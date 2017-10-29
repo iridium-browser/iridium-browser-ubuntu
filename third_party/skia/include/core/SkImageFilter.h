@@ -20,6 +20,7 @@
 class GrContext;
 class GrFragmentProcessor;
 class SkColorFilter;
+class SkColorSpaceXformer;
 struct SkIPoint;
 class SkSpecialImage;
 class SkImageFilterCache;
@@ -172,9 +173,7 @@ public:
         return this->isColorFilterNode(filterPtr);
     }
 
-    static sk_sp<SkImageFilter> MakeBlur(SkScalar sigmaX, SkScalar sigmaY,
-                                         sk_sp<SkImageFilter> input,
-                                         const CropRect* cropRect = nullptr);
+    void removeKey(const SkImageFilterCacheKey& key) const;
 
     /**
      *  Returns true (and optionally returns a ref'd filter) if this imagefilter can be completely
@@ -268,9 +267,9 @@ protected:
         void allocInputs(int count);
     };
 
-    SkImageFilter(sk_sp<SkImageFilter>* inputs, int inputCount, const CropRect* cropRect);
+    SkImageFilter(sk_sp<SkImageFilter> const* inputs, int inputCount, const CropRect* cropRect);
 
-    virtual ~SkImageFilter();
+    ~SkImageFilter() override;
 
     /**
      *  Constructs a new SkImageFilter read from an SkReadBuffer object.
@@ -282,6 +281,10 @@ protected:
     explicit SkImageFilter(int inputCount, SkReadBuffer& rb);
 
     void flatten(SkWriteBuffer&) const override;
+
+    const CropRect* getCropRectIfSet() const {
+        return this->cropRectIsSet() ? &fCropRect : nullptr;
+    }
 
     /**
      *  This is the virtual which should be overridden by the derived class
@@ -395,11 +398,27 @@ protected:
     static sk_sp<SkSpecialImage> ImageToColorSpace(SkSpecialImage* src, const OutputProperties&);
 #endif
 
+    /**
+     *  Returns an image filter transformed into a new color space via the |xformer|.
+     */
+    sk_sp<SkImageFilter> makeColorSpace(SkColorSpaceXformer* xformer) const {
+        return this->onMakeColorSpace(xformer);
+    }
+    virtual sk_sp<SkImageFilter> onMakeColorSpace(SkColorSpaceXformer*) const = 0;
+
+    sk_sp<SkImageFilter> refMe() const {
+        return sk_ref_sp(const_cast<SkImageFilter*>(this));
+    }
+
 private:
+    // For makeColorSpace().
+    friend class SkColorSpaceXformer;
+
     friend class SkGraphics;
+
     static void PurgeCache();
 
-    void init(sk_sp<SkImageFilter>* inputs, int inputCount, const CropRect* cropRect);
+    void init(sk_sp<SkImageFilter> const* inputs, int inputCount, const CropRect* cropRect);
 
     bool usesSrcInput() const { return fUsesSrcInput; }
     virtual bool affectsTransparentBlack() const { return false; }

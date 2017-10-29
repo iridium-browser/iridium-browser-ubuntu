@@ -8,6 +8,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/browser/lifetime/termination_notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "ui/aura/client/capture_client.h"
@@ -23,7 +24,7 @@ namespace chrome {
 void HandleAppExitingForPlatform() {
   // Close all non browser windows now. Those includes notifications
   // and windows created by Ash (launcher, background, etc).
-  g_browser_process->notification_ui_manager()->CancelAll();
+  g_browser_process->notification_ui_manager()->StartShutdown();
 
 #if defined(USE_ASH)
   // This may be called before |ash::Shell| is initialized when
@@ -48,7 +49,7 @@ void HandleAppExitingForPlatform() {
     // if something prevents a browser from closing before SetTryingToQuit()
     // gets called (e.g. browser->TabsNeedBeforeUnloadFired() is true).
     // NotifyAndTerminate does nothing if called more than once.
-    NotifyAndTerminate(true);
+    browser_shutdown::NotifyAndTerminate(true /* fast_path */);
   }
 #endif
 }

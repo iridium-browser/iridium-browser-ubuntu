@@ -7,6 +7,8 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <map>
+#include <utility>
 
 #include "base/command_line.h"
 #include "base/environment.h"
@@ -16,6 +18,7 @@
 #include "base/nix/xdg_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/sys_info.h"
 #include "chromeos/audio/audio_device.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "media/audio/audio_device_description.h"
@@ -23,6 +26,7 @@
 #include "media/audio/cras/cras_input.h"
 #include "media/audio/cras/cras_unified.h"
 #include "media/base/channel_layout.h"
+#include "media/base/limits.h"
 #include "media/base/localized_strings.h"
 
 // cras_util.h headers pull in min/max macros...
@@ -39,15 +43,15 @@ const int kMaxOutputStreams = 50;
 // Default sample rate for input and output streams.
 const int kDefaultSampleRate = 48000;
 
-// Define bounds for the output buffer size.
-const int kMinimumOutputBufferSize = 512;
-const int kMaximumOutputBufferSize = 8192;
-
 // Default input buffer size.
 const int kDefaultInputBufferSize = 1024;
 
 const char kBeamformingOnDeviceId[] = "default-beamforming-on";
 const char kBeamformingOffDeviceId[] = "default-beamforming-off";
+
+const char kInternalInputVirtualDevice[] = "Built-in mic";
+const char kInternalOutputVirtualDevice[] = "Built-in speaker";
+const char kHeadphoneLineOutVirtualDevice[] = "Headphone/Line Out";
 
 enum CrosBeamformingDeviceState {
   BEAMFORMING_DEFAULT_ENABLED = 0,
@@ -81,6 +85,27 @@ std::string MicPositions() {
     }
   }
   return "";
+}
+
+// Process |device_list| that two shares the same dev_index by creating a
+// virtual device name for them.
+void ProcessVirtualDeviceName(AudioDeviceNames* device_names,
+                              const chromeos::AudioDeviceList& device_list) {
+  DCHECK_EQ(2U, device_list.size());
+  if (device_list[0].type == chromeos::AUDIO_TYPE_LINEOUT ||
+      device_list[1].type == chromeos::AUDIO_TYPE_LINEOUT) {
+    device_names->emplace_back(kHeadphoneLineOutVirtualDevice,
+                               base::Uint64ToString(device_list[0].id));
+  } else if (device_list[0].type == chromeos::AUDIO_TYPE_INTERNAL_SPEAKER ||
+             device_list[1].type == chromeos::AUDIO_TYPE_INTERNAL_SPEAKER) {
+    device_names->emplace_back(kInternalOutputVirtualDevice,
+                               base::Uint64ToString(device_list[0].id));
+  } else {
+    DCHECK(device_list[0].type == chromeos::AUDIO_TYPE_INTERNAL_MIC ||
+           device_list[1].type == chromeos::AUDIO_TYPE_INTERNAL_MIC);
+    device_names->emplace_back(kInternalInputVirtualDevice,
+                               base::Uint64ToString(device_list[0].id));
+  }
 }
 
 }  // namespace
@@ -130,21 +155,15 @@ bool AudioManagerCras::HasAudioInputDevices() {
   return false;
 }
 
-AudioManagerCras::AudioManagerCras(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
-    AudioLogFactory* audio_log_factory)
-    : AudioManagerBase(std::move(task_runner),
-                       std::move(worker_task_runner),
-                       audio_log_factory),
+AudioManagerCras::AudioManagerCras(std::unique_ptr<AudioThread> audio_thread,
+                                   AudioLogFactory* audio_log_factory)
+    : AudioManagerBase(std::move(audio_thread), audio_log_factory),
       beamforming_on_device_id_(nullptr),
       beamforming_off_device_id_(nullptr) {
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
 }
 
-AudioManagerCras::~AudioManagerCras() {
-  Shutdown();
-}
+AudioManagerCras::~AudioManagerCras() = default;
 
 void AudioManagerCras::ShowAudioInputSettings() {
   NOTIMPLEMENTED();
@@ -164,10 +183,25 @@ void AudioManagerCras::GetAudioDeviceNamesImpl(bool is_input,
   if (base::FeatureList::IsEnabled(features::kEnumerateAudioDevices)) {
     chromeos::AudioDeviceList devices;
     chromeos::CrasAudioHandler::Get()->GetAudioDevices(&devices);
+
+    // |dev_idx_map| is a map of dev_index and their audio devices.
+    std::map<int, chromeos::AudioDeviceList> dev_idx_map;
     for (const auto& device : devices) {
-      if (device.is_input == is_input && device.is_for_simple_usage()) {
+      if (device.is_input != is_input || !device.is_for_simple_usage())
+        continue;
+
+      dev_idx_map[dev_index_of(device.id)].push_back(device);
+    }
+
+    for (const auto& item : dev_idx_map) {
+      if (1 == item.second.size()) {
+        const chromeos::AudioDevice& device = item.second.front();
         device_names->emplace_back(device.display_name,
                                    base::Uint64ToString(device.id));
+      } else {
+        // Create virtual device name for audio nodes that share the same device
+        // index.
+        ProcessVirtualDeviceName(device_names, item.second);
       }
     }
   }
@@ -228,6 +262,54 @@ AudioParameters AudioManagerCras::GetInputStreamParameters(
   return params;
 }
 
+std::string AudioManagerCras::GetAssociatedOutputDeviceID(
+    const std::string& input_device_id) {
+  if (!base::FeatureList::IsEnabled(features::kEnumerateAudioDevices))
+    return "";
+
+  chromeos::AudioDeviceList devices;
+  chromeos::CrasAudioHandler* audio_handler = chromeos::CrasAudioHandler::Get();
+  audio_handler->GetAudioDevices(&devices);
+
+  if ((beamforming_on_device_id_ &&
+       input_device_id == beamforming_on_device_id_) ||
+      (beamforming_off_device_id_ &&
+       input_device_id == beamforming_off_device_id_)) {
+    // These are special devices derived from the internal mic array, so they
+    // should be associated to the internal speaker.
+    const chromeos::AudioDevice* internal_speaker =
+        audio_handler->GetDeviceByType(chromeos::AUDIO_TYPE_INTERNAL_SPEAKER);
+    return internal_speaker ? base::Uint64ToString(internal_speaker->id) : "";
+  }
+
+  // At this point, we know we have an ordinary input device, so we look up its
+  // device_name, which identifies which hardware device it belongs to.
+  uint64_t device_id = 0;
+  if (!base::StringToUint64(input_device_id, &device_id))
+    return "";
+  const chromeos::AudioDevice* input_device =
+      audio_handler->GetDeviceFromId(device_id);
+  if (!input_device)
+    return "";
+
+  const base::StringPiece device_name = input_device->device_name;
+
+  // Now search for an output device with the same device name.
+  auto output_device_it = std::find_if(
+      devices.begin(), devices.end(),
+      [device_name](const chromeos::AudioDevice& device) {
+        return !device.is_input && device.device_name == device_name;
+      });
+  return output_device_it == devices.end()
+             ? ""
+             : base::Uint64ToString(output_device_it->id);
+}
+
+std::string AudioManagerCras::GetDefaultOutputDeviceID() {
+  return base::Uint64ToString(
+      chromeos::CrasAudioHandler::Get()->GetPrimaryActiveOutputNode());
+}
+
 const char* AudioManagerCras::GetName() {
   return "CRAS";
 }
@@ -265,20 +347,32 @@ AudioInputStream* AudioManagerCras::MakeLowLatencyInputStream(
   return MakeInputStream(params, device_id);
 }
 
+int AudioManagerCras::GetMinimumOutputBufferSizePerBoard() {
+  // On faster boards we can use smaller buffer size for lower latency.
+  // On slower boards we should use larger buffer size to prevent underrun.
+  std::string board = base::SysInfo::GetLsbReleaseBoard();
+  if (board == "kevin")
+    return 768;
+  else if (board == "samus")
+    return 256;
+  return 512;
+}
+
 AudioParameters AudioManagerCras::GetPreferredOutputStreamParameters(
     const std::string& output_device_id,
     const AudioParameters& input_params) {
   ChannelLayout channel_layout = CHANNEL_LAYOUT_STEREO;
   int sample_rate = kDefaultSampleRate;
-  int buffer_size = kMinimumOutputBufferSize;
+  int buffer_size = GetMinimumOutputBufferSizePerBoard();
   int bits_per_sample = 16;
   if (input_params.IsValid()) {
     sample_rate = input_params.sample_rate();
     bits_per_sample = input_params.bits_per_sample();
     channel_layout = input_params.channel_layout();
     buffer_size =
-        std::min(kMaximumOutputBufferSize,
-                 std::max(buffer_size, input_params.frames_per_buffer()));
+        std::min(static_cast<int>(limits::kMaxAudioBufferSize),
+                 std::max(static_cast<int>(limits::kMinAudioBufferSize),
+                          input_params.frames_per_buffer()));
   }
 
   int user_buffer_size = GetUserBufferSize();

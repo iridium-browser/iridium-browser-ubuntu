@@ -8,6 +8,7 @@
 #include "base/logging.h"
 #include "base/threading/thread.h"
 #include "chrome/common/renderer_configuration.mojom.h"
+#include "components/metrics/persistent_system_profile.h"
 #include "components/variations/variations_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -39,6 +40,11 @@ void FieldTrialSynchronizer::NotifyAllRenderers(
   // need to be on the UI thread.
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
+  // Note this in the persistent profile as it will take a while for a new
+  // "complete" profile to be genereated.
+  metrics::GlobalPersistentSystemProfile::GetInstance()->AddFieldTrial(
+      field_trial_name, group_name);
+
   for (content::RenderProcessHost::iterator it(
           content::RenderProcessHost::AllHostsIterator());
        !it.IsAtEnd(); it.Advance()) {
@@ -57,10 +63,8 @@ void FieldTrialSynchronizer::OnFieldTrialGroupFinalized(
     const std::string& group_name) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&FieldTrialSynchronizer::NotifyAllRenderers,
-                 this,
-                 field_trial_name,
-                 group_name));
+      base::BindOnce(&FieldTrialSynchronizer::NotifyAllRenderers, this,
+                     field_trial_name, group_name));
   variations::SetVariationListCrashKeys();
 }
 

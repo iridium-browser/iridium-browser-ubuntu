@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -21,7 +22,8 @@
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/task_runner.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/chromeos/system/fake_input_device_settings.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/events/base_event_utils.h"
@@ -47,13 +49,13 @@ const char kInternalTouchpadName[] = "Elan Touchpad";
 typedef base::RefCountedData<bool> RefCountedBool;
 
 bool ScriptExists(const std::string& script) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  base::ThreadRestrictions::AssertIOAllowed();
   return base::PathExists(base::FilePath(script));
 }
 
 // Executes the input control script asynchronously, if it exists.
 void ExecuteScriptOnFileThread(const std::vector<std::string>& argv) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  base::ThreadRestrictions::AssertIOAllowed();
   DCHECK(!argv.empty());
   const std::string& script(argv[0]);
 
@@ -82,11 +84,10 @@ void ExecuteScript(const std::vector<std::string>& argv) {
   // Control scripts can take long enough to cause SIGART during shutdown
   // (http://crbug.com/261426). Run the blocking pool task with
   // CONTINUE_ON_SHUTDOWN so it won't be joined when Chrome shuts down.
-  base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
-  scoped_refptr<base::TaskRunner> runner =
-      pool->GetTaskRunnerWithShutdownBehavior(
-          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
-  runner->PostTask(FROM_HERE, base::Bind(&ExecuteScriptOnFileThread, argv));
+  base::PostTaskWithTraits(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+      base::BindOnce(&ExecuteScriptOnFileThread, argv));
 }
 
 void AddSensitivityArguments(const char* device_type,
@@ -105,7 +106,7 @@ void AddTPControlArguments(const char* control,
 
 void DeviceExistsBlockingPool(const char* device_type,
                               scoped_refptr<RefCountedBool> exists) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  base::ThreadRestrictions::AssertIOAllowed();
   exists->data = false;
   if (!ScriptExists(kInputControl))
     return;
@@ -121,29 +122,26 @@ void DeviceExistsBlockingPool(const char* device_type,
   DVLOG(1) << "DeviceExistsBlockingPool:" << device_type << "=" << exists->data;
 }
 
-void RunCallbackUIThread(
-    scoped_refptr<RefCountedBool> exists,
-    const InputDeviceSettings::DeviceExistsCallback& callback) {
+void RunCallbackUIThread(scoped_refptr<RefCountedBool> exists,
+                         InputDeviceSettings::DeviceExistsCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DVLOG(1) << "RunCallbackUIThread " << exists->data;
-  callback.Run(exists->data);
+  std::move(callback).Run(exists->data);
 }
 
 void DeviceExists(const char* script,
-                  const InputDeviceSettings::DeviceExistsCallback& callback) {
+                  InputDeviceSettings::DeviceExistsCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   // One or both of the control scripts can apparently hang during shutdown
   // (http://crbug.com/255546). Run the blocking pool task with
   // CONTINUE_ON_SHUTDOWN so it won't be joined when Chrome shuts down.
   scoped_refptr<RefCountedBool> exists(new RefCountedBool(false));
-  base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
-  scoped_refptr<base::TaskRunner> runner =
-      pool->GetTaskRunnerWithShutdownBehavior(
-          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
-  runner->PostTaskAndReply(
-      FROM_HERE, base::Bind(&DeviceExistsBlockingPool, script, exists),
-      base::Bind(&RunCallbackUIThread, exists, callback));
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+      base::BindOnce(&DeviceExistsBlockingPool, script, exists),
+      base::BindOnce(&RunCallbackUIThread, exists, std::move(callback)));
 }
 
 // InputDeviceSettings for Linux with X11.
@@ -156,14 +154,14 @@ class InputDeviceSettingsImplX11 : public InputDeviceSettings {
 
  private:
   // Overridden from InputDeviceSettings.
-  void TouchpadExists(const DeviceExistsCallback& callback) override;
+  void TouchpadExists(DeviceExistsCallback callback) override;
   void UpdateTouchpadSettings(const TouchpadSettings& settings) override;
   void SetTouchpadSensitivity(int value) override;
   void SetTapToClick(bool enabled) override;
   void SetThreeFingerClick(bool enabled) override;
   void SetTapDragging(bool enabled) override;
   void SetNaturalScroll(bool enabled) override;
-  void MouseExists(const DeviceExistsCallback& callback) override;
+  void MouseExists(DeviceExistsCallback callback) override;
   void UpdateMouseSettings(const MouseSettings& settings) override;
   void SetMouseSensitivity(int value) override;
   void SetPrimaryButtonRight(bool right) override;
@@ -189,9 +187,8 @@ class InputDeviceSettingsImplX11 : public InputDeviceSettings {
 InputDeviceSettingsImplX11::InputDeviceSettingsImplX11() {
 }
 
-void InputDeviceSettingsImplX11::TouchpadExists(
-    const DeviceExistsCallback& callback) {
-  DeviceExists(kDeviceTypeTouchpad, callback);
+void InputDeviceSettingsImplX11::TouchpadExists(DeviceExistsCallback callback) {
+  DeviceExists(kDeviceTypeTouchpad, std::move(callback));
 }
 
 void InputDeviceSettingsImplX11::UpdateTouchpadSettings(
@@ -234,10 +231,9 @@ void InputDeviceSettingsImplX11::SetTapDragging(bool enabled) {
   UpdateTouchpadSettings(settings);
 }
 
-void InputDeviceSettingsImplX11::MouseExists(
-    const DeviceExistsCallback& callback) {
+void InputDeviceSettingsImplX11::MouseExists(DeviceExistsCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DeviceExists(kDeviceTypeMouse, callback);
+  DeviceExists(kDeviceTypeMouse, std::move(callback));
 }
 
 void InputDeviceSettingsImplX11::UpdateMouseSettings(

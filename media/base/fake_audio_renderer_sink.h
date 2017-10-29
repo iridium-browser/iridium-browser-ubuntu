@@ -39,6 +39,7 @@ class FakeAudioRendererSink : public AudioRendererSink {
   void Play() override;
   bool SetVolume(double volume) override;
   OutputDeviceInfo GetOutputDeviceInfo() override;
+  bool IsOptimizedForHardwareParameters() override;
   bool CurrentThreadIsRenderingThread() override;
 
   // Attempts to call Render() on the callback provided to
@@ -51,6 +52,9 @@ class FakeAudioRendererSink : public AudioRendererSink {
   bool Render(AudioBus* dest, base::TimeDelta delay, int* frames_written);
   void OnRenderError();
 
+  // Enables different tests to have different settings.
+  void SetIsOptimizedForHardwareParameters(bool value);
+
   State state() const { return state_; }
 
  protected:
@@ -62,6 +66,7 @@ class FakeAudioRendererSink : public AudioRendererSink {
   State state_;
   RenderCallback* callback_;
   OutputDeviceInfo output_device_info_;
+  bool is_optimized_for_hw_params_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeAudioRendererSink);
 };

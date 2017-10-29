@@ -17,20 +17,24 @@ struct EnumTraits<::blink::mojom::ReferrerPolicy, ::blink::WebReferrerPolicy> {
   static ::blink::mojom::ReferrerPolicy ToMojom(
       ::blink::WebReferrerPolicy policy) {
     switch (policy) {
-      case ::blink::WebReferrerPolicyAlways:
+      case ::blink::kWebReferrerPolicyAlways:
         return ::blink::mojom::ReferrerPolicy::ALWAYS;
-      case ::blink::WebReferrerPolicyDefault:
+      case ::blink::kWebReferrerPolicyDefault:
         return ::blink::mojom::ReferrerPolicy::DEFAULT;
-      case ::blink::WebReferrerPolicyNoReferrerWhenDowngrade:
+      case ::blink::kWebReferrerPolicyNoReferrerWhenDowngrade:
         return ::blink::mojom::ReferrerPolicy::NO_REFERRER_WHEN_DOWNGRADE;
-      case ::blink::WebReferrerPolicyNever:
+      case ::blink::kWebReferrerPolicyNever:
         return ::blink::mojom::ReferrerPolicy::NEVER;
-      case ::blink::WebReferrerPolicyOrigin:
+      case ::blink::kWebReferrerPolicyOrigin:
         return ::blink::mojom::ReferrerPolicy::ORIGIN;
-      case ::blink::WebReferrerPolicyOriginWhenCrossOrigin:
+      case ::blink::kWebReferrerPolicyOriginWhenCrossOrigin:
         return ::blink::mojom::ReferrerPolicy::ORIGIN_WHEN_CROSS_ORIGIN;
+      case ::blink::kWebReferrerPolicySameOrigin:
+        return ::blink::mojom::ReferrerPolicy::SAME_ORIGIN;
+      case ::blink::kWebReferrerPolicyStrictOrigin:
+        return ::blink::mojom::ReferrerPolicy::STRICT_ORIGIN;
       case ::blink::
-          WebReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin:
+          kWebReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin:
         return ::blink::mojom::ReferrerPolicy::
             NO_REFERRER_WHEN_DOWNGRADE_ORIGIN_WHEN_CROSS_ORIGIN;
       default:
@@ -43,27 +47,33 @@ struct EnumTraits<::blink::mojom::ReferrerPolicy, ::blink::WebReferrerPolicy> {
                         ::blink::WebReferrerPolicy* out) {
     switch (policy) {
       case ::blink::mojom::ReferrerPolicy::ALWAYS:
-        *out = ::blink::WebReferrerPolicyAlways;
+        *out = ::blink::kWebReferrerPolicyAlways;
         return true;
       case ::blink::mojom::ReferrerPolicy::DEFAULT:
-        *out = ::blink::WebReferrerPolicyDefault;
+        *out = ::blink::kWebReferrerPolicyDefault;
         return true;
       case ::blink::mojom::ReferrerPolicy::NO_REFERRER_WHEN_DOWNGRADE:
-        *out = ::blink::WebReferrerPolicyNoReferrerWhenDowngrade;
+        *out = ::blink::kWebReferrerPolicyNoReferrerWhenDowngrade;
         return true;
       case ::blink::mojom::ReferrerPolicy::NEVER:
-        *out = ::blink::WebReferrerPolicyNever;
+        *out = ::blink::kWebReferrerPolicyNever;
         return true;
       case ::blink::mojom::ReferrerPolicy::ORIGIN:
-        *out = ::blink::WebReferrerPolicyOrigin;
+        *out = ::blink::kWebReferrerPolicyOrigin;
         return true;
       case ::blink::mojom::ReferrerPolicy::ORIGIN_WHEN_CROSS_ORIGIN:
-        *out = ::blink::WebReferrerPolicyOriginWhenCrossOrigin;
+        *out = ::blink::kWebReferrerPolicyOriginWhenCrossOrigin;
+        return true;
+      case ::blink::mojom::ReferrerPolicy::SAME_ORIGIN:
+        *out = ::blink::kWebReferrerPolicySameOrigin;
+        return true;
+      case ::blink::mojom::ReferrerPolicy::STRICT_ORIGIN:
+        *out = ::blink::kWebReferrerPolicyStrictOrigin;
         return true;
       case ::blink::mojom::ReferrerPolicy::
           NO_REFERRER_WHEN_DOWNGRADE_ORIGIN_WHEN_CROSS_ORIGIN:
         *out = ::blink::
-            WebReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin;
+            kWebReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin;
         return true;
       default:
         NOTREACHED();

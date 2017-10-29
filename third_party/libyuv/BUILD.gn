@@ -9,6 +9,11 @@
 import("libyuv.gni")
 import("//testing/test.gni")
 
+declare_args() {
+  # Set to false to disable building with gflags.
+  libyuv_use_gflags = true
+}
+
 config("libyuv_config") {
   include_dirs = [ "include" ]
   if (is_android && current_cpu == "arm64") {
@@ -28,10 +33,10 @@ group("default") {
   if (libyuv_include_tests) {
     deps += [
       ":compare",
-      ":convert",
       ":cpuid",
       ":libyuv_unittest",
       ":psnr",
+      ":yuvconvert",
     ]
   }
 }
@@ -40,6 +45,7 @@ group("libyuv") {
   public_configs = [ ":libyuv_config" ]
 
   if (is_win && target_cpu == "x64") {
+    # Compile with clang in order to get inline assembly
     public_deps = [
       ":libyuv_internal(//build/toolchain/win:clang_x64)",
     ]
@@ -48,9 +54,20 @@ group("libyuv") {
       ":libyuv_internal",
     ]
   }
+
+  if (!is_ios) {
+    # Make sure that clients of libyuv link with libjpeg. This can't go in
+    # libyuv_internal because in Windows x64 builds that will generate a clang
+    # build of libjpeg, and we don't want two copies.
+    deps = [
+      "//third_party:jpeg",
+    ]
+  }
 }
 
 static_library("libyuv_internal") {
+  visibility = [ ":*" ]
+
   sources = [
     # Headers
     "include/libyuv.h",
@@ -117,7 +134,10 @@ static_library("libyuv_internal") {
 
   if (!is_ios) {
     defines += [ "HAVE_JPEG" ]
-    deps += [ "//third_party:jpeg" ]
+
+    # Needed to pull in libjpeg headers. Can't add //third_party:jpeg to deps
+    # because in Windows x64 build it will get compiled with clang.
+    deps += [ "//third_party:jpeg_includes" ]
   }
 
   if (libyuv_use_neon) {
@@ -138,7 +158,8 @@ static_library("libyuv_internal") {
   }
 
   # To enable AVX2 or other cpu optimization, pass flag here
-  #  cflags = [ "-mavx2" ]
+  # cflags = [ "-mavx2" ]
+  # cflags = [ "-mpopcnt" ]
 }
 
 if (libyuv_use_neon) {
@@ -217,6 +238,7 @@ if (libyuv_include_tests) {
       "unit_test/compare_test.cc",
       "unit_test/convert_test.cc",
       "unit_test/cpu_test.cc",
+      "unit_test/cpu_thread_test.cc",
       "unit_test/math_test.cc",
       "unit_test/planar_test.cc",
       "unit_test/rotate_argb_test.cc",
@@ -231,8 +253,13 @@ if (libyuv_include_tests) {
     deps = [
       ":libyuv",
       "//testing/gtest",
-      "//third_party/gflags",
     ]
+
+    defines = []
+    if (libyuv_use_gflags) {
+      defines += [ "LIBYUV_USE_GFLAGS" ]
+      deps += [ "//third_party/gflags" ]
+    }
 
     configs += [ ":libyuv_unittest_warnings_config" ]
 
@@ -240,8 +267,6 @@ if (libyuv_include_tests) {
       "//testing/gtest",
     ]
     public_configs = [ ":libyuv_unittest_config" ]
-
-    defines = []
 
     if (is_linux) {
       cflags = [ "-fexceptions" ]
@@ -289,10 +314,10 @@ if (libyuv_include_tests) {
     }
   }
 
-  executable("convert") {
+  executable("yuvconvert") {
     sources = [
       # sources
-      "util/convert.cc",
+      "util/yuvconvert.cc",
     ]
     deps = [
       ":libyuv",

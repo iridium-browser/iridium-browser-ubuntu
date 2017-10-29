@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkBlurMask.h"
 #include "SkBlurMaskFilter.h"
 #include "SkCanvas.h"
@@ -42,7 +43,7 @@ protected:
 
         canvas->drawCircle(50, 50, 30, paint);
         canvas->drawRect({ 150, 50, 200, 100 }, paint);
-        canvas->drawText("Looper", 6, 230, 100, paint);
+        canvas->drawString("Looper", 230, 100, paint);
     }
 
 private:

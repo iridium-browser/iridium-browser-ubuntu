@@ -12,15 +12,16 @@
 #include "android_webview/browser/deferred_gpu_command_service.h"
 #include "android_webview/browser/parent_output_surface.h"
 #include "base/memory/ptr_util.h"
-#include "cc/output/renderer_settings.h"
 #include "cc/output/texture_mailbox_deleter.h"
+#include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/surface_draw_quad.h"
 #include "cc/scheduler/begin_frame_source.h"
-#include "cc/surfaces/compositor_frame_sink_support.h"
-#include "cc/surfaces/display.h"
-#include "cc/surfaces/display_scheduler.h"
-#include "cc/surfaces/local_surface_id_allocator.h"
-#include "cc/surfaces/surface_manager.h"
+#include "components/viz/common/display/renderer_settings.h"
+#include "components/viz/common/surfaces/local_surface_id_allocator.h"
+#include "components/viz/service/display/display.h"
+#include "components/viz/service/display/display_scheduler.h"
+#include "components/viz/service/frame_sinks/compositor_frame_sink_support.h"
+#include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/transform.h"
@@ -44,7 +45,7 @@ scoped_refptr<SurfacesInstance> SurfacesInstance::GetOrCreateInstance() {
 SurfacesInstance::SurfacesInstance()
     : frame_sink_id_allocator_(kDefaultClientId),
       frame_sink_id_(AllocateFrameSinkId()) {
-  cc::RendererSettings settings;
+  viz::RendererSettings settings;
 
   // Should be kept in sync with compositor_impl_android.cc.
   settings.allow_antialiasing = false;
@@ -53,15 +54,15 @@ SurfacesInstance::SurfacesInstance()
   // Webview does not own the surface so should not clear it.
   settings.should_clear_root_render_pass = false;
 
-  surface_manager_.reset(new cc::SurfaceManager);
-  local_surface_id_allocator_.reset(new cc::LocalSurfaceIdAllocator());
+  frame_sink_manager_.reset(new viz::FrameSinkManagerImpl);
+  local_surface_id_allocator_.reset(new viz::LocalSurfaceIdAllocator());
 
   constexpr bool is_root = true;
   constexpr bool handles_frame_sink_id_invalidation = true;
   constexpr bool needs_sync_points = true;
-  support_.reset(new cc::CompositorFrameSinkSupport(
-      this, surface_manager_.get(), frame_sink_id_, is_root,
-      handles_frame_sink_id_invalidation, needs_sync_points));
+  support_ = viz::CompositorFrameSinkSupport::Create(
+      this, frame_sink_manager_.get(), frame_sink_id_, is_root,
+      handles_frame_sink_id_invalidation, needs_sync_points);
 
   begin_frame_source_.reset(new cc::StubBeginFrameSource);
   std::unique_ptr<cc::TextureMailboxDeleter> texture_mailbox_deleter(
@@ -71,14 +72,24 @@ SurfacesInstance::SurfacesInstance()
           make_scoped_refptr(new AwGLSurface),
           DeferredGpuCommandService::GetInstance())));
   output_surface_ = output_surface_holder.get();
-  std::unique_ptr<cc::DisplayScheduler> scheduler(new cc::DisplayScheduler(
-      nullptr, output_surface_holder->capabilities().max_frames_pending));
-  display_.reset(new cc::Display(
+  auto scheduler = base::MakeUnique<viz::DisplayScheduler>(
+      begin_frame_source_.get(), nullptr,
+      output_surface_holder->capabilities().max_frames_pending);
+  display_ = base::MakeUnique<viz::Display>(
       nullptr /* shared_bitmap_manager */,
       nullptr /* gpu_memory_buffer_manager */, settings, frame_sink_id_,
-      begin_frame_source_.get(), std::move(output_surface_holder),
-      std::move(scheduler), std::move(texture_mailbox_deleter)));
-  display_->Initialize(this, surface_manager_.get());
+      std::move(output_surface_holder), std::move(scheduler),
+      std::move(texture_mailbox_deleter));
+  display_->Initialize(this, frame_sink_manager_->surface_manager());
+  // TODO(ccameron): WebViews that are embedded in WCG windows will want to
+  // specify gfx::ColorSpace::CreateExtendedSRGB(). This situation is not yet
+  // detected.
+  // https://crbug.com/735658
+  gfx::ColorSpace display_color_space = gfx::ColorSpace::CreateSRGB();
+  display_->SetColorSpace(display_color_space, display_color_space);
+  frame_sink_manager_->RegisterBeginFrameSource(begin_frame_source_.get(),
+                                                frame_sink_id_);
+
   display_->SetVisible(true);
 
   DCHECK(!g_surfaces_instance);
@@ -87,6 +98,7 @@ SurfacesInstance::SurfacesInstance()
 
 SurfacesInstance::~SurfacesInstance() {
   DCHECK_EQ(g_surfaces_instance, this);
+  frame_sink_manager_->UnregisterBeginFrameSource(begin_frame_source_.get());
   g_surfaces_instance = nullptr;
   DCHECK(child_ids_.empty());
 }
@@ -96,19 +108,19 @@ void SurfacesInstance::DisplayOutputSurfaceLost() {
   LOG(FATAL) << "Render thread context loss";
 }
 
-cc::FrameSinkId SurfacesInstance::AllocateFrameSinkId() {
+viz::FrameSinkId SurfacesInstance::AllocateFrameSinkId() {
   return frame_sink_id_allocator_.NextFrameSinkId();
 }
 
-cc::SurfaceManager* SurfacesInstance::GetSurfaceManager() {
-  return surface_manager_.get();
+viz::FrameSinkManagerImpl* SurfacesInstance::GetFrameSinkManager() {
+  return frame_sink_manager_.get();
 }
 
 void SurfacesInstance::DrawAndSwap(const gfx::Size& viewport,
                                    const gfx::Rect& clip,
                                    const gfx::Transform& transform,
                                    const gfx::Size& frame_size,
-                                   const cc::SurfaceId& child_id) {
+                                   const viz::SurfaceId& child_id) {
   DCHECK(std::find(child_ids_.begin(), child_ids_.end(), child_id) !=
          child_ids_.end());
 
@@ -121,7 +133,7 @@ void SurfacesInstance::DrawAndSwap(const gfx::Size& viewport,
   cc::SharedQuadState* quad_state =
       render_pass->CreateAndAppendSharedQuadState();
   quad_state->quad_to_target_transform = transform;
-  quad_state->quad_layer_bounds = frame_size;
+  quad_state->quad_layer_rect = gfx::Rect(frame_size);
   quad_state->visible_quad_layer_rect = gfx::Rect(frame_size);
   quad_state->clip_rect = clip;
   quad_state->is_clipped = true;
@@ -129,58 +141,86 @@ void SurfacesInstance::DrawAndSwap(const gfx::Size& viewport,
 
   cc::SurfaceDrawQuad* surface_quad =
       render_pass->CreateAndAppendDrawQuad<cc::SurfaceDrawQuad>();
-  surface_quad->SetNew(quad_state, gfx::Rect(quad_state->quad_layer_bounds),
-                       gfx::Rect(quad_state->quad_layer_bounds), child_id,
+  surface_quad->SetNew(quad_state, gfx::Rect(quad_state->quad_layer_rect),
+                       gfx::Rect(quad_state->quad_layer_rect), child_id,
                        cc::SurfaceDrawQuadType::PRIMARY, nullptr);
 
   cc::CompositorFrame frame;
+  // We draw synchronously, so acknowledge a manual BeginFrame.
+  frame.metadata.begin_frame_ack =
+      cc::BeginFrameAck::CreateManualAckWithDamage();
   frame.render_pass_list.push_back(std::move(render_pass));
+  frame.metadata.device_scale_factor = 1.f;
   frame.metadata.referenced_surfaces = child_ids_;
 
-  if (!root_id_.is_valid()) {
+  if (!root_id_.is_valid() || viewport != surface_size_) {
     root_id_ = local_surface_id_allocator_->GenerateId();
+    surface_size_ = viewport;
     display_->SetLocalSurfaceId(root_id_, 1.f);
   }
-  support_->SubmitCompositorFrame(root_id_, std::move(frame));
+  bool result = support_->SubmitCompositorFrame(root_id_, std::move(frame));
+  DCHECK(result);
 
   display_->Resize(viewport);
   display_->DrawAndSwap();
 }
 
-void SurfacesInstance::AddChildId(const cc::SurfaceId& child_id) {
+void SurfacesInstance::AddChildId(const viz::SurfaceId& child_id) {
   DCHECK(std::find(child_ids_.begin(), child_ids_.end(), child_id) ==
          child_ids_.end());
   child_ids_.push_back(child_id);
   if (root_id_.is_valid())
-    SetEmptyRootFrame();
+    SetSolidColorRootFrame();
 }
 
-void SurfacesInstance::RemoveChildId(const cc::SurfaceId& child_id) {
+void SurfacesInstance::RemoveChildId(const viz::SurfaceId& child_id) {
   auto itr = std::find(child_ids_.begin(), child_ids_.end(), child_id);
   DCHECK(itr != child_ids_.end());
   child_ids_.erase(itr);
   if (root_id_.is_valid())
-    SetEmptyRootFrame();
+    SetSolidColorRootFrame();
 }
 
-void SurfacesInstance::SetEmptyRootFrame() {
-  cc::CompositorFrame empty_frame;
-  empty_frame.metadata.referenced_surfaces = child_ids_;
-  support_->SubmitCompositorFrame(root_id_, std::move(empty_frame));
+void SurfacesInstance::SetSolidColorRootFrame() {
+  DCHECK(!surface_size_.IsEmpty());
+  gfx::Rect rect(surface_size_);
+  std::unique_ptr<cc::RenderPass> render_pass = cc::RenderPass::Create();
+  render_pass->SetNew(1, rect, rect, gfx::Transform());
+  cc::SharedQuadState* quad_state =
+      render_pass->CreateAndAppendSharedQuadState();
+  quad_state->SetAll(gfx::Transform(), rect, rect, rect, false, 1.f,
+                     SkBlendMode::kSrcOver, 0);
+  cc::SolidColorDrawQuad* solid_quad =
+      render_pass->CreateAndAppendDrawQuad<cc::SolidColorDrawQuad>();
+  solid_quad->SetNew(quad_state, rect, rect, SK_ColorBLACK, false);
+  cc::CompositorFrame frame;
+  frame.render_pass_list.push_back(std::move(render_pass));
+  // We draw synchronously, so acknowledge a manual BeginFrame.
+  frame.metadata.begin_frame_ack =
+      cc::BeginFrameAck::CreateManualAckWithDamage();
+  frame.metadata.referenced_surfaces = child_ids_;
+  frame.metadata.device_scale_factor = 1;
+  bool result = support_->SubmitCompositorFrame(root_id_, std::move(frame));
+  DCHECK(result);
 }
 
-void SurfacesInstance::DidReceiveCompositorFrameAck() {}
+void SurfacesInstance::DidReceiveCompositorFrameAck(
+    const std::vector<cc::ReturnedResource>& resources) {
+  ReclaimResources(resources);
+}
 
 void SurfacesInstance::OnBeginFrame(const cc::BeginFrameArgs& args) {}
 
 void SurfacesInstance::WillDrawSurface(
-    const cc::LocalSurfaceId& local_surface_id,
+    const viz::LocalSurfaceId& local_surface_id,
     const gfx::Rect& damage_rect) {}
 
 void SurfacesInstance::ReclaimResources(
-    const cc::ReturnedResourceArray& resources) {
+    const std::vector<cc::ReturnedResource>& resources) {
   // Root surface should have no resources to return.
   CHECK(resources.empty());
 }
+
+void SurfacesInstance::OnBeginFramePausedChanged(bool paused) {}
 
 }  // namespace android_webview

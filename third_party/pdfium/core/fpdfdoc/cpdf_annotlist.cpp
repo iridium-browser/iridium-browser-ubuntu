@@ -62,7 +62,7 @@ std::unique_ptr<CPDF_Annot> CreatePopupAnnot(CPDF_Annot* pAnnot,
 }  // namespace
 
 CPDF_AnnotList::CPDF_AnnotList(CPDF_Page* pPage)
-    : m_pDocument(pPage->m_pDocument) {
+    : m_pDocument(pPage->m_pDocument.Get()) {
   if (!pPage->m_pFormDict)
     return;
 
@@ -86,7 +86,7 @@ CPDF_AnnotList::CPDF_AnnotList(CPDF_Page* pPage)
     pAnnots->ConvertToIndirectObjectAt(i, m_pDocument);
     m_AnnotList.push_back(pdfium::MakeUnique<CPDF_Annot>(pDict, m_pDocument));
     if (bRegenerateAP && subtype == "Widget" &&
-        CPDF_InterForm::IsUpdateAPEnabled()) {
+        CPDF_InterForm::IsUpdateAPEnabled() && !pDict->GetDictFor("AP")) {
       FPDF_GenerateAP(m_pDocument, pDict);
     }
   }

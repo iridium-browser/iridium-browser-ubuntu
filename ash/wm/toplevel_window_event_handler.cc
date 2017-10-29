@@ -4,10 +4,8 @@
 
 #include "ash/wm/toplevel_window_event_handler.h"
 
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_window.h"
 #include "ash/shell.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/window_state.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "ui/aura/client/cursor_client.h"
@@ -24,8 +22,8 @@
 
 namespace ash {
 
-ToplevelWindowEventHandler::ToplevelWindowEventHandler(WmShell* shell)
-    : wm_toplevel_window_event_handler_(shell), weak_factory_(this) {}
+ToplevelWindowEventHandler::ToplevelWindowEventHandler()
+    : weak_factory_(this) {}
 
 ToplevelWindowEventHandler::~ToplevelWindowEventHandler() {}
 
@@ -35,24 +33,23 @@ void ToplevelWindowEventHandler::OnKeyEvent(ui::KeyEvent* event) {
 
 void ToplevelWindowEventHandler::OnMouseEvent(ui::MouseEvent* event) {
   aura::Window* target = static_cast<aura::Window*>(event->target());
-  wm_toplevel_window_event_handler_.OnMouseEvent(event, WmWindow::Get(target));
+  wm_toplevel_window_event_handler_.OnMouseEvent(event, target);
 }
 
 void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
   aura::Window* target = static_cast<aura::Window*>(event->target());
-  wm_toplevel_window_event_handler_.OnGestureEvent(event,
-                                                   WmWindow::Get(target));
+  wm_toplevel_window_event_handler_.OnGestureEvent(event, target);
 }
 
-aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
+::wm::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
     aura::Window* source,
     const gfx::Vector2d& drag_offset,
-    aura::client::WindowMoveSource move_source) {
+    ::wm::WindowMoveSource move_source) {
   DCHECK(!in_move_loop_);  // Can only handle one nested loop at a time.
   aura::Window* root_window = source->GetRootWindow();
   DCHECK(root_window);
   gfx::Point drag_location;
-  if (move_source == aura::client::WINDOW_MOVE_SOURCE_TOUCH &&
+  if (move_source == ::wm::WINDOW_MOVE_SOURCE_TOUCH &&
       aura::Env::GetInstance()->is_touch_down()) {
     gfx::PointF drag_location_f;
     bool has_point = ui::GestureRecognizer::Get()->GetLastTouchPointForTarget(
@@ -70,17 +67,17 @@ aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
   aura::client::CursorClient* cursor_client =
       aura::client::GetCursorClient(root_window);
   if (cursor_client)
-    cursor_client->SetCursor(ui::kCursorPointer);
+    cursor_client->SetCursor(ui::CursorType::kPointer);
 
   base::RunLoop run_loop;
 
   wm::WmToplevelWindowEventHandler::DragResult result =
       wm::WmToplevelWindowEventHandler::DragResult::SUCCESS;
   if (!wm_toplevel_window_event_handler_.AttemptToStartDrag(
-          WmWindow::Get(source), drag_location, HTCAPTION, move_source,
+          source, drag_location, HTCAPTION, move_source,
           base::Bind(&ToplevelWindowEventHandler::OnDragCompleted,
                      weak_factory_.GetWeakPtr(), &result, &run_loop))) {
-    return aura::client::MOVE_CANCELED;
+    return ::wm::MOVE_CANCELED;
   }
 
   in_move_loop_ = true;
@@ -99,7 +96,7 @@ aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
   run_loop.Run();
 
   if (!weak_ptr)
-    return aura::client::MOVE_CANCELED;
+    return ::wm::MOVE_CANCELED;
 
   // Make sure the window hasn't been deleted.
   if (tracker.Contains(source))
@@ -107,8 +104,8 @@ aura::client::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
 
   in_move_loop_ = false;
   return result == wm::WmToplevelWindowEventHandler::DragResult::SUCCESS
-             ? aura::client::MOVE_SUCCESSFUL
-             : aura::client::MOVE_CANCELED;
+             ? ::wm::MOVE_SUCCESSFUL
+             : ::wm::MOVE_CANCELED;
 }
 
 void ToplevelWindowEventHandler::EndMoveLoop() {

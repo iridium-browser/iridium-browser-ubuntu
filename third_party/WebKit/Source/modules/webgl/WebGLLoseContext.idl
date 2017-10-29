@@ -23,9 +23,11 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://www.khronos.org/registry/webgl/extensions/WEBGL_lose_context/
+
 [
     DependentLifetime,
-    NoInterfaceObject,
+    NoInterfaceObject
 ] interface WebGLLoseContext {
     void loseContext();
     void restoreContext();

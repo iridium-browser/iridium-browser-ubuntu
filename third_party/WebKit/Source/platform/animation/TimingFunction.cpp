@@ -4,26 +4,55 @@
 
 #include "platform/animation/TimingFunction.h"
 
-#include "wtf/text/StringBuilder.h"
+#include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
 
-String LinearTimingFunction::toString() const {
+String LinearTimingFunction::ToString() const {
   return "linear";
 }
 
-double LinearTimingFunction::evaluate(double fraction, double) const {
+double LinearTimingFunction::Evaluate(double fraction, double) const {
   return fraction;
 }
 
-void LinearTimingFunction::range(double* minValue, double* maxValue) const {}
+void LinearTimingFunction::Range(double* min_value, double* max_value) const {}
 
-std::unique_ptr<cc::TimingFunction> LinearTimingFunction::cloneToCC() const {
+std::unique_ptr<cc::TimingFunction> LinearTimingFunction::CloneToCC() const {
   return nullptr;
 }
 
-String CubicBezierTimingFunction::toString() const {
-  switch (this->getEaseType()) {
+CubicBezierTimingFunction* CubicBezierTimingFunction::Preset(
+    EaseType ease_type) {
+  DEFINE_STATIC_REF(CubicBezierTimingFunction, ease,
+                    (AdoptRef(new CubicBezierTimingFunction(EaseType::EASE))));
+  DEFINE_STATIC_REF(
+      CubicBezierTimingFunction, ease_in,
+      (AdoptRef(new CubicBezierTimingFunction(EaseType::EASE_IN))));
+  DEFINE_STATIC_REF(
+      CubicBezierTimingFunction, ease_out,
+      (AdoptRef(new CubicBezierTimingFunction(EaseType::EASE_OUT))));
+  DEFINE_STATIC_REF(
+      CubicBezierTimingFunction, ease_in_out,
+      (AdoptRef(new CubicBezierTimingFunction(EaseType::EASE_IN_OUT))));
+
+  switch (ease_type) {
+    case EaseType::EASE:
+      return ease;
+    case EaseType::EASE_IN:
+      return ease_in;
+    case EaseType::EASE_OUT:
+      return ease_out;
+    case EaseType::EASE_IN_OUT:
+      return ease_in_out;
+    default:
+      NOTREACHED();
+      return nullptr;
+  }
+}
+
+String CubicBezierTimingFunction::ToString() const {
+  switch (this->GetEaseType()) {
     case CubicBezierTimingFunction::EaseType::EASE:
       return "ease";
     case CubicBezierTimingFunction::EaseType::EASE_IN:
@@ -33,51 +62,51 @@ String CubicBezierTimingFunction::toString() const {
     case CubicBezierTimingFunction::EaseType::EASE_IN_OUT:
       return "ease-in-out";
     case CubicBezierTimingFunction::EaseType::CUSTOM:
-      return "cubic-bezier(" + String::numberToStringECMAScript(this->x1()) +
-             ", " + String::numberToStringECMAScript(this->y1()) + ", " +
-             String::numberToStringECMAScript(this->x2()) + ", " +
-             String::numberToStringECMAScript(this->y2()) + ")";
+      return "cubic-bezier(" + String::NumberToStringECMAScript(this->X1()) +
+             ", " + String::NumberToStringECMAScript(this->Y1()) + ", " +
+             String::NumberToStringECMAScript(this->X2()) + ", " +
+             String::NumberToStringECMAScript(this->Y2()) + ")";
     default:
       NOTREACHED();
       return "";
   }
 }
 
-double CubicBezierTimingFunction::evaluate(double fraction,
+double CubicBezierTimingFunction::Evaluate(double fraction,
                                            double accuracy) const {
-  return m_bezier->bezier().SolveWithEpsilon(fraction, accuracy);
+  return bezier_->bezier().SolveWithEpsilon(fraction, accuracy);
 }
 
-void CubicBezierTimingFunction::range(double* minValue,
-                                      double* maxValue) const {
-  const double solution1 = m_bezier->bezier().range_min();
-  const double solution2 = m_bezier->bezier().range_max();
+void CubicBezierTimingFunction::Range(double* min_value,
+                                      double* max_value) const {
+  const double solution1 = bezier_->bezier().range_min();
+  const double solution2 = bezier_->bezier().range_max();
 
   // Since our input values can be out of the range 0->1 so we must also
   // consider the minimum and maximum points.
-  double solutionMin = m_bezier->bezier().SolveWithEpsilon(
-      *minValue, std::numeric_limits<double>::epsilon());
-  double solutionMax = m_bezier->bezier().SolveWithEpsilon(
-      *maxValue, std::numeric_limits<double>::epsilon());
-  *minValue = std::min(std::min(solutionMin, solutionMax), 0.0);
-  *maxValue = std::max(std::max(solutionMin, solutionMax), 1.0);
-  *minValue = std::min(std::min(*minValue, solution1), solution2);
-  *maxValue = std::max(std::max(*maxValue, solution1), solution2);
+  double solution_min = bezier_->bezier().SolveWithEpsilon(
+      *min_value, std::numeric_limits<double>::epsilon());
+  double solution_max = bezier_->bezier().SolveWithEpsilon(
+      *max_value, std::numeric_limits<double>::epsilon());
+  *min_value = std::min(std::min(solution_min, solution_max), 0.0);
+  *max_value = std::max(std::max(solution_min, solution_max), 1.0);
+  *min_value = std::min(std::min(*min_value, solution1), solution2);
+  *max_value = std::max(std::max(*max_value, solution1), solution2);
 }
 
-std::unique_ptr<cc::TimingFunction> CubicBezierTimingFunction::cloneToCC()
+std::unique_ptr<cc::TimingFunction> CubicBezierTimingFunction::CloneToCC()
     const {
-  return m_bezier->Clone();
+  return bezier_->Clone();
 }
 
-String StepsTimingFunction::toString() const {
-  const char* positionString = nullptr;
-  switch (getStepPosition()) {
+String StepsTimingFunction::ToString() const {
+  const char* position_string = nullptr;
+  switch (GetStepPosition()) {
     case StepPosition::START:
-      positionString = "start";
+      position_string = "start";
       break;
     case StepPosition::MIDDLE:
-      positionString = "middle";
+      position_string = "middle";
       break;
     case StepPosition::END:
       // do not specify step position in output
@@ -85,53 +114,75 @@ String StepsTimingFunction::toString() const {
   }
 
   StringBuilder builder;
-  builder.append("steps(");
-  builder.append(String::numberToStringECMAScript(this->numberOfSteps()));
-  if (positionString) {
-    builder.append(", ");
-    builder.append(positionString);
+  builder.Append("steps(");
+  builder.Append(String::NumberToStringECMAScript(this->NumberOfSteps()));
+  if (position_string) {
+    builder.Append(", ");
+    builder.Append(position_string);
   }
-  builder.append(')');
-  return builder.toString();
+  builder.Append(')');
+  return builder.ToString();
 }
 
-void StepsTimingFunction::range(double* minValue, double* maxValue) const {
-  *minValue = 0;
-  *maxValue = 1;
+void StepsTimingFunction::Range(double* min_value, double* max_value) const {
+  *min_value = 0;
+  *max_value = 1;
 }
 
-double StepsTimingFunction::evaluate(double fraction, double) const {
-  return m_steps->GetPreciseValue(fraction);
+double StepsTimingFunction::Evaluate(double fraction, double) const {
+  return steps_->GetPreciseValue(fraction);
 }
 
-std::unique_ptr<cc::TimingFunction> StepsTimingFunction::cloneToCC() const {
-  return m_steps->Clone();
+std::unique_ptr<cc::TimingFunction> StepsTimingFunction::CloneToCC() const {
+  return steps_->Clone();
 }
 
-PassRefPtr<TimingFunction> createCompositorTimingFunctionFromCC(
-    const cc::TimingFunction* timingFunction) {
-  if (!timingFunction)
-    return LinearTimingFunction::shared();
+String FramesTimingFunction::ToString() const {
+  StringBuilder builder;
+  builder.Append("frames(");
+  builder.Append(String::NumberToStringECMAScript(this->NumberOfFrames()));
+  builder.Append(")");
+  return builder.ToString();
+}
 
-  switch (timingFunction->GetType()) {
+void FramesTimingFunction::Range(double* min_value, double* max_value) const {
+  *min_value = 0;
+  *max_value = 1;
+}
+
+double FramesTimingFunction::Evaluate(double fraction, double) const {
+  return frames_->GetPreciseValue(fraction);
+}
+
+std::unique_ptr<cc::TimingFunction> FramesTimingFunction::CloneToCC() const {
+  return frames_->Clone();
+}
+
+PassRefPtr<TimingFunction> CreateCompositorTimingFunctionFromCC(
+    const cc::TimingFunction* timing_function) {
+  if (!timing_function)
+    return LinearTimingFunction::Shared();
+
+  switch (timing_function->GetType()) {
     case cc::TimingFunction::Type::CUBIC_BEZIER: {
-      auto cubicTimingFunction =
-          static_cast<const cc::CubicBezierTimingFunction*>(timingFunction);
-      if (cubicTimingFunction->ease_type() !=
+      auto cubic_timing_function =
+          static_cast<const cc::CubicBezierTimingFunction*>(timing_function);
+      if (cubic_timing_function->ease_type() !=
           cc::CubicBezierTimingFunction::EaseType::CUSTOM)
-        return CubicBezierTimingFunction::preset(
-            cubicTimingFunction->ease_type());
+        return CubicBezierTimingFunction::Preset(
+            cubic_timing_function->ease_type());
 
-      const auto& bezier = cubicTimingFunction->bezier();
-      return CubicBezierTimingFunction::create(bezier.GetX1(), bezier.GetY1(),
+      const auto& bezier = cubic_timing_function->bezier();
+      return CubicBezierTimingFunction::Create(bezier.GetX1(), bezier.GetY1(),
                                                bezier.GetX2(), bezier.GetY2());
     }
 
     case cc::TimingFunction::Type::STEPS: {
-      auto stepsTimingFunction =
-          static_cast<const cc::StepsTimingFunction*>(timingFunction);
-      return StepsTimingFunction::create(stepsTimingFunction->steps(),
-                                         stepsTimingFunction->step_position());
+      auto steps_timing_function =
+          static_cast<const cc::StepsTimingFunction*>(timing_function);
+      return StepsTimingFunction::Create(
+          steps_timing_function->steps(),
+          steps_timing_function->step_position());
     }
 
     default:
@@ -142,50 +193,62 @@ PassRefPtr<TimingFunction> createCompositorTimingFunctionFromCC(
 
 // Equals operators
 bool operator==(const LinearTimingFunction& lhs, const TimingFunction& rhs) {
-  return rhs.getType() == TimingFunction::Type::LINEAR;
+  return rhs.GetType() == TimingFunction::Type::LINEAR;
 }
 
 bool operator==(const CubicBezierTimingFunction& lhs,
                 const TimingFunction& rhs) {
-  if (rhs.getType() != TimingFunction::Type::CUBIC_BEZIER)
+  if (rhs.GetType() != TimingFunction::Type::CUBIC_BEZIER)
     return false;
 
-  const CubicBezierTimingFunction& ctf = toCubicBezierTimingFunction(rhs);
-  if ((lhs.getEaseType() == CubicBezierTimingFunction::EaseType::CUSTOM) &&
-      (ctf.getEaseType() == CubicBezierTimingFunction::EaseType::CUSTOM))
-    return (lhs.x1() == ctf.x1()) && (lhs.y1() == ctf.y1()) &&
-           (lhs.x2() == ctf.x2()) && (lhs.y2() == ctf.y2());
+  const CubicBezierTimingFunction& ctf = ToCubicBezierTimingFunction(rhs);
+  if ((lhs.GetEaseType() == CubicBezierTimingFunction::EaseType::CUSTOM) &&
+      (ctf.GetEaseType() == CubicBezierTimingFunction::EaseType::CUSTOM))
+    return (lhs.X1() == ctf.X1()) && (lhs.Y1() == ctf.Y1()) &&
+           (lhs.X2() == ctf.X2()) && (lhs.Y2() == ctf.Y2());
 
-  return lhs.getEaseType() == ctf.getEaseType();
+  return lhs.GetEaseType() == ctf.GetEaseType();
 }
 
 bool operator==(const StepsTimingFunction& lhs, const TimingFunction& rhs) {
-  if (rhs.getType() != TimingFunction::Type::STEPS)
+  if (rhs.GetType() != TimingFunction::Type::STEPS)
     return false;
 
-  const StepsTimingFunction& stf = toStepsTimingFunction(rhs);
-  return (lhs.numberOfSteps() == stf.numberOfSteps()) &&
-         (lhs.getStepPosition() == stf.getStepPosition());
+  const StepsTimingFunction& stf = ToStepsTimingFunction(rhs);
+  return (lhs.NumberOfSteps() == stf.NumberOfSteps()) &&
+         (lhs.GetStepPosition() == stf.GetStepPosition());
+}
+
+bool operator==(const FramesTimingFunction& lhs, const TimingFunction& rhs) {
+  if (rhs.GetType() != TimingFunction::Type::FRAMES)
+    return false;
+
+  const FramesTimingFunction& ftf = ToFramesTimingFunction(rhs);
+  return lhs.NumberOfFrames() == ftf.NumberOfFrames();
 }
 
 // The generic operator== *must* come after the
 // non-generic operator== otherwise it will end up calling itself.
 bool operator==(const TimingFunction& lhs, const TimingFunction& rhs) {
-  switch (lhs.getType()) {
+  switch (lhs.GetType()) {
     case TimingFunction::Type::LINEAR: {
-      const LinearTimingFunction& linear = toLinearTimingFunction(lhs);
+      const LinearTimingFunction& linear = ToLinearTimingFunction(lhs);
       return (linear == rhs);
     }
     case TimingFunction::Type::CUBIC_BEZIER: {
-      const CubicBezierTimingFunction& cubic = toCubicBezierTimingFunction(lhs);
+      const CubicBezierTimingFunction& cubic = ToCubicBezierTimingFunction(lhs);
       return (cubic == rhs);
     }
     case TimingFunction::Type::STEPS: {
-      const StepsTimingFunction& step = toStepsTimingFunction(lhs);
+      const StepsTimingFunction& step = ToStepsTimingFunction(lhs);
       return (step == rhs);
     }
+    case TimingFunction::Type::FRAMES: {
+      const FramesTimingFunction& frame = ToFramesTimingFunction(lhs);
+      return (frame == rhs);
+    }
     default:
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
   }
   return false;
 }

@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkLightingShader.h"
 #include "SkNormalSource.h"
 #include "SkPoint3.h"
@@ -170,25 +171,25 @@ protected:
                             canvas->translate(0.0f, LABEL_SIZE);
                             SkString label;
                             label.appendf("useNormalSource: %d", useNormalSource);
-                            canvas->drawText(label.c_str(), label.size(), 0.0f, 0.0f, labelPaint);
+                            canvas->drawString(label, 0.0f, 0.0f, labelPaint);
                         }
                         {
                             canvas->translate(0.0f, LABEL_SIZE);
                             SkString label;
                             label.appendf("useDiffuseShader: %d", useDiffuseShader);
-                            canvas->drawText(label.c_str(), label.size(), 0.0f, 0.0f, labelPaint);
+                            canvas->drawString(label, 0.0f, 0.0f, labelPaint);
                         }
                         {
                             canvas->translate(0.0f, LABEL_SIZE);
                             SkString label;
                             label.appendf("useTranslucentPaint: %d", useTranslucentPaint);
-                            canvas->drawText(label.c_str(), label.size(), 0.0f, 0.0f, labelPaint);
+                            canvas->drawString(label, 0.0f, 0.0f, labelPaint);
                         }
                         {
                             canvas->translate(0.0f, LABEL_SIZE);
                             SkString label;
                             label.appendf("useTranslucentShader: %d", useTranslucentShader);
-                            canvas->drawText(label.c_str(), label.size(), 0.0f, 0.0f, labelPaint);
+                            canvas->drawString(label, 0.0f, 0.0f, labelPaint);
                         }
 
                         canvas->restore();

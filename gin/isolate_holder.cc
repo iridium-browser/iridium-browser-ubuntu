@@ -13,6 +13,7 @@
 
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/sys_info.h"
 #include "gin/debug_impl.h"
 #include "gin/function_template.h"
@@ -53,6 +54,30 @@ IsolateHolder::IsolateHolder(
   isolate_ = v8::Isolate::New(params);
   isolate_data_.reset(
       new PerIsolateData(isolate_, allocator, access_mode, task_runner));
+  isolate_memory_dump_provider_.reset(new V8IsolateMemoryDumpProvider(this));
+#if defined(OS_WIN)
+  {
+    void* code_range;
+    size_t size;
+    isolate_->GetCodeRange(&code_range, &size);
+    Debug::CodeRangeCreatedCallback callback =
+        DebugImpl::GetCodeRangeCreatedCallback();
+    if (code_range && size && callback)
+      callback(code_range, size);
+  }
+#endif
+}
+
+IsolateHolder::IsolateHolder(intptr_t* reference_table,
+                             v8::StartupData* existing_blob)
+    : snapshot_creator_(
+          new v8::SnapshotCreator(reference_table, existing_blob)),
+      access_mode_(kSingleThread) {
+  v8::ArrayBuffer::Allocator* allocator = g_array_buffer_allocator;
+  CHECK(allocator) << "You need to invoke gin::IsolateHolder::Initialize first";
+  isolate_ = snapshot_creator_->GetIsolate();
+  isolate_data_.reset(
+      new PerIsolateData(isolate_, allocator, access_mode_, nullptr));
   isolate_memory_dump_provider_.reset(new V8IsolateMemoryDumpProvider(this));
 #if defined(OS_WIN)
   {

@@ -30,9 +30,9 @@
 #ifndef DOMWindowCSS_h
 #define DOMWindowCSS_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -42,7 +42,7 @@ class DOMWindowCSS : public GarbageCollected<DOMWindowCSS>,
 
  public:
   static bool supports(const String& property, const String& value);
-  static bool supports(const String& conditionText);
+  static bool supports(const String& condition_text);
   static String escape(const String& ident);
 
   DEFINE_INLINE_TRACE() {}

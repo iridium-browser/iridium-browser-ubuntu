@@ -92,9 +92,8 @@ base::DictionaryValue* GetAppDict(base::DictionaryValue* origin_dict,
   if (!origin_dict->GetDictionaryWithoutPathExpansion(key_name, &app_dict)) {
     // Don't allow more than kMaxAppsPerSite dictionaries.
     if (origin_dict->size() < kMaxAppsPerSite) {
-      app_dict = new base::DictionaryValue();
-      origin_dict->SetWithoutPathExpansion(key_name,
-                                           base::WrapUnique(app_dict));
+      app_dict = origin_dict->SetDictionaryWithoutPathExpansion(
+          key_name, base::MakeUnique<base::DictionaryValue>());
     }
   }
 
@@ -401,7 +400,7 @@ AppBannerSettingsHelper::GetHomescreenLanguageOption() {
   if (param.empty() || !base::StringToUint(param, &language_option) ||
       language_option < LANGUAGE_OPTION_MIN ||
       language_option > LANGUAGE_OPTION_MAX) {
-    return LANGUAGE_OPTION_DEFAULT;
+    return LANGUAGE_OPTION_ADD;
   }
 
   return static_cast<LanguageOption>(language_option);

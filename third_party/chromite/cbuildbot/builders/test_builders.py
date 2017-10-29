@@ -13,11 +13,9 @@ from chromite.cbuildbot.builders import generic_builders
 from chromite.cbuildbot.stages import build_stages
 from chromite.cbuildbot.stages import android_stages
 from chromite.cbuildbot.stages import chrome_stages
-from chromite.cbuildbot.stages import completion_stages
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import sync_stages
 from chromite.cbuildbot.stages import test_stages
-from chromite.lib import results_lib
 
 
 class SuccessStage(generic_stages.BuilderStage):
@@ -74,51 +72,17 @@ class UnittestStressBuilder(generic_builders.Builder):
       self._RunStage(test_stages.UnitTestStage, board, suffix=' - %d' % i)
 
 
-class SignerTestsBuilder(generic_builders.Builder):
+class SignerTestsBuilder(generic_builders.PreCqBuilder):
   """Builder that runs the cros-signing tests, and nothing else."""
+  def RunTestStages(self):
+    """Run the signer tests."""
+    self._RunStage(build_stages.InitSDKStage)
+    self._RunStage(test_stages.CrosSigningTestStage)
 
-  def __init__(self, *args, **kwargs):
-    """Initializes a buildbot builder."""
-    super(SignerTestsBuilder, self).__init__(*args, **kwargs)
-    self.sync_stage = None
-    self.completion_instance = None
 
-  def GetSyncInstance(self):
-    """Returns an instance of a SyncStage that should be run."""
-    self.sync_stage = self._GetStageInstance(sync_stages.PreCQSyncStage,
-                                             self.patch_pool.gerrit_patches)
-    self.patch_pool.gerrit_patches = []
-
-    return self.sync_stage
-
-  def GetCompletionInstance(self):
-    """Return the completion instance.
-
-    Should not be called until after testing is finished, safe to call
-    repeatedly.
-    """
-    if not self.completion_instance:
-      build_id, db = self._run.GetCIDBHandle()
-      was_build_successful = results_lib.Results.BuildSucceededSoFar(
-          db, build_id)
-
-      self.completion_instance = self._GetStageInstance(
-          completion_stages.PreCQCompletionStage,
-          self.sync_stage,
-          was_build_successful)
-
-    return self.completion_instance
-
-  def RunStages(self):
+class ChromiteTestsBuilder(generic_builders.PreCqBuilder):
+  """Builder that runs chromite unit tests, including network."""
+  def RunTestStages(self):
     """Run something after sync/reexec."""
-    try:
-      self._RunStage(test_stages.CrosSigningTestStage, True)
-    except Exception:
-      # We ignore the error, allowing the build to compelete. But make
-      # sure the build has been marked as failing.
-      build_id, db = self._run.GetCIDBHandle()
-      was_build_successful = results_lib.Results.BuildSucceededSoFar(
-          db, build_id)
-      assert not was_build_successful
-
-    self.GetCompletionInstance().Run()
+    self._RunStage(build_stages.InitSDKStage)
+    self._RunStage(test_stages.ChromiteTestStage)

@@ -14,6 +14,12 @@
 #include "base/macros.h"
 #include "chromeos/chromeos_export.h"
 
+namespace ash {
+namespace network_icon {
+class NetworkIconTest;
+}  // namespace network_icon
+}  // namesapce ash
+
 namespace base {
 class Value;
 class DictionaryValue;
@@ -24,6 +30,10 @@ namespace chromeos {
 class DeviceState;
 class NetworkState;
 class NetworkTypePattern;
+
+namespace tether {
+class NetworkListSorterTest;
+}
 
 // Base class for states managed by NetworkStateManger which are associated
 // with a Shill path (e.g. service path or device path).
@@ -112,6 +122,9 @@ class CHROMEOS_EXPORT ManagedState {
 
  private:
   friend class NetworkChangeNotifierChromeosUpdateTest;
+  friend class NetworkStateHandler;
+  friend class ash::network_icon::NetworkIconTest;
+  friend class chromeos::tether::NetworkListSorterTest;
 
   ManagedType managed_type_;
 

@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/shelf/shelf_constants.h"
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/system/toast/toast_manager.h"
-#include "ash/common/wm/wm_screen_util.h"
-#include "ash/common/wm_shell.h"
+#include "ash/system/toast/toast_manager.h"
+
+#include "ash/public/cpp/config.h"
+#include "ash/screen_util.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_constants.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/run_loop.h"
@@ -25,16 +26,16 @@ class DummyEvent : public ui::Event {
   ~DummyEvent() override {}
 };
 
-class ToastManagerTest : public test::AshTestBase {
+class ToastManagerTest : public AshTestBase {
  public:
   ToastManagerTest() {}
   ~ToastManagerTest() override {}
 
  private:
   void SetUp() override {
-    test::AshTestBase::SetUp();
+    AshTestBase::SetUp();
 
-    manager_ = WmShell::Get()->toast_manager();
+    manager_ = Shell::Get()->toast_manager();
 
     manager_->ResetSerialForTesting();
     EXPECT_EQ(0, GetToastSerial());
@@ -128,6 +129,10 @@ TEST_F(ToastManagerTest, ShowAndCloseManually) {
 }
 
 TEST_F(ToastManagerTest, ShowAndCloseManuallyDuringAnimation) {
+  // TODO: gets wedged running animator. http://crbug.com/698016.
+  if (Shell::GetAshConfig() == Config::MASH)
+    return;
+
   ui::ScopedAnimationDurationScaleMode slow_animation_duration(
       ui::ScopedAnimationDurationScaleMode::SLOW_DURATION);
 
@@ -174,15 +179,16 @@ TEST_F(ToastManagerTest, QueueMessage) {
 }
 
 TEST_F(ToastManagerTest, PositionWithVisibleBottomShelf) {
-  WmShelf* shelf = GetPrimaryShelf();
-  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->GetAlignment());
+  Shelf* shelf = GetPrimaryShelf();
+  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
   EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
 
   ShowToast("DUMMY", ToastData::kInfiniteDuration);
   EXPECT_EQ(1, GetToastSerial());
 
   gfx::Rect toast_bounds = GetCurrentWidget()->GetWindowBoundsInScreen();
-  gfx::Rect root_bounds = wm::GetDisplayBoundsWithShelf(shelf->GetWindow());
+  gfx::Rect root_bounds =
+      ScreenUtil::GetDisplayBoundsWithShelf(shelf->GetWindow());
 
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_NEAR(root_bounds.CenterPoint().x(), toast_bounds.CenterPoint().x(), 1);
@@ -198,8 +204,8 @@ TEST_F(ToastManagerTest, PositionWithAutoHiddenBottomShelf) {
   std::unique_ptr<aura::Window> window(
       CreateTestWindowInShellWithBounds(gfx::Rect(1, 2, 3, 4)));
 
-  WmShelf* shelf = GetPrimaryShelf();
-  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->GetAlignment());
+  Shelf* shelf = GetPrimaryShelf();
+  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
   EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf->GetAutoHideState());
 
@@ -207,7 +213,8 @@ TEST_F(ToastManagerTest, PositionWithAutoHiddenBottomShelf) {
   EXPECT_EQ(1, GetToastSerial());
 
   gfx::Rect toast_bounds = GetCurrentWidget()->GetWindowBoundsInScreen();
-  gfx::Rect root_bounds = wm::GetDisplayBoundsWithShelf(shelf->GetWindow());
+  gfx::Rect root_bounds =
+      ScreenUtil::GetDisplayBoundsWithShelf(shelf->GetWindow());
 
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_NEAR(root_bounds.CenterPoint().x(), toast_bounds.CenterPoint().x(), 1);
@@ -216,8 +223,8 @@ TEST_F(ToastManagerTest, PositionWithAutoHiddenBottomShelf) {
 }
 
 TEST_F(ToastManagerTest, PositionWithHiddenBottomShelf) {
-  WmShelf* shelf = GetPrimaryShelf();
-  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->GetAlignment());
+  Shelf* shelf = GetPrimaryShelf();
+  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_ALWAYS_HIDDEN);
   EXPECT_EQ(SHELF_HIDDEN, shelf->GetVisibilityState());
 
@@ -225,7 +232,8 @@ TEST_F(ToastManagerTest, PositionWithHiddenBottomShelf) {
   EXPECT_EQ(1, GetToastSerial());
 
   gfx::Rect toast_bounds = GetCurrentWidget()->GetWindowBoundsInScreen();
-  gfx::Rect root_bounds = wm::GetDisplayBoundsWithShelf(shelf->GetWindow());
+  gfx::Rect root_bounds =
+      ScreenUtil::GetDisplayBoundsWithShelf(shelf->GetWindow());
 
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_NEAR(root_bounds.CenterPoint().x(), toast_bounds.CenterPoint().x(), 1);
@@ -233,7 +241,7 @@ TEST_F(ToastManagerTest, PositionWithHiddenBottomShelf) {
 }
 
 TEST_F(ToastManagerTest, PositionWithVisibleLeftShelf) {
-  WmShelf* shelf = GetPrimaryShelf();
+  Shelf* shelf = GetPrimaryShelf();
   EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
   shelf->SetAlignment(SHELF_ALIGNMENT_LEFT);
 
@@ -242,7 +250,8 @@ TEST_F(ToastManagerTest, PositionWithVisibleLeftShelf) {
 
   gfx::Rect toast_bounds = GetCurrentWidget()->GetWindowBoundsInScreen();
   gfx::RectF precise_toast_bounds(toast_bounds);
-  gfx::Rect root_bounds = wm::GetDisplayBoundsWithShelf(shelf->GetWindow());
+  gfx::Rect root_bounds =
+      ScreenUtil::GetDisplayBoundsWithShelf(shelf->GetWindow());
 
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_EQ(root_bounds.bottom() - 5, toast_bounds.bottom());
@@ -255,18 +264,23 @@ TEST_F(ToastManagerTest, PositionWithVisibleLeftShelf) {
 }
 
 TEST_F(ToastManagerTest, PositionWithUnifiedDesktop) {
+  // TODO: needs unified mode. http://crbug.com/698024.
+  if (Shell::GetAshConfig() == Config::MASH)
+    return;
+
   display_manager()->SetUnifiedDesktopEnabled(true);
   UpdateDisplay("1000x500,0+600-100x500");
 
-  WmShelf* shelf = GetPrimaryShelf();
-  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->GetAlignment());
+  Shelf* shelf = GetPrimaryShelf();
+  EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
   EXPECT_EQ(SHELF_VISIBLE, shelf->GetVisibilityState());
 
   ShowToast("DUMMY", ToastData::kInfiniteDuration);
   EXPECT_EQ(1, GetToastSerial());
 
   gfx::Rect toast_bounds = GetCurrentWidget()->GetWindowBoundsInScreen();
-  gfx::Rect root_bounds = wm::GetDisplayBoundsWithShelf(shelf->GetWindow());
+  gfx::Rect root_bounds =
+      ScreenUtil::GetDisplayBoundsWithShelf(shelf->GetWindow());
 
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_TRUE(root_bounds.Contains(toast_bounds));

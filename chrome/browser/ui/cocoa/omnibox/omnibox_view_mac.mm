@@ -25,8 +25,6 @@
 #include "chrome/browser/ui/omnibox/chrome_omnibox_client.h"
 #include "chrome/browser/ui/omnibox/clipboard_utils.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
-#include "components/grit/components_scaled_resources.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
@@ -121,8 +119,8 @@ struct OmniboxViewMacState : public base::SupportsUserData::Data {
 
 // Accessors for storing and getting the state from the tab.
 void StoreStateToTab(WebContents* tab,
-                     OmniboxViewMacState* state) {
-  tab->SetUserData(kOmniboxViewMacStateKey, state);
+                     std::unique_ptr<OmniboxViewMacState> state) {
+  tab->SetUserData(kOmniboxViewMacStateKey, std::move(state));
 }
 
 const OmniboxViewMacState* GetStateFromTab(const WebContents* tab) {
@@ -222,9 +220,8 @@ void OmniboxViewMac::SaveStateToTab(WebContents* tab) {
     range = NSMakeRange(0, GetTextLength());
   }
 
-  OmniboxViewMacState* state =
-      new OmniboxViewMacState(model()->GetStateForTabSwitch(), hasFocus, range);
-  StoreStateToTab(tab, state);
+  StoreStateToTab(tab, base::MakeUnique<OmniboxViewMacState>(
+                           model()->GetStateForTabSwitch(), hasFocus, range));
 }
 
 void OmniboxViewMac::OnTabChanged(const WebContents* web_contents) {
@@ -354,6 +351,11 @@ void OmniboxViewMac::SetWindowTextAndCaretPos(const base::string16& text,
     TextChanged();
 }
 
+void OmniboxViewMac::SetCaretPos(size_t caret_pos) {
+  size_t pos = std::min(caret_pos, GetTextLength());
+  SetSelectedRange(NSMakeRange(pos, 0));
+}
+
 void OmniboxViewMac::EnterKeywordModeForDefaultSearchProvider() {
   // We need to do this first, else |SetSelectedRange()| won't work.
   FocusLocation(true);
@@ -367,6 +369,8 @@ bool OmniboxViewMac::IsSelectAll() const {
   if (![field_ currentEditor])
     return true;
   const NSRange all_range = NSMakeRange(0, GetTextLength());
+  if (all_range.length == 0)
+    return false;
   return NSEqualRanges(all_range, GetSelectedRange());
 }
 
@@ -387,17 +391,24 @@ void OmniboxViewMac::GetSelectionBounds(base::string16::size_type* start,
 }
 
 void OmniboxViewMac::SelectAll(bool reversed) {
-  DCHECK(!in_coalesced_update_block_);
   if (!model()->has_focus())
     return;
+
+  NSRange full_range = NSMakeRange(0, GetTextLength());
+
+  // When coalescing updates, just set the range and not the direction. It's
+  // unlikely that the direction will matter after OpenMatch() applies updates.
+  if (in_coalesced_update_block_) {
+    SetSelectedRange(full_range);
+    return;
+  }
 
   NSTextView* text_view =
       base::mac::ObjCCastStrict<NSTextView>([field_ currentEditor]);
   NSSelectionAffinity affinity =
       reversed ? NSSelectionAffinityUpstream : NSSelectionAffinityDownstream;
-  NSRange range = NSMakeRange(0, GetTextLength());
 
-  [text_view setSelectedRange:range affinity:affinity stillSelecting:NO];
+  [text_view setSelectedRange:full_range affinity:affinity stillSelecting:NO];
 }
 
 void OmniboxViewMac::RevertAll() {
@@ -818,6 +829,11 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
      (cmd == @selector(noop:) &&
       ([event type] == NSKeyDown || [event type] == NSKeyUp) &&
       [event keyCode] == kVK_Return)) {
+    // If the user hasn't entered any text in keyword search mode, we need to
+    // return early in order to avoid cancelling the search.
+    if (GetTextLength() == 0)
+      return true;
+
     WindowOpenDisposition disposition =
         ui::WindowOpenDispositionFromNSEvent(event);
     model()->AcceptInput(disposition, false);

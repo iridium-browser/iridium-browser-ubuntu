@@ -8,50 +8,53 @@
 #include "core/dom/TaskRunnerHelper.h"
 #include "core/html/imports/HTMLImport.h"
 #include "platform/Timer.h"
+#include "platform/bindings/ScriptWrappable.h"
+#include "platform/bindings/TraceWrapperMember.h"
 
 namespace blink {
 
 class HTMLImportChild;
 class KURL;
 
-class HTMLImportTreeRoot : public HTMLImport {
+class HTMLImportTreeRoot final : public HTMLImport, public TraceWrapperBase {
  public:
-  static HTMLImportTreeRoot* create(Document*);
+  static HTMLImportTreeRoot* Create(Document*);
 
-  ~HTMLImportTreeRoot() override;
-  void dispose();
+  ~HTMLImportTreeRoot() final;
+  void Dispose();
 
-  // HTMLImport
-  Document* document() const override;
-  bool hasFinishedLoading() const override;
-  void stateWillChange() override;
-  void stateDidChange() override;
+  // HTMLImport overrides:
+  Document* GetDocument() const final;
+  bool HasFinishedLoading() const final;
+  void StateWillChange() final;
+  void StateDidChange() final;
 
-  void scheduleRecalcState();
+  void ScheduleRecalcState();
 
-  HTMLImportChild* add(HTMLImportChild*);
-  HTMLImportChild* find(const KURL&) const;
+  HTMLImportChild* Add(HTMLImportChild*);
+  HTMLImportChild* Find(const KURL&) const;
 
   DECLARE_VIRTUAL_TRACE();
+  DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
  private:
   explicit HTMLImportTreeRoot(Document*);
 
-  void recalcTimerFired(TimerBase*);
+  void RecalcTimerFired(TimerBase*);
 
-  Member<Document> m_document;
-  TaskRunnerTimer<HTMLImportTreeRoot> m_recalcTimer;
+  TraceWrapperMember<Document> document_;
+  TaskRunnerTimer<HTMLImportTreeRoot> recalc_timer_;
 
   // List of import which has been loaded or being loaded.
   typedef HeapVector<Member<HTMLImportChild>> ImportList;
-  ImportList m_imports;
+  ImportList imports_;
 };
 
 DEFINE_TYPE_CASTS(HTMLImportTreeRoot,
                   HTMLImport,
                   import,
-                  import->isRoot(),
-                  import.isRoot());
+                  import->IsRoot(),
+                  import.IsRoot());
 
 }  // namespace blink
 

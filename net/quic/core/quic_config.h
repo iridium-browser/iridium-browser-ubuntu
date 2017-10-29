@@ -344,17 +344,6 @@ class QUIC_EXPORT_PRIVATE QuicConfig {
 
   uint32_t ReceivedInitialSessionFlowControlWindowBytes() const;
 
-  // Sets socket receive buffer to transmit to the peer.
-  void SetSocketReceiveBufferToSend(uint32_t window_bytes);
-
-  bool HasReceivedSocketReceiveBuffer() const;
-
-  uint32_t ReceivedSocketReceiveBuffer() const;
-
-  void SetMultipathEnabled(bool multipath_enabled);
-
-  bool MultipathEnabled() const;
-
   void SetDisableConnectionMigration();
 
   bool DisableConnectionMigration() const;
@@ -427,9 +416,6 @@ class QUIC_EXPORT_PRIVATE QuicConfig {
   // Socket receive buffer in bytes.
   // TODO(ianswett): Deprecate once QUIC_VERSION_34 is deprecated.
   QuicFixedUint32 socket_receive_buffer_;
-
-  // Whether to support multipath for this connection.
-  QuicNegotiableUint32 multipath_enabled_;
 
   // Whether tell peer not to attempt connection migration.
   QuicFixedUint32 connection_migration_disabled_;

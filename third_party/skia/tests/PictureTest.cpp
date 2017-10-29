@@ -21,7 +21,6 @@
 #include "SkPicture.h"
 #include "SkPictureAnalyzer.h"
 #include "SkPictureRecorder.h"
-#include "SkPictureUtils.h"
 #include "SkPixelRef.h"
 #include "SkPixelSerializer.h"
 #include "SkMiniRecorder.h"
@@ -851,7 +850,7 @@ static void test_typeface(skiatest::Reporter* reporter) {
     SkPaint paint;
     paint.setTypeface(SkTypeface::MakeFromName("Arial",
                                                SkFontStyle::FromOldStyle(SkTypeface::kItalic)));
-    canvas->drawText("Q", 1, 0, 10, paint);
+    canvas->drawString("Q", 0, 10, paint);
     sk_sp<SkPicture> picture(recorder.finishRecordingAsPicture());
     SkDynamicMemoryWStream stream;
     picture->serialize(&stream);
@@ -1138,66 +1137,38 @@ DEF_TEST(PictureGpuAnalyzer, r) {
 
 #endif // SK_SUPPORT_GPU
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
+// If we record bounded ops into a picture with a big cull and calculate the
+// bounds of those ops, we should trim down the picture cull to the ops' bounds.
+// If we're not using an SkBBH, we shouldn't change it.
+DEF_TEST(Picture_UpdatedCull_1, r) {
+    // Testing 1 draw exercises SkMiniPicture.
+    SkRTreeFactory factory;
+    SkPictureRecorder recorder;
 
-// Disable until we properly fix https://bugs.chromium.org/p/skia/issues/detail?id=5548
-#if 0
-static void empty_ops(SkCanvas* canvas) {
-}
-static void clip_ops(SkCanvas* canvas) {
-    canvas->save();
-    canvas->clipRect(SkRect::MakeWH(20, 20));
-    canvas->restore();
-}
-static void matrix_ops(SkCanvas* canvas) {
-    canvas->save();
-    canvas->scale(2, 3);
-    canvas->restore();
-}
-static void matrixclip_ops(SkCanvas* canvas) {
-    canvas->save();
-    canvas->scale(2, 3);
-    canvas->clipRect(SkRect::MakeWH(20, 20));
-    canvas->restore();
-}
-typedef void (*CanvasProc)(SkCanvas*);
+    auto canvas = recorder.beginRecording(SkRect::MakeLargest(), &factory);
+    canvas->drawRect(SkRect::MakeWH(20,20), SkPaint{});
+    auto pic = recorder.finishRecordingAsPicture();
+    REPORTER_ASSERT(r, pic->cullRect() == SkRect::MakeWH(20,20));
 
-// Test the kReturnNullForEmpty_FinishFlag option when recording
-//
-DEF_TEST(Picture_RecordEmpty, r) {
-    const SkRect cull = SkRect::MakeWH(100, 100);
-
-    CanvasProc procs[] { empty_ops, clip_ops, matrix_ops, matrixclip_ops };
-
-    for (auto proc : procs) {
-        {
-            SkPictureRecorder rec;
-            proc(rec.beginRecording(cull));
-            sk_sp<SkPicture> pic = rec.finishRecordingAsPicture(0);
-            REPORTER_ASSERT(r, pic.get());
-            REPORTER_ASSERT(r, pic->approximateOpCount() == 0);
-        }
-        {
-            SkPictureRecorder rec;
-            proc(rec.beginRecording(cull));
-            sk_sp<SkPicture> pic = rec.finishRecordingAsPicture(
-                                                 SkPictureRecorder::kReturnNullForEmpty_FinishFlag);
-            REPORTER_ASSERT(r, !pic.get());
-        }
-        {
-            SkPictureRecorder rec;
-            proc(rec.beginRecording(cull));
-            sk_sp<SkDrawable> dr = rec.finishRecordingAsDrawable(0);
-            REPORTER_ASSERT(r, dr.get());
-        }
-        {
-            SkPictureRecorder rec;
-            proc(rec.beginRecording(cull));
-            sk_sp<SkDrawable> dr = rec.finishRecordingAsDrawable(
-                                                 SkPictureRecorder::kReturnNullForEmpty_FinishFlag);
-            REPORTER_ASSERT(r, !dr.get());
-        }
-    }
+    canvas = recorder.beginRecording(SkRect::MakeLargest());
+    canvas->drawRect(SkRect::MakeWH(20,20), SkPaint{});
+    pic = recorder.finishRecordingAsPicture();
+    REPORTER_ASSERT(r, pic->cullRect() == SkRect::MakeLargest());
 }
-#endif
+DEF_TEST(Picture_UpdatedCull_2, r) {
+    // Testing >1 draw exercises SkBigPicture.
+    SkRTreeFactory factory;
+    SkPictureRecorder recorder;
 
+    auto canvas = recorder.beginRecording(SkRect::MakeLargest(), &factory);
+    canvas->drawRect(SkRect::MakeWH(20,20), SkPaint{});
+    canvas->drawRect(SkRect::MakeWH(10,40), SkPaint{});
+    auto pic = recorder.finishRecordingAsPicture();
+    REPORTER_ASSERT(r, pic->cullRect() == SkRect::MakeWH(20,40));
+
+    canvas = recorder.beginRecording(SkRect::MakeLargest());
+    canvas->drawRect(SkRect::MakeWH(20,20), SkPaint{});
+    canvas->drawRect(SkRect::MakeWH(10,40), SkPaint{});
+    pic = recorder.finishRecordingAsPicture();
+    REPORTER_ASSERT(r, pic->cullRect() == SkRect::MakeLargest());
+}

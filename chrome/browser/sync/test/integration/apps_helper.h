@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_SYNC_TEST_INTEGRATION_APPS_HELPER_H_
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_APPS_HELPER_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -119,10 +120,9 @@ class AppsMatchChecker : public StatusChangeChecker,
   // extensions::ExtensionRegistryObserver implementation.
   void OnExtensionLoaded(content::BrowserContext* context,
                          const extensions::Extension* extension) override;
-  void OnExtensionUnloaded(
-      content::BrowserContext* context,
-      const extensions::Extension* extenion,
-      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionUnloaded(content::BrowserContext* context,
+                           const extensions::Extension* extenion,
+                           extensions::UnloadedExtensionReason reason) override;
   void OnExtensionInstalled(content::BrowserContext* browser_context,
                             const extensions::Extension* extension,
                             bool is_update) override;
@@ -153,7 +153,8 @@ class AppsMatchChecker : public StatusChangeChecker,
   content::NotificationRegistrar registrar_;
 
   // This installs apps, too.
-  ScopedVector<SyncedExtensionInstaller> synced_extension_installers_;
+  std::vector<std::unique_ptr<SyncedExtensionInstaller>>
+      synced_extension_installers_;
 
   DISALLOW_COPY_AND_ASSIGN(AppsMatchChecker);
 };

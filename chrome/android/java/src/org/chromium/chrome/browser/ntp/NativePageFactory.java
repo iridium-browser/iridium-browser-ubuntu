@@ -16,13 +16,13 @@ import org.chromium.chrome.browser.TabLoadStatus;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.bookmarks.BookmarkPage;
 import org.chromium.chrome.browser.download.DownloadPage;
-import org.chromium.chrome.browser.history.HistoryManagerUtils;
 import org.chromium.chrome.browser.history.HistoryPage;
 import org.chromium.chrome.browser.physicalweb.PhysicalWebDiagnosticsPage;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetMetrics;
 import org.chromium.content_public.browser.LoadUrlParams;
 
 /**
@@ -35,8 +35,13 @@ public class NativePageFactory {
     static class NativePageBuilder {
         protected NativePage buildNewTabPage(ChromeActivity activity, Tab tab,
                 TabModelSelector tabModelSelector) {
-            if (FeatureUtilities.isChromeHomeEnabled() && !tab.isIncognito()) {
-                return new ChromeHomeNewTabPage(activity, tab, tabModelSelector);
+            if (activity.getBottomSheet() != null) {
+                BottomSheet sheet = activity.getBottomSheet();
+                sheet.getBottomSheetMetrics().recordNativeNewTabPageShown();
+                sheet.getBottomSheetMetrics().recordSheetOpenReason(
+                        BottomSheetMetrics.OPENED_BY_NEW_TAB_CREATION);
+                sheet.setSheetState(BottomSheet.SHEET_STATE_FULL, true);
+                return null;
             } else if (tab.isIncognito()) {
                 return new IncognitoNewTabPage(activity);
             } else {
@@ -56,7 +61,7 @@ public class NativePageFactory {
             return new HistoryPage(activity, new TabShim(tab));
         }
 
-        protected NativePage buildRecentTabsPage(Activity activity, Tab tab) {
+        protected NativePage buildRecentTabsPage(ChromeActivity activity, Tab tab) {
             RecentTabsManager recentTabsManager =
                     new RecentTabsManager(tab, tab.getProfile(), activity);
             return new RecentTabsPage(activity, recentTabsManager);
@@ -92,11 +97,7 @@ public class NativePageFactory {
         } else if (UrlConstants.DOWNLOADS_HOST.equals(host)) {
             return NativePageType.DOWNLOADS;
         } else if (UrlConstants.HISTORY_HOST.equals(host)) {
-            if (HistoryManagerUtils.isAndroidHistoryManagerEnabled()) {
-                return NativePageType.HISTORY;
-            } else {
-                return NativePageType.NONE;
-            }
+            return NativePageType.HISTORY;
         } else if (UrlConstants.RECENT_TABS_HOST.equals(host) && !isIncognito) {
             return NativePageType.RECENT_TABS;
         } else if (UrlConstants.PHYSICAL_WEB_DIAGNOSTICS_HOST.equals(host)) {
@@ -162,7 +163,7 @@ public class NativePageFactory {
                 assert false;
                 return null;
         }
-        page.updateForUrl(url);
+        if (page != null) page.updateForUrl(url);
         return page;
     }
 

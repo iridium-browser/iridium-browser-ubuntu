@@ -5,6 +5,8 @@
 package org.chromium.chrome.browser.download;
 
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.components.offline_items_collection.ContentId;
+import org.chromium.components.offline_items_collection.OfflineItem.Progress;
 
 /**
  * A generic class representing a download item. The item can be either downloaded through the
@@ -14,9 +16,9 @@ import org.chromium.base.annotations.CalledByNative;
  * DownloadManager must be queried for the correct status.
  */
 public class DownloadItem {
-    public static final int INDETERMINATE_DOWNLOAD_PERCENTAGE = -1;
     static final long INVALID_DOWNLOAD_ID = -1L;
 
+    private final ContentId mContentId = new ContentId();
     private boolean mUseAndroidDownloadManager;
     private DownloadInfo mDownloadInfo;
     private long mDownloadId = INVALID_DOWNLOAD_ID;
@@ -26,6 +28,8 @@ public class DownloadItem {
     public DownloadItem(boolean useAndroidDownloadManager, DownloadInfo info) {
         mUseAndroidDownloadManager = useAndroidDownloadManager;
         mDownloadInfo = info;
+        if (mDownloadInfo != null) mContentId.namespace = mDownloadInfo.getContentId().namespace;
+        mContentId.id = getId();
     }
 
     /**
@@ -35,6 +39,9 @@ public class DownloadItem {
      */
     public void setSystemDownloadId(long downloadId) {
         mDownloadId = downloadId;
+
+        // Update our ContentId in case it changed.
+        mContentId.id = getId();
     }
 
     /**
@@ -49,6 +56,14 @@ public class DownloadItem {
      */
     public long getSystemDownloadId() {
         return mDownloadId;
+    }
+
+    /**
+     * @return A {@link ContentId} that represents this downloaded item.  The id will match
+     *         {@link #getId()}.
+     */
+    public ContentId getContentId() {
+        return mContentId;
     }
 
     /**
@@ -128,6 +143,7 @@ public class DownloadItem {
      * @return Whether or not the download has an indeterminate percentage.
      */
     public boolean isIndeterminate() {
-        return getDownloadInfo().getPercentCompleted() == INDETERMINATE_DOWNLOAD_PERCENTAGE;
+        Progress progress = getDownloadInfo().getProgress();
+        return progress == null || progress.isIndeterminate();
     }
 }

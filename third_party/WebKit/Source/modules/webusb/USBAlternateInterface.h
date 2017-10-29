@@ -5,8 +5,8 @@
 #ifndef USBAlternateInterface_h
 #define USBAlternateInterface_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "device/usb/public/interfaces/device.mojom-blink.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Heap.h"
 
 namespace blink {
@@ -20,28 +20,28 @@ class USBAlternateInterface : public GarbageCollected<USBAlternateInterface>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static USBAlternateInterface* create(const USBInterface*,
-                                       size_t alternateIndex);
-  static USBAlternateInterface* create(const USBInterface*,
-                                       size_t alternateSetting,
+  static USBAlternateInterface* Create(const USBInterface*,
+                                       size_t alternate_index);
+  static USBAlternateInterface* Create(const USBInterface*,
+                                       size_t alternate_setting,
                                        ExceptionState&);
 
-  USBAlternateInterface(const USBInterface*, size_t alternateIndex);
+  USBAlternateInterface(const USBInterface*, size_t alternate_index);
 
-  const device::usb::blink::AlternateInterfaceInfo& info() const;
+  const device::mojom::blink::UsbAlternateInterfaceInfo& Info() const;
 
-  uint8_t alternateSetting() const { return info().alternate_setting; }
-  uint8_t interfaceClass() const { return info().class_code; }
-  uint8_t interfaceSubclass() const { return info().subclass_code; }
-  uint8_t interfaceProtocol() const { return info().protocol_code; }
-  String interfaceName() const { return info().interface_name; }
+  uint8_t alternateSetting() const { return Info().alternate_setting; }
+  uint8_t interfaceClass() const { return Info().class_code; }
+  uint8_t interfaceSubclass() const { return Info().subclass_code; }
+  uint8_t interfaceProtocol() const { return Info().protocol_code; }
+  String interfaceName() const { return Info().interface_name; }
   HeapVector<Member<USBEndpoint>> endpoints() const;
 
   DECLARE_TRACE();
 
  private:
-  Member<const USBInterface> m_interface;
-  const size_t m_alternateIndex;
+  Member<const USBInterface> interface_;
+  const size_t alternate_index_;
 };
 
 }  // namespace blink

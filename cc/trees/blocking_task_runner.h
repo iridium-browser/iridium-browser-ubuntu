@@ -13,7 +13,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/platform_thread.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 
 namespace cc {
 
@@ -76,7 +76,7 @@ class CC_EXPORT BlockingTaskRunner {
   // until the capturing stops. At that time the tasks will be run directly
   // instead of being posted to the SingleThreadTaskRunner.
   bool PostTask(const tracked_objects::Location& from_here,
-                const base::Closure& task);
+                base::OnceClosure task);
 
  private:
   explicit BlockingTaskRunner(
@@ -89,7 +89,7 @@ class CC_EXPORT BlockingTaskRunner {
 
   base::Lock lock_;
   int capture_;
-  std::vector<base::Closure> captured_tasks_;
+  std::vector<base::OnceClosure> captured_tasks_;
 
   DISALLOW_COPY_AND_ASSIGN(BlockingTaskRunner);
 };

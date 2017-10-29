@@ -54,11 +54,9 @@ bool PrintWebViewHelper::PrintPagesNative(blink::WebLocalFrame* frame,
   if (printed_pages.empty())
     return false;
 
-  PrintMsg_PrintPage_Params page_params;
-  page_params.params = params.params;
   for (int page_number : printed_pages) {
-    page_params.page_number = page_number;
-    PrintPageInternal(page_params, frame, &metafile, nullptr, nullptr, nullptr);
+    PrintPageInternal(params.params, page_number, page_count, frame, &metafile,
+                      nullptr, nullptr, nullptr);
   }
 
   // blink::printEnd() for PDF should be called before metafile is closed.
@@ -78,8 +76,8 @@ bool PrintWebViewHelper::PrintPagesNative(blink::WebLocalFrame* frame,
     return false;
 
   // Tell the browser we've finished writing the file.
-  Send(new PrintHostMsg_TempFileForPrintingWritten(routing_id(),
-                                                   sequence_number));
+  Send(new PrintHostMsg_TempFileForPrintingWritten(
+      routing_id(), sequence_number, printed_pages.size()));
   return true;
 #else
   PrintHostMsg_DidPrintPage_Params printed_page_params;
@@ -96,7 +94,7 @@ bool PrintWebViewHelper::PrintPagesNative(blink::WebLocalFrame* frame,
     printed_page_params.page_number = printed_pages[i];
     Send(new PrintHostMsg_DidPrintPage(routing_id(), printed_page_params));
     // Send the rest of the pages with an invalid metafile handle.
-    printed_page_params.metafile_data_handle.fd = -1;
+    printed_page_params.metafile_data_handle.Release();
   }
   return true;
 #endif  // defined(OS_ANDROID)

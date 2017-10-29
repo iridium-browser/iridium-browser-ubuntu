@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
@@ -15,6 +16,7 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
@@ -46,13 +48,9 @@ void RecordDaysSinceEnabledMetric(int days_since_enabled) {
 
 namespace data_reduction_proxy {
 
-const char kDataReductionPassThroughHeader[] =
-    "Chrome-Proxy-Accept-Transform: identity\nCache-Control: no-cache";
-
 DataReductionProxySettings::DataReductionProxySettings()
     : unreachable_(false),
       deferred_initialization_(false),
-      promo_allowed_(false),
       data_reduction_proxy_enabled_pref_name_(),
       prefs_(NULL),
       config_(nullptr),
@@ -77,11 +75,6 @@ void DataReductionProxySettings::InitPrefMembers() {
                  base::Unretained(this)));
 }
 
-void DataReductionProxySettings::UpdateConfigValues() {
-  DCHECK(config_);
-  promo_allowed_ = config_->promo_allowed();
-}
-
 void DataReductionProxySettings::InitDataReductionProxySettings(
     const std::string& data_reduction_proxy_enabled_pref_name,
     PrefService* prefs,
@@ -100,9 +93,14 @@ void DataReductionProxySettings::InitDataReductionProxySettings(
   data_reduction_proxy_service_ = std::move(data_reduction_proxy_service);
   data_reduction_proxy_service_->AddObserver(this);
   InitPrefMembers();
-  UpdateConfigValues();
   RecordDataReductionInit();
   data_reduction_proxy_service_->InitializeLoFiPrefs();
+
+  if (base::FeatureList::IsEnabled(features::kDataReductionSiteBreakdown) &&
+      spdy_proxy_auth_enabled_.GetValue()) {
+    data_reduction_proxy_service_->compression_stats()
+        ->SetDataUsageReportingEnabled(true);
+  }
 }
 
 void DataReductionProxySettings::OnServiceInitialized() {
@@ -139,9 +137,14 @@ bool DataReductionProxySettings::IsDataReductionProxyManaged() {
 
 void DataReductionProxySettings::SetDataReductionProxyEnabled(bool enabled) {
   DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(data_reduction_proxy_service_->compression_stats());
   if (spdy_proxy_auth_enabled_.GetValue() != enabled) {
     spdy_proxy_auth_enabled_.SetValue(enabled);
     OnProxyEnabledPrefChange();
+    if (base::FeatureList::IsEnabled(features::kDataReductionSiteBreakdown)) {
+      data_reduction_proxy_service_->compression_stats()
+          ->SetDataUsageReportingEnabled(enabled);
+    }
   }
 }
 
@@ -150,6 +153,13 @@ int64_t DataReductionProxySettings::GetDataReductionLastUpdateTime() {
   DCHECK(data_reduction_proxy_service_->compression_stats());
   return
       data_reduction_proxy_service_->compression_stats()->GetLastUpdateTime();
+}
+
+void DataReductionProxySettings::ClearDataSavingStatistics() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(data_reduction_proxy_service_->compression_stats());
+  data_reduction_proxy_service_->compression_stats()
+      ->ClearDataSavingStatistics();
 }
 
 int64_t DataReductionProxySettings::GetTotalHttpContentLengthSaved() {
@@ -389,17 +399,6 @@ void DataReductionProxySettings::GetContentLengths(
 
   data_reduction_proxy_service_->compression_stats()->GetContentLengths(
       days, original_content_length, received_content_length, last_update_time);
-}
-
-bool DataReductionProxySettings::UpdateDataSavings(
-    const std::string& data_usage_host,
-    int64_t data_used,
-    int64_t original_size) {
-  if (!IsDataReductionProxyEnabled())
-    return false;
-  data_reduction_proxy_service_->compression_stats()->UpdateDataSavings(
-      data_usage_host, data_used, original_size);
-  return true;
 }
 
 }  // namespace data_reduction_proxy

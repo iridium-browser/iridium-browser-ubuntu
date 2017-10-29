@@ -27,49 +27,66 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+SDK.PaintProfilerModel = class extends SDK.SDKModel {
+  /**
+   * @param {!SDK.Target} target
+   */
+  constructor(target) {
+    super(target);
+    this._layerTreeAgent = target.layerTreeAgent();
+  }
+
+  /**
+   * @param {!Array.<!SDK.PictureFragment>} fragments
+   * @return {!Promise<?SDK.PaintProfilerSnapshot>}
+   */
+  async loadSnapshotFromFragments(fragments) {
+    var snapshotId = await this._layerTreeAgent.loadSnapshot(fragments);
+    return snapshotId && new SDK.PaintProfilerSnapshot(this, snapshotId);
+  }
+
+  /**
+   * @param {string} encodedPicture
+   * @return {!Promise<?SDK.PaintProfilerSnapshot>}
+   */
+  loadSnapshot(encodedPicture) {
+    var fragment = {x: 0, y: 0, picture: encodedPicture};
+    return this.loadSnapshotFromFragments([fragment]);
+  }
+
+  /**
+   * @param {string} layerId
+   * @return {!Promise<?SDK.PaintProfilerSnapshot>}
+   */
+  async makeSnapshot(layerId) {
+    var snapshotId = await this._layerTreeAgent.makeSnapshot(layerId);
+    return snapshotId && new SDK.PaintProfilerSnapshot(this, snapshotId);
+  }
+};
+
+SDK.SDKModel.register(SDK.PaintProfilerModel, SDK.Target.Capability.DOM, false);
+
 /**
  * @typedef {!{x: number, y: number, picture: string}}
  */
 SDK.PictureFragment;
 
-/**
- * @unrestricted
- */
 SDK.PaintProfilerSnapshot = class {
   /**
-   * @param {!SDK.Target} target
+   * @param {!SDK.PaintProfilerModel} paintProfilerModel
    * @param {string} snapshotId
    */
-  constructor(target, snapshotId) {
-    this._target = target;
+  constructor(paintProfilerModel, snapshotId) {
+    this._paintProfilerModel = paintProfilerModel;
     this._id = snapshotId;
     this._refCount = 1;
-  }
-
-  /**
-   * @param {!SDK.Target} target
-   * @param {!Array.<!SDK.PictureFragment>} fragments
-   * @return {!Promise<?SDK.PaintProfilerSnapshot>}
-   */
-  static loadFromFragments(target, fragments) {
-    return target.layerTreeAgent().loadSnapshot(
-        fragments, (error, snapshotId) => error ? null : new SDK.PaintProfilerSnapshot(target, snapshotId));
-  }
-
-  /**
-   * @param {!SDK.Target} target
-   * @param {string} encodedPicture
-   * @return {!Promise<?SDK.PaintProfilerSnapshot>}
-   */
-  static load(target, encodedPicture) {
-    var fragment = {x: 0, y: 0, picture: encodedPicture};
-    return SDK.PaintProfilerSnapshot.loadFromFragments(target, [fragment]);
   }
 
   release() {
     console.assert(this._refCount > 0, 'release is already called on the object');
     if (!--this._refCount)
-      this._target.layerTreeAgent().releaseSnapshot(this._id);
+      this._paintProfilerModel._layerTreeAgent.releaseSnapshot(this._id);
   }
 
   addReference() {
@@ -78,53 +95,31 @@ SDK.PaintProfilerSnapshot = class {
   }
 
   /**
-   * @return {!SDK.Target}
-   */
-  target() {
-    return this._target;
-  }
-
-  /**
-   * @param {?number} firstStep
-   * @param {?number} lastStep
-   * @param {?number} scale
+   * @param {number=} scale
+   * @param {number=} firstStep
+   * @param {number=} lastStep
    * @return {!Promise<?string>}
    */
-  replay(firstStep, lastStep, scale) {
-    return this._target.layerTreeAgent().replaySnapshot(
-        this._id, firstStep || undefined, lastStep || undefined, scale || 1.0, (error, str) => error ? null : str);
+  replay(scale, firstStep, lastStep) {
+    return this._paintProfilerModel._layerTreeAgent.replaySnapshot(this._id, firstStep, lastStep, scale || 1.0);
   }
 
   /**
    * @param {?Protocol.DOM.Rect} clipRect
-   * @param {function(!Array.<!Protocol.LayerTree.PaintProfile>=)} callback
+   * @return {!Promise<?Array<!Protocol.LayerTree.PaintProfile>>}
    */
-  profile(clipRect, callback) {
-    var wrappedCallback =
-        Protocol.inspectorBackend.wrapClientCallback(callback, 'Protocol.LayerTree.profileSnapshot(): ');
-    this._target.layerTreeAgent().profileSnapshot(this._id, 5, 1, clipRect || undefined, wrappedCallback);
+  profile(clipRect) {
+    return this._paintProfilerModel._layerTreeAgent.profileSnapshot(this._id, 5, 1, clipRect || undefined);
   }
 
   /**
    * @return {!Promise<?Array<!SDK.PaintProfilerLogItem>>}
    */
-  commandLog() {
-    return this._target.layerTreeAgent().snapshotCommandLog(this._id, processLog);
-
-    /**
-     * @param {?string} error
-     * @param {?Array<!Object>} log
-     */
-    function processLog(error, log) {
-      if (error)
-        return null;
-      return log.map(
-          (entry, index) => new SDK.PaintProfilerLogItem(
-              /** @type {!SDK.RawPaintProfilerLogItem} */ (entry), index));
-    }
+  async commandLog() {
+    var log = await this._paintProfilerModel._layerTreeAgent.snapshotCommandLog(this._id);
+    return log && log.map((entry, index) => new SDK.PaintProfilerLogItem(entry, index));
   }
 };
-
 
 /**
  * @typedef {!{method: string, params: ?Object<string, *>}}

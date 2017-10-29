@@ -7,14 +7,34 @@
 
 #import <Foundation/Foundation.h>
 
+#import "cwv_export.h"
+
+@class CWVPreferences;
+@class CWVUserContentController;
 @class CWVWebsiteDataStore;
 
 // Configuration used for creation of a CWVWebView.
-@interface CWVWebViewConfiguration : NSObject<NSCopying>
+CWV_EXPORT
+@interface CWVWebViewConfiguration : NSObject
 
-// Data store defining persistance of website data. Default is
-// [CWVWebsiteDataStore defaultDataStore].
-@property(nonatomic, strong, nonnull) CWVWebsiteDataStore* websiteDataStore;
+// Configuration with persistent data store which stores all data on disk.
++ (instancetype)defaultConfiguration;
+
+// Configuration with ephemeral data store that neven stores data on disk.
++ (instancetype)incognitoConfiguration;
+
+- (instancetype)init NS_UNAVAILABLE;
+
+// The preferences object associated with this web view configuration.
+@property(nonatomic, readonly) CWVPreferences* preferences;
+
+// The user content controller to associate with web views created using this
+// configuration.
+@property(nonatomic, readonly) CWVUserContentController* userContentController;
+
+// YES if it is a configuration with persistent data store which stores all data
+// on disk.
+@property(nonatomic, readonly, getter=isPersistent) BOOL persistent;
 
 @end
 

@@ -15,13 +15,16 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,8 +39,9 @@ var (
 	useCallgrind    = flag.Bool("callgrind", false, "If true, run code under valgrind to generate callgrind traces.")
 	useGDB          = flag.Bool("gdb", false, "If true, run BoringSSL code under gdb")
 	useSDE          = flag.Bool("sde", false, "If true, run BoringSSL code under Intel's SDE for each supported chip")
+	sdePath         = flag.String("sde-path", "sde", "The path to find the sde binary.")
 	buildDir        = flag.String("build-dir", "build", "The build directory to run the tests from.")
-	numWorkers      = flag.Int("num-workers", 1, "Runs the given number of workers when testing.")
+	numWorkers      = flag.Int("num-workers", runtime.NumCPU(), "Runs the given number of workers when testing.")
 	jsonOutput      = flag.String("json-output", "", "The file to output JSON results to.")
 	mallocTest      = flag.Int64("malloc-test", -1, "If non-negative, run each test with each malloc in turn failing from the given number onwards.")
 	mallocTestDebug = flag.Bool("malloc-test-debug", false, "If true, ask each test to abort rather than fail a malloc. This can be used with a specific value for --malloc-test to identity the malloc failing that is causing problems.")
@@ -158,9 +162,18 @@ func gdbOf(path string, args ...string) *exec.Cmd {
 }
 
 func sdeOf(cpu, path string, args ...string) *exec.Cmd {
-	sdeArgs := []string{"-" + cpu, "--", path}
+	sdeArgs := []string{"-" + cpu}
+	// The kernel's vdso code for gettimeofday sometimes uses the RDTSCP
+	// instruction. Although SDE has a -chip_check_vsyscall flag that
+	// excludes such code by default, it does not seem to work. Instead,
+	// pass the -chip_check_exe_only flag which retains test coverage when
+	// statically linked and excludes the vdso.
+	if cpu == "p4p" || cpu == "pnr" || cpu == "mrm" || cpu == "slt" {
+		sdeArgs = append(sdeArgs, "-chip_check_exe_only")
+	}
+	sdeArgs = append(sdeArgs, "--", path)
 	sdeArgs = append(sdeArgs, args...)
-	return exec.Command("sde", sdeArgs...)
+	return exec.Command(*sdePath, sdeArgs...)
 }
 
 type moreMallocsError struct{}
@@ -245,13 +258,13 @@ func runTest(test test) (bool, error) {
 	}
 }
 
-// shortTestName returns the short name of a test. Except for evp_test, it
-// assumes that any argument which ends in .txt is a path to a data file and not
-// relevant to the test's uniqueness.
+// shortTestName returns the short name of a test. Except for evp_test and
+// cipher_test, it assumes that any argument which ends in .txt is a path to a
+// data file and not relevant to the test's uniqueness.
 func shortTestName(test test) string {
 	var args []string
 	for _, arg := range test.args {
-		if test.args[0] == "crypto/evp/evp_test" || !strings.HasSuffix(arg, ".txt") {
+		if test.args[0] == "crypto/evp/evp_test" || test.args[0] == "crypto/cipher_extra/cipher_test" || test.args[0] == "crypto/cipher_extra/aead_test" || !strings.HasSuffix(arg, ".txt") || strings.HasPrefix(arg, "--gtest_filter=") {
 			args = append(args, arg)
 		}
 	}
@@ -307,6 +320,80 @@ func (t test) cpuMsg() string {
 	return fmt.Sprintf(" (for CPU %q)", t.cpu)
 }
 
+func (t test) getGTestShards() ([]test, error) {
+	if *numWorkers == 1 || len(t.args) != 1 {
+		return []test{t}, nil
+	}
+
+	// Only shard the three GTest-based tests.
+	if t.args[0] != "crypto/crypto_test" && t.args[0] != "ssl/ssl_test" && t.args[0] != "decrepit/decrepit_test" {
+		return []test{t}, nil
+	}
+
+	prog := path.Join(*buildDir, t.args[0])
+	cmd := exec.Command(prog, "--gtest_list_tests")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	if err := cmd.Wait(); err != nil {
+		return nil, err
+	}
+
+	var group string
+	var tests []string
+	scanner := bufio.NewScanner(&stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Remove the parameter comment and trailing space.
+		if idx := strings.Index(line, "#"); idx >= 0 {
+			line = line[:idx]
+		}
+		line = strings.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+
+		if line[len(line)-1] == '.' {
+			group = line
+			continue
+		}
+
+		if len(group) == 0 {
+			return nil, fmt.Errorf("found test case %q without group", line)
+		}
+		tests = append(tests, group+line)
+	}
+
+	const testsPerShard = 20
+	if len(tests) <= testsPerShard {
+		return []test{t}, nil
+	}
+
+	// Slow tests which process large test vector files tend to be grouped
+	// together, so shuffle the order.
+	shuffled := make([]string, len(tests))
+	perm := rand.Perm(len(tests))
+	for i, j := range perm {
+		shuffled[i] = tests[j]
+	}
+
+	var shards []test
+	for i := 0; i < len(shuffled); i += testsPerShard {
+		n := len(shuffled) - i
+		if n > testsPerShard {
+			n = testsPerShard
+		}
+		shard := t
+		shard.args = []string{shard.args[0], "--gtest_filter=" + strings.Join(shuffled[i:i+n], ":")}
+		shards = append(shards, shard)
+	}
+
+	return shards, nil
+}
+
 func main() {
 	flag.Parse()
 	setWorkingDirectory()
@@ -329,13 +416,22 @@ func main() {
 	go func() {
 		for _, test := range testCases {
 			if *useSDE {
+				// SDE generates plenty of tasks and gets slower
+				// with additional sharding.
 				for _, cpu := range sdeCPUs {
 					testForCPU := test
 					testForCPU.cpu = cpu
 					tests <- testForCPU
 				}
 			} else {
-				tests <- test
+				shards, err := test.getGTestShards()
+				if err != nil {
+					fmt.Printf("Error listing tests: %s\n", err)
+					os.Exit(1)
+				}
+				for _, shard := range shards {
+					tests <- shard
+				}
 			}
 		}
 		close(tests)
@@ -374,7 +470,7 @@ func main() {
 	if len(failed) > 0 {
 		fmt.Printf("\n%d of %d tests failed:\n", len(failed), len(testCases))
 		for _, test := range failed {
-			fmt.Printf("\t%s%s\n", strings.Join(test.args, ""), test.cpuMsg())
+			fmt.Printf("\t%s%s\n", strings.Join(test.args, " "), test.cpuMsg())
 		}
 		os.Exit(1)
 	}

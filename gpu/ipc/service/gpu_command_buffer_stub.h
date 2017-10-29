@@ -21,21 +21,25 @@
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
-#include "gpu/command_buffer/service/command_executor.h"
 #include "gpu/command_buffer/service/context_group.h"
+#include "gpu/command_buffer/service/gles2_cmd_decoder.h"
+#include "gpu/command_buffer/service/sequence_id.h"
 #include "gpu/gpu_export.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "gpu/ipc/service/gpu_memory_manager.h"
 #include "gpu/ipc/service/image_transport_surface_delegate.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
-#include "ui/events/latency_info.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/swap_result.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gpu_preference.h"
+#include "ui/latency/latency_info.h"
 #include "url/gurl.h"
+
+struct GPUCreateCommandBufferConfig;
+struct GpuCommandBufferMsg_CreateImage_Params;
 
 namespace gl {
 class GLShareGroup;
@@ -44,20 +48,15 @@ class GLShareGroup;
 namespace gpu {
 struct Mailbox;
 struct SyncToken;
-class SyncPointClient;
-}
-
-struct GPUCreateCommandBufferConfig;
-struct GpuCommandBufferMsg_CreateImage_Params;
-
-namespace gpu {
-
-class GpuChannel;
 struct WaitForCommandState;
+class GpuChannel;
+class SyncPointClientState;
 
 class GPU_EXPORT GpuCommandBufferStub
     : public IPC::Listener,
       public IPC::Sender,
+      public CommandBufferServiceClient,
+      public gles2::GLES2DecoderClient,
       public ImageTransportSurfaceDelegate,
       public base::SupportsWeakPtr<GpuCommandBufferStub> {
  public:
@@ -73,12 +72,18 @@ class GPU_EXPORT GpuCommandBufferStub
   typedef base::Callback<void(const std::vector<ui::LatencyInfo>&)>
       LatencyInfoCallback;
 
+  // This must leave the GL context associated with the newly-created
+  // GpuCommandBufferStub current, so the GpuChannel can initialize
+  // the gpu::Capabilities.
   static std::unique_ptr<GpuCommandBufferStub> Create(
-    GpuChannel* channel,
-    GpuCommandBufferStub* share_group,
-    const GPUCreateCommandBufferConfig& init_params,
-    int32_t route_id,
-    std::unique_ptr<base::SharedMemory> shared_state_shm);
+      GpuChannel* channel,
+      GpuCommandBufferStub* share_group,
+      const GPUCreateCommandBufferConfig& init_params,
+      CommandBufferId command_buffer_id,
+      SequenceId sequence_id,
+      int32_t stream_id,
+      int32_t route_id,
+      std::unique_ptr<base::SharedMemory> shared_state_shm);
 
   ~GpuCommandBufferStub() override;
 
@@ -87,6 +92,18 @@ class GPU_EXPORT GpuCommandBufferStub
 
   // IPC::Sender implementation:
   bool Send(IPC::Message* msg) override;
+
+  // CommandBufferServiceClient implementation:
+  CommandBatchProcessedResult OnCommandBatchProcessed() override;
+  void OnParseError() override;
+
+  // GLES2DecoderClient implementation:
+  void OnConsoleMessage(int32_t id, const std::string& message) override;
+  void CacheShader(const std::string& key, const std::string& shader) override;
+  void OnFenceSyncRelease(uint64_t release) override;
+  bool OnWaitSyncToken(const SyncToken& sync_token) override;
+  void OnDescheduleUntilFinished() override;
+  void OnRescheduleAfterFinished() override;
 
 // ImageTransportSurfaceDelegate implementation:
 #if defined(OS_WIN)
@@ -112,19 +129,14 @@ class GPU_EXPORT GpuCommandBufferStub
   bool HasUnprocessedCommands();
 
   gles2::GLES2Decoder* decoder() const { return decoder_.get(); }
-  CommandExecutor* scheduler() const { return executor_.get(); }
   GpuChannel* channel() const { return channel_; }
 
   // Unique command buffer ID for this command buffer stub.
   CommandBufferId command_buffer_id() const { return command_buffer_id_; }
 
-  // Identifies the stream for this command buffer.
+  SequenceId sequence_id() const { return sequence_id_; }
+
   int32_t stream_id() const { return stream_id_; }
-
-  // Sends a message to the console.
-  void SendConsoleMessage(int32_t id, const std::string& message);
-
-  void SendCachedShader(const std::string& key, const std::string& shader);
 
   gl::GLSurface* surface() const { return surface_.get(); }
 
@@ -136,6 +148,9 @@ class GPU_EXPORT GpuCommandBufferStub
  private:
   GpuCommandBufferStub(GpuChannel* channel,
                        const GPUCreateCommandBufferConfig& init_params,
+                       CommandBufferId command_buffer_id,
+                       SequenceId sequence_id,
+                       int32_t stream_id,
                        int32_t route_id);
 
   bool Initialize(GpuCommandBufferStub* share_group,
@@ -149,25 +164,26 @@ class GPU_EXPORT GpuCommandBufferStub
   bool MakeCurrent();
 
   // Message handlers:
-  void OnSetGetBuffer(int32_t shm_id, IPC::Message* reply_message);
+  void OnSetGetBuffer(int32_t shm_id);
   void OnTakeFrontBuffer(const Mailbox& mailbox);
   void OnReturnFrontBuffer(const Mailbox& mailbox, bool is_lost);
   void OnGetState(IPC::Message* reply_message);
   void OnWaitForTokenInRange(int32_t start,
                              int32_t end,
                              IPC::Message* reply_message);
-  void OnWaitForGetOffsetInRange(int32_t start,
+  void OnWaitForGetOffsetInRange(uint32_t set_get_buffer_count,
+                                 int32_t start,
                                  int32_t end,
                                  IPC::Message* reply_message);
   void OnAsyncFlush(int32_t put_offset,
                     uint32_t flush_count,
-                    const std::vector<ui::LatencyInfo>& latency_info);
+                    const std::vector<ui::LatencyInfo>& latency_info,
+                    const std::vector<SyncToken>& sync_token_fences);
   void OnRegisterTransferBuffer(int32_t id,
                                 base::SharedMemoryHandle transfer_buffer,
                                 uint32_t size);
   void OnDestroyTransferBuffer(int32_t id);
   void OnGetTransferBuffer(int32_t id, IPC::Message* reply_message);
-  bool OnWaitSyncToken(const SyncToken& sync_token);
 
   void OnEnsureBackbuffer();
 
@@ -175,24 +191,15 @@ class GPU_EXPORT GpuCommandBufferStub
   void OnSignalAck(uint32_t id);
   void OnSignalQuery(uint32_t query, uint32_t id);
 
-  void OnFenceSyncRelease(uint64_t release);
   void OnWaitSyncTokenCompleted(const SyncToken& sync_token);
-
-  void OnDescheduleUntilFinished();
-  void OnRescheduleAfterFinished();
 
   void OnCreateImage(const GpuCommandBufferMsg_CreateImage_Params& params);
   void OnDestroyImage(int32_t id);
   void OnCreateStreamTexture(uint32_t texture_id,
                              int32_t stream_id,
                              bool* succeeded);
-  void OnCommandProcessed();
-  void OnParseError();
 
   void ReportState();
-
-  // Wrapper for CommandExecutor::PutChanged that sets the crash report URL.
-  void PutChanged();
 
   // Poll the command buffer to execute work.
   void PollWork();
@@ -219,14 +226,14 @@ class GPU_EXPORT GpuCommandBufferStub
   const SurfaceHandle surface_handle_;
   bool use_virtualized_gl_context_;
   const CommandBufferId command_buffer_id_;
+  const SequenceId sequence_id_;
   const int32_t stream_id_;
   const int32_t route_id_;
   uint32_t last_flush_count_;
 
   std::unique_ptr<CommandBufferService> command_buffer_;
   std::unique_ptr<gles2::GLES2Decoder> decoder_;
-  std::unique_ptr<CommandExecutor> executor_;
-  std::unique_ptr<SyncPointClient> sync_point_client_;
+  scoped_refptr<SyncPointClientState> sync_point_client_state_;
   scoped_refptr<gl::GLSurface> surface_;
   scoped_refptr<gl::GLShareGroup> share_group_;
 
@@ -245,6 +252,7 @@ class GPU_EXPORT GpuCommandBufferStub
 
   std::unique_ptr<WaitForCommandState> wait_for_token_;
   std::unique_ptr<WaitForCommandState> wait_for_get_offset_;
+  uint32_t wait_set_get_buffer_count_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuCommandBufferStub);
 };

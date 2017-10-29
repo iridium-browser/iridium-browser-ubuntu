@@ -36,19 +36,6 @@ struct GrContextOptions {
     /** some gpus have problems with partial writes of the rendertarget */
     bool fUseDrawInsteadOfPartialRenderTargetWrite = false;
 
-    /** The GrContext operates in immediate mode. It will issue all draws to the backend API
-        immediately. Intended to ease debugging. */
-    bool fImmediateMode = false;
-
-    /** For debugging purposes turn each GrDrawOp's bounds into a clip rect. This is used to
-        verify that the clip bounds are conservative. */
-    bool fClipDrawOpsToBounds = false;
-
-    /** For debugging, override the default maximum look-back or look-ahead window for GrOp
-        combining. */
-    int fMaxOpCombineLookback = -1;
-    int fMaxOpCombineLookahead = -1;
-
     /** Force us to do all swizzling manually in the shader and don't rely on extensions to do
         swizzling. */
     bool fUseShaderSwizzling = false;
@@ -88,6 +75,11 @@ struct GrContextOptions {
     bool fSuppressPathRendering = false;
 
     /**
+     * Render everything in wireframe
+     */
+    bool fWireframeMode = false;
+
+    /**
      * Allows the client to include or exclude specific GPU path renderers.
      */
     enum class GpuPathRenderers {
@@ -98,15 +90,30 @@ struct GrContextOptions {
         kAAHairline        = 1 << 3,
         kAAConvex          = 1 << 4,
         kAALinearizing     = 1 << 5,
-        kPLS               = 1 << 6,
-        kDistanceField     = 1 << 7,
+        kSmall             = 1 << 6,
+        kCoverageCounting  = 1 << 7,
         kTessellating      = 1 << 8,
         kDefault           = 1 << 9,
 
-        kAll               = kDefault | (kDefault - 1)
+        // Temporarily disabling CCPR by default until it has had a time to soak.
+        kAll               = (kDefault | (kDefault - 1)) & ~kCoverageCounting,
+
+        // For legacy. To be removed when updated in Android.
+        kDistanceField     = kSmall
     };
 
     GpuPathRenderers fGpuPathRenderers = GpuPathRenderers::kAll;
+
+    /**
+     * The maximum size of cache textures used for Skia's Glyph cache.
+     */
+    float fGlyphCacheTextureMaximumBytes = 2048 * 1024 * 4;
+
+    /**
+     * Bugs on certain drivers cause stencil buffers to leak. This flag causes Skia to avoid
+     * allocating stencil buffers and use alternate rasterization paths, avoiding the leak.
+     */
+    bool fAvoidStencilBuffers = false;
 };
 
 GR_MAKE_BITFIELD_CLASS_OPS(GrContextOptions::GpuPathRenderers)

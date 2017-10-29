@@ -12,6 +12,7 @@
 #include "SkRefCnt.h"
 
 class GrDrawOp;
+class GrPaint;
 class GrShaderCaps;
 class GrStyle;
 class SkMatrix;
@@ -24,26 +25,26 @@ class SkStrokeRec;
  */
 class GrOvalOpFactory {
 public:
-    static std::unique_ptr<GrDrawOp> MakeOvalOp(GrColor,
-                                                const SkMatrix& viewMatrix,
+    static std::unique_ptr<GrDrawOp> MakeOvalOp(GrPaint&&,
+                                                const SkMatrix&,
                                                 const SkRect& oval,
-                                                const SkStrokeRec& stroke,
-                                                const GrShaderCaps* shaderCaps);
-    static std::unique_ptr<GrDrawOp> MakeRRectOp(GrColor,
-                                                 bool needsDistance,
-                                                 const SkMatrix& viewMatrix,
-                                                 const SkRRect& rrect,
-                                                 const SkStrokeRec& stroke,
-                                                 const GrShaderCaps* shaderCaps);
+                                                const SkStrokeRec&,
+                                                const GrShaderCaps*);
 
-    static std::unique_ptr<GrDrawOp> MakeArcOp(GrColor,
-                                               const SkMatrix& viewMatrix,
+    static std::unique_ptr<GrDrawOp> MakeRRectOp(GrPaint&&,
+                                                 const SkMatrix&,
+                                                 const SkRRect&,
+                                                 const SkStrokeRec&,
+                                                 const GrShaderCaps*);
+
+    static std::unique_ptr<GrDrawOp> MakeArcOp(GrPaint&&,
+                                               const SkMatrix&,
                                                const SkRect& oval,
                                                SkScalar startAngle,
                                                SkScalar sweepAngle,
                                                bool useCenter,
                                                const GrStyle&,
-                                               const GrShaderCaps* shaderCaps);
+                                               const GrShaderCaps*);
 };
 
 #endif  // GrOvalOpFactory_DEFINED

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "components/sessions/ios/ios_live_tab.h"
+#include "base/memory/ptr_util.h"
 #include "ios/web/public/navigation_manager.h"
 
 namespace {
@@ -17,7 +18,7 @@ std::string IOSLiveTab::user_agent_override_;
 IOSLiveTab* IOSLiveTab::GetForWebState(web::WebState* web_state) {
   if (!web_state->GetUserData(kIOSLiveTabWebStateUserDataKey)) {
     web_state->SetUserData(kIOSLiveTabWebStateUserDataKey,
-                           new IOSLiveTab(web_state));
+                           base::WrapUnique(new IOSLiveTab(web_state)));
   }
 
   return static_cast<IOSLiveTab*>(
@@ -33,7 +34,7 @@ bool IOSLiveTab::IsInitialBlankNavigation() {
 }
 
 int IOSLiveTab::GetCurrentEntryIndex() {
-  return navigation_manager()->GetCurrentItemIndex();
+  return navigation_manager()->GetLastCommittedItemIndex();
 }
 
 int IOSLiveTab::GetPendingEntryIndex() {
@@ -52,10 +53,6 @@ sessions::SerializedNavigationEntry IOSLiveTab::GetPendingEntry() {
 
 int IOSLiveTab::GetEntryCount() {
   return navigation_manager()->GetItemCount();
-}
-
-void IOSLiveTab::LoadIfNecessary() {
-  navigation_manager()->LoadIfNecessary();
 }
 
 const std::string& IOSLiveTab::GetUserAgentOverride() const {

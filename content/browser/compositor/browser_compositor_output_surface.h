@@ -6,7 +6,6 @@
 #define CONTENT_BROWSER_COMPOSITOR_BROWSER_COMPOSITOR_OUTPUT_SURFACE_H_
 
 #include "base/macros.h"
-#include "base/threading/non_thread_safe.h"
 #include "build/build_config.h"
 #include "cc/output/output_surface.h"
 #include "content/common/content_export.h"
@@ -15,7 +14,7 @@ namespace cc {
 class SoftwareOutputDevice;
 }
 
-namespace display_compositor {
+namespace viz {
 class CompositorOverlayCandidateValidator;
 }
 
@@ -51,9 +50,9 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
  protected:
   // Constructor used by the accelerated implementation.
   BrowserCompositorOutputSurface(
-      scoped_refptr<cc::ContextProvider> context,
+      scoped_refptr<viz::ContextProvider> context,
       const UpdateVSyncParametersCallback& update_vsync_parameters_callback,
-      std::unique_ptr<display_compositor::CompositorOverlayCandidateValidator>
+      std::unique_ptr<viz::CompositorOverlayCandidateValidator>
           overlay_candidate_validator);
 
   // Constructor used by the software implementation.
@@ -70,7 +69,7 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
   ReflectorImpl* reflector_;
 
  private:
-  std::unique_ptr<display_compositor::CompositorOverlayCandidateValidator>
+  std::unique_ptr<viz::CompositorOverlayCandidateValidator>
       overlay_candidate_validator_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserCompositorOutputSurface);

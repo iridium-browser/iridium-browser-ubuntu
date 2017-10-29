@@ -23,16 +23,16 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
+#include <objbase.h>
 #include <wpcapi.h>
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/singleton.h"
 #include "base/win/scoped_comptr.h"
-#include "base/win/windows_version.h"
 #endif  // OS_WIN
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/android/chrome_application.h"
+#include "chrome/browser/android/partner_browser_customizations.h"
 #endif  // defined(OS_ANDROID)
 
 using content::BrowserThread;
@@ -76,10 +76,6 @@ class PlatformParentalControlsValue {
     // Since we can potentially block, make sure the thread is okay with this.
     base::ThreadRestrictions::AssertIOAllowed();
 
-    // Query this info on Windows 7 and above.
-    if (base::win::GetVersion() < base::win::VERSION_WIN7)
-      return false;
-
     ThreadType thread_type = ThreadType::BLOCKING;
     if (BrowserThread::IsThreadInitialized(BrowserThread::UI) &&
         content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
@@ -102,13 +98,13 @@ class PlatformParentalControlsValue {
   // is enabled.
   static bool IsParentalControlActivityLoggingOnImpl() {
     base::win::ScopedComPtr<IWindowsParentalControlsCore> parent_controls;
-    HRESULT hr = parent_controls.CreateInstance(
-        __uuidof(WindowsParentalControls));
+    HRESULT hr = ::CoCreateInstance(__uuidof(WindowsParentalControls), nullptr,
+                                    CLSCTX_ALL, IID_PPV_ARGS(&parent_controls));
     if (FAILED(hr))
       return false;
 
     base::win::ScopedComPtr<IWPCSettings> settings;
-    hr = parent_controls->GetUserSettings(nullptr, settings.Receive());
+    hr = parent_controls->GetUserSettings(nullptr, settings.GetAddressOf());
     if (FAILED(hr))
       return false;
 
@@ -198,13 +194,10 @@ bool IncognitoModePrefs::CanOpenBrowser(Profile* profile) {
 #if defined(OS_WIN)
 // static
 void IncognitoModePrefs::InitializePlatformParentalControls() {
-  // TODO(fdoray): This task uses COM. Add the WithCom() trait once supported.
-  // crbug.com/662122
-  base::PostTaskWithTraits(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::USER_VISIBLE),
-      base::Bind(
-          base::IgnoreResult(&PlatformParentalControlsValue::GetInstance)));
+  base::CreateCOMSTATaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::USER_VISIBLE})
+      ->PostTask(FROM_HERE, base::Bind(base::IgnoreResult(
+                                &PlatformParentalControlsValue::GetInstance)));
 }
 #endif
 
@@ -213,7 +206,7 @@ bool IncognitoModePrefs::ArePlatformParentalControlsEnabled() {
 #if defined(OS_WIN)
   return PlatformParentalControlsValue::GetInstance()->is_enabled();
 #elif defined(OS_ANDROID)
-  return chrome::android::ChromeApplication::AreParentalControlsEnabled();
+  return chrome::android::PartnerBrowserCustomizations::IsIncognitoDisabled();
 #else
   return false;
 #endif

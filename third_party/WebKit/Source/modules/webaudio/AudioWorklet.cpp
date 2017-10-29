@@ -4,48 +4,42 @@
 
 #include "modules/webaudio/AudioWorklet.h"
 
-#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
+#include "core/workers/WorkerClients.h"
 #include "modules/webaudio/AudioWorkletMessagingProxy.h"
 #include "modules/webaudio/AudioWorkletThread.h"
 
 namespace blink {
 
-AudioWorklet* AudioWorklet::create(LocalFrame* frame) {
+AudioWorklet* AudioWorklet::Create(LocalFrame* frame) {
   return new AudioWorklet(frame);
 }
 
-AudioWorklet::AudioWorklet(LocalFrame* frame)
-    : Worklet(frame), m_workletMessagingProxy(nullptr) {}
+AudioWorklet::AudioWorklet(LocalFrame* frame) : Worklet(frame) {}
 
-AudioWorklet::~AudioWorklet() {
-  if (m_workletMessagingProxy)
-    m_workletMessagingProxy->parentObjectDestroyed();
+AudioWorklet::~AudioWorklet() {}
+
+bool AudioWorklet::NeedsToCreateGlobalScope() {
+  // For now, create only one global scope per document.
+  // TODO(nhiroki): Revisit this later.
+  return GetNumberOfGlobalScopes() == 0;
 }
 
-void AudioWorklet::initialize() {
-  AudioWorkletThread::ensureSharedBackingThread();
+WorkletGlobalScopeProxy* AudioWorklet::CreateGlobalScope() {
+  DCHECK(NeedsToCreateGlobalScope());
+  AudioWorkletThread::EnsureSharedBackingThread();
 
-  DCHECK(!m_workletMessagingProxy);
-  DCHECK(getExecutionContext());
-
-  m_workletMessagingProxy =
-      new AudioWorkletMessagingProxy(getExecutionContext());
-  m_workletMessagingProxy->initialize();
-}
-
-bool AudioWorklet::isInitialized() const {
-  return m_workletMessagingProxy;
-}
-
-WorkletGlobalScopeProxy* AudioWorklet::workletGlobalScopeProxy() const {
-  DCHECK(m_workletMessagingProxy);
-  return m_workletMessagingProxy;
+  WorkerClients* worker_clients = WorkerClients::Create();
+  AudioWorkletMessagingProxy* proxy =
+      new AudioWorkletMessagingProxy(GetExecutionContext(), worker_clients);
+  proxy->Initialize();
+  return proxy;
 }
 
 DEFINE_TRACE(AudioWorklet) {
-  Worklet::trace(visitor);
+  Worklet::Trace(visitor);
 }
 
 }  // namespace blink

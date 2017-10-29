@@ -68,6 +68,17 @@ public class WatcherImplTest extends MojoTestCase {
 
     private static class WatcherResult implements Callback {
         private int mResult = Integer.MIN_VALUE;
+        private MessagePipeHandle mReadPipe;
+
+        /**
+         * @param readPipe A MessagePipeHandle to read from when onResult triggers success.
+         */
+        public WatcherResult(MessagePipeHandle readPipe) {
+            mReadPipe = readPipe;
+        }
+        public WatcherResult() {
+            this(null);
+        }
 
         /**
          * @see Callback#onResult(int)
@@ -75,6 +86,10 @@ public class WatcherImplTest extends MojoTestCase {
         @Override
         public void onResult(int result) {
             this.mResult = result;
+
+            if (result == MojoResult.OK && mReadPipe != null) {
+                mReadPipe.readMessage(MessagePipeHandle.ReadFlags.NONE);
+            }
         }
 
         /**
@@ -93,7 +108,7 @@ public class WatcherImplTest extends MojoTestCase {
         // Checking a correct result.
         Pair<MessagePipeHandle, MessagePipeHandle> handles = mCore.createMessagePipe(null);
         addHandlePairToClose(handles);
-        final WatcherResult watcherResult = new WatcherResult();
+        final WatcherResult watcherResult = new WatcherResult(handles.first);
         assertEquals(Integer.MIN_VALUE, watcherResult.getResult());
 
         mWatcher.start(handles.first, Core.HandleSignals.READABLE, watcherResult);

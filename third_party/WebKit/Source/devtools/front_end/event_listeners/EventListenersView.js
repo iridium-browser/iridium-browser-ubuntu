@@ -9,13 +9,12 @@ EventListeners.EventListenersResult;
 /**
  * @unrestricted
  */
-EventListeners.EventListenersView = class {
+EventListeners.EventListenersView = class extends UI.VBox {
   /**
-   * @param {!Element} element
    * @param {function()} changeCallback
    */
-  constructor(element, changeCallback) {
-    this._element = element;
+  constructor(changeCallback) {
+    super();
     this._changeCallback = changeCallback;
     this._treeOutline = new UI.TreeOutlineInShadow();
     this._treeOutline.hideOverflow();
@@ -23,9 +22,9 @@ EventListeners.EventListenersView = class {
     this._treeOutline.registerRequiredCSS('event_listeners/eventListenersView.css');
     this._treeOutline.setComparator(EventListeners.EventListenersTreeElement.comparator);
     this._treeOutline.element.classList.add('monospace');
-    this._element.appendChild(this._treeOutline.element);
+    this.element.appendChild(this._treeOutline.element);
     this._emptyHolder = createElementWithClass('div', 'gray-info-message');
-    this._emptyHolder.textContent = Common.UIString('No Event Listeners');
+    this._emptyHolder.textContent = Common.UIString('No event listeners');
     this._linkifier = new Components.Linkifier();
     /** @type {!Map<string, !EventListeners.EventListenersTreeElement>} */
     this._treeItemMap = new Map();
@@ -50,18 +49,21 @@ EventListeners.EventListenersView = class {
    * @return {!Promise<undefined>}
    */
   _addObject(object) {
-    /** @type {?Array<!SDK.EventListener>} */
-    var eventListeners = null;
+    /** @type {!Array<!SDK.EventListener>} */
+    var eventListeners;
     /** @type {?EventListeners.FrameworkEventListenersObject}*/
     var frameworkEventListenersObject = null;
 
     var promises = [];
-    promises.push(object.eventListeners().then(storeEventListeners));
+    var domDebuggerModel = object.runtimeModel().target().model(SDK.DOMDebuggerModel);
+    // TODO(kozyatinskiy): figure out how this should work for |window| when there is no DOMDebugger.
+    if (domDebuggerModel)
+      promises.push(domDebuggerModel.eventListeners(object).then(storeEventListeners));
     promises.push(EventListeners.frameworkEventListeners(object).then(storeFrameworkEventListenersObject));
     return Promise.all(promises).then(markInternalEventListeners).then(addEventListeners.bind(this));
 
     /**
-     * @param {?Array<!SDK.EventListener>} result
+     * @param {!Array<!SDK.EventListener>} result
      */
     function storeEventListeners(result) {
       eventListeners = result;
@@ -78,7 +80,7 @@ EventListeners.EventListenersView = class {
      * @return {!Promise<undefined>}
      */
     function markInternalEventListeners() {
-      if (!eventListeners || !frameworkEventListenersObject.internalHandlers)
+      if (!frameworkEventListenersObject.internalHandlers)
         return Promise.resolve(undefined);
       return frameworkEventListenersObject.internalHandlers.object()
           .callFunctionJSONPromise(isInternalEventListener, eventListeners.map(handlerArgument))
@@ -188,7 +190,7 @@ EventListeners.EventListenersView = class {
       allHidden = allHidden && eventType.hidden;
     }
     if (allHidden && !this._emptyHolder.parentNode)
-      this._element.appendChild(this._emptyHolder);
+      this.element.appendChild(this._emptyHolder);
   }
 
   reset() {
@@ -267,7 +269,7 @@ EventListeners.ObjectEventListenerBar = class extends UI.TreeElement {
   onpopulate() {
     var properties = [];
     var eventListener = this._eventListener;
-    var runtimeModel = eventListener.target().runtimeModel;
+    var runtimeModel = eventListener.domDebuggerModel().runtimeModel();
     properties.push(runtimeModel.createRemotePropertyFromPrimitiveValue('useCapture', eventListener.useCapture()));
     properties.push(runtimeModel.createRemotePropertyFromPrimitiveValue('passive', eventListener.passive()));
     properties.push(runtimeModel.createRemotePropertyFromPrimitiveValue('once', eventListener.once()));

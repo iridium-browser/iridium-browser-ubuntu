@@ -17,7 +17,7 @@ namespace ui {
 namespace internal {
 class InputMethodDelegate;
 }
-class EventProcessor;
+class EventSink;
 }
 
 namespace views {
@@ -78,10 +78,10 @@ class WidgetTest : public ViewsTestBase {
   // initiated window resizes.
   gfx::Size GetNativeWidgetMinimumContentSize(Widget* widget);
 
-  // Return the event processor for |widget|. On aura platforms, this is an
+  // Return the event sink for |widget|. On aura platforms, this is an
   // aura::WindowEventDispatcher. Otherwise, it is a bridge to the OS event
-  // processor.
-  static ui::EventProcessor* GetEventProcessor(Widget* widget);
+  // sink.
+  static ui::EventSink* GetEventSink(Widget* widget);
 
   // Get the InputMethodDelegate, for setting on a Mock InputMethod in tests.
   static ui::internal::InputMethodDelegate* GetInputMethodDelegateForWidget(
@@ -175,6 +175,29 @@ class WidgetActivationWaiter : public WidgetObserver {
   bool active_;
 
   DISALLOW_COPY_AND_ASSIGN(WidgetActivationWaiter);
+};
+
+// Use in tests to provide functionality to observe the widget passed in the
+// constructor for the widget closing event.
+class WidgetClosingObserver : public WidgetObserver {
+ public:
+  explicit WidgetClosingObserver(Widget* widget);
+  ~WidgetClosingObserver() override;
+
+  // Returns immediately when |widget_| becomes NULL, otherwise a RunLoop is
+  // used until widget closing event is received.
+  void Wait();
+
+  bool widget_closed() const { return !widget_; }
+
+ private:
+  // views::WidgetObserver override:
+  void OnWidgetClosing(Widget* widget) override;
+
+  Widget* widget_;
+  base::RunLoop run_loop_;
+
+  DISALLOW_COPY_AND_ASSIGN(WidgetClosingObserver);
 };
 
 }  // namespace test

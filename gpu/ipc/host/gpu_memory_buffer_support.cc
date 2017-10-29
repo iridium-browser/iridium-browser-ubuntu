@@ -23,7 +23,7 @@ bool AreNativeGpuMemoryBuffersEnabled() {
     return false;
   }
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableNativeGpuMemoryBuffers);
 #else
@@ -40,10 +40,12 @@ GpuMemoryBufferConfigurationSet GetNativeGpuMemoryBufferConfigurations() {
     const gfx::BufferFormat kNativeFormats[] = {
         gfx::BufferFormat::R_8,
         gfx::BufferFormat::RG_88,
+        gfx::BufferFormat::R_16,
         gfx::BufferFormat::BGR_565,
         gfx::BufferFormat::RGBA_4444,
         gfx::BufferFormat::RGBA_8888,
         gfx::BufferFormat::BGRA_8888,
+        gfx::BufferFormat::RGBA_F16,
         gfx::BufferFormat::UYVY_422,
         gfx::BufferFormat::YVU_420,
         gfx::BufferFormat::YUV_420_BIPLANAR};
@@ -96,7 +98,7 @@ uint32_t GetImageTextureTarget(gfx::BufferFormat format,
   }
 
   switch (GetNativeGpuMemoryBufferType()) {
-    case gfx::OZONE_NATIVE_PIXMAP:
+    case gfx::NATIVE_PIXMAP:
       // GPU memory buffers that are shared with the GL using EGLImages
       // require TEXTURE_EXTERNAL_OES.
       return GL_TEXTURE_EXTERNAL_OES;

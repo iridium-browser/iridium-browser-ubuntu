@@ -63,10 +63,14 @@ class MEDIA_EXPORT AudioDecoderConfig {
   // output only.
   std::string AsHumanReadableString() const;
 
+  // Sets the number of channels if |channel_layout_| is CHANNEL_LAYOUT_DISCRETE
+  void SetChannelsForDiscrete(int channels);
+
   AudioCodec codec() const { return codec_; }
   int bits_per_channel() const { return bytes_per_channel_ * 8; }
   int bytes_per_channel() const { return bytes_per_channel_; }
   ChannelLayout channel_layout() const { return channel_layout_; }
+  int channels() const { return channels_; }
   int samples_per_second() const { return samples_per_second_; }
   SampleFormat sample_format() const { return sample_format_; }
   int bytes_per_frame() const { return bytes_per_frame_; }
@@ -88,9 +92,7 @@ class MEDIA_EXPORT AudioDecoderConfig {
   }
 
   // Sets the config to be encrypted or not encrypted manually. This can be
-  // useful for decryptors that decrypts an encrypted stream to a clear stream,
-  // or for decoder selectors that wants to select decrypting decoders instead
-  // of clear decoders.
+  // useful for decryptors that decrypts an encrypted stream to a clear stream.
   void SetIsEncrypted(bool is_encrypted);
 
  private:
@@ -98,6 +100,7 @@ class MEDIA_EXPORT AudioDecoderConfig {
   SampleFormat sample_format_;
   int bytes_per_channel_;
   ChannelLayout channel_layout_;
+  int channels_;
   int samples_per_second_;
   int bytes_per_frame_;
   std::vector<uint8_t> extra_data_;

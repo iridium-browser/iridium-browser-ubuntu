@@ -25,259 +25,272 @@
 #include "core/dom/DOMTokenList.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "core/dom/Element.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "wtf/text/StringBuilder.h"
+#include "platform/wtf/AutoReset.h"
+#include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
 
-bool DOMTokenList::validateToken(const String& token,
-                                 ExceptionState& exceptionState) const {
-  if (token.isEmpty()) {
-    exceptionState.throwDOMException(SyntaxError,
-                                     "The token provided must not be empty.");
-    return false;
-  }
+namespace {
 
-  if (token.find(isHTMLSpace) != kNotFound) {
-    exceptionState.throwDOMException(InvalidCharacterError,
-                                     "The token provided ('" + token +
-                                         "') contains HTML space characters, "
-                                         "which are not valid in tokens.");
-    return false;
-  }
-
-  return true;
-}
-
-bool DOMTokenList::validateTokens(const Vector<String>& tokens,
-                                  ExceptionState& exceptionState) const {
-  for (const auto& token : tokens) {
-    if (!validateToken(token, exceptionState))
-      return false;
-  }
-
-  return true;
-}
-
-// https://dom.spec.whatwg.org/#concept-domtokenlist-validation
-bool DOMTokenList::validateTokenValue(const AtomicString&,
-                                      ExceptionState& exceptionState) const {
-  exceptionState.throwTypeError("DOMTokenList has no supported tokens.");
+bool CheckEmptyToken(const String& token, ExceptionState& exception_state) {
+  if (!token.IsEmpty())
+    return true;
+  exception_state.ThrowDOMException(kSyntaxError,
+                                    "The token provided must not be empty.");
   return false;
 }
 
-bool DOMTokenList::contains(const AtomicString& token,
-                            ExceptionState& exceptionState) const {
-  if (!validateToken(token, exceptionState))
+bool CheckTokenWithWhitespace(const String& token,
+                              ExceptionState& exception_state) {
+  if (token.Find(IsHTMLSpace) == kNotFound)
+    return true;
+  exception_state.ThrowDOMException(kInvalidCharacterError,
+                                    "The token provided ('" + token +
+                                        "') contains HTML space characters, "
+                                        "which are not valid in tokens.");
+  return false;
+}
+
+// This implements the common part of the following operations:
+// https://dom.spec.whatwg.org/#dom-domtokenlist-add
+// https://dom.spec.whatwg.org/#dom-domtokenlist-remove
+// https://dom.spec.whatwg.org/#dom-domtokenlist-toggle
+// https://dom.spec.whatwg.org/#dom-domtokenlist-replace
+bool CheckTokenSyntax(const String& token, ExceptionState& exception_state) {
+  // 1. If token is the empty string, then throw a SyntaxError.
+  if (!CheckEmptyToken(token, exception_state))
     return false;
-  return containsInternal(token);
+
+  // 2. If token contains any ASCII whitespace, then throw an
+  // InvalidCharacterError.
+  return CheckTokenWithWhitespace(token, exception_state);
 }
 
-void DOMTokenList::add(const AtomicString& token,
-                       ExceptionState& exceptionState) {
-  Vector<String> tokens;
-  tokens.push_back(token.getString());
-  add(tokens, exceptionState);
-}
-
-// Optimally, this should take a Vector<AtomicString> const ref in argument but
-// the bindings generator does not handle that.
-void DOMTokenList::add(const Vector<String>& tokens,
-                       ExceptionState& exceptionState) {
-  Vector<String> filteredTokens;
-  filteredTokens.reserveCapacity(tokens.size());
+bool CheckTokensSyntax(const Vector<String>& tokens,
+                       ExceptionState& exception_state) {
   for (const auto& token : tokens) {
-    if (!validateToken(token, exceptionState))
-      return;
-    if (containsInternal(AtomicString(token)))
-      continue;
-    if (filteredTokens.contains(token))
-      continue;
-    filteredTokens.push_back(token);
+    if (!CheckTokenSyntax(token, exception_state))
+      return false;
   }
-
-  if (!filteredTokens.isEmpty())
-    setValue(addTokens(value(), filteredTokens));
-}
-
-void DOMTokenList::remove(const AtomicString& token,
-                          ExceptionState& exceptionState) {
-  Vector<String> tokens;
-  tokens.push_back(token.getString());
-  remove(tokens, exceptionState);
-}
-
-// Optimally, this should take a Vector<AtomicString> const ref in argument but
-// the bindings generator does not handle that.
-void DOMTokenList::remove(const Vector<String>& tokens,
-                          ExceptionState& exceptionState) {
-  if (!validateTokens(tokens, exceptionState))
-    return;
-
-  // Check using containsInternal first since it is a lot faster than going
-  // through the string character by character.
-  bool found = false;
-  for (const auto& token : tokens) {
-    if (containsInternal(AtomicString(token))) {
-      found = true;
-      break;
-    }
-  }
-
-  setValue(found ? removeTokens(value(), tokens) : value());
-}
-
-bool DOMTokenList::toggle(const AtomicString& token,
-                          ExceptionState& exceptionState) {
-  if (!validateToken(token, exceptionState))
-    return false;
-
-  if (containsInternal(token)) {
-    removeInternal(token);
-    return false;
-  }
-  addInternal(token);
   return true;
 }
 
+}  // anonymous namespace
+
+DEFINE_TRACE(DOMTokenList) {
+  visitor->Trace(element_);
+}
+
+// https://dom.spec.whatwg.org/#concept-domtokenlist-validation
+bool DOMTokenList::ValidateTokenValue(const AtomicString&,
+                                      ExceptionState& exception_state) const {
+  exception_state.ThrowTypeError("DOMTokenList has no supported tokens.");
+  return false;
+}
+
+// https://dom.spec.whatwg.org/#dom-domtokenlist-contains
+bool DOMTokenList::contains(const AtomicString& token) const {
+  return token_set_.Contains(token);
+}
+
+void DOMTokenList::Add(const AtomicString& token) {
+  add(Vector<String>({token}), ASSERT_NO_EXCEPTION);
+}
+
+// https://dom.spec.whatwg.org/#dom-domtokenlist-add
+// Optimally, this should take a Vector<AtomicString> const ref in argument but
+// the bindings generator does not handle that.
+void DOMTokenList::add(const Vector<String>& tokens,
+                       ExceptionState& exception_state) {
+  if (!CheckTokensSyntax(tokens, exception_state))
+    return;
+  AddTokens(tokens);
+}
+
+void DOMTokenList::Remove(const AtomicString& token) {
+  remove(Vector<String>({token}), ASSERT_NO_EXCEPTION);
+}
+
+// https://dom.spec.whatwg.org/#dom-domtokenlist-remove
+// Optimally, this should take a Vector<AtomicString> const ref in argument but
+// the bindings generator does not handle that.
+void DOMTokenList::remove(const Vector<String>& tokens,
+                          ExceptionState& exception_state) {
+  if (!CheckTokensSyntax(tokens, exception_state))
+    return;
+
+  // TODO(tkent): This null check doesn't conform to the DOM specification.
+  // See https://github.com/whatwg/dom/issues/462
+  if (value().IsNull())
+    return;
+  RemoveTokens(tokens);
+}
+
+// https://dom.spec.whatwg.org/#dom-domtokenlist-toggle
 bool DOMTokenList::toggle(const AtomicString& token,
-                          bool force,
-                          ExceptionState& exceptionState) {
-  if (!validateToken(token, exceptionState))
+                          ExceptionState& exception_state) {
+  if (!CheckTokenSyntax(token, exception_state))
     return false;
 
-  if (force)
-    addInternal(token);
-  else
-    removeInternal(token);
+  // 4. If context object’s token set[token] exists, then:
+  if (contains(token)) {
+    // 1. If force is either not given or is false, then remove token from
+    // context object’s token set.
+    RemoveTokens(Vector<String>({token}));
+    return false;
+  }
+  // 5. Otherwise, if force not given or is true, append token to context
+  // object’s token set and set result to true.
+  AddTokens(Vector<String>({token}));
+  return true;
+}
+
+// https://dom.spec.whatwg.org/#dom-domtokenlist-toggle
+bool DOMTokenList::toggle(const AtomicString& token,
+                          bool force,
+                          ExceptionState& exception_state) {
+  if (!CheckTokenSyntax(token, exception_state))
+    return false;
+
+  // 4. If context object’s token set[token] exists, then:
+  if (contains(token)) {
+    // 1. If force is either not given or is false, then remove token from
+    // context object’s token set.
+    if (!force)
+      RemoveTokens(Vector<String>({token}));
+  } else {
+    // 5. Otherwise, if force not given or is true, append token to context
+    // object’s token set and set result to true.
+    if (force)
+      AddTokens(Vector<String>({token}));
+  }
 
   return force;
 }
 
-bool DOMTokenList::supports(const AtomicString& token,
-                            ExceptionState& exceptionState) {
-  return validateTokenValue(token, exceptionState);
-}
-
-void DOMTokenList::addInternal(const AtomicString& token) {
-  if (!containsInternal(token))
-    setValue(addToken(value(), token));
-}
-
-void DOMTokenList::removeInternal(const AtomicString& token) {
-  // Check using contains first since it uses AtomicString comparisons instead
-  // of character by character testing.
-  if (!containsInternal(token))
+// https://dom.spec.whatwg.org/#dom-domtokenlist-replace
+void DOMTokenList::replace(const AtomicString& token,
+                           const AtomicString& new_token,
+                           ExceptionState& exception_state) {
+  // 1. If either token or newToken is the empty string, then throw a
+  // SyntaxError.
+  if (!CheckEmptyToken(token, exception_state) ||
+      !CheckEmptyToken(new_token, exception_state))
     return;
-  setValue(removeToken(value(), token));
+
+  // 2. If either token or newToken contains any ASCII whitespace, then throw an
+  // InvalidCharacterError.
+  if (!CheckTokenWithWhitespace(token, exception_state) ||
+      !CheckTokenWithWhitespace(new_token, exception_state))
+    return;
+
+  // https://infra.spec.whatwg.org/#set-replace
+  // To replace within an ordered set set, given item and replacement: if set
+  // contains item or replacement, then replace the first instance of either
+  // with replacement and remove all other instances.
+  bool found_old_token = false;
+  bool found_new_token = false;
+  bool did_update = false;
+  for (size_t i = 0; i < token_set_.size(); ++i) {
+    const AtomicString& existing_token = token_set_[i];
+    if (found_old_token) {
+      if (existing_token == new_token) {
+        token_set_.Remove(i);
+        break;
+      }
+    } else if (found_new_token) {
+      if (existing_token == token) {
+        token_set_.Remove(i);
+        did_update = true;
+        break;
+      }
+    } else if (existing_token == token) {
+      found_old_token = true;
+      token_set_.ReplaceAt(i, new_token);
+      did_update = true;
+    } else if (existing_token == new_token) {
+      found_new_token = true;
+    }
+  }
+
+  // TODO(tkent): This check doesn't conform to the DOM specification, but it's
+  // interoperable with Firefox and Safari.
+  // https://github.com/whatwg/dom/issues/462
+  if (!did_update)
+    return;
+
+  UpdateWithTokenSet(token_set_);
 }
 
-AtomicString DOMTokenList::addToken(const AtomicString& input,
-                                    const AtomicString& token) {
-  Vector<String> tokens;
-  tokens.push_back(token.getString());
-  return addTokens(input, tokens);
+bool DOMTokenList::supports(const AtomicString& token,
+                            ExceptionState& exception_state) {
+  return ValidateTokenValue(token, exception_state);
 }
 
-// This returns an AtomicString because it is always passed as argument to
-// setValue() and setValue() takes an AtomicString in argument.
-AtomicString DOMTokenList::addTokens(const AtomicString& input,
-                                     const Vector<String>& tokens) {
-  bool needsSpace = false;
+// https://dom.spec.whatwg.org/#dom-domtokenlist-add
+void DOMTokenList::AddTokens(const Vector<String>& tokens) {
+  // 2. For each token in tokens, append token to context object’s token set.
+  for (const auto& token : tokens)
+    token_set_.Add(AtomicString(token));
+  // 3. Run the update steps.
+  UpdateWithTokenSet(token_set_);
+}
 
+// https://dom.spec.whatwg.org/#dom-domtokenlist-remove
+void DOMTokenList::RemoveTokens(const Vector<String>& tokens) {
+  // 2. For each token in tokens, remove token from context object’s token set.
+  for (const auto& token : tokens)
+    token_set_.Remove(AtomicString(token));
+  // 3. Run the update steps.
+  UpdateWithTokenSet(token_set_);
+}
+
+// https://dom.spec.whatwg.org/#concept-ordered-set-serializer
+// The ordered set serializer takes a set and returns the concatenation of the
+// strings in set, separated from each other by U+0020, if set is non-empty, and
+// the empty string otherwise.
+AtomicString DOMTokenList::SerializeTokenSet(
+    const SpaceSplitString& token_set) {
+  size_t size = token_set.size();
+  if (size == 0)
+    return g_empty_atom;
+  if (size == 1)
+    return token_set[0];
   StringBuilder builder;
-  if (!input.isEmpty()) {
-    builder.append(input);
-    needsSpace = !isHTMLSpace<UChar>(input[input.length() - 1]);
+  builder.Append(token_set[0]);
+  for (size_t i = 1; i < size; ++i) {
+    builder.Append(' ');
+    builder.Append(token_set[i]);
   }
-
-  for (const auto& token : tokens) {
-    if (needsSpace)
-      builder.append(' ');
-    builder.append(token);
-    needsSpace = true;
-  }
-
-  return builder.toAtomicString();
+  return builder.ToAtomicString();
 }
 
-AtomicString DOMTokenList::removeToken(const AtomicString& input,
-                                       const AtomicString& token) {
-  Vector<String> tokens;
-  tokens.push_back(token.getString());
-  return removeTokens(input, tokens);
-}
-
-// This returns an AtomicString because it is always passed as argument to
-// setValue() and setValue() takes an AtomicString in argument.
-AtomicString DOMTokenList::removeTokens(const AtomicString& input,
-                                        const Vector<String>& tokens) {
-  // Algorithm defined at
-  // http://www.whatwg.org/specs/web-apps/current-work/multipage/common-microsyntaxes.html#remove-a-token-from-a-string
-  // New spec is at https://dom.spec.whatwg.org/#remove-a-token-from-a-string
-
-  unsigned inputLength = input.length();
-  StringBuilder output;  // 3
-  output.reserveCapacity(inputLength);
-  unsigned position = 0;  // 4
-
-  // Step 5
-  while (position < inputLength) {
-    if (isHTMLSpace<UChar>(input[position])) {  // 6
-      position++;
-      continue;  // 6.3
-    }
-
-    // Step 7
-    StringBuilder tokenBuilder;
-    while (position < inputLength && isNotHTMLSpace<UChar>(input[position]))
-      tokenBuilder.append(input[position++]);
-
-    // Step 8
-    String token = tokenBuilder.toString();
-    if (tokens.contains(token)) {
-      // Step 8.1
-      while (position < inputLength && isHTMLSpace<UChar>(input[position]))
-        ++position;
-
-      // Step 8.2
-      size_t j = output.length();
-      while (j > 0 && isHTMLSpace<UChar>(output[j - 1]))
-        --j;
-      output.resize(j);
-    } else {
-      output.append(token);  // Step 9
-    }
-
-    if (position < inputLength && !output.isEmpty())
-      output.append(' ');
-  }
-
-  size_t j = output.length();
-  if (j > 0 && isHTMLSpace<UChar>(output[j - 1]))
-    output.resize(j - 1);
-
-  return output.toAtomicString();
+// https://dom.spec.whatwg.org/#concept-dtl-update
+void DOMTokenList::UpdateWithTokenSet(const SpaceSplitString& token_set) {
+  AutoReset<bool> updating(&is_in_update_step_, true);
+  setValue(SerializeTokenSet(token_set));
 }
 
 void DOMTokenList::setValue(const AtomicString& value) {
-  bool valueChanged = m_value != value;
-  m_value = value;
-  if (valueChanged)
-    m_tokens.set(value, SpaceSplitString::ShouldNotFoldCase);
-  if (m_observer)
-    m_observer->valueWasSet();
+  element_->setAttribute(attribute_name_, value);
 }
 
-bool DOMTokenList::containsInternal(const AtomicString& token) const {
-  return m_tokens.contains(token);
+void DOMTokenList::DidUpdateAttributeValue(const AtomicString& old_value,
+                                           const AtomicString& new_value) {
+  value_ = new_value;
+  if (is_in_update_step_)
+    return;
+  if (old_value != new_value)
+    token_set_.Set(new_value);
 }
 
 const AtomicString DOMTokenList::item(unsigned index) const {
   if (index >= length())
     return AtomicString();
-  return m_tokens[index];
+  return token_set_[index];
 }
 
 }  // namespace blink

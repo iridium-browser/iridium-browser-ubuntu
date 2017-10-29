@@ -166,7 +166,6 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest>,
   void SetFullscreenState(bool is_fullscreen);
 
   // GuestViewBase implementation.
-  bool CanRunInDetachedState() const final;
   void CreateWebContents(const base::DictionaryValue& create_params,
                          const WebContentsCreatedCallback& callback) final;
   void DidAttachToEmbedder() final;
@@ -191,7 +190,6 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest>,
   bool IsAutoSizeSupported() const final;
   void SetContextMenuPosition(const gfx::Point& position) final;
   void SignalWhenReady(const base::Closure& callback) final;
-  bool ShouldHandleFindRequestsForEmbedder() const final;
   void WillAttachToEmbedder() final;
   void WillDestroy() final;
 
@@ -310,6 +308,8 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest>,
   bool HandleKeyboardShortcuts(const content::NativeWebKeyboardEvent& event);
 
   void ApplyAttributes(const base::DictionaryValue& params);
+
+  void SetTransparency();
 
   // Identifies the set of rules registries belonging to this guest.
   int rules_registry_id_;

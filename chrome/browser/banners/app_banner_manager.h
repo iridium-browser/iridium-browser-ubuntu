@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_BANNERS_APP_BANNER_MANAGER_H_
 #define CHROME_BROWSER_BANNERS_APP_BANNER_MANAGER_H_
 
-#include <memory>
 #include <vector>
 
 #include "base/macros.h"
@@ -51,6 +50,43 @@ class AppBannerManager : public content::WebContentsObserver,
                          public blink::mojom::AppBannerService,
                          public SiteEngagementObserver {
  public:
+  enum class State {
+    // The banner pipeline has not yet been triggered for this page load.
+    INACTIVE,
+
+    // The banner pipeline is currently running for this page load.
+    ACTIVE,
+
+    // The banner pipeline is currently waiting for the page manifest to be
+    // fetched.
+    FETCHING_MANIFEST,
+
+    // The banner pipeline is currently waiting for the installability criteria
+    // to be checked. In this state the pipeline could be paused while waiting
+    // for the site to register a service worker.
+    PENDING_INSTALLABLE_CHECK,
+
+    // The banner pipeline has finished running, but is waiting for sufficient
+    // engagement to trigger the banner.
+    PENDING_ENGAGEMENT,
+
+    // The banner has sent the beforeinstallprompt event and is waiting for the
+    // response to the event.
+    SENDING_EVENT,
+
+    // The banner has sent the beforeinstallprompt, and the web page called
+    // prompt on the event while the event was being handled.
+    SENDING_EVENT_GOT_EARLY_PROMPT,
+
+    // The banner pipeline has finished running, but is waiting for the web page
+    // to call prompt on the event.
+    PENDING_PROMPT,
+
+    // The banner pipeline has finished running for this page load and no more
+    // processing is to be done.
+    COMPLETE,
+  };
+
   // Returns the current time.
   static base::Time GetCurrentTime();
 
@@ -59,9 +95,6 @@ class AppBannerManager : public content::WebContentsObserver,
 
   // Sets the total engagement required for triggering the banner in testing.
   static void SetTotalEngagementToTrigger(double engagement);
-
-  // Returns whether or not the URLs match for everything except for the ref.
-  static bool URLsAreForTheSamePage(const GURL& first, const GURL& second);
 
   // Requests an app banner. If |is_debug_mode| is true, any failure in the
   // pipeline will be reported to the devtools console.
@@ -72,13 +105,15 @@ class AppBannerManager : public content::WebContentsObserver,
   // resolved, but is required by the install event spec.
   void OnInstall();
 
-  // Sends a message to the renderer that the user accepted the banner. Does
-  // nothing if |request_id| does not match the current request.
-  void SendBannerAccepted(int request_id);
+  // Sends a message to the renderer that the user accepted the banner.
+  void SendBannerAccepted();
 
-  // Sends a message to the renderer that the user dismissed the banner. Does
-  // nothing if |request_id| does not match the current request.
-  void SendBannerDismissed(int request_id);
+  // Sends a message to the renderer that the user dismissed the banner.
+  void SendBannerDismissed();
+
+  // Returns a WeakPtr to this object. Exposed so subclasses/infobars may
+  // may bind callbacks without needing their own WeakPtrFactory.
+  base::WeakPtr<AppBannerManager> GetWeakPtr();
 
   // Overridden and passed through base::Bind on desktop platforms. Called when
   // the bookmark app install initiated by a banner has completed. Not used on
@@ -117,11 +152,7 @@ class AppBannerManager : public content::WebContentsObserver,
   virtual int GetIdealPrimaryIconSizeInPx();
   virtual int GetMinimumPrimaryIconSizeInPx();
 
-  // Returns a WeakPtr to this object. Exposed so subclasses/infobars may
-  // may bind callbacks without needing their own WeakPtrFactory.
-  base::WeakPtr<AppBannerManager> GetWeakPtr();
-
-  // Returns true if |is_debug_mode_| is true or the
+  // Returns true if |triggered_by_devtools_| is true or the
   // kBypassAppBannerEngagementChecks flag is set.
   virtual bool IsDebugMode() const;
 
@@ -171,6 +202,9 @@ class AppBannerManager : public content::WebContentsObserver,
   // display it later), or otherwise allow it to be shown.
   void SendBannerPromptRequest();
 
+  // Updates the current state to |state|. Virtual to allow overriding in tests.
+  virtual void UpdateState(State state);
+
   // content::WebContentsObserver overrides.
   void DidStartNavigation(content::NavigationHandle* handle) override;
   void DidFinishNavigation(content::NavigationHandle* handle) override;
@@ -190,11 +224,9 @@ class AppBannerManager : public content::WebContentsObserver,
   // Subclass accessors for private fields which should not be changed outside
   // this class.
   InstallableManager* manager() const { return manager_; }
-  int event_request_id() const { return event_request_id_; }
-  bool is_active() const { return is_active_; }
-
-  // The title to display in the banner.
-  base::string16 app_title_;
+  State state() const { return state_; }
+  bool IsRunning() const;
+  bool IsWaitingForData() const;
 
   // The URL for which the banner check is being conducted.
   GURL validated_url_;
@@ -209,22 +241,31 @@ class AppBannerManager : public content::WebContentsObserver,
   GURL primary_icon_url_;
 
   // The primary icon object.
-  std::unique_ptr<SkBitmap> primary_icon_;
+  SkBitmap primary_icon_;
 
   // The referrer string (if any) specified in the app URL. Used only for native
   // app banners.
   std::string referrer_;
 
+  // The current banner pipeline state for this page load.
+  State state_;
+
  private:
   friend class AppBannerManagerTest;
+
+  // Returns whether the new experimental flow and UI is enabled.
+  static bool IsExperimentalAppBannersEnabled();
+
+  // Voids all outstanding weak pointers and service pointers.
+  void ResetBindings();
 
   // Record that the banner could be shown at this point, if the triggering
   // heuristic allowed.
   void RecordCouldShowBanner();
 
-  // Creates a banner for the app. Overridden by subclasses as the infobar is
+  // Creates the app banner UI. Overridden by subclasses as the infobar is
   // platform-specific.
-  virtual void ShowBanner() = 0;
+  virtual void ShowBannerUi() = 0;
 
   // Called after the manager sends a message to the renderer regarding its
   // intention to show a prompt. The renderer will send a message back with the
@@ -232,17 +273,16 @@ class AppBannerManager : public content::WebContentsObserver,
   void OnBannerPromptReply(blink::mojom::AppBannerPromptReply reply,
                            const std::string& referrer);
 
+  // Does the non-platform specific parts of showing the app banner.
+  void ShowBanner();
+
   // blink::mojom::AppBannerService overrides.
   // Called when Blink has prevented a banner from being shown, and is now
   // requesting that it be shown later.
-  void DisplayAppBanner() override;
+  void DisplayAppBanner(bool user_gesture) override;
 
   // Fetches the data required to display a banner for the current page.
   InstallableManager* manager_;
-
-  // A monotonically increasing id to verify the response to the
-  // beforeinstallprompt event from the renderer.
-  int event_request_id_;
 
   // We do not want to trigger a banner when the manager is attached to
   // a WebContents that is playing video. Banners triggering on a site in the
@@ -254,21 +294,13 @@ class AppBannerManager : public content::WebContentsObserver,
   blink::mojom::AppBannerEventPtr event_;
   blink::mojom::AppBannerControllerPtr controller_;
 
-  // Whether we are currently working on whether to show a banner.
-  bool is_active_;
-
   // If a banner is requested before the page has finished loading, defer
   // triggering the pipeline until the load is complete.
-  bool banner_request_queued_;
+  bool has_sufficient_engagement_;
   bool load_finished_;
 
-  // Record whether the page decides to defer showing the banner, and if it
-  // requests for it to be shown later on.
-  bool was_canceled_by_page_;
-  bool page_requested_prompt_;
-
-  // Whether we should be logging errors to the console for this request.
-  bool is_debug_mode_;
+  // Whether the current flow was begun via devtools.
+  bool triggered_by_devtools_;
 
   // Whether the installable status has been logged for this run.
   bool need_to_log_status_;

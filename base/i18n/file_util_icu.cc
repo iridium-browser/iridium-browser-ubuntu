@@ -164,8 +164,8 @@ bool LocaleAwareCompareFilenames(const FilePath& a, const FilePath& b) {
   // On linux, the file system encoding is not defined. We assume
   // SysNativeMBToWide takes care of it.
   return CompareString16WithCollator(
-             *collator, WideToUTF16(SysNativeMBToWide(a.value().c_str())),
-             WideToUTF16(SysNativeMBToWide(b.value().c_str()))) == UCOL_LESS;
+             *collator, WideToUTF16(SysNativeMBToWide(a.value())),
+             WideToUTF16(SysNativeMBToWide(b.value()))) == UCOL_LESS;
 #else
   #error Not implemented on your system
 #endif
@@ -174,9 +174,9 @@ bool LocaleAwareCompareFilenames(const FilePath& a, const FilePath& b) {
 void NormalizeFileNameEncoding(FilePath* file_name) {
 #if defined(OS_CHROMEOS)
   std::string normalized_str;
-  if (ConvertToUtf8AndNormalize(file_name->BaseName().value(),
-                                kCodepageUTF8,
-                                &normalized_str)) {
+  if (ConvertToUtf8AndNormalize(file_name->BaseName().value(), kCodepageUTF8,
+                                &normalized_str) &&
+      !normalized_str.empty()) {
     *file_name = file_name->DirName().Append(FilePath(normalized_str));
   }
 #endif

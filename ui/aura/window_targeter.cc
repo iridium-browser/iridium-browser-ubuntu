@@ -19,115 +19,11 @@ namespace aura {
 WindowTargeter::WindowTargeter() {}
 WindowTargeter::~WindowTargeter() {}
 
-Window* WindowTargeter::FindTargetForLocatedEvent(Window* window,
-                                                  ui::LocatedEvent* event) {
-  if (!window->parent()) {
-    Window* target = FindTargetInRootWindow(window, *event);
-    if (target) {
-      window->ConvertEventToTarget(target, event);
-      return target;
-    }
-  }
-  return FindTargetForLocatedEventRecursively(window, event);
-}
-
-bool WindowTargeter::SubtreeCanAcceptEvent(
-    Window* window,
-    const ui::LocatedEvent& event) const {
-  if (!window->IsVisible())
-    return false;
-  if (window->ignore_events())
-    return false;
-  client::EventClient* client = client::GetEventClient(window->GetRootWindow());
-  if (client && !client->CanProcessEventsWithinSubtree(window))
-    return false;
-
-  Window* parent = window->parent();
-  if (parent && parent->delegate_ && !parent->delegate_->
-      ShouldDescendIntoChildForEventHandling(window, event.location())) {
-    return false;
-  }
-  return true;
-}
-
-bool WindowTargeter::EventLocationInsideBounds(
-    Window* window,
-    const ui::LocatedEvent& event) const {
-  gfx::Point point = event.location();
-  if (window->parent())
-    Window::ConvertPointToTarget(window->parent(), window, &point);
-  return gfx::Rect(window->bounds().size()).Contains(point);
-}
-
-ui::EventTarget* WindowTargeter::FindTargetForEvent(ui::EventTarget* root,
-                                                    ui::Event* event) {
-  Window* window = static_cast<Window*>(root);
-  Window* target = event->IsKeyEvent()
-                       ? FindTargetForKeyEvent(window, *event->AsKeyEvent())
-                       : FindTargetForNonKeyEvent(window, event);
-  if (target && !window->parent() && !window->Contains(target)) {
-    // |window| is the root window, but |target| is not a descendent of
-    // |window|. So do not allow dispatching from here. Instead, dispatch the
-    // event through the WindowEventDispatcher that owns |target|.
-    Window* new_root = target->GetRootWindow();
-    DCHECK(new_root);
-    if (event->IsLocatedEvent()) {
-      // The event has been transformed to be in |target|'s coordinate system.
-      // But dispatching the event through the EventProcessor requires the event
-      // to be in the host's coordinate system. So, convert the event to be in
-      // the root's coordinate space, and then to the host's coordinate space by
-      // applying the host's transform.
-      ui::LocatedEvent* located_event = static_cast<ui::LocatedEvent*>(event);
-      located_event->ConvertLocationToTarget(target, new_root);
-      located_event->UpdateForRootTransform(
-          new_root->GetHost()->GetRootTransform());
-    }
-    ignore_result(
-        new_root->GetHost()->event_processor()->OnEventFromSource(event));
-
-    target = nullptr;
-  }
-  return target;
-}
-
-ui::EventTarget* WindowTargeter::FindNextBestTarget(
-    ui::EventTarget* previous_target,
-    ui::Event* event) {
-  return nullptr;
-}
-
 bool WindowTargeter::SubtreeShouldBeExploredForEvent(
     Window* window,
     const ui::LocatedEvent& event) {
   return SubtreeCanAcceptEvent(window, event) &&
          EventLocationInsideBounds(window, event);
-}
-
-Window* WindowTargeter::FindTargetForKeyEvent(Window* window,
-                                              const ui::KeyEvent& key) {
-  Window* root_window = window->GetRootWindow();
-  client::FocusClient* focus_client = client::GetFocusClient(root_window);
-  if (!focus_client)
-    return window;
-  Window* focused_window = focus_client->GetFocusedWindow();
-  if (!focused_window)
-    return window;
-
-  client::EventClient* event_client = client::GetEventClient(root_window);
-  if (event_client &&
-      !event_client->CanProcessEventsWithinSubtree(focused_window)) {
-    focus_client->FocusWindow(nullptr);
-    return nullptr;
-  }
-  return focused_window ? focused_window : window;
-}
-
-Window* WindowTargeter::FindTargetForNonKeyEvent(Window* root_window,
-                                                 ui::Event* event) {
-  if (!event->IsLocatedEvent())
-    return root_window;
-  return FindTargetForLocatedEvent(root_window,
-                                   static_cast<ui::LocatedEvent*>(event));
 }
 
 Window* WindowTargeter::FindTargetInRootWindow(Window* root_window,
@@ -165,6 +61,110 @@ Window* WindowTargeter::FindTargetInRootWindow(Window* root_window,
   }
 
   return nullptr;
+}
+
+ui::EventTarget* WindowTargeter::FindTargetForEvent(ui::EventTarget* root,
+                                                    ui::Event* event) {
+  Window* window = static_cast<Window*>(root);
+  Window* target = event->IsKeyEvent()
+                       ? FindTargetForKeyEvent(window, *event->AsKeyEvent())
+                       : FindTargetForNonKeyEvent(window, event);
+  if (target && !window->parent() && !window->Contains(target)) {
+    // |window| is the root window, but |target| is not a descendent of
+    // |window|. So do not allow dispatching from here. Instead, dispatch the
+    // event through the WindowEventDispatcher that owns |target|.
+    Window* new_root = target->GetRootWindow();
+    DCHECK(new_root);
+    if (event->IsLocatedEvent()) {
+      // The event has been transformed to be in |target|'s coordinate system.
+      // But dispatching the event through the EventProcessor requires the event
+      // to be in the host's coordinate system. So, convert the event to be in
+      // the root's coordinate space, and then to the host's coordinate space by
+      // applying the host's transform.
+      ui::LocatedEvent* located_event = static_cast<ui::LocatedEvent*>(event);
+      located_event->ConvertLocationToTarget(target, new_root);
+      located_event->UpdateForRootTransform(
+          new_root->GetHost()->GetRootTransform());
+    }
+    ignore_result(new_root->GetHost()->event_sink()->OnEventFromSource(event));
+
+    target = nullptr;
+  }
+  return target;
+}
+
+ui::EventTarget* WindowTargeter::FindNextBestTarget(
+    ui::EventTarget* previous_target,
+    ui::Event* event) {
+  return nullptr;
+}
+
+Window* WindowTargeter::FindTargetForLocatedEvent(Window* window,
+                                                  ui::LocatedEvent* event) {
+  if (!window->parent()) {
+    Window* target = FindTargetInRootWindow(window, *event);
+    if (target) {
+      window->ConvertEventToTarget(target, event);
+      return target;
+    }
+  }
+  return FindTargetForLocatedEventRecursively(window, event);
+}
+
+bool WindowTargeter::SubtreeCanAcceptEvent(
+    Window* window,
+    const ui::LocatedEvent& event) const {
+  if (!window->IsVisible())
+    return false;
+  if (window->ignore_events())
+    return false;
+  client::EventClient* client = client::GetEventClient(window->GetRootWindow());
+  if (client && !client->CanProcessEventsWithinSubtree(window))
+    return false;
+
+  Window* parent = window->parent();
+  if (parent && parent->delegate_ &&
+      !parent->delegate_->ShouldDescendIntoChildForEventHandling(
+          window, event.location())) {
+    return false;
+  }
+  return true;
+}
+
+bool WindowTargeter::EventLocationInsideBounds(
+    Window* window,
+    const ui::LocatedEvent& event) const {
+  gfx::Point point = event.location();
+  if (window->parent())
+    Window::ConvertPointToTarget(window->parent(), window, &point);
+  return gfx::Rect(window->bounds().size()).Contains(point);
+}
+
+Window* WindowTargeter::FindTargetForKeyEvent(Window* window,
+                                              const ui::KeyEvent& key) {
+  Window* root_window = window->GetRootWindow();
+  client::FocusClient* focus_client = client::GetFocusClient(root_window);
+  if (!focus_client)
+    return window;
+  Window* focused_window = focus_client->GetFocusedWindow();
+  if (!focused_window)
+    return window;
+
+  client::EventClient* event_client = client::GetEventClient(root_window);
+  if (event_client &&
+      !event_client->CanProcessEventsWithinSubtree(focused_window)) {
+    focus_client->FocusWindow(nullptr);
+    return nullptr;
+  }
+  return focused_window ? focused_window : window;
+}
+
+Window* WindowTargeter::FindTargetForNonKeyEvent(Window* root_window,
+                                                 ui::Event* event) {
+  if (!event->IsLocatedEvent())
+    return root_window;
+  return FindTargetForLocatedEvent(root_window,
+                                   static_cast<ui::LocatedEvent*>(event));
 }
 
 Window* WindowTargeter::FindTargetForLocatedEventRecursively(

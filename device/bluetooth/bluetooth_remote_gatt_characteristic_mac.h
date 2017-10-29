@@ -7,17 +7,11 @@
 
 #include "device/bluetooth/bluetooth_remote_gatt_characteristic.h"
 
+#import <CoreBluetooth/CoreBluetooth.h>
 #include <unordered_map>
 
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/weak_ptr.h"
-
-#if defined(__OBJC__)
-#import <CoreBluetooth/CoreBluetooth.h>
-#else
-@class CBCharacteristic;
-typedef NS_ENUM(NSInteger, CBCharacteristicWriteType);
-#endif  // defined(__OBJC__)
 
 namespace device {
 
@@ -66,6 +60,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattCharacteristicMac
       const ErrorCallback& error_callback) override;
 
  private:
+  friend class BluetoothLowEnergyDeviceMac;
   friend class BluetoothRemoteGattDescriptorMac;
   friend class BluetoothRemoteGattServiceMac;
   friend class BluetoothTestMac;
@@ -74,8 +69,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattCharacteristicMac
   // Called by the BluetoothRemoteGattServiceMac instance when the
   // characteristics value has been read.
   void DidUpdateValue(NSError* error);
-  // Updates value_ and notifies the adapter of the new value.
-  void UpdateValueAndNotify();
+  // Updates value_.
+  void UpdateValue();
   // Called by the BluetoothRemoteGattServiceMac instance when the
   // characteristics value has been written.
   void DidWriteValue(NSError* error);
@@ -104,8 +99,18 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattCharacteristicMac
   // Returns BluetoothRemoteGattDescriptorMac from CBDescriptor.
   BluetoothRemoteGattDescriptorMac* GetBluetoothRemoteGattDescriptorMac(
       CBDescriptor* cb_descriptor) const;
-  // Is true if the characteristic has been discovered with all its descriptors.
+  bool HasPendingRead() const {
+    return !read_characteristic_value_callbacks_.first.is_null();
+  };
+  bool HasPendingWrite() const {
+    return !write_characteristic_value_callbacks_.first.is_null();
+  };
+  // Is true if the characteristic has been discovered with all its descriptors
+  // and discovery_pending_count_ is 0.
   bool is_discovery_complete_;
+  // Increased each time DiscoverDescriptors() is called. And decreased when
+  // DidDiscoverDescriptors() is called.
+  int discovery_pending_count_;
   // gatt_service_ owns instances of this class.
   BluetoothRemoteGattServiceMac* gatt_service_;
   // A characteristic from CBPeripheral.services.characteristics.
@@ -116,8 +121,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattCharacteristicMac
   BluetoothUUID uuid_;
   // Characteristic value.
   std::vector<uint8_t> value_;
-  // True if a gatt read or write request is in progress.
-  bool characteristic_value_read_or_write_in_progress_;
   // ReadRemoteCharacteristic request callbacks.
   std::pair<ValueCallback, ErrorCallback> read_characteristic_value_callbacks_;
   // WriteRemoteCharacteristic request callbacks.
@@ -133,7 +136,14 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattCharacteristicMac
   std::unordered_map<std::string,
                      std::unique_ptr<BluetoothRemoteGattDescriptorMac>>
       gatt_descriptor_macs_;
+
+  base::WeakPtrFactory<BluetoothRemoteGattCharacteristicMac> weak_ptr_factory_;
 };
+
+// Stream operator for logging.
+DEVICE_BLUETOOTH_EXPORT std::ostream& operator<<(
+    std::ostream& out,
+    const BluetoothRemoteGattCharacteristicMac& characteristic);
 
 }  // namespace device
 

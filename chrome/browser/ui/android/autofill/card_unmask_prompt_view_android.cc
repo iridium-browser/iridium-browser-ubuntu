@@ -93,6 +93,12 @@ void CardUnmaskPromptViewAndroid::OnNewCardLinkClicked(
                                controller_->ShouldRequestExpirationDate());
 }
 
+int CardUnmaskPromptViewAndroid::GetExpectedCvcLength(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
+  return controller_->GetExpectedCvcLength();
+}
+
 void CardUnmaskPromptViewAndroid::PromptDismissed(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
@@ -120,11 +126,6 @@ void CardUnmaskPromptViewAndroid::GotVerificationResult(
 
   Java_CardUnmaskBridge_verificationFinished(env, java_object_, message,
                                              allow_retry);
-}
-
-// static
-bool CardUnmaskPromptViewAndroid::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace autofill

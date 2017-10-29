@@ -11,6 +11,7 @@ import errno
 import filecmp
 import fileinput
 import glob
+import itertools
 import multiprocessing
 import os
 import re
@@ -54,6 +55,9 @@ _category_re = re.compile(r'^(?P<category>[\w\+\.][\w\+\.\-]*)$', re.VERBOSE)
 # This regex matches blank lines, commented lines, and the EAPI line.
 _blank_or_eapi_re = re.compile(r'^\s*(?:#|EAPI=|$)')
 
+# This regex is used to extract test names from IUSE_TESTS
+_autotest_re = re.compile(r'\+tests_(\w+)', re.VERBOSE)
+
 WORKON_EBUILD_VERSION = '9999'
 WORKON_EBUILD_SUFFIX = '-%s.ebuild' % WORKON_EBUILD_VERSION
 
@@ -70,11 +74,7 @@ def GetOverlayRoot(path):
   """Get the overlay root folder for |path|.
 
   For traditional portage overlays, the root folder is |path|.
-  For bricks, the root folder is in the 'packages' sub-folder.
   """
-  if os.path.exists(os.path.join(path, 'config.json')):
-    # A brick has its overlay root in the packages subdirectory.
-    return os.path.join(path, 'packages')
   return path
 
 
@@ -528,6 +528,70 @@ class EBuild(object):
      self.is_blacklisted, self.has_test) = EBuild.Classify(path)
 
   @staticmethod
+  def _GetAutotestTestsFromSettings(settings):
+    """Return a list of test names, when given a settings dictionary.
+
+    Args:
+      settings: A dictionary containing ebuild variables contents.
+
+    Returns:
+      A list of test name strings.
+    """
+    # We do a bit of string wrangling to extract directory names from test
+    # names. First, get rid of special characters.
+    test_list = []
+    raw_tests_str = settings['IUSE_TESTS']
+    if len(raw_tests_str) == 0:
+      return test_list
+
+    test_list.extend(_autotest_re.findall(raw_tests_str))
+    return test_list
+
+  @staticmethod
+  def GetAutotestSubdirsToRev(ebuild_path, srcdir):
+    """Return list of subdirs to be watched while deciding whether to uprev.
+
+    This logic is specific to autotest related ebuilds, that derive from the
+    autotest eclass.
+
+    Args:
+      ebuild_path: Path to the ebuild file (e.g
+                   autotest-tests-graphics-9999.ebuild).
+      srcdir: The path of the source for the test
+
+    Returns:
+      A list of strings mentioning directory paths.
+    """
+    results = []
+    test_vars = ('IUSE_TESTS',)
+
+    if not ebuild_path or not srcdir:
+      return results
+
+    # TODO(pmalani): Can we get this from get_test_list in autotest.eclass ?
+    settings = osutils.SourceEnvironment(ebuild_path, test_vars, env=None,
+                                         multiline=True)
+    if 'IUSE_TESTS' not in settings:
+      return results
+
+    test_list = EBuild._GetAutotestTestsFromSettings(settings)
+
+    location = ['client', 'server']
+    test_type = ['tests', 'site_tests']
+
+    # Check the existence of every directory combination of location and
+    # test_type for each test.
+    # This is a re-implementation of the same logic in autotest_src_prepare in
+    # the chromiumos-overlay/eclass/autotest.eclass .
+    for cur_test in test_list:
+      for x, y in list(itertools.product(location, test_type)):
+        a = os.path.join(srcdir, x, y, cur_test)
+        if os.path.isdir(a):
+          results.append(os.path.join(x, y, cur_test))
+
+    return results
+
+  @staticmethod
   def GetCrosWorkonVars(ebuild_path, pkg_name):
     """Return computed (as sourced ebuild script) values of:
 
@@ -571,10 +635,13 @@ class EBuild(object):
     # this covers some types of failures.
     projects = []
     srcpaths = []
+    rev_subdirs = []
     if 'CROS_WORKON_PROJECT' in settings:
       projects = settings['CROS_WORKON_PROJECT'].split(',')
     if 'CROS_WORKON_SRCPATH' in settings:
       srcpaths = settings['CROS_WORKON_SRCPATH'].split(',')
+    if 'CROS_WORKON_SUBDIRS_TO_REV' in settings:
+      rev_subdirs = settings['CROS_WORKON_SUBDIRS_TO_REV'].split(',')
 
     if not (projects or srcpaths):
       raise EbuildFormatIncorrectException(
@@ -585,8 +652,7 @@ class EBuild(object):
     subdirs = settings['CROS_WORKON_SUBDIR'].split(',')
     live = settings['CROS_WORKON_ALWAYS_LIVE']
     commit = settings.get('CROS_WORKON_COMMIT')
-    rev_subdirs = settings.get('CROS_WORKON_SUBDIRS_TO_REV')
-    if (len(projects) > 1 or len(srcpaths) > 1) and rev_subdirs:
+    if (len(projects) > 1 or len(srcpaths) > 1) and len(rev_subdirs) > 0:
       raise EbuildFormatIncorrectException(
           ebuild_path,
           'Must not define CROS_WORKON_SUBDIRS_TO_REV if defining multiple '
@@ -649,18 +715,13 @@ class EBuild(object):
     else:
       dir_ = 'third_party'
 
-    # Obtain brick source directory (used for non-core packages).
-    # TODO(garnold) This manipulates brick internal structure directly instead
-    # of referring to brick_lib; the latter could not be used because of a
-    # cyclic dependency, but should be used once its dependency on portage_util
-    # is eliminated.
     srcbase = ''
     if any(srcpaths):
-      brick_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+      base_dir = os.path.dirname(os.path.dirname(os.path.dirname(
           os.path.dirname(self._unstable_ebuild_path))))
-      srcbase = os.path.join(brick_dir, 'src')
+      srcbase = os.path.join(base_dir, 'src')
       if not os.path.isdir(srcbase):
-        cros_build_lib.Die('_SRCPATH used but brick source path not found.')
+        cros_build_lib.Die('_SRCPATH used but source path not found.')
 
     subdir_paths = []
     rows = zip(localnames, subdirs, projects, srcpaths)
@@ -668,8 +729,7 @@ class EBuild(object):
       if srcpath:
         subdir_path = os.path.join(srcbase, srcpath)
         if not os.path.isdir(subdir_path):
-          cros_build_lib.Die('Source for package %s not found in brick.' %
-                             self.pkgname)
+          cros_build_lib.Die('Source for package %s not found.' % self.pkgname)
       else:
         subdir_path = os.path.realpath(os.path.join(srcroot, dir_, local, sub))
         if dir_ == '' and not os.path.isdir(subdir_path):
@@ -819,7 +879,10 @@ class EBuild(object):
     variables = dict(CROS_WORKON_COMMIT=self.FormatBashArray(commit_ids),
                      CROS_WORKON_TREE=self.FormatBashArray(tree_ids))
 
-    if enforce_subdir_rev and not self._ShouldRevEBuild(commit_ids, srcdirs):
+    subdirs_to_rev = self.GetAutotestSubdirsToRev(self.ebuild_path, srcdirs[0])
+
+    if enforce_subdir_rev and not self._ShouldRevEBuild(commit_ids, srcdirs,
+                                                        subdirs_to_rev):
       self._Print('Skipping uprev of ebuild %s, none of the rev_subdirs have '
                   'been modified.')
       return
@@ -846,19 +909,20 @@ class EBuild(object):
 
       return '%s-%s' % (self.package, new_version)
 
-  def _ShouldRevEBuild(self, commit_ids, srcdirs):
+
+  def _ShouldRevEBuild(self, commit_ids, srcdirs, subdirs_to_rev):
     """Determine whether we should attempt to rev |ebuild|.
 
-    If CROS_WORKON_SUBDIRS_TO_REV is not defined for |ebuild|, this function
-    trivially returns True.
+    Args:
+      commit_ids: Commit ID of the tip of tree for the source dir.
+      srcdirs: Source direutory where the git repo is located.
+      subdirs_to_rev: Test subdirectories which have to be checked for
+      modifications since the last stable commit hash.
 
-    If CROS_WORKON_SUBDIRS_TO_REV is defined, this function returns True if
-    there are commits ahead of CROS_WORKON_COMMIT that have affected one of
-    those directories.
+    Returns:
+      True is an Uprev is needed, False otherwise.
     """
     if not self.cros_workon_vars:
-      return True
-    if not self.cros_workon_vars.rev_subdirs:
       return True
     if not self.cros_workon_vars.commit:
       return True
@@ -866,27 +930,29 @@ class EBuild(object):
       return True
     if len(srcdirs) != 1:
       return True
+    if len(subdirs_to_rev) == 0:
+      return True
 
     current_commit_hash = commit_ids[0]
     stable_commit_hash = self.cros_workon_vars.commit
     srcdir = srcdirs[0]
     logrange = '%s..%s' % (stable_commit_hash, current_commit_hash)
-    paths = self.cros_workon_vars.rev_subdirs
+    git_args = ['log', '--oneline', logrange, '--']
+    git_args.extend(subdirs_to_rev)
 
     try:
-      output = EBuild._RunGit(
-          srcdir, ['log', '--oneline', logrange, '--', paths])
+      output = EBuild._RunGit(srcdir, git_args)
     except cros_build_lib.RunCommandError as ex:
       logging.warning(str(ex))
       return True
 
     if output:
-      logging.info('Determined that one of the rev_subdirs %s of ebuild %s was '
-                   'touched.', paths, self.pkgname)
+      logging.info(' Rev: Determined that one+ of the ebuild %s rev_subdirs '
+                   'was touched %s', self.pkgname, list(subdirs_to_rev))
       return True
     else:
-      logging.info('Determined that none of the rev_subdirs %s of ebuild %s '
-                   'was touched.', paths, self.pkgname)
+      logging.info('Skip: Determined that none of the ebuild %s rev_subdirs '
+                   'was touched %s', self.pkgname, list(subdirs_to_rev))
       return False
 
   @classmethod

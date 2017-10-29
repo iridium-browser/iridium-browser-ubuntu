@@ -8,8 +8,8 @@
 #include "ash/public/interfaces/system_tray.mojom.h"
 #include "base/macros.h"
 #include "chrome/browser/chromeos/system/system_clock_observer.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "chrome/browser/upgrade_observer.h"
+#include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
 namespace ash {
@@ -26,7 +26,8 @@ class WidgetDelegate;
 // TODO: Consider renaming this to SystemTrayClientChromeOS.
 class SystemTrayClient : public ash::mojom::SystemTrayClient,
                          public chromeos::system::SystemClockObserver,
-                         public content::NotificationObserver {
+                         public policy::CloudPolicyStore::Observer,
+                         public UpgradeObserver {
  public:
   SystemTrayClient();
   ~SystemTrayClient() override;
@@ -53,21 +54,29 @@ class SystemTrayClient : public ash::mojom::SystemTrayClient,
   // Wrappers around ash::mojom::SystemTray interface:
   void SetPrimaryTrayEnabled(bool enabled);
   void SetPrimaryTrayVisible(bool visible);
+  void SetPerformanceTracingIconVisible(bool visible);
 
   // ash::mojom::SystemTrayClient:
   void ShowSettings() override;
+  void ShowBluetoothSettings() override;
+  void ShowBluetoothPairingDialog(const std::string& address,
+                                  const base::string16& name_for_display,
+                                  bool paired,
+                                  bool connected) override;
   void ShowDateSettings() override;
   void ShowSetTimeDialog() override;
   void ShowDisplaySettings() override;
   void ShowPowerSettings() override;
   void ShowChromeSlow() override;
   void ShowIMESettings() override;
+  void ShowAboutChromeOS() override;
   void ShowHelp() override;
   void ShowAccessibilityHelp() override;
   void ShowAccessibilitySettings() override;
   void ShowPaletteHelp() override;
   void ShowPaletteSettings() override;
   void ShowPublicAccountInfo() override;
+  void ShowEnterpriseInfo() override;
   void ShowNetworkConfigure(const std::string& network_id) override;
   void ShowNetworkCreate(const std::string& type) override;
   void ShowThirdPartyVpnCreate(const std::string& extension_id) override;
@@ -77,16 +86,28 @@ class SystemTrayClient : public ash::mojom::SystemTrayClient,
   void RequestRestartForUpdate() override;
 
  private:
+  // Helper function shared by ShowNetworkSettings() and ShowNetworkConfigure().
+  void ShowNetworkSettingsHelper(const std::string& network_id,
+                                 bool show_configure);
+
   // Requests that ash show the update available icon.
   void HandleUpdateAvailable();
+
+  // Requests that ash show the update over cellular available icon.
+  void HandleUpdateOverCellularAvailable();
 
   // chromeos::system::SystemClockObserver:
   void OnSystemClockChanged(chromeos::system::SystemClock* clock) override;
 
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // UpgradeObserver implementation.
+  void OnUpdateOverCellularAvailable() override;
+  void OnUpgradeRecommended() override;
+
+  // policy::CloudPolicyStore::Observer
+  void OnStoreLoaded(policy::CloudPolicyStore* store) override;
+  void OnStoreError(policy::CloudPolicyStore* store) override;
+
+  void UpdateEnterpriseDisplayDomain();
 
   // System tray mojo service in ash.
   ash::mojom::SystemTrayPtr system_tray_;
@@ -97,7 +118,10 @@ class SystemTrayClient : public ash::mojom::SystemTrayClient,
   // Whether an Adobe Flash component update is available.
   bool flash_update_available_ = false;
 
-  content::NotificationRegistrar registrar_;
+  // Avoid sending ash an empty enterprise display domain at startup and
+  // suppress duplicate IPCs during the session.
+  std::string last_enterprise_display_domain_;
+  bool last_active_directory_managed_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(SystemTrayClient);
 };

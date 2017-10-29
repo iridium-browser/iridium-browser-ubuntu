@@ -6,15 +6,13 @@
 
 from __future__ import print_function
 
-import ConfigParser
 import glob
 import os
 import pprint
 import re
 
-from chromite.lib import failures_lib
 from chromite.lib import constants
-from chromite.lib import cros_build_lib
+from chromite.lib import cq_config
 from chromite.lib import cros_logging as logging
 from chromite.lib import gerrit
 from chromite.lib import git
@@ -54,21 +52,6 @@ def _GetAffectedImmediateSubdirs(change, git_repo):
   """
   return set([os.path.join(git_repo, path.split(os.path.sep)[0])
               for path in change.GetDiffStatus(git_repo)])
-
-
-def _GetCommonAffectedSubdir(change, git_repo):
-  """Gets the longest common path of changes in |change|.
-
-  Args:
-    change: GitRepoPatch to examine.
-    git_repo: Path to checkout of git repository.
-
-  Returns:
-    An absolute path in |git_repo|.
-  """
-  affected_paths = [os.path.join(git_repo, path)
-                    for path in change.GetDiffStatus(git_repo)]
-  return cros_build_lib.GetCommonPathPrefix(affected_paths)
 
 
 def GetAffectedOverlays(change, manifest, all_overlays):
@@ -141,102 +124,6 @@ def GetAffectedPackagesForOverlayChange(change, manifest, overlays):
   return packages
 
 
-def _GetOptionFromConfigFile(config_path, section, option):
-  """Get |option| from |section| in |config_path|.
-
-  Args:
-    config_path: Filename to look at.
-    section: Section header name.
-    option: Option name.
-
-  Returns:
-    The value of the option.
-  """
-  parser = ConfigParser.SafeConfigParser()
-  parser.read(config_path)
-  if parser.has_option(section, option):
-    return parser.get(section, option)
-
-
-def _GetConfigFileForChange(change, checkout_path):
-  """Gets the path of the config file for |change|.
-
-  This function takes into account the files that are modified by |change| to
-  determine the commit queue config file within |checkout_path| that should be
-  used for this change. The config file used is the one in the common ancestor
-  directory to all changed files, or the nearest parent directory. See
-  http://chromium.org/chromium-os/build/bypassing-tests-on-a-per-project-basis
-
-  Args:
-    change: Change to examine, as a GitRepoPatch object.
-    checkout_path: Full absolute path to a checkout of the repository that
-                   |change| applies to.
-
-  Returns:
-    Path to the config file to be read for |change|. The returned path will
-    be within |checkout_path|. If no config files in common subdirectories
-    were found, a config file path in the root of the checkout will be
-    returned, in which case the file is not guaranteed to exist.
-  """
-  current_dir = _GetCommonAffectedSubdir(change, checkout_path)
-  while True:
-    config_file = os.path.join(current_dir, constants.CQ_CONFIG_FILENAME)
-    if os.path.isfile(config_file) or checkout_path.startswith(current_dir):
-      return config_file
-    assert current_dir not in ('/', '')
-    current_dir = os.path.dirname(current_dir)
-
-
-def GetOptionForChange(build_root, change, section, option):
-  """Get |option| from |section| in the config file for |change|.
-
-  Args:
-    build_root: The root of the checkout.
-    change: Change to examine, as a GitRepoPatch object.
-    section: Section header name.
-    option: Option name.
-
-  Returns:
-    The value of the option.
-  """
-  manifest = git.ManifestCheckout.Cached(build_root)
-  checkout = change.GetCheckout(manifest)
-  if checkout:
-    dirname = checkout.GetPath(absolute=True)
-    config_path = _GetConfigFileForChange(change, dirname)
-    result = None
-    try:
-      result = _GetOptionFromConfigFile(config_path, section, option)
-    except ConfigParser.Error:
-      logging.error('%s has malformed config file', change, exc_info=True)
-    return result
-
-
-def GetStagesToIgnoreForChange(build_root, change):
-  """Get a list of stages that the CQ should ignore for a given |change|.
-
-  The list of stage name prefixes to ignore for each project is specified in a
-  config file inside the project, named COMMIT-QUEUE.ini. The file would look
-  like this:
-
-  [GENERAL]
-    ignored-stages: HWTest VMTest
-
-  The CQ will submit changes to the given project even if the listed stages
-  failed. These strings are stage name prefixes, meaning that "HWTest" would
-  match any HWTest stage (e.g. "HWTest [bvt]" or "HWTest [foo]")
-
-  Args:
-    build_root: The root of the checkout.
-    change: Change to examine, as a PatchQuery object.
-
-  Returns:
-    A list of stages to ignore for the given |change|.
-  """
-  result = GetOptionForChange(build_root, change, 'GENERAL', 'ignored-stages')
-  return result.split() if result else []
-
-
 def GetTestSubsystemForChange(build_root, change):
   """Get a list of subsystem that a given |change| affects.
 
@@ -262,9 +149,10 @@ def GetTestSubsystemForChange(build_root, change):
     if lines:
       subsystems = [x for x in re.split("[, ]", ' '.join(lines)) if x]
   if not subsystems:
-    result = GetOptionForChange(build_root, change, 'GENERAL', 'subsystem')
-    subsystems = result.split() if result else []
+    cq_config_parser = cq_config.CQConfigParser(build_root, change)
+    subsystems = cq_config_parser.GetSubsystems()
   return subsystems if subsystems else ['default']
+
 
 class CategorizeChanges(object):
   """A collection of methods to help categorize GerritPatch changes.
@@ -483,24 +371,37 @@ class CalculateSuspects(object):
     return [x for x, y in zip(changes, reloaded_changes) if y.WasVetoed()]
 
   @classmethod
-  def _FindPackageBuildFailureSuspects(cls, changes, messages, sanity):
-    """Figure out what CLs are at fault for a set of build failures.
+  def FindSuspectsForFailures(cls, changes, messages, build_root,
+                              failed_hwtests, sanity):
+    """Find suspects for the given failure messages and hwtests.
+
+    If messages contain NoneType message and sanity is True, return all changes
+    as suspects.
 
     Args:
-        changes: A list of cros_patch.GerritPatch instances to consider.
-        messages: A list of failure messages. We will only look at the ones of
-                  type BuildFailureMessage.
-        sanity: The sanity checker builder passed and the tree was open when
-                the build started.
+      changes: A list of cros_patch.GerritPatch instances.
+      messages: A list of build_failure_message.BuildFailureMessage or NoneType
+        instances from the failed slaves.
+      build_root: The path to the build root.
+      failed_hwtests: A list of names of failed hwtests got from CIDB (see the
+        return type of HWTestResultManager.GetFailedHWTestsFromCIDB) or a
+        NoneType instance.
+      sanity: The sanity checker builder passed and the tree was open when
+              the build started and ended.
+
+    Returns:
+      An instance of SuspectChanges.
     """
-    suspects = set()
+    suspect_changes = SuspectChanges()
     for message in messages:
       if message:
-        suspects.update(
-            message.FindPackageBuildFailureSuspects(changes, sanity))
+        new_suspect_changes = message.FindSuspectedChanges(
+            changes, build_root, failed_hwtests, sanity)
+        suspect_changes.update(new_suspect_changes)
       elif sanity:
-        suspects.update(changes)
-    return suspects
+        suspect_changes.update(
+            {x: constants.SUSPECT_REASON_UNKNOWN for x in changes})
+    return suspect_changes
 
   @classmethod
   def FilterChangesForInfraFail(cls, changes):
@@ -509,29 +410,37 @@ class CalculateSuspects(object):
     return [x for x in changes if x.project in constants.INFRA_PROJECTS]
 
   @classmethod
-  def _MatchesFailureType(cls, messages, fail_type, strict=True):
-    """Returns True if all failures are instances of |fail_type|.
+  def _MatchesExceptionCategories(cls, messages, exception_categories,
+                                  strict=True):
+    """Returns True if all failure messages are in the exception_categories.
 
     Args:
-      messages: A list of BuildFailureMessage or NoneType objects
-        from the failed slaves.
-      fail_type: The exception class to look for.
+      messages: A list of build_failure_message.BuildFailureMessage or NoneType
+        objects from the failed slaves.
+      exception_categories: A set of exception categories (members of
+         constants.EXCEPTION_CATEGORY_ALL_CATEGORIES).
       strict: If False, treat NoneType message as a match.
 
     Returns:
-      True if all objects in |messages| are non-None and all failures are
-      instances of |fail_type|.
+      Returns True if all the messages matches exception_categories (when strict
+      is off, None message is considered as a match).
     """
-    return ((not strict or all(messages)) and
-            all(x.MatchesFailureType(fail_type) for x in messages if x))
+    if not messages:
+      return False
+
+    if strict and not all(messages):
+      return False
+
+    return (all(x.MatchesExceptionCategories(exception_categories)
+                for x in messages if x))
 
   @classmethod
   def OnlyLabFailures(cls, messages, no_stat):
     """Determine if the cause of build failure was lab failure.
 
     Args:
-      messages: A list of BuildFailureMessage or NoneType objects
-        from the failed slaves.
+      messages: A list of build_failure_message.BuildFailureMessage or NoneType
+        objects from the failed slaves.
       no_stat: A list of builders which failed prematurely without reporting
         status.
 
@@ -539,16 +448,18 @@ class CalculateSuspects(object):
       True if the build failed purely due to lab failures.
     """
     # If any builder failed prematuely, lab failure was not the only cause.
-    return (not no_stat and
-            cls._MatchesFailureType(messages, failures_lib.TestLabFailure))
+    return (not no_stat and cls._MatchesExceptionCategories(
+        messages, {constants.EXCEPTION_CATEGORY_LAB}))
 
   @classmethod
   def OnlyInfraFailures(cls, messages, no_stat):
     """Determine if the cause of build failure was infrastructure failure.
 
+    All failures in 'lab' and 'infra' categories are infra failures.
+
     Args:
-      messages: A list of BuildFailureMessage or NoneType objects
-        from the failed slaves.
+      messages: A list of build_failure_message.BuildFailureMessage or NoneType
+        objects from the failed slaves.
       no_stat: A list of builders which failed prematurely without reporting
         status.
 
@@ -557,33 +468,40 @@ class CalculateSuspects(object):
     """
     # "Failed to report status" and "NoneType" messages are considered
     # infra failures.
-    return ((not messages and no_stat) or
-            cls._MatchesFailureType(
-                messages, failures_lib.InfrastructureFailure, strict=False))
+    return ((not messages and no_stat) or cls._MatchesExceptionCategories(
+        messages,
+        {constants.EXCEPTION_CATEGORY_INFRA, constants.EXCEPTION_CATEGORY_LAB},
+        strict=False))
 
   @classmethod
   def FindSuspects(cls, changes, messages, infra_fail=False, lab_fail=False,
-                   sanity=True):
+                   build_root=None, failed_hwtests=None, sanity=True):
     """Find out what changes probably caused our failure.
 
-    In cases where there were no internal failures, we can assume that the
-    external failures are at fault. Otherwise, this function just defers to
-    _FindPackageBuildFailureSuspects and GetBlamedChanges as needed.
-    If the failures don't match either case, just fail everything.
+    1) if there're bad changes to blame, return the bad changes as the suspects;
+    2) else if there're only internal lab failures, return an empty suspects;
+    3) else if there're only internal infra failures, return infra changes as
+    the suspects;
+    4) else, find and return suspects by analyzing the failures.
 
     Args:
       changes: A list of cros_patch.GerritPatch instances to consider.
       messages: A list of build failure messages, of type
-        BuildFailureMessage or of type NoneType.
+        build_failure_message.BuildFailureMessage or of type NoneType.
       infra_fail: The build failed purely due to infrastructure failures.
       lab_fail: The build failed purely due to test lab infrastructure
         failures.
+      build_root: The path to the build root.
+      failed_hwtests: A list of names of failed hwtests got from CIDB (see the
+        return type of HWTestResultManager.GetFailedHWTestsFromCIDB) or a
+        NoneType instance.
       sanity: The sanity checker builder passed and the tree was open when
-              the build started.
+        the build started and ended.
 
     Returns:
-       A set of changes as suspects.
+      An instance of SuspectChanges.
     """
+    suspect_changes = SuspectChanges()
     bad_changes = cls.GetBlamedChanges(changes)
     if bad_changes:
       # If there are changes that have been set verified=-1 or
@@ -592,20 +510,26 @@ class CalculateSuspects(object):
       logging.warning('Detected that some changes have been blamed for '
                       'the build failure. Only these CLs will be rejected: %s',
                       cros_patch.GetChangesAsString(bad_changes))
-      return set(bad_changes)
+
+      suspect_changes.update(
+          {x: constants.SUSPECT_REASON_BAD_CHANGE for x in bad_changes})
     elif lab_fail:
       logging.warning('Detected that the build failed purely due to HW '
                       'Test Lab failure(s). Will not reject any changes')
-      return set()
     elif infra_fail:
       # The non-lab infrastructure errors might have been caused
       # by chromite changes.
       logging.warning(
           'Detected that the build failed due to non-lab infrastructure '
           'issue(s). Will only reject chromite changes')
-      return set(cls.FilterChangesForInfraFail(changes))
+      infra_changes = cls.FilterChangesForInfraFail(changes)
+      suspect_changes.update(
+          {x: constants.SUSPECT_REASON_INFRA_FAIL for x in infra_changes})
+    else:
+      suspect_changes = cls.FindSuspectsForFailures(
+          changes, messages, build_root, failed_hwtests, sanity)
 
-    return cls._FindPackageBuildFailureSuspects(changes, messages, sanity)
+    return suspect_changes
 
   @classmethod
   def CanIgnoreFailures(cls, messages, change, build_root,
@@ -618,7 +542,8 @@ class CalculateSuspects(object):
     subsystems are unrelated to this change.
 
     Args:
-      messages: A list of BuildFailureMessage from the failed slaves.
+      messages: A list of build_failure_message.BuildFailureMessage from the
+        failed slaves.
       change: A GerritPatch instance to examine.
       build_root: Build root directory.
       subsys_by_config: A dictionary of pass/fail HWTest subsystems indexed
@@ -639,9 +564,11 @@ class CalculateSuspects(object):
 
     for message in messages:
       failing_stages.update(message.GetFailingStages())
-    ignored_stages = GetStagesToIgnoreForChange(build_root, change)
+
+    cq_config_parser = cq_config.CQConfigParser(build_root, change)
+    ignored_stages = cq_config_parser.GetStagesToIgnore()
     if ignored_stages and failing_stages.issubset(ignored_stages):
-      return (True, constants.STRATEGY_CQ_PARTIAL)
+      return (True, constants.STRATEGY_CQ_PARTIAL_IGNORED_STAGES)
 
     # Among the failed stages, except the stages that can be ignored, only
     # HWTestStage fails, and subsystem logic has been used on all configs
@@ -677,7 +604,8 @@ class CalculateSuspects(object):
 
   @classmethod
   def GetFullyVerifiedChanges(cls, changes, changes_by_config, subsys_by_config,
-                              failing, inflight, no_stat, messages, build_root):
+                              passed_in_history_slaves_by_change, failing,
+                              inflight, no_stat, messages, build_root):
     """Examines build failures and returns a set of fully verified changes.
 
     A change is fully verified if all the build configs relevant to
@@ -690,11 +618,13 @@ class CalculateSuspects(object):
         config names.
       subsys_by_config: A dictionary of pass/fail HWTest subsystems indexed
         by the config names.
+      passed_in_history_slaves_by_change: A dict mapping changes to their
+        relevant slaves (build config name strings) which passed in history.
       failing: Names of the builders that failed.
       inflight: Names of the builders that timed out.
       no_stat: Set of builder names of slave builders that had status None.
-      messages: A list of BuildFailureMessage or NoneType objects from
-        the failed slaves.
+      messages: A list of build_failure_message.BuildFailureMessage or NoneType
+        objects from the failed slaves.
       build_root: Build root directory.
 
     Returns:
@@ -719,32 +649,125 @@ class CalculateSuspects(object):
       logging.info('These changes were not tested by any slaves, '
                    'so they will be submitted: %s',
                    cros_patch.GetChangesAsString(untested_changes))
-      fully_verified.update({c: None for c in untested_changes})
+      fully_verified.update({c: constants.STRATEGY_CQ_PARTIAL_NOT_TESTED
+                             for c in untested_changes})
+
+    not_completed = set.union(no_stat, inflight)
 
     for change in all_tested_changes:
-      # If all relevant configs associated with a change passed, the
-      # change is fully verified.
+      # If each of the relevant configs associated with a change satisifies one
+      # of the conditions:
+      # 1) passed successfully; OR
+      # 2) failed with failures which can be ignored by the change; OR
+      # 3) there are builds of the relevant build config passed in history.
+      # this change will be considered as fully verified.
+      verified = True
+      verified_reasons = set()
       relevant_configs = [k for k, v in changes_by_config.iteritems() if
                           change in v]
-      if any(x in set.union(no_stat, inflight) for x in relevant_configs):
-        continue
+      passed_in_history_slaves = passed_in_history_slaves_by_change.get(
+          change, set())
+      logging.info('Checking change %s; relevant configs %s; configs passed in '
+                   'history %s.', change.PatchLink(), relevant_configs,
+                   list(passed_in_history_slaves))
 
-      failed_configs = [x for x in relevant_configs if x in failing]
-      if not failed_configs:
-        logging.info('All the %s relevant config(s) for change %s passed, so '
-                     'it will be submitted.', len(relevant_configs),
-                     cros_patch.GetChangesAsString([change]))
-        fully_verified.update({change: None})
-      else:
-        # Examine the failures and see if we can safely ignore them
-        # for the change.
-        failed_messages = [x for x in messages if x.builder in failed_configs]
-        ignore_result = cls.CanIgnoreFailures(
-            failed_messages, change, build_root, subsys_by_config)
-        if ignore_result[0]:
-          logging.info('All failures of relevant configs for change %s are '
-                       'ignorable by this change, so it will be submitted.',
-                       cros_patch.GetChangesAsString([change]))
-          fully_verified.update({change: ignore_result[1]})
+      for build_config in relevant_configs:
+        if build_config in not_completed:
+          if build_config in passed_in_history_slaves:
+            verified_reasons.add(constants.STRATEGY_CQ_PARTIAL_CQ_HISTORY)
+          else:
+            logging.info('Failed to verify change %s: relevant build %s isn\'t '
+                         'completed in current run and didn\'t pass in history',
+                         change.PatchLink(), build_config)
+            verified = False
+            break
+        elif build_config in failing:
+          failed_messages = [x for x in messages if x.builder == build_config]
+          ignore_result = cls.CanIgnoreFailures(
+              failed_messages, change, build_root, subsys_by_config)
+          if ignore_result[0]:
+            verified_reasons.add(ignore_result[1])
+          elif build_config in passed_in_history_slaves:
+            verified_reasons.add(constants.STRATEGY_CQ_PARTIAL_CQ_HISTORY)
+          else:
+            logging.info('Failed to verify change %s: relevant build %s failed '
+                         'with not ignorable failures in current run and '
+                         'didn\'t pass in history',
+                         change.PatchLink(), build_config)
+            verified = False
+            break
+        else:
+          verified_reasons.add(constants.STRATEGY_CQ_PARTIAL_BUILDS_PASSED)
+
+      if verified:
+        reason = cls._GetVerifiedReason(verified_reasons)
+        fully_verified.update({change: reason})
+        logging.info('Change %s is verified with reasons %s, choose the final '
+                     'reason %s.', change.PatchLink(), list(verified_reasons),
+                     reason)
 
     return fully_verified
+
+  @classmethod
+  def _GetVerifiedReason(cls, verified_reasons):
+    """Get a reason with the highest prioirty from a set of verified reasons.
+
+    Args:
+      verified_reasons: A set of verified reasons (memebers of
+          constants.STRATEGY_CQ_PARTIAL_REASONS).
+
+    Returns:
+      The reason with the highest prioirty.
+    """
+    if verified_reasons:
+      reasons = list(verified_reasons)
+      reason = reasons[0]
+      for r in reasons[1:]:
+        if (constants.STRATEGY_CQ_PARTIAL_REASONS[r] <
+            constants.STRATEGY_CQ_PARTIAL_REASONS[reason]):
+          reason = r
+
+      return reason
+
+
+class SuspectChanges(dict):
+  """A dict mapping from suspected changes to their suspect reasons.
+
+  The suspect reason of a change can be updated in the dict only when the change
+  isn't in the dict, or the new suspect reason has a higher blame priority.
+  """
+
+  def __init__(self, suspect_dict=None):
+    """Initialize a SuspectChanges object."""
+    if suspect_dict is None:
+      suspect_dict = {}
+    super(SuspectChanges, self).__init__(suspect_dict)
+
+  def __setitem__(self, key, value):
+    """Overwrite __setitem__."""
+    if key not in self or value < self[key]:
+      super(SuspectChanges, self).__setitem__(key, value)
+
+  def setdefault(self, key, value):
+    """Overwrite setdefault."""
+    assert value in constants.SUSPECT_REASONS
+
+    if key not in self or value < self[key]:
+      self[key] = value
+    return self[key]
+
+  def update(self, *args, **kwargs):
+    """Overwrite update."""
+    if args:
+      if len(args) > 1:
+        raise TypeError('update expected at most 1 arguments, got %d' %
+                        len(args))
+
+      other = dict(args[0])
+      for key, value in other.iteritems():
+        if key not in self or value < self[key]:
+          self[key] = value
+
+      for key, value in kwargs.iteritems():
+        if key not in self or value < self[key]:
+          self[key] = value

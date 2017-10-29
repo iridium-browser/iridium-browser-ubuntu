@@ -37,8 +37,11 @@
 #include "Memory.hpp"
 #include "MutexLock.hpp"
 
-#include <xmmintrin.h>
 #include <fstream>
+
+#if defined(__i386__) || defined(__x86_64__)
+#include <xmmintrin.h>
+#endif
 
 #if defined(__x86_64__) && defined(_WIN32)
 extern "C" void X86CompilationCallback()
@@ -5218,7 +5221,7 @@ namespace sw
 		else
 		{
 			RValue<Int4> greater = CmpNLE(x, y);
-			return x & greater | y & ~greater;
+			return (x & greater) | (y & ~greater);
 		}
 	}
 
@@ -5231,7 +5234,7 @@ namespace sw
 		else
 		{
 			RValue<Int4> less = CmpLT(x, y);
-			return x & less | y & ~less;
+			return (x & less) | (y & ~less);
 		}
 	}
 
@@ -5558,7 +5561,7 @@ namespace sw
 		else
 		{
 			RValue<UInt4> greater = CmpNLE(x, y);
-			return x & greater | y & ~greater;
+			return (x & greater) | (y & ~greater);
 		}
 	}
 
@@ -5571,7 +5574,7 @@ namespace sw
 		else
 		{
 			RValue<UInt4> less = CmpLT(x, y);
-			return x & less | y & ~less;
+			return (x & less) | (y & ~less);
 		}
 	}
 
@@ -5734,16 +5737,16 @@ namespace sw
 
 	RValue<Float> Rcp_pp(RValue<Float> x, bool exactAtPow2)
 	{
-		if(exactAtPow2)
-		{
-			// rcpss uses a piecewise-linear approximation which minimizes the relative error
-			// but is not exact at power-of-two values. Rectify by multiplying by the inverse.
-			return x86::rcpss(x) * Float(1.0f / _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ps1(1.0f))));
-		}
-		else
-		{
-			return x86::rcpss(x);
-		}
+		#if defined(__i386__) || defined(__x86_64__)
+			if(exactAtPow2)
+			{
+				// rcpss uses a piecewise-linear approximation which minimizes the relative error
+				// but is not exact at power-of-two values. Rectify by multiplying by the inverse.
+				return x86::rcpss(x) * Float(1.0f / _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ps1(1.0f))));
+			}
+		#endif
+
+		return x86::rcpss(x);
 	}
 
 	RValue<Float> RcpSqrt_pp(RValue<Float> x)
@@ -6114,16 +6117,16 @@ namespace sw
 
 	RValue<Float4> Rcp_pp(RValue<Float4> x, bool exactAtPow2)
 	{
-		if(exactAtPow2)
-		{
-			// rcpps uses a piecewise-linear approximation which minimizes the relative error
-			// but is not exact at power-of-two values. Rectify by multiplying by the inverse.
-			return x86::rcpps(x) * Float4(1.0f / _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ps1(1.0f))));
-		}
-		else
-		{
-			return x86::rcpps(x);
-		}
+		#if defined(__i386__) || defined(__x86_64__)
+			if(exactAtPow2)
+			{
+				// rcpps uses a piecewise-linear approximation which minimizes the relative error
+				// but is not exact at power-of-two values. Rectify by multiplying by the inverse.
+				return x86::rcpps(x) * Float4(1.0f / _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ps1(1.0f))));
+			}
+		#endif
+
+		return x86::rcpps(x);
 	}
 
 	RValue<Float4> RcpSqrt_pp(RValue<Float4> x)
@@ -6252,16 +6255,22 @@ namespace sw
 
 	RValue<Float4> Frac(RValue<Float4> x)
 	{
+		Float4 frc;
+
 		if(CPUID::supportsSSE4_1())
 		{
-			return x - x86::floorps(x);
+			frc = x - x86::floorps(x);
 		}
 		else
 		{
-			Float4 frc = x - Float4(Int4(x));   // Signed fractional part
+			frc = x - Float4(Int4(x));   // Signed fractional part.
 
-			return frc + As<Float4>(As<Int4>(CmpNLE(Float4(0.0f), frc)) & As<Int4>(Float4(1, 1, 1, 1)));
+			frc += As<Float4>(As<Int4>(CmpNLE(Float4(0.0f), frc)) & As<Int4>(Float4(1.0f)));   // Add 1.0 if negative.
 		}
+
+		// x - floor(x) can be 1.0 for very small negative x.
+		// Clamp against the value just below 1.0.
+		return Min(frc, As<Float4>(Int4(0x3F7FFFFF)));
 	}
 
 	RValue<Float4> Floor(RValue<Float4> x)
@@ -6367,12 +6376,10 @@ namespace sw
 		Nucleus::createUnreachable();
 	}
 
-	bool branch(RValue<Bool> cmp, BasicBlock *bodyBB, BasicBlock *endBB)
+	void branch(RValue<Bool> cmp, BasicBlock *bodyBB, BasicBlock *endBB)
 	{
 		Nucleus::createCondBr(cmp.value, bodyBB, endBB);
 		Nucleus::setInsertBlock(bodyBB);
-
-		return true;
 	}
 
 	RValue<Long> Ticks()

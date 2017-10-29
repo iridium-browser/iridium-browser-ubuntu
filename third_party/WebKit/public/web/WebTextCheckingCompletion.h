@@ -31,7 +31,7 @@
 #ifndef WebTextCheckingCompletion_h
 #define WebTextCheckingCompletion_h
 
-#include "../platform/WebCommon.h"
+#include "public/platform/WebCommon.h"
 
 namespace blink {
 
@@ -42,9 +42,9 @@ class WebVector;
 // Gets called back when WebViewClient finished an asynchronous spell checking.
 class WebTextCheckingCompletion {
  public:
-  virtual void didFinishCheckingText(
+  virtual void DidFinishCheckingText(
       const WebVector<WebTextCheckingResult>&) = 0;
-  virtual void didCancelCheckingText() {}
+  virtual void DidCancelCheckingText() {}
 
  protected:
   ~WebTextCheckingCompletion() {}

@@ -263,27 +263,6 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   void MarkAsSimd128(Node* node) {
     MarkAsRepresentation(MachineRepresentation::kSimd128, node);
   }
-  void MarkAsSimd1x4(Node* node) {
-    if (kSimdMaskRegisters) {
-      MarkAsRepresentation(MachineRepresentation::kSimd1x4, node);
-    } else {
-      MarkAsSimd128(node);
-    }
-  }
-  void MarkAsSimd1x8(Node* node) {
-    if (kSimdMaskRegisters) {
-      MarkAsRepresentation(MachineRepresentation::kSimd1x8, node);
-    } else {
-      MarkAsSimd128(node);
-    }
-  }
-  void MarkAsSimd1x16(Node* node) {
-    if (kSimdMaskRegisters) {
-      MarkAsRepresentation(MachineRepresentation::kSimd1x16, node);
-    } else {
-      MarkAsSimd128(node);
-    }
-  }
   void MarkAsReference(Node* node) {
     MarkAsRepresentation(MachineRepresentation::kTagged, node);
   }
@@ -365,7 +344,7 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
   void VisitDeoptimize(DeoptimizeKind kind, DeoptimizeReason reason,
                        Node* value);
   void VisitReturn(Node* ret);
-  void VisitThrow(Node* value);
+  void VisitThrow(Node* node);
   void VisitRetain(Node* node);
 
   void EmitPrepareArguments(ZoneVector<compiler::PushParameter>* arguments,
@@ -389,6 +368,9 @@ class V8_EXPORT_PRIVATE InstructionSelector final {
 
   void MarkPairProjectionsAsWord32(Node* node);
   bool IsSourcePositionUsed(Node* node);
+  void VisitAtomicBinaryOperation(Node* node, ArchOpcode int8_op,
+                                  ArchOpcode uint8_op, ArchOpcode int16_op,
+                                  ArchOpcode uint16_op, ArchOpcode word32_op);
 
   // ===========================================================================
 

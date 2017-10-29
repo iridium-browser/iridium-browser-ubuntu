@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 
 #include "SkPictureImageFilter.h"
 #include "SkPictureRecorder.h"
@@ -32,7 +33,7 @@ static sk_sp<SkPicture> make_picture() {
     paint.setColor(0xFFFFFFFF);
     paint.setTextSize(SkIntToScalar(96));
     const char* str = "e";
-    canvas->drawText(str, strlen(str), SkIntToScalar(20), SkIntToScalar(70), paint);
+    canvas->drawString(str, SkIntToScalar(20), SkIntToScalar(70), paint);
     return recorder.finishRecordingAsPicture();
 }
 
@@ -49,7 +50,7 @@ static sk_sp<SkPicture> make_LCD_picture() {
     // this has to be small enough that it doesn't become a path
     paint.setTextSize(SkIntToScalar(36));
     const char* str = "e";
-    canvas->drawText(str, strlen(str), SkIntToScalar(20), SkIntToScalar(70), paint);
+    canvas->drawString(str, SkIntToScalar(20), SkIntToScalar(70), paint);
     return recorder.finishRecordingAsPicture();
 }
 

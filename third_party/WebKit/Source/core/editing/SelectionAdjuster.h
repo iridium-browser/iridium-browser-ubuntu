@@ -6,7 +6,7 @@
 #define SelectionAdjuster_h
 
 #include "core/editing/VisibleSelection.h"
-#include "wtf/Allocator.h"
+#include "platform/wtf/Allocator.h"
 
 namespace blink {
 
@@ -17,9 +17,14 @@ class CORE_EXPORT SelectionAdjuster final {
   STATIC_ONLY(SelectionAdjuster);
 
  public:
-  static void adjustSelectionToAvoidCrossingShadowBoundaries(VisibleSelection*);
-  static void adjustSelectionToAvoidCrossingShadowBoundaries(
-      VisibleSelectionInFlatTree*);
+  static Position AdjustSelectionStartToAvoidCrossingShadowBoundaries(
+      const EphemeralRange&);
+  static Position AdjustSelectionEndToAvoidCrossingShadowBoundaries(
+      const EphemeralRange&);
+  static PositionInFlatTree AdjustSelectionStartToAvoidCrossingShadowBoundaries(
+      const EphemeralRangeInFlatTree&);
+  static PositionInFlatTree AdjustSelectionEndToAvoidCrossingShadowBoundaries(
+      const EphemeralRangeInFlatTree&);
 };
 
 }  // namespace blink

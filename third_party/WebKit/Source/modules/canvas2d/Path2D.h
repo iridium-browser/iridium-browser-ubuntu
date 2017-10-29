@@ -28,49 +28,51 @@
 #ifndef Path2D_h
 #define Path2D_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/svg/SVGMatrixTearOff.h"
 #include "core/svg/SVGPathUtilities.h"
-#include "modules/canvas2d/CanvasPathMethods.h"
+#include "modules/canvas2d/CanvasPath.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/transforms/AffineTransform.h"
 
 namespace blink {
 
 class MODULES_EXPORT Path2D final : public GarbageCollectedFinalized<Path2D>,
-                                    public CanvasPathMethods,
+                                    public CanvasPath,
                                     public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
   WTF_MAKE_NONCOPYABLE(Path2D);
 
  public:
-  static Path2D* create() { return new Path2D; }
-  static Path2D* create(const String& pathData) { return new Path2D(pathData); }
-  static Path2D* create(Path2D* path) { return new Path2D(path); }
-  static Path2D* create(const Path& path) { return new Path2D(path); }
+  static Path2D* Create() { return new Path2D; }
+  static Path2D* Create(const String& path_data) {
+    return new Path2D(path_data);
+  }
+  static Path2D* Create(Path2D* path) { return new Path2D(path); }
+  static Path2D* Create(const Path& path) { return new Path2D(path); }
 
-  const Path& path() const { return m_path; }
+  const Path& GetPath() const { return path_; }
 
   void addPath(Path2D* path) { addPath(path, 0); }
 
   void addPath(Path2D* path, SVGMatrixTearOff* transform) {
-    Path src = path->path();
-    m_path.addPath(src, transform ? transform->value()
-                                  : AffineTransform(1, 0, 0, 1, 0, 0));
+    Path src = path->GetPath();
+    path_.AddPath(src, transform ? transform->Value()
+                                 : AffineTransform(1, 0, 0, 1, 0, 0));
   }
 
   ~Path2D() override {}
   DEFINE_INLINE_TRACE() {}
 
  private:
-  Path2D() : CanvasPathMethods() {}
+  Path2D() : CanvasPath() {}
 
-  Path2D(const Path& path) : CanvasPathMethods(path) {}
+  Path2D(const Path& path) : CanvasPath(path) {}
 
-  Path2D(Path2D* path) : CanvasPathMethods(path->path()) {}
+  Path2D(Path2D* path) : CanvasPath(path->GetPath()) {}
 
-  Path2D(const String& pathData) : CanvasPathMethods() {
-    buildPathFromString(pathData, m_path);
+  Path2D(const String& path_data) : CanvasPath() {
+    BuildPathFromString(path_data, path_);
   }
 };
 

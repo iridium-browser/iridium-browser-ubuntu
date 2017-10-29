@@ -10,6 +10,7 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/ios/device_util.h"
+#include "base/ios/ios_util.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
@@ -26,9 +27,9 @@
 #include "ios/chrome/browser/ui/omnibox/omnibox_popup_view_ios.h"
 #include "ios/chrome/browser/ui/omnibox/omnibox_util.h"
 #include "ios/chrome/browser/ui/omnibox/preload_provider.h"
-#include "ios/chrome/browser/ui/omnibox/web_omnibox_edit_controller.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
+#include "ios/shared/chrome/browser/ui/omnibox/web_omnibox_edit_controller.h"
 #include "ios/web/public/referrer.h"
 #import "net/base/mac/url_conversions.h"
 #include "skia/ext/skia_utils_ios.h"
@@ -37,6 +38,10 @@
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using base::UserMetricsAction;
 
@@ -144,14 +149,6 @@ UIColor* IncognitoSecureTextColor() {
   return editView_->OnCopy();
 }
 
-- (BOOL)onCopyURL {
-  return editView_->OnCopyURL();
-}
-
-- (BOOL)canCopyURL {
-  return editView_->CanCopyURL();
-}
-
 - (void)willPaste {
   editView_->WillPaste();
 }
@@ -171,11 +168,12 @@ OmniboxViewIOS::OmniboxViewIOS(OmniboxTextFieldIOS* field,
           controller,
           base::MakeUnique<ChromeOmniboxClientIOS>(controller, browser_state)),
       browser_state_(browser_state),
-      field_([field retain]),
+      field_(field),
       controller_(controller),
       preloader_(preloader),
       ignore_popup_updates_(false),
       attributing_display_string_(nil) {
+  DCHECK(field_);
   popup_view_.reset(new OmniboxPopupViewIOS(this, model(), positioner));
   field_delegate_.reset(
       [[AutocompleteTextFieldDelegate alloc] initWithEditView:this]);
@@ -183,6 +181,7 @@ OmniboxViewIOS::OmniboxViewIOS(OmniboxTextFieldIOS* field,
   [field_ addTarget:field_delegate_
                 action:@selector(textFieldDidChange:)
       forControlEvents:UIControlEventEditingChanged];
+  use_strikethrough_workaround_ = base::ios::IsRunningOnOrLater(10, 3, 0);
 }
 
 OmniboxViewIOS::~OmniboxViewIOS() {
@@ -234,6 +233,10 @@ void OmniboxViewIOS::SetWindowTextAndCaretPos(const base::string16& text,
   if (notify_text_changed)
     model()->OnChanged();
 }
+
+// TODO(crbug.com/726702): Implement this and have |SetWindowTextAndCaretPos()|
+// call it.
+void OmniboxViewIOS::SetCaretPos(size_t caret_pos) {}
 
 void OmniboxViewIOS::RevertAll() {
   ignore_popup_updates_ = true;
@@ -309,7 +312,7 @@ bool OmniboxViewIOS::IsImeComposing() const {
 }
 
 bool OmniboxViewIOS::IsIndicatingQueryRefinement() const {
-  return [field_ isShowingQueryRefinementChip];
+  return false;
 }
 
 bool OmniboxViewIOS::IsSelectAll() const {
@@ -381,7 +384,6 @@ void OmniboxViewIOS::OnDidBeginEditing() {
 void OmniboxViewIOS::OnDidEndEditing() {
   CloseOmniboxPopup();
   [field_ enableLeftViewButton:YES];
-  [field_ setChipText:@""];
   model()->OnWillKillFocus();
   model()->OnKillFocus();
   if ([field_ isPreEditing])
@@ -582,12 +584,8 @@ bool OmniboxViewIOS::OnCopy() {
 
   GURL url;
   bool write_url = false;
-  // Don't adjust the text (e.g. add http://) if the omnibox is currently
-  // showing non-URL text (e.g. search terms instead of the URL).
-  if (!CanCopyURL()) {
-    model()->AdjustTextForCopy(start_location, is_select_all, &text, &url,
-                               &write_url);
-  }
+  model()->AdjustTextForCopy(start_location, is_select_all, &text, &url,
+                             &write_url);
 
   // Create the pasteboard item manually because the pasteboard expects a single
   // item with multiple representations.  This is expressed as a single
@@ -601,23 +599,6 @@ bool OmniboxViewIOS::OnCopy() {
 
   board.items = [NSArray arrayWithObject:item];
   return true;
-}
-
-bool OmniboxViewIOS::OnCopyURL() {
-  // Create the pasteboard item manually because the pasteboard expects a single
-  // item with multiple representations.  This is expressed as a single
-  // NSDictionary with multiple keys, one for each representation.
-  GURL url = controller_->GetToolbarModel()->GetURL();
-  NSDictionary* item = @{
-    (NSString*)kUTTypePlainText : base::SysUTF8ToNSString(url.spec()),
-    (NSString*)kUTTypeURL : net::NSURLWithGURL(url)
-  };
-  [UIPasteboard generalPasteboard].items = [NSArray arrayWithObject:item];
-  return true;
-}
-
-bool OmniboxViewIOS::CanCopyURL() {
-  return false;
 }
 
 void OmniboxViewIOS::WillPaste() {
@@ -667,11 +648,33 @@ void OmniboxViewIOS::UpdateSchemeStyle(const gfx::Range& range) {
   DCHECK_NE(security_state::SECURE_WITH_POLICY_INSTALLED_CERT, security_level);
 
   if (security_level == security_state::DANGEROUS) {
+    if (use_strikethrough_workaround_) {
+      // Workaround: Add extra attribute to allow strikethough to apply on iOS
+      // 10.3+. See https://crbug.com/699702 for discussion.
+      [attributing_display_string_
+          addAttribute:NSBaselineOffsetAttributeName
+                 value:@0
+                 range:NSMakeRange(0, [attributing_display_string_ length])];
+    }
+
+    NSRange strikethroughRange = range.ToNSRange();
+    // TODO(crbug.com/751801): remove this workaround.
+    // In iOS 11, UITextField has a bug: when the first character has
+    // strikethrough attribute, typing and setting text without strikethrough
+    // attribute will still result in strikethrough. The following is a
+    // workaround that prevents crossing out the first character.
+    if (base::ios::IsRunningOnOrLater(11, 0, 0)) {
+      if (strikethroughRange.location == 0 && strikethroughRange.length > 0) {
+        strikethroughRange.location += 1;
+        strikethroughRange.length -= 1;
+      }
+    }
+
     // Add a strikethrough through the scheme.
     [attributing_display_string_
         addAttribute:NSStrikethroughStyleAttributeName
                value:[NSNumber numberWithInteger:NSUnderlineStyleSingle]
-               range:range.ToNSRange()];
+               range:strikethroughRange];
   }
 
   UIColor* color = GetSecureTextColor(security_level, [field_ incognito]);
@@ -684,8 +687,8 @@ void OmniboxViewIOS::UpdateSchemeStyle(const gfx::Range& range) {
 
 NSAttributedString* OmniboxViewIOS::ApplyTextAttributes(
     const base::string16& text) {
-  NSMutableAttributedString* as = [[[NSMutableAttributedString alloc]
-      initWithString:base::SysUTF16ToNSString(text)] autorelease];
+  NSMutableAttributedString* as = [[NSMutableAttributedString alloc]
+      initWithString:base::SysUTF16ToNSString(text)];
   // Cache a pointer to the attributed string to allow the superclass'
   // virtual method invocations to add attributes.
   DCHECK(attributing_display_string_ == nil);
@@ -703,9 +706,6 @@ void OmniboxViewIOS::UpdateAppearance() {
     RevertAll();
   } else if (!model()->has_focus() &&
              !ShouldIgnoreUserInputDueToPendingVoiceSearch()) {
-    // Only update the chip text if the omnibox is not currently focused.
-    [field_ setChipText:@""];
-
     // Even if the change wasn't "user visible" to the model, it still may be
     // necessary to re-color to the URL string.  Only do this if the omnibox is
     // not currently focused.
@@ -766,7 +766,6 @@ void OmniboxViewIOS::ClearText() {
 }
 
 void OmniboxViewIOS::RemoveQueryRefinementChip() {
-  [field_ setChipText:nil];
   controller_->OnChanged();
 }
 

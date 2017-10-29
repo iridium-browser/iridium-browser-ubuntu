@@ -28,9 +28,8 @@ class FakeContentTranslateDriver
   ~FakeContentTranslateDriver() override {}
 
   void BindHandle(mojo::ScopedMessagePipeHandle handle) {
-    bindings_.AddBinding(
-        this, mojo::MakeRequest<translate::mojom::ContentTranslateDriver>(
-                  std::move(handle)));
+    bindings_.AddBinding(this, translate::mojom::ContentTranslateDriverRequest(
+                                   std::move(handle)));
   }
 
   // translate::mojom::ContentTranslateDriver implementation.
@@ -77,7 +76,7 @@ TEST_F(ChromeRenderFrameObserverTest, SkipCapturingSubFrames) {
       "This is a main document"
       "<iframe srcdoc=\"This a document in an iframe.\">"
       "</body>");
-  view_->GetWebView()->updateAllLifecyclePhases();
+  view_->GetWebView()->UpdateAllLifecyclePhases();
 
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(fake_translate_driver_.called_new_page_);

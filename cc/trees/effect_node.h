@@ -5,8 +5,8 @@
 #ifndef CC_TREES_EFFECT_NODE_H_
 #define CC_TREES_EFFECT_NODE_H_
 
-#include "cc/base/cc_export.h"
-#include "cc/output/filter_operations.h"
+#include "cc/base/filter_operations.h"
+#include "cc/cc_export.h"
 #include "third_party/skia/include/core/SkBlendMode.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/size_f.h"
@@ -23,12 +23,17 @@ struct CC_EXPORT EffectNode {
   EffectNode();
   EffectNode(const EffectNode& other);
 
+  enum StableIdLabels { INVALID_STABLE_ID = 0 };
+
   // The node index of this node in the effect tree node vector.
   int id;
   // The node index of the parent node in the effect tree node vector.
   int parent_id;
-  // The layer id of the layer that owns this node.
-  int owning_layer_id;
+  // An opaque, unique, stable identifer for this effect that persists across
+  // frame commits. This id is used only for internal implementation
+  // details such as RenderSurface and RenderPass ids, and should not
+  // be assumed to have semantic meaning.
+  uint64_t stable_id;
 
   float opacity;
   float screen_space_opacity;
@@ -43,35 +48,44 @@ struct CC_EXPORT EffectNode {
 
   gfx::Size unscaled_mask_target_size;
 
-  bool has_render_surface;
-  // Only applicable if has render surface. A true value means a clip needs to
-  // be applied to the output of the surface when it is drawn onto its parent
-  // surface.
-  // TODO(crbug.com/504464): There is ongoing work to delay render surface
-  // decision to later phase of the pipeline. This flag shall be removed and
-  // computed during render surface decision.
-  bool surface_is_clipped;
-  bool has_copy_request;
-  bool hidden_by_backface_visibility;
-  bool double_sided;
-  bool is_drawn;
+  bool has_render_surface : 1;
+  bool cache_render_surface : 1;
+  bool has_copy_request : 1;
+  bool hidden_by_backface_visibility : 1;
+  bool double_sided : 1;
+  bool is_drawn : 1;
   // TODO(jaydasika) : Delete this after implementation of
   // SetHideLayerAndSubtree is cleaned up. (crbug.com/595843)
-  bool subtree_hidden;
-  bool has_potential_filter_animation;
-  bool has_potential_opacity_animation;
-  bool is_currently_animating_filter;
-  bool is_currently_animating_opacity;
-  // We need to track changes to effects on the compositor to compute damage
-  // rect.
-  bool effect_changed;
-  int num_copy_requests_in_subtree;
-  bool has_unclipped_descendants;
+  bool subtree_hidden : 1;
+  // Whether this node has a potentially running (i.e., irrespective
+  // of exact timeline) filter animation.
+  bool has_potential_filter_animation : 1;
+  // Whether this node has a potentially running (i.e., irrespective
+  // of exact timeline) opacity animation.
+  bool has_potential_opacity_animation : 1;
+  // Whether this node has a currently running filter animation.
+  bool is_currently_animating_filter : 1;
+  // Whether this node has a currently running opacity animation.
+  bool is_currently_animating_opacity : 1;
+  // Whether this node's effect has been changed since the last
+  // frame. Needed in order to compute damage rect.
+  bool effect_changed : 1;
+  bool subtree_has_copy_request : 1;
+  // The transform node index of the transform to apply to this effect
+  // node's content when rendering to a surface.
   int transform_id;
+  // The clip node index of the clip to apply to this effect node's
+  // content when rendering to a surface.
   int clip_id;
-  // Effect node id of which this effect contributes to.
+
+  // This is the id of the ancestor effect node that induces a
+  // RenderSurfaceImpl.
   int target_id;
+  // The layer id of the mask layer, if any, to apply to this effect
+  // node's content when rendering to a surface.
   int mask_layer_id;
+  int closest_ancestor_with_cached_render_surface_id;
+  int closest_ancestor_with_copy_request_id;
 
   bool operator==(const EffectNode& other) const;
 

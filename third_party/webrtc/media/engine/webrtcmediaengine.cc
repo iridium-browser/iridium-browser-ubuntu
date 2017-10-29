@@ -13,10 +13,11 @@
 #include <algorithm>
 
 #include "webrtc/api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "webrtc/api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "webrtc/media/engine/webrtcvoiceengine.h"
 
 #ifdef HAVE_WEBRTC_VIDEO
-#include "webrtc/media/engine/webrtcvideoengine2.h"
+#include "webrtc/media/engine/webrtcvideoengine.h"
 #else
 #include "webrtc/media/engine/nullwebrtcvideoengine.h"
 #endif
@@ -25,30 +26,38 @@ namespace cricket {
 
 class WebRtcMediaEngine2
 #ifdef HAVE_WEBRTC_VIDEO
-    : public CompositeMediaEngine<WebRtcVoiceEngine, WebRtcVideoEngine2> {
+    : public CompositeMediaEngine<WebRtcVoiceEngine, WebRtcVideoEngine> {
 #else
     : public CompositeMediaEngine<WebRtcVoiceEngine, NullWebRtcVideoEngine> {
 #endif
  public:
-  WebRtcMediaEngine2(webrtc::AudioDeviceModule* adm,
-                     const rtc::scoped_refptr<webrtc::AudioDecoderFactory>&
-                         audio_decoder_factory,
-                     WebRtcVideoEncoderFactory* video_encoder_factory,
-                     WebRtcVideoDecoderFactory* video_decoder_factory,
-                     rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer)
+  WebRtcMediaEngine2(
+      webrtc::AudioDeviceModule* adm,
+      const rtc::scoped_refptr<webrtc::AudioEncoderFactory>&
+          audio_encoder_factory,
+      const rtc::scoped_refptr<webrtc::AudioDecoderFactory>&
+          audio_decoder_factory,
+      WebRtcVideoEncoderFactory* video_encoder_factory,
+      WebRtcVideoDecoderFactory* video_decoder_factory,
+      rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
+      rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing)
 #ifdef HAVE_WEBRTC_VIDEO
-      : CompositeMediaEngine<WebRtcVoiceEngine, WebRtcVideoEngine2>(
+      : CompositeMediaEngine<WebRtcVoiceEngine, WebRtcVideoEngine>(
             adm,
+            audio_encoder_factory,
             audio_decoder_factory,
-            audio_mixer){
+            audio_mixer,
+            audio_processing){
 #else
       : CompositeMediaEngine<WebRtcVoiceEngine, NullWebRtcVideoEngine>(
             adm,
+            audio_encoder_factory,
             audio_decoder_factory,
-            audio_mixer) {
+            audio_mixer,
+            audio_processing) {
 #endif
             video_.SetExternalDecoderFactory(video_decoder_factory);
-    video_.SetExternalEncoderFactory(video_encoder_factory);
+  video_.SetExternalEncoderFactory(video_encoder_factory);
   }
 };
 
@@ -56,14 +65,17 @@ class WebRtcMediaEngine2
 
 cricket::MediaEngineInterface* CreateWebRtcMediaEngine(
     webrtc::AudioDeviceModule* adm,
+    const rtc::scoped_refptr<webrtc::AudioEncoderFactory>&
+        audio_encoder_factory,
     const rtc::scoped_refptr<webrtc::AudioDecoderFactory>&
         audio_decoder_factory,
     cricket::WebRtcVideoEncoderFactory* video_encoder_factory,
     cricket::WebRtcVideoDecoderFactory* video_decoder_factory,
-    rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer) {
-  return new cricket::WebRtcMediaEngine2(adm, audio_decoder_factory,
-                                         video_encoder_factory,
-                                         video_decoder_factory, audio_mixer);
+    rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
+    rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing) {
+  return new cricket::WebRtcMediaEngine2(
+      adm, audio_encoder_factory, audio_decoder_factory, video_encoder_factory,
+      video_decoder_factory, audio_mixer, audio_processing);
 }
 
 void DestroyWebRtcMediaEngine(cricket::MediaEngineInterface* media_engine) {
@@ -80,8 +92,9 @@ MediaEngineInterface* WebRtcMediaEngineFactory::Create(
     WebRtcVideoEncoderFactory* video_encoder_factory,
     WebRtcVideoDecoderFactory* video_decoder_factory) {
   return CreateWebRtcMediaEngine(
-      adm, webrtc::CreateBuiltinAudioDecoderFactory(), video_encoder_factory,
-      video_decoder_factory, nullptr);
+      adm, webrtc::CreateBuiltinAudioEncoderFactory(),
+      webrtc::CreateBuiltinAudioDecoderFactory(), video_encoder_factory,
+      video_decoder_factory, nullptr, webrtc::AudioProcessing::Create());
 }
 
 MediaEngineInterface* WebRtcMediaEngineFactory::Create(
@@ -90,9 +103,10 @@ MediaEngineInterface* WebRtcMediaEngineFactory::Create(
         audio_decoder_factory,
     WebRtcVideoEncoderFactory* video_encoder_factory,
     WebRtcVideoDecoderFactory* video_decoder_factory) {
-  return CreateWebRtcMediaEngine(adm, audio_decoder_factory,
-                                 video_encoder_factory, video_decoder_factory,
-                                 nullptr);
+  return CreateWebRtcMediaEngine(
+      adm, webrtc::CreateBuiltinAudioEncoderFactory(), audio_decoder_factory,
+      video_encoder_factory, video_decoder_factory, nullptr,
+      webrtc::AudioProcessing::Create());
 }
 
 // Used by PeerConnectionFactory to create a media engine passed into
@@ -103,10 +117,40 @@ MediaEngineInterface* WebRtcMediaEngineFactory::Create(
         audio_decoder_factory,
     WebRtcVideoEncoderFactory* video_encoder_factory,
     WebRtcVideoDecoderFactory* video_decoder_factory,
-    rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer) {
-  return CreateWebRtcMediaEngine(adm, audio_decoder_factory,
-                                 video_encoder_factory, video_decoder_factory,
-                                 audio_mixer);
+    rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
+    rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing) {
+  return CreateWebRtcMediaEngine(
+      adm, webrtc::CreateBuiltinAudioEncoderFactory(), audio_decoder_factory,
+      video_encoder_factory, video_decoder_factory, audio_mixer,
+      audio_processing);
+}
+
+MediaEngineInterface* WebRtcMediaEngineFactory::Create(
+    webrtc::AudioDeviceModule* adm,
+    const rtc::scoped_refptr<webrtc::AudioEncoderFactory>&
+        audio_encoder_factory,
+    const rtc::scoped_refptr<webrtc::AudioDecoderFactory>&
+        audio_decoder_factory,
+    WebRtcVideoEncoderFactory* video_encoder_factory,
+    WebRtcVideoDecoderFactory* video_decoder_factory) {
+  return CreateWebRtcMediaEngine(
+      adm, audio_encoder_factory, audio_decoder_factory, video_encoder_factory,
+      video_decoder_factory, nullptr, webrtc::AudioProcessing::Create());
+}
+
+MediaEngineInterface* WebRtcMediaEngineFactory::Create(
+    webrtc::AudioDeviceModule* adm,
+    const rtc::scoped_refptr<webrtc::AudioEncoderFactory>&
+        audio_encoder_factory,
+    const rtc::scoped_refptr<webrtc::AudioDecoderFactory>&
+        audio_decoder_factory,
+    WebRtcVideoEncoderFactory* video_encoder_factory,
+    WebRtcVideoDecoderFactory* video_decoder_factory,
+    rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer,
+    rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing) {
+  return CreateWebRtcMediaEngine(
+      adm, audio_encoder_factory, audio_decoder_factory, video_encoder_factory,
+      video_decoder_factory, audio_mixer, audio_processing);
 }
 
 namespace {
@@ -164,18 +208,22 @@ std::vector<webrtc::RtpExtension> FilterRtpExtensions(
     }
   }
 
-  // Sort by name, ascending, so that we don't reset extensions if they were
-  // specified in a different order (also allows us to use std::unique below).
+  // Sort by name, ascending (prioritise encryption), so that we don't reset
+  // extensions if they were specified in a different order (also allows us
+  // to use std::unique below).
   std::sort(result.begin(), result.end(),
             [](const webrtc::RtpExtension& rhs,
-               const webrtc::RtpExtension& lhs) { return rhs.uri < lhs.uri; });
+               const webrtc::RtpExtension& lhs) {
+                return rhs.encrypt == lhs.encrypt ? rhs.uri < lhs.uri
+                                                  : rhs.encrypt > lhs.encrypt;
+              });
 
   // Remove unnecessary extensions (used on send side).
   if (filter_redundant_extensions) {
     auto it = std::unique(
         result.begin(), result.end(),
         [](const webrtc::RtpExtension& rhs, const webrtc::RtpExtension& lhs) {
-          return rhs.uri == lhs.uri;
+          return rhs.uri == lhs.uri && rhs.encrypt == lhs.encrypt;
         });
     result.erase(it, result.end());
 

@@ -26,31 +26,36 @@ class MockSessionManagerClient : public SessionManagerClient {
   MOCK_CONST_METHOD1(HasObserver, bool(const Observer*));
   MOCK_CONST_METHOD0(IsScreenLocked, bool(void));
   MOCK_METHOD0(EmitLoginPromptVisible, void(void));
-  MOCK_METHOD3(RestartJob,
-               void(int,
-                    const std::vector<std::string>&,
-                    const VoidDBusMethodCallback&));
+  void RestartJob(int socket_fd,
+                  const std::vector<std::string>& argv,
+                  VoidDBusMethodCallback callback) override;
   MOCK_METHOD1(StartSession, void(const cryptohome::Identification&));
   MOCK_METHOD0(StopSession, void(void));
   MOCK_METHOD0(NotifySupervisedUserCreationStarted, void(void));
   MOCK_METHOD0(NotifySupervisedUserCreationFinished, void(void));
   MOCK_METHOD0(StartDeviceWipe, void(void));
+  MOCK_METHOD1(StartTPMFirmwareUpdate, void(const std::string&));
   MOCK_METHOD0(RequestLockScreen, void(void));
   MOCK_METHOD0(NotifyLockScreenShown, void(void));
   MOCK_METHOD0(NotifyLockScreenDismissed, void(void));
   MOCK_METHOD1(RetrieveActiveSessions, void(const ActiveSessionsCallback&));
   MOCK_METHOD1(RetrieveDevicePolicy, void(const RetrievePolicyCallback&));
-  MOCK_METHOD0(BlockingRetrieveDevicePolicy, std::string(void));
+  MOCK_METHOD1(BlockingRetrieveDevicePolicy,
+               RetrievePolicyResponseType(std::string*));
   MOCK_METHOD2(RetrievePolicyForUser,
                void(const cryptohome::Identification&,
                     const RetrievePolicyCallback&));
-  MOCK_METHOD1(BlockingRetrievePolicyForUser,
-               std::string(const cryptohome::Identification&));
+  MOCK_METHOD2(RetrievePolicyForUserWithoutSession,
+               void(const cryptohome::Identification&,
+                    const RetrievePolicyCallback&));
+  MOCK_METHOD2(BlockingRetrievePolicyForUser,
+               RetrievePolicyResponseType(const cryptohome::Identification&,
+                                          std::string*));
   MOCK_METHOD2(RetrieveDeviceLocalAccountPolicy,
                void(const std::string&,
                     const RetrievePolicyCallback&));
-  MOCK_METHOD1(BlockingRetrieveDeviceLocalAccountPolicy,
-               std::string(const std::string&));
+  MOCK_METHOD2(BlockingRetrieveDeviceLocalAccountPolicy,
+               RetrievePolicyResponseType(const std::string&, std::string*));
   MOCK_METHOD2(StoreDevicePolicy,
                void(const std::string&,
                     const StorePolicyCallback&));
@@ -68,8 +73,10 @@ class MockSessionManagerClient : public SessionManagerClient {
                     const std::vector<std::string>&));
   MOCK_METHOD1(GetServerBackedStateKeys, void(const StateKeysCallback&));
   MOCK_METHOD1(CheckArcAvailability, void(const ArcCallback&));
-  MOCK_METHOD3(StartArcInstance,
-               void(const cryptohome::Identification&,
+  MOCK_METHOD5(StartArcInstance,
+               void(ArcStartupMode,
+                    const cryptohome::Identification&,
+                    bool,
                     bool,
                     const StartArcInstanceCallback&));
   MOCK_METHOD1(StopArcInstance, void(const ArcCallback&));

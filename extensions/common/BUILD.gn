@@ -6,6 +6,8 @@ import("//build/config/features.gni")
 import("//extensions/features/features.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 
+# TODO(crbug.com/731689): Assert that extensions are enabled.
+
 source_set("common_constants") {
   sources = [
     "constants.cc",
@@ -19,11 +21,23 @@ source_set("common_constants") {
 if (enable_extensions) {
   mojom("mojo") {
     sources = [
+      "extension_unpacker.mojom",
+      "manifest_parser.mojom",
+      "mojo/app_window.mojom",
       "mojo/keep_alive.mojom",
     ]
+
     if (proprietary_codecs && enable_wifi_display) {
       sources += [ "mojo/wifi_display_session_service.mojom" ]
     }
+
+    public_deps = [
+      "//mojo/common:common_custom_types",
+      "//url/mojo:url_mojom_gurl",
+    ]
+
+    # TODO(crbug.com/699569): Convert to use the new JS bindings.
+    use_new_js_bindings = false
   }
 
   # This must be a static library because extensions common depends on
@@ -38,6 +52,8 @@ if (enable_extensions) {
       "api/bluetooth/bluetooth_manifest_handler.h",
       "api/bluetooth/bluetooth_manifest_permission.cc",
       "api/bluetooth/bluetooth_manifest_permission.h",
+      "api/declarative/declarative_constants.cc",
+      "api/declarative/declarative_constants.h",
       "api/declarative/declarative_manifest_data.cc",
       "api/declarative/declarative_manifest_data.h",
       "api/declarative/declarative_manifest_handler.cc",
@@ -57,6 +73,7 @@ if (enable_extensions) {
       "api/sockets/sockets_manifest_permission.h",
       "common_manifest_handlers.cc",
       "common_manifest_handlers.h",
+      "common_param_traits.h",
       "csp_validator.cc",
       "csp_validator.h",
       "dom_action_types.h",
@@ -91,14 +108,13 @@ if (enable_extensions) {
       "extension_set.h",
       "extension_urls.cc",
       "extension_urls.h",
-      "extension_utility_messages.h",
+      "extension_utility_types.h",
       "extensions_aliases.cc",
       "extensions_aliases.h",
       "extensions_client.cc",
       "extensions_client.h",
       "feature_switch.cc",
       "feature_switch.h",
-      "features/api_feature.h",
       "features/behavior_feature.cc",
       "features/behavior_feature.h",
       "features/complex_feature.cc",
@@ -170,6 +186,8 @@ if (enable_extensions) {
       "manifest_handlers/options_page_info.h",
       "manifest_handlers/permissions_parser.cc",
       "manifest_handlers/permissions_parser.h",
+      "manifest_handlers/plugins_handler.cc",
+      "manifest_handlers/plugins_handler.h",
       "manifest_handlers/requirements_info.cc",
       "manifest_handlers/requirements_info.h",
       "manifest_handlers/sandboxed_page_info.cc",
@@ -257,6 +275,8 @@ if (enable_extensions) {
     public_deps = [
       ":common_constants",
       ":mojo",
+      "//content/public/common",
+      "//ipc",
       "//skia",
     ]
 
@@ -269,14 +289,13 @@ if (enable_extensions) {
       "//chrome:resources",
       "//components/crx_file",
       "//components/url_matcher",
-      "//content/public/common",
       "//crypto",
       "//device/bluetooth",
       "//device/usb",
+      "//device/usb/public/cpp",
       "//extensions:extensions_resources",
       "//extensions/common/api",
       "//extensions/strings",
-      "//ipc",
       "//net",
       "//third_party/boringssl",
       "//third_party/icu",

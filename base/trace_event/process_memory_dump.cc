@@ -9,12 +9,15 @@
 #include <vector>
 
 #include "base/memory/ptr_util.h"
+#include "base/memory/shared_memory_tracker.h"
 #include "base/process/process_metrics.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/heap_profiler_heap_dump_writer.h"
+#include "base/trace_event/heap_profiler_serialization_state.h"
 #include "base/trace_event/memory_infra_background_whitelist.h"
 #include "base/trace_event/process_memory_totals.h"
 #include "base/trace_event/trace_event_argument.h"
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
 
 #if defined(OS_IOS)
@@ -115,13 +118,22 @@ size_t ProcessMemoryDump::CountResidentBytes(void* start_address,
 
     for (size_t i = 0; i < page_count; i++)
       resident_page_count += vec[i].VirtualAttributes.Valid;
+#elif defined(OS_FUCHSIA)
+    // TODO(fuchsia): Port, see https://crbug.com/706592.
+    ALLOW_UNUSED_LOCAL(chunk_start);
+    ALLOW_UNUSED_LOCAL(page_count);
 #elif defined(OS_POSIX)
     int error_counter = 0;
     int result = 0;
     // HANDLE_EINTR tries for 100 times. So following the same pattern.
     do {
       result =
+#if defined(OS_AIX)
+          mincore(reinterpret_cast<char*>(chunk_start), chunk_size,
+                  reinterpret_cast<char*>(vec.get()));
+#else
           mincore(reinterpret_cast<void*>(chunk_start), chunk_size, vec.get());
+#endif
     } while (result == -1 && errno == EAGAIN && error_counter++ < 100);
     failure = !!result;
 
@@ -146,11 +158,13 @@ size_t ProcessMemoryDump::CountResidentBytes(void* start_address,
 #endif  // defined(COUNT_RESIDENT_BYTES_SUPPORTED)
 
 ProcessMemoryDump::ProcessMemoryDump(
-    scoped_refptr<MemoryDumpSessionState> session_state,
+    scoped_refptr<HeapProfilerSerializationState>
+        heap_profiler_serialization_state,
     const MemoryDumpArgs& dump_args)
     : has_process_totals_(false),
       has_process_mmaps_(false),
-      session_state_(std::move(session_state)),
+      heap_profiler_serialization_state_(
+          std::move(heap_profiler_serialization_state)),
       dump_args_(dump_args) {}
 
 ProcessMemoryDump::~ProcessMemoryDump() {}
@@ -239,14 +253,22 @@ MemoryAllocatorDump* ProcessMemoryDump::GetSharedGlobalAllocatorDump(
 }
 
 void ProcessMemoryDump::DumpHeapUsage(
-    const base::hash_map<base::trace_event::AllocationContext,
-        base::trace_event::AllocationMetrics>& metrics_by_context,
+    const std::unordered_map<base::trace_event::AllocationContext,
+                             base::trace_event::AllocationMetrics>&
+        metrics_by_context,
     base::trace_event::TraceEventMemoryOverhead& overhead,
     const char* allocator_name) {
   if (!metrics_by_context.empty()) {
+    // We shouldn't end up here unless we're doing a detailed dump with
+    // heap profiling enabled and if that is the case tracing should be
+    // enabled which sets up the heap profiler serialization state.
+    if (!heap_profiler_serialization_state()) {
+      NOTREACHED();
+      return;
+    }
     DCHECK_EQ(0ul, heap_dumps_.count(allocator_name));
     std::unique_ptr<TracedValue> heap_dump = ExportHeapDump(
-        metrics_by_context, *session_state());
+        metrics_by_context, *heap_profiler_serialization_state());
     heap_dumps_[allocator_name] = std::move(heap_dump);
   }
 
@@ -281,8 +303,7 @@ void ProcessMemoryDump::TakeAllDumpsFrom(ProcessMemoryDump* other) {
   other->allocator_dumps_.clear();
 
   // Move all the edges.
-  allocator_dumps_edges_.insert(allocator_dumps_edges_.end(),
-                                other->allocator_dumps_edges_.begin(),
+  allocator_dumps_edges_.insert(other->allocator_dumps_edges_.begin(),
                                 other->allocator_dumps_edges_.end());
   other->allocator_dumps_edges_.clear();
 
@@ -321,7 +342,8 @@ void ProcessMemoryDump::AsValueInto(TracedValue* value) const {
   }
 
   value->BeginArray("allocators_graph");
-  for (const MemoryAllocatorDumpEdge& edge : allocator_dumps_edges_) {
+  for (const auto& it : allocator_dumps_edges_) {
+    const MemoryAllocatorDumpEdge& edge = it.second;
     value->BeginDictionary();
     value->SetString("source", edge.source.ToString());
     value->SetString("target", edge.target.ToString());
@@ -335,14 +357,99 @@ void ProcessMemoryDump::AsValueInto(TracedValue* value) const {
 void ProcessMemoryDump::AddOwnershipEdge(const MemoryAllocatorDumpGuid& source,
                                          const MemoryAllocatorDumpGuid& target,
                                          int importance) {
-  allocator_dumps_edges_.push_back(
-      {source, target, importance, kEdgeTypeOwnership});
+  // This will either override an existing edge or create a new one.
+  auto it = allocator_dumps_edges_.find(source);
+  if (it != allocator_dumps_edges_.end()) {
+    DCHECK_EQ(target.ToUint64(),
+              allocator_dumps_edges_[source].target.ToUint64());
+  }
+  allocator_dumps_edges_[source] = {
+      source, target, importance, kEdgeTypeOwnership, false /* overridable */};
 }
 
 void ProcessMemoryDump::AddOwnershipEdge(
     const MemoryAllocatorDumpGuid& source,
     const MemoryAllocatorDumpGuid& target) {
   AddOwnershipEdge(source, target, 0 /* importance */);
+}
+
+void ProcessMemoryDump::AddOverridableOwnershipEdge(
+    const MemoryAllocatorDumpGuid& source,
+    const MemoryAllocatorDumpGuid& target,
+    int importance) {
+  if (allocator_dumps_edges_.count(source) == 0) {
+    allocator_dumps_edges_[source] = {
+        source, target, importance, kEdgeTypeOwnership, true /* overridable */};
+  } else {
+    // An edge between the source and target already exits. So, do nothing here
+    // since the new overridable edge is implicitly overridden by a strong edge
+    // which was created earlier.
+    DCHECK(!allocator_dumps_edges_[source].overridable);
+  }
+}
+
+void ProcessMemoryDump::CreateSharedMemoryOwnershipEdge(
+    const MemoryAllocatorDumpGuid& client_local_dump_guid,
+    const MemoryAllocatorDumpGuid& client_global_dump_guid,
+    const UnguessableToken& shared_memory_guid,
+    int importance) {
+  CreateSharedMemoryOwnershipEdgeInternal(
+      client_local_dump_guid, client_global_dump_guid, shared_memory_guid,
+      importance, false /*is_weak*/);
+}
+
+void ProcessMemoryDump::CreateWeakSharedMemoryOwnershipEdge(
+    const MemoryAllocatorDumpGuid& client_local_dump_guid,
+    const MemoryAllocatorDumpGuid& client_global_dump_guid,
+    const UnguessableToken& shared_memory_guid,
+    int importance) {
+  CreateSharedMemoryOwnershipEdgeInternal(
+      client_local_dump_guid, client_global_dump_guid, shared_memory_guid,
+      importance, true /*is_weak*/);
+}
+
+void ProcessMemoryDump::CreateSharedMemoryOwnershipEdgeInternal(
+    const MemoryAllocatorDumpGuid& client_local_dump_guid,
+    const MemoryAllocatorDumpGuid& client_global_dump_guid,
+    const UnguessableToken& shared_memory_guid,
+    int importance,
+    bool is_weak) {
+  if (MemoryAllocatorDumpGuid::UseSharedMemoryBasedGUIDs()) {
+    DCHECK(!shared_memory_guid.is_empty());
+    // New model where the global dumps created by SharedMemoryTracker are used
+    // for the clients.
+
+    // The guid of the local dump created by SharedMemoryTracker for the memory
+    // segment.
+    auto local_shm_guid =
+        SharedMemoryTracker::GetDumpIdForTracing(shared_memory_guid);
+
+    // The dump guid of the global dump created by the tracker for the memory
+    // segment.
+    auto global_shm_guid =
+        SharedMemoryTracker::GetGlobalDumpIdForTracing(shared_memory_guid);
+
+    // Create an edge between local dump of the client and the local dump of the
+    // SharedMemoryTracker. Do not need to create the dumps here since the
+    // tracker would create them. The importance is also required here for the
+    // case of single process mode.
+    AddOwnershipEdge(client_local_dump_guid, local_shm_guid, importance);
+
+    // TODO(ssid): Handle the case of weak dumps here. This needs a new function
+    // GetOrCreaetGlobalDump() in PMD since we need to change the behavior of
+    // the created global dump.
+    // Create an edge that overrides the edge created by SharedMemoryTracker.
+    AddOwnershipEdge(local_shm_guid, global_shm_guid, importance);
+  } else {
+    // This is the old model where the clients create global dumps for
+    // themselves.
+    if (is_weak)
+      CreateWeakSharedGlobalAllocatorDump(client_global_dump_guid);
+    else
+      CreateSharedGlobalAllocatorDump(client_global_dump_guid);
+    AddOwnershipEdge(client_local_dump_guid, client_global_dump_guid,
+                     importance);
+  }
 }
 
 void ProcessMemoryDump::AddSuballocation(const MemoryAllocatorDumpGuid& source,

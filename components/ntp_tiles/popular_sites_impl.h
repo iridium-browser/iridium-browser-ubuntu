@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
@@ -19,8 +18,6 @@
 #include "url/gurl.h"
 
 namespace base {
-class TaskRunner;
-class SequencedWorkerPool;
 class Value;
 }
 
@@ -51,12 +48,10 @@ using ParseJSONCallback = base::Callback<void(
 class PopularSitesImpl : public PopularSites, public net::URLFetcherDelegate {
  public:
   PopularSitesImpl(
-      const scoped_refptr<base::SequencedWorkerPool>& blocking_pool,
       PrefService* prefs,
       const TemplateURLService* template_url_service,
       variations::VariationsService* variations_service,
       net::URLRequestContextGetter* download_context,
-      const base::FilePath& directory,
       ParseJSONCallback parse_json);
 
   ~PopularSitesImpl() override;
@@ -67,6 +62,7 @@ class PopularSitesImpl : public PopularSites, public net::URLFetcherDelegate {
   const SitesVector& sites() const override;
   GURL GetLastURLFetched() const override;
   GURL GetURLToFetch() override;
+  std::string GetDirectoryToFetch() override;
   std::string GetCountryToFetch() override;
   std::string GetVersionToFetch() override;
   const base::ListValue* GetCachedJson() override;
@@ -88,7 +84,6 @@ class PopularSitesImpl : public PopularSites, public net::URLFetcherDelegate {
   void OnDownloadFailed();
 
   // Parameters set from constructor.
-  scoped_refptr<base::TaskRunner> const blocking_runner_;
   PrefService* const prefs_;
   const TemplateURLService* const template_url_service_;
   variations::VariationsService* const variations_;

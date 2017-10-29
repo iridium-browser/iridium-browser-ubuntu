@@ -36,7 +36,6 @@
   <link rel="stylesheet" href="search/destination_list.css">
   <link rel="stylesheet" href="search/destination_list_item.css">
   <link rel="stylesheet" href="search/destination_search.css">
-  <link rel="stylesheet" href="search/fedex_tos.css">
   <link rel="stylesheet" href="search/provisional_destination_resolver.css">
 
   <script src="chrome://resources/js/action_link.js"></script>
@@ -48,6 +47,7 @@
   <script src="chrome://resources/js/cr/ui/focus_outline_manager.js"></script>
   <script src="chrome://resources/js/cr/ui/node_utils.js"></script>
   <script src="chrome://resources/js/event_tracker.js"></script>
+  <script src="chrome://resources/js/webui_listener_tracker.js"></script>
   <script src="chrome://resources/js/load_time_data.js"></script>
   <script src="chrome://resources/js/util.js"></script>
   <script src="chrome://print/print_preview.js"></script>
@@ -75,15 +75,14 @@
         <include src="settings/advanced_options_settings.html">
         <include src="settings/more_settings.html">
       </div>
-      <div id="link-container">
 <if expr="not chromeos">
+      <div id="link-container">
         <div>
           <a is="action-link" id="system-dialog-link" class="navbar-link">
             $i18n{systemDialogOption}
           </a>
           <div id="system-dialog-throbber" hidden class="throbber"></div>
         </div>
-</if>
 <if expr="is_macosx">
         <div>
           <a is="action-link" id="open-pdf-in-preview-link" class="navbar-link">
@@ -93,6 +92,7 @@
         </div>
 </if>
       </div>
+</if>
     </div>
   </div>
   <include src="search/destination_search.html">
@@ -108,8 +108,6 @@
   <include src="previewarea/margin_control.html">
   <include src="search/destination_list.html">
   <include src="search/destination_list_item.html">
-  <include src="search/fedex_tos.html">
-  <include src="search/cros_destination_resolver.html">
   <include src="search/provisional_destination_resolver.html">
 
   <script src="chrome://resources/js/i18n_template.js"></script>

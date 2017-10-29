@@ -16,8 +16,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/cancellation_flag.h"
 #include "base/threading/thread_checker.h"
-#include "components/history/core/browser/history_match.h"
 #include "components/omnibox/browser/autocomplete_input.h"
+#include "components/omnibox/browser/history_match.h"
 #include "components/omnibox/browser/history_provider.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/search_engines/template_url.h"
@@ -104,7 +104,7 @@ struct HistoryURLProviderParams {
   HistoryURLProviderParams(const AutocompleteInput& input,
                            bool trim_http,
                            const AutocompleteMatch& what_you_typed_match,
-                           TemplateURL* default_search_provider,
+                           const TemplateURL* default_search_provider,
                            const SearchTermsData& search_terms_data);
   ~HistoryURLProviderParams();
 

@@ -33,47 +33,39 @@
 #define ParsedContentType_h
 
 #include "platform/PlatformExport.h"
-#include "wtf/Allocator.h"
-#include "wtf/HashMap.h"
-#include "wtf/text/StringHash.h"
+#include "platform/network/ParsedContentHeaderFieldParameters.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/HashMap.h"
+#include "platform/wtf/text/StringHash.h"
 
 namespace blink {
 
-// ParsedContentType parses the constructor argument as specified in RFC2045
-// and stores the result.
+// ParsedContentType parses the content of a Content-Type header field as
+// specified in RFC2045 into MIME type and parameters and stores them.
 // FIXME: add support for comments.
 class PLATFORM_EXPORT ParsedContentType final {
   STACK_ALLOCATED();
 
  public:
-  // When |Relaxed| is specified, the parser parses parameter values in a sloppy
-  // manner, i.e., only ';' and '"' are treated as special characters.
-  // See https://chromiumcodereview.appspot.com/23043002.
-  enum class Mode {
-    Normal,
-    Relaxed,
-  };
-  explicit ParsedContentType(const String&, Mode = Mode::Normal);
+  using Mode = ParsedContentHeaderFieldParameters::Mode;
 
-  String mimeType() const { return m_mimeType; }
-  String charset() const;
+  explicit ParsedContentType(const String&, Mode = Mode::kNormal);
+
+  String MimeType() const { return mime_type_; }
+  String Charset() const;
 
   // Note that in the case of multiple values for the same name, the last value
   // is returned.
-  String parameterValueForName(const String&) const;
-  size_t parameterCount() const;
+  String ParameterValueForName(const String& name) const {
+    return parameters_.ParameterValueForName(name);
+  }
+  size_t ParameterCount() const { return parameters_.ParameterCount(); }
 
-  bool isValid() const { return m_isValid; }
+  bool IsValid() const { return parameters_.IsValid(); }
 
  private:
-  bool parse(const String&);
-
-  const Mode m_mode;
-  bool m_isValid;
-
-  typedef HashMap<String, String> KeyValuePairs;
-  KeyValuePairs m_parameters;
-  String m_mimeType;
+  String mime_type_;
+  ParsedContentHeaderFieldParameters parameters_;
 };
 
 }  // namespace blink

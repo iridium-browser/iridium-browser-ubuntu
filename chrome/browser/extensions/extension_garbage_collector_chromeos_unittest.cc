@@ -5,12 +5,13 @@
 #include "chrome/browser/extensions/extension_garbage_collector_chromeos.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/files/file_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
@@ -27,7 +28,6 @@
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_names.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_prefs.h"
@@ -52,14 +52,6 @@ class ExtensionGarbageCollectorChromeOSUnitTest
     content::PluginService::GetInstance()->Init();
 #endif
     InitializeGoodInstalledExtensionService();
-
-    // Need real IO thread.
-    service_->SetFileTaskRunnerForTesting(
-        content::BrowserThread::GetBlockingPool()
-            ->GetSequencedTaskRunnerWithShutdownBehavior(
-                content::BrowserThread::GetBlockingPool()
-                    ->GetNamedSequenceToken("ext_install-"),
-                base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
 
     CHECK(cache_dir_.CreateUniqueTempDir());
     ExtensionAssetsManagerChromeOS::SetSharedInstallDirForTesting(cache_dir());
@@ -98,24 +90,27 @@ class ExtensionGarbageCollectorChromeOSUnitTest
     DictionaryPrefUpdate shared_extensions(testing_local_state_.Get(),
         ExtensionAssetsManagerChromeOS::kSharedExtensions);
 
-    base::DictionaryValue* extension_info = NULL;
-    if (!shared_extensions->GetDictionary(id, &extension_info)) {
-      extension_info = new base::DictionaryValue;
-      shared_extensions->Set(id, extension_info);
+    base::DictionaryValue* extension_info_weak = NULL;
+    if (!shared_extensions->GetDictionary(id, &extension_info_weak)) {
+      auto extension_info = base::MakeUnique<base::DictionaryValue>();
+      extension_info_weak = extension_info.get();
+      shared_extensions->Set(id, std::move(extension_info));
     }
 
-    base::DictionaryValue* version_info = new base::DictionaryValue;
-    extension_info->SetWithoutPathExpansion(version, version_info);
+    auto version_info = base::MakeUnique<base::DictionaryValue>();
     version_info->SetString(
         ExtensionAssetsManagerChromeOS::kSharedExtensionPath, path.value());
 
-    base::ListValue* users = new base::ListValue;
-    version_info->Set(ExtensionAssetsManagerChromeOS::kSharedExtensionUsers,
-                      users);
+    auto users = base::MakeUnique<base::ListValue>();
     for (const std::string& user :
-         base::SplitString(users_string, ",",
-                           base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY))
+         base::SplitString(users_string, ",", base::KEEP_WHITESPACE,
+                           base::SPLIT_WANT_NONEMPTY)) {
       users->AppendString(user);
+    }
+    version_info->Set(ExtensionAssetsManagerChromeOS::kSharedExtensionUsers,
+                      std::move(users));
+    extension_info_weak->SetWithoutPathExpansion(version,
+                                                 std::move(version_info));
   }
 
   scoped_refptr<Extension> CreateExtension(const std::string& id,

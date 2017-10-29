@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "third_party/base/ptr_util.h"
-#include "xfa/fde/tto/fde_textout.h"
+#include "xfa/fde/cfde_textout.h"
 #include "xfa/fwl/cfwl_app.h"
 #include "xfa/fwl/cfwl_event.h"
 #include "xfa/fwl/cfwl_messagekey.h"
@@ -47,7 +47,7 @@ FWL_Type CFWL_CheckBox::GetClassID() const {
   return FWL_Type::CheckBox;
 }
 
-void CFWL_CheckBox::SetBoxSize(FX_FLOAT fHeight) {
+void CFWL_CheckBox::SetBoxSize(float fHeight) {
   m_fBoxHeight = fHeight;
 }
 
@@ -61,7 +61,7 @@ void CFWL_CheckBox::Update() {
   Layout();
 }
 
-void CFWL_CheckBox::DrawWidget(CFX_Graphics* pGraphics,
+void CFWL_CheckBox::DrawWidget(CXFA_Graphics* pGraphics,
                                const CFX_Matrix* pMatrix) {
   if (!pGraphics)
     return;
@@ -129,7 +129,7 @@ void CFWL_CheckBox::Layout() {
       FXSYS_round(m_pProperties->m_rtWidget.height);
   m_rtClient = GetClientRect();
 
-  FX_FLOAT fTextLeft = m_rtClient.left + m_fBoxHeight;
+  float fTextLeft = m_rtClient.left + m_fBoxHeight;
   m_rtBox = CFX_RectF(m_rtClient.TopLeft(), m_fBoxHeight, m_fBoxHeight);
   m_rtCaption = CFX_RectF(fTextLeft, m_rtClient.top,
                           m_rtClient.right() - fTextLeft, m_rtClient.height);
@@ -184,7 +184,7 @@ void CFWL_CheckBox::NextStates() {
       if (!pWidgetMgr->IsFormDisabled()) {
         std::vector<CFWL_Widget*> radioarr =
             pWidgetMgr->GetSameGroupRadioButton(this);
-        for (const auto& pWidget : radioarr) {
+        for (auto* pWidget : radioarr) {
           CFWL_CheckBox* pCheckBox = static_cast<CFWL_CheckBox*>(pWidget);
           if (pCheckBox != this &&
               pCheckBox->GetStates() & FWL_STATE_CKB_Checked) {
@@ -266,7 +266,7 @@ void CFWL_CheckBox::OnProcessMessage(CFWL_Message* pMessage) {
   CFWL_Widget::OnProcessMessage(pMessage);
 }
 
-void CFWL_CheckBox::OnDrawWidget(CFX_Graphics* pGraphics,
+void CFWL_CheckBox::OnDrawWidget(CXFA_Graphics* pGraphics,
                                  const CFX_Matrix* pMatrix) {
   DrawWidget(pGraphics, pMatrix);
 }

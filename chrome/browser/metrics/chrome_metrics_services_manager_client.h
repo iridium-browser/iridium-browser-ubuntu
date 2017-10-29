@@ -11,8 +11,11 @@
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/threading/thread_checker.h"
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "components/metrics_services_manager/metrics_services_manager_client.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#endif
 
 class PrefService;
 
@@ -68,14 +71,16 @@ class ChromeMetricsServicesManagerClient
   std::unique_ptr<const base::FieldTrial::EntropyProvider>
   CreateEntropyProvider() override;
   net::URLRequestContextGetter* GetURLRequestContext() override;
-  bool IsSafeBrowsingEnabled(const base::Closure& on_update_callback) override;
   bool IsMetricsReportingEnabled() override;
-  bool OnlyDoMetricsRecording() override;
 
 #if defined(OS_WIN)
   // On Windows, the client controls whether Crashpad can upload crash reports.
   void UpdateRunningServices(bool may_record, bool may_upload) override;
 #endif  // defined(OS_WIN)
+
+  bool IsMetricsReportingForceEnabled() override;
+
+  bool IsIncognitoSessionActive() override;
 
   // Gets the MetricsStateManager, creating it if it has not already been
   // created.
@@ -94,9 +99,10 @@ class ChromeMetricsServicesManagerClient
   // Weak pointer to the local state prefs store.
   PrefService* local_state_;
 
-  // Subscription to SafeBrowsing service state changes.
-  std::unique_ptr<safe_browsing::SafeBrowsingService::StateSubscription>
-      sb_state_subscription_;
+#if defined(OS_CHROMEOS)
+  std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
+      cros_settings_observer_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ChromeMetricsServicesManagerClient);
 };

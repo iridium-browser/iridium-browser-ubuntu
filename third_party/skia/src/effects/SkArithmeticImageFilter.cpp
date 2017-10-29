@@ -6,8 +6,8 @@
  */
 
 #include "SkArithmeticImageFilter.h"
-#include "SkArithmeticModePriv.h"
 #include "SkCanvas.h"
+#include "SkColorSpaceXformer.h"
 #include "SkNx.h"
 #include "SkReadBuffer.h"
 #include "SkSpecialImage.h"
@@ -15,11 +15,11 @@
 #include "SkWriteBuffer.h"
 #include "SkXfermodeImageFilter.h"
 #if SK_SUPPORT_GPU
+#include "GrClip.h"
 #include "GrContext.h"
 #include "GrRenderTargetContext.h"
 #include "GrTextureProxy.h"
 #include "SkGr.h"
-#include "SkGrPriv.h"
 #include "effects/GrConstColorProcessor.h"
 #include "effects/GrTextureDomain.h"
 #include "glsl/GrGLSLFragmentProcessor.h"
@@ -28,7 +28,6 @@
 #include "glsl/GrGLSLUniformHandler.h"
 #endif
 
-namespace {
 class ArithmeticImageFilterImpl : public SkImageFilter {
 public:
     ArithmeticImageFilterImpl(float k1, float k2, float k3, float k4, bool enforcePMColor,
@@ -62,6 +61,8 @@ protected:
 
     void drawForeground(SkCanvas* canvas, SkSpecialImage*, const SkIRect&) const;
 
+    sk_sp<SkImageFilter> onMakeColorSpace(SkColorSpaceXformer*) const override;
+
 private:
     const float fK[4];
     const bool fEnforcePMColor;
@@ -70,7 +71,6 @@ private:
 
     typedef SkImageFilter INHERITED;
 };
-}
 
 sk_sp<SkFlattenable> ArithmeticImageFilterImpl::CreateProc(SkReadBuffer& buffer) {
     SK_IMAGEFILTER_UNFLATTEN_COMMON(common, 2);
@@ -238,7 +238,7 @@ private:
 
                 GrGLSLFPFragmentBuilder* fragBuilder = args.fFragBuilder;
                 SkString dstColor("dstColor");
-                this->emitChild(0, nullptr, &dstColor, args);
+                this->emitChild(0, &dstColor, args);
 
                 fKUni = args.fUniformHandler->addUniform(kFragment_GrShaderFlag, kVec4f_GrSLType,
                                                          kDefault_GrSLPrecision, "k");
@@ -264,7 +264,7 @@ private:
 
         protected:
             void onSetData(const GrGLSLProgramDataManager& pdman,
-                           const GrProcessor& proc) override {
+                           const GrFragmentProcessor& proc) override {
                 const ArithmeticFP& arith = proc.cast<ArithmeticFP>();
                 pdman.set4f(fKUni, arith.k1(), arith.k2(), arith.k3(), arith.k4());
             }
@@ -303,7 +303,7 @@ private:
     float fK1, fK2, fK3, fK4;
     bool fEnforcePMColor;
 
-    GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
+    GR_DECLARE_FRAGMENT_PROCESSOR_TEST
     typedef GrFragmentProcessor INHERITED;
 };
 }
@@ -325,11 +325,9 @@ GR_DEFINE_FRAGMENT_PROCESSOR_TEST(ArithmeticFP);
 
 sk_sp<SkSpecialImage> ArithmeticImageFilterImpl::filterImageGPU(
         SkSpecialImage* source,
-        sk_sp<SkSpecialImage>
-                background,
+        sk_sp<SkSpecialImage> background,
         const SkIPoint& backgroundOffset,
-        sk_sp<SkSpecialImage>
-                foreground,
+        sk_sp<SkSpecialImage> foreground,
         const SkIPoint& foregroundOffset,
         const SkIRect& bounds,
         const OutputProperties& outputProperties) const {
@@ -356,8 +354,8 @@ sk_sp<SkSpecialImage> ArithmeticImageFilterImpl::filterImageGPU(
         sk_sp<GrColorSpaceXform> bgXform =
                 GrColorSpaceXform::Make(background->getColorSpace(), outputProperties.colorSpace());
         bgFP = GrTextureDomainEffect::Make(
-                context, std::move(backgroundProxy), std::move(bgXform), backgroundMatrix,
-                GrTextureDomain::MakeTexelDomain(background->subset()),
+                std::move(backgroundProxy), std::move(bgXform),
+                backgroundMatrix, GrTextureDomain::MakeTexelDomain(background->subset()),
                 GrTextureDomain::kDecal_Mode, GrSamplerParams::kNone_FilterMode);
     } else {
         bgFP = GrConstColorProcessor::Make(GrColor4f::TransparentBlack(),
@@ -369,13 +367,11 @@ sk_sp<SkSpecialImage> ArithmeticImageFilterImpl::filterImageGPU(
                                                         -SkIntToScalar(foregroundOffset.fY));
         sk_sp<GrColorSpaceXform> fgXform =
                 GrColorSpaceXform::Make(foreground->getColorSpace(), outputProperties.colorSpace());
-        sk_sp<GrFragmentProcessor> foregroundFP;
-
-        foregroundFP = GrTextureDomainEffect::Make(
-                context, std::move(foregroundProxy), std::move(fgXform), foregroundMatrix,
-                GrTextureDomain::MakeTexelDomain(foreground->subset()),
-                GrTextureDomain::kDecal_Mode, GrSamplerParams::kNone_FilterMode);
-
+        sk_sp<GrFragmentProcessor> foregroundFP(GrTextureDomainEffect::Make(
+                                std::move(foregroundProxy), std::move(fgXform),
+                                foregroundMatrix,
+                                GrTextureDomain::MakeTexelDomain(foreground->subset()),
+                                GrTextureDomain::kDecal_Mode, GrSamplerParams::kNone_FilterMode));
         paint.addColorFragmentProcessor(std::move(foregroundFP));
 
         sk_sp<GrFragmentProcessor> xferFP =
@@ -431,7 +427,6 @@ void ArithmeticImageFilterImpl::drawForeground(SkCanvas* canvas, SkSpecialImage*
         if (!img->getROPixels(&srcBM)) {
             return;
         }
-        srcBM.lockPixels();
         if (!srcBM.peekPixels(&src)) {
             return;
         }
@@ -455,6 +450,19 @@ void ArithmeticImageFilterImpl::drawForeground(SkCanvas* canvas, SkSpecialImage*
             proc(fK, dst.writable_addr32(r.fLeft, y), r.width());
         }
     }
+}
+
+sk_sp<SkImageFilter> ArithmeticImageFilterImpl::onMakeColorSpace(SkColorSpaceXformer* xformer)
+const {
+    SkASSERT(2 == this->countInputs());
+    auto background = xformer->apply(this->getInput(0));
+    auto foreground = xformer->apply(this->getInput(1));
+    if (background.get() != this->getInput(0) || foreground.get() != this->getInput(1)) {
+        return SkArithmeticImageFilter::Make(fK[0], fK[1], fK[2], fK[3], fEnforcePMColor,
+                                             std::move(background), std::move(foreground),
+                                             getCropRectIfSet());
+    }
+    return this->refMe();
 }
 
 #ifndef SK_IGNORE_TO_STRING

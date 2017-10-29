@@ -4,12 +4,23 @@
 {
   'targets': [
     {
+      'target_name': 'languages_browser_proxy',
+      'dependencies': [
+        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
+        '<(EXTERNS_GYP):chrome_send',
+        '<(EXTERNS_GYP):input_method_private',
+        '<(EXTERNS_GYP):language_settings_private',
+        '<(INTERFACES_GYP):input_method_private_interface',
+        '<(INTERFACES_GYP):language_settings_private_interface',
+      ],
+      'includes': ['../../../../../third_party/closure_compiler/compile_js2.gypi'],
+    },
+    {
       'target_name': 'languages',
       'dependencies': [
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:assert',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:promise_resolver',
-        '<(EXTERNS_GYP):chrome_send',
         '<(EXTERNS_GYP):input_method_private',
         '<(EXTERNS_GYP):language_settings_private',
         '<(INTERFACES_GYP):input_method_private_interface',
@@ -17,6 +28,7 @@
         '../prefs/compiled_resources2.gyp:prefs_types',
         '../prefs/compiled_resources2.gyp:prefs',
         'languages_types',
+        'languages_browser_proxy',
       ],
       'includes': ['../../../../../third_party/closure_compiler/compile_js2.gypi'],
     },
@@ -34,6 +46,7 @@
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:assert',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:load_time_data',
+        '<(DEPTH)/ui/webui/resources/js/cr/ui/compiled_resources2.gyp:focus_without_ink',
         'languages',
         'languages_types',
       ],
@@ -62,6 +75,7 @@
       'target_name': 'add_languages_dialog',
       'dependencies': [
         '<(DEPTH)/third_party/polymer/v1_0/components-chromium/paper-checkbox/compiled_resources2.gyp:paper-checkbox-extracted',
+        '<(DEPTH)/ui/webui/resources/cr_elements/compiled_resources2.gyp:cr_scrollable_behavior',
         'languages',
         'languages_types',
       ],

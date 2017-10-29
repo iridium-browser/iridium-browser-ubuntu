@@ -17,8 +17,12 @@ namespace {
 const char kUpstartServiceName[] = "com.ubuntu.Upstart";
 const char kUpstartJobInterface[] = "com.ubuntu.Upstart0_6.Job";
 const char kUpstartStartMethod[] = "Start";
+const char kUpstartRestartMethod[] = "Restart";
+const char kUpstartStopMethod[] = "Stop";
 
 const char kUpstartAuthPolicyPath[] = "/com/ubuntu/Upstart/jobs/authpolicyd";
+const char kUpstartMediaAnalyticsPath[] =
+    "/com/ubuntu/Upstart/jobs/rtanalytics";
 
 class UpstartClientImpl : public UpstartClient {
  public:
@@ -28,27 +32,91 @@ class UpstartClientImpl : public UpstartClient {
 
   // UpstartClient override.
   void StartAuthPolicyService() override {
-    dbus::ObjectPath objectPath(kUpstartAuthPolicyPath);
-    dbus::ObjectProxy* proxy =
-        bus_->GetObjectProxy(kUpstartServiceName, objectPath);
     dbus::MethodCall method_call(kUpstartJobInterface, kUpstartStartMethod);
     dbus::MessageWriter writer(&method_call);
     writer.AppendArrayOfStrings(std::vector<std::string>());
     writer.AppendBool(true);  // Wait for response.
-    proxy->CallMethod(&method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
-                      base::Bind(&UpstartClientImpl::HandleStartResponse,
-                                 weak_ptr_factory_.GetWeakPtr()));
+    auth_proxy_->CallMethod(&method_call,
+                            dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+                            base::Bind(&UpstartClientImpl::HandleAuthResponse,
+                                       weak_ptr_factory_.GetWeakPtr()));
+  }
+
+  void RestartAuthPolicyService() override {
+    dbus::MethodCall method_call(kUpstartJobInterface, kUpstartRestartMethod);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendArrayOfStrings(std::vector<std::string>());
+    writer.AppendBool(true);  // Wait for response.
+    auth_proxy_->CallMethod(&method_call,
+                            dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+                            base::Bind(&UpstartClientImpl::HandleAuthResponse,
+                                       weak_ptr_factory_.GetWeakPtr()));
+  }
+
+  void StartMediaAnalytics(const UpstartCallback& callback) override {
+    dbus::MethodCall method_call(kUpstartJobInterface, kUpstartStartMethod);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendArrayOfStrings(std::vector<std::string>());
+    writer.AppendBool(true);  // Wait for response.
+    ma_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&UpstartClientImpl::HandleStartMediaAnalyticsResponse,
+                   weak_ptr_factory_.GetWeakPtr(), callback));
+  }
+
+  void RestartMediaAnalytics(const UpstartCallback& callback) override {
+    dbus::MethodCall method_call(kUpstartJobInterface, kUpstartRestartMethod);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendArrayOfStrings(std::vector<std::string>());
+    writer.AppendBool(true);  // Wait for response.
+    ma_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&UpstartClientImpl::HandleStartMediaAnalyticsResponse,
+                   weak_ptr_factory_.GetWeakPtr(), callback));
+  }
+
+  void StopMediaAnalytics() override {
+    dbus::MethodCall method_call(kUpstartJobInterface, kUpstartStopMethod);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendArrayOfStrings(std::vector<std::string>());
+    writer.AppendBool(true);  // Wait for response.
+    ma_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&UpstartClientImpl::HandleStopMediaAnalyticsResponse,
+                   weak_ptr_factory_.GetWeakPtr()));
   }
 
  protected:
-  void Init(dbus::Bus* bus) override { bus_ = bus; }
+  void Init(dbus::Bus* bus) override {
+    bus_ = bus;
+    auth_proxy_ = bus_->GetObjectProxy(
+        kUpstartServiceName, dbus::ObjectPath(kUpstartAuthPolicyPath));
+    ma_proxy_ = bus_->GetObjectProxy(
+        kUpstartServiceName, dbus::ObjectPath(kUpstartMediaAnalyticsPath));
+  }
 
  private:
-  void HandleStartResponse(dbus::Response* response) {
+  void HandleAuthResponse(dbus::Response* response) {
+    LOG_IF(ERROR, !response) << "Failed to signal Upstart, response is null";
+  }
+
+  void HandleStartMediaAnalyticsResponse(const UpstartCallback& callback,
+                                         dbus::Response* response) {
+    if (!response) {
+      LOG(ERROR) << "Failed to signal Upstart, response is null.";
+      callback.Run(false);
+      return;
+    }
+    callback.Run(true);
+  }
+
+  void HandleStopMediaAnalyticsResponse(dbus::Response* response) {
     LOG_IF(ERROR, !response) << "Failed to signal Upstart, response is null";
   }
 
   dbus::Bus* bus_ = nullptr;
+  dbus::ObjectProxy* auth_proxy_ = nullptr;
+  dbus::ObjectProxy* ma_proxy_ = nullptr;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

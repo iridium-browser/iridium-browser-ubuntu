@@ -5,19 +5,20 @@
  * found in the LICENSE file.
  */
 
+#include "GrYUVProvider.h"
+#include "GrClip.h"
 #include "GrContext.h"
 #include "GrContextPriv.h"
 #include "GrRenderTargetContext.h"
 #include "GrTextureProxy.h"
-#include "GrYUVProvider.h"
-#include "effects/GrSRGBEffect.h"
-#include "effects/GrYUVEffect.h"
-
 #include "SkAutoMalloc.h"
 #include "SkCachedData.h"
 #include "SkRefCnt.h"
 #include "SkResourceCache.h"
 #include "SkYUVPlanesCache.h"
+#include "effects/GrNonlinearColorSpaceXformEffect.h"
+#include "effects/GrSRGBEffect.h"
+#include "effects/GrYUVEffect.h"
 
 namespace {
 /**
@@ -84,9 +85,10 @@ bool YUVScoper::init(GrYUVProvider* provider, SkYUVPlanesCache::Info* yuvInfo, v
     return true;
 }
 
-sk_sp<GrTexture> GrYUVProvider::refAsTexture(GrContext* ctx,
-                                             const GrSurfaceDesc& desc,
-                                             bool useCache) {
+sk_sp<GrTextureProxy> GrYUVProvider::refAsTextureProxy(GrContext* ctx, const GrSurfaceDesc& desc,
+                                                       bool useCache,
+                                                       const SkColorSpace* srcColorSpace,
+                                                       const SkColorSpace* dstColorSpace) {
     SkYUVPlanesCache::Info yuvInfo;
     void* planes[3];
     YUVScoper scoper;
@@ -121,7 +123,7 @@ sk_sp<GrTexture> GrYUVProvider::refAsTexture(GrContext* ctx,
     }
 
     // We never want to perform color-space conversion during the decode
-    sk_sp<GrRenderTargetContext> renderTargetContext(ctx->makeRenderTargetContext(
+    sk_sp<GrRenderTargetContext> renderTargetContext(ctx->makeDeferredRenderTargetContext(
                                                                           SkBackingFit::kExact,
                                                                           desc.fWidth, desc.fHeight,
                                                                           desc.fConfig, nullptr,
@@ -132,8 +134,7 @@ sk_sp<GrTexture> GrYUVProvider::refAsTexture(GrContext* ctx,
 
     GrPaint paint;
     sk_sp<GrFragmentProcessor> yuvToRgbProcessor(
-        GrYUVEffect::MakeYUVToRGB(ctx,
-                                  yuvTextureContexts[0]->asTextureProxyRef(),
+        GrYUVEffect::MakeYUVToRGB(yuvTextureContexts[0]->asTextureProxyRef(),
                                   yuvTextureContexts[1]->asTextureProxyRef(),
                                   yuvTextureContexts[2]->asTextureProxyRef(),
                                   yuvInfo.fSizeInfo.fSizes, yuvInfo.fColorSpace, false));
@@ -149,8 +150,17 @@ sk_sp<GrTexture> GrYUVProvider::refAsTexture(GrContext* ctx,
         if (ctx->caps()->srgbWriteControl()) {
             paint.setDisableOutputConversionToSRGB(true);
         } else {
-            paint.addColorFragmentProcessor(GrSRGBEffect::Make(GrSRGBEffect::Mode::kSRGBToLinear));
+            paint.addColorFragmentProcessor(GrSRGBEffect::Make(GrSRGBEffect::Mode::kSRGBToLinear,
+                                                               GrSRGBEffect::Alpha::kOpaque));
         }
+    }
+
+    // If the caller expects the pixels in a different color space than the one from the image,
+    // apply a color conversion to do this.
+    sk_sp<GrFragmentProcessor> colorConversionProcessor =
+            GrNonlinearColorSpaceXformEffect::Make(srcColorSpace, dstColorSpace);
+    if (colorConversionProcessor) {
+        paint.addColorFragmentProcessor(colorConversionProcessor);
     }
 
     paint.setPorterDuffXPFactory(SkBlendMode::kSrc);
@@ -159,5 +169,5 @@ sk_sp<GrTexture> GrYUVProvider::refAsTexture(GrContext* ctx,
 
     renderTargetContext->drawRect(GrNoClip(), std::move(paint), GrAA::kNo, SkMatrix::I(), r);
 
-    return renderTargetContext->asTexture();
+    return renderTargetContext->asTextureProxyRef();
 }

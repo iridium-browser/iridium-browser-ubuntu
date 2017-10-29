@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
@@ -68,6 +69,8 @@ UpdateEngineClient::UpdateStatusOperation UpdateStatusFromString(
     return UpdateEngineClient::UPDATE_STATUS_REPORTING_ERROR_EVENT;
   if (str == update_engine::kUpdateStatusAttemptingRollback)
     return UpdateEngineClient::UPDATE_STATUS_ATTEMPTING_ROLLBACK;
+  if (str == update_engine::kUpdateStatusNeedPermissionToUpdate)
+    return UpdateEngineClient::UPDATE_STATUS_NEED_PERMISSION_TO_UPDATE;
   return UpdateEngineClient::UPDATE_STATUS_ERROR;
 }
 
@@ -105,6 +108,15 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
   }
 
   void RequestUpdateCheck(const UpdateCheckCallback& callback) override {
+    if (!service_available_) {
+      // TODO(alemate): we probably need to remember callbacks only.
+      // When service becomes available, we can do a single request,
+      // and trigger all callbacks with the same return value.
+      pending_tasks_.push_back(
+          base::Bind(&UpdateEngineClientImpl::RequestUpdateCheck,
+                     weak_ptr_factory_.GetWeakPtr(), callback));
+      return;
+    }
     dbus::MethodCall method_call(
         update_engine::kUpdateEngineInterface,
         update_engine::kAttemptUpdate);
@@ -235,6 +247,26 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
                    weak_ptr_factory_.GetWeakPtr(), callback));
   }
 
+  void SetUpdateOverCellularTarget(
+      const std::string& target_version,
+      int64_t target_size,
+      const SetUpdateOverCellularTargetCallback& callback) override {
+    dbus::MethodCall method_call(update_engine::kUpdateEngineInterface,
+                                 update_engine::kSetUpdateOverCellularTarget);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(target_version);
+    writer.AppendInt64(target_size);
+
+    VLOG(1) << "Requesting UpdateEngine to allow updates over cellular "
+            << "to target version: \"" << target_version << "\" "
+            << "target_size: " << target_size;
+
+    return update_engine_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&UpdateEngineClientImpl::OnSetUpdateOverCellularTarget,
+                   weak_ptr_factory_.GetWeakPtr(), callback));
+  }
+
  protected:
   void Init(dbus::Bus* bus) override {
     update_engine_proxy_ = bus->GetObjectProxy(
@@ -255,6 +287,13 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
  private:
   void OnServiceInitiallyAvailable(bool service_is_available) {
     if (service_is_available) {
+      service_available_ = true;
+      std::vector<base::Closure> callbacks;
+      callbacks.swap(pending_tasks_);
+      for (const auto& callback : callbacks) {
+        callback.Run();
+      }
+
       // Get update engine status for the initial status. Update engine won't
       // send StatusUpdate signal unless there is a status change. If chrome
       // crashes after UPDATE_STATUS_UPDATED_NEED_REBOOT status is set,
@@ -262,6 +301,7 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
       GetUpdateEngineStatus();
     } else {
       LOG(ERROR) << "Failed to wait for D-Bus service to become available";
+      pending_tasks_.clear();
     }
   }
 
@@ -414,30 +454,32 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
   // Called when a response for SetUpdateOverCellularPermission() is received.
   void OnSetUpdateOverCellularPermission(const base::Closure& callback,
                                          dbus::Response* response) {
-    constexpr char kFailureMessage[] =
-        "Failed to set UpdateEngine to allow updates over cellular: ";
-
-    if (response) {
-      switch (response->GetMessageType()) {
-        case dbus::Message::MESSAGE_ERROR:
-          LOG(ERROR) << kFailureMessage
-                     << "DBus responded with error: " << response->ToString();
-          break;
-        case dbus::Message::MESSAGE_INVALID:
-          LOG(ERROR) << kFailureMessage
-                     << "Invalid response from DBus (cannot be parsed).";
-          break;
-        default:
-          VLOG(1) << "Successfully set UpdateEngine to allow update over cell.";
-          break;
-      }
-    } else {
-      LOG(ERROR) << kFailureMessage << "No response from DBus.";
+    if (!response) {
+      LOG(ERROR) << update_engine::kSetUpdateOverCellularPermission
+                 << " call failed";
     }
 
     // Callback should run anyway, regardless of whether DBus call to enable
     // update over cellular succeeded or failed.
     callback.Run();
+  }
+
+  // Called when a response for SetUpdateOverCellularPermission() is received.
+  void OnSetUpdateOverCellularTarget(
+      const SetUpdateOverCellularTargetCallback& callback,
+      dbus::Response* response) {
+    bool success = true;
+    if (!response) {
+      success = false;
+      LOG(ERROR) << update_engine::kSetUpdateOverCellularTarget
+                 << " call failed";
+    }
+
+    for (auto& observer : observers_) {
+      observer.OnUpdateOverCellularTargetSet(success);
+    }
+
+    callback.Run(success);
   }
 
   // Called when a status update signal is received.
@@ -481,6 +523,13 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
   dbus::ObjectProxy* update_engine_proxy_;
   base::ObserverList<Observer> observers_;
   Status last_status_;
+
+  // True after update_engine's D-Bus service has become available.
+  bool service_available_ = false;
+
+  // This is a list of postponed calls to update engine to be called
+  // after it becomes available.
+  std::vector<base::Closure> pending_tasks_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
@@ -538,6 +587,11 @@ class UpdateEngineClientStubImpl : public UpdateEngineClient {
     callback.Run();
   }
 
+  void SetUpdateOverCellularTarget(
+      const std::string& target_version,
+      int64_t target_size,
+      const SetUpdateOverCellularTargetCallback& callback) override {}
+
   std::string current_channel_;
   std::string target_channel_;
 };
@@ -594,6 +648,7 @@ class UpdateEngineClientFakeImpl : public UpdateEngineClientStubImpl {
       case UPDATE_STATUS_UPDATED_NEED_REBOOT:
       case UPDATE_STATUS_REPORTING_ERROR_EVENT:
       case UPDATE_STATUS_ATTEMPTING_ROLLBACK:
+      case UPDATE_STATUS_NEED_PERMISSION_TO_UPDATE:
         return;
       case UPDATE_STATUS_CHECKING_FOR_UPDATE:
         next_status = UPDATE_STATUS_UPDATE_AVAILABLE;

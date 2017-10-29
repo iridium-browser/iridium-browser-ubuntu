@@ -11,17 +11,12 @@
 #include "base/test/test_discardable_memory_allocator.h"
 #include "base/test/test_suite.h"
 #include "build/build_config.h"
+#include "mojo/edk/embedder/embedder.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/aura/env.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
-
-#if defined(OS_MACOSX)
-#include "base/test/mock_chrome_application_mac.h"
-#endif
-
-#if defined(TOOLKIT_VIEWS)
 #include "ui/gl/test/gl_surface_test_support.h"
-#endif
 
 namespace {
 
@@ -38,13 +33,9 @@ class AppListTestSuite : public base::TestSuite {
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     command_line->AppendSwitchASCII(kTestType, "applist");
 
-#if defined(OS_MACOSX)
-    mock_cr_app::RegisterMockCrApp();
-#endif
-#if defined(TOOLKIT_VIEWS)
-    gl::GLSurfaceTestSupport::InitializeOneOff();
-#endif
     base::TestSuite::Initialize();
+    gl::GLSurfaceTestSupport::InitializeOneOff();
+    env_ = aura::Env::CreateInstance();
     ui::RegisterPathProvider();
 
     base::FilePath ui_test_pak_path;
@@ -56,11 +47,13 @@ class AppListTestSuite : public base::TestSuite {
   }
 
   void Shutdown() override {
+    env_.reset();
     ui::ResourceBundle::CleanupSharedInstance();
     base::TestSuite::Shutdown();
   }
 
  private:
+  std::unique_ptr<aura::Env> env_;
   base::TestDiscardableMemoryAllocator discardable_memory_allocator_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListTestSuite);
@@ -70,6 +63,8 @@ class AppListTestSuite : public base::TestSuite {
 
 int main(int argc, char** argv) {
   AppListTestSuite test_suite(argc, argv);
+
+  mojo::edk::Init();
 
   return base::LaunchUnitTests(
       argc,

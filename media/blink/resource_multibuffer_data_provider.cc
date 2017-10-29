@@ -70,7 +70,7 @@ void ResourceMultiBufferDataProvider::Start() {
   // Prepare the request.
   WebURLRequest request(url_data_->url());
   // TODO(mkwst): Split this into video/audio.
-  request.setRequestContext(WebURLRequest::RequestContextVideo);
+  request.SetRequestContext(WebURLRequest::kRequestContextVideo);
 
   DVLOG(1) << __func__ << " @ " << byte_pos();
   if (url_data_->length() > 0 && byte_pos() >= url_data_->length()) {
@@ -80,10 +80,19 @@ void ResourceMultiBufferDataProvider::Start() {
     return;
   }
 
-  request.setHTTPHeaderField(
-      WebString::fromUTF8(net::HttpRequestHeaders::kRange),
-      WebString::fromUTF8(
+  request.SetHTTPHeaderField(
+      WebString::FromUTF8(net::HttpRequestHeaders::kRange),
+      WebString::FromUTF8(
           net::HttpByteRange::RightUnbounded(byte_pos()).GetHeaderValue()));
+
+  if (url_data_->length() == kPositionNotSpecified &&
+      url_data_->CachedSize() == 0 && url_data_->BytesReadFromCache() == 0) {
+    // This lets the data reduction proxy know that we don't have anything
+    // previously cached data for this resource. We can only send it if this is
+    // the first request for this resource.
+    request.SetHTTPHeaderField(WebString::FromUTF8("chrome-proxy"),
+                               WebString::FromUTF8("frfr"));
+  }
 
   // We would like to send an if-match header with the request to
   // tell the remote server that we really can't handle files other
@@ -91,37 +100,37 @@ void ResourceMultiBufferDataProvider::Start() {
   // so will disable the http cache, and possibly other proxies
   // along the way. See crbug/504194 and crbug/689989 for more information.
 
-  url_data_->frame()->setReferrerForRequest(request, blink::WebURL());
+  url_data_->frame()->SetReferrerForRequest(request, blink::WebURL());
 
   // Disable compression, compression for audio/video doesn't make sense...
-  request.setHTTPHeaderField(
-      WebString::fromUTF8(net::HttpRequestHeaders::kAcceptEncoding),
-      WebString::fromUTF8("identity;q=1, *;q=0"));
+  request.SetHTTPHeaderField(
+      WebString::FromUTF8(net::HttpRequestHeaders::kAcceptEncoding),
+      WebString::FromUTF8("identity;q=1, *;q=0"));
 
   // Check for our test WebAssociatedURLLoader.
   std::unique_ptr<WebAssociatedURLLoader> loader;
   if (test_loader_) {
     loader = std::move(test_loader_);
+    request.SetFetchRequestMode(WebURLRequest::kFetchRequestModeSameOrigin);
+    request.SetFetchCredentialsMode(WebURLRequest::kFetchCredentialsModeOmit);
   } else {
     WebAssociatedURLLoaderOptions options;
-    if (url_data_->cors_mode() == UrlData::CORS_UNSPECIFIED) {
-      options.allowCredentials = true;
-      options.crossOriginRequestPolicy =
-          WebAssociatedURLLoaderOptions::CrossOriginRequestPolicyAllow;
-    } else {
-      options.exposeAllResponseHeaders = true;
+    if (url_data_->cors_mode() != UrlData::CORS_UNSPECIFIED) {
+      options.expose_all_response_headers = true;
       // The author header set is empty, no preflight should go ahead.
-      options.preflightPolicy = WebAssociatedURLLoaderOptions::PreventPreflight;
-      options.crossOriginRequestPolicy = WebAssociatedURLLoaderOptions::
-          CrossOriginRequestPolicyUseAccessControl;
-      if (url_data_->cors_mode() == UrlData::CORS_USE_CREDENTIALS)
-        options.allowCredentials = true;
+      options.preflight_policy =
+          WebAssociatedURLLoaderOptions::kPreventPreflight;
+      request.SetFetchRequestMode(WebURLRequest::kFetchRequestModeCORS);
+      if (url_data_->cors_mode() != UrlData::CORS_USE_CREDENTIALS) {
+        request.SetFetchCredentialsMode(
+            WebURLRequest::kFetchCredentialsModeSameOrigin);
+      }
     }
-    loader.reset(url_data_->frame()->createAssociatedURLLoader(options));
+    loader.reset(url_data_->frame()->CreateAssociatedURLLoader(options));
   }
 
   // Start the resource loading.
-  loader->loadAsynchronously(request, this);
+  loader->LoadAsynchronously(request, this);
   active_loader_.reset(new ActiveLoader(std::move(loader)));
 }
 
@@ -170,11 +179,11 @@ void ResourceMultiBufferDataProvider::SetDeferred(bool deferred) {
 /////////////////////////////////////////////////////////////////////////////
 // WebAssociatedURLLoaderClient implementation.
 
-bool ResourceMultiBufferDataProvider::willFollowRedirect(
+bool ResourceMultiBufferDataProvider::WillFollowRedirect(
     const WebURLRequest& newRequest,
     const WebURLResponse& redirectResponse) {
   DVLOG(1) << "willFollowRedirect";
-  redirects_to_ = newRequest.url();
+  redirects_to_ = newRequest.Url();
   url_data_->set_valid_until(base::Time::Now() +
                              GetCacheValidUntil(redirectResponse));
 
@@ -195,35 +204,35 @@ bool ResourceMultiBufferDataProvider::willFollowRedirect(
   return true;
 }
 
-void ResourceMultiBufferDataProvider::didSendData(
+void ResourceMultiBufferDataProvider::DidSendData(
     unsigned long long bytes_sent,
     unsigned long long total_bytes_to_be_sent) {
   NOTIMPLEMENTED();
 }
 
-void ResourceMultiBufferDataProvider::didReceiveResponse(
+void ResourceMultiBufferDataProvider::DidReceiveResponse(
     const WebURLResponse& response) {
 #if DCHECK_IS_ON()
   std::string version;
-  switch (response.httpVersion()) {
-    case WebURLResponse::HTTPVersion_0_9:
+  switch (response.HttpVersion()) {
+    case WebURLResponse::kHTTPVersion_0_9:
       version = "0.9";
       break;
-    case WebURLResponse::HTTPVersion_1_0:
+    case WebURLResponse::kHTTPVersion_1_0:
       version = "1.0";
       break;
-    case WebURLResponse::HTTPVersion_1_1:
+    case WebURLResponse::kHTTPVersion_1_1:
       version = "1.1";
       break;
-    case WebURLResponse::HTTPVersion_2_0:
+    case WebURLResponse::kHTTPVersion_2_0:
       version = "2.1";
       break;
-    case WebURLResponse::HTTPVersionUnknown:
+    case WebURLResponse::kHTTPVersionUnknown:
       version = "unknown";
       break;
   }
   DVLOG(1) << "didReceiveResponse: HTTP/" << version << " "
-           << response.httpStatusCode();
+           << response.HttpStatusCode();
 #endif
   DCHECK(active_loader_);
 
@@ -244,13 +253,13 @@ void ResourceMultiBufferDataProvider::didReceiveResponse(
 
   base::Time last_modified;
   if (base::Time::FromString(
-          response.httpHeaderField("Last-Modified").utf8().data(),
+          response.HttpHeaderField("Last-Modified").Utf8().data(),
           &last_modified)) {
     destination_url_data->set_last_modified(last_modified);
   }
 
   destination_url_data->set_etag(
-      response.httpHeaderField("ETag").utf8().data());
+      response.HttpHeaderField("ETag").Utf8().data());
 
   destination_url_data->set_valid_until(base::Time::Now() +
                                         GetCacheValidUntil(response));
@@ -263,8 +272,10 @@ void ResourceMultiBufferDataProvider::didReceiveResponse(
   while (reasons) {
     DCHECK_LT(shift, max_enum);  // Sanity check.
     if (reasons & 0x1) {
-      UMA_HISTOGRAM_ENUMERATION("Media.UncacheableReason", shift,
-                                max_enum);  // PRESUBMIT_IGNORE_UMA_MAX
+      // Note: this uses an exact linear UMA to fake an enum UMA, as the actual
+      // enum is a bitmask.
+      UMA_HISTOGRAM_EXACT_LINEAR("Media.UncacheableReason", shift,
+                                 max_enum);  // PRESUBMIT_IGNORE_UMA_MAX
     }
 
     reasons >>= 1;
@@ -273,21 +284,22 @@ void ResourceMultiBufferDataProvider::didReceiveResponse(
 
   // Expected content length can be |kPositionNotSpecified|, in that case
   // |content_length_| is not specified and this is a streaming response.
-  int64_t content_length = response.expectedContentLength();
+  int64_t content_length = response.ExpectedContentLength();
   bool end_of_file = false;
   bool do_fail = false;
+  bytes_to_discard_ = 0;
 
   // We make a strong assumption that when we reach here we have either
   // received a response from HTTP/HTTPS protocol or the request was
   // successful (in particular range request). So we only verify the partial
   // response for HTTP and HTTPS protocol.
   if (destination_url_data->url().SchemeIsHTTPOrHTTPS()) {
-    bool partial_response = (response.httpStatusCode() == kHttpPartialContent);
-    bool ok_response = (response.httpStatusCode() == kHttpOK);
+    bool partial_response = (response.HttpStatusCode() == kHttpPartialContent);
+    bool ok_response = (response.HttpStatusCode() == kHttpOK);
 
     // Check to see whether the server supports byte ranges.
     std::string accept_ranges =
-        response.httpHeaderField("Accept-Ranges").utf8();
+        response.HttpHeaderField("Accept-Ranges").Utf8();
     if (accept_ranges.find("bytes") != std::string::npos)
       destination_url_data->set_range_supported();
 
@@ -297,12 +309,13 @@ void ResourceMultiBufferDataProvider::didReceiveResponse(
     if (partial_response &&
         VerifyPartialResponse(response, destination_url_data)) {
       destination_url_data->set_range_supported();
-    } else if (ok_response && pos_ == 0) {
+    } else if (ok_response) {
       // We accept a 200 response for a Range:0- request, trusting the
       // Accept-Ranges header, because Apache thinks that's a reasonable thing
       // to return.
       destination_url_data->set_length(content_length);
-    } else if (response.httpStatusCode() == kHttpRangeNotSatisfiable) {
+      bytes_to_discard_ = byte_pos();
+    } else if (response.HttpStatusCode() == kHttpRangeNotSatisfiable) {
       // Unsatisfiable range
       // Really, we should never request a range that doesn't exist, but
       // if we do, let's handle it in a sane way.
@@ -353,9 +366,9 @@ void ResourceMultiBufferDataProvider::didReceiveResponse(
   }
 
   // This test is vital for security!
-  const GURL& original_url = response.wasFetchedViaServiceWorker()
-                                 ? response.originalURLViaServiceWorker()
-                                 : response.url();
+  const GURL& original_url = response.WasFetchedViaServiceWorker()
+                                 ? response.OriginalURLViaServiceWorker()
+                                 : response.Url();
   if (!url_data_->ValidateDataOrigin(original_url.GetOrigin())) {
     active_loader_ = nullptr;
     url_data_->Fail();
@@ -368,12 +381,23 @@ void ResourceMultiBufferDataProvider::didReceiveResponse(
   }
 }
 
-void ResourceMultiBufferDataProvider::didReceiveData(const char* data,
+void ResourceMultiBufferDataProvider::DidReceiveData(const char* data,
                                                      int data_length) {
   DVLOG(1) << "didReceiveData: " << data_length << " bytes";
   DCHECK(!Available());
   DCHECK(active_loader_);
   DCHECK_GT(data_length, 0);
+
+  url_data_->AddBytesReadFromNetwork(data_length);
+
+  if (bytes_to_discard_) {
+    uint64_t tmp = std::min<uint64_t>(bytes_to_discard_, data_length);
+    data_length -= tmp;
+    data += tmp;
+    bytes_to_discard_ -= tmp;
+    if (data_length == 0)
+      return;
+  }
 
   // When we receive data, we allow more retries.
   retries_ = 0;
@@ -397,17 +421,17 @@ void ResourceMultiBufferDataProvider::didReceiveData(const char* data,
   // Beware, this object might be deleted here.
 }
 
-void ResourceMultiBufferDataProvider::didDownloadData(int dataLength) {
+void ResourceMultiBufferDataProvider::DidDownloadData(int dataLength) {
   NOTIMPLEMENTED();
 }
 
-void ResourceMultiBufferDataProvider::didReceiveCachedMetadata(
+void ResourceMultiBufferDataProvider::DidReceiveCachedMetadata(
     const char* data,
     int data_length) {
   NOTIMPLEMENTED();
 }
 
-void ResourceMultiBufferDataProvider::didFinishLoading(double finishTime) {
+void ResourceMultiBufferDataProvider::DidFinishLoading(double finishTime) {
   DVLOG(1) << "didFinishLoading";
   DCHECK(active_loader_.get());
   DCHECK(!Available());
@@ -440,18 +464,21 @@ void ResourceMultiBufferDataProvider::didFinishLoading(double finishTime) {
   url_data_->set_length(size);
   fifo_.push_back(DataBuffer::CreateEOSBuffer());
 
+  if (url_data_->url_index()) {
+    url_data_->url_index()->TryInsert(url_data_);
+  }
+
   DCHECK(Available());
   url_data_->multibuffer()->OnDataProviderEvent(this);
 
   // Beware, this object might be deleted here.
 }
 
-void ResourceMultiBufferDataProvider::didFail(const WebURLError& error) {
+void ResourceMultiBufferDataProvider::DidFail(const WebURLError& error) {
   DVLOG(1) << "didFail: reason=" << error.reason
-           << ", isCancellation=" << error.isCancellation
-           << ", domain=" << error.domain.utf8().data()
+           << ", domain=" << error.domain.Utf8().data()
            << ", localizedDescription="
-           << error.localizedDescription.utf8().data();
+           << error.localized_description.Utf8().data();
   DCHECK(active_loader_.get());
 
   if (retries_ < kMaxRetries && pos_ != 0) {
@@ -536,7 +563,7 @@ bool ResourceMultiBufferDataProvider::VerifyPartialResponse(
     const WebURLResponse& response,
     const scoped_refptr<UrlData>& url_data) {
   int64_t first_byte_position, last_byte_position, instance_size;
-  if (!ParseContentRange(response.httpHeaderField("Content-Range").utf8(),
+  if (!ParseContentRange(response.HttpHeaderField("Content-Range").Utf8(),
                          &first_byte_position, &last_byte_position,
                          &instance_size)) {
     return false;
@@ -546,9 +573,13 @@ bool ResourceMultiBufferDataProvider::VerifyPartialResponse(
     url_data->set_length(instance_size);
   }
 
-  if (byte_pos() != first_byte_position) {
+  if (first_byte_position > byte_pos()) {
     return false;
   }
+  if (last_byte_position + 1 < byte_pos()) {
+    return false;
+  }
+  bytes_to_discard_ = byte_pos() - first_byte_position;
 
   return true;
 }

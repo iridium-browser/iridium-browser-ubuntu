@@ -11,8 +11,9 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
+#include "base/sequence_checker.h"
 #include "base/single_thread_task_runner.h"
-#include "base/threading/non_thread_safe.h"
 #include "base/threading/thread.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -39,8 +40,7 @@ UINT ReservedIconId(StatusTray::StatusIconType type) {
 // Exporer.exe via COM.  It spawns a background thread with a fresh COM
 // apartment and requests that the visibility be increased unless the user
 // has explicitly set the icon to be hidden.
-class StatusTrayStateChangerProxyImpl : public StatusTrayStateChangerProxy,
-                                        public base::NonThreadSafe {
+class StatusTrayStateChangerProxyImpl : public StatusTrayStateChangerProxy {
  public:
   StatusTrayStateChangerProxyImpl()
       : pending_requests_(0),
@@ -49,8 +49,12 @@ class StatusTrayStateChangerProxyImpl : public StatusTrayStateChangerProxy,
     worker_thread_.init_com_with_mta(false);
   }
 
+  ~StatusTrayStateChangerProxyImpl() override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  }
+
   void EnqueueChange(UINT icon_id, HWND window) override {
-    DCHECK(CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     if (pending_requests_ == 0)
       worker_thread_.Start();
 
@@ -79,7 +83,7 @@ class StatusTrayStateChangerProxyImpl : public StatusTrayStateChangerProxy,
 
   // Called on UI thread.
   void ChangeDone() {
-    DCHECK(CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     DCHECK_GT(pending_requests_, 0);
 
     if (--pending_requests_ == 0)
@@ -89,6 +93,9 @@ class StatusTrayStateChangerProxyImpl : public StatusTrayStateChangerProxy,
  private:
   int pending_requests_;
   base::Thread worker_thread_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
+
   base::WeakPtrFactory<StatusTrayStateChangerProxyImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(StatusTrayStateChangerProxyImpl);
@@ -161,18 +168,18 @@ LRESULT CALLBACK StatusTrayWin::WndProc(HWND hwnd,
     // We need to reset all of our icons because the taskbar went away.
     for (StatusIcons::const_iterator i(status_icons().begin());
          i != status_icons().end(); ++i) {
-      StatusIconWin* win_icon = static_cast<StatusIconWin*>(*i);
+      StatusIconWin* win_icon = static_cast<StatusIconWin*>(i->get());
       win_icon->ResetIcon();
     }
     return TRUE;
   } else if (message == kStatusIconMessage) {
-    StatusIconWin* win_icon = NULL;
+    StatusIconWin* win_icon = nullptr;
 
     // Find the selected status icon.
     for (StatusIcons::const_iterator i(status_icons().begin());
          i != status_icons().end();
          ++i) {
-      StatusIconWin* current_win_icon = static_cast<StatusIconWin*>(*i);
+      StatusIconWin* current_win_icon = static_cast<StatusIconWin*>(i->get());
       if (current_win_icon->icon_id() == wparam) {
         win_icon = current_win_icon;
         break;
@@ -209,7 +216,7 @@ LRESULT CALLBACK StatusTrayWin::WndProc(HWND hwnd,
   return ::DefWindowProc(hwnd, message, wparam, lparam);
 }
 
-StatusIcon* StatusTrayWin::CreatePlatformStatusIcon(
+std::unique_ptr<StatusIcon> StatusTrayWin::CreatePlatformStatusIcon(
     StatusTray::StatusIconType type,
     const gfx::ImageSkia& image,
     const base::string16& tool_tip) {
@@ -219,12 +226,12 @@ StatusIcon* StatusTrayWin::CreatePlatformStatusIcon(
   else
     next_icon_id = ReservedIconId(type);
 
-  StatusIcon* icon =
-      new StatusIconWin(this, next_icon_id, window_, kStatusIconMessage);
+  auto icon = base::MakeUnique<StatusIconWin>(this, next_icon_id, window_,
+                                              kStatusIconMessage);
 
   icon->SetImage(image);
   icon->SetToolTip(tool_tip);
-  return icon;
+  return std::move(icon);
 }
 
 UINT StatusTrayWin::NextIconId() {

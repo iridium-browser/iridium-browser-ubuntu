@@ -41,7 +41,7 @@ void ExtensionWebUIOverrideRegistrar::OnExtensionLoaded(
 void ExtensionWebUIOverrideRegistrar::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   ExtensionWebUI::DeactivateChromeURLOverrides(
       Profile::FromBrowserContext(browser_context),
       URLOverrides::GetChromeURLOverrides(extension));
@@ -62,8 +62,8 @@ void ExtensionWebUIOverrideRegistrar::OnExtensionSystemReady(
       Profile::FromBrowserContext(context));
 }
 
-static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<ExtensionWebUIOverrideRegistrar> > g_factory =
+static base::LazyInstance<BrowserContextKeyedAPIFactory<
+    ExtensionWebUIOverrideRegistrar>>::DestructorAtExit g_factory =
     LAZY_INSTANCE_INITIALIZER;
 
 // static

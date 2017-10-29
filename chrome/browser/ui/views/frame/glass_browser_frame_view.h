@@ -7,20 +7,24 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/scoped_observer.h"
 #include "base/win/scoped_gdi_object.h"
 #include "chrome/browser/ui/views/frame/avatar_button_manager.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/frame/windows_10_caption_button.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tab_icon_view_model.h"
+#include "chrome/browser/ui/views/tabs/tab_strip_observer.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/window/non_client_view.h"
 
 class BrowserView;
+class TabStrip;
 
 class GlassBrowserFrameView : public BrowserNonClientFrameView,
                               public views::ButtonListener,
-                              public TabIconViewModel {
+                              public TabIconViewModel,
+                              public TabStripObserver {
  public:
   // Constructs a non-client view for an BrowserFrame.
   GlassBrowserFrameView(BrowserFrame* frame, BrowserView* browser_view);
@@ -33,6 +37,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   void UpdateThrobber(bool running) override;
   gfx::Size GetMinimumSize() const override;
   views::View* GetProfileSwitcherView() const override;
+  void OnBrowserViewInitViewsComplete() override;
 
   // views::NonClientFrameView:
   gfx::Rect GetBoundsForClientView() const override;
@@ -51,6 +56,11 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   // TabIconViewModel:
   bool ShouldTabIconViewAnimate() const override;
   gfx::ImageSkia GetFaviconForTabIconView() override;
+
+  // TabStripObserver:
+  void TabStripMaxXChanged(TabStrip* tab_strip) override;
+  void TabStripDeleted(TabStrip* tab_strip) override;
+  void TabStripRemovedTabAt(TabStrip* tab_strip, int index) override;
 
   bool IsMaximized() const;
 
@@ -102,7 +112,7 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
   // don't have tabs.
   int TitlebarHeight(bool restored) const;
 
-  // Returns the y coordinate for the top of the frame, which in maximized mode
+  // Returns the y coordinate for the top of the frame, which in tablet mode
   // is the top of the screen and in restored mode is 1 pixel below the top of
   // the window to leave room for the visual border that Windows draws.
   int WindowTopY() const;
@@ -188,6 +198,10 @@ class GlassBrowserFrameView : public BrowserNonClientFrameView,
 
   // The index of the current frame of the throbber animation.
   int throbber_frame_;
+
+  // The window's tabstrip, if any, is observed so we know when to resize any
+  // avatar button.
+  ScopedObserver<TabStrip, GlassBrowserFrameView> tab_strip_observer_;
 
   static const int kThrobberIconCount = 24;
   static HICON throbber_icons_[kThrobberIconCount];

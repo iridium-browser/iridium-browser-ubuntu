@@ -70,13 +70,7 @@ bool GAIAInfoUpdateService::ShouldUseGAIAProfileInfo(Profile* profile) {
 #if defined(OS_CHROMEOS)
   return false;
 #endif
-
-  // To enable this feature for testing pass "--google-profile-info".
-  if (switches::IsGoogleProfileInfo())
-    return true;
-
-  // This feature is disable by default.
-  return false;
+  return true;
 }
 
 bool GAIAInfoUpdateService::NeedsProfilePicture() const {
@@ -212,10 +206,8 @@ void GAIAInfoUpdateService::ScheduleNextUpdate() {
   timer_.Start(FROM_HERE, delta, this, &GAIAInfoUpdateService::Update);
 }
 
-void GAIAInfoUpdateService::GoogleSigninSucceeded(
-    const std::string& account_id,
-    const std::string& username,
-    const std::string& password) {
+void GAIAInfoUpdateService::GoogleSigninSucceeded(const std::string& account_id,
+                                                  const std::string& username) {
   OnUsernameChanged(username);
 }
 

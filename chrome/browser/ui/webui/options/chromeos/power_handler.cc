@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "ash/resources/grit/ash_resources.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/strings/string_number_conversions.h"
@@ -87,7 +86,7 @@ void PowerHandler::RegisterMessages() {
 void PowerHandler::OnPowerStatusChanged() {
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.PowerOverlay.setBatteryStatusText",
-      base::StringValue(GetStatusValue()));
+      base::Value(GetStatusValue()));
   UpdatePowerSources();
 }
 
@@ -165,7 +164,7 @@ void PowerHandler::UpdatePowerSources() {
 
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.PowerOverlay.setPowerSources", sources_list,
-      base::StringValue(status->GetCurrentPowerSourceID()),
+      base::Value(status->GetCurrentPowerSourceID()),
       base::Value(status->IsUsbChargerConnected()),
       base::Value(status->IsBatteryTimeBeingCalculated()));
 }

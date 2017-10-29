@@ -8,6 +8,7 @@
 
 #include "base/files/file_util.h"
 #include "base/run_loop.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/extensions/chrome_extension_test_notification_observer.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_creator.h"
@@ -19,6 +20,7 @@
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -32,7 +34,13 @@ ChromeTestExtensionLoader::ChromeTestExtensionLoader(
       extension_service_(extension_system_->extension_service()),
       extension_registry_(ExtensionRegistry::Get(browser_context)) {}
 
-ChromeTestExtensionLoader::~ChromeTestExtensionLoader() {}
+ChromeTestExtensionLoader::~ChromeTestExtensionLoader() {
+  // If there was a temporary directory created for a CRX, we need to clean it
+  // up before the member is destroyed so we can explicitly allow IO.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  if (temp_dir_.IsValid())
+    EXPECT_TRUE(temp_dir_.Delete());
+}
 
 scoped_refptr<const Extension> ChromeTestExtensionLoader::LoadExtension(
     const base::FilePath& path) {
@@ -98,11 +106,16 @@ bool ChromeTestExtensionLoader::WaitForExtensionReady() {
 
 base::FilePath ChromeTestExtensionLoader::PackExtension(
     const base::FilePath& unpacked_path) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   if (!base::PathExists(unpacked_path)) {
     ADD_FAILURE() << "Unpacked path does not exist: " << unpacked_path.value();
     return base::FilePath();
   }
 
+  if (!temp_dir_.CreateUniqueTempDir()) {
+    ADD_FAILURE() << "Could not create unique temp dir.";
+    return base::FilePath();
+  }
   base::FilePath crx_path = temp_dir_.GetPath().AppendASCII("temp.crx");
   if (base::PathExists(crx_path)) {
     ADD_FAILURE() << "Crx path exists: " << crx_path.value()
@@ -117,7 +130,8 @@ base::FilePath ChromeTestExtensionLoader::PackExtension(
     return base::FilePath();
   }
 
-  base::FilePath* pem_path_to_use = &fallback_pem_path;
+  base::FilePath empty_path;
+  base::FilePath* pem_path_to_use = &empty_path;
   if (!pem_path_.empty()) {
     pem_path_to_use = &pem_path_;
     if (!base::PathExists(pem_path_)) {

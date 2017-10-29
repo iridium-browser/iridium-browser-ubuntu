@@ -34,7 +34,15 @@
 
 #include "libavformat/version.h"
 
-#define AVIO_SEEKABLE_NORMAL 0x0001 /**< Seeking works like for a local file */
+/**
+ * Seeking works like for a local file.
+ */
+#define AVIO_SEEKABLE_NORMAL (1 << 0)
+
+/**
+ * Seeking by timestamp with avio_seek_time() is possible.
+ */
+#define AVIO_SEEKABLE_TIME   (1 << 1)
 
 /**
  * Callback for checking whether to abort blocking functions.
@@ -313,6 +321,14 @@ typedef struct AVIOContext {
      */
     enum AVIODataMarkerType current_type;
     int64_t last_time;
+
+    /**
+     * A callback that is used instead of short_seek_threshold.
+     * This is current internal only, do not use from outside.
+     */
+    int (*short_seek_get)(void *opaque);
+
+    int64_t written;
 } AVIOContext;
 
 /**

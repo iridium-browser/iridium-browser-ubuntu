@@ -19,8 +19,6 @@
 #include "content/browser/indexed_db/leveldb/leveldb_iterator.h"
 
 namespace content {
-
-class LevelDBTransactionRangeTest;
 class LevelDBWriteBatch;
 
 class CONTENT_EXPORT LevelDBTransaction
@@ -42,6 +40,8 @@ class CONTENT_EXPORT LevelDBTransaction
 
   std::unique_ptr<LevelDBIterator> CreateIterator();
 
+  uint64_t GetTransactionSize() const { return size_; }
+
  protected:
   virtual ~LevelDBTransaction();
   explicit LevelDBTransaction(LevelDBDatabase* db);
@@ -49,8 +49,9 @@ class CONTENT_EXPORT LevelDBTransaction
 
  private:
   friend class base::RefCounted<LevelDBTransaction>;
-  friend class content::LevelDBTransactionRangeTest;
-  FRIEND_TEST_ALL_PREFIXES(LevelDBTransactionTest, GetAndPut);
+  friend class LevelDBTransactionRangeTest;
+  friend class LevelDBTransactionTest;
+  FRIEND_TEST_ALL_PREFIXES(LevelDBTransactionTest, GetPutDelete);
   FRIEND_TEST_ALL_PREFIXES(LevelDBTransactionTest, Commit);
   FRIEND_TEST_ALL_PREFIXES(LevelDBTransactionTest, Iterator);
 
@@ -61,6 +62,7 @@ class CONTENT_EXPORT LevelDBTransaction
     std::string value;
     bool deleted = false;
   };
+  static constexpr uint64_t SizeOfRecordInMap(size_t key_size);
 
   class Comparator {
    public:
@@ -123,6 +125,8 @@ class CONTENT_EXPORT LevelDBTransaction
     leveldb::Status Prev() override;
     base::StringPiece Key() const override;
     base::StringPiece Value() const override;
+    // Exposed for testing.
+    bool IsDetached() const override;
     void DataChanged();
 
     // Mark the current record as deleted. If an existing record
@@ -163,6 +167,7 @@ class CONTENT_EXPORT LevelDBTransaction
   const LevelDBComparator* comparator_;
   Comparator data_comparator_;
   DataType data_;
+  uint64_t size_ = 0ull;
   bool finished_ = false;
   std::set<TransactionIterator*> iterators_;
 

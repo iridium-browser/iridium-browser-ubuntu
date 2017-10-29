@@ -64,6 +64,15 @@ class FakeContentPasswordManagerDriver
     return password_form_inpage_navigation_;
   }
 
+  bool called_password_forms_parsed() const {
+    return called_password_forms_parsed_;
+  }
+
+  const base::Optional<std::vector<autofill::PasswordForm>>&
+  password_forms_parsed() const {
+    return password_forms_parsed_;
+  }
+
   bool called_password_forms_rendered() const {
     return called_password_forms_rendered_;
   }
@@ -73,13 +82,19 @@ class FakeContentPasswordManagerDriver
     return password_forms_rendered_;
   }
 
-  void reset_password_forms_rendered() {
+  void reset_password_forms_calls() {
+    called_password_forms_parsed_ = false;
+    password_forms_parsed_ = base::nullopt;
     called_password_forms_rendered_ = false;
     password_forms_rendered_ = base::nullopt;
   }
 
   bool called_record_save_progress() const {
     return called_record_save_progress_;
+  }
+
+  bool called_user_modified_password_field() const {
+    return called_user_modified_password_field_;
   }
 
   bool called_save_generation_field() const {
@@ -109,6 +124,10 @@ class FakeContentPasswordManagerDriver
 
   void reset_called_presave_generated_password() {
     called_presave_generated_password_ = false;
+  }
+
+  int called_check_safe_browsing_reputation_cnt() {
+    return called_check_safe_browsing_reputation_cnt_;
   }
 
  private:
@@ -142,9 +161,14 @@ class FakeContentPasswordManagerDriver
 
   void RecordSavePasswordProgress(const std::string& log) override;
 
+  void UserModifiedPasswordField() override;
+
   void SaveGenerationFieldDetectedByClassifier(
       const autofill::PasswordForm& password_form,
       const base::string16& generation_field) override;
+
+  void CheckSafeBrowsingReputation(const GURL& form_action,
+                                   const GURL& frame_url) override;
 
   // Records whether ShowPasswordSuggestions() gets called.
   bool called_show_pw_suggestions_ = false;
@@ -162,12 +186,18 @@ class FakeContentPasswordManagerDriver
   bool called_inpage_navigation_ = false;
   // Records data received via InPageNavigation() call.
   base::Optional<autofill::PasswordForm> password_form_inpage_navigation_;
+  // Records whether PasswordFormsParsed() gets called.
+  bool called_password_forms_parsed_ = false;
+  // Records if the list received via PasswordFormsParsed() call was empty.
+  base::Optional<std::vector<autofill::PasswordForm>> password_forms_parsed_;
   // Records whether PasswordFormsRendered() gets called.
   bool called_password_forms_rendered_ = false;
   // Records data received via PasswordFormsRendered() call.
   base::Optional<std::vector<autofill::PasswordForm>> password_forms_rendered_;
   // Records whether RecordSavePasswordProgress() gets called.
   bool called_record_save_progress_ = false;
+  // Records whether UserModifiedPasswordField() gets called.
+  bool called_user_modified_password_field_ = false;
   // Records whether SaveGenerationFieldDetectedByClassifier() gets called.
   bool called_save_generation_field_ = false;
   // Records data received via SaveGenerationFieldDetectedByClassifier() call.
@@ -176,6 +206,9 @@ class FakeContentPasswordManagerDriver
   bool called_password_no_longer_generated_ = false;
   // Records whether PresaveGeneratedPassword() gets called.
   bool called_presave_generated_password_ = false;
+
+  // Records number of times CheckSafeBrowsingReputation() gets called.
+  int called_check_safe_browsing_reputation_cnt_ = 0;
 
   mojo::BindingSet<autofill::mojom::PasswordManagerDriver> bindings_;
 };

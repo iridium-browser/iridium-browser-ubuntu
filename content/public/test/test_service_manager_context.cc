@@ -4,13 +4,22 @@
 
 #include "content/public/test/test_service_manager_context.h"
 
+#include "content/browser/child_process_launcher.h"
 #include "content/browser/service_manager/service_manager_context.h"
+#include "content/public/common/service_manager_connection.h"
 
 namespace content {
 
-TestServiceManagerContext::TestServiceManagerContext()
-    : context_(new ServiceManagerContext) {}
+TestServiceManagerContext::TestServiceManagerContext() {
+  // Isolate from previous tests that may have already initialized
+  // ServiceManagerConnection (e.g. in
+  // RenderProcessHostImpl::InitializeChannelProxy()).
+  ServiceManagerConnection::DestroyForProcess();
+  context_.reset(new ServiceManagerContext);
+}
 
-TestServiceManagerContext::~TestServiceManagerContext() {}
+TestServiceManagerContext::~TestServiceManagerContext() {
+  ChildProcessLauncher::ResetRegisteredFilesForTesting();
+}
 
 }  // namespace content

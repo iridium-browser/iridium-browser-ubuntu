@@ -17,7 +17,7 @@ cr.define('print_preview.ticket_items', function() {
   function Copies(destinationStore) {
     print_preview.ticket_items.TicketItem.call(
         this, null /*appState*/, null /*field*/, destinationStore);
-  };
+  }
 
   Copies.prototype = {
     __proto__: print_preview.ticket_items.TicketItem.prototype,
@@ -55,16 +55,12 @@ cr.define('print_preview.ticket_items', function() {
      */
     getCopiesCapability_: function() {
       var dest = this.getSelectedDestInternal();
-      return (dest &&
-              dest.capabilities &&
-              dest.capabilities.printer &&
+      return (dest && dest.capabilities && dest.capabilities.printer &&
               dest.capabilities.printer.copies) ||
-             null;
+          null;
     }
   };
 
   // Export
-  return {
-    Copies: Copies
-  };
+  return {Copies: Copies};
 });

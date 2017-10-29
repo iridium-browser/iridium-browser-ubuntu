@@ -90,10 +90,9 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
   const base::string16& error() { return error_; }
 
   void Start() {
-    BrowserThread::PostTask(BrowserThread::FILE,
-                            FROM_HERE,
-                            base::Bind(&ValidateCrxHelper::StartOnFileThread,
-                                       this));
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&ValidateCrxHelper::StartOnFileThread, this));
   }
 
  protected:
@@ -101,25 +100,23 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
 
   void OnUnpackSuccess(const base::FilePath& temp_dir,
                        const base::FilePath& extension_root,
-                       const base::DictionaryValue* original_manifest,
+                       std::unique_ptr<base::DictionaryValue> original_manifest,
                        const Extension* extension,
                        const SkBitmap& install_icon) override {
     finished_ = true;
     success_ = true;
-    BrowserThread::PostTask(BrowserThread::UI,
-                            FROM_HERE,
-                            base::Bind(&ValidateCrxHelper::FinishOnUIThread,
-                                       this));
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::BindOnce(&ValidateCrxHelper::FinishOnUIThread, this));
   }
 
   void OnUnpackFailure(const CrxInstallError& error) override {
     finished_ = true;
     success_ = false;
     error_ = error.message();
-    BrowserThread::PostTask(BrowserThread::UI,
-                            FROM_HERE,
-                            base::Bind(&ValidateCrxHelper::FinishOnUIThread,
-                                       this));
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::BindOnce(&ValidateCrxHelper::FinishOnUIThread, this));
   }
 
   void FinishOnUIThread() {

@@ -15,19 +15,18 @@
 
 namespace blink {
 
-void BlockPaintInvalidator::clearPreviousVisualRects() {
-  m_block.frame()->selection().clearPreviousCaretVisualRect(m_block);
-  m_block.frame()->page()->dragCaret().clearPreviousVisualRect(m_block);
+void BlockPaintInvalidator::ClearPreviousVisualRects() {
+  block_.GetFrame()->Selection().ClearPreviousCaretVisualRect(block_);
+  block_.GetFrame()->GetPage()->GetDragCaret().ClearPreviousVisualRect(block_);
 }
 
-PaintInvalidationReason BlockPaintInvalidator::invalidatePaintIfNeeded(
+PaintInvalidationReason BlockPaintInvalidator::InvalidatePaint(
     const PaintInvalidatorContext& context) {
   PaintInvalidationReason reason =
-      BoxPaintInvalidator(m_block, context).invalidatePaintIfNeeded();
+      BoxPaintInvalidator(block_, context).InvalidatePaint();
 
-  m_block.frame()->selection().invalidatePaintIfNeeded(m_block, context);
-  m_block.frame()->page()->dragCaret().invalidatePaintIfNeeded(m_block,
-                                                               context);
+  block_.GetFrame()->Selection().InvalidatePaint(block_, context);
+  block_.GetFrame()->GetPage()->GetDragCaret().InvalidatePaint(block_, context);
 
   return reason;
 }

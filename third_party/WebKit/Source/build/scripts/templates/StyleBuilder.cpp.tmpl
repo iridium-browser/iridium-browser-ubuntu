@@ -1,5 +1,7 @@
-{% from 'macros.tmpl' import license %}
+{% from 'templates/macros.tmpl' import license, source_files_for_generated_file %}
 {{license()}}
+
+{{source_files_for_generated_file(template_file, input_files)}}
 
 #include "core/css/resolver/StyleBuilder.h"
 
@@ -12,12 +14,12 @@
 
 namespace blink {
 
-void StyleBuilder::applyProperty(CSSPropertyID property,
+void StyleBuilder::ApplyProperty(CSSPropertyID property,
                                  StyleResolverState& state,
                                  const CSSValue& value,
                                  bool isInitial,
                                  bool isInherit) {
-  switch(property) {
+  switch (property) {
     {% for property_id, property in properties.items()
     if property.should_declare_functions or property.use_handlers_for %}
     {% set used_property = properties[property.use_handlers_for] or property %}
@@ -33,16 +35,17 @@ void StyleBuilder::applyProperty(CSSPropertyID property,
 
     {% endfor %}
     case CSSPropertyVariable:
-      ASSERT(!isInitial && !isInherit);
+      DCHECK(!isInitial);
+      DCHECK(!isInherit);
       StyleBuilderFunctions::applyValueCSSPropertyVariable(state, value);
       return;
     {% for property_id, property in properties.items() if property.direction_aware %}
     case {{property_id}}:
     {% endfor %}
     {
-      CSSPropertyID resolvedProperty = CSSProperty::resolveDirectionAwareProperty(property, state.style()->direction(), state.style()->getWritingMode());
-      ASSERT(resolvedProperty != property);
-      applyProperty(resolvedProperty, state, value);
+      CSSPropertyID resolvedProperty = CSSProperty::ResolveDirectionAwareProperty(property, state.Style()->Direction(), state.Style()->GetWritingMode());
+      DCHECK_NE(resolvedProperty, property);
+      ApplyProperty(resolvedProperty, state, value);
       return;
     }
     {% for property_id, property in properties.items() if property.builder_skip %}
@@ -50,7 +53,7 @@ void StyleBuilder::applyProperty(CSSPropertyID property,
     {% endfor %}
       return;
     default:
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
   }
 }
 

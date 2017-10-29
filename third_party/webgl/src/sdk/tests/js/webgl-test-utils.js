@@ -297,7 +297,7 @@ var setupProgram = function(
  * @param {boolean} opt_logShaders Whether to log shader source.
  */
 var setupTransformFeedbackProgram = function(
-    gl, shaders, varyings, bufferMode, opt_attribs, opt_locations, opt_logShaders) {
+    gl, shaders, varyings, bufferMode, opt_attribs, opt_locations, opt_logShaders, opt_skipCompileStatus) {
   var realShaders = [];
   var program = gl.createProgram();
   var shaderCount = 0;
@@ -309,13 +309,13 @@ var setupTransformFeedbackProgram = function(
       if (element) {
         if (element.type != "x-shader/x-vertex" && element.type != "x-shader/x-fragment")
           shaderType = ii ? gl.FRAGMENT_SHADER : gl.VERTEX_SHADER;
-        shader = loadShaderFromScript(gl, shader, shaderType, undefined, opt_logShaders);
+        shader = loadShaderFromScript(gl, shader, shaderType, undefined, opt_logShaders, opt_skipCompileStatus);
       } else if (endsWith(shader, ".vert")) {
-        shader = loadShaderFromFile(gl, shader, gl.VERTEX_SHADER, undefined, opt_logShaders);
+        shader = loadShaderFromFile(gl, shader, gl.VERTEX_SHADER, undefined, opt_logShaders, opt_skipCompileStatus);
       } else if (endsWith(shader, ".frag")) {
-        shader = loadShaderFromFile(gl, shader, gl.FRAGMENT_SHADER, undefined, opt_logShaders);
+        shader = loadShaderFromFile(gl, shader, gl.FRAGMENT_SHADER, undefined, opt_logShaders, opt_skipCompileStatus);
       } else {
-        shader = loadShader(gl, shader, ii ? gl.FRAGMENT_SHADER : gl.VERTEX_SHADER, undefined, opt_logShaders);
+        shader = loadShader(gl, shader, ii ? gl.FRAGMENT_SHADER : gl.VERTEX_SHADER, undefined, opt_logShaders, undefined, undefined, opt_skipCompileStatus);
       }
     } else if (opt_logShaders) {
       throw 'Shader source logging requested but no shader source provided';
@@ -1458,7 +1458,7 @@ var create3DContext = function(opt_canvas, opt_attributes, opt_version) {
   var names;
   switch (opt_version) {
     case 2:
-      names = ["webgl2", "experimental-webgl2"]; break;
+      names = ["webgl2"]; break;
     default:
       names = ["webgl", "experimental-webgl"]; break;
   }
@@ -1552,11 +1552,12 @@ var shouldGenerateGLError = function(gl, glErrors, evalStr, opt_msg) {
   }
   if (exception) {
     testFailed(evalStr + " threw exception " + exception);
+    return -1;
   } else {
     if (!opt_msg) {
       opt_msg = "after evaluating: " + evalStr;
     }
-    glErrorShouldBe(gl, glErrors, opt_msg);
+    return glErrorShouldBe(gl, glErrors, opt_msg);
   }
 };
 
@@ -1586,7 +1587,7 @@ var failIfGLError = function(gl, evalStr) {
  * @param {string} opt_msg Optional additional message.
  */
 var glErrorShouldBe = function(gl, glErrors, opt_msg) {
-  glErrorShouldBeImpl(gl, glErrors, true, opt_msg);
+  return glErrorShouldBeImpl(gl, glErrors, true, opt_msg);
 };
 
 
@@ -1617,6 +1618,7 @@ var glErrorShouldBeImpl = function(gl, glErrors, reportSuccesses, opt_msg) {
     var msg = "getError was " + ((glErrors.length > 1) ? "one of: " : "expected value: ");
     testPassed(msg + expected + " : " + opt_msg);
   }
+  return err;
 };
 
 /**

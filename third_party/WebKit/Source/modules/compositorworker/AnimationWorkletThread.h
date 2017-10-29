@@ -16,17 +16,17 @@ class WorkerReportingProxy;
 class MODULES_EXPORT AnimationWorkletThread final
     : public AbstractAnimationWorkletThread {
  public:
-  static std::unique_ptr<AnimationWorkletThread> create(
-      PassRefPtr<WorkerLoaderProxy>,
+  static std::unique_ptr<AnimationWorkletThread> Create(
+      ThreadableLoadingContext*,
       WorkerReportingProxy&);
   ~AnimationWorkletThread() override;
 
  protected:
-  WorkerOrWorkletGlobalScope* createWorkerGlobalScope(
-      std::unique_ptr<WorkerThreadStartupData>) final;
+  WorkerOrWorkletGlobalScope* CreateWorkerGlobalScope(
+      std::unique_ptr<GlobalScopeCreationParams>) final;
 
  private:
-  AnimationWorkletThread(PassRefPtr<WorkerLoaderProxy>, WorkerReportingProxy&);
+  AnimationWorkletThread(ThreadableLoadingContext*, WorkerReportingProxy&);
 };
 
 }  // namespace blink

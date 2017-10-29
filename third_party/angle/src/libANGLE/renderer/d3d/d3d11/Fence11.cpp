@@ -33,8 +33,7 @@ gl::Error FenceSetHelper(FenceClass *fence)
         HRESULT result = fence->mRenderer->getDevice()->CreateQuery(&queryDesc, &fence->mQuery);
         if (FAILED(result))
         {
-            return gl::Error(GL_OUT_OF_MEMORY, "Failed to create event query, result: 0x%X.",
-                             result);
+            return gl::OutOfMemory() << "Failed to create event query, " << gl::FmtHR(result);
         }
     }
 
@@ -49,11 +48,11 @@ gl::Error FenceTestHelper(FenceClass *fence, bool flushCommandBuffer, GLboolean 
 
     UINT getDataFlags = (flushCommandBuffer ? 0 : D3D11_ASYNC_GETDATA_DONOTFLUSH);
     HRESULT result =
-        fence->mRenderer->getDeviceContext()->GetData(fence->mQuery, NULL, 0, getDataFlags);
+        fence->mRenderer->getDeviceContext()->GetData(fence->mQuery, nullptr, 0, getDataFlags);
 
     if (FAILED(result))
     {
-        return gl::Error(GL_OUT_OF_MEMORY, "Failed to get query data, result: 0x%X.", result);
+        return gl::OutOfMemory() << "Failed to get query data, " << gl::FmtHR(result);
     }
 
     ASSERT(result == S_OK || result == S_FALSE);
@@ -65,7 +64,7 @@ gl::Error FenceTestHelper(FenceClass *fence, bool flushCommandBuffer, GLboolean 
 // FenceNV11
 //
 
-FenceNV11::FenceNV11(Renderer11 *renderer) : FenceNVImpl(), mRenderer(renderer), mQuery(NULL)
+FenceNV11::FenceNV11(Renderer11 *renderer) : FenceNVImpl(), mRenderer(renderer), mQuery(nullptr)
 {
 }
 
@@ -96,8 +95,7 @@ gl::Error FenceNV11::finish()
 
         if (loopCount % kDeviceLostCheckPeriod == 0 && mRenderer->testDeviceLost())
         {
-            return gl::Error(GL_OUT_OF_MEMORY,
-                             "Device was lost while querying result of an event query.");
+            return gl::OutOfMemory() << "Device was lost while querying result of an event query.";
         }
 
         ScheduleYield();
@@ -121,7 +119,8 @@ gl::Error FenceNV11::finish()
 // We still opt to use QPC. In the present and moving forward, most newer systems will not suffer
 // from buggy implementations.
 
-FenceSync11::FenceSync11(Renderer11 *renderer) : FenceSyncImpl(), mRenderer(renderer), mQuery(NULL)
+FenceSync11::FenceSync11(Renderer11 *renderer)
+    : FenceSyncImpl(), mRenderer(renderer), mQuery(nullptr)
 {
     LARGE_INTEGER counterFreqency = {};
     BOOL success                  = QueryPerformanceFrequency(&counterFreqency);
@@ -192,8 +191,7 @@ gl::Error FenceSync11::clientWait(GLbitfield flags, GLuint64 timeout, GLenum *ou
         if ((loopCount % kDeviceLostCheckPeriod) == 0 && mRenderer->testDeviceLost())
         {
             *outResult = GL_WAIT_FAILED;
-            return gl::Error(GL_OUT_OF_MEMORY,
-                             "Device was lost while querying result of an event query.");
+            return gl::OutOfMemory() << "Device was lost while querying result of an event query.";
         }
     }
 

@@ -10,8 +10,8 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "dbus/message.h"
 #include "dbus/mock_bus.h"
 #include "dbus/mock_object_proxy.h"
@@ -42,7 +42,7 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
     // CallMethodAndBlock() will use CreateNetworkManagerProxyResponse()
     // to return responses.
     EXPECT_CALL(*mock_network_manager_proxy_.get(),
-                MockCallMethodAndBlock(_, _))
+                CallMethodAndBlock(_, _))
         .WillRepeatedly(Invoke(this, &GeolocationWifiDataProviderLinuxTest::
                                          CreateNetworkManagerProxyResponse));
 
@@ -50,7 +50,7 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
     mock_device_proxy_ = new dbus::MockObjectProxy(
         mock_bus_.get(), "org.freedesktop.NetworkManager",
         dbus::ObjectPath("/org/freedesktop/NetworkManager/Devices/0"));
-    EXPECT_CALL(*mock_device_proxy_.get(), MockCallMethodAndBlock(_, _))
+    EXPECT_CALL(*mock_device_proxy_.get(), CallMethodAndBlock(_, _))
         .WillRepeatedly(Invoke(
             this,
             &GeolocationWifiDataProviderLinuxTest::CreateDeviceProxyResponse));
@@ -59,7 +59,7 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
     mock_access_point_proxy_ = new dbus::MockObjectProxy(
         mock_bus_.get(), "org.freedesktop.NetworkManager",
         dbus::ObjectPath("/org/freedesktop/NetworkManager/AccessPoint/0"));
-    EXPECT_CALL(*mock_access_point_proxy_.get(), MockCallMethodAndBlock(_, _))
+    EXPECT_CALL(*mock_access_point_proxy_.get(), CallMethodAndBlock(_, _))
         .WillRepeatedly(Invoke(this, &GeolocationWifiDataProviderLinuxTest::
                                          CreateAccessPointProxyResponse));
 
@@ -92,15 +92,18 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
 
     // Create the wlan API with the mock bus object injected.
     wifi_provider_linux_ = new WifiDataProviderLinux;
-    wlan_api_.reset(
-        wifi_provider_linux_->NewWlanApiForTesting(mock_bus_.get()));
-    ASSERT_TRUE(wlan_api_.get());
+    wlan_api_ = wifi_provider_linux_->CreateWlanApiForTesting(mock_bus_.get());
+    ASSERT_TRUE(wlan_api_);
   }
 
  protected:
+  GeolocationWifiDataProviderLinuxTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+
   // WifiDataProvider requires a task runner to be present. The |message_loop_|
   // is defined here, as it should outlive |wifi_provider_linux_|.
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   scoped_refptr<dbus::MockBus> mock_bus_;
   scoped_refptr<dbus::MockObjectProxy> mock_network_manager_proxy_;
   scoped_refptr<dbus::MockObjectProxy> mock_access_point_proxy_;
@@ -110,7 +113,7 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
 
  private:
   // Creates a response for |mock_network_manager_proxy_|.
-  dbus::Response* CreateNetworkManagerProxyResponse(
+  std::unique_ptr<dbus::Response> CreateNetworkManagerProxyResponse(
       dbus::MethodCall* method_call,
       Unused) {
     if (method_call->GetInterface() == "org.freedesktop.NetworkManager" &&
@@ -123,16 +126,17 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
       std::unique_ptr<dbus::Response> response = dbus::Response::CreateEmpty();
       dbus::MessageWriter writer(response.get());
       writer.AppendArrayOfObjectPaths(object_paths);
-      return response.release();
+      return response;
     }
 
     LOG(ERROR) << "Unexpected method call: " << method_call->ToString();
-    return NULL;
+    return nullptr;
   }
 
   // Creates a response for |mock_device_proxy_|.
-  dbus::Response* CreateDeviceProxyResponse(dbus::MethodCall* method_call,
-                                            Unused) {
+  std::unique_ptr<dbus::Response> CreateDeviceProxyResponse(
+      dbus::MethodCall* method_call,
+      Unused) {
     if (method_call->GetInterface() == DBUS_INTERFACE_PROPERTIES &&
         method_call->GetMember() == "Get") {
       dbus::MessageReader reader(method_call);
@@ -147,7 +151,7 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
         // This matches NM_DEVICE_TYPE_WIFI in wifi_data_provider_linux.cc.
         const int kDeviceTypeWifi = 2;
         writer.AppendVariantOfUint32(kDeviceTypeWifi);
-        return response.release();
+        return response;
       }
     } else if (method_call->GetInterface() ==
                    "org.freedesktop.NetworkManager.Device.Wireless" &&
@@ -159,16 +163,17 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
       object_paths.push_back(
           dbus::ObjectPath("/org/freedesktop/NetworkManager/AccessPoint/0"));
       writer.AppendArrayOfObjectPaths(object_paths);
-      return response.release();
+      return response;
     }
 
     LOG(ERROR) << "Unexpected method call: " << method_call->ToString();
-    return NULL;
+    return nullptr;
   }
 
   // Creates a response for |mock_access_point_proxy_|.
-  dbus::Response* CreateAccessPointProxyResponse(dbus::MethodCall* method_call,
-                                                 Unused) {
+  std::unique_ptr<dbus::Response> CreateAccessPointProxyResponse(
+      dbus::MethodCall* method_call,
+      Unused) {
     if (method_call->GetInterface() == DBUS_INTERFACE_PROPERTIES &&
         method_call->GetMember() == "Get") {
       dbus::MessageReader reader(method_call);
@@ -200,12 +205,12 @@ class GeolocationWifiDataProviderLinuxTest : public testing::Test {
           const uint32_t kFrequency = 2427;
           writer.AppendVariantOfUint32(kFrequency);
         }
-        return response.release();
+        return response;
       }
     }
 
     LOG(ERROR) << "Unexpected method call: " << method_call->ToString();
-    return NULL;
+    return nullptr;
   }
 };
 

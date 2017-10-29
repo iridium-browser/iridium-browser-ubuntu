@@ -130,47 +130,50 @@ template("chrome_extra_paks") {
       sources += invoker.additional_paks
     }
 
-    if (!is_android) {
+    if (is_android) {
+      sources += [ "$root_gen_dir/chrome/webapks_ui_resources.pak" ]
+      deps += [ "//chrome/browser/resources:webapks_ui_resources" ]
+    } else {
       # New paks should be added here by default.
       sources += [
         "$root_gen_dir/chrome/component_extension_resources.pak",
-        "$root_gen_dir/chrome/options_resources.pak",
         "$root_gen_dir/chrome/settings_resources.pak",
-        "$root_gen_dir/chrome/sync_file_system_internals_resources.pak",
         "$root_gen_dir/content/browser/devtools/devtools_resources.pak",
+        "$root_gen_dir/headless/headless_lib_resources.pak",
       ]
       deps += [
         "//chrome/browser/resources:component_extension_resources",
-        "//chrome/browser/resources:options_resources",
         "//chrome/browser/resources:settings_resources",
-        "//chrome/browser/resources:sync_file_system_internals_resources",
         "//content/browser/devtools:devtools_resources",
+        "//headless:resources",
       ]
     }
     if (is_chromeos) {
       sources += [
+        "$root_gen_dir/chrome/options_resources.pak",
         "$root_gen_dir/components/chrome_apps/chrome_apps_resources.pak",
         "$root_gen_dir/ui/file_manager/file_manager_resources.pak",
       ]
       deps += [
+        "//chrome/browser/resources:options_resources",
         "//components/chrome_apps:resources",
         "//ui/file_manager:resources",
       ]
     }
-    if (is_linux) {
-      sources += [ "$root_gen_dir/headless/headless_lib_resources.pak" ]
-      deps += [ "//headless:resources" ]
-    }
     if (enable_extensions) {
       sources += [
+        "$root_gen_dir/chrome/sync_file_system_internals_resources.pak",
         "$root_gen_dir/extensions/extensions_renderer_resources.pak",
         "$root_gen_dir/extensions/extensions_resources.pak",
       ]
-      deps += [ "//extensions:extensions_resources" ]
+      deps += [
+        "//chrome/browser/resources:sync_file_system_internals_resources",
+        "//extensions:extensions_resources",
+      ]
     }
-    if (is_android) {
-      sources += [ "$root_gen_dir/chrome/webapks_ui_resources.pak" ]
-      deps += [ "//chrome/browser/resources:webapks_ui_resources" ]
+    if (enable_vr) {
+      sources += [ "$root_gen_dir/chrome/vr_shell_resources.pak" ]
+      deps += [ "//chrome/browser/resources:vr_shell_resources" ]
     }
   }
 }
@@ -185,8 +188,7 @@ template("chrome_extra_paks") {
 #   output_dir [required]: Directory to output .pak files. Locale .pak files
 #       will always be place in $output_dir/locales
 #   additional_extra_paks: List of extra .pak sources for resources.pak.
-#   additional_locale_source_patterns: additional_source_patterns for
-#       chrome_repack_locales().
+#   locale_whitelist: if set, override repack_whitelist for locale .pak files.
 #   copy_data_to_bundle:
 #   deps:
 #   output_dir:
@@ -241,13 +243,14 @@ template("chrome_paks") {
                            [
                              "copy_data_to_bundle",
                              "deps",
-                             "repack_whitelist",
                              "visibility",
                            ])
-
-    if (defined(invoker.additional_locale_source_patterns)) {
-      additional_source_patterns = invoker.additional_locale_source_patterns
+    if (defined(invoker.locale_whitelist)) {
+      repack_whitelist = invoker.locale_whitelist
+    } else if (defined(invoker.repack_whitelist)) {
+      repack_whitelist = invoker.repack_whitelist
     }
+
     input_locales = locales
     output_dir = "${invoker.output_dir}/locales"
 

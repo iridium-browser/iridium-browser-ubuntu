@@ -26,6 +26,7 @@
 #include "components/proxy_config/proxy_config_pref_names.h"
 #include "components/sync_preferences/pref_service_mock_factory.h"
 #include "components/sync_preferences/pref_service_syncable.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -129,22 +130,23 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineOptions) {
   command_line_.AppendSwitchASCII(switches::kProxyBypassList, "123");
   command_line_.AppendSwitchASCII(switches::kProxyServer, "789");
   std::unique_ptr<base::Value> mode_name(
-      new base::StringValue(ProxyPrefs::kFixedServersProxyModeName));
+      new base::Value(ProxyPrefs::kFixedServersProxyModeName));
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              POLICY_SOURCE_CLOUD, std::move(mode_name), nullptr);
   policy.Set(key::kProxyBypassList, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             POLICY_SOURCE_CLOUD, base::MakeUnique<base::StringValue>("abc"),
+             POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>("abc"),
              nullptr);
   policy.Set(key::kProxyServer, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             POLICY_SOURCE_CLOUD, base::MakeUnique<base::StringValue>("ghi"),
+             POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>("ghi"),
              nullptr);
   provider_.UpdateChromePolicy(policy);
 
   // First verify that command-line options are set correctly when
   // there is no policy in effect.
   std::unique_ptr<PrefService> prefs(CreatePrefService(false));
-  ProxyConfigDictionary dict(prefs->GetDictionary(proxy_config::prefs::kProxy));
+  ProxyConfigDictionary dict(
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
   assertProxyMode(dict, ProxyPrefs::MODE_FIXED_SERVERS);
   assertProxyServer(dict, "789");
   assertPacUrl(dict, std::string());
@@ -155,7 +157,7 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineOptions) {
   // line and replaced them with the policy versions.
   prefs = CreatePrefService(true);
   ProxyConfigDictionary dict2(
-      prefs->GetDictionary(proxy_config::prefs::kProxy));
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
   assertProxyMode(dict2, ProxyPrefs::MODE_FIXED_SERVERS);
   assertProxyServer(dict2, "ghi");
   assertPacUrl(dict2, std::string());
@@ -166,7 +168,7 @@ TEST_F(ProxyPolicyTest, OverridesUnrelatedCommandLineOptions) {
   command_line_.AppendSwitchASCII(switches::kProxyBypassList, "123");
   command_line_.AppendSwitchASCII(switches::kProxyServer, "789");
   std::unique_ptr<base::Value> mode_name(
-      new base::StringValue(ProxyPrefs::kAutoDetectProxyModeName));
+      new base::Value(ProxyPrefs::kAutoDetectProxyModeName));
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              POLICY_SOURCE_CLOUD, std::move(mode_name), nullptr);
@@ -175,7 +177,8 @@ TEST_F(ProxyPolicyTest, OverridesUnrelatedCommandLineOptions) {
   // First verify that command-line options are set correctly when
   // there is no policy in effect.
   std::unique_ptr<PrefService> prefs = CreatePrefService(false);
-  ProxyConfigDictionary dict(prefs->GetDictionary(proxy_config::prefs::kProxy));
+  ProxyConfigDictionary dict(
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
   assertProxyMode(dict, ProxyPrefs::MODE_FIXED_SERVERS);
   assertProxyServer(dict, "789");
   assertPacUrl(dict, std::string());
@@ -187,14 +190,14 @@ TEST_F(ProxyPolicyTest, OverridesUnrelatedCommandLineOptions) {
   // set in policy.
   prefs = CreatePrefService(true);
   ProxyConfigDictionary dict2(
-      prefs->GetDictionary(proxy_config::prefs::kProxy));
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
   assertProxyModeWithoutParams(dict2, ProxyPrefs::MODE_AUTO_DETECT);
 }
 
 TEST_F(ProxyPolicyTest, OverridesCommandLineNoProxy) {
   command_line_.AppendSwitch(switches::kNoProxyServer);
   std::unique_ptr<base::Value> mode_name(
-      new base::StringValue(ProxyPrefs::kAutoDetectProxyModeName));
+      new base::Value(ProxyPrefs::kAutoDetectProxyModeName));
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              POLICY_SOURCE_CLOUD, std::move(mode_name), nullptr);
@@ -203,7 +206,8 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineNoProxy) {
   // First verify that command-line options are set correctly when
   // there is no policy in effect.
   std::unique_ptr<PrefService> prefs = CreatePrefService(false);
-  ProxyConfigDictionary dict(prefs->GetDictionary(proxy_config::prefs::kProxy));
+  ProxyConfigDictionary dict(
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
   assertProxyModeWithoutParams(dict, ProxyPrefs::MODE_DIRECT);
 
   // Try a second time time with the managed PrefStore in place, the
@@ -211,14 +215,14 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineNoProxy) {
   // in place with the appropriate default value for this to work.
   prefs = CreatePrefService(true);
   ProxyConfigDictionary dict2(
-      prefs->GetDictionary(proxy_config::prefs::kProxy));
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
   assertProxyModeWithoutParams(dict2, ProxyPrefs::MODE_AUTO_DETECT);
 }
 
 TEST_F(ProxyPolicyTest, OverridesCommandLineAutoDetect) {
   command_line_.AppendSwitch(switches::kProxyAutoDetect);
   std::unique_ptr<base::Value> mode_name(
-      new base::StringValue(ProxyPrefs::kDirectProxyModeName));
+      new base::Value(ProxyPrefs::kDirectProxyModeName));
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              POLICY_SOURCE_CLOUD, std::move(mode_name), nullptr);
@@ -227,7 +231,8 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineAutoDetect) {
   // First verify that the auto-detect is set if there is no managed
   // PrefStore.
   std::unique_ptr<PrefService> prefs = CreatePrefService(false);
-  ProxyConfigDictionary dict(prefs->GetDictionary(proxy_config::prefs::kProxy));
+  ProxyConfigDictionary dict(
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
   assertProxyModeWithoutParams(dict, ProxyPrefs::MODE_AUTO_DETECT);
 
   // Try a second time time with the managed PrefStore in place, the
@@ -235,7 +240,7 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineAutoDetect) {
   // in place with the appropriate default value for this to work.
   prefs = CreatePrefService(true);
   ProxyConfigDictionary dict2(
-      prefs->GetDictionary(proxy_config::prefs::kProxy));
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
   assertProxyModeWithoutParams(dict2, ProxyPrefs::MODE_DIRECT);
 }
 

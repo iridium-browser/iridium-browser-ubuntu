@@ -29,19 +29,19 @@
 #include "net/quic/core/crypto/quic_encrypter.h"
 #include "net/quic/core/crypto/quic_random.h"
 #include "net/quic/core/proto/source_address_token.pb.h"
-#include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_socket_address_coder.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
 #include "net/quic/platform/api/quic_clock.h"
+#include "net/quic/platform/api/quic_endian.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_hostname_utils.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_reference_counted.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "third_party/boringssl/src/include/openssl/sha.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace net {
@@ -56,11 +56,12 @@ const size_t kMultiplier = 3;
 
 const int kMaxTokenAddresses = 4;
 
-string DeriveSourceAddressTokenKey(StringPiece source_address_token_secret) {
-  crypto::HKDF hkdf(source_address_token_secret, StringPiece() /* no salt */,
-                    "QUIC source address token key",
-                    CryptoSecretBoxer::GetKeySize(), 0 /* no fixed IV needed */,
-                    0 /* no subkey secret */);
+string DeriveSourceAddressTokenKey(
+    QuicStringPiece source_address_token_secret) {
+  crypto::HKDF hkdf(
+      source_address_token_secret, QuicStringPiece() /* no salt */,
+      "QUIC source address token key", CryptoSecretBoxer::GetKeySize(),
+      0 /* no fixed IV needed */, 0 /* no subkey secret */);
   return hkdf.server_write_key().as_string();
 }
 
@@ -148,7 +149,7 @@ QuicCryptoServerConfig::ConfigOptions::ConfigOptions(
 QuicCryptoServerConfig::ConfigOptions::~ConfigOptions() {}
 
 QuicCryptoServerConfig::QuicCryptoServerConfig(
-    StringPiece source_address_token_secret,
+    QuicStringPiece source_address_token_secret,
     QuicRandom* server_nonce_entropy,
     std::unique_ptr<ProofSource> proof_source)
     : replay_protection_(true),
@@ -189,7 +190,7 @@ QuicCryptoServerConfig::GenerateConfig(QuicRandom* rand,
       Curve25519KeyExchange::NewPrivateKey(rand);
   std::unique_ptr<Curve25519KeyExchange> curve25519(
       Curve25519KeyExchange::New(curve25519_private_key));
-  StringPiece curve25519_public_value = curve25519->public_value();
+  QuicStringPiece curve25519_public_value = curve25519->public_value();
 
   string encoded_public_values;
   // First three bytes encode the length of the public value.
@@ -208,7 +209,7 @@ QuicCryptoServerConfig::GenerateConfig(QuicRandom* rand,
     p256_private_key = P256KeyExchange::NewPrivateKey();
     std::unique_ptr<P256KeyExchange> p256(
         P256KeyExchange::New(p256_private_key));
-    StringPiece p256_public_value = p256->public_value();
+    QuicStringPiece p256_public_value = p256->public_value();
 
     DCHECK_LT(p256_public_value.size(), (1U << 24));
     encoded_public_values.push_back(
@@ -247,7 +248,7 @@ QuicCryptoServerConfig::GenerateConfig(QuicRandom* rand,
     DCHECK(options.orbit.empty());
     rand->RandBytes(orbit_bytes, sizeof(orbit_bytes));
   }
-  msg.SetStringPiece(kORBT, StringPiece(orbit_bytes, sizeof(orbit_bytes)));
+  msg.SetStringPiece(kORBT, QuicStringPiece(orbit_bytes, sizeof(orbit_bytes)));
 
   if (options.channel_id_enabled) {
     msg.SetVector(kPDMD, QuicTagVector{kCHID});
@@ -261,7 +262,7 @@ QuicCryptoServerConfig::GenerateConfig(QuicRandom* rand,
     // We need to ensure that the SCID changes whenever the server config does
     // thus we make it a hash of the rest of the server config.
     std::unique_ptr<QuicData> serialized(
-        CryptoFramer::ConstructHandshakeMessage(msg));
+        CryptoFramer::ConstructHandshakeMessage(msg, Perspective::IS_SERVER));
 
     uint8_t scid_bytes[SHA256_DIGEST_LENGTH];
     SHA256(reinterpret_cast<const uint8_t*>(serialized->data()),
@@ -269,7 +270,7 @@ QuicCryptoServerConfig::GenerateConfig(QuicRandom* rand,
     // The SCID is a truncated SHA-256 digest.
     static_assert(16 <= SHA256_DIGEST_LENGTH, "SCID length too high.");
     msg.SetStringPiece(
-        kSCID, StringPiece(reinterpret_cast<const char*>(scid_bytes), 16));
+        kSCID, QuicStringPiece(reinterpret_cast<const char*>(scid_bytes), 16));
   } else {
     msg.SetStringPiece(kSCID, options.id);
   }
@@ -278,7 +279,7 @@ QuicCryptoServerConfig::GenerateConfig(QuicRandom* rand,
   // preceding if block.
 
   std::unique_ptr<QuicData> serialized(
-      CryptoFramer::ConstructHandshakeMessage(msg));
+      CryptoFramer::ConstructHandshakeMessage(msg, Perspective::IS_SERVER));
 
   std::unique_ptr<QuicServerConfigProtobuf> config(
       new QuicServerConfigProtobuf);
@@ -300,7 +301,7 @@ CryptoHandshakeMessage* QuicCryptoServerConfig::AddConfig(
     std::unique_ptr<QuicServerConfigProtobuf> protobuf,
     const QuicWallTime now) {
   std::unique_ptr<CryptoHandshakeMessage> msg(
-      CryptoFramer::ParseMessage(protobuf->config()));
+      CryptoFramer::ParseMessage(protobuf->config(), Perspective::IS_SERVER));
 
   if (!msg.get()) {
     QUIC_LOG(WARNING) << "Failed to parse server config message";
@@ -440,7 +441,7 @@ void QuicCryptoServerConfig::ValidateClientHello(
       new ValidateClientHelloResultCallback::Result(client_hello, client_ip,
                                                     now));
 
-  StringPiece requested_scid;
+  QuicStringPiece requested_scid;
   client_hello.GetStringPiece(kSCID, &requested_scid);
 
   QuicReferenceCountedPointer<Config> requested_config;
@@ -640,7 +641,7 @@ void QuicCryptoServerConfig::ProcessClientHello(
     return;
   }
 
-  StringPiece requested_scid;
+  QuicStringPiece requested_scid;
   client_hello.GetStringPiece(kSCID, &requested_scid);
   const QuicWallTime now(clock->WallNow());
 
@@ -688,16 +689,13 @@ void QuicCryptoServerConfig::ProcessClientHello(
   }
   DCHECK(proof_source_.get());
   string chlo_hash;
-  CryptoUtils::HashHandshakeMessage(client_hello, &chlo_hash);
+  CryptoUtils::HashHandshakeMessage(client_hello, &chlo_hash,
+                                    Perspective::IS_SERVER);
 
   // No need to get a new proof if one was already generated.
   if (!signed_config->chain) {
-    const QuicTag* tag_ptr;
-    size_t num_tags;
     QuicTagVector connection_options;
-    if (client_hello.GetTaglist(kCOPT, &tag_ptr, &num_tags) == QUIC_NO_ERROR) {
-      connection_options.assign(tag_ptr, tag_ptr + num_tags);
-    }
+    client_hello.GetTaglist(kCOPT, &connection_options);
     std::unique_ptr<ProcessClientHelloCallback> cb(
         new ProcessClientHelloCallback(
             this, validate_chlo_result, reject_only, connection_id,
@@ -744,6 +742,8 @@ void QuicCryptoServerConfig::ProcessClientHelloAfterGetProof(
     const QuicReferenceCountedPointer<Config>& requested_config,
     const QuicReferenceCountedPointer<Config>& primary_config,
     std::unique_ptr<ProcessClientHelloResultCallback> done_cb) const {
+  connection_id = QuicEndian::HostToNet64(connection_id);
+
   ProcessClientHelloHelper helper(&done_cb);
 
   if (found_error) {
@@ -757,7 +757,7 @@ void QuicCryptoServerConfig::ProcessClientHelloAfterGetProof(
   std::unique_ptr<DiversificationNonce> out_diversification_nonce(
       new DiversificationNonce);
 
-  StringPiece cert_sct;
+  QuicStringPiece cert_sct;
   if (client_hello.GetStringPiece(kCertificateSCTTag, &cert_sct) &&
       cert_sct.empty()) {
     params->sct_supported_by_client = true;
@@ -784,39 +784,33 @@ void QuicCryptoServerConfig::ProcessClientHelloAfterGetProof(
     return;
   }
 
-  const QuicTag* their_aeads;
-  const QuicTag* their_key_exchanges;
-  size_t num_their_aeads, num_their_key_exchanges;
-  if (client_hello.GetTaglist(kAEAD, &their_aeads, &num_their_aeads) !=
-          QUIC_NO_ERROR ||
-      client_hello.GetTaglist(kKEXS, &their_key_exchanges,
-                              &num_their_key_exchanges) != QUIC_NO_ERROR ||
-      num_their_aeads != 1 || num_their_key_exchanges != 1) {
+  QuicTagVector their_aeads;
+  QuicTagVector their_key_exchanges;
+  if (client_hello.GetTaglist(kAEAD, &their_aeads) != QUIC_NO_ERROR ||
+      client_hello.GetTaglist(kKEXS, &their_key_exchanges) != QUIC_NO_ERROR ||
+      their_aeads.size() != 1 || their_key_exchanges.size() != 1) {
     helper.Fail(QUIC_INVALID_CRYPTO_MESSAGE_PARAMETER,
                 "Missing or invalid AEAD or KEXS");
     return;
   }
 
   size_t key_exchange_index;
-  if (!FindMutualQuicTag(requested_config->aead, their_aeads, num_their_aeads,
-                         &params->aead, nullptr) ||
+  if (!FindMutualQuicTag(requested_config->aead, their_aeads, &params->aead,
+                         nullptr) ||
       !FindMutualQuicTag(requested_config->kexs, their_key_exchanges,
-                         num_their_key_exchanges, &params->key_exchange,
-                         &key_exchange_index)) {
+                         &params->key_exchange, &key_exchange_index)) {
     helper.Fail(QUIC_CRYPTO_NO_SUPPORT, "Unsupported AEAD or KEXS");
     return;
   }
 
   if (!requested_config->tb_key_params.empty()) {
-    const QuicTag* their_tbkps;
-    size_t num_their_tbkps;
-    switch (client_hello.GetTaglist(kTBKP, &their_tbkps, &num_their_tbkps)) {
+    QuicTagVector their_tbkps;
+    switch (client_hello.GetTaglist(kTBKP, &their_tbkps)) {
       case QUIC_CRYPTO_MESSAGE_PARAMETER_NOT_FOUND:
         break;
       case QUIC_NO_ERROR:
         if (FindMutualQuicTag(requested_config->tb_key_params, their_tbkps,
-                              num_their_tbkps, &params->token_binding_key_param,
-                              nullptr)) {
+                              &params->token_binding_key_param, nullptr)) {
           break;
         }
       default:
@@ -826,7 +820,7 @@ void QuicCryptoServerConfig::ProcessClientHelloAfterGetProof(
     }
   }
 
-  StringPiece public_value;
+  QuicStringPiece public_value;
   if (!client_hello.GetStringPiece(kPUBS, &public_value)) {
     helper.Fail(QUIC_INVALID_CRYPTO_MESSAGE_PARAMETER, "Missing public value");
     return;
@@ -848,7 +842,8 @@ void QuicCryptoServerConfig::ProcessClientHelloAfterGetProof(
   }
 
   string hkdf_suffix;
-  const QuicData& client_hello_serialized = client_hello.GetSerialized();
+  const QuicData& client_hello_serialized =
+      client_hello.GetSerialized(Perspective::IS_SERVER);
   hkdf_suffix.reserve(sizeof(connection_id) + client_hello_serialized.length() +
                       requested_config->serialized.size());
   hkdf_suffix.append(reinterpret_cast<char*>(&connection_id),
@@ -863,7 +858,7 @@ void QuicCryptoServerConfig::ProcessClientHelloAfterGetProof(
   }
   hkdf_suffix.append(signed_config->chain->certs.at(0));
 
-  StringPiece cetv_ciphertext;
+  QuicStringPiece cetv_ciphertext;
   if (requested_config->channel_id_enabled &&
       client_hello.GetStringPiece(kCETV, &cetv_ciphertext)) {
     CryptoHandshakeMessage client_hello_copy(client_hello);
@@ -871,7 +866,7 @@ void QuicCryptoServerConfig::ProcessClientHelloAfterGetProof(
     client_hello_copy.Erase(kPAD);
 
     const QuicData& client_hello_copy_serialized =
-        client_hello_copy.GetSerialized();
+        client_hello_copy.GetSerialized(Perspective::IS_SERVER);
     string hkdf_input;
     hkdf_input.append(QuicCryptoConfig::kCETVLabel,
                       strlen(QuicCryptoConfig::kCETVLabel) + 1);
@@ -896,21 +891,21 @@ void QuicCryptoServerConfig::ProcessClientHelloAfterGetProof(
     size_t plaintext_length = 0;
     const bool success = crypters.decrypter->DecryptPacket(
         QUIC_VERSION_35, 0 /* packet number */,
-        StringPiece() /* associated data */, cetv_ciphertext, plaintext,
+        QuicStringPiece() /* associated data */, cetv_ciphertext, plaintext,
         &plaintext_length, kMaxPacketSize);
     if (!success) {
       helper.Fail(QUIC_INVALID_CRYPTO_MESSAGE_PARAMETER,
                   "CETV decryption failure");
       return;
     }
-    std::unique_ptr<CryptoHandshakeMessage> cetv(
-        CryptoFramer::ParseMessage(StringPiece(plaintext, plaintext_length)));
+    std::unique_ptr<CryptoHandshakeMessage> cetv(CryptoFramer::ParseMessage(
+        QuicStringPiece(plaintext, plaintext_length), Perspective::IS_SERVER));
     if (!cetv.get()) {
       helper.Fail(QUIC_INVALID_CRYPTO_MESSAGE_PARAMETER, "CETV parse error");
       return;
     }
 
-    StringPiece key, signature;
+    QuicStringPiece key, signature;
     if (cetv->GetStringPiece(kCIDK, &key) &&
         cetv->GetStringPiece(kCIDS, &signature)) {
       if (!ChannelIDVerifier::Verify(key, hkdf_input, signature)) {
@@ -1005,7 +1000,8 @@ void QuicCryptoServerConfig::ProcessClientHelloAfterGetProof(
 }
 
 QuicReferenceCountedPointer<QuicCryptoServerConfig::Config>
-QuicCryptoServerConfig::GetConfigWithScid(StringPiece requested_scid) const {
+QuicCryptoServerConfig::GetConfigWithScid(
+    QuicStringPiece requested_scid) const {
   configs_lock_.AssertReaderHeld();
 
   if (!requested_scid.empty()) {
@@ -1207,7 +1203,7 @@ void QuicCryptoServerConfig::EvaluateClientHello(
   client_hello.GetStringPiece(kUAID, &info->user_agent_id);
 
   HandshakeFailureReason source_address_token_error = MAX_FAILURE_REASON;
-  StringPiece srct;
+  QuicStringPiece srct;
   if (client_hello.GetStringPiece(kSourceAddressTokenTag, &srct)) {
     Config& config =
         requested_config != nullptr ? *requested_config : *primary_config;
@@ -1226,7 +1222,7 @@ void QuicCryptoServerConfig::EvaluateClientHello(
   }
 
   if (!requested_config.get()) {
-    StringPiece requested_scid;
+    QuicStringPiece requested_scid;
     if (client_hello.GetStringPiece(kSCID, &requested_scid)) {
       info->reject_reasons.push_back(SERVER_CONFIG_UNKNOWN_CONFIG_FAILURE);
     } else {
@@ -1254,15 +1250,12 @@ void QuicCryptoServerConfig::EvaluateClientHello(
   bool get_proof_failed = false;
   string serialized_config = primary_config->serialized;
   string chlo_hash;
-  CryptoUtils::HashHandshakeMessage(client_hello, &chlo_hash);
+  CryptoUtils::HashHandshakeMessage(client_hello, &chlo_hash,
+                                    Perspective::IS_SERVER);
   bool need_proof = true;
   need_proof = !signed_config->chain;
-  const QuicTag* tag_ptr;
-  size_t num_tags;
   QuicTagVector connection_options;
-  if (client_hello.GetTaglist(kCOPT, &tag_ptr, &num_tags) == QUIC_NO_ERROR) {
-    connection_options.assign(tag_ptr, tag_ptr + num_tags);
-  }
+  client_hello.GetTaglist(kCOPT, &connection_options);
 
   if (need_proof) {
     // Make an async call to GetProof and setup the callback to trampoline
@@ -1317,8 +1310,9 @@ void QuicCryptoServerConfig::EvaluateClientHelloAfterGetProof(
   if (info->client_nonce.size() != kNonceSize) {
     info->reject_reasons.push_back(CLIENT_NONCE_INVALID_FAILURE);
     // Invalid client nonce.
-    QUIC_LOG_FIRST_N(ERROR, 2) << "Invalid client nonce: "
-                               << client_hello.DebugString();
+    QUIC_LOG_FIRST_N(ERROR, 2)
+        << "Invalid client nonce: "
+        << client_hello.DebugString(Perspective::IS_SERVER);
     QUIC_DLOG(INFO) << "Invalid client nonce.";
   }
 
@@ -1337,7 +1331,7 @@ void QuicCryptoServerConfig::EvaluateClientHelloAfterGetProof(
 
 void QuicCryptoServerConfig::BuildServerConfigUpdateMessage(
     QuicVersion version,
-    StringPiece chlo_hash,
+    QuicStringPiece chlo_hash,
     const SourceAddressTokens& previous_source_address_tokens,
     const QuicSocketAddress& server_address,
     const QuicIpAddress& client_ip,
@@ -1474,7 +1468,8 @@ void QuicCryptoServerConfig::BuildRejection(
                   << "with server-designated connection ID "
                   << server_designated_connection_id;
     out->set_tag(kSREJ);
-    out->SetValue(kRCID, server_designated_connection_id);
+    out->SetValue(kRCID,
+                  QuicEndian::HostToNet64(server_designated_connection_id));
   } else {
     out->set_tag(kREJ);
   }
@@ -1498,12 +1493,12 @@ void QuicCryptoServerConfig::BuildRejection(
     return;
   }
 
-  StringPiece client_common_set_hashes;
+  QuicStringPiece client_common_set_hashes;
   if (client_hello.GetStringPiece(kCCS, &client_common_set_hashes)) {
     params->client_common_set_hashes = client_common_set_hashes.as_string();
   }
 
-  StringPiece client_cached_cert_hashes;
+  QuicStringPiece client_cached_cert_hashes;
   if (client_hello.GetStringPiece(kCCRT, &client_cached_cert_hashes)) {
     params->client_cached_cert_hashes = client_cached_cert_hashes.as_string();
   }
@@ -1583,7 +1578,7 @@ QuicReferenceCountedPointer<QuicCryptoServerConfig::Config>
 QuicCryptoServerConfig::ParseConfigProtobuf(
     const std::unique_ptr<QuicServerConfigProtobuf>& protobuf) {
   std::unique_ptr<CryptoHandshakeMessage> msg(
-      CryptoFramer::ParseMessage(protobuf->config()));
+      CryptoFramer::ParseMessage(protobuf->config(), Perspective::IS_SERVER));
 
   if (msg->tag() != kSCFG) {
     QUIC_LOG(WARNING) << "Server config message has tag " << msg->tag()
@@ -1602,40 +1597,33 @@ QuicCryptoServerConfig::ParseConfigProtobuf(
 
   config->priority = protobuf->priority();
 
-  StringPiece scid;
+  QuicStringPiece scid;
   if (!msg->GetStringPiece(kSCID, &scid)) {
     QUIC_LOG(WARNING) << "Server config message is missing SCID";
     return nullptr;
   }
   config->id = scid.as_string();
 
-  const QuicTag* aead_tags;
-  size_t aead_len;
-  if (msg->GetTaglist(kAEAD, &aead_tags, &aead_len) != QUIC_NO_ERROR) {
+  if (msg->GetTaglist(kAEAD, &config->aead) != QUIC_NO_ERROR) {
     QUIC_LOG(WARNING) << "Server config message is missing AEAD";
     return nullptr;
   }
-  config->aead = std::vector<QuicTag>(aead_tags, aead_tags + aead_len);
 
-  const QuicTag* kexs_tags;
-  size_t kexs_len;
-  if (msg->GetTaglist(kKEXS, &kexs_tags, &kexs_len) != QUIC_NO_ERROR) {
+  QuicTagVector kexs_tags;
+  if (msg->GetTaglist(kKEXS, &kexs_tags) != QUIC_NO_ERROR) {
     QUIC_LOG(WARNING) << "Server config message is missing KEXS";
     return nullptr;
   }
 
-  const QuicTag* tbkp_tags;
-  size_t tbkp_len;
   QuicErrorCode err;
-  if ((err = msg->GetTaglist(kTBKP, &tbkp_tags, &tbkp_len)) !=
+  if ((err = msg->GetTaglist(kTBKP, &config->tb_key_params)) !=
           QUIC_CRYPTO_MESSAGE_PARAMETER_NOT_FOUND &&
       err != QUIC_NO_ERROR) {
     QUIC_LOG(WARNING) << "Server config message is missing or has invalid TBKP";
     return nullptr;
   }
-  config->tb_key_params = std::vector<QuicTag>(tbkp_tags, tbkp_tags + tbkp_len);
 
-  StringPiece orbit;
+  QuicStringPiece orbit;
   if (!msg->GetStringPiece(kORBT, &orbit)) {
     QUIC_LOG(WARNING) << "Server config message is missing ORBT";
     return nullptr;
@@ -1650,26 +1638,24 @@ QuicCryptoServerConfig::ParseConfigProtobuf(
   static_assert(sizeof(config->orbit) == kOrbitSize, "incorrect orbit size");
   memcpy(config->orbit, orbit.data(), sizeof(config->orbit));
 
-  if (kexs_len != protobuf->key_size()) {
-    QUIC_LOG(WARNING) << "Server config has " << kexs_len
+  if (kexs_tags.size() != protobuf->key_size()) {
+    QUIC_LOG(WARNING) << "Server config has " << kexs_tags.size()
                       << " key exchange methods configured, but "
                       << protobuf->key_size() << " private keys";
     return nullptr;
   }
 
-  const QuicTag* proof_demand_tags;
-  size_t num_proof_demand_tags;
-  if (msg->GetTaglist(kPDMD, &proof_demand_tags, &num_proof_demand_tags) ==
-      QUIC_NO_ERROR) {
-    for (size_t i = 0; i < num_proof_demand_tags; i++) {
-      if (proof_demand_tags[i] == kCHID) {
+  QuicTagVector proof_demand_tags;
+  if (msg->GetTaglist(kPDMD, &proof_demand_tags) == QUIC_NO_ERROR) {
+    for (QuicTag tag : proof_demand_tags) {
+      if (tag == kCHID) {
         config->channel_id_enabled = true;
         break;
       }
     }
   }
 
-  for (size_t i = 0; i < kexs_len; i++) {
+  for (size_t i = 0; i < kexs_tags.size(); i++) {
     const QuicTag tag = kexs_tags[i];
     string private_key;
 
@@ -1737,8 +1723,8 @@ QuicCryptoServerConfig::ParseConfigProtobuf(
 }
 
 void QuicCryptoServerConfig::SetEphemeralKeySource(
-    EphemeralKeySource* ephemeral_key_source) {
-  ephemeral_key_source_.reset(ephemeral_key_source);
+    std::unique_ptr<EphemeralKeySource> ephemeral_key_source) {
+  ephemeral_key_source_ = std::move(ephemeral_key_source);
 }
 
 void QuicCryptoServerConfig::set_replay_protection(bool on) {
@@ -1814,10 +1800,10 @@ int QuicCryptoServerConfig::NumberOfConfigs() const {
 
 HandshakeFailureReason QuicCryptoServerConfig::ParseSourceAddressToken(
     const Config& config,
-    StringPiece token,
+    QuicStringPiece token,
     SourceAddressTokens* tokens) const {
   string storage;
-  StringPiece plaintext;
+  QuicStringPiece plaintext;
   if (!config.source_address_token_boxer->Unbox(token, &storage, &plaintext)) {
     return SOURCE_ADDRESS_TOKEN_DECRYPTION_FAILURE;
   }
@@ -1907,8 +1893,8 @@ string QuicCryptoServerConfig::NewServerNonce(QuicRandom* rand,
                   sizeof(server_nonce) - sizeof(timestamp));
 
   return server_nonce_boxer_.Box(
-      rand,
-      StringPiece(reinterpret_cast<char*>(server_nonce), sizeof(server_nonce)));
+      rand, QuicStringPiece(reinterpret_cast<char*>(server_nonce),
+                            sizeof(server_nonce)));
 }
 
 bool QuicCryptoServerConfig::ValidateExpectedLeafCertificate(
@@ -1927,18 +1913,15 @@ bool QuicCryptoServerConfig::ValidateExpectedLeafCertificate(
 
 bool QuicCryptoServerConfig::ClientDemandsX509Proof(
     const CryptoHandshakeMessage& client_hello) const {
-  const QuicTag* their_proof_demands;
-  size_t num_their_proof_demands;
+  QuicTagVector their_proof_demands;
 
-  if (client_hello.GetTaglist(kPDMD, &their_proof_demands,
-                              &num_their_proof_demands) != QUIC_NO_ERROR) {
+  if (client_hello.GetTaglist(kPDMD, &their_proof_demands) != QUIC_NO_ERROR) {
     return false;
   }
 
-  for (size_t i = 0; i < num_their_proof_demands; i++) {
-    switch (their_proof_demands[i]) {
-      case kX509:
-        return true;
+  for (const QuicTag tag : their_proof_demands) {
+    if (tag == kX509) {
+      return true;
     }
   }
   return false;

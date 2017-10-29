@@ -11,11 +11,10 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
-#include "components/drive/file_errors.h"
 #include "components/drive/file_errors.h"
 #include "url/gurl.h"
 
@@ -27,6 +26,7 @@ namespace google_apis {
 class AboutResource;
 class ChangeList;
 class FileList;
+class TeamDriveList;
 }  // namespace google_apis
 
 namespace drive {
@@ -78,6 +78,7 @@ class ChangeList {
   ChangeList();  // For tests.
   explicit ChangeList(const google_apis::ChangeList& change_list);
   explicit ChangeList(const google_apis::FileList& file_list);
+  explicit ChangeList(const google_apis::TeamDriveList& team_drive_list);
   ~ChangeList();
 
   const std::vector<ResourceEntry>& entries() const { return entries_; }
@@ -113,15 +114,28 @@ class ChangeListProcessor {
                       base::CancellationFlag* in_shutdown);
   ~ChangeListProcessor();
 
-  // Applies change lists or full resource lists to |resource_metadata_|.
+  // Applies user's change lists or full resource lists to
+  // |resource_metadata_|.
   //
   // |is_delta_update| determines the type of input data to process, whether
   // it is full resource lists (false) or change lists (true).
   //
   // Must be run on the same task runner as |resource_metadata_| uses.
-  FileError Apply(std::unique_ptr<google_apis::AboutResource> about_resource,
-                  ScopedVector<ChangeList> change_lists,
-                  bool is_delta_update);
+  FileError ApplyUserChangeList(
+      std::unique_ptr<google_apis::AboutResource> about_resource,
+      std::vector<std::unique_ptr<ChangeList>> change_lists,
+      bool is_delta_update);
+
+  // Applies Team Drive's change lists to |resource_metadata_|.
+  //
+  // |change_lists| must not be an empty list, although it can consist of a
+  // single ChangeList object whose |items_| is emtpy.
+  // |team_drive_id| is the Team Drive's ID which gave the change lists.
+  //
+  // Must be run on the same task runner as |resource_metadata_| uses.
+  FileError ApplyTeamDriveChangeList(
+      const std::string& team_drive_id,
+      std::vector<std::unique_ptr<ChangeList>> change_lists);
 
   // The set of changed files as a result of change list processing.
   const FileChange& changed_files() const { return *changed_files_; }
@@ -140,22 +154,41 @@ class ChangeListProcessor {
       const std::string& parent_resource_id);
 
  private:
+  class ChangeListToEntryMapUMAStats;
+
   typedef std::map<std::string /* resource_id */, ResourceEntry>
       ResourceEntryMap;
   typedef std::map<std::string /* resource_id */,
                    std::string /* parent_resource_id*/> ParentResourceIdMap;
 
+  // Common logic between ApplyTeamDriveChangeList and ApplyUserChangeList.
+  // Applies the |change_lists| to |resource_metadta_|.
+  FileError ApplyChangeListInternal(
+      std::vector<std::unique_ptr<ChangeList>> change_lists,
+      int64_t largest_changestamp,
+      ResourceEntry* root,
+      ChangeListToEntryMapUMAStats* uma_stats);
+
+  // Converts the |change_lists| to |entry_map_| and |parent_resource_id_map_|,
+  // to be applied by ApplyEntryMap() later.
+  void ConvertChangeListsToMap(
+      std::vector<std::unique_ptr<ChangeList>> change_lists,
+      int64_t largest_changestamp,
+      ChangeListToEntryMapUMAStats* uma_stats);
+
   // Applies the pre-processed metadata from entry_map_ onto the resource
-  // metadata. |about_resource| must not be null.
-  FileError ApplyEntryMap(
-      int64_t changestamp,
-      std::unique_ptr<google_apis::AboutResource> about_resource);
+  // metadata.
+  FileError ApplyEntryMap(const std::string& root_resource_id);
 
   // Apply |entry| to resource_metadata_.
   FileError ApplyEntry(const ResourceEntry& entry);
 
   // Adds the directories changed by the update on |entry| to |changed_dirs_|.
   void UpdateChangedDirs(const ResourceEntry& entry);
+
+  // Sets the largest changestamp of a Team Drive's change list.
+  FileError SetTeamDriveLargestChangestamp(const std::string& team_drive_id,
+                                           int64_t value);
 
   ResourceMetadata* resource_metadata_;  // Not owned.
   base::CancellationFlag* in_shutdown_;  // Not owned.

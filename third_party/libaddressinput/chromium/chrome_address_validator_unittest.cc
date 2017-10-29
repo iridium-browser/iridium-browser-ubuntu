@@ -5,6 +5,7 @@
 #include "third_party/libaddressinput/chromium/chrome_address_validator.h"
 
 #include <stddef.h>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -51,6 +52,7 @@ using ::i18n::addressinput::UNEXPECTED_FIELD;
 using ::i18n::addressinput::UNKNOWN_VALUE;
 using ::i18n::addressinput::USES_P_O_BOX;
 
+// This class should always succeed in getting the rules.
 class AddressValidatorTest : public testing::Test, LoadRulesListener {
  protected:
   AddressValidatorTest()
@@ -61,21 +63,27 @@ class AddressValidatorTest : public testing::Test, LoadRulesListener {
     validator_->LoadRules("US");
   }
 
+  void set_expected_status(AddressValidator::Status expected_status) {
+    expected_status_ = expected_status;
+  }
+
   virtual ~AddressValidatorTest() {}
 
   const std::unique_ptr<AddressValidator> validator_;
 
  private:
   // LoadRulesListener implementation.
-  virtual void OnAddressValidationRulesLoaded(const std::string& country_code,
-                                              bool success) override {
+  void OnAddressValidationRulesLoaded(const std::string& country_code,
+                                      bool success) override {
     AddressData address_data;
     address_data.region_code = country_code;
     FieldProblemMap dummy;
     AddressValidator::Status status =
         validator_->ValidateAddress(address_data, NULL, &dummy);
-    ASSERT_EQ(success, status == AddressValidator::SUCCESS);
+    ASSERT_EQ(expected_status_, status);
   }
+
+  AddressValidator::Status expected_status_ = AddressValidator::SUCCESS;
 
   DISALLOW_COPY_AND_ASSIGN(AddressValidatorTest);
 };
@@ -109,6 +117,88 @@ class LargeAddressValidatorTest : public testing::Test {
 };
 
 AddressValidator* LargeAddressValidatorTest::validator_ = NULL;
+
+TEST_F(AddressValidatorTest, SubKeysLoaded) {
+  const std::string country_code = "US";
+  const std::string state_code = "AL";
+  const std::string state_name = "Alabama";
+  const std::string language = "en";
+
+  validator_->LoadRules(country_code);
+  std::vector<std::pair<std::string, std::string>> sub_keys =
+      validator_->GetRegionSubKeys(country_code, language);
+  ASSERT_FALSE(sub_keys.empty());
+  ASSERT_EQ(state_code, sub_keys[0].first);
+  ASSERT_EQ(state_name, sub_keys[0].second);
+}
+
+TEST_F(AddressValidatorTest, SubKeysLoaded_DefaultLanguage) {
+  const std::string country_code = "CA";
+  const std::string province_code = "BC";
+  const std::string province_name = "British Columbia";
+  const std::string language = "en";
+
+  validator_->LoadRules(country_code);
+  std::vector<std::pair<std::string, std::string>> sub_keys =
+      validator_->GetRegionSubKeys(country_code, language);
+  ASSERT_FALSE(sub_keys.empty());
+  ASSERT_EQ(province_code, sub_keys[1].first);
+  ASSERT_EQ(province_name, sub_keys[1].second);
+}
+
+TEST_F(AddressValidatorTest, SubKeysLoaded_NonDefaultLanguage) {
+  const std::string country_code = "CA";
+  const std::string province_code = "BC";
+  const std::string province_name = "Colombie-Britannique";
+  const std::string language = "fr";
+
+  validator_->LoadRules(country_code);
+  std::vector<std::pair<std::string, std::string>> sub_keys =
+      validator_->GetRegionSubKeys(country_code, language);
+  ASSERT_FALSE(sub_keys.empty());
+  ASSERT_EQ(province_code, sub_keys[1].first);
+  ASSERT_EQ(province_name, sub_keys[1].second);
+}
+
+TEST_F(AddressValidatorTest, SubKeysLoaded_LanguageNotAvailable) {
+  const std::string country_code = "CA";
+  const std::string province_code = "BC";
+  const std::string province_name = "British Columbia";
+  const std::string language = "es";
+
+  validator_->LoadRules(country_code);
+  std::vector<std::pair<std::string, std::string>> sub_keys =
+      validator_->GetRegionSubKeys(country_code, language);
+  ASSERT_FALSE(sub_keys.empty());
+  ASSERT_EQ(province_code, sub_keys[1].first);
+  ASSERT_EQ(province_name, sub_keys[1].second);
+}
+
+TEST_F(AddressValidatorTest, SubKeysLoaded_NamesNotAvailable) {
+  const std::string country_code = "ES";
+  const std::string province_code = "A Coruña";
+  const std::string province_name = "A Coruña";
+  const std::string language = "es";
+
+  validator_->LoadRules(country_code);
+  std::vector<std::pair<std::string, std::string>> sub_keys =
+      validator_->GetRegionSubKeys(country_code, language);
+  ASSERT_FALSE(sub_keys.empty());
+  ASSERT_EQ(province_code, sub_keys[0].first);
+  ASSERT_EQ(province_name, sub_keys[0].second);
+}
+
+TEST_F(AddressValidatorTest, SubKeysNotExist) {
+  const std::string country_code = "OZ";
+  const std::string language = "en";
+
+  set_expected_status(AddressValidator::RULES_UNAVAILABLE);
+
+  validator_->LoadRules(country_code);
+  std::vector<std::pair<std::string, std::string>> sub_keys =
+      validator_->GetRegionSubKeys(country_code, language);
+  ASSERT_TRUE(sub_keys.empty());
+}
 
 TEST_F(AddressValidatorTest, RegionHasRules) {
   const std::vector<std::string>& region_codes = GetRegionCodes();
@@ -726,7 +816,7 @@ TEST_F(AddressValidatorTest, ValidateRequiredFieldsWithoutRules) {
 }
 
 TEST_F(AddressValidatorTest,
-       DoNotValidateRequiredFieldsWithoutRulesWhenErorrIsFiltered) {
+       DoNotValidateRequiredFieldsWithoutRulesWhenErrorIsFiltered) {
   // Do not load the rules for JP.
   AddressData address;
   address.region_code = "JP";
@@ -758,7 +848,7 @@ class FailingAddressValidatorTest : public testing::Test, LoadRulesListener {
     virtual ~TestAddressValidator() {}
 
    protected:
-    virtual base::TimeDelta GetBaseRetryPeriod() const override {
+    base::TimeDelta GetBaseRetryPeriod() const override {
       return base::TimeDelta::FromSeconds(0);
     }
 
@@ -770,7 +860,7 @@ class FailingAddressValidatorTest : public testing::Test, LoadRulesListener {
   // data.
   class FailingSource : public Source {
    public:
-    explicit FailingSource()
+    FailingSource()
         : failures_number_(0), attempts_number_(0), actual_source_(true) {}
     virtual ~FailingSource() {}
 
@@ -781,8 +871,7 @@ class FailingAddressValidatorTest : public testing::Test, LoadRulesListener {
 
     // Source implementation.
     // Always fails for the first |failures_number| times.
-    virtual void Get(const std::string& url,
-                     const Callback& callback) const override {
+    void Get(const std::string& url, const Callback& callback) const override {
       ++attempts_number_;
       // |callback| takes ownership of the |new std::string|.
       if (failures_number_-- > 0)
@@ -823,8 +912,7 @@ class FailingAddressValidatorTest : public testing::Test, LoadRulesListener {
 
  private:
   // LoadRulesListener implementation.
-  virtual void OnAddressValidationRulesLoaded(const std::string&,
-                                              bool success) override {
+  void OnAddressValidationRulesLoaded(const std::string&, bool success) override {
     load_rules_success_ = success;
   }
 

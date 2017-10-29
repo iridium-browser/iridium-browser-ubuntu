@@ -31,6 +31,7 @@ source_set("crash_report") {
 }
 
 source_set("crash_report_internal") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "crash_report_helper.h",
     "crash_report_helper.mm",
@@ -48,6 +49,7 @@ source_set("crash_report_internal") {
     "//ios/chrome/browser",
     "//ios/chrome/browser/browser_state",
     "//ios/chrome/browser/sessions",
+    "//ios/chrome/browser/sessions:serialisation",
     "//ios/chrome/browser/tabs",
     "//ios/web",
     "//net",
@@ -69,10 +71,10 @@ source_set("unit_tests") {
     "//breakpad:client",
     "//ios/chrome/browser/browser_state",
     "//ios/chrome/browser/browser_state:test_support",
-    "//ios/chrome/browser/sessions",
+    "//ios/chrome/browser/sessions:serialisation",
     "//ios/chrome/test/base",
     "//ios/chrome/test/ocmock",
-    "//ios/web:test_support",
+    "//ios/web/public/test",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/ocmock",

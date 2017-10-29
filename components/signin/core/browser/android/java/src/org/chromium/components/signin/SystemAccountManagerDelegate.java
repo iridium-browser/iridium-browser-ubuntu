@@ -13,10 +13,11 @@ import android.accounts.AuthenticatorDescription;
 import android.accounts.AuthenticatorException;
 import android.accounts.OperationCanceledException;
 import android.app.Activity;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Process;
@@ -25,11 +26,12 @@ import android.os.SystemClock;
 import com.google.android.gms.auth.GoogleAuthException;
 import com.google.android.gms.auth.GoogleAuthUtil;
 import com.google.android.gms.auth.GooglePlayServicesAvailabilityException;
-import com.google.android.gms.auth.UserRecoverableAuthException;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
+import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.MainDex;
 import org.chromium.base.library_loader.LibraryLoader;
@@ -39,92 +41,84 @@ import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Default implementation of {@link AccountManagerDelegate} which delegates all calls to the Android
- * account manager.
+ * Default implementation of {@link AccountManagerDelegate} which delegates all calls to the
+ * Android account manager.
  */
 @MainDex
 public class SystemAccountManagerDelegate implements AccountManagerDelegate {
     private final AccountManager mAccountManager;
-    private final Context mApplicationContext;
+    private final ObserverList<AccountsChangeObserver> mObservers = new ObserverList<>();
+
     private static final String TAG = "Auth";
 
-    public SystemAccountManagerDelegate(Context context) {
-        mApplicationContext = context.getApplicationContext();
-        mAccountManager = AccountManager.get(context.getApplicationContext());
+    public SystemAccountManagerDelegate() {
+        mAccountManager = AccountManager.get(ContextUtils.getApplicationContext());
+
+        BroadcastReceiver accountsChangedBroadcastReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(final Context context, final Intent intent) {
+                fireOnAccountsChangedNotification();
+            }
+        };
+        IntentFilter accountsChangedIntentFilter = new IntentFilter();
+        accountsChangedIntentFilter.addAction(AccountManager.LOGIN_ACCOUNTS_CHANGED_ACTION);
+        ContextUtils.getApplicationContext().registerReceiver(
+                accountsChangedBroadcastReceiver, accountsChangedIntentFilter);
     }
 
     @Override
-    public Account[] getAccountsByType(String type) {
+    public void addObserver(AccountsChangeObserver observer) {
+        mObservers.addObserver(observer);
+    }
+
+    @Override
+    public void removeObserver(AccountsChangeObserver observer) {
+        mObservers.removeObserver(observer);
+    }
+
+    @Override
+    public Account[] getAccountsSync() throws AccountManagerDelegateException {
         if (!hasGetAccountsPermission()) {
             return new Account[] {};
         }
         long now = SystemClock.elapsedRealtime();
-        Account[] accounts = mAccountManager.getAccountsByType(type);
+        Account[] accounts = mAccountManager.getAccountsByType(GoogleAuthUtil.GOOGLE_ACCOUNT_TYPE);
         long elapsed = SystemClock.elapsedRealtime() - now;
         recordElapsedTimeHistogram("Signin.AndroidGetAccountsTime_AccountManager", elapsed);
+        if (ThreadUtils.runningOnUiThread()) {
+            recordElapsedTimeHistogram(
+                    "Signin.AndroidGetAccountsTimeUiThread_AccountManager", elapsed);
+        }
         return accounts;
-    }
-
-    @Override
-    public void getAccountsByType(final String type, final Callback<Account[]> callback) {
-        new AsyncTask<Void, Void, Account[]>() {
-            @Override
-            protected Account[] doInBackground(Void... params) {
-                return getAccountsByType(type);
-            }
-
-            @Override
-            protected void onPostExecute(Account[] accounts) {
-                callback.onResult(accounts);
-            }
-        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
     @Override
     public String getAuthToken(Account account, String authTokenScope) throws AuthException {
         assert !ThreadUtils.runningOnUiThread();
-        assert AccountManagerHelper.GOOGLE_ACCOUNT_TYPE.equals(account.type);
+        assert AccountManagerFacade.GOOGLE_ACCOUNT_TYPE.equals(account.type);
         try {
             return GoogleAuthUtil.getTokenWithNotification(
-                    mApplicationContext, account, authTokenScope, null);
+                    ContextUtils.getApplicationContext(), account, authTokenScope, null);
         } catch (GoogleAuthException ex) {
-            // TODO(bauerb): Investigate integrating the callback with ConnectionRetry.
-            throw new AuthException(false /* isTransientError */, ex);
+            // This case includes a UserRecoverableNotifiedException, but most clients will have
+            // their own retry mechanism anyway.
+            throw new AuthException(AuthException.NONTRANSIENT,
+                    "Error while getting token for scope '" + authTokenScope + "'", ex);
         } catch (IOException ex) {
-            throw new AuthException(true /* isTransientError */, ex);
-        }
-    }
-
-    @Override
-    public String getAuthTokenAndFixUserRecoverableErrorIfNeeded(
-            Account account, String authTokenScope) throws AuthException {
-        assert !ThreadUtils.runningOnUiThread();
-        assert AccountManagerHelper.GOOGLE_ACCOUNT_TYPE.equals(account.type);
-        try {
-            return GoogleAuthUtil.getToken(mApplicationContext, account, authTokenScope, null);
-        } catch (UserRecoverableAuthException ex) {
-            Intent intent = ex.getIntent();
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            mApplicationContext.startActivity(intent);
-            throw new AuthException(false /* isTransientError */, ex);
-        } catch (GoogleAuthException ex) {
-            // TODO(bauerb): Investigate integrating the callback with ConnectionRetry.
-            throw new AuthException(false /* isTransientError */, ex);
-        } catch (IOException ex) {
-            throw new AuthException(true /* isTransientError */, ex);
+            throw new AuthException(AuthException.TRANSIENT, ex);
         }
     }
 
     @Override
     public void invalidateAuthToken(String authToken) throws AuthException {
         try {
-            GoogleAuthUtil.clearToken(mApplicationContext, authToken);
+            GoogleAuthUtil.clearToken(ContextUtils.getApplicationContext(), authToken);
         } catch (GooglePlayServicesAvailabilityException ex) {
-            throw new AuthException(false /* isTransientError */, ex);
+            throw new AuthException(AuthException.NONTRANSIENT, ex);
         } catch (GoogleAuthException ex) {
-            throw new AuthException(false /* isTransientError */, ex);
+            throw new AuthException(AuthException.NONTRANSIENT, ex);
         } catch (IOException ex) {
-            throw new AuthException(true /* isTransientError */, ex);
+            throw new AuthException(AuthException.TRANSIENT, ex);
         }
     }
 
@@ -134,37 +128,24 @@ public class SystemAccountManagerDelegate implements AccountManagerDelegate {
     }
 
     @Override
-    public void hasFeatures(Account account, String[] features, final Callback<Boolean> callback) {
+    public boolean hasFeatures(Account account, String[] features) {
         if (!hasGetAccountsPermission()) {
-            ThreadUtils.postOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    callback.onResult(false);
-                }
-            });
-            return;
+            return false;
         }
-        mAccountManager.hasFeatures(account, features, new AccountManagerCallback<Boolean>() {
-            @Override
-            public void run(AccountManagerFuture<Boolean> future) {
-                assert future.isDone();
-                boolean hasFeatures = false;
-                try {
-                    hasFeatures = future.getResult();
-                } catch (AuthenticatorException | IOException e) {
-                    Log.e(TAG, "Error while checking features: ", e);
-                } catch (OperationCanceledException e) {
-                    Log.e(TAG, "Checking features was cancelled. This should not happen.");
-                }
-                callback.onResult(hasFeatures);
-            }
-        }, null /* handler */);
+        try {
+            return mAccountManager.hasFeatures(account, features, null, null).getResult();
+        } catch (AuthenticatorException | IOException e) {
+            Log.e(TAG, "Error while checking features: ", e);
+        } catch (OperationCanceledException e) {
+            Log.e(TAG, "Checking features was cancelled. This should not happen.");
+        }
+        return false;
     }
 
     /**
      * Records a histogram value for how long time an action has taken using
-     * {@link RecordHistogram#recordTimesHistogram(String, long, TimeUnit))} iff the browser process
-     * has been initialized.
+     * {@link RecordHistogram#recordTimesHistogram(String, long, TimeUnit))} iff the browser
+     * process has been initialized.
      *
      * @param histogramName the name of the histogram.
      * @param elapsedMs the elapsed time in milliseconds.
@@ -215,7 +196,7 @@ public class SystemAccountManagerDelegate implements AccountManagerDelegate {
     }
 
     protected boolean hasGetAccountsPermission() {
-        return ApiCompatibilityUtils.checkPermission(mApplicationContext,
+        return ApiCompatibilityUtils.checkPermission(ContextUtils.getApplicationContext(),
                        Manifest.permission.GET_ACCOUNTS, Process.myPid(), Process.myUid())
                 == PackageManager.PERMISSION_GRANTED;
     }
@@ -224,8 +205,14 @@ public class SystemAccountManagerDelegate implements AccountManagerDelegate {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             return true;
         }
-        return ApiCompatibilityUtils.checkPermission(mApplicationContext,
+        return ApiCompatibilityUtils.checkPermission(ContextUtils.getApplicationContext(),
                        "android.permission.MANAGE_ACCOUNTS", Process.myPid(), Process.myUid())
                 == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void fireOnAccountsChangedNotification() {
+        for (AccountsChangeObserver observer : mObservers) {
+            observer.onAccountsChanged();
+        }
     }
 }

@@ -17,6 +17,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner_helpers.h"
+#include "build/build_config.h"
 #include "storage/browser/fileapi/file_system_url.h"
 #include "storage/browser/fileapi/open_file_system_mode.h"
 #include "storage/browser/fileapi/plugin_private_file_system_backend.h"
@@ -94,8 +95,8 @@ class STORAGE_EXPORT FileSystemContext
   // file_task_runner is used as default TaskRunner.
   // Unless a FileSystemBackend is overridden in CreateFileSystemOperation,
   // it is used for all file operations and file related meta operations.
-  // The code assumes that file_task_runner->RunsTasksOnCurrentThread()
-  // returns false if the current task is not running on the thread that allows
+  // The code assumes that file_task_runner->RunsTasksInCurrentSequence()
+  // returns false if the current task is not running on the sequence that allows
   // blocking file operations (like SequencedWorkerPool implementation does).
   //
   // |external_mount_points| contains non-system external mount points available
@@ -281,7 +282,10 @@ class STORAGE_EXPORT FileSystemContext
                                            FileSystemType type,
                                            const base::FilePath& path) const;
 
+#if defined(OS_CHROMEOS)
+  // Used only on ChromeOS for now.
   void EnableTemporaryFileSystemInIncognito();
+#endif
 
   SandboxFileSystemBackendDelegate* sandbox_delegate() {
     return sandbox_delegate_.get();
@@ -321,7 +325,7 @@ class STORAGE_EXPORT FileSystemContext
                                           DefaultContextDeleter>;
   ~FileSystemContext();
 
-  void DeleteOnCorrectThread() const;
+  void DeleteOnCorrectSequence() const;
 
   // Creates a new FileSystemOperation instance by getting an appropriate
   // FileSystemBackend for |url| and calling the backend's corresponding
@@ -409,7 +413,7 @@ class STORAGE_EXPORT FileSystemContext
 
 struct DefaultContextDeleter {
   static void Destruct(const FileSystemContext* context) {
-    context->DeleteOnCorrectThread();
+    context->DeleteOnCorrectSequence();
   }
 };
 

@@ -7,7 +7,6 @@
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/mock_random.h"
 #include "net/quic/test_tools/quic_test_utils.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 using std::string;
 
@@ -59,7 +58,7 @@ string QuicCryptoServerConfigPeer::NewSourceAddressToken(
 
 HandshakeFailureReason QuicCryptoServerConfigPeer::ValidateSourceAddressTokens(
     string config_id,
-    StringPiece srct,
+    QuicStringPiece srct,
     const QuicIpAddress& ip,
     QuicWallTime now,
     CachedNetworkParameters* cached_network_params) {
@@ -76,7 +75,7 @@ HandshakeFailureReason QuicCryptoServerConfigPeer::ValidateSourceAddressTokens(
 
 HandshakeFailureReason
 QuicCryptoServerConfigPeer::ValidateSingleSourceAddressToken(
-    StringPiece token,
+    QuicStringPiece token,
     const QuicIpAddress& ip,
     QuicWallTime now) {
   SourceAddressTokens tokens;

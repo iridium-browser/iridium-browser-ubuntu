@@ -10,55 +10,68 @@ found in the LICENSE file.
 <link rel="import" href="/tracing/metrics/system_health/power_metric.html">
 <link rel="import" href="/tracing/model/user_model/idle_expectation.html">
 <link rel="import" href="/tracing/model/user_model/load_expectation.html">
+<link rel="import" href="/tracing/model/user_model/user_expectation.html">
 <link rel="import" href="/tracing/value/histogram_set.html">
 
 <script>
 'use strict';
 
 function containsData(histograms, name) {
-  for (var value of histograms)
-    if (value.name === name)
+  for (const value of histograms) {
+    if (value.name === name) {
       return (value.running !== undefined);
+    }
+  }
 
   return undefined;
 }
 
 function getMetricValueCount(histograms, name) {
-  for (var value of histograms)
-    if (value.name === name && value.running !== undefined)
+  for (const value of histograms) {
+    if (value.name === name && value.running !== undefined) {
       return value.running.count;
+    }
+  }
 
   return undefined;
 }
 
 function getMetricValueSum(histograms, name) {
-  for (var value of histograms)
-    if (value.name === name && value.running !== undefined)
+  for (const value of histograms) {
+    if (value.name === name && value.running !== undefined) {
       return value.running.sum;
+    }
+  }
 
   return undefined;
 }
 
 function getMetricValueMin(histograms, name) {
-  for (var value of histograms)
-    if (value.name === name && value.running !== undefined)
+  for (const value of histograms) {
+    if (value.name === name && value.running !== undefined) {
       return value.running.min;
+    }
+  }
 
   return undefined;
 }
 
 function getMetricValueAvg(histograms, name) {
-  for (var value of histograms)
-    if (value.name === name && value.running !== undefined)
+  for (const value of histograms) {
+    if (value.name === name && value.running !== undefined) {
       return value.running.mean;
+    }
+  }
 
   return undefined;
 }
 
 function getMetricValueMax(histograms, name) {
-  for (var value of histograms)
-    if (value.name === name && value.running !== undefined)
+  for (const value of histograms) {
+    if (value.name === name && value.running !== undefined) {
       return value.running.max;
+    }
+  }
 
   return undefined;
 }
@@ -67,12 +80,12 @@ tr.b.unittest.testSuite(function() {
   test('powerMetric_computesChromeBoundsCorrectly', function() {
     // Tests if Chrome bounds are computed correctly when there
     // are both browser and renderer threads in the trace.
-    var model = tr.c.TestUtils.newModel((model) => {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var rendererThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel((model) => {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const rendererThread = rendererProcess.getOrCreateThread(1);
       rendererThread.name = 'CrRendererMain';
-      var browserProcess = model.getOrCreateProcess(5678);
-      var browserThread = browserProcess.getOrCreateThread(2);
+      const browserProcess = model.getOrCreateProcess(5678);
+      const browserThread = browserProcess.getOrCreateThread(2);
       browserThread.name = 'CrBrowserMain';
       rendererThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -89,12 +102,13 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 2000; i++)
+      for (let i = 0; i <= 2000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 0, 2000));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.closeTo(getMetricValueMin(histograms, 'idle:power'), 200.0, .01);
@@ -103,9 +117,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_noPowerSeries', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -122,16 +136,16 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.lengthOf(histograms, 0);
   });
 
   test('powerMetric_emptyPowerSeries', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -149,19 +163,20 @@ tr.b.unittest.testSuite(function() {
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.lengthOf(histograms, 0);
   });
 
   test('powerMetric_noChromeTrace', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
+    const model = tr.c.TestUtils.newModel(function(model) {
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 1000; i++)
+      for (let i = 0; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     // Only the whole trace power metric should contain data.
@@ -171,14 +186,15 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_emptyChromeTrace', function() {
-    var histograms = new tr.v.HistogramSet();
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const histograms = new tr.v.HistogramSet();
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 1000; i++)
+      for (let i = 0; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.LoadExpectation(
           model, tr.model.um.LOAD_SUBTYPE_NAMES.SUCCESSFUL, 0, 500));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
@@ -192,9 +208,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_powerSeriesStartsLate', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -211,14 +227,15 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 300; i <= 1000; i++)
+      for (let i = 300; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.LoadExpectation(
           model, tr.model.um.LOAD_SUBTYPE_NAMES.SUCCESSFUL, 0, 500));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 500, 500));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert(containsData(histograms, 'story:power'));
@@ -227,9 +244,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_powerSeriesEndsEarly', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -246,14 +263,15 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 700; i++)
+      for (let i = 0; i <= 700; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.LoadExpectation(
           model, tr.model.um.LOAD_SUBTYPE_NAMES.SUCCESSFUL, 0, 500));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 500, 500));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert(containsData(histograms, 'story:power'));
@@ -262,9 +280,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_generic_oneStageEachType_irBeyondChrome', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -281,14 +299,15 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 1000; i++)
+      for (let i = 0; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.ResponseExpectation(
-          model, tr.importer.INITIATOR_TYPE.SCROLL, 0, 500));
+          model, tr.model.um.INITIATOR_TYPE.SCROLL, 0, 500));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 500, 1500));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.closeTo(getMetricValueSum(histograms,
@@ -300,9 +319,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_story_minAvgMax', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -319,14 +338,15 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 1000; i++)
+      for (let i = 0; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.ResponseExpectation(
-          model, tr.importer.INITIATOR_TYPE.SCROLL, 0, 500));
+          model, tr.model.um.INITIATOR_TYPE.SCROLL, 0, 500));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 500, 1500));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.closeTo(getMetricValueMin(histograms, 'story:power'), 0, .01);
@@ -335,9 +355,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_generic_oneUEBeforeChrome', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -354,14 +374,15 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 1000; i++)
+      for (let i = 0; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 0, 300));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 300, 1000));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.closeTo(getMetricValueAvg(histograms,
@@ -369,9 +390,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_generic_multipleStagesEachType', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -388,36 +409,37 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 1000; i++)
+      for (let i = 0; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.ResponseExpectation(
-            model, tr.importer.INITIATOR_TYPE.SCROLL, 0, 200));
+            model, tr.model.um.INITIATOR_TYPE.SCROLL, 0, 200));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
             model, 200, 300));
       model.userModel.expectations.push(new tr.model.um.ResponseExpectation(
-            model, tr.importer.INITIATOR_TYPE.SCROLL, 500, 400));
+            model, tr.model.um.INITIATOR_TYPE.SCROLL, 500, 400));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
             model, 900, 100));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.closeTo(getMetricValueSum(histograms,
         'scroll_response:energy'), 300, 0.6);
     assert.closeTo(getMetricValueAvg(histograms,
         'idle:power'), 500, 0.6);
-    assert.equal(getMetricValueCount(histograms,
+    assert.strictEqual(getMetricValueCount(histograms,
         'scroll_response:energy'), 2);
-    assert.equal(getMetricValueCount(histograms,
+    assert.strictEqual(getMetricValueCount(histograms,
         'idle:power'), 400);
   });
 
   test('powerMetric_loading_oneInterval_samplesBeyondChrome', function() {
     // Interval of load is [200, 15400].
     // Trace goes until 22150.
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1984);
-      var mainThread = rendererProcess.getOrCreateThread(2);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1984);
+      const mainThread = rendererProcess.getOrCreateThread(2);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -482,15 +504,18 @@ tr.b.unittest.testSuite(function() {
       }));
 
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 15400; i++)
+      for (let i = 0; i <= 15400; i++) {
         model.device.powerSeries.addPowerSample(i, 20);
-      for (var i = 15401; i <= 22160; i++)
+      }
+      for (let i = 15401; i <= 22160; i++) {
         model.device.powerSeries.addPowerSample(i, 10);
-      for (var i = 22160; i <= 30000; i++)
+      }
+      for (let i = 22160; i <= 30000; i++) {
         model.device.powerSeries.addPowerSample(i, 10);
+      }
     });
 
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
   // Energy for first load is 20 W * 15.2 s
   // (interval from 0.2 s to 15.4 s)
@@ -501,9 +526,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_loading_noMeaningfulPaint', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1984);
-      var mainThread = rendererProcess.getOrCreateThread(2);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1984);
+      const mainThread = rendererProcess.getOrCreateThread(2);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -552,13 +577,15 @@ tr.b.unittest.testSuite(function() {
       }));
 
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 15400; i++)
+      for (let i = 0; i <= 15400; i++) {
         model.device.powerSeries.addPowerSample(i, 20);
-      for (var i = 15401; i <= 22160; i++)
+      }
+      for (let i = 15401; i <= 22160; i++) {
         model.device.powerSeries.addPowerSample(i, 10);
+      }
     });
 
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
     // Energy for first load is 20 W * 15.2 s
     // (interval from 0.2 s to 15.4 s)
@@ -566,9 +593,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_scroll_oneStageEachType', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -585,14 +612,15 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 1000; i++)
+      for (let i = 0; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.AnimationExpectation(
-          model, tr.importer.INITIATOR_TYPE.SCROLL, 0, 500));
+          model, tr.model.um.INITIATOR_TYPE.SCROLL, 0, 500));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 500, 500));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.closeTo(getMetricValueAvg(histograms,
@@ -600,9 +628,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_scroll_multipleStagesEachType', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -619,18 +647,19 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 1000; i++)
+      for (let i = 0; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.AnimationExpectation(
-          model, tr.importer.INITIATOR_TYPE.SCROLL, 0, 200));
+          model, tr.model.um.INITIATOR_TYPE.SCROLL, 0, 200));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 200, 300));
       model.userModel.expectations.push(new tr.model.um.AnimationExpectation(
-          model, tr.importer.INITIATOR_TYPE.SCROLL, 500, 200));
+          model, tr.model.um.INITIATOR_TYPE.SCROLL, 500, 200));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 700, 300));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.closeTo(getMetricValueAvg(histograms,
@@ -638,9 +667,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_video_oneStageEachType', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -657,14 +686,15 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 1000; i++)
+      for (let i = 0; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.AnimationExpectation(
-          model, tr.importer.INITIATOR_TYPE.VIDEO, 0, 500));
+          model, tr.model.um.INITIATOR_TYPE.VIDEO, 0, 500));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 500, 500));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.closeTo(getMetricValueAvg(histograms, 'video_animation:power'),
@@ -672,9 +702,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('powerMetric_video_multipleStagesEachType', function() {
-    var model = tr.c.TestUtils.newModel(function(model) {
-      var rendererProcess = model.getOrCreateProcess(1234);
-      var mainThread = rendererProcess.getOrCreateThread(1);
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const rendererProcess = model.getOrCreateProcess(1234);
+      const mainThread = rendererProcess.getOrCreateThread(1);
       mainThread.name = 'CrRendererMain';
       mainThread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
         cat: 'blink.user_timing',
@@ -691,18 +721,19 @@ tr.b.unittest.testSuite(function() {
         args: {frame: '0xdeadbeef'}
       }));
       model.device.powerSeries = new tr.model.PowerSeries(model.device);
-      for (var i = 0; i <= 1000; i++)
+      for (let i = 0; i <= 1000; i++) {
         model.device.powerSeries.addPowerSample(i, i);
+      }
       model.userModel.expectations.push(new tr.model.um.AnimationExpectation(
-          model, tr.importer.INITIATOR_TYPE.VIDEO, 0, 200));
+          model, tr.model.um.INITIATOR_TYPE.VIDEO, 0, 200));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 200, 300));
       model.userModel.expectations.push(new tr.model.um.AnimationExpectation(
-          model, tr.importer.INITIATOR_TYPE.VIDEO, 500, 200));
+          model, tr.model.um.INITIATOR_TYPE.VIDEO, 500, 200));
       model.userModel.expectations.push(new tr.model.um.IdleExpectation(
           model, 700, 300));
     });
-    var histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.metrics.sh.powerMetric(histograms, model);
 
     assert.closeTo(getMetricValueAvg(histograms, 'video_animation:power'),

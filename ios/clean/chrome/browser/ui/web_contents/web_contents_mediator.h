@@ -7,18 +7,17 @@
 
 #import <Foundation/Foundation.h>
 
-@protocol WebContentsConsumer;
-
 namespace web {
 class WebState;
 }
+@protocol WebContentsConsumer;
 
 // A mediator object that provides the relevant properties of a web state
 // to a consumer.
 @interface WebContentsMediator : NSObject
 
-// The WebState whose properties this object mediates. This can change during
-// the lifetime of this object and may be null.
+// Updates to this webState are mediated to the consumer. This can change
+// during the lifetime of this object and may be nil.
 @property(nonatomic, assign) web::WebState* webState;
 
 // The consumer for this object. This can change during the lifetime of this

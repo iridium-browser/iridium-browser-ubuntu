@@ -18,6 +18,9 @@ class ChromeBrowserState;
 
 CGFloat tabSwitcherLocalSessionCellTopBarHeight();
 
+// The accessibility label for the close button for use in test automation.
+extern NSString* const kTabSwicherPanelCellCloseButtonAccessibilityID;
+
 @protocol SessionCellDelegate<NSObject>
 
 - (TabSwitcherCache*)tabSwitcherCache;
@@ -32,34 +35,26 @@ CGFloat tabSwitcherLocalSessionCellTopBarHeight();
 + (NSString*)identifier;
 
 // The cell delegate.
-@property(nonatomic, assign) id<SessionCellDelegate> delegate;
+@property(nonatomic, unsafe_unretained) id<SessionCellDelegate> delegate;
 
 @end
 
 // Cell showing information about a local session.
 @interface TabSwitcherLocalSessionCell : TabSwitcherSessionCell
 
+// Getter and setter for the snapshot image.
+@property(nonatomic, weak) UIImage* snapshot;
+
 // Returns the top bar of the cell. The top bar holds the favicon and the tab
 // title.
-@property(nonatomic, readonly) UIView* topBar;
+@property(nonatomic, weak, readonly) UIView* topBar;
 
 // Sets the cell's appearance using information in |tab|.
 // The delegate needs to be set before calling this method.
 - (void)setAppearanceForTab:(Tab*)tab cellSize:(CGSize)cellSize;
 
-// PLACEHOLDER: Sets the cell's appearance using information in |title| and
-// |favicon|.
-- (void)setAppearanceForTabTitle:(NSString*)title
-                         favicon:(UIImage*)favicon
-                        cellSize:(CGSize)cellSize;
-
 // Sets the cell's appearance depending on |type|.
 - (void)setSessionType:(TabSwitcherSessionType)type;
-
-// Returns the current screenshot set on the cell.
-- (UIImage*)screenshot;
-// Sets the snapshot.
-- (void)setSnapshot:(UIImage*)snapshot;
 
 @end
 

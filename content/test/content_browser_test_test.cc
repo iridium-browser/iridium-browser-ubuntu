@@ -25,10 +25,6 @@
 #include "content/shell/common/shell_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
-
 namespace content {
 
 // Disabled on official builds because symbolization in sandboxes processes
@@ -73,13 +69,6 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, MANUAL_RendererCrash) {
 
 // Tests that browser tests print the callstack when a child process crashes.
 IN_PROC_BROWSER_TEST_F(ContentBrowserTest, RendererCrashCallStack) {
-#if defined(OS_WIN)
-  // Matches the same condition in RouteStdioToConsole, which makes this test
-  // fail on XP.
-  if (base::win::GetVersion() < base::win::VERSION_VISTA)
-    return;
-#endif
-
   base::ThreadRestrictions::ScopedAllowIO allow_io_for_temp_dir;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
@@ -90,25 +79,19 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, RendererCrashCallStack) {
   new_test.AppendSwitch(kRunManualTestsFlag);
   new_test.AppendSwitch(kSingleProcessTestsFlag);
 
-  // Per https://www.chromium.org/developers/testing/addresssanitizer, there are
-  // ASAN bots that run without the sandbox which this test will pass for. The
-  // other ones pipe the output to a symbolizer script.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoSandbox)) {
-    new_test.AppendSwitch(switches::kNoSandbox);
-  } else {
-#if defined(ADDRESS_SANITIZER)
-    LOG(INFO) << "Couldn't run ContentBrowserTest.RendererCrashCallStack since "
-              << "sandbox is enabled and ASAN requires piping to an external "
-              << "script.";
-    return;
-#endif
-  }
-
   std::string output;
   base::GetAppOutputAndError(new_test, &output);
 
+  // In sanitizer builds, an external script is responsible for symbolizing,
+  // so the stack that the tests sees here looks like:
+  // "#0 0x0000007ea911 (...content_browsertests+0x7ea910)"
   std::string crash_string =
+#if !defined(ADDRESS_SANITIZER) && !defined(LEAK_SANITIZER) && \
+    !defined(MEMORY_SANITIZER) && !defined(THREAD_SANITIZER)
       "content::RenderFrameImpl::PrepareRenderViewForNavigation";
+#else
+      "#0 ";
+#endif
 
   if (output.find(crash_string) == std::string::npos) {
     GTEST_FAIL() << "Couldn't find\n" << crash_string << "\n in output\n "
@@ -134,8 +117,17 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, BrowserCrashCallStack) {
   std::string output;
   base::GetAppOutputAndError(new_test, &output);
 
+  // In sanitizer builds, an external script is responsible for symbolizing,
+  // so the stack that the test sees here looks like:
+  // "#0 0x0000007ea911 (...content_browsertests+0x7ea910)"
   std::string crash_string =
-      "content::ContentBrowserTest_MANUAL_BrowserCrash_Test::RunTestOnMainThread";
+#if !defined(ADDRESS_SANITIZER) && !defined(LEAK_SANITIZER) && \
+    !defined(MEMORY_SANITIZER) && !defined(THREAD_SANITIZER)
+      "content::ContentBrowserTest_MANUAL_BrowserCrash_Test::"
+      "RunTestOnMainThread";
+#else
+      "#0 ";
+#endif
 
   if (output.find(crash_string) == std::string::npos) {
     GTEST_FAIL() << "Couldn't find\n" << crash_string << "\n in output\n "

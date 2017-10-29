@@ -4,6 +4,7 @@
 
 #include "base/command_line.h"
 #include "base/location.h"
+#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
@@ -26,10 +27,6 @@
 #include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
-
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
 
 namespace extensions {
 
@@ -54,9 +51,8 @@ class TabCaptureApiTest : public ExtensionApiTest {
  protected:
   void SimulateMouseClickInCurrentTab() {
     content::SimulateMouseClick(
-        browser()->tab_strip_model()->GetActiveWebContents(),
-        0,
-        blink::WebMouseEvent::Button::Left);
+        browser()->tab_strip_model()->GetActiveWebContents(), 0,
+        blink::WebMouseEvent::Button::kLeft);
   }
 };
 
@@ -70,11 +66,6 @@ class TabCaptureApiPixelTest : public TabCaptureApiTest {
 
  protected:
   bool IsTooIntensiveForThisPlatform() const {
-#if defined(OS_WIN)
-    if (base::win::GetVersion() < base::win::VERSION_VISTA)
-      return true;
-#endif
-
     // The tests are too slow to succeed with software GL on the bots.
     if (UsingSoftwareGL())
       return true;

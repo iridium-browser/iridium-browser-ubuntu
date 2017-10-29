@@ -5,7 +5,7 @@
 #ifndef COMPONENTS_SIGNIN_CORE_COMMON_SIGNIN_SWITCHES_H_
 #define COMPONENTS_SIGNIN_CORE_COMMON_SIGNIN_SWITCHES_H_
 
-#include "base/feature_list.h"
+#include "components/signin/core/common/signin_features.h"
 
 namespace switches {
 
@@ -16,17 +16,19 @@ namespace switches {
 // All switches in alphabetical order. The switches should be documented
 // alongside the definition of their values in the .cc file.
 extern const char kClearTokenService[];
-extern const char kDisableAccountConsistency[];
-extern const char kDisableNewProfileManagement[];
+extern const char kDisableSigninPromo[];
 extern const char kDisableSigninScopedDeviceId[];
-extern const char kEnableAccountConsistency[];
-extern const char kEnableNewProfileManagement[];
 extern const char kEnableRefreshTokenAnnotationRequest[];
+extern const char kEnableSigninPromo[];
 extern const char kExtensionsMultiAccount[];
-extern const char kGoogleProfileInfo[];
 
-extern const base::Feature kMaterialDesignUserMenu;
-extern const base::Feature kUsePasswordSeparatedSigninFlow;
+#if !BUILDFLAG(ENABLE_MIRROR)
+// Note: Account consistency (Mirror) is already enabled on mobile platforms, so
+// this switch only exist on desktop platforms.
+extern const char kAccountConsistency[];
+extern const char kAccountConsistencyMirror[];
+extern const char kAccountConsistencyDice[];
+#endif
 
 }  // namespace switches
 

@@ -186,11 +186,7 @@ GLenum GLVariableType(const TType &type)
 {
     if (type.getBasicType() == EbtFloat)
     {
-        if (type.isScalar())
-        {
-            return GL_FLOAT;
-        }
-        else if (type.isVector())
+        if (type.isVector())
         {
             switch (type.getNominalSize())
             {
@@ -252,15 +248,13 @@ GLenum GLVariableType(const TType &type)
             }
         }
         else
-            UNREACHABLE();
+        {
+            return GL_FLOAT;
+        }
     }
     else if (type.getBasicType() == EbtInt)
     {
-        if (type.isScalar())
-        {
-            return GL_INT;
-        }
-        else if (type.isVector())
+        if (type.isVector())
         {
             switch (type.getNominalSize())
             {
@@ -275,15 +269,14 @@ GLenum GLVariableType(const TType &type)
             }
         }
         else
-            UNREACHABLE();
+        {
+            ASSERT(!type.isMatrix());
+            return GL_INT;
+        }
     }
     else if (type.getBasicType() == EbtUInt)
     {
-        if (type.isScalar())
-        {
-            return GL_UNSIGNED_INT;
-        }
-        else if (type.isVector())
+        if (type.isVector())
         {
             switch (type.getNominalSize())
             {
@@ -298,15 +291,14 @@ GLenum GLVariableType(const TType &type)
             }
         }
         else
-            UNREACHABLE();
+        {
+            ASSERT(!type.isMatrix());
+            return GL_UNSIGNED_INT;
+        }
     }
     else if (type.getBasicType() == EbtBool)
     {
-        if (type.isScalar())
-        {
-            return GL_BOOL;
-        }
-        else if (type.isVector())
+        if (type.isVector())
         {
             switch (type.getNominalSize())
             {
@@ -321,7 +313,10 @@ GLenum GLVariableType(const TType &type)
             }
         }
         else
-            UNREACHABLE();
+        {
+            ASSERT(!type.isMatrix());
+            return GL_BOOL;
+        }
     }
 
     switch (type.getBasicType())
@@ -334,6 +329,8 @@ GLenum GLVariableType(const TType &type)
             return GL_SAMPLER_CUBE;
         case EbtSamplerExternalOES:
             return GL_SAMPLER_EXTERNAL_OES;
+        case EbtSamplerExternal2DY2YEXT:
+            return GL_SAMPLER_EXTERNAL_2D_Y2Y_EXT;
         case EbtSampler2DRect:
             return GL_SAMPLER_2D_RECT_ARB;
         case EbtSampler2DArray:
@@ -390,6 +387,8 @@ GLenum GLVariableType(const TType &type)
             return GL_INT_IMAGE_CUBE;
         case EbtUImageCube:
             return GL_UNSIGNED_INT_IMAGE_CUBE;
+        case EbtAtomicCounter:
+            return GL_UNSIGNED_INT_ATOMIC_COUNTER;
         default:
             UNREACHABLE();
     }
@@ -573,134 +572,6 @@ TType GetShaderVariableBasicType(const sh::ShaderVariable &var)
     }
 }
 
-TOperator TypeToConstructorOperator(const TType &type)
-{
-    switch (type.getBasicType())
-    {
-        case EbtFloat:
-            if (type.isMatrix())
-            {
-                switch (type.getCols())
-                {
-                    case 2:
-                        switch (type.getRows())
-                        {
-                            case 2:
-                                return EOpConstructMat2;
-                            case 3:
-                                return EOpConstructMat2x3;
-                            case 4:
-                                return EOpConstructMat2x4;
-                            default:
-                                break;
-                        }
-                        break;
-
-                    case 3:
-                        switch (type.getRows())
-                        {
-                            case 2:
-                                return EOpConstructMat3x2;
-                            case 3:
-                                return EOpConstructMat3;
-                            case 4:
-                                return EOpConstructMat3x4;
-                            default:
-                                break;
-                        }
-                        break;
-
-                    case 4:
-                        switch (type.getRows())
-                        {
-                            case 2:
-                                return EOpConstructMat4x2;
-                            case 3:
-                                return EOpConstructMat4x3;
-                            case 4:
-                                return EOpConstructMat4;
-                            default:
-                                break;
-                        }
-                        break;
-                }
-            }
-            else
-            {
-                switch (type.getNominalSize())
-                {
-                    case 1:
-                        return EOpConstructFloat;
-                    case 2:
-                        return EOpConstructVec2;
-                    case 3:
-                        return EOpConstructVec3;
-                    case 4:
-                        return EOpConstructVec4;
-                    default:
-                        break;
-                }
-            }
-            break;
-
-        case EbtInt:
-            switch (type.getNominalSize())
-            {
-                case 1:
-                    return EOpConstructInt;
-                case 2:
-                    return EOpConstructIVec2;
-                case 3:
-                    return EOpConstructIVec3;
-                case 4:
-                    return EOpConstructIVec4;
-                default:
-                    break;
-            }
-            break;
-
-        case EbtUInt:
-            switch (type.getNominalSize())
-            {
-                case 1:
-                    return EOpConstructUInt;
-                case 2:
-                    return EOpConstructUVec2;
-                case 3:
-                    return EOpConstructUVec3;
-                case 4:
-                    return EOpConstructUVec4;
-                default:
-                    break;
-            }
-            break;
-
-        case EbtBool:
-            switch (type.getNominalSize())
-            {
-                case 1:
-                    return EOpConstructBool;
-                case 2:
-                    return EOpConstructBVec2;
-                case 3:
-                    return EOpConstructBVec3;
-                case 4:
-                    return EOpConstructBVec4;
-                default:
-                    break;
-            }
-            break;
-
-        case EbtStruct:
-            return EOpConstructStruct;
-
-        default:
-            break;
-    }
-
-    return EOpNull;
-}
-
 // GLSL ES 1.0.17 4.6.1 The Invariant Qualifier
 bool CanBeInvariantESSL1(TQualifier qualifier)
 {
@@ -749,4 +620,49 @@ bool IsBuiltinFragmentInputVariable(TQualifier qualifier)
     }
     return false;
 }
+
+bool IsOutputESSL(ShShaderOutput output)
+{
+    return output == SH_ESSL_OUTPUT;
+}
+
+bool IsOutputGLSL(ShShaderOutput output)
+{
+    switch (output)
+    {
+        case SH_GLSL_130_OUTPUT:
+        case SH_GLSL_140_OUTPUT:
+        case SH_GLSL_150_CORE_OUTPUT:
+        case SH_GLSL_330_CORE_OUTPUT:
+        case SH_GLSL_400_CORE_OUTPUT:
+        case SH_GLSL_410_CORE_OUTPUT:
+        case SH_GLSL_420_CORE_OUTPUT:
+        case SH_GLSL_430_CORE_OUTPUT:
+        case SH_GLSL_440_CORE_OUTPUT:
+        case SH_GLSL_450_CORE_OUTPUT:
+        case SH_GLSL_COMPATIBILITY_OUTPUT:
+            return true;
+        default:
+            break;
+    }
+    return false;
+}
+bool IsOutputHLSL(ShShaderOutput output)
+{
+    switch (output)
+    {
+        case SH_HLSL_3_0_OUTPUT:
+        case SH_HLSL_4_1_OUTPUT:
+        case SH_HLSL_4_0_FL9_3_OUTPUT:
+            return true;
+        default:
+            break;
+    }
+    return false;
+}
+bool IsOutputVulkan(ShShaderOutput output)
+{
+    return output == SH_GLSL_VULKAN_OUTPUT;
+}
+
 }  // namespace sh

@@ -23,7 +23,9 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "media/audio/audio_device_description.h"
+#include "media/audio/audio_system_impl.h"
 #include "media/audio/fake_audio_log_factory.h"
+#include "media/audio/test_audio_thread.h"
 #include "media/base/media_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -67,8 +69,7 @@ const char kMockSalt[] = "";
 class MockAudioManager : public AudioManagerPlatform {
  public:
   MockAudioManager()
-      : AudioManagerPlatform(base::ThreadTaskRunnerHandle::Get(),
-                             base::ThreadTaskRunnerHandle::Get(),
+      : AudioManagerPlatform(base::MakeUnique<media::TestAudioThread>(),
                              &fake_audio_log_factory_),
         num_output_devices_(2),
         num_input_devices_(2) {}
@@ -166,11 +167,13 @@ class MediaStreamManagerTest : public ::testing::Test {
   MediaStreamManagerTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {
     audio_manager_.reset(new MockAudioManager());
-    media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
+    audio_system_ = media::AudioSystemImpl::Create(audio_manager_.get());
+    media_stream_manager_ =
+        base::MakeUnique<MediaStreamManager>(audio_system_.get());
     base::RunLoop().RunUntilIdle();
   }
 
-  ~MediaStreamManagerTest() override {}
+  ~MediaStreamManagerTest() override { audio_manager_->Shutdown(); }
 
   MOCK_METHOD1(Response, void(int index));
   void ResponseCallback(int index,
@@ -188,12 +191,12 @@ class MediaStreamManagerTest : public ::testing::Test {
     const int page_request_id = 1;
     const url::Origin security_origin;
     MediaStreamManager::MediaRequestResponseCallback callback =
-        base::Bind(&MediaStreamManagerTest::ResponseCallback,
-                   base::Unretained(this), index);
+        base::BindOnce(&MediaStreamManagerTest::ResponseCallback,
+                       base::Unretained(this), index);
     StreamControls controls(true, true);
     return media_stream_manager_->MakeMediaAccessRequest(
         render_process_id, render_frame_id, page_request_id, controls,
-        security_origin, callback);
+        security_origin, std::move(callback));
   }
 
   // media_stream_manager_ needs to outlive thread_bundle_ because it is a
@@ -201,7 +204,8 @@ class MediaStreamManagerTest : public ::testing::Test {
   // thread_bundle_ because it uses the underlying message loop.
   std::unique_ptr<MediaStreamManager> media_stream_manager_;
   content::TestBrowserThreadBundle thread_bundle_;
-  std::unique_ptr<MockAudioManager, media::AudioManagerDeleter> audio_manager_;
+  std::unique_ptr<MockAudioManager> audio_manager_;
+  std::unique_ptr<media::AudioSystem> audio_system_;
   base::RunLoop run_loop_;
 
  private:
@@ -233,12 +237,11 @@ TEST_F(MediaStreamManagerTest, MakeMultipleRequests) {
   int page_request_id = 2;
   url::Origin security_origin;
   StreamControls controls(true, true);
-  MediaStreamManager::MediaRequestResponseCallback callback =
-      base::Bind(&MediaStreamManagerTest::ResponseCallback,
-                 base::Unretained(this), 1);
+  MediaStreamManager::MediaRequestResponseCallback callback = base::BindOnce(
+      &MediaStreamManagerTest::ResponseCallback, base::Unretained(this), 1);
   std::string label2 = media_stream_manager_->MakeMediaAccessRequest(
       render_process_id, render_frame_id, page_request_id, controls,
-      security_origin, callback);
+      security_origin, std::move(callback));
 
   // Expecting the callbackS from requests will be triggered and quit the test.
   // Note, the callbacks might come in a different order depending on the

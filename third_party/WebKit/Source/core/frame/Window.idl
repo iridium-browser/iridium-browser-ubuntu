@@ -30,13 +30,14 @@
 [
     CheckSecurity=Receiver,
     ImplementedAs=DOMWindow,
-    PrimaryGlobal,
+    PrimaryGlobal
 ] interface Window : EventTarget {
     // the current browsing context
     // FIXME: The spec uses the WindowProxy type for this and many other attributes.
     [Unforgeable, CrossOrigin] readonly attribute Window window;
     [Replaceable, CrossOrigin] readonly attribute Window self;
     [Unforgeable, CachedAccessor] readonly attribute Document document;
+    [Replaceable] readonly attribute DOMString origin;
     attribute DOMString name;
     [PutForwards=href, Unforgeable, CrossOrigin=(Getter,Setter), Custom=Getter] readonly attribute Location location;
     readonly attribute History history;
@@ -62,9 +63,13 @@
     [Replaceable, CrossOrigin] readonly attribute Window? parent;
     [CheckSecurity=ReturnValue, Custom=Getter] readonly attribute Element? frameElement;
     // FIXME: open() should have 4 optional arguments with defaults.
-    [Custom] Window? open(DOMString url, DOMString target, optional DOMString features);
-    // FIXME: These getters should not have [NotEnumerable].
+    [Custom, RaisesException] Window? open(DOMString url, DOMString target, optional DOMString features);
+
+    // indexed properties
+    // https://html.spec.whatwg.org/C/browsers.html#windowproxy-getownproperty
     [NotEnumerable, CrossOrigin] getter Window (unsigned long index);
+
+    // named properties
     [Custom, NotEnumerable, CrossOrigin] getter object (DOMString name);
 
     // the user agent
@@ -84,11 +89,11 @@
     [Measure] long requestIdleCallback(IdleRequestCallback callback, optional IdleRequestOptions options);
     void cancelIdleCallback(long handle);
 
-    [CrossOrigin, Custom, RaisesException] void postMessage(any message, DOMString targetOrigin, optional sequence<Transferable> transfer);
+    [CrossOrigin, Custom, RaisesException] void postMessage(any message, DOMString targetOrigin, optional sequence<object> transfer = []);
 
     // Custom elements
     // https://w3c.github.io/webcomponents/spec/custom/#custom-elements-api
-    [RuntimeEnabled=CustomElementsV1, CallWith=ScriptState] readonly attribute CustomElementRegistry customElements;
+    [CallWith=ScriptState] readonly attribute CustomElementRegistry customElements;
 
     // HTML obsolete features
     // https://html.spec.whatwg.org/#Window-partial
@@ -131,7 +136,7 @@
 
     // Visual Viewport API
     // https://github.com/WICG/ViewportAPI
-    [RuntimeEnabled=VisualViewportAPI, Replaceable, SameObject] readonly attribute VisualViewport? visualViewport;
+    [RuntimeEnabled=VisualViewportAPI, Replaceable, SameObject] readonly attribute VisualViewport visualViewport;
 
     // client
     [Replaceable] readonly attribute long screenX;
@@ -193,26 +198,12 @@
     attribute EventHandler onwebkitanimationiteration;
     attribute EventHandler onwebkitanimationstart;
     attribute EventHandler onwebkittransitionend;
-    attribute EventHandler onwheel;
 
     // https://w3c.github.io/webappsec/specs/powerfulfeatures/#monkey-patching-global-object
     readonly attribute boolean isSecureContext;
-};
 
-// https://html.spec.whatwg.org/#transferable-objects
-//
-// Expressing the Transferable typedef in IDL depends on https://crbug.com/240176.
-// The postMessage() methods taking a Transferable array argument have custom
-// binding code that is able to handle the Transferables that we currently
-// recognize. To be able to declare a postMessage() signature that matches
-// the implementation, we provide a Transferable typedef but with an
-// incomplete type.
-//
-// FIXME: make this typedef accurate once enough of https://crbug.com/240176
-// is in place.
-// FIXME: consider putting this typedef in an .idl file containing spec-wide
-// utility type definitions.
-typedef MessagePort Transferable;
+    attribute DOMMatrixConstructor WebKitCSSMatrix;
+};
 
 Window implements GlobalEventHandlers;
 Window implements WindowBase64;

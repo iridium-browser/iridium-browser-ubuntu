@@ -70,10 +70,7 @@ class CastCRLTrustStore {
             kCastCRLRootCaDer, sizeof(kCastCRLRootCaDer), {}, &errors);
     CHECK(cert) << errors.ToDebugString();
     // Enforce pathlen constraints and policies defined on the root certificate.
-    scoped_refptr<net::TrustAnchor> anchor =
-        net::TrustAnchor::CreateFromCertificateWithConstraints(std::move(cert));
-    CHECK(anchor);
-    store_.AddTrustAnchor(std::move(anchor));
+    store_.AddTrustAnchorWithConstraints(std::move(cert));
   }
 
   net::TrustStoreInMemory store_;
@@ -145,9 +142,11 @@ bool VerifyCRL(const Crl& crl,
     return false;
   }
   net::CertPathBuilder::Result result;
-  net::CertPathBuilder path_builder(parsed_cert.get(), trust_store,
-                                    signature_policy.get(), verification_time,
-                                    &result);
+  net::CertPathBuilder path_builder(
+      parsed_cert.get(), trust_store, signature_policy.get(), verification_time,
+      net::KeyPurpose::ANY_EKU, net::InitialExplicitPolicy::kFalse,
+      {net::AnyPolicy()}, net::InitialPolicyMappingInhibit::kFalse,
+      net::InitialAnyPolicyInhibit::kFalse, &result);
   path_builder.Run();
   if (!result.HasValidPath()) {
     VLOG(2) << "CRL - Issuer certificate verification failed.";
@@ -261,7 +260,7 @@ bool CastCRLImpl::CheckRevocation(const net::CertPath& trusted_chain,
   if (trusted_chain.IsEmpty())
     return false;
 
-  DCHECK(trusted_chain.trust_anchor);
+  DCHECK(trusted_chain.last_cert_trust.IsTrustAnchor());
 
   // Check the validity of the CRL at the specified time.
   net::der::GeneralizedTime verification_time;
@@ -274,17 +273,10 @@ bool CastCRLImpl::CheckRevocation(const net::CertPath& trusted_chain,
     return false;
   }
 
-  // Check revocation. Note that this loop has "+ 1" in order to also loop
-  // over the trust anchor (which is treated specially).
-  for (size_t i = 0; i < trusted_chain.certs.size() + 1; ++i) {
-    // This loop iterates over both certificates AND then the trust
-    // anchor after exhausing the certs.
-    net::der::Input spki_tlv;
-    if (i == trusted_chain.certs.size()) {
-      spki_tlv = trusted_chain.trust_anchor->spki();
-    } else {
-      spki_tlv = trusted_chain.certs[i]->tbs().spki_tlv;
-    }
+  // Check revocation. This loop iterates over both certificates AND then the
+  // trust anchor after exhausting the certs.
+  for (size_t i = 0; i < trusted_chain.certs.size(); ++i) {
+    const net::der::Input& spki_tlv = trusted_chain.certs[i]->tbs().spki_tlv;
 
     // Calculate the public key's hash to check for revocation.
     std::string spki_hash = crypto::SHA256HashString(spki_tlv.AsString());

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/chromeos/hats/hats_notification_controller.h"
 
-#include "ash/common/system/system_notifier.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/system/system_notifier.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
@@ -21,11 +21,11 @@
 #include "chrome/browser/search/suggestions/image_decoder_impl.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/theme_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/network/network_state.h"
-#include "components/image_fetcher/image_fetcher_impl.h"
+#include "components/image_fetcher/core/image_fetcher_impl.h"
 #include "components/prefs/pref_service.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia_rep.h"
@@ -114,8 +114,7 @@ HatsNotificationController::HatsNotificationController(
       image_fetcher_(image_fetcher),
       weak_pointer_factory_(this) {
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&IsNewDevice, kHatsNewDeviceThresholdDays),
       base::Bind(&HatsNotificationController::Initialize,
                  weak_pointer_factory_.GetWeakPtr()));
@@ -235,15 +234,19 @@ void HatsNotificationController::OnPortalDetectionCompleted(
   image_fetcher_->StartOrQueueNetworkRequest(
       kImageFetcher1xId, GURL(kGoogleIcon1xUrl),
       base::Bind(&HatsNotificationController::OnImageFetched,
-                 weak_pointer_factory_.GetWeakPtr()));
+                 weak_pointer_factory_.GetWeakPtr()),
+      NO_TRAFFIC_ANNOTATION_YET);
   image_fetcher_->StartOrQueueNetworkRequest(
       kImageFetcher2xId, GURL(kGoogleIcon2xUrl),
       base::Bind(&HatsNotificationController::OnImageFetched,
-                 weak_pointer_factory_.GetWeakPtr()));
+                 weak_pointer_factory_.GetWeakPtr()),
+      NO_TRAFFIC_ANNOTATION_YET);
 }
 
-void HatsNotificationController::OnImageFetched(const std::string& id,
-                                                const gfx::Image& image) {
+void HatsNotificationController::OnImageFetched(
+    const std::string& id,
+    const gfx::Image& image,
+    const image_fetcher::RequestMetadata& metadata) {
   DCHECK(id == kImageFetcher1xId || id == kImageFetcher2xId);
 
   completed_requests_++;

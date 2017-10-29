@@ -33,8 +33,9 @@ void UpdateInstallShim::OnUpdateError(int error) {
   VLOG(1) << "OnUpdateError (" << extension_id_ << ") " << error;
 }
 
-Result UpdateInstallShim::Install(const base::DictionaryValue& manifest,
-                                  const base::FilePath& unpack_path) {
+Result UpdateInstallShim::Install(
+    std::unique_ptr<base::DictionaryValue> manifest,
+    const base::FilePath& unpack_path) {
   base::ScopedTempDir temp_dir;
   if (!temp_dir.CreateUniqueTempDir())
     return Result(InstallError::GENERIC_ERROR);
@@ -80,8 +81,7 @@ UpdateInstallShim::~UpdateInstallShim() {}
 void UpdateInstallShim::RunCallbackOnUIThread(const base::FilePath& temp_dir) {
   if (callback_.is_null()) {
     base::PostTaskWithTraits(FROM_HERE,
-                             base::TaskTraits().MayBlock().WithPriority(
-                                 base::TaskPriority::BACKGROUND),
+                             {base::MayBlock(), base::TaskPriority::BACKGROUND},
                              base::Bind(base::IgnoreResult(&base::DeleteFile),
                                         temp_dir, true /*recursive */));
     return;

@@ -37,8 +37,9 @@ Common.Settings = class {
    * @param {!Common.SettingsStorage} localStorage
    */
   constructor(globalStorage, localStorage) {
-    this._settingsStorage = globalStorage;
+    this._globalStorage = globalStorage;
     this._localStorage = localStorage;
+    this._sessionStorage = new Common.SettingsStorage({});
 
     this._eventSupport = new Common.Object();
     /** @type {!Map<string, !Common.Setting>} */
@@ -54,13 +55,27 @@ Common.Settings = class {
   _registerModuleSetting(extension) {
     var descriptor = extension.descriptor();
     var settingName = descriptor['settingName'];
-    var settingType = descriptor['settingType'];
+    var isRegex = descriptor['settingType'] === 'regex';
     var defaultValue = descriptor['defaultValue'];
-    var isLocal = !!descriptor['local'];
-    var setting = settingType === 'regex' ? this.createRegExpSetting(settingName, defaultValue, undefined, isLocal) :
-                                            this.createSetting(settingName, defaultValue, isLocal);
+    var storageType;
+    switch (descriptor['storageType']) {
+      case ('local'):
+        storageType = Common.SettingStorageType.Local;
+        break;
+      case ('session'):
+        storageType = Common.SettingStorageType.Session;
+        break;
+      case ('global'):
+        storageType = Common.SettingStorageType.Global;
+        break;
+      default:
+        storageType = Common.SettingStorageType.Global;
+    }
+    var setting = isRegex ? this.createRegExpSetting(settingName, defaultValue, undefined, storageType) :
+                            this.createSetting(settingName, defaultValue, storageType);
     if (descriptor['title'])
       setting.setTitle(descriptor['title']);
+    setting._extension = extension;
     this._moduleSettings.set(settingName, setting);
   }
 
@@ -89,15 +104,13 @@ Common.Settings = class {
   /**
    * @param {string} key
    * @param {*} defaultValue
-   * @param {boolean=} isLocal
+   * @param {!Common.SettingStorageType=} storageType
    * @return {!Common.Setting}
    */
-  createSetting(key, defaultValue, isLocal) {
-    if (!this._registry.get(key)) {
-      this._registry.set(
-          key, new Common.Setting(
-                   this, key, defaultValue, this._eventSupport, isLocal ? this._localStorage : this._settingsStorage));
-    }
+  createSetting(key, defaultValue, storageType) {
+    var storage = this._storageFromType(storageType);
+    if (!this._registry.get(key))
+      this._registry.set(key, new Common.Setting(this, key, defaultValue, this._eventSupport, storage));
     return /** @type {!Common.Setting} */ (this._registry.get(key));
   }
 
@@ -107,31 +120,47 @@ Common.Settings = class {
    * @return {!Common.Setting}
    */
   createLocalSetting(key, defaultValue) {
-    return this.createSetting(key, defaultValue, true);
+    return this.createSetting(key, defaultValue, Common.SettingStorageType.Local);
   }
 
   /**
    * @param {string} key
    * @param {string} defaultValue
    * @param {string=} regexFlags
-   * @param {boolean=} isLocal
+   * @param {!Common.SettingStorageType=} storageType
    * @return {!Common.RegExpSetting}
    */
-  createRegExpSetting(key, defaultValue, regexFlags, isLocal) {
+  createRegExpSetting(key, defaultValue, regexFlags, storageType) {
     if (!this._registry.get(key)) {
       this._registry.set(
-          key, new Common.RegExpSetting(
-                   this, key, defaultValue, this._eventSupport, isLocal ? this._localStorage : this._settingsStorage,
-                   regexFlags));
+          key,
+          new Common.RegExpSetting(
+              this, key, defaultValue, this._eventSupport, this._storageFromType(storageType), regexFlags));
     }
     return /** @type {!Common.RegExpSetting} */ (this._registry.get(key));
   }
 
   clearAll() {
-    this._settingsStorage.removeAll();
+    this._globalStorage.removeAll();
     this._localStorage.removeAll();
     var versionSetting = Common.settings.createSetting(Common.VersionController._currentVersionName, 0);
     versionSetting.set(Common.VersionController.currentVersion);
+  }
+
+  /**
+   * @param {!Common.SettingStorageType=} storageType
+   * @return {!Common.SettingsStorage}
+   */
+  _storageFromType(storageType) {
+    switch (storageType) {
+      case (Common.SettingStorageType.Local):
+        return this._localStorage;
+      case (Common.SettingStorageType.Session):
+        return this._sessionStorage;
+      case (Common.SettingStorageType.Global):
+        return this._globalStorage;
+    }
+    return this._globalStorage;
   }
 };
 
@@ -235,6 +264,7 @@ Common.Setting = class {
     this._storage = storage;
     /** @type {string} */
     this._title = '';
+    this._extension = null;
   }
 
   /**
@@ -311,6 +341,13 @@ Common.Setting = class {
     this._settings._registry.delete(this._name);
     this._settings._moduleSettings.delete(this._name);
     this._storage.remove(this._name);
+  }
+
+  /**
+   * @return {?Runtime.Extension}
+   */
+  extension() {
+    return this._extension;
   }
 
   /**
@@ -738,6 +775,14 @@ Common.VersionController = class {
     oldSetting.remove();
   }
 
+  _updateVersionFrom24To25() {
+    var defaultColumns = {status: true, type: true, initiator: true, size: true, time: true};
+    var networkLogColumnsSetting = Common.settings.createSetting('networkLogColumns', defaultColumns);
+    var columns = networkLogColumnsSetting.get();
+    delete columns.product;
+    networkLogColumnsSetting.set(columns);
+  }
+
   _migrateSettingsFromLocalStorage() {
     // This step migrates all the settings except for the ones below into the browser profile.
     var localSettings = new Set([
@@ -753,7 +798,7 @@ Common.VersionController = class {
         continue;
       var value = window.localStorage[key];
       window.localStorage.removeItem(key);
-      Common.settings._settingsStorage[key] = value;
+      Common.settings._globalStorage[key] = value;
     }
   }
 
@@ -770,12 +815,21 @@ Common.VersionController = class {
 };
 
 Common.VersionController._currentVersionName = 'inspectorVersion';
-Common.VersionController.currentVersion = 24;
+Common.VersionController.currentVersion = 25;
 
 /**
  * @type {!Common.Settings}
  */
 Common.settings;
+
+/**
+ * @enum {symbol}
+ */
+Common.SettingStorageType = {
+  Global: Symbol('Global'),
+  Local: Symbol('Local'),
+  Session: Symbol('Session')
+};
 
 /**
  * @param {string} settingName

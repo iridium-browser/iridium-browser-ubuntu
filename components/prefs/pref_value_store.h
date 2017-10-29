@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "base/callback.h"
@@ -16,7 +17,9 @@
 #include "components/prefs/base_prefs_export.h"
 #include "components/prefs/pref_store.h"
 
+class PersistentPrefStore;
 class PrefNotifier;
+class PrefRegistry;
 class PrefStore;
 
 // The PrefValueStore manages various sources of values for Preferences
@@ -29,6 +32,56 @@ class PrefStore;
 class COMPONENTS_PREFS_EXPORT PrefValueStore {
  public:
   typedef base::Callback<void(const std::string&)> PrefChangedCallback;
+
+  // Delegate used to observe certain events in the |PrefValueStore|'s lifetime.
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+
+    // Called by the PrefValueStore constructor with the PrefStores passed to
+    // it.
+    virtual void Init(PrefStore* managed_prefs,
+                      PrefStore* supervised_user_prefs,
+                      PrefStore* extension_prefs,
+                      PrefStore* command_line_prefs,
+                      PrefStore* user_prefs,
+                      PrefStore* recommended_prefs,
+                      PrefStore* default_prefs,
+                      PrefNotifier* pref_notifier) = 0;
+
+    virtual void InitIncognitoUnderlay(
+        PersistentPrefStore* incognito_user_prefs_underlay) = 0;
+
+    virtual void InitPrefRegistry(PrefRegistry* pref_registry) = 0;
+
+    // Called whenever PrefValueStore::UpdateCommandLinePrefStore is called,
+    // with the same argument.
+    virtual void UpdateCommandLinePrefStore(PrefStore* command_line_prefs) = 0;
+  };
+
+  // PrefStores must be listed here in order from highest to lowest priority.
+  //   MANAGED contains all managed preference values that are provided by
+  //      mandatory policies (e.g. Windows Group Policy or cloud policy).
+  //   SUPERVISED_USER contains preferences that are valid for supervised users.
+  //   EXTENSION contains preference values set by extensions.
+  //   COMMAND_LINE contains preference values set by command-line switches.
+  //   USER contains all user-set preference values.
+  //   RECOMMENDED contains all preferences that are provided by recommended
+  //      policies.
+  //   DEFAULT contains all application default preference values.
+  enum PrefStoreType {
+    // INVALID_STORE is not associated with an actual PrefStore but used as
+    // an invalid marker, e.g. as a return value.
+    INVALID_STORE = -1,
+    MANAGED_STORE = 0,
+    SUPERVISED_USER_STORE,
+    EXTENSION_STORE,
+    COMMAND_LINE_STORE,
+    USER_STORE,
+    RECOMMENDED_STORE,
+    DEFAULT_STORE,
+    PREF_STORE_TYPE_MAX = DEFAULT_STORE
+  };
 
   // In decreasing order of precedence:
   //   |managed_prefs| contains all preferences from mandatory policies.
@@ -52,19 +105,24 @@ class COMPONENTS_PREFS_EXPORT PrefValueStore {
                  PrefStore* user_prefs,
                  PrefStore* recommended_prefs,
                  PrefStore* default_prefs,
-                 PrefNotifier* pref_notifier);
+                 PrefNotifier* pref_notifier,
+                 std::unique_ptr<Delegate> delegate = nullptr);
   virtual ~PrefValueStore();
 
   // Creates a clone of this PrefValueStore with PrefStores overwritten
   // by the parameters passed, if unequal NULL.
-  PrefValueStore* CloneAndSpecialize(PrefStore* managed_prefs,
-                                     PrefStore* supervised_user_prefs,
-                                     PrefStore* extension_prefs,
-                                     PrefStore* command_line_prefs,
-                                     PrefStore* user_prefs,
-                                     PrefStore* recommended_prefs,
-                                     PrefStore* default_prefs,
-                                     PrefNotifier* pref_notifier);
+  //
+  // The new PrefValueStore is passed the |delegate| in its constructor.
+  PrefValueStore* CloneAndSpecialize(
+      PrefStore* managed_prefs,
+      PrefStore* supervised_user_prefs,
+      PrefStore* extension_prefs,
+      PrefStore* command_line_prefs,
+      PrefStore* user_prefs,
+      PrefStore* recommended_prefs,
+      PrefStore* default_prefs,
+      PrefNotifier* pref_notifier,
+      std::unique_ptr<Delegate> delegate = nullptr);
 
   // A PrefValueStore can have exactly one callback that is directly
   // notified of preferences changing in the store. This does not
@@ -118,30 +176,6 @@ class COMPONENTS_PREFS_EXPORT PrefValueStore {
   void UpdateCommandLinePrefStore(PrefStore* command_line_prefs);
 
  private:
-  // PrefStores must be listed here in order from highest to lowest priority.
-  //   MANAGED contains all managed preference values that are provided by
-  //      mandatory policies (e.g. Windows Group Policy or cloud policy).
-  //   SUPERVISED_USER contains preferences that are valid for supervised users.
-  //   EXTENSION contains preference values set by extensions.
-  //   COMMAND_LINE contains preference values set by command-line switches.
-  //   USER contains all user-set preference values.
-  //   RECOMMENDED contains all preferences that are provided by recommended
-  //      policies.
-  //   DEFAULT contains all application default preference values.
-  enum PrefStoreType {
-    // INVALID_STORE is not associated with an actual PrefStore but used as
-    // an invalid marker, e.g. as a return value.
-    INVALID_STORE = -1,
-    MANAGED_STORE = 0,
-    SUPERVISED_USER_STORE,
-    EXTENSION_STORE,
-    COMMAND_LINE_STORE,
-    USER_STORE,
-    RECOMMENDED_STORE,
-    DEFAULT_STORE,
-    PREF_STORE_TYPE_MAX = DEFAULT_STORE
-  };
-
   // Keeps a PrefStore reference on behalf of the PrefValueStore and monitors
   // the PrefStore for changes, forwarding notifications to PrefValueStore. This
   // indirection is here for the sake of disambiguating notifications from the
@@ -254,7 +288,22 @@ class COMPONENTS_PREFS_EXPORT PrefValueStore {
   // True if not all of the PrefStores were initialized successfully.
   bool initialization_failed_;
 
+  // Might be null.
+  std::unique_ptr<Delegate> delegate_;
+
   DISALLOW_COPY_AND_ASSIGN(PrefValueStore);
 };
+
+namespace std {
+
+template <>
+struct hash<PrefValueStore::PrefStoreType> {
+  size_t operator()(PrefValueStore::PrefStoreType type) const {
+    return std::hash<
+        std::underlying_type<PrefValueStore::PrefStoreType>::type>()(type);
+  }
+};
+
+}  // namespace std
 
 #endif  // COMPONENTS_PREFS_PREF_VALUE_STORE_H_

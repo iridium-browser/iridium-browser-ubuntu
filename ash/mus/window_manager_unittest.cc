@@ -6,10 +6,17 @@
 #include <memory>
 #include <vector>
 
+#include "ash/mus/window_manager.h"
+#include "ash/mus/window_manager_application.h"
 #include "ash/public/interfaces/constants.mojom.h"
+#include "ash/session/test_session_controller_client.h"
+#include "ash/shell.h"
+#include "ash/test/ash_test_base.h"
+#include "ash/test/ash_test_helper.h"
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "components/session_manager/session_manager_types.h"
 #include "services/service_manager/public/cpp/service_test.h"
 #include "services/ui/public/cpp/property_type_converters.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
@@ -18,6 +25,7 @@
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/mus/window_tree_client_delegate.h"
 #include "ui/aura/mus/window_tree_host_mus.h"
+#include "ui/aura/mus/window_tree_host_mus_init_params.h"
 #include "ui/aura/test/env_test_helper.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
@@ -55,27 +63,34 @@ class WindowTreeClientDelegate : public aura::WindowTreeClientDelegate {
   }
 
   base::RunLoop run_loop_;
-  wm::WMState wm_state_;
+  ::wm::WMState wm_state_;
   aura::PropertyConverter property_converter_;
   std::unique_ptr<aura::WindowTreeHostMus> window_tree_host_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowTreeClientDelegate);
 };
 
-class WindowManagerTest : public service_manager::test::ServiceTest {
+class WindowManagerServiceTest : public service_manager::test::ServiceTest {
  public:
-  WindowManagerTest() : service_manager::test::ServiceTest("mash_unittests") {}
-  ~WindowManagerTest() override {}
+  WindowManagerServiceTest()
+      : service_manager::test::ServiceTest("mash_unittests") {}
+  ~WindowManagerServiceTest() override {}
+
+  void TearDown() override {
+    // Unset the screen installed by the test.
+    display::Screen::SetScreenInstance(nullptr);
+    service_manager::test::ServiceTest::TearDown();
+  }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(WindowManagerTest);
+  DISALLOW_COPY_AND_ASSIGN(WindowManagerServiceTest);
 };
 
 void OnEmbed(bool success) {
   ASSERT_TRUE(success);
 }
 
-TEST_F(WindowManagerTest, OpenWindow) {
+TEST_F(WindowManagerServiceTest, OpenWindow) {
   display::ScreenBase screen;
   screen.display_list().AddDisplay(
       display::Display(1, gfx::Rect(0, 0, 200, 200)),
@@ -84,18 +99,20 @@ TEST_F(WindowManagerTest, OpenWindow) {
 
   WindowTreeClientDelegate window_tree_delegate;
 
-  connector()->Connect(mojom::kServiceName);
+  connector()->StartService(mojom::kServiceName);
 
   // Connect to mus and create a new top level window. The request goes to
   // |ash|, but is async.
-  aura::WindowTreeClient client(connector(), &window_tree_delegate);
+  aura::WindowTreeClient client(connector(), &window_tree_delegate, nullptr,
+                                nullptr, nullptr, false);
   client.ConnectViaWindowTreeFactory();
   aura::test::EnvTestHelper().SetWindowTreeClient(&client);
   std::map<std::string, std::vector<uint8_t>> properties;
   properties[ui::mojom::WindowManager::kWindowType_InitProperty] =
       mojo::ConvertTo<std::vector<uint8_t>>(
           static_cast<int32_t>(ui::mojom::WindowType::WINDOW));
-  aura::WindowTreeHostMus window_tree_host_mus(&client, &properties);
+  aura::WindowTreeHostMus window_tree_host_mus(
+      aura::CreateInitParamsForTopLevel(&client, std::move(properties)));
   window_tree_host_mus.InitHost();
   aura::Window* child_window = new aura::Window(nullptr);
   child_window->Init(ui::LAYER_NOT_DRAWN);
@@ -107,10 +124,29 @@ TEST_F(WindowManagerTest, OpenWindow) {
   auto tree_client_request = MakeRequest(&tree_client);
   client.Embed(child_window, std::move(tree_client), 0u, base::Bind(&OnEmbed));
   aura::WindowTreeClient child_client(connector(), &window_tree_delegate,
-                                      nullptr, std::move(tree_client_request));
+                                      nullptr, std::move(tree_client_request),
+                                      nullptr, false);
   window_tree_delegate.WaitForEmbed();
   ASSERT_TRUE(!child_client.GetRoots().empty());
   window_tree_delegate.DestroyWindowTreeHost();
+}
+
+using WindowManagerTest = AshTestBase;
+
+TEST_F(WindowManagerTest, SystemModalLockIsntReparented) {
+  ash_test_helper()->test_session_controller_client()->SetSessionState(
+      session_manager::SessionState::LOCKED);
+  std::unique_ptr<aura::Window> window = CreateTestWindow();
+  aura::Window* system_modal_container = Shell::GetContainer(
+      Shell::GetPrimaryRootWindow(), kShellWindowId_LockSystemModalContainer);
+  system_modal_container->AddChild(window.get());
+  aura::WindowManagerDelegate* window_manager_delegate =
+      ash_test_helper()->window_manager_app()->window_manager();
+  window_manager_delegate->OnWmSetModalType(window.get(),
+                                            ui::MODAL_TYPE_SYSTEM);
+  ASSERT_TRUE(window->parent());
+  // Setting to system modal should not reparent.
+  EXPECT_EQ(kShellWindowId_LockSystemModalContainer, window->parent()->id());
 }
 
 }  // namespace mus

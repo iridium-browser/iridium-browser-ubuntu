@@ -12,6 +12,8 @@ blink_modules_sources("accessibility") {
     "AXARIAGridCell.h",
     "AXARIAGridRow.cpp",
     "AXARIAGridRow.h",
+    "AXEnums.cpp",
+    "AXEnums.h",
     "AXImageMapLink.cpp",
     "AXImageMapLink.h",
     "AXInlineTextBox.cpp",

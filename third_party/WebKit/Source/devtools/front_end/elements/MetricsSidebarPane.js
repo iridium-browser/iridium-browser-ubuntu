@@ -32,6 +32,7 @@
 Elements.MetricsSidebarPane = class extends Elements.ElementsSidebarPane {
   constructor() {
     super();
+    this.registerRequiredCSS('elements/metricsSidebarPane.css');
 
     /** @type {?SDK.CSSStyleDeclaration} */
     this._inlineStyle = null;
@@ -52,7 +53,7 @@ Elements.MetricsSidebarPane = class extends Elements.ElementsSidebarPane {
     var node = this.node();
     var cssModel = this.cssModel();
     if (!node || node.nodeType() !== Node.ELEMENT_NODE || !cssModel) {
-      this.element.removeChildren();
+      this.contentElement.removeChildren();
       return Promise.resolve();
     }
 
@@ -124,7 +125,7 @@ Elements.MetricsSidebarPane = class extends Elements.ElementsSidebarPane {
       this.node().highlight(mode);
     } else {
       delete this._highlightMode;
-      SDK.DOMModel.hideDOMNodeHighlight();
+      SDK.OverlayModel.hideDOMNodeHighlight();
     }
 
     for (var i = 0; this._boxElements && i < this._boxElements.length; ++i) {
@@ -294,8 +295,8 @@ Elements.MetricsSidebarPane = class extends Elements.ElementsSidebarPane {
 
     metricsElement.appendChild(previousBox);
     metricsElement.addEventListener('mouseover', this._highlightDOMNode.bind(this, false, 'all'), false);
-    this.element.removeChildren();
-    this.element.appendChild(metricsElement);
+    this.contentElement.removeChildren();
+    this.contentElement.appendChild(metricsElement);
   }
 
   /**

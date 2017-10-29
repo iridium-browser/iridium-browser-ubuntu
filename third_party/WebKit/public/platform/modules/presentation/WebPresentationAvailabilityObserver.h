@@ -7,6 +7,7 @@
 
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebURL.h"
+#include "public/platform/modules/presentation/presentation.mojom-blink.h"
 
 namespace blink {
 
@@ -21,9 +22,9 @@ class BLINK_PLATFORM_EXPORT WebPresentationAvailabilityObserver {
  public:
   virtual ~WebPresentationAvailabilityObserver() = default;
 
-  virtual void availabilityChanged(bool) = 0;
+  virtual void AvailabilityChanged(blink::mojom::ScreenAvailability) = 0;
 
-  virtual const WebVector<WebURL>& urls() const = 0;
+  virtual const WebVector<WebURL>& Urls() const = 0;
 };
 
 }  // namespace blink

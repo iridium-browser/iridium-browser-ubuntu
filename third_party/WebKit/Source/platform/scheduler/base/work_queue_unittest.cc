@@ -20,13 +20,12 @@ namespace {
 void NopTask() {}
 }
 
-class WorkQueueTest : public testing::Test {
+class WorkQueueTest : public ::testing::Test {
  public:
   void SetUp() override {
-    time_domain_.reset(new RealTimeDomain(""));
-    task_queue_ = make_scoped_refptr(
-        new TaskQueueImpl(nullptr, time_domain_.get(),
-                          TaskQueue::Spec(TaskQueue::QueueType::TEST), "", ""));
+    time_domain_.reset(new RealTimeDomain());
+    task_queue_ = base::MakeUnique<TaskQueueImpl>(nullptr, time_domain_.get(),
+                                                  TaskQueue::Spec("test"));
 
     work_queue_.reset(new WorkQueue(task_queue_.get(), "test",
                                     WorkQueue::QueueType::IMMEDIATE));
@@ -45,10 +44,10 @@ class WorkQueueTest : public testing::Test {
   }
 
   std::unique_ptr<RealTimeDomain> time_domain_;
-  scoped_refptr<TaskQueueImpl> task_queue_;
+  std::unique_ptr<TaskQueueImpl> task_queue_;
   std::unique_ptr<WorkQueue> work_queue_;
   std::unique_ptr<WorkQueueSets> work_queue_sets_;
-  std::unique_ptr<WTF::Deque<TaskQueueImpl::Task>> incoming_queue_;
+  std::unique_ptr<TaskQueueImpl::TaskDeque> incoming_queue_;
 };
 
 TEST_F(WorkQueueTest, Empty) {

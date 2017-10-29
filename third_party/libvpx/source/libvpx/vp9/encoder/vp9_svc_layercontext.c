@@ -36,12 +36,15 @@ void vp9_init_layer_context(VP9_COMP *const cpi) {
   svc->scaled_temp_is_alloc = 0;
   svc->scaled_one_half = 0;
   svc->current_superframe = 0;
+  svc->non_reference_frame = 0;
   for (i = 0; i < REF_FRAMES; ++i) svc->ref_frame_index[i] = -1;
   for (sl = 0; sl < oxcf->ss_number_layers; ++sl) {
-    cpi->svc.ext_frame_flags[sl] = 0;
-    cpi->svc.ext_lst_fb_idx[sl] = 0;
-    cpi->svc.ext_gld_fb_idx[sl] = 1;
-    cpi->svc.ext_alt_fb_idx[sl] = 2;
+    svc->ext_frame_flags[sl] = 0;
+    svc->ext_lst_fb_idx[sl] = 0;
+    svc->ext_gld_fb_idx[sl] = 1;
+    svc->ext_alt_fb_idx[sl] = 2;
+    svc->downsample_filter_type[sl] = EIGHTTAP;
+    svc->downsample_filter_phase[sl] = 0;  // Set to 8 for averaging filter.
   }
 
   if (cpi->oxcf.error_resilient_mode == 0 && cpi->oxcf.pass == 2) {
@@ -349,6 +352,7 @@ void vp9_save_layer_context(VP9_COMP *const cpi) {
   }
 }
 
+#if !CONFIG_REALTIME_ONLY
 void vp9_init_second_pass_spatial_svc(VP9_COMP *cpi) {
   SVC *const svc = &cpi->svc;
   int i;
@@ -364,6 +368,7 @@ void vp9_init_second_pass_spatial_svc(VP9_COMP *cpi) {
   }
   svc->spatial_layer_id = 0;
 }
+#endif  // !CONFIG_REALTIME_ONLY
 
 void vp9_inc_frame_in_layer(VP9_COMP *const cpi) {
   LAYER_CONTEXT *const lc =
@@ -650,19 +655,35 @@ int vp9_one_pass_cbr_svc_start_layer(VP9_COMP *const cpi) {
                        lc->scaling_factor_num, lc->scaling_factor_den, &width,
                        &height);
 
+  // For low resolutions: set phase of the filter = 8 (for symmetric averaging
+  // filter), use bilinear for now.
+  if (width <= 320 && height <= 240) {
+    cpi->svc.downsample_filter_type[cpi->svc.spatial_layer_id] = BILINEAR;
+    cpi->svc.downsample_filter_phase[cpi->svc.spatial_layer_id] = 8;
+  }
+
   // The usage of use_base_mv assumes down-scale of 2x2. For now, turn off use
-  // of base motion vectors if spatial scale factors for any layers are not 2.
+  // of base motion vectors if spatial scale factors for any layers are not 2,
+  // keep the case of 3 spatial layers with scale factor of 4x4 for base layer.
   // TODO(marpan): Fix this to allow for use_base_mv for scale factors != 2.
   if (cpi->svc.number_spatial_layers > 1) {
     int sl;
     for (sl = 0; sl < cpi->svc.number_spatial_layers - 1; ++sl) {
       lc = &cpi->svc.layer_context[sl * cpi->svc.number_temporal_layers +
                                    cpi->svc.temporal_layer_id];
-      if (lc->scaling_factor_num != lc->scaling_factor_den >> 1) {
+      if ((lc->scaling_factor_num != lc->scaling_factor_den >> 1) &&
+          !(lc->scaling_factor_num == lc->scaling_factor_den >> 2 && sl == 0 &&
+            cpi->svc.number_spatial_layers == 3)) {
         cpi->svc.use_base_mv = 0;
         break;
       }
     }
+  }
+
+  cpi->svc.non_reference_frame = 0;
+  if (cpi->common.frame_type != KEY_FRAME && !cpi->ext_refresh_last_frame &&
+      !cpi->ext_refresh_golden_frame && !cpi->ext_refresh_alt_ref_frame) {
+    cpi->svc.non_reference_frame = 1;
   }
 
   if (vp9_set_size_literal(cpi, width, height) != 0)

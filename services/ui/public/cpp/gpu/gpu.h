@@ -13,14 +13,13 @@
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
-#include "cc/output/context_provider.h"
+#include "components/viz/common/gpu/context_provider.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "services/ui/public/cpp/gpu/client_gpu_memory_buffer_manager.h"
 #include "services/ui/public/interfaces/gpu.mojom.h"
 
 namespace service_manager {
 class Connector;
-class InterfaceProvider;
 }
 
 namespace ui {
@@ -39,13 +38,16 @@ class Gpu : public gpu::GpuChannelHostFactory,
   // created and used.
   static std::unique_ptr<Gpu> Create(
       service_manager::Connector* connector,
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner = nullptr);
-  static std::unique_ptr<Gpu> Create(
-      service_manager::InterfaceProvider*,
+      const std::string& service_name,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner = nullptr);
 
-  scoped_refptr<cc::ContextProvider> CreateContextProvider(
+  scoped_refptr<viz::ContextProvider> CreateContextProvider(
       scoped_refptr<gpu::GpuChannelHost> gpu_channel);
+
+  void CreateJpegDecodeAccelerator(
+      media::mojom::GpuJpegDecodeAcceleratorRequest jda_request);
+  void CreateVideoEncodeAccelerator(
+      media::mojom::VideoEncodeAcceleratorRequest vea_request);
 
   // gpu::GpuChannelEstablishFactory:
   void EstablishGpuChannel(
@@ -54,10 +56,10 @@ class Gpu : public gpu::GpuChannelHostFactory,
   gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
 
  private:
-  friend struct base::DefaultSingletonTraits<Gpu>;
+  friend class GpuTest;
 
-  Gpu(service_manager::Connector* connector,
-      service_manager::InterfaceProvider* provider,
+  using GpuPtrFactory = base::RepeatingCallback<mojom::GpuPtr(void)>;
+  Gpu(GpuPtrFactory factory,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   scoped_refptr<gpu::GpuChannelHost> GetGpuChannel();
@@ -73,8 +75,7 @@ class Gpu : public gpu::GpuChannelHostFactory,
 
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
-  service_manager::Connector* connector_;
-  service_manager::InterfaceProvider* interface_provider_;
+  GpuPtrFactory factory_;
   base::WaitableEvent shutdown_event_;
   std::unique_ptr<base::Thread> io_thread_;
   std::unique_ptr<ClientGpuMemoryBufferManager> gpu_memory_buffer_manager_;

@@ -44,26 +44,21 @@ gpu::CommandBufferId CommandBufferProxyID(int channel_id, int32_t route_id) {
       (static_cast<uint64_t>(channel_id) << 32) | route_id);
 }
 
+int GetChannelID(gpu::CommandBufferId command_buffer_id) {
+  return static_cast<int>(command_buffer_id.GetUnsafeValue() >> 32);
+}
+
 }  // namespace
 
 CommandBufferProxyImpl::CommandBufferProxyImpl(int channel_id,
                                                int32_t route_id,
                                                int32_t stream_id)
-    : lock_(nullptr),
-      gpu_control_client_(nullptr),
-      command_buffer_id_(CommandBufferProxyID(channel_id, route_id)),
+    : command_buffer_id_(CommandBufferProxyID(channel_id, route_id)),
+      channel_id_(channel_id),
       route_id_(route_id),
       stream_id_(stream_id),
-      flush_count_(0),
-      last_put_offset_(-1),
-      last_barrier_put_offset_(-1),
-      next_fence_sync_release_(1),
-      flushed_fence_sync_release_(0),
-      verified_fence_sync_release_(0),
-      next_signal_id_(0),
       weak_this_(AsWeakPtr()) {
   DCHECK(route_id);
-  DCHECK_NE(stream_id, GPU_STREAM_INVALID);
 }
 
 // static
@@ -72,7 +67,7 @@ std::unique_ptr<CommandBufferProxyImpl> CommandBufferProxyImpl::Create(
     gpu::SurfaceHandle surface_handle,
     CommandBufferProxyImpl* share_group,
     int32_t stream_id,
-    gpu::GpuStreamPriority stream_priority,
+    gpu::SchedulingPriority stream_priority,
     const gpu::gles2::ContextCreationAttribHelper& attribs,
     const GURL& active_url,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
@@ -265,7 +260,8 @@ void CommandBufferProxyImpl::Flush(int32_t put_offset) {
     uint32_t highest_verified_flush_id;
     const uint32_t flush_id = channel_->OrderingBarrier(
         route_id_, stream_id_, put_offset, ++flush_count_, latency_info_,
-        put_offset_changed, true, &highest_verified_flush_id);
+        pending_sync_token_fences_, put_offset_changed, true,
+        &highest_verified_flush_id);
     if (put_offset_changed) {
       DCHECK(flush_id);
       const uint64_t fence_sync_release = next_fence_sync_release_ - 1;
@@ -278,8 +274,10 @@ void CommandBufferProxyImpl::Flush(int32_t put_offset) {
     CleanupFlushedReleases(highest_verified_flush_id);
   }
 
-  if (put_offset_changed)
+  if (put_offset_changed) {
     latency_info_.clear();
+    pending_sync_token_fences_.clear();
+  }
 }
 
 void CommandBufferProxyImpl::OrderingBarrier(int32_t put_offset) {
@@ -298,7 +296,8 @@ void CommandBufferProxyImpl::OrderingBarrier(int32_t put_offset) {
     uint32_t highest_verified_flush_id;
     const uint32_t flush_id = channel_->OrderingBarrier(
         route_id_, stream_id_, put_offset, ++flush_count_, latency_info_,
-        put_offset_changed, false, &highest_verified_flush_id);
+        pending_sync_token_fences_, put_offset_changed, false,
+        &highest_verified_flush_id);
 
     if (put_offset_changed) {
       DCHECK(flush_id);
@@ -311,16 +310,10 @@ void CommandBufferProxyImpl::OrderingBarrier(int32_t put_offset) {
     }
     CleanupFlushedReleases(highest_verified_flush_id);
   }
-
-  if (put_offset_changed)
+  if (put_offset_changed) {
     latency_info_.clear();
-}
-
-void CommandBufferProxyImpl::SetLatencyInfo(
-    const std::vector<ui::LatencyInfo>& latency_info) {
-  CheckLock();
-  for (size_t i = 0; i < latency_info.size(); i++)
-    latency_info_.push_back(latency_info[i]);
+    pending_sync_token_fences_.clear();
+  }
 }
 
 void CommandBufferProxyImpl::SetSwapBuffersCompletionCallback(
@@ -377,6 +370,7 @@ gpu::CommandBuffer::State CommandBufferProxyImpl::WaitForTokenInRange(
 }
 
 gpu::CommandBuffer::State CommandBufferProxyImpl::WaitForGetOffsetInRange(
+    uint32_t set_get_buffer_count,
     int32_t start,
     int32_t end) {
   CheckLock();
@@ -392,14 +386,16 @@ gpu::CommandBuffer::State CommandBufferProxyImpl::WaitForGetOffsetInRange(
     return last_state_;
   }
   TryUpdateState();
-  if (!InRange(start, end, last_state_.get_offset) &&
+  if (((set_get_buffer_count != last_state_.set_get_buffer_count) ||
+       !InRange(start, end, last_state_.get_offset)) &&
       last_state_.error == gpu::error::kNoError) {
     gpu::CommandBuffer::State state;
-    if (Send(new GpuCommandBufferMsg_WaitForGetOffsetInRange(route_id_, start,
-                                                             end, &state)))
+    if (Send(new GpuCommandBufferMsg_WaitForGetOffsetInRange(
+            route_id_, set_get_buffer_count, start, end, &state)))
       SetStateFromSyncReply(state);
   }
-  if (!InRange(start, end, last_state_.get_offset) &&
+  if (((set_get_buffer_count != last_state_.set_get_buffer_count) ||
+       !InRange(start, end, last_state_.get_offset)) &&
       last_state_.error == gpu::error::kNoError) {
     LOG(ERROR) << "GPU state invalid after WaitForGetOffsetInRange.";
     OnGpuSyncReplyError();
@@ -415,6 +411,7 @@ void CommandBufferProxyImpl::SetGetBuffer(int32_t shm_id) {
 
   Send(new GpuCommandBufferMsg_SetGetBuffer(route_id_, shm_id));
   last_put_offset_ = -1;
+  last_barrier_put_offset_ = -1;
 }
 
 scoped_refptr<gpu::Buffer> CommandBufferProxyImpl::CreateTransferBuffer(
@@ -513,8 +510,8 @@ int32_t CommandBufferProxyImpl::CreateImage(ClientBuffer buffer,
     DCHECK_EQ(image_fence_sync, flushed_fence_sync_release_ + 1);
   }
 
-  DCHECK(gpu::IsGpuMemoryBufferFormatSupported(gpu_memory_buffer->GetFormat(),
-                                               capabilities_));
+  DCHECK(gpu::IsImageFromGpuMemoryBufferFormatSupported(
+      gpu_memory_buffer->GetFormat(), capabilities_));
   DCHECK(gpu::IsImageSizeValidForGpuMemoryBufferFormat(
       gfx::Size(width, height), gpu_memory_buffer->GetFormat()));
   DCHECK(gpu::IsImageFormatCompatibleWithGpuMemoryBufferFormat(
@@ -531,7 +528,7 @@ int32_t CommandBufferProxyImpl::CreateImage(ClientBuffer buffer,
   Send(new GpuCommandBufferMsg_CreateImage(route_id_, params));
 
   if (image_fence_sync) {
-    gpu::SyncToken sync_token(GetNamespaceID(), GetExtraCommandBufferData(),
+    gpu::SyncToken sync_token(GetNamespaceID(), GetStreamId(),
                               GetCommandBufferID(), image_fence_sync);
 
     // Force a synchronous IPC to validate sync token.
@@ -588,8 +585,13 @@ gpu::CommandBufferId CommandBufferProxyImpl::GetCommandBufferID() const {
   return command_buffer_id_;
 }
 
-int32_t CommandBufferProxyImpl::GetExtraCommandBufferData() const {
+int32_t CommandBufferProxyImpl::GetStreamId() const {
   return stream_id_;
+}
+
+void CommandBufferProxyImpl::FlushOrderingBarrierOnStream(int32_t stream_id) {
+  if (channel_)
+    channel_->FlushPendingStream(stream_id);
 }
 
 uint64_t CommandBufferProxyImpl::GenerateFenceSyncRelease() {
@@ -654,26 +656,38 @@ void CommandBufferProxyImpl::SignalSyncToken(const gpu::SyncToken& sync_token,
   signal_tasks_.insert(std::make_pair(signal_id, callback));
 }
 
+void CommandBufferProxyImpl::WaitSyncTokenHint(
+    const gpu::SyncToken& sync_token) {
+  CheckLock();
+  base::AutoLock lock(last_state_lock_);
+  if (last_state_.error != gpu::error::kNoError)
+    return;
+
+  pending_sync_token_fences_.push_back(sync_token);
+}
+
 bool CommandBufferProxyImpl::CanWaitUnverifiedSyncToken(
-    const gpu::SyncToken* sync_token) {
+    const gpu::SyncToken& sync_token) {
   // Can only wait on an unverified sync token if it is from the same channel.
-  const uint64_t token_channel =
-      sync_token->command_buffer_id().GetUnsafeValue() >> 32;
-  const uint64_t channel = command_buffer_id_.GetUnsafeValue() >> 32;
-  if (sync_token->namespace_id() != gpu::CommandBufferNamespace::GPU_IO ||
-      token_channel != channel) {
+  int sync_token_channel_id = GetChannelID(sync_token.command_buffer_id());
+  if (sync_token.namespace_id() != gpu::CommandBufferNamespace::GPU_IO ||
+      sync_token_channel_id != channel_id_) {
     return false;
   }
 
   // If waiting on a different stream, flush pending commands on that stream.
-  const int32_t release_stream_id = sync_token->extra_data_field();
-  if (release_stream_id == gpu::GPU_STREAM_INVALID)
-    return false;
-
-  if (release_stream_id != stream_id_)
+  int32_t release_stream_id = sync_token.extra_data_field();
+  if (channel_ && release_stream_id != stream_id_)
     channel_->FlushPendingStream(release_stream_id);
 
   return true;
+}
+
+void CommandBufferProxyImpl::AddLatencyInfo(
+    const std::vector<ui::LatencyInfo>& latency_info) {
+  CheckLock();
+  for (size_t i = 0; i < latency_info.size(); i++)
+    latency_info_.push_back(latency_info[i]);
 }
 
 void CommandBufferProxyImpl::SignalQuery(uint32_t query,

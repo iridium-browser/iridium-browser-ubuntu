@@ -5,15 +5,19 @@
 #ifndef CSSTransformComponent_h
 #define CSSTransformComponent_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "core/css/CSSFunctionValue.h"
-#include "wtf/text/WTFString.h"
+#include "platform/bindings/ScriptWrappable.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
-class CSSMatrixComponent;
+class DOMMatrix;
 
+// CSSTransformComponent is the base class used for the representations of
+// the individual CSS transforms. They are combined in a CSSTransformValue
+// before they can be used as a value for properties like "transform".
+// See CSSTransformComponent.idl for more information about this class.
 class CORE_EXPORT CSSTransformComponent
     : public GarbageCollectedFinalized<CSSTransformComponent>,
       public ScriptWrappable {
@@ -22,41 +26,41 @@ class CORE_EXPORT CSSTransformComponent
 
  public:
   enum TransformComponentType {
-    MatrixType,
-    PerspectiveType,
-    RotationType,
-    ScaleType,
-    SkewType,
-    TranslationType,
-    Matrix3DType,
-    Rotation3DType,
-    Scale3DType,
-    Translation3DType
+    kMatrixType,
+    kPerspectiveType,
+    kRotationType,
+    kScaleType,
+    kSkewType,
+    kTranslationType,
   };
-
-  static CSSTransformComponent* fromCSSValue(const CSSValue&);
-
-  static bool is2DComponentType(TransformComponentType transformType) {
-    return transformType != Matrix3DType && transformType != PerspectiveType &&
-           transformType != Rotation3DType && transformType != Scale3DType &&
-           transformType != Translation3DType;
-  }
 
   virtual ~CSSTransformComponent() {}
 
-  virtual TransformComponentType type() const = 0;
+  // Blink-internal ways of creating CSSTransformComponents.
+  static CSSTransformComponent* FromCSSValue(const CSSValue&);
 
-  bool is2D() const { return is2DComponentType(type()); }
+  // Getters and setters for attributes defined in the IDL.
+  bool is2D() const { return is2D_; }
+  virtual void setIs2D(bool is2D) { is2D_ = is2D; }
+  virtual String toString() const {
+    const CSSValue* result = ToCSSValue();
+    // TODO(meade): Remove this once all the number and length types are
+    // rewritten.
+    return result ? result->CssText() : "";
+  }
 
-  String cssText() const { return toCSSValue()->cssText(); }
-
-  virtual CSSFunctionValue* toCSSValue() const = 0;
-  virtual CSSMatrixComponent* asMatrix() const = 0;
+  // Internal methods.
+  virtual TransformComponentType GetType() const = 0;
+  virtual CSSFunctionValue* ToCSSValue() const = 0;
+  virtual const DOMMatrix* AsMatrix() const = 0;
 
   DEFINE_INLINE_VIRTUAL_TRACE() {}
 
  protected:
-  CSSTransformComponent() = default;
+  CSSTransformComponent(bool is2D) : is2D_(is2D) {}
+
+ private:
+  bool is2D_;
 };
 
 }  // namespace blink

@@ -90,10 +90,6 @@ bool LogMessageHandler(int severity,
   return false;
 }
 
-void DumpWithoutCrashing() {
-  CRASHPAD_SIMULATE_CRASH();
-}
-
 void InitializeCrashpadImpl(bool initial_client,
                             const std::string& process_type,
                             bool embedded_handler) {
@@ -204,6 +200,12 @@ void InitializeCrashpadWithEmbeddedHandler(bool initial_client,
 }
 #endif  // OS_WIN
 
+crashpad::CrashpadClient& GetCrashpadClient() {
+  static crashpad::CrashpadClient* const client =
+      new crashpad::CrashpadClient();
+  return *client;
+}
+
 void SetUploadConsent(bool consent) {
   if (!g_database)
     return;
@@ -296,6 +298,10 @@ void RequestSingleCrashUpload(const std::string& local_id) {
   crashpad::UUID uuid;
   uuid.InitializeFromString(local_id);
   g_database->RequestUpload(uuid);
+}
+
+void DumpWithoutCrashing() {
+  CRASHPAD_SIMULATE_CRASH();
 }
 
 }  // namespace crash_reporter

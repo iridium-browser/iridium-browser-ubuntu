@@ -31,98 +31,29 @@
 #ifndef WebWindowFeatures_h
 #define WebWindowFeatures_h
 
-#include "../platform/WebCommon.h"
-#include "../platform/WebString.h"
-#include "../platform/WebVector.h"
-
-#if BLINK_IMPLEMENTATION
-#include "core/page/WindowFeatures.h"
-#endif
-
 namespace blink {
 
 struct WebWindowFeatures {
-  float x;
-  bool xSet;
-  float y;
-  bool ySet;
-  float width;
-  bool widthSet;
-  float height;
-  bool heightSet;
+  float x = 0;
+  bool x_set = false;
+  float y = 0;
+  bool y_set = false;
+  float width = 0;
+  bool width_set = false;
+  float height = 0;
+  bool height_set = false;
 
-  bool menuBarVisible;
-  bool statusBarVisible;
-  bool toolBarVisible;
-  bool locationBarVisible;
-  bool scrollbarsVisible;
-  bool resizable;
+  bool menu_bar_visible = true;
+  bool status_bar_visible = true;
+  // This can be set based on "locationbar" or "toolbar" in a window features
+  // string, we don't distinguish between the two.
+  bool tool_bar_visible = true;
+  bool scrollbars_visible = true;
+  bool resizable = true;
 
-  bool fullscreen;
-  bool dialog;
-  WebVector<WebString> additionalFeatures;
-
-  WebWindowFeatures()
-      : x(0),
-        xSet(false),
-        y(0),
-        ySet(false),
-        width(0),
-        widthSet(false),
-        height(0),
-        heightSet(false),
-        menuBarVisible(true),
-        statusBarVisible(true),
-        toolBarVisible(true),
-        locationBarVisible(true),
-        scrollbarsVisible(true),
-        resizable(true),
-        fullscreen(false),
-        dialog(false) {}
-
-#if BLINK_IMPLEMENTATION
-  WebWindowFeatures(const WindowFeatures& f)
-      : x(f.x),
-        xSet(f.xSet),
-        y(f.y),
-        ySet(f.ySet),
-        width(f.width),
-        widthSet(f.widthSet),
-        height(f.height),
-        heightSet(f.heightSet),
-        menuBarVisible(f.menuBarVisible),
-        statusBarVisible(f.statusBarVisible),
-        toolBarVisible(f.toolBarVisible),
-        locationBarVisible(f.locationBarVisible),
-        scrollbarsVisible(f.scrollbarsVisible),
-        resizable(f.resizable),
-        fullscreen(f.fullscreen),
-        dialog(f.dialog),
-        additionalFeatures(f.additionalFeatures) {}
-
-  operator WindowFeatures() const {
-    WindowFeatures result;
-    result.x = x;
-    result.xSet = xSet;
-    result.y = y;
-    result.ySet = ySet;
-    result.width = width;
-    result.widthSet = widthSet;
-    result.height = height;
-    result.heightSet = heightSet;
-    result.menuBarVisible = menuBarVisible;
-    result.statusBarVisible = statusBarVisible;
-    result.toolBarVisible = toolBarVisible;
-    result.locationBarVisible = locationBarVisible;
-    result.scrollbarsVisible = scrollbarsVisible;
-    result.resizable = resizable;
-    result.fullscreen = fullscreen;
-    result.dialog = dialog;
-    for (size_t i = 0; i < additionalFeatures.size(); ++i)
-      result.additionalFeatures.push_back(additionalFeatures[i]);
-    return result;
-  }
-#endif
+  bool noopener = false;
+  bool background = false;
+  bool persistent = false;
 };
 
 }  // namespace blink

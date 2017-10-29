@@ -12,8 +12,8 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/browser/translate_manager.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/common/translate_constants.h"
-#include "components/translate/core/common/translate_pref_names.h"
 #include "components/translate/core/common/translate_switches.h"
 #include "components/translate/ios/browser/ios_translate_driver.h"
 #import "components/translate/ios/browser/js_translate_manager.h"
@@ -27,11 +27,15 @@
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/testing/wait_util.h"
-#import "ios/web/public/test/http_server.h"
-#include "ios/web/public/test/http_server_util.h"
-#include "ios/web/public/test/response_providers/data_response_provider.h"
+#include "ios/web/public/test/http_server/data_response_provider.h"
+#import "ios/web/public/test/http_server/http_server.h"
+#include "ios/web/public/test/http_server/http_server_util.h"
 #include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -79,14 +83,15 @@ const char kMetaItContentLanguage[] =
     "<meta http-equiv=\"content-language\" content=\"it\">";
 
 // Various link components.
-const char kHttpServerDomain[] = "localhost";
+// TODO(crbug.com/729195): Re-write the hardcoded address.
+const char kHttpServerDomain[] = "127.0.0.1";
 const char kLanguagePath[] = "/languagepath/";
 const char kLinkPath[] = "/linkpath/";
 const char kSubresourcePath[] = "/subresourcepath/";
 const char kSomeLanguageUrl[] = "http://languagepath/?http=es";
 const char kFrenchPagePath[] = "/frenchpage/";
 const char kFrenchPageWithLinkPath[] = "/frenchpagewithlink/";
-const char kTranslateScriptPath[] = "/translatescript";
+const char kTranslateScriptPath[] = "/translatescript/";
 const char kTranslateScript[] = "Fake Translate Script";
 
 // Builds a HTML document with a French text and the given |html| and |meta|
@@ -288,8 +293,9 @@ using translate::LanguageDetectionController;
   [super setUp];
   // Creates a LanguageDetectionController::Callback. The callback is deleted in
   // tearDown.
-  LanguageDetectionController::Callback copyDetailsCallback = base::BindBlock(
-      ^(const LanguageDetectionController::DetectionDetails& details) {
+  LanguageDetectionController::Callback copyDetailsCallback =
+      base::BindBlockArc(^(
+          const LanguageDetectionController::DetectionDetails& details) {
         _language_detection_details.reset(
             new LanguageDetectionController::DetectionDetails(details));
       });
@@ -674,6 +680,16 @@ using translate::LanguageDetectionController;
   [[EarlGrey selectElementWithMatcher:switchOn]
       assertWithMatcher:grey_notNil()];
 
+  // Assert that Spanish to English translation is not enabled after tapping
+  // the switch (should only be saved when "Done" button is tapped).
+  GREYAssert(!translatePrefs->IsLanguagePairWhitelisted("es", "en"),
+             @"Translate Spanish is disabled");
+
+  // Tap the "Done" button to save the preference.
+  [[EarlGrey
+      selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabel(
+                                   @"Done")] performAction:grey_tap()];
+
   // Assert that Spanish to English translation is enabled.
   GREYAssert(translatePrefs->IsLanguagePairWhitelisted("es", "en"),
              @"Translate Spanish is disabled");
@@ -730,22 +746,22 @@ using translate::LanguageDetectionController;
       chrome_test_util::GetCurrentWebState());
   translate::IOSTranslateDriver* driver =
       static_cast<translate::IOSTranslateDriver*>(client->GetTranslateDriver());
-  base::scoped_nsobject<MockTranslateScriptManager> jsTranslateManager(
+  MockTranslateScriptManager* jsTranslateManager =
       [[MockTranslateScriptManager alloc]
-          initWithWebState:chrome_test_util::GetCurrentWebState()]);
+          initWithWebState:chrome_test_util::GetCurrentWebState()];
   driver->translate_controller()->SetJsTranslateManagerForTesting(
       jsTranslateManager);
 
   // Set up a fake URL for the translate script, to avoid hitting real servers.
   base::CommandLine& command_line = *base::CommandLine::ForCurrentProcess();
-  GURL translateScriptURL =
-      web::test::HttpServer::MakeUrl("http://translatescript");
+  GURL translateScriptURL = web::test::HttpServer::MakeUrl(
+      base::StringPrintf("http://%s", kTranslateScriptPath));
   command_line.AppendSwitchASCII(translate::switches::kTranslateScriptURL,
                                  translateScriptURL.spec().c_str());
 
   // Translate the page with the link.
-  GURL frenchPageURL =
-      web::test::HttpServer::MakeUrl("http://frenchpagewithlink");
+  GURL frenchPageURL = web::test::HttpServer::MakeUrl(
+      base::StringPrintf("http://%s", kFrenchPageWithLinkPath));
   [ChromeEarlGrey loadURL:frenchPageURL];
   [[EarlGrey
       selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabelId(
@@ -756,30 +772,25 @@ using translate::LanguageDetectionController;
   GREYAssert(testing::WaitUntilConditionOrTimeout(
                  testing::kWaitForJSCompletionTimeout,
                  ^{
-                   return jsTranslateManager.get().translateStatusChecked;
+                   return jsTranslateManager.translateStatusChecked;
                  }),
              @"Did not receive all translate status callbacks");
 
   // Check that the translation happened.
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewContainingText(
-                                          "Translated")]
-      assertWithMatcher:grey_notNil()];
+  [ChromeEarlGrey waitForWebViewContainingText:"Translated"];
 
   // Click on the link.
   [ChromeEarlGrey tapWebViewElementWithID:@"link"];
+  [ChromeEarlGrey waitForWebViewNotContainingText:"link"];
+
   GURL frenchPagePathURL = web::test::HttpServer::MakeUrl(
       base::StringPrintf("http://%s", kFrenchPagePath));
-  [[EarlGrey
-      selectElementWithMatcher:chrome_test_util::WebViewContainingText("link")]
-      assertWithMatcher:grey_nil()];
   [[EarlGrey selectElementWithMatcher:chrome_test_util::OmniboxText(
                                           frenchPagePathURL.GetContent())]
       assertWithMatcher:grey_notNil()];
 
   // Check that the auto-translation happened.
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::WebViewContainingText(
-                                          "Translated")]
-      assertWithMatcher:grey_notNil()];
+  [ChromeEarlGrey waitForWebViewContainingText:"Translated"];
 }
 
 #pragma mark - Utility methods

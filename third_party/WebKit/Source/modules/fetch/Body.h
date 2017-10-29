@@ -5,14 +5,14 @@
 #ifndef Body_h
 #define Body_h
 
-#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "modules/ModulesExport.h"
+#include "platform/bindings/ActiveScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -44,25 +44,28 @@ class MODULES_EXPORT Body : public GarbageCollected<Body>,
   ScriptPromise json(ScriptState*);
   ScriptPromise text(ScriptState*);
   ScriptValue body(ScriptState*);
-  virtual BodyStreamBuffer* bodyBuffer() = 0;
-  virtual const BodyStreamBuffer* bodyBuffer() const = 0;
+  virtual BodyStreamBuffer* BodyBuffer() = 0;
+  virtual const BodyStreamBuffer* BodyBuffer() const = 0;
 
   virtual bool bodyUsed();
-  bool isBodyLocked();
+  bool IsBodyLocked();
 
   // ScriptWrappable override.
-  bool hasPendingActivity() const override;
+  bool HasPendingActivity() const override;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() { ContextClient::trace(visitor); }
+  DEFINE_INLINE_VIRTUAL_TRACE() { ContextClient::Trace(visitor); }
 
  private:
-  virtual String mimeType() const = 0;
+  // TODO(e_hakkinen): Fix |MimeType()| to always contain parameters and
+  // remove |ContentType()|.
+  virtual String ContentType() const = 0;
+  virtual String MimeType() const = 0;
 
   // Body consumption algorithms will reject with a TypeError in a number of
   // error conditions. This method wraps those up into one call which returns
   // an empty ScriptPromise if the consumption may proceed, and a
   // ScriptPromise rejected with a TypeError if it ought to be blocked.
-  ScriptPromise rejectInvalidConsumption(ScriptState*);
+  ScriptPromise RejectInvalidConsumption(ScriptState*);
 };
 
 }  // namespace blink

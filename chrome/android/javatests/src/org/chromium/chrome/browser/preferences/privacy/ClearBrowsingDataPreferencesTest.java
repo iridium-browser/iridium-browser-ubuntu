@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.preferences.privacy;
 
 import android.content.Intent;
-import android.os.AsyncTask;
 import android.preference.CheckBoxPreference;
 import android.preference.Preference;
 import android.preference.PreferenceScreen;
@@ -18,11 +17,13 @@ import android.widget.ListView;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ShortcutHelper;
+import org.chromium.chrome.browser.browsing_data.ClearBrowsingDataTab;
 import org.chromium.chrome.browser.preferences.ButtonPreference;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.Preferences;
@@ -51,6 +52,8 @@ public class ClearBrowsingDataPreferencesTest
 
     @Override
     protected void setUp() throws Exception {
+        SigninTestUtil.setUpAuthForTest(getInstrumentation());
+
         super.setUp();
         mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
     }
@@ -59,6 +62,8 @@ public class ClearBrowsingDataPreferencesTest
     protected void tearDown() throws Exception {
         mTestServer.stopAndDestroyServer();
         super.tearDown();
+
+        SigninTestUtil.tearDownAuthForTest();
     }
 
     public ClearBrowsingDataPreferencesTest() {
@@ -67,7 +72,6 @@ public class ClearBrowsingDataPreferencesTest
 
     @Override
     public void startMainActivity() throws InterruptedException {
-        SigninTestUtil.setUpAuthForTest(getInstrumentation());
         startMainActivityOnBlankPage();
     }
 
@@ -119,14 +123,7 @@ public class ClearBrowsingDataPreferencesTest
      */
     @MediumTest
     public void testClearingHistoryClearsWebappScopesAndLaunchTimes() throws Exception {
-        AsyncTask<Void, Void, Intent> shortcutIntentTask = new AsyncTask<Void, Void, Intent>() {
-            @Override
-            protected Intent doInBackground(Void... nothing) {
-                return ShortcutHelper.createWebappShortcutIntentForTesting("id", "url");
-            }
-        };
-        final Intent shortcutIntent = shortcutIntentTask.execute().get();
-
+        Intent shortcutIntent = ShortcutHelper.createWebappShortcutIntentForTesting("id", "url");
         TestFetchStorageCallback callback = new TestFetchStorageCallback();
         WebappRegistry.getInstance().register("first", callback);
         callback.waitForCallback(0);
@@ -443,7 +440,7 @@ public class ClearBrowsingDataPreferencesTest
             @Override
             public void run() {
                 for (String origin : importantOrigins) {
-                    PrefServiceBridge.markOriginAsImportantForTesting(origin);
+                    BrowsingDataBridge.markOriginAsImportantForTesting(origin);
                 }
             }
         };
@@ -499,10 +496,13 @@ public class ClearBrowsingDataPreferencesTest
 
     /**
      * Tests that the important sites dialog is shown and if we cancel nothing happens.
+     *
+     * http://crbug.com/727310
      */
     @CommandLineFlags.Add({"enable-features=ImportantSitesInCBD", "enable-site-engagement"})
     @MediumTest
     @Feature({"SiteEngagement"})
+    @DisabledTest(message = "crbug.com/727310")
     public void testImportantSitesDialogNoopOnCancel() throws Exception {
         // Sign in.
         SigninTestUtil.addAndSignInTestAccount();
@@ -605,7 +605,7 @@ public class ClearBrowsingDataPreferencesTest
                 for (DialogOption option : DialogOption.values()) {
                     boolean enabled = typesToClear.contains(option);
                     PrefServiceBridge.getInstance().setBrowsingDataDeletionPreference(
-                            option.getDataType(), enabled);
+                            option.getDataType(), ClearBrowsingDataTab.ADVANCED, enabled);
                 }
             }
         });

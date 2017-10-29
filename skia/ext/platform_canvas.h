@@ -8,15 +8,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
+
 // The platform-specific device will include the necessary platform headers
 // to get the surface type.
-#include "build/build_config.h"
-#include "skia/ext/native_drawing_context.h"
+
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-
-class SkCanvas;
-class SkPixmap;
 
 // A PlatformCanvas is a software-rasterized SkCanvas which is *also*
 // addressable by the platform-specific drawing API (GDI, Core Graphics,
@@ -55,9 +57,10 @@ SK_API std::unique_ptr<SkCanvas> CreatePlatformCanvasWithSharedSection(
 SK_API HDC GetNativeDrawingContext(SkCanvas* canvas);
 
 #elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
-      defined(__sun) || defined(ANDROID) || defined(__APPLE__)
-  // Construct a canvas from the given memory region. The memory is not cleared
-  // first. @data must be, at least, @height * StrideForWidth(@width) bytes.
+    defined(__sun) || defined(ANDROID) || defined(__APPLE__) ||             \
+    defined(__Fuchsia__)
+// Construct a canvas from the given memory region. The memory is not cleared
+// first. @data must be, at least, @height * StrideForWidth(@width) bytes.
 SK_API std::unique_ptr<SkCanvas> CreatePlatformCanvasWithPixels(
     int width,
     int height,

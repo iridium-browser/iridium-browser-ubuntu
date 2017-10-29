@@ -5,6 +5,7 @@
 package org.chromium.device.bluetooth;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
@@ -23,7 +24,9 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.ParcelUuid;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
@@ -41,11 +44,57 @@ import java.util.UUID;
  * pass through to the Android object and instead provide fake implementations.
  */
 @JNINamespace("device")
-@TargetApi(Build.VERSION_CODES.LOLLIPOP)
+@TargetApi(Build.VERSION_CODES.M)
 class Wrappers {
     private static final String TAG = "Bluetooth";
 
     public static final int DEVICE_CLASS_UNSPECIFIED = 0x1F00;
+
+    /**
+     * Wraps base.ThreadUtils.
+     * base.ThreadUtils has a set of static method to interact with the
+     * UI Thread. To be able to provide a set of test methods, ThreadUtilsWrapper
+     * uses the factory pattern.
+     */
+    static class ThreadUtilsWrapper {
+        private static Factory sFactory;
+
+        private static ThreadUtilsWrapper sInstance;
+
+        protected ThreadUtilsWrapper() {}
+
+        /**
+         * Returns the singleton instance of ThreadUtilsWrapper, creating it if needed.
+         */
+        public static ThreadUtilsWrapper getInstance() {
+            if (sInstance == null) {
+                if (sFactory == null) {
+                    sInstance = new ThreadUtilsWrapper();
+                } else {
+                    sInstance = sFactory.create();
+                }
+            }
+            return sInstance;
+        }
+
+        public void runOnUiThread(Runnable r) {
+            ThreadUtils.runOnUiThread(r);
+        }
+
+        /**
+         * Instantiate this to explain how to create a ThreadUtilsWrapper instance in
+         * ThreadUtilsWrapper.getInstance().
+         */
+        public interface Factory { public ThreadUtilsWrapper create(); }
+
+        /**
+         * Call this to use a different subclass of ThreadUtilsWrapper throughout the program.
+         */
+        public static void setFactory(Factory factory) {
+            sFactory = factory;
+            sInstance = null;
+        }
+    }
 
     /**
      * Wraps android.bluetooth.BluetoothAdapter.
@@ -62,8 +111,8 @@ class Wrappers {
          * permissions.
          */
         @CalledByNative("BluetoothAdapterWrapper")
-        public static BluetoothAdapterWrapper createWithDefaultAdapter(Context context) {
-            final boolean hasMinAPI = Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP;
+        public static BluetoothAdapterWrapper createWithDefaultAdapter() {
+            final boolean hasMinAPI = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M;
             if (!hasMinAPI) {
                 Log.i(TAG, "BluetoothAdapterWrapper.create failed: SDK version (%d) too low.",
                         Build.VERSION.SDK_INT);
@@ -71,9 +120,11 @@ class Wrappers {
             }
 
             final boolean hasPermissions =
-                    context.checkCallingOrSelfPermission(Manifest.permission.BLUETOOTH)
+                    ContextUtils.getApplicationContext().checkCallingOrSelfPermission(
+                            Manifest.permission.BLUETOOTH)
                             == PackageManager.PERMISSION_GRANTED
-                    && context.checkCallingOrSelfPermission(Manifest.permission.BLUETOOTH_ADMIN)
+                    && ContextUtils.getApplicationContext().checkCallingOrSelfPermission(
+                               Manifest.permission.BLUETOOTH_ADMIN)
                             == PackageManager.PERMISSION_GRANTED;
             if (!hasPermissions) {
                 Log.w(TAG, "BluetoothAdapterWrapper.create failed: Lacking Bluetooth permissions.");
@@ -83,7 +134,7 @@ class Wrappers {
             // Only Low Energy currently supported, see BluetoothAdapterAndroid class note.
             final boolean hasLowEnergyFeature =
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2
-                    && context.getPackageManager().hasSystemFeature(
+                    && ContextUtils.getApplicationContext().getPackageManager().hasSystemFeature(
                                PackageManager.FEATURE_BLUETOOTH_LE);
             if (!hasLowEnergyFeature) {
                 Log.i(TAG, "BluetoothAdapterWrapper.create failed: No Low Energy support.");
@@ -95,7 +146,7 @@ class Wrappers {
                 Log.i(TAG, "BluetoothAdapterWrapper.create failed: Default adapter not found.");
                 return null;
             } else {
-                return new BluetoothAdapterWrapper(adapter, context);
+                return new BluetoothAdapterWrapper(adapter, ContextUtils.getApplicationContext());
             }
         }
 
@@ -112,6 +163,7 @@ class Wrappers {
             return mAdapter.enable();
         }
 
+        @SuppressLint("HardwareIds")
         public String getAddress() {
             return mAdapter.getAddress();
         }
@@ -268,11 +320,11 @@ class Wrappers {
                     new HashMap<BluetoothGattDescriptor, BluetoothGattDescriptorWrapper>();
         }
 
-        public BluetoothGattWrapper connectGatt(
-                Context context, boolean autoConnect, BluetoothGattCallbackWrapper callback) {
+        public BluetoothGattWrapper connectGatt(Context context, boolean autoConnect,
+                BluetoothGattCallbackWrapper callback, int transport) {
             return new BluetoothGattWrapper(
                     mDevice.connectGatt(context, autoConnect,
-                            new ForwardBluetoothGattCallbackToWrapper(callback, this)),
+                            new ForwardBluetoothGattCallbackToWrapper(callback, this), transport),
                     this);
         }
 

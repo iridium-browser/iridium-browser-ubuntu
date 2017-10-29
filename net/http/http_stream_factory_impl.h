@@ -8,8 +8,8 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <set>
-#include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -19,15 +19,15 @@
 #include "net/base/privacy_mode.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_stream_factory.h"
+#include "net/log/net_log_source.h"
 #include "net/proxy/proxy_server.h"
 #include "net/socket/ssl_client_socket.h"
-#include "net/spdy/spdy_session_key.h"
+#include "net/spdy/chromium/spdy_session_key.h"
 
 namespace net {
 
 class HttpNetworkSession;
 class ProxyInfo;
-class SpdySession;
 class NetLogWithSource;
 
 class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
@@ -43,28 +43,35 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
   ~HttpStreamFactoryImpl() override;
 
   // HttpStreamFactory interface
-  HttpStreamRequest* RequestStream(const HttpRequestInfo& info,
-                                   RequestPriority priority,
-                                   const SSLConfig& server_ssl_config,
-                                   const SSLConfig& proxy_ssl_config,
-                                   HttpStreamRequest::Delegate* delegate,
-                                   const NetLogWithSource& net_log) override;
+  std::unique_ptr<HttpStreamRequest> RequestStream(
+      const HttpRequestInfo& info,
+      RequestPriority priority,
+      const SSLConfig& server_ssl_config,
+      const SSLConfig& proxy_ssl_config,
+      HttpStreamRequest::Delegate* delegate,
+      bool enable_ip_based_pooling,
+      bool enable_alternative_services,
+      const NetLogWithSource& net_log) override;
 
-  HttpStreamRequest* RequestWebSocketHandshakeStream(
+  std::unique_ptr<HttpStreamRequest> RequestWebSocketHandshakeStream(
       const HttpRequestInfo& info,
       RequestPriority priority,
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
       WebSocketHandshakeStreamBase::CreateHelper* create_helper,
+      bool enable_ip_based_pooling,
+      bool enable_alternative_services,
       const NetLogWithSource& net_log) override;
 
-  HttpStreamRequest* RequestBidirectionalStreamImpl(
+  std::unique_ptr<HttpStreamRequest> RequestBidirectionalStreamImpl(
       const HttpRequestInfo& info,
       RequestPriority priority,
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
+      bool enable_ip_based_pooling,
+      bool enable_alternative_services,
       const NetLogWithSource& net_log) override;
 
   void PreconnectStreams(int num_streams, const HttpRequestInfo& info) override;
@@ -84,8 +91,6 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
 
   friend class HttpStreamFactoryImplPeer;
 
-  typedef std::set<Request*> RequestSet;
-  typedef std::map<SpdySessionKey, RequestSet> SpdySessionRequestMap;
   typedef std::set<std::unique_ptr<JobController>> JobControllerSet;
 
   // |PreconnectingProxyServer| holds information of a connection to a single
@@ -113,7 +118,7 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
     MAX_ALTERNATIVE_SERVICE_TYPE
   };
 
-  HttpStreamRequest* RequestStreamInternal(
+  std::unique_ptr<HttpStreamRequest> RequestStreamInternal(
       const HttpRequestInfo& info,
       RequestPriority priority,
       const SSLConfig& server_ssl_config,
@@ -121,18 +126,9 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
       HttpStreamRequest::Delegate* delegate,
       WebSocketHandshakeStreamBase::CreateHelper* create_helper,
       HttpStreamRequest::StreamType stream_type,
+      bool enable_ip_based_pooling,
+      bool enable_alternative_services,
       const NetLogWithSource& net_log);
-
-  // Called when a SpdySession is ready. It will find appropriate Requests and
-  // fulfill them. |direct| indicates whether or not |spdy_session| uses a
-  // proxy.
-  void OnNewSpdySessionReady(const base::WeakPtr<SpdySession>& spdy_session,
-                             bool direct,
-                             const SSLConfig& used_ssl_config,
-                             const ProxyInfo& used_proxy_info,
-                             bool was_alpn_negotiated,
-                             NextProto negotiated_protocol,
-                             bool using_spdy);
 
   // Called when the Job detects that the endpoint indicated by the
   // Alternate-Protocol does not work. Lets the factory update
@@ -161,12 +157,12 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
   // priorities.
   bool ProxyServerSupportsPriorities(const ProxyInfo& proxy_info) const;
 
-  HttpNetworkSession* const session_;
+  // Adds the count of JobControllers that are not completed to UMA histogram if
+  // the count is a multiple of 100: 100, 200, 400, etc. Break down
+  // JobControllers count based on the type of JobController.
+  void AddJobControllerCountToHistograms();
 
-  // All Requests are handed out to clients. By the time HttpStreamFactoryImpl
-  // is destroyed, all Requests should be deleted (which should remove them from
-  // |request_map_|. The Requests will delete the corresponding job.
-  std::map<const Job*, Request*> request_map_;
+  HttpNetworkSession* const session_;
 
   // All Requests/Preconnects are assigned with a JobController to manage
   // serving Job(s). JobController might outlive Request when Request
@@ -182,9 +178,10 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl : public HttpStreamFactory {
   // preconnects should be skipped.
   std::set<PreconnectingProxyServer> preconnecting_proxy_servers_;
 
-  SpdySessionRequestMap spdy_session_request_map_;
-
   const bool for_websockets_;
+
+  // The count of JobControllers that was most recently logged to histograms.
+  size_t last_logged_job_controller_count_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpStreamFactoryImpl);
 };

@@ -256,7 +256,7 @@
     "-webkit-baseline-middle",
     //
     // text-align
-    // The order of this enum must match the order found in CSSParserFastPaths::isValidKeywordPropertyAndValue().
+    // The order of this enum must match the order found in CSSParserFastPaths::IsValidKeywordPropertyAndValue().
     //
     "-webkit-auto",
     "left",
@@ -282,7 +282,7 @@
     "inside",
     //
     // list-style-type
-    // The order of this enum must match the order found in CSSParserFastPaths::isValidKeywordPropertyAndValue().
+    // The order of this enum must match the order found in CSSParserFastPaths::IsValidKeywordPropertyAndValue().
     //
     "disc",
     "circle",
@@ -342,7 +342,7 @@
     //none
     //
     // display
-    // The order of this enum must match the order found in CSSParserFastPaths::isValidKeywordPropertyAndValue().
+    // The order of this enum must match the order found in CSSParserFastPaths::IsValidKeywordPropertyAndValue().
     //
     "inline",
     "block",
@@ -371,7 +371,7 @@
     "-webkit-inline-flex",
     //
     // cursor
-    // The order of this enum must match the order found in CSSPropertyParser::consumeCursor().
+    // The order of this enum must match the order found in CSSPropertyParser::ConsumeCursor().
     //
     "auto",
     "crosshair",
@@ -533,6 +533,8 @@
     // flex-end
     // center
     // baseline
+    // last baseline,
+    // first baseline,
     // stretch
 
     // justify-content
@@ -646,8 +648,6 @@
     "listitem",
     "media-enter-fullscreen-button",
     "media-exit-fullscreen-button",
-    "media-fullscreen-volume-slider",
-    "media-fullscreen-volume-slider-thumb",
     "media-mute-button",
     "media-play-button",
     "media-overlay-play-button",
@@ -668,6 +668,7 @@
     "-internal-media-subtitles-icon",
     "-internal-media-overflow-button",
     "-internal-media-download-button",
+    "-internal-media-remoting-cast-icon",
     "menulist",
     "menulist-button",
     "menulist-text",
@@ -752,6 +753,13 @@
     "preserve-3d",
 
     //
+    // transform-box
+    //
+    // border-box
+    "fill-box",
+    "view-box",
+
+    //
     // transition-timing-function
     // animation-timing-function
     //
@@ -764,6 +772,7 @@
     "step-middle",
     "step-end",
     "steps",
+    "frames",
     "cubic-bezier",
 
     //
@@ -876,6 +885,9 @@
     "pixelated",
     "-webkit-optimize-contrast",
 
+    // image-orientation
+    "from-image",
+
     // shape-outside
     "nonzero",
     "evenodd",
@@ -982,6 +994,9 @@
     // stretch
     // baseline
     "last-baseline",
+    "first-baseline",
+    "first",
+    "last",
     // center
     // start
     // end
@@ -1013,8 +1028,10 @@
     // background-image, etc.
     "linear-gradient",
     "radial-gradient",
+    "conic-gradient",
     "repeating-linear-gradient",
     "repeating-radial-gradient",
+    "repeating-conic-gradient",
     "paint",
     "-webkit-cross-fade",
     "-webkit-gradient",
@@ -1086,17 +1103,34 @@
     "translateZ",
     "translate3d",
 
-    // motion path
+    // offset-path
     "path",
+    "ray",
+    "sides",
 
     "calc",
     "-webkit-calc",
 
     // scroll-snap-type
     // none
+    "x",
+    "y",
+    // block
+    // inline
+    // both
     "mandatory",
     "proximity",
-    "from-image",
+
+    // scroll-snap-align
+    // none
+    // start
+    // end
+    // center
+
+    // scroll-snap-stop
+    // normal
+    // always
+
 
     // containment
     // paint
@@ -1126,5 +1160,10 @@
     // srgb
     "p3",
     "rec2020",
+
+    // scroll-boundary-behavior
+    // auto,
+    // contain
+    // none
   ],
 }

@@ -48,7 +48,7 @@ class PipelineImpl::RendererWrapper : public DemuxerHost,
                                       public RendererClient {
  public:
   RendererWrapper(scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
-                  scoped_refptr<MediaLog> media_log);
+                  MediaLog* media_log);
   ~RendererWrapper() final;
 
   void Start(Demuxer* demuxer,
@@ -121,6 +121,8 @@ class PipelineImpl::RendererWrapper : public DemuxerHost,
   void OnStatisticsUpdate(const PipelineStatistics& stats) final;
   void OnBufferingStateChange(BufferingState state) final;
   void OnWaitingForDecryptionKey() final;
+  void OnAudioConfigChange(const AudioDecoderConfig& config) final;
+  void OnVideoConfigChange(const VideoDecoderConfig& config) final;
   void OnVideoNaturalSizeChange(const gfx::Size& size) final;
   void OnVideoOpacityChange(bool opaque) final;
   void OnDurationChange(base::TimeDelta duration) final;
@@ -149,7 +151,7 @@ class PipelineImpl::RendererWrapper : public DemuxerHost,
 
   const scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
   const scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
-  const scoped_refptr<MediaLog> media_log_;
+  MediaLog* const media_log_;
 
   base::WeakPtr<PipelineImpl> weak_pipeline_;
   Demuxer* demuxer_;
@@ -187,10 +189,10 @@ class PipelineImpl::RendererWrapper : public DemuxerHost,
 
 PipelineImpl::RendererWrapper::RendererWrapper(
     scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
-    scoped_refptr<MediaLog> media_log)
+    MediaLog* media_log)
     : media_task_runner_(std::move(media_task_runner)),
       main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      media_log_(std::move(media_log)),
+      media_log_(media_log),
       demuxer_(nullptr),
       playback_rate_(kDefaultPlaybackRate),
       volume_(kDefaultVolume),
@@ -201,7 +203,6 @@ PipelineImpl::RendererWrapper::RendererWrapper(
       text_renderer_ended_(false),
       weak_factory_(this) {
   weak_this_ = weak_factory_.GetWeakPtr();
-  media_log_->AddEvent(media_log_->CreatePipelineStateChangedEvent(kCreated));
 }
 
 PipelineImpl::RendererWrapper::~RendererWrapper() {
@@ -650,14 +651,20 @@ void PipelineImpl::RendererWrapper::OnStatisticsUpdate(
   shared_state_.statistics.audio_memory_usage += stats.audio_memory_usage;
   shared_state_.statistics.video_memory_usage += stats.video_memory_usage;
 
-  base::TimeDelta old_average =
+  if (stats.video_frame_duration_average != kNoTimestamp) {
+    shared_state_.statistics.video_frame_duration_average =
+        stats.video_frame_duration_average;
+  }
+
+  base::TimeDelta old_key_frame_distance_average =
       shared_state_.statistics.video_keyframe_distance_average;
   if (stats.video_keyframe_distance_average != kNoTimestamp) {
     shared_state_.statistics.video_keyframe_distance_average =
         stats.video_keyframe_distance_average;
   }
 
-  if (shared_state_.statistics.video_keyframe_distance_average != old_average) {
+  if (shared_state_.statistics.video_keyframe_distance_average !=
+      old_key_frame_distance_average) {
     main_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&PipelineImpl::OnVideoAverageKeyframeDistanceUpdate,
@@ -698,6 +705,24 @@ void PipelineImpl::RendererWrapper::OnVideoOpacityChange(bool opaque) {
   main_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&PipelineImpl::OnVideoOpacityChange, weak_pipeline_, opaque));
+}
+
+void PipelineImpl::RendererWrapper::OnAudioConfigChange(
+    const AudioDecoderConfig& config) {
+  DCHECK(media_task_runner_->BelongsToCurrentThread());
+
+  main_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&PipelineImpl::OnAudioConfigChange, weak_pipeline_, config));
+}
+
+void PipelineImpl::RendererWrapper::OnVideoConfigChange(
+    const VideoDecoderConfig& config) {
+  DCHECK(media_task_runner_->BelongsToCurrentThread());
+
+  main_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&PipelineImpl::OnVideoConfigChange, weak_pipeline_, config));
 }
 
 void PipelineImpl::RendererWrapper::OnDurationChange(base::TimeDelta duration) {
@@ -1337,6 +1362,24 @@ void PipelineImpl::OnVideoOpacityChange(bool opaque) {
 
   DCHECK(client_);
   client_->OnVideoOpacityChange(opaque);
+}
+
+void PipelineImpl::OnAudioConfigChange(const AudioDecoderConfig& config) {
+  DVLOG(2) << __func__;
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(IsRunning());
+
+  DCHECK(client_);
+  client_->OnAudioConfigChange(config);
+}
+
+void PipelineImpl::OnVideoConfigChange(const VideoDecoderConfig& config) {
+  DVLOG(2) << __func__;
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(IsRunning());
+
+  DCHECK(client_);
+  client_->OnVideoConfigChange(config);
 }
 
 void PipelineImpl::OnVideoAverageKeyframeDistanceUpdate() {

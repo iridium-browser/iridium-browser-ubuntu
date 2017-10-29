@@ -18,6 +18,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
@@ -53,17 +54,12 @@ const char kChromeURLContentSecurityPolicyHeaderBase[] =
 
 const char kChromeURLXFrameOptionsHeader[] = "X-Frame-Options: DENY";
 
-bool SchemeIsInSchemes(const std::string& scheme,
-                       const std::vector<std::string>& schemes) {
-  return std::find(schemes.begin(), schemes.end(), scheme) != schemes.end();
-}
-
 // Returns whether |url| passes some sanity checks and is a valid GURL.
 bool CheckURLIsValid(const GURL& url) {
   std::vector<std::string> additional_schemes;
   DCHECK(GetWebClient()->IsAppSpecificURL(url) ||
          (GetWebClient()->GetAdditionalWebUISchemes(&additional_schemes),
-          SchemeIsInSchemes(url.scheme(), additional_schemes)));
+          base::ContainsValue(additional_schemes, url.scheme())));
 
   if (!url.is_valid()) {
     NOTREACHED();
@@ -104,7 +100,6 @@ class URLRequestChromeJob : public net::URLRequestJob {
   void Kill() override;
   int ReadRawData(net::IOBuffer* buf, int buf_size) override;
   bool GetMimeType(std::string* mime_type) const override;
-  int GetResponseCode() const override;
   void GetResponseInfo(net::HttpResponseInfo* info) override;
 
   // Used to notify that the requested data's |mime_type| is ready.
@@ -248,10 +243,6 @@ void URLRequestChromeJob::Kill() {
 bool URLRequestChromeJob::GetMimeType(std::string* mime_type) const {
   *mime_type = mime_type_;
   return !mime_type_.empty();
-}
-
-int URLRequestChromeJob::GetResponseCode() const {
-  return net::HTTP_OK;
 }
 
 void URLRequestChromeJob::GetResponseInfo(net::HttpResponseInfo* info) {
@@ -440,12 +431,11 @@ bool URLDataManagerIOSBackend::StartRequest(const net::URLRequest* request,
   if (!source)
     return false;
 
-  if (!source->source()->ShouldServiceRequest(request))
+  if (!source->source()->ShouldServiceRequest(request->url()))
     return false;
 
   std::string path;
   URLToRequestPath(request->url(), &path);
-  source->source()->WillServiceRequest(request, &path);
 
   // Save this request so we know where to send the data.
   RequestID request_id = next_request_id_++;

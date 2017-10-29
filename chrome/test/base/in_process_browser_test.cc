@@ -17,7 +17,6 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/test_file_util.h"
-#include "base/threading/non_thread_safe.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/after_startup_task_utils.h"
@@ -26,6 +25,8 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/termination_notification.h"
+#include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -40,6 +41,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/features.h"
@@ -60,6 +62,7 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/display/display_switches.h"
+#include "ui/gfx/color_space_switches.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -82,7 +85,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
-#endif
+#include "chrome/browser/ui/webui/options/browser_options_handler.h"
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(USE_ASH)
 #include "chrome/test/base/default_ash_event_generator_delegate.h"
@@ -189,11 +193,6 @@ void InProcessBrowserTest::SetUp() {
   // Browser tests will create their own g_browser_process later.
   DCHECK(!g_browser_process);
 
-  // Clear the FeatureList instance from base/test/test_suite.cc. Since this is
-  // a browser test, a FeatureList will be registered as part of normal browser
-  // start up in ChromeBrowserMainParts::SetupMetricsAndFieldTrials().
-  base::FeatureList::ClearInstanceForTesting();
-
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   // Auto-reload breaks many browser tests, which assume error pages won't be
@@ -201,6 +200,10 @@ void InProcessBrowserTest::SetUp() {
   // append switches::kEnableOfflineAutoReload, which will override the disable
   // here.
   command_line->AppendSwitch(switches::kDisableOfflineAutoReload);
+
+  // Turn off preconnects because they break the brittle python webserver;
+  // see http://crbug.com/60035.
+  scoped_feature_list_.InitAndDisableFeature(features::kNetworkPrediction);
 
   // Allow subclasses to change the command line before running any tests.
   SetUpCommandLine(command_line);
@@ -218,7 +221,7 @@ void InProcessBrowserTest::SetUp() {
 
 #if defined(OS_CHROMEOS)
   // Make sure that the log directory exists.
-  base::FilePath log_dir = logging::GetSessionLogFile(*command_line).DirName();
+  base::FilePath log_dir = logging::GetSessionLogDir(*command_line);
   base::CreateDirectory(log_dir);
   // Disable IME extension loading to avoid many browser tests failures.
   chromeos::input_method::DisableExtensionLoading();
@@ -249,6 +252,16 @@ void InProcessBrowserTest::SetUp() {
 
   google_util::SetMockLinkDoctorBaseURLForTesting();
 
+#if defined(OS_CHROMEOS)
+  // Polymer Elements are used for quick unlock configuration in options page,
+  // which is chromeos specific feature.
+  options::BrowserOptionsHandler::DisablePolymerPreloadForTesting();
+  // On Chrome OS, access to files via file: scheme is restricted. Enable
+  // access to all files here since browser_tests and interactive_ui_tests
+  // rely on the ability to open any files via file: scheme.
+  ChromeNetworkDelegate::EnableAccessToAllFilesForTesting(true);
+#endif  // defined(OS_CHROMEOS)
+
   // Use hardcoded quota settings to have a consistent testing environment.
   const int kQuota = 5 * 1024 * 1024;
   quota_settings_ = storage::QuotaSettings(kQuota * 5, kQuota, 0, 0);
@@ -265,6 +278,10 @@ void InProcessBrowserTest::SetUpDefaultCommandLine(
 
   // This is a Browser test.
   command_line->AppendSwitchASCII(switches::kTestType, kBrowserTestType);
+
+  // Use an sRGB color profile to ensure that the machine's color profile does
+  // not affect the results.
+  command_line->AppendSwitchASCII(switches::kForceColorProfile, "srgb");
 
 #if defined(OS_MACOSX)
   // Explicitly set the path of the binary used for child processes, otherwise
@@ -291,6 +308,7 @@ void InProcessBrowserTest::SetUpDefaultCommandLine(
 }
 
 bool InProcessBrowserTest::RunAccessibilityChecks(std::string* error_message) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   if (!browser()) {
     *error_message = "browser is NULL";
     return false;
@@ -511,7 +529,7 @@ base::CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
 }
 #endif
 
-void InProcessBrowserTest::RunTestOnMainThreadLoop() {
+void InProcessBrowserTest::PreRunTestOnMainThread() {
   AfterStartupTaskUtils::SetBrowserStartupIsCompleteForTesting();
 
   // Pump startup related events.
@@ -558,13 +576,16 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   if (browser_ && global_browser_set_up_function_)
     ASSERT_TRUE(global_browser_set_up_function_(browser_));
 
-  SetUpOnMainThread();
 #if defined(OS_MACOSX)
   autorelease_pool_->Recycle();
 #endif
 
-  if (!HasFatalFailure())
-    RunTestOnMainThread();
+#if defined(OS_CHROMEOS)  // http://crbug.com/715735
+  disable_io_checks();
+#endif
+}
+
+void InProcessBrowserTest::PostRunTestOnMainThread() {
 #if defined(OS_MACOSX)
   autorelease_pool_->Recycle();
 #endif
@@ -575,9 +596,6 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
     EXPECT_EQ("", error_message);
   }
 
-  // Invoke cleanup and quit even if there are failures. This is similar to
-  // gtest in that it invokes TearDown even if Setup fails.
-  TearDownOnMainThread();
 #if defined(OS_MACOSX)
   autorelease_pool_->Recycle();
 #endif
@@ -595,7 +613,7 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
 
 void InProcessBrowserTest::QuitBrowsers() {
   if (chrome::GetTotalBrowserCount() == 0) {
-    chrome::NotifyAppTerminating();
+    browser_shutdown::NotifyAppTerminating();
     return;
   }
 

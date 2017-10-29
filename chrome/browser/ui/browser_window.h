@@ -32,8 +32,6 @@ class Profile;
 class StatusBubble;
 class ToolbarActionsBar;
 
-struct WebApplicationInfo;
-
 namespace autofill {
 class SaveCardBubbleController;
 class SaveCardBubbleView;
@@ -42,6 +40,7 @@ class SaveCardBubbleView;
 namespace content {
 class WebContents;
 struct NativeWebKeyboardEvent;
+enum class KeyboardEventProcessingResult;
 }
 
 namespace extensions {
@@ -219,8 +218,18 @@ class BrowserWindow : public ui::BaseWindow {
   // Returns whether the tab strip is editable (for extensions).
   virtual bool IsTabStripEditable() const = 0;
 
-  // Returns whether the tool bar is visible or not.
+  // Returns whether the toolbar is available or not. It's called "Visible()"
+  // to follow the name convention. But it does not indicate the visibility of
+  // the toolbar, i.e. toolbar may be hidden, and only visible when the mouse
+  // cursor is at a certain place.
+  // TODO(zijiehe): Rename Visible() functions into Available() to match their
+  // original meaning.
   virtual bool IsToolbarVisible() const = 0;
+
+  // Returns whether the toolbar is showing up on the screen.
+  // TODO(zijiehe): Rename this function into IsToolbarVisible() once other
+  // Visible() functions are renamed to Available().
+  virtual bool IsToolbarShowing() const = 0;
 
   // Shows the Update Recommended dialog box.
   virtual void ShowUpdateChromeDialog() = 0;
@@ -228,21 +237,6 @@ class BrowserWindow : public ui::BaseWindow {
   // Shows the Bookmark bubble. |url| is the URL being bookmarked,
   // |already_bookmarked| is true if the url is already bookmarked.
   virtual void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) = 0;
-
-  // Callback type used with the ShowBookmarkAppBubble() method. The boolean
-  // parameter is true when the user accepts the dialog. The WebApplicationInfo
-  // parameter contains the WebApplicationInfo as edited by the user.
-  typedef base::Callback<void(bool, const WebApplicationInfo&)>
-      ShowBookmarkAppBubbleCallback;
-
-  // Shows the Bookmark App bubble.
-  // See Extension::InitFromValueFlags::FROM_BOOKMARK for a description of
-  // bookmark apps.
-  //
-  // |web_app_info| is the WebApplicationInfo being converted into an app.
-  virtual void ShowBookmarkAppBubble(
-      const WebApplicationInfo& web_app_info,
-      const ShowBookmarkAppBubbleCallback& callback) = 0;
 
   // Shows the "Save credit card" bubble.
   virtual autofill::SaveCardBubbleView* ShowSaveCreditCardBubble(
@@ -293,11 +287,10 @@ class BrowserWindow : public ui::BaseWindow {
   // that it's time to redraw everything.
   virtual void UserChangedTheme() = 0;
 
-  // Shows the website settings using the specified information. |virtual_url|
-  // is the virtual url of the page/frame the info applies to, |ssl| is the SSL
-  // information for that page/frame. If |show_history| is true, a section
-  // showing how many times that URL has been visited is added to the page info.
-  virtual void ShowWebsiteSettings(
+  // Shows Page Info using the specified information. |virtual_url| is the
+  // virtual url of the page/frame the info applies to, and |security_info|
+  // contains the security state for that page/frame.
+  virtual void ShowPageInfo(
       Profile* profile,
       content::WebContents* web_contents,
       const GURL& virtual_url,
@@ -308,12 +301,8 @@ class BrowserWindow : public ui::BaseWindow {
 
   // Allows the BrowserWindow object to handle the specified keyboard event
   // before sending it to the renderer.
-  // Returns true if the |event| was handled. Otherwise, if the |event| would
-  // be handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
-  // |*is_keyboard_shortcut| should be set to true.
-  virtual bool PreHandleKeyboardEvent(
-      const content::NativeWebKeyboardEvent& event,
-      bool* is_keyboard_shortcut) = 0;
+  virtual content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event) = 0;
 
   // Allows the BrowserWindow object to handle the specified keyboard event,
   // if the renderer did not process it.
@@ -336,17 +325,6 @@ class BrowserWindow : public ui::BaseWindow {
   virtual web_modal::WebContentsModalDialogHost*
       GetWebContentsModalDialogHost() = 0;
 
-  // Invoked when the preferred size of the contents in current tab has been
-  // changed. We might choose to update the window size to accomodate this
-  // change.
-  // Note that this won't be fired if we change tabs.
-  virtual void UpdatePreferredSize(content::WebContents* web_contents,
-                                   const gfx::Size& pref_size) {}
-
-  // Invoked when the contents auto-resized and the container should match it.
-  virtual void ResizeDueToAutoResize(content::WebContents* web_contents,
-                                     const gfx::Size& new_size) {}
-
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(Browser* browser,
                                             bool user_gesture);
@@ -363,7 +341,6 @@ class BrowserWindow : public ui::BaseWindow {
     AVATAR_BUBBLE_MODE_REAUTH,
     AVATAR_BUBBLE_MODE_CONFIRM_SIGNIN,
     AVATAR_BUBBLE_MODE_SHOW_ERROR,
-    AVATAR_BUBBLE_MODE_FAST_USER_SWITCH,
   };
   virtual void ShowAvatarBubbleFromAvatarButton(
       AvatarBubbleMode mode,

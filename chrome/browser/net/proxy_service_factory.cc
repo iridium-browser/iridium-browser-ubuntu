@@ -15,27 +15,22 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/net/chrome_mojo_proxy_resolver_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "net/proxy/dhcp_proxy_script_fetcher_factory.h"
 #include "net/proxy/proxy_config_service.h"
-#include "net/proxy/proxy_resolver_v8.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
-#include "net/proxy/proxy_service_v8.h"
+#include "net/proxy/proxy_service_mojo.h"
 #include "net/url_request/url_request_context.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/network/dhcp_proxy_script_fetcher_chromeos.h"
 #include "chromeos/network/proxy/proxy_config_service_impl.h"
 #endif  // defined(OS_CHROMEOS)
-
-#if !defined(OS_ANDROID)
-#include "chrome/browser/net/utility_process_mojo_proxy_resolver_factory.h"
-#include "net/proxy/proxy_service_mojo.h"
-#endif
 
 using content::BrowserThread;
 
@@ -57,12 +52,8 @@ ProxyServiceFactory::CreateProxyConfigService(PrefProxyConfigTracker* tracker) {
   // configuration in case nothing is configured through prefs (Note: prefs
   // include command line and configuration policy).
 
-  // TODO(port): the IO and FILE message loops are only used by Linux.  Can
-  // that code be moved to chrome/browser instead of being in net, so that it
-  // can use BrowserThread instead of raw MessageLoop pointers? See bug 25354.
   base_service = net::ProxyService::CreateSystemProxyConfigService(
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE));
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
 #endif  // !defined(OS_CHROMEOS)
 
   return tracker->CreateTrackingProxyConfigService(std::move(base_service));
@@ -117,22 +108,6 @@ std::unique_ptr<net::ProxyService> ProxyServiceFactory::CreateProxyService(
     use_v8 = false;  // Fallback to non-v8 implementation.
   }
 
-  size_t num_pac_threads = 0u;  // Use default number of threads.
-
-  // Check the command line for an override on the number of proxy resolver
-  // threads to use.
-  if (command_line.HasSwitch(switches::kNumPacThreads)) {
-    std::string s = command_line.GetSwitchValueASCII(switches::kNumPacThreads);
-
-    // Parse the switch (it should be a positive integer formatted as decimal).
-    int n;
-    if (base::StringToInt(s, &n) && n > 0) {
-      num_pac_threads = static_cast<size_t>(n);
-    } else {
-      LOG(ERROR) << "Invalid switch for number of PAC threads: " << s;
-    }
-  }
-
   std::unique_ptr<net::ProxyService> proxy_service;
   if (use_v8) {
     std::unique_ptr<net::DhcpProxyScriptFetcher> dhcp_proxy_script_fetcher;
@@ -144,23 +119,15 @@ std::unique_ptr<net::ProxyService> ProxyServiceFactory::CreateProxyService(
     dhcp_proxy_script_fetcher = dhcp_factory.Create(context);
 #endif
 
-#if !defined(OS_ANDROID)
     proxy_service = net::CreateProxyServiceUsingMojoFactory(
-        UtilityProcessMojoProxyResolverFactory::GetInstance(),
+        ChromeMojoProxyResolverFactory::GetInstance(),
         std::move(proxy_config_service),
         new net::ProxyScriptFetcherImpl(context),
         std::move(dhcp_proxy_script_fetcher), context->host_resolver(), net_log,
         network_delegate);
-#else
-    proxy_service = net::CreateProxyServiceUsingV8ProxyResolver(
-        std::move(proxy_config_service),
-        new net::ProxyScriptFetcherImpl(context),
-        std::move(dhcp_proxy_script_fetcher), context->host_resolver(), net_log,
-        network_delegate);
-#endif  // !defined(OS_ANDROID)
   } else {
     proxy_service = net::ProxyService::CreateUsingSystemProxyResolver(
-        std::move(proxy_config_service), num_pac_threads, net_log);
+        std::move(proxy_config_service), net_log);
   }
 
   proxy_service->set_quick_check_enabled(quick_check_enabled);

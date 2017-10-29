@@ -8,6 +8,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_provider_listener.h"
@@ -165,7 +166,7 @@ class ZeroSuggestProviderTest : public testing::Test,
   void CreatePersonalizedFieldTrial();
   void CreateMostVisitedFieldTrial();
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
   // Needed for OmniboxFieldTrial::ActivateStaticTrials().
   std::unique_ptr<base::FieldTrialList> field_trial_list_;
@@ -242,7 +243,7 @@ TEST_F(ZeroSuggestProviderTest, TestDoesNotReturnMatchesForPrefix) {
 
   std::string url("http://www.cnn.com/");
   AutocompleteInput input(base::ASCIIToUTF16(url), base::string16::npos,
-                          std::string(), GURL(url),
+                          std::string(), GURL(url), base::string16(),
                           metrics::OmniboxEventProto::INVALID_SPEC, true, false,
                           true, true, false, TestSchemeClassifier());
 
@@ -270,7 +271,7 @@ TEST_F(ZeroSuggestProviderTest, TestMostVisitedCallback) {
   std::string current_url("http://www.foxnews.com/");
   std::string input_url("http://www.cnn.com/");
   AutocompleteInput input(base::ASCIIToUTF16(input_url), base::string16::npos,
-                          std::string(), GURL(current_url),
+                          std::string(), GURL(current_url), base::string16(),
                           metrics::OmniboxEventProto::OTHER, false, false, true,
                           true, true, TestSchemeClassifier());
   history::MostVisitedURLList urls;
@@ -301,7 +302,7 @@ TEST_F(ZeroSuggestProviderTest, TestMostVisitedNavigateToSearchPage) {
   std::string current_url("http://www.foxnews.com/");
   std::string input_url("http://www.cnn.com/");
   AutocompleteInput input(base::ASCIIToUTF16(input_url), base::string16::npos,
-                          std::string(), GURL(current_url),
+                          std::string(), GURL(current_url), base::string16(),
                           metrics::OmniboxEventProto::OTHER, false, false, true,
                           true, true, TestSchemeClassifier());
   history::MostVisitedURLList urls;
@@ -316,7 +317,7 @@ TEST_F(ZeroSuggestProviderTest, TestMostVisitedNavigateToSearchPage) {
   std::string search_url("https://www.google.com/?q=flowers");
   AutocompleteInput srp_input(
       base::ASCIIToUTF16(search_url), base::string16::npos, std::string(),
-      GURL(search_url),
+      GURL(search_url), base::string16(),
       metrics::OmniboxEventProto::SEARCH_RESULT_PAGE_NO_SEARCH_TERM_REPLACEMENT,
       false, false, true, true, true, TestSchemeClassifier());
 
@@ -337,7 +338,7 @@ TEST_F(ZeroSuggestProviderTest, TestPsuggestZeroSuggestCachingFirstRun) {
 
   std::string url("http://www.cnn.com/");
   AutocompleteInput input(base::ASCIIToUTF16(url), base::string16::npos,
-                          std::string(), GURL(url),
+                          std::string(), GURL(url), base::string16(),
                           metrics::OmniboxEventProto::INVALID_SPEC, true, false,
                           true, true, true, TestSchemeClassifier());
 
@@ -367,7 +368,7 @@ TEST_F(ZeroSuggestProviderTest, TestPsuggestZeroSuggestHasCachedResults) {
 
   std::string url("http://www.cnn.com/");
   AutocompleteInput input(base::ASCIIToUTF16(url), base::string16::npos,
-                          std::string(), GURL(url),
+                          std::string(), GURL(url), base::string16(),
                           metrics::OmniboxEventProto::INVALID_SPEC, true, false,
                           true, true, true, TestSchemeClassifier());
 
@@ -413,7 +414,7 @@ TEST_F(ZeroSuggestProviderTest, TestPsuggestZeroSuggestReceivedEmptyResults) {
 
   std::string url("http://www.cnn.com/");
   AutocompleteInput input(base::ASCIIToUTF16(url), base::string16::npos,
-                          std::string(), GURL(url),
+                          std::string(), GURL(url), base::string16(),
                           metrics::OmniboxEventProto::INVALID_SPEC, true, false,
                           true, true, true, TestSchemeClassifier());
 

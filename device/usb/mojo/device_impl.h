@@ -17,8 +17,7 @@
 #include "device/usb/public/interfaces/device.mojom.h"
 #include "device/usb/usb_device.h"
 #include "device/usb/usb_device_handle.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace device {
 namespace usb {
@@ -28,30 +27,34 @@ class PermissionProvider;
 // Implementation of the public Device interface. Instances of this class are
 // constructed by DeviceManagerImpl and are strongly bound to their MessagePipe
 // lifetime.
-class DeviceImpl : public Device, public device::UsbDevice::Observer {
+class DeviceImpl : public mojom::UsbDevice, public device::UsbDevice::Observer {
  public:
-  DeviceImpl(scoped_refptr<UsbDevice> device,
-             DeviceInfoPtr device_info,
-             base::WeakPtr<PermissionProvider> permission_provider,
-             DeviceRequest request);
+  static void Create(scoped_refptr<device::UsbDevice> device,
+                     base::WeakPtr<PermissionProvider> permission_provider,
+                     mojom::UsbDeviceRequest request);
+
   ~DeviceImpl() override;
 
  private:
+  DeviceImpl(scoped_refptr<device::UsbDevice> device,
+             base::WeakPtr<PermissionProvider> permission_provider);
+
   // Closes the device if it's open. This will always set |device_handle_| to
   // null.
   void CloseHandle();
 
   // Checks interface permissions for control transfers.
-  bool HasControlTransferPermission(ControlTransferRecipient recipient,
-                                    uint16_t index);
+  bool HasControlTransferPermission(
+      mojom::UsbControlTransferRecipient recipient,
+      uint16_t index);
 
   // Handles completion of an open request.
-  void OnOpen(const OpenCallback& callback,
-              scoped_refptr<device::UsbDeviceHandle> handle);
+  static void OnOpen(base::WeakPtr<DeviceImpl> device,
+                     const OpenCallback& callback,
+                     scoped_refptr<device::UsbDeviceHandle> handle);
   void OnPermissionGrantedForOpen(const OpenCallback& callback, bool granted);
 
   // Device implementation:
-  void GetDeviceInfo(const GetDeviceInfoCallback& callback) override;
   void Open(const OpenCallback& callback) override;
   void Close(const CloseCallback& callback) override;
   void SetConfiguration(uint8_t value,
@@ -66,11 +69,11 @@ class DeviceImpl : public Device, public device::UsbDevice::Observer {
       const SetInterfaceAlternateSettingCallback& callback) override;
   void Reset(const ResetCallback& callback) override;
   void ClearHalt(uint8_t endpoint, const ClearHaltCallback& callback) override;
-  void ControlTransferIn(ControlTransferParamsPtr params,
+  void ControlTransferIn(mojom::UsbControlTransferParamsPtr params,
                          uint32_t length,
                          uint32_t timeout,
                          const ControlTransferInCallback& callback) override;
-  void ControlTransferOut(ControlTransferParamsPtr params,
+  void ControlTransferOut(mojom::UsbControlTransferParamsPtr params,
                           const std::vector<uint8_t>& data,
                           uint32_t timeout,
                           const ControlTransferOutCallback& callback) override;
@@ -97,8 +100,7 @@ class DeviceImpl : public Device, public device::UsbDevice::Observer {
   // device::UsbDevice::Observer implementation:
   void OnDeviceRemoved(scoped_refptr<device::UsbDevice> device) override;
 
-  const scoped_refptr<UsbDevice> device_;
-  const DeviceInfoPtr device_info_;
+  const scoped_refptr<device::UsbDevice> device_;
   base::WeakPtr<PermissionProvider> permission_provider_;
   ScopedObserver<device::UsbDevice, device::UsbDevice::Observer> observer_;
 
@@ -106,7 +108,7 @@ class DeviceImpl : public Device, public device::UsbDevice::Observer {
   // has been closed.
   scoped_refptr<UsbDeviceHandle> device_handle_;
 
-  mojo::Binding<Device> binding_;
+  mojo::StrongBindingPtr<mojom::UsbDevice> binding_;
   base::WeakPtrFactory<DeviceImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DeviceImpl);

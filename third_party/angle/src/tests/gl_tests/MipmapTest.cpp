@@ -6,6 +6,8 @@
 
 #include "test_utils/ANGLETest.h"
 
+#include "test_utils/gl_raii.h"
+
 using namespace angle;
 
 namespace
@@ -156,7 +158,8 @@ class MipmapTest : public BaseMipmapTest
 
         // Initialize the texture2D to be empty, and don't use mips.
         glBindTexture(GL_TEXTURE_2D, mTexture2D);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, getWindowWidth(), getWindowHeight(), 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, getWindowWidth(), getWindowHeight(), 0, GL_RGB,
+                     GL_UNSIGNED_BYTE, nullptr);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
@@ -457,7 +460,8 @@ TEST_P(MipmapTest, DISABLED_ThreeLevelsInitData)
     int n = 1;
     while (getWindowWidth() / (1U << n) >= 1)
     {
-        glTexImage2D(GL_TEXTURE_2D, n, GL_RGB, getWindowWidth() / (1U << n), getWindowWidth() / (1U << n), 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        glTexImage2D(GL_TEXTURE_2D, n, GL_RGB, getWindowWidth() / (1U << n),
+                     getWindowWidth() / (1U << n), 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
         ASSERT_GL_NO_ERROR();
         n+=1;
     }
@@ -681,6 +685,34 @@ TEST_P(MipmapTest, RenderOntoLevelZeroAfterGenerateMipmap)
     // Render a small textured quad. This would force minification if mips were enabled, but they're not. Therefore, this should be green.
     clearAndDrawQuad(m2DProgram, getWindowWidth() / 4, getWindowHeight() / 4);
     EXPECT_PIXEL_COLOR_EQ(getWindowWidth() / 8, getWindowHeight() / 8, GLColor::green);
+}
+
+// Regression test for a bug that cause mipmaps to only generate using the top left corner as input.
+TEST_P(MipmapTest, MipMapGenerationD3D9Bug)
+{
+    if (!extensionEnabled("GL_EXT_texture_storage") || !extensionEnabled("GL_OES_rgb8_rgba8") ||
+        !extensionEnabled("GL_ANGLE_texture_usage"))
+    {
+        std::cout << "Test skipped due to missing extensions." << std::endl;
+        return;
+    }
+
+    const GLColor mip0Color[4] = {
+        GLColor::red, GLColor::green, GLColor::red, GLColor::green,
+    };
+    const GLColor mip1Color = GLColor(127, 127, 0, 255);
+
+    GLTexture texture;
+    glBindTexture(GL_TEXTURE_2D, texture.get());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_USAGE_ANGLE, GL_FRAMEBUFFER_ATTACHMENT_ANGLE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+    glTexStorage2DEXT(GL_TEXTURE_2D, 2, GL_RGBA8_OES, 2, 2);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE, mip0Color);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    // Only draw to a 1 pixel viewport so the lower mip is used
+    clearAndDrawQuad(m2DProgram, 1, 1);
+    EXPECT_PIXEL_COLOR_NEAR(0, 0, mip1Color, 1.0);
 }
 
 // This test ensures that the level-zero workaround for TextureCubes (on D3D11 Feature Level 9_3)
@@ -1119,6 +1151,43 @@ TEST_P(MipmapTestES3, GenerateMipmapBaseLevelOutOfRangeImmutableTexture)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     clearAndDrawQuad(m2DProgram, getWindowWidth(), getWindowHeight());
     EXPECT_PIXEL_COLOR_EQ(getWindowWidth() / 2, getWindowHeight() / 2, GLColor::green);
+}
+
+// A native version of the WebGL2 test tex-base-level-bug.html
+TEST_P(MipmapTestES3, BaseLevelTextureBug)
+{
+    if (IsOpenGL() && IsAMD())
+    {
+        std::cout << "Test skipped on Windows AMD OpenGL." << std::endl;
+        return;
+    }
+
+#if defined(ANGLE_PLATFORM_APPLE)
+    // Regression in 10.12.4 needing workaround -- crbug.com/705865.
+    // Seems to be passing on AMD GPUs. Definitely not NVIDIA.
+    // Probably not Intel.
+    if (IsNVIDIA() || IsIntel())
+    {
+        std::cout << "Test skipped on macOS with NVIDIA and Intel GPUs." << std::endl;
+        return;
+    }
+#endif
+
+    glBindTexture(GL_TEXTURE_2D, mTexture);
+    glTexImage2D(GL_TEXTURE_2D, 2, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, &GLColor::red);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 2);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    ASSERT_GL_NO_ERROR();
+
+    drawQuad(m2DProgram, "position", 0.5f);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    ASSERT_GL_NO_ERROR();
+
+    drawQuad(m2DProgram, "position", 0.5f);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
 }
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.

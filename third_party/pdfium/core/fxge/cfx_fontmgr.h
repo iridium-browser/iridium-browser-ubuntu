@@ -43,7 +43,7 @@ class CFX_FontMgr {
                              uint8_t* pData,
                              uint32_t size,
                              int font_offset);
-  FXFT_Face GetFileFace(const FX_CHAR* filename, int face_index);
+  FXFT_Face GetFileFace(const char* filename, int face_index);
   FXFT_Face GetFixedFace(const uint8_t* pData, uint32_t size, int face_index);
   void ReleaseFace(FXFT_Face face);
   void SetSystemFontInfo(std::unique_ptr<IFX_SystemFontInfo> pFontInfo);
@@ -61,7 +61,7 @@ class CFX_FontMgr {
 
  private:
   std::unique_ptr<CFX_FontMapper> m_pBuiltinMapper;
-  std::map<CFX_ByteString, CTTFontDesc*> m_FaceMap;
+  std::map<CFX_ByteString, std::unique_ptr<CTTFontDesc>> m_FaceMap;
   FXFT_Library m_FTLibrary;
   bool m_FTLibrarySupportsHinting;
 };

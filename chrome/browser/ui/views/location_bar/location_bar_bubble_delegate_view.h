@@ -34,15 +34,21 @@ class LocationBarBubbleDelegateView : public views::BubbleDialogDelegateView,
     AUTOMATIC,
   };
 
+  // Constructs LocationBarBubbleDelegateView. Anchors the bubble to
+  // |anchor_view| when it is not nullptr or alternatively, to |anchor_point|.
+  // Registers with a fullscreen controller identified by |web_contents| to
+  // close the bubble if the fullscreen state changes.
+  LocationBarBubbleDelegateView(views::View* anchor_view,
+                                const gfx::Point& anchor_point,
+                                content::WebContents* web_contents);
+
+  // TODO(varkha): Delete this override and use the constructor above.
   LocationBarBubbleDelegateView(views::View* anchor_view,
                                 content::WebContents* web_contents);
   ~LocationBarBubbleDelegateView() override;
 
   // Displays the bubble with appearance and behavior tailored for |reason|.
   void ShowForReason(DisplayReason reason);
-
-  // views::BubbleDialogDelegateView:
-  int GetDialogButtons() const override;
 
   // content::NotificationObserver:
   void Observe(int type,

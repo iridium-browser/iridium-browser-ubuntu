@@ -32,7 +32,7 @@ class ContextualSearchJsApiServiceImpl
 // static
 void CreateContextualSearchJsApiService(
     ContextualSearchJsApiHandler* contextual_search_js_api_handler,
-    mojo::InterfaceRequest<mojom::ContextualSearchJsApiService> request);
+    mojom::ContextualSearchJsApiServiceRequest request);
 
 }  // namespace contextual_search
 

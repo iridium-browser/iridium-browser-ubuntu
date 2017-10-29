@@ -32,14 +32,15 @@ class {{exported}}{{cpp_class}}{% if parent_cpp_class %} : public {{parent_cpp_c
   {% endif %}
 
   {% endfor %}
-  v8::Local<v8::Value> toV8Impl(v8::Local<v8::Object>, v8::Isolate*) const override;
+  v8::Local<v8::Value> ToV8Impl(v8::Local<v8::Object>, v8::Isolate*) const override;
   DECLARE_VIRTUAL_TRACE();
 
  private:
-  {% for member in members %}
-  {% if member.nullable_indicator_name %}
+  {% for member in members if member.nullable_indicator_name %}
   bool {{member.nullable_indicator_name}} = false;
-  {% endif %}
+  {% endfor %}
+
+  {% for member in members %}
   {{member.member_cpp_type}} m_{{member.cpp_name}};
   {% endfor %}
 

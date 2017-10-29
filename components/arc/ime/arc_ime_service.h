@@ -8,9 +8,9 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "components/arc/arc_service.h"
 #include "components/arc/ime/arc_ime_bridge.h"
 #include "components/exo/wm_helper.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "ui/aura/env_observer.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/ime/text_input_client.h"
@@ -22,11 +22,15 @@
 
 namespace aura {
 class Window;
-}
+}  // namespace aura
+
+namespace content {
+class BrowserContext;
+}  // namespace content
 
 namespace ui {
 class InputMethod;
-}
+}  // namespace ui
 
 namespace arc {
 
@@ -34,7 +38,7 @@ class ArcBridgeService;
 
 // This class implements ui::TextInputClient and makes ARC windows behave
 // as a text input target in Chrome OS environment.
-class ArcImeService : public ArcService,
+class ArcImeService : public KeyedService,
                       public ArcImeBridge::Delegate,
                       public aura::EnvObserver,
                       public aura::WindowObserver,
@@ -42,7 +46,12 @@ class ArcImeService : public ArcService,
                       public keyboard::KeyboardControllerObserver,
                       public ui::TextInputClient {
  public:
-  explicit ArcImeService(ArcBridgeService* bridge_service);
+  // Returns singleton instance for the given BrowserContext,
+  // or nullptr if the browser |context| is not allowed to use ARC.
+  static ArcImeService* GetForBrowserContext(content::BrowserContext* context);
+
+  ArcImeService(content::BrowserContext* context,
+                ArcBridgeService* bridge_service);
   ~ArcImeService() override;
 
   class ArcWindowDelegate {
@@ -80,6 +89,11 @@ class ArcImeService : public ArcService,
   void OnCursorRectChanged(const gfx::Rect& rect) override;
   void OnCancelComposition() override;
   void ShowImeIfNeeded() override;
+  void OnCursorRectChangedWithSurroundingText(
+      const gfx::Rect& rect,
+      const gfx::Range& text_range,
+      const base::string16& text_in_range,
+      const gfx::Range& selection_range) override;
 
   // Overridden from keyboard::KeyboardControllerObserver.
   void OnKeyboardBoundsChanging(const gfx::Rect& rect) override;
@@ -93,6 +107,10 @@ class ArcImeService : public ArcService,
   void InsertChar(const ui::KeyEvent& event) override;
   ui::TextInputType GetTextInputType() const override;
   gfx::Rect GetCaretBounds() const override;
+  bool GetTextRange(gfx::Range* range) const override;
+  bool GetSelectionRange(gfx::Range* range) const override;
+  bool GetTextFromRange(const gfx::Range& range,
+                        base::string16* text) const override;
 
   // Overridden from ui::TextInputClient (with default implementation):
   // TODO(kinaba): Support each of these methods to the extent possible in
@@ -104,13 +122,9 @@ class ArcImeService : public ArcService,
   bool GetCompositionCharacterBounds(uint32_t index,
                                      gfx::Rect* rect) const override;
   bool HasCompositionText() const override;
-  bool GetTextRange(gfx::Range* range) const override;
   bool GetCompositionTextRange(gfx::Range* range) const override;
-  bool GetSelectionRange(gfx::Range* range) const override;
   bool SetSelectionRange(const gfx::Range& range) override;
   bool DeleteRange(const gfx::Range& range) override;
-  bool GetTextFromRange(const gfx::Range& range,
-                        base::string16* text) const override;
   void OnInputMethodChanged() override {}
   bool ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) override;
@@ -123,11 +137,16 @@ class ArcImeService : public ArcService,
  private:
   ui::InputMethod* GetInputMethod();
 
+  void InvalidateSurroundingTextAndSelectionRange();
+
   std::unique_ptr<ArcImeBridge> ime_bridge_;
   std::unique_ptr<ArcWindowDelegate> arc_window_delegate_;
   ui::TextInputType ime_type_;
   gfx::Rect cursor_rect_;
   bool has_composition_text_;
+  gfx::Range text_range_;
+  base::string16 text_in_range_;
+  gfx::Range selection_range_;
 
   aura::Window* focused_arc_window_ = nullptr;
 

@@ -17,6 +17,7 @@
 #include "extensions/browser/process_manager.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 namespace extensions {
@@ -26,9 +27,8 @@ class ExtensionBindingsApiTest : public ExtensionApiTest {
  public:
   void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
-    content::BrowserThread::PostTask(
-        content::BrowserThread::IO, FROM_HERE,
-        base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
+    host_resolver()->AddRule("*", "127.0.0.1");
+    ASSERT_TRUE(StartEmbeddedTestServer());
   }
 };
 
@@ -95,8 +95,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest,
 // Tests that we don't override events when bindings are re-injected.
 // Regression test for http://crbug.com/269149.
 // Regression test for http://crbug.com/436593.
-IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, EventOverriding) {
+// Flaky on Mac. http://crbug.com/733064.
+#if defined(OS_MACOSX)
+#define MAYBE_EventOverriding DISABLED_EventOverriding
+#else
+#define MAYBE_EventOverriding EventOverriding
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, MAYBE_EventOverriding) {
   ASSERT_TRUE(RunExtensionTest("bindings/event_overriding")) << message_;
+  // The extension test removes a window and, during window removal, sends the
+  // success message. Make sure we flush all pending tasks.
+  base::RunLoop().RunUntilIdle();
 }
 
 // Tests the effectiveness of the 'nocompile' feature file property.
@@ -117,8 +126,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, ModuleSystem) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, NoExportOverriding) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   // We need to create runtime bindings in the web page. An extension that's
   // externally connectable will do that for us.
   ASSERT_TRUE(LoadExtension(
@@ -141,8 +148,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, NoExportOverriding) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, NoGinDefineOverriding) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   // We need to create runtime bindings in the web page. An extension that's
   // externally connectable will do that for us.
   ASSERT_TRUE(LoadExtension(
@@ -167,7 +172,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, NoGinDefineOverriding) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, HandlerFunctionTypeChecking) {
-  ASSERT_TRUE(embedded_test_server()->Start());
   ui_test_utils::NavigateToURL(
       browser(),
       embedded_test_server()->GetURL(
@@ -187,8 +191,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, HandlerFunctionTypeChecking) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest,
                        MoreNativeFunctionInterceptionTests) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   // We need to create runtime bindings in the web page. An extension that's
   // externally connectable will do that for us.
   ASSERT_TRUE(
@@ -245,7 +247,6 @@ IN_PROC_BROWSER_TEST_F(FramesExtensionBindingsApiTest, FramesBeforeNavigation) {
   // Load the web page which tries to impersonate the sender extension via
   // scripting iframes/child windows before they finish navigating to pages
   // within the sender extension.
-  ASSERT_TRUE(embedded_test_server()->Start());
   ui_test_utils::NavigateToURL(
       browser(),
       embedded_test_server()->GetURL(
@@ -268,6 +269,50 @@ IN_PROC_BROWSER_TEST_F(FramesExtensionBindingsApiTest, FramesBeforeNavigation) {
           ->host_contents(),
       "getMessageCountAfterReceivingRealSenderMessage()", &message_count));
   EXPECT_EQ(1, message_count);
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, TestFreezingChrome) {
+  ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL(
+                     "/extensions/api_test/bindings/freeze.html"));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_FALSE(web_contents->IsCrashed());
+}
+
+// Tests interaction with event filter parsing.
+IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, TestEventFilterParsing) {
+  ExtensionTestMessageListener listener("ready", false);
+  ASSERT_TRUE(
+      LoadExtension(test_data_dir_.AppendASCII("bindings/event_filter")));
+  ASSERT_TRUE(listener.WaitUntilSatisfied());
+
+  ResultCatcher catcher;
+  ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("example.com", "/title1.html"));
+  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+// crbug.com/733337
+IN_PROC_BROWSER_TEST_F(ExtensionBindingsApiTest, ValidationInterception) {
+  // We need to create runtime bindings in the web page. An extension that's
+  // externally connectable will do that for us.
+  ASSERT_TRUE(
+      LoadExtension(test_data_dir_.AppendASCII("bindings")
+                        .AppendASCII("externally_connectable_everywhere")));
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ui_test_utils::NavigateToURL(
+      browser(),
+      embedded_test_server()->GetURL(
+          "/extensions/api_test/bindings/validation_interception.html"));
+  content::WaitForLoadStop(web_contents);
+  ASSERT_FALSE(web_contents->IsCrashed());
+  bool caught = false;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      web_contents, "domAutomationController.send(caught)", &caught));
+  EXPECT_TRUE(caught);
 }
 
 }  // namespace

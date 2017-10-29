@@ -13,9 +13,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "services/service_manager/public/c/main.h"
-#include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_runner.h"
@@ -26,6 +24,7 @@
 #include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/background.h"
+#include "ui/views/border.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/md_text_button.h"
@@ -60,7 +59,7 @@ class WindowDelegateView : public views::WidgetDelegateView {
   };
 
   explicit WindowDelegateView(uint32_t traits) : traits_(traits) {
-    set_background(views::Background::CreateSolidBackground(SK_ColorRED));
+    SetBackground(views::CreateSolidBackground(SK_ColorRED));
   }
   ~WindowDelegateView() override {}
 
@@ -93,7 +92,9 @@ class WindowDelegateView : public views::WidgetDelegateView {
   base::string16 GetWindowTitle() const override {
     return base::ASCIIToUTF16("Window");
   }
-  gfx::Size GetPreferredSize() const override { return gfx::Size(300, 300); }
+  gfx::Size CalculatePreferredSize() const override {
+    return gfx::Size(300, 300);
+  }
 
  private:
   const uint32_t traits_;
@@ -124,7 +125,9 @@ class ModalWindow : public views::WidgetDelegateView,
   void OnPaint(gfx::Canvas* canvas) override {
     canvas->FillRect(GetLocalBounds(), color_);
   }
-  gfx::Size GetPreferredSize() const override { return gfx::Size(200, 200); }
+  gfx::Size CalculatePreferredSize() const override {
+    return gfx::Size(200, 200);
+  }
   void Layout() override {
     gfx::Size open_ps = open_button_->GetPreferredSize();
     gfx::Rect local_bounds = GetLocalBounds();
@@ -188,7 +191,9 @@ class NonModalTransient : public views::WidgetDelegateView {
   void OnPaint(gfx::Canvas* canvas) override {
     canvas->FillRect(GetLocalBounds(), color_);
   }
-  gfx::Size GetPreferredSize() const override { return gfx::Size(250, 250); }
+  gfx::Size CalculatePreferredSize() const override {
+    return gfx::Size(250, 250);
+  }
 
   // Overridden from views::WidgetDelegate:
   bool CanResize() const override { return true; }
@@ -269,8 +274,8 @@ class WindowTypeLauncherView : public views::WidgetDelegateView,
         jank_button_(
             MdTextButton::Create(this, base::ASCIIToUTF16("Jank for (s):"))),
         jank_duration_field_(new views::Textfield) {
+    SetBorder(views::CreateEmptyBorder(gfx::Insets(5)));
     views::GridLayout* layout = new views::GridLayout(this);
-    layout->SetInsets(5, 5, 5, 5);
     SetLayoutManager(layout);
     views::ColumnSet* column_set = layout->AddColumnSet(0);
     column_set->AddColumn(views::GridLayout::LEADING,
@@ -405,8 +410,7 @@ class WindowTypeLauncherView : public views::WidgetDelegateView,
                          MenuItemView::NORMAL);
     // MenuRunner takes ownership of root.
     menu_runner_.reset(new MenuRunner(
-        root, MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU |
-                  views::MenuRunner::ASYNC));
+        root, MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU));
     menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
                             views::MENU_ANCHOR_TOPLEFT, source_type);
   }
@@ -435,7 +439,8 @@ class WindowTypeLauncherView : public views::WidgetDelegateView,
 }  // namespace
 
 WindowTypeLauncher::WindowTypeLauncher() {
-  registry_.AddInterface<mash::mojom::Launchable>(this);
+  registry_.AddInterface<mash::mojom::Launchable>(
+      base::Bind(&WindowTypeLauncher::Create, base::Unretained(this)));
 }
 WindowTypeLauncher::~WindowTypeLauncher() {}
 
@@ -448,17 +453,18 @@ void WindowTypeLauncher::RemoveWindow(views::Widget* window) {
 }
 
 void WindowTypeLauncher::OnStart() {
-  aura_init_ = base::MakeUnique<views::AuraInit>(
+  aura_init_ = views::AuraInit::Create(
       context()->connector(), context()->identity(), "views_mus_resources.pak",
       std::string(), nullptr, views::AuraInit::Mode::AURA_MUS);
+  if (!aura_init_)
+    context()->QuitNow();
 }
 
 void WindowTypeLauncher::OnBindInterface(
-    const service_manager::ServiceInfo& source_info,
+    const service_manager::BindSourceInfo& source_info,
     const std::string& interface_name,
     mojo::ScopedMessagePipeHandle interface_pipe) {
-  registry_.BindInterface(source_info.identity, interface_name,
-                          std::move(interface_pipe));
+  registry_.BindInterface(interface_name, std::move(interface_pipe));
 }
 
 void WindowTypeLauncher::Launch(uint32_t what, mash::mojom::LaunchMode how) {
@@ -476,9 +482,7 @@ void WindowTypeLauncher::Launch(uint32_t what, mash::mojom::LaunchMode how) {
   windows_.push_back(window);
 }
 
-void WindowTypeLauncher::Create(
-    const service_manager::Identity& remote_identity,
-    mash::mojom::LaunchableRequest request) {
+void WindowTypeLauncher::Create(mash::mojom::LaunchableRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }
 

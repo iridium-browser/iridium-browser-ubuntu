@@ -8,7 +8,6 @@
 #include "ash/shell.h"
 
 namespace ash {
-namespace test {
 
 AshTestViewsDelegate::AshTestViewsDelegate() {}
 
@@ -21,7 +20,7 @@ void AshTestViewsDelegate::OnBeforeWidgetInit(
 
   if (!params->parent && !params->context && ash::Shell::HasInstance()) {
     // If the window has neither a parent nor a context add to the root.
-    params->parent = ash::Shell::GetInstance()->GetPrimaryRootWindow();
+    params->parent = ash::Shell::Get()->GetPrimaryRootWindow();
   }
 }
 
@@ -35,5 +34,13 @@ void AshTestViewsDelegate::NotifyAccessibilityEvent(views::View* view,
   }
 }
 
-}  // namespace test
+views::TestViewsDelegate::ProcessMenuAcceleratorResult
+AshTestViewsDelegate::ProcessAcceleratorWhileMenuShowing(
+    const ui::Accelerator& accelerator) {
+  if (accelerator == close_menu_accelerator_)
+    return ProcessMenuAcceleratorResult::CLOSE_MENU;
+
+  return ProcessMenuAcceleratorResult::LEAVE_MENU_OPEN;
+}
+
 }  // namespace ash

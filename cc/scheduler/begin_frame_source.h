@@ -11,8 +11,6 @@
 #include <set>
 #include <string>
 
-#include "base/containers/flat_set.h"
-#include "base/containers/small_map.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/trace_event/trace_event.h"
@@ -74,6 +72,7 @@ class CC_EXPORT BeginFrameObserver {
 class CC_EXPORT BeginFrameObserverBase : public BeginFrameObserver {
  public:
   BeginFrameObserverBase();
+  ~BeginFrameObserverBase() override;
 
   // BeginFrameObserver
 
@@ -84,12 +83,13 @@ class CC_EXPORT BeginFrameObserverBase : public BeginFrameObserver {
   const BeginFrameArgs& LastUsedBeginFrameArgs() const override;
 
  protected:
-  // Subclasses should override this method!
   // Return true if the given argument is (or will be) used.
   virtual bool OnBeginFrameDerivedImpl(const BeginFrameArgs& args) = 0;
 
+  void AsValueInto(base::trace_event::TracedValue* state) const;
+
   BeginFrameArgs last_begin_frame_args_;
-  int64_t dropped_begin_frame_args_;
+  int64_t dropped_begin_frame_args_ = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BeginFrameObserverBase);
@@ -107,21 +107,19 @@ class CC_EXPORT BeginFrameObserverBase : public BeginFrameObserver {
 class CC_EXPORT BeginFrameSource {
  public:
   BeginFrameSource();
-  virtual ~BeginFrameSource() {}
+  virtual ~BeginFrameSource();
 
-  // BeginFrameObservers use DidFinishFrame to acknowledge that they have
-  // completed handling a BeginFrame.
-  //
-  // The DisplayScheduler uses these acknowledgments to trigger an early
-  // deadline once all BeginFrameObservers have completed a frame.
-  //
-  // They also provide back pressure to a frame source about frame processing
-  // (rather than toggling SetNeedsBeginFrames every frame). For example, the
-  // BackToBackFrameSource uses them to make sure only one frame is pending at a
-  // time.
-  // TODO(eseckler): Use BeginFrameAcks in DisplayScheduler as described above.
-  virtual void DidFinishFrame(BeginFrameObserver* obs,
-                              const BeginFrameAck& ack) = 0;
+  // Returns an identifier for this BeginFrameSource. Guaranteed unique within a
+  // process, but not across processes. This is used to create BeginFrames that
+  // originate at this source. Note that BeginFrameSources may pass on
+  // BeginFrames created by other sources, with different IDs.
+  uint32_t source_id() const { return source_id_; }
+
+  // BeginFrameObservers use DidFinishFrame to provide back pressure to a frame
+  // source about frame processing (rather than toggling SetNeedsBeginFrames
+  // every frame). For example, the BackToBackFrameSource uses them to make sure
+  // only one frame is pending at a time.
+  virtual void DidFinishFrame(BeginFrameObserver* obs) = 0;
 
   // Add/Remove an observer from the source. When no observers are added the BFS
   // should shut down its timers, disable vsync, etc.
@@ -132,21 +130,18 @@ class CC_EXPORT BeginFrameSource {
   // begin frames without waiting.
   virtual bool IsThrottled() const = 0;
 
-  // Returns an identifier for this BeginFrameSource. Guaranteed unique within a
-  // process, but not across processes. This is used to create BeginFrames that
-  // originate at this source. Note that BeginFrameSources may pass on
-  // BeginFrames created by other sources, with different IDs.
-  uint32_t source_id() const;
+  virtual void AsValueInto(base::trace_event::TracedValue* state) const;
 
  private:
   uint32_t source_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(BeginFrameSource);
 };
 
 // A BeginFrameSource that does nothing.
 class CC_EXPORT StubBeginFrameSource : public BeginFrameSource {
  public:
-  void DidFinishFrame(BeginFrameObserver* obs,
-                      const BeginFrameAck& ack) override {}
+  void DidFinishFrame(BeginFrameObserver* obs) override {}
   void AddObserver(BeginFrameObserver* obs) override {}
   void RemoveObserver(BeginFrameObserver* obs) override {}
   bool IsThrottled() const override;
@@ -164,7 +159,7 @@ class CC_EXPORT SyntheticBeginFrameSource : public BeginFrameSource {
 };
 
 // A frame source which calls BeginFrame (at the next possible time) as soon as
-// remaining frames reaches zero.
+// an observer acknowledges the prior BeginFrame.
 class CC_EXPORT BackToBackBeginFrameSource : public SyntheticBeginFrameSource,
                                              public DelayBasedTimeSourceClient {
  public:
@@ -175,8 +170,7 @@ class CC_EXPORT BackToBackBeginFrameSource : public SyntheticBeginFrameSource,
   // BeginFrameSource implementation.
   void AddObserver(BeginFrameObserver* obs) override;
   void RemoveObserver(BeginFrameObserver* obs) override;
-  void DidFinishFrame(BeginFrameObserver* obs,
-                      const BeginFrameAck& ack) override;
+  void DidFinishFrame(BeginFrameObserver* obs) override;
   bool IsThrottled() const override;
 
   // SyntheticBeginFrameSource implementation.
@@ -209,8 +203,7 @@ class CC_EXPORT DelayBasedBeginFrameSource : public SyntheticBeginFrameSource,
   // BeginFrameSource implementation.
   void AddObserver(BeginFrameObserver* obs) override;
   void RemoveObserver(BeginFrameObserver* obs) override;
-  void DidFinishFrame(BeginFrameObserver* obs,
-                      const BeginFrameAck& ack) override {}
+  void DidFinishFrame(BeginFrameObserver* obs) override {}
   bool IsThrottled() const override;
 
   // SyntheticBeginFrameSource implementation.
@@ -235,50 +228,10 @@ class CC_EXPORT DelayBasedBeginFrameSource : public SyntheticBeginFrameSource,
   DISALLOW_COPY_AND_ASSIGN(DelayBasedBeginFrameSource);
 };
 
-// Helper class that tracks outstanding acknowledgments from
-// BeginFrameObservers.
-class CC_EXPORT BeginFrameObserverAckTracker {
- public:
-  BeginFrameObserverAckTracker();
-  virtual ~BeginFrameObserverAckTracker();
-
-  // The BeginFrameSource uses these methods to notify us when a BeginFrame was
-  // started, an observer finished a frame, or an observer was added/removed.
-  void OnBeginFrame(const BeginFrameArgs& args);
-  void OnObserverFinishedFrame(BeginFrameObserver* obs,
-                               const BeginFrameAck& ack);
-  void OnObserverAdded(BeginFrameObserver* obs);
-  void OnObserverRemoved(BeginFrameObserver* obs);
-
-  // Returns |true| if all the source's observers completed the current frame.
-  bool AllObserversFinishedFrame() const;
-
-  // Returns |true| if any observer had damage during the current frame.
-  bool AnyObserversHadDamage() const;
-
-  // Return the sequence number of the latest frame that all active observers
-  // have confirmed.
-  uint64_t LatestConfirmedSequenceNumber() const;
-
- private:
-  void SourceChanged(const BeginFrameArgs& args);
-
-  uint32_t current_source_id_;
-  uint64_t current_sequence_number_;
-  // Small sets, but order matters for intersection computation.
-  base::flat_set<BeginFrameObserver*> observers_;
-  base::flat_set<BeginFrameObserver*> finished_observers_;
-  bool observers_had_damage_;
-  base::SmallMap<std::map<BeginFrameObserver*, uint64_t>, 4>
-      latest_confirmed_sequence_numbers_;
-};
-
 class CC_EXPORT ExternalBeginFrameSourceClient {
  public:
   // Only called when changed.  Assumed false by default.
   virtual void OnNeedsBeginFrames(bool needs_begin_frames) = 0;
-  // Called when all observers have completed a frame.
-  virtual void OnDidFinishFrame(const BeginFrameAck& ack) = 0;
 };
 
 // A BeginFrameSource that is only ticked manually.  Usually the endpoint
@@ -294,23 +247,18 @@ class CC_EXPORT ExternalBeginFrameSource : public BeginFrameSource {
   // BeginFrameSource implementation.
   void AddObserver(BeginFrameObserver* obs) override;
   void RemoveObserver(BeginFrameObserver* obs) override;
-  void DidFinishFrame(BeginFrameObserver* obs,
-                      const BeginFrameAck& ack) override;
+  void DidFinishFrame(BeginFrameObserver* obs) override {}
   bool IsThrottled() const override;
+  void AsValueInto(base::trace_event::TracedValue* state) const override;
 
   void OnSetBeginFrameSourcePaused(bool paused);
   void OnBeginFrame(const BeginFrameArgs& args);
 
  protected:
-  void MaybeFinishFrame();
-  void FinishFrame();
-
-  BeginFrameArgs missed_begin_frame_args_;
+  BeginFrameArgs last_begin_frame_args_;
   std::unordered_set<BeginFrameObserver*> observers_;
   ExternalBeginFrameSourceClient* client_;
   bool paused_ = false;
-  bool frame_active_ = false;
-  BeginFrameObserverAckTracker ack_tracker_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ExternalBeginFrameSource);

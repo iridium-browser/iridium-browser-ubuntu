@@ -4,69 +4,71 @@
 
 #include "platform/graphics/PaintInvalidationReason.h"
 
-#include "wtf/Assertions.h"
+#include "platform/wtf/Assertions.h"
 
 namespace blink {
 
-const char* paintInvalidationReasonToString(PaintInvalidationReason reason) {
+const char* PaintInvalidationReasonToString(PaintInvalidationReason reason) {
   switch (reason) {
-    case PaintInvalidationNone:
+    case PaintInvalidationReason::kNone:
       return "none";
-    case PaintInvalidationIncremental:
+    case PaintInvalidationReason::kIncremental:
       return "incremental";
-    case PaintInvalidationRectangle:
+    case PaintInvalidationReason::kRectangle:
       return "invalidate paint rectangle";
-    case PaintInvalidationFull:
+    case PaintInvalidationReason::kFull:
       return "full";
-    case PaintInvalidationStyleChange:
+    case PaintInvalidationReason::kStyle:
       return "style change";
-    case PaintInvalidationForcedByLayout:
-      return "forced by layout";
-    case PaintInvalidationCompositingUpdate:
+    case PaintInvalidationReason::kGeometry:
+      return "geometry";
+    case PaintInvalidationReason::kCompositing:
       return "compositing update";
-    case PaintInvalidationBorderBoxChange:
-      return "border box change";
-    case PaintInvalidationContentBoxChange:
-      return "content box change";
-    case PaintInvalidationLayoutOverflowBoxChange:
-      return "layout overflow box change";
-    case PaintInvalidationBoundsChange:
-      return "bounds change";
-    case PaintInvalidationLocationChange:
-      return "location change";
-    case PaintInvalidationBackgroundObscurationChange:
-      return "background obscuration change";
-    case PaintInvalidationBecameVisible:
-      return "became visible";
-    case PaintInvalidationBecameInvisible:
-      return "became invisible";
-    case PaintInvalidationScroll:
+    case PaintInvalidationReason::kBackground:
+      return "background";
+    case PaintInvalidationReason::kAppeared:
+      return "appeared";
+    case PaintInvalidationReason::kDisappeared:
+      return "disappeared";
+    case PaintInvalidationReason::kScroll:
       return "scroll";
-    case PaintInvalidationSelection:
+    case PaintInvalidationReason::kScrollControl:
+      return "scroll control";
+    case PaintInvalidationReason::kSelection:
       return "selection";
-    case PaintInvalidationOutline:
+    case PaintInvalidationReason::kOutline:
       return "outline";
-    case PaintInvalidationSubtree:
+    case PaintInvalidationReason::kSubtree:
       return "subtree";
-    case PaintInvalidationLayoutObjectInsertion:
-      return "layoutObject insertion";
-    case PaintInvalidationLayoutObjectRemoval:
-      return "layoutObject removal";
-    case PaintInvalidationSVGResourceChange:
+    case PaintInvalidationReason::kSVGResource:
       return "SVG resource change";
-    case PaintInvalidationBackgroundOnScrollingContentsLayer:
+    case PaintInvalidationReason::kBackgroundOnScrollingContentsLayer:
       return "background on scrolling contents layer";
-    case PaintInvalidationCaret:
+    case PaintInvalidationReason::kCaret:
       return "caret";
-    case PaintInvalidationViewBackground:
-      return "view background";
-    case PaintInvalidationForTesting:
+    case PaintInvalidationReason::kDocumentMarker:
+      return "DocumentMarker change";
+    case PaintInvalidationReason::kImage:
+      return "image";
+    case PaintInvalidationReason::kChunkUncacheable:
+      return "chunk uncacheable";
+    case PaintInvalidationReason::kChunkReordered:
+      return "chunk reordered";
+    case PaintInvalidationReason::kFullLayer:
+      return "full layer";
+    case PaintInvalidationReason::kPaintProperty:
+      return "paint property change";
+    case PaintInvalidationReason::kForTesting:
       return "for testing";
-    case PaintInvalidationDelayedFull:
+    case PaintInvalidationReason::kDelayedFull:
       return "delayed full";
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return "";
+}
+
+std::ostream& operator<<(std::ostream& out, PaintInvalidationReason reason) {
+  return out << PaintInvalidationReasonToString(reason);
 }
 
 }  // namespace blink

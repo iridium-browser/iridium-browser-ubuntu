@@ -6,57 +6,57 @@
 
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/V8Binding.h"
-#include "bindings/core/v8/V8DOMWrapper.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/core/v8/V8GCController.h"
 #include "bindings/core/v8/V8IntersectionObserverCallback.h"
 #include "bindings/core/v8/V8IntersectionObserverInit.h"
 #include "core/dom/Element.h"
+#include "platform/bindings/V8DOMWrapper.h"
 
 namespace blink {
 
 void V8IntersectionObserver::constructorCustom(
     const v8::FunctionCallbackInfo<v8::Value>& info) {
-  ExceptionState exceptionState(info.GetIsolate(),
-                                ExceptionState::ConstructionContext,
-                                "IntersectionObserver");
+  ExceptionState exception_state(info.GetIsolate(),
+                                 ExceptionState::kConstructionContext,
+                                 "IntersectionObserver");
 
   if (UNLIKELY(info.Length() < 1)) {
-    exceptionState.throwTypeError(
-        ExceptionMessages::notEnoughArguments(1, info.Length()));
+    exception_state.ThrowTypeError(
+        ExceptionMessages::NotEnoughArguments(1, info.Length()));
     return;
   }
 
   v8::Local<v8::Object> wrapper = info.Holder();
 
   if (!info[0]->IsFunction()) {
-    exceptionState.throwTypeError(
+    exception_state.ThrowTypeError(
         "The callback provided as parameter 1 is not a function.");
     return;
   }
 
-  if (info.Length() > 1 && !isUndefinedOrNull(info[1]) &&
+  if (info.Length() > 1 && !IsUndefinedOrNull(info[1]) &&
       !info[1]->IsObject()) {
-    exceptionState.throwTypeError("parameter 2 ('options') is not an object.");
+    exception_state.ThrowTypeError("parameter 2 ('options') is not an object.");
     return;
   }
 
-  IntersectionObserverInit intersectionObserverInit;
-  V8IntersectionObserverInit::toImpl(info.GetIsolate(), info[1],
-                                     intersectionObserverInit, exceptionState);
-  if (exceptionState.hadException())
+  IntersectionObserverInit intersection_observer_init;
+  V8IntersectionObserverInit::toImpl(
+      info.GetIsolate(), info[1], intersection_observer_init, exception_state);
+  if (exception_state.HadException())
     return;
 
   IntersectionObserverCallback* callback = new V8IntersectionObserverCallback(
       v8::Local<v8::Function>::Cast(info[0]), wrapper,
-      ScriptState::current(info.GetIsolate()));
-  IntersectionObserver* observer = IntersectionObserver::create(
-      intersectionObserverInit, *callback, exceptionState);
-  if (exceptionState.hadException())
+      ScriptState::Current(info.GetIsolate()));
+  IntersectionObserver* observer = IntersectionObserver::Create(
+      intersection_observer_init, *callback, exception_state);
+  if (exception_state.HadException())
     return;
-  ASSERT(observer);
-  v8SetReturnValue(info,
-                   V8DOMWrapper::associateObjectWithWrapper(
+  DCHECK(observer);
+  V8SetReturnValue(info,
+                   V8DOMWrapper::AssociateObjectWithWrapper(
                        info.GetIsolate(), observer, &wrapperTypeInfo, wrapper));
 }
 

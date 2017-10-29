@@ -35,18 +35,15 @@ void ImageWriterHandler::Write(
     extensions::mojom::RemovableStorageWriterClientPtr client) {
   client_ = std::move(client);
   client_.set_connection_error_handler(
-      base::Bind(&ImageWriterHandler::Cancel, base::Unretained(this)));
+      base::BindOnce(&ImageWriterHandler::Cancel, base::Unretained(this)));
 
   base::FilePath target_device = device;
   const bool test_mode = IsTestDevice(device);
   if (test_mode)
     target_device = MakeTestDevicePath(image);
 
-  // https://crbug.com/352442
-  if (!image_writer_.get() || image != image_writer_->GetImagePath() ||
-      target_device != image_writer_->GetDevicePath()) {
+  if (ShouldResetImageWriter(image, target_device))
     image_writer_.reset(new ImageWriter(this, image, target_device));
-  }
 
   if (image_writer_->IsRunning()) {
     SendFailed(error::kOperationAlreadyInProgress);
@@ -73,18 +70,15 @@ void ImageWriterHandler::Verify(
     extensions::mojom::RemovableStorageWriterClientPtr client) {
   client_ = std::move(client);
   client_.set_connection_error_handler(
-      base::Bind(&ImageWriterHandler::Cancel, base::Unretained(this)));
+      base::BindOnce(&ImageWriterHandler::Cancel, base::Unretained(this)));
 
   base::FilePath target_device = device;
   const bool test_mode = IsTestDevice(device);
   if (test_mode)
     target_device = MakeTestDevicePath(image);
 
-  // https://crbug.com/352442
-  if (!image_writer_.get() || image != image_writer_->GetImagePath() ||
-      target_device != image_writer_->GetDevicePath()) {
+  if (ShouldResetImageWriter(image, target_device))
     image_writer_.reset(new ImageWriter(this, image, target_device));
-  }
 
   if (image_writer_->IsRunning()) {
     SendFailed(error::kOperationAlreadyInProgress);
@@ -122,6 +116,21 @@ void ImageWriterHandler::Cancel() {
   if (image_writer_)
     image_writer_->Cancel();
   client_.reset();
+}
+
+bool ImageWriterHandler::ShouldResetImageWriter(const base::FilePath& image,
+                                                const base::FilePath& device) {
+  if (!image_writer_)
+    return true;
+  if (image != image_writer_->GetImagePath())
+    return true;
+  if (device != image_writer_->GetDevicePath())
+    return true;
+
+  // When writing and verifying the same file on the same device, keep
+  // the file handles open; do not reset them since that can cause the
+  // operation to fail in unexpected ways: crbug.com/352442#c7
+  return false;
 }
 
 }  // namespace image_writer

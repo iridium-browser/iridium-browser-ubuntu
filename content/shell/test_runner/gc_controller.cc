@@ -7,8 +7,8 @@
 #include "gin/arguments.h"
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebKit.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "v8/include/v8.h"
 
 namespace test_runner {
@@ -16,10 +16,10 @@ namespace test_runner {
 gin::WrapperInfo GCController::kWrapperInfo = {gin::kEmbedderNativeGin};
 
 // static
-void GCController::Install(blink::WebFrame* frame) {
-  v8::Isolate* isolate = blink::mainThreadIsolate();
+void GCController::Install(blink::WebLocalFrame* frame) {
+  v8::Isolate* isolate = blink::MainThreadIsolate();
   v8::HandleScope handle_scope(isolate);
-  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
+  v8::Local<v8::Context> context = frame->MainWorldScriptContext();
   if (context.IsEmpty())
     return;
 

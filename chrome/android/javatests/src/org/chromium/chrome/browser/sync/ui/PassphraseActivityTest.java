@@ -9,69 +9,78 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
 
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.RuleChain;
+import org.junit.runner.RunWith;
+
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.sync.FakeProfileSyncService;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
-import org.chromium.chrome.test.util.ApplicationData;
+import org.chromium.chrome.browser.test.ChromeBrowserTestRule;
+import org.chromium.chrome.browser.test.ClearAppDataTestRule;
 import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
 import org.chromium.components.signin.ChromeSigninController;
-import org.chromium.content.browser.test.NativeLibraryTestBase;
 
 /**
  * Tests for PassphraseActivity.
  */
-public class PassphraseActivityTest extends NativeLibraryTestBase {
-    private static final String TEST_ACCOUNT = "test@gmail.com";
+@RunWith(BaseJUnit4ClassRunner.class)
+public class PassphraseActivityTest {
+    @Rule
+    public final RuleChain mChain =
+            RuleChain.outerRule(new ClearAppDataTestRule()).around(new ChromeBrowserTestRule());
 
     private Context mContext;
 
-    @Override
-    protected void setUp() throws Exception {
-        super.setUp();
-        mContext = getInstrumentation().getTargetContext();
-        SigninTestUtil.setUpAuthForTest(getInstrumentation());
-        ApplicationData.clearAppData(mContext);
-        loadNativeLibraryAndInitBrowserProcess();
+    @Before
+    public void setUp() throws Exception {
+        mContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
     }
 
-    @Override
-    protected void tearDown() throws Exception {
+    @After
+    public void tearDown() throws Exception {
         // Clear ProfileSyncService in case it was mocked.
         ProfileSyncService.overrideForTests(null);
-        super.tearDown();
-        SigninTestUtil.resetSigninState();
     }
 
     /**
      * This is a regression test for http://crbug.com/469890.
      */
+    @Test
     @SmallTest
     @Feature({"Sync"})
     @RetryOnFailure
     public void testCallbackAfterBackgrounded() throws Exception {
-        getInstrumentation().waitForIdleSync();
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         SigninTestUtil.addAndSignInTestAccount();
 
         // Override before creating the activity so we know initialized is false.
         overrideProfileSyncService();
 
         // PassphraseActivity won't start if an account isn't set.
-        assertNotNull(ChromeSigninController.get(mContext).getSignedInAccountName());
+        Assert.assertNotNull(ChromeSigninController.get().getSignedInAccountName());
 
         // Create the activity.
         final PassphraseActivity activity = launchPassphraseActivity();
-        assertNotNull(activity);
+        Assert.assertNotNull(activity);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
                 // Fake backgrounding the activity.
                 Bundle bundle = new Bundle();
-                getInstrumentation().callActivityOnPause(activity);
-                getInstrumentation().callActivityOnSaveInstanceState(activity, bundle);
+                InstrumentationRegistry.getInstrumentation().callActivityOnPause(activity);
+                InstrumentationRegistry.getInstrumentation().callActivityOnSaveInstanceState(
+                        activity, bundle);
                 // Fake sync's backend finishing its initialization.
                 FakeProfileSyncService pss = (FakeProfileSyncService) ProfileSyncService.get();
                 pss.setEngineInitialized(true);
@@ -89,10 +98,11 @@ public class PassphraseActivityTest extends NativeLibraryTestBase {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         // Clears the task stack above this activity if it already exists.
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        ActivityMonitor monitor =
-                getInstrumentation().addMonitor(PassphraseActivity.class.getName(), null, false);
+        ActivityMonitor monitor = InstrumentationRegistry.getInstrumentation().addMonitor(
+                PassphraseActivity.class.getName(), null, false);
         mContext.startActivity(intent);
-        return (PassphraseActivity) getInstrumentation().waitForMonitor(monitor);
+        return (PassphraseActivity) InstrumentationRegistry.getInstrumentation().waitForMonitor(
+                monitor);
     }
 
     private void overrideProfileSyncService() {

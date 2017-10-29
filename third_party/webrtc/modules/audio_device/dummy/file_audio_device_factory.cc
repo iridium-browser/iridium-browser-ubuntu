@@ -13,8 +13,8 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "webrtc/base/logging.h"
 #include "webrtc/modules/audio_device/dummy/file_audio_device.h"
+#include "webrtc/rtc_base/logging.h"
 
 namespace webrtc {
 
@@ -39,8 +39,8 @@ FileAudioDevice* FileAudioDeviceFactory::CreateFileAudioDevice(
 void FileAudioDeviceFactory::SetFilenamesToUse(
     const char* inputAudioFilename, const char* outputAudioFilename) {
 #ifdef WEBRTC_DUMMY_FILE_DEVICES
-  assert(strlen(inputAudioFilename) < MAX_FILENAME_LEN &&
-         strlen(outputAudioFilename) < MAX_FILENAME_LEN);
+  RTC_DCHECK(strlen(inputAudioFilename) < MAX_FILENAME_LEN &&
+             strlen(outputAudioFilename) < MAX_FILENAME_LEN);
 
   // Copy the strings since we don't know the lifetime of the input pointers.
   strncpy(_inputAudioFilename, inputAudioFilename, MAX_FILENAME_LEN);

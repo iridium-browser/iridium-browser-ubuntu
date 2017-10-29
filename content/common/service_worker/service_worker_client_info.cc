@@ -11,12 +11,13 @@ namespace content {
 
 ServiceWorkerClientInfo::ServiceWorkerClientInfo()
     : ServiceWorkerClientInfo(std::string(),
-                              blink::WebPageVisibilityStateLast,
+                              blink::kWebPageVisibilityStateLast,
                               false,
                               GURL(),
                               REQUEST_CONTEXT_FRAME_TYPE_LAST,
                               base::TimeTicks(),
-                              blink::WebServiceWorkerClientTypeLast) {}
+                              base::TimeTicks(),
+                              blink::kWebServiceWorkerClientTypeLast) {}
 
 ServiceWorkerClientInfo::ServiceWorkerClientInfo(
     const std::string& client_uuid,
@@ -25,6 +26,7 @@ ServiceWorkerClientInfo::ServiceWorkerClientInfo(
     const GURL& url,
     RequestContextFrameType frame_type,
     base::TimeTicks last_focus_time,
+    base::TimeTicks create_time,
     blink::WebServiceWorkerClientType client_type)
     : client_uuid(client_uuid),
       page_visibility_state(page_visibility_state),
@@ -32,17 +34,17 @@ ServiceWorkerClientInfo::ServiceWorkerClientInfo(
       url(url),
       frame_type(frame_type),
       last_focus_time(last_focus_time),
+      create_time(create_time),
       client_type(client_type) {}
 
 ServiceWorkerClientInfo::ServiceWorkerClientInfo(
     const ServiceWorkerClientInfo& other) = default;
 
 bool ServiceWorkerClientInfo::IsEmpty() const {
-  return page_visibility_state == blink::WebPageVisibilityStateLast &&
-         is_focused == false &&
-         url.is_empty() &&
+  return page_visibility_state == blink::kWebPageVisibilityStateLast &&
+         is_focused == false && url.is_empty() &&
          frame_type == REQUEST_CONTEXT_FRAME_TYPE_LAST &&
-         client_type == blink::WebServiceWorkerClientTypeLast;
+         client_type == blink::kWebServiceWorkerClientTypeLast;
 }
 
 bool ServiceWorkerClientInfo::IsValid() const {

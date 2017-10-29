@@ -40,12 +40,6 @@ enum NotificationType {
   // containing the affected Browser.  No details are expected.
   NOTIFICATION_BROWSER_WINDOW_READY,
 
-  // This message is sent when a browser is closing. The source is a
-  // Source<Browser> containing the affected Browser. No details are expected.
-  // This is sent prior to BROWSER_CLOSED, and may be sent more than once for a
-  // particular browser.
-  NOTIFICATION_BROWSER_CLOSING,
-
   // This message is sent after a window has been closed.  The source is a
   // Source<Browser> containing the affected Browser.  No details are exptected.
   NOTIFICATION_BROWSER_CLOSED,
@@ -82,12 +76,6 @@ enum NotificationType {
   // Sent when the renderer returns focus to the browser, as part of focus
   // traversal. The source is the browser, there are no details.
   NOTIFICATION_FOCUS_RETURNED_TO_BROWSER,
-
-  // A new tab is created from an existing tab to serve as a target of a
-  // navigation that is about to happen. The source will be a Source<Profile>
-  // corresponding to the profile in which the new tab will live.  Details in
-  // the form of a RetargetingDetails object are provided.
-  NOTIFICATION_RETARGETING,
 
   // Application-wide ----------------------------------------------------------
 
@@ -276,24 +264,6 @@ enum NotificationType {
   // Sent when a PrintJob has been released.
   // Source is the WebContents that holds the print job.
   NOTIFICATION_PRINT_JOB_RELEASED,
-
-  // Upgrade notifications ---------------------------------------------------
-
-  // Sent when Chrome believes an update has been installed and available for
-  // long enough with the user shutting down to let it take effect. See
-  // upgrade_detector.cc for details on how long it waits. No details are
-  // expected.
-  NOTIFICATION_UPGRADE_RECOMMENDED,
-
-  // Sent when a critical update has been installed. No details are expected.
-  NOTIFICATION_CRITICAL_UPGRADE_INSTALLED,
-
-  // Sent when the current install is outdated. No details are expected.
-  NOTIFICATION_OUTDATED_INSTALL,
-
-  // Sent when the current install is outdated and auto-update (AU) is disabled.
-  // No details are expected.
-  NOTIFICATION_OUTDATED_INSTALL_NO_AU,
 
   // Content Settings --------------------------------------------------------
 

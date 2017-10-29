@@ -15,6 +15,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/renderer_resources.h"
 #include "chrome/renderer/extensions/app_bindings.h"
+#include "chrome/renderer/extensions/app_hooks_delegate.h"
 #include "chrome/renderer/extensions/automation_internal_custom_bindings.h"
 #include "chrome/renderer/extensions/media_galleries_custom_bindings.h"
 #include "chrome/renderer/extensions/notifications_native_handler.h"
@@ -33,6 +34,7 @@
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/switches.h"
+#include "extensions/renderer/bindings/api_bindings_system.h"
 #include "extensions/renderer/css_native_handler.h"
 #include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/i18n_custom_bindings.h"
@@ -42,6 +44,7 @@
 #include "extensions/renderer/script_context.h"
 #include "media/media_features.h"
 #include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 
 #if BUILDFLAG(ENABLE_WEBRTC)
@@ -74,9 +77,9 @@ void ChromeExtensionsDispatcherDelegate::InitOriginPermissions(
   // conservative.
   if (extensions::Manifest::IsComponentLocation(extension->location()) &&
       is_extension_active) {
-    blink::WebSecurityPolicy::addOriginAccessWhitelistEntry(
-        extension->url(), blink::WebString::fromUTF8(content::kChromeUIScheme),
-        blink::WebString::fromUTF8(chrome::kChromeUIThemeHost), false);
+    blink::WebSecurityPolicy::AddOriginAccessWhitelistEntry(
+        extension->url(), blink::WebString::FromUTF8(content::kChromeUIScheme),
+        blink::WebString::FromUTF8(chrome::kChromeUIThemeHost), false);
   }
 
   // TODO(jstritar): We should try to remove this special case. Also, these
@@ -85,17 +88,16 @@ void ChromeExtensionsDispatcherDelegate::InitOriginPermissions(
   if (is_extension_active &&
       extension->permissions_data()->HasAPIPermission(
           extensions::APIPermission::kManagement)) {
-    blink::WebSecurityPolicy::addOriginAccessWhitelistEntry(
-        extension->url(),
-        blink::WebString::fromUTF8(content::kChromeUIScheme),
-        blink::WebString::fromUTF8(chrome::kChromeUIExtensionIconHost),
-        false);
+    blink::WebSecurityPolicy::AddOriginAccessWhitelistEntry(
+        extension->url(), blink::WebString::FromUTF8(content::kChromeUIScheme),
+        blink::WebString::FromUTF8(chrome::kChromeUIExtensionIconHost), false);
   }
 }
 
 void ChromeExtensionsDispatcherDelegate::RegisterNativeHandlers(
     extensions::Dispatcher* dispatcher,
     extensions::ModuleSystem* module_system,
+    extensions::ExtensionBindingsSystem* bindings_system,
     extensions::ScriptContext* context) {
   module_system->RegisterNativeHandler(
       "app", std::unique_ptr<NativeHandler>(
@@ -135,13 +137,13 @@ void ChromeExtensionsDispatcherDelegate::RegisterNativeHandlers(
 #if BUILDFLAG(ENABLE_WEBRTC)
   module_system->RegisterNativeHandler(
       "cast_streaming_natives",
-      std::unique_ptr<NativeHandler>(
-          new extensions::CastStreamingNativeHandler(context)));
+      base::MakeUnique<extensions::CastStreamingNativeHandler>(
+          context, bindings_system));
 #endif
   module_system->RegisterNativeHandler(
       "automationInternal",
-      std::unique_ptr<NativeHandler>(
-          new extensions::AutomationInternalCustomBindings(context)));
+      base::MakeUnique<extensions::AutomationInternalCustomBindings>(
+          context, bindings_system));
 
   // The following are native handlers that are defined in //extensions, but
   // are only used for APIs defined in Chrome.
@@ -163,7 +165,6 @@ void ChromeExtensionsDispatcherDelegate::RegisterNativeHandlers(
 void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
     extensions::ResourceBundleSourceMap* source_map) {
   // Custom bindings.
-  source_map->RegisterSource("app", IDR_APP_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("automation", IDR_AUTOMATION_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("automationEvent", IDR_AUTOMATION_EVENT_JS);
   source_map->RegisterSource("automationNode", IDR_AUTOMATION_NODE_JS);
@@ -178,13 +179,11 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   source_map->RegisterSource("downloads", IDR_DOWNLOADS_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("feedbackPrivate",
                              IDR_FEEDBACK_PRIVATE_CUSTOM_BINDINGS_JS);
-  source_map->RegisterSource("fileSystem", IDR_FILE_SYSTEM_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("gcm", IDR_GCM_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("identity", IDR_IDENTITY_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("imageWriterPrivate",
                              IDR_IMAGE_WRITER_PRIVATE_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("input.ime", IDR_INPUT_IME_CUSTOM_BINDINGS_JS);
-  source_map->RegisterSource("logPrivate", IDR_LOG_PRIVATE_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("mediaGalleries",
                              IDR_MEDIA_GALLERIES_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("notifications",
@@ -252,18 +251,45 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
       IDR_WEBRTC_DESKTOP_CAPTURE_PRIVATE_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("webstore", IDR_WEBSTORE_CUSTOM_BINDINGS_JS);
 
-  // Custom types sources.
-  source_map->RegisterSource("ChromeSetting", IDR_CHROME_SETTING_JS);
-  source_map->RegisterSource("ContentSetting", IDR_CONTENT_SETTING_JS);
-  source_map->RegisterSource("ChromeDirectSetting",
-                             IDR_CHROME_DIRECT_SETTING_JS);
 
   // Platform app sources that are not API-specific..
-  source_map->RegisterSource("fileEntryBindingUtil",
-                             IDR_FILE_ENTRY_BINDING_UTIL_JS);
   source_map->RegisterSource("chromeWebViewInternal",
                              IDR_CHROME_WEB_VIEW_INTERNAL_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("chromeWebView", IDR_CHROME_WEB_VIEW_JS);
+
+  // Media router.
+  source_map->RegisterSource(
+      "chrome/common/media_router/mojo/media_controller.mojom",
+      IDR_MEDIA_CONTROLLER_MOJOM_JS);
+  source_map->RegisterSource(
+      "chrome/common/media_router/mojo/media_router.mojom",
+      IDR_MEDIA_ROUTER_MOJOM_JS);
+  source_map->RegisterSource(
+      "chrome/common/media_router/mojo/media_status.mojom",
+      IDR_MEDIA_STATUS_MOJOM_JS);
+  source_map->RegisterSource("media_router_bindings",
+                             IDR_MEDIA_ROUTER_BINDINGS_JS);
+  source_map->RegisterSource("mojo/common/time.mojom", IDR_MOJO_TIME_MOJOM_JS);
+  source_map->RegisterSource("net/interfaces/ip_address.mojom",
+                             IDR_MOJO_IP_ADDRESS_MOJOM_JS);
+  source_map->RegisterSource("url/mojo/origin.mojom", IDR_ORIGIN_MOJOM_JS);
+  source_map->RegisterSource("url/mojo/url.mojom", IDR_MOJO_URL_MOJOM_JS);
+  source_map->RegisterSource("media/mojo/interfaces/remoting_common.mojom",
+                             IDR_REMOTING_COMMON_JS);
+  source_map->RegisterSource(
+      "media/mojo/interfaces/mirror_service_remoting.mojom",
+      IDR_MEDIA_REMOTING_JS);
+
+  // These bindings are unnecessary with native bindings enabled.
+  if (!extensions::FeatureSwitch::native_crx_bindings()->IsEnabled()) {
+    source_map->RegisterSource("app", IDR_APP_CUSTOM_BINDINGS_JS);
+
+    // Custom types sources.
+    source_map->RegisterSource("ChromeSetting", IDR_CHROME_SETTING_JS);
+    source_map->RegisterSource("ContentSetting", IDR_CONTENT_SETTING_JS);
+    source_map->RegisterSource("ChromeDirectSetting",
+                               IDR_CHROME_DIRECT_SETTING_JS);
+  }
 }
 
 void ChromeExtensionsDispatcherDelegate::RequireAdditionalModules(
@@ -285,4 +311,13 @@ void ChromeExtensionsDispatcherDelegate::OnActiveExtensionsUpdated(
           ::switches::kSingleProcess))
     return;
   crash_keys::SetActiveExtensions(extension_ids);
+}
+
+void ChromeExtensionsDispatcherDelegate::InitializeBindingsSystem(
+    extensions::Dispatcher* dispatcher,
+    extensions::APIBindingsSystem* bindings_system) {
+  DCHECK(extensions::FeatureSwitch::native_crx_bindings()->IsEnabled());
+  bindings_system->GetHooksForAPI("app")->SetDelegate(
+      base::MakeUnique<extensions::AppHooksDelegate>(
+          dispatcher, bindings_system->request_handler()));
 }

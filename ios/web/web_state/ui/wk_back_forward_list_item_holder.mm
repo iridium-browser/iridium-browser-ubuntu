@@ -4,7 +4,12 @@
 
 #import "ios/web/web_state/ui/wk_back_forward_list_item_holder.h"
 
+#include "base/memory/ptr_util.h"
 #import "ios/web/public/navigation_item.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 
@@ -29,7 +34,8 @@ WKBackForwardListItemHolder* WKBackForwardListItemHolder::FromNavigationItem(
       item->GetUserData(kBackForwardListItemIdentifierKey);
   if (!user_data) {
     user_data = new WKBackForwardListItemHolder();
-    item->SetUserData(kBackForwardListItemIdentifierKey, user_data);
+    item->SetUserData(kBackForwardListItemIdentifierKey,
+                      base::WrapUnique(user_data));
   }
   return static_cast<WKBackForwardListItemHolder*>(user_data);
 }

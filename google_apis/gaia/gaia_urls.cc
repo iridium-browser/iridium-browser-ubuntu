@@ -20,7 +20,8 @@ const char kDefaultGoogleApisBaseUrl[] = "https://www.googleapis.com";
 // API calls from accounts.google.com
 const char kClientLoginUrlSuffix[] = "ClientLogin";
 const char kServiceLoginUrlSuffix[] = "ServiceLogin";
-const char kEmbeddedSetupChromeOsUrlSuffix[] = "embedded/setup/chromeos";
+const char kEmbeddedSetupChromeOsUrlSuffixV1[] = "embedded/setup/chromeos";
+const char kEmbeddedSetupChromeOsUrlSuffixV2[] = "embedded/setup/v2/chromeos";
 const char kServiceLoginAuthUrlSuffix[] = "ServiceLoginAuth";
 const char kServiceLogoutUrlSuffix[] = "Logout";
 const char kIssueAuthTokenUrlSuffix[] = "IssueAuthToken";
@@ -32,7 +33,6 @@ const char kOAuthWrapBridgeUrlSuffix[] = "OAuthWrapBridge";
 const char kOAuth1LoginUrlSuffix[] = "OAuthLogin";
 const char kOAuthRevokeTokenUrlSuffix[] = "AuthSubRevokeToken";
 const char kListAccountsSuffix[] = "ListAccounts?json=standard";
-const char kPasswordCombinedEmbeddedSigninSuffix[] = "EmbeddedSignIn";
 const char kEmbeddedSigninSuffix[] = "embedded/setup/chrome/usermenu";
 const char kAddAccountSuffix[] = "AddSession";
 const char kGetCheckConnectionInfoSuffix[] = "GetCheckConnectionInfo";
@@ -98,8 +98,10 @@ GaiaUrls::GaiaUrls() {
   // URLs from accounts.google.com.
   client_login_url_ = gaia_url_.Resolve(kClientLoginUrlSuffix);
   service_login_url_ = gaia_url_.Resolve(kServiceLoginUrlSuffix);
-  embedded_setup_chromeos_url_ =
-      gaia_url_.Resolve(kEmbeddedSetupChromeOsUrlSuffix);
+  embedded_setup_chromeos_url_v1_ =
+      gaia_url_.Resolve(kEmbeddedSetupChromeOsUrlSuffixV1);
+  embedded_setup_chromeos_url_v2_ =
+      gaia_url_.Resolve(kEmbeddedSetupChromeOsUrlSuffixV2);
   service_login_auth_url_ = gaia_url_.Resolve(kServiceLoginAuthUrlSuffix);
   service_logout_url_ = gaia_url_.Resolve(kServiceLogoutUrlSuffix);
   issue_auth_token_url_ = gaia_url_.Resolve(kIssueAuthTokenUrlSuffix);
@@ -112,8 +114,6 @@ GaiaUrls::GaiaUrls() {
   oauth_revoke_token_url_ = gaia_url_.Resolve(kOAuthRevokeTokenUrlSuffix);
   oauth1_login_url_ = gaia_url_.Resolve(kOAuth1LoginUrlSuffix);
   list_accounts_url_ = gaia_url_.Resolve(kListAccountsSuffix);
-  password_combined_embedded_signin_url_ =
-      gaia_url_.Resolve(kPasswordCombinedEmbeddedSigninSuffix);
   embedded_signin_url_ = gaia_url_.Resolve(kEmbeddedSigninSuffix);
   add_account_url_ = gaia_url_.Resolve(kAddAccountSuffix);
   get_check_connection_info_url_ =
@@ -163,8 +163,13 @@ const GURL& GaiaUrls::service_login_url() const {
   return service_login_url_;
 }
 
-const GURL& GaiaUrls::embedded_setup_chromeos_url() const {
-  return embedded_setup_chromeos_url_;
+const GURL& GaiaUrls::embedded_setup_chromeos_url(unsigned version) const {
+  DCHECK_GT(version, 0U);
+  DCHECK_LE(version, 2U);
+  if (version == 2U)
+    return embedded_setup_chromeos_url_v2_;
+
+  return embedded_setup_chromeos_url_v1_;
 }
 
 
@@ -222,10 +227,6 @@ const GURL& GaiaUrls::oauth1_login_url() const {
 
 const GURL& GaiaUrls::embedded_signin_url() const {
   return embedded_signin_url_;
-}
-
-const GURL& GaiaUrls::password_combined_embedded_signin_url() const {
-  return password_combined_embedded_signin_url_;
 }
 
 const GURL& GaiaUrls::add_account_url() const {

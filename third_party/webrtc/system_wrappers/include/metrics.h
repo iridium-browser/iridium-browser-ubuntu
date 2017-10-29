@@ -13,10 +13,9 @@
 
 #include <string>
 
-#include "webrtc/base/atomicops.h"
-#include "webrtc/base/checks.h"
 #include "webrtc/common_types.h"
-#include "webrtc/system_wrappers/include/logging.h"
+#include "webrtc/rtc_base/atomicops.h"
+#include "webrtc/rtc_base/checks.h"
 
 // Macros for allowing WebRTC clients (e.g. Chrome) to gather and aggregate
 // statistics.

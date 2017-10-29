@@ -20,7 +20,6 @@
 #include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/devtools_frontend_host.h"
 #include "content/public/browser/devtools_socket_factory.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
@@ -29,13 +28,19 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/user_agent.h"
+#include "content/shell/browser/layout_test/secondary_test_window_observer.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/common/shell_content_client.h"
+#include "content/shell/common/shell_switches.h"
 #include "content/shell/grit/shell_resources.h"
 #include "net/base/net_errors.h"
 #include "net/log/net_log_source.h"
 #include "net/socket/tcp_server_socket.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if !defined(OS_ANDROID)
+#include "content/public/browser/devtools_frontend_host.h"
+#endif
 
 #if defined(OS_ANDROID)
 #include "content/public/browser/android/devtools_auth.h"
@@ -190,6 +195,8 @@ ShellDevToolsManagerDelegate::CreateNewTarget(const GURL& url) {
                                         url,
                                         nullptr,
                                         gfx::Size());
+  if (switches::IsRunLayoutTestSwitchPresent())
+    SecondaryTestWindowObserver::CreateForWebContents(shell->web_contents());
   return DevToolsAgentHost::GetOrCreateFor(shell->web_contents());
 }
 
@@ -204,7 +211,11 @@ std::string ShellDevToolsManagerDelegate::GetDiscoveryPageHTML() {
 
 std::string ShellDevToolsManagerDelegate::GetFrontendResource(
     const std::string& path) {
+#if defined(OS_ANDROID)
+  return std::string();
+#else
   return content::DevToolsFrontendHost::GetFrontendResource(path).as_string();
+#endif
 }
 
 }  // namespace content

@@ -36,15 +36,14 @@
     #define SK_OPTS_NS portable
 #endif
 
-#include "SkBitmapFilter_opts.h"
 #include "SkBlend_opts.h"
 #include "SkBlitMask_opts.h"
 #include "SkBlitRow_opts.h"
 #include "SkBlurImageFilter_opts.h"
 #include "SkChecksum_opts.h"
 #include "SkMorphologyImageFilter_opts.h"
-#include "SkRasterPipeline_opts.h"
 #include "SkSwizzler_opts.h"
+#include "SkUtils_opts.h"
 #include "SkXfermode_opts.h"
 
 namespace SkOpts {
@@ -82,13 +81,11 @@ namespace SkOpts {
 
     DEFINE_DEFAULT(srcover_srgb_srgb);
 
+    DEFINE_DEFAULT(memset16);
+    DEFINE_DEFAULT(memset32);
+    DEFINE_DEFAULT(memset64);
+
     DEFINE_DEFAULT(hash_fn);
-
-    DEFINE_DEFAULT(run_pipeline);
-
-    DEFINE_DEFAULT(convolve_vertically);
-    DEFINE_DEFAULT(convolve_horizontally);
-    DEFINE_DEFAULT(convolve_4_rows_horizontally);
 
 #undef DEFINE_DEFAULT
 
@@ -97,7 +94,6 @@ namespace SkOpts {
     void Init_sse41();
     void Init_sse42();
     void Init_avx();
-    void Init_hsw();
     void Init_crc32();
 
     static void init() {
@@ -107,7 +103,6 @@ namespace SkOpts {
         if (SkCpu::Supports(SkCpu::SSE41)) { Init_sse41(); }
         if (SkCpu::Supports(SkCpu::SSE42)) { Init_sse42(); }
         if (SkCpu::Supports(SkCpu::AVX  )) { Init_avx();   }
-        if (SkCpu::Supports(SkCpu::HSW  )) { Init_hsw();   }
 
     #elif defined(SK_CPU_ARM64)
         if (SkCpu::Supports(SkCpu::CRC32)) { Init_crc32(); }

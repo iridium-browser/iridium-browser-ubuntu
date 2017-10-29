@@ -15,7 +15,7 @@
 #include "angle_gl.h"
 #include "compiler/translator/Diagnostics.h"
 #include "compiler/translator/FindSymbolNode.h"
-#include "compiler/translator/IntermNode.h"
+#include "compiler/translator/IntermTraverse.h"
 #include "compiler/translator/SymbolTable.h"
 
 namespace sh
@@ -363,7 +363,7 @@ bool ValidateMultiviewTraverser::visitAggregate(Visit visit, TIntermAggregate *n
             mValid = false;
         }
         else if (node->getOp() == EOpCallBuiltInFunction &&
-                 TFunction::unmangleName(node->getFunctionSymbolInfo()->getName()) == "imageStore")
+                 node->getFunctionSymbolInfo()->getName() == "imageStore")
         {
             // TODO(oetuaho@nvidia.com): Record which built-in functions have side effects in
             // the symbol info instead.
@@ -375,7 +375,8 @@ bool ValidateMultiviewTraverser::visitAggregate(Visit visit, TIntermAggregate *n
         }
         else if (!node->isConstructor())
         {
-            TFunction *builtInFunc = mSymbolTable.findBuiltInOp(node, mShaderVersion);
+            TFunction *builtInFunc = static_cast<TFunction *>(
+                mSymbolTable.findBuiltIn(node->getSymbolTableMangledName(), mShaderVersion));
             for (size_t paramIndex = 0u; paramIndex < builtInFunc->getParamCount(); ++paramIndex)
             {
                 TQualifier qualifier = builtInFunc->getParam(paramIndex).type->getQualifier();

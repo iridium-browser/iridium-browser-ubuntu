@@ -16,9 +16,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Looper;
 import android.os.Process;
+import android.os.StrictMode;
 import android.os.UserManager;
 import android.provider.Settings;
 import android.util.Log;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.ServiceWorkerController;
@@ -40,13 +42,11 @@ import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwCookieManager;
 import org.chromium.android_webview.AwDevToolsServer;
-import org.chromium.android_webview.AwMetricsServiceClient;
 import org.chromium.android_webview.AwNetworkChangeNotifierRegistrationPolicy;
 import org.chromium.android_webview.AwQuotaManagerBridge;
 import org.chromium.android_webview.AwResource;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.HttpAuthDatabase;
-import org.chromium.android_webview.PlatformServiceBridge;
 import org.chromium.android_webview.ResourcesContextWrapperFactory;
 import org.chromium.android_webview.command_line.CommandLineUtil;
 import org.chromium.base.BuildConfig;
@@ -63,11 +63,12 @@ import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.NativeLibraries;
 import org.chromium.base.library_loader.ProcessInitException;
-import org.chromium.content.browser.ContentViewStatics;
+import org.chromium.components.autofill.AutofillProvider;
 import org.chromium.content.browser.input.LGEmailActionModeWorkaround;
 import org.chromium.net.NetworkChangeNotifier;
 
 import java.io.File;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -248,8 +249,15 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         System.loadLibrary("webviewchromium_plat_support");
 
         // Use shared preference to check for package downgrade.
-        mWebViewPrefs = ContextUtils.getApplicationContext().getSharedPreferences(
-                CHROMIUM_PREFS_NAME, Context.MODE_PRIVATE);
+        // Since N, getSharedPreferences creates the preference dir if it doesn't exist,
+        // causing a disk write.
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
+        try {
+            mWebViewPrefs = ContextUtils.getApplicationContext().getSharedPreferences(
+                    CHROMIUM_PREFS_NAME, Context.MODE_PRIVATE);
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
+        }
         int lastVersion = mWebViewPrefs.getInt(VERSION_CODE_PREF, 0);
         int currentVersion = packageInfo.versionCode;
         if (!versionCodeGE(currentVersion, lastVersion)) {
@@ -270,8 +278,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     }
 
     static void checkStorageIsNotDeviceProtected(Context context) {
-        if ((Build.VERSION.CODENAME.equals("N") || Build.VERSION.SDK_INT > Build.VERSION_CODES.M)
-                && context.isDeviceProtectedStorage()) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && context.isDeviceProtectedStorage()) {
             throw new IllegalArgumentException(
                     "WebView cannot be used with device protected storage");
         }
@@ -330,15 +337,12 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     private void doNetworkInitializations(Context applicationContext) {
         if (applicationContext.checkPermission(Manifest.permission.ACCESS_NETWORK_STATE,
                 Process.myPid(), Process.myUid()) == PackageManager.PERMISSION_GRANTED) {
-            NetworkChangeNotifier.init(applicationContext);
+            NetworkChangeNotifier.init();
             NetworkChangeNotifier.setAutoDetectConnectivityState(
                     new AwNetworkChangeNotifierRegistrationPolicy());
         }
 
-        int targetSdkVersion = applicationContext.getApplicationInfo().targetSdkVersion;
-        // TODO(sgurun) We need to change this to > N_MR1 when we roll N_MR1 sdk or
-        //  >= O when we roll O SDK to upstream. crbug/688556
-        AwContentsStatics.setCheckClearTextPermitted(targetSdkVersion > 25);
+        AwContentsStatics.setCheckClearTextPermitted(BuildInfo.targetsAtLeastO(applicationContext));
     }
 
     private void ensureChromiumStartedLocked(boolean onMainThread) {
@@ -385,7 +389,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     // lives in the ui/ layer. See ui/base/ui_base_paths.h
     private static final int DIR_RESOURCE_PAKS_ANDROID = 3003;
 
-    private void startChromiumLocked() {
+    protected void startChromiumLocked() {
         assert Thread.holdsLock(mLock) && ThreadUtils.runningOnUiThread();
 
         // The post-condition of this method is everything is ready, so notify now to cover all
@@ -413,27 +417,15 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         initPlatSupportLibrary();
         doNetworkInitializations(context);
         final boolean isExternalService = true;
+        // The WebView package name is used to locate the separate Service to which we copy crash
+        // minidumps. This package name must be set before a render process has a chance to crash -
+        // otherwise we might try to copy a minidump without knowing what process to copy it to.
+        // It's also used to determine channel for UMA, so it must be set before initializing UMA.
+        AwBrowserProcess.setWebViewPackageName(webViewPackageName);
         AwBrowserProcess.configureChildProcessLauncher(webViewPackageName, isExternalService);
         AwBrowserProcess.start();
-
-        final boolean enableMinidumpUploadingForTesting = CommandLine.getInstance().hasSwitch(
-                CommandLineUtil.CRASH_UPLOADS_ENABLED_FOR_TESTING_SWITCH);
-        if (enableMinidumpUploadingForTesting) {
-            AwBrowserProcess.handleMinidumps(webViewPackageName, true /* enabled */);
-        }
-
-        // Actions conditioned on whether the Android Checkbox is toggled on
-        PlatformServiceBridge.getInstance(context)
-                .queryMetricsSetting(new ValueCallback<Boolean>() {
-                    public void onReceiveValue(Boolean enabled) {
-                        ThreadUtils.assertOnUiThread();
-                        AwMetricsServiceClient.setConsentSetting(context, enabled);
-
-                        if (!enableMinidumpUploadingForTesting) {
-                            AwBrowserProcess.handleMinidumps(webViewPackageName, enabled);
-                        }
-                    }
-                });
+        AwBrowserProcess.handleMinidumpsAndSetMetricsConsent(
+                webViewPackageName, true /* updateMetricsConsent */);
 
         if (CommandLineUtil.isBuildDebuggable()) {
             setWebContentsDebuggingEnabled(true);
@@ -525,7 +517,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                 mStaticMethods = new WebViewFactoryProvider.Statics() {
                     @Override
                     public String findAddress(String addr) {
-                        return ContentViewStatics.findAddress(addr);
+                        return AwContentsStatics.findAddress(addr);
                     }
 
                     @Override
@@ -563,6 +555,43 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                     @Override
                     public Uri[] parseFileChooserResult(int resultCode, Intent intent) {
                         return AwContentsClient.parseFileChooserResult(resultCode, intent);
+                    }
+
+                    /**
+                     * Starts Safe Browsing initialization. This should only be called once.
+                     * @param context is the application context the WebView will be used in.
+                     * @param callback will be called with the value true if initialization is
+                     * successful. The callback will be run on the UI thread.
+                     */
+                    // TODO(ntfschr): add @Override once next android SDK rolls
+                    public void initSafeBrowsing(Context context, ValueCallback<Boolean> callback) {
+                        AwContentsStatics.initSafeBrowsing(
+                                context.getApplicationContext(), callback);
+                    }
+
+                    /**
+                     * Shuts down Safe Browsing. This should only be called once.
+                     */
+                    // TODO(ntfschr): add @Override once next android SDK rolls
+                    public void shutdownSafeBrowsing() {
+                        AwContentsStatics.shutdownSafeBrowsing();
+                    }
+
+                    // TODO(ntfschr): add @Override once next android SDK rolls
+                    public void setSafeBrowsingWhitelist(
+                            List<String> urls, ValueCallback<Boolean> callback) {
+                        AwContentsStatics.setSafeBrowsingWhitelist(urls, callback);
+                    }
+
+                    /**
+                     * Returns a URL pointing to the privacy policy for Safe Browsing reporting.
+                     *
+                     * @return the url pointing to a privacy policy document which can be displayed
+                     * to users.
+                     */
+                    // TODO(ntfschr): add @Override once next android SDK rolls
+                    public Uri getSafeBrowsingPrivacyPolicyUrl() {
+                        return AwContentsStatics.getSafeBrowsingPrivacyPolicyUrl();
                     }
                 };
             }
@@ -650,7 +679,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     }
 
     public TokenBindingService getTokenBindingService() {
-       synchronized (mLock) {
+        synchronized (mLock) {
             if (mTokenBindingManager == null) {
                 mTokenBindingManager = new TokenBindingManagerAdapter(this);
             }
@@ -699,5 +728,9 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     WebViewContentsClientAdapter createWebViewContentsClientAdapter(WebView webView,
             Context context) {
         return new WebViewContentsClientAdapter(webView, context, mWebViewDelegate);
+    }
+
+    AutofillProvider createAutofillProvider(Context context, ViewGroup containerView) {
+        return null;
     }
 }

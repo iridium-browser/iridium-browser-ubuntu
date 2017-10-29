@@ -12,8 +12,10 @@ goog.provide('cursors.Movement');
 goog.provide('cursors.Range');
 goog.provide('cursors.Unit');
 
+goog.require('AncestryRecoveryStrategy');
 goog.require('AutomationPredicate');
 goog.require('AutomationUtil');
+goog.require('RecoveryStrategy');
 goog.require('StringUtil');
 goog.require('constants');
 
@@ -75,17 +77,32 @@ var Unit = cursors.Unit;
  * is pointed to and covers the case where the accessible text is empty.
  */
 cursors.Cursor = function(node, index) {
+  // Compensate for specific issues in Blink.
+  // TODO(dtseng): Pass through affinity; if upstream, skip below.
+  if (node.role == RoleType.STATIC_TEXT && node.name.length == index) {
+    // Re-interpret this case as the beginning of the next node.
+    var nextNode = AutomationUtil.findNextNode(
+        node, Dir.FORWARD, AutomationPredicate.leafOrStaticText);
+
+    // The exception is when a user types at the end of a line. In that case,
+    // staying on the current node is appropriate.
+    if (node && node.nextOnLine && node.nextOnLine.role && nextNode) {
+      node = nextNode;
+      index = 0;
+    }
+  } else if (
+      node.role == RoleType.GENERIC_CONTAINER && node.state.richlyEditable &&
+      (node.firstChild &&
+       (node.firstChild.role == RoleType.LINE_BREAK ||
+        node.firstChild.role == RoleType.STATIC_TEXT))) {
+    // Re-interpret this case as pointing to the text under the div.
+    node = node.find({role: RoleType.INLINE_TEXT_BOX}) || node;
+  }
+
   /** @type {number} @private */
   this.index_ = index;
-  /** @type {Array<AutomationNode>} @private */
-  this.ancestry_ = [];
-  var nodeWalker = node;
-  while (nodeWalker) {
-    this.ancestry_.push(nodeWalker);
-    nodeWalker = nodeWalker.parent;
-    if (nodeWalker && nodeWalker.role == RoleType.WINDOW)
-      break;
-  }
+  /** @type {RecoveryStrategy} */
+  this.recovery_ = new AncestryRecoveryStrategy(node);
 };
 
 /**
@@ -105,8 +122,7 @@ cursors.Cursor.prototype = {
    * @return {boolean}
    */
   equals: function(rhs) {
-    return this.node === rhs.node &&
-        this.index === rhs.index;
+    return this.node === rhs.node && this.index === rhs.index;
   },
 
   /**
@@ -121,11 +137,13 @@ cursors.Cursor.prototype = {
     // node.
     var lNode = this.node;
     var rNode = rhs.node;
-    while (lNode && (lNode.role == RoleType.INLINE_TEXT_BOX ||
-        lNode.role == RoleType.STATIC_TEXT))
+    while (lNode &&
+           (lNode.role == RoleType.INLINE_TEXT_BOX ||
+            lNode.role == RoleType.STATIC_TEXT))
       lNode = lNode.parent;
-    while (rNode && (rNode.role == RoleType.INLINE_TEXT_BOX ||
-        rNode.role == RoleType.STATIC_TEXT))
+    while (rNode &&
+           (rNode.role == RoleType.INLINE_TEXT_BOX ||
+            rNode.role == RoleType.STATIC_TEXT))
       rNode = rNode.parent;
 
     // Ignore indicies for now.
@@ -134,21 +152,31 @@ cursors.Cursor.prototype = {
   },
 
   /**
+   * Compares this cursor with |rhs|.
+   * @param {cursors.Cursor} rhs
+   * @return Dir.BACKWARD if |rhs| comes before this cursor in
+   * document order. Forward otherwise.
+   */
+  compare: function(rhs) {
+    if (!this.node || !rhs.node)
+      return Dir.FORWARD;
+
+    if (rhs.node == this.node)
+      return rhs.index < this.index ? Dir.BACKWARD : Dir.FORWARD;
+    return AutomationUtil.getDirection(this.node, rhs.node);
+  },
+
+  /**
    * Returns the node. If the node is invalid since the last time it
    * was accessed, moves the cursor to the nearest valid ancestor first.
    * @return {AutomationNode}
    */
   get node() {
-    for (var i = 0; i < this.ancestry_.length; i++) {
-      var firstValidNode = this.ancestry_[i];
-      if (firstValidNode != null && firstValidNode.role !== undefined &&
-          firstValidNode.root !== undefined) {
-        return firstValidNode;
-      }
-      // If we have to walk up to an ancestor, reset the index to NODE_INDEX.
+    if (this.recovery_.requiresRecovery()) {
+      // If we need to recover, the index is no longer valid.
       this.index_ = cursors.NODE_INDEX;
     }
-    return null;
+    return this.recovery_.node;
   },
 
   /**
@@ -176,11 +204,12 @@ cursors.Cursor.prototype = {
     // Selections over line break nodes are broken.
     var parent = adjustedNode.parent;
     var grandparent = parent && parent.parent;
-    if (parent.role == RoleType.LINE_BREAK) {
+    if (parent && parent.role == RoleType.LINE_BREAK) {
       adjustedNode = grandparent;
-    } else if (grandparent.role == RoleType.LINE_BREAK) {
+    } else if (grandparent && grandparent.role == RoleType.LINE_BREAK) {
       adjustedNode = grandparent.parent;
-    } else if (this.index_ == cursors.NODE_INDEX ||
+    } else if (
+        this.index_ == cursors.NODE_INDEX ||
         adjustedNode.role == RoleType.INLINE_TEXT_BOX ||
         adjustedNode.nameFrom != chrome.automation.NameFromType.CONTENTS) {
       // A node offset or unselectable character offset.
@@ -209,8 +238,9 @@ cursors.Cursor.prototype = {
 
     if (this.node.state.editable) {
       return this.index_ == cursors.NODE_INDEX ? 0 : this.index_;
-    } else if (this.node.role == RoleType.INLINE_TEXT_BOX &&
-    // Selections under a line break are broken.
+    } else if (
+        this.node.role == RoleType.INLINE_TEXT_BOX &&
+        // Selections under a line break are broken.
         this.node.parent && this.node.parent.role != RoleType.LINE_BREAK) {
       if (adjustedIndex == cursors.NODE_INDEX)
         adjustedIndex = 0;
@@ -220,7 +250,8 @@ cursors.Cursor.prototype = {
         adjustedIndex += sibling.name.length;
         sibling = sibling.previousSibling;
       }
-    } else if (this.index_ == cursors.NODE_INDEX ||
+    } else if (
+        this.index_ == cursors.NODE_INDEX ||
         this.node.nameFrom != chrome.automation.NameFromType.CONTENTS) {
       // A node offset or unselectable character offset.
 
@@ -276,8 +307,8 @@ cursors.Cursor.prototype = {
               newNode, dir, AutomationPredicate.leafWithText);
           if (newNode) {
             var newText = AutomationUtil.getText(newNode);
-            newIndex =
-                dir == Dir.FORWARD ? 0 :
+            newIndex = dir == Dir.FORWARD ?
+                0 :
                 StringUtil.previousCodePointOffset(newText, newText.length);
             newIndex = Math.max(newIndex, 0);
           } else {
@@ -287,10 +318,10 @@ cursors.Cursor.prototype = {
         break;
       case Unit.WORD:
         if (newNode.role != RoleType.INLINE_TEXT_BOX) {
-          newNode = AutomationUtil.findNextNode(newNode,
-              Dir.FORWARD,
-              AutomationPredicate.inlineTextBox,
-              {skipInitialSubtree: false}) || newNode;
+          newNode = AutomationUtil.findNextNode(
+                        newNode, Dir.FORWARD, AutomationPredicate.inlineTextBox,
+                        {skipInitialSubtree: false}) ||
+              newNode;
         }
         switch (movement) {
           case Movement.BOUND:
@@ -329,8 +360,8 @@ cursors.Cursor.prototype = {
                 if (dir == Dir.BACKWARD && newIndex != 0) {
                   newIndex = 0;
                 } else {
-                  newNode = AutomationUtil.findNextNode(newNode, dir,
-                      AutomationPredicate.leaf);
+                  newNode = AutomationUtil.findNextNode(
+                      newNode, dir, AutomationPredicate.leaf);
                   if (newNode) {
                     newIndex = 0;
                     if (dir == Dir.BACKWARD &&
@@ -355,20 +386,23 @@ cursors.Cursor.prototype = {
             newIndex = dir == Dir.FORWARD ? this.getText().length - 1 : 0;
             break;
           case Movement.DIRECTIONAL:
-            var pred = unit == Unit.TEXT ?
-                AutomationPredicate.leaf : AutomationPredicate.object;
-            newNode = AutomationUtil.findNextNode(newNode, dir, pred) ||
-                originalNode;
+            var pred = unit == Unit.TEXT ? AutomationPredicate.leaf :
+                                           AutomationPredicate.object;
+            newNode =
+                AutomationUtil.findNextNode(newNode, dir, pred) || originalNode;
             newIndex = cursors.NODE_INDEX;
             break;
         }
         break;
       case Unit.LINE:
-        newIndex = 0;
+        var deepEquivalent = this.deepEquivalent;
+        newNode = deepEquivalent.node || newNode;
+        newIndex = deepEquivalent.index || 0;
+
         switch (movement) {
           case Movement.BOUND:
-            newNode = AutomationUtil.findNodeUntil(newNode, dir,
-                AutomationPredicate.linebreak, true);
+            newNode = AutomationUtil.findNodeUntil(
+                newNode, dir, AutomationPredicate.linebreak, true);
             newNode = newNode || originalNode;
             newIndex =
                 dir == Dir.FORWARD ? AutomationUtil.getText(newNode).length : 0;
@@ -377,13 +411,57 @@ cursors.Cursor.prototype = {
             newNode = AutomationUtil.findNodeUntil(
                 newNode, dir, AutomationPredicate.linebreak);
             break;
-          }
-      break;
+        }
+        break;
       default:
         throw Error('Unrecognized unit: ' + unit);
     }
     newNode = newNode || originalNode;
     newIndex = goog.isDef(newIndex) ? newIndex : this.index_;
+    return new cursors.Cursor(newNode, newIndex);
+  },
+
+  /**
+   * Returns the deepest equivalent cursor.
+   * @return {cursors.Cursor}
+   */
+  get deepEquivalent() {
+    var newNode = this.node;
+    var newIndex = this.index_;
+    while (newNode.firstChild) {
+      if (newNode.role == RoleType.STATIC_TEXT) {
+        // Text offset.
+        // Re-interpret the index as an offset into an inlineTextBox.
+        var target = newNode.firstChild;
+        var length = 0;
+        while (target && length < newIndex) {
+          var newLength = length + target.name.length;
+
+          // Either |newIndex| falls between target's text or |newIndex| is the
+          // total length of all sibling text content.
+          if ((length <= newIndex && newIndex < newLength) ||
+              (newIndex == newLength && !target.nextSibling))
+            break;
+          length = newLength;
+          target = target.nextSibling;
+        }
+        if (target) {
+          newNode = target;
+          newIndex = newIndex - length;
+        }
+        break;
+      } else if (
+          newNode.role != RoleType.INLINE_TEXT_BOX &&
+          newNode.children[newIndex]) {
+        // Valid node offset.
+        newNode = newNode.children[newIndex];
+        newIndex = 0;
+      } else {
+        // Invalid offset.
+        break;
+      }
+    }
+
     return new cursors.Cursor(newNode, newIndex);
   },
 
@@ -429,8 +507,7 @@ cursors.WrappingCursor.prototype = {
       return this;
 
     // Regular movement.
-    if (!AutomationPredicate.root(this.node) ||
-        dir == Dir.FORWARD ||
+    if (!AutomationPredicate.root(this.node) || dir == Dir.FORWARD ||
         movement == Movement.BOUND)
       result = cursors.Cursor.prototype.move.call(this, unit, movement, dir);
 
@@ -446,8 +523,8 @@ cursors.WrappingCursor.prototype = {
     // For 2, place range on the root (if not already there). If at root,
     // try to descend to the first leaf-like object.
     if (movement == Movement.DIRECTIONAL && result.equals(this)) {
-      var pred = unit == Unit.NODE ?
-          AutomationPredicate.object : AutomationPredicate.leaf;
+      var pred = unit == Unit.NODE ? AutomationPredicate.object :
+                                     AutomationPredicate.leaf;
       var endpoint = this.node;
       if (!endpoint)
         return this;
@@ -462,11 +539,9 @@ cursors.WrappingCursor.prototype = {
       // Case 2: backward (sync downwards to a leaf), if already on the root.
       if (dir == Dir.BACKWARD && endpoint == this.node) {
         playEarcon = true;
-        endpoint = AutomationUtil.findNodePre(endpoint,
-            dir,
-            function(n) {
-              return pred(n) && !AutomationPredicate.shouldIgnoreNode(n);
-            }) || endpoint;
+        endpoint = AutomationUtil.findNodePre(endpoint, dir, function(n) {
+          return pred(n) && !AutomationPredicate.shouldIgnoreNode(n);
+        }) || endpoint;
       }
 
       if (playEarcon)
@@ -503,7 +578,7 @@ cursors.Range.fromNode = function(node) {
   return new cursors.Range(cursor, cursor);
 };
 
- /**
+/**
  * Given |rangeA| and |rangeB| in order, determine which |Dir|
  * relates them.
  * @param {!cursors.Range} rangeA
@@ -514,8 +589,8 @@ cursors.Range.getDirection = function(rangeA, rangeB) {
   if (!rangeA || !rangeB)
     return Dir.FORWARD;
 
-  if (!rangeA.start.node || !rangeA.end.node ||
-      !rangeB.start.node || !rangeB.end.node)
+  if (!rangeA.start.node || !rangeA.end.node || !rangeB.start.node ||
+      !rangeB.end.node)
     return Dir.FORWARD;
 
   // They are the same range.
@@ -524,11 +599,9 @@ cursors.Range.getDirection = function(rangeA, rangeB) {
     return Dir.FORWARD;
 
   var testDirA =
-      AutomationUtil.getDirection(
-          rangeA.start.node, rangeB.end.node);
+      AutomationUtil.getDirection(rangeA.start.node, rangeB.end.node);
   var testDirB =
-      AutomationUtil.getDirection(
-          rangeB.start.node, rangeA.end.node);
+      AutomationUtil.getDirection(rangeB.start.node, rangeA.end.node);
 
   // The two ranges are either partly overlapping or non overlapping.
   if (testDirA == Dir.FORWARD && testDirB == Dir.BACKWARD)
@@ -547,8 +620,7 @@ cursors.Range.prototype = {
    * @return {boolean}
    */
   equals: function(rhs) {
-    return this.start_.equals(rhs.start) &&
-        this.end_.equals(rhs.end);
+    return this.start_.equals(rhs.start) && this.end_.equals(rhs.end);
   },
 
   /**
@@ -591,8 +663,7 @@ cursors.Range.prototype = {
    * @return {boolean}
    */
   isSubNode: function() {
-    return this.start.node === this.end.node &&
-        this.start.index > -1 &&
+    return this.start.node === this.end.node && this.start.index > -1 &&
         this.end.index > -1;
   },
 
@@ -602,8 +673,7 @@ cursors.Range.prototype = {
    * @return {boolean?}
    */
   isInlineText: function() {
-    return this.start.node &&
-        this.end.node &&
+    return this.start.node && this.end.node &&
         this.start.node.role == this.end.node.role &&
         this.start.node.role == RoleType.INLINE_TEXT_BOX;
   },
@@ -656,32 +726,32 @@ cursors.Range.prototype = {
       return;
 
     // Only allow selections within the same web tree.
-    if (startNode.root &&
-        startNode.root.role == RoleType.ROOT_WEB_AREA &&
+    if (startNode.root && startNode.root.role == RoleType.ROOT_WEB_AREA &&
         startNode.root == endNode.root) {
       // We want to adjust to select the entire node for node offsets;
       // otherwise, use the plain character offset.
       var startIndex = this.start.selectionIndex_;
       var endIndex = this.end.index_ == cursors.NODE_INDEX ?
-          this.end.selectionIndex_ + 1 : this.end.selectionIndex_;
+          this.end.selectionIndex_ + 1 :
+          this.end.selectionIndex_;
 
-      chrome.automation.setDocumentSelection(
-          { anchorObject: startNode,
-            anchorOffset: startIndex,
-            focusObject: endNode,
-            focusOffset: endIndex }
-      );
+      chrome.automation.setDocumentSelection({
+        anchorObject: startNode,
+        anchorOffset: startIndex,
+        focusObject: endNode,
+        focusOffset: endIndex
+      });
     }
   },
 
   /**
    * Returns true if this range has either cursor end on web content.
    * @return {boolean}
-  */
+   */
   isWebRange: function() {
     return this.isValid() &&
         (this.start.node.root.role != RoleType.DESKTOP ||
-        this.end.node.root.role != RoleType.DESKTOP);
+         this.end.node.root.role != RoleType.DESKTOP);
   },
 
   /**

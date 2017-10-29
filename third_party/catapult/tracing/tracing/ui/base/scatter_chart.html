@@ -5,14 +5,14 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<link rel="import" href="/tracing/base/range.html">
+<link rel="import" href="/tracing/base/math/range.html">
 <link rel="import" href="/tracing/ui/base/chart_base_2d.html">
 
 <script>
 'use strict';
 
 tr.exportTo('tr.ui.b', function() {
-  var ScatterChart = tr.ui.b.define('scatter-chart', tr.ui.b.ChartBase2D);
+  const ScatterChart = tr.ui.b.define('scatter-chart', tr.ui.b.ChartBase2D);
 
   // @constructor
   ScatterChart.Dot = function(x, y, radius, color, breadcrumb) {
@@ -28,8 +28,8 @@ tr.exportTo('tr.ui.b', function() {
 
     decorate() {
       super.decorate();
-      this.brushedXRange_ = new tr.b.Range();
-      this.brushedYRange_ = new tr.b.Range();
+      this.brushedXRange_ = new tr.b.math.Range();
+      this.brushedYRange_ = new tr.b.math.Range();
     },
 
     get hideLegend() {
@@ -48,11 +48,11 @@ tr.exportTo('tr.ui.b', function() {
       super.updateMargins_();
       if (this.data.length === 0) return;
 
-      var rightOverhangPx = tr.b.Statistics.max(
+      const rightOverhangPx = tr.b.math.Statistics.max(
           this.data, d => this.xScale_(d.x) + d.radius - this.graphWidth);
       this.margin.right = Math.max(this.margin.right, rightOverhangPx);
 
-      var topOverhangPx = tr.b.Statistics.max(
+      const topOverhangPx = tr.b.math.Statistics.max(
           this.data, d => (this.graphHeight - this.yScale_(d.y)) + d.radius) -
         this.graphHeight;
       this.margin.top = Math.max(this.margin.top, topOverhangPx);
@@ -70,7 +70,7 @@ tr.exportTo('tr.ui.b', function() {
       brushSel.selectAll('*').remove();
       if (this.brushedXRange_.isEmpty || this.brushedYRange_.isEmpty) return;
 
-      var brushRectsSel = brushSel.selectAll('rect').data([undefined]);
+      const brushRectsSel = brushSel.selectAll('rect').data([undefined]);
       brushRectsSel.enter().append('rect')
           .attr('x', () => this.xScale_(this.brushedXRange_.min))
           .attr('y', () => this.yScale_(this.brushedYRange_.max))

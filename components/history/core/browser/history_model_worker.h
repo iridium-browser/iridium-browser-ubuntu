@@ -30,14 +30,12 @@ class HistoryModelWorker : public syncer::ModelSafeWorker {
 
   // syncer::ModelSafeWorker implementation.
   syncer::ModelSafeGroup GetModelSafeGroup() override;
-  bool IsOnModelThread() override;
-
- protected:
-  syncer::SyncerError DoWorkAndWaitUntilDoneImpl(
-      const syncer::WorkCallback& work) override;
+  bool IsOnModelSequence() override;
 
  private:
   ~HistoryModelWorker() override;
+
+  void ScheduleWork(base::OnceClosure work) override;
 
   const base::WeakPtr<history::HistoryService> history_service_;
 

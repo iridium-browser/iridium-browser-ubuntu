@@ -18,10 +18,12 @@ class WebFederatedCredential : public WebCredential {
       const WebString& id,
       const WebSecurityOrigin& federation,
       const WebString& name,
-      const WebURL& iconURL);
+      const WebURL& icon_url);
 
-  BLINK_PLATFORM_EXPORT void assign(const WebFederatedCredential&);
-  BLINK_PLATFORM_EXPORT WebSecurityOrigin provider() const;
+  BLINK_PLATFORM_EXPORT void Assign(const WebFederatedCredential&);
+  BLINK_PLATFORM_EXPORT WebSecurityOrigin Provider() const;
+  BLINK_PLATFORM_EXPORT WebString Name() const;
+  BLINK_PLATFORM_EXPORT WebURL IconURL() const;
 
 #if INSIDE_BLINK
   BLINK_PLATFORM_EXPORT WebFederatedCredential(PlatformCredential*);

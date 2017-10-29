@@ -23,9 +23,10 @@
 // http://www.w3.org/TR/SVG11/types.html#InterfaceSVGRect
 
 // TODO(foolip): SVGRect is gone from SVG 2, replaced by DOMRect.
+// https://crbug.com/709001
 [
     DependentLifetime,
-    ImplementedAs=SVGRectTearOff,
+    ImplementedAs=SVGRectTearOff
 ] interface SVGRect {
     [RaisesException=Setter] attribute unrestricted float x;
     [RaisesException=Setter] attribute unrestricted float y;

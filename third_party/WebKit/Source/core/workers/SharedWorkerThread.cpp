@@ -30,39 +30,33 @@
 
 #include "core/workers/SharedWorkerThread.h"
 
+#include <memory>
+#include "core/workers/GlobalScopeCreationParams.h"
 #include "core/workers/SharedWorkerGlobalScope.h"
 #include "core/workers/WorkerBackingThread.h"
-#include "core/workers/WorkerThreadStartupData.h"
-#include "wtf/PtrUtil.h"
-#include <memory>
+#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
-std::unique_ptr<SharedWorkerThread> SharedWorkerThread::create(
-    const String& name,
-    PassRefPtr<WorkerLoaderProxy> workerLoaderProxy,
-    WorkerReportingProxy& workerReportingProxy) {
-  return WTF::wrapUnique(new SharedWorkerThread(
-      name, std::move(workerLoaderProxy), workerReportingProxy));
-}
-
 SharedWorkerThread::SharedWorkerThread(
     const String& name,
-    PassRefPtr<WorkerLoaderProxy> workerLoaderProxy,
-    WorkerReportingProxy& workerReportingProxy)
-    : WorkerThread(std::move(workerLoaderProxy), workerReportingProxy),
-      m_workerBackingThread(WorkerBackingThread::create("SharedWorker Thread")),
-      m_name(name.isolatedCopy()) {}
+    ThreadableLoadingContext* loading_context,
+    WorkerReportingProxy& worker_reporting_proxy)
+    : WorkerThread(loading_context, worker_reporting_proxy),
+      worker_backing_thread_(
+          WorkerBackingThread::Create("SharedWorker Thread")),
+      name_(name.IsolatedCopy()) {}
 
 SharedWorkerThread::~SharedWorkerThread() {}
 
-void SharedWorkerThread::clearWorkerBackingThread() {
-  m_workerBackingThread = nullptr;
+void SharedWorkerThread::ClearWorkerBackingThread() {
+  worker_backing_thread_ = nullptr;
 }
 
-WorkerOrWorkletGlobalScope* SharedWorkerThread::createWorkerGlobalScope(
-    std::unique_ptr<WorkerThreadStartupData> startupData) {
-  return SharedWorkerGlobalScope::create(m_name, this, std::move(startupData));
+WorkerOrWorkletGlobalScope* SharedWorkerThread::CreateWorkerGlobalScope(
+    std::unique_ptr<GlobalScopeCreationParams> creation_params) {
+  return SharedWorkerGlobalScope::Create(
+      name_, this, std::move(creation_params), time_origin_);
 }
 
 }  // namespace blink

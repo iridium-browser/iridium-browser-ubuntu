@@ -15,7 +15,6 @@ template("test") {
   if (is_android) {
     import("//build/config/android/config.gni")
     import("//build/config/android/rules.gni")
-    import("//build/config/sanitizers/sanitizers.gni")
 
     _use_raw_android_executable = defined(invoker.use_raw_android_executable) &&
                                   invoker.use_raw_android_executable
@@ -54,9 +53,12 @@ template("test") {
         # the default shared_library configs rather than executable configs.
         configs -= [
           "//build/config:shared_library_config",
-          "//build/config/android:hide_native_jni_exports",
+          "//build/config/android:hide_all_but_jni_onload",
         ]
-        configs += [ "//build/config:executable_config" ]
+        configs += [
+          "//build/config:executable_config",
+          "//build/config/android:hide_all_but_jni",
+        ]
 
         # Don't output to the root or else conflict with the group() below.
         output_name = rebase_path(_exec_output, root_out_dir)
@@ -185,15 +187,6 @@ template("test") {
         deps += [ ":$_apk_target" ]
       }
     }
-
-    # TODO(GYP_GONE): Delete this after we've converted everything to GN.
-    # The _run targets exist only for compatibility w/ GYP.
-    group("${target_name}_apk_run") {
-      testonly = true
-      deps = [
-        ":${invoker.target_name}",
-      ]
-    }
   } else if (is_ios) {
     import("//build/config/ios/rules.gni")
 
@@ -237,11 +230,7 @@ template("test") {
       if (!defined(deps)) {
         deps = []
       }
-      deps += [
-        # All shared libraries must have the sanitizer deps to properly link in
-        # asan mode (this target will be empty in other cases).
-        "//build/config/sanitizers:deps",
-      ]
+      deps += [ "//build/config:exe_and_shlib_deps" ]
       if (!defined(bundle_deps)) {
         bundle_deps = []
       }
@@ -254,21 +243,10 @@ template("test") {
 
       testonly = true
       deps += [
-        # All shared libraries must have the sanitizer deps to properly link in
-        # asan mode (this target will be empty in other cases).
-        "//build/config/sanitizers:deps",
+        "//build/config:exe_and_shlib_deps",
 
         # Give tests the default manifest on Windows (a no-op elsewhere).
         "//build/win:default_exe_manifest",
-      ]
-    }
-
-    # TODO(GYP_GONE): Delete this after we've converted everything to GN.
-    # The _run targets exist only for compatibility with GYP.
-    group("${target_name}_run") {
-      testonly = true
-      deps = [
-        ":${invoker.target_name}",
       ]
     }
 

@@ -7,8 +7,13 @@
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
+#include "base/time/time.h"
 #include "components/password_manager/core/browser/password_reuse_detector_consumer.h"
 #include "url/gurl.h"
+
+namespace base {
+class Clock;
+}
 
 namespace password_manager {
 
@@ -21,20 +26,25 @@ class PasswordReuseDetectionManager : public PasswordReuseDetectorConsumer {
  public:
   explicit PasswordReuseDetectionManager(PasswordManagerClient* client);
   ~PasswordReuseDetectionManager() override;
-
   void DidNavigateMainFrame(const GURL& main_frame_url);
   void OnKeyPressed(const base::string16& text);
 
   // PasswordReuseDetectorConsumer
   void OnReuseFound(const base::string16& password,
-                    const std::string& saved_domain,
+                    const std::string& legitimate_domain,
                     int saved_passwords,
                     int number_matches) override;
+
+  void SetClockForTesting(std::unique_ptr<base::Clock> clock);
 
  private:
   PasswordManagerClient* client_;
   base::string16 input_characters_;
   GURL main_frame_url_;
+  base::Time last_keystroke_time_;
+  // Used to retrieve the current time, in base::Time units.
+  std::unique_ptr<base::Clock> clock_;
+  bool reuse_on_this_page_was_found_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordReuseDetectionManager);
 };

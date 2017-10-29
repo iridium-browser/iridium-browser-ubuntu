@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/timer/timer.h"
+#include "components/browsing_data/core/clear_browsing_data_tab.h"
 #include "components/prefs/pref_member.h"
 
 class PrefService;
@@ -59,6 +60,23 @@ class BrowsingDataCounter {
     DISALLOW_COPY_AND_ASSIGN(FinishedResult);
   };
 
+  // A subclass of FinishedResult that besides |Value()| also stores whether
+  // the datatype is synced.
+  class SyncResult : public FinishedResult {
+   public:
+    SyncResult(const BrowsingDataCounter* source,
+               ResultInt value,
+               bool sync_enabled);
+    ~SyncResult() override;
+
+    bool is_sync_enabled() const { return sync_enabled_; }
+
+   private:
+    bool sync_enabled_;
+
+    DISALLOW_COPY_AND_ASSIGN(SyncResult);
+  };
+
   typedef base::Callback<void(std::unique_ptr<Result>)> Callback;
 
   // Every calculation progresses through a state machine. At initialization,
@@ -85,14 +103,17 @@ class BrowsingDataCounter {
   virtual ~BrowsingDataCounter();
 
   // Should be called once to initialize this class.
-  void Init(PrefService* pref_service, const Callback& callback);
+  void Init(PrefService* pref_service,
+            ClearBrowsingDataTab clear_browsing_data_tab,
+            const Callback& callback);
+
+  // Can be called instead of |Init()|, to create a counter that doesn't
+  // observe pref changes and counts data that was changed since |begin_time|.
+  // This mode doesn't use delayed responses.
+  void InitWithoutPref(base::Time begin_time, const Callback& callback);
 
   // Name of the preference associated with this counter.
   virtual const char* GetPrefName() const = 0;
-
-  // PrefService that manages the preferences for the user profile
-  // associated with this counter.
-  PrefService* GetPrefs() const;
 
   // Restarts the counter. Will be called automatically if the counting needs
   // to be restarted, e.g. when the deletion preference changes state or when
@@ -121,20 +142,24 @@ class BrowsingDataCounter {
   // Calculates the beginning of the counting period as |period_| before now.
   base::Time GetPeriodStart();
 
+  // Returns if this counter belongs to a preference on the default, basic or
+  // advanced CBD tab.
+  ClearBrowsingDataTab GetTab() const;
+
  private:
   // Called after the class is initialized by calling |Init|.
   virtual void OnInitialized();
 
-  // Count the data.
+  // Count the data. Call ReportResult() when finished. Tasks that are still
+  // running should be cancelled to avoid reporting old results.
   virtual void Count() = 0;
 
   // State transition methods.
   void TransitionToShowCalculating();
   void TransitionToReadyToReportResult();
 
-  // Pointer to the PrefService that manages the preferences for the user
-  // profile associated with this counter.
-  PrefService* pref_service_;
+  // Indicates if this counter belongs to a preference on the basic CBD tab.
+  ClearBrowsingDataTab clear_browsing_data_tab_;
 
   // The callback that will be called when the UI should be updated with a new
   // counter value.
@@ -148,8 +173,14 @@ class BrowsingDataCounter {
   // is to be deleted.
   IntegerPrefMember period_;
 
+  // This time period is used when |period_| is not initialized.
+  base::Time begin_time_;
+
   // Whether this class was properly initialized by calling |Init|.
   bool initialized_;
+
+  // Whether to introduce a delayed response to avoid flickering.
+  bool use_delay_;
 
   // State of the counter.
   State state_;

@@ -140,7 +140,10 @@ class DataUseMeasurement {
   void RecordTabStateHistogram(TrafficDirection dir,
                                DataUseUserData::AppState app_state,
                                bool is_tab_visible,
-                               int64_t bytes);
+                               int64_t bytes) const;
+
+  // Records data use histograms split on page tranition.
+  void RecordPageTransitionUMA(const net::URLRequest& request) const;
 
   // Records data use histograms of user traffic and services traffic split on
   // content type, AppState and TabState.
@@ -190,6 +193,10 @@ class DataUseMeasurement {
   // True if app is in background and first network read has not yet happened.
   bool no_reads_since_background_;
 #endif
+
+  // User traffic data use by content type is logged in 1KB increments. The
+  // remaining bytes are saved in this array until logged next time.
+  int16_t user_traffic_content_type_bytes_[DataUseUserData::TYPE_MAX];
 
   DISALLOW_COPY_AND_ASSIGN(DataUseMeasurement);
 };

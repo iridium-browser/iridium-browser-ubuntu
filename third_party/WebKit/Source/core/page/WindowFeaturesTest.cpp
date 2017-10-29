@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-#include "core/page/WindowFeatures.h"
+#include "core/page/CreateWindow.h"
 
-#include "wtf/text/WTFString.h"
 #include <gtest/gtest.h>
+#include "platform/wtf/text/WTFString.h"
+#include "public/web/WebWindowFeatures.h"
 
 namespace blink {
 
@@ -13,9 +14,9 @@ using WindowFeaturesTest = ::testing::Test;
 
 TEST_F(WindowFeaturesTest, NoOpener) {
   static const struct {
-    const char* featureString;
+    const char* feature_string;
     bool noopener;
-  } cases[] = {
+  } kCases[] = {
       {"", false},
       {"something", false},
       {"something, something", false},
@@ -26,10 +27,10 @@ TEST_F(WindowFeaturesTest, NoOpener) {
       {"NoOpEnEr", true},
   };
 
-  for (const auto& test : cases) {
-    WindowFeatures features(test.featureString);
-    EXPECT_EQ(test.noopener, features.noopener) << "Testing '"
-                                                << test.featureString << "'";
+  for (const auto& test : kCases) {
+    EXPECT_EQ(test.noopener,
+              GetWindowFeaturesFromString(test.feature_string).noopener)
+        << "Testing '" << test.feature_string << "'";
   }
 }
 

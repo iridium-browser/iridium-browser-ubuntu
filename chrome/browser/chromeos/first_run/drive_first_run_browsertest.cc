@@ -10,14 +10,11 @@
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/chromeos/first_run/drive_first_run_controller.h"
-#include "chrome/browser/extensions/chrome_extension_test_notification_observer.h"
-#include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/test/test_utils.h"
-#include "extensions/browser/extension_system.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_status_code.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -91,7 +88,6 @@ DriveFirstRunTest::DriveFirstRunTest() :
     success_(false) {}
 
 void DriveFirstRunTest::SetUpOnMainThread() {
-  InProcessBrowserTest::SetUpOnMainThread();
   PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_);
   test_data_dir_ = test_data_dir_.AppendASCII(kTestDirectory);
 
@@ -123,16 +119,9 @@ void DriveFirstRunTest::InitTestServer(const std::string& directory) {
 }
 
 void DriveFirstRunTest::InstallApp() {
-  ExtensionService* extension_service = extensions::ExtensionSystem::Get(
-      browser()->profile())->extension_service();
-  scoped_refptr<extensions::CrxInstaller> installer =
-      extensions::CrxInstaller::CreateSilent(extension_service);
-
-  installer->InstallCrx(test_data_dir_.AppendASCII(kTestAppCrxName));
-  extensions::ChromeExtensionTestNotificationObserver observer(browser());
-  observer.WaitForExtensionLoad();
-
-  ASSERT_TRUE(extension_service->GetExtensionById(kTestAppId, false));
+  extensions::ChromeTestExtensionLoader loader(browser()->profile());
+  ASSERT_TRUE(
+      loader.LoadExtension(test_data_dir_.AppendASCII(kTestAppCrxName)));
 }
 
 void DriveFirstRunTest::EnableOfflineMode() {

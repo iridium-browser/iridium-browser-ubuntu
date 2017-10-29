@@ -40,6 +40,16 @@ Polymer({
     networkingPrivate: Object,
 
     /**
+     * Reflects networkProperties.Cellular.SIMLockStatus.LockEnabled for the
+     * toggle button.
+     * @private
+     */
+    lockEnabled_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
      * Set to true when a PUK is required to unlock the SIM.
      * @private
      */
@@ -61,14 +71,17 @@ Polymer({
 
   sendSimLockEnabled_: false,
 
+  /** @private */
   networkPropertiesChanged_: function() {
     if (!this.networkProperties || !this.networkProperties.Cellular)
       return;
     var simLockStatus = this.networkProperties.Cellular.SIMLockStatus;
     this.pukRequired_ =
         !!simLockStatus && simLockStatus.LockType == CrOnc.LockType.PUK;
+    this.lockEnabled_ = simLockStatus.LockEnabled;
   },
 
+  /** @private */
   pukRequiredChanged_: function() {
     if (this.$.unlockPukDialog.open) {
       if (this.pukRequired_)
@@ -99,13 +112,12 @@ Polymer({
     if (!showUnlockPuk)
       return;
 
-    this.error_ = ErrorType.NONE;
-    this.$.unlockPukDialog.showModal();
+    this.showUnlockPukDialog_();
   },
 
   /**
    * Opens the pin dialog when the sim lock enabled state changes.
-   * @param {Event} event
+   * @param {!Event} event
    * @private
    */
   onSimLockEnabledChange_: function(event) {
@@ -113,21 +125,22 @@ Polymer({
       return;
     this.sendSimLockEnabled_ = event.target.checked;
     this.error_ = ErrorType.NONE;
-    this.$.enterPinDialog.showModal();
     this.$.enterPin.value = '';
+    this.$.enterPinDialog.showModal();
   },
 
   /**
    * Sends the PIN value from the Enter PIN dialog.
-   * @param {Event} event
+   * @param {!Event} event
    * @private
    */
   sendEnterPin_: function(event) {
     var guid = (this.networkProperties && this.networkProperties.GUID) || '';
     var pin = this.$.enterPin.value;
-    if (!this.validatePin_(pin))
+    if (!this.validatePin_(pin)) {
+      this.onEnterPinDialogCancel_();
       return;
-
+    }
     var simState = /** @type {!CrOnc.CellularSimState} */ ({
       currentPin: pin,
       requirePin: this.sendSimLockEnabled_,
@@ -153,15 +166,15 @@ Polymer({
       return;
     event.preventDefault();
     this.error_ = ErrorType.NONE;
-    this.$.changePinDialog.showModal();
     this.$.changePinOld.value = '';
     this.$.changePinNew1.value = '';
     this.$.changePinNew2.value = '';
+    this.$.changePinDialog.showModal();
   },
 
   /**
    * Sends the old and new PIN values from the Change PIN dialog.
-   * @param {Event} event
+   * @param {!Event} event
    * @private
    */
   sendChangePin_: function(event) {
@@ -194,13 +207,13 @@ Polymer({
   onUnlockPinTap_: function(event) {
     event.preventDefault();
     this.error_ = ErrorType.NONE;
-    this.$.unlockPinDialog.showModal();
     this.$.unlockPin.value = '';
+    this.$.unlockPinDialog.showModal();
   },
 
   /**
    * Sends the PIN value from the Unlock PIN dialog.
-   * @param {Event} event
+   * @param {!Event} event
    * @private
    */
   sendUnlockPin_: function(event) {
@@ -220,22 +233,18 @@ Polymer({
     }.bind(this));
   },
 
-  /**
-   * Opens the Unlock PUK dialog.
-   * @param {Event} event
-   * @private
-   */
-  unlockPuk_: function(event) {
+  /** @private */
+  showUnlockPukDialog_: function() {
     this.error_ = ErrorType.NONE;
-    this.$.unlockPukDialog.showModal();
     this.$.unlockPuk.value = '';
     this.$.unlockPin1.value = '';
     this.$.unlockPin2.value = '';
+    this.$.unlockPukDialog.showModal();
   },
 
   /**
    * Sends the PUK value and new PIN value from the Unblock PUK dialog.
-   * @param {Event} event
+   * @param {!Event} event
    * @private
    */
   sendUnlockPuk_: function(event) {
@@ -342,6 +351,27 @@ Polymer({
       return false;
     }
     return true;
-  }
+  },
+
+  /** @private */
+  onEnterPinDialogCancel_: function() {
+    this.lockEnabled_ =
+        this.networkProperties.Cellular.SIMLockStatus.LockEnabled;
+  },
+
+  /** @private */
+  onEnterPinDialogClose_: function() {
+    cr.ui.focusWithoutInk(assert(this.$$('#simLockButton')));
+  },
+
+  /** @private */
+  onChangePinDialogClose_: function() {
+    cr.ui.focusWithoutInk(assert(this.$$('#changePinButton')));
+  },
+
+  /** @private */
+  onUnlockPinDialogClose_: function() {
+    cr.ui.focusWithoutInk(assert(this.$$('#unlockPinButton')));
+  },
 });
 })();

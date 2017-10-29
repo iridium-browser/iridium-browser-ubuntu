@@ -9,25 +9,28 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "cc/test/ordered_simple_task_runner.h"
 #include "platform/scheduler/base/real_time_domain.h"
-#include "public/platform/scheduler/base/task_queue.h"
+#include "platform/scheduler/base/task_queue.h"
 #include "platform/scheduler/base/task_queue_manager.h"
 #include "platform/scheduler/base/test_time_source.h"
 #include "platform/scheduler/child/scheduler_helper.h"
 #include "platform/scheduler/child/scheduler_tqm_delegate_for_test.h"
 #include "platform/scheduler/child/scheduler_tqm_delegate_impl.h"
+#include "platform/scheduler/child/worker_scheduler_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using testing::_;
-using testing::AnyNumber;
-using testing::AtLeast;
-using testing::Exactly;
-using testing::Invoke;
-using testing::Return;
+using ::testing::_;
+using ::testing::AnyNumber;
+using ::testing::AtLeast;
+using ::testing::Exactly;
+using ::testing::Invoke;
+using ::testing::Return;
 
 namespace blink {
 namespace scheduler {
@@ -68,13 +71,13 @@ void IdleTestTask(int* run_count,
   *deadline_out = deadline;
 }
 
-int max_idle_task_reposts = 2;
+int g_max_idle_task_reposts = 2;
 
 void RepostingIdleTestTask(SingleThreadIdleTaskRunner* idle_task_runner,
                            int* run_count,
                            base::TimeTicks* deadline_out,
                            base::TimeTicks deadline) {
-  if ((*run_count + 1) < max_idle_task_reposts) {
+  if ((*run_count + 1) < g_max_idle_task_reposts) {
     idle_task_runner->PostIdleTask(
         FROM_HERE,
         base::Bind(&RepostingIdleTestTask, base::Unretained(idle_task_runner),
@@ -91,7 +94,7 @@ void RepostingUpdateClockIdleTestTask(
     base::TimeDelta advance_time,
     std::vector<base::TimeTicks>* deadlines,
     base::TimeTicks deadline) {
-  if ((*run_count + 1) < max_idle_task_reposts) {
+  if ((*run_count + 1) < g_max_idle_task_reposts) {
     idle_task_runner->PostIdleTask(
         FROM_HERE, base::Bind(&RepostingUpdateClockIdleTestTask,
                               base::Unretained(idle_task_runner), run_count,
@@ -150,19 +153,41 @@ void ShutdownIdleTask(IdleHelper* helper,
   helper->Shutdown();
 }
 
+// RAII helper class to enable auto advancing of time inside mock task runner.
+// Automatically disables auto-advancement when destroyed.
+class ScopedAutoAdvanceNowEnabler {
+ public:
+  ScopedAutoAdvanceNowEnabler(
+      scoped_refptr<cc::OrderedSimpleTaskRunner> task_runner)
+      : task_runner_(task_runner) {
+    if (task_runner_)
+      task_runner_->SetAutoAdvanceNowToPendingTasks(true);
+  }
+
+  ~ScopedAutoAdvanceNowEnabler() {
+    if (task_runner_)
+      task_runner_->SetAutoAdvanceNowToPendingTasks(false);
+  }
+
+ private:
+  scoped_refptr<cc::OrderedSimpleTaskRunner> task_runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedAutoAdvanceNowEnabler);
+};
+
 };  // namespace
 
 class IdleHelperForTest : public IdleHelper, public IdleHelper::Delegate {
  public:
   explicit IdleHelperForTest(
       SchedulerHelper* scheduler_helper,
-      base::TimeDelta required_quiescence_duration_before_long_idle_period)
+      base::TimeDelta required_quiescence_duration_before_long_idle_period,
+      scoped_refptr<TaskQueue> idle_task_runner)
       : IdleHelper(scheduler_helper,
                    this,
-                   "test.idle",
-                   TRACE_DISABLED_BY_DEFAULT("test.idle"),
                    "TestSchedulerIdlePeriod",
-                   required_quiescence_duration_before_long_idle_period) {}
+                   required_quiescence_duration_before_long_idle_period,
+                   idle_task_runner) {}
 
   ~IdleHelperForTest() override {}
 
@@ -174,9 +199,10 @@ class IdleHelperForTest : public IdleHelper, public IdleHelper::Delegate {
   MOCK_METHOD0(IsNotQuiescent, void());
   MOCK_METHOD0(OnIdlePeriodStarted, void());
   MOCK_METHOD0(OnIdlePeriodEnded, void());
+  MOCK_METHOD1(OnPendingTasksChanged, void(bool has_tasks));
 };
 
-class BaseIdleHelperTest : public testing::Test {
+class BaseIdleHelperTest : public ::testing::Test {
  public:
   BaseIdleHelperTest(
       base::MessageLoop* message_loop,
@@ -191,15 +217,12 @@ class BaseIdleHelperTest : public testing::Test {
             message_loop,
             mock_task_runner_,
             base::WrapUnique(new TestTimeSource(clock_.get())))),
-        scheduler_helper_(
-            new SchedulerHelper(main_task_runner_,
-                                "test.idle",
-                                TRACE_DISABLED_BY_DEFAULT("test.idle"),
-                                TRACE_DISABLED_BY_DEFAULT("test.idle.debug"))),
+        scheduler_helper_(new WorkerSchedulerHelper(main_task_runner_)),
         idle_helper_(new IdleHelperForTest(
             scheduler_helper_.get(),
-            required_quiescence_duration_before_long_idle_period)),
-        default_task_runner_(scheduler_helper_->DefaultTaskRunner()),
+            required_quiescence_duration_before_long_idle_period,
+            scheduler_helper_->NewTaskQueue(TaskQueue::Spec("idle_test")))),
+        default_task_runner_(scheduler_helper_->DefaultWorkerTaskQueue()),
         idle_task_runner_(idle_helper_->IdleTaskRunner()) {
     clock_->Advance(base::TimeDelta::FromMicroseconds(5000));
   }
@@ -212,6 +235,7 @@ class BaseIdleHelperTest : public testing::Test {
     EXPECT_CALL(*idle_helper_, CanEnterLongIdlePeriod(_, _))
         .Times(AnyNumber())
         .WillRepeatedly(Return(true));
+    EXPECT_CALL(*idle_helper_, OnPendingTasksChanged(_)).Times(AnyNumber());
   }
 
   void TearDown() override {
@@ -231,10 +255,11 @@ class BaseIdleHelperTest : public testing::Test {
   void RunUntilIdle() {
     // Only one of mock_task_runner_ or message_loop_ should be set.
     DCHECK(!mock_task_runner_.get() || !message_loop_.get());
-    if (mock_task_runner_.get())
+    if (mock_task_runner_.get()) {
       mock_task_runner_->RunUntilIdle();
-    else
+    } else {
       base::RunLoop().RunUntilIdle();
+    }
   }
 
   template <typename E>
@@ -294,7 +319,7 @@ class BaseIdleHelperTest : public testing::Test {
   std::unique_ptr<base::MessageLoop> message_loop_;
 
   scoped_refptr<SchedulerTqmDelegate> main_task_runner_;
-  std::unique_ptr<SchedulerHelper> scheduler_helper_;
+  std::unique_ptr<WorkerSchedulerHelper> scheduler_helper_;
   std::unique_ptr<IdleHelperForTest> idle_helper_;
   scoped_refptr<base::SingleThreadTaskRunner> default_task_runner_;
   scoped_refptr<SingleThreadIdleTaskRunner> idle_task_runner_;
@@ -360,7 +385,7 @@ TEST_F(IdleHelperTest, TestRepostingIdleTask) {
   base::TimeTicks actual_deadline;
   int run_count = 0;
 
-  max_idle_task_reposts = 2;
+  g_max_idle_task_reposts = 2;
   idle_task_runner_->PostIdleTask(
       FROM_HERE,
       base::Bind(&RepostingIdleTestTask, base::RetainedRef(idle_task_runner_),
@@ -429,7 +454,8 @@ class IdleHelperTestWithIdlePeriodObserver : public BaseIdleHelperTest {
     EXPECT_CALL(*idle_helper_, OnIdlePeriodEnded()).Times(0);
   }
 
-  void ExpectIdlePeriodStartsAndEnds(const testing::Cardinality& cardinality) {
+  void ExpectIdlePeriodStartsAndEnds(
+      const ::testing::Cardinality& cardinality) {
     EXPECT_CALL(*idle_helper_, OnIdlePeriodStarted()).Times(cardinality);
     EXPECT_CALL(*idle_helper_, OnIdlePeriodEnded()).Times(cardinality);
   }
@@ -526,9 +552,9 @@ TEST_F(IdleHelperWithMessageLoopTest,
       clock_->NowTicks() + base::TimeDelta::FromMilliseconds(10));
   RunUntilIdle();
   // Note we expect task 3 to run last because it's non-nestable.
-  EXPECT_THAT(order, testing::ElementsAre(std::string("1"), std::string("2"),
-                                          std::string("4"), std::string("5"),
-                                          std::string("3")));
+  EXPECT_THAT(order, ::testing::ElementsAre(std::string("1"), std::string("2"),
+                                            std::string("4"), std::string("5"),
+                                            std::string("3")));
 }
 
 TEST_F(IdleHelperTestWithIdlePeriodObserver, TestLongIdlePeriod) {
@@ -606,7 +632,7 @@ TEST_F(IdleHelperTestWithIdlePeriodObserver, TestLongIdlePeriodRepeating) {
       .WillRepeatedly(Return(true));
   ExpectIdlePeriodStartsAndEnds(AtLeast(2));
 
-  max_idle_task_reposts = 3;
+  g_max_idle_task_reposts = 3;
   base::TimeTicks clock_before(clock_->NowTicks());
   base::TimeDelta idle_task_runtime(base::TimeDelta::FromMilliseconds(10));
   idle_task_runner_->PostIdleTask(
@@ -619,15 +645,13 @@ TEST_F(IdleHelperTestWithIdlePeriodObserver, TestLongIdlePeriodRepeating) {
   idle_helper_->EnableLongIdlePeriod();
   RunUntilIdle();
   EXPECT_EQ(3, run_count);
-  EXPECT_THAT(
-      actual_deadlines,
-      testing::ElementsAre(
-          clock_before + maximum_idle_period_duration(),
-          clock_before + idle_task_runtime + maximum_idle_period_duration(),
-          clock_before + (2 * idle_task_runtime) +
-              maximum_idle_period_duration()));
+  EXPECT_THAT(actual_deadlines,
+              ::testing::ElementsAre(
+                  clock_before + maximum_idle_period_duration(),
+                  clock_before + 2 * maximum_idle_period_duration(),
+                  clock_before + 3 * maximum_idle_period_duration()));
 
-  max_idle_task_reposts = 5;
+  g_max_idle_task_reposts = 5;
   idle_task_runner_->PostIdleTask(
       FROM_HERE,
       base::Bind(&RepostingUpdateClockIdleTestTask,
@@ -645,16 +669,17 @@ TEST_F(IdleHelperTestWithIdlePeriodObserver, TestLongIdlePeriodRepeating) {
 TEST_F(IdleHelperTestWithIdlePeriodObserver,
        TestLongIdlePeriodWhenNotCanEnterLongIdlePeriod) {
   base::TimeDelta delay = base::TimeDelta::FromMilliseconds(1000);
-  base::TimeDelta halfDelay = base::TimeDelta::FromMilliseconds(500);
-  base::TimeTicks delayOver = clock_->NowTicks() + delay;
+  base::TimeDelta half_delay = base::TimeDelta::FromMilliseconds(500);
+  base::TimeTicks delay_over = clock_->NowTicks() + delay;
   base::TimeTicks deadline_in_task;
   int run_count = 0;
 
   ON_CALL(*idle_helper_, CanEnterLongIdlePeriod(_, _))
-      .WillByDefault(Invoke(
-          [delay, delayOver](base::TimeTicks now,
-                             base::TimeDelta* next_long_idle_period_delay_out) {
-            if (now >= delayOver)
+      .WillByDefault(
+          Invoke([delay, delay_over](
+                     base::TimeTicks now,
+                     base::TimeDelta* next_long_idle_period_delay_out) {
+            if (now >= delay_over)
               return true;
             *next_long_idle_period_delay_out = delay;
             return false;
@@ -671,17 +696,20 @@ TEST_F(IdleHelperTestWithIdlePeriodObserver,
   RunUntilIdle();
   EXPECT_EQ(0, run_count);
 
-  clock_->Advance(halfDelay);
+  clock_->Advance(half_delay);
   RunUntilIdle();
   EXPECT_EQ(0, run_count);
 
   // Delay is finished, idle task should run.
-  clock_->Advance(halfDelay);
+  clock_->Advance(half_delay);
   RunUntilIdle();
   EXPECT_EQ(1, run_count);
 }
 
-TEST_F(IdleHelperTest, TestLongIdlePeriodImmediatelyRestartsIfMaxDeadline) {
+TEST_F(IdleHelperTest,
+       TestLongIdlePeriodDoesNotImmediatelyRestartIfMaxDeadline) {
+  ScopedAutoAdvanceNowEnabler advance_now(mock_task_runner_);
+
   std::vector<base::TimeTicks> actual_deadlines;
   int run_count = 0;
 
@@ -690,7 +718,7 @@ TEST_F(IdleHelperTest, TestLongIdlePeriodImmediatelyRestartsIfMaxDeadline) {
 
   // The second idle period should happen immediately after the first the
   // they have max deadlines.
-  max_idle_task_reposts = 2;
+  g_max_idle_task_reposts = 2;
   idle_task_runner_->PostIdleTask(
       FROM_HERE,
       base::Bind(&RepostingUpdateClockIdleTestTask,
@@ -700,11 +728,10 @@ TEST_F(IdleHelperTest, TestLongIdlePeriodImmediatelyRestartsIfMaxDeadline) {
   idle_helper_->EnableLongIdlePeriod();
   RunUntilIdle();
   EXPECT_EQ(2, run_count);
-  EXPECT_THAT(
-      actual_deadlines,
-      testing::ElementsAre(
-          clock_before + maximum_idle_period_duration(),
-          clock_before + idle_task_runtime + maximum_idle_period_duration()));
+  EXPECT_THAT(actual_deadlines,
+              ::testing::ElementsAre(
+                  clock_before + maximum_idle_period_duration(),
+                  clock_before + 2 * maximum_idle_period_duration()));
 }
 
 TEST_F(IdleHelperTest, TestLongIdlePeriodRestartWaitsIfNotMaxDeadline) {
@@ -721,7 +748,7 @@ TEST_F(IdleHelperTest, TestLongIdlePeriodRestartWaitsIfNotMaxDeadline) {
   default_task_runner_->PostDelayedTask(FROM_HERE, base::Bind(&NullTask),
                                         pending_task_delay);
 
-  max_idle_task_reposts = 2;
+  g_max_idle_task_reposts = 2;
   idle_task_runner_->PostIdleTask(
       FROM_HERE,
       base::Bind(&RepostingIdleTestTask, base::RetainedRef(idle_task_runner_),
@@ -761,7 +788,7 @@ TEST_F(IdleHelperTest, TestLongIdlePeriodPaused) {
       &next_pending_delayed_task));
 
   // Posting a task should transition us to the an active state.
-  max_idle_task_reposts = 2;
+  g_max_idle_task_reposts = 2;
   base::TimeTicks clock_before(clock_->NowTicks());
   base::TimeDelta idle_task_runtime(base::TimeDelta::FromMilliseconds(10));
   idle_task_runner_->PostIdleTask(
@@ -771,11 +798,10 @@ TEST_F(IdleHelperTest, TestLongIdlePeriodPaused) {
                  idle_task_runtime, &actual_deadlines));
   RunUntilIdle();
   EXPECT_EQ(2, run_count);
-  EXPECT_THAT(
-      actual_deadlines,
-      testing::ElementsAre(
-          clock_before + maximum_idle_period_duration(),
-          clock_before + idle_task_runtime + maximum_idle_period_duration()));
+  EXPECT_THAT(actual_deadlines,
+              ::testing::ElementsAre(
+                  clock_before + maximum_idle_period_duration(),
+                  clock_before + 2 * maximum_idle_period_duration()));
 
   // Once all task have been run we should go back to the paused state.
   CheckIdlePeriodStateIs("in_long_idle_period_paused");
@@ -908,7 +934,7 @@ TEST_F(IdleHelperWithQuiescencePeriodTest,
        LongIdlePeriodStartsImmediatelyIfQuiescent) {
   base::TimeTicks actual_deadline;
   int run_count = 0;
-  max_idle_task_reposts = 1;
+  g_max_idle_task_reposts = 1;
   idle_task_runner_->PostIdleTask(
       FROM_HERE,
       base::Bind(&RepostingIdleTestTask, base::RetainedRef(idle_task_runner_),
@@ -930,7 +956,7 @@ TEST_F(IdleHelperWithQuiescencePeriodTestWithIdlePeriodObserver,
 
   base::TimeTicks actual_deadline;
   int run_count = 0;
-  max_idle_task_reposts = 1;
+  g_max_idle_task_reposts = 1;
   idle_task_runner_->PostIdleTask(
       FROM_HERE,
       base::Bind(&RepostingIdleTestTask, base::RetainedRef(idle_task_runner_),
@@ -1115,6 +1141,71 @@ TEST_F(IdleHelperTest, TestPostDelayedIdleTask) {
   RunUntilIdle();
 
   EXPECT_EQ(1, run_count);
+  EXPECT_EQ(expected_deadline, deadline_in_task);
+}
+
+// Tests that the OnPendingTasksChanged callback is called once when the idle
+// queue becomes non-empty and again when it becomes empty.
+TEST_F(IdleHelperTest, OnPendingTasksChanged) {
+  int run_count = 0;
+  base::TimeTicks expected_deadline =
+      clock_->NowTicks() + base::TimeDelta::FromMilliseconds(2300);
+  base::TimeTicks deadline_in_task;
+
+  {
+    ::testing::InSequence dummy;
+    // This will be called once. I.e when the one and only task is posted.
+    EXPECT_CALL(*idle_helper_, OnPendingTasksChanged(true)).Times(1);
+    // This will be called once. I.e when the one and only task completes.
+    EXPECT_CALL(*idle_helper_, OnPendingTasksChanged(false)).Times(1);
+  }
+
+  clock_->Advance(base::TimeDelta::FromMilliseconds(100));
+  idle_task_runner_->PostIdleTask(
+      FROM_HERE, base::Bind(&IdleTestTask, &run_count, &deadline_in_task));
+
+  RunUntilIdle();
+  EXPECT_EQ(0, run_count);
+
+  idle_helper_->StartIdlePeriod(
+      IdleHelper::IdlePeriodState::IN_SHORT_IDLE_PERIOD, clock_->NowTicks(),
+      expected_deadline);
+  RunUntilIdle();
+  EXPECT_EQ(1, run_count);
+  EXPECT_EQ(expected_deadline, deadline_in_task);
+}
+
+// Tests that the OnPendingTasksChanged callback is still only called once
+// with false despite there being two idle tasks posted.
+TEST_F(IdleHelperTest, OnPendingTasksChanged_TwoTasksAtTheSameTime) {
+  int run_count = 0;
+  base::TimeTicks expected_deadline =
+      clock_->NowTicks() + base::TimeDelta::FromMilliseconds(2300);
+  base::TimeTicks deadline_in_task;
+
+  {
+    ::testing::InSequence dummy;
+    // This will be called 3 times. I.e when T1 and T2 are posted and when T1
+    // completes.
+    EXPECT_CALL(*idle_helper_, OnPendingTasksChanged(true)).Times(3);
+    // This will be called once. I.e when T2 completes.
+    EXPECT_CALL(*idle_helper_, OnPendingTasksChanged(false)).Times(1);
+  }
+
+  clock_->Advance(base::TimeDelta::FromMilliseconds(100));
+  idle_task_runner_->PostIdleTask(
+      FROM_HERE, base::Bind(&IdleTestTask, &run_count, &deadline_in_task));
+  idle_task_runner_->PostIdleTask(
+      FROM_HERE, base::Bind(&IdleTestTask, &run_count, &deadline_in_task));
+
+  RunUntilIdle();
+  EXPECT_EQ(0, run_count);
+
+  idle_helper_->StartIdlePeriod(
+      IdleHelper::IdlePeriodState::IN_SHORT_IDLE_PERIOD, clock_->NowTicks(),
+      expected_deadline);
+  RunUntilIdle();
+  EXPECT_EQ(2, run_count);
   EXPECT_EQ(expected_deadline, deadline_in_task);
 }
 

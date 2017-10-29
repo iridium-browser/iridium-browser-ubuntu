@@ -16,7 +16,7 @@ package metrics;
 // the Translate UI. Contains features used by Translate Ranker for
 // inference, information about the ranker model and its decision, as
 // well as user or automated feedback from the Translate UI.
-// Next tag: 15
+// Next tag: 16
 message TranslateEventProto {
   // Language strings are two or three letter codes, with sometimes an extra
   // suffix (for e.g. chinese zh-TW or zh-CN). See
@@ -67,6 +67,7 @@ message TranslateEventProto {
   optional RankerResponse ranker_response = 9;
 
   // The action performed by the user in the translate UI.
+  // Next tag 27.
   enum EventType {
     // The feedback event does not correspond to any of the enumerated
     // cases.
@@ -92,9 +93,15 @@ message TranslateEventProto {
     // The user reverted the translation.
     USER_REVERT = 9;
 
+    // Deprecated. Use AUTO_TRANSLATION_BY_PREF or AUTO_TRANSLATION_BY_LINK
+    // instead.
+    AUTOMATICALLY_TRANSLATED = 10;
     // Automated feedback.
     // An automatic translation was triggered.
-    AUTOMATICALLY_TRANSLATED = 10;
+    // User sets always translate in user settings.
+    AUTO_TRANSLATION_BY_PREF = 25;
+    // User navigated through a click from a translated page.
+    AUTO_TRANSLATION_BY_LINK = 26;
     // The translation was not offered because translate is disabled
     // globally in the user preferences.
     DISABLED_BY_PREF = 11;
@@ -131,10 +138,17 @@ message TranslateEventProto {
     WEB_CONTENTS_NOT_ACTIVE = 22;
     // The translate UI was not shown because the user is editing a form field.
     EDITABLE_FIELD_IS_ACTIVE = 23;
+    // The translate UI was not shown because the language is in the user's User
+    // Language Profile.
+    LANGUAGE_IN_ULP = 24;
   }
 
   // Event received from translate UI.
   optional EventType event_type = 10;
+
+  // Decisions that have been overriden by translate ranker (e.g.
+  // LANGUAGE_DISABLED_BY_AUTO_BLACKLIST).
+  repeated EventType decision_overrides = 15;
 
   // The timestamp for the event, in seconds.
   // This value comes from Chromium's TimeTicks::Now(), which is an abstract

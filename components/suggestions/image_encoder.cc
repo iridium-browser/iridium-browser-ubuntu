@@ -17,14 +17,11 @@ std::unique_ptr<SkBitmap> DecodeJPEGToSkBitmap(const void* encoded_data,
 
 bool EncodeSkBitmapToJPEG(const SkBitmap& bitmap,
                           std::vector<unsigned char>* dest) {
-  SkAutoLockPixels bitmap_lock(bitmap);
   if (!bitmap.readyToDraw() || bitmap.isNull()) {
     return false;
   }
-  return gfx::JPEGCodec::Encode(
-      reinterpret_cast<unsigned char*>(bitmap.getAddr32(0, 0)),
-      gfx::JPEGCodec::FORMAT_SkBitmap, bitmap.width(), bitmap.height(),
-      bitmap.rowBytes(), 100, dest);
+
+  return gfx::JPEGCodec::Encode(bitmap, 100, dest);
 }
 
 }  // namespace suggestions

@@ -1,4 +1,4 @@
-/* Copyright (c) 2016 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2017 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -8,6 +8,7 @@
 
 #include "ppapi/c/ppb.h"
 #include "ppapi/c/dev/ppb_audio_input_dev.h"
+#include "ppapi/c/dev/ppb_audio_output_dev.h"
 #include "ppapi/c/dev/ppb_device_ref_dev.h"
 #include "ppapi/c/dev/ppb_file_chooser_dev.h"
 #include "ppapi/c/dev/ppb_ime_input_event_dev.h"
@@ -117,6 +118,7 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_WheelInputEvent_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_KeyboardInputEvent_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_KeyboardInputEvent_1_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TouchInputEvent_1_0;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_MediaStreamAudioTrack_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_MediaStreamVideoTrack_0_1;
@@ -156,6 +158,7 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_WebSocket_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Messaging_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_3;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_DeviceRef_Dev_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_5;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_6;
@@ -191,7 +194,7 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_NetAddress_Private_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_NetAddress_Private_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_NetAddress_Private_1_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_OutputProtection_Private_0_1;
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_2;
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_3;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPServerSocket_Private_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPServerSocket_Private_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_3;
@@ -1188,6 +1191,50 @@ static void Pnacl_M13_PPB_TouchInputEvent_GetTouchById(struct PP_TouchPoint* _st
 }
 
 /* End wrapper methods for PPB_TouchInputEvent_1_0 */
+
+/* Begin wrapper methods for PPB_TouchInputEvent_1_4 */
+
+static PP_Resource Pnacl_M60_PPB_TouchInputEvent_Create(PP_Instance instance, PP_InputEvent_Type type, PP_TimeTicks time_stamp, uint32_t modifiers) {
+  const struct PPB_TouchInputEvent_1_4 *iface = Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4.real_iface;
+  return iface->Create(instance, type, time_stamp, modifiers);
+}
+
+static void Pnacl_M60_PPB_TouchInputEvent_AddTouchPoint(PP_Resource touch_event, PP_TouchListType list, const struct PP_TouchPoint* point) {
+  const struct PPB_TouchInputEvent_1_4 *iface = Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4.real_iface;
+  iface->AddTouchPoint(touch_event, list, point);
+}
+
+static PP_Bool Pnacl_M60_PPB_TouchInputEvent_IsTouchInputEvent(PP_Resource resource) {
+  const struct PPB_TouchInputEvent_1_4 *iface = Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4.real_iface;
+  return iface->IsTouchInputEvent(resource);
+}
+
+static uint32_t Pnacl_M60_PPB_TouchInputEvent_GetTouchCount(PP_Resource resource, PP_TouchListType list) {
+  const struct PPB_TouchInputEvent_1_4 *iface = Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4.real_iface;
+  return iface->GetTouchCount(resource, list);
+}
+
+static void Pnacl_M60_PPB_TouchInputEvent_GetTouchByIndex(struct PP_TouchPoint* _struct_result, PP_Resource resource, PP_TouchListType list, uint32_t index) {
+  const struct PPB_TouchInputEvent_1_4 *iface = Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4.real_iface;
+  *_struct_result = iface->GetTouchByIndex(resource, list, index);
+}
+
+static void Pnacl_M60_PPB_TouchInputEvent_GetTouchById(struct PP_TouchPoint* _struct_result, PP_Resource resource, PP_TouchListType list, uint32_t touch_id) {
+  const struct PPB_TouchInputEvent_1_4 *iface = Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4.real_iface;
+  *_struct_result = iface->GetTouchById(resource, list, touch_id);
+}
+
+static void Pnacl_M60_PPB_TouchInputEvent_GetTouchTiltByIndex(struct PP_FloatPoint* _struct_result, PP_Resource resource, PP_TouchListType list, uint32_t index) {
+  const struct PPB_TouchInputEvent_1_4 *iface = Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4.real_iface;
+  *_struct_result = iface->GetTouchTiltByIndex(resource, list, index);
+}
+
+static void Pnacl_M60_PPB_TouchInputEvent_GetTouchTiltById(struct PP_FloatPoint* _struct_result, PP_Resource resource, PP_TouchListType list, uint32_t touch_id) {
+  const struct PPB_TouchInputEvent_1_4 *iface = Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4.real_iface;
+  *_struct_result = iface->GetTouchTiltById(resource, list, touch_id);
+}
+
+/* End wrapper methods for PPB_TouchInputEvent_1_4 */
 
 /* Begin wrapper methods for PPB_IMEInputEvent_1_0 */
 
@@ -2751,6 +2798,55 @@ static void Pnacl_M30_PPB_AudioInput_Dev_Close(PP_Resource audio_input) {
 
 /* End wrapper methods for PPB_AudioInput_Dev_0_4 */
 
+/* Begin wrapper methods for PPB_AudioOutput_Dev_0_1 */
+
+static PP_Resource Pnacl_M59_PPB_AudioOutput_Dev_Create(PP_Instance instance) {
+  const struct PPB_AudioOutput_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1.real_iface;
+  return iface->Create(instance);
+}
+
+static PP_Bool Pnacl_M59_PPB_AudioOutput_Dev_IsAudioOutput(PP_Resource resource) {
+  const struct PPB_AudioOutput_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1.real_iface;
+  return iface->IsAudioOutput(resource);
+}
+
+static int32_t Pnacl_M59_PPB_AudioOutput_Dev_EnumerateDevices(PP_Resource audio_output, struct PP_ArrayOutput* output, struct PP_CompletionCallback* callback) {
+  const struct PPB_AudioOutput_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1.real_iface;
+  return iface->EnumerateDevices(audio_output, *output, *callback);
+}
+
+static int32_t Pnacl_M59_PPB_AudioOutput_Dev_MonitorDeviceChange(PP_Resource audio_output, PP_MonitorDeviceChangeCallback callback, void* user_data) {
+  const struct PPB_AudioOutput_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1.real_iface;
+  return iface->MonitorDeviceChange(audio_output, callback, user_data);
+}
+
+static int32_t Pnacl_M59_PPB_AudioOutput_Dev_Open(PP_Resource audio_output, PP_Resource device_ref, PP_Resource config, PPB_AudioOutput_Callback audio_output_callback, void* user_data, struct PP_CompletionCallback* callback) {
+  const struct PPB_AudioOutput_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1.real_iface;
+  return iface->Open(audio_output, device_ref, config, audio_output_callback, user_data, *callback);
+}
+
+static PP_Resource Pnacl_M59_PPB_AudioOutput_Dev_GetCurrentConfig(PP_Resource audio_output) {
+  const struct PPB_AudioOutput_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1.real_iface;
+  return iface->GetCurrentConfig(audio_output);
+}
+
+static PP_Bool Pnacl_M59_PPB_AudioOutput_Dev_StartPlayback(PP_Resource audio_output) {
+  const struct PPB_AudioOutput_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1.real_iface;
+  return iface->StartPlayback(audio_output);
+}
+
+static PP_Bool Pnacl_M59_PPB_AudioOutput_Dev_StopPlayback(PP_Resource audio_output) {
+  const struct PPB_AudioOutput_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1.real_iface;
+  return iface->StopPlayback(audio_output);
+}
+
+static void Pnacl_M59_PPB_AudioOutput_Dev_Close(PP_Resource audio_output) {
+  const struct PPB_AudioOutput_Dev_0_1 *iface = Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1.real_iface;
+  iface->Close(audio_output);
+}
+
+/* End wrapper methods for PPB_AudioOutput_Dev_0_1 */
+
 /* Not generating wrapper methods for PPB_Buffer_Dev_0_4 */
 
 /* Not generating wrapper methods for PPB_Crypto_Dev_0_1 */
@@ -4017,24 +4113,29 @@ static int32_t Pnacl_M31_PPB_OutputProtection_Private_EnableProtection(PP_Resour
 
 /* End wrapper methods for PPB_OutputProtection_Private_0_1 */
 
-/* Begin wrapper methods for PPB_PlatformVerification_Private_0_2 */
+/* Begin wrapper methods for PPB_PlatformVerification_Private_0_3 */
 
-static PP_Resource Pnacl_M32_PPB_PlatformVerification_Private_Create(PP_Instance instance) {
-  const struct PPB_PlatformVerification_Private_0_2 *iface = Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_2.real_iface;
+static PP_Resource Pnacl_M61_PPB_PlatformVerification_Private_Create(PP_Instance instance) {
+  const struct PPB_PlatformVerification_Private_0_3 *iface = Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_3.real_iface;
   return iface->Create(instance);
 }
 
-static PP_Bool Pnacl_M32_PPB_PlatformVerification_Private_IsPlatformVerification(PP_Resource resource) {
-  const struct PPB_PlatformVerification_Private_0_2 *iface = Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_2.real_iface;
+static PP_Bool Pnacl_M61_PPB_PlatformVerification_Private_IsPlatformVerification(PP_Resource resource) {
+  const struct PPB_PlatformVerification_Private_0_3 *iface = Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_3.real_iface;
   return iface->IsPlatformVerification(resource);
 }
 
-static int32_t Pnacl_M32_PPB_PlatformVerification_Private_ChallengePlatform(PP_Resource instance, struct PP_Var* service_id, struct PP_Var* challenge, struct PP_Var* signed_data, struct PP_Var* signed_data_signature, struct PP_Var* platform_key_certificate, struct PP_CompletionCallback* callback) {
-  const struct PPB_PlatformVerification_Private_0_2 *iface = Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_2.real_iface;
+static int32_t Pnacl_M61_PPB_PlatformVerification_Private_ChallengePlatform(PP_Resource instance, struct PP_Var* service_id, struct PP_Var* challenge, struct PP_Var* signed_data, struct PP_Var* signed_data_signature, struct PP_Var* platform_key_certificate, struct PP_CompletionCallback* callback) {
+  const struct PPB_PlatformVerification_Private_0_3 *iface = Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_3.real_iface;
   return iface->ChallengePlatform(instance, *service_id, *challenge, signed_data, signed_data_signature, platform_key_certificate, *callback);
 }
 
-/* End wrapper methods for PPB_PlatformVerification_Private_0_2 */
+static int32_t Pnacl_M61_PPB_PlatformVerification_Private_GetStorageId(PP_Resource instance, struct PP_Var* storage_id, struct PP_CompletionCallback* callback) {
+  const struct PPB_PlatformVerification_Private_0_3 *iface = Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_3.real_iface;
+  return iface->GetStorageId(instance, storage_id, *callback);
+}
+
+/* End wrapper methods for PPB_PlatformVerification_Private_0_3 */
 
 /* Begin wrapper methods for PPB_TCPServerSocket_Private_0_1 */
 
@@ -4967,6 +5068,17 @@ static const struct PPB_TouchInputEvent_1_0 Pnacl_Wrappers_PPB_TouchInputEvent_1
     .GetTouchById = (struct PP_TouchPoint (*)(PP_Resource resource, PP_TouchListType list, uint32_t touch_id))&Pnacl_M13_PPB_TouchInputEvent_GetTouchById
 };
 
+static const struct PPB_TouchInputEvent_1_4 Pnacl_Wrappers_PPB_TouchInputEvent_1_4 = {
+    .Create = (PP_Resource (*)(PP_Instance instance, PP_InputEvent_Type type, PP_TimeTicks time_stamp, uint32_t modifiers))&Pnacl_M60_PPB_TouchInputEvent_Create,
+    .AddTouchPoint = (void (*)(PP_Resource touch_event, PP_TouchListType list, const struct PP_TouchPoint* point))&Pnacl_M60_PPB_TouchInputEvent_AddTouchPoint,
+    .IsTouchInputEvent = (PP_Bool (*)(PP_Resource resource))&Pnacl_M60_PPB_TouchInputEvent_IsTouchInputEvent,
+    .GetTouchCount = (uint32_t (*)(PP_Resource resource, PP_TouchListType list))&Pnacl_M60_PPB_TouchInputEvent_GetTouchCount,
+    .GetTouchByIndex = (struct PP_TouchPoint (*)(PP_Resource resource, PP_TouchListType list, uint32_t index))&Pnacl_M60_PPB_TouchInputEvent_GetTouchByIndex,
+    .GetTouchById = (struct PP_TouchPoint (*)(PP_Resource resource, PP_TouchListType list, uint32_t touch_id))&Pnacl_M60_PPB_TouchInputEvent_GetTouchById,
+    .GetTouchTiltByIndex = (struct PP_FloatPoint (*)(PP_Resource resource, PP_TouchListType list, uint32_t index))&Pnacl_M60_PPB_TouchInputEvent_GetTouchTiltByIndex,
+    .GetTouchTiltById = (struct PP_FloatPoint (*)(PP_Resource resource, PP_TouchListType list, uint32_t touch_id))&Pnacl_M60_PPB_TouchInputEvent_GetTouchTiltById
+};
+
 static const struct PPB_IMEInputEvent_1_0 Pnacl_Wrappers_PPB_IMEInputEvent_1_0 = {
     .Create = (PP_Resource (*)(PP_Instance instance, PP_InputEvent_Type type, PP_TimeTicks time_stamp, struct PP_Var text, uint32_t segment_number, const uint32_t segment_offsets[], int32_t target_segment, uint32_t selection_start, uint32_t selection_end))&Pnacl_M13_PPB_IMEInputEvent_Create,
     .IsIMEInputEvent = (PP_Bool (*)(PP_Resource resource))&Pnacl_M13_PPB_IMEInputEvent_IsIMEInputEvent,
@@ -5408,6 +5520,18 @@ static const struct PPB_AudioInput_Dev_0_4 Pnacl_Wrappers_PPB_AudioInput_Dev_0_4
     .Close = (void (*)(PP_Resource audio_input))&Pnacl_M30_PPB_AudioInput_Dev_Close
 };
 
+static const struct PPB_AudioOutput_Dev_0_1 Pnacl_Wrappers_PPB_AudioOutput_Dev_0_1 = {
+    .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M59_PPB_AudioOutput_Dev_Create,
+    .IsAudioOutput = (PP_Bool (*)(PP_Resource resource))&Pnacl_M59_PPB_AudioOutput_Dev_IsAudioOutput,
+    .EnumerateDevices = (int32_t (*)(PP_Resource audio_output, struct PP_ArrayOutput output, struct PP_CompletionCallback callback))&Pnacl_M59_PPB_AudioOutput_Dev_EnumerateDevices,
+    .MonitorDeviceChange = (int32_t (*)(PP_Resource audio_output, PP_MonitorDeviceChangeCallback callback, void* user_data))&Pnacl_M59_PPB_AudioOutput_Dev_MonitorDeviceChange,
+    .Open = (int32_t (*)(PP_Resource audio_output, PP_Resource device_ref, PP_Resource config, PPB_AudioOutput_Callback audio_output_callback, void* user_data, struct PP_CompletionCallback callback))&Pnacl_M59_PPB_AudioOutput_Dev_Open,
+    .GetCurrentConfig = (PP_Resource (*)(PP_Resource audio_output))&Pnacl_M59_PPB_AudioOutput_Dev_GetCurrentConfig,
+    .StartPlayback = (PP_Bool (*)(PP_Resource audio_output))&Pnacl_M59_PPB_AudioOutput_Dev_StartPlayback,
+    .StopPlayback = (PP_Bool (*)(PP_Resource audio_output))&Pnacl_M59_PPB_AudioOutput_Dev_StopPlayback,
+    .Close = (void (*)(PP_Resource audio_output))&Pnacl_M59_PPB_AudioOutput_Dev_Close
+};
+
 /* Not generating wrapper interface for PPB_Buffer_Dev_0_4 */
 
 /* Not generating wrapper interface for PPB_Crypto_Dev_0_1 */
@@ -5775,10 +5899,11 @@ static const struct PPB_OutputProtection_Private_0_1 Pnacl_Wrappers_PPB_OutputPr
     .EnableProtection = (int32_t (*)(PP_Resource resource, uint32_t desired_protection_mask, struct PP_CompletionCallback callback))&Pnacl_M31_PPB_OutputProtection_Private_EnableProtection
 };
 
-static const struct PPB_PlatformVerification_Private_0_2 Pnacl_Wrappers_PPB_PlatformVerification_Private_0_2 = {
-    .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M32_PPB_PlatformVerification_Private_Create,
-    .IsPlatformVerification = (PP_Bool (*)(PP_Resource resource))&Pnacl_M32_PPB_PlatformVerification_Private_IsPlatformVerification,
-    .ChallengePlatform = (int32_t (*)(PP_Resource instance, struct PP_Var service_id, struct PP_Var challenge, struct PP_Var* signed_data, struct PP_Var* signed_data_signature, struct PP_Var* platform_key_certificate, struct PP_CompletionCallback callback))&Pnacl_M32_PPB_PlatformVerification_Private_ChallengePlatform
+static const struct PPB_PlatformVerification_Private_0_3 Pnacl_Wrappers_PPB_PlatformVerification_Private_0_3 = {
+    .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M61_PPB_PlatformVerification_Private_Create,
+    .IsPlatformVerification = (PP_Bool (*)(PP_Resource resource))&Pnacl_M61_PPB_PlatformVerification_Private_IsPlatformVerification,
+    .ChallengePlatform = (int32_t (*)(PP_Resource instance, struct PP_Var service_id, struct PP_Var challenge, struct PP_Var* signed_data, struct PP_Var* signed_data_signature, struct PP_Var* platform_key_certificate, struct PP_CompletionCallback callback))&Pnacl_M61_PPB_PlatformVerification_Private_ChallengePlatform,
+    .GetStorageId = (int32_t (*)(PP_Resource instance, struct PP_Var* storage_id, struct PP_CompletionCallback callback))&Pnacl_M61_PPB_PlatformVerification_Private_GetStorageId
 };
 
 static const struct PPB_TCPServerSocket_Private_0_1 Pnacl_Wrappers_PPB_TCPServerSocket_Private_0_1 = {
@@ -6088,6 +6213,12 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TouchInputEvent_1_0 = {
   .real_iface = NULL
 };
 
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4 = {
+  .iface_macro = PPB_TOUCH_INPUT_EVENT_INTERFACE_1_4,
+  .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_TouchInputEvent_1_4,
+  .real_iface = NULL
+};
+
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0 = {
   .iface_macro = PPB_IME_INPUT_EVENT_INTERFACE_1_0,
   .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_IMEInputEvent_1_0,
@@ -6322,6 +6453,12 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4 = {
   .real_iface = NULL
 };
 
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1 = {
+  .iface_macro = PPB_AUDIO_OUTPUT_DEV_INTERFACE_0_1,
+  .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_AudioOutput_Dev_0_1,
+  .real_iface = NULL
+};
+
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_DeviceRef_Dev_0_1 = {
   .iface_macro = PPB_DEVICEREF_DEV_INTERFACE_0_1,
   .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_DeviceRef_Dev_0_1,
@@ -6532,9 +6669,9 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_OutputProtection_Private_
   .real_iface = NULL
 };
 
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_2 = {
-  .iface_macro = PPB_PLATFORMVERIFICATION_PRIVATE_INTERFACE_0_2,
-  .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_PlatformVerification_Private_0_2,
+static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_3 = {
+  .iface_macro = PPB_PLATFORMVERIFICATION_PRIVATE_INTERFACE_0_3,
+  .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_PlatformVerification_Private_0_3,
   .real_iface = NULL
 };
 
@@ -6652,6 +6789,7 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_KeyboardInputEvent_1_0,
   &Pnacl_WrapperInfo_PPB_KeyboardInputEvent_1_2,
   &Pnacl_WrapperInfo_PPB_TouchInputEvent_1_0,
+  &Pnacl_WrapperInfo_PPB_TouchInputEvent_1_4,
   &Pnacl_WrapperInfo_PPB_IMEInputEvent_1_0,
   &Pnacl_WrapperInfo_PPB_MediaStreamAudioTrack_0_1,
   &Pnacl_WrapperInfo_PPB_MediaStreamVideoTrack_0_1,
@@ -6690,6 +6828,7 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_WebSocket_1_0,
   &Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_3,
   &Pnacl_WrapperInfo_PPB_AudioInput_Dev_0_4,
+  &Pnacl_WrapperInfo_PPB_AudioOutput_Dev_0_1,
   &Pnacl_WrapperInfo_PPB_DeviceRef_Dev_0_1,
   &Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_5,
   &Pnacl_WrapperInfo_PPB_FileChooser_Dev_0_6,
@@ -6725,7 +6864,7 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_NetAddress_Private_1_0,
   &Pnacl_WrapperInfo_PPB_NetAddress_Private_1_1,
   &Pnacl_WrapperInfo_PPB_OutputProtection_Private_0_1,
-  &Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_2,
+  &Pnacl_WrapperInfo_PPB_PlatformVerification_Private_0_3,
   &Pnacl_WrapperInfo_PPB_TCPServerSocket_Private_0_1,
   &Pnacl_WrapperInfo_PPB_TCPServerSocket_Private_0_2,
   &Pnacl_WrapperInfo_PPB_TCPSocket_Private_0_3,

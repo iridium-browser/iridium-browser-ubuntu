@@ -65,6 +65,9 @@ CardUnmaskPromptViewBridge::~CardUnmaskPromptViewBridge() {
 void CardUnmaskPromptViewBridge::Show() {
   view_controller_.reset(
       [[CardUnmaskPromptViewController alloc] initWithBridge:this]);
+  [view_controller_ setModalPresentationStyle:UIModalPresentationFormSheet];
+  [view_controller_
+      setModalTransitionStyle:UIModalTransitionStyleCoverVertical];
   // Present the view controller.
   // TODO(crbug.com/692525): Find an alternative to presenting the view
   // controller on the root view controller.
@@ -141,8 +144,10 @@ void CardUnmaskPromptViewBridge::DeleteSelf() {
 @implementation CardUnmaskPromptViewController
 
 - (instancetype)initWithBridge:(autofill::CardUnmaskPromptViewBridge*)bridge {
+  UICollectionViewLayout* layout = [[MDCCollectionViewFlowLayout alloc] init];
   DCHECK(bridge);
-  self = [super initWithStyle:CollectionViewControllerStyleAppBar];
+  self =
+      [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
   if (self) {
     _bridge = bridge;
   }
@@ -201,12 +206,14 @@ void CardUnmaskPromptViewBridge::DeleteSelf() {
 
 - (void)viewWillLayoutSubviews {
   [super viewWillLayoutSubviews];
-  NSIndexPath* CVCIndexPath =
-      [self.collectionViewModel indexPathForItem:_CVCItem
-                         inSectionWithIdentifier:SectionIdentifierMain];
-  CVCCell* CVC = base::mac::ObjCCastStrict<CVCCell>(
-      [self.collectionView cellForItemAtIndexPath:CVCIndexPath]);
-  [self focusInputIfNeeded:CVC];
+  if ([self.collectionViewModel hasItemForItemType:ItemTypeCVC
+                                 sectionIdentifier:SectionIdentifierMain]) {
+    NSIndexPath* CVCIndexPath =
+        [self.collectionViewModel indexPathForItem:_CVCItem];
+    CVCCell* CVC = base::mac::ObjCCastStrict<CVCCell>(
+        [self.collectionView cellForItemAtIndexPath:CVCIndexPath]);
+    [self focusInputIfNeeded:CVC];
+  }
 }
 
 #pragma mark - CollectionViewController
@@ -309,8 +316,7 @@ void CardUnmaskPromptViewBridge::DeleteSelf() {
   } else {
     _statusItem.text = text;
     _statusItem.state = state;
-    [self reconfigureCellsForItems:@[ _statusItem ]
-           inSectionWithIdentifier:SectionIdentifierMain];
+    [self reconfigureCellsForItems:@[ _statusItem ]];
     [self.collectionViewLayout invalidateLayout];
   }
 }
@@ -405,8 +411,7 @@ void CardUnmaskPromptViewBridge::DeleteSelf() {
         IDS_AUTOFILL_CARD_UNMASK_INVALID_EXPIRATION_DATE);
   }
 
-  [self reconfigureCellsForItems:@[ item ]
-         inSectionWithIdentifier:SectionIdentifierMain];
+  [self reconfigureCellsForItems:@[ item ]];
   [self.collectionViewLayout invalidateLayout];
 }
 
@@ -489,8 +494,7 @@ void CardUnmaskPromptViewBridge::DeleteSelf() {
   _CVCItem.showDateInputError = NO;
   _CVCItem.showCVCInputError = NO;
 
-  [self reconfigureCellsForItems:@[ _CVCItem ]
-         inSectionWithIdentifier:SectionIdentifierMain];
+  [self reconfigureCellsForItems:@[ _CVCItem ]];
   [self.collectionViewLayout invalidateLayout];
 
   [self inputsDidChange:_CVCItem];

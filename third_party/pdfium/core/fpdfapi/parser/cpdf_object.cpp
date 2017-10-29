@@ -14,6 +14,7 @@
 #include "core/fpdfapi/parser/cpdf_parser.h"
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
 #include "core/fxcrt/fx_string.h"
+#include "third_party/base/logging.h"
 #include "third_party/base/stl_util.h"
 
 CPDF_Object::~CPDF_Object() {}
@@ -46,7 +47,7 @@ CFX_WideString CPDF_Object::GetUnicodeText() const {
   return CFX_WideString();
 }
 
-FX_FLOAT CPDF_Object::GetNumber() const {
+float CPDF_Object::GetNumber() const {
   return 0;
 }
 
@@ -59,7 +60,7 @@ CPDF_Dictionary* CPDF_Object::GetDict() const {
 }
 
 void CPDF_Object::SetString(const CFX_ByteString& str) {
-  ASSERT(false);
+  NOTREACHED();
 }
 
 bool CPDF_Object::IsArray() const {

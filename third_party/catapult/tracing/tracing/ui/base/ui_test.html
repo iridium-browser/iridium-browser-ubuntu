@@ -11,21 +11,22 @@ found in the LICENSE file.
 'use strict';
 
 tr.b.unittest.testSuite(function() {
-  var TestElement = tr.ui.b.define('div');
+  const TestElement = tr.ui.b.define('div');
   TestElement.prototype = {
     __proto__: HTMLDivElement.prototype,
 
-    decorate: function() {
-      if (!this.decorateCallCount)
+    decorate() {
+      if (!this.decorateCallCount) {
         this.decorateCallCount = 0;
+      }
       this.decorateCallCount++;
     }
   };
 
-  var Base = tr.ui.b.define('div');
+  const Base = tr.ui.b.define('div');
   Base.prototype = {
     __proto__: HTMLDivElement.prototype,
-    decorate: function() {
+    decorate() {
       this.decoratedAsBase = true;
     },
     set baseProperty(v) {
@@ -34,65 +35,65 @@ tr.b.unittest.testSuite(function() {
   };
 
   test('decorateOnceViaNew', function() {
-    var testElement = new TestElement();
-    assert.equal(testElement.decorateCallCount, 1);
+    const testElement = new TestElement();
+    assert.strictEqual(testElement.decorateCallCount, 1);
   });
 
   test('decorateOnceDirectly', function() {
-    var testElement = document.createElement('div');
+    const testElement = document.createElement('div');
     tr.ui.b.decorate(testElement, TestElement);
-    assert.equal(testElement.decorateCallCount, 1);
+    assert.strictEqual(testElement.decorateCallCount, 1);
   });
 
   test('componentToString', function() {
-    assert.equal(Base.toString(), 'div');
+    assert.strictEqual(Base.toString(), 'div');
 
-    var Sub = tr.ui.b.define('Sub', Base);
-    assert.equal(Sub.toString(), 'div::sub');
+    const Sub = tr.ui.b.define('Sub', Base);
+    assert.strictEqual(Sub.toString(), 'div::sub');
 
-    var SubSub = tr.ui.b.define('Marine', Sub);
-    assert.equal(SubSub.toString(), 'div::sub::marine');
+    const SubSub = tr.ui.b.define('Marine', Sub);
+    assert.strictEqual(SubSub.toString(), 'div::sub::marine');
   });
 
   test('basicDefines', function() {
-    var baseInstance = new Base();
+    const baseInstance = new Base();
     assert.instanceOf(baseInstance, Base);
     assert.isTrue(baseInstance.decoratedAsBase);
 
-    assert.equal(baseInstance.constructor, Base);
-    assert.equal(baseInstance.constructor.toString(), 'div');
+    assert.strictEqual(baseInstance.constructor, Base);
+    assert.strictEqual(baseInstance.constructor.toString(), 'div');
 
     baseInstance.basePropertySet = 7;
-    assert.equal(baseInstance.basePropertySet, 7);
+    assert.strictEqual(baseInstance.basePropertySet, 7);
   });
 
   test('subclassing', function() {
-    var Sub = tr.ui.b.define('sub', Base);
+    const Sub = tr.ui.b.define('sub', Base);
     Sub.prototype = {
       __proto__: Base.prototype,
-      decorate: function() {
+      decorate() {
         this.decoratedAsSub = true;
       }
     };
 
-    var subInstance = new Sub();
+    const subInstance = new Sub();
     assert.instanceOf(subInstance, Sub);
     assert.isTrue(subInstance.decoratedAsSub);
 
     assert.instanceOf(subInstance, Base);
     assert.isUndefined(subInstance.decoratedAsBase);
 
-    assert.equal(subInstance.constructor, Sub);
-    assert.equal(subInstance.constructor.toString(), 'div::sub');
+    assert.strictEqual(subInstance.constructor, Sub);
+    assert.strictEqual(subInstance.constructor.toString(), 'div::sub');
 
     subInstance.baseProperty = true;
     assert.isTrue(subInstance.basePropertySet);
   });
 
-  var NoArgs = tr.ui.b.define('div');
+  const NoArgs = tr.ui.b.define('div');
   NoArgs.prototype = {
     __proto__: HTMLDivElement.prototype,
-    decorate: function() {
+    decorate() {
       this.noArgsDecorated_ = true;
     },
     get noArgsDecorated() {
@@ -100,10 +101,10 @@ tr.b.unittest.testSuite(function() {
     }
   };
 
-  var Args = tr.ui.b.define('args', NoArgs);
+  const Args = tr.ui.b.define('args', NoArgs);
   Args.prototype = {
     __proto__: NoArgs.prototype,
-    decorate: function(first) {
+    decorate(first) {
       this.first_ = first;
       this.argsDecorated_ = true;
     },
@@ -115,10 +116,10 @@ tr.b.unittest.testSuite(function() {
     }
   };
 
-  var ArgsChild = tr.ui.b.define('args-child', Args);
+  const ArgsChild = tr.ui.b.define('args-child', Args);
   ArgsChild.prototype = {
     __proto__: Args.prototype,
-    decorate: function(_, second) {
+    decorate(_, second) {
       this.second_ = second;
       this.argsChildDecorated_ = true;
     },
@@ -133,10 +134,10 @@ tr.b.unittest.testSuite(function() {
     }
   };
 
-  var ArgsDecoratingChild = tr.ui.b.define('args-decorating-child', Args);
+  const ArgsDecoratingChild = tr.ui.b.define('args-decorating-child', Args);
   ArgsDecoratingChild.prototype = {
     __proto__: Args.prototype,
-    decorate: function(first, second) {
+    decorate(first, second) {
       Args.prototype.decorate.call(this, first);
       this.second_ = second;
       this.argsDecoratingChildDecorated_ = true;
@@ -153,7 +154,7 @@ tr.b.unittest.testSuite(function() {
   };
 
   test('decorate_noArguments', function() {
-    var noArgs;
+    let noArgs;
     assert.doesNotThrow(function() {
       noArgs = new NoArgs();
     });
@@ -161,16 +162,16 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('decorate_arguments', function() {
-    var args = new Args('this is first');
-    assert.equal(args.first, 'this is first');
+    const args = new Args('this is first');
+    assert.strictEqual(args.first, 'this is first');
     assert.isTrue(args.argsDecorated);
     assert.isUndefined(args.noArgsDecorated);
   });
 
   test('decorate_subclassArguments', function() {
-    var argsChild = new ArgsChild('this is first', 'and second');
+    const argsChild = new ArgsChild('this is first', 'and second');
     assert.isUndefined(argsChild.first);
-    assert.equal(argsChild.second, 'and second');
+    assert.strictEqual(argsChild.second, 'and second');
 
     assert.isTrue(argsChild.argsChildDecorated);
     assert.isUndefined(argsChild.argsDecorated);
@@ -178,26 +179,26 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('decorate_subClassCallsParentDecorate', function() {
-    var argsDecoratingChild = new ArgsDecoratingChild(
+    const argsDecoratingChild = new ArgsDecoratingChild(
         'this is first', 'and second');
-    assert.equal(argsDecoratingChild.first, 'this is first');
-    assert.equal(argsDecoratingChild.second, 'and second');
+    assert.strictEqual(argsDecoratingChild.first, 'this is first');
+    assert.strictEqual(argsDecoratingChild.second, 'and second');
     assert.isTrue(argsDecoratingChild.argsDecoratingChildDecorated);
     assert.isTrue(argsDecoratingChild.argsDecorated);
     assert.isUndefined(argsDecoratingChild.noArgsDecorated);
   });
 
   test('defineWithNamespace', function() {
-    var svgNS = 'http://www.w3.org/2000/svg';
-    var cls = tr.ui.b.define('svg', undefined, svgNS);
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const cls = tr.ui.b.define('svg', undefined, svgNS);
     cls.prototype = {
       __proto__: HTMLDivElement.prototype,
 
-      decorate: function() {
+      decorate() {
         Polymer.dom(this).setAttribute('width', 200);
         Polymer.dom(this).setAttribute('height', 200);
         Polymer.dom(this).setAttribute('viewPort', '0 0 200 200');
-        var rectEl = document.createElementNS(svgNS, 'rect');
+        const rectEl = document.createElementNS(svgNS, 'rect');
         Polymer.dom(rectEl).setAttribute('x', 10);
         Polymer.dom(rectEl).setAttribute('y', 10);
         Polymer.dom(rectEl).setAttribute('width', 180);
@@ -205,23 +206,23 @@ tr.b.unittest.testSuite(function() {
         Polymer.dom(this).appendChild(rectEl);
       }
     };
-    var el = new cls();
-    assert.equal(el.tagName, 'svg');
-    assert.equal(el.namespaceURI, svgNS);
+    const el = new cls();
+    assert.strictEqual(el.tagName, 'svg');
+    assert.strictEqual(el.namespaceURI, svgNS);
     this.addHTMLOutput(el);
   });
 
   test('defineSubclassWithNamespace', function() {
-    var svgNS = 'http://www.w3.org/2000/svg';
-    var cls = tr.ui.b.define('svg', undefined, svgNS);
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const cls = tr.ui.b.define('svg', undefined, svgNS);
     cls.prototype = {
       __proto__: HTMLDivElement.prototype,
 
-      decorate: function() {
+      decorate() {
         Polymer.dom(this).setAttribute('width', 200);
         Polymer.dom(this).setAttribute('height', 200);
         Polymer.dom(this).setAttribute('viewPort', '0 0 200 200');
-        var rectEl = document.createElementNS(svgNS, 'rect');
+        const rectEl = document.createElementNS(svgNS, 'rect');
         Polymer.dom(rectEl).setAttribute('x', 10);
         Polymer.dom(rectEl).setAttribute('y', 10);
         Polymer.dom(rectEl).setAttribute('width', 180);
@@ -230,16 +231,16 @@ tr.b.unittest.testSuite(function() {
       }
     };
 
-    var subCls = tr.ui.b.define('sub', cls);
+    const subCls = tr.ui.b.define('sub', cls);
     subCls.prototype = {
       __proto__: cls.prototype
     };
-    assert.equal(subCls.toString(), 'svg::sub');
+    assert.strictEqual(subCls.toString(), 'svg::sub');
 
-    var el = new subCls();
+    const el = new subCls();
     this.addHTMLOutput(el);
-    assert.equal(el.tagName, 'svg');
-    assert.equal(el.namespaceURI, svgNS);
+    assert.strictEqual(el.tagName, 'svg');
+    assert.strictEqual(el.namespaceURI, svgNS);
   });
 });
 </script>

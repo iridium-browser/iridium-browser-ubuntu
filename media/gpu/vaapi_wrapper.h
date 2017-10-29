@@ -36,7 +36,7 @@
 #endif  // USE_X11
 
 #if defined(USE_OZONE)
-namespace ui {
+namespace gfx {
 class NativePixmap;
 }
 #endif
@@ -118,13 +118,7 @@ class MEDIA_GPU_EXPORT VaapiWrapper
   // transferred to the caller. It differs from surfaces created using
   // CreateSurfaces(), where VaapiWrapper is the owner of the surfaces.
   scoped_refptr<VASurface> CreateVASurfaceForPixmap(
-      const scoped_refptr<ui::NativePixmap>& pixmap);
-
-  // Use VPP to process |source_pixmap| to |target_pixmap| with scaling and
-  // color space conversion.
-  bool ProcessPixmap(const scoped_refptr<ui::NativePixmap>& source_pixmap,
-                     scoped_refptr<ui::NativePixmap> target_pixmap);
-
+      const scoped_refptr<gfx::NativePixmap>& pixmap);
 #endif
 
   // Submit parameters or slice data of |va_buffer_type|, copying them from
@@ -256,9 +250,6 @@ class MEDIA_GPU_EXPORT VaapiWrapper
 #endif  // USE_OZONE
 
    private:
-    // Returns true if the VAAPI version is less than the specified version.
-    bool VAAPIVersionLessThan(int major, int minor);
-
     // Protected by |va_lock_|.
     int refcount_;
 
@@ -289,6 +280,9 @@ class MEDIA_GPU_EXPORT VaapiWrapper
   void Deinitialize();
   bool VaInitialize(const base::Closure& report_error_to_uma_cb);
   bool GetSupportedVaProfiles(std::vector<VAProfile>* profiles);
+
+  // Free all memory allocated in CreateSurfaces.
+  void DestroySurfaces_Locked();
 
   // Check if |va_profile| supports |entrypoint| or not. |va_lock_| must be
   // held on entry.

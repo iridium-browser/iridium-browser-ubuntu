@@ -68,7 +68,7 @@ protected:
         }
         count >>= (3 * complexity());
 
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < SkTMax(1, count); i++) {
             canvas->drawPath(path, paint);
         }
     }
@@ -1082,7 +1082,7 @@ class TightBoundsBench : public Benchmark {
 public:
     TightBoundsBench(SkRect (*proc)(const SkPath&), const char suffix[]) : fProc(proc) {
         fName.printf("tight_bounds_%s", suffix);
-        
+
         const int N = 100;
         SkRandom rand;
         for (int i = 0; i < N; ++i) {
@@ -1102,21 +1102,21 @@ protected:
     }
 
     const char* onGetName() override { return fName.c_str(); }
-    
+
     void onDraw(int loops, SkCanvas* canvas) override {
         for (int i = 0; i < loops*100; ++i) {
             fProc(fPath);
         }
     }
-    
+
 private:
     typedef Benchmark INHERITED;
 };
 
 
 const SkRect ConservativelyContainsBench::kBounds = SkRect::MakeWH(SkIntToScalar(100), SkIntToScalar(100));
-const SkSize ConservativelyContainsBench::kQueryMin = SkSize::Make(SkIntToScalar(1), SkIntToScalar(1));
-const SkSize ConservativelyContainsBench::kQueryMax = SkSize::Make(SkIntToScalar(40), SkIntToScalar(40));
+const SkSize ConservativelyContainsBench::kQueryMin = {SkIntToScalar(1), SkIntToScalar(1)};
+const SkSize ConservativelyContainsBench::kQueryMax = {SkIntToScalar(40), SkIntToScalar(40)};
 const SkRect ConservativelyContainsBench::kBaseRect = SkRect::MakeXYWH(SkIntToScalar(25), SkIntToScalar(25), SkIntToScalar(50), SkIntToScalar(50));
 const SkScalar ConservativelyContainsBench::kRRRadii[2] = {SkIntToScalar(5), SkIntToScalar(10)};
 

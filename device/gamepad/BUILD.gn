@@ -23,6 +23,7 @@ component("gamepad") {
     "gamepad_data_fetcher.h",
     "gamepad_data_fetcher_manager.cc",
     "gamepad_data_fetcher_manager.h",
+    "gamepad_export.h",
     "gamepad_monitor.cc",
     "gamepad_monitor.h",
     "gamepad_pad_state_provider.cc",
@@ -59,6 +60,7 @@ component("gamepad") {
     "//base",
     "//base/third_party/dynamic_annotations",
     "//device/base/synchronization",
+    "//device/gamepad/public/cpp:shared_with_blink",
     "//device/gamepad/public/interfaces",
     "//mojo/public/cpp/system",
     "//third_party/WebKit/public:blink_headers",
@@ -70,10 +72,12 @@ component("gamepad") {
     cflags = [ "/wd4267" ]  # conversion from 'size_t' (64 bit) to 'type'(32 bit).
   }
 
-  if (is_linux && use_udev) {
-    deps += [ "//device/udev_linux" ]
-  } else if (!is_win && !is_mac && !is_android) {
-    sources -= [ "gamepad_platform_data_fetcher_linux.cc" ]
+  if (is_linux) {
+    if (use_udev) {
+      deps += [ "//device/udev_linux" ]
+    } else {
+      sources -= [ "gamepad_platform_data_fetcher_linux.cc" ]
+    }
   }
 
   if (is_android) {
@@ -87,8 +91,6 @@ component("gamepad") {
       "GameController.framework",
       "IOKit.framework",
     ]
-
-    cflags = [ "-Wpartial-availability" ]
   }
 }
 
@@ -103,6 +105,7 @@ static_library("test_helpers") {
   public_deps = [
     ":gamepad",
     "//base",
+    "//device/gamepad/public/cpp:shared_with_blink",
     "//third_party/WebKit/public:blink_headers",
   ]
 }

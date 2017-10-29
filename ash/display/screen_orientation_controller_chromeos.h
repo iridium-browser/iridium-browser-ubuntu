@@ -8,9 +8,9 @@
 #include <unordered_map>
 
 #include "ash/ash_export.h"
-#include "ash/common/shell_observer.h"
-#include "ash/common/wm_activation_observer.h"
-#include "ash/common/wm_display_observer.h"
+#include "ash/display/display_configuration_controller.h"
+#include "ash/display/window_tree_host_manager.h"
+#include "ash/wm/tablet_mode/tablet_mode_observer.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "chromeos/accelerometer/accelerometer_reader.h"
@@ -18,19 +18,21 @@
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationLockType.h"
 #include "ui/aura/window_observer.h"
 #include "ui/display/display.h"
+#include "ui/wm/public/activation_change_observer.h"
+
+namespace aura {
+class Window;
+}
 
 namespace ash {
-namespace test {
-class ScreenOrientationControllerTestApi;
-}
 
 // Implements ChromeOS specific functionality for ScreenOrientationProvider.
 class ASH_EXPORT ScreenOrientationController
-    : public WmActivationObserver,
+    : public ::wm::ActivationChangeObserver,
       public aura::WindowObserver,
       public chromeos::AccelerometerReader::Observer,
-      public WmDisplayObserver,
-      public ShellObserver {
+      public WindowTreeHostManager::Observer,
+      public TabletModeObserver {
  public:
   // Observer that reports changes to the state of ScreenOrientationProvider's
   // rotation lock.
@@ -64,15 +66,20 @@ class ASH_EXPORT ScreenOrientationController
 
   // Allows/unallows a window to lock the screen orientation.
   void LockOrientationForWindow(
-      WmWindow* requesting_window,
+      aura::Window* requesting_window,
       blink::WebScreenOrientationLockType lock_orientation,
       LockCompletionBehavior lock_completion_behavior);
-  void UnlockOrientationForWindow(WmWindow* window);
+  void UnlockOrientationForWindow(aura::Window* window);
 
   // Unlock all and set the rotation back to the user specified rotation.
   void UnlockAll();
 
   bool ScreenOrientationProviderSupported() const;
+
+  // Returns true if the user has locked the orientation to portrait, false if
+  // the user has locked the orientation to landscape or not locked the
+  // orientation.
+  bool IsUserLockedOrientationPortrait();
 
   bool ignore_display_configuration_updates() const {
     return ignore_display_configuration_updates_;
@@ -83,7 +90,7 @@ class ASH_EXPORT ScreenOrientationController
   bool rotation_locked() const { return rotation_locked_; }
 
   bool user_rotation_locked() const {
-    return user_locked_orientation_ != blink::WebScreenOrientationLockAny;
+    return user_locked_orientation_ != blink::kWebScreenOrientationLockAny;
   }
 
   // Trun on/off the user rotation lock. When turned on, it will lock
@@ -95,9 +102,11 @@ class ASH_EXPORT ScreenOrientationController
   // Set locked to the given |rotation| and save it.
   void SetLockToRotation(display::Display::Rotation rotation);
 
-  // WmActivationObserver:
-  void OnWindowActivated(WmWindow* gained_active,
-                         WmWindow* lost_active) override;
+  // wm::ActivationChangeObserver:
+  void OnWindowActivated(
+      ::wm::ActivationChangeObserver::ActivationReason reason,
+      aura::Window* gained_active,
+      aura::Window* lost_active) override;
 
   // aura::WindowObserver:
   void OnWindowDestroying(aura::Window* window) override;
@@ -107,15 +116,15 @@ class ASH_EXPORT ScreenOrientationController
   void OnAccelerometerUpdated(
       scoped_refptr<const chromeos::AccelerometerUpdate> update) override;
 
-  // WmDisplayObserver:
+  // WindowTreeHostManager::Observer:
   void OnDisplayConfigurationChanged() override;
 
-  // ShellObserver:
-  void OnMaximizeModeStarted() override;
-  void OnMaximizeModeEnded() override;
+  // TabletModeObserver:
+  void OnTabletModeStarted() override;
+  void OnTabletModeEnding() override;
 
  private:
-  friend class test::ScreenOrientationControllerTestApi;
+  friend class ScreenOrientationControllerTestApi;
 
   struct LockInfo {
     LockInfo() {}
@@ -125,7 +134,7 @@ class ASH_EXPORT ScreenOrientationController
           lock_completion_behavior(lock_completion_behavior) {}
 
     blink::WebScreenOrientationLockType orientation =
-        blink::WebScreenOrientationLockAny;
+        blink::kWebScreenOrientationLockAny;
     LockCompletionBehavior lock_completion_behavior =
         LockCompletionBehavior::None;
   };
@@ -133,8 +142,11 @@ class ASH_EXPORT ScreenOrientationController
   // Sets the display rotation for the given |source|. The new |rotation| will
   // also become active. Display changed notifications are surpressed for this
   // change.
-  void SetDisplayRotation(display::Display::Rotation rotation,
-                          display::Display::RotationSource source);
+  void SetDisplayRotation(
+      display::Display::Rotation rotation,
+      display::Display::RotationSource source,
+      DisplayConfigurationController::RotationAnimation mode =
+          DisplayConfigurationController::ANIMATION_ASYNC);
 
   void SetRotationLockedInternal(bool rotation_locked);
 
@@ -209,12 +221,12 @@ class ASH_EXPORT ScreenOrientationController
   blink::WebScreenOrientationLockType rotation_locked_orientation_;
 
   // The rotation of the display set by the user. This rotation will be
-  // restored upon exiting maximize mode.
+  // restored upon exiting tablet mode.
   display::Display::Rotation user_rotation_;
 
   // The orientation of the device locked by the user.
   blink::WebScreenOrientationLockType user_locked_orientation_ =
-      blink::WebScreenOrientationLockAny;
+      blink::kWebScreenOrientationLockAny;
 
   // The current rotation set by ScreenOrientationController for the internal
   // display.
@@ -225,7 +237,7 @@ class ASH_EXPORT ScreenOrientationController
 
   // Tracks all windows that have requested a lock, as well as the requested
   // orientation.
-  std::unordered_map<WmWindow*, LockInfo> lock_info_map_;
+  std::unordered_map<aura::Window*, LockInfo> lock_info_map_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenOrientationController);
 };

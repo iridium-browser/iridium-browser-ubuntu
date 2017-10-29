@@ -5,6 +5,7 @@
 #include "components/favicon/core/favicon_driver_impl.h"
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
@@ -52,13 +53,17 @@ FaviconDriverImpl::FaviconDriverImpl(FaviconService* favicon_service,
     : favicon_service_(favicon_service),
       history_service_(history_service),
       bookmark_model_(bookmark_model) {
-  favicon_handler_.reset(new FaviconHandler(
-      favicon_service_, this, kEnableTouchIcon
-                                  ? FaviconDriverObserver::NON_TOUCH_LARGEST
-                                  : FaviconDriverObserver::NON_TOUCH_16_DIP));
+  if (!favicon_service_)
+    return;
+
   if (kEnableTouchIcon) {
-    touch_icon_handler_.reset(new FaviconHandler(
+    handlers_.push_back(base::MakeUnique<FaviconHandler>(
+        favicon_service_, this, FaviconDriverObserver::NON_TOUCH_LARGEST));
+    handlers_.push_back(base::MakeUnique<FaviconHandler>(
         favicon_service_, this, FaviconDriverObserver::TOUCH_LARGEST));
+  } else {
+    handlers_.push_back(base::MakeUnique<FaviconHandler>(
+        favicon_service_, this, FaviconDriverObserver::NON_TOUCH_16_DIP));
   }
 }
 
@@ -66,9 +71,8 @@ FaviconDriverImpl::~FaviconDriverImpl() {
 }
 
 void FaviconDriverImpl::FetchFavicon(const GURL& url) {
-  favicon_handler_->FetchFavicon(url);
-  if (touch_icon_handler_.get())
-    touch_icon_handler_->FetchFavicon(url);
+  for (const std::unique_ptr<FaviconHandler>& handler : handlers_)
+    handler->FetchFavicon(url);
 }
 
 bool FaviconDriverImpl::IsBookmarked(const GURL& url) {
@@ -76,15 +80,11 @@ bool FaviconDriverImpl::IsBookmarked(const GURL& url) {
 }
 
 bool FaviconDriverImpl::HasPendingTasksForTest() {
-  if (favicon_handler_->HasPendingTasksForTest())
-    return true;
-  if (touch_icon_handler_ && touch_icon_handler_->HasPendingTasksForTest())
-    return true;
+  for (const std::unique_ptr<FaviconHandler>& handler : handlers_) {
+    if (handler->HasPendingTasksForTest())
+      return true;
+  }
   return false;
-}
-
-bool FaviconDriverImpl::WasUnableToDownloadFavicon(const GURL& url) {
-  return favicon_service_ && favicon_service_->WasUnableToDownloadFavicon(url);
 }
 
 void FaviconDriverImpl::SetFaviconOutOfDateForPage(const GURL& url,
@@ -96,14 +96,21 @@ void FaviconDriverImpl::SetFaviconOutOfDateForPage(const GURL& url,
   }
 }
 
-void FaviconDriverImpl::OnUpdateFaviconURL(
+void FaviconDriverImpl::OnUpdateCandidates(
     const GURL& page_url,
-    const std::vector<FaviconURL>& candidates) {
-  DCHECK(!candidates.empty());
+    const std::vector<FaviconURL>& candidates,
+    const GURL& manifest_url) {
   RecordCandidateMetrics(candidates);
-  favicon_handler_->OnUpdateFaviconURL(page_url, candidates);
-  if (touch_icon_handler_.get())
-    touch_icon_handler_->OnUpdateFaviconURL(page_url, candidates);
+  for (const std::unique_ptr<FaviconHandler>& handler : handlers_) {
+    // We feed in the Web Manifest URL (if any) to the instance handling type
+    // WEB_MANIFEST_ICON, because those compete which each other (i.e. manifest
+    // icons override inline touch icons).
+    handler->OnUpdateCandidates(
+        page_url, candidates,
+        handler->icon_types() & favicon_base::WEB_MANIFEST_ICON
+            ? manifest_url
+            : GURL::EmptyGURL());
+  }
 }
 
 }  // namespace favicon

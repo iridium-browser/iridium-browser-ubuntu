@@ -22,9 +22,9 @@ class GrRenderTargetContext;
 class GrPaint;
 class GrFragmentProcessor;
 class GrRenderTarget;
+class GrResourceProvider;
 class GrTexture;
 class GrTextureProxy;
-class GrTextureProvider;
 class SkBitmap;
 class SkBlitter;
 class SkCachedData;
@@ -78,7 +78,7 @@ public:
      * If effect is non-NULL, a new GrProcessor instance is stored in it. The caller assumes
      * ownership of the effect and must unref it.
      */
-    virtual bool asFragmentProcessor(GrFragmentProcessor**, GrTexture*, const SkMatrix& ctm) const;
+    virtual bool asFragmentProcessor(GrFragmentProcessor**) const { return false; }
 
     /**
      *  If asFragmentProcessor() fails the filter may be implemented on the GPU by a subclass
@@ -115,7 +115,7 @@ public:
      *  Try to directly render the mask filter into the target. Returns true if drawing was
      *  successful. If false is returned then paint is unmodified.
      */
-    virtual bool directFilterMaskGPU(GrTextureProvider* texProvider,
+    virtual bool directFilterMaskGPU(GrContext*,
                                      GrRenderTargetContext* renderTargetContext,
                                      GrPaint&& paint,
                                      const GrClip&,

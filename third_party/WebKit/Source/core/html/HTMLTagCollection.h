@@ -34,39 +34,35 @@ namespace blink {
 // HTMLDocument.
 class HTMLTagCollection final : public TagCollection {
  public:
-  static HTMLTagCollection* create(ContainerNode& rootNode,
+  static HTMLTagCollection* Create(ContainerNode& root_node,
                                    CollectionType type,
-                                   const AtomicString& localName) {
-    DCHECK_EQ(type, HTMLTagCollectionType);
-    return new HTMLTagCollection(rootNode, localName);
+                                   const AtomicString& qualified_name) {
+    DCHECK_EQ(type, kHTMLTagCollectionType);
+    return new HTMLTagCollection(root_node, qualified_name);
   }
 
-  bool elementMatches(const Element&) const;
+  bool ElementMatches(const Element&) const;
 
  private:
-  HTMLTagCollection(ContainerNode& rootNode, const AtomicString& localName);
+  HTMLTagCollection(ContainerNode& root_node,
+                    const AtomicString& qualified_name);
 
-  AtomicString m_loweredLocalName;
+  AtomicString lowered_qualified_name_;
 };
 
 DEFINE_TYPE_CASTS(HTMLTagCollection,
                   LiveNodeListBase,
                   collection,
-                  collection->type() == HTMLTagCollectionType,
-                  collection.type() == HTMLTagCollectionType);
+                  collection->GetType() == kHTMLTagCollectionType,
+                  collection.GetType() == kHTMLTagCollectionType);
 
-inline bool HTMLTagCollection::elementMatches(
-    const Element& testElement) const {
-  // Implements
-  // https://dom.spec.whatwg.org/#concept-getelementsbytagname
-  if (m_localName != starAtom) {
-    const AtomicString& localName =
-        testElement.isHTMLElement() ? m_loweredLocalName : m_localName;
-    if (localName != testElement.localName())
-      return false;
-  }
-  DCHECK_EQ(m_namespaceURI, starAtom);
-  return true;
+inline bool HTMLTagCollection::ElementMatches(
+    const Element& test_element) const {
+  if (qualified_name_ == g_star_atom)
+    return true;
+  if (test_element.IsHTMLElement())
+    return lowered_qualified_name_ == test_element.TagQName().ToString();
+  return qualified_name_ == test_element.TagQName().ToString();
 }
 
 }  // namespace blink

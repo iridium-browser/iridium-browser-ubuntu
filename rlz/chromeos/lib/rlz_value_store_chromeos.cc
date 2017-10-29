@@ -9,6 +9,7 @@
 #include "base/files/important_file_writer.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/json/json_string_value_serializer.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
@@ -41,24 +42,25 @@ const base::FilePath::CharType kRLZLockFileName[] =
     FILE_PATH_LITERAL("RLZ Data.lock");
 
 // RLZ store path for testing.
-base::FilePath g_testing_rlz_store_path_;
+base::LazyInstance<base::FilePath>::Leaky g_testing_rlz_store_path =
+    LAZY_INSTANCE_INITIALIZER;
+
+base::FilePath GetRlzStorePathCommon() {
+  base::FilePath homedir;
+  PathService::Get(base::DIR_HOME, &homedir);
+  return g_testing_rlz_store_path.Get().empty()
+             ? homedir
+             : g_testing_rlz_store_path.Get();
+}
 
 // Returns file path of the RLZ storage.
 base::FilePath GetRlzStorePath() {
-  base::FilePath homedir;
-  PathService::Get(base::DIR_HOME, &homedir);
-  return g_testing_rlz_store_path_.empty() ?
-      homedir.Append(kRLZDataFileName) :
-      g_testing_rlz_store_path_.Append(kRLZDataFileName);
+  return GetRlzStorePathCommon().Append(kRLZDataFileName);
 }
 
 // Returns file path of the RLZ storage lock file.
 base::FilePath GetRlzStoreLockPath() {
-  base::FilePath homedir;
-  PathService::Get(base::DIR_HOME, &homedir);
-  return g_testing_rlz_store_path_.empty() ?
-      homedir.Append(kRLZLockFileName) :
-      g_testing_rlz_store_path_.Append(kRLZLockFileName);
+  return GetRlzStorePathCommon().Append(kRLZLockFileName);
 }
 
 // Returns the dictionary key for storing access point-related prefs.
@@ -87,37 +89,38 @@ RlzValueStoreChromeOS::RlzValueStoreChromeOS(const base::FilePath& store_path)
 }
 
 RlzValueStoreChromeOS::~RlzValueStoreChromeOS() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   WriteStore();
 }
 
 bool RlzValueStoreChromeOS::HasAccess(AccessType type) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return type == kReadAccess || !read_only_;
 }
 
 bool RlzValueStoreChromeOS::WritePingTime(Product product, int64_t time) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   rlz_store_->SetString(GetKeyName(kPingTimeKey, product),
                         base::Int64ToString(time));
   return true;
 }
 
 bool RlzValueStoreChromeOS::ReadPingTime(Product product, int64_t* time) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   std::string ping_time;
   return rlz_store_->GetString(GetKeyName(kPingTimeKey, product), &ping_time) &&
       base::StringToInt64(ping_time, time);
 }
 
 bool RlzValueStoreChromeOS::ClearPingTime(Product product) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   rlz_store_->Remove(GetKeyName(kPingTimeKey, product), NULL);
   return true;
 }
 
 bool RlzValueStoreChromeOS::WriteAccessPointRlz(AccessPoint access_point,
                                                 const char* new_rlz) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   rlz_store_->SetString(
       GetKeyName(kAccessPointKey, access_point), new_rlz);
   return true;
@@ -126,7 +129,7 @@ bool RlzValueStoreChromeOS::WriteAccessPointRlz(AccessPoint access_point,
 bool RlzValueStoreChromeOS::ReadAccessPointRlz(AccessPoint access_point,
                                                char* rlz,
                                                size_t rlz_size) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   std::string rlz_value;
   rlz_store_->GetString(GetKeyName(kAccessPointKey, access_point), &rlz_value);
   if (rlz_value.size() < rlz_size) {
@@ -139,23 +142,23 @@ bool RlzValueStoreChromeOS::ReadAccessPointRlz(AccessPoint access_point,
 }
 
 bool RlzValueStoreChromeOS::ClearAccessPointRlz(AccessPoint access_point) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   rlz_store_->Remove(GetKeyName(kAccessPointKey, access_point), NULL);
   return true;
 }
 
 bool RlzValueStoreChromeOS::AddProductEvent(Product product,
                                             const char* event_rlz) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return AddValueToList(GetKeyName(kProductEventKey, product),
-                        base::MakeUnique<base::StringValue>(event_rlz));
+                        base::MakeUnique<base::Value>(event_rlz));
 }
 
 bool RlzValueStoreChromeOS::ReadProductEvents(
     Product product,
     std::vector<std::string>* events) {
-  DCHECK(CalledOnValidThread());
-  base::ListValue* events_list = NULL; ;
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  base::ListValue* events_list = nullptr;
   if (!rlz_store_->GetList(GetKeyName(kProductEventKey, product), &events_list))
     return false;
   events->clear();
@@ -169,29 +172,29 @@ bool RlzValueStoreChromeOS::ReadProductEvents(
 
 bool RlzValueStoreChromeOS::ClearProductEvent(Product product,
                                               const char* event_rlz) {
-  DCHECK(CalledOnValidThread());
-  base::StringValue event_value(event_rlz);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  base::Value event_value(event_rlz);
   return RemoveValueFromList(GetKeyName(kProductEventKey, product),
                              event_value);
 }
 
 bool RlzValueStoreChromeOS::ClearAllProductEvents(Product product) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   rlz_store_->Remove(GetKeyName(kProductEventKey, product), NULL);
   return true;
 }
 
 bool RlzValueStoreChromeOS::AddStatefulEvent(Product product,
                                              const char* event_rlz) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return AddValueToList(GetKeyName(kStatefulEventKey, product),
-                        base::MakeUnique<base::StringValue>(event_rlz));
+                        base::MakeUnique<base::Value>(event_rlz));
 }
 
 bool RlzValueStoreChromeOS::IsStatefulEvent(Product product,
                                             const char* event_rlz) {
-  DCHECK(CalledOnValidThread());
-  base::StringValue event_value(event_rlz);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  base::Value event_value(event_rlz);
   base::ListValue* events_list = NULL;
   return rlz_store_->GetList(GetKeyName(kStatefulEventKey, product),
                              &events_list) &&
@@ -199,13 +202,13 @@ bool RlzValueStoreChromeOS::IsStatefulEvent(Product product,
 }
 
 bool RlzValueStoreChromeOS::ClearAllStatefulEvents(Product product) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   rlz_store_->Remove(GetKeyName(kStatefulEventKey, product), NULL);
   return true;
 }
 
 void RlzValueStoreChromeOS::CollectGarbage() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   NOTIMPLEMENTED();
 }
 
@@ -247,8 +250,8 @@ bool RlzValueStoreChromeOS::AddValueToList(const std::string& list_name,
                                            std::unique_ptr<base::Value> value) {
   base::ListValue* list_value = NULL;
   if (!rlz_store_->GetList(list_name, &list_value)) {
-    list_value = new base::ListValue;
-    rlz_store_->Set(list_name, list_value);
+    list_value =
+        rlz_store_->SetList(list_name, base::MakeUnique<base::ListValue>());
   }
   list_value->AppendIfNotPresent(std::move(value));
   return true;
@@ -311,7 +314,7 @@ ScopedRlzValueStoreLock::ScopedRlzValueStoreLock() {
 
 ScopedRlzValueStoreLock::~ScopedRlzValueStoreLock() {
   --g_lock_depth;
-  DCHECK(g_lock_depth >= 0);
+  DCHECK_GE(g_lock_depth, 0);
 
   if (g_lock_depth > 0) {
     // Other locks are still using store_, so don't free it yet.
@@ -331,7 +334,7 @@ RlzValueStore* ScopedRlzValueStoreLock::GetStore() {
 namespace testing {
 
 void SetRlzStoreDirectory(const base::FilePath& directory) {
-  g_testing_rlz_store_path_ = directory;
+  g_testing_rlz_store_path.Get() = directory;
 }
 
 std::string RlzStoreFilenameStr() {

@@ -72,11 +72,7 @@ const TextInputManager::SelectionRegion* TextInputManager::GetSelectionRegion(
 }
 
 const TextInputManager::CompositionRangeInfo*
-TextInputManager::GetCompositionRangeInfo(
-    RenderWidgetHostViewBase* view) const {
-  DCHECK(!view || IsRegistered(view));
-  if (!view)
-    view = active_view_;
+TextInputManager::GetCompositionRangeInfo() const {
   return active_view_ ? &composition_range_info_map_.at(active_view_) : nullptr;
 }
 
@@ -85,7 +81,10 @@ const TextInputManager::TextSelection* TextInputManager::GetTextSelection(
   DCHECK(!view || IsRegistered(view));
   if (!view)
     view = active_view_;
-  return !!view ? &text_selection_map_.at(view) : nullptr;
+  // A crash occurs when we end up here with an unregistered view.
+  // See crbug.com/735980
+  // TODO(ekaramad): Take a deeper look why this is happening.
+  return (view && IsRegistered(view)) ? &text_selection_map_.at(view) : nullptr;
 }
 
 void TextInputManager::UpdateTextInputState(
@@ -174,9 +173,9 @@ void TextInputManager::SelectionBoundsChanged(
     focus_bound.set_type(gfx::SelectionBound::CENTER);
   } else {
     // Whether text is LTR at the anchor handle.
-    bool anchor_LTR = params.anchor_dir == blink::WebTextDirectionLeftToRight;
+    bool anchor_LTR = params.anchor_dir == blink::kWebTextDirectionLeftToRight;
     // Whether text is LTR at the focus handle.
-    bool focus_LTR = params.focus_dir == blink::WebTextDirectionLeftToRight;
+    bool focus_LTR = params.focus_dir == blink::kWebTextDirectionLeftToRight;
 
     if ((params.is_anchor_first && anchor_LTR) ||
         (!params.is_anchor_first && !anchor_LTR)) {
@@ -295,6 +294,12 @@ ui::TextInputType TextInputManager::GetTextInputTypeForViewForTesting(
     RenderWidgetHostViewBase* view) {
   DCHECK(IsRegistered(view));
   return text_input_state_map_[view].type;
+}
+
+const gfx::Range* TextInputManager::GetCompositionRangeForTesting() const {
+  if (auto* info = GetCompositionRangeInfo())
+    return &info->range;
+  return nullptr;
 }
 
 void TextInputManager::NotifyObserversAboutInputStateUpdate(

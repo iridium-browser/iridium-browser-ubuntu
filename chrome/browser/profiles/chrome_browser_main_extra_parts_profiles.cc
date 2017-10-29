@@ -13,7 +13,7 @@
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate_factory.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -21,19 +21,23 @@
 #include "chrome/browser/data_use_measurement/chrome_data_use_ascriber_service_factory.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/engagement/site_engagement_service_factory.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/feature_engagement_tracker/feature_engagement_tracker_factory.h"
 #include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
+#include "chrome/browser/media/media_engagement_service.h"
+#include "chrome/browser/media/media_engagement_service_factory.h"
+#include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
 #include "chrome/browser/net/nqe/ui_network_quality_estimator_service_factory.h"
 #include "chrome/browser/notifications/extension_welcome_notification_factory.h"
 #include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "chrome/browser/ntp_snippets/content_suggestions_service_factory.h"
-#include "chrome/browser/password_manager/password_manager_setting_migrator_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/plugins/plugin_prefs_factory.h"
 #include "chrome/browser/policy/cloud/policy_header_service_factory.h"
@@ -41,8 +45,8 @@
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/policy/schema_registry_service_factory.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
+#include "chrome/browser/predictors/loading_predictor_factory.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
-#include "chrome/browser/predictors/resource_prefetch_predictor_factory.h"
 #include "chrome/browser/prerender/prerender_link_manager_factory.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_message_filter.h"
@@ -61,6 +65,7 @@
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/sync/user_event_service_factory.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnail_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
@@ -78,9 +83,8 @@
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "apps/browser_context_keyed_service_factories.h"
-#include "chrome/browser/apps/shortcut_manager_factory.h"
+#include "chrome/browser/apps/browser_context_keyed_service_factories.h"
 #include "chrome/browser/extensions/api/networking_private/networking_private_ui_delegate_factory_impl.h"
-#include "chrome/browser/extensions/api/networking_private/networking_private_verify_delegate_factory_impl.h"
 #include "chrome/browser/extensions/browser_context_keyed_service_factories.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/search/hotword_service_factory.h"
@@ -116,9 +120,10 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/printer_detector/printer_detector_factory.h"
 #include "chrome/browser/chromeos/printing/cups_print_job_manager_factory.h"
-#include "chrome/browser/chromeos/printing/printers_manager_factory.h"
+#include "chrome/browser/chromeos/printing/synced_printers_manager_factory.h"
+#include "chrome/browser/chromeos/printing/usb_printer_detector_factory.h"
+#include "chrome/browser/chromeos/tether/tether_service_factory.h"
 #include "chrome/browser/extensions/api/platform_keys/verify_trust_api.h"
 #endif
 
@@ -126,6 +131,8 @@
 #include "chrome/browser/android/data_usage/data_use_ui_tab_model_factory.h"
 #include "chrome/browser/android/search_geolocation/search_geolocation_service.h"
 #else
+#include "chrome/browser/cryptauth/chrome_cryptauth_service_factory.h"
+#include "chrome/browser/media/router/media_router_ui_service_factory.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #endif
@@ -135,19 +142,16 @@
 #include "chrome/browser/ui/desktop_ios_promotion/sms_service_factory.h"
 #endif
 
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
+#include "chrome/browser/feature_engagement_tracker/new_tab/new_tab_tracker_factory.h"
+#endif
+
 #if BUILDFLAG(ENABLE_SPELLCHECK)
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #endif
 
 #if BUILDFLAG(ENABLE_SERVICE_DISCOVERY)
 #include "chrome/browser/printing/cloud_print/privet_notifications_factory.h"
-#endif
-
-#if defined(ENABLE_MEDIA_ROUTER)
-#include "chrome/browser/media/router/media_router_factory.h"
-#if !defined(OS_ANDROID)
-#include "chrome/browser/media/router/media_router_ui_service_factory.h"
-#endif
 #endif
 
 namespace chrome {
@@ -182,7 +186,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::EnsureBrowserContextKeyedServiceFactoriesBuilt();
   extensions::ExtensionManagementFactory::GetInstance();
   chrome_extensions::EnsureBrowserContextKeyedServiceFactoriesBuilt();
-  AppShortcutManagerFactory::GetInstance();
+  chrome_apps::EnsureBrowserContextKeyedServiceFactoriesBuilt();
 #endif
 
 #if BUILDFLAG(ENABLE_APP_LIST)
@@ -199,7 +203,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #endif
   BookmarkModelFactory::GetInstance();
   BookmarkUndoServiceFactory::GetInstance();
-  BrowsingDataRemoverFactory::GetInstance();
+  browser_sync::UserEventServiceFactory::GetInstance();
 #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
   CaptivePortalServiceFactory::GetInstance();
 #endif
@@ -207,7 +211,10 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if defined(OS_ANDROID)
   chrome::android::DataUseUITabModelFactory::GetInstance();
 #endif
-  UINetworkQualityEstimatorServiceFactory::GetInstance();
+  ChromeBrowsingDataRemoverDelegateFactory::GetInstance();
+#if !defined(OS_ANDROID)
+  ChromeCryptAuthServiceFactory::GetInstance();
+#endif
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   CloudPrintProxyServiceFactory::GetInstance();
 #endif
@@ -222,18 +229,21 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #endif
   dom_distiller::DomDistillerServiceFactory::GetInstance();
   domain_reliability::DomainReliabilityServiceFactory::GetInstance();
+  DownloadCoreServiceFactory::GetInstance();
   DownloadServiceFactory::GetInstance();
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   EasyUnlockServiceFactory::GetInstance();
   EnhancedBookmarkKeyServiceFactory::GetInstance();
 #endif
 #if defined(OS_CHROMEOS)
-  chromeos::PrinterDetectorFactory::GetInstance();
+  chromeos::UsbPrinterDetectorFactory::GetInstance();
   chromeos::CupsPrintJobManagerFactory::GetInstance();
-  chromeos::PrintersManagerFactory::GetInstance();
+  chromeos::SyncedPrintersManagerFactory::GetInstance();
+  TetherServiceFactory::GetInstance();
   extensions::VerifyTrustAPI::GetFactoryInstance();
 #endif
   FaviconServiceFactory::GetInstance();
+  FeatureEngagementTrackerFactory::GetInstance();
   FindBarStateFactory::GetInstance();
   GAIAInfoUpdateServiceFactory::GetInstance();
 #if !defined(OS_ANDROID)
@@ -263,12 +273,6 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #endif
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #if defined(OS_CHROMEOS) || defined(OS_WIN) || defined(OS_MACOSX)
-  std::unique_ptr<extensions::NetworkingPrivateVerifyDelegateFactoryImpl>
-      networking_private_verify_delegate_factory(
-          new extensions::NetworkingPrivateVerifyDelegateFactoryImpl);
-  extensions::NetworkingPrivateDelegateFactory::GetInstance()
-      ->SetVerifyDelegateFactory(
-          std::move(networking_private_verify_delegate_factory));
   std::unique_ptr<extensions::NetworkingPrivateUIDelegateFactoryImpl>
       networking_private_ui_delegate_factory(
           new extensions::NetworkingPrivateUIDelegateFactoryImpl);
@@ -276,19 +280,21 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
       ->SetUIDelegateFactory(std::move(networking_private_ui_delegate_factory));
 #endif
 #endif
-#if defined(ENABLE_MEDIA_ROUTER)
+  if (MediaEngagementService::IsEnabled())
+    MediaEngagementServiceFactory::GetInstance();
   media_router::MediaRouterFactory::GetInstance();
 #if !defined(OS_ANDROID)
   media_router::MediaRouterUIServiceFactory::GetInstance();
 #endif
-#endif  // defined(ENABLE_MEDIA_ROUTER)
 #if !defined(OS_ANDROID)
   MediaGalleriesPreferencesFactory::GetInstance();
   NTPResourceCacheFactory::GetInstance();
 #endif
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
+  feature_engagement_tracker::NewTabTrackerFactory::GetInstance();
+#endif
   ContentSuggestionsServiceFactory::GetInstance();
   PasswordStoreFactory::GetInstance();
-  PasswordManagerSettingMigratorServiceFactory::GetInstance();
 #if !defined(OS_ANDROID)
   PinnedTabServiceFactory::GetInstance();
   ThemeServiceFactory::GetInstance();
@@ -314,7 +320,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   policy::UserCloudPolicyInvalidatorFactory::GetInstance();
   predictors::AutocompleteActionPredictorFactory::GetInstance();
   predictors::PredictorDatabaseFactory::GetInstance();
-  predictors::ResourcePrefetchPredictorFactory::GetInstance();
+  predictors::LoadingPredictorFactory::GetInstance();
   prerender::PrerenderLinkManagerFactory::GetInstance();
   prerender::PrerenderManagerFactory::GetInstance();
   prerender::PrerenderMessageFilter::EnsureShutdownNotifierFactoryBuilt();
@@ -343,6 +349,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if defined(OS_WIN)
   TriggeredProfileResetterFactory::GetInstance();
 #endif
+  UINetworkQualityEstimatorServiceFactory::GetInstance();
 #if !defined(OS_ANDROID)
   UsbChooserContextFactory::GetInstance();
 #endif

@@ -14,6 +14,7 @@ namespace ui {
 
 struct AXActionData;
 struct AXNodeData;
+struct AXTreeData;
 class AXPlatformNode;
 
 // An object that wants to be accessible should derive from this class.
@@ -34,7 +35,10 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // Virtually all of the information is obtained from this structure
   // (role, state, name, cursor position, etc.) - the rest of this interface
   // is mostly to implement support for walking the accessibility tree.
-  virtual const AXNodeData& GetData() = 0;
+  virtual const AXNodeData& GetData() const = 0;
+
+  // Get the accessibility tree data for this node.
+  virtual const ui::AXTreeData& GetTreeData() const = 0;
 
   // Get the window the node is contained in.
   virtual gfx::NativeWindow GetTopLevelWidget() = 0;
@@ -49,8 +53,8 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // Get the child of a node given a 0-based index.
   virtual gfx::NativeViewAccessible ChildAtIndex(int index) = 0;
 
-  // Get the offset to convert local coordinates to screen global coordinates.
-  virtual gfx::Vector2d GetGlobalCoordinateOffset() = 0;
+  // Get the bounds of this node in screen coordinates.
+  virtual gfx::Rect GetScreenBoundsRect() const = 0;
 
   // Do a *synchronous* hit test of the given location in global screen
   // coordinates, and the node within this node's subtree (inclusive) that's
@@ -69,6 +73,8 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // has focus.
   virtual gfx::NativeViewAccessible GetFocus() = 0;
 
+  virtual ui::AXPlatformNode* GetFromNodeID(int32_t id) = 0;
+
   //
   // Events.
   //
@@ -81,13 +87,19 @@ class AX_EXPORT AXPlatformNodeDelegate {
   // Actions.
   //
 
-  // Calls one of the methods below to perform an accessibility action,
-  // switching on the ui::AXAction provided in |data|.
+  // Perform an accessibility action, switching on the ui::AXAction
+  // provided in |data|.
   virtual bool AccessibilityPerformAction(const ui::AXActionData& data) = 0;
 
-  // Perform the default action, e.g. click a button, follow a link, or
-  // toggle a checkbox.
-  virtual void DoDefaultAction() = 0;
+  //
+  // Testing.
+  //
+
+  // Accessibility objects can have the "hot tracked" state set when
+  // the mouse is hovering over them, but this makes tests flaky because
+  // the test behaves differently when the mouse happens to be over an
+  // element. The default value should be falses if not in testing mode.
+  virtual bool ShouldIgnoreHoveredStateForTesting() = 0;
 };
 
 }  // namespace ui

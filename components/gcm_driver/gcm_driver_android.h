@@ -8,6 +8,7 @@
 #include <jni.h>
 
 #include "base/android/scoped_java_ref.h"
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -50,10 +51,12 @@ class GCMDriverAndroid : public GCMDriver,
       const base::android::JavaParamRef<jbyteArray>& raw_data,
       const base::android::JavaParamRef<jobjectArray>& data_keys_and_values);
 
-  // Register JNI methods.
-  static bool RegisterJni(JNIEnv* env);
-
   // GCMDriver implementation:
+  void ValidateRegistration(
+      const std::string& app_id,
+      const std::vector<std::string>& sender_ids,
+      const std::string& registration_id,
+      const ValidateRegistrationCallback& callback) override;
   void OnSignedIn() override;
   void OnSignedOut() override;
   void Enable() override;
@@ -93,8 +96,7 @@ class GCMDriverAndroid : public GCMDriver,
                 const std::string& receiver_id,
                 const OutgoingMessage& message) override;
   void RecordDecryptionFailure(const std::string& app_id,
-                               GCMEncryptionProvider::DecryptionResult result)
-      override;
+                               GCMDecryptionResult result) override;
 
  private:
   base::android::ScopedJavaGlobalRef<jobject> java_ref_;

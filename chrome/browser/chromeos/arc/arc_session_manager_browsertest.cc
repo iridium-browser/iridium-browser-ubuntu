@@ -17,10 +17,12 @@
 #include "chrome/browser/chromeos/arc/arc_auth_notification.h"
 #include "chrome/browser/chromeos/arc/arc_service_launcher.h"
 #include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/arc/test/arc_data_removed_waiter.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/policy/cloud/test_request_interceptor.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
@@ -103,7 +105,6 @@ class ArcSessionManagerTest : public InProcessBrowserTest {
   ~ArcSessionManagerTest() override {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
     arc::SetArcAvailableCommandLineForTesting(command_line);
   }
 
@@ -124,13 +125,21 @@ class ArcSessionManagerTest : public InProcessBrowserTest {
     user_manager_enabler_.reset(new chromeos::ScopedUserManagerEnabler(
         new chromeos::FakeChromeUserManager));
     // Init ArcSessionManager for testing.
+    ArcServiceLauncher::Get()->ResetForTesting();
     ArcSessionManager::DisableUIForTesting();
     ArcAuthNotification::DisableForTesting();
     ArcSessionManager::EnableCheckAndroidManagementForTesting();
     ArcSessionManager::Get()->SetArcSessionRunnerForTesting(
         base::MakeUnique<ArcSessionRunner>(base::Bind(FakeArcSession::Create)));
 
-    EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+
+    chromeos::ProfileHelper::SetAlwaysReturnPrimaryUserForTesting(true);
+
+    const AccountId account_id(
+        AccountId::FromUserEmailGaiaId(kFakeUserName, kFakeGaiaId));
+    GetFakeUserManager()->AddUser(account_id);
+    GetFakeUserManager()->LoginUser(account_id);
 
     // Create test profile.
     TestingProfile::Builder profile_builder;
@@ -146,11 +155,6 @@ class ArcSessionManagerTest : public InProcessBrowserTest {
 
     profile()->GetPrefs()->SetBoolean(prefs::kArcSignedIn, true);
     profile()->GetPrefs()->SetBoolean(prefs::kArcTermsAccepted, true);
-
-    const AccountId account_id(
-        AccountId::FromUserEmailGaiaId(kFakeUserName, kFakeGaiaId));
-    GetFakeUserManager()->AddUser(account_id);
-    GetFakeUserManager()->LoginUser(account_id);
 
     // Set up ARC for test profile.
     // Currently, ArcSessionManager is singleton and set up with the original
@@ -178,8 +182,10 @@ class ArcSessionManagerTest : public InProcessBrowserTest {
     // TODO(hidehiko): Think about a way to test the code cleanly.
     ArcServiceLauncher::Get()->Shutdown();
     profile_.reset();
+    base::RunLoop().RunUntilIdle();
     user_manager_enabler_.reset();
     test_server_.reset();
+    chromeos::ProfileHelper::SetAlwaysReturnPrimaryUserForTesting(false);
   }
 
   chromeos::FakeChromeUserManager* GetFakeUserManager() const {
@@ -241,11 +247,7 @@ IN_PROC_BROWSER_TEST_F(ArcSessionManagerTest, ManagedAndroidAccount) {
   token_service()->IssueTokenForAllPendingRequests(kManagedAuthToken,
                                                    base::Time::Max());
   ArcPlayStoreDisabledWaiter().Wait();
-  ASSERT_EQ(ArcSessionManager::State::REMOVING_DATA_DIR,
-            ArcSessionManager::Get()->state());
-  ArcDataRemovedWaiter().Wait();
-  ASSERT_EQ(ArcSessionManager::State::STOPPED,
-            ArcSessionManager::Get()->state());
+  EXPECT_FALSE(IsArcPlayStoreEnabledForProfile(profile()));
 }
 
 }  // namespace arc

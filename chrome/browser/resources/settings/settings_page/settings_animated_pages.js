@@ -13,6 +13,7 @@
  *      <!-- Insert your section controls here -->
  *    </settings-animated-pages>
  */
+
 Polymer({
   is: 'settings-animated-pages',
 
@@ -26,16 +27,71 @@ Polymer({
      *
      * The section name must match the name specified in route.js.
      */
-    section: {
-      type: String,
-    },
+    section: String,
+
+    /**
+     * A Map specifying which element should be focused when exiting a subpage.
+     * The key of the map holds a settings.Route path, and the value holds a
+     * query selector that identifies the desired element.
+     * @type {?Map<string, string>}
+     */
+    focusConfig: Object,
   },
+
+  /**
+   * The last "previous" route reported by the router.
+   * @private {?settings.Route}
+   */
+  previousRoute_: null,
 
   /** @override */
   created: function() {
     // Observe the light DOM so we know when it's ready.
-    this.lightDomObserver_ = Polymer.dom(this).observeNodes(
-        this.lightDomChanged_.bind(this));
+    this.lightDomObserver_ =
+        Polymer.dom(this).observeNodes(this.lightDomChanged_.bind(this));
+  },
+
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onIronSelect_: function(e) {
+    if (!this.focusConfig || !this.previousRoute_)
+      return;
+
+    // Don't attempt to focus any anchor element, unless last navigation was a
+    // 'pop' (backwards) navigation.
+    if (!settings.lastRouteChangeWasPopstate())
+      return;
+
+    // Only handle iron-select events from neon-animatable elements and the
+    // given whitelist of settings-subpage instances.
+    var whitelist = 'settings-subpage#site-settings';
+
+    if (settings.routes.SITE_SETTINGS_COOKIES) {
+      whitelist += ', settings-subpage[route-path=\"' +
+          settings.routes.SITE_SETTINGS_COOKIES.path + '\"]';
+    }
+
+    // <if expr="chromeos">
+    if (settings.routes.INTERNET_NETWORKS) {
+      whitelist += ', settings-subpage[route-path=\"' +
+          settings.routes.INTERNET_NETWORKS.path + '\"]';
+    }
+    // </if>
+
+    if (!e.detail.item.matches('neon-animatable, ' + whitelist))
+      return;
+
+    var selector = this.focusConfig.get(this.previousRoute_.path);
+    if (selector) {
+      // neon-animatable has "display: none" until the animation finishes, so
+      // calling focus() on any of its children has no effect until "display:
+      // none" is removed. Therefore, don't set focus from within the
+      // currentRouteChanged callback. Using 'iron-select' listener which fires
+      // after the animation has finished allows setting focus to work.
+      cr.ui.focusWithoutInk(assert(this.querySelector(selector)));
+    }
   },
 
   /**
@@ -59,18 +115,19 @@ Polymer({
     if (!this.queuedRouteChange_)
       return;
     this.async(this.currentRouteChanged.bind(
-        this,
-        this.queuedRouteChange_.newRoute,
+        this, this.queuedRouteChange_.newRoute,
         this.queuedRouteChange_.oldRoute));
   },
 
   /** @protected */
   currentRouteChanged: function(newRoute, oldRoute) {
+    this.previousRoute_ = oldRoute;
+
     if (newRoute.section == this.section && newRoute.isSubpage()) {
       this.switchToSubpage_(newRoute, oldRoute);
     } else {
-      this.$.animatedPages.exitAnimation = 'fade-out-animation';
-      this.$.animatedPages.entryAnimation = 'fade-in-animation';
+      this.$.animatedPages.exitAnimation = 'settings-fade-out-animation';
+      this.$.animatedPages.entryAnimation = 'settings-fade-in-animation';
       this.$.animatedPages.selected = 'default';
     }
   },
@@ -102,8 +159,8 @@ Polymer({
         this.$.animatedPages.entryAnimation = 'slide-from-left-animation';
       } else {
         // The old route is not a subpage or is at the same level, so just fade.
-        this.$.animatedPages.exitAnimation = 'fade-out-animation';
-        this.$.animatedPages.entryAnimation = 'fade-in-animation';
+        this.$.animatedPages.exitAnimation = 'settings-fade-out-animation';
+        this.$.animatedPages.entryAnimation = 'settings-fade-in-animation';
 
         if (!oldRoute.isSubpage()) {
           // Set the height the expand animation should start at before
@@ -136,8 +193,8 @@ Polymer({
       return;
 
     // Set the subpage's id for use by neon-animated-pages.
-    var subpage = /** @type {{_content: DocumentFragment}} */(template)._content
-        .querySelector('settings-subpage');
+    var subpage = /** @type {{_content: DocumentFragment}} */ (template)
+                      ._content.querySelector('settings-subpage');
     subpage.setAttribute('route-path', routePath);
 
     // Carry over the 'no-search' attribute from the template to the stamped

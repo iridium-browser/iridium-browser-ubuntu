@@ -9,7 +9,6 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
-#include "components/certificate_reporting/cert_logger.pb.h"
 #include "components/network_time/network_time_tracker.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/x509_certificate.h"
@@ -93,10 +92,7 @@ ErrorReport::ErrorReport(const std::string& hostname,
 #if defined(OS_ANDROID)
   CertLoggerFeaturesInfo* features_info = cert_report_->mutable_features_info();
   features_info->set_android_aia_fetching_status(
-      base::FeatureList::IsEnabled(
-          net::CertVerifyProcAndroid::kAIAFetchingFeature)
-          ? CertLoggerFeaturesInfo::ANDROID_AIA_FETCHING_ENABLED
-          : CertLoggerFeaturesInfo::ANDROID_AIA_FETCHING_DISABLED);
+      CertLoggerFeaturesInfo::ANDROID_AIA_FETCHING_ENABLED);
 #endif
 }
 
@@ -130,6 +126,10 @@ void ErrorReport::SetInterstitialInfo(
     case INTERSTITIAL_CLOCK:
       interstitial_info->set_interstitial_reason(
           CertLoggerInterstitialInfo::INTERSTITIAL_CLOCK);
+      break;
+    case INTERSTITIAL_SUPERFISH:
+      interstitial_info->set_interstitial_reason(
+          CertLoggerInterstitialInfo::INTERSTITIAL_SUPERFISH);
       break;
   }
 
@@ -173,12 +173,51 @@ void ErrorReport::AddNetworkTimeInfo(
   network_time_info->set_network_time_query_behavior(report_behavior);
 }
 
+void ErrorReport::AddChromeChannel(version_info::Channel channel) {
+  switch (channel) {
+    case version_info::Channel::STABLE:
+      cert_report_->set_chrome_channel(
+          CertLoggerRequest::CHROME_CHANNEL_STABLE);
+      break;
+
+    case version_info::Channel::BETA:
+      cert_report_->set_chrome_channel(CertLoggerRequest::CHROME_CHANNEL_BETA);
+      break;
+
+    case version_info::Channel::CANARY:
+      cert_report_->set_chrome_channel(
+          CertLoggerRequest::CHROME_CHANNEL_CANARY);
+      break;
+
+    case version_info::Channel::DEV:
+      cert_report_->set_chrome_channel(CertLoggerRequest::CHROME_CHANNEL_DEV);
+      break;
+
+    case version_info::Channel::UNKNOWN:
+      cert_report_->set_chrome_channel(
+          CertLoggerRequest::CHROME_CHANNEL_UNKNOWN);
+      break;
+  }
+}
+
+void ErrorReport::SetIsEnterpriseManaged(bool is_enterprise_managed) {
+  cert_report_->set_is_enterprise_managed(is_enterprise_managed);
+}
+
 void ErrorReport::SetIsRetryUpload(bool is_retry_upload) {
   cert_report_->set_is_retry_upload(is_retry_upload);
 }
 
 const std::string& ErrorReport::hostname() const {
   return cert_report_->hostname();
+}
+
+CertLoggerRequest::ChromeChannel ErrorReport::chrome_channel() const {
+  return cert_report_->chrome_channel();
+}
+
+bool ErrorReport::is_enterprise_managed() const {
+  return cert_report_->is_enterprise_managed();
 }
 
 bool ErrorReport::is_retry_upload() const {

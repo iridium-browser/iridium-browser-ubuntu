@@ -7,11 +7,13 @@
 from __future__ import print_function
 
 import collections
+import json
 import sys
 import traceback
 
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
+from chromite.lib import failure_message_lib
 
 
 class StepFailure(Exception):
@@ -43,6 +45,29 @@ class StepFailure(Exception):
   def __str__(self):
     """Stringify the message."""
     return self.message
+
+  def EncodeExtraInfo(self):
+    """Encode extra_info into a json string, can be overwritten by subclasses"""
+
+  def ConvertToStageFailureMessage(self, build_stage_id, stage_name,
+                                   stage_prefix_name=None):
+    """Convert StepFailure to StageFailureMessage.
+
+    Args:
+      build_stage_id: The id of the build stage.
+      stage_name: The name (string) of the failed stage.
+      stage_prefix_name: The prefix name (string) of the failed stage,
+          default to None.
+
+    Returns:
+      An instance of failure_message_lib.StageFailureMessage.
+    """
+    stage_failure = failure_message_lib.StageFailure(
+        None, build_stage_id, None, self.__class__.__name__, self.message,
+        self.EXCEPTION_CATEGORY, self.EncodeExtraInfo(), None, stage_name,
+        None, None, None, None, None, None, None, None, None, None, None)
+    return failure_message_lib.StageFailureMessage(
+        stage_failure, stage_prefix_name=stage_prefix_name)
 
 
 # A namedtuple to hold information of an exception.
@@ -134,6 +159,37 @@ class CompoundFailure(StepFailure):
 
     return False
 
+  def ConvertToStageFailureMessage(self, build_stage_id, stage_name,
+                                   stage_prefix_name=None):
+    """Convert CompoundFailure to StageFailureMessage.
+
+    Args:
+      build_stage_id: The id of the build stage.
+      stage_name: The name (string) of the failed stage.
+      stage_prefix_name: The prefix name (string) of the failed stage,
+          default to None.
+
+    Returns:
+      An instance of failure_message_lib.StageFailureMessage.
+    """
+    stage_failure = failure_message_lib.StageFailure(
+        None, build_stage_id, None, self.__class__.__name__, self.message,
+        self.EXCEPTION_CATEGORY, self.EncodeExtraInfo(), None, stage_name,
+        None, None, None, None, None, None, None, None, None, None, None)
+    compound_failure_message = failure_message_lib.CompoundFailureMessage(
+        stage_failure, stage_prefix_name=stage_prefix_name)
+
+    for exc_class, exc_str, _ in self.exc_infos:
+      inner_failure = failure_message_lib.StageFailure(
+          None, build_stage_id, None, exc_class.__name__, exc_str,
+          _GetExceptionCategory(exc_class), None, None, stage_name,
+          None, None, None, None, None, None, None, None, None, None, None)
+      innner_failure_message = failure_message_lib.StageFailureMessage(
+          inner_failure, stage_prefix_name=stage_prefix_name)
+      compound_failure_message.inner_failures.append(innner_failure_message)
+
+    return compound_failure_message
+
 
 class ExitEarlyException(Exception):
   """Exception when a stage finishes and exits early."""
@@ -193,6 +249,8 @@ class RetriableStepFailure(StepFailure):
   """This exception is thrown when a step failed, but should be retried."""
 
 
+# TODO(nxia): Everytime the class name is changed, add the new class name to
+# BUILD_SCRIPT_FAILURE_TYPES.
 class BuildScriptFailure(StepFailure):
   """This exception is thrown when a build command failed.
 
@@ -225,7 +283,20 @@ class BuildScriptFailure(StepFailure):
     else:
       return self.exception.msg
 
+  def EncodeExtraInfo(self):
+    """Encode extra_info into a json string.
 
+    Returns:
+      A json string containing shortname.
+    """
+    extra_info_dict = {
+        'shortname': self.shortname,
+    }
+    return json.dumps(extra_info_dict)
+
+
+# TODO(nxia): Everytime the class name is changed, add the new class name to
+# PACKAGE_BUILD_FAILURE_TYPES
 class PackageBuildFailure(BuildScriptFailure):
   """This exception is thrown when packages fail to build."""
 
@@ -244,6 +315,18 @@ class PackageBuildFailure(BuildScriptFailure):
   def __str__(self):
     return ('Packages failed in %s: %s'
             % (self.shortname, ' '.join(sorted(self.failed_packages))))
+
+  def EncodeExtraInfo(self):
+    """Encode extra_info into a json string.
+
+    Returns:
+      A json string containing shortname and failed_packages.
+    """
+    extra_info_dict = {
+        'shortname': self.shortname,
+        'failed_packages': list(self.failed_packages)
+    }
+    return json.dumps(extra_info_dict)
 
 
 class InfrastructureFailure(CompoundFailure):
@@ -324,139 +407,6 @@ class TestWarning(StepFailure):
   """Raised if a test stage (e.g. VMTest) returns a warning code."""
 
 
-class BuildFailureMessage(object):
-  """Message indicating that changes failed to be validated."""
-
-  def __init__(self, message, tracebacks, internal, reason, builder):
-    """Create a BuildFailureMessage object.
-
-    Args:
-      message: The message to print.
-      tracebacks: Exceptions received by individual builders, if any.
-      internal: Whether this failure occurred on an internal builder.
-      reason: A string describing the failure.
-      builder: The builder the failure occurred on.
-    """
-    # Convert each of the input arguments into simple Python datastructures
-    # (i.e. not generators) that can be easily pickled.
-    self.message = str(message)
-    self.tracebacks = tuple(tracebacks)
-    self.internal = bool(internal)
-    self.reason = str(reason)
-    # builder should match build_config, e.g. self._run.config.name.
-    self.builder = str(builder)
-
-  def __str__(self):
-    return self.message
-
-  def GetFailingStages(self):
-    """Get a list of the failing stage prefixes from tracebacks.
-
-    Returns:
-      A list of failing stage prefixes if there are tracebacks; None otherwise.
-    """
-    failing_stages = None
-    if self.tracebacks:
-      failing_stages = set(x.failed_prefix for x in self.tracebacks)
-    return failing_stages
-
-  def MatchesFailureType(self, cls):
-    """Check if all of the tracebacks match the specified failure type."""
-    for tb in self.tracebacks:
-      if not isinstance(tb.exception, cls):
-        if (isinstance(tb.exception, CompoundFailure) and
-            tb.exception.MatchesFailureType(cls)):
-          # If the exception is a CompoundFailure instance and all its
-          # stored exceptions match |cls|, it meets the criteria.
-          continue
-        else:
-          return False
-
-    return True
-
-  def HasFailureType(self, cls):
-    """Check if any of the failures match the specified failure type."""
-    for tb in self.tracebacks:
-      if isinstance(tb.exception, cls):
-        return True
-
-      if (isinstance(tb.exception, CompoundFailure) and
-          tb.exception.HasFailureType(cls)):
-        # If the exception is a CompoundFailure instance and any of its
-        # stored exceptions match |cls|, it meets the criteria.
-        return True
-
-    return False
-
-  def IsPackageBuildFailure(self):
-    """Check if all of the failures are package build failures."""
-    return self.MatchesFailureType(PackageBuildFailure)
-
-  def FindPackageBuildFailureSuspects(self, changes, sanity):
-    """Figure out what changes probably caused our failures.
-
-    We use a fairly simplistic algorithm to calculate breakage: If you changed
-    a package, and that package broke, you probably broke the build. If there
-    were multiple changes to a broken package, we fail them all.
-
-    Some safeguards are implemented to ensure that bad changes are kicked out:
-      1) Changes to overlays (e.g. ebuilds, eclasses, etc.) are always kicked
-         out if the build fails.
-      2) If a package fails that nobody changed, we kick out all of the
-         changes.
-      3) If any failures occur that we can't explain, we kick out all of the
-         changes.
-
-    It is certainly possible to trick this algorithm: If one developer submits
-    a change to libchromeos that breaks the power_manager, and another developer
-    submits a change to the power_manager at the same time, only the
-    power_manager change will be kicked out. That said, in that situation, the
-    libchromeos change will likely be kicked out on the next run, thanks to
-    safeguard #2 above.
-
-    Args:
-      changes: List of changes to examine.
-      sanity: The sanity checker builder passed and the tree was open when
-              the build started.
-
-    Returns:
-      Set of changes that likely caused the failure.
-    """
-    # Import portage_util here to avoid circular imports.
-    # portage_util -> parallel -> failures_lib
-    from chromite.lib import portage_util
-    blame_everything = False
-    suspects = set()
-    for tb in self.tracebacks:
-      # Only look at PackageBuildFailure objects.
-      failed_packages = []
-      if isinstance(tb.exception, PackageBuildFailure):
-        failed_packages = tb.exception.failed_packages
-      else:
-        blame_everything = True
-
-      for package in failed_packages:
-        failed_projects = portage_util.FindWorkonProjects([package])
-        blame_assigned = False
-        for change in changes:
-          if change.project in failed_projects:
-            blame_assigned = True
-            suspects.add(change)
-        if not blame_assigned:
-          blame_everything = True
-
-    # Only do broad-brush blaming if the tree is sane.
-    if sanity:
-      if blame_everything or not suspects:
-        suspects = changes[:]
-      else:
-        # Never treat changes to overlays as innocent.
-        suspects.update(change for change in changes
-                        if '/overlays/' in change.project)
-
-    return suspects
-
-
 def ReportStageFailureToCIDB(db, build_stage_id, exception):
   """Reports stage failure to cidb along with inner exceptions.
 
@@ -464,11 +414,23 @@ def ReportStageFailureToCIDB(db, build_stage_id, exception):
     db: A valid cidb handle.
     build_stage_id: The cidb id for the build stage that failed.
     exception: The failure exception to report.
+
+  Returns:
+    The Integer id of this exception in the failureTable (outer_failure_id if
+    it's a CompoundFailure).
   """
+  exception_message = (exception.ToSummaryString()
+                       if isinstance(exception, CompoundFailure)
+                       else str(exception))
+
+  extra_info = (exception.EncodeExtraInfo()
+                if isinstance(exception, StepFailure) else None)
+
   outer_failure_id = db.InsertFailure(build_stage_id,
                                       type(exception).__name__,
-                                      str(exception),
-                                      _GetExceptionCategory(type(exception)))
+                                      exception_message,
+                                      _GetExceptionCategory(type(exception)),
+                                      extra_info=extra_info)
 
   # This assumes that CompoundFailure can't be nested.
   if isinstance(exception, CompoundFailure):
@@ -478,6 +440,35 @@ def ReportStageFailureToCIDB(db, build_stage_id, exception):
                        exc_str,
                        _GetExceptionCategory(exc_class),
                        outer_failure_id)
+
+  return outer_failure_id
+
+
+def GetStageFailureMessageFromException(stage_name, build_stage_id,
+                                        exception, stage_prefix_name=None):
+  """Get StageFailureMessage from an exception.
+
+  Args:
+    stage_name: The name (string) of the failed stage.
+    build_stage_id: The id of the failed build stage.
+    exception: The BaseException instance to convert to StageFailureMessage.
+    stage_prefix_name: The prefix name (string) of the failed stage,
+        default to None.
+
+  Returns:
+    An instance of failure_message_lib.StageFailureMessage.
+  """
+  if isinstance(exception, StepFailure):
+    return exception.ConvertToStageFailureMessage(
+        build_stage_id, stage_name, stage_prefix_name=stage_prefix_name)
+  else:
+    stage_failure = failure_message_lib.StageFailure(
+        None, build_stage_id, None, type(exception).__name__, str(exception),
+        _GetExceptionCategory(type(exception)), None, None, stage_name,
+        None, None, None, None, None, None, None, None, None, None, None)
+
+    return failure_message_lib.StageFailureMessage(
+        stage_failure, stage_prefix_name=stage_prefix_name)
 
 
 def _GetExceptionCategory(exception_class):

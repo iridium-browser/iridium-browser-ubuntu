@@ -13,11 +13,11 @@
 #include <algorithm>  // min, max
 #include <memory>
 
-#include "webrtc/base/safe_conversions.h"
 #include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
 #include "webrtc/modules/audio_coding/neteq/background_noise.h"
 #include "webrtc/modules/audio_coding/neteq/cross_correlation.h"
 #include "webrtc/modules/audio_coding/neteq/dsp_helper.h"
+#include "webrtc/rtc_base/safe_conversions.h"
 
 namespace webrtc {
 
@@ -195,7 +195,7 @@ bool TimeStretch::SpeechDetection(int32_t vec1_energy, int32_t vec2_energy,
   right_scale = std::max(0, right_scale);
   left_side = left_side >> right_scale;
   right_side =
-      rtc::checked_cast<int32_t>(peak_index) * (right_side >> right_scale);
+      rtc::dchecked_cast<int32_t>(peak_index) * (right_side >> right_scale);
 
   // Scale |left_side| properly before comparing with |right_side|.
   // (|scaling| is the scale factor before energy calculation, thus the scale

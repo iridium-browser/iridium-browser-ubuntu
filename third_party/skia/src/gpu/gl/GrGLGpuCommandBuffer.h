@@ -11,8 +11,10 @@
 #include "GrGpuCommandBuffer.h"
 
 #include "GrGLGpu.h"
+#include "GrGLRenderTarget.h"
 #include "GrOpFlushState.h"
 
+class GrGLGpu;
 class GrGLRenderTarget;
 
 class GrGLGpuCommandBuffer : public GrGpuCommandBuffer {
@@ -24,7 +26,7 @@ class GrGLGpuCommandBuffer : public GrGpuCommandBuffer {
 public:
     GrGLGpuCommandBuffer(GrGLGpu* gpu) : fGpu(gpu), fRenderTarget(nullptr) {}
 
-    virtual ~GrGLGpuCommandBuffer() {}
+    ~GrGLGpuCommandBuffer() override {}
 
     void end() override {}
 
@@ -36,7 +38,8 @@ public:
         SkASSERT(target == fRenderTarget);
     }
 
-    void inlineUpload(GrOpFlushState* state, GrDrawOp::DeferredUploadFn& upload) override {
+    void inlineUpload(GrOpFlushState* state, GrDrawOp::DeferredUploadFn& upload,
+                      GrRenderTarget*) override {
         state->doUpload(upload);
     }
 
@@ -48,7 +51,8 @@ private:
 
     void onDraw(const GrPipeline& pipeline,
                 const GrPrimitiveProcessor& primProc,
-                const GrMesh* mesh,
+                const GrMesh mesh[],
+                const GrPipeline::DynamicState dynamicStates[],
                 int meshCount,
                 const SkRect& bounds) override {
         GrGLRenderTarget* target = static_cast<GrGLRenderTarget*>(pipeline.getRenderTarget());
@@ -56,7 +60,7 @@ private:
             fRenderTarget = target;
         }
         SkASSERT(target == fRenderTarget);
-        fGpu->draw(pipeline, primProc, mesh, meshCount);
+        fGpu->draw(pipeline, primProc, mesh, dynamicStates, meshCount);
     }
 
     void onClear(GrRenderTarget* rt, const GrFixedClip& clip, GrColor color) override {

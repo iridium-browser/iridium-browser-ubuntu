@@ -10,11 +10,14 @@
 #ifndef LIBANGLE_RENDERER_VULKAN_RENDERERVK_UTILS_H_
 #define LIBANGLE_RENDERER_VULKAN_RENDERERVK_UTILS_H_
 
+#include <limits>
+
 #include <vulkan/vulkan.h>
 
-#include "common/debug.h"
 #include "common/Optional.h"
+#include "common/debug.h"
 #include "libANGLE/Error.h"
+#include "libANGLE/renderer/renderer_utils.h"
 
 namespace gl
 {
@@ -45,35 +48,6 @@ enum DeleteSchedule
     LATER,
 };
 
-// A serial supports a few operations - comparison, increment, and assignment.
-// TODO(jmadill): Verify it's not easy to overflow the queue serial.
-class Serial final
-{
-  public:
-    Serial() : mValue(0) {}
-    Serial(const Serial &other) : mValue(other.mValue) {}
-    Serial(Serial &&other) : mValue(other.mValue) { other.mValue = 0; }
-    Serial &operator=(const Serial &other)
-    {
-        mValue = other.mValue;
-        return *this;
-    }
-    bool operator>=(Serial other) const { return mValue >= other.mValue; }
-    bool operator>(Serial other) const { return mValue > other.mValue; }
-
-    // This function fails if we're at the limits of our counting.
-    bool operator++()
-    {
-        if (mValue == std::numeric_limits<uint32_t>::max())
-            return false;
-        mValue++;
-        return true;
-    }
-
-  private:
-    uint32_t mValue;
-};
-
 // This is a small helper mixin for any GL object used in Vk command buffers. It records a serial
 // at command submission times indicating it's order in the queue. We will use Fences to detect
 // when commands are finished, and then handle lifetime management for the resources.
@@ -88,7 +62,7 @@ class ResourceVk
         mStoredQueueSerial = queueSerial;
     }
 
-    DeleteSchedule getDeleteSchedule(Serial lastCompletedQueueSerial)
+    DeleteSchedule getDeleteSchedule(Serial lastCompletedQueueSerial) const
     {
         if (lastCompletedQueueSerial >= mStoredQueueSerial)
         {
@@ -99,6 +73,8 @@ class ResourceVk
             return DeleteSchedule::LATER;
         }
     }
+
+    Serial getStoredQueueSerial() const { return mStoredQueueSerial; }
 
   private:
     Serial mStoredQueueSerial;
@@ -159,6 +135,8 @@ class WrappedObject : angle::NonCopyable
     HandleT getHandle() const { return mHandle; }
     bool valid() const { return (mHandle != VK_NULL_HANDLE); }
 
+    const HandleT *ptr() const { return &mHandle; }
+
   protected:
     WrappedObject() : mHandle(VK_NULL_HANDLE) {}
     WrappedObject(HandleT handle) : mHandle(handle) {}
@@ -205,6 +183,8 @@ class CommandBuffer final : public WrappedObject<CommandBuffer, VkCommandBuffer>
   public:
     CommandBuffer();
 
+    bool started() const { return mStarted; }
+
     void destroy(VkDevice device);
     using WrappedObject::operator=;
 
@@ -242,6 +222,7 @@ class CommandBuffer final : public WrappedObject<CommandBuffer, VkCommandBuffer>
                            const std::vector<VkDeviceSize> &offsets);
 
   private:
+    bool mStarted;
     CommandPool *mCommandPool;
 };
 
@@ -342,6 +323,7 @@ class StagingImage final : angle::NonCopyable
 {
   public:
     StagingImage();
+    StagingImage(StagingImage &&other);
     void destroy(VkDevice device);
     void retain(VkDevice device, StagingImage &&other);
 
@@ -423,22 +405,70 @@ class Fence final : public WrappedObject<Fence, VkFence>
     VkResult getStatus(VkDevice device) const;
 };
 
-class FenceAndCommandBuffer final : angle::NonCopyable
+template <typename ObjT>
+class ObjectAndSerial final : angle::NonCopyable
 {
   public:
-    FenceAndCommandBuffer(Serial queueSerial, Fence &&fence, CommandBuffer &&commandBuffer);
-    FenceAndCommandBuffer(FenceAndCommandBuffer &&other);
-    FenceAndCommandBuffer &operator=(FenceAndCommandBuffer &&other);
+    ObjectAndSerial(ObjT &&object, Serial queueSerial)
+        : mObject(std::move(object)), mQueueSerial(queueSerial)
+    {
+    }
 
-    void destroy(VkDevice device);
-    vk::ErrorOrResult<bool> finished(VkDevice device) const;
+    ObjectAndSerial(ObjectAndSerial &&other)
+        : mObject(std::move(other.mObject)), mQueueSerial(std::move(other.mQueueSerial))
+    {
+    }
+    ObjectAndSerial &operator=(ObjectAndSerial &&other)
+    {
+        mObject      = std::move(other.mObject);
+        mQueueSerial = std::move(other.mQueueSerial);
+        return *this;
+    }
+
+    void destroy(VkDevice device) { mObject.destroy(device); }
 
     Serial queueSerial() const { return mQueueSerial; }
 
+    const ObjT &get() const { return mObject; }
+
   private:
+    ObjT mObject;
     Serial mQueueSerial;
-    Fence mFence;
-    CommandBuffer mCommandBuffer;
+};
+
+using CommandBufferAndSerial = ObjectAndSerial<CommandBuffer>;
+using FenceAndSerial         = ObjectAndSerial<Fence>;
+
+class IGarbageObject : angle::NonCopyable
+{
+  public:
+    virtual ~IGarbageObject() {}
+    virtual bool destroyIfComplete(VkDevice device, Serial completedSerial) = 0;
+    virtual void destroy(VkDevice device) = 0;
+};
+
+template <typename T>
+class GarbageObject final : public IGarbageObject
+{
+  public:
+    GarbageObject(Serial serial, T &&object) : mSerial(serial), mObject(std::move(object)) {}
+
+    bool destroyIfComplete(VkDevice device, Serial completedSerial) override
+    {
+        if (completedSerial >= mSerial)
+        {
+            mObject.destroy(device);
+            return true;
+        }
+
+        return false;
+    }
+
+    void destroy(VkDevice device) override { mObject.destroy(device); }
+
+  private:
+    Serial mSerial;
+    T mObject;
 };
 
 }  // namespace vk

@@ -71,14 +71,14 @@ const std::vector<VarT> *GetShaderVariables(const ShHandle handle)
 {
     if (!handle)
     {
-        return NULL;
+        return nullptr;
     }
 
     TShHandleBase *base = static_cast<TShHandleBase *>(handle);
     TCompiler *compiler = base->getAsCompiler();
     if (!compiler)
     {
-        return NULL;
+        return nullptr;
     }
 
     return GetVariableList<VarT>(compiler);
@@ -87,7 +87,7 @@ const std::vector<VarT> *GetShaderVariables(const ShHandle handle)
 TCompiler *GetCompilerFromHandle(ShHandle handle)
 {
     if (!handle)
-        return NULL;
+        return nullptr;
     TShHandleBase *base = static_cast<TShHandleBase *>(handle);
     return base->getAsCompiler();
 }
@@ -96,7 +96,7 @@ TCompiler *GetCompilerFromHandle(ShHandle handle)
 TranslatorHLSL *GetTranslatorHLSLFromHandle(ShHandle handle)
 {
     if (!handle)
-        return NULL;
+        return nullptr;
     TShHandleBase *base = static_cast<TShHandleBase *>(handle);
     return base->getAsTranslatorHLSL();
 }
@@ -163,6 +163,7 @@ void InitBuiltInResources(ShBuiltInResources *resources)
     resources->NV_shader_framebuffer_fetch     = 0;
     resources->ARM_shader_framebuffer_fetch    = 0;
     resources->OVR_multiview                   = 0;
+    resources->EXT_YUV_target                  = 0;
 
     resources->NV_draw_buffers = 0;
 
@@ -178,10 +179,10 @@ void InitBuiltInResources(ShBuiltInResources *resources)
     // Extensions constants.
     resources->MaxDualSourceDrawBuffers = 0;
 
-    resources->MaxViewsOVR = 2;
+    resources->MaxViewsOVR = 4;
 
     // Disable name hashing by default.
-    resources->HashFunction = NULL;
+    resources->HashFunction = nullptr;
 
     resources->ArrayIndexClampingStrategy = SH_CLAMP_WITH_CLAMP_INTRINSIC;
 
@@ -195,6 +196,8 @@ void InitBuiltInResources(ShBuiltInResources *resources)
     resources->MaxFragmentImageUniforms = 0;
     resources->MaxComputeImageUniforms  = 4;
     resources->MaxCombinedImageUniforms = 4;
+
+    resources->MaxUniformLocations = 1024;
 
     resources->MaxCombinedShaderOutputResources = 4;
 
@@ -219,6 +222,8 @@ void InitBuiltInResources(ShBuiltInResources *resources)
     resources->MaxFragmentAtomicCounterBuffers = 0;
     resources->MaxCombinedAtomicCounterBuffers = 1;
     resources->MaxAtomicCounterBufferSize      = 32;
+
+    resources->MaxUniformBufferBindings = 32;
 }
 
 //

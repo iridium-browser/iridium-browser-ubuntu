@@ -15,45 +15,34 @@ struct SkIRect;
 
 namespace blink {
 
-// Converts a PaintCanvas temporarily to a CGContext
+// Creates a bridge for painting into a PaintCanvas with a CGContext.
 class PLATFORM_EXPORT GraphicsContextCanvas {
  public:
-  /**
-    User clip rect is an *additional* clip to be applied in addition to the
-    current state of the canvas, in *local* rather than device coordinates.
-    If no additional clipping is desired, pass in
-    SkIRect::MakeSize(canvas->getBaseLayerSize()) transformed by the inverse
-    CTM.
-   */
+  // Internally creates a bitmap the same size |paint_rect|, scaled by
+  // |bitmap_scale_factor|.  Painting into the CgContext will go into the
+  // bitmap.  Upon destruction, that bitmap will be painted into the
+  // canvas as the rectangle |paint_rect|.  Users are expected to
+  // clip |paint_rect| to reasonable sizes to not create giant bitmaps.
+  // The |paint_rect| is in canvas device space.  The CgContext is set
+  // up to be in exactly the same space as the canvas is at construction
+  // time.
   GraphicsContextCanvas(PaintCanvas*,
-                        const SkIRect& userClipRect,
-                        SkScalar bitmapScaleFactor = 1);
+                        const SkIRect& paint_rect,
+                        SkScalar bitmap_scale_factor = 1);
   ~GraphicsContextCanvas();
-  CGContextRef cgContext();
-  bool hasEmptyClipRegion() const;
+
+  CGContextRef CgContext();
 
  private:
-  void releaseIfNeeded();
-  SkIRect computeDirtyRect();
+  void ReleaseIfNeeded();
 
-  PaintCanvas* m_canvas;
+  PaintCanvas* canvas_;
 
-  CGContextRef m_cgContext;
-  // m_offscreen is only valid if m_useDeviceBits is false
-  SkBitmap m_offscreen;
-  SkIPoint m_bitmapOffset;
-  SkScalar m_bitmapScaleFactor;
+  CGContextRef cg_context_;
+  SkBitmap offscreen_;
+  SkScalar bitmap_scale_factor_;
 
-  // True if we are drawing to |m_canvas|'s backing store directly.
-  // Otherwise, the bits in |bitmap_| are our allocation and need to
-  // be copied over to |m_canvas|.
-  bool m_useDeviceBits;
-
-  // True if |bitmap_| is a dummy 1x1 bitmap allocated for the sake of creating
-  // a non-null CGContext (it is invalid to use a null CGContext), and will not
-  // be copied to |m_canvas|. This will happen if |m_canvas|'s clip region is
-  // empty.
-  bool m_bitmapIsDummy;
+  SkIRect paint_rect_;
 };
 
 }  // namespace blink

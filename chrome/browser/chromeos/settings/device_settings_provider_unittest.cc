@@ -18,6 +18,7 @@
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
+#include "chrome/browser/chromeos/settings/stub_install_attributes.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -115,12 +116,20 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
     Mock::VerifyAndClearExpectations(this);
   }
 
+  enum MetricsOption { DISABLE_METRICS, ENABLE_METRICS, REMOVE_METRICS_POLICY };
+
   // Helper routine to enable/disable metrics report upload settings in policy.
-  void SetMetricsReportingSettings(bool enable_metrics_reporting) {
+  void SetMetricsReportingSettings(MetricsOption option) {
     EXPECT_CALL(*this, SettingChanged(_)).Times(AtLeast(1));
-    em::MetricsEnabledProto* proto =
-        device_policy_.payload().mutable_metrics_enabled();
-    proto->set_metrics_enabled(enable_metrics_reporting);
+    if (option == REMOVE_METRICS_POLICY) {
+      // Remove policy altogether
+      device_policy_.payload().clear_metrics_enabled();
+    } else {
+      // Enable or disable policy
+      em::MetricsEnabledProto* proto =
+          device_policy_.payload().mutable_metrics_enabled();
+      proto->set_metrics_enabled(option == ENABLE_METRICS);
+    }
     device_policy_.Build();
     device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
     ReloadDeviceSettings();
@@ -191,7 +200,7 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
 
   // Helper routine to check value of the LoginScreenDomainAutoComplete policy.
   void VerifyDomainAutoComplete(
-      const base::StringValue* const ptr_to_expected_value) {
+      const base::Value* const ptr_to_expected_value) {
     EXPECT_TRUE(base::Value::Equals(
         provider_->Get(kAccountsPrefLoginScreenDomainAutoComplete),
         ptr_to_expected_value));
@@ -205,6 +214,18 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DeviceSettingsProviderTest);
+};
+
+// Same as above, but enrolled into an enterprise
+class DeviceSettingsProviderTestEnterprise : public DeviceSettingsProviderTest {
+ protected:
+  DeviceSettingsProviderTestEnterprise()
+      : install_attributes_(ScopedStubInstallAttributes::CreateCloudManaged(
+            policy::PolicyBuilder::kFakeDomain,
+            policy::PolicyBuilder::kFakeDeviceId)) {}
+
+ private:
+  ScopedStubInstallAttributes install_attributes_;
 };
 
 TEST_F(DeviceSettingsProviderTest, InitializationTest) {
@@ -241,7 +262,7 @@ TEST_F(DeviceSettingsProviderTest, InitializationTestUnowned) {
   // Sets should succeed though and be readable from the cache.
   EXPECT_CALL(*this, SettingChanged(_)).Times(AnyNumber());
   EXPECT_CALL(*this, SettingChanged(kReleaseChannel)).Times(1);
-  base::StringValue new_value("stable-channel");
+  base::Value new_value("stable-channel");
   provider_->Set(kReleaseChannel, new_value);
   Mock::VerifyAndClearExpectations(this);
 
@@ -257,8 +278,30 @@ TEST_F(DeviceSettingsProviderTest, InitializationTestUnowned) {
   ASSERT_EQ("stable-channel", string_value);
 }
 
+TEST_F(DeviceSettingsProviderTestEnterprise, NoPolicyDefaultsOn) {
+  // Missing policy should default to reporting enabled for enterprise-enrolled
+  // devices, see crbug/456186.
+  SetMetricsReportingSettings(REMOVE_METRICS_POLICY);
+  const base::Value* saved_value = provider_->Get(kStatsReportingPref);
+  ASSERT_TRUE(saved_value);
+  bool bool_value;
+  EXPECT_TRUE(saved_value->GetAsBoolean(&bool_value));
+  EXPECT_TRUE(bool_value);
+}
+
+TEST_F(DeviceSettingsProviderTest, NoPolicyDefaultsOff) {
+  // Missing policy should default to reporting enabled for non-enterprise-
+  // enrolled devices, see crbug/456186.
+  SetMetricsReportingSettings(REMOVE_METRICS_POLICY);
+  const base::Value* saved_value = provider_->Get(kStatsReportingPref);
+  ASSERT_TRUE(saved_value);
+  bool bool_value;
+  EXPECT_TRUE(saved_value->GetAsBoolean(&bool_value));
+  EXPECT_FALSE(bool_value);
+}
+
 TEST_F(DeviceSettingsProviderTest, SetPrefFailed) {
-  SetMetricsReportingSettings(false);
+  SetMetricsReportingSettings(DISABLE_METRICS);
 
   // If we are not the owner no sets should work.
   base::Value value(true);
@@ -316,9 +359,9 @@ TEST_F(DeviceSettingsProviderTest, SetPrefTwice) {
 
   EXPECT_CALL(*this, SettingChanged(_)).Times(AnyNumber());
 
-  base::StringValue value1("beta");
+  base::Value value1("beta");
   provider_->Set(kReleaseChannel, value1);
-  base::StringValue value2("dev");
+  base::Value value2("dev");
   provider_->Set(kReleaseChannel, value2);
 
   // Let the changes propagate through the system.
@@ -425,7 +468,7 @@ TEST_F(DeviceSettingsProviderTest, DecodeDeviceState) {
   const base::Value expected_disabled_value(true);
   EXPECT_TRUE(base::Value::Equals(provider_->Get(kDeviceDisabled),
                                   &expected_disabled_value));
-  const base::StringValue expected_disabled_message_value(kDisabledMessage);
+  const base::Value expected_disabled_message_value(kDisabledMessage);
   EXPECT_TRUE(base::Value::Equals(provider_->Get(kDeviceDisabledMessage),
                                   &expected_disabled_message_value));
 
@@ -477,7 +520,7 @@ TEST_F(DeviceSettingsProviderTest, DecodeDomainAutoComplete) {
 
   // Check some meaningful value. Policy should be set.
   const std::string domain = "domain.test";
-  const base::StringValue domain_value(domain);
+  const base::Value domain_value(domain);
   SetDomainAutoComplete(domain);
   VerifyDomainAutoComplete(&domain_value);
 }
@@ -489,4 +532,5 @@ TEST_F(DeviceSettingsProviderTest, DecodeLogUploadSettings) {
   SetLogUploadSettings(false);
   VerifyLogUploadSettings(false);
 }
-} // namespace chromeos
+
+}  // namespace chromeos

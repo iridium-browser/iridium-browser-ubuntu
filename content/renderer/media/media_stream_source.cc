@@ -22,8 +22,18 @@ void MediaStreamSource::StopSource() {
   DCHECK(thread_checker_.CalledOnValidThread());
   DoStopSource();
   if (!stop_callback_.is_null())
-    base::ResetAndReturn(&stop_callback_).Run(owner());
-  owner().setReadyState(blink::WebMediaStreamSource::ReadyStateEnded);
+    base::ResetAndReturn(&stop_callback_).Run(Owner());
+  Owner().SetReadyState(blink::WebMediaStreamSource::kReadyStateEnded);
+}
+
+void MediaStreamSource::SetSourceMuted(bool is_muted) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  // Although this change is valid only if the ready state isn't already Ended,
+  // there's code further along (like in blink::MediaStreamTrack) which filters
+  // that out alredy.
+  Owner().SetReadyState(is_muted
+                            ? blink::WebMediaStreamSource::kReadyStateMuted
+                            : blink::WebMediaStreamSource::kReadyStateLive);
 }
 
 void MediaStreamSource::SetDeviceInfo(const StreamDeviceInfo& device_info) {

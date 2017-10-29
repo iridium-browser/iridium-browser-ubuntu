@@ -34,31 +34,25 @@
 namespace blink {
 
 struct WebAssociatedURLLoaderOptions {
-  enum CrossOriginRequestPolicy {
-    CrossOriginRequestPolicyDeny,
-    CrossOriginRequestPolicyUseAccessControl,
-    CrossOriginRequestPolicyAllow
+  enum PreflightPolicy {
+    kConsiderPreflight,
+    kPreventPreflight
   };
 
-  enum PreflightPolicy { ConsiderPreflight, ForcePreflight, PreventPreflight };
-
   WebAssociatedURLLoaderOptions()
-      : untrustedHTTP(false),
-        allowCredentials(false),
-        exposeAllResponseHeaders(false),
-        preflightPolicy(ConsiderPreflight),
-        crossOriginRequestPolicy(CrossOriginRequestPolicyDeny) {}
+      : untrusted_http(false),
+        expose_all_response_headers(false),
+        preflight_policy(kConsiderPreflight) {}
 
   // Whether to validate the method and headers as if this was an
   // XMLHttpRequest.
-  bool untrustedHTTP;
-  // Whether to send HTTP credentials and cookies with the request.
-  bool allowCredentials;
+  bool untrusted_http;
+
   // If policy is to use access control, whether to expose non-whitelisted
   // response headers to the client.
-  bool exposeAllResponseHeaders;
-  PreflightPolicy preflightPolicy;
-  CrossOriginRequestPolicy crossOriginRequestPolicy;
+  bool expose_all_response_headers;
+
+  PreflightPolicy preflight_policy;
 };
 
 }  // namespace blink

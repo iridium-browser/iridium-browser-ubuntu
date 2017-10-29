@@ -11,9 +11,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
-#include "content/common/url_loader.mojom.h"
+#include "content/public/common/url_loader.mojom.h"
 #include "ipc/ipc_message.h"
-#include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 
 namespace base {
@@ -37,8 +36,6 @@ class CONTENT_EXPORT URLLoaderClientImpl final : public mojom::URLLoaderClient {
                       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   ~URLLoaderClientImpl() override;
 
-  void Bind(mojom::URLLoaderClientPtr* client_ptr);
-
   // Sets |is_deferred_|. From now, the received messages are not dispatched
   // to clients until UnsetDefersLoading is called.
   void SetDefersLoading();
@@ -51,13 +48,14 @@ class CONTENT_EXPORT URLLoaderClientImpl final : public mojom::URLLoaderClient {
 
   // mojom::URLLoaderClient implementation
   void OnReceiveResponse(const ResourceResponseHead& response_head,
+                         const base::Optional<net::SSLInfo>& ssl_info,
                          mojom::DownloadedTempFilePtr downloaded_file) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          const ResourceResponseHead& response_head) override;
   void OnDataDownloaded(int64_t data_len, int64_t encoded_data_len) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
-                        const base::Closure& ack_callback) override;
+                        OnUploadProgressCallback ack_callback) override;
   void OnReceiveCachedMetadata(const std::vector<uint8_t>& data) override;
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override;
   void OnStartLoadingResponseBody(
@@ -65,9 +63,9 @@ class CONTENT_EXPORT URLLoaderClientImpl final : public mojom::URLLoaderClient {
   void OnComplete(const ResourceRequestCompletionStatus& status) override;
 
  private:
-  void Dispatch(const IPC::Message& message);
+  bool NeedsStoringMessage() const;
+  void StoreAndDispatch(const IPC::Message& message);
 
-  mojo::Binding<mojom::URLLoaderClient> binding_;
   scoped_refptr<URLResponseBodyConsumer> body_consumer_;
   mojom::DownloadedTempFilePtr downloaded_file_;
   std::vector<IPC::Message> deferred_messages_;

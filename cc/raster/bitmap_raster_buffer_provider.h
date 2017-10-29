@@ -34,7 +34,8 @@ class CC_EXPORT BitmapRasterBufferProvider : public RasterBufferProvider {
       uint64_t previous_content_id) override;
   void ReleaseBufferForRaster(std::unique_ptr<RasterBuffer> buffer) override;
   void OrderingBarrier() override;
-  ResourceFormat GetResourceFormat(bool must_support_alpha) const override;
+  void Flush() override;
+  viz::ResourceFormat GetResourceFormat(bool must_support_alpha) const override;
   bool IsResourceSwizzleRequired(bool must_support_alpha) const override;
   bool CanPartialRasterIntoProvidedResource() const override;
   bool IsResourceReadyToDraw(ResourceId id) const override;

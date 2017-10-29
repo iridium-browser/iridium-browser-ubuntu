@@ -10,7 +10,6 @@
 
 goog.provide('cvox.ScriptInstaller');
 
-goog.require('cvox.DomUtil');
 
 /**
  * URL pattern where we do not allow script installation.
@@ -30,8 +29,8 @@ cvox.ScriptInstaller.blacklistPattern = /chrome:\/\/|chrome-extension:\/\//;
  * @return {boolean} False if the script already existed and this function
  * didn't do anything.
  */
-cvox.ScriptInstaller.installScript = function(srcs, uid, opt_onload,
-    opt_chromevoxScriptBase) {
+cvox.ScriptInstaller.installScript = function(
+    srcs, uid, opt_onload, opt_chromevoxScriptBase) {
   if (cvox.ScriptInstaller.blacklistPattern.test(document.URL)) {
     return false;
   }
@@ -42,8 +41,8 @@ cvox.ScriptInstaller.installScript = function(srcs, uid, opt_onload,
     return false;
   }
 
-  cvox.ScriptInstaller.installScriptHelper_(srcs, uid, opt_onload,
-                                            opt_chromevoxScriptBase);
+  cvox.ScriptInstaller.installScriptHelper_(
+      srcs, uid, opt_onload, opt_chromevoxScriptBase);
   return true;
 };
 
@@ -59,12 +58,12 @@ cvox.ScriptInstaller.installScript = function(srcs, uid, opt_onload,
  *     attribute to add.
  * @private
  */
-cvox.ScriptInstaller.installScriptHelper_ = function(srcs, uid, opt_onload,
-    opt_chromevoxScriptBase) {
+cvox.ScriptInstaller.installScriptHelper_ = function(
+    srcs, uid, opt_onload, opt_chromevoxScriptBase) {
   function next() {
     if (srcs.length > 0) {
-      cvox.ScriptInstaller.installScriptHelper_(srcs, uid, opt_onload,
-                                                opt_chromevoxScriptBase);
+      cvox.ScriptInstaller.installScriptHelper_(
+          srcs, uid, opt_onload, opt_chromevoxScriptBase);
     } else if (opt_onload) {
       opt_onload();
     }
@@ -90,10 +89,10 @@ cvox.ScriptInstaller.installScriptHelper_ = function(srcs, uid, opt_onload,
       apiScript.setAttribute(uid, '1');
       apiScript.textContent = scriptText;
       if (opt_chromevoxScriptBase) {
-        apiScript.setAttribute('chromevoxScriptBase',
-                               opt_chromevoxScriptBase);
+        apiScript.setAttribute('chromevoxScriptBase', opt_chromevoxScriptBase);
       }
-      cvox.DomUtil.addNodeToHead(apiScript);
+      var scriptOwner = document.head || document.body;
+      scriptOwner.appendChild(apiScript);
       next();
     }
   };
@@ -102,8 +101,9 @@ cvox.ScriptInstaller.installScriptHelper_ = function(srcs, uid, opt_onload,
     xhr.open('GET', url, true);
     xhr.send(null);
   } catch (exception) {
-    console.log('Warning: ChromeVox external script loading for ' +
-        document.location + ' stopped after failing to install ' + scriptSrc);
+    console.log(
+        'Warning: ChromeVox external script loading for ' + document.location +
+        ' stopped after failing to install ' + scriptSrc);
     next();
   }
 };

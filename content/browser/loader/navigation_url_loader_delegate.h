@@ -10,6 +10,8 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
+#include "content/public/common/url_loader_factory.mojom.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 
 namespace net {
 struct RedirectInfo;
@@ -35,14 +37,21 @@ class CONTENT_EXPORT NavigationURLLoaderDelegate {
   // Called when the request receives its response. No further calls will be
   // made to the delegate. The response body is returned as a stream in
   // |body_stream|. |navigation_data| is passed to the NavigationHandle.
+  // If --enable-network-service, then |consumer_handle| will be used,
+  // otherwise |body_stream|. Only one of these will ever be non-null.
+  // |subresource_url_loader_factory_info| is used in the network service only
+  // for passing factories which are interested in handling subresource
+  // requests like AppCache.
   virtual void OnResponseStarted(
       const scoped_refptr<ResourceResponse>& response,
       std::unique_ptr<StreamHandle> body_stream,
+      mojo::ScopedDataPipeConsumerHandle consumer_handle,
       const SSLStatus& ssl_status,
       std::unique_ptr<NavigationData> navigation_data,
       const GlobalRequestID& request_id,
       bool is_download,
-      bool is_stream) = 0;
+      bool is_stream,
+      mojom::URLLoaderFactoryPtrInfo subresource_url_loader_factory_info) = 0;
 
   // Called if the request fails before receving a response. |net_error| is a
   // network error code for the failure. |has_stale_copy_in_cache| is true if

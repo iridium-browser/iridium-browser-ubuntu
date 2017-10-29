@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/ash/chrome_screenshot_grabber.h"
 
-#include "ash/common/accelerators/accelerator_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/bind.h"
@@ -28,7 +27,6 @@
 #include "ui/snapshot/screenshot_grabber.h"
 
 namespace ash {
-namespace test {
 
 class ChromeScreenshotGrabberTest : public AshTestBase,
                                     public ui::ScreenshotGrabberObserver {
@@ -136,5 +134,4 @@ TEST_F(ChromeScreenshotGrabberTest, DISABLED_TakeScreenshot) {
   chromeos::LoginState::Shutdown();
 }
 
-}  // namespace test
 }  // namespace ash

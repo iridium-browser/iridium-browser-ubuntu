@@ -14,6 +14,7 @@
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/values.h"
 #include "net/base/address_list.h"
@@ -84,18 +85,18 @@ void GetCiphersList(int cipher, base::ListValue* values) {
     values->AppendString("aes128gcm");
 }
 
-base::StringValue* GetTLSIntoleranceType(
+std::unique_ptr<base::Value> GetTLSIntoleranceType(
     BaseTestServer::SSLOptions::TLSIntoleranceType type) {
   switch (type) {
     case BaseTestServer::SSLOptions::TLS_INTOLERANCE_ALERT:
-      return new base::StringValue("alert");
+      return base::MakeUnique<base::Value>("alert");
     case BaseTestServer::SSLOptions::TLS_INTOLERANCE_CLOSE:
-      return new base::StringValue("close");
+      return base::MakeUnique<base::Value>("close");
     case BaseTestServer::SSLOptions::TLS_INTOLERANCE_RESET:
-      return new base::StringValue("reset");
+      return base::MakeUnique<base::Value>("reset");
     default:
       NOTREACHED();
-      return new base::StringValue("");
+      return base::MakeUnique<base::Value>("");
   }
 }
 
@@ -433,8 +434,15 @@ bool BaseTestServer::LoadTestRootCert() const {
   if (!GetLocalCertificatesDir(certificates_dir_, &root_certificate_path))
     return false;
 
-  return root_certs->AddFromFile(
-      root_certificate_path.AppendASCII("root_ca_cert.pem"));
+  if (ssl_options_.server_certificate == SSLOptions::CERT_AUTO ||
+      ssl_options_.server_certificate ==
+          SSLOptions::CERT_AUTO_AIA_INTERMEDIATE) {
+    return root_certs->AddFromFile(
+        root_certificate_path.AppendASCII("ocsp-test-root.pem"));
+  } else {
+    return root_certs->AddFromFile(
+        root_certificate_path.AppendASCII("root_ca_cert.pem"));
+  }
 }
 
 scoped_refptr<X509Certificate> BaseTestServer::GetCertificate() const {
@@ -535,16 +543,16 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
   arguments->SetString("data-dir", document_root_.value());
 
   if (VLOG_IS_ON(1) || log_to_console_)
-    arguments->Set("log-to-console", base::Value::CreateNullValue());
+    arguments->Set("log-to-console", base::MakeUnique<base::Value>());
 
   if (ws_basic_auth_) {
     DCHECK(type_ == TYPE_WS || type_ == TYPE_WSS);
-    arguments->Set("ws-basic-auth", base::Value::CreateNullValue());
+    arguments->Set("ws-basic-auth", base::MakeUnique<base::Value>());
   }
 
   if (no_anonymous_ftp_user_) {
     DCHECK_EQ(TYPE_FTP, type_);
-    arguments->Set("no-anonymous-ftp-user", base::Value::CreateNullValue());
+    arguments->Set("no-anonymous-ftp-user", base::MakeUnique<base::Value>());
   }
 
   if (UsingSSL(type_)) {
@@ -564,7 +572,7 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
 
     // Check the client certificate related arguments.
     if (ssl_options_.request_client_certificate)
-      arguments->Set("ssl-client-auth", base::Value::CreateNullValue());
+      arguments->Set("ssl-client-auth", base::MakeUnique<base::Value>());
     std::unique_ptr<base::ListValue> ssl_client_certs(new base::ListValue());
 
     std::vector<base::FilePath>::const_iterator it;
@@ -579,7 +587,7 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
     }
 
     if (ssl_client_certs->GetSize())
-      arguments->Set("ssl-client-ca", ssl_client_certs.release());
+      arguments->Set("ssl-client-ca", std::move(ssl_client_certs));
 
     std::unique_ptr<base::ListValue> client_cert_types(new base::ListValue());
     for (size_t i = 0; i < ssl_options_.client_cert_types.size(); i++) {
@@ -587,15 +595,15 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
           GetClientCertType(ssl_options_.client_cert_types[i]));
     }
     if (client_cert_types->GetSize())
-      arguments->Set("ssl-client-cert-type", client_cert_types.release());
+      arguments->Set("ssl-client-cert-type", std::move(client_cert_types));
   }
 
   if (type_ == TYPE_HTTPS) {
-    arguments->Set("https", base::Value::CreateNullValue());
+    arguments->Set("https", base::MakeUnique<base::Value>());
 
     if (ssl_options_.server_certificate ==
         SSLOptions::CERT_AUTO_AIA_INTERMEDIATE)
-      arguments->Set("aia-intermediate", base::Value::CreateNullValue());
+      arguments->Set("aia-intermediate", base::MakeUnique<base::Value>());
 
     std::string ocsp_arg = ssl_options_.GetOCSPArgument();
     if (!ocsp_arg.empty())
@@ -617,21 +625,21 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
     std::unique_ptr<base::ListValue> key_exchange_values(new base::ListValue());
     GetKeyExchangesList(ssl_options_.key_exchanges, key_exchange_values.get());
     if (key_exchange_values->GetSize())
-      arguments->Set("ssl-key-exchange", key_exchange_values.release());
+      arguments->Set("ssl-key-exchange", std::move(key_exchange_values));
     // Check bulk cipher argument.
     std::unique_ptr<base::ListValue> bulk_cipher_values(new base::ListValue());
     GetCiphersList(ssl_options_.bulk_ciphers, bulk_cipher_values.get());
     if (bulk_cipher_values->GetSize())
-      arguments->Set("ssl-bulk-cipher", bulk_cipher_values.release());
+      arguments->Set("ssl-bulk-cipher", std::move(bulk_cipher_values));
     if (ssl_options_.record_resume)
-      arguments->Set("https-record-resume", base::Value::CreateNullValue());
+      arguments->Set("https-record-resume", base::MakeUnique<base::Value>());
     if (ssl_options_.tls_intolerant != SSLOptions::TLS_INTOLERANT_NONE) {
       arguments->SetInteger("tls-intolerant", ssl_options_.tls_intolerant);
       arguments->Set("tls-intolerance-type", GetTLSIntoleranceType(
           ssl_options_.tls_intolerance_type));
     }
     if (ssl_options_.fallback_scsv_enabled)
-      arguments->Set("fallback-scsv", base::Value::CreateNullValue());
+      arguments->Set("fallback-scsv", base::MakeUnique<base::Value>());
     if (!ssl_options_.signed_cert_timestamps_tls_ext.empty()) {
       std::string b64_scts_tls_ext;
       base::Base64Encode(ssl_options_.signed_cert_timestamps_tls_ext,
@@ -639,10 +647,10 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
       arguments->SetString("signed-cert-timestamps-tls-ext", b64_scts_tls_ext);
     }
     if (ssl_options_.staple_ocsp_response)
-      arguments->Set("staple-ocsp-response", base::Value::CreateNullValue());
+      arguments->Set("staple-ocsp-response", base::MakeUnique<base::Value>());
     if (ssl_options_.ocsp_server_unavailable) {
       arguments->Set("ocsp-server-unavailable",
-                     base::Value::CreateNullValue());
+                     base::MakeUnique<base::Value>());
     }
     if (!ssl_options_.alpn_protocols.empty()) {
       std::unique_ptr<base::ListValue> alpn_protocols(new base::ListValue());
@@ -659,13 +667,13 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
       arguments->Set("npn-protocols", std::move(npn_protocols));
     }
     if (ssl_options_.alert_after_handshake)
-      arguments->Set("alert-after-handshake", base::Value::CreateNullValue());
+      arguments->Set("alert-after-handshake", base::MakeUnique<base::Value>());
 
     if (ssl_options_.disable_channel_id)
-      arguments->Set("disable-channel-id", base::Value::CreateNullValue());
+      arguments->Set("disable-channel-id", base::MakeUnique<base::Value>());
     if (ssl_options_.disable_extended_master_secret) {
       arguments->Set("disable-extended-master-secret",
-                     base::Value::CreateNullValue());
+                     base::MakeUnique<base::Value>());
     }
     if (!ssl_options_.supported_token_binding_params.empty()) {
       std::unique_ptr<base::ListValue> token_binding_params(

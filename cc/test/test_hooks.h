@@ -46,11 +46,17 @@ class TestHooks : public AnimationDelegate {
       LayerTreeHostImpl::FrameData* frame_data,
       DrawResult draw_result);
   virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) {}
+  virtual void WillNotifyReadyToActivateOnThread(LayerTreeHostImpl* host_impl) {
+  }
   virtual void NotifyReadyToActivateOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void NotifyReadyToDrawOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void NotifyAllTileTasksCompleted(LayerTreeHostImpl* host_impl) {}
   virtual void NotifyTileStateChangedOnThread(LayerTreeHostImpl* host_impl,
                                               const Tile* tile) {}
+  virtual void WillReceiveCompositorFrameAckOnThread(
+      LayerTreeHostImpl* host_impl) {}
+  virtual void DidReceiveCompositorFrameAckOnThread(
+      LayerTreeHostImpl* host_impl) {}
   virtual void DidSetVisibleOnImplTree(LayerTreeHostImpl* host_impl,
                                        bool visible) {}
   virtual void AnimateLayers(LayerTreeHostImpl* host_impl,
@@ -60,6 +66,8 @@ class TestHooks : public AnimationDelegate {
   virtual void WillAnimateLayers(LayerTreeHostImpl* host_impl,
                                  base::TimeTicks monotonic_time) {}
   virtual void DidInvalidateContentOnImplSide(LayerTreeHostImpl* host_impl) {}
+  virtual void DidReceiveImplSideInvalidationRequest(
+      LayerTreeHostImpl* host_impl) {}
   virtual void DidRequestImplSideInvalidation(LayerTreeHostImpl* host_impl) {}
 
   // Asynchronous compositor thread hooks.
@@ -67,6 +75,8 @@ class TestHooks : public AnimationDelegate {
   // draw, so you should record state you want to use here in
   // DrawLayersOnThread() instead. For that reason these methods do not receive
   // a LayerTreeHostImpl pointer.
+  virtual void DisplayReceivedLocalSurfaceIdOnThread(
+      const viz::LocalSurfaceId& local_surface_id) {}
   virtual void DisplayReceivedCompositorFrameOnThread(
       const CompositorFrame& frame) {}
   virtual void DisplayWillDrawAndSwapOnThread(
@@ -86,8 +96,8 @@ class TestHooks : public AnimationDelegate {
   virtual void WillBeginMainFrame() {}
   virtual void DidBeginMainFrame() {}
   virtual void UpdateLayerTreeHost() {}
-  virtual void DidInitializeCompositorFrameSink() {}
-  virtual void DidFailToInitializeCompositorFrameSink() {}
+  virtual void DidInitializeLayerTreeFrameSink() {}
+  virtual void DidFailToInitializeLayerTreeFrameSink() {}
   virtual void DidAddAnimation() {}
   virtual void WillCommit() {}
   virtual void DidCommit() {}
@@ -114,9 +124,9 @@ class TestHooks : public AnimationDelegate {
 
   // OutputSurface indirections to the LayerTreeTest, that can be further
   // overridden.
-  virtual void RequestNewCompositorFrameSink() = 0;
+  virtual void RequestNewLayerTreeFrameSink() = 0;
   virtual std::unique_ptr<OutputSurface> CreateDisplayOutputSurfaceOnThread(
-      scoped_refptr<ContextProvider> compositor_context_provider) = 0;
+      scoped_refptr<viz::ContextProvider> compositor_context_provider) = 0;
 };
 
 }  // namespace cc

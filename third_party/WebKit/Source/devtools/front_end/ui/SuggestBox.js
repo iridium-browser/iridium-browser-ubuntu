@@ -61,20 +61,41 @@ UI.SuggestBox = class {
     this._rowHeight = 17;
     this._userInteracted = false;
     this._userEnteredText = '';
+    this._defaultSelectionIsDimmed = false;
+
     /** @type {?string} */
     this._onlyCompletion = null;
 
+    /** @type {!UI.ListModel<!UI.SuggestBox.Suggestion>} */
+    this._items = new UI.ListModel();
     /** @type {!UI.ListControl<!UI.SuggestBox.Suggestion>} */
-    this._list = new UI.ListControl(this, UI.ListMode.EqualHeightItems);
+    this._list = new UI.ListControl(this._items, this, UI.ListMode.EqualHeightItems);
     this._element = this._list.element;
     this._element.classList.add('suggest-box');
     this._element.addEventListener('mousedown', event => event.preventDefault(), true);
+    this._element.addEventListener('click', this._onClick.bind(this), false);
 
     this._glassPane = new UI.GlassPane();
     this._glassPane.setAnchorBehavior(UI.GlassPane.AnchorBehavior.PreferBottom);
-    this._glassPane.setSetOutsideClickCallback(this.hide.bind(this));
+    this._glassPane.setOutsideClickCallback(this.hide.bind(this));
     var shadowRoot = UI.createShadowRootWithCoreStyles(this._glassPane.contentElement, 'ui/suggestBox.css');
     shadowRoot.appendChild(this._element);
+  }
+
+  /**
+   * @param {boolean} value
+   */
+  setDefaultSelectionIsDimmed(value) {
+    this._defaultSelectionIsDimmed = value;
+    this._element.classList.toggle('default-selection-is-dimmed', value);
+  }
+
+  /**
+   * @param {boolean} value
+   */
+  _setUserInteracted(value) {
+    this._userInteracted = value;
+    this._element.classList.toggle('user-has-interacted', value);
   }
 
   /**
@@ -137,7 +158,7 @@ UI.SuggestBox = class {
   hide() {
     if (!this.visible())
       return;
-    this._userInteracted = false;
+    this._setUserInteracted(false);
     this._glassPane.hide();
   }
 
@@ -206,13 +227,6 @@ UI.SuggestBox = class {
       var subtitleElement = element.createChild('span', 'suggestion-subtitle');
       subtitleElement.textContent = item.subtitle.trimEnd(maxTextLength - displayText.length);
     }
-
-    element.addEventListener('click', event => {
-      this._list.selectItem(item);
-      this._userInteracted = true;
-      event.consume(true);
-      this.acceptSuggestion();
-    });
     return element;
   }
 
@@ -244,11 +258,28 @@ UI.SuggestBox = class {
   selectedItemChanged(from, to, fromElement, toElement) {
     if (fromElement)
       fromElement.classList.remove('selected', 'force-white-icons');
-    if (toElement)
-      toElement.classList.add('selected', 'force-white-icons');
+    if (toElement) {
+      toElement.classList.add('selected');
+      if (fromElement || this._userInteracted || !this._defaultSelectionIsDimmed)
+        toElement.classList.add('force-white-icons');
+    }
     if (!to)
       return;
     this._applySuggestion(true);
+  }
+
+  /**
+   * @param {!Event} event
+   */
+  _onClick(event) {
+    var item = this._list.itemForNode(/** @type {?Node} */ (event.target));
+    if (!item)
+      return;
+
+    this._list.selectItem(item);
+    this._setUserInteracted(true);
+    this.acceptSuggestion();
+    event.consume(true);
   }
 
   /**
@@ -287,7 +318,7 @@ UI.SuggestBox = class {
       this._updateMaxSize(completions);
       this._glassPane.setContentAnchorBox(anchorBox);
       this._list.invalidateItemHeight();
-      this._list.replaceAllItems(completions);
+      this._items.replaceAll(completions);
 
       if (selectHighestPriority) {
         var highestPriorityItem = completions[0];
@@ -335,7 +366,7 @@ UI.SuggestBox = class {
         return false;
     }
     if (selected) {
-      this._userInteracted = true;
+      this._setUserInteracted(true);
       return true;
     }
     return false;

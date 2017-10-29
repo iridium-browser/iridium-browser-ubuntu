@@ -8,14 +8,18 @@
 #include <map>
 #include <string>
 
+#include "ash/shell_observer.h"
+#include "ash/system/status_area_focus_observer.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "chrome/browser/chromeos/lock_screen_apps/focus_cycler_delegate.h"
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -38,10 +42,14 @@ class OobeUI;
 // View used to render a WebUI supporting Widget. This widget is used for the
 // WebUI based start up and lock screens. It contains a WebView.
 class WebUILoginView : public views::View,
+                       public ash::ShellObserver,
+                       public keyboard::KeyboardControllerObserver,
                        public content::WebContentsDelegate,
                        public content::NotificationObserver,
                        public ChromeWebModalDialogManagerDelegate,
-                       public web_modal::WebContentsModalDialogHost {
+                       public web_modal::WebContentsModalDialogHost,
+                       public lock_screen_apps::FocusCyclerDelegate,
+                       public ash::StatusAreaFocusObserver {
  public:
   struct WebViewSettings {
     // If true, this will check for and consume a preloaded views::WebView
@@ -131,9 +139,25 @@ class WebUILoginView : public views::View,
 
   views::WebView* web_view();
 
+  // Sets |this| as lock_screen_apps::StateController's
+  // lock_screen_apps::FocusCyclerDelegate.
+  void SetLockScreenAppFocusCyclerDelegate();
+
+  // Resets the lock_screen_apps::StateController's FocusCyclerDelegate,
+  // provided that |this|  was set as the delegate.
+  void ClearLockScreenAppFocusCyclerDelegate();
+
  private:
   // Map type for the accelerator-to-identifier map.
   typedef std::map<ui::Accelerator, std::string> AccelMap;
+
+  // ash::ShellObserver:
+  void OnVirtualKeyboardStateChanged(bool activated,
+                                     aura::Window* root_window) override;
+
+  // keyboard::KeyboardControllerObserver:
+  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
+  void OnKeyboardClosed() override;
 
   // Overridden from content::WebContentsDelegate.
   bool HandleContextMenu(const content::ContextMenuParams& params) override;
@@ -151,6 +175,19 @@ class WebUILoginView : public views::View,
                                   content::MediaStreamType type) override;
   bool PreHandleGestureEvent(content::WebContents* source,
                              const blink::WebGestureEvent& event) override;
+
+  // lock_screen_apps::FocusCyclerDelegate:
+  void RegisterLockScreenAppFocusHandler(
+      const LockScreenAppFocusCallback& focus_handler) override;
+  void UnregisterLockScreenAppFocusHandler() override;
+  void HandleLockScreenAppFocusOut(bool reverse) override;
+
+  // Overridden from ash::StatusAreaFocusObserver.
+  void OnFocusOut(bool reverse) override;
+
+  // Attempts to move focus to system tray. Returns whether the attempt was
+  // successful (it might fail if the system tray is not visible).
+  bool MoveFocusToSystemTray(bool reverse);
 
   // Performs series of actions when login prompt is considered
   // to be ready and visible.
@@ -187,6 +224,15 @@ class WebUILoginView : public views::View,
 
   // True to forward keyboard event.
   bool forward_keyboard_event_ = true;
+
+  // If set, the callback that should be called when focus should be moved to
+  // a lock screen app window.
+  // It gets registered using |RegisterLockScreenAppFocusHandler|.
+  LockScreenAppFocusCallback lock_screen_app_focus_handler_;
+
+  // Whether this was set as lock_screen_apps::StateController's
+  // FocusCyclerDelegate.
+  bool delegates_lock_screen_app_focus_cycle_ = false;
 
   base::ObserverList<web_modal::ModalDialogHostObserver> observer_list_;
 

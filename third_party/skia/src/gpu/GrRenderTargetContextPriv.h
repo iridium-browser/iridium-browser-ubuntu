@@ -22,29 +22,23 @@ struct GrUserStencilSettings;
 class GrRenderTargetContextPriv {
 public:
     gr_instanced::InstancedRendering* accessInstancedRendering() const {
-        return fRenderTargetContext->getOpList()->instancedRendering();
+        return fRenderTargetContext->getRTOpList()->instancedRendering();
     }
 
     // called to note the last clip drawn to the stencil buffer.
     // TODO: remove after clipping overhaul.
-    void setLastClip(int32_t clipStackGenID,
-                     const SkIRect& clipSpaceRect,
-                     const SkIPoint clipOrigin) {
-        GrRenderTargetOpList* opList = fRenderTargetContext->getOpList();
+    void setLastClip(uint32_t clipStackGenID, const SkIRect& devClipBounds) {
+        GrRenderTargetOpList* opList = fRenderTargetContext->getRTOpList();
         opList->fLastClipStackGenID = clipStackGenID;
-        opList->fLastClipStackRect = clipSpaceRect;
-        opList->fLastClipOrigin = clipOrigin;
+        opList->fLastDevClipBounds = devClipBounds;
     }
 
     // called to determine if we have to render the clip into SB.
     // TODO: remove after clipping overhaul.
-    bool mustRenderClip(int32_t clipStackGenID,
-                        const SkIRect& clipSpaceRect,
-                        const SkIPoint& clipOrigin) const {
-        GrRenderTargetOpList* opList = fRenderTargetContext->getOpList();
+    bool mustRenderClip(uint32_t clipStackGenID, const SkIRect& devClipBounds) const {
+        GrRenderTargetOpList* opList = fRenderTargetContext->getRTOpList();
         return opList->fLastClipStackGenID != clipStackGenID ||
-               opList->fLastClipOrigin != clipOrigin ||
-               !opList->fLastClipStackRect.contains(clipSpaceRect);
+               !opList->fLastDevClipBounds.contains(devClipBounds);
     }
 
     void clear(const GrFixedClip&, const GrColor, bool canIgnoreClip);
@@ -108,11 +102,7 @@ public:
         return fRenderTargetContext->fRenderTargetProxy->uniqueID();
     }
 
-    void testingOnly_addDrawOp(GrPaint&&,
-                               GrAAType,
-                               std::unique_ptr<GrDrawOp>,
-                               const GrUserStencilSettings* = nullptr,
-                               bool snapToCenters = false);
+    uint32_t testingOnly_addDrawOp(std::unique_ptr<GrDrawOp>);
 
     bool refsWrappedObjects() const {
         return fRenderTargetContext->fRenderTargetProxy->refsWrappedObjects();

@@ -24,6 +24,7 @@
 #include "media/base/media_tracks.h"
 #include "media/base/ranges.h"
 #include "media/base/stream_parser.h"
+#include "media/filters/source_buffer_parse_warnings.h"
 #include "media/filters/source_buffer_state.h"
 #include "media/filters/source_buffer_stream.h"
 
@@ -65,7 +66,7 @@ class MEDIA_EXPORT ChunkDemuxerStream : public DemuxerStream {
   // the "Coded Frame Eviction Algorithm" in the Media Source Extensions Spec.
   // Returns false iff buffer is still full after running eviction.
   // https://w3c.github.io/media-source/#sourcebuffer-coded-frame-eviction
-  bool EvictCodedFrames(DecodeTimestamp media_time, size_t newDataSize);
+  bool EvictCodedFrames(base::TimeDelta media_time, size_t newDataSize);
 
   void OnMemoryPressure(
       DecodeTimestamp media_time,
@@ -96,12 +97,9 @@ class MEDIA_EXPORT ChunkDemuxerStream : public DemuxerStream {
   // Called when midstream config updates occur.
   // Returns true if the new config is accepted.
   // Returns false if the new config should trigger an error.
-  bool UpdateAudioConfig(const AudioDecoderConfig& config,
-                         const scoped_refptr<MediaLog>& media_log);
-  bool UpdateVideoConfig(const VideoDecoderConfig& config,
-                         const scoped_refptr<MediaLog>& media_log);
-  void UpdateTextConfig(const TextTrackConfig& config,
-                        const scoped_refptr<MediaLog>& media_log);
+  bool UpdateAudioConfig(const AudioDecoderConfig& config, MediaLog* media_log);
+  bool UpdateVideoConfig(const VideoDecoderConfig& config, MediaLog* media_log);
+  void UpdateTextConfig(const TextTrackConfig& config, MediaLog* media_log);
 
   void MarkEndOfStream();
   void UnmarkEndOfStream();
@@ -115,8 +113,8 @@ class MEDIA_EXPORT ChunkDemuxerStream : public DemuxerStream {
   bool SupportsConfigChanges() override;
   VideoRotation video_rotation() override;
 
-  bool enabled() const;
-  void set_enabled(bool enabled, base::TimeDelta timestamp);
+  bool IsEnabled() const;
+  void SetEnabled(bool enabled, base::TimeDelta timestamp);
 
   void SetStreamStatusChangeCB(const StreamStatusChangeCB& cb);
 
@@ -178,13 +176,15 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   };
 
   // |open_cb| Run when Initialize() is called to signal that the demuxer
-  //   is ready to receive media data via AppenData().
+  //   is ready to receive media data via AppendData().
+  // |progress_cb| Run each time data is appended.
   // |encrypted_media_init_data_cb| Run when the demuxer determines that an
   //   encryption key is needed to decrypt the content.
   // |media_log| Used to report content and engine debug messages.
   ChunkDemuxer(const base::Closure& open_cb,
+               const base::Closure& progress_cb,
                const EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
-               const scoped_refptr<MediaLog>& media_log);
+               MediaLog* media_log);
   ~ChunkDemuxer() override;
 
   // Demuxer implementation.
@@ -226,6 +226,11 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
   // for a given |id| has changed.
   void SetTracksWatcher(const std::string& id,
                         const MediaTracksUpdatedCB& tracks_updated_cb);
+
+  // Notifies a caller via |parse_warning_cb| of a parse warning.
+  void SetParseWarningCallback(
+      const std::string& id,
+      const SourceBufferParseWarningCB& parse_warning_cb);
 
   // Removed an ID & associated resources that were previously added with
   // AddId().
@@ -406,11 +411,12 @@ class MEDIA_EXPORT ChunkDemuxer : public Demuxer {
 
   DemuxerHost* host_;
   base::Closure open_cb_;
+  base::Closure progress_cb_;
   EncryptedMediaInitDataCB encrypted_media_init_data_cb_;
   bool enable_text_;
 
   // MediaLog for reporting messages and properties to debug content and engine.
-  scoped_refptr<MediaLog> media_log_;
+  MediaLog* media_log_;
 
   PipelineStatusCB init_cb_;
   // Callback to execute upon seek completion.

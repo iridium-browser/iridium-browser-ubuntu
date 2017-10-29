@@ -8,12 +8,10 @@
 namespace blink {
 
 enum WebPlatformEventType {
-  WebPlatformEventTypeDeviceMotion,
-  WebPlatformEventTypeDeviceOrientation,
-  WebPlatformEventTypeDeviceOrientationAbsolute,
-  WebPlatformEventTypeDeviceLight,
-  WebPlatformEventTypeGamepad,
-  WebPlatformEventTypeScreenOrientation
+  kWebPlatformEventTypeDeviceMotion,
+  kWebPlatformEventTypeDeviceOrientation,
+  kWebPlatformEventTypeDeviceOrientationAbsolute,
+  kWebPlatformEventTypeGamepad,
 };
 
 }  // namespace blink

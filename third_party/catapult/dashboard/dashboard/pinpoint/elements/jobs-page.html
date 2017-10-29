@@ -56,6 +56,7 @@ found in the LICENSE file.
       </template>
       <template is="dom-if" if="{{!error}}">
         <div id="content">
+          <h1>Pinpoint Jobs</h1>
           <div id="action-bar">
           </div>
           <h2>Running Jobs</h2>
@@ -107,26 +108,33 @@ found in the LICENSE file.
 
       computeIsSingular: count => count === 1,
 
-      computeJobCountString: function() {
-        if (this.totalJobsCount === 1)
+      computeJobCountString() {
+        if (this.totalJobsCount === 1) {
           return '1 job';
-        if (this.totalJobsCount < this.totalJobsCountMax)
+        }
+        if (this.totalJobsCount < this.totalJobsCountMax) {
           return String(this.totalJobsCount) + ' jobs.';
+        }
         return String(this.totalJobsCountMax) + ' or more jobs.';
       },
 
-      getJobCount: function() {
+      getJobCount() {
         return this.jobs.length;
       },
 
-      ready: function() {
-        var params = {};
-        simple_xhr.send('/_ah/api/jobs', params,
+      deselected() {
+        this.jobs = [];
+      },
+
+      selected() {
+        this.loading = true;
+        const params = {};
+        simple_xhr.send('/api/jobs', params,
             function(response) {
-              this.jobs = response['jobs_list'];
-              this.totalJobsCount = response['jobs_count'];
-              this.totalJobsCountMax = response['jobs_count_max'];
-              this.xsrfToken = response['xsrf_token'];
+              this.jobs = response.jobs_list;
+              this.totalJobsCount = response.jobs_count;
+              this.totalJobsCountMax = response.jobs_count_max;
+              this.xsrfToken = response.xsrf_token;
               this.loading = false;
             }.bind(this),
             function(msg) {

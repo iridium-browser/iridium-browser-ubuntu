@@ -16,6 +16,7 @@
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/events/event_processor.h"
 #include "ui/events/event_utils.h"
+#include "ui/events/test/event_generator.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -28,31 +29,14 @@
 #include "ui/message_center/views/message_center_controller.h"
 #include "ui/message_center/views/message_view_factory.h"
 #include "ui/message_center/views/notification_button.h"
+#include "ui/message_center/views/notification_control_buttons_view.h"
+#include "ui/message_center/views/padded_button.h"
 #include "ui/message_center/views/proportional_image_view.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/widget/widget_delegate.h"
-
-namespace {
-
-std::unique_ptr<ui::GestureEvent> GenerateGestureEvent(ui::EventType type) {
-  ui::GestureEventDetails detail(type);
-  std::unique_ptr<ui::GestureEvent> event(
-      new ui::GestureEvent(0, 0, 0, base::TimeTicks(), detail));
-  return event;
-}
-
-std::unique_ptr<ui::GestureEvent> GenerateGestureVerticalScrollUpdateEvent(
-    int dx) {
-  ui::GestureEventDetails detail(ui::ET_GESTURE_SCROLL_UPDATE, dx, 0);
-  std::unique_ptr<ui::GestureEvent> event(
-      new ui::GestureEvent(0, 0, 0, base::TimeTicks(), detail));
-  return event;
-}
-
-}  // anonymouse namespace
 
 namespace message_center {
 
@@ -132,10 +116,7 @@ class NotificationViewTest : public views::ViewsTestBase,
     canvas.DrawColor(SK_ColorBLACK);
     view->OnPaint(&canvas);
 
-    SkBitmap bitmap;
-    bitmap.allocN32Pixels(canvas_size.width(), canvas_size.height());
-    canvas.sk_canvas()->readPixels(&bitmap, 0, 0);
-
+    SkBitmap bitmap = canvas.GetBitmap();
     // Incrementally inset each edge at its midpoint to find the bounds of the
     // rect containing the image's color. This assumes that the image is
     // centered in the canvas.
@@ -181,16 +162,23 @@ class NotificationViewTest : public views::ViewsTestBase,
     }
   }
 
-  views::ImageButton* GetCloseButton() {
-    return notification_view()->close_button();
+  PaddedButton* GetCloseButton() {
+    return notification_view()->control_buttons_view_->close_button();
+  }
+
+  PaddedButton* GetSettingsButton() {
+    return notification_view()->control_buttons_view_->settings_button();
   }
 
   void UpdateNotificationViews() {
     notification_view()->UpdateWithNotification(*notification());
   }
 
-  float GetNotificationScrollAmount() const {
-    return notification_view()->GetTransform().To2dTranslation().x();
+  float GetNotificationSlideAmount() const {
+    return notification_view_->GetSlideOutLayer()
+        ->transform()
+        .To2dTranslation()
+        .x();
   }
 
   bool IsRemoved(const std::string& notification_id) const {
@@ -198,6 +186,26 @@ class NotificationViewTest : public views::ViewsTestBase,
   }
 
   void RemoveNotificationView() { notification_view_.reset(); }
+
+  void DispatchGesture(const ui::GestureEventDetails& details) {
+    ui::test::EventGenerator generator(
+        notification_view()->GetWidget()->GetNativeWindow());
+    ui::GestureEvent event(0, 0, 0, ui::EventTimeForNow(), details);
+    generator.Dispatch(&event);
+  }
+
+  void BeginScroll() {
+    DispatchGesture(ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_BEGIN));
+  }
+
+  void EndScroll() {
+    DispatchGesture(ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_END));
+  }
+
+  void ScrollBy(int dx) {
+    DispatchGesture(
+        ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_UPDATE, dx, 0));
+  }
 
  private:
   std::set<std::string> removed_ids_;
@@ -240,6 +248,7 @@ void NotificationViewTest::SetUp() {
   widget->Init(init_params);
   widget->SetContentsView(notification_view_.get());
   widget->SetSize(notification_view_->GetPreferredSize());
+  widget->Show();
 }
 
 void NotificationViewTest::TearDown() {
@@ -305,11 +314,16 @@ TEST_F(NotificationViewTest, CreateOrUpdateTest) {
   notification()->set_message(base::ASCIIToUTF16(""));
   notification()->set_icon(gfx::Image());
 
-  notification_view()->CreateOrUpdateViews(*notification());
+  notification_view()->UpdateWithNotification(*notification());
   EXPECT_TRUE(NULL == notification_view()->title_view_);
   EXPECT_TRUE(NULL == notification_view()->message_view_);
   EXPECT_TRUE(NULL == notification_view()->image_view_);
-  EXPECT_TRUE(NULL == notification_view()->settings_button_view_);
+  // Notification must have a control buttons view.
+  EXPECT_TRUE(NULL != notification_view()->control_buttons_view_);
+  // Notification is not pinned and have a close button by default.
+  EXPECT_TRUE(NULL != GetCloseButton());
+  // Notification doesn't have a settings button by default.
+  EXPECT_TRUE(NULL == GetSettingsButton());
   // We still expect an icon view for all layouts.
   EXPECT_TRUE(NULL != notification_view()->icon_view_);
 }
@@ -325,11 +339,12 @@ TEST_F(NotificationViewTest, CreateOrUpdateTestSettingsButton) {
                     NotifierId(NotifierId::APPLICATION, "extension_id"),
                     *data(), delegate.get());
 
-  notification_view()->CreateOrUpdateViews(notf);
+  notification_view()->UpdateWithNotification(notf);
   EXPECT_TRUE(NULL != notification_view()->title_view_);
   EXPECT_TRUE(NULL != notification_view()->message_view_);
   EXPECT_TRUE(NULL != notification_view()->context_message_view_);
-  EXPECT_TRUE(NULL != notification_view()->settings_button_view_);
+  EXPECT_TRUE(NULL != GetCloseButton());
+  EXPECT_TRUE(NULL != GetSettingsButton());
   EXPECT_TRUE(NULL != notification_view()->icon_view_);
 
   EXPECT_TRUE(NULL == notification_view()->image_view_);
@@ -338,21 +353,21 @@ TEST_F(NotificationViewTest, CreateOrUpdateTestSettingsButton) {
 TEST_F(NotificationViewTest, TestLineLimits) {
   notification()->set_image(CreateTestImage(0, 0));
   notification()->set_context_message(base::ASCIIToUTF16(""));
-  notification_view()->CreateOrUpdateViews(*notification());
+  notification_view()->UpdateWithNotification(*notification());
 
   EXPECT_EQ(5, notification_view()->GetMessageLineLimit(0, 360));
   EXPECT_EQ(5, notification_view()->GetMessageLineLimit(1, 360));
   EXPECT_EQ(3, notification_view()->GetMessageLineLimit(2, 360));
 
   notification()->set_image(CreateTestImage(2, 2));
-  notification_view()->CreateOrUpdateViews(*notification());
+  notification_view()->UpdateWithNotification(*notification());
 
   EXPECT_EQ(2, notification_view()->GetMessageLineLimit(0, 360));
   EXPECT_EQ(2, notification_view()->GetMessageLineLimit(1, 360));
   EXPECT_EQ(1, notification_view()->GetMessageLineLimit(2, 360));
 
   notification()->set_context_message(base::ASCIIToUTF16("foo"));
-  notification_view()->CreateOrUpdateViews(*notification());
+  notification_view()->UpdateWithNotification(*notification());
 
   EXPECT_TRUE(notification_view()->context_message_view_ != NULL);
 
@@ -445,7 +460,7 @@ TEST_F(NotificationViewTest, TestImageSizing) {
 
 TEST_F(NotificationViewTest, UpdateButtonsStateTest) {
   notification()->set_buttons(CreateButtons(2));
-  notification_view()->CreateOrUpdateViews(*notification());
+  notification_view()->UpdateWithNotification(*notification());
   widget()->Show();
 
   EXPECT_EQ(views::CustomButton::STATE_NORMAL,
@@ -463,7 +478,7 @@ TEST_F(NotificationViewTest, UpdateButtonsStateTest) {
   EXPECT_EQ(views::CustomButton::STATE_HOVERED,
             notification_view()->action_buttons_[0]->state());
 
-  notification_view()->CreateOrUpdateViews(*notification());
+  notification_view()->UpdateWithNotification(*notification());
 
   EXPECT_EQ(views::CustomButton::STATE_HOVERED,
             notification_view()->action_buttons_[0]->state());
@@ -481,7 +496,7 @@ TEST_F(NotificationViewTest, UpdateButtonsStateTest) {
 
 TEST_F(NotificationViewTest, UpdateButtonCountTest) {
   notification()->set_buttons(CreateButtons(2));
-  notification_view()->CreateOrUpdateViews(*notification());
+  notification_view()->UpdateWithNotification(*notification());
   widget()->Show();
 
   EXPECT_EQ(views::CustomButton::STATE_NORMAL,
@@ -497,8 +512,7 @@ TEST_F(NotificationViewTest, UpdateButtonCountTest) {
   ui::MouseEvent move(ui::ET_MOUSE_MOVED, cursor_location, cursor_location,
                       ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
   ui::EventDispatchDetails details =
-      views::test::WidgetTest::GetEventProcessor(widget())->
-          OnEventFromSource(&move);
+      views::test::WidgetTest::GetEventSink(widget())->OnEventFromSource(&move);
   EXPECT_FALSE(details.dispatcher_destroyed);
 
   EXPECT_EQ(views::CustomButton::STATE_HOVERED,
@@ -507,7 +521,7 @@ TEST_F(NotificationViewTest, UpdateButtonCountTest) {
             notification_view()->action_buttons_[1]->state());
 
   notification()->set_buttons(CreateButtons(1));
-  notification_view()->CreateOrUpdateViews(*notification());
+  notification_view()->UpdateWithNotification(*notification());
 
   EXPECT_EQ(views::CustomButton::STATE_HOVERED,
             notification_view()->action_buttons_[0]->state());
@@ -534,29 +548,24 @@ TEST_F(NotificationViewTest, SettingsButtonTest) {
                     GURL("https://hello.com"),
                     NotifierId(NotifierId::APPLICATION, "extension_id"),
                     *data(), delegate.get());
-  notification_view()->CreateOrUpdateViews(notf);
+  notification_view()->UpdateWithNotification(notf);
   widget()->Show();
-  notification_view()->Layout();
 
-  EXPECT_TRUE(NULL != notification_view()->settings_button_view_);
-  EXPECT_EQ(views::CustomButton::STATE_NORMAL,
-            notification_view()->settings_button_view_->state());
+  EXPECT_TRUE(NULL != GetSettingsButton());
+  EXPECT_EQ(views::CustomButton::STATE_NORMAL, GetSettingsButton()->state());
 
   // Now construct a mouse move event 1 pixel inside the boundary of the action
   // button.
   gfx::Point cursor_location(1, 1);
-  views::View::ConvertPointToScreen(notification_view()->settings_button_view_,
-                                    &cursor_location);
+  views::View::ConvertPointToScreen(GetSettingsButton(), &cursor_location);
   ui::MouseEvent move(ui::ET_MOUSE_MOVED, cursor_location, cursor_location,
                       ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
   widget()->OnMouseEvent(&move);
   ui::EventDispatchDetails details =
-      views::test::WidgetTest::GetEventProcessor(widget())
-          ->OnEventFromSource(&move);
+      views::test::WidgetTest::GetEventSink(widget())->OnEventFromSource(&move);
   EXPECT_FALSE(details.dispatcher_destroyed);
 
-  EXPECT_EQ(views::CustomButton::STATE_HOVERED,
-            notification_view()->settings_button_view_->state());
+  EXPECT_EQ(views::CustomButton::STATE_HOVERED, GetSettingsButton()->state());
 
   // Now construct a mouse move event 1 pixel outside the boundary of the
   // widget.
@@ -565,8 +574,7 @@ TEST_F(NotificationViewTest, SettingsButtonTest) {
                         ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
   widget()->OnMouseEvent(&move);
 
-  EXPECT_EQ(views::CustomButton::STATE_NORMAL,
-            notification_view()->settings_button_view_->state());
+  EXPECT_EQ(views::CustomButton::STATE_NORMAL, GetSettingsButton()->state());
 }
 
 TEST_F(NotificationViewTest, ViewOrderingTest) {
@@ -664,24 +672,43 @@ TEST_F(NotificationViewTest, SlideOut) {
   UpdateNotificationViews();
   std::string notification_id = notification()->id();
 
-  auto event_begin = GenerateGestureEvent(ui::ET_GESTURE_SCROLL_BEGIN);
-  auto event_scroll10 = GenerateGestureVerticalScrollUpdateEvent(-10);
-  auto event_scroll500 = GenerateGestureVerticalScrollUpdateEvent(-500);
-  auto event_end = GenerateGestureEvent(ui::ET_GESTURE_SCROLL_END);
+  BeginScroll();
+  ScrollBy(-10);
+  EXPECT_FALSE(IsRemoved(notification_id));
+  EXPECT_EQ(-10.f, GetNotificationSlideAmount());
+  EndScroll();
+  EXPECT_FALSE(IsRemoved(notification_id));
+  EXPECT_EQ(0.f, GetNotificationSlideAmount());
 
-  notification_view()->OnGestureEvent(event_begin.get());
-  notification_view()->OnGestureEvent(event_scroll10.get());
+  BeginScroll();
+  ScrollBy(-200);
   EXPECT_FALSE(IsRemoved(notification_id));
-  EXPECT_EQ(-10.f, GetNotificationScrollAmount());
-  notification_view()->OnGestureEvent(event_end.get());
-  EXPECT_FALSE(IsRemoved(notification_id));
-  EXPECT_EQ(0.f, GetNotificationScrollAmount());
+  EXPECT_EQ(-200.f, GetNotificationSlideAmount());
+  EndScroll();
+  EXPECT_TRUE(IsRemoved(notification_id));
+}
 
-  notification_view()->OnGestureEvent(event_begin.get());
-  notification_view()->OnGestureEvent(event_scroll500.get());
+TEST_F(NotificationViewTest, SlideOutNested) {
+  ui::ScopedAnimationDurationScaleMode zero_duration_scope(
+      ui::ScopedAnimationDurationScaleMode::ZERO_DURATION);
+
+  UpdateNotificationViews();
+  notification_view()->SetIsNested();
+  std::string notification_id = notification()->id();
+
+  BeginScroll();
+  ScrollBy(-10);
   EXPECT_FALSE(IsRemoved(notification_id));
-  EXPECT_EQ(-500.f, GetNotificationScrollAmount());
-  notification_view()->OnGestureEvent(event_end.get());
+  EXPECT_EQ(-10.f, GetNotificationSlideAmount());
+  EndScroll();
+  EXPECT_FALSE(IsRemoved(notification_id));
+  EXPECT_EQ(0.f, GetNotificationSlideAmount());
+
+  BeginScroll();
+  ScrollBy(-200);
+  EXPECT_FALSE(IsRemoved(notification_id));
+  EXPECT_EQ(-200.f, GetNotificationSlideAmount());
+  EndScroll();
   EXPECT_TRUE(IsRemoved(notification_id));
 }
 
@@ -696,15 +723,11 @@ TEST_F(NotificationViewTest, SlideOutPinned) {
   UpdateNotificationViews();
   std::string notification_id = notification()->id();
 
-  auto event_begin = GenerateGestureEvent(ui::ET_GESTURE_SCROLL_BEGIN);
-  auto event_scroll500 = GenerateGestureVerticalScrollUpdateEvent(-500);
-  auto event_end = GenerateGestureEvent(ui::ET_GESTURE_SCROLL_END);
-
-  notification_view()->OnGestureEvent(event_begin.get());
-  notification_view()->OnGestureEvent(event_scroll500.get());
+  BeginScroll();
+  ScrollBy(-200);
   EXPECT_FALSE(IsRemoved(notification_id));
-  EXPECT_LT(-500.f, GetNotificationScrollAmount());
-  notification_view()->OnGestureEvent(event_end.get());
+  EXPECT_LT(-200.f, GetNotificationSlideAmount());
+  EndScroll();
   EXPECT_FALSE(IsRemoved(notification_id));
 }
 

@@ -13,6 +13,11 @@ namespace switches {
 // Enables software based mirroring.
 const char kEnableSoftwareMirroring[] = "ash-enable-software-mirroring";
 
+// Force all monitors to be treated as though they have the specified color
+// profile. Accepted values are "srgb" and "generic-rgb" (currently used by Mac
+// layout tests) and "color-spin-gamma24" (used by layout tests).
+const char kForceColorProfile[] = "force-color-profile";
+
 // Overrides the device scale factor for the browser UI and the contents.
 const char kForceDeviceScaleFactor[] = "force-device-scale-factor";
 
@@ -37,6 +42,9 @@ const char kScreenConfig[] = "screen-config";
 // Uses the 1st display in --ash-host-window-bounds as internal display.
 // This is for debugging on linux desktop.
 const char kUseFirstDisplayAsInternal[] = "use-first-display-as-internal";
+
+// Use an fp16 scRGB swap chain compatible with HDR output.
+const char kEnableHDR[] = "enable-hdr";
 
 #if defined(OS_CHROMEOS)
 const char kDisableDisplayColorCalibration[] =

@@ -4,16 +4,16 @@
 
 #include "chrome/browser/lifetime/browser_close_manager.h"
 
-#include <algorithm>
 #include <iterator>
 #include <vector>
 
+#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -31,9 +31,9 @@ namespace {
 // Navigates a browser window for |profile|, creating one if necessary, to the
 // downloads page if there are downloads in progress for |profile|.
 void ShowInProgressDownloads(Profile* profile) {
-  DownloadService* download_service =
-      DownloadServiceFactory::GetForBrowserContext(profile);
-  if (download_service->NonMaliciousDownloadCount() > 0) {
+  DownloadCoreService* download_core_service =
+      DownloadCoreServiceFactory::GetForBrowserContext(profile);
+  if (download_core_service->NonMaliciousDownloadCount() > 0) {
     chrome::ScopedTabbedBrowserDisplayer displayer(profile);
     chrome::ShowDownloads(displayer.browser());
   }
@@ -61,9 +61,8 @@ void BrowserCloseManager::StartClosingBrowsers() {
 
 void BrowserCloseManager::CancelBrowserClose() {
   browser_shutdown::SetTryingToQuit(false);
-  for (auto* browser : *BrowserList::GetInstance()) {
-    browser->ResetBeforeUnloadHandlers();
-  }
+  for (auto* browser : *BrowserList::GetInstance())
+    browser->ResetTryToCloseWindow();
 }
 
 void BrowserCloseManager::TryToCloseBrowsers() {
@@ -73,7 +72,8 @@ void BrowserCloseManager::TryToCloseBrowsers() {
   // OnBrowserReportCloseable with the result. If the user confirms the close,
   // this will trigger TryToCloseBrowsers to try again.
   for (auto* browser : *BrowserList::GetInstance()) {
-    if (browser->CallBeforeUnloadHandlers(
+    if (browser->TryToCloseWindow(
+            false,
             base::Bind(&BrowserCloseManager::OnBrowserReportCloseable, this))) {
       current_browser_ = browser;
       return;
@@ -101,7 +101,8 @@ void BrowserCloseManager::CheckForDownloadsInProgress() {
   return;
 #endif
 
-  int download_count = DownloadService::NonMaliciousDownloadCountAllProfiles();
+  int download_count =
+      DownloadCoreService::NonMaliciousDownloadCountAllProfiles();
   if (download_count == 0) {
     CloseBrowsers();
     return;
@@ -179,9 +180,7 @@ void BrowserCloseManager::CloseBrowsers() {
         delete browser->tab_strip_model()->GetWebContentsAt(0);
       browser->window()->DestroyBrowser();
       // Destroying the browser should have removed it from the browser list.
-      DCHECK(BrowserList::GetInstance()->end() ==
-             std::find(BrowserList::GetInstance()->begin(),
-                       BrowserList::GetInstance()->end(), browser));
+      DCHECK(!base::ContainsValue(*BrowserList::GetInstance(), browser));
     }
   }
 

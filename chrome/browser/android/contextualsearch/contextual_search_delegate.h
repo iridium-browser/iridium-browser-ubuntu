@@ -17,7 +17,6 @@
 #include "base/values.h"
 #include "chrome/browser/android/contextualsearch/contextual_search_context.h"
 #include "chrome/browser/android/contextualsearch/resolved_search_term.h"
-#include "content/public/browser/android/content_view_core.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
 namespace content {
@@ -38,20 +37,13 @@ class ContextualSearchDelegate
     : public net::URLFetcherDelegate,
       public base::SupportsWeakPtr<ContextualSearchDelegate> {
  public:
-  // Callback that provides the surrounding text past the selection for the UX.
-  typedef base::Callback<void(const std::string&)> SurroundingTextCallback;
   // Provides the Resolved Search Term, called when the Resolve Request returns.
   typedef base::Callback<void(const ResolvedSearchTerm&)>
       SearchTermResolutionCallback;
-  // Provides the surrounding text and selection start/end when Blink gathers
-  // surrounding text for the Context.
-  typedef base::Callback<
-      void(const base::string16&, int, int)>
-      HandleSurroundingsCallback;
-  // Provides limited surrounding text for icing.
+  // Provides text surrounding the selection to Java.
   typedef base::Callback<
       void(const std::string&, const base::string16&, size_t, size_t)>
-      IcingCallback;
+      SurroundingTextCallback;
 
   // ID used in creating URLFetcher for Contextual Search results.
   static const int kContextualSearchURLFetcherID;
@@ -62,28 +54,22 @@ class ContextualSearchDelegate
       net::URLRequestContextGetter* url_request_context,
       TemplateURLService* template_url_service,
       const SearchTermResolutionCallback& search_term_callback,
-      const SurroundingTextCallback& surrounding_callback,
-      const IcingCallback& icing_callback);
+      const SurroundingTextCallback& surrounding_callback);
   ~ContextualSearchDelegate() override;
 
-  // Gathers surrounding text and starts an asynchronous search term resolution
-  // request. The "search term" is the best query to issue for a section of text
-  // in the context of a web page. When the response is available the callback
-  // specified in the constructor is run.
-  void StartSearchTermResolutionRequest(const std::string& selection,
-                                        const std::string& home_country,
-                                        content::WebContents* web_contents,
-                                        bool may_send_base_page_url);
+  // Gathers surrounding text and saves it locally in the given context.
+  void GatherAndSaveSurroundingText(
+      base::WeakPtr<ContextualSearchContext> contextual_search_context,
+      content::WebContents* web_contents);
 
-  // Gathers surrounding text and saves it locally for a future query.
-  void GatherAndSaveSurroundingText(const std::string& selection,
-                                    const std::string& home_country,
-                                    content::WebContents* web_contents,
-                                    bool may_send_base_page_url);
-
-  // Continues making a Search Term Resolution request, once the surrounding
-  // text has been gathered.
-  void ContinueSearchTermResolutionRequest();
+  // Starts an asynchronous search term resolution request.
+  // The given context includes some content from a web page and must be able
+  // to resolve.
+  // When the response is available the callback specified in the constructor
+  // is run.
+  void StartSearchTermResolutionRequest(
+      base::WeakPtr<ContextualSearchContext> contextual_search_context,
+      content::WebContents* web_contents);
 
   // Gets the target language for translation purposes for this user.
   std::string GetTargetLanguage();
@@ -91,12 +77,12 @@ class ContextualSearchDelegate
   // Returns the accept languages preference string.
   std::string GetAcceptLanguages();
 
-  // For testing.
-  void set_context_for_testing(ContextualSearchContext* context) {
-    context_.reset(context);
-  }
-
  private:
+  // Friend our test which allows our private methods to be used in helper
+  // functions.  FRIEND_TEST_ALL_PREFIXES just friends individual prefixes.
+  // Needed for |ResolveSearchTermFromContext|.
+  friend class ContextualSearchDelegateTest;
+  // TODO(donnd): consider removing the following since the above covers this.
   FRIEND_TEST_ALL_PREFIXES(ContextualSearchDelegateTest,
                            SurroundingTextHighMaximum);
   FRIEND_TEST_ALL_PREFIXES(ContextualSearchDelegateTest,
@@ -107,10 +93,11 @@ class ContextualSearchDelegate
                            SurroundingTextNoAfterText);
   FRIEND_TEST_ALL_PREFIXES(ContextualSearchDelegateTest,
                            ExtractMentionsStartEnd);
+  FRIEND_TEST_ALL_PREFIXES(ContextualSearchDelegateTest, SampleSurroundingText);
   FRIEND_TEST_ALL_PREFIXES(ContextualSearchDelegateTest,
-                           SurroundingTextForIcing);
+                           SampleSurroundingTextNegativeLimit);
   FRIEND_TEST_ALL_PREFIXES(ContextualSearchDelegateTest,
-                           SurroundingTextForIcingNegativeLimit);
+                           SampleSurroundingTextSameStartEnd);
   FRIEND_TEST_ALL_PREFIXES(ContextualSearchDelegateTest,
                            DecodeSearchTermFromJsonResponse);
   FRIEND_TEST_ALL_PREFIXES(ContextualSearchDelegateTest, DecodeStringMentions);
@@ -118,12 +105,9 @@ class ContextualSearchDelegate
   // net::URLFetcherDelegate:
   void OnURLFetchComplete(const net::URLFetcher* source) override;
 
-  // Builds the ContextualSearchContext in the current context from
-  // the given parameters.
-  void BuildContext(const std::string& selection,
-                    const std::string& home_country,
-                    content::WebContents* web_contents,
-                    bool may_send_base_page_url);
+  // Resolves the search term specified by the current context.
+  // Only needed for tests.  TODO(donnd): make private and friend?
+  void ResolveSearchTermFromContext();
 
   // Builds and returns the search term resolution request URL.
   // |selection| is used as the default query.
@@ -136,30 +120,10 @@ class ContextualSearchDelegate
       const std::string& base_page_url,
       const bool may_send_base_page_url);
 
-  // Will gather the surrounding text from the |content_view_core| and call the
-  // |callback|.
-  void GatherSurroundingTextWithCallback(const std::string& selection,
-                                         const std::string& home_country,
-                                         content::WebContents* web_contents,
-                                         bool may_send_base_page_url,
-                                         HandleSurroundingsCallback callback);
-
-  // Callback for GatherSurroundingTextWithCallback(). Will start the search
-  // term resolution request.
-  void StartSearchTermRequestFromSelection(
-      const base::string16& surrounding_text,
-      int start_offset,
-      int end_offset);
-
-  void SaveSurroundingText(
+  void OnTextSurroundingSelectionAvailable(
     const base::string16& surrounding_text,
     int start_offset,
     int end_offset);
-
-  // Will call back to the manager with the proper surrounding text to be shown
-  // in the UI. Will return a maximum of |max_surrounding_chars| characters for
-  // each of the segments.
-  void SendSurroundingText(int max_surrounding_chars);
 
   // Populates the discourse context and adds it to the HTTP header of the
   // search term resolution request.
@@ -204,8 +168,8 @@ class ContextualSearchDelegate
                                int* startResult,
                                int* endResult);
 
-  // Generates a subset of the given surrounding_text string, for Icing
-  // integration.
+  // Generates a subset of the given surrounding_text string, for usage from
+  // Java.
   // |surrounding_text| the entire text context that contains the selection.
   // |padding_each_side| the number of characters of padding desired on each
   // side of the selection (negative values treated as 0).
@@ -216,10 +180,16 @@ class ContextualSearchDelegate
   // of the selection in the function result.
   // |return| the trimmed surrounding text with selection at the
   // updated start/end offsets.
-  base::string16 SurroundingTextForIcing(const base::string16& surrounding_text,
-                                         int padding_each_side,
-                                         size_t* start,
-                                         size_t* end);
+  base::string16 SampleSurroundingText(const base::string16& surrounding_text,
+                                       int padding_each_side,
+                                       size_t* start,
+                                       size_t* end);
+
+  // For testing.
+  void SetContextForTesting(
+      const base::WeakPtr<ContextualSearchContext>& context) {
+    context_ = context;
+  }
 
   // The current request in progress, or NULL.
   std::unique_ptr<net::URLFetcher> search_term_fetcher_;
@@ -237,13 +207,11 @@ class ContextualSearchDelegate
   SearchTermResolutionCallback search_term_callback_;
 
   // The callback for notifications of surrounding text being available.
-  SurroundingTextCallback surrounding_callback_;
-
-  // The callback for notifications of Icing selection being available.
-  IcingCallback icing_callback_;
+  SurroundingTextCallback surrounding_text_callback_;
 
   // Used to hold the context until an upcoming search term request is started.
-  std::unique_ptr<ContextualSearchContext> context_;
+  // Owned by the Java ContextualSearchContext.
+  base::WeakPtr<ContextualSearchContext> context_;
 
   DISALLOW_COPY_AND_ASSIGN(ContextualSearchDelegate);
 };

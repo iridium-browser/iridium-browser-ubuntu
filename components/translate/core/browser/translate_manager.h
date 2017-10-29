@@ -29,6 +29,7 @@ extern const base::Feature kTranslateLanguageByULP;
 class TranslateClient;
 class TranslateDriver;
 class TranslatePrefs;
+class TranslateRanker;
 
 namespace testing {
 class TranslateManagerTest;
@@ -46,6 +47,7 @@ class TranslateManager {
   // |accept_language_pref_name| is the path for the preference for the
   // accept-languages.
   TranslateManager(TranslateClient* translate_client,
+                   TranslateRanker* translate_ranker,
                    const std::string& accept_language_pref_name);
   virtual ~TranslateManager();
 
@@ -122,6 +124,15 @@ class TranslateManager {
   // testing, set to true to offer anyway.
   static void SetIgnoreMissingKeyForTesting(bool ignore);
 
+  // Returns true if the decision should be overridden and logs the event
+  // appropriately. |event_type| must be one of the
+  // values defined by metrics::TranslateEventProto::EventType.
+  bool ShouldOverrideDecision(int event_type);
+
+  // Returns true if the BubbleUI should be suppressed.
+  bool ShouldSuppressBubbleUI(bool triggered_from_menu,
+                              const std::string& source_language);
+
  private:
   friend class translate::testing::TranslateManagerTest;
 
@@ -161,6 +172,7 @@ class TranslateManager {
 
   TranslateClient* translate_client_;  // Weak.
   TranslateDriver* translate_driver_;  // Weak.
+  TranslateRanker* translate_ranker_;  // Weak.
 
   LanguageState language_state_;
 

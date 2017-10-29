@@ -48,18 +48,18 @@ Polymer({
     }
   },
 
-  ready: function() {
+  ready() {
     this.currentSelection_ = undefined;
     this.$.table.tableColumns = [
       {
         title: 'Label',
-        value: function(row) { return row.name; },
+        value(row) { return row.name; },
         width: '150px'
       },
       {
         title: 'Value',
         width: '100%',
-        value: function(row) { return row.value; }
+        value(row) { return row.value; }
       }
     ];
     this.$.table.showHeader = false;
@@ -70,21 +70,21 @@ Polymer({
   },
 
   set selection(selection) {
-    if (selection.length !== 1)
+    if (selection.length !== 1) {
       throw new Error('Only supports single slices');
+    }
     this.setSelectionWithoutErrorChecks(selection);
   },
 
-  setSelectionWithoutErrorChecks: function(selection) {
+  setSelectionWithoutErrorChecks(selection) {
     this.currentSelection_ = selection;
     this.updateContents_();
   },
 
-  getFlowEventRows_: function(event) {
+  getFlowEventRows_(event) {
     // TODO(nduca): Figure out if there is a cleaner way to do this.
 
-    var rows = this.getEventRowsHelper_(event);
-    // var rows = this.__proto__.__proto__.getEventRows_(event);
+    const rows = this.getEventRowsHelper_(event);
 
     // Put the ID up top.
     rows.splice(0, 0, {
@@ -93,7 +93,7 @@ Polymer({
     });
 
     function createLinkTo(slice) {
-      var linkEl = document.createElement('tr-ui-a-analysis-link');
+      const linkEl = document.createElement('tr-ui-a-analysis-link');
       linkEl.setSelectionAndContent(function() {
         return new tr.model.EventSet(slice);
       });
@@ -112,26 +112,31 @@ Polymer({
     return rows;
   },
 
-  getEventRowsHelper_: function(event) {
-    var rows = [];
+  getEventRowsHelper_(event) {
+    const rows = [];
 
-    if (event.error)
+    if (event.error) {
       rows.push({ name: 'Error', value: event.error });
-
-    if (event.title)
-      rows.push({ name: 'Title', value: event.title });
-
-    if (event.category)
-      rows.push({ name: 'Category', value: event.category });
-
-    if (event.model !== undefined) {
-      var ufc = event.model.getUserFriendlyCategoryFromEvent(event);
-      if (ufc !== undefined)
-        rows.push({ name: 'User Friendly Category', value: ufc });
     }
 
-    if (event.name)
+    if (event.title) {
+      rows.push({ name: 'Title', value: event.title });
+    }
+
+    if (event.category) {
+      rows.push({ name: 'Category', value: event.category });
+    }
+
+    if (event.model !== undefined) {
+      const ufc = event.model.getUserFriendlyCategoryFromEvent(event);
+      if (ufc !== undefined) {
+        rows.push({ name: 'User Friendly Category', value: ufc });
+      }
+    }
+
+    if (event.name) {
       rows.push({ name: 'Name', value: event.name });
+    }
 
     rows.push({
       name: 'Start',
@@ -169,7 +174,7 @@ Polymer({
       }
 
       if (event.cpuSelfTime) {
-        var cpuSelfTimeEl = tr.v.ui.createScalarSpan(event.cpuSelfTime, {
+        const cpuSelfTimeEl = tr.v.ui.createScalarSpan(event.cpuSelfTime, {
           unit: tr.b.Unit.byName.timeDurationInMs
         });
         if (event.cpuSelfTime > event.selfTime) {
@@ -193,7 +198,7 @@ Polymer({
     }
 
     function createStackFrameEl(sf) {
-      var sfEl = document.createElement('tr-ui-a-stack-frame');
+      const sfEl = document.createElement('tr-ui-a-stack-frame');
       sfEl.stackFrame = sf;
       return sfEl;
     }
@@ -216,7 +221,7 @@ Polymer({
     }
 
     if (event.info) {
-      var descriptionEl = tr.ui.b.createDiv({
+      const descriptionEl = tr.ui.b.createDiv({
         textContent: event.info.description,
         maxWidth: '300px'
       });
@@ -228,7 +233,7 @@ Polymer({
 
       if (event.info.docLinks) {
         event.info.docLinks.forEach(function(linkObject) {
-          var linkEl = document.createElement('a');
+          const linkEl = document.createElement('a');
           linkEl.target = '_blank';
           linkEl.href = linkObject.href;
           Polymer.dom(linkEl).textContent = Polymer.dom(linkObject).textContent;
@@ -241,9 +246,9 @@ Polymer({
     }
 
     if (event.associatedAlerts.length) {
-      var alertSubRows = [];
+      const alertSubRows = [];
       event.associatedAlerts.forEach(function(alert) {
-        var linkEl = document.createElement('tr-ui-a-analysis-link');
+        const linkEl = document.createElement('tr-ui-a-analysis-link');
         linkEl.setSelectionAndContent(function() {
           return new tr.model.EventSet(alert);
         }, alert.info.description);
@@ -261,27 +266,28 @@ Polymer({
     return rows;
   },
 
-  getEventRows_: function(event) {
-    if (this.isFlow)
+  getEventRows_(event) {
+    if (this.isFlow) {
       return this.getFlowEventRows_(event);
+    }
 
     return this.getEventRowsHelper_(event);
   },
 
-  addArgsToRows_: function(rows, args) {
-    var n = 0;
-    for (var argName in args) {
+  addArgsToRows_(rows, args) {
+    let n = 0;
+    for (const argName in args) {
       n += 1;
     }
     if (n > 0) {
-      var subRows = [];
-      for (var argName in args) {
+      const subRows = [];
+      for (const argName in args) {
         n += 1;
       }
       if (n > 0) {
-        var subRows = [];
-        for (var argName in args) {
-          var argView =
+        const subRows = [];
+        for (const argName in args) {
+          const argView =
               document.createElement('tr-ui-a-generic-object-view');
           argView.object = args[argName];
           subRows.push({name: argName, value: argView});
@@ -290,16 +296,16 @@ Polymer({
           name: 'Args',
           value: '',
           isExpanded: true,
-          subRows: subRows
+          subRows
         });
       }
     }
   },
 
-  addContextsToRows_: function(rows, contexts) {
+  addContextsToRows_(rows, contexts) {
     if (contexts.length) {
-      var subRows = contexts.map(function(context) {
-        var contextView =
+      const subRows = contexts.map(function(context) {
+        const contextView =
             document.createElement('tr-ui-a-generic-object-view');
         contextView.object = context;
         return {name: 'Context', value: contextView};
@@ -308,28 +314,29 @@ Polymer({
         name: 'Contexts',
         value: '',
         isExpanded: true,
-        subRows: subRows
+        subRows
       });
     }
   },
 
-  updateContents_: function() {
+  updateContents_() {
     if (this.currentSelection_ === undefined) {
       this.$.table.rows = [];
       this.$.table.rebuild();
       return;
     }
 
-    var event = tr.b.getOnlyElement(this.currentSelection_);
+    const event = tr.b.getOnlyElement(this.currentSelection_);
 
-    var rows = this.getEventRows_(event);
-    if (event.argsStripped)
+    const rows = this.getEventRows_(event);
+    if (event.argsStripped) {
       rows.push({ name: 'Args', value: 'Stripped' });
-    else
+    } else {
       this.addArgsToRows_(rows, event.args);
+    }
     this.addContextsToRows_(rows, event.contexts);
 
-    var customizeRowsEvent = new tr.b.Event('customize-rows');
+    const customizeRowsEvent = new tr.b.Event('customize-rows');
     customizeRowsEvent.rows = rows;
     this.dispatchEvent(customizeRowsEvent);
 

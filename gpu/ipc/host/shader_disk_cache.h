@@ -10,10 +10,12 @@
 #include <map>
 #include <queue>
 #include <string>
+#include <unordered_map>
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "net/disk_cache/disk_cache.h"
 
@@ -115,6 +117,13 @@ class ShaderCacheFactory : NON_EXPORTED_BASE(public base::ThreadChecker) {
                    const base::Time& begin_time,
                    const base::Time& end_time,
                    const base::Closure& callback);
+
+  // Same as ClearByPath, but looks up the cache by |client_id|. The |callback|
+  // will be executed when the clear is complete.
+  void ClearByClientId(int32_t client_id,
+                       const base::Time& begin_time,
+                       const base::Time& end_time,
+                       const base::Closure& callback);
 
   // Retrieve the shader disk cache for the provided |client_id|.
   scoped_refptr<ShaderDiskCache> Get(int32_t client_id);

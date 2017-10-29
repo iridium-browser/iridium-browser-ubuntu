@@ -8,15 +8,28 @@ option optimize_for = LITE_RUNTIME;
 
 package content;
 
-message PaymentAppManifestProto {
-  optional string name = 1;
-  optional string icon = 2;
-  repeated PaymentAppOptionProto options = 3;
+message StoredPaymentInstrumentKeyInfoProto {
+  optional uint64 insertion_order = 1;
+  optional string key = 2;
 }
 
-message PaymentAppOptionProto {
-  optional string name = 1;
-  optional string icon = 2;
-  optional string id = 3;
+message StoredPaymentInstrumentImageObject {
+  optional string src = 1;
+}
+
+message StoredPaymentInstrumentProto {
+  optional string instrument_key = 1;
+  optional string origin = 2;
+  optional string name = 3;
   repeated string enabled_methods = 4;
+  optional string stringified_capabilities = 5;
+  repeated StoredPaymentInstrumentImageObject icons = 6;
+  optional string decoded_instrument_icon = 7;
+}
+
+message StoredPaymentAppProto {
+  optional int64 registration_id = 1;
+  optional string origin = 2;
+  optional string name = 3;
+  optional string icon = 4;
 }

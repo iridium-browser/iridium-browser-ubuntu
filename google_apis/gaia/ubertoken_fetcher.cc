@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/time/time.h"
@@ -16,11 +17,11 @@
 #include "google_apis/gaia/oauth2_token_service.h"
 
 namespace {
-GaiaAuthFetcher* CreateGaiaAuthFetcher(
+std::unique_ptr<GaiaAuthFetcher> CreateGaiaAuthFetcher(
     GaiaAuthConsumer* consumer,
     const std::string& source,
     net::URLRequestContextGetter* request_context) {
-  return new GaiaAuthFetcher(consumer, source, request_context);
+  return base::MakeUnique<GaiaAuthFetcher>(consumer, source, request_context);
 }
 }
 
@@ -49,6 +50,7 @@ UbertokenFetcher::UbertokenFetcher(
       consumer_(consumer),
       source_(source),
       request_context_(request_context),
+      is_bound_to_channel_id_(true),
       gaia_auth_fetcher_factory_(factory),
       retry_number_(0),
       second_access_token_request_(false) {
@@ -149,7 +151,8 @@ void UbertokenFetcher::RequestAccessToken() {
 }
 
 void UbertokenFetcher::ExchangeTokens() {
-  gaia_auth_fetcher_.reset(
-      gaia_auth_fetcher_factory_.Run(this, source_, request_context_));
-  gaia_auth_fetcher_->StartTokenFetchForUberAuthExchange(access_token_);
+  gaia_auth_fetcher_ =
+      gaia_auth_fetcher_factory_.Run(this, source_, request_context_);
+  gaia_auth_fetcher_->StartTokenFetchForUberAuthExchange(
+      access_token_, is_bound_to_channel_id_);
 }

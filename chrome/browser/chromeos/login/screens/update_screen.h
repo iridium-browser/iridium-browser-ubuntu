@@ -79,6 +79,7 @@ class UpdateScreen : public BaseScreen,
   FRIEND_TEST_ALL_PREFIXES(UpdateScreenTest, TestBasic);
   FRIEND_TEST_ALL_PREFIXES(UpdateScreenTest, TestUpdateAvailable);
   FRIEND_TEST_ALL_PREFIXES(UpdateScreenTest, TestAPReselection);
+  friend class UpdateScreenUnitTest;
 
   enum class State {
     STATE_IDLE = 0,

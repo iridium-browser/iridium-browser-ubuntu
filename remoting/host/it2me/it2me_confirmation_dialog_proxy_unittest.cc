@@ -7,7 +7,9 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
@@ -114,9 +116,8 @@ class It2MeConfirmationDialogProxyTest : public testing::Test {
   base::RunLoop run_loop_;
   base::Thread dialog_thread_;
 
-  // |dialog_| is owned by |dialog_proxy_| but we keep an alias for test
-  // purposes.
-  StubIt2MeConfirmationDialog* dialog_;
+  // |dialog_| is owned by |dialog_proxy_| but we keep an alias for testing.
+  StubIt2MeConfirmationDialog* dialog_ = nullptr;
   std::unique_ptr<It2MeConfirmationDialogProxy> dialog_proxy_;
 };
 
@@ -124,9 +125,11 @@ It2MeConfirmationDialogProxyTest::It2MeConfirmationDialogProxyTest()
     : dialog_thread_("test dialog thread") {
   dialog_thread_.Start();
 
-  dialog_ = new StubIt2MeConfirmationDialog(dialog_task_runner());
-  dialog_proxy_.reset(new It2MeConfirmationDialogProxy(
-      dialog_task_runner(), std::unique_ptr<It2MeConfirmationDialog>(dialog_)));
+  auto dialog =
+      base::MakeUnique<StubIt2MeConfirmationDialog>(dialog_task_runner());
+  dialog_ = dialog.get();
+  dialog_proxy_.reset(new It2MeConfirmationDialogProxy(dialog_task_runner(),
+                                                       std::move(dialog)));
 }
 
 It2MeConfirmationDialogProxyTest::~It2MeConfirmationDialogProxyTest() {}

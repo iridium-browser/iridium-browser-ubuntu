@@ -251,6 +251,7 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     logging.info('Requested remote debugging port: %d' % self._port)
     args.append('--remote-debugging-port=%i' % self._port)
     args.append('--enable-crash-reporter-for-testing')
+    args.append('--disable-component-update')
     if not self._is_content_shell:
       args.append('--window-size=1280,1024')
       if self._flash_path:
@@ -274,9 +275,16 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
     # macOS displays a blocking crash resume dialog that we need to suppress.
     if self.browser.platform.GetOSName() == 'mac':
-      subprocess.call(['defaults', 'write', '-app', self._executable,
+      # Default write expects either the application name or the
+      # path to the application. self._executable has the path to the app
+      # with a few other bits tagged on after .app. Thus, we shorten the path
+      # to end with .app. If this is ineffective on your mac, please delete
+      # the saved state of the browser you are testing on here:
+      # /Users/.../Library/Saved\ Application State/...
+      # http://stackoverflow.com/questions/20226802
+      dialog_path = re.sub(r'\.app\/.*', '.app', self._executable)
+      subprocess.check_call(['defaults', 'write', '-app', dialog_path,
                        'NSQuitAlwaysKeepsWindows', '-bool', 'false'])
-
 
     args = [self._executable]
     args.extend(self.GetBrowserStartupArgs())

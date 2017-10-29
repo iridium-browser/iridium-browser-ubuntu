@@ -28,7 +28,7 @@
 #include "VertexDataManager.h"
 #include "IndexDataManager.h"
 #include "libEGL/Display.h"
-#include "libEGL/EGLSurface.h"
+#include "common/Surface.hpp"
 #include "Common/Half.hpp"
 
 #include <EGL/eglext.h>
@@ -37,8 +37,8 @@ using std::abs;
 
 namespace es1
 {
-Context::Context(egl::Display *const display, const Context *shareContext)
-	: egl::Context(display),
+Context::Context(egl::Display *const display, const Context *shareContext, const egl::Config *config)
+	: egl::Context(display), config(config),
 	  modelViewStack(MAX_MODELVIEW_STACK_DEPTH),
 	  projectionStack(MAX_PROJECTION_STACK_DEPTH),
 	  textureStack0(MAX_TEXTURE_STACK_DEPTH),
@@ -281,7 +281,7 @@ Context::~Context()
 	delete device;
 }
 
-void Context::makeCurrent(egl::Surface *surface)
+void Context::makeCurrent(gl::Surface *surface)
 {
 	if(!mHasBeenCurrent)
 	{
@@ -321,9 +321,14 @@ void Context::makeCurrent(egl::Surface *surface)
 	markAllStateDirty();
 }
 
-int Context::getClientVersion() const
+EGLint Context::getClientVersion() const
 {
 	return 1;
+}
+
+EGLint Context::getConfigID() const
+{
+	return config->mConfigID;
 }
 
 // This function will set all of the state-related dirty flags, so that all state is set during next pre-draw.
@@ -1173,6 +1178,24 @@ bool Context::getFloatv(GLenum pname, GLfloat *params)
 		for(int i = 0; i < 16; i++)
 		{
 			params[i] = projectionStack.current()[i % 4][i / 4];
+		}
+		break;
+	case GL_CURRENT_COLOR:
+		for(int i = 0; i < 4; i++)
+		{
+			params[i] = mState.vertexAttribute[sw::Color0].mCurrentValue[i];
+		}
+		break;
+	case GL_CURRENT_NORMAL:
+		for(int i = 0; i < 3; i++)
+		{
+			params[i] = mState.vertexAttribute[sw::Normal].mCurrentValue[i];
+		}
+		break;
+	case GL_CURRENT_TEXTURE_COORDS:
+		for(int i = 0; i < 4; i++)
+		{
+			params[i] = mState.vertexAttribute[sw::TexCoord0].mCurrentValue[i];
 		}
 		break;
 	default:
@@ -2827,6 +2850,11 @@ void Context::drawTexture(GLfloat x, GLfloat y, GLfloat z, GLfloat width, GLfloa
 	projectionStack.load(P);
 }
 
+void Context::blit(sw::Surface *source, const sw::SliceRect &sRect, sw::Surface *dest, const sw::SliceRect &dRect)
+{
+	device->blit(source, sRect, dest, dRect, false);
+}
+
 void Context::finish()
 {
 	device->finish();
@@ -3072,7 +3100,7 @@ void Context::setVertexAttrib(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLf
 	mVertexDataManager->dirtyCurrentValue(index);
 }
 
-void Context::bindTexImage(egl::Surface *surface)
+void Context::bindTexImage(gl::Surface *surface)
 {
 	es1::Texture2D *textureObject = getTexture2D();
 
@@ -3452,8 +3480,8 @@ unsigned int Context::getActiveTexture() const
 
 }
 
-egl::Context *es1CreateContext(egl::Display *display, const egl::Context *shareContext)
+egl::Context *es1CreateContext(egl::Display *display, const egl::Context *shareContext, const egl::Config *config)
 {
 	ASSERT(!shareContext || shareContext->getClientVersion() == 1);   // Should be checked by eglCreateContext
-	return new es1::Context(display, static_cast<const es1::Context*>(shareContext));
+	return new es1::Context(display, static_cast<const es1::Context*>(shareContext), config);
 }

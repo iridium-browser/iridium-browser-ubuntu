@@ -383,9 +383,6 @@ int ff_h264_update_thread_context(AVCodecContext *dst,
     h->picture_structure    = h1->picture_structure;
     h->mb_aff_frame         = h1->mb_aff_frame;
     h->droppable            = h1->droppable;
-    h->backup_width         = h1->backup_width;
-    h->backup_height        = h1->backup_height;
-    h->backup_pix_fmt       = h1->backup_pix_fmt;
 
     for (i = 0; i < H264_MAX_PICTURE_COUNT; i++) {
         ff_h264_unref_picture(h, &h->DPB[i]);
@@ -1131,7 +1128,7 @@ static int h264_export_frame_props(H264Context *h)
     /* Prioritize picture timing SEI information over used
      * decoding process if it exists. */
 
-    if (sps->pic_struct_present_flag) {
+    if (sps->pic_struct_present_flag && h->sei.picture_timing.present) {
         H264SEIPictureTiming *pt = &h->sei.picture_timing;
         switch (pt->pic_struct) {
         case SEI_PIC_STRUCT_FRAME:
@@ -1176,7 +1173,7 @@ static int h264_export_frame_props(H264Context *h)
         /* Derive top_field_first from field pocs. */
         cur->f->top_field_first = cur->field_poc[0] < cur->field_poc[1];
     } else {
-        if (sps->pic_struct_present_flag) {
+        if (sps->pic_struct_present_flag && h->sei.picture_timing.present) {
             /* Use picture timing SEI information. Even if it is a
              * information of a past frame, better than nothing. */
             if (h->sei.picture_timing.pic_struct == SEI_PIC_STRUCT_TOP_BOTTOM ||
@@ -1426,14 +1423,14 @@ static int h264_field_start(H264Context *h, const H264SliceContext *sl,
      * We have to do that before the "dummy" in-between frame allocation,
      * since that can modify h->cur_pic_ptr. */
     if (h->first_field) {
+        int last_field = last_pic_structure == PICT_BOTTOM_FIELD;
         av_assert0(h->cur_pic_ptr);
         av_assert0(h->cur_pic_ptr->f->buf[0]);
         assert(h->cur_pic_ptr->reference != DELAYED_PIC_REF);
 
         /* Mark old field/frame as completed */
-        if (h->cur_pic_ptr->tf.owner == h->avctx) {
-            ff_thread_report_progress(&h->cur_pic_ptr->tf, INT_MAX,
-                                      last_pic_structure == PICT_BOTTOM_FIELD);
+        if (h->cur_pic_ptr->tf.owner[last_field] == h->avctx) {
+            ff_thread_report_progress(&h->cur_pic_ptr->tf, INT_MAX, last_field);
         }
 
         /* figure out if we have a complementary field pair */
@@ -1571,7 +1568,9 @@ static int h264_field_start(H264Context *h, const H264SliceContext *sl,
             return AVERROR_INVALIDDATA;
         }
     } else {
+        int field = h->picture_structure == PICT_BOTTOM_FIELD;
         release_unused_pictures(h, 0);
+        h->cur_pic_ptr->tf.owner[field] = h->avctx;
     }
     /* Some macroblocks can be accessed before they're available in case
     * of lost slices, MBAFF or threading. */
@@ -1781,9 +1780,12 @@ static int h264_slice_header_parse(const H264Context *h, H264SliceContext *sl,
     }
     if ((pps->weighted_pred && sl->slice_type_nos == AV_PICTURE_TYPE_P) ||
         (pps->weighted_bipred_idc == 1 &&
-         sl->slice_type_nos == AV_PICTURE_TYPE_B))
-        ff_h264_pred_weight_table(&sl->gb, sps, sl->ref_count,
+         sl->slice_type_nos == AV_PICTURE_TYPE_B)) {
+        ret = ff_h264_pred_weight_table(&sl->gb, sps, sl->ref_count,
                                   sl->slice_type_nos, &sl->pwt, h->avctx);
+        if (ret < 0)
+            return ret;
+    }
 
     sl->explicit_ref_marking = 0;
     if (nal->ref_idc) {
@@ -1889,7 +1891,8 @@ static int h264_slice_init(H264Context *h, H264SliceContext *sl,
 
     if (sl->slice_type_nos == AV_PICTURE_TYPE_B && !sl->direct_spatial_mv_pred)
         ff_h264_direct_dist_scale_factor(h, sl);
-    ff_h264_direct_ref_list_init(h, sl);
+    if (!h->setup_finished)
+        ff_h264_direct_ref_list_init(h, sl);
 
     if (h->avctx->skip_loop_filter >= AVDISCARD_ALL ||
         (h->avctx->skip_loop_filter >= AVDISCARD_NONKEY &&
@@ -1999,8 +2002,10 @@ int ff_h264_queue_decode_slice(H264Context *h, const H2645NAL *nal)
         return ret;
 
     // discard redundant pictures
-    if (sl->redundant_pic_count > 0)
+    if (sl->redundant_pic_count > 0) {
+        sl->ref_count[0] = sl->ref_count[1] = 0;
         return 0;
+    }
 
     if (sl->first_mb_addr == 0 || !h->current_slice) {
         if (h->setup_finished) {

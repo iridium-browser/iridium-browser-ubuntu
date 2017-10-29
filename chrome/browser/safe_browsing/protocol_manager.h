@@ -30,7 +30,7 @@
 #include "chrome/browser/safe_browsing/chunk_range.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/safe_browsing_db/safebrowsing.pb.h"
 #include "components/safe_browsing_db/util.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -334,8 +334,8 @@ class SafeBrowsingProtocolManager : public net::URLFetcherDelegate {
   // All chunk requests that need to be made.
   std::deque<ChunkUrl> chunk_request_urls_;
 
-  base::hash_map<const net::URLFetcher*,
-                 std::pair<std::unique_ptr<net::URLFetcher>, FullHashDetails>>
+  std::map<const net::URLFetcher*,
+           std::pair<std::unique_ptr<net::URLFetcher>, FullHashDetails>>
       hash_requests_;
 
   // True if the service has been given an add/sub chunk but it hasn't been

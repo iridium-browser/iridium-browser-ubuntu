@@ -8,6 +8,7 @@
 #define CORE_FPDFDOC_CPDF_APSETTINGS_H_
 
 #include "core/fpdfdoc/cpdf_iconfit.h"
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
 #include "core/fxge/fx_dib.h"
@@ -19,6 +20,8 @@ class CPDF_Stream;
 class CPDF_ApSettings {
  public:
   explicit CPDF_ApSettings(CPDF_Dictionary* pDict);
+  CPDF_ApSettings(const CPDF_ApSettings& that);
+  ~CPDF_ApSettings();
 
   bool HasMKEntry(const CFX_ByteString& csEntry) const;
   int GetRotation() const;
@@ -27,11 +30,11 @@ class CPDF_ApSettings {
     return GetColor(iColorType, "BC");
   }
 
-  FX_FLOAT GetOriginalBorderColor(int index) const {
+  float GetOriginalBorderColor(int index) const {
     return GetOriginalColor(index, "BC");
   }
 
-  void GetOriginalBorderColor(int& iColorType, FX_FLOAT fc[4]) const {
+  void GetOriginalBorderColor(int& iColorType, float fc[4]) const {
     GetOriginalColor(iColorType, fc, "BC");
   }
 
@@ -39,11 +42,11 @@ class CPDF_ApSettings {
     return GetColor(iColorType, "BG");
   }
 
-  FX_FLOAT GetOriginalBackgroundColor(int index) const {
+  float GetOriginalBackgroundColor(int index) const {
     return GetOriginalColor(index, "BG");
   }
 
-  void GetOriginalBackgroundColor(int& iColorType, FX_FLOAT fc[4]) const {
+  void GetOriginalBackgroundColor(int& iColorType, float fc[4]) const {
     GetOriginalColor(iColorType, fc, "BG");
   }
 
@@ -60,15 +63,15 @@ class CPDF_ApSettings {
   friend class CPDF_FormControl;
 
   FX_ARGB GetColor(int& iColorType, const CFX_ByteString& csEntry) const;
-  FX_FLOAT GetOriginalColor(int index, const CFX_ByteString& csEntry) const;
+  float GetOriginalColor(int index, const CFX_ByteString& csEntry) const;
   void GetOriginalColor(int& iColorType,
-                        FX_FLOAT fc[4],
+                        float fc[4],
                         const CFX_ByteString& csEntry) const;
 
   CFX_WideString GetCaption(const CFX_ByteString& csEntry) const;
   CPDF_Stream* GetIcon(const CFX_ByteString& csEntry) const;
 
-  CPDF_Dictionary* const m_pDict;
+  CFX_UnownedPtr<CPDF_Dictionary> const m_pDict;
 };
 
 #endif  // CORE_FPDFDOC_CPDF_APSETTINGS_H_

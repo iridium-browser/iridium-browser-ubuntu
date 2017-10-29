@@ -54,18 +54,10 @@ bool CompilationInfo::has_shared_info() const {
 }
 
 CompilationInfo::CompilationInfo(Zone* zone, ParseInfo* parse_info,
-                                 Handle<JSFunction> closure)
+                                 Isolate* isolate, Handle<JSFunction> closure)
     : CompilationInfo(parse_info, {}, Code::ComputeFlags(Code::FUNCTION), BASE,
-                      parse_info->isolate(), zone) {
+                      isolate, zone) {
   closure_ = closure;
-
-  // Compiling for the snapshot typically results in different code than
-  // compiling later on. This means that code recompiled with deoptimization
-  // support won't be "equivalent" (as defined by SharedFunctionInfo::
-  // EnableDeoptimizationSupport), so it will replace the old code and all
-  // its type feedback. To avoid this, always compile functions in the snapshot
-  // with deoptimization support.
-  if (isolate_->serializer_enabled()) EnableDeoptimizationSupport();
 
   if (FLAG_function_context_specialization) MarkAsFunctionContextSpecializing();
   if (FLAG_turbo_splitting) MarkAsSplittingEnabled();
@@ -75,6 +67,11 @@ CompilationInfo::CompilationInfo(Zone* zone, ParseInfo* parse_info,
   // more memory consumption.
   if (isolate_->NeedsSourcePositionsForProfiling()) {
     MarkAsSourcePositionsEnabled();
+  }
+
+  if (FLAG_block_coverage && isolate->is_block_code_coverage() &&
+      parse_info->script()->IsUserJavaScript()) {
+    MarkAsBlockCoverageEnabled();
   }
 }
 
@@ -123,12 +120,11 @@ bool CompilationInfo::is_this_defined() const { return !IsStub(); }
 // Primitive functions are unlikely to be picked up by the stack-walking
 // profiler, so they trigger their own optimization when they're called
 // for the SharedFunctionInfo::kCallsUntilPrimitiveOptimization-th time.
+// TODO(6409) Remove when Full-Codegen dies.
 bool CompilationInfo::ShouldSelfOptimize() {
-  return FLAG_opt && FLAG_crankshaft &&
-         !(literal()->flags() & AstProperties::kDontSelfOptimize) &&
+  return FLAG_opt && !literal()->dont_self_optimize() &&
          !literal()->dont_optimize() &&
-         literal()->scope()->AllowsLazyCompilation() &&
-         !shared_info()->optimization_disabled();
+         literal()->scope()->AllowsLazyCompilation();
 }
 
 void CompilationInfo::set_deferred_handles(
@@ -240,8 +236,7 @@ void CompilationInfo::SetOptimizing() {
 int CompilationInfo::AddInlinedFunction(
     Handle<SharedFunctionInfo> inlined_function, SourcePosition pos) {
   int id = static_cast<int>(inlined_functions_.size());
-  inlined_functions_.push_back(InlinedFunctionHolder(
-      inlined_function, handle(inlined_function->code()), pos));
+  inlined_functions_.push_back(InlinedFunctionHolder(inlined_function, pos));
   return id;
 }
 

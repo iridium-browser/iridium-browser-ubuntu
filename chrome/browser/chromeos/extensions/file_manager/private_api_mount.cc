@@ -101,13 +101,12 @@ bool FileManagerPrivateAddMountFunction::RunAsync() {
       // For files under downloads, change the file permission and make it
       // readable from avfs/fuse if needed.
       base::PostTaskWithTraits(
-          FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                         base::TaskPriority::USER_BLOCKING),
-          base::Bind(&EnsureReadableFilePermissionAsync, path,
-                     google_apis::CreateRelayCallback(
-                         base::Bind(&FileManagerPrivateAddMountFunction::
-                                        RunAfterMarkCacheFileAsMounted,
-                                    this, path.BaseName()))));
+          FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
+          base::BindOnce(&EnsureReadableFilePermissionAsync, path,
+                         google_apis::CreateRelayCallback(
+                             base::Bind(&FileManagerPrivateAddMountFunction::
+                                            RunAfterMarkCacheFileAsMounted,
+                                        this, path.BaseName()))));
     } else {
       RunAfterMarkCacheFileAsMounted(
           path.BaseName(), drive::FILE_ERROR_OK, path);
@@ -155,7 +154,7 @@ void FileManagerPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted(
   }
 
   // Pass back the actual source path of the mount point.
-  SetResult(base::MakeUnique<base::StringValue>(file_path.AsUTF8Unsafe()));
+  SetResult(base::MakeUnique<base::Value>(file_path.AsUTF8Unsafe()));
   SendResponse(true);
 
   // MountPath() takes a std::string.

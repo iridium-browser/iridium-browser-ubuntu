@@ -9,38 +9,40 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "components/feedback/feedback_report.h"
 #include "components/feedback/feedback_uploader.h"
 #include "components/feedback/feedback_uploader_factory.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace feedback {
+
 namespace {
 
-const char kHistograms[] = "";
-const char kImageData[] = "";
-const char kFileData[] = "";
-
-using content::BrowserThread;
+constexpr char kHistograms[] = "";
+constexpr char kImageData[] = "";
+constexpr char kFileData[] = "";
 
 class MockUploader : public feedback::FeedbackUploader, public KeyedService {
  public:
-  MockUploader(content::BrowserContext* context)
+  MockUploader(content::BrowserContext* context,
+               scoped_refptr<base::SingleThreadTaskRunner> task_runner)
       : FeedbackUploader(context ? context->GetPath() : base::FilePath(),
-                         BrowserThread::GetBlockingPool()) {}
+                         task_runner) {}
 
-  MOCK_METHOD1(DispatchReport, void(const std::string&));
+  MOCK_METHOD1(DispatchReport, void(scoped_refptr<FeedbackReport>));
 };
 
 std::unique_ptr<KeyedService> CreateFeedbackUploaderService(
     content::BrowserContext* context) {
-  std::unique_ptr<MockUploader> uploader(new MockUploader(context));
+  auto uploader = base::MakeUnique<MockUploader>(
+      context, FeedbackUploaderFactory::CreateUploaderTaskRunner());
   EXPECT_CALL(*uploader, DispatchReport(testing::_)).Times(1);
   return std::move(uploader);
 }
@@ -51,15 +53,12 @@ std::unique_ptr<std::string> MakeScoped(const char* str) {
 
 }  // namespace
 
-namespace feedback {
-
 class FeedbackDataTest : public testing::Test {
  protected:
   FeedbackDataTest()
       : context_(new content::TestBrowserContext()),
         prefs_(new TestingPrefServiceSimple()),
-        data_(new FeedbackData()),
-        ui_thread_(content::BrowserThread::UI, &message_loop_) {
+        data_(new FeedbackData()) {
     user_prefs::UserPrefs::Set(context_.get(), prefs_.get());
     data_->set_context(context_.get());
     data_->set_send_report_callback(base::Bind(
@@ -95,8 +94,7 @@ class FeedbackDataTest : public testing::Test {
   std::unique_ptr<content::TestBrowserContext> context_;
   std::unique_ptr<PrefService> prefs_;
   scoped_refptr<FeedbackData> data_;
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
 };
 
 TEST_F(FeedbackDataTest, ReportSending) {

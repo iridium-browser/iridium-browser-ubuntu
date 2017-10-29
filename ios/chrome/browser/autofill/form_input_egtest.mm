@@ -14,12 +14,15 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/testing/earl_grey/disabled_test_macros.h"
 #import "ios/testing/wait_util.h"
 #import "ios/web/public/test/earl_grey/web_view_actions.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
-#import "ios/web/public/test/http_server.h"
-#include "ios/web/public/test/http_server_util.h"
+#import "ios/web/public/test/http_server/http_server.h"
+#include "ios/web/public/test/http_server/http_server_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -32,7 +35,7 @@ NSString* GetFocusedElementId() {
   NSString* js = @"(function() {"
                   "  return document.activeElement.id;"
                   "})();";
-  NSError* error = nil;
+  __unsafe_unretained NSError* error = nil;
   NSString* result = chrome_test_util::ExecuteJavaScript(js, &error);
   GREYAssertTrue(!error, @"Unexpected error when executing JavaScript.");
   return result;
@@ -84,10 +87,7 @@ void AssertElementIsFocused(const std::string& element_id) {
       "http://ios/testing/data/http_server_files/multi_field_form.html");
   [ChromeEarlGrey loadURL:URL];
 
-  id<GREYMatcher> webViewMatcher =
-      chrome_test_util::WebViewContainingText("hello!");
-  [[EarlGrey selectElementWithMatcher:webViewMatcher]
-      assertWithMatcher:grey_notNil()];
+  [ChromeEarlGrey waitForWebViewContainingText:"hello!"];
 
   // Opening the keyboard from a webview blocks EarlGrey's synchronization.
   [[GREYConfiguration sharedInstance]
@@ -98,7 +98,7 @@ void AssertElementIsFocused(const std::string& element_id) {
   [[EarlGrey
       selectElementWithMatcher:web::WebViewInWebState(
                                    chrome_test_util::GetCurrentWebState())]
-      performAction:web::webViewTapElement(
+      performAction:web::WebViewTapElement(
                         chrome_test_util::GetCurrentWebState(),
                         kFormElementId1)];
 

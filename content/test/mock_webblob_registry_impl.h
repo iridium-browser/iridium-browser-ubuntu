@@ -17,29 +17,16 @@ class MockWebBlobRegistryImpl : public blink::WebBlobRegistry {
   MockWebBlobRegistryImpl();
   ~MockWebBlobRegistryImpl() override;
 
-  void registerBlobData(const blink::WebString& uuid,
+  void RegisterBlobData(const blink::WebString& uuid,
                         const blink::WebBlobData& data) override;
-  std::unique_ptr<Builder> createBuilder(
+  std::unique_ptr<Builder> CreateBuilder(
       const blink::WebString& uuid,
       const blink::WebString& contentType) override;
-  void addBlobDataRef(const blink::WebString& uuid) override;
-  void removeBlobDataRef(const blink::WebString& uuid) override;
-  void registerPublicBlobURL(const blink::WebURL&,
+  void AddBlobDataRef(const blink::WebString& uuid) override;
+  void RemoveBlobDataRef(const blink::WebString& uuid) override;
+  void RegisterPublicBlobURL(const blink::WebURL&,
                              const blink::WebString& uuid) override;
-  void revokePublicBlobURL(const blink::WebURL&) override;
-
-  // Additional support for Streams.
-  void registerStreamURL(const blink::WebURL& url,
-                         const blink::WebString& content_type) override;
-  void registerStreamURL(const blink::WebURL& url,
-                         const blink::WebURL& src_url) override;
-  void addDataToStream(const blink::WebURL& url,
-                       const char* data,
-                       size_t length) override;
-  void flushStream(const blink::WebURL& url) override;
-  void finalizeStream(const blink::WebURL& url) override;
-  void abortStream(const blink::WebURL& url) override;
-  void unregisterStreamURL(const blink::WebURL& url) override;
+  void RevokePublicBlobURL(const blink::WebURL&) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockWebBlobRegistryImpl);

@@ -9,8 +9,8 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "cc/output/context_provider.h"
 #include "cc/output/shader.h"
+#include "components/viz/common/gpu/context_provider.h"
 
 namespace gfx {
 class ColorTransform;
@@ -32,9 +32,7 @@ class ProgramBindingBase {
   bool Init(gpu::gles2::GLES2Interface* context,
             const std::string& vertex_shader,
             const std::string& fragment_shader);
-  bool Link(gpu::gles2::GLES2Interface* context,
-            const std::string& vertex_source,
-            const std::string& fragment_source);
+  bool Link(gpu::gles2::GLES2Interface* context);
   void Cleanup(gpu::gles2::GLES2Interface* context);
 
   unsigned program() const { return program_; }
@@ -86,7 +84,8 @@ class CC_EXPORT ProgramKey {
   static ProgramKey Texture(TexCoordPrecision precision,
                             SamplerType sampler,
                             PremultipliedAlphaMode premultiplied_alpha,
-                            bool has_background_color);
+                            bool has_background_color,
+                            bool has_tex_clamp_rect);
 
   // TODO(ccameron): Merge |mask_for_background| into MaskMode.
   static ProgramKey RenderPass(TexCoordPrecision precision,
@@ -131,6 +130,8 @@ class CC_EXPORT ProgramKey {
 
   ColorConversionMode color_conversion_mode_ = COLOR_CONVERSION_MODE_NONE;
   const gfx::ColorTransform* color_transform_ = nullptr;
+
+  bool has_tex_clamp_rect_ = false;
 };
 
 struct ProgramKeyHash {
@@ -149,7 +150,8 @@ struct ProgramKeyHash {
            (static_cast<size_t>(key.has_color_matrix_) << 23) ^
            (static_cast<size_t>(key.yuv_alpha_texture_mode_) << 24) ^
            (static_cast<size_t>(key.uv_texture_mode_) << 25) ^
-           (static_cast<size_t>(key.color_conversion_mode_) << 26);
+           (static_cast<size_t>(key.color_conversion_mode_) << 26) ^
+           (static_cast<size_t>(key.has_tex_clamp_rect_) << 28);
   }
 };
 
@@ -157,7 +159,8 @@ class Program : public ProgramBindingBase {
  public:
   Program() {}
 
-  void Initialize(ContextProvider* context_provider, const ProgramKey& key) {
+  void Initialize(viz::ContextProvider* context_provider,
+                  const ProgramKey& key) {
     // Set parameters that are common to all sub-classes.
     vertex_shader_.aa_mode_ = key.aa_mode_;
     fragment_shader_.aa_mode_ = key.aa_mode_;
@@ -258,6 +261,9 @@ class Program : public ProgramBindingBase {
   int color_offset_location() const {
     return fragment_shader_.color_offset_location_;
   }
+  int tex_clamp_rect_location() const {
+    return fragment_shader_.tex_clamp_rect_location_;
+  }
   int y_texture_location() const {
     return fragment_shader_.y_texture_location_;
   }
@@ -347,11 +353,12 @@ class Program : public ProgramBindingBase {
     vertex_shader_.tex_coord_transform_ = TEX_COORD_TRANSFORM_VEC4;
     vertex_shader_.has_matrix_ = true;
     vertex_shader_.has_vertex_opacity_ = true;
-    vertex_shader_.use_uniform_arrays_ = true;
+    vertex_shader_.use_uniform_arrays_ = !key.has_tex_clamp_rect_;
 
     // Initialize fragment program.
     fragment_shader_.has_varying_alpha_ = true;
     fragment_shader_.has_background_color_ = key.has_background_color_;
+    fragment_shader_.has_tex_clamp_rect_ = key.has_tex_clamp_rect_;
   }
 
   void InitializeRenderPassProgram(const ProgramKey& key) {
@@ -398,17 +405,16 @@ class Program : public ProgramBindingBase {
     fragment_shader_.uv_texture_mode_ = key.uv_texture_mode_;
   }
 
-  void InitializeInternal(ContextProvider* context_provider) {
+  void InitializeInternal(viz::ContextProvider* context_provider) {
     DCHECK(context_provider);
     DCHECK(!initialized_);
 
     if (IsContextLost(context_provider->ContextGL()))
       return;
 
-    std::string vertex_source = vertex_shader_.GetShaderString();
-    std::string fragment_source = fragment_shader_.GetShaderString();
-    if (!ProgramBindingBase::Init(context_provider->ContextGL(), vertex_source,
-                                  fragment_source)) {
+    if (!ProgramBindingBase::Init(context_provider->ContextGL(),
+                                  vertex_shader_.GetShaderString(),
+                                  fragment_shader_.GetShaderString())) {
       DCHECK(IsContextLost(context_provider->ContextGL()));
       return;
     }
@@ -420,7 +426,7 @@ class Program : public ProgramBindingBase {
                           program_, &base_uniform_index);
 
     // Link after binding uniforms
-    if (!Link(context_provider->ContextGL(), vertex_source, fragment_source)) {
+    if (!Link(context_provider->ContextGL())) {
       DCHECK(IsContextLost(context_provider->ContextGL()));
       return;
     }

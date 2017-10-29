@@ -11,6 +11,8 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/sys_byteorder.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
@@ -27,9 +29,9 @@ namespace {
 const int kMaxRestartAttempts = 10;
 const char kPrivetDeviceTypeDnsString[] = "\x07_privet";
 
-void GetNetworkListOnFileThread(
+void GetNetworkListInBackground(
     const base::Callback<void(const net::NetworkInterfaceList&)> callback) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
+  base::ThreadRestrictions::AssertIOAllowed();
   net::NetworkInterfaceList networks;
   if (!GetNetworkList(&networks, net::INCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES))
     return;
@@ -54,7 +56,7 @@ void GetNetworkListOnFileThread(
                             8,
                             net::IP_ADDRESS_ATTRIBUTE_NONE));
   content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
-                                   base::Bind(callback, ip4_networks));
+                                   base::BindOnce(callback, ip4_networks));
 }
 
 }  // namespace
@@ -74,10 +76,9 @@ PrivetTrafficDetector::PrivetTrafficDetector(
 
 void PrivetTrafficDetector::Start() {
   content::BrowserThread::PostTask(
-      content::BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&PrivetTrafficDetector::StartOnIOThread,
-                 weak_ptr_factory_.GetWeakPtr()));
+      content::BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&PrivetTrafficDetector::StartOnIOThread,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 PrivetTrafficDetector::~PrivetTrafficDetector() {
@@ -103,12 +104,11 @@ void PrivetTrafficDetector::ScheduleRestart() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   socket_.reset();
   weak_ptr_factory_.InvalidateWeakPtrs();
-  content::BrowserThread::PostDelayedTask(
-      content::BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(&GetNetworkListOnFileThread,
-                 base::Bind(&PrivetTrafficDetector::Restart,
-                            weak_ptr_factory_.GetWeakPtr())),
+  base::PostDelayedTaskWithTraits(
+      FROM_HERE, {base::TaskPriority::BACKGROUND, base::MayBlock()},
+      base::BindOnce(&GetNetworkListInBackground,
+                     base::Bind(&PrivetTrafficDetector::Restart,
+                                weak_ptr_factory_.GetWeakPtr())),
       base::TimeDelta::FromSeconds(3));
 }
 

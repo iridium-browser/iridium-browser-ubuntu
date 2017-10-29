@@ -74,7 +74,8 @@ error::Error DoCompressedTexImage2D(GLenum target,
                                     GLsizei width,
                                     GLsizei height,
                                     GLint border,
-                                    GLsizei imageSize,
+                                    GLsizei image_size,
+                                    GLsizei data_size,
                                     const void* data);
 error::Error DoCompressedTexSubImage2D(GLenum target,
                                        GLint level,
@@ -83,7 +84,8 @@ error::Error DoCompressedTexSubImage2D(GLenum target,
                                        GLsizei width,
                                        GLsizei height,
                                        GLenum format,
-                                       GLsizei imageSize,
+                                       GLsizei image_size,
+                                       GLsizei data_size,
                                        const void* data);
 error::Error DoCompressedTexImage3D(GLenum target,
                                     GLint level,
@@ -92,7 +94,8 @@ error::Error DoCompressedTexImage3D(GLenum target,
                                     GLsizei height,
                                     GLsizei depth,
                                     GLint border,
-                                    GLsizei imageSize,
+                                    GLsizei image_size,
+                                    GLsizei data_size,
                                     const void* data);
 error::Error DoCompressedTexSubImage3D(GLenum target,
                                        GLint level,
@@ -103,7 +106,8 @@ error::Error DoCompressedTexSubImage3D(GLenum target,
                                        GLsizei height,
                                        GLsizei depth,
                                        GLenum format,
-                                       GLsizei imageSize,
+                                       GLsizei image_size,
+                                       GLsizei data_size,
                                        const void* data);
 error::Error DoCopyBufferSubData(GLenum readtarget,
                                  GLenum writetarget,
@@ -215,8 +219,6 @@ error::Error DoGetActiveUniformsiv(GLuint program,
                                    GLsizei count,
                                    const GLuint* indices,
                                    GLenum pname,
-                                   GLsizei bufSize,
-                                   GLsizei* length,
                                    GLint* params);
 error::Error DoGetAttachedShaders(GLuint program,
                                   GLsizei maxcount,
@@ -225,6 +227,10 @@ error::Error DoGetAttachedShaders(GLuint program,
 error::Error DoGetAttribLocation(GLuint program,
                                  const char* name,
                                  GLint* result);
+error::Error DoGetBufferSubDataAsyncCHROMIUM(GLenum target,
+                                             GLintptr offset,
+                                             GLsizeiptr size,
+                                             uint8_t* mem);
 error::Error DoGetBooleanv(GLenum pname,
                            GLsizei bufsize,
                            GLsizei* length,
@@ -354,7 +360,6 @@ error::Error DoGetUniformIndices(GLuint program,
                                  GLsizei count,
                                  const char* const* names,
                                  GLsizei bufSize,
-                                 GLsizei* length,
                                  GLuint* indices);
 error::Error DoGetUniformLocation(GLuint program,
                                   const char* name,
@@ -419,6 +424,8 @@ error::Error DoReadPixels(GLint x,
                           GLenum type,
                           GLsizei bufsize,
                           GLsizei* length,
+                          GLsizei* columns,
+                          GLsizei* rows,
                           void* pixels,
                           int32_t* success);
 error::Error DoReleaseShaderCompiler();
@@ -466,7 +473,7 @@ error::Error DoTexImage2D(GLenum target,
                           GLint border,
                           GLenum format,
                           GLenum type,
-                          GLsizei imagesize,
+                          GLsizei image_size,
                           const void* pixels);
 error::Error DoTexImage3D(GLenum target,
                           GLint level,
@@ -477,7 +484,7 @@ error::Error DoTexImage3D(GLenum target,
                           GLint border,
                           GLenum format,
                           GLenum type,
-                          GLsizei imagesize,
+                          GLsizei image_size,
                           const void* pixels);
 error::Error DoTexParameterf(GLenum target, GLenum pname, GLfloat param);
 error::Error DoTexParameterfv(GLenum target,
@@ -501,7 +508,7 @@ error::Error DoTexSubImage2D(GLenum target,
                              GLsizei height,
                              GLenum format,
                              GLenum type,
-                             GLsizei imagesize,
+                             GLsizei image_size,
                              const void* pixels);
 error::Error DoTexSubImage3D(GLenum target,
                              GLint level,
@@ -513,7 +520,7 @@ error::Error DoTexSubImage3D(GLenum target,
                              GLsizei depth,
                              GLenum format,
                              GLenum type,
-                             GLsizei imagesize,
+                             GLsizei image_size,
                              const void* pixels);
 error::Error DoTransformFeedbackVaryings(GLuint program,
                                          GLsizei count,
@@ -713,7 +720,10 @@ error::Error DoMapBufferRange(GLenum target,
                               GLintptr offset,
                               GLsizeiptr size,
                               GLbitfield access,
-                              void** ptr);
+                              void* ptr,
+                              int32_t data_shm_id,
+                              uint32_t data_shm_offset,
+                              uint32_t* result);
 error::Error DoUnmapBuffer(GLenum target);
 error::Error DoResizeCHROMIUM(GLuint width,
                               GLuint height,
@@ -737,20 +747,20 @@ error::Error DoPostSubBufferCHROMIUM(GLint x,
                                      GLint y,
                                      GLint width,
                                      GLint height);
-error::Error DoCopyTextureCHROMIUM(GLenum source_id,
+error::Error DoCopyTextureCHROMIUM(GLuint source_id,
                                    GLint source_level,
                                    GLenum dest_target,
-                                   GLenum dest_id,
+                                   GLuint dest_id,
                                    GLint dest_level,
                                    GLint internalformat,
                                    GLenum dest_type,
                                    GLboolean unpack_flip_y,
                                    GLboolean unpack_premultiply_alpha,
                                    GLboolean unpack_unmultiply_alpha);
-error::Error DoCopySubTextureCHROMIUM(GLenum source_id,
+error::Error DoCopySubTextureCHROMIUM(GLuint source_id,
                                       GLint source_level,
                                       GLenum dest_target,
-                                      GLenum dest_id,
+                                      GLuint dest_id,
                                       GLint dest_level,
                                       GLint xoffset,
                                       GLint yoffset,
@@ -761,7 +771,7 @@ error::Error DoCopySubTextureCHROMIUM(GLenum source_id,
                                       GLboolean unpack_flip_y,
                                       GLboolean unpack_premultiply_alpha,
                                       GLboolean unpack_unmultiply_alpha);
-error::Error DoCompressedCopyTextureCHROMIUM(GLenum source_id, GLenum dest_id);
+error::Error DoCompressedCopyTextureCHROMIUM(GLuint source_id, GLuint dest_id);
 error::Error DoDrawArraysInstancedANGLE(GLenum mode,
                                         GLint first,
                                         GLsizei count,
@@ -786,6 +796,9 @@ error::Error DoBindUniformLocationCHROMIUM(GLuint program,
                                            GLint location,
                                            const char* name);
 error::Error DoBindTexImage2DCHROMIUM(GLenum target, GLint imageId);
+error::Error DoBindTexImage2DWithInternalformatCHROMIUM(GLenum target,
+                                                        GLenum internalformat,
+                                                        GLint imageId);
 error::Error DoReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId);
 error::Error DoTraceBeginCHROMIUM(const char* category_name,
                                   const char* trace_name);
@@ -825,6 +838,18 @@ error::Error DoScheduleCALayerCHROMIUM(GLuint contents_texture_id,
 error::Error DoScheduleCALayerInUseQueryCHROMIUM(
     GLuint n,
     const volatile GLuint* textures);
+error::Error DoScheduleDCLayerSharedStateCHROMIUM(GLfloat opacity,
+                                                  GLboolean is_clipped,
+                                                  const GLfloat* clip_rect,
+                                                  GLint z_order,
+                                                  const GLfloat* transform);
+error::Error DoScheduleDCLayerCHROMIUM(
+    GLsizei num_textures,
+    const volatile GLuint* contents_texture_ids,
+    const GLfloat* contents_rect,
+    GLuint background_color,
+    GLuint edge_aa_mask,
+    const GLfloat* bounds_rect);
 error::Error DoCommitOverlayPlanesCHROMIUM();
 error::Error DoSwapInterval(GLint interval);
 error::Error DoFlushDriverCachesCHROMIUM();
@@ -958,3 +983,4 @@ error::Error DoSetDrawRectangleCHROMIUM(GLint x,
                                         GLint y,
                                         GLint width,
                                         GLint height);
+error::Error DoSetEnableDCLayersCHROMIUM(GLboolean enable);

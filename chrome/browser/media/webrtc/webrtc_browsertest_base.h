@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "chrome/browser/media/webrtc/test_stats_dictionary.h"
 #include "chrome/test/base/in_process_browser_test.h"
 
@@ -45,6 +46,14 @@ class WebRtcTestBase : public InProcessBrowserTest {
   static const char kUseDefaultCertKeygen[];
   static const char kUseDefaultAudioCodec[];
   static const char kUseDefaultVideoCodec[];
+
+  static const char kUndefined[];
+
+  enum class StreamArgumentType {
+    NO_STREAM,
+    SHARED_STREAM,
+    INDIVIDUAL_STREAMS
+  };
 
  protected:
   WebRtcTestBase();
@@ -138,6 +147,10 @@ class WebRtcTestBase : public InProcessBrowserTest {
   void NegotiateCall(content::WebContents* from_tab,
                      content::WebContents* to_tab) const;
 
+  void VerifyLocalDescriptionContainsCertificate(
+      content::WebContents* tab,
+      const std::string& certificate) const;
+
   // Hangs up a negotiated call.
   void HangUp(content::WebContents* from_tab) const;
 
@@ -157,8 +170,8 @@ class WebRtcTestBase : public InProcessBrowserTest {
   std::string GetStreamSize(content::WebContents* tab_contents,
                             const std::string& video_element) const;
 
-  // Returns true if we're on win 8.
-  bool OnWin8() const;
+  // Returns true if we're on Windows 8 or higher.
+  bool OnWin8OrHigher() const;
 
   void OpenDatabase(content::WebContents* tab) const;
   void CloseDatabase(content::WebContents* tab) const;
@@ -186,6 +199,33 @@ class WebRtcTestBase : public InProcessBrowserTest {
   // Add 'usedtx=1' to the offer SDP.
   void EnableOpusDtx(content::WebContents* tab) const;
 
+  void CreateAndAddStreams(content::WebContents* tab, size_t count) const;
+  void VerifyRtpSenders(content::WebContents* tab,
+                        base::Optional<size_t> expected_num_tracks =
+                            base::Optional<size_t>()) const;
+  void VerifyRtpReceivers(content::WebContents* tab,
+                          base::Optional<size_t> expected_num_tracks =
+                              base::Optional<size_t>()) const;
+  std::vector<std::string> CreateAndAddAudioAndVideoTrack(
+      content::WebContents* tab,
+      StreamArgumentType stream_argument_type) const;
+  void RemoveTrack(content::WebContents* tab,
+                   const std::string& track_id) const;
+  bool HasLocalStreamWithTrack(content::WebContents* tab,
+                               const std::string& stream_id,
+                               const std::string& track_id) const;
+  bool HasRemoteStreamWithTrack(content::WebContents* tab,
+                                const std::string& stream_id,
+                                const std::string& track_id) const;
+  bool HasSenderWithTrack(content::WebContents* tab,
+                          std::string track_id) const;
+  bool HasReceiverWithTrack(content::WebContents* tab,
+                            std::string track_id) const;
+  size_t GetNegotiationNeededCount(content::WebContents* tab) const;
+  // Performs garbage collection with "gc()". Requires command line switch
+  // |kJavaScriptFlags| with "--expose-gc".
+  void CollectGarbage(content::WebContents* tab) const;
+
  private:
   void CloseInfoBarInTab(content::WebContents* tab_contents,
                          infobars::InfoBar* infobar) const;
@@ -197,6 +237,10 @@ class WebRtcTestBase : public InProcessBrowserTest {
                      content::WebContents* from_tab) const;
   void GatherAndSendIceCandidates(content::WebContents* from_tab,
                                   content::WebContents* to_tab) const;
+  bool HasStreamWithTrack(content::WebContents* tab,
+                          const char* function_name,
+                          std::string stream_id,
+                          std::string track_id) const;
 
   infobars::InfoBar* GetUserMediaAndWaitForInfoBar(
       content::WebContents* tab_contents,

@@ -8,19 +8,21 @@
 
 #include "ash/host/root_window_transformer.h"
 #include "ash/host/transformer_helper.h"
-#include "ash/ime/input_method_event_handler.h"
+#include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host_platform.h"
-#include "ui/events/event_processor.h"
+#include "ui/events/event_sink.h"
 #include "ui/events/null_event_targeter.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/transform.h"
 #include "ui/platform_window/platform_window.h"
 
 #if defined(USE_OZONE)
-#include "ui/ozone/public/input_controller.h"
-#include "ui/ozone/public/ozone_platform.h"
+#include "services/ui/public/cpp/input_devices/input_device_controller_client.h"
+#include "services/ui/public/interfaces/window_manager.mojom.h"
+#include "ui/events/ozone/chromeos/cursor_controller.h"
 #endif
 
 namespace ash {
@@ -39,10 +41,6 @@ AshWindowTreeHostPlatform::AshWindowTreeHostPlatform()
 
 AshWindowTreeHostPlatform::~AshWindowTreeHostPlatform() {}
 
-void AshWindowTreeHostPlatform::ToggleFullScreen() {
-  NOTIMPLEMENTED();
-}
-
 bool AshWindowTreeHostPlatform::ConfineCursorToRootWindow() {
   gfx::Rect confined_bounds(GetBoundsInPixels().size());
   confined_bounds.Inset(transformer_helper_.GetHostInsets());
@@ -53,6 +51,26 @@ bool AshWindowTreeHostPlatform::ConfineCursorToRootWindow() {
 void AshWindowTreeHostPlatform::UnConfineCursor() {
   NOTIMPLEMENTED();
 }
+
+#if defined(USE_OZONE)
+void AshWindowTreeHostPlatform::SetCursorConfig(
+    const display::Display& display,
+    display::Display::Rotation rotation) {
+  // Scale all motion on High-DPI displays.
+  float scale = display.device_scale_factor();
+
+  if (!display.IsInternal())
+    scale *= ui::mojom::kCursorMultiplierForExternalDisplays;
+
+  ui::CursorController::GetInstance()->SetCursorConfigForWindow(
+      GetAcceleratedWidget(), rotation, scale);
+}
+
+void AshWindowTreeHostPlatform::ClearCursorConfig() {
+  ui::CursorController::GetInstance()->ClearCursorConfigForWindow(
+      GetAcceleratedWidget());
+}
+#endif
 
 void AshWindowTreeHostPlatform::SetRootWindowTransformer(
     std::unique_ptr<RootWindowTransformer> transformer) {
@@ -75,6 +93,10 @@ void AshWindowTreeHostPlatform::PrepareForShutdown() {
   // coordinates.
   window()->SetEventTargeter(
       std::unique_ptr<ui::EventTargeter>(new ui::NullEventTargeter));
+
+  // Do anything platform specific necessary before shutdown (eg. stop
+  // listening for configuration XEvents).
+  platform_window()->PrepareForShutdown();
 }
 
 void AshWindowTreeHostPlatform::SetRootTransform(
@@ -108,26 +130,18 @@ void AshWindowTreeHostPlatform::DispatchEvent(ui::Event* event) {
   TRACE_EVENT0("input", "AshWindowTreeHostPlatform::DispatchEvent");
   if (event->IsLocatedEvent())
     TranslateLocatedEvent(static_cast<ui::LocatedEvent*>(event));
-  SendEventToProcessor(event);
-}
-
-ui::EventDispatchDetails AshWindowTreeHostPlatform::DispatchKeyEventPostIME(
-    ui::KeyEvent* event) {
-  input_method_handler()->SetPostIME(true);
-  ui::EventDispatchDetails details =
-      event_processor()->OnEventFromSource(event);
-  if (!details.dispatcher_destroyed)
-    input_method_handler()->SetPostIME(false);
-  return details;
+  SendEventToSink(event);
 }
 
 void AshWindowTreeHostPlatform::SetTapToClickPaused(bool state) {
 #if defined(USE_OZONE)
-  DCHECK(ui::OzonePlatform::GetInstance()->GetInputController());
+  ui::InputDeviceControllerClient* input_device_controller_client =
+      Shell::Get()->shell_delegate()->GetInputDeviceControllerClient();
+  if (!input_device_controller_client)
+    return;  // Happens in tests.
 
   // Temporarily pause tap-to-click when the cursor is hidden.
-  ui::OzonePlatform::GetInstance()->GetInputController()->SetTapToClickPaused(
-      state);
+  input_device_controller_client->SetTapToClickPaused(state);
 #endif
 }
 

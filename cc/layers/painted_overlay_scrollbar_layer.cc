@@ -9,6 +9,7 @@
 #include "base/auto_reset.h"
 #include "cc/base/math_util.h"
 #include "cc/layers/painted_overlay_scrollbar_layer_impl.h"
+#include "cc/paint/skia_paint_canvas.h"
 #include "cc/resources/ui_resource_bitmap.h"
 #include "cc/resources/ui_resource_manager.h"
 #include "cc/trees/layer_tree_host.h"
@@ -31,16 +32,16 @@ std::unique_ptr<LayerImpl> PaintedOverlayScrollbarLayer::CreateLayerImpl(
 
 scoped_refptr<PaintedOverlayScrollbarLayer>
 PaintedOverlayScrollbarLayer::Create(std::unique_ptr<Scrollbar> scrollbar,
-                                     int scroll_layer_id) {
-  return make_scoped_refptr(
-      new PaintedOverlayScrollbarLayer(std::move(scrollbar), scroll_layer_id));
+                                     ElementId scroll_element_id) {
+  return make_scoped_refptr(new PaintedOverlayScrollbarLayer(
+      std::move(scrollbar), scroll_element_id));
 }
 
 PaintedOverlayScrollbarLayer::PaintedOverlayScrollbarLayer(
     std::unique_ptr<Scrollbar> scrollbar,
-    int scroll_layer_id)
+    ElementId scroll_element_id)
     : scrollbar_(std::move(scrollbar)),
-      scroll_layer_id_(scroll_layer_id),
+      scroll_element_id_(scroll_element_id),
       thumb_thickness_(scrollbar_->ThumbThickness()),
       thumb_length_(scrollbar_->ThumbLength()) {
   DCHECK(scrollbar_->UsesNinePatchThumbResource());
@@ -48,28 +49,16 @@ PaintedOverlayScrollbarLayer::PaintedOverlayScrollbarLayer(
 
 PaintedOverlayScrollbarLayer::~PaintedOverlayScrollbarLayer() {}
 
-int PaintedOverlayScrollbarLayer::ScrollLayerId() const {
-  return scroll_layer_id_;
-}
-
-void PaintedOverlayScrollbarLayer::SetScrollLayer(int layer_id) {
-  if (layer_id == scroll_layer_id_)
+void PaintedOverlayScrollbarLayer::SetScrollElementId(ElementId element_id) {
+  if (element_id == scroll_element_id_)
     return;
 
-  scroll_layer_id_ = layer_id;
+  scroll_element_id_ = element_id;
   SetNeedsFullTreeSync();
 }
 
 bool PaintedOverlayScrollbarLayer::OpacityCanAnimateOnImplThread() const {
   return scrollbar_->IsOverlay();
-}
-
-bool PaintedOverlayScrollbarLayer::AlwaysUseActiveTreeOpacity() const {
-  return true;
-}
-
-ScrollbarOrientation PaintedOverlayScrollbarLayer::orientation() const {
-  return scrollbar_->Orientation();
 }
 
 void PaintedOverlayScrollbarLayer::PushPropertiesTo(LayerImpl* layer) {
@@ -78,11 +67,11 @@ void PaintedOverlayScrollbarLayer::PushPropertiesTo(LayerImpl* layer) {
   PaintedOverlayScrollbarLayerImpl* scrollbar_layer =
       static_cast<PaintedOverlayScrollbarLayerImpl*>(layer);
 
-  scrollbar_layer->SetScrollLayerId(scroll_layer_id_);
+  scrollbar_layer->SetScrollElementId(scroll_element_id_);
 
   scrollbar_layer->SetThumbThickness(thumb_thickness_);
   scrollbar_layer->SetThumbLength(thumb_length_);
-  if (orientation() == HORIZONTAL) {
+  if (scrollbar_->Orientation() == HORIZONTAL) {
     scrollbar_layer->SetTrackStart(track_rect_.x() - location_.x());
     scrollbar_layer->SetTrackLength(track_rect_.width());
   } else {
@@ -137,7 +126,7 @@ bool PaintedOverlayScrollbarLayer::Update() {
 }
 
 bool PaintedOverlayScrollbarLayer::PaintThumbIfNeeded() {
-  if (!scrollbar_->NeedsPaintPart(THUMB))
+  if (!scrollbar_->NeedsPaintPart(THUMB) && thumb_resource_)
     return false;
 
   gfx::Rect paint_rect = OriginThumbRectForPainting();
@@ -148,16 +137,16 @@ bool PaintedOverlayScrollbarLayer::PaintThumbIfNeeded() {
 
   SkBitmap skbitmap;
   skbitmap.allocN32Pixels(paint_rect.width(), paint_rect.height());
-  SkCanvas skcanvas(skbitmap);
+  SkiaPaintCanvas canvas(skbitmap);
 
   SkRect content_skrect = RectToSkRect(paint_rect);
-  SkPaint paint;
-  paint.setAntiAlias(false);
-  paint.setBlendMode(SkBlendMode::kClear);
-  skcanvas.drawRect(content_skrect, paint);
-  skcanvas.clipRect(content_skrect);
+  PaintFlags flags;
+  flags.setAntiAlias(false);
+  flags.setBlendMode(SkBlendMode::kClear);
+  canvas.drawRect(content_skrect, flags);
+  canvas.clipRect(content_skrect);
 
-  scrollbar_->PaintPart(&skcanvas, THUMB, paint_rect);
+  scrollbar_->PaintPart(&canvas, THUMB, paint_rect);
   // Make sure that the pixels are no longer mutable to unavoid unnecessary
   // allocation and copying.
   skbitmap.setImmutable();

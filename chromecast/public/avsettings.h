@@ -21,6 +21,7 @@ class AvSettings {
  public:
   // Defines whether or not the cast receiver is the current active source of
   // the screen. If the device is connected to HDMI sinks, it may be unknown.
+  // GENERATED_JAVA_ENUM_PACKAGE: com.google.android.apps.mediashell.avsettings
   enum ActiveState {
     UNKNOWN,
     STANDBY,   // Screen is off
@@ -29,6 +30,7 @@ class AvSettings {
   };
 
   // Audio codec supported by the device (or HDMI sink).
+  // GENERATED_JAVA_ENUM_PACKAGE: com.google.android.apps.mediashell.avsettings
   enum AudioCodec {
     AC3 = 1 << 0,
     DTS = 1 << 1,
@@ -63,6 +65,7 @@ class AvSettings {
     WAKE_ON_CAST_ENABLED,
   };
 
+  // GENERATED_JAVA_ENUM_PACKAGE: com.google.android.apps.mediashell.avsettings
   enum Event {
     // This event shall be fired whenever the active state is changed including
     // when the screen turned on, when the cast receiver (or the device where
@@ -73,6 +76,8 @@ class AvSettings {
     // Initialize() was called.
     ACTIVE_STATE_CHANGED = 0,
 
+    // DEPRECATED - Prefer to implement volume control in the media shlib using
+    // the VolumeControl API (see chromecast/public/volume_control.h).
     // This event shall be fired whenever the system volume level or muted state
     // are changed including when user changed volume via a remote controller,
     // or after a call to SetAudioVolume() or SetAudioMuted().
@@ -163,9 +168,10 @@ class AvSettings {
   // Returns current active state.
   virtual ActiveState GetActiveState() = 0;
 
-  // Turns the screen on and sets the active input to the cast receiver.
+  // Turns the screen on. Sets the active input to the cast receiver iff
+  // switch_to_cast == true.
   // If successful, it must return true and fire ACTIVE_STATE_CHANGED.
-  virtual bool TurnActive() = 0;
+  virtual bool TurnActive(bool switch_to_cast) = 0;
 
   // Turns the screen off (or stand-by). If the device is connecting to HDMI
   // sinks, broadcasts a CEC standby message on the HDMI control bus to put all
@@ -203,19 +209,27 @@ class AvSettings {
   //  - UNKNOWN_VOLUME: 0.01 (1%)
   virtual bool GetAudioVolumeStepInterval(float* step_inteval) = 0;
 
+  // DEPRECATED - Prefer to implement volume control in the media shlib using
+  // the VolumeControl API (see chromecast/public/volume_control.h).
   // Returns the current volume level, which must be from 0.0 (inclusive) to
   // 1.0 (inclusive).
   virtual float GetAudioVolume() = 0;
 
+  // DEPRECATED - Prefer to implement volume control in the media shlib using
+  // the VolumeControl API (see chromecast/public/volume_control.h).
   // Sets new volume level of the device (or HDMI sinks). |level| is from 0.0
   // (inclusive) to 1.0 (inclusive).
   // If successful and the level has changed, it must return true and fire
   // AUDIO_VOLUME_CHANGED.
   virtual bool SetAudioVolume(float level) = 0;
 
+  // DEPRECATED - Prefer to implement volume control in the media shlib using
+  // the VolumeControl API (see chromecast/public/volume_control.h).
   // Whether or not the device (or HDMI sinks) is muted.
   virtual bool IsAudioMuted() = 0;
 
+  // DEPRECATED - Prefer to implement volume control in the media shlib using
+  // the VolumeControl API (see chromecast/public/volume_control.h).
   // Sets the device (or HDMI sinks) muted.
   // If successful and the muted state has changed, it must return true and fire
   // AUDIO_VOLUME_CHANGED.

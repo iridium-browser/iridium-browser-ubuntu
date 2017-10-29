@@ -9,11 +9,13 @@
 #include <vector>
 
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/elevation_icon_setter.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -25,7 +27,6 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/window/dialog_client_view.h"
 
 #if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
@@ -69,6 +70,7 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
       error_(error) {
   if (!anchor_view)
     SetAnchorRect(gfx::Rect(anchor_point, gfx::Size()));
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::GLOBAL_ERROR);
 }
 
 GlobalErrorBubbleView::~GlobalErrorBubbleView() {}
@@ -89,7 +91,7 @@ gfx::ImageSkia GlobalErrorBubbleView::GetWindowIcon() {
 }
 
 bool GlobalErrorBubbleView::ShouldShowWindowIcon() const {
-  return true;
+  return ChromeLayoutProvider::Get()->ShouldShowWindowIcon();
 }
 
 void GlobalErrorBubbleView::WindowClosing() {
@@ -126,7 +128,8 @@ void GlobalErrorBubbleView::Init() {
     layout->StartRow(1, 0);
     layout->AddView(message_labels[i]);
     if (i < message_labels.size() - 1)
-      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+      layout->AddPaddingRow(0, ChromeLayoutProvider::Get()->GetDistanceMetric(
+                                   views::DISTANCE_RELATED_CONTROL_VERTICAL));
   }
 
   // These bubbles show at times where activation is sporadic (like at startup,
@@ -152,10 +155,6 @@ void GlobalErrorBubbleView::UpdateButton(views::LabelButton* button,
 
 bool GlobalErrorBubbleView::ShouldShowCloseButton() const {
   return error_ && error_->ShouldShowCloseButton();
-}
-
-bool GlobalErrorBubbleView::ShouldDefaultButtonBeBlue() const {
-  return true;
 }
 
 base::string16 GlobalErrorBubbleView::GetDialogButtonLabel(

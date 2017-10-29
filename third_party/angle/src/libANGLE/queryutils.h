@@ -18,6 +18,8 @@ namespace gl
 {
 class Buffer;
 class Context;
+class Error;
+class FenceSync;
 class Framebuffer;
 class Program;
 class Renderbuffer;
@@ -27,7 +29,7 @@ class Texture;
 struct TextureCaps;
 struct UniformBlock;
 struct VertexAttribute;
-struct VertexBinding;
+class VertexBinding;
 struct VertexAttribCurrentValueData;
 
 void QueryFramebufferAttachmentParameteriv(const Framebuffer *framebuffer,
@@ -37,12 +39,12 @@ void QueryFramebufferAttachmentParameteriv(const Framebuffer *framebuffer,
 void QueryBufferParameteriv(const Buffer *buffer, GLenum pname, GLint *params);
 void QueryBufferParameteri64v(const Buffer *buffer, GLenum pname, GLint64 *params);
 void QueryBufferPointerv(const Buffer *buffer, GLenum pname, void **params);
-void QueryProgramiv(const Program *program, GLenum pname, GLint *params);
+void QueryProgramiv(const Context *context, const Program *program, GLenum pname, GLint *params);
 void QueryRenderbufferiv(const Context *context,
                          const Renderbuffer *renderbuffer,
                          GLenum pname,
                          GLint *params);
-void QueryShaderiv(const Shader *shader, GLenum pname, GLint *params);
+void QueryShaderiv(const Context *context, Shader *shader, GLenum pname, GLint *params);
 void QueryTexLevelParameterfv(const Texture *texture,
                               GLenum target,
                               GLint level,
@@ -72,7 +74,7 @@ void QueryVertexAttribiv(const VertexAttribute &attrib,
                          GLenum pname,
                          GLint *params);
 
-void QueryVertexAttribPointerv(const VertexAttribute &attrib, GLenum pname, GLvoid **pointer);
+void QueryVertexAttribPointerv(const VertexAttribute &attrib, GLenum pname, void **pointer);
 
 void QueryVertexAttribIiv(const VertexAttribute &attrib,
                           const VertexBinding &binding,
@@ -95,10 +97,16 @@ void QueryInternalFormativ(const TextureCaps &format, GLenum pname, GLsizei bufS
 
 void QueryFramebufferParameteriv(const Framebuffer *framebuffer, GLenum pname, GLint *params);
 
-void SetTexParameterf(Texture *texture, GLenum pname, GLfloat param);
-void SetTexParameterfv(Texture *texture, GLenum pname, const GLfloat *params);
-void SetTexParameteri(Texture *texture, GLenum pname, GLint param);
-void SetTexParameteriv(Texture *texture, GLenum pname, const GLint *params);
+Error QuerySynciv(const FenceSync *sync,
+                  GLenum pname,
+                  GLsizei bufSize,
+                  GLsizei *length,
+                  GLint *values);
+
+void SetTexParameterf(Context *context, Texture *texture, GLenum pname, GLfloat param);
+void SetTexParameterfv(Context *context, Texture *texture, GLenum pname, const GLfloat *params);
+void SetTexParameteri(Context *context, Texture *texture, GLenum pname, GLint param);
+void SetTexParameteriv(Context *context, Texture *texture, GLenum pname, const GLint *params);
 
 void SetSamplerParameterf(Sampler *sampler, GLenum pname, GLfloat param);
 void SetSamplerParameterfv(Sampler *sampler, GLenum pname, const GLfloat *params);
@@ -106,6 +114,23 @@ void SetSamplerParameteri(Sampler *sampler, GLenum pname, GLint param);
 void SetSamplerParameteriv(Sampler *sampler, GLenum pname, const GLint *params);
 
 void SetFramebufferParameteri(Framebuffer *framebuffer, GLenum pname, GLint param);
+
+void SetProgramParameteri(Program *program, GLenum pname, GLint value);
+
+GLuint QueryProgramResourceIndex(const Program *program,
+                                 GLenum programInterface,
+                                 const GLchar *name);
+
+void QueryProgramResourceName(const Program *program,
+                              GLenum programInterface,
+                              GLuint index,
+                              GLsizei bufSize,
+                              GLsizei *length,
+                              GLchar *name);
+
+GLint QueryProgramResourceLocation(const Program *program,
+                                   GLenum programInterface,
+                                   const GLchar *name);
 
 }  // namespace gl
 

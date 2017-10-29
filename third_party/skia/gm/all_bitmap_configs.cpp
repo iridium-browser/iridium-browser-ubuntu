@@ -5,17 +5,24 @@
  * found in the LICENSE file.
  */
 
-#include "sk_tool_utils.h"
 #include "SkSurface.h"
 #include "Resources.h"
 #include "gm.h"
+#include "sk_tool_utils.h"
 
 #include "SkMath.h"
 #include "SkColorPriv.h"
 
 static SkBitmap copy_bitmap(const SkBitmap& src, SkColorType colorType) {
+    const SkBitmap* srcPtr = &src;
+    SkBitmap tmp(src);
+    if (kRGB_565_SkColorType == colorType) {
+        tmp.setAlphaType(kOpaque_SkAlphaType);
+        srcPtr = &tmp;
+    }
+
     SkBitmap copy;
-    src.copyTo(&copy, colorType);
+    sk_tool_utils::copy_to(&copy, colorType, *srcPtr);
     copy.setImmutable();
     return copy;
 }
@@ -37,7 +44,6 @@ static SkBitmap make_bitmap(SkColorType ct) {
             SkASSERT(false);
             return bm;
     }
-    SkAutoLockPixels autoLockPixels(bm);
     uint8_t spectrum[256];
     for (int y = 0; y < 256; ++y) {
         spectrum[y] = y;
@@ -96,50 +102,6 @@ int find(T* array, int N, T item) {
     return -1;
 }
 
-static SkPMColor premultiply_color(SkColor c) {
-    return SkPremultiplyARGBInline(SkColorGetA(c), SkColorGetR(c),
-                                   SkColorGetG(c), SkColorGetB(c));
-}
-
-static SkBitmap indexed_bitmap() {
-    SkBitmap n32bitmap;
-    n32bitmap.allocN32Pixels(SCALE, SCALE);
-    n32bitmap.eraseColor(SK_ColorTRANSPARENT);
-
-    SkCanvas canvas(n32bitmap);
-    color_wheel_native(&canvas);
-    const SkColor colors[] = {
-            SK_ColorTRANSPARENT,
-            SK_ColorWHITE,
-            SK_ColorBLACK,
-            SK_ColorRED,
-            SK_ColorGREEN,
-            SK_ColorBLUE,
-            SK_ColorCYAN,
-            SK_ColorMAGENTA,
-            SK_ColorYELLOW,
-    };
-    SkPMColor pmColors[SK_ARRAY_COUNT(colors)];
-    for (size_t i = 0; i < SK_ARRAY_COUNT(colors); ++i) {
-        pmColors[i] = premultiply_color(colors[i]);
-    }
-    SkBitmap bm;
-    sk_sp<SkColorTable> ctable(new SkColorTable(pmColors, SK_ARRAY_COUNT(pmColors)));
-    SkImageInfo info = SkImageInfo::Make(SCALE, SCALE, kIndex_8_SkColorType,
-                                         kPremul_SkAlphaType);
-    bm.allocPixels(info, nullptr, ctable.get());
-    SkAutoLockPixels autoLockPixels1(n32bitmap);
-    SkAutoLockPixels autoLockPixels2(bm);
-    for (int y = 0; y < SCALE; ++y) {
-        for (int x = 0; x < SCALE; ++x) {
-            SkPMColor c = *n32bitmap.getAddr32(x, y);
-            int idx = find(pmColors, SK_ARRAY_COUNT(pmColors), c);
-            *bm.getAddr8(x, y) = SkClampMax(idx, SK_ARRAY_COUNT(pmColors) - 1);
-        }
-    }
-    return bm;
-}
-
 static void draw(SkCanvas* canvas,
                  const SkPaint& p,
                  const SkBitmap& src,
@@ -147,10 +109,10 @@ static void draw(SkCanvas* canvas,
                  const char text[]) {
     SkASSERT(src.colorType() == colorType);
     canvas->drawBitmap(src, 0.0f, 0.0f);
-    canvas->drawText(text, strlen(text), 0.0f, 12.0f, p);
+    canvas->drawString(text, 0.0f, 12.0f, p);
 }
 
-DEF_SIMPLE_GM(all_bitmap_configs, canvas, SCALE, 6 * SCALE) {
+DEF_SIMPLE_GM(all_bitmap_configs, canvas, SCALE, 5 * SCALE) {
     SkAutoCanvasRestore autoCanvasRestore(canvas, true);
     SkPaint p;
     p.setColor(SK_ColorBLACK);
@@ -178,10 +140,6 @@ DEF_SIMPLE_GM(all_bitmap_configs, canvas, SCALE, 6 * SCALE) {
     }
 
     canvas->translate(0.0f, SkIntToScalar(SCALE));
-    SkBitmap bitmapIndexed = indexed_bitmap();
-    draw(canvas, p, bitmapIndexed, kIndex_8_SkColorType, "Index 8");
-
-    canvas->translate(0.0f, SkIntToScalar(SCALE));
     SkBitmap bitmapA8 = make_bitmap(kAlpha_8_SkColorType);
     draw(canvas, p, bitmapA8, kAlpha_8_SkColorType, "Alpha 8");
 
@@ -204,7 +162,7 @@ sk_sp<SkImage> make_not_native32_color_wheel() {
         const SkColorType ct = kBGRA_8888_SkColorType;
     #endif
     static_assert(ct != kN32_SkColorType, "BRGA!=RGBA");
-    SkAssertResult(n32bitmap.copyTo(&notN32bitmap, ct));
+    SkAssertResult(sk_tool_utils::copy_to(&notN32bitmap, ct, n32bitmap));
     SkASSERT(notN32bitmap.colorType() == ct);
     return SkImage::MakeFromBitmap(notN32bitmap);
 }

@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/values.h"
 #include "net/base/proxy_delegate.h"
@@ -19,10 +20,10 @@
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_source_type.h"
 #include "net/socket/client_socket_handle.h"
-#include "net/spdy/spdy_proxy_client_socket.h"
-#include "net/spdy/spdy_session.h"
-#include "net/spdy/spdy_session_pool.h"
-#include "net/spdy/spdy_stream.h"
+#include "net/spdy/chromium/spdy_proxy_client_socket.h"
+#include "net/spdy/chromium/spdy_session.h"
+#include "net/spdy/chromium/spdy_session_pool.h"
+#include "net/spdy/chromium/spdy_stream.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "url/gurl.h"
 
@@ -59,6 +60,7 @@ HttpProxyClientSocketWrapper::HttpProxyClientSocketWrapper(
       user_agent_(user_agent),
       endpoint_(endpoint),
       spdy_session_pool_(spdy_session_pool),
+      has_restarted_(false),
       tunnel_(tunnel),
       proxy_delegate_(proxy_delegate),
       using_spdy_(false),
@@ -122,7 +124,8 @@ const HttpResponseInfo* HttpProxyClientSocketWrapper::GetConnectResponseInfo()
   return nullptr;
 }
 
-HttpStream* HttpProxyClientSocketWrapper::CreateConnectResponseStream() {
+std::unique_ptr<HttpStream>
+HttpProxyClientSocketWrapper::CreateConnectResponseStream() {
   if (transport_socket_)
     return transport_socket_->CreateConnectResponseStream();
   return nullptr;
@@ -387,6 +390,7 @@ int HttpProxyClientSocketWrapper::DoLoop(int result) {
 }
 
 int HttpProxyClientSocketWrapper::DoBeginConnect() {
+  connect_start_time_ = base::TimeTicks::Now();
   SetConnectTimer(connect_timeout_duration_);
   if (transport_params_) {
     next_state_ = STATE_TCP_CONNECT;
@@ -408,8 +412,11 @@ int HttpProxyClientSocketWrapper::DoTransportConnect() {
 }
 
 int HttpProxyClientSocketWrapper::DoTransportConnectComplete(int result) {
-  if (result != OK)
+  if (result != OK) {
+    UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpProxy.ConnectLatency.Insecure.Error",
+                               base::TimeTicks::Now() - connect_start_time_);
     return ERR_PROXY_CONNECTION_FAILED;
+  }
 
   // Reset the timer to just the length of time allowed for HttpProxy handshake
   // so that a fast TCP connection plus a slow HttpProxy failure doesn't take
@@ -424,7 +431,9 @@ int HttpProxyClientSocketWrapper::DoSSLConnect() {
   if (tunnel_) {
     SpdySessionKey key(GetDestination().host_port_pair(), ProxyServer::Direct(),
                        PRIVACY_MODE_DISABLED);
-    if (spdy_session_pool_->FindAvailableSession(key, GURL(), net_log_)) {
+    if (spdy_session_pool_->FindAvailableSession(
+            key, GURL(),
+            /* enable_ip_based_pooling = */ true, net_log_)) {
       using_spdy_ = true;
       next_state_ = STATE_SPDY_PROXY_CREATE_STREAM;
       return OK;
@@ -443,6 +452,8 @@ int HttpProxyClientSocketWrapper::DoSSLConnectComplete(int result) {
   if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
     DCHECK(
         transport_socket_handle_->ssl_error_response_info().cert_request_info);
+    UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpProxy.ConnectLatency.Secure.Error",
+                               base::TimeTicks::Now() - connect_start_time_);
     error_response_info_.reset(new HttpResponseInfo(
         transport_socket_handle_->ssl_error_response_info()));
     error_response_info_->cert_request_info->is_proxy = true;
@@ -450,6 +461,8 @@ int HttpProxyClientSocketWrapper::DoSSLConnectComplete(int result) {
   }
 
   if (IsCertificateError(result)) {
+    UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpProxy.ConnectLatency.Secure.Error",
+                               base::TimeTicks::Now() - connect_start_time_);
     if (ssl_params_->load_flags() & LOAD_IGNORE_ALL_CERT_ERRORS) {
       result = OK;
     } else {
@@ -467,6 +480,8 @@ int HttpProxyClientSocketWrapper::DoSSLConnectComplete(int result) {
     return ERR_SPDY_SESSION_ALREADY_EXISTS;
   }
   if (result < 0) {
+    UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpProxy.ConnectLatency.Secure.Error",
+                               base::TimeTicks::Now() - connect_start_time_);
     if (transport_socket_handle_->socket())
       transport_socket_handle_->socket()->Disconnect();
     return ERR_PROXY_CONNECTION_FAILED;
@@ -499,6 +514,14 @@ int HttpProxyClientSocketWrapper::DoSSLConnectComplete(int result) {
 int HttpProxyClientSocketWrapper::DoHttpProxyConnect() {
   next_state_ = STATE_HTTP_PROXY_CONNECT_COMPLETE;
 
+  if (transport_params_) {
+    UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpProxy.ConnectLatency.Insecure.Success",
+                               base::TimeTicks::Now() - connect_start_time_);
+  } else {
+    UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpProxy.ConnectLatency.Secure.Success",
+                               base::TimeTicks::Now() - connect_start_time_);
+  }
+
   // Add a HttpProxy connection on top of the tcp socket.
   transport_socket_.reset(new HttpProxyClientSocket(
       transport_socket_handle_.release(), user_agent_, endpoint_,
@@ -522,7 +545,9 @@ int HttpProxyClientSocketWrapper::DoSpdyProxyCreateStream() {
   SpdySessionKey key(GetDestination().host_port_pair(), ProxyServer::Direct(),
                      PRIVACY_MODE_DISABLED);
   base::WeakPtr<SpdySession> spdy_session =
-      spdy_session_pool_->FindAvailableSession(key, GURL(), net_log_);
+      spdy_session_pool_->FindAvailableSession(
+          key, GURL(),
+          /* enable_ip_based_pooling = */ true, net_log_);
   // It's possible that a session to the proxy has recently been created
   if (spdy_session) {
     if (transport_socket_handle_.get()) {
@@ -533,8 +558,7 @@ int HttpProxyClientSocketWrapper::DoSpdyProxyCreateStream() {
   } else {
     // Create a session direct to the proxy itself
     spdy_session = spdy_session_pool_->CreateAvailableSessionFromSocket(
-        key, std::move(transport_socket_handle_), net_log_,
-        /*using_ssl_*/ true);
+        key, std::move(transport_socket_handle_), net_log_);
     DCHECK(spdy_session);
   }
 
@@ -572,13 +596,33 @@ int HttpProxyClientSocketWrapper::DoRestartWithAuth() {
 
 int HttpProxyClientSocketWrapper::DoRestartWithAuthComplete(int result) {
   DCHECK_NE(ERR_IO_PENDING, result);
+
   // If the connection could not be reused to attempt to send proxy auth
-  // credentials, try reconnecting. If auth credentials were sent, pass the
-  // error on to caller, even if the credentials may have passed a close message
-  // from the server in flight.
-  if (result == ERR_UNABLE_TO_REUSE_CONNECTION_FOR_PROXY_AUTH) {
-    // If can't reuse the connection, attempt to create a new one.
+  // credentials, try reconnecting. Do not reset the HttpAuthController in this
+  // case; the server may, for instance, send "Proxy-Connection: close" and
+  // expect that each leg of the authentication progress on separate
+  // connections.
+  bool reconnect = result == ERR_UNABLE_TO_REUSE_CONNECTION_FOR_PROXY_AUTH;
+
+  // If auth credentials were sent but the connection was closed, the server may
+  // have timed out while the user was selecting credentials. Retry once.
+  if (!has_restarted_ &&
+      (result == ERR_CONNECTION_CLOSED || result == ERR_CONNECTION_RESET ||
+       result == ERR_CONNECTION_ABORTED ||
+       result == ERR_SOCKET_NOT_CONNECTED)) {
+    reconnect = true;
+    has_restarted_ = true;
+
+    // Release any auth state bound to the connection. The new connection will
+    // start the current scheme from scratch.
+    if (http_auth_controller_)
+      http_auth_controller_->OnConnectionClosed();
+  }
+
+  if (reconnect) {
+    // Attempt to create a new one.
     transport_socket_.reset();
+
     // Reconnect with HIGHEST priority to get in front of other requests that
     // don't yet have the information |http_auth_controller_| does.
     // TODO(mmenke): This may still result in waiting in line, if there are
@@ -613,6 +657,18 @@ void HttpProxyClientSocketWrapper::ConnectTimeout() {
   // Timer shouldn't be running if next_state_ is STATE_NONE.
   DCHECK_NE(STATE_NONE, next_state_);
   DCHECK(!connect_callback_.is_null());
+
+  if (next_state_ == STATE_TCP_CONNECT_COMPLETE ||
+      next_state_ == STATE_SSL_CONNECT_COMPLETE) {
+    if (transport_params_) {
+      UMA_HISTOGRAM_MEDIUM_TIMES(
+          "Net.HttpProxy.ConnectLatency.Insecure.TimedOut",
+          base::TimeTicks::Now() - connect_start_time_);
+    } else {
+      UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpProxy.ConnectLatency.Secure.TimedOut",
+                                 base::TimeTicks::Now() - connect_start_time_);
+    }
+  }
 
   NotifyProxyDelegateOfCompletion(ERR_CONNECTION_TIMED_OUT);
 

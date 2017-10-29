@@ -10,15 +10,22 @@
 
 #include "SkTypes.h"
 #include "SkMath.h"
+#include "SkOpts.h"
 
 /** Similar to memset(), but it assigns a 16, 32, or 64-bit value into the buffer.
     @param buffer   The memory to have value copied into it
     @param value    The value to be copied into buffer
     @param count    The number of times value should be copied into the buffer.
 */
-void sk_memset16(uint16_t buffer[], uint16_t value, int count);
-void sk_memset32(uint32_t buffer[], uint32_t value, int count);
-void sk_memset64(uint64_t buffer[], uint64_t value, int count);
+static inline void sk_memset16(uint16_t buffer[], uint16_t value, int count) {
+    SkOpts::memset16(buffer, value, count);
+}
+static inline void sk_memset32(uint32_t buffer[], uint32_t value, int count) {
+    SkOpts::memset32(buffer, value, count);
+}
+static inline void sk_memset64(uint64_t buffer[], uint64_t value, int count) {
+    SkOpts::memset64(buffer, value, count);
+}
 ///////////////////////////////////////////////////////////////////////////////
 
 #define kMaxBytesInUTF8Sequence     4
@@ -100,4 +107,10 @@ inline bool SkUnichar_IsVariationSelector(SkUnichar uni) {
     }
     return true;
 }
+
+namespace SkHexadecimalDigits {
+    extern const char gUpper[16];  // 0-9A-F
+    extern const char gLower[16];  // 0-9a-f
+}
+
 #endif

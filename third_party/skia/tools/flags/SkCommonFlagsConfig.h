@@ -46,15 +46,17 @@ class SkCommandLineConfig {
 #if SK_SUPPORT_GPU
 // SkCommandLineConfigGpu is a SkCommandLineConfig that extracts information out of the backend
 // part of the tag. It is constructed tags that have:
-// * backends of form "gpu(option=value,option2=value,...)"
-// * backends that represent a shorthand of above (such as "msaa16" representing "gpu(samples=16)")
+// * backends of form "gpu[option=value,option2=value,...]"
+// * backends that represent a shorthand of above (such as "glmsaa16" representing
+// "gpu(api=gl,samples=16)")
 class SkCommandLineConfigGpu : public SkCommandLineConfig {
   public:
     typedef sk_gpu_test::GrContextFactory::ContextType ContextType;
     typedef sk_gpu_test::GrContextFactory::ContextOverrides ContextOverrides;
     SkCommandLineConfigGpu(const SkString& tag, const SkTArray<SkString>& viaParts,
                            ContextType contextType, bool useNVPR, bool useInstanced, bool useDIText,
-                           int samples, SkColorType colorType, sk_sp<SkColorSpace> colorSpace);
+                           int samples, SkColorType colorType, SkAlphaType alphaType,
+                           sk_sp<SkColorSpace> colorSpace, bool useStencilBuffers);
     const SkCommandLineConfigGpu* asConfigGpu() const override { return this; }
     ContextType getContextType() const { return fContextType; }
     ContextOverrides getContextOverrides() const { return fContextOverrides; }
@@ -67,6 +69,7 @@ class SkCommandLineConfigGpu : public SkCommandLineConfig {
     bool getUseDIText() const { return fUseDIText; }
     int getSamples() const { return fSamples; }
     SkColorType getColorType() const { return fColorType; }
+    SkAlphaType getAlphaType() const { return fAlphaType; }
     SkColorSpace* getColorSpace() const { return fColorSpace.get(); }
 
   private:
@@ -75,6 +78,7 @@ class SkCommandLineConfigGpu : public SkCommandLineConfig {
     bool fUseDIText;
     int fSamples;
     SkColorType fColorType;
+    SkAlphaType fAlphaType;
     sk_sp<SkColorSpace> fColorSpace;
 };
 #endif

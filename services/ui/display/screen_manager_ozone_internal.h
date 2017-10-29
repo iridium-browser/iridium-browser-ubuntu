@@ -11,8 +11,6 @@
 
 #include "base/macros.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/service_manager/public/cpp/connection.h"
-#include "services/service_manager/public/cpp/interface_factory.h"
 #include "services/ui/display/screen_manager.h"
 #include "services/ui/display/viewport_metrics.h"
 #include "services/ui/public/interfaces/display/display_controller.mojom.h"
@@ -34,15 +32,11 @@ class TouchTransformController;
 // ScreenManagerOzoneInternal provides the necessary functionality to configure
 // all attached physical displays on the the ozone platform when operating in
 // internal window mode.
-class ScreenManagerOzoneInternal
-    : public ScreenManager,
-      public mojom::TestDisplayController,
-      public mojom::DisplayController,
-      public DisplayObserver,
-      public DisplayManager::Delegate,
-      public service_manager::InterfaceFactory<mojom::DisplayController>,
-      public service_manager::InterfaceFactory<mojom::OutputProtection>,
-      public service_manager::InterfaceFactory<mojom::TestDisplayController> {
+class ScreenManagerOzoneInternal : public ScreenManager,
+                                   public mojom::TestDisplayController,
+                                   public mojom::DisplayController,
+                                   public DisplayObserver,
+                                   public DisplayManager::Delegate {
  public:
   ScreenManagerOzoneInternal();
   ~ScreenManagerOzoneInternal() override;
@@ -50,13 +44,15 @@ class ScreenManagerOzoneInternal
   void SetPrimaryDisplayId(int64_t display_id);
 
   // ScreenManager:
-  void AddInterfaces(service_manager::InterfaceRegistry* registry) override;
+  void AddInterfaces(
+      service_manager::BinderRegistryWithArgs<
+          const service_manager::BindSourceInfo&>* registry) override;
   void Init(ScreenManagerDelegate* delegate) override;
   void RequestCloseDisplay(int64_t display_id) override;
+  display::ScreenBase* GetScreen() override;
 
   // mojom::TestDisplayController:
   void ToggleAddRemoveDisplay() override;
-  void ToggleDisplayResolution() override;
 
   // mojom::DisplayController:
   void IncreaseInternalDisplayZoom() override;
@@ -91,17 +87,17 @@ class ScreenManagerOzoneInternal
   void PostDisplayConfigurationChange(bool must_clear_window) override;
   DisplayConfigurator* display_configurator() override;
 
-  // mojo::InterfaceFactory<mojom::DisplayController>:
-  void Create(const service_manager::Identity& remote_identity,
-              mojom::DisplayControllerRequest request) override;
+  void BindDisplayControllerRequest(
+      mojom::DisplayControllerRequest request,
+      const service_manager::BindSourceInfo& source_info);
 
-  // mojo::InterfaceFactory<mojom:OutputProtection>:
-  void Create(const service_manager::Identity& remote_identity,
-              mojom::OutputProtectionRequest request) override;
+  void BindOutputProtectionRequest(
+      mojom::OutputProtectionRequest request,
+      const service_manager::BindSourceInfo& source_info);
 
-  // mojo::InterfaceFactory<mojom::TestDisplayController>:
-  void Create(const service_manager::Identity& remote_identity,
-              mojom::TestDisplayControllerRequest request) override;
+  void BindTestDisplayControllerRequest(
+      mojom::TestDisplayControllerRequest request,
+      const service_manager::BindSourceInfo& source_info);
 
   DisplayConfigurator display_configurator_;
   std::unique_ptr<DisplayManager> display_manager_;

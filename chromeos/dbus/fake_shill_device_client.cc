@@ -5,6 +5,7 @@
 #include "chromeos/dbus/fake_shill_device_client.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
@@ -93,10 +94,9 @@ void FakeShillDeviceClient::GetProperties(
                  weak_ptr_factory_.GetWeakPtr(), device_path, callback));
 }
 
-void FakeShillDeviceClient::ProposeScan(
-    const dbus::ObjectPath& device_path,
-    const VoidDBusMethodCallback& callback) {
-  PostVoidCallback(callback, DBUS_METHOD_CALL_SUCCESS);
+void FakeShillDeviceClient::ProposeScan(const dbus::ObjectPath& device_path,
+                                        VoidDBusMethodCallback callback) {
+  PostVoidCallback(std::move(callback), DBUS_METHOD_CALL_SUCCESS);
 }
 
 void FakeShillDeviceClient::SetProperty(const dbus::ObjectPath& device_path,
@@ -121,7 +121,8 @@ void FakeShillDeviceClient::SetPropertyInternal(
     PostNotFoundError(error_callback);
     return;
   }
-  device_properties->SetWithoutPathExpansion(name, value.DeepCopy());
+  device_properties->SetWithoutPathExpansion(
+      name, base::MakeUnique<base::Value>(value));
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&FakeShillDeviceClient::NotifyObserversPropertyChanged,
@@ -129,18 +130,17 @@ void FakeShillDeviceClient::SetPropertyInternal(
   base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
-void FakeShillDeviceClient::ClearProperty(
-    const dbus::ObjectPath& device_path,
-    const std::string& name,
-    const VoidDBusMethodCallback& callback) {
+void FakeShillDeviceClient::ClearProperty(const dbus::ObjectPath& device_path,
+                                          const std::string& name,
+                                          VoidDBusMethodCallback callback) {
   base::DictionaryValue* device_properties = NULL;
   if (!stub_devices_.GetDictionaryWithoutPathExpansion(device_path.value(),
                                                        &device_properties)) {
-    PostVoidCallback(callback, DBUS_METHOD_CALL_FAILURE);
+    PostVoidCallback(std::move(callback), DBUS_METHOD_CALL_FAILURE);
     return;
   }
   device_properties->RemoveWithoutPathExpansion(name, NULL);
-  PostVoidCallback(callback, DBUS_METHOD_CALL_SUCCESS);
+  PostVoidCallback(std::move(callback), DBUS_METHOD_CALL_SUCCESS);
 }
 
 void FakeShillDeviceClient::AddIPConfig(
@@ -266,7 +266,7 @@ void FakeShillDeviceClient::SetCarrier(const dbus::ObjectPath& device_path,
                                        const base::Closure& callback,
                                        const ErrorCallback& error_callback) {
   SetPropertyInternal(device_path, shill::kCarrierProperty,
-                      base::StringValue(carrier), callback, error_callback);
+                      base::Value(carrier), callback, error_callback);
 }
 
 void FakeShillDeviceClient::Reset(const dbus::ObjectPath& device_path,
@@ -495,9 +495,9 @@ void FakeShillDeviceClient::SetSimLockStatus(const std::string& device_path,
   base::DictionaryValue* simlock_dict = nullptr;
   if (!device_properties->GetDictionaryWithoutPathExpansion(
           shill::kSIMLockStatusProperty, &simlock_dict)) {
-    simlock_dict = new base::DictionaryValue;
-    device_properties->SetWithoutPathExpansion(shill::kSIMLockStatusProperty,
-                                               simlock_dict);
+    simlock_dict = device_properties->SetDictionaryWithoutPathExpansion(
+        shill::kSIMLockStatusProperty,
+        base::MakeUnique<base::DictionaryValue>());
   }
   simlock_dict->Clear();
   simlock_dict->SetStringWithoutPathExpansion(shill::kSIMLockTypeProperty,
@@ -582,11 +582,10 @@ void FakeShillDeviceClient::PassStubDeviceProperties(
 }
 
 // Posts a task to run a void callback with status code |status|.
-void FakeShillDeviceClient::PostVoidCallback(
-    const VoidDBusMethodCallback& callback,
-    DBusMethodCallStatus status) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                base::Bind(callback, status));
+void FakeShillDeviceClient::PostVoidCallback(VoidDBusMethodCallback callback,
+                                             DBusMethodCallStatus status) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), status));
 }
 
 void FakeShillDeviceClient::NotifyObserversPropertyChanged(
@@ -613,8 +612,8 @@ base::DictionaryValue* FakeShillDeviceClient::GetDeviceProperties(
   base::DictionaryValue* properties = NULL;
   if (!stub_devices_.GetDictionaryWithoutPathExpansion(
       device_path, &properties)) {
-    properties = new base::DictionaryValue;
-    stub_devices_.SetWithoutPathExpansion(device_path, properties);
+    properties = stub_devices_.SetDictionaryWithoutPathExpansion(
+        device_path, base::MakeUnique<base::DictionaryValue>());
   }
   return properties;
 }

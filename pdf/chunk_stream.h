@@ -29,8 +29,9 @@ class ChunkStream {
   bool ReadData(size_t offset, size_t size, void* buffer) const;
 
   // Returns vector of pairs where first is an offset, second is a size.
-  bool GetMissedRanges(size_t offset, size_t size,
-      std::vector<std::pair<size_t, size_t> >* ranges) const;
+  bool GetMissedRanges(size_t offset,
+                       size_t size,
+                       std::vector<std::pair<size_t, size_t>>* ranges) const;
   bool IsRangeAvailable(size_t offset, size_t size) const;
   size_t GetFirstMissingByte() const;
 
@@ -40,9 +41,12 @@ class ChunkStream {
   size_t GetLastMissingByteInInterval(size_t offset) const;
 
  private:
+  std::map<size_t, size_t>::const_iterator GetStartChunk(size_t offset) const;
+
   std::vector<unsigned char> data_;
 
-  // Pair, first - begining of the chunk, second - size of the chunk.
+  // Key: offset of the chunk.
+  // Value: size of the chunk.
   std::map<size_t, size_t> chunks_;
 
   size_t stream_size_;

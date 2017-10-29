@@ -9,17 +9,16 @@
 #import "ios/chrome/browser/find_in_page/find_in_page_controller.h"
 #import "ios/chrome/browser/ui/find_bar/find_bar_controller_ios.h"
 #import "ios/chrome/browser/ui/find_bar/find_bar_view.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_menu_view_controller.h"
+#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
 #import "ios/chrome/test/app/tab_test_util.h"
 #import "ios/chrome/test/earl_grey/accessibility_util.h"
-#import "ios/chrome/test/earl_grey/chrome_assertions.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/testing/wait_util.h"
-#import "ios/web/public/test/http_server.h"
-#import "ios/web/public/test/http_server_util.h"
+#import "ios/web/public/test/http_server/http_server.h"
+#include "ios/web/public/test/http_server/http_server_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -32,8 +31,6 @@ namespace {
 const std::string kFindInPageResponse = "Find in page. Find in page.";
 
 }  // namespace
-
-using chrome_test_util::WebViewContainingText;
 
 // Tests for Find in Page.
 @interface FindInPageTestCase : ChromeTestCase
@@ -223,9 +220,7 @@ using chrome_test_util::WebViewContainingText;
   [ChromeEarlGrey loadURL:self.testURL];
 
   // Verify web page finished loading.
-  [[EarlGrey
-      selectElementWithMatcher:WebViewContainingText(kFindInPageResponse)]
-      assertWithMatcher:grey_notNil()];
+  [ChromeEarlGrey waitForWebViewContainingText:kFindInPageResponse];
 }
 
 @end

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef COMPONENTS_SECURITY_STATE_SECURITY_STATE_H_
-#define COMPONENTS_SECURITY_STATE_SECURITY_STATE_H_
+#ifndef COMPONENTS_SECURITY_STATE_CORE_SECURITY_STATE_H_
+#define COMPONENTS_SECURITY_STATE_CORE_SECURITY_STATE_H_
 
 #include <stdint.h>
 #include <memory>
@@ -110,9 +110,6 @@ struct SecurityInfo {
   // content that was loaded over an HTTPS connection with
   // certificate errors.
   ContentStatus content_with_cert_errors_status;
-  // The verification statuses of the signed certificate timestamps
-  // for the connection.
-  std::vector<net::ct::SCTVerifyStatus> sct_verify_statuses;
   bool scheme_is_cryptographic;
   net::CertStatus cert_status;
   scoped_refptr<net::X509Certificate> certificate;
@@ -133,19 +130,20 @@ struct SecurityInfo {
   // key exchange, or cipher for the connection is considered
   // obsolete. See net::ObsoleteSSLMask for specific mask values.
   int obsolete_ssl_status;
-
   // True if pinning was bypassed due to a local trust anchor.
   bool pkp_bypassed;
-
   // True if the page displayed password field on an HTTP page.
   bool displayed_password_field_on_http;
-
   // True if the page displayed credit card field on an HTTP page.
   bool displayed_credit_card_field_on_http;
-
+  // True if the secure page contained a form with a nonsecure target.
+  bool contained_mixed_form;
   // True if the server's certificate does not contain a
   // subjectAltName extension with a domain name or IP address.
   bool cert_missing_subject_alt_name;
+  // True if the |security_level| was downgraded to HTTP_SHOW_WARNING because
+  // the page was loaded while Incognito.
+  bool incognito_downgraded_security_level;
 };
 
 // Contains the security state relevant to computing the SecurityInfo
@@ -170,11 +168,10 @@ struct VisibleSecurityState {
   // unknown (older cache entries may not store the value) or not applicable.
   uint16_t key_exchange_group;
   int security_bits;
-  // The verification statuses of the Signed Certificate
-  // Timestamps (if any) that the server provided.
-  std::vector<net::ct::SCTVerifyStatus> sct_verify_statuses;
   // True if the page displayed passive mixed content.
   bool displayed_mixed_content;
+  // True if the secure page contained a form with a nonsecure target.
+  bool contained_mixed_form;
   // True if the page ran active mixed content.
   bool ran_mixed_content;
   // True if the page displayed passive subresources with certificate errors.
@@ -187,6 +184,8 @@ struct VisibleSecurityState {
   bool displayed_password_field_on_http;
   // True if the page was an HTTP page that displayed a credit card field.
   bool displayed_credit_card_field_on_http;
+  // True if the page was displayed in an Incognito context.
+  bool is_incognito;
 };
 
 // These security levels describe the treatment given to pages that
@@ -215,6 +214,10 @@ void GetSecurityInfo(
 // |kHttpFormWarningFeature| feature.
 bool IsHttpWarningInFormEnabled();
 
+// Returns true if the MarkHttpAs setting indicates that a warning
+// should be shown for HTTP pages loaded while in Incognito mode.
+bool IsHttpWarningForIncognitoEnabled();
+
 }  // namespace security_state
 
-#endif  // COMPONENTS_SECURITY_STATE_SECURITY_STATE_H_
+#endif  // COMPONENTS_SECURITY_STATE_CORE_SECURITY_STATE_H_

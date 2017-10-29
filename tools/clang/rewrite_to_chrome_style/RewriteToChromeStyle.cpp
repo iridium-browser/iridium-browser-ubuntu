@@ -26,8 +26,8 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
-#include "clang/Lex/MacroArgs.h"
 #include "clang/Lex/Lexer.h"
+#include "clang/Lex/MacroArgs.h"
 #include "clang/Lex/PPCallbacks.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Tooling/CommonOptionsParser.h"
@@ -37,6 +37,7 @@
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/LineIterator.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/TargetSelect.h"
 
 #include "EditTracker.h"
@@ -50,11 +51,13 @@ namespace {
 
 const char kBlinkFieldPrefix[] = "m_";
 const char kBlinkStaticMemberPrefix[] = "s_";
-const char kGeneratedFileRegex[] = "^gen/|/gen/";
-const char kGeneratedFileExclusionRegex[] =
-    "(^gen/|/gen/).*/ComputedStyleBase\\.h$";
 const char kGMockMethodNamePrefix[] = "gmock_";
 const char kMethodBlocklistParamName[] = "method-blocklist";
+
+std::set<clang::SourceLocation>& GetRewrittenLocs() {
+  static auto& locations = *new std::set<clang::SourceLocation>();
+  return locations;
+}
 
 template <typename MatcherType, typename NodeType>
 bool IsMatching(const MatcherType& matcher,
@@ -140,8 +143,8 @@ class MethodBlocklist {
     if (!method.getDeclName().isIdentifier())
       return false;
 
-    auto it = method_to_class_to_args_.find(method.getName());
-    if (it == method_to_class_to_args_.end())
+    auto it = method_to_classes_.find(method.getName());
+    if (it == method_to_classes_.end())
       return false;
 
     // |method_context| is either
@@ -154,32 +157,19 @@ class MethodBlocklist {
     if (!method_context->getDeclName().isIdentifier())
       return false;
 
-    const llvm::StringMap<std::set<unsigned>>& class_to_args = it->second;
-    auto it2 = class_to_args.find(method_context->getName());
-    if (it2 == class_to_args.end())
+    const llvm::StringSet<>& classes = it->second;
+    auto it2 = classes.find(method_context->getName());
+    if (it2 == classes.end())
       return false;
-
-    const std::set<unsigned>& arg_counts = it2->second;
-    unsigned method_param_count = method.param_size();
-    unsigned method_non_optional_param_count = method_param_count;
-    for (const clang::ParmVarDecl* param : method.parameters()) {
-      if (param->hasInit())
-        method_non_optional_param_count--;
-    }
-    bool found_matching_arg_count =
-        std::any_of(arg_counts.begin(), arg_counts.end(),
-                    [method_param_count,
-                     method_non_optional_param_count](unsigned arg_count) {
-                      return (method_non_optional_param_count <= arg_count) &&
-                             (arg_count <= method_param_count);
-                    });
 
     // No need to verify here that |actual_class| is in the |blink| namespace -
     // this will be done by other matchers elsewhere.
 
     // TODO(lukasza): Do we need to consider return type and/or param types?
 
-    return found_matching_arg_count;
+    // TODO(lukasza): Do we need to consider param count?
+
+    return true;
   }
 
  private:
@@ -218,24 +208,16 @@ class MethodBlocklist {
       // Parse individual parts.
       llvm::StringRef class_name = parts[0];
       llvm::StringRef method_name = parts[1];
-      unsigned number_of_method_args;
-      if (parts[2].getAsInteger(0, number_of_method_args)) {
-        llvm::errs() << "ERROR: Parsing error - '" << parts[2] << "' "
-                     << "is not an unsigned integer: " << filepath << ":"
-                     << it.line_number() << ": " << line << "\n";
-        assert(false);
-        continue;
-      }
+      // ignoring parts[2] - the (not so trustworthy) number of parameters.
 
       // Store the new entry.
-      method_to_class_to_args_[method_name][class_name].insert(
-          number_of_method_args);
+      method_to_classes_[method_name].insert(class_name);
     }
   }
 
   // Stores methods to blacklist in a map:
   // method name -> class name -> set of all allowed numbers of arguments.
-  llvm::StringMap<llvm::StringMap<std::set<unsigned>>> method_to_class_to_args_;
+  llvm::StringMap<llvm::StringSet<>> method_to_classes_;
 };
 
 AST_MATCHER_P(clang::FunctionDecl,
@@ -446,7 +428,7 @@ bool IsBlacklistedInstanceMethodName(llvm::StringRef name) {
 
       // https://crbug.com/672902: Should not rewrite names that mimick methods
       // from std library.
-      "back", "empty", "erase", "front", "insert", "length", "size",
+      "at", "back", "empty", "erase", "front", "insert", "length", "size",
   };
   for (const auto& b : kBlacklistedNames) {
     if (name == b)
@@ -537,12 +519,22 @@ AST_MATCHER(clang::Decl, isDeclInGeneratedFile) {
   if (!file_entry)
     return false;
 
-  static llvm::Regex exclusion_regex(kGeneratedFileExclusionRegex);
-  if (exclusion_regex.match(file_entry->getName()))
-    return false;
-
-  static llvm::Regex generated_file_regex(kGeneratedFileRegex);
-  return generated_file_regex.match(file_entry->getName());
+  bool is_generated_file = false;
+  bool is_computed_style_base_cpp =
+      llvm::sys::path::filename(file_entry->getName())
+          .equals("ComputedStyleBase.h");
+  for (auto it = llvm::sys::path::begin(file_entry->getName());
+       it != llvm::sys::path::end(file_entry->getName()); ++it) {
+    if (it->equals("gen")) {
+      is_generated_file = true;
+      break;
+    }
+  }
+  // ComputedStyleBase is intentionally not treated as a generated file, since
+  // style definitions are split between generated and non-generated code. It's
+  // easier to have the tool just automatically rewrite references to generated
+  // code as well, with a small manual patch to fix the code generators.
+  return is_generated_file && !is_computed_style_base_cpp;
 }
 
 // Helper to convert from a camelCaseName to camel_case_name. It uses some
@@ -678,92 +670,118 @@ AST_MATCHER_P(clang::QualType, hasString, std::string, ExpectedString) {
 bool ShouldPrefixFunctionName(const std::string& old_method_name) {
   // Functions that are named similarily to a type - they should be prefixed
   // with a "Get" prefix.
-  static const char* kConflictingMethods[] = {
-      "animationWorklet",
-      "audioWorklet",
-      "binaryType",
-      "blob",
-      "channelCountMode",
-      "color",
-      "compositorElementId",
-      "counterDirectives",
-      "document",
-      "element",
-      "emptyChromeClient",
-      "emptyEditorClient",
-      "emptySpellCheckerClient",
-      "entryType",
-      "error",
-      "fileUtilities",
-      "font",
-      "frame",
-      "frameBlameContext",
-      "frontend",
-      "gridCell",
-      "hash",
-      "heapObjectHeader",
-      "iconURL",
-      "image",
-      "inputMethodController",
-      "inputType",
-      "interpolationTypes",
-      "layout",
-      "layoutBlock",
-      "layoutObject",
-      "layoutSize",
-      "lineCap",
-      "lineEndings",
-      "lineJoin",
-      "listItems",
-      "matchedProperties",
-      "midpointState",
-      "modifiers",
-      "mouseEvent",
-      "name",
-      "navigationType",
-      "node",
-      "notificationManager",
-      "outcome",
-      "pagePopup",
-      "paintWorklet",
-      "path",
-      "position",
-      "processingInstruction",
-      "readyState",
-      "relList",
-      "referrer",
-      "referrerPolicy",
-      "resource",
-      "response",
-      "restrictedKeyMap",
-      "sandboxSupport",
-      "screenInfo",
-      "screenOrientationController",
-      "scrollAnimator",
-      "selectionInFlatTree",
-      "settings",
-      "signalingState",
-      "snapshotById",
-      "state",
-      "string",
-      "styleSheet",
-      "supplementable",
-      "text",
-      "textAlign",
-      "textBaseline",
-      "theme",
-      "thread",
-      "timing",
-      "topLevelBlameContext",
-      "type",
-      "vector",
-      "visibleSelection",
-      "visibleSelectionInFlatTree",
-      "webFrame",
-      "widget",
-      "wordBoundaries",
-      "wrapperTypeInfo",
-  };
+  static const char* kConflictingMethods[] = {"accumulatorMap",
+                                              "animationWorklet",
+                                              "attrNodeList",
+                                              "audioWorklet",
+                                              "binaryType",
+                                              "blob",
+                                              "channelCountMode",
+                                              "color",
+                                              "compositorElementId",
+                                              "constructionStack",
+                                              "controlSize",
+                                              "counterDirectives",
+                                              "counterMaps",
+                                              "document",
+                                              "dragOperation",
+                                              "element",
+                                              "emptyChromeClient",
+                                              "emptyEditorClient",
+                                              "emptySpellCheckerClient",
+                                              "entryType",
+                                              "error",
+                                              "eventTargetDataMap",
+                                              "fileUtilities",
+                                              "font",
+                                              "frame",
+                                              "frameBlameContext",
+                                              "frontend",
+                                              "gridCell",
+                                              "harfBuzzFontCache",
+                                              "hash",
+                                              "heapObjectHeader",
+                                              "heapObjectSet",
+                                              "iconURL",
+                                              "image",
+                                              "infoMap",
+                                              "inputMethodController",
+                                              "inputType",
+                                              "interpolationTypes",
+                                              "intervalArena",
+                                              "layout",
+                                              "layoutBlock",
+                                              "layoutObject",
+                                              "layoutSize",
+                                              "lineCap",
+                                              "lineEndings",
+                                              "lineJoin",
+                                              "listItems",
+                                              "locationInBackingMap",
+                                              "matchedProperties",
+                                              "midpointState",
+                                              "modifiers",
+                                              "mouseEvent",
+                                              "name",
+                                              "navigationType",
+                                              "node",
+                                              "notificationManager",
+                                              "originAccessMap",
+                                              "outcome",
+                                              "pagePopup",
+                                              "paintWorklet",
+                                              "path",
+                                              "position",
+                                              "presentationAttributeCache",
+                                              "processingInstruction",
+                                              "qualifiedNameCache",
+                                              "readyState",
+                                              "referrer",
+                                              "referrerPolicy",
+                                              "relList",
+                                              "resource",
+                                              "response",
+                                              "restrictedKeyMap",
+                                              "sandboxSupport",
+                                              "screenInfo",
+                                              "screenOrientationController",
+                                              "scrollAnimator",
+                                              "scrollbarPainterMap",
+                                              "scrollbarSet",
+                                              "selectionInDOMTree",
+                                              "selectionInFlatTree",
+                                              "selectionVisualRectMap",
+                                              "selectorTextCache",
+                                              "settings",
+                                              "shadowRootType",
+                                              "signalingState",
+                                              "snapshotById",
+                                              "state",
+                                              "stickyConstraintsMap",
+                                              "string",
+                                              "styleSharingList",
+                                              "styleSheet",
+                                              "supplementable",
+                                              "text",
+                                              "textAlign",
+                                              "textBaseline",
+                                              "textDirection",
+                                              "theme",
+                                              "thread",
+                                              "timing",
+                                              "topLevelBlameContext",
+                                              "type",
+                                              "vector",
+                                              "visibleSelection",
+                                              "visibleSelectionInFlatTree",
+                                              "weakHeapObjectSet",
+                                              "webFrame",
+                                              "widget",
+                                              "wordBoundaries",
+                                              "workerThread",
+                                              "worldId",
+                                              "worldMap",
+                                              "wrapperTypeInfo"};
   for (const auto& conflicting_method : kConflictingMethods) {
     if (old_method_name == conflicting_method)
       return true;
@@ -876,28 +894,8 @@ bool GetNameForDecl(const clang::VarDecl& decl,
   StringRef original_name = decl.getName();
 
   // Nothing to do for unnamed parameters.
-  if (clang::isa<clang::ParmVarDecl>(decl)) {
-    if (original_name.empty())
-      return false;
-
-    // Check if |decl| and |decl.getLocation| are in sync.  We need to skip
-    // out-of-sync ParmVarDecls to avoid renaming buggy ParmVarDecls that
-    // 1) have decl.getLocation() pointing at a parameter declaration without a
-    // name, but 2) have decl.getName() retained from a template specialization
-    // of a method.  See also: https://llvm.org/bugs/show_bug.cgi?id=29145
-    clang::SourceLocation loc =
-        context.getSourceManager().getSpellingLoc(decl.getLocation());
-    auto parents = context.getParents(decl);
-    bool is_child_location_within_parent_source_range = std::all_of(
-        parents.begin(), parents.end(),
-        [&loc](const clang::ast_type_traits::DynTypedNode& parent) {
-          clang::SourceLocation begin = parent.getSourceRange().getBegin();
-          clang::SourceLocation end = parent.getSourceRange().getEnd();
-          return (begin < loc) && (loc < end);
-        });
-    if (!is_child_location_within_parent_source_range)
-      return false;
-  }
+  if (clang::isa<clang::ParmVarDecl>(decl) && original_name.empty())
+    return false;
 
   // This is a type trait that appears in consumers of WTF as well as inside
   // WTF. We want it to be named in this_style_of_case accordingly.
@@ -1136,8 +1134,16 @@ class RewriterBase : public MatchFinder::MatchCallback {
     if (actual_old_text != expected_old_text)
       return false;
 
-    if (replacement)
+    if (replacement) {
+      // If there's already a replacement for this location, don't emit any
+      // other replacements to avoid potential naming conflicts. This is
+      // primarily to avoid problems when a function and a parameter are defined
+      // by the same macro argument.
+      if (!GetRewrittenLocs().emplace(spell).second)
+        return false;
+
       *replacement = Replacement(source_manager, range, new_text);
+    }
     return true;
   }
 

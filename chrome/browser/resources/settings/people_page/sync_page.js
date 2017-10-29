@@ -35,13 +35,6 @@ var SyncPrefsIndividualDataTypes = [
 /**
  * @fileoverview
  * 'settings-sync-page' is the settings page containing sync settings.
- *
- * Example:
- *
- *    <iron-animated-pages>
- *      <settings-sync-page></settings-sync-page>
- *      ... other pages ...
- *    </iron-animated-pages>
  */
 Polymer({
   is: 'settings-sync-page',
@@ -53,7 +46,7 @@ Polymer({
 
   properties: {
     /** @private */
-    pages: {
+    pages_: {
       type: Object,
       value: settings.PageStatus,
       readOnly: true,
@@ -75,15 +68,6 @@ Polymer({
      * @type {settings.SyncPrefs|undefined}
      */
     syncPrefs: {
-      type: Object,
-    },
-
-    /**
-     * Caches the individually selected synced data types. This is used to
-     * be able to restore the selections after checking and unchecking Sync All.
-     * @private
-     */
-    cachedSyncPrefs_: {
       type: Object,
     },
 
@@ -124,47 +108,51 @@ Polymer({
       type: String,
       value: '',
     },
+  },
 
-    /** @private {!settings.SyncBrowserProxy} */
-    browserProxy_: {
-      type: Object,
-      value: function() {
-        return settings.SyncBrowserProxyImpl.getInstance();
-      },
-    },
+  /** @private {?settings.SyncBrowserProxy} */
+  browserProxy_: null,
 
-    /**
-     * The unload callback is needed because the sign-in flow needs to know
-     * if the user has closed the tab with the sync settings. This property is
-     * non-null if the user is currently navigated on the sync settings route.
-     * @private {Function}
-     */
-    unloadCallback_: {
-      type: Object,
-      value: null,
-    },
+  /**
+   * The unload callback is needed because the sign-in flow needs to know
+   * if the user has closed the tab with the sync settings. This property is
+   * non-null if the user is currently navigated on the sync settings route.
+   * @private {?Function}
+   */
+  unloadCallback_: null,
+
+  /**
+   * Caches the individually selected synced data types. This is used to
+   * be able to restore the selections after checking and unchecking Sync All.
+   * @private {?Object}
+   */
+  cachedSyncPrefs_: null,
+
+  /** @override */
+  created: function() {
+    this.browserProxy_ = settings.SyncBrowserProxyImpl.getInstance();
   },
 
   /** @override */
   attached: function() {
-    this.addWebUIListener('page-status-changed',
-                          this.handlePageStatusChanged_.bind(this));
-    this.addWebUIListener('sync-prefs-changed',
-                          this.handleSyncPrefsChanged_.bind(this));
+    this.addWebUIListener(
+        'page-status-changed', this.handlePageStatusChanged_.bind(this));
+    this.addWebUIListener(
+        'sync-prefs-changed', this.handleSyncPrefsChanged_.bind(this));
 
-    if (settings.getCurrentRoute() == settings.Route.SYNC)
+    if (settings.getCurrentRoute() == settings.routes.SYNC)
       this.onNavigateToPage_();
   },
 
   /** @override */
   detached: function() {
-    if (settings.getCurrentRoute() == settings.Route.SYNC)
+    if (settings.getCurrentRoute() == settings.routes.SYNC)
       this.onNavigateAwayFromPage_();
   },
 
   /** @protected */
   currentRouteChanged: function() {
-    if (settings.getCurrentRoute() == settings.Route.SYNC)
+    if (settings.getCurrentRoute() == settings.routes.SYNC)
       this.onNavigateToPage_();
     else
       this.onNavigateAwayFromPage_();
@@ -181,7 +169,7 @@ Polymer({
 
   /** @private */
   onNavigateToPage_: function() {
-    assert(settings.getCurrentRoute() == settings.Route.SYNC);
+    assert(settings.getCurrentRoute() == settings.routes.SYNC);
 
     if (this.unloadCallback_)
       return;
@@ -225,6 +213,16 @@ Polymer({
     // Hide the new passphrase box if the sync data has been encrypted.
     if (this.syncPrefs.encryptAllData)
       this.creatingNewPassphrase_ = false;
+
+    // Focus the password input box if password is needed to start sync.
+    if (this.syncPrefs.passphraseRequired) {
+      // Wait for the dom-if templates to render and subpage to become visible.
+      listenOnce(document, 'show-container', function() {
+        var input = /** @type {!PaperInputElement} */ (
+            this.$$('#existingPassphraseInput'));
+        input.inputElement.focus();
+      }.bind(this));
+    }
   },
 
   /**
@@ -262,13 +260,13 @@ Polymer({
    */
   onSingleSyncDataTypeChanged_: function() {
     assert(this.syncPrefs);
-    this.browserProxy_.setSyncDatatypes(this.syncPrefs).then(
-        this.handlePageStatusChanged_.bind(this));
+    this.browserProxy_.setSyncDatatypes(this.syncPrefs)
+        .then(this.handlePageStatusChanged_.bind(this));
   },
 
   /** @private */
-  onManageSyncedDataTap_: function() {
-    window.open(loadTimeData.getString('syncDashboardUrl'));
+  onActivityControlsTap_: function() {
+    this.browserProxy_.openActivityControlsUrl();
   },
 
   /**
@@ -276,8 +274,8 @@ Polymer({
    * @private
    */
   onAutofillDataTypeChanged_: function() {
-    this.set('syncPrefs.paymentsIntegrationEnabled',
-             this.syncPrefs.autofillSynced);
+    this.set(
+        'syncPrefs.paymentsIntegrationEnabled', this.syncPrefs.autofillSynced);
 
     this.onSingleSyncDataTypeChanged_();
   },
@@ -295,9 +293,16 @@ Polymer({
   /**
    * Sends the newly created custom sync passphrase to the browser.
    * @private
+   * @param {!Event} e
    */
-  onSaveNewPassphraseTap_: function() {
+  onSaveNewPassphraseTap_: function(e) {
     assert(this.creatingNewPassphrase_);
+
+    // Ignore events on irrevelant elements or with irrelevant keys.
+    if (e.target.tagName != 'PAPER-BUTTON' && e.target.tagName != 'PAPER-INPUT')
+      return;
+    if (e.type == 'keypress' && e.key != 'Enter')
+      return;
 
     // If a new password has been entered but it is invalid, do not send the
     // sync state to the API.
@@ -308,15 +313,19 @@ Polymer({
     this.syncPrefs.setNewPassphrase = true;
     this.syncPrefs.passphrase = this.passphrase_;
 
-    this.browserProxy_.setSyncEncryption(this.syncPrefs).then(
-        this.handlePageStatusChanged_.bind(this));
+    this.browserProxy_.setSyncEncryption(this.syncPrefs)
+        .then(this.handlePageStatusChanged_.bind(this));
   },
 
   /**
    * Sends the user-entered existing password to re-enable sync.
    * @private
+   * @param {!Event} e
    */
-  onSubmitExistingPassphraseTap_: function() {
+  onSubmitExistingPassphraseTap_: function(e) {
+    if (e.type == 'keypress' && e.key != 'Enter')
+      return;
+
     assert(!this.creatingNewPassphrase_);
 
     this.syncPrefs.setNewPassphrase = false;
@@ -324,8 +333,8 @@ Polymer({
     this.syncPrefs.passphrase = this.existingPassphrase_;
     this.existingPassphrase_ = '';
 
-    this.browserProxy_.setSyncEncryption(this.syncPrefs).then(
-        this.handlePageStatusChanged_.bind(this));
+    this.browserProxy_.setSyncEncryption(this.syncPrefs)
+        .then(this.handlePageStatusChanged_.bind(this));
   },
 
   /**
@@ -341,12 +350,12 @@ Polymer({
         this.pageStatus_ = pageStatus;
         return;
       case settings.PageStatus.DONE:
-        if (settings.getCurrentRoute() == settings.Route.SYNC)
-          settings.navigateTo(settings.Route.PEOPLE);
+        if (settings.getCurrentRoute() == settings.routes.SYNC)
+          settings.navigateTo(settings.routes.PEOPLE);
         return;
       case settings.PageStatus.PASSPHRASE_FAILED:
-        if (this.pageStatus_ == this.pages.CONFIGURE &&
-            this.syncPrefs && this.syncPrefs.passphraseRequired) {
+        if (this.pageStatus_ == this.pages_.CONFIGURE && this.syncPrefs &&
+            this.syncPrefs.passphraseRequired) {
           this.$$('#existingPassphraseInput').invalid = true;
         }
         return;

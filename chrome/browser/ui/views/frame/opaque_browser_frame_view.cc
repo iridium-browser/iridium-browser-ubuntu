@@ -107,9 +107,9 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
     window_icon_->Update();
   }
 
-  window_title_ = new views::Label(
-      browser_view->GetWindowTitle(),
-      gfx::FontList(BrowserFrame::GetTitleFontList()));
+  window_title_ = new views::Label(browser_view->GetWindowTitle(),
+                                   views::Label::CustomFont{gfx::FontList(
+                                       BrowserFrame::GetTitleFontList())});
   window_title_->SetVisible(browser_view->ShouldShowWindowTitle());
   window_title_->SetEnabledColor(SK_ColorWHITE);
   window_title_->SetSubpixelRenderingEnabled(false);
@@ -198,11 +198,11 @@ int OpaqueBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   // See if we're in the sysmenu region.  We still have to check the tabstrip
   // first so that clicks in a tab don't get treated as sysmenu clicks.
   gfx::Rect sysmenu_rect(IconBounds());
-  // In maximized mode we extend the rect to the screen corner to take advantage
+  // In tablet mode we extend the rect to the screen corner to take advantage
   // of Fitts' Law.
   if (layout_->IsTitleBarCondensed())
     sysmenu_rect.SetRect(0, 0, sysmenu_rect.right(), sysmenu_rect.bottom());
-  sysmenu_rect.set_x(GetMirroredXForRect(sysmenu_rect));
+  sysmenu_rect = GetMirroredRect(sysmenu_rect);
   if (sysmenu_rect.Contains(point))
     return (frame_component == HTCLIENT) ? HTCLIENT : HTSYSMENU;
 
@@ -295,11 +295,9 @@ void OpaqueBrowserFrameView::OnMenuButtonClicked(views::MenuButton* source,
 #if defined(OS_LINUX)
   views::MenuRunner menu_runner(frame()->GetSystemMenuModel(),
                                 views::MenuRunner::HAS_MNEMONICS);
-  ignore_result(menu_runner.RunMenuAt(browser_view()->GetWidget(),
-                                      window_icon_,
-                                      window_icon_->GetBoundsInScreen(),
-                                      views::MENU_ANCHOR_TOPLEFT,
-                                      ui::MENU_SOURCE_MOUSE));
+  menu_runner.RunMenuAt(browser_view()->GetWidget(), window_icon_,
+                        window_icon_->GetBoundsInScreen(),
+                        views::MENU_ANCHOR_TOPLEFT, ui::MENU_SOURCE_MOUSE);
 #endif
 }
 
@@ -471,7 +469,7 @@ views::ImageButton* OpaqueBrowserFrameView::InitWindowCaptionButton(
   button->SetImage(views::CustomButton::STATE_PRESSED,
                    tp->GetImageSkiaNamed(pushed_image_id));
   if (browser_view()->IsBrowserTypeNormal()) {
-    button->SetBackground(
+    button->SetBackgroundImage(
         tp->GetColor(ThemeProperties::COLOR_BUTTON_BACKGROUND),
         tp->GetImageSkiaNamed(IDR_THEME_WINDOW_CONTROL_BACKGROUND),
         tp->GetImageSkiaNamed(mask_image_id));
@@ -510,7 +508,8 @@ bool OpaqueBrowserFrameView::ShouldShowWindowTitleBar() const {
 
 int OpaqueBrowserFrameView::GetTopAreaHeight() const {
   const gfx::ImageSkia frame_image = GetFrameImage();
-  int top_area_height = frame_image.height();  // Returns 0 if isNull().
+  int top_area_height =
+      std::max(frame_image.height(), layout_->NonClientTopHeight(false));
   if (browser_view()->IsTabStripVisible()) {
     top_area_height =
         std::max(top_area_height,
@@ -575,8 +574,8 @@ void OpaqueBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) const {
   // Top stroke.
   gfx::Rect separator_rect(x, y, w, 0);
   gfx::ScopedCanvas scoped_canvas(canvas);
-  gfx::Rect tabstrip_bounds(GetBoundsForTabStrip(browser_view()->tabstrip()));
-  tabstrip_bounds.set_x(GetMirroredXForRect(tabstrip_bounds));
+  gfx::Rect tabstrip_bounds =
+      GetMirroredRect(GetBoundsForTabStrip(browser_view()->tabstrip()));
   canvas->sk_canvas()->clipRect(gfx::RectToSkRect(tabstrip_bounds),
                                 SkClipOp::kDifference);
   separator_rect.set_y(tabstrip_bounds.bottom());
@@ -604,7 +603,7 @@ void OpaqueBrowserFrameView::PaintClientEdge(gfx::Canvas* canvas) const {
                                         client_bounds, true);
   }
 
-  // In maximized mode, the only edge to draw is the top one, so we're done.
+  // In tablet mode, the only edge to draw is the top one, so we're done.
   if (layout_->IsTitleBarCondensed())
     return;
 

@@ -12,6 +12,7 @@
 
 #include "base/debug/dump_without_crashing.h"
 #include "base/memory/singleton.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
@@ -270,7 +271,7 @@ void ServiceWatcherImplMac::Start() {
   started_ = true;
 }
 
-void ServiceWatcherImplMac::DiscoverNewServices(bool force_update) {
+void ServiceWatcherImplMac::DiscoverNewServices() {
   DCHECK(started_);
   VLOG(1) << "ServiceWatcherImplMac::DiscoverNewServices";
   container_->DiscoverNewServices();

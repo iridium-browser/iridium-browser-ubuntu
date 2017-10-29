@@ -13,7 +13,6 @@
 #include "ui/aura/window_tree_host.h"
 
 namespace aura {
-class InputMethodGlue;
 class Window;
 class WindowTreeHost;
 namespace client {
@@ -48,14 +47,12 @@ class WMTestHelper : public aura::client::WindowParentingClient {
   aura::WindowTreeHost* host() { return host_.get(); }
 
   // Overridden from client::WindowParentingClient:
-  aura::Window* GetDefaultParent(aura::Window* context,
-                                 aura::Window* window,
+  aura::Window* GetDefaultParent(aura::Window* window,
                                  const gfx::Rect& bounds) override;
 
  private:
   std::unique_ptr<WMState> wm_state_;
   std::unique_ptr<aura::WindowTreeHost> host_;
-  std::unique_ptr<aura::InputMethodGlue> input_method_glue_;
   std::unique_ptr<wm::CompoundEventFilter> root_window_event_filter_;
   std::unique_ptr<aura::client::DefaultCaptureClient> capture_client_;
   std::unique_ptr<aura::client::FocusClient> focus_client_;

@@ -18,7 +18,7 @@ ContentLiveTab* ContentLiveTab::GetForWebContents(
     content::WebContents* contents) {
   if (!contents->GetUserData(kContentLiveTabWebContentsUserDataKey)) {
     contents->SetUserData(kContentLiveTabWebContentsUserDataKey,
-                          new ContentLiveTab(contents));
+                          base::WrapUnique(new ContentLiveTab(contents)));
   }
 
   return static_cast<ContentLiveTab*>(contents->GetUserData(
@@ -60,10 +60,6 @@ std::unique_ptr<sessions::PlatformSpecificTabData>
 ContentLiveTab::GetPlatformSpecificTabData() {
   return base::MakeUnique<sessions::ContentPlatformSpecificTabData>(
       web_contents());
-}
-
-void ContentLiveTab::LoadIfNecessary() {
-  navigation_controller().LoadIfNecessary();
 }
 
 const std::string& ContentLiveTab::GetUserAgentOverride() const {

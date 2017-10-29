@@ -42,8 +42,7 @@ tr.exportTo('tr.model', function() {
     },
 
     get protectionFlagsToString() {
-      if (this.protectionFlags === undefined)
-        return undefined;
+      if (this.protectionFlags === undefined) return undefined;
       return (
           (this.protectionFlags & VMRegion.PROTECTION_FLAG_READ ? 'r' : '-') +
           (this.protectionFlags & VMRegion.PROTECTION_FLAG_WRITE ? 'w' : '-') +
@@ -219,10 +218,11 @@ tr.exportTo('tr.model', function() {
   VMRegionClassificationNode.OTHER_RULE = { name: 'Other' };
 
   VMRegionClassificationNode.fromRegions = function(regions, opt_rules) {
-    var tree = new VMRegionClassificationNode(opt_rules);
+    const tree = new VMRegionClassificationNode(opt_rules);
     tree.regions_ = regions;
-    for (var i = 0; i < regions.length; i++)
+    for (let i = 0; i < regions.length; i++) {
       tree.addStatsFromRegion_(regions[i]);
+    }
     return tree;
   };
 
@@ -232,10 +232,12 @@ tr.exportTo('tr.model', function() {
     },
 
     get children() {
-      if (this.isLeafNode)
+      if (this.isLeafNode) {
         return undefined;  // Leaf nodes don't have children (by definition).
-      if (this.children_ === undefined)
+      }
+      if (this.children_ === undefined) {
         this.buildTree_();  // Lazily classify VM regions.
+      }
       return this.children_;
     },
 
@@ -259,7 +261,7 @@ tr.exportTo('tr.model', function() {
       }
 
       // Intermediate node.
-      var regions = [];
+      let regions = [];
       this.children_.forEach(function(childNode) {
         regions = regions.concat(childNode.allRegionsForTesting);
       });
@@ -267,15 +269,15 @@ tr.exportTo('tr.model', function() {
     },
 
     get isLeafNode() {
-      var children = this.rule_.children;
+      const children = this.rule_.children;
       return children === undefined || children.length === 0;
     },
 
-    addRegion: function(region) {
+    addRegion(region) {
       this.addRegionRecursively_(region, true /* addStatsToThisNode */);
     },
 
-    someRegion: function(fn, opt_this) {
+    someRegion(fn, opt_this) {
       if (this.regions_ !== undefined) {
         // Leaf node (or caching internal node).
         return this.regions_.some(fn, opt_this);
@@ -287,9 +289,10 @@ tr.exportTo('tr.model', function() {
       });
     },
 
-    addRegionRecursively_: function(region, addStatsToThisNode) {
-      if (addStatsToThisNode)
+    addRegionRecursively_(region, addStatsToThisNode) {
+      if (addStatsToThisNode) {
         this.addStatsFromRegion_(region);
+      }
 
       if (this.regions_ !== undefined) {
         if (this.children_ !== undefined) {
@@ -304,18 +307,17 @@ tr.exportTo('tr.model', function() {
 
       // Non-leaf rule (classify region row further down the tree).
       function regionRowMatchesChildNide(child) {
-        var fileRegExp = child.rule_.file;
-        if (fileRegExp === undefined)
-          return true;
+        const fileRegExp = child.rule_.file;
+        if (fileRegExp === undefined) return true;
         return fileRegExp.test(region.mappedFile);
       }
 
-      var matchedChild = tr.b.findFirstInArray(
-          this.children_, regionRowMatchesChildNide);
+      let matchedChild = this.children_.find(regionRowMatchesChildNide);
       if (matchedChild === undefined) {
         // Region belongs to the 'Other' node (created lazily).
-        if (this.children_.length !== this.rule_.children.length)
+        if (this.children_.length !== this.rule_.children.length) {
           throw new Error('Internal error');
+        }
         matchedChild = new VMRegionClassificationNode(
             VMRegionClassificationNode.OTHER_RULE);
         this.children_.push(matchedChild);
@@ -324,12 +326,12 @@ tr.exportTo('tr.model', function() {
       matchedChild.addRegionRecursively_(region, true);
     },
 
-    buildTree_: function() {
-      var cachedRegions = this.regions_;
+    buildTree_() {
+      const cachedRegions = this.regions_;
       this.regions_ = undefined;
 
       this.buildChildNodesRecursively_();
-      for (var i = 0; i < cachedRegions.length; i++) {
+      for (let i = 0; i < cachedRegions.length; i++) {
         // Note that we don't add the VM region's stats to this node because
         // they have already been added to it.
         this.addRegionRecursively_(
@@ -337,7 +339,7 @@ tr.exportTo('tr.model', function() {
       }
     },
 
-    buildChildNodesRecursively_: function() {
+    buildChildNodesRecursively_() {
       if (this.children_ !== undefined) {
         throw new Error(
             'Internal error: Classification node already has children');
@@ -347,33 +349,34 @@ tr.exportTo('tr.model', function() {
             'Internal error: Classification node should have no regions');
       }
 
-      if (this.isLeafNode)
+      if (this.isLeafNode) {
         return;  // Leaf node: Nothing to do.
+      }
 
       // Intermediate node: Clear regions and build children recursively.
       this.regions_ = undefined;
       this.children_ = this.rule_.children.map(function(childRule) {
-        var child = new VMRegionClassificationNode(childRule);
+        const child = new VMRegionClassificationNode(childRule);
         child.buildChildNodesRecursively_();
         return child;
       });
     },
 
-    addStatsFromRegion_: function(region) {
+    addStatsFromRegion_(region) {
       this.hasRegions = true;
 
       // Aggregate virtual size.
-      var regionSizeInBytes = region.sizeInBytes;
-      if (regionSizeInBytes !== undefined)
+      const regionSizeInBytes = region.sizeInBytes;
+      if (regionSizeInBytes !== undefined) {
         this.sizeInBytes = (this.sizeInBytes || 0) + regionSizeInBytes;
+      }
 
       // Aggregate byte stats.
-      var thisByteStats = this.byteStats;
-      var regionByteStats = region.byteStats;
-      for (var byteStatName in regionByteStats) {
-        var regionByteStatValue = regionByteStats[byteStatName];
-        if (regionByteStatValue === undefined)
-          continue;
+      const thisByteStats = this.byteStats;
+      const regionByteStats = region.byteStats;
+      for (const byteStatName in regionByteStats) {
+        const regionByteStatValue = regionByteStats[byteStatName];
+        if (regionByteStatValue === undefined) continue;
         thisByteStats[byteStatName] =
             (thisByteStats[byteStatName] || 0) + regionByteStatValue;
       }

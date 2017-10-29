@@ -19,7 +19,6 @@ class ProfileAndroid : public base::SupportsUserData::Data {
  public:
   static ProfileAndroid* FromProfile(Profile* profile);
   static Profile* FromProfileAndroid(jobject obj);
-  static bool RegisterProfileAndroid(JNIEnv* env);
 
   static base::android::ScopedJavaLocalRef<jobject> GetLastUsedProfile(
       JNIEnv* env,
@@ -51,6 +50,10 @@ class ProfileAndroid : public base::SupportsUserData::Data {
   // Whether this profile is off the record.
   jboolean IsOffTheRecord(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj);
+
+  // Whether this profile is signed in to a child account.
+  jboolean IsChild(JNIEnv* env,
+                   const base::android::JavaParamRef<jobject>& obj);
 
   explicit ProfileAndroid(Profile* profile);
   ~ProfileAndroid() override;

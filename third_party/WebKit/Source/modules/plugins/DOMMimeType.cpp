@@ -19,54 +19,57 @@
 
 #include "modules/plugins/DOMMimeType.h"
 
+#include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/Navigator.h"
 #include "core/loader/FrameLoader.h"
 #include "core/page/Page.h"
 #include "modules/plugins/DOMPlugin.h"
-#include "wtf/text/StringBuilder.h"
+#include "modules/plugins/DOMPluginArray.h"
+#include "modules/plugins/NavigatorPlugins.h"
+#include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
 
-DOMMimeType::DOMMimeType(PassRefPtr<PluginData> pluginData,
-                         LocalFrame* frame,
-                         unsigned index)
-    : ContextClient(frame), m_pluginData(pluginData), m_index(index) {}
-
-DOMMimeType::~DOMMimeType() {}
+DOMMimeType::DOMMimeType(LocalFrame* frame,
+                         const MimeClassInfo& mime_class_info)
+    : ContextClient(frame), mime_class_info_(&mime_class_info) {}
 
 DEFINE_TRACE(DOMMimeType) {
-  ContextClient::trace(visitor);
+  ContextClient::Trace(visitor);
+  visitor->Trace(mime_class_info_);
 }
 
 const String& DOMMimeType::type() const {
-  return mimeClassInfo().type;
+  return mime_class_info_->Type();
 }
 
 String DOMMimeType::suffixes() const {
-  const Vector<String>& extensions = mimeClassInfo().extensions;
+  const Vector<String>& extensions = mime_class_info_->Extensions();
 
   StringBuilder builder;
   for (size_t i = 0; i < extensions.size(); ++i) {
     if (i)
-      builder.append(',');
-    builder.append(extensions[i]);
+      builder.Append(',');
+    builder.Append(extensions[i]);
   }
-  return builder.toString();
+  return builder.ToString();
 }
 
 const String& DOMMimeType::description() const {
-  return mimeClassInfo().desc;
+  return mime_class_info_->Description();
 }
 
 DOMPlugin* DOMMimeType::enabledPlugin() const {
   // FIXME: allowPlugins is just a client call. We should not need
   // to bounce through the loader to get there.
-  // Something like: frame()->host()->client()->allowPlugins().
-  if (!frame() || !frame()->loader().allowPlugins(NotAboutToInstantiatePlugin))
+  // Something like: frame()->page()->client()->allowPlugins().
+  if (!GetFrame() ||
+      !GetFrame()->Loader().AllowPlugins(kNotAboutToInstantiatePlugin))
     return nullptr;
 
-  return DOMPlugin::create(m_pluginData.get(), frame(),
-                           m_pluginData->mimePluginIndices()[m_index]);
+  return NavigatorPlugins::plugins(*GetFrame()->DomWindow()->navigator())
+      ->namedItem(AtomicString(mime_class_info_->Plugin()->Name()));
 }
 
 }  // namespace blink

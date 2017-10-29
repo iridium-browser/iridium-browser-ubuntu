@@ -19,15 +19,12 @@ class VMTest(object):
 
   CATAPULT_RUN_TESTS = \
       '/usr/local/telemetry/src/third_party/catapult/telemetry/bin/run_tests'
-  TEST_PATTERNS = ['testBrowserCreation']
-  GUEST_TEST_PATTERNS = []
   SANITY_TEST = '/usr/local/autotest/bin/vm_sanity.py'
 
   def __init__(self, image_path, qemu_path, enable_kvm, display, catapult_tests,
-               vm_sanity, guest, start_vm, ssh_port):
+               guest, start_vm, ssh_port):
     self.start_time = datetime.datetime.utcnow()
     self.test_pattern = catapult_tests
-    self.vm_sanity = vm_sanity
     self.guest = guest
     self.start_vm = start_vm
     self.ssh_port = ssh_port
@@ -37,13 +34,11 @@ class VMTest(object):
                           ssh_port=ssh_port)
 
   def __del__(self):
-    if self._vm and self.start_vm:
-      self._vm.Stop()
+    self.StopVM()
 
-    elapsed = datetime.datetime.utcnow() - self.start_time
-    # Don't need trailing milliseconds.
     logging.info('Time elapsed %s.',
-                 datetime.timedelta(seconds=elapsed.seconds))
+                 datetime.datetime.utcnow() - self.start_time)
+
 
   def StartVM(self):
     """Start a VM if necessary.
@@ -57,6 +52,14 @@ class VMTest(object):
     if self.start_vm:
       self._vm.Start()
     self._vm.WaitForBoot()
+
+  def StopVM(self):
+    """Stop the VM if necessary.
+
+    If --start-vm was specified, we launched this VM, so we now stop it.
+    """
+    if self._vm and self.start_vm:
+      self._vm.Stop()
 
   def Build(self, build_dir):
     """Build chrome.
@@ -74,9 +77,12 @@ class VMTest(object):
     Args:
       build_dir: Build directory.
     """
-    cros_build_lib.RunCommand(['deploy_chrome', '--build-dir', build_dir,
-                               '--force', '--to', 'localhost',
+    cros_build_lib.RunCommand(['deploy_chrome', '--force',
+                               '--build-dir', build_dir,
+                               '--process-timeout', '180',
+                               '--to', 'localhost',
                                '--port', str(self.ssh_port)], log_output=True)
+    self._vm.WaitForBoot()
 
   def _RunCatapultTests(self, test_pattern, guest):
     """Run catapult tests matching a pattern.
@@ -89,10 +95,8 @@ class VMTest(object):
       True if all tests passed.
     """
 
-    self._vm.RemoteCommand(['chmod', '+x', self.CATAPULT_RUN_TESTS])
-
     browser = 'system-guest' if guest else 'system'
-    result = self._vm.RemoteCommand([self.CATAPULT_RUN_TESTS,
+    result = self._vm.RemoteCommand(['python', self.CATAPULT_RUN_TESTS,
                                      '--browser=%s' % browser,
                                      test_pattern])
     return result.returncode == 0
@@ -100,27 +104,17 @@ class VMTest(object):
   def RunTests(self):
     """Run all eligible tests.
 
-    If a test_pattern has been specified, only run those tests. Otherwise, run
-    all tests in TEST_PATTERNS and GUEST_TEST_PATTERNS.
+    If a test_pattern for catapult tests has been specified, run those tests.
+    Otherwise, run vm_sanity.
 
     Returns:
       True if all tests passed.
     """
 
-    if self.vm_sanity:
-      return self._vm.RemoteCommand([self.SANITY_TEST]).returncode == 0
-
     if self.test_pattern:
       return self._RunCatapultTests(self.test_pattern, self.guest)
 
-    success = True
-    for pattern in self.TEST_PATTERNS:
-      success = self._RunCatapultTests(pattern, guest=False) and success
-
-    for pattern in self.GUEST_TEST_PATTERNS:
-      success = self._RunCatapultTests(pattern, guest=True) and success
-
-    return success
+    return self._vm.RemoteCommand([self.SANITY_TEST]).returncode == 0
 
 
 def ParseCommandLine(argv):
@@ -138,9 +132,6 @@ def ParseCommandLine(argv):
                       help='Start a new VM before running tests.')
   parser.add_argument('--catapult-tests',
                       help='Catapult test pattern to run, passed to run_tests.')
-  parser.add_argument('--vm-sanity', action='store_true', default=False,
-                      help='Run a minimal and fast sanity test that ensures '
-                           'chrome starts and login works.')
   parser.add_argument('--guest', action='store_true', default=False,
                       help='Run tests in incognito mode.')
   parser.add_argument('--build-dir', type='path',
@@ -171,7 +162,7 @@ def main(argv):
   vm_test = VMTest(image_path=args.image_path,
                    qemu_path=args.qemu_path, enable_kvm=args.enable_kvm,
                    display=args.display, catapult_tests=args.catapult_tests,
-                   vm_sanity=args.vm_sanity, guest=args.guest,
+                   guest=args.guest,
                    start_vm=args.start_vm, ssh_port=args.ssh_port)
 
   if (args.build or args.deploy) and not args.build_dir:
@@ -188,4 +179,5 @@ def main(argv):
   success = vm_test.RunTests()
   success_str = 'succeeded' if success else 'failed'
   logging.info('Tests %s.', success_str)
+  vm_test.StopVM()
   return not success

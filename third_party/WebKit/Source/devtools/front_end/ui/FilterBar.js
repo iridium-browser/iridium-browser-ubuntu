@@ -106,13 +106,15 @@ UI.FilterBar = class extends UI.HBox {
       this._showingWidget = true;
       this.showWidget();
       this._showingWidget = false;
-      this._focusTextField();
     } else {
       this.hideWidget();
     }
   }
 
-  _focusTextField() {
+  /**
+   * @override
+   */
+  focus() {
     for (var i = 0; i < this._filters.length; ++i) {
       if (this._filters[i] instanceof UI.TextFilterUI) {
         var textFilterUI = /** @type {!UI.TextFilterUI} */ (this._filters[i]);
@@ -135,12 +137,6 @@ UI.FilterBar = class extends UI.HBox {
     this._filters = [];
     this._updateFilterButton();
   }
-};
-
-UI.FilterBar.FilterBarState = {
-  Inactive: 'inactive',
-  Active: 'active',
-  Shown: 'on'
 };
 
 /**
@@ -190,14 +186,14 @@ UI.TextFilterUI = class extends Common.Object {
     this._prompt.setPlaceholder(Common.UIString('Filter'));
 
     this._proxyElement.addEventListener('keydown', this._onInputKeyDown.bind(this), false);
-    this._prompt.on(UI.TextPrompt.TextChangedEvent, this._valueChanged.bind(this));
+    this._prompt.addEventListener(UI.TextPrompt.Events.TextChanged, this._valueChanged.bind(this));
 
     /** @type {?function(string, string, boolean=):!Promise<!UI.SuggestBox.Suggestions>} */
     this._suggestionProvider = null;
 
     if (this._supportRegex) {
       this._filterElement.classList.add('supports-regex');
-      var label = UI.createCheckboxLabel(Common.UIString('Regex'));
+      var label = UI.CheckboxLabel.create(Common.UIString('Regex'));
       this._regexCheckBox = label.checkboxElement;
       this._regexCheckBox.id = 'text-filter-regex';
       this._regexCheckBox.addEventListener('change', this._valueChanged.bind(this), false);
@@ -452,101 +448,6 @@ UI.NamedBitSetFilterUI.ALL_TYPES = 'all';
  * @implements {UI.FilterUI}
  * @unrestricted
  */
-UI.ComboBoxFilterUI = class extends Common.Object {
-  /**
-   * @param {!Array.<!{value: string, label: string, title: string, default:(boolean|undefined)}>} options
-   * @param {string=} label
-   * @param {!Common.Setting=} setting
-   */
-  constructor(options, label, setting) {
-    super();
-    this._setting = setting;
-    this._toolbar = new UI.Toolbar('');
-    this._filterComboBox = new UI.ToolbarComboBox(this._filterChanged.bind(this));
-    this._toolbar.appendToolbarItem(this._filterComboBox);
-
-    this._options = options;
-    for (var i = 0; i < options.length; ++i) {
-      var filterOption = options[i];
-      var option = this._filterComboBox.createOption(filterOption.label, filterOption.title, filterOption.value);
-      this._filterComboBox.addOption(option);
-      if (setting && setting.get() === filterOption.value)
-        this._filterComboBox.setSelectedIndex(i);
-    }
-
-    if (setting)
-      setting.addChangeListener(this._settingChanged, this);
-  }
-
-  /**
-   * @override
-   * @return {boolean}
-   */
-  isActive() {
-    var option = this._options[this._filterComboBox.selectedIndex()];
-    return !option || !option.default;
-  }
-
-  /**
-   * @override
-   * @return {!Element}
-   */
-  element() {
-    return this._toolbar.element;
-  }
-
-  /**
-   * @return {string}
-   */
-  value() {
-    return this._options[this._filterComboBox.selectedIndex()].value;
-  }
-
-  /**
-   * @param {number} index
-   */
-  setSelectedIndex(index) {
-    this._filterComboBox.setSelectedIndex(index);
-  }
-
-  /**
-   * @return {number}
-   */
-  selectedIndex(index) {
-    return this._filterComboBox.selectedIndex();
-  }
-
-  _settingChanged() {
-    if (this._muteSettingListener)
-      return;
-
-    var value = this._setting.get();
-    for (var i = 0; i < this._options.length; ++i) {
-      if (value === this._options[i].value) {
-        this._filterComboBox.setSelectedIndex(i);
-        break;
-      }
-    }
-  }
-
-  /**
-   * @param {!Event} event
-   */
-  _filterChanged(event) {
-    var option = this._options[this._filterComboBox.selectedIndex()];
-    if (this._setting) {
-      this._muteSettingListener = true;
-      this._setting.set(option.value);
-      this._muteSettingListener = false;
-    }
-    this.dispatchEventToListeners(UI.FilterUI.Events.FilterChanged, null);
-  }
-};
-
-/**
- * @implements {UI.FilterUI}
- * @unrestricted
- */
 UI.CheckboxFilterUI = class extends Common.Object {
   /**
    * @param {string} className
@@ -558,7 +459,7 @@ UI.CheckboxFilterUI = class extends Common.Object {
     super();
     this._filterElement = createElementWithClass('div', 'filter-checkbox-filter');
     this._activeWhenChecked = !!activeWhenChecked;
-    this._label = UI.createCheckboxLabel(title);
+    this._label = UI.CheckboxLabel.create(title);
     this._filterElement.appendChild(this._label);
     this._checkboxElement = this._label.checkboxElement;
     if (setting)

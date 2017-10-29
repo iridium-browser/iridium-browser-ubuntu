@@ -4,55 +4,53 @@
 
 #include "modules/compositorworker/AnimationWorklet.h"
 
-#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "core/dom/AnimationWorkletProxyClient.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/WebLocalFrameBase.h"
 #include "core/page/ChromeClient.h"
+#include "core/workers/WorkerClients.h"
 #include "modules/compositorworker/AnimationWorkletMessagingProxy.h"
+#include "modules/compositorworker/AnimationWorkletProxyClientImpl.h"
 #include "modules/compositorworker/AnimationWorkletThread.h"
 
 namespace blink {
 
 // static
-AnimationWorklet* AnimationWorklet::create(LocalFrame* frame) {
+AnimationWorklet* AnimationWorklet::Create(LocalFrame* frame) {
   return new AnimationWorklet(frame);
 }
 
-AnimationWorklet::AnimationWorklet(LocalFrame* frame)
-    : Worklet(frame), m_workletMessagingProxy(nullptr) {}
+AnimationWorklet::AnimationWorklet(LocalFrame* frame) : Worklet(frame) {}
 
-AnimationWorklet::~AnimationWorklet() {
-  if (m_workletMessagingProxy)
-    m_workletMessagingProxy->parentObjectDestroyed();
+AnimationWorklet::~AnimationWorklet() {}
+
+bool AnimationWorklet::NeedsToCreateGlobalScope() {
+  // For now, create only one global scope per document.
+  // TODO(nhiroki): Revisit this later.
+  return GetNumberOfGlobalScopes() == 0;
 }
 
-void AnimationWorklet::initialize() {
-  AnimationWorkletThread::ensureSharedBackingThread();
+WorkletGlobalScopeProxy* AnimationWorklet::CreateGlobalScope() {
+  DCHECK(NeedsToCreateGlobalScope());
+  AnimationWorkletThread::EnsureSharedBackingThread();
 
-  DCHECK(!m_workletMessagingProxy);
-  DCHECK(getExecutionContext());
-  Document* document = toDocument(getExecutionContext());
-  AnimationWorkletProxyClient* proxyClient =
-      document->frame()->chromeClient().createAnimationWorkletProxyClient(
-          document->frame());
+  Document* document = ToDocument(GetExecutionContext());
+  AnimationWorkletProxyClient* proxy_client =
+      AnimationWorkletProxyClientImpl::FromDocument(document);
 
-  m_workletMessagingProxy =
-      new AnimationWorkletMessagingProxy(getExecutionContext(), proxyClient);
-  m_workletMessagingProxy->initialize();
-}
+  WorkerClients* worker_clients = WorkerClients::Create();
+  ProvideAnimationWorkletProxyClientTo(worker_clients, proxy_client);
 
-bool AnimationWorklet::isInitialized() const {
-  return m_workletMessagingProxy;
-}
-
-WorkletGlobalScopeProxy* AnimationWorklet::workletGlobalScopeProxy() const {
-  DCHECK(m_workletMessagingProxy);
-  return m_workletMessagingProxy;
+  AnimationWorkletMessagingProxy* proxy =
+      new AnimationWorkletMessagingProxy(GetExecutionContext(), worker_clients);
+  proxy->Initialize();
+  return proxy;
 }
 
 DEFINE_TRACE(AnimationWorklet) {
-  Worklet::trace(visitor);
+  Worklet::Trace(visitor);
 }
 
 }  // namespace blink

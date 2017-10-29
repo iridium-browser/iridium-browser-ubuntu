@@ -6,17 +6,47 @@
             "marker": "breakpoint-marker",
             "title": "DOM Breakpoint",
             "color": "rgb(105, 140, 254)"
+        },
+        {
+            "type": "@UI.ContextMenu.Provider",
+            "contextTypes": [
+                "SDK.DOMNode"
+            ],
+            "className": "Components.DOMBreakpointsSidebarPane.ContextMenuProvider"
+        },
+        {
+            "type": "@UI.ContextFlavorListener",
+            "contextTypes": [
+                "SDK.DebuggerPausedDetails"
+            ],
+            "className": "Components.DOMBreakpointsSidebarPane"
+        },
+        {
+            "type": "view",
+            "location": "sources-sidebar",
+            "id": "sources.domBreakpoints",
+            "title": "DOM Breakpoints",
+            "order": 7,
+            "persistence": "permanent",
+            "factoryName": "Components.DOMBreakpointsSidebarPane"
+        },
+        {
+            "type": "view",
+            "location": "elements-sidebar",
+            "id": "elements.domBreakpoints",
+            "title": "DOM Breakpoints",
+            "order": 6,
+            "persistence": "permanent",
+            "factoryName": "Components.DOMBreakpointsSidebarPane"
         }
     ],
     "dependencies": [
         "bindings",
         "platform",
-        "ui"
+        "ui",
+        "network_log"
     ],
     "scripts": [
-        "BreakpointsSidebarPaneBase.js",
-        "CPUThrottlingManager.js",
-        "DataSaverInfobar.js",
         "DOMBreakpointsSidebarPane.js",
         "DOMPresentationUtils.js",
         "DockController.js",
@@ -24,7 +54,7 @@
         "Reload.js"
     ],
     "resources": [
-        "breakpointsList.css",
+        "domBreakpointsSidebarPane.css",
         "domUtils.css",
         "imagePreview.css"
     ]

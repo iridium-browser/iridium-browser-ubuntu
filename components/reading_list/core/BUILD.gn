@@ -2,22 +2,56 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/buildflag_header.gni")
-import("//components/reading_list/core/reading_list.gni")
+import("//components/reading_list/features/reading_list.gni")
 
 source_set("core") {
   sources = [
-    "reading_list_switches.cc",
-    "reading_list_switches.h",
+    "offline_url_utils.cc",
+    "offline_url_utils.h",
+    "reading_list_entry.cc",
+    "reading_list_entry.h",
+    "reading_list_model.cc",
+    "reading_list_model.h",
+    "reading_list_model_impl.cc",
+    "reading_list_model_impl.h",
+    "reading_list_model_observer.h",
+    "reading_list_model_storage.cc",
+    "reading_list_model_storage.h",
+    "reading_list_pref_names.cc",
+    "reading_list_pref_names.h",
+    "reading_list_store.cc",
+    "reading_list_store.h",
+    "reading_list_store_delegate.h",
   ]
   deps = [
-    ":reading_list_enable_flags",
     "//base",
+    "//components/keyed_service/core",
+    "//components/prefs",
+    "//components/reading_list/features:flags",
+    "//components/sync",
+    "//net",
+    "//url",
+  ]
+  public_deps = [
+    "//components/reading_list/core/proto",
   ]
 }
 
-buildflag_header("reading_list_enable_flags") {
-  header = "reading_list_enable_flags.h"
-  _enabled = is_ios && enable_reading_list
-  flags = [ "ENABLE_READING_LIST=$_enabled" ]
+source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "offline_url_utils_unittest.cc",
+    "reading_list_entry_unittest.cc",
+    "reading_list_model_unittest.cc",
+    "reading_list_store_unittest.cc",
+  ]
+  deps = [
+    ":core",
+    "//base",
+    "//base/test:test_support",
+    "//components/sync",
+    "//components/sync:test_support_model",
+    "//testing/gtest",
+    "//url",
+  ]
 }

@@ -8,17 +8,24 @@
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/permissions/permission_manager_factory.h"
+#include "chrome/browser/permissions/permission_request_manager.h"
 #include "chrome/browser/permissions/permission_result.h"
+#include "chrome/browser/ui/permission_bubble/mock_permission_prompt_factory.h"
+#include "chrome/browser/vr/vr_tab_helper.h"
+#include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "device/vr/features/features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using blink::mojom::PermissionStatus;
 using content::PermissionType;
 
 namespace {
+
+int kNoPendingOperation = -1;
 
 class PermissionManagerTestingProfile final : public TestingProfile {
  public:
@@ -34,7 +41,7 @@ class PermissionManagerTestingProfile final : public TestingProfile {
 
 }  // anonymous namespace
 
-class PermissionManagerTest : public testing::Test {
+class PermissionManagerTest : public ChromeRenderViewHostTestHarness {
  public:
   void OnPermissionChange(PermissionStatus permission) {
     callback_called_ = true;
@@ -49,11 +56,11 @@ class PermissionManagerTest : public testing::Test {
         callback_result_(PermissionStatus::ASK) {}
 
   PermissionManager* GetPermissionManager() {
-    return profile_.GetPermissionManager();
+    return profile_->GetPermissionManager();
   }
 
   HostContentSettingsMap* GetHostContentSettingsMap() {
-    return HostContentSettingsMapFactory::GetForProfile(&profile_);
+    return HostContentSettingsMapFactory::GetForProfile(profile_.get());
   }
 
   void CheckPermissionStatus(PermissionType type,
@@ -72,7 +79,7 @@ class PermissionManagerTest : public testing::Test {
   }
 
   void SetPermission(ContentSettingsType type, ContentSetting value) {
-    HostContentSettingsMapFactory::GetForProfile(&profile_)
+    HostContentSettingsMapFactory::GetForProfile(profile_.get())
         ->SetContentSettingDefaultScope(url_, url_, type, std::string(), value);
   }
 
@@ -95,13 +102,26 @@ class PermissionManagerTest : public testing::Test {
     callback_result_ = PermissionStatus::ASK;
   }
 
+  bool PendingRequestsEmpty() {
+    return GetPermissionManager()->pending_requests_.IsEmpty();
+  }
+
  private:
+  void SetUp() override {
+    ChromeRenderViewHostTestHarness::SetUp();
+    profile_.reset(new PermissionManagerTestingProfile());
+  }
+
+  void TearDown() override {
+    profile_.reset();
+    ChromeRenderViewHostTestHarness::TearDown();
+  }
+
   const GURL url_;
   const GURL other_url_;
   bool callback_called_;
   PermissionStatus callback_result_;
-  content::TestBrowserThreadBundle thread_bundle_;
-  PermissionManagerTestingProfile profile_;
+  std::unique_ptr<PermissionManagerTestingProfile> profile_;
 };
 
 TEST_F(PermissionManagerTest, GetPermissionStatusDefault) {
@@ -179,6 +199,15 @@ TEST_F(PermissionManagerTest, CheckPermissionResultAfterSet) {
                         CONTENT_SETTING_ALLOW,
                         PermissionStatusSource::UNSPECIFIED);
 #endif
+}
+
+TEST_F(PermissionManagerTest, SubscriptionDestroyedCleanlyWithoutUnsubscribe) {
+  // Test that the PermissionManager shuts down cleanly with subscriptions that
+  // haven't been removed, crbug.com/720071.
+  GetPermissionManager()->SubscribePermissionStatusChange(
+      PermissionType::GEOLOCATION, url(), url(),
+      base::Bind(&PermissionManagerTest::OnPermissionChange,
+                 base::Unretained(this)));
 }
 
 TEST_F(PermissionManagerTest, SameTypeChangeNotifies) {
@@ -370,4 +399,60 @@ TEST_F(PermissionManagerTest, SubscribeMIDIPermission) {
   EXPECT_FALSE(callback_called());
 
   GetPermissionManager()->UnsubscribePermissionStatusChange(subscription_id);
+}
+
+TEST_F(PermissionManagerTest, SuppressPermissionRequests) {
+  content::WebContents* contents = web_contents();
+  vr::VrTabHelper::CreateForWebContents(contents);
+  NavigateAndCommit(url());
+
+  SetPermission(CONTENT_SETTINGS_TYPE_NOTIFICATIONS, CONTENT_SETTING_ALLOW);
+  GetPermissionManager()->RequestPermission(
+      PermissionType::NOTIFICATIONS, main_rfh(), url(), true,
+      base::Bind(&PermissionManagerTest::OnPermissionChange,
+                 base::Unretained(this)));
+  EXPECT_TRUE(callback_called());
+  EXPECT_EQ(PermissionStatus::GRANTED, callback_result());
+
+  vr::VrTabHelper* vr_tab_helper = vr::VrTabHelper::FromWebContents(contents);
+  vr_tab_helper->SetIsInVr(true);
+  EXPECT_EQ(
+      kNoPendingOperation,
+      GetPermissionManager()->RequestPermission(
+          PermissionType::NOTIFICATIONS, contents->GetMainFrame(), url(), false,
+          base::Bind(&PermissionManagerTest::OnPermissionChange,
+                     base::Unretained(this))));
+  EXPECT_TRUE(callback_called());
+  EXPECT_EQ(PermissionStatus::DENIED, callback_result());
+
+  vr_tab_helper->SetIsInVr(false);
+  GetPermissionManager()->RequestPermission(
+      PermissionType::NOTIFICATIONS, main_rfh(), url(), false,
+      base::Bind(&PermissionManagerTest::OnPermissionChange,
+                 base::Unretained(this)));
+  EXPECT_TRUE(callback_called());
+  EXPECT_EQ(PermissionStatus::GRANTED, callback_result());
+}
+
+TEST_F(PermissionManagerTest, PermissionIgnoredCleanup) {
+  content::WebContents* contents = web_contents();
+  PermissionRequestManager::CreateForWebContents(contents);
+  PermissionRequestManager* manager =
+      PermissionRequestManager::FromWebContents(contents);
+  auto prompt_factory = base::MakeUnique<MockPermissionPromptFactory>(manager);
+  manager->DisplayPendingRequests();
+
+  NavigateAndCommit(url());
+
+  GetPermissionManager()->RequestPermission(
+      PermissionType::VIDEO_CAPTURE, main_rfh(), url(), /*user_gesture=*/true,
+      base::Bind(&PermissionManagerTest::OnPermissionChange,
+                 base::Unretained(this)));
+
+  EXPECT_FALSE(PendingRequestsEmpty());
+
+  NavigateAndCommit(GURL("https://foobar.com"));
+
+  EXPECT_FALSE(callback_called());
+  EXPECT_TRUE(PendingRequestsEmpty());
 }

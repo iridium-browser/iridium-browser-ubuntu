@@ -59,6 +59,11 @@ public interface TabModel extends TabList {
 
         /** Opened from a launcher shortcut. */
         FROM_LAUNCHER_SHORTCUT,
+
+        /**
+         * The tab is initially detached.
+         */
+        FROM_DETACHED,
     }
 
     /**
@@ -203,6 +208,19 @@ public interface TabModel extends TabList {
      * @param tab The tab to remove.
      */
     void removeTab(Tab tab);
+
+    /**
+     * Indicates that a new tab may be added to the model soon. Allows the model to initialize
+     * anything necessary for the creation of a tab or perform cleanup once a new tab is no longer
+     * pending addition.
+     * @param isPendingTabAdd Whether a new tab is pending addition to this model.
+     */
+    void setIsPendingTabAdd(boolean isPendingTabAdd);
+
+    /**
+     * Whether a new tab is pending addition to this model.
+     */
+    boolean isPendingTabAdd();
 
     /**
      * Subscribes a {@link TabModelObserver} to be notified about changes to this model.

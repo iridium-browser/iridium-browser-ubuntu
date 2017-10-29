@@ -9,6 +9,7 @@
 
 #include <map>
 #include <memory>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -25,10 +26,10 @@
 #include "core/fxcrt/fx_coordinates.h"
 
 #ifdef PDF_ENABLE_XFA
-#include "core/fxcodec/codec/icodec_bmpmodule.h"
-#include "core/fxcodec/codec/icodec_gifmodule.h"
-#include "core/fxcodec/codec/icodec_pngmodule.h"
-#include "core/fxcodec/codec/icodec_tiffmodule.h"
+#include "core/fxcodec/codec/ccodec_bmpmodule.h"
+#include "core/fxcodec/codec/ccodec_gifmodule.h"
+#include "core/fxcodec/codec/ccodec_pngmodule.h"
+#include "core/fxcodec/codec/ccodec_tiffmodule.h"
 #endif  // PDF_ENABLE_XFA
 
 class CFX_DIBSource;
@@ -46,10 +47,9 @@ class CFX_DIBAttribute {
 
   int32_t m_nXDPI;
   int32_t m_nYDPI;
-  FX_FLOAT m_fAspectRatio;
+  float m_fAspectRatio;
   uint16_t m_wDPIUnit;
   CFX_ByteString m_strAuthor;
-  uint8_t m_strTime[20];
   int32_t m_nGifLeft;
   int32_t m_nGifTop;
   uint32_t* m_pGifLocalPalette;
@@ -74,22 +74,22 @@ class CCodec_ModuleMgr {
 
 #ifdef PDF_ENABLE_XFA
   std::unique_ptr<CCodec_ProgressiveDecoder> CreateProgressiveDecoder();
-  void SetBmpModule(std::unique_ptr<ICodec_BmpModule> module) {
+  void SetBmpModule(std::unique_ptr<CCodec_BmpModule> module) {
     m_pBmpModule = std::move(module);
   }
-  void SetGifModule(std::unique_ptr<ICodec_GifModule> module) {
+  void SetGifModule(std::unique_ptr<CCodec_GifModule> module) {
     m_pGifModule = std::move(module);
   }
-  void SetPngModule(std::unique_ptr<ICodec_PngModule> module) {
+  void SetPngModule(std::unique_ptr<CCodec_PngModule> module) {
     m_pPngModule = std::move(module);
   }
-  void SetTiffModule(std::unique_ptr<ICodec_TiffModule> module) {
+  void SetTiffModule(std::unique_ptr<CCodec_TiffModule> module) {
     m_pTiffModule = std::move(module);
   }
-  ICodec_BmpModule* GetBmpModule() const { return m_pBmpModule.get(); }
-  ICodec_GifModule* GetGifModule() const { return m_pGifModule.get(); }
-  ICodec_PngModule* GetPngModule() const { return m_pPngModule.get(); }
-  ICodec_TiffModule* GetTiffModule() const { return m_pTiffModule.get(); }
+  CCodec_BmpModule* GetBmpModule() const { return m_pBmpModule.get(); }
+  CCodec_GifModule* GetGifModule() const { return m_pGifModule.get(); }
+  CCodec_PngModule* GetPngModule() const { return m_pPngModule.get(); }
+  CCodec_TiffModule* GetTiffModule() const { return m_pTiffModule.get(); }
 #endif  // PDF_ENABLE_XFA
 
  protected:
@@ -101,10 +101,10 @@ class CCodec_ModuleMgr {
   std::unique_ptr<CCodec_IccModule> m_pIccModule;
 
 #ifdef PDF_ENABLE_XFA
-  std::unique_ptr<ICodec_BmpModule> m_pBmpModule;
-  std::unique_ptr<ICodec_GifModule> m_pGifModule;
-  std::unique_ptr<ICodec_PngModule> m_pPngModule;
-  std::unique_ptr<ICodec_TiffModule> m_pTiffModule;
+  std::unique_ptr<CCodec_BmpModule> m_pBmpModule;
+  std::unique_ptr<CCodec_GifModule> m_pGifModule;
+  std::unique_ptr<CCodec_PngModule> m_pPngModule;
+  std::unique_ptr<CCodec_TiffModule> m_pTiffModule;
 #endif  // PDF_ENABLE_XFA
 
   std::unique_ptr<CCodec_FlateModule> m_pFlateModule;
@@ -112,28 +112,21 @@ class CCodec_ModuleMgr {
 
 void ReverseRGB(uint8_t* pDestBuf, const uint8_t* pSrcBuf, int pixels);
 uint32_t ComponentsForFamily(int family);
-void sRGB_to_AdobeCMYK(FX_FLOAT R,
-                       FX_FLOAT G,
-                       FX_FLOAT B,
-                       FX_FLOAT& c,
-                       FX_FLOAT& m,
-                       FX_FLOAT& y,
-                       FX_FLOAT& k);
-void AdobeCMYK_to_sRGB(FX_FLOAT c,
-                       FX_FLOAT m,
-                       FX_FLOAT y,
-                       FX_FLOAT k,
-                       FX_FLOAT& R,
-                       FX_FLOAT& G,
-                       FX_FLOAT& B);
-void AdobeCMYK_to_sRGB1(uint8_t c,
-                        uint8_t m,
-                        uint8_t y,
-                        uint8_t k,
-                        uint8_t& R,
-                        uint8_t& G,
-                        uint8_t& B);
-bool MD5ComputeID(const void* buf, uint32_t dwSize, uint8_t ID[16]);
+void sRGB_to_AdobeCMYK(float R,
+                       float G,
+                       float B,
+                       float& c,
+                       float& m,
+                       float& y,
+                       float& k);
+std::tuple<float, float, float> AdobeCMYK_to_sRGB(float c,
+                                                  float m,
+                                                  float y,
+                                                  float k);
+std::tuple<uint8_t, uint8_t, uint8_t> AdobeCMYK_to_sRGB1(uint8_t c,
+                                                         uint8_t m,
+                                                         uint8_t y,
+                                                         uint8_t k);
 void FaxG4Decode(const uint8_t* src_buf,
                  uint32_t src_size,
                  int* pbitpos,

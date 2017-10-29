@@ -10,16 +10,22 @@
 #include <vector>
 
 #include "base/strings/string_piece.h"
-#include "components/subresource_filter/core/common/proto/rules.pb.h"
+#include "components/url_pattern_index/proto/rules.pb.h"
 
 namespace subresource_filter {
 namespace testing {
 
-proto::UrlRule CreateSuffixRule(base::StringPiece suffix);
+// Creates a blacklist URL rule which targets subresources of any type such that
+// the resource URL ends with |suffix|.
+url_pattern_index::proto::UrlRule CreateSuffixRule(base::StringPiece suffix);
 
-proto::UrlRule CreateWhitelistRuleForDocument(
+// Same as CreateUrlRule(pattern, proto::URL_PATTERN_TYPE_WILDCARDED), but the
+// rule applies to the specified |activation_types|, and to no element types.
+// Additionally, it is restricted to a set of |domains| (if provided).
+url_pattern_index::proto::UrlRule CreateWhitelistRuleForDocument(
     base::StringPiece pattern,
-    int32_t activation_types = proto::ACTIVATION_TYPE_DOCUMENT,
+    int32_t activation_types =
+        url_pattern_index::proto::ACTIVATION_TYPE_DOCUMENT,
     std::vector<std::string> domains = std::vector<std::string>());
 
 }  // namespace testing

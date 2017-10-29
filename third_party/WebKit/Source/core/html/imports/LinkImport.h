@@ -33,8 +33,8 @@
 
 #include "core/html/LinkResource.h"
 #include "core/html/imports/HTMLImportChildClient.h"
-#include "wtf/Allocator.h"
-#include "wtf/RefPtr.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -48,29 +48,29 @@ class LinkImport final : public LinkResource, public HTMLImportChildClient {
   USING_GARBAGE_COLLECTED_MIXIN(LinkImport);
 
  public:
-  static LinkImport* create(HTMLLinkElement* owner);
+  static LinkImport* Create(HTMLLinkElement* owner);
 
   explicit LinkImport(HTMLLinkElement* owner);
-  ~LinkImport() override;
+  ~LinkImport() final;
 
-  // LinkResource
-  void process() override;
-  LinkResourceType type() const override { return Import; }
-  bool hasLoaded() const override;
+  // LinkResource overrides:
+  void Process() final;
+  LinkResourceType GetType() const final { return kImport; }
+  bool HasLoaded() const final;
   DECLARE_VIRTUAL_TRACE();
-  void ownerInserted() override;
-  void ownerRemoved() override;
+  void OwnerInserted() final;
+  void OwnerRemoved() final;
 
-  // HTMLImportChildClient
-  void didFinish() override;
-  void importChildWasDisposed(HTMLImportChild*) override;
-  bool isSync() const override;
-  HTMLLinkElement* link() override;
+  // HTMLImportChildClient overrides:
+  void DidFinish() final;
+  void ImportChildWasDisposed(HTMLImportChild*) final;
+  bool IsSync() const final;
+  HTMLLinkElement* Link() final;
 
-  Document* importedDocument() const;
+  Document* ImportedDocument() const;
 
  private:
-  Member<HTMLImportChild> m_child;
+  Member<HTMLImportChild> child_;
 };
 
 }  // namespace blink

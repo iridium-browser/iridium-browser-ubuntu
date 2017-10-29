@@ -14,7 +14,7 @@
 #include "chrome/browser/safe_browsing/incident_reporting/incident_receiver.h"
 #include "chrome/browser/safe_browsing/incident_reporting/variations_seed_signature_incident.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "components/variations/service/variations_service.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -55,10 +55,9 @@ void RegisterVariationsSeedSignatureAnalysis() {
 void VerifyVariationsSeedSignature(
     std::unique_ptr<IncidentReceiver> incident_receiver) {
   content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&VerifyVariationsSeedSignatureOnUIThread,
-                 base::Passed(&incident_receiver)));
+      content::BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&VerifyVariationsSeedSignatureOnUIThread,
+                     base::Passed(&incident_receiver)));
 }
 
 }  // namespace safe_browsing

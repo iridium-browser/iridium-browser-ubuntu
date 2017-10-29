@@ -10,7 +10,7 @@
 #include "base/macros.h"
 #include "third_party/libjingle_xmpp/xmpp/constants.h"
 #include "third_party/libjingle_xmpp/xmpp/saslcookiemechanism.h"
-#include "webrtc/base/socketaddress.h"
+#include "webrtc/rtc_base/socketaddress.h"
 
 namespace notifier {
 
@@ -65,7 +65,7 @@ GaiaTokenPreXmppAuth::~GaiaTokenPreXmppAuth() { }
 void GaiaTokenPreXmppAuth::StartPreXmppAuth(
     const buzz::Jid& jid,
     const rtc::SocketAddress& server,
-    const rtc::CryptString& pass,
+    const std::string& pass,
     const std::string& auth_mechanism,
     const std::string& auth_token) {
   SignalAuthDone();

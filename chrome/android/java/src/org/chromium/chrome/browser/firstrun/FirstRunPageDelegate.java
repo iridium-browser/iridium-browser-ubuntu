@@ -11,12 +11,6 @@ import android.app.Fragment;
  */
 public interface FirstRunPageDelegate {
     /**
-     * Must be called only after native has been initialized.
-     * @return A {@link ProfileDataCache} for Android user accounts.
-     */
-    ProfileDataCache getProfileDataCache();
-
-    /**
      * Advances the First Run Experience to the next page.
      * Successfully finishes FRE if the current page is the last page.
      */
@@ -48,8 +42,9 @@ public interface FirstRunPageDelegate {
     /**
      * Notifies that the user accepted to be signed in.
      * @param accountName An account to be signed in to.
+     * @param isDefaultAccount Whether this account is the default choice for the user.
      */
-    void acceptSignIn(String accountName);
+    void acceptSignIn(String accountName, boolean isDefaultAccount);
 
     /**
      * Notifies that the user asked to show sign in Settings once the sign in

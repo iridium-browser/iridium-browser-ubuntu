@@ -56,6 +56,7 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   void SwitchActiveUser(const AccountId& account_id) override;
   void SwitchToLastActiveUser() override;
   void OnSessionStarted() override;
+  void OnProfileInitialized(User* user) override;
   void RemoveUser(const AccountId& account_id,
                   RemoveUserDelegate* delegate) override;
   void RemoveUserFromList(const AccountId& account_id) override;
@@ -110,6 +111,7 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
       const User& user,
       const gfx::ImageSkia& profile_image) override;
   void ChangeUserChildStatus(User* user, bool is_child) override;
+  void ResetProfileEverInitialized(const AccountId& account_id) override;
   void Initialize() override;
 
   // This method updates "User was added to the device in this session nad is
@@ -130,6 +132,10 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // Returns true if trusted device policies have successfully been retrieved
   // and ephemeral users are enabled.
   virtual bool AreEphemeralUsersEnabled() const = 0;
+
+  void AddUserRecordForTesting(User* user) {
+    return AddUserRecord(user);
+  }
 
  protected:
   // Adds |user| to users list, and adds it to front of LRU list. It is assumed
@@ -308,6 +314,10 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // Read a flag indicating whether online authentication against GAIA should
   // be enforced during the user's next sign-in from local state preferences.
   bool LoadForceOnlineSignin(const AccountId& account_id) const;
+
+  // Read a flag indicating whether session initialization has completed at
+  // least once.
+  bool LoadSessionInitialized(const AccountId& account_id) const;
 
   // Notifies observers that merge session state had changed.
   void NotifyMergeSessionStateChanged();

@@ -11,9 +11,9 @@ from infra_libs.ts_mon.protos import metrics_pb2
 class DeviceTargetTest(unittest.TestCase):
 
   def test_populate_target(self):
-    pb = metrics_pb2.MetricsData()
+    pb = metrics_pb2.MetricsCollection()
     t = targets.DeviceTarget('reg', 'role', 'net', 'host')
-    t._populate_target_pb(pb)
+    t.populate_target_pb(pb)
     self.assertEquals(pb.network_device.metro, 'reg')
     self.assertEquals(pb.network_device.role, 'role')
     self.assertEquals(pb.network_device.hostgroup, 'net')
@@ -51,9 +51,9 @@ class DeviceTargetTest(unittest.TestCase):
 class TaskTargetTest(unittest.TestCase):
 
   def test_populate_target(self):
-    pb = metrics_pb2.MetricsData()
+    pb = metrics_pb2.MetricsCollection()
     t = targets.TaskTarget('serv', 'job', 'reg', 'host')
-    t._populate_target_pb(pb)
+    t.populate_target_pb(pb)
     self.assertEquals(pb.task.service_name, 'serv')
     self.assertEquals(pb.task.job_name, 'job')
     self.assertEquals(pb.task.data_center, 'reg')
@@ -87,3 +87,36 @@ class TaskTargetTest(unittest.TestCase):
     target._fields += ('bad',)
     with self.assertRaises(AttributeError):
       target.update({'bad': 'boo'})
+
+
+class TargetIdentityTest(unittest.TestCase):
+
+  def setUp(self):
+    self.task0 = targets.TaskTarget('serv', 'job', 'reg', 'host', 0)
+    self.task1 = targets.TaskTarget('serv', 'job', 'reg', 'host', 0)
+    self.task2 = targets.TaskTarget('serv', 'job', 'reg', 'host', 1)
+    self.device0 = targets.DeviceTarget('reg', 'role', 'net', 'host0')
+    self.device1 = targets.DeviceTarget('reg', 'role', 'net', 'host0')
+    self.device2 = targets.DeviceTarget('reg', 'role', 'net', 'host1')
+
+  def test_hash(self):
+    d = {}
+    d[self.task0] = 1
+    d[self.task1] = 2
+    d[self.task2] = 3
+    d[self.device0] = 4
+    d[self.device1] = 5
+    d[self.device2] = 6
+
+    self.assertDictEqual({self.task0: 2, self.task2: 3, self.device0: 5,
+                          self.device2: 6}, d)
+
+  def test_equality(self):
+    self.assertTrue(self.task0 == self.task1)
+    self.assertTrue(self.device0 == self.device1)
+
+    self.assertFalse(self.task0 == self.task2)
+    self.assertFalse(self.device0 == self.device2)
+
+    self.assertFalse(self.task0 == self.device0)
+

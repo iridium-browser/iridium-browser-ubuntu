@@ -67,6 +67,7 @@ class Command(object):
   ELEMENT_EQUALS = (
       _Method.GET, '/session/:sessionId/element/:id/equals/:other')
   GET_COOKIES = (_Method.GET, '/session/:sessionId/cookie')
+  GET_NAMED_COOKIE = (_Method.GET, '/session/:sessionId/cookie/:name')
   ADD_COOKIE = (_Method.POST, '/session/:sessionId/cookie')
   DELETE_ALL_COOKIES = (_Method.DELETE, '/session/:sessionId/cookie')
   DELETE_COOKIE = (_Method.DELETE, '/session/:sessionId/cookie/:name')
@@ -152,6 +153,10 @@ class Command(object):
   STATUS = (_Method.GET, '/status')
   SET_NETWORK_CONNECTION = (
       _Method.POST, '/session/:sessionId/network_connection')
+  SEND_COMMAND = (
+      _Method.POST, '/session/:sessionId/chromium/send_command')
+  SEND_COMMAND_AND_GET_RESULT = (
+      _Method.POST, '/session/:sessionId/chromium/send_command_and_get_result')
 
   # Custom Chrome commands.
   IS_LOADING = (_Method.GET, '/session/:sessionId/is_loading')

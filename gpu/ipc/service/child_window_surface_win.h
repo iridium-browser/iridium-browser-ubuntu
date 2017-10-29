@@ -16,7 +16,8 @@ namespace gpu {
 
 class ChildWindowSurfaceWin : public gl::NativeViewGLSurfaceEGL {
  public:
-  ChildWindowSurfaceWin(base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
+  ChildWindowSurfaceWin(std::unique_ptr<gfx::VSyncProvider> vsync_provider,
+                        base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
                         HWND parent_window);
 
   // GLSurface implementation.
@@ -27,6 +28,7 @@ class ChildWindowSurfaceWin : public gl::NativeViewGLSurfaceEGL {
   bool InitializeNativeWindow() override;
   gfx::SwapResult SwapBuffers() override;
   gfx::SwapResult PostSubBuffer(int x, int y, int width, int height) override;
+  void WaitForSnapshotRendering() override;
 
  protected:
   ~ChildWindowSurfaceWin() override;

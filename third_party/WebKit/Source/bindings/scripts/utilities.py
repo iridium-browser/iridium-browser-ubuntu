@@ -344,16 +344,19 @@ def write_pickle_file(pickle_filename, data):
 # Leading and trailing context (e.g. following '{') used to avoid false matches.
 ################################################################################
 
-def is_callback_interface_from_idl(file_contents):
+def is_non_legacy_callback_interface_from_idl(file_contents):
+    """Returns True if the specified IDL is a non-legacy callback interface."""
     match = re.search(r'callback\s+interface\s+\w+\s*{', file_contents)
-    return bool(match)
+    # Having constants means it's a legacy callback interface.
+    # https://heycam.github.io/webidl/#legacy-callback-interface-object
+    return bool(match) and not re.search(r'\s+const\b', file_contents)
 
 
 def should_generate_impl_file_from_idl(file_contents):
     """True when a given IDL file contents could generate .h/.cpp files."""
     # FIXME: This would be error-prone and we should use AST rather than
     # improving the regexp pattern.
-    match = re.search(r'(interface|dictionary|exception)\s+\w+', file_contents)
+    match = re.search(r'(interface|dictionary)\s+\w+', file_contents)
     return bool(match)
 
 
@@ -367,7 +370,7 @@ def match_interface_extended_attributes_from_idl(file_contents):
 
     match = re.search(
         r'\[([^[]*)\]\s*'
-        r'(interface|callback\s+interface|partial\s+interface|exception)\s+'
+        r'(interface|callback\s+interface|partial\s+interface)\s+'
         r'\w+\s*'
         r'(:\s*\w+\s*)?'
         r'{',
@@ -410,11 +413,21 @@ def get_interface_exposed_arguments(file_contents):
     return arguments
 
 
-# Workaround for http://crbug.com/611437
+# Workaround for crbug.com/611437 and crbug.com/711464
 # TODO(bashi): Remove this hack once we resolve too-long generated file names.
+# pylint: disable=line-too-long
 def shorten_union_name(union_type):
     aliases = {
+        # modules/canvas2d/CanvasRenderingContext2D.idl
+        'CSSImageValueOrHTMLImageElementOrSVGImageElementOrHTMLVideoElementOrHTMLCanvasElementOrImageBitmapOrOffscreenCanvas': 'CanvasImageSource',
+        # modules/canvas/HTMLCanvasElementModule.idl
         'CanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrImageBitmapRenderingContext': 'RenderingContext',
+        # core/imagebitmap/ImageBitmapFactories.idl
+        'HTMLImageElementOrSVGImageElementOrHTMLVideoElementOrHTMLCanvasElementOrBlobOrImageDataOrImageBitmapOrOffscreenCanvas': 'ImageBitmapSource',
+        # bindings/tests/idls/core/TestTypedefs.idl
+        'NodeOrLongSequenceOrEventOrXMLHttpRequestOrStringOrStringByteStringOrNodeListRecord': 'NestedUnionType',
+        # modules/offscreencanvas/OffscreenCanvasModules.idl
+        'OffscreenCanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContext': 'OffscreenRenderingContext',
     }
 
     idl_type = union_type
@@ -424,6 +437,9 @@ def shorten_union_name(union_type):
     alias = aliases.get(name)
     if alias:
         return alias
+    if len(name) >= 80:
+        raise Exception('crbug.com/711464: The union name %s is too long. '
+                        'Please add an alias to shorten_union_name()' % name)
     return name
 
 

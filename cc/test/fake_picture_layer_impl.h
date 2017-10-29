@@ -11,7 +11,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "cc/layers/picture_layer_impl.h"
-#include "cc/playback/raster_source.h"
+#include "cc/raster/raster_source.h"
 
 namespace cc {
 
@@ -114,7 +114,8 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   using PictureLayerImpl::MaximumTilingContentsScale;
 
   void AddTilingUntilNextDraw(float scale) {
-    last_append_quads_tilings_.push_back(AddTiling(scale));
+    last_append_quads_tilings_.push_back(
+        AddTiling(gfx::AxisTransform2d(scale, gfx::Vector2dF())));
   }
 
   float raster_page_scale() const { return raster_page_scale_; }

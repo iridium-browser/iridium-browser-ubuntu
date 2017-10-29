@@ -8,6 +8,8 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/strings/grit/components_strings.h"
@@ -19,10 +21,9 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_source.h"
 #include "ui/views/controls/button/checkbox.h"
-#include "ui/views/controls/image_view.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/layout/box_layout.h"
-#include "ui/views/layout/layout_constants.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_client_view.h"
 
@@ -30,8 +31,6 @@ namespace {
 
 // Minimum width of the the bubble.
 const int kMinBubbleWidth = 300;
-// Size of the icon.
-const int kIconSize = extension_misc::EXTENSION_ICON_MEDIUM;
 
 class WebAppInfoImageSource : public gfx::ImageSkiaSource {
  public:
@@ -57,47 +56,63 @@ class WebAppInfoImageSource : public gfx::ImageSkiaSource {
 
 BookmarkAppConfirmationView::~BookmarkAppConfirmationView() {}
 
-// static
-void BookmarkAppConfirmationView::CreateAndShow(
-    gfx::NativeWindow parent,
-    const WebApplicationInfo& web_app_info,
-    const BrowserWindow::ShowBookmarkAppBubbleCallback& callback) {
-  constrained_window::CreateBrowserModalDialogViews(
-      new BookmarkAppConfirmationView(web_app_info, callback), parent)
-      ->Show();
-}
-
 BookmarkAppConfirmationView::BookmarkAppConfirmationView(
     const WebApplicationInfo& web_app_info,
-    const BrowserWindow::ShowBookmarkAppBubbleCallback& callback)
+    chrome::ShowBookmarkAppDialogCallback callback)
     : web_app_info_(web_app_info),
-      callback_(callback),
+      callback_(std::move(callback)),
       open_as_window_checkbox_(nullptr),
       title_tf_(nullptr) {
-  views::BoxLayout* layout = new views::BoxLayout(
-      views::BoxLayout::kHorizontal, views::kButtonHEdgeMarginNew,
-      views::kButtonHEdgeMarginNew, views::kButtonHEdgeMarginNew);
-  layout->set_cross_axis_alignment(
-      views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
-  SetLayoutManager(layout);
+  const ChromeLayoutProvider* layout_provider = ChromeLayoutProvider::Get();
+  views::GridLayout* layout = views::GridLayout::CreatePanel(this);
+  const int column_set_id = 0;
 
+  views::ColumnSet* column_set = layout->AddColumnSet(column_set_id);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER, 0,
+                        views::GridLayout::USE_PREF, 0, 0);
+  column_set->AddPaddingColumn(0,
+                               layout_provider->GetDistanceMetric(
+                                   views::DISTANCE_RELATED_CONTROL_HORIZONTAL));
+  constexpr int textfield_width = 320;
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER, 0,
+                        views::GridLayout::FIXED, textfield_width, 0);
+
+  const int icon_size = layout_provider->IsHarmonyMode()
+                            ? extension_misc::EXTENSION_ICON_SMALL
+                            : extension_misc::EXTENSION_ICON_MEDIUM;
   views::ImageView* icon_image_view = new views::ImageView();
-  gfx::Size image_size(kIconSize, kIconSize);
-  gfx::ImageSkia image(new WebAppInfoImageSource(kIconSize, web_app_info_),
+  gfx::Size image_size(icon_size, icon_size);
+  gfx::ImageSkia image(new WebAppInfoImageSource(icon_size, web_app_info_),
                        image_size);
   icon_image_view->SetImageSize(image_size);
   icon_image_view->SetImage(image);
-  AddChildView(icon_image_view);
+  layout->StartRow(0, column_set_id);
+  layout->AddView(icon_image_view);
 
   title_tf_ = new views::Textfield();
   title_tf_->SetText(web_app_info_.title);
   title_tf_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_BOOKMARK_APP_AX_BUBBLE_NAME_LABEL));
   title_tf_->set_controller(this);
-  AddChildView(title_tf_);
-  layout->SetFlexForView(title_tf_, 1);
+  layout->AddView(title_tf_);
+
+  layout->AddPaddingRow(
+      0, layout_provider->GetDistanceMetric(DISTANCE_CONTROL_LIST_VERTICAL));
+
+  // When CanHostedAppsOpenInWindows() returns false, do not show the open as
+  // window checkbox to avoid confusing users.
+  if (extensions::util::CanHostedAppsOpenInWindows()) {
+    open_as_window_checkbox_ = new views::Checkbox(
+        l10n_util::GetStringUTF16(IDS_BOOKMARK_APP_BUBBLE_OPEN_AS_WINDOW));
+    open_as_window_checkbox_->SetChecked(web_app_info_.open_as_window);
+    layout->StartRow(0, column_set_id);
+    layout->SkipColumns(1);
+    layout->AddView(open_as_window_checkbox_);
+  }
 
   title_tf_->SelectAll(true);
+  chrome::RecordDialogCreation(
+      chrome::DialogIdentifier::BOOKMARK_APP_CONFIRMATION);
 }
 
 views::View* BookmarkAppConfirmationView::GetInitiallyFocusedView() {
@@ -124,19 +139,13 @@ bool BookmarkAppConfirmationView::ShouldShowCloseButton() const {
 
 void BookmarkAppConfirmationView::WindowClosing() {
   if (!callback_.is_null())
-    callback_.Run(false, web_app_info_);
-}
-
-views::View* BookmarkAppConfirmationView::CreateExtraView() {
-  open_as_window_checkbox_ = new views::Checkbox(
-      l10n_util::GetStringUTF16(IDS_BOOKMARK_APP_BUBBLE_OPEN_AS_WINDOW));
-  open_as_window_checkbox_->SetChecked(web_app_info_.open_as_window);
-  return open_as_window_checkbox_;
+    std::move(callback_).Run(false, web_app_info_);
 }
 
 bool BookmarkAppConfirmationView::Accept() {
   web_app_info_.title = GetTrimmedTitle();
-  web_app_info_.open_as_window = open_as_window_checkbox_->checked();
+  web_app_info_.open_as_window =
+      open_as_window_checkbox_ && open_as_window_checkbox_->checked();
   base::ResetAndReturn(&callback_).Run(true, web_app_info_);
   return true;
 }
@@ -153,7 +162,7 @@ bool BookmarkAppConfirmationView::IsDialogButtonEnabled(
 }
 
 gfx::Size BookmarkAppConfirmationView::GetMinimumSize() const {
-  gfx::Size size(views::DialogDelegateView::GetPreferredSize());
+  gfx::Size size(views::DialogDelegateView::CalculatePreferredSize());
   size.SetToMax(gfx::Size(kMinBubbleWidth, 0));
   return size;
 }
@@ -170,3 +179,16 @@ base::string16 BookmarkAppConfirmationView::GetTrimmedTitle() const {
   base::TrimWhitespace(title, base::TRIM_ALL, &title);
   return title;
 }
+
+namespace chrome {
+
+void ShowBookmarkAppDialog(gfx::NativeWindow parent,
+                           const WebApplicationInfo& web_app_info,
+                           ShowBookmarkAppDialogCallback callback) {
+  constrained_window::CreateBrowserModalDialogViews(
+      new BookmarkAppConfirmationView(web_app_info, std::move(callback)),
+      parent)
+      ->Show();
+}
+
+}  // namespace chrome

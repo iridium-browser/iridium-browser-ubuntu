@@ -6,9 +6,11 @@
 
 #include <stdint.h>
 
+#include "base/bind_helpers.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/optional.h"
 #include "base/rand_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_page_load_timing.h"
@@ -18,6 +20,7 @@
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "net/base/load_flags.h"
 #include "net/nqe/effective_connection_type.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
@@ -36,8 +39,10 @@ static const char kHistogramAttempted[] =
 // timing and data reduction proxy state.
 void AddDataToPageloadMetrics(const DataReductionProxyData& request_data,
                               const DataReductionProxyPageLoadTiming& timing,
-                              PageloadMetrics* request) {
+                              PageloadMetrics* request,
+                              bool opted_out) {
   request->set_session_key(request_data.session_key());
+  request->set_holdback_group(params::HoldbackFieldTrialGroup());
   // For the timing events, any of them could be zero. Fill the message as a
   // best effort.
   request->set_allocated_first_request_time(
@@ -92,6 +97,37 @@ void AddDataToPageloadMetrics(const DataReductionProxyData& request_data,
           request_data.effective_connection_type()));
   request->set_compressed_page_size_bytes(timing.network_bytes);
   request->set_original_page_size_bytes(timing.original_network_bytes);
+
+  if (request_data.page_id()) {
+    request->set_page_id(request_data.page_id().value());
+  }
+
+  bool was_preview_shown = false;
+  if (request_data.lofi_received()) {
+    request->set_previews_type(PageloadMetrics_PreviewsType_LOFI);
+    was_preview_shown = true;
+  } else if (request_data.lite_page_received()) {
+    request->set_previews_type(PageloadMetrics_PreviewsType_LITE_PAGE);
+    was_preview_shown = true;
+  } else {
+    request->set_previews_type(PageloadMetrics_PreviewsType_NONE);
+  }
+
+  // Only report opt out information if a server preview was shown (otherwise,
+  // report opt out unknown). Similarly, if app background (Android) caused this
+  // report to be sent before the page load is terminated, do not report opt out
+  // information as the user could reload the original preview after this report
+  // is sent.
+  if (!was_preview_shown || timing.app_background_occurred) {
+    request->set_previews_opt_out(PageloadMetrics_PreviewsOptOut_UNKNOWN);
+    return;
+  }
+
+  if (opted_out) {
+    request->set_previews_opt_out(PageloadMetrics_PreviewsOptOut_OPT_OUT);
+    return;
+  }
+  request->set_previews_opt_out(PageloadMetrics_PreviewsOptOut_NON_OPT_OUT);
 }
 
 // Adds |current_time| as the metrics sent time to |request_data|, and returns
@@ -115,6 +151,7 @@ DataReductionProxyPingbackClient::DataReductionProxyPingbackClient(
       pingback_reporting_fraction_(0.0) {}
 
 DataReductionProxyPingbackClient::~DataReductionProxyPingbackClient() {
+  DCHECK(opt_outs_.empty());
   DCHECK(thread_checker_.CalledOnValidThread());
 }
 
@@ -137,8 +174,18 @@ void DataReductionProxyPingbackClient::SendPingback(
   UMA_HISTOGRAM_BOOLEAN(kHistogramAttempted, send_pingback);
   if (!send_pingback)
     return;
+
+  bool opted_out = false;
+  if (request_data.page_id()) {
+    auto opt_out = opt_outs_.find(NavigationID(request_data.page_id().value(),
+                                               request_data.session_key()));
+    opted_out = opt_out != opt_outs_.end();
+    if (opted_out)
+      opt_outs_.erase(opt_out);
+  }
+
   PageloadMetrics* pageload_metrics = metrics_request_.add_pageloads();
-  AddDataToPageloadMetrics(request_data, timing, pageload_metrics);
+  AddDataToPageloadMetrics(request_data, timing, pageload_metrics, opted_out);
   if (current_fetcher_.get())
     return;
   DCHECK_EQ(1, metrics_request_.pageloads_size());
@@ -151,12 +198,39 @@ void DataReductionProxyPingbackClient::CreateFetcherForDataAndStart() {
   std::string serialized_request =
       AddTimeAndSerializeRequest(&metrics_request_, CurrentTime());
   metrics_request_.Clear();
-  current_fetcher_ =
-      net::URLFetcher::Create(pingback_url_, net::URLFetcher::POST, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("data_reduction_proxy_pingback", R"(
+        semantics {
+          sender: "Data Reduction Proxy"
+          description:
+            "Sends page performance and data efficiency metrics to the data "
+            "reduction proxy."
+          trigger:
+            "Sent after a page load, if the page was loaded via the data "
+            "reduction proxy."
+          data:
+            "URL, request time, response time, page size, connection type, and "
+            "performance measures. See the following for details: "
+            "components/data_reduction_proxy/proto/pageload_metrics.proto"
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "Users can control Data Saver on Android via 'Data Saver' setting. "
+            "Data Saver is not available on iOS, and on desktop it is enabled "
+            "by insalling the Data Saver extension. While Data Saver is "
+            "enabled, this feature cannot be disabled by settings."
+          policy_exception_justification: "Not implemented."
+        })");
+  current_fetcher_ = net::URLFetcher::Create(
+      pingback_url_, net::URLFetcher::POST, this, traffic_annotation);
   data_use_measurement::DataUseUserData::AttachToFetcher(
       current_fetcher_.get(),
       data_use_measurement::DataUseUserData::DATA_REDUCTION_PROXY);
-  current_fetcher_->SetLoadFlags(net::LOAD_BYPASS_PROXY);
+  current_fetcher_->SetLoadFlags(net::LOAD_BYPASS_PROXY |
+                                 net::LOAD_DO_NOT_SEND_COOKIES |
+                                 net::LOAD_DO_NOT_SAVE_COOKIES);
   current_fetcher_->SetUploadData("application/x-protobuf", serialized_request);
   current_fetcher_->SetRequestContext(url_request_context_);
   // |current_fetcher_| should not retry on 5xx errors since the server may
@@ -185,6 +259,28 @@ void DataReductionProxyPingbackClient::SetPingbackReportingFraction(
   DCHECK_LE(0.0f, pingback_reporting_fraction);
   DCHECK_GE(1.0f, pingback_reporting_fraction);
   pingback_reporting_fraction_ = pingback_reporting_fraction;
+}
+
+void DataReductionProxyPingbackClient::AddOptOut(
+    const NavigationID& navigation_id) {
+  opt_outs_.emplace(navigation_id);
+}
+
+void DataReductionProxyPingbackClient::ClearNavigationKeySync(
+    const NavigationID& navigation_id) {
+  opt_outs_.erase(navigation_id);
+}
+
+void DataReductionProxyPingbackClient::ClearNavigationKeyAsync(
+    const NavigationID& navigation_id) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&DataReductionProxyPingbackClient::ClearNavigationKeySync,
+                 base::Unretained(this), navigation_id));
+}
+
+size_t DataReductionProxyPingbackClient::OptOutsSizeForTesting() const {
+  return opt_outs_.size();
 }
 
 }  // namespace data_reduction_proxy

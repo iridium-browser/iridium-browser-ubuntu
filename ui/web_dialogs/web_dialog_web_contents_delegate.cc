@@ -60,9 +60,7 @@ bool WebDialogWebContentsDelegate::PreHandleGestureEvent(
     WebContents* source,
     const blink::WebGestureEvent& event) {
   // Disable pinch zooming.
-  return event.type() == blink::WebGestureEvent::GesturePinchBegin ||
-         event.type() == blink::WebGestureEvent::GesturePinchUpdate ||
-         event.type() == blink::WebGestureEvent::GesturePinchEnd;
+  return blink::WebInputEvent::IsPinchGestureEventType(event.GetType());
 }
 
 }  // namespace ui

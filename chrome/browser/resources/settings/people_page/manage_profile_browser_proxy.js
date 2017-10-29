@@ -20,74 +20,90 @@ var ProfileShortcutStatus = {
 
 cr.define('settings', function() {
   /** @interface */
-  function ManageProfileBrowserProxy() {}
-
-  ManageProfileBrowserProxy.prototype = {
+  class ManageProfileBrowserProxy {
     /**
      * Gets the available profile icons to choose from.
-     * @return {!Promise<!Array<string>>}
+     * @return {!Promise<!Array<!AvatarIcon>>}
      */
-    getAvailableIcons: function() {},
+    getAvailableIcons() {}
 
     /**
-     * Sets the profile's icon and name. There is no response.
-     * @param {!string} iconUrl The new profile URL.
-     * @param {!string} name The new profile name.
+     * Sets the profile's icon to the GAIA avatar.
      */
-    setProfileIconAndName: function(iconUrl, name) {},
+    setProfileIconToGaiaAvatar() {}
+
+    /**
+     * Sets the profile's icon to one of the default avatars.
+     * @param {string} iconUrl The new profile URL.
+     */
+    setProfileIconToDefaultAvatar(iconUrl) {}
+
+    /**
+     * Sets the profile's name.
+     * @param {string} name The new profile name.
+     */
+    setProfileName(name) {}
 
     /**
      * Returns whether the current profile has a shortcut.
      * @return {!Promise<ProfileShortcutStatus>}
      */
-    getProfileShortcutStatus: function() {},
+    getProfileShortcutStatus() {}
 
     /**
      * Adds a shortcut for the current profile.
      */
-    addProfileShortcut: function() {},
+    addProfileShortcut() {}
 
     /**
      * Removes the shortcut of the current profile.
      */
-    removeProfileShortcut: function() {},
-  };
+    removeProfileShortcut() {}
+  }
 
   /**
-   * @constructor
    * @implements {settings.ManageProfileBrowserProxy}
    */
-  function ManageProfileBrowserProxyImpl() {}
+  class ManageProfileBrowserProxyImpl {
+    /** @override */
+    getAvailableIcons() {
+      return cr.sendWithPromise('getAvailableIcons');
+    }
+
+    /** @override */
+    setProfileIconToGaiaAvatar() {
+      chrome.send('setProfileIconToGaiaAvatar');
+    }
+
+    /** @override */
+    setProfileIconToDefaultAvatar(iconUrl) {
+      chrome.send('setProfileIconToDefaultAvatar', [iconUrl]);
+    }
+
+    /** @override */
+    setProfileName(name) {
+      chrome.send('setProfileName', [name]);
+    }
+
+    /** @override */
+    getProfileShortcutStatus() {
+      return cr.sendWithPromise('requestProfileShortcutStatus');
+    }
+
+    /** @override */
+    addProfileShortcut() {
+      chrome.send('addProfileShortcut');
+    }
+
+    /** @override */
+    removeProfileShortcut() {
+      chrome.send('removeProfileShortcut');
+    }
+  }
+
   // The singleton instance_ is replaced with a test version of this wrapper
   // during testing.
   cr.addSingletonGetter(ManageProfileBrowserProxyImpl);
-
-  ManageProfileBrowserProxyImpl.prototype = {
-    /** @override */
-    getAvailableIcons: function() {
-      return cr.sendWithPromise('getAvailableIcons');
-    },
-
-    /** @override */
-    setProfileIconAndName: function(iconUrl, name) {
-      chrome.send('setProfileIconAndName', [iconUrl, name]);
-    },
-
-    /** @override */
-    getProfileShortcutStatus: function() {
-      return cr.sendWithPromise('requestProfileShortcutStatus');
-    },
-
-    /** @override */
-    addProfileShortcut: function() {
-      chrome.send('addProfileShortcut');
-    },
-
-    /** @override */
-    removeProfileShortcut: function() {
-      chrome.send('removeProfileShortcut');
-    },
-  };
 
   return {
     ManageProfileBrowserProxy: ManageProfileBrowserProxy,

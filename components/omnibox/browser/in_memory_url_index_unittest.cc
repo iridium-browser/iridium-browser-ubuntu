@@ -16,7 +16,6 @@
 #include "base/i18n/case_conversion.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
@@ -24,7 +23,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/sequenced_worker_pool_owner.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_service.h"
@@ -124,7 +123,7 @@ void CacheFileSaverObserver::OnCacheSaveFinished(bool succeeded) {
 
 class InMemoryURLIndexTest : public testing::Test {
  public:
-  InMemoryURLIndexTest();
+  InMemoryURLIndexTest() = default;
 
  protected:
   // Test setup.
@@ -169,17 +168,13 @@ class InMemoryURLIndexTest : public testing::Test {
   void ExpectPrivateDataEqual(const URLIndexPrivateData& expected,
                               const URLIndexPrivateData& actual);
 
-  base::MessageLoop message_loop_;
-  base::SequencedWorkerPoolOwner pool_owner_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   base::ScopedTempDir history_dir_;
   std::unique_ptr<history::HistoryService> history_service_;
-  history::HistoryDatabase* history_database_;
+  history::HistoryDatabase* history_database_ = nullptr;
   std::unique_ptr<TemplateURLService> template_url_service_;
   std::unique_ptr<InMemoryURLIndex> url_index_;
 };
-
-InMemoryURLIndexTest::InMemoryURLIndexTest()
-    : pool_owner_(3, "Background Pool"), history_database_(nullptr) {}
 
 sql::Connection& InMemoryURLIndexTest::GetDB() {
   return history_database_->GetDB();
@@ -242,79 +237,42 @@ void InMemoryURLIndexTest::SetUp() {
   history::HistoryBackend* backend = history_service_->history_backend_.get();
   history_database_ = backend->db();
 
-  // Create and populate a working copy of the URL history database.
-  base::FilePath history_proto_path;
-  PathService::Get(base::DIR_SOURCE_ROOT, &history_proto_path);
-  history_proto_path = history_proto_path.AppendASCII("components");
-  history_proto_path = history_proto_path.AppendASCII("test");
-  history_proto_path = history_proto_path.AppendASCII("data");
-  history_proto_path = history_proto_path.AppendASCII("omnibox");
-  history_proto_path = history_proto_path.Append(TestDBName());
-  ASSERT_TRUE(base::PathExists(history_proto_path));
+  // TODO(shess): If/when this code gets refactored, consider including the
+  // schema in the golden file (as sqlite3 .dump would generate) and using
+  // sql::test::CreateDatabaseFromSQL() to load it.  The code above which
+  // creates the database can change in ways which may not reliably represent
+  // user databases on disks in the fleet.
 
-  std::ifstream proto_file(history_proto_path.value().c_str());
-  static const size_t kCommandBufferMaxSize = 2048;
-  char sql_cmd_line[kCommandBufferMaxSize];
-
+  // Execute the contents of a golden file to populate the [urls] and [visits]
+  // tables.
+  base::FilePath golden_path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &golden_path);
+  golden_path = golden_path.AppendASCII("components/test/data/omnibox");
+  golden_path = golden_path.Append(TestDBName());
+  ASSERT_TRUE(base::PathExists(golden_path));
+  std::string sql;
+  ASSERT_TRUE(base::ReadFileToString(golden_path, &sql));
   sql::Connection& db(GetDB());
   ASSERT_TRUE(db.is_open());
-  {
-    sql::Transaction transaction(&db);
-    transaction.Begin();
-    while (!proto_file.eof()) {
-      proto_file.getline(sql_cmd_line, kCommandBufferMaxSize);
-      if (!proto_file.eof()) {
-        // We only process lines which begin with a upper-case letter.
-        if (base::IsAsciiUpper(sql_cmd_line[0])) {
-          std::string sql_cmd(sql_cmd_line);
-          sql::Statement sql_stmt(db.GetUniqueStatement(sql_cmd_line));
-          EXPECT_TRUE(sql_stmt.Run());
-        }
-      }
-    }
-    transaction.Commit();
-  }
+  ASSERT_TRUE(db.Execute(sql.c_str()));
 
-  // Update the last_visit_time table column in the "urls" table
-  // such that it represents a time relative to 'now'.
-  sql::Statement statement(db.GetUniqueStatement(
-      "SELECT" HISTORY_URL_ROW_FIELDS "FROM urls;"));
-  ASSERT_TRUE(statement.is_valid());
+  // Update [urls.last_visit_time] and [visits.visit_time] to represent a time
+  // relative to 'now'.
   base::Time time_right_now = base::Time::NowFromSystemTime();
   base::TimeDelta day_delta = base::TimeDelta::FromDays(1);
   {
-    sql::Transaction transaction(&db);
-    transaction.Begin();
-    while (statement.Step()) {
-      history::URLRow row;
-      history_database_->FillURLRow(statement, &row);
-      base::Time last_visit = time_right_now;
-      for (int64_t i = row.last_visit().ToInternalValue(); i > 0; --i)
-        last_visit -= day_delta;
-      row.set_last_visit(last_visit);
-      history_database_->UpdateURLRow(row.id(), row);
-    }
-    transaction.Commit();
+    sql::Statement s(db.GetUniqueStatement(
+        "UPDATE urls SET last_visit_time = ? - ? * last_visit_time"));
+    s.BindInt64(0, time_right_now.ToInternalValue());
+    s.BindInt64(1, day_delta.ToInternalValue());
+    ASSERT_TRUE(s.Run());
   }
-
-  // Update the visit_time table column in the "visits" table
-  // such that it represents a time relative to 'now'.
-  statement.Assign(db.GetUniqueStatement(
-      "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits;"));
-  ASSERT_TRUE(statement.is_valid());
   {
-    sql::Transaction transaction(&db);
-    transaction.Begin();
-    while (statement.Step()) {
-      history::VisitRow row;
-      history_database_->FillVisitRow(statement, &row);
-      base::Time last_visit = time_right_now;
-      for (int64_t i = row.visit_time.ToInternalValue(); i > 0; --i)
-        last_visit -= day_delta;
-      row.visit_time = last_visit;
-      history_database_->UpdateVisitRow(row);
-    }
-    transaction.Commit();
+    sql::Statement s(db.GetUniqueStatement(
+        "UPDATE visits SET visit_time = ? - ? * visit_time"));
+    s.BindInt64(0, time_right_now.ToInternalValue());
+    s.BindInt64(1, day_delta.ToInternalValue());
+    ASSERT_TRUE(s.Run());
   }
 
   // Set up a simple template URL service with a default search engine.
@@ -333,10 +291,11 @@ void InMemoryURLIndexTest::TearDown() {
   // it is destroyed in order to prevent HistoryService calling dead observer.
   if (url_index_)
     url_index_->Shutdown();
+  scoped_task_environment_.RunUntilIdle();
 }
 
 base::FilePath::StringType InMemoryURLIndexTest::TestDBName() const {
-    return FILE_PATH_LITERAL("in_memory_url_index_test.db.txt");
+  return FILE_PATH_LITERAL("in_memory_url_index_test.sql");
 }
 
 bool InMemoryURLIndexTest::InitializeInMemoryURLIndexInSetUp() const {
@@ -350,7 +309,7 @@ void InMemoryURLIndexTest::InitializeInMemoryURLIndex() {
   client_schemes_to_whitelist.insert(kClientWhitelistedScheme);
   url_index_.reset(new InMemoryURLIndex(
       nullptr, history_service_.get(), template_url_service_.get(),
-      pool_owner_.pool().get(), base::FilePath(), client_schemes_to_whitelist));
+      base::FilePath(), client_schemes_to_whitelist));
   url_index_->Init();
   url_index_->RebuildFromHistory(history_database_);
 }
@@ -494,7 +453,7 @@ class LimitedInMemoryURLIndexTest : public InMemoryURLIndexTest {
 };
 
 base::FilePath::StringType LimitedInMemoryURLIndexTest::TestDBName() const {
-  return FILE_PATH_LITERAL("in_memory_url_index_test_limited.db.txt");
+  return FILE_PATH_LITERAL("in_memory_url_index_test_limited.sql");
 }
 
 bool LimitedInMemoryURLIndexTest::InitializeInMemoryURLIndexInSetUp() const {
@@ -517,6 +476,20 @@ TEST_F(LimitedInMemoryURLIndexTest, Initialization) {
   EXPECT_EQ(1U, private_data.history_info_map_.size());
   EXPECT_EQ(35U, private_data.char_word_map_.size());
   EXPECT_EQ(17U, private_data.word_map_.size());
+}
+
+TEST_F(InMemoryURLIndexTest, HiddenURLRowsAreIgnored) {
+  history::URLID new_row_id = 87654321;  // Arbitrarily chosen large new row id.
+  history::URLRow new_row =
+      history::URLRow(GURL("http://hidden.com/"), new_row_id++);
+  new_row.set_last_visit(base::Time::Now());
+  new_row.set_hidden(true);
+
+  EXPECT_FALSE(UpdateURL(new_row));
+  EXPECT_EQ(0U, url_index_
+                    ->HistoryItemsForTerms(ASCIIToUTF16("hidden"),
+                                           base::string16::npos, kMaxMatches)
+                    .size());
 }
 
 TEST_F(InMemoryURLIndexTest, Retrieval) {
@@ -1274,6 +1247,7 @@ TEST_F(InMemoryURLIndexTest, RebuildFromHistoryIfCacheOld) {
     PostSaveToCacheFileTask();
     run_loop.Run();
     EXPECT_TRUE(save_observer.succeeded());
+    url_index_->set_save_cache_observer(nullptr);
   }
 
   // Clear and then prove it's clear before restoring.
@@ -1294,6 +1268,7 @@ TEST_F(InMemoryURLIndexTest, RebuildFromHistoryIfCacheOld) {
     PostRestoreFromCacheFileTask();
     run_loop.Run();
     EXPECT_TRUE(restore_observer.succeeded());
+    url_index_->set_restore_cache_observer(nullptr);
   }
 
   URLIndexPrivateData& new_data(*GetPrivateData());
@@ -1389,7 +1364,7 @@ TEST_F(InMemoryURLIndexTest, CalculateWordStartsOffsets) {
 
 class InMemoryURLIndexCacheTest : public testing::Test {
  public:
-  InMemoryURLIndexCacheTest();
+  InMemoryURLIndexCacheTest() = default;
 
  protected:
   void SetUp() override;
@@ -1399,21 +1374,16 @@ class InMemoryURLIndexCacheTest : public testing::Test {
   void set_history_dir(const base::FilePath& dir_path);
   bool GetCacheFilePath(base::FilePath* file_path) const;
 
-  base::MessageLoop message_loop_;
-  base::SequencedWorkerPoolOwner pool_owner_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<InMemoryURLIndex> url_index_;
 };
 
-InMemoryURLIndexCacheTest::InMemoryURLIndexCacheTest()
-    : pool_owner_(3, "Background Pool") {}
-
 void InMemoryURLIndexCacheTest::SetUp() {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   base::FilePath path(temp_dir_.GetPath());
-  url_index_.reset(new InMemoryURLIndex(nullptr, nullptr, nullptr,
-                                        pool_owner_.pool().get(), path,
-                                        SchemeSet()));
+  url_index_.reset(
+      new InMemoryURLIndex(nullptr, nullptr, nullptr, path, SchemeSet()));
 }
 
 void InMemoryURLIndexCacheTest::TearDown() {

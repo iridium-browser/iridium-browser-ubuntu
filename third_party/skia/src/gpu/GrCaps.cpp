@@ -21,7 +21,6 @@ static const char* pixel_config_name(GrPixelConfig config) {
         case kSRGBA_8888_GrPixelConfig: return "SRGBA8888";
         case kSBGRA_8888_GrPixelConfig: return "SBGRA8888";
         case kRGBA_8888_sint_GrPixelConfig: return "RGBA8888_sint";
-        case kETC1_GrPixelConfig: return "ETC1";
         case kRGBA_float_GrPixelConfig: return "RGBAFloat";
         case kRG_float_GrPixelConfig: return "RGFloat";
         case kAlpha_half_GrPixelConfig: return "AlphaHalf";
@@ -36,17 +35,15 @@ GrCaps::GrCaps(const GrContextOptions& options) {
     fNPOTTextureTileSupport = false;
     fSRGBSupport = false;
     fSRGBWriteControl = false;
-    fTwoSidedStencilSupport = false;
-    fStencilWrapOpsSupport = false;
     fDiscardRenderTargetSupport = false;
     fReuseScratchTextures = true;
     fReuseScratchBuffers = true;
     fGpuTracingSupport = false;
-    fCompressedTexSubImageSupport = false;
     fOversizedStencilSupport = false;
     fTextureBarrierSupport = false;
     fSampleLocationsSupport = false;
     fMultisampleDisableSupport = false;
+    fInstanceAttribSupport = false;
     fUsesMixedSamples = false;
     fPreferClientSideDynamicBuffers = false;
     fFullClearIsFree = false;
@@ -73,11 +70,10 @@ GrCaps::GrCaps(const GrContextOptions& options) {
     fMaxWindowRectangles = 0;
 
     fSuppressPrints = options.fSuppressPrints;
-    fImmediateFlush = options.fImmediateMode;
+    fWireframeMode = options.fWireframeMode;
     fBufferMapThreshold = options.fBufferMapThreshold;
-    fUseDrawInsteadOfPartialRenderTargetWrite = options.fUseDrawInsteadOfPartialRenderTargetWrite;
-    fUseDrawInsteadOfAllRenderTargetWrites = false;
     fAvoidInstancedDrawsToFPTargets = false;
+    fAvoidStencilBuffers = false;
 
     fPreferVRAMUseOverFlushes = true;
 }
@@ -96,6 +92,7 @@ void GrCaps::applyOptionsOverrides(const GrContextOptions& options) {
                  GrWindowRectangles::kMaxWindows, fMaxWindowRectangles);
         fMaxWindowRectangles = GrWindowRectangles::kMaxWindows;
     }
+    fAvoidStencilBuffers = options.fAvoidStencilBuffers;
 }
 
 static SkString map_flags_to_string(uint32_t flags) {
@@ -125,17 +122,15 @@ SkString GrCaps::dump() const {
     r.appendf("NPOT Texture Tile Support          : %s\n", gNY[fNPOTTextureTileSupport]);
     r.appendf("sRGB Support                       : %s\n", gNY[fSRGBSupport]);
     r.appendf("sRGB Write Control                 : %s\n", gNY[fSRGBWriteControl]);
-    r.appendf("Two Sided Stencil Support          : %s\n", gNY[fTwoSidedStencilSupport]);
-    r.appendf("Stencil Wrap Ops  Support          : %s\n", gNY[fStencilWrapOpsSupport]);
     r.appendf("Discard Render Target Support      : %s\n", gNY[fDiscardRenderTargetSupport]);
     r.appendf("Reuse Scratch Textures             : %s\n", gNY[fReuseScratchTextures]);
     r.appendf("Reuse Scratch Buffers              : %s\n", gNY[fReuseScratchBuffers]);
     r.appendf("Gpu Tracing Support                : %s\n", gNY[fGpuTracingSupport]);
-    r.appendf("Compressed Update Support          : %s\n", gNY[fCompressedTexSubImageSupport]);
     r.appendf("Oversized Stencil Support          : %s\n", gNY[fOversizedStencilSupport]);
     r.appendf("Texture Barrier Support            : %s\n", gNY[fTextureBarrierSupport]);
     r.appendf("Sample Locations Support           : %s\n", gNY[fSampleLocationsSupport]);
     r.appendf("Multisample disable support        : %s\n", gNY[fMultisampleDisableSupport]);
+    r.appendf("Instance Attrib Support            : %s\n", gNY[fInstanceAttribSupport]);
     r.appendf("Uses Mixed Samples                 : %s\n", gNY[fUsesMixedSamples]);
     r.appendf("Prefer client-side dynamic buffers : %s\n", gNY[fPreferClientSideDynamicBuffers]);
     r.appendf("Full screen clear is free          : %s\n", gNY[fFullClearIsFree]);
@@ -145,8 +140,6 @@ SkString GrCaps::dump() const {
     r.appendf("Cross context texture support      : %s\n", gNY[fCrossContextTextureSupport]);
 
     r.appendf("Draw Instead of Clear [workaround] : %s\n", gNY[fUseDrawInsteadOfClear]);
-    r.appendf("Draw Instead of TexSubImage [workaround] : %s\n",
-              gNY[fUseDrawInsteadOfPartialRenderTargetWrite]);
     r.appendf("Prefer VRAM Use over flushes [workaround] : %s\n", gNY[fPreferVRAMUseOverFlushes]);
 
     if (this->advancedBlendEquationSupport()) {

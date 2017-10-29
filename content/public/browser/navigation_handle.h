@@ -82,9 +82,10 @@ class CONTENT_EXPORT NavigationHandle {
   // stays constant for the lifetime of the frame.
   virtual int GetFrameTreeNodeId() = 0;
 
-  // Returns the FrameTreeNode ID for the parent frame. If this navigation is
-  // taking place in the main frame, the value returned is -1.
-  virtual int GetParentFrameTreeNodeId() = 0;
+  // Returns the RenderFrameHost for the parent frame, or nullptr if this
+  // navigation is taking place in the main frame. This value will not change
+  // during a navigation.
+  virtual RenderFrameHost* GetParentFrame() = 0;
 
   // The WebContents the navigation is taking place in.
   WebContents* GetWebContents();
@@ -109,6 +110,9 @@ class CONTENT_EXPORT NavigationHandle {
   // Returns the restore type for this navigation. RestoreType::NONE is returned
   // if the navigation is not a restore.
   virtual RestoreType GetRestoreType() = 0;
+
+  // Used for specifying a base URL for pages loaded via data URLs.
+  virtual const GURL& GetBaseURLForDataURL() = 0;
 
   // Parameters available at network request start time ------------------------
   //
@@ -157,12 +161,12 @@ class CONTENT_EXPORT NavigationHandle {
   // called.
   virtual RenderFrameHost* GetRenderFrameHost() = 0;
 
-  // Whether the navigation happened in the same page. Examples of same page
-  // navigations are:
+  // Whether the navigation happened without changing document. Examples of
+  // same document navigations are:
   // * reference fragment navigations
   // * pushState/replaceState
   // * same page history navigation
-  virtual bool IsSamePage() = 0;
+  virtual bool IsSameDocument() = 0;
 
   // Whether the navigation has encountered a server redirect or not.
   virtual bool WasServerRedirect() = 0;
@@ -224,19 +228,6 @@ class CONTENT_EXPORT NavigationHandle {
   // encountering a server redirect).
   virtual net::HttpResponseInfo::ConnectionInfo GetConnectionInfo() = 0;
 
-  // Resumes a navigation that was previously deferred by a NavigationThrottle.
-  // Note: this may lead to the deletion of the NavigationHandle and its
-  // associated NavigationThrottles.
-  virtual void Resume() = 0;
-
-  // Cancels a navigation that was previously deferred by a NavigationThrottle.
-  // |result| should be equal to NavigationThrottle::CANCEL or
-  // NavigationThrottle::CANCEL_AND_IGNORE.
-  // Note: this may lead to the deletion of the NavigationHandle and its
-  // associated NavigationThrottles.
-  virtual void CancelDeferredNavigation(
-      NavigationThrottle::ThrottleCheckResult result) = 0;
-
   // Returns the ID of the URLRequest associated with this navigation. Can only
   // be called from NavigationThrottle::WillProcessResponse and
   // WebContentsObserver::ReadyToCommitNavigation.
@@ -254,7 +245,7 @@ class CONTENT_EXPORT NavigationHandle {
       RenderFrameHost* render_frame_host,
       bool committed = false,
       net::Error error = net::OK,
-      bool is_same_page = false);
+      bool is_same_document = false);
 
   // Registers a NavigationThrottle for tests. The throttle can
   // modify the request, pause the request or cancel the request. This will
@@ -289,6 +280,10 @@ class CONTENT_EXPORT NavigationHandle {
 
   // Simulates the navigation being committed.
   virtual void CallDidCommitNavigationForTesting(const GURL& url) = 0;
+
+  // Simulates the navigation resuming. Most callers should just let the
+  // deferring NavigationThrottle do the resuming.
+  virtual void CallResumeForTesting() = 0;
 
   // The NavigationData that the embedder returned from
   // ResourceDispatcherHostDelegate::GetNavigationData during commit. This will

@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef DEVICE_USB_USB_SERVICE_WIN_H_
+#define DEVICE_USB_USB_SERVICE_WIN_H_
+
 #include "device/usb/usb_service.h"
 
 #include <list>
@@ -13,20 +16,15 @@
 #include "device/base/device_monitor_win.h"
 #include "device/usb/usb_device_win.h"
 
-namespace base {
-class SequencedTaskRunner;
-}
-
 namespace device {
 
 class UsbServiceWin : public DeviceMonitorWin::Observer, public UsbService {
  public:
-  explicit UsbServiceWin(
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
+  UsbServiceWin();
   ~UsbServiceWin() override;
 
  private:
-  class BlockingThreadHelper;
+  class BlockingTaskHelper;
 
   // device::UsbService implementation
   void GetDevices(const GetDevicesCallback& callback) override;
@@ -55,7 +53,7 @@ class UsbServiceWin : public DeviceMonitorWin::Observer, public UsbService {
   uint32_t first_enumeration_countdown_ = 0;
   std::list<GetDevicesCallback> enumeration_callbacks_;
 
-  BlockingThreadHelper* helper_;
+  std::unique_ptr<BlockingTaskHelper> helper_;
   std::unordered_map<std::string, scoped_refptr<UsbDeviceWin>> devices_by_path_;
 
   ScopedObserver<DeviceMonitorWin, DeviceMonitorWin::Observer> device_observer_;
@@ -66,3 +64,5 @@ class UsbServiceWin : public DeviceMonitorWin::Observer, public UsbService {
 };
 
 }  // namespace device
+
+#endif  // DEVICE_USB_USB_SERVICE_WIN_H_

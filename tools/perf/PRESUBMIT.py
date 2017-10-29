@@ -19,6 +19,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckWprShaFiles(input_api, output_api))
   results.extend(_CheckJson(input_api, output_api))
   results.extend(_CheckPerfJsonUpToDate(input_api, output_api))
+  results.extend(_CheckExpectations(input_api, output_api))
   results.extend(input_api.RunTests(input_api.canned_checks.GetPylint(
       input_api, output_api, extra_paths_list=_GetPathsToPrepend(input_api),
       pylintrc='pylintrc')))
@@ -32,10 +33,13 @@ def _GetPathsToPrepend(input_api):
       chromium_src_dir, 'third_party', 'catapult', 'telemetry')
   experimental_dir = input_api.os_path.join(
       chromium_src_dir, 'third_party', 'catapult', 'experimental')
+  tracing_dir = input_api.os_path.join(
+      chromium_src_dir, 'third_party', 'catapult', 'tracing')
   return [
       telemetry_dir,
       input_api.os_path.join(telemetry_dir, 'third_party', 'mock'),
       experimental_dir,
+      tracing_dir,
   ]
 
 
@@ -46,12 +50,24 @@ def _RunArgs(args, input_api):
   return (out, p.returncode)
 
 
+def _CheckExpectations(input_api, output_api):
+  results = []
+  perf_dir = input_api.PresubmitLocalPath()
+  out, return_code = _RunArgs([
+      input_api.python_executable,
+      input_api.os_path.join(perf_dir, 'validate_story_expectation_data')],
+      input_api)
+  if return_code:
+    results.append(output_api.PresubmitError(
+        'Validating story expectation data failed.', long_text=out))
+  return results
+
 def _CheckPerfJsonUpToDate(input_api, output_api):
   results = []
   perf_dir = input_api.PresubmitLocalPath()
   out, return_code = _RunArgs([
       input_api.python_executable,
-      input_api.os_path.join(perf_dir, 'generate_perf_json.py'),
+      input_api.os_path.join(perf_dir, 'generate_perf_data'),
       '--validate-only'], input_api)
   if return_code:
       results.append(output_api.PresubmitError(

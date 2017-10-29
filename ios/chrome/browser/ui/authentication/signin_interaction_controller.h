@@ -11,9 +11,11 @@
 #include "components/signin/core/browser/signin_metrics.h"
 #include "ios/chrome/browser/signin/constants.h"
 
+@protocol ApplicationSettingsCommands;
 namespace ios {
 class ChromeBrowserState;
 }
+@class ChromeIdentity;
 
 // Interaction controller for sign-in related operations. This class is mainly a
 // proxy for |ChromeSigninViewController|, calling directly
@@ -29,13 +31,20 @@ class ChromeBrowserState;
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
             presentingViewController:(UIViewController*)presentingViewController
                isPresentedOnSettings:(BOOL)isPresentedOnSettings
-                   signInAccessPoint:(signin_metrics::AccessPoint)accessPoint;
+                         accessPoint:(signin_metrics::AccessPoint)accessPoint
+                         promoAction:(signin_metrics::PromoAction)promoAction
+                          dispatcher:
+                              (id<ApplicationSettingsCommands>)dispatcher;
 
-// Starts user sign-in. The completion block will be called when the operation
-// is done, and |succeeded| will notify the caller on whether the user is now
-// signed in.
-- (void)signInWithCompletion:(signin_ui::CompletionCallback)completion
-              viewController:(UIViewController*)viewController;
+// Starts user sign-in.
+// * |viewController| is the current view controller.
+// * |identity|, if not nil, the user will be signed in without requiring user
+//   input, using this Chrome identity.
+// * |completion| will be called when the operation is done, and
+//   |succeeded| will notify the caller on whether the user is now signed in.
+- (void)signInWithViewController:(UIViewController*)viewController
+                        identity:(ChromeIdentity*)identity
+                      completion:(signin_ui::CompletionCallback)completion;
 
 // Re-authenticate the user. This method will always show a sign-in web flow.
 // The completion block will be called when the operation is done, and

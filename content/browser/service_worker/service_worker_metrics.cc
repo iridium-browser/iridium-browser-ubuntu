@@ -12,7 +12,6 @@
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
-#include "content/common/service_worker/service_worker_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
@@ -26,15 +25,19 @@ std::string StartSituationToSuffix(
   // Don't change these returned strings. They are written (in hashed form) into
   // logs.
   switch (situation) {
+    case ServiceWorkerMetrics::StartSituation::UNKNOWN:
+      NOTREACHED();
+      return "_Unknown";
     case ServiceWorkerMetrics::StartSituation::DURING_STARTUP:
       return "_DuringStartup";
     case ServiceWorkerMetrics::StartSituation::NEW_PROCESS:
       return "_NewProcess";
-    case ServiceWorkerMetrics::StartSituation::EXISTING_PROCESS:
-      return "_ExistingProcess";
-    default:
-      NOTREACHED() << static_cast<int>(situation);
+    case ServiceWorkerMetrics::StartSituation::EXISTING_UNREADY_PROCESS:
+      return "_ExistingUnreadyProcess";
+    case ServiceWorkerMetrics::StartSituation::EXISTING_READY_PROCESS:
+      return "_ExistingReadyProcess";
   }
+  NOTREACHED() << static_cast<int>(situation);
   return "_Unknown";
 }
 
@@ -72,16 +75,20 @@ std::string EventTypeToSuffix(ServiceWorkerMetrics::EventType event_type) {
       return "_FETCH_WAITUNTIL";
     case ServiceWorkerMetrics::EventType::FOREIGN_FETCH_WAITUNTIL:
       return "_FOREIGN_FETCH_WAITUNTIL";
-    case ServiceWorkerMetrics::EventType::NAVIGATION_HINT_LINK_MOUSE_DOWN:
-      return "_NAVIGATION_HINT_LINK_MOUSE_DOWN";
-    case ServiceWorkerMetrics::EventType::NAVIGATION_HINT_LINK_TAP_UNCONFIRMED:
-      return "_NAVIGATION_HINT_LINK_TAP_UNCONFIRMED";
-    case ServiceWorkerMetrics::EventType::NAVIGATION_HINT_LINK_TAP_DOWN:
-      return "_NAVIGATION_HINT_LINK_TAP_DOWN";
     case ServiceWorkerMetrics::EventType::EXTERNAL_REQUEST:
       return "_EXTERNAL_REQUEST";
     case ServiceWorkerMetrics::EventType::PAYMENT_REQUEST:
       return "_PAYMENT_REQUEST";
+    case ServiceWorkerMetrics::EventType::BACKGROUND_FETCH_ABORT:
+      return "_BACKGROUND_FETCH_ABORT";
+    case ServiceWorkerMetrics::EventType::BACKGROUND_FETCH_CLICK:
+      return "_BACKGROUND_FETCH_CLICK";
+    case ServiceWorkerMetrics::EventType::BACKGROUND_FETCH_FAIL:
+      return "_BACKGROUND_FETCH_FAIL";
+    case ServiceWorkerMetrics::EventType::BACKGROUND_FETCHED:
+      return "_BACKGROUND_FETCHED";
+    case ServiceWorkerMetrics::EventType::NAVIGATION_HINT:
+      return "_NAVIGATION_HINT";
     case ServiceWorkerMetrics::EventType::NUM_TYPES:
       NOTREACHED() << static_cast<int>(event_type);
   }
@@ -100,8 +107,10 @@ ServiceWorkerMetrics::WorkerPreparationType GetWorkerPreparationType(
           return Preparation::START_DURING_STARTUP;
         case Situation::NEW_PROCESS:
           return Preparation::START_IN_NEW_PROCESS;
-        case Situation::EXISTING_PROCESS:
-          return Preparation::START_IN_EXISTING_PROCESS;
+        case Situation::EXISTING_UNREADY_PROCESS:
+          return Preparation::START_IN_EXISTING_UNREADY_PROCESS;
+        case Situation::EXISTING_READY_PROCESS:
+          return Preparation::START_IN_EXISTING_READY_PROCESS;
         case Situation::UNKNOWN:
           break;
       }
@@ -129,8 +138,10 @@ std::string GetWorkerPreparationSuffix(
       return "_StartWorkerDuringStartup";
     case Preparation::START_IN_NEW_PROCESS:
       return "_StartWorkerNewProcess";
-    case Preparation::START_IN_EXISTING_PROCESS:
-      return "_StartWorkerExistingProcess";
+    case Preparation::START_IN_EXISTING_UNREADY_PROCESS:
+      return "_StartWorkerExistingUnreadyProcess";
+    case Preparation::START_IN_EXISTING_READY_PROCESS:
+      return "_StartWorkerExistingReadyProcess";
     case Preparation::STARTING:
       return "_StartingWorker";
     case Preparation::RUNNING:
@@ -193,30 +204,17 @@ void RecordSuffixedMediumTimeHistogram(const std::string& name,
 
 // Use this for histograms with dynamically generated names, which
 // otherwise can't use the UMA_HISTOGRAM macro without code duplication.
-void RecordSuffixedStatusHistogram(const std::string& name,
-                                   const std::string& suffix,
-                                   ServiceWorkerStatusCode status) {
-  const std::string name_with_suffix = name + suffix;
+void RecordHistogramEnum(const std::string& name, int value, int max_value) {
   // This unrolls UMA_HISTOGRAM_ENUMERATION.
   base::HistogramBase* histogram_pointer = base::LinearHistogram::FactoryGet(
-      name_with_suffix, 1, SERVICE_WORKER_ERROR_MAX_VALUE,
-      SERVICE_WORKER_ERROR_MAX_VALUE + 1,
+      name, 1, max_value, max_value + 1,
       base::HistogramBase::kUmaTargetedHistogramFlag);
-  histogram_pointer->Add(status);
+  histogram_pointer->Add(value);
 }
 
-void RecordURLMetricOnUI(const GURL& url) {
+void RecordURLMetricOnUI(const std::string& metric_name, const GURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  GetContentClient()->browser()->RecordURLMetric(
-      "ServiceWorker.ControlledPageUrl", url);
-}
-
-// Returns true when the event is for a navigation hint.
-bool IsNavigationHintEvent(ServiceWorkerMetrics::EventType event_type) {
-  using EventType = ServiceWorkerMetrics::EventType;
-  return event_type == EventType::NAVIGATION_HINT_LINK_MOUSE_DOWN ||
-         event_type == EventType::NAVIGATION_HINT_LINK_TAP_UNCONFIRMED ||
-         event_type == EventType::NAVIGATION_HINT_LINK_TAP_DOWN;
+  GetContentClient()->browser()->RecordURLMetric(metric_name, url);
 }
 
 enum EventHandledRatioType {
@@ -239,11 +237,12 @@ ScopedEventRecorder::~ScopedEventRecorder() {
     RecordEventHandledRatio(ev.first, ev.second.handled_events,
                             ev.second.fired_events);
   }
-  if (IsNavigationHintEvent(start_worker_purpose_)) {
-    RecordNavigationHintPrecision(
-        start_worker_purpose_,
-        event_stats_[EventType::FETCH_MAIN_FRAME].fired_events != 0 ||
-            event_stats_[EventType::FETCH_SUB_FRAME].fired_events != 0);
+  if (start_worker_purpose_ == EventType::NAVIGATION_HINT) {
+    bool frame_fetch_event_fired =
+        event_stats_[EventType::FETCH_MAIN_FRAME].fired_events ||
+        event_stats_[EventType::FETCH_SUB_FRAME].fired_events;
+    UMA_HISTOGRAM_BOOLEAN("ServiceWorker.StartHintPrecision",
+                          frame_fetch_event_fired);
   }
 }
 
@@ -287,34 +286,6 @@ void ScopedEventRecorder::RecordEventHandledRatio(
   }
 }
 
-void ScopedEventRecorder::RecordNavigationHintPrecision(
-    ServiceWorkerMetrics::EventType start_worker_purpose,
-    bool frame_fetch_event_fired) {
-  DCHECK(IsNavigationHintEvent(start_worker_purpose));
-  UMA_HISTOGRAM_BOOLEAN("ServiceWorker.NavigationHintPrecision",
-                        frame_fetch_event_fired);
-  switch (start_worker_purpose) {
-    case EventType::NAVIGATION_HINT_LINK_MOUSE_DOWN:
-      UMA_HISTOGRAM_BOOLEAN(
-          "ServiceWorker.NavigationHintPrecision.LINK_MOUSE_DOWN",
-          frame_fetch_event_fired);
-      break;
-    case EventType::NAVIGATION_HINT_LINK_TAP_UNCONFIRMED:
-      UMA_HISTOGRAM_BOOLEAN(
-          "ServiceWorker.NavigationHintPrecision.LINK_TAP_UNCONFIRMED",
-          frame_fetch_event_fired);
-      break;
-    case EventType::NAVIGATION_HINT_LINK_TAP_DOWN:
-      UMA_HISTOGRAM_BOOLEAN(
-          "ServiceWorker.NavigationHintPrecision.LINK_TAP_DOWN",
-          frame_fetch_event_fired);
-      break;
-    default:
-      NOTREACHED();
-      break;
-  }
-}
-
 const char* ServiceWorkerMetrics::EventTypeToString(EventType event_type) {
   switch (event_type) {
     case EventType::ACTIVATE:
@@ -347,16 +318,20 @@ const char* ServiceWorkerMetrics::EventTypeToString(EventType event_type) {
       return "Fetch WaitUntil";
     case EventType::FOREIGN_FETCH_WAITUNTIL:
       return "Foreign Fetch WaitUntil";
-    case EventType::NAVIGATION_HINT_LINK_MOUSE_DOWN:
-      return "Navigation Hint Link Mouse Down";
-    case EventType::NAVIGATION_HINT_LINK_TAP_UNCONFIRMED:
-      return "Navigation Hint Link Tap Unconfirmed";
-    case EventType::NAVIGATION_HINT_LINK_TAP_DOWN:
-      return "Navigation Hint Link Tap Down";
     case EventType::EXTERNAL_REQUEST:
       return "External Request";
     case EventType::PAYMENT_REQUEST:
       return "Payment Request";
+    case EventType::BACKGROUND_FETCH_ABORT:
+      return "Background Fetch Abort";
+    case EventType::BACKGROUND_FETCH_CLICK:
+      return "Background Fetch Click";
+    case EventType::BACKGROUND_FETCH_FAIL:
+      return "Background Fetch Fail";
+    case EventType::BACKGROUND_FETCHED:
+      return "Background Fetched";
+    case EventType::NAVIGATION_HINT:
+      return "Navigation Hint";
     case EventType::NUM_TYPES:
       break;
   }
@@ -364,9 +339,32 @@ const char* ServiceWorkerMetrics::EventTypeToString(EventType event_type) {
   return "error";
 }
 
+const char* ServiceWorkerMetrics::StartSituationToString(
+    StartSituation start_situation) {
+  switch (start_situation) {
+    case StartSituation::UNKNOWN:
+      return "Unknown";
+    case StartSituation::DURING_STARTUP:
+      return "During startup";
+    case StartSituation::NEW_PROCESS:
+      return "New process";
+    case StartSituation::EXISTING_UNREADY_PROCESS:
+      return "Existing unready process";
+    case StartSituation::EXISTING_READY_PROCESS:
+      return "Existing ready process";
+      break;
+  }
+  NOTREACHED() << "Got unexpected start situation: "
+               << static_cast<int>(start_situation);
+  return "error";
+}
+
 ServiceWorkerMetrics::Site ServiceWorkerMetrics::SiteFromURL(const GURL& url) {
-  // UIThreadSearchTermsData::GoogleBaseURLValue() returns the google base
-  // URL, but not available in content layer.
+  // TODO(falken): Plumb through ContentBrowserClient::GetMetricSuffixForURL or
+  // figure out a way to remove ServiceWorkerMetrics::Site entirely instead of
+  // hardcoding sites in //content.
+
+  // This inaccurately matches google.example.com, see the TODO above.
   static const char google_like_scope_prefix[] = "https://www.google.";
   static const char ntp_scope_path[] = "/_/chrome/";
   if (base::StartsWith(url.spec(), google_like_scope_prefix,
@@ -381,8 +379,13 @@ ServiceWorkerMetrics::Site ServiceWorkerMetrics::SiteFromURL(const GURL& url) {
     return ServiceWorkerMetrics::Site::PLUS;
   if (host == "inbox.google.com")
     return ServiceWorkerMetrics::Site::INBOX;
-  if ((host == "docs.google.com") || (host == "drive.google.com"))
+  if (host == "docs.google.com")
     return ServiceWorkerMetrics::Site::DOCS;
+  if (host == "drive.google.com") {
+    // TODO(falken): This should not be DOCS but historically we logged them
+    // together.
+    return ServiceWorkerMetrics::Site::DOCS;
+  }
   return ServiceWorkerMetrics::Site::OTHER;
 }
 
@@ -470,8 +473,9 @@ void ServiceWorkerMetrics::CountControlledPageLoad(
         "ServiceWorker.MainFramePageLoad.RedirectChainLength",
         redirect_chain_length, 21);
   }
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(&RecordURLMetricOnUI, url));
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&RecordURLMetricOnUI, "ServiceWorker.ControlledPageUrl", url));
 }
 
 void ServiceWorkerMetrics::RecordStartWorkerStatus(
@@ -486,8 +490,9 @@ void ServiceWorkerMetrics::RecordStartWorkerStatus(
 
   UMA_HISTOGRAM_ENUMERATION("ServiceWorker.StartWorker.Status", status,
                             SERVICE_WORKER_ERROR_MAX_VALUE);
-  RecordSuffixedStatusHistogram("ServiceWorker.StartWorker.StatusByPurpose",
-                                EventTypeToSuffix(purpose), status);
+  RecordHistogramEnum(std::string("ServiceWorker.StartWorker.StatusByPurpose") +
+                          EventTypeToSuffix(purpose),
+                      status, SERVICE_WORKER_ERROR_MAX_VALUE);
   UMA_HISTOGRAM_ENUMERATION("ServiceWorker.StartWorker.Purpose",
                             static_cast<int>(purpose),
                             static_cast<int>(EventType::NUM_TYPES));
@@ -520,7 +525,8 @@ void ServiceWorkerMetrics::RecordActivatedWorkerPreparationForMainFrame(
     base::TimeDelta time,
     EmbeddedWorkerStatus initial_worker_status,
     StartSituation start_situation,
-    bool did_navigation_preload) {
+    bool did_navigation_preload,
+    const GURL& url) {
   // Record the worker preparation type.
   WorkerPreparationType preparation =
       GetWorkerPreparationType(initial_worker_status, start_situation);
@@ -528,7 +534,23 @@ void ServiceWorkerMetrics::RecordActivatedWorkerPreparationForMainFrame(
       "ServiceWorker.ActivatedWorkerPreparationForMainFrame.Type",
       static_cast<int>(preparation),
       static_cast<int>(WorkerPreparationType::NUM_TYPES));
+  std::string suffix =
+      GetContentClient()->browser()->GetMetricSuffixForURL(url);
+  if (!suffix.empty()) {
+    RecordHistogramEnum(
+        std::string(
+            "ServiceWorker.ActivatedWorkerPreparationForMainFrame.Type.") +
+            suffix,
+        static_cast<int>(preparation),
+        static_cast<int>(WorkerPreparationType::NUM_TYPES) - 1);
+  }
+
   if (did_navigation_preload) {
+    // TODO(falken): Consider removing this UMA if it turns out the same as
+    // ServiceWorker.NavPreload.WorkerPreparationType. That UMA is logged at
+    // the same time as the other NavPreload metrics (which requires both the
+    // worker to start and the nav preload response to arrive successfuly), so
+    // they are more safely compared together.
     UMA_HISTOGRAM_ENUMERATION(
         "ServiceWorker.ActivatedWorkerPreparationForMainFrame.Type_"
         "NavigationPreloadEnabled",
@@ -551,13 +573,11 @@ void ServiceWorkerMetrics::RecordActivatedWorkerPreparationForMainFrame(
         "ServiceWorker.ActivatedWorkerPreparationForMainFrame.Time_"
         "NavigationPreloadEnabled",
         time);
-    // We're mostly interested in when the worker needed to start up. To avoid
-    // using too much memory, just log the the common case of startup in an
-    // existing process.
-    if (preparation == WorkerPreparationType::START_IN_EXISTING_PROCESS) {
+    // We're mostly interested in when the worker needed to start up.
+    if (initial_worker_status != EmbeddedWorkerStatus::RUNNING) {
       UMA_HISTOGRAM_MEDIUM_TIMES(
           "ServiceWorker.ActivatedWorkerPreparationForMainFrame.Time_"
-          "StartWorkerExistingProcess_NavigationPreloadEnabled",
+          "WorkerStartOccurred_NavigationPreloadEnabled",
           time);
     }
   }
@@ -687,11 +707,25 @@ void ServiceWorkerMetrics::RecordEventDuration(EventType event,
       UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.PaymentRequestEvent.Time",
                                  time);
       break;
-    // Those navigation hints should not be sent as request events.
-    case EventType::NAVIGATION_HINT_LINK_MOUSE_DOWN:
-    case EventType::NAVIGATION_HINT_LINK_TAP_UNCONFIRMED:
-    case EventType::NAVIGATION_HINT_LINK_TAP_DOWN:
+    case EventType::BACKGROUND_FETCH_ABORT:
+      UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.BackgroundFetchAbortEvent.Time",
+                                 time);
+      break;
+    case EventType::BACKGROUND_FETCH_CLICK:
+      UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.BackgroundFetchClickEvent.Time",
+                                 time);
+      break;
+    case EventType::BACKGROUND_FETCH_FAIL:
+      UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.BackgroundFetchFailEvent.Time",
+                                 time);
+      break;
+    case EventType::BACKGROUND_FETCHED:
+      UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.BackgroundFetchedEvent.Time",
+                                 time);
+      break;
 
+    case EventType::NAVIGATION_HINT:
+    // The navigation hint should not be sent as an event.
     case EventType::UNKNOWN:
     case EventType::NUM_TYPES:
       NOTREACHED() << "Invalid event type";
@@ -729,21 +763,17 @@ void ServiceWorkerMetrics::RecordStatusZeroResponseError(
   if (is_main_resource) {
     UMA_HISTOGRAM_ENUMERATION(
         "ServiceWorker.URLRequestJob.MainResource.StatusZeroError", error,
-        blink::WebServiceWorkerResponseErrorLast + 1);
+        blink::kWebServiceWorkerResponseErrorLast + 1);
   } else {
     UMA_HISTOGRAM_ENUMERATION(
         "ServiceWorker.URLRequestJob.Subresource.StatusZeroError", error,
-        blink::WebServiceWorkerResponseErrorLast + 1);
+        blink::kWebServiceWorkerResponseErrorLast + 1);
   }
 }
 
 void ServiceWorkerMetrics::RecordFallbackedRequestMode(FetchRequestMode mode) {
   UMA_HISTOGRAM_ENUMERATION("ServiceWorker.URLRequestJob.FallbackedRequestMode",
                             mode, FETCH_REQUEST_MODE_LAST + 1);
-}
-
-void ServiceWorkerMetrics::RecordTimeBetweenEvents(base::TimeDelta time) {
-  UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.TimeBetweenEvents", time);
 }
 
 void ServiceWorkerMetrics::RecordProcessCreated(bool is_new_process) {
@@ -813,6 +843,52 @@ void ServiceWorkerMetrics::RecordTimeToEvaluateScript(
                                     duration);
 }
 
+void ServiceWorkerMetrics::RecordStartMessageLatencyType(
+    CrossProcessTimeDelta type) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "EmbeddedWorkerInstance.Start.StartMessageLatency.Type", type,
+      CrossProcessTimeDelta::NUM_TYPES);
+}
+
+void ServiceWorkerMetrics::RecordWaitedForRendererSetup(bool waited) {
+  UMA_HISTOGRAM_BOOLEAN("EmbeddedWorkerInstance.Start.WaitedForRendererSetup",
+                        waited);
+}
+
+void ServiceWorkerMetrics::RecordEmbeddedWorkerStartTiming(
+    mojom::EmbeddedWorkerStartTimingPtr start_timing,
+    base::TimeTicks start_worker_sent_time,
+    StartSituation situation) {
+  if (!base::TimeTicks::IsHighResolution() ||
+      !base::TimeTicks::IsConsistentAcrossProcesses()) {
+    RecordStartMessageLatencyType(CrossProcessTimeDelta::INACCURATE_CLOCK);
+    return;
+  }
+  if (start_timing->start_worker_received_time < start_worker_sent_time) {
+    RecordStartMessageLatencyType(CrossProcessTimeDelta::NEGATIVE);
+    return;
+  }
+
+  RecordStartMessageLatencyType(CrossProcessTimeDelta::NORMAL);
+
+  const base::TimeDelta start_worker_message_latency =
+      start_timing->start_worker_received_time - start_worker_sent_time;
+  UMA_HISTOGRAM_MEDIUM_TIMES("EmbeddedWorkerInstance.Start.StartMessageLatency",
+                             start_worker_message_latency);
+  RecordSuffixedMediumTimeHistogram(
+      "EmbeddedWorkerInstance.Start.StartMessageLatency",
+      StartSituationToSuffix(situation), start_worker_message_latency);
+
+  if (start_worker_sent_time < start_timing->blink_initialized_time) {
+    RecordWaitedForRendererSetup(true);
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "EmbeddedWorkerInstance.Start.WaitedForRendererSetup.Time",
+        (start_timing->blink_initialized_time - start_worker_sent_time));
+  } else {
+    RecordWaitedForRendererSetup(false);
+  }
+}
+
 const char* ServiceWorkerMetrics::LoadSourceToString(LoadSource source) {
   switch (source) {
     case LoadSource::NETWORK:
@@ -824,16 +900,6 @@ const char* ServiceWorkerMetrics::LoadSourceToString(LoadSource source) {
   }
   NOTREACHED() << static_cast<int>(source);
   return nullptr;
-}
-
-ServiceWorkerMetrics::StartSituation ServiceWorkerMetrics::GetStartSituation(
-    bool is_browser_startup_complete,
-    bool is_new_process) {
-  if (!is_browser_startup_complete)
-    return StartSituation::DURING_STARTUP;
-  if (is_new_process)
-    return StartSituation::NEW_PROCESS;
-  return StartSituation::EXISTING_PROCESS;
 }
 
 void ServiceWorkerMetrics::RecordStartStatusAfterFailure(
@@ -871,76 +937,61 @@ void ServiceWorkerMetrics::RecordNavigationPreloadResponse(
     base::TimeDelta worker_start,
     base::TimeDelta response_start,
     EmbeddedWorkerStatus initial_worker_status,
-    StartSituation start_situation) {
+    StartSituation start_situation,
+    ResourceType resource_type) {
   DCHECK_GE(worker_start.ToInternalValue(), 0);
   DCHECK_GE(response_start.ToInternalValue(), 0);
-
-  UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.NavigationPreload.ResponseTime",
-                             response_start);
-
-  const bool nav_preload_finished_first = response_start < worker_start;
-  UMA_HISTOGRAM_BOOLEAN(
-      "ServiceWorker.NavigationPreload.FinishedBeforeStartWorker",
-      nav_preload_finished_first);
-
-  const bool existing_process_startup =
-      (initial_worker_status == EmbeddedWorkerStatus::STOPPED &&
-       start_situation ==
-           ServiceWorkerMetrics::StartSituation::EXISTING_PROCESS);
-  if (existing_process_startup) {
-    UMA_HISTOGRAM_BOOLEAN(
-        "ServiceWorker.NavigationPreload.FinishedBeforeStartWorker"
-        "_StartWorkerExistingProcess",
-        nav_preload_finished_first);
+  DCHECK(resource_type == RESOURCE_TYPE_MAIN_FRAME ||
+         resource_type == RESOURCE_TYPE_SUB_FRAME);
+  const bool is_main_frame = (resource_type == RESOURCE_TYPE_MAIN_FRAME);
+  // TODO(falken): Log sub-frame navigations also.
+  if (!is_main_frame) {
+    return;
   }
+  const bool nav_preload_finished_first = response_start < worker_start;
+  const base::TimeDelta concurrent_time =
+      nav_preload_finished_first ? response_start : worker_start;
+  base::TimeDelta worker_wait_time;
+  if (nav_preload_finished_first) {
+    worker_wait_time = worker_start - response_start;
+  }
+  const bool worker_start_occurred =
+      initial_worker_status != EmbeddedWorkerStatus::RUNNING;
+  const WorkerPreparationType preparation =
+      GetWorkerPreparationType(initial_worker_status, start_situation);
 
+  UMA_HISTOGRAM_ENUMERATION(
+      "ServiceWorker.NavPreload.WorkerPreparationType_MainFrame", preparation,
+      WorkerPreparationType::NUM_TYPES);
+  UMA_HISTOGRAM_MEDIUM_TIMES("ServiceWorker.NavPreload.ResponseTime_MainFrame",
+                             response_start);
+  UMA_HISTOGRAM_BOOLEAN("ServiceWorker.NavPreload.FinishedFirst_MainFrame",
+                        nav_preload_finished_first);
   UMA_HISTOGRAM_MEDIUM_TIMES(
-      "ServiceWorker.NavigationPreload.ConcurrentTime",
-      nav_preload_finished_first ? response_start : worker_start);
-
+      "ServiceWorker.NavPreload.ConcurrentTime_MainFrame", concurrent_time);
   if (nav_preload_finished_first) {
     UMA_HISTOGRAM_MEDIUM_TIMES(
-        "ServiceWorker.NavigationPreload.ConcurrentTime_NavPreloadFirst",
+        "ServiceWorker.NavPreload.WorkerWaitTime_MainFrame", worker_wait_time);
+  }
+
+  if (worker_start_occurred) {
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "ServiceWorker.NavPreload.ResponseTime_MainFrame_"
+        "WorkerStartOccurred",
         response_start);
+    UMA_HISTOGRAM_BOOLEAN(
+        "ServiceWorker.NavPreload.FinishedFirst_MainFrame_"
+        "WorkerStartOccurred",
+        nav_preload_finished_first);
     UMA_HISTOGRAM_MEDIUM_TIMES(
-        "ServiceWorker.NavigationPreload.SWStartAfterNavPreload",
-        worker_start - response_start);
-
-    if (existing_process_startup) {
+        "ServiceWorker.NavPreload.ConcurrentTime_MainFrame_"
+        "WorkerStartOccurred",
+        concurrent_time);
+    if (nav_preload_finished_first) {
       UMA_HISTOGRAM_MEDIUM_TIMES(
-          "ServiceWorker.NavigationPreload.ConcurrentTime_"
-          "StartWorkerExistingProcess",
-          response_start);
-      UMA_HISTOGRAM_MEDIUM_TIMES(
-          "ServiceWorker.NavigationPreload.ConcurrentTime_"
-          "NavPreloadFirst_StartWorkerExistingProcess",
-          response_start);
-      UMA_HISTOGRAM_MEDIUM_TIMES(
-          "ServiceWorker.NavigationPreload.SWStartAfterNavPreload_"
-          "StartWorkerExistingProcess",
-          worker_start - response_start);
-    }
-  } else {
-    UMA_HISTOGRAM_MEDIUM_TIMES(
-        "ServiceWorker.NavigationPreload.ConcurrentTime_SWStartFirst",
-        worker_start);
-    UMA_HISTOGRAM_MEDIUM_TIMES(
-        "ServiceWorker.NavigationPreload.NavPreloadAfterSWStart",
-        response_start - worker_start);
-
-    if (existing_process_startup) {
-      UMA_HISTOGRAM_MEDIUM_TIMES(
-          "ServiceWorker.NavigationPreload.ConcurrentTime_"
-          "StartWorkerExistingProcess",
-          worker_start);
-      UMA_HISTOGRAM_MEDIUM_TIMES(
-          "ServiceWorker.NavigationPreload.ConcurrentTime_"
-          "SWStartFirst_StartWorkerExistingProcess",
-          worker_start);
-      UMA_HISTOGRAM_MEDIUM_TIMES(
-          "ServiceWorker.NavigationPreload.NavPreloadAfterSWStart_"
-          "StartWorkerExistingProcess",
-          response_start - worker_start);
+          "ServiceWorker.NavPreload.WorkerWaitTime_MainFrame_"
+          "WorkerStartOccurred",
+          worker_wait_time);
     }
   }
 }
@@ -976,6 +1027,37 @@ void ServiceWorkerMetrics::RecordContextRequestHandlerStatus(
           value, max);
     }
   }
+}
+
+void ServiceWorkerMetrics::RecordRuntime(base::TimeDelta time) {
+  // Start at 1 second since we expect service worker to last at least this
+  // long: the update timer and idle timeout timer run on the order of seconds.
+  constexpr base::TimeDelta kMin = base::TimeDelta::FromSeconds(1);
+  // End at 1 day since service workers can conceivably run as long as the the
+  // browser is open; we have to cap somewhere.
+  constexpr base::TimeDelta kMax = base::TimeDelta::FromDays(1);
+  // Set the bucket count to 50 since that is the recommended value for all
+  // histograms.
+  const int kBucketCount = 50;
+
+  UMA_HISTOGRAM_CUSTOM_TIMES("ServiceWorker.Runtime", time, kMin, kMax,
+                             kBucketCount);
+}
+
+void ServiceWorkerMetrics::RecordUninstalledScriptImport(const GURL& url) {
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&RecordURLMetricOnUI,
+                 "ServiceWorker.ContextRequestHandlerStatus."
+                 "UninstalledScriptImport",
+                 url));
+}
+
+void ServiceWorkerMetrics::RecordStartServiceWorkerForNavigationHintResult(
+    StartServiceWorkerForNavigationHintResult result) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "ServiceWorker.StartForNavigationHint.Result", result,
+      StartServiceWorkerForNavigationHintResult::NUM_TYPES);
 }
 
 }  // namespace content

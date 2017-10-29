@@ -18,7 +18,6 @@ group("extensions_resources") {
 
 grit("extensions_resources_grd") {
   source = "extensions_resources.grd"
-  use_qualified_include = true
   outputs = [
     "grit/extensions_resources.h",
     "extensions_resources.pak",
@@ -27,10 +26,6 @@ grit("extensions_resources_grd") {
 
 grit("extensions_browser_resources") {
   source = "browser/resources/extensions_browser_resources.grd"
-
-  # TODO(thakis): Enable, https://crbug.com/401588
-  #use_qualified_include = true
-
   outputs = [
     "grit/extensions_browser_resources.h",
     "grit/extensions_browser_resources_map.cc",
@@ -40,37 +35,31 @@ grit("extensions_browser_resources") {
   ]
   grit_flags = [
     "-E",
-    "mojom_root=" + rebase_path(root_gen_dir),
+    "mojom_root=" + rebase_path(root_gen_dir, root_build_dir),
   ]
 }
 
 grit("extensions_renderer_resources") {
   source = "renderer/resources/extensions_renderer_resources.grd"
-  use_qualified_include = true
   outputs = [
     "grit/extensions_renderer_resources.h",
     "extensions_renderer_resources.pak",
   ]
   grit_flags = [
     "-E",
-    "mojom_root=" + rebase_path(root_gen_dir),
+    "mojom_root=" + rebase_path(root_gen_dir, root_build_dir),
   ]
 
   deps = [
-    "//chrome/browser/media/router:mojo_bindings__generator",
-    "//device/serial:serial_mojo__generator",
-    "//extensions/common:mojo__generator",
-    "//extensions/common/api:mojom__generator",
-    "//mojo/common:common_custom_types__generator",
-    "//url/mojo:url_mojom_origin__generator",
+    "//device/serial:serial_mojo_js",
+    "//extensions/common:mojo_js",
+    "//extensions/common/api:mojom_js",
   ]
 }
 
 static_library("test_support") {
   testonly = true
   sources = [
-    "browser/api/cast_channel/cast_test_util.cc",
-    "browser/api/cast_channel/cast_test_util.h",
     "browser/api/declarative/test_rules_registry.cc",
     "browser/api/declarative/test_rules_registry.h",
     "browser/api/dns/mock_host_resolver_creator.cc",
@@ -91,6 +80,8 @@ static_library("test_support") {
     "browser/guest_view/mime_handler_view/test_mime_handler_view_guest.h",
     "browser/mock_extension_system.cc",
     "browser/mock_extension_system.h",
+    "browser/mock_external_provider.cc",
+    "browser/mock_external_provider.h",
     "browser/scoped_ignore_content_verifier_for_test.cc",
     "browser/scoped_ignore_content_verifier_for_test.h",
     "browser/test_extension_registry_observer.cc",
@@ -107,6 +98,8 @@ static_library("test_support") {
     "common/extension_builder.h",
     "common/manifest_test.cc",
     "common/manifest_test.h",
+    "common/permissions/mock_manifest_permission.cc",
+    "common/permissions/mock_manifest_permission.h",
     "common/permissions/permission_message_test_util.cc",
     "common/permissions/permission_message_test_util.h",
     "common/test_util.cc",
@@ -121,6 +114,8 @@ static_library("test_support") {
     "test/extension_test_notification_observer.h",
     "test/result_catcher.cc",
     "test/result_catcher.h",
+    "test/test_content_browser_client.cc",
+    "test/test_content_browser_client.h",
     "test/test_content_utility_client.cc",
     "test/test_content_utility_client.h",
     "test/test_extensions_client.cc",
@@ -136,6 +131,7 @@ static_library("test_support") {
     ":extensions_resources",
     "//base",
     "//components/cast_certificate:test_support",
+    "//components/cast_channel:test_support",
     "//components/guest_view/browser:test_support",
     "//components/prefs:test_support",
     "//components/sync_preferences:test_support",
@@ -154,7 +150,6 @@ static_library("test_support") {
 
   public_deps = [
     "//content/public/browser",
-    "//extensions/common/api/cast_channel:cast_channel_proto",
   ]
 }
 

@@ -134,7 +134,6 @@ struct FrameResizeObserver {
                              const std::string& label) {
     const char kOnResizeCallbackSetup[] =
         "document.body.onresize = function(){"
-        "  window.domAutomationController.setAutomationId(0);"
         "  window.domAutomationController.send('%s ' + window.innerWidth);"
         "};";
     EXPECT_TRUE(ExecuteScript(
@@ -168,7 +167,6 @@ struct ResizeObserver {
   void SetupOnResizeCallback(const ToRenderFrameHost& adapter) {
     const char kOnResizeCallbackSetup[] =
         "document.body.onresize = function(){"
-        "  window.domAutomationController.setAutomationId(0);"
         "  window.domAutomationController.send('Resized');"
         "};";
     EXPECT_TRUE(ExecuteScript(
@@ -584,10 +582,9 @@ IN_PROC_BROWSER_TEST_F(IFrameZoomBrowserTest,
   EXPECT_TRUE(IsLastCommittedEntryOfPageType(web_contents(), PAGE_TYPE_NORMAL));
   EXPECT_EQ(redirect_url, web_contents()->GetLastCommittedURL());
 
-  EXPECT_NEAR(
-      kZoomFactorForRedirectedHost,
-      GetMainFrameZoomFactor(web_contents(), main_frame_window_border),
-      0.001);
+  EXPECT_NEAR(kZoomFactorForRedirectedHost,
+              GetMainFrameZoomFactor(web_contents(), main_frame_window_border),
+              0.01);
 }
 #endif
 

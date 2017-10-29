@@ -34,18 +34,17 @@
 #include "components/metrics/net/cellular_logic_helper.h"
 #include "components/metrics/net/net_metrics_log_uploader.h"
 #include "components/metrics/net/network_metrics_provider.h"
-#include "components/metrics/net/version_utils.h"
 #include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/profiler/tracking_synchronizer.h"
 #include "components/metrics/stability_metrics_helper.h"
 #include "components/metrics/ui/screen_info_metrics_provider.h"
 #include "components/metrics/url_constants.h"
+#include "components/metrics/version_utils.h"
 #include "components/omnibox/browser/omnibox_metrics_provider.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_status_metrics_provider.h"
 #include "components/sync/device_info/device_count_metrics_provider.h"
-#include "components/translate/core/browser/translate_ranker_metrics_provider.h"
 #include "components/ukm/ukm_service.h"
 #include "components/variations/variations_associated_data.h"
 #include "components/version_info/version_info.h"
@@ -61,6 +60,7 @@
 #include "ios/chrome/browser/sync/ios_chrome_sync_client.h"
 #include "ios/chrome/browser/tab_parenting_global_observer.h"
 #include "ios/chrome/browser/tabs/tab_model_list.h"
+#include "ios/chrome/browser/translate/translate_ranker_metrics_provider.h"
 #include "ios/chrome/common/channel_info.h"
 #include "ios/web/public/web_thread.h"
 
@@ -163,10 +163,10 @@ void IOSChromeMetricsServiceClient::CollectFinalMetricsForLog(
 
 std::unique_ptr<metrics::MetricsLogUploader>
 IOSChromeMetricsServiceClient::CreateUploader(
-    const std::string& server_url,
-    const std::string& mime_type,
+    base::StringPiece server_url,
+    base::StringPiece mime_type,
     metrics::MetricsLogUploader::MetricServiceType service_type,
-    const base::Callback<void(int)>& on_upload_complete) {
+    const metrics::MetricsLogUploader::UploadCallback& on_upload_complete) {
   return base::MakeUnique<metrics::NetMetricsLogUploader>(
       GetApplicationContext()->GetSystemURLRequestContext(), server_url,
       mime_type, service_type, on_upload_complete);
@@ -174,10 +174,6 @@ IOSChromeMetricsServiceClient::CreateUploader(
 
 base::TimeDelta IOSChromeMetricsServiceClient::GetStandardUploadInterval() {
   return metrics::GetUploadInterval();
-}
-
-base::string16 IOSChromeMetricsServiceClient::GetRegistryBackupKey() {
-  return base::string16();
 }
 
 void IOSChromeMetricsServiceClient::OnRendererProcessCrash() {
@@ -204,8 +200,7 @@ void IOSChromeMetricsServiceClient::Initialize() {
 
   // Register metrics providers.
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<metrics::NetworkMetricsProvider>(
-          web::WebThread::GetBlockingPool()));
+      base::MakeUnique<metrics::NetworkMetricsProvider>());
 
   // Currently, we configure OmniboxMetricsProvider to not log events to UMA
   // if there is a single incognito session visible. In the future, it may
@@ -228,9 +223,7 @@ void IOSChromeMetricsServiceClient::Initialize() {
 
   {
     auto drive_metrics_provider =
-        base::MakeUnique<metrics::DriveMetricsProvider>(
-            web::WebThread::GetTaskRunnerForThread(web::WebThread::FILE),
-            ios::FILE_LOCAL_STATE);
+        base::MakeUnique<metrics::DriveMetricsProvider>(ios::FILE_LOCAL_STATE);
     drive_metrics_provider_ = drive_metrics_provider.get();
     metrics_service_->RegisterMetricsProvider(
         std::move(drive_metrics_provider));

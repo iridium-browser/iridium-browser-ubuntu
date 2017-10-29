@@ -11,8 +11,8 @@
 #include "base/guid.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -24,11 +24,10 @@
 #include "components/history/core/browser/in_memory_database.h"
 #include "components/history/core/browser/url_database.h"
 #include "components/omnibox/browser/autocomplete_match.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::ASCIIToUTF16;
-using content::BrowserThread;
 using predictors::AutocompleteActionPredictor;
 
 namespace {
@@ -87,12 +86,7 @@ namespace predictors {
 class AutocompleteActionPredictorTest : public testing::Test {
  public:
   AutocompleteActionPredictorTest()
-      : ui_thread_(BrowserThread::UI, &loop_),
-        db_thread_(BrowserThread::DB, &loop_),
-        file_thread_(BrowserThread::FILE, &loop_),
-        profile_(new TestingProfile()),
-        predictor_(nullptr) {
-  }
+      : profile_(new TestingProfile()), predictor_(nullptr) {}
 
   ~AutocompleteActionPredictorTest() override {
     predictor_.reset(NULL);
@@ -218,10 +212,7 @@ class AutocompleteActionPredictorTest : public testing::Test {
   }
 
  private:
-  base::MessageLoop loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread db_thread_;
-  content::TestBrowserThread file_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   std::unique_ptr<TestingProfile> profile_;
   std::unique_ptr<AutocompleteActionPredictor> predictor_;
 };
@@ -346,10 +337,8 @@ TEST_F(AutocompleteActionPredictorTest, DeleteOldIdsFromCaches) {
   for (std::vector<AutocompleteActionPredictorTable::Row::Id>::iterator it =
        all_ids.begin();
        it != all_ids.end(); ++it) {
-    bool in_expected =
-        (std::find(expected.begin(), expected.end(), *it) != expected.end());
-    bool in_list =
-        (std::find(id_list.begin(), id_list.end(), *it) != id_list.end());
+    bool in_expected = base::ContainsValue(expected, *it);
+    bool in_list = base::ContainsValue(id_list, *it);
     EXPECT_EQ(in_expected, in_list);
   }
 }

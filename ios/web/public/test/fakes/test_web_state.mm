@@ -6,8 +6,16 @@
 
 #include <stdint.h>
 
+#include "base/bind.h"
 #include "base/callback.h"
+#include "base/threading/sequenced_task_runner_handle.h"
+#import "ios/web/public/web_state/ui/crw_content_view.h"
 #include "ios/web/public/web_state/web_state_observer.h"
+#include "ui/gfx/image/image.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 
@@ -58,7 +66,7 @@ bool TestWebState::ShouldSuppressDialogs() const {
 void TestWebState::SetShouldSuppressDialogs(bool should_suppress) {}
 
 UIView* TestWebState::GetView() {
-  return view_.get();
+  return view_;
 }
 
 const NavigationManager* TestWebState::GetNavigationManager() const {
@@ -67,6 +75,16 @@ const NavigationManager* TestWebState::GetNavigationManager() const {
 
 NavigationManager* TestWebState::GetNavigationManager() {
   return navigation_manager_.get();
+}
+
+const SessionCertificatePolicyCache*
+TestWebState::GetSessionCertificatePolicyCache() const {
+  return nullptr;
+}
+
+SessionCertificatePolicyCache*
+TestWebState::GetSessionCertificatePolicyCache() {
+  return nullptr;
 }
 
 CRWSessionStorage* TestWebState::BuildSessionStorage() {
@@ -79,7 +97,7 @@ void TestWebState::SetNavigationManager(
 }
 
 void TestWebState::SetView(UIView* view) {
-  view_.reset([view retain]);
+  view_ = view;
 }
 
 CRWJSInjectionReceiver* TestWebState::GetJSInjectionReceiver() const {
@@ -171,9 +189,28 @@ void TestWebState::OnPageLoaded(
     observer.PageLoaded(load_completion_status);
 }
 
-void TestWebState::OnProvisionalNavigationStarted(const GURL& url) {
+void TestWebState::OnNavigationStarted(NavigationContext* navigation_context) {
   for (auto& observer : observers_)
-    observer.ProvisionalNavigationStarted(url);
+    observer.DidStartNavigation(navigation_context);
+}
+
+void TestWebState::OnRenderProcessGone() {
+  for (auto& observer : observers_)
+    observer.RenderProcessGone();
+}
+
+void TestWebState::ShowTransientContentView(CRWContentView* content_view) {
+  if (content_view) {
+    transient_content_view_ = content_view;
+  }
+}
+
+void TestWebState::ClearTransientContentView() {
+  transient_content_view_ = nil;
+}
+
+CRWContentView* TestWebState::GetTransientContentView() {
+  return transient_content_view_;
 }
 
 void TestWebState::SetCurrentURL(const GURL& url) {
@@ -188,8 +225,17 @@ CRWWebViewProxyType TestWebState::GetWebViewProxy() const {
   return nullptr;
 }
 
-service_manager::InterfaceRegistry* TestWebState::GetMojoInterfaceRegistry() {
+WebStateInterfaceProvider* TestWebState::GetWebStateInterfaceProvider() {
   return nullptr;
+}
+
+bool TestWebState::HasOpener() const {
+  return false;
+}
+
+void TestWebState::TakeSnapshot(const SnapshotCallback& callback,
+                                CGSize target_size) const {
+  callback.Run(gfx::Image([[UIImage alloc] init]));
 }
 
 base::WeakPtr<WebState> TestWebState::AsWeakPtr() {

@@ -44,9 +44,8 @@ import org.chromium.base.Log;
 import org.chromium.base.StreamUtil;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.SuppressFBWarnings;
-import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.metrics.CachedMetrics;
 import org.chromium.chrome.R;
-import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.ui.UiUtils;
 
 import java.io.File;
@@ -62,6 +61,7 @@ import java.util.concurrent.TimeoutException;
  * A helper class that helps to start an intent to share titles and URLs.
  */
 public class ShareHelper {
+    static final String EXTERNAL_APP_SHARING_PREF_FILE_NAME = "external_app_sharing";
 
     /** Interface that receives intents for testing (to fake out actually sending them). */
     public interface FakeIntentReceiver {
@@ -119,7 +119,10 @@ public class ShareHelper {
     private static void deleteShareImageFiles(File file) {
         if (!file.exists()) return;
         if (file.isDirectory()) {
-            for (File f : file.listFiles()) deleteShareImageFiles(f);
+            File[] file_list = file.listFiles();
+            if (file_list != null) {
+                for (File f : file_list) deleteShareImageFiles(f);
+            }
         }
         if (!file.delete()) {
             Log.w(TAG, "Failed to delete share image file: %s", file.getAbsolutePath());
@@ -170,6 +173,7 @@ public class ShareHelper {
      */
     static class TargetChosenReceiver extends BroadcastReceiver {
         private static final String EXTRA_RECEIVER_TOKEN = "receiver_token";
+        private static final String EXTRA_SOURCE_PACKAGE_NAME = "source_package_name";
         private static final Object LOCK = new Object();
 
         private static String sTargetChosenReceiveAction;
@@ -190,9 +194,8 @@ public class ShareHelper {
         }
 
         @TargetApi(Build.VERSION_CODES.LOLLIPOP_MR1)
-        static void sendChooserIntent(boolean saveLastUsed, Activity activity,
-                                      Intent sharingIntent,
-                                      @Nullable TargetChosenCallback callback) {
+        static void sendChooserIntent(boolean saveLastUsed, Activity activity, Intent sharingIntent,
+                @Nullable TargetChosenCallback callback, @Nullable String sourcePackageName) {
             synchronized (LOCK) {
                 if (sTargetChosenReceiveAction == null) {
                     sTargetChosenReceiveAction = activity.getPackageName() + "/"
@@ -215,6 +218,7 @@ public class ShareHelper {
             Intent intent = new Intent(sTargetChosenReceiveAction);
             intent.setPackage(activity.getPackageName());
             intent.putExtra(EXTRA_RECEIVER_TOKEN, sLastRegisteredReceiver.hashCode());
+            intent.putExtra(EXTRA_SOURCE_PACKAGE_NAME, sourcePackageName);
             final PendingIntent pendingIntent = PendingIntent.getBroadcast(activity, 0, intent,
                     PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_ONE_SHOT);
             Intent chooserIntent = Intent.createChooser(sharingIntent,
@@ -239,11 +243,12 @@ public class ShareHelper {
             }
 
             ComponentName target = intent.getParcelableExtra(Intent.EXTRA_CHOSEN_COMPONENT);
+            String sourcePackageName = intent.getStringExtra(EXTRA_SOURCE_PACKAGE_NAME);
             if (mCallback != null) {
                 mCallback.onTargetChosen(target);
             }
             if (mSaveLastUsed && target != null) {
-                setLastShareComponentName(target);
+                setLastShareComponentName(target, sourcePackageName);
             }
         }
 
@@ -282,31 +287,18 @@ public class ShareHelper {
      * Cleaning up doesn't happen automatically, and so an app should call clearSharedScreenshots()
      * explicitly when needed.
      *
-     * @param shareDirectly Whether it should share directly with the activity that was most
-     *                      recently used to share.
-     * @param saveLastUsed Whether to save the chosen activity for future direct sharing.
-     * @param activity Activity that is used to access package manager.
-     * @param title Title of the page to be shared.
-     * @param text Text to be shared. If both |text| and |url| are supplied, they are concatenated
-     *             with a space.
-     * @param url URL of the page to be shared.
-     * @param offlineUri URI to the offline MHTML file to be shared.
-     * @param screenshotUri Uri of the screenshot of the page to be shared.
-     * @param callback Optional callback to be called when user makes a choice. Will not be called
-     *                 if receiving a response when the user makes a choice is not supported (on
-     *                 older Android versions).
+     * @param params The container holding the share parameters.
      */
-    public static void share(boolean shareDirectly, boolean saveLastUsed, Activity activity,
-            String title, String text, String url, @Nullable Uri offlineUri, Uri screenshotUri,
-            @Nullable TargetChosenCallback callback) {
-        if (shareDirectly) {
-            shareWithLastUsed(activity, title, text, url, offlineUri, screenshotUri);
+    public static void share(ShareParams params) {
+        if (params.shareDirectly()) {
+            ComponentName component = getLastShareComponentName(params.getSourcePackageName());
+            if (component == null) return;
+            assert params.getCallback() == null;
+            makeIntentAndShare(params, component);
         } else if (TargetChosenReceiver.isSupported()) {
-            makeIntentAndShare(saveLastUsed, activity, title, text, url, offlineUri, screenshotUri,
-                    null, callback);
+            makeIntentAndShare(params, null);
         } else {
-            showShareDialog(
-                    saveLastUsed, activity, title, text, url, offlineUri, screenshotUri, callback);
+            showShareDialog(params);
         }
     }
 
@@ -314,8 +306,11 @@ public class ShareHelper {
      * Trigger the share action for the given image data.
      * @param activity The activity used to trigger the share action.
      * @param jpegImageData The image data to be shared in jpeg format.
+     * @param name When this is not null, it will share the image directly with the
+     *             {@link ComponentName}
      */
-    public static void shareImage(final Activity activity, final byte[] jpegImageData) {
+    public static void shareImage(
+            final Activity activity, final byte[] jpegImageData, final ComponentName name) {
         if (jpegImageData.length == 0) {
             Log.w(TAG, "Share failed -- Received image contains no data.");
             return;
@@ -359,12 +354,21 @@ public class ShareHelper {
 
                 if (ApplicationStatus.getStateForApplication()
                         != ApplicationState.HAS_DESTROYED_ACTIVITIES) {
-                    Uri imageUri = ApiCompatibilityUtils.getUriForImageCaptureFile(activity,
-                            saveFile);
-
-                    Intent chooserIntent = Intent.createChooser(getShareImageIntent(imageUri),
-                            activity.getString(R.string.share_link_chooser_title));
-                    fireIntent(activity, chooserIntent);
+                    Uri imageUri = ApiCompatibilityUtils.getUriForImageCaptureFile(saveFile);
+                    Intent shareIntent = getShareImageIntent(imageUri);
+                    if (name == null) {
+                        if (TargetChosenReceiver.isSupported()) {
+                            TargetChosenReceiver.sendChooserIntent(
+                                    true, activity, shareIntent, null, null);
+                        } else {
+                            Intent chooserIntent = Intent.createChooser(shareIntent,
+                                    activity.getString(R.string.share_link_chooser_title));
+                            fireIntent(activity, chooserIntent);
+                        }
+                    } else {
+                        shareIntent.setComponent(name);
+                        fireIntent(activity, shareIntent);
+                    }
                 }
             }
         }.execute();
@@ -415,7 +419,7 @@ public class ShareHelper {
                 if (ApplicationStatus.getStateForApplication()
                         != ApplicationState.HAS_DESTROYED_ACTIVITIES
                         && savedFile != null) {
-                    fileUri = ApiCompatibilityUtils.getUriForImageCaptureFile(context, savedFile);
+                    fileUri = ApiCompatibilityUtils.getUriForImageCaptureFile(savedFile);
                 }
                 callback.onResult(fileUri);
             }
@@ -425,22 +429,12 @@ public class ShareHelper {
     /**
      * Creates and shows a share intent picker dialog.
      *
-     * @param saveLastUsed Whether to save the chosen activity for future direct sharing.
-     * @param activity Activity that is used to access package manager.
-     * @param title Title of the page to be shared.
-     * @param text Text to be shared. If both |text| and |url| are supplied, they are concatenated
-     *             with a space.
-     * @param url URL of the page to be shared.
-     * @oaram offlineUri URI of the offline page to be shared.
-     * @param screenshotUri Uri of the screenshot of the page to be shared.
-     * @param callback Optional callback to be called when user makes a choice. Will not be called
-     *                 if receiving a response when the user makes a choice is not supported (on
-     *                 older Android versions).
+     * @param params The container holding the share parameters.
      */
-    private static void showShareDialog(final boolean saveLastUsed, final Activity activity,
-            final String title, final String text, final String url, final Uri offlineUri,
-            final Uri screenshotUri, @Nullable final TargetChosenCallback callback) {
-        Intent intent = getShareIntent(activity, title, text, url, null, null);
+    private static void showShareDialog(final ShareParams params) {
+        Activity activity = params.getActivity();
+        final TargetChosenCallback callback = params.getCallback();
+        Intent intent = getShareLinkAppCompatibilityIntent();
         PackageManager manager = activity.getPackageManager();
         List<ResolveInfo> resolveInfoList = manager.queryIntentActivities(intent, 0);
         assert resolveInfoList.size() > 0;
@@ -465,13 +459,15 @@ public class ShareHelper {
                 ActivityInfo ai = info.activityInfo;
                 ComponentName component =
                         new ComponentName(ai.applicationInfo.packageName, ai.name);
+
                 if (callback != null && !callbackCalled[0]) {
                     callback.onTargetChosen(component);
                     callbackCalled[0] = true;
                 }
-                if (saveLastUsed) setLastShareComponentName(component);
-                makeIntentAndShare(false, activity, title, text, url, offlineUri, screenshotUri,
-                        component, null);
+                if (params.saveLastUsed()) {
+                    setLastShareComponentName(component, params.getSourcePackageName());
+                }
+                makeIntentAndShare(params, component);
                 dialog.dismiss();
             }
         });
@@ -493,63 +489,55 @@ public class ShareHelper {
         }
     }
 
-    /**
-     * Starts a share intent with the activity that was most recently used to share.
-     * If there is no most recently used activity, it does nothing.
-     * @param activity Activity that is used to start the share intent.
-     * @param title Title of the page to be shared.
-     * @param text Text to be shared. If both |text| and |url| are supplied, they are concatenated
-     *             with a space.
-     * @param url URL of the page to be shared.
-     * @oaram offlineUri URI of the offline page to be shared.
-     * @param screenshotUri Uri of the screenshot of the page to be shared.
-     */
-    private static void shareWithLastUsed(Activity activity, String title, String text, String url,
-            Uri offlineUri, Uri screenshotUri) {
-        ComponentName component = getLastShareComponentName();
-        if (component == null) return;
-        makeIntentAndShare(
-                false, activity, title, text, url, offlineUri, screenshotUri, component, null);
-    }
-
-    private static void shareIntent(boolean saveLastUsed, Activity activity, Intent sharingIntent,
-                                    @Nullable TargetChosenCallback callback) {
-        if (sharingIntent.getComponent() != null) {
-            // If a component was specified, there should not also be a callback.
-            assert callback == null;
-            fireIntent(activity, sharingIntent);
+    private static void makeIntentAndShare(ShareParams params, @Nullable ComponentName component) {
+        Intent intent = getShareLinkIntent(params);
+        intent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT | Intent.FLAG_ACTIVITY_PREVIOUS_IS_TOP);
+        intent.setComponent(component);
+        if (intent.getComponent() != null) {
+            fireIntent(params.getActivity(), intent);
         } else {
             assert TargetChosenReceiver.isSupported();
-            TargetChosenReceiver.sendChooserIntent(saveLastUsed, activity, sharingIntent, callback);
+            TargetChosenReceiver.sendChooserIntent(params.saveLastUsed(), params.getActivity(),
+                    intent, params.getCallback(), params.getSourcePackageName());
         }
-    }
-
-    private static void makeIntentAndShare(final boolean saveLastUsed, final Activity activity,
-            final String title, final String text, final String url, final Uri offlineUri,
-            final Uri screenshotUri, final ComponentName component,
-            @Nullable final TargetChosenCallback callback) {
-        Intent intent = getDirectShareIntentForComponent(
-                activity, title, text, url, offlineUri, screenshotUri, component);
-        shareIntent(saveLastUsed, activity, intent, callback);
     }
 
     /**
      * Set the icon and the title for the menu item used for direct share.
-     *
      * @param activity Activity that is used to access the package manager.
      * @param item The menu item that is used for direct share
      */
     public static void configureDirectShareMenuItem(Activity activity, MenuItem item) {
+        Intent shareIntent = getShareLinkAppCompatibilityIntent();
+        Pair<Drawable, CharSequence> directShare = getShareableIconAndName(shareIntent, null);
+        Drawable directShareIcon = directShare.first;
+        CharSequence directShareTitle = directShare.second;
+
+        item.setIcon(directShareIcon);
+        if (directShareTitle != null) {
+            item.setTitle(
+                    activity.getString(R.string.accessibility_menu_share_via, directShareTitle));
+        }
+    }
+
+    /**
+     * Get the icon and name of the most recently shared app by certain app.
+     * @param shareIntent Intent used to get list of apps support sharing.
+     * @param sourcePackageName The package name of the app who requests for share. If Null, it is
+     *                          requested by Chrome.
+     * @return The Image and the String of the recently shared Icon.
+     */
+    public static Pair<Drawable, CharSequence> getShareableIconAndName(
+            Intent shareIntent, @Nullable String sourcePackageName) {
         Drawable directShareIcon = null;
         CharSequence directShareTitle = null;
 
-        final ComponentName component = getLastShareComponentName();
+        final ComponentName component = getLastShareComponentName(sourcePackageName);
         boolean isComponentValid = false;
         if (component != null) {
-            Intent intent = getShareIntent(activity, "", "", "", null, null);
-            intent.setPackage(component.getPackageName());
-            PackageManager manager = activity.getPackageManager();
-            List<ResolveInfo> resolveInfoList = manager.queryIntentActivities(intent, 0);
+            shareIntent.setPackage(component.getPackageName());
+            PackageManager manager = ContextUtils.getApplicationContext().getPackageManager();
+            List<ResolveInfo> resolveInfoList = manager.queryIntentActivities(shareIntent, 0);
             for (ResolveInfo info : resolveInfoList) {
                 ActivityInfo ai = info.activityInfo;
                 if (component.equals(new ComponentName(ai.applicationInfo.packageName, ai.name))) {
@@ -561,7 +549,7 @@ public class ShareHelper {
         if (isComponentValid) {
             boolean retrieved = false;
             try {
-                final PackageManager pm = activity.getPackageManager();
+                final PackageManager pm = ContextUtils.getApplicationContext().getPackageManager();
                 AsyncTask<Void, Void, Pair<Drawable, CharSequence>> task =
                         new AsyncTask<Void, Void, Pair<Drawable, CharSequence>>() {
                             @Override
@@ -581,6 +569,8 @@ public class ShareHelper {
                             }
                         };
                 task.execute();
+                // TODO(ltian): Return nothing for the AsyncTask and have a callback to update the
+                // the menu.
                 Pair<Drawable, CharSequence> result =
                         task.get(COMPONENT_INFO_READ_TIMEOUT_IN_MS, TimeUnit.MILLISECONDS);
                 directShareIcon = result.first;
@@ -593,70 +583,66 @@ public class ShareHelper {
             } catch (TimeoutException te) {
                 // Use the default null values.
             }
-            RecordHistogram.recordBooleanHistogram(
-                    "Android.IsLastSharedAppInfoRetrieved", retrieved);
+            CachedMetrics.BooleanHistogramSample isLastSharedAppInfoRetrieved =
+                    new CachedMetrics.BooleanHistogramSample(
+                            "Android.IsLastSharedAppInfoRetrieved");
+            isLastSharedAppInfoRetrieved.record(retrieved);
         }
 
-        item.setIcon(directShareIcon);
-        if (directShareTitle != null) {
-            item.setTitle(activity.getString(R.string.accessibility_menu_share_via,
-                    directShareTitle));
-        }
+        return new Pair<>(directShareIcon, directShareTitle);
     }
 
-    /*
-     * Stores the component selected for sharing last time share was called.
+    /**
+     * Stores the component selected for sharing last time share was called by certain app.
      *
      * This method is public since it is used in tests to avoid creating share dialog.
+     * @param component The {@link ComponentName} of the app selected for sharing.
+     * @param sourcePackageName The package name of the app who requests share. If Null, it is
+     *                          request by Chrome.
      */
     @VisibleForTesting
-    public static void setLastShareComponentName(ComponentName component) {
-        SharedPreferences preferences = ContextUtils.getAppSharedPreferences();
+    public static void setLastShareComponentName(
+            ComponentName component, @Nullable String sourcePackageName) {
+        SharedPreferences preferences = getSharePreferences(sourcePackageName);
         SharedPreferences.Editor editor = preferences.edit();
-        editor.putString(PACKAGE_NAME_KEY, component.getPackageName());
-        editor.putString(CLASS_NAME_KEY, component.getClassName());
+        editor.putString(getPackageNameKey(sourcePackageName), component.getPackageName());
+        editor.putString(getClassNameKey(sourcePackageName), component.getClassName());
         editor.apply();
     }
 
     @VisibleForTesting
-    public static Intent getShareIntent(Activity activity, String title, String text, String url,
-            Uri offlineUri, Uri screenshotUri) {
-        if (!TextUtils.isEmpty(url)) {
-            url = DomDistillerUrlUtils.getOriginalUrlFromDistillerUrl(url);
-            if (!TextUtils.isEmpty(text)) {
-                // Concatenate text and URL with a space.
-                text = text + " " + url;
-            } else {
-                text = url;
-            }
-        }
-
+    public static Intent getShareLinkIntent(ShareParams params) {
+        String text = params.getText();
         Intent intent = new Intent(Intent.ACTION_SEND);
         intent.addFlags(ApiCompatibilityUtils.getActivityNewDocumentFlag());
-        intent.putExtra(Intent.EXTRA_SUBJECT, title);
+        intent.putExtra(Intent.EXTRA_SUBJECT, params.getTitle());
         intent.putExtra(Intent.EXTRA_TEXT, text);
-        intent.putExtra(EXTRA_TASK_ID, activity.getTaskId());
+        intent.putExtra(EXTRA_TASK_ID, params.getActivity().getTaskId());
 
+        Uri screenshotUri = params.getScreenshotUri();
         if (screenshotUri != null) {
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        }
-        if (screenshotUri != null) {
             // To give read access to an Intent target, we need to put |screenshotUri| in clipData
             // because adding Intent.FLAG_GRANT_READ_URI_PERMISSION doesn't work for
             // EXTRA_SHARE_SCREENSHOT_AS_STREAM.
             intent.setClipData(ClipData.newRawUri("", screenshotUri));
             intent.putExtra(EXTRA_SHARE_SCREENSHOT_AS_STREAM, screenshotUri);
         }
-        if (offlineUri == null) {
+        if (params.getOfflineUri() == null) {
             intent.setType("text/plain");
         } else {
             intent.setType("multipart/related");
-            intent.putExtra(Intent.EXTRA_STREAM, offlineUri);
+            intent.putExtra(Intent.EXTRA_STREAM, params.getOfflineUri());
         }
         return intent;
     }
 
-    private static Intent getShareImageIntent(Uri imageUri) {
+    /**
+     * Creates an Intent to share an image.
+     * @param imageUri The Uri of the image.
+     * @return The Intent used to share the image.
+     */
+    public static Intent getShareImageIntent(Uri imageUri) {
         Intent intent = new Intent(Intent.ACTION_SEND);
         intent.addFlags(ApiCompatibilityUtils.getActivityNewDocumentFlag());
         intent.setType("image/jpeg");
@@ -665,20 +651,44 @@ public class ShareHelper {
         return intent;
     }
 
-    private static Intent getDirectShareIntentForComponent(Activity activity, String title,
-            String text, String url, Uri offlineUri, Uri screenshotUri, ComponentName component) {
-        Intent intent = getShareIntent(activity, title, text, url, offlineUri, screenshotUri);
-        intent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT
-                | Intent.FLAG_ACTIVITY_PREVIOUS_IS_TOP);
-        intent.setComponent(component);
+    /**
+     * Convenience method to create an Intent to retrieve all the apps support sharing text.
+     */
+    public static Intent getShareLinkAppCompatibilityIntent() {
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.addFlags(ApiCompatibilityUtils.getActivityNewDocumentFlag());
+        intent.putExtra(Intent.EXTRA_SUBJECT, "");
+        intent.putExtra(Intent.EXTRA_TEXT, "");
+        intent.setType("text/plain");
         return intent;
     }
 
-    private static ComponentName getLastShareComponentName() {
-        SharedPreferences preferences = ContextUtils.getAppSharedPreferences();
-        String packageName = preferences.getString(PACKAGE_NAME_KEY, null);
-        String className = preferences.getString(CLASS_NAME_KEY, null);
+    /**
+     * Gets the {@link ComponentName} of the app that was used to last share by certain app.
+     * @param sourcePackageName The package name of the app who requests for share. If Null, it is
+     *                          requested by Chrome.
+     */
+    @Nullable
+    public static ComponentName getLastShareComponentName(@Nullable String sourcePackageName) {
+        SharedPreferences preferences = getSharePreferences(sourcePackageName);
+        String packageName = preferences.getString(getPackageNameKey(sourcePackageName), null);
+        String className = preferences.getString(getClassNameKey(sourcePackageName), null);
         if (packageName == null || className == null) return null;
         return new ComponentName(packageName, className);
+    }
+
+    private static SharedPreferences getSharePreferences(@Nullable String sourcePackageName) {
+        return sourcePackageName != null
+                ? ContextUtils.getApplicationContext().getSharedPreferences(
+                          EXTERNAL_APP_SHARING_PREF_FILE_NAME, Context.MODE_PRIVATE)
+                : ContextUtils.getAppSharedPreferences();
+    }
+
+    private static String getPackageNameKey(@Nullable String sourcePackageName) {
+        return (TextUtils.isEmpty(sourcePackageName) ? "" : sourcePackageName) + PACKAGE_NAME_KEY;
+    }
+
+    private static String getClassNameKey(@Nullable String sourcePackageName) {
+        return (TextUtils.isEmpty(sourcePackageName) ? "" : sourcePackageName) + CLASS_NAME_KEY;
     }
 }

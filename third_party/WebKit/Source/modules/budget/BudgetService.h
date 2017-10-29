@@ -5,9 +5,13 @@
 #ifndef BudgetService_h
 #define BudgetService_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/ModulesExport.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "public/platform/modules/budget_service/budget_service.mojom-blink.h"
+
+namespace service_manager {
+class InterfaceProvider;
+}
 
 namespace blink {
 
@@ -23,7 +27,10 @@ class BudgetService final : public GarbageCollectedFinalized<BudgetService>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static BudgetService* create() { return new BudgetService(); }
+  static BudgetService* Create(
+      service_manager::InterfaceProvider* interface_provider) {
+    return new BudgetService(interface_provider);
+  }
 
   ~BudgetService();
 
@@ -36,22 +43,22 @@ class BudgetService final : public GarbageCollectedFinalized<BudgetService>,
 
  private:
   // Callbacks from the BudgetService to the blink layer.
-  void gotCost(ScriptPromiseResolver*, double cost) const;
-  void gotBudget(
+  void GotCost(ScriptPromiseResolver*, double cost) const;
+  void GotBudget(
       ScriptPromiseResolver*,
       mojom::blink::BudgetServiceErrorType,
       const WTF::Vector<mojom::blink::BudgetStatePtr> expectations) const;
-  void gotReservation(ScriptPromiseResolver*,
+  void GotReservation(ScriptPromiseResolver*,
                       mojom::blink::BudgetServiceErrorType,
                       bool success) const;
 
   // Error handler for use if mojo service doesn't connect.
-  void onConnectionError();
+  void OnConnectionError();
 
-  BudgetService();
+  explicit BudgetService(service_manager::InterfaceProvider*);
 
   // Pointer to the Mojo service which will proxy calls to the browser.
-  mojom::blink::BudgetServicePtr m_service;
+  mojom::blink::BudgetServicePtr service_;
 };
 
 }  // namespace blink

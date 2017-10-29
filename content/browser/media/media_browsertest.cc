@@ -17,6 +17,7 @@
 #include "media/base/test_data_util.h"
 #include "media/media_features.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "url/url_util.h"
 
 namespace content {
 
@@ -33,10 +34,13 @@ const char MediaBrowserTest::kErrorEvent[] = "ERROR";
 // Lower case event name as set by Utils.failTest().
 const char MediaBrowserTest::kError[] = "error";
 
+#if defined(OS_ANDROID)
+// Title set by android cleaner page after short timeout.
+const char kClean[] = "CLEAN";
+#endif
+
 void MediaBrowserTest::SetUpCommandLine(base::CommandLine* command_line) {
-  command_line->AppendSwitch(
-      switches::kDisableGestureRequirementForMediaPlayback);
-  command_line->AppendSwitch(switches::kEnableVp9InMp4);
+  command_line->AppendSwitch(switches::kIgnoreAutoplayRestrictionsForTests);
 }
 
 void MediaBrowserTest::RunMediaTestPage(const std::string& html_page,
@@ -67,7 +71,28 @@ std::string MediaBrowserTest::RunTest(const GURL& gurl,
   AddTitlesToAwait(&title_watcher);
   NavigateToURL(shell(), gurl);
   base::string16 result = title_watcher.WaitAndGetTitle();
+
+#if defined(OS_ANDROID)
+  // We only do this cleanup on Android, as a workaround for a test-only OOM
+  // bug. See http://crbug.com/727542
+  const base::string16 cleaner_title = base::ASCIIToUTF16(kClean);
+  TitleWatcher clean_title_watcher(shell()->web_contents(), cleaner_title);
+  GURL cleaner_url = content::GetFileUrlWithQuery(
+      media::GetTestDataFilePath("cleaner.html"), "");
+  NavigateToURL(shell(), cleaner_url);
+  base::string16 cleaner_result = clean_title_watcher.WaitAndGetTitle();
+  EXPECT_EQ(cleaner_result, cleaner_title);
+#endif
+
   return base::UTF16ToASCII(result);
+}
+
+std::string MediaBrowserTest::EncodeErrorMessage(
+    const std::string& original_message) {
+  url::RawCanonOutputT<char> buffer;
+  url::EncodeURIComponent(original_message.data(), original_message.size(),
+                          &buffer);
+  return std::string(buffer.data(), buffer.length());
 }
 
 void MediaBrowserTest::AddTitlesToAwait(content::TitleWatcher* title_watcher) {
@@ -100,6 +125,17 @@ class MediaTest : public testing::WithParamInterface<bool>,
     base::StringPairs query_params;
     query_params.push_back(std::make_pair(tag, media_file));
     RunMediaTestPage("player.html", query_params, kEnded, http);
+  }
+
+  void RunErrorMessageTest(const std::string& tag,
+                           const std::string& media_file,
+                           const std::string& expected_error_substring,
+                           bool http) {
+    base::StringPairs query_params;
+    query_params.push_back(std::make_pair(tag, media_file));
+    query_params.push_back(std::make_pair(
+        "error_substr", EncodeErrorMessage(expected_error_substring)));
+    RunMediaTestPage("player.html", query_params, kErrorEvent, http);
   }
 
   void RunVideoSizeTest(const char* media_file, int width, int height) {
@@ -152,13 +188,7 @@ IN_PROC_BROWSER_TEST_P(MediaTest, VideoBear12DepthVP9) {
 #endif
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-// Crashes on Mac http://crbug.com/621857
-#if defined(OS_MACOSX)
-#define MAYBE_VideoBearMp4 DISABLED_VideoBearMp4
-#else
-#define MAYBE_VideoBearMp4 VideoBearMp4
-#endif
-IN_PROC_BROWSER_TEST_P(MediaTest, MAYBE_VideoBearMp4) {
+IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearMp4) {
   PlayVideo("bear.mp4", GetParam());
 }
 
@@ -173,13 +203,7 @@ IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearHighBitDepthMp4) {
 }
 #endif  // !defined(OS_ANDROID)
 
-// Crashes on Mac only.  http://crbug.com/621857
-#if defined(OS_MACOSX)
-#define MAYBE_VideoBearSilentMp4 DISABLED_VideoBearSilentMp4
-#else
-#define MAYBE_VideoBearSilentMp4 VideoBearSilentMp4
-#endif
-IN_PROC_BROWSER_TEST_P(MediaTest, MAYBE_VideoBearSilentMp4) {
+IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearSilentMp4) {
   PlayVideo("bear_silent.mp4", GetParam());
 }
 
@@ -269,6 +293,23 @@ IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearWavPcm192kHz) {
 
 IN_PROC_BROWSER_TEST_P(MediaTest, VideoTulipWebm) {
   PlayVideo("tulip2.webm", GetParam());
+}
+
+IN_PROC_BROWSER_TEST_P(MediaTest, VideoErrorMissingResource) {
+  RunErrorMessageTest("video", "nonexistent_file.webm",
+                      "MEDIA_ELEMENT_ERROR: Format error", GetParam());
+}
+
+IN_PROC_BROWSER_TEST_P(MediaTest, VideoErrorEmptySrcAttribute) {
+  RunErrorMessageTest("video", "", "MEDIA_ELEMENT_ERROR: Empty src attribute",
+                      GetParam());
+}
+
+IN_PROC_BROWSER_TEST_P(MediaTest, VideoErrorNoSupportedStreams) {
+  RunErrorMessageTest(
+      "video", "no_streams.webm",
+      "DEMUXER_ERROR_NO_SUPPORTED_STREAMS: FFmpegDemuxer: no supported streams",
+      GetParam());
 }
 
 // Covers tear-down when navigating away as opposed to browser exiting.

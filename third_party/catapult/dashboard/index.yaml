@@ -104,16 +104,18 @@ indexes:
   - name: internal_only
   - name: end_revision
 
-# Used in speed_releasing.py to find anomalies that match a specific test
-# and are between a specified range (usually a milestone).
+# Used in speed_releasing.py to find anomalies that match a specific master
+# and benchmark and are between a specified range (usually a milestone).
 - kind: Anomaly
   properties:
-  - name: test
+  - name: benchmark_name
+  - name: master_name
   - name: end_revision
 - kind: Anomaly
   properties:
   - name: internal_only
-  - name: test
+  - name: benchmark_name
+  - name: master_name
   - name: end_revision
 
 # Used in benchmark_health_report for querying benchmark by name
@@ -135,6 +137,21 @@ indexes:
   - name: timestamp
     direction: desc
 
+# Used in API to query for named benchmarks.
+- kind: Anomaly
+  properties:
+  - name: benchmark_name
+  - name: sheriff
+  - name: timestamp
+    direction: desc
+
+- kind: Anomaly
+  properties:
+  - name: benchmark_name
+  - name: internal_only
+  - name: sheriff
+  - name: timestamp
+    direction: desc
 
 # Might be unused!
 # This index would enable querying for points for a particular test,
@@ -190,50 +207,22 @@ indexes:
   - name: timestamp
     direction: desc
 
-# May be used in send_stoppage_alert_emails to fetch recent StoppageAlert
-# entities for a particular sheriff, for both internal-only and public alerts.
-- kind: StoppageAlert
+# Used for returning timeseries of diagnostics.
+- kind: SparseDiagnostic
   properties:
-  - name: sheriff
-  - name: mail_sent
-- kind: StoppageAlert
-  properties:
-  - name: internal_only
-  - name: sheriff
-  - name: mail_sent
-
-# Used in alerts to fetch recent StoppageAlert entities for a particular
-# sheriff, for both internal and non-internal users.
-- kind: StoppageAlert
-  properties:
-  - name: sheriff
-  - name: timestamp
+  - name: start_revision
     direction: desc
-- kind: StoppageAlert
-  properties:
-  - name: internal_only
-  - name: sheriff
-  - name: timestamp
+  - name: end_revision
     direction: desc
 
-# Used in /alerts to query for stoppage alerts, for internal and external
-# sheriffs.
-- kind: StoppageAlert
+- kind: SparseDiagnostic
   properties:
-  - name: bug_id
+  - name: start_revision
+    direction: desc
+  - name: end_revision
+    direction: desc
   - name: internal_only
-  - name: recovered
-  - name: sheriff
-  - name: timestamp
-    direction: desc
-- kind: StoppageAlert
-  properties:
-  - name: bug_id
-  - name: recovered
-  - name: sheriff
-  - name: timestamp
-    direction: desc
-
+  
 # Used in update_test_suites to query keys of test suites (parent_test == None)
 # with deprecated and description projection. Two separate lists of
 # test suites are kept, one for external and one for internal.

@@ -41,11 +41,11 @@ void ExpectEquality(const std::vector<T>& a, const std::vector<T>& b) {
 }
 
 template <>
-void ExpectEquality(const ResourceRequestBodyImpl::Element& a,
-                    const ResourceRequestBodyImpl::Element& b) {
+void ExpectEquality(const ResourceRequestBody::Element& a,
+                    const ResourceRequestBody::Element& b) {
   EXPECT_EQ(a.type(), b.type());
-  if (a.type() == ResourceRequestBodyImpl::Element::TYPE_BYTES &&
-      b.type() == ResourceRequestBodyImpl::Element::TYPE_BYTES) {
+  if (a.type() == ResourceRequestBody::Element::TYPE_BYTES &&
+      b.type() == ResourceRequestBody::Element::TYPE_BYTES) {
     EXPECT_EQ(std::string(a.bytes(), a.length()),
               std::string(b.bytes(), b.length()));
   }
@@ -101,7 +101,7 @@ class PageStateSerializationTest : public testing::Test {
     // Invent some data for the various fields.
     frame_state->url_string = NS16("http://dev.chromium.org/");
     frame_state->referrer = NS16("https://www.google.com/search?q=dev.chromium.org");
-    frame_state->referrer_policy = blink::WebReferrerPolicyAlways;
+    frame_state->referrer_policy = blink::kWebReferrerPolicyAlways;
     frame_state->target = NS16("foo");
     frame_state->state_object = NS16(NULL);
     frame_state->document_state.push_back(NS16("1"));
@@ -109,7 +109,7 @@ class PageStateSerializationTest : public testing::Test {
     frame_state->document_state.push_back(NS16("text"));
     frame_state->document_state.push_back(NS16("dev.chromium.org"));
     frame_state->scroll_restoration_type =
-        blink::WebHistoryScrollRestorationManual;
+        blink::kWebHistoryScrollRestorationManual;
     frame_state->visual_viewport_scroll_offset = gfx::PointF(10, 15);
     frame_state->scroll_offset = gfx::Point(0, 100);
     frame_state->item_sequence_number = 1;
@@ -119,7 +119,7 @@ class PageStateSerializationTest : public testing::Test {
 
   void PopulateHttpBody(ExplodedHttpBody* http_body,
                         std::vector<base::NullableString16>* referenced_files) {
-    http_body->request_body = new ResourceRequestBodyImpl();
+    http_body->request_body = new ResourceRequestBody();
     http_body->request_body->set_identifier(12345);
     http_body->contains_passwords = false;
     http_body->http_content_type = NS16("text/foo");
@@ -140,11 +140,11 @@ class PageStateSerializationTest : public testing::Test {
       bool is_child) {
     frame_state->url_string = NS16("http://chromium.org/");
     frame_state->referrer = NS16("http://google.com/");
-    frame_state->referrer_policy = blink::WebReferrerPolicyDefault;
+    frame_state->referrer_policy = blink::kWebReferrerPolicyDefault;
     if (!is_child)
       frame_state->target = NS16("target");
     frame_state->scroll_restoration_type =
-        blink::WebHistoryScrollRestorationAuto;
+        blink::kWebHistoryScrollRestorationAuto;
     frame_state->visual_viewport_scroll_offset = gfx::PointF(-1, -1);
     frame_state->scroll_offset = gfx::Point(42, -42);
     frame_state->item_sequence_number = 123;
@@ -163,7 +163,7 @@ class PageStateSerializationTest : public testing::Test {
 
     if (!is_child) {
       frame_state->http_body.http_content_type = NS16("foo/bar");
-      frame_state->http_body.request_body = new ResourceRequestBodyImpl();
+      frame_state->http_body.request_body = new ResourceRequestBody();
       frame_state->http_body.request_body->set_identifier(789);
 
       std::string test_body("first data block");
@@ -355,7 +355,7 @@ TEST_F(PageStateSerializationTest, BadMessagesTest2) {
   p.WriteInt(0);
   // WebForm
   p.WriteInt(1);
-  p.WriteInt(blink::WebHTTPBody::Element::TypeData);
+  p.WriteInt(blink::WebHTTPBody::Element::kTypeData);
 
   std::string s(static_cast<const char*>(p.data()), p.size());
 
@@ -441,6 +441,10 @@ TEST_F(PageStateSerializationTest, BackwardsCompat_v22) {
 
 TEST_F(PageStateSerializationTest, BackwardsCompat_v23) {
   TestBackwardsCompat(23);
+}
+
+TEST_F(PageStateSerializationTest, BackwardsCompat_v24) {
+  TestBackwardsCompat(24);
 }
 
 }  // namespace

@@ -67,7 +67,9 @@ MojoCdm::MojoCdm(mojom::ContentDecryptionModulePtr remote_cdm,
   DCHECK(!session_keys_change_cb_.is_null());
   DCHECK(!session_expiration_update_cb_.is_null());
 
-  remote_cdm_->SetClient(binding_.CreateInterfacePtrAndBind());
+  mojom::ContentDecryptionModuleClientPtr client;
+  binding_.Bind(mojo::MakeRequest(&client));
+  remote_cdm_->SetClient(std::move(client));
 }
 
 MojoCdm::~MojoCdm() {
@@ -321,8 +323,7 @@ void MojoCdm::OnSessionKeysChange(
   CdmKeysInfo key_data;
   key_data.reserve(keys_info.size());
   for (size_t i = 0; i < keys_info.size(); ++i) {
-    key_data.push_back(
-        keys_info[i].To<std::unique_ptr<CdmKeyInformation>>().release());
+    key_data.push_back(keys_info[i].To<std::unique_ptr<CdmKeyInformation>>());
   }
   session_keys_change_cb_.Run(session_id, has_additional_usable_key,
                               std::move(key_data));

@@ -7,7 +7,7 @@ cr.define('print_preview', function() {
 
   /**
    * Print options section to control printer advanced options.
-   * @param {!print_preview.ticket_item.VendorItems} ticketItem Ticket item to
+   * @param {!print_preview.ticket_items.VendorItems} ticketItem Ticket item to
    *     check settings availability.
    * @param {!print_preview.DestinationStore} destinationStore Used to determine
    *     the selected destination.
@@ -28,7 +28,7 @@ cr.define('print_preview', function() {
      * @private {!print_preview.DestinationStore}
      */
     this.destinationStore_ = destinationStore;
-  };
+  }
 
   /**
    * Event types dispatched by the component.
@@ -60,24 +60,23 @@ cr.define('print_preview', function() {
     enterDocument: function() {
       print_preview.SettingsSection.prototype.enterDocument.call(this);
 
-      this.tracker.add(
-          this.getButton_(), 'click', function() {
-            cr.dispatchSimpleEvent(
-                this, AdvancedOptionsSettings.EventType.BUTTON_ACTIVATED);
-          }.bind(this));
+      this.tracker.add(this.getButton_(), 'click', function() {
+        cr.dispatchSimpleEvent(
+            this, AdvancedOptionsSettings.EventType.BUTTON_ACTIVATED);
+      }.bind(this));
       this.tracker.add(
           this.destinationStore_,
           print_preview.DestinationStore.EventType.DESTINATION_SELECT,
           this.onDestinationChanged_.bind(this));
       this.tracker.add(
           this.destinationStore_,
-          print_preview.DestinationStore.EventType.
-              SELECTED_DESTINATION_CAPABILITIES_READY,
+          print_preview.DestinationStore.EventType
+              .SELECTED_DESTINATION_CAPABILITIES_READY,
           this.onDestinationChanged_.bind(this));
     },
 
     /**
-     * @return {HTMLElement}
+     * @return {!HTMLElement}
      * @private
      */
     getButton_: function() {
@@ -94,7 +93,5 @@ cr.define('print_preview', function() {
   };
 
   // Export
-  return {
-    AdvancedOptionsSettings: AdvancedOptionsSettings
-  };
+  return {AdvancedOptionsSettings: AdvancedOptionsSettings};
 });

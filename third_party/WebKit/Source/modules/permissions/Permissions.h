@@ -6,13 +6,14 @@
 #define Permissions_h
 
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/modules/permissions/permission.mojom-blink.h"
 
 namespace blink {
 
 class Dictionary;
+class ExecutionContext;
 class ScriptPromiseResolver;
 class ScriptState;
 
@@ -29,17 +30,17 @@ class Permissions final : public GarbageCollectedFinalized<Permissions>,
   ScriptPromise requestAll(ScriptState*, const Vector<Dictionary>&);
 
  private:
-  mojom::blink::PermissionService* getService(ExecutionContext*);
-  void serviceConnectionError();
-  void taskComplete(ScriptPromiseResolver*,
+  mojom::blink::PermissionService* GetService(ExecutionContext*);
+  void ServiceConnectionError();
+  void TaskComplete(ScriptPromiseResolver*,
                     mojom::blink::PermissionDescriptorPtr,
                     mojom::blink::PermissionStatus);
-  void batchTaskComplete(ScriptPromiseResolver*,
+  void BatchTaskComplete(ScriptPromiseResolver*,
                          Vector<mojom::blink::PermissionDescriptorPtr>,
                          Vector<int>,
                          const Vector<mojom::blink::PermissionStatus>&);
 
-  mojom::blink::PermissionServicePtr m_service;
+  mojom::blink::PermissionServicePtr service_;
 };
 
 }  // namespace blink

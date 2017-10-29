@@ -12,7 +12,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/sequence_checker.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/syncable/dir_open_result.h"
 #include "components/sync/syncable/directory.h"
@@ -51,7 +51,7 @@ extern const int32_t kCurrentPageSizeKB;
 // This class is abstract so that we can extend it in interesting ways for use
 // in tests.  The concrete class used in non-test scenarios is
 // OnDiskDirectoryBackingStore.
-class DirectoryBackingStore : public base::NonThreadSafe {
+class DirectoryBackingStore {
  public:
   explicit DirectoryBackingStore(const std::string& dir_name);
   virtual ~DirectoryBackingStore();
@@ -187,12 +187,15 @@ class DirectoryBackingStore : public base::NonThreadSafe {
   bool MigrateVersion87To88();
   bool MigrateVersion88To89();
   bool MigrateVersion89To90();
+  bool MigrateVersion90To91();
 
   // Accessor for needs_column_refresh_.  Used in tests.
   bool needs_column_refresh() const;
 
   // Destroys the existing Connection and creates a new one.
   void ResetAndCreateConnection();
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
  private:
   friend class DirectoryBackingStoreTest;

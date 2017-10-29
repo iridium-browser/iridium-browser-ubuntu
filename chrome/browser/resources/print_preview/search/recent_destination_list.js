@@ -15,12 +15,9 @@ cr.define('print_preview', function() {
    */
   function RecentDestinationList(eventTarget) {
     print_preview.DestinationList.call(
-        this,
-        eventTarget,
-        loadTimeData.getString('recentDestinationsTitle'),
-        null /*actionLinkLabel*/,
-        true /*opt_showAll*/);
-  };
+        this, eventTarget, loadTimeData.getString('recentDestinationsTitle'),
+        null /*actionLinkLabel*/, true /*opt_showAll*/);
+  }
 
   RecentDestinationList.prototype = {
     __proto__: print_preview.DestinationList.prototype,
@@ -32,7 +29,5 @@ cr.define('print_preview', function() {
     }
   };
 
-  return {
-    RecentDestinationList: RecentDestinationList
-  };
+  return {RecentDestinationList: RecentDestinationList};
 });

@@ -12,17 +12,14 @@ import contextlib
 import glob
 import json
 import os
-import distutils.version
 
 from chromite.cli import command
 from chromite.lib import cache
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
-from chromite.lib import git
 from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import path_util
-from chromite.lib import stats
 from chromite.cbuildbot import archive_lib
 from chromite.lib import config_lib
 from chromite.lib import constants
@@ -44,6 +41,18 @@ def Log(*args, **kwargs):
   level = logging.DEBUG if silent else logging.INFO
   logging.log(level, *args, **kwargs)
 
+
+class NoChromiumSrcDir(Exception):
+  """Error thrown when no chromium src dir is found."""
+
+  def __init__(self, path):
+    Exception.__init__(self, 'No chromium src dir found in: ' % (path))
+
+class MissingLKGMFile(Exception):
+  """Error thrown when we cannot get the version from CHROMEOS_LKGM."""
+
+  def __init__(self, path):
+    Exception.__init__(self, 'Cannot parse CHROMEOS_LKGM file: %s' % (path))
 
 class MissingSDK(Exception):
   """Error thrown when we cannot find an SDK."""
@@ -72,6 +81,10 @@ class SDKFetcher(object):
   MISC_CACHE = 'misc'
 
   TARGET_TOOLCHAIN_KEY = 'target_toolchain'
+
+  CANARIES_PER_DAY = 3
+  DAYS_TO_CONSIDER = 14
+  VERSIONS_TO_CONSIDER = DAYS_TO_CONSIDER * CANARIES_PER_DAY
 
   def __init__(self, cache_dir, board, clear_cache=False, chrome_src=None,
                sdk_path=None, toolchain_path=None, silent=False,
@@ -165,48 +178,63 @@ class SDKFetcher(object):
     """
     version = osutils.ReadFile(os.path.join(
         chrome_src_dir, constants.PATH_TO_CHROME_LKGM))
+    logging.debug('Loading LKGM version from "%s": %s',
+                  constants.PATH_TO_CHROME_LKGM, version)
     return version
 
-  def _GetRepoCheckoutVersion(self, repo_root):
-    """Get the version specified in chromeos_version.sh.
+  def _GetFullVersionFromRecentLatest(self, version):
+    """Gets the full version number from a recent LATEST- file.
 
-    Returns:
-      Version number in format '3929.0.0'.
-    """
-    chromeos_version_sh = os.path.join(repo_root, constants.VERSION_FILE)
-    sourced_env = osutils.SourceEnvironment(
-        chromeos_version_sh, ['CHROMEOS_VERSION_STRING'],
-        env={'CHROMEOS_OFFICIAL': '1'})
-    return sourced_env['CHROMEOS_VERSION_STRING']
-
-  def _GetNewestFullVersion(self, version=None):
-    """Gets the full version number of the latest build for the given |version|.
+    If LATEST-{version} does not exist, we need to look for a recent
+    LATEST- file to get a valid full version from.
 
     Args:
-      version: The version number or branch to look at. By default, look at
-        builds on the current branch.
+      version: The version number to look backwards from. If version is not a
+      canary version (ending in .0.0), returns None.
 
     Returns:
-      Version number in the format 'R30-3929.0.0'.
+      Version number in the format 'R30-3929.0.0' or None.
     """
-    if version is None:
-      version = git.GetChromiteTrackingBranch()
+
+    # If version does not end in .0.0 it is not a canary so fail.
+    if not version.endswith('.0.0'):
+      return None
+    version_base = int(version.split('.')[0])
+    version_base_min = version_base - self.VERSIONS_TO_CONSIDER
+
+    for v in xrange(version_base - 1, version_base_min, -1):
+      version_file = '%s/LATEST-%d.0.0' % (self.gs_base, v)
+      logging.info('Trying: %s', version_file)
+      try:
+        full_version = self.gs_ctx.Cat(version_file)
+        assert full_version.startswith('R')
+        logging.warning(
+            'Using cros version from most recent LATEST file: %s -> %s',
+            version_file, full_version)
+        return full_version
+      except gs.GSNoSuchKey:
+        pass
+    logging.warning('No recent LATEST file found from %d.0.0 to %d.0.0: ',
+                    version_base_min, version_base)
+    return None
+
+  def _GetFullVersionFromLatest(self, version):
+    """Gets the full version number from the LATEST-{version} file.
+
+    Args:
+      version: The version number or branch to look at.
+
+    Returns:
+      Version number in the format 'R30-3929.0.0' or None.
+    """
     version_file = '%s/LATEST-%s' % (self.gs_base, version)
     try:
       full_version = self.gs_ctx.Cat(version_file)
       assert full_version.startswith('R')
       return full_version
     except gs.GSNoSuchKey:
-      return None
-
-  def _GetNewestManifestVersion(self):
-    """Gets the latest uploaded SDK version.
-
-    Returns:
-      Version number in the format '3929.0.0'.
-    """
-    full_version = self._GetNewestFullVersion()
-    return None if full_version is None else full_version.split('-')[1]
+      logging.warning('No LATEST file matching SDK version %s', version)
+      return self._GetFullVersionFromRecentLatest(version)
 
   def GetDefaultVersion(self):
     """Get the default SDK version to use.
@@ -246,24 +274,13 @@ class SDKFetcher(object):
     checkout_dir = self.chrome_src if self.chrome_src else os.getcwd()
     checkout = path_util.DetermineCheckout(checkout_dir)
     current = self.GetDefaultVersion() or '0'
-    if checkout.chrome_src_dir:
-      target = self._GetChromeLKGM(checkout.chrome_src_dir)
-    elif checkout.type == path_util.CHECKOUT_TYPE_REPO:
-      target = self._GetRepoCheckoutVersion(checkout.root)
-      if target != current:
-        lv_cls = distutils.version.LooseVersion
-        if lv_cls(target) > lv_cls(current):
-          # Hit the network for the newest uploaded version for the branch.
-          newest = self._GetNewestManifestVersion()
-          # The SDK for the version of the checkout has not been uploaded yet,
-          # so fall back to the latest uploaded SDK.
-          if newest is not None and lv_cls(target) > lv_cls(newest):
-            target = newest
-    else:
-      target = self._GetNewestManifestVersion()
 
+    if not checkout.chrome_src_dir:
+      raise NoChromiumSrcDir(checkout_dir)
+
+    target = self._GetChromeLKGM(checkout.chrome_src_dir)
     if target is None:
-      raise MissingSDK(self.board)
+      raise MissingLKGMFile(checkout.chrome_src_dir)
 
     self._SetDefaultVersion(target)
     return target, target != current
@@ -288,8 +305,7 @@ class SDKFetcher(object):
       if ref.Exists(lock=True):
         return osutils.ReadFile(ref.path).strip()
       else:
-        # Find out the newest version from the LATEST (or LATEST-%s) file.
-        full_version = self._GetNewestFullVersion(version=version)
+        full_version = self._GetFullVersionFromLatest(version)
 
         if full_version is None:
           raise MissingSDK(self.board, version)
@@ -437,21 +453,8 @@ class ChromeSDKCommand(command.CliCommand):
   GOMACC_PORT_CMD = ['./gomacc', 'port']
   FETCH_GOMA_CMD = ['wget', _GOMA_URL]
 
-  # Override base class property to enable stats upload.
-  upload_stats = True
-
   # Override base class property to use cache related commandline options.
   use_caching_options = True
-
-  @property
-  def upload_stats_timeout(self):
-    # Give a longer timeout for interactive SDK shell invocations, since the
-    # user will not notice a longer wait because it's happening in the
-    # background.
-    if self.options.cmd:
-      return super(ChromeSDKCommand, self).upload_stats_timeout
-    else:
-      return stats.StatsUploader.UPLOAD_TIMEOUT
 
   @staticmethod
   def ValidateVersion(version):
@@ -495,12 +498,11 @@ class ChromeSDKCommand(command.CliCommand):
              'Chrome, rather than Chromium.')
     parser.add_argument(
         '--component', action='store_true', default=False,
-        help='Sets up SDK for building a componentized build of Chrome '
-             '(is_component_build=true in GN).')
+        help='Deprecated and ignored. Set is_component_build=true in args.gn '
+             'instead.')
     parser.add_argument(
         '--fastbuild', action='store_true', default=False,
-        help='Turn off debugging information for a faster build '
-             '(symbol_level=1 in GN).')
+        help='Deprecated and ignored. Set symbol_level=1 in args.gn instead.')
     parser.add_argument(
         '--use-external-config', action='store_true', default=False,
         help='Use the external configuration for the specified board, even if '
@@ -515,7 +517,8 @@ class ChromeSDKCommand(command.CliCommand):
              'pull toolchain components from.')
     parser.add_argument(
         '--nogoma', action='store_false', default=True, dest='goma',
-        help='Disables Goma in the shell by removing it from the PATH.')
+        help='Disables Goma in the shell by removing it from the PATH and '
+             'set use_goma=false to GN_ARGS.')
     parser.add_argument(
         '--nostart-goma', action='store_false', default=True, dest='start_goma',
         help='Skip starting goma and hope somebody else starts goma later.')
@@ -600,6 +603,45 @@ class ChromeSDKCommand(command.CliCommand):
     cmd, _, gold_path = var_contents.partition(' -B')
     gold_path = os.path.join(toolchain_path, gold_path.lstrip('/'))
     return '%s -B%s' % (cmd, gold_path)
+
+  def _StripGnArgs(self, gn_args_dict):
+    """Strip GN args set by developers and not by the chrome ebuild.
+
+    Accepts a dictionary of GN args and strips out args that should be ignored
+    when comparing two sets of GN args for the purpose of identifying GN args
+    that are generated by the chromeos-chrome ebuild and may have changed.a
+
+    Returns a new dictionary including only the GN args to compare.
+    """
+    args_to_ignore = (
+        'dcheck_always_on',
+        'ffmpeg_branding',
+        'is_component_build',
+        'is_debug',
+        'proprietary_codecs',
+        'symbol_level',
+        'use_vulcanize',
+    )
+    return dict((k, v) for k, v in gn_args_dict.items()
+                if k not in args_to_ignore)
+
+  def _LogArgsDiff(self, cur_args, new_args):
+    """Logs the differences between |cur_args| and |new_args|."""
+    cur_keys = set(cur_args.keys())
+    new_keys = set(new_args.keys())
+
+    for k in new_keys - cur_keys:
+      logging.info('MISSING ARG: %s = %s', k, new_args[k])
+
+    for k in cur_keys - new_keys:
+      logging.info('EXTRA ARG: %s = %s', k, cur_args[k])
+
+    for k in new_keys & cur_keys:
+      v_cur = cur_args[k]
+      v_new = new_args[k]
+      if v_cur != v_new:
+        logging.info('MISMATCHED ARG: %s: %s != %s', k, v_cur, v_new)
+
 
   def _SetupTCEnvironment(self, sdk_ctx, options, env, gn_is_clang):
     """Sets up toolchain-related environment variables."""
@@ -704,8 +746,18 @@ class ChromeSDKCommand(command.CliCommand):
     # SYSROOT is necessary for Goma and the sysroot wrapper.
     env['SYSROOT'] = sysroot
 
+    # Deprecated options warnings. TODO(stevenjb): Eliminate these entirely
+    # once removed from any builders.
+    if options.component:
+      logging.warning('--component is deprecated, ignoring')
+    if options.fastbuild:
+      logging.warning('--fastbuild is deprecated, ignoring')
+
     gn_args['target_sysroot'] = sysroot
     gn_args.pop('pkg_config', None)
+    # pkg_config only affects the target and comes from the sysroot.
+    # host_pkg_config is used for programs compiled for use later in the build.
+    gn_args['host_pkg_config'] = 'pkg-config'
     if options.clang:
       gn_args['is_clang'] = True
     if options.internal:
@@ -715,14 +767,6 @@ class ChromeSDKCommand(command.CliCommand):
       gn_args.pop('is_chrome_branded', None)
       gn_args.pop('is_official_build', None)
       gn_args.pop('internal_gles2_conform_tests', None)
-    if options.component:
-      gn_args['is_component_build'] = True
-    if options.fastbuild:
-      # symbol_level corresponds to GYP's fastbuild (https://goo.gl/ZC4fUO).
-      gn_args['symbol_level'] = 1
-    else:
-      # Enable debug fission for GN.
-      gn_args['use_debug_fission'] = True
 
     # For SimpleChrome, we use the binutils that comes bundled within Chrome.
     # We should not use the binutils from the host system.
@@ -756,10 +800,15 @@ class ChromeSDKCommand(command.CliCommand):
     if goma_dir:
       gn_args['use_goma'] = True
       gn_args['goma_dir'] = goma_dir
+    elif not options.goma:
+      # If --nogoma option is explicitly set, disable goma, even if it is
+      # used in the original GN_ARGS.
+      gn_args['use_goma'] = False
 
     gn_args.pop('internal_khronos_glcts_tests', None)  # crbug.com/588080
 
-    env['GN_ARGS'] = gn_helpers.ToGNString(gn_args)
+    gn_args_env = gn_helpers.ToGNString(gn_args)
+    env['GN_ARGS'] = gn_args_env
 
     # PS1 sets the command line prompt and xterm window caption.
     full_version = sdk_ctx.version
@@ -770,6 +819,28 @@ class ChromeSDKCommand(command.CliCommand):
 
     out_dir = 'out_%s' % self.board
     env['builddir_name'] = out_dir
+
+    build_label = 'Release'
+
+    checkout_dir = (self.options.chrome_src
+                    if self.options.chrome_src else os.getcwd())
+    gn_args_file_path = os.path.join(
+        checkout_dir, out_dir, build_label, 'args.gn')
+
+    if os.path.exists(gn_args_file_path):
+      stripped_gn_args = self._StripGnArgs(gn_args)
+      stripped_gn_args_file = self._StripGnArgs(
+          gn_helpers.FromGNArgs(osutils.ReadFile(gn_args_file_path)))
+      if stripped_gn_args != stripped_gn_args_file:
+        logging.warning('Stale args.gn file: %s', gn_args_file_path)
+        self._LogArgsDiff(stripped_gn_args_file, stripped_gn_args)
+        logging.warning('Please run:')
+        logging.warning('gn gen out_$SDK_BOARD/Release --args="$GN_ARGS"')
+
+    # This is used by landmines.py to prevent collisions when building both
+    # chromeos and android from shared source.
+    # For context, see crbug.com/407417
+    env['CHROMIUM_OUT_DIR'] = os.path.join(checkout_dir, out_dir)
 
     return env
 

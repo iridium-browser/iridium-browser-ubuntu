@@ -7,16 +7,16 @@
 from __future__ import print_function
 
 import os
+import time
 
-from chromite.cbuildbot import build_status
-from chromite.cbuildbot import manifest_version
-from chromite.cbuildbot import tree_status
+from chromite.lib import builder_status_lib
 from chromite.lib import constants
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
-from chromite.lib import gs_unittest
+from chromite.lib import fake_cidb
 from chromite.lib import osutils
 from chromite.lib import partial_mock
+from chromite.lib import tree_status
 from chromite.scripts import cros_best_revision
 
 
@@ -25,30 +25,51 @@ class BaseChromeCommitterTest(cros_test_lib.MockTempDirTestCase):
 
   def setUp(self):
     """Common set up method for all tests."""
-    self.committer = cros_best_revision.ChromeCommitter(self.tempdir, False)
+    self.db = fake_cidb.FakeCIDBConnection()
+    self.committer = cros_best_revision.ChromeCommitter(
+        self.tempdir, self.db, False)
     self.lkgm_file = os.path.join(self.tempdir, constants.PATH_TO_CHROME_LKGM)
-    self.pass_status = build_status.BuilderStatus(
+    self.pass_status = builder_status_lib.BuilderStatus(
         constants.BUILDER_STATUS_PASSED, None)
-    self.fail_status = build_status.BuilderStatus(
+    self.fail_status = builder_status_lib.BuilderStatus(
         constants.BUILDER_STATUS_FAILED, None)
+    # No need to make tests sleep.
+    self.PatchObject(time, 'sleep')
 
 
 # pylint: disable=W0212
 class ChromeGSTest(BaseChromeCommitterTest):
   """Test cros_best_revision.ChromeCommitter version filtering."""
 
-  def testGetLatestCanaryVersions(self):
+  def testGetLatestCanaryVersionsFromCIDB(self):
     """Test that we correctly filter out non-canary and older versions."""
-    output = '\n'.join(['2910.0.1', '2900.0.0', '2908.0.0', '2909.0.0',
-                        '2910.0.0'])
+    builder = 'master-release'
+    self.db.InsertBuild(builder, constants.WATERFALL_INTERNAL, 1, builder,
+                        'host', milestone_version='60',
+                        platform_version='2905.0.0')
+    self.db.InsertBuild(builder, constants.WATERFALL_INTERNAL, 1, builder,
+                        'host', milestone_version='60',
+                        platform_version='2910.0.1')
+    self.db.InsertBuild(builder, constants.WATERFALL_INTERNAL, 1, builder,
+                        'host', milestone_version='60',
+                        platform_version='2900.0.0')
+    self.db.InsertBuild(builder, constants.WATERFALL_INTERNAL, 1, builder,
+                        'host', milestone_version='60',
+                        platform_version='2908.0.0')
+    self.db.InsertBuild(builder, constants.WATERFALL_INTERNAL, 1, builder,
+                        'host',
+                        milestone_version='60', platform_version='2909.0.0')
+    self.db.InsertBuild(builder, constants.WATERFALL_INTERNAL, 1, builder,
+                        'host', milestone_version='60',
+                        platform_version='2910.0.0')
+
     # Only return 2 -- the 2 newest canary results.
     cros_best_revision.ChromeCommitter._CANDIDATES_TO_CONSIDER = 2
     expected_output = ['2910.0.0', '2909.0.0']
 
     self.committer._old_lkgm = '2905.0.0'
-    with gs_unittest.GSContextMock() as gs_mock:
-      gs_mock.AddCmdResult(partial_mock.In('ls'), output=output)
-      versions = self.committer._GetLatestCanaryVersions()
+
+    versions = self.committer._GetLatestCanaryVersionsFromCIDB()
     self.assertEqual(versions, expected_output)
 
 
@@ -74,14 +95,16 @@ class ChromeCommitterTester(cros_build_lib_unittest.RunCommandTestCase,
     for canary, results in zip(self.canaries, all_results):
       for version, status in zip(self.versions, results):
         expected[(canary, version)] = status
-    def _GetBuildStatus(canary, version, **_):
+    # pylint: disable=unused-argument
+    def _GetBuilderStatus(db, canary, version, **_):
       return expected[(canary, version)]
-    self.PatchObject(self.committer, '_GetLatestCanaryVersions',
+    self.PatchObject(self.committer, '_GetLatestCanaryVersionsFromCIDB',
                      return_value=self.versions)
     self.PatchObject(self.committer, 'GetCanariesForChromeLKGM',
                      return_value=self.canaries)
-    self.PatchObject(manifest_version.BuildSpecsManager, 'GetBuildStatus',
-                     side_effect=_GetBuildStatus)
+    self.PatchObject(builder_status_lib.BuilderStatusManager,
+                     'GetBuilderStatusFromCIDB',
+                     side_effect=_GetBuilderStatus)
     self.committer.FindNewLKGM()
     self.assertTrue(self.committer._lkgm, lkgm)
 
@@ -111,9 +134,30 @@ class ChromeCommitterTester(cros_build_lib_unittest.RunCommandTestCase,
     """Tests that we can commit a new LKGM file."""
     osutils.SafeMakedirs(os.path.dirname(self.lkgm_file))
     self.committer._lkgm = '4.0.0'
+
     self.PatchObject(tree_status, 'IsTreeOpen', return_value=True)
     self.committer.CommitNewLKGM()
 
     # Check the file was actually written out correctly.
     self.assertEqual(osutils.ReadFile(self.lkgm_file), self.committer._lkgm)
+    self.assertCommandContains(['git', 'commit'])
+
+  def testPushNewLKGM(self):
+    """Tests that we can rebase if landing fails due to missing revisions."""
+    self.PatchObject(tree_status, 'IsTreeOpen', return_value=True)
+
+    self.committer.PushNewLKGM()
+
     self.assertCommandContains(['git', 'cl', 'land'])
+
+  def testPushNewLKGMWithRetry(self):
+    """Tests that we try to rebase if landing fails due to missing revisions."""
+    self.PatchObject(tree_status, 'IsTreeOpen', return_value=True)
+
+    self.rc.AddCmdResult(partial_mock.In('land'), returncode=1)
+    self.assertRaises(cros_best_revision.LKGMNotCommitted,
+                      self.committer.PushNewLKGM)
+
+    self.assertCommandContains(['git', 'cl', 'land'])
+    self.assertCommandContains(['git', 'fetch', 'origin', 'master'])
+    self.assertCommandContains(['git', 'rebase'])

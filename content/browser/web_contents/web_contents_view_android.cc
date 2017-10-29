@@ -8,21 +8,27 @@
 #include "base/android/jni_string.h"
 #include "base/logging.h"
 #include "cc/layers/layer.h"
-#include "content/browser/android/content_view_core_impl.h"
+#include "content/browser/accessibility/browser_accessibility_manager_android.h"
+#include "content/browser/android/content_view_core.h"
 #include "content/browser/frame_host/interstitial_page_impl.h"
-#include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/drop_data.h"
+#include "jni/DragEvent_jni.h"
 #include "ui/android/overscroll_refresh_handler.h"
+#include "ui/base/clipboard/clipboard.h"
 #include "ui/display/screen.h"
+#include "ui/events/android/drag_event_android.h"
+#include "ui/events/android/motion_event_android.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/image/image_skia.h"
 
 using base::android::AttachCurrentThread;
+using base::android::ConvertJavaStringToUTF16;
 using base::android::ConvertUTF16ToJavaString;
 using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
@@ -41,6 +47,7 @@ void DisplayToScreenInfo(const display::Display& display, ScreenInfo* results) {
   results->depth = display.color_depth();
   results->depth_per_component = display.depth_per_component();
   results->is_monochrome = display.is_monochrome();
+  results->color_space = display.color_space();
 }
 }
 
@@ -82,8 +89,8 @@ WebContentsViewAndroid::WebContentsViewAndroid(
     : web_contents_(web_contents),
       content_view_core_(NULL),
       delegate_(delegate),
-      synchronous_compositor_client_(nullptr) {
-}
+      view_(this),
+      synchronous_compositor_client_(nullptr) {}
 
 WebContentsViewAndroid::~WebContentsViewAndroid() {
   if (view_.GetLayer())
@@ -91,10 +98,9 @@ WebContentsViewAndroid::~WebContentsViewAndroid() {
 }
 
 void WebContentsViewAndroid::SetContentViewCore(
-    ContentViewCoreImpl* content_view_core) {
+    ContentViewCore* content_view_core) {
   content_view_core_ = content_view_core;
-  RenderWidgetHostViewAndroid* rwhv = static_cast<RenderWidgetHostViewAndroid*>(
-      web_contents_->GetRenderWidgetHostView());
+  RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
   if (rwhv)
     rwhv->SetContentViewCore(content_view_core_);
 
@@ -113,8 +119,7 @@ void WebContentsViewAndroid::SetContentViewCore(
 void WebContentsViewAndroid::SetOverscrollRefreshHandler(
     std::unique_ptr<ui::OverscrollRefreshHandler> overscroll_refresh_handler) {
   overscroll_refresh_handler_ = std::move(overscroll_refresh_handler);
-  RenderWidgetHostViewAndroid* rwhv = static_cast<RenderWidgetHostViewAndroid*>(
-      web_contents_->GetRenderWidgetHostView());
+  RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
   if (rwhv)
     rwhv->OnOverscrollRefreshHandlerAvailable();
 
@@ -148,6 +153,12 @@ gfx::NativeView WebContentsViewAndroid::GetContentNativeView() const {
   return GetNativeView();
 }
 
+RenderWidgetHostViewAndroid*
+WebContentsViewAndroid::GetRenderWidgetHostViewAndroid() {
+  return static_cast<RenderWidgetHostViewAndroid*>(
+      web_contents_->GetRenderWidgetHostView());
+}
+
 gfx::NativeWindow WebContentsViewAndroid::GetTopLevelNativeWindow() const {
   return content_view_core_ ? content_view_core_->GetWindowAndroid() : nullptr;
 }
@@ -158,9 +169,11 @@ void WebContentsViewAndroid::GetScreenInfo(ScreenInfo* result) const {
   gfx::NativeView native_view = GetNativeView();
   display::Display display =
       native_view
-          ? display::Screen::GetScreen()->GetDisplayNearestWindow(native_view)
+          ? display::Screen::GetScreen()->GetDisplayNearestView(native_view)
           : display::Screen::GetScreen()->GetPrimaryDisplay();
   DisplayToScreenInfo(display, result);
+  if (delegate_)
+    delegate_->OverrideDisplayColorSpace(&result->color_space);
 }
 
 void WebContentsViewAndroid::GetContainerBounds(gfx::Rect* out) const {
@@ -180,12 +193,9 @@ void WebContentsViewAndroid::SizeContents(const gfx::Size& size) {
 }
 
 void WebContentsViewAndroid::Focus() {
-  RenderWidgetHostViewAndroid* rwhv = static_cast<RenderWidgetHostViewAndroid*>(
-      web_contents_->GetRenderWidgetHostView());
+  RenderWidgetHostViewAndroid* rwhv = GetRenderWidgetHostViewAndroid();
   if (web_contents_->ShowingInterstitialPage()) {
     web_contents_->GetInterstitialPage()->Focus();
-    if (content_view_core_)
-      content_view_core_->ForceUpdateImeAdapter(rwhv->GetNativeImeAdapter());
   } else {
     rwhv->Focus();
   }
@@ -263,6 +273,12 @@ void WebContentsViewAndroid::SetOverscrollControllerEnabled(bool enabled) {
 
 void WebContentsViewAndroid::ShowContextMenu(
     RenderFrameHost* render_frame_host, const ContextMenuParams& params) {
+  RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
+  // See if context menu is handled by SelectionController as a selection menu.
+  // If not, use the delegate to show it.
+  if (view && view->ShowSelectionMenu(params))
+    return;
+
   if (delegate_)
     delegate_->ShowContextMenu(render_frame_host, params);
 }
@@ -339,6 +355,52 @@ void WebContentsViewAndroid::UpdateDragCursor(blink::WebDragOperation op) {
   // Intentional no-op because Android does not have cursor.
 }
 
+bool WebContentsViewAndroid::OnDragEvent(const ui::DragEventAndroid& event) {
+  switch (event.action()) {
+    case JNI_DragEvent::ACTION_DRAG_ENTERED: {
+      std::vector<DropData::Metadata> metadata;
+      for (const base::string16& mime_type : event.mime_types()) {
+        metadata.push_back(DropData::Metadata::CreateForMimeType(
+            DropData::Kind::STRING, mime_type));
+      }
+      OnDragEntered(metadata, event.GetLocation(), event.GetScreenLocation());
+      break;
+    }
+    case JNI_DragEvent::ACTION_DRAG_LOCATION:
+      OnDragUpdated(event.GetLocation(), event.GetScreenLocation());
+      break;
+    case JNI_DragEvent::ACTION_DROP: {
+      DropData drop_data;
+      drop_data.did_originate_from_renderer = false;
+      JNIEnv* env = AttachCurrentThread();
+      base::string16 drop_content =
+          ConvertJavaStringToUTF16(env, event.GetJavaContent());
+      for (const base::string16& mime_type : event.mime_types()) {
+        if (base::EqualsASCII(mime_type, ui::Clipboard::kMimeTypeURIList)) {
+          drop_data.url = GURL(drop_content);
+        } else if (base::EqualsASCII(mime_type, ui::Clipboard::kMimeTypeText)) {
+          drop_data.text = base::NullableString16(drop_content, false);
+        } else {
+          drop_data.html = base::NullableString16(drop_content, false);
+        }
+      }
+
+      OnPerformDrop(&drop_data, event.GetLocation(), event.GetScreenLocation());
+      break;
+    }
+    case JNI_DragEvent::ACTION_DRAG_EXITED:
+      OnDragExited();
+      break;
+    case JNI_DragEvent::ACTION_DRAG_ENDED:
+      OnDragEnded();
+      break;
+    case JNI_DragEvent::ACTION_DRAG_STARTED:
+      // Nothing meaningful to do.
+      break;
+  }
+  return true;
+}
+
 // TODO(paulmeyer): The drag-and-drop calls on GetRenderViewHost()->GetWidget()
 // in the following functions will need to be targeted to specific
 // RenderWidgetHosts in order to work with OOPIFs. See crbug.com/647249.
@@ -348,8 +410,8 @@ void WebContentsViewAndroid::OnDragEntered(
     const gfx::Point& location,
     const gfx::Point& screen_location) {
   blink::WebDragOperationsMask allowed_ops =
-      static_cast<blink::WebDragOperationsMask>(blink::WebDragOperationCopy |
-                                                blink::WebDragOperationMove);
+      static_cast<blink::WebDragOperationsMask>(blink::kWebDragOperationCopy |
+                                                blink::kWebDragOperationMove);
   web_contents_->GetRenderViewHost()->GetWidget()->
       DragTargetDragEnterWithMetaData(metadata, location, screen_location,
                                       allowed_ops, 0);
@@ -358,8 +420,8 @@ void WebContentsViewAndroid::OnDragEntered(
 void WebContentsViewAndroid::OnDragUpdated(const gfx::Point& location,
                                            const gfx::Point& screen_location) {
   blink::WebDragOperationsMask allowed_ops =
-      static_cast<blink::WebDragOperationsMask>(blink::WebDragOperationCopy |
-                                                blink::WebDragOperationMove);
+      static_cast<blink::WebDragOperationsMask>(blink::kWebDragOperationCopy |
+                                                blink::kWebDragOperationMove);
   web_contents_->GetRenderViewHost()->GetWidget()->DragTargetDragOver(
       location, screen_location, allowed_ops, 0);
 }
@@ -381,9 +443,14 @@ void WebContentsViewAndroid::OnDragEnded() {
   web_contents_->GetRenderViewHost()->GetWidget()->DragSourceSystemDragEnded();
 }
 
-void WebContentsViewAndroid::GotFocus() {
-  // This is only used in the views FocusManager stuff but it bleeds through
-  // all subclasses. http://crbug.com/21875
+void WebContentsViewAndroid::GotFocus(
+    RenderWidgetHostImpl* render_widget_host) {
+  web_contents_->NotifyWebContentsFocused(render_widget_host);
+}
+
+void WebContentsViewAndroid::LostFocus(
+    RenderWidgetHostImpl* render_widget_host) {
+  web_contents_->NotifyWebContentsLostFocus(render_widget_host);
 }
 
 // This is called when we the renderer asks us to take focus back (i.e., it has
@@ -393,6 +460,31 @@ void WebContentsViewAndroid::TakeFocus(bool reverse) {
       web_contents_->GetDelegate()->TakeFocus(web_contents_, reverse))
     return;
   web_contents_->GetRenderWidgetHostView()->Focus();
+}
+
+bool WebContentsViewAndroid::OnTouchEvent(const ui::MotionEventAndroid& event,
+                                          bool for_touch_handle) {
+  if (event.GetAction() == ui::MotionEventAndroid::ACTION_DOWN)
+    content_view_core_->OnTouchDown(event.GetJavaObject());
+  return false;  // let the children handle the actual event.
+}
+
+bool WebContentsViewAndroid::OnMouseEvent(const ui::MotionEventAndroid& event) {
+  // Hover events can be intercepted when in accessibility mode.
+  auto action = event.GetAction();
+  if (action != ui::MotionEventAndroid::ACTION_HOVER_ENTER &&
+      action != ui::MotionEventAndroid::ACTION_HOVER_EXIT &&
+      action != ui::MotionEventAndroid::ACTION_HOVER_MOVE)
+    return false;
+
+  auto* manager = static_cast<BrowserAccessibilityManagerAndroid*>(
+      web_contents_->GetRootBrowserAccessibilityManager());
+  return manager && manager->OnHoverEvent(event);
+}
+
+void WebContentsViewAndroid::OnPhysicalBackingSizeChanged() {
+  if (web_contents_->GetRenderWidgetHostView())
+    web_contents_->SendScreenRects();
 }
 
 } // namespace content

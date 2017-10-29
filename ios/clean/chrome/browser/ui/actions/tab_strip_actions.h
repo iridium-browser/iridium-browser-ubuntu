@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// ======                        New Architecture                         =====
-// =         This code is only used in the new iOS Chrome architecture.       =
-// ============================================================================
-
 #ifndef IOS_CLEAN_CHROME_BROWSER_UI_ACTIONS_TAB_STRIP_ACTIONS_H_
 #define IOS_CLEAN_CHROME_BROWSER_UI_ACTIONS_TAB_STRIP_ACTIONS_H_
 
@@ -14,8 +10,6 @@
 // Target/Action methods relating to the tab strip.
 @protocol TabStripActions
 @optional
-// Shows the tab strip.
-- (void)showTabStrip:(id)sender;
 // Hides the tab strip.
 - (void)hideTabStrip:(id)sender;
 @end

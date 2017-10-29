@@ -4,7 +4,6 @@
 
 #include "modules/compositorworker/CompositorWorkerMessagingProxy.h"
 
-#include "core/workers/WorkerThreadStartupData.h"
 #include "modules/compositorworker/CompositorWorkerThread.h"
 #include <memory>
 
@@ -12,15 +11,22 @@ namespace blink {
 
 CompositorWorkerMessagingProxy::CompositorWorkerMessagingProxy(
     InProcessWorkerBase* worker,
-    WorkerClients* workerClients)
-    : InProcessWorkerMessagingProxy(worker, workerClients) {}
+    WorkerClients* worker_clients)
+    : InProcessWorkerMessagingProxy(worker, worker_clients) {
+  DCHECK(IsMainThread());
+}
 
 CompositorWorkerMessagingProxy::~CompositorWorkerMessagingProxy() {}
 
+WTF::Optional<WorkerBackingThreadStartupData>
+CompositorWorkerMessagingProxy::CreateBackingThreadStartupData(v8::Isolate*) {
+  return WTF::nullopt;
+}
+
 std::unique_ptr<WorkerThread>
-CompositorWorkerMessagingProxy::createWorkerThread(double originTime) {
-  return CompositorWorkerThread::create(loaderProxy(), workerObjectProxy(),
-                                        originTime);
+CompositorWorkerMessagingProxy::CreateWorkerThread() {
+  return CompositorWorkerThread::Create(CreateThreadableLoadingContext(),
+                                        WorkerObjectProxy());
 }
 
 }  // namespace blink

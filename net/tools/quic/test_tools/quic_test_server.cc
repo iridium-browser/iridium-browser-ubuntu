@@ -38,6 +38,7 @@ class CustomStreamSession : public QuicSimpleServerSession {
         crypto_stream_factory_(crypto_stream_factory) {}
 
   QuicSpdyStream* CreateIncomingDynamicStream(QuicStreamId id) override {
+    DCHECK(!FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
     if (!ShouldCreateIncomingDynamicStream(id)) {
       return nullptr;
     }
@@ -48,6 +49,14 @@ class CustomStreamSession : public QuicSimpleServerSession {
       return stream;
     }
     return QuicSimpleServerSession::CreateIncomingDynamicStream(id);
+  }
+
+  std::unique_ptr<QuicStream> CreateStream(QuicStreamId id) override {
+    if (stream_factory_) {
+      return QuicWrapUnique<QuicSpdyStream>(
+          stream_factory_->CreateStream(id, this, response_cache()));
+    }
+    return QuicSimpleServerSession::CreateStream(id);
   }
 
   QuicCryptoServerStreamBase* CreateQuicCryptoServerStream(
@@ -86,13 +95,13 @@ class QuicTestDispatcher : public QuicSimpleDispatcher {
         stream_factory_(nullptr),
         crypto_stream_factory_(nullptr) {}
 
-  QuicServerSessionBase* CreateQuicSession(
-      QuicConnectionId id,
-      const QuicSocketAddress& client) override {
+  QuicServerSessionBase* CreateQuicSession(QuicConnectionId id,
+                                           const QuicSocketAddress& client,
+                                           QuicStringPiece alpn) override {
     QuicReaderMutexLock lock(&factory_lock_);
     if (session_factory_ == nullptr && stream_factory_ == nullptr &&
         crypto_stream_factory_ == nullptr) {
-      return QuicSimpleDispatcher::CreateQuicSession(id, client);
+      return QuicSimpleDispatcher::CreateQuicSession(id, client, alpn);
     }
     QuicConnection* connection = new QuicConnection(
         id, client, helper(), alarm_factory(), CreatePerConnectionWriter(),

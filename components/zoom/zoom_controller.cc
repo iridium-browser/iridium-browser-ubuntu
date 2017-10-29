@@ -293,7 +293,7 @@ void ZoomController::DidFinishNavigation(
   if (navigation_handle->IsErrorPage())
     content::HostZoomMap::SendErrorPageZoomLevelRefresh(web_contents());
 
-  if (!navigation_handle->IsSamePage())
+  if (!navigation_handle->IsSameDocument())
     ResetZoomModeOnNavigationIfNeeded(navigation_handle->GetURL());
 
   // If the main frame's content has changed, the new page may have a different
@@ -347,8 +347,12 @@ void ZoomController::UpdateState(const std::string& host) {
     ZoomChangedEventData zoom_change_data = *event_data_;
     event_data_.reset();
     // The zoom bubble should not be shown for zoom changes where the host
-    // is empty.
-    zoom_change_data.can_show_bubble = can_show_bubble_ && !host.empty();
+    // is empty or when zoom level is not changed from default.
+    const bool changed_from_default =
+        zoom_change_data.new_zoom_level != zoom_change_data.old_zoom_level ||
+        zoom_change_data.new_zoom_level != GetDefaultZoomLevel();
+    zoom_change_data.can_show_bubble =
+        can_show_bubble_ && !host.empty() && changed_from_default;
     for (auto& observer : observers_)
       observer.OnZoomChanged(zoom_change_data);
   } else {

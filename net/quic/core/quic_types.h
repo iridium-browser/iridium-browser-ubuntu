@@ -16,7 +16,6 @@
 
 namespace net {
 
-typedef uint8_t QuicPathId;
 typedef uint16_t QuicPacketLength;
 typedef uint32_t QuicHeaderId;
 typedef uint32_t QuicStreamId;
@@ -122,7 +121,6 @@ enum QuicFrameType {
   BLOCKED_FRAME = 5,
   STOP_WAITING_FRAME = 6,
   PING_FRAME = 7,
-  PATH_CLOSE_FRAME = 8,
 
   // STREAM and ACK frames are special frames. They are encoded differently on
   // the wire and their values do not need to be stable.
@@ -184,16 +182,13 @@ enum QuicPacketPublicFlags {
   PACKET_PUBLIC_FLAGS_4BYTE_PACKET = PACKET_FLAGS_4BYTE_PACKET << 4,
   PACKET_PUBLIC_FLAGS_6BYTE_PACKET = PACKET_FLAGS_6BYTE_PACKET << 4,
 
-  // Bit 6: Does the packet header contain a path id?
-  PACKET_PUBLIC_FLAGS_MULTIPATH = 1 << 6,
-
   // Reserved, unimplemented flags:
 
   // Bit 7: indicates the presence of a second flags byte.
   PACKET_PUBLIC_FLAGS_TWO_OR_MORE_BYTES = 1 << 7,
 
-  // All bits set (bit 7 is not currently used): 01111111
-  PACKET_PUBLIC_FLAGS_MAX = (1 << 7) - 1,
+  // All bits set (bits 6 and 7 are not currently used): 00111111
+  PACKET_PUBLIC_FLAGS_MAX = (1 << 6) - 1,
 };
 
 // The private flags are specified in one byte.
@@ -217,6 +212,7 @@ enum CongestionControlType {
   kReno,
   kRenoBytes,
   kBBR,
+  kPCC
 };
 
 enum LossDetectionType {
@@ -253,6 +249,16 @@ enum PeerAddressChangeType {
   IPV6_TO_IPV4_CHANGE,
   // IP address change from an IPv6 to an IPv6 address (port may have changed.)
   IPV6_TO_IPV6_CHANGE,
+};
+
+enum StreamSendingState {
+  // Sender has more data to send on this stream.
+  NO_FIN,
+  // Sender is done sending on this stream.
+  FIN,
+  // Sender is done sending on this stream and random padding needs to be
+  // appended after all stream frames.
+  FIN_AND_PADDING,
 };
 
 }  // namespace net

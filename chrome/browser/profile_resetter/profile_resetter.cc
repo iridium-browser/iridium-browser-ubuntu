@@ -11,13 +11,14 @@
 
 #include "base/macros.h"
 #include "base/synchronization/cancellation_flag.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/task_scheduler/task_traits.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_remover.h"
-#include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/profile_resetter/brandcoded_default_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -31,13 +32,13 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/browser/website_settings_info.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
-#include "components/google/core/browser/google_url_tracker.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/browsing_data_remover.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/management_policy.h"
@@ -51,8 +52,8 @@
 
 namespace {
 
-void ResetShortcutsOnFileThread() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
+void ResetShortcutsOnBlockingThread() {
+  base::ThreadRestrictions::AssertIOAllowed();
   // Get full path of chrome.
   base::FilePath chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &chrome_exe))
@@ -80,11 +81,12 @@ ProfileResetter::ProfileResetter(Profile* profile)
       pending_reset_flags_(0),
       cookies_remover_(nullptr),
       weak_ptr_factory_(this) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(profile_);
 }
 
 ProfileResetter::~ProfileResetter() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (cookies_remover_)
     cookies_remover_->RemoveObserver(this);
 }
@@ -93,7 +95,7 @@ void ProfileResetter::Reset(
     ProfileResetter::ResettableFlags resettable_flags,
     std::unique_ptr<BrandcodedDefaultSettings> master_settings,
     const base::Closure& callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(master_settings);
 
   // We should never be called with unknown flags.
@@ -140,12 +142,12 @@ void ProfileResetter::Reset(
 }
 
 bool ProfileResetter::IsActive() const {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return pending_reset_flags_ != 0;
 }
 
 void ProfileResetter::MarkAsDone(Resettable resettable) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Check that we are never called twice or unexpectedly.
   CHECK(pending_reset_flags_ & resettable);
@@ -162,7 +164,7 @@ void ProfileResetter::MarkAsDone(Resettable resettable) {
 }
 
 void ProfileResetter::ResetDefaultSearchEngine() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(template_url_service_);
   // If TemplateURLServiceFactory is ready we can clean it right now.
   // Otherwise, load it and continue from ProfileResetter::Observe.
@@ -182,18 +184,6 @@ void ProfileResetter::ResetDefaultSearchEngine() {
 
     template_url_service_->RepairPrepopulatedSearchEngines();
 
-    // Reset Google search URL.
-    const TemplateURL* default_search_provider =
-        template_url_service_->GetDefaultSearchProvider();
-    if (default_search_provider &&
-        default_search_provider->HasGoogleBaseURLs(
-            template_url_service_->search_terms_data())) {
-      GoogleURLTracker* tracker =
-          GoogleURLTrackerFactory::GetForProfile(profile_);
-      if (tracker)
-        tracker->RequestServerCheck(true);
-    }
-
     MarkAsDone(DEFAULT_SEARCH_ENGINE);
   } else {
     template_url_service_sub_ =
@@ -205,7 +195,7 @@ void ProfileResetter::ResetDefaultSearchEngine() {
 }
 
 void ProfileResetter::ResetHomepage() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   PrefService* prefs = profile_->GetPrefs();
   DCHECK(prefs);
   std::string homepage;
@@ -227,7 +217,7 @@ void ProfileResetter::ResetHomepage() {
 }
 
 void ProfileResetter::ResetContentSettings() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile_);
 
@@ -247,25 +237,26 @@ void ProfileResetter::ResetContentSettings() {
 }
 
 void ProfileResetter::ResetCookiesAndSiteData() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!cookies_remover_);
 
-  cookies_remover_ = BrowsingDataRemoverFactory::GetForBrowserContext(profile_);
+  cookies_remover_ = content::BrowserContext::GetBrowsingDataRemover(profile_);
   cookies_remover_->AddObserver(this);
-  int remove_mask = BrowsingDataRemover::REMOVE_SITE_DATA |
-                    BrowsingDataRemover::REMOVE_CACHE;
+  int remove_mask = ChromeBrowsingDataRemoverDelegate::DATA_TYPE_SITE_DATA |
+                    content::BrowsingDataRemover::DATA_TYPE_CACHE;
   PrefService* prefs = profile_->GetPrefs();
   DCHECK(prefs);
 
   // Don't try to clear LSO data if it's not supported.
   if (!prefs->GetBoolean(prefs::kClearPluginLSODataEnabled))
-    remove_mask &= ~BrowsingDataRemover::REMOVE_PLUGIN_DATA;
-  cookies_remover_->RemoveAndReply(base::Time(), base::Time::Max(), remove_mask,
-                                   BrowsingDataHelper::UNPROTECTED_WEB, this);
+    remove_mask &= ~ChromeBrowsingDataRemoverDelegate::DATA_TYPE_PLUGIN_DATA;
+  cookies_remover_->RemoveAndReply(
+      base::Time(), base::Time::Max(), remove_mask,
+      content::BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB, this);
 }
 
 void ProfileResetter::ResetExtensions() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   std::vector<std::string> brandcode_extensions;
   master_settings_->GetExtensions(&brandcode_extensions);
@@ -297,7 +288,7 @@ void ProfileResetter::ResetExtensions() {
 }
 
 void ProfileResetter::ResetStartupPages() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   PrefService* prefs = profile_->GetPrefs();
   DCHECK(prefs);
   std::unique_ptr<base::ListValue> url_list(
@@ -333,13 +324,11 @@ void ProfileResetter::ResetPinnedTabs() {
 
 void ProfileResetter::ResetShortcuts() {
 #if defined(OS_WIN)
-  content::BrowserThread::PostTaskAndReply(
-      content::BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(&ResetShortcutsOnFileThread),
-      base::Bind(&ProfileResetter::MarkAsDone,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 SHORTCUTS));
+  base::CreateCOMSTATaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::USER_VISIBLE})
+      ->PostTaskAndReply(FROM_HERE, base::Bind(&ResetShortcutsOnBlockingThread),
+                         base::Bind(&ProfileResetter::MarkAsDone,
+                                    weak_ptr_factory_.GetWeakPtr(), SHORTCUTS));
 #else
   MarkAsDone(SHORTCUTS);
 #endif
@@ -348,7 +337,7 @@ void ProfileResetter::ResetShortcuts() {
 void ProfileResetter::OnTemplateURLServiceLoaded() {
   // TemplateURLService has loaded. If we need to clean search engines, it's
   // time to go on.
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   template_url_service_sub_.reset();
   if (pending_reset_flags_ & DEFAULT_SEARCH_ENGINE)
     ResetDefaultSearchEngine();
@@ -360,10 +349,10 @@ void ProfileResetter::OnBrowsingDataRemoverDone() {
   MarkAsDone(COOKIES_AND_SITE_DATA);
 }
 
+#if defined(OS_WIN)
 std::vector<ShortcutCommand> GetChromeLaunchShortcuts(
     const scoped_refptr<SharedCancellationFlag>& cancel) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
-#if defined(OS_WIN)
+  base::ThreadRestrictions::AssertIOAllowed();
   // Get full path of chrome.
   base::FilePath chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &chrome_exe))
@@ -384,7 +373,5 @@ std::vector<ShortcutCommand> GetChromeLaunchShortcuts(
         &shortcuts);
   }
   return shortcuts;
-#else
-  return std::vector<ShortcutCommand>();
-#endif
 }
+#endif  // defined(OS_WIN)

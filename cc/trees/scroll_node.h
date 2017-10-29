@@ -5,9 +5,10 @@
 #ifndef CC_TREES_SCROLL_NODE_H_
 #define CC_TREES_SCROLL_NODE_H_
 
-#include "cc/base/cc_export.h"
+#include "cc/base/filter_operations.h"
 #include "cc/base/region.h"
-#include "cc/output/filter_operations.h"
+#include "cc/cc_export.h"
+#include "cc/input/scroll_boundary_behavior.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
@@ -27,40 +28,36 @@ struct CC_EXPORT ScrollNode {
   // The node index of the parent node in the scroll tree node vector.
   int parent_id;
 
-  // The layer id that corresponds to the layer contents that are scrolled.
-  // Unlike |id|, this id is stable across frames that don't change the
-  // composited layer list.
-  int owning_layer_id;
-
-  // This is used for subtrees that should not be scrolled independently. For
-  // example, when there is a layer that is not scrollable itself but is inside
-  // a scrolling layer.
-  bool scrollable;
-
   uint32_t main_thread_scrolling_reasons;
 
   Region non_fast_scrollable_region;
 
-  // Size of the clipped area, not including non-overlay scrollbars. Overlay
-  // scrollbars do not affect the clipped area.
-  gfx::Size scroll_clip_layer_bounds;
+  // Size of the container area that the contents scrolls in, not including
+  // non-overlay scrollbars. Overlay scrollbars do not affect these bounds.
+  gfx::Size container_bounds;
 
-  // Bounds of the overflow scrolling area.
+  // Size of the content that is scrolled within the container bounds.
   gfx::Size bounds;
 
-  bool max_scroll_offset_affected_by_page_scale;
-  bool scrolls_inner_viewport;
-  bool scrolls_outer_viewport;
+  // This is used for subtrees that should not be scrolled independently. For
+  // example, when there is a layer that is not scrollable itself but is inside
+  // a scrolling layer.
+  bool scrollable : 1;
+  bool max_scroll_offset_affected_by_page_scale : 1;
+  bool scrolls_inner_viewport : 1;
+  bool scrolls_outer_viewport : 1;
+  bool should_flatten : 1;
+  bool user_scrollable_horizontal : 1;
+  bool user_scrollable_vertical : 1;
 
   // This offset is used when |scrollable| is false and there isn't a transform
   // node already present that covers this offset.
   gfx::Vector2dF offset_to_transform_parent;
 
-  bool should_flatten;
-  bool user_scrollable_horizontal;
-  bool user_scrollable_vertical;
   ElementId element_id;
   int transform_id;
+
+  ScrollBoundaryBehavior scroll_boundary_behavior;
 
   bool operator==(const ScrollNode& other) const;
   void AsValueInto(base::trace_event::TracedValue* value) const;

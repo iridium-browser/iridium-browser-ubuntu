@@ -10,7 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/threading/thread_checker.h"
 #include "content/public/child/worker_thread.h"
 #include "third_party/WebKit/public/platform/WebFileSystem.h"
 
@@ -26,8 +26,7 @@ class WebFileWriterClient;
 namespace content {
 
 class WebFileSystemImpl : public blink::WebFileSystem,
-                          public WorkerThread::Observer,
-                          public base::NonThreadSafe {
+                          public WorkerThread::Observer {
  public:
   class WaitableCallbackResults;
 
@@ -52,42 +51,42 @@ class WebFileSystemImpl : public blink::WebFileSystem,
   void WillStopCurrentWorkerThread() override;
 
   // WebFileSystem implementation.
-  void openFileSystem(const blink::WebURL& storage_partition,
+  void OpenFileSystem(const blink::WebURL& storage_partition,
                       const blink::WebFileSystemType type,
                       blink::WebFileSystemCallbacks) override;
-  void resolveURL(const blink::WebURL& filesystem_url,
+  void ResolveURL(const blink::WebURL& filesystem_url,
                   blink::WebFileSystemCallbacks) override;
-  void move(const blink::WebURL& src_path,
+  void Move(const blink::WebURL& src_path,
             const blink::WebURL& dest_path,
             blink::WebFileSystemCallbacks) override;
-  void copy(const blink::WebURL& src_path,
+  void Copy(const blink::WebURL& src_path,
             const blink::WebURL& dest_path,
             blink::WebFileSystemCallbacks) override;
-  void remove(const blink::WebURL& path,
+  void Remove(const blink::WebURL& path,
               blink::WebFileSystemCallbacks) override;
-  void removeRecursively(const blink::WebURL& path,
+  void RemoveRecursively(const blink::WebURL& path,
                          blink::WebFileSystemCallbacks) override;
-  void readMetadata(const blink::WebURL& path,
+  void ReadMetadata(const blink::WebURL& path,
                     blink::WebFileSystemCallbacks) override;
-  void createFile(const blink::WebURL& path,
+  void CreateFile(const blink::WebURL& path,
                   bool exclusive,
                   blink::WebFileSystemCallbacks) override;
-  void createDirectory(const blink::WebURL& path,
+  void CreateDirectory(const blink::WebURL& path,
                        bool exclusive,
                        blink::WebFileSystemCallbacks) override;
-  void fileExists(const blink::WebURL& path,
+  void FileExists(const blink::WebURL& path,
                   blink::WebFileSystemCallbacks) override;
-  void directoryExists(const blink::WebURL& path,
+  void DirectoryExists(const blink::WebURL& path,
                        blink::WebFileSystemCallbacks) override;
-  int readDirectory(const blink::WebURL& path,
+  int ReadDirectory(const blink::WebURL& path,
                     blink::WebFileSystemCallbacks) override;
-  void createFileWriter(const blink::WebURL& path,
+  void CreateFileWriter(const blink::WebURL& path,
                         blink::WebFileWriterClient*,
                         blink::WebFileSystemCallbacks) override;
-  void createSnapshotFileAndReadMetadata(
+  void CreateSnapshotFileAndReadMetadata(
       const blink::WebURL& path,
       blink::WebFileSystemCallbacks) override;
-  bool waitForAdditionalResult(int callbacksId) override;
+  bool WaitForAdditionalResult(int callbacksId) override;
 
   int RegisterCallbacks(const blink::WebFileSystemCallbacks& callbacks);
   blink::WebFileSystemCallbacks GetCallbacks(int callbacks_id);
@@ -106,6 +105,9 @@ class WebFileSystemImpl : public blink::WebFileSystem,
   CallbacksMap callbacks_;
   int next_callbacks_id_;
   WaitableCallbackResultsMap waitable_results_;
+
+  // Thread-affine per use of TLS in impl.
+  THREAD_CHECKER(thread_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(WebFileSystemImpl);
 };

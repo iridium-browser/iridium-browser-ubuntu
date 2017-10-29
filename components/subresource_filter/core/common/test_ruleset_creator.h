@@ -14,7 +14,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/strings/string_piece.h"
-#include "components/subresource_filter/core/common/proto/rules.pb.h"
+#include "components/url_pattern_index/proto/rules.pb.h"
 
 namespace subresource_filter {
 namespace testing {
@@ -83,8 +83,12 @@ class TestRulesetCreator {
       int num_of_suffixes,
       TestRulesetPair* test_ruleset_pair);
 
-  void CreateRulesetWithRules(const std::vector<proto::UrlRule>& rules,
-                              TestRulesetPair* test_ruleset_pair);
+  void CreateRulesetWithRules(
+      const std::vector<url_pattern_index::proto::UrlRule>& rules,
+      TestRulesetPair* test_ruleset_pair);
+  void CreateUnindexedRulesetWithRules(
+      const std::vector<url_pattern_index::proto::UrlRule>& rules,
+      TestRuleset* test_unindexed_ruleset);
 
   // Returns a unique |path| that is valid for the lifetime of this instance.
   // No file at |path| will be automatically created.
@@ -96,7 +100,7 @@ class TestRulesetCreator {
   void CreateTestRulesetFromContents(std::vector<uint8_t> ruleset_contents,
                                      TestRuleset* ruleset);
 
-  base::ScopedTempDir scoped_temp_dir_;
+  std::unique_ptr<base::ScopedTempDir> scoped_temp_dir_;
   int next_unique_file_suffix = 1;
 
   DISALLOW_COPY_AND_ASSIGN(TestRulesetCreator);

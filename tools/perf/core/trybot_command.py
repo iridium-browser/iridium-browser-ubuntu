@@ -3,45 +3,30 @@
 # found in the LICENSE file.
 
 import argparse
+import base64
+import collections
+import gzip
+import io
 import json
 import logging
 import os
 import platform
 import subprocess
 import tempfile
+import urllib
 import urllib2
 
 
+from core import benchmark_finders
 from core import path_util
 
 from telemetry import benchmark
 from telemetry import decorators
-from telemetry.core import discover
 from telemetry.util import command_line
 from telemetry.util import matching
 
 
-# Unsupported Perf bisect bots.
-EXCLUDED_BOTS = {
-    'win_xp_perf_bisect',  # Goma issues: crbug.com/330900
-    'win_perf_bisect_builder',
-    'win64_nv_tester',
-    'winx64_bisect_builder',
-    'linux_perf_bisect_builder',
-    'mac_perf_bisect_builder',
-    'android_perf_bisect_builder',
-    'android_arm64_perf_bisect_builder',
-    # Bisect FYI bots are not meant for testing actual perf regressions.
-    # Hardware configuration on these bots is different from actual bisect bot
-    # and these bots runs E2E integration tests for auto-bisect
-    # using dummy benchmarks.
-    'linux_fyi_perf_bisect',
-    'mac_fyi_perf_bisect',
-    'win_fyi_perf_bisect',
-    'winx64_fyi_perf_bisect',
-}
-
-INCLUDE_BOTS = [
+ALL_CONFIG_BOTS = [
     'all',
     'all-win',
     'all-mac',
@@ -86,8 +71,26 @@ REPO_INFO_MAP = {
     }
 }
 
-assert not set(DEFAULT_TRYBOTS) & set(EXCLUDED_BOTS), (
-    'A trybot cannot present in both Default as well as Excluded bots lists.')
+_MILO_MASTER_ENDPOINT = ('https://luci-milo.appspot.com/prpc/milo.Buildbot/'
+                        'GetCompressedMasterJSON')
+
+_MILO_RESPONSE_PREFIX = ')]}\'\n'
+
+
+def _IsPerfBisectBot(builder):
+  return (
+      builder.endswith('_perf_bisect') and
+      # Bisect FYI bots are not meant for testing actual perf regressions.
+      # Hardware configuration on these bots is different from actual bisect bot
+      # and these bots runs E2E integration tests for auto-bisect
+      # using dummy benchmarks.
+      not builder.endswith('fyi_perf_bisect')
+      # Individual bisect bots may be blacklisted here.
+  )
+
+
+assert all(_IsPerfBisectBot(builder) for builder in DEFAULT_TRYBOTS), (
+    'A default trybot is being exluded by the perf bisect bot filter.')
 
 
 class TrybotError(Exception):
@@ -96,10 +99,35 @@ class TrybotError(Exception):
     return '(ERROR) Perf Try Job: %s' % self.args[0]
 
 
+def _ProcessMiloData(data):
+  if not data.startswith(_MILO_RESPONSE_PREFIX):
+    return None
+  data = data[len(_MILO_RESPONSE_PREFIX):]
+
+  try:
+    response_data = json.loads(data)
+  except Exception:
+    return None
+
+  try:
+    decoded_data = base64.b64decode(response_data.get('data'))
+  except Exception:
+    return None
+
+  try:
+    with io.BytesIO(decoded_data) as compressed_file:
+      with gzip.GzipFile(fileobj=compressed_file) as decompressed_file:
+        data_json = decompressed_file.read()
+  except Exception:
+    return None
+
+  return json.loads(data_json)
+
+
 def _GetTrybotList(builders):
   builders = ['%s' % bot.replace('_perf_bisect', '').replace('_', '-')
               for bot in builders]
-  builders.extend(INCLUDE_BOTS)
+  builders.extend(ALL_CONFIG_BOTS)
   return sorted(builders)
 
 
@@ -111,41 +139,31 @@ def _GetBotPlatformFromTrybotName(trybot_name):
     raise TrybotError('Trybot "%s" unsupported for tryjobs.' % trybot_name)
 
 
+def _GetPlatformVariantFromBuilderName(builder):
+  bot_platform = _GetBotPlatformFromTrybotName(builder)
+  # Special case for platform variants that need special configs.
+  if bot_platform == 'win' and 'x64' in builder:
+    return 'win-x64'
+  elif bot_platform == 'android' and 'webview' in builder:
+    return 'android-webview'
+  else:
+    return bot_platform
+
+
 def _GetBuilderNames(trybot_name, builders):
   """Return platform and its available bot name as dictionary."""
-  os_names = ['linux', 'android', 'mac', 'win']
-  if 'all' not in trybot_name:
-    bot = ['%s_perf_bisect' % trybot_name.replace('-', '_')]
-    bot_platform = _GetBotPlatformFromTrybotName(trybot_name)
-    if 'x64' in trybot_name:
-      bot_platform += '-x64'
-    return {bot_platform: bot}
-
-  platform_and_bots = {}
-  for os_name in os_names:
-    platform_and_bots[os_name] = [bot for bot in builders if os_name in bot]
-
-  # Special case for Windows x64, consider it as separate platform
-  # config config should contain target_arch=x64 and --browser=release_x64.
-  win_x64_bots = [
-      win_bot for win_bot in platform_and_bots['win']
-      if 'x64' in win_bot]
-  # Separate out non x64 bits win bots
-  platform_and_bots['win'] = list(
-      set(platform_and_bots['win']) - set(win_x64_bots))
-  platform_and_bots['win-x64'] = win_x64_bots
-
-  if 'all-win' in trybot_name:
-    return {'win': platform_and_bots['win'],
-            'win-x64': platform_and_bots['win-x64']}
-  if 'all-mac' in trybot_name:
-    return {'mac': platform_and_bots['mac']}
-  if 'all-android' in trybot_name:
-    return {'android': platform_and_bots['android']}
-  if 'all-linux' in trybot_name:
-    return {'linux': platform_and_bots['linux']}
-
-  return platform_and_bots
+  if trybot_name in ALL_CONFIG_BOTS:
+    platform_prefix = trybot_name[4:]
+    platform_and_bots = collections.defaultdict(list)
+    for builder in builders:
+      bot_platform = _GetPlatformVariantFromBuilderName(builder)
+      if bot_platform.startswith(platform_prefix):
+        platform_and_bots[bot_platform].append(builder)
+    return platform_and_bots
+  else:
+    builder = '%s_perf_bisect' % trybot_name.replace('-', '_')
+    bot_platform = _GetPlatformVariantFromBuilderName(builder)
+    return {bot_platform: [builder]}
 
 
 _GIT_CMD = 'git'
@@ -195,10 +213,14 @@ class Trybot(command_line.ArgParseCommand):
   def _GetBuilderList(cls):
     if not cls._builders:
       try:
-        f = urllib2.urlopen(
-            ('https://build.chromium.org/p/tryserver.chromium.perf/json/'
-             'builders'),
-            timeout=5)
+        headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        }
+        values = {'name': 'tryserver.chromium.perf'}
+        data = urllib.urlencode(values)
+        req = urllib2.Request(_MILO_MASTER_ENDPOINT, None, headers)
+        f = urllib2.urlopen(req, json.dumps(values), timeout=10)
       # In case of any kind of exception, allow tryjobs to use default trybots.
       # Possible exception are ssl.SSLError, urllib2.URLError,
       # socket.timeout, socket.error.
@@ -208,9 +230,10 @@ class Trybot(command_line.ArgParseCommand):
                'information, tryjob will use default trybots.')
         cls._builders = DEFAULT_TRYBOTS
       else:
-        builders = json.loads(f.read()).keys()
+        data = _ProcessMiloData(f.read())
+        builders = data.get('builders', {}).keys()
         # Exclude unsupported bots like win xp and some dummy bots.
-        cls._builders = [bot for bot in builders if bot not in EXCLUDED_BOTS]
+        cls._builders = [bot for bot in builders if _IsPerfBisectBot(bot)]
 
     return cls._builders
 
@@ -231,10 +254,8 @@ class Trybot(command_line.ArgParseCommand):
     for arg in extra_args:
       if arg == '--browser' or arg.startswith('--browser='):
         parser.error('--browser=... is not allowed when running trybot.')
-    all_benchmarks = discover.DiscoverClasses(
-        start_dir=path_util.GetPerfBenchmarksDir(),
-        top_level_dir=path_util.GetPerfDir(),
-        base_class=benchmark.Benchmark).values()
+    all_benchmarks = benchmark_finders.GetAllPerfBenchmarks()
+    all_benchmarks.extend(benchmark_finders.GetAllContribBenchmarks())
     all_benchmark_names = [b.Name() for b in all_benchmarks]
     all_benchmarks_by_names = {b.Name(): b for b in all_benchmarks}
     benchmark_class = all_benchmarks_by_names.get(options.benchmark_name, None)
@@ -387,11 +408,12 @@ E.g.,
     arguments.insert(0, 'src/tools/perf/run_benchmark')
     if bot_platform == 'android':
       arguments.insert(1, '--browser=android-chromium')
-    elif any('x64' in bot for bot in self._builder_names[bot_platform]):
+    elif bot_platform == 'android-webview':
+      arguments.insert(1, '--browser=android-webview')
+    elif bot_platform == 'win-x64':
       arguments.insert(1, '--browser=release_x64')
       target_arch = 'x64'
     else:
-
       arguments.insert(1, '--browser=release')
 
     command = ' '.join(arguments)

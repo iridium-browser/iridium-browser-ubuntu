@@ -22,6 +22,7 @@ ios_eg_test("ios_web_shell_egtests") {
     "pdf_egtest.mm",
     "plugin_placeholder_egtest.mm",
     "redirect_egtest.mm",
+    "service_manager_egtest.mm",
   ]
 
   deps = [
@@ -30,15 +31,21 @@ ios_eg_test("ios_web_shell_egtests") {
     "//base/test:test_support",
     "//ios/testing:ios_test_support",
     "//ios/testing/earl_grey:earl_grey_support",
+    "//ios/web",
     "//ios/web:earl_grey_test_support",
-    "//ios/web:test_support",
+    "//ios/web/public/test",
+    "//ios/web/public/test/fakes",
+    "//ios/web/public/test/http_server",
     "//ios/web/shell",
     "//net",
+    "//services/service_manager/public/cpp",
+    "//services/test/echo/public/interfaces",
+    "//services/test/user_id/public/interfaces",
     "//url",
 
     # All shared libraries must have the sanitizer deps to properly link in
     # asan mode (this target will be empty in other cases).
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
   ]
 
   bundle_deps = [ ":bundle" ]
@@ -59,7 +66,8 @@ source_set("earl_grey_test_support") {
     "//ios/third_party/earl_grey",
     "//ios/web",
     "//ios/web:earl_grey_test_support",
-    "//ios/web:test_support",
+    "//ios/web/public/test",
+    "//ios/web/public/test/http_server",
     "//ios/web/shell",
     "//url",
   ]
@@ -77,12 +85,12 @@ source_set("earl_grey_test_support") {
     "app/web_view_interaction_test_util.mm",
     "earl_grey/shell_actions.h",
     "earl_grey/shell_actions.mm",
-    "earl_grey/shell_base_test_case.h",
-    "earl_grey/shell_base_test_case.mm",
     "earl_grey/shell_earl_grey.h",
     "earl_grey/shell_earl_grey.mm",
     "earl_grey/shell_matchers.h",
     "earl_grey/shell_matchers.mm",
+    "earl_grey/web_shell_test_case.h",
+    "earl_grey/web_shell_test_case.mm",
   ]
 
   configs += [ "//build/config/compiler:enable_arc" ]

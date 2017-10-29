@@ -4,6 +4,7 @@
 
 #include "content/renderer/internal_document_state_data.h"
 
+#include "base/memory/ptr_util.h"
 #include "content/public/renderer/document_state.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 
@@ -21,12 +22,12 @@ InternalDocumentStateData::InternalDocumentStateData()
       is_overriding_user_agent_(false),
       must_reset_scroll_and_scale_state_(false),
       cache_policy_override_set_(false),
-      cache_policy_override_(blink::WebCachePolicy::UseProtocolCachePolicy) {}
+      cache_policy_override_(blink::WebCachePolicy::kUseProtocolCachePolicy) {}
 
 // static
 InternalDocumentStateData* InternalDocumentStateData::FromDataSource(
     blink::WebDataSource* ds) {
-  return FromDocumentState(static_cast<DocumentState*>(ds->getExtraData()));
+  return FromDocumentState(static_cast<DocumentState*>(ds->GetExtraData()));
 }
 
 // static
@@ -38,7 +39,7 @@ InternalDocumentStateData* InternalDocumentStateData::FromDocumentState(
       ds->GetUserData(&kUserDataKey));
   if (!data) {
     data = new InternalDocumentStateData;
-    ds->SetUserData(&kUserDataKey, data);
+    ds->SetUserData(&kUserDataKey, base::WrapUnique(data));
   }
   return data;
 }

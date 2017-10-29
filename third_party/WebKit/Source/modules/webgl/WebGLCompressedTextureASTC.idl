@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// https://www.khronos.org/registry/webgl/extensions/WEBGL_compressed_texture_astc/
+
 [
     DependentLifetime,
     NoInterfaceObject,
-    DoNotCheckConstants,
+    DoNotCheckConstants
 ] interface WebGLCompressedTextureASTC {
     /* Compressed Texture Formats */
     const unsigned long COMPRESSED_RGBA_ASTC_4x4_KHR           = 0x93B0;

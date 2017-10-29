@@ -54,12 +54,27 @@
 
   NullAttachmentStrategy.prototype.onAddedListener =
       function(listener) {
+    // For named events, we still inform the messaging bindings when a listener
+    // is registered to allow for native checking if a listener is registered.
+    if (this.event_.eventName &&
+        this.event_.listeners.length == 0) {
+      eventNatives.AttachUnmanagedEvent(this.event_.eventName);
+    }
   };
+
   NullAttachmentStrategy.prototype.onRemovedListener =
       function(listener) {
+    if (this.event_.eventName &&
+        this.event_.listeners.length == 0) {
+      this.detach(true);
+    }
   };
+
   NullAttachmentStrategy.prototype.detach = function(manual) {
+    if (this.event_.eventName)
+      eventNatives.DetachUnmanagedEvent(this.event_.eventName);
   };
+
   NullAttachmentStrategy.prototype.getListenersByIDs = function(ids) {
     // |ids| is for filtered events only.
     return this.event_.listeners;
@@ -75,7 +90,8 @@
       function(listener) {
     // Only attach / detach on the first / last listener removed.
     if (this.event_.listeners.length == 0)
-      eventNatives.AttachEvent(this.event_.eventName);
+      eventNatives.AttachEvent(this.event_.eventName,
+                               this.event_.eventOptions.supportsLazyListeners);
   };
 
   UnfilteredAttachmentStrategy.prototype.onRemovedListener =
@@ -85,7 +101,8 @@
   };
 
   UnfilteredAttachmentStrategy.prototype.detach = function(manual) {
-    eventNatives.DetachEvent(this.event_.eventName, manual);
+    eventNatives.DetachEvent(this.event_.eventName, manual,
+                             this.event_.eventOptions.supportsLazyListeners);
   };
 
   UnfilteredAttachmentStrategy.prototype.getListenersByIDs = function(ids) {
@@ -103,8 +120,9 @@
       {__proto__: null});
 
   FilteredAttachmentStrategy.prototype.onAddedListener = function(listener) {
-    var id = eventNatives.AttachFilteredEvent(this.event_.eventName,
-                                              listener.filters || {});
+    var id = eventNatives.AttachFilteredEvent(
+                 this.event_.eventName, listener.filters || {},
+                 this.event_.eventOptions.supportsLazyListeners);
     if (id == -1)
       throw new Error("Can't add listener");
     listener.id = id;
@@ -123,7 +141,8 @@
     var id = listener.id;
     delete this.listenerMap_[id];
     delete FilteredAttachmentStrategy.idToEventMap[id];
-    eventNatives.DetachFilteredEvent(id, manual);
+    eventNatives.DetachFilteredEvent(
+        id, manual, this.event_.eventOptions.supportsLazyListeners);
   };
 
   FilteredAttachmentStrategy.prototype.detach = function(manual) {
@@ -152,6 +171,10 @@
       //
       // event.addListener(listener);
       supportsListeners: true,
+
+      // Event supports lazy listeners, where an extension can register a
+      // listener to be used to "wake up" a lazy context.
+      supportsLazyListeners: true,
 
       // Event supports adding rules ("declarative events") rather than
       // listeners, for example as used in the declarativeWebRequest API.
@@ -203,12 +226,8 @@
       this.eventOptions.unmanaged = true;
     }
 
-    // Track whether the event has been destroyed to help track down the cause
-    // of http://crbug.com/258526.
-    // This variable will eventually hold the stack trace of the destroy call.
-    // TODO(kalman): Delete this and replace with more sound logic that catches
-    // when events are used without being *attached*.
-    this.destroyed = null;
+    // Track whether the event has been destroyed as a sanity check.
+    this.destroyed = false;
 
     if (this.eventOptions.unmanaged)
       this.attachmentStrategy = new NullAttachmentStrategy(this);
@@ -230,18 +249,15 @@
 
   // Dispatches a named event with the given argument array. The args array is
   // the list of arguments that will be sent to the event callback.
-  function dispatchEvent(name, args, filteringInfo) {
-    var listenerIDs = [];
-
-    if (filteringInfo)
-      listenerIDs = eventNatives.MatchAgainstEventFilter(name, filteringInfo);
-
+  // |listenerIds| contains the ids of matching listeners, or is an empty array
+  // for all listeners.
+  function dispatchEvent(name, args, listenerIds) {
     var event = attachedNamedEvents[name];
     if (!event)
       return;
 
     var dispatchArgs = function(args) {
-      var result = event.dispatch_(args, listenerIDs);
+      var result = event.dispatch_(args, listenerIds);
       if (result)
         logging.DCHECK(!result.validationErrors, result.validationErrors);
       return result;
@@ -346,8 +362,7 @@
 
   EventImpl.prototype.dispatch_ = function(args, listenerIDs) {
     if (this.destroyed) {
-      throw new Error(this.eventName + ' was already destroyed at: ' +
-                      this.destroyed);
+      throw new Error(this.eventName + ' was already destroyed');
     }
     if (!this.eventOptions.supportsListeners)
       throw new Error("This event does not support listeners.");
@@ -402,7 +417,7 @@
   EventImpl.prototype.destroy_ = function() {
     this.listeners.length = 0;
     this.detach_();
-    this.destroyed = exceptionHandler.getStackTrace();
+    this.destroyed = true;
   };
 
   EventImpl.prototype.addRules = function(rules, opt_cb) {

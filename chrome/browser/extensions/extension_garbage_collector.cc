@@ -22,7 +22,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/extensions/extension_garbage_collector_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "components/crx_file/id_util.h"
@@ -32,6 +31,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest_handlers/app_isolation_info.h"
@@ -179,8 +179,8 @@ void ExtensionGarbageCollector::GarbageCollectExtensions() {
     // collect again later.
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&ExtensionGarbageCollector::GarbageCollectExtensions,
-                   weak_factory_.GetWeakPtr()),
+        base::BindOnce(&ExtensionGarbageCollector::GarbageCollectExtensions,
+                       weak_factory_.GetWeakPtr()),
         base::TimeDelta::FromSeconds(kGarbageCollectRetryDelayInSeconds));
     return;
   }
@@ -203,9 +203,8 @@ void ExtensionGarbageCollector::GarbageCollectExtensions() {
       ExtensionSystem::Get(context_)->extension_service();
   if (!service->GetFileTaskRunner()->PostTask(
           FROM_HERE,
-          base::Bind(&GarbageCollectExtensionsOnFileThread,
-                     service->install_directory(),
-                     extension_paths))) {
+          base::BindOnce(&GarbageCollectExtensionsOnFileThread,
+                         service->install_directory(), extension_paths))) {
     NOTREACHED();
   }
 }

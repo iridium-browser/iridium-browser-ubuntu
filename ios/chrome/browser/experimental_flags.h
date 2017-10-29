@@ -19,11 +19,10 @@ enum GaiaEnvironment {
 };
 
 enum WhatsNewPromoStatus {
-  WHATS_NEW_DEFAULT = 0,          // Not forced to enable a promo.
-  WHATS_NEW_APP_RATING,           // Force enable App Rating Promo.
-  WHATS_NEW_MOVE_TO_DOCK_FASTER,  // Force enable Move To Dock Faster Access
-  WHATS_NEW_MOVE_TO_DOCK_LOVE,    // Force enable Move To Dock Love Chrome
-  WHATS_NEW_MOVE_TO_DOCK_TIP,     // Force enable Move To Dock Tip promo.
+  WHATS_NEW_DEFAULT = 0,         // Not forced to enable a promo.
+  WHATS_NEW_APP_RATING,          // Force enable App Rating Promo.
+  WHATS_NEW_MOVE_TO_DOCK_TIP,    // Force enable Move To Dock Tip promo.
+  WHATS_NEW_PROMO_STATUS_COUNT,  // Count of Whats New Promo Statuses.
 };
 
 // Whether the First Run UI will be always be displayed.
@@ -46,15 +45,6 @@ bool IsAlertOnBackgroundUploadEnabled();
 // Whether auto-reload is enabled.
 bool IsAutoReloadEnabled();
 
-// Whether "Save Image" should be renamed as "Download Image".
-bool IsDownloadRenamingEnabled();
-
-// Whether the external applicaiton prompt is enabled.
-bool IsExternalApplicationPromptEnabled();
-
-// Whether contextual search must be reset to undecided state.
-bool IsForceResetContextualSearchEnabled();
-
 // Whether the lru snapshot cache experiment is enabled.
 bool IsLRUSnapshotCacheEnabled();
 
@@ -73,20 +63,14 @@ bool IsPageIconForDowngradedHTTPSEnabled();
 // Whether password generation is enabled.
 bool IsPasswordGenerationEnabled();
 
-// Whether the Payment Request API is enabled or not.
-bool IsPaymentRequestEnabled();
-
-// Whether the back-forward navigation uses pending index.
-bool IsPendingIndexNavigationEnabled();
-
 // Whether the Physical Web feature is enabled.
 bool IsPhysicalWebEnabled();
 
 // Whether reader mode is enabled.
 bool IsReaderModeEnabled();
 
-// Whether the reading list is enabled.
-bool IsReadingListEnabled();
+// Whether request mobile site is enabled.
+bool IsRequestMobileSiteEnabled();
 
 // Whether the Sign In Flow via SFSafariViewController is enabled.
 bool IsSafariVCSignInEnabled();
@@ -106,6 +90,24 @@ bool UseOnlyLocalHeuristicsForPasswordGeneration();
 
 // Whether the Suggestions UI is enabled.
 bool IsSuggestionsUIEnabled();
+
+// Whether Sign-in promo is enabled.
+bool IsSigninPromoEnabled();
+
+// Whether Bookmark reordering is enabled.
+bool IsBookmarkReorderingEnabled();
+
+// Whether a new version of FeedbackKit is the preferred feedback UI provider.
+bool IsNewFeedbackKitEnabled();
+
+// Whether the keyboard accessory view with camera search is enabled.
+bool IsKeyboardAccessoryViewWithCameraSearchEnabled();
+
+// Whether the WKBackForwardList based navigation manager is enabled.
+bool IsSlimNavigationManagerEnabled();
+
+// Whether the 3rd party keyboard omnibox workaround is enabled.
+bool IsThirdPartyKeyboardWorkaroundEnabled();
 
 }  // namespace experimental_flags
 

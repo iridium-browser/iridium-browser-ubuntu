@@ -12,7 +12,7 @@
 #include "base/bind.h"
 #include "base/process/process_iterator.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "content/public/browser/browser_thread.h"
@@ -63,6 +63,8 @@ void GetProcessDataMemoryInformation(
     std::unique_ptr<base::ProcessMetrics> metrics(
         base::ProcessMetrics::CreateProcessMetrics(*i));
     metrics->GetWorkingSetKBytes(&pmi.working_set);
+    // TODO(dcastagna): Compute number of open fds (pmi.num_open_fds) and soft
+    // limits (pmi.open_fds_soft_limit) on android.
 
     out->processes.push_back(pmi);
   }
@@ -106,7 +108,7 @@ ProcessData* MemoryDetails::ChromeBrowser() {
 
 void MemoryDetails::CollectProcessData(
     const std::vector<ProcessMemoryInformation>& chrome_processes) {
-  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  base::ThreadRestrictions::AssertIOAllowed();
 
   std::vector<ProcessMemoryInformation> all_processes(chrome_processes);
   AddNonChildChromeProcesses(&all_processes);

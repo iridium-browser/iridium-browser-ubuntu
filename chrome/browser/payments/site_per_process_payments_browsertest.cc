@@ -8,11 +8,11 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/network_session_configurator/common/network_switches.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -29,14 +29,10 @@ class SitePerProcessPaymentsBrowserTest : public InProcessBrowserTest {
   ~SitePerProcessPaymentsBrowserTest() override {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
     // HTTPS server only serves a valid cert for localhost, so this is needed
     // to load pages from other hosts without an error.
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
-    command_line->AppendSwitch(
-        switches::kEnableExperimentalWebPlatformFeatures);
-    command_line->AppendSwitchASCII(switches::kEnableFeatures,
-                                    features::kWebPayments.name);
+
     // Append --site-per-process flag.
     content::IsolateAllSitesForTesting(command_line);
   }
@@ -47,7 +43,8 @@ class SitePerProcessPaymentsBrowserTest : public InProcessBrowserTest {
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(https_server_->InitializeAndListen());
     content::SetupCrossSiteRedirector(https_server_.get());
-    https_server_->ServeFilesFromSourceDirectory("chrome/test/data/payments");
+    https_server_->ServeFilesFromSourceDirectory(
+        "components/test/data/payments");
     https_server_->StartAcceptingConnections();
   }
 

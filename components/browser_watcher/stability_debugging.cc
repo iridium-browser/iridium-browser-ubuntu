@@ -4,92 +4,56 @@
 
 #include "components/browser_watcher/stability_debugging.h"
 
-#include <string>
+#include <windows.h>
+
+#include <memory>
 
 #include "base/debug/activity_tracker.h"
-#include "base/feature_list.h"
-#include "base/files/file.h"
-#include "base/metrics/persistent_memory_allocator.h"
-#include "base/path_service.h"
-#include "base/process/process.h"
-#include "base/strings/stringprintf.h"
-#include "base/time/time.h"
-#include "components/browser_watcher/features.h"
+#include "build/build_config.h"
 
 namespace browser_watcher {
 
 namespace {
 
-#if defined(OS_WIN)
-bool GetCreationTime(const base::Process& process, base::Time* time) {
-  DCHECK(time);
-
-  FILETIME creation_time = {};
-  FILETIME ignore1 = {};
-  FILETIME ignore2 = {};
-  FILETIME ignore3 = {};
-  if (!::GetProcessTimes(process.Handle(), &creation_time, &ignore1, &ignore2,
-                         &ignore3)) {
-    return false;
+struct VehUnregisterer {
+  void operator()(void* handle) const {
+    ::RemoveVectoredExceptionHandler(handle);
   }
-  *time = base::Time::FromFileTime(creation_time);
-  return true;
+};
+
+using VehHandle = std::unique_ptr<void, VehUnregisterer>;
+
+uintptr_t GetProgramCounter(const CONTEXT& context) {
+#if defined(ARCH_CPU_X86)
+  return context.Eip;
+#elif defined(ARCH_CPU_X86_64)
+  return context.Rip;
+#endif
 }
-#endif  // defined(OS_WIN)
+
+LONG CALLBACK VectoredExceptionHandler(EXCEPTION_POINTERS* exception_pointers) {
+  base::debug::GlobalActivityTracker* tracker =
+      base::debug::GlobalActivityTracker::Get();
+  if (tracker) {
+    EXCEPTION_RECORD* record = exception_pointers->ExceptionRecord;
+    uintptr_t pc = GetProgramCounter(*exception_pointers->ContextRecord);
+    tracker->RecordException(reinterpret_cast<void*>(pc),
+                             record->ExceptionAddress, record->ExceptionCode);
+  }
+
+  return EXCEPTION_CONTINUE_SEARCH;  // Continue to the next handler.
+}
 
 }  // namespace
 
-#if defined(OS_WIN)
+void SetStabilityDataBool(base::StringPiece name, bool value) {
+  base::debug::GlobalActivityTracker* global_tracker =
+      base::debug::GlobalActivityTracker::Get();
+  if (!global_tracker)
+    return;  // Activity tracking isn't enabled.
 
-base::FilePath GetStabilityDir(const base::FilePath& user_data_dir) {
-  return user_data_dir.AppendASCII("Stability");
+  global_tracker->process_data().SetBool(name, value);
 }
-
-bool GetStabilityFileForProcess(const base::Process& process,
-                                const base::FilePath& user_data_dir,
-                                base::FilePath* file_path) {
-  DCHECK(file_path);
-  base::FilePath stability_dir = GetStabilityDir(user_data_dir);
-
-  // Build the name using the pid and creation time. On windows, this is unique
-  // even after the process exits.
-  base::Time creation_time;
-  if (!GetCreationTime(process, &creation_time))
-    return false;
-
-  std::string file_name =
-      base::StringPrintf("%u-%llu", process.Pid(), creation_time.ToJavaTime());
-  *file_path = stability_dir.AppendASCII(file_name).AddExtension(
-      base::PersistentMemoryAllocator::kFileExtension);
-  return true;
-}
-
-base::FilePath::StringType GetStabilityFilePattern() {
-  return base::FilePath::StringType(FILE_PATH_LITERAL("*-*")) +
-         base::PersistentMemoryAllocator::kFileExtension;
-}
-
-void MarkStabilityFileForDeletion(const base::FilePath& user_data_dir) {
-  if (!base::FeatureList::IsEnabled(
-          browser_watcher::kStabilityDebuggingFeature)) {
-    return;
-  }
-
-  base::FilePath stability_file;
-  if (!GetStabilityFileForProcess(base::Process::Current(), user_data_dir,
-                                  &stability_file)) {
-    // TODO(manzagop): add a metric for this.
-    return;
-  }
-
-  // Open (with delete) and then immediately close the file by going out of
-  // scope. This should cause the stability debugging file to be deleted prior
-  // to the next execution.
-  base::File file(stability_file, base::File::FLAG_OPEN |
-                                      base::File::FLAG_READ |
-                                      base::File::FLAG_DELETE_ON_CLOSE);
-}
-#endif  // defined(OS_WIN)
 
 void SetStabilityDataInt(base::StringPiece name, int64_t value) {
   base::debug::GlobalActivityTracker* global_tracker =
@@ -97,7 +61,19 @@ void SetStabilityDataInt(base::StringPiece name, int64_t value) {
   if (!global_tracker)
     return;  // Activity tracking isn't enabled.
 
-  global_tracker->global_data().SetInt(name, value);
+  global_tracker->process_data().SetInt(name, value);
+}
+
+void RegisterStabilityVEH() {
+  // Register a vectored exception handler and request it be first. Note that
+  // subsequent registrations may also request to be first, in which case this
+  // one will be bumped.
+  // TODO(manzagop): Depending on observations, it may be necessary to
+  // consider refreshing the registration, either periodically or at opportune
+  // (e.g. risky) times.
+  static VehHandle veh_handler(
+      ::AddVectoredExceptionHandler(1, &VectoredExceptionHandler));
+  DCHECK(veh_handler);
 }
 
 }  // namespace browser_watcher

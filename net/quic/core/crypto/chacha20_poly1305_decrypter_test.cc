@@ -7,10 +7,10 @@
 #include <memory>
 
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace {
@@ -114,11 +114,12 @@ namespace test {
 // DecryptWithNonce wraps the |Decrypt| method of |decrypter| to allow passing
 // in an nonce and also to allocate the buffer needed for the plaintext.
 QuicData* DecryptWithNonce(ChaCha20Poly1305Decrypter* decrypter,
-                           StringPiece nonce,
-                           StringPiece associated_data,
-                           StringPiece ciphertext) {
+                           QuicStringPiece nonce,
+                           QuicStringPiece associated_data,
+                           QuicStringPiece ciphertext) {
   QuicPacketNumber packet_number;
-  StringPiece nonce_prefix(nonce.data(), nonce.size() - sizeof(packet_number));
+  QuicStringPiece nonce_prefix(nonce.data(),
+                               nonce.size() - sizeof(packet_number));
   decrypter->SetNoncePrefix(nonce_prefix);
   memcpy(&packet_number, nonce.data() + nonce_prefix.size(),
          sizeof(packet_number));
@@ -133,7 +134,9 @@ QuicData* DecryptWithNonce(ChaCha20Poly1305Decrypter* decrypter,
   return new QuicData(output.release(), output_length, true);
 }
 
-TEST(ChaCha20Poly1305DecrypterTest, Decrypt) {
+class ChaCha20Poly1305DecrypterTest : public QuicTest {};
+
+TEST_F(ChaCha20Poly1305DecrypterTest, Decrypt) {
   for (size_t i = 0; test_vectors[i].key != nullptr; i++) {
     // If not present then decryption is expected to fail.
     bool has_pt = test_vectors[i].pt;
@@ -155,7 +158,8 @@ TEST(ChaCha20Poly1305DecrypterTest, Decrypt) {
         &decrypter, fixed + iv,
         // This deliberately tests that the decrypter can handle an AAD that
         // is set to nullptr, as opposed to a zero-length, non-nullptr pointer.
-        StringPiece(aad.length() ? aad.data() : nullptr, aad.length()), ct));
+        QuicStringPiece(aad.length() ? aad.data() : nullptr, aad.length()),
+        ct));
     if (!decrypted.get()) {
       EXPECT_FALSE(has_pt);
       continue;

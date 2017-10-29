@@ -8,23 +8,28 @@
 #include "base/atomicops.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
+#include "base/metrics/single_sample_metrics.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/trace_event/trace_log.h"
 #include "device/base/synchronization/shared_memory_seqlock_buffer.h"
 #include "platform/scheduler/base/pollable_thread_safe_flag.h"
 #include "platform/scheduler/base/queueing_time_estimator.h"
+#include "platform/scheduler/base/task_time_observer.h"
 #include "platform/scheduler/base/thread_load_tracker.h"
 #include "platform/scheduler/child/idle_canceled_delayed_task_sweeper.h"
 #include "platform/scheduler/child/idle_helper.h"
-#include "platform/scheduler/child/scheduler_helper.h"
 #include "platform/scheduler/renderer/deadline_task_runner.h"
 #include "platform/scheduler/renderer/idle_time_estimator.h"
+#include "platform/scheduler/renderer/main_thread_scheduler_helper.h"
+#include "platform/scheduler/renderer/main_thread_task_queue.h"
 #include "platform/scheduler/renderer/render_widget_signals.h"
 #include "platform/scheduler/renderer/task_cost_estimator.h"
+#include "platform/scheduler/renderer/task_duration_metric_reporter.h"
 #include "platform/scheduler/renderer/user_model.h"
 #include "platform/scheduler/renderer/web_view_scheduler_impl.h"
 #include "public/platform/scheduler/renderer/renderer_scheduler.h"
-#include "public/platform/scheduler/base/task_time_observer.h"
 
 namespace base {
 namespace trace_event {
@@ -39,10 +44,10 @@ class RenderWidgetSchedulingState;
 class WebViewSchedulerImpl;
 class TaskQueueThrottler;
 
-class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
+class PLATFORM_EXPORT RendererSchedulerImpl
     : public RendererScheduler,
       public IdleHelper::Delegate,
-      public SchedulerHelper::Observer,
+      public MainThreadSchedulerHelper::Observer,
       public RenderWidgetSignals::Observer,
       public TaskTimeObserver,
       public QueueingTimeEstimator::Client,
@@ -85,35 +90,27 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
 
   // RendererScheduler implementation:
   std::unique_ptr<WebThread> CreateMainThread() override;
-  scoped_refptr<TaskQueue> DefaultTaskRunner() override;
   scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner() override;
-  scoped_refptr<TaskQueue> CompositorTaskRunner() override;
-  scoped_refptr<TaskQueue> LoadingTaskRunner() override;
-  scoped_refptr<TaskQueue> TimerTaskRunner() override;
-  scoped_refptr<TaskQueue> NewLoadingTaskRunner(
-      TaskQueue::QueueType queue_type) override;
-  scoped_refptr<TaskQueue> NewTimerTaskRunner(
-      TaskQueue::QueueType queue_type) override;
-  scoped_refptr<TaskQueue> NewUnthrottledTaskRunner(
-      TaskQueue::QueueType queue_type) override;
   std::unique_ptr<RenderWidgetSchedulingState> NewRenderWidgetSchedulingState()
       override;
   void WillBeginFrame(const cc::BeginFrameArgs& args) override;
   void BeginFrameNotExpectedSoon() override;
+  void BeginMainFrameNotExpectedUntil(base::TimeTicks time) override;
   void DidCommitFrameToCompositor() override;
   void DidHandleInputEventOnCompositorThread(
       const WebInputEvent& web_input_event,
       InputEventState event_state) override;
   void DidHandleInputEventOnMainThread(const WebInputEvent& web_input_event,
                                        WebInputEventResult result) override;
+  base::TimeDelta MostRecentExpectedQueueingTime() override;
   void DidAnimateForInputOnCompositorThread() override;
-  void OnRendererBackgrounded() override;
-  void OnRendererForegrounded() override;
+  void SetRendererHidden(bool hidden) override;
+  void SetRendererBackgrounded(bool backgrounded) override;
   void SuspendRenderer() override;
   void ResumeRenderer() override;
-  void AddPendingNavigation(WebScheduler::NavigatingFrameType type) override;
-  void RemovePendingNavigation(WebScheduler::NavigatingFrameType type) override;
-  void OnNavigationStarted() override;
+  void AddPendingNavigation(NavigatingFrameType type) override;
+  void RemovePendingNavigation(NavigatingFrameType type) override;
+  void OnNavigate() override;
   bool IsHighPriorityWorkAnticipated() override;
   bool ShouldYieldForHighPriorityWork() override;
   bool CanExceedIdleDeadlineIfRequired() const override;
@@ -123,6 +120,8 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
   void Shutdown() override;
   void SuspendTimerQueue() override;
   void ResumeTimerQueue() override;
+  void VirtualTimePaused() override;
+  void VirtualTimeResumed() override;
   void SetTimerQueueSuspensionWhenBackgroundedEnabled(bool enabled) override;
   void SetTopLevelBlameContext(
       base::trace_event::BlameContext* blame_context) override;
@@ -136,27 +135,51 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
       bool has_visible_render_widget_with_touch_handler) override;
 
   // SchedulerHelper::Observer implementation:
-  void OnUnregisterTaskQueue(const scoped_refptr<TaskQueue>& queue) override;
-  void OnTriedToExecuteBlockedTask(const TaskQueue& queue,
-                                   const base::PendingTask& task) override;
+  void OnTriedToExecuteBlockedTask() override;
 
   // TaskTimeObserver implementation:
-  void willProcessTask(TaskQueue* task_queue, double start_time) override;
-  void didProcessTask(TaskQueue* task_queue,
-                      double start_time,
-                      double end_time) override;
+  void WillProcessTask(double start_time) override;
+  void DidProcessTask(double start_time, double end_time) override;
+  void OnBeginNestedRunLoop() override;
 
   // QueueingTimeEstimator::Client implementation:
-  void OnQueueingTimeForWindowEstimated(base::TimeDelta queueing_time) override;
+  void OnQueueingTimeForWindowEstimated(
+      base::TimeDelta queueing_time,
+      base::TimeTicks window_start_time) override;
 
-  // Returns a task runner where tasks run at the highest possible priority.
-  scoped_refptr<TaskQueue> ControlTaskRunner();
+  scoped_refptr<MainThreadTaskQueue> DefaultTaskQueue();
+  scoped_refptr<MainThreadTaskQueue> CompositorTaskQueue();
+  scoped_refptr<MainThreadTaskQueue> LoadingTaskQueue();
+  scoped_refptr<MainThreadTaskQueue> TimerTaskQueue();
+
+  // Returns a new task queue created with given params.
+  scoped_refptr<MainThreadTaskQueue> NewTaskQueue(
+      const MainThreadTaskQueue::QueueCreationParams& params);
+
+  // Returns a new loading task queue. This queue is intended for tasks related
+  // to resource dispatch, foreground HTML parsing, etc...
+  scoped_refptr<MainThreadTaskQueue> NewLoadingTaskQueue(
+      MainThreadTaskQueue::QueueType queue_type);
+
+  // Returns a new timer task queue. This queue is intended for DOM Timers.
+  scoped_refptr<MainThreadTaskQueue> NewTimerTaskQueue(
+      MainThreadTaskQueue::QueueType queue_type);
+
+  // Returns a task queue where tasks run at the highest possible priority.
+  scoped_refptr<MainThreadTaskQueue> ControlTaskQueue();
+
+  // A control task queue which also respects virtual time. Only available if
+  // virtual time has been enabled.
+  scoped_refptr<MainThreadTaskQueue> VirtualTimeControlTaskQueue();
 
   void RegisterTimeDomain(TimeDomain* time_domain);
   void UnregisterTimeDomain(TimeDomain* time_domain);
 
   // Tells the scheduler that all TaskQueues should use virtual time.
   void EnableVirtualTime();
+
+  // Migrates all task queues to real time.
+  void DisableVirtualTimeForTesting();
 
   void AddWebViewScheduler(WebViewSchedulerImpl* web_view_scheduler);
   void RemoveWebViewScheduler(WebViewSchedulerImpl* web_view_scheduler);
@@ -171,8 +194,19 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
   // state.
   void OnAudioStateChanged();
 
+  // Tells the scheduler that a provisional load has committed. Must be called
+  // from the main thread.
+  void DidStartProvisionalLoad(bool is_main_frame);
+
+  // Tells the scheduler that a provisional load has committed. The scheduler
+  // may reset the task cost estimators and the UserModel. Must be called from
+  // the main thread.
+  void DidCommitProvisionalLoad(bool is_web_history_inert_commit,
+                                bool is_reload,
+                                bool is_main_frame);
+
   // Test helpers.
-  SchedulerHelper* GetSchedulerHelperForTesting();
+  MainThreadSchedulerHelper* GetSchedulerHelperForTesting();
   TaskCostEstimator* GetLoadingTaskCostEstimatorForTesting();
   TaskCostEstimator* GetTimerTaskCostEstimatorForTesting();
   IdleTimeEstimator* GetIdleTimeEstimatorForTesting();
@@ -181,6 +215,7 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
   void EndIdlePeriodForTesting(const base::Closure& callback,
                                base::TimeTicks time_remaining);
   bool PolicyNeedsUpdateForTesting();
+  WakeUpBudgetPool* GetWakeUpBudgetPoolForTesting();
 
   base::TickClock* tick_clock() const;
 
@@ -198,9 +233,24 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
 
   void OnFirstMeaningfulPaint();
 
+  void OnUnregisterTaskQueue(const scoped_refptr<MainThreadTaskQueue>& queue);
+
+  void OnTaskCompleted(MainThreadTaskQueue* queue,
+                       const TaskQueue::Task& task,
+                       base::TimeTicks start,
+                       base::TimeTicks end);
+
   // base::trace_event::TraceLog::EnabledStateObserver implementation:
   void OnTraceLogEnabled() override;
   void OnTraceLogDisabled() override;
+
+ protected:
+  // RendererScheduler implementation.
+  // Use *TaskQueue internally.
+  scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> LoadingTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> TimerTaskRunner() override;
 
  private:
   friend class RendererSchedulerImplTest;
@@ -219,41 +269,111 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
   static const char* TimeDomainTypeToString(TimeDomainType domain_type);
 
   struct TaskQueuePolicy {
+    // Default constructor of TaskQueuePolicy should match behaviour of a
+    // newly-created task queue.
     TaskQueuePolicy()
         : is_enabled(true),
-          priority(TaskQueue::NORMAL_PRIORITY),
-          time_domain_type(TimeDomainType::REAL) {}
+          is_suspended(false),
+          is_throttled(false),
+          is_blocked(false),
+          use_virtual_time(false),
+          priority(TaskQueue::NORMAL_PRIORITY) {}
 
     bool is_enabled;
+    bool is_suspended;
+    bool is_throttled;
+    bool is_blocked;
+    bool use_virtual_time;
     TaskQueue::QueuePriority priority;
-    TimeDomainType time_domain_type;
+
+    bool IsQueueEnabled(MainThreadTaskQueue* task_queue) const;
+
+    TaskQueue::QueuePriority GetPriority(MainThreadTaskQueue* task_queue) const;
+
+    TimeDomainType GetTimeDomainType(MainThreadTaskQueue* task_queue) const;
 
     bool operator==(const TaskQueuePolicy& other) const {
-      return is_enabled == other.is_enabled && priority == other.priority &&
-             time_domain_type == other.time_domain_type;
+      return is_enabled == other.is_enabled &&
+             is_suspended == other.is_suspended &&
+             is_throttled == other.is_throttled &&
+             is_blocked == other.is_blocked &&
+             use_virtual_time == other.use_virtual_time &&
+             priority == other.priority;
     }
 
     void AsValueInto(base::trace_event::TracedValue* state) const;
   };
 
-  struct Policy {
-    TaskQueuePolicy compositor_queue_policy;
-    TaskQueuePolicy loading_queue_policy;
-    TaskQueuePolicy timer_queue_policy;
-    TaskQueuePolicy default_queue_policy;
-    v8::RAILMode rail_mode = v8::PERFORMANCE_ANIMATION;
-    bool should_disable_throttling = false;
+  class Policy {
+   public:
+    Policy()
+        : rail_mode_(v8::PERFORMANCE_ANIMATION),
+          should_disable_throttling_(false) {}
+    ~Policy() {}
+
+    TaskQueuePolicy& compositor_queue_policy() {
+      return policies_[static_cast<size_t>(
+          MainThreadTaskQueue::QueueClass::COMPOSITOR)];
+    }
+    const TaskQueuePolicy& compositor_queue_policy() const {
+      return policies_[static_cast<size_t>(
+          MainThreadTaskQueue::QueueClass::COMPOSITOR)];
+    }
+
+    TaskQueuePolicy& loading_queue_policy() {
+      return policies_[static_cast<size_t>(
+          MainThreadTaskQueue::QueueClass::LOADING)];
+    }
+    const TaskQueuePolicy& loading_queue_policy() const {
+      return policies_[static_cast<size_t>(
+          MainThreadTaskQueue::QueueClass::LOADING)];
+    }
+
+    TaskQueuePolicy& timer_queue_policy() {
+      return policies_[static_cast<size_t>(
+          MainThreadTaskQueue::QueueClass::TIMER)];
+    }
+    const TaskQueuePolicy& timer_queue_policy() const {
+      return policies_[static_cast<size_t>(
+          MainThreadTaskQueue::QueueClass::TIMER)];
+    }
+
+    TaskQueuePolicy& default_queue_policy() {
+      return policies_[static_cast<size_t>(
+          MainThreadTaskQueue::QueueClass::NONE)];
+    }
+    const TaskQueuePolicy& default_queue_policy() const {
+      return policies_[static_cast<size_t>(
+          MainThreadTaskQueue::QueueClass::NONE)];
+    }
+
+    const TaskQueuePolicy& GetQueuePolicy(
+        MainThreadTaskQueue::QueueClass queue_class) const {
+      return policies_[static_cast<size_t>(queue_class)];
+    }
+
+    v8::RAILMode& rail_mode() { return rail_mode_; }
+    v8::RAILMode rail_mode() const { return rail_mode_; }
+
+    bool& should_disable_throttling() { return should_disable_throttling_; }
+    bool should_disable_throttling() const {
+      return should_disable_throttling_;
+    }
 
     bool operator==(const Policy& other) const {
-      return compositor_queue_policy == other.compositor_queue_policy &&
-             loading_queue_policy == other.loading_queue_policy &&
-             timer_queue_policy == other.timer_queue_policy &&
-             default_queue_policy == other.default_queue_policy &&
-             rail_mode == other.rail_mode &&
-             should_disable_throttling == other.should_disable_throttling;
+      return policies_ == other.policies_ && rail_mode_ == other.rail_mode_ &&
+             should_disable_throttling_ == other.should_disable_throttling_;
     }
 
     void AsValueInto(base::trace_event::TracedValue* state) const;
+
+   private:
+    v8::RAILMode rail_mode_;
+    bool should_disable_throttling_;
+
+    std::array<TaskQueuePolicy,
+               static_cast<size_t>(MainThreadTaskQueue::QueueClass::COUNT)>
+        policies_;
   };
 
   class PollableNeedsUpdateFlag {
@@ -274,6 +394,8 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
     DISALLOW_COPY_AND_ASSIGN(PollableNeedsUpdateFlag);
   };
 
+  class TaskDurationMetricTracker;
+
   // IdleHelper::Delegate implementation:
   bool CanEnterLongIdlePeriod(
       base::TimeTicks now,
@@ -281,6 +403,8 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
   void IsNotQuiescent() override {}
   void OnIdlePeriodStarted() override;
   void OnIdlePeriodEnded() override;
+
+  void OnPendingTasksChanged(bool has_tasks) override;
 
   void EndIdlePeriod();
 
@@ -345,6 +469,8 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
       base::TimeTicks now,
       base::TimeDelta* expected_use_case_duration) const;
 
+  std::unique_ptr<base::SingleSampleMetric> CreateMaxQueueingTimeMetric();
+
   // An input event of some sort happened, the policy may need updating.
   void UpdateForInputEventOnCompositorThread(WebInputEvent::Type type,
                                              InputEventState input_event_state);
@@ -366,7 +492,7 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
   void BroadcastIntervention(const std::string& message);
 
   void ApplyTaskQueuePolicy(
-      TaskQueue* task_queue,
+      MainThreadTaskQueue* task_queue,
       TaskQueue::QueueEnabledVoter* task_queue_enabled_voter,
       const TaskQueuePolicy& old_task_queue_policy,
       const TaskQueuePolicy& new_task_queue_policy) const;
@@ -376,26 +502,36 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
 
   bool ShouldDisableThrottlingBecauseOfAudio(base::TimeTicks now);
 
-  SchedulerHelper helper_;
+  void AddQueueToWakeUpBudgetPool(MainThreadTaskQueue* queue);
+
+  void RecordTaskMetrics(MainThreadTaskQueue::QueueType queue_type,
+                         base::TimeTicks start_time,
+                         base::TimeTicks end_time);
+
+  void RecordMainThreadTaskLoad(base::TimeTicks time, double load);
+  void RecordForegroundMainThreadTaskLoad(base::TimeTicks time, double load);
+  void RecordBackgroundMainThreadTaskLoad(base::TimeTicks time, double load);
+
+  MainThreadSchedulerHelper helper_;
   IdleHelper idle_helper_;
   IdleCanceledDelayedTaskSweeper idle_canceled_delayed_task_sweeper_;
   std::unique_ptr<TaskQueueThrottler> task_queue_throttler_;
   RenderWidgetSignals render_widget_scheduler_signals_;
 
-  const scoped_refptr<TaskQueue> control_task_runner_;
-  const scoped_refptr<TaskQueue> compositor_task_runner_;
+  const scoped_refptr<MainThreadTaskQueue> control_task_queue_;
+  const scoped_refptr<MainThreadTaskQueue> compositor_task_queue_;
+  scoped_refptr<MainThreadTaskQueue> virtual_time_control_task_queue_;
   std::unique_ptr<TaskQueue::QueueEnabledVoter>
-      compositor_task_runner_enabled_voter_;
+      compositor_task_queue_enabled_voter_;
 
   using TaskQueueVoterMap =
-      std::map<scoped_refptr<TaskQueue>,
+      std::map<scoped_refptr<MainThreadTaskQueue>,
                std::unique_ptr<TaskQueue::QueueEnabledVoter>>;
 
-  TaskQueueVoterMap loading_task_runners_;
-  TaskQueueVoterMap timer_task_runners_;
-  std::set<scoped_refptr<TaskQueue>> unthrottled_task_runners_;
-  scoped_refptr<TaskQueue> default_loading_task_runner_;
-  scoped_refptr<TaskQueue> default_timer_task_runner_;
+  TaskQueueVoterMap task_runners_;
+
+  scoped_refptr<MainThreadTaskQueue> default_loading_task_queue_;
+  scoped_refptr<MainThreadTaskQueue> default_timer_task_queue_;
 
   // Note |virtual_time_domain_| is lazily created.
   std::unique_ptr<AutoAdvancingVirtualTimeDomain> virtual_time_domain_;
@@ -414,15 +550,17 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
   // (the accessors) for the following data members.
 
   struct MainThreadOnly {
-    MainThreadOnly(RendererSchedulerImpl* renderer_scheduler_impl,
-                   const scoped_refptr<TaskQueue>& compositor_task_runner,
-                   base::TickClock* time_source,
-                   base::TimeTicks now);
+    MainThreadOnly(
+        RendererSchedulerImpl* renderer_scheduler_impl,
+        const scoped_refptr<MainThreadTaskQueue>& compositor_task_runner,
+        base::TickClock* time_source,
+        base::TimeTicks now);
     ~MainThreadOnly();
 
     TaskCostEstimator loading_task_cost_estimator;
     TaskCostEstimator timer_task_cost_estimator;
     IdleTimeEstimator idle_time_estimator;
+    ThreadLoadTracker main_thread_load_tracker;
     ThreadLoadTracker background_main_thread_load_tracker;
     ThreadLoadTracker foreground_main_thread_load_tracker;
     UseCase current_use_case;
@@ -430,6 +568,8 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
     base::TimeTicks current_policy_expiration_time;
     base::TimeTicks estimated_next_frame_begin;
     base::TimeTicks current_task_start_time;
+    base::TimeTicks uma_last_queueing_time_report_window_start_time;
+    base::TimeDelta most_recent_expected_queueing_time;
     base::TimeDelta compositor_frame_interval;
     base::TimeDelta longest_jank_free_task_duration;
     base::Optional<base::TimeTicks> last_audio_state_change;
@@ -453,8 +593,34 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
     bool in_idle_period_for_testing;
     bool use_virtual_time;
     bool is_audio_playing;
+    bool compositor_will_send_main_frame_not_expected;
+    bool virtual_time_paused;
+    bool has_navigated;
+    std::unique_ptr<base::SingleSampleMetric> max_queueing_time_metric;
+    base::TimeDelta max_queueing_time;
+    base::TimeTicks background_status_changed_at;
     std::set<WebViewSchedulerImpl*> web_view_schedulers;  // Not owned.
     RAILModeObserver* rail_mode_observer;                 // Not owned.
+    WakeUpBudgetPool* wake_up_budget_pool;                // Not owned.
+    base::Optional<base::TimeTicks> last_reported_task;
+    TaskDurationMetricReporter task_duration_reporter;
+    TaskDurationMetricReporter foreground_task_duration_reporter;
+    TaskDurationMetricReporter foreground_first_minute_task_duration_reporter;
+    TaskDurationMetricReporter foreground_second_minute_task_duration_reporter;
+    TaskDurationMetricReporter foreground_third_minute_task_duration_reporter;
+    TaskDurationMetricReporter
+        foreground_after_third_minute_task_duration_reporter;
+    TaskDurationMetricReporter background_task_duration_reporter;
+    TaskDurationMetricReporter background_first_minute_task_duration_reporter;
+    TaskDurationMetricReporter background_second_minute_task_duration_reporter;
+    TaskDurationMetricReporter background_third_minute_task_duration_reporter;
+    TaskDurationMetricReporter background_fourth_minute_task_duration_reporter;
+    TaskDurationMetricReporter background_fifth_minute_task_duration_reporter;
+    TaskDurationMetricReporter
+        background_after_fifth_minute_task_duration_reporter;
+    TaskDurationMetricReporter hidden_task_duration_reporter;
+    TaskDurationMetricReporter visible_task_duration_reporter;
+    TaskDurationMetricReporter hidden_music_task_duration_reporter;
   };
 
   struct AnyThread {
@@ -469,7 +635,7 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
     bool begin_main_frame_on_critical_path;
     bool last_gesture_was_compositor_driven;
     bool default_gesture_prevented;
-    bool have_seen_touchstart;
+    bool have_seen_a_potentially_blocking_gesture;
     bool waiting_for_meaningful_paint;
     bool have_seen_input_since_navigation;
   };
@@ -495,11 +661,11 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
 
   // Don't access main_thread_only_, instead use MainThreadOnly().
   MainThreadOnly main_thread_only_;
-  MainThreadOnly& MainThreadOnly() {
+  MainThreadOnly& GetMainThreadOnly() {
     helper_.CheckOnValidThread();
     return main_thread_only_;
   }
-  const struct MainThreadOnly& MainThreadOnly() const {
+  const struct MainThreadOnly& GetMainThreadOnly() const {
     helper_.CheckOnValidThread();
     return main_thread_only_;
   }
@@ -507,18 +673,18 @@ class BLINK_PLATFORM_EXPORT RendererSchedulerImpl
   mutable base::Lock any_thread_lock_;
   // Don't access any_thread_, instead use AnyThread().
   AnyThread any_thread_;
-  AnyThread& AnyThread() {
+  AnyThread& GetAnyThread() {
     any_thread_lock_.AssertAcquired();
     return any_thread_;
   }
-  const struct AnyThread& AnyThread() const {
+  const struct AnyThread& GetAnyThread() const {
     any_thread_lock_.AssertAcquired();
     return any_thread_;
   }
 
   // Don't access compositor_thread_only_, instead use CompositorThreadOnly().
   CompositorThreadOnly compositor_thread_only_;
-  CompositorThreadOnly& CompositorThreadOnly() {
+  CompositorThreadOnly& GetCompositorThreadOnly() {
     compositor_thread_only_.CheckOnValidThread();
     return compositor_thread_only_;
   }

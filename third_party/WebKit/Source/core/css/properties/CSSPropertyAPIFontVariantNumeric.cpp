@@ -7,22 +7,24 @@
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 #include "core/css/parser/FontVariantNumericParser.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIFontVariantNumeric::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  if (range.peek().id() == CSSValueNormal)
-    return CSSPropertyParserHelpers::consumeIdent(range);
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  if (range.Peek().Id() == CSSValueNormal)
+    return CSSPropertyParserHelpers::ConsumeIdent(range);
 
-  FontVariantNumericParser numericParser;
+  FontVariantNumericParser numeric_parser;
   do {
-    if (numericParser.consumeNumeric(range) !=
-        FontVariantNumericParser::ParseResult::ConsumedValue)
+    if (numeric_parser.ConsumeNumeric(range) !=
+        FontVariantNumericParser::ParseResult::kConsumedValue)
       return nullptr;
-  } while (!range.atEnd());
+  } while (!range.AtEnd());
 
-  return numericParser.finalizeValue();
+  return numeric_parser.FinalizeValue();
 }
 
 }  // namespace blink

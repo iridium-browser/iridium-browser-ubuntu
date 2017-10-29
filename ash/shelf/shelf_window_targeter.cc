@@ -4,10 +4,9 @@
 
 #include "ash/shelf/shelf_window_targeter.h"
 
-#include "ash/common/shelf/shelf_constants.h"
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/wm_window.h"
 #include "ash/public/cpp/shelf_types.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_constants.h"
 #include "ui/aura/window.h"
 
 namespace ash {
@@ -24,13 +23,11 @@ gfx::Insets GetInsetsForAlignment(int distance, ShelfAlignment alignment) {
 
 }  // namespace
 
-ShelfWindowTargeter::ShelfWindowTargeter(WmWindow* container, WmShelf* shelf)
-    : ::wm::EasyResizeWindowTargeter(WmWindow::GetAuraWindow(container),
-                                     gfx::Insets(),
-                                     gfx::Insets()),
+ShelfWindowTargeter::ShelfWindowTargeter(aura::Window* container, Shelf* shelf)
+    : ::wm::EasyResizeWindowTargeter(container, gfx::Insets(), gfx::Insets()),
       shelf_(shelf) {
   WillChangeVisibilityState(shelf_->GetVisibilityState());
-  container->aura_window()->AddObserver(this);
+  container->AddObserver(this);
   shelf_->AddObserver(this);
 }
 
@@ -52,17 +49,16 @@ void ShelfWindowTargeter::WillChangeVisibilityState(
   if (new_state == SHELF_VISIBLE) {
     // Let clicks at the very top of the shelf through so windows can be
     // resized with the bottom-right corner and bottom edge.
-    mouse_insets = GetInsetsForAlignment(kWorkspaceAreaVisibleInset,
-                                         shelf_->GetAlignment());
+    mouse_insets =
+        GetInsetsForAlignment(kWorkspaceAreaVisibleInset, shelf_->alignment());
   } else if (new_state == SHELF_AUTO_HIDE) {
     // Extend the touch hit target out a bit to allow users to drag shelf out
     // while hidden.
     touch_insets = GetInsetsForAlignment(-kWorkspaceAreaAutoHideInset,
-                                         shelf_->GetAlignment());
+                                         shelf_->alignment());
   }
 
-  set_mouse_extend(mouse_insets);
-  set_touch_extend(touch_insets);
+  SetInsets(mouse_insets, touch_insets);
 }
 
 }  // namespace ash

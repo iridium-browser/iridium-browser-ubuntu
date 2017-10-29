@@ -6,6 +6,7 @@
 #define IOS_CHROME_BROWSER_UI_SETTINGS_CONTENT_SETTINGS_COLLECTION_VIEW_CONTROLLER_H_
 
 #import "ios/chrome/browser/ui/settings/settings_root_collection_view_controller.h"
+#import "ios/chrome/browser/web/mailto_url_rewriter.h"
 
 namespace ios {
 class ChromeBrowserState;
@@ -14,13 +15,14 @@ class ChromeBrowserState;
 // Controller for the UI that allows the user to change content settings like
 // blocking popups.
 @interface ContentSettingsCollectionViewController
-    : SettingsRootCollectionViewController
+    : SettingsRootCollectionViewController<MailtoURLRewriterObserver>
 
 // The designated initializer. |browserState| must not be nil.
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
     NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
-- (instancetype)initWithStyle:(CollectionViewControllerStyle)style
+- (instancetype)initWithLayout:(UICollectionViewLayout*)layout
+                         style:(CollectionViewControllerStyle)style
     NS_UNAVAILABLE;
 @end
 

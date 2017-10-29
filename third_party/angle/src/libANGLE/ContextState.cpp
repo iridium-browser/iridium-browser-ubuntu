@@ -61,7 +61,7 @@ TextureManager *AllocateOrGetSharedTextureManager(const ContextState *shareConte
 
 }  // anonymous namespace
 
-ContextState::ContextState(uintptr_t contextIn,
+ContextState::ContextState(ContextID contextIn,
                            const ContextState *shareContextState,
                            TextureManager *shareTextures,
                            const Version &clientVersion,
@@ -117,7 +117,7 @@ ValidationContext::ValidationContext(const ValidationContext *shareContext,
                                      const Extensions &extensions,
                                      const Limitations &limitations,
                                      bool skipValidation)
-    : mState(reinterpret_cast<uintptr_t>(this),
+    : mState(reinterpret_cast<ContextID>(this),
              shareContext ? &shareContext->mState : nullptr,
              shareTextures,
              clientVersion,
@@ -133,13 +133,6 @@ ValidationContext::ValidationContext(const ValidationContext *shareContext,
 
 bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsigned int *numParams)
 {
-    if (pname >= GL_DRAW_BUFFER0_EXT && pname <= GL_DRAW_BUFFER15_EXT)
-    {
-        *type      = GL_INT;
-        *numParams = 1;
-        return true;
-    }
-
     // Please note: the query type returned for DEPTH_CLEAR_VALUE in this implementation
     // is FLOAT rather than INT, as would be suggested by the GL ES 2.0 spec. This is due
     // to the fact that it is stored internally as a float, and so would require conversion
@@ -188,7 +181,6 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
         case GL_PACK_REVERSE_ROW_ORDER_ANGLE:
         case GL_UNPACK_ALIGNMENT:
         case GL_GENERATE_MIPMAP_HINT:
-        case GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES:
         case GL_RED_BITS:
         case GL_GREEN_BITS:
         case GL_BLUE_BITS:
@@ -312,7 +304,7 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
             return true;
         }
         case GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT:
-            if (!getExtensions().maxTextureAnisotropy)
+            if (!getExtensions().textureFilterAnisotropic)
             {
                 return false;
             }
@@ -433,6 +425,21 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
         }
     }
 
+    if (getExtensions().robustResourceInitialization &&
+        pname == GL_CONTEXT_ROBUST_RESOURCE_INITIALIZATION_ANGLE)
+    {
+        *type      = GL_BOOL;
+        *numParams = 1;
+        return true;
+    }
+
+    if (getExtensions().programCacheControl && pname == GL_PROGRAM_CACHE_ENABLED_ANGLE)
+    {
+        *type      = GL_BOOL;
+        *numParams = 1;
+        return true;
+    }
+
     // Check for ES3.0+ parameter names which are also exposed as ES2 extensions
     switch (pname)
     {
@@ -484,7 +491,34 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
             *type      = GL_INT;
             *numParams = 1;
             return true;
+
+            case GL_FRAGMENT_SHADER_DERIVATIVE_HINT:
+                if ((getClientMajorVersion() < 3) && !getExtensions().standardDerivatives)
+                {
+                    return false;
+                }
+                *type      = GL_INT;
+                *numParams = 1;
+                return true;
         }
+    }
+
+    if (pname >= GL_DRAW_BUFFER0_EXT && pname <= GL_DRAW_BUFFER15_EXT)
+    {
+        if ((getClientVersion() < Version(3, 0)) && !getExtensions().drawBuffers)
+        {
+            return false;
+        }
+        *type      = GL_INT;
+        *numParams = 1;
+        return true;
+    }
+
+    if (getExtensions().multiview && pname == GL_MAX_VIEWS_ANGLE)
+    {
+        *type      = GL_INT;
+        *numParams = 1;
+        return true;
     }
 
     if (getClientVersion() < Version(3, 0))
@@ -623,7 +657,9 @@ bool ValidationContext::getQueryParameterInfo(GLenum pname, GLenum *type, unsign
         case GL_MAX_COMBINED_IMAGE_UNIFORMS:
         case GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS:
         case GL_MAX_COMBINED_SHADER_STORAGE_BLOCKS:
+        case GL_SHADER_STORAGE_BUFFER_BINDING:
         case GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT:
+        case GL_TEXTURE_BINDING_2D_MULTISAMPLE:
             *type      = GL_INT;
             *numParams = 1;
             return true;
@@ -675,6 +711,11 @@ bool ValidationContext::getIndexedQueryParameterInfo(GLenum target,
         case GL_MAX_COMPUTE_WORK_GROUP_COUNT:
         case GL_MAX_COMPUTE_WORK_GROUP_SIZE:
         case GL_ATOMIC_COUNTER_BUFFER_BINDING:
+        case GL_SHADER_STORAGE_BUFFER_BINDING:
+        case GL_VERTEX_BINDING_BUFFER:
+        case GL_VERTEX_BINDING_DIVISOR:
+        case GL_VERTEX_BINDING_OFFSET:
+        case GL_VERTEX_BINDING_STRIDE:
         {
             *type      = GL_INT;
             *numParams = 1;
@@ -682,6 +723,8 @@ bool ValidationContext::getIndexedQueryParameterInfo(GLenum target,
         }
         case GL_ATOMIC_COUNTER_BUFFER_START:
         case GL_ATOMIC_COUNTER_BUFFER_SIZE:
+        case GL_SHADER_STORAGE_BUFFER_START:
+        case GL_SHADER_STORAGE_BUFFER_SIZE:
         {
             *type      = GL_INT_64_ANGLEX;
             *numParams = 1;
@@ -704,22 +747,22 @@ Shader *ValidationContext::getShader(GLuint handle) const
 
 bool ValidationContext::isTextureGenerated(GLuint texture) const
 {
-    return mState.mTextures->isTextureGenerated(texture);
+    return mState.mTextures->isHandleGenerated(texture);
 }
 
 bool ValidationContext::isBufferGenerated(GLuint buffer) const
 {
-    return mState.mBuffers->isBufferGenerated(buffer);
+    return mState.mBuffers->isHandleGenerated(buffer);
 }
 
 bool ValidationContext::isRenderbufferGenerated(GLuint renderbuffer) const
 {
-    return mState.mRenderbuffers->isRenderbufferGenerated(renderbuffer);
+    return mState.mRenderbuffers->isHandleGenerated(renderbuffer);
 }
 
 bool ValidationContext::isFramebufferGenerated(GLuint framebuffer) const
 {
-    return mState.mFramebuffers->isFramebufferGenerated(framebuffer);
+    return mState.mFramebuffers->isHandleGenerated(framebuffer);
 }
 
 bool ValidationContext::usingDisplayTextureShareGroup() const

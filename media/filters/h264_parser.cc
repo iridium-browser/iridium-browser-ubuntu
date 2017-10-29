@@ -123,14 +123,14 @@ base::Optional<gfx::Rect> H264SPS::GetVisibleRect() const {
 
 // Based on T-REC-H.264 E.2.1, "VUI parameters semantics",
 // available from http://www.itu.int/rec/T-REC-H.264.
-gfx::ColorSpace H264SPS::GetColorSpace() const {
+VideoColorSpace H264SPS::GetColorSpace() const {
   if (colour_description_present_flag) {
-    return gfx::ColorSpace::CreateVideo(
+    return VideoColorSpace(
         colour_primaries, transfer_characteristics, matrix_coefficients,
         video_full_range_flag ? gfx::ColorSpace::RangeID::FULL
                               : gfx::ColorSpace::RangeID::LIMITED);
   } else {
-    return gfx::ColorSpace();
+    return VideoColorSpace();
   }
 }
 
@@ -287,6 +287,19 @@ bool H264Parser::FindStartCode(const uint8_t* data,
   off_t bytes_left = data_size;
 
   while (bytes_left >= 3) {
+    // The start code is "\0\0\1", ones are more unusual than zeroes, so let's
+    // search for it first.
+    const uint8_t* tmp =
+        reinterpret_cast<const uint8_t*>(memchr(data + 2, 1, bytes_left - 2));
+    if (!tmp) {
+      data += bytes_left - 2;
+      bytes_left = 2;
+      break;
+    }
+    tmp -= 2;
+    bytes_left -= tmp - data;
+    data = tmp;
+
     if (IsStartCode(data)) {
       // Found three-byte start code, set pointer at its beginning.
       *offset = data_size - bytes_left;
@@ -478,6 +491,8 @@ H264Parser::Result H264Parser::AdvanceToNextNALU(H264NALU* nalu) {
   if (!LocateNALU(&nalu_size_with_start_code, &start_code_size)) {
     DVLOG(4) << "Could not find next NALU, bytes left in stream: "
              << bytes_left_;
+    stream_ = nullptr;
+    bytes_left_ = 0;
     return kEOStream;
   }
 
@@ -486,8 +501,11 @@ H264Parser::Result H264Parser::AdvanceToNextNALU(H264NALU* nalu) {
   DVLOG(4) << "NALU found: size=" << nalu_size_with_start_code;
 
   // Initialize bit reader at the start of found NALU.
-  if (!br_.Initialize(nalu->data, nalu->size))
+  if (!br_.Initialize(nalu->data, nalu->size)) {
+    stream_ = nullptr;
+    bytes_left_ = 0;
     return kEOStream;
+  }
 
   // Move parser state to after this NALU, so next time AdvanceToNextNALU
   // is called, we will effectively be skipping it;

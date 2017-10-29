@@ -1,25 +1,26 @@
+<link rel="import" href="chrome://resources/html/polymer.html">
+
+<link rel="import" href="chrome://resources/cr_elements/hidden_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/paper_button_style_css.html">
+<link rel="import" href="chrome://resources/html/action_link.html">
+<link rel="import" href="chrome://resources/html/action_link_css.html">
 <link rel="import" href="chrome://resources/html/assert.html">
 <link rel="import" href="chrome://resources/html/cr.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
 <link rel="import" href="chrome://resources/html/load_time_data.html">
-<link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://extensions/icons.html">
-<link rel="import" href="chrome://extensions/item_source.html">
+<link rel="import" href="chrome://extensions/item_util.html">
 <link rel="import" href="chrome://extensions/strings.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/iron-icons.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/communication-icons.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/shadow.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-toggle-button/paper-toggle-button.html">
 
 <dom-module id="extensions-item">
-  <style include="iron-flex"></style>
   <template>
-    <style>
-      [hidden] {
-        display: none !important;
-      }
-
+    <style include="iron-flex cr-hidden-style action-link paper-button-style">
       #icon-wrapper {
         align-self: flex-start;
         display: flex;
@@ -36,7 +37,6 @@
         background: white;
         display: flex;
         flex-direction: column;
-        font-size: 13px;
         height: 160px;
         width: 400px;
       }
@@ -86,19 +86,6 @@
         color: var(--paper-grey-600);
       }
 
-      #description,
-      #extension-id,
-      #inspect-views {
-        line-height: 20px;
-      }
-
-      #inspect-views paper-button {
-        color: var(--google-blue-700);
-        height: 20px;
-        padding: 0;
-        text-transform: none;
-      }
-
       #button-strip {
         -webkit-padding-end: 4px;
         -webkit-padding-start: 20px;
@@ -109,15 +96,32 @@
         padding-top: 8px;
       }
 
+      #button-strip paper-button {
+        margin: 0 4px;
+      }
+
       #source-indicator {
         -webkit-margin-start: 30px;
         margin-top: 30px;
         position: absolute;
       }
 
-      #source-indicator iron-icon {
+      .source-icon-wrapper {
+        align-items: center;
+        background: rgb(241, 89, 43);
+        border-radius: 50%;  /* 50% border radius == a circle */
+        box-shadow: 0 1px 1px 0 rgba(0, 0, 0, 0.22),
+                    0 2px 2px 0 rgba(0, 0, 0, 0.12);
+        display: flex;
         height: 22px;
+        justify-content: center;
         width: 22px;
+      }
+
+      #source-indicator iron-icon {
+        color: white;
+        height: 16px;
+        width: 16px;
       }
 
       #source-indicator-text {
@@ -138,22 +142,19 @@
         display: block;
       }
 
-      paper-button,
       paper-toggle-button {
         cursor: pointer;
       }
 
-      #button-strip paper-button {
-        align-items: center;
-        display: flex;
-        margin: 0 4px;
-        min-height: 32px;
-        padding: 0 12px;
-        text-transform: uppercase;
-      }
-
       .action-button {
         color: var(--google-blue-500);
+      }
+
+      #dev-reload-button {
+        -webkit-margin-end: 20px;
+        height: 20px;
+        padding: 0;
+        width: 20px;
       }
 
       #warnings {
@@ -169,8 +170,10 @@
         <template is="dom-if"
             if="[[computeSourceIndicatorIcon_(data.*)]]">
           <div id="source-indicator">
-            <iron-icon icon="[[computeSourceIndicatorIcon_(data.*)]]">
-            </iron-icon>
+            <div class="source-icon-wrapper">
+              <iron-icon icon="[[computeSourceIndicatorIcon_(data.*)]]">
+              </iron-icon>
+            </div>
             <div id="source-indicator-text">
               [[computeSourceIndicatorText_(data.*)]]
             </div>
@@ -208,20 +211,20 @@
                 if="[[!computeInspectViewsHidden_(data.views)]]">
               <div id="inspect-views">
                 <span>$i18n{itemInspectViews}</span>
-                <paper-button on-tap="onInspectTap_">
+                <a is="action-link" on-tap="onInspectTap_">
                   [[computeFirstInspectLabel_(data.views)]]
-                </paper-button>
-                <paper-button
+                </a>
+                <a is="action-link"
                     hidden$="[[computeExtraViewsHidden_(data.views)]]"
                     on-tap="onExtraInspectTap_">
                   [[computeExtraInspectLabel_(data.views)]]
-                </paper-button>
+                </a>
               </div>
             </template>
           </template>
         </div>
       </div>
-      <div id="button-strip" class="layout horizontal">
+      <div id="button-strip" class="layout horizontal center">
         <div class="layout flex horizontal center">
           <paper-button id="details-button" on-tap="onDetailsTap_">
             $i18n{itemDetails}
@@ -234,18 +237,24 @@
             $i18n{itemErrors}
           </paper-button>
         </div>
+        <template is="dom-if" if="[[!computeDevReloadButtonHidden_(data.*)]]">
+          <paper-icon-button id="dev-reload-button"
+              on-tap="onReloadTap_" icon="refresh">
+          </paper-icon-button>
+        </template>
         <paper-button id="repair-button" class="action-button"
             on-tap="onRepairTap_"
             hidden$="[[!data.disableReasons.corruptInstall]]">
           $i18n{itemRepair}
         </paper-button>
-        <paper-button id="reload-button" on-tap="onReloadTap_"
+        <paper-button id="terminated-reload-button" on-tap="onReloadTap_"
             class="action-button"
             hidden$="[[!isTerminated_(data.state)]]">
           $i18n{itemReload}
         </paper-button>
         <paper-toggle-button id="enable-toggle" class="action-button"
             checked="[[isEnabled_(data.state)]]" on-change="onEnableChange_"
+            enabled="[[isEnableToggleEnabled_(data)]]"
             hidden$="[[!showEnableToggle_(data.*)]]">
         </paper-toggle-button>
       </div>

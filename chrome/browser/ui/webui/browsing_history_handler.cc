@@ -7,7 +7,6 @@
 #include <stddef.h>
 
 #include <set>
-#include <utility>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -19,21 +18,18 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
-#include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/favicon/fallback_icon_service_factory.h"
 #include "chrome/browser/favicon/large_icon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
-#include "chrome/browser/ui/webui/large_icon_source.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/features.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/browser_sync/profile_sync_service.h"
-#include "components/favicon/core/fallback_icon_service.h"
 #include "components/favicon/core/fallback_url_util.h"
 #include "components/favicon/core/large_icon_service.h"
 #include "components/query_parser/snippet.h"
@@ -53,15 +49,6 @@
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #endif
-
-#if defined(OS_ANDROID)
-#include "chrome/browser/android/chrome_application.h"
-#else
-#include "chrome/common/chrome_features.h"
-#endif
-
-// Number of chars to truncate titles when making them "short".
-static const size_t kShortTitleLength = 300;
 
 using bookmarks::BookmarkModel;
 
@@ -87,15 +74,6 @@ base::string16 GetRelativeDateLocalized(base::Clock* clock,
         base::TimeFormatFriendlyDate(visit_time));
   }
   return date_str;
-}
-
-// Sets the correct year when substracting months from a date.
-void NormalizeMonths(base::Time::Exploded* exploded) {
-  // Decrease a year at a time until we have a proper date.
-  while (exploded->month < 1) {
-    exploded->month += 12;
-    exploded->year--;
-  }
 }
 
 // Gets the name and type of a device for the given sync client ID.
@@ -133,8 +111,7 @@ void GetDeviceNameAndType(const browser_sync::ProfileSyncService* sync_service,
 
 // Formats |entry|'s URL and title and adds them to |result|.
 void SetHistoryEntryUrlAndTitle(BrowsingHistoryService::HistoryEntry* entry,
-                                base::DictionaryValue* result,
-                                bool limit_title_length) {
+                                base::DictionaryValue* result) {
   result->SetString("url", entry->url.spec());
 
   bool using_url_as_the_title = false;
@@ -155,9 +132,12 @@ void SetHistoryEntryUrlAndTitle(BrowsingHistoryService::HistoryEntry* entry,
       base::i18n::AdjustStringForLocaleDirection(&title_to_set);
   }
 
-  result->SetString("title",
-      limit_title_length ? title_to_set.substr(0, kShortTitleLength)
-                         : title_to_set);
+  // Number of chars to truncate titles when making them "short".
+  static const size_t kShortTitleLength = 300;
+  if (title_to_set.size() > kShortTitleLength)
+    title_to_set.resize(kShortTitleLength);
+
+  result->SetString("title", title_to_set);
 }
 
 // Converts |entry| to a DictionaryValue to be owned by the caller.
@@ -165,10 +145,9 @@ std::unique_ptr<base::DictionaryValue> HistoryEntryToValue(
     BrowsingHistoryService::HistoryEntry* entry,
     BookmarkModel* bookmark_model,
     SupervisedUserService* supervised_user_service,
-    const browser_sync::ProfileSyncService* sync_service,
-    bool limit_title_length) {
+    const browser_sync::ProfileSyncService* sync_service) {
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
-  SetHistoryEntryUrlAndTitle(entry, result.get(), limit_title_length);
+  SetHistoryEntryUrlAndTitle(entry, result.get());
 
   base::string16 domain = url_formatter::IDNToUnicode(entry->url.host());
   // When the domain is empty, use the scheme instead. This allows for a
@@ -194,7 +173,7 @@ std::unique_ptr<base::DictionaryValue> HistoryEntryToValue(
        it != entry->all_timestamps.end(); ++it) {
     timestamps->AppendDouble(base::Time::FromInternalValue(*it).ToJsTime());
   }
-  result->Set("allTimestamps", timestamps.release());
+  result->Set("allTimestamps", std::move(timestamps));
 
   // Always pass the short date since it is needed both in the search and in
   // the monthly view.
@@ -238,7 +217,7 @@ std::unique_ptr<base::DictionaryValue> HistoryEntryToValue(
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   if (supervised_user_service) {
     const SupervisedUserURLFilter* url_filter =
-        supervised_user_service->GetURLFilterForUIThread();
+        supervised_user_service->GetURLFilter();
     int filtering_behavior =
         url_filter->GetFilteringBehaviorForURL(entry->url.GetWithEmptyPath());
     is_blocked_visit = entry->blocked_visit;
@@ -271,18 +250,7 @@ void BrowsingHistoryHandler::RegisterMessages() {
 
   // Create our favicon data source.
   Profile* profile = Profile::FromWebUI(web_ui());
-
-#if defined(OS_ANDROID)
-  favicon::FallbackIconService* fallback_icon_service =
-      FallbackIconServiceFactory::GetForBrowserContext(profile);
-  favicon::LargeIconService* large_icon_service =
-      LargeIconServiceFactory::GetForBrowserContext(profile);
-  content::URLDataSource::Add(
-      profile, new LargeIconSource(fallback_icon_service, large_icon_service));
-#else
-  content::URLDataSource::Add(
-      profile, new FaviconSource(profile, FaviconSource::ANY));
-#endif
+  content::URLDataSource::Add(profile, new FaviconSource(profile));
 
   web_ui()->RegisterMessageCallback("queryHistory",
       base::Bind(&BrowsingHistoryHandler::HandleQueryHistory,
@@ -298,59 +266,27 @@ void BrowsingHistoryHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-bool BrowsingHistoryHandler::ExtractIntegerValueAtIndex(
-    const base::ListValue* value,
-    int index,
-    int* out_int) {
-  double double_value;
-  if (value->GetDouble(index, &double_value)) {
-    *out_int = static_cast<int>(double_value);
-    return true;
-  }
-  NOTREACHED();
-  return false;
-}
-
 void BrowsingHistoryHandler::HandleQueryHistory(const base::ListValue* args) {
   history::QueryOptions options;
 
   // Parse the arguments from JavaScript. There are five required arguments:
   // - the text to search for (may be empty)
-  // - the offset from which the search should start (in multiples of week or
-  //   month, set by the next argument).
-  // - the range (BrowsingHistoryHandler::Range) Enum value that sets the range
-  //   of the query.
   // - the end time for the query. Only results older than this time will be
   //   returned.
   // - the maximum number of results to return (may be 0, meaning that there
   //   is no maximum).
   base::string16 search_text = ExtractStringValue(args);
-  int offset;
-  if (!args->GetInteger(1, &offset)) {
-    NOTREACHED() << "Failed to convert argument 1. ";
-    return;
-  }
-  int range;
-  if (!args->GetInteger(2, &range)) {
-    NOTREACHED() << "Failed to convert argument 2. ";
-    return;
-  }
-
-  if (range == BrowsingHistoryHandler::MONTH)
-    SetQueryTimeInMonths(offset, &options);
-  else if (range == BrowsingHistoryHandler::WEEK)
-    SetQueryTimeInWeeks(offset, &options);
 
   double end_time;
-  if (!args->GetDouble(3, &end_time)) {
-    NOTREACHED() << "Failed to convert argument 3. ";
+  if (!args->GetDouble(1, &end_time)) {
+    NOTREACHED() << "Failed to convert argument 1. ";
     return;
   }
   if (end_time)
     options.end_time = base::Time::FromJsTime(end_time);
 
-  if (!ExtractIntegerValueAtIndex(args, 4, &options.max_count)) {
-    NOTREACHED() << "Failed to convert argument 4.";
+  if (!args->GetInteger(2, &options.max_count)) {
+    NOTREACHED() << "Failed to convert argument 2.";
     return;
   }
 
@@ -364,18 +300,17 @@ void BrowsingHistoryHandler::HandleRemoveVisits(const base::ListValue* args) {
   items_to_remove.reserve(args->GetSize());
   for (base::ListValue::const_iterator it = args->begin();
        it != args->end(); ++it) {
-    base::DictionaryValue* deletion = NULL;
+    const base::DictionaryValue* deletion = NULL;
     base::string16 url;
-    base::ListValue* timestamps = NULL;
+    const base::ListValue* timestamps = NULL;
 
     // Each argument is a dictionary with properties "url" and "timestamps".
-    if (!((*it)->GetAsDictionary(&deletion) &&
-        deletion->GetString("url", &url) &&
-        deletion->GetList("timestamps", &timestamps))) {
+    if (!(it->GetAsDictionary(&deletion) && deletion->GetString("url", &url) &&
+          deletion->GetList("timestamps", &timestamps))) {
       NOTREACHED() << "Unable to extract arguments";
       return;
     }
-    DCHECK(timestamps->GetSize() > 0);
+    DCHECK_GT(timestamps->GetSize(), 0U);
     std::unique_ptr<BrowsingHistoryService::HistoryEntry> entry(
             new BrowsingHistoryService::HistoryEntry());
 
@@ -384,7 +319,7 @@ void BrowsingHistoryHandler::HandleRemoveVisits(const base::ListValue* args) {
     double timestamp;
     for (base::ListValue::const_iterator ts_iterator = timestamps->begin();
          ts_iterator != timestamps->end(); ++ts_iterator) {
-      if (!(*ts_iterator)->GetAsDouble(&timestamp)) {
+      if (!ts_iterator->GetAsDouble(&timestamp)) {
         NOTREACHED() << "Unable to extract visit timestamp.";
         continue;
       }
@@ -402,16 +337,11 @@ void BrowsingHistoryHandler::HandleRemoveVisits(const base::ListValue* args) {
 
 void BrowsingHistoryHandler::HandleClearBrowsingData(
     const base::ListValue* args) {
-#if defined(OS_ANDROID)
-  chrome::android::ChromeApplication::OpenClearBrowsingData(
-      web_ui()->GetWebContents());
-#else
   // TODO(beng): This is an improper direct dependency on Browser. Route this
   // through some sort of delegate.
   Browser* browser = chrome::FindBrowserWithWebContents(
       web_ui()->GetWebContents());
   chrome::ShowClearBrowsingDataDialog(browser);
-#endif
 }
 
 void BrowsingHistoryHandler::HandleRemoveBookmark(const base::ListValue* args) {
@@ -419,59 +349,6 @@ void BrowsingHistoryHandler::HandleRemoveBookmark(const base::ListValue* args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(profile);
   bookmarks::RemoveAllBookmarks(model, GURL(url));
-}
-
-void BrowsingHistoryHandler::SetQueryTimeInWeeks(
-    int offset, history::QueryOptions* options) {
-  // LocalMidnight returns the beginning of the current day so get the
-  // beginning of the next one.
-  base::Time midnight =
-      clock_->Now().LocalMidnight() + base::TimeDelta::FromDays(1);
-  options->end_time = midnight -
-      base::TimeDelta::FromDays(7 * offset);
-  options->begin_time = midnight -
-      base::TimeDelta::FromDays(7 * (offset + 1));
-}
-
-void BrowsingHistoryHandler::SetQueryTimeInMonths(
-    int offset, history::QueryOptions* options) {
-  // Configure the begin point of the search to the start of the
-  // current month.
-  base::Time::Exploded exploded;
-  clock_->Now().LocalMidnight().LocalExplode(&exploded);
-  exploded.day_of_month = 1;
-
-  if (offset == 0) {
-    if (!base::Time::FromLocalExploded(exploded, &options->begin_time)) {
-      // TODO(maksims): implement errors handling here.
-      NOTIMPLEMENTED();
-    }
-
-    // Set the end time of this first search to null (which will
-    // show results from the future, should the user's clock have
-    // been set incorrectly).
-    options->end_time = base::Time();
-  } else {
-    // Go back |offset| months in the past. The end time is not inclusive, so
-    // use the first day of the |offset| - 1 and |offset| months (e.g. for
-    // the last month, |offset| = 1, use the first days of the last month and
-    // the current month.
-    exploded.month -= offset - 1;
-    // Set the correct year.
-    NormalizeMonths(&exploded);
-    if (!base::Time::FromLocalExploded(exploded, &options->end_time)) {
-      // TODO(maksims): implement errors handling here.
-      NOTIMPLEMENTED();
-    }
-
-    exploded.month -= 1;
-    // Set the correct year
-    NormalizeMonths(&exploded);
-    if (!base::Time::FromLocalExploded(exploded, &options->begin_time)) {
-      // TODO(maksims): implement errors handling here.
-      NOTIMPLEMENTED();
-    }
-  }
 }
 
 void BrowsingHistoryHandler::OnQueryComplete(
@@ -489,17 +366,12 @@ void BrowsingHistoryHandler::OnQueryComplete(
   browser_sync::ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
 
-  bool is_md = false;
-#if !defined(OS_ANDROID)
-  is_md = base::FeatureList::IsEnabled(::features::kMaterialDesignHistory);
-#endif
-
   // Convert the result vector into a ListValue.
   base::ListValue results_value;
   for (std::vector<BrowsingHistoryService::HistoryEntry>::iterator it =
            results->begin(); it != results->end(); ++it) {
-    std::unique_ptr<base::Value> value(HistoryEntryToValue(&(*it),
-        bookmark_model, supervised_user_service, sync_service, is_md));
+    std::unique_ptr<base::Value> value(HistoryEntryToValue(
+        &(*it), bookmark_model, supervised_user_service, sync_service));
     results_value.Append(std::move(value));
   }
 
@@ -521,17 +393,6 @@ void BrowsingHistoryHandler::OnQueryComplete(
   results_info.SetString(
       "queryEndTime",
       GetRelativeDateLocalized(clock_.get(), query_results_info->end_time));
-
-  // TODO(calamity): Clean up grouped-specific fields once grouped history is
-  // removed.
-  results_info.SetString(
-      "queryStartMonth",
-      base::TimeFormatMonthAndYear(query_results_info->start_time));
-  results_info.SetString(
-      "queryInterval",
-      base::DateIntervalFormat(query_results_info->start_time,
-                               query_results_info->end_time,
-                               base::DATE_FORMAT_MONTH_WEEKDAY_DAY));
 
   web_ui()->CallJavascriptFunctionUnsafe("historyResult", results_info,
                                          results_value);

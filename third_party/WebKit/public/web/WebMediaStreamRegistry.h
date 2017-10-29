@@ -31,7 +31,7 @@
 #ifndef WebMediaStreamRegistry_h
 #define WebMediaStreamRegistry_h
 
-#include "../platform/WebString.h"
+#include "public/platform/WebString.h"
 
 namespace blink {
 
@@ -40,7 +40,7 @@ class WebURL;
 
 class WebMediaStreamRegistry {
  public:
-  BLINK_EXPORT static WebMediaStream lookupMediaStreamDescriptor(const WebURL&);
+  BLINK_EXPORT static WebMediaStream LookupMediaStreamDescriptor(const WebURL&);
 };
 
 }  // namespace blink

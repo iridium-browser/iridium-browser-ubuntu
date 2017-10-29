@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -25,14 +24,14 @@
 #include "chromeos/cryptohome/mock_async_method_caller.h"
 #include "chromeos/dbus/fake_cryptohome_client.h"
 #include "chromeos/settings/cros_settings_names.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
 using testing::DoAll;
 using testing::Invoke;
 using testing::Return;
-using testing::SetArgumentPointee;
+using testing::SetArgPointee;
 using testing::StrictMock;
 using testing::WithArgs;
 
@@ -105,13 +104,15 @@ class CustomFakeCryptohomeClient : public FakeCryptohomeClient {
   void TpmAttestationIsEnrolled(
       const BoolDBusMethodCallback& callback) override {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, call_status_, attestation_enrolled_));
+        FROM_HERE,
+        base::BindOnce(callback, call_status_, attestation_enrolled_));
   }
 
   void TpmAttestationIsPrepared(
       const BoolDBusMethodCallback& callback) override {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, call_status_, attestation_prepared_));
+        FROM_HERE,
+        base::BindOnce(callback, call_status_, attestation_prepared_));
   }
 
   void set_call_status(DBusMethodCallStatus call_status) {
@@ -137,8 +138,7 @@ class CustomFakeCryptohomeClient : public FakeCryptohomeClient {
 class PlatformVerificationFlowTest : public ::testing::Test {
  public:
   PlatformVerificationFlowTest()
-      : ui_thread_(content::BrowserThread::UI, &message_loop_),
-        certificate_success_(true),
+      : certificate_success_(true),
         fake_certificate_index_(0),
         sign_challenge_success_(true),
         result_(PlatformVerificationFlow::INTERNAL_ERROR) {}
@@ -188,15 +188,15 @@ class PlatformVerificationFlowTest : public ::testing::Test {
         (fake_certificate_index_ < fake_certificate_list_.size()) ?
             fake_certificate_list_[fake_certificate_index_] : kTestCertificate;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, certificate_success_, certificate));
+        FROM_HERE, base::BindOnce(callback, certificate_success_, certificate));
     ++fake_certificate_index_;
   }
 
   void FakeSignChallenge(
       const cryptohome::AsyncMethodCaller::DataCallback& callback) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, sign_challenge_success_,
-                              CreateFakeResponseProto()));
+        FROM_HERE, base::BindOnce(callback, sign_challenge_success_,
+                                  CreateFakeResponseProto()));
   }
 
   void FakeChallengeCallback(PlatformVerificationFlow::Result result,
@@ -219,8 +219,7 @@ class PlatformVerificationFlowTest : public ::testing::Test {
   }
 
  protected:
-  base::MessageLoopForUI message_loop_;
-  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   StrictMock<MockAttestationFlow> mock_attestation_flow_;
   cryptohome::MockAsyncMethodCaller mock_async_caller_;
   CustomFakeCryptohomeClient fake_cryptohome_client_;

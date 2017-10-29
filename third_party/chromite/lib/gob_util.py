@@ -21,12 +21,14 @@ import socket
 import sys
 import urllib
 import urlparse
+import warnings
 from cStringIO import StringIO
 
 from chromite.lib import constants
 from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import retry_util
+from chromite.lib import timeout_util
 
 
 try:
@@ -35,6 +37,7 @@ except (IOError, netrc.NetrcParseError):
   NETRC = netrc.netrc(os.devnull)
 TRY_LIMIT = 10
 SLEEP = 0.5
+REQUEST_TIMEOUT_SECONDS = 120  # 2 minutes.
 
 # Controls the transport protocol used to communicate with Gerrit servers using
 # git. This is parameterized primarily to enable cros_test_lib.GerritTestCase.
@@ -111,6 +114,7 @@ def GetCookies(host, path, cookie_paths=None):
 
 def CreateHttpConn(host, path, reqtype='GET', headers=None, body=None):
   """Opens an https connection to a gerrit service, and sends a request."""
+  path = '/a/' + path.lstrip('/')
   headers = headers or {}
   bare_host = host.partition(':')[0]
   auth = NETRC.authenticators(bare_host)
@@ -121,7 +125,7 @@ def CreateHttpConn(host, path, reqtype='GET', headers=None, body=None):
     logging.debug('No netrc file found')
 
   if 'Cookie' not in headers:
-    cookies = GetCookies(host, '/a/%s' % path)
+    cookies = GetCookies(host, path)
     headers['Cookie'] = '; '.join('%s=%s' % (n, v) for n, v in cookies.items())
 
   if 'User-Agent' not in headers:
@@ -135,7 +139,7 @@ def CreateHttpConn(host, path, reqtype='GET', headers=None, body=None):
     body = json.JSONEncoder().encode(body)
     headers.setdefault('Content-Type', 'application/json')
   if logging.getLogger().isEnabledFor(logging.DEBUG):
-    logging.debug('%s https://%s/a/%s', reqtype, host, path)
+    logging.debug('%s https://%s%s', reqtype, host, path)
     for key, val in headers.iteritems():
       if key.lower() in ('authorization', 'cookie'):
         val = 'HIDDEN'
@@ -145,7 +149,7 @@ def CreateHttpConn(host, path, reqtype='GET', headers=None, body=None):
   conn = httplib.HTTPSConnection(host)
   conn.req_host = host
   conn.req_params = {
-      'url': '/a/%s' % path,
+      'url': path,
       'method': reqtype,
       'headers': headers,
       'body': body,
@@ -175,6 +179,7 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
   Returns:
     A string buffer containing the connection's reply.
   """
+  @timeout_util.TimeoutDecorator(REQUEST_TIMEOUT_SECONDS)
   def _FetchUrlHelper():
     err_prefix = 'A transient error occured while querying %s:\n' % (host,)
     try:
@@ -248,8 +253,10 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
     else:
       raise GOBError(http_status=response.status, reason=response.reason)
 
-  return retry_util.RetryException((socket.error, InternalGOBError), TRY_LIMIT,
-                                   _FetchUrlHelper, sleep=SLEEP)
+  return retry_util.RetryException(
+      (socket.error, InternalGOBError, timeout_util.TimeoutError),
+      TRY_LIMIT,
+      _FetchUrlHelper, sleep=SLEEP)
 
 
 def FetchUrlJson(*args, **kwargs):
@@ -348,14 +355,18 @@ def GetChange(host, change):
   return FetchUrlJson(host, _GetChangePath(change))
 
 
-def GetChangeReview(host, change, revision='current'):
+def GetChangeReview(host, change, revision=None):
   """Get the current review information for a change."""
+  if revision is None:
+    revision = 'current'
   path = '%s/revisions/%s/review' % (_GetChangePath(change), revision)
   return FetchUrlJson(host, path)
 
 
-def GetChangeCommit(host, change, revision='current'):
+def GetChangeCommit(host, change, revision=None):
   """Get the current review information for a change."""
+  if revision is None:
+    revision = 'current'
   path = '%s/revisions/%s/commit' % (_GetChangePath(change), revision)
   return FetchUrlJson(host, path)
 
@@ -376,9 +387,14 @@ def GetChangeDetail(host, change, o_params=None):
 
 
 def GetChangeReviewers(host, change):
-  """Get information about all reviewers attached to a change."""
-  path = '%s/reviewers' % _GetChangePath(change)
-  return FetchUrlJson(host, path)
+  """Get information about all reviewers attached to a change.
+
+  Args:
+    host: The Gerrit host to interact with.
+    change: The Gerrit change ID.
+  """
+  warnings.warn('GetChangeReviewers is deprecated; use GetReviewers instead.')
+  GetReviewers(host, change)
 
 
 def AbandonChange(host, change, msg=''):
@@ -411,8 +427,10 @@ def DeleteDraft(host, change):
                ' %r' % change)
 
 
-def SubmitChange(host, change, revision='current', wait_for_merge=True):
+def SubmitChange(host, change, revision=None, wait_for_merge=True):
   """Submits a gerrit change via Gerrit."""
+  if revision is None:
+    revision = 'current'
   path = '%s/revisions/%s/submit' % (_GetChangePath(change), revision)
   body = {'wait_for_merge': wait_for_merge}
   return FetchUrlJson(host, path, reqtype='POST', body=body, ignore_404=False)
@@ -442,8 +460,32 @@ def CheckChange(host, change, sha1=None):
                       headers=headers)
 
 
+def GetAssignee(host, change):
+  """Get assignee for a change."""
+  path = '%s/assignee' % _GetChangePath(change)
+  return FetchUrlJson(host, path)
+
+
+def AddAssignee(host, change, assignee):
+  """Add reviewers to a change.
+
+  Args:
+    host: The Gerrit host to interact with.
+    change: The Gerrit change ID.
+    assignee: Gerrit account email as a string
+  """
+  path = '%s/assignee' % _GetChangePath(change)
+  body = {'assignee': assignee}
+  return  FetchUrlJson(host, path, reqtype='PUT', body=body, ignore_404=False)
+
+
 def GetReviewers(host, change):
-  """Get information about all reviewers attached to a change."""
+  """Get information about all reviewers attached to a change.
+
+  Args:
+    host: The Gerrit host to interact with.
+    change: The Gerrit change ID.
+  """
   path = '%s/reviewers' % _GetChangePath(change)
   return FetchUrlJson(host, path)
 
@@ -482,9 +524,10 @@ def RemoveReviewers(host, change, remove=None):
                  ' reviewer "%s" from change %s' % (r, change))
 
 
-def SetReview(host, change, revision='current', msg=None, labels=None,
-              notify=None):
+def SetReview(host, change, revision=None, msg=None, labels=None, notify=None):
   """Set labels and/or add a message to a code review."""
+  if revision is None:
+    revision = 'current'
   if not msg and not labels:
     return
   path = '%s/revisions/%s/review' % (_GetChangePath(change), revision)
@@ -496,7 +539,7 @@ def SetReview(host, change, revision='current', msg=None, labels=None,
   if notify:
     body['notify'] = notify
   response = FetchUrlJson(host, path, reqtype='POST', body=body)
-  if not response:
+  if response is None:
     raise GOBError(
         http_status=404,
         reason='CL %s not found in %s' % (change, host))
@@ -516,9 +559,26 @@ def SetTopic(host, change, topic):
   return FetchUrlJson(host, path, reqtype='PUT', body=body, ignore_404=False)
 
 
-def ResetReviewLabels(host, change, label, value='0', revision='current',
+def SetHashtags(host, change, add, remove):
+  """Adds and / or removes hashtags from a change.
+
+  Args:
+    host: Hostname (without protocol prefix) of the gerrit server.
+    change: A gerrit change number.
+    add: a list of hashtags to be added.
+    remove: a list of hashtags to be removed.
+  """
+  path = '%s/hashtags' % _GetChangePath(change)
+  return FetchUrlJson(host, path, reqtype='POST',
+                      body={'add': add, 'remove': remove},
+                      ignore_404=False)
+
+
+def ResetReviewLabels(host, change, label, value='0', revision=None,
                       message=None, notify=None):
   """Reset the value of a given label for all reviewers on a change."""
+  if revision is None:
+    revision = 'current'
   # This is tricky when working on the "current" revision, because there's
   # always the risk that the "current" revision will change in between API
   # calls.  So, the code dereferences the "current" revision down to a literal

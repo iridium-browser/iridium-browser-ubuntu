@@ -431,6 +431,7 @@ class DevServerWrapper(multiprocessing.Process):
 
     return url
 
+
   @classmethod
   def OpenURL(cls, url, ignore_url_error=False, timeout=60):
     """Returns the HTTP response of a URL."""
@@ -438,11 +439,11 @@ class DevServerWrapper(multiprocessing.Process):
     try:
       res = urllib2.urlopen(url, timeout=timeout)
     except (urllib2.HTTPError, httplib.HTTPException) as e:
-      logging.error('Devserver responded with an error!')
+      logging.error('Devserver responded with HTTP error (%s)', e)
       raise DevServerResponseError(e)
     except (urllib2.URLError, socket.timeout) as e:
       if not ignore_url_error:
-        logging.error('Cannot connect to devserver!')
+        logging.error('Cannot connect to devserver (%s)', e)
         raise DevServerConnectionError(e)
     else:
       return res.read()
@@ -479,7 +480,7 @@ class DevServerWrapper(multiprocessing.Process):
   def _ReadPortNumber(self):
     """Read port number from file."""
     if not self.is_alive():
-      raise DevServerStartupError('Devserver terminated unexpectedly!')
+      raise DevServerStartupError('Devserver is dead and has no port number')
 
     try:
       timeout_util.WaitForReturnTrue(os.path.exists,
@@ -488,14 +489,15 @@ class DevServerWrapper(multiprocessing.Process):
                                      period=5)
     except timeout_util.TimeoutError:
       self.terminate()
-      raise DevServerStartupError('Devserver portfile does not exist!')
+      raise DevServerStartupError('Timeout (%s) waiting for devserver '
+                                  'port_file' % self.DEV_SERVER_TIMEOUT)
 
     self.port = int(osutils.ReadFile(self.port_file).strip())
 
   def IsReady(self):
     """Check if devserver is up and running."""
     if not self.is_alive():
-      raise DevServerStartupError('Devserver terminated unexpectedly!')
+      raise DevServerStartupError('Devserver is not ready because it died')
 
     url = os.path.join('http://%s:%d' % (remote_access.LOCALHOST_IP, self.port),
                        'check_health')
@@ -562,11 +564,11 @@ class DevServerWrapper(multiprocessing.Process):
         cwd=constants.SOURCE_ROOT, error_code_ok=True,
         redirect_stdout=True, combine_stdout_stderr=True)
     if result.returncode != 0:
-      msg = (('Devserver failed to start!\n'
-              '--- Start output from the devserver startup command ---\n'
-              '%s'
-              '--- End output from the devserver startup command ---') %
-             (result.output))
+      msg = ('Devserver failed to start!\n'
+             '--- Start output from the devserver startup command ---\n'
+             '%s'
+             '--- End output from the devserver startup command ---' %
+             result.output)
       logging.error(msg)
 
   def Start(self):
@@ -589,7 +591,7 @@ class DevServerWrapper(multiprocessing.Process):
     if self.is_alive():
       self._RunCommand(['kill', self._pid], error_code_ok=True)
     else:
-      logging.debug('Devserver not running!')
+      logging.debug('Devserver not running')
       return
 
     self.join(self.KILL_TIMEOUT)
@@ -690,7 +692,8 @@ You can fix this with one of the following three options:
   def _ReadPortNumber(self):
     """Read port number from file."""
     if not self.is_alive():
-      raise DevServerStartupError('Devserver terminated unexpectedly!')
+      raise DevServerStartupError('Devserver not alive '
+                                  'therefore no port number')
 
     def PortFileExists():
       result = self._RunCommand(['test', '-f', self.port_file],
@@ -703,7 +706,8 @@ You can fix this with one of the following three options:
                                      period=5)
     except timeout_util.TimeoutError:
       self.terminate()
-      raise DevServerStartupError('Devserver portfile does not exist!')
+      raise DevServerStartupError('Timeout (%s) waiting for remote devserver'
+                                  ' port_file' % self.DEV_SERVER_TIMEOUT)
 
     self.port = int(self._RunCommand(
         ['cat', self.port_file], capture_output=True).output.strip())
@@ -711,7 +715,7 @@ You can fix this with one of the following three options:
   def IsReady(self):
     """Returns True if devserver is ready to accept requests."""
     if not self.is_alive():
-      raise DevServerStartupError('Devserver terminated unexpectedly!')
+      raise DevServerStartupError('Devserver not alive therefore not ready')
 
     url = os.path.join('http://127.0.0.1:%d' % self.port, 'check_health')
     # Running wget through ssh because the port on the device is not
@@ -729,7 +733,8 @@ You can fix this with one of the following three options:
            '--logfile=%s' % self.log_file,
            '--pidfile', self._pid_file,
            '--port=%d' % port,
-           '--critical_update']
+           '--critical_update',
+           '--host_log']
 
     if not self.port:
       cmd.append('--portfile=%s' % self.port_file)
@@ -764,3 +769,18 @@ You can fix this with one of the following three options:
   def WipeStaticDirectory(cls, static_dir):
     """Cleans up |static_dir|."""
     raise NotImplementedError()
+
+  def GetDevServerHostLogURL(self, ip=None, port=None, host=None):
+    """Returns the dev server host log url.
+
+    Args:
+      ip: IP address of the devserver.
+      port: Port number of devserver.
+      host: The host to get the hostlog for.
+    """
+    if self.is_alive():
+      host_log = 'api/hostlog?ip=%s' % host
+      devserver_host_log = self.GetDevServerURL(ip=ip, port=port,
+                                                sub_dir=host_log)
+      logging.debug('Host Log URL: %s' % devserver_host_log)
+      return devserver_host_log

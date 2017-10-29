@@ -30,21 +30,20 @@
 
 #include "web/LocalFrameClientImpl.h"
 
-#include "core/loader/FrameLoader.h"
+#include "core/frame/FrameTestHelpers.h"
+#include "core/frame/WebLocalFrameBase.h"
 #include "platform/weborigin/KURL.h"
+#include "platform/wtf/text/CString.h"
+#include "platform/wtf/text/WTFString.h"
 #include "public/web/WebFrameClient.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebView.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "web/WebLocalFrameImpl.h"
-#include "web/tests/FrameTestHelpers.h"
-#include "wtf/text/CString.h"
-#include "wtf/text/WTFString.h"
 
-using testing::_;
-using testing::Mock;
-using testing::Return;
+using ::testing::_;
+using ::testing::Mock;
+using ::testing::Return;
 
 namespace blink {
 namespace {
@@ -53,67 +52,61 @@ class MockWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
  public:
   ~MockWebFrameClient() override {}
 
-  MOCK_METHOD0(userAgentOverride, WebString());
+  MOCK_METHOD0(UserAgentOverride, WebString());
 };
 
 class LocalFrameClientImplTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    ON_CALL(m_webFrameClient, userAgentOverride())
+    ON_CALL(web_frame_client_, UserAgentOverride())
         .WillByDefault(Return(WebString()));
 
-    FrameTestHelpers::TestWebViewClient webViewClient;
-    m_webView = WebView::create(&webViewClient, WebPageVisibilityStateVisible);
+    helper_.Initialize(&web_frame_client_);
     // FIXME: http://crbug.com/363843. This needs to find a better way to
     // not create graphics layers.
-    m_webView->settings()->setAcceleratedCompositingEnabled(false);
-    m_mainFrame = WebLocalFrame::create(WebTreeScopeType::Document,
-                                        &m_webFrameClient, nullptr, nullptr);
-    m_webView->setMainFrame(m_mainFrame);
+    helper_.WebView()->GetSettings()->SetAcceleratedCompositingEnabled(false);
   }
 
-  void TearDown() override { m_webView->close(); }
+  void TearDown() override {
+    // Tearing down the WebView by resetting the helper will call
+    // UserAgentOverride() in order to store the information for detached
+    // requests.
+    EXPECT_CALL(WebFrameClient(), UserAgentOverride());
+    helper_.Reset();
+  }
 
-  WebString userAgent() {
+  WebString UserAgent() {
     // The test always returns the same user agent .
-    WTF::CString userAgent = localFrameClient().userAgent().utf8();
-    return WebString::fromUTF8(userAgent.data(), userAgent.length());
+    WTF::CString user_agent = GetLocalFrameClient().UserAgent().Utf8();
+    return WebString::FromUTF8(user_agent.data(), user_agent.length());
   }
 
-  WebLocalFrameImpl* mainFrame() {
-    return toWebLocalFrameImpl(m_webView->mainFrame());
-  }
-  Document& document() {
-    return *toWebLocalFrameImpl(m_mainFrame)->frame()->document();
-  }
-  MockWebFrameClient& webFrameClient() { return m_webFrameClient; }
-  LocalFrameClient& localFrameClient() {
-    return *toLocalFrameClientImpl(toWebLocalFrameImpl(m_webView->mainFrame())
-                                       ->frame()
-                                       ->loader()
-                                       .client());
+  WebLocalFrameBase* MainFrame() { return helper_.LocalMainFrame(); }
+  Document& GetDocument() { return *MainFrame()->GetFrame()->GetDocument(); }
+  MockWebFrameClient& WebFrameClient() { return web_frame_client_; }
+  LocalFrameClient& GetLocalFrameClient() {
+    return *ToLocalFrameClientImpl(MainFrame()->GetFrame()->Client());
   }
 
  private:
-  MockWebFrameClient m_webFrameClient;
-  WebView* m_webView;
-  WebLocalFrame* m_mainFrame;
+  MockWebFrameClient web_frame_client_;
+  FrameTestHelpers::WebViewHelper helper_;
 };
 
 TEST_F(LocalFrameClientImplTest, UserAgentOverride) {
-  const WebString defaultUserAgent = userAgent();
-  const WebString overrideUserAgent = WebString::fromUTF8("dummy override");
+  const WebString default_user_agent = UserAgent();
+  const WebString override_user_agent = WebString::FromUTF8("dummy override");
 
   // Override the user agent and make sure we get it back.
-  EXPECT_CALL(webFrameClient(), userAgentOverride())
-      .WillOnce(Return(overrideUserAgent));
-  EXPECT_TRUE(overrideUserAgent.equals(userAgent()));
-  Mock::VerifyAndClearExpectations(&webFrameClient());
+  EXPECT_CALL(WebFrameClient(), UserAgentOverride())
+      .WillOnce(Return(override_user_agent));
+  EXPECT_TRUE(override_user_agent.Equals(UserAgent()));
+  Mock::VerifyAndClearExpectations(&WebFrameClient());
 
   // Remove the override and make sure we get the original back.
-  EXPECT_CALL(webFrameClient(), userAgentOverride())
+  EXPECT_CALL(WebFrameClient(), UserAgentOverride())
       .WillOnce(Return(WebString()));
-  EXPECT_TRUE(defaultUserAgent.equals(userAgent()));
+  EXPECT_TRUE(default_user_agent.Equals(UserAgent()));
 }
 
 }  // namespace

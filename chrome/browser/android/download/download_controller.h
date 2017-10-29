@@ -19,13 +19,12 @@
 #ifndef CHROME_BROWSER_ANDROID_DOWNLOAD_DOWNLOAD_CONTROLLER_H_
 #define CHROME_BROWSER_ANDROID_DOWNLOAD_DOWNLOAD_CONTROLLER_H_
 
+#include <map>
+#include <utility>
+
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/singleton.h"
 #include "chrome/browser/android/download/download_controller_base.h"
-
-namespace ui {
-class WindowAndroid;
-}
 
 namespace content {
 class WebContents;
@@ -35,18 +34,14 @@ class DownloadController : public DownloadControllerBase {
  public:
   static DownloadController* GetInstance();
 
-  static bool RegisterDownloadController(JNIEnv* env);
-
-  // Called when DownloadController Java object is instantiated.
-  void Init(JNIEnv* env, jobject obj);
-
   // DownloadControllerBase implementation.
   void AcquireFileAccessPermission(
-      content::WebContents* web_contents,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const AcquireFileAccessPermissionCallback& callback) override;
   void CreateAndroidDownload(
       const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const DownloadInfo& info) override;
+  void AboutToResumeDownload(content::DownloadItem* download_item) override;
 
   // UMA histogram enum for download cancellation reasons. Keep this
   // in sync with MobileDownloadCancelReason in histograms.xml. This should be
@@ -65,14 +60,31 @@ class DownloadController : public DownloadControllerBase {
   };
   static void RecordDownloadCancelReason(DownloadCancelReason reason);
 
+  // UMA histogram enum for download storage permission requests. Keep this
+  // in sync with MobileDownloadStoragePermission in histograms.xml. This should
+  // be append only.
+  enum StoragePermissionType {
+    STORAGE_PERMISSION_REQUESTED = 0,
+    STORAGE_PERMISSION_NO_ACTION_NEEDED,
+    STORAGE_PERMISSION_GRANTED,
+    STORAGE_PERMISSION_DENIED,
+    STORAGE_PERMISSION_NO_WEB_CONTENTS,
+    STORAGE_PERMISSION_MAX
+  };
+  static void RecordStoragePermission(StoragePermissionType type);
+
+  // Callback when user permission prompt finishes. Args: whether file access
+  // permission is acquired, which permission to update.
+  typedef base::Callback<void(bool, const std::string&)>
+      AcquirePermissionCallback;
+
  private:
-  struct JavaObject;
   friend struct base::DefaultSingletonTraits<DownloadController>;
   DownloadController();
   ~DownloadController() override;
 
   // Helper method for implementing AcquireFileAccessPermission().
-  bool HasFileAccessPermission(ui::WindowAndroid* window_android);
+  bool HasFileAccessPermission();
 
   // DownloadControllerBase implementation.
   void OnDownloadStarted(content::DownloadItem* download_item) override;
@@ -98,12 +110,17 @@ class DownloadController : public DownloadControllerBase {
       const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const DownloadInfo& info, bool allowed);
 
-  // Creates Java object if it is not created already and returns it.
-  JavaObject* GetJavaObject();
-
-  JavaObject* java_object_;
+  // Check if an interrupted download item can be auto resumed.
+  bool IsInterruptedDownloadAutoResumable(content::DownloadItem* download_item);
 
   std::string default_file_name_;
+
+  using StrongValidatorsMap =
+      std::map<std::string, std::pair<std::string, std::string>>;
+  // Stores the previous strong validators before a download is resumed. If the
+  // strong validators change after resumption starts, the download will restart
+  // from the beginning and all downloaded data will be lost.
+  StrongValidatorsMap strong_validators_map_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadController);
 };

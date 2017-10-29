@@ -5,61 +5,71 @@
 #ifndef CSSTranslation_h
 #define CSSTranslation_h
 
-#include "core/css/cssom/CSSLengthValue.h"
+#include "core/css/CSSPrimitiveValue.h"
+#include "core/css/cssom/CSSStyleValue.h"
 #include "core/css/cssom/CSSTransformComponent.h"
+#include "core/css/cssom/CSSUnitValue.h"
 
 namespace blink {
 
+class CSSNumericValue;
+class DOMMatrix;
 class ExceptionState;
 
+// Represents a translation value in a CSSTransformValue used for properties
+// like "transform".
+// See CSSTranslation.idl for more information about this class.
 class CORE_EXPORT CSSTranslation final : public CSSTransformComponent {
   WTF_MAKE_NONCOPYABLE(CSSTranslation);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static CSSTranslation* create(CSSLengthValue* x,
-                                CSSLengthValue* y,
-                                ExceptionState&) {
-    return new CSSTranslation(x, y, nullptr);
-  }
-  static CSSTranslation* create(CSSLengthValue* x,
-                                CSSLengthValue* y,
-                                CSSLengthValue* z,
+  // Constructors defined in the IDL.
+  static CSSTranslation* Create(CSSNumericValue* x,
+                                CSSNumericValue* y,
+                                CSSNumericValue* z,
+                                ExceptionState&);
+  static CSSTranslation* Create(CSSNumericValue* x,
+                                CSSNumericValue* y,
                                 ExceptionState&);
 
-  static CSSTranslation* fromCSSValue(const CSSFunctionValue& value) {
-    return nullptr;
-  }
+  // Blink-internal ways of creating CSSTranslations.
+  static CSSTranslation* Create(CSSNumericValue* x, CSSNumericValue* y);
+  static CSSTranslation* Create(CSSNumericValue* x,
+                                CSSNumericValue* y,
+                                CSSNumericValue* z);
+  static CSSTranslation* FromCSSValue(const CSSFunctionValue&);
 
-  CSSLengthValue* x() const { return m_x; }
-  CSSLengthValue* y() const { return m_y; }
-  CSSLengthValue* z() const { return m_z; }
+  // Getters and setters for attributes defined in the IDL.
+  CSSNumericValue* x() { return x_; }
+  CSSNumericValue* y() { return y_; }
+  CSSNumericValue* z() { return z_; }
+  void setX(CSSNumericValue* x, ExceptionState&);
+  void setY(CSSNumericValue* y, ExceptionState&);
+  void setZ(CSSNumericValue* z, ExceptionState&);
 
-  TransformComponentType type() const override {
-    return is2D() ? TranslationType : Translation3DType;
-  }
-
-  // TODO: Implement asMatrix for CSSTranslation.
-  CSSMatrixComponent* asMatrix() const override { return nullptr; }
-
-  CSSFunctionValue* toCSSValue() const override;
+  // Internal methods - from CSSTransformComponent.
+  TransformComponentType GetType() const final { return kTranslationType; }
+  const DOMMatrix* AsMatrix() const final;
+  CSSFunctionValue* ToCSSValue() const final;
 
   DEFINE_INLINE_VIRTUAL_TRACE() {
-    visitor->trace(m_x);
-    visitor->trace(m_y);
-    visitor->trace(m_z);
-    CSSTransformComponent::trace(visitor);
+    visitor->Trace(x_);
+    visitor->Trace(y_);
+    visitor->Trace(z_);
+    CSSTransformComponent::Trace(visitor);
   }
 
  private:
-  CSSTranslation(CSSLengthValue* x, CSSLengthValue* y, CSSLengthValue* z)
-      : CSSTransformComponent(), m_x(x), m_y(y), m_z(z) {}
+  CSSTranslation(CSSNumericValue* x,
+                 CSSNumericValue* y,
+                 CSSNumericValue* z,
+                 bool is2D)
+      : CSSTransformComponent(is2D), x_(x), y_(y), z_(z) {}
 
-  bool is2D() const { return !m_z; }
-
-  Member<CSSLengthValue> m_x;
-  Member<CSSLengthValue> m_y;
-  Member<CSSLengthValue> m_z;
+  Member<CSSNumericValue> x_;
+  Member<CSSNumericValue> y_;
+  Member<CSSNumericValue> z_;
 };
 
 }  // namespace blink

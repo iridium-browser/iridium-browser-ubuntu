@@ -28,14 +28,14 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// http://www.w3.org/TR/WebCryptoAPI/#subtlecrypto-interface
+// https://w3c.github.io/webcrypto/Overview.html#subtlecrypto-interface
 
 typedef DOMString KeyFormat;
 typedef DOMString KeyUsage;
 typedef (Dictionary or DOMString) AlgorithmIdentifier;
 
 [
-    Exposed=(Window,Worker),
+    Exposed=(Window,Worker)
 ] interface SubtleCrypto {
     [CallWith=ScriptState, MeasureAs=SubtleCryptoEncrypt] Promise encrypt(AlgorithmIdentifier algorithm, CryptoKey key, BufferSource data);
     [CallWith=ScriptState, MeasureAs=SubtleCryptoDecrypt] Promise decrypt(AlgorithmIdentifier algorithm, CryptoKey key, BufferSource data);

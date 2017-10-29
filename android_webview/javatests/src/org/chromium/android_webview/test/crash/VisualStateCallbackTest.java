@@ -26,7 +26,9 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.parameter.ParameterizedTest;
+import org.chromium.base.test.util.RetryOnFailure;
+import org.chromium.base.test.util.parameter.SkipCommandLineParameterization;
+import org.chromium.content_public.common.ContentUrlConstants;
 
 import java.util.concurrent.TimeUnit;
 
@@ -150,15 +152,17 @@ public class VisualStateCallbackTest extends AwTestBase {
     // process gone, but before the AwContentsClient knows about it.
     @Feature({"AndroidWebView"})
     @SmallTest
-    @CommandLineFlags
-            .Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
-            @ParameterizedTest.Set
-            public void testAddVisualStateCallbackAfterRendererGone() throws Throwable {
+    @CommandLineFlags.Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
+    @SkipCommandLineParameterization
+    public void testAddVisualStateCallbackAfterRendererGone() throws Throwable {
+        final VisualStateCallbackImpl vsImpl = new VisualStateCallbackImpl();
+        mHelper.setOnRenderProcessGoneTask(new Runnable() {
+            @Override
+            public void run() {
+                mAwContents.insertVisualStateCallback(vsImpl.requestId(), vsImpl);
+            }
+        });
         loadUrlAsync(mAwContents, "chrome://kill");
-        mHelper.waitForRenderProcessGone();
-
-        VisualStateCallbackImpl vsImpl = new VisualStateCallbackImpl();
-        insertVisualStateCallbackOnUIThread(mAwContents, vsImpl.requestId(), vsImpl);
 
         mHelper.waitForRenderProcessGoneNotifiedToAwContentsClient();
 
@@ -171,16 +175,15 @@ public class VisualStateCallbackTest extends AwTestBase {
     // Tests the callback isn't invoked when AwContents knows about render process being gone.
     @Feature({"AndroidWebView"})
     @SmallTest
-    @CommandLineFlags
-            .Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
-            @ParameterizedTest.Set
-            public void testVisualStateCallbackNotCalledAfterRendererGone() throws Throwable {
-
+    @RetryOnFailure
+    @CommandLineFlags.Add(AwSwitches.WEBVIEW_SANDBOXED_RENDERER)
+    @SkipCommandLineParameterization
+    public void testVisualStateCallbackNotCalledAfterRendererGone() throws Throwable {
         VisualStateCallbackImpl vsImpl = new VisualStateCallbackImpl();
         insertVisualStateCallbackOnUIThread(mAwContents, vsImpl.requestId(), vsImpl);
         VisualStateCallbackHelper vsCallbackHelper = mAwContents.getVisualStateCallbackHelper();
         int callCount = vsCallbackHelper.getCallCount();
-        loadUrlAsync(mAwContents, "about:blank");
+        loadUrlAsync(mAwContents, ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
         vsCallbackHelper.waitForCallback(
                 callCount, 1, CallbackHelper.WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         assertEquals(callCount + 1, vsCallbackHelper.getCallCount());

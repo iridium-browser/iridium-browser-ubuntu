@@ -26,9 +26,23 @@ namespace omnibox {
 
 extern const base::Feature kNewOmniboxAnswerTypes;
 extern const base::Feature kOmniboxEntitySuggestions;
+extern const base::Feature kOmniboxTailSuggestions;
 extern const base::Feature kEnableClipboardProvider;
+extern const base::Feature kAndroidFakeboxDemotion;
+extern const base::Feature kAndroidFakeboxDemotionOnPhones;
 extern const base::Feature kSearchProviderWarmUpOnFocus;
 extern const base::Feature kSearchProviderContextAllowHttpsUrls;
+extern const base::Feature kZeroSuggestRedirectToChrome;
+extern const base::Feature kZeroSuggestSwapTitleAndUrl;
+extern const base::Feature kDisplayTitleForCurrentUrl;
+extern const base::Feature kUIExperimentElideSuggestionUrlAfterHost;
+extern const base::Feature kUIExperimentHideSuggestionUrlScheme;
+extern const base::Feature kUIExperimentHideSuggestionUrlTrivialSubdomains;
+extern const base::Feature kUIExperimentMaxAutocompleteMatches;
+extern const base::Feature kUIExperimentNarrowDropdown;
+extern const base::Feature kUIExperimentVerticalLayout;
+extern const base::Feature kUIExperimentVerticalMargin;
+extern const base::Feature kSpeculativeServiceWorkerStartOnQueryInput;
 }
 
 // The set of parameters customizing the HUP scoring.
@@ -301,6 +315,15 @@ class OmniboxFieldTrial {
   static float HQPExperimentalTopicalityThreshold();
 
   // ---------------------------------------------------------
+  // For experiment to limit HQP url indexing that's part of the bundled
+  // omnibox field trial.
+
+  // Returns the maximum number of history urls to index for HQP at the startup.
+  // Note: this limit is only applied at startup and more urls can be indexed
+  // during the session. Returns -1 if limit is not set by trials.
+  static int MaxNumHQPUrlsIndexedAtStartup();
+
+  // ---------------------------------------------------------
   // For the HQPFixFrequencyScoring experiment that's part of the
   // bundled omnibox field trial.
 
@@ -424,6 +447,16 @@ class OmniboxFieldTrial {
   static std::string ZeroSuggestRedirectToChromeAdditionalFields();
 
   // ---------------------------------------------------------
+  // Clipboard URL suggestions:
+
+  // The parameter "ClipboardURLMaximumAge" doesn't live in this file; instead
+  // it lives in
+  // components/open_from_clipboard/clipboard_recent_content.cc.
+  // Please see ClipboardRecentContent::MaximumAgeOfClipboard() for the usage
+  // of it.  The parameter cannot live here because that component cannot
+  // include this component, else there would be a circular dependency.
+
+  // ---------------------------------------------------------
   // Exposed publicly for the sake of unittests.
   static const char kBundledExperimentFieldTrialName[];
   // Rule names used by the bundled experiment.
@@ -473,6 +506,11 @@ class OmniboxFieldTrial {
   static const char kHQPExperimentalScoringBucketsParam[];
   static const char kHQPExperimentalScoringTopicalityThresholdParam[];
 
+  // Parameter names used by the experiment that limits the number of history
+  // urls indexed for suggestions.
+  static const char kMaxNumHQPUrlsIndexedAtStartupOnLowEndDevicesParam[];
+  static const char kMaxNumHQPUrlsIndexedAtStartupOnNonLowEndDevicesParam[];
+
   // Parameter names used by the Physical Web experimental scoring experiments.
   static const char kPhysicalWebZeroSuggestBaseRelevanceParam[];
   static const char kPhysicalWebAfterTypingBaseRelevanceParam[];
@@ -481,6 +519,10 @@ class OmniboxFieldTrial {
   // to a service provided by the Chrome team.
   static const char kZeroSuggestRedirectToChromeServerAddressParam[];
   static const char kZeroSuggestRedirectToChromeAdditionalFieldsParam[];
+
+  // Parameter names used by UI experiments.
+  static const char kUIMaxAutocompleteMatchesParam[];
+  static const char kUIVerticalMarginParam[];
 
   // The amount of time to wait before sending a new suggest request after the
   // previous one unless overridden by a field trial parameter.

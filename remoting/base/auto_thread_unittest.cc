@@ -2,19 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "remoting/base/auto_thread.h"
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/scoped_native_library.h"
 #include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
-#include "remoting/base/auto_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_WIN)
 #include <objbase.h>
-#include "base/win/windows_version.h"
 #endif
 
 namespace {
@@ -35,12 +35,6 @@ void PostSetFlagTask(
 void CheckComAptTypeTask(APTTYPE* apt_type_out, HRESULT* hresult) {
   typedef HRESULT (WINAPI * CoGetApartmentTypeFunc)
       (APTTYPE*, APTTYPEQUALIFIER*);
-
-  // CoGetApartmentType requires Windows 7 or above.
-  if (base::win::GetVersion() < base::win::VERSION_WIN7) {
-    *hresult = E_NOTIMPL;
-    return;
-  }
 
   // Dynamic link to the API so the same test binary can run on older systems.
   base::ScopedNativeLibrary com_library(base::FilePath(L"ole32.dll"));
@@ -164,13 +158,8 @@ TEST_F(AutoThreadTest, ThreadWithComMta) {
   task_runner = NULL;
   RunMessageLoop();
 
-  // CoGetApartmentType requires Windows 7 or above.
-  if (base::win::GetVersion() >= base::win::VERSION_WIN7) {
-    EXPECT_EQ(S_OK, hresult);
-    EXPECT_EQ(APTTYPE_MTA, apt_type);
-  } else {
-    EXPECT_EQ(E_NOTIMPL, hresult);
-  }
+  EXPECT_EQ(S_OK, hresult);
+  EXPECT_EQ(APTTYPE_MTA, apt_type);
 }
 
 TEST_F(AutoThreadTest, ThreadWithComSta) {
@@ -190,15 +179,10 @@ TEST_F(AutoThreadTest, ThreadWithComSta) {
   task_runner = NULL;
   RunMessageLoop();
 
-  // CoGetApartmentType requires Windows 7 or above.
-  if (base::win::GetVersion() >= base::win::VERSION_WIN7) {
-    EXPECT_EQ(S_OK, hresult);
-    // Whether the thread is the "main" STA apartment depends upon previous
-    // COM activity in this test process, so allow both types here.
-    EXPECT_TRUE(apt_type == APTTYPE_MAINSTA || apt_type == APTTYPE_STA);
-  } else {
-    EXPECT_EQ(E_NOTIMPL, hresult);
-  }
+  EXPECT_EQ(S_OK, hresult);
+  // Whether the thread is the "main" STA apartment depends upon previous
+  // COM activity in this test process, so allow both types here.
+  EXPECT_TRUE(apt_type == APTTYPE_MAINSTA || apt_type == APTTYPE_STA);
 }
 #endif // defined(OS_WIN)
 

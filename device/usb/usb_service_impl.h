@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef DEVICE_USB_USB_SERVICE_IMPL_H_
+#define DEVICE_USB_USB_SERVICE_IMPL_H_
+
 #include "device/usb/usb_service.h"
 
 #include <stddef.h>
@@ -25,10 +28,6 @@
 struct libusb_device;
 struct libusb_context;
 
-namespace base {
-class SequencedTaskRunner;
-}
-
 namespace device {
 
 typedef struct libusb_device* PlatformUsbDevice;
@@ -42,8 +41,7 @@ class UsbServiceImpl :
 #endif  // OS_WIN
     public UsbService {
  public:
-  explicit UsbServiceImpl(
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
+  UsbServiceImpl();
   ~UsbServiceImpl() override;
 
  private:
@@ -125,3 +123,5 @@ class UsbServiceImpl :
 };
 
 }  // namespace device
+
+#endif  // DEVICE_USB_USB_SERVICE_IMPL_H_

@@ -15,12 +15,12 @@
 #include <limits>
 #include <vector>
 
-#include "webrtc/base/platform_thread.h"
-#include "webrtc/base/random.h"
 #include "webrtc/modules/video_coding/frame_object.h"
 #include "webrtc/modules/video_coding/jitter_estimator.h"
 #include "webrtc/modules/video_coding/sequence_number_util.h"
 #include "webrtc/modules/video_coding/timing.h"
+#include "webrtc/rtc_base/platform_thread.h"
+#include "webrtc/rtc_base/random.h"
 #include "webrtc/system_wrappers/include/clock.h"
 #include "webrtc/test/gmock.h"
 #include "webrtc/test/gtest.h"
@@ -116,6 +116,7 @@ class VCMReceiveStatisticsCallbackMock : public VCMReceiveStatisticsCallback {
                     int jitter_buffer_ms,
                     int min_playout_delay_ms,
                     int render_delay_ms));
+  MOCK_METHOD1(OnTimingFrameInfoUpdated, void(const TimingFrameInfo& info));
 };
 
 class TestFrameBuffer2 : public ::testing::Test {
@@ -258,6 +259,15 @@ TEST_F(TestFrameBuffer2, OneSuperFrame) {
 
   CheckFrame(0, pid, 0);
   CheckFrame(1, pid, 1);
+}
+
+TEST_F(TestFrameBuffer2, SetPlayoutDelay) {
+  const PlayoutDelay kPlayoutDelayMs = {123, 321};
+  std::unique_ptr<FrameObjectFake> test_frame(new FrameObjectFake());
+  test_frame->SetPlayoutDelay(kPlayoutDelayMs);
+  buffer_.InsertFrame(std::move(test_frame));
+  EXPECT_EQ(kPlayoutDelayMs.min_ms, timing_.min_playout_delay());
+  EXPECT_EQ(kPlayoutDelayMs.max_ms, timing_.max_playout_delay());
 }
 
 // Flaky test, see bugs.webrtc.org/7068.
@@ -495,6 +505,39 @@ TEST_F(TestFrameBuffer2, StatsCallback) {
 
   ExtractFrame();
   CheckFrame(0, pid, 0);
+}
+
+TEST_F(TestFrameBuffer2, ForwardJumps) {
+  EXPECT_EQ(5453, InsertFrame(5453, 0, 1, false));
+  ExtractFrame();
+  EXPECT_EQ(5454, InsertFrame(5454, 0, 1, false, 5453));
+  ExtractFrame();
+  EXPECT_EQ(15670, InsertFrame(15670, 0, 1, false));
+  ExtractFrame();
+  EXPECT_EQ(29804, InsertFrame(29804, 0, 1, false));
+  ExtractFrame();
+  EXPECT_EQ(29805, InsertFrame(29805, 0, 1, false, 29804));
+  ExtractFrame();
+  EXPECT_EQ(29806, InsertFrame(29806, 0, 1, false, 29805));
+  ExtractFrame();
+  EXPECT_EQ(33819, InsertFrame(33819, 0, 1, false));
+  ExtractFrame();
+  EXPECT_EQ(41248, InsertFrame(41248, 0, 1, false));
+  ExtractFrame();
+}
+
+TEST_F(TestFrameBuffer2, DuplicateFrames) {
+  EXPECT_EQ(22256, InsertFrame(22256, 0, 1, false));
+  ExtractFrame();
+  EXPECT_EQ(22256, InsertFrame(22256, 0, 1, false));
+}
+
+// TODO(philipel): implement more unittests related to invalid references.
+TEST_F(TestFrameBuffer2, InvalidReferences) {
+  EXPECT_EQ(-1, InsertFrame(0, 0, 1000, false, 2));
+  EXPECT_EQ(1, InsertFrame(1, 0, 2000, false));
+  ExtractFrame();
+  EXPECT_EQ(2, InsertFrame(2, 0, 3000, false, 1));
 }
 
 }  // namespace video_coding

@@ -5,23 +5,32 @@
 #ifndef IOS_CHROME_BROWSER_UI_CONTENT_SUGGESTIONS_CONTENT_SUGGESTIONS_COMMANDS_H_
 #define IOS_CHROME_BROWSER_UI_CONTENT_SUGGESTIONS_CONTENT_SUGGESTIONS_COMMANDS_H_
 
-@class ContentSuggestionsArticleItem;
-class GURL;
+@class CollectionViewItem;
 
-// Commands protocol for the ContentSuggestionsViewController.
+// Commands protocol allowing the ContentSuggestions ViewControllers to interact
+// with the coordinator layer, and from there to the rest of the application.
 @protocol ContentSuggestionsCommands
 
 // Opens the Reading List.
 - (void)openReadingList;
-// Opens the first page of the Reading List.
-- (void)openFirstPageOfReadingList;
-// Opens the favicon associated with the cell with the |index|.
-- (void)openFaviconAtIndex:(NSInteger)index;
-// Opens the |URL|.
-- (void)openURL:(const GURL&)URL;
-// Displays a context menu for opening the |articleItem|.
-- (void)displayContextMenuForArticle:(ContentSuggestionsArticleItem*)articleItem
-                             atPoint:(CGPoint)touchLocation;
+// Opens the page associated with this |item|.
+- (void)openPageForItem:(nonnull CollectionViewItem*)item;
+// Opens the Most Visited associated with this |item| at the |mostVisitedItem|.
+- (void)openMostVisitedItem:(nonnull CollectionViewItem*)item
+                    atIndex:(NSInteger)mostVisitedIndex;
+// Displays a context menu for the |articleItem|.
+- (void)displayContextMenuForArticle:(nonnull CollectionViewItem*)articleItem
+                             atPoint:(CGPoint)touchLocation
+                         atIndexPath:(nonnull NSIndexPath*)indexPath;
+// Displays a context menu for the |mostVisitedItem|.
+- (void)displayContextMenuForMostVisitedItem:
+            (nonnull CollectionViewItem*)mostVisitedItem
+                                     atPoint:(CGPoint)touchLocation
+                                 atIndexPath:(nonnull NSIndexPath*)indexPath;
+// Dismisses the context menu if it is displayed.
+- (void)dismissModals;
+// Handles the actions following a tap on the promo.
+- (void)handlePromoTapped;
 
 @end
 

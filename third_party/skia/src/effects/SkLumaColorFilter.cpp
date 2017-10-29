@@ -6,7 +6,7 @@
  */
 
 #include "SkLumaColorFilter.h"
-
+#include "SkPM4f.h"
 #include "SkColorPriv.h"
 #include "SkRasterPipeline.h"
 #include "SkString.h"
@@ -17,32 +17,11 @@
 #include "glsl/GrGLSLFragmentShaderBuilder.h"
 #endif
 
-void SkLumaColorFilter::filterSpan(const SkPMColor src[], int count,
-                                   SkPMColor dst[]) const {
-    for (int i = 0; i < count; ++i) {
-        SkPMColor c = src[i];
-
-        /*
-         * While LuminanceToAlpha is defined to operate on un-premultiplied
-         * inputs, due to the final alpha scaling it can be computed based on
-         * premultipled components:
-         *
-         *   LumA = (k1 * r / a + k2 * g / a + k3 * b / a) * a
-         *   LumA = (k1 * r + k2 * g + k3 * b)
-         */
-        unsigned luma = SkComputeLuminance(SkGetPackedR32(c),
-                                           SkGetPackedG32(c),
-                                           SkGetPackedB32(c));
-        dst[i] = SkPackARGB32(luma, 0, 0, 0);
-    }
-}
-
-bool SkLumaColorFilter::onAppendStages(SkRasterPipeline* p,
+void SkLumaColorFilter::onAppendStages(SkRasterPipeline* p,
                                        SkColorSpace* dst,
                                        SkArenaAlloc* scratch,
                                        bool shaderIsOpaque) const {
     p->append(SkRasterPipeline::luminance_to_alpha);
-    return true;
 }
 
 sk_sp<SkColorFilter> SkLumaColorFilter::Make() {

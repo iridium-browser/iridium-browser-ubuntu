@@ -4,6 +4,7 @@
 
 #include "components/omnibox/browser/physical_web_provider.h"
 
+#include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
@@ -102,8 +103,13 @@ void PhysicalWebProvider::Start(const AutocompleteInput& input,
     // the omnibox causes the current page to reload. If the input field is
     // empty, no default match is required.
     if (!matches_.empty() && !input.text().empty()) {
-      matches_.push_back(VerbatimMatchForURL(
-          client_, input, input.current_url(), history_url_provider_, -1));
+      const base::string16 description =
+          (base::FeatureList::IsEnabled(omnibox::kDisplayTitleForCurrentUrl))
+              ? input.current_title()
+              : base::string16();
+      matches_.push_back(VerbatimMatchForURL(client_, input,
+                                             input.current_url(), description,
+                                             history_url_provider_, -1));
     }
   } else {
     ConstructQuerySuggestMatches(std::move(metadata_list), input);
@@ -227,10 +233,8 @@ void PhysicalWebProvider::ConstructZeroSuggestMatches(
         AutocompleteMatchType::PHYSICAL_WEB);
     match.destination_url = url;
 
-    // Physical Web results should omit http:// (but not https://) and never
-    // appear bold.
-    match.contents = url_formatter::FormatUrl(url,
-        url_formatter::kFormatUrlOmitHTTP, net::UnescapeRule::SPACES,
+    match.contents = url_formatter::FormatUrl(
+        url, AutocompleteMatch::GetFormatTypes(true), net::UnescapeRule::SPACES,
         nullptr, nullptr, nullptr);
     match.contents_class.push_back(
         ACMatchClassification(0, ACMatchClassification::URL));

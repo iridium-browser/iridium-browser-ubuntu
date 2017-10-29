@@ -30,22 +30,22 @@
 #define IPC_MESSAGE_START ServiceWorkerMsgStart
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerError::ErrorType,
-                          blink::WebServiceWorkerError::ErrorTypeLast)
+                          blink::WebServiceWorkerError::kErrorTypeLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerEventResult,
-                          blink::WebServiceWorkerEventResultLast)
+                          blink::kWebServiceWorkerEventResultLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerState,
-                          blink::WebServiceWorkerStateLast)
+                          blink::kWebServiceWorkerStateLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerResponseType,
-                          blink::WebServiceWorkerResponseTypeLast)
+                          blink::kWebServiceWorkerResponseTypeLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerResponseError,
-                          blink::WebServiceWorkerResponseErrorLast)
+                          blink::kWebServiceWorkerResponseErrorLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebServiceWorkerClientType,
-                          blink::WebServiceWorkerClientTypeLast)
+                          blink::kWebServiceWorkerClientTypeLast)
 
 IPC_ENUM_TRAITS_MAX_VALUE(content::ServiceWorkerProviderType,
                           content::SERVICE_WORKER_PROVIDER_TYPE_LAST)
@@ -76,6 +76,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::ServiceWorkerFetchRequest)
   IPC_STRUCT_TRAITS_MEMBER(referrer)
   IPC_STRUCT_TRAITS_MEMBER(credentials_mode)
   IPC_STRUCT_TRAITS_MEMBER(redirect_mode)
+  IPC_STRUCT_TRAITS_MEMBER(integrity)
   IPC_STRUCT_TRAITS_MEMBER(client_id)
   IPC_STRUCT_TRAITS_MEMBER(is_reload)
   IPC_STRUCT_TRAITS_MEMBER(fetch_type)
@@ -92,7 +93,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::ServiceWorkerResponse)
   IPC_STRUCT_TRAITS_MEMBER(headers)
   IPC_STRUCT_TRAITS_MEMBER(blob_uuid)
   IPC_STRUCT_TRAITS_MEMBER(blob_size)
-  IPC_STRUCT_TRAITS_MEMBER(stream_url)
   IPC_STRUCT_TRAITS_MEMBER(error)
   IPC_STRUCT_TRAITS_MEMBER(response_time)
   IPC_STRUCT_TRAITS_MEMBER(is_in_cache_storage)
@@ -107,9 +107,13 @@ IPC_STRUCT_TRAITS_BEGIN(content::ServiceWorkerObjectInfo)
   IPC_STRUCT_TRAITS_MEMBER(version_id)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(content::ServiceWorkerRegistrationOptions)
+  IPC_STRUCT_TRAITS_MEMBER(scope)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(content::ServiceWorkerRegistrationObjectInfo)
   IPC_STRUCT_TRAITS_MEMBER(handle_id)
-  IPC_STRUCT_TRAITS_MEMBER(scope)
+  IPC_STRUCT_TRAITS_MEMBER(options)
   IPC_STRUCT_TRAITS_MEMBER(registration_id)
 IPC_STRUCT_TRAITS_END()
 
@@ -153,8 +157,8 @@ IPC_MESSAGE_CONTROL5(ServiceWorkerHostMsg_RegisterServiceWorker,
                      int /* thread_id */,
                      int /* request_id */,
                      int /* provider_id */,
-                     GURL /* scope */,
-                     GURL /* script_url */)
+                     GURL /* script_url */,
+                     content::ServiceWorkerRegistrationOptions)
 
 IPC_MESSAGE_CONTROL4(ServiceWorkerHostMsg_UpdateServiceWorker,
                      int /* thread_id */,
@@ -237,23 +241,13 @@ IPC_MESSAGE_CONTROL1(ServiceWorkerHostMsg_DecrementRegistrationRefCount,
 IPC_MESSAGE_CONTROL1(ServiceWorkerHostMsg_TerminateWorker,
                      int /* handle_id */)
 
-// Informs the browser that event handling has finished.
-// Routed to the target ServiceWorkerVersion.
-IPC_MESSAGE_ROUTED4(ServiceWorkerHostMsg_InstallEventFinished,
-                    int /* request_id */,
-                    blink::WebServiceWorkerEventResult,
-                    bool /* has_fetch_event_handler */,
-                    base::Time /* dispatch_event_time */)
-
-IPC_MESSAGE_ROUTED4(ServiceWorkerHostMsg_FetchEventResponse,
+// Returns the response as the result of fetch event. This is used only for blob
+// to keep the IPC ordering. Mojo IPC is used when the response body is a stream
+// or is empty, and for the fallback-to-network response.
+IPC_MESSAGE_ROUTED3(ServiceWorkerHostMsg_FetchEventResponse,
                     int /* fetch_event_id */,
-                    content::ServiceWorkerFetchEventResult,
                     content::ServiceWorkerResponse,
                     base::Time /* dispatch_event_time */)
-
-// Responds to a Ping from the browser.
-// Routed to the target ServiceWorkerVersion.
-IPC_MESSAGE_ROUTED0(ServiceWorkerHostMsg_Pong)
 
 // Asks the browser to retrieve client of the sender ServiceWorker.
 IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_GetClient,
@@ -283,7 +277,12 @@ IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_SetCachedMetadata,
 IPC_MESSAGE_ROUTED1(ServiceWorkerHostMsg_ClearCachedMetadata, GURL /* url */)
 
 // Ask the browser to open a tab/window (renderer->browser).
-IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_OpenWindow,
+IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_OpenNewTab,
+                    int /* request_id */,
+                    GURL /* url */)
+
+// Ask the browser to open a popup tab/window (renderer->browser).
+IPC_MESSAGE_ROUTED2(ServiceWorkerHostMsg_OpenNewPopup,
                     int /* request_id */,
                     GURL /* url */)
 
@@ -479,8 +478,6 @@ IPC_MESSAGE_CONTROL3(ServiceWorkerMsg_CountFeature,
                      uint32_t /* feature */)
 
 // Sent via EmbeddedWorker to dispatch events.
-IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_InstallEvent,
-                     int /* request_id */)
 IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_DidSkipWaiting,
                      int /* request_id */)
 IPC_MESSAGE_CONTROL1(ServiceWorkerMsg_DidClaimClients,
@@ -489,9 +486,6 @@ IPC_MESSAGE_CONTROL3(ServiceWorkerMsg_ClaimClientsError,
                      int /* request_id */,
                      blink::WebServiceWorkerError::ErrorType /* code */,
                      base::string16 /* message */)
-
-// Sent via EmbeddedWorker to Ping the worker, expecting a Pong in response.
-IPC_MESSAGE_CONTROL0(ServiceWorkerMsg_Ping)
 
 // Sent via EmbeddedWorker as a response of GetClient.
 IPC_MESSAGE_CONTROL2(ServiceWorkerMsg_DidGetClient,

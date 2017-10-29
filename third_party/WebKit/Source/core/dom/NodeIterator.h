@@ -25,9 +25,9 @@
 #ifndef NodeIterator_h
 #define NodeIterator_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/NodeFilter.h"
 #include "core/dom/NodeIteratorBase.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -41,30 +41,30 @@ class NodeIterator final : public GarbageCollected<NodeIterator>,
   USING_GARBAGE_COLLECTED_MIXIN(NodeIterator);
 
  public:
-  static NodeIterator* create(Node* rootNode,
-                              unsigned whatToShow,
-                              NodeFilter* filter) {
-    return new NodeIterator(rootNode, whatToShow, filter);
+  static NodeIterator* Create(Node* root_node,
+                              unsigned what_to_show,
+                              V8NodeFilterCondition* filter) {
+    return new NodeIterator(root_node, what_to_show, filter);
   }
 
   Node* nextNode(ExceptionState&);
   Node* previousNode(ExceptionState&);
   void detach();
 
-  Node* referenceNode() const { return m_referenceNode.node.get(); }
+  Node* referenceNode() const { return reference_node_.node.Get(); }
   bool pointerBeforeReferenceNode() const {
-    return m_referenceNode.isPointerBeforeNode;
+    return reference_node_.is_pointer_before_node;
   }
 
   // This function is called before any node is removed from the document tree.
-  void nodeWillBeRemoved(Node&);
+  void NodeWillBeRemoved(Node&);
 
   DECLARE_VIRTUAL_TRACE();
 
   DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
  private:
-  NodeIterator(Node*, unsigned whatToShow, NodeFilter*);
+  NodeIterator(Node*, unsigned what_to_show, V8NodeFilterCondition*);
 
   class NodePointer {
     DISALLOW_NEW();
@@ -73,20 +73,20 @@ class NodeIterator final : public GarbageCollected<NodeIterator>,
     NodePointer();
     NodePointer(Node*, bool);
 
-    void clear();
-    bool moveToNext(Node* root);
-    bool moveToPrevious(Node* root);
+    void Clear();
+    bool MoveToNext(Node* root);
+    bool MoveToPrevious(Node* root);
 
     Member<Node> node;
-    bool isPointerBeforeNode;
+    bool is_pointer_before_node;
 
-    DEFINE_INLINE_TRACE() { visitor->trace(node); }
+    DEFINE_INLINE_TRACE() { visitor->Trace(node); }
   };
 
-  void updateForNodeRemoval(Node& nodeToBeRemoved, NodePointer&) const;
+  void UpdateForNodeRemoval(Node& node_to_be_removed, NodePointer&) const;
 
-  NodePointer m_referenceNode;
-  NodePointer m_candidateNode;
+  NodePointer reference_node_;
+  NodePointer candidate_node_;
 };
 
 }  // namespace blink

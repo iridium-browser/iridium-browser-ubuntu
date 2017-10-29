@@ -10,6 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/process/process_handle.h"
 #include "base/task_runner.h"
+#include "mojo/edk/embedder/connection_params.h"
 #include "mojo/edk/embedder/platform_handle_vector.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
 
@@ -102,7 +103,7 @@ class MOJO_SYSTEM_IMPL_EXPORT Channel
       // Actual number of Mach ports encoded in the extra header.
       uint16_t num_ports;
 
-      // Array of encoded Mach ports. If |num_ports| > 0, |entires[0]| through
+      // Array of encoded Mach ports. If |num_ports| > 0, |entries[0]| through
       // to |entries[num_ports-1]| inclusive are valid.
       MachPortsEntry entries[0];
     };
@@ -123,6 +124,11 @@ class MOJO_SYSTEM_IMPL_EXPORT Channel
     // |payload_size| bytes plus a header, plus |max_handles| platform handles.
     Message(size_t payload_size, size_t max_handles);
     Message(size_t payload_size, size_t max_handles, MessageType message_type);
+    Message(size_t capacity, size_t payload_size, size_t max_handles);
+    Message(size_t capacity,
+            size_t max_handles,
+            size_t payload_size,
+            MessageType message_type);
     ~Message();
 
     // Constructs a Message from serialized message data.
@@ -130,6 +136,18 @@ class MOJO_SYSTEM_IMPL_EXPORT Channel
 
     const void* data() const { return data_; }
     size_t data_num_bytes() const { return size_; }
+
+    // The current capacity of the message buffer, not counting internal header
+    // data.
+    size_t capacity() const;
+
+    // Extends the portion of the total message capacity which contains
+    // meaningful payload data. Storage capacity which falls outside of this
+    // range is not transmitted when the message is sent.
+    //
+    // If the message's current capacity is not large enough to accommodate the
+    // new payload size, it will be reallocated accordingly.
+    void ExtendPayload(size_t new_payload_size);
 
     const void* extra_header() const;
     void* mutable_extra_header();
@@ -173,9 +191,19 @@ class MOJO_SYSTEM_IMPL_EXPORT Channel
     void SetVersionForTest(uint16_t version_number);
 
    private:
-    size_t size_ = 0;
-    size_t max_handles_ = 0;
+    // The message data buffer.
     char* data_ = nullptr;
+
+    // The capacity of the buffer at |data_|.
+    size_t capacity_ = 0;
+
+    // The size of the message. This is the portion of |data_| that should
+    // be transmitted if the message is written to a channel. Includes all
+    // headers and user payload.
+    size_t size_ = 0;
+
+    // Maximum number of handles which may be attached to this message.
+    size_t max_handles_ = 0;
 
     ScopedPlatformHandleVectorPtr handle_vector_;
 
@@ -188,6 +216,21 @@ class MOJO_SYSTEM_IMPL_EXPORT Channel
 #endif
 
     DISALLOW_COPY_AND_ASSIGN(Message);
+  };
+
+  // Error types which may be reported by a Channel instance to its delegate.
+  enum class Error {
+    // The remote end of the channel has been closed, either explicitly or
+    // because the process which hosted it is gone.
+    kDisconnected,
+
+    // For connection-oriented channels (e.g. named pipes), an unexpected error
+    // occurred during channel connection.
+    kConnectionFailed,
+
+    // Some incoming data failed validation, implying either a buggy or
+    // compromised sender.
+    kReceivedMalformedData,
   };
 
   // Delegate methods are called from the I/O task runner with which the Channel
@@ -204,7 +247,7 @@ class MOJO_SYSTEM_IMPL_EXPORT Channel
                                   ScopedPlatformHandleVectorPtr handles) = 0;
 
     // Notify that an error has occured and the Channel will cease operation.
-    virtual void OnChannelError() = 0;
+    virtual void OnChannelError(Error error) = 0;
   };
 
   // Creates a new Channel around a |platform_handle|, taking ownership of the
@@ -213,7 +256,7 @@ class MOJO_SYSTEM_IMPL_EXPORT Channel
   // |delegate| is destroyed.
   static scoped_refptr<Channel> Create(
       Delegate* delegate,
-      ScopedPlatformHandle platform_handle,
+      ConnectionParams connection_params,
       scoped_refptr<base::TaskRunner> io_task_runner);
 
   // Request that the channel be shut down. This should always be called before
@@ -259,7 +302,7 @@ class MOJO_SYSTEM_IMPL_EXPORT Channel
 
   // Called by the implementation when something goes horribly wrong. It is NOT
   // OK to call this synchronously from any public interface methods.
-  void OnError();
+  void OnError(Error error);
 
   // Retrieves the set of platform handles read for a given message.
   // |extra_header| and |extra_header_size| correspond to the extra header data.

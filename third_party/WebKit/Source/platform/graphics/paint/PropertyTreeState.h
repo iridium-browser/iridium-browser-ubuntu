@@ -8,63 +8,59 @@
 #include "platform/graphics/paint/ClipPaintPropertyNode.h"
 #include "platform/graphics/paint/EffectPaintPropertyNode.h"
 #include "platform/graphics/paint/TransformPaintPropertyNode.h"
-#include "wtf/HashFunctions.h"
-#include "wtf/HashTraits.h"
-#include "wtf/text/StringBuilder.h"
+#include "platform/wtf/HashFunctions.h"
+#include "platform/wtf/HashTraits.h"
+#include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
 
 // A complete set of paint properties including those that are inherited from
-// other objects.  RefPtrs are used to guard against use-after-free bugs and
-// DCHECKs ensure PropertyTreeState never retains the last reference to a
-// property tree node.
+// other objects.  RefPtrs are used to guard against use-after-free bugs.
 class PLATFORM_EXPORT PropertyTreeState {
+  USING_FAST_MALLOC(PropertyTreeState);
+
  public:
   PropertyTreeState(const TransformPaintPropertyNode* transform,
                     const ClipPaintPropertyNode* clip,
                     const EffectPaintPropertyNode* effect)
-      : m_transform(transform), m_clip(clip), m_effect(effect) {
-    DCHECK(!m_transform || !m_transform->hasOneRef());
-    DCHECK(!m_clip || !m_clip->hasOneRef());
-    DCHECK(!m_effect || !m_effect->hasOneRef());
+      : transform_(transform), clip_(clip), effect_(effect) {}
+
+  bool HasDirectCompositingReasons() const;
+
+  const TransformPaintPropertyNode* Transform() const {
+    return transform_.Get();
+  }
+  void SetTransform(RefPtr<const TransformPaintPropertyNode> node) {
+    transform_ = std::move(node);
   }
 
-  bool hasDirectCompositingReasons() const;
-
-  const TransformPaintPropertyNode* transform() const {
-    DCHECK(!m_transform || !m_transform->hasOneRef());
-    return m_transform.get();
+  const ClipPaintPropertyNode* Clip() const {
+    return clip_.Get();
   }
-  void setTransform(RefPtr<const TransformPaintPropertyNode> node) {
-    m_transform = std::move(node);
+  void SetClip(RefPtr<const ClipPaintPropertyNode> node) {
+    clip_ = std::move(node);
   }
 
-  const ClipPaintPropertyNode* clip() const {
-    DCHECK(!m_clip || !m_clip->hasOneRef());
-    return m_clip.get();
+  const EffectPaintPropertyNode* Effect() const {
+    return effect_.Get();
   }
-  void setClip(RefPtr<const ClipPaintPropertyNode> node) {
-    m_clip = std::move(node);
+  void SetEffect(RefPtr<const EffectPaintPropertyNode> node) {
+    effect_ = std::move(node);
   }
 
-  const EffectPaintPropertyNode* effect() const {
-    DCHECK(!m_effect || !m_effect->hasOneRef());
-    return m_effect.get();
-  }
-  void setEffect(RefPtr<const EffectPaintPropertyNode> node) {
-    m_effect = std::move(node);
-  }
+  static const PropertyTreeState& Root();
 
   // Returns the compositor element id, if any, for this property state. If
   // neither the effect nor transform nodes have a compositor element id then a
   // default instance is returned.
-  const CompositorElementId compositorElementId() const;
+  const CompositorElementId GetCompositorElementId(
+      const CompositorElementIdSet& element_ids) const;
 
   enum InnermostNode {
-    None,  // None means that all nodes are their root values
-    Transform,
-    Clip,
-    Effect,
+    kNone,  // None means that all nodes are their root values
+    kTransform,
+    kClip,
+    kEffect,
   };
 
   // There is always a well-defined order in which the transform, clip
@@ -102,22 +98,35 @@ class PLATFORM_EXPORT PropertyTreeState {
   // DCHECK(iterator.next()->innermostNode() == Clip);
   // DCHECK(iterator.next()->innermostNode() == Transform);
   // DCHECK(iterator.next()->innermostNode() == None);
-  InnermostNode innermostNode() const;
+  InnermostNode GetInnermostNode() const;
+
+  // See PaintPropertyNode::Changed().
+  bool Changed(const PropertyTreeState& relative_to_state) const {
+    return Transform()->Changed(*relative_to_state.Transform()) ||
+           Clip()->Changed(*relative_to_state.Clip()) ||
+           Effect()->Changed(*relative_to_state.Effect());
+  }
+
+  void ClearChangedToRoot() const {
+    Transform()->ClearChangedToRoot();
+    Clip()->ClearChangedToRoot();
+    Effect()->ClearChangedToRoot();
+  }
 
 #if DCHECK_IS_ON()
   // Dumps the tree from this state up to the root as a string.
-  String toTreeString() const;
+  String ToTreeString() const;
 #endif
 
  private:
-  RefPtr<const TransformPaintPropertyNode> m_transform;
-  RefPtr<const ClipPaintPropertyNode> m_clip;
-  RefPtr<const EffectPaintPropertyNode> m_effect;
+  RefPtr<const TransformPaintPropertyNode> transform_;
+  RefPtr<const ClipPaintPropertyNode> clip_;
+  RefPtr<const EffectPaintPropertyNode> effect_;
 };
 
 inline bool operator==(const PropertyTreeState& a, const PropertyTreeState& b) {
-  return a.transform() == b.transform() && a.clip() == b.clip() &&
-         a.effect() == b.effect();
+  return a.Transform() == b.Transform() && a.Clip() == b.Clip() &&
+         a.Effect() == b.Effect();
 }
 
 // Iterates over the sequence transforms, clips and effects for a
@@ -128,11 +137,11 @@ inline bool operator==(const PropertyTreeState& a, const PropertyTreeState& b) {
 class PLATFORM_EXPORT PropertyTreeStateIterator {
  public:
   PropertyTreeStateIterator(const PropertyTreeState& properties)
-      : m_properties(properties) {}
-  const PropertyTreeState* next();
+      : properties_(properties) {}
+  const PropertyTreeState* Next();
 
  private:
-  PropertyTreeState m_properties;
+  PropertyTreeState properties_;
 };
 
 #if DCHECK_IS_ON()
@@ -140,42 +149,42 @@ class PLATFORM_EXPORT PropertyTreeStateIterator {
 template <typename PropertyTreeNode>
 class PropertyTreeStatePrinter {
  public:
-  String pathAsString(const PropertyTreeNode* lastNode) {
-    const PropertyTreeNode* node = lastNode;
-    while (!node->isRoot()) {
-      addPropertyNode(node, "");
-      node = node->parent();
+  String PathAsString(const PropertyTreeNode* last_node) {
+    const PropertyTreeNode* node = last_node;
+    while (!node->IsRoot()) {
+      AddPropertyNode(node, "");
+      node = node->Parent();
     }
-    addPropertyNode(node, "root");
+    AddPropertyNode(node, "root");
 
-    StringBuilder stringBuilder;
-    addAllPropertyNodes(stringBuilder, node);
-    return stringBuilder.toString();
+    StringBuilder string_builder;
+    AddAllPropertyNodes(string_builder, node);
+    return string_builder.ToString();
   }
 
-  void addPropertyNode(const PropertyTreeNode* node, String debugInfo) {
-    m_nodeToDebugString.set(node, debugInfo);
+  void AddPropertyNode(const PropertyTreeNode* node, String debug_info) {
+    node_to_debug_string_.Set(node, debug_info);
   }
 
-  void addAllPropertyNodes(StringBuilder& stringBuilder,
+  void AddAllPropertyNodes(StringBuilder& string_builder,
                            const PropertyTreeNode* node,
                            unsigned indent = 0) {
     DCHECK(node);
     for (unsigned i = 0; i < indent; i++)
-      stringBuilder.append(' ');
-    if (m_nodeToDebugString.contains(node))
-      stringBuilder.append(m_nodeToDebugString.at(node));
-    stringBuilder.append(String::format(" %p ", node));
-    stringBuilder.append(node->toString());
-    stringBuilder.append("\n");
+      string_builder.Append(' ');
+    if (node_to_debug_string_.Contains(node))
+      string_builder.Append(node_to_debug_string_.at(node));
+    string_builder.Append(String::Format(" %p ", node));
+    string_builder.Append(node->ToString());
+    string_builder.Append("\n");
 
-    for (const auto* childNode : m_nodeToDebugString.keys()) {
-      if (childNode->parent() == node)
-        addAllPropertyNodes(stringBuilder, childNode, indent + 2);
+    for (const auto* child_node : node_to_debug_string_.Keys()) {
+      if (child_node->Parent() == node)
+        AddAllPropertyNodes(string_builder, child_node, indent + 2);
     }
   }
 
-  HashMap<const PropertyTreeNode*, String> m_nodeToDebugString;
+  HashMap<const PropertyTreeNode*, String> node_to_debug_string_;
 };
 
 #endif

@@ -195,6 +195,12 @@ void DumpAccessibilityTestBase::RunTestForPlatform(
   BrowserAccessibilityStateImpl::GetInstance()->
       set_disable_hot_tracking_for_testing(true);
 
+  // Normally some accessibility events that would be fired are suppressed or
+  // delayed, depending on what has focus or the type of event. For testing,
+  // we want all events to fire immediately to make tests predictable and not
+  // flaky.
+  BrowserAccessibilityManager::NeverSuppressOrDelayEventsForTesting();
+
   NavigateToURL(shell(), GURL(url::kAboutBlankURL));
 
   std::string html_contents;
@@ -242,6 +248,7 @@ void DumpAccessibilityTestBase::RunTestForPlatform(
 
   // Parse filters and other directives in the test file.
   std::vector<std::string> wait_for;
+  filters_.clear();
   AddDefaultFilters(&filters_);
   ParseHtmlForExtraDirectives(html_contents, &filters_, &wait_for);
 
@@ -252,21 +259,17 @@ void DumpAccessibilityTestBase::RunTestForPlatform(
       shell()->web_contents());
 
   if (enable_accessibility_after_navigating_ &&
-      web_contents->GetAccessibilityMode() == AccessibilityModeOff) {
+      web_contents->GetAccessibilityMode().is_mode_off()) {
     // Load the url, then enable accessibility.
     NavigateToURL(shell(), url);
     AccessibilityNotificationWaiter accessibility_waiter(
-        web_contents,
-        ACCESSIBILITY_MODE_COMPLETE,
-        ui::AX_EVENT_NONE);
+        web_contents, kAccessibilityModeComplete, ui::AX_EVENT_NONE);
     accessibility_waiter.WaitForNotification();
   } else {
     // Enable accessibility, then load the test html and wait for the
     // "load complete" AX event.
     AccessibilityNotificationWaiter accessibility_waiter(
-        web_contents,
-        ACCESSIBILITY_MODE_COMPLETE,
-        ui::AX_EVENT_LOAD_COMPLETE);
+        web_contents, kAccessibilityModeComplete, ui::AX_EVENT_LOAD_COMPLETE);
     NavigateToURL(shell(), url);
     accessibility_waiter.WaitForNotification();
   }
@@ -389,8 +392,9 @@ void DumpAccessibilityTestBase::RunTestForPlatform(
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kGenerateAccessibilityTestExpectations)) {
       base::ThreadRestrictions::ScopedAllowIO allow_io_to_write_expected_file;
-      CHECK(base::WriteFile(
-          expected_file, actual_contents.c_str(), actual_contents.size()));
+      CHECK(base::WriteFile(expected_file, actual_contents.c_str(),
+                            actual_contents.size()) ==
+            static_cast<int>(actual_contents.size()));
       LOG(INFO) << "Wrote expectations to: "
                 << expected_file.LossyDisplayName();
     }

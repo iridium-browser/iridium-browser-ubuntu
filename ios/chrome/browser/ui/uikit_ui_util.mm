@@ -570,17 +570,8 @@ void ApplyVisualConstraintsWithMetricsAndOptions(
     NSDictionary* subviewsDictionary,
     NSDictionary* metrics,
     NSLayoutFormatOptions options) {
-  NSMutableArray* layoutConstraints =
-      [NSMutableArray arrayWithCapacity:constraints.count * 3];
-  for (NSString* constraint in constraints) {
-    DCHECK([constraint isKindOfClass:[NSString class]]);
-    [layoutConstraints addObjectsFromArray:
-                           [NSLayoutConstraint
-                               constraintsWithVisualFormat:constraint
-                                                   options:options
-                                                   metrics:metrics
-                                                     views:subviewsDictionary]];
-  }
+  NSArray* layoutConstraints = VisualConstraintsWithMetricsAndOptions(
+      constraints, subviewsDictionary, metrics, options);
   [NSLayoutConstraint activateConstraints:layoutConstraints];
 }
 
@@ -592,6 +583,31 @@ void ApplyVisualConstraintsWithMetricsAndOptions(
     UIView* unused_parentView) {
   ApplyVisualConstraintsWithMetricsAndOptions(constraints, subviewsDictionary,
                                               metrics, options);
+}
+
+NSArray* VisualConstraintsWithMetrics(NSArray* constraints,
+                                      NSDictionary* subviewsDictionary,
+                                      NSDictionary* metrics) {
+  return VisualConstraintsWithMetricsAndOptions(constraints, subviewsDictionary,
+                                                metrics, 0);
+}
+
+NSArray* VisualConstraintsWithMetricsAndOptions(
+    NSArray* constraints,
+    NSDictionary* subviewsDictionary,
+    NSDictionary* metrics,
+    NSLayoutFormatOptions options) {
+  NSMutableArray* layoutConstraints = [NSMutableArray array];
+  for (NSString* constraint in constraints) {
+    DCHECK([constraint isKindOfClass:[NSString class]]);
+    [layoutConstraints addObjectsFromArray:
+                           [NSLayoutConstraint
+                               constraintsWithVisualFormat:constraint
+                                                   options:options
+                                                   metrics:metrics
+                                                     views:subviewsDictionary]];
+  }
+  return [layoutConstraints copy];
 }
 
 void AddSameCenterConstraints(UIView* view1, UIView* view2) {
@@ -621,7 +637,7 @@ void AddSameCenterYConstraint(UIView* unused_parentView,
   AddSameCenterYConstraint(subview1, subview2);
 }
 
-void AddSameSizeConstraint(UIView* view1, UIView* view2) {
+void AddSameConstraints(UIView* view1, UIView* view2) {
   [NSLayoutConstraint activateConstraints:@[
     [view1.leadingAnchor constraintEqualToAnchor:view2.leadingAnchor],
     [view1.trailingAnchor constraintEqualToAnchor:view2.trailingAnchor],

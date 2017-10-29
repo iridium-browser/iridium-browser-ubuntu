@@ -2,17 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "media/gpu/vaapi_drm_picture.h"
+
 #include "base/file_descriptor_posix.h"
 #include "media/gpu/va_surface.h"
-#include "media/gpu/vaapi_drm_picture.h"
 #include "media/gpu/vaapi_wrapper.h"
 #include "third_party/libva/va/drm/va_drm.h"
 #include "third_party/libva/va/va.h"
 #include "ui/gfx/gpu_memory_buffer.h"
+#include "ui/gfx/native_pixmap.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_image_native_pixmap.h"
 #include "ui/gl/scoped_binders.h"
-#include "ui/ozone/gl/gl_image_ozone_native_pixmap.h"
-#include "ui/ozone/public/native_pixmap.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/surface_factory_ozone.h"
 
@@ -43,6 +44,9 @@ VaapiDrmPicture::~VaapiDrmPicture() {
 
 static unsigned BufferFormatToInternalFormat(gfx::BufferFormat format) {
   switch (format) {
+    case gfx::BufferFormat::BGRX_8888:
+      return GL_RGB;
+
     case gfx::BufferFormat::BGRA_8888:
       return GL_BGRA_EXT;
 
@@ -64,9 +68,6 @@ bool VaapiDrmPicture::Initialize() {
     return false;
   }
 
-  pixmap_->SetProcessingCallback(
-      base::Bind(&VaapiWrapper::ProcessPixmap, vaapi_wrapper_));
-
   if (texture_id_ != 0 && !make_context_current_cb_.is_null()) {
     if (!make_context_current_cb_.Run())
       return false;
@@ -76,9 +77,8 @@ bool VaapiDrmPicture::Initialize() {
 
     gfx::BufferFormat format = pixmap_->GetBufferFormat();
 
-    scoped_refptr<ui::GLImageOzoneNativePixmap> image(
-        new ui::GLImageOzoneNativePixmap(size_,
-                                         BufferFormatToInternalFormat(format)));
+    scoped_refptr<gl::GLImageNativePixmap> image(new gl::GLImageNativePixmap(
+        size_, BufferFormatToInternalFormat(format)));
     if (!image->Initialize(pixmap_.get(), format)) {
       LOG(ERROR) << "Failed to create GLImage";
       return false;

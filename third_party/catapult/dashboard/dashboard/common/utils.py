@@ -163,6 +163,58 @@ def OldStyleTestKey(key_or_string):
   return ndb.Key(*key_parts)
 
 
+def MostSpecificMatchingPattern(test, pattern_data_tuples):
+  """Takes a test and a list of (pattern, data) tuples and returns the data
+  for the pattern which most closely matches the test. It does this by
+  ordering the matching patterns, and choosing the one with the most specific
+  top level match.
+
+  For example, if there was a test Master/Bot/Foo/Bar, then:
+
+  */*/*/Bar would match more closely than */*/*/*
+  */*/*/Bar would match more closely than */*/*/Bar.*
+  */*/*/Bar.* would match more closely than */*/*/*
+  """
+  matching_patterns = []
+  for p, v in pattern_data_tuples:
+    if not TestMatchesPattern(test, p):
+      continue
+    matching_patterns.append([p, v])
+
+  if not matching_patterns:
+    return None
+
+  if type(test) is ndb.Key:
+    test_path = TestPath(test)
+  else:
+    test_path = test.test_path
+  test_path_parts = test_path.split('/')
+
+  # This ensures the ordering puts the closest match at index 0
+  def CmpPatterns(a, b):
+    a_parts = a[0].split('/')
+    b_parts = b[0].split('/')
+    for a_part, b_part, test_part in reversed(
+        zip(a_parts, b_parts, test_path_parts)):
+      # We favour a specific match over a partial match, and a partial
+      # match over a catch-all * match.
+      if a_part == b_part:
+        continue
+      if a_part == test_part:
+        return -1
+      if b_part == test_part:
+        return 1
+      if a_part != '*':
+        return -1
+      if b_part != '*':
+        return 1
+      return 0
+
+  matching_patterns.sort(cmp=CmpPatterns)
+
+  return matching_patterns[0][1]
+
+
 def TestMatchesPattern(test, pattern):
   """Checks whether a test matches a test path pattern.
 
@@ -262,7 +314,7 @@ def MinimumAlertRange(alerts):
   """Returns the intersection of the revision ranges for a set of alerts.
 
   Args:
-    alerts: An iterable of Alerts (Anomaly or StoppageAlert entities).
+    alerts: An iterable of Alerts.
 
   Returns:
     A pair (start, end) if there is a valid minimum range,
@@ -291,7 +343,7 @@ def IsInternalUser():
   cached = GetCachedIsInternalUser(username)
   if cached is not None:
     return cached
-  is_internal_user = IsGroupMember(identity=username, group='googlers')
+  is_internal_user = IsGroupMember(identity=username, group='chromeperf-access')
   SetCachedIsInternalUser(username, is_internal_user)
   return is_internal_user
 
@@ -318,6 +370,9 @@ def IsGroupMember(identity, group):
   Returns:
     True if confirmed to be a member, False otherwise.
   """
+  cached = GetCachedIsGroupMember(identity, group)
+  if cached is not None:
+    return cached
   try:
     discovery_url = ('https://chrome-infra-auth.appspot.com'
                      '/_ah/api/discovery/v1/apis/{api}/{apiVersion}/rest')
@@ -326,10 +381,24 @@ def IsGroupMember(identity, group):
         http=ServiceAccountHttp())
     request = service.membership(identity=identity, group=group)
     response = request.execute()
-    return response['is_member']
+    is_member = response['is_member']
+    SetCachedIsGroupMember(identity, group, is_member)
+    return is_member
   except (errors.HttpError, KeyError, AttributeError) as e:
     logging.error('Failed to check membership of %s: %s', identity, e)
     return False
+
+
+def GetCachedIsGroupMember(identity, group):
+  return memcache.get(_IsGroupMemberCacheKey(identity, group))
+
+
+def SetCachedIsGroupMember(identity, group, value):
+  memcache.add(_IsGroupMemberCacheKey(identity, group), value, time=60*60*24)
+
+
+def _IsGroupMemberCacheKey(identity, group):
+  return 'is_group_member_%s_%s' % (identity, group)
 
 
 def ServiceAccountHttp(*args, **kwargs):
@@ -338,6 +407,7 @@ def ServiceAccountHttp(*args, **kwargs):
   if not account_details:
     raise KeyError('Service account credentials not found.')
 
+  client.logger.setLevel(logging.WARNING)
   credentials = client.SignedJwtAssertionCredentials(
       service_account_name=account_details['client_email'],
       private_key=account_details['private_key'],

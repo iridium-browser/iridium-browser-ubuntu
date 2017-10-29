@@ -30,9 +30,9 @@ namespace crash_reporter {
 
 namespace {
 
-// Use a value of 0.1% for WebView Stable to avoid hitting the crash report
-// upload cap.
-const double minidump_generation_user_fraction = 0.001;
+// Use a value of 1% for WebView Stable to avoid hitting the crash report upload
+// cap.
+const double minidump_generation_user_fraction = 0.01;
 
 // Returns whether the current process should be reporting crashes through
 // minidumps. This function should only be called once per process - the return
@@ -211,7 +211,7 @@ void EnableCrashReporter(const std::string& process_type, int crash_signal_fd) {
       process_type == breakpad::kWebViewSingleProcessType ||
       process_type == breakpad::kBrowserProcessType;
   if (is_browser_process) {
-    breakpad::InitCrashReporter("", sanitization_info);
+    breakpad::InitCrashReporter(process_type, sanitization_info);
   } else {
     breakpad::InitNonBrowserCrashReporterForAndroid(process_type,
                                                     sanitization_info);

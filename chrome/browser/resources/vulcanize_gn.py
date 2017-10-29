@@ -70,9 +70,6 @@ _VULCANIZE_REDIRECT_ARGS = list(itertools.chain.from_iterable(map(
     lambda m: ['--redirect', '"%s|%s"' % (m[0], m[1])], _URL_MAPPINGS)))
 
 
-_PAK_UNPACK_FOLDER = 'flattened'
-
-
 def _undo_mapping(mappings, url):
   for (redirect_url, file_path) in mappings:
     if url.startswith(redirect_url):
@@ -117,10 +114,10 @@ def _update_dep_file(in_folder, args):
   deps = [_undo_mapping(url_mappings, u) for u in request_list]
   deps = map(os.path.normpath, deps)
 
-  # If the input was a .pak file, the generated depfile should not list files
-  # already in the .pak file.
-  if args.input.endswith('.pak'):
-    filter_url = os.path.join(args.out_folder, _PAK_UNPACK_FOLDER)
+  # If the input was a folder holding an unpacked .pak file, the generated
+  # depfile should not list files already in the .pak file.
+  if args.input.endswith('.unpak'):
+    filter_url = args.input
     deps = [d for d in deps if not d.startswith(filter_url)]
 
   with open(os.path.join(_CWD, args.depfile), 'w') as f:
@@ -161,21 +158,44 @@ def _vulcanize(in_folder, args):
     # that by adding a <base> tag to the (post-processed) generated output.
     output = output.replace('<head>', '<head>' + args.insert_in_head)
 
-  with tempfile.NamedTemporaryFile(mode='wt+', delete=False) as tmp:
-    tmp.write(output)
+  crisper_input = tempfile.NamedTemporaryFile(mode='wt+', delete=False)
+  crisper_input.write(output)
+  crisper_input.close()
+
+  crisper_output = tempfile.NamedTemporaryFile(mode='wt+', delete=False)
+  crisper_output.close()
 
   try:
     node.RunNode([node_modules.PathToCrisper(),
-                 '--source', tmp.name,
+                 '--source', crisper_input.name,
                  '--script-in-head', 'false',
+                 '--only-split',
                  '--html', html_out_path,
-                 '--js', js_out_path])
+                 '--js', crisper_output.name])
 
-    node.RunNode([node_modules.PathToUglifyJs(), js_out_path,
+    # Crisper by default inserts a <script> tag with the name of the --js file,
+    # but since we are using a temporary file, need to manually insert a
+    # <script> tag with the correct final filename (in combination with
+    # --only-split flag). There is no way currently to manually specify the
+    # <script> tag's path, see https://github.com/PolymerLabs/crisper/issues/46.
+    with open(html_out_path, 'r+') as f:
+      data = f.read()
+      new_data = data.replace(
+          '</body></html>',
+          '<script src="' + args.js_out_file + '"></script></body></html>')
+      assert new_data != data, 'Expected to find </body></html> token.'
+      f.seek(0)
+      f.write(new_data)
+      f.truncate()
+
+    node.RunNode([node_modules.PathToUglify(), crisper_output.name,
                   '--comments', '"/Copyright|license|LICENSE|\<\/?if/"',
                   '--output', js_out_path])
   finally:
-    os.remove(tmp.name)
+    if os.path.exists(crisper_input.name):
+      os.remove(crisper_input.name)
+    if os.path.exists(crisper_output.name):
+      os.remove(crisper_output.name)
 
 
 def main(argv):
@@ -198,19 +218,8 @@ def main(argv):
   args.input = os.path.normpath(args.input)
   args.out_folder = os.path.normpath(args.out_folder)
 
-  vulcanize_input_folder = args.input
-
-  # If a .pak file was specified, unpack that file first and pass the output to
-  # vulcanize.
-  if args.input.endswith('.pak'):
-    import unpack_pak
-    output_folder = os.path.join(args.out_folder, _PAK_UNPACK_FOLDER)
-    unpack_pak.unpack(args.input, output_folder)
-    vulcanize_input_folder = output_folder
-
-  _vulcanize(vulcanize_input_folder, args)
-
-  _update_dep_file(vulcanize_input_folder, args)
+  _vulcanize(args.input, args)
+  _update_dep_file(args.input, args)
 
 
 if __name__ == '__main__':

@@ -39,12 +39,6 @@ class CONTENT_EXPORT BrowserPluginGuestDelegate {
   virtual WebContents* CreateNewGuestWindow(
       const WebContents::CreateParams& create_params);
 
-  // Asks the delegate whether this guest can run while detached from a
-  // container. A detached guest is a WebContents that has no visual surface
-  // into which it can composite its content. Detached guests can be thought
-  // of as workers with a DOM.
-  virtual bool CanRunInDetachedState() const;
-
   // Notification that the embedder has completed attachment. The
   // |guest_proxy_routing_id| is the routing ID for the RenderView in the
   // embedder that will serve as a contentWindow proxy for the guest.
@@ -73,13 +67,6 @@ class CONTENT_EXPORT BrowserPluginGuestDelegate {
       bool user_gesture,
       bool last_unlocked_by_target,
       const base::Callback<void(bool)>& callback) {}
-
-  // Find the given |search_text| in the page. Returns true if the find request
-  // is handled by this browser plugin guest delegate.
-  virtual bool HandleFindForEmbedder(int request_id,
-                                     const base::string16& search_text,
-                                     const blink::WebFindOptions& options);
-  virtual bool HandleStopFindingForEmbedder(StopFindAction action);
 
   // Provides the delegate with an interface with which to communicate with the
   // content module.

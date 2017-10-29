@@ -11,12 +11,13 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/sequence_checker.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
 namespace content {
 class WebContents;
+class BrowserContext;
 }
 
 namespace printing {
@@ -25,8 +26,7 @@ namespace printing {
 // The hidden WebContents are no longer part of any Browser / TabStripModel.
 // The WebContents started life as a ConstrainedWebDialog.
 // They get deleted when the printing finishes.
-class BackgroundPrintingManager : public base::NonThreadSafe,
-                                  public content::NotificationObserver {
+class BackgroundPrintingManager : public content::NotificationObserver {
  public:
   class Observer;
 
@@ -44,6 +44,12 @@ class BackgroundPrintingManager : public base::NonThreadSafe,
   // Let others see the list of background printing contents.
   std::set<content::WebContents*> CurrentContentSet();
 
+  // Delete all preview contents that are associated with |browser_context|.
+  void DeletePreviewContentsForBrowserContext(
+      content::BrowserContext* browser_context);
+
+  void OnPrintRequestCancelled(content::WebContents* preview_dialog);
+
  private:
   // content::NotificationObserver overrides:
   void Observe(int type,
@@ -59,6 +65,8 @@ class BackgroundPrintingManager : public base::NonThreadSafe,
       printing_contents_map_;
 
   content::NotificationRegistrar registrar_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(BackgroundPrintingManager);
 };

@@ -11,17 +11,16 @@
 #include "media/mojo/services/interface_factory_impl.h"
 #include "media/mojo/services/mojo_media_client.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 
 namespace media {
 
 // TODO(xhwang): Hook up MediaLog when possible.
 MediaService::MediaService(std::unique_ptr<MojoMediaClient> mojo_media_client)
-    : mojo_media_client_(std::move(mojo_media_client)),
-      media_log_(new MediaLog()) {
+    : mojo_media_client_(std::move(mojo_media_client)) {
   DCHECK(mojo_media_client_);
+  registry_.AddInterface<mojom::MediaService>(
+      base::Bind(&MediaService::Create, base::Unretained(this)));
 }
 
 MediaService::~MediaService() {}
@@ -33,19 +32,20 @@ void MediaService::OnStart() {
   mojo_media_client_->Initialize(context()->connector());
 }
 
-bool MediaService::OnConnect(const service_manager::ServiceInfo& remote_info,
-                             service_manager::InterfaceRegistry* registry) {
-  registry->AddInterface<mojom::MediaService>(this);
-  return true;
+void MediaService::OnBindInterface(
+    const service_manager::BindSourceInfo& source_info,
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle interface_pipe) {
+  registry_.BindInterface(interface_name, std::move(interface_pipe));
 }
 
 bool MediaService::OnServiceManagerConnectionLost() {
+  interface_factory_bindings_.CloseAllBindings();
   mojo_media_client_.reset();
   return true;
 }
 
-void MediaService::Create(const service_manager::Identity& remote_identity,
-                          mojom::MediaServiceRequest request) {
+void MediaService::Create(mojom::MediaServiceRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }
 
@@ -56,9 +56,9 @@ void MediaService::CreateInterfaceFactory(
   if (!mojo_media_client_)
     return;
 
-  mojo::MakeStrongBinding(
+  interface_factory_bindings_.AddBinding(
       base::MakeUnique<InterfaceFactoryImpl>(
-          std::move(host_interfaces), media_log_, ref_factory_->CreateRef(),
+          std::move(host_interfaces), &media_log_, ref_factory_->CreateRef(),
           mojo_media_client_.get()),
       std::move(request));
 }

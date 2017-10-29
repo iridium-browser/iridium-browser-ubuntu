@@ -4,7 +4,6 @@
 
 #import "ios/chrome/browser/ui/promos/signin_promo_view_controller.h"
 
-#include "base/mac/scoped_nsobject.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/sys_string_conversions.h"
@@ -15,10 +14,14 @@
 #import "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/signin/authentication_service.h"
 #include "ios/chrome/browser/signin/authentication_service_factory.h"
-#import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity_service.h"
 #include "net/base/network_change_notifier.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 // Key in the UserDefaults to record the version of the application when the
 // SSO Recall promo has been displayed.
@@ -59,12 +62,17 @@ enum PromoAction {
   BOOL _addAccountOperation;
 }
 
-- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
+- (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
+                          dispatcher:
+                              (id<ApplicationSettingsCommands>)dispatcher {
   self = [super initWithBrowserState:browserState
                isPresentedOnSettings:NO
-                   signInAccessPoint:signin_metrics::AccessPoint::
+                         accessPoint:signin_metrics::AccessPoint::
                                          ACCESS_POINT_SIGNIN_PROMO
-                      signInIdentity:nil];
+                         promoAction:signin_metrics::PromoAction::
+                                         PROMO_ACTION_NO_SIGNIN_PROMO
+                      signInIdentity:nil
+                          dispatcher:dispatcher];
   if (self) {
     super.delegate = self;
   }
@@ -85,15 +93,14 @@ enum PromoAction {
 }
 
 - (void)dismissWithSignedIn:(BOOL)signedIn
-             executeCommand:(GenericChromeCommand*)command {
+       showAccountsSettings:(BOOL)showAccountsSettings {
   DCHECK(self.presentingViewController);
   UIViewController* presentingViewController = self.presentingViewController;
   [presentingViewController
       dismissViewControllerAnimated:YES
                          completion:^{
-                           if (command) {
-                             [presentingViewController
-                                 chromeExecuteCommand:command];
+                           if (showAccountsSettings) {
+                             [self.dispatcher showAccountsSettings];
                            }
                          }];
 }
@@ -171,12 +178,6 @@ enum PromoAction {
   return [identities count] > 0;
 }
 
-+ (UIViewController*)controllerToPresentForBrowserState:
-    (ios::ChromeBrowserState*)browserState {
-  base::scoped_nsobject<UIViewController> controller(
-      [[SigninPromoViewController alloc] initWithBrowserState:browserState]);
-  return controller.autorelease();
-}
 
 #pragma mark - ChromeSigninViewControllerDelegate
 
@@ -194,12 +195,12 @@ enum PromoAction {
   DCHECK_EQ(self, controller);
   UMA_HISTOGRAM_ENUMERATION(kUMASSORecallPromoAction, ACTION_DISMISSED,
                             PROMO_ACTION_COUNT);
-  [self dismissWithSignedIn:NO executeCommand:nil];
+  [self dismissWithSignedIn:NO showAccountsSettings:NO];
 }
 
 - (void)didFailSignIn:(ChromeSigninViewController*)controller {
   DCHECK_EQ(self, controller);
-  [self dismissWithSignedIn:NO executeCommand:nil];
+  [self dismissWithSignedIn:NO showAccountsSettings:NO];
 }
 
 - (void)didSignIn:(ChromeSigninViewController*)controller {
@@ -213,14 +214,14 @@ enum PromoAction {
 }
 
 - (void)didAcceptSignIn:(ChromeSigninViewController*)controller
-         executeCommand:(GenericChromeCommand*)command {
+    showAccountsSettings:(BOOL)showAccountsSettings {
   DCHECK_EQ(self, controller);
   PromoAction promoAction = _addAccountOperation ? ACTION_ADDED_ANOTHER_ACCOUNT
                                                  : ACTION_ENABLED_SSO_ACCOUNT;
   UMA_HISTOGRAM_ENUMERATION(kUMASSORecallPromoAction, promoAction,
                             PROMO_ACTION_COUNT);
 
-  [self dismissWithSignedIn:YES executeCommand:command];
+  [self dismissWithSignedIn:YES showAccountsSettings:showAccountsSettings];
 }
 
 @end

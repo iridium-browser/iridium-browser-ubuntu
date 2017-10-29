@@ -6,15 +6,17 @@ import inspect
 import os
 import sys
 
-from telemetry.core import discover
 from telemetry import story
+from telemetry.story import expectations
 
+from py_utils import discover
 
 # Import all submodules' PageSet classes.
 start_dir = os.path.dirname(os.path.abspath(__file__))
 top_level_dir = os.path.dirname(start_dir)
-base_class = story.StorySet
+base_classes = [story.StorySet, expectations.StoryExpectations]
 
-for cls in discover.DiscoverClasses(
-    start_dir, top_level_dir, base_class).values():
-  setattr(sys.modules[__name__], cls.__name__, cls)
+for base_class in base_classes:
+  for cls in discover.DiscoverClasses(
+      start_dir, top_level_dir, base_class).values():
+    setattr(sys.modules[__name__], cls.__name__, cls)

@@ -314,7 +314,7 @@ MappedFile* BlockFiles::GetFile(Addr address) {
       return NULL;
   }
   DCHECK_GE(block_files_.size(), static_cast<unsigned int>(file_index));
-  return block_files_[file_index];
+  return block_files_[file_index].get();
 }
 
 bool BlockFiles::CreateBlock(FileType block_type, int block_count,
@@ -388,12 +388,6 @@ void BlockFiles::CloseFiles() {
     DCHECK(thread_checker_->CalledOnValidThread());
   }
   init_ = false;
-  for (unsigned int i = 0; i < block_files_.size(); i++) {
-    if (block_files_[i]) {
-      block_files_[i]->Release();
-      block_files_[i] = NULL;
-    }
-  }
   block_files_.clear();
 }
 
@@ -404,10 +398,10 @@ void BlockFiles::ReportStats() {
   for (int i = 0; i < kFirstAdditionalBlockFile; i++) {
     GetFileStats(i, &used_blocks[i], &load[i]);
   }
-  UMA_HISTOGRAM_COUNTS("DiskCache.Blocks_0", used_blocks[0]);
-  UMA_HISTOGRAM_COUNTS("DiskCache.Blocks_1", used_blocks[1]);
-  UMA_HISTOGRAM_COUNTS("DiskCache.Blocks_2", used_blocks[2]);
-  UMA_HISTOGRAM_COUNTS("DiskCache.Blocks_3", used_blocks[3]);
+  UMA_HISTOGRAM_COUNTS_1M("DiskCache.Blocks_0", used_blocks[0]);
+  UMA_HISTOGRAM_COUNTS_1M("DiskCache.Blocks_1", used_blocks[1]);
+  UMA_HISTOGRAM_COUNTS_1M("DiskCache.Blocks_2", used_blocks[2]);
+  UMA_HISTOGRAM_COUNTS_1M("DiskCache.Blocks_3", used_blocks[3]);
 
   UMA_HISTOGRAM_ENUMERATION("DiskCache.BlockLoad_0", load[0], 101);
   UMA_HISTOGRAM_ENUMERATION("DiskCache.BlockLoad_1", load[1], 101);
@@ -515,7 +509,7 @@ bool BlockFiles::OpenBlockFile(int index) {
 
   ScopedFlush flush(file.get());
   DCHECK(!block_files_[index]);
-  file.swap(&block_files_[index]);
+  block_files_[index] = std::move(file);
   return true;
 }
 
@@ -551,7 +545,7 @@ bool BlockFiles::GrowBlockFile(MappedFile* file, BlockFileHeader* header) {
 
 MappedFile* BlockFiles::FileForNewBlock(FileType block_type, int block_count) {
   static_assert(RANKINGS == 1, "invalid file type");
-  MappedFile* file = block_files_[block_type - 1];
+  MappedFile* file = block_files_[block_type - 1].get();
   BlockHeader file_header(file);
 
   TimeTicks start = TimeTicks::Now();
@@ -608,7 +602,7 @@ int16_t BlockFiles::CreateNextBlockFile(FileType block_type) {
 // We walk the list of files for this particular block type, deleting the ones
 // that are empty.
 bool BlockFiles::RemoveEmptyFile(FileType block_type) {
-  MappedFile* file = block_files_[block_type - 1];
+  MappedFile* file = block_files_[block_type - 1].get();
   BlockFileHeader* header = reinterpret_cast<BlockFileHeader*>(file->buffer());
 
   while (header->next_file) {
@@ -633,11 +627,10 @@ bool BlockFiles::RemoveEmptyFile(FileType block_type) {
       base::FilePath name = Name(file_index);
       scoped_refptr<File> this_file(new File(false));
       this_file->Init(name);
-      block_files_[file_index]->Release();
       block_files_[file_index] = NULL;
 
       int failure = DeleteCacheFile(name) ? 0 : 1;
-      UMA_HISTOGRAM_COUNTS("DiskCache.DeleteFailed2", failure);
+      UMA_HISTOGRAM_COUNTS_1M("DiskCache.DeleteFailed2", failure);
       if (failure)
         LOG(ERROR) << "Failed to delete " << name.value() << " from the cache.";
       continue;

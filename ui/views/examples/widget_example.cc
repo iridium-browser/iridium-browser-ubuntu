@@ -7,8 +7,9 @@
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/views/background.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/view.h"
@@ -43,8 +44,8 @@ class ModalDialogExample : public DialogExample {
 };
 
 DialogExample::DialogExample() {
-  set_background(Background::CreateSolidBackground(SK_ColorGRAY));
-  SetLayoutManager(new BoxLayout(BoxLayout::kVertical, 10, 10, 10));
+  SetBackground(CreateSolidBackground(SK_ColorGRAY));
+  SetLayoutManager(new BoxLayout(BoxLayout::kVertical, gfx::Insets(10), 10));
   AddChildView(new Label(ASCIIToUTF16("Dialog contents label!")));
 }
 
@@ -55,9 +56,8 @@ base::string16 DialogExample::GetWindowTitle() const {
 }
 
 View* DialogExample::CreateExtraView() {
-  LabelButton* button = new LabelButton(NULL, ASCIIToUTF16("Extra button!"));
-  button->SetStyle(Button::STYLE_BUTTON);
-  return button;
+  return MdTextButton::CreateSecondaryUiButton(nullptr,
+                                               ASCIIToUTF16("Extra button!"));
 }
 
 View* DialogExample::CreateFootnoteView() {
@@ -73,7 +73,8 @@ WidgetExample::~WidgetExample() {
 }
 
 void WidgetExample::CreateExampleView(View* container) {
-  container->SetLayoutManager(new BoxLayout(BoxLayout::kHorizontal, 0, 0, 10));
+  container->SetLayoutManager(
+      new BoxLayout(BoxLayout::kHorizontal, gfx::Insets(), 10));
   BuildButton(container, "Popup widget", POPUP);
   BuildButton(container, "Dialog widget", DIALOG);
   BuildButton(container, "Modal Dialog", MODAL_DIALOG);
@@ -105,8 +106,8 @@ void WidgetExample::ShowWidget(View* sender, Widget::InitParams params) {
   // If the Widget has no contents by default, add a view with a 'Close' button.
   if (!widget->GetContentsView()) {
     View* contents = new View();
-    contents->SetLayoutManager(new BoxLayout(BoxLayout::kHorizontal, 0, 0, 0));
-    contents->set_background(Background::CreateSolidBackground(SK_ColorGRAY));
+    contents->SetLayoutManager(new BoxLayout(BoxLayout::kHorizontal));
+    contents->SetBackground(CreateSolidBackground(SK_ColorGRAY));
     BuildButton(contents, "Close", CLOSE_WIDGET);
     widget->SetContentsView(contents);
   }

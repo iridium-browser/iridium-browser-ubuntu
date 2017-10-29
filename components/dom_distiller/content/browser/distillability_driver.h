@@ -21,7 +21,7 @@ class DistillabilityDriver
  public:
   ~DistillabilityDriver() override;
   void CreateDistillabilityService(
-      mojo::InterfaceRequest<mojom::DistillabilityService> request);
+      mojom::DistillabilityServiceRequest request);
 
   void SetDelegate(const base::Callback<void(bool, bool)>& delegate);
 

@@ -205,9 +205,6 @@ bool AutoEnrollmentCheckScreen::UpdateAutoEnrollmentState(
     policy::AutoEnrollmentState new_auto_enrollment_state) {
   switch (new_auto_enrollment_state) {
     case policy::AUTO_ENROLLMENT_STATE_IDLE:
-      // The client should have been started already.
-      NOTREACHED();
-      return false;
     case policy::AUTO_ENROLLMENT_STATE_PENDING:
     case policy::AUTO_ENROLLMENT_STATE_SERVER_ERROR:
     case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT:
@@ -248,9 +245,9 @@ void AutoEnrollmentCheckScreen::SignalCompletion() {
   // their work before.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&AutoEnrollmentCheckScreen::Finish,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 ScreenExitCode::ENTERPRISE_AUTO_ENROLLMENT_CHECK_COMPLETED));
+      base::BindOnce(
+          &AutoEnrollmentCheckScreen::Finish, weak_ptr_factory_.GetWeakPtr(),
+          ScreenExitCode::ENTERPRISE_AUTO_ENROLLMENT_CHECK_COMPLETED));
 }
 
 bool AutoEnrollmentCheckScreen::IsCompleted() const {

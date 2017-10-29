@@ -35,7 +35,8 @@ namespace {
 
 // TODO(yusukes|djacobo): Find a better way to detect a request loop and remove
 // the global variables.
-base::LazyInstance<GURL> g_last_url = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<GURL>::DestructorAtExit g_last_url =
+    LAZY_INSTANCE_INITIALIZER;
 ui::PageTransition g_last_page_transition;
 
 // Shows the Chrome OS' original external protocol dialog as a fallback.
@@ -365,8 +366,13 @@ void OnUrlHandlerList(int render_process_host_id,
 
   auto* instance = ARC_GET_INSTANCE_FOR_METHOD(
       arc_service_manager->arc_bridge_service()->intent_helper(), HandleUrl);
+
+  WebContents* web_contents =
+      tab_util::GetWebContentsByID(render_process_host_id, routing_id);
   auto* intent_helper_bridge =
-      ArcServiceManager::GetGlobalService<ArcIntentHelperBridge>();
+      web_contents ? ArcIntentHelperBridge::GetForBrowserContext(
+                         web_contents->GetBrowserContext())
+                   : nullptr;
   if (!instance || !intent_helper_bridge) {
     // ARC is not running anymore. Show the Chrome OS dialog.
     ShowFallbackExternalProtocolDialog(render_process_host_id, routing_id, url);

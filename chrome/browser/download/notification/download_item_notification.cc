@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "base/files/file_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_scheduler/post_task.h"
 #include "build/build_config.h"
@@ -23,15 +24,14 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
 #include "components/mime_util/mime_util.h"
 #include "components/url_formatter/elide_url.h"
+#include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/page_navigator.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/mime_util.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -45,7 +45,6 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_style.h"
-#include "ui/vector_icons/vector_icons.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/note_taking_helper.h"
@@ -121,55 +120,54 @@ SkBitmap CropImage(const SkBitmap& original_bitmap) {
 void RecordButtonClickAction(DownloadCommands::Command command) {
   switch (command) {
     case DownloadCommands::SHOW_IN_FOLDER:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_ShowInFolder"));
       break;
     case DownloadCommands::OPEN_WHEN_COMPLETE:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_OpenWhenComplete"));
       break;
     case DownloadCommands::ALWAYS_OPEN_TYPE:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_AlwaysOpenType"));
       break;
     case DownloadCommands::PLATFORM_OPEN:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_PlatformOpen"));
       break;
     case DownloadCommands::CANCEL:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_Cancel"));
       break;
     case DownloadCommands::DISCARD:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_Discard"));
       break;
     case DownloadCommands::KEEP:
-      content::RecordAction(
-          UserMetricsAction("DownloadNotification.Button_Keep"));
+      base::RecordAction(UserMetricsAction("DownloadNotification.Button_Keep"));
       break;
     case DownloadCommands::LEARN_MORE_SCANNING:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_LearnScanning"));
       break;
     case DownloadCommands::LEARN_MORE_INTERRUPTED:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_LearnInterrupted"));
       break;
     case DownloadCommands::PAUSE:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_Pause"));
       break;
     case DownloadCommands::RESUME:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_Resume"));
       break;
     case DownloadCommands::COPY_TO_CLIPBOARD:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_CopyToClipboard"));
       break;
     case DownloadCommands::ANNOTATE:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Button_Annotate"));
       break;
   }
@@ -220,7 +218,7 @@ bool DownloadItemNotification::HasNotificationClickedListener() {
 
 void DownloadItemNotification::OnNotificationClose() {
   if (item_ && item_->IsDangerous() && !item_->IsDone()) {
-    content::RecordAction(
+    base::RecordAction(
         UserMetricsAction("DownloadNotification.Close_Dangerous"));
     closed_ = true;  // Should be set before cancelling the download.
     item_->Cancel(true /* by_user */);
@@ -235,7 +233,7 @@ void DownloadItemNotification::OnNotificationClose() {
 
 void DownloadItemNotification::OnNotificationClick() {
   if (item_->IsDangerous()) {
-    content::RecordAction(
+    base::RecordAction(
         UserMetricsAction("DownloadNotification.Click_Dangerous"));
     // Do nothing.
     return;
@@ -243,13 +241,13 @@ void DownloadItemNotification::OnNotificationClick() {
 
   switch (item_->GetState()) {
     case content::DownloadItem::IN_PROGRESS:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Click_InProgress"));
       item_->SetOpenWhenComplete(!item_->GetOpenWhenComplete());  // Toggle
       break;
     case content::DownloadItem::CANCELLED:
     case content::DownloadItem::INTERRUPTED:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Click_Stopped"));
       GetBrowser()->OpenURL(content::OpenURLParams(
           GURL(chrome::kChromeUIDownloadsURL), content::Referrer(),
@@ -258,7 +256,7 @@ void DownloadItemNotification::OnNotificationClick() {
       CloseNotificationByUser();
       break;
     case content::DownloadItem::COMPLETE:
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("DownloadNotification.Click_Completed"));
       item_->OpenDownload();
       CloseNotificationByUser();
@@ -483,8 +481,7 @@ void DownloadItemNotification::UpdateNotificationData(
     if (model.HasSupportedImageMimeType()) {
       base::FilePath file_path = item_->GetFullPath();
       base::PostTaskWithTraitsAndReplyWithResult(
-          FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                         base::TaskPriority::BACKGROUND),
+          FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
           base::Bind(&ReadNotificationImage, file_path),
           base::Bind(&DownloadItemNotification::OnImageLoaded,
                      weak_factory_.GetWeakPtr()));
@@ -500,9 +497,9 @@ void DownloadItemNotification::UpdateNotificationIcon() {
                             ? IDR_DOWNLOAD_NOTIFICATION_WARNING_BAD
                             : IDR_DOWNLOAD_NOTIFICATION_WARNING_UNWANTED);
 #else
-    SetNotificationVectorIcon(ui::kWarningIcon, model.MightBeMalicious()
-                                                    ? gfx::kGoogleRed700
-                                                    : gfx::kGoogleYellow700);
+    SetNotificationVectorIcon(
+        vector_icons::kWarningIcon,
+        model.MightBeMalicious() ? gfx::kGoogleRed700 : gfx::kGoogleYellow700);
 #endif
     return;
   }
@@ -528,7 +525,8 @@ void DownloadItemNotification::UpdateNotificationIcon() {
 #if defined(OS_MACOSX)
       SetNotificationIcon(IDR_DOWNLOAD_NOTIFICATION_ERROR);
 #else
-      SetNotificationVectorIcon(ui::kErrorCircleIcon, gfx::kGoogleRed700);
+      SetNotificationVectorIcon(vector_icons::kErrorCircleIcon,
+                                gfx::kGoogleRed700);
 #endif
       break;
 
@@ -594,8 +592,7 @@ void DownloadItemNotification::OnImageDecoded(const SkBitmap& decoded_bitmap) {
   }
 
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&CropImage, decoded_bitmap),
       base::Bind(&DownloadItemNotification::OnImageCropped,
                  weak_factory_.GetWeakPtr()));

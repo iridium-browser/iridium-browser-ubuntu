@@ -8,11 +8,12 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_authentication.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_constants.h"
@@ -30,8 +31,6 @@
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/browser/browser_thread.h"
-#include "content/public/browser/user_metrics.h"
 #include "crypto/random.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
@@ -348,9 +347,9 @@ void SupervisedUserCreationControllerNew::RegistrationCallback(
     creation_context_->token = token;
 
     PostTaskAndReplyWithResult(
-        content::BrowserThread::GetBlockingPool()
-            ->GetTaskRunnerWithShutdownBehavior(
-                  base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN)
+        base::CreateTaskRunnerWithTraits(
+            {base::MayBlock(), base::TaskPriority::BACKGROUND,
+             base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})
             .get(),
         FROM_HERE,
         base::Bind(&StoreSupervisedUserFiles, creation_context_->token,
@@ -391,7 +390,7 @@ void SupervisedUserCreationControllerNew::OnSupervisedUserFilesStored(
   ChromeUserManager::Get()
       ->GetSupervisedUserManager()
       ->CommitCreationTransaction();
-  content::RecordAction(
+  base::RecordAction(
       base::UserMetricsAction("ManagedMode_LocallyManagedUserCreated"));
 
   stage_ = TRANSACTION_COMMITTED;

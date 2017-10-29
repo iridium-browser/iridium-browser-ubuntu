@@ -45,7 +45,7 @@ cr.define('print_preview', function() {
      * @private {HTMLElement}
      */
     this.checkbox_ = null;
-  };
+  }
 
   CheckboxTicketItemElement.prototype = {
 
@@ -69,8 +69,9 @@ cr.define('print_preview', function() {
 
     /** Initializes container and checkbox */
     decorate: function() {
-      this.container_ = document.getElementById(this.cssId_);
-      this.checkbox_ = this.container_.querySelector('.checkbox');
+      this.container_ = $(this.cssId_);
+      this.checkbox_ = /** @type {HTMLElement} */ (
+          this.container_.querySelector('.checkbox'));
     },
 
     /** Resets container and checkbox. */
@@ -86,7 +87,7 @@ cr.define('print_preview', function() {
 
     /**
      * Called when the ticket item changes. Updates the UI state.
-     * @param {!print_preview.SettingsSection.OtherOptionsSettings}
+     * @param {!print_preview.OtherOptionsSettings}
      *     otherOptionsSettings The settings section that this element is part
      *     of.
      */
@@ -102,7 +103,7 @@ cr.define('print_preview', function() {
      */
     isVisible: function(collapseContent) {
       return this.ticketItem_.isCapabilityAvailable() &&
-             (!this.collapsible_ || !collapseContent);
+          (!this.collapsible_ || !collapseContent);
     },
 
     /**
@@ -111,7 +112,7 @@ cr.define('print_preview', function() {
      *     collapsed.
      */
     setVisibility: function(collapseContent) {
-      setIsVisible(this.container_, this.isVisible(collapseContent));
+      setIsVisible(assert(this.container_), this.isVisible(collapseContent));
     },
 
   };
@@ -141,7 +142,7 @@ cr.define('print_preview', function() {
      *     enabled.
      */
     this.rasterizeEnabled_ = (!cr.isWindows && !cr.isMac) &&
-                             loadTimeData.getBoolean('printPdfAsImageEnabled');
+        loadTimeData.getBoolean('printPdfAsImageEnabled');
 
     /**
      * @private {!Array<!CheckboxTicketItemElement>} checkbox ticket item
@@ -149,22 +150,22 @@ cr.define('print_preview', function() {
      *      Selection only must always be the last element in the array.
      */
     this.elements_ = [
-      new CheckboxTicketItemElement(headerFooter, true,
-                                    'header-footer-container'),
-      new CheckboxTicketItemElement(fitToPage, false,
-                                    'fit-to-page-container'),
+      new CheckboxTicketItemElement(
+          headerFooter, true, 'header-footer-container'),
+      new CheckboxTicketItemElement(fitToPage, false, 'fit-to-page-container'),
       new CheckboxTicketItemElement(duplex, false, 'duplex-container'),
-      new CheckboxTicketItemElement(cssBackground, true,
-                                    'css-background-container'),
-      new CheckboxTicketItemElement(selectionOnly, true,
-                                    'selection-only-container')
+      new CheckboxTicketItemElement(
+          cssBackground, true, 'css-background-container'),
+      new CheckboxTicketItemElement(
+          selectionOnly, true, 'selection-only-container')
     ];
     if (this.rasterizeEnabled_) {
-      this.elements_.splice(4, 0,
-                            new CheckboxTicketItemElement(rasterize, true,
-                                'rasterize-container'));
+      this.elements_.splice(
+          4, 0,
+          new CheckboxTicketItemElement(
+              rasterize, true, 'rasterize-container'));
     }
-  };
+  }
 
   OtherOptionsSettings.prototype = {
     __proto__: print_preview.SettingsSection.prototype,
@@ -198,8 +199,7 @@ cr.define('print_preview', function() {
       print_preview.SettingsSection.prototype.enterDocument.call(this);
       this.elements_.forEach(function(element) {
         this.tracker.add(
-            element.checkbox,
-            'click',
+            assert(element.checkbox), 'click',
             element.onCheckboxClick.bind(element));
         this.tracker.add(
             element.ticketItem,
@@ -241,7 +241,5 @@ cr.define('print_preview', function() {
   };
 
   // Export
-  return {
-    OtherOptionsSettings: OtherOptionsSettings
-  };
+  return {OtherOptionsSettings: OtherOptionsSettings};
 });

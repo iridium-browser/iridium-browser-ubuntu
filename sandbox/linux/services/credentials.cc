@@ -94,7 +94,7 @@ bool ChrootToSafeEmptyDir() {
   // /proc/tid directory for the thread (since /proc may not be aware of the
   // PID namespace). With a process, we can just use /proc/self.
   pid_t pid = -1;
-  char stack_buf[PTHREAD_STACK_MIN] ALIGNAS(16);
+  alignas(16) char stack_buf[PTHREAD_STACK_MIN];
 #if defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARM_FAMILY) || \
     defined(ARCH_CPU_MIPS_FAMILY)
   // The stack grows downward.
@@ -132,9 +132,10 @@ bool ChrootToSafeEmptyDir() {
 void CheckCloneNewUserErrno(int error) {
   // EPERM can happen if already in a chroot. EUSERS if too many nested
   // namespaces are used. EINVAL for kernels that don't support the feature.
-  // Valgrind will ENOSYS unshare().
+  // Valgrind will ENOSYS unshare().  ENOSPC can occur when the system has
+  // reached its maximum configured number of user namespaces.
   PCHECK(error == EPERM || error == EUSERS || error == EINVAL ||
-         error == ENOSYS);
+         error == ENOSYS || error == ENOSPC);
 }
 
 // Converts a Capability to the corresponding Linux CAP_XXX value.
@@ -150,16 +151,19 @@ int CapabilityToKernelValue(Credentials::Capability cap) {
   return 0;
 }
 
-void SetGidAndUidMaps(gid_t gid, uid_t uid) {
+bool SetGidAndUidMaps(gid_t gid, uid_t uid) {
+  const char kGidMapFile[] = "/proc/self/gid_map";
+  const char kUidMapFile[] = "/proc/self/uid_map";
   if (NamespaceUtils::KernelSupportsDenySetgroups()) {
     PCHECK(NamespaceUtils::DenySetgroups());
   }
   DCHECK(GetRESIds(NULL, NULL));
-  const char kGidMapFile[] = "/proc/self/gid_map";
-  const char kUidMapFile[] = "/proc/self/uid_map";
-  PCHECK(NamespaceUtils::WriteToIdMapFile(kGidMapFile, gid));
-  PCHECK(NamespaceUtils::WriteToIdMapFile(kUidMapFile, uid));
+  if (!NamespaceUtils::WriteToIdMapFile(kGidMapFile, gid) ||
+      !NamespaceUtils::WriteToIdMapFile(kUidMapFile, uid)) {
+    return false;
+  }
   DCHECK(GetRESIds(NULL, NULL));
+  return true;
 }
 
 }  // namespace.
@@ -284,7 +288,8 @@ bool Credentials::CanCreateProcessInNewUserNS() {
   if (pid == 0) {
     // unshare() requires the effective uid and gid to have a mapping in the
     // parent namespace.
-    SetGidAndUidMaps(gid, uid);
+    if (!SetGidAndUidMaps(gid, uid))
+      _exit(1);
 
     // Make sure we drop CAP_SYS_ADMIN.
     CHECK(sandbox::Credentials::DropAllCapabilities());
@@ -292,7 +297,10 @@ bool Credentials::CanCreateProcessInNewUserNS() {
     // Ensure we have unprivileged use of CLONE_NEWUSER.  Debian
     // Jessie explicitly forbids this case.  See:
     // add-sysctl-to-disallow-unprivileged-CLONE_NEWUSER-by-default.patch
-    _exit(!!sys_unshare(CLONE_NEWUSER));
+    if (sys_unshare(CLONE_NEWUSER))
+      _exit(1);
+
+    _exit(kExitSuccess);
   }
 
   // Always reap the child.
@@ -324,7 +332,7 @@ bool Credentials::MoveToNewUserNS() {
 
   // The current {r,e,s}{u,g}id is now an overflow id (c.f.
   // /proc/sys/kernel/overflowuid). Setup the uid and gid maps.
-  SetGidAndUidMaps(gid, uid);
+  PCHECK(SetGidAndUidMaps(gid, uid));
   return true;
 }
 

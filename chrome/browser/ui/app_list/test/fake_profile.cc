@@ -69,6 +69,11 @@ content::BackgroundSyncController* FakeProfile::GetBackgroundSyncController() {
   return nullptr;
 }
 
+content::BrowsingDataRemoverDelegate*
+FakeProfile::GetBrowsingDataRemoverDelegate() {
+  return nullptr;
+}
+
 net::URLRequestContextGetter* FakeProfile::CreateRequestContext(
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) {
@@ -168,12 +173,10 @@ base::FilePath FakeProfile::last_selected_directory() {
 
 void FakeProfile::set_last_selected_directory(const base::FilePath& path) {}
 
-#if defined(OS_CHROMEOS)
 void FakeProfile::ChangeAppLocale(
     const std::string& locale, AppLocaleChangedVia via) {}
 void FakeProfile::OnLogin() {}
 void FakeProfile::InitChromeOSPreferences() {}
-#endif  // defined(OS_CHROMEOS)
 
 PrefProxyConfigTracker* FakeProfile::GetProxyConfigTracker() {
   return nullptr;

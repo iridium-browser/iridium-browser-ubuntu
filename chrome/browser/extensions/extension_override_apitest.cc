@@ -4,6 +4,10 @@
 
 #include <stddef.h>
 
+#include <utility>
+
+#include "base/memory/ptr_util.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -32,6 +36,12 @@ namespace extensions {
 
 class ExtensionOverrideTest : public ExtensionApiTest {
  protected:
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
+    ASSERT_TRUE(embedded_test_server()->Start());
+  }
+
   bool CheckHistoryOverridesContainsNoDupes() {
     // There should be no duplicate entries in the preferences.
     const base::DictionaryValue* overrides =
@@ -46,7 +56,7 @@ class ExtensionOverrideTest : public ExtensionApiTest {
     for (const auto& val : *values) {
       const base::DictionaryValue* dict = nullptr;
       std::string entry;
-      if (!val->GetAsDictionary(&dict) || !dict->GetString("entry", &entry) ||
+      if (!val.GetAsDictionary(&dict) || !dict->GetString("entry", &entry) ||
           seen_overrides.count(entry) != 0)
         return false;
       seen_overrides.insert(entry);
@@ -200,9 +210,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, MAYBE_OverrideNewTabIncognito) {
 // See https://crbug.com/700124.
 IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest,
                        SubframeNavigationInOverridenNTPDoesNotAffectFocus) {
-  host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   // Load an extension that overrides the new tab page.
   const Extension* extension = LoadExtension(data_dir().AppendASCII("newtab"));
 
@@ -274,7 +281,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, ShouldCleanUpDuplicateEntries) {
   // a preferences file without corresponding UnloadExtension() calls. This is
   // the same as the above test, except for that it is testing the case where
   // the file already contains dupes when an extension is loaded.
-  base::ListValue* list = new base::ListValue();
+  auto list = base::MakeUnique<base::ListValue>();
   for (size_t i = 0; i < 3; ++i) {
     std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
     dict->SetString("entry", "http://www.google.com/");
@@ -285,7 +292,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionOverrideTest, ShouldCleanUpDuplicateEntries) {
   {
     DictionaryPrefUpdate update(browser()->profile()->GetPrefs(),
                                 ExtensionWebUI::kExtensionURLOverrides);
-    update.Get()->Set("history", list);
+    update.Get()->Set("history", std::move(list));
   }
 
   ASSERT_FALSE(CheckHistoryOverridesContainsNoDupes());

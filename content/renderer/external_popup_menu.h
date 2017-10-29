@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "content/common/features.h"
 #include "third_party/WebKit/public/web/WebExternalPopupMenu.h"
 #include "third_party/WebKit/public/web/WebPopupMenuInfo.h"
 #include "ui/gfx/geometry/point_f.h"
@@ -28,10 +29,9 @@ class ExternalPopupMenu : public blink::WebExternalPopupMenu {
 
   virtual ~ExternalPopupMenu() {}
 
-  void SetOriginScaleAndOffsetForEmulation(
-      float scale, const gfx::PointF& offset);
+  void SetOriginScaleForEmulation(float scale);
 
-#if defined(USE_EXTERNAL_POPUP_MENU)
+#if BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
 #if defined(OS_MACOSX)
   // Called when the user has selected an item. |selected_item| is -1 if the
   // user canceled the popup.
@@ -43,8 +43,8 @@ class ExternalPopupMenu : public blink::WebExternalPopupMenu {
 #endif
 
   // blink::WebExternalPopupMenu implementation:
-  void show(const blink::WebRect& bounds) override;
-  void close() override;
+  void Show(const blink::WebRect& bounds) override;
+  void Close() override;
 
  private:
   RenderFrameImpl* render_frame_;
@@ -54,7 +54,6 @@ class ExternalPopupMenu : public blink::WebExternalPopupMenu {
   // Popups may be displaced when screen metrics emulation is enabled.
   // These scale and offset are used to properly adjust popup position.
   float origin_scale_for_emulation_;
-  gfx::PointF origin_offset_for_emulation_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalPopupMenu);
 };

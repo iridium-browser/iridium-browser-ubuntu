@@ -14,6 +14,7 @@
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/common/content_settings.h"
 #include "components/prefs/pref_service.h"
 #include "extensions/browser/extension_registry.h"
 
@@ -25,6 +26,7 @@ const char kSetting[] = "setting";
 const char kOrigin[] = "origin";
 const char kDisplayName[] = "displayName";
 const char kOriginForFavicon[] = "originForFavicon";
+const char kExtensionProviderId[] = "extension";
 const char kPolicyProviderId[] = "policy";
 const char kSource[] = "source";
 const char kIncognito[] = "incognito";
@@ -73,6 +75,7 @@ const ContentSettingsTypeNameEntry kContentSettingsTypeGroupNames[] = {
     {CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER, "protectedContent"},
 #endif
     {CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC, "background-sync"},
+    {CONTENT_SETTINGS_TYPE_ADS, "ads"},
 };
 
 }  // namespace
@@ -135,7 +138,7 @@ std::unique_ptr<base::DictionaryValue> GetExceptionForPage(
     const ContentSetting& setting,
     const std::string& provider_name,
     bool incognito) {
-  base::DictionaryValue* exception = new base::DictionaryValue();
+  auto exception = base::MakeUnique<base::DictionaryValue>();
   exception->SetString(kOrigin, pattern.ToString());
   exception->SetString(kDisplayName, display_name);
   exception->SetString(kEmbeddingOrigin,
@@ -150,7 +153,7 @@ std::unique_ptr<base::DictionaryValue> GetExceptionForPage(
   exception->SetString(kSetting, setting_string);
   exception->SetString(kSource, provider_name);
   exception->SetBoolean(kIncognito, incognito);
-  return base::WrapUnique(exception);
+  return exception;
 }
 
 std::string GetDisplayName(
@@ -201,7 +204,7 @@ void GetExceptionsFromHostContentSettingsMap(
       continue;
 
     all_patterns_settings[std::make_pair(i->primary_pattern, i->source)]
-        [i->secondary_pattern] = i->setting;
+                         [i->secondary_pattern] = i->GetContentSetting();
   }
 
   // Keep the exceptions sorted by provider so they will be displayed in
@@ -306,7 +309,7 @@ void GetPolicyAllowedUrls(
   std::vector<ContentSettingsPattern> patterns;
   for (const auto& entry : *policy_urls) {
     std::string url;
-    bool valid_string = entry->GetAsString(&url);
+    bool valid_string = entry.GetAsString(&url);
     if (!valid_string)
       continue;
 

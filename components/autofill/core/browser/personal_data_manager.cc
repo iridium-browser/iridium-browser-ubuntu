@@ -12,10 +12,12 @@
 #include <string>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/timezone.h"
 #include "base/memory/ptr_util.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -49,6 +51,7 @@
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_formatter.h"
 
 namespace autofill {
+
 namespace {
 
 using ::i18n::addressinput::AddressField;
@@ -57,6 +60,9 @@ using ::i18n::addressinput::STREET_ADDRESS;
 
 // The length of a local profile GUID.
 const int LOCAL_GUID_LENGTH = 36;
+
+constexpr base::TimeDelta kDisusedProfileTimeDelta =
+    base::TimeDelta::FromDays(180);
 
 template<typename T>
 class FormGroupMatchesByGUIDFunctor {
@@ -268,7 +274,7 @@ PersonalDataManager::PersonalDataManager(const std::string& app_locale)
       pref_service_(nullptr),
       account_tracker_(nullptr),
       is_off_the_record_(false),
-      has_logged_profile_count_(false),
+      has_logged_stored_profile_metrics_(false),
       has_logged_local_credit_card_count_(false),
       has_logged_server_credit_card_counts_(false) {}
 
@@ -373,7 +379,7 @@ void PersonalDataManager::OnWebDataServiceRequestDone(
       if (h == pending_profiles_query_) {
         ReceiveLoadedDbValues(h, result.get(), &pending_profiles_query_,
                               &web_profiles_);
-        LogProfileCount();  // This only logs local profiles.
+        LogStoredProfileMetrics();  // This only logs local profiles.
       } else {
         ReceiveLoadedDbValues(h, result.get(), &pending_server_profiles_query_,
                               &server_profiles_);
@@ -442,13 +448,16 @@ void PersonalDataManager::RemoveObserver(
 bool PersonalDataManager::ImportFormData(
     const FormStructure& form,
     bool should_return_local_card,
-    std::unique_ptr<CreditCard>* imported_credit_card) {
+    std::unique_ptr<CreditCard>* imported_credit_card,
+    bool* imported_credit_card_matches_masked_server_credit_card) {
   // We try the same |form| for both credit card and address import/update.
   // - ImportCreditCard may update an existing card, or fill
   //   |imported_credit_card| with an extracted card. See .h for details of
-  //   |should_return_local_card|.
+  //   |should_return_local_card| and
+  //   |imported_credit_card_matches_masked_server_credit_card|.
   bool cc_import =
-      ImportCreditCard(form, should_return_local_card, imported_credit_card);
+      ImportCreditCard(form, should_return_local_card, imported_credit_card,
+                       imported_credit_card_matches_masked_server_credit_card);
   // - ImportAddressProfiles may eventually save or update one or more address
   //   profiles.
   bool address_import = ImportAddressProfiles(form);
@@ -611,6 +620,27 @@ void PersonalDataManager::UpdateCreditCard(const CreditCard& credit_card) {
   Refresh();
 }
 
+void PersonalDataManager::AddFullServerCreditCard(
+    const CreditCard& credit_card) {
+  DCHECK_EQ(CreditCard::FULL_SERVER_CARD, credit_card.record_type());
+  DCHECK(!credit_card.IsEmpty(app_locale_));
+  DCHECK(!credit_card.server_id().empty());
+
+  if (is_off_the_record_ || !database_.get())
+    return;
+
+  // Don't add a duplicate.
+  if (FindByGUID<CreditCard>(server_credit_cards_, credit_card.guid()) ||
+      FindByContents(server_credit_cards_, credit_card))
+    return;
+
+  // Add the new credit card to the web database.
+  database_->AddFullServerCreditCard(credit_card);
+
+  // Refresh our local cache and send notifications to observers.
+  Refresh();
+}
+
 void PersonalDataManager::UpdateServerCreditCard(
     const CreditCard& credit_card) {
   DCHECK_NE(CreditCard::LOCAL_CARD, credit_card.record_type());
@@ -709,10 +739,23 @@ void PersonalDataManager::RemoveByGUID(const std::string& guid) {
   if (!database_.get())
     return;
 
-  if (is_credit_card)
+  if (is_credit_card) {
     database_->RemoveCreditCard(guid);
-  else
+  } else {
     database_->RemoveAutofillProfile(guid);
+
+    // Reset the billing_address_id of any card that refered to this profile.
+    for (CreditCard* credit_card : GetCreditCards()) {
+      if (credit_card->billing_address_id() == guid) {
+        credit_card->set_billing_address_id("");
+
+        if (credit_card->record_type() == CreditCard::LOCAL_CARD)
+          database_->UpdateCreditCard(*credit_card);
+        else
+          database_->UpdateServerCardMetadata(*credit_card);
+      }
+    }
+  }
 
   // Refresh our local cache and send notifications to observers.
   Refresh();
@@ -723,6 +766,18 @@ CreditCard* PersonalDataManager::GetCreditCardByGUID(const std::string& guid) {
   std::vector<CreditCard*>::const_iterator iter =
       FindElementByGUID<CreditCard>(credit_cards, guid);
   return iter != credit_cards.end() ? *iter : nullptr;
+}
+
+CreditCard* PersonalDataManager::GetCreditCardByNumber(
+    const std::string& number) {
+  CreditCard numbered_card;
+  numbered_card.SetNumber(base::ASCIIToUTF16(number));
+  for (CreditCard* credit_card : GetCreditCards()) {
+    DCHECK(credit_card);
+    if (credit_card->HasSameNumberAs(numbered_card))
+      return credit_card;
+  }
+  return nullptr;
 }
 
 void PersonalDataManager::GetNonEmptyTypes(
@@ -778,12 +833,12 @@ void PersonalDataManager::Refresh() {
   LoadCreditCards();
 }
 
-const std::vector<AutofillProfile*> PersonalDataManager::GetProfilesToSuggest()
+std::vector<AutofillProfile*> PersonalDataManager::GetProfilesToSuggest()
     const {
   std::vector<AutofillProfile*> profiles = GetProfiles(true);
 
   // Rank the suggestions by frecency (see AutofillDataModel for details).
-  base::Time comparison_time = AutofillClock::Now();
+  const base::Time comparison_time = AutofillClock::Now();
   std::sort(profiles.begin(), profiles.end(),
             [comparison_time](const AutofillDataModel* a,
                               const AutofillDataModel* b) {
@@ -791,6 +846,22 @@ const std::vector<AutofillProfile*> PersonalDataManager::GetProfilesToSuggest()
             });
 
   return profiles;
+}
+
+// static
+void PersonalDataManager::RemoveProfilesNotUsedSinceTimestamp(
+    base::Time min_last_used,
+    std::vector<AutofillProfile*>* profiles) {
+  const size_t original_size = profiles->size();
+  profiles->erase(
+      std::stable_partition(profiles->begin(), profiles->end(),
+                            [min_last_used](const AutofillDataModel* m) {
+                              return m->use_date() > min_last_used;
+                            }),
+      profiles->end());
+  const size_t num_profiles_supressed = original_size - profiles->size();
+  AutofillMetrics::LogNumberOfAddressesSuppressedForDisuse(
+      num_profiles_supressed);
 }
 
 std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
@@ -807,6 +878,15 @@ std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
 
   // Get the profiles to suggest, which are already sorted.
   std::vector<AutofillProfile*> profiles = GetProfilesToSuggest();
+
+  // If enabled, suppress disused address profiles when triggered from an empty
+  // field.
+  if (field_contents.empty() &&
+      base::FeatureList::IsEnabled(kAutofillSuppressDisusedAddresses)) {
+    const base::Time min_last_used =
+        AutofillClock::Now() - kDisusedProfileTimeDelta;
+    RemoveProfilesNotUsedSinceTimestamp(min_last_used, &profiles);
+  }
 
   std::vector<Suggestion> suggestions;
   // Match based on a prefix search.
@@ -883,7 +963,11 @@ std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
   // trial group or SIZE_MAX if no limit is defined.
   std::string limit_str = variations::GetVariationParamValue(
       kFrecencyFieldTrialName, kFrecencyFieldTrialLimitParam);
-  size_t limit = base::StringToSizeT(limit_str, &limit) ? limit : SIZE_MAX;
+  size_t limit = SIZE_MAX;
+  // Reassign SIZE_MAX to |limit| is needed after calling base::StringToSizeT,
+  // as this method can modify |limit| even if it returns false.
+  if (!base::StringToSizeT(limit_str, &limit))
+    limit = SIZE_MAX;
 
   unique_suggestions.resize(std::min(unique_suggestions.size(), limit));
 
@@ -1062,8 +1146,7 @@ bool PersonalDataManager::IsCountryOfInterest(const std::string& country_code)
         AutofillCountry::CountryCodeForLocale(app_locale())));
   }
 
-  return std::find(country_codes.begin(), country_codes.end(),
-                   base::ToLowerASCII(country_code)) != country_codes.end();
+  return base::ContainsValue(country_codes, base::ToLowerASCII(country_code));
 }
 
 const std::string& PersonalDataManager::GetDefaultCountryCodeForNewAddress()
@@ -1286,10 +1369,28 @@ std::string PersonalDataManager::SaveImportedCreditCard(
   return guid;
 }
 
-void PersonalDataManager::LogProfileCount() const {
-  if (!has_logged_profile_count_) {
+void PersonalDataManager::LogStoredProfileMetrics() const {
+  if (!has_logged_stored_profile_metrics_) {
+    // Update the histogram of how many addresses the user has stored.
     AutofillMetrics::LogStoredProfileCount(web_profiles_.size());
-    has_logged_profile_count_ = true;
+
+    // If the user has stored addresses, log the distribution of days since
+    // their last use and how many would be considered disused.
+    if (!web_profiles_.empty()) {
+      size_t num_disused_profiles = 0;
+      const base::Time now = AutofillClock::Now();
+      for (const std::unique_ptr<AutofillProfile>& profile : web_profiles_) {
+        const base::TimeDelta time_since_last_use = now - profile->use_date();
+        AutofillMetrics::LogStoredProfileDaysSinceLastUse(
+            time_since_last_use.InDays());
+        if (time_since_last_use > kDisusedProfileTimeDelta)
+          ++num_disused_profiles;
+      }
+      AutofillMetrics::LogStoredProfileDisusedCount(num_disused_profiles);
+    }
+
+    // Only log this info once per chrome user profile load.
+    has_logged_stored_profile_metrics_ = true;
   }
 }
 
@@ -1331,8 +1432,7 @@ std::string PersonalDataManager::MostCommonCountryCodeFromProfiles() const {
     std::string country_code = base::ToUpperASCII(base::UTF16ToASCII(
         profiles[i]->GetRawInfo(ADDRESS_HOME_COUNTRY)));
 
-    if (std::find(country_codes.begin(), country_codes.end(), country_code) !=
-            country_codes.end()) {
+    if (base::ContainsValue(country_codes, country_code)) {
       // Verified profiles count 100x more than unverified ones.
       votes[country_code] += profiles[i]->IsVerified() ? 100 : 1;
     }
@@ -1472,8 +1572,10 @@ bool PersonalDataManager::ImportAddressProfileForSection(
 bool PersonalDataManager::ImportCreditCard(
     const FormStructure& form,
     bool should_return_local_card,
-    std::unique_ptr<CreditCard>* imported_credit_card) {
+    std::unique_ptr<CreditCard>* imported_credit_card,
+    bool* imported_credit_card_matches_masked_server_credit_card) {
   DCHECK(!imported_credit_card->get());
+  *imported_credit_card_matches_masked_server_credit_card = false;
 
   // The candidate for credit card import. There are many ways for the candidate
   // to be rejected (see everywhere this function returns false, below).
@@ -1536,7 +1638,8 @@ bool PersonalDataManager::ImportCreditCard(
   // have already saved this card number, unless |should_return_local_card| is
   // true which indicates that upload is enabled. In this case, it's useful to
   // present the upload prompt to the user to promote the card from a local card
-  // to a synced server card.
+  // to a synced server card, provided we don't have a masked server card with
+  // the same |TypeAndLastFourDigits|.
   for (const auto& card : local_credit_cards_) {
     // Make a local copy so that the data in |local_credit_cards_| isn't
     // modified directly by the UpdateFromImportedCard() call.
@@ -1553,14 +1656,43 @@ bool PersonalDataManager::ImportCreditCard(
     }
   }
 
-  // Also don't offer to save if we already have this stored as a server card.
-  // We only check the number because if the new card has the same number as the
-  // server card, upload is guaranteed to fail. There's no mechanism for entries
-  // with the same number but different names or expiration dates as there is
-  // for local cards.
+  // Also don't offer to save if we already have this stored as a full server
+  // card. We only check the number because if the new card has the same number
+  // as the server card, upload is guaranteed to fail. There's no mechanism for
+  // entries with the same number but different names or expiration dates as
+  // there is for local cards.
   for (const auto& card : server_credit_cards_) {
-    if (candidate_credit_card.HasSameNumberAs(*card))
-      return false;
+    if (candidate_credit_card.HasSameNumberAs(*card)) {
+      // Record metric on whether expiration dates matched.
+      if (candidate_credit_card.expiration_month() ==
+              card->expiration_month() &&
+          candidate_credit_card.expiration_year() == card->expiration_year()) {
+        AutofillMetrics::LogSubmittedServerCardExpirationStatusMetric(
+            card->record_type() == CreditCard::FULL_SERVER_CARD
+                ? AutofillMetrics::FULL_SERVER_CARD_EXPIRATION_DATE_MATCHED
+                : AutofillMetrics::MASKED_SERVER_CARD_EXPIRATION_DATE_MATCHED);
+      } else {
+        AutofillMetrics::LogSubmittedServerCardExpirationStatusMetric(
+            card->record_type() == CreditCard::FULL_SERVER_CARD
+                ? AutofillMetrics::
+                      FULL_SERVER_CARD_EXPIRATION_DATE_DID_NOT_MATCH
+                : AutofillMetrics::
+                      MASKED_SERVER_CARD_EXPIRATION_DATE_DID_NOT_MATCH);
+      }
+
+      // We can offer to save locally even if we already have this stored as
+      // another masked server card with the same |TypeAndLastFourDigits| as
+      // long as the AutofillOfferLocalSaveIfServerCardManuallyEntered flag is
+      // enabled. This will allow the user to fill the full card number in the
+      // future without having to unmask the card.
+      if (card->record_type() == CreditCard::FULL_SERVER_CARD ||
+          !IsAutofillOfferLocalSaveIfServerCardManuallyEnteredExperimentEnabled()) {
+        return false;
+      }
+      DCHECK_EQ(card->record_type(), CreditCard::MASKED_SERVER_CARD);
+      *imported_credit_card_matches_masked_server_credit_card = true;
+      break;
+    }
   }
 
   imported_credit_card->reset(new CreditCard(candidate_credit_card));
@@ -1600,7 +1732,7 @@ std::vector<Suggestion> PersonalDataManager::GetSuggestionsForCards(
       Suggestion* suggestion = &suggestions.back();
 
       suggestion->value = credit_card->GetInfo(type, app_locale_);
-      suggestion->icon = base::UTF8ToUTF16(credit_card->type());
+      suggestion->icon = base::UTF8ToUTF16(credit_card->network());
       suggestion->backend_id = credit_card->guid();
       suggestion->match = prefix_matched_suggestion
                               ? Suggestion::PREFIX_MATCH
@@ -1610,7 +1742,12 @@ std::vector<Suggestion> PersonalDataManager::GetSuggestionsForCards(
       // Otherwise the label is the card number, or if that is empty the
       // cardholder name. The label should never repeat the value.
       if (type.GetStorableType() == CREDIT_CARD_NUMBER) {
-        suggestion->value = credit_card->TypeAndLastFourDigits();
+        if (IsAutofillCreditCardBankNameDisplayExperimentEnabled() &&
+            !credit_card->bank_name().empty()) {
+          suggestion->value = credit_card->BankNameAndLastFourDigits();
+        } else {
+          suggestion->value = credit_card->NetworkAndLastFourDigits();
+        }
         if (IsAutofillCreditCardLastUsedDateDisplayExperimentEnabled()) {
           suggestion->label =
               credit_card->GetLastUsedDateForDisplay(app_locale_);
@@ -1630,7 +1767,7 @@ std::vector<Suggestion> PersonalDataManager::GetSuggestionsForCards(
         // Since Android places the label on its own row, there's more
         // horizontal
         // space to work with. Show "Amex - 1234" rather than desktop's "*1234".
-        suggestion->label = credit_card->TypeAndLastFourDigits();
+        suggestion->label = credit_card->NetworkAndLastFourDigits();
 #else
         suggestion->label = base::ASCIIToUTF16("*");
         suggestion->label.append(credit_card->LastFourDigits());

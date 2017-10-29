@@ -132,14 +132,12 @@ NotificationDatabase::Status NotificationDatabase::Open(
     options.env = env_.get();
   }
 
-  leveldb::DB* db = nullptr;
   Status status = LevelDBStatusToStatus(
-      leveldb::DB::Open(options, path_.AsUTF8Unsafe(), &db));
+      leveldb_env::OpenDB(options, path_.AsUTF8Unsafe(), &db_));
   if (status != STATUS_OK)
     return status;
 
   state_ = STATE_INITIALIZED;
-  db_.reset(db);
 
   return ReadNextPersistentNotificationId();
 }
@@ -327,11 +325,6 @@ NotificationDatabase::ReadAllNotificationDataInternal(
             service_worker_registration_id) {
       continue;
     }
-
-    // Silently ignore the notification if it doesn't have an ID assigned.
-    // TODO(peter): Remove this clause when Chrome 55 has branched.
-    if (notification_database_data.notification_id.empty())
-      continue;
 
     notification_data_vector->push_back(notification_database_data);
   }

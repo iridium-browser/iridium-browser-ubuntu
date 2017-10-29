@@ -51,14 +51,14 @@ using content::WebContentsViewMac;
 #define STATIC_ASSERT_ENUM(a, b)                            \
   static_assert(static_cast<int>(a) == static_cast<int>(b), \
                 "enum mismatch: " #a)
-STATIC_ASSERT_ENUM(NSDragOperationNone, blink::WebDragOperationNone);
-STATIC_ASSERT_ENUM(NSDragOperationCopy, blink::WebDragOperationCopy);
-STATIC_ASSERT_ENUM(NSDragOperationLink, blink::WebDragOperationLink);
-STATIC_ASSERT_ENUM(NSDragOperationGeneric, blink::WebDragOperationGeneric);
-STATIC_ASSERT_ENUM(NSDragOperationPrivate, blink::WebDragOperationPrivate);
-STATIC_ASSERT_ENUM(NSDragOperationMove, blink::WebDragOperationMove);
-STATIC_ASSERT_ENUM(NSDragOperationDelete, blink::WebDragOperationDelete);
-STATIC_ASSERT_ENUM(NSDragOperationEvery, blink::WebDragOperationEvery);
+STATIC_ASSERT_ENUM(NSDragOperationNone, blink::kWebDragOperationNone);
+STATIC_ASSERT_ENUM(NSDragOperationCopy, blink::kWebDragOperationCopy);
+STATIC_ASSERT_ENUM(NSDragOperationLink, blink::kWebDragOperationLink);
+STATIC_ASSERT_ENUM(NSDragOperationGeneric, blink::kWebDragOperationGeneric);
+STATIC_ASSERT_ENUM(NSDragOperationPrivate, blink::kWebDragOperationPrivate);
+STATIC_ASSERT_ENUM(NSDragOperationMove, blink::kWebDragOperationMove);
+STATIC_ASSERT_ENUM(NSDragOperationDelete, blink::kWebDragOperationDelete);
+STATIC_ASSERT_ENUM(NSDragOperationEvery, blink::kWebDragOperationEvery);
 
 @interface WebContentsViewCocoa (Private)
 - (id)initWithWebContentsViewMac:(WebContentsViewMac*)w;
@@ -85,11 +85,11 @@ WebContentsViewMac::RenderWidgetHostViewCreateFunction
 
 content::ScreenInfo GetNSViewScreenInfo(NSView* view) {
   display::Display display =
-      display::Screen::GetScreen()->GetDisplayNearestWindow(view);
+      display::Screen::GetScreen()->GetDisplayNearestView(view);
 
   content::ScreenInfo results;
   results.device_scale_factor = static_cast<int>(display.device_scale_factor());
-  results.icc_profile = display.icc_profile();
+  results.color_space = display.color_space();
   results.depth = display.color_depth();
   results.depth_per_component = display.depth_per_component();
   results.is_monochrome = display.is_monochrome();
@@ -269,8 +269,8 @@ void WebContentsViewMac::UpdateDragCursor(WebDragOperation operation) {
   [cocoa_view_ setCurrentDragOperation: operation];
 }
 
-void WebContentsViewMac::GotFocus() {
-  web_contents_->NotifyWebContentsFocused();
+void WebContentsViewMac::GotFocus(RenderWidgetHostImpl* render_widget_host) {
+  web_contents_->NotifyWebContentsFocused(render_widget_host);
 }
 
 // This is called when the renderer asks us to take focus back (i.e., it has
@@ -307,16 +307,20 @@ void WebContentsViewMac::ShowPopupMenu(
     const std::vector<MenuItem>& items,
     bool right_aligned,
     bool allow_multiple_selection) {
-  popup_menu_helper_.reset(new PopupMenuHelper(render_frame_host));
+  popup_menu_helper_.reset(new PopupMenuHelper(this, render_frame_host));
   popup_menu_helper_->ShowPopupMenu(bounds, item_height, item_font_size,
                                     selected_item, items, right_aligned,
                                     allow_multiple_selection);
-  popup_menu_helper_.reset();
+  // Note: |this| may be deleted here.
 }
 
 void WebContentsViewMac::HidePopupMenu() {
   if (popup_menu_helper_)
     popup_menu_helper_->Hide();
+}
+
+void WebContentsViewMac::OnMenuClosed() {
+  popup_menu_helper_.reset();
 }
 
 gfx::Rect WebContentsViewMac::GetViewBounds() const {

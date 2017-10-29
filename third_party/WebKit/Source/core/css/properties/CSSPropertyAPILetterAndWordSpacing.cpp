@@ -7,17 +7,19 @@
 #include "core/css/parser/CSSParserContext.h"
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPILetterAndWordSpacing::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  if (range.peek().id() == CSSValueNormal)
-    return CSSPropertyParserHelpers::consumeIdent(range);
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  if (range.Peek().Id() == CSSValueNormal)
+    return CSSPropertyParserHelpers::ConsumeIdent(range);
   // TODO(timloh): allow <percentage>s in word-spacing.
-  return CSSPropertyParserHelpers::consumeLength(
-      range, context->mode(), ValueRangeAll,
-      CSSPropertyParserHelpers::UnitlessQuirk::Allow);
+  return CSSPropertyParserHelpers::ConsumeLength(
+      range, context.Mode(), kValueRangeAll,
+      CSSPropertyParserHelpers::UnitlessQuirk::kAllow);
 }
 
 }  // namespace blink

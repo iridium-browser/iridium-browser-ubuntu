@@ -4,9 +4,15 @@
 
 #include "bindings/core/v8/serialization/V8ScriptValueSerializer.h"
 
-#include "bindings/core/v8/ToV8.h"
+#include "bindings/core/v8/ToV8ForCore.h"
 #include "bindings/core/v8/V8Blob.h"
-#include "bindings/core/v8/V8CompositorProxy.h"
+#include "bindings/core/v8/V8DOMMatrix.h"
+#include "bindings/core/v8/V8DOMMatrixReadOnly.h"
+#include "bindings/core/v8/V8DOMPoint.h"
+#include "bindings/core/v8/V8DOMPointReadOnly.h"
+#include "bindings/core/v8/V8DOMQuad.h"
+#include "bindings/core/v8/V8DOMRect.h"
+#include "bindings/core/v8/V8DOMRectReadOnly.h"
 #include "bindings/core/v8/V8File.h"
 #include "bindings/core/v8/V8FileList.h"
 #include "bindings/core/v8/V8ImageBitmap.h"
@@ -14,19 +20,28 @@
 #include "bindings/core/v8/V8MessagePort.h"
 #include "bindings/core/v8/V8OffscreenCanvas.h"
 #include "bindings/core/v8/V8SharedArrayBuffer.h"
-#include "core/dom/DOMArrayBufferBase.h"
+#include "bindings/core/v8/V8ThrowDOMException.h"
+#include "core/geometry/DOMMatrix.h"
+#include "core/geometry/DOMMatrixReadOnly.h"
+#include "core/geometry/DOMPoint.h"
+#include "core/geometry/DOMPointReadOnly.h"
+#include "core/geometry/DOMQuad.h"
+#include "core/geometry/DOMRect.h"
+#include "core/geometry/DOMRectReadOnly.h"
 #include "core/html/ImageData.h"
+#include "core/typed_arrays/DOMArrayBufferBase.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "platform/wtf/AutoReset.h"
+#include "platform/wtf/DateMath.h"
+#include "platform/wtf/allocator/Partitions.h"
+#include "platform/wtf/text/StringUTF8Adaptor.h"
 #include "public/platform/WebBlobInfo.h"
-#include "wtf/AutoReset.h"
-#include "wtf/DateMath.h"
-#include "wtf/allocator/Partitions.h"
-#include "wtf/text/StringUTF8Adaptor.h"
 
 namespace blink {
 
 // The "Blink-side" serialization version, which defines how Blink will behave
-// during the serialization process. The serialization format has two
+// during the serialization process, is in
+// SerializedScriptValue::wireFormatVersion. The serialization format has two
 // "envelopes": an outer one controlled by Blink and an inner one by V8.
 //
 // They are formatted as follows:
@@ -40,364 +55,485 @@ namespace blink {
 // This version number must be incremented whenever any incompatible changes are
 // made to how Blink writes data. Purely V8-side changes do not require an
 // adjustment to this value.
-static const uint32_t kLatestVersion = 16;
 
 V8ScriptValueSerializer::V8ScriptValueSerializer(
-    RefPtr<ScriptState> scriptState)
-    : m_scriptState(std::move(scriptState)),
-      m_serializedScriptValue(SerializedScriptValue::create()),
-      m_serializer(m_scriptState->isolate(), this) {
-}
+    RefPtr<ScriptState> script_state,
+    const Options& options)
+    : script_state_(std::move(script_state)),
+      serialized_script_value_(SerializedScriptValue::Create()),
+      serializer_(script_state_->GetIsolate(), this),
+      transferables_(options.transferables),
+      blob_info_array_(options.blob_info),
+      wasm_policy_(options.wasm_policy),
+      for_storage_(options.for_storage == SerializedScriptValue::kForStorage) {}
 
-RefPtr<SerializedScriptValue> V8ScriptValueSerializer::serialize(
+RefPtr<SerializedScriptValue> V8ScriptValueSerializer::Serialize(
     v8::Local<v8::Value> value,
-    Transferables* transferables,
-    ExceptionState& exceptionState) {
+    ExceptionState& exception_state) {
 #if DCHECK_IS_ON()
-  DCHECK(!m_serializeInvoked);
-  m_serializeInvoked = true;
+  DCHECK(!serialize_invoked_);
+  serialize_invoked_ = true;
 #endif
-  DCHECK(m_serializedScriptValue);
-  AutoReset<const ExceptionState*> reset(&m_exceptionState, &exceptionState);
+  DCHECK(serialized_script_value_);
+  AutoReset<const ExceptionState*> reset(&exception_state_, &exception_state);
 
   // Prepare to transfer the provided transferables.
-  prepareTransfer(transferables, exceptionState);
-  if (exceptionState.hadException())
+  PrepareTransfer(exception_state);
+  if (exception_state.HadException())
     return nullptr;
 
   // Write out the file header.
-  writeTag(VersionTag);
-  writeUint32(kLatestVersion);
-  m_serializer.WriteHeader();
+  WriteTag(kVersionTag);
+  WriteUint32(SerializedScriptValue::kWireFormatVersion);
+  serializer_.WriteHeader();
 
   // Serialize the value and handle errors.
-  v8::TryCatch tryCatch(m_scriptState->isolate());
-  bool wroteValue;
-  if (!m_serializer.WriteValue(m_scriptState->context(), value)
-           .To(&wroteValue)) {
-    DCHECK(tryCatch.HasCaught());
-    exceptionState.rethrowV8Exception(tryCatch.Exception());
+  v8::TryCatch try_catch(script_state_->GetIsolate());
+  bool wrote_value;
+  if (!serializer_.WriteValue(script_state_->GetContext(), value)
+           .To(&wrote_value)) {
+    DCHECK(try_catch.HasCaught());
+    exception_state.RethrowV8Exception(try_catch.Exception());
     return nullptr;
   }
-  DCHECK(wroteValue);
+  DCHECK(wrote_value);
 
   // Finalize the transfer (e.g. neutering array buffers).
-  finalizeTransfer(exceptionState);
-  if (exceptionState.hadException())
+  FinalizeTransfer(exception_state);
+  if (exception_state.HadException())
     return nullptr;
 
   // Finalize the results.
-  std::pair<uint8_t*, size_t> buffer = m_serializer.Release();
-  m_serializedScriptValue->setData(
+  std::pair<uint8_t*, size_t> buffer = serializer_.Release();
+  serialized_script_value_->SetData(
       SerializedScriptValue::DataBufferPtr(buffer.first), buffer.second);
-  return std::move(m_serializedScriptValue);
+  return std::move(serialized_script_value_);
 }
 
-void V8ScriptValueSerializer::prepareTransfer(Transferables* transferables,
-                                              ExceptionState& exceptionState) {
-  if (!transferables)
+void V8ScriptValueSerializer::PrepareTransfer(ExceptionState& exception_state) {
+  if (!transferables_)
     return;
-  m_transferables = transferables;
 
   // Transfer array buffers.
-  for (uint32_t i = 0; i < transferables->arrayBuffers.size(); i++) {
-    DOMArrayBufferBase* arrayBuffer = transferables->arrayBuffers[i].get();
-    if (!arrayBuffer->isShared()) {
-      v8::Local<v8::Value> wrapper = ToV8(arrayBuffer, m_scriptState.get());
-      m_serializer.TransferArrayBuffer(
+  for (uint32_t i = 0; i < transferables_->array_buffers.size(); i++) {
+    DOMArrayBufferBase* array_buffer = transferables_->array_buffers[i].Get();
+    if (!array_buffer->IsShared()) {
+      v8::Local<v8::Value> wrapper = ToV8(array_buffer, script_state_.Get());
+      serializer_.TransferArrayBuffer(
           i, v8::Local<v8::ArrayBuffer>::Cast(wrapper));
     } else {
-      exceptionState.throwDOMException(
-          DataCloneError, "SharedArrayBuffer can not be in transfer list.");
+      exception_state.ThrowDOMException(
+          kDataCloneError, "SharedArrayBuffer can not be in transfer list.");
       return;
     }
   }
 }
 
-void V8ScriptValueSerializer::finalizeTransfer(ExceptionState& exceptionState) {
-  if (!m_transferables && m_sharedArrayBuffers.isEmpty())
-    return;
-
+void V8ScriptValueSerializer::FinalizeTransfer(
+    ExceptionState& exception_state) {
   // TODO(jbroman): Strictly speaking, this is not correct; transfer should
   // occur in the order of the transfer list.
   // https://html.spec.whatwg.org/multipage/infrastructure.html#structuredclonewithtransfer
 
-  ArrayBufferArray arrayBuffers;
-  arrayBuffers.appendVector(m_transferables->arrayBuffers);
-  arrayBuffers.appendVector(m_sharedArrayBuffers);
+  v8::Isolate* isolate = script_state_->GetIsolate();
 
-  v8::Isolate* isolate = m_scriptState->isolate();
-  m_serializedScriptValue->transferArrayBuffers(isolate, arrayBuffers,
-                                                exceptionState);
-  if (exceptionState.hadException())
-    return;
+  // The order of ArrayBuffers and SharedArrayBuffers matters; we use the index
+  // into this array for deserialization.
+  ArrayBufferArray array_buffers;
+  if (transferables_)
+    array_buffers.AppendVector(transferables_->array_buffers);
+  array_buffers.AppendVector(shared_array_buffers_);
 
-  m_serializedScriptValue->transferImageBitmaps(
-      isolate, m_transferables->imageBitmaps, exceptionState);
-  if (exceptionState.hadException())
-    return;
+  if (!array_buffers.IsEmpty()) {
+    serialized_script_value_->TransferArrayBuffers(isolate, array_buffers,
+                                                   exception_state);
+    if (exception_state.HadException())
+      return;
+  }
 
-  m_serializedScriptValue->transferOffscreenCanvas(
-      isolate, m_transferables->offscreenCanvases, exceptionState);
-  if (exceptionState.hadException())
-    return;
+  if (transferables_) {
+    serialized_script_value_->TransferImageBitmaps(
+        isolate, transferables_->image_bitmaps, exception_state);
+    if (exception_state.HadException())
+      return;
+
+    serialized_script_value_->TransferOffscreenCanvas(
+        isolate, transferables_->offscreen_canvases, exception_state);
+    if (exception_state.HadException())
+      return;
+  }
 }
 
-void V8ScriptValueSerializer::writeUTF8String(const String& string) {
+void V8ScriptValueSerializer::WriteUTF8String(const String& string) {
   // TODO(jbroman): Ideally this method would take a WTF::StringView, but the
   // StringUTF8Adaptor trick doesn't yet work with StringView.
   StringUTF8Adaptor utf8(string);
   DCHECK_LT(utf8.length(), std::numeric_limits<uint32_t>::max());
-  writeUint32(utf8.length());
-  writeRawBytes(utf8.data(), utf8.length());
+  WriteUint32(utf8.length());
+  WriteRawBytes(utf8.Data(), utf8.length());
 }
 
-bool V8ScriptValueSerializer::writeDOMObject(ScriptWrappable* wrappable,
-                                             ExceptionState& exceptionState) {
-  const WrapperTypeInfo* wrapperTypeInfo = wrappable->wrapperTypeInfo();
-  if (wrapperTypeInfo == &V8Blob::wrapperTypeInfo) {
-    Blob* blob = wrappable->toImpl<Blob>();
+bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
+                                             ExceptionState& exception_state) {
+  const WrapperTypeInfo* wrapper_type_info = wrappable->GetWrapperTypeInfo();
+  if (wrapper_type_info == &V8Blob::wrapperTypeInfo) {
+    Blob* blob = wrappable->ToImpl<Blob>();
     if (blob->isClosed()) {
-      exceptionState.throwDOMException(
-          DataCloneError,
+      exception_state.ThrowDOMException(
+          kDataCloneError,
           "A Blob object has been closed, and could therefore not be cloned.");
       return false;
     }
-    m_serializedScriptValue->blobDataHandles().set(blob->uuid(),
-                                                   blob->blobDataHandle());
-    if (m_blobInfoArray) {
-      size_t index = m_blobInfoArray->size();
+    serialized_script_value_->BlobDataHandles().Set(blob->Uuid(),
+                                                    blob->GetBlobDataHandle());
+    if (blob_info_array_) {
+      size_t index = blob_info_array_->size();
       DCHECK_LE(index, std::numeric_limits<uint32_t>::max());
-      m_blobInfoArray->emplace_back(blob->uuid(), blob->type(), blob->size());
-      writeTag(BlobIndexTag);
-      writeUint32(static_cast<uint32_t>(index));
+      blob_info_array_->emplace_back(blob->Uuid(), blob->type(), blob->size());
+      WriteTag(kBlobIndexTag);
+      WriteUint32(static_cast<uint32_t>(index));
     } else {
-      writeTag(BlobTag);
-      writeUTF8String(blob->uuid());
-      writeUTF8String(blob->type());
-      writeUint64(blob->size());
+      WriteTag(kBlobTag);
+      WriteUTF8String(blob->Uuid());
+      WriteUTF8String(blob->type());
+      WriteUint64(blob->size());
     }
     return true;
   }
-  if (wrapperTypeInfo == &V8CompositorProxy::wrapperTypeInfo) {
-    DCHECK(RuntimeEnabledFeatures::compositorWorkerEnabled());
-    CompositorProxy* proxy = wrappable->toImpl<CompositorProxy>();
-    if (!proxy->connected()) {
-      exceptionState.throwDOMException(DataCloneError,
-                                       "A CompositorProxy object has been "
-                                       "disconnected, and could therefore not "
-                                       "be cloned.");
-      return false;
-    }
-    // TODO(jbroman): This seems likely to break in cross-process or
-    // persistent scenarios. Keeping as-is for now because the successor
-    // does not use this approach (and this feature is unshipped).
-    writeTag(CompositorProxyTag);
-    writeUint64(proxy->elementId());
-    writeUint32(proxy->compositorMutableProperties());
-    return true;
+  if (wrapper_type_info == &V8File::wrapperTypeInfo) {
+    WriteTag(blob_info_array_ ? kFileIndexTag : kFileTag);
+    return WriteFile(wrappable->ToImpl<File>(), exception_state);
   }
-  if (wrapperTypeInfo == &V8File::wrapperTypeInfo) {
-    writeTag(m_blobInfoArray ? FileIndexTag : FileTag);
-    return writeFile(wrappable->toImpl<File>(), exceptionState);
-  }
-  if (wrapperTypeInfo == &V8FileList::wrapperTypeInfo) {
+  if (wrapper_type_info == &V8FileList::wrapperTypeInfo) {
     // This does not presently deduplicate a File object and its entry in a
     // FileList, which is non-standard behavior.
-    FileList* fileList = wrappable->toImpl<FileList>();
-    unsigned length = fileList->length();
-    writeTag(m_blobInfoArray ? FileListIndexTag : FileListTag);
-    writeUint32(length);
+    FileList* file_list = wrappable->ToImpl<FileList>();
+    unsigned length = file_list->length();
+    WriteTag(blob_info_array_ ? kFileListIndexTag : kFileListTag);
+    WriteUint32(length);
     for (unsigned i = 0; i < length; i++) {
-      if (!writeFile(fileList->item(i), exceptionState))
+      if (!WriteFile(file_list->item(i), exception_state))
         return false;
     }
     return true;
   }
-  if (wrapperTypeInfo == &V8ImageBitmap::wrapperTypeInfo) {
-    ImageBitmap* imageBitmap = wrappable->toImpl<ImageBitmap>();
-    if (imageBitmap->isNeutered()) {
-      exceptionState.throwDOMException(
-          DataCloneError,
+  if (wrapper_type_info == &V8ImageBitmap::wrapperTypeInfo) {
+    ImageBitmap* image_bitmap = wrappable->ToImpl<ImageBitmap>();
+    if (image_bitmap->IsNeutered()) {
+      exception_state.ThrowDOMException(
+          kDataCloneError,
           "An ImageBitmap is detached and could not be cloned.");
       return false;
     }
 
     // If this ImageBitmap was transferred, it can be serialized by index.
     size_t index = kNotFound;
-    if (m_transferables)
-      index = m_transferables->imageBitmaps.find(imageBitmap);
+    if (transferables_)
+      index = transferables_->image_bitmaps.Find(image_bitmap);
     if (index != kNotFound) {
       DCHECK_LE(index, std::numeric_limits<uint32_t>::max());
-      writeTag(ImageBitmapTransferTag);
-      writeUint32(static_cast<uint32_t>(index));
+      WriteTag(kImageBitmapTransferTag);
+      WriteUint32(static_cast<uint32_t>(index));
       return true;
     }
 
     // Otherwise, it must be fully serialized.
-    // Warning: using N32ColorType here is not portable (across CPU
-    // architectures, across platforms, etc.).
-    RefPtr<Uint8Array> pixels = imageBitmap->copyBitmapData(
-        imageBitmap->isPremultiplied() ? PremultiplyAlpha
-                                       : DontPremultiplyAlpha,
-        N32ColorType);
-    writeTag(ImageBitmapTag);
-    writeUint32(imageBitmap->originClean());
-    writeUint32(imageBitmap->isPremultiplied());
-    writeUint32(imageBitmap->width());
-    writeUint32(imageBitmap->height());
-    writeUint32(pixels->length());
-    writeRawBytes(pixels->data(), pixels->length());
+    WriteTag(kImageBitmapTag);
+    SerializedColorParams color_params(image_bitmap->GetCanvasColorParams());
+    WriteUint32Enum(ImageSerializationTag::kCanvasColorSpaceTag);
+    WriteUint32Enum(color_params.GetSerializedColorSpace());
+    WriteUint32Enum(ImageSerializationTag::kCanvasPixelFormatTag);
+    WriteUint32Enum(color_params.GetSerializedPixelFormat());
+    WriteUint32Enum(ImageSerializationTag::kOriginClean);
+    WriteUint32(image_bitmap->OriginClean());
+    WriteUint32Enum(ImageSerializationTag::kIsPremultiplied);
+    WriteUint32(image_bitmap->IsPremultiplied());
+    WriteUint32Enum(ImageSerializationTag::kEndTag);
+    WriteUint32(image_bitmap->width());
+    WriteUint32(image_bitmap->height());
+    RefPtr<Uint8Array> pixels = image_bitmap->CopyBitmapData();
+    WriteUint32(pixels->length());
+    WriteRawBytes(pixels->Data(), pixels->length());
     return true;
   }
-  if (wrapperTypeInfo == &V8ImageData::wrapperTypeInfo) {
-    ImageData* imageData = wrappable->toImpl<ImageData>();
-    DOMUint8ClampedArray* pixels = imageData->data();
-    writeTag(ImageDataTag);
-    writeUint32(imageData->width());
-    writeUint32(imageData->height());
-    writeUint32(pixels->length());
-    writeRawBytes(pixels->data(), pixels->length());
+  if (wrapper_type_info == &V8ImageData::wrapperTypeInfo) {
+    ImageData* image_data = wrappable->ToImpl<ImageData>();
+    WriteTag(kImageDataTag);
+    SerializedColorParams color_params(image_data->GetCanvasColorParams(),
+                                       image_data->GetImageDataStorageFormat());
+    WriteUint32Enum(ImageSerializationTag::kCanvasColorSpaceTag);
+    WriteUint32Enum(color_params.GetSerializedColorSpace());
+    WriteUint32Enum(ImageSerializationTag::kImageDataStorageFormatTag);
+    WriteUint32Enum(color_params.GetSerializedImageDataStorageFormat());
+    WriteUint32Enum(ImageSerializationTag::kEndTag);
+    WriteUint32(image_data->width());
+    WriteUint32(image_data->height());
+    DOMArrayBufferBase* pixel_buffer = image_data->BufferBase();
+    WriteUint32(pixel_buffer->ByteLength());
+    WriteRawBytes(pixel_buffer->Data(), pixel_buffer->ByteLength());
     return true;
   }
-  if (wrapperTypeInfo == &V8MessagePort::wrapperTypeInfo) {
-    MessagePort* messagePort = wrappable->toImpl<MessagePort>();
+  if (wrapper_type_info == &V8DOMPoint::wrapperTypeInfo) {
+    DOMPoint* point = wrappable->ToImpl<DOMPoint>();
+    WriteTag(kDOMPointTag);
+    WriteDouble(point->x());
+    WriteDouble(point->y());
+    WriteDouble(point->z());
+    WriteDouble(point->w());
+    return true;
+  }
+  if (wrapper_type_info == &V8DOMPointReadOnly::wrapperTypeInfo) {
+    DOMPointReadOnly* point = wrappable->ToImpl<DOMPointReadOnly>();
+    WriteTag(kDOMPointReadOnlyTag);
+    WriteDouble(point->x());
+    WriteDouble(point->y());
+    WriteDouble(point->z());
+    WriteDouble(point->w());
+    return true;
+  }
+  if (wrapper_type_info == &V8DOMRect::wrapperTypeInfo) {
+    DOMRect* rect = wrappable->ToImpl<DOMRect>();
+    WriteTag(kDOMRectTag);
+    WriteDouble(rect->x());
+    WriteDouble(rect->y());
+    WriteDouble(rect->width());
+    WriteDouble(rect->height());
+    return true;
+  }
+  if (wrapper_type_info == &V8DOMRectReadOnly::wrapperTypeInfo) {
+    DOMRectReadOnly* rect = wrappable->ToImpl<DOMRectReadOnly>();
+    WriteTag(kDOMRectReadOnlyTag);
+    WriteDouble(rect->x());
+    WriteDouble(rect->y());
+    WriteDouble(rect->width());
+    WriteDouble(rect->height());
+    return true;
+  }
+  if (wrapper_type_info == &V8DOMQuad::wrapperTypeInfo) {
+    DOMQuad* quad = wrappable->ToImpl<DOMQuad>();
+    WriteTag(kDOMQuadTag);
+    for (const DOMPoint* point :
+         {quad->p1(), quad->p2(), quad->p3(), quad->p4()}) {
+      WriteDouble(point->x());
+      WriteDouble(point->y());
+      WriteDouble(point->z());
+      WriteDouble(point->w());
+    }
+    return true;
+  }
+  if (wrapper_type_info == &V8DOMMatrix::wrapperTypeInfo) {
+    DOMMatrix* matrix = wrappable->ToImpl<DOMMatrix>();
+    if (matrix->is2D()) {
+      WriteTag(kDOMMatrix2DTag);
+      WriteDouble(matrix->a());
+      WriteDouble(matrix->b());
+      WriteDouble(matrix->c());
+      WriteDouble(matrix->d());
+      WriteDouble(matrix->e());
+      WriteDouble(matrix->f());
+    } else {
+      WriteTag(kDOMMatrixTag);
+      WriteDouble(matrix->m11());
+      WriteDouble(matrix->m12());
+      WriteDouble(matrix->m13());
+      WriteDouble(matrix->m14());
+      WriteDouble(matrix->m21());
+      WriteDouble(matrix->m22());
+      WriteDouble(matrix->m23());
+      WriteDouble(matrix->m24());
+      WriteDouble(matrix->m31());
+      WriteDouble(matrix->m32());
+      WriteDouble(matrix->m33());
+      WriteDouble(matrix->m34());
+      WriteDouble(matrix->m41());
+      WriteDouble(matrix->m42());
+      WriteDouble(matrix->m43());
+      WriteDouble(matrix->m44());
+    }
+    return true;
+  }
+  if (wrapper_type_info == &V8DOMMatrixReadOnly::wrapperTypeInfo) {
+    DOMMatrixReadOnly* matrix = wrappable->ToImpl<DOMMatrixReadOnly>();
+    if (matrix->is2D()) {
+      WriteTag(kDOMMatrix2DReadOnlyTag);
+      WriteDouble(matrix->a());
+      WriteDouble(matrix->b());
+      WriteDouble(matrix->c());
+      WriteDouble(matrix->d());
+      WriteDouble(matrix->e());
+      WriteDouble(matrix->f());
+    } else {
+      WriteTag(kDOMMatrixReadOnlyTag);
+      WriteDouble(matrix->m11());
+      WriteDouble(matrix->m12());
+      WriteDouble(matrix->m13());
+      WriteDouble(matrix->m14());
+      WriteDouble(matrix->m21());
+      WriteDouble(matrix->m22());
+      WriteDouble(matrix->m23());
+      WriteDouble(matrix->m24());
+      WriteDouble(matrix->m31());
+      WriteDouble(matrix->m32());
+      WriteDouble(matrix->m33());
+      WriteDouble(matrix->m34());
+      WriteDouble(matrix->m41());
+      WriteDouble(matrix->m42());
+      WriteDouble(matrix->m43());
+      WriteDouble(matrix->m44());
+    }
+    return true;
+  }
+  if (wrapper_type_info == &V8MessagePort::wrapperTypeInfo) {
+    MessagePort* message_port = wrappable->ToImpl<MessagePort>();
     size_t index = kNotFound;
-    if (m_transferables)
-      index = m_transferables->messagePorts.find(messagePort);
+    if (transferables_)
+      index = transferables_->message_ports.Find(message_port);
     if (index == kNotFound) {
-      exceptionState.throwDOMException(
-          DataCloneError,
+      exception_state.ThrowDOMException(
+          kDataCloneError,
           "A MessagePort could not be cloned because it was not transferred.");
       return false;
     }
     DCHECK_LE(index, std::numeric_limits<uint32_t>::max());
-    writeTag(MessagePortTag);
-    writeUint32(static_cast<uint32_t>(index));
+    WriteTag(kMessagePortTag);
+    WriteUint32(static_cast<uint32_t>(index));
     return true;
   }
-  if (wrapperTypeInfo == &V8OffscreenCanvas::wrapperTypeInfo) {
-    OffscreenCanvas* canvas = wrappable->toImpl<OffscreenCanvas>();
+  if (wrapper_type_info == &V8OffscreenCanvas::wrapperTypeInfo) {
+    OffscreenCanvas* canvas = wrappable->ToImpl<OffscreenCanvas>();
     size_t index = kNotFound;
-    if (m_transferables)
-      index = m_transferables->offscreenCanvases.find(canvas);
+    if (transferables_)
+      index = transferables_->offscreen_canvases.Find(canvas);
     if (index == kNotFound) {
-      exceptionState.throwDOMException(DataCloneError,
-                                       "An OffscreenCanvas could not be cloned "
-                                       "because it was not transferred.");
+      exception_state.ThrowDOMException(
+          kDataCloneError,
+          "An OffscreenCanvas could not be cloned "
+          "because it was not transferred.");
       return false;
     }
-    if (canvas->isNeutered()) {
-      exceptionState.throwDOMException(
-          DataCloneError,
+    if (canvas->IsNeutered()) {
+      exception_state.ThrowDOMException(
+          kDataCloneError,
           "An OffscreenCanvas could not be cloned because it was detached.");
       return false;
     }
-    if (canvas->renderingContext()) {
-      exceptionState.throwDOMException(DataCloneError,
-                                       "An OffscreenCanvas could not be cloned "
-                                       "because it had a rendering context.");
+    if (canvas->RenderingContext()) {
+      exception_state.ThrowDOMException(
+          kDataCloneError,
+          "An OffscreenCanvas could not be cloned "
+          "because it had a rendering context.");
       return false;
     }
-    writeTag(OffscreenCanvasTransferTag);
-    writeUint32(canvas->width());
-    writeUint32(canvas->height());
-    writeUint32(canvas->placeholderCanvasId());
-    writeUint32(canvas->clientId());
-    writeUint32(canvas->sinkId());
+    WriteTag(kOffscreenCanvasTransferTag);
+    WriteUint32(canvas->width());
+    WriteUint32(canvas->height());
+    WriteUint32(canvas->PlaceholderCanvasId());
+    WriteUint32(canvas->ClientId());
+    WriteUint32(canvas->SinkId());
     return true;
   }
   return false;
 }
 
-bool V8ScriptValueSerializer::writeFile(File* file,
-                                        ExceptionState& exceptionState) {
+bool V8ScriptValueSerializer::WriteFile(File* file,
+                                        ExceptionState& exception_state) {
   if (file->isClosed()) {
-    exceptionState.throwDOMException(
-        DataCloneError,
+    exception_state.ThrowDOMException(
+        kDataCloneError,
         "A File object has been closed, and could therefore not be cloned.");
     return false;
   }
-  m_serializedScriptValue->blobDataHandles().set(file->uuid(),
-                                                 file->blobDataHandle());
-  if (m_blobInfoArray) {
-    size_t index = m_blobInfoArray->size();
+  serialized_script_value_->BlobDataHandles().Set(file->Uuid(),
+                                                  file->GetBlobDataHandle());
+  if (blob_info_array_) {
+    size_t index = blob_info_array_->size();
     DCHECK_LE(index, std::numeric_limits<uint32_t>::max());
     long long size = -1;
-    double lastModifiedMs = invalidFileTime();
-    file->captureSnapshot(size, lastModifiedMs);
+    double last_modified_ms = InvalidFileTime();
+    file->CaptureSnapshot(size, last_modified_ms);
     // FIXME: transition WebBlobInfo.lastModified to be milliseconds-based also.
-    double lastModified = lastModifiedMs / msPerSecond;
-    m_blobInfoArray->emplace_back(file->uuid(), file->path(), file->name(),
-                                  file->type(), lastModified, size);
-    writeUint32(static_cast<uint32_t>(index));
+    double last_modified = last_modified_ms / kMsPerSecond;
+    blob_info_array_->emplace_back(file->Uuid(), file->GetPath(), file->name(),
+                                   file->type(), last_modified, size);
+    WriteUint32(static_cast<uint32_t>(index));
   } else {
-    writeUTF8String(file->hasBackingFile() ? file->path() : emptyString);
-    writeUTF8String(file->name());
-    writeUTF8String(file->webkitRelativePath());
-    writeUTF8String(file->uuid());
-    writeUTF8String(file->type());
+    WriteUTF8String(file->HasBackingFile() ? file->GetPath() : g_empty_string);
+    WriteUTF8String(file->name());
+    WriteUTF8String(file->webkitRelativePath());
+    WriteUTF8String(file->Uuid());
+    WriteUTF8String(file->type());
     // TODO(jsbell): metadata is unconditionally captured in the index case.
     // Why this inconsistency?
-    if (file->hasValidSnapshotMetadata()) {
-      writeUint32(1);
+    if (file->HasValidSnapshotMetadata()) {
+      WriteUint32(1);
       long long size;
-      double lastModifiedMs;
-      file->captureSnapshot(size, lastModifiedMs);
+      double last_modified_ms;
+      file->CaptureSnapshot(size, last_modified_ms);
       DCHECK_GE(size, 0);
-      writeUint64(static_cast<uint64_t>(size));
-      writeDouble(lastModifiedMs);
+      WriteUint64(static_cast<uint64_t>(size));
+      WriteDouble(last_modified_ms);
     } else {
-      writeUint32(0);
+      WriteUint32(0);
     }
-    writeUint32(file->getUserVisibility() == File::IsUserVisible ? 1 : 0);
+    WriteUint32(file->GetUserVisibility() == File::kIsUserVisible ? 1 : 0);
   }
   return true;
 }
 
 void V8ScriptValueSerializer::ThrowDataCloneError(
-    v8::Local<v8::String> v8Message) {
-  DCHECK(m_exceptionState);
-  String message = m_exceptionState->addExceptionContext(
-      v8StringToWebCoreString<String>(v8Message, DoNotExternalize));
-  v8::Local<v8::Value> exception = V8ThrowException::createDOMException(
-      m_scriptState->isolate(), DataCloneError, message);
-  V8ThrowException::throwException(m_scriptState->isolate(), exception);
+    v8::Local<v8::String> v8_message) {
+  DCHECK(exception_state_);
+  String message = exception_state_->AddExceptionContext(
+      V8StringToWebCoreString<String>(v8_message, kDoNotExternalize));
+  V8ThrowDOMException::ThrowDOMException(script_state_->GetIsolate(),
+                                         kDataCloneError, message);
 }
 
 v8::Maybe<bool> V8ScriptValueSerializer::WriteHostObject(
     v8::Isolate* isolate,
     v8::Local<v8::Object> object) {
-  DCHECK(m_exceptionState);
-  DCHECK_EQ(isolate, m_scriptState->isolate());
-  ExceptionState exceptionState(isolate, m_exceptionState->context(),
-                                m_exceptionState->interfaceName(),
-                                m_exceptionState->propertyName());
+  DCHECK(exception_state_);
+  DCHECK_EQ(isolate, script_state_->GetIsolate());
+  ExceptionState exception_state(isolate, exception_state_->Context(),
+                                 exception_state_->InterfaceName(),
+                                 exception_state_->PropertyName());
 
-  if (!V8DOMWrapper::isWrapper(isolate, object)) {
-    exceptionState.throwDOMException(DataCloneError,
-                                     "An object could not be cloned.");
+  if (!V8DOMWrapper::IsWrapper(isolate, object)) {
+    exception_state.ThrowDOMException(kDataCloneError,
+                                      "An object could not be cloned.");
     return v8::Nothing<bool>();
   }
-  ScriptWrappable* wrappable = toScriptWrappable(object);
-  bool wroteDOMObject = writeDOMObject(wrappable, exceptionState);
-  if (wroteDOMObject) {
-    DCHECK(!exceptionState.hadException());
+  ScriptWrappable* wrappable = ToScriptWrappable(object);
+  bool wrote_dom_object = WriteDOMObject(wrappable, exception_state);
+  if (wrote_dom_object) {
+    DCHECK(!exception_state.HadException());
     return v8::Just(true);
   }
-  if (!exceptionState.hadException()) {
-    StringView interface = wrappable->wrapperTypeInfo()->interfaceName;
-    exceptionState.throwDOMException(
-        DataCloneError, interface + " object could not be cloned.");
+  if (!exception_state.HadException()) {
+    StringView interface = wrappable->GetWrapperTypeInfo()->interface_name;
+    exception_state.ThrowDOMException(
+        kDataCloneError, interface + " object could not be cloned.");
   }
   return v8::Nothing<bool>();
 }
 
 v8::Maybe<uint32_t> V8ScriptValueSerializer::GetSharedArrayBufferId(
     v8::Isolate* isolate,
-    v8::Local<v8::SharedArrayBuffer> v8SharedArrayBuffer) {
-  DOMSharedArrayBuffer* sharedArrayBuffer =
-      V8SharedArrayBuffer::toImpl(v8SharedArrayBuffer);
+    v8::Local<v8::SharedArrayBuffer> v8_shared_array_buffer) {
+  if (for_storage_) {
+    DCHECK(exception_state_);
+    DCHECK_EQ(isolate, script_state_->GetIsolate());
+    ExceptionState exception_state(isolate, exception_state_->Context(),
+                                   exception_state_->InterfaceName(),
+                                   exception_state_->PropertyName());
+    exception_state.ThrowDOMException(
+        kDataCloneError,
+        "A SharedArrayBuffer can not be serialized for storage.");
+    return v8::Nothing<uint32_t>();
+  }
+
+  DOMSharedArrayBuffer* shared_array_buffer =
+      V8SharedArrayBuffer::toImpl(v8_shared_array_buffer);
 
   // The index returned from this function will be serialized into the data
   // stream. When deserializing, this will be used to index into the
@@ -410,27 +546,64 @@ v8::Maybe<uint32_t> V8ScriptValueSerializer::GetSharedArrayBufferId(
   //
   // So we offset all SharedArrayBuffer indexes by the number of transferred
   // ArrayBuffers.
-  size_t index = m_sharedArrayBuffers.find(sharedArrayBuffer);
+  size_t index = shared_array_buffers_.Find(shared_array_buffer);
   if (index == kNotFound) {
-    m_sharedArrayBuffers.push_back(sharedArrayBuffer);
-    index = m_sharedArrayBuffers.size() - 1;
+    shared_array_buffers_.push_back(shared_array_buffer);
+    index = shared_array_buffers_.size() - 1;
   }
-  if (m_transferables) {
-    index += m_transferables->arrayBuffers.size();
+  if (transferables_) {
+    index += transferables_->array_buffers.size();
   }
   return v8::Just<uint32_t>(index);
 }
 
-void* V8ScriptValueSerializer::ReallocateBufferMemory(void* oldBuffer,
+v8::Maybe<uint32_t> V8ScriptValueSerializer::GetWasmModuleTransferId(
+    v8::Isolate* isolate,
+    v8::Local<v8::WasmCompiledModule> module) {
+  switch (wasm_policy_) {
+    case Options::kSerialize:
+      return v8::Nothing<uint32_t>();
+
+    case Options::kBlockedInNonSecureContext: {
+      // This happens, currently, when we try to serialize to IndexedDB
+      // in an non-secure context.
+      ExceptionState exception_state(isolate, exception_state_->Context(),
+                                     exception_state_->InterfaceName(),
+                                     exception_state_->PropertyName());
+      exception_state.ThrowDOMException(kDataCloneError,
+                                        "Serializing WebAssembly modules in "
+                                        "non-secure contexts is not allowed.");
+      return v8::Nothing<uint32_t>();
+    }
+
+    case Options::kTransfer: {
+      // We don't expect scenarios with numerous wasm modules being transferred
+      // around. Most likely, we'll have one module. The vector approach is
+      // simple and should perform sufficiently well under these expectations.
+      serialized_script_value_->WasmModules().push_back(
+          module->GetTransferrableModule());
+      uint32_t size =
+          static_cast<uint32_t>(serialized_script_value_->WasmModules().size());
+      DCHECK_GE(size, 1u);
+      return v8::Just(size - 1);
+    }
+
+    case Options::kUnspecified:
+      NOTREACHED();
+  }
+  return v8::Nothing<uint32_t>();
+}
+
+void* V8ScriptValueSerializer::ReallocateBufferMemory(void* old_buffer,
                                                       size_t size,
-                                                      size_t* actualSize) {
-  *actualSize = WTF::Partitions::bufferActualSize(size);
-  return WTF::Partitions::bufferRealloc(oldBuffer, *actualSize,
+                                                      size_t* actual_size) {
+  *actual_size = WTF::Partitions::BufferActualSize(size);
+  return WTF::Partitions::BufferRealloc(old_buffer, *actual_size,
                                         "SerializedScriptValue buffer");
 }
 
 void V8ScriptValueSerializer::FreeBufferMemory(void* buffer) {
-  return WTF::Partitions::bufferFree(buffer);
+  return WTF::Partitions::BufferFree(buffer);
 }
 
 }  // namespace blink

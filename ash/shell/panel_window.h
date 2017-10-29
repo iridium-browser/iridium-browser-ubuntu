@@ -6,7 +6,6 @@
 #define ASH_SHELL_PANEL_WINDOW_H_
 
 #include "base/macros.h"
-#include "ui/aura/aura_export.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -31,7 +30,7 @@ class PanelWindow : public views::WidgetDelegateView {
 
  private:
   // Overridden from views::View:
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
   void OnPaint(gfx::Canvas* canvas) override;
 
   // Overridden from views::WidgetDelegate:

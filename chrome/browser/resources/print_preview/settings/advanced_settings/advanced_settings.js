@@ -37,7 +37,7 @@ cr.define('print_preview', function() {
 
     /** @private {!Array<!print_preview.AdvancedSettingsItem>} */
     this.items_ = [];
-  };
+  }
 
   /**
    * CSS classes used by the component.
@@ -59,8 +59,8 @@ cr.define('print_preview', function() {
       assert(!this.destination_);
       this.destination_ = destination;
       this.getChildElement('.advanced-settings-title').textContent =
-          loadTimeData.getStringF('advancedSettingsDialogTitle',
-                                  this.destination_.displayName);
+          loadTimeData.getStringF(
+              'advancedSettingsDialogTitle', this.destination_.displayName);
       this.setIsVisible(true);
       this.renderSettings_();
     },
@@ -70,18 +70,15 @@ cr.define('print_preview', function() {
       print_preview.Overlay.prototype.enterDocument.call(this);
 
       this.tracker.add(
-          this.getChildElement('.button-strip .cancel-button'),
-          'click',
+          this.getChildElement('.button-strip .cancel-button'), 'click',
           this.cancel.bind(this));
 
       this.tracker.add(
-          this.getChildElement('.button-strip .done-button'),
-          'click',
+          this.getChildElement('.button-strip .done-button'), 'click',
           this.onApplySettings_.bind(this));
 
       this.tracker.add(
-          this.searchBox_,
-          print_preview.SearchBox.EventType.SEARCH,
+          assert(this.searchBox_), print_preview.SearchBox.EventType.SEARCH,
           this.onSearch_.bind(this));
     },
 
@@ -94,8 +91,8 @@ cr.define('print_preview', function() {
     onSetVisibleInternal: function(isVisible) {
       if (isVisible) {
         this.searchBox_.focus();
-        this.metrics_.record(print_preview.Metrics.PrintSettingsUiBucket.
-            ADVANCED_SETTINGS_DIALOG_SHOWN);
+        this.metrics_.record(print_preview.Metrics.PrintSettingsUiBucket
+                                 .ADVANCED_SETTINGS_DIALOG_SHOWN);
       } else {
         this.resetSearch_();
         this.destination_ = null;
@@ -104,8 +101,8 @@ cr.define('print_preview', function() {
 
     /** @override */
     onCancelInternal: function() {
-      this.metrics_.record(print_preview.Metrics.PrintSettingsUiBucket.
-          ADVANCED_SETTINGS_DIALOG_CANCELED);
+      this.metrics_.record(print_preview.Metrics.PrintSettingsUiBucket
+                               .ADVANCED_SETTINGS_DIALOG_CANCELED);
     },
 
     /** @override */
@@ -131,7 +128,7 @@ cr.define('print_preview', function() {
 
     /**
      * Filters displayed settings with the given query.
-     * @param {?string} query Query to filter settings by.
+     * @param {?RegExp} query Query to filter settings by.
      * @private
      */
     filterLists_: function(query) {
@@ -171,8 +168,8 @@ cr.define('print_preview', function() {
       }.bind(this));
       this.items_ = [];
 
-      var extraPadding =
-          this.getChildElement('.' + AdvancedSettings.Classes_.EXTRA_PADDING);
+      var extraPadding = this.element_.querySelector(
+          '.' + AdvancedSettings.Classes_.EXTRA_PADDING);
       if (extraPadding)
         extraPadding.parentNode.removeChild(extraPadding);
 
@@ -187,16 +184,17 @@ cr.define('print_preview', function() {
 
       vendorCapabilities.forEach(function(capability) {
         var item = new print_preview.AdvancedSettingsItem(
-            this.eventTarget_, this.printTicketStore_, capability);
+            this.printTicketStore_, capability);
         this.addChild(item);
         item.render(settingsEl);
         this.items_.push(item);
       }.bind(this));
 
+      var searchBoxArea = this.getChildElement('.search-box-area');
       if (this.items_.length <= 1) {
-        setIsVisible(this.getChildElement('.search-box-area'), false);
+        setIsVisible(searchBoxArea, false);
       } else {
-        setIsVisible(this.getChildElement('.search-box-area'), true);
+        setIsVisible(searchBoxArea, true);
         this.searchBox_.focus();
       }
 
@@ -234,7 +232,5 @@ cr.define('print_preview', function() {
   };
 
   // Export
-  return {
-    AdvancedSettings: AdvancedSettings
-  };
+  return {AdvancedSettings: AdvancedSettings};
 });

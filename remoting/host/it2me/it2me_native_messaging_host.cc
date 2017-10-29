@@ -13,6 +13,8 @@
 #include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/memory/ptr_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringize_macros.h"
@@ -25,11 +27,13 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "remoting/base/auto_thread_task_runner.h"
+#include "remoting/base/name_value_map.h"
+#include "remoting/base/service_urls.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/host_exit_codes.h"
+#include "remoting/host/it2me/it2me_confirmation_dialog.h"
 #include "remoting/host/policy_watcher.h"
-#include "remoting/host/service_urls.h"
-#include "remoting/protocol/name_value_map.h"
+#include "remoting/protocol/ice_config.h"
 #include "remoting/signaling/delegating_signal_strategy.h"
 
 #if defined(OS_WIN)
@@ -41,17 +45,19 @@
 
 namespace remoting {
 
+using protocol::ErrorCode;
+
 namespace {
 
-const remoting::protocol::NameMapElement<It2MeHostState> kIt2MeHostStates[] = {
+const NameMapElement<It2MeHostState> kIt2MeHostStates[] = {
     {kDisconnected, "DISCONNECTED"},
     {kStarting, "STARTING"},
     {kRequestedAccessCode, "REQUESTED_ACCESS_CODE"},
     {kReceivedAccessCode, "RECEIVED_ACCESS_CODE"},
+    {kConnecting, "CONNECTING"},
     {kConnected, "CONNECTED"},
     {kError, "ERROR"},
     {kInvalidDomainError, "INVALID_DOMAIN_ERROR"},
-    {kConnecting, "CONNECTING"},
 };
 
 #if defined(OS_WIN)
@@ -61,48 +67,47 @@ const base::FilePath::CharType kElevatedHostBinaryName[] =
     FILE_PATH_LITERAL("remote_assistance_host_uiaccess.exe");
 #endif  // defined(OS_WIN)
 
-// Helper function to run |callback| on the correct thread using |task_runner|.
+// Helper functions to run |callback| asynchronously on the correct thread
+// using |task_runner|.
 void PolicyUpdateCallback(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     remoting::PolicyWatcher::PolicyUpdatedCallback callback,
     std::unique_ptr<base::DictionaryValue> policies) {
-  DCHECK(!callback.is_null());
-
-  // Always post the task so the execution is consistent (always asynchronous).
+  DCHECK(callback);
   task_runner->PostTask(FROM_HERE,
                         base::Bind(callback, base::Passed(&policies)));
 }
 
-// Called when malformed policies are detected.
-void OnPolicyError() {
-  // TODO(joedow): Report the policy error to the user.  crbug.com/433009
-  NOTIMPLEMENTED();
+void PolicyErrorCallback(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    remoting::PolicyWatcher::PolicyErrorCallback callback) {
+  DCHECK(callback);
+  task_runner->PostTask(FROM_HERE, callback);
 }
 
 }  // namespace
 
 It2MeNativeMessagingHost::It2MeNativeMessagingHost(
     bool needs_elevation,
-    policy::PolicyService* policy_service,
+    std::unique_ptr<PolicyWatcher> policy_watcher,
     std::unique_ptr<ChromotingHostContext> context,
     std::unique_ptr<It2MeHostFactory> factory)
     : needs_elevation_(needs_elevation),
       host_context_(std::move(context)),
       factory_(std::move(factory)),
-      policy_service_(policy_service),
-      policy_watcher_(PolicyWatcher::Create(policy_service_,
-                                            host_context_->file_task_runner())),
+      policy_watcher_(std::move(policy_watcher)),
       weak_factory_(this) {
   weak_ptr_ = weak_factory_.GetWeakPtr();
 
   // The policy watcher runs on the |file_task_runner| but we want to run the
-  // update code on |task_runner| so we use a shim to post the callback to the
-  // preferred task runner.
+  // callbacks on |task_runner| so we use a shim to post them to it.
   PolicyWatcher::PolicyUpdatedCallback update_callback =
       base::Bind(&It2MeNativeMessagingHost::OnPolicyUpdate, weak_ptr_);
+  PolicyWatcher::PolicyErrorCallback error_callback =
+      base::Bind(&It2MeNativeMessagingHost::OnPolicyError, weak_ptr_);
   policy_watcher_->StartWatching(
       base::Bind(&PolicyUpdateCallback, task_runner(), update_callback),
-      base::Bind(&OnPolicyError));
+      base::Bind(&PolicyErrorCallback, task_runner(), error_callback));
 }
 
 It2MeNativeMessagingHost::~It2MeNativeMessagingHost() {
@@ -132,11 +137,12 @@ void It2MeNativeMessagingHost::OnMessage(const std::string& message) {
   // might be a string or a number, so cope with both.
   const base::Value* id;
   if (message_dict->Get("id", &id))
-    response->Set("id", id->CreateDeepCopy());
+    response->Set("id", base::MakeUnique<base::Value>(*id));
 
   std::string type;
   if (!message_dict->GetString("type", &type)) {
-    SendErrorAndExit(std::move(response), "'type' not found in request.");
+    LOG(ERROR) << "'type' not found in request.";
+    SendErrorAndExit(std::move(response), ErrorCode::INCOMPATIBLE_PROTOCOL);
     return;
   }
 
@@ -151,7 +157,8 @@ void It2MeNativeMessagingHost::OnMessage(const std::string& message) {
   } else if (type == "incomingIq") {
     ProcessIncomingIq(std::move(message_dict), std::move(response));
   } else {
-    SendErrorAndExit(std::move(response), "Unsupported request type: " + type);
+    LOG(ERROR) << "Unsupported request type: " << type;
+    SendErrorAndExit(std::move(response), ErrorCode::INCOMPATIBLE_PROTOCOL);
   }
 }
 
@@ -182,9 +189,7 @@ void It2MeNativeMessagingHost::ProcessHello(
   response->SetString("version", STRINGIZE(VERSION));
 
   // This list will be populated when new features are added.
-  std::unique_ptr<base::ListValue> supported_features_list(
-      new base::ListValue());
-  response->Set("supportedFeatures", supported_features_list.release());
+  response->Set("supportedFeatures", base::MakeUnique<base::ListValue>());
 
   SendMessageToClient(std::move(response));
 }
@@ -195,7 +200,7 @@ void It2MeNativeMessagingHost::ProcessConnect(
   DCHECK(task_runner()->BelongsToCurrentThread());
 
   if (!policy_received_) {
-    DCHECK(pending_connect_.is_null());
+    DCHECK(!pending_connect_);
     pending_connect_ =
         base::Bind(&It2MeNativeMessagingHost::ProcessConnect, weak_ptr_,
                    base::Passed(&message), base::Passed(&response));
@@ -209,21 +214,22 @@ void It2MeNativeMessagingHost::ProcessConnect(
     // If the process cannot be started or message passing fails, then return an
     // error to the message sender.
     if (!DelegateToElevatedHost(std::move(message))) {
-      SendErrorAndExit(std::move(response),
-                       "Failed to send message to elevated host.");
+      LOG(ERROR) << "Failed to send message to elevated host.";
+      SendErrorAndExit(std::move(response), ErrorCode::ELEVATION_ERROR);
     }
     return;
   }
 
   if (it2me_host_.get()) {
-    SendErrorAndExit(std::move(response),
-                     "Connect can be called only when disconnected.");
+    LOG(ERROR) << "Connect can be called only when disconnected.";
+    SendErrorAndExit(std::move(response), ErrorCode::UNKNOWN_ERROR);
     return;
   }
 
   std::string username;
   if (!message->GetString("userName", &username)) {
-    SendErrorAndExit(std::move(response), "'userName' not found in request.");
+    LOG(ERROR) << "'userName' not found in request.";
+    SendErrorAndExit(std::move(response), ErrorCode::INCOMPATIBLE_PROTOCOL);
     return;
   }
 
@@ -245,8 +251,8 @@ void It2MeNativeMessagingHost::ProcessConnect(
 
     std::string auth_service_with_token;
     if (!message->GetString("authServiceWithToken", &auth_service_with_token)) {
-      SendErrorAndExit(std::move(response),
-                       "'authServiceWithToken' not found in request.");
+      LOG(ERROR) << "'authServiceWithToken' not found in request.";
+      SendErrorAndExit(std::move(response), ErrorCode::INCOMPATIBLE_PROTOCOL);
       return;
     }
 
@@ -256,8 +262,9 @@ void It2MeNativeMessagingHost::ProcessConnect(
     const char kOAuth2ServicePrefix[] = "oauth2:";
     if (!base::StartsWith(auth_service_with_token, kOAuth2ServicePrefix,
                           base::CompareCase::SENSITIVE)) {
-      SendErrorAndExit(std::move(response), "Invalid 'authServiceWithToken': " +
-                                                auth_service_with_token);
+      LOG(ERROR) << "Invalid 'authServiceWithToken': "
+                 << auth_service_with_token;
+      SendErrorAndExit(std::move(response), ErrorCode::INCOMPATIBLE_PROTOCOL);
       return;
     }
 
@@ -267,20 +274,20 @@ void It2MeNativeMessagingHost::ProcessConnect(
 #if !defined(NDEBUG)
     std::string address;
     if (!message->GetString("xmppServerAddress", &address)) {
-      SendErrorAndExit(std::move(response),
-                       "'xmppServerAddress' not found in request.");
+      LOG(ERROR) << "'xmppServerAddress' not found in request.";
+      SendErrorAndExit(std::move(response), ErrorCode::INCOMPATIBLE_PROTOCOL);
       return;
     }
 
     if (!net::ParseHostAndPort(address, &xmpp_config.host, &xmpp_config.port)) {
-      SendErrorAndExit(std::move(response),
-                       "Invalid 'xmppServerAddress': " + address);
+      LOG(ERROR) << "Invalid 'xmppServerAddress': " << address;
+      SendErrorAndExit(std::move(response), ErrorCode::INCOMPATIBLE_PROTOCOL);
       return;
     }
 
     if (!message->GetBoolean("xmppServerUseTls", &xmpp_config.use_tls)) {
-      SendErrorAndExit(std::move(response),
-                       "'xmppServerUseTls' not found in request.");
+      LOG(ERROR) << "'xmppServerUseTls' not found in request.";
+      SendErrorAndExit(std::move(response), ErrorCode::INCOMPATIBLE_PROTOCOL);
       return;
     }
 #endif  // !defined(NDEBUG)
@@ -292,32 +299,54 @@ void It2MeNativeMessagingHost::ProcessConnect(
     std::string local_jid;
 
     if (!message->GetString("localJid", &local_jid)) {
-      SendErrorAndExit(std::move(response), "'localJid' not found in request.");
+      LOG(ERROR) << "'localJid' not found in request.";
+      SendErrorAndExit(std::move(response), ErrorCode::INCOMPATIBLE_PROTOCOL);
       return;
     }
 
-    delegating_signal_strategy_ = new DelegatingSignalStrategy(
-        local_jid, host_context_->network_task_runner(),
-        base::Bind(&It2MeNativeMessagingHost::SendOutgoingIq,
-                   weak_factory_.GetWeakPtr()));
-    signal_strategy.reset(delegating_signal_strategy_);
+    auto delegating_signal_strategy =
+        base::MakeUnique<DelegatingSignalStrategy>(
+            SignalingAddress(local_jid), host_context_->network_task_runner(),
+            base::Bind(&It2MeNativeMessagingHost::SendOutgoingIq,
+                       weak_factory_.GetWeakPtr()));
+    incoming_message_callback_ =
+        delegating_signal_strategy->GetIncomingMessageCallback();
+    signal_strategy = std::move(delegating_signal_strategy);
   }
 
   std::string directory_bot_jid = service_urls->directory_bot_jid();
 
 #if !defined(NDEBUG)
   if (!message->GetString("directoryBotJid", &directory_bot_jid)) {
-    SendErrorAndExit(std::move(response),
-                     "'directoryBotJid' not found in request.");
+    LOG(ERROR) << "'directoryBotJid' not found in request.";
+    SendErrorAndExit(std::move(response), ErrorCode::INCOMPATIBLE_PROTOCOL);
     return;
   }
 #endif  // !defined(NDEBUG)
 
+  base::DictionaryValue* ice_config_dict;
+  protocol::IceConfig ice_config;
+  if (message->GetDictionary("iceConfig", &ice_config_dict)) {
+    ice_config = protocol::IceConfig::Parse(*ice_config_dict);
+  }
+
+  std::unique_ptr<base::DictionaryValue> policies =
+      policy_watcher_->GetCurrentPolicies();
+  if (policies->size() == 0) {
+    // At this point policies have been read, so if there are none set then
+    // it indicates an error. Since this can be fixed by end users it has a
+    // dedicated message type rather than the generic "error" so that the
+    // right error message can be displayed.
+    SendPolicyErrorAndExit();
+    return;
+  }
+
   // Create the It2Me host and start connecting.
-  it2me_host_ = factory_->CreateIt2MeHost(
-      host_context_->Copy(), policy_service_, weak_ptr_,
-      std::move(signal_strategy), username, directory_bot_jid);
-  it2me_host_->Connect();
+  it2me_host_ = factory_->CreateIt2MeHost();
+  it2me_host_->Connect(host_context_->Copy(), std::move(policies),
+                       base::MakeUnique<It2MeConfirmationDialogFactory>(),
+                       weak_ptr_, std::move(signal_strategy), username,
+                       directory_bot_jid, ice_config);
 
   SendMessageToClient(std::move(response));
 }
@@ -335,8 +364,8 @@ void It2MeNativeMessagingHost::ProcessDisconnect(
     // If the process cannot be started or message passing fails, then return an
     // error to the message sender.
     if (!DelegateToElevatedHost(std::move(message))) {
-      SendErrorAndExit(std::move(response),
-                       "Failed to send message to elevated host.");
+      LOG(ERROR) << "Failed to send message to elevated host.";
+      SendErrorAndExit(std::move(response), ErrorCode::ELEVATION_ERROR);
     }
     return;
   }
@@ -357,8 +386,7 @@ void It2MeNativeMessagingHost::ProcessIncomingIq(
     return;
   }
 
-  if (delegating_signal_strategy_)
-    delegating_signal_strategy_->OnIncomingMessage(iq);
+  incoming_message_callback_.Run(iq);
   SendMessageToClient(std::move(response));
 };
 
@@ -371,22 +399,29 @@ void It2MeNativeMessagingHost::SendOutgoingIq(const std::string& iq) {
 
 void It2MeNativeMessagingHost::SendErrorAndExit(
     std::unique_ptr<base::DictionaryValue> response,
-    const std::string& description) const {
+    protocol::ErrorCode error_code) const {
   DCHECK(task_runner()->BelongsToCurrentThread());
-
-  LOG(ERROR) << description;
-
   response->SetString("type", "error");
-  response->SetString("description", description);
+  response->SetString("error_code", ErrorCodeToString(error_code));
+  // TODO(kelvinp): Remove this after M61 Webapp is pushed to 100%.
+  response->SetString("description", ErrorCodeToString(error_code));
   SendMessageToClient(std::move(response));
 
   // Trigger a host shutdown by sending an empty message.
   client_->CloseChannel(std::string());
 }
 
-void It2MeNativeMessagingHost::OnStateChanged(
-    It2MeHostState state,
-    const std::string& error_message) {
+void It2MeNativeMessagingHost::SendPolicyErrorAndExit() const {
+  DCHECK(task_runner()->BelongsToCurrentThread());
+
+  auto message = base::MakeUnique<base::DictionaryValue>();
+  message->SetString("type", "policyError");
+  SendMessageToClient(std::move(message));
+  client_->CloseChannel(std::string());
+}
+
+void It2MeNativeMessagingHost::OnStateChanged(It2MeHostState state,
+                                              protocol::ErrorCode error_code) {
   DCHECK(task_runner()->BelongsToCurrentThread());
 
   state_ = state;
@@ -416,7 +451,9 @@ void It2MeNativeMessagingHost::OnStateChanged(
       // "error" message so that errors that occur before the "connect" message
       // is sent can be communicated.
       message->SetString("type", "error");
-      message->SetString("description", error_message);
+      message->SetString("error_code", ErrorCodeToString(error_code));
+      // TODO(kelvinp): Remove this after M61 Webapp is pushed to 100%.
+      message->SetString("description", ErrorCodeToString(error_code));
       break;
 
     default:
@@ -424,6 +461,11 @@ void It2MeNativeMessagingHost::OnStateChanged(
   }
 
   SendMessageToClient(std::move(message));
+}
+
+void It2MeNativeMessagingHost::SetPolicyErrorClosureForTesting(
+    const base::Closure& closure) {
+  policy_error_closure_for_testing_ = closure;
 }
 
 void It2MeNativeMessagingHost::OnNatPolicyChanged(bool nat_traversal_enabled) {
@@ -467,29 +509,54 @@ std::string It2MeNativeMessagingHost::HostStateToString(
 
 void It2MeNativeMessagingHost::OnPolicyUpdate(
     std::unique_ptr<base::DictionaryValue> policies) {
-  if (policy_received_) {
-    // Don't dynamically change how the host operates since we don't have a good
-    // way to communicate changes to the user.
-    return;
-  }
-
-  bool allow_elevated_host = false;
-  if (!policies->GetBoolean(
-          policy::key::kRemoteAccessHostAllowUiAccessForRemoteAssistance,
-          &allow_elevated_host)) {
-    LOG(WARNING) << "Failed to retrieve elevated host policy value.";
-  }
+  // Don't dynamically change the elevation status since we don't have a good
+  // way to communicate changes to the user.
+  if (!policy_received_) {
+    bool allow_elevated_host = false;
+    if (!policies->GetBoolean(
+            policy::key::kRemoteAccessHostAllowUiAccessForRemoteAssistance,
+            &allow_elevated_host)) {
+      LOG(WARNING) << "Failed to retrieve elevated host policy value.";
+    }
 #if defined(OS_WIN)
-  LOG(INFO) << "Allow UiAccess for Remote Assistance: " << allow_elevated_host;
+    LOG(INFO) << "Allow UiAccess for Remote Assistance: "
+              << allow_elevated_host;
 #endif  // defined(OS_WIN)
 
+    policy_received_ = true;
+
+    // If |allow_elevated_host| is false, then we will fall back to using a host
+    // running in the current context regardless of the elevation request.  This
+    // may not be ideal, but is still functional.
+    needs_elevation_ = needs_elevation_ && allow_elevated_host;
+    if (pending_connect_) {
+      base::ResetAndReturn(&pending_connect_).Run();
+    }
+  }
+
+  if (it2me_host_) {
+    it2me_host_->OnPolicyUpdate(std::move(policies));
+  }
+}
+
+void It2MeNativeMessagingHost::OnPolicyError() {
+  LOG(ERROR) << "Malformed policies detected.";
   policy_received_ = true;
 
-  // If |allow_elevated_host| is false, then we will fall back to using a host
-  // running in the current context regardless of the elevation request.  This
-  // may not be ideal, but is still functional.
-  needs_elevation_ = needs_elevation_ && allow_elevated_host;
-  if (!pending_connect_.is_null()) {
+  if (policy_error_closure_for_testing_) {
+    policy_error_closure_for_testing_.Run();
+  }
+
+  if (it2me_host_) {
+    // If there is already a connection, close it and notify the webapp.
+    it2me_host_->Disconnect();
+    it2me_host_ = nullptr;
+    SendPolicyErrorAndExit();
+  } else if (pending_connect_) {
+    // If there is no connection, run the pending connection callback if there
+    // is one, but otherwise do nothing. The policy error will be sent when a
+    // connection is made; doing so beforehand would break assumptions made by
+    // the Chrome app.
     base::ResetAndReturn(&pending_connect_).Run();
   }
 }

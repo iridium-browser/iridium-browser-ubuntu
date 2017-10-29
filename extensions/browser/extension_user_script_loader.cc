@@ -6,8 +6,11 @@
 
 #include <stddef.h>
 
+#include <map>
+#include <memory>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -21,6 +24,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/component_extension_resource_manager.h"
 #include "extensions/browser/content_verifier.h"
+#include "extensions/browser/extension_file_task_runner.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extensions_browser_client.h"
@@ -151,19 +155,21 @@ void LoadUserScripts(UserScriptList* user_scripts,
   }
 }
 
-void LoadScriptsOnFileThread(
+void LoadScriptsOnFileTaskRunner(
     std::unique_ptr<UserScriptList> user_scripts,
     const ExtensionUserScriptLoader::HostsInfo& hosts_info,
     const std::set<int>& added_script_ids,
     const scoped_refptr<ContentVerifier>& verifier,
     UserScriptLoader::LoadScriptsCallback callback) {
+  DCHECK(GetExtensionFileTaskRunner()->RunsTasksInCurrentSequence());
   DCHECK(user_scripts.get());
   LoadUserScripts(user_scripts.get(), hosts_info, added_script_ids, verifier);
   std::unique_ptr<base::SharedMemory> memory =
       UserScriptLoader::Serialize(*user_scripts);
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(callback, base::Passed(&user_scripts), base::Passed(&memory)));
+      base::BindOnce(std::move(callback), std::move(user_scripts),
+                     std::move(memory)));
 }
 
 }  // namespace
@@ -210,10 +216,11 @@ void ExtensionUserScriptLoader::LoadScripts(
     LoadScriptsCallback callback) {
   UpdateHostsInfo(changed_hosts);
 
-  content::BrowserThread::PostTask(
-      content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&LoadScriptsOnFileThread, base::Passed(&user_scripts),
-                 hosts_info_, added_script_ids, content_verifier_, callback));
+  GetExtensionFileTaskRunner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&LoadScriptsOnFileTaskRunner, std::move(user_scripts),
+                     hosts_info_, added_script_ids, content_verifier_,
+                     std::move(callback)));
 }
 
 void ExtensionUserScriptLoader::UpdateHostsInfo(
@@ -236,7 +243,7 @@ void ExtensionUserScriptLoader::UpdateHostsInfo(
 void ExtensionUserScriptLoader::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   hosts_info_.erase(HostID(HostID::EXTENSIONS, extension->id()));
 }
 

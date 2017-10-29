@@ -6,7 +6,7 @@
 #define RuntimeEnabledFeaturesTestHelpers_h
 
 #include "platform/RuntimeEnabledFeatures.h"
-#include "wtf/Assertions.h"
+#include "platform/wtf/Assertions.h"
 
 namespace blink {
 
@@ -14,48 +14,52 @@ template <bool (&getter)(), void (&setter)(bool)>
 class ScopedRuntimeEnabledFeatureForTest {
  public:
   ScopedRuntimeEnabledFeatureForTest(bool enabled)
-      : m_enabled(enabled), m_original(getter()) {
+      : enabled_(enabled), original_(getter()) {
     setter(enabled);
   }
 
   ~ScopedRuntimeEnabledFeatureForTest() {
-    CHECK_EQ(m_enabled, getter());
-    setter(m_original);
+    CHECK_EQ(enabled_, getter());
+    setter(original_);
   }
 
  private:
-  bool m_enabled;
-  bool m_original;
+  bool enabled_;
+  bool original_;
 };
 
 typedef ScopedRuntimeEnabledFeatureForTest<
-    RuntimeEnabledFeatures::compositeOpaqueFixedPositionEnabled,
-    RuntimeEnabledFeatures::setCompositeOpaqueFixedPositionEnabled>
+    RuntimeEnabledFeatures::CompositeOpaqueFixedPositionEnabled,
+    RuntimeEnabledFeatures::SetCompositeOpaqueFixedPositionEnabled>
     ScopedCompositeFixedPositionForTest;
 typedef ScopedRuntimeEnabledFeatureForTest<
-    RuntimeEnabledFeatures::compositeOpaqueScrollersEnabled,
-    RuntimeEnabledFeatures::setCompositeOpaqueScrollersEnabled>
+    RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled,
+    RuntimeEnabledFeatures::SetCompositeOpaqueScrollersEnabled>
     ScopedCompositeOpaqueScrollersForTest;
 typedef ScopedRuntimeEnabledFeatureForTest<
-    RuntimeEnabledFeatures::compositorWorkerEnabled,
-    RuntimeEnabledFeatures::setCompositorWorkerEnabled>
+    RuntimeEnabledFeatures::CompositorWorkerEnabled,
+    RuntimeEnabledFeatures::SetCompositorWorkerEnabled>
     ScopedCompositorWorkerForTest;
 typedef ScopedRuntimeEnabledFeatureForTest<
-    RuntimeEnabledFeatures::rootLayerScrollingEnabled,
-    RuntimeEnabledFeatures::setRootLayerScrollingEnabled>
+    RuntimeEnabledFeatures::RootLayerScrollingEnabled,
+    RuntimeEnabledFeatures::SetRootLayerScrollingEnabled>
     ScopedRootLayerScrollingForTest;
 typedef ScopedRuntimeEnabledFeatureForTest<
-    RuntimeEnabledFeatures::slimmingPaintV2Enabled,
-    RuntimeEnabledFeatures::setSlimmingPaintV2Enabled>
+    RuntimeEnabledFeatures::SlimmingPaintV2Enabled,
+    RuntimeEnabledFeatures::SetSlimmingPaintV2Enabled>
     ScopedSlimmingPaintV2ForTest;
 typedef ScopedRuntimeEnabledFeatureForTest<
-    RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled,
-    RuntimeEnabledFeatures::setSlimmingPaintInvalidationEnabled>
-    ScopedSlimmingPaintInvalidationForTest;
-typedef ScopedRuntimeEnabledFeatureForTest<
-    RuntimeEnabledFeatures::paintUnderInvalidationCheckingEnabled,
-    RuntimeEnabledFeatures::setPaintUnderInvalidationCheckingEnabled>
+    RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled,
+    RuntimeEnabledFeatures::SetPaintUnderInvalidationCheckingEnabled>
     ScopedPaintUnderInvalidationCheckingForTest;
+typedef ScopedRuntimeEnabledFeatureForTest<
+    RuntimeEnabledFeatures::AccessibilityObjectModelEnabled,
+    RuntimeEnabledFeatures::SetAccessibilityObjectModelEnabled>
+    ScopedAccessibilityObjectModelForTest;
+typedef ScopedRuntimeEnabledFeatureForTest<
+    RuntimeEnabledFeatures::MojoBlobsEnabled,
+    RuntimeEnabledFeatures::SetMojoBlobsEnabled>
+    ScopedMojoBlobsForTest;
 
 }  // namespace blink
 

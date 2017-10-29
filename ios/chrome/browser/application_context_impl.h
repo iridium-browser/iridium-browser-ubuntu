@@ -43,6 +43,8 @@ class ApplicationContextImpl : public ApplicationContext {
   void OnAppEnterForeground() override;
   void OnAppEnterBackground() override;
   bool WasLastShutdownClean() override;
+  void SetIsShuttingDown() override;
+  bool IsShuttingDown() override;
   PrefService* GetLocalState() override;
   net::URLRequestContextGetter* GetSystemURLRequestContext() override;
   const std::string& GetApplicationLocale() override;
@@ -50,7 +52,7 @@ class ApplicationContextImpl : public ApplicationContext {
   metrics_services_manager::MetricsServicesManager* GetMetricsServicesManager()
       override;
   metrics::MetricsService* GetMetricsService() override;
-  ukm::UkmService* GetUkmService() override;
+  ukm::UkmRecorder* GetUkmRecorder() override;
   variations::VariationsService* GetVariationsService() override;
   rappor::RapporServiceImpl* GetRapporServiceImpl() override;
   net_log::ChromeNetLog* GetNetLog() override;
@@ -91,6 +93,7 @@ class ApplicationContextImpl : public ApplicationContext {
   const scoped_refptr<base::SequencedTaskRunner> local_state_task_runner_;
 
   bool was_last_shutdown_clean_;
+  bool is_shutting_down_;
   bool created_local_state_;
 
   DISALLOW_COPY_AND_ASSIGN(ApplicationContextImpl);

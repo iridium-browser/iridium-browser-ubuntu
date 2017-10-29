@@ -46,7 +46,7 @@ std::vector<uint64_t> GetIds(const base::Value& value) {
   const base::ListValue* list;
   if (value.GetAsList(&list)) {
     for (const auto& list_item : *list)
-      ids.push_back(GetId(*list_item));
+      ids.push_back(GetId(list_item));
   } else {
     ids.push_back(GetId(value));
   }
@@ -113,6 +113,7 @@ class DownloadsListTrackerTest : public testing::Test {
 
     ON_CALL(*new_item, GetId()).WillByDefault(Return(id));
     ON_CALL(*new_item, GetStartTime()).WillByDefault(Return(started));
+    ON_CALL(*new_item, IsTransient()).WillByDefault(Return(false));
 
     return new_item;
   }
@@ -354,4 +355,15 @@ TEST_F(DownloadsListTrackerTest, IgnoreUnsentItemRemovals) {
   DownloadItemModel(unsent_item).SetShouldShowInShelf(true);
   tracker()->OnDownloadUpdated(manager(), unsent_item);
   EXPECT_EQ(1u, web_ui()->call_data().size());
+}
+
+TEST_F(DownloadsListTrackerTest, IgnoreTransientDownloads) {
+  MockDownloadItem* transient_item = CreateNextItem();
+  ON_CALL(*transient_item, IsTransient()).WillByDefault(Return(true));
+
+  CreateTracker();
+  tracker()->StartAndSendChunk();
+
+  ASSERT_FALSE(web_ui()->call_data().empty());
+  EXPECT_EQ(0u, GetIds(*web_ui()->call_data()[0]->arg2()).size());
 }

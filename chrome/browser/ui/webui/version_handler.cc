@@ -12,6 +12,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/grit/generated_resources.h"
@@ -33,7 +35,7 @@ namespace {
 void GetFilePaths(const base::FilePath& profile_path,
                   base::string16* exec_path_out,
                   base::string16* profile_path_out) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
+  base::ThreadRestrictions::AssertIOAllowed();
 
   base::FilePath executable_path = base::MakeAbsoluteFilePath(
       base::CommandLine::ForCurrentProcess()->GetProgram());
@@ -78,15 +80,14 @@ void VersionHandler::HandleRequestVersionInfo(const base::ListValue* args) {
   // OnGotFilePaths.
   base::string16* exec_path_buffer = new base::string16;
   base::string16* profile_path_buffer = new base::string16;
-  content::BrowserThread::PostTaskAndReply(
-      content::BrowserThread::FILE, FROM_HERE,
-          base::Bind(&GetFilePaths, Profile::FromWebUI(web_ui())->GetPath(),
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
+      base::BindOnce(&GetFilePaths, Profile::FromWebUI(web_ui())->GetPath(),
                      base::Unretained(exec_path_buffer),
                      base::Unretained(profile_path_buffer)),
-          base::Bind(&VersionHandler::OnGotFilePaths,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     base::Owned(exec_path_buffer),
-                     base::Owned(profile_path_buffer)));
+      base::BindOnce(
+          &VersionHandler::OnGotFilePaths, weak_ptr_factory_.GetWeakPtr(),
+          base::Owned(exec_path_buffer), base::Owned(profile_path_buffer)));
 
   // Respond with the variations info immediately.
   web_ui()->CallJavascriptFunctionUnsafe(version_ui::kReturnVariationInfo,
@@ -97,8 +98,8 @@ void VersionHandler::OnGotFilePaths(base::string16* executable_path_data,
                                     base::string16* profile_path_data) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  base::StringValue exec_path(*executable_path_data);
-  base::StringValue profile_path(*profile_path_data);
+  base::Value exec_path(*executable_path_data);
+  base::Value profile_path(*profile_path_data);
   web_ui()->CallJavascriptFunctionUnsafe(version_ui::kReturnFilePaths,
                                          exec_path, profile_path);
 }
@@ -125,7 +126,7 @@ void VersionHandler::OnGotPlugins(
     }
   }
 
-  base::StringValue arg(flash_version_and_path);
+  base::Value arg(flash_version_and_path);
 
   web_ui()->CallJavascriptFunctionUnsafe(version_ui::kReturnFlashVersion, arg);
 }

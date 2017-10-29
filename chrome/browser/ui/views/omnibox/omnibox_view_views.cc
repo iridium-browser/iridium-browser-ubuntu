@@ -14,9 +14,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/ui/omnibox/chrome_omnibox_client.h"
 #include "chrome/browser/ui/omnibox/clipboard_utils.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -24,6 +22,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/omnibox_client.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
@@ -106,15 +105,12 @@ OmniboxState::~OmniboxState() {
 const char OmniboxViewViews::kViewClassName[] = "OmniboxViewViews";
 
 OmniboxViewViews::OmniboxViewViews(OmniboxEditController* controller,
-                                   Profile* profile,
+                                   std::unique_ptr<OmniboxClient> client,
                                    CommandUpdater* command_updater,
                                    bool popup_window_mode,
                                    LocationBarView* location_bar,
                                    const gfx::FontList& font_list)
-    : OmniboxView(
-          controller,
-          base::WrapUnique(new ChromeOmniboxClient(controller, profile))),
-      profile_(profile),
+    : OmniboxView(controller, std::move(client)),
       popup_window_mode_(popup_window_mode),
       security_level_(security_state::NONE),
       saved_selection_for_focus_change_(gfx::Range::InvalidRange()),
@@ -142,6 +138,7 @@ OmniboxViewViews::~OmniboxViewViews() {
 void OmniboxViewViews::Init() {
   set_controller(this);
   SetTextInputType(ui::TEXT_INPUT_TYPE_URL);
+  GetRenderText()->SetElideBehavior(gfx::ELIDE_TAIL);
 
   if (popup_window_mode_)
     SetReadOnly(true);
@@ -176,8 +173,9 @@ void OmniboxViewViews::SaveStateToTab(content::WebContents* tab) {
   // NOTE: GetStateForTabSwitch() may affect GetSelectedRange(), so order is
   // important.
   OmniboxEditModel::State state = model()->GetStateForTabSwitch();
-  tab->SetUserData(OmniboxState::kKey, new OmniboxState(
-      state, GetSelectedRange(), saved_selection_for_focus_change_));
+  tab->SetUserData(OmniboxState::kKey, base::MakeUnique<OmniboxState>(
+                                           state, GetSelectedRange(),
+                                           saved_selection_for_focus_change_));
 }
 
 void OmniboxViewViews::OnTabChanged(const content::WebContents* web_contents) {
@@ -431,9 +429,13 @@ void OmniboxViewViews::SetWindowTextAndCaretPos(const base::string16& text,
     TextChanged();
 }
 
+void OmniboxViewViews::SetCaretPos(size_t caret_pos) {
+  SelectRange(gfx::Range(caret_pos, caret_pos));
+}
+
 bool OmniboxViewViews::IsSelectAll() const {
   // TODO(oshima): IME support.
-  return text() == GetSelectedText();
+  return !text().empty() && text() == GetSelectedText();
 }
 
 bool OmniboxViewViews::DeleteAtEndPressed() {
@@ -583,7 +585,7 @@ void OmniboxViewViews::UpdateSchemeStyle(const gfx::Range& range) {
     return;
   ApplyColor(location_bar_view_->GetSecureTextColor(security_level_), range);
   if (security_level_ == security_state::DANGEROUS)
-    ApplyStyle(gfx::DIAGONAL_STRIKE, true, range);
+    ApplyStyle(gfx::STRIKE, true, range);
 }
 
 void OmniboxViewViews::EmphasizeURLComponents() {
@@ -598,8 +600,8 @@ void OmniboxViewViews::EmphasizeURLComponents() {
   GetRenderText()->SetDirectionalityMode(text_is_url
                                              ? gfx::DIRECTIONALITY_FORCE_LTR
                                              : gfx::DIRECTIONALITY_FROM_TEXT);
-  SetStyle(gfx::DIAGONAL_STRIKE, false);
-  UpdateTextStyle(text(), ChromeAutocompleteSchemeClassifier(profile_));
+  SetStyle(gfx::STRIKE, false);
+  UpdateTextStyle(text(), model()->client()->GetSchemeClassifier());
 }
 
 bool OmniboxViewViews::IsItemForCommandIdDynamic(int command_id) const {
@@ -709,6 +711,7 @@ void OmniboxViewViews::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ui::AX_ROLE_TEXT_FIELD;
   node_data->SetName(l10n_util::GetStringUTF8(IDS_ACCNAME_LOCATION));
   node_data->SetValue(GetText());
+  node_data->html_attributes.push_back(std::make_pair("type", "url"));
 
   base::string16::size_type entry_start;
   base::string16::size_type entry_end;
@@ -724,9 +727,10 @@ void OmniboxViewViews::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->AddIntAttribute(ui::AX_ATTR_TEXT_SEL_END, entry_end);
 
   if (popup_window_mode_) {
-    node_data->AddStateFlag(ui::AX_STATE_READ_ONLY);
+    node_data->AddIntAttribute(ui::AX_ATTR_RESTRICTION,
+                               ui::AX_RESTRICTION_READ_ONLY);
   } else {
-    node_data->AddStateFlag(ui::AX_STATE_EDITABLE);
+    node_data->AddState(ui::AX_STATE_EDITABLE);
   }
 }
 
@@ -763,6 +767,12 @@ void OmniboxViewViews::OnFocus() {
     SelectRange(saved_selection_for_focus_change_);
     saved_selection_for_focus_change_ = gfx::Range::InvalidRange();
   }
+
+  GetRenderText()->SetElideBehavior(gfx::NO_ELIDE);
+
+  // Focus changes can affect the visibility of any keyword hint.
+  if (model()->is_keyword_hint())
+    location_bar_view_->Layout();
 }
 
 void OmniboxViewViews::OnBlur() {
@@ -772,12 +782,14 @@ void OmniboxViewViews::OnBlur() {
   views::Textfield::OnBlur();
   model()->OnWillKillFocus();
 
-  // If ZeroSuggest is active, we may have refused to show an update to the
-  // underlying permanent URL that happened while the popup was open, so
-  // revert to ensure that update is shown now.  Otherwise, make sure to call
-  // CloseOmniboxPopup() unconditionally, so that if ZeroSuggest is in the midst
-  // of running but hasn't yet opened the popup, it will be halted.
-  if (!model()->user_input_in_progress() && model()->popup_model()->IsOpen())
+  // If ZeroSuggest is active, and there is evidence that there is a text
+  // update to show, revert to ensure that update is shown now.  Otherwise,
+  // at least call CloseOmniboxPopup(), so that if ZeroSuggest is in the
+  // midst of running but hasn't yet opened the popup, it will be halted.
+  // If we fully reverted in this case, we'd lose the cursor/highlight
+  // information saved above. Note: popup_model() can be null in tests.
+  if (!model()->user_input_in_progress() && model()->popup_model() &&
+      model()->popup_model()->IsOpen() && text() != model()->PermanentText())
     RevertAll();
   else
     CloseOmniboxPopup();
@@ -785,11 +797,30 @@ void OmniboxViewViews::OnBlur() {
   // Tell the model to reset itself.
   model()->OnKillFocus();
 
-  // Make sure the beginning of the text is visible.
+  // Deselect the text. Ensures the cursor is an I-beam.
   SelectRange(gfx::Range(0));
 
-  // The location bar needs to repaint without a focus ring.
-  location_bar_view_->SchedulePaint();
+  // When deselected, elide and reset scroll position. After eliding, the old
+  // scroll offset is meaningless (since the string is guaranteed to fit within
+  // the view). The scroll must be reset or the text may be rendered partly or
+  // wholly off-screen.
+  //
+  // Important: Since the URL can contain bidirectional text, it is important to
+  // set the display offset directly to 0 (not simply scroll to the start of the
+  // text, since the start of the text may not be at the left edge).
+  gfx::RenderText* render_text = GetRenderText();
+  render_text->SetElideBehavior(gfx::ELIDE_TAIL);
+  render_text->SetDisplayOffset(0);
+
+  // Focus changes can affect the visibility of any keyword hint.
+  // |location_bar_view_| can be null in tests.
+  if (location_bar_view_) {
+    if (model()->is_keyword_hint())
+      location_bar_view_->Layout();
+
+    // The location bar needs to repaint without a focus ring.
+    location_bar_view_->SchedulePaint();
+  }
 }
 
 bool OmniboxViewViews::IsCommandIdEnabled(int command_id) const {
@@ -997,7 +1028,7 @@ void OmniboxViewViews::OnWriteDragData(ui::OSExchangeData* data) {
     if (is_all_selected)
       model()->GetDataForURLExport(&url, &title, &favicon);
     button_drag_utils::SetURLAndDragImage(url, title, favicon.AsImageSkia(),
-                                          NULL, data, GetWidget());
+                                          nullptr, *GetWidget(), data);
     data->SetURL(url, title);
   }
 }

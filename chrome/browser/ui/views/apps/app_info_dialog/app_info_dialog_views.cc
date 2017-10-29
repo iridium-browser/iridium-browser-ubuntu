@@ -16,6 +16,7 @@
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_header_panel.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_permissions_panel.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_summary_panel.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/features.h"
@@ -24,12 +25,12 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
@@ -69,10 +70,6 @@ bool CanShowAppInfoDialog() {
 #endif
 }
 
-gfx::Size GetAppInfoNativeDialogSize() {
-  return gfx::Size(380, 490);
-}
-
 #if BUILDFLAG(ENABLE_APP_LIST)
 void ShowAppInfoInAppList(gfx::NativeWindow parent,
                           const gfx::Rect& app_list_bounds,
@@ -90,14 +87,14 @@ void ShowAppInfoInAppList(gfx::NativeWindow parent,
 #endif
 
 void ShowAppInfoInNativeDialog(content::WebContents* web_contents,
-                               const gfx::Size& size,
                                Profile* profile,
                                const extensions::Extension* app,
                                const base::Closure& close_callback) {
   gfx::NativeWindow window = web_contents->GetTopLevelNativeWindow();
   views::View* app_info_view = new AppInfoDialog(window, profile, app);
+  constexpr gfx::Size kDialogSize = gfx::Size(380, 490);
   views::DialogDelegate* dialog =
-      CreateDialogContainerForView(app_info_view, size, close_callback);
+      CreateDialogContainerForView(app_info_view, kDialogSize, close_callback);
   views::Widget* dialog_widget;
   if (dialog->GetModalType() == ui::MODAL_TYPE_CHILD) {
     dialog_widget =
@@ -113,8 +110,7 @@ AppInfoDialog::AppInfoDialog(gfx::NativeWindow parent_window,
                              Profile* profile,
                              const extensions::Extension* app)
     : profile_(profile), app_id_(app->id()) {
-  views::BoxLayout* layout =
-      new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0);
+  views::BoxLayout* layout = new views::BoxLayout(views::BoxLayout::kVertical);
   SetLayoutManager(layout);
 
   const int kHorizontalSeparatorHeight = 1;
@@ -134,11 +130,11 @@ AppInfoDialog::AppInfoDialog(gfx::NativeWindow parent_window,
   // Make a vertically stacked view of all the panels we want to display in the
   // dialog.
   views::View* dialog_body_contents = new views::View();
-  dialog_body_contents->SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kVertical,
-                           views::kButtonHEdgeMarginNew,
-                           views::kPanelVertMargin,
-                           views::kUnrelatedControlVerticalSpacing));
+  const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
+  dialog_body_contents->SetLayoutManager(new views::BoxLayout(
+      views::BoxLayout::kVertical,
+      provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS),
+      provider->GetDistanceMetric(views::DISTANCE_UNRELATED_CONTROL_VERTICAL)));
   dialog_body_contents->AddChildView(new AppInfoSummaryPanel(profile, app));
   dialog_body_contents->AddChildView(new AppInfoPermissionsPanel(profile, app));
 

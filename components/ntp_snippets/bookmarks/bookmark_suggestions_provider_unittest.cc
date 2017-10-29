@@ -18,7 +18,6 @@
 #include "components/ntp_snippets/bookmarks/bookmark_last_visit_utils.h"
 #include "components/ntp_snippets/category.h"
 #include "components/ntp_snippets/mock_content_suggestions_provider_observer.h"
-#include "components/prefs/testing_pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -38,9 +37,10 @@ class BookmarkSuggestionsProviderTest : public ::testing::Test {
  public:
   BookmarkSuggestionsProviderTest()
       : model_(bookmarks::TestBookmarkClient::CreateModel()) {
-    EXPECT_CALL(observer_, OnNewSuggestions(_, Category::FromKnownCategory(
-                                                   KnownCategories::BOOKMARKS),
-                                            IsEmpty()))
+    EXPECT_CALL(observer_,
+                OnNewSuggestions(
+                    _, Category::FromKnownCategory(KnownCategories::BOOKMARKS),
+                    IsEmpty()))
         .RetiresOnSaturation();
     EXPECT_CALL(observer_,
                 OnCategoryStatusChanged(
@@ -52,20 +52,17 @@ class BookmarkSuggestionsProviderTest : public ::testing::Test {
                     _, Category::FromKnownCategory(KnownCategories::BOOKMARKS),
                     CategoryStatus::AVAILABLE))
         .RetiresOnSaturation();
-    BookmarkSuggestionsProvider::RegisterProfilePrefs(test_prefs_.registry());
-    provider_ = base::MakeUnique<BookmarkSuggestionsProvider>(
-        &observer_, model_.get(), &test_prefs_);
+    provider_ =
+        base::MakeUnique<BookmarkSuggestionsProvider>(&observer_, model_.get());
   }
 
  protected:
   std::unique_ptr<bookmarks::BookmarkModel> model_;
   StrictMock<MockContentSuggestionsProviderObserver> observer_;
-  TestingPrefServiceSimple test_prefs_;
   std::unique_ptr<BookmarkSuggestionsProvider> provider_;
 };
 
-TEST_F(BookmarkSuggestionsProviderTest,
-       ShouldProvideBookmarkSuggestions) {
+TEST_F(BookmarkSuggestionsProviderTest, ShouldProvideBookmarkSuggestions) {
   GURL url("http://my-new-bookmarked.url");
   // Note, this update to the model does not trigger OnNewSuggestions() on the
   // observer as the provider realizes no new nodes were added.
@@ -125,12 +122,13 @@ TEST_F(BookmarkSuggestionsProviderTest,
   EXPECT_THAT(IsDismissedFromNTPForBookmark(*dismissed_node), Eq(true));
 
   // Clear history and make sure the suggestions actually get removed.
-  EXPECT_CALL(observer_, OnNewSuggestions(_, Category::FromKnownCategory(
-                                                 KnownCategories::BOOKMARKS),
-                                          IsEmpty()));
+  EXPECT_CALL(observer_,
+              OnNewSuggestions(
+                  _, Category::FromKnownCategory(KnownCategories::BOOKMARKS),
+                  IsEmpty()));
   static_cast<ContentSuggestionsProvider*>(provider_.get())
       ->ClearHistory(base::Time(), base::Time::Max(),
-                     base::Bind([] (const GURL& url) { return true; }));
+                     base::Bind([](const GURL& url) { return true; }));
 
   // Verify the dismissed marker is gone.
   EXPECT_THAT(IsDismissedFromNTPForBookmark(*dismissed_node), Eq(false));
@@ -143,4 +141,3 @@ TEST_F(BookmarkSuggestionsProviderTest,
 
 }  // namespace
 }  // namespace ntp_snippets
-

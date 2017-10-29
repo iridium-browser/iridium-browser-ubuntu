@@ -5,13 +5,15 @@ include_rules = [
   "+components/scheduler/child",
   "+components/scheduler/common",
   "+components/tracing",
+  "+components/variations/child_process_field_trial_syncer.h",
   "+components/webcrypto",
 
   "+content/app/strings/grit",  # For generated headers
   "+content/public/child",
+  "+services/device/public/cpp/device_features.h",
   "+services/device/public/cpp/power_monitor",
   "+services/device/public/interfaces",
-  "+services/service_manager",
+  "+services/resource_coordinator",
   "+services/service_manager",
   "+v8/include/v8.h"
 ]

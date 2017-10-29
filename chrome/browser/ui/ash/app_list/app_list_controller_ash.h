@@ -22,7 +22,7 @@ class AppListControllerDelegateAsh : public AppListControllerDelegate {
   // AppListControllerDelegate overrides:
   void DismissView() override;
   gfx::NativeWindow GetAppListWindow() override;
-  gfx::Rect GetAppListBounds() override;
+  gfx::Rect GetAppInfoDialogBounds() override;
   bool IsAppPinned(const std::string& app_id) override;
   bool IsAppOpen(const std::string& app_id) const override;
   void PinApp(const std::string& app_id) override;
@@ -30,9 +30,6 @@ class AppListControllerDelegateAsh : public AppListControllerDelegate {
   Pinnable GetPinnable(const std::string& app_id) override;
   void OnShowChildDialog() override;
   void OnCloseChildDialog() override;
-  bool CanDoCreateShortcutsFlow() override;
-  void DoCreateShortcutsFlow(Profile* profile,
-                             const std::string& extension_id) override;
   void CreateNewWindow(Profile* profile, bool incognito) override;
   void OpenURL(Profile* profile,
                const GURL& url,
@@ -45,9 +42,8 @@ class AppListControllerDelegateAsh : public AppListControllerDelegate {
   void LaunchApp(Profile* profile,
                  const extensions::Extension* extension,
                  AppListSource source,
-                 int event_flags) override;
-  void ShowForProfileByPath(const base::FilePath& profile_path) override;
-  bool ShouldShowUserIcon() override;
+                 int event_flags,
+                 int64_t display_id) override;
 
  private:
   ash::ShelfLaunchSource AppListSourceToLaunchSource(AppListSource source);

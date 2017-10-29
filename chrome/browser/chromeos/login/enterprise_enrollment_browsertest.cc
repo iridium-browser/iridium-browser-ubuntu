@@ -15,7 +15,9 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/fake_auth_policy_client.h"
 #include "chromeos/dbus/upstart_client.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 
 using testing::_;
@@ -108,7 +110,7 @@ class EnterpriseEnrollmentTest : public LoginManagerTest {
     js_checker().ExecuteAsync(set_machine_name);
     js_checker().ExecuteAsync(set_username);
     js_checker().ExecuteAsync(set_password);
-    js_checker().Evaluate(
+    js_checker().ExecuteAsync(
         "document.querySelector('#oauth-enroll-ad-join-ui /deep/ "
         "#button').fire('tap')");
     ExecutePendingJavaScript();
@@ -153,6 +155,35 @@ class EnterpriseEnrollmentTest : public LoginManagerTest {
                 const std::string& realm) { EXPECT_EQ(kAdTestRealm, realm); }));
           }));
     });
+    static_cast<FakeAuthPolicyClient*>(
+        DBusThreadManager::Get()->GetAuthPolicyClient())
+        ->set_operation_delay(base::TimeDelta::FromSeconds(0));
+  }
+
+  void SetupActiveDirectoryJSNotifications() {
+    js_checker().ExecuteAsync(
+        "var testShowStep = login.OAuthEnrollmentScreen.showStep;"
+        "login.OAuthEnrollmentScreen.showStep = function(step) {"
+        "  testShowStep(step);"
+        "  if (step == 'working') {"
+        "    window.domAutomationController.send('ShowSpinnerScreen');"
+        "  }"
+        "}");
+    js_checker().ExecuteAsync(
+        "var testInvalidateAd = login.OAuthEnrollmentScreen.invalidateAd;"
+        "login.OAuthEnrollmentScreen.invalidateAd = function(machineName, "
+        "user, errorState) {"
+        "  testInvalidateAd(machineName, user, errorState);"
+        "  window.domAutomationController.send('ShowJoinDomainError');"
+        "}");
+  }
+
+  void WaitForMessage(content::DOMMessageQueue* message_queue,
+                      const std::string& expected_message) {
+    std::string message;
+    do {
+      ASSERT_TRUE(message_queue->WaitForMessage(&message));
+    } while (message != expected_message);
   }
 
   // Fills out the UI with device attribute information and submits it.
@@ -201,7 +232,8 @@ class EnterpriseEnrollmentTest : public LoginManagerTest {
 
   // Helper method to return the current EnrollmentScreen instance.
   EnrollmentScreen* enrollment_screen() {
-    return EnrollmentScreen::Get(WizardController::default_controller());
+    return EnrollmentScreen::Get(
+        WizardController::default_controller()->screen_manager());
   }
 
  private:
@@ -263,8 +295,9 @@ IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest,
 // attribute prompt screen. Verifies the attribute prompt screen is displayed.
 // Verifies that the data the user enters into the attribute prompt screen is
 // received by the enrollment helper.
+// Crashes on ChromeOS: http://crbug.com/746723.
 IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest,
-                       TestAttributePromptPageGetsLoaded) {
+                       DISABLED_TestAttributePromptPageGetsLoaded) {
   ShowEnrollmentScreen();
   ExpectAttributePromptUpdate();
   SubmitEnrollmentCredentials();
@@ -296,7 +329,10 @@ IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest,
       ->GetUpstartClient()
       ->StartAuthPolicyService();
 
+  content::DOMMessageQueue message_queue;
+  SetupActiveDirectoryJSNotifications();
   SubmitActiveDirectoryCredentials("machine_name", kAdTestUser, "password");
+  WaitForMessage(&message_queue, "\"ShowSpinnerScreen\"");
   EXPECT_FALSE(IsStepDisplayed("ad-join"));
 
   CompleteEnrollment();
@@ -312,8 +348,9 @@ IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest,
 // Directory domain join screen. Verifies the domain join screen is displayed.
 // Submits Active Directory different incorrect credentials. Verifies that the
 // correct error is displayed.
+// Crashes on ChromeOS: http://crbug.com/746723.
 IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest,
-                       TestActiveDirectoryEnrollment_UIErrors) {
+                       DISABLED_TestActiveDirectoryEnrollment_UIErrors) {
   ShowEnrollmentScreen();
   SetupActiveDirectoryJoin();
   SubmitEnrollmentCredentials();
@@ -322,9 +359,11 @@ IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest,
       ->GetUpstartClient()
       ->StartAuthPolicyService();
 
+  content::DOMMessageQueue message_queue;
   // Checking error in case of empty password. Whether password is not empty
   // being checked in the UI. Machine name length is checked after that in the
   // authpolicyd.
+  SetupActiveDirectoryJSNotifications();
   SubmitActiveDirectoryCredentials("too_long_machine_name", kAdTestUser, "");
   EXPECT_TRUE(IsStepDisplayed("ad-join"));
   js_checker().ExpectFalse(std::string(kAdMachineNameInput) + ".isInvalid");
@@ -334,6 +373,7 @@ IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest,
   // Checking error in case of too long machine name.
   SubmitActiveDirectoryCredentials("too_long_machine_name", kAdTestUser,
                                    "password");
+  WaitForMessage(&message_queue, "\"ShowJoinDomainError\"");
   EXPECT_TRUE(IsStepDisplayed("ad-join"));
   js_checker().ExpectTrue(std::string(kAdMachineNameInput) + ".isInvalid");
   js_checker().ExpectFalse(std::string(kAdUsernameInput) + ".isInvalid");
@@ -341,6 +381,7 @@ IN_PROC_BROWSER_TEST_F(EnterpriseEnrollmentTest,
 
   // Checking error in case of bad username (without realm).
   SubmitActiveDirectoryCredentials("machine_name", "test_user", "password");
+  WaitForMessage(&message_queue, "\"ShowJoinDomainError\"");
   EXPECT_TRUE(IsStepDisplayed("ad-join"));
   js_checker().ExpectFalse(std::string(kAdMachineNameInput) + ".isInvalid");
   js_checker().ExpectTrue(std::string(kAdUsernameInput) + ".isInvalid");

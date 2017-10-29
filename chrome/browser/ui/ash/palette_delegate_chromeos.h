@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "ash/common/palette_delegate.h"
+#include "ash/palette_delegate.h"
 #include "base/callback_list.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -20,6 +20,8 @@ class PrefChangeRegistrar;
 class Profile;
 
 namespace chromeos {
+
+class VoiceInteractionSelectionObserver;
 
 // A class which allows the Ash palette to perform chrome actions.
 class PaletteDelegateChromeOS
@@ -41,6 +43,8 @@ class PaletteDelegateChromeOS
   void TakeScreenshot() override;
   void TakePartialScreenshot(const base::Closure& done) override;
   void CancelPartialScreenshot() override;
+  void ShowMetalayer(base::OnceClosure done) override;
+  void HideMetalayer() override;
 
   // user_manager::UserManager::UserSessionStateObserver:
   void ActiveUserChanged(const user_manager::User* active_user) override;
@@ -64,6 +68,9 @@ class PaletteDelegateChromeOS
   std::unique_ptr<user_manager::ScopedUserSessionStateObserver>
       session_state_observer_;
   content::NotificationRegistrar registrar_;
+
+  std::unique_ptr<VoiceInteractionSelectionObserver>
+      highlighter_selection_observer_;
 
   base::WeakPtrFactory<PaletteDelegateChromeOS> weak_factory_;
 

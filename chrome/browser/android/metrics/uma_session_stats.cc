@@ -8,6 +8,7 @@
 #include "base/android/jni_string.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
@@ -24,7 +25,6 @@
 #include "components/variations/metrics_util.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/user_metrics.h"
 #include "jni/UmaSessionStats_jni.h"
 
 using base::android::ConvertJavaStringToUTF8;
@@ -53,7 +53,8 @@ void UmaSessionStats::UmaResumeSession(JNIEnv* env,
     metrics::MetricsService* metrics = g_browser_process->metrics_service();
     if (metrics)
       metrics->OnAppEnterForeground();
-    ukm::UkmService* ukm_service = g_browser_process->ukm_service();
+    ukm::UkmService* ukm_service =
+        g_browser_process->GetMetricsServicesManager()->GetUkmService();
     if (ukm_service)
       ukm_service->OnAppEnterForeground();
   }
@@ -77,7 +78,8 @@ void UmaSessionStats::UmaEndSession(JNIEnv* env,
     metrics::MetricsService* metrics = g_browser_process->metrics_service();
     if (metrics)
       metrics->OnAppEnterBackground();
-    ukm::UkmService* ukm_service = g_browser_process->ukm_service();
+    ukm::UkmService* ukm_service =
+        g_browser_process->GetMetricsServicesManager()->GetUkmService();
     if (ukm_service)
       ukm_service->OnAppEnterBackground();
   }
@@ -113,7 +115,7 @@ static void ChangeMetricsReportingConsent(JNIEnv*,
   // created, or deleted, depending on consent. Starting up metrics services
   // will ensure that the consent file contains the ClientID. The ID is passed
   // to the renderer for crash reporting when things go wrong.
-  content::BrowserThread::GetBlockingPool()->PostTask(
+  GoogleUpdateSettings::CollectStatsConsentTaskRunner()->PostTask(
       FROM_HERE, base::Bind(base::IgnoreResult(
                                 GoogleUpdateSettings::SetCollectStatsConsent),
                             consent));
@@ -149,6 +151,8 @@ static void LogRendererCrash(JNIEnv*, const JavaParamRef<jclass>&) {
   DCHECK(pref);
   int value = pref->GetInteger(metrics::prefs::kStabilityRendererCrashCount);
   pref->SetInteger(metrics::prefs::kStabilityRendererCrashCount, value + 1);
+  // Migrate proto to histogram to repurpose proto count.
+  UMA_HISTOGRAM_BOOLEAN("Stability.Android.RendererCrash", true);
 }
 
 static void RegisterExternalExperiment(
@@ -223,15 +227,14 @@ static void RecordPageLoaded(JNIEnv*,
                              const JavaParamRef<jclass>&,
                              jboolean is_desktop_user_agent) {
   // Should be called whenever a page has been loaded.
-  content::RecordAction(UserMetricsAction("MobilePageLoaded"));
+  base::RecordAction(UserMetricsAction("MobilePageLoaded"));
   if (is_desktop_user_agent) {
-    content::RecordAction(
-        UserMetricsAction("MobilePageLoadedDesktopUserAgent"));
+    base::RecordAction(UserMetricsAction("MobilePageLoadedDesktopUserAgent"));
   }
 }
 
 static void RecordPageLoadedWithKeyboard(JNIEnv*, const JavaParamRef<jclass>&) {
-  content::RecordAction(UserMetricsAction("MobilePageLoadedWithKeyboard"));
+  base::RecordAction(UserMetricsAction("MobilePageLoadedWithKeyboard"));
 }
 
 static jlong Init(JNIEnv* env, const JavaParamRef<jclass>& obj) {
@@ -239,9 +242,4 @@ static jlong Init(JNIEnv* env, const JavaParamRef<jclass>& obj) {
   DCHECK(!g_uma_session_stats);
   g_uma_session_stats = new UmaSessionStats();
   return reinterpret_cast<intptr_t>(g_uma_session_stats);
-}
-
-// Register native methods
-bool RegisterUmaSessionStats(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }

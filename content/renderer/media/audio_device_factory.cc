@@ -11,7 +11,7 @@
 #include "build/build_config.h"
 #include "content/common/content_constants_internal.h"
 #include "content/renderer/media/audio_input_message_filter.h"
-#include "content/renderer/media/audio_message_filter.h"
+#include "content/renderer/media/audio_ipc_factory.h"
 #include "content/renderer/media/audio_renderer_mixer_manager.h"
 #include "content/renderer/render_thread_impl.h"
 #include "media/audio/audio_input_device.h"
@@ -26,12 +26,13 @@ namespace content {
 AudioDeviceFactory* AudioDeviceFactory::factory_ = NULL;
 
 namespace {
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MACOSX) || \
+    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
 // Due to driver deadlock issues on Windows (http://crbug/422522) there is a
 // chance device authorization response is never received from the browser side.
 // In this case we will time out, to avoid renderer hang forever waiting for
 // device authorization (http://crbug/615589). This will result in "no audio".
-// There are also cases when authorization takes too long on Mac.
+// There are also cases when authorization takes too long on Mac and Linux.
 const int64_t kMaxAuthorizationTimeoutMs = 10000;
 #else
 const int64_t kMaxAuthorizationTimeoutMs = 0;  // No timeout.
@@ -42,14 +43,14 @@ scoped_refptr<media::AudioOutputDevice> NewOutputDevice(
     int session_id,
     const std::string& device_id,
     const url::Origin& security_origin) {
-  AudioMessageFilter* const filter = AudioMessageFilter::Get();
-  scoped_refptr<media::AudioOutputDevice> device(new media::AudioOutputDevice(
-      filter->CreateAudioOutputIPC(render_frame_id), filter->io_task_runner(),
-      session_id, device_id, security_origin,
-      // Set authorization request timeout at 80% of renderer hung timeout, but
-      // no more than kMaxAuthorizationTimeout.
-      base::TimeDelta::FromMilliseconds(std::min(kHungRendererDelayMs * 8 / 10,
-                                                 kMaxAuthorizationTimeoutMs))));
+  auto device = base::MakeRefCounted<media::AudioOutputDevice>(
+      AudioIPCFactory::get()->CreateAudioOutputIPC(render_frame_id),
+      AudioIPCFactory::get()->io_task_runner(), session_id, device_id,
+      security_origin,
+      // Set authorization request timeout at 80% of renderer hung timeout,
+      // but no more than kMaxAuthorizationTimeout.
+      base::TimeDelta::FromMilliseconds(
+          std::min(kHungRendererDelayMs * 8 / 10, kMaxAuthorizationTimeoutMs)));
   device->RequestDeviceAuthorization();
   return device;
 }

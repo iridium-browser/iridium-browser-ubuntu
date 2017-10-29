@@ -82,19 +82,28 @@ class BrowserList {
   // Notifies the observers when the current active browser becomes not active.
   static void NotifyBrowserNoLongerActive(Browser* browser);
 
+  // Notifies the observers when browser close was started. This may be called
+  // more than once for a particular browser.
+  static void NotifyBrowserCloseStarted(Browser* browser);
+
   // Closes all browsers for |profile| across all desktops.
   // TODO(mlerman): Move the Profile Deletion flow to use the overloaded
   // version of this method with a callback, then remove this method.
   static void CloseAllBrowsersWithProfile(Profile* profile);
 
   // Closes all browsers for |profile| across all desktops. Uses
-  // TryToCloseBrowserList() to do the actual closing and trigger any
-  // OnBeforeUnload events. If all OnBeforeUnload events are confirmed,
-  // |on_close_success| is called, otherwise |on_close_aborted| is called.
-  static void CloseAllBrowsersWithProfile(
-      Profile* profile,
-      const CloseCallback& on_close_success,
-      const CloseCallback& on_close_aborted);
+  // TryToCloseBrowserList() to do the actual closing. Triggers any
+  // OnBeforeUnload events unless |skip_beforeunload| is true. If all
+  // OnBeforeUnload events are confirmed or |skip_beforeunload| is true,
+  // |on_close_success| is called, otherwise |on_close_aborted| is called. Both
+  // callbacks may be null.
+  // Note that if there is any browser window that has been used before, the
+  // user should always have a chance to save their work before closing windows
+  // without triggering beforeunload events.
+  static void CloseAllBrowsersWithProfile(Profile* profile,
+                                          const CloseCallback& on_close_success,
+                                          const CloseCallback& on_close_aborted,
+                                          bool skip_beforeunload);
 
   // Returns true if at least one incognito session is active across all
   // desktops.
@@ -116,26 +125,27 @@ class BrowserList {
   // |on_close_success| will be called, with a parameter of |profile_path|,
   // and the Browsers will then be closed. If at least one unfired
   // OnBeforeUnload event is found, handle it with a callback to
-  // PostBeforeUnloadHandlers, which upon success will recursively call this
+  // PostTryToCloseBrowserWindow, which upon success will recursively call this
   // method to handle any other OnBeforeUnload events. If aborted in the
-  // OnBeforeUnload event, PostBeforeUnloadHandlers will call |on_close_aborted|
-  // instead and reset all OnBeforeUnload event handlers.
-  static void TryToCloseBrowserList(
-      const BrowserVector& browsers_to_close,
-      const CloseCallback& on_close_success,
-      const CloseCallback& on_close_aborted,
-      const base::FilePath& profile_path);
+  // OnBeforeUnload event, PostTryToCloseBrowserWindow will call
+  // |on_close_aborted| instead and reset all OnBeforeUnload event handlers.
+  static void TryToCloseBrowserList(const BrowserVector& browsers_to_close,
+                                    const CloseCallback& on_close_success,
+                                    const CloseCallback& on_close_aborted,
+                                    const base::FilePath& profile_path,
+                                    const bool skip_beforeunload);
 
   // Called after handling an OnBeforeUnload event. If |tab_close_confirmed| is
   // true, calls |TryToCloseBrowserList()|, passing the parameters
   // |browsers_to_close|, |on_close_success|, |on_close_aborted|, and
   // |profile_path|. Otherwise, resets all the OnBeforeUnload event handlers and
   // calls |on_close_aborted|.
-  static void PostBeforeUnloadHandlers(
+  static void PostTryToCloseBrowserWindow(
       const BrowserVector& browsers_to_close,
       const CloseCallback& on_close_success,
       const CloseCallback& on_close_aborted,
       const base::FilePath& profile_path,
+      const bool skip_beforeunload,
       bool tab_close_confirmed);
 
   // A vector of the browsers in this list, in the order they were added.

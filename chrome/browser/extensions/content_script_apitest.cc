@@ -8,19 +8,22 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/extension_management_test_util.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_with_management_policy_apitest.h"
 #include "chrome/browser/extensions/test_extension_dir.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/javascript_dialogs/javascript_dialog_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/app_modal/javascript_dialog_extensions_client.h"
-#include "components/app_modal/javascript_dialog_manager.h"
 #include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
@@ -28,6 +31,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 #include "net/dns/mock_host_resolver.h"
@@ -86,107 +90,6 @@ testing::AssertionResult CheckStyleInjection(Browser* browser,
   return testing::AssertionSuccess();
 }
 
-class DialogClient;
-
-// A helper class to hijack the dialog manager's ExtensionsClient, so that we
-// know when dialogs are being opened.
-// NOTE: The default implementation of the JavaScriptDialogExtensionsClient
-// doesn't do anything, so it's safe to override it. If, at some stage, this
-// has behavior (like if we move this into app shell), we'll need to update
-// this (by, e.g., making DialogClient a wrapper around the implementation).
-class DialogHelper {
- public:
-  explicit DialogHelper(content::WebContents* web_contents);
-  ~DialogHelper();
-
-  // Notifies the DialogHelper that a dialog was opened. Runs |quit_closure_|,
-  // if it is non-null.
-  void DialogOpened();
-
-  // Closes any active dialogs.
-  void CloseDialogs();
-
-  void set_quit_closure(const base::Closure& quit_closure) {
-    quit_closure_ = quit_closure;
-  }
-  size_t dialog_count() const { return dialog_count_; }
-
- private:
-  // The number of dialogs to appear.
-  size_t dialog_count_;
-
-  // The WebContents this helper is associated with.
-  content::WebContents* web_contents_;
-
-  // The dialog manager for |web_contents_|.
-  content::JavaScriptDialogManager* dialog_manager_;
-
-  // The dialog client override.
-  DialogClient* client_;
-
-  // The quit closure to run when a dialog appears.
-  base::Closure quit_closure_;
-
-  DISALLOW_COPY_AND_ASSIGN(DialogHelper);
-};
-
-// The client override for the DialogHelper.
-class DialogClient : public app_modal::JavaScriptDialogExtensionsClient {
- public:
-  explicit DialogClient(DialogHelper* helper) : helper_(helper) {}
-  ~DialogClient() override {}
-
-  void set_helper(DialogHelper* helper) { helper_ = helper; }
-
- private:
-  // app_modal::JavaScriptDialogExtensionsClient:
-  void OnDialogOpened(content::WebContents* web_contents) override {
-    if (helper_)
-      helper_->DialogOpened();
-  }
-  void OnDialogClosed(content::WebContents* web_contents) override {}
-  bool GetExtensionName(content::WebContents* web_contents,
-                        const GURL& origin_url,
-                        std::string* name_out) override {
-    return false;
-  }
-
-  // The dialog helper to notify of any open dialogs.
-  DialogHelper* helper_;
-
-  DISALLOW_COPY_AND_ASSIGN(DialogClient);
-};
-
-DialogHelper::DialogHelper(content::WebContents* web_contents)
-    : dialog_count_(0),
-      web_contents_(web_contents),
-      dialog_manager_(nullptr),
-      client_(nullptr) {
-  app_modal::JavaScriptDialogManager* dialog_manager_impl =
-      app_modal::JavaScriptDialogManager::GetInstance();
-  client_ = new DialogClient(this);
-  dialog_manager_impl->SetExtensionsClient(base::WrapUnique(client_));
-
-  dialog_manager_ =
-      web_contents_->GetDelegate()->GetJavaScriptDialogManager(web_contents_);
-}
-
-DialogHelper::~DialogHelper() {
-  client_->set_helper(nullptr);
-}
-
-void DialogHelper::CloseDialogs() {
-  dialog_manager_->CancelDialogs(web_contents_, false);
-}
-
-void DialogHelper::DialogOpened() {
-  ++dialog_count_;
-  if (!quit_closure_.is_null()) {
-    quit_closure_.Run();
-    quit_closure_ = base::Closure();
-  }
-}
-
 // Runs all pending tasks in the renderer associated with |web_contents|, and
 // then all pending tasks in the browser process.
 // Returns true on success.
@@ -232,18 +135,47 @@ const char kNewTabHtml[] = "<html>NewTabOverride!</html>";
 
 }  // namespace
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptAllFrames) {
+enum class TestConfig {
+  kDefault,
+  kYieldBetweenContentScriptRunsEnabled,
+};
+
+class ContentScriptApiTest : public ExtensionApiTest,
+                             public testing::WithParamInterface<TestConfig> {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ExtensionApiTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(
+        switches::kYieldBetweenContentScriptRuns,
+        (GetParam() == TestConfig::kYieldBetweenContentScriptRunsEnabled)
+            ? "1"
+            : "0");
+  }
+
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
+  }
+};
+
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptAllFrames) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("content_scripts/all_frames")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptAboutBlankIframes) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptAboutBlankIframes) {
+  const char* testArg =
+      GetParam() == TestConfig::kYieldBetweenContentScriptRunsEnabled
+          ? "YieldBetweenContentScriptRunsEnabled"
+          : "YieldBetweenContentScriptRunsDisabled";
+
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(
-      RunExtensionTest("content_scripts/about_blank_iframes")) << message_;
+      RunExtensionTestWithArg("content_scripts/about_blank_iframes", testArg))
+      << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptAboutBlankAndSrcdoc) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptAboutBlankAndSrcdoc) {
   // The optional "*://*/*" permission is requested after verifying that
   // content script insertion solely depends on content_scripts[*].matches.
   // The permission is needed for chrome.tabs.executeScript tests.
@@ -255,18 +187,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptAboutBlankAndSrcdoc) {
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptExtensionIframe) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptExtensionIframe) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("content_scripts/extension_iframe")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptExtensionProcess) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptExtensionProcess) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(
       RunExtensionTest("content_scripts/extension_process")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptFragmentNavigation) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptFragmentNavigation) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   const char extension_name[] = "content_scripts/fragment";
   ASSERT_TRUE(RunExtensionTest(extension_name)) << message_;
@@ -278,7 +210,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptFragmentNavigation) {
 #else
 #define MAYBE_ContentScriptIsolatedWorlds ContentScriptIsolatedWorlds
 #endif
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_ContentScriptIsolatedWorlds) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest,
+                       MAYBE_ContentScriptIsolatedWorlds) {
   // This extension runs various bits of script and tests that they all run in
   // the same isolated world.
   ASSERT_TRUE(StartEmbeddedTestServer());
@@ -289,24 +222,22 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_ContentScriptIsolatedWorlds) {
   ASSERT_TRUE(RunExtensionTest("content_scripts/isolated_world2")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptIgnoreHostPermissions) {
-  host_resolver()->AddRule("a.com", "127.0.0.1");
-  host_resolver()->AddRule("b.com", "127.0.0.1");
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest,
+                       ContentScriptIgnoreHostPermissions) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest(
       "content_scripts/dont_match_host_permissions")) << message_;
 }
 
 // crbug.com/39249 -- content scripts js should not run on view source.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptViewSource) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptViewSource) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("content_scripts/view_source")) << message_;
 }
 
 // crbug.com/126257 -- content scripts should not get injected into other
 // extensions.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptOtherExtensions) {
-  host_resolver()->AddRule("a.com", "127.0.0.1");
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptOtherExtensions) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   // First, load extension that sets up content script.
   ASSERT_TRUE(RunExtensionTest("content_scripts/other_extensions/injector"))
@@ -329,14 +260,18 @@ class ContentScriptCssInjectionTest : public ExtensionApiTest {
     // can't use the real Webstore's URL. If this changes, we could clean this
     // up.
     command_line->AppendSwitchASCII(
-        switches::kAppsGalleryURL,
+        ::switches::kAppsGalleryURL,
         base::StringPrintf("http://%s", kWebstoreDomain));
+  }
+
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
   }
 };
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest,
                        ContentScriptDuplicateScriptInjection) {
-  host_resolver()->AddRule("maps.google.com", "127.0.0.1");
   ASSERT_TRUE(StartEmbeddedTestServer());
 
   GURL url(
@@ -374,7 +309,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
 IN_PROC_BROWSER_TEST_F(ContentScriptCssInjectionTest,
                        ContentScriptInjectsStyles) {
   ASSERT_TRUE(StartEmbeddedTestServer());
-  host_resolver()->AddRule(kWebstoreDomain, "127.0.0.1");
 
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("content_scripts")
                                           .AppendASCII("css_injection")));
@@ -427,13 +361,12 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_TRUE(styles_injected);
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
-                       ContentScriptCSSLocalization) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptCSSLocalization) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("content_scripts/css_l10n")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptExtensionAPIs) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptExtensionAPIs) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
   const extensions::Extension* extension = LoadExtension(
@@ -468,22 +401,45 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptExtensionAPIs) {
 #else
 #define MAYBE_ContentScriptPermissionsApi ContentScriptPermissionsApi
 #endif
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_ContentScriptPermissionsApi) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest,
+                       MAYBE_ContentScriptPermissionsApi) {
   extensions::PermissionsRequestFunction::SetIgnoreUserGestureForTests(true);
   extensions::PermissionsRequestFunction::SetAutoConfirmForTests(true);
-  host_resolver()->AddRule("*.com", "127.0.0.1");
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("content_scripts/permissions")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptBypassPageCSP) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTestWithManagementPolicy,
+                       ContentScriptPolicy) {
+  // Set enterprise policy to block injection to policy specified host.
+  {
+    ExtensionManagementPolicyUpdater pref(&policy_provider_);
+    pref.AddRuntimeBlockedHost("*", "*://example.com");
+  }
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  ASSERT_TRUE(RunExtensionTest("content_scripts/policy")) << message_;
+}
+
+// Verifies wildcard can be used for effecitve TLD.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTestWithManagementPolicy,
+                       ContentScriptPolicyWildcard) {
+  // Set enterprise policy to block injection to policy specified hosts.
+  {
+    ExtensionManagementPolicyUpdater pref(&policy_provider_);
+    pref.AddRuntimeBlockedHost("*", "*://example.*");
+  }
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  ASSERT_TRUE(RunExtensionTest("content_scripts/policy")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptBypassPageCSP) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("content_scripts/bypass_page_csp")) << message_;
 }
 
 // Test that when injecting a blocking content script, other scripts don't run
 // until the blocking script finishes.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptBlockingScript) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, ContentScriptBlockingScript) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
   // Load up two extensions.
@@ -502,9 +458,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptBlockingScript) {
 
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  DialogHelper dialog_helper(web_contents);
-  base::RunLoop run_loop;
-  dialog_helper.set_quit_closure(run_loop.QuitClosure());
+  JavaScriptDialogTabHelper* js_helper =
+      JavaScriptDialogTabHelper::FromWebContents(web_contents);
+  base::RunLoop dialog_wait;
+  js_helper->SetDialogShownCallbackForTesting(dialog_wait.QuitClosure());
 
   ExtensionTestMessageListener listener("done", false);
   listener.set_extension_id(ext2->id());
@@ -514,12 +471,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptBlockingScript) {
       browser(), embedded_test_server()->GetURL("/empty.html"),
       WindowOpenDisposition::CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
 
-  run_loop.Run();
+  dialog_wait.Run();
   // Right now, the alert dialog is showing and blocking injection of anything
   // after it, so the listener shouldn't be satisfied.
   EXPECT_FALSE(listener.was_satisfied());
-  EXPECT_EQ(1u, dialog_helper.dialog_count());
-  dialog_helper.CloseDialogs();
+  js_helper->HandleJavaScriptDialog(web_contents, true, nullptr);
 
   // After closing the dialog, the rest of the scripts should be able to
   // inject.
@@ -528,7 +484,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptBlockingScript) {
 
 // Test that closing a tab with a blocking script results in no further scripts
 // running (and we don't crash).
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptBlockingScriptTabClosed) {
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest,
+                       ContentScriptBlockingScriptTabClosed) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
   // We're going to close a tab in this test, so make a new one (to ensure
@@ -554,21 +511,22 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptBlockingScriptTabClosed) {
 
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  DialogHelper dialog_helper(web_contents);
-  base::RunLoop run_loop;
-  dialog_helper.set_quit_closure(run_loop.QuitClosure());
+  JavaScriptDialogTabHelper* js_helper =
+      JavaScriptDialogTabHelper::FromWebContents(web_contents);
+  base::RunLoop dialog_wait;
+  js_helper->SetDialogShownCallbackForTesting(dialog_wait.QuitClosure());
 
   ExtensionTestMessageListener listener("done", false);
   listener.set_extension_id(ext2->id());
 
-  // Navitate!
+  // Navigate!
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), embedded_test_server()->GetURL("/empty.html"),
       WindowOpenDisposition::CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
 
   // Now, instead of closing the dialog, just close the tab. Later scripts
   // should never get a chance to run (and we shouldn't crash).
-  run_loop.Run();
+  dialog_wait.Run();
   EXPECT_FALSE(listener.was_satisfied());
   EXPECT_TRUE(browser()->tab_strip_model()->CloseWebContentsAt(
       browser()->tab_strip_model()->active_index(), 0));
@@ -578,7 +536,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ContentScriptBlockingScriptTabClosed) {
 // There was a bug by which content scripts that blocked and ran on
 // document_idle could be injected twice (crbug.com/431263). Test for
 // regression.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest,
                        ContentScriptBlockingScriptsDontRunTwice) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
@@ -592,26 +550,26 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
 
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  DialogHelper dialog_helper(web_contents);
-  base::RunLoop run_loop;
-  dialog_helper.set_quit_closure(run_loop.QuitClosure());
+  JavaScriptDialogTabHelper* js_helper =
+      JavaScriptDialogTabHelper::FromWebContents(web_contents);
+  base::RunLoop dialog_wait;
+  js_helper->SetDialogShownCallbackForTesting(dialog_wait.QuitClosure());
 
   // Navigate!
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), embedded_test_server()->GetURL("/empty.html"),
       WindowOpenDisposition::CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
 
-  run_loop.Run();
+  dialog_wait.Run();
 
   // The extension will have injected at idle, but it should only inject once.
-  EXPECT_EQ(1u, dialog_helper.dialog_count());
-  dialog_helper.CloseDialogs();
+  js_helper->HandleJavaScriptDialog(web_contents, true, nullptr);
   EXPECT_TRUE(RunAllPending(web_contents));
-  EXPECT_EQ(1u, dialog_helper.dialog_count());
+  EXPECT_FALSE(js_helper->IsShowingDialogForTesting());
 }
 
 // Bug fix for crbug.com/507461.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest,
                        DocumentStartInjectionFromExtensionTabNavigation) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
@@ -648,9 +606,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
   EXPECT_TRUE(listener.was_satisfied());
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest,
                        DontInjectContentScriptsInBackgroundPages) {
-  host_resolver()->AddRule("a.com", "127.0.0.1");
   ASSERT_TRUE(StartEmbeddedTestServer());
   // Load two extensions, one with an iframe to a.com in its background page,
   // the other, a content script for a.com. The latter should never be able to
@@ -665,5 +622,51 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
   iframe_loaded_listener.WaitUntilSatisfied();
   EXPECT_FALSE(content_script_listener.was_satisfied());
 }
+
+IN_PROC_BROWSER_TEST_P(ContentScriptApiTest, CannotScriptTheNewTabPage) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  ExtensionTestMessageListener test_listener("ready", true);
+  LoadExtension(test_data_dir_.AppendASCII("content_scripts/ntp"));
+  ASSERT_TRUE(test_listener.WaitUntilSatisfied());
+
+  auto did_script_inject = [](content::WebContents* web_contents) {
+    bool did_inject = false;
+    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+        web_contents,
+        "domAutomationController.send(document.title === 'injected');",
+        &did_inject));
+    return did_inject;
+  };
+
+  // First, test the executeScript() method.
+  ResultCatcher catcher;
+  test_listener.Reply(std::string());
+  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+  EXPECT_EQ(GURL("chrome://newtab"), browser()
+                                         ->tab_strip_model()
+                                         ->GetActiveWebContents()
+                                         ->GetLastCommittedURL());
+  EXPECT_FALSE(
+      did_script_inject(browser()->tab_strip_model()->GetActiveWebContents()));
+
+  // Next, check content script injection.
+  ui_test_utils::NavigateToURL(browser(), search::GetNewTabPageURL(profile()));
+  EXPECT_FALSE(
+      did_script_inject(browser()->tab_strip_model()->GetActiveWebContents()));
+
+  // The extension should inject on "normal" urls.
+  GURL unprotected_url = embedded_test_server()->GetURL(
+      "example.com", "/extensions/test_file.html");
+  ui_test_utils::NavigateToURL(browser(), unprotected_url);
+  EXPECT_TRUE(
+      did_script_inject(browser()->tab_strip_model()->GetActiveWebContents()));
+}
+
+INSTANTIATE_TEST_CASE_P(
+    ContentScriptApiTests,
+    ContentScriptApiTest,
+    testing::Values(TestConfig::kDefault,
+                    TestConfig::kYieldBetweenContentScriptRunsEnabled));
 
 }  // namespace extensions

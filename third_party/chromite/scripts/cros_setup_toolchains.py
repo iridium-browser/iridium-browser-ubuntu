@@ -51,17 +51,34 @@ DEFAULT_TARGET_VERSION_MAP = {
 TARGET_VERSION_MAP = {
     'host' : {
         'gdb' : PACKAGE_NONE,
-        'ex_go' : PACKAGE_NONE,
     },
 }
 
 # Enable the Go compiler for these targets.
 TARGET_GO_ENABLED = (
     'x86_64-cros-linux-gnu',
-    'i686-pc-linux-gnu',
     'armv7a-cros-linux-gnueabi',
 )
 CROSSDEV_GO_ARGS = ['--ex-pkg', 'dev-lang/go']
+
+# Enable llvm's compiler-rt for these targets.
+TARGET_COMPILER_RT_ENABLED = (
+    'armv7a-cros-linux-gnueabi',
+    'aarch64-cros-linux-gnu',
+)
+CROSSDEV_COMPILER_RT_ARGS = ['--ex-pkg', 'sys-libs/compiler-rt']
+
+TARGET_LLVM_PKGS_ENABLED = (
+    'armv7a-cros-linux-gnueabi',
+    'aarch64-cros-linux-gnu',
+    'x86_64-cros-linux-gnu',
+)
+
+LLVM_PKGS_TABLE = {
+    'ex_llvm-libunwind' : ['--ex-pkg', 'sys-libs/llvm-libunwind'],
+    'ex_libcxxabi' : ['--ex-pkg', 'sys-libs/libcxxabi'],
+    'ex_libcxx' : ['--ex-pkg', 'sys-libs/libcxx'],
+}
 
 # Overrides for {gcc,binutils}-config, pick a package with particular suffix.
 CONFIG_TARGET_SUFFIXES = {
@@ -120,8 +137,13 @@ class Crossdev(object):
         target_tuple = toolchain.GetHostTuple()
       # Build the crossdev command.
       cmd = ['crossdev', '--show-target-cfg', '--ex-gdb']
+      if target in TARGET_COMPILER_RT_ENABLED:
+        cmd.extend(CROSSDEV_COMPILER_RT_ARGS)
       if target in TARGET_GO_ENABLED:
         cmd.extend(CROSSDEV_GO_ARGS)
+      if target in TARGET_LLVM_PKGS_ENABLED:
+        for pkg in LLVM_PKGS_TABLE:
+          cmd.extend(LLVM_PKGS_TABLE[pkg])
       cmd.extend(['-t', target_tuple])
       # Catch output of crossdev.
       out = cros_build_lib.RunCommand(cmd, print_cmd=False,
@@ -175,9 +197,13 @@ class Crossdev(object):
         if pkg == 'gdb':
           # Gdb does not have selectable versions.
           cmd.append('--ex-gdb')
+        elif pkg == 'ex_compiler-rt':
+          cmd.extend(CROSSDEV_COMPILER_RT_ARGS)
         elif pkg == 'ex_go':
           # Go does not have selectable versions.
           cmd.extend(CROSSDEV_GO_ARGS)
+        elif pkg in LLVM_PKGS_TABLE:
+          cmd.extend(LLVM_PKGS_TABLE[pkg])
         elif pkg in cls.MANUAL_PKGS:
           pass
         else:
@@ -1000,8 +1026,15 @@ def _ProcessBinutilsConfig(target, output_dir):
     logging.warning('%s: binutils lacks support for the gold linker', target)
   else:
     assert len(srcpath) == 1, '%s: did not match exactly 1 path' % globpath
-    gold_supported = True
     srcpath = srcpath[0]
+
+    # Package the binutils-bin directory without the '-gold' suffix
+    # if gold is not enabled as the default linker for this target.
+    gold_supported = CONFIG_TARGET_SUFFIXES['binutils'].get(target) == '-gold'
+    if not gold_supported:
+      srcpath = srcpath[:-len('-gold')]
+      ld_path = os.path.join(srcpath, 'ld')
+      assert os.path.exists(ld_path), '%s: linker is missing!' % ld_path
 
   srcpath = srcpath[len(output_dir):]
   gccpath = os.path.join('/usr', 'libexec', 'gcc')
@@ -1017,6 +1050,12 @@ def _ProcessBinutilsConfig(target, output_dir):
   envd = os.path.join(output_dir, 'etc', 'env.d', 'binutils', '*')
   if gold_supported:
     envd += '-gold'
+  else:
+    # If gold is not enabled as the default linker and 2 env.d
+    # files exist, pick the one without the '-gold' suffix.
+    envds = sorted(glob.glob(envd))
+    if len(envds) == 2 and envds[1] == envds[0] + '-gold':
+      envd = envds[0]
   srcpath = _EnvdGetVar(envd, 'LIBPATH')
   os.symlink(os.path.relpath(srcpath, os.path.dirname(libpath)),
              output_dir + libpath)
@@ -1045,7 +1084,8 @@ def _ProcessSysrootWrappers(_target, output_dir, srcpath):
     contents = osutils.ReadFile(sysroot_wrapper).splitlines()
     for num in xrange(len(contents)):
       if '@CCACHE_DEFAULT@' in contents[num]:
-        contents[num] = 'use_ccache = False'
+        assert 'True' in contents[num]
+        contents[num] = contents[num].replace('True', 'False')
         break
     # Can't update the wrapper in place since it's a hardlink to a file in /.
     os.unlink(sysroot_wrapper)

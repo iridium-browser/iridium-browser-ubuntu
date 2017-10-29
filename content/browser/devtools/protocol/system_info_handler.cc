@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "gpu/config/gpu_feature_type.h"
@@ -109,7 +110,7 @@ void SendGetInfoResponse(std::unique_ptr<GetInfoCallback> callback) {
   gpu_info.EnumerateFields(&enumerator);
 
   std::unique_ptr<base::DictionaryValue> base_feature_status =
-      base::WrapUnique(GetFeatureStatus());
+      GetFeatureStatus();
   std::unique_ptr<protocol::DictionaryValue> feature_status =
       protocol::DictionaryValue::cast(
           protocol::toProtocolValue(base_feature_status.get(), 1000));
@@ -126,8 +127,16 @@ void SendGetInfoResponse(std::unique_ptr<GetInfoCallback> callback) {
       .SetDriverBugWorkarounds(std::move(driver_bug_workarounds))
       .Build();
 
+  base::CommandLine* command = base::CommandLine::ForCurrentProcess();
+#if defined(OS_WIN)
+  std::string command_string =
+      base::WideToUTF8(command->GetCommandLineString());
+#else
+  std::string command_string = command->GetCommandLineString();
+#endif
+
   callback->sendSuccess(std::move(gpu), gpu_info.machine_model_name,
-      gpu_info.machine_model_version);
+                        gpu_info.machine_model_version, command_string);
 }
 
 }  // namespace

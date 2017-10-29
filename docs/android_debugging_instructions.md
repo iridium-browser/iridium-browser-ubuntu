@@ -92,6 +92,7 @@ private int mSuperNiftyDrawingProperty;
 
 ## Debugging Java
 
+### Eclipse
 *   In Eclipse, make a debug configuration of type "Remote Java Application".
     Choose a "Name" and set "Port" to `8700`.
 
@@ -108,6 +109,12 @@ private int mSuperNiftyDrawingProperty;
     should now mention 8700 or xxxx/8700).
 
 *   Run your debug configuration, and switch to the Debug perspective.
+
+### Android Studio
+*   Build and install the desired target
+
+*   Click the "Attach debugger to Android process" (see
+[here](https://developer.android.com/studio/debug/index.html) for more)
 
 ## Waiting for Java Debugger on Early Startup
 
@@ -196,19 +203,23 @@ that crashed was built. When building locally, these are found in:
 
 ```shell
 out/Default/apks/ChromePublic.apk.mapping
-out/Default/apks/Chrome.apk.mapping
+out/Default/apks/ChromeModernPublic.apk.mapping
+etc.
 ```
 
-To deobfuscate a stack trace from a file, run
+Build the `java_deobfuscate` tool:
 
 ```shell
-build/android/stacktrace/java_deobfuscate.py PROGUARD_MAPPING_FILE.mapping --stacktrace STACKTRACE_FILE
+ninja -C out/Default java_deobfuscate
 ```
 
-Deobfuscation also works from `stdin`:
+Then run it via:
 
 ```shell
-adb logcat -d | build/android/stacktrace/java_deobfuscate.py PROGUARD_MAPPING_FILE.mapping
+# For a file:
+out/Default/bin/java_deobfuscate PROGUARD_MAPPING_FILE.mapping < FILE
+# For logcat:
+adb logcat | out/Default/bin/java_deobfuscate PROGUARD_MAPPING_FILE.mapping
 ```
 
 ## Get WebKit code to output to the adb log
@@ -230,7 +241,7 @@ output a message.
 To run unit tests use the following command:
 
 ```shell
-out/Debug/bin/run_test_name -f <test_filter_if_any> --test-arguments=--wait-for-debugger -t 6000
+out/Debug/bin/run_test_name -f <test_filter_if_any> --wait-for-debugger -t 6000
 ```
 
 That command will cause the test process to wait until a debugger is attached.

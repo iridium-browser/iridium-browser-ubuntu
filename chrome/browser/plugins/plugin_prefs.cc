@@ -49,7 +49,10 @@ using content::PluginService;
 namespace {
 
 bool IsPDFViewerPlugin(const base::string16& plugin_name) {
-  return plugin_name == base::ASCIIToUTF16(ChromeContentClient::kPDFPluginName);
+  return (plugin_name ==
+          base::ASCIIToUTF16(ChromeContentClient::kPDFExtensionPluginName)) ||
+         (plugin_name ==
+          base::ASCIIToUTF16(ChromeContentClient::kPDFInternalPluginName));
 }
 
 bool IsAdobeFlashPlayerPlugin(const base::string16& plugin_name) {
@@ -129,16 +132,16 @@ void PluginPrefs::SetPrefs(PrefService* prefs) {
     ListPrefUpdate update(prefs_, prefs::kPluginsPluginsList);
     base::ListValue* saved_plugins_list = update.Get();
     if (saved_plugins_list && !saved_plugins_list->empty()) {
-      for (const auto& plugin_value : *saved_plugins_list) {
+      for (auto& plugin_value : *saved_plugins_list) {
         base::DictionaryValue* plugin;
-        if (!plugin_value->GetAsDictionary(&plugin)) {
+        if (!plugin_value.GetAsDictionary(&plugin)) {
           LOG(WARNING) << "Invalid entry in " << prefs::kPluginsPluginsList;
           continue;  // Oops, don't know what to do with this item.
         }
 
-        bool enabled;
-        if (!plugin->GetBoolean("enabled", &enabled))
-          enabled = true;
+        bool enabled = true;
+        if (plugin->GetBoolean("enabled", &enabled))
+          plugin->Remove("enabled", nullptr);
 
         // Migrate disabled plugins and re-enable them all internally.
         // TODO(http://crbug.com/662006): Remove migration eventually.

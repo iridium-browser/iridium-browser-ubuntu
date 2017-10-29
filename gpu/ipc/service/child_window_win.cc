@@ -8,6 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
 #include "base/win/scoped_hdc.h"
 #include "base/win/wrapped_window_proc.h"
@@ -205,6 +206,11 @@ ChildWindowWin::~ChildWindowWin() {
         base::Bind(&DestroyWindowsOnThread, window_, initial_parent_window_),
         base::Bind(&DestroySharedData, base::Passed(std::move(shared_data_))));
   }
+}
+
+scoped_refptr<base::TaskRunner> ChildWindowWin::GetTaskRunnerForTesting() {
+  DCHECK(shared_data_);
+  return shared_data_->thread.task_runner();
 }
 
 }  // namespace gpu

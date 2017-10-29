@@ -12,10 +12,12 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/service_manager_connection.h"
+#include "media/mojo/interfaces/constants.mojom.h"
 #include "media/mojo/interfaces/media_service.mojom.h"
+#include "media/mojo/services/media_interface_provider.h"
 #include "services/service_manager/public/cpp/connector.h"
 
-#if defined(ENABLE_MOJO_CDM)
+#if BUILDFLAG(ENABLE_MOJO_CDM)
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/provision_fetcher_impl.h"
 #include "content/public/browser/render_process_host.h"
@@ -69,7 +71,7 @@ void MediaInterfaceProxy::CreateRenderer(
 void MediaInterfaceProxy::CreateCdm(
     media::mojom::ContentDecryptionModuleRequest request) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  GetMediaInterfaceFactory()->CreateCdm(std::move(request));
+  GetCdmInterfaceFactory()->CreateCdm(std::move(request));
 }
 
 media::mojom::InterfaceFactory*
@@ -78,59 +80,104 @@ MediaInterfaceProxy::GetMediaInterfaceFactory() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (!interface_factory_ptr_)
-    ConnectToService();
+    ConnectToMediaService();
 
   DCHECK(interface_factory_ptr_);
 
   return interface_factory_ptr_.get();
 }
 
-void MediaInterfaceProxy::OnConnectionError() {
+media::mojom::InterfaceFactory* MediaInterfaceProxy::GetCdmInterfaceFactory() {
+  DVLOG(1) << __FUNCTION__;
+  DCHECK(thread_checker_.CalledOnValidThread());
+#if !BUILDFLAG(ENABLE_STANDALONE_CDM_SERVICE)
+  return GetMediaInterfaceFactory();
+#else
+  if (!cdm_interface_factory_ptr_)
+    ConnectToCdmService();
+
+  DCHECK(cdm_interface_factory_ptr_);
+
+  return cdm_interface_factory_ptr_.get();
+#endif
+}
+
+void MediaInterfaceProxy::OnMediaServiceConnectionError() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(thread_checker_.CalledOnValidThread());
 
   interface_factory_ptr_.reset();
 }
 
-void MediaInterfaceProxy::ConnectToService() {
+void MediaInterfaceProxy::OnCdmServiceConnectionError() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!interface_factory_ptr_);
 
+  cdm_interface_factory_ptr_.reset();
+}
+
+service_manager::mojom::InterfaceProviderPtr
+MediaInterfaceProxy::GetFrameServices() {
   // Register frame services.
-  auto registry =
-      base::MakeUnique<service_manager::InterfaceRegistry>(std::string());
-#if defined(ENABLE_MOJO_CDM)
+  service_manager::mojom::InterfaceProviderPtr interfaces;
+
+  // TODO(xhwang): Replace this InterfaceProvider with a dedicated media host
+  // interface. See http://crbug.com/660573
+  auto provider = base::MakeUnique<media::MediaInterfaceProvider>(
+      mojo::MakeRequest(&interfaces));
+
+#if BUILDFLAG(ENABLE_MOJO_CDM)
   // TODO(slan): Wrap these into a RenderFrame specific ProvisionFetcher impl.
   net::URLRequestContextGetter* context_getter =
       BrowserContext::GetDefaultStoragePartition(
           render_frame_host_->GetProcess()->GetBrowserContext())
           ->GetURLRequestContext();
-  registry->AddInterface(
-      base::Bind(&ProvisionFetcherImpl::Create, context_getter));
-#endif  // defined(ENABLE_MOJO_CDM)
-  GetContentClient()->browser()->ExposeInterfacesToMediaService(
-      registry.get(), render_frame_host_);
+  provider->registry()->AddInterface(base::Bind(
+      &ProvisionFetcherImpl::Create, base::RetainedRef(context_getter)));
+#endif  // BUILDFLAG(ENABLE_MOJO_CDM)
 
-  // Get frame service InterfaceProvider.
-  // TODO(xhwang): Replace this InterfaceProvider with a dedicated media host
-  // interface. See http://crbug.com/660573
-  service_manager::mojom::InterfaceProviderPtr interfaces;
-  registry->Bind(MakeRequest(&interfaces), service_manager::Identity(),
-                 service_manager::InterfaceProviderSpec(),
-                 service_manager::Identity(),
-                 service_manager::InterfaceProviderSpec());
-  media_registries_.push_back(std::move(registry));
+  GetContentClient()->browser()->ExposeInterfacesToMediaService(
+      provider->registry(), render_frame_host_);
+
+  media_registries_.push_back(std::move(provider));
+
+  return interfaces;
+}
+
+void MediaInterfaceProxy::ConnectToMediaService() {
+  DVLOG(1) << __FUNCTION__;
+
+  media::mojom::MediaServicePtr media_service;
 
   // TODO(slan): Use the BrowserContext Connector instead. See crbug.com/638950.
-  media::mojom::MediaServicePtr media_service;
   service_manager::Connector* connector =
       ServiceManagerConnection::GetForProcess()->GetConnector();
-  connector->BindInterface("media", &media_service);
+  connector->BindInterface(media::mojom::kMediaServiceName, &media_service);
+
   media_service->CreateInterfaceFactory(MakeRequest(&interface_factory_ptr_),
-                                        std::move(interfaces));
-  interface_factory_ptr_.set_connection_error_handler(base::Bind(
-      &MediaInterfaceProxy::OnConnectionError, base::Unretained(this)));
+                                        GetFrameServices());
+
+  interface_factory_ptr_.set_connection_error_handler(
+      base::Bind(&MediaInterfaceProxy::OnMediaServiceConnectionError,
+                 base::Unretained(this)));
+}
+
+void MediaInterfaceProxy::ConnectToCdmService() {
+  DVLOG(1) << __FUNCTION__;
+
+  media::mojom::MediaServicePtr media_service;
+
+  // TODO(slan): Use the BrowserContext Connector instead. See crbug.com/638950.
+  service_manager::Connector* connector =
+      ServiceManagerConnection::GetForProcess()->GetConnector();
+  connector->BindInterface(media::mojom::kCdmServiceName, &media_service);
+
+  media_service->CreateInterfaceFactory(
+      MakeRequest(&cdm_interface_factory_ptr_), GetFrameServices());
+
+  cdm_interface_factory_ptr_.set_connection_error_handler(
+      base::Bind(&MediaInterfaceProxy::OnCdmServiceConnectionError,
+                 base::Unretained(this)));
 }
 
 }  // namespace content

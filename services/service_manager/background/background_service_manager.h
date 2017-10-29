@@ -10,14 +10,15 @@
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/threading/thread.h"
+#include "base/values.h"
+#include "build/build_config.h"
 #include "services/service_manager/public/cpp/identity.h"
 #include "services/service_manager/public/interfaces/connector.mojom.h"
 #include "services/service_manager/public/interfaces/service.mojom.h"
-#include "services/service_manager/runner/host/service_process_launcher.h"
+#include "services/service_manager/runner/host/service_process_launcher_delegate.h"
 
 namespace base {
 class SingleThreadTaskRunner;
-class Value;
 class WaitableEvent;
 }
 
@@ -32,9 +33,12 @@ class ServiceManager;
 class BackgroundServiceManager {
  public:
   BackgroundServiceManager(
-      service_manager::ServiceProcessLauncher::Delegate* launcher_delegate,
+      service_manager::ServiceProcessLauncherDelegate* launcher_delegate,
       std::unique_ptr<base::Value> catalog_contents);
   ~BackgroundServiceManager();
+
+  // Starts a service instance for |identity| if one is not already running.
+  void StartService(const Identity& identity);
 
   // Creates a service instance for |identity|. This is intended for use by the
   // Service Manager's embedder to register instances directly, without
@@ -54,9 +58,10 @@ class BackgroundServiceManager {
 
  private:
   void InitializeOnBackgroundThread(
-      service_manager::ServiceProcessLauncher::Delegate* launcher_delegate,
+      service_manager::ServiceProcessLauncherDelegate* launcher_delegate,
       std::unique_ptr<base::Value> catalog_contents);
   void ShutDownOnBackgroundThread(base::WaitableEvent* done_event);
+  void StartServiceOnBackgroundThread(const Identity& identity);
   void RegisterServiceOnBackgroundThread(
       const Identity& identity,
       mojom::ServicePtrInfo service_info,

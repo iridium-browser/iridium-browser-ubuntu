@@ -13,7 +13,7 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -33,6 +33,7 @@
 #include "components/proxy_config/proxy_config_pref_names.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service_common_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -236,9 +237,7 @@ const char kUserProfilePath[] = "user_profile";
 
 class ProxyConfigServiceImplTest : public testing::Test {
  protected:
-  ProxyConfigServiceImplTest()
-      : ui_thread_(BrowserThread::UI, &loop_),
-        io_thread_(BrowserThread::IO, &loop_) {}
+  ProxyConfigServiceImplTest() = default;
 
   void SetUp() override {
     DBusThreadManager::Initialize();
@@ -323,19 +322,19 @@ class ProxyConfigServiceImplTest : public testing::Test {
     std::unique_ptr<base::DictionaryValue> new_config;
     switch (input.mode) {
       case MK_MODE(DIRECT):
-        new_config.reset(ProxyConfigDictionary::CreateDirect());
+        new_config = ProxyConfigDictionary::CreateDirect();
         break;
       case MK_MODE(AUTO_DETECT):
-        new_config.reset(ProxyConfigDictionary::CreateAutoDetect());
+        new_config = ProxyConfigDictionary::CreateAutoDetect();
         break;
       case MK_MODE(PAC_SCRIPT):
-        new_config.reset(
-            ProxyConfigDictionary::CreatePacScript(input.pac_url, false));
+        new_config =
+            ProxyConfigDictionary::CreatePacScript(input.pac_url, false);
         break;
       case MK_MODE(SINGLE_PROXY):
       case MK_MODE(PROXY_PER_SCHEME):
-        new_config.reset(ProxyConfigDictionary::CreateFixedServers(
-            input.server, input.bypass_rules));
+        new_config = ProxyConfigDictionary::CreateFixedServers(
+            input.server, input.bypass_rules);
         break;
     }
     result->Swap(new_config.get());
@@ -350,10 +349,11 @@ class ProxyConfigServiceImplTest : public testing::Test {
         NetworkHandler::Get()->network_state_handler();
     const NetworkState* network = network_state_handler->DefaultNetwork();
     ASSERT_TRUE(network);
-    DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface()->
-        SetServiceProperty(network->path(),
-                           shill::kProxyConfigProperty,
-                           base::StringValue(proxy_config));
+    DBusThreadManager::Get()
+        ->GetShillServiceClient()
+        ->GetTestInterface()
+        ->SetServiceProperty(network->path(), shill::kProxyConfigProperty,
+                             base::Value(proxy_config));
   }
 
   // Synchronously gets the latest proxy config.
@@ -369,7 +369,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
     EXPECT_EQ(net::ProxyConfigService::CONFIG_VALID, availability);
   }
 
-  base::MessageLoop loop_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   std::unique_ptr<net::ProxyConfigService> proxy_config_service_;
   std::unique_ptr<ProxyConfigServiceImpl> config_service_impl_;
   TestingPrefServiceSimple pref_service_;
@@ -378,8 +378,6 @@ class ProxyConfigServiceImplTest : public testing::Test {
  private:
   ScopedTestDeviceSettingsService test_device_settings_service_;
   ScopedTestCrosSettings test_cros_settings_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread io_thread_;
 };
 
 TEST_F(ProxyConfigServiceImplTest, NetworkProxy) {
@@ -453,9 +451,9 @@ TEST_F(ProxyConfigServiceImplTest, DynamicPrefsOverride) {
     // non-existent network proxy.
     SetUserConfigInShill(nullptr);
     pref_service_.SetManagedPref(::proxy_config::prefs::kProxy,
-                                 managed_config.DeepCopy());
+                                 managed_config.CreateDeepCopy());
     pref_service_.SetRecommendedPref(::proxy_config::prefs::kProxy,
-                                     recommended_config.DeepCopy());
+                                     recommended_config.CreateDeepCopy());
     net::ProxyConfig actual_config;
     SyncGetLatestProxyConfig(&actual_config);
     EXPECT_EQ(managed_params.auto_detect, actual_config.auto_detect());
@@ -482,7 +480,7 @@ TEST_F(ProxyConfigServiceImplTest, DynamicPrefsOverride) {
 
     // Managed proxy pref should take effect over network proxy.
     pref_service_.SetManagedPref(::proxy_config::prefs::kProxy,
-                                 managed_config.DeepCopy());
+                                 managed_config.CreateDeepCopy());
     SyncGetLatestProxyConfig(&actual_config);
     EXPECT_EQ(managed_params.auto_detect, actual_config.auto_detect());
     EXPECT_EQ(managed_params.pac_url, actual_config.pac_url());
@@ -522,9 +520,9 @@ TEST_F(ProxyConfigServiceImplTest, SharedEthernetAndUserPolicy) {
   network_configs->Append(std::move(ethernet_policy));
 
   profile_prefs_.SetUserPref(::proxy_config::prefs::kUseSharedProxies,
-                             new base::Value(false));
+                             base::MakeUnique<base::Value>(false));
   profile_prefs_.SetManagedPref(::onc::prefs::kOpenNetworkConfiguration,
-                                network_configs.release());
+                                std::move(network_configs));
 
   net::ProxyConfig actual_config;
   SyncGetLatestProxyConfig(&actual_config);

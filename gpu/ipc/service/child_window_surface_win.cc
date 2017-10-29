@@ -11,7 +11,7 @@
 #include "gpu/ipc/common/gpu_messages.h"
 #include "gpu/ipc/service/gpu_channel_manager.h"
 #include "gpu/ipc/service/gpu_channel_manager_delegate.h"
-#include "ui/base/ui_base_switches.h"
+#include "ui/display/display_switches.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gl/egl_util.h"
 #include "ui/gl/gl_context.h"
@@ -21,9 +21,10 @@
 namespace gpu {
 
 ChildWindowSurfaceWin::ChildWindowSurfaceWin(
+    std::unique_ptr<gfx::VSyncProvider> vsync_provider,
     base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
     HWND parent_window)
-    : gl::NativeViewGLSurfaceEGL(0),
+    : gl::NativeViewGLSurfaceEGL(0, std::move(vsync_provider)),
       child_window_(delegate, parent_window),
       alpha_(true),
       first_swap_(true) {
@@ -35,10 +36,10 @@ ChildWindowSurfaceWin::ChildWindowSurfaceWin(
 EGLConfig ChildWindowSurfaceWin::GetConfig() {
   if (!config_) {
     int alpha_size = alpha_ ? 8 : EGL_DONT_CARE;
-    int bits_per_channel = base::CommandLine::ForCurrentProcess()->HasSwitch(
-                               switches::kEnableHDROutput)
-                               ? 16
-                               : 8;
+    int bits_per_channel =
+        base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableHDR)
+            ? 16
+            : 8;
 
     EGLint config_attribs[] = {EGL_ALPHA_SIZE,
                                alpha_size,
@@ -56,10 +57,28 @@ EGLConfig ChildWindowSurfaceWin::GetConfig() {
 
     EGLDisplay display = GetHardwareDisplay();
     EGLint num_configs;
-    if (!eglChooseConfig(display, config_attribs, &config_, 1, &num_configs)) {
+    if (!eglChooseConfig(display, config_attribs, NULL, 0, &num_configs)) {
       LOG(ERROR) << "eglChooseConfig failed with error "
                  << ui::GetLastEGLErrorString();
       return NULL;
+    }
+    std::vector<EGLConfig> configs(num_configs);
+    if (!eglChooseConfig(display, config_attribs, configs.data(), num_configs,
+                         &num_configs)) {
+      LOG(ERROR) << "eglChooseConfig failed with error "
+                 << ui::GetLastEGLErrorString();
+      return NULL;
+    }
+    config_ = configs[0];
+    for (int i = 0; i < num_configs; i++) {
+      EGLint red_bits;
+      eglGetConfigAttrib(display, configs[i], EGL_RED_SIZE, &red_bits);
+      // Try to pick a configuration with the right number of bits rather
+      // than one that just has enough bits.
+      if (red_bits == bits_per_channel) {
+        config_ = configs[i];
+        break;
+      }
     }
   }
 
@@ -144,6 +163,11 @@ gfx::SwapResult ChildWindowSurfaceWin::PostSubBuffer(int x,
       NativeViewGLSurfaceEGL::PostSubBuffer(x, y, width, height);
   child_window_.ClearInvalidContents();
   return result;
+}
+
+void ChildWindowSurfaceWin::WaitForSnapshotRendering() {
+  DCHECK(gl::GLContext::GetCurrent()->IsCurrent(this));
+  glFinish();
 }
 
 ChildWindowSurfaceWin::~ChildWindowSurfaceWin() {

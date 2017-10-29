@@ -11,6 +11,7 @@
 #include <set>
 #include <type_traits>
 
+#include "core/fxcrt/fx_basic.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
 
@@ -56,7 +57,7 @@ class CPDF_Object {
   virtual CPDF_Object* GetDirect() const;
   virtual CFX_ByteString GetString() const;
   virtual CFX_WideString GetUnicodeText() const;
-  virtual FX_FLOAT GetNumber() const;
+  virtual float GetNumber() const;
   virtual int GetInteger() const;
   virtual CPDF_Dictionary* GetDict() const;
 
@@ -87,6 +88,8 @@ class CPDF_Object {
   virtual const CPDF_Stream* AsStream() const;
   virtual CPDF_String* AsString();
   virtual const CPDF_String* AsString() const;
+
+  virtual bool WriteTo(IFX_ArchiveStream* archive) const = 0;
 
  protected:
   friend class CPDF_Array;

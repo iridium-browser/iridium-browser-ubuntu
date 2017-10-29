@@ -6,6 +6,8 @@
  * found in the LICENSE file.
  */
 
+#ifndef SK_NO_COMMAND_BUFFER
+
 #include "SkMutex.h"
 #include "SkOnce.h"
 #include "gl/GrGLInterface.h"
@@ -108,8 +110,6 @@ static void load_command_buffer_functions() {
                                             gfCreateContext && gfDestroyContext && gfMakeCurrent &&
                                             gfSwapBuffers && gfGetProcAddress;
 
-        } else {
-            SkDebugf("Could not load %s.\n", libName);
         }
     }
 }
@@ -159,8 +159,6 @@ CommandBufferGLTestContext::CommandBufferGLTestContext(CommandBufferGLTestContex
 
     load_command_buffer_once();
     if (!gfFunctionsLoadedSuccessfully) {
-        static SkOnce once;
-        once([] { SkDebugf("Command Buffer: Could not load EGL functions.\n"); });
         return;
     }
 
@@ -306,3 +304,4 @@ int CommandBufferGLTestContext::getSampleCount() {
 }
 
 }  // namespace sk_gpu_test
+#endif // SK_NO_COMMAND_BUFFER

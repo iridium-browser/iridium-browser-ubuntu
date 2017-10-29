@@ -8,7 +8,7 @@
 #import <UIKit/UIKit.h>
 
 #import "ios/web/public/web_state/crw_web_controller_observer.h"
-#import "ios/web/public/web_state/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
 
 namespace ios_internal {
 // Duration of the toolbar animation.
@@ -119,8 +119,6 @@ extern NSString* const kSetupForTestingWillCloseAllTabsNotification;
 // Enables/Disables the FullScreenController in tests. The unit tests do not set
 // the delegate which is crucial for methods to work on the controller.
 // This a temporary solution.
-// TODO(shreyasv): Find a better solution/remove this when FullScreenController
-// moves to Tab.
 + (void)setEnabledForTests:(BOOL)enabled;
 @end
 

@@ -75,6 +75,8 @@ class StartupBrowserCreatorImpl {
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorImplTest,
                            DetermineStartupTabs_NewTabPage);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorImplTest,
+                           DetermineStartupTabs_WelcomeBackPage);
+  FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorImplTest,
                            DetermineBrowserOpenBehavior_Startup);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorImplTest,
                            DetermineBrowserOpenBehavior_CmdLineTabs);
@@ -98,11 +100,10 @@ class StartupBrowserCreatorImpl {
 
   // Boolean flags used to indicate state for DetermineBrowserOpenBehavior.
   enum BehaviorFlags {
-    PROCESS_STARTUP       = (1 << 0),
-    IS_POST_CRASH_LAUNCH  = (1 << 1),
-    HAS_RESTORE_SWITCH    = (1 << 2),
-    HAS_NEW_WINDOW_SWITCH = (1 << 3),
-    HAS_CMD_LINE_TABS     = (1 << 4),
+    PROCESS_STARTUP = (1 << 0),
+    IS_POST_CRASH_LAUNCH = (1 << 1),
+    HAS_NEW_WINDOW_SWITCH = (1 << 2),
+    HAS_CMD_LINE_TABS = (1 << 3),
   };
 
   using BrowserOpenBehaviorOptions = uint32_t;
@@ -142,6 +143,7 @@ class StartupBrowserCreatorImpl {
   // and the interactions between those policies.
   StartupTabs DetermineStartupTabs(const StartupTabProvider& provider,
                                    const StartupTabs& cmd_line_tabs,
+                                   bool process_startup,
                                    bool is_ephemeral_profile,
                                    bool is_post_crash_launch);
 

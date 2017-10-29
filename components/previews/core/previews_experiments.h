@@ -5,7 +5,7 @@
 #ifndef COMPONENTS_PREVIEWS_CORE_PREVIEWS_EXPERIMENTS_H_
 #define COMPONENTS_PREVIEWS_CORE_PREVIEWS_EXPERIMENTS_H_
 
-#include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -48,39 +48,52 @@ base::TimeDelta SingleOptOutDuration();
 // shown as a preview.
 base::TimeDelta OfflinePreviewFreshnessDuration();
 
-// The threshold of EffectiveConnectionType above which previews should not be
-// served.
-net::EffectiveConnectionType EffectiveConnectionTypeThreshold();
+// The threshold of EffectiveConnectionType above which previews will trigger by
+// default.
+net::EffectiveConnectionType DefaultEffectiveConnectionTypeThreshold();
+
+// Whether offline previews are enabled.
+bool IsOfflinePreviewsEnabled();
+
+// The blacklist version for offline previews.
+int OfflinePreviewsVersion();
+
+// Whether Client Lo-Fi previews are enabled.
+bool IsClientLoFiEnabled();
+
+// The blacklist version for Client Lo-Fi previews.
+int ClientLoFiVersion();
+
+// The threshold of EffectiveConnectionType above which Client Lo-Fi previews
+// should not be served.
+net::EffectiveConnectionType EffectiveConnectionTypeThresholdForClientLoFi();
+
+// Returns the hosts that are blacklisted by the Client Lo-Fi field trial.
+std::vector<std::string> GetBlackListedHostsForClientLoFiFieldTrial();
 
 }  // namespace params
 
 enum class PreviewsType {
   NONE = 0,
+
+  // The user is shown an offline page as a preview.
   OFFLINE = 1,
+
+  // Replace images with placeholders.
+  LOFI = 2,
+
+  // The user is shown a server lite page.
+  LITE_PAGE = 3,
+
   // Insert new enum values here. Keep values sequential to allow looping
   // from NONE+1 to LAST-1.
-  LAST = 2,
+  LAST = 4,
 };
 
 typedef std::vector<std::pair<PreviewsType, int>> PreviewsTypeList;
 
-// Returns true if any client-side previews experiment is active.
-bool IsIncludedInClientSidePreviewsExperimentsFieldTrial();
-
-// Returns true if the field trial that should enable previews for |type| for
-// prohibitvely slow networks is active.
-bool IsPreviewsTypeEnabled(PreviewsType type);
-
-// Returns the version of preview treatment |type|. Defaults to 0 if not
-// specified in field trial config.
-int GetPreviewsTypeVersion(PreviewsType type);
-
-// Returns the enabled PreviewsTypes with their version.
-std::unique_ptr<PreviewsTypeList> GetEnabledPreviews();
-
-// Sets the appropriate state for field trial and variations to imitate the
-// offline pages field trial.
-bool EnableOfflinePreviewsForTesting();
+// Gets the string representation of |type|.
+std::string GetStringNameForType(PreviewsType type);
 
 }  // namespace previews
 

@@ -33,8 +33,7 @@ class ProfileImportHandler : public chrome::mojom::ProfileImport {
   ProfileImportHandler();
   ~ProfileImportHandler() override;
 
-  static void Create(
-      mojo::InterfaceRequest<chrome::mojom::ProfileImport> request);
+  static void Create(chrome::mojom::ProfileImportRequest request);
 
  private:
   // chrome::mojom::ProfileImport:

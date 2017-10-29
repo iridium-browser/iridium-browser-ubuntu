@@ -104,7 +104,6 @@ void AppLauncherPageUI::HTMLSource::StartDataRequest(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   NTPResourceCache* resource = AppResourceCacheFactory::GetForProfile(profile_);
-  resource->set_should_show_other_devices_menu(false);
 
   content::WebContents* web_contents = wc_getter.Run();
   content::RenderProcessHost* render_host =
@@ -123,6 +122,12 @@ std::string AppLauncherPageUI::HTMLSource::GetMimeType(
 }
 
 bool AppLauncherPageUI::HTMLSource::ShouldReplaceExistingSource() const {
+  return false;
+}
+
+bool AppLauncherPageUI::HTMLSource::AllowCaching() const {
+  // Should not be cached to reflect dynamically-generated contents that may
+  // depend on user profiles.
   return false;
 }
 

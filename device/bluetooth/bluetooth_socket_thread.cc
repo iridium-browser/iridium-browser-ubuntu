@@ -5,13 +5,14 @@
 #include "device/bluetooth/bluetooth_socket_thread.h"
 
 #include "base/lazy_instance.h"
+#include "base/message_loop/message_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/threading/thread.h"
 
 namespace device {
 
-base::LazyInstance<scoped_refptr<BluetoothSocketThread> > g_instance =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<scoped_refptr<BluetoothSocketThread>>::DestructorAtExit
+    g_instance = LAZY_INSTANCE_INITIALIZER;
 
 // static
 scoped_refptr<BluetoothSocketThread> BluetoothSocketThread::Get() {

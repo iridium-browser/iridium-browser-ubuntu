@@ -13,6 +13,7 @@
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "ui/gfx/buffer_format_util.h"
+#include "ui/gfx/gpu_memory_buffer_tracing.h"
 
 namespace gl {
 
@@ -76,8 +77,7 @@ void GLImageSharedMemory::OnMemoryDump(
     const std::string& dump_name) {
   size_t size_in_bytes = 0;
 
-  if (shared_memory_)
-    size_in_bytes = stride() * GetSize().height();
+  size_in_bytes = stride() * GetSize().height();
 
   // Dump under "/shared_memory", as the base class may also dump to
   // "/texture_memory".
@@ -87,10 +87,13 @@ void GLImageSharedMemory::OnMemoryDump(
                   base::trace_event::MemoryAllocatorDump::kUnitsBytes,
                   static_cast<uint64_t>(size_in_bytes));
 
-  auto guid = GetGenericSharedMemoryGUIDForTracing(process_tracing_id,
-                                                   shared_memory_id_);
-  pmd->CreateSharedGlobalAllocatorDump(guid);
-  pmd->AddOwnershipEdge(dump->guid(), guid);
+  auto guid =
+      gfx::GetSharedMemoryGUIDForTracing(process_tracing_id, shared_memory_id_);
+  auto shared_memory_guid = shared_memory_->mapped_id();
+  if (!shared_memory_guid.is_empty()) {
+    pmd->CreateSharedMemoryOwnershipEdge(dump->guid(), guid, shared_memory_guid,
+                                         0 /* importance */);
+  }
 }
 
 }  // namespace gl

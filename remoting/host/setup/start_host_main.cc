@@ -9,17 +9,19 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/task_scheduler/task_scheduler.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "remoting/base/logging.h"
 #include "remoting/base/oauth_helper.h"
+#include "remoting/base/service_urls.h"
 #include "remoting/base/url_request_context_getter.h"
-#include "remoting/host/service_urls.h"
 #include "remoting/host/setup/host_starter.h"
 #include "remoting/host/setup/pin_validator.h"
 
@@ -29,7 +31,7 @@
 #endif  // defined(OS_POSIX)
 
 #if defined(OS_WIN)
-#include "remoting/host/win/elevation_helpers.h"
+#include "base/process/process_info.h"
 #endif  // defined(OS_WIN)
 
 namespace remoting {
@@ -130,6 +132,8 @@ int StartHostMain(int argc, char** argv) {
   settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
   logging::InitLogging(settings);
 
+  base::TaskScheduler::CreateAndStartWithDefaultParams("RemotingHostSetup");
+
   std::string host_name = command_line->GetSwitchValueASCII("name");
   std::string host_pin = command_line->GetSwitchValueASCII("pin");
   std::string auth_code = command_line->GetSwitchValueASCII("code");
@@ -147,20 +151,25 @@ int StartHostMain(int argc, char** argv) {
 #if defined(OS_WIN)
   // The tool must be run elevated on Windows so the host has access to the
   // directories used to store the configuration JSON files.
-  if (!remoting::IsProcessElevated()) {
+  if (!base::IsCurrentProcessElevated()) {
     fprintf(stderr, "Error: %s must be run as an elevated process.", argv[0]);
     return 1;
   }
 #endif  // defined(OS_WIN)
 
-  if (host_name.empty()) {
+  if (command_line->HasSwitch("help") || command_line->HasSwitch("h") ||
+      command_line->HasSwitch("?") || !command_line->GetArgs().empty()) {
     fprintf(stderr,
-            "Usage: %s --name=<hostname> [--code=<auth-code>] [--pin=<PIN>] "
+            "Usage: %s [--name=<hostname>] [--code=<auth-code>] [--pin=<PIN>] "
             "[--redirect-url=<redirectURL>]\n",
             argv[0]);
-    fprintf(stderr, "\nAuthorization URL for Production services:\n");
-    fprintf(stderr, "%s\n", GetAuthorizationCodeUri().c_str());
     return 1;
+  }
+
+  if (host_name.empty()) {
+    fprintf(stdout, "Enter a name for this computer: ");
+    fflush(stdout);
+    host_name = ReadString(false);
   }
 
   if (host_pin.empty()) {
@@ -193,6 +202,8 @@ int StartHostMain(int argc, char** argv) {
   }
 
   if (auth_code.empty()) {
+    fprintf(stdout, "\nAuthorization URL for Production services:\n");
+    fprintf(stdout, "%s\n\n", GetAuthorizationCodeUri().c_str());
     fprintf(stdout, "Enter an authorization code: ");
     fflush(stdout);
     auth_code = ReadString(true);

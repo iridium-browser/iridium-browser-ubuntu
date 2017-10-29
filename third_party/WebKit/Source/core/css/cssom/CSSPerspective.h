@@ -6,42 +6,52 @@
 #define CSSPerspective_h
 
 #include "core/CoreExport.h"
-#include "core/css/cssom/CSSLengthValue.h"
+#include "core/css/cssom/CSSNumericValue.h"
 #include "core/css/cssom/CSSTransformComponent.h"
 
 namespace blink {
 
+class DOMMatrix;
 class ExceptionState;
 
-class CORE_EXPORT CSSPerspective : public CSSTransformComponent {
+// Represents a perspective value in a CSSTransformValue used for properties
+// like "transform".
+// See CSSPerspective.idl for more information about this class.
+class CORE_EXPORT CSSPerspective final : public CSSTransformComponent {
   WTF_MAKE_NONCOPYABLE(CSSPerspective);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static CSSPerspective* create(const CSSLengthValue*, ExceptionState&);
-  static CSSPerspective* fromCSSValue(const CSSFunctionValue&);
+  // Constructor defined in the IDL.
+  static CSSPerspective* Create(CSSNumericValue*, ExceptionState&);
 
-  // Bindings require a non const return value.
-  CSSLengthValue* length() const {
-    return const_cast<CSSLengthValue*>(m_length.get());
-  }
+  // Blink-internal ways of creating CSSPerspectives.
+  static CSSPerspective* FromCSSValue(const CSSFunctionValue&);
 
-  TransformComponentType type() const override { return PerspectiveType; }
+  // Getters and setters for attributes defined in the IDL.
+  CSSNumericValue* length() { return length_.Get(); }
+  void setLength(CSSNumericValue*, ExceptionState&);
 
-  // TODO: Implement asMatrix for CSSPerspective.
-  CSSMatrixComponent* asMatrix() const override { return nullptr; }
+  // From CSSTransformComponent
+  // Setting is2D for CSSPerspective does nothing.
+  // https://drafts.css-houdini.org/css-typed-om/#dom-cssskew-is2d
+  void setIs2D(bool is2D) final {}
 
-  CSSFunctionValue* toCSSValue() const override;
+  // Internal methods - from CSSTransformComponent.
+  TransformComponentType GetType() const final { return kPerspectiveType; }
+  const DOMMatrix* AsMatrix() const final;
+  CSSFunctionValue* ToCSSValue() const final;
 
   DEFINE_INLINE_VIRTUAL_TRACE() {
-    visitor->trace(m_length);
-    CSSTransformComponent::trace(visitor);
+    visitor->Trace(length_);
+    CSSTransformComponent::Trace(visitor);
   }
 
  private:
-  CSSPerspective(const CSSLengthValue* length) : m_length(length) {}
+  CSSPerspective(CSSNumericValue* length)
+      : CSSTransformComponent(false /* is2D */), length_(length) {}
 
-  Member<const CSSLengthValue> m_length;
+  Member<CSSNumericValue> length_;
 };
 
 }  // namespace blink

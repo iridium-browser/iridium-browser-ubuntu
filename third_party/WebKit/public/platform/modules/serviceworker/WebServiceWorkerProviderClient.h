@@ -44,17 +44,17 @@ class WebString;
 
 // This class is the interface for embedders to talk to
 // ServiceWorkerContainer.
-class BLINK_PLATFORM_EXPORT WebServiceWorkerProviderClient {
+class WebServiceWorkerProviderClient {
  public:
   virtual ~WebServiceWorkerProviderClient() {}
 
-  virtual void setController(std::unique_ptr<WebServiceWorker::Handle>,
-                             bool shouldNotifyControllerChange) = 0;
+  virtual void SetController(std::unique_ptr<WebServiceWorker::Handle>,
+                             bool should_notify_controller_change) = 0;
 
-  virtual void dispatchMessageEvent(std::unique_ptr<WebServiceWorker::Handle>,
+  virtual void DispatchMessageEvent(std::unique_ptr<WebServiceWorker::Handle>,
                                     const WebString& message,
                                     WebMessagePortChannelArray channels) = 0;
-  virtual void countFeature(uint32_t feature) = 0;
+  virtual void CountFeature(uint32_t feature) = 0;
 };
 
 }  // namespace blink

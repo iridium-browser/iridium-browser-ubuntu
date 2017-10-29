@@ -5,14 +5,13 @@
 #include <memory>
 #include <string>
 
-#include "ash/common/login_status.h"
-#include "ash/common/system/date/date_default_view.h"
-#include "ash/common/system/date/tray_date.h"
-#include "ash/common/system/tiles/tiles_default_view.h"
-#include "ash/common/system/tiles/tray_tiles.h"
-#include "ash/common/system/tray/system_tray.h"
+#include "ash/login_status.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/system/tiles/tiles_default_view.h"
+#include "ash/system/tiles/tray_tiles.h"
+#include "ash/system/tray/system_tray.h"
+#include "ash/system/tray/system_tray_test_api.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
@@ -147,19 +146,20 @@ class ShutdownPolicyInSessionTest
 
   // Opens the system tray menu. This creates the tray views.
   void OpenSystemTrayMenu() {
-    ash::Shell::GetInstance()->GetPrimarySystemTray()->ShowDefaultView(
+    ash::Shell::Get()->GetPrimarySystemTray()->ShowDefaultView(
         ash::BUBBLE_CREATE_NEW);
   }
 
   // Closes the system tray menu. This deletes the tray views.
   void CloseSystemTrayMenu() {
-    ash::Shell::GetInstance()->GetPrimarySystemTray()->CloseSystemBubble();
+    ash::Shell::Get()->GetPrimarySystemTray()->CloseBubble();
   }
 
   // Gets the shutdown button view.
   const views::View* GetShutdownButton() {
-    ash::SystemTray* tray = ash::Shell::GetInstance()->GetPrimarySystemTray();
-    return tray->GetTrayTilesForTesting()
+    ash::SystemTray* tray = ash::Shell::Get()->GetPrimarySystemTray();
+    return ash::SystemTrayTestApi(tray)
+        .tray_tiles()
         ->GetDefaultViewForTesting()
         ->GetShutdownButtonViewForTest();
   }
@@ -240,7 +240,8 @@ class ShutdownPolicyLockerTest : public ShutdownPolicyBaseTest {
     if (!tester->IsLocked())
       lock_state_observer.Wait();
     ScreenLocker* screen_locker = ScreenLocker::default_screen_locker();
-    WebUIScreenLocker* web_ui_screen_locker = screen_locker->web_ui();
+    WebUIScreenLocker* web_ui_screen_locker =
+        screen_locker->web_ui_for_testing();
     ASSERT_TRUE(web_ui_screen_locker);
     content::WebUI* web_ui = web_ui_screen_locker->GetWebUI();
     ASSERT_TRUE(web_ui);

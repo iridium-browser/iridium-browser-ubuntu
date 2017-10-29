@@ -9,7 +9,6 @@
 #include "compiler/translator/Compiler.h"
 #include "compiler/translator/Diagnostics.h"
 #include "compiler/translator/DirectiveHandler.h"
-#include "compiler/translator/Intermediate.h"
 #include "compiler/translator/SymbolTable.h"
 #include "compiler/translator/QualifierTypes.h"
 #include "compiler/preprocessor/Preprocessor.h"
@@ -40,6 +39,7 @@ class TParseContext : angle::NonCopyable
                   bool checksPrecErrors,
                   TDiagnostics *diagnostics,
                   const ShBuiltInResources &resources);
+    ~TParseContext();
 
     const pp::Preprocessor &getPreprocessor() const { return mPreprocessor; }
     pp::Preprocessor &getPreprocessor() { return mPreprocessor; }
@@ -89,6 +89,9 @@ class TParseContext : angle::NonCopyable
 
     bool declaringFunction() const { return mDeclaringFunction; }
 
+    TIntermConstantUnion *addScalarLiteral(const TConstantUnion *constantUnion,
+                                           const TSourceLoc &line);
+
     // This method is guaranteed to succeed, even if no variable with 'name' exists.
     const TVariable *getNamedVariable(const TSourceLoc &location,
                                       const TString *name,
@@ -97,7 +100,11 @@ class TParseContext : angle::NonCopyable
                                           const TString *name,
                                           const TSymbol *symbol);
 
-    bool parseVectorFields(const TString &, int vecSize, TVectorFields &, const TSourceLoc &line);
+    // Look at a '.' field selector string and change it into offsets for a vector.
+    bool parseVectorFields(const TSourceLoc &line,
+                           const TString &compString,
+                           int vecSize,
+                           TVector<int> *fieldOffsets);
 
     void assignError(const TSourceLoc &line, const char *op, TString left, TString right);
     void unaryOpError(const TSourceLoc &line, const char *op, TString operand);
@@ -113,7 +120,6 @@ class TParseContext : angle::NonCopyable
     bool checkIsAtGlobalLevel(const TSourceLoc &line, const char *token);
     bool checkConstructorArguments(const TSourceLoc &line,
                                    const TIntermSequence *arguments,
-                                   TOperator op,
                                    const TType &type);
 
     // Returns a sanitized array size to use (the size is at least 1).
@@ -121,14 +127,11 @@ class TParseContext : angle::NonCopyable
     bool checkIsValidQualifierForArray(const TSourceLoc &line, const TPublicType &elementQualifier);
     bool checkIsValidTypeForArray(const TSourceLoc &line, const TPublicType &elementType);
     bool checkIsNonVoid(const TSourceLoc &line, const TString &identifier, const TBasicType &type);
-    void checkIsScalarBool(const TSourceLoc &line, const TIntermTyped *type);
+    bool checkIsScalarBool(const TSourceLoc &line, const TIntermTyped *type);
     void checkIsScalarBool(const TSourceLoc &line, const TPublicType &pType);
-    bool checkIsNotSampler(const TSourceLoc &line,
-                           const TTypeSpecifierNonArray &pType,
-                           const char *reason);
-    bool checkIsNotImage(const TSourceLoc &line,
-                         const TTypeSpecifierNonArray &pType,
-                         const char *reason);
+    bool checkIsNotOpaqueType(const TSourceLoc &line,
+                              const TTypeSpecifierNonArray &pType,
+                              const char *reason);
     void checkDeclaratorLocationIsNotSpecified(const TSourceLoc &line, const TPublicType &pType);
     void checkLocationIsNotSpecified(const TSourceLoc &location,
                                      const TLayoutQualifier &layoutQualifier);
@@ -136,15 +139,23 @@ class TParseContext : angle::NonCopyable
                                         const TTypeQualifierBuilder &typeQualifierBuilder,
                                         TType *type);
     bool checkCanUseExtension(const TSourceLoc &line, const TString &extension);
-    void singleDeclarationErrorCheck(const TPublicType &publicType,
-                                     const TSourceLoc &identifierLocation);
+
+    // Done for all declarations, whether empty or not.
+    void declarationQualifierErrorCheck(const sh::TQualifier qualifier,
+                                        const sh::TLayoutQualifier &layoutQualifier,
+                                        const TSourceLoc &location);
+    // Done for the first non-empty declarator in a declaration.
+    void nonEmptyDeclarationErrorCheck(const TPublicType &publicType,
+                                       const TSourceLoc &identifierLocation);
+    // Done only for empty declarations.
     void emptyDeclarationErrorCheck(const TPublicType &publicType, const TSourceLoc &location);
+
     void checkLayoutQualifierSupported(const TSourceLoc &location,
                                        const TString &layoutQualifierName,
                                        int versionRequired);
     bool checkWorkGroupSizeIsNotSpecified(const TSourceLoc &location,
                                           const TLayoutQualifier &layoutQualifier);
-    void functionCallLValueErrorCheck(const TFunction *fnCandidate, TIntermAggregate *fnCall);
+    void functionCallRValueLValueErrorCheck(const TFunction *fnCandidate, TIntermAggregate *fnCall);
     void checkInvariantVariableQualifier(bool invariant,
                                          const TQualifier qualifier,
                                          const TSourceLoc &invariantLocation);
@@ -159,17 +170,38 @@ class TParseContext : angle::NonCopyable
     }
     bool supportsExtension(const char *extension);
     bool isExtensionEnabled(const char *extension) const;
+    bool isMultiviewExtensionEnabled() const
+    {
+        return mMultiviewAvailable &&
+               (isExtensionEnabled("GL_OVR_multiview") || isExtensionEnabled("GL_OVR_multiview2"));
+    }
     void handleExtensionDirective(const TSourceLoc &loc, const char *extName, const char *behavior);
     void handlePragmaDirective(const TSourceLoc &loc,
                                const char *name,
                                const char *value,
                                bool stdgl);
 
+    // Returns true on success. *initNode may still be nullptr on success in case the initialization
+    // is not needed in the AST.
     bool executeInitializer(const TSourceLoc &line,
                             const TString &identifier,
                             const TPublicType &pType,
                             TIntermTyped *initializer,
                             TIntermBinary **initNode);
+    TIntermNode *addConditionInitializer(const TPublicType &pType,
+                                         const TString &identifier,
+                                         TIntermTyped *initializer,
+                                         const TSourceLoc &loc);
+    TIntermNode *addLoop(TLoopType type,
+                         TIntermNode *init,
+                         TIntermNode *cond,
+                         TIntermTyped *expr,
+                         TIntermNode *body,
+                         const TSourceLoc &loc);
+
+    // For "if" test nodes. There are three children: a condition, a true path, and a false path.
+    // The two paths are in TIntermNodePair code.
+    TIntermNode *addIfElse(TIntermTyped *cond, TIntermNodePair code, const TSourceLoc &loc);
 
     void addFullySpecifiedType(TPublicType *typeSpecifier);
     TPublicType addFullySpecifiedType(const TTypeQualifierBuilder &typeQualifierBuilder,
@@ -232,7 +264,11 @@ class TParseContext : angle::NonCopyable
                                   TIntermTyped *initializer,
                                   TIntermDeclaration *declarationOut);
 
+    void parseDefaultPrecisionQualifier(const TPrecision precision,
+                                        const TPublicType &type,
+                                        const TSourceLoc &loc);
     void parseGlobalLayoutQualifier(const TTypeQualifierBuilder &typeQualifierBuilder);
+
     TIntermFunctionPrototype *addFunctionPrototypeDeclaration(const TFunction &parsedFunction,
                                                               const TSourceLoc &location);
     TIntermFunctionDefinition *addFunctionDefinition(TIntermFunctionPrototype *functionPrototype,
@@ -245,7 +281,16 @@ class TParseContext : angle::NonCopyable
     TFunction *parseFunctionHeader(const TPublicType &type,
                                    const TString *name,
                                    const TSourceLoc &location);
+    TFunction *addNonConstructorFunc(const TString *name, const TSourceLoc &loc);
     TFunction *addConstructorFunc(const TPublicType &publicType);
+    TParameter parseParameterDeclarator(const TPublicType &publicType,
+                                        const TString *name,
+                                        const TSourceLoc &nameLoc);
+    TParameter parseParameterArrayDeclarator(const TString *identifier,
+                                             const TSourceLoc &identifierLoc,
+                                             TIntermTyped *arraySize,
+                                             const TSourceLoc &arrayLoc,
+                                             TPublicType *type);
 
     TIntermTyped *addIndexExpression(TIntermTyped *baseExpression,
                                      const TSourceLoc &location,
@@ -254,6 +299,13 @@ class TParseContext : angle::NonCopyable
                                               const TSourceLoc &dotLocation,
                                               const TString &fieldString,
                                               const TSourceLoc &fieldLocation);
+
+    // Parse declarator for a single field
+    TField *parseStructDeclarator(TString *identifier, const TSourceLoc &loc);
+    TField *parseStructArrayDeclarator(TString *identifier,
+                                       const TSourceLoc &loc,
+                                       TIntermTyped *arraySize,
+                                       const TSourceLoc &arraySizeLoc);
 
     TFieldList *combineStructFieldLists(TFieldList *processedFields,
                                         const TFieldList *newlyAddedFields,
@@ -295,6 +347,12 @@ class TParseContext : angle::NonCopyable
                                           int intValue,
                                           const TSourceLoc &intValueLine);
     TTypeQualifierBuilder *createTypeQualifierBuilder(const TSourceLoc &loc);
+    TStorageQualifierWrapper *parseGlobalStorageQualifier(TQualifier qualifier,
+                                                          const TSourceLoc &loc);
+    TStorageQualifierWrapper *parseVaryingQualifier(const TSourceLoc &loc);
+    TStorageQualifierWrapper *parseInQualifier(const TSourceLoc &loc);
+    TStorageQualifierWrapper *parseOutQualifier(const TSourceLoc &loc);
+    TStorageQualifierWrapper *parseInOutQualifier(const TSourceLoc &loc);
     TLayoutQualifier joinLayoutQualifiers(TLayoutQualifier leftQualifier,
                                           TLayoutQualifier rightQualifier,
                                           const TSourceLoc &rightQualifierLocation);
@@ -329,7 +387,7 @@ class TParseContext : angle::NonCopyable
     TIntermTyped *addComma(TIntermTyped *left, TIntermTyped *right, const TSourceLoc &loc);
 
     TIntermBranch *addBranch(TOperator op, const TSourceLoc &loc);
-    TIntermBranch *addBranch(TOperator op, TIntermTyped *returnValue, const TSourceLoc &loc);
+    TIntermBranch *addBranch(TOperator op, TIntermTyped *expression, const TSourceLoc &loc);
 
     void checkTextureOffsetConst(TIntermAggregate *functionCall);
     void checkImageMemoryAccessForBuiltinFunctions(TIntermAggregate *functionCall);
@@ -349,11 +407,20 @@ class TParseContext : angle::NonCopyable
                                       TIntermTyped *falseExpression,
                                       const TSourceLoc &line);
 
-    // TODO(jmadill): make these private
-    TIntermediate intermediate;  // to build a parse tree
+    // TODO(jmadill): make this private
     TSymbolTable &symbolTable;   // symbol table that goes with the language currently being parsed
 
   private:
+    class AtomicCounterBindingState;
+    constexpr static size_t kAtomicCounterSize = 4;
+    // UNIFORM_ARRAY_STRIDE for atomic counter arrays is an implementation-dependent value which
+    // can be queried after a program is linked according to ES 3.10 section 7.7.1. This is
+    // controversial with the offset inheritance as described in ESSL 3.10 section 4.4.6. Currently
+    // we treat it as always 4 in favour of the original interpretation in
+    // "ARB_shader_atomic_counters".
+    // TODO(jie.a.chen@intel.com): Double check this once the spec vagueness is resolved.
+    constexpr static size_t kAtomicCounterArrayStride = 4;
+
     // Returns a clamped index. If it prints out an error message, the token is "[]".
     int checkIndexOutOfRange(bool outOfRangeIndexIsError,
                              const TSourceLoc &location,
@@ -372,28 +439,42 @@ class TParseContext : angle::NonCopyable
 
     bool checkIsValidTypeAndQualifierForArray(const TSourceLoc &indexLocation,
                                               const TPublicType &elementType);
+    // Done for all atomic counter declarations, whether empty or not.
+    void atomicCounterQualifierErrorCheck(const TPublicType &publicType,
+                                          const TSourceLoc &location);
 
     // Assumes that multiplication op has already been set based on the types.
     bool isMultiplicationTypeCombinationValid(TOperator op, const TType &left, const TType &right);
 
-    void checkOutParameterIsNotImage(const TSourceLoc &line,
-                                     TQualifier qualifier,
-                                     const TType &type);
     void checkOutParameterIsNotOpaqueType(const TSourceLoc &line,
                                           TQualifier qualifier,
                                           const TType &type);
-    void checkOutParameterIsNotSampler(const TSourceLoc &line,
-                                       TQualifier qualifier,
-                                       const TType &type);
 
     void checkInternalFormatIsNotSpecified(const TSourceLoc &location,
                                            TLayoutImageInternalFormat internalFormat);
     void checkMemoryQualifierIsNotSpecified(const TMemoryQualifier &memoryQualifier,
                                             const TSourceLoc &location);
+    void checkAtomicCounterOffsetIsNotOverlapped(TPublicType &publicType,
+                                                 size_t size,
+                                                 bool forceAppend,
+                                                 const TSourceLoc &loc,
+                                                 TType &type);
     void checkBindingIsValid(const TSourceLoc &identifierLocation, const TType &type);
     void checkBindingIsNotSpecified(const TSourceLoc &location, int binding);
+    void checkOffsetIsNotSpecified(const TSourceLoc &location, int offset);
     void checkImageBindingIsValid(const TSourceLoc &location, int binding, int arraySize);
     void checkSamplerBindingIsValid(const TSourceLoc &location, int binding, int arraySize);
+    void checkBlockBindingIsValid(const TSourceLoc &location,
+                                  const TQualifier &qualifier,
+                                  int binding,
+                                  int arraySize);
+    void checkAtomicCounterBindingIsValid(const TSourceLoc &location, int binding);
+
+    void checkUniformLocationInRange(const TSourceLoc &location,
+                                     int objectLocationCount,
+                                     const TLayoutQualifier &layoutQualifier);
+
+    void checkYuvIsNotSpecified(const TSourceLoc &location, bool yuv);
 
     TIntermTyped *addBinaryMathInternal(TOperator op,
                                         TIntermTyped *left,
@@ -410,7 +491,6 @@ class TParseContext : angle::NonCopyable
                             TIntermNode *thisNode,
                             const TSourceLoc &loc);
     TIntermTyped *addConstructor(TIntermSequence *arguments,
-                                 TOperator op,
                                  TType type,
                                  const TSourceLoc &line);
     TIntermTyped *addNonConstructorFunctionCall(TFunction *fnCall,
@@ -427,8 +507,13 @@ class TParseContext : angle::NonCopyable
                                                               const TSourceLoc &location,
                                                               bool insertParametersToSymbolTable);
 
-    // Set to true when the last/current declarator list was started with an empty declaration.
-    bool mDeferredSingleDeclarationErrorCheck;
+    void setAtomicCounterBindingDefaultOffset(const TPublicType &declaration,
+                                              const TSourceLoc &location);
+
+    // Set to true when the last/current declarator list was started with an empty declaration. The
+    // non-empty declaration error check will need to be performed if the empty declaration is
+    // followed by a declarator.
+    bool mDeferredNonEmptyDeclarationErrorCheck;
 
     sh::GLenum mShaderType;    // vertex or fragment language (future: pack or unpack)
     ShShaderSpec mShaderSpec;  // The language specification compiler conforms to - GLES2 or WebGL.
@@ -445,8 +530,10 @@ class TParseContext : angle::NonCopyable
                                   // without precision, explicit or implicit.
     bool mFragmentPrecisionHighOnESSL1;  // true if highp precision is supported when compiling
                                          // ESSL1.
-    TLayoutMatrixPacking mDefaultMatrixPacking;
-    TLayoutBlockStorage mDefaultBlockStorage;
+    TLayoutMatrixPacking mDefaultUniformMatrixPacking;
+    TLayoutBlockStorage mDefaultUniformBlockStorage;
+    TLayoutMatrixPacking mDefaultBufferMatrixPacking;
+    TLayoutBlockStorage mDefaultBufferBlockStorage;
     TString mHashErrMsg;
     TDiagnostics *mDiagnostics;
     TDirectiveHandler mDirectiveHandler;
@@ -469,8 +556,16 @@ class TParseContext : angle::NonCopyable
     int mMaxNumViews;
     int mMaxImageUnits;
     int mMaxCombinedTextureImageUnits;
+    int mMaxUniformLocations;
+    int mMaxUniformBufferBindings;
+    int mMaxAtomicCounterBindings;
+    int mMaxShaderStorageBufferBindings;
+
     // keeps track whether we are declaring / defining a function
     bool mDeclaringFunction;
+
+    // Track the state of each atomic counter binding.
+    std::map<int, AtomicCounterBindingState> mAtomicCounterBindingStates;
 };
 
 int PaParseStrings(size_t count,

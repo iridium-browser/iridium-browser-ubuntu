@@ -47,8 +47,8 @@ ScopedHandle WrapPlatformFile(base::PlatformFile platform_file) {
 MojoResult UnwrapPlatformFile(ScopedHandle handle, base::PlatformFile* file) {
   MojoPlatformHandle platform_handle;
   platform_handle.struct_size = sizeof(MojoPlatformHandle);
-  MojoResult result = MojoUnwrapPlatformHandle(handle.release().value(),
-                                               &platform_handle);
+  MojoResult result =
+      MojoUnwrapPlatformHandle(handle.release().value(), &platform_handle);
   if (result != MOJO_RESULT_OK)
     return result;
 
@@ -66,22 +66,15 @@ ScopedSharedBufferHandle WrapSharedMemoryHandle(
     const base::SharedMemoryHandle& memory_handle,
     size_t size,
     bool read_only) {
-#if defined(OS_POSIX) && !(defined(OS_MACOSX) && !defined(OS_IOS))
-  if (memory_handle.fd == base::kInvalidPlatformFile)
-    return ScopedSharedBufferHandle();
-#else
   if (!memory_handle.IsValid())
     return ScopedSharedBufferHandle();
-#endif
   MojoPlatformHandle platform_handle;
   platform_handle.struct_size = sizeof(MojoPlatformHandle);
   platform_handle.type = kPlatformSharedBufferHandleType;
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   platform_handle.value =
       static_cast<uint64_t>(memory_handle.GetMemoryObject());
-#elif defined(OS_POSIX)
-  platform_handle.value = PlatformHandleValueFromPlatformFile(memory_handle.fd);
-#elif defined(OS_WIN)
+#else
   platform_handle.value =
       PlatformHandleValueFromPlatformFile(memory_handle.GetHandle());
 #endif
@@ -91,9 +84,12 @@ ScopedSharedBufferHandle WrapSharedMemoryHandle(
   if (read_only)
     flags |= MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_READ_ONLY;
 
+  MojoSharedBufferGuid guid;
+  guid.high = memory_handle.GetGUID().GetHighForSerialization();
+  guid.low = memory_handle.GetGUID().GetLowForSerialization();
   MojoHandle mojo_handle;
   MojoResult result = MojoWrapPlatformSharedBufferHandle(
-      &platform_handle, size, flags, &mojo_handle);
+      &platform_handle, size, &guid, flags, &mojo_handle);
   CHECK_EQ(result, MOJO_RESULT_OK);
 
   return ScopedSharedBufferHandle(SharedBufferHandle(mojo_handle));
@@ -110,8 +106,10 @@ MojoResult UnwrapSharedMemoryHandle(ScopedSharedBufferHandle handle,
 
   MojoPlatformSharedBufferHandleFlags flags;
   size_t num_bytes;
+  MojoSharedBufferGuid mojo_guid;
   MojoResult result = MojoUnwrapPlatformSharedBufferHandle(
-      handle.release().value(), &platform_handle, &num_bytes, &flags);
+      handle.release().value(), &platform_handle, &num_bytes, &mojo_guid,
+      &flags);
   if (result != MOJO_RESULT_OK)
     return result;
 
@@ -121,20 +119,25 @@ MojoResult UnwrapSharedMemoryHandle(ScopedSharedBufferHandle handle,
   if (read_only)
     *read_only = flags & MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_READ_ONLY;
 
+  base::UnguessableToken guid =
+      base::UnguessableToken::Deserialize(mojo_guid.high, mojo_guid.low);
 #if defined(OS_MACOSX) && !defined(OS_IOS)
-  CHECK_EQ(platform_handle.type, MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT);
+  DCHECK_EQ(platform_handle.type, MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT);
   *memory_handle = base::SharedMemoryHandle(
-      static_cast<mach_port_t>(platform_handle.value), num_bytes,
-      base::GetCurrentProcId());
+      static_cast<mach_port_t>(platform_handle.value), num_bytes, guid);
+#elif defined(OS_FUCHSIA)
+  DCHECK_EQ(platform_handle.type, MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE);
+  *memory_handle = base::SharedMemoryHandle(
+      static_cast<mx_handle_t>(platform_handle.value), num_bytes, guid);
 #elif defined(OS_POSIX)
-  CHECK_EQ(platform_handle.type, MOJO_PLATFORM_HANDLE_TYPE_FILE_DESCRIPTOR);
+  DCHECK_EQ(platform_handle.type, MOJO_PLATFORM_HANDLE_TYPE_FILE_DESCRIPTOR);
   *memory_handle = base::SharedMemoryHandle(
-      static_cast<int>(platform_handle.value), false);
+      base::FileDescriptor(static_cast<int>(platform_handle.value), false),
+      num_bytes, guid);
 #elif defined(OS_WIN)
-  CHECK_EQ(platform_handle.type, MOJO_PLATFORM_HANDLE_TYPE_WINDOWS_HANDLE);
+  DCHECK_EQ(platform_handle.type, MOJO_PLATFORM_HANDLE_TYPE_WINDOWS_HANDLE);
   *memory_handle = base::SharedMemoryHandle(
-      reinterpret_cast<HANDLE>(platform_handle.value),
-      base::GetCurrentProcId());
+      reinterpret_cast<HANDLE>(platform_handle.value), num_bytes, guid);
 #endif
 
   return MOJO_RESULT_OK;

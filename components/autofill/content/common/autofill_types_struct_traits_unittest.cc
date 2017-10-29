@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -54,21 +56,6 @@ void CreateTestPasswordFormFillData(PasswordFormFillData* fill_data) {
   pr.realm = "https://bar.com/";
   fill_data->additional_logins[name] = pr;
 
-  UsernamesCollectionKey key;
-  key.username = base::ASCIIToUTF16("Tom");
-  key.password = base::ASCIIToUTF16("Tom_Password");
-  key.realm = "https://foo.com/";
-  std::vector<base::string16>& possible_names =
-      fill_data->other_possible_usernames[key];
-  possible_names.push_back(base::ASCIIToUTF16("Tom_1"));
-  possible_names.push_back(base::ASCIIToUTF16("Tom_2"));
-  key.username = base::ASCIIToUTF16("Jerry");
-  key.password = base::ASCIIToUTF16("Jerry_Password");
-  key.realm = "https://bar.com/";
-  possible_names = fill_data->other_possible_usernames[key];
-  possible_names.push_back(base::ASCIIToUTF16("Jerry_1"));
-  possible_names.push_back(base::ASCIIToUTF16("Jerry_2"));
-
   fill_data->wait_for_username = true;
   fill_data->is_possible_change_password_form = false;
 }
@@ -83,8 +70,10 @@ void CreateTestPasswordForm(PasswordForm* form) {
   form->username_element = base::ASCIIToUTF16("username");
   form->username_marked_by_site = true;
   form->username_value = base::ASCIIToUTF16("test@gmail.com");
-  form->other_possible_usernames.push_back(base::ASCIIToUTF16("Jerry_1"));
-  form->other_possible_usernames.push_back(base::ASCIIToUTF16("Jerry_2"));
+  form->other_possible_usernames.push_back(PossibleUsernamePair(
+      base::ASCIIToUTF16("Jerry_1"), base::ASCIIToUTF16("id1")));
+  form->other_possible_usernames.push_back(PossibleUsernamePair(
+      base::ASCIIToUTF16("Jerry_2"), base::ASCIIToUTF16("id2")));
   form->password_element = base::ASCIIToUTF16("password");
   form->password_value = base::ASCIIToUTF16("test");
   form->password_value_is_default = true;
@@ -106,13 +95,15 @@ void CreateTestPasswordForm(PasswordForm* form) {
   form->icon_url = GURL("https://foo.com/icon.png");
   form->federation_origin =
       url::Origin::UnsafelyCreateOriginWithoutNormalization(
-          "http", "www.google.com", 80);
+          "http", "www.google.com", 80, "");
   form->skip_zero_click = false;
   form->layout = PasswordForm::Layout::LAYOUT_LOGIN_AND_SIGNUP;
   form->was_parsed_using_autofill_predictions = false;
   form->is_public_suffix_match = true;
   form->is_affiliation_based_match = true;
   form->does_look_like_signup_form = true;
+  form->submission_event =
+      PasswordForm::SubmissionIndicatorEvent::SAME_DOCUMENT_NAVIGATION;
 }
 
 void CreateTestFormsPredictionsMap(FormsPredictionsMap* predictions) {
@@ -201,6 +192,10 @@ void CheckEqualPasswordFormGenerationData(
     const PasswordFormGenerationData& actual) {
   EXPECT_EQ(expected.form_signature, actual.form_signature);
   EXPECT_EQ(expected.field_signature, actual.field_signature);
+  ASSERT_EQ(expected.confirmation_field_signature.has_value(),
+            actual.confirmation_field_signature.has_value());
+  EXPECT_EQ(expected.confirmation_field_signature.value(),
+            actual.confirmation_field_signature.value());
 }
 
 }  // namespace
@@ -211,53 +206,54 @@ class AutofillTypeTraitsTestImpl : public testing::Test,
   AutofillTypeTraitsTestImpl() {}
 
   mojom::TypeTraitsTestPtr GetTypeTraitsTestProxy() {
-    return bindings_.CreateInterfacePtrAndBind(this);
+    mojom::TypeTraitsTestPtr proxy;
+    bindings_.AddBinding(this, mojo::MakeRequest(&proxy));
+    return proxy;
   }
 
   // mojom::TypeTraitsTest:
-  void PassFormData(const FormData& s,
-                    const PassFormDataCallback& callback) override {
-    callback.Run(s);
+  void PassFormData(const FormData& s, PassFormDataCallback callback) override {
+    std::move(callback).Run(s);
   }
 
   void PassFormFieldData(const FormFieldData& s,
-                         const PassFormFieldDataCallback& callback) override {
-    callback.Run(s);
+                         PassFormFieldDataCallback callback) override {
+    std::move(callback).Run(s);
   }
 
   void PassFormDataPredictions(
       const FormDataPredictions& s,
-      const PassFormDataPredictionsCallback& callback) override {
-    callback.Run(s);
+      PassFormDataPredictionsCallback callback) override {
+    std::move(callback).Run(s);
   }
 
   void PassFormFieldDataPredictions(
       const FormFieldDataPredictions& s,
-      const PassFormFieldDataPredictionsCallback& callback) override {
-    callback.Run(s);
+      PassFormFieldDataPredictionsCallback callback) override {
+    std::move(callback).Run(s);
   }
 
   void PassPasswordFormFillData(
       const PasswordFormFillData& s,
-      const PassPasswordFormFillDataCallback& callback) override {
-    callback.Run(s);
+      PassPasswordFormFillDataCallback callback) override {
+    std::move(callback).Run(s);
   }
 
   void PassPasswordFormGenerationData(
       const PasswordFormGenerationData& s,
-      const PassPasswordFormGenerationDataCallback& callback) override {
-    callback.Run(s);
+      PassPasswordFormGenerationDataCallback callback) override {
+    std::move(callback).Run(s);
   }
 
   void PassPasswordForm(const PasswordForm& s,
-                        const PassPasswordFormCallback& callback) override {
-    callback.Run(s);
+                        PassPasswordFormCallback callback) override {
+    std::move(callback).Run(s);
   }
 
   void PassFormsPredictionsMap(
       const FormsPredictionsMap& s,
-      const PassFormsPredictionsMapCallback& callback) override {
-    callback.Run(s);
+      PassFormsPredictionsMapCallback callback) override {
+    std::move(callback).Run(s);
   }
 
  private:
@@ -407,7 +403,10 @@ TEST_F(AutofillTypeTraitsTestImpl, PassPasswordFormGenerationData) {
   FormSignature form_signature = CalculateFormSignature(form);
   FieldSignature field_signature =
       CalculateFieldSignatureForField(form.fields[0]);
-  PasswordFormGenerationData input{form_signature, field_signature};
+  FieldSignature confirmation_field_signature =
+      CalculateFieldSignatureForField(form.fields[1]);
+  PasswordFormGenerationData input(form_signature, field_signature);
+  input.confirmation_field_signature.emplace(confirmation_field_signature);
 
   base::RunLoop loop;
   mojom::TypeTraitsTestPtr proxy = GetTypeTraitsTestProxy();

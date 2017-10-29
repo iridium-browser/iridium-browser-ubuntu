@@ -15,8 +15,7 @@ cr.define('print_preview', function() {
 
     /**
      * Component's HTML element.
-     * @type {Element}
-     * @private
+     * @private {Element}
      */
     this.element_ = null;
 
@@ -24,18 +23,22 @@ cr.define('print_preview', function() {
 
     /**
      * Component's event tracker.
-     * @type {EventTracker}
-     * @private
+     * @private {!EventTracker}
      */
-     this.tracker_ = new EventTracker();
+    this.tracker_ = new EventTracker();
+
+    /**
+     * Component's WebUI listener tracker.
+     * @private {!WebUIListenerTracker}
+     */
+    this.listenerTracker_ = new WebUIListenerTracker();
 
     /**
      * Child components of the component.
-     * @type {!Array<!print_preview.Component>}
-     * @private
+     * @private {!Array<!print_preview.Component>}
      */
     this.children_ = [];
-  };
+  }
 
   Component.prototype = {
     __proto__: cr.EventTarget.prototype,
@@ -45,9 +48,14 @@ cr.define('print_preview', function() {
       return this.element_;
     },
 
-    /** @return {EventTracker} Component's event tracker. */
+    /** @return {!EventTracker} Component's event tracker. */
     get tracker() {
       return this.tracker_;
+    },
+
+    /** @return {!WebUIListenerTracker} Component's Web UI listener tracker. */
+    get listenerTracker() {
+      return this.listenerTracker_;
     },
 
     /**
@@ -88,6 +96,7 @@ cr.define('print_preview', function() {
         }
       });
       this.tracker_.removeAll();
+      this.listenerTracker_.removeAll();
       this.isInDocument_ = false;
     },
 
@@ -162,12 +171,11 @@ cr.define('print_preview', function() {
      * @param {string} query Selector query to select an element starting from
      *     the component's root element using a depth first search for the first
      *     element that matches the query.
-     * @return {HTMLElement} Element selected by the given query.
-     * TODO(alekseys): Check all call sites and rename this function to
-     *     something like getRequiredChildElement.
+     * @return {!HTMLElement} Element selected by the given query.
      */
     getChildElement: function(query) {
-      return this.element_.querySelector(query);
+      return /** @type {!HTMLElement} */ (
+          assert(this.element_.querySelector(query)));
     },
 
     /**
@@ -195,8 +203,8 @@ cr.define('print_preview', function() {
      */
     cloneTemplateInternal: function(templateId, opt_keepHidden) {
       var templateEl = $(templateId);
-      assert(templateEl != null,
-             'Could not find element with ID: ' + templateId);
+      assert(
+          templateEl != null, 'Could not find element with ID: ' + templateId);
       var el = assertInstanceof(templateEl.cloneNode(true), HTMLElement);
       el.id = '';
       if (!opt_keepHidden) {
@@ -206,7 +214,5 @@ cr.define('print_preview', function() {
     }
   };
 
-  return {
-    Component: Component
-  };
+  return {Component: Component};
 });

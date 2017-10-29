@@ -20,6 +20,9 @@ namespace {
 const char kLoadMediaRouterComponentExtensionFlag[] =
     "load-media-router-component-extension";
 
+const char kYieldBetweenContentScriptRunsFieldTrial[] =
+    "YieldBetweenContentScriptRuns";
+
 class CommonSwitches {
  public:
   CommonSwitches()
@@ -39,7 +42,6 @@ class CommonSwitches {
         error_console(switches::kErrorConsole, FeatureSwitch::DEFAULT_DISABLED),
         enable_override_bookmarks_ui(switches::kEnableOverrideBookmarksUI,
                                      FeatureSwitch::DEFAULT_DISABLED),
-        extension_action_redesign(nullptr, FeatureSwitch::DEFAULT_ENABLED),
         scripts_require_action(switches::kScriptsRequireAction,
                                FeatureSwitch::DEFAULT_DISABLED),
         embedded_extension_options(switches::kEmbeddedExtensionOptions,
@@ -54,7 +56,11 @@ class CommonSwitches {
             FeatureSwitch::DEFAULT_DISABLED),
 #endif  // defined(GOOGLE_CHROME_BUILD)
         native_crx_bindings(switches::kNativeCrxBindings,
-                            FeatureSwitch::DEFAULT_DISABLED) {
+                            FeatureSwitch::DEFAULT_DISABLED),
+        yield_between_content_script_runs(
+            switches::kYieldBetweenContentScriptRuns,
+            kYieldBetweenContentScriptRunsFieldTrial,
+            FeatureSwitch::DEFAULT_DISABLED) {
   }
 
   FeatureSwitch force_dev_mode_highlighting;
@@ -65,15 +71,15 @@ class CommonSwitches {
 
   FeatureSwitch error_console;
   FeatureSwitch enable_override_bookmarks_ui;
-  FeatureSwitch extension_action_redesign;
   FeatureSwitch scripts_require_action;
   FeatureSwitch embedded_extension_options;
   FeatureSwitch trace_app_source;
   FeatureSwitch load_media_router_component_extension;
   FeatureSwitch native_crx_bindings;
+  FeatureSwitch yield_between_content_script_runs;
 };
 
-base::LazyInstance<CommonSwitches> g_common_switches =
+base::LazyInstance<CommonSwitches>::DestructorAtExit g_common_switches =
     LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
@@ -90,9 +96,6 @@ FeatureSwitch* FeatureSwitch::error_console() {
 FeatureSwitch* FeatureSwitch::enable_override_bookmarks_ui() {
   return &g_common_switches.Get().enable_override_bookmarks_ui;
 }
-FeatureSwitch* FeatureSwitch::extension_action_redesign() {
-  return &g_common_switches.Get().extension_action_redesign;
-}
 FeatureSwitch* FeatureSwitch::scripts_require_action() {
   return &g_common_switches.Get().scripts_require_action;
 }
@@ -107,6 +110,9 @@ FeatureSwitch* FeatureSwitch::load_media_router_component_extension() {
 }
 FeatureSwitch* FeatureSwitch::native_crx_bindings() {
   return &g_common_switches.Get().native_crx_bindings;
+}
+FeatureSwitch* FeatureSwitch::yield_between_content_script_runs() {
+  return &g_common_switches.Get().yield_between_content_script_runs;
 }
 
 FeatureSwitch::ScopedOverride::ScopedOverride(FeatureSwitch* feature,
@@ -153,7 +159,12 @@ FeatureSwitch::FeatureSwitch(const base::CommandLine* command_line,
 bool FeatureSwitch::IsEnabled() const {
   if (override_value_ != OVERRIDE_NONE)
     return override_value_ == OVERRIDE_ENABLED;
+  if (!cached_value_.has_value())
+    cached_value_ = ComputeValue();
+  return cached_value_.value();
+}
 
+bool FeatureSwitch::ComputeValue() const {
   if (!switch_name_)
     return default_value_;
 

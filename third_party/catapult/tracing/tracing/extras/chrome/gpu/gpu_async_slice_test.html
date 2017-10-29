@@ -14,31 +14,32 @@ found in the LICENSE file.
 'use strict';
 
 tr.b.unittest.testSuite(function() {
-  var AsyncSlice = tr.model.AsyncSlice;
-  var GpuAsyncSlice = tr.e.gpu.GpuAsyncSlice;
+  const AsyncSlice = tr.model.AsyncSlice;
+  const GpuAsyncSlice = tr.e.gpu.GpuAsyncSlice;
 
   test('construct', function() {
-    assert.equal(AsyncSlice.subTypes.getConstructor(
+    assert.strictEqual(AsyncSlice.subTypes.getConstructor(
         'disabled-by-default-gpu.device', 'gpu1'),
         GpuAsyncSlice);
-    assert.equal(AsyncSlice.subTypes.getConstructor(
+    assert.strictEqual(AsyncSlice.subTypes.getConstructor(
         'disabled-by-default-gpu.service', 'gpu2'),
         GpuAsyncSlice);
   });
 
   test('subgroup', function() {
-    var sDevice = new GpuAsyncSlice('disabled-by-default-gpu.device', 'gpu1',
+    const sDevice = new GpuAsyncSlice('disabled-by-default-gpu.device', 'gpu1',
                                      7, 0, {'channel': 'test_channel1'});
 
-    var sService = new GpuAsyncSlice('disabled-by-default-gpu.service', 'gpu2',
-                                      7, 0, {'channel': 'test_channel2'});
+    const sService = new GpuAsyncSlice(
+        'disabled-by-default-gpu.service', 'gpu2', 7, 0,
+        {'channel': 'test_channel2'});
 
-    assert.equal(sDevice.viewSubGroupTitle, 'Device.test_channel1');
-    assert.equal(sService.viewSubGroupTitle, 'Service.test_channel2');
+    assert.strictEqual(sDevice.viewSubGroupTitle, 'Device.test_channel1');
+    assert.strictEqual(sService.viewSubGroupTitle, 'Service.test_channel2');
   });
 
   test('import', function() {
-    var events = [
+    const events = [
       {name: 'trace1', args: {}, pid: 1, ts: 100,
         cat: 'disabled-by-default-gpu.service', tid: 2, ph: 'b', id: 71},
       {name: 'trace1', args: {}, pid: 1, ts: 200,
@@ -52,21 +53,21 @@ tr.b.unittest.testSuite(function() {
       {name: 'trace3', args: {'channel': 'test_channel'}, pid: 1, ts: 200,
         cat: 'disabled-by-default-gpu.device', tid: 2, ph: 'e', id: 73}
     ];
-    var m = tr.c.TestUtils.newModelWithEvents([events]);
-    var t2 = m.getOrCreateProcess(1).getOrCreateThread(2);
-    assert.equal(t2.asyncSliceGroup.length, 3);
+    const m = tr.c.TestUtils.newModelWithEvents([events]);
+    const t2 = m.getOrCreateProcess(1).getOrCreateThread(2);
+    assert.strictEqual(t2.asyncSliceGroup.length, 3);
 
-    var slice1 = t2.asyncSliceGroup.slices[0];
-    var slice2 = t2.asyncSliceGroup.slices[1];
-    var slice3 = t2.asyncSliceGroup.slices[2];
+    const slice1 = t2.asyncSliceGroup.slices[0];
+    const slice2 = t2.asyncSliceGroup.slices[1];
+    const slice3 = t2.asyncSliceGroup.slices[2];
 
     assert.instanceOf(slice1, GpuAsyncSlice);
     assert.instanceOf(slice2, GpuAsyncSlice);
     assert.instanceOf(slice3, GpuAsyncSlice);
 
-    assert.equal(slice1.viewSubGroupTitle, 'trace1');
-    assert.equal(slice2.viewSubGroupTitle, 'Service.test_channel');
-    assert.equal(slice3.viewSubGroupTitle, 'Device.test_channel');
+    assert.strictEqual(slice1.viewSubGroupTitle, 'trace1');
+    assert.strictEqual(slice2.viewSubGroupTitle, 'Service.test_channel');
+    assert.strictEqual(slice3.viewSubGroupTitle, 'Device.test_channel');
   });
 });
 </script>

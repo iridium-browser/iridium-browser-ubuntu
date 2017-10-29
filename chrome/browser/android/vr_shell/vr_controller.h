@@ -9,18 +9,35 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "third_party/WebKit/public/platform/WebGestureEvent.h"
-#include "third_party/WebKit/public/platform/WebInputEvent.h"
+#include "base/time/time.h"
+#include "chrome/browser/vr/vr_controller_model.h"
+#include "device/vr/android/gvr/gvr_gamepad_data_provider.h"
 #include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_types.h"
+#include "ui/gfx/geometry/point3_f.h"
+#include "ui/gfx/geometry/quaternion.h"
+#include "ui/gfx/geometry/vector2d_f.h"
+#include "ui/gfx/geometry/vector3d_f.h"
 
-using blink::WebGestureEvent;
-using blink::WebInputEvent;
+namespace blink {
+class WebGestureEvent;
+}
+
+namespace gfx {
+class Transform;
+}
 
 namespace gvr {
 class ControllerState;
 }
 
 namespace vr_shell {
+
+class ElbowModel;
+
+// Angle (radians) the beam down from the controller axis, for wrist comfort.
+constexpr float kErgoAngleOffset = 0.26f;
+
+using GestureList = std::vector<std::unique_ptr<blink::WebGestureEvent>>;
 
 class VrController {
  public:
@@ -34,13 +51,12 @@ class VrController {
   // Must be called when the Activity gets OnPause().
   void OnPause();
 
-  // Must be called when the GL renderer gets OnSurfaceCreated().
-  void Initialize(gvr_context* gvr_context);
+  device::GvrGamepadData GetGamepadData();
 
   // Must be called when the GL renderer gets OnDrawFrame().
-  void UpdateState();
+  void UpdateState(const gfx::Vector3dF& head_direction);
 
-  std::vector<std::unique_ptr<WebGestureEvent>> DetectGestures();
+  std::unique_ptr<GestureList> DetectGestures();
 
   bool IsTouching();
 
@@ -48,7 +64,12 @@ class VrController {
 
   float TouchPosY();
 
-  const gvr::Quatf Orientation();
+  gfx::Quaternion Orientation() const;
+  void GetTransform(gfx::Transform* out) const;
+  float GetOpacity() const;
+  gfx::Point3F GetPointerStart() const;
+
+  vr::VrControllerModel::State GetModelState() const;
 
   bool TouchDownHappened();
 
@@ -56,8 +77,13 @@ class VrController {
 
   bool ButtonUpHappened(gvr::ControllerButton button);
   bool ButtonDownHappened(gvr::ControllerButton button);
+  bool ButtonState(gvr::ControllerButton button) const;
 
   bool IsConnected();
+
+  base::TimeTicks GetLastOrientationTimestamp() const;
+  base::TimeTicks GetLastTouchTimestamp() const;
+  base::TimeTicks GetLastButtonTimestamp() const;
 
  private:
   enum GestureDetectorState {
@@ -67,7 +93,7 @@ class VrController {
   };
 
   struct TouchPoint {
-    gvr::Vec2f position;
+    gfx::Vector2dF position;
     int64_t timestamp;
   };
 
@@ -86,23 +112,23 @@ class VrController {
     int64_t timestamp;
   };
 
-  void UpdateGestureFromTouchInfo(WebGestureEvent* gesture);
+  void UpdateGestureFromTouchInfo(blink::WebGestureEvent* gesture);
 
   bool GetButtonLongPressFromButtonInfo();
 
   // Handle the waiting state.
-  void HandleWaitingState(WebGestureEvent* gesture);
+  void HandleWaitingState(blink::WebGestureEvent* gesture);
 
   // Handle the detecting state.
-  void HandleDetectingState(WebGestureEvent* gesture);
+  void HandleDetectingState(blink::WebGestureEvent* gesture);
 
   // Handle the scrolling state.
-  void HandleScrollingState(WebGestureEvent* gesture);
+  void HandleScrollingState(blink::WebGestureEvent* gesture);
   void UpdateTouchInfo();
 
   // Returns true if the touch position is within the slop of the initial touch
   // point, false otherwise.
-  bool InSlop(const gvr::Vec2f touch_position);
+  bool InSlop(const gfx::Vector2dF touch_position);
 
   // Returns true if the gesture is in horizontal direction.
   bool IsHorizontalGesture();
@@ -125,10 +151,15 @@ class VrController {
   // The last controller state (updated once per frame).
   std::unique_ptr<gvr::ControllerState> controller_state_;
 
+  std::unique_ptr<gvr::GvrApi> gvr_api_;
+
   float last_qx_;
   bool pinch_started_;
   bool zoom_in_progress_ = false;
   bool touch_position_changed_ = false;
+
+  // Handedness from user prefs.
+  gvr::ControllerHandedness handedness_;
 
   // Current touch info after the extrapolation.
   std::unique_ptr<TouchInfo> touch_info_;
@@ -143,19 +174,21 @@ class VrController {
   std::unique_ptr<TouchPoint> init_touch_point_;
 
   // Overall velocity
-  gvr::Vec2f overall_velocity_;
+  gfx::Vector2dF overall_velocity_;
 
   // Last velocity that is used for fling and direction detection
-  gvr::Vec2f last_velocity_;
+  gfx::Vector2dF last_velocity_;
 
   // Displacement of the touch point from the previews to the current touch
-  gvr::Vec2f displacement_;
+  gfx::Vector2dF displacement_;
 
   int64_t last_touch_timestamp_ = 0;
   int64_t last_timestamp_nanos_ = 0;
 
   // Number of consecutively extrapolated touch points
   int extrapolated_touch_ = 0;
+
+  std::unique_ptr<ElbowModel> elbow_model_;
 
   DISALLOW_COPY_AND_ASSIGN(VrController);
 };

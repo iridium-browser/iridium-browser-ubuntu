@@ -8,7 +8,6 @@
 #include "core/CSSValueKeywords.h"
 #include "core/CoreExport.h"
 #include "core/css/cssom/CSSStyleValue.h"
-#include "wtf/text/AtomicString.h"
 
 namespace blink {
 
@@ -19,29 +18,31 @@ class CORE_EXPORT CSSKeywordValue final : public CSSStyleValue {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static CSSKeywordValue* create(const AtomicString& keyword);
-  static CSSKeywordValue* create(const AtomicString& keyword, ExceptionState&);
-  static CSSKeywordValue* fromCSSValue(const CSSValue&);
+  static CSSKeywordValue* Create(const String& keyword);
+  static CSSKeywordValue* Create(const String& keyword, ExceptionState&);
+  static CSSKeywordValue* FromCSSValue(const CSSValue&);
 
-  StyleValueType type() const override { return KeywordType; }
+  StyleValueType GetType() const override { return kKeywordType; }
 
-  const AtomicString& keywordValue() const;
-  CSSValueID keywordValueID() const;
+  const String& value() const;
+  void setValue(const String& keyword) { keyword_value_ = keyword; }
+  CSSValueID KeywordValueID() const;
 
-  CSSValue* toCSSValue() const override;
+  CSSValue* ToCSSValue() const override;
 
  private:
-  explicit CSSKeywordValue(const AtomicString& keyword)
-      : m_keywordValue(keyword) {}
+  explicit CSSKeywordValue(const String& keyword) : keyword_value_(keyword) {}
 
-  AtomicString m_keywordValue;
+  String keyword_value_;
 };
 
 DEFINE_TYPE_CASTS(CSSKeywordValue,
                   CSSStyleValue,
                   value,
-                  value->type() == CSSStyleValue::StyleValueType::KeywordType,
-                  value.type() == CSSStyleValue::StyleValueType::KeywordType);
+                  value->GetType() ==
+                      CSSStyleValue::StyleValueType::kKeywordType,
+                  value.GetType() ==
+                      CSSStyleValue::StyleValueType::kKeywordType);
 
 }  // namespace blink
 

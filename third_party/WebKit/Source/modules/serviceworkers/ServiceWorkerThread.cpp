@@ -30,37 +30,39 @@
 
 #include "modules/serviceworkers/ServiceWorkerThread.h"
 
-#include "core/workers/WorkerBackingThread.h"
-#include "core/workers/WorkerThreadStartupData.h"
-#include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
-#include "wtf/PtrUtil.h"
 #include <memory>
+#include "core/workers/GlobalScopeCreationParams.h"
+#include "core/workers/WorkerBackingThread.h"
+#include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
+#include "modules/serviceworkers/ServiceWorkerInstalledScriptsManager.h"
+#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
-std::unique_ptr<ServiceWorkerThread> ServiceWorkerThread::create(
-    PassRefPtr<WorkerLoaderProxy> workerLoaderProxy,
-    WorkerReportingProxy& workerReportingProxy) {
-  return WTF::wrapUnique(new ServiceWorkerThread(std::move(workerLoaderProxy),
-                                                 workerReportingProxy));
-}
-
 ServiceWorkerThread::ServiceWorkerThread(
-    PassRefPtr<WorkerLoaderProxy> workerLoaderProxy,
-    WorkerReportingProxy& workerReportingProxy)
-    : WorkerThread(std::move(workerLoaderProxy), workerReportingProxy),
-      m_workerBackingThread(
-          WorkerBackingThread::create("ServiceWorker Thread")) {}
+    ThreadableLoadingContext* loading_context,
+    WorkerReportingProxy& worker_reporting_proxy,
+    std::unique_ptr<ServiceWorkerInstalledScriptsManager>
+        installed_scripts_manager)
+    : WorkerThread(loading_context, worker_reporting_proxy),
+      worker_backing_thread_(
+          WorkerBackingThread::Create("ServiceWorker Thread")),
+      installed_scripts_manager_(std::move(installed_scripts_manager)) {}
 
 ServiceWorkerThread::~ServiceWorkerThread() {}
 
-void ServiceWorkerThread::clearWorkerBackingThread() {
-  m_workerBackingThread = nullptr;
+void ServiceWorkerThread::ClearWorkerBackingThread() {
+  worker_backing_thread_ = nullptr;
 }
 
-WorkerOrWorkletGlobalScope* ServiceWorkerThread::createWorkerGlobalScope(
-    std::unique_ptr<WorkerThreadStartupData> startupData) {
-  return ServiceWorkerGlobalScope::create(this, std::move(startupData));
+WorkerOrWorkletGlobalScope* ServiceWorkerThread::CreateWorkerGlobalScope(
+    std::unique_ptr<GlobalScopeCreationParams> creation_params) {
+  return ServiceWorkerGlobalScope::Create(this, std::move(creation_params),
+                                          time_origin_);
+}
+
+InstalledScriptsManager* ServiceWorkerThread::GetInstalledScriptsManager() {
+  return installed_scripts_manager_.get();
 }
 
 }  // namespace blink

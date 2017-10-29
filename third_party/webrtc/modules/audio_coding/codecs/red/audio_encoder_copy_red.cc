@@ -14,7 +14,7 @@
 
 #include <utility>
 
-#include "webrtc/base/checks.h"
+#include "webrtc/rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -124,6 +124,12 @@ void AudioEncoderCopyRed::OnReceivedUplinkPacketLossFraction(
     float uplink_packet_loss_fraction) {
   speech_encoder_->OnReceivedUplinkPacketLossFraction(
       uplink_packet_loss_fraction);
+}
+
+void AudioEncoderCopyRed::OnReceivedUplinkRecoverablePacketLossFraction(
+    float uplink_recoverable_packet_loss_fraction) {
+  speech_encoder_->OnReceivedUplinkRecoverablePacketLossFraction(
+      uplink_recoverable_packet_loss_fraction);
 }
 
 void AudioEncoderCopyRed::OnReceivedUplinkBandwidth(

@@ -13,10 +13,12 @@
 #include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/task_runner_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/sessions/session_restore.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -37,7 +39,6 @@
 #include "ui/views/controls/styled_label.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 
 using views::GridLayout;
@@ -118,11 +119,8 @@ bool SessionCrashedBubble::Show(Browser* browser) {
           new SessionCrashedBubbleView::BrowserRemovalObserver(browser));
 
   if (DoesSupportConsentCheck()) {
-    // Schedule a task to run GoogleUpdateSettings::GetCollectStatsConsent() on
-    // FILE thread, since it does IO. Then, call
-    // SessionCrashedBubbleView::ShowForReal with the result.
-    content::BrowserThread::PostTaskAndReplyWithResult(
-        content::BrowserThread::FILE, FROM_HERE,
+    base::PostTaskAndReplyWithResult(
+        GoogleUpdateSettings::CollectStatsConsentTaskRunner(), FROM_HERE,
         base::Bind(&GoogleUpdateSettings::GetCollectStatsConsent),
         base::Bind(&SessionCrashedBubbleView::ShowForReal,
                    base::Passed(&browser_observer)));
@@ -172,6 +170,7 @@ SessionCrashedBubbleView::SessionCrashedBubbleView(views::View* anchor_view,
       offer_uma_optin_(offer_uma_optin),
       ignored_(true) {
   set_close_on_deactivate(false);
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::SESSION_CRASHED);
 }
 
 SessionCrashedBubbleView::~SessionCrashedBubbleView() {

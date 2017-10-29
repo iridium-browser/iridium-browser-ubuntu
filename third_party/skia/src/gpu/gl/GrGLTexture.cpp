@@ -5,11 +5,10 @@
  * found in the LICENSE file.
  */
 
-#include "GrContext.h"
 #include "GrGLTexture.h"
 #include "GrGLGpu.h"
+#include "GrSemaphore.h"
 #include "GrShaderCaps.h"
-#include "SkMakeUnique.h"
 #include "SkTraceMemoryDump.h"
 
 #define GPUGL static_cast<GrGLGpu*>(this->getGpu())
@@ -33,6 +32,7 @@ static inline GrSLType sampler_type(const GrGLTexture::IDDesc& idDesc, GrPixelCo
     }
 }
 
+// This method parallels GrTextureProxy::highestFilterMode
 static inline GrSamplerParams::FilterMode highest_filter_mode(const GrGLTexture::IDDesc& idDesc,
                                                               GrPixelConfig config) {
     if (GrPixelConfigIsSint(config)) {
@@ -100,34 +100,19 @@ void GrGLTexture::onRelease() {
         }
         fInfo.fID = 0;
     }
+    this->invokeReleaseProc();
     INHERITED::onRelease();
 }
 
 void GrGLTexture::onAbandon() {
     fInfo.fTarget = 0;
     fInfo.fID = 0;
+    this->invokeReleaseProc();
     INHERITED::onAbandon();
 }
 
 GrBackendObject GrGLTexture::getTextureHandle() const {
     return reinterpret_cast<GrBackendObject>(&fInfo);
-}
-
-std::unique_ptr<GrExternalTextureData> GrGLTexture::detachBackendTexture() {
-    // Flush any pending writes to this texture, as well GL itself
-    GrFence fence = this->getContext()->prepareSurfaceForExternalIOAndFlush(this);
-
-    // Make a copy of our GL-specific information
-    auto data = skstd::make_unique<GrGLExternalTextureData>(fInfo, fence);
-
-    // Ensure the cache can't reach this texture anymore
-    this->detachFromCache();
-
-    // Detach from the GL object, so we don't use it (or try to delete it when we're freed)
-    fInfo.fTarget = 0;
-    fInfo.fID = 0;
-
-    return std::move(data);
 }
 
 void GrGLTexture::setMemoryBacking(SkTraceMemoryDump* traceMemoryDump,

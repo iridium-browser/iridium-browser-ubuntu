@@ -57,6 +57,8 @@ enum CryptohomeErrorCode {
   CRYPTOHOME_ERROR_FIRMWARE_MANAGEMENT_PARAMETERS_INVALID = 26;
   CRYPTOHOME_ERROR_FIRMWARE_MANAGEMENT_PARAMETERS_CANNOT_STORE = 27;
   CRYPTOHOME_ERROR_FIRMWARE_MANAGEMENT_PARAMETERS_CANNOT_REMOVE = 28;
+  CRYPTOHOME_ERROR_MOUNT_OLD_ENCRYPTION = 29;
+  CRYPTOHOME_ERROR_MOUNT_PREVIOUS_MIGRATION_INCOMPLETE = 30;
 }
 
 message AccountIdentifier {
@@ -86,6 +88,19 @@ message MountRequest {
   // Additionally, a failed AuthorizationRequest will be expected as
   // there will be no existing keys.
   optional CreateRequest create = 2;
+  // If set to true, and cryptohomed supports the new "dircrypto" encryption,
+  // forces to use the new encryption. That is, makes it an error to mount
+  // an existing home directory encrypted in the old way (ecryptfs).
+  optional bool force_dircrypto_if_available = 3;
+  // If set to true, mounts the existing ecryptfs vault to a temporary location
+  // while setting up a new dircrypto directory.
+  optional bool to_migrate_from_ecryptfs = 4;
+  // Performs a public mount, which is used for a Kiosk session. Credentials are
+  // not needed in the request; they are synthesized by cryptohomed from id.
+  optional bool public_mount = 5;
+  // If set to true, mounts the vault to a temporary location. The mount is not
+  // exposed to the usual locations (/home/user, /home/root).
+  optional bool hidden_mount = 6;
 }
 
 // A BaseReply type is used for all cryptohomed responses. A shared base class
@@ -125,6 +140,8 @@ message CreateRequest {
   // Setting this value means that the KeyData is filled as it
   // would be with a Key above or in an AddKeyRequest.
   optional bool copy_authorization_key = 2 [default=false];
+  // If set to true, always use eCryptfs as the encryption method.
+  optional bool force_ecryptfs = 3 [default=false];
   // In the future, this will contain account-wide data like
   // the deletion priority or the IdP's origin.
 }
@@ -323,4 +340,15 @@ message GetAccountDiskUsageReply {
   }
   // The size of cryptohome in bytes.
   optional int64 size = 1;
+}
+
+// Request parameters for MigrateToDircryptoEx.
+// TODO(pmarko): Update comment when MigrateToDircryptoEx gets renamed to
+// MigrateToDircrypto: crbug.com/758837.
+message MigrateToDircryptoRequest {
+  // Next ID to use: 2
+
+  // If true, only a few paths (specified in cryptohomed) that are necessary for
+  // a working profile will be migrated. Most user data will be wiped.
+  optional bool minimal_migration = 1;
 }

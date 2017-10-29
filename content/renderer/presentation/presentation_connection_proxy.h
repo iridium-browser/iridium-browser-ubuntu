@@ -6,12 +6,14 @@
 #define CONTENT_RENDERER_PRESENTATION_PRESENTATION_CONNECTION_PROXY_H_
 
 #include "base/callback.h"
+#include "content/public/common/presentation_connection_message.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/WebKit/public/platform/modules/presentation/WebPresentationConnectionProxy.h"
 #include "third_party/WebKit/public/platform/modules/presentation/presentation.mojom.h"
 
 namespace blink {
 class WebPresentationConnection;
+class WebPresentationReceiver;
 }  // namespace blink
 
 namespace content {
@@ -70,22 +72,22 @@ class CONTENT_EXPORT PresentationConnectionProxy
     : public NON_EXPORTED_BASE(blink::WebPresentationConnectionProxy),
       public NON_EXPORTED_BASE(blink::mojom::PresentationConnection) {
  public:
-  using OnMessageCallback = base::Callback<void(bool)>;
+  using OnMessageCallback = base::OnceCallback<void(bool)>;
 
   ~PresentationConnectionProxy() override;
 
-  virtual void SendConnectionMessage(
-      blink::mojom::ConnectionMessagePtr connection_message,
-      const OnMessageCallback& callback) const;
-
   // blink::mojom::PresentationConnection implementation
-  void OnMessage(blink::mojom::ConnectionMessagePtr message,
-                 const OnMessageCallback& callback) override;
+  void OnMessage(PresentationConnectionMessage message,
+                 OnMessageCallback callback) override;
   void DidChangeState(content::PresentationConnectionState state) override;
   void OnClose() override;
 
   // blink::WebPresentationConnectionProxy implementation.
-  void close() const override;
+  void Close() const override;
+  void NotifyTargetConnection(
+      blink::WebPresentationConnectionState state) override;
+  void SendTextMessage(const blink::WebString& message) override;
+  void SendBinaryMessage(const uint8_t* data, size_t length) override;
 
  protected:
   explicit PresentationConnectionProxy(
@@ -94,10 +96,14 @@ class CONTENT_EXPORT PresentationConnectionProxy
   mojo::InterfacePtr<blink::mojom::PresentationConnection>
       target_connection_ptr_;
 
- private:
   // Raw pointer to Blink connection object owning this proxy object. Does not
   // take ownership.
   blink::WebPresentationConnection* const source_connection_;
+
+ private:
+  void SendConnectionMessage(PresentationConnectionMessage message) const;
+
+  DISALLOW_COPY_AND_ASSIGN(PresentationConnectionProxy);
 };
 
 // Represents PresentationConnectionProxy object on controlling frame.
@@ -116,8 +122,8 @@ class CONTENT_EXPORT ControllerConnectionProxy
 class CONTENT_EXPORT ReceiverConnectionProxy
     : public PresentationConnectionProxy {
  public:
-  explicit ReceiverConnectionProxy(
-      blink::WebPresentationConnection* receiver_connection);
+  ReceiverConnectionProxy(blink::WebPresentationConnection* receiver_connection,
+                          blink::WebPresentationReceiver* receiver);
   ~ReceiverConnectionProxy() override;
 
   void Bind(
@@ -127,6 +133,14 @@ class CONTENT_EXPORT ReceiverConnectionProxy
   // called only once.
   void BindControllerConnection(
       blink::mojom::PresentationConnectionPtr controller_connection_ptr);
+
+  // PresentationConnectionProxy override
+  void DidChangeState(content::PresentationConnectionState state) override;
+
+ private:
+  // Raw pointer to PresentationReceiver. This class does not take ownership of
+  // |receiver_|.
+  blink::WebPresentationReceiver* receiver_;
 };
 
 }  // namespace content

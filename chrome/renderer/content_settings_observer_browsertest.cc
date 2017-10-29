@@ -4,10 +4,13 @@
 
 #include <stddef.h>
 
+#include "base/run_loop.h"
+#include "base/values.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/content_settings_observer.h"
 #include "chrome/test/base/chrome_render_view_test.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_utils.h"
 #include "content/public/renderer/render_view.h"
 #include "ipc/ipc_message_macros.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -77,11 +80,11 @@ TEST_F(ChromeRenderViewTest, DISABLED_AllowDOMStorage) {
           OnAllowDOMStorage(_, _, _, _, _)).WillByDefault(DeleteArg<4>());
   EXPECT_CALL(observer,
               OnAllowDOMStorage(_, _, _, _, _));
-  observer.allowStorage(true);
+  observer.AllowStorage(true);
 
   // Accessing localStorage from the same origin again shouldn't result in a
   // new IPC.
-  observer.allowStorage(true);
+  observer.AllowStorage(true);
   ::testing::Mock::VerifyAndClearExpectations(&observer);
 }
 
@@ -103,18 +106,16 @@ TEST_F(ChromeRenderViewTest, JSBlockSentAfterPageLoad) {
   RendererContentSettingRules content_setting_rules;
   ContentSettingsForOneType& script_setting_rules =
       content_setting_rules.script_rules;
-  script_setting_rules.push_back(
-      ContentSettingPatternSource(ContentSettingsPattern::Wildcard(),
-                                  ContentSettingsPattern::Wildcard(),
-                                  CONTENT_SETTING_BLOCK,
-                                  std::string(),
-                                  false));
+  script_setting_rules.push_back(ContentSettingPatternSource(
+      ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
+      content_settings::ContentSettingToValue(CONTENT_SETTING_BLOCK),
+      std::string(), false));
   ContentSettingsObserver* observer = ContentSettingsObserver::Get(
       view_->GetMainRenderFrame());
   observer->SetContentSettingRules(&content_setting_rules);
 
   // Make sure no pending messages are in the queue.
-  ProcessPendingMessages();
+  base::RunLoop().RunUntilIdle();
   render_thread_->sink().ClearMessages();
 
   // 3. Reload page.
@@ -122,7 +123,7 @@ TEST_F(ChromeRenderViewTest, JSBlockSentAfterPageLoad) {
   url_str.append(kHtml);
   GURL url(url_str);
   Reload(url);
-  ProcessPendingMessages();
+  base::RunLoop().RunUntilIdle();
 
   // 4. Verify that the notification that javascript was blocked is sent after
   //    the navigation notification is sent.
@@ -156,8 +157,8 @@ TEST_F(ChromeRenderViewTest, PluginsTemporarilyAllowed) {
   EXPECT_TRUE(observer->IsPluginTemporarilyAllowed(foo_plugin));
   EXPECT_FALSE(observer->IsPluginTemporarilyAllowed(bar_plugin));
 
-  // Simulate a navigation within the page.
-  DidNavigateWithinPage(GetMainFrame(), true, true);
+  // Simulate same document navigation.
+  OnSameDocumentNavigation(GetMainFrame(), true, true);
   EXPECT_TRUE(observer->IsPluginTemporarilyAllowed(foo_plugin));
   EXPECT_FALSE(observer->IsPluginTemporarilyAllowed(bar_plugin));
 
@@ -182,19 +183,17 @@ TEST_F(ChromeRenderViewTest, ImagesBlockedByDefault) {
   RendererContentSettingRules content_setting_rules;
   ContentSettingsForOneType& image_setting_rules =
       content_setting_rules.image_rules;
-  image_setting_rules.push_back(
-      ContentSettingPatternSource(ContentSettingsPattern::Wildcard(),
-                                  ContentSettingsPattern::Wildcard(),
-                                  CONTENT_SETTING_BLOCK,
-                                  std::string(),
-                                  false));
+  image_setting_rules.push_back(ContentSettingPatternSource(
+      ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
+      content_settings::ContentSettingToValue(CONTENT_SETTING_BLOCK),
+      std::string(), false));
 
   ContentSettingsObserver* observer = ContentSettingsObserver::Get(
       view_->GetMainRenderFrame());
   observer->SetContentSettingRules(&content_setting_rules);
   EXPECT_CALL(mock_observer,
               OnContentBlocked(CONTENT_SETTINGS_TYPE_IMAGES, base::string16()));
-  EXPECT_FALSE(observer->allowImage(true, mock_observer.image_url_));
+  EXPECT_FALSE(observer->AllowImage(true, mock_observer.image_url_));
   ::testing::Mock::VerifyAndClearExpectations(&observer);
 
   // Create an exception which allows the image.
@@ -203,13 +202,12 @@ TEST_F(ChromeRenderViewTest, ImagesBlockedByDefault) {
       ContentSettingPatternSource(
           ContentSettingsPattern::Wildcard(),
           ContentSettingsPattern::FromString(mock_observer.image_origin_),
-          CONTENT_SETTING_ALLOW,
-          std::string(),
-          false));
+          content_settings::ContentSettingToValue(CONTENT_SETTING_ALLOW),
+          std::string(), false));
 
   EXPECT_CALL(mock_observer, OnContentBlocked(CONTENT_SETTINGS_TYPE_IMAGES,
                                               base::string16())).Times(0);
-  EXPECT_TRUE(observer->allowImage(true, mock_observer.image_url_));
+  EXPECT_TRUE(observer->AllowImage(true, mock_observer.image_url_));
   ::testing::Mock::VerifyAndClearExpectations(&observer);
 }
 
@@ -223,19 +221,17 @@ TEST_F(ChromeRenderViewTest, ImagesAllowedByDefault) {
   RendererContentSettingRules content_setting_rules;
   ContentSettingsForOneType& image_setting_rules =
       content_setting_rules.image_rules;
-  image_setting_rules.push_back(
-      ContentSettingPatternSource(ContentSettingsPattern::Wildcard(),
-                                  ContentSettingsPattern::Wildcard(),
-                                  CONTENT_SETTING_ALLOW,
-                                  std::string(),
-                                  false));
+  image_setting_rules.push_back(ContentSettingPatternSource(
+      ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
+      content_settings::ContentSettingToValue(CONTENT_SETTING_ALLOW),
+      std::string(), false));
 
   ContentSettingsObserver* observer =
       ContentSettingsObserver::Get(view_->GetMainRenderFrame());
   observer->SetContentSettingRules(&content_setting_rules);
   EXPECT_CALL(mock_observer, OnContentBlocked(CONTENT_SETTINGS_TYPE_IMAGES,
                                               base::string16())).Times(0);
-  EXPECT_TRUE(observer->allowImage(true, mock_observer.image_url_));
+  EXPECT_TRUE(observer->AllowImage(true, mock_observer.image_url_));
   ::testing::Mock::VerifyAndClearExpectations(&observer);
 
   // Create an exception which blocks the image.
@@ -244,12 +240,11 @@ TEST_F(ChromeRenderViewTest, ImagesAllowedByDefault) {
       ContentSettingPatternSource(
           ContentSettingsPattern::Wildcard(),
           ContentSettingsPattern::FromString(mock_observer.image_origin_),
-          CONTENT_SETTING_BLOCK,
-          std::string(),
-          false));
+          content_settings::ContentSettingToValue(CONTENT_SETTING_BLOCK),
+          std::string(), false));
   EXPECT_CALL(mock_observer,
               OnContentBlocked(CONTENT_SETTINGS_TYPE_IMAGES, base::string16()));
-  EXPECT_FALSE(observer->allowImage(true, mock_observer.image_url_));
+  EXPECT_FALSE(observer->AllowImage(true, mock_observer.image_url_));
   ::testing::Mock::VerifyAndClearExpectations(&observer);
 }
 
@@ -258,12 +253,10 @@ TEST_F(ChromeRenderViewTest, ContentSettingsBlockScripts) {
   RendererContentSettingRules content_setting_rules;
   ContentSettingsForOneType& script_setting_rules =
       content_setting_rules.script_rules;
-  script_setting_rules.push_back(
-      ContentSettingPatternSource(ContentSettingsPattern::Wildcard(),
-                                  ContentSettingsPattern::Wildcard(),
-                                  CONTENT_SETTING_BLOCK,
-                                  std::string(),
-                                  false));
+  script_setting_rules.push_back(ContentSettingPatternSource(
+      ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
+      content_settings::ContentSettingToValue(CONTENT_SETTING_BLOCK),
+      std::string(), false));
 
   ContentSettingsObserver* observer =
       ContentSettingsObserver::Get(view_->GetMainRenderFrame());
@@ -295,12 +288,10 @@ TEST_F(ChromeRenderViewTest, ContentSettingsAllowScripts) {
   RendererContentSettingRules content_setting_rules;
   ContentSettingsForOneType& script_setting_rules =
       content_setting_rules.script_rules;
-  script_setting_rules.push_back(
-      ContentSettingPatternSource(ContentSettingsPattern::Wildcard(),
-                                  ContentSettingsPattern::Wildcard(),
-                                  CONTENT_SETTING_ALLOW,
-                                  std::string(),
-                                  false));
+  script_setting_rules.push_back(ContentSettingPatternSource(
+      ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
+      content_settings::ContentSettingToValue(CONTENT_SETTING_ALLOW),
+      std::string(), false));
 
   ContentSettingsObserver* observer =
       ContentSettingsObserver::Get(view_->GetMainRenderFrame());
@@ -337,7 +328,8 @@ TEST_F(ChromeRenderViewTest, ContentSettingsNoscriptTag) {
       content_setting_rules.script_rules;
   script_setting_rules.push_back(ContentSettingPatternSource(
       ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTING_BLOCK, std::string(), false));
+      content_settings::ContentSettingToValue(CONTENT_SETTING_BLOCK),
+      std::string(), false));
 
   ContentSettingsObserver* observer =
       ContentSettingsObserver::Get(view_->GetMainRenderFrame());
@@ -353,22 +345,23 @@ TEST_F(ChromeRenderViewTest, ContentSettingsNoscriptTag) {
   LoadHTML(kHtml);
   EXPECT_NE(
       std::string::npos,
-      blink::WebFrameContentDumper::dumpLayoutTreeAsText(
-          GetMainFrame(), blink::WebFrameContentDumper::LayoutAsTextNormal)
-          .utf8()
+      blink::WebFrameContentDumper::DumpLayoutTreeAsText(
+          GetMainFrame(), blink::WebFrameContentDumper::kLayoutAsTextNormal)
+          .Utf8()
           .find("JS_DISABLED"));
   EXPECT_EQ(
       std::string::npos,
-      blink::WebFrameContentDumper::dumpLayoutTreeAsText(
-          GetMainFrame(), blink::WebFrameContentDumper::LayoutAsTextNormal)
-          .utf8()
+      blink::WebFrameContentDumper::DumpLayoutTreeAsText(
+          GetMainFrame(), blink::WebFrameContentDumper::kLayoutAsTextNormal)
+          .Utf8()
           .find("JS_ENABLED"));
 
   // 3. Allow JavaScript.
   script_setting_rules.clear();
   script_setting_rules.push_back(ContentSettingPatternSource(
       ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTING_ALLOW, std::string(), false));
+      content_settings::ContentSettingToValue(CONTENT_SETTING_ALLOW),
+      std::string(), false));
   observer->SetContentSettingRules(&content_setting_rules);
 
   // 4. Reload the page.
@@ -378,20 +371,21 @@ TEST_F(ChromeRenderViewTest, ContentSettingsNoscriptTag) {
   Reload(url);
   EXPECT_NE(
       std::string::npos,
-      blink::WebFrameContentDumper::dumpLayoutTreeAsText(
-          GetMainFrame(), blink::WebFrameContentDumper::LayoutAsTextNormal)
-          .utf8()
+      blink::WebFrameContentDumper::DumpLayoutTreeAsText(
+          GetMainFrame(), blink::WebFrameContentDumper::kLayoutAsTextNormal)
+          .Utf8()
           .find("JS_ENABLED"));
   EXPECT_EQ(
       std::string::npos,
-      blink::WebFrameContentDumper::dumpLayoutTreeAsText(
-          GetMainFrame(), blink::WebFrameContentDumper::LayoutAsTextNormal)
-          .utf8()
+      blink::WebFrameContentDumper::DumpLayoutTreeAsText(
+          GetMainFrame(), blink::WebFrameContentDumper::kLayoutAsTextNormal)
+          .Utf8()
           .find("JS_DISABLED"));
 }
 
-// Checks that same page navigations don't update content settings for the page.
-TEST_F(ChromeRenderViewTest, ContentSettingsSamePageNavigation) {
+// Checks that same document navigations don't update content settings for the
+// page.
+TEST_F(ChromeRenderViewTest, ContentSettingsSameDocumentNavigation) {
   MockContentSettingsObserver mock_observer(view_->GetMainRenderFrame());
   // Load a page which contains a script.
   const char kHtml[] =
@@ -419,16 +413,17 @@ TEST_F(ChromeRenderViewTest, ContentSettingsSamePageNavigation) {
       content_setting_rules.script_rules;
   script_setting_rules.push_back(ContentSettingPatternSource(
       ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTING_BLOCK, std::string(), false));
+      content_settings::ContentSettingToValue(CONTENT_SETTING_BLOCK),
+      std::string(), false));
 
   ContentSettingsObserver* observer =
       ContentSettingsObserver::Get(view_->GetMainRenderFrame());
   observer->SetContentSettingRules(&content_setting_rules);
 
   // The page shouldn't see the change to script blocking setting after a
-  // same page navigation.
-  DidNavigateWithinPage(GetMainFrame(), true, true);
-  EXPECT_TRUE(observer->allowScript(true));
+  // same document navigation.
+  OnSameDocumentNavigation(GetMainFrame(), true, true);
+  EXPECT_TRUE(observer->AllowScript(true));
 }
 
 TEST_F(ChromeRenderViewTest, ContentSettingsInterstitialPages) {
@@ -437,21 +432,17 @@ TEST_F(ChromeRenderViewTest, ContentSettingsInterstitialPages) {
   RendererContentSettingRules content_setting_rules;
   ContentSettingsForOneType& script_setting_rules =
       content_setting_rules.script_rules;
-  script_setting_rules.push_back(
-      ContentSettingPatternSource(ContentSettingsPattern::Wildcard(),
-                                  ContentSettingsPattern::Wildcard(),
-                                  CONTENT_SETTING_BLOCK,
-                                  std::string(),
-                                  false));
+  script_setting_rules.push_back(ContentSettingPatternSource(
+      ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
+      content_settings::ContentSettingToValue(CONTENT_SETTING_BLOCK),
+      std::string(), false));
   // Block images.
   ContentSettingsForOneType& image_setting_rules =
       content_setting_rules.image_rules;
-  image_setting_rules.push_back(
-      ContentSettingPatternSource(ContentSettingsPattern::Wildcard(),
-                                  ContentSettingsPattern::Wildcard(),
-                                  CONTENT_SETTING_BLOCK,
-                                  std::string(),
-                                  false));
+  image_setting_rules.push_back(ContentSettingPatternSource(
+      ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
+      content_settings::ContentSettingToValue(CONTENT_SETTING_BLOCK),
+      std::string(), false));
 
   ContentSettingsObserver* observer =
       ContentSettingsObserver::Get(view_->GetMainRenderFrame());
@@ -481,7 +472,7 @@ TEST_F(ChromeRenderViewTest, ContentSettingsInterstitialPages) {
   // Verify that images are allowed.
   EXPECT_CALL(mock_observer, OnContentBlocked(CONTENT_SETTINGS_TYPE_IMAGES,
                                               base::string16())).Times(0);
-  EXPECT_TRUE(observer->allowImage(true, mock_observer.image_url_));
+  EXPECT_TRUE(observer->AllowImage(true, mock_observer.image_url_));
   ::testing::Mock::VerifyAndClearExpectations(&observer);
 }
 
@@ -495,18 +486,16 @@ TEST_F(ChromeRenderViewTest, AutoplayContentSettings) {
   RendererContentSettingRules content_setting_rules;
   ContentSettingsForOneType& autoplay_setting_rules =
       content_setting_rules.autoplay_rules;
-  autoplay_setting_rules.push_back(
-      ContentSettingPatternSource(ContentSettingsPattern::Wildcard(),
-                                  ContentSettingsPattern::Wildcard(),
-                                  CONTENT_SETTING_ALLOW,
-                                  std::string(),
-                                  false));
+  autoplay_setting_rules.push_back(ContentSettingPatternSource(
+      ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
+      content_settings::ContentSettingToValue(CONTENT_SETTING_ALLOW),
+      std::string(), false));
 
   ContentSettingsObserver* observer =
       ContentSettingsObserver::Get(view_->GetMainRenderFrame());
   observer->SetContentSettingRules(&content_setting_rules);
 
-  EXPECT_TRUE(observer->allowAutoplay(false));
+  EXPECT_TRUE(observer->AllowAutoplay(false));
   ::testing::Mock::VerifyAndClearExpectations(&observer);
 
   // Add rule to block autoplay.
@@ -515,10 +504,9 @@ TEST_F(ChromeRenderViewTest, AutoplayContentSettings) {
       ContentSettingPatternSource(
           ContentSettingsPattern::Wildcard(),
           ContentSettingsPattern::Wildcard(),
-          CONTENT_SETTING_BLOCK,
-          std::string(),
-          false));
+          content_settings::ContentSettingToValue(CONTENT_SETTING_BLOCK),
+          std::string(), false));
 
-  EXPECT_FALSE(observer->allowAutoplay(true));
+  EXPECT_FALSE(observer->AllowAutoplay(true));
   ::testing::Mock::VerifyAndClearExpectations(&observer);
 }

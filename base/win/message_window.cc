@@ -32,8 +32,8 @@ class MessageWindow::WindowClass {
   DISALLOW_COPY_AND_ASSIGN(WindowClass);
 };
 
-static LazyInstance<MessageWindow::WindowClass> g_window_class =
-    LAZY_INSTANCE_INITIALIZER;
+static LazyInstance<MessageWindow::WindowClass>::DestructorAtExit
+    g_window_class = LAZY_INSTANCE_INITIALIZER;
 
 MessageWindow::WindowClass::WindowClass()
     : atom_(0), instance_(CURRENT_MODULE()) {
@@ -73,7 +73,7 @@ MessageWindow::MessageWindow()
 }
 
 MessageWindow::~MessageWindow() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (window_ != NULL) {
     BOOL result = DestroyWindow(window_);
@@ -81,13 +81,13 @@ MessageWindow::~MessageWindow() {
   }
 }
 
-bool MessageWindow::Create(const MessageCallback& message_callback) {
-  return DoCreate(message_callback, NULL);
+bool MessageWindow::Create(MessageCallback message_callback) {
+  return DoCreate(std::move(message_callback), NULL);
 }
 
-bool MessageWindow::CreateNamed(const MessageCallback& message_callback,
+bool MessageWindow::CreateNamed(MessageCallback message_callback,
                                 const string16& window_name) {
-  return DoCreate(message_callback, window_name.c_str());
+  return DoCreate(std::move(message_callback), window_name.c_str());
 }
 
 // static
@@ -96,13 +96,13 @@ HWND MessageWindow::FindWindow(const string16& window_name) {
                       window_name.c_str());
 }
 
-bool MessageWindow::DoCreate(const MessageCallback& message_callback,
+bool MessageWindow::DoCreate(MessageCallback message_callback,
                              const wchar_t* window_name) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(message_callback_.is_null());
   DCHECK(!window_);
 
-  message_callback_ = message_callback;
+  message_callback_ = std::move(message_callback);
 
   WindowClass& window_class = g_window_class.Get();
   window_ = CreateWindow(MAKEINTATOM(window_class.atom()), window_name, 0, 0, 0,

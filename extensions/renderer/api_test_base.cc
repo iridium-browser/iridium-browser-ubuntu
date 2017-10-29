@@ -13,11 +13,13 @@
 #include "base/strings/string_piece.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "extensions/common/extension_urls.h"
+#include "extensions/common/feature_switch.h"
 #include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/process_info_native_handler.h"
 #include "gin/converter.h"
 #include "gin/dictionary.h"
 #include "gin/modules/console.h"
+#include "gin/modules/timer.h"
 #include "mojo/edk/js/core.h"
 #include "mojo/edk/js/handle.h"
 #include "mojo/edk/js/support.h"
@@ -157,6 +159,9 @@ void ApiTestEnvironment::RegisterModules() {
       ->AddBuiltinModule(env()->isolate(), gin::Console::kModuleName,
                          gin::Console::GetModule(env()->isolate()));
   gin::ModuleRegistry::From(env()->context()->v8_context())
+      ->AddBuiltinModule(env()->isolate(), gin::TimerModule::kName,
+                         gin::TimerModule::GetModule(env()->isolate()));
+  gin::ModuleRegistry::From(env()->context()->v8_context())
       ->AddBuiltinModule(env()->isolate(), mojo::edk::js::Core::kModuleName,
                          mojo::edk::js::Core::GetModule(env()->isolate()));
   gin::ModuleRegistry::From(env()->context()->v8_context())
@@ -172,6 +177,11 @@ void ApiTestEnvironment::RegisterModules() {
 }
 
 void ApiTestEnvironment::InitializeEnvironment() {
+  // With native bindings, we use the actual bindings system to set up the
+  // context, so there's no need to provide these stubs.
+  if (FeatureSwitch::native_crx_bindings()->IsEnabled())
+    return;
+
   gin::Dictionary global(env()->isolate(),
                          env()->context()->v8_context()->Global());
   gin::Dictionary navigator(gin::Dictionary::CreateEmpty(env()->isolate()));
@@ -179,8 +189,6 @@ void ApiTestEnvironment::InitializeEnvironment() {
   global.Set("navigator", navigator);
   gin::Dictionary chrome(gin::Dictionary::CreateEmpty(env()->isolate()));
   global.Set("chrome", chrome);
-  gin::Dictionary extension(gin::Dictionary::CreateEmpty(env()->isolate()));
-  chrome.Set("extension", extension);
   gin::Dictionary runtime(gin::Dictionary::CreateEmpty(env()->isolate()));
   chrome.Set("runtime", runtime);
 }
@@ -218,6 +226,9 @@ void ApiTestEnvironment::RunTestInner(const std::string& test_name,
       FAIL() << "Failed to run test \"" << test_name << "\"";
     }
   };
+
+  ASSERT_FALSE(
+      env()->module_system()->Require("testBody").ToLocalChecked().IsEmpty());
   env()->module_system()->CallModuleMethodSafe(
       "testBody", test_name, 0, nullptr,
       base::Bind(callback, &did_run, quit_closure, test_name));
@@ -226,9 +237,6 @@ void ApiTestEnvironment::RunTestInner(const std::string& test_name,
 
 void ApiTestEnvironment::RunPromisesAgain() {
   v8::MicrotasksScope::PerformCheckpoint(env()->isolate());
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ApiTestEnvironment::RunPromisesAgain,
-                            base::Unretained(this)));
 }
 
 ApiTestBase::ApiTestBase() {

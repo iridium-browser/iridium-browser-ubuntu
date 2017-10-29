@@ -20,6 +20,7 @@
 #define gl_Object_hpp
 
 #include "common/debug.h"
+#include "Common/MutexLock.hpp"
 
 #include <set>
 
@@ -28,7 +29,7 @@ typedef unsigned int GLuint;
 namespace gl
 {
 
-class Object
+class [[clang::lto_visibility_public]] Object
 {
 public:
 	Object();
@@ -51,6 +52,7 @@ protected:
 
 #ifndef NDEBUG
 public:
+	static sw::MutexLock instances_mutex;
 	static std::set<Object*> instances;   // For leak checking
 #endif
 };

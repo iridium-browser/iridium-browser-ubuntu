@@ -6,8 +6,10 @@
 
 #include "cc/layers/picture_image_layer.h"
 #include "cc/layers/solid_color_layer.h"
+#include "cc/paint/paint_image.h"
 #include "cc/test/layer_tree_pixel_resource_test.h"
 #include "cc/test/pixel_comparator.h"
+#include "components/viz/test/test_layer_tree_frame_sink.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
@@ -66,13 +68,21 @@ class LayerTreeHostBlendingPixelTest : public LayerTreeHostPixelResourceTest {
     pixel_comparator_.reset(new FuzzyPixelOffByOneComparator(true));
   }
 
-  void InitializeSettings(LayerTreeSettings* settings) override {
-    settings->renderer_settings.force_antialiasing = force_antialiasing_;
-    settings->renderer_settings.force_blending_with_shaders =
+ protected:
+  std::unique_ptr<viz::TestLayerTreeFrameSink> CreateLayerTreeFrameSink(
+      const viz::RendererSettings& renderer_settings,
+      double refresh_rate,
+      scoped_refptr<viz::ContextProvider> compositor_context_provider,
+      scoped_refptr<viz::ContextProvider> worker_context_provider) override {
+    viz::RendererSettings modified_renderer_settings = renderer_settings;
+    modified_renderer_settings.force_antialiasing = force_antialiasing_;
+    modified_renderer_settings.force_blending_with_shaders =
         force_blending_with_shaders_;
+    return LayerTreeHostPixelResourceTest::CreateLayerTreeFrameSink(
+        modified_renderer_settings, refresh_rate, compositor_context_provider,
+        worker_context_provider);
   }
 
- protected:
   void RunBlendingWithRootPixelTestType(PixelResourceTestCase type) {
     const int kLaneWidth = 2;
     const int kLaneHeight = kLaneWidth;
@@ -145,7 +155,8 @@ class LayerTreeHostBlendingPixelTest : public LayerTreeHostPixelResourceTest {
     scoped_refptr<PictureImageLayer> layer = PictureImageLayer::Create();
     layer->SetIsDrawable(true);
     layer->SetBounds(gfx::Size(width, height));
-    layer->SetImage(backing_store->makeImageSnapshot());
+    layer->SetImage(PaintImage(PaintImage::GetNextId(),
+                               backing_store->makeImageSnapshot()));
     return layer;
   }
 
@@ -167,7 +178,8 @@ class LayerTreeHostBlendingPixelTest : public LayerTreeHostPixelResourceTest {
                                       bounds.width() - kMaskOffset * 2,
                                       bounds.height() - kMaskOffset * 2),
                      paint);
-    mask->SetImage(surface->makeImageSnapshot());
+    mask->SetImage(
+        PaintImage(PaintImage::GetNextId(), surface->makeImageSnapshot()));
     layer->SetMaskLayer(mask.get());
   }
 

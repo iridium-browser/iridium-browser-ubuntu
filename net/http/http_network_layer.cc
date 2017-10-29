@@ -13,9 +13,9 @@
 #include "net/http/http_network_transaction.h"
 #include "net/http/http_server_properties_impl.h"
 #include "net/http/http_stream_factory_impl_job.h"
-#include "net/spdy/spdy_framer.h"
-#include "net/spdy/spdy_session.h"
-#include "net/spdy/spdy_session_pool.h"
+#include "net/spdy/chromium/spdy_session.h"
+#include "net/spdy/chromium/spdy_session_pool.h"
+#include "net/spdy/core/spdy_framer.h"
 
 namespace net {
 
@@ -31,6 +31,7 @@ HttpNetworkLayer::HttpNetworkLayer(HttpNetworkSession* session)
 }
 
 HttpNetworkLayer::~HttpNetworkLayer() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 #if defined(OS_WIN)
   base::PowerMonitor* power_monitor = base::PowerMonitor::Get();
   if (power_monitor)

@@ -14,18 +14,14 @@ namespace gpu {
 
 struct Capabilities;
 
-// Returns a valid GpuMemoryBuffer format given a valid internalformat as
-// defined by CHROMIUM_image.
-GPU_EXPORT gfx::BufferFormat DefaultBufferFormatForImageFormat(
-    unsigned internalformat);
-
 // Returns true if |internalformat| is compatible with |format|.
 GPU_EXPORT bool IsImageFormatCompatibleWithGpuMemoryBufferFormat(
     unsigned internalformat,
     gfx::BufferFormat format);
 
-// Returns true if |format| is supported by |capabilities|.
-GPU_EXPORT bool IsGpuMemoryBufferFormatSupported(
+// Returns true if creating an image for a GpuMemoryBuffer with |format| is
+// supported by |capabilities|.
+GPU_EXPORT bool IsImageFromGpuMemoryBufferFormatSupported(
     gfx::BufferFormat format,
     const Capabilities& capabilities);
 

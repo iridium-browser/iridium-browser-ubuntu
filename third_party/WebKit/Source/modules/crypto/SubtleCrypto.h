@@ -33,11 +33,11 @@
 
 #include "bindings/core/v8/ArrayBufferOrArrayBufferView.h"
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "bindings/modules/v8/ArrayBufferOrArrayBufferViewOrDictionary.h"
 #include "bindings/modules/v8/DictionaryOrString.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -51,7 +51,7 @@ class SubtleCrypto final : public GarbageCollected<SubtleCrypto>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SubtleCrypto* create() { return new SubtleCrypto(); }
+  static SubtleCrypto* Create() { return new SubtleCrypto(); }
 
   ScriptPromise encrypt(ScriptState*,
                         const AlgorithmIdentifier&,
@@ -79,13 +79,13 @@ class SubtleCrypto final : public GarbageCollected<SubtleCrypto>,
   ScriptPromise generateKey(ScriptState*,
                             const AlgorithmIdentifier&,
                             bool extractable,
-                            const Vector<String>& keyUsages);
+                            const Vector<String>& key_usages);
   ScriptPromise importKey(ScriptState*,
                           const String&,
                           const ArrayBufferOrArrayBufferViewOrDictionary&,
                           const AlgorithmIdentifier&,
                           bool extractable,
-                          const Vector<String>& keyUsages);
+                          const Vector<String>& key_usages);
   ScriptPromise exportKey(ScriptState*, const String&, CryptoKey*);
 
   ScriptPromise wrapKey(ScriptState*,

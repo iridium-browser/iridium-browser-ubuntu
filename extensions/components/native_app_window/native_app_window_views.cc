@@ -219,7 +219,7 @@ bool NativeAppWindowViews::CanMaximize() const {
 }
 
 bool NativeAppWindowViews::CanMinimize() const {
-  return true;
+  return !app_window_->show_on_lock_screen();
 }
 
 base::string16 NativeAppWindowViews::GetWindowTitle() const {
@@ -227,11 +227,7 @@ base::string16 NativeAppWindowViews::GetWindowTitle() const {
 }
 
 bool NativeAppWindowViews::ShouldShowWindowTitle() const {
-  return app_window_->window_type() == AppWindow::WINDOW_TYPE_V1_PANEL;
-}
-
-bool NativeAppWindowViews::ShouldShowWindowIcon() const {
-  return app_window_->window_type() == AppWindow::WINDOW_TYPE_V1_PANEL;
+  return false;
 }
 
 void NativeAppWindowViews::SaveWindowPlacement(const gfx::Rect& bounds,
@@ -296,6 +292,14 @@ void NativeAppWindowViews::RenderViewCreated(
         render_view_host->GetWidget()->GetView();
     DCHECK(view);
     view->SetBackgroundColor(SK_ColorTRANSPARENT);
+  } else if (app_window_->show_on_lock_screen()) {
+    content::RenderWidgetHostView* view =
+        render_view_host->GetWidget()->GetView();
+    DCHECK(view);
+    // When shown on the lock screen, app windows will be shown on top of black
+    // background - to avoid a white flash while launching the app window,
+    // initialize it with black background color.
+    view->SetBackgroundColor(SK_ColorBLACK);
   }
 }
 
@@ -438,5 +442,7 @@ bool NativeAppWindowViews::CanHaveAlphaEnabled() const {
 void NativeAppWindowViews::SetVisibleOnAllWorkspaces(bool always_visible) {
   widget_->SetVisibleOnAllWorkspaces(always_visible);
 }
+
+void NativeAppWindowViews::SetActivateOnPointer(bool activate_on_pointer) {}
 
 }  // namespace native_app_window

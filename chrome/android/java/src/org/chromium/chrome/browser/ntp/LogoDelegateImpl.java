@@ -11,6 +11,8 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.PageTransition;
 
+import java.util.concurrent.TimeUnit;
+
 import jp.tomorrowkey.android.gifplayer.BaseGifImage;
 
 /**
@@ -21,6 +23,8 @@ public class LogoDelegateImpl implements LogoView.Delegate {
     private static final String LOGO_SHOWN_UMA_NAME = "NewTabPage.LogoShown";
     private static final int STATIC_LOGO_SHOWN = 0;
     private static final int CTA_IMAGE_SHOWN = 1;
+
+    private static final String LOGO_SHOWN_TIME_UMA_NAME = "NewTabPage.LogoShownTime";
 
     private static final String LOGO_CLICK_UMA_NAME = "NewTabPage.LogoClick";
     private static final int STATIC_LOGO_CLICKED = 0;
@@ -33,6 +37,8 @@ public class LogoDelegateImpl implements LogoView.Delegate {
     private LogoBridge mLogoBridge;
     private String mOnLogoClickUrl;
     private String mAnimatedLogoUrl;
+
+    private boolean mShouldRecordLoadTime = true;
 
     private boolean mIsDestroyed;
 
@@ -47,7 +53,6 @@ public class LogoDelegateImpl implements LogoView.Delegate {
         mLogoBridge = new LogoBridge(tab.getProfile());
     }
 
-    @Override
     public void destroy() {
         mIsDestroyed = true;
     }
@@ -73,9 +78,10 @@ public class LogoDelegateImpl implements LogoView.Delegate {
         }
     }
 
-    @Override
     public void getSearchProviderLogo(final LogoObserver logoObserver) {
-        if (mIsDestroyed) return;
+        assert !mIsDestroyed;
+
+        final long loadTimeStart = System.currentTimeMillis();
 
         LogoObserver wrapperCallback = new LogoObserver() {
             @Override
@@ -86,7 +92,15 @@ public class LogoDelegateImpl implements LogoView.Delegate {
                 if (logo != null) {
                     RecordHistogram.recordSparseSlowlyHistogram(LOGO_SHOWN_UMA_NAME,
                             logo.animatedLogoUrl == null ? STATIC_LOGO_SHOWN : CTA_IMAGE_SHOWN);
+                    if (mShouldRecordLoadTime) {
+                        long loadTime = System.currentTimeMillis() - loadTimeStart;
+                        RecordHistogram.recordMediumTimesHistogram(
+                                LOGO_SHOWN_TIME_UMA_NAME, loadTime, TimeUnit.MILLISECONDS);
+                    }
                 }
+                // If there currently is no Doodle, don't record the time if a refresh happens
+                // later.
+                mShouldRecordLoadTime = false;
                 logoObserver.onLogoAvailable(logo, fromCache);
             }
         };

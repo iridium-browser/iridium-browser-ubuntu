@@ -6,13 +6,13 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <functional>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/process/process_metrics.h"
+#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -44,7 +44,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "net/http/http_response_headers.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -70,7 +70,12 @@ const char* const kValidHttpMethodsForPrerendering[] = {
 };
 
 void ResumeThrottles(
-    std::vector<base::WeakPtr<PrerenderResourceThrottle> > throttles) {
+    std::vector<base::WeakPtr<PrerenderResourceThrottle>> throttles,
+    std::vector<base::WeakPtr<PrerenderResourceThrottle>> idle_resources) {
+  for (auto resource : idle_resources) {
+    if (resource)
+      resource->ResetResourcePriority();
+  }
   for (size_t i = 0; i < throttles.size(); i++) {
     if (throttles[i])
       throttles[i]->ResumeHandler();
@@ -135,6 +140,7 @@ class PrerenderContents::WebContentsDelegateImpl
 
   bool ShouldCreateWebContents(
       content::WebContents* web_contents,
+      content::RenderFrameHost* opener,
       content::SiteInstance* source_site_instance,
       int32_t route_id,
       int32_t main_frame_route_id,
@@ -513,8 +519,7 @@ bool PrerenderContents::Matches(
       session_storage_namespace_id_ != session_storage_namespace->id()) {
     return false;
   }
-  return std::find(alias_urls_.begin(), alias_urls_.end(), url) !=
-         alias_urls_.end();
+  return base::ContainsValue(alias_urls_, url);
 }
 
 void PrerenderContents::RenderProcessGone(base::TerminationStatus status) {
@@ -553,8 +558,10 @@ void PrerenderContents::DocumentLoadedInFrame(
 
 void PrerenderContents::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (!navigation_handle->IsInMainFrame() || navigation_handle->IsSamePage())
+  if (!navigation_handle->IsInMainFrame() ||
+      navigation_handle->IsSameDocument()) {
     return;
+  }
 
   if (!CheckURL(navigation_handle->GetURL()))
     return;
@@ -755,10 +762,10 @@ void PrerenderContents::PrepareForUse() {
   NotifyPrerenderStop();
 
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&ResumeThrottles, resource_throttles_));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&ResumeThrottles, resource_throttles_, idle_resources_));
   resource_throttles_.clear();
+  idle_resources_.clear();
 }
 
 void PrerenderContents::CancelPrerenderForPrinting() {
@@ -774,6 +781,11 @@ void PrerenderContents::OnPrerenderCancelerRequest(
 void PrerenderContents::AddResourceThrottle(
     const base::WeakPtr<PrerenderResourceThrottle>& throttle) {
   resource_throttles_.push_back(throttle);
+}
+
+void PrerenderContents::AddIdleResource(
+    const base::WeakPtr<PrerenderResourceThrottle>& throttle) {
+  idle_resources_.push_back(throttle);
 }
 
 void PrerenderContents::AddNetworkBytes(int64_t bytes) {

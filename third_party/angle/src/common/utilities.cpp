@@ -157,6 +157,7 @@ GLenum VariableComponentType(GLenum type)
       case GL_IMAGE_CUBE:
       case GL_INT_IMAGE_CUBE:
       case GL_UNSIGNED_INT_IMAGE_CUBE:
+      case GL_UNSIGNED_INT_ATOMIC_COUNTER:
           return GL_INT;
       case GL_UNSIGNED_INT:
       case GL_UNSIGNED_INT_VEC2:
@@ -277,6 +278,7 @@ int VariableRowCount(GLenum type)
       case GL_IMAGE_CUBE:
       case GL_INT_IMAGE_CUBE:
       case GL_UNSIGNED_INT_IMAGE_CUBE:
+      case GL_UNSIGNED_INT_ATOMIC_COUNTER:
           return 1;
       case GL_FLOAT_MAT2:
       case GL_FLOAT_MAT3x2:
@@ -340,6 +342,7 @@ int VariableColumnCount(GLenum type)
       case GL_IMAGE_CUBE:
       case GL_INT_IMAGE_CUBE:
       case GL_UNSIGNED_INT_IMAGE_CUBE:
+      case GL_UNSIGNED_INT_ATOMIC_COUNTER:
           return 1;
       case GL_BOOL_VEC2:
       case GL_FLOAT_VEC2:
@@ -422,11 +425,15 @@ bool IsImageType(GLenum type)
     return false;
 }
 
+bool IsAtomicCounterType(GLenum type)
+{
+    return type == GL_UNSIGNED_INT_ATOMIC_COUNTER;
+}
+
 bool IsOpaqueType(GLenum type)
 {
     // ESSL 3.10 section 4.1.7 defines opaque types as: samplers, images and atomic counters.
-    // TODO(oetuaho): add atomic types
-    return IsImageType(type) || IsSamplerType(type);
+    return IsImageType(type) || IsSamplerType(type) || IsAtomicCounterType(type);
 }
 
 GLenum SamplerTypeToTextureType(GLenum samplerType)
@@ -617,6 +624,21 @@ bool IsTriangleMode(GLenum drawMode)
     return false;
 }
 
+bool IsIntegerFormat(GLenum unsizedFormat)
+{
+    switch (unsizedFormat)
+    {
+        case GL_RGBA_INTEGER:
+        case GL_RGB_INTEGER:
+        case GL_RG_INTEGER:
+        case GL_RED_INTEGER:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
 // [OpenGL ES SL 3.00.4] Section 11 p. 120
 // Vertex Outs/Fragment Ins packing priorities
 int VariableSortOrder(GLenum type)
@@ -697,7 +719,7 @@ int VariableSortOrder(GLenum type)
     }
 }
 
-std::string ParseUniformName(const std::string &name, size_t *outSubscript)
+std::string ParseResourceName(const std::string &name, size_t *outSubscript)
 {
     // Strip any trailing array operator and retrieve the subscript
     size_t open = name.find_last_of('[');

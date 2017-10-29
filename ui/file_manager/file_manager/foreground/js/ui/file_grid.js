@@ -82,9 +82,6 @@ FileGrid.decorate = function(
   /** @private {function(!Event)} */
   self.onThumbnailLoadedBound_ = self.onThumbnailLoaded_.bind(self);
 
-  self.scrollBar_ = new ScrollBar();
-  self.scrollBar_.initialize(self.parentElement, self);
-
   self.itemConstructor = function(entry) {
     var item = self.ownerDocument.createElement('li');
     FileGrid.Item.decorate(
@@ -905,6 +902,21 @@ FileGrid.prototype.getHitElements = function(x, y, opt_width, opt_height) {
  */
 function FileGridSelectionController(selectionModel, grid) {
   cr.ui.GridSelectionController.call(this, selectionModel, grid);
+
+  /**
+   * Whether to allow touch-specific interaction.
+   * @private {boolean}
+   */
+  this.enableTouchMode_ = false;
+  util.isTouchModeEnabled().then(function(enabled) {
+    this.enableTouchMode_ = enabled;
+  }.bind(this));
+
+  /**
+   * @type {!FileTapHandler}
+   * @const
+   */
+  this.tapHandler_ = new FileTapHandler();
 }
 
 FileGridSelectionController.prototype = /** @struct */ {
@@ -914,6 +926,15 @@ FileGridSelectionController.prototype = /** @struct */ {
 /** @override */
 FileGridSelectionController.prototype.handlePointerDownUp = function(e, index) {
   filelist.handlePointerDownUp.call(this, e, index);
+};
+
+/** @override */
+FileGridSelectionController.prototype.handleTouchEvents = function(e, index) {
+  if (!this.enableTouchMode_)
+    return;
+  if (this.tapHandler_.handleTouchEvents(
+          e, index, filelist.handleTap.bind(this)))
+    filelist.focusParentList(e);
 };
 
 /** @override */

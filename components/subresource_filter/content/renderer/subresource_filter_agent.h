@@ -9,8 +9,9 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "components/subresource_filter/core/common/activation_level.h"
+#include "components/subresource_filter/core/common/activation_state.h"
 #include "content/public/renderer/render_frame_observer.h"
+#include "content/public/renderer/render_frame_observer_tracker.h"
 #include "url/gurl.h"
 
 namespace blink {
@@ -29,6 +30,7 @@ class WebDocumentSubresourceFilterImpl;
 // to do so by the driver.
 class SubresourceFilterAgent
     : public content::RenderFrameObserver,
+      public content::RenderFrameObserverTracker<SubresourceFilterAgent>,
       public base::SupportsWeakPtr<SubresourceFilterAgent> {
  public:
   // The |ruleset_dealer| must not be null and must outlive this instance. The
@@ -40,10 +42,8 @@ class SubresourceFilterAgent
  protected:
   // Below methods are protected virtual so they can be mocked out in tests.
 
-  // Returns the URLs of documents loaded into nested frames starting with the
-  // current frame and ending with the main frame. The returned array is
-  // guaranteed to have at least one element.
-  virtual std::vector<GURL> GetAncestorDocumentURLs();
+  // Returns the URL of the currently committed document.
+  virtual GURL GetDocumentURL();
 
   // Injects the provided subresource |filter| into the DocumentLoader
   // orchestrating the most recently committed load.
@@ -59,8 +59,12 @@ class SubresourceFilterAgent
       const DocumentLoadStatistics& statistics);
 
  private:
-  void OnActivateForNextCommittedLoad(ActivationLevel activation_level,
-                                      bool measure_performance);
+  // Assumes that the parent will be in a local frame relative to this one, upon
+  // construction.
+  static ActivationState GetParentActivationState(
+      content::RenderFrame* render_frame);
+
+  void OnActivateForNextCommittedLoad(ActivationState activation_state);
   void RecordHistogramsOnLoadCommitted();
   void RecordHistogramsOnLoadFinished();
   void ResetActivatonStateForNextCommit();
@@ -68,16 +72,21 @@ class SubresourceFilterAgent
   // content::RenderFrameObserver:
   void OnDestruct() override;
   void DidCommitProvisionalLoad(bool is_new_navigation,
-                                bool is_same_page_navigation) override;
+                                bool is_same_document_navigation) override;
   void DidFailProvisionalLoad(const blink::WebURLError& error) override;
   void DidFinishLoad() override;
   bool OnMessageReceived(const IPC::Message& message) override;
+  void WillCreateWorkerFetchContext(blink::WebWorkerFetchContext*) override;
+
+  // Subframe navigations matching these URLs/schemes will not trigger
+  // ReadyToCommitNavigation in the browser process, so they must be treated
+  // specially to maintain activation.
+  bool ShouldUseParentActivation(const GURL& url) const;
 
   // Owned by the ChromeContentRendererClient and outlives us.
   UnverifiedRulesetDealer* ruleset_dealer_;
 
-  ActivationLevel activation_level_for_next_commit_ = ActivationLevel::DISABLED;
-  bool measure_performance_for_next_commit_ = false;
+  ActivationState activation_state_for_next_commit_;
 
   base::WeakPtr<WebDocumentSubresourceFilterImpl>
       filter_for_last_committed_load_;

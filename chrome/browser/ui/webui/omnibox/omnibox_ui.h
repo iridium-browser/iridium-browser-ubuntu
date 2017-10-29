@@ -19,8 +19,7 @@ class OmniboxUI : public MojoWebUIController<mojom::OmniboxPageHandler> {
 
  private:
   // MojoWebUIController overrides:
-  void BindUIHandler(
-      mojo::InterfaceRequest<mojom::OmniboxPageHandler> request) override;
+  void BindUIHandler(mojom::OmniboxPageHandlerRequest request) override;
 
   std::unique_ptr<OmniboxPageHandler> omnibox_handler_;
 

@@ -13,6 +13,7 @@
 #pragma clang diagnostic ignored "-Wnull-conversion"
 #pragma clang diagnostic ignored "-Wsign-compare"
 #pragma clang diagnostic ignored "-Wunused-function"
+#pragma clang diagnostic ignored "-Wdeprecated-register"
 #endif
 #ifdef __GNUC__
 #pragma GCC diagnostic push
@@ -23,3 +24,5 @@
 #pragma warning(push)
 #pragma warning(disable:4018)
 #endif
+
+#define YY_NO_UNPUT

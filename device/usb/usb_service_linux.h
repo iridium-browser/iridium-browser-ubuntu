@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef DEVICE_USB_USB_SERVICE_LINUX_H_
+#define DEVICE_USB_USB_SERVICE_LINUX_H_
+
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -10,10 +13,6 @@
 #include "base/memory/weak_ptr.h"
 #include "device/usb/usb_service.h"
 
-namespace base {
-class SequencedTaskRunner;
-}
-
 namespace device {
 
 struct UsbDeviceDescriptor;
@@ -21,12 +20,10 @@ class UsbDeviceLinux;
 
 class UsbServiceLinux : public UsbService {
  public:
-  explicit UsbServiceLinux(
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_in);
+  UsbServiceLinux();
   ~UsbServiceLinux() override;
 
   // device::UsbService implementation
-  void Shutdown() override;
   void GetDevices(const GetDevicesCallback& callback) override;
 
  private:
@@ -67,3 +64,5 @@ class UsbServiceLinux : public UsbService {
 };
 
 }  // namespace device
+
+#endif  // DEVICE_USB_USB_SERVICE_LINUX_H_

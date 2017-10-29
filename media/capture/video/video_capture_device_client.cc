@@ -104,7 +104,11 @@ VideoCaptureDeviceClient::VideoCaptureDeviceClient(
       jpeg_decoder_factory_callback_(jpeg_decoder_factory),
       external_jpeg_decoder_initialized_(false),
       buffer_pool_(std::move(buffer_pool)),
-      last_captured_pixel_format_(media::PIXEL_FORMAT_UNKNOWN) {}
+      last_captured_pixel_format_(media::PIXEL_FORMAT_UNKNOWN) {
+  on_started_using_gpu_cb_ =
+      base::Bind(&VideoFrameReceiver::OnStartedUsingGpuDecode,
+                 base::Unretained(receiver_.get()));
+}
 
 VideoCaptureDeviceClient::~VideoCaptureDeviceClient() {
   // This should be on the platform auxiliary thread since
@@ -147,7 +151,8 @@ void VideoCaptureDeviceClient::OnIncomingCapturedData(
         !external_jpeg_decoder_initialized_) {
       external_jpeg_decoder_initialized_ = true;
       external_jpeg_decoder_ = jpeg_decoder_factory_callback_.Run();
-      external_jpeg_decoder_->Initialize();
+      if (external_jpeg_decoder_)
+        external_jpeg_decoder_->Initialize();
     }
   }
 
@@ -194,10 +199,19 @@ void VideoCaptureDeviceClient::OnIncomingCapturedData(
   if (!buffer.is_valid())
     return;
 
+  DCHECK(dimensions.height());
+  DCHECK(dimensions.width());
+
   auto buffer_access = buffer.handle_provider->GetHandleForInProcessAccess();
-  uint8_t *y_plane_data, *u_plane_data, *v_plane_data;
-  InitializeI420PlanePointers(dimensions, buffer_access->data(), &y_plane_data,
-                              &u_plane_data, &v_plane_data);
+  uint8_t* y_plane_data = buffer_access->data();
+  uint8_t* u_plane_data =
+      y_plane_data + VideoFrame::PlaneSize(media::PIXEL_FORMAT_I420,
+                                           VideoFrame::kYPlane, dimensions)
+                         .GetArea();
+  uint8_t* v_plane_data =
+      u_plane_data + VideoFrame::PlaneSize(media::PIXEL_FORMAT_I420,
+                                           VideoFrame::kUPlane, dimensions)
+                         .GetArea();
 
   const int yplane_stride = dimensions.width();
   const int uv_plane_stride = yplane_stride / 2;
@@ -281,6 +295,8 @@ void VideoCaptureDeviceClient::OnIncomingCapturedData(
     } else if (status == VideoCaptureJpegDecoder::INIT_PASSED &&
                format.pixel_format == media::PIXEL_FORMAT_MJPEG &&
                rotation == 0 && !flip) {
+      if (on_started_using_gpu_cb_)
+        std::move(on_started_using_gpu_cb_).Run();
       external_jpeg_decoder_->DecodeCapturedData(
           data, length, format, reference_time, timestamp, std::move(buffer));
       return;
@@ -336,9 +352,8 @@ VideoCaptureDeviceClient::ReserveOutputBuffer(
 
   if (!base::ContainsValue(buffer_ids_known_by_receiver_, buffer_id)) {
     receiver_->OnNewBufferHandle(
-        buffer_id,
-        base::MakeUnique<BufferPoolBufferHandleProvider>(buffer_pool_,
-                                                         buffer_id));
+        buffer_id, base::MakeUnique<BufferPoolBufferHandleProvider>(
+                       buffer_pool_, buffer_id));
     buffer_ids_known_by_receiver_.push_back(buffer_id);
   }
 
@@ -424,27 +439,6 @@ void VideoCaptureDeviceClient::OnStarted() {
 
 double VideoCaptureDeviceClient::GetBufferPoolUtilization() const {
   return buffer_pool_->GetBufferPoolUtilization();
-}
-
-void VideoCaptureDeviceClient::InitializeI420PlanePointers(
-    const gfx::Size& dimensions,
-    uint8_t* const data,
-    uint8_t** y_plane_data,
-    uint8_t** u_plane_data,
-    uint8_t** v_plane_data) {
-  DCHECK(dimensions.height());
-  DCHECK(dimensions.width());
-
-  const media::VideoPixelFormat format = media::PIXEL_FORMAT_I420;
-  // TODO(emircan): See http://crbug.com/521068, move this pointer
-  // arithmetic inside Buffer::data() when this bug is resolved.
-  *y_plane_data = data;
-  *u_plane_data =
-      *y_plane_data +
-      VideoFrame::PlaneSize(format, VideoFrame::kYPlane, dimensions).GetArea();
-  *v_plane_data =
-      *u_plane_data +
-      VideoFrame::PlaneSize(format, VideoFrame::kUPlane, dimensions).GetArea();
 }
 
 void VideoCaptureDeviceClient::OnIncomingCapturedY16Data(

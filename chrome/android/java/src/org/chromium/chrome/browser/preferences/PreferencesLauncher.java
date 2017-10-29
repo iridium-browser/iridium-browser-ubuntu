@@ -8,6 +8,10 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 
+import org.chromium.base.ContextUtils;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.chrome.browser.preferences.autofill.AutofillAndPaymentsPreferences;
+import org.chromium.chrome.browser.preferences.password.SavePasswordsPreferences;
 import org.chromium.chrome.browser.preferences.privacy.ClearBrowsingDataPreferences;
 import org.chromium.chrome.browser.preferences.privacy.ClearBrowsingDataTabsFragment;
 
@@ -15,6 +19,7 @@ import org.chromium.chrome.browser.preferences.privacy.ClearBrowsingDataTabsFrag
  * A utility class for launching Chrome Settings.
  */
 public class PreferencesLauncher {
+    private static final String TAG = "PreferencesLauncher";
 
     /**
      * Launches settings, either on the top-level page or on a subpage.
@@ -58,5 +63,17 @@ public class PreferencesLauncher {
                 ? ClearBrowsingDataTabsFragment.class.getName()
                 : ClearBrowsingDataPreferences.class.getName();
         return createIntentForSettingsPage(context, fragmentName);
+    }
+
+    @CalledByNative
+    private static void showAutofillSettings() {
+        launchSettingsPage(ContextUtils.getApplicationContext(),
+                AutofillAndPaymentsPreferences.class.getName());
+    }
+
+    @CalledByNative
+    private static void showPasswordSettings() {
+        launchSettingsPage(
+                ContextUtils.getApplicationContext(), SavePasswordsPreferences.class.getName());
     }
 }

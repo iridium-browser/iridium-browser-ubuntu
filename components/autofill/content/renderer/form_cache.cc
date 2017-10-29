@@ -4,6 +4,10 @@
 
 #include "components/autofill/content/renderer/form_cache.h"
 
+#include <algorithm>
+#include <string>
+#include <utility>
+
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/stl_util.h"
@@ -28,7 +32,7 @@ using blink::WebDocument;
 using blink::WebElement;
 using blink::WebFormControlElement;
 using blink::WebFormElement;
-using blink::WebFrame;
+using blink::WebLocalFrame;
 using blink::WebInputElement;
 using blink::WebNode;
 using blink::WebSelectElement;
@@ -41,7 +45,7 @@ namespace {
 
 void LogDeprecationMessages(const WebFormControlElement& element) {
   std::string autocomplete_attribute =
-      element.getAttribute("autocomplete").utf8();
+      element.GetAttribute("autocomplete").Utf8();
 
   static const char* const deprecated[] = { "region", "locality" };
   for (const char* str : deprecated) {
@@ -50,8 +54,8 @@ void LogDeprecationMessages(const WebFormControlElement& element) {
     std::string msg = std::string("autocomplete='") + str +
         "' is deprecated and will soon be ignored. See http://goo.gl/YjeSsW";
     WebConsoleMessage console_message = WebConsoleMessage(
-        WebConsoleMessage::LevelWarning, WebString::fromASCII(msg));
-    element.document().frame()->addMessageToConsole(console_message);
+        WebConsoleMessage::kLevelWarning, WebString::FromASCII(msg));
+    element.GetDocument().GetFrame()->AddMessageToConsole(console_message);
   }
 }
 
@@ -82,22 +86,21 @@ bool IsFormInteresting(const FormData& form, size_t num_editable_elements) {
 
 }  // namespace
 
-FormCache::FormCache(const WebFrame& frame) : frame_(frame) {
-}
+FormCache::FormCache(const WebLocalFrame& frame) : frame_(frame) {}
 
 FormCache::~FormCache() {
 }
 
 std::vector<FormData> FormCache::ExtractNewForms() {
   std::vector<FormData> forms;
-  WebDocument document = frame_.document();
-  if (document.isNull())
+  WebDocument document = frame_.GetDocument();
+  if (document.IsNull())
     return forms;
 
   initial_checked_state_.clear();
   initial_select_values_.clear();
   WebVector<WebFormElement> web_forms;
-  document.forms(web_forms);
+  document.Forms(web_forms);
 
   // Log an error message for deprecated attributes, but only the first time
   // the form is parsed.
@@ -147,7 +150,7 @@ std::vector<FormData> FormCache::ExtractNewForms() {
   // Look for more parseable fields outside of forms.
   std::vector<WebElement> fieldsets;
   std::vector<WebFormControlElement> control_elements =
-      form_util::GetUnownedAutofillableFormFieldElements(document.all(),
+      form_util::GetUnownedAutofillableFormFieldElements(document.All(),
                                                          &fieldsets);
 
   size_t num_editable_elements =
@@ -186,11 +189,11 @@ void FormCache::Reset() {
 }
 
 bool FormCache::ClearFormWithElement(const WebFormControlElement& element) {
-  WebFormElement form_element = element.form();
+  WebFormElement form_element = element.Form();
   std::vector<WebFormControlElement> control_elements;
-  if (form_element.isNull()) {
+  if (form_element.IsNull()) {
     control_elements = form_util::GetUnownedAutofillableFormFieldElements(
-        element.document().all(), nullptr);
+        element.GetDocument().All(), nullptr);
   } else {
     control_elements =
         form_util::ExtractAutofillableElementsInForm(form_element);
@@ -198,46 +201,46 @@ bool FormCache::ClearFormWithElement(const WebFormControlElement& element) {
   for (size_t i = 0; i < control_elements.size(); ++i) {
     WebFormControlElement control_element = control_elements[i];
     // Don't modify the value of disabled fields.
-    if (!control_element.isEnabled())
+    if (!control_element.IsEnabled())
       continue;
 
     // Don't clear field that was not autofilled
-    if (!control_element.isAutofilled())
+    if (!control_element.IsAutofilled())
       continue;
 
-    control_element.setAutofilled(false);
+    control_element.SetAutofilled(false);
 
-    WebInputElement* input_element = toWebInputElement(&control_element);
+    WebInputElement* input_element = ToWebInputElement(&control_element);
     if (form_util::IsTextInput(input_element) ||
         form_util::IsMonthInput(input_element)) {
-      input_element->setValue(blink::WebString(), true);
+      input_element->SetAutofillValue(blink::WebString());
 
       // Clearing the value in the focused node (above) can cause selection
       // to be lost. We force selection range to restore the text cursor.
       if (element == *input_element) {
-        int length = input_element->value().length();
-        input_element->setSelectionRange(length, length);
+        int length = input_element->Value().length();
+        input_element->SetSelectionRange(length, length);
       }
     } else if (form_util::IsTextAreaElement(control_element)) {
-      control_element.setValue(blink::WebString(), true);
+      control_element.SetAutofillValue(blink::WebString());
     } else if (form_util::IsSelectElement(control_element)) {
-      WebSelectElement select_element = control_element.to<WebSelectElement>();
+      WebSelectElement select_element = control_element.To<WebSelectElement>();
 
       std::map<const WebSelectElement, base::string16>::const_iterator
           initial_value_iter = initial_select_values_.find(select_element);
       if (initial_value_iter != initial_select_values_.end() &&
-          select_element.value().utf16() != initial_value_iter->second) {
-        select_element.setValue(
-            blink::WebString::fromUTF16(initial_value_iter->second), true);
+          select_element.Value().Utf16() != initial_value_iter->second) {
+        select_element.SetAutofillValue(
+            blink::WebString::FromUTF16(initial_value_iter->second));
       }
     } else {
-      WebInputElement input_element = control_element.to<WebInputElement>();
+      WebInputElement input_element = control_element.To<WebInputElement>();
       DCHECK(form_util::IsCheckableElement(&input_element));
       std::map<const WebInputElement, bool>::const_iterator it =
           initial_checked_state_.find(input_element);
       if (it != initial_checked_state_.end() &&
-          input_element.isChecked() != it->second) {
-        input_element.setChecked(it->second, true);
+          input_element.IsChecked() != it->second) {
+        input_element.SetChecked(it->second, true);
       }
     }
   }
@@ -254,9 +257,9 @@ bool FormCache::ShowPredictions(const FormDataPredictions& form) {
   bool found_synthetic_form = false;
   if (form.data.SameFormAs(synthetic_form_)) {
     found_synthetic_form = true;
-    WebDocument document = frame_.document();
+    WebDocument document = frame_.GetDocument();
     control_elements = form_util::GetUnownedAutofillableFormFieldElements(
-        document.all(), nullptr);
+        document.All(), nullptr);
   }
 
   if (!found_synthetic_form) {
@@ -264,7 +267,7 @@ bool FormCache::ShowPredictions(const FormDataPredictions& form) {
     bool found_form = false;
     WebFormElement form_element;
     WebVector<WebFormElement> web_forms;
-    frame_.document().forms(web_forms);
+    frame_.GetDocument().Forms(web_forms);
 
     for (size_t i = 0; i < web_forms.size(); ++i) {
       form_element = web_forms[i];
@@ -277,7 +280,8 @@ bool FormCache::ShowPredictions(const FormDataPredictions& form) {
       // an "empty" string (rhs). We don't want that distinction, so forcing
       // to string16.
       base::string16 element_name = form_util::GetFormIdentifier(form_element);
-      GURL action(form_element.document().completeURL(form_element.action()));
+      GURL action(
+          form_element.GetDocument().CompleteURL(form_element.Action()));
       if (element_name == form.data.name && action == form.data.action) {
         found_form = true;
         control_elements =
@@ -300,7 +304,7 @@ bool FormCache::ShowPredictions(const FormDataPredictions& form) {
     WebFormControlElement& element = control_elements[i];
 
     const FormFieldData& field_data = form.data.fields[i];
-    if (element.nameForAutofill().utf16() != field_data.name) {
+    if (element.NameForAutofill().Utf16() != field_data.name) {
       // Keep things simple.  Don't show predictions for elements whose names
       // were modified between page load and the server's response to our query.
       continue;
@@ -324,10 +328,10 @@ bool FormCache::ShowPredictions(const FormDataPredictions& form) {
     replacements.push_back(base::UTF8ToUTF16(form.signature));
     const base::string16 title = l10n_util::GetStringFUTF16(
         IDS_AUTOFILL_SHOW_PREDICTIONS_TITLE, replacements, nullptr);
-    element.setAttribute("title", WebString::fromUTF16(title));
+    element.SetAttribute("title", WebString::FromUTF16(title));
 
-    element.setAttribute("autofill-prediction",
-                         WebString::fromUTF16(overall_type));
+    element.SetAttribute("autofill-prediction",
+                         WebString::FromUTF16(overall_type));
   }
 
   return true;
@@ -349,7 +353,7 @@ size_t FormCache::ScanFormControlElements(
         form_util::IsTextAreaElement(element)) {
       ++num_editable_elements;
     } else {
-      const WebInputElement input_element = element.toConst<WebInputElement>();
+      const WebInputElement input_element = element.ToConst<WebInputElement>();
       if (!form_util::IsCheckableElement(&input_element))
         ++num_editable_elements;
     }
@@ -362,14 +366,14 @@ void FormCache::SaveInitialValues(
   for (const WebFormControlElement& element : control_elements) {
     if (form_util::IsSelectElement(element)) {
       const WebSelectElement select_element =
-          element.toConst<WebSelectElement>();
+          element.ToConst<WebSelectElement>();
       initial_select_values_.insert(
-          std::make_pair(select_element, select_element.value().utf16()));
+          std::make_pair(select_element, select_element.Value().Utf16()));
     } else {
-      const WebInputElement* input_element = toWebInputElement(&element);
+      const WebInputElement* input_element = ToWebInputElement(&element);
       if (form_util::IsCheckableElement(input_element)) {
         initial_checked_state_.insert(
-            std::make_pair(*input_element, input_element->isChecked()));
+            std::make_pair(*input_element, input_element->IsChecked()));
       }
     }
   }

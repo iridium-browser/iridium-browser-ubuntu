@@ -31,9 +31,9 @@
 #ifndef DataTransferItemList_h
 #define DataTransferItemList_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -50,7 +50,7 @@ class DataTransferItemList final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static DataTransferItemList* create(DataTransfer*, DataObject*);
+  static DataTransferItemList* Create(DataTransfer*, DataObject*);
 
   size_t length() const;
   DataTransferItem* item(unsigned long index);
@@ -66,8 +66,8 @@ class DataTransferItemList final
  private:
   DataTransferItemList(DataTransfer*, DataObject*);
 
-  Member<DataTransfer> m_dataTransfer;
-  Member<DataObject> m_dataObject;
+  Member<DataTransfer> data_transfer_;
+  Member<DataObject> data_object_;
 };
 
 }  // namespace blink

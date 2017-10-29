@@ -8,53 +8,60 @@
 #ifndef GrOpList_DEFINED
 #define GrOpList_DEFINED
 
+#include "GrGpuResourceRef.h"
 #include "SkRefCnt.h"
 #include "SkTDArray.h"
 
 //#define ENABLE_MDB 1
 
 class GrAuditTrail;
+class GrCaps;
 class GrOpFlushState;
 class GrRenderTargetOpList;
-class GrSurface;
+class GrResourceProvider;
 class GrSurfaceProxy;
+class GrTextureProxy;
 class GrTextureOpList;
+
+struct SkIPoint;
+struct SkIRect;
 
 class GrOpList : public SkRefCnt {
 public:
-    GrOpList(GrSurfaceProxy* surfaceProxy, GrAuditTrail* auditTrail);
+    GrOpList(GrResourceProvider*, GrSurfaceProxy*, GrAuditTrail*);
     ~GrOpList() override;
 
-    // These two methods are invoked as flush time
+    // These three methods are invoked at flush time
+    bool instantiate(GrResourceProvider* resourceProvider);
     virtual void prepareOps(GrOpFlushState* flushState) = 0;
     virtual bool executeOps(GrOpFlushState* flushState) = 0;
 
-    virtual void makeClosed() {
-        // We only close GrOpLists when MDB is enabled. When MDB is disabled there is only
-        // ever one GrOpLists and all calls will be funnelled into it.
-#ifdef ENABLE_MDB
-        this->setFlag(kClosed_Flag);
-#endif    
+    virtual bool copySurface(const GrCaps& caps,
+                             GrSurfaceProxy* dst,
+                             GrSurfaceProxy* src,
+                             const SkIRect& srcRect,
+                             const SkIPoint& dstPoint) = 0;
+
+    virtual void makeClosed(const GrCaps&) {
+        if (!this->isClosed()) {
+            this->setFlag(kClosed_Flag);
+            fTarget.removeRef();
+        }
     }
 
-    // TODO: it seems a bit odd that GrOpList has nothing to clear on reset
-    virtual void reset() = 0;
+    virtual void reset();
 
     // TODO: in an MDB world, where the OpLists don't allocate GPU resources, it seems like
     // these could go away
     virtual void abandonGpuResources() = 0;
     virtual void freeGpuResources() = 0;
 
-    // TODO: this entry point is only needed in the non-MDB world. Remove when
-    // we make the switch to MDB
-    void clearTarget() { fTarget = nullptr; }
-
     bool isClosed() const { return this->isSetFlag(kClosed_Flag); }
 
     /*
      * Notify this GrOpList that it relies on the contents of 'dependedOn'
      */
-    void addDependency(GrSurface* dependedOn);
+    void addDependency(GrSurfaceProxy* dependedOn, const GrCaps& caps);
 
     /*
      * Does this opList depend on 'dependedOn'?
@@ -73,13 +80,24 @@ public:
      */
     virtual GrRenderTargetOpList* asRenderTargetOpList() { return nullptr; }
 
+    int32_t uniqueID() const { return fUniqueID; }
+
     /*
      * Dump out the GrOpList dependency DAG
      */
     SkDEBUGCODE(virtual void dump() const;)
 
+    SkDEBUGCODE(virtual int numOps() const = 0;)
+    SkDEBUGCODE(virtual int numClips() const { return 0; })
+
+protected:
+    GrSurfaceProxyRef fTarget;
+    GrAuditTrail*     fAuditTrail;
+
 private:
     friend class GrDrawingManager; // for resetFlag & TopoSortTraits
+
+    static uint32_t CreateUniqueID();
 
     enum Flags {
         kClosed_Flag    = 0x01,   //!< This GrOpList can't accept any more ops
@@ -126,15 +144,11 @@ private:
 
     void addDependency(GrOpList* dependedOn);
 
-    SkDEBUGCODE(int                                 fDebugID;)
-    uint32_t                                        fFlags;
-    GrSurfaceProxy*                                 fTarget;
+    uint32_t              fUniqueID;
+    uint32_t              fFlags;
 
     // 'this' GrOpList relies on the output of the GrOpLists in 'fDependencies'
-    SkTDArray<GrOpList*>                            fDependencies;
-
-protected:
-    GrAuditTrail*                                   fAuditTrail;
+    SkTDArray<GrOpList*>  fDependencies;
 
     typedef SkRefCnt INHERITED;
 };

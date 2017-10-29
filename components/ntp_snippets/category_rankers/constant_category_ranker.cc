@@ -5,6 +5,8 @@
 #include "components/ntp_snippets/category_rankers/constant_category_ranker.h"
 
 #include "base/stl_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "components/ntp_snippets/features.h"
 
 namespace ntp_snippets {
@@ -57,6 +59,51 @@ void ConstantCategoryRanker::AppendCategoryIfNecessary(Category category) {
   }
 }
 
+void ConstantCategoryRanker::InsertCategoryBeforeIfNecessary(
+    Category category_to_insert,
+    Category anchor) {
+  // TODO(vitaliii): Implement.
+  LOG(DFATAL) << "Not implemented, use ClickBasedCategoryRanker instead for "
+                 "inserting categories relative to other categories.";
+  AppendCategoryIfNecessary(category_to_insert);
+}
+
+void ConstantCategoryRanker::InsertCategoryAfterIfNecessary(
+    Category category_to_insert,
+    Category anchor) {
+  // TODO(vitaliii): Implement.
+  LOG(DFATAL) << "Not implemented, use ClickBasedCategoryRanker instead for "
+                 "inserting categories relative to other categories.";
+  AppendCategoryIfNecessary(category_to_insert);
+}
+
+std::vector<CategoryRanker::DebugDataItem>
+ConstantCategoryRanker::GetDebugData() {
+  std::vector<CategoryRanker::DebugDataItem> result;
+  result.push_back(
+      CategoryRanker::DebugDataItem("Type", "ConstantCategoryRanker"));
+
+  std::string initial_order_type;
+  CategoryOrderChoice choice = GetSelectedCategoryOrder();
+  if (choice == CategoryOrderChoice::GENERAL) {
+    initial_order_type = "GENERAL";
+  }
+  if (choice == CategoryOrderChoice::EMERGING_MARKETS_ORIENTED) {
+    initial_order_type = "EMERGING_MARKETS_ORIENTED;";
+  }
+  result.push_back(
+      CategoryRanker::DebugDataItem("Initial order type", initial_order_type));
+
+  std::vector<std::string> category_strings;
+  for (Category category : ordered_categories_) {
+    category_strings.push_back(base::IntToString(category.id()));
+  }
+  result.push_back(CategoryRanker::DebugDataItem(
+      "Current order", base::JoinString(category_strings, ", ")));
+
+  return result;
+}
+
 void ConstantCategoryRanker::OnSuggestionOpened(Category category) {
   // Ignored. The order is constant.
 }
@@ -73,6 +120,7 @@ ConstantCategoryRanker::GetKnownCategoriesDefaultOrder() {
   switch (choice) {
     case CategoryOrderChoice::GENERAL:
       categories.push_back(KnownCategories::PHYSICAL_WEB_PAGES);
+      categories.push_back(KnownCategories::READING_LIST);
       categories.push_back(KnownCategories::DOWNLOADS);
       categories.push_back(KnownCategories::RECENT_TABS);
       categories.push_back(KnownCategories::FOREIGN_TABS);
@@ -81,6 +129,7 @@ ConstantCategoryRanker::GetKnownCategoriesDefaultOrder() {
       break;
     case CategoryOrderChoice::EMERGING_MARKETS_ORIENTED:
       categories.push_back(KnownCategories::ARTICLES);
+      categories.push_back(KnownCategories::READING_LIST);
       categories.push_back(KnownCategories::DOWNLOADS);
       categories.push_back(KnownCategories::BOOKMARKS);
 
@@ -91,7 +140,7 @@ ConstantCategoryRanker::GetKnownCategoriesDefaultOrder() {
   }
 
   static_assert(
-      static_cast<size_t>(KnownCategories::LOCAL_CATEGORIES_COUNT) == 5,
+      static_cast<size_t>(KnownCategories::LOCAL_CATEGORIES_COUNT) == 6,
       "All local KnownCategories must be present in all orders.");
 
   // Other remote categories will be ordered after these depending on when

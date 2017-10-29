@@ -12,6 +12,8 @@ from recipe_engine import recipe_api
 BUILD_PRODUCTS_ISOLATE_WHITELIST = [
   'dm',
   'dm.exe',
+  'dm.app',
+  'nanobench.app',
   'get_images_from_skps',
   'get_images_from_skps.exe',
   'nanobench',
@@ -58,44 +60,29 @@ class SkiaStepApi(recipe_api.RecipeApi):
 
   def readfile(self, filename, *args, **kwargs):
     """Convenience function for reading files."""
-    name = kwargs.pop('name') or 'read %s' % self.m.path.basename(filename)
-    return self.m.file.read(name, filename, infra_step=True, *args, **kwargs)
+    name = kwargs.pop('name', 'read %s' % self.m.path.basename(filename))
+    return self.m.file.read_text(name, filename, *args, **kwargs)
 
   def writefile(self, filename, contents):
     """Convenience function for writing files."""
-    return self.m.file.write('write %s' % self.m.path.basename(filename),
-                             filename, contents, infra_step=True)
+    return self.m.file.write_text('write %s' % self.m.path.basename(filename),
+                                  filename, contents)
 
   def rmtree(self, path):
-    """Wrapper around api.file.rmtree with environment fix."""
-    env = {}
-    env['PYTHONPATH'] = str(self.m.path['start_dir'].join(
-        'skia', 'infra', 'bots', '.recipe_deps', 'build', 'scripts'))
-    self.m.file.rmtree(self.m.path.basename(path),
-                       path,
-                       env=env,
-                       infra_step=True)
-
-  def _run(self, steptype, **kwargs):
-    """Wrapper for running a step."""
-    cwd = kwargs.pop('cwd', None)
-    if cwd:
-      with self.m.step.context({'cwd': cwd}):
-        return steptype(**kwargs)
-    return steptype(**kwargs)
+    """Wrapper around api.file.rmtree."""
+    self.m.file.rmtree('rmtree %s' % self.m.path.basename(path), path)
 
   def __call__(self, steptype, name, abort_on_failure=True,
-               fail_build_on_failure=True, env=None, **kwargs):
+               fail_build_on_failure=True, **kwargs):
     """Run a step. If it fails, keep going but mark the build status failed."""
-    env = env or {}
-    env.update(self.m.vars.default_env)
     try:
-      return self._run(steptype, name=name, env=env, **kwargs)
+      with self.m.env(self.m.vars.default_env):
+        return steptype(name=name, **kwargs)
     except self.m.step.StepFailure as e:
       if abort_on_failure or fail_build_on_failure:
         self._failed.append(e)
       if abort_on_failure:
-        raise  # pragma: no cover
+        raise
 
   def copy_build_products(self, src, dst):
     """Copy whitelisted build products from src to dst."""
@@ -135,7 +122,7 @@ for pattern in build_products_whitelist:
       if attempt > 0:
         step_name += ' (attempt %d)' % (attempt + 1)
       try:
-        res = self._run(steptype, name=step_name, **kwargs)
+        res = self(steptype, name=step_name, **kwargs)
         return res
       except self.m.step.StepFailure:
         if attempt == attempts - 1:

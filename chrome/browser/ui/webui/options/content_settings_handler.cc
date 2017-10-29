@@ -18,6 +18,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -64,7 +65,6 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_switches.h"
@@ -205,7 +205,7 @@ std::unique_ptr<base::DictionaryValue> GetGeolocationExceptionForPage(
     const ContentSettingsPattern& origin,
     const ContentSettingsPattern& embedding_origin,
     ContentSetting setting) {
-  base::DictionaryValue* exception = new base::DictionaryValue();
+  auto exception = base::MakeUnique<base::DictionaryValue>();
 
   std::string setting_string =
       content_settings::ContentSettingToString(setting);
@@ -215,7 +215,7 @@ std::unique_ptr<base::DictionaryValue> GetGeolocationExceptionForPage(
   exception->SetString(site_settings::kOrigin, origin.ToString());
   exception->SetString(
       site_settings::kEmbeddingOrigin, embedding_origin.ToString());
-  return base::WrapUnique(exception);
+  return exception;
 }
 
 // Create a DictionaryValue* that will act as a data source for a single row
@@ -229,7 +229,7 @@ std::unique_ptr<base::DictionaryValue> GetNotificationExceptionForPage(
   if (secondary_pattern != ContentSettingsPattern::Wildcard())
     embedding_origin = secondary_pattern.ToString();
 
-  base::DictionaryValue* exception = new base::DictionaryValue();
+  auto exception = base::MakeUnique<base::DictionaryValue>();
 
   std::string setting_string =
       content_settings::ContentSettingToString(setting);
@@ -239,7 +239,7 @@ std::unique_ptr<base::DictionaryValue> GetNotificationExceptionForPage(
   exception->SetString(site_settings::kOrigin, primary_pattern.ToString());
   exception->SetString(site_settings::kEmbeddingOrigin, embedding_origin);
   exception->SetString(site_settings::kSource, provider_name);
-  return base::WrapUnique(exception);
+  return exception;
 }
 
 // Returns true whenever the |extension| is hosted and has |permission|.
@@ -838,7 +838,7 @@ void ContentSettingsHandler::UpdateGeolocationExceptionsView() {
       continue;
     }
     all_patterns_settings[std::make_pair(i->primary_pattern, i->source)]
-        [i->secondary_pattern] = i->setting;
+                         [i->secondary_pattern] = i->GetContentSetting();
   }
 
   base::ListValue exceptions;
@@ -876,7 +876,7 @@ void ContentSettingsHandler::UpdateGeolocationExceptionsView() {
     }
   }
 
-  base::StringValue type_string(site_settings::ContentSettingsTypeToGroupName(
+  base::Value type_string(site_settings::ContentSettingsTypeToGroupName(
       CONTENT_SETTINGS_TYPE_GEOLOCATION));
   web_ui()->CallJavascriptFunctionUnsafe("ContentSettings.setExceptions",
                                          type_string, exceptions);
@@ -909,14 +909,12 @@ void ContentSettingsHandler::UpdateNotificationExceptionsView() {
       continue;
     }
 
-    exceptions.Append(
-        GetNotificationExceptionForPage(i->primary_pattern,
-                                        i->secondary_pattern,
-                                        i->setting,
-                                        i->source));
+    exceptions.Append(GetNotificationExceptionForPage(
+        i->primary_pattern, i->secondary_pattern, i->GetContentSetting(),
+        i->source));
   }
 
-  base::StringValue type_string(site_settings::ContentSettingsTypeToGroupName(
+  base::Value type_string(site_settings::ContentSettingsTypeToGroupName(
       CONTENT_SETTINGS_TYPE_NOTIFICATIONS));
   web_ui()->CallJavascriptFunctionUnsafe("ContentSettings.setExceptions",
                                          type_string, exceptions);
@@ -941,8 +939,8 @@ void ContentSettingsHandler::CompareMediaExceptionsWithFlash(
   settings.exceptions.clear();
   for (base::ListValue::const_iterator entry = exceptions.begin();
        entry != exceptions.end(); ++entry) {
-    base::DictionaryValue* dict = nullptr;
-    bool valid_dict = (*entry)->GetAsDictionary(&dict);
+    const base::DictionaryValue* dict = nullptr;
+    bool valid_dict = entry->GetAsDictionary(&dict);
     DCHECK(valid_dict);
 
     std::string origin;
@@ -990,7 +988,7 @@ void ContentSettingsHandler::UpdateChooserExceptionsViewFromModel(
   base::ListValue exceptions;
   site_settings::GetChooserExceptionsFromProfile(
       Profile::FromWebUI(web_ui()), false, chooser_type, &exceptions);
-  base::StringValue type_string(chooser_type.name);
+  base::Value type_string(chooser_type.name);
   web_ui()->CallJavascriptFunctionUnsafe("ContentSettings.setExceptions",
                                          type_string, exceptions);
 
@@ -1005,7 +1003,7 @@ void ContentSettingsHandler::UpdateOTRChooserExceptionsViewFromModel(
   base::ListValue exceptions;
   site_settings::GetChooserExceptionsFromProfile(
       Profile::FromWebUI(web_ui()), true, chooser_type, &exceptions);
-  base::StringValue type_string(chooser_type.name);
+  base::Value type_string(chooser_type.name);
   web_ui()->CallJavascriptFunctionUnsafe("ContentSettings.setOTRExceptions",
                                          type_string, exceptions);
 }
@@ -1070,7 +1068,7 @@ void ContentSettingsHandler::UpdateZoomLevelsExceptionsView() {
     zoom_levels_exceptions.Append(std::move(exception));
   }
 
-  base::StringValue type_string(kZoomContentType);
+  base::Value type_string(kZoomContentType);
   web_ui()->CallJavascriptFunctionUnsafe("ContentSettings.setExceptions",
                                          type_string, zoom_levels_exceptions);
 }
@@ -1085,8 +1083,7 @@ void ContentSettingsHandler::UpdateExceptionsViewFromHostContentSettingsMap(
   site_settings::GetExceptionsFromHostContentSettingsMap(
       settings_map, type, extension_registry, web_ui(), /*incognito=*/false,
       /*filter=*/nullptr, &exceptions);
-  base::StringValue type_string(
-      site_settings::ContentSettingsTypeToGroupName(type));
+  base::Value type_string(site_settings::ContentSettingsTypeToGroupName(type));
   web_ui()->CallJavascriptFunctionUnsafe("ContentSettings.setExceptions",
                                          type_string, exceptions);
 
@@ -1115,8 +1112,7 @@ void ContentSettingsHandler::UpdateExceptionsViewFromOTRHostContentSettingsMap(
   site_settings::GetExceptionsFromHostContentSettingsMap(
       otr_settings_map, type, extension_registry, web_ui(), /*incognito=*/true,
       /*filter=*/nullptr, &exceptions);
-  base::StringValue type_string(
-      site_settings::ContentSettingsTypeToGroupName(type));
+  base::Value type_string(site_settings::ContentSettingsTypeToGroupName(type));
   web_ui()->CallJavascriptFunctionUnsafe("ContentSettings.setOTRExceptions",
                                          type_string, exceptions);
 }
@@ -1264,7 +1260,7 @@ void ContentSettingsHandler::SetContentFilter(const base::ListValue* args) {
   const ExceptionsInfoMap& exceptions_info_map = GetExceptionsInfoMap();
   const auto& it = exceptions_info_map.find(content_type);
   if (it != exceptions_info_map.end())
-    content::RecordAction(it->second.uma);
+    base::RecordAction(it->second.uma);
 }
 
 void ContentSettingsHandler::RemoveException(const base::ListValue* args) {
@@ -1350,9 +1346,9 @@ void ContentSettingsHandler::CheckExceptionPatternValidity(
       ContentSettingsPattern::FromString(pattern_string);
 
   web_ui()->CallJavascriptFunctionUnsafe(
-      "ContentSettings.patternValidityCheckComplete",
-      base::StringValue(type_string), base::StringValue(mode_string),
-      base::StringValue(pattern_string), base::Value(pattern.IsValid()));
+      "ContentSettings.patternValidityCheckComplete", base::Value(type_string),
+      base::Value(mode_string), base::Value(pattern_string),
+      base::Value(pattern.IsValid()));
 }
 
 Profile* ContentSettingsHandler::GetProfile() {
@@ -1413,11 +1409,10 @@ void ContentSettingsHandler::ShowFlashMediaLink(
   if (show_link != show) {
     web_ui()->CallJavascriptFunctionUnsafe(
         "ContentSettings.showMediaPepperFlashLink",
-        base::StringValue(link_type == DEFAULT_SETTING ? "default"
-                                                       : "exceptions"),
-        base::StringValue(content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
-                              ? "mic"
-                              : "camera"),
+        base::Value(link_type == DEFAULT_SETTING ? "default" : "exceptions"),
+        base::Value(content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
+                        ? "mic"
+                        : "camera"),
         base::Value(show));
     show_link = show;
   }
@@ -1475,7 +1470,7 @@ void ContentSettingsHandler::UpdateMediaDeviceDropdownVisibility(
 
   web_ui()->CallJavascriptFunctionUnsafe(
       "ContentSettings.setDevicesMenuVisibility",
-      base::StringValue(site_settings::ContentSettingsTypeToGroupName(type)),
+      base::Value(site_settings::ContentSettingsTypeToGroupName(type)),
       base::Value(!settings.policy_disable));
 }
 

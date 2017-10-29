@@ -8,6 +8,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
+#include "content/common/feature_policy/feature_policy.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "third_party/WebKit/public/platform/WebFocusType.h"
@@ -17,11 +18,10 @@
 #include "url/origin.h"
 
 namespace blink {
-class WebInputEvent;
 struct WebRect;
 }
 
-namespace cc {
+namespace viz {
 class SurfaceInfo;
 struct SurfaceSequence;
 }
@@ -94,8 +94,9 @@ class CONTENT_EXPORT RenderFrameProxy
   // Returns the RenderFrameProxy for the given routing ID.
   static RenderFrameProxy* FromRoutingID(int routing_id);
 
-  // Returns the RenderFrameProxy given a WebFrame.
-  static RenderFrameProxy* FromWebFrame(blink::WebFrame* web_frame);
+  // Returns the RenderFrameProxy given a WebRemoteFrame. |web_frame| must not
+  // be null, nor will this method return null.
+  static RenderFrameProxy* FromWebFrame(blink::WebRemoteFrame* web_frame);
 
   ~RenderFrameProxy() override;
 
@@ -117,6 +118,7 @@ class CONTENT_EXPORT RenderFrameProxy
   int routing_id() { return routing_id_; }
   RenderViewImpl* render_view() { return render_view_; }
   blink::WebRemoteFrame* web_frame() { return web_frame_; }
+  const std::string& unique_name() const { return unique_name_; }
 
   void set_provisional_frame_routing_id(int routing_id) {
     provisional_frame_routing_id_ = routing_id;
@@ -128,22 +130,22 @@ class CONTENT_EXPORT RenderFrameProxy
   RenderWidget* render_widget() { return render_widget_; }
 
   // blink::WebRemoteFrameClient implementation:
-  void frameDetached(DetachType type) override;
-  void forwardPostMessage(blink::WebLocalFrame* sourceFrame,
+  void FrameDetached(DetachType type) override;
+  void ForwardPostMessage(blink::WebLocalFrame* sourceFrame,
                           blink::WebRemoteFrame* targetFrame,
                           blink::WebSecurityOrigin target,
                           blink::WebDOMMessageEvent event) override;
-  void navigate(const blink::WebURLRequest& request,
+  void Navigate(const blink::WebURLRequest& request,
                 bool should_replace_current_entry) override;
-  void forwardInputEvent(const blink::WebInputEvent* event) override;
-  void frameRectsChanged(const blink::WebRect& frame_rect) override;
-  void updateRemoteViewportIntersection(
+  void FrameRectsChanged(const blink::WebRect& frame_rect) override;
+  void UpdateRemoteViewportIntersection(
       const blink::WebRect& viewportIntersection) override;
-  void visibilityChanged(bool visible) override;
-  void didChangeOpener(blink::WebFrame* opener) override;
-  void advanceFocus(blink::WebFocusType type,
+  void VisibilityChanged(bool visible) override;
+  void SetIsInert(bool) override;
+  void DidChangeOpener(blink::WebFrame* opener) override;
+  void AdvanceFocus(blink::WebFocusType type,
                     blink::WebLocalFrame* source) override;
-  void frameFocused() override;
+  void FrameFocused() override;
 
   // IPC handlers
   void OnDidStartLoading();
@@ -162,14 +164,18 @@ class CONTENT_EXPORT RenderFrameProxy
   void OnDeleteProxy();
   void OnChildFrameProcessGone();
   void OnCompositorFrameSwapped(const IPC::Message& message);
-  void OnSetChildFrameSurface(const cc::SurfaceInfo& surface_info,
-                              const cc::SurfaceSequence& sequence);
+  void OnSetChildFrameSurface(const viz::SurfaceInfo& surface_info,
+                              const viz::SurfaceSequence& sequence);
   void OnUpdateOpener(int opener_routing_id);
   void OnDidStopLoading();
-  void OnDidUpdateSandboxFlags(blink::WebSandboxFlags flags);
+  void OnDidUpdateFramePolicy(
+      blink::WebSandboxFlags flags,
+      const ParsedFeaturePolicyHeader& container_policy);
   void OnDispatchLoad();
+  void OnCollapse(bool collapsed);
   void OnDidUpdateName(const std::string& name, const std::string& unique_name);
-  void OnAddContentSecurityPolicy(const ContentSecurityPolicyHeader& header);
+  void OnAddContentSecurityPolicies(
+      const std::vector<ContentSecurityPolicyHeader>& header);
   void OnResetContentSecurityPolicy();
   void OnEnforceInsecureRequestPolicy(blink::WebInsecureRequestPolicy policy);
   void OnSetFrameOwnerProperties(const FrameOwnerProperties& properties);
@@ -189,6 +195,7 @@ class CONTENT_EXPORT RenderFrameProxy
 
   // Stores the WebRemoteFrame we are associated with.
   blink::WebRemoteFrame* web_frame_;
+  std::string unique_name_;
   scoped_refptr<ChildFrameCompositingHelper> compositing_helper_;
 
   RenderViewImpl* render_view_;

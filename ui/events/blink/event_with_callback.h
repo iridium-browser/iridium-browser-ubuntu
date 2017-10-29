@@ -8,7 +8,7 @@
 #include <list>
 
 #include "ui/events/blink/input_handler_proxy.h"
-#include "ui/events/latency_info.h"
+#include "ui/latency/latency_info.h"
 
 namespace ui {
 
@@ -21,18 +21,17 @@ class EventWithCallback {
   struct OriginalEventWithCallback {
     OriginalEventWithCallback(
         WebScopedInputEvent event,
-        const InputHandlerProxy::EventDispositionCallback& callback);
+        InputHandlerProxy::EventDispositionCallback callback);
     ~OriginalEventWithCallback();
     WebScopedInputEvent event_;
     InputHandlerProxy::EventDispositionCallback callback_;
   };
   using OriginalEventList = std::list<OriginalEventWithCallback>;
 
-  EventWithCallback(
-      WebScopedInputEvent event,
-      const LatencyInfo& latency,
-      base::TimeTicks timestamp_now,
-      const InputHandlerProxy::EventDispositionCallback& callback);
+  EventWithCallback(WebScopedInputEvent event,
+                    const LatencyInfo& latency,
+                    base::TimeTicks timestamp_now,
+                    InputHandlerProxy::EventDispositionCallback callback);
   EventWithCallback(WebScopedInputEvent event,
                     const LatencyInfo& latency,
                     base::TimeTicks creation_timestamp,

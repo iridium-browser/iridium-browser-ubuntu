@@ -37,8 +37,9 @@ struct DeviceScaleFactorDPIThreshold {
   float device_scale_factor;
 };
 
-const DeviceScaleFactorDPIThreshold kThresholdTable[] = {
-    {200.0f, 2.0f},
+const DeviceScaleFactorDPIThreshold kThresholdTableForInternal[] = {
+    {220.0f, 2.0f},
+    {200.0f, 1.6f},
     {150.0f, 1.25f},
     {0.0f, 1.0f},
 };
@@ -220,17 +221,9 @@ void DisplayChangeObserver::OnDisplayModeChanged(
     }
     gfx::Rect display_bounds(state->origin(), mode_info->size());
 
-    std::string name;
-    switch (state->type()) {
-      case DISPLAY_CONNECTION_TYPE_INTERNAL:
-        name = l10n_util::GetStringUTF8(IDS_DISPLAY_NAME_INTERNAL);
-        break;
-      case DISPLAY_CONNECTION_TYPE_VIRTUAL:
-        name = l10n_util::GetStringUTF8(IDS_DISPLAY_NAME_VIRTUAL);
-        break;
-      default:
-        name = state->display_name();
-    }
+    std::string name = (state->type() == DISPLAY_CONNECTION_TYPE_INTERNAL)
+                           ? l10n_util::GetStringUTF8(IDS_DISPLAY_NAME_INTERNAL)
+                           : state->display_name();
 
     if (name.empty())
       name = l10n_util::GetStringUTF8(IDS_DISPLAY_NAME_UNKNOWN);
@@ -297,9 +290,9 @@ void DisplayChangeObserver::OnTouchscreenDeviceConfigurationChanged() {
 
 // static
 float DisplayChangeObserver::FindDeviceScaleFactor(float dpi) {
-  for (size_t i = 0; i < arraysize(kThresholdTable); ++i) {
-    if (dpi > kThresholdTable[i].dpi)
-      return kThresholdTable[i].device_scale_factor;
+  for (size_t i = 0; i < arraysize(kThresholdTableForInternal); ++i) {
+    if (dpi > kThresholdTableForInternal[i].dpi)
+      return kThresholdTableForInternal[i].device_scale_factor;
   }
   return 1.0f;
 }

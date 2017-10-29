@@ -15,16 +15,15 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/metrics/user_metrics.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/chromeos_metrics_provider.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/serialization/metric_sample.h"
 #include "components/metrics/serialization/serialization_utils.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/user_metrics.h"
 
-using base::UserMetricsAction;
 using content::BrowserThread;
 
 namespace chromeos {
@@ -49,11 +48,12 @@ bool CheckLinearValues(const std::string& name, int maximum) {
   return CheckValues(name, 1, maximum, maximum + 1);
 }
 
-}  // namespace
+// The interval between external metrics collections.
+constexpr base::TimeDelta kExternalMetricsCollectionInterval =
+    base::TimeDelta::FromSeconds(30);
+constexpr char kEventsFilePath[] = "/var/lib/metrics/uma-events";
 
-// The interval between external metrics collections in seconds
-static const int kExternalMetricsCollectionIntervalSeconds = 30;
-const char kEventsFilePath[] = "/var/lib/metrics/uma-events";
+}  // namespace
 
 ExternalMetrics::ExternalMetrics() : uma_events_file_(kEventsFilePath) {
 }
@@ -73,7 +73,7 @@ scoped_refptr<ExternalMetrics> ExternalMetrics::CreateForTesting(
 }
 
 void ExternalMetrics::RecordActionUI(const std::string& action_string) {
-  content::RecordComputedAction(action_string);
+  base::RecordComputedAction(action_string);
 }
 
 void ExternalMetrics::RecordAction(const std::string& action) {
@@ -172,11 +172,11 @@ void ExternalMetrics::CollectEventsAndReschedule() {
 }
 
 void ExternalMetrics::ScheduleCollector() {
-  bool result = BrowserThread::GetBlockingPool()->PostDelayedWorkerTask(
-      FROM_HERE,
-      base::Bind(&chromeos::ExternalMetrics::CollectEventsAndReschedule, this),
-      base::TimeDelta::FromSeconds(kExternalMetricsCollectionIntervalSeconds));
-  DCHECK(result);
+  base::PostDelayedTaskWithTraits(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::BindOnce(&chromeos::ExternalMetrics::CollectEventsAndReschedule,
+                     this),
+      kExternalMetricsCollectionInterval);
 }
 
 }  // namespace chromeos

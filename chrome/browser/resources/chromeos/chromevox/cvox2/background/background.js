@@ -23,7 +23,6 @@ goog.require('Notifications');
 goog.require('Output');
 goog.require('Output.EventType');
 goog.require('PanelCommand');
-goog.require('Stubs');
 goog.require('constants');
 goog.require('cursors.Cursor');
 goog.require('cvox.BrailleKeyCommand');
@@ -73,17 +72,6 @@ Background = function() {
       chrome.runtime.getManifest()['content_scripts'][0]['exclude_globs']);
 
   /**
-   * Regular expression for whitelisting Next compat.
-   * @type {RegExp}
-   * @private
-   */
-  this.nextCompatRegExp_ = Background.globsToRegExp_([
-    '*docs.google.com/document/*',
-    '*docs.google.com/spreadsheets/*',
-    '*docs.google.com/presentation/*'
-  ]);
-
-  /**
    * @type {cursors.Range}
    * @private
    */
@@ -105,22 +93,22 @@ Background = function() {
   // Next earcons or the Classic earcons depending on the current mode.
   Object.defineProperty(cvox.ChromeVox, 'earcons', {
     get: (function() {
-      if (this.mode === ChromeVoxMode.FORCE_NEXT ||
-          this.mode === ChromeVoxMode.NEXT ||
-          this.mode === ChromeVoxMode.NEXT_COMPAT) {
-        return this.nextEarcons_;
-      } else {
-        return this.classicEarcons_;
-      }
-    }).bind(this)
+           if (this.mode === ChromeVoxMode.FORCE_NEXT ||
+               this.mode === ChromeVoxMode.NEXT) {
+             return this.nextEarcons_;
+           } else {
+             return this.classicEarcons_;
+           }
+         }).bind(this)
   });
 
   if (cvox.ChromeVox.isChromeOS) {
     Object.defineProperty(cvox.ChromeVox, 'modKeyStr', {
       get: function() {
         return (this.mode == ChromeVoxMode.CLASSIC ||
-            this.mode == ChromeVoxMode.CLASSIC_COMPAT) ?
-                'Search+Shift' : 'Search';
+                this.mode == ChromeVoxMode.CLASSIC_COMPAT) ?
+            'Search+Shift' :
+            'Search';
       }.bind(this)
     });
 
@@ -140,6 +128,16 @@ Background = function() {
     },
     set: function(value) {
       localStorage['active'] = value;
+    }
+  });
+
+  Object.defineProperty(cvox.ChromeVox, 'typingEcho', {
+    get: function() {
+      var typingEcho = parseInt(localStorage['typingEcho'], 10) || 0;
+      return typingEcho;
+    },
+    set: function(value) {
+      localStorage['typingEcho'] = value;
     }
   });
 
@@ -177,11 +175,13 @@ Background = function() {
   // Record a metric with the mode we're in on startup.
   var useNext = localStorage['useClassic'] != 'true';
   chrome.metricsPrivate.recordValue(
-      { metricName: 'Accessibility.CrosChromeVoxNext',
+      {
+        metricName: 'Accessibility.CrosChromeVoxNext',
         type: chrome.metricsPrivate.MetricTypeType.HISTOGRAM_LINEAR,
         min: 1,  // According to histogram.h, this should be 1 for enums.
         max: 2,  // Maximum should be exclusive.
-        buckets: 3 },  // Number of buckets: 0, 1 and overflowing 2.
+        buckets: 3
+      },  // Number of buckets: 0, 1 and overflowing 2.
       useNext ? 1 : 0);
 };
 
@@ -248,20 +248,14 @@ Background.prototype = {
 
     // Closure complains, but clearly, |target| is not null.
     var topLevelRoot =
-        AutomationUtil.getTopLevelRoot(/** @type {!AutomationNode} */(target));
+        AutomationUtil.getTopLevelRoot(/** @type {!AutomationNode} */ (target));
     if (!topLevelRoot)
-      return useNext ? ChromeVoxMode.FORCE_NEXT :
-          ChromeVoxMode.CLASSIC_COMPAT;
+      return useNext ? ChromeVoxMode.FORCE_NEXT : ChromeVoxMode.CLASSIC_COMPAT;
 
     var docUrl = topLevelRoot.docUrl || '';
     var nextSite = this.isWhitelistedForNext_(docUrl);
-    var nextCompat = this.nextCompatRegExp_.test(docUrl) &&
-        this.chromeChannel_ != 'dev';
-    var classicCompat =
-        this.isWhitelistedForClassicCompat_(docUrl);
-    if (nextCompat && useNext)
-      return ChromeVoxMode.NEXT_COMPAT;
-    else if (classicCompat && !useNext)
+    var classicCompat = this.isWhitelistedForClassicCompat_(docUrl);
+    if (classicCompat && !useNext)
       return ChromeVoxMode.CLASSIC_COMPAT;
     else if (nextSite)
       return ChromeVoxMode.NEXT;
@@ -289,8 +283,7 @@ Background.prototype = {
     // misc states that are not handled above.
 
     // Classic modes do not use the new focus highlight.
-    if (newMode == ChromeVoxMode.CLASSIC ||
-        newMode == ChromeVoxMode.NEXT_COMPAT)
+    if (newMode == ChromeVoxMode.CLASSIC)
       chrome.accessibilityPrivate.setFocusRing([]);
 
     // Switch on/off content scripts.
@@ -298,29 +291,24 @@ Background.prototype = {
     // async. Save it to ensure we're looking at the currentRange at this moment
     // in time.
     var cur = this.currentRange_;
-    chrome.tabs.query({active: true,
-                       lastFocusedWindow: true}, function(tabs) {
+    chrome.tabs.query({active: true, lastFocusedWindow: true}, function(tabs) {
       if (newMode == ChromeVoxMode.CLASSIC) {
         // Generally, we don't want to inject classic content scripts as it is
         // done by the extension system at document load. The exception is when
         // we toggle classic on manually as part of a user command.
-        // Note that classic -> next_compat is ignored here because classic
-        // should have already enabled content scripts.
         if (oldMode == ChromeVoxMode.FORCE_NEXT) {
           cvox.ChromeVox.injectChromeVoxIntoTabs(tabs);
         }
       } else if (newMode === ChromeVoxMode.FORCE_NEXT) {
-        // Disable ChromeVox everywhere except for things whitelisted
-        // for next compat.
-        this.disableClassicChromeVox_({forNextCompat: true});
-      } else if (newMode != ChromeVoxMode.NEXT_COMPAT) {
+        this.disableClassicChromeVox_();
+      } else {
         // If we're focused in the desktop tree, do nothing.
         if (cur && !cur.isWebRange())
           return;
 
         // If we're entering classic compat mode or next mode for just one tab,
         // disable Classic for that tab only.
-        this.disableClassicChromeVox_({tabs: tabs});
+        this.disableClassicChromeVox_(tabs);
       }
     }.bind(this));
 
@@ -374,8 +362,8 @@ Background.prototype = {
     else
       this.setCurrentRange(null);
 
-    var announce = Msgs.getMsg(useNext ?
-        'switch_to_next' : 'switch_to_classic');
+    var announce =
+        Msgs.getMsg(useNext ? 'switch_to_next' : 'switch_to_classic');
     cvox.ChromeVox.tts.speak(
         announce, cvox.QueueMode.FLUSH, {doNotInterrupt: true});
 
@@ -405,6 +393,9 @@ Background.prototype = {
       return;
 
     this.currentRange_ = newRange;
+    ChromeVoxState.observers.forEach(function(observer) {
+      observer.onCurrentRangeChanged(newRange);
+    });
     var oldMode = this.mode_;
     var newMode = this.getMode();
     if (oldMode != newMode) {
@@ -448,19 +439,17 @@ Background.prototype = {
 
     var o = new Output();
     var selectedRange;
-    if (this.pageSel_ &&
-        this.pageSel_.isValid() &&
-        range.isValid()) {
+    if (this.pageSel_ && this.pageSel_.isValid() && range.isValid()) {
       // Compute the direction of the endpoints of each range.
 
       // Casts are ok because isValid checks node start and end nodes are
       // non-null; Closure just doesn't eval enough to see it.
-      var startDir =
-          AutomationUtil.getDirection(this.pageSel_.start.node,
-              /** @type {!AutomationNode} */ (range.start.node));
-      var endDir =
-          AutomationUtil.getDirection(this.pageSel_.end.node,
-              /** @type {!AutomationNode} */ (range.end.node));
+      var startDir = AutomationUtil.getDirection(
+          this.pageSel_.start.node,
+          /** @type {!AutomationNode} */ (range.start.node));
+      var endDir = AutomationUtil.getDirection(
+          this.pageSel_.end.node,
+          /** @type {!AutomationNode} */ (range.end.node));
 
       // Selection across roots isn't supported.
       var pageRootStart = this.pageSel_.start.node.root;
@@ -469,10 +458,8 @@ Background.prototype = {
       var curRootEnd = range.end.node.root;
 
       // Disallow crossing over the start of the page selection and roots.
-      if (startDir == Dir.BACKWARD ||
-          pageRootStart != pageRootEnd ||
-          pageRootStart != curRootStart ||
-          pageRootEnd != curRootEnd) {
+      if (startDir == Dir.BACKWARD || pageRootStart != pageRootEnd ||
+          pageRootStart != curRootStart || pageRootEnd != curRootEnd) {
         o.format('@end_selection');
         this.pageSel_ = null;
       } else {
@@ -480,16 +467,13 @@ Background.prototype = {
         var msg;
         if (endDir == Dir.FORWARD &&
             (this.pageSel_.end.node != range.end.node ||
-                this.pageSel_.end.index <= range.end.index)) {
+             this.pageSel_.end.index <= range.end.index)) {
           msg = '@selected';
         } else {
           msg = '@unselected';
           selectedRange = prevRange;
         }
-        this.pageSel_ = new cursors.Range(
-            this.pageSel_.start,
-            range.end
-            );
+        this.pageSel_ = new cursors.Range(this.pageSel_.start, range.end);
         if (this.pageSel_)
           this.pageSel_.select();
       }
@@ -497,17 +481,21 @@ Background.prototype = {
       // Ensure we don't select the editable when we first encounter it.
       var lca = null;
       if (range.start.node && prevRange.start.node) {
-        lca = AutomationUtil.getLeastCommonAncestor(prevRange.start.node,
-                                                    range.start.node);
+        lca = AutomationUtil.getLeastCommonAncestor(
+            prevRange.start.node, range.start.node);
       }
       if (!lca || lca.state[StateType.EDITABLE] ||
           !range.start.node.state[StateType.EDITABLE])
         range.select();
+
+      // Richly editable output gets handled by editing.js.
+      if (lca && lca.state.richlyEditable)
+        return;
     }
 
     o.withRichSpeechAndBraille(
-        selectedRange || range, prevRange, Output.EventType.NAVIGATE)
-            .withQueueMode(cvox.QueueMode.FLUSH);
+         selectedRange || range, prevRange, Output.EventType.NAVIGATE)
+        .withQueueMode(cvox.QueueMode.FLUSH);
 
     if (msg)
       o.format(msg);
@@ -581,10 +569,8 @@ Background.prototype = {
    * @private
    */
   shouldEnableClassicForUrl_: function(url) {
-    return (this.nextCompatRegExp_.test(url) &&this.chromeChannel_ != 'dev') ||
-        (this.mode != ChromeVoxMode.FORCE_NEXT &&
-         !this.isBlacklistedForClassic_(url) &&
-         !this.isWhitelistedForNext_(url));
+    return this.mode != ChromeVoxMode.FORCE_NEXT &&
+        !this.isBlacklistedForClassic_(url) && !this.isWhitelistedForNext_(url);
   },
 
   /**
@@ -595,9 +581,10 @@ Background.prototype = {
    * @return {boolean}
    */
   isWhitelistedForClassicCompat_: function(url) {
-    return (this.isBlacklistedForClassic_(url) || (this.getCurrentRange() &&
-        !this.getCurrentRange().isWebRange() &&
-        this.getCurrentRange().start.node.state[StateType.FOCUSED])) || false;
+    return (this.isBlacklistedForClassic_(url) ||
+            (this.getCurrentRange() && !this.getCurrentRange().isWebRange() &&
+             this.getCurrentRange().start.node.state[StateType.FOCUSED])) ||
+        false;
   },
 
   /**
@@ -625,27 +612,17 @@ Background.prototype = {
 
   /**
    * Disables classic ChromeVox in current web content.
-   * @param {{tabs: (Array<Tab>|undefined),
-   *          forNextCompat: (boolean|undefined)}} params
-   * tabs: The tabs where ChromeVox scripts should be disabled. If null, will
-   *     disable ChromeVox everywhere.
-   * forNextCompat: filters out tabs that have been listed for next compat (i.e.
-   *     should retain content script).
+   * @param {Array<Tab>=} opt_tabs The tabs where ChromeVox scripts should be
+   * disabled. If null, will disable ChromeVox everywhere.
    */
-  disableClassicChromeVox_: function(params) {
+  disableClassicChromeVox_: function(opt_tabs) {
     var disableChromeVoxCommand = {
       message: 'SYSTEM_COMMAND',
       command: 'killChromeVox'
     };
 
-    if (params.forNextCompat) {
-      var reStr = this.nextCompatRegExp_.toString();
-      disableChromeVoxCommand['excludeUrlRegExp'] =
-          reStr.substring(1, reStr.length - 1);
-    }
-
-    if (params.tabs) {
-      for (var i = 0, tab; tab = params.tabs[i]; i++)
+    if (opt_tabs) {
+      for (var i = 0, tab; tab = opt_tabs[i]; i++)
         chrome.tabs.sendMessage(tab.id, disableChromeVoxCommand);
     } else {
       // Send to all ChromeVox clients.
@@ -674,12 +651,25 @@ Background.prototype = {
     if (!actionNodeSpan)
       return;
     var actionNode = actionNodeSpan.node;
+    var offset = actionNodeSpan.offset;
     if (actionNode.role === RoleType.INLINE_TEXT_BOX)
       actionNode = actionNode.parent;
     actionNode.doDefault();
-    if (selectionSpan) {
-      var start = text.getSpanStart(selectionSpan);
-      var targetPosition = position - start;
+
+    if (!selectionSpan)
+      selectionSpan = actionNodeSpan;
+
+    var start = text.getSpanStart(selectionSpan);
+    var targetPosition = position - start + offset;
+
+    if (actionNode.state.richlyEditable) {
+      chrome.automation.setDocumentSelection({
+        anchorObject: actionNode,
+        anchorOffset: targetPosition,
+        focusObject: actionNode,
+        focusOffset: targetPosition
+      });
+    } else {
       actionNode.setSelection(targetPosition, targetPosition);
     }
   },
@@ -698,10 +688,8 @@ Background.prototype = {
         if (action == 'getIsClassicEnabled') {
           var url = msg['url'];
           var isClassicEnabled = this.shouldEnableClassicForUrl_(url);
-          port.postMessage({
-            target: 'next',
-            isClassicEnabled: isClassicEnabled
-          });
+          port.postMessage(
+              {target: 'next', isClassicEnabled: isClassicEnabled});
         } else if (action == 'enableClassicCompatForUrl') {
           var url = msg['url'];
           this.classicBlacklist_.add(url);
@@ -761,10 +749,7 @@ Background.prototype = {
     if (!command)
       return false;
 
-    var msg = {
-      'message': 'USER_COMMAND',
-      'command': command
-    };
+    var msg = {'message': 'USER_COMMAND', 'command': command};
     cvox.ExtensionBridge.send(msg);
     return true;
   },
@@ -791,10 +776,11 @@ Background.prototype = {
     // First, see if we've crossed a root. Remove once webview handles focus
     // correctly.
     if (prevRange && prevRange.start.node && start) {
-      var entered = AutomationUtil.getUniqueAncestors(
-          prevRange.start.node, start);
+      var entered =
+          AutomationUtil.getUniqueAncestors(prevRange.start.node, start);
       var embeddedObject = entered.find(function(f) {
-        return f.role == RoleType.EMBEDDED_OBJECT; });
+        return f.role == RoleType.EMBEDDED_OBJECT;
+      });
       if (embeddedObject && !embeddedObject.state[StateType.FOCUSED])
         embeddedObject.focus();
     }
@@ -813,7 +799,8 @@ Background.prototype = {
       if (!start.state[StateType.FOCUSED])
         start.focus();
       return;
-    } else if (!AutomationPredicate.structuralContainer(end) &&
+    } else if (
+        !AutomationPredicate.structuralContainer(end) &&
         end.state[StateType.FOCUSABLE]) {
       if (!end.state[StateType.FOCUSED])
         end.focus();
@@ -847,11 +834,16 @@ Background.prototype = {
  * @private
  */
 Background.globsToRegExp_ = function(globs) {
-  return new RegExp('^(' + globs.map(function(glob) {
-    return glob.replace(/[.+^$(){}|[\]\\]/g, '\\$&')
-        .replace(/\*/g, '.*')
-        .replace(/\?/g, '.');
-  }).join('|') + ')$');
+  return new RegExp(
+      '^(' +
+      globs
+          .map(function(glob) {
+            return glob.replace(/[.+^$(){}|[\]\\]/g, '\\$&')
+                .replace(/\*/g, '.*')
+                .replace(/\?/g, '.');
+          })
+          .join('|') +
+      ')$');
 };
 
 new Background();

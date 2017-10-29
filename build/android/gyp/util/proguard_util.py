@@ -15,15 +15,24 @@ class _ProguardOutputFilter(object):
   """
 
   IGNORE_RE = re.compile(
-      r'(?:Pro.*version|Note:|Reading|Preparing|.*:.*(?:MANIFEST\.MF|\.empty))')
+      r'(?:Pro.*version|Note:|Reading|Preparing|ProgramClass:|'
+      '.*:.*(?:MANIFEST\.MF|\.empty))')
 
   def __init__(self):
     self._last_line_ignored = False
+    self._ignore_next_line = False
 
   def __call__(self, output):
     ret = []
     for line in output.splitlines(True):
-      if not line.startswith(' '):
+      if self._ignore_next_line:
+        self._ignore_next_line = False
+        continue
+
+      if '***BINARY RUN STATS***' in line:
+        self._last_line_ignored = True
+        self._ignore_next_line = True
+      elif not line.startswith(' '):
         self._last_line_ignored = bool(self.IGNORE_RE.match(line))
       elif 'You should check if you need to specify' in line:
         self._last_line_ignored = True
@@ -141,25 +150,35 @@ class ProguardCmdBuilder(object):
     self._cmd = cmd
     return self._cmd
 
-  def GetInputs(self):
+  def GetDepfileDeps(self):
+    # The list of inputs that the GN target does not directly know about.
     self.build()
-    inputs = [self._proguard_jar_path] + self._configs + self._injars
-    if self._mapping:
-      inputs.append(self._mapping)
+    inputs = self._configs + self._injars
     if self._libraries:
       inputs += self._libraries
     if self._tested_apk_info_path:
       inputs += [self._tested_apk_info_path]
     return inputs
 
+  def GetInputs(self):
+    inputs = self.GetDepfileDeps()
+    inputs += [self._proguard_jar_path]
+    if self._mapping:
+      inputs.append(self._mapping)
+    return inputs
+
   def _WriteFlagsFile(self, out):
     # Quite useful for auditing proguard flags.
-    for config in self._configs:
+    for config in sorted(self._configs):
       out.write('#' * 80 + '\n')
       out.write(config + '\n')
       out.write('#' * 80 + '\n')
       with open(config) as config_file:
-        out.write(config_file.read().rstrip())
+        contents = config_file.read().rstrip()
+      # Remove numbers from generated rule comments to make file more
+      # diff'able.
+      contents = re.sub(r' #generated:\d+', '', contents)
+      out.write(contents)
       out.write('\n\n')
     out.write('#' * 80 + '\n')
     out.write('Command-line\n')
@@ -199,4 +218,3 @@ class ProguardCmdBuilder(object):
     }
 
     build_utils.WriteJson(this_info, self._outjar + '.info')
-

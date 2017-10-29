@@ -13,8 +13,8 @@ import android.view.MenuItem;
 import android.view.MenuItem.OnMenuItemClickListener;
 import android.view.View;
 
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ntp.snippets.SnippetsConfig;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.suggestions.SuggestionsNavigationDelegate;
 import org.chromium.ui.base.WindowAndroid.OnCloseContextMenuListener;
@@ -44,7 +44,7 @@ public class ContextMenuManager implements OnCloseContextMenuListener {
 
     private final Activity mActivity;
     private final SuggestionsNavigationDelegate mNavigationDelegate;
-    private final TouchDisableableView mOuterView;
+    private final TouchEnabledDelegate mTouchEnabledDelegate;
     private boolean mContextMenuOpen;
 
     /** Defines callback to configure the context menu and respond to user interaction. */
@@ -68,14 +68,17 @@ public class ContextMenuManager implements OnCloseContextMenuListener {
         void onContextMenuCreated();
     }
 
-    /** Interface for a view that can be set to stop responding to touches. */
-    public interface TouchDisableableView { void setTouchEnabled(boolean enabled); }
+    /**
+     * Delegate used by the {@link ContextMenuManager} to disable touch events on the outer view
+     * while the context menu is open.
+     */
+    public interface TouchEnabledDelegate { void setTouchEnabled(boolean enabled); }
 
     public ContextMenuManager(Activity activity, SuggestionsNavigationDelegate navigationDelegate,
-            TouchDisableableView outerView) {
+            TouchEnabledDelegate touchEnabledDelegate) {
         mActivity = activity;
         mNavigationDelegate = navigationDelegate;
-        mOuterView = outerView;
+        mTouchEnabledDelegate = touchEnabledDelegate;
     }
 
     /**
@@ -115,18 +118,20 @@ public class ContextMenuManager implements OnCloseContextMenuListener {
             }
         });
 
-        // Disable touch events on the outer view while the context menu is open. This is to
-        // prevent the user long pressing to get the context menu then on the same press scrolling
-        // or swiping to dismiss an item (eg. https://crbug.com/638854, https://crbug.com/638555,
-        // https://crbug.com/636296)
-        mOuterView.setTouchEnabled(false);
+        // Touch events must be disabled on the outer view while the context menu is open. This is
+        // to prevent the user long pressing to get the context menu then on the same press
+        // scrolling or swiping to dismiss an item (eg. https://crbug.com/638854,
+        // https://crbug.com/638555, https://crbug.com/636296).
+        mTouchEnabledDelegate.setTouchEnabled(false);
         mContextMenuOpen = true;
+
+        RecordUserAction.record("Suggestions.ContextMenu.Shown");
     }
 
     @Override
     public void onContextMenuClosed() {
         if (!mContextMenuOpen) return;
-        mOuterView.setTouchEnabled(true);
+        mTouchEnabledDelegate.setTouchEnabled(true);
         mContextMenuOpen = false;
     }
 
@@ -146,7 +151,6 @@ public class ContextMenuManager implements OnCloseContextMenuListener {
             case ID_OPEN_IN_INCOGNITO_TAB:
                 return mNavigationDelegate.isOpenInIncognitoEnabled();
             case ID_SAVE_FOR_OFFLINE: {
-                if (!SnippetsConfig.isSaveToOfflineEnabled()) return false;
                 String itemUrl = delegate.getUrl();
                 return itemUrl != null && OfflinePageBridge.canSavePage(itemUrl);
             }
@@ -183,18 +187,23 @@ public class ContextMenuManager implements OnCloseContextMenuListener {
             switch (item.getItemId()) {
                 case ID_OPEN_IN_NEW_WINDOW:
                     mDelegate.openItem(WindowOpenDisposition.NEW_WINDOW);
+                    RecordUserAction.record("Suggestions.ContextMenu.OpenItemInNewWindow");
                     return true;
                 case ID_OPEN_IN_NEW_TAB:
                     mDelegate.openItem(WindowOpenDisposition.NEW_BACKGROUND_TAB);
+                    RecordUserAction.record("Suggestions.ContextMenu.OpenItemInNewTab");
                     return true;
                 case ID_OPEN_IN_INCOGNITO_TAB:
                     mDelegate.openItem(WindowOpenDisposition.OFF_THE_RECORD);
+                    RecordUserAction.record("Suggestions.ContextMenu.OpenItemInIncognitoTab");
                     return true;
                 case ID_SAVE_FOR_OFFLINE:
                     mDelegate.openItem(WindowOpenDisposition.SAVE_TO_DISK);
+                    RecordUserAction.record("Suggestions.ContextMenu.DownloadItem");
                     return true;
                 case ID_REMOVE:
                     mDelegate.removeItem();
+                    RecordUserAction.record("Suggestions.ContextMenu.RemoveItem");
                     return true;
                 default:
                     return false;

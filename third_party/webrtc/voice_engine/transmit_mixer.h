@@ -13,15 +13,15 @@
 
 #include <memory>
 
-#include "webrtc/base/criticalsection.h"
 #include "webrtc/common_audio/resampler/include/push_resampler.h"
 #include "webrtc/common_types.h"
 #include "webrtc/modules/audio_processing/typing_detection.h"
 #include "webrtc/modules/include/module_common_types.h"
+#include "webrtc/rtc_base/criticalsection.h"
+#include "webrtc/voice_engine/audio_level.h"
 #include "webrtc/voice_engine/file_player.h"
 #include "webrtc/voice_engine/file_recorder.h"
 #include "webrtc/voice_engine/include/voe_base.h"
-#include "webrtc/voice_engine/level_indicator.h"
 #include "webrtc/voice_engine/monitor_module.h"
 #include "webrtc/voice_engine/voice_engine_defines.h"
 
@@ -32,7 +32,6 @@
 #endif
 
 namespace webrtc {
-
 class AudioProcessing;
 class ProcessThread;
 
@@ -64,30 +63,26 @@ public:
                          uint16_t currentMicLevel,
                          bool keyPressed);
 
-
-    int32_t DemuxAndMix();
-    // Used by the Chrome to pass the recording data to the specific VoE
-    // channels for demux.
-    void DemuxAndMix(const int voe_channels[], size_t number_of_voe_channels);
-
-    int32_t EncodeAndSend();
-    // Used by the Chrome to pass the recording data to the specific VoE
-    // channels for encoding and sending to the network.
-    void EncodeAndSend(const int voe_channels[], size_t number_of_voe_channels);
+    void ProcessAndEncodeAudio();
 
     // Must be called on the same thread as PrepareDemux().
     uint32_t CaptureLevel() const;
 
     int32_t StopSend();
 
-    // VoEVolumeControl
-    int SetMute(bool enable);
-
-    bool Mute() const;
-
+    // TODO(solenberg): Remove, once AudioMonitor is gone.
     int8_t AudioLevel() const;
 
-    int16_t AudioLevelFullRange() const;
+    // 'virtual' to allow mocking.
+    virtual int16_t AudioLevelFullRange() const;
+
+    // See description of "totalAudioEnergy" in the WebRTC stats spec:
+    // https://w3c.github.io/webrtc-stats/#dom-rtcmediastreamtrackstats-totalaudioenergy
+    // 'virtual' to allow mocking.
+    virtual double GetTotalInputEnergy() const;
+
+    // 'virtual' to allow mocking.
+    virtual double GetTotalInputDuration() const;
 
     bool IsRecordingCall();
 
@@ -148,16 +143,6 @@ public:
 
     void RecordFileEnded(const int32_t id);
 
-#if WEBRTC_VOICE_ENGINE_TYPING_DETECTION
-    // Typing detection
-    int TimeSinceLastTyping(int &seconds);
-    int SetTypingDetectionParameters(int timeWindow,
-                                     int costPerTyping,
-                                     int reportingThreshold,
-                                     int penaltyDecay,
-                                     int typeEventDelay);
-#endif
-
   // Virtual to allow mocking.
   virtual void EnableStereoChannelSwapping(bool enable);
   bool IsStereoChannelSwappingEnabled();
@@ -212,6 +197,8 @@ private:
     bool _fileRecording = false;
     bool _fileCallRecording = false;
     voe::AudioLevel _audioLevel;
+    double totalInputEnergy_ = 0.0;
+    double totalInputDuration_ = 0.0;
     // protect file instances and their variables in MixedParticipants()
     rtc::CriticalSection _critSect;
     rtc::CriticalSection _callbackCritSect;
@@ -226,7 +213,6 @@ private:
     int _instanceId = 0;
     bool _mixFileWithMicrophone = false;
     uint32_t _captureLevel = 0;
-    bool _mute = false;
     bool stereo_codec_ = false;
     bool swap_stereo_channels_ = false;
 };

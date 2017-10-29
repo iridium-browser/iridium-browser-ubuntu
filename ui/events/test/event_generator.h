@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "ui/events/event.h"
+#include "ui/events/event_dispatcher.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/native_widget_types.h"
@@ -69,11 +70,17 @@ class EventGeneratorDelegate {
   virtual void ConvertPointFromHost(const EventTarget* hosted_target,
                                     gfx::Point* point) const = 0;
 
-  // Detemines whether the input method should be the first to handle key events
-  // before dispathcing to Views. If it does, the given |event| will be
+  // Determines if the input method should be the first to handle key events
+  // before dispatching to Views. If it does, the given |event| will be
   // dispatched and processed by the input method from the host of |target|.
-  virtual void DispatchKeyEventToIME(EventTarget* target,
-                                     ui::KeyEvent* event) = 0;
+  virtual ui::EventDispatchDetails DispatchKeyEventToIME(EventTarget* target,
+                                                         ui::KeyEvent* event)
+      WARN_UNUSED_RESULT = 0;
+
+  // Offers the event to pointer watchers on systems that provide them.
+  // Does not consume the event (pointer watchers cannot consume events).
+  virtual void DispatchEventToPointerWatchers(EventTarget* target,
+                                              const PointerEvent& event) {}
 };
 
 // ui::test::EventGenerator is a tool that generates and dispatches events.
@@ -85,10 +92,10 @@ class EventGeneratorDelegate {
 //
 // 1) If your test depends on native events (ui::Event::native_event()).
 //   This return is empty/NULL event with EventGenerator.
-// 2) If your test involves nested message loop, such as
+// 2) If your test involves nested run loop, such as
 //    menu or drag & drop. Because this class directly
 //    post an event to WindowEventDispatcher, this event will not be
-//    handled in the nested message loop.
+//    handled in the nested run loop.
 // 3) Similarly, |base::MessagePumpObserver| will not be invoked.
 // 4) Any other code that requires native message loops, such as
 //    tests for WindowTreeHostWin/WindowTreeHostX11.
@@ -153,6 +160,20 @@ class EventGenerator {
   // Resets the event flags bitmask.
   void set_flags(int flags) { flags_ = flags; }
   int flags() const { return flags_; }
+
+  // Many tests assume a window created at (0,0) will remain there when shown.
+  // However, an operating system's window manager may reposition the window
+  // into the work area. This can disrupt the coordinates used on test events,
+  // so an EventGeneratorDelegate may skip the step that remaps coordinates in
+  // the root window to window coordinates when dispatching events.
+  // Setting this to false skips that step, in which case the test must ensure
+  // it correctly maps coordinates in window coordinates to root window (screen)
+  // coordinates when calling, e.g., set_current_location().
+  // Default is true. This only has any effect on Mac.
+  void set_assume_window_at_origin(bool assume_window_at_origin) {
+    assume_window_at_origin_ = assume_window_at_origin;
+  }
+  bool assume_window_at_origin() { return assume_window_at_origin_; }
 
   // Generates a left button press event.
   void PressLeftButton();
@@ -337,29 +358,26 @@ class EventGenerator {
   // Generates press, move, release touch-events to generate a sequence of
   // multi-finger scroll events. |count| specifies the number of touch-points
   // that should generate the scroll events. |start| are the starting positions
-  // of all the touch points. |steps| and |event_separation_time_ms| are
-  // relevant when testing velocity/fling/swipe, otherwise these can be any
-  // non-zero value. |delta_x| and |delta_y| are the amount that each finger
-  // should be moved. Internally calls GestureMultiFingerScrollWithDelays
-  // with zeros as |delay_adding_finger_ms| forcing all touch down events to be
-  // immediate.
-  void GestureMultiFingerScroll(int count,
-                                const gfx::Point start[],
-                                int event_separation_time_ms,
-                                int steps,
-                                int move_x,
-                                int move_y);
+  // of all the touch points. |delta| specifies the moving vectors for all
+  // fingers. |delay_adding_finger_ms| are delays in ms from the starting time
+  // till touching down of each finger. |delay_releasing_finger_ms| are delays
+  // in ms from starting time till touching release of each finger. These two
+  // parameters are useful when testing complex gestures that start with 1 or 2
+  // fingers and add fingers with a delay. |steps| and
+  // |event_separation_time_ms| are relevant when testing velocity/fling/swipe,
+  // otherwise these can be any non-zero value.
+  void GestureMultiFingerScrollWithDelays(int count,
+                                          const gfx::Point start[],
+                                          const gfx::Vector2d delta[],
+                                          const int delay_adding_finger_ms[],
+                                          const int delay_releasing_finger_ms[],
+                                          int event_separation_time_ms,
+                                          int steps);
 
-  // Generates press, move, release touch-events to generate a sequence of
-  // multi-finger scroll events. |count| specifies the number of touch-points
-  // that should generate the scroll events. |start| are the starting positions
-  // of all the touch points. |delay_adding_finger_ms| are delays in ms from the
-  // starting time till touching down of each finger. |delay_adding_finger_ms|
-  // is useful when testing complex gestures that start with 1 or 2 fingers and
-  // add fingers with a delay. |steps| and |event_separation_time_ms| are
-  // relevant when testing velocity/fling/swipe, otherwise these can be any
-  // non-zero value. |delta_x| and |delta_y| are the amount that each finger
-  // should be moved.
+  // Similar to GestureMultiFingerScrollWithDelays() above. Generates press,
+  // move, release touch-events to generate a sequence of multi-finger scroll
+  // events. All fingers are released at the end of scrolling together. All
+  // fingers move the same amount specified by |move_x| and |move_y|.
   void GestureMultiFingerScrollWithDelays(int count,
                                           const gfx::Point start[],
                                           const int delay_adding_finger_ms[],
@@ -367,6 +385,18 @@ class EventGenerator {
                                           int steps,
                                           int move_x,
                                           int move_y);
+
+  // Similar to GestureMultiFingerScrollWithDelays(). Generates press, move,
+  // release touch-events to generate a sequence of multi-finger scroll events.
+  // All fingers are pressed at the beginning together and are released at the
+  // end of scrolling together. All fingers move move the same amount specified
+  // by |move_x| and |move_y|.
+  void GestureMultiFingerScroll(int count,
+                                const gfx::Point start[],
+                                int event_separation_time_ms,
+                                int steps,
+                                int move_x,
+                                int move_y);
 
   // Generates scroll sequences of a FlingCancel, Scrolls, FlingStart, with
   // constant deltas to |x_offset| and |y_offset| in |steps|.
@@ -432,20 +462,32 @@ class EventGenerator {
   void DispatchNextPendingEvent();
   void DoDispatchEvent(Event* event, bool async);
 
+  // Offers event to pointer watchers (via delegate) if the event is a mouse or
+  // touch event.
+  void MaybeDispatchToPointerWatchers(const Event& event);
+
   const EventGeneratorDelegate* delegate() const;
   EventGeneratorDelegate* delegate();
 
   std::unique_ptr<EventGeneratorDelegate> delegate_;
   gfx::Point current_location_;
-  EventTarget* current_target_;
-  int flags_;
-  bool grab_;
+  EventTarget* current_target_ = nullptr;
+  int flags_ = 0;
+  bool grab_ = false;
+
   ui::PointerDetails touch_pointer_details_;
 
   std::list<std::unique_ptr<Event>> pending_events_;
+
   // Set to true to cause events to be posted asynchronously.
-  bool async_;
-  Target target_;
+  bool async_ = false;
+
+  // Whether to skip mapping of coordinates from the root window to a hit window
+  // when dispatching events.
+  bool assume_window_at_origin_ = true;
+
+  Target target_ = Target::WIDGET;
+
   std::unique_ptr<base::TickClock> tick_clock_;
 
   DISALLOW_COPY_AND_ASSIGN(EventGenerator);

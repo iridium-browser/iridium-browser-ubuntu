@@ -22,8 +22,9 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "cc/surfaces/surface_id.h"
+#include "components/viz/common/surfaces/surface_id.h"
 #include "content/browser/renderer_host/browser_compositor_view_mac.h"
+#include "content/browser/renderer_host/input/mouse_wheel_phase_handler.h"
 #include "content/browser/renderer_host/input/mouse_wheel_rails_filter_mac.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/renderer_host/text_input_manager.h"
@@ -31,15 +32,16 @@
 #include "content/common/cursors/webcursor.h"
 #include "content/common/edit_command.h"
 #include "ipc/ipc_sender.h"
-#include "third_party/WebKit/public/web/WebCompositionUnderline.h"
 #include "ui/accelerated_widget_mac/accelerated_widget_mac.h"
 #include "ui/accelerated_widget_mac/display_link_mac.h"
 #import "ui/base/cocoa/command_dispatcher.h"
 #include "ui/base/cocoa/remote_layer_api.h"
 #import "ui/base/cocoa/tool_tip_base_view.h"
+#include "ui/base/ime/composition_underline.h"
 #include "ui/display/display_observer.h"
 
 namespace content {
+class CursorManager;
 class RenderWidgetHost;
 class RenderWidgetHostImpl;
 class RenderWidgetHostViewMac;
@@ -123,7 +125,7 @@ struct TextInputState;
   NSRange markedTextSelectedRange_;
 
   // Underline information of the |markedText_|.
-  std::vector<blink::WebCompositionUnderline> underlines_;
+  std::vector<ui::CompositionUnderline> underlines_;
 
   // Replacement range information received from |setMarkedText:|.
   gfx::Range setMarkedTextReplacementRange_;
@@ -188,6 +190,22 @@ struct TextInputState;
 @property(nonatomic, readonly) NSRange selectedRange;
 @property(nonatomic, readonly) BOOL suppressNextEscapeKeyUp;
 
+// Common code path for handling begin gesture events. This helper method is
+// called via different codepaths based on OS version and SDK:
+// - On 10.11 and later, when linking with the 10.11 SDK, it is called from
+//   |magnifyWithEvent:| when the given event's phase is NSEventPhaseBegin.
+// - On 10.10 and earlier, or when linking with an earlier SDK, it is called
+//   by |beginGestureWithEvent:| when a gesture begins.
+- (void)handleBeginGestureWithEvent:(NSEvent*)event;
+
+// Common code path for handling end gesture events. This helper method is
+// called via different codepaths based on OS version and SDK:
+// - On 10.11 and later, when linking with the 10.11 SDK, it is called from
+//   |magnifyWithEvent:| when the given event's phase is NSEventPhaseEnded.
+// - On 10.10 and earlier, or when linking with an earlier SDK, it is called
+//   by |endGestureWithEvent:| when a gesture ends.
+- (void)handleEndGestureWithEvent:(NSEvent*)event;
+
 - (void)setCanBeKeyView:(BOOL)can;
 - (void)setCloseOnDeactivate:(BOOL)b;
 - (void)setOpaque:(BOOL)opaque;
@@ -200,6 +218,7 @@ struct TextInputState;
 - (void)updateCursor:(NSCursor*)cursor;
 - (NSRect)firstViewRectForCharacterRange:(NSRange)theRange
                              actualRange:(NSRangePointer)actualRange;
+- (void)tabletEvent:(NSEvent*)theEvent;
 - (void)quickLookWithEvent:(NSEvent*)event;
 - (void)showLookUpDictionaryOverlayAtPoint:(NSPoint)point;
 - (void)showLookUpDictionaryOverlayFromRange:(NSRange)range
@@ -268,7 +287,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void WasUnOccluded() override;
   void WasOccluded() override;
   gfx::Rect GetViewBounds() const override;
-  void SetShowingContextMenu(bool showing) override;
   void SetActive(bool active) override;
   void ShowDefinitionForSelection() override;
   bool SupportsSpeech() const override;
@@ -276,6 +294,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   bool IsSpeaking() const override;
   void StopSpeaking() override;
   void SetBackgroundColor(SkColor color) override;
+  SkColor background_color() const override;
   void SetNeedsBeginFrames(bool needs_begin_frames) override;
 
   // Implementation of RenderWidgetHostViewBase.
@@ -284,6 +303,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override;
   void Focus() override;
   void UpdateCursor(const WebCursor& cursor) override;
+  void DisplayCursor(const WebCursor& cursor) override;
+  CursorManager* GetCursorManager() override;
   void SetIsLoading(bool is_loading) override;
   void RenderProcessGone(base::TerminationStatus status,
                          int error_code) override;
@@ -304,8 +325,12 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   ui::AcceleratedWidgetMac* GetAcceleratedWidgetMac() const override;
   void FocusedNodeChanged(bool is_editable_node,
                           const gfx::Rect& node_bounds_in_screen) override;
-  void OnSwapCompositorFrame(uint32_t compositor_frame_sink_id,
+  void DidCreateNewRendererCompositorFrameSink(
+      cc::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink)
+      override;
+  void SubmitCompositorFrame(const viz::LocalSurfaceId& local_surface_id,
                              cc::CompositorFrame frame) override;
+  void OnDidNotProduceFrame(const cc::BeginFrameAck& ack) override;
   void ClearCompositorFrame() override;
   BrowserAccessibilityManager* CreateBrowserAccessibilityManager(
       BrowserAccessibilityDelegate* delegate, bool for_root_frame) override;
@@ -317,17 +342,16 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   bool LockMouse() override;
   void UnlockMouse() override;
-  void OnSetNeedsFlushInput() override;
   void GestureEventAck(const blink::WebGestureEvent& event,
                        InputEventAckState ack_result) override;
 
   std::unique_ptr<SyntheticGestureTarget> CreateSyntheticGestureTarget()
       override;
 
-  cc::FrameSinkId GetFrameSinkId() override;
-  cc::FrameSinkId FrameSinkIdAtPoint(cc::SurfaceHittestDelegate* delegate,
-                                     const gfx::Point& point,
-                                     gfx::Point* transformed_point) override;
+  viz::FrameSinkId GetFrameSinkId() override;
+  viz::FrameSinkId FrameSinkIdAtPoint(cc::SurfaceHittestDelegate* delegate,
+                                      const gfx::Point& point,
+                                      gfx::Point* transformed_point) override;
   // Returns true when we can do SurfaceHitTesting for the event type.
   bool ShouldRouteEvent(const blink::WebInputEvent& event) const;
   void ProcessMouseEvent(const blink::WebMouseEvent& event,
@@ -339,7 +363,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void ProcessGestureEvent(const blink::WebGestureEvent& event,
                            const ui::LatencyInfo& latency) override;
   bool TransformPointToLocalCoordSpace(const gfx::Point& point,
-                                       const cc::SurfaceId& original_surface,
+                                       const viz::SurfaceId& original_surface,
                                        gfx::Point* transformed_point) override;
   bool TransformPointToCoordSpaceForView(
       const gfx::Point& point,
@@ -402,6 +426,14 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   WebContents* GetWebContents();
 
+  // Applies background color without notifying the RenderWidget about
+  // opaqueness changes.
+  void UpdateBackgroundColorFromRenderer(SkColor color);
+
+  bool HasPendingWheelEndEventForTesting() {
+    return mouse_wheel_phase_handler_.HasPendingWheelEndEvent();
+  }
+
   // These member variables should be private, but the associated ObjC class
   // needs access to them and can't be made a friend.
 
@@ -419,6 +451,8 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // determine if pinch gestures need to be thresholded.
   bool page_at_minimum_scale_;
 
+  MouseWheelPhaseHandler mouse_wheel_phase_handler_;
+
   NSWindow* pepper_fullscreen_window() const {
     return pepper_fullscreen_window_;
   }
@@ -430,9 +464,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   }
 
   int window_number() const;
-
-  // The scale factor for the screen that the view is currently on.
-  float ViewScaleFactor() const;
 
   // Update properties, such as the scale factor for the backing store
   // and for any CALayers, and the screen color profile.
@@ -446,12 +477,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // BrowserCompositorMacClient implementation.
   NSView* BrowserCompositorMacGetNSView() const override;
   SkColor BrowserCompositorMacGetGutterColor(SkColor color) const override;
-  void BrowserCompositorMacSendReclaimCompositorResources(
-      int compositor_frame_sink_id,
-      bool is_swap_ack,
-      const cc::ReturnedResourceArray& resources) override;
-  void BrowserCompositorMacSendBeginFrame(
-      const cc::BeginFrameArgs& args) override;
+  void BrowserCompositorMacOnBeginFrame() override;
 
   // AcceleratedWidgetMacNSView implementation.
   NSView* AcceleratedWidgetGetNSView() const override;
@@ -460,7 +486,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void AcceleratedWidgetSwapCompleted() override;
 
   // Exposed for testing.
-  cc::SurfaceId SurfaceIdForTesting() const override;
+  viz::SurfaceId SurfaceIdForTesting() const override;
+
+  void SetShowingContextMenu(bool showing) override;
 
   // Helper method to obtain ui::TextInputType for the active widget from the
   // TextInputManager.
@@ -481,6 +509,16 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // platform view for a guest).
   const TextInputManager::TextSelection* GetTextSelection();
 
+  // Get the focused view that should be used for retrieving the text selection.
+  RenderWidgetHostViewBase* GetFocusedViewForTextSelection();
+
+  // Returns the RenderWidgetHostDelegate corresponding to the currently focused
+  // RenderWidgetHost. It is different from |render_widget_host_->delegate()|
+  // when there are focused inner WebContentses on the page. Also, this method
+  // can return nullptr; for instance when |render_widget_host_| becomes nullptr
+  // in the destruction path of the WebContentsImpl.
+  RenderWidgetHostDelegate* GetFocusedRenderWidgetHostDelegate();
+
  private:
   friend class RenderWidgetHostViewMacTest;
 
@@ -500,11 +538,12 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // Dispatches a TTS session.
   void SpeakText(const std::string& text);
 
-  // Get the focused view that should be used for retrieving the text selection.
-  RenderWidgetHostViewBase* GetFocusedViewForTextSelection();
-
   // Adds/Removes frame observer based on state.
   void UpdateNeedsBeginFramesInternal();
+
+  void SendSyntheticWheelEventWithPhaseEnded(
+      blink::WebMouseWheelEvent wheel_event,
+      bool should_route_event);
 
   // The associated view. This is weak and is inserted into the view hierarchy
   // to own this RenderWidgetHostViewMac object. Set to nil at the start of the
@@ -527,9 +566,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // RenderWidgetHostViewGuest.
   bool is_guest_view_hack_;
 
-  // selected text on the renderer.
-  std::string selected_text_;
-
   // The window used for popup widgets.
   base::scoped_nsobject<NSWindow> popup_window_;
 
@@ -550,8 +586,12 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // Whether a request for begin frames has been issued.
   bool needs_begin_frames_;
 
-  // Whether a request to flush input has been issued.
-  bool needs_flush_input_;
+  // The background color of the web content. This color will be drawn when the
+  // web content is not able to draw in time.
+  SkColor background_color_ = SK_ColorTRANSPARENT;
+  SkColor last_frame_root_background_color_ = SK_ColorTRANSPARENT;
+
+  std::unique_ptr<CursorManager> cursor_manager_;
 
   // Factory used to safely scope delayed calls to ShutdownHost().
   base::WeakPtrFactory<RenderWidgetHostViewMac> weak_factory_;

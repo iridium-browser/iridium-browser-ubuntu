@@ -4,13 +4,11 @@
 
 #include "ui/base/touch/touch_device.h"
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_array.h"
 #include "base/logging.h"
 #include "jni/TouchDevice_jni.h"
 
 using base::android::AttachCurrentThread;
-using base::android::GetApplicationContext;
 
 namespace ui {
 
@@ -19,20 +17,25 @@ TouchScreensAvailability GetTouchScreensAvailability() {
 }
 
 int MaxTouchPoints() {
-  return Java_TouchDevice_maxTouchPoints(AttachCurrentThread(),
-                                         GetApplicationContext());
+  return Java_TouchDevice_maxTouchPoints(AttachCurrentThread());
 }
 
-std::pair<int, int> GetAvailablePointerAndHoverTypes() {
+std::pair<int, int> AvailablePointerAndHoverTypes() {
   JNIEnv* env = AttachCurrentThread();
   std::vector<int> pointer_and_hover_types;
   base::android::JavaIntArrayToIntVector(
-      env, Java_TouchDevice_availablePointerAndHoverTypes(
-               env, GetApplicationContext())
-               .obj(),
+      env, Java_TouchDevice_availablePointerAndHoverTypes(env).obj(),
       &pointer_and_hover_types);
   DCHECK_EQ(pointer_and_hover_types.size(), 2u);
   return std::make_pair(pointer_and_hover_types[0], pointer_and_hover_types[1]);
+}
+
+int GetAvailableHoverTypes() {
+  return AvailablePointerAndHoverTypes().second;
+}
+
+int GetAvailablePointerTypes() {
+  return AvailablePointerAndHoverTypes().first;
 }
 
 PointerType GetPrimaryPointerType(int available_pointer_types) {
@@ -45,12 +48,10 @@ PointerType GetPrimaryPointerType(int available_pointer_types) {
 }
 
 HoverType GetPrimaryHoverType(int available_hover_types) {
-  if (available_hover_types & HOVER_TYPE_ON_DEMAND)
-    return HOVER_TYPE_ON_DEMAND;
-  if (available_hover_types & HOVER_TYPE_HOVER)
-    return HOVER_TYPE_HOVER;
-  DCHECK_EQ(available_hover_types, HOVER_TYPE_NONE);
-  return HOVER_TYPE_NONE;
+  if (available_hover_types & HOVER_TYPE_NONE)
+    return HOVER_TYPE_NONE;
+  DCHECK_EQ(available_hover_types, HOVER_TYPE_HOVER);
+  return HOVER_TYPE_HOVER;
 }
 
 }  // namespace ui

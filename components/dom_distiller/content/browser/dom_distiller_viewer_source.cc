@@ -40,8 +40,8 @@
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "net/base/url_util.h"
 #include "net/url_request/url_request.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace dom_distiller {
@@ -136,9 +136,9 @@ void DomDistillerViewerSource::RequestViewerHandle::DidFinishNavigation(
 
   const GURL& navigation = navigation_handle->GetURL();
   bool expected_main_view_request =
-      navigation.SchemeIs(expected_scheme_.c_str()) &&
+      navigation.SchemeIs(expected_scheme_) &&
       expected_request_path_ == navigation.query();
-  if (navigation_handle->IsSamePage() || expected_main_view_request) {
+  if (navigation_handle->IsSameDocument() || expected_main_view_request) {
     // In-page navigations, as well as the main view request can be ignored.
     if (expected_main_view_request) {
       content::RenderFrameHost* render_frame_host =
@@ -290,14 +290,10 @@ std::string DomDistillerViewerSource::GetMimeType(
 }
 
 bool DomDistillerViewerSource::ShouldServiceRequest(
-    const net::URLRequest* request) const {
-  return request->url().SchemeIs(scheme_.c_str());
-}
-
-// TODO(nyquist): Start tracking requests using this method.
-void DomDistillerViewerSource::WillServiceRequest(
-    const net::URLRequest* request,
-    std::string* path) const {
+    const GURL& url,
+    content::ResourceContext* resource_context,
+    int render_process_id) const {
+  return url.SchemeIs(scheme_);
 }
 
 std::string DomDistillerViewerSource::GetContentSecurityPolicyStyleSrc()

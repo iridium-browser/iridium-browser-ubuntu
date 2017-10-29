@@ -5,6 +5,7 @@
 #include "content/browser/loader/resource_scheduler.h"
 
 #include <stdint.h>
+
 #include <set>
 #include <string>
 #include <utility>
@@ -12,6 +13,7 @@
 
 #include "base/feature_list.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
@@ -39,7 +41,7 @@ namespace {
 // HTTP/1.1 resources are. Disabling this appears to have negative performance
 // impact, see https://crbug.com/655585.
 const base::Feature kPrioritySupportedRequestsDelayable{
-    "PrioritySupportedRequestsDelayable", base::FEATURE_DISABLED_BY_DEFAULT};
+    "PrioritySupportedRequestsDelayable", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // In the event that many resource requests are started quickly, this feature
 // will periodically yield (e.g., delaying starting of requests) by posting a
@@ -225,20 +227,32 @@ class ResourceScheduler::ScheduledResourceRequest : public ResourceThrottle {
         scheduler_(scheduler),
         priority_(priority),
         fifo_ordering_(0),
+        peak_delayable_requests_in_flight_(0u),
         host_port_pair_(net::HostPortPair::FromURL(request->url())),
         weak_ptr_factory_(this) {
     DCHECK(!request_->GetUserData(kUserDataKey));
-    request_->SetUserData(kUserDataKey, new UnownedPointer(this));
+    request_->SetUserData(kUserDataKey, base::MakeUnique<UnownedPointer>(this));
   }
 
   ~ScheduledResourceRequest() override {
+    if ((attributes_ & kAttributeLayoutBlocking) == kAttributeLayoutBlocking) {
+      UMA_HISTOGRAM_COUNTS_100(
+          "ResourceScheduler.PeakDelayableRequestsInFlight.LayoutBlocking",
+          peak_delayable_requests_in_flight_);
+    }
+    if (!((attributes_ & kAttributeDelayable) == kAttributeDelayable)) {
+      UMA_HISTOGRAM_COUNTS_100(
+          "ResourceScheduler.PeakDelayableRequestsInFlight.NonDelayable",
+          peak_delayable_requests_in_flight_);
+    }
     request_->RemoveUserData(kUserDataKey);
     scheduler_->RemoveRequest(this);
   }
 
   static ScheduledResourceRequest* ForRequest(net::URLRequest* request) {
-    return static_cast<UnownedPointer*>(request->GetUserData(kUserDataKey))
-        ->get();
+    UnownedPointer* pointer =
+        static_cast<UnownedPointer*>(request->GetUserData(kUserDataKey));
+    return pointer ? pointer->get() : nullptr;
   }
 
   // Starts the request. If |start_mode| is START_ASYNC, the request will not
@@ -269,6 +283,11 @@ class ResourceScheduler::ScheduledResourceRequest : public ResourceThrottle {
     }
 
     ready_ = true;
+  }
+
+  void UpdateDelayableRequestsInFlight(size_t delayable_requests_in_flight) {
+    peak_delayable_requests_in_flight_ = std::max(
+        peak_delayable_requests_in_flight_, delayable_requests_in_flight);
   }
 
   void set_request_priority_params(const RequestPriorityParams& priority) {
@@ -325,6 +344,9 @@ class ResourceScheduler::ScheduledResourceRequest : public ResourceThrottle {
   ResourceScheduler* scheduler_;
   RequestPriorityParams priority_;
   uint32_t fifo_ordering_;
+
+  // Maximum number of delayable requests in-flight when |this| was in-flight.
+  size_t peak_delayable_requests_in_flight_;
   // Cached to excessive recomputation in ShouldKeepSearching.
   const net::HostPortPair host_port_pair_;
 
@@ -491,9 +513,40 @@ class ResourceScheduler::Client {
     YIELD_SCHEDULER
   };
 
+  // Records the metrics related to number of requests in flight.
+  void RecordRequestCountMetrics() const {
+    UMA_HISTOGRAM_COUNTS_100("ResourceScheduler.RequestsCount.All",
+                             in_flight_requests_.size());
+    UMA_HISTOGRAM_COUNTS_100("ResourceScheduler.RequestsCount.Delayable",
+                             in_flight_delayable_count_);
+    UMA_HISTOGRAM_COUNTS_100(
+        "ResourceScheduler.RequestsCount.NonDelayable",
+        in_flight_requests_.size() - in_flight_delayable_count_);
+    UMA_HISTOGRAM_COUNTS_100(
+        "ResourceScheduler.RequestsCount.TotalLayoutBlocking",
+        total_layout_blocking_count_);
+  }
+
   void InsertInFlightRequest(ScheduledResourceRequest* request) {
     in_flight_requests_.insert(request);
     SetRequestAttributes(request, DetermineRequestAttributes(request));
+    RecordRequestCountMetrics();
+
+    if (RequestAttributesAreSet(request->attributes(), kAttributeDelayable)) {
+      // Notify all in-flight with the new count of in-flight delayable
+      // requests.
+      for (RequestSet::const_iterator it = in_flight_requests_.begin();
+           it != in_flight_requests_.end(); ++it) {
+        (*it)->UpdateDelayableRequestsInFlight(in_flight_delayable_count_);
+      }
+    }
+
+    if (RequestAttributesAreSet(request->attributes(),
+                                kAttributeLayoutBlocking) ||
+        !RequestAttributesAreSet(request->attributes(), kAttributeDelayable)) {
+      // |request| is either a layout blocking or a non-delayable request.
+      request->UpdateDelayableRequestsInFlight(in_flight_delayable_count_);
+    }
   }
 
   void EraseInFlightRequest(ScheduledResourceRequest* request) {
@@ -891,6 +944,7 @@ ResourceScheduler::ResourceScheduler()
           kMaxRequestsBeforeYieldingDefault)) {}
 
 ResourceScheduler::~ResourceScheduler() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(unowned_requests_.empty());
   DCHECK(client_map_.empty());
 }
@@ -900,7 +954,7 @@ std::unique_ptr<ResourceThrottle> ResourceScheduler::ScheduleRequest(
     int route_id,
     bool is_async,
     net::URLRequest* url_request) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   ClientId client_id = MakeClientId(child_id, route_id);
   std::unique_ptr<ScheduledResourceRequest> request(
       new ScheduledResourceRequest(
@@ -924,7 +978,7 @@ std::unique_ptr<ResourceThrottle> ResourceScheduler::ScheduleRequest(
 }
 
 void ResourceScheduler::RemoveRequest(ScheduledResourceRequest* request) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (base::ContainsKey(unowned_requests_, request)) {
     unowned_requests_.erase(request);
     return;
@@ -941,7 +995,7 @@ void ResourceScheduler::RemoveRequest(ScheduledResourceRequest* request) {
 
 void ResourceScheduler::OnClientCreated(int child_id,
                                         int route_id) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   ClientId client_id = MakeClientId(child_id, route_id);
   DCHECK(!base::ContainsKey(client_map_, client_id));
 
@@ -952,7 +1006,7 @@ void ResourceScheduler::OnClientCreated(int child_id,
 }
 
 void ResourceScheduler::OnClientDeleted(int child_id, int route_id) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   ClientId client_id = MakeClientId(child_id, route_id);
   ClientMap::iterator it = client_map_.find(client_id);
   DCHECK(it != client_map_.end());
@@ -980,7 +1034,7 @@ void ResourceScheduler::OnLoadingStateChanged(int child_id,
 }
 
 void ResourceScheduler::OnNavigate(int child_id, int route_id) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   ClientId client_id = MakeClientId(child_id, route_id);
 
   ClientMap::iterator it = client_map_.find(client_id);
@@ -994,7 +1048,7 @@ void ResourceScheduler::OnNavigate(int child_id, int route_id) {
 }
 
 void ResourceScheduler::OnWillInsertBody(int child_id, int route_id) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   ClientId client_id = MakeClientId(child_id, route_id);
 
   ClientMap::iterator it = client_map_.find(client_id);
@@ -1010,7 +1064,7 @@ void ResourceScheduler::OnWillInsertBody(int child_id, int route_id) {
 void ResourceScheduler::OnReceivedSpdyProxiedHttpResponse(
     int child_id,
     int route_id) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   ClientId client_id = MakeClientId(child_id, route_id);
 
   ClientMap::iterator client_it = client_map_.find(client_id);
@@ -1078,6 +1132,17 @@ void ResourceScheduler::ReprioritizeRequest(net::URLRequest* request,
   Client* client = client_it->second;
   client->ReprioritizeRequest(scheduled_resource_request, old_priority_params,
                               new_priority_params);
+}
+
+void ResourceScheduler::ReprioritizeRequest(net::URLRequest* request,
+                                            net::RequestPriority new_priority) {
+  int current_intra_priority = 0;
+  auto* existing_request = ScheduledResourceRequest::ForRequest(request);
+  if (existing_request) {
+    current_intra_priority =
+        existing_request->get_request_priority_params().intra_priority;
+  }
+  ReprioritizeRequest(request, new_priority, current_intra_priority);
 }
 
 ResourceScheduler::ClientId ResourceScheduler::MakeClientId(

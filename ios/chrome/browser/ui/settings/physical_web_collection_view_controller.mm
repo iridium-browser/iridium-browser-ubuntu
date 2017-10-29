@@ -6,9 +6,7 @@
 
 #import <CoreLocation/CoreLocation.h>
 
-#import "base/ios/weak_nsobject.h"
 #import "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
 #include "base/metrics/user_metrics.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/physical_web/data_source/physical_web_data_source.h"
@@ -31,6 +29,10 @@
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -63,23 +65,15 @@ typedef NS_ENUM(NSInteger, ItemType) {
 #pragma mark - Initialization
 
 - (instancetype)initWithPrefs:(PrefService*)prefs {
-  self = [super initWithStyle:CollectionViewControllerStyleAppBar];
+  UICollectionViewLayout* layout = [[MDCCollectionViewFlowLayout alloc] init];
+  self =
+      [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
   if (self) {
     self.title = l10n_util::GetNSString(IDS_IOS_OPTIONS_ENABLE_PHYSICAL_WEB);
     _physicalWebEnabled.Init(prefs::kIosPhysicalWebEnabled, prefs);
     [self loadModel];
   }
   return self;
-}
-
-- (instancetype)init {
-  NOTREACHED();
-  return nil;
-}
-
-- (instancetype)initWithStyle:(CollectionViewControllerStyle)style {
-  NOTREACHED();
-  return nil;
 }
 
 #pragma mark - Preference switch
@@ -163,8 +157,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
   NSString* switchLabelText =
       l10n_util::GetNSString(IDS_IOS_OPTIONS_ENABLE_PHYSICAL_WEB);
 
-  CollectionViewSwitchItem* switchItem = [[[CollectionViewSwitchItem alloc]
-      initWithType:ItemTypePhysicalWebSwitch] autorelease];
+  CollectionViewSwitchItem* switchItem =
+      [[CollectionViewSwitchItem alloc] initWithType:ItemTypePhysicalWebSwitch];
   switchItem.text = switchLabelText;
   switchItem.on = [PhysicalWebCollectionViewController
       shouldEnableForPreferenceState:_physicalWebEnabled.GetValue()];
@@ -176,8 +170,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
   NSString* learnMoreText =
       l10n_util::GetNSString(IDS_IOS_OPTIONS_ENABLE_PHYSICAL_WEB_DETAILS);
 
-  CollectionViewFooterItem* learnMore = [[[CollectionViewFooterItem alloc]
-      initWithType:ItemTypeLearnMore] autorelease];
+  CollectionViewFooterItem* learnMore =
+      [[CollectionViewFooterItem alloc] initWithType:ItemTypeLearnMore];
   learnMore.text = learnMoreText;
   learnMore.linkURL = GURL(kPhysicalWebLearnMoreURL);
   learnMore.linkDelegate = self;

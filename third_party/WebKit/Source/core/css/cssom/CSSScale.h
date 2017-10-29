@@ -5,48 +5,55 @@
 #ifndef CSSScale_h
 #define CSSScale_h
 
-#include "core/css/cssom/CSSMatrixComponent.h"
 #include "core/css/cssom/CSSTransformComponent.h"
+#include "core/geometry/DOMMatrix.h"
 
 namespace blink {
 
+class DOMMatrix;
+
+// Represents a scale value in a CSSTransformValue used for properties like
+// "transform".
+// See CSSScale.idl for more information about this class.
 class CORE_EXPORT CSSScale final : public CSSTransformComponent {
   WTF_MAKE_NONCOPYABLE(CSSScale);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static CSSScale* create(double x, double y) { return new CSSScale(x, y); }
-
-  static CSSScale* create(double x, double y, double z) {
+  // Constructors defined in the IDL.
+  static CSSScale* Create(double x, double y) { return new CSSScale(x, y); }
+  static CSSScale* Create(double x, double y, double z) {
     return new CSSScale(x, y, z);
   }
 
-  static CSSScale* fromCSSValue(const CSSFunctionValue&);
+  // Blink-internal ways of creating CSSScales.
+  static CSSScale* FromCSSValue(const CSSFunctionValue&);
 
-  double x() const { return m_x; }
-  double y() const { return m_y; }
-  double z() const { return m_z; }
+  // Getters and setters for attributes defined in the IDL.
+  double x() const { return x_; }
+  double y() const { return y_; }
+  double z() const { return z_; }
+  void setX(double x) { x_ = x; }
+  void setY(double y) { y_ = y; }
+  void setZ(double z) { z_ = z; }
 
-  TransformComponentType type() const override {
-    return m_is2D ? ScaleType : Scale3DType;
+  // Internal methods - from CSSTransformComponent.
+  TransformComponentType GetType() const final { return kScaleType; }
+  const DOMMatrix* AsMatrix() const final {
+    DOMMatrix* result = DOMMatrix::Create();
+    return result->scaleSelf(x_, y_, z_);
   }
-
-  CSSMatrixComponent* asMatrix() const override {
-    return m_is2D ? CSSMatrixComponent::scale(m_x, m_y)
-                  : CSSMatrixComponent::scale3d(m_x, m_y, m_z);
-  }
-
-  CSSFunctionValue* toCSSValue() const override;
+  CSSFunctionValue* ToCSSValue() const final;
 
  private:
-  CSSScale(double x, double y) : m_x(x), m_y(y), m_z(1), m_is2D(true) {}
+  CSSScale(double x, double y)
+      : CSSTransformComponent(true /* is2D */), x_(x), y_(y), z_(1) {}
   CSSScale(double x, double y, double z)
-      : m_x(x), m_y(y), m_z(z), m_is2D(false) {}
+      : CSSTransformComponent(false /* is2D */), x_(x), y_(y), z_(z) {}
 
-  double m_x;
-  double m_y;
-  double m_z;
-  bool m_is2D;
+  double x_;
+  double y_;
+  double z_;
 };
 
 }  // namespace blink

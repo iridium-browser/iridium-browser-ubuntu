@@ -4,6 +4,8 @@
 
 #include "content/common/service_worker/service_worker_types.h"
 
+#include "content/public/common/service_worker_modes.h"
+
 namespace content {
 
 const char kServiceWorkerRegisterErrorPrefix[] =
@@ -71,9 +73,9 @@ size_t ServiceWorkerFetchRequest::EstimatedStructSize() {
 
 ServiceWorkerResponse::ServiceWorkerResponse()
     : status_code(0),
-      response_type(blink::WebServiceWorkerResponseTypeOpaque),
+      response_type(blink::kWebServiceWorkerResponseTypeOpaque),
       blob_size(0),
-      error(blink::WebServiceWorkerResponseErrorUnknown) {}
+      error(blink::kWebServiceWorkerResponseErrorUnknown) {}
 
 ServiceWorkerResponse::ServiceWorkerResponse(
     std::unique_ptr<std::vector<GURL>> url_list,
@@ -83,7 +85,6 @@ ServiceWorkerResponse::ServiceWorkerResponse(
     std::unique_ptr<ServiceWorkerHeaderMap> headers,
     const std::string& blob_uuid,
     uint64_t blob_size,
-    const GURL& stream_url,
     blink::WebServiceWorkerResponseError error,
     base::Time response_time,
     bool is_in_cache_storage,
@@ -94,7 +95,6 @@ ServiceWorkerResponse::ServiceWorkerResponse(
       response_type(response_type),
       blob_uuid(blob_uuid),
       blob_size(blob_size),
-      stream_url(stream_url),
       error(error),
       response_time(response_time),
       is_in_cache_storage(is_in_cache_storage),
@@ -114,7 +114,6 @@ size_t ServiceWorkerResponse::EstimatedStructSize() {
   for (const auto& url : url_list)
     size += url.spec().size();
   size += blob_uuid.size();
-  size += stream_url.spec().size();
   size += cache_storage_cache_name.size();
   for (const auto& key_and_value : headers) {
     size += key_and_value.first.size();
@@ -127,7 +126,7 @@ size_t ServiceWorkerResponse::EstimatedStructSize() {
 
 ServiceWorkerObjectInfo::ServiceWorkerObjectInfo()
     : handle_id(kInvalidServiceWorkerHandleId),
-      state(blink::WebServiceWorkerStateUnknown),
+      state(blink::kWebServiceWorkerStateUnknown),
       version_id(kInvalidServiceWorkerVersionId) {}
 
 bool ServiceWorkerObjectInfo::IsValid() const {
@@ -135,15 +134,18 @@ bool ServiceWorkerObjectInfo::IsValid() const {
          version_id != kInvalidServiceWorkerVersionId;
 }
 
+ServiceWorkerRegistrationOptions::ServiceWorkerRegistrationOptions(
+    const GURL& scope)
+    : scope(scope) {}
+
 ServiceWorkerRegistrationObjectInfo::ServiceWorkerRegistrationObjectInfo()
     : handle_id(kInvalidServiceWorkerRegistrationHandleId),
       registration_id(kInvalidServiceWorkerRegistrationId) {
 }
 
 ServiceWorkerClientQueryOptions::ServiceWorkerClientQueryOptions()
-    : client_type(blink::WebServiceWorkerClientTypeWindow),
-      include_uncontrolled(false) {
-}
+    : client_type(blink::kWebServiceWorkerClientTypeWindow),
+      include_uncontrolled(false) {}
 
 ExtendableMessageEventSource::ExtendableMessageEventSource() {}
 

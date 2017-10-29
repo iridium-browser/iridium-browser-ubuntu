@@ -348,8 +348,7 @@ UDIFParser::UDIFParser(ReadStream* stream)
     : stream_(stream),
       partition_names_(),
       blocks_(),
-      block_size_(kSectorSize) {
-}
+      block_size_(kSectorSize) {}
 
 UDIFParser::~UDIFParser() {}
 
@@ -358,6 +357,10 @@ bool UDIFParser::Parse() {
     return false;
 
   return true;
+}
+
+const std::vector<uint8_t>& UDIFParser::GetCodeSignature() {
+  return signature_blob_;
 }
 
 size_t UDIFParser::GetNumberOfPartitions() {
@@ -403,7 +406,7 @@ std::unique_ptr<ReadStream> UDIFParser::GetPartitionReadStream(
     size_t part_number) {
   DCHECK_LT(part_number, blocks_.size());
   return base::MakeUnique<UDIFPartitionReadStream>(stream_, block_size_,
-                                                   blocks_[part_number]);
+                                                   blocks_[part_number].get());
 }
 
 bool UDIFParser::ParseBlkx() {
@@ -509,7 +512,7 @@ bool UDIFParser::ParseBlkx() {
     }
 
     // Copy the block table out of the plist.
-    std::unique_ptr<UDIFBlock> block(new UDIFBlock());
+    auto block = base::MakeUnique<UDIFBlock>();
     if (!block->ParseBlockData(
             reinterpret_cast<const UDIFBlockData*>(CFDataGetBytePtr(data)),
             base::checked_cast<size_t>(CFDataGetLength(data)),
@@ -555,6 +558,37 @@ bool UDIFParser::ParseBlkx() {
 
     blocks_.push_back(std::move(block));
     partition_names_.push_back(partition_name);
+  }
+
+  // The offsets in the trailer could be garbage in DMGs that aren't signed.
+  // Need a sanity check that the DMG has legit values for these fields.
+  if (trailer.code_signature_length != 0 && trailer_start > 0) {
+    auto code_signature_end =
+        base::CheckedNumeric<size_t>(trailer.code_signature_offset) +
+        trailer.code_signature_length;
+    if (code_signature_end.IsValid() &&
+        code_signature_end.ValueOrDie() <=
+            base::checked_cast<size_t>(trailer_start)) {
+      signature_blob_.resize(trailer.code_signature_length);
+
+      off_t code_signature_start =
+          stream_->Seek(trailer.code_signature_offset, SEEK_SET);
+      if (code_signature_start == -1)
+        return false;
+
+      size_t bytes_read = 0;
+
+      if (!stream_->Read(signature_blob_.data(), trailer.code_signature_length,
+                         &bytes_read)) {
+        DLOG(ERROR) << "Failed to read raw signature bytes";
+        return false;
+      }
+
+      if (bytes_read != trailer.code_signature_length) {
+        DLOG(ERROR) << "Read unexpected number of raw signature bytes";
+        return false;
+      }
+    }
   }
 
   return true;

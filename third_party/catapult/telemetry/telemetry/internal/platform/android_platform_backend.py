@@ -22,7 +22,6 @@ from telemetry.internal.platform import linux_based_platform_backend
 from telemetry.internal.platform.power_monitor import android_dumpsys_power_monitor
 from telemetry.internal.platform.power_monitor import android_fuelgauge_power_monitor
 from telemetry.internal.platform.power_monitor import android_temperature_monitor
-from telemetry.internal.platform.power_monitor import monsoon_power_monitor
 from telemetry.internal.platform.power_monitor import (
   android_power_monitor_controller)
 from telemetry.internal.platform.power_monitor import sysfs_power_monitor
@@ -64,24 +63,6 @@ _DEVICE_COPY_SCRIPT_FILE = os.path.abspath(os.path.join(
 _DEVICE_COPY_SCRIPT_LOCATION = (
     '/data/local/tmp/efficient_android_directory_copy.sh')
 
-# TODO(nednguyen): Remove this method and update the client config to point to
-# the correct binary instead.
-def _FindLocallyBuiltPath(binary_name):
-  """Finds the most recently built |binary_name|."""
-  command = None
-  command_mtime = 0
-  required_mode = os.X_OK
-  if binary_name.endswith('.apk'):
-    required_mode = os.R_OK
-  for build_path in util.GetBuildDirectories():
-    candidate = os.path.join(build_path, binary_name)
-    if os.path.isfile(candidate) and os.access(candidate, required_mode):
-      candidate_mtime = os.stat(candidate).st_mtime
-      if candidate_mtime > command_mtime:
-        command = candidate
-        command_mtime = candidate_mtime
-  return command
-
 
 class AndroidPlatformBackend(
     linux_based_platform_backend.LinuxBasedPlatformBackend):
@@ -108,7 +89,6 @@ class AndroidPlatformBackend(
     self._power_monitor = (
       android_power_monitor_controller.AndroidPowerMonitorController([
         android_temperature_monitor.AndroidTemperatureMonitor(self._device),
-        monsoon_power_monitor.MonsoonPowerMonitor(self._device, self),
         android_dumpsys_power_monitor.DumpsysPowerMonitor(
           self._battery, self),
         sysfs_power_monitor.SysfsPowerMonitor(self, standalone=True),
@@ -161,8 +141,14 @@ class AndroidPlatformBackend(
     description = self._device.GetProp('ro.build.description', cache=True)
     if description is not None:
       return 'svelte' in description
-    else:
-      return False
+    return False
+
+  def IsAosp(self):
+    description = self._device.GetProp('ro.build.description', cache=True)
+    if description is not None:
+      return 'aosp' in description
+    return False
+
 
   def GetRemotePort(self, port):
     return forwarder.Forwarder.DevicePortForHostPort(port) or 0
@@ -323,6 +309,9 @@ class AndroidPlatformBackend(
   def GetOSVersionName(self):
     return self._device.GetProp('ro.build.id')[0]
 
+  def GetOSVersionDetailString(self):
+    return ''  # TODO(kbr): Implement this.
+
   def CanFlushIndividualFilesFromSystemCache(self):
     return False
 
@@ -455,21 +444,21 @@ class AndroidPlatformBackend(
   def GetPsOutput(self, columns, pid=None):
     assert columns == ['pid', 'name'] or columns == ['pid'], \
         'Only know how to return pid and name. Requested: ' + columns
-    # TODO(catapult:#3215): Migrate to GetPids.
-    cmd = ['ps']
-    if pid:
-      cmd.extend(['-p', str(pid)])
-    ps = self._device.RunShellCommand(
-        cmd, check_return=True, large_output=True)[1:]
+    if pid is not None:
+      pid = str(pid)
+    procs_pids = self._device.GetPids()
     output = []
-    for line in ps:
-      data = line.split()
-      curr_pid = data[1]
-      curr_name = data[-1]
-      if columns == ['pid', 'name']:
-        output.append([curr_pid, curr_name])
-      else:
-        output.append([curr_pid])
+    for curr_name, pids_list in procs_pids.iteritems():
+      for curr_pid in pids_list:
+        if columns == ['pid', 'name']:
+          row = [curr_pid, curr_name]
+        else:
+          row = [curr_pid]
+        if pid is not None:
+          if curr_pid == pid:
+            return [row]
+        else:
+          output.append(row)
     return output
 
   def RunCommand(self, command):
@@ -538,7 +527,9 @@ class AndroidPlatformBackend(
   def supports_test_ca(self):
     # TODO(nednguyen): figure out how to install certificate on Android M
     # crbug.com/593152
-    return self._device.build_version_sdk <= version_codes.LOLLIPOP_MR1
+    # TODO(crbug.com/716084): enable support for test CA
+    # return self._device.build_version_sdk <= version_codes.LOLLIPOP_MR1
+    return False
 
   def InstallTestCa(self, ca_cert_path):
     """Install a randomly generated root CA on the android device.
@@ -605,7 +596,8 @@ class AndroidPlatformBackend(
       # Note: need to pass command as a string for the shell to expand the *'s.
       extended_path = '%s %s/* %s/*/* %s/*/*/*' % (path, path, path, path)
       self._device.RunShellCommand(
-          'chown %s.%s %s' % (uid, uid, extended_path), check_return=False)
+          'chown %s.%s %s' % (uid, uid, extended_path),
+          check_return=False, shell=True)
 
   def _EfficientDeviceDirectoryCopy(self, source, dest):
     if not self._device_copy_script:
@@ -738,6 +730,10 @@ class AndroidPlatformBackend(
       arch = self.GetArchName()
       arch = _ARCH_TO_STACK_TOOL_ARCH.get(arch, arch)
       cmd.append('--arch=%s' % arch)
+      for build_path in util.GetBuildDirectories():
+        if os.path.exists(build_path):
+          cmd.append('--output-directory=%s' % build_path)
+          break
       p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
       ret += Decorate('Stack from Logcat', p.communicate(input=logcat)[0])
 
@@ -810,7 +806,7 @@ class AndroidPlatformBackend(
         ['log', '-p', 'i', '-t', TELEMETRY_LOGCAT_TAG, message],
         check_return=True)
 
-  def WaitForTemperature(self, temp):
+  def WaitForBatteryTemperature(self, temp):
     # Temperature is in tenths of a degree C, so we convert to that scale.
     self._battery.LetBatteryCoolToTemperature(temp * 10)
 

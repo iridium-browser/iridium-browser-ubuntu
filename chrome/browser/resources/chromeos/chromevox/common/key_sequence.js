@@ -44,8 +44,9 @@ goog.require('cvox.PlatformFilter');
  * @param {boolean=} opt_requireStickyMode Whether to require sticky mode.
  * @constructor
  */
-cvox.KeySequence = function(originalEvent, opt_cvoxModifier, opt_doubleTap,
-                            opt_skipStripping, opt_requireStickyMode) {
+cvox.KeySequence = function(
+    originalEvent, opt_cvoxModifier, opt_doubleTap, opt_skipStripping,
+    opt_requireStickyMode) {
   /** @type {boolean} */
   this.doubleTap = !!opt_doubleTap;
 
@@ -68,8 +69,6 @@ cvox.KeySequence = function(originalEvent, opt_cvoxModifier, opt_doubleTap,
   if (this.stickyMode && this.prefixKey) {
     throw 'Prefix key and sticky mode cannot both be enabled: ' + originalEvent;
   }
-
-  var event = this.resolveChromeOSSpecialKeys_(originalEvent);
 
   // TODO (rshearer): We should take the user out of sticky mode if they
   // try to use the CVox modifier or prefix key.
@@ -98,7 +97,7 @@ cvox.KeySequence = function(originalEvent, opt_cvoxModifier, opt_doubleTap,
     keyCode: []
   };
 
-  this.extractKey_(event);
+  this.extractKey_(originalEvent);
 };
 
 
@@ -176,8 +175,8 @@ cvox.KeySequence.prototype.equals = function(rhs) {
   // If one key sequence requires sticky mode, return early the strict
   // sticky mode state.
   if (this.requireStickyMode || rhs.requireStickyMode) {
-    return (this.stickyMode || rhs.stickyMode) &&
-        !this.cvoxModifier && !rhs.cvoxModifier;
+    return (this.stickyMode || rhs.stickyMode) && !this.cvoxModifier &&
+        !rhs.cvoxModifier;
   }
 
   // If they both have the ChromeVox modifier, or they both don't have the
@@ -357,25 +356,25 @@ cvox.KeySequence.prototype.isCVoxModifierActive = function(keyEvent) {
   // If the combo string becomes empty, then the user has activated the combo.
   if (this.isKeyModifierActive(keyEvent, 'ctrlKey')) {
     modifierKeyCombo = modifierKeyCombo.filter(function(modifier) {
-                              return modifier != 'Ctrl';
-                            });
+      return modifier != 'Ctrl';
+    });
   }
   if (this.isKeyModifierActive(keyEvent, 'altKey')) {
     modifierKeyCombo = modifierKeyCombo.filter(function(modifier) {
-                                                 return modifier != 'Alt';
-                                               });
+      return modifier != 'Alt';
+    });
   }
   if (this.isKeyModifierActive(keyEvent, 'shiftKey')) {
     modifierKeyCombo = modifierKeyCombo.filter(function(modifier) {
-                                                 return modifier != 'Shift';
-                                               });
+      return modifier != 'Shift';
+    });
   }
   if (this.isKeyModifierActive(keyEvent, 'metaKey') ||
       this.isKeyModifierActive(keyEvent, 'searchKeyHeld')) {
     var metaKeyName = this.getMetaKeyName_();
     modifierKeyCombo = modifierKeyCombo.filter(function(modifier) {
-                                                 return modifier != metaKeyName;
-                                               });
+      return modifier != metaKeyName;
+    });
   }
   return (modifierKeyCombo.length == 0);
 };
@@ -407,7 +406,8 @@ cvox.KeySequence.prototype.isKeyModifierActive = function(keyEvent, modifier) {
       return (keyEvent.metaKey || (keyEvent.keyCode == 91));
       break;
     case 'searchKeyHeld':
-      return ((cvox.ChromeVox.isChromeOS && keyEvent.keyCode == 91) ||
+      return (
+          (cvox.ChromeVox.isChromeOS && keyEvent.keyCode == 91) ||
           keyEvent['searchKeyHeld']);
       break;
   }
@@ -439,9 +439,11 @@ cvox.KeySequence.deserialize = function(sequenceObject) {
   var firstSequenceEvent = {};
 
   firstSequenceEvent['stickyMode'] = (sequenceObject.stickyMode == undefined) ?
-      false : sequenceObject.stickyMode;
+      false :
+      sequenceObject.stickyMode;
   firstSequenceEvent['prefixKey'] = (sequenceObject.prefixKey == undefined) ?
-      false : sequenceObject.prefixKey;
+      false :
+      sequenceObject.prefixKey;
 
   var secondKeyPressed = sequenceObject.keys.keyCode.length > 1;
   var secondSequenceEvent = {};
@@ -453,12 +455,11 @@ cvox.KeySequence.deserialize = function(sequenceObject) {
     }
   }
   var skipStripping = sequenceObject.skipStripping !== undefined ?
-      sequenceObject.skipStripping : true;
-  var keySeq = new cvox.KeySequence(firstSequenceEvent,
-                                    sequenceObject.cvoxModifier,
-                                    sequenceObject.doubleTap,
-                                    skipStripping,
-                                    sequenceObject.requireStickyMode);
+      sequenceObject.skipStripping :
+      true;
+  var keySeq = new cvox.KeySequence(
+      firstSequenceEvent, sequenceObject.cvoxModifier, sequenceObject.doubleTap,
+      skipStripping, sequenceObject.requireStickyMode);
   if (secondKeyPressed) {
     cvox.ChromeVox.sequenceSwitchKeyCodes.push(
         new cvox.KeySequence(firstSequenceEvent, sequenceObject.cvoxModifier));
@@ -569,81 +570,4 @@ cvox.KeySequence.setModifiersOnEvent_ = function(keyName, seqEvent) {
   } else if (keyName == 'Insert') {
     seqEvent['keyCode'] = 45;
   }
-};
-
-
-/**
- * Used to resolve special ChromeOS keys (see link for more detail).
- * http://crbug.com/162268
- * @param {Object} originalEvent The event.
- * @return {Object} The resolved event.
- * @private
- */
-cvox.KeySequence.prototype.resolveChromeOSSpecialKeys_ =
-    function(originalEvent) {
-  if (!this.cvoxModifier || this.stickyMode || this.prefixKey ||
-      !cvox.ChromeVox.isChromeOS) {
-    return originalEvent;
-  }
-  var evt = {};
-  for (var key in originalEvent) {
-    evt[key] = originalEvent[key];
-  }
-  switch (evt['keyCode']) {
-    case 33:  // Page up.
-      evt['keyCode'] = 38;  // Up arrow.
-      break;
-    case 34:  // Page down.
-      evt['keyCode'] = 40;  // Down arrow.
-      break;
-    case 35:  // End.
-      evt['keyCode'] = 39;  // Right arrow.
-      break;
-    case 36:  // Home.
-      evt['keyCode'] = 37;  // Left arrow.
-      break;
-    case 45:  // Insert.
-      evt['keyCode'] = 190;  // Period.
-      break;
-    case 46:  // Delete.
-      evt['keyCode'] = 8;  // Backspace.
-      break;
-    case 112:  // F1.
-      evt['keyCode'] = 49;  // 1.
-      break;
-    case 113:  // F2.
-      evt['keyCode'] = 50;  // 2.
-      break;
-    case 114:  // F3.
-      evt['keyCode'] = 51;  // 3.
-      break;
-    case 115:  // F4.
-      evt['keyCode'] = 52;  // 4.
-      break;
-    case 116:  // F5.
-      evt['keyCode'] = 53;  // 5.
-      break;
-    case 117:  // F6.
-      evt['keyCode'] = 54;  // 6.
-      break;
-    case 118:  // F7.
-      evt['keyCode'] = 55;  // 7.
-      break;
-    case 119:  // F8.
-      evt['keyCode'] = 56;  // 8.
-      break;
-    case 120:  // F9.
-      evt['keyCode'] = 57;  // 9.
-      break;
-    case 121:  // F10.
-      evt['keyCode'] = 48;  // 0.
-      break;
-    case 122:  // F11
-      evt['keyCode'] = 189;  // Hyphen.
-      break;
-    case 123:  // F12
-      evt['keyCode'] = 187;  // Equals.
-      break;
-  }
-  return evt;
 };

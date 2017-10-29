@@ -136,14 +136,9 @@ Resources.ApplicationCacheItemsView = class extends UI.SimpleView {
     }
   }
 
-  _update() {
-    this._model.requestApplicationCache(this._frameId, this._updateCallback.bind(this));
-  }
+  async _update() {
+    var applicationCache = await this._model.requestApplicationCache(this._frameId);
 
-  /**
-   * @param {?Protocol.ApplicationCache.ApplicationCache} applicationCache
-   */
-  _updateCallback(applicationCache) {
     if (!applicationCache || !applicationCache.manifestURL) {
       delete this._manifest;
       delete this._creationTime;
@@ -185,6 +180,7 @@ Resources.ApplicationCacheItemsView = class extends UI.SimpleView {
       {id: 'size', title: Common.UIString('Size'), align: DataGrid.DataGrid.Align.Right, sortable: true}
     ]);
     this._dataGrid = new DataGrid.DataGrid(columns);
+    this._dataGrid.setStriped(true);
     this._dataGrid.asWidget().show(this.element);
     this._dataGrid.addEventListener(DataGrid.DataGrid.Events.SortingChanged, this._populateDataGrid, this);
   }

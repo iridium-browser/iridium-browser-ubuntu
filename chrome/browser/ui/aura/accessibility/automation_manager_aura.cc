@@ -11,13 +11,16 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/automation_internal/automation_event_router.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/common/extensions/api/automation_api_constants.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
 #include "content/public/browser/ax_event_notification_details.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/render_frame_host.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_enums.h"
 #include "ui/accessibility/ax_tree_id_registry.h"
+#include "ui/accessibility/platform/aura_window_properties.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/views/accessibility/ax_aura_obj_wrapper.h"
@@ -25,11 +28,50 @@
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/shell.h"           // nogncheck
 #include "ash/wm/window_util.h"  // nogncheck
+#include "components/session_manager/core/session_manager.h"
 #endif
 
 using content::BrowserContext;
 using extensions::AutomationEventRouter;
+
+namespace {
+
+// Returns default browser context for sending events in case it was not
+// provided.
+BrowserContext* GetDefaultEventContext() {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  if (!profile_manager)
+    return nullptr;
+
+#if defined(OS_CHROMEOS)
+  session_manager::SessionManager* session_manager =
+      session_manager::SessionManager::Get();
+  // It is not guaranteed that user profile creation is completed for
+  // some session states. In this case use default profile.
+  const session_manager::SessionState session_state =
+      session_manager ? session_manager->session_state()
+                      : session_manager::SessionState::UNKNOWN;
+  switch (session_state) {
+    case session_manager::SessionState::LOGGED_IN_NOT_ACTIVE:
+    case session_manager::SessionState::ACTIVE:
+    case session_manager::SessionState::LOCKED:
+      break;
+    case session_manager::SessionState::UNKNOWN:
+    case session_manager::SessionState::OOBE:
+    case session_manager::SessionState::LOGIN_PRIMARY:
+    case session_manager::SessionState::LOGIN_SECONDARY:
+      const base::FilePath defult_profile_dir =
+          profiles::GetDefaultProfileDir(profile_manager->user_data_dir());
+      return profile_manager->GetProfileByPath(defult_profile_dir);
+  }
+#endif
+
+  return ProfileManager::GetLastUsedProfile();
+}
+
+}  // namespace
 
 // static
 AutomationManagerAura* AutomationManagerAura::GetInstance() {
@@ -81,53 +123,17 @@ void AutomationManagerAura::HandleAlert(content::BrowserContext* context,
   SendEvent(context, obj, ui::AX_EVENT_ALERT);
 }
 
-void AutomationManagerAura::PerformAction(
-    const ui::AXActionData& data) {
+void AutomationManagerAura::PerformAction(const ui::AXActionData& data) {
   CHECK(enabled_);
 
-  switch (data.action) {
-    case ui::AX_ACTION_DO_DEFAULT:
-      current_tree_->DoDefault(data.target_node_id);
-      break;
-    case ui::AX_ACTION_FOCUS:
-      current_tree_->Focus(data.target_node_id);
-      break;
-    case ui::AX_ACTION_SCROLL_TO_MAKE_VISIBLE:
-      current_tree_->MakeVisible(data.target_node_id);
-      break;
-    case ui::AX_ACTION_SET_SELECTION:
-      if (data.anchor_node_id != data.focus_node_id) {
-        NOTREACHED();
-        return;
-      }
-      current_tree_->SetSelection(
-          data.anchor_node_id, data.anchor_offset, data.focus_offset);
-      break;
-    case ui::AX_ACTION_SHOW_CONTEXT_MENU:
-      current_tree_->ShowContextMenu(data.target_node_id);
-      break;
-    case ui::AX_ACTION_SET_ACCESSIBILITY_FOCUS:
-      // Sent by ChromeVox but doesn't need to be handled by aura.
-      break;
-    case ui::AX_ACTION_SET_SEQUENTIAL_FOCUS_NAVIGATION_STARTING_POINT:
-      // Sent by ChromeVox but doesn't need to be handled by aura.
-      break;
-    case ui::AX_ACTION_BLUR:
-    case ui::AX_ACTION_DECREMENT:
-    case ui::AX_ACTION_GET_IMAGE_DATA:
-    case ui::AX_ACTION_HIT_TEST:
-    case ui::AX_ACTION_INCREMENT:
-    case ui::AX_ACTION_REPLACE_SELECTED_TEXT:
-    case ui::AX_ACTION_SCROLL_TO_POINT:
-    case ui::AX_ACTION_SET_SCROLL_OFFSET:
-    case ui::AX_ACTION_SET_VALUE:
-      // Not implemented yet.
-      NOTREACHED();
-      break;
-    case ui::AX_ACTION_NONE:
-      NOTREACHED();
-      break;
+  // Unlike all of the other actions, a hit test requires determining the
+  // node to perform the action on first.
+  if (data.action == ui::AX_ACTION_HIT_TEST) {
+    PerformHitTest(data);
+    return;
   }
+
+  current_tree_->HandleAccessibleAction(data);
 }
 
 void AutomationManagerAura::OnChildWindowRemoved(
@@ -139,6 +145,11 @@ void AutomationManagerAura::OnChildWindowRemoved(
     parent = current_tree_->GetRoot();
 
   SendEvent(nullptr, parent, ui::AX_EVENT_CHILDREN_CHANGED);
+}
+
+void AutomationManagerAura::OnEvent(views::AXAuraObjWrapper* aura_obj,
+                                    ui::AXEvent event_type) {
+  SendEvent(nullptr, aura_obj, event_type);
 }
 
 AutomationManagerAura::AutomationManagerAura()
@@ -160,9 +171,11 @@ void AutomationManagerAura::Reset(bool reset_serializer) {
 void AutomationManagerAura::SendEvent(BrowserContext* context,
                                       views::AXAuraObjWrapper* aura_obj,
                                       ui::AXEvent event_type) {
-  if (!context && g_browser_process->profile_manager()) {
-    context = g_browser_process->profile_manager()->GetLastUsedProfile();
-  }
+  if (!current_tree_serializer_)
+    return;
+
+  if (!context)
+    context = GetDefaultEventContext();
 
   if (!context) {
     LOG(WARNING) << "Accessibility notification but no browser context";
@@ -202,4 +215,61 @@ void AutomationManagerAura::SendEvent(BrowserContext* context,
               pending_events_copy[i].first,
               pending_events_copy[i].second);
   }
+}
+
+void AutomationManagerAura::PerformHitTest(
+    const ui::AXActionData& original_action) {
+#if defined(OS_CHROMEOS)
+  ui::AXActionData action = original_action;
+  aura::Window* root_window = ash::Shell::Get()->GetPrimaryRootWindow();
+  if (!root_window)
+    return;
+
+  // Determine which aura Window is associated with the target point.
+  aura::Window* window =
+      root_window->GetEventHandlerForPoint(action.target_point);
+  if (!window)
+    return;
+
+  // Convert point to local coordinates of the hit window.
+  aura::Window::ConvertPointToTarget(root_window, window, &action.target_point);
+
+  // If the window has a child AX tree ID, forward the action to the
+  // associated AXHostDelegate or RenderFrameHost.
+  ui::AXTreeIDRegistry::AXTreeID child_ax_tree_id =
+      window->GetProperty(ui::kChildAXTreeID);
+  if (child_ax_tree_id != ui::AXTreeIDRegistry::kNoAXTreeID) {
+    ui::AXTreeIDRegistry* registry = ui::AXTreeIDRegistry::GetInstance();
+    ui::AXHostDelegate* delegate = registry->GetHostDelegate(child_ax_tree_id);
+    if (delegate) {
+      delegate->PerformAction(action);
+      return;
+    }
+
+    content::RenderFrameHost* rfh =
+        content::RenderFrameHost::FromAXTreeID(child_ax_tree_id);
+    if (rfh)
+      rfh->AccessibilityPerformAction(action);
+    return;
+  }
+
+  // If the window doesn't have a child tree ID, try to fire the event
+  // on a View.
+  views::Widget* widget = views::Widget::GetWidgetForNativeView(window);
+  if (widget) {
+    views::View* root_view = widget->GetRootView();
+    views::View* hit_view =
+        root_view->GetEventHandlerForPoint(action.target_point);
+    if (hit_view) {
+      hit_view->NotifyAccessibilityEvent(action.hit_test_event_to_fire, true);
+      return;
+    }
+  }
+
+  // Otherwise, fire the event directly on the Window.
+  views::AXAuraObjWrapper* window_wrapper =
+      views::AXAuraObjCache::GetInstance()->GetOrCreate(window);
+  if (window_wrapper)
+    SendEvent(nullptr, window_wrapper, action.hit_test_event_to_fire);
+#endif
 }

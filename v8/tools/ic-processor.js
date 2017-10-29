@@ -36,7 +36,7 @@ function IcProcessor() {
                           null, null, null];
   LogReader.call(this, {
       'code-creation': {
-          parsers: [null, parseInt, parseInt, parseInt, null, 'var-args'],
+          parsers: [null, parseInt, parseInt, parseInt, parseInt, null, 'var-args'],
           processor: this.processCodeCreation },
       'code-move': { parsers: [parseInt, parseInt],
           processor: this.processCodeMove },
@@ -60,13 +60,6 @@ function IcProcessor() {
         parsers : [parseInt, parseInt, parseInt, parseInt, null, null, null,
                    null, null, null, null],
         processor: this.processCompareIC },
-      'BinaryOpIC': {
-        parsers : [parseInt, parseInt, parseInt, parseInt, null, null,
-                   parseInt],
-        processor: this.processBinaryOpIC },
-      'ToBooleanIC': {
-        parsers : [parseInt, parseInt, parseInt, parseInt, null, null],
-        processor: this.processToBooleanIC },
       'PatchIC': {
         parsers : [parseInt, parseInt, parseInt],
         processor: this.processPatchIC },
@@ -79,8 +72,6 @@ function IcProcessor() {
   this.KeyedLoadIC = 0;
   this.KeyedStoreIC = 0;
   this.CompareIC = 0;
-  this.BinaryOpIC = 0;
-  this.ToBooleanIC = 0;
   this.PatchIC = 0;
 }
 inherits(IcProcessor, LogReader);
@@ -92,8 +83,25 @@ IcProcessor.prototype.printError = function(str) {
   print(str);
 };
 
+IcProcessor.prototype.processString = function(string) {
+  var end = string.length;
+  var current = 0;
+  var next = 0;
+  var line;
+  var i = 0;
+  var entry;
+  while (current < end) {
+    next = string.indexOf("\n", current);
+    if (next === -1) break;
+    i++;
+    line = string.substring(current, next);
+    current = next + 1;
+    this.processLogLine(line);
+  }
+}
 
 IcProcessor.prototype.processLogFile = function(fileName) {
+  this.collectEntries = true
   this.lastLogFileName_ = fileName;
   var line;
   while (line = readline()) {
@@ -106,21 +114,25 @@ IcProcessor.prototype.processLogFile = function(fileName) {
   print("KeyedLoad: " + this.KeyedLoadIC);
   print("KeyedStore: " + this.KeyedStoreIC);
   print("CompareIC: " + this.CompareIC);
-  print("BinaryOpIC: " + this.BinaryOpIC);
-  print("ToBooleanIC: " + this.ToBooleanIC);
   print("PatchIC: " + this.PatchIC);
 };
 
+IcProcessor.prototype.addEntry = function(entry) {
+  this.entries.push(entry);
+}
 
 IcProcessor.prototype.processCodeCreation = function(
-    type, kind, start, size, name, maybe_func) {
+    type, kind, timestamp, start, size, name, maybe_func) {
   name = this.deserializedEntriesNames_[start] || name;
+  if (name.startsWith("onComplete")) {
+    console.log(name);
+  }
   if (maybe_func.length) {
     var funcAddr = parseInt(maybe_func[0]);
     var state = parseState(maybe_func[1]);
-    this.profile_.addFuncCode(type, name, start, size, funcAddr, state);
+    this.profile_.addFuncCode(type, name, timestamp, start, size, funcAddr, state);
   } else {
-    this.profile_.addCode(type, name, start, size);
+    this.profile_.addCode(type, name, timestamp, start, size);
   }
 };
 
@@ -145,7 +157,7 @@ IcProcessor.prototype.formatName = function(entry) {
   var re = /(.*):[0-9]+:[0-9]+$/;
   var array = re.exec(name);
   if (!array) return name;
-  return array[1];
+  return entry.getState() + array[1];
 }
 
 IcProcessor.prototype.processPropertyIC = function (
@@ -166,22 +178,6 @@ IcProcessor.prototype.processCompareIC = function (
   print("CompareIC[" + op + "] ((" +
         old_left + "+" + old_right + "=" + old_state + ")->(" +
         new_left + "+" + new_right + "=" + new_state + ")) at " +
-        this.formatName(entry) + ":" + line + ":" + column);
-}
-
-IcProcessor.prototype.processBinaryOpIC = function (
-    pc, line, column, stub, old_state, new_state, allocation_site) {
-  var entry = this.profile_.findEntry(pc);
-  this.BinaryOpIC++;
-  print("BinaryOpIC (" + old_state + "->" + new_state + ") at " +
-        this.formatName(entry) + ":" + line + ":" + column);
-}
-
-IcProcessor.prototype.processToBooleanIC = function (
-    pc, line, column, stub, old_state, new_state) {
-  var entry = this.profile_.findEntry(pc);
-  this.ToBooleanIC++;
-  print("ToBooleanIC (" + old_state + "->" + new_state + ") at " +
         this.formatName(entry) + ":" + line + ":" + column);
 }
 

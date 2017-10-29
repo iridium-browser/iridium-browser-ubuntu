@@ -5,8 +5,6 @@
 #ifndef COMPONENTS_EXO_WAYLAND_CLIENTS_CLIENT_BASE_H_
 #define COMPONENTS_EXO_WAYLAND_CLIENTS_CLIENT_BASE_H_
 
-#include <drm_fourcc.h>
-
 #include <memory>
 #include <string>
 #include <vector>
@@ -21,6 +19,7 @@
 
 namespace base {
 class CommandLine;
+class MessageLoopForUI;
 }
 
 namespace exo {
@@ -44,7 +43,7 @@ class ClientBase {
     bool transparent_background = false;
     bool use_drm = false;
     std::string use_drm_value;
-    int32_t drm_format = DRM_FORMAT_ABGR8888;
+    int32_t drm_format = 0;
   };
 
   struct Globals {
@@ -94,6 +93,7 @@ class ClientBase {
   std::unique_ptr<wl_shell_surface> shell_surface_;
   Globals globals_;
 #if defined(OZONE_PLATFORM_GBM)
+  std::unique_ptr<base::MessageLoopForUI> ui_loop_;
   base::ScopedFD drm_fd_;
   std::unique_ptr<gbm_device> device_;
 #endif

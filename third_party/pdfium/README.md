@@ -36,7 +36,7 @@ authentication instructions. **Note that you must authenticate with your
 @google.com credentials**. Enter "0" if asked for a project-id.
 
 Once you've done this, the toolchain will be installed automatically for
-you in [the step](#GenBuild) below.
+you in the [Generate the build files](#GenBuild) step below.
 
 The toolchain will be in `depot_tools\win_toolchain\vs_files\<hash>`, and windbg
 can be found in `depot_tools\win_toolchain\vs_files\<hash>\win_sdk\Debuggers`.
@@ -58,15 +58,18 @@ gclient sync
 cd pdfium
 ```
 
-##<a name="GenBuild"></a> Generate the build files
+Additional build dependencies need to be installed by running:
+
+```
+./build/install-build-deps.sh
+```
+
+## Generate the build files
 
 We use GN to generate the build files and
-[Ninja](http://martine.github.io/ninja/) (also included with the depot\_tools
-checkout) to execute the build files.
-
-```
-gn gen <directory>
-```
+[Ninja](http://martine.github.io/ninja/)
+to execute the build files.  Both of these are included with the
+depot\_tools checkout.
 
 ### Selecting build configuration
 
@@ -76,9 +79,10 @@ default. Also note that the XFA feature requires JavaScript.
 
 Configuration is done by executing `gn args <directory>` to configure the build.
 This will launch an editor in which you can set the following arguments.
+A typical `<directory>` name is `out/Debug`.
 
 ```
-use_goma = true  # Googlers only.
+use_goma = true  # Googlers only. Make sure goma is installed and running first.
 is_debug = true  # Enable debugging features.
 
 pdf_use_skia = false  # Set true to enable experimental skia backend.
@@ -90,19 +94,21 @@ pdf_is_standalone = true  # Set for a non-embedded build.
 is_component_build = false # Disable component build (must be false)
 
 clang_use_chrome_plugins = false  # Currently must be false.
-use_sysroot = false  # Currently must be false on Linux.
 ```
 
 Note, you must set `pdf_is_standalone = true` if you want the sample
 applications like `pdfium_test` to build.
 
-When complete the arguments will be stored in `<directory>/args.gn`.
+When complete the arguments will be stored in `<directory>/args.gn`, and
+GN will automatically use the new arguments to generate build files.
+Should your files fail to generate, please double-check that you have set
+use\_sysroot as indicated above.
 
 ## Building the code
 
-If you used Ninja, you can build the sample program by:
-`ninja -C <directory>/pdfium_test` You can build the entire product (which
-includes a few unit tests) by: `ninja -C <directory>`.
+You can build the sample program by running: `ninja -C <directory> pdfium_test`
+You can build the entire product (which includes a few unit tests) by running:
+`ninja -C <directory> pdfium_all`.
 
 ## Running the sample program
 
@@ -125,6 +131,11 @@ It is possible the tests in the `testing` directory can fail due to font
 differences on the various platforms. These tests are reliable on the bots. If
 you see failures, it can be a good idea to run the tests on the tip-of-tree
 checkout to see if the same failures appear.
+
+## Code Coverage
+
+Code coverage reports for PDFium can be generated in Linux development
+environments. Details can be found [here](/docs/code-coverage.md).
 
 ## Waterfall
 
@@ -153,7 +164,10 @@ and add the "Cr-Internals-Plugins-PDF" label.
 
 For contributing code, we will follow
 [Chromium's process](http://dev.chromium.org/developers/contributing-code)
-as much as possible. The main exceptions is:
+as much as possible. The main exceptions are:
 
 1. Code has to conform to the existing style and not Chromium/Google style.
+2. PDFium uses a different tool for code reviews, and credentials for
+the tool need to be generated before uploading a CL.
+
 

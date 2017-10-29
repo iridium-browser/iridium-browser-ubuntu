@@ -31,7 +31,7 @@ class CONTENT_EXPORT StylusTextSelectorClient {
   // (x0, y0) and (x1, y1) indicate the bounds of the initial selection.
   virtual void OnStylusSelectBegin(float x0, float y0, float x1, float y1) = 0;
   virtual void OnStylusSelectUpdate(float x, float y) = 0;
-  virtual void OnStylusSelectEnd() = 0;
+  virtual void OnStylusSelectEnd(float x, float y) = 0;
   virtual void OnStylusSelectTap(base::TimeTicks time, float x, float y) = 0;
 };
 
@@ -50,6 +50,11 @@ class CONTENT_EXPORT StylusTextSelector : public ui::SimpleGestureListener {
   bool OnTouchEvent(const ui::MotionEvent& event);
 
  private:
+  enum DragState {
+    NO_DRAG,
+    DRAGGING_WITH_BUTTON_PRESSED,
+    DRAGGING_WITH_BUTTON_RELEASED,
+  };
   friend class StylusTextSelectorTest;
   FRIEND_TEST_ALL_PREFIXES(StylusTextSelectorTest, ShouldStartTextSelection);
 
@@ -66,8 +71,7 @@ class CONTENT_EXPORT StylusTextSelector : public ui::SimpleGestureListener {
   StylusTextSelectorClient* client_;
   bool text_selection_triggered_;
   bool secondary_button_pressed_;
-  bool dragging_;
-  bool dragged_;
+  DragState drag_state_;
   float anchor_x_;
   float anchor_y_;
   std::unique_ptr<ui::GestureDetector> gesture_detector_;

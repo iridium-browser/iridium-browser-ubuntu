@@ -20,13 +20,15 @@ class BLINK_PLATFORM_EXPORT WebCoalescedInputEvent {
   explicit WebCoalescedInputEvent(const WebInputEvent&);
   WebCoalescedInputEvent(const WebInputEvent&,
                          const std::vector<const WebInputEvent*>&);
+  // Copy constructor to deep copy the event.
+  WebCoalescedInputEvent(const WebCoalescedInputEvent&);
 
-  WebInputEvent* eventPointer();
-  void addCoalescedEvent(const blink::WebInputEvent&);
-  const WebInputEvent& event() const;
-  size_t coalescedEventSize() const;
-  const WebInputEvent& coalescedEvent(size_t index) const;
-  std::vector<const WebInputEvent*> getCoalescedEventsPointers() const;
+  WebInputEvent* EventPointer();
+  void AddCoalescedEvent(const blink::WebInputEvent&);
+  const WebInputEvent& Event() const;
+  size_t CoalescedEventSize() const;
+  const WebInputEvent& CoalescedEvent(size_t index) const;
+  std::vector<const WebInputEvent*> GetCoalescedEventsPointers() const;
 
  private:
   // TODO(hans): Remove this once clang-cl knows to not inline dtors that
@@ -38,10 +40,10 @@ class BLINK_PLATFORM_EXPORT WebCoalescedInputEvent {
   using WebScopedInputEvent =
       std::unique_ptr<WebInputEvent, WebInputEventDeleter>;
 
-  WebScopedInputEvent makeWebScopedInputEvent(const blink::WebInputEvent&);
+  WebScopedInputEvent MakeWebScopedInputEvent(const blink::WebInputEvent&);
 
-  WebScopedInputEvent m_event;
-  std::vector<WebScopedInputEvent> m_coalescedEvents;
+  WebScopedInputEvent event_;
+  std::vector<WebScopedInputEvent> coalesced_events_;
 };
 
 using WebScopedCoalescedInputEvent = std::unique_ptr<WebCoalescedInputEvent>;

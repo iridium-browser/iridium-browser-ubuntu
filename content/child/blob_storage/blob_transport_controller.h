@@ -26,7 +26,7 @@
 
 namespace base {
 template <typename T>
-struct DefaultLazyInstanceTraits;
+struct LazyInstanceTraitsBase;
 class SingleThreadTaskRunner;
 class TaskRunner;
 }
@@ -77,7 +77,7 @@ class CONTENT_EXPORT BlobTransportController {
       scoped_refptr<base::SingleThreadTaskRunner> main_runner);
 
   // This responds to the request using the |sender|. If we need to save files
-  // then we we hold onto the sender to send the (possibly multiple) reponses
+  // then we we hold onto the sender to send the (possibly multiple) responses
   // asynchronously. Use CancelAllBlobTransfers to stop usage of the |sender|.
   // We close the file handles once we're done writing to them.
   void OnMemoryRequest(
@@ -100,7 +100,7 @@ class CONTENT_EXPORT BlobTransportController {
   void CancelAllBlobTransfers();
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<BlobTransportController>;
+  friend struct base::LazyInstanceTraitsBase<BlobTransportController>;
   friend class BlobTransportControllerTest;
   FRIEND_TEST_ALL_PREFIXES(BlobTransportControllerTest, Descriptions);
   FRIEND_TEST_ALL_PREFIXES(BlobTransportControllerTest, Responses);

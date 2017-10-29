@@ -6,10 +6,8 @@
 
 #include <utility>
 
-#include "ash/common/wallpaper/wallpaper_controller.h"
-#include "ash/common/wm_shell.h"
+#include "ash/shell.h"
 #include "base/memory/ptr_util.h"
-#include "base/rand_util.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/camera_detector.h"
 #include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
@@ -363,9 +361,6 @@ void SupervisedUserCreationScreen::OnManagerFullyAuthenticated(
       ->NotifySupervisedUserCreationStarted();
   manager_signin_in_progress_ = false;
   DCHECK(controller_.get());
-  // For manager user, move wallpaper to locked container so that windows
-  // created during the user image picker step are below it.
-  ash::WmShell::Get()->wallpaper_controller()->MoveToLockedContainer();
 
   controller_->SetManagerProfile(manager_profile);
   if (view_)
@@ -414,13 +409,10 @@ void SupervisedUserCreationScreen::OnCreationError(
     case SupervisedUserCreationController::CRYPTOHOME_NO_MOUNT:
     case SupervisedUserCreationController::CRYPTOHOME_FAILED_MOUNT:
     case SupervisedUserCreationController::CRYPTOHOME_FAILED_TPM:
-      title = l10n_util::GetStringUTF16(
-          IDS_CREATE_SUPERVISED_USER_TPM_ERROR_TITLE);
-      message = l10n_util::GetStringUTF16(
-          IDS_CREATE_SUPERVISED_USER_TPM_ERROR);
-      button = l10n_util::GetStringUTF16(
-          IDS_CREATE_SUPERVISED_USER_TPM_ERROR_BUTTON);
-      break;
+      ::login::GetSecureModuleUsed(base::BindOnce(
+          &SupervisedUserCreationScreen::UpdateSecureModuleMessages,
+          weak_factory_.GetWeakPtr()));
+      return;
     case SupervisedUserCreationController::CLOUD_SERVER_ERROR:
     case SupervisedUserCreationController::TOKEN_WRITE_FAILED:
       title = l10n_util::GetStringUTF16(
@@ -499,8 +491,7 @@ void SupervisedUserCreationScreen::ApplyPicture() {
       NOTREACHED() << "Supervised users have no profile pictures";
       break;
     default:
-      DCHECK(selected_image_ >= 0 &&
-             selected_image_ < default_user_image::kDefaultImagesCount);
+      DCHECK(default_user_image::IsValidIndex(selected_image_));
       image_manager->SaveUserDefaultImageIndex(selected_image_);
       break;
   }
@@ -529,9 +520,10 @@ void SupervisedUserCreationScreen::OnGetSupervisedUsers(
   existing_users_.reset(new base::DictionaryValue());
   for (base::DictionaryValue::Iterator it(*users); !it.IsAtEnd();
        it.Advance()) {
+    const base::DictionaryValue* value = nullptr;
+    it.value().GetAsDictionary(&value);
     // Copy that would be stored in this class.
-    base::DictionaryValue* local_copy =
-        static_cast<base::DictionaryValue*>(it.value().DeepCopy());
+    std::unique_ptr<base::DictionaryValue> local_copy = value->CreateDeepCopy();
     // Copy that would be passed to WebUI. It has some extra values for
     // displaying, but does not contain sensitive data, such as master password.
     auto ui_copy = base::MakeUnique<base::DictionaryValue>();
@@ -546,8 +538,7 @@ void SupervisedUserCreationScreen::OnGetSupervisedUsers(
       ui_copy->SetString(kAvatarURLKey,
                          default_user_image::GetDefaultImageUrl(avatar_index));
     } else {
-      int i = base::RandInt(default_user_image::kFirstDefaultImageIndex,
-                            default_user_image::kDefaultImagesCount - 1);
+      int i = default_user_image::GetRandomDefaultImageIndex();
       local_copy->SetString(
           SupervisedUserSyncService::kChromeOsAvatar,
           SupervisedUserSyncService::BuildAvatarString(i));
@@ -584,10 +575,40 @@ void SupervisedUserCreationScreen::OnGetSupervisedUsers(
     ui_copy->SetBoolean(kUserNeedPassword, !has_password);
     ui_copy->SetString("id", it.key());
 
-    existing_users_->Set(it.key(), local_copy);
+    existing_users_->Set(it.key(), std::move(local_copy));
     ui_users->Append(std::move(ui_copy));
   }
   view_->ShowExistingSupervisedUsers(ui_users.get());
+}
+
+void SupervisedUserCreationScreen::UpdateSecureModuleMessages(
+    ::login::SecureModuleUsed secure_module_used) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  base::string16 title;
+  base::string16 message;
+  base::string16 button;
+  switch (secure_module_used) {
+    case ::login::SecureModuleUsed::TPM:
+      title =
+          l10n_util::GetStringUTF16(IDS_CREATE_SUPERVISED_USER_TPM_ERROR_TITLE);
+      message = l10n_util::GetStringUTF16(IDS_CREATE_SUPERVISED_USER_TPM_ERROR);
+      button = l10n_util::GetStringUTF16(
+          IDS_CREATE_SUPERVISED_USER_TPM_ERROR_BUTTON);
+      break;
+    case ::login::SecureModuleUsed::CR50:
+      title = l10n_util::GetStringUTF16(
+          IDS_CREATE_SUPERVISED_USER_SECURE_MODULE_ERROR_TITLE);
+      message = l10n_util::GetStringUTF16(
+          IDS_CREATE_SUPERVISED_USER_SECURE_MODULE_ERROR);
+      button = l10n_util::GetStringUTF16(
+          IDS_CREATE_SUPERVISED_USER_SECURE_MODULE_ERROR_BUTTON);
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+  if (view_)
+    view_->ShowErrorPage(title, message, button);
 }
 
 void SupervisedUserCreationScreen::OnPhotoTaken(
@@ -612,13 +633,15 @@ void SupervisedUserCreationScreen::OnDecodeImageFailed() {
 void SupervisedUserCreationScreen::OnImageSelected(
     const std::string& image_type,
     const std::string& image_url) {
-  if (image_url.empty())
-    return;
-  int user_image_index = user_manager::User::USER_IMAGE_INVALID;
-  if (image_type == "default" &&
-      default_user_image::IsDefaultImageUrl(image_url, &user_image_index)) {
+  if (image_type == "default") {
+    int user_image_index = user_manager::User::USER_IMAGE_INVALID;
+    if (image_url.empty() ||
+        !default_user_image::IsDefaultImageUrl(image_url, &user_image_index)) {
+      LOG(ERROR) << "Unexpected default image url: " << image_url;
+      return;
+    }
     selected_image_ = user_image_index;
-  } else if (image_type == "camera") {
+  } else if (image_type == "camera" || image_type == "old") {
     selected_image_ = user_manager::User::USER_IMAGE_EXTERNAL;
   } else {
     NOTREACHED() << "Unexpected image type: " << image_type;

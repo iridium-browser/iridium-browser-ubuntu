@@ -31,9 +31,9 @@
 #ifndef SVGNumberTearOff_h
 #define SVGNumberTearOff_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/svg/SVGNumber.h"
 #include "core/svg/properties/SVGPropertyTearOff.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -42,25 +42,25 @@ class SVGNumberTearOff : public SVGPropertyTearOff<SVGNumber>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGNumberTearOff* create(
-      SVGNumber* target,
-      SVGElement* contextElement,
-      PropertyIsAnimValType propertyIsAnimVal,
-      const QualifiedName& attributeName = QualifiedName::null()) {
-    return new SVGNumberTearOff(target, contextElement, propertyIsAnimVal,
-                                attributeName);
+  static SVGNumberTearOff* Create(SVGNumber* target,
+                                  SVGElement* context_element,
+                                  PropertyIsAnimValType property_is_anim_val,
+                                  const QualifiedName& attribute_name) {
+    return new SVGNumberTearOff(target, context_element, property_is_anim_val,
+                                attribute_name);
   }
+  static SVGNumberTearOff* CreateDetached();
 
   DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
   void setValue(float, ExceptionState&);
-  float value() { return target()->value(); }
+  float value() { return Target()->Value(); }
 
  protected:
   SVGNumberTearOff(SVGNumber*,
-                   SVGElement* contextElement,
+                   SVGElement* context_element,
                    PropertyIsAnimValType,
-                   const QualifiedName& attributeName = QualifiedName::null());
+                   const QualifiedName& attribute_name);
 };
 
 }  // namespace blink

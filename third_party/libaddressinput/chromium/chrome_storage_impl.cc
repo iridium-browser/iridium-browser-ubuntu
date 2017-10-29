@@ -26,7 +26,7 @@ void ChromeStorageImpl::Put(const std::string& key, std::string* data) {
   DCHECK(data);
   std::unique_ptr<std::string> owned_data(data);
   backing_store_->SetValue(
-      key, base::MakeUnique<base::StringValue>(std::move(*owned_data)),
+      key, base::MakeUnique<base::Value>(std::move(*owned_data)),
       WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
 }
 
@@ -39,10 +39,8 @@ void ChromeStorageImpl::Get(const std::string& key,
 void ChromeStorageImpl::OnPrefValueChanged(const std::string& key) {}
 
 void ChromeStorageImpl::OnInitializationCompleted(bool succeeded) {
-  for (std::vector<Request*>::iterator iter = outstanding_requests_.begin();
-       iter != outstanding_requests_.end(); ++iter) {
-    DoGet((*iter)->key, (*iter)->callback);
-  }
+  for (const auto& request : outstanding_requests_)
+    DoGet(request->key, request->callback);
 
   outstanding_requests_.clear();
 }
@@ -50,7 +48,7 @@ void ChromeStorageImpl::OnInitializationCompleted(bool succeeded) {
 void ChromeStorageImpl::DoGet(const std::string& key,
                               const Storage::Callback& data_ready) {
   if (!backing_store_->IsInitializationComplete()) {
-    outstanding_requests_.push_back(new Request(key, data_ready));
+    outstanding_requests_.push_back(base::MakeUnique<Request>(key, data_ready));
     return;
   }
 

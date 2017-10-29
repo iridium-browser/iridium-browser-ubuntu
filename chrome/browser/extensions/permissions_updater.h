@@ -19,11 +19,23 @@ namespace extensions {
 
 class Extension;
 class PermissionSet;
+class URLPatternSet;
 
 // Updates an Extension's active and granted permissions in persistent storage
 // and notifies interested parties of the changes.
 class PermissionsUpdater {
  public:
+  // Platform specific delegate.
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+    // Platform specific initialization of |extension|'s permissions (does any
+    // necessary filtering of permissions or similar).
+    virtual void InitializePermissions(
+        const Extension* extension,
+        std::unique_ptr<const PermissionSet>* granted_permissions) = 0;
+  };
+
   enum InitFlag {
     INIT_FLAG_NONE = 0,
     INIT_FLAG_TRANSIENT = 1 << 0,
@@ -38,6 +50,12 @@ class PermissionsUpdater {
   PermissionsUpdater(content::BrowserContext* browser_context,
                      InitFlag init_flag);
   ~PermissionsUpdater();
+
+  // Sets a delegate to provide platform-specific logic. This should be set
+  // during startup (to ensure all extensions are initialized through the
+  // delegate).
+  // |delegate| is a singleton instance and is leaked.
+  static void SetPlatformDelegate(Delegate* delegate);
 
   // Adds the set of |permissions| to the |extension|'s active permission set
   // and sends the relevant messages and notifications. This method assumes the
@@ -64,6 +82,21 @@ class PermissionsUpdater {
   void RemovePermissionsUnsafe(const Extension* extension,
                                const PermissionSet& permissions);
 
+  // Sets list of hosts |extension| may not interact with (overrides default).
+  void SetPolicyHostRestrictions(const Extension* extension,
+                                 const URLPatternSet& runtime_blocked_hosts,
+                                 const URLPatternSet& runtime_allowed_hosts);
+
+  // Sets extension to use the default list of policy host restrictions.
+  void SetUsesDefaultHostRestrictions(const Extension* extension);
+
+  // Sets list of hosts extensions may not interact with. Extension specific
+  // exceptions to this default policy are defined with
+  // SetPolicyHostRestrictions.
+  void SetDefaultPolicyHostRestrictions(
+      const URLPatternSet& default_runtime_blocked_hosts,
+      const URLPatternSet& default_runtime_allowed_hosts);
+
   // Returns the set of revokable permissions.
   std::unique_ptr<const PermissionSet> GetRevokablePermissions(
       const Extension* extension) const;
@@ -81,6 +114,7 @@ class PermissionsUpdater {
   enum EventType {
     ADDED,
     REMOVED,
+    POLICY,
   };
 
   // Sets the |extension|'s active permissions to |active| and records the
@@ -105,6 +139,14 @@ class PermissionsUpdater {
   void NotifyPermissionsUpdated(EventType event_type,
                                 const Extension* extension,
                                 const PermissionSet& changed);
+
+  // Issues the relevant events, messages and notifications when the
+  // default scope management policy have changed.
+  // Specifically, this sends the ExtensionMsg_UpdateDefaultHostRestrictions
+  // IPC message.
+  void NotifyDefaultPolicyHostRestrictionsUpdated(
+      const URLPatternSet& default_runtime_blocked_hosts,
+      const URLPatternSet& default_runtime_allowed_hosts);
 
   // The associated BrowserContext.
   content::BrowserContext* browser_context_;

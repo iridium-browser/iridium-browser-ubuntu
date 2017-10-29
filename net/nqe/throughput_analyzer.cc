@@ -8,15 +8,17 @@
 
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/network_activity_monitor.h"
 #include "net/base/url_util.h"
+#include "net/nqe/network_quality_estimator_params.h"
+#include "net/nqe/network_quality_estimator_util.h"
 #include "net/url_request/url_request.h"
-
-#if defined(OS_ANDROID)
-#include "net/android/traffic_stats.h"
-#endif  // OS_ANDROID
+#include "net/url_request/url_request_context.h"
 
 namespace net {
+
+class HostResolver;
 
 namespace {
 
@@ -35,18 +37,23 @@ namespace nqe {
 namespace internal {
 
 ThroughputAnalyzer::ThroughputAnalyzer(
+    const NetworkQualityEstimatorParams* params,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     ThroughputObservationCallback throughput_observation_callback,
     bool use_local_host_requests_for_tests,
-    bool use_smaller_responses_for_tests)
-    : task_runner_(task_runner),
+    bool use_smaller_responses_for_tests,
+    const NetLogWithSource& net_log)
+    : params_(params),
+      task_runner_(task_runner),
       throughput_observation_callback_(throughput_observation_callback),
       last_connection_change_(base::TimeTicks::Now()),
       window_start_time_(base::TimeTicks()),
       bits_received_at_window_start_(0),
       disable_throughput_measurements_(false),
       use_localhost_requests_for_tests_(use_local_host_requests_for_tests),
-      use_small_responses_for_tests_(use_smaller_responses_for_tests) {
+      use_small_responses_for_tests_(use_smaller_responses_for_tests),
+      net_log_(net_log) {
+  DCHECK(params_);
   DCHECK(task_runner_);
   DCHECK(!IsCurrentlyTrackingThroughput());
 }
@@ -66,7 +73,8 @@ void ThroughputAnalyzer::MaybeStartThroughputObservationWindow() {
   // started, and there is at least one active request that does not degrade
   // throughput computation accuracy.
   if (accuracy_degrading_requests_.size() > 0 ||
-      IsCurrentlyTrackingThroughput() || requests_.size() <= 0) {
+      IsCurrentlyTrackingThroughput() ||
+      requests_.size() < params_->throughput_min_requests_in_flight()) {
     return;
   }
   window_start_time_ = base::TimeTicks::Now();
@@ -95,6 +103,8 @@ bool ThroughputAnalyzer::IsCurrentlyTrackingThroughput() const {
   // If the throughput observation window is running, then no accuracy degrading
   // requests should be currently active.
   DCHECK_EQ(0U, accuracy_degrading_requests_.size());
+
+  DCHECK_LE(params_->throughput_min_requests_in_flight(), requests_.size());
 
   return true;
 }
@@ -141,7 +151,7 @@ void ThroughputAnalyzer::NotifyRequestCompleted(const URLRequest& request) {
   }
 
   int32_t downstream_kbps;
-  if (MayBeGetThroughputObservation(&downstream_kbps)) {
+  if (MaybeGetThroughputObservation(&downstream_kbps)) {
     // Notify the provided callback.
     task_runner_->PostTask(
         FROM_HERE,
@@ -164,7 +174,7 @@ void ThroughputAnalyzer::NotifyRequestCompleted(const URLRequest& request) {
   if (requests_.erase(&request) == 1u) {
     // If there is no network activity, stop tracking throughput to prevent
     // recording of any observations.
-    if (requests_.size() == 0)
+    if (requests_.size() < params_->throughput_min_requests_in_flight())
       EndThroughputObservationWindow();
     return;
   }
@@ -172,7 +182,7 @@ void ThroughputAnalyzer::NotifyRequestCompleted(const URLRequest& request) {
   NOTREACHED();
 }
 
-bool ThroughputAnalyzer::MayBeGetThroughputObservation(
+bool ThroughputAnalyzer::MaybeGetThroughputObservation(
     int32_t* downstream_kbps) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(downstream_kbps);
@@ -245,20 +255,17 @@ void ThroughputAnalyzer::SetUseSmallResponsesForTesting(
 
 int64_t ThroughputAnalyzer::GetBitsReceived() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-
-#if defined(OS_ANDROID)
-  int64_t rx_bytes;
-  if (android::traffic_stats::GetCurrentUidRxBytes(&rx_bytes))
-    return static_cast<uint64_t>(rx_bytes * 8);
-#endif
   return NetworkActivityMonitor::GetInstance()->GetBytesReceived() * 8;
 }
 
 bool ThroughputAnalyzer::DegradesAccuracy(const URLRequest& request) const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  return !(use_localhost_requests_for_tests_ ||
-           !IsLocalhost(request.url().host())) ||
+  bool private_network_request = nqe::internal::IsPrivateHost(
+      request.context()->host_resolver(),
+      HostPortPair(request.url().host(), request.url().EffectiveIntPort()));
+
+  return !(use_localhost_requests_for_tests_ || !private_network_request) ||
          request.creation_time() < last_connection_change_;
 }
 

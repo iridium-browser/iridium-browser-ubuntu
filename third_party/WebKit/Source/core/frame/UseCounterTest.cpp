@@ -12,388 +12,483 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
-// Note that the new histogram names will change once the semantics stabilize;
-const char* const kFeaturesHistogramName = "Blink.UseCounter.Features";
-const char* const kCSSHistogramName = "Blink.UseCounter.CSSProperties";
-const char* const kSVGFeaturesHistogramName =
-    "Blink.UseCounter.SVGImage.Features";
-const char* const kSVGCSSHistogramName =
-    "Blink.UseCounter.SVGImage.CSSProperties";
-const char* const kLegacyFeaturesHistogramName = "WebCore.FeatureObserver";
-const char* const kLegacyCSSHistogramName =
-    "WebCore.FeatureObserver.CSSProperties";
+const char kFeaturesHistogramName[] = "Blink.UseCounter.Features";
+const char kCSSHistogramName[] = "Blink.UseCounter.CSSProperties";
+const char kAnimatedCSSHistogramName[] =
+    "Blink.UseCounter.AnimatedCSSProperties";
+const char kExtensionFeaturesHistogramName[] =
+    "Blink.UseCounter.Extensions.Features";
+
+const char kSVGFeaturesHistogramName[] = "Blink.UseCounter.SVGImage.Features";
+const char kSVGCSSHistogramName[] = "Blink.UseCounter.SVGImage.CSSProperties";
+const char kSVGAnimatedCSSHistogramName[] =
+    "Blink.UseCounter.SVGImage.AnimatedCSSProperties";
+
+const char kLegacyFeaturesHistogramName[] = "WebCore.FeatureObserver";
+const char kLegacyCSSHistogramName[] = "WebCore.FeatureObserver.CSSProperties";
+
+// In practice, SVGs always appear to be loaded with an about:blank URL
+const char kSvgUrl[] = "about:blank";
+const char* const kInternalUrl = kSvgUrl;
+const char kHttpsUrl[] = "https://dummysite.com/";
+const char kExtensionUrl[] = "chrome-extension://dummysite/";
+
+int GetPageVisitsBucketforHistogram(const std::string& histogram_name) {
+  if (histogram_name.find("CSS") == std::string::npos)
+    return static_cast<int>(blink::WebFeature::kPageVisits);
+  // For CSS histograms, the page visits bucket should be 1.
+  return 1;
 }
+
+}  // namespace
 
 namespace blink {
 
 template <typename T>
-void histogramBasicTest(const std::string& histogram,
-                        const std::string& legacyHistogram,
-                        const std::vector<std::string>& unaffectedHistograms,
+void HistogramBasicTest(const std::string& histogram,
+                        const std::string& legacy_histogram,
                         T item,
-                        T secondItem,
+                        T second_item,
                         std::function<bool(T)> counted,
                         std::function<void(T)> count,
-                        std::function<int(T)> histogramMap,
-                        std::function<void(KURL)> didCommitLoad,
-                        const std::string& url,
-                        int pageVisitBucket) {
-  HistogramTester histogramTester;
+                        std::function<int(T)> histogram_map,
+                        std::function<void(KURL)> did_commit_load,
+                        const std::string& url) {
+  HistogramTester histogram_tester;
+
+  int page_visit_bucket = GetPageVisitsBucketforHistogram(histogram);
 
   // Test recording a single (arbitrary) counter
   EXPECT_FALSE(counted(item));
   count(item);
   EXPECT_TRUE(counted(item));
-  histogramTester.expectUniqueSample(histogram, histogramMap(item), 1);
-  histogramTester.expectTotalCount(legacyHistogram, 0);
+  histogram_tester.ExpectUniqueSample(histogram, histogram_map(item), 1);
+  if (!legacy_histogram.empty()) {
+    histogram_tester.ExpectTotalCount(legacy_histogram, 0);
+  }
 
   // Test that repeated measurements have no effect
   count(item);
-  histogramTester.expectUniqueSample(histogram, histogramMap(item), 1);
-  histogramTester.expectTotalCount(legacyHistogram, 0);
+  histogram_tester.ExpectUniqueSample(histogram, histogram_map(item), 1);
+  if (!legacy_histogram.empty()) {
+    histogram_tester.ExpectTotalCount(legacy_histogram, 0);
+  }
 
   // Test recording a different sample
-  EXPECT_FALSE(counted(secondItem));
-  count(secondItem);
-  EXPECT_TRUE(counted(secondItem));
-  histogramTester.expectBucketCount(histogram, histogramMap(item), 1);
-  histogramTester.expectBucketCount(histogram, histogramMap(secondItem), 1);
-  histogramTester.expectTotalCount(histogram, 2);
-  histogramTester.expectTotalCount(legacyHistogram, 0);
+  EXPECT_FALSE(counted(second_item));
+  count(second_item);
+  EXPECT_TRUE(counted(second_item));
+  histogram_tester.ExpectBucketCount(histogram, histogram_map(item), 1);
+  histogram_tester.ExpectBucketCount(histogram, histogram_map(second_item), 1);
+  histogram_tester.ExpectTotalCount(histogram, 2);
+  if (!legacy_histogram.empty()) {
+    histogram_tester.ExpectTotalCount(legacy_histogram, 0);
+  }
 
   // After a page load, the histograms will be updated, even when the URL
   // scheme is internal
-  didCommitLoad(URLTestHelpers::toKURL(url));
-  histogramTester.expectBucketCount(histogram, histogramMap(item), 1);
-  histogramTester.expectBucketCount(histogram, histogramMap(secondItem), 1);
-  histogramTester.expectBucketCount(histogram, pageVisitBucket, 1);
-  histogramTester.expectTotalCount(histogram, 3);
+  did_commit_load(URLTestHelpers::ToKURL(url));
+  histogram_tester.ExpectBucketCount(histogram, histogram_map(item), 1);
+  histogram_tester.ExpectBucketCount(histogram, histogram_map(second_item), 1);
+  histogram_tester.ExpectBucketCount(histogram, page_visit_bucket, 1);
+  histogram_tester.ExpectTotalCount(histogram, 3);
 
   // And verify the legacy histogram now looks the same
-  histogramTester.expectBucketCount(legacyHistogram, histogramMap(item), 1);
-  histogramTester.expectBucketCount(legacyHistogram, histogramMap(secondItem),
-                                    1);
-  histogramTester.expectBucketCount(legacyHistogram, pageVisitBucket, 1);
-  histogramTester.expectTotalCount(legacyHistogram, 3);
+  if (!legacy_histogram.empty()) {
+    histogram_tester.ExpectBucketCount(legacy_histogram, histogram_map(item),
+                                       1);
+    histogram_tester.ExpectBucketCount(legacy_histogram,
+                                       histogram_map(second_item), 1);
+    histogram_tester.ExpectBucketCount(legacy_histogram, page_visit_bucket, 1);
+    histogram_tester.ExpectTotalCount(legacy_histogram, 3);
+  }
 
   // Now a repeat measurement should get recorded again, exactly once
   EXPECT_FALSE(counted(item));
   count(item);
   count(item);
   EXPECT_TRUE(counted(item));
-  histogramTester.expectBucketCount(histogram, histogramMap(item), 2);
-  histogramTester.expectTotalCount(histogram, 4);
+  histogram_tester.ExpectBucketCount(histogram, histogram_map(item), 2);
+  histogram_tester.ExpectTotalCount(histogram, 4);
 
   // And on the next page load, the legacy histogram will again be updated
-  didCommitLoad(URLTestHelpers::toKURL(url));
-  histogramTester.expectBucketCount(legacyHistogram, histogramMap(item), 2);
-  histogramTester.expectBucketCount(legacyHistogram, histogramMap(secondItem),
-                                    1);
-  histogramTester.expectBucketCount(legacyHistogram, pageVisitBucket, 2);
-  histogramTester.expectTotalCount(legacyHistogram, 5);
+  did_commit_load(URLTestHelpers::ToKURL(url));
+  if (!legacy_histogram.empty()) {
+    histogram_tester.ExpectBucketCount(legacy_histogram, histogram_map(item),
+                                       2);
+    histogram_tester.ExpectBucketCount(legacy_histogram,
+                                       histogram_map(second_item), 1);
+    histogram_tester.ExpectBucketCount(legacy_histogram, page_visit_bucket, 2);
+    histogram_tester.ExpectTotalCount(legacy_histogram, 5);
+  }
 
-  for (size_t i = 0; i < unaffectedHistograms.size(); ++i) {
-    histogramTester.expectTotalCount(unaffectedHistograms[i], 0);
+  // For all histograms, no other histograms besides |histogram| should
+  // be affected. Legacy histograms are not included in the list because they
+  // soon will be removed.
+  for (const std::string& unaffected_histogram :
+       {kAnimatedCSSHistogramName, kCSSHistogramName,
+        kExtensionFeaturesHistogramName, kFeaturesHistogramName,
+        kSVGAnimatedCSSHistogramName, kSVGCSSHistogramName,
+        kSVGFeaturesHistogramName}) {
+    if (unaffected_histogram == histogram)
+      continue;
+    // CSS histograms are never created in didCommitLoad when the context is
+    // extension.
+    if (histogram == kExtensionFeaturesHistogramName &&
+        unaffected_histogram.find("CSS") != std::string::npos)
+      continue;
+
+    // The expected total count for "Features" of unaffected histograms should
+    // be either:
+    //    a. pageVisits, for "CSSFeatures"; or
+    //    b. 0 (pageVisits is 0), for others, including "SVGImage.CSSFeatures"
+    //      since no SVG images are loaded at all.
+    histogram_tester.ExpectTotalCount(
+        unaffected_histogram,
+        0 + histogram_tester.GetBucketCount(
+                unaffected_histogram,
+                GetPageVisitsBucketforHistogram(unaffected_histogram)));
   }
 }
 
-// Failing on Android: crbug.com/667913
-#if OS(ANDROID)
-#define MAYBE_RecordingFeatures DISABLED_RecordingFeatures
-#else
-#define MAYBE_RecordingFeatures RecordingFeatures
-#endif
-TEST(UseCounterTest, MAYBE_RecordingFeatures) {
-  UseCounter useCounter;
-  histogramBasicTest<UseCounter::Feature>(
-      kFeaturesHistogramName, kLegacyFeaturesHistogramName,
-      {kSVGFeaturesHistogramName, kSVGCSSHistogramName}, UseCounter::Fetch,
-      UseCounter::FetchBodyStream,
-      [&](UseCounter::Feature feature) -> bool {
-        return useCounter.hasRecordedMeasurement(feature);
+TEST(UseCounterTest, RecordingFeatures) {
+  UseCounter use_counter;
+  HistogramBasicTest<WebFeature>(
+      kFeaturesHistogramName, kLegacyFeaturesHistogramName, WebFeature::kFetch,
+      WebFeature::kFetchBodyStream,
+      [&](WebFeature feature) -> bool {
+        return use_counter.HasRecordedMeasurement(feature);
       },
-      [&](UseCounter::Feature feature) {
-        useCounter.recordMeasurement(feature);
-      },
-      [](UseCounter::Feature feature) -> int { return feature; },
-      [&](KURL kurl) { useCounter.didCommitLoad(kurl); },
-      "https://dummysite.com/", UseCounter::PageVisits);
+      [&](WebFeature feature) { use_counter.RecordMeasurement(feature); },
+      [](WebFeature feature) -> int { return static_cast<int>(feature); },
+      [&](KURL kurl) { use_counter.DidCommitLoad(kurl); }, kHttpsUrl);
 }
 
 TEST(UseCounterTest, RecordingCSSProperties) {
-  UseCounter useCounter;
-  histogramBasicTest<CSSPropertyID>(
-      kCSSHistogramName, kLegacyCSSHistogramName,
-      {kSVGFeaturesHistogramName, kSVGCSSHistogramName}, CSSPropertyFont,
+  UseCounter use_counter;
+  HistogramBasicTest<CSSPropertyID>(
+      kCSSHistogramName, kLegacyCSSHistogramName, CSSPropertyFont,
       CSSPropertyZoom,
       [&](CSSPropertyID property) -> bool {
-        return useCounter.isCounted(property);
+        return use_counter.IsCounted(property);
       },
       [&](CSSPropertyID property) {
-        useCounter.count(HTMLStandardMode, property);
+        use_counter.Count(kHTMLStandardMode, property);
       },
       [](CSSPropertyID property) -> int {
-        return UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(property);
+        return UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(property);
       },
-      [&](KURL kurl) { useCounter.didCommitLoad(kurl); },
-      "https://dummysite.com/", 1 /* page visit bucket */);
+      [&](KURL kurl) { use_counter.DidCommitLoad(kurl); }, kHttpsUrl);
 }
 
-// Failing on Android: crbug.com/667913
-#if OS(ANDROID)
-#define MAYBE_SVGImageContextFeatures DISABLED_SVGImageContextFeatures
-#else
-#define MAYBE_SVGImageContextFeatures SVGImageContextFeatures
-#endif
-TEST(UseCounterTest, MAYBE_SVGImageContextFeatures) {
-  UseCounter useCounter(UseCounter::SVGImageContext);
-  histogramBasicTest<UseCounter::Feature>(
+TEST(UseCounterTest, RecordingAnimatedCSSProperties) {
+  UseCounter use_counter;
+  HistogramBasicTest<CSSPropertyID>(
+      kAnimatedCSSHistogramName, "", CSSPropertyOpacity, CSSPropertyVariable,
+      [&](CSSPropertyID property) -> bool {
+        return use_counter.IsCountedAnimatedCSS(property);
+      },
+      [&](CSSPropertyID property) { use_counter.CountAnimatedCSS(property); },
+      [](CSSPropertyID property) -> int {
+        return UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(property);
+      },
+      [&](KURL kurl) { use_counter.DidCommitLoad(kurl); }, kHttpsUrl);
+}
+
+TEST(UseCounterTest, RecordingExtensions) {
+  UseCounter use_counter(UseCounter::kExtensionContext);
+  HistogramBasicTest<WebFeature>(
+      kExtensionFeaturesHistogramName, kLegacyFeaturesHistogramName,
+      WebFeature::kFetch, WebFeature::kFetchBodyStream,
+      [&](WebFeature feature) -> bool {
+        return use_counter.HasRecordedMeasurement(feature);
+      },
+      [&](WebFeature feature) { use_counter.RecordMeasurement(feature); },
+      [](WebFeature feature) -> int { return static_cast<int>(feature); },
+      [&](KURL kurl) { use_counter.DidCommitLoad(kurl); }, kExtensionUrl);
+}
+
+TEST(UseCounterTest, SVGImageContextFeatures) {
+  UseCounter use_counter(UseCounter::kSVGImageContext);
+  HistogramBasicTest<WebFeature>(
       kSVGFeaturesHistogramName, kLegacyFeaturesHistogramName,
-      {kFeaturesHistogramName, kCSSHistogramName},
-      UseCounter::SVGSMILAdditiveAnimation,
-      UseCounter::SVGSMILAnimationElementTiming,
-      [&](UseCounter::Feature feature) -> bool {
-        return useCounter.hasRecordedMeasurement(feature);
+      WebFeature::kSVGSMILAdditiveAnimation,
+      WebFeature::kSVGSMILAnimationElementTiming,
+      [&](WebFeature feature) -> bool {
+        return use_counter.HasRecordedMeasurement(feature);
       },
-      [&](UseCounter::Feature feature) {
-        useCounter.recordMeasurement(feature);
-      },
-      [](UseCounter::Feature feature) -> int { return feature; },
-      [&](KURL kurl) { useCounter.didCommitLoad(kurl); }, "about:blank",
-      // In practice SVGs always appear to be loaded with an about:blank URL
-      UseCounter::PageVisits);
+      [&](WebFeature feature) { use_counter.RecordMeasurement(feature); },
+      [](WebFeature feature) -> int { return static_cast<int>(feature); },
+      [&](KURL kurl) { use_counter.DidCommitLoad(kurl); }, kSvgUrl);
 }
 
 TEST(UseCounterTest, SVGImageContextCSSProperties) {
-  UseCounter useCounter(UseCounter::SVGImageContext);
-  histogramBasicTest<CSSPropertyID>(
-      kSVGCSSHistogramName, kLegacyCSSHistogramName,
-      {kFeaturesHistogramName, kCSSHistogramName}, CSSPropertyFont,
+  UseCounter use_counter(UseCounter::kSVGImageContext);
+  HistogramBasicTest<CSSPropertyID>(
+      kSVGCSSHistogramName, kLegacyCSSHistogramName, CSSPropertyFont,
       CSSPropertyZoom,
       [&](CSSPropertyID property) -> bool {
-        return useCounter.isCounted(property);
+        return use_counter.IsCounted(property);
       },
       [&](CSSPropertyID property) {
-        useCounter.count(HTMLStandardMode, property);
+        use_counter.Count(kHTMLStandardMode, property);
       },
       [](CSSPropertyID property) -> int {
-        return UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(property);
+        return UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(property);
       },
-      [&](KURL kurl) { useCounter.didCommitLoad(kurl); }, "about:blank",
-      // In practice SVGs always appear to be loaded with an about:blank URL
-      1 /* page visit bucket */);
+      [&](KURL kurl) { use_counter.DidCommitLoad(kurl); }, kSvgUrl);
 }
 
-// Failing on Android: crbug.com/667913
-#if OS(ANDROID)
-#define MAYBE_InspectorDisablesMeasurement DISABLED_InspectorDisablesMeasurement
-#else
-#define MAYBE_InspectorDisablesMeasurement InspectorDisablesMeasurement
-#endif
-TEST(UseCounterTest, MAYBE_InspectorDisablesMeasurement) {
-  UseCounter useCounter;
-  HistogramTester histogramTester;
+TEST(UseCounterTest, SVGImageContextAnimatedCSSProperties) {
+  UseCounter use_counter(UseCounter::kSVGImageContext);
+  HistogramBasicTest<CSSPropertyID>(
+      kSVGAnimatedCSSHistogramName, "", CSSPropertyOpacity, CSSPropertyVariable,
+      [&](CSSPropertyID property) -> bool {
+        return use_counter.IsCountedAnimatedCSS(property);
+      },
+      [&](CSSPropertyID property) { use_counter.CountAnimatedCSS(property); },
+      [](CSSPropertyID property) -> int {
+        return UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(property);
+      },
+      [&](KURL kurl) { use_counter.DidCommitLoad(kurl); }, kSvgUrl);
+}
+
+TEST(UseCounterTest, InspectorDisablesMeasurement) {
+  UseCounter use_counter;
+  HistogramTester histogram_tester;
 
   // The specific feature we use here isn't important.
-  UseCounter::Feature feature = UseCounter::Feature::SVGSMILElementInDocument;
+  WebFeature feature = WebFeature::kSVGSMILElementInDocument;
   CSSPropertyID property = CSSPropertyFontWeight;
-  CSSParserMode parserMode = HTMLStandardMode;
+  CSSParserMode parser_mode = kHTMLStandardMode;
 
-  EXPECT_FALSE(useCounter.hasRecordedMeasurement(feature));
+  EXPECT_FALSE(use_counter.HasRecordedMeasurement(feature));
 
-  useCounter.muteForInspector();
-  useCounter.recordMeasurement(feature);
-  EXPECT_FALSE(useCounter.hasRecordedMeasurement(feature));
-  useCounter.count(parserMode, property);
-  EXPECT_FALSE(useCounter.isCounted(property));
-  histogramTester.expectTotalCount(kFeaturesHistogramName, 0);
-  histogramTester.expectTotalCount(kCSSHistogramName, 0);
+  use_counter.MuteForInspector();
+  use_counter.RecordMeasurement(feature);
+  EXPECT_FALSE(use_counter.HasRecordedMeasurement(feature));
+  use_counter.Count(parser_mode, property);
+  EXPECT_FALSE(use_counter.IsCounted(property));
+  histogram_tester.ExpectTotalCount(kFeaturesHistogramName, 0);
+  histogram_tester.ExpectTotalCount(kCSSHistogramName, 0);
 
-  useCounter.muteForInspector();
-  useCounter.recordMeasurement(feature);
-  EXPECT_FALSE(useCounter.hasRecordedMeasurement(feature));
-  useCounter.count(parserMode, property);
-  EXPECT_FALSE(useCounter.isCounted(property));
-  histogramTester.expectTotalCount(kFeaturesHistogramName, 0);
-  histogramTester.expectTotalCount(kCSSHistogramName, 0);
+  use_counter.MuteForInspector();
+  use_counter.RecordMeasurement(feature);
+  EXPECT_FALSE(use_counter.HasRecordedMeasurement(feature));
+  use_counter.Count(parser_mode, property);
+  EXPECT_FALSE(use_counter.IsCounted(property));
+  histogram_tester.ExpectTotalCount(kFeaturesHistogramName, 0);
+  histogram_tester.ExpectTotalCount(kCSSHistogramName, 0);
 
-  useCounter.unmuteForInspector();
-  useCounter.recordMeasurement(feature);
-  EXPECT_FALSE(useCounter.hasRecordedMeasurement(feature));
-  useCounter.count(parserMode, property);
-  EXPECT_FALSE(useCounter.isCounted(property));
-  histogramTester.expectTotalCount(kFeaturesHistogramName, 0);
-  histogramTester.expectTotalCount(kCSSHistogramName, 0);
+  use_counter.UnmuteForInspector();
+  use_counter.RecordMeasurement(feature);
+  EXPECT_FALSE(use_counter.HasRecordedMeasurement(feature));
+  use_counter.Count(parser_mode, property);
+  EXPECT_FALSE(use_counter.IsCounted(property));
+  histogram_tester.ExpectTotalCount(kFeaturesHistogramName, 0);
+  histogram_tester.ExpectTotalCount(kCSSHistogramName, 0);
 
-  useCounter.unmuteForInspector();
-  useCounter.recordMeasurement(feature);
-  EXPECT_TRUE(useCounter.hasRecordedMeasurement(feature));
-  useCounter.count(parserMode, property);
-  EXPECT_TRUE(useCounter.isCounted(property));
-  histogramTester.expectUniqueSample(kFeaturesHistogramName, feature, 1);
-  histogramTester.expectUniqueSample(
+  use_counter.UnmuteForInspector();
+  use_counter.RecordMeasurement(feature);
+  EXPECT_TRUE(use_counter.HasRecordedMeasurement(feature));
+  use_counter.Count(parser_mode, property);
+  EXPECT_TRUE(use_counter.IsCounted(property));
+  histogram_tester.ExpectUniqueSample(kFeaturesHistogramName,
+                                      static_cast<int>(feature), 1);
+  histogram_tester.ExpectUniqueSample(
       kCSSHistogramName,
-      UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(property), 1);
+      UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(property), 1);
 }
 
-void expectHistograms(const HistogramTester& histogramTester,
-                      int visitsCount,
-                      UseCounter::Feature feature,
-                      int featureCount,
+void ExpectHistograms(const HistogramTester& histogram_tester,
+                      int visits_count,
+                      WebFeature feature,
+                      int feature_count,
                       CSSPropertyID property,
-                      int propertyCount) {
-  histogramTester.expectBucketCount(kFeaturesHistogramName,
-                                    UseCounter::PageVisits, visitsCount);
-  histogramTester.expectBucketCount(kFeaturesHistogramName, feature,
-                                    featureCount);
-  histogramTester.expectTotalCount(kFeaturesHistogramName,
-                                   visitsCount + featureCount);
-  histogramTester.expectBucketCount(kCSSHistogramName, 1, visitsCount);
-  histogramTester.expectBucketCount(
+                      int property_count) {
+  histogram_tester.ExpectBucketCount(kFeaturesHistogramName,
+                                     static_cast<int>(WebFeature::kPageVisits),
+                                     visits_count);
+  histogram_tester.ExpectBucketCount(kFeaturesHistogramName,
+                                     static_cast<int>(feature), feature_count);
+  histogram_tester.ExpectTotalCount(kFeaturesHistogramName,
+                                    visits_count + feature_count);
+  histogram_tester.ExpectBucketCount(kCSSHistogramName, 1, visits_count);
+  histogram_tester.ExpectBucketCount(
       kCSSHistogramName,
-      UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(property),
-      propertyCount);
-  histogramTester.expectTotalCount(kCSSHistogramName,
-                                   visitsCount + propertyCount);
+      UseCounter::MapCSSPropertyIdToCSSSampleIdForHistogram(property),
+      property_count);
+  histogram_tester.ExpectTotalCount(kCSSHistogramName,
+                                    visits_count + property_count);
 }
 
-// Failing on Android: crbug.com/667913
-#if OS(ANDROID)
-#define MAYBE_MutedDocuments DISABLED_MutedDocuments
-#else
-#define MAYBE_MutedDocuments MutedDocuments
-#endif
-TEST(UseCounterTest, MAYBE_MutedDocuments) {
-  UseCounter useCounter;
-  HistogramTester histogramTester;
+TEST(UseCounterTest, MutedDocuments) {
+  UseCounter use_counter;
+  HistogramTester histogram_tester;
 
   // Counters triggered before any load are always reported.
-  useCounter.recordMeasurement(UseCounter::Fetch);
-  useCounter.count(HTMLStandardMode, CSSPropertyFontWeight);
-  expectHistograms(histogramTester, 0, UseCounter::Fetch, 1,
+  use_counter.RecordMeasurement(WebFeature::kFetch);
+  use_counter.Count(kHTMLStandardMode, CSSPropertyFontWeight);
+  ExpectHistograms(histogram_tester, 0, WebFeature::kFetch, 1,
                    CSSPropertyFontWeight, 1);
 
   // Loading an internal page doesn't bump PageVisits and metrics not reported.
-  useCounter.didCommitLoad(URLTestHelpers::toKURL("about:blank"));
-  EXPECT_FALSE(useCounter.hasRecordedMeasurement(UseCounter::Fetch));
-  EXPECT_FALSE(useCounter.isCounted(CSSPropertyFontWeight));
-  useCounter.recordMeasurement(UseCounter::Fetch);
-  useCounter.count(HTMLStandardMode, CSSPropertyFontWeight);
-  expectHistograms(histogramTester, 0, UseCounter::Fetch, 1,
+  use_counter.DidCommitLoad(URLTestHelpers::ToKURL(kInternalUrl));
+  EXPECT_FALSE(use_counter.HasRecordedMeasurement(WebFeature::kFetch));
+  EXPECT_FALSE(use_counter.IsCounted(CSSPropertyFontWeight));
+  use_counter.RecordMeasurement(WebFeature::kFetch);
+  use_counter.Count(kHTMLStandardMode, CSSPropertyFontWeight);
+  ExpectHistograms(histogram_tester, 0, WebFeature::kFetch, 1,
                    CSSPropertyFontWeight, 1);
 
   // But the fact that the features were seen is still known.
-  EXPECT_TRUE(useCounter.hasRecordedMeasurement(UseCounter::Fetch));
-  EXPECT_TRUE(useCounter.isCounted(CSSPropertyFontWeight));
+  EXPECT_TRUE(use_counter.HasRecordedMeasurement(WebFeature::kFetch));
+  EXPECT_TRUE(use_counter.IsCounted(CSSPropertyFontWeight));
 
   // Inspector muting then unmuting doesn't change the behavior.
-  useCounter.muteForInspector();
-  useCounter.unmuteForInspector();
-  useCounter.recordMeasurement(UseCounter::Fetch);
-  useCounter.count(HTMLStandardMode, CSSPropertyFontWeight);
-  expectHistograms(histogramTester, 0, UseCounter::Fetch, 1,
+  use_counter.MuteForInspector();
+  use_counter.UnmuteForInspector();
+  use_counter.RecordMeasurement(WebFeature::kFetch);
+  use_counter.Count(kHTMLStandardMode, CSSPropertyFontWeight);
+  ExpectHistograms(histogram_tester, 0, WebFeature::kFetch, 1,
                    CSSPropertyFontWeight, 1);
 
   // If we now load a real web page, metrics are reported again.
-  useCounter.didCommitLoad(URLTestHelpers::toKURL("http://foo.com/"));
-  useCounter.recordMeasurement(UseCounter::Fetch);
-  useCounter.count(HTMLStandardMode, CSSPropertyFontWeight);
-  expectHistograms(histogramTester, 1, UseCounter::Fetch, 2,
+  use_counter.DidCommitLoad(URLTestHelpers::ToKURL("http://foo.com/"));
+  use_counter.RecordMeasurement(WebFeature::kFetch);
+  use_counter.Count(kHTMLStandardMode, CSSPropertyFontWeight);
+  ExpectHistograms(histogram_tester, 1, WebFeature::kFetch, 2,
                    CSSPropertyFontWeight, 2);
 
   // HTTPs URLs are the same.
-  useCounter.didCommitLoad(
-      URLTestHelpers::toKURL("https://baz.com:1234/blob.html"));
-  useCounter.recordMeasurement(UseCounter::Fetch);
-  useCounter.count(HTMLStandardMode, CSSPropertyFontWeight);
-  expectHistograms(histogramTester, 2, UseCounter::Fetch, 3,
+  use_counter.DidCommitLoad(URLTestHelpers::ToKURL(kHttpsUrl));
+  use_counter.RecordMeasurement(WebFeature::kFetch);
+  use_counter.Count(kHTMLStandardMode, CSSPropertyFontWeight);
+  ExpectHistograms(histogram_tester, 2, WebFeature::kFetch, 3,
                    CSSPropertyFontWeight, 3);
 
   // Extensions aren't counted.
-  useCounter.didCommitLoad(
-      URLTestHelpers::toKURL("chrome-extension://1238ba908adf/"));
-  useCounter.recordMeasurement(UseCounter::Fetch);
-  useCounter.count(HTMLStandardMode, CSSPropertyFontWeight);
-  expectHistograms(histogramTester, 2, UseCounter::Fetch, 3,
+  use_counter.DidCommitLoad(URLTestHelpers::ToKURL(kExtensionUrl));
+  use_counter.RecordMeasurement(WebFeature::kFetch);
+  use_counter.Count(kHTMLStandardMode, CSSPropertyFontWeight);
+  ExpectHistograms(histogram_tester, 2, WebFeature::kFetch, 3,
                    CSSPropertyFontWeight, 3);
 
   // Nor is devtools
-  useCounter.didCommitLoad(
-      URLTestHelpers::toKURL("chrome-devtools://1238ba908adf/"));
-  useCounter.recordMeasurement(UseCounter::Fetch);
-  useCounter.count(HTMLStandardMode, CSSPropertyFontWeight);
-  expectHistograms(histogramTester, 2, UseCounter::Fetch, 3,
+  use_counter.DidCommitLoad(
+      URLTestHelpers::ToKURL("chrome-devtools://1238ba908adf/"));
+  use_counter.RecordMeasurement(WebFeature::kFetch);
+  use_counter.Count(kHTMLStandardMode, CSSPropertyFontWeight);
+  ExpectHistograms(histogram_tester, 2, WebFeature::kFetch, 3,
                    CSSPropertyFontWeight, 3);
 
   // Nor are data URLs
-  useCounter.didCommitLoad(
-      URLTestHelpers::toKURL("data:text/plain,thisisaurl"));
-  useCounter.recordMeasurement(UseCounter::Fetch);
-  useCounter.count(HTMLStandardMode, CSSPropertyFontWeight);
-  expectHistograms(histogramTester, 2, UseCounter::Fetch, 3,
+  use_counter.DidCommitLoad(
+      URLTestHelpers::ToKURL("data:text/plain,thisisaurl"));
+  use_counter.RecordMeasurement(WebFeature::kFetch);
+  use_counter.Count(kHTMLStandardMode, CSSPropertyFontWeight);
+  ExpectHistograms(histogram_tester, 2, WebFeature::kFetch, 3,
                    CSSPropertyFontWeight, 3);
 
   // Or empty URLs (a main frame with no Document)
-  useCounter.didCommitLoad(KURL());
-  useCounter.recordMeasurement(UseCounter::Fetch);
-  useCounter.count(HTMLStandardMode, CSSPropertyFontWeight);
-  expectHistograms(histogramTester, 2, UseCounter::Fetch, 3,
+  use_counter.DidCommitLoad(NullURL());
+  use_counter.RecordMeasurement(WebFeature::kFetch);
+  use_counter.Count(kHTMLStandardMode, CSSPropertyFontWeight);
+  ExpectHistograms(histogram_tester, 2, WebFeature::kFetch, 3,
                    CSSPropertyFontWeight, 3);
 
   // But file URLs are
-  useCounter.didCommitLoad(URLTestHelpers::toKURL("file:///c/autoexec.bat"));
-  useCounter.recordMeasurement(UseCounter::Fetch);
-  useCounter.count(HTMLStandardMode, CSSPropertyFontWeight);
-  expectHistograms(histogramTester, 3, UseCounter::Fetch, 4,
+  use_counter.DidCommitLoad(URLTestHelpers::ToKURL("file:///c/autoexec.bat"));
+  use_counter.RecordMeasurement(WebFeature::kFetch);
+  use_counter.Count(kHTMLStandardMode, CSSPropertyFontWeight);
+  ExpectHistograms(histogram_tester, 3, WebFeature::kFetch, 4,
                    CSSPropertyFontWeight, 4);
 }
 
 class DeprecationTest : public ::testing::Test {
  public:
   DeprecationTest()
-      : m_dummy(DummyPageHolder::create()),
-        m_deprecation(m_dummy->page().deprecation()),
-        m_useCounter(m_dummy->page().useCounter()) {}
+      : dummy_(DummyPageHolder::Create()),
+        deprecation_(dummy_->GetPage().GetDeprecation()),
+        use_counter_(dummy_->GetPage().GetUseCounter()) {}
 
  protected:
-  LocalFrame* frame() { return &m_dummy->frame(); }
+  LocalFrame* GetFrame() { return &dummy_->GetFrame(); }
 
-  std::unique_ptr<DummyPageHolder> m_dummy;
-  Deprecation& m_deprecation;
-  UseCounter& m_useCounter;
+  std::unique_ptr<DummyPageHolder> dummy_;
+  Deprecation& deprecation_;
+  UseCounter& use_counter_;
 };
 
 TEST_F(DeprecationTest, InspectorDisablesDeprecation) {
   // The specific feature we use here isn't important.
-  UseCounter::Feature feature = UseCounter::Feature::CSSDeepCombinator;
+  WebFeature feature = WebFeature::kCSSDeepCombinator;
   CSSPropertyID property = CSSPropertyFontWeight;
 
-  EXPECT_FALSE(m_deprecation.isSuppressed(property));
+  EXPECT_FALSE(deprecation_.IsSuppressed(property));
 
-  m_deprecation.muteForInspector();
-  Deprecation::warnOnDeprecatedProperties(frame(), property);
-  EXPECT_FALSE(m_deprecation.isSuppressed(property));
-  Deprecation::countDeprecation(frame(), feature);
-  EXPECT_FALSE(m_useCounter.hasRecordedMeasurement(feature));
+  deprecation_.MuteForInspector();
+  Deprecation::WarnOnDeprecatedProperties(GetFrame(), property);
+  EXPECT_FALSE(deprecation_.IsSuppressed(property));
+  Deprecation::CountDeprecation(GetFrame(), feature);
+  EXPECT_FALSE(use_counter_.HasRecordedMeasurement(feature));
 
-  m_deprecation.muteForInspector();
-  Deprecation::warnOnDeprecatedProperties(frame(), property);
-  EXPECT_FALSE(m_deprecation.isSuppressed(property));
-  Deprecation::countDeprecation(frame(), feature);
-  EXPECT_FALSE(m_useCounter.hasRecordedMeasurement(feature));
+  deprecation_.MuteForInspector();
+  Deprecation::WarnOnDeprecatedProperties(GetFrame(), property);
+  EXPECT_FALSE(deprecation_.IsSuppressed(property));
+  Deprecation::CountDeprecation(GetFrame(), feature);
+  EXPECT_FALSE(use_counter_.HasRecordedMeasurement(feature));
 
-  m_deprecation.unmuteForInspector();
-  Deprecation::warnOnDeprecatedProperties(frame(), property);
-  EXPECT_FALSE(m_deprecation.isSuppressed(property));
-  Deprecation::countDeprecation(frame(), feature);
-  EXPECT_FALSE(m_useCounter.hasRecordedMeasurement(feature));
+  deprecation_.UnmuteForInspector();
+  Deprecation::WarnOnDeprecatedProperties(GetFrame(), property);
+  EXPECT_FALSE(deprecation_.IsSuppressed(property));
+  Deprecation::CountDeprecation(GetFrame(), feature);
+  EXPECT_FALSE(use_counter_.HasRecordedMeasurement(feature));
 
-  m_deprecation.unmuteForInspector();
-  Deprecation::warnOnDeprecatedProperties(frame(), property);
+  deprecation_.UnmuteForInspector();
+  Deprecation::WarnOnDeprecatedProperties(GetFrame(), property);
   // TODO: use the actually deprecated property to get a deprecation message.
-  EXPECT_FALSE(m_deprecation.isSuppressed(property));
-  Deprecation::countDeprecation(frame(), feature);
-  EXPECT_TRUE(m_useCounter.hasRecordedMeasurement(feature));
+  EXPECT_FALSE(deprecation_.IsSuppressed(property));
+  Deprecation::CountDeprecation(GetFrame(), feature);
+  EXPECT_TRUE(use_counter_.HasRecordedMeasurement(feature));
+}
+
+class FeaturePolicyDisabledDeprecationTest : public ::testing::Test {
+ public:
+  FeaturePolicyDisabledDeprecationTest() {
+    feature_policy_was_enabled = RuntimeEnabledFeatures::FeaturePolicyEnabled();
+    RuntimeEnabledFeatures::SetFeaturePolicyEnabled(false);
+    dummy_ = DummyPageHolder::Create();
+  }
+  ~FeaturePolicyDisabledDeprecationTest() {
+    RuntimeEnabledFeatures::SetFeaturePolicyEnabled(feature_policy_was_enabled);
+  }
+
+ protected:
+  Document& GetDocument() { return dummy_->GetDocument(); }
+  UseCounter& GetUseCounter() { return dummy_->GetPage().GetUseCounter(); }
+
+  std::unique_ptr<DummyPageHolder> dummy_;
+
+ private:
+  bool feature_policy_was_enabled;
+};
+
+TEST_F(FeaturePolicyDisabledDeprecationTest,
+       TestCountDeprecationFeaturePolicy) {
+  // The specific feature we use here isn't important, but we need the
+  // corresponding FP feature as well.
+  WebFeaturePolicyFeature policy_feature =
+      WebFeaturePolicyFeature::kGeolocation;
+  WebFeature feature =
+      WebFeature::kGeolocationDisallowedByFeaturePolicyInCrossOriginIframe;
+
+  // Verify that there is, in fact, no policy attacted to the document
+  ASSERT_EQ(GetDocument().GetFeaturePolicy(), nullptr);
+  // Trigger the deprecation counter as if the feature was used.
+  Deprecation::CountDeprecationFeaturePolicy(GetDocument(), policy_feature);
+  // Verify that no usage was recorded.
+  EXPECT_FALSE(GetUseCounter().HasRecordedMeasurement(feature));
 }
 
 }  // namespace blink

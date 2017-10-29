@@ -8,16 +8,16 @@
 
 namespace blink {
 
-DEFINE_WEAK_IDENTIFIER_MAP(Node);
+DEFINE_WEAK_IDENTIFIER_MAP(Node, DOMNodeId);
 
 // static
-int DOMNodeIds::idForNode(Node* node) {
-  return WeakIdentifierMap<Node>::identifier(node);
+DOMNodeId DOMNodeIds::IdForNode(Node* node) {
+  return WeakIdentifierMap<Node, DOMNodeId>::Identifier(node);
 }
 
 // static
-Node* DOMNodeIds::nodeForId(int id) {
-  return WeakIdentifierMap<Node>::lookup(id);
+Node* DOMNodeIds::NodeForId(DOMNodeId id) {
+  return WeakIdentifierMap<Node, DOMNodeId>::Lookup(id);
 }
 
 }  // namespace blink

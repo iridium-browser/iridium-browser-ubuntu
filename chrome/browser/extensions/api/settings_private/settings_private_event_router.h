@@ -8,11 +8,18 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/extensions/api/settings_private/prefs_util.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "extensions/browser/event_router.h"
+
+// TODO(wychen): ChromeOS headers should only be included when building
+//               ChromeOS, and the following headers should be guarded by
+//               #if defined(OS_CHROMEOS). However, the types are actually
+//               used, and it takes another CL to clean them up.
+//               Reference: crbug.com/720159
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 
 namespace content {
 class BrowserContext;
@@ -55,6 +62,9 @@ class SettingsPrivateEventRouter : public KeyedService,
 
   void OnPreferenceChanged(const std::string& pref_name);
 
+  // Sends a pref change to any listeners (if they exist; no-ops otherwise).
+  void SendPrefChange(const std::string& pref_name);
+
   PrefChangeRegistrar* FindRegistrarForPref(const std::string& pref_name);
 
   using SubscriptionMap =
@@ -66,6 +76,8 @@ class SettingsPrivateEventRouter : public KeyedService,
   bool listening_;
 
   std::unique_ptr<PrefsUtil> prefs_util_;
+
+  base::WeakPtrFactory<SettingsPrivateEventRouter> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SettingsPrivateEventRouter);
 };

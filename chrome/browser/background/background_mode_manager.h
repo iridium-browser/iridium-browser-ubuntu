@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_BACKGROUND_BACKGROUND_MODE_MANAGER_H_
 
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -13,8 +14,8 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequenced_task_runner.h"
 #include "chrome/browser/background/background_application_list_model.h"
 #include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
@@ -404,6 +405,13 @@ class BackgroundModeManager
   // if the profile isn't locked. Returns NULL otherwise.
   BackgroundModeData* GetBackgroundModeDataForLastProfile() const;
 
+  // Creates sequenced task runner for making startup/login configuration
+  // changes that may require file system or registry access.
+  // The implementation of this function is platform specific and may return
+  // a null scoped_refptr if the task runner isn't needed on that particular
+  // platform.
+  static scoped_refptr<base::SequencedTaskRunner> CreateTaskRunner();
+
   // Set to true when the next restart should be done in background mode.
   // Static because its value is read after the background mode manager is
   // destroyed.
@@ -424,7 +432,7 @@ class BackgroundModeManager
   CommandIdHandlerVector command_id_handler_vector_;
 
   // Maintains submenu lifetime for the multiple profile context menu.
-  ScopedVector<StatusIconMenuModel> submenus;
+  std::vector<std::unique_ptr<StatusIconMenuModel>> submenus;
 
   // Reference to our status tray. If null, the platform doesn't support status
   // icons.
@@ -462,6 +470,10 @@ class BackgroundModeManager
 
   // Set to true when background mode is suspended.
   bool background_mode_suspended_;
+
+  // Task runner for making startup/login configuration changes that may
+  // require file system or registry access.
+  const scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   base::WeakPtrFactory<BackgroundModeManager> weak_factory_;
 

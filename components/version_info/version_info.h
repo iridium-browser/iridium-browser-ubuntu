@@ -7,10 +7,9 @@
 
 #include <string>
 
-namespace version_info {
+#include "components/version_info/channel.h"
 
-// The possible channels for an installation, from most fun to most stable.
-enum class Channel { UNKNOWN = 0, CANARY, DEV, BETA, STABLE };
+namespace version_info {
 
 // Returns the product name and version information for UserAgent header,
 // e.g. "Chrome/a.b.c.d".
@@ -36,12 +35,6 @@ std::string GetOSType();
 // Returns a string equivalent of |channel|, indenpendent of whether the build
 // is branded or not and without any additional modifiers.
 std::string GetChannelString(Channel channel);
-
-// Returns a version string to be displayed in "About Chromium" dialog.
-// |modifier| is a string representation of the channel with system specific
-// information, e.g. "dev SyzyASan". It is appended to the returned version
-// information if non-empty.
-std::string GetVersionStringWithModifier(const std::string& modifier);
 
 }  // namespace version_info
 

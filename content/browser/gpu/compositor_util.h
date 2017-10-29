@@ -5,7 +5,10 @@
 #ifndef CONTENT_BROWSER_GPU_COMPOSITOR_UTIL_H_
 #define CONTENT_BROWSER_GPU_COMPOSITOR_UTIL_H_
 
+#include <memory>
+
 #include "base/values.h"
+#include "components/viz/common/resources/buffer_to_texture_target_map.h"
 #include "content/common/content_export.h"
 
 namespace content {
@@ -26,9 +29,6 @@ CONTENT_EXPORT bool IsGpuMemoryBufferCompositorResourcesEnabled();
 // Returns true if gpu rasterization is on (via flags) for the renderer.
 CONTENT_EXPORT bool IsGpuRasterizationEnabled();
 
-// returns true if async worker context is on (via flags).
-CONTENT_EXPORT bool IsAsyncWorkerContextEnabled();
-
 // Returns the number of multisample antialiasing samples (via flags) for
 // GPU rasterization.
 CONTENT_EXPORT int GpuRasterizationMSAASampleCount();
@@ -42,9 +42,15 @@ CONTENT_EXPORT int NumberOfRendererRasterThreads();
 // Returns true if main thread can be pipelined with activation.
 CONTENT_EXPORT bool IsMainFrameBeforeActivationEnabled();
 
-CONTENT_EXPORT base::DictionaryValue* GetFeatureStatus();
-CONTENT_EXPORT base::Value* GetProblems();
+// Returns true if images can be decode asynchronously from rasterization.
+CONTENT_EXPORT bool IsCheckerImagingEnabled();
+
+CONTENT_EXPORT std::unique_ptr<base::DictionaryValue> GetFeatureStatus();
+CONTENT_EXPORT std::unique_ptr<base::ListValue> GetProblems();
 CONTENT_EXPORT std::vector<std::string> GetDriverBugWorkarounds();
+
+// Populate BufferToTextureTargetMap for all buffer usage/formats.
+CONTENT_EXPORT viz::BufferToTextureTargetMap CreateBufferToTextureTargetMap();
 
 }  // namespace content
 

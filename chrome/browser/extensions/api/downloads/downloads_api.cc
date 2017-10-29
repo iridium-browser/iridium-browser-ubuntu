@@ -14,6 +14,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
@@ -23,6 +24,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -35,12 +37,12 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_danger_prompt.h"
 #include "chrome/browser/download/download_file_icon_extractor.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_query.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/download/drag_download_item.h"
@@ -78,6 +80,7 @@
 #include "net/base/filename_util.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_util.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/gfx/image/image_skia.h"
@@ -360,49 +363,69 @@ IconLoader::IconSize IconLoaderSizeFromPixelSize(int pixel_size) {
   }
 }
 
-typedef base::hash_map<std::string, DownloadQuery::FilterType> FilterTypeMap;
-
-void InitFilterTypeMap(FilterTypeMap* filter_types_ptr) {
-  FilterTypeMap& filter_types = *filter_types_ptr;
-  filter_types[kBytesReceivedKey] = DownloadQuery::FILTER_BYTES_RECEIVED;
-  filter_types[kExistsKey] = DownloadQuery::FILTER_EXISTS;
-  filter_types[kFilenameKey] = DownloadQuery::FILTER_FILENAME;
-  filter_types[kFilenameRegexKey] = DownloadQuery::FILTER_FILENAME_REGEX;
-  filter_types[kMimeKey] = DownloadQuery::FILTER_MIME;
-  filter_types[kPausedKey] = DownloadQuery::FILTER_PAUSED;
-  filter_types[kQueryKey] = DownloadQuery::FILTER_QUERY;
-  filter_types[kEndedAfterKey] = DownloadQuery::FILTER_ENDED_AFTER;
-  filter_types[kEndedBeforeKey] = DownloadQuery::FILTER_ENDED_BEFORE;
-  filter_types[kEndTimeKey] = DownloadQuery::FILTER_END_TIME;
-  filter_types[kStartedAfterKey] = DownloadQuery::FILTER_STARTED_AFTER;
-  filter_types[kStartedBeforeKey] = DownloadQuery::FILTER_STARTED_BEFORE;
-  filter_types[kStartTimeKey] = DownloadQuery::FILTER_START_TIME;
-  filter_types[kTotalBytesKey] = DownloadQuery::FILTER_TOTAL_BYTES;
-  filter_types[kTotalBytesGreaterKey] =
-    DownloadQuery::FILTER_TOTAL_BYTES_GREATER;
-  filter_types[kTotalBytesLessKey] = DownloadQuery::FILTER_TOTAL_BYTES_LESS;
-  filter_types[kUrlKey] = DownloadQuery::FILTER_ORIGINAL_URL;
-  filter_types[kUrlRegexKey] = DownloadQuery::FILTER_ORIGINAL_URL_REGEX;
-  filter_types[kFinalUrlKey] = DownloadQuery::FILTER_URL;
-  filter_types[kFinalUrlRegexKey] = DownloadQuery::FILTER_URL_REGEX;
+using FilterTypeMap = base::flat_map<std::string, DownloadQuery::FilterType>;
+void AppendFilter(const char* name,
+                  DownloadQuery::FilterType type,
+                  std::vector<FilterTypeMap::value_type>* v) {
+  v->emplace_back(name, type);
 }
 
-typedef base::hash_map<std::string, DownloadQuery::SortType> SortTypeMap;
+void InitFilterTypeMap(FilterTypeMap* filter_types_ptr) {
+  // Initialize the map in one shot by storing to a vector and assigning.
+  std::vector<FilterTypeMap::value_type> v;
+
+  AppendFilter(kBytesReceivedKey, DownloadQuery::FILTER_BYTES_RECEIVED, &v);
+
+  AppendFilter(kBytesReceivedKey, DownloadQuery::FILTER_BYTES_RECEIVED, &v);
+  AppendFilter(kExistsKey, DownloadQuery::FILTER_EXISTS, &v);
+  AppendFilter(kFilenameKey, DownloadQuery::FILTER_FILENAME, &v);
+  AppendFilter(kFilenameRegexKey, DownloadQuery::FILTER_FILENAME_REGEX, &v);
+  AppendFilter(kMimeKey, DownloadQuery::FILTER_MIME, &v);
+  AppendFilter(kPausedKey, DownloadQuery::FILTER_PAUSED, &v);
+  AppendFilter(kQueryKey, DownloadQuery::FILTER_QUERY, &v);
+  AppendFilter(kEndedAfterKey, DownloadQuery::FILTER_ENDED_AFTER, &v);
+  AppendFilter(kEndedBeforeKey, DownloadQuery::FILTER_ENDED_BEFORE, &v);
+  AppendFilter(kEndTimeKey, DownloadQuery::FILTER_END_TIME, &v);
+  AppendFilter(kStartedAfterKey, DownloadQuery::FILTER_STARTED_AFTER, &v);
+  AppendFilter(kStartedBeforeKey, DownloadQuery::FILTER_STARTED_BEFORE, &v);
+  AppendFilter(kStartTimeKey, DownloadQuery::FILTER_START_TIME, &v);
+  AppendFilter(kTotalBytesKey, DownloadQuery::FILTER_TOTAL_BYTES, &v);
+  AppendFilter(kTotalBytesGreaterKey, DownloadQuery::FILTER_TOTAL_BYTES_GREATER,
+               &v);
+  AppendFilter(kTotalBytesLessKey, DownloadQuery::FILTER_TOTAL_BYTES_LESS, &v);
+  AppendFilter(kUrlKey, DownloadQuery::FILTER_ORIGINAL_URL, &v);
+  AppendFilter(kUrlRegexKey, DownloadQuery::FILTER_ORIGINAL_URL_REGEX, &v);
+  AppendFilter(kFinalUrlKey, DownloadQuery::FILTER_URL, &v);
+  AppendFilter(kFinalUrlRegexKey, DownloadQuery::FILTER_URL_REGEX, &v);
+
+  *filter_types_ptr = FilterTypeMap(std::move(v), base::KEEP_FIRST_OF_DUPES);
+}
+
+using SortTypeMap = base::flat_map<std::string, DownloadQuery::SortType>;
+void AppendFilter(const char* name,
+                  DownloadQuery::SortType type,
+                  std::vector<SortTypeMap::value_type>* v) {
+  v->emplace_back(name, type);
+}
 
 void InitSortTypeMap(SortTypeMap* sorter_types_ptr) {
-  SortTypeMap& sorter_types = *sorter_types_ptr;
-  sorter_types[kBytesReceivedKey] = DownloadQuery::SORT_BYTES_RECEIVED;
-  sorter_types[kDangerKey] = DownloadQuery::SORT_DANGER;
-  sorter_types[kEndTimeKey] = DownloadQuery::SORT_END_TIME;
-  sorter_types[kExistsKey] = DownloadQuery::SORT_EXISTS;
-  sorter_types[kFilenameKey] = DownloadQuery::SORT_FILENAME;
-  sorter_types[kMimeKey] = DownloadQuery::SORT_MIME;
-  sorter_types[kPausedKey] = DownloadQuery::SORT_PAUSED;
-  sorter_types[kStartTimeKey] = DownloadQuery::SORT_START_TIME;
-  sorter_types[kStateKey] = DownloadQuery::SORT_STATE;
-  sorter_types[kTotalBytesKey] = DownloadQuery::SORT_TOTAL_BYTES;
-  sorter_types[kUrlKey] = DownloadQuery::SORT_ORIGINAL_URL;
-  sorter_types[kFinalUrlKey] = DownloadQuery::SORT_URL;
+  // Initialize the map in one shot by storing to a vector and assigning.
+  std::vector<SortTypeMap::value_type> v;
+
+  AppendFilter(kBytesReceivedKey, DownloadQuery::SORT_BYTES_RECEIVED, &v);
+  AppendFilter(kDangerKey, DownloadQuery::SORT_DANGER, &v);
+  AppendFilter(kEndTimeKey, DownloadQuery::SORT_END_TIME, &v);
+  AppendFilter(kExistsKey, DownloadQuery::SORT_EXISTS, &v);
+  AppendFilter(kFilenameKey, DownloadQuery::SORT_FILENAME, &v);
+  AppendFilter(kMimeKey, DownloadQuery::SORT_MIME, &v);
+  AppendFilter(kPausedKey, DownloadQuery::SORT_PAUSED, &v);
+  AppendFilter(kStartTimeKey, DownloadQuery::SORT_START_TIME, &v);
+  AppendFilter(kStateKey, DownloadQuery::SORT_STATE, &v);
+  AppendFilter(kTotalBytesKey, DownloadQuery::SORT_TOTAL_BYTES, &v);
+  AppendFilter(kUrlKey, DownloadQuery::SORT_ORIGINAL_URL, &v);
+  AppendFilter(kFinalUrlKey, DownloadQuery::SORT_URL, &v);
+
+  *sorter_types_ptr = SortTypeMap(std::move(v), base::KEEP_FIRST_OF_DUPES);
 }
 
 bool IsNotTemporaryDownloadFilter(const DownloadItem& download_item) {
@@ -476,8 +499,8 @@ void CompileDownloadQueryOrderBy(
     DownloadQuery* query) {
   // TODO(benjhayden): Consider switching from LazyInstance to explicit string
   // comparisons.
-  static base::LazyInstance<SortTypeMap> sorter_types =
-    LAZY_INSTANCE_INITIALIZER;
+  static base::LazyInstance<SortTypeMap>::DestructorAtExit sorter_types =
+      LAZY_INSTANCE_INITIALIZER;
   if (sorter_types.Get().empty())
     InitSortTypeMap(sorter_types.Pointer());
 
@@ -509,8 +532,8 @@ void RunDownloadQuery(
     DownloadQuery::DownloadVector* results) {
   // TODO(benjhayden): Consider switching from LazyInstance to explicit string
   // comparisons.
-  static base::LazyInstance<FilterTypeMap> filter_types =
-    LAZY_INSTANCE_INITIALIZER;
+  static base::LazyInstance<FilterTypeMap>::DestructorAtExit filter_types =
+      LAZY_INSTANCE_INITIALIZER;
   if (filter_types.Get().empty())
     InitFilterTypeMap(filter_types.Pointer());
 
@@ -620,7 +643,7 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
         determined_conflict_action_(
             downloads::FILENAME_CONFLICT_ACTION_UNIQUIFY) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    download_item->SetUserData(kKey, this);
+    download_item->SetUserData(kKey, base::WrapUnique(this));
   }
 
   ~ExtensionDownloadsEventRouterData() override {
@@ -659,8 +682,9 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
         new base::WeakPtrFactory<ExtensionDownloadsEventRouterData>(this));
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&ExtensionDownloadsEventRouterData::DetermineFilenameTimeout,
-                   weak_ptr_factory_->GetWeakPtr()),
+        base::BindOnce(
+            &ExtensionDownloadsEventRouterData::DetermineFilenameTimeout,
+            weak_ptr_factory_->GetWeakPtr()),
         base::TimeDelta::FromSeconds(determine_filename_timeout_s_));
   }
 
@@ -825,8 +849,9 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
         new base::WeakPtrFactory<ExtensionDownloadsEventRouterData>(this));
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&ExtensionDownloadsEventRouterData::ClearPendingDeterminers,
-                   weak_ptr_factory_->GetWeakPtr()),
+        base::BindOnce(
+            &ExtensionDownloadsEventRouterData::ClearPendingDeterminers,
+            weak_ptr_factory_->GetWeakPtr()),
         base::TimeDelta::FromSeconds(15));
   }
 
@@ -952,7 +977,7 @@ DownloadedByExtension::DownloadedByExtension(
     const std::string& name)
   : id_(id),
     name_(name) {
-  item->SetUserData(kKey, this);
+  item->SetUserData(kKey, base::WrapUnique(this));
 }
 
 DownloadsDownloadFunction::DownloadsDownloadFunction() {}
@@ -976,12 +1001,41 @@ bool DownloadsDownloadFunction::RunAsync() {
       BrowserContext::GetStoragePartition(
           render_frame_host()->GetProcess()->GetBrowserContext(),
           render_frame_host()->GetSiteInstance());
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("downloads_api_run_async", R"(
+        semantics {
+          sender: "Downloads API"
+          description:
+            "This request is made when an extension makes an API call to "
+            "download a file."
+          trigger:
+            "An API call from an extension, can be in response to user input "
+            "or autonomously."
+          data:
+            "The extension may provide any data that it has permission to "
+            "access, or is provided to it by the user."
+          destination: OTHER
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store: "user"
+          setting:
+            "This feature cannot be disabled in settings, but disabling all "
+            "extensions will prevent it."
+          chrome_policy {
+            ExtensionInstallBlacklist {
+              ExtensionInstallBlacklist: {
+                entries: '*'
+              }
+            }
+          }
+        })");
   std::unique_ptr<content::DownloadUrlParameters> download_params(
       new content::DownloadUrlParameters(
           download_url, render_frame_host()->GetProcess()->GetID(),
           render_frame_host()->GetRenderViewHost()->GetRoutingID(),
           render_frame_host()->GetRoutingID(),
-          storage_partition->GetURLRequestContext()));
+          storage_partition->GetURLRequestContext(), traffic_annotation));
 
   base::FilePath creator_suggested_filename;
   if (options.filename.get()) {
@@ -1089,13 +1143,15 @@ ExtensionFunction::ResponseAction DownloadsSearchFunction::Run() {
   GetManagers(browser_context(), include_incognito(), &manager,
               &incognito_manager);
   ExtensionDownloadsEventRouter* router =
-      DownloadServiceFactory::GetForBrowserContext(
-          manager->GetBrowserContext())->GetExtensionEventRouter();
+      DownloadCoreServiceFactory::GetForBrowserContext(
+          manager->GetBrowserContext())
+          ->GetExtensionEventRouter();
   router->CheckForHistoryFilesRemoval();
   if (incognito_manager) {
     ExtensionDownloadsEventRouter* incognito_router =
-        DownloadServiceFactory::GetForBrowserContext(
-            incognito_manager->GetBrowserContext())->GetExtensionEventRouter();
+        DownloadCoreServiceFactory::GetForBrowserContext(
+            incognito_manager->GetBrowserContext())
+            ->GetExtensionEventRouter();
     incognito_router->CheckForHistoryFilesRemoval();
   }
   DownloadQuery::DownloadVector results;
@@ -1276,8 +1332,9 @@ void DownloadsAcceptDangerFunction::PromptOrWait(int download_id, int retries) {
   if (!visible) {
     if (retries > 0) {
       base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-          FROM_HERE, base::Bind(&DownloadsAcceptDangerFunction::PromptOrWait,
-                                this, download_id, retries - 1),
+          FROM_HERE,
+          base::BindOnce(&DownloadsAcceptDangerFunction::PromptOrWait, this,
+                         download_id, retries - 1),
           base::TimeDelta::FromMilliseconds(100));
       return;
     }
@@ -1431,16 +1488,16 @@ ExtensionFunction::ResponseAction DownloadsSetShelfEnabledFunction::Run() {
   DownloadManager* incognito_manager = NULL;
   GetManagers(browser_context(), include_incognito(), &manager,
               &incognito_manager);
-  DownloadService* service = NULL;
-  DownloadService* incognito_service = NULL;
+  DownloadCoreService* service = NULL;
+  DownloadCoreService* incognito_service = NULL;
   if (manager) {
-    service = DownloadServiceFactory::GetForBrowserContext(
+    service = DownloadCoreServiceFactory::GetForBrowserContext(
         manager->GetBrowserContext());
     service->GetExtensionEventRouter()->SetShelfEnabled(extension(),
                                                         params->enabled);
   }
   if (incognito_manager) {
-    incognito_service = DownloadServiceFactory::GetForBrowserContext(
+    incognito_service = DownloadCoreServiceFactory::GetForBrowserContext(
         incognito_manager->GetBrowserContext());
     incognito_service->GetExtensionEventRouter()->SetShelfEnabled(
         extension(), params->enabled);
@@ -1451,8 +1508,8 @@ ExtensionFunction::ResponseAction DownloadsSetShelfEnabledFunction::Run() {
     for (BrowserList::const_iterator iter = browsers->begin();
         iter != browsers->end(); ++iter) {
       const Browser* browser = *iter;
-      DownloadService* current_service =
-        DownloadServiceFactory::GetForBrowserContext(browser->profile());
+      DownloadCoreService* current_service =
+          DownloadCoreServiceFactory::GetForBrowserContext(browser->profile());
       if (((current_service == service) ||
            (current_service == incognito_service)) &&
           browser->window()->IsDownloadShelfVisible() &&
@@ -1524,7 +1581,7 @@ void DownloadsGetFileIconFunction::OnIconURLExtracted(const std::string& url) {
     return;
   }
   RecordApiFunctions(DOWNLOADS_FUNCTION_GET_FILE_ICON);
-  SetResult(base::MakeUnique<base::StringValue>(url));
+  SetResult(base::MakeUnique<base::Value>(url));
   SendResponse(true);
 }
 
@@ -1824,9 +1881,9 @@ void ExtensionDownloadsEventRouter::OnDownloadUpdated(
       if (!data->json().HasKey(iter.key()) ||
           (data->json().Get(iter.key(), &old_value) &&
            !iter.value().Equals(old_value))) {
-        delta->Set(iter.key() + ".current", iter.value().DeepCopy());
+        delta->Set(iter.key() + ".current", iter.value().CreateDeepCopy());
         if (old_value)
-          delta->Set(iter.key() + ".previous", old_value->DeepCopy());
+          delta->Set(iter.key() + ".previous", old_value->CreateDeepCopy());
         changed = true;
       }
     }
@@ -1839,7 +1896,7 @@ void ExtensionDownloadsEventRouter::OnDownloadUpdated(
     if ((new_fields.find(iter.key()) == new_fields.end()) &&
         IsDownloadDeltaField(iter.key())) {
       // estimatedEndTime disappears after completion, but bytesReceived stays.
-      delta->Set(iter.key() + ".previous", iter.value().DeepCopy());
+      delta->Set(iter.key() + ".previous", iter.value().CreateDeepCopy());
       changed = true;
     }
   }
@@ -1880,15 +1937,20 @@ void ExtensionDownloadsEventRouter::DispatchEvent(
   args->Append(std::move(arg));
   std::string json_args;
   base::JSONWriter::Write(*args, &json_args);
-  std::unique_ptr<Event> event(
-      new Event(histogram_value, event_name, std::move(args)));
   // The downloads system wants to share on-record events with off-record
   // extension renderers even in incognito_split_mode because that's how
   // chrome://downloads works. The "restrict_to_profile" mechanism does not
   // anticipate this, so it does not automatically prevent sharing off-record
   // events with on-record extension renderers.
-  event->restrict_to_browser_context =
-      (include_incognito && !profile_->IsOffTheRecord()) ? NULL : profile_;
+  // TODO(lazyboy): When |restrict_to_browser_context| is nullptr, this will
+  // broadcast events to unrelated profiles, not just incognito. Fix this
+  // by introducing "include incognito" option to Event constructor.
+  // https://crbug.com/726022.
+  Profile* restrict_to_browser_context =
+      (include_incognito && !profile_->IsOffTheRecord()) ? nullptr : profile_;
+  auto event =
+      base::MakeUnique<Event>(histogram_value, event_name, std::move(args),
+                              restrict_to_browser_context);
   event->will_dispatch_callback = will_dispatch_callback;
   EventRouter::Get(profile_)->BroadcastEvent(std::move(event));
   DownloadsNotificationSource notification_source;
@@ -1905,7 +1967,7 @@ void ExtensionDownloadsEventRouter::DispatchEvent(
 void ExtensionDownloadsEventRouter::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::set<const Extension*>::iterator iter =
       shelf_disabling_extensions_.find(extension);

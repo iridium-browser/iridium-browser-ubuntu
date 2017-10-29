@@ -1,5 +1,5 @@
 <!doctype html>
-<html i18n-values="dir:textdirection;lang:language">
+<html dir="$i18n{textdirection}" lang="$i18n{language}">
   <head>
     <meta charset="utf-8">
     <link rel="import" href="chrome://resources/html/polymer.html">
@@ -56,8 +56,7 @@
           <div id="chrome-logo" class="logo"></div>
           <div>
             <div class="title">$i18n{syncConfirmationChromeSyncTitle}</div>
-            <div class="body text"
-                i18n-values=".innerHTML:syncConfirmationChromeSyncBody"></div>
+            <div class="body text">$i18n{syncConfirmationChromeSyncBody}</div>
           </div>
         </div>
         <div class="message-container">
@@ -76,9 +75,7 @@
           </div>
         </div>
         <div class="message-container">
-          <div class="body"
-              i18n-values=".innerHTML:syncConfirmationSyncSettingsLinkBody">
-          </div>
+          <div class="body">$i18nRaw{syncConfirmationSyncSettingsLinkBody}</div>
         </div>
       </div>
       <div class="details" id="syncDisabledDetails">
@@ -99,5 +96,4 @@
   <script src="chrome://resources/js/util.js"></script>
   <script src="sync_confirmation.js"></script>
   <script src="chrome://sync-confirmation/strings.js"></script>
-  <script src="chrome://resources/js/i18n_template.js"></script>
 </html>

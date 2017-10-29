@@ -8,7 +8,7 @@
 #include "core/CoreExport.h"
 #include "core/layout/ng/ng_layout_input_node.h"
 #include "platform/heap/Handle.h"
-#include "wtf/RefCounted.h"
+#include "platform/wtf/RefCounted.h"
 
 namespace blink {
 
@@ -35,8 +35,11 @@ class CORE_EXPORT NGBreakToken : public RefCounted<NGBreakToken> {
  public:
   virtual ~NGBreakToken() {}
 
-  enum NGBreakTokenType { kBlockBreakToken, kTextBreakToken };
+  enum NGBreakTokenType { kBlockBreakToken, kInlineBreakToken };
   NGBreakTokenType Type() const { return static_cast<NGBreakTokenType>(type_); }
+
+  bool IsBlockType() const { return Type() == kBlockBreakToken; }
+  bool IsInlineType() const { return Type() == kInlineBreakToken; }
 
   enum NGBreakTokenStatus { kUnfinished, kFinished };
 
@@ -45,19 +48,19 @@ class CORE_EXPORT NGBreakToken : public RefCounted<NGBreakToken> {
 
   // Returns the node associated with this break token. A break token cannot be
   // used with any other node.
-  NGLayoutInputNode* InputNode() const { return node_; }
+  NGLayoutInputNode InputNode() const { return node_; }
 
  protected:
   NGBreakToken(NGBreakTokenType type,
                NGBreakTokenStatus status,
-               NGLayoutInputNode* node)
+               NGLayoutInputNode node)
       : type_(type), status_(status), node_(node) {}
 
  private:
   unsigned type_ : 1;
   unsigned status_ : 1;
 
-  Persistent<NGLayoutInputNode> node_;
+  NGLayoutInputNode node_;
 };
 
 }  // namespace blink

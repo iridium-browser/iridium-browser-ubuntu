@@ -10,11 +10,14 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/optional.h"
+#include "build/build_config.h"
 #include "components/autofill/content/common/autofill_driver.mojom.h"
 #include "components/password_manager/content/browser/content_password_manager_driver_factory.h"
 #include "components/password_manager/content/browser/credential_manager_impl.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
+#include "components/password_manager/core/browser/password_manager_metrics_recorder.h"
 #include "components/password_manager/core/browser/password_reuse_detection_manager.h"
 #include "components/password_manager/sync/browser/sync_credentials_filter.h"
 #include "components/prefs/pref_member.h"
@@ -48,11 +51,11 @@ class ChromePasswordManagerClient
   // PasswordManagerClient implementation.
   bool IsSavingAndFillingEnabledForCurrentPage() const override;
   bool IsFillingEnabledForCurrentPage() const override;
-  bool IsHSTSActiveForHost(const GURL& origin) const override;
+  void PostHSTSQueryForHost(const GURL& origin,
+                            const HSTSCallback& callback) const override;
   bool OnCredentialManagerUsed() override;
   bool PromptUserToSaveOrUpdatePassword(
       std::unique_ptr<password_manager::PasswordFormManager> form_to_save,
-      password_manager::CredentialSourceType type,
       bool update_password) override;
   bool PromptUserToChooseCredentials(
       std::vector<std::unique_ptr<autofill::PasswordForm>> local_forms,
@@ -82,7 +85,7 @@ class ChromePasswordManagerClient
   password_manager::PasswordSyncState GetPasswordSyncState() const override;
   bool WasLastNavigationHTTPError() const override;
   bool DidLastPageLoadEncounterSSLErrors() const override;
-  bool IsOffTheRecord() const override;
+  bool IsIncognito() const override;
   const password_manager::PasswordManager* GetPasswordManager() const override;
   autofill::AutofillManager* GetAutofillManagerForMainFrame() override;
   const GURL& GetMainFrameURL() const override;
@@ -104,6 +107,21 @@ class ChromePasswordManagerClient
   void GenerationAvailableForForm(const autofill::PasswordForm& form) override;
   void HidePasswordGenerationPopup() override;
 
+#if defined(SAFE_BROWSING_DB_LOCAL)
+  safe_browsing::PasswordProtectionService* GetPasswordProtectionService()
+      const override;
+  void CheckSafeBrowsingReputation(const GURL& form_action,
+                                   const GURL& frame_url) override;
+
+  void CheckProtectedPasswordEntry(const std::string& password_saved_domain,
+                                   bool password_field_exists) override;
+#endif
+
+  ukm::UkmRecorder* GetUkmRecorder() override;
+  ukm::SourceId GetUkmSourceId() override;
+  password_manager::PasswordManagerMetricsRecorder& GetMetricsRecorder()
+      override;
+
   static void CreateForWebContentsWithAutofillClient(
       content::WebContents* contents,
       autofill::AutofillClient* autofill_client);
@@ -112,12 +130,19 @@ class ChromePasswordManagerClient
   void SetTestObserver(autofill::PasswordGenerationPopupObserver* observer);
 
   static void BindCredentialManager(
-      content::RenderFrameHost* render_frame_host,
-      password_manager::mojom::CredentialManagerRequest request);
+      password_manager::mojom::CredentialManagerAssociatedRequest request,
+      content::RenderFrameHost* render_frame_host);
 
   // A helper method to determine whether a save/update bubble can be shown
   // on this |url|.
   static bool CanShowBubbleOnURL(const GURL& url);
+
+#if defined(UNIT_TEST)
+  bool was_store_ever_called() const { return was_store_ever_called_; }
+  bool has_binding_for_credential_manager() const {
+    return credential_manager_impl_.HasBinding();
+  }
+#endif
 
  protected:
   // Callable for tests.
@@ -133,8 +158,11 @@ class ChromePasswordManagerClient
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
 
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID)
   // content::RenderWidgetHost::InputEventObserver overrides.
   void OnInputEvent(const blink::WebInputEvent&) override;
+#endif
 
   // Given |bounds| in the renderers coordinate system, return the same bounds
   // in the screens coordinate system.
@@ -165,8 +193,11 @@ class ChromePasswordManagerClient
 
   password_manager::PasswordManager password_manager_;
 
+// TODO(crbug.com/706392): Fix password reuse detection for Android.
+#if !defined(OS_ANDROID)
   password_manager::PasswordReuseDetectionManager
       password_reuse_detection_manager_;
+#endif
 
   password_manager::ContentPasswordManagerDriverFactory* driver_factory_;
 
@@ -196,6 +227,20 @@ class ChromePasswordManagerClient
   // Set during 'NotifyUserCouldBeAutoSignedIn' in order to store the
   // form for potential use during 'NotifySuccessfulLoginWithExistingPassword'.
   std::unique_ptr<autofill::PasswordForm> possible_auto_sign_in_;
+
+  // If set, this stores a ukm::SourceId that is bound to the last committed
+  // navigation of the tab owning this ChromePasswordManagerClient.
+  base::Optional<ukm::SourceId> ukm_source_id_;
+
+  // Recorder of metrics that is associated with the last committed navigation
+  // of the WebContents owning this ChromePasswordManagerClient. May be unset at
+  // times. Sends statistics on destruction.
+  base::Optional<password_manager::PasswordManagerMetricsRecorder>
+      metrics_recorder_;
+
+  // Whether navigator.credentials.store() was ever called from this
+  // WebContents. Used for testing.
+  bool was_store_ever_called_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ChromePasswordManagerClient);
 };

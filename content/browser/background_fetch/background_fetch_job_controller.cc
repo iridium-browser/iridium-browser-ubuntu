@@ -4,60 +4,127 @@
 
 #include "content/browser/background_fetch/background_fetch_job_controller.h"
 
-#include <string>
-#include <vector>
-
-#include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "content/public/browser/browser_context.h"
+#include "content/browser/background_fetch/background_fetch_data_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/download_manager.h"
-#include "content/public/browser/storage_partition.h"
+#include "net/url_request/url_request_context_getter.h"
 
 namespace content {
 
 BackgroundFetchJobController::BackgroundFetchJobController(
+    const BackgroundFetchRegistrationId& registration_id,
+    const BackgroundFetchOptions& options,
+    BackgroundFetchDataManager* data_manager,
     BrowserContext* browser_context,
-    StoragePartition* storage_partition)
-    : browser_context_(browser_context),
-      storage_partition_(storage_partition) {}
-
-BackgroundFetchJobController::~BackgroundFetchJobController() = default;
-
-void BackgroundFetchJobController::ProcessJob(
-    const std::string& job_guid,
-    BackgroundFetchJobData* job_data) {
+    scoped_refptr<net::URLRequestContextGetter> request_context,
+    CompletedCallback completed_callback)
+    : registration_id_(registration_id),
+      options_(options),
+      data_manager_(data_manager),
+      delegate_proxy_(this, registration_id, browser_context, request_context),
+      completed_callback_(std::move(completed_callback)),
+      weak_ptr_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(job_data);
-  const BackgroundFetchRequestInfo& fetch_request =
-      job_data->GetNextBackgroundFetchRequestInfo();
-  ProcessRequest(job_guid, fetch_request);
-
-  // Currently this only supports jobs of size 1.
-  // TODO(crbug.com/692544)
-  DCHECK(!job_data->HasRequestsRemaining());
-
-  // TODO(harkness): Save the BackgroundFetchJobData so that when the download
-  // completes we can notify the DataManager.
 }
 
-void BackgroundFetchJobController::ProcessRequest(
-    const std::string& job_guid,
-    const BackgroundFetchRequestInfo& fetch_request) {
-  // First add the new request to the internal map tracking in-progress
-  // requests.
-  fetch_map_[job_guid] = fetch_request;
+BackgroundFetchJobController::~BackgroundFetchJobController() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+};
 
-  // TODO(harkness): Check if the download is already in progress or completed.
+void BackgroundFetchJobController::Start() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_EQ(state_, State::INITIALIZED);
 
-  // Send the fetch request to the DownloadManager.
-  std::unique_ptr<DownloadUrlParameters> params(
-      base::MakeUnique<DownloadUrlParameters>(
-          fetch_request.url(), storage_partition_->GetURLRequestContext()));
-  // TODO(harkness): Currently this is the only place the browser_context is
-  // used. Evaluate whether we can just pass in the download manager explicitly.
-  BrowserContext::GetDownloadManager(browser_context_)
-      ->DownloadUrl(std::move(params));
+  state_ = State::FETCHING;
+
+  // TODO(crbug.com/741609): Enforce kMaximumBackgroundFetchParallelRequests
+  // globally and/or per origin rather than per fetch.
+  for (size_t i = 0; i < kMaximumBackgroundFetchParallelRequests; i++) {
+    data_manager_->PopNextRequest(
+        registration_id_,
+        base::BindOnce(&BackgroundFetchJobController::StartRequest,
+                       weak_ptr_factory_.GetWeakPtr()));
+  }
+}
+
+void BackgroundFetchJobController::StartRequest(
+    scoped_refptr<BackgroundFetchRequestInfo> request) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_EQ(state_, State::FETCHING);
+  if (!request) {
+    // This can happen when |Start| tries to start multiple initial requests,
+    // but the fetch does not contain that many pending requests; or when
+    // |DidMarkRequestCompleted| tries to start the next request but there are
+    // none left.
+    return;
+  }
+
+  delegate_proxy_.StartRequest(request);
+}
+
+void BackgroundFetchJobController::DidStartRequest(
+    scoped_refptr<BackgroundFetchRequestInfo> request,
+    const std::string& download_guid) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  data_manager_->MarkRequestAsStarted(registration_id_, request.get(),
+                                      download_guid);
+}
+
+void BackgroundFetchJobController::DidCompleteRequest(
+    scoped_refptr<BackgroundFetchRequestInfo> request) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  // The DataManager must acknowledge that it stored the data and that there are
+  // no more pending requests to avoid marking this job as completed too early.
+  data_manager_->MarkRequestAsComplete(
+      registration_id_, request.get(),
+      base::BindOnce(&BackgroundFetchJobController::DidMarkRequestCompleted,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void BackgroundFetchJobController::DidMarkRequestCompleted(
+    bool has_pending_or_active_requests) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_EQ(state_, State::FETCHING);
+
+  // If not all requests have completed, start a pending request if there are
+  // any left, and bail.
+  if (has_pending_or_active_requests) {
+    data_manager_->PopNextRequest(
+        registration_id_,
+        base::BindOnce(&BackgroundFetchJobController::StartRequest,
+                       weak_ptr_factory_.GetWeakPtr()));
+    return;
+  }
+
+  // Otherwise the job this controller is responsible for has completed.
+  state_ = State::COMPLETED;
+  std::move(completed_callback_).Run(this);
+}
+
+void BackgroundFetchJobController::UpdateUI(const std::string& title) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  delegate_proxy_.UpdateUI(title);
+}
+
+void BackgroundFetchJobController::Abort() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  switch (state_) {
+    case State::INITIALIZED:
+    case State::FETCHING:
+      break;
+    case State::ABORTED:
+    case State::COMPLETED:
+      return;  // Ignore attempt to abort after completion/abort.
+  }
+
+  delegate_proxy_.Abort();
+
+  state_ = State::ABORTED;
+  // Inform the owner of the controller about the job having aborted.
+  std::move(completed_callback_).Run(this);
 }
 
 }  // namespace content

@@ -7,7 +7,6 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 
-#import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #import "base/test/ios/wait_util.h"
 #include "ios/web/public/test/fakes/test_browser_state.h"
@@ -16,6 +15,10 @@
 #include "ios/web/public/test/web_test.h"
 #import "ios/web/public/web_view_creation_util.h"
 #import "testing/gtest_mac.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 namespace {
@@ -27,7 +30,7 @@ typedef WebTest PageScriptUtilTest;
 // __gCrWeb object.
 TEST_F(PageScriptUtilTest, WKWebViewEarlyPageScript) {
   WKWebView* web_view = BuildWKWebView(CGRectZero, GetBrowserState());
-  ExecuteJavaScript(web_view, GetEarlyPageScript());
+  ExecuteJavaScript(web_view, GetEarlyPageScript(GetBrowserState()));
   EXPECT_NSEQ(@"object", ExecuteJavaScript(web_view, @"typeof __gCrWeb"));
 }
 
@@ -35,7 +38,7 @@ TEST_F(PageScriptUtilTest, WKWebViewEarlyPageScript) {
 TEST_F(PageScriptUtilTest, WKEmbedderScript) {
   GetWebClient()->SetEarlyPageScript(@"__gCrEmbedder = {};");
   WKWebView* web_view = BuildWKWebView(CGRectZero, GetBrowserState());
-  ExecuteJavaScript(web_view, GetEarlyPageScript());
+  ExecuteJavaScript(web_view, GetEarlyPageScript(GetBrowserState()));
   EXPECT_NSEQ(@"object", ExecuteJavaScript(web_view, @"typeof __gCrEmbedder"));
 }
 

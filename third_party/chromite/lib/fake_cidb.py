@@ -12,6 +12,8 @@ import itertools
 from chromite.lib import constants
 from chromite.lib import cidb
 from chromite.lib import clactions
+from chromite.lib import failure_message_lib
+from chromite.lib import hwtest_results
 
 
 class FakeCIDBConnection(object):
@@ -30,6 +32,8 @@ class FakeCIDBConnection(object):
     self.failureTable = {}
     self.fake_time = None
     self.fake_keyvals = fake_keyvals or {}
+    self.buildMessageTable = {}
+    self.hwTestResultTable = {}
 
   def _TrimStatus(self, status):
     """Trims a build row to keys that should be returned by GetBuildStatus"""
@@ -51,7 +55,8 @@ class FakeCIDBConnection(object):
   def InsertBuild(self, builder_name, waterfall, build_number,
                   build_config, bot_hostname, master_build_id=None,
                   timeout_seconds=None, status=constants.BUILDER_STATUS_PASSED,
-                  important=None, buildbucket_id=None):
+                  important=None, buildbucket_id=None, milestone_version=None,
+                  platform_version=None):
     """Insert a build row.
 
     Note this API slightly differs from cidb as we pass status to avoid having
@@ -76,13 +81,19 @@ class FakeCIDBConnection(object):
            'status': status,
            'finish_time': datetime.datetime.now(),
            'important': important,
-           'buildbucket_id': buildbucket_id}
+           'buildbucket_id': buildbucket_id,
+           'final': False,
+           'milestone_version': milestone_version,
+           'platform_version': platform_version}
     self.buildTable.append(row)
     return build_id
 
-  def FinishBuild(self, build_id, status=None, summary=None):
+  def FinishBuild(self, build_id, status=None, summary=None, strict=True):
     """Update the build with finished status."""
     build = self.buildTable[build_id]
+
+    if strict and build['final']:
+      return 0
 
     values = {}
     if status is not None:
@@ -92,6 +103,9 @@ class FakeCIDBConnection(object):
 
     if values:
       build.update(values)
+      return 1
+    else:
+      return 0
 
   def UpdateMetadata(self, build_id, metadata):
     """See cidb.UpdateMetadata.
@@ -164,14 +178,80 @@ class FakeCIDBConnection(object):
                     outer_failure_id=None,
                     extra_info=None):
     failure_id = len(self.failureTable)
-    values = {'build_stage_id': build_stage_id,
+    values = {'id': failure_id,
+              'build_stage_id': build_stage_id,
               'exception_type': exception_type,
               'exception_message': exception_message,
               'exception_category': exception_category,
               'outer_failure_id': outer_failure_id,
-              'extra_info': extra_info}
+              'extra_info': extra_info,
+              'timestamp': None}
     self.failureTable[failure_id] = values
     return failure_id
+
+  def InsertBuildMessage(self, build_id, message_type=None,
+                         message_subtype=None, message_value=None, board=None):
+    """Insert a build message.
+
+    Args:
+      build_id: primary key of build recording this message.
+      message_type: Optional str name of message type.
+      message_subtype: Optional str name of message subtype.
+      message_value: Optional value of message.
+      board: Optional str name of the board.
+
+    Returns:
+      The build message id (string).
+    """
+    if message_type:
+      message_type = message_type[:240]
+    if message_subtype:
+      message_subtype = message_subtype[:240]
+    if message_value:
+      message_value = message_value[:480]
+    if board:
+      board = board[:240]
+
+    build_message_id = len(self.buildMessageTable)
+    values = {'build_id': build_id,
+              'message_type': message_type,
+              'message_subtype': message_subtype,
+              'message_value': message_value,
+              'board': board}
+    self.buildMessageTable[build_message_id] = values
+    return build_message_id
+
+  def InsertHWTestResults(self, hwTestResults):
+    """Insert HWTestResults into the hwTestResultTable.
+
+    Args:
+      hwTestResults: A list of HWTestResult instances.
+
+    Returns:
+      The number of inserted rows.
+    """
+    result_id = len(self.hwTestResultTable)
+    for result in hwTestResults:
+      values = {'id': result_id,
+                'build_id': result.build_id,
+                'test_name': result.test_name,
+                'status': result.status}
+      self.hwTestResultTable[result_id] = values
+      result_id = result_id + 1
+
+    return len(hwTestResults)
+
+  def GetBuildMessages(self, build_id):
+    """Get the build messages of the given build id.
+
+    Args:
+      build_id: build id (string) of the build to get messages.
+
+    Returns:
+      A list of build messages (in the format of dict).
+    """
+    return [v for v in  self.buildMessageTable.values()
+            if v['build_id'] == build_id]
 
   def StartBuildStage(self, build_stage_id):
     if build_stage_id > len(self.buildStageTable):
@@ -199,16 +279,48 @@ class FakeCIDBConnection(object):
 
     self.buildStageTable[build_stage_id]['status'] = status
 
-  def GetActionsForChanges(self, changes):
-    """Gets all the actions for the given changes."""
-    clauses = set()
-    for change in changes:
-      change_source = 'internal' if change.internal else 'external'
-      clauses.add((int(change.gerrit_number), change_source))
+  def GetActionsForChanges(self, changes, ignore_patch_number=True,
+                           status=None, action=None, start_time=None):
+    """Gets all the actions for the given changes.
+
+    Args:
+      changes: A list of GerritChangeTuple, GerritPatchTuple or GerritPatch
+        specifying the changes to whose actions should be fetched.
+      ignore_patch_number: Boolean indicating whether to ignore patch_number of
+        the changes. If ignore_patch_number is False, only get the actions with
+        matched patch_number. Default to True.
+      status: If provided, only return the actions with build is |status| (a
+        member of constants.BUILDER_ALL_STATUSES). Default to None.
+      action: If provided, only return the actions is |action| (a member of
+        constants.CL_ACTIONS). Default to None.
+      start_time: If provided, only return the actions with timestamp >=
+        start_time. Default to None.
+
+    Returns:
+      A list of CLAction instances, in action id order.
+    """
     values = []
     for row in self.GetActionHistory():
-      if (row.change_number, row.change_source) in clauses:
+      if start_time is not None and row.timestamp < start_time:
+        continue
+      if status is not None and row.status != status:
+        continue
+      if action is not None and row.action != action:
+        continue
+
+      for change in changes:
+        change_source = 'internal' if change.internal else 'external'
+
+        if (change_source != row.change_source or
+            int(change.gerrit_number) != row.change_number):
+          continue
+        if (not ignore_patch_number and
+            int(change.patch_number) != row.patch_number):
+          continue
+
         values.append(row)
+        break
+
     return values
 
   def GetActionHistory(self, *args, **kwargs):
@@ -226,7 +338,8 @@ class FakeCIDBConnection(object):
           item['patch_number'],
           item['change_source'],
           item['timestamp'],
-          item['buildbucket_id'])
+          item['buildbucket_id'],
+          self.buildTable[item['build_id']]['status'])
       values.append(row)
 
     return clactions.CLActionHistory(clactions.CLAction(*row) for row in values)
@@ -252,20 +365,63 @@ class FakeCIDBConnection(object):
               if b['master_build_id'] == master_build_id and
               b['buildbucket_id'] in buildbucket_ids]
 
+  def GetBuildStage(self, build_stage_id):
+    """Get build stage given the build_stage_id.
+
+    Args:
+      build_stage_id: The build_stage_id to get the stage.
+
+    Returns:
+      A dict prensenting the stage if the build_stage_id exists in
+      the buildStageTable; else, None.
+    """
+    return self.buildStageTable.get(build_stage_id)
+
   def GetBuildStages(self, build_id):
     """Gets build stages given the build_id"""
     return [self.buildStageTable[_id]
             for _id in self.buildStageTable
             if self.buildStageTable[_id]['build_id'] == build_id]
 
+  def GetSlaveStages(self, master_build_id, buildbucket_ids=None):
+    """Get the slave stages of the given build.
+
+    Args:
+      master_build_id: The build id (string) of the master build.
+      buildbucket_ids: A list of buildbucket ids (strings) of the slaves.
+
+    Returns:
+      A list of slave stages (in format of dicts).
+    """
+    slave_builds = []
+
+    if buildbucket_ids is None:
+      slave_builds = {b['id']: b for b in self.buildTable
+                      if b['master_build_id'] == master_build_id}
+    else:
+      slave_builds = {b['id']: b for b in self.buildTable
+                      if b['master_build_id'] == master_build_id and
+                      b['buildbucket_id'] in buildbucket_ids}
+
+    slave_stages = []
+    for _id in self.buildStageTable:
+      build_id = self.buildStageTable[_id]['build_id']
+      if build_id in slave_builds:
+        stage = self.buildStageTable[_id].copy()
+        stage['build_config'] = slave_builds[build_id]['build_config']
+        slave_stages.append(stage)
+
+    return slave_stages
+
   def GetBuildHistory(self, build_config, num_results,
                       ignore_build_id=None, start_date=None, end_date=None,
-                      starting_build_number=None, milestone_version=None):
+                      starting_build_number=None, milestone_version=None,
+                      platform_version=None):
     """Returns the build history for the given |build_config|."""
     builds = [b for b in self.buildTable
               if b['build_config'] == build_config]
     # Reverse sort as that's what's expected.
-    builds = sorted(builds[-num_results:], reverse=True)
+    builds = sorted(builds, reverse=True)
 
     # Filter results.
     if ignore_build_id is not None:
@@ -283,9 +439,32 @@ class FakeCIDBConnection(object):
                 if b['build_number'] >= starting_build_number]
     if milestone_version is not None:
       builds = [b for b in builds
-                if b['milestone_version'] == milestone_version]
+                if b.get('milestone_version') == milestone_version]
+    if platform_version is not None:
+      builds = [b for b in builds
+                if b.get('platform_version') == platform_version]
 
-    return builds
+    if num_results != -1:
+      return builds[:num_results]
+    else:
+      return builds
+
+  def GetPlatformVersions(self, build_config, num_results=-1,
+                          starting_milestone_version=None):
+    """Get the platform versions for a build_config."""
+    builds = [b for b in self.buildTable
+              if b['build_config'] == build_config]
+
+    if starting_milestone_version is not None:
+      builds = [b for b in builds if int(b.get('milestone_version')) >=
+                int(starting_milestone_version)]
+
+    versions = [b['platform_version'] for b in builds]
+
+    if num_results != -1:
+      return versions[:num_results]
+    else:
+      return versions
 
   def GetTimeToDeadline(self, build_id):
     """Gets the time remaining until deadline."""
@@ -303,3 +482,62 @@ class FakeCIDBConnection(object):
         return self._TrimStatus(row)
 
     return None
+
+  def GetBuildsFailures(self, build_ids):
+    """Gets the failure entries for all listed build_ids.
+
+    Args:
+      build_ids: list of build ids of the builds to fetch failures for.
+
+    Returns:
+      A list of failure_message_lib.StageFailure instances.
+    """
+    stage_failures = []
+    for build_id in build_ids:
+      b_dict = self.buildTable[build_id]
+      bs_table = {k: v for k, v in self.buildStageTable.iteritems()
+                  if v['build_id'] == build_id}
+
+      for f_dict in self.failureTable.values():
+        if f_dict['build_stage_id'] in bs_table:
+          bs_dict = bs_table[f_dict['build_stage_id']]
+          stage_failures.append(
+              failure_message_lib.StageFailure.GetStageFailureFromDicts(
+                  f_dict, bs_dict, b_dict))
+
+    return stage_failures
+
+  def GetHWTestResultsForBuilds(self, build_ids):
+    """Get hwTestResults for builds.
+
+    Args:
+      build_ids: A list of build_id (strings) of build.
+
+    Returns:
+      A list of hwtest_results.HWTestResult instances.
+    """
+    results = []
+    for value in self.hwTestResultTable.values():
+      if value['build_id'] in build_ids:
+        results.append(hwtest_results.HWTestResult(
+            value['id'], value['build_id'], value['test_name'],
+            value['status']))
+
+    return results
+
+  def HasFailureMsgForStage(self, build_stage_id):
+    """Determine whether a build stage has failure messages in failureTable.
+
+    Args:
+      build_stage_id: The id of the build_stage to query for.
+
+    Returns:
+      True if there're failures reported to failureTable for this build stage
+      to cidb; else, False.
+    """
+    stages = self.failureTable.values()
+    for stage in stages:
+      if stage['build_stage_id'] == build_stage_id:
+        return True
+
+    return False

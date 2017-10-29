@@ -21,6 +21,7 @@ namespace ui {
 class Event;
 
 namespace mojom {
+class WindowManagerClient;
 class WindowTree;
 }
 }
@@ -30,6 +31,8 @@ namespace aura {
 class Window;
 class WindowTreeClient;
 class WindowTreeHostMus;
+
+struct WindowTreeHostMusInitParams;
 
 // Use to access implementation details of WindowTreeClient.
 class WindowTreeClientPrivate {
@@ -49,11 +52,21 @@ class WindowTreeClientPrivate {
   // Pretends that |event| has been received from the window server.
   void CallOnWindowInputEvent(Window* window, std::unique_ptr<ui::Event> event);
 
+  // Simulates |event| matching a pointer watcher on the window server.
+  void CallOnPointerEventObserved(Window* window,
+                                  std::unique_ptr<ui::Event> event);
+
   void CallOnCaptureChanged(Window* new_capture, Window* old_capture);
+
+  void CallOnConnect();
+
+  WindowTreeHostMusInitParams CallCreateInitParamsForNewDisplay();
 
   // Sets the WindowTree and client id.
   void SetTreeAndClientId(ui::mojom::WindowTree* window_tree,
                           ClientSpecificId client_id);
+
+  void SetWindowManagerClient(ui::mojom::WindowManagerClient* client);
 
   bool HasPointerWatcher();
 

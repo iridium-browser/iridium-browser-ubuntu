@@ -4,12 +4,11 @@
 
 #include "chrome/browser/ui/webui/settings/chromeos/device_keyboard_handler.h"
 
-#include "ash/common/new_window_controller.h"
-#include "ash/common/wm_shell.h"
+#include "ash/new_window_controller.h"
+#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/values.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chromeos/chromeos_switches.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/events/devices/input_device_manager.h"
@@ -31,11 +30,16 @@ bool HasExternalKeyboard() {
 namespace chromeos {
 namespace settings {
 
-KeyboardHandler::KeyboardHandler(content::WebUI* webui)
-    : profile_(Profile::FromWebUI(webui)), observer_(this) {}
+const char KeyboardHandler::kShowKeysChangedName[] = "show-keys-changed";
 
-KeyboardHandler::~KeyboardHandler() {
+void KeyboardHandler::TestAPI::Initialize() {
+  base::ListValue args;
+  handler_->HandleInitialize(&args);
 }
+
+KeyboardHandler::KeyboardHandler() : observer_(this) {}
+
+KeyboardHandler::~KeyboardHandler() = default;
 
 void KeyboardHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
@@ -67,17 +71,20 @@ void KeyboardHandler::HandleInitialize(const base::ListValue* args) {
 
 void KeyboardHandler::HandleShowKeyboardShortcutsOverlay(
     const base::ListValue* args) const {
-  ash::WmShell::Get()->new_window_controller()->ShowKeyboardOverlay();
+  ash::Shell::Get()->new_window_controller()->ShowKeyboardOverlay();
 }
 
 void KeyboardHandler::UpdateShowKeys() {
-  const base::Value has_caps_lock(HasExternalKeyboard());
+  // kHasChromeOSKeyboard will be unset on Chromebooks that have standalone Caps
+  // Lock keys.
+  const base::Value has_caps_lock(
+      HasExternalKeyboard() ||
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kHasChromeOSKeyboard));
   const base::Value has_diamond_key(
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kHasChromeOSDiamondKey));
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("show-keys-changed"), has_caps_lock,
-                         has_diamond_key);
+  FireWebUIListener(kShowKeysChangedName, has_caps_lock, has_diamond_key);
 }
 
 }  // namespace settings

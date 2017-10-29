@@ -1,5 +1,6 @@
 {
     "dependencies": [
+        "text_utils",
         "platform"
     ],
     "scripts": [
@@ -16,14 +17,10 @@
         "StaticContentProvider.js",
         "OutputStream.js",
         "SegmentedRange.js",
-        "Text.js",
-        "TextRange.js",
-        "TextUtils.js",
         "Throttler.js",
         "Trie.js",
         "UIString.js",
         "ModuleExtensionInterfaces.js",
-        "FormatterWorkerPool.js",
         "CharacterIdMap.js"
     ]
 }

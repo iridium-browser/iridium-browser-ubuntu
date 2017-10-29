@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkAnimTimer.h"
 #include "SkCanvas.h"
 #include "SkPathMeasure.h"
@@ -102,7 +103,7 @@ protected:
             SkScalar arcLen = rad * R;
             SkPoint pos;
             if (meas.getPosTan(arcLen, &pos, nullptr)) {
-                canvas->drawLine(0, 0, pos.x(), pos.y(), measPaint);
+                canvas->drawLine({0, 0}, pos, measPaint);
             }
         }
     }

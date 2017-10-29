@@ -10,6 +10,7 @@
 
 #include "GrConfig.h"
 #include "GrGpuResource.h"
+#include "GrRenderTargetProxy.h"
 #include "SkRect.h"
 #include "SkString.h"
 #include "SkTArray.h"
@@ -80,7 +81,7 @@ public:
         fCurrentStackTrace.push_back(SkString(framename));
     }
 
-    void addOp(const GrOp*, GrGpuResource::UniqueID renderTargetID);
+    void addOp(const GrOp*, GrRenderTargetProxy::UniqueID proxyID);
 
     void opsCombined(const GrOp* consumer, const GrOp* consumed);
 
@@ -103,14 +104,14 @@ public:
     // We could just return our internal bookkeeping struct if copying the data out becomes
     // a performance issue, but until then its nice to decouple
     struct OpInfo {
-        SkRect fBounds;
-        // TODO: switch over to GrSurfaceProxy::UniqueID
-        GrGpuResource::UniqueID fRenderTargetUniqueID;
         struct Op {
-            int fClientID;
+            int    fClientID;
             SkRect fBounds;
         };
-        SkTArray<Op> fOps;
+
+        SkRect                   fBounds;
+        GrSurfaceProxy::UniqueID fProxyUniqueID;
+        SkTArray<Op>             fOps;
     };
 
     void getBoundsByClientID(SkTArray<OpInfo>* outInfo, int clientID);
@@ -136,11 +137,12 @@ private:
     typedef SkTArray<Op*> Ops;
 
     struct OpNode {
-        OpNode(const GrGpuResource::UniqueID& id) : fRenderTargetUniqueID(id) {}
+        OpNode(const GrSurfaceProxy::UniqueID& proxyID) : fProxyUniqueID(proxyID) { }
         SkString toJson() const;
+
         SkRect                         fBounds;
-        Ops fChildren;
-        const GrGpuResource::UniqueID  fRenderTargetUniqueID;
+        Ops                            fChildren;
+        const GrSurfaceProxy::UniqueID fProxyUniqueID;
     };
     typedef SkTArray<std::unique_ptr<OpNode>, true> OpList;
 
@@ -172,8 +174,8 @@ private:
 #define GR_AUDIT_TRAIL_RESET(audit_trail) \
     //GR_AUDIT_TRAIL_INVOKE_GUARD(audit_trail, fullReset);
 
-#define GR_AUDIT_TRAIL_ADD_OP(audit_trail, op, rt_id) \
-    GR_AUDIT_TRAIL_INVOKE_GUARD(audit_trail, addOp, op, rt_id);
+#define GR_AUDIT_TRAIL_ADD_OP(audit_trail, op, proxy_id) \
+    GR_AUDIT_TRAIL_INVOKE_GUARD(audit_trail, addOp, op, proxy_id);
 
 #define GR_AUDIT_TRAIL_OPS_RESULT_COMBINED(audit_trail, combineWith, op) \
     GR_AUDIT_TRAIL_INVOKE_GUARD(audit_trail, opsCombined, combineWith, op);

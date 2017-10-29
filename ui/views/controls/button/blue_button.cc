@@ -9,7 +9,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/vector2d.h"
-#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/resources/grit/views_resources.h"
 
@@ -21,7 +20,7 @@ const char BlueButton::kViewClassName[] = "views/BlueButton";
 BlueButton::BlueButton(ButtonListener* listener, const base::string16& text)
     : LabelButton(listener, text) {
   // Inherit STYLE_BUTTON insets, minimum size, alignment, etc.
-  SetStyle(STYLE_BUTTON);
+  SetStyleDeprecated(STYLE_BUTTON);
   UpdateThemedBorder();
 }
 

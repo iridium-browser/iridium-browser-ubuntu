@@ -27,17 +27,13 @@ var FACTORY_REGISTRY = (function() {
   var xhrTextFetcher = new XhrTextFetcher();
   return new FactoryRegistry(
       new XhrAppIdCheckerFactory(xhrTextFetcher),
-      new CryptoTokenApprovedOrigin(),
-      new CountdownTimerFactory(windowTimer),
-      new CryptoTokenOriginChecker(),
-      new UsbHelper(),
-      windowTimer,
+      new CryptoTokenApprovedOrigin(), new CountdownTimerFactory(windowTimer),
+      new CryptoTokenOriginChecker(), new UsbHelper(), windowTimer,
       xhrTextFetcher);
 })();
 
 var DEVICE_FACTORY_REGISTRY = new DeviceFactoryRegistry(
-    new UsbGnubbyFactory(gnubbies),
-    FACTORY_REGISTRY.getCountdownFactory(),
+    new UsbGnubbyFactory(gnubbies), FACTORY_REGISTRY.getCountdownFactory(),
     new GoogleCorpIndividualAttestation());
 
 /**
@@ -107,8 +103,8 @@ function messageHandler(request, sender, sendResponse) {
     responseCallback =
         defaultResponseCallback.bind(null, request, sendResponse);
   }
-  var closeable = handleWebPageRequest(/** @type {Object} */(request),
-      sender, responseCallback);
+  var closeable = handleWebPageRequest(
+      /** @type {Object} */ (request), sender, responseCallback);
   return closeable;
 }
 
@@ -156,24 +152,24 @@ chrome.runtime.onConnectExternal.addListener(function(port) {
  */
 function handleLogSaverMessage(request) {
   if (request === 'start') {
-    if (originalUtilFmt_) {
+    if (originalUtilFmt) {
       // We're already sending
       return false;
     }
-    originalUtilFmt_ = UTIL_fmt;
+    originalUtilFmt = UTIL_fmt;
     UTIL_fmt = function(s) {
-      var line = originalUtilFmt_(s);
+      var line = originalUtilFmt(s);
       chrome.runtime.sendMessage(LOG_SAVER_EXTENSION_ID, line);
       return line;
     };
   } else if (request === 'stop') {
-    if (originalUtilFmt_) {
-      UTIL_fmt = originalUtilFmt_;
-      originalUtilFmt_ = null;
+    if (originalUtilFmt) {
+      UTIL_fmt = originalUtilFmt;
+      originalUtilFmt = null;
     }
   }
   return false;
 }
 
 /** @private */
-var originalUtilFmt_ = null;
+var originalUtilFmt = null;

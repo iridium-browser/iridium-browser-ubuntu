@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include <utility>
 #include <vector>
 
 #include "base/memory/ptr_util.h"
@@ -32,7 +33,9 @@ DirectoryUpdateHandler::DirectoryUpdateHandler(
     : dir_(dir),
       type_(type),
       worker_(worker),
-      debug_info_emitter_(debug_info_emitter) {}
+      debug_info_emitter_(debug_info_emitter),
+      cached_gc_directive_version_(0),
+      cached_gc_directive_aged_out_day_(base::Time::FromDoubleT(0)) {}
 
 DirectoryUpdateHandler::~DirectoryUpdateHandler() {}
 
@@ -127,7 +130,7 @@ void DirectoryUpdateHandler::ApplyUpdates(StatusController* status) {
                    // We wait until the callback is executed.  We can safely use
                    // Unretained.
                    base::Unretained(this), base::Unretained(status));
-    worker_->DoWorkAndWaitUntilDone(c);
+    worker_->DoWorkAndWaitUntilDone(std::move(c));
 
     debug_info_emitter_->EmitUpdateCountersUpdate();
     debug_info_emitter_->EmitStatusCountersUpdate();
@@ -270,28 +273,12 @@ bool DirectoryUpdateHandler::IsValidProgressMarker(
 
 void DirectoryUpdateHandler::UpdateProgressMarker(
     const sync_pb::DataTypeProgressMarker& progress_marker) {
-  if (progress_marker.has_gc_directive() || !cached_gc_directive_) {
-    dir_->SetDownloadProgress(type_, progress_marker);
-  } else {
-    sync_pb::DataTypeProgressMarker merged_marker = progress_marker;
-    merged_marker.mutable_gc_directive()->CopyFrom(*cached_gc_directive_);
-    dir_->SetDownloadProgress(type_, merged_marker);
-  }
+  dir_->SetDownloadProgress(type_, progress_marker);
 }
 
 void DirectoryUpdateHandler::ExpireEntriesIfNeeded(
     syncable::ModelNeutralWriteTransaction* trans,
     const sync_pb::DataTypeProgressMarker& progress_marker) {
-  if (!cached_gc_directive_) {
-    sync_pb::DataTypeProgressMarker current_marker;
-    GetDownloadProgress(&current_marker);
-    if (current_marker.has_gc_directive()) {
-      cached_gc_directive_ =
-          base::MakeUnique<sync_pb::GarbageCollectionDirective>(
-              current_marker.gc_directive());
-    }
-  }
-
   if (!progress_marker.has_gc_directive())
     return;
 
@@ -299,15 +286,28 @@ void DirectoryUpdateHandler::ExpireEntriesIfNeeded(
       progress_marker.gc_directive();
 
   if (new_gc_directive.has_version_watermark() &&
-      (!cached_gc_directive_ ||
-       cached_gc_directive_->version_watermark() <
-           new_gc_directive.version_watermark())) {
+      (cached_gc_directive_version_ < new_gc_directive.version_watermark())) {
     ExpireEntriesByVersion(dir_, trans, type_,
                            new_gc_directive.version_watermark());
+    cached_gc_directive_version_ = new_gc_directive.version_watermark();
   }
 
-  cached_gc_directive_ =
-      base::MakeUnique<sync_pb::GarbageCollectionDirective>(new_gc_directive);
+  if (new_gc_directive.has_age_watermark_in_days()) {
+    DCHECK(new_gc_directive.age_watermark_in_days());
+    // For saving resource purpose(ex. cpu, battery), We round up garbage
+    // collection age to day, so we only run GC once a day if server did not
+    // change the |age_watermark_in_days|.
+    if (cached_gc_directive_aged_out_day_ !=
+        base::Time::Now().LocalMidnight() -
+            base::TimeDelta::FromDays(
+                new_gc_directive.age_watermark_in_days())) {
+      ExpireEntriesByAge(dir_, trans, type_,
+                         new_gc_directive.age_watermark_in_days());
+      cached_gc_directive_aged_out_day_ =
+          base::Time::Now().LocalMidnight() -
+          base::TimeDelta::FromDays(new_gc_directive.age_watermark_in_days());
+    }
+  }
 }
 
 }  // namespace syncer

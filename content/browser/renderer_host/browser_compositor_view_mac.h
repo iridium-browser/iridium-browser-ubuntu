@@ -26,12 +26,7 @@ class BrowserCompositorMacClient {
  public:
   virtual NSView* BrowserCompositorMacGetNSView() const = 0;
   virtual SkColor BrowserCompositorMacGetGutterColor(SkColor color) const = 0;
-  virtual void BrowserCompositorMacSendReclaimCompositorResources(
-      int compositor_frame_sink_id,
-      bool is_swap_ack,
-      const cc::ReturnedResourceArray& resources) = 0;
-  virtual void BrowserCompositorMacSendBeginFrame(
-      const cc::BeginFrameArgs& args) = 0;
+  virtual void BrowserCompositorMacOnBeginFrame() = 0;
 };
 
 // This class owns a DelegatedFrameHost, and will dynamically attach and
@@ -43,15 +38,14 @@ class BrowserCompositorMacClient {
 //   is visible.
 // - The RenderWidgetHostViewMac that is used to display these frames is
 //   attached to the NSView hierarchy of an NSWindow.
-class BrowserCompositorMac : public cc::BeginFrameObserver,
-                             public DelegatedFrameHostClient {
+class BrowserCompositorMac : public DelegatedFrameHostClient {
  public:
   BrowserCompositorMac(
       ui::AcceleratedWidgetMacNSView* accelerated_widget_mac_ns_view,
       BrowserCompositorMacClient* client,
       bool render_widget_host_is_hidden,
       bool ns_view_attached_to_window,
-      const cc::FrameSinkId& frame_sink_id);
+      const viz::FrameSinkId& frame_sink_id);
   ~BrowserCompositorMac() override;
 
   // These will not return nullptr until Destroy is called.
@@ -61,8 +55,11 @@ class BrowserCompositorMac : public cc::BeginFrameObserver,
   // ui::Compositor.
   ui::AcceleratedWidgetMac* GetAcceleratedWidgetMac();
 
-  void SwapCompositorFrame(uint32_t compositor_frame_sink_id,
-                           cc::CompositorFrame frame);
+  void DidCreateNewRendererCompositorFrameSink(
+      cc::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink);
+  void SubmitCompositorFrame(const viz::LocalSurfaceId& local_surface_id,
+                             cc::CompositorFrame frame);
+  void OnDidNotProduceFrame(const cc::BeginFrameAck& ack);
   void SetHasTransparentBackground(bool transparent);
   void SetDisplayColorSpace(const gfx::ColorSpace& color_space);
   void UpdateVSyncParameters(const base::TimeTicks& timebase,
@@ -103,20 +100,10 @@ class BrowserCompositorMac : public cc::BeginFrameObserver,
   SkColor DelegatedFrameHostGetGutterColor(SkColor color) const override;
   gfx::Size DelegatedFrameHostDesiredSizeInDIP() const override;
   bool DelegatedFrameCanCreateResizeLock() const override;
-  std::unique_ptr<ResizeLock> DelegatedFrameHostCreateResizeLock(
-      bool defer_compositor_lock) override;
-  void DelegatedFrameHostResizeLockWasReleased() override;
-  void DelegatedFrameHostSendReclaimCompositorResources(
-      int compositor_frame_sink_id,
-      bool is_swap_ack,
-      const cc::ReturnedResourceArray& resources) override;
-  void SetBeginFrameSource(cc::BeginFrameSource* source) override;
+  std::unique_ptr<CompositorResizeLock> DelegatedFrameHostCreateResizeLock()
+      override;
+  void OnBeginFrame() override;
   bool IsAutoResizeEnabled() const override;
-
-  // cc::BeginFrameObserver implementation.
-  void OnBeginFrame(const cc::BeginFrameArgs& args) override;
-  const cc::BeginFrameArgs& LastUsedBeginFrameArgs() const override;
-  void OnBeginFrameSourcePausedChanged(bool paused) override;
 
  private:
   // The state of |delegated_frame_host_| and |recyclable_compositor_| to
@@ -176,11 +163,8 @@ class BrowserCompositorMac : public cc::BeginFrameObserver,
   std::unique_ptr<ui::Layer> root_layer_;
 
   bool has_transparent_background_ = false;
-
-  // The begin frame source being observed.  Null if none.
-  cc::BeginFrameSource* begin_frame_source_ = nullptr;
-  cc::BeginFrameArgs last_begin_frame_args_;
-  bool needs_begin_frames_ = false;
+  cc::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink_ =
+      nullptr;
 
   base::WeakPtrFactory<BrowserCompositorMac> weak_factory_;
 };

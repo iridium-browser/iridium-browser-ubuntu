@@ -33,7 +33,7 @@ found in the LICENSE file.
 Polymer({
   is: 'tr-ui-b-radio-picker',
 
-  created: function() {
+  created() {
     this.needsInit_ = true;
     this.settingsKey_ = undefined;
     this.isReady_ = false;
@@ -44,7 +44,7 @@ Polymer({
     this.selectedKey_ = undefined;
   },
 
-  ready: function() {
+  ready() {
     this.isReady_ = true;
     this.maybeInit_();
     this.maybeRenderRadioButtons_();
@@ -55,10 +55,11 @@ Polymer({
   },
 
   set vertical(vertical) {
-    if (vertical)
+    if (vertical) {
       this.setAttribute('vertical', true);
-    else
+    } else {
       this.removeAttribute('vertical');
+    }
   },
 
   get settingsKey() {
@@ -66,17 +67,16 @@ Polymer({
   },
 
   set settingsKey(settingsKey) {
-    if (!this.needsInit_)
+    if (!this.needsInit_) {
       throw new Error('Already initialized.');
+    }
     this.settingsKey_ = settingsKey;
     this.maybeInit_();
   },
 
-  maybeInit_: function() {
-    if (!this.needsInit_)
-      return;
-    if (this.settingsKey_ === undefined)
-      return;
+  maybeInit_() {
+    if (!this.needsInit_) return;
+    if (this.settingsKey_ === undefined) return;
     this.needsInit_ = false;
     this.select(tr.b.Settings.get(this.settingsKey_));
   },
@@ -84,11 +84,12 @@ Polymer({
   set items(items) {
     this.radioButtons_ = {};
     items.forEach(function(e) {
-      if (e.key in this.radioButtons_)
+      if (e.key in this.radioButtons_) {
         throw new Error(e.key + ' already exists');
-      var radioButton = document.createElement('div');
-      var input = document.createElement('input');
-      var label = document.createElement('label');
+      }
+      const radioButton = document.createElement('div');
+      const input = document.createElement('input');
+      const label = document.createElement('label');
       input.type = 'radio';
       input.id = e.label;
       input.addEventListener('click', function() {
@@ -106,34 +107,38 @@ Polymer({
     this.maybeRenderRadioButtons_();
   },
 
-  maybeRenderRadioButtons_: function() {
-    if (!this.isReady_)
-      return;
-    if (this.radioButtons_ === undefined)
-      return;
-    for (var key in this.radioButtons_)
+  maybeRenderRadioButtons_() {
+    if (!this.isReady_) return;
+    if (this.radioButtons_ === undefined) return;
+    for (const key in this.radioButtons_) {
       Polymer.dom(this.$.container).appendChild(
           this.radioButtons_[key].parentElement);
-    if (this.selectedKey_ !== undefined)
+    }
+    if (this.selectedKey_ !== undefined) {
       this.select(this.selectedKey_);
+    }
   },
 
-  select: function(key) {
-    if (key === undefined || key === this.selectedKey_)
+  select(key) {
+    if (key === undefined || key === this.selectedKey_) {
       return;
+    }
     if (this.radioButtons_ === undefined) {
       this.selectedKey_ = key;
       return;
     }
-    if (!(key in this.radioButtons_))
+    if (!(key in this.radioButtons_)) {
       throw new Error(key + ' does not exists');
+    }
     // Unselect the previous radio, update the key & select the new one.
-    if (this.selectedKey_ !== undefined)
+    if (this.selectedKey_ !== undefined) {
       this.radioButtons_[this.selectedKey_].checked = false;
+    }
     this.selectedKey_ = key;
     tr.b.Settings.set(this.settingsKey_, this.selectedKey_);
-    if (this.selectedKey_ !== undefined)
+    if (this.selectedKey_ !== undefined) {
       this.radioButtons_[this.selectedKey_].checked = true;
+    }
 
     this.dispatchEvent(new tr.b.Event('change', false));
   },

@@ -22,16 +22,23 @@
 #ifndef CSSHelper_h
 #define CSSHelper_h
 
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
+const double kMillimetersPerCentimeter = 10;
+const double kCentimetersPerInch = 2.54;
+const double kMillimetersPerInch = 25.4;
+const double kPointsPerInch = 72;
+const double kPicasPerInch = 6;
+
 // These conversions are defined in css-values
-const double cssPixelsPerInch = 96;
-const double cssPixelsPerCentimeter = cssPixelsPerInch / 2.54;  // 2.54 cm/in
-const double cssPixelsPerMillimeter = cssPixelsPerCentimeter / 10;
-const double cssPixelsPerPoint = cssPixelsPerInch / 72;
-const double cssPixelsPerPica = cssPixelsPerInch / 6;
+const double kCssPixelsPerInch = 96;
+const double kCssPixelsPerCentimeter = kCssPixelsPerInch / kCentimetersPerInch;
+const double kCssPixelsPerMillimeter =
+    kCssPixelsPerCentimeter / kMillimetersPerCentimeter;
+const double kCssPixelsPerPoint = kCssPixelsPerInch / kPointsPerInch;
+const double kCssPixelsPerPica = kCssPixelsPerInch / kPicasPerInch;
 
 }  // namespace blink
 

@@ -4,6 +4,7 @@
 
 package org.chromium.chromecast.shell;
 
+import android.annotation.SuppressLint;
 import android.os.Build;
 
 import org.chromium.base.annotations.CalledByNative;
@@ -16,8 +17,15 @@ import org.chromium.base.annotations.JNINamespace;
 public final class CastSysInfoAndroid {
     private static final String TAG = "CastSysInfoAndroid";
 
+    @SuppressLint("HardwareIds")
     @CalledByNative
     private static String getSerialNumber() {
         return Build.SERIAL;
+    }
+
+    @SuppressLint("HardwareIds")
+    @CalledByNative
+    private static String getBoard() {
+        return Build.BOARD;
     }
 }

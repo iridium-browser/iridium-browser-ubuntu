@@ -24,28 +24,28 @@ if (is_chromeos && current_cpu != "arm") {
 
     script = "../../tools/generate_stubs/generate_stubs.py"
     sources = [
-      "va.sigs",
+      "vaapi/va.sigs",
     ]
     inputs = [
       extra_header,
     ]
     if (use_x11) {
-      sources += [ "va_x11.sigs" ]
+      sources += [ "vaapi/va_x11.sigs" ]
     }
     if (use_ozone) {
-      sources += [ "va_drm.sigs" ]
+      sources += [ "vaapi/va_drm.sigs" ]
     }
     stubs_filename_root = "va_stubs"
 
     outputs = [
-      "$target_gen_dir/$stubs_filename_root.cc",
-      "$target_gen_dir/$stubs_filename_root.h",
+      "$target_gen_dir/vaapi/$stubs_filename_root.cc",
+      "$target_gen_dir/vaapi/$stubs_filename_root.h",
     ]
     args = [
       "-i",
-      rebase_path("$target_gen_dir", root_build_dir),
+      rebase_path("$target_gen_dir/vaapi", root_build_dir),
       "-o",
-      rebase_path("$target_gen_dir", root_build_dir),
+      rebase_path("$target_gen_dir/vaapi", root_build_dir),
       "-t",
       "posix_stubs",
       "-e",
@@ -53,7 +53,7 @@ if (is_chromeos && current_cpu != "arm") {
       "-s",
       stubs_filename_root,
       "-p",
-      "media/gpu",
+      "media/gpu/vaapi",
     ]
 
     args += rebase_path(sources, root_build_dir)
@@ -66,7 +66,7 @@ if (is_chromeos && use_v4lplugin) {
 
     script = "../../tools/generate_stubs/generate_stubs.py"
     sources = [
-      "v4l2.sig",
+      "v4l2/v4l2.sig",
     ]
     inputs = [
       extra_header,
@@ -74,14 +74,14 @@ if (is_chromeos && use_v4lplugin) {
     stubs_filename_root = "v4l2_stubs"
 
     outputs = [
-      "$target_gen_dir/$stubs_filename_root.cc",
-      "$target_gen_dir/$stubs_filename_root.h",
+      "$target_gen_dir/v4l2/$stubs_filename_root.cc",
+      "$target_gen_dir/v4l2/$stubs_filename_root.h",
     ]
     args = [
       "-i",
-      rebase_path("$target_gen_dir", root_build_dir),
+      rebase_path("$target_gen_dir/v4l2", root_build_dir),
       "-o",
-      rebase_path("$target_gen_dir", root_build_dir),
+      rebase_path("$target_gen_dir/v4l2", root_build_dir),
       "-t",
       "posix_stubs",
       "-e",
@@ -89,7 +89,7 @@ if (is_chromeos && use_v4lplugin) {
       "-s",
       stubs_filename_root,
       "-p",
-      "media/gpu",
+      "media/gpu/v4l2",
     ]
 
     args += rebase_path(sources, root_build_dir)
@@ -116,6 +116,7 @@ component("gpu") {
     "//content/gpu:*",
     "//content/renderer:*",
     "//media/gpu/ipc/*",
+    "//media/mojo/*",
     ":*",
   ]
 
@@ -128,13 +129,24 @@ component("gpu") {
   defines = [ "MEDIA_GPU_IMPLEMENTATION" ]
 
   sources = [
+    "accelerated_video_decoder.h",
+    "fake_jpeg_decode_accelerator.cc",
+    "fake_jpeg_decode_accelerator.h",
     "fake_video_decode_accelerator.cc",
     "fake_video_decode_accelerator.h",
+    "gles2_decoder_helper.cc",
+    "gles2_decoder_helper.h",
     "gpu_video_accelerator_util.cc",
     "gpu_video_accelerator_util.h",
     "gpu_video_decode_accelerator_factory.cc",
     "gpu_video_decode_accelerator_factory.h",
     "gpu_video_decode_accelerator_helpers.h",
+    "gpu_video_encode_accelerator_factory.cc",
+    "gpu_video_encode_accelerator_factory.h",
+    "h264_decoder.cc",
+    "h264_decoder.h",
+    "h264_dpb.cc",
+    "h264_dpb.h",
     "shared_memory_region.cc",
     "shared_memory_region.h",
   ]
@@ -176,8 +188,16 @@ component("gpu") {
 
   if (is_android) {
     sources += [
+      "android/device_info.cc",
+      "android/device_info.h",
+      "android/promotion_hint_aggregator.h",
+      "android/promotion_hint_aggregator_impl.cc",
+      "android/promotion_hint_aggregator_impl.h",
       "android_video_decode_accelerator.cc",
       "android_video_decode_accelerator.h",
+      "android_video_surface_chooser.h",
+      "android_video_surface_chooser_impl.cc",
+      "android_video_surface_chooser_impl.h",
       "avda_codec_allocator.cc",
       "avda_codec_allocator.h",
       "avda_codec_image.cc",
@@ -187,7 +207,17 @@ component("gpu") {
       "avda_shared_state.cc",
       "avda_shared_state.h",
       "avda_state_provider.h",
+      "avda_surface_bundle.cc",
+      "avda_surface_bundle.h",
+      "content_video_view_overlay.cc",
+      "content_video_view_overlay.h",
+      "content_video_view_overlay_allocator.cc",
+      "content_video_view_overlay_allocator.h",
+      "surface_texture_gl_owner.cc",
+      "surface_texture_gl_owner.h",
     ]
+
+    deps += [ "//media/mojo:features" ]
 
     if (enable_webrtc) {
       deps += [ "//third_party/libyuv" ]
@@ -198,9 +228,17 @@ component("gpu") {
     }
 
     if (enable_media_codec_video_decoder) {
+      assert(mojo_media_host == "gpu", "MCVD requires the CDM")
       sources += [
+        "android/codec_image.cc",
+        "android/codec_image.h",
+        "android/codec_wrapper.cc",
+        "android/codec_wrapper.h",
         "android/media_codec_video_decoder.cc",
         "android/media_codec_video_decoder.h",
+        "android/video_frame_factory.h",
+        "android/video_frame_factory_impl.cc",
+        "android/video_frame_factory_impl.h",
       ]
     }
 
@@ -208,19 +246,10 @@ component("gpu") {
     # Remove this dependency after VDAs are also running as part of the mojo
     # media service. See http://crbug.com/522298
     if (mojo_media_host == "gpu") {
-      deps += [ "//media/mojo/services" ]
+      deps += [ "//media/cdm:cdm_manager" ]
     }
   }
 
-  if (is_chromeos || is_win) {
-    sources += [
-      "accelerated_video_decoder.h",
-      "h264_decoder.cc",
-      "h264_decoder.h",
-      "h264_dpb.cc",
-      "h264_dpb.h",
-    ]
-  }
   if (is_chromeos) {
     sources += [
       "vp8_decoder.cc",
@@ -245,8 +274,6 @@ component("gpu") {
         "v4l2_device.h",
         "v4l2_image_processor.cc",
         "v4l2_image_processor.h",
-        "v4l2_jpeg_decode_accelerator.cc",
-        "v4l2_jpeg_decode_accelerator.h",
         "v4l2_slice_video_decode_accelerator.cc",
         "v4l2_slice_video_decode_accelerator.h",
         "v4l2_video_decode_accelerator.cc",
@@ -258,12 +285,14 @@ component("gpu") {
         "EGL",
         "GLESv2",
       ]
-    }
-    if (current_cpu == "arm") {
-      sources += [
-        "tegra_v4l2_device.cc",
-        "tegra_v4l2_device.h",
-      ]
+      if (current_cpu == "arm") {
+        sources += [
+          "tegra_v4l2_device.cc",
+          "tegra_v4l2_device.h",
+          "v4l2_jpeg_decode_accelerator.cc",
+          "v4l2_jpeg_decode_accelerator.h",
+        ]
+      }
     }
     if (current_cpu != "arm") {
       sources += [
@@ -330,6 +359,7 @@ component("gpu") {
     deps += [
       "//third_party/angle:includes",
       "//third_party/libyuv",
+      "//ui/display",
     ]
     libs += [
       "d3d9.lib",
@@ -432,17 +462,35 @@ source_set("android_video_decode_accelerator_unittests") {
   if (is_android) {
     testonly = true
     sources = [
+      "android/fake_codec_allocator.cc",
+      "android/fake_codec_allocator.h",
+      "android/mock_device_info.cc",
+      "android/mock_device_info.h",
+      "android/promotion_hint_aggregator_impl_unittest.cc",
       "android_video_decode_accelerator_unittest.cc",
+      "android_video_surface_chooser_impl_unittest.cc",
       "avda_codec_allocator_unittest.cc",
+      "content_video_view_overlay_allocator_unittest.cc",
+      "fake_android_video_surface_chooser.cc",
+      "fake_android_video_surface_chooser.h",
+      "mock_surface_texture_gl_owner.cc",
+      "mock_surface_texture_gl_owner.h",
+      "surface_texture_gl_owner_unittest.cc",
     ]
     if (enable_media_codec_video_decoder) {
-      sources += [ "android/media_codec_video_decoder_unittest.cc" ]
+      sources += [
+        "android/codec_image_unittest.cc",
+        "android/codec_wrapper_unittest.cc",
+        "android/media_codec_video_decoder_unittest.cc",
+        "android/video_frame_factory_impl_unittest.cc",
+      ]
     }
     deps = [
       ":gpu",
       "//base/test:test_support",
       "//gpu:test_support",
-      "//media/base/android",
+      "//media",
+      "//media/base/android:test_support",
       "//testing/gmock",
       "//testing/gtest",
     ]
@@ -514,6 +562,20 @@ if (is_chromeos) {
       deps += [ "//ui/ozone" ]
     }
   }
+}
+
+source_set("unit_tests") {
+  testonly = true
+  deps = [
+    "//base",
+    "//media/base:test_support",
+    "//media/gpu",
+    "//testing/gmock",
+    "//testing/gtest",
+  ]
+  sources = [
+    "h264_decoder_unittest.cc",
+  ]
 }
 
 test("video_decode_accelerator_service_unittest") {

@@ -7,7 +7,7 @@
 #ifndef COMPONENTS_SAFE_BROWSING_DB_HIT_REPORT_H_
 #define COMPONENTS_SAFE_BROWSING_DB_HIT_REPORT_H_
 
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/safe_browsing_db/util.h"
 #include "url/gurl.h"
 
@@ -21,6 +21,7 @@ enum class ThreatSource {
   LOCAL_PVER4,            // From V4LocalDatabaseManager, protocol v4
   REMOTE,                 // From RemoteSafeBrowsingDatabaseManager
   CLIENT_SIDE_DETECTION,  // From ClientSideDetectionHost
+  PASSWORD_PROTECTION_SERVICE,  // From PasswordProtectionService
 };
 
 // Data to report about the contents of a particular threat (malware, phishing,

@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
@@ -224,7 +225,7 @@ IN_PROC_BROWSER_TEST_F(PolicyUITest, SendPolicyValues) {
   expected_values[policy::key::kRestoreOnStartupURLs] = "aaa,bbb,ccc";
   values.Set(policy::key::kHomepageLocation, policy::POLICY_LEVEL_MANDATORY,
              policy::POLICY_SCOPE_MACHINE, policy::POLICY_SOURCE_CLOUD,
-             base::MakeUnique<base::StringValue>("http://google.com"), nullptr);
+             base::MakeUnique<base::Value>("http://google.com"), nullptr);
   expected_values[policy::key::kHomepageLocation] = "http://google.com";
   values.Set(policy::key::kRestoreOnStartup, policy::POLICY_LEVEL_RECOMMENDED,
              policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
@@ -240,6 +241,12 @@ IN_PROC_BROWSER_TEST_F(PolicyUITest, SendPolicyValues) {
              policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_PLATFORM,
              base::MakeUnique<base::Value>(true), nullptr);
   expected_values[kUnknownPolicy] = "true";
+  const std::string kUnknownPolicyWithDots = "no.such.thing";
+  values.Set(kUnknownPolicyWithDots, policy::POLICY_LEVEL_MANDATORY,
+             policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_PLATFORM,
+             base::MakeUnique<base::Value>("blub"), nullptr);
+  expected_values[kUnknownPolicyWithDots] = "blub";
+
   UpdateProviderPolicy(values);
 
   // Expect that the policy table contains, in order:
@@ -272,6 +279,11 @@ IN_PROC_BROWSER_TEST_F(PolicyUITest, SendPolicyValues) {
                              "Platform",
                              values.Get(kUnknownPolicy),
                              true));
+  expected_policies.insert(
+      expected_policies.begin() + first_unset_position++,
+      PopulateExpectedPolicy(
+          kUnknownPolicyWithDots, expected_values[kUnknownPolicyWithDots],
+          "Platform", values.Get(kUnknownPolicyWithDots), true));
 
   // Retrieve the contents of the policy table from the UI and verify that it
   // matches the expectation.
@@ -280,6 +292,7 @@ IN_PROC_BROWSER_TEST_F(PolicyUITest, SendPolicyValues) {
 
 IN_PROC_BROWSER_TEST_F(PolicyUITest, ExtensionLoadAndSendPolicy) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIPolicyURL));
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temp_dir_;
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 

@@ -29,8 +29,6 @@ component("wm") {
     "core/focus_controller.cc",
     "core/focus_controller.h",
     "core/focus_rules.h",
-    "core/image_grid.cc",
-    "core/image_grid.h",
     "core/masked_window_targeter.cc",
     "core/masked_window_targeter.h",
     "core/native_cursor_manager.h",
@@ -56,18 +54,19 @@ component("wm") {
     "core/window_modality_controller.h",
     "core/window_util.cc",
     "core/window_util.h",
+    "core/wm_core_export.h",
     "core/wm_core_switches.cc",
     "core/wm_core_switches.h",
     "core/wm_state.cc",
     "core/wm_state.h",
-    "wm_export.h",
   ]
 
   configs += [ "//build/config:precompiled_headers" ]
-  defines = [ "WM_IMPLEMENTATION" ]
+  defines = [ "WM_CORE_IMPLEMENTATION" ]
 
   deps = [
     "//base",
+    "//services/ui/public/interfaces",
     "//skia",
     "//ui/aura",
     "//ui/base",
@@ -79,13 +78,22 @@ component("wm") {
     "//ui/events/devices",
     "//ui/events/platform",
     "//ui/gfx",
+    "//ui/gfx/animation",
     "//ui/gfx/geometry",
     "//ui/resources",
+    "//ui/wm/public",
   ]
 
   if (use_x11) {
     configs += [ "//build/config/linux:x11" ]
     deps += [ "//ui/events/devices/x11" ]
+  }
+
+  if (is_chromeos) {
+    sources += [
+      "core/ime_util_chromeos.cc",
+      "core/ime_util_chromeos.h",
+    ]
   }
 }
 
@@ -117,7 +125,6 @@ test("wm_unittests") {
     "core/coordinate_conversion_unittest.cc",
     "core/cursor_manager_unittest.cc",
     "core/focus_controller_unittest.cc",
-    "core/image_grid_unittest.cc",
     "core/shadow_controller_unittest.cc",
     "core/shadow_unittest.cc",
     "core/transient_window_manager_unittest.cc",
@@ -133,6 +140,7 @@ test("wm_unittests") {
     ":wm",
     "//base",
     "//base/test:test_support",
+    "//mojo/edk/system",
     "//skia",
     "//testing/gtest",
     "//ui/aura:test_support",
@@ -142,12 +150,18 @@ test("wm_unittests") {
     "//ui/events:test_support",
     "//ui/events/platform",
     "//ui/gfx",
+    "//ui/gfx/animation",
     "//ui/gfx/geometry",
     "//ui/gl:test_support",
     "//ui/resources",
+    "//ui/wm/public",
   ]
 
   data_deps = [
     "//ui/resources:ui_test_pak_data",
   ]
+
+  if (is_chromeos) {
+    sources += [ "core/ime_util_chromeos_unittest.cc" ]
+  }
 }

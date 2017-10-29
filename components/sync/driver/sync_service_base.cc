@@ -26,6 +26,9 @@ namespace {
 const base::FilePath::CharType kSyncDataFolderName[] =
     FILE_PATH_LITERAL("Sync Data");
 
+const base::FilePath::CharType kLevelDBFolderName[] =
+    FILE_PATH_LITERAL("LevelDB");
+
 EngineComponentsFactory::Switches EngineSwitchesFromCommandLine() {
   EngineComponentsFactory::Switches factory_switches = {
       EngineComponentsFactory::ENCRYPTION_KEYSTORE,
@@ -58,8 +61,6 @@ SyncServiceBase::SyncServiceBase(std::unique_ptr<SyncClient> sync_client,
       signin_(std::move(signin)),
       channel_(channel),
       base_directory_(base_directory),
-      sync_data_folder_(
-          base_directory_.Append(base::FilePath(kSyncDataFolderName))),
       debug_identifier_(debug_identifier),
       sync_prefs_(sync_client_->GetPrefService()) {
   ResetCryptoState();
@@ -80,6 +81,24 @@ void SyncServiceBase::RemoveObserver(SyncServiceObserver* observer) {
 bool SyncServiceBase::HasObserver(const SyncServiceObserver* observer) const {
   DCHECK(thread_checker_.CalledOnValidThread());
   return observers_.HasObserver(observer);
+}
+
+SigninManagerBase* SyncServiceBase::signin() const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return signin_ ? signin_->GetOriginal() : nullptr;
+}
+
+// static
+base::FilePath SyncServiceBase::FormatSyncDataPath(
+    const base::FilePath& base_directory) {
+  return base_directory.Append(base::FilePath(kSyncDataFolderName));
+}
+
+// static
+base::FilePath SyncServiceBase::FormatSharedModelTypeStorePath(
+    const base::FilePath& base_directory) {
+  return FormatSyncDataPath(base_directory)
+      .Append(base::FilePath(kLevelDBFolderName));
 }
 
 void SyncServiceBase::NotifyObservers() {

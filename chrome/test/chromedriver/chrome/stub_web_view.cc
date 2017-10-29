@@ -40,6 +40,18 @@ Status StubWebView::Reload(const Timeout* timeout) {
   return Status(kOk);
 }
 
+Status StubWebView::SendCommand(const std::string& cmd,
+                                const base::DictionaryValue& params) {
+  return Status(kOk);
+}
+
+Status StubWebView::SendCommandAndGetResult(
+        const std::string& cmd,
+        const base::DictionaryValue& params,
+        std::unique_ptr<base::Value>* value) {
+  return Status(kOk);
+}
+
 Status StubWebView::TraverseHistory(int delta, const Timeout* timeout) {
   return Status(kOk);
 }
@@ -98,12 +110,24 @@ Status StubWebView::DispatchKeyEvents(const std::list<KeyEvent>& events) {
   return Status(kOk);
 }
 
-Status StubWebView::GetCookies(std::unique_ptr<base::ListValue>* cookies) {
+Status StubWebView::GetCookies(std::unique_ptr<base::ListValue>* cookies,
+                               const std::string& current_page_url) {
   return Status(kOk);
 }
 
 Status StubWebView::DeleteCookie(const std::string& name,
                                  const std::string& url) {
+  return Status(kOk);
+}
+
+Status StubWebView::AddCookie(const std::string& name,
+                              const std::string& url,
+                              const std::string& value,
+                              const std::string& domain,
+                              const std::string& path,
+                              bool secure,
+                              bool httpOnly,
+                              double expiry) {
   return Status(kOk);
 }
 

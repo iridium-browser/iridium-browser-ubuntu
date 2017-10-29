@@ -4,13 +4,14 @@
 
 #include "chrome/browser/ui/ash/networking_config_delegate_chromeos.h"
 
-#include "ash/common/login_status.h"
-#include "ash/common/system/chromeos/network/network_detailed_view.h"
-#include "ash/common/system/chromeos/network/tray_network.h"
-#include "ash/common/system/tray/system_tray.h"
-#include "ash/common/wm_shell.h"
+#include "ash/login_status.h"
 #include "ash/root_window_controller.h"
+#include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/system/network/network_list.h"
+#include "ash/system/network/tray_network.h"
+#include "ash/system/tray/system_tray.h"
+#include "ash/system/tray/system_tray_test_api.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
@@ -52,13 +53,14 @@ IN_PROC_BROWSER_TEST_F(NetworkingConfigDelegateChromeosTest, SystemTrayItem) {
 
   // Open the system tray menu.
   ash::SystemTray* system_tray =
-      ash::WmShell::Get()->GetPrimaryRootWindowController()->GetSystemTray();
+      ash::Shell::GetPrimaryRootWindowController()->GetSystemTray();
   system_tray->ShowDefaultView(ash::BUBBLE_CREATE_NEW);
   content::RunAllPendingInMessageLoop();
   ASSERT_TRUE(system_tray->HasSystemBubble());
 
   // Show the network detail view.
-  ash::TrayNetwork* tray_network = system_tray->GetTrayNetworkForTesting();
+  ash::TrayNetwork* tray_network =
+      ash::SystemTrayTestApi(system_tray).tray_network();
   system_tray->ShowDetailedView(tray_network, 0, false, ash::BUBBLE_CREATE_NEW);
   content::RunAllPendingInMessageLoop();
   ASSERT_TRUE(tray_network->detailed());
@@ -72,7 +74,7 @@ IN_PROC_BROWSER_TEST_F(NetworkingConfigDelegateChromeosTest, SystemTrayItem) {
   EXPECT_TRUE(HasChildWithTooltip(tray_network->detailed(), expected_tooltip));
 
   // Close the system tray menu.
-  system_tray->CloseSystemBubble();
+  system_tray->CloseBubble();
   content::RunAllPendingInMessageLoop();
 }
 

@@ -14,14 +14,15 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/run_loop.h"
-#include "base/threading/thread_task_runner_handle.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
+#include "base/sequenced_task_runner.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/test/mock_download_item.h"
 #include "content/public/test/mock_download_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_utils.cc"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -78,9 +79,7 @@ class MockDownloadDetailsGetter : public DownloadDetailsGetter {
 // a DownloadManager.
 class MockDownloadMetadataManager : public DownloadMetadataManager {
  public:
-  MockDownloadMetadataManager(
-      const scoped_refptr<base::SequencedTaskRunner>& task_runner)
-      : DownloadMetadataManager(task_runner) {}
+  MockDownloadMetadataManager() = default;
 
   MOCK_METHOD1(GetDownloadManagerForBrowserContext,
                content::DownloadManager*(content::BrowserContext*));
@@ -105,11 +104,7 @@ class DownloadMetadataManagerTestBase : public ::testing::Test {
  protected:
   // Sets up a DownloadMetadataManager that will run tasks on the main test
   // thread.
-  DownloadMetadataManagerTestBase()
-      : manager_(scoped_refptr<base::SequencedTaskRunner>(
-            base::ThreadTaskRunnerHandle::Get())),
-        download_manager_(),
-        dm_observer_() {}
+  DownloadMetadataManagerTestBase() = default;
 
   // Returns the path to the test profile's DownloadMetadata file.
   base::FilePath GetMetadataPath() const {
@@ -143,7 +138,8 @@ class DownloadMetadataManagerTestBase : public ::testing::Test {
   void WriteTestMetadataFileForItem(uint32_t download_id) {
     std::string data;
     ASSERT_TRUE(GetTestMetadata(download_id)->SerializeToString(&data));
-    ASSERT_TRUE(base::WriteFile(GetMetadataPath(), data.data(), data.size()));
+    ASSERT_EQ(static_cast<int>(data.size()),
+              base::WriteFile(GetMetadataPath(), data.data(), data.size()));
   }
 
   // Writes a test DownloadMetadata file for kTestDownloadId to the test profile
@@ -163,7 +159,7 @@ class DownloadMetadataManagerTestBase : public ::testing::Test {
   }
 
   // Runs all tasks posted to the test thread's message loop.
-  void RunAllTasks() { base::RunLoop().RunUntilIdle(); }
+  void RunAllTasks() { content::RunAllBlockingPoolTasksUntilIdle(); }
 
   // Adds a DownloadManager for the test profile. The DownloadMetadataManager's
   // observer is stashed for later use. Only call once per call to
@@ -262,7 +258,7 @@ class DownloadMetadataManagerTestBase : public ::testing::Test {
 
   // The DownloadMetadataManager's content::DownloadManager::Observer. Captured
   // by download_manager_'s AddObserver action.
-  content::DownloadManager::Observer* dm_observer_;
+  content::DownloadManager::Observer* dm_observer_ = nullptr;
 };
 
 // A parameterized test that exercises GetDownloadDetails. The parameters

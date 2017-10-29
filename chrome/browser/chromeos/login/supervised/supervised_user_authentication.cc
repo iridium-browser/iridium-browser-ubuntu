@@ -10,7 +10,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_constants.h"
 #include "chrome/browser/chromeos/login/users/supervised_user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -18,7 +18,6 @@
 #include "chromeos/login/auth/key.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/browser/browser_thread.h"
 #include "crypto/hmac.h"
 #include "crypto/random.h"
 #include "crypto/symmetric_key.h"
@@ -48,9 +47,8 @@ std::string BuildRawHMACKey() {
   std::unique_ptr<crypto::SymmetricKey> key(
       crypto::SymmetricKey::GenerateRandomKey(crypto::SymmetricKey::AES,
                                               kHMACKeySizeInBits));
-  std::string raw_result, result;
-  key->GetRawKey(&raw_result);
-  base::Base64Encode(raw_result, &result);
+  std::string result;
+  base::Base64Encode(key->key(), &result);
   return result;
 }
 
@@ -178,11 +176,11 @@ void SupervisedUserAuthentication::StorePasswordData(
   owner_->GetPasswordInformation(user_id, &holder);
   const base::Value* value;
   if (password_data.GetWithoutPathExpansion(kSchemaVersion, &value))
-      holder.SetWithoutPathExpansion(kSchemaVersion, value->DeepCopy());
+    holder.SetWithoutPathExpansion(kSchemaVersion, value->CreateDeepCopy());
   if (password_data.GetWithoutPathExpansion(kSalt, &value))
-      holder.SetWithoutPathExpansion(kSalt, value->DeepCopy());
+    holder.SetWithoutPathExpansion(kSalt, value->CreateDeepCopy());
   if (password_data.GetWithoutPathExpansion(kPasswordRevision, &value))
-      holder.SetWithoutPathExpansion(kPasswordRevision, value->DeepCopy());
+    holder.SetWithoutPathExpansion(kPasswordRevision, value->CreateDeepCopy());
   owner_->SetPasswordInformation(user_id, &holder);
 }
 
@@ -288,13 +286,13 @@ void SupervisedUserAuthentication::LoadPasswordUpdateData(
       AccountId::FromUserEmail(user_id));
   base::FilePath profile_path =
       ProfileHelper::GetProfilePathByUserIdHash(user->username_hash());
-  PostTaskAndReplyWithResult(
-      content::BrowserThread::GetBlockingPool()
-          ->GetTaskRunnerWithShutdownBehavior(
-                base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN)
-          .get(),
-      FROM_HERE, base::Bind(&LoadPasswordData, profile_path),
-      base::Bind(&OnPasswordDataLoaded, success_callback, failure_callback));
+  PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+      base::BindOnce(&LoadPasswordData, profile_path),
+      base::BindOnce(&OnPasswordDataLoaded, success_callback,
+                     failure_callback));
 }
 
 std::string SupervisedUserAuthentication::BuildPasswordSignature(

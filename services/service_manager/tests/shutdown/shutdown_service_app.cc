@@ -5,8 +5,7 @@
 #include "base/macros.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/service_manager/public/c/main.h"
-#include "services/service_manager/public/cpp/interface_factory.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_runner.h"
 #include "services/service_manager/tests/shutdown/shutdown_unittest.mojom.h"
@@ -16,32 +15,31 @@ namespace {
 
 service_manager::ServiceRunner* g_app = nullptr;
 
-class ShutdownServiceApp
-    : public Service,
-      public InterfaceFactory<mojom::ShutdownTestService>,
-      public mojom::ShutdownTestService {
+class ShutdownServiceApp : public Service, public mojom::ShutdownTestService {
  public:
-  ShutdownServiceApp() {}
+  ShutdownServiceApp() {
+    registry_.AddInterface<mojom::ShutdownTestService>(
+        base::Bind(&ShutdownServiceApp::Create, base::Unretained(this)));
+  }
   ~ShutdownServiceApp() override {}
 
  private:
   // service_manager::Service:
-  bool OnConnect(const ServiceInfo& remote_info,
-                 InterfaceRegistry* registry) override {
-    registry->AddInterface<mojom::ShutdownTestService>(this);
-    return true;
-  }
-
-  // InterfaceFactory<mojom::ShutdownTestService>:
-  void Create(const Identity& remote_identity,
-              mojom::ShutdownTestServiceRequest request) override {
-    bindings_.AddBinding(this, std::move(request));
+  void OnBindInterface(const BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override {
+    registry_.BindInterface(interface_name, std::move(interface_pipe));
   }
 
   // mojom::ShutdownTestService:
   void SetClient(mojom::ShutdownTestClientPtr client) override {}
   void ShutDown() override { g_app->Quit(); }
 
+  void Create(mojom::ShutdownTestServiceRequest request) {
+    bindings_.AddBinding(this, std::move(request));
+  }
+
+  BinderRegistry registry_;
   mojo::BindingSet<mojom::ShutdownTestService> bindings_;
 
   DISALLOW_COPY_AND_ASSIGN(ShutdownServiceApp);

@@ -43,12 +43,14 @@ TString ArrayString(const TType &type);
 
 TType GetShaderVariableBasicType(const sh::ShaderVariable &var);
 
-TOperator TypeToConstructorOperator(const TType &type);
-
 bool IsBuiltinOutputVariable(TQualifier qualifier);
 bool IsBuiltinFragmentInputVariable(TQualifier qualifier);
 bool CanBeInvariantESSL1(TQualifier qualifier);
 bool CanBeInvariantESSL3OrGreater(TQualifier qualifier);
+bool IsOutputESSL(ShShaderOutput output);
+bool IsOutputGLSL(ShShaderOutput output);
+bool IsOutputHLSL(ShShaderOutput output);
+bool IsOutputVulkan(ShShaderOutput output);
 }  // namespace sh
 
 #endif  // COMPILER_TRANSLATOR_UTIL_H_

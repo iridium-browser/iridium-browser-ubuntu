@@ -16,15 +16,15 @@
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
-#include "chrome/browser/features.h"
+#include "base/time/time.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/browser_watcher/features.h"
-#include "components/browser_watcher/stability_debugging.h"
+#include "components/metrics/persistent_system_profile.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/common/content_switches.h"
 #include "media/media_features.h"
@@ -32,7 +32,11 @@
 #if defined(OS_WIN)
 #include "base/win/pe_image.h"
 #include "chrome/install_static/install_util.h"
+#include "components/browser_watcher/features.h"
 #include "components/browser_watcher/stability_data_names.h"
+#include "components/browser_watcher/stability_debugging.h"
+#include "components/browser_watcher/stability_metrics.h"
+#include "components/browser_watcher/stability_paths.h"
 #endif
 
 #if defined(OS_WIN)
@@ -66,19 +70,6 @@ void SetupStunProbeTrial() {
 }
 
 #if defined(OS_WIN)
-// DO NOT CHANGE VALUES. This is logged persistently in a histogram.
-enum StabilityDebuggingInitializationStatus {
-  INIT_SUCCESS = 0,
-  CREATE_STABILITY_DIR_FAILED = 1,
-  GET_STABILITY_FILE_PATH_FAILED = 2,
-  INIT_STATUS_MAX = 3
-};
-
-void LogStabilityDebuggingInitStatus(
-    StabilityDebuggingInitializationStatus status) {
-  UMA_HISTOGRAM_ENUMERATION("ActivityTracker.Record.InitStatus", status,
-                            INIT_STATUS_MAX);
-}
 
 // Record information about the chrome module.
 void RecordChromeModuleInfo(
@@ -115,6 +106,8 @@ void SetupStabilityDebugging() {
     return;
   }
 
+  SCOPED_UMA_HISTOGRAM_TIMER("ActivityTracker.Record.SetupTime");
+
   // TODO(bcwhite): Adjust these numbers once there is real data to show
   // just how much of an arena is necessary.
   const size_t kMemorySize = 1 << 20;  // 1 MiB
@@ -126,18 +119,18 @@ void SetupStabilityDebugging() {
   base::FilePath user_data_dir;
   if (!base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir) ||
       !base::CreateDirectory(browser_watcher::GetStabilityDir(user_data_dir))) {
-    LOG(ERROR) << "Failed to create the stability directory.";
-    LogStabilityDebuggingInitStatus(CREATE_STABILITY_DIR_FAILED);
     return;
   }
+  browser_watcher::LogStabilityRecordEvent(
+      browser_watcher::StabilityRecordEvent::kStabilityDirectoryExists);
+
   base::FilePath stability_file;
   if (!browser_watcher::GetStabilityFileForProcess(
           base::Process::Current(), user_data_dir, &stability_file)) {
-    LOG(ERROR) << "Failed to obtain stability file's path.";
-    LogStabilityDebuggingInitStatus(GET_STABILITY_FILE_PATH_FAILED);
     return;
   }
-  LogStabilityDebuggingInitStatus(INIT_SUCCESS);
+  browser_watcher::LogStabilityRecordEvent(
+      browser_watcher::StabilityRecordEvent::kGotStabilityPath);
 
   // Track code activities (such as posting task, blocking on locks, and
   // joining threads) that can cause hanging threads and general instability
@@ -149,6 +142,8 @@ void SetupStabilityDebugging() {
   base::debug::GlobalActivityTracker* global_tracker =
       base::debug::GlobalActivityTracker::Get();
   if (global_tracker) {
+    browser_watcher::LogStabilityRecordEvent(
+        browser_watcher::StabilityRecordEvent::kGotTracker);
     // Record product, version, channel, special build and platform.
     wchar_t exe_file[MAX_PATH] = {};
     CHECK(::GetModuleFileName(nullptr, exe_file, arraysize(exe_file)));
@@ -161,20 +156,41 @@ void SetupStabilityDebugging() {
                                                 &version_number, &special_build,
                                                 &channel_name);
 
-    base::debug::ActivityUserData& global_data = global_tracker->global_data();
-    global_data.SetString(browser_watcher::kStabilityProduct, product_name);
-    global_data.SetString(browser_watcher::kStabilityVersion, version_number);
-    global_data.SetString(browser_watcher::kStabilityChannel, channel_name);
-    global_data.SetString(browser_watcher::kStabilitySpecialBuild,
-                          special_build);
+    base::debug::ActivityUserData& proc_data = global_tracker->process_data();
+    proc_data.SetString(browser_watcher::kStabilityProduct, product_name);
+    proc_data.SetString(browser_watcher::kStabilityVersion, version_number);
+    proc_data.SetString(browser_watcher::kStabilityChannel, channel_name);
+    proc_data.SetString(browser_watcher::kStabilitySpecialBuild, special_build);
 #if defined(ARCH_CPU_X86)
-    global_data.SetString(browser_watcher::kStabilityPlatform, "Win32");
+    proc_data.SetString(browser_watcher::kStabilityPlatform, "Win32");
 #elif defined(ARCH_CPU_X86_64)
-    global_data.SetString(browser_watcher::kStabilityPlatform, "Win64");
+    proc_data.SetString(browser_watcher::kStabilityPlatform, "Win64");
 #endif
+    proc_data.SetInt(browser_watcher::kStabilityStartTimestamp,
+                     base::Time::Now().ToInternalValue());
 
     // Record information about chrome's module. We want this to be done early.
     RecordChromeModuleInfo(global_tracker);
+
+    // Trigger a flush of the memory mapped file to maximize the chances of
+    // having a minimal amount of content in the stability file, even if
+    // the system crashes or loses power. Note: this does not flush the file
+    // metadata nor does it wait for the changes to be flushed to disk before
+    // returning. This is an expensive operation. Run as an experiment to
+    // measure the effect on performance and collection.
+    const bool should_flush = base::GetFieldTrialParamByFeatureAsBool(
+        browser_watcher::kStabilityDebuggingFeature,
+        browser_watcher::kInitFlushParam, false);
+    if (should_flush)
+      ::FlushViewOfFile(global_tracker->allocator()->data(), 0U);
+
+    // Store a copy of the system profile in this allocator. There will be some
+    // delay before this gets populated, perhaps as much as a minute. Because
+    // of this, there is no need to flush it here.
+    metrics::GlobalPersistentSystemProfile::GetInstance()
+        ->RegisterPersistentAllocator(global_tracker->allocator());
+
+    browser_watcher::RegisterStabilityVEH();
   }
 }
 #endif  // defined(OS_WIN)
@@ -188,12 +204,6 @@ void SetupDesktopFieldTrials() {
   SetupStabilityDebugging();
   base::FeatureList::IsEnabled(features::kModuleDatabase);
 #endif  // defined(OS_WIN)
-  // Activate the experiment as early as possible to increase its visibility
-  // (e.g. the likelihood of its presence in the serialized system profile).
-  // This also needs to happen before the browser rendez-vous attempt
-  // (NotifyOtherProcessOrCreate) in PreMainMessageLoopRun so the corresponding
-  // metrics are tagged.
-  base::FeatureList::IsEnabled(features::kDesktopFastShutdown);
 }
 
 }  // namespace chrome

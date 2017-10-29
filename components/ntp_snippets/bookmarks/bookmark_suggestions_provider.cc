@@ -18,9 +18,6 @@
 #include "components/ntp_snippets/category.h"
 #include "components/ntp_snippets/content_suggestion.h"
 #include "components/ntp_snippets/features.h"
-#include "components/ntp_snippets/pref_names.h"
-#include "components/prefs/pref_registry_simple.h"
-#include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/variations/variations_associated_data.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -34,16 +31,12 @@ namespace ntp_snippets {
 namespace {
 
 const int kMaxBookmarks = 10;
-const int kMaxBookmarkAgeInDays = 42;
+const int kMaxBookmarkAgeInDays = 7;
 
 const char* kMaxBookmarksParamName = "bookmarks_max_count";
 const char* kMaxBookmarkAgeInDaysParamName = "bookmarks_max_age_in_days";
 const char* kConsiderDesktopVisitsParamName =
     "bookmarks_consider_desktop_visits";
-
-// TODO(treib,jkrcal): Remove this after M57.
-const char kDeprecatedBookmarksFirstM54StartPref[] =
-    "ntp_suggestions.bookmarks.first_M54_start";
 
 // Any bookmark created or visited after this time will be considered recent.
 // Note that bookmarks can be shown that do not meet this threshold.
@@ -64,15 +57,14 @@ int GetMaxCount() {
 bool AreDesktopVisitsConsidered() {
   return variations::GetVariationParamByFeatureAsBool(
       ntp_snippets::kBookmarkSuggestionsFeature,
-      kConsiderDesktopVisitsParamName, false);
+      kConsiderDesktopVisitsParamName, true);
 }
 
 }  // namespace
 
 BookmarkSuggestionsProvider::BookmarkSuggestionsProvider(
     ContentSuggestionsProvider::Observer* observer,
-    bookmarks::BookmarkModel* bookmark_model,
-    PrefService* pref_service)
+    bookmarks::BookmarkModel* bookmark_model)
     : ContentSuggestionsProvider(observer),
       category_status_(CategoryStatus::AVAILABLE_LOADING),
       provided_category_(
@@ -82,19 +74,12 @@ BookmarkSuggestionsProvider::BookmarkSuggestionsProvider(
       end_of_list_last_visit_date_(GetThresholdTime()),
       consider_bookmark_visits_from_desktop_(AreDesktopVisitsConsidered()) {
   observer->OnCategoryStatusChanged(this, provided_category_, category_status_);
-  pref_service->ClearPref(kDeprecatedBookmarksFirstM54StartPref);
   bookmark_model_->AddObserver(this);
   FetchBookmarks();
 }
 
 BookmarkSuggestionsProvider::~BookmarkSuggestionsProvider() {
   bookmark_model_->RemoveObserver(this);
-}
-
-// static
-void BookmarkSuggestionsProvider::RegisterProfilePrefs(
-    PrefRegistrySimple* registry) {
-  registry->RegisterInt64Pref(kDeprecatedBookmarksFirstM54StartPref, 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -110,8 +95,7 @@ CategoryInfo BookmarkSuggestionsProvider::GetCategoryInfo(Category category) {
   return CategoryInfo(
       l10n_util::GetStringUTF16(IDS_NTP_BOOKMARK_SUGGESTIONS_SECTION_HEADER),
       ContentSuggestionsCardLayout::MINIMAL_CARD,
-      /*has_fetch_action=*/false,
-      /*has_view_all_action=*/true,
+      ContentSuggestionsAdditionalAction::VIEW_ALL,
       /*show_if_empty=*/false,
       l10n_util::GetStringUTF16(IDS_NTP_BOOKMARK_SUGGESTIONS_SECTION_EMPTY));
 }
@@ -231,11 +215,11 @@ void BookmarkSuggestionsProvider::BookmarkMetaInfoChanged(
 }
 
 void BookmarkSuggestionsProvider::BookmarkNodeRemoved(
-      bookmarks::BookmarkModel* model,
-      const bookmarks::BookmarkNode* parent,
-      int old_index,
-      const bookmarks::BookmarkNode* node,
-      const std::set<GURL>& no_longer_bookmarked) {
+    bookmarks::BookmarkModel* model,
+    const bookmarks::BookmarkNode* parent,
+    int old_index,
+    const bookmarks::BookmarkNode* node,
+    const std::set<GURL>& no_longer_bookmarked) {
   base::Time time;
   if (GetLastVisitDateForNTPBookmark(
           *node, consider_bookmark_visits_from_desktop_, &time) &&

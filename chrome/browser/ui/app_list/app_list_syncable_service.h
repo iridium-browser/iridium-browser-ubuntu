@@ -24,10 +24,7 @@
 #include "components/sync/model/syncable_service.h"
 #include "components/sync/protocol/app_list_specifics.pb.h"
 
-#if defined(OS_CHROMEOS)
 class ArcAppModelBuilder;
-#endif
-
 class DriveAppProvider;
 class ExtensionAppModelBuilder;
 class Profile;
@@ -255,14 +252,21 @@ class AppListSyncableService : public syncer::SyncableService,
   // Returns true if extension service is ready.
   bool IsExtensionServiceReady() const;
 
+  // Play Store app id is changed in the app launcher and now unified with shelf
+  // id. This copies position from the legacy Play Store item in case the legacy
+  // position was modified and differs from the default position and the new
+  // position is still default. Don't remove the legacy sync item once user may
+  // use old and new versions at the same time.
+  // TODO(khmel): Remove import of legacy Play Store sync item after few
+  // releases http://crbug.com/722675.
+  void MaybeImportLegacyPlayStorePosition(syncer::SyncChangeList* change_list);
+
   Profile* profile_;
   extensions::ExtensionSystem* extension_system_;
   std::unique_ptr<AppListModel> model_;
   std::unique_ptr<ModelObserver> model_observer_;
   std::unique_ptr<ExtensionAppModelBuilder> apps_builder_;
-#if defined(OS_CHROMEOS)
   std::unique_ptr<ArcAppModelBuilder> arc_apps_builder_;
-#endif
   std::unique_ptr<syncer::SyncChangeProcessor> sync_processor_;
   std::unique_ptr<syncer::SyncErrorFactory> sync_error_handler_;
   SyncItemMap sync_items_;

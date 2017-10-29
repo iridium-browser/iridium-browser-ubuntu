@@ -8,12 +8,13 @@
 #include <memory>
 #include <utility>
 
-#include "base/strings/string_piece.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/core/spdy_utils.h"
 #include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_socket_address.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
+#include "net/quic/test_tools/quic_spdy_session_peer.h"
 #include "net/quic/test_tools/quic_stream_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/test/gtest_util.h"
@@ -22,7 +23,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::StringPiece;
 using std::string;
 using testing::_;
 using testing::AnyNumber;
@@ -43,7 +43,7 @@ class QuicSimpleServerStreamPeer : public QuicSimpleServerStream {
                              QuicHttpResponseCache* response_cache)
       : QuicSimpleServerStream(stream_id, session, response_cache) {}
 
-  ~QuicSimpleServerStreamPeer() override{};
+  ~QuicSimpleServerStreamPeer() override {}
 
   using QuicSimpleServerStream::SendResponse;
   using QuicSimpleServerStream::SendErrorResponse;
@@ -110,7 +110,7 @@ class MockQuicSimpleServerSession : public QuicSimpleServerSession {
                        QuicStreamId id,
                        QuicIOVector data,
                        QuicStreamOffset offset,
-                       bool fin,
+                       StreamSendingState state,
                        QuicReferenceCountedPointer<QuicAckListenerInterface>));
   MOCK_METHOD4(OnStreamHeaderList,
                void(QuicStreamId stream_id,
@@ -166,8 +166,7 @@ class MockQuicSimpleServerSession : public QuicSimpleServerSession {
   DISALLOW_COPY_AND_ASSIGN(MockQuicSimpleServerSession);
 };
 
-class QuicSimpleServerStreamTest
-    : public ::testing::TestWithParam<QuicVersion> {
+class QuicSimpleServerStreamTest : public QuicTestWithParam<QuicVersion> {
  public:
   QuicSimpleServerStreamTest()
       : connection_(
@@ -194,7 +193,7 @@ class QuicSimpleServerStreamTest
     header_list_.OnHeader(":method", "POST");
     header_list_.OnHeader(":version", "HTTP/1.1");
     header_list_.OnHeader("content-length", "11");
-    header_list_.OnHeaderBlockEnd(128);
+    header_list_.OnHeaderBlockEnd(128, 128);
 
     // New streams rely on having the peer's flow control receive window
     // negotiated in the config.
@@ -202,8 +201,9 @@ class QuicSimpleServerStreamTest
         kInitialStreamFlowControlWindowForTest);
     session_.config()->SetInitialSessionFlowControlWindowToSend(
         kInitialSessionFlowControlWindowForTest);
-    stream_ = new QuicSimpleServerStreamPeer(kClientDataStreamId1, &session_,
-                                             &response_cache_);
+    stream_ = new QuicSimpleServerStreamPeer(
+        QuicSpdySessionPeer::GetNthClientInitiatedStreamId(session_, 0),
+        &session_, &response_cache_);
     // Register stream_ in dynamic_stream_map_ and pass ownership to session_.
     session_.ActivateStream(QuicWrapUnique(stream_));
   }
@@ -326,9 +326,6 @@ TEST_P(QuicSimpleServerStreamTest, SendResponseWithIllegalResponseStatus) {
 
   QuicSimpleServerStreamPeer::SendResponse(stream_);
   EXPECT_FALSE(QuicStreamPeer::read_side_closed(stream_));
-  if (!FLAGS_quic_reloadable_flag_quic_always_enable_bidi_streaming) {
-    EXPECT_TRUE(stream_->reading_stopped());
-  }
   EXPECT_TRUE(stream_->write_side_closed());
 }
 
@@ -359,9 +356,6 @@ TEST_P(QuicSimpleServerStreamTest, SendResponseWithIllegalResponseStatus2) {
 
   QuicSimpleServerStreamPeer::SendResponse(stream_);
   EXPECT_FALSE(QuicStreamPeer::read_side_closed(stream_));
-  if (!FLAGS_quic_reloadable_flag_quic_always_enable_bidi_streaming) {
-    EXPECT_TRUE(stream_->reading_stopped());
-  }
   EXPECT_TRUE(stream_->write_side_closed());
 }
 
@@ -417,9 +411,6 @@ TEST_P(QuicSimpleServerStreamTest, SendResponseWithValidHeaders) {
 
   QuicSimpleServerStreamPeer::SendResponse(stream_);
   EXPECT_FALSE(QuicStreamPeer::read_side_closed(stream_));
-  if (!FLAGS_quic_reloadable_flag_quic_always_enable_bidi_streaming) {
-    EXPECT_TRUE(stream_->reading_stopped());
-  }
   EXPECT_TRUE(stream_->write_side_closed());
 }
 
@@ -446,8 +437,11 @@ TEST_P(QuicSimpleServerStreamTest, SendReponseWithPushResources) {
 
   stream_->set_fin_received(true);
   InSequence s;
-  EXPECT_CALL(session_, PromisePushResourcesMock(host + request_path, _,
-                                                 kClientDataStreamId1, _));
+  EXPECT_CALL(
+      session_,
+      PromisePushResourcesMock(
+          host + request_path, _,
+          QuicSpdySessionPeer::GetNthClientInitiatedStreamId(session_, 0), _));
   EXPECT_CALL(session_, WriteHeadersMock(stream_->id(), _, false, _, _));
   EXPECT_CALL(session_, WritevData(_, _, _, _, _, _))
       .Times(1)
@@ -500,14 +494,12 @@ TEST_P(QuicSimpleServerStreamTest, PushResponseOnServerInitiatedStream) {
       .Times(1)
       .WillOnce(Return(QuicConsumedData(kBody.size(), true)));
   server_initiated_stream->PushResponse(std::move(headers));
-  EXPECT_EQ(
-      kPath,
-      QuicSimpleServerStreamPeer::headers(server_initiated_stream)[":path"]
-          .as_string());
-  EXPECT_EQ(
-      "GET",
-      QuicSimpleServerStreamPeer::headers(server_initiated_stream)[":method"]
-          .as_string());
+  EXPECT_EQ(kPath, QuicSimpleServerStreamPeer::headers(
+                       server_initiated_stream)[":path"]
+                       .as_string());
+  EXPECT_EQ("GET", QuicSimpleServerStreamPeer::headers(
+                       server_initiated_stream)[":method"]
+                       .as_string());
 }
 
 TEST_P(QuicSimpleServerStreamTest, TestSendErrorResponse) {
@@ -523,9 +515,6 @@ TEST_P(QuicSimpleServerStreamTest, TestSendErrorResponse) {
 
   QuicSimpleServerStreamPeer::SendErrorResponse(stream_);
   EXPECT_FALSE(QuicStreamPeer::read_side_closed(stream_));
-  if (!FLAGS_quic_reloadable_flag_quic_always_enable_bidi_streaming) {
-    EXPECT_TRUE(stream_->reading_stopped());
-  }
   EXPECT_TRUE(stream_->write_side_closed());
 }
 
@@ -534,7 +523,7 @@ TEST_P(QuicSimpleServerStreamTest, InvalidMultipleContentLength) {
 
   SpdyHeaderBlock request_headers;
   // \000 is a way to write the null byte when followed by a literal digit.
-  header_list_.OnHeader("content-length", StringPiece("11\00012", 5));
+  header_list_.OnHeader("content-length", QuicStringPiece("11\00012", 5));
 
   headers_string_ = SpdyUtils::SerializeUncompressedHeaders(request_headers);
 
@@ -554,7 +543,7 @@ TEST_P(QuicSimpleServerStreamTest, InvalidLeadingNullContentLength) {
 
   SpdyHeaderBlock request_headers;
   // \000 is a way to write the null byte when followed by a literal digit.
-  header_list_.OnHeader("content-length", StringPiece("\00012", 3));
+  header_list_.OnHeader("content-length", QuicStringPiece("\00012", 3));
 
   headers_string_ = SpdyUtils::SerializeUncompressedHeaders(request_headers);
 
@@ -572,7 +561,7 @@ TEST_P(QuicSimpleServerStreamTest, InvalidLeadingNullContentLength) {
 TEST_P(QuicSimpleServerStreamTest, ValidMultipleContentLength) {
   SpdyHeaderBlock request_headers;
   // \000 is a way to write the null byte when followed by a literal digit.
-  header_list_.OnHeader("content-length", StringPiece("11\00011", 5));
+  header_list_.OnHeader("content-length", QuicStringPiece("11\00011", 5));
 
   headers_string_ = SpdyUtils::SerializeUncompressedHeaders(request_headers);
 
@@ -582,22 +571,6 @@ TEST_P(QuicSimpleServerStreamTest, ValidMultipleContentLength) {
   EXPECT_FALSE(QuicStreamPeer::read_side_closed(stream_));
   EXPECT_FALSE(stream_->reading_stopped());
   EXPECT_FALSE(stream_->write_side_closed());
-}
-
-TEST_P(QuicSimpleServerStreamTest, SendQuicRstStreamNoErrorWithEarlyResponse) {
-  if (FLAGS_quic_reloadable_flag_quic_always_enable_bidi_streaming) {
-    return;
-  }
-  InSequence s;
-  EXPECT_CALL(session_, WriteHeadersMock(stream_->id(), _, false, _, _));
-  EXPECT_CALL(session_, WritevData(_, _, _, _, _, _))
-      .Times(1)
-      .WillOnce(Return(QuicConsumedData(3, true)));
-  EXPECT_CALL(session_, SendRstStream(_, QUIC_STREAM_NO_ERROR, _)).Times(1);
-  EXPECT_FALSE(stream_->fin_received());
-  QuicSimpleServerStreamPeer::SendErrorResponse(stream_);
-  EXPECT_TRUE(stream_->reading_stopped());
-  EXPECT_TRUE(stream_->write_side_closed());
 }
 
 TEST_P(QuicSimpleServerStreamTest,
@@ -638,7 +611,7 @@ TEST_P(QuicSimpleServerStreamTest, InvalidHeadersWithFin) {
       0x54, 0x54, 0x50, 0x2f,  // TTP/
       0x31, 0x2e, 0x31,        // 1.1
   };
-  StringPiece data(arr, arraysize(arr));
+  QuicStringPiece data(arr, arraysize(arr));
   QuicStreamFrame frame(stream_->id(), true, 0, data);
   // Verify that we don't crash when we get a invalid headers in stream frame.
   stream_->OnStreamFrame(frame);

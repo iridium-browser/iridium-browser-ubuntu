@@ -4,7 +4,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
- 
+
 #ifndef SKSL_INTLITERAL
 #define SKSL_INTLITERAL
 
@@ -23,12 +23,21 @@ struct IntLiteral : public Expression {
     : INHERITED(position, kIntLiteral_Kind, type ? *type : *context.fInt_Type)
     , fValue(value) {}
 
-    virtual SkString description() const override {
+    String description() const override {
         return to_string(fValue);
     }
 
-   bool isConstant() const override {
+    bool hasSideEffects() const override {
+        return false;
+    }
+
+    bool isConstant() const override {
         return true;
+    }
+
+    bool compareConstant(const Context& context, const Expression& other) const override {
+        IntLiteral& i = (IntLiteral&) other;
+        return fValue == i.fValue;
     }
 
     const int64_t fValue;

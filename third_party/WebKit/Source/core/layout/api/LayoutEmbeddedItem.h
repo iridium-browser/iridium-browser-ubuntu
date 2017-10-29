@@ -6,39 +6,41 @@
 #define LayoutEmbeddedItem_h
 
 #include "core/layout/LayoutEmbeddedObject.h"
-#include "core/layout/api/LayoutPartItem.h"
+#include "core/layout/api/LayoutEmbeddedContentItem.h"
 
 namespace blink {
 
-class LayoutEmbeddedItem : public LayoutPartItem {
+class LayoutEmbeddedItem : public LayoutEmbeddedContentItem {
  public:
-  explicit LayoutEmbeddedItem(LayoutEmbeddedObject* layoutEmbeddedObject)
-      : LayoutPartItem(layoutEmbeddedObject) {}
+  explicit LayoutEmbeddedItem(LayoutEmbeddedObject* layout_embedded_object)
+      : LayoutEmbeddedContentItem(layout_embedded_object) {}
 
-  explicit LayoutEmbeddedItem(const LayoutItem& item) : LayoutPartItem(item) {
-    SECURITY_DCHECK(!item || item.isEmbeddedObject());
+  explicit LayoutEmbeddedItem(const LayoutItem& item)
+      : LayoutEmbeddedContentItem(item) {
+    SECURITY_DCHECK(!item || item.IsEmbeddedObject());
   }
 
-  explicit LayoutEmbeddedItem(std::nullptr_t) : LayoutPartItem(nullptr) {}
+  explicit LayoutEmbeddedItem(std::nullptr_t)
+      : LayoutEmbeddedContentItem(nullptr) {}
 
   LayoutEmbeddedItem() {}
 
-  void setPluginAvailability(
+  void SetPluginAvailability(
       LayoutEmbeddedObject::PluginAvailability availability) {
-    toEmbeddedObject()->setPluginAvailability(availability);
+    ToEmbeddedObject()->SetPluginAvailability(availability);
   }
 
-  bool showsUnavailablePluginIndicator() const {
-    return toEmbeddedObject()->showsUnavailablePluginIndicator();
+  bool ShowsUnavailablePluginIndicator() const {
+    return ToEmbeddedObject()->ShowsUnavailablePluginIndicator();
   }
 
  private:
-  LayoutEmbeddedObject* toEmbeddedObject() {
-    return toLayoutEmbeddedObject(layoutObject());
+  LayoutEmbeddedObject* ToEmbeddedObject() {
+    return ToLayoutEmbeddedObject(GetLayoutObject());
   }
 
-  const LayoutEmbeddedObject* toEmbeddedObject() const {
-    return toLayoutEmbeddedObject(layoutObject());
+  const LayoutEmbeddedObject* ToEmbeddedObject() const {
+    return ToLayoutEmbeddedObject(GetLayoutObject());
   }
 };
 

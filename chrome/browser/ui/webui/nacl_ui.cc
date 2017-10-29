@@ -19,6 +19,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -35,12 +36,10 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -320,7 +319,7 @@ void NaClDomHandler::PopulatePageInformation(base::DictionaryValue* naclInfo) {
   // Display information relevant to NaCl (non-portable.
   AddNaClInfo(list.get());
   // naclInfo will take ownership of list, and clean it up on destruction.
-  naclInfo->Set("naclInfo", list.release());
+  naclInfo->Set("naclInfo", std::move(list));
 }
 
 void NaClDomHandler::DidCheckPathAndVersion(const std::string* version,
@@ -365,8 +364,7 @@ void NaClDomHandler::MaybeRespondToPage() {
   if (!pnacl_path_validated_) {
     std::string* version_string = new std::string;
     base::PostTaskWithTraitsAndReplyWithResult(
-        FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                       base::TaskPriority::BACKGROUND),
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
         base::Bind(&CheckPathAndVersion, version_string),
         base::Bind(&NaClDomHandler::DidCheckPathAndVersion,
                    weak_ptr_factory_.GetWeakPtr(),
@@ -388,7 +386,7 @@ void NaClDomHandler::MaybeRespondToPage() {
 ///////////////////////////////////////////////////////////////////////////////
 
 NaClUI::NaClUI(content::WebUI* web_ui) : WebUIController(web_ui) {
-  content::RecordAction(UserMetricsAction("ViewAboutNaCl"));
+  base::RecordAction(UserMetricsAction("ViewAboutNaCl"));
 
   web_ui->AddMessageHandler(base::MakeUnique<NaClDomHandler>());
 

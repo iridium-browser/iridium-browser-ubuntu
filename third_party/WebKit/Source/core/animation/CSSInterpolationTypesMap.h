@@ -14,22 +14,21 @@ namespace blink {
 class CSSSyntaxDescriptor;
 class PropertyRegistry;
 
-using CSSInterpolationTypes = Vector<std::unique_ptr<CSSInterpolationType>>;
-
 class CSSInterpolationTypesMap : public InterpolationTypesMap {
  public:
   CSSInterpolationTypesMap(const PropertyRegistry* registry)
-      : m_registry(registry) {}
+      : registry_(registry) {}
 
-  const InterpolationTypes& get(const PropertyHandle&) const final;
-  size_t version() const final;
+  const InterpolationTypes& Get(const PropertyHandle&) const final;
+  size_t Version() const final;
 
-  static CSSInterpolationTypes createCSSInterpolationTypesForSyntax(
-      const AtomicString& propertyName,
-      const CSSSyntaxDescriptor&);
+  static InterpolationTypes CreateInterpolationTypesForCSSSyntax(
+      const AtomicString& property_name,
+      const CSSSyntaxDescriptor&,
+      const PropertyRegistration&);
 
  private:
-  Member<const PropertyRegistry> m_registry;
+  Member<const PropertyRegistry> registry_;
 };
 
 }  // namespace blink

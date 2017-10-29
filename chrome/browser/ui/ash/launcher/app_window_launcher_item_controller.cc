@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/ash/launcher/app_window_launcher_item_controller.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "ash/wm/window_util.h"
 #include "base/memory/ptr_util.h"
@@ -16,11 +17,8 @@
 #include "ui/wm/core/window_animations.h"
 
 AppWindowLauncherItemController::AppWindowLauncherItemController(
-    const std::string& app_id,
-    const std::string& launch_id,
-    ChromeLauncherController* controller)
-    : LauncherItemController(app_id, launch_id, controller),
-      observed_windows_(this) {}
+    const ash::ShelfID& shelf_id)
+    : ash::ShelfItemDelegate(shelf_id), observed_windows_(this) {}
 
 AppWindowLauncherItemController::~AppWindowLauncherItemController() {}
 
@@ -29,6 +27,7 @@ void AppWindowLauncherItemController::AddWindow(ui::BaseWindow* app_window) {
   aura::Window* window = app_window->GetNativeWindow();
   if (window)
     observed_windows_.Add(window);
+  UpdateShelfItemIcon();
 }
 
 AppWindowLauncherItemController::WindowList::iterator
@@ -51,8 +50,8 @@ void AppWindowLauncherItemController::RemoveWindow(ui::BaseWindow* app_window) {
     NOTREACHED();
     return;
   }
-  OnWindowRemoved(app_window);
   windows_.erase(iter);
+  UpdateShelfItemIcon();
 }
 
 ui::BaseWindow* AppWindowLauncherItemController::GetAppWindow(
@@ -67,6 +66,7 @@ void AppWindowLauncherItemController::SetActiveWindow(aura::Window* window) {
   ui::BaseWindow* app_window = GetAppWindow(window);
   if (app_window)
     last_active_window_ = app_window;
+  UpdateShelfItemIcon();
 }
 
 AppWindowLauncherItemController*
@@ -74,34 +74,34 @@ AppWindowLauncherItemController::AsAppWindowLauncherItemController() {
   return this;
 }
 
-ash::ShelfAction AppWindowLauncherItemController::ItemSelected(
-    ui::EventType event_type,
-    int event_flags,
+void AppWindowLauncherItemController::ItemSelected(
+    std::unique_ptr<ui::Event> event,
     int64_t display_id,
-    ash::ShelfLaunchSource source) {
-  if (windows_.empty())
-    return ash::SHELF_ACTION_NONE;
+    ash::ShelfLaunchSource source,
+    ItemSelectedCallback callback) {
+  if (windows_.empty()) {
+    std::move(callback).Run(ash::SHELF_ACTION_NONE, base::nullopt);
+    return;
+  }
 
   ui::BaseWindow* window_to_show =
       last_active_window_ ? last_active_window_ : windows_.front();
   // If the event was triggered by a keystroke, we try to advance to the next
   // item if the window we are trying to activate is already active.
-  if (windows_.size() >= 1 && window_to_show->IsActive() &&
-      event_type == ui::ET_KEY_RELEASED) {
-    return ActivateOrAdvanceToNextAppWindow(window_to_show);
+  ash::ShelfAction action = ash::SHELF_ACTION_NONE;
+  if (windows_.size() >= 1 && window_to_show->IsActive() && event &&
+      event->type() == ui::ET_KEY_RELEASED) {
+    action = ActivateOrAdvanceToNextAppWindow(window_to_show);
+  } else {
+    action = ShowAndActivateOrMinimize(window_to_show);
   }
 
-  return ShowAndActivateOrMinimize(window_to_show);
-}
-
-ash::ShelfAppMenuItemList AppWindowLauncherItemController::GetAppMenuItems(
-    int event_flags) {
-  // Return an empty item list to avoid showing an application menu.
-  return ash::ShelfAppMenuItemList();
+  std::move(callback).Run(
+      action, GetAppMenuItems(event ? event->flags() : ui::EF_NONE));
 }
 
 void AppWindowLauncherItemController::ExecuteCommand(uint32_t command_id,
-                                                     int event_flags) {
+                                                     int32_t event_flags) {
   // This delegate does not support showing an application menu.
   NOTIMPLEMENTED();
 }
@@ -121,6 +121,14 @@ void AppWindowLauncherItemController::ActivateIndexedApp(size_t index) {
   ShowAndActivateOrMinimize(*it);
 }
 
+ui::BaseWindow* AppWindowLauncherItemController::GetLastActiveWindow() {
+  if (last_active_window_)
+    return last_active_window_;
+  if (windows_.empty())
+    return nullptr;
+  return windows_.front();
+}
+
 void AppWindowLauncherItemController::OnWindowPropertyChanged(
     aura::Window* window,
     const void* key,
@@ -134,15 +142,17 @@ void AppWindowLauncherItemController::OnWindowPropertyChanged(
     } else {
       status = ash::STATUS_RUNNING;
     }
-    launcher_controller()->SetItemStatus(shelf_id(), status);
+    ChromeLauncherController::instance()->SetItemStatus(shelf_id(), status);
+  } else if (key == aura::client::kAppIconKey) {
+    UpdateShelfItemIcon();
   }
 }
 
 ash::ShelfAction AppWindowLauncherItemController::ShowAndActivateOrMinimize(
     ui::BaseWindow* app_window) {
   // Either show or minimize windows when shown from the launcher.
-  return launcher_controller()->ActivateWindowOrMinimizeIfActive(
-      app_window, GetAppMenuItems(0).size() == 1);
+  return ChromeLauncherController::instance()->ActivateWindowOrMinimizeIfActive(
+      app_window, GetAppMenuItems(ui::EF_NONE).size() == 1);
 }
 
 ash::ShelfAction
@@ -165,4 +175,26 @@ AppWindowLauncherItemController::ActivateOrAdvanceToNextAppWindow(
     return ShowAndActivateOrMinimize(window_to_show);
   }
   return ash::SHELF_ACTION_NONE;
+}
+
+void AppWindowLauncherItemController::UpdateShelfItemIcon() {
+  // Set the shelf item icon from the kAppIconKey property of the current
+  // (or most recently) active window. If there is no valid icon, ask
+  // ChromeLauncherController to update the icon.
+  const gfx::ImageSkia* app_icon = nullptr;
+  ui::BaseWindow* last_active_window = GetLastActiveWindow();
+  if (last_active_window && last_active_window->GetNativeWindow()) {
+    app_icon = last_active_window->GetNativeWindow()->GetProperty(
+        aura::client::kAppIconKey);
+  }
+  // TODO(khmel): Remove using image_set_by_controller
+  if (app_icon && !app_icon->isNull()) {
+    set_image_set_by_controller(true);
+    ChromeLauncherController::instance()->SetLauncherItemImage(shelf_id(),
+                                                               *app_icon);
+  } else if (image_set_by_controller()) {
+    set_image_set_by_controller(false);
+    ChromeLauncherController::instance()->UpdateLauncherItemImage(
+        shelf_id().app_id);
+  }
 }

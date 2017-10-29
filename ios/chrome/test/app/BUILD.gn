@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 source_set("test_support") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "bookmarks_test_util.h",
@@ -21,6 +22,8 @@ source_set("test_support") {
     "signin_test_util.mm",
     "stack_view_test_util.h",
     "stack_view_test_util.mm",
+    "static_html_view_test_util.h",
+    "static_html_view_test_util.mm",
     "sync_test_util.h",
     "sync_test_util.mm",
     "tab_test_util.h",
@@ -65,14 +68,16 @@ source_set("test_support") {
     "//ios/chrome/browser/ui:ui_internal",
     "//ios/chrome/browser/ui/commands",
     "//ios/chrome/browser/ui/main",
-    "//ios/chrome/browser/ui/ntp:ntp_internal",
+    "//ios/chrome/browser/ui/ntp:ntp_controller",
     "//ios/chrome/browser/ui/stack_view",
+    "//ios/chrome/browser/ui/static_content",
+    "//ios/chrome/browser/ui/tab_switcher",
     "//ios/chrome/browser/ui/tabs",
     "//ios/public/provider/chrome/browser",
     "//ios/public/provider/chrome/browser/signin:test_support",
     "//ios/testing:ios_test_support",
     "//ios/web",
-    "//ios/web:test_support",
+    "//ios/web/public/test",
     "//net",
     "//net:test_support",
     "//url",

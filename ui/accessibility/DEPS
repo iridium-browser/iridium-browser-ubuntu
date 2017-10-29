@@ -1,5 +1,8 @@
 include_rules = [
   "+third_party/iaccessible2",
+  "+third_party/skia",
+  "+ui/aura",
+  "+ui/base",
   "+ui/base/l10n",
   "+ui/base/win",
   "+ui/gfx",

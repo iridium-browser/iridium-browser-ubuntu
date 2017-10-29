@@ -13,11 +13,12 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
-#include "components/reading_list/ios/offline_url_utils.h"
-#include "components/reading_list/ios/reading_list_entry.h"
-#include "components/reading_list/ios/reading_list_model.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/thread_restrictions.h"
+#include "components/reading_list/core/offline_url_utils.h"
+#include "components/reading_list/core/reading_list_entry.h"
+#include "components/reading_list/core/reading_list_model.h"
 #include "ios/chrome/browser/reading_list/reading_list_distiller_page_factory.h"
-#include "ios/web/public/web_thread.h"
 
 namespace {
 // Status of the download when it ends, for UMA report.
@@ -140,12 +141,12 @@ void ReadingListDownloadService::SyncWithModel() {
       case ReadingListEntry::WILL_RETRY:
         unprocessed_entries.insert(url);
         break;
-      case ReadingListEntry::ERROR:
+      case ReadingListEntry::DISTILLATION_ERROR:
         break;
     }
   }
-  web::WebThread::PostTaskAndReply(
-      web::WebThread::FILE, FROM_HERE,
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&ReadingListDownloadService::CleanUpFiles,
                  base::Unretained(this), processed_directories),
       base::Bind(&ReadingListDownloadService::DownloadUnprocessedEntries,
@@ -154,6 +155,7 @@ void ReadingListDownloadService::SyncWithModel() {
 
 void ReadingListDownloadService::CleanUpFiles(
     const std::set<std::string>& processed_directories) {
+  base::ThreadRestrictions::AssertIOAllowed();
   base::FileEnumerator file_enumerator(OfflineRoot(), false,
                                        base::FileEnumerator::DIRECTORIES);
   for (base::FilePath sub_directory = file_enumerator.Next();
@@ -175,12 +177,13 @@ void ReadingListDownloadService::DownloadUnprocessedEntries(
 void ReadingListDownloadService::ScheduleDownloadEntry(const GURL& url) {
   DCHECK(reading_list_model_->loaded());
   const ReadingListEntry* entry = reading_list_model_->GetEntryByURL(url);
-  if (!entry || entry->DistilledState() == ReadingListEntry::ERROR ||
+  if (!entry ||
+      entry->DistilledState() == ReadingListEntry::DISTILLATION_ERROR ||
       entry->DistilledState() == ReadingListEntry::PROCESSED || entry->IsRead())
     return;
   GURL local_url(url);
-  web::WebThread::PostDelayedTask(
-      web::WebThread::UI, FROM_HERE,
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE,
       base::Bind(&ReadingListDownloadService::DownloadEntry,
                  weak_ptr_factory_.GetWeakPtr(), local_url),
       entry->TimeUntilNextTry());
@@ -189,7 +192,8 @@ void ReadingListDownloadService::ScheduleDownloadEntry(const GURL& url) {
 void ReadingListDownloadService::DownloadEntry(const GURL& url) {
   DCHECK(reading_list_model_->loaded());
   const ReadingListEntry* entry = reading_list_model_->GetEntryByURL(url);
-  if (!entry || entry->DistilledState() == ReadingListEntry::ERROR ||
+  if (!entry ||
+      entry->DistilledState() == ReadingListEntry::DISTILLATION_ERROR ||
       entry->DistilledState() == ReadingListEntry::PROCESSED || entry->IsRead())
     return;
 
@@ -247,10 +251,8 @@ void ReadingListDownloadService::OnDownloadEnd(
   switch (real_success_value) {
     case URLDownloader::DOWNLOAD_SUCCESS:
     case URLDownloader::DOWNLOAD_EXISTS: {
-      int64_t now =
-          (base::Time::Now() - base::Time::UnixEpoch()).InMicroseconds();
-      reading_list_model_->SetEntryDistilledInfo(url, distilled_path,
-                                                 distilled_url, size, now);
+      reading_list_model_->SetEntryDistilledInfo(
+          url, distilled_path, distilled_url, size, base::Time::Now());
 
       std::string trimmed_title = base::CollapseWhitespaceASCII(title, false);
       if (!trimmed_title.empty())
@@ -277,8 +279,8 @@ void ReadingListDownloadService::OnDownloadEnd(
       } else {
         UMA_HISTOGRAM_ENUMERATION("ReadingList.Download.Status", FAILURE,
                                   STATUS_MAX);
-        reading_list_model_->SetEntryDistilledState(url,
-                                                    ReadingListEntry::ERROR);
+        reading_list_model_->SetEntryDistilledState(
+            url, ReadingListEntry::DISTILLATION_ERROR);
       }
       break;
     }

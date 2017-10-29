@@ -240,7 +240,7 @@ TEST_P(UniformBufferTest, UniformBufferManyUpdates)
     float data[4];
 
     glBindBuffer(GL_UNIFORM_BUFFER, mUniformBuffer);
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(data), NULL, GL_DYNAMIC_DRAW);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(data), nullptr, GL_DYNAMIC_DRAW);
     glUniformBlockBinding(mProgram, mUniformBufferIndex, 0);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
 
@@ -373,17 +373,13 @@ TEST_P(UniformBufferTest, ActiveUniformNames)
     glGetProgramiv(program, GL_ACTIVE_UNIFORM_BLOCKS, &activeUniformBlocks);
     ASSERT_EQ(2, activeUniformBlocks);
 
-    GLint maxLength;
-    GLsizei length;
-    glGetProgramiv(program, GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH, &maxLength);
-    std::vector<GLchar> strBlockNameBuffer(maxLength + 1, 0);
-    glGetActiveUniformBlockName(program, 0, maxLength, &length, &strBlockNameBuffer[0]);
+    GLuint index = glGetUniformBlockIndex(program, "blockName1");
+    EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    EXPECT_EQ("blockName1", std::string(&strBlockNameBuffer[0]));
 
-    glGetActiveUniformBlockName(program, 1, maxLength, &length, &strBlockNameBuffer[0]);
+    index = glGetUniformBlockIndex(program, "blockName2[0]");
+    EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    EXPECT_EQ("blockName2[0]", std::string(&strBlockNameBuffer[0]));
 
     GLint activeUniforms;
     glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &activeUniforms);
@@ -392,18 +388,26 @@ TEST_P(UniformBufferTest, ActiveUniformNames)
 
     GLint size;
     GLenum type;
+    GLint maxLength;
+    GLsizei length;
+
     glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &maxLength);
     std::vector<GLchar> strUniformNameBuffer(maxLength + 1, 0);
-    glGetActiveUniform(program, 0, maxLength, &length, &size, &type, &strUniformNameBuffer[0]);
-
+    const GLchar *uniformNames[1];
+    uniformNames[0] = "blockName1.f1";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strUniformNameBuffer[0]);
     EXPECT_EQ(1, size);
     EXPECT_GLENUM_EQ(GL_FLOAT, type);
     EXPECT_EQ("blockName1.f1", std::string(&strUniformNameBuffer[0]));
 
-    glGetActiveUniform(program, 1, maxLength, &length, &size, &type, &strUniformNameBuffer[0]);
-
+    uniformNames[0] = "blockName2.f2";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strUniformNameBuffer[0]);
     EXPECT_EQ(1, size);
     EXPECT_GLENUM_EQ(GL_FLOAT, type);
     EXPECT_EQ("blockName2.f2", std::string(&strUniformNameBuffer[0]));
@@ -412,23 +416,6 @@ TEST_P(UniformBufferTest, ActiveUniformNames)
 // Tests active uniforms and blocks when the layout is std140, shared and packed.
 TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
 {
-    // TODO(Jiajia): Figure out why this fails on Intel on Mac.
-    // This case can pass on Intel Mac-10.11/10.12. But it fails on Intel Mac-10.10.
-    if (IsIntel() && IsOSX())
-    {
-        std::cout << "Test skipped on Intel on Mac." << std::endl;
-        return;
-    }
-
-    // This case fails on all AMD platforms (Mac, Linux, Win).
-    // TODO(zmo): This actually passes on certain AMD cards, but we don't have
-    // a way to do device specific handling yet.
-    if (IsAMD())
-    {
-        std::cout << "Test skipped on AMD." << std::endl;
-        return;
-    }
-
     const std::string &vertexShaderSource =
         "#version 300 es\n"
         "in vec2 position;\n"
@@ -481,60 +468,105 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     GLint maxLength, size;
     GLenum type;
     GLsizei length;
+    GLuint index;
+    const GLchar *uniformNames[1];
     glGetProgramiv(program.get(), GL_ACTIVE_UNIFORM_MAX_LENGTH, &maxLength);
     std::vector<GLchar> strBuffer(maxLength + 1, 0);
 
-    glGetActiveUniform(program.get(), 0, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "s0.a";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     EXPECT_EQ(1, size);
     EXPECT_EQ("s0.a", std::string(&strBuffer[0]));
 
-    glGetActiveUniform(program.get(), 1, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "s0.b[0]";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
+    ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(4, size);
     EXPECT_EQ("s0.b[0]", std::string(&strBuffer[0]));
 
-    glGetActiveUniform(program.get(), 2, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "v0";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
+    ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("v0", std::string(&strBuffer[0]));
 
-    glGetActiveUniform(program.get(), 3, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "s1[0].a";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
+    ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("s1[0].a", std::string(&strBuffer[0]));
 
-    glGetActiveUniform(program.get(), 4, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "s1[0].b[0]";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
+    ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(4, size);
     EXPECT_EQ("s1[0].b[0]", std::string(&strBuffer[0]));
 
-    glGetActiveUniform(program.get(), 5, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "s1[1].a";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
+    ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("s1[1].a", std::string(&strBuffer[0]));
 
-    glGetActiveUniform(program.get(), 6, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "s1[1].b[0]";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
+    ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(4, size);
     EXPECT_EQ("s1[1].b[0]", std::string(&strBuffer[0]));
 
-    glGetActiveUniform(program.get(), 7, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "u0";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
+    ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("u0", std::string(&strBuffer[0]));
 
-    glGetActiveUniform(program.get(), 8, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "blockName1.f1";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
+    ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("blockName1.f1", std::string(&strBuffer[0]));
 
-    glGetActiveUniform(program.get(), 9, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "blockName1.b1";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
+    ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("blockName1.b1", std::string(&strBuffer[0]));
 
-    glGetActiveUniform(program.get(), 10, maxLength, &length, &size, &type, &strBuffer[0]);
+    uniformNames[0] = "f2";
+    glGetUniformIndices(program, 1, uniformNames, &index);
+    EXPECT_NE(GL_INVALID_INDEX, index);
+    ASSERT_GL_NO_ERROR();
+    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("f2", std::string(&strBuffer[0]));
@@ -604,6 +636,193 @@ TEST_P(UniformBufferTest, VeryLargeReadback)
     glUnmapBuffer(GL_UNIFORM_BUFFER);
 }
 
+class UniformBufferTest31 : public ANGLETest
+{
+  protected:
+    UniformBufferTest31()
+    {
+        setWindowWidth(128);
+        setWindowHeight(128);
+        setConfigRedBits(8);
+        setConfigGreenBits(8);
+        setConfigBlueBits(8);
+        setConfigAlphaBits(8);
+    }
+};
+
+// Test uniform block bindings greater than GL_MAX_UNIFORM_BUFFER_BINDINGS cause compile error.
+TEST_P(UniformBufferTest31, MaxUniformBufferBindingsExceeded)
+{
+    GLint maxUniformBufferBindings;
+    glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS, &maxUniformBufferBindings);
+    std::string source =
+        "#version 310 es\n"
+        "in vec4 position;\n"
+        "layout(binding = ";
+    std::stringstream ss;
+    ss << maxUniformBufferBindings;
+    source = source + ss.str() +
+             ") uniform uni {\n"
+             "    vec4 color;\n"
+             "};\n"
+             "void main()\n"
+             "{\n"
+             "    gl_Position = position;\n"
+             "}";
+    GLuint shader = CompileShader(GL_VERTEX_SHADER, source);
+    EXPECT_EQ(0u, shader);
+}
+
+// Test uniform block bindings specified by layout in shader work properly.
+TEST_P(UniformBufferTest31, UniformBufferBindings)
+{
+    const std::string &vertexShaderSource =
+        "#version 310 es\n"
+        "in vec4 position;\n"
+        "void main()\n"
+        "{\n"
+        "    gl_Position = position;\n"
+        "}";
+    const std::string &fragmentShaderSource =
+        "#version 310 es\n"
+        "precision highp float;\n"
+        "layout(binding = 2) uniform uni {\n"
+        "    vec4 color;\n"
+        "};\n"
+        "out vec4 fragColor;\n"
+        "void main()\n"
+        "{"
+        "    fragColor = color;\n"
+        "}";
+
+    ANGLE_GL_PROGRAM(program, vertexShaderSource, fragmentShaderSource);
+    GLuint uniformBufferIndex = glGetUniformBlockIndex(program, "uni");
+    ASSERT_NE(GL_INVALID_INDEX, uniformBufferIndex);
+    GLBuffer uniformBuffer;
+
+    int px = getWindowWidth() / 2;
+    int py = getWindowHeight() / 2;
+
+    ASSERT_GL_NO_ERROR();
+
+    // Let's create a buffer which contains one vec4.
+    GLuint vec4Size = 4 * sizeof(float);
+    std::vector<char> v(vec4Size);
+    float *first = reinterpret_cast<float *>(v.data());
+
+    first[0] = 10.f / 255.f;
+    first[1] = 20.f / 255.f;
+    first[2] = 30.f / 255.f;
+    first[3] = 40.f / 255.f;
+
+    glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer.get());
+    glBufferData(GL_UNIFORM_BUFFER, vec4Size, v.data(), GL_STATIC_DRAW);
+
+    EXPECT_GL_NO_ERROR();
+
+    glBindBufferBase(GL_UNIFORM_BUFFER, 2, uniformBuffer.get());
+    drawQuad(program, "position", 0.5f);
+    EXPECT_GL_NO_ERROR();
+    EXPECT_PIXEL_EQ(px, py, 10, 20, 30, 40);
+
+    // Clear the framebuffer
+    glClearColor(0.0, 0.0, 0.0, 0.0);
+    glClear(GL_COLOR_BUFFER_BIT);
+    EXPECT_PIXEL_EQ(px, py, 0, 0, 0, 0);
+
+    // Try to bind the buffer to another binding point
+    glUniformBlockBinding(program, uniformBufferIndex, 5);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 5, uniformBuffer.get());
+    drawQuad(program, "position", 0.5f);
+    EXPECT_GL_NO_ERROR();
+    EXPECT_PIXEL_EQ(px, py, 10, 20, 30, 40);
+}
+
+// Test uniform blocks used as instanced array take next binding point for each subsequent element.
+TEST_P(UniformBufferTest31, ConsecutiveBindingsForBlockArray)
+{
+    const std::string &vertexShaderSource =
+        "#version 310 es\n"
+        "in vec4 position;\n"
+        "void main()\n"
+        "{\n"
+        "    gl_Position = position;\n"
+        "}";
+    const std::string &fragmentShaderSource =
+        "#version 310 es\n"
+        "precision highp float;\n"
+        "layout(binding = 2) uniform uni {\n"
+        "    vec4 color;\n"
+        "} blocks[2];\n"
+        "out vec4 fragColor;\n"
+        "void main()\n"
+        "{\n"
+        "    fragColor = blocks[0].color + blocks[1].color;\n"
+        "}";
+
+    ANGLE_GL_PROGRAM(program, vertexShaderSource, fragmentShaderSource);
+    std::array<GLBuffer, 2> uniformBuffers;
+
+    int px = getWindowWidth() / 2;
+    int py = getWindowHeight() / 2;
+
+    ASSERT_GL_NO_ERROR();
+
+    // Let's create a buffer which contains one vec4.
+    GLuint vec4Size = 4 * sizeof(float);
+    std::vector<char> v(vec4Size);
+    float *first = reinterpret_cast<float *>(v.data());
+
+    first[0] = 10.f / 255.f;
+    first[1] = 20.f / 255.f;
+    first[2] = 30.f / 255.f;
+    first[3] = 40.f / 255.f;
+
+    glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffers[0].get());
+    glBufferData(GL_UNIFORM_BUFFER, vec4Size, v.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+    glBindBufferBase(GL_UNIFORM_BUFFER, 2, uniformBuffers[0].get());
+    ASSERT_GL_NO_ERROR();
+    glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffers[1].get());
+    glBufferData(GL_UNIFORM_BUFFER, vec4Size, v.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+    glBindBufferBase(GL_UNIFORM_BUFFER, 3, uniformBuffers[1].get());
+
+    drawQuad(program, "position", 0.5f);
+    EXPECT_GL_NO_ERROR();
+    EXPECT_PIXEL_EQ(px, py, 20, 40, 60, 80);
+}
+
+// Test the layout qualifier binding must be both specified(ESSL 3.10.4 section 9.2).
+TEST_P(UniformBufferTest31, BindingMustBeBothSpecified)
+{
+    const std::string &vertexShaderSource =
+        "#version 310 es\n"
+        "in vec4 position;\n"
+        "uniform uni\n"
+        "{\n"
+        "    vec4 color;\n"
+        "} block;\n"
+        "void main()\n"
+        "{\n"
+        "    gl_Position = position + block.color;\n"
+        "}";
+    const std::string &fragmentShaderSource =
+        "#version 310 es\n"
+        "precision highp float;\n"
+        "layout(binding = 0) uniform uni\n"
+        "{\n"
+        "    vec4 color;\n"
+        "} block;\n"
+        "out vec4 fragColor;\n"
+        "void main()\n"
+        "{\n"
+        "    fragColor = block.color;\n"
+        "}";
+    GLuint program = CompileProgram(vertexShaderSource, fragmentShaderSource);
+    ASSERT_EQ(0u, program);
+}
+
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
 ANGLE_INSTANTIATE_TEST(UniformBufferTest,
                        ES3_D3D11(),
@@ -611,5 +830,6 @@ ANGLE_INSTANTIATE_TEST(UniformBufferTest,
                        ES3_D3D11_FL11_1_REFERENCE(),
                        ES3_OPENGL(),
                        ES3_OPENGLES());
+ANGLE_INSTANTIATE_TEST(UniformBufferTest31, ES31_D3D11(), ES31_OPENGL(), ES31_OPENGLES());
 
 } // namespace

@@ -15,6 +15,7 @@ void ShutdownQuicTestServer();
 
 int GetQuicTestServerPort();
 
+extern const char kTestServerDomain[];
 extern const char kTestServerHost[];
 extern const char kTestServerUrl[];
 
@@ -28,6 +29,13 @@ extern const char kHelloHeaderValue[];
 
 extern const char kHelloTrailerName[];
 extern const char kHelloTrailerValue[];
+
+// Simple Url returns response without HTTP/2 trailers.
+extern const char kTestServerSimpleUrl[];
+extern const char kSimpleBodyValue[];
+extern const char kSimpleStatus[];
+extern const char kSimpleHeaderName[];
+extern const char kSimpleHeaderValue[];
 
 }  // namespace grpc_support
 

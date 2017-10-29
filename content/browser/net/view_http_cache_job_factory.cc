@@ -57,8 +57,7 @@ class ViewHttpCacheJob : public net::URLRequestJob {
    public:
     Core()
         : data_offset_(0),
-          callback_(base::Bind(&Core::OnIOComplete, this)) {
-    }
+          callback_(base::Bind(&Core::OnIOComplete, base::Unretained(this))) {}
 
     int Start(const net::URLRequest& request, const base::Closure& callback);
 
@@ -184,9 +183,9 @@ void ViewHttpCacheJob::Core::OnIOComplete(int result) {
   if (!user_callback_.is_null())
     user_callback_.Run();
 
-  // We may be holding the last reference to this job. Do not access |this|
-  // after Release().
-  Release();  // Acquired on Start().
+  // We may be holding the last reference to this job. If it's deleted
+  // synchronously then ViewCacheHelper would have a UaF.
+  base::ThreadTaskRunnerHandle::Get()->ReleaseSoon(FROM_HERE, this);
 }
 
 }  // namespace.

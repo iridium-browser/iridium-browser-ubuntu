@@ -6,9 +6,8 @@
 
 #include <memory>
 
-#include "ash/common/wm/window_state.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/window_state.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
@@ -28,7 +27,7 @@ namespace {
 const char kTestAccount1[] = "user1@test.com";
 const char kTestAccount2[] = "user2@test.com";
 
-class WallpaperPrivateApiUnittest : public ash::test::AshTestBase {
+class WallpaperPrivateApiUnittest : public ash::AshTestBase {
  public:
   WallpaperPrivateApiUnittest()
       : fake_user_manager_(new FakeChromeUserManager()),

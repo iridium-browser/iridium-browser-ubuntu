@@ -4,6 +4,7 @@
 
 import unittest
 
+from telemetry.core import platform as platform_module
 from telemetry.internal import story_runner
 from telemetry.page import page
 from telemetry.page import legacy_page_test
@@ -30,6 +31,7 @@ class SharedPageStateTests(unittest.TestCase):
 
   def setUp(self):
     self.options = fakes.CreateBrowserFinderOptions()
+    self.options.pause = None
     self.options.use_live_sites = False
     self.options.output_formats = ['none']
     self.options.suppress_gtest_report = True
@@ -70,7 +72,8 @@ class SharedPageStateTests(unittest.TestCase):
       self, shared_page_state_class, expected_user_agent):
     story = page.Page(
         'http://www.google.com',
-        shared_page_state_class=shared_page_state_class)
+        shared_page_state_class=shared_page_state_class,
+        name='Google')
     test = DummyTest()
     story_set = story_module.StorySet()
     story_set.AddStory(story)
@@ -82,8 +85,12 @@ class SharedPageStateTests(unittest.TestCase):
   def testPageStatesUserAgentType(self):
     self.assertUserAgentSetCorrectly(
         shared_page_state.SharedMobilePageState, 'mobile')
-    self.assertUserAgentSetCorrectly(
-        shared_page_state.SharedDesktopPageState, 'desktop')
+    if platform_module.GetHostPlatform().GetOSName() == 'chromeos':
+      self.assertUserAgentSetCorrectly(
+          shared_page_state.SharedDesktopPageState, 'chromeos')
+    else:
+      self.assertUserAgentSetCorrectly(
+          shared_page_state.SharedDesktopPageState, 'desktop')
     self.assertUserAgentSetCorrectly(
         shared_page_state.SharedTabletPageState, 'tablet')
     self.assertUserAgentSetCorrectly(
@@ -95,13 +102,16 @@ class SharedPageStateTests(unittest.TestCase):
     story_set = story_module.StorySet()
     google_page = page.Page(
         'http://www.google.com',
-        startup_url='http://www.google.com', page_set=story_set)
+        startup_url='http://www.google.com', page_set=story_set,
+        name='google')
     example_page = page.Page(
         'https://www.example.com',
-        startup_url='https://www.example.com', page_set=story_set)
+        startup_url='https://www.example.com', page_set=story_set,
+        name='example')
     gmail_page = page.Page(
         'https://www.gmail.com',
-        startup_url='https://www.gmail.com', page_set=story_set)
+        startup_url='https://www.gmail.com', page_set=story_set,
+        name='gmail')
 
     for p in (google_page, example_page, gmail_page):
       story_set.AddStory(p)

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/android/trace_event_binding.h"
-
 #include <jni.h>
 
 #include <set>
@@ -121,8 +119,12 @@ static void End(JNIEnv* env,
   }
 }
 
-static void BeginToplevel(JNIEnv* env, const JavaParamRef<jclass>& clazz) {
-  TRACE_EVENT_BEGIN0(kToplevelCategory, kLooperDispatchMessage);
+static void BeginToplevel(JNIEnv* env,
+                          const JavaParamRef<jclass>& clazz,
+                          const JavaParamRef<jstring>& jtarget) {
+  std::string target = ConvertJavaStringToUTF8(env, jtarget);
+  TRACE_EVENT_BEGIN1(kToplevelCategory, kLooperDispatchMessage, "target",
+                     target);
 }
 
 static void EndToplevel(JNIEnv* env, const JavaParamRef<jclass>& clazz) {
@@ -143,10 +145,6 @@ static void FinishAsync(JNIEnv* env,
                         jlong jid) {
   TraceEventDataConverter converter(env, jname, nullptr);
   TRACE_EVENT_COPY_ASYNC_END0(kJavaCategory, converter.name(), jid);
-}
-
-bool RegisterTraceEvent(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace android

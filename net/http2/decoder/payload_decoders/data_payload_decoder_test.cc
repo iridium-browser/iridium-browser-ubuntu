@@ -6,16 +6,15 @@
 
 #include <stddef.h>
 
-#include <string>
-
 #include "base/logging.h"
-#include "net/http2/decoder/frame_parts.h"
-#include "net/http2/decoder/frame_parts_collector.h"
 #include "net/http2/decoder/http2_frame_decoder_listener.h"
 #include "net/http2/decoder/payload_decoders/payload_decoder_base_test_util.h"
 #include "net/http2/http2_constants.h"
 #include "net/http2/http2_structures.h"
 #include "net/http2/http2_structures_test_util.h"
+#include "net/http2/platform/api/http2_string.h"
+#include "net/http2/test_tools/frame_parts.h"
+#include "net/http2/test_tools/frame_parts_collector.h"
 #include "net/http2/tools/failure.h"
 #include "net/http2/tools/http2_frame_builder.h"
 #include "net/http2/tools/http2_random.h"
@@ -23,7 +22,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::AssertionResult;
-using std::string;
 
 namespace net {
 namespace test {
@@ -37,7 +35,7 @@ class DataPayloadDecoderPeer {
   // Returns the mask of flags that affect the decoding of the payload (i.e.
   // flags that that indicate the presence of certain fields or padding).
   static constexpr uint8_t FlagsAffectingPayloadDecoding() {
-    return Http2FrameFlag::FLAG_PADDED;
+    return Http2FrameFlag::PADDED;
   }
 
   static void Randomize(DataPayloadDecoder* p, RandomBase* rng) {
@@ -91,7 +89,7 @@ class DataPayloadDecoderTest
     Reset();
     uint8_t flags = RandFlags();
 
-    string data_payload = Random().RandString(data_size);
+    Http2String data_payload = Random().RandString(data_size);
     frame_builder_.Append(data_payload);
     MaybeAppendTrailingPadding();
 

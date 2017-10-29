@@ -33,7 +33,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/resources/grit/ui_resources.h"
 
 using content::NativeWebKeyboardEvent;
 
@@ -303,6 +302,8 @@ const int kMaxCharacters = 4000;
     // the list above.
     content::RenderViewHost* render_view_host =
         web_contents->GetRenderViewHost();
+
+    // TODO(tdresser): get the hardware timestamp from the NSEvent.
     render_view_host->GetWidget()->ForwardKeyboardEvent(
         NativeWebKeyboardEvent(event));
     return YES;

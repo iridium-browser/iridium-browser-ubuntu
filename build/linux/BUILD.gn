@@ -29,40 +29,15 @@ if (use_gio) {
     # GYP build.
     #ignore_libs = true  # Loader generated below.
   }
-
-  deps = [
-    "//build/linux/libgio",
-  ]
 }
 
 # Looking for libspeechd? Use //third_party/speech-dispatcher
 
-group("fontconfig") {
-  if (is_chromecast) {
-    # Chromecast platform does not provide fontconfig
-    public_deps = [
-      "//third_party/fontconfig",
-    ]
-  } else {
-    public_configs = [ "//build/config/linux:fontconfig" ]
-  }
-}
-
 if (!is_chromecast) {
-  pkg_config("freetype2_config") {
+  # Only provided for distributions which prefer to keep linking to FreeType on
+  # the system, use with caution,for details see build/config/freetype/BUILD.gn.
+  pkg_config("freetype_from_pkgconfig") {
     visibility = [ ":freetype2" ]
     packages = [ "freetype2" ]
-  }
-}
-
-group("freetype2") {
-  if (is_chromecast) {
-    # Chromecast platform doesn't provide freetype, so use Chromium's.
-    # The version in freetype-android is unmodified from freetype2 upstream.
-    public_deps = [
-      "//third_party/freetype-android:freetype",
-    ]
-  } else {
-    public_configs = [ ":freetype2_config" ]
   }
 }

@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <algorithm>
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -379,7 +380,7 @@ template <size_t N>
 class EqualsFramesMatcher : public ::testing::MatcherInterface<
                                 std::vector<std::unique_ptr<WebSocketFrame>>*> {
  public:
-  EqualsFramesMatcher(const InitFrame (*expect_frames)[N])
+  explicit EqualsFramesMatcher(const InitFrame (*expect_frames)[N])
       : expect_frames_(expect_frames) {}
 
   virtual bool MatchAndExplain(
@@ -2540,6 +2541,39 @@ TEST_F(WebSocketChannelFlowControlTest, CloseFrameShouldNotOvertakeDataFrames) {
   checkpoint.Call(3);
   ASSERT_EQ(CHANNEL_ALIVE, channel_->SendFlowControl(6));
   checkpoint.Call(4);
+}
+
+// SendFlowControl calls should not trigger multiple close respond frames.
+TEST_F(WebSocketChannelFlowControlTest, DoNotSendMultipleCloseRespondFrames) {
+  std::unique_ptr<ReadableFakeWebSocketStream> stream(
+      new ReadableFakeWebSocketStream);
+  static constexpr InitFrame frames[] = {
+      {FINAL_FRAME, WebSocketFrameHeader::kOpCodeText, NOT_MASKED,
+       "FIRST SECOND"},
+      {FINAL_FRAME, WebSocketFrameHeader::kOpCodeClose, NOT_MASKED,
+       CLOSE_DATA(NORMAL_CLOSURE, "GOOD BYE")},
+  };
+  stream->PrepareReadFrames(ReadableFakeWebSocketStream::SYNC, OK, frames);
+  set_stream(std::move(stream));
+  Checkpoint checkpoint;
+  InSequence s;
+  EXPECT_CALL(*event_interface_, OnAddChannelResponse(_, _));
+  EXPECT_CALL(*event_interface_, OnFlowControl(_));
+  EXPECT_CALL(*event_interface_,
+              OnDataFrameVector(false, WebSocketFrameHeader::kOpCodeText,
+                                AsVector("FIRST ")));
+  EXPECT_CALL(checkpoint, Call(1));
+  EXPECT_CALL(*event_interface_,
+              OnDataFrameVector(true, WebSocketFrameHeader::kOpCodeContinuation,
+                                AsVector("SECOND")));
+  EXPECT_CALL(*event_interface_, OnClosingHandshake());
+  EXPECT_CALL(checkpoint, Call(2));
+
+  CreateChannelAndConnectWithQuota(6);
+  checkpoint.Call(1);
+  ASSERT_EQ(CHANNEL_ALIVE, channel_->SendFlowControl(6));
+  checkpoint.Call(2);
+  ASSERT_EQ(CHANNEL_ALIVE, channel_->SendFlowControl(6));
 }
 
 // RFC6455 5.1 "a client MUST mask all frames that it sends to the server".

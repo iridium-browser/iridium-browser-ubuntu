@@ -119,7 +119,7 @@ SourceBufferState::SourceBufferState(
     std::unique_ptr<StreamParser> stream_parser,
     std::unique_ptr<FrameProcessor> frame_processor,
     const CreateDemuxerStreamCB& create_demuxer_stream_cb,
-    const scoped_refptr<MediaLog>& media_log)
+    MediaLog* media_log)
     : create_demuxer_stream_cb_(create_demuxer_stream_cb),
       timestamp_offset_during_append_(NULL),
       parsing_media_segment_(false),
@@ -197,6 +197,13 @@ void SourceBufferState::SetTracksWatcher(
   init_segment_received_cb_ = tracks_updated_cb;
 }
 
+void SourceBufferState::SetParseWarningCallback(
+    const SourceBufferParseWarningCB& parse_warning_cb) {
+  // Give the callback to |frame_processor_|; none of these warnings are
+  // currently emitted elsewhere.
+  frame_processor_->SetParseWarningCallback(parse_warning_cb);
+}
+
 bool SourceBufferState::Append(const uint8_t* data,
                                size_t length,
                                TimeDelta append_window_start,
@@ -256,7 +263,7 @@ void SourceBufferState::Remove(TimeDelta start,
   }
 }
 
-bool SourceBufferState::EvictCodedFrames(DecodeTimestamp media_time,
+bool SourceBufferState::EvictCodedFrames(base::TimeDelta media_time,
                                          size_t newDataSize) {
   size_t total_buffered_size = 0;
   for (const auto& it : audio_streams_)

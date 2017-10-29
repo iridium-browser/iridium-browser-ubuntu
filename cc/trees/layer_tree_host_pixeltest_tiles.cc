@@ -7,13 +7,11 @@
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/output/copy_output_request.h"
-#include "cc/paint/paint_canvas.h"
+#include "cc/paint/display_item_list.h"
 #include "cc/paint/paint_flags.h"
-#include "cc/paint/paint_recorder.h"
-#include "cc/playback/display_item_list.h"
-#include "cc/playback/drawing_display_item.h"
+#include "cc/paint/paint_op_buffer.h"
 #include "cc/test/layer_tree_pixel_test.h"
-#include "cc/test/test_compositor_frame_sink.h"
+#include "components/viz/test/test_layer_tree_frame_sink.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 
 #if !defined(OS_ANDROID)
@@ -111,9 +109,8 @@ class BlueYellowClient : public ContentLayerClient {
       PaintingControlSetting painting_status) override {
     auto display_list = make_scoped_refptr(new DisplayItemList);
 
-    PaintRecorder recorder;
-    PaintCanvas* canvas =
-        recorder.beginRecording(gfx::RectToSkRect(gfx::Rect(size_)));
+    PaintOpBuffer* buffer = display_list->StartPaint();
+
     gfx::Rect top(0, 0, size_.width(), size_.height() / 2);
     gfx::Rect bottom(0, size_.height() / 2, size_.width(), size_.height() / 2);
 
@@ -124,12 +121,11 @@ class BlueYellowClient : public ContentLayerClient {
     flags.setStyle(PaintFlags::kFill_Style);
 
     flags.setColor(SK_ColorBLUE);
-    canvas->drawRect(gfx::RectToSkRect(blue_rect), flags);
+    buffer->push<DrawRectOp>(gfx::RectToSkRect(blue_rect), flags);
     flags.setColor(SK_ColorYELLOW);
-    canvas->drawRect(gfx::RectToSkRect(yellow_rect), flags);
+    buffer->push<DrawRectOp>(gfx::RectToSkRect(yellow_rect), flags);
 
-    display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(
-        PaintableRegion(), recorder.finishRecordingAsPicture());
+    display_list->EndPaintOfUnpaired(PaintableRegion());
     display_list->Finalize();
     return display_list;
   }
@@ -157,11 +153,17 @@ class LayerTreeHostTilesTestPartialInvalidation
   void DidCommitAndDrawFrame() override {
     switch (layer_tree_host()->SourceFrameNumber()) {
       case 1:
-        // We have done one frame, so the layer's content has been rastered.
-        // Now we change the picture behind it to record something completely
-        // different, but we give a smaller invalidation rect. The layer should
-        // only re-raster the stuff in the rect. If it doesn't do partial raster
-        // it would re-raster the whole thing instead.
+        // We have done one frame, but the resource may not be available for
+        // partial raster yet. Force a second frame.
+        picture_layer_->SetNeedsDisplayRect(gfx::Rect(50, 50, 100, 100));
+        break;
+      case 2:
+        // We have done two frames, so the layer's content has been rastered
+        // twice and the first frame's resource is available for partial
+        // raster. Now we change the picture behind it to record something
+        // completely different, but we give a smaller invalidation rect. The
+        // layer should only re-raster the stuff in the rect. If it doesn't do
+        // partial raster it would re-raster the whole thing instead.
         client_.set_blue_top(false);
         Finish();
         picture_layer_->SetNeedsDisplayRect(gfx::Rect(50, 50, 100, 100));
@@ -175,12 +177,12 @@ class LayerTreeHostTilesTestPartialInvalidation
   void WillPrepareTilesOnThread(LayerTreeHostImpl* host_impl) override {
     // Issue a GL finish before preparing tiles to ensure resources become
     // available for use in a timely manner. Needed for the one-copy path.
-    ContextProvider* context_provider =
-        host_impl->compositor_frame_sink()->worker_context_provider();
+    viz::ContextProvider* context_provider =
+        host_impl->layer_tree_frame_sink()->worker_context_provider();
     if (!context_provider)
       return;
 
-    ContextProvider::ScopedContextLock lock(context_provider);
+    viz::ContextProvider::ScopedContextLock lock(context_provider);
     lock.ContextGL()->Finish();
   }
 

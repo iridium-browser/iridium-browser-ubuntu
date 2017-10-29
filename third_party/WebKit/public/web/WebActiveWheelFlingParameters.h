@@ -26,25 +26,25 @@
 #ifndef WebActiveWheelFlingParameters_h
 #define WebActiveWheelFlingParameters_h
 
-#include "../platform/WebCommon.h"
-#include "../platform/WebFloatPoint.h"
-#include "../platform/WebGestureDevice.h"
-#include "../platform/WebPoint.h"
-#include "../platform/WebSize.h"
+#include "public/platform/WebCommon.h"
+#include "public/platform/WebFloatPoint.h"
+#include "public/platform/WebGestureDevice.h"
+#include "public/platform/WebPoint.h"
+#include "public/platform/WebSize.h"
 
 namespace blink {
 
 struct WebActiveWheelFlingParameters {
   WebFloatPoint delta;
   WebPoint point;
-  WebPoint globalPoint;
+  WebPoint global_point;
   int modifiers;
-  WebGestureDevice sourceDevice;
-  WebSize cumulativeScroll;
-  double startTime;
+  WebGestureDevice source_device;
+  WebSize cumulative_scroll;
+  double start_time;
 
   WebActiveWheelFlingParameters()
-      : modifiers(0), sourceDevice(WebGestureDeviceTouchpad), startTime(0) {}
+      : modifiers(0), source_device(kWebGestureDeviceTouchpad), start_time(0) {}
 };
 }
 

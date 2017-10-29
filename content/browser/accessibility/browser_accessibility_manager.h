@@ -14,6 +14,7 @@
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "content/browser/accessibility/accessibility_flags.h"
 #include "content/browser/accessibility/ax_platform_position.h"
 #include "content/browser/accessibility/browser_accessibility_event.h"
 #include "content/common/content_export.h"
@@ -36,7 +37,7 @@ class BrowserAccessibilityManager;
 class BrowserAccessibilityManagerAndroid;
 #elif defined(OS_WIN)
 class BrowserAccessibilityManagerWin;
-#elif defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_X11)
+#elif BUILDFLAG(USE_ATK)
 class BrowserAccessibilityManagerAuraLinux;
 #elif defined(OS_MACOSX)
 class BrowserAccessibilityManagerMac;
@@ -73,6 +74,7 @@ class CONTENT_EXPORT BrowserAccessibilityDelegate {
   virtual gfx::Rect AccessibilityGetViewBounds() const = 0;
   virtual gfx::Point AccessibilityOriginInScreen(
       const gfx::Rect& bounds) const = 0;
+  virtual float AccessibilityGetDeviceScaleFactor() const = 0;
   virtual void AccessibilityFatalError() = 0;
   virtual gfx::AcceleratedWidget AccessibilityGetAcceleratedWidget() = 0;
   virtual gfx::NativeViewAccessible AccessibilityGetNativeViewAccessible() = 0;
@@ -182,6 +184,14 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
   // in any BrowserAccessibilityManager.
   static void SetFocusChangeCallbackForTesting(const base::Closure& callback);
 
+  // Normally we avoid firing accessibility focus events when the containing
+  // native window isn't focused, and we also delay some other events like
+  // live region events to improve screen reader compatibility.
+  // However, this can lead to test flakiness, so for testing, simplify
+  // this behavior and just fire all events with no delay as if the window
+  // had focus.
+  static void NeverSuppressOrDelayEventsForTesting();
+
   // Accessibility actions. All of these are implemented asynchronously
   // by sending a message to the renderer to perform the respective action
   // on the given node.  See the definition of |ui::AXActionData| for more
@@ -206,7 +216,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
   void ShowContextMenu(const BrowserAccessibility& node);
 
   // Retrieve the bounds of the parent View in screen coordinates.
-  gfx::Rect GetViewBounds();
+  virtual gfx::Rect GetViewBounds();
 
   // Fire an event telling native assistive technology to move focus to the
   // given find in page result.
@@ -230,7 +240,9 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
   // Called in response to a hit test, when the object hit has a child frame
   // (like an iframe element or browser plugin), and we need to do another
   // hit test recursively.
-  void OnChildFrameHitTestResult(const gfx::Point& point, int hit_obj_id);
+  void OnChildFrameHitTestResult(const gfx::Point& point,
+                                 int hit_obj_id,
+                                 ui::AXEvent event_to_fire);
 
   // This is called when the user has committed to a find in page query,
   // e.g. by pressing enter or tapping on the next / previous result buttons.
@@ -248,7 +260,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
   BrowserAccessibilityManagerAndroid* ToBrowserAccessibilityManagerAndroid();
 #endif
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_X11)
+#if BUILDFLAG(USE_ATK)
   BrowserAccessibilityManagerAuraLinux*
       ToBrowserAccessibilityManagerAuraLinux();
 #endif
@@ -326,12 +338,16 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
 
   // Accessors.
   ui::AXTreeIDRegistry::AXTreeID ax_tree_id() const { return ax_tree_id_; }
+  float device_scale_factor() const { return device_scale_factor_; }
+  const ui::AXTree* ax_tree() const { return tree_.get(); }
 
   // AXTreeDelegate implementation.
   void OnNodeDataWillChange(ui::AXTree* tree,
                             const ui::AXNodeData& old_node_data,
                             const ui::AXNodeData& new_node_data) override;
-  void OnTreeDataChanged(ui::AXTree* tree) override;
+  void OnTreeDataChanged(ui::AXTree* tree,
+                         const ui::AXTreeData& old_tree_data,
+                         const ui::AXTreeData& new_tree_data) override;
   void OnNodeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
   void OnSubtreeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
   void OnNodeWillBeReparented(ui::AXTree* tree, ui::AXNode* node) override;
@@ -362,6 +378,9 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
 
   // Get a snapshot of the current tree as an AXTreeUpdate.
   ui::AXTreeUpdate SnapshotAXTreeForTesting();
+
+  // Use a custom device scale factor for testing.
+  void UseCustomDeviceScaleFactorForTesting(float device_scale_factor);
 
   // Given a point in screen coordinates, trigger an asynchronous hit test
   // but return the best possible match instantly.
@@ -428,6 +447,11 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
   // A mapping from a node id to its wrapper of type BrowserAccessibility.
   base::hash_map<int32_t, BrowserAccessibility*> id_wrapper_map_;
 
+  // A set of accessibility events to fire based on changes to the
+  // accessibility tree. It's represented as a map from node id
+  // to a set of events, which makes it easy to remove duplicates.
+  std::map<int32_t, std::set<ui::AXEvent>> tree_events_;
+
   // True if the user has initiated a navigation to another page.
   bool user_is_navigating_away_;
 
@@ -466,6 +490,18 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
   // node within that parent tree. It's computed as needed and cached for
   // speed so that it can be accessed quickly if it hasn't changed.
   int parent_node_id_from_parent_tree_;
+
+  // The device scale factor for the view associated with this frame,
+  // cached each time there's any update to the accessibility tree.
+  float device_scale_factor_;
+
+  // For testing only: If true, the manually-set device scale factor will be
+  // used and it won't be updated from the delegate.
+  bool use_custom_device_scale_factor_for_testing_;
+
+  // Fire all events regardless of focus and with no delay, to avoid test
+  // flakiness. See NeverSuppressOrDelayEventsForTesting() for details.
+  static bool never_suppress_or_delay_events_for_testing_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityManager);

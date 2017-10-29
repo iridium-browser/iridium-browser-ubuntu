@@ -57,11 +57,13 @@ class ProcessManager : public KeyedService,
   static ProcessManager* Get(content::BrowserContext* context);
   ~ProcessManager() override;
 
+  // KeyedService support:
+  void Shutdown() override;
+
   void RegisterRenderFrameHost(content::WebContents* web_contents,
                                content::RenderFrameHost* render_frame_host,
                                const Extension* extension);
   void UnregisterRenderFrameHost(content::RenderFrameHost* render_frame_host);
-  void DidNavigateRenderFrameHost(content::RenderFrameHost* render_frame_host);
 
   // Returns the SiteInstance that the given URL belongs to.
   // TODO(aa): This only returns correct results for extensions and packaged
@@ -106,10 +108,13 @@ class ProcessManager : public KeyedService,
   // already been sent the unload event and is shutting down.
   bool IsBackgroundHostClosing(const std::string& extension_id);
 
-  // Returns the extension associated with the specified RenderFrameHost/
-  // WebContents, or null.
+  // Returns the extension associated with the specified RenderFrameHost,
+  // or null.
   const Extension* GetExtensionForRenderFrameHost(
       content::RenderFrameHost* render_frame_host);
+
+  // Returns the extension associated with the main frame of the given
+  // |web_contents|, or null if there isn't one.
   const Extension* GetExtensionForWebContents(
       const content::WebContents* web_contents);
 
@@ -121,16 +126,6 @@ class ProcessManager : public KeyedService,
   int GetLazyKeepaliveCount(const Extension* extension);
   void IncrementLazyKeepaliveCount(const Extension* extension);
   void DecrementLazyKeepaliveCount(const Extension* extension);
-
-  // Keeps a background page alive. Unlike IncrementLazyKeepaliveCount, these
-  // impulses will only keep the page alive for a limited amount of time unless
-  // called regularly.
-  void KeepaliveImpulse(const Extension* extension);
-
-  // Triggers a keepalive impulse for a plugin (e.g NaCl).
-  static void OnKeepaliveFromPlugin(int render_process_id,
-                                    int render_frame_id,
-                                    const std::string& extension_id);
 
   // Handles a response to the ShouldSuspend message, used for lazy background
   // pages.
@@ -153,14 +148,6 @@ class ProcessManager : public KeyedService,
 
   // Called on shutdown to close our extension hosts.
   void CloseBackgroundHosts();
-
-  // Sets callbacks for testing keepalive impulse behavior.
-  using ImpulseCallbackForTesting =
-      base::Callback<void(const std::string& extension_id)>;
-  void SetKeepaliveImpulseCallbackForTesting(
-      const ImpulseCallbackForTesting& callback);
-  void SetKeepaliveImpulseDecrementCallbackForTesting(
-      const ImpulseCallbackForTesting& callback);
 
   // EventPageTracker implementation.
   bool IsEventPageSuspended(const std::string& extension_id) override;
@@ -226,7 +213,7 @@ class ProcessManager : public KeyedService,
                          const Extension* extension) override;
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
-                           UnloadedExtensionInfo::Reason reason) override;
+                           UnloadedExtensionReason reason) override;
 
   // Extra information we keep for each extension's background page.
   struct BackgroundPageData;
@@ -258,9 +245,6 @@ class ProcessManager : public KeyedService,
   // Internal implementation of DecrementLazyKeepaliveCount with an
   // |extension_id| known to have a lazy background page.
   void DecrementLazyKeepaliveCount(const std::string& extension_id);
-
-  // Checks if keepalive impulses have occured, and adjusts keep alive count.
-  void OnKeepaliveImpulseCheck();
 
   // These are called when the extension transitions between idle and active.
   // They control the process of closing the background page when idle.
@@ -308,9 +292,6 @@ class ProcessManager : public KeyedService,
 
   // True if we have created the startup set of background hosts.
   bool startup_background_hosts_created_;
-
-  ImpulseCallbackForTesting keepalive_impulse_callback_for_testing_;
-  ImpulseCallbackForTesting keepalive_impulse_decrement_callback_for_testing_;
 
   base::ObserverList<ProcessManagerObserver> observer_list_;
 

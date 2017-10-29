@@ -4,10 +4,8 @@
 
 from core import perf_benchmark
 
-import ct_benchmarks_util
 from measurements import rasterize_and_record_micro
 import page_sets
-from page_sets import repaint_helpers
 from telemetry import benchmark
 
 
@@ -59,45 +57,8 @@ class RasterizeAndRecordMicroTop25(_RasterizeAndRecordMicro):
   def Name(cls):
     return 'rasterize_and_record_micro.top_25'
 
-
-@benchmark.Disabled('mac', 'win', 'android')  # http://crbug.com/531597
-class RasterizeAndRecordMicroKeyMobileSites(_RasterizeAndRecordMicro):
-  """Measures rasterize and record performance on the key mobile sites.
-
-  http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-  page_set = page_sets.KeyMobileSitesPageSet
-
-  @classmethod
-  def Name(cls):
-    return 'rasterize_and_record_micro.key_mobile_sites'
-
-
-@benchmark.Disabled('all') # http://crbug.com/610424
-class RasterizeAndRecordMicroKeySilkCases(_RasterizeAndRecordMicro):
-  """Measures rasterize and record performance on the silk sites.
-
-  http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-
-  @classmethod
-  def Name(cls):
-    return 'rasterize_and_record_micro.key_silk_cases'
-
-  def CreateStorySet(self, options):
-    return page_sets.KeySilkCasesPageSet(run_no_page_interactions=True)
-
-
-@benchmark.Enabled('android')
-class RasterizeAndRecordMicroPolymer(_RasterizeAndRecordMicro):
-  """Measures rasterize and record performance on the Polymer cases.
-
-  http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-
-  @classmethod
-  def Name(cls):
-    return 'rasterize_and_record_micro.polymer'
-
-  def CreateStorySet(self, options):
-    return page_sets.PolymerPageSet(run_no_page_interactions=True)
+  def GetExpectations(self):
+    return page_sets.Top25StoryExpectations()
 
 
 # New benchmark only enabled on Linux until we've observed behavior for a
@@ -113,27 +74,5 @@ class RasterizeAndRecordMicroPartialInvalidation(_RasterizeAndRecordMicro):
   def Name(cls):
     return 'rasterize_and_record_micro.partial_invalidation'
 
-
-# Disabled because we do not plan on running CT benchmarks on the perf
-# waterfall any time soon.
-@benchmark.Disabled('all')
-class RasterizeAndRecordMicroCT(_RasterizeAndRecordMicro):
-  """Measures rasterize and record performance for Cluster Telemetry."""
-
-  @classmethod
-  def Name(cls):
-    return 'rasterize_and_record_micro_ct'
-
-  @classmethod
-  def AddBenchmarkCommandLineArgs(cls, parser):
-    _RasterizeAndRecordMicro.AddBenchmarkCommandLineArgs(parser)
-    ct_benchmarks_util.AddBenchmarkCommandLineArgs(parser)
-
-  @classmethod
-  def ProcessCommandLineArgs(cls, parser, args):
-    ct_benchmarks_util.ValidateCommandLineArgs(parser, args)
-
-  def CreateStorySet(self, options):
-    return page_sets.CTPageSet(
-        options.urls_list, options.user_agent, options.archive_data_file,
-        run_page_interaction_callback=repaint_helpers.WaitThenRepaint)
+  def GetExpectations(self):
+    return page_sets.PartialInvalidationCasesStoryExpectations()

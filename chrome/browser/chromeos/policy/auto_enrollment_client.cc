@@ -55,10 +55,9 @@ int NextPowerOf2(int64_t value) {
 void UpdateDict(base::DictionaryValue* dict,
                 const char* pref_path,
                 bool set_or_clear,
-                base::Value* value) {
-  std::unique_ptr<base::Value> scoped_value(value);
+                std::unique_ptr<base::Value> value) {
   if (set_or_clear)
-    dict->Set(pref_path, scoped_value.release());
+    dict->Set(pref_path, std::move(value));
   else
     dict->Remove(pref_path, NULL);
 }
@@ -79,7 +78,7 @@ std::string ConvertRestoreMode(
   }
 
   // Return is required to avoid compiler warning.
-  NOTREACHED() << "Bad restore mode " << restore_mode;
+  NOTREACHED() << "Bad restore_mode=" << restore_mode;
   return std::string();
 }
 
@@ -191,6 +190,7 @@ bool AutoEnrollmentClient::RetryStep() {
     return true;
 
   if (GetCachedDecision()) {
+    VLOG(1) << "Cached: has_state=" << has_server_state_;
     // The bucket download check has completed already. If it came back
     // positive, then device state should be (re-)downloaded.
     if (has_server_state_) {
@@ -223,11 +223,15 @@ void AutoEnrollmentClient::NextStep() {
 
   // Protocol finished successfully, report result.
   const RestoreMode restore_mode = GetRestoreMode();
-  if (restore_mode == RESTORE_MODE_REENROLLMENT_REQUESTED ||
-      restore_mode == RESTORE_MODE_REENROLLMENT_ENFORCED) {
-    ReportProgress(AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT);
-  } else {
-    ReportProgress(AUTO_ENROLLMENT_STATE_NO_ENROLLMENT);
+  switch (restore_mode) {
+    case RESTORE_MODE_NONE:
+    case RESTORE_MODE_DISABLED:
+      ReportProgress(AUTO_ENROLLMENT_STATE_NO_ENROLLMENT);
+      break;
+    case RESTORE_MODE_REENROLLMENT_REQUESTED:
+    case RESTORE_MODE_REENROLLMENT_ENFORCED:
+      ReportProgress(AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT);
+      break;
   }
 }
 
@@ -243,6 +247,7 @@ void AutoEnrollmentClient::SendBucketDownloadRequest() {
 
   ReportProgress(AUTO_ENROLLMENT_STATE_PENDING);
 
+  VLOG(1) << "Request bucket #" << remainder;
   request_job_.reset(
       device_management_service_->CreateJob(
           DeviceManagementRequestJob::TYPE_AUTO_ENROLLMENT,
@@ -261,6 +266,7 @@ void AutoEnrollmentClient::SendBucketDownloadRequest() {
 void AutoEnrollmentClient::SendDeviceStateRequest() {
   ReportProgress(AUTO_ENROLLMENT_STATE_PENDING);
 
+  VLOG(1) << "State request for key: " << server_backed_state_key_;
   request_job_.reset(
       device_management_service_->CreateJob(
           DeviceManagementRequestJob::TYPE_DEVICE_STATE_RETRIEVAL,
@@ -354,8 +360,7 @@ bool AutoEnrollmentClient::OnBucketDownloadRequestCompletion(
     local_state_->SetBoolean(prefs::kShouldAutoEnroll, has_server_state_);
     local_state_->SetInteger(prefs::kAutoEnrollmentPowerLimit, power_limit_);
     local_state_->CommitPendingWrite();
-    VLOG(1) << "Auto enrollment check complete, has_server_state_ = "
-            << has_server_state_;
+    VLOG(1) << "Received has_state=" << has_server_state_;
     progress = true;
   }
 
@@ -376,26 +381,23 @@ bool AutoEnrollmentClient::OnDeviceStateRequestCompletion(
         response.device_state_retrieval_response();
     {
       DictionaryPrefUpdate dict(local_state_, prefs::kServerBackedDeviceState);
-      UpdateDict(dict.Get(),
-                 kDeviceStateManagementDomain,
-                 state_response.has_management_domain(),
-                 new base::StringValue(state_response.management_domain()));
+      UpdateDict(
+          dict.Get(), kDeviceStateManagementDomain,
+          state_response.has_management_domain(),
+          base::MakeUnique<base::Value>(state_response.management_domain()));
 
       std::string restore_mode =
           ConvertRestoreMode(state_response.restore_mode());
-      UpdateDict(dict.Get(),
-                 kDeviceStateRestoreMode,
-                 !restore_mode.empty(),
-                 new base::StringValue(restore_mode));
+      UpdateDict(dict.Get(), kDeviceStateRestoreMode, !restore_mode.empty(),
+                 base::MakeUnique<base::Value>(restore_mode));
 
-      UpdateDict(dict.Get(),
-                 kDeviceStateDisabledMessage,
+      UpdateDict(dict.Get(), kDeviceStateDisabledMessage,
                  state_response.has_disabled_state(),
-                 new base::StringValue(
+                 base::MakeUnique<base::Value>(
                      state_response.disabled_state().message()));
 
       // Logging as "WARNING" to make sure it's preserved in the logs.
-      LOG(WARNING) << "Restore mode: " << restore_mode;
+      LOG(WARNING) << "Received restore_mode=" << state_response.restore_mode();
     }
     local_state_->CommitPendingWrite();
     device_state_available_ = true;

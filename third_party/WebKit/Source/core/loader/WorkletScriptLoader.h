@@ -19,7 +19,7 @@ class ScriptSourceCode;
 // classic script. You can access this class only on the main thread.
 // A client of this class receives notifications via Client interface.
 // TODO(nhiroki): Switch to module script loading (https://crbug.com/627945)
-class WorkletScriptLoader final
+class CORE_EXPORT WorkletScriptLoader final
     : public GarbageCollectedFinalized<WorkletScriptLoader>,
       public ResourceOwner<ScriptResource, ScriptResourceClient> {
   USING_GARBAGE_COLLECTED_MIXIN(WorkletScriptLoader);
@@ -31,12 +31,12 @@ class WorkletScriptLoader final
     // Called when resource loading is completed. If loading is failed or
     // canceled, an empty ScriptSourceCode is passed. You can check if loading
     // is successfully completed by wasScriptLoadSuccessful().
-    virtual void notifyWorkletScriptLoadingFinished(
+    virtual void NotifyWorkletScriptLoadingFinished(
         WorkletScriptLoader*,
         const ScriptSourceCode&) = 0;
   };
 
-  static WorkletScriptLoader* create(ResourceFetcher* fetcher, Client* client) {
+  static WorkletScriptLoader* Create(ResourceFetcher* fetcher, Client* client) {
     return new WorkletScriptLoader(fetcher, client);
   }
 
@@ -44,15 +44,15 @@ class WorkletScriptLoader final
 
   // Fetches an URL and loads it as a classic script. Synchronously calls
   // Client::notifyWorkletScriptLoadingFinished() if there is an error.
-  void fetchScript(const String& scriptURL);
+  void FetchScript(const KURL& module_url_record);
 
   // Cancels resource loading and synchronously calls
   // Client::notifyWorkletScriptLoadingFinished().
-  void cancel();
+  void Cancel();
 
   // Returns true if a script was successfully loaded. This should be called
   // after Client::notifyWorkletScriptLoadingFinished() is called.
-  bool wasScriptLoadSuccessful() const;
+  bool WasScriptLoadSuccessful() const;
 
   DECLARE_TRACE();
 
@@ -60,14 +60,14 @@ class WorkletScriptLoader final
   WorkletScriptLoader(ResourceFetcher*, Client*);
 
   // ResourceClient
-  void notifyFinished(Resource*) final;
-  String debugName() const final { return "WorkletLoader"; }
+  void NotifyFinished(Resource*) final;
+  String DebugName() const final { return "WorkletLoader"; }
 
-  Member<ResourceFetcher> m_fetcher;
-  Member<Client> m_client;
+  Member<ResourceFetcher> fetcher_;
+  Member<Client> client_;
 
-  bool m_wasScriptLoadSuccessful = false;
-  bool m_wasScriptLoadComplete = false;
+  bool was_script_load_successful_ = false;
+  bool was_script_load_complete_ = false;
 };
 
 }  // namespace blink

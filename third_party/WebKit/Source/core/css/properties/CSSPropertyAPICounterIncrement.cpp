@@ -4,4 +4,17 @@
 
 #include "core/css/properties/CSSPropertyAPICounterIncrement.h"
 
-namespace blink {}  // namespace blink
+#include "core/css/properties/CSSPropertyCounterUtils.h"
+
+class CSSParserLocalContext;
+namespace blink {
+
+const CSSValue* CSSPropertyAPICounterIncrement::parseSingleValue(
+    CSSParserTokenRange& range,
+    const CSSParserContext&,
+    const CSSParserLocalContext&) {
+  return CSSPropertyCounterUtils::ConsumeCounter(
+      range, CSSPropertyCounterUtils::kIncrementDefaultValue);
+}
+
+}  // namespace blink

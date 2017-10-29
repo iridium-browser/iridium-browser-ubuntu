@@ -143,7 +143,7 @@ class MicrodumpInfo {
 void SetMinidumpSanitizationFields(MinidumpDescriptor* minidump_descriptor,
                                    const SanitizationInfo& sanitization_info);
 
-base::LazyInstance<MicrodumpInfo> g_microdump_info =
+base::LazyInstance<MicrodumpInfo>::DestructorAtExit g_microdump_info =
     LAZY_INSTANCE_INITIALIZER;
 
 #endif
@@ -980,9 +980,7 @@ void MicrodumpInfo::Initialize(const std::string& process_type,
                            true,  // Install handlers.
                            -1);   // Server file descriptor. -1 for in-process.
 
-  if (process_type != kWebViewSingleProcessType &&
-      process_type != kBrowserProcessType &&
-      !process_type.empty()) {
+  if (!is_browser_process) {
     g_signal_code_pipe_fd =
         GetCrashReporterClient()->GetAndroidCrashSignalFD();
     if (g_signal_code_pipe_fd != -1)
@@ -1717,6 +1715,8 @@ void HandleCrashDump(const BreakpadInfo& info) {
     static const char android_build_fp[] = "android_build_fp";
     static const char device[] = "device";
     static const char gms_core_version[] = "gms_core_version";
+    static const char installer_package_name[] = "installer_package_name";
+    static const char abi_name[] = "abi_name";
     static const char model[] = "model";
     static const char brand[] = "brand";
     static const char exception_info[] = "exception_info";
@@ -1737,6 +1737,11 @@ void HandleCrashDump(const BreakpadInfo& info) {
     writer.AddBoundary();
     writer.AddPairString(gms_core_version,
         android_build_info->gms_version_code());
+    writer.AddBoundary();
+    writer.AddPairString(installer_package_name,
+                         android_build_info->installer_package_name());
+    writer.AddBoundary();
+    writer.AddPairString(abi_name, android_build_info->abi_name());
     writer.AddBoundary();
     WriteAndroidPackage(writer, android_build_info);
     writer.AddBoundary();
@@ -1953,7 +1958,14 @@ void InitCrashReporter(const std::string& process_type) {
   if (parsed_command_line.HasSwitch(switches::kDisableBreakpad))
     return;
 
-  if (process_type.empty()) {
+  bool is_browser_process =
+#if defined(OS_ANDROID)
+      process_type == kWebViewSingleProcessType ||
+      process_type == kBrowserProcessType ||
+#endif
+      process_type.empty();
+
+  if (is_browser_process) {
     bool enable_breakpad = GetCrashReporterClient()->GetCollectStatsConsent() ||
                            GetCrashReporterClient()->IsRunningUnattended();
     enable_breakpad &=
@@ -2085,6 +2097,10 @@ void SuppressDumpGeneration() {
 
 bool IsCrashReporterEnabled() {
   return g_is_crash_reporter_enabled;
+}
+
+void SetFirstChanceExceptionHandler(bool (*handler)(int, void*, void*)) {
+  google_breakpad::SetFirstChanceExceptionHandler(handler);
 }
 
 }  // namespace breakpad

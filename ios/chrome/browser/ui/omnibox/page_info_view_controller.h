@@ -15,6 +15,7 @@
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_controller.h"
 
 @class BidiContainerView;
+@protocol BrowserCommands;
 class PageInfoModel;
 
 // TODO(crbug.com/227827) Merge 178763: PageInfoModel has been removed in
@@ -29,6 +30,9 @@ class PageInfoModel;
              bridge:(PageInfoModelObserver*)bridge
         sourceFrame:(CGRect)source
          parentView:(UIView*)parent;
+
+// Dispatcher for browser commands.
+@property(nonatomic, weak) id<BrowserCommands> dispatcher;
 
 // Dismisses the view.
 - (void)dismiss;
@@ -53,16 +57,9 @@ class PageInfoModelBubbleBridge : public PageInfoModelObserver {
   }
 
  private:
-  void PerformLayout() {
-    // If the window is animating closed when this is called, the
-    // animation could be holding the last reference to |controller_|
-    // (and thus |this|).  Pin it until the task is completed.
-    base::scoped_nsobject<PageInfoViewController> keep_alive(
-        [controller_ retain]);
-    [controller_ performLayout];
-  }
+  void PerformLayout();
 
-  PageInfoViewController* controller_;  // weak
+  __unsafe_unretained PageInfoViewController* controller_;
 
   base::WeakPtrFactory<PageInfoModelBubbleBridge> weak_ptr_factory_;
 

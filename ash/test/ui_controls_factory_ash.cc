@@ -2,9 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/wm/root_window_finder.h"
-#include "ash/common/wm_window.h"
 #include "ash/shell.h"
+#include "ash/wm/root_window_finder.h"
 #include "ash/wm/window_properties.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/screen_position_client.h"
@@ -44,8 +43,7 @@ UIControlsAura* GetUIControlsForRootWindow(aura::Window* root_window) {
 // Returns the UIControls object for the RootWindow at |point_in_screen|.
 UIControlsAura* GetUIControlsAt(const gfx::Point& point_in_screen) {
   // TODO(mazda): Support the case passive grab is taken.
-  return GetUIControlsForRootWindow(
-      WmWindow::GetAuraWindow(ash::wm::GetRootWindowAt(point_in_screen)));
+  return GetUIControlsForRootWindow(ash::wm::GetRootWindowAt(point_in_screen));
 }
 
 }  // namespace
@@ -73,8 +71,8 @@ class UIControlsAsh : public UIControlsAura {
                                   bool alt,
                                   bool command,
                                   const base::Closure& closure) override {
-    aura::Window* root =
-        window ? window->GetRootWindow() : ash::Shell::GetTargetRootWindow();
+    aura::Window* root = window ? window->GetRootWindow()
+                                : ash::Shell::GetRootWindowForNewWindows();
     UIControlsAura* ui_controls = GetUIControlsForRootWindow(root);
     return ui_controls &&
            ui_controls->SendKeyPressNotifyWhenDone(window, key, control, shift,
@@ -120,7 +118,7 @@ class UIControlsAsh : public UIControlsAura {
   void RunClosureAfterAllPendingUIEvents(
       const base::Closure& closure) override {
     UIControlsAura* ui_controls =
-        GetUIControlsForRootWindow(ash::Shell::GetTargetRootWindow());
+        GetUIControlsForRootWindow(ash::Shell::GetRootWindowForNewWindows());
     if (ui_controls)
       ui_controls->RunClosureAfterAllPendingUIEvents(closure);
   }

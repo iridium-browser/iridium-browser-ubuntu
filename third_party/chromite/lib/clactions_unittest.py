@@ -103,6 +103,7 @@ class TestCLActionHistory(cros_test_lib.TestCase):
     self.assertEqual(7, clactions.GetPreCQTime(change, action_history))
     self.assertEqual(3, clactions.GetCQWaitTime(change, action_history))
     self.assertEqual(6, clactions.GetCQRunTime(change, action_history))
+    self.assertEqual(3, clactions.GetCQAttemptsCount(change, action_history))
 
     clactions.RecordSubmissionMetrics(
         clactions.CLActionHistory(action_history), strategies)
@@ -125,7 +126,6 @@ class TestCLActionHistory(cros_test_lib.TestCase):
     changes = [c1, c2]
 
     build_id = self.fake_db.InsertBuild('n', 'w', 1, 'c', 'h')
-
 
     a1 = clactions.CLAction.FromGerritPatchAndAction(
         c1, constants.CL_ACTION_TRYBOT_LAUNCHING,
@@ -186,6 +186,28 @@ class TestCLActionHistory(cros_test_lib.TestCase):
     self.assertEqual([c.buildbucket_id for c in c2_old_actions],
                      [a2.buildbucket_id, a3.buildbucket_id,
                       a6.buildbucket_id])
+
+  def testGetCancelledPreCQBuilds(self):
+    """Test GetCancelledPreCQBuilds."""
+    c1 = metadata_lib.GerritPatchTuple(1, 1, False)
+    build_id = self.fake_db.InsertBuild('n', 'w', 1, 'c', 'h')
+    a1 = clactions.CLAction.FromGerritPatchAndAction(
+        c1, constants.CL_ACTION_TRYBOT_CANCELLED,
+        reason='binhost-pre-cq')
+    a2 = clactions.CLAction.FromGerritPatchAndAction(
+        c1, constants.CL_ACTION_TRYBOT_LAUNCHING,
+        reason='binhost-pre-cq',
+        buildbucket_id='1')
+    a3 = clactions.CLAction.FromGerritPatchAndAction(
+        c1, constants.CL_ACTION_TRYBOT_CANCELLED,
+        reason='binhost-pre-cq',
+        buildbucket_id='2')
+    cl_actions = [a1, a2, a3]
+    self.fake_db.InsertCLActions(build_id, cl_actions)
+    action_history = self.fake_db.GetActionsForChanges([c1])
+    builds = clactions.GetCancelledPreCQBuilds(action_history)
+    self.assertEqual(len(builds), 1)
+    self.assertEqual(builds.pop().buildbucket_id, '2')
 
   def testGetRequeuedOrSpeculative(self):
     """Tests GetRequeuedOrSpeculative function."""
@@ -627,8 +649,9 @@ class TestCLActionHistoryRejections(cros_test_lib.TestCase):
     kwargs['patch_number'] = int(patch.patch_number)
     kwargs['change_source'] = clactions.BoolToChangeSource(patch.internal)
     kwargs['buildbucket_id'] = 'test-id'
+    kwargs['status'] = None
 
-    action = clactions.CLAction.GetCLAction(**kwargs)
+    action = clactions.CLAction(**kwargs)
     self.action_history.append(action)
     return action
 

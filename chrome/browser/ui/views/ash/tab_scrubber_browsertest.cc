@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/interactive_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/test_utils.h"
@@ -98,7 +99,7 @@ class TabScrubberTest : public InProcessBrowserTest,
     TabScrubber::GetInstance()->set_activation_delay(0);
 
     // Disable external monitor scaling of coordinates.
-    ash::Shell* shell = ash::Shell::GetInstance();
+    ash::Shell* shell = ash::Shell::Get();
     shell->event_transformation_handler()->set_transformation_mode(
         ash::EventTransformationHandler::TRANSFORM_NONE);
   }
@@ -330,6 +331,10 @@ IN_PROC_BROWSER_TEST_F(TabScrubberTest, MultiBrowser) {
 
 // Tests that tab scrubbing works correctly for a full-screen browser.
 IN_PROC_BROWSER_TEST_F(TabScrubberTest, FullScreenBrowser) {
+  // Initializes the position of mouse. Makes the mouse away from the tabstrip
+  // to prevent any interference on this test.
+  ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(
+      gfx::Point(0, browser()->window()->GetBounds().height())));
   AddTabs(browser(), 6);
   browser()->tab_strip_model()->ActivateTabAt(4, false);
 

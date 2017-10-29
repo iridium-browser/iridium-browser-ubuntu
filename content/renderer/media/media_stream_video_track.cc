@@ -4,14 +4,18 @@
 
 #include "content/renderer/media/media_stream_video_track.h"
 
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "content/renderer/media/media_stream_constraints_util_video_device.h"
+#include "media/capture/video_capture_types.h"
 
 namespace content {
 
@@ -198,43 +202,83 @@ MediaStreamVideoTrack::FrameDeliverer::GetBlackFrame(
 // static
 blink::WebMediaStreamTrack MediaStreamVideoTrack::CreateVideoTrack(
     MediaStreamVideoSource* source,
-    const blink::WebMediaConstraints& constraints,
     const MediaStreamVideoSource::ConstraintsCallback& callback,
     bool enabled) {
   blink::WebMediaStreamTrack track;
-  track.initialize(source->owner());
-  track.setTrackData(
-      new MediaStreamVideoTrack(source, constraints, callback, enabled));
+  track.Initialize(source->Owner());
+  track.SetTrackData(new MediaStreamVideoTrack(source, callback, enabled));
+  return track;
+}
+
+// static
+blink::WebMediaStreamTrack MediaStreamVideoTrack::CreateVideoTrack(
+    MediaStreamVideoSource* source,
+    const VideoTrackAdapterSettings& adapter_settings,
+    const base::Optional<bool>& noise_reduction,
+    bool is_screencast,
+    const base::Optional<double>& min_frame_rate,
+    const MediaStreamVideoSource::ConstraintsCallback& callback,
+    bool enabled) {
+  blink::WebMediaStreamTrack track;
+  track.Initialize(source->Owner());
+  track.SetTrackData(new MediaStreamVideoTrack(
+      source, adapter_settings, noise_reduction, is_screencast, min_frame_rate,
+      callback, enabled));
   return track;
 }
 
 // static
 MediaStreamVideoTrack* MediaStreamVideoTrack::GetVideoTrack(
      const blink::WebMediaStreamTrack& track) {
-  if (track.isNull() ||
-      track.source().getType() != blink::WebMediaStreamSource::TypeVideo) {
+  if (track.IsNull() ||
+      track.Source().GetType() != blink::WebMediaStreamSource::kTypeVideo) {
     return nullptr;
   }
-  return static_cast<MediaStreamVideoTrack*>(track.getTrackData());
+  return static_cast<MediaStreamVideoTrack*>(track.GetTrackData());
 }
 
 MediaStreamVideoTrack::MediaStreamVideoTrack(
     MediaStreamVideoSource* source,
-    const blink::WebMediaConstraints& constraints,
     const MediaStreamVideoSource::ConstraintsCallback& callback,
     bool enabled)
     : MediaStreamTrack(true),
       frame_deliverer_(
           new MediaStreamVideoTrack::FrameDeliverer(source->io_task_runner(),
                                                     enabled)),
-      constraints_(constraints),
+      adapter_settings_(base::MakeUnique<VideoTrackAdapterSettings>(
+          VideoTrackAdapterSettings())),
+      is_screencast_(false),
       source_(source->GetWeakPtr()) {
-  DCHECK(!constraints.isNull());
-  source->AddTrack(this,
-                   base::Bind(
-                       &MediaStreamVideoTrack::FrameDeliverer::DeliverFrameOnIO,
-                       frame_deliverer_),
-                   constraints, callback);
+  source->AddTrack(
+      this, VideoTrackAdapterSettings(),
+      base::Bind(&MediaStreamVideoTrack::FrameDeliverer::DeliverFrameOnIO,
+                 frame_deliverer_),
+      callback);
+}
+
+MediaStreamVideoTrack::MediaStreamVideoTrack(
+    MediaStreamVideoSource* source,
+    const VideoTrackAdapterSettings& adapter_settings,
+    const base::Optional<bool>& noise_reduction,
+    bool is_screen_cast,
+    const base::Optional<double>& min_frame_rate,
+    const MediaStreamVideoSource::ConstraintsCallback& callback,
+    bool enabled)
+    : MediaStreamTrack(true),
+      frame_deliverer_(
+          new MediaStreamVideoTrack::FrameDeliverer(source->io_task_runner(),
+                                                    enabled)),
+      adapter_settings_(
+          base::MakeUnique<VideoTrackAdapterSettings>(adapter_settings)),
+      noise_reduction_(noise_reduction),
+      is_screencast_(is_screen_cast),
+      min_frame_rate_(min_frame_rate),
+      source_(source->GetWeakPtr()) {
+  source->AddTrack(
+      this, adapter_settings,
+      base::Bind(&MediaStreamVideoTrack::FrameDeliverer::DeliverFrameOnIO,
+                 frame_deliverer_),
+      callback);
 }
 
 MediaStreamVideoTrack::~MediaStreamVideoTrack() {
@@ -297,44 +341,68 @@ void MediaStreamVideoTrack::Stop() {
     source_->RemoveTrack(this);
     source_ = NULL;
   }
-  OnReadyStateChanged(blink::WebMediaStreamSource::ReadyStateEnded);
+  OnReadyStateChanged(blink::WebMediaStreamSource::kReadyStateEnded);
 }
 
-void MediaStreamVideoTrack::getSettings(
+void MediaStreamVideoTrack::GetSettings(
     blink::WebMediaStreamTrack::Settings& settings) {
-  // TODO(hta): Extract the real value.
-  settings.deviceId = blink::WebString("video device ID");
+  DCHECK(main_render_thread_checker_.CalledOnValidThread());
   if (!source_)
     return;
 
-  const media::VideoCaptureFormat* format = source_->GetCurrentFormat();
+  if (width_ && height_) {
+    settings.width = width_;
+    settings.height = height_;
+    settings.aspect_ratio = static_cast<double>(width_) / height_;
+  }
+
+  // 0.0 means the track is using the source's frame rate.
+  if (frame_rate_ != 0.0) {
+    settings.frame_rate = frame_rate_;
+  }
+
+  base::Optional<media::VideoCaptureFormat> format =
+      source_->GetCurrentFormat();
   if (format) {
-    settings.frameRate = format->frame_rate;
-    settings.width = format->frame_size.width();
-    settings.height = format->frame_size.height();
-    settings.videoKind = GetVideoKindForFormat(*format);
+    if (frame_rate_ == 0.0)
+      settings.frame_rate = format->frame_rate;
+    settings.video_kind = GetVideoKindForFormat(*format);
   }
   switch (source_->device_info().device.video_facing) {
     case media::MEDIA_VIDEO_FACING_NONE:
-      settings.facingMode = blink::WebMediaStreamTrack::FacingMode::None;
+      settings.facing_mode = blink::WebMediaStreamTrack::FacingMode::kNone;
       break;
     case media::MEDIA_VIDEO_FACING_USER:
-      settings.facingMode = blink::WebMediaStreamTrack::FacingMode::User;
+      settings.facing_mode = blink::WebMediaStreamTrack::FacingMode::kUser;
       break;
     case media::MEDIA_VIDEO_FACING_ENVIRONMENT:
-      settings.facingMode = blink::WebMediaStreamTrack::FacingMode::Environment;
+      settings.facing_mode =
+          blink::WebMediaStreamTrack::FacingMode::kEnvironment;
       break;
     default:
-      settings.facingMode = blink::WebMediaStreamTrack::FacingMode::None;
+      settings.facing_mode = blink::WebMediaStreamTrack::FacingMode::kNone;
       break;
   }
+#if defined(OS_ANDROID)
+  // On Android, the facing mode is not available in the |video_facing| field,
+  // but is available as part of the label.
+  // TODO(guidou): Remove this code once the |video_facing| field is supported
+  // on Android. See http://crbug.com/672856.
+  if (source_->device_info().device.name.find("front") != std::string::npos) {
+    settings.facing_mode = blink::WebMediaStreamTrack::FacingMode::kUser;
+  } else if (source_->device_info().device.name.find("back") !=
+             std::string::npos) {
+    settings.facing_mode = blink::WebMediaStreamTrack::FacingMode::kEnvironment;
+  }
+#endif
+
   const base::Optional<CameraCalibration> calibration =
       source_->device_info().device.camera_calibration;
   if (calibration) {
-    settings.depthNear = calibration->depth_near;
-    settings.depthFar = calibration->depth_far;
-    settings.focalLengthX = calibration->focal_length_x;
-    settings.focalLengthY = calibration->focal_length_y;
+    settings.depth_near = calibration->depth_near;
+    settings.depth_far = calibration->depth_far;
+    settings.focal_length_x = calibration->focal_length_x;
+    settings.focal_length_y = calibration->focal_length_y;
   }
 }
 

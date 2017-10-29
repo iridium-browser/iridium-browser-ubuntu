@@ -47,6 +47,20 @@
             "order": 1
         },
         {
+            "type": "@UI.ActionDelegate",
+            "actionId": "emulation.capture-full-height-screenshot",
+            "category": "Mobile",
+            "className": "Emulation.DeviceModeWrapper.ActionDelegate",
+            "title": "Capture full size screenshot",
+            "tags": "device"
+        },
+        {
+            "type": "context-menu-item",
+            "location": "deviceModeMenu/tools",
+            "order": 13,
+            "actionId": "emulation.capture-full-height-screenshot"
+        },
+        {
             "type": "setting",
             "category": "Mobile",
             "settingName": "showMediaQueryInspector",
@@ -105,7 +119,7 @@
             "location": "settings-view",
             "id": "devices",
             "title": "Devices",
-            "order": "30",
+            "order": 30,
             "className": "Emulation.DevicesSettingsTab",
             "settings": [
                 "standardEmulatedDeviceList",
@@ -116,6 +130,7 @@
             "type": "@UI.ActionDelegate",
             "actionId": "emulation.show-sensors",
             "title": "Sensors",
+            "condition": "!v8only",
             "className": "Emulation.SensorsView.ShowActionDelegate"
         },
         {
@@ -123,6 +138,7 @@
             "location": "drawer-view",
             "id": "sensors",
             "title": "Sensors",
+            "condition": "!v8only",
             "persistence": "closeable",
             "order": 100,
             "className": "Emulation.SensorsView",
@@ -134,18 +150,15 @@
         "components",
         "platform",
         "ui",
-        "network_conditions"
+        "mobile_throttling"
     ],
     "scripts": [
         "AdvancedApp.js",
         "EmulatedDevices.js",
         "DevicesSettingsTab.js",
-        "DeviceOrientation.js",
-        "Geolocation.js",
         "InspectedPagePlaceholder.js",
         "MediaQueryInspector.js",
         "SensorsView.js",
-        "TouchModel.js",
         "DeviceModeModel.js",
         "DeviceModeToolbar.js",
         "DeviceModeView.js",

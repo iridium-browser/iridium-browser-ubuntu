@@ -6,6 +6,10 @@
 
 #import "ios/web/navigation/navigation_item_impl.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace web {
 
 ScopedNavigationItemImplList CreateScopedNavigationItemImplList(
@@ -15,6 +19,15 @@ ScopedNavigationItemImplList CreateScopedNavigationItemImplList(
     std::unique_ptr<NavigationItemImpl> scoped_item_impl(
         static_cast<NavigationItemImpl*>(scoped_item_list[index].release()));
     list[index] = std::move(scoped_item_impl);
+  }
+  return list;
+}
+
+NavigationItemList CreateNavigationItemList(
+    const ScopedNavigationItemImplList& scoped_item_list) {
+  NavigationItemList list(scoped_item_list.size());
+  for (size_t index = 0; index < scoped_item_list.size(); ++index) {
+    list[index] = scoped_item_list[index].get();
   }
   return list;
 }

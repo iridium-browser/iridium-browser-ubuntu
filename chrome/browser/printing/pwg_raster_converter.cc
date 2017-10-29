@@ -19,7 +19,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/chrome_utility_printing_messages.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/cloud_devices/common/cloud_device_description.h"
@@ -170,9 +169,10 @@ void PwgUtilityProcessHostClient::Convert(
 
   BrowserThread::PostTaskAndReply(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&FileHandlers::Init, base::Unretained(files_.get()),
-                 base::RetainedRef(data)),
-      base::Bind(&PwgUtilityProcessHostClient::OnFilesReadyOnUIThread, this));
+      base::BindOnce(&FileHandlers::Init, base::Unretained(files_.get()),
+                     base::RetainedRef(data)),
+      base::BindOnce(&PwgUtilityProcessHostClient::OnFilesReadyOnUIThread,
+                     this));
 }
 
 void PwgUtilityProcessHostClient::OnProcessCrashed(int exit_code) {
@@ -211,7 +211,8 @@ void PwgUtilityProcessHostClient::OnFilesReadyOnUIThread() {
   }
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&PwgUtilityProcessHostClient::StartProcessOnIOThread, this));
+      base::BindOnce(&PwgUtilityProcessHostClient::StartProcessOnIOThread,
+                     this));
 }
 
 void PwgUtilityProcessHostClient::StartProcessOnIOThread() {
@@ -230,8 +231,8 @@ void PwgUtilityProcessHostClient::StartProcessOnIOThread() {
 void PwgUtilityProcessHostClient::RunCallback(bool success) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&PwgUtilityProcessHostClient::RunCallbackOnUIThread, this,
-                 success));
+      base::BindOnce(&PwgUtilityProcessHostClient::RunCallbackOnUIThread, this,
+                     success));
 }
 
 void PwgUtilityProcessHostClient::RunCallbackOnUIThread(bool success) {
@@ -239,8 +240,9 @@ void PwgUtilityProcessHostClient::RunCallbackOnUIThread(bool success) {
   if (callback_.is_null())
     return;
 
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(callback_, success, files_->GetPwgPath()));
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(callback_, success, files_->GetPwgPath()));
   callback_.Reset();
 }
 
@@ -301,7 +303,7 @@ PdfRenderSettings PWGRasterConverter::GetConversionSettings(
   // by autorotate.
   gfx::Rect area(std::min(page_size.width(), page_size.height()) * scale,
                  std::max(page_size.width(), page_size.height()) * scale);
-  return PdfRenderSettings(area, gfx::Point(0,0), dpi, /*autorotate=*/true,
+  return PdfRenderSettings(area, gfx::Point(0, 0), dpi, /*autorotate=*/true,
                            PdfRenderSettings::Mode::NORMAL);
 }
 

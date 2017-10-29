@@ -38,7 +38,7 @@
 
 #if defined(OS_WIN)
 
-#if defined(_MSC_VER)
+#if defined(COMPILER_MSVC)
 // ssize_t needed for OutOfMemoryTest.
 #if defined(_WIN64)
 typedef __int64 ssize_t;
@@ -61,7 +61,7 @@ typedef BOOL (WINAPI* HeapQueryFn)  \
 // will fail.
 
 TEST(ProcessMemoryTest, MacTerminateOnHeapCorruption) {
-#if BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
+#if BUILDFLAG(USE_ALLOCATOR_SHIM)
   base::allocator::InitializeAllocatorShim();
 #endif
   // Assert that freeing an unallocated pointer will crash the process.
@@ -79,25 +79,32 @@ TEST(ProcessMemoryTest, MacTerminateOnHeapCorruption) {
 #else
   ADD_FAILURE() << "This test is not supported in this build configuration.";
 #endif
+
+#if BUILDFLAG(USE_ALLOCATOR_SHIM)
+  base::allocator::UninterceptMallocZonesForTesting();
+#endif
 }
 
 #endif  // defined(OS_MACOSX)
 
 TEST(MemoryTest, AllocatorShimWorking) {
 #if defined(OS_MACOSX)
-#if BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
+#if BUILDFLAG(USE_ALLOCATOR_SHIM)
   base::allocator::InitializeAllocatorShim();
 #endif
   base::allocator::InterceptAllocationsMac();
 #endif
   ASSERT_TRUE(base::allocator::IsAllocatorInitialized());
+
+#if defined(OS_MACOSX)
+  base::allocator::UninterceptMallocZonesForTesting();
+#endif
 }
 
 // OpenBSD does not support these tests. Don't test these on ASan/TSan/MSan
 // configurations: only test the real allocator.
 // Windows only supports these tests with the allocator shim in place.
-#if !defined(OS_OPENBSD) && \
-    BUILDFLAG(ENABLE_WIN_ALLOCATOR_SHIM_TESTS) && \
+#if !defined(OS_OPENBSD) && BUILDFLAG(USE_ALLOCATOR_SHIM) && \
     !defined(MEMORY_TOOL_REPLACES_ALLOCATOR)
 
 namespace {
@@ -135,7 +142,7 @@ class OutOfMemoryTest : public testing::Test {
 class OutOfMemoryDeathTest : public OutOfMemoryTest {
  public:
   void SetUpInDeathAssert() {
-#if defined(OS_MACOSX) && BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
+#if defined(OS_MACOSX) && BUILDFLAG(USE_ALLOCATOR_SHIM)
     base::allocator::InitializeAllocatorShim();
 #endif
 
@@ -146,6 +153,12 @@ class OutOfMemoryDeathTest : public OutOfMemoryTest {
     // should be done inside of the ASSERT_DEATH.
     base::EnableTerminationOnOutOfMemory();
   }
+
+#if defined(OS_MACOSX)
+  void TearDown() override {
+    base::allocator::UninterceptMallocZonesForTesting();
+  }
+#endif
 };
 
 TEST_F(OutOfMemoryDeathTest, New) {
@@ -421,6 +434,12 @@ class OutOfMemoryHandledTest : public OutOfMemoryTest {
     // initialization - and test that UncheckedMalloc and  UncheckedCalloc
     // properly by-pass this in order to allow the caller to handle OOM.
     base::EnableTerminationOnOutOfMemory();
+  }
+
+  void TearDown() override {
+#if defined(OS_MACOSX)
+    base::allocator::UninterceptMallocZonesForTesting();
+#endif
   }
 };
 

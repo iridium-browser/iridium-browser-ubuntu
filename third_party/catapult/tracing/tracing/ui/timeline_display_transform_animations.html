@@ -11,7 +11,8 @@ found in the LICENSE file.
 'use strict';
 
 tr.exportTo('tr.ui', function() {
-  var kDefaultPanAnimationDurationMs = 100.0;
+  const kDefaultPanAnimationDurationMs = 100.0;
+  const lerp = tr.b.math.lerp;
 
   /**
    * Pans a TimelineDisplayTransform by a given amount.
@@ -26,10 +27,11 @@ tr.exportTo('tr.ui', function() {
       deltaX, deltaY, opt_durationMs) {
     this.deltaX = deltaX;
     this.deltaY = deltaY;
-    if (opt_durationMs === undefined)
+    if (opt_durationMs === undefined) {
       this.durationMs = kDefaultPanAnimationDurationMs;
-    else
+    } else {
       this.durationMs = opt_durationMs;
+    }
 
     this.startPanX = undefined;
     this.startPanY = undefined;
@@ -43,14 +45,14 @@ tr.exportTo('tr.ui', function() {
       return this.deltaY !== 0;
     },
 
-    canTakeOverFor: function(existingAnimation) {
+    canTakeOverFor(existingAnimation) {
       return existingAnimation instanceof TimelineDisplayTransformPanAnimation;
     },
 
-    takeOverFor: function(existing, timestamp, target) {
-      var remainingDeltaXOnExisting = existing.goalPanX - target.panX;
-      var remainingDeltaYOnExisting = existing.goalPanY - target.panY;
-      var remainingTimeOnExisting = timestamp - (
+    takeOverFor(existing, timestamp, target) {
+      const remainingDeltaXOnExisting = existing.goalPanX - target.panX;
+      const remainingDeltaYOnExisting = existing.goalPanY - target.panY;
+      let remainingTimeOnExisting = timestamp - (
           existing.startTimeMs + existing.durationMs);
       remainingTimeOnExisting = Math.max(remainingTimeOnExisting, 0);
 
@@ -59,19 +61,20 @@ tr.exportTo('tr.ui', function() {
       this.durationMs += remainingTimeOnExisting;
     },
 
-    start: function(timestamp, target) {
+    start(timestamp, target) {
       this.startTimeMs = timestamp;
       this.startPanX = target.panX;
       this.startPanY = target.panY;
     },
 
-    tick: function(timestamp, target) {
-      var percentDone = (timestamp - this.startTimeMs) / this.durationMs;
-      percentDone = tr.b.clamp(percentDone, 0, 1);
+    tick(timestamp, target) {
+      let percentDone = (timestamp - this.startTimeMs) / this.durationMs;
+      percentDone = tr.b.math.clamp(percentDone, 0, 1);
 
-      target.panX = tr.b.lerp(percentDone, this.startPanX, this.goalPanX);
-      if (this.affectsPanY)
-        target.panY = tr.b.lerp(percentDone, this.startPanY, this.goalPanY);
+      target.panX = lerp(percentDone, this.startPanX, this.goalPanX);
+      if (this.affectsPanY) {
+        target.panY = lerp(percentDone, this.startPanY, this.goalPanY);
+      }
       return timestamp >= this.startTimeMs + this.durationMs;
     },
 
@@ -115,10 +118,11 @@ tr.exportTo('tr.ui', function() {
     this.goalFocalPointXView = goalFocalPointXView;
     this.goalFocalPointY = goalFocalPointY;
     this.zoomInRatioX = zoomInRatioX;
-    if (opt_durationMs === undefined)
+    if (opt_durationMs === undefined) {
       this.durationMs = kDefaultPanAnimationDurationMs;
-    else
+    } else {
       this.durationMs = opt_durationMs;
+    }
 
     this.startTimeMs = undefined;
     this.startScaleX = undefined;
@@ -133,29 +137,28 @@ tr.exportTo('tr.ui', function() {
       return this.startPanY !== this.goalFocalPointY;
     },
 
-    canTakeOverFor: function(existingAnimation) {
+    canTakeOverFor(existingAnimation) {
       return false;
     },
 
-    takeOverFor: function(existingAnimation, timestamp, target) {
+    takeOverFor(existingAnimation, timestamp, target) {
       this.goalScaleX = target.scaleX * this.zoomInRatioX;
     },
 
-    start: function(timestamp, target) {
+    start(timestamp, target) {
       this.startTimeMs = timestamp;
       this.startScaleX = target.scaleX;
       this.goalScaleX = this.zoomInRatioX * target.scaleX;
       this.startPanY = target.panY;
     },
 
-    tick: function(timestamp, target) {
-      var percentDone = (timestamp - this.startTimeMs) / this.durationMs;
-      percentDone = tr.b.clamp(percentDone, 0, 1);
+    tick(timestamp, target) {
+      let percentDone = (timestamp - this.startTimeMs) / this.durationMs;
+      percentDone = tr.b.math.clamp(percentDone, 0, 1);
 
-      target.scaleX = tr.b.lerp(percentDone, this.startScaleX, this.goalScaleX);
+      target.scaleX = lerp(percentDone, this.startScaleX, this.goalScaleX);
       if (this.affectsPanY) {
-        target.panY = tr.b.lerp(
-            percentDone, this.startPanY, this.goalFocalPointY);
+        target.panY = lerp(percentDone, this.startPanY, this.goalFocalPointY);
       }
 
       target.xPanWorldPosToViewPos(
@@ -165,10 +168,8 @@ tr.exportTo('tr.ui', function() {
   };
 
   return {
-    TimelineDisplayTransformPanAnimation:
-        TimelineDisplayTransformPanAnimation,
-    TimelineDisplayTransformZoomToAnimation:
-        TimelineDisplayTransformZoomToAnimation
+    TimelineDisplayTransformPanAnimation,
+    TimelineDisplayTransformZoomToAnimation,
   };
 });
 </script>

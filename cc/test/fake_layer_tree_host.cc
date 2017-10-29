@@ -5,6 +5,7 @@
 #include "cc/test/fake_layer_tree_host.h"
 
 #include "base/memory/ptr_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/animation/animation_host.h"
 #include "cc/layers/layer.h"
@@ -35,7 +36,6 @@ std::unique_ptr<FakeLayerTreeHost> FakeLayerTreeHost::Create(
     TestTaskGraphRunner* task_graph_runner,
     MutatorHost* mutator_host) {
   LayerTreeSettings settings;
-  settings.verify_clip_tree_calculations = true;
   return Create(client, task_graph_runner, mutator_host, settings);
 }
 
@@ -69,6 +69,8 @@ FakeLayerTreeHost::~FakeLayerTreeHost() {
 void FakeLayerTreeHost::SetNeedsCommit() { needs_commit_ = true; }
 
 LayerImpl* FakeLayerTreeHost::CommitAndCreateLayerImplTree() {
+  // TODO(pdr): Update the LayerTreeImpl lifecycle states here so lifecycle
+  // violations can be caught.
   TreeSynchronizer::SynchronizeTrees(root_layer(), active_tree());
   active_tree()->SetPropertyTrees(property_trees());
   TreeSynchronizer::PushLayerProperties(root_layer()->layer_tree_host(),
@@ -79,15 +81,20 @@ LayerImpl* FakeLayerTreeHost::CommitAndCreateLayerImplTree() {
       property_trees(), active_tree());
 
   if (page_scale_layer() && inner_viewport_scroll_layer()) {
-    active_tree()->SetViewportLayersFromIds(
-        overscroll_elasticity_layer() ? overscroll_elasticity_layer()->id()
-                                      : Layer::INVALID_ID,
-        page_scale_layer()->id(), inner_viewport_scroll_layer()->id(),
-        outer_viewport_scroll_layer() ? outer_viewport_scroll_layer()->id()
-                                      : Layer::INVALID_ID);
+    LayerTreeImpl::ViewportLayerIds ids;
+    if (overscroll_elasticity_layer())
+      ids.overscroll_elasticity = overscroll_elasticity_layer()->id();
+    ids.page_scale = page_scale_layer()->id();
+    if (inner_viewport_container_layer())
+      ids.inner_viewport_container = inner_viewport_container_layer()->id();
+    if (outer_viewport_container_layer())
+      ids.outer_viewport_container = outer_viewport_container_layer()->id();
+    ids.inner_viewport_scroll = inner_viewport_scroll_layer()->id();
+    if (outer_viewport_scroll_layer())
+      ids.outer_viewport_scroll = outer_viewport_scroll_layer()->id();
+    active_tree()->SetViewportLayersFromIds(ids);
   }
 
-  active_tree()->UpdatePropertyTreesForBoundsDelta();
   return active_tree()->root_layer_for_testing();
 }
 

@@ -4,7 +4,7 @@
 
 #include "ash/magnifier/magnification_controller.h"
 
-#include "ash/common/accessibility_types.h"
+#include "ash/accessibility_types.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/strings/stringprintf.h"
@@ -41,12 +41,11 @@ class TextInputView : public views::WidgetDelegateView {
 
   ~TextInputView() override {}
 
-  gfx::Size GetPreferredSize() const override {
+  gfx::Size CalculatePreferredSize() const override {
     return gfx::Size(kTextInputWindowWidth, kTextInputWindowHeight);
   }
 
-  // Overridden from views::WidgetDelegate:
-  void FocusOnTextInput() { GetFocusManager()->SetFocusedView(text_field_); }
+  void FocusOnTextInput() { text_field_->RequestFocus(); }
 
  private:
   views::Textfield* text_field_;  // owned by views hierarchy
@@ -56,7 +55,7 @@ class TextInputView : public views::WidgetDelegateView {
 
 }  // namespace
 
-class MagnificationControllerTest : public test::AshTestBase {
+class MagnificationControllerTest : public AshTestBase {
  public:
   MagnificationControllerTest() : text_input_view_(NULL) {}
   ~MagnificationControllerTest() override {}
@@ -81,7 +80,7 @@ class MagnificationControllerTest : public test::AshTestBase {
   }
 
   ash::MagnificationController* GetMagnificationController() const {
-    return ash::Shell::GetInstance()->magnification_controller();
+    return ash::Shell::Get()->magnification_controller();
   }
 
   gfx::Rect GetViewport() const {
@@ -673,7 +672,7 @@ TEST_F(MagnificationControllerTest, CenterTextCaretInViewport) {
 
 // Make sure that unified desktop can enter magnified mode.
 TEST_F(MagnificationControllerTest, EnableMagnifierInUnifiedDesktop) {
-  Shell::GetInstance()->display_manager()->SetUnifiedDesktopEnabled(true);
+  Shell::Get()->display_manager()->SetUnifiedDesktopEnabled(true);
 
   EXPECT_EQ(1.0f, GetMagnificationController()->GetScale());
 
@@ -699,6 +698,30 @@ TEST_F(MagnificationControllerTest, EnableMagnifierInUnifiedDesktop) {
   GetMagnificationController()->SetEnabled(false);
   EXPECT_EQ("0,0 500x500", screen->GetPrimaryDisplay().bounds().ToString());
   EXPECT_EQ(1.0f, GetMagnificationController()->GetScale());
+}
+
+// Make sure that mouse can move across display in magnified mode.
+TEST_F(MagnificationControllerTest, MoveMouseToSecondDisplay) {
+  UpdateDisplay("0+0-500x500, 500+0-500x500");
+  EXPECT_EQ(2ul, display::Screen::GetScreen()->GetAllDisplays().size());
+
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+
+  GetEventGenerator().MoveMouseTo(gfx::Point(250, 250));
+  EXPECT_TRUE(root_windows[1]->layer()->transform().IsIdentity());
+  EXPECT_TRUE(root_windows[0]->layer()->transform().IsIdentity());
+
+  GetMagnificationController()->SetEnabled(true);
+  EXPECT_FALSE(root_windows[0]->layer()->transform().IsIdentity());
+  EXPECT_TRUE(root_windows[1]->layer()->transform().IsIdentity());
+
+  GetEventGenerator().MoveMouseTo(gfx::Point(750, 250));
+  EXPECT_FALSE(root_windows[1]->layer()->transform().IsIdentity());
+  EXPECT_TRUE(root_windows[0]->layer()->transform().IsIdentity());
+
+  GetMagnificationController()->SetEnabled(false);
+  EXPECT_TRUE(root_windows[1]->layer()->transform().IsIdentity());
+  EXPECT_TRUE(root_windows[0]->layer()->transform().IsIdentity());
 }
 
 }  // namespace ash

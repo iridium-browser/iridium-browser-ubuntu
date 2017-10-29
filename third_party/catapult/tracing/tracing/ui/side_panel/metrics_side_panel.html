@@ -46,7 +46,7 @@ tr.exportTo('tr.ui', function() {
     is: 'tr-ui-sp-metrics-side-panel',
     behaviors: [tr.ui.behaviors.SidePanel],
 
-    ready: function() {
+    ready() {
       this.model_ = undefined;
 
       this.rangeOfInterest_ = undefined;
@@ -55,8 +55,8 @@ tr.exportTo('tr.ui', function() {
       this.metrics_ = [];
       tr.metrics.MetricRegistry.getAllRegisteredTypeInfos().forEach(
           function(m) {
-            if (m.constructor.name === 'sampleMetric')
-              return;
+            if (m.constructor.name === 'sampleMetric') return;
+
             this.metrics_.push({
               label: m.constructor.name,
               value: m.constructor.name
@@ -65,7 +65,7 @@ tr.exportTo('tr.ui', function() {
 
       this.settingsKey_ = 'metrics-side-panel-metric-name';
       this.currentMetricName_ = 'responsivenessMetric';
-      var metricSelector = tr.ui.b.createSelector(
+      const metricSelector = tr.ui.b.createSelector(
           this, 'currentMetricName_',
           this.settingsKey_,
           this.currentMetricName_,
@@ -80,6 +80,15 @@ tr.exportTo('tr.ui', function() {
       this.recomputeButton_ = tr.ui.b.createButton(
           'Recompute', this.onRecompute_, this);
       Polymer.dom(this.$.top_left_controls).appendChild(this.recomputeButton_);
+
+      this.$.results.addEventListener('display-ready', () => {
+        this.$.results.style.display = '';
+      });
+    },
+
+    async build(model) {
+      this.model_ = model;
+      await this.updateContents_();
     },
 
     /**
@@ -89,10 +98,10 @@ tr.exportTo('tr.ui', function() {
      * @return {undefined|number}
      */
     get metricLatencyMs() {
-      return tr.b.Statistics.mean(this.metricLatenciesMs_);
+      return tr.b.math.Statistics.mean(this.metricLatenciesMs_);
     },
 
-    onMetricChange_: function() {
+    onMetricChange_() {
       this.currentMetricTypeInfo_ =
         tr.metrics.MetricRegistry.findTypeInfoWithName(
             this.currentMetricName_);
@@ -100,7 +109,7 @@ tr.exportTo('tr.ui', function() {
       this.updateContents_();
     },
 
-    onRecompute_: function() {
+    onRecompute_() {
       this.updateContents_();
     },
 
@@ -108,7 +117,7 @@ tr.exportTo('tr.ui', function() {
       return 'Metrics';
     },
 
-    supportsModel: function(m) {
+    supportsModel(m) {
       if (!m) {
         return {
           supported: false,
@@ -126,8 +135,7 @@ tr.exportTo('tr.ui', function() {
     },
 
     set model(model) {
-      this.model_ = model;
-      this.updateContents_();
+      this.build(model);
     },
 
     get selection() {
@@ -139,7 +147,7 @@ tr.exportTo('tr.ui', function() {
     },
 
     /**
-     * @return {undefined|!tr.b.Range}
+     * @return {undefined|!tr.b.math.Range}
      */
     get rangeOfInterest() {
       return this.rangeOfInterest_;
@@ -151,7 +159,7 @@ tr.exportTo('tr.ui', function() {
      * will be re-run immediately; otherwise, the Recompute button will be
      * enabled.
      *
-     * @param {!tr.b.Range} range
+     * @param {!tr.b.math.Range} range
      */
     set rangeOfInterest(range) {
       this.rangeOfInterest_ = range;
@@ -167,7 +175,7 @@ tr.exportTo('tr.ui', function() {
       }
     },
 
-    updateContents_: function() {
+    async updateContents_() {
       Polymer.dom(this.$.error).textContent = '';
       this.$.results.style.display = 'none';
 
@@ -176,34 +184,32 @@ tr.exportTo('tr.ui', function() {
         return;
       }
 
-      var options = {metrics: [this.currentMetricName_]};
+      const options = {metrics: [this.currentMetricName_]};
 
       if (this.currentMetricTypeInfo_ &&
           this.currentMetricTypeInfo_.metadata.supportsRangeOfInterest &&
           this.rangeOfInterest &&
-          !this.rangeOfInterest.isEmpty)
+          !this.rangeOfInterest.isEmpty) {
         options.rangeOfInterest = this.rangeOfInterest;
+      }
 
-      var startDate = new Date();
+      const startDate = new Date();
+      let histograms;
       try {
-        var histograms = tr.metrics.runMetrics(this.model_, options);
+        histograms = tr.metrics.runMetrics(this.model_, options);
       } catch (err) {
-        console.warn(
-            this.currentMetricName_ +
-            ' could not be computed for the current model:\n' +
-            err.stack);
         Polymer.dom(this.$.error).textContent = err.message;
         return;
       }
 
       this.metricLatenciesMs_.push(new Date() - startDate);
-      while (this.metricLatenciesMs_.length > 20)
+      while (this.metricLatenciesMs_.length > 20) {
         this.metricLatenciesMs_.shift();
+      }
 
       this.recomputeButton_.style.background = '';
 
-      this.$.results.style.display = '';
-      this.$.results.histograms = histograms;
+      await this.$.results.build(histograms);
     }
   });
 

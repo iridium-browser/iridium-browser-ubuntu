@@ -66,11 +66,13 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_math.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "net/base/load_flags.h"
 #include "net/cert/cert_net_fetcher.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request_context.h"
 
@@ -203,7 +205,7 @@ class RequestCore : public base::RefCountedThreadSafe<RequestCore> {
         task_runner_(std::move(task_runner)) {}
 
   void AttachedToJob(Job* job) {
-    DCHECK(task_runner_->RunsTasksOnCurrentThread());
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
     DCHECK(!job_);
     // Requests should not be attached to jobs after they have been signalled
     // with a cancellation error (which happens via either Cancel() or
@@ -215,7 +217,7 @@ class RequestCore : public base::RefCountedThreadSafe<RequestCore> {
   void OnJobCompleted(Job* job,
                       Error error,
                       const std::vector<uint8_t>& response_body) {
-    DCHECK(task_runner_->RunsTasksOnCurrentThread());
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
     DCHECK_EQ(job_, job);
     job_ = nullptr;
@@ -235,7 +237,7 @@ class RequestCore : public base::RefCountedThreadSafe<RequestCore> {
 
   // Should only be called once.
   void WaitForResult(Error* error, std::vector<uint8_t>* bytes) {
-    DCHECK(!task_runner_->RunsTasksOnCurrentThread());
+    DCHECK(!task_runner_->RunsTasksInCurrentSequence());
 
     completion_event_.Wait();
     *bytes = std::move(bytes_);
@@ -259,7 +261,7 @@ class RequestCore : public base::RefCountedThreadSafe<RequestCore> {
   // there is no work that will be done on the network thread (e.g. when the
   // network thread has been shutdown before the request begins). See comment in
   // SignalImmediateError.
-  Error error_;
+  Error error_ = OK;
   std::vector<uint8_t> bytes_;
 
   // Indicates when |error_| and |bytes_| have been written to.
@@ -382,7 +384,7 @@ class Job : public URLRequest::Delegate {
 };
 
 void RequestCore::CancelJob() {
-  if (!task_runner_->RunsTasksOnCurrentThread()) {
+  if (!task_runner_->RunsTasksInCurrentSequence()) {
     task_runner_->PostTask(FROM_HERE,
                            base::Bind(&RequestCore::CancelJob, this));
     return;
@@ -449,8 +451,35 @@ void Job::StartURLRequest(URLRequestContext* context) {
 
   // Start the URLRequest.
   read_buffer_ = new IOBuffer(kReadBufferSizeInBytes);
-  url_request_ =
-      context->CreateRequest(request_params_->url, DEFAULT_PRIORITY, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("certificate_verifier", R"(
+        semantics {
+          sender: "Certificate Verifier"
+          description:
+            "When verifying certificates, the browser may need to fetch "
+            "additional URLs that are encoded in the server-provided "
+            "certificate chain. This may be part of revocation checking ("
+            "Online Certificate Status Protocol, Certificate Revocation List), "
+            "or path building (Authority Information Access fetches). Please "
+            "refer to the following for more on above protocols: "
+            "https://tools.ietf.org/html/rfc6960, "
+            "https://tools.ietf.org/html/rfc5280#section-4.2.1.13, and"
+            "https://tools.ietf.org/html/rfc5280#section-5.2.7."
+          trigger:
+            "Verifying a certificate (likely in response to navigating to an "
+            "'https://' website)."
+          data:
+            "In the case of OCSP this may divulge the website being viewed. No "
+            "user data in other cases."
+          destination: OTHER
+        }
+        policy {
+          cookies_allowed: false
+          setting: "This feature cannot be disabled by settings."
+          policy_exception_justification: "Not implemented."
+        })");
+  url_request_ = context->CreateRequest(request_params_->url, DEFAULT_PRIORITY,
+                                        this, traffic_annotation);
   if (request_params_->http_method == HTTP_METHOD_POST)
     url_request_->set_method("POST");
   url_request_->SetLoadFlags(LOAD_DO_NOT_SAVE_COOKIES |
@@ -682,7 +711,7 @@ class CertNetFetcherImpl : public CertNetFetcher {
       : task_runner_(base::ThreadTaskRunnerHandle::Get()), context_(context) {}
 
   void Shutdown() override {
-    DCHECK(task_runner_->RunsTasksOnCurrentThread());
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
     if (impl_) {
       impl_->Shutdown();
       impl_.reset();
@@ -740,9 +769,9 @@ class CertNetFetcherImpl : public CertNetFetcher {
     DCHECK(!context_);
   }
 
-  void DoFetchOnNetworkThread(std::unique_ptr<RequestParams> request_params,
-                              scoped_refptr<RequestCore> request) {
-    DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  void DoFetchOnNetworkSequence(std::unique_ptr<RequestParams> request_params,
+                                scoped_refptr<RequestCore> request) {
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
     if (!context_) {
       // The fetcher might have been shutdown between when this task was posted
@@ -763,13 +792,13 @@ class CertNetFetcherImpl : public CertNetFetcher {
       std::unique_ptr<RequestParams> request_params) {
     scoped_refptr<RequestCore> request_core = new RequestCore(task_runner_);
 
-    // If the fetcher has already been shutdown, DoFetchOnNetworkThread will
+    // If the fetcher has already been shutdown, DoFetchOnNetworkSequence will
     // signal the request with an error. However, if the fetcher shuts down
-    // before DoFetchOnNetworkThread runs and PostTask still returns true, then
-    // the request will hang (that is, WaitForResult will not return).
+    // before DoFetchOnNetworkSequence runs and PostTask still returns true,
+    // then the request will hang (that is, WaitForResult will not return).
     if (!task_runner_->PostTask(
             FROM_HERE,
-            base::Bind(&CertNetFetcherImpl::DoFetchOnNetworkThread, this,
+            base::Bind(&CertNetFetcherImpl::DoFetchOnNetworkSequence, this,
                        base::Passed(&request_params), request_core))) {
       request_core->SignalImmediateError();
     }

@@ -10,6 +10,7 @@
 
 #include "GrGpuResource.h"
 #include "GrOpList.h"
+#include "GrSurfaceProxy.h"
 
 #include "SkTArray.h"
 
@@ -22,8 +23,7 @@ struct SkIRect;
 
 class GrTextureOpList final : public GrOpList {
 public:
-    GrTextureOpList(GrTextureProxy*, GrGpu*, GrAuditTrail*);
-
+    GrTextureOpList(GrResourceProvider*, GrTextureProxy*, GrAuditTrail*);
     ~GrTextureOpList() override;
 
     /**
@@ -51,21 +51,22 @@ public:
      * depending on the type of surface, configs, etc, and the backend-specific
      * limitations.
      */
-    bool copySurface(GrSurface* dst,
-                     GrSurface* src,
+    bool copySurface(const GrCaps& caps,
+                     GrSurfaceProxy* dst,
+                     GrSurfaceProxy* src,
                      const SkIRect& srcRect,
-                     const SkIPoint& dstPoint);
+                     const SkIPoint& dstPoint) override;
 
     GrTextureOpList* asTextureOpList() override { return this; }
 
     SkDEBUGCODE(void dump() const override;)
 
+    SkDEBUGCODE(int numOps() const override { return fRecordedOps.count(); })
+
 private:
-    // The unique ID is only needed for the audit trail. This should be removed with MDB.
-    void recordOp(std::unique_ptr<GrOp>, GrGpuResource::UniqueID renderTargetID);
+    void recordOp(std::unique_ptr<GrOp>);
 
     SkSTArray<2, std::unique_ptr<GrOp>, true> fRecordedOps;
-    GrGpu*                          fGpu;
 
     typedef GrOpList INHERITED;
 };

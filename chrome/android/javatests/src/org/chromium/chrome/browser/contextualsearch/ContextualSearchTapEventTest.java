@@ -4,58 +4,53 @@
 
 package org.chromium.chrome.browser.contextualsearch;
 
-import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE;
-
 import android.content.Context;
-import android.net.Uri;
 import android.support.test.filters.SmallTest;
 import android.widget.LinearLayout;
 
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManagerWrapper;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilterHost;
-import org.chromium.chrome.test.ChromeActivityTestCaseBase;
+import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.ContextualSearchClient;
+import org.chromium.content.browser.SelectionClient;
 import org.chromium.content.browser.SelectionPopupController;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
 import org.chromium.ui.touch_selection.SelectionEventType;
-
-import javax.annotation.Nullable;
 
 /**
  * Mock touch events with Contextual Search to test behavior of its panel and manager.
  */
-public class ContextualSearchTapEventTest extends ChromeActivityTestCaseBase<ChromeActivity> {
+@RunWith(ChromeJUnit4ClassRunner.class)
+@CommandLineFlags.Add({
+        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
+})
+public class ContextualSearchTapEventTest {
+    @Rule
+    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
+            new ChromeActivityTestRule<>(ChromeActivity.class);
 
     private ContextualSearchManagerWrapper mContextualSearchManager;
     private ContextualSearchPanel mPanel;
     private OverlayPanelManagerWrapper mPanelManager;
-    private ContextualSearchClient mContextualSearchClient;
-
-    /**
-     * A ContextualSearchRequest that forgoes URI template lookup.
-     */
-    private static class MockContextualSearchRequest extends ContextualSearchRequest {
-        public MockContextualSearchRequest(String term, String altTerm, boolean prefetch) {
-            super(term, altTerm, "", prefetch);
-        }
-
-        @Override
-        protected Uri getUriTemplate(
-                String query, @Nullable String alternateTerm, String mid, boolean shouldPrefetch) {
-            return Uri.parse("");
-        }
-    }
+    private SelectionClient mContextualSearchClient;
 
     // --------------------------------------------------------------------------------------------
 
@@ -63,9 +58,9 @@ public class ContextualSearchTapEventTest extends ChromeActivityTestCaseBase<Chr
      * ContextualSearchPanel wrapper that prevents native calls.
      */
     private static class ContextualSearchPanelWrapper extends ContextualSearchPanel {
-        public ContextualSearchPanelWrapper(Context context, LayoutUpdateHost updateHost,
-                EventFilterHost eventHost, OverlayPanelManager panelManager) {
-            super(context, updateHost, eventHost, panelManager);
+        public ContextualSearchPanelWrapper(
+                Context context, LayoutUpdateHost updateHost, OverlayPanelManager panelManager) {
+            super(context, updateHost, panelManager);
         }
 
         @Override
@@ -84,15 +79,14 @@ public class ContextualSearchTapEventTest extends ChromeActivityTestCaseBase<Chr
      * ContextualSearchManager wrapper that prevents network requests and most native calls.
      */
     private static class ContextualSearchManagerWrapper extends ContextualSearchManager {
-        public ContextualSearchManagerWrapper(ChromeActivity activity,
-                WindowAndroid windowAndroid) {
-            super(activity, windowAndroid, null);
+        public ContextualSearchManagerWrapper(ChromeActivity activity) {
+            super(activity, null);
             setSelectionController(new MockCSSelectionController(activity, this));
             ContentViewCore contentView = getSelectionController().getBaseContentView();
-            contentView.setSelectionPopupControllerForTesting(
-                    new SelectionPopupController(activity, null, null, null,
-                            contentView.getRenderCoordinates(), null));
-            contentView.setContextualSearchClient(this);
+            WebContents webContents = WebContentsFactory.createWebContents(false, false);
+            contentView.setSelectionPopupControllerForTesting(new SelectionPopupController(
+                    activity, null, webContents, null, contentView.getRenderCoordinates()));
+            contentView.setSelectionClient(this);
             MockContextualSearchPolicy policy = new MockContextualSearchPolicy();
             setContextualSearchPolicy(policy);
             mTranslateController = new MockedCSTranslateController(activity, policy, null);
@@ -107,15 +101,8 @@ public class ContextualSearchTapEventTest extends ChromeActivityTestCaseBase<Chr
         }
 
         @Override
-        protected ContextualSearchRequest createContextualSearchRequest(
-                String query, String altTerm, String mid, boolean shouldPrefetch) {
-            return new MockContextualSearchRequest(query, altTerm, shouldPrefetch);
-        }
-
-        @Override
         protected void nativeGatherSurroundingText(long nativeContextualSearchManager,
-                String selection, String homeCountry, WebContents webContents,
-                boolean maySendBasePageUrl) {}
+                ContextualSearchContext contextualSearchContext, WebContents baseWebContents) {}
 
         /**
          * @return A stubbed ContentViewCore for mocking text selection.
@@ -140,7 +127,7 @@ public class ContextualSearchTapEventTest extends ChromeActivityTestCaseBase<Chr
         }
 
         @Override
-        public StubbedContentViewCore getBaseContentView() {
+        StubbedContentViewCore getBaseContentView() {
             return mContentViewCore;
         }
     }
@@ -197,7 +184,7 @@ public class ContextualSearchTapEventTest extends ChromeActivityTestCaseBase<Chr
     /**
      * Trigger text selection on the contextual search manager.
      */
-    private void mockTapText(String text) {
+    private void mockLongpressText(String text) {
         mContextualSearchManager.getBaseContentView().setSelectedText(text);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -209,65 +196,161 @@ public class ContextualSearchTapEventTest extends ChromeActivityTestCaseBase<Chr
     }
 
     /**
+     * Trigger text selection on the contextual search manager.
+     */
+    private void mockTapText(String text) {
+        mContextualSearchManager.getBaseContentView().setSelectedText(text);
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mContextualSearchManager.getGestureStateListener().onTouchDown();
+                mContextualSearchClient.showUnhandledTapUIIfNeeded(0, 0);
+            }
+        });
+    }
+
+    /**
      * Trigger empty space tap.
      */
     private void mockTapEmptySpace() {
-        mContextualSearchClient.showUnhandledTapUIIfNeeded(0, 0);
-        mContextualSearchClient.onSelectionEvent(
-                SelectionEventType.SELECTION_HANDLES_CLEARED, 0, 0);
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mContextualSearchClient.showUnhandledTapUIIfNeeded(0, 0);
+                mContextualSearchClient.onSelectionEvent(
+                        SelectionEventType.SELECTION_HANDLES_CLEARED, 0, 0);
+            }
+        });
+    }
+
+    /**
+     * Generates a call indicating that surrounding text and selection range are available.
+     */
+    private void generateTextSurroundingSelectionAvailable() {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                // It only makes sense to send dummy data here because we can't easily control
+                // what's in the native context.
+                mContextualSearchManager.onTextSurroundingSelectionAvailable(
+                        "UTF-8", "unused", 0, 0);
+            }
+        });
+    }
+
+    /**
+     * Generates an ACK for the SelectWordAroundCaret native call, which indicates that the select
+     * action has completed with the given result.
+     */
+    private void generateSelectWordAroundCaretAck() {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                // It only makes sense to send dummy data here because we can't easily control
+                // what's in the native context.
+                mContextualSearchManager.selectWordAroundCaretAck(true, 0, 0);
+            }
+        });
     }
 
     // --------------------------------------------------------------------------------------------
 
-    public ContextualSearchTapEventTest() {
-        super(ChromeActivity.class);
-    }
+    @Before
+    public void setUp() throws Exception {
+        mActivityTestRule.startMainActivityOnBlankPage();
+        final ChromeActivity activity = mActivityTestRule.getActivity();
 
-    @Override
-    protected void setUp() throws Exception {
-        super.setUp();
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mPanelManager = new OverlayPanelManagerWrapper();
+                mPanelManager.setContainerView(new LinearLayout(activity));
+                mPanelManager.setDynamicResourceLoader(new DynamicResourceLoader(0, null));
 
-        mPanelManager = new OverlayPanelManagerWrapper();
-        mPanelManager.setContainerView(new LinearLayout(getActivity()));
-        mPanelManager.setDynamicResourceLoader(new DynamicResourceLoader(0, null));
+                mContextualSearchManager = new ContextualSearchManagerWrapper(activity);
+                mPanel = new ContextualSearchPanelWrapper(activity, null, mPanelManager);
+                mPanel.setManagementDelegate(mContextualSearchManager);
+                mContextualSearchManager.setContextualSearchPanel(mPanel);
 
-        mContextualSearchManager =
-                new ContextualSearchManagerWrapper(getActivity(), getActivity().getWindowAndroid());
-        mPanel = new ContextualSearchPanelWrapper(getActivity(), null, null, mPanelManager);
-        mPanel.setManagementDelegate(mContextualSearchManager);
-        mContextualSearchManager.setContextualSearchPanel(mPanel);
-
-        mContextualSearchClient = mContextualSearchManager;
-    }
-
-    @Override
-    public void startMainActivity() throws InterruptedException {
-        startMainActivityWithURL("about:blank");
+                mContextualSearchClient = mContextualSearchManager;
+            }
+        });
     }
 
     /**
      * Tests that a Tap gesture followed by tapping empty space closes the panel.
      */
+    @Test
     @SmallTest
     @Feature({"ContextualSearch"})
-    @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
-    @RetryOnFailure
-    public void testTextTapFollowedByNonTextTap() {
-        assertTrue(mPanelManager.getRequestPanelShowCount() == 0);
+    @Restriction(Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    public void testLongpressFollowedByNonTextTap() {
+        Assert.assertEquals(mPanelManager.getRequestPanelShowCount(), 0);
 
         // Fake a selection event.
-        mockTapText("text");
+        mockLongpressText("text");
+        // Generate the surrounding-text-available callback.
+        // Surrounding text is gathered for longpress due to icing integration.
+        generateTextSurroundingSelectionAvailable();
 
-        assertTrue(mPanelManager.getRequestPanelShowCount() == 1);
-        assertTrue(mPanelManager.getPanelHideCount() == 0);
-        assertTrue(mContextualSearchManager.getSelectionController().getSelectedText()
-                .equals("text"));
+        Assert.assertEquals(mPanelManager.getRequestPanelShowCount(), 1);
+        Assert.assertEquals(mPanelManager.getPanelHideCount(), 0);
+        Assert.assertEquals(mContextualSearchManager.getSelectionController().getSelectedText(),
+                "text");
 
         // Fake tap on non-text.
         mockTapEmptySpace();
 
-        assertTrue(mPanelManager.getRequestPanelShowCount() == 1);
-        assertTrue(mPanelManager.getPanelHideCount() == 1);
-        assertTrue(mContextualSearchManager.getSelectionController().getSelectedText() == null);
+        Assert.assertEquals(mPanelManager.getRequestPanelShowCount(), 1);
+        Assert.assertEquals(mPanelManager.getPanelHideCount(), 1);
+        Assert.assertNull(mContextualSearchManager.getSelectionController().getSelectedText());
+    }
+
+    /**
+     * Tests that a Tap gesture followed by tapping empty space closes the panel.
+     */
+    @Test
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    @Restriction(Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    public void testTextTapFollowedByNonTextTap() {
+        Assert.assertEquals(mPanelManager.getRequestPanelShowCount(), 0);
+
+        // Fake a Tap event.
+        mockTapText("text");
+        // Generate the surrounding-text-available callback.
+        generateTextSurroundingSelectionAvailable();
+        // Right now the tap-processing sequence will stall at selectWordAroundCaret, so we need
+        // to prod it forward by generating an ACK:
+        generateSelectWordAroundCaretAck();
+        Assert.assertEquals(mPanelManager.getRequestPanelShowCount(), 1);
+        Assert.assertEquals(mPanelManager.getPanelHideCount(), 0);
+    }
+
+    /**
+     * Tests that a Tap gesture processing is robust even when the selection somehow gets cleared
+     * during that process.  This tests a failure-case found in crbug.com/728644.
+     */
+    @Test
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    @Restriction(Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    public void testTapProcessIsRobustWhenSelectionGetsCleared() throws InterruptedException {
+        Assert.assertEquals(mPanelManager.getRequestPanelShowCount(), 0);
+
+        // Fake a Tap event.
+        mockTapText("text");
+        // Generate the surrounding-text-available callback.
+        generateTextSurroundingSelectionAvailable();
+
+        // Now clear the selection!
+        mContextualSearchManager.getSelectionController().clearSelection();
+
+        // Continue processing the Tap by acknowledging the SelectWordAroundCaret has selected the
+        // word.  However we just simulated a condition that clears the selection above, so we're
+        // testing for robustness in completion of the processing even when there's no selection.
+        generateSelectWordAroundCaretAck();
+        Assert.assertEquals(mPanelManager.getRequestPanelShowCount(), 0);
+        Assert.assertEquals(mPanelManager.getPanelHideCount(), 0);
     }
 }

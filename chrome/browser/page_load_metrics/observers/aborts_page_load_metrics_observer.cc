@@ -230,8 +230,8 @@ void RecordAbortAfterCommitBeforePaint(
                           abort_info.time_to_abort);
       return;
     case PageAbortReason::ABORT_OTHER:
-      NOTREACHED()
-          << "Received PageAbortReason::ABORT_OTHER for committed load.";
+      // This is technically possible, though rare. See ~PageLoadTracker for an
+      // explanation.
       return;
     case PageAbortReason::ABORT_NONE:
       NOTREACHED();
@@ -268,8 +268,8 @@ void RecordAbortDuringParse(
                           abort_info.time_to_abort);
       return;
     case PageAbortReason::ABORT_OTHER:
-      NOTREACHED()
-          << "Received PageAbortReason::ABORT_OTHER for committed load.";
+      // This is technically possible, though rare. See ~PageLoadTracker for an
+      // explanation.
       return;
     case PageAbortReason::ABORT_NONE:
       NOTREACHED();
@@ -296,7 +296,7 @@ bool ShouldTrackMetrics(const page_load_metrics::PageLoadExtraInfo& extra_info,
 AbortsPageLoadMetricsObserver::AbortsPageLoadMetricsObserver() {}
 
 void AbortsPageLoadMetricsObserver::OnComplete(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   page_load_metrics::PageAbortInfo abort_info = GetPageAbortInfo(extra_info);
   if (!ShouldTrackMetrics(extra_info, abort_info))
@@ -309,14 +309,17 @@ void AbortsPageLoadMetricsObserver::OnComplete(
   // timing IPCs are tracked via the ERR_NO_IPCS_RECEIVED error code in the
   // PageLoad.Events.InternalError histogram, so we can keep track of how often
   // this happens.
-  if (timing.IsEmpty())
+  if (page_load_metrics::IsEmpty(timing))
     return;
 
-  if (timing.parse_start && abort_info.time_to_abort >= timing.parse_start &&
-      (!timing.parse_stop || timing.parse_stop >= abort_info.time_to_abort)) {
+  if (timing.parse_timing->parse_start &&
+      abort_info.time_to_abort >= timing.parse_timing->parse_start &&
+      (!timing.parse_timing->parse_stop ||
+       timing.parse_timing->parse_stop >= abort_info.time_to_abort)) {
     RecordAbortDuringParse(abort_info);
   }
-  if (!timing.first_paint || timing.first_paint >= abort_info.time_to_abort) {
+  if (!timing.paint_timing->first_paint ||
+      timing.paint_timing->first_paint >= abort_info.time_to_abort) {
     RecordAbortAfterCommitBeforePaint(abort_info);
   }
 }

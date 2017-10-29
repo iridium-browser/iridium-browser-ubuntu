@@ -6,6 +6,7 @@
 
 #include <iterator>
 
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -20,12 +21,13 @@ namespace certificate_transparency {
 
 namespace {
 
-base::ListValue* ListValueFromStrings(const std::vector<const char*>& strings) {
+std::unique_ptr<base::ListValue> ListValueFromStrings(
+    const std::vector<const char*>& strings) {
   std::unique_ptr<base::ListValue> result(new base::ListValue);
   for (auto* const str : strings) {
     result->AppendString(str);
   }
-  return result.release();
+  return result;
 }
 
 class CTPolicyManagerTest : public ::testing::Test {

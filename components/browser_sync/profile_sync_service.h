@@ -20,11 +20,11 @@
 #include "base/message_loop/message_loop.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
-#include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/sync/base/experiments.h"
@@ -56,7 +56,6 @@
 #include "net/base/backoff_entry.h"
 #include "url/gurl.h"
 
-class Profile;
 class ProfileOAuth2TokenService;
 class SigninManagerWrapper;
 
@@ -170,7 +169,6 @@ class ProfileSyncService : public syncer::SyncServiceBase,
                            public syncer::SyncPrefObserver,
                            public syncer::DataTypeManagerObserver,
                            public syncer::UnrecoverableErrorHandler,
-                           public KeyedService,
                            public OAuth2TokenService::Consumer,
                            public OAuth2TokenService::Observer,
                            public SigninManagerBase::Observer,
@@ -240,7 +238,6 @@ class ProfileSyncService : public syncer::SyncServiceBase,
     scoped_refptr<net::URLRequestContextGetter> url_request_context;
     std::string debug_identifier;
     version_info::Channel channel = version_info::Channel::UNKNOWN;
-    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(InitParams);
@@ -385,8 +382,7 @@ class ProfileSyncService : public syncer::SyncServiceBase,
 
   // SigninManagerBase::Observer implementation.
   void GoogleSigninSucceeded(const std::string& account_id,
-                             const std::string& username,
-                             const std::string& password) override;
+                             const std::string& username) override;
   void GoogleSignedOut(const std::string& account_id,
                        const std::string& username) override;
 
@@ -395,6 +391,13 @@ class ProfileSyncService : public syncer::SyncServiceBase,
       const std::vector<gaia::ListedAccount>& accounts,
       const std::vector<gaia::ListedAccount>& signed_out_accounts,
       const GoogleServiceAuthError& error) override;
+
+  // Similar to above but with a callback that will be invoked on completion.
+  void OnGaiaAccountsInCookieUpdatedWithCallback(
+      const std::vector<gaia::ListedAccount>& accounts,
+      const std::vector<gaia::ListedAccount>& signed_out_accounts,
+      const GoogleServiceAuthError& error,
+      const base::Closure& callback);
 
   // Get the sync status code.
   SyncStatusSummary QuerySyncStatusSummary();
@@ -430,6 +433,10 @@ class ProfileSyncService : public syncer::SyncServiceBase,
 
   // Returns whether sync is currently allowed on this platform.
   bool IsSyncAllowedByPlatform() const;
+
+  // Whether sync is currently blocked from starting because the sync
+  // confirmation dialog hasn't been confirmed.
+  virtual bool IsSyncConfirmationNeeded() const;
 
   // Returns whether sync is managed, i.e. controlled by configuration
   // management. If so, the user is not allowed to configure sync.
@@ -489,8 +496,6 @@ class ProfileSyncService : public syncer::SyncServiceBase,
 
   // Returns true if the syncer is waiting for new datatypes to be encrypted.
   virtual bool encryption_pending() const;
-
-  SigninManagerBase* signin() const;
 
   syncer::SyncErrorController* sync_error_controller() {
     return sync_error_controller_.get();
@@ -552,9 +557,10 @@ class ProfileSyncService : public syncer::SyncServiceBase,
       const PlatformSyncAllowedProvider& platform_sync_allowed_provider);
 
   // Returns a function for |type| that will create a ModelTypeStore that shares
-  // the sync LevelDB backend.
-  syncer::ModelTypeStoreFactory GetModelTypeStoreFactory(
-      syncer::ModelType type);
+  // the sync LevelDB backend. |base_path| should be set to profile path.
+  static syncer::ModelTypeStoreFactory GetModelTypeStoreFactory(
+      syncer::ModelType type,
+      const base::FilePath& base_path);
 
   // Needed to test whether the directory is deleted properly.
   base::FilePath GetDirectoryPathForTest() const;
@@ -567,6 +573,10 @@ class ProfileSyncService : public syncer::SyncServiceBase,
 
   // Triggers sync cycle with request to update specified |types|.
   void RefreshTypesForTest(syncer::ModelTypeSet types);
+
+  // Calls sync engine to send ClearServerDataMessage to server. This is used
+  // to start accounts with a clean slate when performing end to end testing.
+  void ClearServerDataForTest(const base::Closure& callback);
 
  protected:
   // SyncServiceBase implementation.
@@ -672,12 +682,6 @@ class ProfileSyncService : public syncer::SyncServiceBase,
       bool sync_everything,
       const syncer::ModelTypeSet chosen_types) const;
 
-#if defined(OS_CHROMEOS)
-  // Refresh spare sync bootstrap token for re-enabling the sync service.
-  // Called on successful sign-in notifications.
-  void RefreshSpareBootstrapToken(const std::string& passphrase);
-#endif
-
   // Internal unrecoverable error handler. Used to track error reason via
   // Sync.UnrecoverableErrors histogram.
   void OnInternalUnrecoverableError(const tracked_objects::Location& from_here,
@@ -713,6 +717,9 @@ class ProfileSyncService : public syncer::SyncServiceBase,
 
   // Check if previous shutdown is shutdown cleanly.
   void ReportPreviousSessionMemoryWarningCount();
+
+  // Estimates and records memory usage histograms per type.
+  void RecordMemoryUsageHistograms();
 
   // After user switches to custom passphrase encryption a set of steps needs to
   // be performed:
@@ -758,9 +765,6 @@ class ProfileSyncService : public syncer::SyncServiceBase,
 
   // The request context in which sync should operate.
   scoped_refptr<net::URLRequestContextGetter> url_request_context_;
-
-  // The task runner to use for blocking IO operations.
-  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
 
   // Indicates if this is the first time sync is being configured.  This value
   // is equal to !IsFirstSetupComplete() at the time of OnEngineInitialized().

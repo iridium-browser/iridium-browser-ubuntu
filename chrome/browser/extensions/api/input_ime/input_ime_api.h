@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/input_method/input_method_engine_base.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function.h"
@@ -33,10 +34,6 @@
 #endif  // defined(OS_CHROMEOS)
 
 class Profile;
-
-namespace content {
-class NotificationRegistrar;
-}
 
 namespace ui {
 class IMEEngineHandlerInterface;
@@ -65,7 +62,7 @@ class ImeObserver : public input_method::InputMethodEngineBase::Observer {
                                 int cursor_pos,
                                 int anchor_pos,
                                 int offset_pos) override;
-  void OnRequestEngineSwitch() override {};
+  void OnRequestEngineSwitch() override {}
 
  protected:
   // Helper function used to forward the given event to the |profile_|'s event
@@ -179,13 +176,14 @@ class InputImeAPI : public BrowserContextKeyedAPI,
 
   // BrowserContextKeyedAPI implementation.
   static BrowserContextKeyedAPIFactory<InputImeAPI>* GetFactoryInstance();
+  void Shutdown() override;
 
   // ExtensionRegistryObserver implementation.
   void OnExtensionLoaded(content::BrowserContext* browser_context,
                          const Extension* extension) override;
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
-                           UnloadedExtensionInfo::Reason reason) override;
+                           UnloadedExtensionReason reason) override;
 
   // EventRouter::Observer implementation.
   void OnListenerAdded(const EventListenerInfo& details) override;

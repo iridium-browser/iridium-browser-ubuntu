@@ -251,11 +251,11 @@ bool SkRRect::checkCornerContainment(SkScalar x, SkScalar y) const {
     return dist <= SkScalarSquare(fRadii[index].fX * fRadii[index].fY);
 }
 
-bool SkRRect::allCornersCircular() const {
-    return fRadii[0].fX == fRadii[0].fY &&
-        fRadii[1].fX == fRadii[1].fY &&
-        fRadii[2].fX == fRadii[2].fY &&
-        fRadii[3].fX == fRadii[3].fY;
+bool SkRRect::allCornersCircular(SkScalar tolerance) const {
+    return SkScalarNearlyEqual(fRadii[0].fX, fRadii[0].fY, tolerance) &&
+           SkScalarNearlyEqual(fRadii[1].fX, fRadii[1].fY, tolerance) &&
+           SkScalarNearlyEqual(fRadii[2].fX, fRadii[2].fY, tolerance) &&
+           SkScalarNearlyEqual(fRadii[3].fX, fRadii[3].fY, tolerance);
 }
 
 bool SkRRect::contains(const SkRect& rect) const {
@@ -456,10 +456,8 @@ void SkRRect::inset(SkScalar dx, SkScalar dy, SkRRect* dst) const {
 ///////////////////////////////////////////////////////////////////////////////
 
 size_t SkRRect::writeToMemory(void* buffer) const {
-    SkASSERT(kSizeInMemory == sizeof(SkRect) + sizeof(fRadii));
-
-    memcpy(buffer, &fRect, sizeof(SkRect));
-    memcpy((char*)buffer + sizeof(SkRect), fRadii, sizeof(fRadii));
+    // Serialize only the rect and corners, but not the derived type tag.
+    memcpy(buffer, this, kSizeInMemory);
     return kSizeInMemory;
 }
 
@@ -468,14 +466,10 @@ size_t SkRRect::readFromMemory(const void* buffer, size_t length) {
         return 0;
     }
 
-    SkScalar storage[12];
-    SkASSERT(sizeof(storage) == kSizeInMemory);
+    // Deserialize rect and corners, then rederive the type tag.
+    memcpy(this, buffer, kSizeInMemory);
+    this->computeType();
 
-    // we make a local copy, to ensure alignment before we cast
-    memcpy(storage, buffer, kSizeInMemory);
-
-    this->setRectRadii(*(const SkRect*)&storage[0],
-                       (const SkVector*)&storage[4]);
     return kSizeInMemory;
 }
 

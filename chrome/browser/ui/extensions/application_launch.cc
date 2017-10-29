@@ -228,7 +228,8 @@ WebContents* OpenApplicationTab(const AppLaunchParams& launch_params,
   Profile* const profile = launch_params.profile;
   WindowOpenDisposition disposition = launch_params.disposition;
 
-  Browser* browser = chrome::FindTabbedBrowser(profile, false);
+  Browser* browser =
+      chrome::FindTabbedBrowser(profile, false, launch_params.display_id);
   WebContents* contents = NULL;
   if (!browser) {
     // No browser for this profile, need to open a new one.
@@ -266,9 +267,10 @@ WebContents* OpenApplicationTab(const AppLaunchParams& launch_params,
     int tab_index = model->GetIndexOfWebContents(existing_tab);
 
     existing_tab->OpenURL(content::OpenURLParams(
-        url, content::Referrer::SanitizeForRequest(
-                 url, content::Referrer(existing_tab->GetURL(),
-                                        blink::WebReferrerPolicyDefault)),
+        url,
+        content::Referrer::SanitizeForRequest(
+            url, content::Referrer(existing_tab->GetURL(),
+                                   blink::kWebReferrerPolicyDefault)),
         disposition, transition, false));
     // Reset existing_tab as OpenURL() may have clobbered it.
     existing_tab = browser->tab_strip_model()->GetActiveWebContents();

@@ -8,12 +8,13 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "content/browser/renderer_host/input/mouse_wheel_phase_handler.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/events/event_handler.h"
 #include "ui/events/gestures/motion_event_aura.h"
-#include "ui/events/latency_info.h"
+#include "ui/latency/latency_info.h"
 
 namespace aura {
 class Window;
@@ -31,6 +32,7 @@ class TouchSelectionController;
 }
 
 namespace content {
+
 struct ContextMenuParams;
 class OverscrollController;
 class RenderWidgetHostImpl;
@@ -59,8 +61,13 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
     // Converts |rect| from window coordinate to screen coordinate.
     virtual gfx::Rect ConvertRectToScreen(const gfx::Rect& rect) const = 0;
     // Call keybindings handler against the event and send matched edit commands
-    // to the renderer instead.
-    virtual void ForwardKeyboardEvent(const NativeWebKeyboardEvent& event) = 0;
+    // to the renderer instead. |update_event| (if non-null) is set to indicate
+    // whether ui::KeyEvent::SetHandled() should be called on the underlying
+    // ui::KeyEvent.
+    virtual void ForwardKeyboardEventWithLatencyInfo(
+        const NativeWebKeyboardEvent& event,
+        const ui::LatencyInfo& latency,
+        bool* update_event) = 0;
     // Returns whether the widget needs to grab mouse capture to work properly.
     virtual bool NeedsMouseCapture() = 0;
     virtual void SetTooltipsEnabled(bool enable) = 0;
@@ -243,6 +250,7 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   ui::EventHandler* popup_child_event_handler_;
   Delegate* const delegate_;
   aura::Window* window_;
+  MouseWheelPhaseHandler mouse_wheel_phase_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewEventHandler);
 };

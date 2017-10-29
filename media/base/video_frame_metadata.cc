@@ -53,7 +53,7 @@ void VideoFrameMetadata::SetString(Key key, const std::string& value) {
       // Using BinaryValue since we don't want the |value| interpreted as having
       // any particular character encoding (e.g., UTF-8) by
       // base::DictionaryValue.
-      base::BinaryValue::CreateWithCopiedBuffer(value.data(), value.size()));
+      base::Value::CreateWithCopiedBuffer(value.data(), value.size()));
 }
 
 namespace {
@@ -63,10 +63,9 @@ void SetTimeValue(VideoFrameMetadata::Key key,
                   base::DictionaryValue* dictionary) {
   const int64_t internal_value = value.ToInternalValue();
   dictionary->SetWithoutPathExpansion(
-      ToInternalKey(key),
-      base::BinaryValue::CreateWithCopiedBuffer(
-          reinterpret_cast<const char*>(&internal_value),
-          sizeof(internal_value)));
+      ToInternalKey(key), base::Value::CreateWithCopiedBuffer(
+                              reinterpret_cast<const char*>(&internal_value),
+                              sizeof(internal_value)));
 }
 }  // namespace
 
@@ -110,32 +109,34 @@ bool VideoFrameMetadata::GetRotation(Key key, VideoRotation* value) const {
 
 bool VideoFrameMetadata::GetString(Key key, std::string* value) const {
   DCHECK(value);
-  const base::BinaryValue* const binary_value = GetBinaryValue(key);
+  const base::Value* const binary_value = GetBinaryValue(key);
   if (binary_value)
-    value->assign(binary_value->GetBuffer(), binary_value->GetSize());
+    value->assign(binary_value->GetBlob().data(),
+                  binary_value->GetBlob().size());
   return !!binary_value;
 }
 
 namespace {
-template<class TimeType>
-bool ToTimeValue(const base::BinaryValue& binary_value, TimeType* value) {
+template <class TimeType>
+bool ToTimeValue(const base::Value& binary_value, TimeType* value) {
   DCHECK(value);
   int64_t internal_value;
-  if (binary_value.GetSize() != sizeof(internal_value))
+  if (binary_value.GetBlob().size() != sizeof(internal_value))
     return false;
-  memcpy(&internal_value, binary_value.GetBuffer(), sizeof(internal_value));
+  memcpy(&internal_value, binary_value.GetBlob().data(),
+         sizeof(internal_value));
   *value = TimeType::FromInternalValue(internal_value);
   return true;
 }
 }  // namespace
 
 bool VideoFrameMetadata::GetTimeDelta(Key key, base::TimeDelta* value) const {
-  const base::BinaryValue* const binary_value = GetBinaryValue(key);
+  const base::Value* const binary_value = GetBinaryValue(key);
   return binary_value && ToTimeValue(*binary_value, value);
 }
 
 bool VideoFrameMetadata::GetTimeTicks(Key key, base::TimeTicks* value) const {
-  const base::BinaryValue* const binary_value = GetBinaryValue(key);
+  const base::Value* const binary_value = GetBinaryValue(key);
   return binary_value && ToTimeValue(*binary_value, value);
 }
 
@@ -166,7 +167,7 @@ void VideoFrameMetadata::MergeMetadataFrom(
   dictionary_.MergeDictionary(&metadata_source->dictionary_);
 }
 
-const base::BinaryValue* VideoFrameMetadata::GetBinaryValue(Key key) const {
+const base::Value* VideoFrameMetadata::GetBinaryValue(Key key) const {
   const base::Value* internal_value = nullptr;
   if (dictionary_.GetWithoutPathExpansion(ToInternalKey(key),
                                           &internal_value) &&

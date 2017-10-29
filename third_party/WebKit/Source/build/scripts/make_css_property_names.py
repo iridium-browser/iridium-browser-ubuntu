@@ -5,76 +5,9 @@ import sys
 
 import css_properties
 import json5_generator
+import template_expander
 import license
 
-
-HEADER_TEMPLATE = """
-%(license)s
-
-#ifndef %(class_name)s_h
-#define %(class_name)s_h
-
-#include "core/CoreExport.h"
-#include "wtf/Assertions.h"
-#include <stddef.h>
-
-namespace WTF {
-class AtomicString;
-class String;
-}
-
-namespace blink {
-
-enum CSSPropertyID {
-    CSSPropertyInvalid = 0,
-    // This isn't a property, but we need to know the position of @apply rules in style rules
-    CSSPropertyApplyAtRule = 1,
-    CSSPropertyVariable = 2,
-%(property_enums)s
-};
-
-const int firstCSSProperty = %(first_property_id)s;
-const int numCSSProperties = %(properties_count)s;
-const int lastCSSProperty = %(last_property_id)d;
-const int lastUnresolvedCSSProperty = %(last_unresolved_property_id)d;
-const size_t maxCSSPropertyNameLength = %(max_name_length)d;
-
-const char* getPropertyName(CSSPropertyID);
-const WTF::AtomicString& getPropertyNameAtomicString(CSSPropertyID);
-WTF::String getPropertyNameString(CSSPropertyID);
-WTF::String getJSPropertyName(CSSPropertyID);
-
-inline bool isCSSPropertyIDWithName(int id)
-{
-    return id >= firstCSSProperty && id <= lastUnresolvedCSSProperty;
-}
-
-inline bool isValidCSSPropertyID(CSSPropertyID id)
-{
-    return id != CSSPropertyInvalid;
-}
-
-inline CSSPropertyID convertToCSSPropertyID(int value)
-{
-    DCHECK(value >= CSSPropertyInvalid && value <= lastCSSProperty);
-    return static_cast<CSSPropertyID>(value);
-}
-
-inline CSSPropertyID resolveCSSPropertyID(CSSPropertyID id)
-{
-    return convertToCSSPropertyID(id & ~512);
-}
-
-inline bool isPropertyAlias(CSSPropertyID id) { return id & 512; }
-
-CSSPropertyID unresolvedCSSPropertyID(const WTF::String&);
-
-CSSPropertyID CORE_EXPORT cssPropertyID(const WTF::String&);
-
-} // namespace blink
-
-#endif // %(class_name)s_h
-"""
 
 GPERF_TEMPLATE = """
 %%{
@@ -84,15 +17,21 @@ GPERF_TEMPLATE = """
 #include "core/css/HashTools.h"
 #include <string.h>
 
-#include "wtf/ASCIICType.h"
-#include "wtf/text/AtomicString.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/ASCIICType.h"
+#include "platform/wtf/text/AtomicString.h"
+#include "platform/wtf/text/WTFString.h"
 
 #ifdef _MSC_VER
 // Disable the warnings from casting a 64-bit pointer to 32-bit long
 // warning C4302: 'type cast': truncation from 'char (*)[28]' to 'long'
 // warning C4311: 'type cast': pointer truncation from 'char (*)[18]' to 'long'
 #pragma warning(disable : 4302 4311)
+#endif
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+// TODO(thakis): Remove once we use a gperf that no longer produces "register".
+#pragma clang diagnostic ignored "-Wdeprecated-register"
 #endif
 
 namespace blink {
@@ -115,61 +54,65 @@ struct Property;
 %%define class-name %(class_name)sHash
 %%define lookup-function-name findPropertyImpl
 %%define hash-function-name property_hash_function
-%%define slot-name nameOffset
+%%define slot-name name_offset
 %%define word-array-name property_word_list
 %%enum
 %%%%
 %(property_to_enum_map)s
 %%%%
-const Property* findProperty(register const char* str, register unsigned int len)
-{
-    return %(class_name)sHash::findPropertyImpl(str, len);
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
+const Property* FindProperty(const char* str, unsigned int len) {
+  return %(class_name)sHash::findPropertyImpl(str, len);
 }
 
-const char* getPropertyName(CSSPropertyID id)
-{
-    DCHECK(isCSSPropertyIDWithName(id));
-    int index = id - firstCSSProperty;
-    return propertyNameStringsPool + propertyNameStringsOffsets[index];
+const char* getPropertyName(CSSPropertyID id) {
+  DCHECK(isCSSPropertyIDWithName(id));
+  int index = id - firstCSSProperty;
+  return propertyNameStringsPool + propertyNameStringsOffsets[index];
 }
 
-const AtomicString& getPropertyNameAtomicString(CSSPropertyID id)
-{
-    DCHECK(isCSSPropertyIDWithName(id));
-    int index = id - firstCSSProperty;
-    static AtomicString* propertyStrings = new AtomicString[lastUnresolvedCSSProperty]; // Intentionally never destroyed.
-    AtomicString& propertyString = propertyStrings[index];
-    if (propertyString.isNull())
-        propertyString = AtomicString(propertyNameStringsPool + propertyNameStringsOffsets[index]);
-    return propertyString;
+const AtomicString& getPropertyNameAtomicString(CSSPropertyID id) {
+  DCHECK(isCSSPropertyIDWithName(id));
+  int index = id - firstCSSProperty;
+  static AtomicString* propertyStrings =
+      new AtomicString[lastUnresolvedCSSProperty]; // Leaked.
+  AtomicString& propertyString = propertyStrings[index];
+  if (propertyString.IsNull()) {
+    propertyString = AtomicString(propertyNameStringsPool +
+                     propertyNameStringsOffsets[index]);
+  }
+  return propertyString;
 }
 
-String getPropertyNameString(CSSPropertyID id)
-{
-    // We share the StringImpl with the AtomicStrings.
-    return getPropertyNameAtomicString(id).getString();
+String getPropertyNameString(CSSPropertyID id) {
+  // We share the StringImpl with the AtomicStrings.
+  return getPropertyNameAtomicString(id).GetString();
 }
 
-String getJSPropertyName(CSSPropertyID id)
-{
-    char result[maxCSSPropertyNameLength + 1];
-    const char* cssPropertyName = getPropertyName(id);
-    const char* propertyNamePointer = cssPropertyName;
-    if (!propertyNamePointer)
-        return emptyString;
+String getJSPropertyName(CSSPropertyID id) {
+  char result[maxCSSPropertyNameLength + 1];
+  const char* cssPropertyName = getPropertyName(id);
+  const char* propertyNamePointer = cssPropertyName;
+  if (!propertyNamePointer)
+    return g_empty_string;
 
-    char* resultPointer = result;
-    while (char character = *propertyNamePointer++) {
-        if (character == '-') {
-            char nextCharacter = *propertyNamePointer++;
-            if (!nextCharacter)
-                break;
-            character = (propertyNamePointer - 2 != cssPropertyName) ? toASCIIUpper(nextCharacter) : nextCharacter;
-        }
-        *resultPointer++ = character;
+  char* resultPointer = result;
+  while (char character = *propertyNamePointer++) {
+    if (character == '-') {
+      char nextCharacter = *propertyNamePointer++;
+      if (!nextCharacter)
+        break;
+      character = (propertyNamePointer - 2 != cssPropertyName)
+                      ? ToASCIIUpper(nextCharacter) : nextCharacter;
     }
-    *resultPointer = '\\0';
-    return String(result);
+    *resultPointer++ = character;
+  }
+  *resultPointer = '\\0';
+  return String(result);
 }
 
 CSSPropertyID cssPropertyID(const String& string)
@@ -190,18 +133,23 @@ class CSSPropertyNamesWriter(css_properties.CSSProperties):
                          (self.class_name + ".cpp"): self.generate_implementation,
                         }
 
-    def _enum_declaration(self, property):
-        return "    %(property_id)s = %(enum_value)s," % property
+    def _enum_declaration(self, property_):
+        return "    %(property_id)s = %(enum_value)s," % property_
 
+    def _array_item(self, property_):
+        return "    static_cast<CSSPropertyID>(%(enum_value)s), // %(property_id)s" % property_
+
+    @template_expander.use_jinja('templates/CSSPropertyNames.h.tmpl')
     def generate_header(self):
-        return HEADER_TEMPLATE % {
-            'license': license.license_for_generated_cpp(),
+        return {
+            'alias_offset': self._alias_offset,
             'class_name': self.class_name,
             'property_enums': "\n".join(map(self._enum_declaration, self._properties_including_aliases)),
+            'property_aliases': "\n".join(map(self._array_item, self._aliases)),
             'first_property_id': self._first_enum_value,
             'properties_count': len(self._properties),
             'last_property_id': self._first_enum_value + len(self._properties) - 1,
-            'last_unresolved_property_id': max(property["enum_value"] for property in self._properties_including_aliases),
+            'last_unresolved_property_id': self.last_unresolved_property_id,
             'max_name_length': max(map(len, self._properties)),
         }
 
@@ -230,6 +178,7 @@ class CSSPropertyNamesWriter(css_properties.CSSProperties):
         gperf_args = [self.gperf_path, '--key-positions=*', '-P', '-n']
         gperf_args.extend(['-m', '50'])  # Pick best of 50 attempts.
         gperf_args.append('-D')  # Allow duplicate hashes -> More compact code.
+        gperf_args.extend(['-Q', 'CSSPropStringPool'])  # Unique var names.
 
         # If gperf isn't in the path we get an OSError. We don't want to use
         # the normal solution of shell=True (as this has to run on many

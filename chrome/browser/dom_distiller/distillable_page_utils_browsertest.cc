@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "base/command_line.h"
+#include "base/message_loop/message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -100,7 +101,6 @@ class DistillablePageUtilsBrowserTestOption : public InProcessBrowserTest {
   }
 
   void SetUpOnMainThread() override {
-    InProcessBrowserTest::SetUpOnMainThread();
     ASSERT_TRUE(embedded_test_server()->Start());
     web_contents_ =
         browser()->tab_strip_model()->GetActiveWebContents();
@@ -187,6 +187,28 @@ IN_PROC_BROWSER_TEST_F(DistillablePageUtilsBrowserTestAdaboost,
                        TestDelegate) {
   const char* paths[] = {kSimpleArticlePath, kSimpleArticleIFramePath};
   for (unsigned i = 0; i < sizeof(paths)/sizeof(paths[0]); ++i) {
+    testing::InSequence dummy;
+    EXPECT_CALL(holder_, OnResult(true, false)).Times(1);
+    EXPECT_CALL(holder_, OnResult(true, true))
+        .WillOnce(testing::InvokeWithoutArgs(QuitSoon));
+    NavigateAndWait(paths[i], 0);
+  }
+  {
+    testing::InSequence dummy;
+    EXPECT_CALL(holder_, OnResult(false, false)).Times(1);
+    EXPECT_CALL(holder_, OnResult(false, true))
+        .WillOnce(testing::InvokeWithoutArgs(QuitSoon));
+    NavigateAndWait(kNonArticlePath, 0);
+  }
+}
+
+using DistillablePageUtilsBrowserTestAllArticles =
+    DistillablePageUtilsBrowserTestOption<kAllArticles>;
+
+IN_PROC_BROWSER_TEST_F(DistillablePageUtilsBrowserTestAllArticles,
+                       TestDelegate) {
+  const char* paths[] = {kSimpleArticlePath, kSimpleArticleIFramePath};
+  for (unsigned i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i) {
     testing::InSequence dummy;
     EXPECT_CALL(holder_, OnResult(true, false)).Times(1);
     EXPECT_CALL(holder_, OnResult(true, true))

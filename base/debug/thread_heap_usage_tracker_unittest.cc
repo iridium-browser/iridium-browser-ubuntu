@@ -10,6 +10,10 @@
 #include "base/allocator/features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_MACOSX)
+#include "base/allocator/allocator_interception_mac.h"
+#endif
+
 namespace base {
 namespace debug {
 
@@ -549,12 +553,15 @@ TEST_F(ThreadHeapUsageTrackerTest, AllShimFunctionsAreProvided) {
   MockFree(alloc);
 }
 
-#if BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
-TEST(ThreadHeapUsageShimTest, HooksIntoMallocWhenShimAvailable) {
+#if BUILDFLAG(USE_ALLOCATOR_SHIM)
+class ThreadHeapUsageShimTest : public testing::Test {
 #if defined(OS_MACOSX)
-  allocator::InitializeAllocatorShim();
+  void SetUp() override { allocator::InitializeAllocatorShim(); }
+  void TearDown() override { allocator::UninterceptMallocZonesForTesting(); }
 #endif
+};
 
+TEST_F(ThreadHeapUsageShimTest, HooksIntoMallocWhenShimAvailable) {
   ASSERT_FALSE(ThreadHeapUsageTracker::IsHeapTrackingEnabled());
 
   ThreadHeapUsageTracker::EnableHeapTracking();
@@ -594,7 +601,7 @@ TEST(ThreadHeapUsageShimTest, HooksIntoMallocWhenShimAvailable) {
 
   ASSERT_FALSE(ThreadHeapUsageTracker::IsHeapTrackingEnabled());
 }
-#endif  // BUILDFLAG(USE_EXPERIMENTAL_ALLOCATOR_SHIM)
+#endif  // BUILDFLAG(USE_ALLOCATOR_SHIM)
 
 }  // namespace debug
 }  // namespace base

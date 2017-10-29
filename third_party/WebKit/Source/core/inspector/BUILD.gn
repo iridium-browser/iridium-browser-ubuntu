@@ -11,6 +11,8 @@ _inspector_protocol_dir = "//third_party/inspector_protocol"
 
 blink_core_sources("inspector") {
   sources = [
+    "AddStringToDigestor.cpp",
+    "AddStringToDigestor.h",
     "ConsoleMessage.cpp",
     "ConsoleMessage.h",
     "ConsoleMessageStorage.cpp",
@@ -20,6 +22,8 @@ blink_core_sources("inspector") {
     "DOMEditor.h",
     "DOMPatchSupport.cpp",
     "DOMPatchSupport.h",
+    "DevToolsEmulator.cpp",
+    "DevToolsEmulator.h",
     "DevToolsHost.cpp",
     "DevToolsHost.h",
     "IdentifiersFactory.cpp",
@@ -30,20 +34,25 @@ blink_core_sources("inspector") {
     "InspectorAnimationAgent.h",
     "InspectorApplicationCacheAgent.cpp",
     "InspectorApplicationCacheAgent.h",
+    "InspectorBaseAgent.cpp",
     "InspectorBaseAgent.h",
     "InspectorCSSAgent.cpp",
     "InspectorCSSAgent.h",
     "InspectorDOMAgent.cpp",
+    "InspectorDOMAgent.h",
     "InspectorDOMDebuggerAgent.cpp",
     "InspectorDOMDebuggerAgent.h",
+    "InspectorDOMSnapshotAgent.cpp",
+    "InspectorDOMSnapshotAgent.h",
+    "InspectorEmulationAgent.cpp",
+    "InspectorEmulationAgent.h",
+    "InspectorFrontendClient.h",
     "InspectorHighlight.cpp",
     "InspectorHighlight.h",
     "InspectorHistory.cpp",
     "InspectorHistory.h",
     "InspectorInputAgent.cpp",
     "InspectorInputAgent.h",
-    "InspectorInstrumentation.cpp",
-    "InspectorInstrumentation.h",
     "InspectorLayerTreeAgent.cpp",
     "InspectorLayerTreeAgent.h",
     "InspectorLogAgent.cpp",
@@ -52,6 +61,8 @@ blink_core_sources("inspector") {
     "InspectorMemoryAgent.h",
     "InspectorNetworkAgent.cpp",
     "InspectorNetworkAgent.h",
+    "InspectorOverlayAgent.cpp",
+    "InspectorOverlayAgent.h",
     "InspectorOverlayHost.cpp",
     "InspectorOverlayHost.h",
     "InspectorPageAgent.cpp",
@@ -86,32 +97,18 @@ blink_core_sources("inspector") {
     "WorkerThreadDebugger.h",
   ]
 
+  jumbo_excluded_sources = [
+    # Collides with InspectorPageAgent.cpp and
+    # NetworkResourcesData.cpp (patch incoming)
+    "InspectorNetworkAgent.cpp",
+
+    # Collides with InspectorPageAgent.cpp (patch incoming)
+    "MainThreadDebugger.cpp",
+  ]
+
   configs += [
     # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
     "//build/config/compiler:no_size_t_to_int_warning",
-  ]
-}
-
-action("instrumentation_sources") {
-  visibility = [ ":*" ]
-  script = "CodeGeneratorInstrumentation.py"
-
-  inputs = [
-    # Input file for the script.
-    "InspectorInstrumentation.idl",
-  ]
-
-  outputs = [
-    "$blink_core_output_dir/InspectorInstrumentationInl.h",
-    "$blink_core_output_dir/InspectorOverridesInl.h",
-    "$blink_core_output_dir/InstrumentingAgents.h",
-    "$blink_core_output_dir/InspectorInstrumentationImpl.cpp",
-  ]
-
-  args = [
-    rebase_path("InspectorInstrumentation.idl", root_build_dir),
-    "--output_dir",
-    rebase_path(blink_core_output_dir, root_build_dir),
   ]
 }
 
@@ -152,6 +149,8 @@ inspector_protocol_generate("protocol_sources") {
     "inspector/protocol/DOMDebugger.cpp",
     "inspector/protocol/DOMDebugger.h",
     "inspector/protocol/DOM.h",
+    "inspector/protocol/DOMSnapshot.cpp",
+    "inspector/protocol/DOMSnapshot.h",
     "inspector/protocol/DOMStorage.cpp",
     "inspector/protocol/DOMStorage.h",
     "inspector/protocol/Emulation.cpp",
@@ -171,12 +170,12 @@ inspector_protocol_generate("protocol_sources") {
     "inspector/protocol/Memory.h",
     "inspector/protocol/Network.cpp",
     "inspector/protocol/Network.h",
+    "inspector/protocol/Overlay.cpp",
+    "inspector/protocol/Overlay.h",
     "inspector/protocol/Page.cpp",
     "inspector/protocol/Page.h",
     "inspector/protocol/Protocol.cpp",
     "inspector/protocol/Protocol.h",
-    "inspector/protocol/Rendering.cpp",
-    "inspector/protocol/Rendering.h",
     "inspector/protocol/Runtime.h",
     "inspector/protocol/Security.cpp",
     "inspector/protocol/Security.h",
@@ -193,8 +192,7 @@ inspector_protocol_generate("protocol_sources") {
 
 # Compiles the sources generated above.
 source_set("generated") {
-  sources = get_target_outputs(":protocol_sources") +
-            get_target_outputs(":instrumentation_sources")
+  sources = get_target_outputs(":protocol_sources")
 
   configs -= core_config_remove
   configs += core_config_add + [
@@ -207,13 +205,13 @@ source_set("generated") {
   }
 
   deps = [
-    ":instrumentation_sources",
     ":protocol_sources",
     "//skia",
     "//third_party/WebKit/Source/bindings/core/v8:bindings_core_v8_generated",
     "//third_party/WebKit/Source/core:all_generators",
+    "//third_party/WebKit/Source/core/probe:generated",
     "//third_party/WebKit/Source/platform:make_platform_generated",
-    "//third_party/WebKit/Source/wtf",
+    "//third_party/WebKit/Source/platform/wtf",
     "//v8",
   ]
 }

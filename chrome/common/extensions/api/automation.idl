@@ -67,6 +67,7 @@
     abbr,
     alertDialog,
     alert,
+    anchor,
     annotation,
     application,
     article,
@@ -78,6 +79,7 @@
     buttonDropDown,
     canvas,
     caption,
+    caret,
     cell,
     checkBox,
     client,
@@ -98,7 +100,6 @@
     dialog,
     directory,
     disclosureTriangle,
-    div,
     document,
     embeddedObject,
     feed,
@@ -106,6 +107,7 @@
     figure,
     footer,
     form,
+    genericContainer,
     grid,
     group,
     heading,
@@ -199,10 +201,8 @@
   // Describes characteristics of an $(ref:automation.AutomationNode).
   enum StateType {
     busy,
-    checked,
     collapsed,
     default,
-    disabled,
     editable,
     expanded,
     focusable,
@@ -215,9 +215,7 @@
     multiline,
     multiselectable,
     offscreen,
-    pressed,
     protected,
-    readOnly,
     required,
     richlyEditable,
     selectable,
@@ -267,10 +265,17 @@
   enum NameFromType {
     uninitialized,
     attribute,
+    attributeExplicitlyEmpty,
     contents,
     placeholder,
     relatedElement,
     value
+  };
+
+  // The input restriction for a object -- even non-controls can be disabled.
+  enum Restriction {
+    disabled,
+    readOnly
   };
 
   dictionary Rect {
@@ -365,6 +370,11 @@
   // A listener for changes on the <code>AutomationNode</code> tree.
   callback TreeChangeObserver = void(TreeChange treeChange);
 
+  dictionary CustomAction {
+    long id;
+    DOMString description;
+  };
+
   // A single node in an Automation tree.
   [nocompile, noinline_doc] dictionary AutomationNode {
     // The root node of the tree containing this AutomationNode.
@@ -396,6 +406,9 @@
 
     // The placeholder for this text field, if any.
     DOMString? placeholder;
+
+    // The role description for this node.
+    DOMString? roleDescription;
 
     // The accessible name for this node, via the
     // <a href="http://www.w3.org/TR/wai-aria/roles#namecalculation">
@@ -441,6 +454,12 @@
     // The node referred to by <code>aria-activedescendant</code>, where
     // applicable
     AutomationNode? activeDescendant;
+
+    // The target of an in-page link.
+    AutomationNode? inPageLinkTarget;
+
+    // An array of custom actions.
+    CustomAction[]? customActions;
 
     //
     // Link attributes.
@@ -548,24 +567,38 @@
     // Table attributes.
     //
 
-    // The number of rows in this table.
+    // The number of rows in this table as specified in the DOM.
     long? tableRowCount;
 
-    // The number of columns in this table.
+    // The number of rows in this table as specified by the page author.
+    long? ariaRowCount;
+
+    // The number of columns in this table as specified in the DOM.
     long? tableColumnCount;
+
+    // The number of columns in this table as specified by the page author.
+    long? ariaColumnCount;
 
     //
     // Table cell attributes.
     //
 
-    // The zero-based index of the column that this cell is in.
+    // The zero-based index of the column that this cell is in as specified in
+    // the DOM.
     long? tableCellColumnIndex;
+
+    // The ARIA column index as specified by the page author.
+    long? ariaCellColumnIndex;
 
     // The number of columns that this cell spans (default is 1).
     long? tableCellColumnSpan;
 
-    // The zero-based index of the row that this cell is in.
+    // The zero-based index of the row that this cell is in as specified in the
+    // DOM.
     long? tableCellRowIndex;
+
+    // The ARIA row index as specified by the page author.
+    long? ariaCellRowIndex;
 
     // The number of rows that this cell spans (default is 1).
     long? tableCellRowSpan;
@@ -622,9 +655,6 @@
     // The value of the aria-invalid attribute, indicating the error type.
     DOMString? ariaInvalidValue;
 
-    // The value of the aria-readonly attribute, if applicable.
-    boolean? ariaReadonly;
-
     // The CSS display attribute for this node, if applicable.
     DOMString? display;
 
@@ -634,8 +664,15 @@
     // The language code for this subtree.
     DOMString? language;
 
-    // If a checkbox or toggle button is in the mixed state.
-    boolean? buttonMixed;
+    // Input restriction, if any, such as readonly or disabled:
+    // undefined - enabled control or other object that is not disabled 
+    // Restriction.DISABLED - disallows input in itself + any descendants
+    // Restriction.READONLY - allow focus/selection but not input
+    DOMString? restriction;
+
+    // Tri-state describing checkbox or radio button:
+    // 'false' | 'true' | 'mixed'
+    DOMString? checked;
 
     // The RGBA foreground color of this subtree, as an integer.
     long? color;
@@ -645,6 +682,18 @@
 
     // The RGBA color of an input element whose value is a color.
     long? colorValue;
+
+    // Indicates node text is bold.
+    boolean bold;
+
+    // Indicates node text is italic.
+    boolean italic;
+
+    // Indicates node text is underline.
+    boolean underline;
+
+    // Indicates node text is line through.
+    boolean lineThrough;
 
     //
     // Walking the tree.
@@ -681,8 +730,15 @@
     // original size.
     static void getImageData(long maxWidth, long maxHeight);
 
+    // Does a hit test of the given global screen coordinates, and fires
+    // eventToFire on the resulting object.
+    static void hitTest(long x, long y, EventType eventToFire);
+
     // Scrolls this node to make it visible.
     static void makeVisible();
+
+    // Performs custom action.
+    static void performCustomAction(long customActionId);
 
     // Sets selection within a text field.
     static void setSelection(long startIndex, long endIndex);
@@ -754,7 +810,8 @@
     // tree with a placeholder root node; listen for the "loadComplete" event to
     // get a notification that the tree has fully loaded (the previous root node
     // reference will stop working at or before this point).
-    [nocompile] static void getTree(optional long tabId, RootCallback callback);
+    [nocompile] static void getTree(optional long tabId,
+                                    optional RootCallback callback);
 
     // Get the automation tree for the whole desktop which consists of all on
     // screen views. Note this API is currently only supported on Chrome OS.

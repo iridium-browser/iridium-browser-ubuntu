@@ -81,7 +81,6 @@ Layers.LayersPanel = class extends UI.PanelWithSidebar {
     super.wasShown();
     if (this._model)
       this._model.enable();
-    this._layerTreeOutline.focus();
   }
 
   /**
@@ -100,7 +99,7 @@ Layers.LayersPanel = class extends UI.PanelWithSidebar {
   targetAdded(target) {
     if (this._model)
       return;
-    this._model = Layers.LayerTreeModel.fromTarget(target);
+    this._model = target.model(Layers.LayerTreeModel);
     if (!this._model)
       return;
     this._model.addEventListener(Layers.LayerTreeModel.Events.LayerTreeChanged, this._onLayerTreeUpdated, this);

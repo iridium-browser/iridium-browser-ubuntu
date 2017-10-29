@@ -19,7 +19,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
@@ -45,14 +44,12 @@ ExternalProcessImporterClient::ExternalProcessImporterClient(
 void ExternalProcessImporterClient::Start() {
   AddRef();  // balanced in Cleanup.
 
-  chrome::mojom::ProfileImportRequest request(&profile_import_);
-
   BrowserThread::ID thread_id;
   CHECK(BrowserThread::GetCurrentThreadIdentifier(&thread_id));
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&ExternalProcessImporterClient::StartProcessOnIOThread, this,
-                 thread_id, base::Passed(std::move(request))));
+      base::BindOnce(&ExternalProcessImporterClient::StartProcessOnIOThread,
+                     this, thread_id, mojo::MakeRequest(&profile_import_)));
 
   // Dictionary of all localized strings that could be needed by the importer
   // in the external process.
@@ -80,10 +77,11 @@ void ExternalProcessImporterClient::Start() {
 
   // If the utility process hasn't started yet the message will queue until it
   // does.
-  auto observer_ptr = binding_.CreateInterfacePtrAndBind();
+  chrome::mojom::ProfileImportObserverPtr observer;
+  binding_.Bind(mojo::MakeRequest(&observer));
   profile_import_->StartImport(source_profile_, items_,
                                std::move(localized_strings),
-                               std::move(observer_ptr));
+                               std::move(observer));
 }
 
 void ExternalProcessImporterClient::Cancel() {
@@ -296,7 +294,7 @@ void ExternalProcessImporterClient::StartProcessOnIOThread(
       this, BrowserThread::GetTaskRunnerForThread(thread_id).get());
   utility_process_host->SetName(
       l10n_util::GetStringUTF16(IDS_UTILITY_PROCESS_PROFILE_IMPORTER_NAME));
-  utility_process_host->DisableSandbox();
+  utility_process_host->SetSandboxType(content::SANDBOX_TYPE_NO_SANDBOX);
 
 #if defined(OS_MACOSX)
   base::EnvironmentMap env;
@@ -308,7 +306,7 @@ void ExternalProcessImporterClient::StartProcessOnIOThread(
 
   utility_process_host->Start();
   chrome::mojom::ProfileImportPtr profile_import;
-  utility_process_host->GetRemoteInterfaces()->GetInterface(std::move(request));
+  BindInterface(utility_process_host, std::move(request));
 }
 
 void ExternalProcessImporterClient::CloseMojoHandles() {

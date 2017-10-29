@@ -10,7 +10,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
-#include "chrome/browser/ui/native_window_tracker.h"
+#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/strings/grit/components_strings.h"
@@ -18,11 +19,11 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
@@ -30,7 +31,6 @@
 namespace {
 
 const int kRightColumnWidth = 210;
-const int kIconSize = 64;
 
 class ExtensionUninstallDialogDelegateView;
 
@@ -55,13 +55,7 @@ class ExtensionUninstallDialogViews
  private:
   void Show() override;
 
-  ExtensionUninstallDialogDelegateView* view_;
-
-  // The dialog's parent window.
-  gfx::NativeWindow parent_;
-
-  // Tracks whether |parent_| got destroyed.
-  std::unique_ptr<NativeWindowTracker> parent_window_tracker_;
+  ExtensionUninstallDialogDelegateView* view_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionUninstallDialogViews);
 };
@@ -110,12 +104,7 @@ ExtensionUninstallDialogViews::ExtensionUninstallDialogViews(
     Profile* profile,
     gfx::NativeWindow parent,
     extensions::ExtensionUninstallDialog::Delegate* delegate)
-    : extensions::ExtensionUninstallDialog(profile, delegate),
-      view_(NULL),
-      parent_(parent) {
-  if (parent_)
-    parent_window_tracker_ = NativeWindowTracker::Create(parent_);
-}
+    : extensions::ExtensionUninstallDialog(profile, parent, delegate) {}
 
 ExtensionUninstallDialogViews::~ExtensionUninstallDialogViews() {
   // Close the widget (the views framework will delete view_).
@@ -126,14 +115,9 @@ ExtensionUninstallDialogViews::~ExtensionUninstallDialogViews() {
 }
 
 void ExtensionUninstallDialogViews::Show() {
-  if (parent_ && parent_window_tracker_->WasNativeWindowClosed()) {
-    OnDialogClosed(CLOSE_ACTION_CANCELED);
-    return;
-  }
-
   view_ = new ExtensionUninstallDialogDelegateView(
       this, triggering_extension() != nullptr, &icon());
-  constrained_window::CreateBrowserModalDialogViews(view_, parent_)->Show();
+  constrained_window::CreateBrowserModalDialogViews(view_, parent())->Show();
 }
 
 void ExtensionUninstallDialogViews::DialogDelegateDestroyed() {
@@ -168,14 +152,15 @@ ExtensionUninstallDialogDelegateView::ExtensionUninstallDialogDelegateView(
     : dialog_(dialog_view),
       triggered_by_extension_(triggered_by_extension),
       report_abuse_checkbox_(nullptr) {
+  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
   SetLayoutManager(new views::BoxLayout(
-      views::BoxLayout::kHorizontal, views::kButtonHEdgeMarginNew,
-      views::kPanelVertMargin, views::kRelatedControlHorizontalSpacing));
+      views::BoxLayout::kHorizontal,
+      provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS),
+      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL)));
 
   icon_ = new views::ImageView();
-  DCHECK_GE(image->width(), kIconSize);
-  DCHECK_GE(image->height(), kIconSize);
-  icon_->SetImageSize(gfx::Size(kIconSize, kIconSize));
+  DCHECK(image->width() && image->height());
+  icon_->SetImageSize(gfx::Size(image->width(), image->height()));
   icon_->SetImage(*image);
   AddChildView(icon_);
 
@@ -185,6 +170,8 @@ ExtensionUninstallDialogDelegateView::ExtensionUninstallDialogDelegateView(
   heading_->SetAllowCharacterBreak(true);
   heading_->SizeToFit(kRightColumnWidth);
   AddChildView(heading_);
+
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::EXTENSION_UNINSTALL);
 }
 
 ExtensionUninstallDialogDelegateView::~ExtensionUninstallDialogDelegateView() {
@@ -209,7 +196,8 @@ views::View* ExtensionUninstallDialogDelegateView::CreateExtraView() {
 bool ExtensionUninstallDialogDelegateView::GetExtraViewPadding(int* padding) {
   // We want a little more padding between the "report abuse" checkbox and the
   // buttons.
-  *padding = views::kUnrelatedControlLargeHorizontalSpacing;
+  *padding = ChromeLayoutProvider::Get()->GetDistanceMetric(
+      DISTANCE_UNRELATED_CONTROL_HORIZONTAL_LARGE);
   return true;
 }
 

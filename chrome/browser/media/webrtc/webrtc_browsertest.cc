@@ -88,6 +88,7 @@ class WebRtcBrowserTest : public WebRtcTestBase {
     SetupPeerconnectionWithLocalStream(right_tab_, cert_keygen_alg);
 
     NegotiateCall(left_tab_, right_tab_);
+    VerifyLocalDescriptionContainsCertificate(left_tab_, "gCertificate");
 
     DetectVideoAndHangUp();
   }
@@ -228,5 +229,20 @@ IN_PROC_BROWSER_TEST_F(WebRtcBrowserTest,
     EXPECT_TRUE(false) << "Expected stats dictionary is missing: " << type;
   }
 
+  DetectVideoAndHangUp();
+}
+
+IN_PROC_BROWSER_TEST_F(
+    WebRtcBrowserTest,
+    RunsAudioVideoWebRTCCallInTwoTabsEmitsGatheringStateChange) {
+  StartServerAndOpenTabs();
+  SetupPeerconnectionWithLocalStream(left_tab_);
+  SetupPeerconnectionWithLocalStream(right_tab_);
+  NegotiateCall(left_tab_, right_tab_);
+
+  std::string ice_gatheringstate =
+      ExecuteJavascript("getLastGatheringState()", left_tab_);
+
+  EXPECT_EQ("complete", ice_gatheringstate);
   DetectVideoAndHangUp();
 }

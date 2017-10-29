@@ -17,8 +17,8 @@
 #include "components/autofill/content/common/autofill_driver.mojom.h"
 #include "components/autofill/content/renderer/form_cache.h"
 #include "components/autofill/content/renderer/page_click_listener.h"
+#include "components/autofill/content/renderer/page_click_tracker.h"
 #include "content/public/renderer/render_frame_observer.h"
-#include "content/public/renderer/render_view_observer.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/WebKit/public/web/WebAutofillClient.h"
 #include "third_party/WebKit/public/web/WebFormControlElement.h"
@@ -65,7 +65,6 @@ class AutofillAgent : public content::RenderFrameObserver,
   const mojom::PasswordManagerDriverPtr& GetPasswordManagerDriver();
 
   // mojom::AutofillAgent:
-  void FirstUserGestureObservedInTab() override;
   void FillForm(int32_t id, const FormData& form) override;
   void PreviewForm(int32_t id, const FormData& form) override;
   void FieldTypePredictionsAvailable(
@@ -82,12 +81,19 @@ class AutofillAgent : public content::RenderFrameObserver,
   void ShowInitialPasswordAccountSuggestions(
       int32_t key,
       const PasswordFormFillData& form_data) override;
+  void SetUserGestureRequired(bool required) override;
+  void SetSecureContextRequired(bool required) override;
 
   void ShowNotSecureWarning(const blink::WebInputElement& element);
 
+  void set_page_click_tracker_for_testing(
+      std::unique_ptr<PageClickTracker> page_click_tracker) {
+    page_click_tracker_ = std::move(page_click_tracker);
+  }
+
  protected:
   // blink::WebAutofillClient:
-  void didAssociateFormControlsDynamically() override;
+  void DidAssociateFormControlsDynamically() override;
 
  private:
   // Functor used as a simplified comparison function for FormData. Only
@@ -95,29 +101,6 @@ class AutofillAgent : public content::RenderFrameObserver,
   struct FormDataCompare {
     bool operator()(const FormData& lhs, const FormData& rhs) const;
   };
-
-  // Thunk class for RenderViewObserver methods that haven't yet been migrated
-  // to RenderFrameObserver. Should eventually be removed.
-  // http://crbug.com/433486
-  class LegacyAutofillAgent : public content::RenderViewObserver {
-   public:
-    LegacyAutofillAgent(content::RenderView* render_view, AutofillAgent* agent);
-    ~LegacyAutofillAgent() override;
-
-    // Shuts the LegacyAutofillAgent down on RenderFrame deletion. Safe to call
-    // multiple times.
-    void Shutdown();
-
-   private:
-    // content::RenderViewObserver:
-    void OnDestruct() override;
-    void FocusChangeComplete() override;
-
-    AutofillAgent* agent_;
-
-    DISALLOW_COPY_AND_ASSIGN(LegacyAutofillAgent);
-  };
-  friend class LegacyAutofillAgent;
 
   // Flags passed to ShowSuggestions.
   struct ShowSuggestionsOptions {
@@ -149,7 +132,7 @@ class AutofillAgent : public content::RenderFrameObserver,
 
   // content::RenderFrameObserver:
   void DidCommitProvisionalLoad(bool is_new_navigation,
-                                bool is_same_page_navigation) override;
+                                bool is_same_document_navigation) override;
   void DidFinishDocumentLoad() override;
   void WillSendSubmitEvent(const blink::WebFormElement& form) override;
   void WillSubmitForm(const blink::WebFormElement& form) override;
@@ -170,27 +153,26 @@ class AutofillAgent : public content::RenderFrameObserver,
   // times.
   void Shutdown();
 
-  // Pass-through from LegacyAutofillAgent. This correlates with the
-  // RenderViewObserver method.
-  void FocusChangeComplete();
-
   // PageClickListener:
   void FormControlElementClicked(const blink::WebFormControlElement& element,
                                  bool was_focused) override;
 
   // blink::WebAutofillClient:
-  void textFieldDidEndEditing(const blink::WebInputElement& element) override;
-  void textFieldDidChange(const blink::WebFormControlElement& element) override;
-  void textFieldDidReceiveKeyDown(
+  void TextFieldDidEndEditing(const blink::WebInputElement& element) override;
+  void TextFieldDidChange(const blink::WebFormControlElement& element) override;
+  void TextFieldDidReceiveKeyDown(
       const blink::WebInputElement& element,
       const blink::WebKeyboardEvent& event) override;
-  void openTextDataListChooser(const blink::WebInputElement& element) override;
-  void dataListOptionsChanged(const blink::WebInputElement& element) override;
-  void firstUserGestureObserved() override;
-  void ajaxSucceeded() override;
+  void OpenTextDataListChooser(const blink::WebInputElement& element) override;
+  void DataListOptionsChanged(const blink::WebInputElement& element) override;
+  void UserGestureObserved() override;
+  void AjaxSucceeded() override;
+  void DidCompleteFocusChangeInFrame() override;
+  void DidReceiveLeftMouseDownOrGestureTapInNode(
+      const blink::WebNode& node) override;
 
-  // Called when a same-page navigation is detected.
-  void OnSamePageNavigationCompleted();
+  // Called when a same-document navigation is detected.
+  void OnSameDocumentNavigationCompleted();
   // Helper method which collects unowned elements (i.e., those not inside a
   // form tag) and writes them into |output|. Returns true if the process is
   // successful, and all conditions for firing events are true.
@@ -260,9 +242,6 @@ class AutofillAgent : public content::RenderFrameObserver,
   PasswordAutofillAgent* password_autofill_agent_;  // Weak reference.
   PasswordGenerationAgent* password_generation_agent_;  // Weak reference.
 
-  // Passes through RenderViewObserver methods to |this|.
-  LegacyAutofillAgent legacy_;
-
   // The ID of the last request sent for form field Autofill.  Used to ignore
   // out of date responses.
   int autofill_query_id_;
@@ -298,6 +277,16 @@ class AutofillAgent : public content::RenderFrameObserver,
   // This is needed because generation is shown on field focus vs. field click
   // for the password manager. TODO(gcasto): Have both UIs show on focus.
   bool is_generation_popup_possibly_visible_;
+
+  // Whether or not a user gesture is required before notification of a text
+  // field change. Default to true.
+  bool is_user_gesture_required_;
+
+  // Whether or not the secure context is required to query autofill suggestion.
+  // Default to false.
+  bool is_secure_context_required_;
+
+  std::unique_ptr<PageClickTracker> page_click_tracker_;
 
   mojo::Binding<mojom::AutofillAgent> binding_;
 

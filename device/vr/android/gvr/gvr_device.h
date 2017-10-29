@@ -12,6 +12,7 @@ namespace device {
 
 class GvrDeviceProvider;
 class GvrDelegate;
+class VRDisplayImpl;
 
 class DEVICE_VR_EXPORT GvrDevice : public VRDevice {
  public:
@@ -19,19 +20,21 @@ class DEVICE_VR_EXPORT GvrDevice : public VRDevice {
   ~GvrDevice() override;
 
   // VRDevice
-  void GetVRDevice(
-      const base::Callback<void(mojom::VRDisplayInfoPtr)>& callback) override;
-  void ResetPose() override;
+  void CreateVRDisplayInfo(
+      const base::Callback<void(mojom::VRDisplayInfoPtr)>& on_created) override;
 
-  void RequestPresent(const base::Callback<void(bool)>& callback) override;
+  void RequestPresent(mojom::VRSubmitFrameClientPtr submit_client,
+                      mojom::VRPresentationProviderRequest request,
+                      const base::Callback<void(bool)>& callback) override;
   void SetSecureOrigin(bool secure_origin) override;
   void ExitPresent() override;
+  void GetNextMagicWindowPose(
+      VRDisplayImpl* display,
+      mojom::VRDisplay::GetNextMagicWindowPoseCallback callback) override;
+  void OnDisplayAdded(VRDisplayImpl* display) override;
+  void OnDisplayRemoved(VRDisplayImpl* display) override;
+  void OnListeningForActivateChanged(VRDisplayImpl* display) override;
 
-  void SubmitFrame(mojom::VRPosePtr pose) override;
-  void UpdateLayerBounds(int16_t frame_index,
-                         mojom::VRLayerBoundsPtr left_bounds,
-                         mojom::VRLayerBoundsPtr right_bounds) override;
-  void GetVRVSyncProvider(mojom::VRVSyncProviderRequest request) override;
   void OnDelegateChanged();
 
  private:

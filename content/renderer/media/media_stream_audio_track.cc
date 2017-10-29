@@ -4,6 +4,8 @@
 
 #include "content/renderer/media/media_stream_audio_track.h"
 
+#include <vector>
+
 #include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "content/public/renderer/media_stream_audio_sink.h"
@@ -27,11 +29,11 @@ MediaStreamAudioTrack::~MediaStreamAudioTrack() {
 // static
 MediaStreamAudioTrack* MediaStreamAudioTrack::From(
     const blink::WebMediaStreamTrack& track) {
-  if (track.isNull() ||
-      track.source().getType() != blink::WebMediaStreamSource::TypeAudio) {
+  if (track.IsNull() ||
+      track.Source().GetType() != blink::WebMediaStreamSource::kTypeAudio) {
     return nullptr;
   }
-  return static_cast<MediaStreamAudioTrack*>(track.getTrackData());
+  return static_cast<MediaStreamAudioTrack*>(track.GetTrackData());
 }
 
 void MediaStreamAudioTrack::AddSink(MediaStreamAudioSink* sink) {
@@ -43,7 +45,7 @@ void MediaStreamAudioTrack::AddSink(MediaStreamAudioSink* sink) {
   // If the track has already stopped, just notify the sink of this fact without
   // adding it.
   if (stop_callback_.is_null()) {
-    sink->OnReadyStateChanged(blink::WebMediaStreamSource::ReadyStateEnded);
+    sink->OnReadyStateChanged(blink::WebMediaStreamSource::kReadyStateEnded);
     return;
   }
 
@@ -111,7 +113,7 @@ void MediaStreamAudioTrack::Stop() {
   deliverer_.GetConsumerList(&sinks_to_end);
   for (MediaStreamAudioSink* sink : sinks_to_end) {
     deliverer_.RemoveConsumer(sink);
-    sink->OnReadyStateChanged(blink::WebMediaStreamSource::ReadyStateEnded);
+    sink->OnReadyStateChanged(blink::WebMediaStreamSource::kReadyStateEnded);
   }
 
   weak_factory_.InvalidateWeakPtrs();
@@ -139,12 +141,6 @@ void MediaStreamAudioTrack::OnData(const media::AudioBus& audio_bus,
     }
     deliverer_.OnData(*silent_bus_, reference_time);
   }
-}
-
-void MediaStreamAudioTrack::getSettings(
-    blink::WebMediaStreamTrack::Settings& settings) {
-  // TODO(hta): Extract the real value.
-  settings.deviceId = blink::WebString("audio device ID");
 }
 
 }  // namespace content

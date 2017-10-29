@@ -12,6 +12,15 @@
 #include <vector>
 
 #include "base/files/file_path.h"
+#include "build/build_config.h"
+
+#if defined(OS_MACOSX)
+#include "base/mac/scoped_mach_port.h"
+#endif
+
+namespace crashpad {
+class CrashpadClient;
+}
 
 namespace crash_reporter {
 
@@ -55,6 +64,10 @@ void InitializeCrashpadWithEmbeddedHandler(bool initial_client,
                                            const std::string& process_type);
 #endif  // OS_WIN
 
+// Returns the CrashpadClient for this process. This will lazily create it if
+// it does not already exist. This is called as part of InitializeCrashpad.
+crashpad::CrashpadClient& GetCrashpadClient();
+
 // Enables or disables crash report upload, taking the given consent to upload
 // into account. Consent may be ignored, uploads may not be enabled even with
 // consent, but will only be enabled without consent when policy enforces crash
@@ -93,6 +106,8 @@ void GetReports(std::vector<Report>* reports);
 
 // Requests a user triggered upload for a crash report with a given id.
 void RequestSingleCrashUpload(const std::string& local_id);
+
+void DumpWithoutCrashing();
 
 namespace internal {
 

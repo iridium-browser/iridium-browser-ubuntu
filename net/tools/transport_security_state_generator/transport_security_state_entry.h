@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_TOOLS_TRANSPORT_SECURITY_STATE_GENERATOR_DOMAIN_SECURITY_ENTRY_H_
-#define NET_TOOLS_TRANSPORT_SECURITY_STATE_GENERATOR_DOMAIN_SECURITY_ENTRY_H_
+#ifndef NET_TOOLS_TRANSPORT_SECURITY_STATE_GENERATOR_TRANSPORT_SECURITY_STATE_ENTRY_H_
+#define NET_TOOLS_TRANSPORT_SECURITY_STATE_GENERATOR_TRANSPORT_SECURITY_STATE_ENTRY_H_
 
 #include <memory>
 #include <string>
@@ -37,10 +37,6 @@ struct TransportSecurityStateEntry {
 using TransportSecurityStateEntries =
     std::vector<std::unique_ptr<TransportSecurityStateEntry>>;
 
-// TODO(Martijnc): Remove the domain IDs from the preload format.
-// https://crbug.com/661206.
-using DomainIDList = std::vector<std::string>;
-
 // ReversedEntry points to a TransportSecurityStateEntry and contains the
 // reversed hostname for that entry. This is used to construct the trie.
 struct ReversedEntry {
@@ -58,4 +54,4 @@ using ReversedEntries = std::vector<std::unique_ptr<ReversedEntry>>;
 
 }  // namespace net
 
-#endif  // NET_TOOLS_TRANSPORT_SECURITY_STATE_GENERATOR_DOMAIN_SECURITY_ENTRY_H_
+#endif  // NET_TOOLS_TRANSPORT_SECURITY_STATE_GENERATOR_TRANSPORT_SECURITY_STATE_ENTRY_H_

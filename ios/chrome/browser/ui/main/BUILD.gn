@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 source_set("main") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "browser_view_information.h",
     "browser_view_wrangler.h",
@@ -22,6 +23,7 @@ source_set("main") {
     "//ios/chrome/browser/device_sharing",
     "//ios/chrome/browser/physical_web",
     "//ios/chrome/browser/sessions",
+    "//ios/chrome/browser/sessions:serialisation",
     "//ios/chrome/browser/tabs",
     "//ios/chrome/browser/tabs:tabs_internal",
     "//ios/public/provider/chrome/browser",
@@ -48,7 +50,7 @@ source_set("unit_tests") {
     "//ios/chrome/browser/browser_state:test_support",
     "//ios/chrome/browser/tabs",
     "//ios/chrome/browser/ui:ui_internal",
-    "//ios/web:test_support",
+    "//ios/web/public/test",
     "//testing/gtest",
   ]
 }

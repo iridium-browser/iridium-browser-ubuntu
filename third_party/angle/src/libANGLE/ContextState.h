@@ -9,9 +9,11 @@
 #ifndef LIBANGLE_CONTEXTSTATE_H_
 #define LIBANGLE_CONTEXTSTATE_H_
 
+#include "common/MemoryBuffer.h"
 #include "common/angleutils.h"
 #include "libANGLE/State.h"
 #include "libANGLE/Version.h"
+#include "libANGLE/params.h"
 
 namespace gl
 {
@@ -30,10 +32,12 @@ static constexpr Version ES_2_0 = Version(2, 0);
 static constexpr Version ES_3_0 = Version(3, 0);
 static constexpr Version ES_3_1 = Version(3, 1);
 
-class ContextState final : public angle::NonCopyable
+using ContextID = uintptr_t;
+
+class ContextState final : angle::NonCopyable
 {
   public:
-    ContextState(uintptr_t context,
+    ContextState(ContextID context,
                  const ContextState *shareContextState,
                  TextureManager *shareTextures,
                  const Version &clientVersion,
@@ -44,7 +48,7 @@ class ContextState final : public angle::NonCopyable
                  const Limitations &limitations);
     ~ContextState();
 
-    uintptr_t getContext() const { return mContext; }
+    ContextID getContextID() const { return mContext; }
     GLint getClientMajorVersion() const { return mClientVersion.major; }
     GLint getClientMinorVersion() const { return mClientVersion.minor; }
     const Version &getClientVersion() const { return mClientVersion; }
@@ -65,7 +69,7 @@ class ContextState final : public angle::NonCopyable
     friend class ValidationContext;
 
     Version mClientVersion;
-    uintptr_t mContext;
+    ContextID mContext;
     State *mState;
     const Caps &mCaps;
     const TextureCapsMap &mTextureCaps;
@@ -128,11 +132,28 @@ class ValidationContext : angle::NonCopyable
 
     bool isWebGL1() const { return mState.isWebGL1(); }
 
+    template <typename T>
+    const T &getParams() const;
+
   protected:
     ContextState mState;
     bool mSkipValidation;
     bool mDisplayTextureShareGroup;
+
+    // Caches entry point parameters and values re-used between layers.
+    mutable const ParamTypeInfo *mSavedArgsType;
+    static constexpr size_t kParamsBufferSize = 64u;
+    mutable std::array<uint8_t, kParamsBufferSize> mParamsBuffer;
 };
+
+template <typename T>
+const T &ValidationContext::getParams() const
+{
+    const T *params = reinterpret_cast<T *>(mParamsBuffer.data());
+    ASSERT(mSavedArgsType->hasDynamicType(T::TypeInfo));
+    return *params;
+}
+
 }  // namespace gl
 
 #endif  // LIBANGLE_CONTEXTSTATE_H_

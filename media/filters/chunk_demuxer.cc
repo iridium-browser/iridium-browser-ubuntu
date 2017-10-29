@@ -119,10 +119,25 @@ void ChunkDemuxerStream::Remove(TimeDelta start, TimeDelta end,
   stream_->Remove(start, end, duration);
 }
 
-bool ChunkDemuxerStream::EvictCodedFrames(DecodeTimestamp media_time,
+bool ChunkDemuxerStream::EvictCodedFrames(base::TimeDelta media_time,
                                           size_t newDataSize) {
   base::AutoLock auto_lock(lock_);
-  return stream_->GarbageCollectIfNeeded(media_time, newDataSize);
+
+  // If the stream is disabled, then the renderer is not reading from it and
+  // thus the read position might be stale. MSE GC algorithm uses the read
+  // position to determine when to stop removing data from the front of buffered
+  // ranges, so do a Seek in order to update the read position and allow the GC
+  // to collect unnecessary data that is earlier than the GOP containing
+  // |media_time|.
+  if (!is_enabled_)
+    stream_->Seek(media_time);
+
+  // Note: The direct conversion from PTS to DTS is safe here, since we don't
+  // need to know currentTime precisely for GC. GC only needs to know which GOP
+  // currentTime points to.
+  DecodeTimestamp media_time_dts =
+      DecodeTimestamp::FromPresentationTime(media_time);
+  return stream_->GarbageCollectIfNeeded(media_time_dts, newDataSize);
 }
 
 void ChunkDemuxerStream::OnMemoryPressure(
@@ -186,9 +201,8 @@ void ChunkDemuxerStream::OnStartOfCodedFrameGroup(
   stream_->OnStartOfCodedFrameGroup(start_timestamp);
 }
 
-bool ChunkDemuxerStream::UpdateAudioConfig(
-    const AudioDecoderConfig& config,
-    const scoped_refptr<MediaLog>& media_log) {
+bool ChunkDemuxerStream::UpdateAudioConfig(const AudioDecoderConfig& config,
+                                           MediaLog* media_log) {
   DCHECK(config.IsValidConfig());
   DCHECK_EQ(type_, AUDIO);
   base::AutoLock auto_lock(lock_);
@@ -208,9 +222,8 @@ bool ChunkDemuxerStream::UpdateAudioConfig(
   return stream_->UpdateAudioConfig(config);
 }
 
-bool ChunkDemuxerStream::UpdateVideoConfig(
-    const VideoDecoderConfig& config,
-    const scoped_refptr<MediaLog>& media_log) {
+bool ChunkDemuxerStream::UpdateVideoConfig(const VideoDecoderConfig& config,
+                                           MediaLog* media_log) {
   DCHECK(config.IsValidConfig());
   DCHECK_EQ(type_, VIDEO);
   base::AutoLock auto_lock(lock_);
@@ -224,9 +237,8 @@ bool ChunkDemuxerStream::UpdateVideoConfig(
   return stream_->UpdateVideoConfig(config);
 }
 
-void ChunkDemuxerStream::UpdateTextConfig(
-    const TextTrackConfig& config,
-    const scoped_refptr<MediaLog>& media_log) {
+void ChunkDemuxerStream::UpdateTextConfig(const TextTrackConfig& config,
+                                          MediaLog* media_log) {
   DCHECK_EQ(type_, TEXT);
   base::AutoLock auto_lock(lock_);
   DCHECK(!stream_);
@@ -272,12 +284,16 @@ DemuxerStream::Liveness ChunkDemuxerStream::liveness() const {
 AudioDecoderConfig ChunkDemuxerStream::audio_decoder_config() {
   CHECK_EQ(type_, AUDIO);
   base::AutoLock auto_lock(lock_);
+  // Trying to track down crash. http://crbug.com/715761
+  CHECK(stream_);
   return stream_->GetCurrentAudioDecoderConfig();
 }
 
 VideoDecoderConfig ChunkDemuxerStream::video_decoder_config() {
   CHECK_EQ(type_, VIDEO);
   base::AutoLock auto_lock(lock_);
+  // Trying to track down crash. http://crbug.com/715761
+  CHECK(stream_);
   return stream_->GetCurrentVideoDecoderConfig();
 }
 
@@ -287,12 +303,12 @@ VideoRotation ChunkDemuxerStream::video_rotation() {
   return VIDEO_ROTATION_0;
 }
 
-bool ChunkDemuxerStream::enabled() const {
+bool ChunkDemuxerStream::IsEnabled() const {
   base::AutoLock auto_lock(lock_);
   return is_enabled_;
 }
 
-void ChunkDemuxerStream::set_enabled(bool enabled, base::TimeDelta timestamp) {
+void ChunkDemuxerStream::SetEnabled(bool enabled, base::TimeDelta timestamp) {
   base::AutoLock auto_lock(lock_);
 
   if (enabled == is_enabled_)
@@ -401,12 +417,14 @@ void ChunkDemuxerStream::CompletePendingReadIfPossible_Locked() {
 
 ChunkDemuxer::ChunkDemuxer(
     const base::Closure& open_cb,
+    const base::Closure& progress_cb,
     const EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
-    const scoped_refptr<MediaLog>& media_log)
+    MediaLog* media_log)
     : state_(WAITING_FOR_INIT),
       cancel_next_seek_(false),
       host_(NULL),
       open_cb_(open_cb),
+      progress_cb_(progress_cb),
       encrypted_media_init_data_cb_(encrypted_media_init_data_cb),
       enable_text_(false),
       media_log_(media_log),
@@ -498,26 +516,27 @@ std::vector<DemuxerStream*> ChunkDemuxer::GetAllStreams() {
   // MediaResource::GetFirstStream returns the enabled stream if there is one.
   // TODO(servolk): Revisit this after media track switching is supported.
   for (const auto& stream : audio_streams_) {
-    if (stream->enabled())
+    if (stream->IsEnabled())
       result.push_back(stream.get());
   }
   for (const auto& stream : video_streams_) {
-    if (stream->enabled())
+    if (stream->IsEnabled())
       result.push_back(stream.get());
   }
   // Put disabled streams at the end of the vector.
   for (const auto& stream : audio_streams_) {
-    if (!stream->enabled())
+    if (!stream->IsEnabled())
       result.push_back(stream.get());
   }
   for (const auto& stream : video_streams_) {
-    if (!stream->enabled())
+    if (!stream->IsEnabled())
       result.push_back(stream.get());
   }
   return result;
 }
 
 void ChunkDemuxer::SetStreamStatusChangeCB(const StreamStatusChangeCB& cb) {
+  base::AutoLock auto_lock(lock_);
   DCHECK(!cb.is_null());
   for (const auto& stream : audio_streams_)
     stream->SetStreamStatusChangeCB(cb);
@@ -604,8 +623,11 @@ ChunkDemuxer::Status ChunkDemuxer::AddId(const std::string& id,
   std::unique_ptr<media::StreamParser> stream_parser(
       StreamParserFactory::Create(type, parsed_codec_ids, media_log_));
 
-  if (!stream_parser)
+  if (!stream_parser) {
+    DVLOG(1) << __func__ << " failed: unsupported mime_type=" << type
+             << " codecs=" << codecs;
     return ChunkDemuxer::kNotSupported;
+  }
 
   std::unique_ptr<FrameProcessor> frame_processor(
       new FrameProcessor(base::Bind(&ChunkDemuxer::IncreaseDurationIfNecessary,
@@ -647,6 +669,14 @@ void ChunkDemuxer::SetTracksWatcher(
   base::AutoLock auto_lock(lock_);
   CHECK(IsValidId(id));
   source_state_map_[id]->SetTracksWatcher(tracks_updated_cb);
+}
+
+void ChunkDemuxer::SetParseWarningCallback(
+    const std::string& id,
+    const SourceBufferParseWarningCB& parse_warning_cb) {
+  base::AutoLock auto_lock(lock_);
+  CHECK(IsValidId(id));
+  source_state_map_[id]->SetParseWarningCallback(parse_warning_cb);
 }
 
 void ChunkDemuxer::RemoveId(const std::string& id) {
@@ -712,6 +742,13 @@ void ChunkDemuxer::OnEnabledAudioTracksChanged(
     ChunkDemuxerStream* stream = track_id_to_demux_stream_map_[id];
     DCHECK(stream);
     DCHECK_EQ(DemuxerStream::AUDIO, stream->type());
+    // TODO(servolk): Remove after multiple enabled audio tracks are supported
+    // by the media::RendererImpl.
+    if (!enabled_streams.empty()) {
+      MEDIA_LOG(INFO, media_log_)
+          << "Only one enabled audio track is supported, ignoring track " << id;
+      continue;
+    }
     enabled_streams.insert(stream);
   }
 
@@ -720,12 +757,12 @@ void ChunkDemuxer::OnEnabledAudioTracksChanged(
   for (const auto& stream : audio_streams_) {
     if (enabled_streams.find(stream.get()) == enabled_streams.end()) {
       DVLOG(1) << __func__ << ": disabling stream " << stream.get();
-      stream->set_enabled(false, curr_time);
+      stream->SetEnabled(false, curr_time);
     }
   }
   for (auto* stream : enabled_streams) {
     DVLOG(1) << __func__ << ": enabling stream " << stream;
-    stream->set_enabled(true, curr_time);
+    stream->SetEnabled(true, curr_time);
   }
 }
 
@@ -746,12 +783,12 @@ void ChunkDemuxer::OnSelectedVideoTrackChanged(
     if (stream.get() != selected_stream) {
       DVLOG(1) << __func__ << ": disabling stream " << stream.get();
       DCHECK_EQ(DemuxerStream::VIDEO, stream->type());
-      stream->set_enabled(false, curr_time);
+      stream->SetEnabled(false, curr_time);
     }
   }
   if (selected_stream) {
     DVLOG(1) << __func__ << ": enabling stream " << selected_stream;
-    selected_stream->set_enabled(true, curr_time);
+    selected_stream->SetEnabled(true, curr_time);
   }
 }
 
@@ -776,19 +813,13 @@ bool ChunkDemuxer::EvictCodedFrames(const std::string& id,
            << " newDataSize=" << newDataSize;
   base::AutoLock auto_lock(lock_);
 
-  // Note: The direct conversion from PTS to DTS is safe here, since we don't
-  // need to know currentTime precisely for GC. GC only needs to know which GOP
-  // currentTime points to.
-  DecodeTimestamp media_time_dts =
-      DecodeTimestamp::FromPresentationTime(currentMediaTime);
-
   DCHECK(!id.empty());
   auto itr = source_state_map_.find(id);
   if (itr == source_state_map_.end()) {
     LOG(WARNING) << __func__ << " stream " << id << " not found";
     return false;
   }
-  return itr->second->EvictCodedFrames(media_time_dts, newDataSize);
+  return itr->second->EvictCodedFrames(currentMediaTime, newDataSize);
 }
 
 bool ChunkDemuxer::AppendData(const std::string& id,
@@ -848,6 +879,7 @@ bool ChunkDemuxer::AppendData(const std::string& id,
   }
 
   host_->OnBufferedTimeRangesChanged(ranges);
+  progress_cb_.Run();
   return true;
 }
 
@@ -1224,6 +1256,7 @@ ChunkDemuxerStream* ChunkDemuxer::CreateDemuxerStream(
          track_id_to_demux_stream_map_.end());
   track_id_to_demux_stream_map_[media_track_id] = stream.get();
   id_to_streams_map_[source_id].push_back(stream.get());
+  stream->SetEnabled(owning_vector->empty(), base::TimeDelta());
   owning_vector->push_back(std::move(stream));
   return owning_vector->back().get();
 }

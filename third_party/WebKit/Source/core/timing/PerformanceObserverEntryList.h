@@ -5,9 +5,9 @@
 #ifndef PerformanceObserverEntryList_h
 #define PerformanceObserverEntryList_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -25,14 +25,14 @@ class PerformanceObserverEntryList
   virtual ~PerformanceObserverEntryList();
 
   PerformanceEntryVector getEntries() const;
-  PerformanceEntryVector getEntriesByType(const String& entryType);
+  PerformanceEntryVector getEntriesByType(const String& entry_type);
   PerformanceEntryVector getEntriesByName(const String& name,
-                                          const String& entryType);
+                                          const String& entry_type);
 
   DECLARE_TRACE();
 
  protected:
-  PerformanceEntryVector m_performanceEntries;
+  PerformanceEntryVector performance_entries_;
 };
 
 }  // namespace blink

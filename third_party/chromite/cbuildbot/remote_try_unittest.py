@@ -42,7 +42,7 @@ class RemoteTryTests(cros_test_lib.MockTempDirTestCase):
     args = ['-r', '/tmp/test_build1', '-g', '5555', '-g',
             '6666', '--remote']
     args.extend(self.BOTS)
-    self.options, args = cbuildbot._ParseCommandLine(self.parser, args)
+    self.options, args = cbuildbot.ParseCommandLine(self.parser, args)
     self.options.cache_dir = self.tempdir
     self.checkout_dir = os.path.join(self.tempdir, 'test_checkout')
     self.int_mirror, self.ext_mirror = None, None
@@ -113,7 +113,17 @@ class RemoteTryTests(cros_test_lib.MockTempDirTestCase):
       job_class = RemoteTryJobMock
       self._SetupMirrors()
 
-    job = job_class(self.options, self.BOTS, [])
+    description = remote_try.DefaultDescription(
+        self.options.branch,
+        self.options.gerrit_patches+self.options.local_patches)
+
+    job = job_class(self.BOTS, [],
+                    self.options.pass_through_args,
+                    self.tempdir,
+                    description,
+                    self.options.committer_email,
+                    self.options.use_buildbucket,
+                    self.options.slaves)
     return job
 
   def testJobTimestamp(self):
@@ -180,12 +190,3 @@ class RemoteTryTests(cros_test_lib.MockTempDirTestCase):
         ['git', 'config', 'remote.origin.url'], redirect_stdout=True,
         cwd=self.checkout_dir).output.strip()
     self.assertEqual(remote_url, self.int_mirror)
-
-  def testBareTryJob(self):
-    """Verify submitting a tryjob from just a chromite checkout works."""
-    self.PatchObject(repository, 'IsARepoRoot', return_value=False)
-    self.PatchObject(repository, 'IsInternalRepoCheckout',
-                     side_effect=Exception('should not be called'))
-
-    job = self._CreateJob(mirror=False)
-    self.assertEqual(job.repo_url, remote_try.RemoteTryJob.EXTERNAL_URL)

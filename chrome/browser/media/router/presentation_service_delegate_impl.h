@@ -16,10 +16,10 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/media/router/media_router.h"
-#include "chrome/browser/media/router/media_source.h"
 #include "chrome/browser/media/router/presentation_request.h"
 #include "chrome/browser/media/router/presentation_service_delegate_observers.h"
 #include "chrome/browser/media/router/render_frame_host_id.h"
+#include "chrome/common/media_router/media_source.h"
 #include "content/public/browser/presentation_service_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -27,8 +27,7 @@
 namespace content {
 class PresentationScreenAvailabilityListener;
 class WebContents;
-struct PresentationSessionInfo;
-struct PresentationConnectionMessage;
+struct PresentationInfo;
 }  // namespace content
 
 namespace url {
@@ -38,15 +37,15 @@ class Origin;
 namespace media_router {
 
 class MediaRoute;
-class PresentationFrameManager;
+class PresentationFrame;
 class RouteRequestResult;
 
 // Implementation of PresentationServiceDelegate that interfaces an instance of
 // WebContents with the Chrome Media Router. It uses the Media Router to handle
 // presentation API calls forwarded from PresentationServiceImpl. In addition,
 // it also provides default presentation URL that is required for creating
-// browser-initiated sessions.  It is scoped to the lifetime of a WebContents,
-// and is managed by the associated WebContents.
+// browser-initiated presentations.  It is scoped to the lifetime of a
+// WebContents, and is managed by the associated WebContents.
 class PresentationServiceDelegateImpl
     : public content::WebContentsUserData<PresentationServiceDelegateImpl>,
       public content::ControllerPresentationServiceDelegate {
@@ -95,48 +94,36 @@ class PresentationServiceDelegateImpl
       int render_process_id,
       int render_frame_id,
       const std::vector<GURL>& default_presentation_urls,
-      const content::PresentationSessionStartedCallback& callback) override;
-  void StartSession(
+      content::DefaultPresentationConnectionCallback callback) override;
+  void StartPresentation(
       int render_process_id,
       int render_frame_id,
       const std::vector<GURL>& presentation_urls,
-      const content::PresentationSessionStartedCallback& success_cb,
-      const content::PresentationSessionErrorCallback& error_cb) override;
-  void JoinSession(
+      content::PresentationConnectionCallback success_cb,
+      content::PresentationConnectionErrorCallback error_cb) override;
+  void ReconnectPresentation(
       int render_process_id,
       int render_frame_id,
       const std::vector<GURL>& presentation_urls,
       const std::string& presentation_id,
-      const content::PresentationSessionStartedCallback& success_cb,
-      const content::PresentationSessionErrorCallback& error_cb) override;
+      content::PresentationConnectionCallback success_cb,
+      content::PresentationConnectionErrorCallback error_cb) override;
   void CloseConnection(int render_process_id,
                        int render_frame_id,
                        const std::string& presentation_id) override;
   void Terminate(int render_process_id,
                  int render_frame_id,
                  const std::string& presentation_id) override;
-  void ListenForConnectionMessages(
-      int render_process_id,
-      int render_frame_id,
-      const content::PresentationSessionInfo& session,
-      const content::PresentationConnectionMessageCallback& message_cb)
-      override;
-  void SendMessage(
-      int render_process_id,
-      int render_frame_id,
-      const content::PresentationSessionInfo& session,
-      std::unique_ptr<content::PresentationConnectionMessage> message,
-      const SendMessageCallback& send_message_cb) override;
   void ListenForConnectionStateChange(
       int render_process_id,
       int render_frame_id,
-      const content::PresentationSessionInfo& connection,
+      const content::PresentationInfo& connection,
       const content::PresentationConnectionStateChangedCallback&
           state_changed_cb) override;
   void ConnectToPresentation(
       int render_process_id,
       int render_frame_id,
-      const content::PresentationSessionInfo& session,
+      const content::PresentationInfo& presentation_info,
       content::PresentationConnectionPtr controller_connection_ptr,
       content::PresentationConnectionRequest receiver_connection_request)
       override;
@@ -154,7 +141,7 @@ class PresentationServiceDelegateImpl
   void RemoveDefaultPresentationRequestObserver(
       DefaultPresentationRequestObserver* observer);
 
-  // Gets the default presentation request for the owning tab WebContents. It
+  // Gets the default presentation request for the owning WebContents. It
   // is an error to call this method if the default presentation request does
   // not exist.
   PresentationRequest GetDefaultPresentationRequest() const;
@@ -185,30 +172,60 @@ class PresentationServiceDelegateImpl
   FRIEND_TEST_ALL_PREFIXES(PresentationServiceDelegateImplTest,
                            DefaultPresentationUrlCallback);
   FRIEND_TEST_ALL_PREFIXES(PresentationServiceDelegateImplTest,
+                           TestCloseConnectionForOffscreenPresentation);
+  FRIEND_TEST_ALL_PREFIXES(PresentationServiceDelegateImplTest,
+                           ConnectToOffscreenPresentation);
+  FRIEND_TEST_ALL_PREFIXES(PresentationServiceDelegateImplTest,
                            ConnectToPresentation);
 
   explicit PresentationServiceDelegateImpl(content::WebContents* web_contents);
 
-  // Returns |listener|'s presentation URL as a MediaSource. If |listener| does
-  // not have a persentation URL, returns the tab mirroring MediaSource.
-  MediaSource GetMediaSourceFromListener(
-      content::PresentationScreenAvailabilityListener* listener);
+  PresentationFrame* GetOrAddPresentationFrame(
+      const RenderFrameHostId& render_frame_host_id);
 
   void OnJoinRouteResponse(
       int render_process_id,
       int render_frame_id,
       const GURL& presentation_url,
       const std::string& presentation_id,
-      const content::PresentationSessionStartedCallback& success_cb,
-      const content::PresentationSessionErrorCallback& error_cb,
+      content::PresentationConnectionCallback success_cb,
+      content::PresentationConnectionErrorCallback error_cb,
       const RouteRequestResult& result);
 
-  void OnStartSessionSucceeded(
+  void OnStartPresentationSucceeded(
       int render_process_id,
       int render_frame_id,
-      const content::PresentationSessionStartedCallback& success_cb,
-      const content::PresentationSessionInfo& new_session,
+      content::PresentationConnectionCallback success_cb,
+      const content::PresentationInfo& new_presentation_info,
       const MediaRoute& route);
+
+  // Notifies the PresentationFrame of |render_frame_host_id| that a
+  // presentation and its corresponding MediaRoute has been created.
+  // The PresentationFrame will be created if it does not already exist.
+  // This must be called before |ConnectToPresentation()|.
+  void AddPresentation(const RenderFrameHostId& render_frame_host_id,
+                       const content::PresentationInfo& presentation_info,
+                       const MediaRoute& route);
+
+  // Notifies the PresentationFrame of |render_frame_host_id| that a
+  // presentation and its corresponding MediaRoute has been removed.
+  void RemovePresentation(const RenderFrameHostId& render_frame_host_id,
+                          const std::string& presentation_id);
+
+  // Sets the default presentation request for the owning WebContents and
+  // notifies observers of changes.
+  void SetDefaultPresentationRequest(
+      const PresentationRequest& default_presentation_request);
+
+  // Clears the default presentation request for the owning WebContents and
+  // notifies observers of changes. Also resets
+  // |default_presentation_started_callback_|.
+  void ClearDefaultPresentationRequest();
+
+  // Returns the ID of the route corresponding to |presentation_id| in the given
+  // frame, or empty if no such route exist.
+  MediaRoute::Id GetRouteId(const RenderFrameHostId& render_frame_host_id,
+                            const std::string& presentation_id) const;
 
 #if !defined(OS_ANDROID)
   // Returns true if auto-join requests should be cancelled for |origin|.
@@ -220,7 +237,25 @@ class PresentationServiceDelegateImpl
   content::WebContents* const web_contents_;
   MediaRouter* router_;
 
-  std::unique_ptr<PresentationFrameManager> frame_manager_;
+  // References to the observers listening for changes to the default
+  // presentation of the associated WebContents.
+  base::ObserverList<DefaultPresentationRequestObserver>
+      default_presentation_request_observers_;
+
+  // Default presentation request for the owning WebContents.
+  std::unique_ptr<PresentationRequest> default_presentation_request_;
+
+  // Callback to invoke when the default presentation has started.
+  content::DefaultPresentationConnectionCallback
+      default_presentation_started_callback_;
+
+  // Maps a frame identifier to a PresentationFrame object for frames
+  // that are using Presentation API.
+  std::unordered_map<RenderFrameHostId,
+                     std::unique_ptr<PresentationFrame>,
+                     RenderFrameHostIdHasher>
+      presentation_frames_;
+
   PresentationServiceDelegateObservers observers_;
 
   base::WeakPtrFactory<PresentationServiceDelegateImpl> weak_factory_;

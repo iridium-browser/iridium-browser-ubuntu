@@ -115,7 +115,7 @@ base::FilePath GetSanitizedWhitelistPath(const std::string& crx_id) {
 void RecordUncleanUninstall() {
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           &base::RecordAction,
           base::UserMetricsAction("ManagedUsers_Whitelist_UncleanUninstall")));
 }
@@ -439,7 +439,7 @@ bool SupervisedUserWhitelistInstallerImpl::UnregisterWhitelistInternal(
   base::ListValue* clients = nullptr;
   success = whitelist_dict->GetList(kClients, &clients);
 
-  const bool removed = clients->Remove(base::StringValue(client_id), nullptr);
+  const bool removed = clients->Remove(base::Value(client_id), nullptr);
 
   if (!clients->empty())
     return removed;
@@ -449,8 +449,8 @@ bool SupervisedUserWhitelistInstallerImpl::UnregisterWhitelistInternal(
   DCHECK(result);
 
   cus_->GetSequencedTaskRunner()->PostTask(
-    FROM_HERE,
-    base::Bind(&DeleteFileOnTaskRunner, GetSanitizedWhitelistPath(crx_id)));
+      FROM_HERE, base::BindOnce(&DeleteFileOnTaskRunner,
+                                GetSanitizedWhitelistPath(crx_id)));
 
   return removed;
 }
@@ -462,7 +462,7 @@ void SupervisedUserWhitelistInstallerImpl::OnRawWhitelistReady(
     const base::FilePath& whitelist_path) {
   cus_->GetSequencedTaskRunner()->PostTask(
       FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           &CheckForSanitizedWhitelistOnTaskRunner, crx_id, whitelist_path,
           base::ThreadTaskRunnerHandle::Get(),
           base::Bind(
@@ -517,8 +517,8 @@ void SupervisedUserWhitelistInstallerImpl::RegisterComponents() {
     whitelists->RemoveWithoutPathExpansion(id, nullptr);
 
   cus_->GetSequencedTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&RemoveUnregisteredWhitelistsOnTaskRunner,
-                            registered_whitelists));
+      FROM_HERE, base::BindOnce(&RemoveUnregisteredWhitelistsOnTaskRunner,
+                                registered_whitelists));
 }
 
 void SupervisedUserWhitelistInstallerImpl::Subscribe(
@@ -533,24 +533,25 @@ void SupervisedUserWhitelistInstallerImpl::RegisterWhitelist(
   DictionaryPrefUpdate update(local_state_,
                               prefs::kRegisteredSupervisedUserWhitelists);
   base::DictionaryValue* pref_dict = update.Get();
-  base::DictionaryValue* whitelist_dict = nullptr;
-  const bool newly_added =
-      !pref_dict->GetDictionaryWithoutPathExpansion(crx_id, &whitelist_dict);
+  base::DictionaryValue* whitelist_dict_weak = nullptr;
+  const bool newly_added = !pref_dict->GetDictionaryWithoutPathExpansion(
+      crx_id, &whitelist_dict_weak);
   if (newly_added) {
-    whitelist_dict = new base::DictionaryValue;
-    whitelist_dict->SetString(kName, name);
-    pref_dict->SetWithoutPathExpansion(crx_id, whitelist_dict);
+    whitelist_dict_weak = pref_dict->SetDictionaryWithoutPathExpansion(
+        crx_id, base::MakeUnique<base::DictionaryValue>());
+    whitelist_dict_weak->SetString(kName, name);
   }
 
   if (!client_id.empty()) {
-    base::ListValue* clients = nullptr;
-    if (!whitelist_dict->GetList(kClients, &clients)) {
+    base::ListValue* clients_weak = nullptr;
+    if (!whitelist_dict_weak->GetList(kClients, &clients_weak)) {
       DCHECK(newly_added);
-      clients = new base::ListValue;
-      whitelist_dict->Set(kClients, clients);
+      auto clients = base::MakeUnique<base::ListValue>();
+      clients_weak = clients.get();
+      whitelist_dict_weak->Set(kClients, std::move(clients));
     }
-    bool success = clients->AppendIfNotPresent(
-        base::MakeUnique<base::StringValue>(client_id));
+    bool success = clients_weak->AppendIfNotPresent(
+        base::MakeUnique<base::Value>(client_id));
     DCHECK(success);
   }
 
@@ -558,7 +559,7 @@ void SupervisedUserWhitelistInstallerImpl::RegisterWhitelist(
     // Sanity-check that the stored name is equal to the name passed in.
     // In release builds this is a no-op.
     std::string stored_name;
-    DCHECK(whitelist_dict->GetString(kName, &stored_name));
+    DCHECK(whitelist_dict_weak->GetString(kName, &stored_name));
     DCHECK_EQ(stored_name, name);
     return;
   }

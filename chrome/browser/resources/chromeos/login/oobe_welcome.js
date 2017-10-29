@@ -9,6 +9,8 @@
 Polymer({
   is: 'oobe-welcome-md',
 
+  behaviors: [I18nBehavior],
+
   properties: {
     /**
      * Currently selected system language (display name).
@@ -32,7 +34,7 @@ Polymer({
      */
     languages: {
       type: Array,
-      observer: "onLanguagesChanged_",
+      observer: 'onLanguagesChanged_',
     },
 
     /**
@@ -41,7 +43,7 @@ Polymer({
      */
     keyboards: {
       type: Array,
-      observer: "onKeyboardsChanged_",
+      observer: 'onKeyboardsChanged_',
     },
 
     /**
@@ -89,7 +91,7 @@ Polymer({
     /**
      * Controls displaying of "Enable debugging features" link.
      */
-     debuggingLinkVisible: Boolean,
+    debuggingLinkVisible: Boolean,
   },
 
   /**
@@ -111,10 +113,10 @@ Polymer({
     CrOncStrings = {
       OncTypeCellular: loadTimeData.getString('OncTypeCellular'),
       OncTypeEthernet: loadTimeData.getString('OncTypeEthernet'),
+      OncTypeTether: loadTimeData.getString('OncTypeTether'),
       OncTypeVPN: loadTimeData.getString('OncTypeVPN'),
       OncTypeWiFi: loadTimeData.getString('OncTypeWiFi'),
       OncTypeWiMAX: loadTimeData.getString('OncTypeWiMAX'),
-      networkDisabled: loadTimeData.getString('networkDisabled'),
       networkListItemConnected:
           loadTimeData.getString('networkListItemConnected'),
       networkListItemConnecting:
@@ -131,6 +133,8 @@ Polymer({
       addWiFiNetworkMenuName: loadTimeData.getString('addWiFiNetworkMenuName'),
       proxySettingsMenuName: loadTimeData.getString('proxySettingsMenuName'),
     };
+
+    this.i18nUpdateLocale();
   },
 
   /**
@@ -140,7 +144,7 @@ Polymer({
   hideAllScreens_: function() {
     this.$.welcomeScreen.hidden = true;
 
-    var screens = Polymer.dom(this.root).querySelectorAll('oobe-dialog')
+    var screens = Polymer.dom(this.root).querySelectorAll('oobe-dialog');
     for (var i = 0; i < screens.length; ++i) {
       screens[i].hidden = true;
     }
@@ -165,7 +169,7 @@ Polymer({
    * @private
    */
   getActiveScreen_: function() {
-    var screens = Polymer.dom(this.root).querySelectorAll('oobe-dialog')
+    var screens = Polymer.dom(this.root).querySelectorAll('oobe-dialog');
     for (var i = 0; i < screens.length; ++i) {
       if (!screens[i].hidden)
         return screens[i];
@@ -197,34 +201,44 @@ Polymer({
   },
 
   /**
-   * Returns custom items for network selector.
+   * Returns custom items for network selector. Shows 'Proxy settings' only
+   * when connected to a network.
    * @private
    */
-  getNetworkCustomItems_: function() {
+  getNetworkCustomItems_: function(isConnected_) {
     var self = this;
-    return [
+    var items = [
       {
         customItemName: 'proxySettingsMenuName',
         polymerIcon: 'oobe-welcome-20:add-proxy',
         customData: {
-          onTap: function() { self.OpenProxySettingsDialog_(); },
+          onTap: function() {
+            self.OpenProxySettingsDialog_();
+          },
         },
       },
       {
         customItemName: 'addWiFiNetworkMenuName',
         polymerIcon: 'oobe-welcome-20:add-wifi',
         customData: {
-          onTap: function() { self.OpenAddWiFiNetworkDialog_(); },
+          onTap: function() {
+            self.OpenAddWiFiNetworkDialog_();
+          },
         },
       },
       {
         customItemName: 'addMobileNetworkMenuName',
         polymerIcon: 'oobe-welcome-20:add-cellular',
         customData: {
-          onTap: function() { self.OpenAddWiFiNetworkDialog_(); },
+          onTap: function() {
+            self.OpenAddMobileNetworkDialog_();
+          },
         },
       },
     ];
+    if (isConnected_)
+      return items;
+    return items.slice(1);
   },
 
   /**
@@ -272,7 +286,7 @@ Polymer({
   },
 
   /**
-   * Handle Networwork Setup screen "Proxy settings" button.
+   * Handle Network Setup screen "Proxy settings" button.
    *
    * @private
    */
@@ -281,7 +295,7 @@ Polymer({
   },
 
   /**
-   * Handle Networwork Setup screen "Add WiFi network" button.
+   * Handle Network Setup screen "Add WiFi network" button.
    *
    * @private
    */
@@ -290,7 +304,7 @@ Polymer({
   },
 
   /**
-   * Handle Networwork Setup screen "Add cellular network" button.
+   * Handle Network Setup screen "Add cellular network" button.
    *
    * @private
    */
@@ -339,6 +353,7 @@ Polymer({
     if (this.networkLastSelectedGuid_ == '' &&
         state.ConnectionState == CrOnc.ConnectionState.CONNECTED) {
       this.onSelectedNetworkConnected_();
+      return;
     }
 
     // If user has previously selected another network, there
@@ -409,6 +424,24 @@ Polymer({
 
   onLanguagesChanged_: function() {
     this.currentLanguage = Oobe.getSelectedTitle(this.languages);
+  },
+
+  setSelectedKeyboard: function(keyboard_id) {
+    var found = false;
+    for (var i = 0; i < this.keyboards.length; ++i) {
+      if (this.keyboards[i].value != keyboard_id) {
+        this.keyboards[i].selected = false;
+        continue;
+      }
+      this.keyboards[i].selected = true;
+      found = true;
+    }
+    if (!found)
+      return;
+
+    // Force i18n-dropdown to refresh.
+    this.keyboards = this.keyboards.slice();
+    this.onKeyboardsChanged_();
   },
 
   onKeyboardsChanged_: function() {

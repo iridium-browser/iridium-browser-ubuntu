@@ -16,6 +16,7 @@
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "device/gamepad/gamepad_data_fetcher.h"
+#include "device/gamepad/public/cpp/gamepad.h"
 
 #if defined(__OBJC__)
 @class NSArray;
@@ -77,13 +78,13 @@ class GamepadPlatformDataFetcherMac : public GamepadDataFetcher {
   struct AssociatedData {
     int location_id;
     IOHIDDeviceRef device_ref;
-    IOHIDElementRef button_elements[blink::WebGamepad::buttonsLengthCap];
-    IOHIDElementRef axis_elements[blink::WebGamepad::axesLengthCap];
-    CFIndex axis_minimums[blink::WebGamepad::axesLengthCap];
-    CFIndex axis_maximums[blink::WebGamepad::axesLengthCap];
-    CFIndex axis_report_sizes[blink::WebGamepad::axesLengthCap];
+    IOHIDElementRef button_elements[Gamepad::kButtonsLengthCap];
+    IOHIDElementRef axis_elements[Gamepad::kAxesLengthCap];
+    CFIndex axis_minimums[Gamepad::kAxesLengthCap];
+    CFIndex axis_maximums[Gamepad::kAxesLengthCap];
+    CFIndex axis_report_sizes[Gamepad::kAxesLengthCap];
   };
-  AssociatedData associated_[blink::WebGamepads::itemsLengthCap];
+  AssociatedData associated_[Gamepads::kItemsLengthCap];
 
   DISALLOW_COPY_AND_ASSIGN(GamepadPlatformDataFetcherMac);
 };

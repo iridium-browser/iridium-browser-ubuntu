@@ -31,9 +31,9 @@
 #ifndef DOMVisualViewport_h
 #define DOMVisualViewport_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/events/EventTarget.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollTypes.h"
 
@@ -46,7 +46,7 @@ class DOMVisualViewport final : public EventTargetWithInlineData {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static DOMVisualViewport* create(LocalDOMWindow* window) {
+  static DOMVisualViewport* Create(LocalDOMWindow* window) {
     return new DOMVisualViewport(window);
   }
 
@@ -55,21 +55,21 @@ class DOMVisualViewport final : public EventTargetWithInlineData {
   DECLARE_VIRTUAL_TRACE();
 
   // EventTarget overrides:
-  const AtomicString& interfaceName() const override;
-  ExecutionContext* getExecutionContext() const override;
+  const AtomicString& InterfaceName() const override;
+  ExecutionContext* GetExecutionContext() const override;
 
-  float scrollLeft();
-  float scrollTop();
-  float pageX();
-  float pageY();
-  double clientWidth();
-  double clientHeight();
-  double scale();
+  float offsetLeft() const;
+  float offsetTop() const;
+  float pageLeft() const;
+  float pageTop() const;
+  double width() const;
+  double height() const;
+  double scale() const;
 
  private:
   explicit DOMVisualViewport(LocalDOMWindow*);
 
-  Member<LocalDOMWindow> m_window;
+  Member<LocalDOMWindow> window_;
 };
 
 }  // namespace blink

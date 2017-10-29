@@ -10,7 +10,6 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_provider_client.h"
@@ -23,13 +22,12 @@
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "components/omnibox/browser/shortcuts_backend.h"
 #include "components/omnibox/browser/shortcuts_provider_test_util.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/features/features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "extensions/browser/notification_types.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #endif
@@ -57,9 +55,7 @@ class ShortcutsProviderExtensionTest : public testing::Test {
   void SetUp() override;
   void TearDown() override;
 
-  base::MessageLoopForUI message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread file_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   TestingProfile profile_;
   ChromeAutocompleteProviderClient client_;
   scoped_refptr<ShortcutsBackend> backend_;
@@ -67,9 +63,7 @@ class ShortcutsProviderExtensionTest : public testing::Test {
 };
 
 ShortcutsProviderExtensionTest::ShortcutsProviderExtensionTest()
-    : ui_thread_(content::BrowserThread::UI, &message_loop_),
-      file_thread_(content::BrowserThread::FILE, &message_loop_),
-      client_(&profile_) {}
+    : client_(&profile_) {}
 
 void ShortcutsProviderExtensionTest::SetUp() {
   ShortcutsBackendFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -113,12 +107,8 @@ TEST_F(ShortcutsProviderExtensionTest, Extension) {
                            .Build())
           .SetID("cedabbhfglmiikkmdgcpjdkocfcmbkee")
           .Build();
-  extensions::UnloadedExtensionInfo details(
-      extension.get(), extensions::UnloadedExtensionInfo::REASON_UNINSTALL);
-  content::NotificationService::current()->Notify(
-      extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
-      content::Source<Profile>(&profile_),
-      content::Details<extensions::UnloadedExtensionInfo>(&details));
+  extensions::ExtensionRegistry::Get(&profile_)->TriggerOnUnloaded(
+      extension.get(), extensions::UnloadedExtensionReason::UNINSTALL);
 
   // Now the URL should have disappeared.
   RunShortcutsProviderTest(provider_, text, false, ExpectedURLs(),

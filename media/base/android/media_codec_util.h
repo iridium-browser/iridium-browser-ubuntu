@@ -43,6 +43,9 @@ class MEDIA_EXPORT MediaCodecUtil {
   // Returns true if MediaCodec.setParameters() is available on the device.
   static bool SupportsSetParameters();
 
+  // Returns true if MediaCodec supports CBCS Encryption.
+  static bool PlatformSupportsCbcsEncryption(int sdk);
+
   // Returns whether it's possible to create a MediaCodec for the given codec
   // and secureness.
   static bool CanDecode(VideoCodec codec, bool is_secure);
@@ -83,6 +86,10 @@ class MEDIA_EXPORT MediaCodecUtil {
 
   // Indicates if MediaCodec.setOutputSurface() works on this device.
   static bool IsSetOutputSurfaceSupported();
+
+  // Return true if the compressed audio |codec| will pass through the media
+  // pipelines without decompression.
+  static bool IsPassthroughAudioFormat(AudioCodec codec);
 
   // Indicates if the decoder is known to fail when flushed. (b/8125974,
   // b/8347958)

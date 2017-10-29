@@ -6,7 +6,7 @@
 
 #include "base/memory/ptr_util.h"
 #import "ios/clean/chrome/browser/ui/web_contents/web_contents_consumer.h"
-#import "ios/web/public/test/fakes/test_navigation_manager.h"
+#import "ios/shared/chrome/browser/ui/tab/tab_test_util.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
@@ -31,81 +31,73 @@
 
 namespace {
 
-class StubNavigationManager : public web::TestNavigationManager {
- public:
-  int GetItemCount() const override { return item_count_; }
-
-  void LoadURLWithParams(const NavigationManager::WebLoadParams&) override {
-    has_loaded_url_ = true;
-  }
-
-  void SetItemCount(int count) { item_count_ = count; }
-  bool GetHasLoadedUrl() { return has_loaded_url_; }
-
- private:
-  int item_count_;
-  bool has_loaded_url_;
-};
-
 class WebContentsMediatorTest : public PlatformTest {
  public:
   WebContentsMediatorTest() {
-    auto navigation_manager = base::MakeUnique<StubNavigationManager>();
-    navigation_manager_ = navigation_manager.get();
-    navigation_manager_->SetItemCount(0);
-    web_state_.SetNavigationManager(std::move(navigation_manager));
+    auto navigation_manager = base::MakeUnique<TabNavigationManager>();
+    navigation_manager->SetItemCount(0);
+    test_web_state_.SetView([[UIView alloc] init]);
+    test_web_state_.SetNavigationManager(std::move(navigation_manager));
+
+    auto new_navigation_manager = base::MakeUnique<TabNavigationManager>();
+    new_test_web_state_.SetView([[UIView alloc] init]);
+    new_test_web_state_.SetNavigationManager(std::move(new_navigation_manager));
+
+    mediator_ = [[WebContentsMediator alloc] init];
+  }
+
+  TabNavigationManager* navigation_manager() {
+    return static_cast<TabNavigationManager*>(
+        test_web_state_.GetNavigationManager());
+  }
+
+  TabNavigationManager* new_navigation_manager() {
+    return static_cast<TabNavigationManager*>(
+        new_test_web_state_.GetNavigationManager());
   }
 
  protected:
-  StubNavigationManager* navigation_manager_;
-  web::TestWebState web_state_;
+  WebContentsMediator* mediator_;
+  web::TestWebState test_web_state_;
+  web::TestWebState new_test_web_state_;
 };
 
-TEST_F(WebContentsMediatorTest, TestSetWebUsageEnabled) {
-  WebContentsMediator* mediator = [[WebContentsMediator alloc] init];
-
-  mediator.webState = &web_state_;
-  // Setting the webState should set webUsageEnabled.
-  EXPECT_EQ(true, web_state_.IsWebUsageEnabled());
-  // Expect that with zero navigation items, a url will be loaded.
-  EXPECT_EQ(true, navigation_manager_->GetHasLoadedUrl());
-
-  mediator.webState = nullptr;
-  // The previous webState should now have web usage disabled.
-  EXPECT_EQ(false, web_state_.IsWebUsageEnabled());
+// Tests that a URL is loaded if the new active web state has zero navigation
+// items.
+TEST_F(WebContentsMediatorTest, TestURLHasLoaded) {
+  mediator_.webState = &test_web_state_;
+  new_navigation_manager()->SetItemCount(0);
+  mediator_.webState = &new_test_web_state_;
+  EXPECT_TRUE(navigation_manager()->GetHasLoadedUrl());
 }
 
+// Tests that a URL is not loaded if the new active web state has some
+// navigation items.
 TEST_F(WebContentsMediatorTest, TestNoLoadURL) {
-  WebContentsMediator* mediator = [[WebContentsMediator alloc] init];
-
-  navigation_manager_->SetItemCount(2);
-
-  mediator.webState = &web_state_;
-  // Expect that with nonzero navigation items, no url will be loaded.
-  EXPECT_EQ(false, navigation_manager_->GetHasLoadedUrl());
+  mediator_.webState = &test_web_state_;
+  new_navigation_manager()->SetItemCount(2);
+  mediator_.webState = &new_test_web_state_;
+  EXPECT_FALSE(new_navigation_manager()->GetHasLoadedUrl());
 }
 
-TEST_F(WebContentsMediatorTest, TestSetWebStateFirst) {
-  WebContentsMediator* mediator = [[WebContentsMediator alloc] init];
+// Tests that the consumer is updated immediately once both consumer and
+// webStateList are set. This test sets webStateList first.
+TEST_F(WebContentsMediatorTest, TestConsumerViewIsSetWebStateListFirst) {
   StubContentsConsumer* consumer = [[StubContentsConsumer alloc] init];
-
-  mediator.webState = &web_state_;
-  mediator.consumer = consumer;
-
-  // Setting the consumer after the web state should still have the consumer
-  // called.
-  EXPECT_EQ(web_state_.GetView(), consumer.contentView);
+  mediator_.webState = &test_web_state_;
+  EXPECT_NE(test_web_state_.GetView(), consumer.contentView);
+  mediator_.consumer = consumer;
+  EXPECT_EQ(test_web_state_.GetView(), consumer.contentView);
 }
 
-TEST_F(WebContentsMediatorTest, TestSetConsumerFirst) {
-  WebContentsMediator* mediator = [[WebContentsMediator alloc] init];
+// Tests that the consumer is updated immediately once both consumer and
+// webStateList are set. This test sets consumer first.
+TEST_F(WebContentsMediatorTest, TestConsumerViewIsSetConsumerFirst) {
   StubContentsConsumer* consumer = [[StubContentsConsumer alloc] init];
-
-  mediator.consumer = consumer;
-  mediator.webState = &web_state_;
-
-  // Setting the web_state after the consumer should trigger a call to the
-  // consumer.
-  EXPECT_EQ(web_state_.GetView(), consumer.contentView);
+  mediator_.consumer = consumer;
+  EXPECT_NE(test_web_state_.GetView(), consumer.contentView);
+  mediator_.webState = &test_web_state_;
+  EXPECT_EQ(test_web_state_.GetView(), consumer.contentView);
 }
-}
+
+}  // namespace

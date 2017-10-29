@@ -8,84 +8,169 @@
 #include <map>
 #include <string>
 
+#include "base/macros.h"
+#include "base/optional.h"
+#include "base/sequence_checker.h"
+#include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
 #include "net/nqe/effective_connection_type.h"
 #include "net/nqe/network_quality.h"
 
 namespace net {
 
-namespace nqe {
+// Forces NQE to return a specific effective connection type. Set using the
+// |params| provided to the NetworkQualityEstimatorParams constructor.
+NET_EXPORT extern const char kForceEffectiveConnectionType[];
 
-namespace internal {
+// NetworkQualityEstimatorParams computes the configuration parameters for
+// the network quality estimator.
+class NET_EXPORT NetworkQualityEstimatorParams {
+ public:
+  // Algorithms supported by network quality estimator for computing effective
+  // connection type.
+  enum class EffectiveConnectionTypeAlgorithm {
+    HTTP_RTT_AND_DOWNSTREAM_THROUGHOUT = 0,
+    TRANSPORT_RTT_OR_DOWNSTREAM_THROUGHOUT,
+    EFFECTIVE_CONNECTION_TYPE_ALGORITHM_LAST
+  };
 
-// Returns the algorithm that should be used for computing effective connection
-// type based on field trial params. Returns an empty string if a valid
-// algorithm paramter is not present in the field trial params.
-std::string GetEffectiveConnectionTypeAlgorithm(
-    const std::map<std::string, std::string>& variation_params);
+  // |params| is the map containing all field trial parameters related to
+  // NetworkQualityEstimator field trial.
+  explicit NetworkQualityEstimatorParams(
+      const std::map<std::string, std::string>& params);
 
-// Computes and returns the weight multiplier per second, which represents the
-// factor by which the weight of an observation reduces every second.
-// |variation_params| is the map containing all field trial parameters
-// related to the NetworkQualityualityEstimator field trial.
-double GetWeightMultiplierPerSecond(
-    const std::map<std::string, std::string>& variation_params);
+  ~NetworkQualityEstimatorParams();
 
-// Returns the factor by which the weight of an observation reduces for every
-// dBm difference between the current signal strength (in dBm), and the signal
-// strength at the time when the observation was taken.
-double GetWeightMultiplierPerDbm(
-    const std::map<std::string, std::string>& variation_params);
+  // Returns the algorithm to use for computing effective connection type. The
+  // value is obtained from |params|. If the value from |params| is unavailable,
+  // a default value is used.
+  EffectiveConnectionTypeAlgorithm GetEffectiveConnectionTypeAlgorithm() const;
 
-// Returns a descriptive name corresponding to |connection_type|.
-const char* GetNameForConnectionType(
-    net::NetworkChangeNotifier::ConnectionType connection_type);
+  // Returns a descriptive name corresponding to |connection_type|.
+  static const char* GetNameForConnectionType(
+      NetworkChangeNotifier::ConnectionType connection_type);
 
-// Sets the default observation for different connection types in
-// |default_observations|. The default observations are different for different
-// connection types (e.g., 2G, 3G, 4G, WiFi). The default observations may be
-// used to determine the network quality in absence of any other information.
-void ObtainDefaultObservations(
-    const std::map<std::string, std::string>& variation_params,
-    nqe::internal::NetworkQuality default_observations[]);
+  // Returns the default observation for connection |type|. The default
+  // observations are different for different connection types (e.g., 2G, 3G,
+  // 4G, WiFi). The default observations may be used to determine the network
+  // quality in absence of any other information.
+  const nqe::internal::NetworkQuality& DefaultObservation(
+      NetworkChangeNotifier::ConnectionType type) const;
 
-// Sets |typical_network_quality| to typical network quality for different
-// effective connection types.
-void ObtainTypicalNetworkQuality(NetworkQuality typical_network_quality[]);
+  // Returns the typical network quality for connection |type|.
+  const nqe::internal::NetworkQuality& TypicalNetworkQuality(
+      EffectiveConnectionType type) const;
 
-// Parses the variation paramaters and sets the thresholds for different
-// effective connection types in |connection_thresholds|.
-void ObtainEffectiveConnectionTypeModelParams(
-    const std::map<std::string, std::string>& variation_params,
-    nqe::internal::NetworkQuality connection_thresholds[]);
+  // Returns the threshold for effective connection type |type|.
+  const nqe::internal::NetworkQuality& ConnectionThreshold(
+      EffectiveConnectionType type) const;
 
-// Returns the fraction of URL requests that should record the correlation UMA.
-double correlation_uma_logging_probability(
-    const std::map<std::string, std::string>& variation_params);
+  // Returns the minimum number of requests in-flight to consider the network
+  // fully utilized. A throughput observation is taken only when the network is
+  // considered as fully utilized.
+  size_t throughput_min_requests_in_flight() const {
+    return throughput_min_requests_in_flight_;
+  }
 
-// Returns true if the effective connection type has been determined via
-// variation parameters.
-bool forced_effective_connection_type_set(
-    const std::map<std::string, std::string>& variation_params);
+  // Returns the weight multiplier per second, which represents the factor by
+  // which the weight of an observation reduces every second.
+  double weight_multiplier_per_second() const {
+    return weight_multiplier_per_second_;
+  }
 
-// Returns the effective connection type that was configured by variation
-// parameters.
-EffectiveConnectionType forced_effective_connection_type(
-    const std::map<std::string, std::string>& variation_params);
+  // Returns the factor by which the weight of an observation reduces for every
+  // signal strength level difference between the current signal strength, and
+  // the signal strength at the time when the observation was taken.
+  double weight_multiplier_per_signal_strength_level() const {
+    return weight_multiplier_per_signal_strength_level_;
+  }
 
-// Returns true if reading from the persistent cache has been enabled via field
-// trial.
-bool persistent_cache_reading_enabled(
-    const std::map<std::string, std::string>& variation_params);
+  // Returns the fraction of URL requests that should record the correlation
+  // UMA.
+  double correlation_uma_logging_probability() const {
+    return correlation_uma_logging_probability_;
+  }
 
-// Returns the the minimum interval betweeen consecutive notifications to a
-// single socket watcher.
-base::TimeDelta GetMinSocketWatcherNotificationInterval(
-    const std::map<std::string, std::string>& variation_params);
+  // Returns an unset value if the effective connection type has not been forced
+  // via the |params| provided to this class. Otherwise, returns a value set to
+  // the effective connection type that has been forced.
+  base::Optional<EffectiveConnectionType> forced_effective_connection_type()
+      const {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    return forced_effective_connection_type_;
+  }
 
-}  // namespace internal
+  void SetForcedEffectiveConnectionType(
+      EffectiveConnectionType forced_effective_connection_type) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    forced_effective_connection_type_ = forced_effective_connection_type;
+  }
 
-}  // namespace nqe
+  // Returns true if reading from the persistent cache is enabled.
+  bool persistent_cache_reading_enabled() const {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    return persistent_cache_reading_enabled_;
+  }
+
+  void set_persistent_cache_reading_enabled(
+      bool persistent_cache_reading_enabled) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    persistent_cache_reading_enabled_ = persistent_cache_reading_enabled;
+  }
+
+  // Returns the the minimum interval betweeen consecutive notifications to a
+  // single socket watcher.
+  base::TimeDelta min_socket_watcher_notification_interval() const {
+    return min_socket_watcher_notification_interval_;
+  }
+
+  // Returns the algorithm that should be used for computing effective
+  // connection type. Returns an empty string if a valid algorithm parameter is
+  // not specified.
+  static EffectiveConnectionTypeAlgorithm
+  GetEffectiveConnectionTypeAlgorithmFromString(
+      const std::string& algorithm_param_value);
+
+  void SetEffectiveConnectionTypeAlgorithm(
+      EffectiveConnectionTypeAlgorithm algorithm) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    effective_connection_type_algorithm_ = algorithm;
+  }
+
+ private:
+  // Map containing all field trial parameters related to
+  // NetworkQualityEstimator field trial.
+  const std::map<std::string, std::string> params_;
+
+  const size_t throughput_min_requests_in_flight_;
+  const double weight_multiplier_per_second_;
+  const double weight_multiplier_per_signal_strength_level_;
+  const double correlation_uma_logging_probability_;
+  base::Optional<EffectiveConnectionType> forced_effective_connection_type_;
+  bool persistent_cache_reading_enabled_;
+  const base::TimeDelta min_socket_watcher_notification_interval_;
+
+  EffectiveConnectionTypeAlgorithm effective_connection_type_algorithm_;
+
+  // Default network quality observations obtained from |params_|.
+  nqe::internal::NetworkQuality
+      default_observations_[NetworkChangeNotifier::CONNECTION_LAST + 1];
+
+  // Typical network quality for different effective connection types obtained
+  // from |params_|.
+  nqe::internal::NetworkQuality typical_network_quality_
+      [EffectiveConnectionType::EFFECTIVE_CONNECTION_TYPE_LAST];
+
+  // Thresholds for different effective connection types obtained from
+  // |params_|. These thresholds encode how different connection types behave
+  // in general.
+  nqe::internal::NetworkQuality connection_thresholds_
+      [EffectiveConnectionType::EFFECTIVE_CONNECTION_TYPE_LAST];
+
+  SEQUENCE_CHECKER(sequence_checker_);
+
+  DISALLOW_COPY_AND_ASSIGN(NetworkQualityEstimatorParams);
+};
 
 }  // namespace net
 

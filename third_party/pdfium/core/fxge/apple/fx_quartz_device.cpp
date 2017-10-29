@@ -4,20 +4,18 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "core/fxcrt/fx_ext.h"
+#include "core/fxcrt/fx_extension.h"
 
 #if !defined _SKIA_SUPPORT_ && !defined _SKIA_SUPPORT_PATHS_
 #include "core/fxge/agg/fx_agg_driver.h"
 #endif
 
 #include "core/fxcrt/fx_memory.h"
-#include "core/fxge/cfx_gemodule.h"
 #include "core/fxge/cfx_graphstatedata.h"
 #include "core/fxge/cfx_pathdata.h"
 #include "core/fxge/cfx_renderdevice.h"
-#include "core/fxge/dib/dib_int.h"
 #include "core/fxge/fx_freetype.h"
-#include "core/fxge/ge/fx_text_int.h"
+#include "core/fxge/fx_text_int.h"
 #include "third_party/base/ptr_util.h"
 
 #include "core/fxge/apple/apple_int.h"
@@ -25,7 +23,7 @@
 #error Expected CGFLOAT_IS_DOUBLE to be defined by CoreGraphics headers
 #endif
 
-void* CQuartz2D::createGraphics(CFX_DIBitmap* pBitmap) {
+void* CQuartz2D::createGraphics(const CFX_RetainPtr<CFX_DIBitmap>& pBitmap) {
   if (!pBitmap)
     return nullptr;
   CGBitmapInfo bmpInfo = kCGBitmapByteOrder32Little;
@@ -77,7 +75,7 @@ void CQuartz2D::setGraphicsTextMatrix(void* graphics, CFX_Matrix* matrix) {
 
 bool CQuartz2D::drawGraphicsString(void* graphics,
                                    void* font,
-                                   FX_FLOAT fontSize,
+                                   float fontSize,
                                    uint16_t* glyphIndices,
                                    CGPoint* glyphPositions,
                                    int32_t charsCount,
@@ -95,8 +93,11 @@ bool CQuartz2D::drawGraphicsString(void* graphics,
                                  matrix->e, matrix->f));
     CGContextSetTextMatrix(context, m);
   }
-  int32_t a, r, g, b;
-  ArgbDecode(argb, a, r, g, b);
+  int32_t a;
+  int32_t r;
+  int32_t g;
+  int32_t b;
+  std::tie(a, r, g, b) = ArgbDecode(argb);
   CGContextSetRGBFillColor(context, r / 255.f, g / 255.f, b / 255.f, a / 255.f);
   CGContextSaveGState(context);
 #if CGFLOAT_IS_DOUBLE

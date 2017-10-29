@@ -10,19 +10,18 @@
 #include <string>
 #include <vector>
 
-#include "services/ui/public/interfaces/cursor.mojom.h"
+#include "services/ui/public/interfaces/cursor/cursor.mojom.h"
 #include "services/ui/public/interfaces/mus_constants.mojom.h"
 
 namespace gfx {
 class Insets;
 class Rect;
+class Transform;
 }
 
 namespace ui {
+
 struct TextInputState;
-}
-
-namespace ui {
 
 namespace ws {
 
@@ -51,6 +50,10 @@ class ServerWindowObserver {
                                      const gfx::Rect& old_bounds,
                                      const gfx::Rect& new_bounds) {}
 
+  virtual void OnWindowTransformChanged(ServerWindow* window,
+                                        const gfx::Transform& old_transform,
+                                        const gfx::Transform& new_transform) {}
+
   virtual void OnWindowClientAreaChanged(
       ServerWindow* window,
       const gfx::Insets& new_client_area,
@@ -66,10 +69,11 @@ class ServerWindowObserver {
                                       float old_opacity,
                                       float new_opacity) {}
 
-  virtual void OnWindowPredefinedCursorChanged(ServerWindow* window,
-                                               mojom::Cursor cursor_id) {}
-  virtual void OnWindowNonClientCursorChanged(ServerWindow* window,
-                                              mojom::Cursor cursor_id) {}
+  virtual void OnWindowCursorChanged(ServerWindow* window,
+                                     const ui::CursorData& cursor_data) {}
+  virtual void OnWindowNonClientCursorChanged(
+      ServerWindow* window,
+      const ui::CursorData& cursor_data) {}
 
   virtual void OnWindowTextInputStateChanged(ServerWindow* window,
                                              const ui::TextInputState& state) {}
@@ -95,7 +99,6 @@ class ServerWindowObserver {
 };
 
 }  // namespace ws
-
 }  // namespace ui
 
 #endif  // SERVICES_UI_WS_SERVER_WINDOW_OBSERVER_H_

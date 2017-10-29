@@ -73,7 +73,6 @@ source_set("ipc_common_sources") {
     "gpu_param_traits.cc",
     "gpu_param_traits.h",
     "gpu_param_traits_macros.h",
-    "gpu_stream_constants.h",
     "memory_stats.cc",
     "memory_stats.h",
   ]
@@ -87,18 +86,18 @@ source_set("ipc_common_sources") {
     ":command_buffer_traits_sources",
     ":surface_handle_type",
     "//gpu/command_buffer/common:gles2_utils",
+    "//ipc",
   ]
 
   deps = [
     "//base",
     "//gpu/command_buffer/common:common_sources",
     "//gpu/config:config_sources",
-    "//ipc",
     "//ui/base",
-    "//ui/events/ipc",
     "//ui/gfx/ipc",
     "//ui/gfx/ipc/geometry",
     "//ui/gl",
+    "//ui/latency/ipc",
     "//url/ipc:url_ipc",
   ]
 
@@ -138,6 +137,7 @@ mojom("interfaces") {
   sources = [
     "capabilities.mojom",
     "dx_diag_node.mojom",
+    "gpu_feature_info.mojom",
     "gpu_info.mojom",
     "gpu_preferences.mojom",
     "mailbox.mojom",

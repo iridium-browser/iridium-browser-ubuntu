@@ -9,13 +9,15 @@
 #include "base/bind.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "content/public/common/service_names.mojom.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace content {
 
 BlinkInterfaceProviderImpl::BlinkInterfaceProviderImpl(
-    base::WeakPtr<service_manager::InterfaceProvider> remote_interfaces)
-    : remote_interfaces_(remote_interfaces),
+    base::WeakPtr<service_manager::Connector> connector)
+    : connector_(connector),
       main_thread_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       weak_ptr_factory_(this) {
   weak_ptr_ = weak_ptr_factory_.GetWeakPtr();
@@ -23,20 +25,26 @@ BlinkInterfaceProviderImpl::BlinkInterfaceProviderImpl(
 
 BlinkInterfaceProviderImpl::~BlinkInterfaceProviderImpl() = default;
 
-void BlinkInterfaceProviderImpl::getInterface(
+void BlinkInterfaceProviderImpl::GetInterface(
     const char* name,
+    mojo::ScopedMessagePipeHandle handle) {
+  GetInterfaceInternal(name, std::move(handle));
+}
+
+void BlinkInterfaceProviderImpl::GetInterfaceInternal(
+    const std::string& name,
     mojo::ScopedMessagePipeHandle handle) {
   if (!main_thread_task_runner_->BelongsToCurrentThread()) {
     main_thread_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&BlinkInterfaceProviderImpl::getInterface,
+        FROM_HERE, base::Bind(&BlinkInterfaceProviderImpl::GetInterfaceInternal,
                               weak_ptr_, name, base::Passed(&handle)));
     return;
   }
 
-  if (!remote_interfaces_)
-    return;
-
-  remote_interfaces_->GetInterface(name, std::move(handle));
+  connector_->BindInterface(
+      service_manager::Identity(mojom::kBrowserServiceName,
+                                service_manager::mojom::kInheritUserID),
+      name, std::move(handle));
 }
 
 }  // namespace content

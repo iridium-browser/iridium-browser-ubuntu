@@ -1,13 +1,20 @@
 include_rules = [
-    "+bindings",
-    "+core",
     "-modules",
     "+modules/EventModules.h",
     "+modules/EventTargetModules.h",
     "+modules/ModulesExport.h",
     "+modules/fetch",
     "+modules/serviceworkers",
-    "+platform",
-    "+public/platform",
-    "-web",
+    "+mojo/public/cpp/system/data_pipe.h",
 ]
+
+specific_include_rules = {
+    "ServiceWorkerGlobalScopeProxy\.cpp": [
+        "+modules/background_fetch",
+        "+modules/background_sync",
+        "+modules/exported",
+        "+modules/notifications",
+        "+modules/payments",
+        "+modules/push_messaging",
+    ],
+}

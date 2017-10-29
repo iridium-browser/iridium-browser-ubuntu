@@ -72,7 +72,7 @@ ExternalPrerenderHandlerAndroid::AddPrerender(
     GURL referrer_url(ConvertJavaStringToUTF16(env, jreferrer));
     if (referrer_url.is_valid()) {
       referrer =
-          content::Referrer(referrer_url, blink::WebReferrerPolicyDefault);
+          content::Referrer(referrer_url, blink::kWebReferrerPolicyDefault);
     }
   }
 
@@ -157,11 +157,6 @@ static jlong Init(JNIEnv* env, const JavaParamRef<jclass>& clazz) {
   ExternalPrerenderHandlerAndroid* external_handler =
       new ExternalPrerenderHandlerAndroid();
   return reinterpret_cast<intptr_t>(external_handler);
-}
-
-bool ExternalPrerenderHandlerAndroid::RegisterExternalPrerenderHandlerAndroid(
-    JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace prerender

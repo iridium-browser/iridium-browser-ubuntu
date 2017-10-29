@@ -9,6 +9,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "cc/surfaces/surface_manager.h"
+#include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "content/browser/compositor/image_transport_factory.h"
 #include "content/browser/compositor/surface_utils.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
@@ -30,7 +31,12 @@
 #include "media/base/video_frame.h"
 #include "ui/aura/env.h"
 #include "ui/compositor/compositor.h"
+#include "ui/compositor/layer_type.h"
 #include "ui/gfx/geometry/rect.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/test/test_window_delegate.h"
+#endif
 
 namespace content {
 
@@ -41,6 +47,7 @@ void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
                         ui::PageTransition transition) {
   params->nav_entry_id = nav_entry_id;
   params->url = url;
+  params->origin = url::Origin(url);
   params->referrer = Referrer();
   params->transition = transition;
   params->redirects = std::vector<GURL>();
@@ -49,7 +56,7 @@ void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
   params->searchable_form_encoding = std::string();
   params->did_create_new_entry = did_create_new_entry;
   params->gesture = NavigationGestureUser;
-  params->was_within_same_page = false;
+  params->was_within_same_document = false;
   params->method = "GET";
   params->page_state = PageState::CreateFromURL(url);
 }
@@ -58,25 +65,34 @@ TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
     : rwh_(RenderWidgetHostImpl::From(rwh)),
       is_showing_(false),
       is_occluded_(false),
-      did_swap_compositor_frame_(false) {
+      did_swap_compositor_frame_(false),
+      background_color_(SK_ColorWHITE) {
 #if defined(OS_ANDROID)
   frame_sink_id_ = AllocateFrameSinkId();
-  GetSurfaceManager()->RegisterFrameSinkId(frame_sink_id_);
+  GetFrameSinkManager()->surface_manager()->RegisterFrameSinkId(frame_sink_id_);
 #else
   // Not all tests initialize or need an image transport factory.
   if (ImageTransportFactory::GetInstance()) {
     frame_sink_id_ = AllocateFrameSinkId();
-    GetSurfaceManager()->RegisterFrameSinkId(frame_sink_id_);
+    GetFrameSinkManager()->surface_manager()->RegisterFrameSinkId(
+        frame_sink_id_);
   }
 #endif
 
   rwh_->SetView(this);
+
+#if defined(USE_AURA)
+  window_.reset(new aura::Window(
+      aura::test::TestWindowDelegate::CreateSelfDestroyingDelegate()));
+  window_->set_owned_by_parent(false);
+  window_->Init(ui::LayerType::LAYER_NOT_DRAWN);
+#endif
 }
 
 TestRenderWidgetHostView::~TestRenderWidgetHostView() {
-  cc::SurfaceManager* manager = GetSurfaceManager();
+  viz::FrameSinkManagerImpl* manager = GetFrameSinkManager();
   if (manager) {
-    manager->InvalidateFrameSinkId(frame_sink_id_);
+    manager->surface_manager()->InvalidateFrameSinkId(frame_sink_id_);
   }
 }
 
@@ -89,7 +105,11 @@ gfx::Vector2dF TestRenderWidgetHostView::GetLastScrollOffset() const {
 }
 
 gfx::NativeView TestRenderWidgetHostView::GetNativeView() const {
+#if defined(USE_AURA)
+  return window_.get();
+#else
   return nullptr;
+#endif
 }
 
 gfx::NativeViewAccessible TestRenderWidgetHostView::GetNativeViewAccessible() {
@@ -136,6 +156,14 @@ gfx::Rect TestRenderWidgetHostView::GetViewBounds() const {
   return gfx::Rect();
 }
 
+void TestRenderWidgetHostView::SetBackgroundColor(SkColor color) {
+  background_color_ = color;
+}
+
+SkColor TestRenderWidgetHostView::background_color() const {
+  return background_color_;
+}
+
 bool TestRenderWidgetHostView::HasAcceleratedSurface(
       const gfx::Size& desired_size) {
   return false;
@@ -171,8 +199,13 @@ gfx::Rect TestRenderWidgetHostView::GetBoundsInRootWindow() {
   return gfx::Rect();
 }
 
-void TestRenderWidgetHostView::OnSwapCompositorFrame(
-    uint32_t compositor_frame_sink_id,
+void TestRenderWidgetHostView::DidCreateNewRendererCompositorFrameSink(
+    cc::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink) {
+  did_change_compositor_frame_sink_ = true;
+}
+
+void TestRenderWidgetHostView::SubmitCompositorFrame(
+    const viz::LocalSurfaceId& local_surface_id,
     cc::CompositorFrame frame) {
   did_swap_compositor_frame_ = true;
 }
@@ -184,7 +217,7 @@ bool TestRenderWidgetHostView::LockMouse() {
 void TestRenderWidgetHostView::UnlockMouse() {
 }
 
-cc::FrameSinkId TestRenderWidgetHostView::GetFrameSinkId() {
+viz::FrameSinkId TestRenderWidgetHostView::GetFrameSinkId() {
   return frame_sink_id_;
 }
 
@@ -265,7 +298,7 @@ void TestRenderViewHost::OnWebkitPreferencesChanged() {
 
 void TestRenderViewHost::TestOnStartDragging(
     const DropData& drop_data) {
-  blink::WebDragOperationsMask drag_operation = blink::WebDragOperationEvery;
+  blink::WebDragOperationsMask drag_operation = blink::kWebDragOperationEvery;
   DragEventSourceInfo event_info;
   GetWidget()->OnStartDragging(drop_data, drag_operation, SkBitmap(),
                                gfx::Vector2d(), event_info);

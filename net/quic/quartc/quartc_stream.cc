@@ -1,8 +1,10 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright (c) 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/quic/quartc/quartc_stream.h"
+
+#include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
 
@@ -29,7 +31,7 @@ void QuartcStream::OnDataAvailable() {
 void QuartcStream::OnClose() {
   QuicStream::OnClose();
   DCHECK(delegate_);
-  delegate_->OnClose(this, connection_error());
+  delegate_->OnClose(this);
 }
 
 void QuartcStream::OnCanWrite() {
@@ -50,10 +52,18 @@ bool QuartcStream::fin_sent() {
   return QuicStream::fin_sent();
 }
 
+int QuartcStream::stream_error() {
+  return QuicStream::stream_error();
+}
+
+int QuartcStream::connection_error() {
+  return QuicStream::connection_error();
+}
+
 void QuartcStream::Write(const char* data,
                          size_t size,
                          const WriteParameters& param) {
-  WriteOrBufferData(base::StringPiece(data, size), param.fin, nullptr);
+  WriteOrBufferData(QuicStringPiece(data, size), param.fin, nullptr);
 }
 
 void QuartcStream::Close() {

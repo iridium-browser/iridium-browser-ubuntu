@@ -8,10 +8,13 @@
 
 #include "base/files/file_util.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/strings/stringprintf.h"
 #include "components/update_client/test_configurator.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_data_stream.h"
+#include "net/http/http_response_headers.h"
+#include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_interceptor.h"
@@ -32,7 +35,12 @@ class URLRequestMockJob : public net::URLRequestSimpleJob {
         response_body_(response_body) {}
 
  protected:
-  int GetResponseCode() const override { return response_code_; }
+  void GetResponseInfo(net::HttpResponseInfo* info) override {
+    const std::string headers =
+        base::StringPrintf("HTTP/1.1 %i OK\r\n\r\n", response_code_);
+    info->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+        net::HttpUtil::AssembleRawHeaders(headers.c_str(), headers.length()));
+  }
 
   int GetData(std::string* mime_type,
               std::string* charset,
@@ -59,7 +67,7 @@ URLRequestPostInterceptor::URLRequestPostInterceptor(
 }
 
 URLRequestPostInterceptor::~URLRequestPostInterceptor() {
-  DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
   ClearExpectations();
 }
 
@@ -146,13 +154,13 @@ class URLRequestPostInterceptor::Delegate : public net::URLRequestInterceptor {
       : scheme_(scheme), hostname_(hostname), io_task_runner_(io_task_runner) {}
 
   void Register() {
-    DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+    DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
     net::URLRequestFilter::GetInstance()->AddHostnameInterceptor(
         scheme_, hostname_, std::unique_ptr<net::URLRequestInterceptor>(this));
   }
 
   void Unregister() {
-    DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+    DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
     for (InterceptorMap::iterator it = interceptors_.begin();
          it != interceptors_.end(); ++it)
       delete (*it).second;
@@ -161,7 +169,7 @@ class URLRequestPostInterceptor::Delegate : public net::URLRequestInterceptor {
   }
 
   void OnCreateInterceptor(URLRequestPostInterceptor* interceptor) {
-    DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+    DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
     DCHECK(interceptors_.find(interceptor->GetUrl()) == interceptors_.end());
 
     interceptors_.insert(std::make_pair(interceptor->GetUrl(), interceptor));
@@ -173,7 +181,7 @@ class URLRequestPostInterceptor::Delegate : public net::URLRequestInterceptor {
   net::URLRequestJob* MaybeInterceptRequest(
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate) const override {
-    DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+    DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
 
     // Only intercepts POST.
     if (!request->has_upload())

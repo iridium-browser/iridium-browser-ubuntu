@@ -18,7 +18,7 @@ Resources.ServiceWorkersView = class extends UI.VBox {
     /** @type {!Map<!SDK.ServiceWorkerRegistration, !Resources.ServiceWorkersView.Section>} */
     this._sections = new Map();
 
-    this._toolbar.appendToolbarItem(NetworkConditions.NetworkConditionsSelector.createOfflineToolbarCheckbox());
+    this._toolbar.appendToolbarItem(MobileThrottling.throttlingManager().createOfflineToolbarCheckbox());
     var updateOnReloadSetting = Common.settings.createSetting('serviceWorkerUpdateOnReload', false);
     updateOnReloadSetting.setTitle(Common.UIString('Update on reload'));
     var forceUpdate = new UI.ToolbarSettingCheckbox(
@@ -48,7 +48,7 @@ Resources.ServiceWorkersView = class extends UI.VBox {
     if (this._manager)
       return;
     this._manager = serviceWorkerManager;
-    this._securityOriginManager = SDK.SecurityOriginManager.fromTarget(serviceWorkerManager.target());
+    this._securityOriginManager = serviceWorkerManager.target().model(SDK.SecurityOriginManager);
 
     for (var registration of this._manager.registrations().values())
       this._updateRegistration(registration);
@@ -261,7 +261,7 @@ Resources.ServiceWorkersView.Section = class {
       var scriptElement = this._section.appendField(Common.UIString('Source'));
       scriptElement.removeChildren();
       var fileName = Common.ParsedURL.extractName(active.scriptURL);
-      scriptElement.appendChild(Components.Linkifier.linkifyURL(active.scriptURL, fileName));
+      scriptElement.appendChild(Components.Linkifier.linkifyURL(active.scriptURL, {text: fileName}));
       scriptElement.createChild('div', 'report-field-value-subtitle').textContent =
           Common.UIString('Received %s', new Date(active.scriptResponseTime * 1000).toLocaleString());
 
@@ -287,7 +287,7 @@ Resources.ServiceWorkersView.Section = class {
           this._updateClientInfo(
               clientLabelText, /** @type {!Protocol.Target.TargetInfo} */ (this._clientInfoCache.get(client)));
         }
-        this._manager.target().targetAgent().getTargetInfo(client, this._onClientInfo.bind(this, clientLabelText));
+        this._manager.target().targetAgent().getTargetInfo(client).then(this._onClientInfo.bind(this, clientLabelText));
       }
     }
 
@@ -297,7 +297,7 @@ Resources.ServiceWorkersView.Section = class {
       waitingEntry.createChild('span').textContent = Common.UIString('#%s waiting to activate', waiting.id);
       createLink(waitingEntry, Common.UIString('skipWaiting'), this._skipButtonClicked.bind(this));
       waitingEntry.createChild('div', 'service-worker-subtitle').textContent =
-          new Date(waiting.scriptResponseTime * 1000).toLocaleString();
+          Common.UIString('Received %s', new Date(waiting.scriptResponseTime * 1000).toLocaleString());
       if (!this._targetForVersionId(waiting.id) && (waiting.isRunning() || waiting.isStarting()))
         createLink(waitingEntry, Common.UIString('inspect'), this._inspectButtonClicked.bind(this, waiting.id));
     }
@@ -306,7 +306,7 @@ Resources.ServiceWorkersView.Section = class {
       installingEntry.createChild('div', 'service-worker-installing-circle');
       installingEntry.createChild('span').textContent = Common.UIString('#%s installing', installing.id);
       installingEntry.createChild('div', 'service-worker-subtitle').textContent =
-          new Date(installing.scriptResponseTime * 1000).toLocaleString();
+          Common.UIString('Received %s', new Date(installing.scriptResponseTime * 1000).toLocaleString());
       if (!this._targetForVersionId(installing.id) && (installing.isRunning() || installing.isStarting()))
         createLink(installingEntry, Common.UIString('inspect'), this._inspectButtonClicked.bind(this, installing.id));
     }
@@ -382,11 +382,10 @@ Resources.ServiceWorkersView.Section = class {
 
   /**
    * @param {!Element} element
-   * @param {?Protocol.Error} error
    * @param {?Protocol.Target.TargetInfo} targetInfo
    */
-  _onClientInfo(element, error, targetInfo) {
-    if (error || !targetInfo)
+  _onClientInfo(element, targetInfo) {
+    if (!targetInfo)
       return;
     this._clientInfoCache.set(targetInfo.targetId, targetInfo);
     this._updateClientInfo(element, targetInfo);

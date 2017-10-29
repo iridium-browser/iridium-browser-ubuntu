@@ -4,6 +4,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+
 #include "SampleCode.h"
 #include "SkBlurMask.h"
 #include "SkBlurMaskFilter.h"
@@ -13,50 +14,10 @@
 #include "SkUtils.h"
 #include "SkView.h"
 
-static SkBitmap make_bitmap() {
-    SkPMColor c[256];
-    for (int i = 0; i < 256; i++) {
-        c[i] = SkPackARGB32(255 - i, 0, 0, 0);
-    }
-
-    SkBitmap bm;
-    SkColorTable* ctable = new SkColorTable(c, 256);
-
-    bm.allocPixels(SkImageInfo::Make(256, 256, kIndex_8_SkColorType,
-                                     kPremul_SkAlphaType),
-                   nullptr, ctable);
-    ctable->unref();
-
-    bm.lockPixels();
-    const float cx = bm.width() * 0.5f;
-    const float cy = bm.height() * 0.5f;
-    for (int y = 0; y < bm.height(); y++) {
-        float dy = y - cy;
-        dy *= dy;
-        uint8_t* p = bm.getAddr8(0, y);
-        for (int x = 0; x < 256; x++) {
-            float dx = x - cx;
-            dx *= dx;
-            float d = (dx + dy) / (cx/2);
-            int id = (int)d;
-            if (id > 255) {
-                id = 255;
-            }
-            p[x] = id;
-        }
-    }
-    bm.unlockPixels();
-    return bm;
-}
-
 class BlurView : public SampleView {
     SkBitmap    fBM;
 public:
-    BlurView() {
-        if (false) { // avoid bit rot, suppress warning
-            fBM = make_bitmap();
-        }
-    }
+    BlurView() {}
 
 protected:
     // overrides from SkEventSink
@@ -115,13 +76,13 @@ protected:
                 SkScalar x = SkIntToScalar(70);
                 SkScalar y = SkIntToScalar(400);
                 paint.setColor(SK_ColorBLACK);
-                canvas->drawText("Hamburgefons Style", 18, x, y, paint);
-                canvas->drawText("Hamburgefons Style", 18, x, y + SkIntToScalar(50), paint);
+                canvas->drawString("Hamburgefons Style", x, y, paint);
+                canvas->drawString("Hamburgefons Style", x, y + SkIntToScalar(50), paint);
                 paint.setMaskFilter(nullptr);
                 paint.setColor(SK_ColorWHITE);
                 x -= SkIntToScalar(2);
                 y -= SkIntToScalar(2);
-                canvas->drawText("Hamburgefons Style", 18, x, y, paint);
+                canvas->drawString("Hamburgefons Style", x, y, paint);
             }
             canvas->restore();
             flags = SkBlurMaskFilter::kHighQuality_BlurFlag;

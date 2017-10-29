@@ -10,45 +10,78 @@ Polymer({
    */
   is: 'bookmarks-router',
 
+  behaviors: [
+    bookmarks.StoreClient,
+  ],
+
   properties: {
-    // Parameter q is routed to the searchTerm.
-    // Parameter id is routed to the selectedId.
+    /**
+     * Parameter q is routed to the searchTerm.
+     * Parameter id is routed to the selectedId.
+     * @private
+     */
     queryParams_: Object,
 
-    searchTerm: {
+    /** @private */
+    searchTerm_: {
       type: String,
-      observer: 'onSearchTermChanged_',
+      value: '',
     },
 
-    /** @type {?string} */
-    selectedId: {
-      type: String,
-      observer: 'onSelectedIdChanged_',
-    },
+    /** @private {?string} */
+    selectedId_: String,
   },
 
   observers: [
-    'onQueryChanged_(queryParams_.*)',
+    'onQueryParamsChanged_(queryParams_)',
+    'onStateChanged_(searchTerm_, selectedId_)',
   ],
 
-  /** @private */
-  onQueryChanged_: function() {
-    this.searchTerm = this.queryParams_.q || '';
-    this.selectedId = this.queryParams_.id;
+  attached: function() {
+    this.watch('selectedId_', function(state) {
+      return state.selectedFolder;
+    });
+    this.watch('searchTerm_', function(state) {
+      return state.search.term;
+    });
+    this.updateFromStore();
+  },
 
-    if (this.searchTerm)
-      this.fire('search-term-changed', this.searchTerm);
+  /** @private */
+  onQueryParamsChanged_: function() {
+    var searchTerm = this.queryParams_.q || '';
+    var selectedId = this.queryParams_.id;
+    if (!selectedId && !searchTerm)
+      selectedId = BOOKMARKS_BAR_ID;
+
+    if (searchTerm != this.searchTerm_) {
+      this.searchTerm_ = searchTerm;
+      this.dispatch(bookmarks.actions.setSearchTerm(searchTerm));
+    }
+
+    if (selectedId && selectedId != this.selectedId_) {
+      this.selectedId_ = selectedId;
+      // Need to dispatch a deferred action so that during page load
+      // `this.getState()` will only evaluate after the Store is initialized.
+      this.dispatchAsync(function(dispatch) {
+        dispatch(
+            bookmarks.actions.selectFolder(selectedId, this.getState().nodes));
+      }.bind(this));
+    }
+  },
+
+  /** @private */
+  onStateChanged_: function() {
+    this.debounce('updateQueryParams', this.updateQueryParams_.bind(this));
+  },
+
+  /** @private */
+  updateQueryParams_: function() {
+    if (this.searchTerm_)
+      this.queryParams_ = {q: this.searchTerm_};
+    else if (this.selectedId_ != BOOKMARKS_BAR_ID)
+      this.queryParams_ = {id: this.selectedId_};
     else
-      this.fire('selected-folder-changed', this.selectedId);
-  },
-
-  /** @private */
-  onSelectedIdChanged_: function() {
-    this.set('queryParams_.id', this.selectedId || null);
-  },
-
-  /** @private */
-  onSearchTermChanged_: function() {
-    this.set('queryParams_.q', this.searchTerm || null);
+      this.queryParams_ = {};
   },
 });

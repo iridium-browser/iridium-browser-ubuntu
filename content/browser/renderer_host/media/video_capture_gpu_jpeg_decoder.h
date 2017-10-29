@@ -15,9 +15,11 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequence_checker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "content/common/content_export.h"
+#include "gpu/config/gpu_info.h"
 #include "media/capture/video/video_capture_jpeg_decoder.h"
 #include "media/video/jpeg_decode_accelerator.h"
 
@@ -37,13 +39,14 @@ namespace content {
 class CONTENT_EXPORT VideoCaptureGpuJpegDecoder
     : public media::VideoCaptureJpegDecoder,
       public media::JpegDecodeAccelerator::Client,
-      public base::NonThreadSafe,
       public base::SupportsWeakPtr<VideoCaptureGpuJpegDecoder> {
  public:
   // |decode_done_cb| is called on the IO thread when decode succeed. This can
   // be on any thread. |decode_done_cb| is never called after
   // VideoCaptureGpuJpegDecoder is destroyed.
-  explicit VideoCaptureGpuJpegDecoder(const DecodeDoneCB& decode_done_cb);
+  VideoCaptureGpuJpegDecoder(
+      DecodeDoneCB decode_done_cb,
+      base::Callback<void(const std::string&)> send_log_message_cb);
   ~VideoCaptureGpuJpegDecoder() override;
 
   // Implementation of VideoCaptureJpegDecoder:
@@ -64,6 +67,15 @@ class CONTENT_EXPORT VideoCaptureGpuJpegDecoder
                    media::JpegDecodeAccelerator::Error error) override;
 
  private:
+  static void RequestGPUInfoOnIOThread(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      base::WeakPtr<VideoCaptureGpuJpegDecoder> weak_this);
+
+  static void DidReceiveGPUInfoOnIOThread(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      base::WeakPtr<VideoCaptureGpuJpegDecoder> weak_this,
+      const gpu::GPUInfo& gpu_info);
+
   // Initialization helper, to establish GPU channel.
   static void EstablishGpuChannelOnUIThread(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
@@ -91,6 +103,9 @@ class CONTENT_EXPORT VideoCaptureGpuJpegDecoder
   // The callback to run when decode succeeds.
   const DecodeDoneCB decode_done_cb_;
 
+  const base::Callback<void(const std::string&)> send_log_message_cb_;
+  bool has_received_decoded_frame_;
+
   // Guards |decode_done_closure_| and |decoder_status_|.
   mutable base::Lock lock_;
 
@@ -108,6 +123,8 @@ class CONTENT_EXPORT VideoCaptureGpuJpegDecoder
   std::unique_ptr<base::SharedMemory> in_shared_memory_;
 
   STATUS decoder_status_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureGpuJpegDecoder);
 };

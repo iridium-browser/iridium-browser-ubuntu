@@ -14,17 +14,22 @@ import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.banners.SwipableOverlayView;
+import org.chromium.chrome.browser.infobar.InfoBarContainerLayout.Item;
+import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetObserver;
+import org.chromium.chrome.browser.widget.bottomsheet.EmptyBottomSheetObserver;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.DeviceFormFactor;
 
 import java.util.ArrayList;
-
 
 /**
  * A container for all the infobars of a specific tab.
@@ -57,6 +62,12 @@ public class InfoBarContainer extends SwipableOverlayView {
          * Notifies the subscriber when an animation is completed.
          */
         void notifyAnimationFinished(int animationType);
+
+        /**
+         * Notifies the subscriber when all animations are finished.
+         * @param frontInfoBar The frontmost infobar or {@code null} if none are showing.
+         */
+        void notifyAllAnimationsFinished(Item frontInfoBar);
     }
 
     /**
@@ -90,7 +101,7 @@ public class InfoBarContainer extends SwipableOverlayView {
     private final TabObserver mTabObserver = new EmptyTabObserver() {
         @Override
         public void onDidFinishNavigation(Tab tab, String url, boolean isInMainFrame,
-                boolean isErrorPage, boolean hasCommitted, boolean isSamePage,
+                boolean isErrorPage, boolean hasCommitted, boolean isSameDocument,
                 boolean isFragmentNavigation, Integer pageTransition, int errorCode,
                 int httpStatusCode) {
             if (hasCommitted && isInMainFrame) {
@@ -108,8 +119,10 @@ public class InfoBarContainer extends SwipableOverlayView {
         @Override
         public void onReparentingFinished(Tab tab) {
             setParentView((ViewGroup) tab.getActivity().findViewById(R.id.bottom_container));
+            mTab = tab;
         }
     };
+
 
     /**
      * Adds/removes the {@link InfoBarContainer} when the tab's view is attached/detached. This is
@@ -130,6 +143,9 @@ public class InfoBarContainer extends SwipableOverlayView {
 
     private final InfoBarContainerLayout mLayout;
 
+    /** Helper class to manage showing in-product help bubbles over specific info bars. */
+    private final IPHInfoBarSupport mIPHSupport;
+
     /** Native InfoBarContainer pointer which will be set by nativeInit(). */
     private final long mNativeInfoBarContainer;
 
@@ -148,13 +164,20 @@ public class InfoBarContainer extends SwipableOverlayView {
     /** Whether or not another View is occupying the same space as this one. */
     private boolean mIsObscured;
 
+    /** A {@link BottomSheetObserver} so this view knows when to show/hide. */
+    private BottomSheetObserver mBottomSheetObserver;
+
     private final ObserverList<InfoBarContainerObserver> mObservers =
             new ObserverList<InfoBarContainerObserver>();
+
+    /** The tab that hosts this infobar container. */
+    private Tab mTab;
 
     public InfoBarContainer(Context context, final ViewGroup parentView, Tab tab) {
         super(context, null);
         tab.addObserver(mTabObserver);
         mTabView = tab.getView();
+        mTab = tab;
 
         // TODO(newt): move this workaround into the infobar views if/when they're scrollable.
         // Workaround for http://crbug.com/407149. See explanation in onMeasure() below.
@@ -162,20 +185,30 @@ public class InfoBarContainer extends SwipableOverlayView {
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
-        int topMarginDp = DeviceFormFactor.isTablet(context)
-                ? TOP_MARGIN_TABLET_DP : TOP_MARGIN_PHONE_DP;
+        int topMarginDp = DeviceFormFactor.isTablet() ? TOP_MARGIN_TABLET_DP : TOP_MARGIN_PHONE_DP;
         lp.topMargin = Math.round(topMarginDp * getResources().getDisplayMetrics().density);
         setLayoutParams(lp);
 
         mParentView = parentView;
-
         mLayout = new InfoBarContainerLayout(context);
         addView(mLayout, new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT,
                 LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
+        mIPHSupport = new IPHInfoBarSupport(context);
+        mLayout.addAnimationListener(mIPHSupport);
+        addObserver(mIPHSupport);
+
         // Chromium's InfoBarContainer may add an InfoBar immediately during this initialization
         // call, so make sure everything in the InfoBarContainer is completely ready beforehand.
         mNativeInfoBarContainer = nativeInit();
+    }
+
+    public SnackbarManager getSnackbarManager() {
+        if (mTab != null && mTab.getActivity() != null) {
+            return mTab.getActivity().getSnackbarManager();
+        }
+
+        return null;
     }
 
     /**
@@ -212,8 +245,8 @@ public class InfoBarContainer extends SwipableOverlayView {
     }
 
     @VisibleForTesting
-    public void setAnimationListener(InfoBarAnimationListener listener) {
-        mLayout.setAnimationListener(listener);
+    public void addAnimationListener(InfoBarAnimationListener listener) {
+        mLayout.addAnimationListener(listener);
     }
 
     /**
@@ -298,6 +331,12 @@ public class InfoBarContainer extends SwipableOverlayView {
     }
 
     public void destroy() {
+        ChromeActivity activity = mTab.getActivity();
+        if (activity != null && mBottomSheetObserver != null && activity.getBottomSheet() != null) {
+            activity.getBottomSheet().removeObserver(mBottomSheetObserver);
+        }
+        mLayout.removeAnimationListener(mIPHSupport);
+        removeObserver(mIPHSupport);
         mDestroyed = true;
         if (mNativeInfoBarContainer != 0) {
             nativeDestroy(mNativeInfoBarContainer);
@@ -368,6 +407,20 @@ public class InfoBarContainer extends SwipableOverlayView {
             setAlpha(0f);
             animate().alpha(1f).setDuration(REATTACH_FADE_IN_MS);
         }
+
+        // Activity is checked first in the following block for tests.
+        ChromeActivity activity = mTab.getActivity();
+        if (activity != null && activity.getBottomSheet() != null && mBottomSheetObserver == null) {
+            mBottomSheetObserver = new EmptyBottomSheetObserver() {
+                @Override
+                public void onSheetStateChanged(int sheetState) {
+                    if (mTab.isHidden()) return;
+                    setVisibility(sheetState == BottomSheet.SHEET_STATE_FULL ? INVISIBLE : VISIBLE);
+                }
+            };
+            activity.getBottomSheet().addObserver(mBottomSheetObserver);
+        }
+
         // Notify observers that the container has attached to the window.
         for (InfoBarContainerObserver observer : mObservers) {
             observer.onInfoBarContainerAttachedToWindow(!mInfoBars.isEmpty());

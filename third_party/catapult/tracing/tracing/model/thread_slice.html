@@ -14,7 +14,7 @@ found in the LICENSE file.
  * @fileoverview Provides the Thread class.
  */
 tr.exportTo('tr.model', function() {
-  var Slice = tr.model.Slice;
+  const Slice = tr.model.Slice;
 
   /**
    * A ThreadSlice represents an interval of time on a thread resource
@@ -44,12 +44,14 @@ tr.exportTo('tr.model', function() {
     __proto__: Slice.prototype,
 
     get overlappingSamples() {
-      var samples = new tr.model.EventSet();
-      if (!this.parentContainer || !this.parentContainer.samples)
+      const samples = new tr.model.EventSet();
+      if (!this.parentContainer || !this.parentContainer.samples) {
         return samples;
+      }
       this.parentContainer.samples.forEach(function(sample) {
-        if (this.start <= sample.start && sample.start <= this.end)
+        if (this.start <= sample.start && sample.start <= this.end) {
           samples.push(sample);
+        }
       }, this);
       return samples;
     }

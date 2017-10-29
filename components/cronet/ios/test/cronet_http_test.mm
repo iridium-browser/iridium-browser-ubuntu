@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
+#include "components/cronet/ios/test/cronet_test_base.h"
 #include "components/cronet/ios/test/start_cronet.h"
 #include "components/cronet/ios/test/test_server.h"
 #include "components/grpc_support/test/quic_test_server.h"
@@ -21,150 +22,74 @@
 
 #include "url/gurl.h"
 
-@interface TestDelegate : NSObject<NSURLSessionDataDelegate,
-                                   NSURLSessionDelegate,
-                                   NSURLSessionTaskDelegate>
-
-// Completion semaphore for this TestDelegate. When the request this delegate is
-// attached to finishes (either successfully or with an error), this delegate
-// signals this semaphore.
-@property(assign, nonatomic) dispatch_semaphore_t semaphore;
-
-// Body of response received by the request this delegate is attached to.
-@property(retain, nonatomic) NSString* responseBody;
-
-// Error the request this delegate is attached to failed with, if any.
-@property(retain, nonatomic) NSError* error;
-
-@end
-
-@implementation TestDelegate
-@synthesize semaphore = _semaphore;
-@synthesize responseBody = _responseBody;
-@synthesize error = _error;
-
-- (id)init {
-  if (self = [super init]) {
-    _semaphore = dispatch_semaphore_create(0);
-  }
-  return self;
-}
-
-- (void)dealloc {
-  dispatch_release(_semaphore);
-  [_error release];
-  _error = nil;
-  [super dealloc];
-}
-
-- (void)reset {
-  _responseBody = nil;
-  _error = nil;
-}
-
-- (void)URLSession:(NSURLSession*)session
-    didBecomeInvalidWithError:(NSError*)error {
-}
-
-- (void)URLSession:(NSURLSession*)session
-                    task:(NSURLSessionTask*)task
-    didCompleteWithError:(NSError*)error {
-  [self setError:error];
-  dispatch_semaphore_signal(_semaphore);
-}
-
-- (void)URLSession:(NSURLSession*)session
-                   task:(NSURLSessionTask*)task
-    didReceiveChallenge:(NSURLAuthenticationChallenge*)challenge
-      completionHandler:
-          (void (^)(NSURLSessionAuthChallengeDisposition disp,
-                    NSURLCredential* credential))completionHandler {
-  completionHandler(NSURLSessionAuthChallengeUseCredential, nil);
-}
-
-- (void)URLSession:(NSURLSession*)session
-              dataTask:(NSURLSessionDataTask*)dataTask
-    didReceiveResponse:(NSURLResponse*)response
-     completionHandler:(void (^)(NSURLSessionResponseDisposition disposition))
-                           completionHandler {
-  completionHandler(NSURLSessionResponseAllow);
-}
-
-- (void)URLSession:(NSURLSession*)session
-          dataTask:(NSURLSessionDataTask*)dataTask
-    didReceiveData:(NSData*)data {
-  NSString* stringData =
-      [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-  if (_responseBody == nil) {
-    _responseBody = stringData;
-  } else {
-    _responseBody = [_responseBody stringByAppendingString:stringData];
-  }
-}
-
-- (void)URLSession:(NSURLSession*)session
-             dataTask:(NSURLSessionDataTask*)dataTask
-    willCacheResponse:(NSCachedURLResponse*)proposedResponse
-    completionHandler:
-        (void (^)(NSCachedURLResponse* cachedResponse))completionHandler {
-  completionHandler(proposedResponse);
-}
-
-@end
-
 namespace cronet {
-// base::TimeDelta would normally be ideal for this but it does not support
-// nanosecond resolution.
-static const int64_t ns_in_second = 1000000000LL;
 const char kUserAgent[] = "CronetTest/1.0.0.0";
 
-class HttpTest : public ::testing::Test {
+class HttpTest : public CronetTestBase {
  protected:
   HttpTest() {}
   ~HttpTest() override {}
 
   void SetUp() override {
-    grpc_support::StartQuicTestServer();
+    CronetTestBase::SetUp();
     TestServer::Start();
 
     [Cronet setRequestFilterBlock:^(NSURLRequest* request) {
       return YES;
     }];
-    StartCronetIfNecessary(grpc_support::GetQuicTestServerPort());
+    StartCronet(grpc_support::GetQuicTestServerPort());
     [Cronet registerHttpProtocolHandler];
     NSURLSessionConfiguration* config =
         [NSURLSessionConfiguration ephemeralSessionConfiguration];
     [Cronet installIntoSessionConfiguration:config];
-    delegate_.reset([[TestDelegate alloc] init]);
-    NSURLSession* session = [NSURLSession sessionWithConfiguration:config
-                                                          delegate:delegate_
-                                                     delegateQueue:nil];
-    // Take a reference to the session and store it so it doesn't get
-    // deallocated until this object does.
-    session_.reset([session retain]);
+    session_ = [NSURLSession sessionWithConfiguration:config
+                                             delegate:delegate_
+                                        delegateQueue:nil];
   }
 
   void TearDown() override {
-    grpc_support::ShutdownQuicTestServer();
     TestServer::Shutdown();
+
+    [Cronet stopNetLog];
+    [Cronet shutdownForTesting];
+    CronetTestBase::TearDown();
   }
 
-  // Launches the supplied |task| and blocks until it completes, with a timeout
-  // of 1 second.
-  void StartDataTaskAndWaitForCompletion(NSURLSessionDataTask* task) {
-    [delegate_ reset];
-    [task resume];
-    int64_t deadline_ns = 1 * ns_in_second;
-    dispatch_semaphore_wait([delegate_ semaphore],
-                            dispatch_time(DISPATCH_TIME_NOW, deadline_ns));
-  }
-
-  base::scoped_nsobject<NSURLSession> session_;
-  base::scoped_nsobject<TestDelegate> delegate_;
+  NSURLSession* session_;
 };
 
+TEST_F(HttpTest, CreateSslKeyLogFile) {
+  // Shutdown Cronet so that it can be restarted with specific configuration
+  // (SSL key log file specified in experimental options) for this one test.
+  // This is necessary because SslKeyLogFile can only be set once, before any
+  // SSL Client Sockets are created.
+
+  [Cronet shutdownForTesting];
+
+  NSString* ssl_key_log_file = [Cronet getNetLogPathForFile:@"SSLKEYLOGFILE"];
+
+  // Ensure that the keylog file doesn't exist.
+  [[NSFileManager defaultManager] removeItemAtPath:ssl_key_log_file error:nil];
+
+  [Cronet setExperimentalOptions:
+              [NSString stringWithFormat:@"{\"ssl_key_log_file\":\"%@\"}",
+                                         ssl_key_log_file]];
+
+  StartCronet(grpc_support::GetQuicTestServerPort());
+
+  bool ssl_file_created =
+      [[NSFileManager defaultManager] fileExistsAtPath:ssl_key_log_file];
+
+  [[NSFileManager defaultManager] removeItemAtPath:ssl_key_log_file error:nil];
+
+  [Cronet shutdownForTesting];
+  [Cronet setExperimentalOptions:@""];
+
+  EXPECT_TRUE(ssl_file_created);
+}
+
 TEST_F(HttpTest, NSURLSessionReceivesData) {
-  NSURL* url = net::NSURLWithGURL(GURL(grpc_support::kTestServerUrl));
+  NSURL* url = net::NSURLWithGURL(GURL(grpc_support::kTestServerSimpleUrl));
   __block BOOL block_used = NO;
   NSURLSessionDataTask* task = [session_ dataTaskWithURL:url];
   [Cronet setRequestFilterBlock:^(NSURLRequest* request) {
@@ -175,18 +100,50 @@ TEST_F(HttpTest, NSURLSessionReceivesData) {
   StartDataTaskAndWaitForCompletion(task);
   EXPECT_TRUE(block_used);
   EXPECT_EQ(nil, [delegate_ error]);
-  EXPECT_STREQ(grpc_support::kHelloBodyValue,
+  EXPECT_STREQ(grpc_support::kSimpleBodyValue,
                base::SysNSStringToUTF8([delegate_ responseBody]).c_str());
+}
+
+TEST_F(HttpTest, NSURLSessionReceivesBigHttpDataLoop) {
+  int iterations = 50;
+  long size = 10 * 1024 * 1024;
+  LOG(INFO) << "Downloading " << size << " bytes " << iterations << " times.";
+  NSTimeInterval elapsed_avg = 0;
+  NSTimeInterval elapsed_max = 0;
+  NSURL* url = net::NSURLWithGURL(GURL(TestServer::PrepareBigDataURL(size)));
+  for (int i = 0; i < iterations; ++i) {
+    [delegate_ reset];
+    __block BOOL block_used = NO;
+    NSURLSessionDataTask* task = [session_ dataTaskWithURL:url];
+    [Cronet setRequestFilterBlock:^(NSURLRequest* request) {
+      block_used = YES;
+      EXPECT_EQ([request URL], url);
+      return YES;
+    }];
+    NSDate* start = [NSDate date];
+    StartDataTaskAndWaitForCompletion(task);
+    NSTimeInterval elapsed = -[start timeIntervalSinceNow];
+    elapsed_avg += elapsed;
+    if (elapsed > elapsed_max)
+      elapsed_max = elapsed;
+    EXPECT_TRUE(block_used);
+    EXPECT_EQ(nil, [delegate_ error]);
+    EXPECT_EQ(size, [delegate_ totalBytesReceived]);
+  }
+  // Release the response buffer.
+  TestServer::ReleaseBigDataURL();
+  LOG(INFO) << "Elapsed Average:" << elapsed_avg * 1000 / iterations
+            << "ms Max:" << elapsed_max * 1000 << "ms";
 }
 
 TEST_F(HttpTest, GetGlobalMetricsDeltas) {
   NSData* delta1 = [Cronet getGlobalMetricsDeltas];
 
-  NSURL* url = net::NSURLWithGURL(GURL(grpc_support::kTestServerUrl));
+  NSURL* url = net::NSURLWithGURL(GURL(grpc_support::kTestServerSimpleUrl));
   NSURLSessionDataTask* task = [session_ dataTaskWithURL:url];
   StartDataTaskAndWaitForCompletion(task);
   EXPECT_EQ(nil, [delegate_ error]);
-  EXPECT_STREQ(grpc_support::kHelloBodyValue,
+  EXPECT_STREQ(grpc_support::kSimpleBodyValue,
                base::SysNSStringToUTF8([delegate_ responseBody]).c_str());
 
   NSData* delta2 = [Cronet getGlobalMetricsDeltas];
@@ -396,6 +353,69 @@ TEST_F(HttpTest, FileSchemeNotSupported) {
   [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
   EXPECT_EQ(nil, [delegate_ error]);
   EXPECT_TRUE([[delegate_ responseBody] containsString:fileData]);
+}
+
+TEST_F(HttpTest, DataSchemeNotSupported) {
+  NSString* testString = @"Hello, World!";
+  NSData* testData = [testString dataUsingEncoding:NSUTF8StringEncoding];
+  NSString* dataString =
+      [NSString stringWithFormat:@"data:text/plain;base64,%@",
+                                 [testData base64EncodedStringWithOptions:0]];
+  NSURL* url = [NSURL URLWithString:dataString];
+  NSURLSessionDataTask* task = [session_ dataTaskWithURL:url];
+  [Cronet setRequestFilterBlock:^(NSURLRequest* request) {
+    EXPECT_TRUE(false) << "Block should not be called for unsupported requests";
+    return YES;
+  }];
+  StartDataTaskAndWaitForCompletion(task);
+  EXPECT_EQ(nil, [delegate_ error]);
+  EXPECT_TRUE([[delegate_ responseBody] containsString:testString]);
+}
+
+TEST_F(HttpTest, BrotliAdvertisedTest) {
+  [Cronet shutdownForTesting];
+
+  [Cronet setBrotliEnabled:YES];
+
+  StartCronet(grpc_support::GetQuicTestServerPort());
+
+  NSURL* url =
+      net::NSURLWithGURL(GURL(TestServer::GetEchoHeaderURL("Accept-Encoding")));
+  NSURLSessionDataTask* task = [session_ dataTaskWithURL:url];
+  StartDataTaskAndWaitForCompletion(task);
+  EXPECT_EQ(nil, [delegate_ error]);
+  EXPECT_TRUE([[delegate_ responseBody] containsString:@"br"]);
+}
+
+TEST_F(HttpTest, BrotliNotAdvertisedTest) {
+  [Cronet shutdownForTesting];
+
+  [Cronet setBrotliEnabled:NO];
+
+  StartCronet(grpc_support::GetQuicTestServerPort());
+
+  NSURL* url =
+      net::NSURLWithGURL(GURL(TestServer::GetEchoHeaderURL("Accept-Encoding")));
+  NSURLSessionDataTask* task = [session_ dataTaskWithURL:url];
+  StartDataTaskAndWaitForCompletion(task);
+  EXPECT_EQ(nil, [delegate_ error]);
+  EXPECT_FALSE([[delegate_ responseBody] containsString:@"br"]);
+}
+
+TEST_F(HttpTest, BrotliHandleDecoding) {
+  [Cronet shutdownForTesting];
+
+  [Cronet setBrotliEnabled:YES];
+
+  StartCronet(grpc_support::GetQuicTestServerPort());
+
+  NSURL* url =
+      net::NSURLWithGURL(GURL(TestServer::GetUseEncodingURL("brotli")));
+  NSURLSessionDataTask* task = [session_ dataTaskWithURL:url];
+  StartDataTaskAndWaitForCompletion(task);
+  EXPECT_EQ(nil, [delegate_ error]);
+  EXPECT_STREQ(base::SysNSStringToUTF8([delegate_ responseBody]).c_str(),
+               "The quick brown fox jumps over the lazy dog");
 }
 
 }  // namespace cronet

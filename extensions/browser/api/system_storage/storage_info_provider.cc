@@ -38,7 +38,7 @@ void BuildStorageUnitInfo(const StorageInfo& info, StorageUnitInfo* unit) {
 }  // namespace systeminfo
 
 // Static member intialization.
-base::LazyInstance<scoped_refptr<StorageInfoProvider> >
+base::LazyInstance<scoped_refptr<StorageInfoProvider>>::DestructorAtExit
     StorageInfoProvider::provider_ = LAZY_INSTANCE_INITIALIZER;
 
 StorageInfoProvider::StorageInfoProvider() {
@@ -68,7 +68,7 @@ void StorageInfoProvider::InitializeProvider(
 }
 
 bool StorageInfoProvider::QueryInfo() {
-  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  base::ThreadRestrictions::AssertIOAllowed();
   // No info to query since we get all available storage devices' info in
   // |PrepareQueryOnUIThread()|.
   return true;

@@ -8,6 +8,7 @@
 
 #include "base/lazy_instance.h"
 #include "content/browser/bad_message.h"
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/frame_host/cross_process_frame_connector.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/frame_tree_node.h"
@@ -30,10 +31,10 @@ namespace {
 typedef std::pair<int32_t, int32_t> RenderFrameProxyHostID;
 typedef base::hash_map<RenderFrameProxyHostID, RenderFrameProxyHost*>
     RoutingIDFrameProxyMap;
-base::LazyInstance<RoutingIDFrameProxyMap> g_routing_id_frame_proxy_map =
-  LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<RoutingIDFrameProxyMap>::DestructorAtExit
+    g_routing_id_frame_proxy_map = LAZY_INSTANCE_INITIALIZER;
 
-}
+}  // namespace
 
 // static
 RenderFrameProxyHost* RenderFrameProxyHost::FromID(int process_id,
@@ -251,6 +252,15 @@ void RenderFrameProxyHost::OnOpenURL(
   if (!site_instance_->IsRelatedSiteInstance(current_rfh->GetSiteInstance()))
     return;
 
+  // Verify if the request originator (*not* |current_rfh|) has access to the
+  // contents of the POST body.
+  if (!ChildProcessSecurityPolicyImpl::GetInstance()->CanReadRequestBody(
+          GetSiteInstance(), params.resource_request_body)) {
+    bad_message::ReceivedBadMessage(GetProcess(),
+                                    bad_message::RFPH_ILLEGAL_UPLOAD_PARAMS);
+    return;
+  }
+
   // Since this navigation targeted a specific RenderFrameProxy, it should stay
   // in the current tab.
   DCHECK_EQ(WindowOpenDisposition::CURRENT_TAB, params.disposition);
@@ -346,6 +356,8 @@ void RenderFrameProxyHost::OnAdvanceFocus(blink::WebFocusType type,
           : nullptr;
 
   target_rfh->AdvanceFocus(type, source_proxy);
+  frame_tree_node_->current_frame_host()->delegate()->OnAdvanceFocus(
+      source_rfh);
 }
 
 void RenderFrameProxyHost::OnFrameFocused() {

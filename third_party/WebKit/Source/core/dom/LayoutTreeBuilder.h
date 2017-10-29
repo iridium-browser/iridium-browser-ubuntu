@@ -33,71 +33,85 @@
 #include "core/dom/Node.h"
 #include "core/dom/Text.h"
 #include "core/layout/LayoutObject.h"
-#include "wtf/RefPtr.h"
+#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
 class ComputedStyle;
 
+// The LayoutTreeBuilder class uses the DOM tree and CSS style rules as input to
+// form a LayoutObject Tree which is then used for layout computations in a
+// later stage.
+
+// To construct the LayoutObject tree, the LayoutTreeBuilder does the following:
+// 1. Starting at the root of the DOM tree, traverse each visible node.
+//    Visibility is determined by
+//    LayoutTreeBuilderFor{Element,Text}::ShouldCreateLayoutObject() functions.
+// 2. For each visible node, ensure that the style has been resolved (either by
+//    getting the ComputedStyle passed on to the LayoutTreeBuilder or by forcing
+//    style resolution). This is done in LayoutTreeBuilderForElement::Style().
+// 3. Emit visible LayoutObjects with content and their computed styles.
+//    This is dealt with by the
+//    LayoutTreeBuilderFor{Element,Text}::CreateLayoutObject() functions.
 template <typename NodeType>
 class LayoutTreeBuilder {
   STACK_ALLOCATED();
 
  protected:
-  LayoutTreeBuilder(NodeType& node, LayoutObject* layoutObjectParent)
-      : m_node(node), m_layoutObjectParent(layoutObjectParent) {
-    DCHECK(!node.layoutObject());
-    DCHECK(node.needsAttach());
-    DCHECK(node.document().inStyleRecalc());
-    DCHECK(node.inActiveDocument());
+  LayoutTreeBuilder(NodeType& node, LayoutObject* layout_object_parent)
+      : node_(node), layout_object_parent_(layout_object_parent) {
+    DCHECK(!node.GetLayoutObject());
+    DCHECK(node.NeedsAttach());
+    DCHECK(node.GetDocument().InStyleRecalc());
+    DCHECK(node.InActiveDocument());
   }
 
-  LayoutObject* nextLayoutObject() const {
-    DCHECK(m_layoutObjectParent);
+  LayoutObject* NextLayoutObject() const {
+    DCHECK(layout_object_parent_);
 
     // Avoid an O(N^2) walk over the children when reattaching all children of a
     // node.
-    if (m_layoutObjectParent->node() &&
-        m_layoutObjectParent->node()->needsAttach())
-      return 0;
+    if (layout_object_parent_->GetNode() &&
+        layout_object_parent_->GetNode()->NeedsAttach())
+      return nullptr;
 
-    return LayoutTreeBuilderTraversal::nextSiblingLayoutObject(*m_node);
+    return LayoutTreeBuilderTraversal::NextSiblingLayoutObject(*node_);
   }
 
-  Member<NodeType> m_node;
-  LayoutObject* m_layoutObjectParent;
+  Member<NodeType> node_;
+  LayoutObject* layout_object_parent_;
 };
 
 class LayoutTreeBuilderForElement : public LayoutTreeBuilder<Element> {
  public:
   LayoutTreeBuilderForElement(Element&, ComputedStyle*);
 
-  void createLayoutObjectIfNeeded() {
-    if (shouldCreateLayoutObject())
-      createLayoutObject();
+  void CreateLayoutObjectIfNeeded() {
+    if (ShouldCreateLayoutObject())
+      CreateLayoutObject();
   }
 
-  ComputedStyle* resolvedStyle() const { return m_style.get(); }
+  ComputedStyle* ResolvedStyle() const { return style_.Get(); }
 
  private:
-  LayoutObject* parentLayoutObject() const;
-  LayoutObject* nextLayoutObject() const;
-  bool shouldCreateLayoutObject() const;
-  ComputedStyle& style() const;
-  void createLayoutObject();
+  LayoutObject* ParentLayoutObject() const;
+  LayoutObject* NextLayoutObject() const;
+  bool ShouldCreateLayoutObject() const;
+  ComputedStyle& Style() const;
+  void CreateLayoutObject();
 
-  mutable RefPtr<ComputedStyle> m_style;
+  mutable RefPtr<ComputedStyle> style_;
 };
 
 class LayoutTreeBuilderForText : public LayoutTreeBuilder<Text> {
  public:
   LayoutTreeBuilderForText(Text& text,
-                           LayoutObject* layoutParent,
-                           ComputedStyle* styleFromParent)
-      : LayoutTreeBuilder(text, layoutParent), m_style(styleFromParent) {}
+                           LayoutObject* layout_parent,
+                           ComputedStyle* style_from_parent)
+      : LayoutTreeBuilder(text, layout_parent), style_(style_from_parent) {}
 
-  RefPtr<ComputedStyle> m_style;
-  void createLayoutObject();
+  RefPtr<ComputedStyle> style_;
+  void CreateLayoutObject();
 };
 
 }  // namespace blink

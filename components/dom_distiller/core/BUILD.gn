@@ -52,13 +52,13 @@ static_library("core") {
     "url_utils.cc",
     "url_utils.h",
     "url_utils_android.cc",
-    "url_utils_android.h",
     "viewer.cc",
     "viewer.h",
   ]
 
   public_deps = [
     "//components/dom_distiller/core/proto",
+    "//net",
     "//third_party/dom_distiller_js:proto",
   ]
   deps = [
@@ -71,7 +71,6 @@ static_library("core") {
     "//components/strings",
     "//components/sync",
     "//components/variations",
-    "//net",
     "//skia",
     "//third_party/re2",
     "//ui/base",
@@ -80,8 +79,6 @@ static_library("core") {
 
   if (is_android) {
     sources += [
-      "android/core_jni_registrar.cc",
-      "android/core_jni_registrar.h",
       "dom_distiller_service_android.cc",
       "dom_distiller_service_android.h",
     ]

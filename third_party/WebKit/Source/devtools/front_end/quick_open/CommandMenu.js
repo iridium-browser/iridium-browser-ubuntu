@@ -59,35 +59,30 @@ QuickOpen.CommandMenu = class {
 
   /**
    * @param {!Runtime.Extension} extension
+   * @param {string} category
    * @return {!QuickOpen.CommandMenu.Command}
    */
-  static createRevealPanelCommand(extension) {
-    var panelId = extension.descriptor()['id'];
-    var executeHandler = UI.viewManager.showView.bind(UI.viewManager, panelId);
+  static createRevealViewCommand(extension, category) {
+    var viewId = extension.descriptor()['id'];
+    var executeHandler = UI.viewManager.showView.bind(UI.viewManager, viewId);
     var tags = extension.descriptor()['tags'] || '';
     return QuickOpen.CommandMenu.createCommand(
-        Common.UIString('Panel'), tags, Common.UIString('Show %s', extension.title()), '', executeHandler);
-  }
-
-  /**
-   * @param {!Runtime.Extension} extension
-   * @return {!QuickOpen.CommandMenu.Command}
-   */
-  static createRevealDrawerCommand(extension) {
-    var drawerId = extension.descriptor()['id'];
-    var executeHandler = UI.viewManager.showView.bind(UI.viewManager, drawerId);
-    var tags = extension.descriptor()['tags'] || '';
-    return QuickOpen.CommandMenu.createCommand(
-        Common.UIString('Drawer'), tags, Common.UIString('Show %s', extension.title()), '', executeHandler);
+        category, tags, Common.UIString('Show %s', extension.title()), '', executeHandler);
   }
 
   _loadCommands() {
+    var locations = new Map();
+    self.runtime.extensions(UI.ViewLocationResolver).forEach(extension => {
+      var category = extension.descriptor()['category'];
+      var name = extension.descriptor()['name'];
+      if (category && name)
+        locations.set(name, category);
+    });
     var viewExtensions = self.runtime.extensions('view');
     for (var extension of viewExtensions) {
-      if (extension.descriptor()['location'] === 'panel')
-        this._commands.push(QuickOpen.CommandMenu.createRevealPanelCommand(extension));
-      else if (extension.descriptor()['location'] === 'drawer-view')
-        this._commands.push(QuickOpen.CommandMenu.createRevealDrawerCommand(extension));
+      var category = locations.get(extension.descriptor()['location']);
+      if (category)
+        this._commands.push(QuickOpen.CommandMenu.createRevealViewCommand(extension, category));
     }
 
     // Populate whitelisted settings.
@@ -109,17 +104,16 @@ QuickOpen.CommandMenu = class {
   }
 };
 
-/**
- * @unrestricted
- */
-QuickOpen.CommandMenuDelegate = class extends QuickOpen.FilteredListWidget.Delegate {
+QuickOpen.CommandMenuProvider = class extends QuickOpen.FilteredListWidget.Provider {
   constructor() {
     super();
     this._commands = [];
-    this._appendAvailableCommands();
   }
 
-  _appendAvailableCommands() {
+  /**
+   * @override
+   */
+  attach() {
     var allCommands = QuickOpen.commandMenu.commands();
 
     // Populate whitelisted actions.
@@ -145,6 +139,13 @@ QuickOpen.CommandMenuDelegate = class extends QuickOpen.FilteredListWidget.Deleg
       var cats = left.category().compareTo(right.category());
       return cats ? cats : left.title().compareTo(right.title());
     }
+  }
+
+  /**
+   * @override
+   */
+  detach() {
+    this._commands = [];
   }
 
   /**
@@ -200,8 +201,8 @@ QuickOpen.CommandMenuDelegate = class extends QuickOpen.FilteredListWidget.Deleg
     var command = this._commands[itemIndex];
     titleElement.removeChildren();
     var tagElement = titleElement.createChild('span', 'tag');
-    var index = String.hashCode(command.category()) % QuickOpen.CommandMenuDelegate.MaterialPaletteColors.length;
-    tagElement.style.backgroundColor = QuickOpen.CommandMenuDelegate.MaterialPaletteColors[index];
+    var index = String.hashCode(command.category()) % QuickOpen.CommandMenuProvider.MaterialPaletteColors.length;
+    tagElement.style.backgroundColor = QuickOpen.CommandMenuProvider.MaterialPaletteColors[index];
     tagElement.textContent = command.category();
     titleElement.createTextChild(command.title());
     QuickOpen.FilteredListWidget.highlightRanges(titleElement, query, true);
@@ -217,14 +218,7 @@ QuickOpen.CommandMenuDelegate = class extends QuickOpen.FilteredListWidget.Deleg
     if (itemIndex === null)
       return;
     this._commands[itemIndex].execute();
-  }
-
-  /**
-   * @override
-   * @return {boolean}
-   */
-  renderMonospace() {
-    return false;
+    Host.userMetrics.actionTaken(Host.UserMetrics.Action.SelectCommandFromCommandMenu);
   }
 
   /**
@@ -236,7 +230,7 @@ QuickOpen.CommandMenuDelegate = class extends QuickOpen.FilteredListWidget.Deleg
   }
 };
 
-QuickOpen.CommandMenuDelegate.MaterialPaletteColors = [
+QuickOpen.CommandMenuProvider.MaterialPaletteColors = [
   '#F44336', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5', '#03A9F4', '#00BCD4', '#009688', '#4CAF50', '#8BC34A',
   '#CDDC39', '#FFC107', '#FF9800', '#FF5722', '#795548', '#9E9E9E', '#607D8B'
 ];
@@ -318,8 +312,8 @@ QuickOpen.CommandMenu.ShowActionDelegate = class {
    * @return {boolean}
    */
   handleAction(context, actionId) {
-    new QuickOpen.FilteredListWidget(new QuickOpen.CommandMenuDelegate()).showAsDialog();
     InspectorFrontendHost.bringToFront();
+    QuickOpen.QuickOpen.show('>');
     return true;
   }
 };

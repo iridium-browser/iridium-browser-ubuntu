@@ -18,7 +18,6 @@
 #include "base/containers/stack_container.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "components/favicon_base/favicon_types.h"
@@ -78,23 +77,23 @@ class VisitRow {
   ~VisitRow();
 
   // ID of this row (visit ID, used a a referrer for other visits).
-  VisitID visit_id;
+  VisitID visit_id = 0;
 
   // Row ID into the URL table of the URL that this page is.
-  URLID url_id;
+  URLID url_id = 0;
 
   base::Time visit_time;
 
   // Indicates another visit that was the referring page for this one.
   // 0 indicates no referrer.
-  VisitID referring_visit;
+  VisitID referring_visit = 0;
 
   // A combination of bits from PageTransition.
-  ui::PageTransition transition;
+  ui::PageTransition transition = ui::PAGE_TRANSITION_LINK;
 
   // The segment id (see visitsegment_database.*).
   // If 0, the segment id is null in the table.
-  SegmentID segment_id;
+  SegmentID segment_id = 0;
 
   // Record how much time a user has this visit starting from the user
   // opened this visit to the user closed or ended this visit.
@@ -103,7 +102,7 @@ class VisitRow {
   base::TimeDelta visit_duration;
 
   // Compares two visits based on dates, for sorting.
-  bool operator<(const VisitRow& other) {
+  bool operator<(const VisitRow& other) const {
     return visit_time < other.visit_time;
   }
 
@@ -123,7 +122,7 @@ typedef std::pair<base::Time, ui::PageTransition> VisitInfo;
 // views are only interested in the time, and not the other information
 // associated with a VisitRow.
 struct PageVisit {
-  URLID page_id;
+  URLID page_id = 0;
   base::Time visit_time;
 };
 
@@ -134,26 +133,10 @@ struct PageVisit {
 // a given URL appears in those results.
 class QueryResults {
  public:
-  typedef std::vector<URLResult*> URLResultVector;
+  typedef std::vector<URLResult> URLResultVector;
 
   QueryResults();
   ~QueryResults();
-
-  // Indicates the first time that the query includes results for (queries are
-  // clipped at the beginning, so it will always include to the end of the time
-  // queried).
-  //
-  // If the number of results was clipped as a result of the max count, this
-  // will be the time of the first query returned. If there were fewer results
-  // than we were allowed to return, this represents the first date considered
-  // in the query (this will be before the first result if there was time
-  // queried with no results).
-  //
-  // TODO(brettw): bug 1203054: This field is not currently set properly! Do
-  // not use until the bug is fixed.
-  base::Time first_time_searched() const { return first_time_searched_; }
-  void set_first_time_searched(base::Time t) { first_time_searched_ = t; }
-  // Note: If you need end_time_searched, it can be added.
 
   void set_reached_beginning(bool reached) { reached_beginning_ = reached; }
   bool reached_beginning() { return reached_beginning_; }
@@ -161,11 +144,11 @@ class QueryResults {
   size_t size() const { return results_.size(); }
   bool empty() const { return results_.empty(); }
 
-  URLResult& back() { return *results_.back(); }
-  const URLResult& back() const { return *results_.back(); }
+  URLResult& back() { return results_.back(); }
+  const URLResult& back() const { return results_.back(); }
 
-  URLResult& operator[](size_t i) { return *results_[i]; }
-  const URLResult& operator[](size_t i) const { return *results_[i]; }
+  URLResult& operator[](size_t i) { return results_[i]; }
+  const URLResult& operator[](size_t i) const { return results_[i]; }
 
   URLResultVector::const_iterator begin() const { return results_.begin(); }
   URLResultVector::const_iterator end() const { return results_.end(); }
@@ -189,10 +172,9 @@ class QueryResults {
   // efficiently transferred without copying.
   void Swap(QueryResults* other);
 
-  // Adds the given result to the map, using swap() on the members to avoid
-  // copying (there are a lot of strings and vectors). This means the parameter
-  // object will be cleared after this call.
-  void AppendURLBySwapping(URLResult* result);
+  // Set the result vector, the parameter vector will be moved to results_.
+  // It means the parameter vector will be empty after calling this method.
+  void SetURLResults(std::vector<URLResult>&& results);
 
   // Removes all instances of the given URL from the result set.
   void DeleteURL(const GURL& url);
@@ -205,7 +187,7 @@ class QueryResults {
   // time an entry with that URL appears. Normally, each URL will have one or
   // very few indices after it, so we optimize this to use statically allocated
   // memory when possible.
-  typedef std::map<GURL, base::StackVector<size_t, 4> > URLToResultIndices;
+  typedef std::map<GURL, base::StackVector<size_t, 4>> URLToResultIndices;
 
   // Inserts an entry into the |url_to_results_| map saying that the given URL
   // is at the given index in the results_.
@@ -215,14 +197,12 @@ class QueryResults {
   // (this is inclusive). This is used when inserting or deleting.
   void AdjustResultMap(size_t begin, size_t end, ptrdiff_t delta);
 
-  base::Time first_time_searched_;
-
   // Whether the query reaches the beginning of the database.
   bool reached_beginning_;
 
   // The ordered list of results. The pointers inside this are owned by this
   // QueryResults object.
-  ScopedVector<URLResult> results_;
+  URLResultVector results_;
 
   // Maps URLs to entries in results_.
   URLToResultIndices url_to_results_;
@@ -251,8 +231,8 @@ struct QueryOptions {
 
   // The maximum number of results to return. The results will be sorted with
   // the most recent first, so older results may not be returned if there is not
-  // enough room. When 0, this will return everything (the default).
-  int max_count;
+  // enough room. When 0, this will return everything.
+  int max_count = 0;
 
   enum DuplicateHandling {
     // Omit visits for which there is a more recent visit to the same URL.
@@ -269,11 +249,12 @@ struct QueryOptions {
   };
 
   // Allows the caller to specify how duplicate URLs in the result set should
-  // be handled. The default is REMOVE_DUPLICATES.
-  DuplicateHandling duplicate_policy;
+  // be handled.
+  DuplicateHandling duplicate_policy = REMOVE_ALL_DUPLICATES;
 
   // Allows the caller to specify the matching algorithm for text queries.
-  query_parser::MatchingAlgorithm matching_algorithm;
+  query_parser::MatchingAlgorithm matching_algorithm =
+      query_parser::MatchingAlgorithm::DEFAULT;
 
   // Helpers to get the effective parameters values, since a value of 0 means
   // "unspecified".
@@ -291,7 +272,7 @@ struct QueryURLResult {
 
   // Indicates whether the call to HistoryBackend::QueryURL was successfull
   // or not. If false, then both |row| and |visits| fields are undefined.
-  bool success;
+  bool success = false;
   URLRow row;
   VisitVector visits;
 };
@@ -304,8 +285,8 @@ struct VisibleVisitCountToHostResult {
   // Indicates whether the call to HistoryBackend::GetVisibleVisitCountToHost
   // was successful or not. If false, then both |count| and |first_visit| are
   // undefined.
-  bool success;
-  int count;
+  bool success = false;
+  int count = 0;
   base::Time first_visit;
 };
 
@@ -314,11 +295,11 @@ struct VisibleVisitCountToHostResult {
 // Holds the per-URL information of the most visited query.
 struct MostVisitedURL {
   MostVisitedURL();
-  MostVisitedURL(const GURL& url, const base::string16& title);
   MostVisitedURL(const GURL& url,
                  const base::string16& title,
-                 const base::Time& last_forced_time);
+                 base::Time last_forced_time = base::Time());
   MostVisitedURL(const MostVisitedURL& other);
+  MostVisitedURL(MostVisitedURL&& other) noexcept;
   ~MostVisitedURL();
 
   GURL url;
@@ -330,6 +311,8 @@ struct MostVisitedURL {
   base::Time last_forced_time;
 
   RedirectList redirects;
+
+  MostVisitedURL& operator=(const MostVisitedURL&);
 
   bool operator==(const MostVisitedURL& other) const {
     return url == other.url;
@@ -343,22 +326,23 @@ struct FilteredURL {
   struct ExtendedInfo {
     ExtendedInfo();
     // The absolute number of visits.
-    unsigned int total_visits;
+    unsigned int total_visits = 0;
     // The number of visits, as seen by the Most Visited NTP pane.
-    unsigned int visits;
+    unsigned int visits = 0;
     // The total number of seconds that the page was open.
-    int64_t duration_opened;
+    int64_t duration_opened = 0;
     // The time when the page was last visited.
     base::Time last_visit_time;
   };
 
   FilteredURL();
   explicit FilteredURL(const PageUsageData& data);
+  FilteredURL(FilteredURL&& other) noexcept;
   ~FilteredURL();
 
   GURL url;
   base::string16 title;
-  double score;
+  double score = 0.0;
   ExtendedInfo extended_info;
 };
 
@@ -437,7 +421,7 @@ struct TopSitesDelta {
   MostVisitedURLWithRankList moved;
 };
 
-typedef std::map<GURL, scoped_refptr<base::RefCountedBytes> > URLToThumbnailMap;
+typedef std::map<GURL, scoped_refptr<base::RefCountedBytes>> URLToThumbnailMap;
 
 // Used when migrating most visited thumbnails out of history and into topsites.
 struct ThumbnailMigration {
@@ -479,8 +463,8 @@ typedef std::map<GURL, std::pair<int, base::Time>> OriginCountAndLastVisitMap;
 struct HistoryCountResult {
   // Indicates whether the call to HistoryBackend::GetHistoryCount was
   // successful or not. If false, then |count| is undefined.
-  bool success;
-  int count;
+  bool success = false;
+  int count = 0;
 };
 
 // Favicons -------------------------------------------------------------------
@@ -488,22 +472,26 @@ struct HistoryCountResult {
 // Used for the mapping between the page and icon.
 struct IconMapping {
   IconMapping();
+  IconMapping(const IconMapping&);
+  IconMapping(IconMapping&&) noexcept;
   ~IconMapping();
 
+  IconMapping& operator=(const IconMapping&);
+
   // The unique id of the mapping.
-  IconMappingID mapping_id;
+  IconMappingID mapping_id = 0;
 
   // The url of a web page.
   GURL page_url;
 
   // The unique id of the icon.
-  favicon_base::FaviconID icon_id;
+  favicon_base::FaviconID icon_id = 0;
 
   // The url of the icon.
   GURL icon_url;
 
   // The type of icon.
-  favicon_base::IconType icon_type;
+  favicon_base::IconType icon_type = favicon_base::INVALID_ICON;
 };
 
 // Defines a favicon bitmap and its associated pixel size.
@@ -512,10 +500,28 @@ struct FaviconBitmapIDSize {
   ~FaviconBitmapIDSize();
 
   // The unique id of the favicon bitmap.
-  FaviconBitmapID bitmap_id;
+  FaviconBitmapID bitmap_id = 0;
 
   // The pixel dimensions of the associated bitmap.
   gfx::Size pixel_size;
+};
+
+enum FaviconBitmapType {
+  // The bitmap gets downloaded while visiting its page. Their life-time is
+  // bound to the life-time of the corresponding visit in history.
+  //  - These bitmaps are re-downloaded when visiting the page again and the
+  //  last_updated timestamp is old enough.
+  ON_VISIT,
+
+  // The bitmap gets downloaded because it is demanded by some Chrome UI (while
+  // not visiting its page). For this reason, their life-time cannot be bound to
+  // the life-time of the corresponding visit in history.
+  // - These bitmaps are evicted from the database based on the last time they
+  //   were requested.
+  // - Furthermore, on-demand bitmaps are immediately marked as expired. Hence,
+  //   they are always replaced by ON_VISIT favicons whenever their page gets
+  //   visited.
+  ON_DEMAND
 };
 
 // Defines a favicon bitmap stored in the history backend.
@@ -525,10 +531,10 @@ struct FaviconBitmap {
   ~FaviconBitmap();
 
   // The unique id of the bitmap.
-  FaviconBitmapID bitmap_id;
+  FaviconBitmapID bitmap_id = 0;
 
   // The id of the favicon to which the bitmap belongs to.
-  favicon_base::FaviconID icon_id;
+  favicon_base::FaviconID icon_id = 0;
 
   // Time at which |bitmap_data| was last updated.
   base::Time last_updated;

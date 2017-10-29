@@ -16,7 +16,7 @@
 #include "base/scoped_observer.h"
 #include "device/usb/public/interfaces/device_manager.mojom.h"
 #include "device/usb/usb_service.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace device {
 
@@ -26,31 +26,29 @@ namespace usb {
 
 class PermissionProvider;
 
-// Implementation of the public DeviceManager interface. This interface can be
-// requested from the devices app located at "devices", if available.
-class DeviceManagerImpl : public DeviceManager, public UsbService::Observer {
+// Implements the public Mojo UsbDeviceManager interface by wrapping the
+// UsbService instance.
+class DeviceManagerImpl : public mojom::UsbDeviceManager,
+                          public UsbService::Observer {
  public:
   static void Create(base::WeakPtr<PermissionProvider> permission_provider,
-                     mojo::InterfaceRequest<DeviceManager> request);
+                     mojom::UsbDeviceManagerRequest request);
 
-  DeviceManagerImpl(base::WeakPtr<PermissionProvider> permission_provider,
-                    UsbService* usb_service);
   ~DeviceManagerImpl() override;
 
-  void set_connection_error_handler(const base::Closure& error_handler) {
-    connection_error_handler_ = error_handler;
-  }
-
  private:
+  DeviceManagerImpl(base::WeakPtr<PermissionProvider> permission_provider,
+                    UsbService* usb_service);
+
   // DeviceManager implementation:
-  void GetDevices(EnumerationOptionsPtr options,
+  void GetDevices(mojom::UsbEnumerationOptionsPtr options,
                   const GetDevicesCallback& callback) override;
   void GetDevice(const std::string& guid,
-                 mojo::InterfaceRequest<Device> device_request) override;
-  void SetClient(DeviceManagerClientPtr client) override;
+                 mojom::UsbDeviceRequest device_request) override;
+  void SetClient(mojom::UsbDeviceManagerClientPtr client) override;
 
   // Callbacks to handle the async responses from the underlying UsbService.
-  void OnGetDevices(EnumerationOptionsPtr options,
+  void OnGetDevices(mojom::UsbEnumerationOptionsPtr options,
                     const GetDevicesCallback& callback,
                     const std::vector<scoped_refptr<UsbDevice>>& devices);
 
@@ -61,13 +59,12 @@ class DeviceManagerImpl : public DeviceManager, public UsbService::Observer {
 
   void MaybeRunDeviceChangesCallback();
 
+  mojo::StrongBindingPtr<mojom::UsbDeviceManager> binding_;
   base::WeakPtr<PermissionProvider> permission_provider_;
 
   UsbService* usb_service_;
   ScopedObserver<UsbService, UsbService::Observer> observer_;
-  DeviceManagerClientPtr client_;
-
-  base::Closure connection_error_handler_;
+  mojom::UsbDeviceManagerClientPtr client_;
 
   base::WeakPtrFactory<DeviceManagerImpl> weak_factory_;
 

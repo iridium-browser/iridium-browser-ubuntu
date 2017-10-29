@@ -13,16 +13,13 @@
 CPDF_Type3Glyphs::CPDF_Type3Glyphs()
     : m_TopBlueCount(0), m_BottomBlueCount(0) {}
 
-CPDF_Type3Glyphs::~CPDF_Type3Glyphs() {
-  for (const auto& pair : m_GlyphMap)
-    delete pair.second;
-}
+CPDF_Type3Glyphs::~CPDF_Type3Glyphs() {}
 
-static int _AdjustBlue(FX_FLOAT pos, int& count, int blues[]) {
-  FX_FLOAT min_distance = 1000000.0f;
+static int _AdjustBlue(float pos, int& count, int blues[]) {
+  float min_distance = 1000000.0f;
   int closest_pos = -1;
   for (int i = 0; i < count; i++) {
-    FX_FLOAT distance = FXSYS_fabs(pos - static_cast<FX_FLOAT>(blues[i]));
+    float distance = fabs(pos - static_cast<float>(blues[i]));
     if (distance < 1.0f * 80.0f / 100.0f && distance < min_distance) {
       min_distance = distance;
       closest_pos = i;
@@ -37,8 +34,8 @@ static int _AdjustBlue(FX_FLOAT pos, int& count, int blues[]) {
   return new_pos;
 }
 
-void CPDF_Type3Glyphs::AdjustBlue(FX_FLOAT top,
-                                  FX_FLOAT bottom,
+void CPDF_Type3Glyphs::AdjustBlue(float top,
+                                  float bottom,
                                   int& top_line,
                                   int& bottom_line) {
   top_line = _AdjustBlue(top, m_TopBlueCount, m_TopBlue);

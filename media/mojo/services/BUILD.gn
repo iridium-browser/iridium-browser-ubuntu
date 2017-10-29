@@ -9,67 +9,15 @@ import("//services/service_manager/public/service_manifest.gni")
 import("//services/service_manager/public/tools/test/service_test.gni")
 import("//testing/test.gni")
 
-config("mojo_media_config") {
-  if (!enable_mojo_media) {
-    assert(mojo_media_services == [], "Mojo media is not enabled")
-    assert(mojo_media_host == "none", "Mojo media is not enabled")
-    assert(!enable_test_mojo_media_client, "Mojo media is not enabled")
-  } else {
-    defines = [ "ENABLE_MOJO_MEDIA" ]
-
-    assert(mojo_media_services != [], "No mojo media service specified")
-    mojo_renderer_enabled = false
-    foreach(service, mojo_media_services) {
-      if (service == "renderer") {
-        defines += [ "ENABLE_MOJO_RENDERER" ]
-        mojo_renderer_enabled = true
-      } else if (service == "cdm") {
-        defines += [ "ENABLE_MOJO_CDM" ]
-      } else if (service == "audio_decoder") {
-        defines += [ "ENABLE_MOJO_AUDIO_DECODER" ]
-      } else if (service == "video_decoder") {
-        defines += [ "ENABLE_MOJO_VIDEO_DECODER" ]
-      } else {
-        assert(false, "Invalid mojo media service: $service")
-      }
-    }
-    assert(
-        mojo_renderer_enabled || !enable_runtime_media_renderer_selection,
-        "The mojo renderer must be enabled to use runtime media renderer selection.")
-
-    if (mojo_media_host == "browser") {
-      defines += [ "ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS" ]
-    } else if (mojo_media_host == "gpu") {
-      defines += [ "ENABLE_MOJO_MEDIA_IN_GPU_PROCESS" ]
-    } else if (mojo_media_host == "utility") {
-      defines += [ "ENABLE_MOJO_MEDIA_IN_UTILITY_PROCESS" ]
-    } else {
-      assert(false, "Invalid mojo media host: $mojo_media_host")
-    }
-
-    if (enable_test_mojo_media_client) {
-      defines += [ "ENABLE_TEST_MOJO_MEDIA_CLIENT" ]
-    }
-  }
-}
-
 component("services") {
   output_name = "media_mojo_services"
-
-  public_deps = [
-    ":lib",
-  ]
-}
-
-# TODO(xhwang): Add this intermediate target because ServiceTest doesn't support
-# services that depend on shared libraries in component build.
-# See http://crbug.com/670094
-source_set("lib") {
   sources = [
     "gpu_mojo_media_client.cc",
     "gpu_mojo_media_client.h",
     "interface_factory_impl.cc",
     "interface_factory_impl.h",
+    "media_interface_provider.cc",
+    "media_interface_provider.h",
     "media_mojo_export.h",
     "media_resource_shim.cc",
     "media_resource_shim.h",
@@ -79,6 +27,10 @@ source_set("lib") {
     "media_service_factory.h",
     "mojo_audio_decoder_service.cc",
     "mojo_audio_decoder_service.h",
+    "mojo_audio_output_stream.cc",
+    "mojo_audio_output_stream.h",
+    "mojo_audio_output_stream_provider.cc",
+    "mojo_audio_output_stream_provider.h",
     "mojo_cdm_allocator.cc",
     "mojo_cdm_allocator.h",
     "mojo_cdm_promise.cc",
@@ -93,12 +45,16 @@ source_set("lib") {
     "mojo_demuxer_stream_adapter.h",
     "mojo_media_client.cc",
     "mojo_media_client.h",
+    "mojo_media_log.cc",
+    "mojo_media_log.h",
     "mojo_provision_fetcher.cc",
     "mojo_provision_fetcher.h",
     "mojo_renderer_service.cc",
     "mojo_renderer_service.h",
     "mojo_video_decoder_service.cc",
     "mojo_video_decoder_service.h",
+    "mojo_video_encode_accelerator_service.cc",
+    "mojo_video_encode_accelerator_service.h",
     "test_mojo_media_client.cc",
     "test_mojo_media_client.h",
   ]
@@ -107,11 +63,12 @@ source_set("lib") {
 
   # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
   configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
-  public_configs = [ ":mojo_media_config" ]
 
   public_deps = [
     "//base",
     "//media",
+    "//media/gpu",
+    "//media/mojo:features",
     "//media/mojo/interfaces",
     "//mojo/public/cpp/bindings",
     "//mojo/public/cpp/system",
@@ -120,9 +77,11 @@ source_set("lib") {
   ]
 
   deps = [
-    "//media:cdm_api",
     "//media:shared_memory_support",
+    "//media/cdm:cdm_api",
+    "//media/cdm:cdm_manager",
     "//media/mojo/common",
+    "//media/mojo/common:mojo_shared_buffer_video_frame",
     "//mojo/common",
     "//services/service_manager/public/interfaces",
   ]
@@ -131,17 +90,14 @@ source_set("lib") {
     sources += [
       "android_mojo_media_client.cc",
       "android_mojo_media_client.h",
+      "mojo_media_drm_storage.cc",
+      "mojo_media_drm_storage.h",
     ]
   }
 }
 
 service("media") {
   testonly = true
-
-  # crbug.com/676418: Suppress symbol import warnings.
-  if (is_win && is_component_build) {
-    ldflags = [ "/ignore:4217" ]
-  }
 
   sources = [
     "main.cc",
@@ -153,42 +109,44 @@ service("media") {
   ]
 
   deps = [
-    ":lib",
+    ":services",
     "//mojo/public/c/system",
     "//services/service_manager/public/cpp",
   ]
 }
 
-# crbug.com/676055: media_service_unittests currently fails to link in Windows
-# component builds, so don't declare it, otherwise the "all" target will still
-# try to build it.
-if (!(is_win && is_component_build)) {
-  service_test("media_service_unittests") {
-    testonly = true
+service_test("media_service_unittests") {
+  testonly = true
 
-    sources = [
-      "media_service_unittest.cc",
-    ]
+  sources = [
+    "media_service_unittest.cc",
+  ]
 
-    catalog = ":media_service_unittests_catalog"
+  catalog = ":media_service_unittests_catalog"
 
-    deps = [
-      "//base",
-      "//media",
-      "//media/base:test_support",
-      "//media/mojo/clients",
-      "//media/mojo/common",
-      "//media/mojo/interfaces",
-      "//services/service_manager/public/cpp:service_test_support",
-      "//testing/gmock",
-      "//testing/gtest",
-    ]
+  deps = [
+    ":services",
+    "//base",
+    "//media",
+    "//media/base:test_support",
+    "//media/mojo/clients",
+    "//media/mojo/common",
+    "//media/mojo/interfaces",
+    "//media/mojo/interfaces:constants",
+    "//services/service_manager/public/cpp:service_test_support",
+    "//testing/gmock",
+    "//testing/gtest",
+  ]
 
-    data_deps = [
-      ":media",
-    ]
-  }
-}  # !(is_win && is_component_build)
+  data_deps = [
+    ":media",
+  ]
+}
+
+service_manifest("cdm_manifest") {
+  name = "cdm"
+  source = "cdm_manifest.json"
+}
 
 service_manifest("media_manifest") {
   name = "media"

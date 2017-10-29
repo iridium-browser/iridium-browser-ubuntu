@@ -11,24 +11,26 @@
 // clang-format off
 #include "StringOrStringSequence.h"
 
-#include "bindings/core/v8/ToV8.h"
+#include "bindings/core/v8/IDLTypes.h"
+#include "bindings/core/v8/NativeValueTraitsImpl.h"
+#include "bindings/core/v8/ToV8ForCore.h"
 
 namespace blink {
 
 StringOrStringSequence::StringOrStringSequence() : m_type(SpecificTypeNone) {}
 
-String StringOrStringSequence::getAsString() const {
+const String& StringOrStringSequence::getAsString() const {
   DCHECK(isString());
   return m_string;
 }
 
-void StringOrStringSequence::setString(String value) {
+void StringOrStringSequence::setString(const String& value) {
   DCHECK(isNull());
   m_string = value;
   m_type = SpecificTypeString;
 }
 
-StringOrStringSequence StringOrStringSequence::fromString(String value) {
+StringOrStringSequence StringOrStringSequence::fromString(const String& value) {
   StringOrStringSequence container;
   container.setString(value);
   return container;
@@ -62,12 +64,12 @@ void V8StringOrStringSequence::toImpl(v8::Isolate* isolate, v8::Local<v8::Value>
   if (v8Value.IsEmpty())
     return;
 
-  if (conversionMode == UnionTypeConversionMode::Nullable && isUndefinedOrNull(v8Value))
+  if (conversionMode == UnionTypeConversionMode::kNullable && IsUndefinedOrNull(v8Value))
     return;
 
-  if (v8Value->IsArray()) {
-    Vector<String> cppValue = toImplArray<Vector<String>>(v8Value, 0, isolate, exceptionState);
-    if (exceptionState.hadException())
+  if (HasCallableIteratorSymbol(isolate, v8Value, exceptionState)) {
+    Vector<String> cppValue = NativeValueTraits<IDLSequence<IDLString>>::NativeValue(isolate, v8Value, exceptionState);
+    if (exceptionState.HadException())
       return;
     impl.setStringSequence(cppValue);
     return;
@@ -75,7 +77,7 @@ void V8StringOrStringSequence::toImpl(v8::Isolate* isolate, v8::Local<v8::Value>
 
   {
     V8StringResource<> cppValue = v8Value;
-    if (!cppValue.prepare(exceptionState))
+    if (!cppValue.Prepare(exceptionState))
       return;
     impl.setString(cppValue);
     return;
@@ -87,7 +89,7 @@ v8::Local<v8::Value> ToV8(const StringOrStringSequence& impl, v8::Local<v8::Obje
     case StringOrStringSequence::SpecificTypeNone:
       return v8::Null(isolate);
     case StringOrStringSequence::SpecificTypeString:
-      return v8String(isolate, impl.getAsString());
+      return V8String(isolate, impl.getAsString());
     case StringOrStringSequence::SpecificTypeStringSequence:
       return ToV8(impl.getAsStringSequence(), creationContext, isolate);
     default:
@@ -96,9 +98,9 @@ v8::Local<v8::Value> ToV8(const StringOrStringSequence& impl, v8::Local<v8::Obje
   return v8::Local<v8::Value>();
 }
 
-StringOrStringSequence NativeValueTraits<StringOrStringSequence>::nativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState) {
+StringOrStringSequence NativeValueTraits<StringOrStringSequence>::NativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState) {
   StringOrStringSequence impl;
-  V8StringOrStringSequence::toImpl(isolate, value, impl, UnionTypeConversionMode::NotNullable, exceptionState);
+  V8StringOrStringSequence::toImpl(isolate, value, impl, UnionTypeConversionMode::kNotNullable, exceptionState);
   return impl;
 }
 

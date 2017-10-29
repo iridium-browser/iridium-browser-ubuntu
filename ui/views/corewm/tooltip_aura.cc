@@ -99,7 +99,7 @@ class TooltipAura::TooltipView : public views::View {
     OnPaintBorder(canvas);
   }
 
-  gfx::Size GetPreferredSize() const override {
+  gfx::Size CalculatePreferredSize() const override {
     gfx::Size view_size = render_text_->GetStringSize();
     gfx::Insets insets = border()->GetInsets();
     view_size.Enlarge(insets.width(), insets.height());
@@ -123,13 +123,12 @@ class TooltipAura::TooltipView : public views::View {
   void SetBackgroundColor(SkColor background_color) {
     // Corner radius of tooltip background.
     const float kTooltipCornerRadius = 2.f;
-    views::Background* background =
-        CanUseTranslucentTooltipWidget()
-            ? views::Background::CreateBackgroundPainter(
-                  views::Painter::CreateSolidRoundRectPainter(
-                      background_color, kTooltipCornerRadius))
-            : views::Background::CreateSolidBackground(background_color);
-    set_background(background);
+    SetBackground(CanUseTranslucentTooltipWidget()
+                      ? views::CreateBackgroundFromPainter(
+                            views::Painter::CreateSolidRoundRectPainter(
+                                background_color, kTooltipCornerRadius))
+                      : views::CreateSolidBackground(background_color));
+
     // Force the text color to be readable when |background_color| is not
     // opaque.
     render_text_->set_subpixel_rendering_suppressed(

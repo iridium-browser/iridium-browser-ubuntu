@@ -71,6 +71,17 @@ void ContentViewRenderView::SetCurrentWebContents(
                                 : scoped_refptr<cc::Layer>());
 }
 
+void ContentViewRenderView::OnPhysicalBackingSizeChanged(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jobject>& jweb_contents,
+    jint width,
+    jint height) {
+  WebContents* web_contents = WebContents::FromJavaWebContents(jweb_contents);
+  gfx::Size size(width, height);
+  web_contents->GetNativeView()->OnPhysicalBackingSizeChanged(size);
+}
+
 void ContentViewRenderView::SurfaceCreated(JNIEnv* env,
                                            const JavaParamRef<jobject>& obj) {
   current_surface_format_ = 0;
@@ -101,6 +112,7 @@ void ContentViewRenderView::SetOverlayVideoMode(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     bool enabled) {
+  compositor_->SetRequiresAlphaChannel(enabled);
   compositor_->SetHasTransparentBackground(enabled);
   compositor_->SetNeedsComposite();
 }

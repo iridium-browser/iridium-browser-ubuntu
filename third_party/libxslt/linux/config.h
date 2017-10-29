@@ -4,9 +4,6 @@
 /* Define to 1 if you have the <ansidecl.h> header file. */
 /* #undef HAVE_ANSIDECL_H */
 
-/* Define to 1 if you have the `asctime' function. */
-
-
 /* Define to 1 if you have the `clock_gettime' function. */
 
 
@@ -69,9 +66,6 @@
 
 /* Define to 1 if you have the <memory.h> header file. */
 #define HAVE_MEMORY_H 1
-
-/* Define to 1 if you have the `mktime' function. */
-
 
 /* Define to 1 if you have the <nan.h> header file. */
 /* #undef HAVE_NAN_H */
@@ -151,7 +145,8 @@
 /* Define to 1 if you have the `_stat' function. */
 /* #undef HAVE__STAT */
 
-/* Define to the sub-directory where libtool stores uninstalled libraries. */
+/* Define to the sub-directory in which libtool stores uninstalled libraries.
+   */
 #define LT_OBJDIR ".libs/"
 
 /* Name of package */

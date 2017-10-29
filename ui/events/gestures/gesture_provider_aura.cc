@@ -42,13 +42,16 @@ bool GestureProviderAura::OnTouchEvent(TouchEvent* event) {
   return true;
 }
 
-void GestureProviderAura::OnTouchEventAck(uint32_t unique_touch_event_id,
-    bool event_consumed) {
+void GestureProviderAura::OnTouchEventAck(
+    uint32_t unique_touch_event_id,
+    bool event_consumed,
+    bool is_source_touch_event_set_non_blocking) {
   DCHECK(pending_gestures_.empty());
   DCHECK(!handling_event_);
   base::AutoReset<bool> handling_event(&handling_event_, true);
-  filtered_gesture_provider_.OnTouchEventAck(unique_touch_event_id,
-      event_consumed);
+  filtered_gesture_provider_.OnTouchEventAck(
+      unique_touch_event_id, event_consumed,
+      is_source_touch_event_set_non_blocking);
 }
 
 void GestureProviderAura::OnGestureEvent(const GestureEventData& gesture) {
@@ -74,14 +77,16 @@ GestureProviderAura::GetAndResetPendingGestures() {
 
 void GestureProviderAura::OnTouchEnter(int pointer_id, float x, float y) {
   std::unique_ptr<TouchEvent> touch_event(new TouchEvent(
-      ET_TOUCH_PRESSED, gfx::Point(), EF_IS_SYNTHESIZED, pointer_id,
-      ui::EventTimeForNow(), 0.0f, 0.0f, 0.0f, 0.0f));
+      ET_TOUCH_PRESSED, gfx::Point(), ui::EventTimeForNow(),
+      PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, pointer_id),
+      EF_IS_SYNTHESIZED, 0.0f));
   gfx::PointF point(x, y);
   touch_event->set_location_f(point);
   touch_event->set_root_location_f(point);
 
   OnTouchEvent(touch_event.get());
-  OnTouchEventAck(touch_event->unique_event_id(), true);
+  OnTouchEventAck(touch_event->unique_event_id(), true /* event_consumed */,
+                  false /* is_source_touch_event_set_non_blocking */);
 }
 
 }  // namespace content

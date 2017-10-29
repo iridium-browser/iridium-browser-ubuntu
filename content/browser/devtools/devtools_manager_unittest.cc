@@ -9,6 +9,7 @@
 #include "base/guid.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -23,6 +24,7 @@
 #include "content/public/browser/devtools_external_agent_proxy.h"
 #include "content/public/browser/devtools_external_agent_proxy_delegate.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_render_view_host.h"
@@ -148,8 +150,7 @@ TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedContents) {
 
   // Start with a short timeout.
   inspected_rvh->GetWidget()->StartHangMonitorTimeout(
-      TimeDelta::FromMilliseconds(10), blink::WebInputEvent::Undefined,
-      RendererUnresponsiveType::RENDERER_UNRESPONSIVE_UNKNOWN);
+      TimeDelta::FromMilliseconds(10), blink::WebInputEvent::kUndefined);
   // Wait long enough for first timeout and see if it fired.
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
@@ -161,8 +162,7 @@ TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedContents) {
   client_host.Close();
   // Start with a short timeout.
   inspected_rvh->GetWidget()->StartHangMonitorTimeout(
-      TimeDelta::FromMilliseconds(10), blink::WebInputEvent::Undefined,
-      RendererUnresponsiveType::RENDERER_UNRESPONSIVE_UNKNOWN);
+      TimeDelta::FromMilliseconds(10), blink::WebInputEvent::kUndefined);
   // Wait long enough for first timeout and see if it fired.
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
@@ -174,6 +174,9 @@ TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedContents) {
 }
 
 TEST_F(DevToolsManagerTest, ReattachOnCancelPendingNavigation) {
+  // This test triggers incorrect notifications with PlzNavigate.
+  if (IsBrowserSideNavigationEnabled())
+    return;
   // Navigate to URL.  First URL should use first RenderViewHost.
   const GURL url("http://www.google.com");
   controller().LoadURL(

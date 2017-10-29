@@ -7,6 +7,7 @@ package org.chromium.chrome.browser;
 import android.app.backup.BackupAgent;
 import android.app.backup.BackupDataInput;
 import android.app.backup.BackupDataOutput;
+import android.app.backup.BackupManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.ParcelFileDescriptor;
@@ -25,9 +26,11 @@ import org.chromium.chrome.browser.firstrun.FirstRunSignInProcessor;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.init.AsyncInitTaskRunner;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
+import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager;
-import org.chromium.components.signin.AccountManagerHelper;
+import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.ChromeSigninController;
+import org.chromium.content_public.common.ContentProcessInfo;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -76,10 +79,16 @@ public class ChromeBackupAgent extends BackupAgent {
 
     private static final String RESTORE_STATUS = "android_restore_status";
 
+    // Keep track of backup failures, so that we give up in the end on persistent problems.
+    @VisibleForTesting
+    static final String BACKUP_FAILURE_COUNT = "android_backup_failure_count";
+    @VisibleForTesting
+    static final int MAX_BACKUP_FAILURES = 5;
+
     // List of preferences that should be restored unchanged.
     static final String[] BACKUP_ANDROID_BOOL_PREFS = {
-            FirstRunGlueImpl.CACHED_TOS_ACCEPTED_PREF,
-            FirstRunStatus.FIRST_RUN_FLOW_COMPLETE,
+            DataReductionProxySettings.DATA_REDUCTION_ENABLED_PREF,
+            FirstRunGlueImpl.CACHED_TOS_ACCEPTED_PREF, FirstRunStatus.FIRST_RUN_FLOW_COMPLETE,
             FirstRunStatus.LIGHTWEIGHT_FIRST_RUN_FLOW_COMPLETE,
             FirstRunSignInProcessor.FIRST_RUN_FLOW_SIGNIN_SETUP,
             PrivacyPreferencesManager.PREF_METRICS_REPORTING,
@@ -138,11 +147,20 @@ public class ChromeBackupAgent extends BackupAgent {
 
     @VisibleForTesting
     protected boolean accountExistsOnDevice(String userName) {
-        return AccountManagerHelper.get(this).getAccountFromName(userName) != null;
+        return AccountManagerFacade.get().getAccountFromName(userName) != null;
     }
 
+    // TODO (aberent) Refactor the tests to use a mocked ChromeBrowserInitializer, and make this
+    // private again.
     @VisibleForTesting
-    protected boolean initializeBrowser(Context context) {
+    boolean initializeBrowser(Context context) {
+        // Workaround for https://crbug.com/718166. The backup agent is sometimes being started in a
+        // child process, before the child process loads its native library. If backup then loads
+        // the native library the child process is left in a very confused state and crashes.
+        if (ContentProcessInfo.inChildProcess()) {
+            Log.e(TAG, "Backup agent started from child process");
+            return false;
+        }
         try {
             ChromeBrowserInitializer.getInstance(context).handleSynchronousStartup();
         } catch (ProcessInitException e) {
@@ -192,13 +210,38 @@ public class ChromeBackupAgent extends BackupAgent {
                         return true;
                     }
                 });
+        SharedPreferences sharedPrefs = ContextUtils.getAppSharedPreferences();
+
         if (!nativePrefsRead) {
-            // Something went wrong reading the native preferences, skip the backup.
+            // Something went wrong reading the native preferences, skip the backup, but try again
+            // later.
+            int backupFailureCount = sharedPrefs.getInt(BACKUP_FAILURE_COUNT, 0) + 1;
+            if (backupFailureCount >= MAX_BACKUP_FAILURES) {
+                // Too many re-tries, give up and force an unconditional backup next time one is
+                // requested.
+                return;
+            }
+            sharedPrefs.edit().putInt(BACKUP_FAILURE_COUNT, backupFailureCount).apply();
+            if (oldState != null) {
+                try {
+                    // Copy the old state to the new state, so that next time Chrome only does a
+                    // backup if necessary.
+                    BackupState state = new BackupState(oldState);
+                    state.save(newState);
+                } catch (Exception e) {
+                    // There was no old state, or it was corrupt; leave the newState unwritten,
+                    // hence forcing an unconditional backup on the next attempt.
+                }
+            }
+            // Ask Android to schedule a retry.
+            new BackupManager(this).dataChanged();
             return;
         }
 
+        // The backup is going to work, clear the failure count.
+        sharedPrefs.edit().remove(BACKUP_FAILURE_COUNT).apply();
+
         // Add the Android boolean prefs.
-        SharedPreferences sharedPrefs = ContextUtils.getAppSharedPreferences();
         for (String prefName : BACKUP_ANDROID_BOOL_PREFS) {
             if (sharedPrefs.contains(prefName)) {
                 backupNames.add(ANDROID_DEFAULT_PREFIX + prefName);
@@ -415,7 +458,7 @@ public class ChromeBackupAgent extends BackupAgent {
     /**
      * Record the restore histogram. To be called from Chrome itself once it is running.
      */
-    static void recordRestoreHistogram() {
+    public static void recordRestoreHistogram() {
         int restoreStatus = getRestoreStatus();
         // Ensure restore status is only recorded once
         if (restoreStatus != RESTORE_STATUS_RECORDED) {

@@ -13,6 +13,7 @@
 
 #include "core/fpdfapi/parser/cpdf_parser.h"
 #include "core/fpdfapi/parser/cpdf_syntax_parser.h"
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxcrt/fx_basic.h"
 
 class CPDF_Dictionary;
@@ -156,7 +157,7 @@ class CPDF_DataAvail final {
   int32_t CheckCrossRefStream(DownloadHints* pHints, FX_FILESIZE& xref_offset);
   bool IsLinearizedFile(uint8_t* pData, uint32_t dwLen);
   void SetStartOffset(FX_FILESIZE dwOffset);
-  bool GetNextToken(CFX_ByteString& token);
+  bool GetNextToken(CFX_ByteString* token);
   bool GetNextChar(uint8_t& ch);
   std::unique_ptr<CPDF_Object> ParseIndirectObjectAt(
       FX_FILESIZE pos,
@@ -204,7 +205,7 @@ class CPDF_DataAvail final {
   uint32_t m_dwRootObjNum;
   uint32_t m_dwInfoObjNum;
   std::unique_ptr<CPDF_LinearizedHeader> m_pLinearized;
-  CPDF_Object* m_pTrailer;
+  CFX_UnownedPtr<CPDF_Object> m_pTrailer;
   bool m_bDocAvail;
   FX_FILESIZE m_dwHeaderOffset;
   FX_FILESIZE m_dwLastXRefOffset;
@@ -235,8 +236,7 @@ class CPDF_DataAvail final {
   bool m_bHaveAcroForm;
   uint32_t m_dwAcroFormObjNum;
   bool m_bAcroFormLoad;
-  CPDF_Object* m_pAcroForm;
-  std::vector<CPDF_Object*> m_arrayAcroforms;
+  std::vector<std::unique_ptr<CPDF_Object>> m_Acroforms;
   CPDF_Dictionary* m_pPageDict;
   CPDF_Object* m_pPageResource;
   bool m_bNeedDownLoadResource;

@@ -16,6 +16,7 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringize_macros.h"
 #include "base/time/time.h"
@@ -95,7 +96,7 @@ Me2MeNativeMessagingHost::~Me2MeNativeMessagingHost() {
 void Me2MeNativeMessagingHost::OnMessage(const std::string& message) {
   DCHECK(task_runner()->BelongsToCurrentThread());
 
-  std::unique_ptr<base::DictionaryValue> response(new base::DictionaryValue());
+  auto response = base::MakeUnique<base::DictionaryValue>();
   std::unique_ptr<base::Value> message_value = base::JSONReader::Read(message);
   if (!message_value->IsType(base::Value::Type::DICTIONARY)) {
     OnError("Received a message that's not a dictionary.");
@@ -109,7 +110,7 @@ void Me2MeNativeMessagingHost::OnMessage(const std::string& message) {
   // might be a string or a number, so cope with both.
   const base::Value* id;
   if (message_dict->Get("id", &id))
-    response->Set("id", id->CreateDeepCopy());
+    response->Set("id", base::MakeUnique<base::Value>(*id));
 
   std::string type;
   if (!message_dict->GetString("type", &type)) {
@@ -180,7 +181,7 @@ void Me2MeNativeMessagingHost::ProcessHello(
       new base::ListValue());
   supported_features_list->AppendStrings(std::vector<std::string>(
       kSupportedFeatures, kSupportedFeatures + arraysize(kSupportedFeatures)));
-  response->Set("supportedFeatures", supported_features_list.release());
+  response->Set("supportedFeatures", std::move(supported_features_list));
   SendMessageToClient(std::move(response));
 }
 
@@ -455,9 +456,9 @@ void Me2MeNativeMessagingHost::SendConfigResponse(
   DCHECK(task_runner()->BelongsToCurrentThread());
 
   if (config) {
-    response->Set("config", config.release());
+    response->Set("config", std::move(config));
   } else {
-    response->Set("config", base::Value::CreateNullValue());
+    response->Set("config", base::MakeUnique<base::Value>());
   }
   SendMessageToClient(std::move(response));
 }
@@ -467,7 +468,7 @@ void Me2MeNativeMessagingHost::SendPairedClientsResponse(
     std::unique_ptr<base::ListValue> pairings) {
   DCHECK(task_runner()->BelongsToCurrentThread());
 
-  response->Set("pairedClients", pairings.release());
+  response->Set("pairedClients", std::move(pairings));
   SendMessageToClient(std::move(response));
 }
 

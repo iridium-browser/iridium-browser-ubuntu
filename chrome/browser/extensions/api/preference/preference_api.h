@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_PREFERENCE_PREFERENCE_API_H__
 #define CHROME_BROWSER_EXTENSIONS_API_PREFERENCE_PREFERENCE_API_H__
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -13,6 +14,7 @@
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_prefs_scope.h"
@@ -27,17 +29,25 @@ class Value;
 namespace extensions {
 class ExtensionPrefs;
 
-class PreferenceEventRouter {
+class PreferenceEventRouter : public content::NotificationObserver {
  public:
   explicit PreferenceEventRouter(Profile* profile);
-  virtual ~PreferenceEventRouter();
+  ~PreferenceEventRouter() override;
 
  private:
   void OnPrefChanged(PrefService* pref_service,
                      const std::string& pref_key);
 
+  // content::NotificationObserver:
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
+
+  void OnIncognitoProfileCreated(PrefService* prefs);
+
+  content::NotificationRegistrar notification_registrar_;
   PrefChangeRegistrar registrar_;
-  PrefChangeRegistrar incognito_registrar_;
+  std::unique_ptr<PrefChangeRegistrar> incognito_registrar_;
 
   // Weak, owns us (transitively via ExtensionService).
   Profile* profile_;
@@ -151,7 +161,7 @@ class PrefTransformerInterface {
   // |error| and returns NULL otherwise. |bad_message| is passed to simulate
   // the behavior of EXTENSION_FUNCTION_VALIDATE. It is never NULL.
   // The ownership of the returned value is passed to the caller.
-  virtual base::Value* ExtensionToBrowserPref(
+  virtual std::unique_ptr<base::Value> ExtensionToBrowserPref(
       const base::Value* extension_pref,
       std::string* error,
       bool* bad_message) = 0;
@@ -160,7 +170,7 @@ class PrefTransformerInterface {
   // into a representation that is used by the extension.
   // Returns the extension representation in case of success or NULL otherwise.
   // The ownership of the returned value is passed to the caller.
-  virtual base::Value* BrowserToExtensionPref(
+  virtual std::unique_ptr<base::Value> BrowserToExtensionPref(
       const base::Value* browser_pref) = 0;
 };
 

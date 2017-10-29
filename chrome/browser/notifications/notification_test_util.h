@@ -70,12 +70,18 @@ class StubNotificationUIManager : public NotificationUIManager {
   bool CancelAllBySourceOrigin(const GURL& source_origin) override;
   bool CancelAllByProfile(ProfileID profile_id) override;
   void CancelAll() override;
+  void StartShutdown() override;
+
+  GURL& last_canceled_source() { return last_canceled_source_; }
 
  private:
   using NotificationPair = std::pair<Notification, ProfileID>;
   std::vector<NotificationPair> notifications_;
 
   base::Closure notification_added_callback_;
+
+  bool is_shutdown_started_ = false;
+  GURL last_canceled_source_;
 
   DISALLOW_COPY_AND_ASSIGN(StubNotificationUIManager);
 };

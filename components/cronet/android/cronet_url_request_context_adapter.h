@@ -19,8 +19,10 @@
 #include "base/threading/thread.h"
 #include "components/prefs/json_pref_store.h"
 #include "net/nqe/effective_connection_type.h"
+#include "net/nqe/effective_connection_type_observer.h"
 #include "net/nqe/network_quality_estimator.h"
 #include "net/nqe/network_quality_observation_source.h"
+#include "net/nqe/rtt_throughput_estimates_observer.h"
 
 class PrefService;
 
@@ -36,16 +38,12 @@ class NetworkQualitiesPrefsManager;
 class ProxyConfigService;
 class SdchOwner;
 class URLRequestContext;
-class WriteToFileNetLogObserver;
 class FileNetLogObserver;
 }  // namespace net
 
 namespace cronet {
+class HostCachePersistenceManager;
 class TestUtil;
-
-#if defined(DATA_REDUCTION_PROXY_SUPPORT)
-class CronetDataReductionProxy;
-#endif
 
 struct URLRequestContextConfig;
 
@@ -53,8 +51,8 @@ bool CronetUrlRequestContextAdapterRegisterJni(JNIEnv* env);
 
 // Adapter between Java CronetUrlRequestContext and net::URLRequestContext.
 class CronetURLRequestContextAdapter
-    : public net::NetworkQualityEstimator::EffectiveConnectionTypeObserver,
-      public net::NetworkQualityEstimator::RTTAndThroughputEstimatesObserver,
+    : public net::EffectiveConnectionTypeObserver,
+      public net::RTTAndThroughputEstimatesObserver,
       public net::NetworkQualityEstimator::RTTObserver,
       public net::NetworkQualityEstimator::ThroughputObserver {
  public:
@@ -63,8 +61,8 @@ class CronetURLRequestContextAdapter
 
   ~CronetURLRequestContextAdapter() override;
 
-  // Called on main Java thread to initialize URLRequestContext.
-  void InitRequestContextOnMainThread(
+  // Called on init Java thread to initialize URLRequestContext.
+  void InitRequestContextOnInitThread(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& jcaller);
 
@@ -82,8 +80,10 @@ class CronetURLRequestContextAdapter
 
   net::URLRequestContext* GetURLRequestContext();
 
-  // Starts NetLog logging to file. This can be called on any thread.  Returns
-  // false if it fails to open log file.
+  // TODO(xunjieli): Keep only one version of StartNetLog().
+
+  // Starts NetLog logging to file. This can be called on any thread.
+  // Return false if |jfile_name| cannot be opened.
   bool StartNetLogToFile(JNIEnv* env,
                          const base::android::JavaParamRef<jobject>& jcaller,
                          const base::android::JavaParamRef<jstring>& jfile_name,
@@ -108,10 +108,10 @@ class CronetURLRequestContextAdapter
                            const base::android::JavaParamRef<jobject>& jcaller);
 
   // Default net::LOAD flags used to create requests.
-  int default_load_flags() const { return default_load_flags_; }
+  int default_load_flags() const;
 
-  // Called on main Java thread to initialize URLRequestContext.
-  void InitRequestContextOnMainThread();
+  // Called on init Java thread to initialize URLRequestContext.
+  void InitRequestContextOnInitThread();
 
   // Configures the network quality estimator to observe requests to localhost,
   // to use smaller responses when estimating throughput, and to disable the
@@ -199,17 +199,22 @@ class CronetURLRequestContextAdapter
                                                bool include_socket_bytes,
                                                int size);
 
-  // Stops NetLog logging to file by calling StopObserving() and destroying
-  // the |bounded_file_observer_|.
-  void StopBoundedFileNetLogOnNetworkThread();
+  // Same as StartNetLogToFile, but called only on the network thread.
+  void StartNetLogOnNetworkThread(const base::FilePath& file_path,
+                                  bool include_socket_bytes);
+
+  // Stops NetLog logging on the network thread.
+  void StopNetLogOnNetworkThread();
 
   // Callback for StopObserving() that unblocks the Java ConditionVariable and
   // signals that it is safe to access the NetLog files.
   void StopNetLogCompleted();
 
-  // Helper method to stop NetLog logging to file. This can be called on any
-  // thread. This will flush any remaining writes to disk.
-  void StopNetLogHelper();
+  std::unique_ptr<base::DictionaryValue> GetNetLogInfo() const;
+
+  // Initializes Network Quality Estimator (NQE) prefs manager on network
+  // thread.
+  void InitializeNQEPrefsOnNetworkThread() const;
 
   // Network thread is owned by |this|, but is destroyed from java thread.
   base::Thread* network_thread_;
@@ -217,15 +222,10 @@ class CronetURLRequestContextAdapter
   // File thread should be destroyed last.
   std::unique_ptr<base::Thread> file_thread_;
 
-  // |write_to_file_observer_| should only be accessed with
-  // |write_to_file_observer_lock_|.
-  std::unique_ptr<net::WriteToFileNetLogObserver> write_to_file_observer_;
-  base::Lock write_to_file_observer_lock_;
-
-  std::unique_ptr<net::FileNetLogObserver> bounded_file_observer_;
+  std::unique_ptr<net::FileNetLogObserver> net_log_file_observer_;
 
   // |pref_service_| should outlive the HttpServerPropertiesManager owned by
-  // |context_|.
+  // |context_| and the HostCachePersistenceManager.
   std::unique_ptr<PrefService> pref_service_;
   std::unique_ptr<net::URLRequestContext> context_;
   std::unique_ptr<net::ProxyConfigService> proxy_config_service_;
@@ -240,6 +240,9 @@ class CronetURLRequestContextAdapter
   // Context config is only valid until context is initialized.
   std::unique_ptr<URLRequestContextConfig> context_config_;
 
+  // Effective experimental options. Kept for NetLog.
+  std::unique_ptr<base::DictionaryValue> effective_experimental_options_;
+
   // A queue of tasks that need to be run after context has been initialized.
   std::queue<base::Closure> tasks_waiting_for_context_;
   bool is_context_initialized_;
@@ -252,12 +255,13 @@ class CronetURLRequestContextAdapter
   std::unique_ptr<net::NetworkQualitiesPrefsManager>
       network_qualities_prefs_manager_;
 
+  // Manages reading and writing the HostCache pref when persistence is enabled.
+  // Must be destroyed before |context_| (because it owns the HostResolverImpl,
+  // which owns the HostCache) and |pref_service_|.
+  std::unique_ptr<HostCachePersistenceManager> host_cache_persistence_manager_;
+
   // Java object that owns this CronetURLRequestContextAdapter.
   base::android::ScopedJavaGlobalRef<jobject> jcronet_url_request_context_;
-
-#if defined(DATA_REDUCTION_PROXY_SUPPORT)
-  std::unique_ptr<CronetDataReductionProxy> data_reduction_proxy_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(CronetURLRequestContextAdapter);
 };

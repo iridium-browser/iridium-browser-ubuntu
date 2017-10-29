@@ -17,33 +17,60 @@ namespace media {
 class SlewVolume {
  public:
   SlewVolume();
-  SlewVolume(int max_slew_up_ms, int max_slew_down_ms);
+  SlewVolume(int max_slew_time_ms);
   ~SlewVolume() = default;
 
   void SetSampleRate(int sample_rate);
   void SetVolume(double volume_scale);
+  void SetMaxSlewTimeMs(int max_slew_time_ms);
 
-  // Assumes 1 channel float data that is 16-byte aligned. Smoothly calculates
-  // dest[i] += src[i] * volume_scaling
-  // ProcessFMAC will be called once for each channel of audio present and
-  // |repeat_transition| will be true for channels 2 through n.
+  // Called to indicate that the stream was interrupted; volume changes can be
+  // applied immediately.
+  void Interrupted();
+
+  // Smoothly calculates dest[i] += src[i] * |volume_scale|.
+  // |volume_scale| will always be consistent across a frame.
+  // |src| and |dest| are interleaved buffers with |channels| channels and at
+  // least |frames| frames (|channels| * |frames| total size).
+  // |src| and |dest| may be the same.
+  // |src| and |dest| must be 16-byte aligned.
+  // If using planar data, |repeat_transition| should be true for channels 2
+  // through n, which will cause the slewing process to be repeated.
   void ProcessFMAC(bool repeat_transition,
                    const float* src,
                    int frames,
+                   int channels,
                    float* dest);
 
-  // Assumes 2 channels.
-  bool ProcessInterleaved(int32_t* data, int frames);
+  // Smoothly calculates dest[i] = src[i] * |volume_scale|.
+  // |volume_scale| will always be consistent across a frame.
+  // |src| and |dest| are interleaved buffers with |channels| channels and at
+  // least |frames| frames (|channels| * |frames| total size).
+  // |src| and |dest| may be the same.
+  // |src| and |dest| must be 16-byte aligned.
+  // If using planar data, |repeat_transition| should be true for channels 2
+  // through n, which will cause the slewing process to be repeated.
+  void ProcessFMUL(bool repeat_transition,
+                   const float* src,
+                   int frames,
+                   int channels,
+                   float* dest);
 
  private:
+  template <typename Traits>
+  void ProcessData(bool repeat_transition,
+                   const float* src,
+                   int frames,
+                   int channels,
+                   float* dest);
+
   double sample_rate_;
   double volume_scale_ = 1.0;
   double current_volume_ = 1.0;
   double last_starting_volume_ = 1.0;
-  int max_slew_time_up_ms_;
-  int max_slew_time_down_ms_;
-  double max_slew_up_;
-  double max_slew_down_;
+  double max_slew_time_ms_;
+  double max_slew_per_sample_;
+  bool interrupted_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(SlewVolume);
 };

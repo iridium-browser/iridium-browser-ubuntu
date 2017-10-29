@@ -16,21 +16,18 @@ import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelContentViewDelegate;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
-import org.chromium.chrome.browser.compositor.bottombar.readermode.ReaderModePanel;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
 import org.chromium.chrome.browser.compositor.layouts.components.VirtualView;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeEventFilter;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeEventFilter.ScrollDirection;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeHandler;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EmptyEdgeSwipeHandler;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.GestureHandler;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.ScrollDirection;
 import org.chromium.chrome.browser.compositor.overlays.SceneOverlay;
 import org.chromium.chrome.browser.compositor.scene_layer.ToolbarSceneLayer;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManagementDelegate;
 import org.chromium.chrome.browser.device.DeviceClassManager;
-import org.chromium.chrome.browser.dom_distiller.ReaderModeManagerDelegate;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
+import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabModel;
@@ -56,17 +53,11 @@ public class LayoutManagerDocument extends LayoutManager
     protected final StaticLayout mStaticLayout;
 
     // Event Filters
-    private final EdgeSwipeEventFilter mStaticEdgeEventFilter;
     private final EdgeSwipeHandler mToolbarSwipeHandler;
-
-    // Event Filter Handlers
-    /** A {@link GestureHandler} that will delegate all events to {@link #getActiveLayout()}. */
-    protected final GestureHandler mGestureHandler;
 
     // Internal State
     private final SparseArray<LayoutTab> mTabCache = new SparseArray<LayoutTab>();
     private final ContextualSearchPanel mContextualSearchPanel;
-    private final ReaderModePanel mReaderModePanel;
     private final OverlayPanelManager mOverlayPanelManager;
     private final ToolbarSceneLayer mToolbarOverlay;
     /** A delegate for interacting with the Contextual Search manager. */
@@ -88,25 +79,15 @@ public class LayoutManagerDocument extends LayoutManager
         mToolbarOverlay = new ToolbarSceneLayer(mContext, this, renderHost);
 
         // Build Event Filter Handlers
-        mGestureHandler = new GestureHandlerLayoutDelegate(this);
         mToolbarSwipeHandler = new ToolbarSwipeHandler(this);
-
-        // Build Event Filters
-        mStaticEdgeEventFilter =
-                new EdgeSwipeEventFilter(mContext, this, new StaticEdgeSwipeHandler());
 
         mOverlayPanelManager = new OverlayPanelManager();
 
         // Build Layouts
-        mStaticLayout = new StaticLayout(
-                mContext, this, renderHost, mStaticEdgeEventFilter, mOverlayPanelManager);
+        mStaticLayout = new StaticLayout(mContext, this, renderHost, null, mOverlayPanelManager);
 
         // Contextual Search scene overlay.
-        mContextualSearchPanel =
-                new ContextualSearchPanel(mContext, this, this, mOverlayPanelManager);
-
-        // Reader Mode scene overlay.
-        mReaderModePanel = new ReaderModePanel(mContext, this, this, mOverlayPanelManager, this);
+        mContextualSearchPanel = new ContextualSearchPanel(mContext, this, mOverlayPanelManager);
 
         // Set up layout parameters
         mStaticLayout.setLayoutHandlesTabLifecycles(true);
@@ -118,16 +99,12 @@ public class LayoutManagerDocument extends LayoutManager
     public void init(TabModelSelector selector, TabCreatorManager creator,
             TabContentManager content, ViewGroup androidContentContainer,
             ContextualSearchManagementDelegate contextualSearchDelegate,
-            ReaderModeManagerDelegate readerModeDelegate,
             DynamicResourceLoader dynamicResourceLoader) {
         // Add any SceneOverlays to a layout.
         addAllSceneOverlays();
 
         // Save state
         mContextualSearchDelegate = contextualSearchDelegate;
-
-        // Initialize Event Filters
-        mStaticEdgeEventFilter.setTabModelSelector(selector);
 
         // Initialize Layouts
         mStaticLayout.setTabModelSelector(selector, content);
@@ -138,11 +115,6 @@ public class LayoutManagerDocument extends LayoutManager
         // Set back flow communication
         if (contextualSearchDelegate != null) {
             contextualSearchDelegate.setContextualSearchPanel(mContextualSearchPanel);
-        }
-
-        mReaderModePanel.setManagerDelegate(readerModeDelegate);
-        if (readerModeDelegate != null) {
-            readerModeDelegate.setReaderModePanel(mReaderModePanel);
         }
 
         // Set the dynamic resource loader for all overlay panels.
@@ -167,7 +139,7 @@ public class LayoutManagerDocument extends LayoutManager
         };
 
         super.init(selector, creator, content, androidContentContainer, contextualSearchDelegate,
-                readerModeDelegate, dynamicResourceLoader);
+                dynamicResourceLoader);
     }
 
     @Override
@@ -229,7 +201,6 @@ public class LayoutManagerDocument extends LayoutManager
     protected void addAllSceneOverlays() {
         addGlobalSceneOverlay(mToolbarOverlay);
         mStaticLayout.addSceneOverlay(mContextualSearchPanel);
-        mStaticLayout.addSceneOverlay(mReaderModePanel);
     }
 
     /**
@@ -263,9 +234,11 @@ public class LayoutManagerDocument extends LayoutManager
         boolean canUseLiveTexture =
                 tab.getContentViewCore() != null && !tab.isShowingSadTab() && !isNativePage;
 
+        boolean isNtp = tab.getNativePage() instanceof NewTabPage;
         boolean needsUpdate = layoutTab.initFromHost(tab.getBackgroundColor(), tab.shouldStall(),
-                canUseLiveTexture, themeColor, ColorUtils.getTextBoxColorForToolbarBackground(
-                                                       mContext.getResources(), tab, themeColor),
+                canUseLiveTexture, themeColor,
+                ColorUtils.getTextBoxColorForToolbarBackground(
+                        mContext.getResources(), isNtp, themeColor),
                 ColorUtils.getTextBoxAlphaForToolbarBackground(tab));
         if (needsUpdate) requestUpdate();
 

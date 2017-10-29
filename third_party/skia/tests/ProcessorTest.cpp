@@ -9,31 +9,50 @@
 #include "Test.h"
 
 #if SK_SUPPORT_GPU
+#include <random>
+#include "GrClip.h"
 #include "GrContext.h"
 #include "GrGpuResource.h"
-#include "GrPipelineBuilder.h"
 #include "GrRenderTargetContext.h"
 #include "GrRenderTargetContextPriv.h"
 #include "GrResourceProvider.h"
 #include "glsl/GrGLSLFragmentProcessor.h"
 #include "glsl/GrGLSLFragmentShaderBuilder.h"
-#include "ops/GrNonAAFillRectOp.h"
-#include "ops/GrTestMeshDrawOp.h"
+#include "ops/GrMeshDrawOp.h"
+#include "ops/GrRectOpFactory.h"
 
 namespace {
-class TestOp : public GrTestMeshDrawOp {
+class TestOp : public GrMeshDrawOp {
 public:
     DEFINE_OP_CLASS_ID
     const char* name() const override { return "TestOp"; }
 
-    static std::unique_ptr<GrDrawOp> Make() { return std::unique_ptr<GrDrawOp>(new TestOp); }
+    static std::unique_ptr<GrDrawOp> Make(sk_sp<GrFragmentProcessor> fp) {
+        return std::unique_ptr<GrDrawOp>(new TestOp(std::move(fp)));
+    }
+
+    FixedFunctionFlags fixedFunctionFlags() const override { return FixedFunctionFlags::kNone; }
+
+    RequiresDstTexture finalize(const GrCaps& caps, const GrAppliedClip* clip) override {
+        static constexpr GrProcessorAnalysisColor kUnknownColor;
+        GrColor overrideColor;
+        fProcessors.finalize(kUnknownColor, GrProcessorAnalysisCoverage::kNone, clip, false, caps,
+                             &overrideColor);
+        return RequiresDstTexture::kNo;
+    }
 
 private:
-    TestOp() : INHERITED(ClassID(), SkRect::MakeWH(100, 100), 0xFFFFFFFF) {}
+    TestOp(sk_sp<GrFragmentProcessor> fp) : INHERITED(ClassID()), fProcessors(std::move(fp)) {
+        this->setBounds(SkRect::MakeWH(100, 100), HasAABloat::kNo, IsZeroArea::kNo);
+    }
 
     void onPrepareDraws(Target* target) const override { return; }
 
-    typedef GrTestMeshDrawOp INHERITED;
+    bool onCombineIfPossible(GrOp* op, const GrCaps& caps) override { return false; }
+
+    GrProcessorSet fProcessors;
+
+    typedef GrMeshDrawOp INHERITED;
 };
 
 /**
@@ -43,18 +62,17 @@ private:
 class TestFP : public GrFragmentProcessor {
 public:
     struct Image {
-        Image(sk_sp<GrTexture> texture, GrIOType ioType) : fTexture(texture), fIOType(ioType) {}
-        sk_sp<GrTexture> fTexture;
+        Image(sk_sp<GrTextureProxy> proxy, GrIOType ioType) : fProxy(proxy), fIOType(ioType) {}
+        sk_sp<GrTextureProxy> fProxy;
         GrIOType fIOType;
     };
     static sk_sp<GrFragmentProcessor> Make(sk_sp<GrFragmentProcessor> child) {
         return sk_sp<GrFragmentProcessor>(new TestFP(std::move(child)));
     }
-    static sk_sp<GrFragmentProcessor> Make(GrContext* context,
-                                           const SkTArray<sk_sp<GrTextureProxy>>& proxies,
+    static sk_sp<GrFragmentProcessor> Make(const SkTArray<sk_sp<GrTextureProxy>>& proxies,
                                            const SkTArray<sk_sp<GrBuffer>>& buffers,
                                            const SkTArray<Image>& images) {
-        return sk_sp<GrFragmentProcessor>(new TestFP(context, proxies, buffers, images));
+        return sk_sp<GrFragmentProcessor>(new TestFP(proxies, buffers, images));
     }
 
     const char* name() const override { return "test"; }
@@ -66,20 +84,20 @@ public:
     }
 
 private:
-    TestFP(GrContext* context,
-           const SkTArray<sk_sp<GrTextureProxy>>& proxies,
+    TestFP(const SkTArray<sk_sp<GrTextureProxy>>& proxies,
            const SkTArray<sk_sp<GrBuffer>>& buffers,
            const SkTArray<Image>& images)
             : INHERITED(kNone_OptimizationFlags), fSamplers(4), fBuffers(4), fImages(4) {
         for (const auto& proxy : proxies) {
-            this->addTextureSampler(&fSamplers.emplace_back(context->textureProvider(), proxy));
+            this->addTextureSampler(&fSamplers.emplace_back(proxy));
         }
         for (const auto& buffer : buffers) {
             this->addBufferAccess(&fBuffers.emplace_back(kRGBA_8888_GrPixelConfig, buffer.get()));
         }
         for (const Image& image : images) {
-            this->addImageStorageAccess(&fImages.emplace_back(
-                    image.fTexture, image.fIOType, GrSLMemoryModel::kNone, GrSLRestrict::kNo));
+            fImages.emplace_back(image.fProxy, image.fIOType,
+                                 GrSLMemoryModel::kNone, GrSLRestrict::kNo);
+            this->addImageStorageAccess(&fImages.back());
         }
     }
 
@@ -118,7 +136,7 @@ inline void testingOnly_getIORefCnts(const T* resource, int* refCnt, int* readCn
     *writeCnt = resource->fPendingWrites;
 }
 
-void testingOnly_getIORefCnts(GrSurfaceProxy* proxy, int* refCnt, int* readCnt, int* writeCnt) {
+void testingOnly_getIORefCnts(GrTextureProxy* proxy, int* refCnt, int* readCnt, int* writeCnt) {
     *refCnt = proxy->getBackingRefCnt_TestOnly();
     *readCnt = proxy->getPendingReadCnt_TestOnly();
     *writeCnt = proxy->getPendingWriteCnt_TestOnly();
@@ -133,21 +151,23 @@ DEF_GPUTEST_FOR_ALL_CONTEXTS(ProcessorRefTest, reporter, ctxInfo) {
     desc.fHeight = 10;
 
     for (int parentCnt = 0; parentCnt < 2; parentCnt++) {
-        sk_sp<GrRenderTargetContext> renderTargetContext(context->makeRenderTargetContext(
+        sk_sp<GrRenderTargetContext> renderTargetContext(context->makeDeferredRenderTargetContext(
                 SkBackingFit::kApprox, 1, 1, kRGBA_8888_GrPixelConfig, nullptr));
         {
             bool texelBufferSupport = context->caps()->shaderCaps()->texelBufferSupport();
             bool imageLoadStoreSupport = context->caps()->shaderCaps()->imageLoadStoreSupport();
-            sk_sp<GrSurfaceProxy> proxy1(GrSurfaceProxy::MakeDeferred(context->textureProvider(),
-                                                                      *context->caps(), desc,
-                                                                      SkBackingFit::kExact,
+            sk_sp<GrTextureProxy> proxy1(GrSurfaceProxy::MakeDeferred(context->resourceProvider(),
+                                                                      desc, SkBackingFit::kExact,
                                                                       SkBudgeted::kYes));
-            sk_sp<GrTexture> texture2(
-                    context->resourceProvider()->createTexture(desc, SkBudgeted::kYes));
-            sk_sp<GrTexture> texture3(
-                    context->resourceProvider()->createTexture(desc, SkBudgeted::kYes));
-            sk_sp<GrTexture> texture4(
-                    context->resourceProvider()->createTexture(desc, SkBudgeted::kYes));
+            sk_sp<GrTextureProxy> proxy2(GrSurfaceProxy::MakeDeferred(context->resourceProvider(),
+                                                                      desc, SkBackingFit::kExact,
+                                                                      SkBudgeted::kYes));
+            sk_sp<GrTextureProxy> proxy3(GrSurfaceProxy::MakeDeferred(context->resourceProvider(),
+                                                                      desc, SkBackingFit::kExact,
+                                                                      SkBudgeted::kYes));
+            sk_sp<GrTextureProxy> proxy4(GrSurfaceProxy::MakeDeferred(context->resourceProvider(),
+                                                                      desc, SkBackingFit::kExact,
+                                                                      SkBudgeted::kYes));
             sk_sp<GrBuffer> buffer(texelBufferSupport
                                            ? context->resourceProvider()->createBuffer(
                                                      1024, GrBufferType::kTexel_GrBufferType,
@@ -157,25 +177,21 @@ DEF_GPUTEST_FOR_ALL_CONTEXTS(ProcessorRefTest, reporter, ctxInfo) {
                 SkTArray<sk_sp<GrTextureProxy>> proxies;
                 SkTArray<sk_sp<GrBuffer>> buffers;
                 SkTArray<TestFP::Image> images;
-                proxies.push_back(sk_ref_sp(proxy1->asTextureProxy()));
+                proxies.push_back(proxy1);
                 if (texelBufferSupport) {
                     buffers.push_back(buffer);
                 }
                 if (imageLoadStoreSupport) {
-                    images.emplace_back(texture2, GrIOType::kRead_GrIOType);
-                    images.emplace_back(texture3, GrIOType::kWrite_GrIOType);
-                    images.emplace_back(texture4, GrIOType::kRW_GrIOType);
+                    images.emplace_back(proxy2, GrIOType::kRead_GrIOType);
+                    images.emplace_back(proxy3, GrIOType::kWrite_GrIOType);
+                    images.emplace_back(proxy4, GrIOType::kRW_GrIOType);
                 }
-                std::unique_ptr<GrDrawOp> op(TestOp::Make());
-                GrPaint paint;
-                auto fp = TestFP::Make(context,
-                                       std::move(proxies), std::move(buffers), std::move(images));
+                auto fp = TestFP::Make(std::move(proxies), std::move(buffers), std::move(images));
                 for (int i = 0; i < parentCnt; ++i) {
                     fp = TestFP::Make(std::move(fp));
                 }
-                paint.addColorFragmentProcessor(std::move(fp));
-                renderTargetContext->priv().testingOnly_addDrawOp(std::move(paint), GrAAType::kNone,
-                                                                  std::move(op));
+                std::unique_ptr<GrDrawOp> op(TestOp::Make(std::move(fp)));
+                renderTargetContext->priv().testingOnly_addDrawOp(std::move(op));
             }
             int refCnt, readCnt, writeCnt;
 
@@ -192,17 +208,17 @@ DEF_GPUTEST_FOR_ALL_CONTEXTS(ProcessorRefTest, reporter, ctxInfo) {
             }
 
             if (imageLoadStoreSupport) {
-                testingOnly_getIORefCnts(texture2.get(), &refCnt, &readCnt, &writeCnt);
+                testingOnly_getIORefCnts(proxy2.get(), &refCnt, &readCnt, &writeCnt);
                 REPORTER_ASSERT(reporter, 1 == refCnt);
                 REPORTER_ASSERT(reporter, 1 == readCnt);
                 REPORTER_ASSERT(reporter, 0 == writeCnt);
 
-                testingOnly_getIORefCnts(texture3.get(), &refCnt, &readCnt, &writeCnt);
+                testingOnly_getIORefCnts(proxy3.get(), &refCnt, &readCnt, &writeCnt);
                 REPORTER_ASSERT(reporter, 1 == refCnt);
                 REPORTER_ASSERT(reporter, 0 == readCnt);
                 REPORTER_ASSERT(reporter, 1 == writeCnt);
 
-                testingOnly_getIORefCnts(texture4.get(), &refCnt, &readCnt, &writeCnt);
+                testingOnly_getIORefCnts(proxy4.get(), &refCnt, &readCnt, &writeCnt);
                 REPORTER_ASSERT(reporter, 1 == refCnt);
                 REPORTER_ASSERT(reporter, 1 == readCnt);
                 REPORTER_ASSERT(reporter, 1 == writeCnt);
@@ -223,17 +239,17 @@ DEF_GPUTEST_FOR_ALL_CONTEXTS(ProcessorRefTest, reporter, ctxInfo) {
             }
 
             if (texelBufferSupport) {
-                testingOnly_getIORefCnts(texture2.get(), &refCnt, &readCnt, &writeCnt);
+                testingOnly_getIORefCnts(proxy2.get(), &refCnt, &readCnt, &writeCnt);
                 REPORTER_ASSERT(reporter, 1 == refCnt);
                 REPORTER_ASSERT(reporter, 0 == readCnt);
                 REPORTER_ASSERT(reporter, 0 == writeCnt);
 
-                testingOnly_getIORefCnts(texture3.get(), &refCnt, &readCnt, &writeCnt);
+                testingOnly_getIORefCnts(proxy3.get(), &refCnt, &readCnt, &writeCnt);
                 REPORTER_ASSERT(reporter, 1 == refCnt);
                 REPORTER_ASSERT(reporter, 0 == readCnt);
                 REPORTER_ASSERT(reporter, 0 == writeCnt);
 
-                testingOnly_getIORefCnts(texture4.get(), &refCnt, &readCnt, &writeCnt);
+                testingOnly_getIORefCnts(proxy4.get(), &refCnt, &readCnt, &writeCnt);
                 REPORTER_ASSERT(reporter, 1 == refCnt);
                 REPORTER_ASSERT(reporter, 0 == readCnt);
                 REPORTER_ASSERT(reporter, 0 == writeCnt);
@@ -253,31 +269,45 @@ static GrColor texel_color(int i, int j) {
 
 static GrColor4f texel_color4f(int i, int j) { return GrColor4f::FromGrColor(texel_color(i, j)); }
 
-void test_draw_op(GrContext* context, GrRenderTargetContext* rtc, sk_sp<GrFragmentProcessor> fp,
+void test_draw_op(GrRenderTargetContext* rtc, sk_sp<GrFragmentProcessor> fp,
                   sk_sp<GrTextureProxy> inputDataProxy) {
     GrPaint paint;
-    paint.addColorTextureProcessor(context, std::move(inputDataProxy), nullptr, SkMatrix::I());
+    paint.addColorTextureProcessor(std::move(inputDataProxy), nullptr, SkMatrix::I());
     paint.addColorFragmentProcessor(std::move(fp));
     paint.setPorterDuffXPFactory(SkBlendMode::kSrc);
-    GrPipelineBuilder pb(std::move(paint), GrAAType::kNone);
-    auto op =
-            GrNonAAFillRectOp::Make(GrColor_WHITE, SkMatrix::I(),
-                                    SkRect::MakeWH(rtc->width(), rtc->height()), nullptr, nullptr);
-    rtc->addDrawOp(pb, GrNoClip(), std::move(op));
+
+    auto op = GrRectOpFactory::MakeNonAAFill(std::move(paint), SkMatrix::I(),
+                                             SkRect::MakeWH(rtc->width(), rtc->height()),
+                                             GrAAType::kNone);
+    rtc->addDrawOp(GrNoClip(), std::move(op));
 }
+
+#include "SkCommandLineFlags.h"
+DEFINE_bool(randomProcessorTest, false, "Use non-deterministic seed for random processor tests?");
 
 #if GR_TEST_UTILS
 DEF_GPUTEST_FOR_GL_RENDERING_CONTEXTS(ProcessorOptimizationValidationTest, reporter, ctxInfo) {
     GrContext* context = ctxInfo.grContext();
     using FPFactory = GrProcessorTestFactory<GrFragmentProcessor>;
-    SkRandom random;
-    sk_sp<GrRenderTargetContext> rtc = context->makeRenderTargetContext(
+
+    uint32_t seed = 0;
+    if (FLAGS_randomProcessorTest) {
+        std::random_device rd;
+        seed = rd();
+    }
+    // If a non-deterministic bot fails this test, check the output to see what seed it used, then
+    // hard-code that value here:
+    SkRandom random(seed);
+
+    sk_sp<GrRenderTargetContext> rtc = context->makeDeferredRenderTargetContext(
             SkBackingFit::kExact, 256, 256, kRGBA_8888_GrPixelConfig, nullptr);
     GrSurfaceDesc desc;
     desc.fWidth = 256;
     desc.fHeight = 256;
     desc.fFlags = kRenderTarget_GrSurfaceFlag;
     desc.fConfig = kRGBA_8888_GrPixelConfig;
+
+    sk_sp<GrTextureProxy> proxies[2];
 
     // Put premul data into the RGBA texture that the test FPs can optionally use.
     std::unique_ptr<GrColor[]> rgbaData(new GrColor[256 * 256]);
@@ -287,8 +317,8 @@ DEF_GPUTEST_FOR_GL_RENDERING_CONTEXTS(ProcessorOptimizationValidationTest, repor
                     texel_color(random.nextULessThan(256), random.nextULessThan(256));
         }
     }
-    sk_sp<GrTexture> tex0(context->textureProvider()->createTexture(
-            desc, SkBudgeted::kYes, rgbaData.get(), 256 * sizeof(GrColor)));
+    proxies[0] = GrSurfaceProxy::MakeDeferred(context->resourceProvider(), desc, SkBudgeted::kYes,
+                                              rgbaData.get(), 256 * sizeof(GrColor));
 
     // Put random values into the alpha texture that the test FPs can optionally use.
     desc.fConfig = kAlpha_8_GrPixelConfig;
@@ -298,10 +328,14 @@ DEF_GPUTEST_FOR_GL_RENDERING_CONTEXTS(ProcessorOptimizationValidationTest, repor
             alphaData.get()[256 * y + x] = random.nextULessThan(256);
         }
     }
-    sk_sp<GrTexture> tex1(context->textureProvider()->createTexture(desc, SkBudgeted::kYes,
-                                                                    alphaData.get(), 256));
-    GrTexture* textures[] = {tex0.get(), tex1.get()};
-    GrProcessorTestData testData(&random, context, rtc.get(), textures);
+    proxies[1] = GrSurfaceProxy::MakeDeferred(context->resourceProvider(), desc, SkBudgeted::kYes,
+                                              alphaData.get(), 256);
+
+    if (!proxies[0] || !proxies[1]) {
+        return;
+    }
+
+    GrProcessorTestData testData(&random, context, rtc.get(), proxies);
 
     // Use a different array of premul colors for the output of the fragment processor that preceeds
     // the fragment processor under test.
@@ -312,8 +346,7 @@ DEF_GPUTEST_FOR_GL_RENDERING_CONTEXTS(ProcessorOptimizationValidationTest, repor
     }
     desc.fConfig = kRGBA_8888_GrPixelConfig;
 
-    sk_sp<GrSurfaceProxy> dataProxy = GrSurfaceProxy::MakeDeferred(*context->caps(),
-                                                                   context->textureProvider(),
+    sk_sp<GrTextureProxy> dataProxy = GrSurfaceProxy::MakeDeferred(context->resourceProvider(),
                                                                    desc, SkBudgeted::kYes,
                                                                    rgbaData.get(),
                                                                    256 * sizeof(GrColor));
@@ -331,11 +364,15 @@ DEF_GPUTEST_FOR_GL_RENDERING_CONTEXTS(ProcessorOptimizationValidationTest, repor
         }
         for (int j = 0; j < timesToInvokeFactory; ++j) {
             fp = FPFactory::MakeIdx(i, &testData);
+            if (!fp->instantiate(context->resourceProvider())) {
+                continue;
+            }
+
             if (!fp->hasConstantOutputForConstantInput() && !fp->preservesOpaqueInput() &&
                 !fp->compatibleWithCoverageAsAlpha()) {
                 continue;
             }
-            test_draw_op(context, rtc.get(), fp, sk_ref_sp(dataProxy->asTextureProxy()));
+            test_draw_op(rtc.get(), fp, dataProxy);
             memset(rgbaData.get(), 0x0, sizeof(GrColor) * 256 * 256);
             rtc->readPixels(
                     SkImageInfo::Make(256, 256, kRGBA_8888_SkColorType, kPremul_SkAlphaType),
@@ -372,7 +409,7 @@ DEF_GPUTEST_FOR_GL_RENDERING_CONTEXTS(ProcessorOptimizationValidationTest, repor
                         if (!legalColorModulation && !legalAlphaModulation) {
                             ERRORF(reporter,
                                    "\"Modulating\" processor %s made color/alpha value larger. "
-                                   "Input: 0x%0x8, Output: 0x%08x.",
+                                   "Input: 0x%08x, Output: 0x%08x.",
                                    fp->name(), input, output);
                             passing = false;
                         }
@@ -403,15 +440,20 @@ DEF_GPUTEST_FOR_GL_RENDERING_CONTEXTS(ProcessorOptimizationValidationTest, repor
                         !GrColorIsOpaque(output)) {
                         ERRORF(reporter,
                                "Processor %s claimed opaqueness is preserved but it is not. Input: "
-                               "0x%0x8, Output: 0x%08x.",
+                               "0x%08x, Output: 0x%08x.",
                                fp->name(), input, output);
                         passing = false;
+                    }
+                    if (!passing) {
+                        ERRORF(reporter, "Seed: 0x%08x, Processor details: %s",
+                               seed, fp->dumpInfo().c_str());
                     }
                 }
             }
         }
     }
 }
+
 #endif  // GR_TEST_UTILS
 #endif  // SK_ALLOW_STATIC_GLOBAL_INITIALIZERS
 #endif  // SK_SUPPORT_GPU

@@ -23,32 +23,32 @@
 #ifndef LayoutFrame_h
 #define LayoutFrame_h
 
+#include "core/layout/LayoutEmbeddedContent.h"
 #include "core/layout/LayoutFrameSet.h"
-#include "core/layout/LayoutPart.h"
 
 namespace blink {
 
 class HTMLFrameElement;
 
-class LayoutFrame final : public LayoutPart {
+class LayoutFrame final : public LayoutEmbeddedContent {
  public:
   explicit LayoutFrame(HTMLFrameElement*);
 
-  FrameEdgeInfo edgeInfo() const;
+  FrameEdgeInfo EdgeInfo() const;
 
-  void imageChanged(WrappedImagePtr, const IntRect* = nullptr) override;
+  void ImageChanged(WrappedImagePtr, const IntRect* = nullptr) override;
 
-  const char* name() const override { return "LayoutFrame"; }
+  const char* GetName() const override { return "LayoutFrame"; }
 
  private:
-  bool isOfType(LayoutObjectType type) const override {
-    return type == LayoutObjectFrame || LayoutPart::isOfType(type);
+  bool IsOfType(LayoutObjectType type) const override {
+    return type == kLayoutObjectFrame || LayoutEmbeddedContent::IsOfType(type);
   }
 
-  void updateFromElement() override;
+  void UpdateFromElement() override;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutFrame, isFrame());
+DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutFrame, IsFrame());
 
 }  // namespace blink
 

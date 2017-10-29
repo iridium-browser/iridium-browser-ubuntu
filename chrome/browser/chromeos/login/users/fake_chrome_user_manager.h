@@ -9,9 +9,11 @@
 #include <memory>
 #include <string>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "chrome/browser/chromeos/login/user_flow.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
+#include "components/prefs/testing_pref_service.h"
 #include "components/user_manager/fake_user_manager.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_image/user_image.h"
@@ -27,19 +29,25 @@ class FakeChromeUserManager : public ChromeUserManager {
   FakeChromeUserManager();
   ~FakeChromeUserManager() override;
 
-  // Create and add a kiosk app user.
+  // Create and add various types of users.
   user_manager::User* AddKioskAppUser(const AccountId& account_id);
   user_manager::User* AddArcKioskAppUser(const AccountId& account_id);
-
-  // Create and add a public account user.
+  user_manager::User* AddSupervisedUser(const AccountId& account_id);
   const user_manager::User* AddPublicAccountUser(const AccountId& account_id);
 
   // Calculates the user name hash and calls UserLoggedIn to login a user.
+  // Sets the user as having its profile created, but does not create a profile.
+  // NOTE: This does not match production, which first logs in the user, then
+  // creates the profile and updates the user later.
   void LoginUser(const AccountId& account_id);
 
   const user_manager::User* AddUser(const AccountId& account_id);
   const user_manager::User* AddUserWithAffiliation(const AccountId& account_id,
                                                    bool is_affiliated);
+
+  // Creates the instance returned by |GetLocalState()| (which returns nullptr
+  // by default).
+  void CreateLocalState();
 
   // user_manager::UserManager override.
   void Shutdown() override;
@@ -55,6 +63,7 @@ class FakeChromeUserManager : public ChromeUserManager {
   void SwitchActiveUser(const AccountId& account_id) override;
   void SwitchToLastActiveUser() override;
   void OnSessionStarted() override;
+  void OnProfileInitialized(user_manager::User* user) override;
   void RemoveUser(const AccountId& account_id,
                   user_manager::RemoveUserDelegate* delegate) override;
   void RemoveUserFromList(const AccountId& account_id) override;
@@ -201,6 +210,8 @@ class FakeChromeUserManager : public ChromeUserManager {
   mutable std::unique_ptr<UserFlow> default_flow_;
 
   using FlowMap = std::map<AccountId, UserFlow*>;
+
+  std::unique_ptr<TestingPrefServiceSimple> local_state_;
 
   // Specific flows by user e-mail.
   // Keys should be canonicalized before access.

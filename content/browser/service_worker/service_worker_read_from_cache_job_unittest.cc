@@ -11,7 +11,6 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "content/browser/fileapi/mock_url_request_delegate.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_registration.h"
@@ -21,6 +20,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_response_headers.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_status.h"
@@ -90,9 +90,9 @@ class ServiceWorkerReadFromCacheJobTest : public testing::Test {
     run_loop.Run();
 
     // Populate a registration in the storage.
-    registration_ =
-        new ServiceWorkerRegistration(GURL("http://example.com/scope"),
-                                      kRegistrationId, context()->AsWeakPtr());
+    registration_ = new ServiceWorkerRegistration(
+        ServiceWorkerRegistrationOptions(GURL("http://example.com/scope")),
+        kRegistrationId, context()->AsWeakPtr());
     version_ = new ServiceWorkerVersion(registration_.get(), main_script_.url,
                                         kVersionId, context()->AsWeakPtr());
     std::vector<ServiceWorkerDatabase::ResourceRecord> resources;
@@ -162,7 +162,7 @@ class ServiceWorkerReadFromCacheJobTest : public testing::Test {
 
   void StartAndWaitForRequest(net::URLRequest* request) {
     request->Start();
-    // MockURLRequestDelegate quits the loop when the request is completed.
+    // net::TestDelegate quits the loop when the request is completed.
     base::RunLoop().RunUntilIdle();
   }
 
@@ -187,14 +187,15 @@ class ServiceWorkerReadFromCacheJobTest : public testing::Test {
   net::URLRequestJobFactoryImpl test_job_factory_;
 
   std::unique_ptr<net::TestURLRequestContext> url_request_context_;
-  MockURLRequestDelegate delegate_;
+  net::TestDelegate delegate_;
 };
 
 TEST_F(ServiceWorkerReadFromCacheJobTest, ReadMainScript) {
   // Read the main script from the diskcache.
   std::unique_ptr<net::URLRequest> request =
       url_request_context_->CreateRequest(main_script_.url,
-                                          net::DEFAULT_PRIORITY, &delegate_);
+                                          net::DEFAULT_PRIORITY, &delegate_,
+                                          TRAFFIC_ANNOTATION_FOR_TESTS);
   test_job_interceptor_->set_main_intercept_job(
       base::MakeUnique<ServiceWorkerReadFromCacheJob>(
           request.get(), nullptr /* NetworkDelegate */,
@@ -212,7 +213,8 @@ TEST_F(ServiceWorkerReadFromCacheJobTest, ReadImportedScript) {
   // Read the imported script from the diskcache.
   std::unique_ptr<net::URLRequest> request =
       url_request_context_->CreateRequest(imported_script_.url,
-                                          net::DEFAULT_PRIORITY, &delegate_);
+                                          net::DEFAULT_PRIORITY, &delegate_,
+                                          TRAFFIC_ANNOTATION_FOR_TESTS);
   test_job_interceptor_->set_main_intercept_job(
       base::MakeUnique<ServiceWorkerReadFromCacheJob>(
           request.get(), nullptr /* NetworkDelegate */, RESOURCE_TYPE_SCRIPT,
@@ -241,7 +243,8 @@ TEST_F(ServiceWorkerReadFromCacheJobTest, ResourceNotFound) {
   // Attempt to read it from the disk cache.
   std::unique_ptr<net::URLRequest> request =
       url_request_context_->CreateRequest(main_script_.url,
-                                          net::DEFAULT_PRIORITY, &delegate_);
+                                          net::DEFAULT_PRIORITY, &delegate_,
+                                          TRAFFIC_ANNOTATION_FOR_TESTS);
   const int64_t kNonexistentResourceId = 100;
   test_job_interceptor_->set_main_intercept_job(
       base::MakeUnique<ServiceWorkerReadFromCacheJob>(

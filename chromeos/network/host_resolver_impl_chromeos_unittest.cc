@@ -8,6 +8,7 @@
 
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
@@ -127,11 +128,11 @@ class HostResolverImplChromeOSTest : public testing::Test {
                    const std::string& method,
                    const std::string& address) {
     DBusThreadManager::Get()->GetShillIPConfigClient()->SetProperty(
-        dbus::ObjectPath(path), shill::kAddressProperty,
-        base::StringValue(address), base::Bind(&DoNothingWithCallStatus));
+        dbus::ObjectPath(path), shill::kAddressProperty, base::Value(address),
+        base::Bind(&DoNothingWithCallStatus));
     DBusThreadManager::Get()->GetShillIPConfigClient()->SetProperty(
-        dbus::ObjectPath(path), shill::kMethodProperty,
-        base::StringValue(method), base::Bind(&DoNothingWithCallStatus));
+        dbus::ObjectPath(path), shill::kMethodProperty, base::Value(method),
+        base::Bind(&DoNothingWithCallStatus));
   }
 
   std::unique_ptr<NetworkStateHandler> network_state_handler_;

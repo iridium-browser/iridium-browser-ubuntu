@@ -7,6 +7,7 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "media/audio/audio_input_controller.h"
 #include "media/base/audio_parameters.h"
 
@@ -73,7 +74,7 @@ class TestAudioInputController : public AudioInputController {
   void Record() override;
 
   // Ensure that the closure is run on the audio-manager thread.
-  void Close(const base::Closure& closed_task) override;
+  void Close(base::OnceClosure closed_task) override;
 
   const AudioParameters& audio_parameters() const {
     return audio_parameters_;

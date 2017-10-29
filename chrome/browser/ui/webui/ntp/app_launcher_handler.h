@@ -72,10 +72,9 @@ class AppLauncherHandler
   // extensions::ExtensionRegistryObserver:
   void OnExtensionLoaded(content::BrowserContext* browser_context,
                          const extensions::Extension* extension) override;
-  void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const extensions::Extension* extension,
+                           extensions::UnloadedExtensionReason reason) override;
   void OnExtensionUninstalled(content::BrowserContext* browser_context,
                               const extensions::Extension* extension,
                               extensions::UninstallReason reason) override;
@@ -166,7 +165,7 @@ class AppLauncherHandler
 
   // Returns the ExtensionUninstallDialog object for this class, creating it if
   // needed.
-  extensions::ExtensionUninstallDialog* GetExtensionUninstallDialog();
+  extensions::ExtensionUninstallDialog* CreateExtensionUninstallDialog();
 
   // Continuation for installing a bookmark app after favicon lookup.
   void OnFaviconForApp(std::unique_ptr<AppInstallInfo> install_info,

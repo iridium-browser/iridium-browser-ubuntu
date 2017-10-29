@@ -24,36 +24,35 @@
 #define BidiContext_h
 
 #include "platform/PlatformExport.h"
-#include "wtf/Assertions.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
-#include "wtf/RefPtr.h"
-#include "wtf/text/Unicode.h"
+#include "platform/wtf/Assertions.h"
+#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/ThreadSafeRefCounted.h"
+#include "platform/wtf/text/Unicode.h"
 
 namespace blink {
 
-enum BidiEmbeddingSource { FromStyleOrDOM, FromUnicode };
+enum BidiEmbeddingSource { kFromStyleOrDOM, kFromUnicode };
 
 // Used to keep track of explicit embeddings.
-class PLATFORM_EXPORT BidiContext : public RefCounted<BidiContext> {
+class PLATFORM_EXPORT BidiContext : public ThreadSafeRefCounted<BidiContext> {
  public:
-  static PassRefPtr<BidiContext> create(unsigned char level,
-                                        WTF::Unicode::CharDirection,
-                                        bool override = false,
-                                        BidiEmbeddingSource = FromStyleOrDOM,
-                                        BidiContext* parent = 0);
+  static RefPtr<BidiContext> Create(unsigned char level,
+                                    WTF::Unicode::CharDirection,
+                                    bool override = false,
+                                    BidiEmbeddingSource = kFromStyleOrDOM,
+                                    BidiContext* parent = 0);
 
-  BidiContext* parent() const { return m_parent.get(); }
-  unsigned char level() const { return m_level; }
-  WTF::Unicode::CharDirection dir() const {
-    return static_cast<WTF::Unicode::CharDirection>(m_direction);
+  BidiContext* Parent() const { return parent_.Get(); }
+  unsigned char Level() const { return level_; }
+  WTF::Unicode::CharDirection Dir() const {
+    return static_cast<WTF::Unicode::CharDirection>(direction_);
   }
-  bool override() const { return m_override; }
-  BidiEmbeddingSource source() const {
-    return static_cast<BidiEmbeddingSource>(m_source);
+  bool Override() const { return override_; }
+  BidiEmbeddingSource Source() const {
+    return static_cast<BidiEmbeddingSource>(source_);
   }
 
-  PassRefPtr<BidiContext> copyStackRemovingUnicodeEmbeddingContexts();
+  RefPtr<BidiContext> CopyStackRemovingUnicodeEmbeddingContexts();
 
   // http://www.unicode.org/reports/tr9/#Modifications
   // 6.3 raised the limit from 61 to 125.
@@ -66,34 +65,34 @@ class PLATFORM_EXPORT BidiContext : public RefCounted<BidiContext> {
               bool override,
               BidiEmbeddingSource source,
               BidiContext* parent)
-      : m_level(level),
-        m_direction(direction),
-        m_override(override),
-        m_source(source),
-        m_parent(parent) {
-    ASSERT(level <= kMaxLevel);
+      : level_(level),
+        direction_(direction),
+        override_(override),
+        source_(source),
+        parent_(parent) {
+    DCHECK(level <= kMaxLevel);
   }
 
-  static PassRefPtr<BidiContext> createUncached(unsigned char level,
-                                                WTF::Unicode::CharDirection,
-                                                bool override,
-                                                BidiEmbeddingSource,
-                                                BidiContext* parent);
+  static RefPtr<BidiContext> CreateUncached(unsigned char level,
+                                            WTF::Unicode::CharDirection,
+                                            bool override,
+                                            BidiEmbeddingSource,
+                                            BidiContext* parent);
 
   // The maximium bidi level is 125:
   // http://unicode.org/reports/tr9/#Explicit_Levels_and_Directions
-  unsigned m_level : 7;
-  unsigned m_direction : 5;  // Direction
-  unsigned m_override : 1;
-  unsigned m_source : 1;  // BidiEmbeddingSource
-  RefPtr<BidiContext> m_parent;
+  unsigned level_ : 7;
+  unsigned direction_ : 5;  // Direction
+  unsigned override_ : 1;
+  unsigned source_ : 1;  // BidiEmbeddingSource
+  RefPtr<BidiContext> parent_;
 };
 
-inline unsigned char nextGreaterOddLevel(unsigned char level) {
+inline unsigned char NextGreaterOddLevel(unsigned char level) {
   return (level + 1) | 1;
 }
 
-inline unsigned char nextGreaterEvenLevel(unsigned char level) {
+inline unsigned char NextGreaterEvenLevel(unsigned char level) {
   return (level + 2) & ~1;
 }
 

@@ -16,11 +16,15 @@
 #include "content/common/push_messaging.mojom.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/push_messaging_status.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "url/gurl.h"
 
 namespace content {
+
+namespace mojom {
+enum class PushRegistrationStatus;
+enum class PushUnregistrationStatus;
+}  // namespace mojom
 
 class PushMessagingService;
 class ServiceWorkerContextWrapper;
@@ -41,15 +45,15 @@ class PushMessagingManager : public mojom::PushMessaging {
   void Subscribe(int32_t render_frame_id,
                  int64_t service_worker_registration_id,
                  const PushSubscriptionOptions& options,
-                 const SubscribeCallback& callback) override;
+                 bool user_gesture,
+                 SubscribeCallback callback) override;
   void Unsubscribe(int64_t service_worker_registration_id,
-                   const UnsubscribeCallback& callback) override;
+                   UnsubscribeCallback callback) override;
   void GetSubscription(int64_t service_worker_registration_id,
-                       const GetSubscriptionCallback& callback) override;
-  void GetPermissionStatus(
-      int64_t service_worker_registration_id,
-      bool user_visible,
-      const GetPermissionStatusCallback& callback) override;
+                       GetSubscriptionCallback callback) override;
+  void GetPermissionStatus(int64_t service_worker_registration_id,
+                           bool user_visible,
+                           GetPermissionStatusCallback callback) override;
 
  private:
   struct RegisterData;
@@ -62,66 +66,53 @@ class PushMessagingManager : public mojom::PushMessaging {
   ~PushMessagingManager() override;
 
   void DidCheckForExistingRegistration(
-      const RegisterData& data,
+      RegisterData data,
       const std::vector<std::string>& push_registration_id,
       ServiceWorkerStatusCode service_worker_status);
 
-  void DidGetEncryptionKeys(const RegisterData& data,
-                            const std::string& push_registration_id,
-                            bool success,
-                            const std::vector<uint8_t>& p256dh,
-                            const std::vector<uint8_t>& auth);
-
-  void DidGetSenderIdFromStorage(const RegisterData& data,
+  void DidGetSenderIdFromStorage(RegisterData data,
                                  const std::vector<std::string>& sender_id,
                                  ServiceWorkerStatusCode service_worker_status);
 
   // Called via PostTask from UI thread.
-  void PersistRegistrationOnIO(const RegisterData& data,
+  void PersistRegistrationOnIO(RegisterData data,
                                const std::string& push_registration_id,
                                const std::vector<uint8_t>& p256dh,
                                const std::vector<uint8_t>& auth);
 
   void DidPersistRegistrationOnIO(
-      const RegisterData& data,
+      RegisterData data,
       const std::string& push_registration_id,
       const std::vector<uint8_t>& p256dh,
       const std::vector<uint8_t>& auth,
       ServiceWorkerStatusCode service_worker_status);
 
   // Called both from IO thread, and via PostTask from UI thread.
-  void SendSubscriptionError(const RegisterData& data,
-                             PushRegistrationStatus status);
+  void SendSubscriptionError(RegisterData data,
+                             mojom::PushRegistrationStatus status);
   // Called both from IO thread, and via PostTask from UI thread.
-  void SendSubscriptionSuccess(const RegisterData& data,
-                               PushRegistrationStatus status,
+  void SendSubscriptionSuccess(RegisterData data,
+                               mojom::PushRegistrationStatus status,
                                const std::string& push_subscription_id,
                                const std::vector<uint8_t>& p256dh,
                                const std::vector<uint8_t>& auth);
 
   void UnsubscribeHavingGottenSenderId(
-      const UnsubscribeCallback& callback,
+      UnsubscribeCallback callback,
       int64_t service_worker_registration_id,
       const GURL& requesting_origin,
       const std::vector<std::string>& sender_id,
       ServiceWorkerStatusCode service_worker_status);
 
   // Called both from IO thread, and via PostTask from UI thread.
-  void DidUnregister(const UnsubscribeCallback& callback,
-                     PushUnregistrationStatus unregistration_status);
+  void DidUnregister(UnsubscribeCallback callback,
+                     mojom::PushUnregistrationStatus unregistration_status);
 
   void DidGetSubscription(
-      const GetSubscriptionCallback& callback,
+      GetSubscriptionCallback callback,
       int64_t service_worker_registration_id,
       const std::vector<std::string>& push_subscription_id_and_sender_info,
       ServiceWorkerStatusCode service_worker_status);
-
-  void DidGetSubscriptionKeys(const GetSubscriptionCallback& callback,
-                              const GURL& endpoint,
-                              const std::string& sender_info,
-                              bool success,
-                              const std::vector<uint8_t>& p256dh,
-                              const std::vector<uint8_t>& auth);
 
   // Helper methods on either thread -------------------------------------------
 
@@ -132,6 +123,10 @@ class PushMessagingManager : public mojom::PushMessaging {
 
   // Inner core of this message filter which lives on the UI thread.
   std::unique_ptr<Core, BrowserThread::DeleteOnUIThread> ui_core_;
+
+  // Can be used on the IO thread as the |this| parameter when binding a
+  // callback that will be called on the UI thread (an IO -> UI -> UI chain).
+  base::WeakPtr<Core> ui_core_weak_ptr_;
 
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
 

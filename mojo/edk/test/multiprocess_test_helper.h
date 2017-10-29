@@ -20,6 +20,8 @@ namespace mojo {
 
 namespace edk {
 
+class PeerConnection;
+
 namespace test {
 
 class MultiprocessTestHelper {
@@ -80,12 +82,13 @@ class MultiprocessTestHelper {
   // |EXPECT_TRUE(WaitForChildTestShutdown());|.
   bool WaitForChildTestShutdown();
 
-  const base::Process& test_child() const { return test_child_; }
+  const base::Process& test_child() const { return test_child_.process; }
 
   // Used by macros in mojo/edk/test/mojo_test_base.h to support multiprocess
   // test client initialization.
   static void ChildSetup();
-  static int RunClientMain(const base::Callback<int(MojoHandle)>& main);
+  static int RunClientMain(const base::Callback<int(MojoHandle)>& main,
+                           bool pass_pipe_ownership_to_main = false);
   static int RunClientTestMain(const base::Callback<void(MojoHandle)>& main);
 
   // For use (and only valid) in the child process:
@@ -93,11 +96,11 @@ class MultiprocessTestHelper {
 
  private:
   // Valid after |StartChild()| and before |WaitForChildShutdown()|.
-  base::Process test_child_;
+  base::SpawnChildResult test_child_;
 
   ProcessErrorCallback process_error_callback_;
 
-  std::string peer_token_;
+  std::unique_ptr<PeerConnection> peer_connection_;
 
   DISALLOW_COPY_AND_ASSIGN(MultiprocessTestHelper);
 };

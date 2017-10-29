@@ -12,7 +12,9 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chromeos/chromeos_switches.h"
@@ -38,8 +40,6 @@ class TestWallpaperObserverPendingListEmpty
   ~TestWallpaperObserverPendingListEmpty() override {
     wallpaper_manager_->RemoveObserver(this);
   }
-
-  void OnWallpaperAnimationFinished(const AccountId& account_id) override {}
 
   void OnPendingListEmptyForTesting() override {
     empty_ = true;
@@ -85,15 +85,8 @@ bool CreateJPEGImage(int width,
   bitmap.allocN32Pixels(width, height);
   bitmap.eraseColor(color);
 
-  const int kQuality = 80;
-  if (!gfx::JPEGCodec::Encode(
-          static_cast<const unsigned char*>(bitmap.getPixels()),
-          gfx::JPEGCodec::FORMAT_SkBitmap,
-          width,
-          height,
-          bitmap.rowBytes(),
-          kQuality,
-          output)) {
+  constexpr int kQuality = 80;
+  if (!gfx::JPEGCodec::Encode(bitmap, kQuality, output)) {
     LOG(ERROR) << "Unable to encode " << width << "x" << height << " bitmap";
     return false;
   }
@@ -111,6 +104,7 @@ bool WriteJPEGFile(const base::FilePath& path,
                    int width,
                    int height,
                    SkColor color) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   std::vector<unsigned char> output;
   if (!CreateJPEGImage(width, height, color, &output))
     return false;
@@ -137,10 +131,8 @@ bool ImageIsNearColor(gfx::ImageSkia image, SkColor expected_color) {
     return false;
   }
 
-  bitmap->lockPixels();
   gfx::Point center = gfx::Rect(image.size()).CenterPoint();
   SkColor image_color = bitmap->getColor(center.x(), center.y());
-  bitmap->unlockPixels();
 
   const int kDiff = 3;
   if (std::abs(static_cast<int>(SkColorGetA(image_color)) -

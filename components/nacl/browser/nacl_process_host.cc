@@ -30,6 +30,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_byteorder.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
@@ -158,10 +159,6 @@ bool RunningOnWOW64() {
 
 namespace {
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-content::ZygoteHandle g_nacl_zygote;
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
-
 // NOTE: changes to this class need to be reviewed by the security team.
 class NaClSandboxedProcessLauncherDelegate
     : public content::SandboxedProcessLauncherDelegate {
@@ -184,7 +181,7 @@ class NaClSandboxedProcessLauncherDelegate
     }
   }
 #elif defined(OS_POSIX) && !defined(OS_MACOSX)
-  content::ZygoteHandle* GetZygote() override {
+  content::ZygoteHandle GetZygote() override {
     return content::GetGenericZygote();
   }
 #endif  // OS_WIN
@@ -195,9 +192,6 @@ void CloseFile(base::File file) {
 }
 
 }  // namespace
-
-unsigned NaClProcessHost::keepalive_throttle_interval_milliseconds_ =
-    ppapi::kKeepaliveThrottleIntervalDefaultMilliseconds;
 
 NaClProcessHost::NaClProcessHost(
     const GURL& manifest_url,
@@ -333,20 +327,6 @@ void NaClProcessHost::EarlyStartup() {
     nacl_debug_mask = "!*://*/*ssh_client.nmf,chrome://pnacl-translator/*";
   }
   NaClBrowser::GetDelegate()->SetDebugPatterns(nacl_debug_mask);
-}
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-// static
-void NaClProcessHost::EarlyZygoteLaunch() {
-  DCHECK(!g_nacl_zygote);
-  g_nacl_zygote = content::CreateZygote();
-}
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
-
-// static
-void NaClProcessHost::SetPpapiKeepAliveThrottleForTesting(
-    unsigned milliseconds) {
-  keepalive_throttle_interval_milliseconds_ = milliseconds;
 }
 
 void NaClProcessHost::Launch(
@@ -571,7 +551,7 @@ bool NaClProcessHost::LaunchSelLdr() {
   if (RunningOnWOW64()) {
     if (!NaClBrokerService::GetInstance()->LaunchLoader(
             weak_factory_.GetWeakPtr(),
-            process_->GetServiceRequestChannelToken())) {
+            process_->TakeInProcessServiceRequest())) {
       SendErrorToRenderer("broker service did not launch process");
       return false;
     }
@@ -638,16 +618,16 @@ void NaClProcessHost::ReplyToRenderer(
   // Hereafter, we always send an IPC message with handles created above
   // which, on Windows, are not closable in this process.
   std::string error_message;
-  base::SharedMemoryHandle crash_info_shmem_renderer_handle;
-  if (!crash_info_shmem_.ShareToProcess(nacl_host_message_filter_->PeerHandle(),
-                                        &crash_info_shmem_renderer_handle)) {
+  base::SharedMemoryHandle crash_info_shmem_renderer_handle =
+      crash_info_shmem_.handle().Duplicate();
+  if (!crash_info_shmem_renderer_handle.IsValid()) {
     // On error, we do not send "IPC::ChannelHandle"s to the renderer process.
     // Note that some other FDs/handles still get sent to the renderer, but
     // will be closed there.
     ppapi_channel_handle.reset();
     trusted_channel_handle.reset();
     manifest_service_channel_handle.reset();
-    error_message = "ShareToProcess() failed";
+    error_message = "handle duplication failed";
   }
 
   const ChildProcessData& data = process_->GetData();
@@ -805,9 +785,9 @@ bool NaClProcessHost::StartNaClExecution() {
 #endif
   }
 
-  if (!crash_info_shmem_.ShareToProcess(process_->GetData().handle,
-                                        &params.crash_info_shmem_handle)) {
-    DLOG(ERROR) << "Failed to ShareToProcess() a shared memory buffer";
+  params.crash_info_shmem_handle = crash_info_shmem_.handle().Duplicate();
+  if (!params.crash_info_shmem_handle.IsValid()) {
+    DLOG(ERROR) << "Failed to duplicate a shared memory buffer";
     return false;
   }
 
@@ -838,18 +818,12 @@ bool NaClProcessHost::StartNaClExecution() {
       // We have to reopen the file in the browser process; we don't want a
       // compromised renderer to pass an arbitrary fd that could get loaded
       // into the plugin process.
-      if (base::PostTaskAndReplyWithResult(
-              content::BrowserThread::GetBlockingPool(),
-              FROM_HERE,
-              base::Bind(OpenNaClReadExecImpl,
-                         file_path,
-                         true /* is_executable */),
-              base::Bind(&NaClProcessHost::StartNaClFileResolved,
-                         weak_factory_.GetWeakPtr(),
-                         params,
-                         file_path))) {
-        return true;
-      }
+      base::PostTaskWithTraitsAndReplyWithResult(
+          FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+          base::Bind(OpenNaClReadExecImpl, file_path, true /* is_executable */),
+          base::Bind(&NaClProcessHost::StartNaClFileResolved,
+                     weak_factory_.GetWeakPtr(), params, file_path));
+      return true;
     }
   }
 
@@ -933,14 +907,10 @@ bool NaClProcessHost::StartPPAPIProxy(
       nacl_host_message_filter_->render_process_id(),
       render_view_id_,
       profile_directory_));
-  ppapi_host_->SetOnKeepaliveCallback(
-      NaClBrowser::GetDelegate()->GetOnKeepaliveCallback());
 
   ppapi::PpapiNaClPluginArgs args;
   args.off_the_record = nacl_host_message_filter_->off_the_record();
   args.permissions = permissions_;
-  args.keepalive_throttle_interval_milliseconds =
-      keepalive_throttle_interval_milliseconds_;
   base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
   DCHECK(cmdline);
   std::string flag_whitelist[] = {
@@ -1064,21 +1034,11 @@ void NaClProcessHost::OnResolveFileToken(uint64_t file_token_lo,
   }
 
   // Open the file.
-  if (!base::PostTaskAndReplyWithResult(
-          content::BrowserThread::GetBlockingPool(),
-          FROM_HERE,
-          base::Bind(OpenNaClReadExecImpl, file_path, true /* is_executable */),
-          base::Bind(&NaClProcessHost::FileResolved,
-                     weak_factory_.GetWeakPtr(),
-                     file_token_lo,
-                     file_token_hi,
-                     file_path))) {
-    Send(new NaClProcessMsg_ResolveFileTokenReply(
-            file_token_lo,
-            file_token_hi,
-            IPC::PlatformFileForTransit(),
-            base::FilePath()));
-  }
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::Bind(OpenNaClReadExecImpl, file_path, true /* is_executable */),
+      base::Bind(&NaClProcessHost::FileResolved, weak_factory_.GetWeakPtr(),
+                 file_token_lo, file_token_hi, file_path));
 }
 
 void NaClProcessHost::FileResolved(

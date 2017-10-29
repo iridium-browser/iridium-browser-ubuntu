@@ -17,7 +17,8 @@ from chromite.lib import constants
 from chromite.lib import clactions
 from chromite.lib import cros_logging as logging
 from chromite.lib import factory
-from chromite.lib import graphite
+from chromite.lib import failure_message_lib
+from chromite.lib import hwtest_results
 from chromite.lib import metrics
 from chromite.lib import osutils
 from chromite.lib import retry_stats
@@ -87,12 +88,6 @@ def _IsRetryableException(e):
                    encountered_error_codes)
 
   return False
-
-
-def _RetrySuccessHandler(attempt):
-  """If a query succeeded after retry, log it."""
-  if attempt > 1:
-    logging.info('cidb query succeeded after %s retries', attempt - 1)
 
 
 class DBException(Exception):
@@ -457,8 +452,8 @@ class SchemaVersionedMySQLConnection(object):
       The number of rows that were updated.
     """
     self._ReflectToMetadata()
-    upd = self._meta.tables[table].update().where(where)
-    r = self._Execute(upd, values)
+    upd = self._meta.tables[table].update().where(where).values(values)
+    r = self._Execute(upd)
     return r.rowcount
 
   def _Select(self, table, row_id, columns):
@@ -550,13 +545,20 @@ class SchemaVersionedMySQLConnection(object):
 
   def _RunFunctorWithRetries(self, functor):
     """Run the given |functor| with correct retry parameters."""
+
+    # TODO(hidehiko): Move this back to retry implementation, because this
+    # should be useful for other retry run, too.
+    def _StatusCallback(attempt, success):
+      if success and attempt:
+        logging.info('cidb query succeeded after %d retries', attempt)
+
     return retry_stats.RetryWithStats(
         retry_stats.CIDB,
         handler=_IsRetryableException,
         max_retry=self.query_retry_args.max_retry,
         sleep=self.query_retry_args.sleep,
         backoff_factor=self.query_retry_args.backoff_factor,
-        success_functor=_RetrySuccessHandler,
+        status_callback=_StatusCallback,
         raise_first_exception_on_failure=False,
         functor=functor)
 
@@ -600,8 +602,8 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
   # it launches by a pre-cq, not the pre-cq-launcher builder buildbucket_id
   _SQL_FETCH_ACTIONS = (
       'SELECT c.id, b.id, action, c.reason, build_config, '
-      'change_number, patch_number, change_source, timestamp, c.buildbucket_id '
-      'FROM clActionTable c JOIN buildTable b ON build_id = b.id ')
+      'change_number, patch_number, change_source, timestamp, c.buildbucket_id,'
+      ' status FROM clActionTable c JOIN buildTable b ON build_id = b.id ')
   _SQL_FETCH_MESSAGES = (
       'SELECT build_id, build_config, waterfall, builder_name, build_number, '
       'message_type, message_subtype, message_value, timestamp, board FROM '
@@ -668,7 +670,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     return self._Insert('buildTable', values)
 
   @minimum_schema(3)
-  def InsertCLActions(self, build_id, cl_actions):
+  def InsertCLActions(self, build_id, cl_actions, timestamp=None):
     """Insert a list of |cl_actions|.
 
     If |cl_actions| is empty, this function does nothing.
@@ -676,6 +678,8 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     Args:
       build_id: primary key of build that performed these actions.
       cl_actions: A list of CLAction objects.
+      timestamp: (Optional) timestamp of the cl_actions. If not provided, use
+        the current timestamp of the database.
 
     Returns:
       Number of actions inserted.
@@ -691,27 +695,22 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       action = cl_action.action
       reason = cl_action.reason
       buildbucket_id = cl_action.buildbucket_id
-      values.append({
+      value = {
           'build_id': build_id,
           'change_source': change_source,
           'change_number': change_number,
           'patch_number': patch_number,
           'action': action,
           'reason': reason,
-          'buildbucket_id': buildbucket_id})
+          'buildbucket_id': buildbucket_id}
+      if timestamp != None:
+        value['timestamp'] = timestamp
+      values.append(value)
 
     retval = self._InsertMany('clActionTable', values)
 
-    stats = graphite.StatsFactory.GetInstance()
     for cl_action in cl_actions:
       r = cl_action.reason or 'no_reason'
-
-      # TODO(akeshet) This is a slightly hacky workaround for the fact that our
-      # strategy reasons contain a ':', but statsd considers that character to
-      # be a name terminator.
-      statsd_name = 'cl_actions.%s' % cl_action.action
-      stats.Counter(statsd_name).increment(r.replace(':', '_'))
-
       counter = metrics.Counter(constants.MON_CL_ACTION)
       counter.increment(fields={'reason': r, 'action': cl_action.action})
 
@@ -818,7 +817,25 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
               'board': board}
     return self._Insert('buildMessageTable', values)
 
-  @minimum_schema(55)
+  @minimum_schema(57)
+  def InsertHWTestResults(self, hwTestResults):
+    """Insert HWTest results.
+
+    Args:
+      hwTestResults: A list of hwtest_results.HWTestResult instances.
+
+    Returns:
+      The number of inserted rows.
+    """
+    values = []
+    for result in hwTestResults:
+      values.append({'build_id': result.build_id,
+                     'test_name': result.test_name,
+                     'status': result.status})
+
+    return self._InsertMany('hwTestResultTable', values)
+
+  @minimum_schema(56)
   def UpdateMetadata(self, build_id, metadata):
     """Update the given metadata row in database.
 
@@ -840,7 +857,8 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
                          'toolchain_url': d.get('toolchain-url'),
                          'build_type': d.get('build_type'),
                          'important': d.get('important'),
-                         'unibuild': d.get('unibuild', False)})
+                         'unibuild': d.get('unibuild', False),
+                         'suite_scheduling': d.get('suite_scheduling', False)})
 
   @minimum_schema(2)
   def GetMetadata(self, build_id):
@@ -941,9 +959,9 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
          'finish_time': current_timestamp,
          'final': True})
 
-
   @minimum_schema(25)
-  def FinishBuild(self, build_id, status=None, summary=None, metadata_url=None):
+  def FinishBuild(self, build_id, status=None, summary=None, metadata_url=None,
+                  strict=True):
     """Update the given build row, marking it as finished.
 
     This should be called once per build, as the last update to the build.
@@ -957,8 +975,20 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       metadata_url: google storage url to metadata.json file for this build,
                     e.g. ('gs://chromeos-image-archive/master-paladin/'
                           'R39-6225.0.0-rc1/metadata.json')
+      strict: If |strict| is True, can only update the build status when 'final'
+        is False. |strict| can only be False when the caller wants to change the
+        entry ignoring the 'final' value (For example, a build was marked as
+        status='aborted' and final='true', a cron job to adjust the finish_time
+        will call this method with strict=False).
+
+    Returns:
+      The number of rows that were updated.
     """
     self._ReflectToMetadata()
+
+    clause = 'id = %d' % build_id
+    if strict:
+      clause += ' AND final = False'
 
     # The current timestamp is evaluated on the database, not locally.
     current_timestamp = sqlalchemy.func.current_timestamp()
@@ -966,7 +996,6 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
         'finish_time': current_timestamp,
         'final': True
     }
-
     if status is not None:
       values.update(status=status)
     if summary is not None:
@@ -975,8 +1004,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     if metadata_url is not None:
       values.update(metadata_url=metadata_url)
 
-    self._Update('buildTable', build_id, values)
-
+    return self._UpdateWhere('buildTable', clause, values)
 
   @minimum_schema(16)
   def FinishChildConfig(self, build_id, child_config, status=None):
@@ -1036,6 +1064,25 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
         'buildTable',
         'id IN (%s)' % ','.join(str(int(x)) for x in build_ids),
         self.BUILD_STATUS_KEYS)
+
+  @minimum_schema(30)
+  def GetBuildStage(self, build_stage_id):
+    """Gets stage given the build_stage_id.
+
+    Args:
+      build_stage_id: build_stage_id to fetch the stage.
+
+    Returns:
+      If the build_stage_id exists, returns a dictionary presenting the stage
+      with keys (id, build_id, name, board, status, last_updated, start_time,
+      finish_time, final); else, returns None.
+    """
+    stage = self._SelectWhere(
+        'buildStageTable',
+        'id = %s' % build_stage_id,
+        ['id', 'build_id', 'name', 'board', 'status',
+         'last_updated', 'start_time', 'finish_time', 'final'])
+    return stage[0] if stage else None
 
   @minimum_schema(30)
   def GetBuildStages(self, build_id):
@@ -1147,6 +1194,27 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     return [dict(zip(columns, values)) for values in results]
 
   @minimum_schema(44)
+  def GetBuildsFailures(self, build_ids):
+    """Gets the failure entries for all listed build_ids.
+
+    Args:
+      build_ids: list of build ids of the builds to fetch failures for.
+
+    Returns:
+      A list of failure_message_lib.StageFailure instances.
+    """
+    if not build_ids:
+      return []
+
+    columns_string = ', '.join(failure_message_lib.FAILURE_KEYS)
+
+    query = ('SELECT %s FROM failureView WHERE build_id IN (%s)' %
+             (columns_string, ','.join(str(int(x)) for x in build_ids)))
+
+    results = self._Execute(query).fetchall()
+    return [failure_message_lib.StageFailure(*values) for values in results]
+
+  @minimum_schema(44)
   def GetSlaveFailures(self, master_build_id, buildbucket_ids=None):
     """Gets the failure entries for slave builds to given build.
 
@@ -1159,18 +1227,9 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
         Default to None.
 
     Returns:
-      A list containing, for each failure entry, a dictionary with keys
-      (id, build_stage_id, outer_failure_id, exception_type, exception_message,
-       exception_category, extra_info, timestamp, stage_name, board,
-       stage_status, build_id, master_build_id, builder_name, waterfall,
-       build_number, build_config, build_status, important).
+      A list of failure_message_lib.StageFailure instances.
     """
-    columns = ['id', 'build_stage_id', 'outer_failure_id', 'exception_type',
-               'exception_message', 'exception_category', 'extra_info',
-               'timestamp', 'stage_name', 'board', 'stage_status', 'build_id',
-               'master_build_id', 'builder_name', 'waterfall', 'build_number',
-               'build_config', 'build_status', 'important', 'buildbucket_id']
-    columns_string = ', '.join(columns)
+    columns_string = ', '.join(failure_message_lib.FAILURE_KEYS)
 
     query = ('SELECT %s FROM failureView WHERE master_build_id = %s ' %
              (columns_string, master_build_id))
@@ -1186,7 +1245,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
                 (','.join('"%s"' % x for x in buildbucket_ids)))
       results = self._Execute(query).fetchall()
 
-    return [dict(zip(columns, values)) for values in results]
+    return [failure_message_lib.StageFailure(*values) for values in results]
 
   @minimum_schema(32)
   def GetTimeToDeadline(self, build_id):
@@ -1208,13 +1267,14 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     # datetime.timedelta type. So, we must find out if the deadline is past
     # separately.
     r = self._Execute(
-        'SELECT deadline >= NOW(), TIMEDIFF(deadline, NOW()) '
+        'SELECT deadline >= NOW(), TIMEDIFF(deadline, NOW()), deadline '
         'from buildTable where id = %d' % build_id).fetchall()
     if not r:
       return None
 
     time_remaining = r[0][1]
-    if time_remaining is None:
+    deadline = r[0][2]
+    if deadline is None:
       return None
 
     deadline_past = (r[0][0] == 0)
@@ -1223,8 +1283,10 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
   @minimum_schema(47)
   def GetBuildHistory(self, build_config, num_results,
                       ignore_build_id=None, start_date=None, end_date=None,
-                      starting_build_number=None, milestone_version=None,
-                      starting_build_id=None):
+                      starting_build_number=None, ending_build_number=None,
+                      milestone_version=None, platform_version=None,
+                      starting_build_id=None, waterfall=None,
+                      buildbot_generation=None, final=False):
     """Returns basic information about most recent builds.
 
     By default this function returns the most recent builds. Some arguments can
@@ -1242,12 +1304,20 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
           after this date.
       end_date: (Optional, type:datetime.date) Get builds that occured on or
           before this date.
-      starting_build_number: (Optional) The minimum build_number on the CQ
-          master for which data should be retrieved.
+      starting_build_number: (Optional) The minimum build_number for which
+          data should be retrieved.
+      ending_build_number: (Optional) The maximum build_number for which
+          data should be retrieved.
       milestone_version: (Optional) Return only results for this
           milestone_version.
+      platform_version: (Optional) Return only results for this
+          platform_version.
       starting_build_id: (Optional) The minimum build_id for which data should
           be retrieved.
+      waterfall: (Optional) The waterfall for which data should be retrieved.
+      buildbot_generation: (Optional) The buildbot_generation for which data
+          should be retrieved.
+      final: (Optional) If True, only retrieve final (ie finished) builds.
 
     Returns:
       A sorted list of dicts containing up to |number| dictionaries for
@@ -1267,10 +1337,20 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       where_clauses.append('build_number >= %d' % starting_build_number)
     if starting_build_id is not None:
       where_clauses.append('id >= %d' % starting_build_id)
+    if ending_build_number is not None:
+      where_clauses.append('build_number <= %d' % ending_build_number)
     if ignore_build_id is not None:
       where_clauses.append('id != %d' % ignore_build_id)
     if milestone_version is not None:
       where_clauses.append('milestone_version = "%s"' % milestone_version)
+    if platform_version is not None:
+      where_clauses.append('platform_version = "%s"' % platform_version)
+    if waterfall is not None:
+      where_clauses.append('waterfall = "%s"' % waterfall)
+    if buildbot_generation is not None:
+      where_clauses.append('buildbot_generation = "%s"' % buildbot_generation)
+    if final:
+      where_clauses.append('final = 1')
     query = (
         'SELECT %s'
         ' FROM buildTable'
@@ -1284,6 +1364,35 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     results = self._Execute(query).fetchall()
     return [dict(zip(CIDBConnection.BUILD_STATUS_KEYS, values))
             for values in results]
+
+  def GetPlatformVersions(self, build_config,
+                          num_results=NUM_RESULTS_NO_LIMIT,
+                          starting_milestone_version=None):
+    """Get the platform versions for a build_config.
+
+    Args:
+      build_config: The build config (string) to get the platform version.
+      num_results: Number of platform_version to get. Default to
+        CIDBConnection.NUM_RESULTS_NO_LIMIT to request no limit on the number
+        of results.
+      starting_milestone_version: The starting milestone version to get the
+        platform version.
+
+    Returns:
+      A list of platform_version which match the requirement.
+    """
+    where_clauses = ['build_config = "%s"' % build_config]
+    if starting_milestone_version is not None:
+      starting_milestone_version_int = int(starting_milestone_version)
+      where_clauses.append('CAST(milestone_version as UNSIGNED) >= %d' %
+                           starting_milestone_version_int)
+    query = ('SELECT platform_version FROM buildTable WHERE %s' %
+             ' AND '.join(where_clauses))
+    if num_results != self.NUM_RESULTS_NO_LIMIT:
+      query += ' LIMIT %d' % num_results
+
+    results = self._Execute(query).fetchall()
+    return [r['platform_version'] for r in results]
 
   @minimum_schema(47)
   def GetMostRecentBuild(self, waterfall, build_config, milestone_version=None):
@@ -1345,14 +1454,24 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     return results
 
   @minimum_schema(11)
-  def GetActionsForChanges(self, changes):
+  def GetActionsForChanges(self, changes, ignore_patch_number=True,
+                           status=None, action=None, start_time=None):
     """Gets all the actions for the given changes.
 
     Note, this includes all patches of the given changes.
 
     Args:
       changes: A list of GerritChangeTuple, GerritPatchTuple or GerritPatch
-               specifying the changes to whose actions should be fetched.
+        specifying the changes to whose actions should be fetched.
+      ignore_patch_number: Boolean indicating whether to ignore patch_number of
+        the changes. If ignore_patch_number is False, only get the actions with
+        matched patch_number. Default to True.
+      status: If provided, only return the actions with build is |status| (a
+        member of constants.BUILDER_ALL_STATUSES). Default to None.
+      action: If provided, only return the actions is |action| (a member of
+        constants.CL_ACTIONS). Default to None.
+      start_time: If provided, only return the actions with timestamp >=
+        start_time. Default to None.
 
     Returns:
       A list of CLAction instances, in action id order.
@@ -1361,14 +1480,31 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       return []
 
     clauses = []
+    basic_conds = []
+    if status is not None:
+      basic_conds.append('status = "%s"' % status)
+    if action is not None:
+      basic_conds.append('action = "%s"' % action)
+    if start_time is not None:
+      basic_conds.append('timestamp > TIMESTAMP("%s")' % start_time)
+
     # Note: We are using a string of OR statements rather than a 'WHERE IN'
     # style clause, because 'WHERE IN' does not make use of multi-column
     # indexes, and therefore has poor performance with a large table.
     for change in changes:
       change_number = int(change.gerrit_number)
       change_source = 'internal' if change.internal else 'external'
-      clauses.append('(change_number, change_source) = (%d, "%s")' %
-                     (change_number, change_source))
+      conds = ['change_number = %d' % change_number,
+               'change_source = "%s"' % change_source]
+
+      if not ignore_patch_number:
+        patch_number = int(change.patch_number)
+        conds.append('patch_number = %d' % patch_number)
+
+      conds.extend(basic_conds)
+      conds_str = ' AND '.join(conds)
+      clauses.append('(' + conds_str + ')')
+
     clause = ' OR '.join(clauses)
     results = self._Execute(
         '%s WHERE %s' % (self._SQL_FETCH_ACTIONS, clause)).fetchall()
@@ -1439,14 +1575,15 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     return [clactions.CLAction(*values) for values in results]
 
   @minimum_schema(29)
-  def HasBuildStageFailed(self, build_stage_id):
-    """Determine whether a build stage has failed according to cidb.
+  def HasFailureMsgForStage(self, build_stage_id):
+    """Determine whether a build stage has failure messages in failureTable.
 
     Args:
       build_stage_id: The id of the build_stage to query for.
 
     Returns:
-      True if there is a failure reported for this build stage to cidb.
+      True if there're failures reported to failureTable for this build stage
+      to cidb; else, False.
     """
     failures = self._SelectWhere('failureTable',
                                  'build_stage_id = %d' % build_stage_id,
@@ -1505,6 +1642,24 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     results = self._Execute('%s WHERE %s' % (self._SQL_FETCH_MESSAGES,
                                              clause)).fetchall()
     return [dict(zip(columns, values)) for values in results]
+
+  @minimum_schema(57)
+  def GetHWTestResultsForBuilds(self, build_ids):
+    """Get HWTest results for builds.
+
+    Args:
+      build_ids: A list of build_ids (strings) to get the HWTest results.
+
+    Returns:
+      A list of HWTest result dictionaries, where each dictionary contains keys
+        id, build_id, test_name and status.
+    """
+    q = ('SELECT * from hwTestResultTable WHERE build_id IN (%s)' %
+         ','.join(str(int(x)) for x in build_ids))
+    results = self._Execute(q).fetchall()
+
+    return [hwtest_results.HWTestResult(*values) for values in results]
+
 
 def _INV():
   raise AssertionError('CIDB connection factory has been invalidated.')

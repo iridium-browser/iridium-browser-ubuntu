@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/mac/bundle_locations.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/timer/elapsed_timer.h"
 #include "ios/chrome/test/base/perf_test_ios.h"
 #include "ios/web/public/test/fakes/test_browser_state.h"
@@ -14,6 +13,10 @@
 #import <Foundation/Foundation.h>
 #import <WebKit/WebKit.h>
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 
 // Class for testing early page script injection into WKWebView.
@@ -21,18 +24,18 @@ namespace {
 class EarlyPageScriptPerfTest : public PerfTest {
  protected:
   EarlyPageScriptPerfTest() : PerfTest("Early Page Script for WKWebView") {
-    web_view_.reset([web::BuildWKWebView(CGRectZero, &browser_state_) retain]);
+    web_view_ = web::BuildWKWebView(CGRectZero, &browser_state_);
   }
 
   // Injects early script into WKWebView.
   void InjectEarlyScript() {
-    web::ExecuteJavaScript(web_view_, web::GetEarlyPageScript());
+    web::ExecuteJavaScript(web_view_, web::GetEarlyPageScript(&browser_state_));
   }
 
   // BrowserState required for web view creation.
   web::TestBrowserState browser_state_;
   // WKWebView to test scripts injections.
-  base::scoped_nsobject<WKWebView> web_view_;
+  WKWebView* web_view_;
 };
 
 // Tests script loading time.
@@ -40,7 +43,7 @@ TEST_F(EarlyPageScriptPerfTest, ScriptLoading) {
   RepeatTimedRuns("Loading",
                   ^base::TimeDelta(int) {
                     base::ElapsedTimer timer;
-                    web::GetEarlyPageScript();
+                    web::GetEarlyPageScript(&browser_state_);
                     return timer.Elapsed();
                   },
                   nil);

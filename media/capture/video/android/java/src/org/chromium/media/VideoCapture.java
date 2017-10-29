@@ -9,10 +9,12 @@ import android.graphics.ImageFormat;
 import android.view.Surface;
 import android.view.WindowManager;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -20,7 +22,7 @@ import java.util.List;
 /**
  * Video Capture Device base class, defines a set of methods that native code
  * needs to use to configure, start capture, and to be reached by callbacks and
- * provides some neccesary data type(s) with accessors.
+ * provides some necessary data type(s) with accessors.
  **/
 @JNINamespace("media")
 public abstract class VideoCapture {
@@ -45,15 +47,13 @@ public abstract class VideoCapture {
     protected boolean mInvertDeviceOrientationReadings;
 
     protected VideoCaptureFormat mCaptureFormat;
-    protected final Context mContext;
     protected final int mId;
     // Native callback context variable.
     protected final long mNativeVideoCaptureDeviceAndroid;
 
     protected boolean mUseBackgroundThreadForTesting;
 
-    VideoCapture(Context context, int id, long nativeVideoCaptureDeviceAndroid) {
-        mContext = context;
+    VideoCapture(int id, long nativeVideoCaptureDeviceAndroid) {
         mId = id;
         mNativeVideoCaptureDeviceAndroid = nativeVideoCaptureDeviceAndroid;
     }
@@ -72,27 +72,28 @@ public abstract class VideoCapture {
     public abstract PhotoCapabilities getPhotoCapabilities();
 
     /**
-    * @param zoom Zoom level, should be ignored if 0.
-    * @param focusMode Focus mode following AndroidMeteringMode enum.
-    * @param exposureMode Exposure mode following AndroidMeteringMode enum.
-    * @param pointsOfInterest2D 2D normalized points of interest, marshalled with
-    * x coordinate first followed by the y coordinate.
-    * @param hasExposureCompensation Indicates if |exposureCompensation| is set.
-    * @param exposureCompensation Adjustment to auto exposure. 0 means not adjusted.
-    * @param whiteBalanceMode White Balance mode following AndroidMeteringMode enum.
-    * @param iso Sensitivity to light. 0, which would be invalid, means ignore.
-    * @param hasRedEyeReduction Indicates if |redEyeReduction| is set.
-    * @param redEyeReduction Value of red eye reduction for the auto flash setting.
-    * @param fillLightMode Flash/Torch setting, following AndroidFillLightMode enum.
-    * @param colorTemperature White Balance reference temperature, valid if whiteBalanceMode is
-    * manual, and its value is larger than 0.
-    */
+     * @param zoom Zoom level, should be ignored if 0.
+     * @param focusMode Focus mode following AndroidMeteringMode enum.
+     * @param exposureMode Exposure mode following AndroidMeteringMode enum.
+     * @param pointsOfInterest2D 2D normalized points of interest, marshalled with
+     * x coordinate first followed by the y coordinate.
+     * @param hasExposureCompensation Indicates if |exposureCompensation| is set.
+     * @param exposureCompensation Adjustment to auto exposure. 0 means not adjusted.
+     * @param whiteBalanceMode White Balance mode following AndroidMeteringMode enum.
+     * @param iso Sensitivity to light. 0, which would be invalid, means ignore.
+     * @param hasRedEyeReduction Indicates if |redEyeReduction| is set.
+     * @param redEyeReduction Value of red eye reduction for the auto flash setting.
+     * @param fillLightMode Flash setting, following AndroidFillLightMode enum.
+     * @param colorTemperature White Balance reference temperature, valid if whiteBalanceMode is
+     * manual, and its value is larger than 0.
+     * @param torch Torch setting, true meaning on.
+     */
     @CalledByNative
     public abstract void setPhotoOptions(double zoom, int focusMode, int exposureMode, double width,
             double height, float[] pointsOfInterest2D, boolean hasExposureCompensation,
             double exposureCompensation, int whiteBalanceMode, double iso,
             boolean hasRedEyeReduction, boolean redEyeReduction, int fillLightMode,
-            double colorTemperature);
+            boolean hasTorch, boolean torch, double colorTemperature);
 
     @CalledByNative
     public abstract boolean takePhoto(final long callbackId);
@@ -142,9 +143,9 @@ public abstract class VideoCapture {
     }
 
     protected final int getDeviceRotation() {
-        if (mContext == null) return 0;
         final int orientation;
-        WindowManager wm = (WindowManager) mContext.getSystemService(Context.WINDOW_SERVICE);
+        WindowManager wm = (WindowManager) ContextUtils.getApplicationContext().getSystemService(
+                Context.WINDOW_SERVICE);
         switch (wm.getDefaultDisplay().getRotation()) {
             case Surface.ROTATION_90:
                 orientation = 90;
@@ -207,6 +208,14 @@ public abstract class VideoCapture {
                 return diff(range1) - diff(range2);
             }
         });
+    }
+
+    protected static int[] integerArrayListToArray(ArrayList<Integer> intArrayList) {
+        int[] intArray = new int[intArrayList.size()];
+        for (int i = 0; i < intArrayList.size(); i++) {
+            intArray[i] = intArrayList.get(i).intValue();
+        }
+        return intArray;
     }
 
     // Method for VideoCapture implementations to call back native code.

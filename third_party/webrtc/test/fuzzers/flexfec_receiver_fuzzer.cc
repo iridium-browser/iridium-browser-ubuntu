@@ -10,17 +10,17 @@
 
 #include <algorithm>
 
-#include "webrtc/base/basictypes.h"
-#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "webrtc/modules/rtp_rtcp/include/flexfec_receiver.h"
+#include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "webrtc/modules/rtp_rtcp/source/byte_io.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_packet_received.h"
+#include "webrtc/rtc_base/basictypes.h"
 
 namespace webrtc {
 
 namespace {
 class DummyCallback : public RecoveredPacketReceiver {
-  bool OnRecoveredPacket(const uint8_t* packet, size_t length) { return true; }
+  void OnRecoveredPacket(const uint8_t* packet, size_t length) override {}
 };
 }  // namespace
 

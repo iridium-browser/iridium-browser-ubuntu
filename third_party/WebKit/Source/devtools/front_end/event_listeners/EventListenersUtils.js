@@ -12,7 +12,8 @@ EventListeners.EventListenerObjectInInspectedPage;
  * @return {!Promise<!EventListeners.FrameworkEventListenersObject>}
  */
 EventListeners.frameworkEventListeners = function(object) {
-  if (!object.target().hasDOMCapability()) {
+  var domDebuggerModel = object.runtimeModel().target().model(SDK.DOMDebuggerModel);
+  if (!domDebuggerModel) {
     // TODO(kozyatinskiy): figure out how this should work for |window|.
     return Promise.resolve(
         /** @type {!EventListeners.FrameworkEventListenersObject} */ ({eventListeners: [], internalHandlers: null}));
@@ -177,8 +178,8 @@ EventListeners.frameworkEventListeners = function(object) {
         if (!location)
           throw new Error('Empty event listener\'s location');
         return new SDK.EventListener(
-            handler._target, object, type, useCapture, passive, once, handler, originalHandler, location,
-            removeFunctionObject, SDK.EventListener.Origin.FrameworkUser);
+            /** @type {!SDK.DOMDebuggerModel} */ (domDebuggerModel), object, type, useCapture, passive, once, handler,
+            originalHandler, location, removeFunctionObject, SDK.EventListener.Origin.FrameworkUser);
       }
     }
   }
@@ -219,7 +220,7 @@ EventListeners.frameworkEventListeners = function(object) {
    * @param {!SDK.RemoteObject} errorString
    */
   function printErrorString(errorString) {
-    Common.console.error(errorString.value);
+    Common.console.error(String(errorString.value));
   }
 
   /**

@@ -11,6 +11,7 @@
 #include "base/memory/singleton.h"
 #include "base/time/default_clock.h"
 #include "chrome/browser/permissions/permission_result.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -58,6 +59,17 @@ class PermissionDecisionAutoBlocker : public KeyedService {
 
   static PermissionDecisionAutoBlocker* GetForProfile(Profile* profile);
 
+  // Checks the status of the content setting to determine if |request_origin|
+  // is under embargo for |permission|. This checks both embargo for Permissions
+  // Blacklisting and repeated dismissals. Prefer to use
+  // PermissionManager::GetPermissionStatus when possible. This method is only
+  // exposed to facilitate permission checks from threads other than the
+  // UI thread. See crbug.com/658020.
+  static PermissionResult GetEmbargoResult(HostContentSettingsMap* settings_map,
+                                           const GURL& request_origin,
+                                           ContentSettingsType permission,
+                                           base::Time current_time);
+
   // Updates the threshold to start blocking prompts from the field trial.
   static void UpdateFromVariations();
 
@@ -85,12 +97,22 @@ class PermissionDecisionAutoBlocker : public KeyedService {
 
   // Records that a dismissal of a prompt for |permission| was made. If the
   // total number of dismissals exceeds a threshhold and
-  // features::kBlockPromptsIfDismissedOften is enabled it will place |url|
+  // features::kBlockPromptsIfDismissedOften is enabled, it will place |url|
   // under embargo for |permission|.
   bool RecordDismissAndEmbargo(const GURL& url, ContentSettingsType permission);
 
-  // Records that an ignore of a prompt for |permission| was made.
-  int RecordIgnore(const GURL& url, ContentSettingsType permission);
+  // Records that an ignore of a prompt for |permission| was made. If the total
+  // number of ignores exceeds a threshold and
+  // features::kBlockPromptsIfIgnoredOften is enabled, it will place |url| under
+  // embargo for |permission|.
+  bool RecordIgnoreAndEmbargo(const GURL& url, ContentSettingsType permission);
+
+  // Clears any existing embargo status for |url|, |permission|. For permissions
+  // embargoed under repeated dismissals, this means a prompt will be shown to
+  // the user on next permission request. On blacklisted permissions, the next
+  // permission request will re-embargo the permission only if it is still
+  // blacklisted. This is a NO-OP for non-embargoed |url|, |permission| pairs.
+  void RemoveEmbargoByUrl(const GURL& url, ContentSettingsType permission);
 
   // Removes any recorded counts for urls which match |filter|.
   void RemoveCountsByUrl(base::Callback<bool(const GURL& url)> filter);
@@ -123,6 +145,7 @@ class PermissionDecisionAutoBlocker : public KeyedService {
   static const char kPromptDismissCountKey[];
   static const char kPromptIgnoreCountKey[];
   static const char kPermissionDismissalEmbargoKey[];
+  static const char kPermissionIgnoreEmbargoKey[];
   static const char kPermissionBlacklistEmbargoKey[];
 
   Profile* profile_;

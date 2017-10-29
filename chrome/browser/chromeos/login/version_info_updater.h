@@ -5,14 +5,19 @@
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_VERSION_INFO_UPDATER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_VERSION_INFO_UPDATER_H_
 
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chromeos/system/version_loader.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
+
+namespace device {
+class BluetoothAdapter;
+}
 
 namespace chromeos {
 
@@ -33,6 +38,9 @@ class VersionInfoUpdater : public policy::CloudPolicyStore::Observer {
     // Called when the enterprise info notice should be updated.
     virtual void OnEnterpriseInfoUpdated(const std::string& enterprise_info,
                                          const std::string& asset_id) = 0;
+
+    // Called when the device info should be updated.
+    virtual void OnDeviceInfoUpdated(const std::string& bluetooth_name) = 0;
   };
 
   explicit VersionInfoUpdater(Delegate* delegate);
@@ -57,7 +65,7 @@ class VersionInfoUpdater : public policy::CloudPolicyStore::Observer {
   void UpdateEnterpriseInfo();
 
   // Set enterprise domain name and device asset ID.
-  void SetEnterpriseInfo(const std::string& domain_name,
+  void SetEnterpriseInfo(const std::string& enterprise_display_domain,
                          const std::string& asset_id);
 
   // Creates a serial number string.
@@ -66,6 +74,9 @@ class VersionInfoUpdater : public policy::CloudPolicyStore::Observer {
   // Callback from chromeos::VersionLoader giving the version.
   void OnVersion(const std::string& version);
 
+  // Callback from device::BluetoothAdapterFactory::GetAdapter.
+  void OnGetAdapter(scoped_refptr<device::BluetoothAdapter> adapter);
+
   // Information pieces for version label.
   std::string version_text_;
   std::string serial_number_text_;
@@ -73,7 +84,8 @@ class VersionInfoUpdater : public policy::CloudPolicyStore::Observer {
   // Full text for the OS version label.
   std::string os_version_label_text_;
 
-  ScopedVector<CrosSettings::ObserverSubscription> subscriptions_;
+  std::vector<std::unique_ptr<CrosSettings::ObserverSubscription>>
+      subscriptions_;
 
   chromeos::CrosSettings* cros_settings_;
 

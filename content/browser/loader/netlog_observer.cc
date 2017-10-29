@@ -18,7 +18,7 @@
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source_type.h"
 #include "net/log/net_log_with_source.h"
-#include "net/spdy/spdy_header_block.h"
+#include "net/spdy/core/spdy_header_block.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_netlog_params.h"
 
@@ -167,7 +167,7 @@ void NetLogObserver::Attach(net::NetLog* net_log) {
   io_thread_checker_.Get().reset(new base::ThreadChecker());
   if (net_log) {
     instance_ = new NetLogObserver();
-    net_log->DeprecatedAddObserver(
+    net_log->AddObserver(
         instance_, net::NetLogCaptureMode::IncludeCookiesAndCredentials());
   }
 }
@@ -179,7 +179,7 @@ void NetLogObserver::Detach() {
   if (instance_) {
     // Safest not to do this in the destructor to maintain thread safety across
     // refactorings.
-    instance_->net_log()->DeprecatedRemoveObserver(instance_);
+    instance_->net_log()->RemoveObserver(instance_);
     delete instance_;
     instance_ = NULL;
   }

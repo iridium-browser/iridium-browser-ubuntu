@@ -11,13 +11,15 @@
 
 namespace password_manager {
 
-StubPasswordManagerClient::StubPasswordManagerClient() {}
+StubPasswordManagerClient::StubPasswordManagerClient()
+    : ukm_source_id_(ukm::UkmRecorder::Get()
+                         ? ukm::UkmRecorder::Get()->GetNewSourceID()
+                         : 0) {}
 
 StubPasswordManagerClient::~StubPasswordManagerClient() {}
 
 bool StubPasswordManagerClient::PromptUserToSaveOrUpdatePassword(
     std::unique_ptr<PasswordFormManager> form_to_save,
-    password_manager::CredentialSourceType type,
     bool update_password) {
   return false;
 }
@@ -63,6 +65,38 @@ const CredentialsFilter* StubPasswordManagerClient::GetStoreResultFilter()
 
 const LogManager* StubPasswordManagerClient::GetLogManager() const {
   return &log_manager_;
+}
+
+#if defined(SAFE_BROWSING_DB_LOCAL)
+safe_browsing::PasswordProtectionService*
+StubPasswordManagerClient::GetPasswordProtectionService() const {
+  return nullptr;
+}
+
+void StubPasswordManagerClient::CheckSafeBrowsingReputation(
+    const GURL& form_action,
+    const GURL& frame_url) {}
+
+void StubPasswordManagerClient::CheckProtectedPasswordEntry(
+    const std::string& password_saved_domain,
+    bool password_field_exists) {}
+#endif
+
+ukm::UkmRecorder* StubPasswordManagerClient::GetUkmRecorder() {
+  return ukm::UkmRecorder::Get();
+}
+
+ukm::SourceId StubPasswordManagerClient::GetUkmSourceId() {
+  return ukm_source_id_;
+}
+
+PasswordManagerMetricsRecorder&
+StubPasswordManagerClient::GetMetricsRecorder() {
+  if (!metrics_recorder_) {
+    metrics_recorder_.emplace(GetUkmRecorder(), GetUkmSourceId(),
+                              GetMainFrameURL());
+  }
+  return metrics_recorder_.value();
 }
 
 }  // namespace password_manager

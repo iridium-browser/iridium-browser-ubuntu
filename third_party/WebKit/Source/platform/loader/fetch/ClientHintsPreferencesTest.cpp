@@ -12,10 +12,10 @@ class ClientHintsPreferencesTest : public ::testing::Test {};
 
 TEST_F(ClientHintsPreferencesTest, Basic) {
   struct TestCase {
-    const char* headerValue;
-    bool expectationResourceWidth;
-    bool expectationDPR;
-    bool expectationViewportWidth;
+    const char* header_value;
+    bool expectation_resource_width;
+    bool expectation_dpr;
+    bool expectation_viewport_width;
   } cases[] = {
       {"width, dpr, viewportWidth", true, true, false},
       {"WiDtH, dPr,     viewport-width", true, true, true},
@@ -25,16 +25,36 @@ TEST_F(ClientHintsPreferencesTest, Basic) {
       {"DPRW", false, false, false},
   };
 
-  for (const auto& testCase : cases) {
+  for (const auto& test_case : cases) {
     ClientHintsPreferences preferences;
-    const char* value = testCase.headerValue;
+    preferences.UpdateFromAcceptClientHintsHeader(test_case.header_value,
+                                                  nullptr);
+    EXPECT_EQ(test_case.expectation_resource_width,
+              preferences.ShouldSend(kWebClientHintsTypeResourceWidth));
+    EXPECT_EQ(test_case.expectation_dpr,
+              preferences.ShouldSend(kWebClientHintsTypeDpr));
+    EXPECT_EQ(test_case.expectation_viewport_width,
+              preferences.ShouldSend(kWebClientHintsTypeViewportWidth));
 
-    preferences.updateFromAcceptClientHintsHeader(value, nullptr);
-    EXPECT_EQ(testCase.expectationResourceWidth,
-              preferences.shouldSendResourceWidth());
-    EXPECT_EQ(testCase.expectationDPR, preferences.shouldSendDPR());
-    EXPECT_EQ(testCase.expectationViewportWidth,
-              preferences.shouldSendViewportWidth());
+    // Calling UpdateFromAcceptClientHintsHeader with empty header should have
+    // no impact on client hint preferences.
+    preferences.UpdateFromAcceptClientHintsHeader("", nullptr);
+    EXPECT_EQ(test_case.expectation_resource_width,
+              preferences.ShouldSend(kWebClientHintsTypeResourceWidth));
+    EXPECT_EQ(test_case.expectation_dpr,
+              preferences.ShouldSend(kWebClientHintsTypeDpr));
+    EXPECT_EQ(test_case.expectation_viewport_width,
+              preferences.ShouldSend(kWebClientHintsTypeViewportWidth));
+
+    // Calling UpdateFromAcceptClientHintsHeader with an invalid header should
+    // have no impact on client hint preferences.
+    preferences.UpdateFromAcceptClientHintsHeader("foobar", nullptr);
+    EXPECT_EQ(test_case.expectation_resource_width,
+              preferences.ShouldSend(kWebClientHintsTypeResourceWidth));
+    EXPECT_EQ(test_case.expectation_dpr,
+              preferences.ShouldSend(kWebClientHintsTypeDpr));
+    EXPECT_EQ(test_case.expectation_viewport_width,
+              preferences.ShouldSend(kWebClientHintsTypeViewportWidth));
   }
 }
 

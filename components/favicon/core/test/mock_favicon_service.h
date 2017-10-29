@@ -78,8 +78,8 @@ class MockFaviconService : public FaviconService {
   MOCK_METHOD6(UpdateFaviconMappingsAndFetch,
                base::CancelableTaskTracker::TaskId(
                    const GURL& page_url,
-                   const std::vector<GURL>& icon_urls,
-                   int icon_types,
+                   const GURL& icon_url,
+                   favicon_base::IconType icon_type,
                    int desired_size_in_dip,
                    const favicon_base::FaviconResultsCallback& callback,
                    base::CancelableTaskTracker* tracker));
@@ -89,6 +89,7 @@ class MockFaviconService : public FaviconService {
                    const favicon_base::FaviconRawBitmapCallback& callback,
                    base::CancelableTaskTracker* tracker));
   MOCK_METHOD1(SetFaviconOutOfDateForPage, void(const GURL& page_url));
+  MOCK_METHOD1(TouchOnDemandFavicon, void(const GURL& icon_url));
   MOCK_METHOD1(SetImportedFavicons,
                void(const favicon_base::FaviconUsageDataList& favicon_usage));
   MOCK_METHOD5(MergeFavicon,
@@ -102,6 +103,12 @@ class MockFaviconService : public FaviconService {
                     const GURL& icon_url,
                     favicon_base::IconType icon_type,
                     const gfx::Image& image));
+  MOCK_METHOD5(SetOnDemandFavicons,
+               void(const GURL& page_url,
+                    const GURL& icon_url,
+                    favicon_base::IconType icon_type,
+                    const gfx::Image& image,
+                    base::Callback<void(bool)> callback));
   MOCK_METHOD1(UnableToDownloadFavicon, void(const GURL& icon_url));
   MOCK_CONST_METHOD1(WasUnableToDownloadFavicon, bool(const GURL& icon_url));
   MOCK_METHOD0(ClearUnableToDownloadFavicons, void());

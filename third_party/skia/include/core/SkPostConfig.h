@@ -131,11 +131,20 @@
 #  define SK_DUMP_GOOGLE3_STACK()
 #endif
 
+#ifdef SK_BUILD_FOR_WIN
+// permits visual studio to follow error back to source
+#define SK_DUMP_LINE_FORMAT(message) \
+    SkDebugf("%s(%d): fatal error: \"%s\"\n", __FILE__, __LINE__, message)
+#else
+#define SK_DUMP_LINE_FORMAT(message) \
+    SkDebugf("%s:%d: fatal error: \"%s\"\n", __FILE__, __LINE__, message)
+#endif
+
 #ifndef SK_ABORT
 #  define SK_ABORT(message) \
     do { \
        SkNO_RETURN_HINT(); \
-       SkDebugf("%s:%d: fatal error: \"%s\"\n", __FILE__, __LINE__, message); \
+       SK_DUMP_LINE_FORMAT(message); \
        SK_DUMP_GOOGLE3_STACK(); \
        sk_abort_no_print(); \
     } while (false)
@@ -248,14 +257,6 @@
 #  define SK_ATTR_DEPRECATED(msg) SK_ATTRIBUTE(deprecated)
 #endif
 
-#if !defined(SK_ATTR_EXTERNALLY_DEPRECATED)
-#  if !defined(SK_INTERNAL)
-#    define SK_ATTR_EXTERNALLY_DEPRECATED(msg) SK_ATTR_DEPRECATED(msg)
-#  else
-#    define SK_ATTR_EXTERNALLY_DEPRECATED(msg)
-#  endif
-#endif
-
 /**
  * If your judgment is better than the compiler's (i.e. you've profiled it),
  * you can use SK_ALWAYS_INLINE to force inlining. E.g.
@@ -340,7 +341,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #ifndef GR_TEST_UTILS
-#  define GR_TEST_UTILS 1
+#  define GR_TEST_UTILS 0
 #endif
 
 //////////////////////////////////////////////////////////////////////

@@ -27,7 +27,7 @@ cr.define('print_preview', function() {
      * @private {?Array<string>}
      */
     this.users_ = null;
-  };
+  }
 
   /**
    * Enumeration of event types dispatched by the user info.
@@ -87,7 +87,5 @@ cr.define('print_preview', function() {
     },
   };
 
-  return {
-    UserInfo: UserInfo
-  };
+  return {UserInfo: UserInfo};
 });

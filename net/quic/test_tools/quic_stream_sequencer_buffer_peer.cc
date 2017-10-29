@@ -4,8 +4,9 @@
 
 #include "net/quic/test_tools/quic_stream_sequencer_buffer_peer.h"
 
-#include "net/quic/core/quic_flags.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/test/gtest_util.h"
 
 typedef net::QuicStreamSequencerBuffer::BufferBlock BufferBlock;
@@ -42,8 +43,7 @@ bool QuicStreamSequencerBufferPeer::CheckEmptyInvariants() {
 }
 
 bool QuicStreamSequencerBufferPeer::IsBlockArrayEmpty() {
-  if (FLAGS_quic_reloadable_flag_quic_reduce_sequencer_buffer_memory_life_time &&  // NOLINT
-      buffer_->blocks_ == nullptr) {
+  if (buffer_->blocks_ == nullptr) {
     return true;
   }
 

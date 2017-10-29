@@ -30,6 +30,7 @@
 
 #include "platform/graphics/skia/SkiaUtils.h"
 
+#include "build/build_config.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/PaintFlags.h"
 #include "third_party/skia/include/effects/SkCornerPathEffect.h"
@@ -37,25 +38,25 @@
 namespace blink {
 
 static const struct CompositOpToXfermodeMode {
-  CompositeOperator mCompositOp;
-  SkBlendMode m_xfermodeMode;
-} gMapCompositOpsToXfermodeModes[] = {
-    {CompositeClear, SkBlendMode::kClear},
-    {CompositeCopy, SkBlendMode::kSrc},
-    {CompositeSourceOver, SkBlendMode::kSrcOver},
-    {CompositeSourceIn, SkBlendMode::kSrcIn},
-    {CompositeSourceOut, SkBlendMode::kSrcOut},
-    {CompositeSourceAtop, SkBlendMode::kSrcATop},
-    {CompositeDestinationOver, SkBlendMode::kDstOver},
-    {CompositeDestinationIn, SkBlendMode::kDstIn},
-    {CompositeDestinationOut, SkBlendMode::kDstOut},
-    {CompositeDestinationAtop, SkBlendMode::kDstATop},
-    {CompositeXOR, SkBlendMode::kXor},
-    {CompositePlusLighter, SkBlendMode::kPlus}};
+  CompositeOperator composit_op;
+  SkBlendMode xfermode_mode;
+} kGMapCompositOpsToXfermodeModes[] = {
+    {kCompositeClear, SkBlendMode::kClear},
+    {kCompositeCopy, SkBlendMode::kSrc},
+    {kCompositeSourceOver, SkBlendMode::kSrcOver},
+    {kCompositeSourceIn, SkBlendMode::kSrcIn},
+    {kCompositeSourceOut, SkBlendMode::kSrcOut},
+    {kCompositeSourceAtop, SkBlendMode::kSrcATop},
+    {kCompositeDestinationOver, SkBlendMode::kDstOver},
+    {kCompositeDestinationIn, SkBlendMode::kDstIn},
+    {kCompositeDestinationOut, SkBlendMode::kDstOut},
+    {kCompositeDestinationAtop, SkBlendMode::kDstATop},
+    {kCompositeXOR, SkBlendMode::kXor},
+    {kCompositePlusLighter, SkBlendMode::kPlus}};
 
 // Keep this array in sync with the WebBlendMode enum in
 // public/platform/WebBlendMode.h.
-static const SkBlendMode gMapBlendOpsToXfermodeModes[] = {
+static const SkBlendMode kGMapBlendOpsToXfermodeModes[] = {
     SkBlendMode::kSrcOver,     // WebBlendModeNormal
     SkBlendMode::kMultiply,    // WebBlendModeMultiply
     SkBlendMode::kScreen,      // WebBlendModeScreen
@@ -75,115 +76,115 @@ static const SkBlendMode gMapBlendOpsToXfermodeModes[] = {
 };
 
 SkBlendMode WebCoreCompositeToSkiaComposite(CompositeOperator op,
-                                            WebBlendMode blendMode) {
-  ASSERT(op == CompositeSourceOver || blendMode == WebBlendModeNormal);
-  if (blendMode != WebBlendModeNormal) {
-    if (static_cast<uint8_t>(blendMode) >=
-        SK_ARRAY_COUNT(gMapBlendOpsToXfermodeModes)) {
+                                            WebBlendMode blend_mode) {
+  DCHECK(op == kCompositeSourceOver || blend_mode == WebBlendMode::kNormal);
+  if (blend_mode != WebBlendMode::kNormal) {
+    if (static_cast<uint8_t>(blend_mode) >=
+        SK_ARRAY_COUNT(kGMapBlendOpsToXfermodeModes)) {
       SkDEBUGF(
           ("GraphicsContext::setPlatformCompositeOperation unknown "
            "WebBlendMode %d\n",
-           blendMode));
+           blend_mode));
       return SkBlendMode::kSrcOver;
     }
-    return gMapBlendOpsToXfermodeModes[static_cast<uint8_t>(blendMode)];
+    return kGMapBlendOpsToXfermodeModes[static_cast<uint8_t>(blend_mode)];
   }
 
-  const CompositOpToXfermodeMode* table = gMapCompositOpsToXfermodeModes;
+  const CompositOpToXfermodeMode* table = kGMapCompositOpsToXfermodeModes;
   if (static_cast<uint8_t>(op) >=
-      SK_ARRAY_COUNT(gMapCompositOpsToXfermodeModes)) {
+      SK_ARRAY_COUNT(kGMapCompositOpsToXfermodeModes)) {
     SkDEBUGF(
         ("GraphicsContext::setPlatformCompositeOperation unknown "
          "CompositeOperator %d\n",
          op));
     return SkBlendMode::kSrcOver;
   }
-  SkASSERT(table[static_cast<uint8_t>(op)].mCompositOp == op);
-  return table[static_cast<uint8_t>(op)].m_xfermodeMode;
+  SkASSERT(table[static_cast<uint8_t>(op)].composit_op == op);
+  return table[static_cast<uint8_t>(op)].xfermode_mode;
 }
 
-CompositeOperator compositeOperatorFromSkia(SkBlendMode xferMode) {
-  switch (xferMode) {
+CompositeOperator CompositeOperatorFromSkia(SkBlendMode xfer_mode) {
+  switch (xfer_mode) {
     case SkBlendMode::kClear:
-      return CompositeClear;
+      return kCompositeClear;
     case SkBlendMode::kSrc:
-      return CompositeCopy;
+      return kCompositeCopy;
     case SkBlendMode::kSrcOver:
-      return CompositeSourceOver;
+      return kCompositeSourceOver;
     case SkBlendMode::kSrcIn:
-      return CompositeSourceIn;
+      return kCompositeSourceIn;
     case SkBlendMode::kSrcOut:
-      return CompositeSourceOut;
+      return kCompositeSourceOut;
     case SkBlendMode::kSrcATop:
-      return CompositeSourceAtop;
+      return kCompositeSourceAtop;
     case SkBlendMode::kDstOver:
-      return CompositeDestinationOver;
+      return kCompositeDestinationOver;
     case SkBlendMode::kDstIn:
-      return CompositeDestinationIn;
+      return kCompositeDestinationIn;
     case SkBlendMode::kDstOut:
-      return CompositeDestinationOut;
+      return kCompositeDestinationOut;
     case SkBlendMode::kDstATop:
-      return CompositeDestinationAtop;
+      return kCompositeDestinationAtop;
     case SkBlendMode::kXor:
-      return CompositeXOR;
+      return kCompositeXOR;
     case SkBlendMode::kPlus:
-      return CompositePlusLighter;
+      return kCompositePlusLighter;
     default:
       break;
   }
-  return CompositeSourceOver;
+  return kCompositeSourceOver;
 }
 
-WebBlendMode blendModeFromSkia(SkBlendMode xferMode) {
-  switch (xferMode) {
+WebBlendMode BlendModeFromSkia(SkBlendMode xfer_mode) {
+  switch (xfer_mode) {
     case SkBlendMode::kSrcOver:
-      return WebBlendModeNormal;
+      return WebBlendMode::kNormal;
     case SkBlendMode::kMultiply:
-      return WebBlendModeMultiply;
+      return WebBlendMode::kMultiply;
     case SkBlendMode::kScreen:
-      return WebBlendModeScreen;
+      return WebBlendMode::kScreen;
     case SkBlendMode::kOverlay:
-      return WebBlendModeOverlay;
+      return WebBlendMode::kOverlay;
     case SkBlendMode::kDarken:
-      return WebBlendModeDarken;
+      return WebBlendMode::kDarken;
     case SkBlendMode::kLighten:
-      return WebBlendModeLighten;
+      return WebBlendMode::kLighten;
     case SkBlendMode::kColorDodge:
-      return WebBlendModeColorDodge;
+      return WebBlendMode::kColorDodge;
     case SkBlendMode::kColorBurn:
-      return WebBlendModeColorBurn;
+      return WebBlendMode::kColorBurn;
     case SkBlendMode::kHardLight:
-      return WebBlendModeHardLight;
+      return WebBlendMode::kHardLight;
     case SkBlendMode::kSoftLight:
-      return WebBlendModeSoftLight;
+      return WebBlendMode::kSoftLight;
     case SkBlendMode::kDifference:
-      return WebBlendModeDifference;
+      return WebBlendMode::kDifference;
     case SkBlendMode::kExclusion:
-      return WebBlendModeExclusion;
+      return WebBlendMode::kExclusion;
     case SkBlendMode::kHue:
-      return WebBlendModeHue;
+      return WebBlendMode::kHue;
     case SkBlendMode::kSaturation:
-      return WebBlendModeSaturation;
+      return WebBlendMode::kSaturation;
     case SkBlendMode::kColor:
-      return WebBlendModeColor;
+      return WebBlendMode::kColor;
     case SkBlendMode::kLuminosity:
-      return WebBlendModeLuminosity;
+      return WebBlendMode::kLuminosity;
     default:
       break;
   }
-  return WebBlendModeNormal;
+  return WebBlendMode::kNormal;
 }
 
-SkMatrix affineTransformToSkMatrix(const AffineTransform& source) {
+SkMatrix AffineTransformToSkMatrix(const AffineTransform& source) {
   SkMatrix result;
 
-  result.setScaleX(WebCoreDoubleToSkScalar(source.a()));
-  result.setSkewX(WebCoreDoubleToSkScalar(source.c()));
-  result.setTranslateX(WebCoreDoubleToSkScalar(source.e()));
+  result.setScaleX(WebCoreDoubleToSkScalar(source.A()));
+  result.setSkewX(WebCoreDoubleToSkScalar(source.C()));
+  result.setTranslateX(WebCoreDoubleToSkScalar(source.E()));
 
-  result.setScaleY(WebCoreDoubleToSkScalar(source.d()));
-  result.setSkewY(WebCoreDoubleToSkScalar(source.b()));
-  result.setTranslateY(WebCoreDoubleToSkScalar(source.f()));
+  result.setScaleY(WebCoreDoubleToSkScalar(source.D()));
+  result.setSkewY(WebCoreDoubleToSkScalar(source.B()));
+  result.setTranslateY(WebCoreDoubleToSkScalar(source.F()));
 
   // FIXME: Set perspective properly.
   result.setPerspX(0);
@@ -193,21 +194,21 @@ SkMatrix affineTransformToSkMatrix(const AffineTransform& source) {
   return result;
 }
 
-bool nearlyIntegral(float value) {
+bool NearlyIntegral(float value) {
   return fabs(value - floorf(value)) < std::numeric_limits<float>::epsilon();
 }
 
-InterpolationQuality limitInterpolationQuality(
+InterpolationQuality LimitInterpolationQuality(
     const GraphicsContext& context,
     InterpolationQuality resampling) {
-  return std::min(resampling, context.imageInterpolationQuality());
+  return std::min(resampling, context.ImageInterpolationQuality());
 }
 
-InterpolationQuality computeInterpolationQuality(float srcWidth,
-                                                 float srcHeight,
-                                                 float destWidth,
-                                                 float destHeight,
-                                                 bool isDataComplete) {
+InterpolationQuality ComputeInterpolationQuality(float src_width,
+                                                 float src_height,
+                                                 float dest_width,
+                                                 float dest_height,
+                                                 bool is_data_complete) {
   // The percent change below which we will not resample. This usually means
   // an off-by-one error on the web page, and just doing nearest neighbor
   // sampling is usually good enough.
@@ -225,118 +226,119 @@ InterpolationQuality computeInterpolationQuality(float srcWidth,
   // Figure out if we should resample this image. We try to prune out some
   // common cases where resampling won't give us anything, since it is much
   // slower than drawing stretched.
-  float diffWidth = fabs(destWidth - srcWidth);
-  float diffHeight = fabs(destHeight - srcHeight);
-  bool widthNearlyEqual = diffWidth < std::numeric_limits<float>::epsilon();
-  bool heightNearlyEqual = diffHeight < std::numeric_limits<float>::epsilon();
+  float diff_width = fabs(dest_width - src_width);
+  float diff_height = fabs(dest_height - src_height);
+  bool width_nearly_equal = diff_width < std::numeric_limits<float>::epsilon();
+  bool height_nearly_equal =
+      diff_height < std::numeric_limits<float>::epsilon();
   // We don't need to resample if the source and destination are the same.
-  if (widthNearlyEqual && heightNearlyEqual)
-    return InterpolationNone;
+  if (width_nearly_equal && height_nearly_equal)
+    return kInterpolationNone;
 
-  if (srcWidth <= kSmallImageSizeThreshold ||
-      srcHeight <= kSmallImageSizeThreshold ||
-      destWidth <= kSmallImageSizeThreshold ||
-      destHeight <= kSmallImageSizeThreshold) {
+  if (src_width <= kSmallImageSizeThreshold ||
+      src_height <= kSmallImageSizeThreshold ||
+      dest_width <= kSmallImageSizeThreshold ||
+      dest_height <= kSmallImageSizeThreshold) {
     // Small image detected.
 
     // Resample in the case where the new size would be non-integral.
     // This can cause noticeable breaks in repeating patterns, except
     // when the source image is only one pixel wide in that dimension.
-    if ((!nearlyIntegral(destWidth) &&
-         srcWidth > 1 + std::numeric_limits<float>::epsilon()) ||
-        (!nearlyIntegral(destHeight) &&
-         srcHeight > 1 + std::numeric_limits<float>::epsilon()))
-      return InterpolationLow;
+    if ((!NearlyIntegral(dest_width) &&
+         src_width > 1 + std::numeric_limits<float>::epsilon()) ||
+        (!NearlyIntegral(dest_height) &&
+         src_height > 1 + std::numeric_limits<float>::epsilon()))
+      return kInterpolationLow;
 
     // Otherwise, don't resample small images. These are often used for
     // borders and rules (think 1x1 images used to make lines).
-    return InterpolationNone;
+    return kInterpolationNone;
   }
 
-  if (srcHeight * kLargeStretch <= destHeight ||
-      srcWidth * kLargeStretch <= destWidth) {
+  if (src_height * kLargeStretch <= dest_height ||
+      src_width * kLargeStretch <= dest_width) {
     // Large image detected.
 
     // Don't resample if it is being stretched a lot in only one direction.
     // This is trying to catch cases where somebody has created a border
     // (which might be large) and then is stretching it to fill some part
     // of the page.
-    if (widthNearlyEqual || heightNearlyEqual)
-      return InterpolationNone;
+    if (width_nearly_equal || height_nearly_equal)
+      return kInterpolationNone;
 
     // The image is growing a lot and in more than one direction. Resampling
     // is slow and doesn't give us very much when growing a lot.
-    return InterpolationLow;
+    return kInterpolationLow;
   }
 
-  if ((diffWidth / srcWidth < kFractionalChangeThreshold) &&
-      (diffHeight / srcHeight < kFractionalChangeThreshold)) {
+  if ((diff_width / src_width < kFractionalChangeThreshold) &&
+      (diff_height / src_height < kFractionalChangeThreshold)) {
     // It is disappointingly common on the web for image sizes to be off by
     // one or two pixels. We don't bother resampling if the size difference
     // is a small fraction of the original size.
-    return InterpolationNone;
+    return kInterpolationNone;
   }
 
   // When the image is not yet done loading, use linear. We don't cache the
   // partially resampled images, and as they come in incrementally, it causes
   // us to have to resample the whole thing every time.
-  if (!isDataComplete)
-    return InterpolationLow;
+  if (!is_data_complete)
+    return kInterpolationLow;
 
   // Everything else gets resampled at high quality.
-  return InterpolationHigh;
+  return kInterpolationHigh;
 }
 
-int clampedAlphaForBlending(float alpha) {
+int ClampedAlphaForBlending(float alpha) {
   if (alpha < 0)
     return 0;
-  int roundedAlpha = roundf(alpha * 256);
-  if (roundedAlpha > 256)
-    roundedAlpha = 256;
-  return roundedAlpha;
+  int rounded_alpha = roundf(alpha * 256);
+  if (rounded_alpha > 256)
+    rounded_alpha = 256;
+  return rounded_alpha;
 }
 
-SkColor scaleAlpha(SkColor color, float alpha) {
-  return scaleAlpha(color, clampedAlphaForBlending(alpha));
+SkColor ScaleAlpha(SkColor color, float alpha) {
+  return ScaleAlpha(color, ClampedAlphaForBlending(alpha));
 }
 
-SkColor scaleAlpha(SkColor color, int alpha) {
+SkColor ScaleAlpha(SkColor color, int alpha) {
   int a = (SkColorGetA(color) * alpha) >> 8;
   return (color & 0x00FFFFFF) | (a << 24);
 }
 
 template <typename PrimitiveType>
-void drawFocusRingPrimitive(const PrimitiveType&,
+void DrawFocusRingPrimitive(const PrimitiveType&,
                             PaintCanvas*,
                             const PaintFlags&,
-                            float cornerRadius) {
-  ASSERT_NOT_REACHED();  // Missing an explicit specialization?
+                            float corner_radius) {
+  NOTREACHED();  // Missing an explicit specialization?
 }
 
 template <>
-void drawFocusRingPrimitive<SkRect>(const SkRect& rect,
+void DrawFocusRingPrimitive<SkRect>(const SkRect& rect,
                                     PaintCanvas* canvas,
                                     const PaintFlags& flags,
-                                    float cornerRadius) {
+                                    float corner_radius) {
   SkRRect rrect;
-  rrect.setRectXY(rect, SkFloatToScalar(cornerRadius),
-                  SkFloatToScalar(cornerRadius));
+  rrect.setRectXY(rect, SkFloatToScalar(corner_radius),
+                  SkFloatToScalar(corner_radius));
   canvas->drawRRect(rrect, flags);
 }
 
 template <>
-void drawFocusRingPrimitive<SkPath>(const SkPath& path,
+void DrawFocusRingPrimitive<SkPath>(const SkPath& path,
                                     PaintCanvas* canvas,
                                     const PaintFlags& flags,
-                                    float cornerRadius) {
-  PaintFlags pathFlags = flags;
-  pathFlags.setPathEffect(
-      SkCornerPathEffect::Make(SkFloatToScalar(cornerRadius)));
-  canvas->drawPath(path, pathFlags);
+                                    float corner_radius) {
+  PaintFlags path_flags = flags;
+  path_flags.setPathEffect(
+      SkCornerPathEffect::Make(SkFloatToScalar(corner_radius)));
+  canvas->drawPath(path, path_flags);
 }
 
 template <typename PrimitiveType>
-void drawPlatformFocusRing(const PrimitiveType& primitive,
+void DrawPlatformFocusRing(const PrimitiveType& primitive,
                            PaintCanvas* canvas,
                            SkColor color,
                            float width) {
@@ -346,28 +348,28 @@ void drawPlatformFocusRing(const PrimitiveType& primitive,
   flags.setColor(color);
   flags.setStrokeWidth(width);
 
-#if OS(MACOSX)
+#if defined(OS_MACOSX)
   flags.setAlpha(64);
-  const float cornerRadius = (width - 1) * 0.5f;
+  const float corner_radius = (width - 1) * 0.5f;
 #else
-  const float cornerRadius = width;
+  const float corner_radius = width;
 #endif
 
-  drawFocusRingPrimitive(primitive, canvas, flags, cornerRadius);
+  DrawFocusRingPrimitive(primitive, canvas, flags, corner_radius);
 
-#if OS(MACOSX)
+#if defined(OS_MACOSX)
   // Inner part
   flags.setAlpha(128);
   flags.setStrokeWidth(flags.getStrokeWidth() * 0.5f);
-  drawFocusRingPrimitive(primitive, canvas, flags, cornerRadius);
+  DrawFocusRingPrimitive(primitive, canvas, flags, corner_radius);
 #endif
 }
 
-template void PLATFORM_EXPORT drawPlatformFocusRing<SkRect>(const SkRect&,
+template void PLATFORM_EXPORT DrawPlatformFocusRing<SkRect>(const SkRect&,
                                                             PaintCanvas*,
                                                             SkColor,
                                                             float width);
-template void PLATFORM_EXPORT drawPlatformFocusRing<SkPath>(const SkPath&,
+template void PLATFORM_EXPORT DrawPlatformFocusRing<SkPath>(const SkPath&,
                                                             PaintCanvas*,
                                                             SkColor,
                                                             float width);

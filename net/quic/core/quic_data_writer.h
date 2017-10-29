@@ -10,10 +10,11 @@
 #include <string>
 
 #include "base/macros.h"
-#include "base/strings/string_piece.h"
 #include "net/base/int128.h"
 #include "net/quic/core/quic_packets.h"
+#include "net/quic/platform/api/quic_endian.h"
 #include "net/quic/platform/api/quic_export.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
 
@@ -25,7 +26,10 @@ namespace net {
 class QUIC_EXPORT_PRIVATE QuicDataWriter {
  public:
   // Creates a QuicDataWriter where |buffer| is not owned.
-  QuicDataWriter(size_t size, char* buffer);
+  QuicDataWriter(size_t size,
+                 char* buffer,
+                 Perspective perspective,
+                 Endianness endianness);
 
   ~QuicDataWriter();
 
@@ -36,22 +40,41 @@ class QUIC_EXPORT_PRIVATE QuicDataWriter {
   char* data();
 
   // Methods for adding to the payload.  These values are appended to the end
-  // of the QuicDataWriter payload. Note - binary integers are written in
-  // host byte order (little endian) not network byte order (big endian).
+  // of the QuicDataWriter payload.
+
+  // Writes 8/16/32/64-bit unsigned integers.
   bool WriteUInt8(uint8_t value);
   bool WriteUInt16(uint16_t value);
   bool WriteUInt32(uint32_t value);
-  bool WriteUInt48(uint64_t value);
   bool WriteUInt64(uint64_t value);
+
+  // Writes least significant |num_bytes| of a 64-bit unsigned integer in the
+  // correct byte order.
+  bool WriteBytesToUInt64(size_t num_bytes, uint64_t value);
+
   // Write unsigned floating point corresponding to the value. Large values are
   // clamped to the maximum representable (kUFloat16MaxValue). Values that can
   // not be represented directly are rounded down.
   bool WriteUFloat16(uint64_t value);
-  bool WriteStringPiece16(base::StringPiece val);
+  bool WriteStringPiece16(QuicStringPiece val);
   bool WriteBytes(const void* data, size_t data_len);
   bool WriteRepeatedByte(uint8_t byte, size_t count);
   // Fills the remaining buffer with null characters.
   void WritePadding();
+  // Write padding of |count| bytes.
+  bool WritePaddingBytes(size_t count);
+
+  // Write connection ID as a 64-bit unsigned integer to the payload.
+  // TODO(fayang): Remove this method and use WriteUInt64() once deprecating
+  // quic_restart_flag_quic_rw_cid_in_big_endian and QuicDataWriter has a mode
+  // indicating writing in little/big endian.
+  bool WriteConnectionId(uint64_t connection_id);
+
+  // Write tag as a 32-bit unsigned integer to the payload. As tags are already
+  // converted to big endian (e.g., CHLO is 'C','H','L','O') in memory by TAG or
+  // MakeQuicTag and tags are written in byte order, so tags on the wire are
+  // in big endian.
+  bool WriteTag(uint32_t tag);
 
   size_t capacity() const { return capacity_; }
 
@@ -64,6 +87,15 @@ class QUIC_EXPORT_PRIVATE QuicDataWriter {
   char* buffer_;
   size_t capacity_;  // Allocation size of payload (or -1 if buffer is const).
   size_t length_;    // Current length of the buffer.
+
+  // TODO(zhongyi): remove this field as it is no longer used.
+  // Perspective of this data writer. Please note, although client and server
+  // may have different in-memory representation of the same field, the on wire
+  // representation must be consistent.
+  Perspective perspective_;
+
+  // The endianness to write integers and floating numbers.
+  Endianness endianness_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicDataWriter);
 };

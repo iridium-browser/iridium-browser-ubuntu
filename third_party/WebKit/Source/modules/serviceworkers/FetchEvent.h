@@ -5,47 +5,58 @@
 #ifndef FetchEvent_h
 #define FetchEvent_h
 
+#include <memory>
+
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseProperty.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "modules/EventModules.h"
 #include "modules/ModulesExport.h"
 #include "modules/fetch/Request.h"
 #include "modules/serviceworkers/ExtendableEvent.h"
 #include "modules/serviceworkers/FetchEventInit.h"
-#include "modules/serviceworkers/RespondWithObserver.h"
 #include "modules/serviceworkers/WaitUntilObserver.h"
+#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/heap/Handle.h"
+#include "platform/loader/fetch/ResourceResponse.h"
 
 namespace blink {
 
 class ExceptionState;
+class FetchRespondWithObserver;
 class Request;
 class Response;
-class RespondWithObserver;
 class ScriptState;
 class WebDataConsumerHandle;
 struct WebServiceWorkerError;
 class WebURLResponse;
+class WorkerGlobalScope;
 
 // A fetch event is dispatched by the client to a service worker's script
-// context. RespondWithObserver can be used to notify the client about the
+// context. FetchRespondWithObserver can be used to notify the client about the
 // service worker's response.
-class MODULES_EXPORT FetchEvent final : public ExtendableEvent {
+class MODULES_EXPORT FetchEvent final
+    : public ExtendableEvent,
+      public ActiveScriptWrappable<FetchEvent>,
+      public ContextClient {
   DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(FetchEvent);
 
  public:
   using PreloadResponseProperty = ScriptPromiseProperty<Member<FetchEvent>,
                                                         Member<Response>,
                                                         Member<DOMException>>;
-  static FetchEvent* create(ScriptState*,
+  static FetchEvent* Create(ScriptState*,
                             const AtomicString& type,
                             const FetchEventInit&);
-  static FetchEvent* create(ScriptState*,
+  static FetchEvent* Create(ScriptState*,
                             const AtomicString& type,
                             const FetchEventInit&,
-                            RespondWithObserver*,
+                            FetchRespondWithObserver*,
                             WaitUntilObserver*,
-                            bool navigationPreloadSent);
+                            bool navigation_preload_sent);
+
+  ~FetchEvent() override;
 
   Request* request() const;
   String clientId() const;
@@ -54,13 +65,21 @@ class MODULES_EXPORT FetchEvent final : public ExtendableEvent {
   void respondWith(ScriptState*, ScriptPromise, ExceptionState&);
   ScriptPromise preloadResponse(ScriptState*);
 
-  void onNavigationPreloadResponse(ScriptState*,
+  void OnNavigationPreloadResponse(ScriptState*,
                                    std::unique_ptr<WebURLResponse>,
                                    std::unique_ptr<WebDataConsumerHandle>);
-  void onNavigationPreloadError(ScriptState*,
+  void OnNavigationPreloadError(ScriptState*,
                                 std::unique_ptr<WebServiceWorkerError>);
+  void OnNavigationPreloadComplete(WorkerGlobalScope*,
+                                   double completion_time,
+                                   int64_t encoded_data_length,
+                                   int64_t encoded_body_length,
+                                   int64_t decoded_body_length);
 
-  const AtomicString& interfaceName() const override;
+  const AtomicString& InterfaceName() const override;
+
+  // ScriptWrappable
+  bool HasPendingActivity() const override;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -68,16 +87,17 @@ class MODULES_EXPORT FetchEvent final : public ExtendableEvent {
   FetchEvent(ScriptState*,
              const AtomicString& type,
              const FetchEventInit&,
-             RespondWithObserver*,
+             FetchRespondWithObserver*,
              WaitUntilObserver*,
-             bool navigationPreloadSent);
+             bool navigation_preload_sent);
 
  private:
-  Member<RespondWithObserver> m_observer;
-  Member<Request> m_request;
-  Member<PreloadResponseProperty> m_preloadResponseProperty;
-  String m_clientId;
-  bool m_isReload;
+  Member<FetchRespondWithObserver> observer_;
+  Member<Request> request_;
+  Member<PreloadResponseProperty> preload_response_property_;
+  std::unique_ptr<WebURLResponse> preload_response_;
+  String client_id_;
+  bool is_reload_;
 };
 
 }  // namespace blink

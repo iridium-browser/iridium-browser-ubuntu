@@ -53,17 +53,15 @@ class FaviconDriverImpl : public FaviconDriver,
                     bookmarks::BookmarkModel* bookmark_model);
   ~FaviconDriverImpl() override;
 
-  // Returns whether downloading favicon for |url| previously failed.
-  bool WasUnableToDownloadFavicon(const GURL& url);
-
   // Informs FaviconService that the favicon for |url| is out of date. If
   // |force_reload| is true, then discard information about favicon download
   // failures.
   void SetFaviconOutOfDateForPage(const GURL& url, bool force_reload);
 
   // Broadcasts new favicon URL candidates to FaviconHandlers.
-  void OnUpdateFaviconURL(const GURL& page_url,
-                          const std::vector<FaviconURL>& candidates);
+  void OnUpdateCandidates(const GURL& page_url,
+                          const std::vector<FaviconURL>& candidates,
+                          const GURL& manifest_url);
 
  protected:
   history::HistoryService* history_service() { return history_service_; }
@@ -78,9 +76,7 @@ class FaviconDriverImpl : public FaviconDriver,
   bookmarks::BookmarkModel* bookmark_model_;
 
   // FaviconHandlers used to download the different kind of favicons.
-  // |touch_icon_handler_| may be null depending on the platform and variations.
-  std::unique_ptr<FaviconHandler> favicon_handler_;
-  std::unique_ptr<FaviconHandler> touch_icon_handler_;
+  std::vector<std::unique_ptr<FaviconHandler>> handlers_;
 
   DISALLOW_COPY_AND_ASSIGN(FaviconDriverImpl);
 };

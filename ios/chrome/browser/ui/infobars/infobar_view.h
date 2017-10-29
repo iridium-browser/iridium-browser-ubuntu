@@ -21,7 +21,7 @@ class InfoBarViewDelegate;
 @property(nonatomic, assign) CGFloat visibleHeight;
 
 // Label text with links initialized with |stringAsLink:|.
-@property(nonatomic, readonly) NSString* markedLabel;
+@property(nonatomic, strong, readonly) NSString* markedLabel;
 
 // Stops propagating events to delegate.
 - (void)resetDelegate;
@@ -35,13 +35,6 @@ class InfoBarViewDelegate;
 // Adds icon subview.
 - (void)addLeftIcon:(UIImage*)image;
 
-// Adds transparent icon of size |imageSize| as placeholder during the time when
-// the icon is being downloaded.
-- (void)addPlaceholderTransparentIcon:(CGSize const&)imageSize;
-
-// Adds an icon subview with rounded corners and a shadow.
-- (void)addLeftIconWithRoundedCornersAndShadow:(UIImage*)image;
-
 // Creates a new string from |string| that is interpreted as a link by
 // |addLabel:|. |tag| must not be 0.
 + (NSString*)stringAsLink:(NSString*)string tag:(NSUInteger)tag;
@@ -51,8 +44,9 @@ class InfoBarViewDelegate;
 - (void)addLabel:(NSString*)label;
 
 // Adds a message to the infobar that optionaly contains links initialized with
-// |stringAsLink:|. |action| is called on |target| when a link is clicked.
-- (void)addLabel:(NSString*)label target:(id)target action:(SEL)action;
+// |stringAsLink:|. |action| is called when a link is clicked, with the tag
+// associated with the link passed as a parameter..
+- (void)addLabel:(NSString*)label action:(void (^)(NSUInteger))action;
 
 // Adds two buttons to the infobar. Button1 is the primary action of the infobar
 // and in Material Design mode is shown with bold colors to reflect this role.

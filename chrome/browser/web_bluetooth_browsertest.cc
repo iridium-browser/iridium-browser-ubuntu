@@ -37,7 +37,6 @@ class WebBluetoothTest : public InProcessBrowserTest {
     // https://crbug.com/507419
     command_line->AppendSwitch(
         switches::kEnableExperimentalWebPlatformFeatures);
-    InProcessBrowserTest::SetUpCommandLine(command_line);
   }
 
   void SetUpOnMainThread() override {
@@ -63,6 +62,9 @@ IN_PROC_BROWSER_TEST_F(WebBluetoothTest, WebBluetoothAfterCrash) {
       new NiceMockBluetoothAdapter());
   ON_CALL(*adapter, IsPresent()).WillByDefault(Return(false));
 
+  auto bt_global_values =
+      device::BluetoothAdapterFactory::Get().InitGlobalValuesForTesting();
+  bt_global_values->SetLESupported(true);
   device::BluetoothAdapterFactory::SetAdapterForTesting(adapter);
 
   std::string result;
@@ -101,6 +103,9 @@ IN_PROC_BROWSER_TEST_F(WebBluetoothTest, KillSwitchShouldBlock) {
   scoped_refptr<device::MockBluetoothAdapter> adapter =
       new testing::NiceMock<device::MockBluetoothAdapter>;
   EXPECT_CALL(*adapter, IsPresent()).WillRepeatedly(Return(true));
+  auto bt_global_values =
+      device::BluetoothAdapterFactory::Get().InitGlobalValuesForTesting();
+  bt_global_values->SetLESupported(true);
   device::BluetoothAdapterFactory::SetAdapterForTesting(adapter);
 
   // Turn on the global kill switch.
@@ -133,6 +138,9 @@ IN_PROC_BROWSER_TEST_F(WebBluetoothTest, BlocklistShouldBlock) {
   scoped_refptr<device::MockBluetoothAdapter> adapter =
       new testing::NiceMock<device::MockBluetoothAdapter>;
   EXPECT_CALL(*adapter, IsPresent()).WillRepeatedly(Return(true));
+  auto bt_global_values =
+      device::BluetoothAdapterFactory::Get().InitGlobalValuesForTesting();
+  bt_global_values->SetLESupported(true);
   device::BluetoothAdapterFactory::SetAdapterForTesting(adapter);
 
   if (base::FieldTrialList::TrialExists("WebBluetoothBlocklist")) {

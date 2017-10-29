@@ -16,13 +16,13 @@
 #include "base/hash.h"
 #include "base/macros.h"
 #include "base/trace_event/memory_dump_provider.h"
+#include "content/browser/gpu/gpu_process_host.h"
 #include "content/common/content_export.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "gpu/ipc/host/gpu_memory_buffer_support.h"
 
 namespace content {
-class GpuProcessHost;
 
 class CONTENT_EXPORT BrowserGpuMemoryBufferManager
     : public gpu::GpuMemoryBufferManager,
@@ -69,7 +69,6 @@ class CONTENT_EXPORT BrowserGpuMemoryBufferManager
 
  private:
   struct BufferInfo {
-    BufferInfo();
     BufferInfo(const gfx::Size& size,
                gfx::GpuMemoryBufferType type,
                gfx::BufferFormat format,
@@ -83,17 +82,10 @@ class CONTENT_EXPORT BrowserGpuMemoryBufferManager
     gfx::BufferFormat format = gfx::BufferFormat::RGBA_8888;
     gfx::BufferUsage usage = gfx::BufferUsage::GPU_READ;
     int gpu_host_id = 0;
+    base::UnguessableToken shared_memory_guid;
   };
 
   struct CreateGpuMemoryBufferRequest;
-
-  using CreateDelegate = base::Callback<void(GpuProcessHost* host,
-                                             gfx::GpuMemoryBufferId id,
-                                             const gfx::Size& size,
-                                             gfx::BufferFormat format,
-                                             gfx::BufferUsage usage,
-                                             int client_id,
-                                             const CreateCallback& callback)>;
 
   std::unique_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBufferForSurface(
       const gfx::Size& size,
@@ -108,21 +100,20 @@ class CONTENT_EXPORT BrowserGpuMemoryBufferManager
       const gfx::GpuMemoryBufferHandle& handle);
 
   // Functions that implement asynchronous buffer creation.
-  void CreateGpuMemoryBufferOnIO(const CreateDelegate& create_delegate,
-                                 gfx::GpuMemoryBufferId id,
+  void CreateGpuMemoryBufferOnIO(gfx::GpuMemoryBufferId id,
                                  const gfx::Size& size,
                                  gfx::BufferFormat format,
                                  gfx::BufferUsage usage,
+                                 gpu::SurfaceHandle surface_handle,
                                  int client_id,
-                                 bool reused_gpu_process,
                                  const CreateCallback& callback);
-  void GpuMemoryBufferCreatedOnIO(const CreateDelegate& create_delegate,
-                                  gfx::GpuMemoryBufferId id,
+  void GpuMemoryBufferCreatedOnIO(gfx::GpuMemoryBufferId id,
+                                  gpu::SurfaceHandle surface_handle,
                                   int client_id,
                                   int gpu_host_id,
-                                  bool reused_gpu_process,
                                   const CreateCallback& callback,
-                                  const gfx::GpuMemoryBufferHandle& handle);
+                                  const gfx::GpuMemoryBufferHandle& handle,
+                                  GpuProcessHost::BufferCreationStatus status);
   void DestroyGpuMemoryBufferOnIO(gfx::GpuMemoryBufferId id,
                                   int client_id,
                                   const gpu::SyncToken& sync_token);
@@ -132,9 +123,7 @@ class CONTENT_EXPORT BrowserGpuMemoryBufferManager
   const gpu::GpuMemoryBufferConfigurationSet native_configurations_;
   const int gpu_client_id_;
   const uint64_t gpu_client_tracing_id_;
-
-  // The GPU process host ID. This should only be accessed on the IO thread.
-  int gpu_host_id_;
+  int next_gpu_memory_id_ = 1;
 
   // Stores info about buffers for all clients. This should only be accessed
   // on the IO thread.

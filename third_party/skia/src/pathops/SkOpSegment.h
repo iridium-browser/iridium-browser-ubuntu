@@ -7,9 +7,9 @@
 #ifndef SkOpSegment_DEFINE
 #define SkOpSegment_DEFINE
 
+#include "SkArenaAlloc.h"
 #include "SkOpAngle.h"
 #include "SkOpSpan.h"
-#include "SkOpTAllocator.h"
 #include "SkPathOpsBounds.h"
 #include "SkPathOpsCubic.h"
 #include "SkPathOpsCurve.h"
@@ -60,7 +60,7 @@ public:
     bool addCurveTo(const SkOpSpanBase* start, const SkOpSpanBase* end, SkPathWriter* path) const;
 
     SkOpAngle* addEndSpan() {
-        SkOpAngle* angle = SkOpTAllocator<SkOpAngle>::Allocate(this->globalState()->allocator());
+        SkOpAngle* angle = this->globalState()->allocator()->make<SkOpAngle>();
         angle->set(&fTail, fTail.prev());
         fTail.setFromAngle(angle);
         return angle;
@@ -78,7 +78,7 @@ public:
     SkOpPtT* addMissing(double t, SkOpSegment* opp, bool* allExist);
 
     SkOpAngle* addStartSpan() {
-        SkOpAngle* angle = SkOpTAllocator<SkOpAngle>::Allocate(this->globalState()->allocator());
+        SkOpAngle* angle = this->globalState()->allocator()->make<SkOpAngle>();
         angle->set(&fHead, fHead.next());
         fHead.setToAngle(angle);
         return angle;
@@ -93,10 +93,7 @@ public:
     }
 
     SkOpPtT* addT(double t);
-
-    template<typename T> T* allocateArray(int count) {
-        return SkOpTAllocator<T>::AllocateArray(this->globalState()->allocator(), count);
-    }
+    SkOpPtT* addT(double t, const SkPoint& pt);
 
     const SkPathOpsBounds& bounds() const {
         return fBounds;
@@ -169,8 +166,8 @@ public:
     void debugValidate() const;
 
 #if DEBUG_COINCIDENCE_ORDER
-    void debugResetCoinT() const; 
-    void debugSetCoinT(int, SkScalar ) const; 
+    void debugResetCoinT() const;
+    void debugSetCoinT(int, SkScalar ) const;
 #endif
 
 #if DEBUG_COIN
@@ -236,7 +233,7 @@ public:
     SkOpSpan* insert(SkOpSpan* prev) {
         SkOpGlobalState* globalState = this->globalState();
         globalState->setAllocatedOpSpan();
-        SkOpSpan* result = SkOpTAllocator<SkOpSpan>::Allocate(globalState->allocator());
+        SkOpSpan* result = globalState->allocator()->make<SkOpSpan>();
         SkOpSpanBase* next = prev->next();
         result->setPrev(prev);
         prev->setNext(result);
@@ -291,7 +288,7 @@ public:
     bool match(const SkOpPtT* span, const SkOpSegment* parent, double t, const SkPoint& pt) const;
     bool missingCoincidence();
     bool moveMultiples();
-    void moveNearby();
+    bool moveNearby();
 
     SkOpSegment* next() const {
         return fNext;
@@ -333,7 +330,7 @@ public:
 
     bool ptsDisjoint(double t1, const SkPoint& pt1, double t2, const SkPoint& pt2) const;
 
-    void rayCheck(const SkOpRayHit& base, SkOpRayDir dir, SkOpRayHit** hits, SkChunkAlloc*);
+    void rayCheck(const SkOpRayHit& base, SkOpRayDir dir, SkOpRayHit** hits, SkArenaAlloc*);
     void release(const SkOpSpan* );
 
 #if DEBUG_COIN
@@ -372,7 +369,7 @@ public:
     void setUpWindings(SkOpSpanBase* start, SkOpSpanBase* end, int* sumMiWinding, int* sumSuWinding,
                        int* maxWinding, int* sumWinding, int* oppMaxWinding, int* oppSumWinding);
     bool sortAngles();
-    bool spansNearby(const SkOpSpanBase* ref, const SkOpSpanBase* check) const;
+    bool spansNearby(const SkOpSpanBase* ref, const SkOpSpanBase* check, bool* found) const;
 
     static int SpanSign(const SkOpSpanBase* start, const SkOpSpanBase* end) {
         int result = start->t() < end->t() ? -start->upCast()->windValue()

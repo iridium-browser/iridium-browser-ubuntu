@@ -36,8 +36,7 @@ class CONTENT_EXPORT BackgroundSyncContext
 
   // Create a BackgroundSyncServiceImpl that is owned by this. Call on the UI
   // thread.
-  void CreateService(
-      mojo::InterfaceRequest<blink::mojom::BackgroundSyncService> request);
+  void CreateService(blink::mojom::BackgroundSyncServiceRequest request);
 
   // Called by BackgroundSyncServiceImpl objects so that they can
   // be deleted. Call on the IO thread.

@@ -22,10 +22,13 @@ Polymer({
 
   properties: {
     /** Reflects the bluetooth-page property. */
-    bluetoothEnabled: {
+    bluetoothToggleState: {
       type: Boolean,
       notify: true,
     },
+
+    /** Reflects the bluetooth-page property. */
+    bluetoothToggleDisabled: Boolean,
 
     /**
      * The bluetooth adapter state, cached by bluetooth-page.
@@ -95,7 +98,7 @@ Polymer({
 
     /**
      * Set to the name of the dialog to show. This page uses a single
-     * paper-dialog to host one of two dialog elements: 'pairDevice' or
+     * dialog to host one of two dialog elements: 'pairDevice' or
      * 'connectError'. This allows a seamless transition between dialogs.
      * Note: This property should be set before opening the dialog and setting
      * the property will not itself cause the dialog to open.
@@ -237,7 +240,7 @@ Polymer({
   updateDiscovery_: function() {
     if (!this.adapterState || !this.adapterState.powered)
       return;
-    if (settings.getCurrentRoute() == settings.Route.BLUETOOTH_DEVICES)
+    if (settings.getCurrentRoute() == settings.routes.BLUETOOTH_DEVICES)
       this.startDiscovery_();
     else
       this.stopDiscovery_();
@@ -249,7 +252,7 @@ Polymer({
    * @private
    */
   updateDeviceList_: function() {
-    if (!this.bluetoothEnabled) {
+    if (!this.bluetoothToggleState) {
       this.deviceList_ = [];
       return;
     }
@@ -352,23 +355,23 @@ Polymer({
   },
 
   /**
-   * @param {boolean} bluetoothEnabled
+   * @param {boolean} bluetoothToggleState
    * @param {!Array<!chrome.bluetooth.Device>} deviceList
    * @return {boolean}
    * @private
    */
-  showDevices_: function(bluetoothEnabled, deviceList) {
-    return bluetoothEnabled && deviceList.length > 0;
+  showDevices_: function(bluetoothToggleState, deviceList) {
+    return bluetoothToggleState && deviceList.length > 0;
   },
 
   /**
-   * @param {boolean} bluetoothEnabled
+   * @param {boolean} bluetoothToggleState
    * @param {!Array<!chrome.bluetooth.Device>} deviceList
    * @return {boolean}
    * @private
    */
-  showNoDevices_: function(bluetoothEnabled, deviceList) {
-    return bluetoothEnabled && deviceList.length == 0;
+  showNoDevices_: function(bluetoothToggleState, deviceList) {
+    return bluetoothToggleState && deviceList.length == 0;
   },
 
   /**
@@ -462,8 +465,12 @@ Polymer({
   },
 
   /** @private */
-  onDialogClosed_: function() {
+  onDialogClose_: function() {
     this.dialogId_ = '';
     this.pairingDevice_ = undefined;
+    // The list is dynamic so focus the first item.
+    var device = this.$$('#unpairedContainer bluetooth-device-list-item');
+    if (device)
+      device.focus();
   },
 });

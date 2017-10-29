@@ -12,11 +12,11 @@ import random
 
 from core import perf_benchmark
 
+from telemetry import benchmark
 from telemetry.value import scalar
 from telemetry.page import legacy_page_test
 
 from page_sets import dummy_story_set
-
 
 class _DummyTest(legacy_page_test.LegacyPageTest):
 
@@ -39,6 +39,7 @@ class _DummyBenchmark(perf_benchmark.PerfBenchmark):
   page_set = dummy_story_set.DummyStorySet
 
 
+@benchmark.Owner(emails=['nednguyen@google.com'])
 class DummyBenchmarkOne(_DummyBenchmark):
   """A low noise benchmark with mean=100 & std=1."""
 
@@ -49,7 +50,11 @@ class DummyBenchmarkOne(_DummyBenchmark):
   def Name(cls):
     return 'dummy_benchmark.stable_benchmark_1'
 
+  def GetExpectations(self):
+    return dummy_story_set.DummyStoryExpectations()
 
+
+@benchmark.Owner(emails=['nednguyen@google.com'])
 class DummyBenchmarkTwo(_DummyBenchmark):
   """A noisy benchmark with mean=50 & std=20."""
 
@@ -59,3 +64,6 @@ class DummyBenchmarkTwo(_DummyBenchmark):
   @classmethod
   def Name(cls):
     return 'dummy_benchmark.noisy_benchmark_1'
+
+  def GetExpectations(self):
+    return dummy_story_set.DummyStoryExpectations()

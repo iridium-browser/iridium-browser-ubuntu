@@ -19,7 +19,6 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/text_utils.h"
 #include "ui/native_theme/common_theme.h"
-#include "ui/resources/grit/ui_resources.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/image_view.h"
@@ -29,7 +28,6 @@
 #include "ui/views/controls/menu/menu_scroll_view_container.h"
 #include "ui/views/controls/menu/menu_separator.h"
 #include "ui/views/controls/menu/submenu_view.h"
-#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
@@ -171,13 +169,15 @@ void MenuItemView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
 
   switch (GetType()) {
     case SUBMENU:
-      node_data->AddStateFlag(ui::AX_STATE_HASPOPUP);
+      node_data->AddState(ui::AX_STATE_HASPOPUP);
       break;
     case CHECKBOX:
-    case RADIO:
-      if (GetDelegate()->IsItemChecked(GetCommand()))
-        node_data->AddStateFlag(ui::AX_STATE_CHECKED);
-      break;
+    case RADIO: {
+      const bool is_checked = GetDelegate()->IsItemChecked(GetCommand());
+      const ui::AXCheckedState checked_state =
+          is_checked ? ui::AX_CHECKED_STATE_TRUE : ui::AX_CHECKED_STATE_FALSE;
+      node_data->AddIntAttribute(ui::AX_ATTR_CHECKED_STATE, checked_state);
+    } break;
     case NORMAL:
     case SEPARATOR:
     case EMPTY:
@@ -347,6 +347,10 @@ SubmenuView* MenuItemView::GetSubmenu() const {
   return submenu_;
 }
 
+bool MenuItemView::SubmenuIsShowing() const {
+  return HasSubmenu() && GetSubmenu()->IsShowing();
+}
+
 void MenuItemView::SetTitle(const base::string16& title) {
   title_ = title;
   invalidate_dimensions();  // Triggers preferred size recalculation.
@@ -408,7 +412,7 @@ void MenuItemView::OnPaint(gfx::Canvas* canvas) {
   PaintButton(canvas, PB_NORMAL);
 }
 
-gfx::Size MenuItemView::GetPreferredSize() const {
+gfx::Size MenuItemView::CalculatePreferredSize() const {
   const MenuItemDimensions& dimensions(GetDimensions());
   return gfx::Size(dimensions.standard_width + dimensions.children_width,
                    dimensions.height);

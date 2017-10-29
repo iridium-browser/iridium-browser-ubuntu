@@ -11,9 +11,8 @@
 #include "base/run_loop.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/service_manager/public/c/main.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/interface_factory.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/service_manager/public/cpp/service_runner.h"
@@ -24,8 +23,14 @@ namespace service_manager {
 
 namespace {
 
-void QuitLoop(base::RunLoop* loop) {
+void QuitLoop(base::RunLoop* loop,
+              mojom::ConnectResult* out_result,
+              Identity* out_resolved_identity,
+              mojom::ConnectResult result,
+              const Identity& resolved_identity) {
   loop->Quit();
+  *out_result = result;
+  *out_resolved_identity = resolved_identity;
 }
 
 void ReceiveString(std::string* string,
@@ -40,10 +45,6 @@ void ReceiveString(std::string* string,
 using GetTitleCallback = test::mojom::ConnectTestService::GetTitleCallback;
 
 class ConnectTestApp : public Service,
-                       public InterfaceFactory<test::mojom::ConnectTestService>,
-                       public InterfaceFactory<test::mojom::StandaloneApp>,
-                       public InterfaceFactory<test::mojom::BlockedInterface>,
-                       public InterfaceFactory<test::mojom::UserIdTest>,
                        public test::mojom::ConnectTestService,
                        public test::mojom::StandaloneApp,
                        public test::mojom::BlockedInterface,
@@ -61,73 +62,73 @@ class ConnectTestApp : public Service,
     standalone_bindings_.set_connection_error_handler(
         base::Bind(&ConnectTestApp::OnConnectionError,
                    base::Unretained(this)));
+    registry_.AddInterface<test::mojom::ConnectTestService>(
+        base::Bind(&ConnectTestApp::BindConnectTestServiceRequest,
+                   base::Unretained(this)));
+    registry_.AddInterface<test::mojom::StandaloneApp>(base::Bind(
+        &ConnectTestApp::BindStandaloneAppRequest, base::Unretained(this)));
+    registry_.AddInterface<test::mojom::BlockedInterface>(base::Bind(
+        &ConnectTestApp::BindBlockedInterfaceRequest, base::Unretained(this)));
+    registry_.AddInterface<test::mojom::UserIdTest>(base::Bind(
+        &ConnectTestApp::BindUserIdTestRequest, base::Unretained(this)));
   }
-
-  bool OnConnect(const ServiceInfo& remote_info,
-                 InterfaceRegistry* registry) override {
-    registry->AddInterface<test::mojom::ConnectTestService>(this);
-    registry->AddInterface<test::mojom::StandaloneApp>(this);
-    registry->AddInterface<test::mojom::BlockedInterface>(this);
-    registry->AddInterface<test::mojom::UserIdTest>(this);
-
-    test::mojom::ConnectionStatePtr state(test::mojom::ConnectionState::New());
-    state->connection_remote_name = remote_info.identity.name();
-    state->connection_remote_userid = remote_info.identity.user_id();
-    state->initialize_local_name = context()->identity().name();
-    state->initialize_userid = context()->identity().user_id();
-
-    context()->connector()->BindInterface(remote_info.identity, &caller_);
-    caller_->ConnectionAccepted(std::move(state));
-
-    return true;
+  void OnBindInterface(const BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override {
+    registry_.BindInterface(interface_name, std::move(interface_pipe),
+                            source_info);
   }
 
   // InterfaceFactory<test::mojom::ConnectTestService>:
-  void Create(const Identity& remote_identity,
-              test::mojom::ConnectTestServiceRequest request) override {
+  void BindConnectTestServiceRequest(
+      test::mojom::ConnectTestServiceRequest request,
+      const BindSourceInfo& source_info) {
     bindings_.AddBinding(this, std::move(request));
+    test::mojom::ConnectionStatePtr state(test::mojom::ConnectionState::New());
+    state->connection_remote_name = source_info.identity.name();
+    state->connection_remote_userid = source_info.identity.user_id();
+    state->initialize_local_name = context()->identity().name();
+    state->initialize_userid = context()->identity().user_id();
+
+    context()->connector()->BindInterface(source_info.identity, &caller_);
+    caller_->ConnectionAccepted(std::move(state));
   }
 
-  // InterfaceFactory<test::mojom::StandaloneApp>:
-  void Create(const Identity& remote_identity,
-              test::mojom::StandaloneAppRequest request) override {
+  void BindStandaloneAppRequest(test::mojom::StandaloneAppRequest request,
+                                const BindSourceInfo& source_info) {
     standalone_bindings_.AddBinding(this, std::move(request));
   }
 
-  // InterfaceFactory<test::mojom::BlockedInterface>:
-  void Create(const Identity& remote_identity,
-              test::mojom::BlockedInterfaceRequest request) override {
+  void BindBlockedInterfaceRequest(test::mojom::BlockedInterfaceRequest request,
+                                   const BindSourceInfo& source_info) {
     blocked_bindings_.AddBinding(this, std::move(request));
   }
 
-  // InterfaceFactory<test::mojom::UserIdTest>:
-  void Create(const Identity& remote_identity,
-              test::mojom::UserIdTestRequest request) override {
+  void BindUserIdTestRequest(test::mojom::UserIdTestRequest request,
+                             const BindSourceInfo& source_info) {
     user_id_test_bindings_.AddBinding(this, std::move(request));
   }
 
   // test::mojom::ConnectTestService:
-  void GetTitle(const GetTitleCallback& callback) override {
-    callback.Run("APP");
+  void GetTitle(GetTitleCallback callback) override {
+    std::move(callback).Run("APP");
   }
-  void GetInstance(const GetInstanceCallback& callback) override {
-    callback.Run(context()->identity().instance());
+  void GetInstance(GetInstanceCallback callback) override {
+    std::move(callback).Run(context()->identity().instance());
   }
 
   // test::mojom::StandaloneApp:
   void ConnectToAllowedAppInBlockedPackage(
-      const ConnectToAllowedAppInBlockedPackageCallback& callback) override {
+      ConnectToAllowedAppInBlockedPackageCallback callback) override {
     base::RunLoop run_loop;
-    std::unique_ptr<Connection> connection =
-        context()->connector()->Connect("connect_test_a");
-    connection->SetConnectionLostClosure(
-        base::Bind(&ConnectTestApp::OnConnectionBlocked,
-                   base::Unretained(this), callback, &run_loop));
     test::mojom::ConnectTestServicePtr test_service;
-    connection->GetInterface(&test_service);
-    test_service->GetTitle(
-        base::Bind(&ConnectTestApp::OnGotTitle, base::Unretained(this),
-                   callback, &run_loop));
+    context()->connector()->BindInterface("connect_test_a", &test_service);
+    test_service.set_connection_error_handler(
+        base::Bind(&ConnectTestApp::OnConnectionBlocked, base::Unretained(this),
+                   base::Unretained(&callback), &run_loop));
+    test_service->GetTitle(base::Bind(&ConnectTestApp::OnGotTitle,
+                                      base::Unretained(this),
+                                      base::Unretained(&callback), &run_loop));
     {
       // This message is dispatched as a task on the same run loop, so we need
       // to allow nesting in order to pump additional signals.
@@ -137,11 +138,10 @@ class ConnectTestApp : public Service,
     }
   }
   void ConnectToClassInterface(
-      const ConnectToClassInterfaceCallback& callback) override {
-    std::unique_ptr<Connection> connection =
-        context()->connector()->Connect("connect_test_class_app");
+      ConnectToClassInterfaceCallback callback) override {
     test::mojom::ClassInterfacePtr class_interface;
-    connection->GetInterface(&class_interface);
+    context()->connector()->BindInterface("connect_test_class_app",
+                                          &class_interface);
     std::string ping_response;
     {
       base::RunLoop loop;
@@ -151,7 +151,7 @@ class ConnectTestApp : public Service,
       loop.Run();
     }
     test::mojom::ConnectTestServicePtr service;
-    connection->GetInterface(&service);
+    context()->connector()->BindInterface("connect_test_class_app", &service);
     std::string title_response;
     {
       base::RunLoop loop;
@@ -160,43 +160,44 @@ class ConnectTestApp : public Service,
           base::MessageLoop::current());
       loop.Run();
     }
-    callback.Run(ping_response, title_response);
+    std::move(callback).Run(ping_response, title_response);
   }
 
   // test::mojom::BlockedInterface:
-  void GetTitleBlocked(const GetTitleBlockedCallback& callback) override {
-    callback.Run("Called Blocked Interface!");
+  void GetTitleBlocked(GetTitleBlockedCallback callback) override {
+    std::move(callback).Run("Called Blocked Interface!");
   }
 
   // test::mojom::UserIdTest:
   void ConnectToClassAppAsDifferentUser(
       const service_manager::Identity& target,
-      const ConnectToClassAppAsDifferentUserCallback& callback) override {
-    std::unique_ptr<Connection> connection =
-        context()->connector()->Connect(target);
+      ConnectToClassAppAsDifferentUserCallback callback) override {
+    context()->connector()->StartService(target);
+    mojom::ConnectResult result;
+    Identity resolved_identity;
     {
       base::RunLoop loop;
-      connection->AddConnectionCompletedClosure(base::Bind(&QuitLoop, &loop));
+      Connector::TestApi test_api(context()->connector());
+      test_api.SetStartServiceCallback(
+          base::Bind(&QuitLoop, &loop, &result, &resolved_identity));
       base::MessageLoop::ScopedNestableTaskAllower allow(
           base::MessageLoop::current());
       loop.Run();
     }
-    callback.Run(static_cast<int32_t>(connection->GetResult()),
-                 connection->GetRemoteIdentity());
+    std::move(callback).Run(static_cast<int32_t>(result), resolved_identity);
   }
 
   void OnConnectionBlocked(
-      const ConnectToAllowedAppInBlockedPackageCallback& callback,
+      ConnectToAllowedAppInBlockedPackageCallback* callback,
       base::RunLoop* run_loop) {
-    callback.Run("uninitialized");
+    std::move(*callback).Run("uninitialized");
     run_loop->Quit();
   }
 
-  void OnGotTitle(
-      const ConnectToAllowedAppInBlockedPackageCallback& callback,
-      base::RunLoop* run_loop,
-      const std::string& title) {
-    callback.Run(title);
+  void OnGotTitle(ConnectToAllowedAppInBlockedPackageCallback* callback,
+                  base::RunLoop* run_loop,
+                  const std::string& title) {
+    std::move(*callback).Run(title);
     run_loop->Quit();
   }
 
@@ -205,6 +206,7 @@ class ConnectTestApp : public Service,
       base::MessageLoop::current()->QuitWhenIdle();
   }
 
+  BinderRegistryWithArgs<const BindSourceInfo&> registry_;
   mojo::BindingSet<test::mojom::ConnectTestService> bindings_;
   mojo::BindingSet<test::mojom::StandaloneApp> standalone_bindings_;
   mojo::BindingSet<test::mojom::BlockedInterface> blocked_bindings_;

@@ -13,7 +13,6 @@ import("//tools/grit/grit_rule.gni")
 grit("resources") {
   source = "resources/renderer_resources.grd"
   defines = chrome_grit_defines
-  use_qualified_include = true
   output_dir = "$root_gen_dir/chrome"
   output_name = "renderer_resources"
   outputs = [
@@ -21,6 +20,18 @@ grit("resources") {
     "renderer_resources_100_percent.pak",
     "renderer_resources_200_percent.pak",
     "renderer_resources_300_percent.pak",
+  ]
+  grit_flags = [
+    "-E",
+    "mojom_root=" + rebase_path(root_gen_dir, root_build_dir),
+  ]
+  deps = [
+    "//chrome/common/media_router/mojo:media_controller_js",
+    "//chrome/common/media_router/mojo:media_router_js",
+    "//mojo/common:common_custom_types_js",
+    "//net/interfaces:interfaces_js",
+    "//url/mojo:url_mojom_gurl_js",
+    "//url/mojo:url_mojom_origin_js",
   ]
 }
 
@@ -46,6 +57,8 @@ static_library("renderer") {
     "loadtimes_extension_bindings.h",
     "media/chrome_key_systems.cc",
     "media/chrome_key_systems.h",
+    "media/chrome_key_systems_provider.cc",
+    "media/chrome_key_systems_provider.h",
     "net/net_error_helper.cc",
     "net/net_error_helper.h",
     "net/net_error_page_controller.cc",
@@ -56,10 +69,13 @@ static_library("renderer") {
     "page_load_metrics/metrics_render_frame_observer.h",
     "page_load_metrics/page_timing_metrics_sender.cc",
     "page_load_metrics/page_timing_metrics_sender.h",
+    "page_load_metrics/page_timing_sender.h",
     "page_load_metrics/renderer_page_track_decider.cc",
     "page_load_metrics/renderer_page_track_decider.h",
     "plugins/non_loadable_plugin_placeholder.cc",
     "plugins/non_loadable_plugin_placeholder.h",
+    "plugins/pdf_plugin_placeholder.cc",
+    "plugins/pdf_plugin_placeholder.h",
     "plugins/plugin_uma.cc",
     "plugins/plugin_uma.h",
     "prerender/prerender_dispatcher.cc",
@@ -70,6 +86,10 @@ static_library("renderer") {
     "prerender/prerender_helper.h",
     "prerender/prerenderer_client.cc",
     "prerender/prerenderer_client.h",
+    "safe_browsing/renderer_url_loader_throttle.cc",
+    "safe_browsing/renderer_url_loader_throttle.h",
+    "sandbox_status_extension_android.cc",
+    "sandbox_status_extension_android.h",
     "searchbox/search_bouncer.cc",
     "searchbox/search_bouncer.h",
     "searchbox/searchbox.cc",
@@ -82,8 +102,8 @@ static_library("renderer") {
     "tts_dispatcher.h",
     "web_apps.cc",
     "web_apps.h",
-    "worker_content_settings_client_proxy.cc",
-    "worker_content_settings_client_proxy.h",
+    "worker_content_settings_client.cc",
+    "worker_content_settings_client.h",
   ]
 
   defines = []
@@ -101,14 +121,14 @@ static_library("renderer") {
     "//components/data_reduction_proxy/core/common",
     "//components/dom_distiller/content/renderer",
     "//components/error_page/renderer",
-    "//components/guest_view/renderer",
     "//components/network_hints/renderer",
     "//components/omnibox/common",
     "//components/password_manager/content/renderer",
     "//components/plugins/renderer",
-    "//components/printing/renderer",
     "//components/rappor/public/interfaces",
     "//components/resources:components_resources",
+    "//components/safe_browsing/common:interfaces",
+    "//components/safe_browsing/renderer:websocket_sb_handshake_throttle",
     "//components/spellcheck:build_features",
     "//components/startup_metric_utils/common:interfaces",
     "//components/subresource_filter/content/renderer",
@@ -126,9 +146,12 @@ static_library("renderer") {
     "//media",
     "//media:media_features",
     "//media/capture",
+    "//mojo/public/cpp/bindings",
     "//net",
     "//ppapi/features",
     "//printing/features",
+    "//services/metrics/public/cpp:metrics_cpp",
+    "//services/metrics/public/interfaces",
     "//services/service_manager/public/cpp",
     "//skia",
     "//storage/common",
@@ -189,11 +212,10 @@ static_library("renderer") {
   }
 
   if (safe_browsing_mode != 0) {
-    sources += [
-      "safe_browsing/threat_dom_details.cc",
-      "safe_browsing/threat_dom_details.h",
+    deps += [
+      "//components/safe_browsing/common:common",
+      "//components/safe_browsing/renderer",
     ]
-    deps += [ "//components/safe_browsing/common:common" ]
     if (safe_browsing_mode == 1) {
       sources += [
         "safe_browsing/feature_extractor_clock.cc",
@@ -217,6 +239,7 @@ static_library("renderer") {
       ]
       deps += [
         "//chrome/common/safe_browsing:proto",
+        "//components/safe_browsing:csd_proto",
         "//third_party/smhasher:murmurhash3",
       ]
     }
@@ -226,6 +249,10 @@ static_library("renderer") {
     sources += [
       "extensions/app_bindings.cc",
       "extensions/app_bindings.h",
+      "extensions/app_bindings_core.cc",
+      "extensions/app_bindings_core.h",
+      "extensions/app_hooks_delegate.cc",
+      "extensions/app_hooks_delegate.h",
       "extensions/automation_internal_custom_bindings.cc",
       "extensions/automation_internal_custom_bindings.h",
       "extensions/chrome_extensions_dispatcher_delegate.cc",
@@ -279,13 +306,10 @@ static_library("renderer") {
       "resources/extensions/declarative_content_custom_bindings.js",
       "resources/extensions/enterprise_platform_keys_custom_bindings.js",
       "resources/extensions/feedback_private_custom_bindings.js",
-      "resources/extensions/file_entry_binding_util.js",
-      "resources/extensions/file_system_custom_bindings.js",
       "resources/extensions/gcm_custom_bindings.js",
       "resources/extensions/identity_custom_bindings.js",
       "resources/extensions/image_writer_private_custom_bindings.js",
       "resources/extensions/input.ime_custom_bindings.js",
-      "resources/extensions/log_private_custom_bindings.js",
       "resources/extensions/notifications_custom_bindings.js",
       "resources/extensions/omnibox_custom_bindings.js",
       "resources/extensions/page_action_custom_bindings.js",
@@ -298,11 +322,15 @@ static_library("renderer") {
       # TODO(hclam): See crbug.com/298380 for details.
       # We should isolate the APIs needed by the renderer.
       "//chrome/common/extensions/api",
+      "//components/guest_view/renderer",
       "//extensions:extensions_resources",
       "//extensions/renderer",
       "//media/cast:net",
       "//media/cast:receiver",
       "//media/cast:sender",
+    ]
+    public_deps = [
+      "//ipc",
     ]
     if (!enable_webrtc) {
       sources -= [
@@ -330,8 +358,12 @@ static_library("renderer") {
   if (enable_spellcheck) {
     deps += [ "//components/spellcheck/renderer:renderer" ]
   }
+
   if (enable_basic_printing || enable_print_preview) {
-    deps += [ "//printing" ]
+    deps += [
+      "//components/printing/renderer",
+      "//printing",
+    ]
     sources += [
       "printing/chrome_print_web_view_helper_delegate.cc",
       "printing/chrome_print_web_view_helper_delegate.h",

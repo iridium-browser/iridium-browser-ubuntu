@@ -9,44 +9,69 @@
 namespace blink {
 
 WebMouseEvent::WebMouseEvent(WebInputEvent::Type type,
-                             const WebGestureEvent& gestureEvent,
-                             Button buttonParam,
-                             int clickCountParam,
+                             const WebGestureEvent& gesture_event,
+                             Button button_param,
+                             int click_count_param,
                              int modifiers,
-                             double timeStampSeconds)
-    : WebInputEvent(sizeof(WebMouseEvent), type, modifiers, timeStampSeconds),
-      WebPointerProperties(buttonParam,
-                           WebPointerProperties::PointerType::Mouse),
-      x(gestureEvent.x),
-      y(gestureEvent.y),
-      globalX(gestureEvent.globalX),
-      globalY(gestureEvent.globalY),
-      clickCount(clickCountParam) {
-  setFrameScale(gestureEvent.frameScale());
-  setFrameTranslate(gestureEvent.frameTranslate());
+                             double time_stamp_seconds,
+                             PointerId id_param)
+    : WebInputEvent(sizeof(WebMouseEvent), type, modifiers, time_stamp_seconds),
+      WebPointerProperties(id_param,
+                           WebPointerProperties::PointerType::kMouse,
+                           button_param),
+      click_count(click_count_param) {
+  DCHECK_GE(type, kMouseTypeFirst);
+  DCHECK_LE(type, kMouseTypeLast);
+  SetPositionInWidget(gesture_event.x, gesture_event.y);
+  SetPositionInScreen(gesture_event.global_x, gesture_event.global_y);
+  SetFrameScale(gesture_event.FrameScale());
+  SetFrameTranslate(gesture_event.FrameTranslate());
+  SetMenuSourceType(gesture_event.GetType());
 }
 
-WebFloatPoint WebMouseEvent::movementInRootFrame() const {
-  return WebFloatPoint((movementX / m_frameScale), (movementY / m_frameScale));
+WebFloatPoint WebMouseEvent::MovementInRootFrame() const {
+  return WebFloatPoint((movement_x / frame_scale_),
+                       (movement_y / frame_scale_));
 }
 
-WebFloatPoint WebMouseEvent::positionInRootFrame() const {
-  return WebFloatPoint((x / m_frameScale) + m_frameTranslate.x,
-                       (y / m_frameScale) + m_frameTranslate.y);
+WebFloatPoint WebMouseEvent::PositionInRootFrame() const {
+  return WebFloatPoint(
+      (position_in_widget_.x / frame_scale_) + frame_translate_.x,
+      (position_in_widget_.y / frame_scale_) + frame_translate_.y);
 }
 
-WebMouseEvent WebMouseEvent::flattenTransform() const {
+WebMouseEvent WebMouseEvent::FlattenTransform() const {
   WebMouseEvent result = *this;
-  result.flattenTransformSelf();
+  result.FlattenTransformSelf();
   return result;
 }
 
-void WebMouseEvent::flattenTransformSelf() {
-  x = (x / m_frameScale) + m_frameTranslate.x;
-  y = (y / m_frameScale) + m_frameTranslate.y;
-  m_frameTranslate.x = 0;
-  m_frameTranslate.y = 0;
-  m_frameScale = 1;
+void WebMouseEvent::FlattenTransformSelf() {
+  position_in_widget_.x =
+      floor((position_in_widget_.x / frame_scale_) + frame_translate_.x);
+  position_in_widget_.y =
+      floor((position_in_widget_.y / frame_scale_) + frame_translate_.y);
+  frame_translate_.x = 0;
+  frame_translate_.y = 0;
+  frame_scale_ = 1;
+}
+
+void WebMouseEvent::SetMenuSourceType(WebInputEvent::Type type) {
+  switch (type) {
+    case kGestureTapDown:
+    case kGestureTap:
+    case kGestureDoubleTap:
+      menu_source_type = kMenuSourceTouch;
+      break;
+    case kGestureLongPress:
+      menu_source_type = kMenuSourceLongPress;
+      break;
+    case kGestureLongTap:
+      menu_source_type = kMenuSourceLongTap;
+      break;
+    default:
+      menu_source_type = kMenuSourceNone;
+  }
 }
 
 }  // namespace blink

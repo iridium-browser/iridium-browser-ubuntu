@@ -13,18 +13,20 @@ from telemetry import benchmark
 from telemetry.internal.results import json_output_formatter
 from telemetry.internal.results import page_test_results
 from telemetry import page as page_module
-from telemetry.timeline import trace_data
 from telemetry.value import improvement_direction
 from telemetry.value import scalar
 from telemetry.value import trace
+from tracing.trace_data import trace_data
 
 
 def _MakeStorySet():
   story_set = story.StorySet(base_dir=os.path.dirname(__file__))
   story_set.AddStory(
-      page_module.Page('http://www.foo.com/', story_set, story_set.base_dir))
+      page_module.Page('http://www.foo.com/', story_set, story_set.base_dir,
+                       name='http://www.foo.com/'))
   story_set.AddStory(
-      page_module.Page('http://www.bar.com/', story_set, story_set.base_dir))
+      page_module.Page('http://www.bar.com/', story_set, story_set.base_dir,
+                       name='http://www.bar.com/'))
   return story_set
 
 def _HasPage(pages, page):

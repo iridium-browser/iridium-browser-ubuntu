@@ -22,6 +22,7 @@
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/loader/stream_resource_handler.h"
+#include "content/common/loader_util.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_save_info.h"
@@ -47,9 +48,9 @@ namespace {
 const char kAcceptHeader[] = "Accept";
 const char kFrameAcceptHeader[] =
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,"
-    "*/*;q=0.8";
+    "image/apng,*/*;q=0.8";
 const char kStylesheetAcceptHeader[] = "text/css,*/*;q=0.1";
-const char kImageAcceptHeader[] = "image/webp,image/*,*/*;q=0.8";
+const char kImageAcceptHeader[] = "image/webp,image/apng,image/*,*/*;q=0.8";
 const char kDefaultAcceptHeader[] = "*/*";
 
 // Used to write into an existing IOBuffer at a given offset.
@@ -125,6 +126,8 @@ MimeSniffingResourceHandler::MimeSniffingResourceHandler(
       must_download_is_set_(false),
       read_buffer_size_(0),
       bytes_read_(0),
+      parent_read_buffer_(nullptr),
+      parent_read_buffer_size_(nullptr),
       intercepting_handler_(intercepting_handler),
       request_context_type_(request_context_type),
       in_state_loop_(false),
@@ -192,7 +195,9 @@ void MimeSniffingResourceHandler::OnResponseStarted(
   // the response, and so must be skipped for 304 responses.
   if (!(response_->head.headers.get() &&
         response_->head.headers->response_code() == 304)) {
-    if (ShouldSniffContent()) {
+    // MIME sniffing should be disabled for a request initiated by fetch().
+    if (request_context_type_ != REQUEST_CONTEXT_TYPE_FETCH &&
+        ShouldSniffContent(request(), response_.get())) {
       controller->Resume();
       return;
     }
@@ -215,24 +220,41 @@ void MimeSniffingResourceHandler::OnResponseStarted(
   AdvanceState();
 }
 
-bool MimeSniffingResourceHandler::OnWillRead(scoped_refptr<net::IOBuffer>* buf,
-                                             int* buf_size) {
-  if (state_ == STATE_STREAMING)
-    return next_handler_->OnWillRead(buf, buf_size);
+void MimeSniffingResourceHandler::OnWillRead(
+    scoped_refptr<net::IOBuffer>* buf,
+    int* buf_size,
+    std::unique_ptr<ResourceController> controller) {
+  DCHECK(buf);
+  DCHECK(buf_size);
+  DCHECK(!parent_read_buffer_);
+  DCHECK(!parent_read_buffer_size_);
+
+  if (state_ == STATE_STREAMING) {
+    next_handler_->OnWillRead(buf, buf_size, std::move(controller));
+    return;
+  }
+
+  DCHECK_EQ(State::STATE_BUFFERING, state_);
 
   if (read_buffer_.get()) {
     CHECK_LT(bytes_read_, read_buffer_size_);
     *buf = new DependentIOBuffer(read_buffer_.get(), bytes_read_);
     *buf_size = read_buffer_size_ - bytes_read_;
-  } else {
-    if (!next_handler_->OnWillRead(buf, buf_size))
-      return false;
-
-    read_buffer_ = *buf;
-    read_buffer_size_ = *buf_size;
-    DCHECK_GE(read_buffer_size_, net::kMaxBytesToSniff * 2);
+    controller->Resume();
+    return;
   }
-  return true;
+
+  DCHECK(!read_buffer_size_);
+
+  parent_read_buffer_ = buf;
+  parent_read_buffer_size_ = buf_size;
+
+  HoldController(std::move(controller));
+
+  // Have to go through AdvanceState here so that if OnWillRead completes
+  // synchronously, won't post a task.
+  state_ = State::STATE_CALLING_ON_WILL_READ;
+  AdvanceState();
 }
 
 void MimeSniffingResourceHandler::OnReadCompleted(
@@ -316,6 +338,12 @@ void MimeSniffingResourceHandler::AdvanceState() {
       case STATE_BUFFERING:
         MaybeIntercept();
         break;
+      case STATE_CALLING_ON_WILL_READ:
+        CallOnWillRead();
+        break;
+      case STATE_WAITING_FOR_BUFFER:
+        BufferReceived();
+        break;
       case STATE_INTERCEPTION_CHECK_DONE:
         ReplayResponseReceived();
         break;
@@ -324,7 +352,6 @@ void MimeSniffingResourceHandler::AdvanceState() {
         break;
       case STATE_STARTING:
       case STATE_STREAMING:
-        in_state_loop_ = false;
         Resume();
         return;
       default:
@@ -346,6 +373,32 @@ void MimeSniffingResourceHandler::MaybeIntercept() {
 
   state_ = STATE_INTERCEPTION_CHECK_DONE;
   ResumeInternal();
+}
+
+void MimeSniffingResourceHandler::CallOnWillRead() {
+  DCHECK_EQ(STATE_CALLING_ON_WILL_READ, state_);
+
+  state_ = STATE_WAITING_FOR_BUFFER;
+  next_handler_->OnWillRead(&read_buffer_, &read_buffer_size_,
+                            base::MakeUnique<Controller>(this));
+}
+
+void MimeSniffingResourceHandler::BufferReceived() {
+  DCHECK_EQ(STATE_WAITING_FOR_BUFFER, state_);
+
+  DCHECK(read_buffer_);
+  DCHECK(parent_read_buffer_);
+  DCHECK(parent_read_buffer_size_);
+  DCHECK_GE(read_buffer_size_, net::kMaxBytesToSniff * 2);
+
+  *parent_read_buffer_ = read_buffer_;
+  *parent_read_buffer_size_ = read_buffer_size_;
+
+  parent_read_buffer_ = nullptr;
+  parent_read_buffer_size_ = nullptr;
+
+  state_ = State::STATE_BUFFERING;
+  Resume();
 }
 
 void MimeSniffingResourceHandler::ReplayResponseReceived() {
@@ -373,34 +426,6 @@ void MimeSniffingResourceHandler::ReplayReadCompleted() {
 
   next_handler_->OnReadCompleted(bytes_read,
                                  base::MakeUnique<Controller>(this));
-}
-
-bool MimeSniffingResourceHandler::ShouldSniffContent() {
-  if (request_context_type_ == REQUEST_CONTEXT_TYPE_FETCH) {
-    // MIME sniffing should be disabled for a request initiated by fetch().
-    return false;
-  }
-
-  const std::string& mime_type = response_->head.mime_type;
-
-  std::string content_type_options;
-  request()->GetResponseHeaderByName("x-content-type-options",
-                                     &content_type_options);
-
-  bool sniffing_blocked =
-      base::LowerCaseEqualsASCII(content_type_options, "nosniff");
-  bool we_would_like_to_sniff =
-      net::ShouldSniffMimeType(request()->url(), mime_type);
-
-  if (!sniffing_blocked && we_would_like_to_sniff) {
-    // We're going to look at the data before deciding what the content type
-    // is.  That means we need to delay sending the ResponseStarted message
-    // over the IPC channel.
-    VLOG(1) << "To buffer: " << request()->url().spec();
-    return true;
-  }
-
-  return false;
 }
 
 bool MimeSniffingResourceHandler::MaybeStartInterception() {
@@ -495,10 +520,8 @@ bool MimeSniffingResourceHandler::CheckForPluginHandler(
   std::unique_ptr<ResourceHandler> handler(host_->MaybeInterceptAsStream(
       plugin_path, request(), response_.get(), &payload));
   if (handler) {
-    if (!CheckResponseIsNotProvisional()) {
-      Cancel();
+    if (!CheckResponseIsNotProvisional())
       return false;
-    }
     *handled_by_plugin = true;
     intercepting_handler_->UseNewHandler(std::move(handler), payload);
   }
@@ -527,7 +550,7 @@ bool MimeSniffingResourceHandler::CheckResponseIsNotProvisional() {
   // download.
   // TODO(abarth): We should abstract the response_code test, but this kind
   // of check is scattered throughout our codebase.
-  request()->CancelWithError(net::ERR_INVALID_RESPONSE);
+  CancelWithError(net::ERR_INVALID_RESPONSE);
   return false;
 }
 

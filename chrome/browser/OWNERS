@@ -1,6 +1,9 @@
 # For simple changes (add/remove flag). For other changes use
 # usual OWNERS rules.
 per-file about_flags.cc=*
+per-file flag_descriptions.*=*
+
+per-file about_flags_unittest.cc=file://components/flags_ui/OWNERS
 
 # This is for the common case of adding or renaming files. If you're doing
 # structural changes, use usual OWNERS rules.
@@ -8,15 +11,9 @@ per-file BUILD.gn=*
 
 per-file *_android.*=file://chrome/browser/android/OWNERS
 
-per-file browser_resources.grd=bauerb@chromium.org
+per-file browser_resources.grd=file://ui/webui/PLATFORM_OWNERS
 per-file browser_resources.grd=calamity@chromium.org
-per-file browser_resources.grd=dbeam@chromium.org
-per-file browser_resources.grd=dpapad@chromium.org
-per-file browser_resources.grd=estade@chromium.org
-per-file browser_resources.grd=michaelpg@chromium.org
-per-file browser_resources.grd=pam@chromium.org
 per-file browser_resources.grd=tsergeant@chromium.org
-per-file browser_resources.grd=xiyuan@chromium.org
 
 per-file browser_close_manager_browsertest.cc=creis@chromium.org
 
@@ -50,6 +47,8 @@ per-file chrome_webusb_browser_client*=juncai@chromium.org
 per-file chrome_webusb_browser_client*=reillyg@chromium.org
 per-file chrome_webusb_browser_client*=rockot@chromium.org
 
+per-file exo_parts.*=reveman@chromium.org
+
 per-file io_thread*=cbentzel@chromium.org
 per-file io_thread*=mmenke@chromium.org
 per-file io_thread*=rch@chromium.org
@@ -80,10 +79,9 @@ per-file site_details*=nick@chromium.org
 per-file site_per_process_interactive_browsertest.cc=alexmos@chromium.org
 per-file site_per_process_interactive_browsertest.cc=file://content/OWNERS
 
-per-file PRESUBMIT.py=dbeam@chromium.org
-per-file test_presubmit.py=dbeam@chromium.org
-
 per-file unload_browsertest.cc=file://content/OWNERS
+
+per-file vr_shell_resources.grdp=file://chrome/browser/android/vr_shell/OWNERS
 
 per-file web_bluetooth*=jyasskin@chromium.org
 per-file web_bluetooth*=ortuno@chromium.org

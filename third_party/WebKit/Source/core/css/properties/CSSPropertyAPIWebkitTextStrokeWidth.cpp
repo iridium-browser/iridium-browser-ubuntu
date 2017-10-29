@@ -7,13 +7,15 @@
 #include "core/css/parser/CSSParserContext.h"
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIWebkitTextStrokeWidth::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  return CSSPropertyParserHelpers::consumeLineWidth(
-      range, context->mode(), CSSPropertyParserHelpers::UnitlessQuirk::Forbid);
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  return CSSPropertyParserHelpers::ConsumeLineWidth(
+      range, context.Mode(), CSSPropertyParserHelpers::UnitlessQuirk::kForbid);
 }
 
 }  // namespace blink

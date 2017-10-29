@@ -21,6 +21,7 @@
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/window_parenting_client.h"
+#include "ui/aura/client/window_types.h"
 #include "ui/aura/env.h"
 #include "ui/aura/mus/property_utils.h"
 #include "ui/aura/window.h"
@@ -48,11 +49,11 @@
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/window_reorderer.h"
 #include "ui/wm/core/shadow_types.h"
+#include "ui/wm/core/transient_window_manager.h"
 #include "ui/wm/core/window_animations.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
 #include "ui/wm/public/window_move_client.h"
-#include "ui/wm/public/window_types.h"
 
 #if defined(OS_WIN)
 #include "base/win/scoped_gdi_object.h"
@@ -110,7 +111,7 @@ NativeWidgetAura::NativeWidgetAura(internal::NativeWidgetDelegate* delegate,
       cursor_(gfx::kNullCursor),
       close_widget_factory_(this) {
   aura::client::SetFocusChangeObserver(window_, this);
-  aura::client::SetActivationChangeObserver(window_, this);
+  wm::SetActivationChangeObserver(window_, this);
 }
 
 // static
@@ -158,7 +159,7 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   aura::SetWindowType(window_, static_cast<ui::mojom::WindowType>(params.type));
   window_->SetProperty(aura::client::kShowStateKey, params.show_state);
   if (params.type == Widget::InitParams::TYPE_BUBBLE)
-    aura::client::SetHideOnDeactivate(window_, true);
+    wm::SetHideOnDeactivate(window_, true);
   window_->SetTransparent(
       params.opacity == Widget::InitParams::TRANSLUCENT_WINDOW);
   window_->Init(params.layer_type);
@@ -176,11 +177,19 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   if (!params.child) {
     // Set up the transient child before the window is added. This way the
     // LayoutManager knows the window has a transient parent.
-    if (parent && parent->type() != ui::wm::WINDOW_TYPE_UNKNOWN) {
+    if (parent && parent->type() != aura::client::WINDOW_TYPE_UNKNOWN) {
       wm::AddTransientChild(parent, window_);
       if (!context)
         context = parent;
       parent = NULL;
+
+      // Generally transient bubbles are showing state associated to the parent
+      // window. Make sure the transient bubble is only visible if the parent is
+      // visible, otherwise the bubble may not make sense by itself.
+      if (params.type == Widget::InitParams::TYPE_BUBBLE) {
+        wm::TransientWindowManager::Get(window_)
+            ->set_parent_controls_visibility(true);
+      }
     }
     // SetAlwaysOnTop before SetParent so that always-on-top container is used.
     SetAlwaysOnTop(params.keep_on_top);
@@ -233,7 +242,7 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
         base::MakeUnique<FocusManagerEventHandler>(GetWidget(), window_);
   }
 
-  aura::client::SetActivationDelegate(window_, this);
+  wm::SetActivationDelegate(window_, this);
 
   window_reorderer_.reset(new WindowReorderer(window_,
       GetWidget()->GetRootView()));
@@ -430,7 +439,7 @@ gfx::Rect NativeWidgetAura::GetRestoredBounds() const {
     return gfx::Rect();
 
   // Restored bounds should only be relevant if the window is minimized,
-  // maximized, fullscreen or docked. However, in some places the code expects
+  // maximized, or fullscreen. However, in some places the code expects
   // GetRestoredBounds() to return the current window bounds if the window is
   // not in either state.
   if (IsMinimized() || IsMaximized() || IsFullscreen()) {
@@ -440,20 +449,7 @@ gfx::Rect NativeWidgetAura::GetRestoredBounds() const {
     if (restore_bounds)
       return *restore_bounds;
   }
-  gfx::Rect bounds = window_->GetBoundsInScreen();
-  if (IsDocked()) {
-    // Restore bounds are in screen coordinates, no need to convert.
-    gfx::Rect* restore_bounds =
-        window_->GetProperty(aura::client::kRestoreBoundsKey);
-    // Use current window horizontal offset origin in order to preserve docked
-    // alignment but preserve restored size and vertical offset for the time
-    // when the |window_| gets undocked.
-    if (restore_bounds) {
-      bounds.set_size(restore_bounds->size());
-      bounds.set_y(restore_bounds->y());
-    }
-  }
-  return bounds;
+  return window_->GetBoundsInScreen();
 }
 
 std::string NativeWidgetAura::GetWorkspace() const {
@@ -541,11 +537,8 @@ void NativeWidgetAura::ShowWithWindowState(ui::WindowShowState state) {
   if (!window_)
     return;
 
-  // TODO(afakhry): Remove Docked Windows in M58.
-  if (state == ui::SHOW_STATE_MAXIMIZED || state == ui::SHOW_STATE_FULLSCREEN ||
-      state == ui::SHOW_STATE_DOCKED) {
+  if (state == ui::SHOW_STATE_MAXIMIZED || state == ui::SHOW_STATE_FULLSCREEN)
     window_->SetProperty(aura::client::kShowStateKey, state);
-  }
   window_->Show();
   if (delegate_->CanActivate()) {
     if (state != ui::SHOW_STATE_INACTIVE)
@@ -576,8 +569,7 @@ void NativeWidgetAura::Activate() {
   // We don't necessarily have a root window yet. This can happen with
   // constrained windows.
   if (window_->GetRootWindow()) {
-    aura::client::GetActivationClient(window_->GetRootWindow())->ActivateWindow(
-        window_);
+    wm::GetActivationClient(window_->GetRootWindow())->ActivateWindow(window_);
   }
   if (window_->GetProperty(aura::client::kDrawAttentionKey))
     window_->SetProperty(aura::client::kDrawAttentionKey, false);
@@ -586,8 +578,7 @@ void NativeWidgetAura::Activate() {
 void NativeWidgetAura::Deactivate() {
   if (!window_)
     return;
-  aura::client::GetActivationClient(window_->GetRootWindow())->DeactivateWindow(
-      window_);
+  wm::GetActivationClient(window_->GetRootWindow())->DeactivateWindow(window_);
 }
 
 bool NativeWidgetAura::IsActive() const {
@@ -710,18 +701,17 @@ Widget::MoveLoopResult NativeWidgetAura::RunMoveLoop(
   // loop.
   if (!window_ || !window_->GetRootWindow())
     return Widget::MOVE_LOOP_CANCELED;
-  aura::client::WindowMoveClient* move_client =
-      aura::client::GetWindowMoveClient(window_->GetRootWindow());
+  wm::WindowMoveClient* move_client =
+      wm::GetWindowMoveClient(window_->GetRootWindow());
   if (!move_client)
     return Widget::MOVE_LOOP_CANCELED;
 
   SetCapture();
-  aura::client::WindowMoveSource window_move_source =
-      source == Widget::MOVE_LOOP_SOURCE_MOUSE ?
-      aura::client::WINDOW_MOVE_SOURCE_MOUSE :
-      aura::client::WINDOW_MOVE_SOURCE_TOUCH;
+  wm::WindowMoveSource window_move_source =
+      source == Widget::MOVE_LOOP_SOURCE_MOUSE ? wm::WINDOW_MOVE_SOURCE_MOUSE
+                                               : wm::WINDOW_MOVE_SOURCE_TOUCH;
   if (move_client->RunMoveLoop(window_, drag_offset, window_move_source) ==
-          aura::client::MOVE_SUCCESSFUL) {
+      wm::MOVE_SUCCESSFUL) {
     return Widget::MOVE_LOOP_SUCCESSFUL;
   }
   return Widget::MOVE_LOOP_CANCELED;
@@ -730,8 +720,8 @@ Widget::MoveLoopResult NativeWidgetAura::RunMoveLoop(
 void NativeWidgetAura::EndMoveLoop() {
   if (!window_ || !window_->GetRootWindow())
     return;
-  aura::client::WindowMoveClient* move_client =
-      aura::client::GetWindowMoveClient(window_->GetRootWindow());
+  wm::WindowMoveClient* move_client =
+      wm::GetWindowMoveClient(window_->GetRootWindow());
   if (move_client)
     move_client->EndMoveLoop();
 }
@@ -925,17 +915,17 @@ void NativeWidgetAura::OnGestureEvent(ui::GestureEvent* event) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// NativeWidgetAura, aura::client::ActivationDelegate implementation:
+// NativeWidgetAura, wm::ActivationDelegate implementation:
 
 bool NativeWidgetAura::ShouldActivate() const {
   return delegate_->CanActivate();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// NativeWidgetAura, aura::client::ActivationChangeObserver implementation:
+// NativeWidgetAura, wm::ActivationChangeObserver implementation:
 
 void NativeWidgetAura::OnWindowActivated(
-    aura::client::ActivationChangeObserver::ActivationReason,
+    wm::ActivationChangeObserver::ActivationReason,
     aura::Window* gained_active,
     aura::Window* lost_active) {
   DCHECK(window_ == gained_active || window_ == lost_active);
@@ -999,13 +989,6 @@ NativeWidgetAura::~NativeWidgetAura() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetAura, private:
-
-// TODO(afakhry): Remove Docked Windows in M58.
-bool NativeWidgetAura::IsDocked() const {
-  return window_ &&
-         window_->GetProperty(aura::client::kShowStateKey) ==
-             ui::SHOW_STATE_DOCKED;
-}
 
 void NativeWidgetAura::SetInitialFocus(ui::WindowShowState show_state) {
   // The window does not get keyboard messages unless we focus it.

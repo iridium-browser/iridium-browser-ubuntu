@@ -171,11 +171,6 @@ const uint64_t kUFloat16MaxValue =  // 0x3FFC0000000
     ((UINT64_C(1) << kUFloat16MantissaEffectiveBits) - 1)
     << kUFloat16MaxExponent;
 
-// Default path ID.
-const QuicPathId kDefaultPathId = 0;
-// Invalid path ID.
-const QuicPathId kInvalidPathId = 0xff;
-
 // kDiversificationNonceSize is the size, in bytes, of the nonce that a server
 // may set in the packet header to ensure that its INITIAL keys are not
 // duplicated.
@@ -184,6 +179,9 @@ const size_t kDiversificationNonceSize = 32;
 // The largest gap in packets we'll accept without closing the connection.
 // This will likely have to be tuned.
 const QuicPacketNumber kMaxPacketGap = 5000;
+
+// The maximum number of random padding bytes to add.
+const QuicByteCount kMaxNumRandomPaddingBytes = 256;
 
 }  // namespace net
 

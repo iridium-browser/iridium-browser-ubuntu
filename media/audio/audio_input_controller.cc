@@ -20,13 +20,13 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
-#include "media/base/media_switches.h"
 #include "media/base/user_input_monitor.h"
 
 namespace media {
 namespace {
 
 const int kMaxInputChannels = 3;
+constexpr int kCheckMutedStateIntervalSeconds = 1;
 
 #if defined(AUDIO_POWER_MONITORING)
 // Time in seconds between two successive measurements of audio power levels.
@@ -124,36 +124,17 @@ class AudioInputController::AudioCallback
     received_callback_ = true;
 
     DeliverDataToSyncWriter(source, hardware_delay_bytes, volume);
-    PerformOptionalDebugRecording(source);
+
+#if BUILDFLAG(ENABLE_WEBRTC)
+    controller_->debug_recording_helper_.OnData(source);
+#endif
   }
 
   void OnError(AudioInputStream* stream) override {
     error_during_callback_ = true;
     controller_->task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&AudioInputController::DoReportError, weak_controller_));
-  }
-
-  void PerformOptionalDebugRecording(const AudioBus* source) {
-    // Called on the hw callback thread while recording is enabled.
-    if (!controller_->debug_writer_ || !controller_->debug_writer_->WillWrite())
-      return;
-
-    // TODO(tommi): This is costly. AudioBus heap allocs and we create a new
-    // one for every callback. We could instead have a pool of bus objects
-    // that get returned to us somehow.
-    // We should also avoid calling PostTask here since the implementation
-    // of the debug writer will basically do a PostTask straight away anyway.
-    // Might require some modifications to AudioDebugFileWriter though since
-    // there are some threading concerns there and AudioDebugFileWriter's
-    // lifetime guarantees need to be longer than that of associated active
-    // audio streams.
-    std::unique_ptr<AudioBus> source_copy =
-        AudioBus::Create(source->channels(), source->frames());
-    source->CopyTo(source_copy.get());
-    controller_->task_runner_->PostTask(
-        FROM_HERE, base::Bind(&AudioInputController::WriteInputDataForDebugging,
-                              weak_controller_, base::Passed(&source_copy)));
+        base::BindOnce(&AudioInputController::DoReportError, weak_controller_));
   }
 
   void DeliverDataToSyncWriter(const AudioBus* source,
@@ -175,9 +156,9 @@ class AudioInputController::AudioCallback
       // Use event handler on the audio thread to relay a message to the ARIH
       // in content which does the actual logging on the IO thread.
       controller_->task_runner_->PostTask(
-          FROM_HERE,
-          base::Bind(&AudioInputController::DoLogAudioLevels, weak_controller_,
-                     average_power_dbfs, mic_volume_percent));
+          FROM_HERE, base::BindOnce(&AudioInputController::DoLogAudioLevels,
+                                    weak_controller_, average_power_dbfs,
+                                    mic_volume_percent));
     }
   }
 
@@ -199,8 +180,7 @@ AudioInputController::AudioInputController(
     SyncWriter* sync_writer,
     UserInputMonitor* user_input_monitor,
     const AudioParameters& params,
-    StreamType type,
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner)
+    StreamType type)
     : creator_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       task_runner_(std::move(task_runner)),
       handler_(handler),
@@ -209,9 +189,7 @@ AudioInputController::AudioInputController(
       type_(type),
       user_input_monitor_(user_input_monitor),
 #if BUILDFLAG(ENABLE_WEBRTC)
-      debug_writer_(
-          base::MakeUnique<AudioDebugFileWriter>(params,
-                                                 std::move(file_task_runner))),
+      debug_recording_helper_(params, task_runner_, base::OnceClosure()),
 #endif
       weak_ptr_factory_(this) {
   DCHECK(creator_task_runner_.get());
@@ -222,6 +200,7 @@ AudioInputController::AudioInputController(
 AudioInputController::~AudioInputController() {
   DCHECK(!audio_callback_);
   DCHECK(!stream_);
+  DCHECK(!check_muted_state_timer_.IsRunning());
 }
 
 // static
@@ -232,8 +211,7 @@ scoped_refptr<AudioInputController> AudioInputController::Create(
     UserInputMonitor* user_input_monitor,
     const AudioParameters& params,
     const std::string& device_id,
-    bool enable_agc,
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner) {
+    bool enable_agc) {
   DCHECK(audio_manager);
   DCHECK(sync_writer);
   DCHECK(event_handler);
@@ -251,15 +229,14 @@ scoped_refptr<AudioInputController> AudioInputController::Create(
   // the audio-manager thread.
   scoped_refptr<AudioInputController> controller(new AudioInputController(
       audio_manager->GetTaskRunner(), event_handler, sync_writer,
-      user_input_monitor, params, ParamsToStreamType(params),
-      std::move(file_task_runner)));
+      user_input_monitor, params, ParamsToStreamType(params)));
 
   // Create and open a new audio input stream from the existing
   // audio-device thread. Use the provided audio-input device.
   if (!controller->task_runner_->PostTask(
-          FROM_HERE, base::Bind(&AudioInputController::DoCreate, controller,
-                                base::Unretained(audio_manager), params,
-                                device_id, enable_agc))) {
+          FROM_HERE, base::BindOnce(&AudioInputController::DoCreate, controller,
+                                    base::Unretained(audio_manager), params,
+                                    device_id, enable_agc))) {
     controller = nullptr;
   }
 
@@ -273,7 +250,6 @@ scoped_refptr<AudioInputController> AudioInputController::CreateForStream(
     AudioInputStream* stream,
     SyncWriter* sync_writer,
     UserInputMonitor* user_input_monitor,
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
     const AudioParameters& params) {
   DCHECK(sync_writer);
   DCHECK(stream);
@@ -288,13 +264,14 @@ scoped_refptr<AudioInputController> AudioInputController::CreateForStream(
 
   // Create the AudioInputController object and ensure that it runs on
   // the audio-manager thread.
-  scoped_refptr<AudioInputController> controller(new AudioInputController(
-      task_runner, event_handler, sync_writer, user_input_monitor, params,
-      VIRTUAL, std::move(file_task_runner)));
+  scoped_refptr<AudioInputController> controller(
+      new AudioInputController(task_runner, event_handler, sync_writer,
+                               user_input_monitor, params, VIRTUAL));
 
   if (!controller->task_runner_->PostTask(
-          FROM_HERE, base::Bind(&AudioInputController::DoCreateForStream,
-                                controller, stream, /*enable_agc*/ false))) {
+          FROM_HERE,
+          base::BindOnce(&AudioInputController::DoCreateForStream, controller,
+                         stream, /*enable_agc*/ false))) {
     controller = nullptr;
   }
 
@@ -303,22 +280,24 @@ scoped_refptr<AudioInputController> AudioInputController::CreateForStream(
 
 void AudioInputController::Record() {
   DCHECK(creator_task_runner_->BelongsToCurrentThread());
-  task_runner_->PostTask(FROM_HERE, base::Bind(
-      &AudioInputController::DoRecord, this));
+  task_runner_->PostTask(FROM_HERE,
+                         base::BindOnce(&AudioInputController::DoRecord, this));
 }
 
-void AudioInputController::Close(const base::Closure& closed_task) {
+void AudioInputController::Close(base::OnceClosure closed_task) {
   DCHECK(!closed_task.is_null());
   DCHECK(creator_task_runner_->BelongsToCurrentThread());
 
   task_runner_->PostTaskAndReply(
-      FROM_HERE, base::Bind(&AudioInputController::DoClose, this), closed_task);
+      FROM_HERE, base::BindOnce(&AudioInputController::DoClose, this),
+      std::move(closed_task));
 }
 
 void AudioInputController::SetVolume(double volume) {
   DCHECK(creator_task_runner_->BelongsToCurrentThread());
-  task_runner_->PostTask(FROM_HERE, base::Bind(
-      &AudioInputController::DoSetVolume, this, volume));
+  task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&AudioInputController::DoSetVolume, this, volume));
 }
 
 void AudioInputController::DoCreate(AudioManager* audio_manager,
@@ -341,7 +320,8 @@ void AudioInputController::DoCreate(AudioManager* audio_manager,
   // MakeAudioInputStream might fail and return nullptr. If so,
   // DoCreateForStream will handle and report it.
   auto* stream = audio_manager->MakeAudioInputStream(
-      params, device_id, base::Bind(&AudioInputController::LogMessage, this));
+      params, device_id,
+      base::BindRepeating(&AudioInputController::LogMessage, this));
   DoCreateForStream(stream, enable_agc);
 }
 
@@ -350,6 +330,7 @@ void AudioInputController::DoCreateForStream(
     bool enable_agc) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(!stream_);
+  handler_->OnLog(this, "AIC::DoCreateForStream");
 
   if (!stream_to_control) {
     LogCaptureStartupResult(CAPTURE_STARTUP_CREATE_STREAM_FAILED);
@@ -378,7 +359,15 @@ void AudioInputController::DoCreateForStream(
 
   // Finally, keep the stream pointer around, update the state and notify.
   stream_ = stream_to_control;
-  handler_->OnCreated(this);
+
+  // Send initial muted state along with OnCreated, to avoid races.
+  is_muted_ = stream_->IsMuted();
+  handler_->OnCreated(this, is_muted_);
+
+  check_muted_state_timer_.Start(
+      FROM_HERE, base::TimeDelta::FromSeconds(kCheckMutedStateIntervalSeconds),
+      this, &AudioInputController::CheckMutedState);
+  DCHECK(check_muted_state_timer_.IsRunning());
 }
 
 void AudioInputController::DoRecord() {
@@ -408,6 +397,11 @@ void AudioInputController::DoClose() {
   if (!stream_)
     return;
 
+  check_muted_state_timer_.AbandonAndStop();
+
+  std::string log_string;
+  static const char kLogStringPrefix[] = "AIC::DoClose:";
+
   // Allow calling unconditionally and bail if we don't have a stream to close.
   if (audio_callback_) {
     stream_->Stop();
@@ -425,14 +419,15 @@ void AudioInputController::DoClose() {
                    : CAPTURE_STARTUP_NEVER_GOT_DATA);
     LogCaptureStartupResult(capture_startup_result);
     LogCallbackError();
+
+    log_string = base::StringPrintf(
+        "%s stream duration=%" PRId64 " seconds%s", kLogStringPrefix,
+        duration.InSeconds(),
+        audio_callback_->received_callback() ? "" : " (no callbacks received)");
+
     if (type_ == LOW_LATENCY) {
       if (audio_callback_->received_callback()) {
-        // Log the total duration (since DoCreate) and update the histogram.
         UMA_HISTOGRAM_LONG_TIMES("Media.InputStreamDuration", duration);
-        const std::string log_string = base::StringPrintf(
-            "AIC::DoClose: stream duration=%" PRId64 " seconds",
-            duration.InSeconds());
-        handler_->OnLog(this, log_string);
       } else {
         UMA_HISTOGRAM_LONG_TIMES("Media.InputStreamDurationWithoutCallback",
                                  duration);
@@ -440,7 +435,12 @@ void AudioInputController::DoClose() {
     }
 
     audio_callback_.reset();
+  } else {
+    log_string =
+        base::StringPrintf("%s recording never started", kLogStringPrefix);
   }
+
+  handler_->OnLog(this, log_string);
 
   stream_->Close();
   stream_ = nullptr;
@@ -456,8 +456,9 @@ void AudioInputController::DoClose() {
     LogSilenceState(silence_state_);
 #endif
 
-  if (debug_writer_)
-    debug_writer_->Stop();
+#if BUILDFLAG(ENABLE_WEBRTC)
+  debug_recording_helper_.DisableDebugRecording();
+#endif
 
   max_volume_ = 0.0;
   weak_ptr_factory_.InvalidateWeakPtrs();
@@ -531,17 +532,21 @@ void AudioInputController::DoLogAudioLevels(float level_dbfs,
 
 void AudioInputController::EnableDebugRecording(
     const base::FilePath& file_name) {
+#if BUILDFLAG(ENABLE_WEBRTC)
   DCHECK(creator_task_runner_->BelongsToCurrentThread());
   task_runner_->PostTask(
-      FROM_HERE, base::Bind(&AudioInputController::DoEnableDebugRecording, this,
-                            file_name));
+      FROM_HERE, base::BindOnce(&AudioInputController::DoEnableDebugRecording,
+                                this, file_name));
+#endif
 }
 
 void AudioInputController::DisableDebugRecording() {
+#if BUILDFLAG(ENABLE_WEBRTC)
   DCHECK(creator_task_runner_->BelongsToCurrentThread());
   task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&AudioInputController::DoDisableDebugRecording, this));
+      base::BindOnce(&AudioInputController::DoDisableDebugRecording, this));
+#endif
 }
 
 #if defined(AUDIO_POWER_MONITORING)
@@ -614,25 +619,18 @@ void AudioInputController::LogCallbackError() {
   }
 }
 
+#if BUILDFLAG(ENABLE_WEBRTC)
 void AudioInputController::DoEnableDebugRecording(
     const base::FilePath& file_name) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  if (debug_writer_)
-    debug_writer_->Start(file_name);
+  debug_recording_helper_.EnableDebugRecording(file_name);
 }
 
 void AudioInputController::DoDisableDebugRecording() {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  if (debug_writer_)
-    debug_writer_->Stop();
+  debug_recording_helper_.DisableDebugRecording();
 }
-
-void AudioInputController::WriteInputDataForDebugging(
-    std::unique_ptr<AudioBus> data) {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-  if (debug_writer_)
-    debug_writer_->Write(std::move(data));
-}
+#endif  // BUILDFLAG(ENABLE_WEBRTC)
 
 void AudioInputController::LogMessage(const std::string& message) {
   DCHECK(task_runner_->BelongsToCurrentThread());
@@ -678,6 +676,17 @@ bool AudioInputController::CheckAudioPower(const AudioBus* source,
 #else
   return false;
 #endif
+}
+
+void AudioInputController::CheckMutedState() {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  DCHECK(stream_);
+  const bool new_state = stream_->IsMuted();
+  if (new_state != is_muted_) {
+    is_muted_ = new_state;
+    // We don't log OnMuted here, but leave that for AudioInputRendererHost.
+    handler_->OnMuted(this, is_muted_);
+  }
 }
 
 // static

@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
+#include "base/message_loop/message_loop.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
@@ -340,9 +341,9 @@ TEST_F(AudioRendererSinkCacheTest, MultithreadedAccess) {
   EXPECT_EQ(1, sink_count());
 
   // Release the sink on the second thread.
-  PostAndRunUntilDone(thread2,
-                      base::Bind(&AudioRendererSinkCache::ReleaseSink,
-                                 base::Unretained(cache_.get()), sink));
+  PostAndRunUntilDone(thread2, base::Bind(&AudioRendererSinkCache::ReleaseSink,
+                                          base::Unretained(cache_.get()),
+                                          base::RetainedRef(sink)));
 
   EXPECT_EQ(0, sink_count());
 }

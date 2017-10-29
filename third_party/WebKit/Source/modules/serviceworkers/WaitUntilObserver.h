@@ -8,7 +8,8 @@
 #include "modules/ModulesExport.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "platform/Timer.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
+#include "platform/wtf/Functional.h"
 
 namespace blink {
 
@@ -16,41 +17,53 @@ class ExceptionState;
 class ExecutionContext;
 class ScriptPromise;
 class ScriptState;
-class ScriptValue;
 
 // Created for each ExtendableEvent instance.
 class MODULES_EXPORT WaitUntilObserver final
     : public GarbageCollectedFinalized<WaitUntilObserver> {
  public:
+  using PromiseSettledCallback = Function<void(const ScriptValue&)>;
+
   enum EventType {
-    Activate,
-    Fetch,
-    Install,
-    Message,
-    NotificationClick,
-    NotificationClose,
-    PaymentRequest,
-    Push,
-    Sync
+    kActivate,
+    kCanMakePayment,
+    kFetch,
+    kInstall,
+    kMessage,
+    kNotificationClick,
+    kNotificationClose,
+    kPaymentRequest,
+    kPush,
+    kSync,
+    kBackgroundFetchAbort,
+    kBackgroundFetchClick,
+    kBackgroundFetchFail,
+    kBackgroundFetched
   };
 
-  static WaitUntilObserver* create(ExecutionContext*, EventType, int eventID);
+  static WaitUntilObserver* Create(ExecutionContext*, EventType, int event_id);
 
-  // Must be called before and after dispatching the event.
-  void willDispatchEvent();
-  void didDispatchEvent(bool errorOccurred);
+  // Must be called before dispatching the event.
+  void WillDispatchEvent();
+  // Must be called after dispatching the event. If |event_dispatch_failed| is
+  // true, then DidDispatchEvent() immediately reports to
+  // ServiceWorkerGlobalScopeClient that the event finished, without waiting for
+  // all waitUntil promises to settle.
+  void DidDispatchEvent(bool event_dispatch_failed);
 
-  // Observes the promise and delays calling the continuation until
-  // the given promise is resolved or rejected.
-  void waitUntil(ScriptState*, ScriptPromise, ExceptionState&);
-
-  // These methods can be called when the lifecycle of ExtendableEvent
-  // observed by this WaitUntilObserver should be extended by other reason
-  // than ExtendableEvent.waitUntil.
-  // Note: There is no need to call decrementPendingActivity() after the context
-  // is being destroyed.
-  void incrementPendingActivity();
-  void decrementPendingActivity();
+  // Observes the promise and delays reporting to ServiceWorkerGlobalScopeClient
+  // that the event completed until the given promise is resolved or rejected.
+  // WaitUntil may be called multiple times. The event is extended until all
+  // promises have settled.
+  // If provided, |on_promise_fulfilled| or |on_promise_rejected| is invoked
+  // once |script_promise| fulfills or rejects. This enables the caller to do
+  // custom handling.
+  void WaitUntil(
+      ScriptState*,
+      ScriptPromise /* script_promise */,
+      ExceptionState&,
+      std::unique_ptr<PromiseSettledCallback> on_promise_fulfilled = nullptr,
+      std::unique_ptr<PromiseSettledCallback> on_promise_rejected = nullptr);
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -58,20 +71,43 @@ class MODULES_EXPORT WaitUntilObserver final
   friend class InternalsServiceWorker;
   class ThenFunction;
 
-  WaitUntilObserver(ExecutionContext*, EventType, int eventID);
+  enum class EventDispatchState {
+    // Event dispatch has not yet started.
+    kInitial,
+    // Event dispatch has started but not yet finished.
+    kDispatching,
+    // Event dispatch completed. There may still be outstanding waitUntil
+    // promises that must settle before notifying ServiceWorkerGlobalScopeClient
+    // that the event finished.
+    kDispatched,
+    // Event dispatch failed. Any outstanding waitUntil promises are ignored.
+    kFailed
+  };
 
-  void reportError(const ScriptValue&);
+  WaitUntilObserver(ExecutionContext*, EventType, int event_id);
 
-  void consumeWindowInteraction(TimerBase*);
+  void IncrementPendingPromiseCount();
+  void DecrementPendingPromiseCount();
 
-  Member<ExecutionContext> m_executionContext;
-  EventType m_type;
-  int m_eventID;
-  int m_pendingActivity = 0;
-  bool m_hasError = false;
-  bool m_eventDispatched = false;
-  double m_eventDispatchTime = 0;
-  TaskRunnerTimer<WaitUntilObserver> m_consumeWindowInteractionTimer;
+  // Enqueued as a microtask when a promise passed to a waitUntil() call that is
+  // associated with this observer was fulfilled.
+  void OnPromiseFulfilled();
+  // Enqueued as a microtask when a promise passed to a waitUntil() call that is
+  // associated with this observer was rejected.
+  void OnPromiseRejected();
+
+  void ConsumeWindowInteraction(TimerBase*);
+
+  void MaybeCompleteEvent();
+
+  Member<ExecutionContext> execution_context_;
+  EventType type_;
+  int event_id_;
+  int pending_promises_ = 0;
+  EventDispatchState event_dispatch_state_ = EventDispatchState::kInitial;
+  bool has_rejected_promise_ = false;
+  double event_dispatch_time_ = 0;
+  TaskRunnerTimer<WaitUntilObserver> consume_window_interaction_timer_;
 };
 
 }  // namespace blink

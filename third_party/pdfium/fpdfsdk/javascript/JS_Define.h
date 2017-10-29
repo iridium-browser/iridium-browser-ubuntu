@@ -173,14 +173,15 @@ void JSMethod(const char* method_name_string,
   static JSConstSpec ConstSpecs[];    \
   static void DefineConsts(CFXJS_Engine* pEngine);
 
-#define IMPLEMENT_JS_CLASS_CONST_PART(js_class_name, class_name)             \
-  void js_class_name::DefineConsts(CFXJS_Engine* pEngine) {                  \
-    for (size_t i = 0; i < FX_ArraySize(ConstSpecs) - 1; ++i) {              \
-      pEngine->DefineObjConst(g_nObjDefnID, ConstSpecs[i].pName,             \
-                              ConstSpecs[i].eType == JSConstSpec::Number     \
-                                  ? pEngine->NewNumber(ConstSpecs[i].number) \
-                                  : pEngine->NewString(ConstSpecs[i].pStr)); \
-    }                                                                        \
+#define IMPLEMENT_JS_CLASS_CONST_PART(js_class_name, class_name)         \
+  void js_class_name::DefineConsts(CFXJS_Engine* pEngine) {              \
+    for (size_t i = 0; i < FX_ArraySize(ConstSpecs) - 1; ++i) {          \
+      pEngine->DefineObjConst(                                           \
+          g_nObjDefnID, ConstSpecs[i].pName,                             \
+          ConstSpecs[i].eType == JSConstSpec::Number                     \
+              ? pEngine->NewNumber(ConstSpecs[i].number).As<v8::Value>() \
+              : pEngine->NewString(ConstSpecs[i].pStr).As<v8::Value>()); \
+    }                                                                    \
   }
 
 // Convenience macros for declaring classes without an alternate.
@@ -222,7 +223,7 @@ void JSMethod(const char* method_name_string,
                                     v8::Local<v8::Object> obj) {        \
     CJS_Object* pObj = new js_class_name(obj);                          \
     pObj->SetEmbedObject(new class_alternate(pObj));                    \
-    pEngine->SetObjectPrivate(obj, (void*)pObj);                        \
+    pEngine->SetObjectPrivate(obj, pObj);                               \
     pObj->InitInstance(static_cast<CJS_Runtime*>(pEngine));             \
   }                                                                     \
   void js_class_name::JSDestructor(CFXJS_Engine* pEngine,               \

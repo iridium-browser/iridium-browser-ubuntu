@@ -8,6 +8,8 @@ static_library("browser") {
   sources = [
     "address.cc",
     "address.h",
+    "address_combobox_model.cc",
+    "address_combobox_model.h",
     "address_field.cc",
     "address_field.h",
     "address_i18n.cc",
@@ -18,6 +20,8 @@ static_library("browser") {
     "autocomplete_history_manager.cc",
     "autocomplete_history_manager.h",
     "autofill-inl.h",
+    "autofill_address_util.cc",
+    "autofill_address_util.h",
     "autofill_client.h",
     "autofill_country.cc",
     "autofill_country.h",
@@ -36,6 +40,10 @@ static_library("browser") {
     "autofill_external_delegate.h",
     "autofill_field.cc",
     "autofill_field.h",
+    "autofill_handler.cc",
+    "autofill_handler.h",
+    "autofill_handler_proxy.cc",
+    "autofill_handler_proxy.h",
     "autofill_ie_toolbar_import_win.cc",
     "autofill_ie_toolbar_import_win.h",
     "autofill_manager.cc",
@@ -48,12 +56,10 @@ static_library("browser") {
     "autofill_profile.h",
     "autofill_profile_comparator.cc",
     "autofill_profile_comparator.h",
-    "autofill_regex_constants.cc",
-    "autofill_regex_constants.h",
+    "autofill_provider.cc",
+    "autofill_provider.h",
     "autofill_scanner.cc",
     "autofill_scanner.h",
-    "autofill_sync_constants.cc",
-    "autofill_sync_constants.h",
     "autofill_type.cc",
     "autofill_type.h",
     "autofill_wallet_data_type_controller.cc",
@@ -109,6 +115,12 @@ static_library("browser") {
     "phone_number_i18n.cc",
     "phone_number_i18n.h",
     "popup_item_ids.h",
+    "region_combobox_model.cc",
+    "region_combobox_model.h",
+    "region_data_loader.h",
+    "region_data_loader_impl.cc",
+    "region_data_loader_impl.h",
+    "risk_data_loader.h",
     "server_field_types_util.cc",
     "server_field_types_util.h",
     "state_names.cc",
@@ -131,8 +143,6 @@ static_library("browser") {
     "webdata/autofill_data_type_controller.h",
     "webdata/autofill_entry.cc",
     "webdata/autofill_entry.h",
-    "webdata/autofill_metadata_change_list.cc",
-    "webdata/autofill_metadata_change_list.h",
     "webdata/autofill_profile_data_type_controller.cc",
     "webdata/autofill_profile_data_type_controller.h",
     "webdata/autofill_profile_syncable_service.cc",
@@ -178,12 +188,17 @@ static_library("browser") {
     ]
   }
 
+  if (!is_android) {
+    sources += [ "ui/save_card_bubble_controller.h" ]
+  }
+
   configs += [ "//build/config:precompiled_headers" ]
 
   public_deps = [
     "//components/autofill/core/browser/proto",
     "//components/autofill/core/common",
     "//components/resources",
+    "//skia",
   ]
   deps = [
     "//base",
@@ -206,11 +221,10 @@ static_library("browser") {
     "//components/webdata/common",
     "//google_apis",
     "//net",
-    "//skia",
     "//sql",
     "//third_party/fips181",
     "//third_party/icu",
-    "//third_party/libaddressinput:util",
+    "//third_party/libaddressinput",
     "//third_party/libphonenumber",
     "//third_party/re2",
     "//ui/base",
@@ -245,7 +259,16 @@ static_library("test_support") {
     "test_autofill_external_delegate.h",
     "test_personal_data_manager.cc",
     "test_personal_data_manager.h",
+    "test_region_data_loader.cc",
+    "test_region_data_loader.h",
   ]
+
+  if (!is_android) {
+    sources += [
+      "ui/mock_save_card_bubble_controller.cc",
+      "ui/mock_save_card_bubble_controller.h",
+    ]
+  }
 
   public_deps = [
     ":browser",
@@ -269,6 +292,7 @@ static_library("test_support") {
     "//google_apis:test_support",
     "//skia",
     "//testing/gtest",
+    "//third_party/libaddressinput:util",
     "//ui/gfx:test_support",
     "//ui/gfx/geometry",
   ]
@@ -300,6 +324,7 @@ bundle_data("unit_tests_bundle_data") {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "address_combobox_model_unittest.cc",
     "address_field_unittest.cc",
     "address_i18n_unittest.cc",
     "address_rewriter_unittest.cc",
@@ -336,6 +361,7 @@ source_set("unit_tests") {
     "phone_field_unittest.cc",
     "phone_number_i18n_unittest.cc",
     "phone_number_unittest.cc",
+    "region_combobox_model_unittest.cc",
     "ui/card_unmask_prompt_controller_impl_unittest.cc",
     "validation_unittest.cc",
     "webdata/autocomplete_sync_bridge_unittest.cc",

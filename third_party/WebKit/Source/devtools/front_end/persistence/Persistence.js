@@ -1,6 +1,7 @@
 // Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 /**
  * @unrestricted
  */
@@ -8,7 +9,7 @@ Persistence.Persistence = class extends Common.Object {
   /**
    * @param {!Workspace.Workspace} workspace
    * @param {!Bindings.BreakpointManager} breakpointManager
-   * @param {!Workspace.FileSystemMapping} fileSystemMapping
+   * @param {!Persistence.FileSystemMapping} fileSystemMapping
    */
   constructor(workspace, breakpointManager, fileSystemMapping) {
     super();
@@ -32,10 +33,18 @@ Persistence.Persistence = class extends Common.Object {
   }
 
   /**
+   * @param {function(function(!Persistence.PersistenceBinding), function(!Persistence.PersistenceBinding)):!Persistence.MappingSystem} mappingFactory
+   */
+  _setMappingForTest(mappingFactory) {
+    this._mapping.dispose();
+    this._mapping = mappingFactory(this._validateBinding.bind(this), this._onBindingRemoved.bind(this));
+  }
+
+  /**
    * @param {!Persistence.PersistenceBinding} binding
    */
   _validateBinding(binding) {
-    if (!Runtime.experiments.isEnabled('persistenceValidation') || binding.network.contentType().isFromSourceMap() ||
+    if (!Runtime.experiments.isEnabled('persistence2') || binding.network.contentType().isFromSourceMap() ||
         !binding.fileSystem.contentType().isTextType()) {
       this._establishBinding(binding);
       return;
@@ -287,7 +296,7 @@ Persistence.Persistence = class extends Common.Object {
    * @param {function()} listener
    */
   unsubscribeFromBindingEvent(uiSourceCode, listener) {
-    this._subscribedBindingEventListeners.remove(uiSourceCode, listener);
+    this._subscribedBindingEventListeners.delete(uiSourceCode, listener);
   }
 
   /**
@@ -380,6 +389,15 @@ Persistence.PersistenceBinding = class {
     this.exactMatch = exactMatch;
     this._removed = false;
   }
+};
+
+/**
+ * @interface
+ */
+Persistence.MappingSystem = function() {};
+
+Persistence.MappingSystem.prototype = {
+  dispose: function() {}
 };
 
 /** @type {!Persistence.Persistence} */

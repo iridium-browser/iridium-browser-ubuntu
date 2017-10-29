@@ -18,7 +18,6 @@
 #include "base/version.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/extension_install_ui_util.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/install_tracker.h"
@@ -122,8 +121,8 @@ api::webstore_private::Result WebstoreInstallHelperResultToApiResult(
   return api::webstore_private::RESULT_NONE;
 }
 
-static base::LazyInstance<PendingApprovals> g_pending_approvals =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<PendingApprovals>::DestructorAtExit
+    g_pending_approvals = LAZY_INSTANCE_INITIALIZER;
 
 // A preference set by the web store to indicate login information for
 // purchased apps.
@@ -545,7 +544,7 @@ ExtensionFunction::ResponseAction WebstorePrivateSetStoreLoginFunction::Run() {
 
 WebstorePrivateGetWebGLStatusFunction::WebstorePrivateGetWebGLStatusFunction()
     : feature_checker_(content::GpuFeatureChecker::Create(
-          gpu::GPU_FEATURE_TYPE_WEBGL,
+          gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL,
           base::Bind(&WebstorePrivateGetWebGLStatusFunction::OnFeatureCheck,
                      base::Unretained(this)))) {}
 

@@ -29,11 +29,10 @@
 
 #include "platform/PlatformExport.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
-#include "platform/network/ResourceRequest.h"
-#include "wtf/Allocator.h"
-#include "wtf/Forward.h"
-#include "wtf/HashSet.h"
-#include "wtf/PassRefPtr.h"
+#include "platform/loader/fetch/ResourceRequest.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Forward.h"
+#include "platform/wtf/HashSet.h"
 
 namespace blink {
 
@@ -94,20 +93,20 @@ class PLATFORM_EXPORT CrossOriginAccessControl {
   // Perform a CORS access check on the response. Returns |kAccessAllowed| if
   // access is allowed. Use |accessControlErrorString()| to construct a
   // user-friendly error message for any of the other (error) conditions.
-  static AccessStatus checkAccess(const ResourceResponse&,
-                                  StoredCredentials,
+  static AccessStatus CheckAccess(const ResourceResponse&,
+                                  WebURLRequest::FetchCredentialsMode,
                                   const SecurityOrigin*);
 
   // Perform the required CORS checks on the response to a preflight request.
   // Returns |kPreflightSuccess| if preflight response was successful.
   // Use |preflightErrorString()| to construct a user-friendly error message
   // for any of the other (error) conditions.
-  static PreflightStatus checkPreflight(const ResourceResponse&);
+  static PreflightStatus CheckPreflight(const ResourceResponse&);
 
   // Error checking for the currently experimental
   // "Access-Control-Allow-External:" header. Shares error conditions with
   // standard preflight checking.
-  static PreflightStatus checkExternalPreflight(const ResourceResponse&);
+  static PreflightStatus CheckExternalPreflight(const ResourceResponse&);
 
   // Given a redirected-to URL, check if the location is allowed
   // according to CORS. That is:
@@ -117,38 +116,38 @@ class PLATFORM_EXPORT CrossOriginAccessControl {
   // Returns |kRedirectSuccess| in all other cases. Use
   // |redirectErrorString()| to construct a user-friendly error
   // message for any of the error conditions.
-  static RedirectStatus checkRedirectLocation(const KURL&);
+  static RedirectStatus CheckRedirectLocation(const KURL&);
 
-  static bool handleRedirect(PassRefPtr<SecurityOrigin>,
+  static bool HandleRedirect(RefPtr<SecurityOrigin>,
                              ResourceRequest&,
                              const ResourceResponse&,
-                             StoredCredentials,
+                             WebURLRequest::FetchCredentialsMode,
                              ResourceLoaderOptions&,
                              String&);
 
   // Stringify errors from CORS access checks, preflight or redirect checks.
-  static void accessControlErrorString(StringBuilder&,
+  static void AccessControlErrorString(StringBuilder&,
                                        AccessStatus,
                                        const ResourceResponse&,
                                        const SecurityOrigin*,
                                        WebURLRequest::RequestContext);
-  static void preflightErrorString(StringBuilder&,
+  static void PreflightErrorString(StringBuilder&,
                                    PreflightStatus,
                                    const ResourceResponse&);
-  static void redirectErrorString(StringBuilder&, RedirectStatus, const KURL&);
+  static void RedirectErrorString(StringBuilder&, RedirectStatus, const KURL&);
+
+  static bool IsOnAccessControlResponseHeaderWhitelist(const String&);
+
+  static ResourceRequest CreateAccessControlPreflightRequest(
+      const ResourceRequest&);
+
+  static void ParseAccessControlExposeHeadersAllowList(
+      const String& header_value,
+      HTTPHeaderSet&);
+
+  static void ExtractCorsExposedHeaderNamesList(const ResourceResponse&,
+                                                HTTPHeaderSet&);
 };
-
-// TODO: also migrate these into the above static class.
-PLATFORM_EXPORT bool isOnAccessControlResponseHeaderWhitelist(const String&);
-
-PLATFORM_EXPORT ResourceRequest
-createAccessControlPreflightRequest(const ResourceRequest&);
-
-PLATFORM_EXPORT void parseAccessControlExposeHeadersAllowList(
-    const String& headerValue,
-    HTTPHeaderSet&);
-PLATFORM_EXPORT void extractCorsExposedHeaderNamesList(const ResourceResponse&,
-                                                       HTTPHeaderSet&);
 
 }  // namespace blink
 

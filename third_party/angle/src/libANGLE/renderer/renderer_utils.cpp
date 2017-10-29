@@ -12,6 +12,7 @@
 #include "image_util/copyimage.h"
 #include "image_util/imageformats.h"
 
+#include "libANGLE/AttributeMap.h"
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/Format.h"
 
@@ -130,19 +131,19 @@ static FormatWriteFunctionMap BuildFormatWriteFunctionMap()
     InsertFormatWriteFunctionMapping(&map, GL_SRGB_EXT,           GL_UNSIGNED_BYTE,                  WriteColor<R8G8B8, GLfloat>       );
     InsertFormatWriteFunctionMapping(&map, GL_SRGB_ALPHA_EXT,     GL_UNSIGNED_BYTE,                  WriteColor<R8G8B8A8, GLfloat>     );
 
-    InsertFormatWriteFunctionMapping(&map, GL_COMPRESSED_RGB_S3TC_DXT1_EXT,    GL_UNSIGNED_BYTE,     NULL                              );
-    InsertFormatWriteFunctionMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,   GL_UNSIGNED_BYTE,     NULL                              );
-    InsertFormatWriteFunctionMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT3_ANGLE, GL_UNSIGNED_BYTE,     NULL                              );
-    InsertFormatWriteFunctionMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT5_ANGLE, GL_UNSIGNED_BYTE,     NULL                              );
+    InsertFormatWriteFunctionMapping(&map, GL_COMPRESSED_RGB_S3TC_DXT1_EXT,    GL_UNSIGNED_BYTE,     nullptr                              );
+    InsertFormatWriteFunctionMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,   GL_UNSIGNED_BYTE,     nullptr                              );
+    InsertFormatWriteFunctionMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT3_ANGLE, GL_UNSIGNED_BYTE,     nullptr                              );
+    InsertFormatWriteFunctionMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT5_ANGLE, GL_UNSIGNED_BYTE,     nullptr                              );
 
-    InsertFormatWriteFunctionMapping(&map, GL_DEPTH_COMPONENT,    GL_UNSIGNED_SHORT,                 NULL                              );
-    InsertFormatWriteFunctionMapping(&map, GL_DEPTH_COMPONENT,    GL_UNSIGNED_INT,                   NULL                              );
-    InsertFormatWriteFunctionMapping(&map, GL_DEPTH_COMPONENT,    GL_FLOAT,                          NULL                              );
+    InsertFormatWriteFunctionMapping(&map, GL_DEPTH_COMPONENT,    GL_UNSIGNED_SHORT,                 nullptr                              );
+    InsertFormatWriteFunctionMapping(&map, GL_DEPTH_COMPONENT,    GL_UNSIGNED_INT,                   nullptr                              );
+    InsertFormatWriteFunctionMapping(&map, GL_DEPTH_COMPONENT,    GL_FLOAT,                          nullptr                              );
 
-    InsertFormatWriteFunctionMapping(&map, GL_STENCIL,            GL_UNSIGNED_BYTE,                  NULL                              );
+    InsertFormatWriteFunctionMapping(&map, GL_STENCIL,            GL_UNSIGNED_BYTE,                  nullptr                              );
 
-    InsertFormatWriteFunctionMapping(&map, GL_DEPTH_STENCIL,      GL_UNSIGNED_INT_24_8,              NULL                              );
-    InsertFormatWriteFunctionMapping(&map, GL_DEPTH_STENCIL,      GL_FLOAT_32_UNSIGNED_INT_24_8_REV, NULL                              );
+    InsertFormatWriteFunctionMapping(&map, GL_DEPTH_STENCIL,      GL_UNSIGNED_INT_24_8,              nullptr                              );
+    InsertFormatWriteFunctionMapping(&map, GL_DEPTH_STENCIL,      GL_FLOAT_32_UNSIGNED_INT_24_8_REV, nullptr                              );
     // clang-format on
 
     return map;
@@ -170,6 +171,18 @@ PackPixelsParams::PackPixelsParams(const gl::Rectangle &areaIn,
 {
 }
 
+PackPixelsParams::PackPixelsParams(const gl::Context *context, const PackPixelsParams &other)
+    : area(other.area),
+      format(other.format),
+      type(other.type),
+      outputPitch(other.outputPitch),
+      packBuffer(other.packBuffer),
+      pack(),
+      offset(other.offset)
+{
+    pack.copyFrom(context, other.pack);
+}
+
 void PackPixels(const PackPixelsParams &params,
                 const angle::Format &sourceFormat,
                 int inputPitchIn,
@@ -187,7 +200,7 @@ void PackPixels(const PackPixelsParams &params,
         inputPitch = -inputPitch;
     }
 
-    const auto &sourceGLInfo = gl::GetInternalFormatInfo(sourceFormat.glInternalFormat);
+    const auto &sourceGLInfo = gl::GetSizedInternalFormatInfo(sourceFormat.glInternalFormat);
 
     if (sourceGLInfo.format == params.format && sourceGLInfo.type == params.type)
     {
@@ -200,13 +213,12 @@ void PackPixels(const PackPixelsParams &params,
         return;
     }
 
-    ASSERT(sourceGLInfo.pixelBytes > 0);
+    ASSERT(sourceGLInfo.sized);
 
     gl::FormatType formatType(params.format, params.type);
     ColorCopyFunction fastCopyFunc =
         GetFastCopyFunction(sourceFormat.fastCopyFunctions, formatType);
-    GLenum sizedDestInternalFormat = gl::GetSizedInternalFormat(formatType.format, formatType.type);
-    const auto &destFormatInfo     = gl::GetInternalFormatInfo(sizedDestInternalFormat);
+    const auto &destFormatInfo = gl::GetInternalFormatInfo(formatType.format, formatType.type);
 
     if (fastCopyFunc)
     {
@@ -287,6 +299,19 @@ ColorCopyFunction FastCopyFunctionMap::get(const gl::FormatType &formatType) con
     }
 
     return nullptr;
+}
+
+bool ShouldUseDebugLayers(const egl::AttributeMap &attribs)
+{
+    EGLAttrib debugSetting =
+        attribs.get(EGL_PLATFORM_ANGLE_DEBUG_LAYERS_ENABLED_ANGLE, EGL_DONT_CARE);
+
+// Prefer to enable debug layers if compiling in Debug, and disabled in Release.
+#if !defined(NDEBUG)
+    return (debugSetting != EGL_FALSE);
+#else
+    return (debugSetting == EGL_TRUE);
+#endif  // !defined(NDEBUG)
 }
 
 }  // namespace rx

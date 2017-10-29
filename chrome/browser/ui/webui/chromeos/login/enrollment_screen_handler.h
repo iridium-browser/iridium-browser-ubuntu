@@ -15,13 +15,24 @@
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
+#include "chromeos/dbus/auth_policy_client.h"
 #include "net/base/net_errors.h"
-#include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
 
+class AuthPolicyLoginHelper;
 class ErrorScreensHistogramHelper;
 class HelpAppLauncher;
+
+// Possible error states of the Active Directory screen. Must be in the same
+// order as ACTIVE_DIRECTORY_ERROR_STATE enum values.
+enum class ActiveDirectoryErrorState {
+  NONE = 0,
+  MACHINE_NAME_INVALID = 1,
+  MACHINE_NAME_TOO_LONG = 2,
+  BAD_USERNAME = 3,
+  BAD_PASSWORD = 4,
+};
 
 // WebUIMessageHandler implementation which handles events occurring on the
 // page, such as the user pressing the signin button.
@@ -44,6 +55,8 @@ class EnrollmentScreenHandler
   void Show() override;
   void Hide() override;
   void ShowSigninScreen() override;
+  void ShowLicenseTypeSelectionScreen(
+      const base::DictionaryValue& license_types) override;
   void ShowAdJoin() override;
   void ShowAttributePromptScreen(const std::string& asset_id,
                                  const std::string& location) override;
@@ -77,6 +90,7 @@ class EnrollmentScreenHandler
   void HandleDeviceAttributesProvided(const std::string& asset_id,
                                       const std::string& location);
   void HandleOnLearnMore();
+  void HandleLicenseTypeSelected(const std::string& licenseType);
 
   void UpdateStateInternal(NetworkError::ErrorReason reason, bool force_update);
   void SetupAndShowOfflineMessage(NetworkStateInformer::State state,
@@ -143,6 +157,10 @@ class EnrollmentScreenHandler
 
   // Help application used for help dialogs.
   scoped_refptr<HelpAppLauncher> help_app_;
+
+  // Helper to call AuthPolicyClient and cancel calls if needed. Used to join
+  // Active Directory domain.
+  std::unique_ptr<AuthPolicyLoginHelper> authpolicy_login_helper_;
 
   base::WeakPtrFactory<EnrollmentScreenHandler> weak_ptr_factory_;
 

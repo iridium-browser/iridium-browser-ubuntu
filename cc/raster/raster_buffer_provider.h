@@ -7,12 +7,12 @@
 
 #include <stddef.h>
 
-#include "cc/playback/raster_source.h"
 #include "cc/raster/raster_buffer.h"
+#include "cc/raster/raster_source.h"
 #include "cc/raster/task_graph_runner.h"
 #include "cc/raster/tile_task.h"
-#include "cc/resources/resource_format.h"
 #include "cc/resources/resource_provider.h"
+#include "components/viz/common/quads/resource_format.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -32,14 +32,14 @@ class CC_EXPORT RasterBufferProvider {
   // already partially complete, and only the subrect needs to be played back.
   static void PlaybackToMemory(
       void* memory,
-      ResourceFormat format,
+      viz::ResourceFormat format,
       const gfx::Size& size,
       size_t stride,
       const RasterSource* raster_source,
       const gfx::Rect& canvas_bitmap_rect,
       const gfx::Rect& canvas_playback_rect,
-      float scale,
-      sk_sp<SkColorSpace> color_space,
+      const gfx::AxisTransform2d& transform,
+      const gfx::ColorSpace& target_color_space,
       const RasterSource::PlaybackSettings& playback_settings);
 
   // Acquire raster buffer.
@@ -54,8 +54,13 @@ class CC_EXPORT RasterBufferProvider {
   // Used for syncing resources to the worker context.
   virtual void OrderingBarrier() = 0;
 
+  // In addition to above, also ensures that pending work is sent to the GPU
+  // process.
+  virtual void Flush() = 0;
+
   // Returns the format to use for the tiles.
-  virtual ResourceFormat GetResourceFormat(bool must_support_alpha) const = 0;
+  virtual viz::ResourceFormat GetResourceFormat(
+      bool must_support_alpha) const = 0;
 
   // Determine if the resource requires swizzling.
   virtual bool IsResourceSwizzleRequired(bool must_support_alpha) const = 0;
@@ -83,7 +88,7 @@ class CC_EXPORT RasterBufferProvider {
 
  protected:
   // Check if resource format matches output format.
-  static bool ResourceFormatRequiresSwizzle(ResourceFormat format);
+  static bool ResourceFormatRequiresSwizzle(viz::ResourceFormat format);
 };
 
 }  // namespace cc

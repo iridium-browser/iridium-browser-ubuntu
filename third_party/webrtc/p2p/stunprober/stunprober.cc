@@ -13,18 +13,18 @@
 #include <set>
 #include <string>
 
-#include "webrtc/base/asyncpacketsocket.h"
-#include "webrtc/base/asyncresolverinterface.h"
-#include "webrtc/base/bind.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/helpers.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/base/timeutils.h"
-#include "webrtc/base/thread.h"
 #include "webrtc/p2p/base/packetsocketfactory.h"
 #include "webrtc/p2p/base/stun.h"
 #include "webrtc/p2p/stunprober/stunprober.h"
+#include "webrtc/rtc_base/asyncpacketsocket.h"
+#include "webrtc/rtc_base/asyncresolverinterface.h"
+#include "webrtc/rtc_base/bind.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/constructormagic.h"
+#include "webrtc/rtc_base/helpers.h"
+#include "webrtc/rtc_base/logging.h"
+#include "webrtc/rtc_base/thread.h"
+#include "webrtc/rtc_base/timeutils.h"
 
 namespace stunprober {
 
@@ -280,6 +280,19 @@ bool StunProber::Prepare(const std::vector<rtc::SocketAddress>& servers,
   timeout_ms_ = timeout_ms;
   servers_ = servers;
   observer_ = observer;
+  // Remove addresses that are already resolved.
+  for (auto it = servers_.begin(); it != servers_.end();) {
+    if (it->ipaddr().family() != AF_UNSPEC) {
+      all_servers_addrs_.push_back(*it);
+      it = servers_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  if (servers_.empty()) {
+    CreateSockets();
+    return true;
+  }
   return ResolveServerName(servers_.back());
 }
 
@@ -339,6 +352,10 @@ void StunProber::OnServerResolved(rtc::AsyncResolverInterface* resolver) {
     return;
   }
 
+  CreateSockets();
+}
+
+void StunProber::CreateSockets() {
   // Dedupe.
   std::set<rtc::SocketAddress> addrs(all_servers_addrs_.begin(),
                                      all_servers_addrs_.end());

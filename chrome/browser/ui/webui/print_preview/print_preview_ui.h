@@ -17,13 +17,13 @@
 #include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "printing/features/features.h"
 
-class PrintPreviewDataService;
 class PrintPreviewHandler;
 struct PrintHostMsg_DidGetPreviewPageCount_Params;
 struct PrintHostMsg_RequestPrintPreview_Params;
 struct PrintHostMsg_SetOptionsFromDocument_Params;
 
 namespace base {
+class DictionaryValue;
 class FilePath;
 class RefCountedBytes;
 }
@@ -44,8 +44,9 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   // Gets the print preview |data|. |index| is zero-based, and can be
   // |printing::COMPLETE_PREVIEW_DOCUMENT_INDEX| to get the entire preview
   // document.
-  void GetPrintPreviewDataForIndex(int index,
-                                   scoped_refptr<base::RefCountedBytes>* data);
+  void GetPrintPreviewDataForIndex(
+      int index,
+      scoped_refptr<base::RefCountedBytes>* data) const;
 
   // Sets the print preview |data|. |index| is zero-based, and can be
   // |printing::COMPLETE_PREVIEW_DOCUMENT_INDEX| to set the entire preview
@@ -57,18 +58,18 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   void ClearAllPreviewData();
 
   // Returns the available draft page count.
-  int GetAvailableDraftPageCount();
+  int GetAvailableDraftPageCount() const;
 
   // Setters
   void SetInitiatorTitle(const base::string16& initiator_title);
 
-  base::string16 initiator_title() { return initiator_title_; }
+  const base::string16& initiator_title() const { return initiator_title_; }
 
-  bool source_is_modifiable() { return source_is_modifiable_; }
+  bool source_is_modifiable() const { return source_is_modifiable_; }
 
-  bool source_has_selection() { return source_has_selection_; }
+  bool source_has_selection() const { return source_has_selection_; }
 
-  bool print_selection_only() { return print_selection_only_; }
+  bool print_selection_only() const { return print_selection_only_; }
 
   // Set initial settings for PrintPreviewUI.
   static void SetInitialParams(
@@ -87,11 +88,6 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
 
   // Notifies the Web UI of a print preview request with |request_id|.
   void OnPrintPreviewRequest(int request_id);
-
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
-  // Notifies the Web UI to show the system dialog.
-  void OnShowSystemDialog();
-#endif  // ENABLE_BASIC_PRINTING
 
   // Notifies the Web UI about the page count of the request preview.
   void OnDidGetPreviewPageCount(
@@ -120,12 +116,12 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   // closed, which may occur for several reasons, e.g. tab closure or crash.
   void OnPrintPreviewDialogClosed();
 
+  // Notifies the Web UI that the preview request was cancelled.
+  void OnPrintPreviewCancelled();
+
   // Notifies the Web UI that initiator is closed, so we can disable all the
   // controls that need the initiator for generating the preview data.
   void OnInitiatorClosed();
-
-  // Notifies the Web UI renderer that file selection has been cancelled.
-  void OnFileSelectionCancelled();
 
   // Notifies the Web UI that the printer is unavailable or its settings are
   // invalid.
@@ -140,15 +136,11 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   // Closes the print preview dialog.
   void OnClosePrintPreviewDialog();
 
-  // Reload the printers list.
-  void OnReloadPrintersList();
-
   // Notifies the WebUI to set print preset options from source PDF.
   void OnSetOptionsFromDocument(
       const PrintHostMsg_SetOptionsFromDocument_Params& params);
 
-  // Allows tests to wait until the print preview dialog is loaded. Optionally
-  // also instructs the dialog to auto-cancel, which is used for testing only.
+  // Allows tests to wait until the print preview dialog is loaded.
   class TestingDelegate {
    public:
     virtual void DidGetPreviewPageCount(int page_count) = 0;
@@ -164,12 +156,17 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   // Passes |closure| to PrintPreviewHandler::SetPdfSavedClosureForTesting().
   void SetPdfSavedClosureForTesting(const base::Closure& closure);
 
+  // Tell the handler to send the enable-manipulate-settings-for-test WebUI
+  // event.
+  void SendEnableManipulateSettingsForTest();
+
+  // Tell the handler to send the manipulate-settings-for-test WebUI event
+  // to set the print preview settings contained in |settings|.
+  void SendManipulateSettingsForTest(const base::DictionaryValue& settings);
+
  private:
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewDialogControllerUnitTest,
                            TitleAfterReload);
-
-  // Returns the Singleton instance of the PrintPreviewDataService.
-  PrintPreviewDataService* print_preview_data_service();
 
   base::TimeTicks initial_preview_start_time_;
 

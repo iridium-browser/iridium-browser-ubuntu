@@ -35,7 +35,7 @@ void CFWL_Barcode::Update() {
   GenerateBarcodeImageCache();
 }
 
-void CFWL_Barcode::DrawWidget(CFX_Graphics* pGraphics,
+void CFWL_Barcode::DrawWidget(CXFA_Graphics* pGraphics,
                               const CFX_Matrix* pMatrix) {
   if (!pGraphics)
     return;
@@ -52,9 +52,7 @@ void CFWL_Barcode::DrawWidget(CFX_Graphics* pGraphics,
     if (pMatrix)
       mt.Concat(*pMatrix);
 
-    int32_t errorCode = 0;
-    m_pBarcodeEngine->RenderDevice(pGraphics->GetRenderDevice(), pMatrix,
-                                   errorCode);
+    m_pBarcodeEngine->RenderDevice(pGraphics->GetRenderDevice(), pMatrix);
     return;
   }
   CFWL_Edit::DrawWidget(pGraphics, pMatrix);
@@ -131,17 +129,17 @@ void CFWL_Barcode::SetTextLocation(BC_TEXT_LOC location) {
   m_eTextLocation = location;
 }
 
-void CFWL_Barcode::SetWideNarrowRatio(int32_t ratio) {
+void CFWL_Barcode::SetWideNarrowRatio(int8_t ratio) {
   m_dwAttributeMask |= FWL_BCDATTRIBUTE_WIDENARROWRATIO;
   m_nWideNarrowRatio = ratio;
 }
 
-void CFWL_Barcode::SetStartChar(FX_CHAR startChar) {
+void CFWL_Barcode::SetStartChar(char startChar) {
   m_dwAttributeMask |= FWL_BCDATTRIBUTE_STARTCHAR;
   m_cStartChar = startChar;
 }
 
-void CFWL_Barcode::SetEndChar(FX_CHAR endChar) {
+void CFWL_Barcode::SetEndChar(char endChar) {
   m_dwAttributeMask |= FWL_BCDATTRIBUTE_ENDCHAR;
   m_cEndChar = endChar;
 }
@@ -201,15 +199,12 @@ void CFWL_Barcode::GenerateBarcodeImageCache() {
     m_pBarcodeEngine->SetStartChar(m_cStartChar);
   if (m_dwAttributeMask & FWL_BCDATTRIBUTE_ENDCHAR)
     m_pBarcodeEngine->SetEndChar(m_cEndChar);
-  if (m_dwAttributeMask & FWL_BCDATTRIBUTE_VERSION)
-    m_pBarcodeEngine->SetVersion(0);
   if (m_dwAttributeMask & FWL_BCDATTRIBUTE_ECLEVEL)
     m_pBarcodeEngine->SetErrorCorrectionLevel(m_nECLevel);
   if (m_dwAttributeMask & FWL_BCDATTRIBUTE_TRUNCATED)
     m_pBarcodeEngine->SetTruncated(m_bTruncated);
 
-  int32_t errorCode = 0;
-  m_dwStatus = m_pBarcodeEngine->Encode(GetText().AsStringC(), true, errorCode)
+  m_dwStatus = m_pBarcodeEngine->Encode(GetText().AsStringC(), true)
                    ? XFA_BCS_EncodeSuccess
                    : 0;
 }
@@ -218,7 +213,7 @@ void CFWL_Barcode::CreateBarcodeEngine() {
   if (m_pBarcodeEngine || m_type == BC_UNKNOWN)
     return;
 
-  std::unique_ptr<CFX_Barcode> pBarcode(new CFX_Barcode);
+  auto pBarcode = pdfium::MakeUnique<CFX_Barcode>();
   if (pBarcode->Create(m_type))
     m_pBarcodeEngine = std::move(pBarcode);
 }

@@ -10,6 +10,7 @@
 #include "core/imagebitmap/ImageBitmapFactories.h"
 #include "modules/ModulesExport.h"
 #include "modules/canvas2d/CanvasRenderingContext2D.h"
+#include "skia/public/interfaces/bitmap.mojom-blink.h"
 
 namespace blink {
 
@@ -22,14 +23,12 @@ class MODULES_EXPORT ShapeDetector
   DEFINE_INLINE_VIRTUAL_TRACE() {}
 
  private:
-  ScriptPromise detectShapesOnImageData(ScriptPromiseResolver*, ImageData*);
-  ScriptPromise detectShapesOnImageElement(ScriptPromiseResolver*,
+  ScriptPromise DetectShapesOnImageData(ScriptPromiseResolver*, ImageData*);
+  ScriptPromise DetectShapesOnImageElement(ScriptPromiseResolver*,
                                            const HTMLImageElement*);
 
-  virtual ScriptPromise doDetect(ScriptPromiseResolver*,
-                                 mojo::ScopedSharedBufferHandle,
-                                 int imageWidth,
-                                 int imageHeight) = 0;
+  virtual ScriptPromise DoDetect(ScriptPromiseResolver*,
+                                 skia::mojom::blink::BitmapPtr) = 0;
 };
 
 }  // namespace blink

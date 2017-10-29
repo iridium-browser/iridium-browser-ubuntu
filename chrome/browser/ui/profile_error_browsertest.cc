@@ -48,8 +48,9 @@ class ProfileErrorBrowserTest : public InProcessBrowserTest,
     // Write either an empty or an invalid string to the user profile as
     // determined by the boolean parameter.
     const std::string kUserProfileData(do_corrupt_ ? "invalid json" : "{}");
-    if (!base::WriteFile(pref_file, kUserProfileData.c_str(),
-                         kUserProfileData.size())) {
+    if (base::WriteFile(pref_file, kUserProfileData.c_str(),
+                        kUserProfileData.size()) !=
+        static_cast<int>(kUserProfileData.size())) {
       ADD_FAILURE();
       return false;
     }
@@ -57,8 +58,6 @@ class ProfileErrorBrowserTest : public InProcessBrowserTest,
   }
 
   void SetUpInProcessBrowserTestFixture() override {
-    InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
-
     // Skip showing the error message box in order to avoid freezing the main
     // thread.
     chrome::internal::g_should_skip_message_box_for_test = true;

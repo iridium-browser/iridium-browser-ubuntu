@@ -13,11 +13,11 @@ found in the LICENSE file.
 
 tr.b.unittest.testSuite(function() {
   test('instantiate', function() {
-    var ctl = document.createElement('tr-ui-find-control');
+    const ctl = document.createElement('tr-ui-find-control');
     ctl.controller = {
-      findNext: function() { },
-      findPrevious: function() { },
-      reset: function() {},
+      findNext() { },
+      findPrevious() { },
+      reset() {},
 
       filterHits: ['a', 'b'],
 
@@ -28,11 +28,11 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('updateHitCountEl_twoResults', function() {
-    var ctl = document.createElement('tr-ui-find-control');
+    const ctl = document.createElement('tr-ui-find-control');
     ctl.controller = {
-      findNext: function() { },
-      findPrevious: function() { },
-      reset: function() {},
+      findNext() { },
+      findPrevious() { },
+      reset() {},
 
       filterHits: ['a', 'b'],
 
@@ -42,15 +42,15 @@ tr.b.unittest.testSuite(function() {
     this.addHTMLOutput(ctl);
     ctl.$.filter.value = 'test';
     ctl.updateHitCountEl();
-    assert.equal(ctl.$.hitCount.textContent, '1 of 2');
+    assert.strictEqual(ctl.$.hitCount.textContent, '1 of 2');
   });
 
   test('updateHitCountEl_emptyFilter', function() {
-    var ctl = document.createElement('tr-ui-find-control');
+    const ctl = document.createElement('tr-ui-find-control');
     ctl.controller = {
-      findNext: function() { },
-      findPrevious: function() { },
-      reset: function() {},
+      findNext() { },
+      findPrevious() { },
+      reset() {},
 
       filterHits: ['a', 'b'],
 
@@ -60,7 +60,7 @@ tr.b.unittest.testSuite(function() {
     this.addHTMLOutput(ctl);
     ctl.$.filter.value = '';
     ctl.updateHitCountEl();
-    assert.equal(ctl.$.hitCount.textContent, '');
+    assert.strictEqual(ctl.$.hitCount.textContent, '');
   });
 });
 </script>

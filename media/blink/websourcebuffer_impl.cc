@@ -21,6 +21,25 @@
 
 namespace media {
 
+static blink::WebSourceBufferClient::ParseWarning ParseWarningToBlink(
+    const SourceBufferParseWarning warning) {
+#define CHROMIUM_PARSE_WARNING_TO_BLINK_ENUM_CASE(name) \
+  case SourceBufferParseWarning::name:                  \
+    return blink::WebSourceBufferClient::ParseWarning::name
+
+  switch (warning) {
+    CHROMIUM_PARSE_WARNING_TO_BLINK_ENUM_CASE(
+        kKeyframeTimeGreaterThanDependant);
+    CHROMIUM_PARSE_WARNING_TO_BLINK_ENUM_CASE(kMuxedSequenceMode);
+  }
+
+  NOTREACHED();
+  return blink::WebSourceBufferClient::ParseWarning::
+      kKeyframeTimeGreaterThanDependant;
+
+#undef CHROMIUM_PARSE_WARNING_TO_BLINK_ENUM_CASE
+}
+
 static base::TimeDelta DoubleToTimeDelta(double time) {
   DCHECK(!std::isnan(time));
   DCHECK_NE(time, -std::numeric_limits<double>::infinity());
@@ -51,6 +70,9 @@ WebSourceBufferImpl::WebSourceBufferImpl(const std::string& id,
   demuxer_->SetTracksWatcher(
       id, base::Bind(&WebSourceBufferImpl::InitSegmentReceived,
                      base::Unretained(this)));
+  demuxer_->SetParseWarningCallback(
+      id, base::Bind(&WebSourceBufferImpl::NotifyParseWarning,
+                     base::Unretained(this)));
 }
 
 WebSourceBufferImpl::~WebSourceBufferImpl() {
@@ -58,21 +80,21 @@ WebSourceBufferImpl::~WebSourceBufferImpl() {
   DCHECK(!client_);
 }
 
-void WebSourceBufferImpl::setClient(blink::WebSourceBufferClient* client) {
+void WebSourceBufferImpl::SetClient(blink::WebSourceBufferClient* client) {
   DCHECK(client);
   DCHECK(!client_);
   client_ = client;
 }
 
-bool WebSourceBufferImpl::setMode(WebSourceBuffer::AppendMode mode) {
+bool WebSourceBufferImpl::SetMode(WebSourceBuffer::AppendMode mode) {
   if (demuxer_->IsParsingMediaSegment(id_))
     return false;
 
   switch (mode) {
-    case WebSourceBuffer::AppendModeSegments:
+    case WebSourceBuffer::kAppendModeSegments:
       demuxer_->SetSequenceMode(id_, false);
       return true;
-    case WebSourceBuffer::AppendModeSequence:
+    case WebSourceBuffer::kAppendModeSequence:
       demuxer_->SetSequenceMode(id_, true);
       return true;
   }
@@ -81,7 +103,7 @@ bool WebSourceBufferImpl::setMode(WebSourceBuffer::AppendMode mode) {
   return false;
 }
 
-blink::WebTimeRanges WebSourceBufferImpl::buffered() {
+blink::WebTimeRanges WebSourceBufferImpl::Buffered() {
   Ranges<base::TimeDelta> ranges = demuxer_->GetBufferedRanges(id_);
   blink::WebTimeRanges result(ranges.size());
   for (size_t i = 0; i < ranges.size(); i++) {
@@ -91,11 +113,11 @@ blink::WebTimeRanges WebSourceBufferImpl::buffered() {
   return result;
 }
 
-double WebSourceBufferImpl::highestPresentationTimestamp() {
+double WebSourceBufferImpl::HighestPresentationTimestamp() {
   return demuxer_->GetHighestPresentationTimestamp(id_).InSecondsF();
 }
 
-bool WebSourceBufferImpl::evictCodedFrames(double currentPlaybackTime,
+bool WebSourceBufferImpl::EvictCodedFrames(double currentPlaybackTime,
                                            size_t newDataSize) {
   return demuxer_->EvictCodedFrames(
       id_,
@@ -103,7 +125,7 @@ bool WebSourceBufferImpl::evictCodedFrames(double currentPlaybackTime,
       newDataSize);
 }
 
-bool WebSourceBufferImpl::append(const unsigned char* data,
+bool WebSourceBufferImpl::Append(const unsigned char* data,
                                  unsigned length,
                                  double* timestamp_offset) {
   base::TimeDelta old_offset = timestamp_offset_;
@@ -121,7 +143,7 @@ bool WebSourceBufferImpl::append(const unsigned char* data,
   return success;
 }
 
-void WebSourceBufferImpl::resetParserState() {
+void WebSourceBufferImpl::ResetParserState() {
   demuxer_->ResetParserState(id_,
                              append_window_start_, append_window_end_,
                              &timestamp_offset_);
@@ -131,13 +153,13 @@ void WebSourceBufferImpl::resetParserState() {
   // See http://crbug.com/370229 for further details.
 }
 
-void WebSourceBufferImpl::remove(double start, double end) {
+void WebSourceBufferImpl::Remove(double start, double end) {
   DCHECK_GE(start, 0);
   DCHECK_GE(end, 0);
   demuxer_->Remove(id_, DoubleToTimeDelta(start), DoubleToTimeDelta(end));
 }
 
-bool WebSourceBufferImpl::setTimestampOffset(double offset) {
+bool WebSourceBufferImpl::SetTimestampOffset(double offset) {
   if (demuxer_->IsParsingMediaSegment(id_))
     return false;
 
@@ -150,17 +172,17 @@ bool WebSourceBufferImpl::setTimestampOffset(double offset) {
   return true;
 }
 
-void WebSourceBufferImpl::setAppendWindowStart(double start) {
+void WebSourceBufferImpl::SetAppendWindowStart(double start) {
   DCHECK_GE(start, 0);
   append_window_start_ = DoubleToTimeDelta(start);
 }
 
-void WebSourceBufferImpl::setAppendWindowEnd(double end) {
+void WebSourceBufferImpl::SetAppendWindowEnd(double end) {
   DCHECK_GE(end, 0);
   append_window_end_ = DoubleToTimeDelta(end);
 }
 
-void WebSourceBufferImpl::removedFromMediaSource() {
+void WebSourceBufferImpl::RemovedFromMediaSource() {
   demuxer_->RemoveId(id_);
   demuxer_ = NULL;
   client_ = NULL;
@@ -169,14 +191,14 @@ void WebSourceBufferImpl::removedFromMediaSource() {
 blink::WebMediaPlayer::TrackType mediaTrackTypeToBlink(MediaTrack::Type type) {
   switch (type) {
     case MediaTrack::Audio:
-      return blink::WebMediaPlayer::AudioTrack;
+      return blink::WebMediaPlayer::kAudioTrack;
     case MediaTrack::Text:
-      return blink::WebMediaPlayer::TextTrack;
+      return blink::WebMediaPlayer::kTextTrack;
     case MediaTrack::Video:
-      return blink::WebMediaPlayer::VideoTrack;
+      return blink::WebMediaPlayer::kVideoTrack;
   }
   NOTREACHED();
-  return blink::WebMediaPlayer::AudioTrack;
+  return blink::WebMediaPlayer::kAudioTrack;
 }
 
 void WebSourceBufferImpl::InitSegmentReceived(
@@ -187,17 +209,22 @@ void WebSourceBufferImpl::InitSegmentReceived(
   std::vector<blink::WebSourceBufferClient::MediaTrackInfo> trackInfoVector;
   for (const auto& track : tracks->tracks()) {
     blink::WebSourceBufferClient::MediaTrackInfo trackInfo;
-    trackInfo.trackType = mediaTrackTypeToBlink(track->type());
-    trackInfo.id = blink::WebString::fromUTF8(track->id());
-    trackInfo.byteStreamTrackID = blink::WebString::fromUTF8(
+    trackInfo.track_type = mediaTrackTypeToBlink(track->type());
+    trackInfo.id = blink::WebString::FromUTF8(track->id());
+    trackInfo.byte_stream_track_id = blink::WebString::FromUTF8(
         base::UintToString(track->bytestream_track_id()));
-    trackInfo.kind = blink::WebString::fromUTF8(track->kind());
-    trackInfo.label = blink::WebString::fromUTF8(track->label());
-    trackInfo.language = blink::WebString::fromUTF8(track->language());
+    trackInfo.kind = blink::WebString::FromUTF8(track->kind());
+    trackInfo.label = blink::WebString::FromUTF8(track->label());
+    trackInfo.language = blink::WebString::FromUTF8(track->language());
     trackInfoVector.push_back(trackInfo);
   }
 
-  client_->initializationSegmentReceived(trackInfoVector);
+  client_->InitializationSegmentReceived(trackInfoVector);
+}
+
+void WebSourceBufferImpl::NotifyParseWarning(
+    const SourceBufferParseWarning warning) {
+  client_->NotifyParseWarning(ParseWarningToBlink(warning));
 }
 
 }  // namespace media

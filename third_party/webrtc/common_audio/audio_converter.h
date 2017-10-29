@@ -13,7 +13,7 @@
 
 #include <memory>
 
-#include "webrtc/base/constructormagic.h"
+#include "webrtc/rtc_base/constructormagic.h"
 
 namespace webrtc {
 
@@ -31,7 +31,7 @@ class AudioConverter {
                                                 size_t src_frames,
                                                 size_t dst_channels,
                                                 size_t dst_frames);
-  virtual ~AudioConverter() {};
+  virtual ~AudioConverter() {}
 
   // Convert |src|, containing |src_size| samples, to |dst|, having a sample
   // capacity of |dst_capacity|. Both point to a series of buffers containing

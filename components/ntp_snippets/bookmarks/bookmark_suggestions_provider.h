@@ -15,9 +15,6 @@
 #include "components/ntp_snippets/category_status.h"
 #include "components/ntp_snippets/content_suggestions_provider.h"
 
-class PrefRegistrySimple;
-class PrefService;
-
 namespace ntp_snippets {
 
 // Provides content suggestions from the bookmarks model.
@@ -25,11 +22,8 @@ class BookmarkSuggestionsProvider : public ContentSuggestionsProvider,
                                     public bookmarks::BookmarkModelObserver {
  public:
   BookmarkSuggestionsProvider(ContentSuggestionsProvider::Observer* observer,
-                              bookmarks::BookmarkModel* bookmark_model,
-                              PrefService* pref_service);
+                              bookmarks::BookmarkModel* bookmark_model);
   ~BookmarkSuggestionsProvider() override;
-
-  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
 
  private:
   // ContentSuggestionsProvider implementation.
@@ -68,12 +62,11 @@ class BookmarkSuggestionsProvider : public ContentSuggestionsProvider,
   void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
                          const bookmarks::BookmarkNode* parent,
                          int index) override;
-  void BookmarkNodeRemoved(
-      bookmarks::BookmarkModel* model,
-      const bookmarks::BookmarkNode* parent,
-      int old_index,
-      const bookmarks::BookmarkNode* node,
-      const std::set<GURL>& no_longer_bookmarked) override;
+  void BookmarkNodeRemoved(bookmarks::BookmarkModel* model,
+                           const bookmarks::BookmarkNode* parent,
+                           int old_index,
+                           const bookmarks::BookmarkNode* node,
+                           const std::set<GURL>& no_longer_bookmarked) override;
   void BookmarkNodeChanged(bookmarks::BookmarkModel* model,
                            const bookmarks::BookmarkNode* node) override {}
   void BookmarkNodeFaviconChanged(

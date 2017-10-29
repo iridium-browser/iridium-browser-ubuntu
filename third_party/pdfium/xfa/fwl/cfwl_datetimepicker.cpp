@@ -40,8 +40,8 @@ CFWL_DateTimePicker::CFWL_DateTimePicker(const CFWL_App* app)
   monthProp->m_dwStates = FWL_WGTSTATE_Invisible;
   monthProp->m_pParent = this;
   monthProp->m_pThemeProvider = m_pProperties->m_pThemeProvider;
-  m_pMonthCal.reset(
-      new CFWL_MonthCalendar(m_pOwnerApp, std::move(monthProp), this));
+  m_pMonthCal = pdfium::MakeUnique<CFWL_MonthCalendar>(
+      m_pOwnerApp.Get(), std::move(monthProp), this);
 
   m_pMonthCal->SetWidgetRect(
       CFX_RectF(0, 0, m_pMonthCal->GetAutosizedWidgetRect().Size()));
@@ -50,7 +50,7 @@ CFWL_DateTimePicker::CFWL_DateTimePicker(const CFWL_App* app)
   editProp->m_pParent = this;
   editProp->m_pThemeProvider = m_pProperties->m_pThemeProvider;
 
-  m_pEdit = pdfium::MakeUnique<CFWL_DateTimeEdit>(m_pOwnerApp,
+  m_pEdit = pdfium::MakeUnique<CFWL_DateTimeEdit>(m_pOwnerApp.Get(),
                                                   std::move(editProp), this);
   RegisterEventTarget(m_pMonthCal.get());
   RegisterEventTarget(m_pEdit.get());
@@ -81,7 +81,7 @@ void CFWL_DateTimePicker::Update() {
   if (!theme)
     return;
 
-  FX_FLOAT fBtn = theme->GetScrollBarWidth();
+  float fBtn = theme->GetScrollBarWidth();
   m_rtBtn = CFX_RectF(m_rtClient.right() - fBtn, m_rtClient.top, fBtn - 1,
                       m_rtClient.height - 1);
 
@@ -114,7 +114,7 @@ FWL_WidgetHit CFWL_DateTimePicker::HitTest(const CFX_PointF& point) {
   return FWL_WidgetHit::Unknown;
 }
 
-void CFWL_DateTimePicker::DrawWidget(CFX_Graphics* pGraphics,
+void CFWL_DateTimePicker::DrawWidget(CXFA_Graphics* pGraphics,
                                      const CFX_Matrix* pMatrix) {
   if (!pGraphics)
     return;
@@ -195,7 +195,7 @@ void CFWL_DateTimePicker::ModifyEditStylesEx(uint32_t dwStylesExAdded,
   m_pEdit->ModifyStylesEx(dwStylesExAdded, dwStylesExRemoved);
 }
 
-void CFWL_DateTimePicker::DrawDropDownButton(CFX_Graphics* pGraphics,
+void CFWL_DateTimePicker::DrawDropDownButton(CXFA_Graphics* pGraphics,
                                              IFWL_ThemeProvider* pTheme,
                                              const CFX_Matrix* pMatrix) {
   CFWL_ThemeBackground param;
@@ -332,8 +332,8 @@ void CFWL_DateTimePicker::InitProxyForm() {
   prop->m_dwStates = FWL_WGTSTATE_Invisible;
   prop->m_pOwner = this;
 
-  m_pForm = pdfium::MakeUnique<CFWL_FormProxy>(m_pOwnerApp, std::move(prop),
-                                               m_pMonthCal.get());
+  m_pForm = pdfium::MakeUnique<CFWL_FormProxy>(
+      m_pOwnerApp.Get(), std::move(prop), m_pMonthCal.get());
   m_pMonthCal->SetParent(m_pForm.get());
 }
 
@@ -349,8 +349,8 @@ void CFWL_DateTimePicker::DisForm_ShowMonthCalendar(bool bActivate) {
 
   if (bActivate) {
     CFX_RectF rtMonthCal = m_pMonthCal->GetAutosizedWidgetRect();
-    FX_FLOAT fPopupMin = rtMonthCal.height;
-    FX_FLOAT fPopupMax = rtMonthCal.height;
+    float fPopupMin = rtMonthCal.height;
+    float fPopupMax = rtMonthCal.height;
     CFX_RectF rtAnchor(m_pProperties->m_rtWidget);
     rtAnchor.width = rtMonthCal.width;
     rtMonthCal.left = m_rtClient.left;
@@ -443,7 +443,7 @@ CFX_RectF CFWL_DateTimePicker::DisForm_GetBBox() const {
   return rect;
 }
 
-void CFWL_DateTimePicker::DisForm_DrawWidget(CFX_Graphics* pGraphics,
+void CFWL_DateTimePicker::DisForm_DrawWidget(CXFA_Graphics* pGraphics,
                                              const CFX_Matrix* pMatrix) {
   if (!pGraphics)
     return;
@@ -510,7 +510,7 @@ void CFWL_DateTimePicker::OnProcessMessage(CFWL_Message* pMessage) {
   CFWL_Widget::OnProcessMessage(pMessage);
 }
 
-void CFWL_DateTimePicker::OnDrawWidget(CFX_Graphics* pGraphics,
+void CFWL_DateTimePicker::OnDrawWidget(CXFA_Graphics* pGraphics,
                                        const CFX_Matrix* pMatrix) {
   DrawWidget(pGraphics, pMatrix);
 }

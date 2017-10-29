@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/frame/taskbar_decorator_win.h"
 
+#include <objbase.h>
 #include <shobjidl.h>
 
 #include "base/bind.h"
@@ -11,7 +12,6 @@
 #include "base/task_scheduler/post_task.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_gdi_object.h"
-#include "base/win/windows_version.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
@@ -24,7 +24,7 @@ namespace chrome {
 namespace {
 
 // Responsible for invoking TaskbarList::SetOverlayIcon(). The call to
-// TaskbarList::SetOverlayIcon() runs a nested message loop that proves
+// TaskbarList::SetOverlayIcon() runs a nested run loop that proves
 // problematic when called on the UI thread. Additionally it seems the call may
 // take a while to complete. For this reason we call it on a worker thread.
 //
@@ -32,8 +32,8 @@ namespace {
 // valid.
 void SetOverlayIcon(HWND hwnd, std::unique_ptr<SkBitmap> bitmap) {
   base::win::ScopedComPtr<ITaskbarList3> taskbar;
-  HRESULT result = taskbar.CreateInstance(CLSID_TaskbarList, nullptr,
-                                          CLSCTX_INPROC_SERVER);
+  HRESULT result = ::CoCreateInstance(
+      CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&taskbar));
   if (FAILED(result) || FAILED(taskbar->HrInit()))
     return;
 
@@ -68,9 +68,6 @@ void SetOverlayIcon(HWND hwnd, std::unique_ptr<SkBitmap> bitmap) {
 }  // namespace
 
 void DrawTaskbarDecoration(gfx::NativeWindow window, const gfx::Image* image) {
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return;
-
   HWND hwnd = views::HWNDForNativeWindow(window);
 
   // SetOverlayIcon() does nothing if the window is not visible so testing here
@@ -85,12 +82,10 @@ void DrawTaskbarDecoration(gfx::NativeWindow window, const gfx::Image* image) {
     bitmap.reset(new SkBitmap(
         profiles::GetAvatarIconAsSquare(*image->ToSkBitmap(), 1)));
   }
-  // TODO(robliao): Annotate this task with .WithCOM() once supported.
-  // https://crbug.com/662122
-  base::PostTaskWithTraits(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::USER_VISIBLE),
-      base::Bind(&SetOverlayIcon, hwnd, base::Passed(&bitmap)));
+  base::CreateCOMSTATaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::USER_VISIBLE})
+      ->PostTask(FROM_HERE,
+                 base::Bind(&SetOverlayIcon, hwnd, base::Passed(&bitmap)));
 }
 
 }  // namespace chrome

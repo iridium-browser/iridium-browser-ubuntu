@@ -4,12 +4,14 @@
 
 #include "chrome/browser/ui/webui/local_discovery/local_discovery_ui_handler.h"
 
+#include <memory>
 #include <set>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/user_metrics.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -32,7 +34,6 @@
 #include "components/cloud_devices/common/cloud_devices_urls.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
 #include "printing/features/features.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -173,7 +174,7 @@ void LocalDiscoveryUIHandler::HandleStart(const base::ListValue* args) {
   }
 
   privet_lister_->Start();
-  privet_lister_->DiscoverNewDevices(false);
+  privet_lister_->DiscoverNewDevices();
 
 #if defined(CLOUD_PRINT_CONNECTOR_UI_AVAILABLE)
   StartCloudPrintConnector();
@@ -227,7 +228,7 @@ void LocalDiscoveryUIHandler::HandleRequestDeviceList(
 
   if (cloud_print_printer_list_) {
     cloud_print_printer_list_->Start(
-        base::WrapUnique<GCDApiFlow::Request>(new CloudPrintPrinterList(this)));
+        base::MakeUnique<CloudPrintPrinterList>(this));
   }
 
   CheckListingDone();
@@ -289,10 +290,10 @@ void LocalDiscoveryUIHandler::OnPrivetRegisterClaimToken(
     SendRegisterError();
     return;
   }
-  confirm_api_call_flow_->Start(base::WrapUnique<GCDApiFlow::Request>(
-      new cloud_print::PrivetConfirmApiCallFlow(
+  confirm_api_call_flow_->Start(
+      base::MakeUnique<cloud_print::PrivetConfirmApiCallFlow>(
           token, base::Bind(&LocalDiscoveryUIHandler::OnConfirmDone,
-                            base::Unretained(this)))));
+                            base::Unretained(this))));
 }
 
 void LocalDiscoveryUIHandler::OnPrivetRegisterError(
@@ -302,7 +303,6 @@ void LocalDiscoveryUIHandler::OnPrivetRegisterError(
     int printer_http_code,
     const base::DictionaryValue* json) {
   std::string error;
-
   if (reason == PrivetRegisterOperation::FAILURE_JSON_ERROR &&
       json->GetString(cloud_print::kPrivetKeyError, &error)) {
     if (error == cloud_print::kPrivetErrorTimeout) {
@@ -350,7 +350,7 @@ void LocalDiscoveryUIHandler::DeviceChanged(
 
   base::DictionaryValue info;
 
-  base::StringValue service_key(kKeyPrefixMDns + name);
+  base::Value service_key(kKeyPrefixMDns + name);
 
   if (description.id.empty()) {
     info.SetString(kDictionaryKeyServiceName, name);
@@ -362,7 +362,7 @@ void LocalDiscoveryUIHandler::DeviceChanged(
     web_ui()->CallJavascriptFunctionUnsafe(
         "local_discovery.onUnregisteredDeviceUpdate", service_key, info);
   } else {
-    std::unique_ptr<base::Value> null_value = base::Value::CreateNullValue();
+    auto null_value = base::MakeUnique<base::Value>();
 
     web_ui()->CallJavascriptFunctionUnsafe(
         "local_discovery.onUnregisteredDeviceUpdate", service_key, *null_value);
@@ -371,8 +371,8 @@ void LocalDiscoveryUIHandler::DeviceChanged(
 
 void LocalDiscoveryUIHandler::DeviceRemoved(const std::string& name) {
   device_descriptions_.erase(name);
-  std::unique_ptr<base::Value> null_value = base::Value::CreateNullValue();
-  base::StringValue name_value(kKeyPrefixMDns + name);
+  auto null_value = base::MakeUnique<base::Value>();
+  base::Value name_value(kKeyPrefixMDns + name);
 
   web_ui()->CallJavascriptFunctionUnsafe(
       "local_discovery.onUnregisteredDeviceUpdate", name_value, *null_value);
@@ -381,7 +381,7 @@ void LocalDiscoveryUIHandler::DeviceRemoved(const std::string& name) {
 void LocalDiscoveryUIHandler::DeviceCacheFlushed() {
   web_ui()->CallJavascriptFunctionUnsafe(
       "local_discovery.onDeviceCacheFlushed");
-  privet_lister_->DiscoverNewDevices(false);
+  privet_lister_->DiscoverNewDevices();
 }
 
 void LocalDiscoveryUIHandler::OnDeviceListReady(
@@ -398,8 +398,7 @@ void LocalDiscoveryUIHandler::OnDeviceListUnavailable() {
 
 void LocalDiscoveryUIHandler::GoogleSigninSucceeded(
     const std::string& account_id,
-    const std::string& username,
-    const std::string& password) {
+    const std::string& username) {
   CheckUserLoggedIn();
 }
 
@@ -417,7 +416,7 @@ void LocalDiscoveryUIHandler::SendRegisterDone(
     const std::string& service_name) {
   // HACK(noamsml): Generate network traffic so the Windows firewall doesn't
   // block the printer's announcement.
-  privet_lister_->DiscoverNewDevices(false);
+  privet_lister_->DiscoverNewDevices();
 
   DeviceDescriptionMap::iterator it = device_descriptions_.find(service_name);
 
@@ -557,8 +556,7 @@ void LocalDiscoveryUIHandler::OnCloudPrintPrefsChanged() {
 
 void LocalDiscoveryUIHandler::ShowCloudPrintSetupDialog(
     const base::ListValue* args) {
-  content::RecordAction(
-      base::UserMetricsAction("Options_EnableCloudPrintProxy"));
+  base::RecordAction(base::UserMetricsAction("Options_EnableCloudPrintProxy"));
   // Open the connector enable page in the current tab.
   content::OpenURLParams params(cloud_devices::GetCloudPrintEnableURL(
                                     GetCloudPrintProxyService()->proxy_id()),
@@ -570,8 +568,7 @@ void LocalDiscoveryUIHandler::ShowCloudPrintSetupDialog(
 
 void LocalDiscoveryUIHandler::HandleDisableCloudPrintConnector(
     const base::ListValue* args) {
-  content::RecordAction(
-      base::UserMetricsAction("Options_DisableCloudPrintProxy"));
+  base::RecordAction(base::UserMetricsAction("Options_DisableCloudPrintProxy"));
   GetCloudPrintProxyService()->DisableForUser();
 }
 
@@ -600,7 +597,7 @@ void LocalDiscoveryUIHandler::SetupCloudPrintConnectorSection() {
         l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT),
         base::UTF8ToUTF16(email));
   }
-  base::StringValue label(label_str);
+  base::Value label(label_str);
 
   web_ui()->CallJavascriptFunctionUnsafe(
       "local_discovery.setupCloudPrintConnectorSection", disabled, label,

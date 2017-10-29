@@ -11,7 +11,9 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace remoting {
@@ -90,8 +92,9 @@ class CertificateWatcherTest : public testing::Test {
       EXPECT_TRUE(base::AppendToFile(path, testWriteString.c_str(),
                                      testWriteString.length()));
     } else {
-      EXPECT_TRUE(base::WriteFile(path, testWriteString.c_str(),
-                                  testWriteString.length()));
+      EXPECT_EQ(static_cast<int>(testWriteString.length()),
+                base::WriteFile(path, testWriteString.c_str(),
+                                testWriteString.length()));
     }
   }
 

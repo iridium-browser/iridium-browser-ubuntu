@@ -16,7 +16,6 @@
 #include "base/trace_event/heap_profiler_allocation_context.h"
 #include "base/trace_event/heap_profiler_stack_frame_deduplicator.h"
 #include "base/trace_event/heap_profiler_type_name_deduplicator.h"
-#include "base/trace_event/memory_dump_session_state.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "base/values.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -179,7 +178,7 @@ TEST(HeapDumpWriterTest, SizeAndCountAreHexadecimal) {
 }
 
 TEST(HeapDumpWriterTest, BacktraceTypeNameTable) {
-  hash_map<AllocationContext, AllocationMetrics> metrics_by_context;
+  std::unordered_map<AllocationContext, AllocationMetrics> metrics_by_context;
 
   AllocationContext ctx;
   ctx.backtrace.frames[0] = kBrowserMain;
@@ -221,8 +220,7 @@ TEST(HeapDumpWriterTest, BacktraceTypeNameTable) {
   auto stack_frame_deduplicator = WrapUnique(new StackFrameDeduplicator);
   auto type_name_deduplicator = WrapUnique(new TypeNameDeduplicator);
   HeapDumpWriter writer(stack_frame_deduplicator.get(),
-                        type_name_deduplicator.get(),
-                        10u);
+                        type_name_deduplicator.get(), 10u);
   const std::set<Entry>& dump = writer.Summarize(metrics_by_context);
 
   // Get the indices of the backtraces and types by adding them again to the
@@ -274,7 +272,7 @@ TEST(HeapDumpWriterTest, BacktraceTypeNameTable) {
 }
 
 TEST(HeapDumpWriterTest, InsignificantValuesNotDumped) {
-  hash_map<AllocationContext, AllocationMetrics> metrics_by_context;
+  std::unordered_map<AllocationContext, AllocationMetrics> metrics_by_context;
 
   AllocationContext ctx;
   ctx.backtrace.frames[0] = kBrowserMain;
@@ -297,8 +295,7 @@ TEST(HeapDumpWriterTest, InsignificantValuesNotDumped) {
   auto stack_frame_deduplicator = WrapUnique(new StackFrameDeduplicator);
   auto type_name_deduplicator = WrapUnique(new TypeNameDeduplicator);
   HeapDumpWriter writer(stack_frame_deduplicator.get(),
-                        type_name_deduplicator.get(),
-                        512u);
+                        type_name_deduplicator.get(), 512u);
   const std::set<Entry>& dump = writer.Summarize(metrics_by_context);
 
   // Get the indices of the backtraces and types by adding them again to the

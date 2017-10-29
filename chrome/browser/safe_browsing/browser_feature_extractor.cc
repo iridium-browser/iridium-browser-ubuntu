@@ -22,9 +22,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/browser_features.h"
 #include "chrome/browser/safe_browsing/client_side_detection_host.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "components/safe_browsing_db/database_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
@@ -245,8 +245,8 @@ void BrowserFeatureExtractor::ExtractFeatures(const BrowseInfo* info,
   ExtractBrowseInfoFeatures(*info, request);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&BrowserFeatureExtractor::StartExtractFeatures,
-                 weak_factory_.GetWeakPtr(), base::Passed(&req), callback));
+      base::BindOnce(&BrowserFeatureExtractor::StartExtractFeatures,
+                     weak_factory_.GetWeakPtr(), base::Passed(&req), callback));
 }
 
 void BrowserFeatureExtractor::ExtractMalwareFeatures(
@@ -269,14 +269,12 @@ void BrowserFeatureExtractor::ExtractMalwareFeatures(
 
   // IP blacklist lookups have to happen on the IO thread.
   BrowserThread::PostTaskAndReply(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&FilterBenignIpsOnIOThread,
-                 host_->database_manager(),
-                 ips_ptr),
-      base::Bind(&BrowserFeatureExtractor::FinishExtractMalwareFeatures,
-                 weak_factory_.GetWeakPtr(),
-                 base::Passed(&ips), callback, base::Passed(&req)));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&FilterBenignIpsOnIOThread, host_->database_manager(),
+                     ips_ptr),
+      base::BindOnce(&BrowserFeatureExtractor::FinishExtractMalwareFeatures,
+                     weak_factory_.GetWeakPtr(), base::Passed(&ips), callback,
+                     base::Passed(&req)));
 }
 
 void BrowserFeatureExtractor::ExtractBrowseInfoFeatures(

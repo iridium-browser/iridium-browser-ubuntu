@@ -52,18 +52,21 @@ bool GetByteRange(const std::string& headers, uint32_t* start, uint32_t* end) {
 std::string GetMultiPartBoundary(const std::string& headers) {
   net::HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\n");
   while (it.GetNext()) {
-    if (base::LowerCaseEqualsASCII(it.name(), "content-type")) {
-      std::string type = base::ToLowerASCII(it.values());
-      if (base::StartsWith(type, "multipart/", base::CompareCase::SENSITIVE)) {
-        const char* boundary = strstr(type.c_str(), "boundary=");
-        if (!boundary) {
-          NOTREACHED();
-          break;
-        }
+    if (!base::LowerCaseEqualsASCII(it.name(), "content-type"))
+      continue;
 
-        return std::string(boundary + 9);
-      }
+    std::string type = base::ToLowerASCII(it.values());
+    if (!base::StartsWith(type, "multipart/", base::CompareCase::SENSITIVE))
+      continue;
+
+    static constexpr char kBoundary[] = "boundary=";
+    const char* boundary = strstr(type.c_str(), kBoundary);
+    if (!boundary) {
+      NOTREACHED();
+      return std::string();
     }
+
+    return std::string(boundary + strlen(kBoundary));
   }
   return std::string();
 }
@@ -80,31 +83,42 @@ bool ResponseStatusSuccess(const pp::URLLoader& loader) {
 }
 
 bool IsValidContentType(const std::string& type) {
-  return (base::EndsWith(type, "/pdf", base::CompareCase::INSENSITIVE_ASCII) ||
-          base::EndsWith(type, ".pdf", base::CompareCase::INSENSITIVE_ASCII) ||
-          base::EndsWith(type, "/x-pdf",
-                         base::CompareCase::INSENSITIVE_ASCII) ||
-          base::EndsWith(type, "/*", base::CompareCase::INSENSITIVE_ASCII) ||
-          base::EndsWith(type, "/acrobat",
-                         base::CompareCase::INSENSITIVE_ASCII) ||
-          base::EndsWith(type, "/unknown",
-                         base::CompareCase::INSENSITIVE_ASCII));
+  return base::EndsWith(type, "/pdf", base::CompareCase::INSENSITIVE_ASCII) ||
+         base::EndsWith(type, ".pdf", base::CompareCase::INSENSITIVE_ASCII) ||
+         base::EndsWith(type, "/x-pdf", base::CompareCase::INSENSITIVE_ASCII) ||
+         base::EndsWith(type, "/*", base::CompareCase::INSENSITIVE_ASCII) ||
+         base::EndsWith(type, "/acrobat",
+                        base::CompareCase::INSENSITIVE_ASCII) ||
+         base::EndsWith(type, "/unknown", base::CompareCase::INSENSITIVE_ASCII);
+}
+
+bool IsDoubleNewlines(const char* buffer, int index) {
+  DCHECK_GE(index, 2);
+  static constexpr char kLF2[] = "\n\n";
+  static constexpr char kCRLF2[] = "\r\n\r\n";
+  if (strncmp(&buffer[index - 2], kLF2, strlen(kLF2)) == 0)
+    return true;
+  return index >= 4 && strncmp(&buffer[index - 4], kCRLF2, strlen(kCRLF2)) == 0;
 }
 
 }  // namespace
 
-DocumentLoader::Client::~Client() {
-}
+DocumentLoader::Client::~Client() {}
 
 DocumentLoader::DocumentLoader(Client* client)
-    : client_(client), partial_document_(false), request_pending_(false),
-      current_pos_(0), current_chunk_size_(0), current_chunk_read_(0),
-      document_size_(0), header_request_(true), is_multipart_(false) {
+    : client_(client),
+      partial_document_(false),
+      request_pending_(false),
+      current_pos_(0),
+      current_chunk_size_(0),
+      current_chunk_read_(0),
+      document_size_(0),
+      header_request_(true),
+      is_multipart_(false) {
   loader_factory_.Initialize(this);
 }
 
-DocumentLoader::~DocumentLoader() {
-}
+DocumentLoader::~DocumentLoader() {}
 
 bool DocumentLoader::Init(const pp::URLLoader& loader,
                           const std::string& url,
@@ -181,8 +195,7 @@ bool DocumentLoader::Init(const pp::URLLoader& loader,
 
   // Enable partial loading only if file size is above the threshold.
   // It will allow avoiding latency for multiple requests.
-  if (content_length > kMinFileSize &&
-      accept_ranges_bytes &&
+  if (content_length > kMinFileSize && accept_ranges_bytes &&
       !content_encoded) {
     LoadPartialDocument();
   } else {
@@ -219,11 +232,10 @@ bool DocumentLoader::IsDocumentComplete() const {
 }
 
 uint32_t DocumentLoader::GetAvailableData() const {
-  if (document_size_ == 0) {  // If document size is unknown.
+  if (document_size_ == 0)  // Document size unknown.
     return current_pos_;
-  }
 
-  std::vector<std::pair<size_t, size_t> > ranges;
+  std::vector<std::pair<size_t, size_t>> ranges;
   chunk_stream_.GetMissedRanges(0, document_size_, &ranges);
   uint32_t available = document_size_;
   for (const auto& range : ranges)
@@ -232,8 +244,7 @@ uint32_t DocumentLoader::GetAvailableData() const {
 }
 
 void DocumentLoader::ClearPendingRequests() {
-  pending_requests_.erase(pending_requests_.begin(),
-                          pending_requests_.end());
+  pending_requests_.clear();
 }
 
 bool DocumentLoader::GetBlock(uint32_t position,
@@ -266,7 +277,7 @@ void DocumentLoader::RequestData(uint32_t position, uint32_t size) {
 void DocumentLoader::RemoveCompletedRanges() {
   // Split every request that has been partially downloaded already into smaller
   // requests.
-  std::vector<std::pair<size_t, size_t> > ranges;
+  std::vector<std::pair<size_t, size_t>> ranges;
   auto it = pending_requests_.begin();
   while (it != pending_requests_.end()) {
     chunk_stream_.GetMissedRanges(it->first, it->second, &ranges);
@@ -401,7 +412,8 @@ void DocumentLoader::DidOpen(int32_t result) {
     // i.e. sniff response to
     // http://www.act.org/compass/sample/pdf/geometry.pdf
     current_pos_ = 0;
-    uint32_t start_pos, end_pos;
+    uint32_t start_pos;
+    uint32_t end_pos;
     if (GetByteRange(headers, &start_pos, &end_pos)) {
       current_pos_ = start_pos;
       if (end_pos && end_pos > start_pos)
@@ -416,7 +428,7 @@ void DocumentLoader::DidOpen(int32_t result) {
 
 void DocumentLoader::ReadMore() {
   pp::CompletionCallback callback =
-        loader_factory_.NewCallback(&DocumentLoader::DidRead);
+      loader_factory_.NewCallback(&DocumentLoader::DidRead);
   int rv = loader_.ReadResponseBody(buffer_, sizeof(buffer_), callback);
   if (rv != PP_OK_COMPLETIONPENDING)
     callback.Run(rv);
@@ -436,10 +448,9 @@ void DocumentLoader::DidRead(int32_t result) {
   size_t length = result;
   if (is_multipart_ && result > 2) {
     for (int i = 2; i < result; ++i) {
-      if ((buffer_[i - 1] == '\n' && buffer_[i - 2] == '\n') ||
-          (i >= 4 && buffer_[i - 1] == '\n' && buffer_[i - 2] == '\r' &&
-           buffer_[i - 3] == '\n' && buffer_[i - 4] == '\r')) {
-        uint32_t start_pos, end_pos;
+      if (IsDoubleNewlines(buffer_, i)) {
+        uint32_t start_pos;
+        uint32_t end_pos;
         if (GetByteRange(std::string(buffer_, i), &start_pos, &end_pos)) {
           current_pos_ = start_pos;
           start += i;
@@ -515,7 +526,7 @@ void DocumentLoader::DidRead(int32_t result) {
 
 bool DocumentLoader::SatisfyingRequest(size_t offset, size_t size) const {
   return offset <= current_pos_ + kDefaultRequestSize &&
-      current_pos_ < offset + size;
+         current_pos_ < offset + size;
 }
 
 void DocumentLoader::ReadComplete() {

@@ -5,24 +5,22 @@
 
 #include <string>
 
-#include "ash/common/shelf/shelf_delegate.h"
-#include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_lookup.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
-#include "ash/common/wm_window_property.h"
 #include "ash/display/screen_orientation_controller_chromeos.h"
-#include "ash/shared/app_types.h"
+#include "ash/public/cpp/app_types.h"
+#include "ash/public/cpp/shelf_model.h"
+#include "ash/public/cpp/window_properties.h"
 #include "ash/shell.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "chrome/browser/chromeos/arc/arc_support_host.h"
+#include "chrome/browser/chromeos/arc/arc_optin_uma.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
+#include "chrome/browser/chromeos/arc/policy/arc_policy_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
+#include "chrome/browser/ui/ash/launcher/arc_app_window.h"
 #include "chrome/browser/ui/ash/launcher/arc_app_window_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
@@ -40,30 +38,26 @@
 
 namespace {
 
-enum class FullScreenMode {
-  NOT_DEFINED,  // Fullscreen mode was not defined.
-  ACTIVE,       // Fullscreen is activated for an app.
-  NON_ACTIVE,   // Fullscreen was not activated for an app.
-};
+constexpr size_t kMaxIconPngSize = 64 * 1024;  // 64 kb
 
 blink::WebScreenOrientationLockType BlinkOrientationLockFromMojom(
     arc::mojom::OrientationLock orientation_lock) {
   DCHECK_NE(arc::mojom::OrientationLock::CURRENT, orientation_lock);
   switch (orientation_lock) {
     case arc::mojom::OrientationLock::PORTRAIT:
-      return blink::WebScreenOrientationLockPortrait;
+      return blink::kWebScreenOrientationLockPortrait;
     case arc::mojom::OrientationLock::LANDSCAPE:
-      return blink::WebScreenOrientationLockLandscape;
+      return blink::kWebScreenOrientationLockLandscape;
     case arc::mojom::OrientationLock::PORTRAIT_PRIMARY:
-      return blink::WebScreenOrientationLockPortraitPrimary;
+      return blink::kWebScreenOrientationLockPortraitPrimary;
     case arc::mojom::OrientationLock::LANDSCAPE_PRIMARY:
-      return blink::WebScreenOrientationLockLandscapePrimary;
+      return blink::kWebScreenOrientationLockLandscapePrimary;
     case arc::mojom::OrientationLock::PORTRAIT_SECONDARY:
-      return blink::WebScreenOrientationLockPortraitSecondary;
+      return blink::kWebScreenOrientationLockPortraitSecondary;
     case arc::mojom::OrientationLock::LANDSCAPE_SECONDARY:
-      return blink::WebScreenOrientationLockLandscapeSecondary;
+      return blink::kWebScreenOrientationLockLandscapeSecondary;
     default:
-      return blink::WebScreenOrientationLockAny;
+      return blink::kWebScreenOrientationLockAny;
   }
 }
 
@@ -75,9 +69,29 @@ using ash::ScreenOrientationController;
 // even when its AppWindow is not present.
 class ArcAppWindowLauncherController::AppWindowInfo {
  public:
-  explicit AppWindowInfo(const arc::ArcAppShelfId& app_shelf_id)
-      : app_shelf_id_(app_shelf_id) {}
+  explicit AppWindowInfo(const arc::ArcAppShelfId& app_shelf_id,
+                         const std::string& launch_intent)
+      : app_shelf_id_(app_shelf_id), launch_intent_(launch_intent) {}
   ~AppWindowInfo() = default;
+
+  void SetDescription(const std::string& title,
+                      const std::vector<uint8_t>& icon_data_png) {
+    if (base::IsStringUTF8(title))
+      title_ = title;
+    else
+      VLOG(1) << "Task label is not UTF-8 string.";
+    // Chrome has custom Play Store icon. Don't overwrite it.
+    if (app_shelf_id_.app_id() != arc::kPlayStoreAppId) {
+      if (icon_data_png.size() < kMaxIconPngSize)
+        icon_data_png_ = icon_data_png;
+      else
+        VLOG(1) << "Task icon size is too big " << icon_data_png.size() << ".";
+    }
+  }
+
+  void set_app_window(std::unique_ptr<ArcAppWindow> window) {
+    app_window_ = std::move(window);
+  }
 
   const arc::ArcAppShelfId& app_shelf_id() const { return app_shelf_id_; }
 
@@ -104,14 +118,17 @@ class ArcAppWindowLauncherController::AppWindowInfo {
     return lock_completion_behavior_;
   }
 
-  void set_app_window(std::unique_ptr<AppWindow> window) {
-    app_window_ = std::move(window);
-  }
+  ArcAppWindow* app_window() { return app_window_.get(); }
 
-  AppWindow* app_window() { return app_window_.get(); }
+  const std::string& launch_intent() { return launch_intent_; }
+
+  const std::string& title() const { return title_; }
+
+  const std::vector<uint8_t>& icon_data_png() const { return icon_data_png_; }
 
  private:
   const arc::ArcAppShelfId app_shelf_id_;
+  const std::string launch_intent_;
   bool has_requested_orientation_lock_ = false;
 
   // If true, the orientation should be locked to the specific
@@ -123,161 +140,34 @@ class ArcAppWindowLauncherController::AppWindowInfo {
           ScreenOrientationController::LockCompletionBehavior::None;
   arc::mojom::OrientationLock requested_orientation_lock_ =
       arc::mojom::OrientationLock::NONE;
-  std::unique_ptr<AppWindow> app_window_;
+  // Keeps overridden window title.
+  std::string title_;
+  // Keeps overridden window icon.
+  std::vector<uint8_t> icon_data_png_;
+  std::unique_ptr<ArcAppWindow> app_window_;
 
   DISALLOW_COPY_AND_ASSIGN(AppWindowInfo);
 };
 
-// A ui::BaseWindow for a chromeos launcher to control ARC applications.
-class ArcAppWindowLauncherController::AppWindow : public ui::BaseWindow {
- public:
-  AppWindow(int task_id,
-            const arc::ArcAppShelfId& app_shelf_id,
-            views::Widget* widget,
-            ArcAppWindowLauncherController* owner)
-      : task_id_(task_id),
-        app_shelf_id_(app_shelf_id),
-        widget_(widget),
-        owner_(owner) {}
-  ~AppWindow() = default;
-
-  void SetController(ArcAppWindowLauncherItemController* controller) {
-    DCHECK(!controller_ && controller);
-    controller_ = controller;
-  }
-
-  void ResetController() { controller_ = nullptr; }
-
-  void SetFullscreenMode(FullScreenMode mode) {
-    DCHECK(mode != FullScreenMode::NOT_DEFINED);
-    fullscreen_mode_ = mode;
-  }
-
-  FullScreenMode fullscreen_mode() const { return fullscreen_mode_; }
-
-  int task_id() const { return task_id_; }
-
-  const arc::ArcAppShelfId& app_shelf_id() const { return app_shelf_id_; }
-
-  ash::ShelfID shelf_id() const { return shelf_id_; }
-
-  void set_shelf_id(ash::ShelfID shelf_id) { shelf_id_ = shelf_id; }
-
-  views::Widget* widget() const { return widget_; }
-
-  ArcAppWindowLauncherItemController* controller() { return controller_; }
-
-  // ui::BaseWindow:
-  bool IsActive() const override {
-    return widget_->IsActive() && owner_->active_task_id_ == task_id_;
-  }
-
-  bool IsMaximized() const override {
-    NOTREACHED();
-    return false;
-  }
-
-  bool IsMinimized() const override {
-    NOTREACHED();
-    return false;
-  }
-
-  bool IsFullscreen() const override {
-    NOTREACHED();
-    return false;
-  }
-
-  gfx::NativeWindow GetNativeWindow() const override {
-    return widget_->GetNativeWindow();
-  }
-
-  gfx::Rect GetRestoredBounds() const override {
-    NOTREACHED();
-    return gfx::Rect();
-  }
-
-  ui::WindowShowState GetRestoredState() const override {
-    NOTREACHED();
-    return ui::SHOW_STATE_NORMAL;
-  }
-
-  gfx::Rect GetBounds() const override {
-    NOTREACHED();
-    return gfx::Rect();
-  }
-
-  void Show() override { widget_->Show(); }
-
-  void ShowInactive() override { NOTREACHED(); }
-
-  void Hide() override { NOTREACHED(); }
-
-  void Close() override { arc::CloseTask(task_id_); }
-
-  void Activate() override { widget_->Activate(); }
-
-  void Deactivate() override { NOTREACHED(); }
-
-  void Maximize() override { NOTREACHED(); }
-
-  void Minimize() override { widget_->Minimize(); }
-
-  void Restore() override { NOTREACHED(); }
-
-  void SetBounds(const gfx::Rect& bounds) override { NOTREACHED(); }
-
-  void FlashFrame(bool flash) override { NOTREACHED(); }
-
-  bool IsAlwaysOnTop() const override {
-    NOTREACHED();
-    return false;
-  }
-
-  void SetAlwaysOnTop(bool always_on_top) override { NOTREACHED(); }
-
- private:
-  const int task_id_;
-  const arc::ArcAppShelfId app_shelf_id_;
-  ash::ShelfID shelf_id_ = 0;
-  FullScreenMode fullscreen_mode_ = FullScreenMode::NOT_DEFINED;
-  // Unowned pointers
-  views::Widget* const widget_;
-  ArcAppWindowLauncherController* owner_;
-  ArcAppWindowLauncherItemController* controller_ = nullptr;
-  // Unowned pointer, represents host ARC window.
-
-  DISALLOW_COPY_AND_ASSIGN(AppWindow);
-};
-
 ArcAppWindowLauncherController::ArcAppWindowLauncherController(
-    ChromeLauncherController* owner,
-    ash::ShelfDelegate* shelf_delegate)
-    : AppWindowLauncherController(owner), shelf_delegate_(shelf_delegate) {
+    ChromeLauncherController* owner)
+    : AppWindowLauncherController(owner) {
   if (arc::IsArcAllowedForProfile(owner->profile())) {
     observed_profile_ = owner->profile();
     StartObserving(observed_profile_);
+
+    arc::ArcSessionManager::Get()->AddObserver(this);
   }
 }
 
 ArcAppWindowLauncherController::~ArcAppWindowLauncherController() {
   if (observed_profile_)
     StopObserving(observed_profile_);
-  if (observing_shell_)
-    ash::WmShell::Get()->RemoveShellObserver(this);
-}
-
-// static
-std::string ArcAppWindowLauncherController::GetShelfAppIdFromArcAppId(
-    const std::string& arc_app_id) {
-  return arc_app_id == arc::kPlayStoreAppId ? ArcSupportHost::kHostAppId
-                                            : arc_app_id;
-}
-
-// static
-std::string ArcAppWindowLauncherController::GetArcAppIdFromShelfAppId(
-    const std::string& shelf_app_id) {
-  return shelf_app_id == ArcSupportHost::kHostAppId ? arc::kPlayStoreAppId
-                                                    : shelf_app_id;
+  if (observing_shell_ && ash::Shell::Get()->tablet_mode_controller()) {
+    ash::Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
+  }
+  if (arc::ArcSessionManager::Get())
+    arc::ArcSessionManager::Get()->RemoveObserver(this);
 }
 
 void ArcAppWindowLauncherController::ActiveUserChanged(
@@ -319,7 +209,7 @@ void ArcAppWindowLauncherController::AdditionalUserAddedToSession(
 void ArcAppWindowLauncherController::OnWindowInitialized(aura::Window* window) {
   // An arc window has type WINDOW_TYPE_NORMAL, a WindowDelegate and
   // is a top level views widget.
-  if (window->type() != ui::wm::WINDOW_TYPE_NORMAL || !window->delegate())
+  if (window->type() != aura::client::WINDOW_TYPE_NORMAL || !window->delegate())
     return;
   views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
   if (!widget || !widget->is_top_level())
@@ -375,8 +265,7 @@ ArcAppWindowLauncherController::GetAppWindowInfoForTask(int task_id) {
   return it == task_id_to_app_window_info_.end() ? nullptr : it->second.get();
 }
 
-ArcAppWindowLauncherController::AppWindow*
-ArcAppWindowLauncherController::GetAppWindowForTask(int task_id) {
+ArcAppWindow* ArcAppWindowLauncherController::GetAppWindowForTask(int task_id) {
   AppWindowInfo* info = GetAppWindowInfoForTask(task_id);
   return info ? info->app_window() : nullptr;
 }
@@ -397,13 +286,14 @@ void ArcAppWindowLauncherController::AttachControllerToWindowIfNeeded(
   // the layout switch information.
   if (!observing_shell_) {
     observing_shell_ = true;
-    ash::WmShell::Get()->AddShellObserver(this);
+    ash::Shell::Get()->tablet_mode_controller()->AddObserver(this);
   }
 
   // Check if we have controller for this task.
   if (GetAppWindowForTask(task_id))
     return;
 
+  window->SetProperty<int>(ash::kShelfItemTypeKey, ash::TYPE_APP);
   window->SetProperty(aura::client::kAppType,
                       static_cast<int>(ash::AppType::ARC_APP));
 
@@ -417,15 +307,16 @@ void ArcAppWindowLauncherController::AttachControllerToWindowIfNeeded(
   views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
   DCHECK(widget);
   DCHECK(!info->app_window());
-  info->set_app_window(
-      base::MakeUnique<AppWindow>(task_id, info->app_shelf_id(), widget, this));
+  info->set_app_window(base::MakeUnique<ArcAppWindow>(
+      task_id, info->app_shelf_id(), widget, this));
+  info->app_window()->SetDescription(info->title(), info->icon_data_png());
   RegisterApp(info);
   DCHECK(info->app_window()->controller());
-  ash::WmWindow::Get(window)->SetIntProperty(ash::WmWindowProperty::SHELF_ID,
-                                             info->app_window()->shelf_id());
-  if (ash::WmShell::Get()
-          ->maximize_mode_controller()
-          ->IsMaximizeModeWindowManagerEnabled()) {
+  const ash::ShelfID shelf_id(info->app_window()->shelf_id());
+  window->SetProperty(ash::kShelfIDKey, new std::string(shelf_id.Serialize()));
+  if (ash::Shell::Get()
+          ->tablet_mode_controller()
+          ->IsTabletModeWindowManagerEnabled()) {
     SetOrientationLockForAppWindow(info->app_window());
   }
 }
@@ -439,15 +330,13 @@ void ArcAppWindowLauncherController::OnAppReadyChanged(
 
 std::vector<int> ArcAppWindowLauncherController::GetTaskIdsForApp(
     const std::string& arc_app_id) const {
-  const std::string app_id = GetShelfAppIdFromArcAppId(arc_app_id);
-
-  // Note, AppWindow is optional part for a task and it may be not created if
+  // Note, ArcAppWindow is optional part for a task and it may be not created if
   // another full screen Android app is currently active. Use
   // |task_id_to_app_window_info_| that keeps currently running tasks info.
   std::vector<int> task_ids;
   for (const auto& it : task_id_to_app_window_info_) {
     const AppWindowInfo* app_window_info = it.second.get();
-    if (app_window_info->app_shelf_id().app_id() == app_id)
+    if (app_window_info->app_shelf_id().app_id() == arc_app_id)
       task_ids.push_back(it.first);
   }
 
@@ -471,10 +360,9 @@ void ArcAppWindowLauncherController::OnTaskCreated(
   const std::string arc_app_id =
       ArcAppListPrefs::GetAppId(package_name, activity_name);
   const arc::ArcAppShelfId arc_app_shelf_id =
-      arc::ArcAppShelfId::FromIntentAndAppId(
-          intent, GetShelfAppIdFromArcAppId(arc_app_id));
+      arc::ArcAppShelfId::FromIntentAndAppId(intent, arc_app_id);
   task_id_to_app_window_info_[task_id] =
-      base::MakeUnique<AppWindowInfo>(arc_app_shelf_id);
+      base::MakeUnique<AppWindowInfo>(arc_app_shelf_id, intent);
   // Don't create shelf icon for non-primary user.
   if (observed_profile_ != owner()->profile())
     return;
@@ -485,6 +373,18 @@ void ArcAppWindowLauncherController::OnTaskCreated(
   // pushed to the front. We need its representation on the shelf to give a user
   // control over it.
   AttachControllerToTask(task_id, *task_id_to_app_window_info_[task_id]);
+}
+
+void ArcAppWindowLauncherController::OnTaskDescriptionUpdated(
+    int32_t task_id,
+    const std::string& label,
+    const std::vector<uint8_t>& icon_png_data) {
+  AppWindowInfo* info = GetAppWindowInfoForTask(task_id);
+  if (info) {
+    info->SetDescription(label, icon_png_data);
+    if (info->app_window())
+      info->app_window()->SetDescription(label, icon_png_data);
+  }
 }
 
 void ArcAppWindowLauncherController::OnTaskDestroyed(int task_id) {
@@ -509,42 +409,6 @@ void ArcAppWindowLauncherController::OnTaskDestroyed(int task_id) {
   task_id_to_app_window_info_.erase(it);
 }
 
-void ArcAppWindowLauncherController::OnTaskSetActive(int32_t task_id) {
-  if (observed_profile_ != owner()->profile()) {
-    active_task_id_ = task_id;
-    return;
-  }
-
-  AppWindow* previous_app_window = GetAppWindowForTask(active_task_id_);
-  if (previous_app_window) {
-    owner()->SetItemStatus(previous_app_window->shelf_id(),
-                           ash::STATUS_RUNNING);
-    previous_app_window->SetFullscreenMode(
-        previous_app_window->widget() &&
-                previous_app_window->widget()->IsFullscreen()
-            ? FullScreenMode::ACTIVE
-            : FullScreenMode::NON_ACTIVE);
-  }
-
-  active_task_id_ = task_id;
-
-  AppWindow* current_app_window = GetAppWindowForTask(task_id);
-  if (current_app_window) {
-    owner()->SetItemStatus(
-        current_app_window->shelf_id(),
-        current_app_window->widget() && current_app_window->IsActive()
-            ? ash::STATUS_ACTIVE
-            : ash::STATUS_RUNNING);
-    // TODO(reveman): Figure out how to support fullscreen in interleaved
-    // window mode.
-    // if (new_active_app_it->second->widget()) {
-    //   new_active_app_it->second->widget()->SetFullscreen(
-    //       new_active_app_it->second->fullscreen_mode() ==
-    //       FullScreenMode::ACTIVE);
-    // }
-  }
-}
-
 void ArcAppWindowLauncherController::OnTaskOrientationLockRequested(
     int32_t task_id,
     const arc::mojom::OrientationLock orientation_lock) {
@@ -566,12 +430,52 @@ void ArcAppWindowLauncherController::OnTaskOrientationLockRequested(
         ScreenOrientationController::LockCompletionBehavior::None);
   }
 
-  if (ash::WmShell::Get()
-          ->maximize_mode_controller()
-          ->IsMaximizeModeWindowManagerEnabled()) {
-    AppWindow* app_window = info->app_window();
+  if (ash::Shell::Get()
+          ->tablet_mode_controller()
+          ->IsTabletModeWindowManagerEnabled()) {
+    ArcAppWindow* app_window = info->app_window();
     if (app_window)
       SetOrientationLockForAppWindow(app_window);
+  }
+}
+
+void ArcAppWindowLauncherController::OnTaskSetActive(int32_t task_id) {
+  if (observed_profile_ != owner()->profile()) {
+    active_task_id_ = task_id;
+    return;
+  }
+
+  ArcAppWindow* previous_app_window = GetAppWindowForTask(active_task_id_);
+  if (previous_app_window) {
+    owner()->SetItemStatus(previous_app_window->shelf_id(),
+                           ash::STATUS_RUNNING);
+    previous_app_window->SetFullscreenMode(
+        previous_app_window->widget() &&
+                previous_app_window->widget()->IsFullscreen()
+            ? ArcAppWindow::FullScreenMode::ACTIVE
+            : ArcAppWindow::FullScreenMode::NON_ACTIVE);
+  }
+
+  active_task_id_ = task_id;
+
+  ArcAppWindow* current_app_window = GetAppWindowForTask(task_id);
+  if (current_app_window) {
+    if (current_app_window->widget() && current_app_window->IsActive()) {
+      owner()->SetItemStatus(current_app_window->shelf_id(),
+                             ash::STATUS_ACTIVE);
+      current_app_window->controller()->SetActiveWindow(
+          current_app_window->GetNativeWindow());
+    } else {
+      owner()->SetItemStatus(current_app_window->shelf_id(),
+                             ash::STATUS_RUNNING);
+    }
+    // TODO(reveman): Figure out how to support fullscreen in interleaved
+    // window mode.
+    // if (new_active_app_it->second->widget()) {
+    //   new_active_app_it->second->widget()->SetFullscreen(
+    //       new_active_app_it->second->fullscreen_mode() ==
+    //       ArcAppWindow::FullScreenMode::ACTIVE);
+    // }
   }
 }
 
@@ -580,14 +484,14 @@ ArcAppWindowLauncherController::ControllerForWindow(aura::Window* window) {
   if (!window)
     return nullptr;
 
-  AppWindow* app_window = GetAppWindowForTask(active_task_id_);
+  ArcAppWindow* app_window = GetAppWindowForTask(active_task_id_);
   if (app_window &&
       app_window->widget() == views::Widget::GetWidgetForNativeWindow(window)) {
     return app_window->controller();
   }
 
   for (auto& it : task_id_to_app_window_info_) {
-    AppWindow* app_window = it.second->app_window();
+    ArcAppWindow* app_window = it.second->app_window();
     if (app_window &&
         app_window->widget() ==
             views::Widget::GetWidgetForNativeWindow(window)) {
@@ -598,8 +502,18 @@ ArcAppWindowLauncherController::ControllerForWindow(aura::Window* window) {
   return nullptr;
 }
 
+void ArcAppWindowLauncherController::OnArcOptInManagementCheckStarted() {
+  // In case of retry this time is updated and we measure only successful run.
+  opt_in_management_check_start_time_ = base::Time::Now();
+}
+
+void ArcAppWindowLauncherController::OnArcSessionStopped(
+    arc::ArcStopReason stop_reason) {
+  opt_in_management_check_start_time_ = base::Time();
+}
+
 void ArcAppWindowLauncherController::OnWindowActivated(
-    aura::client::ActivationChangeObserver::ActivationReason reason,
+    wm::ActivationChangeObserver::ActivationReason reason,
     aura::Window* gained_active,
     aura::Window* lost_active) {
   AppWindowLauncherController::OnWindowActivated(reason, gained_active,
@@ -607,17 +521,17 @@ void ArcAppWindowLauncherController::OnWindowActivated(
   OnTaskSetActive(active_task_id_);
 }
 
-void ArcAppWindowLauncherController::OnMaximizeModeStarted() {
+void ArcAppWindowLauncherController::OnTabletModeStarted() {
   for (auto& it : task_id_to_app_window_info_) {
-    AppWindow* app_window = it.second->app_window();
+    ArcAppWindow* app_window = it.second->app_window();
     if (app_window)
       SetOrientationLockForAppWindow(app_window);
   }
 }
 
-void ArcAppWindowLauncherController::OnMaximizeModeEnded() {
+void ArcAppWindowLauncherController::OnTabletModeEnded() {
   ash::ScreenOrientationController* orientation_controller =
-      ash::Shell::GetInstance()->screen_orientation_controller();
+      ash::Shell::Get()->screen_orientation_controller();
   // Don't unlock one by one because it'll switch to next rotation.
   orientation_controller->UnlockAll();
 }
@@ -653,56 +567,66 @@ ArcAppWindowLauncherController::AttachControllerToTask(
     return it->second;
   }
 
-  ArcAppWindowLauncherItemController* controller =
-      new ArcAppWindowLauncherItemController(app_shelf_id.ToString(), owner());
-  const ash::ShelfID shelf_id =
-      shelf_delegate_->GetShelfIDForAppID(app_shelf_id.ToString());
-  if (!shelf_id) {
-    owner()->CreateAppLauncherItem(controller, app_shelf_id.ToString(),
-                                   ash::STATUS_RUNNING);
+  std::unique_ptr<ArcAppWindowLauncherItemController> controller =
+      base::MakeUnique<ArcAppWindowLauncherItemController>(
+          app_shelf_id.ToString());
+  ArcAppWindowLauncherItemController* item_controller = controller.get();
+  const ash::ShelfID shelf_id(app_shelf_id.ToString());
+  if (!owner()->GetItem(shelf_id)) {
+    owner()->CreateAppLauncherItem(std::move(controller), ash::STATUS_RUNNING);
   } else {
-    owner()->SetItemController(shelf_id, controller);
+    owner()->shelf_model()->SetShelfItemDelegate(shelf_id,
+                                                 std::move(controller));
     owner()->SetItemStatus(shelf_id, ash::STATUS_RUNNING);
   }
-  controller->AddTaskId(task_id);
-  app_shelf_group_to_controller_map_[app_shelf_id] = controller;
-  return controller;
+  item_controller->AddTaskId(task_id);
+  app_shelf_group_to_controller_map_[app_shelf_id] = item_controller;
+  return item_controller;
 }
 
 void ArcAppWindowLauncherController::RegisterApp(
     AppWindowInfo* app_window_info) {
-  AppWindow* app_window = app_window_info->app_window();
+  ArcAppWindow* app_window = app_window_info->app_window();
   ArcAppWindowLauncherItemController* controller =
       AttachControllerToTask(app_window->task_id(), *app_window_info);
-  DCHECK(controller);
-
-  const ash::ShelfID shelf_id =
-      shelf_delegate_->GetShelfIDForAppID(controller->app_id());
-  DCHECK(shelf_id);
+  DCHECK(!controller->app_id().empty());
+  const ash::ShelfID shelf_id(controller->app_id());
+  DCHECK(owner()->GetItem(shelf_id));
 
   controller->AddWindow(app_window);
   owner()->SetItemStatus(shelf_id, ash::STATUS_RUNNING);
   app_window->SetController(controller);
   app_window->set_shelf_id(shelf_id);
+
+  if (!opt_in_management_check_start_time_.is_null() &&
+      app_window_info->app_shelf_id().app_id() == arc::kPlayStoreAppId) {
+    arc::Intent intent;
+    if (arc::ParseIntent(app_window_info->launch_intent(), &intent) &&
+        intent.HasExtraParam(arc::kInitialStartParam)) {
+      arc::UpdatePlayStoreShowTime(
+          base::Time::Now() - opt_in_management_check_start_time_,
+          arc::policy_util::IsAccountManaged(owner()->profile()));
+    }
+    opt_in_management_check_start_time_ = base::Time();
+  }
 }
 
 void ArcAppWindowLauncherController::UnregisterApp(
     AppWindowInfo* app_window_info) {
-  AppWindow* app_window = app_window_info->app_window();
+  ArcAppWindow* app_window = app_window_info->app_window();
   if (!app_window)
     return;
 
   ArcAppWindowLauncherItemController* controller = app_window->controller();
   if (controller)
     controller->RemoveWindow(app_window);
-  app_window->ResetController();
+  app_window->SetController(nullptr);
   app_window_info->set_app_window(nullptr);
 }
 
 void ArcAppWindowLauncherController::SetOrientationLockForAppWindow(
-    AppWindow* app_window) {
-  ash::WmWindow* window =
-      ash::WmLookup::Get()->GetWindowForWidget(app_window->widget());
+    ArcAppWindow* app_window) {
+  aura::Window* window = app_window->widget()->GetNativeWindow();
   if (!window)
     return;
   AppWindowInfo* info = GetAppWindowInfoForTask(app_window->task_id());
@@ -726,7 +650,7 @@ void ArcAppWindowLauncherController::SetOrientationLockForAppWindow(
           ScreenOrientationController::LockCompletionBehavior::DisableSensor;
     }
   }
-  ash::Shell* shell = ash::Shell::GetInstance();
+  ash::Shell* shell = ash::Shell::Get();
   shell->screen_orientation_controller()->LockOrientationForWindow(
       window, BlinkOrientationLockFromMojom(orientation_lock),
       lock_completion_behavior);
@@ -734,12 +658,12 @@ void ArcAppWindowLauncherController::SetOrientationLockForAppWindow(
 
 // static
 int ArcAppWindowLauncherController::GetWindowTaskId(aura::Window* window) {
-  const std::string arc_app_id = exo::ShellSurface::GetApplicationId(window);
-  if (arc_app_id.empty())
+  const std::string* arc_app_id = exo::ShellSurface::GetApplicationId(window);
+  if (!arc_app_id)
     return -1;
 
   int task_id = -1;
-  if (sscanf(arc_app_id.c_str(), "org.chromium.arc.%d", &task_id) != 1)
+  if (sscanf(arc_app_id->c_str(), "org.chromium.arc.%d", &task_id) != 1)
     return -1;
 
   return task_id;

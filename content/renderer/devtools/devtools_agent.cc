@@ -7,13 +7,14 @@
 #include <stddef.h>
 
 #include <map>
+#include <utility>
 
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/sequence_checker.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/threading/non_thread_safe.h"
 #include "base/trace_event/trace_event.h"
 #include "content/common/devtools_messages.h"
 #include "content/common/frame_messages.h"
@@ -46,13 +47,14 @@ const size_t kMaxMessageChunkSize = IPC::Channel::kMaximumMessageSize / 4;
 const char kPageGetAppManifest[] = "Page.getAppManifest";
 
 class WebKitClientMessageLoopImpl
-    : public WebDevToolsAgentClient::WebKitClientMessageLoop,
-      public base::NonThreadSafe {
+    : public WebDevToolsAgentClient::WebKitClientMessageLoop {
  public:
   WebKitClientMessageLoopImpl() = default;
-  ~WebKitClientMessageLoopImpl() override { DCHECK(CalledOnValidThread()); }
-  void run() override {
-    DCHECK(CalledOnValidThread());
+  ~WebKitClientMessageLoopImpl() override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  }
+  void Run() override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
     base::RunLoop* const previous_run_loop = run_loop_;
     base::RunLoop run_loop;
@@ -64,8 +66,8 @@ class WebKitClientMessageLoopImpl
 
     run_loop_ = previous_run_loop;
   }
-  void quitNow() override {
-    DCHECK(CalledOnValidThread());
+  void QuitNow() override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     DCHECK(run_loop_);
 
     run_loop_->Quit();
@@ -73,6 +75,8 @@ class WebKitClientMessageLoopImpl
 
  private:
   base::RunLoop* run_loop_ = nullptr;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 };
 
 typedef std::map<int, DevToolsAgent*> IdToAgentMap;
@@ -83,14 +87,13 @@ base::LazyInstance<IdToAgentMap>::Leaky
 
 DevToolsAgent::DevToolsAgent(RenderFrameImpl* frame)
     : RenderFrameObserver(frame),
-      is_attached_(false),
       is_devtools_client_(false),
       paused_(false),
       frame_(frame),
       cpu_throttler_(new DevToolsCPUThrottler()),
       weak_factory_(this) {
   g_agent_for_routing_id.Get()[routing_id()] = this;
-  frame_->GetWebFrame()->setDevToolsAgentClient(this);
+  frame_->GetWebFrame()->SetDevToolsAgentClient(this);
 }
 
 DevToolsAgent::~DevToolsAgent() {
@@ -127,17 +130,17 @@ void DevToolsAgent::OnDestruct() {
   delete this;
 }
 
-void DevToolsAgent::sendProtocolMessage(int session_id,
+void DevToolsAgent::SendProtocolMessage(int session_id,
                                         int call_id,
                                         const blink::WebString& message,
                                         const blink::WebString& state_cookie) {
   if (!send_protocol_message_callback_for_test_.is_null()) {
     send_protocol_message_callback_for_test_.Run(
-        session_id, call_id, message.utf8(), state_cookie.utf8());
+        session_id, call_id, message.Utf8(), state_cookie.Utf8());
     return;
   }
   SendChunkedProtocolMessage(this, routing_id(), session_id, call_id,
-                             message.utf8(), state_cookie.utf8());
+                             message.Utf8(), state_cookie.Utf8());
 }
 
 // static
@@ -147,19 +150,19 @@ DevToolsAgent::createMessageLoopWrapper() {
 }
 
 blink::WebDevToolsAgentClient::WebKitClientMessageLoop*
-DevToolsAgent::createClientMessageLoop() {
+DevToolsAgent::CreateClientMessageLoop() {
   return createMessageLoopWrapper();
 }
 
-void DevToolsAgent::willEnterDebugLoop() {
+void DevToolsAgent::WillEnterDebugLoop() {
   paused_ = true;
 }
 
-void DevToolsAgent::didExitDebugLoop() {
+void DevToolsAgent::DidExitDebugLoop() {
   paused_ = false;
 }
 
-bool DevToolsAgent::requestDevToolsForFrame(blink::WebLocalFrame* webFrame) {
+bool DevToolsAgent::RequestDevToolsForFrame(blink::WebLocalFrame* webFrame) {
   RenderFrameImpl* frame = RenderFrameImpl::FromWebFrame(webFrame);
   if (!frame)
     return false;
@@ -168,7 +171,7 @@ bool DevToolsAgent::requestDevToolsForFrame(blink::WebLocalFrame* webFrame) {
   return true;
 }
 
-void DevToolsAgent::enableTracing(const WebString& category_filter) {
+void DevToolsAgent::EnableTracing(const WebString& category_filter) {
   // Tracing is already started by DevTools TracingHandler::Start for the
   // renderer target in the browser process. It will eventually start tracing in
   // the renderer process via IPC. But we still need a redundant
@@ -177,15 +180,15 @@ void DevToolsAgent::enableTracing(const WebString& category_filter) {
   // sure if tracing is already started in the renderer process.
   TraceLog* trace_log = TraceLog::GetInstance();
   trace_log->SetEnabled(
-      base::trace_event::TraceConfig(category_filter.utf8(), ""),
+      base::trace_event::TraceConfig(category_filter.Utf8(), ""),
       TraceLog::RECORDING_MODE);
 }
 
-void DevToolsAgent::disableTracing() {
+void DevToolsAgent::DisableTracing() {
   TraceLog::GetInstance()->SetDisabled();
 }
 
-void DevToolsAgent::setCPUThrottlingRate(double rate) {
+void DevToolsAgent::SetCPUThrottlingRate(double rate) {
   cpu_throttler_->SetThrottlingRate(rate);
 }
 
@@ -222,7 +225,7 @@ void DevToolsAgent::SendChunkedProtocolMessage(IPC::Sender* sender,
 
   for (size_t pos = 0; pos < message.length(); pos += kMaxMessageChunkSize) {
     chunk.is_last = pos + kMaxMessageChunkSize >= message.length();
-    chunk.session_id = chunk.is_last ? session_id : 0;
+    chunk.session_id = session_id;
     chunk.call_id = chunk.is_last ? call_id : 0;
     chunk.post_state = chunk.is_last ? post_state : std::string();
     chunk.data = message.substr(pos, kMaxMessageChunkSize);
@@ -234,21 +237,21 @@ void DevToolsAgent::SendChunkedProtocolMessage(IPC::Sender* sender,
 }
 
 void DevToolsAgent::OnAttach(const std::string& host_id, int session_id) {
-  GetWebAgent()->attach(WebString::fromUTF8(host_id), session_id);
-  is_attached_ = true;
+  GetWebAgent()->Attach(WebString::FromUTF8(host_id), session_id);
+  session_ids_.insert(session_id);
 }
 
 void DevToolsAgent::OnReattach(const std::string& host_id,
                                int session_id,
                                const std::string& agent_state) {
-  GetWebAgent()->reattach(WebString::fromUTF8(host_id), session_id,
-                          WebString::fromUTF8(agent_state));
-  is_attached_ = true;
+  GetWebAgent()->Reattach(WebString::FromUTF8(host_id), session_id,
+                          WebString::FromUTF8(agent_state));
+  session_ids_.insert(session_id);
 }
 
-void DevToolsAgent::OnDetach() {
-  GetWebAgent()->detach();
-  is_attached_ = false;
+void DevToolsAgent::OnDetach(int session_id) {
+  GetWebAgent()->Detach(session_id);
+  session_ids_.erase(session_id);
 }
 
 void DevToolsAgent::OnDispatchOnInspectorBackend(int session_id,
@@ -263,44 +266,47 @@ void DevToolsAgent::OnDispatchOnInspectorBackend(int session_id,
         weak_factory_.GetWeakPtr(), session_id, call_id));
     return;
   }
-  GetWebAgent()->dispatchOnInspectorBackend(session_id,
-                                            call_id,
-                                            WebString::fromUTF8(method),
-                                            WebString::fromUTF8(message));
+  GetWebAgent()->DispatchOnInspectorBackend(session_id, call_id,
+                                            WebString::FromUTF8(method),
+                                            WebString::FromUTF8(message));
 }
 
 void DevToolsAgent::OnInspectElement(int session_id, int x, int y) {
   blink::WebFloatRect point_rect(x, y, 0, 0);
-  frame_->GetRenderWidget()->convertWindowToViewport(&point_rect);
-  GetWebAgent()->inspectElementAt(
-      session_id, WebPoint(point_rect.x, point_rect.y));
+  frame_->GetRenderWidget()->ConvertWindowToViewport(&point_rect);
+  GetWebAgent()->InspectElementAt(session_id,
+                                  WebPoint(point_rect.x, point_rect.y));
 }
 
 void DevToolsAgent::OnRequestNewWindowACK(bool success) {
   if (!success)
-    GetWebAgent()->failedToRequestDevTools();
+    GetWebAgent()->FailedToRequestDevTools();
 }
 
 void DevToolsAgent::ContinueProgram() {
-  GetWebAgent()->continueProgram();
+  GetWebAgent()->ContinueProgram();
 }
 
-void DevToolsAgent::OnSetupDevToolsClient(
-    const std::string& compatibility_script) {
+void DevToolsAgent::OnSetupDevToolsClient(const std::string& api_script) {
   // We only want to register once; and only in main frame.
-  DCHECK(!frame_->GetWebFrame()->parent());
   if (is_devtools_client_)
     return;
   is_devtools_client_ = true;
-  new DevToolsClient(frame_, compatibility_script);
+  new DevToolsClient(frame_, api_script);
 }
 
 WebDevToolsAgent* DevToolsAgent::GetWebAgent() {
-  return frame_->GetWebFrame()->devToolsAgent();
+  return frame_->GetWebFrame()->DevToolsAgent();
 }
 
 bool DevToolsAgent::IsAttached() {
-  return is_attached_;
+  return !!session_ids_.size();
+}
+
+void DevToolsAgent::DetachAllSessions() {
+  for (int session_id : session_ids_)
+    GetWebAgent()->Detach(session_id);
+  session_ids_.clear();
 }
 
 void DevToolsAgent::GotManifest(int session_id,
@@ -308,7 +314,7 @@ void DevToolsAgent::GotManifest(int session_id,
                                 const GURL& manifest_url,
                                 const Manifest& manifest,
                                 const ManifestDebugInfo& debug_info) {
-  if (!is_attached_)
+  if (!IsAttached())
     return;
 
   std::unique_ptr<base::DictionaryValue> response(new base::DictionaryValue());
@@ -329,12 +335,13 @@ void DevToolsAgent::GotManifest(int session_id,
     errors->Append(std::move(error_value));
   }
 
-  WebString url = frame_->GetWebFrame()->document().manifestURL().string();
-  result->SetString("url", url.utf16());
+  WebString url =
+      frame_->GetWebFrame()->GetDocument().ManifestURL().GetString();
+  result->SetString("url", url.Utf16());
   if (!failed)
     result->SetString("data", debug_info.raw_data);
-  result->Set("errors", errors.release());
-  response->Set("result", result.release());
+  result->Set("errors", std::move(errors));
+  response->Set("result", std::move(result));
 
   std::string json_message;
   base::JSONWriter::Write(*response, &json_message);

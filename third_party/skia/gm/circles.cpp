@@ -77,10 +77,7 @@ protected:
         p.setAntiAlias(true);
         p.setLooper(SkBlurDrawLooper::Make(SK_ColorBLUE,
                                      SkBlurMask::ConvertRadiusToSigma(SkIntToScalar(10)),
-                                     SkIntToScalar(5), SkIntToScalar(10),
-                                     SkBlurDrawLooper::kIgnoreTransform_BlurFlag |
-                                     SkBlurDrawLooper::kOverrideColor_BlurFlag |
-                                     SkBlurDrawLooper::kHighQuality_BlurFlag));
+                                     SkIntToScalar(5), SkIntToScalar(10)));
         fPaints.push_back(p);
         }
 
@@ -153,7 +150,7 @@ protected:
         SkPaint giantPaint;
         giantPaint.setAntiAlias(true);
         giantPaint.setColor(0x80808080);
-        canvas->drawCircle(giantCenter.fX, giantCenter.fY, giantRadius, giantPaint);
+        canvas->drawCircle(giantCenter, giantRadius, giantPaint);
 
         SkRandom rand;
         canvas->translate(20 * SK_Scalar1, 20 * SK_Scalar1);

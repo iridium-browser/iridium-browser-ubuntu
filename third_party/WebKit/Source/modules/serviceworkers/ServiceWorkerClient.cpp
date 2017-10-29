@@ -8,78 +8,100 @@
 #include <memory>
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/ScriptState.h"
-#include "bindings/core/v8/SerializedScriptValue.h"
+#include "bindings/core/v8/serialization/SerializedScriptValue.h"
+#include "core/dom/ExecutionContext.h"
+#include "core/frame/UseCounter.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
+#include "platform/bindings/ScriptState.h"
+#include "platform/wtf/RefPtr.h"
 #include "public/platform/WebString.h"
-#include "wtf/RefPtr.h"
 
 namespace blink {
 
-ServiceWorkerClient* ServiceWorkerClient::take(
+ServiceWorkerClient* ServiceWorkerClient::Take(
     ScriptPromiseResolver*,
-    std::unique_ptr<WebServiceWorkerClientInfo> webClient) {
-  if (!webClient)
+    std::unique_ptr<WebServiceWorkerClientInfo> web_client) {
+  if (!web_client)
     return nullptr;
 
-  switch (webClient->clientType) {
-    case WebServiceWorkerClientTypeWindow:
-      return ServiceWorkerWindowClient::create(*webClient);
-    case WebServiceWorkerClientTypeWorker:
-    case WebServiceWorkerClientTypeSharedWorker:
-      return ServiceWorkerClient::create(*webClient);
-    case WebServiceWorkerClientTypeLast:
-      ASSERT_NOT_REACHED();
+  switch (web_client->client_type) {
+    case kWebServiceWorkerClientTypeWindow:
+      return ServiceWorkerWindowClient::Create(*web_client);
+    case kWebServiceWorkerClientTypeWorker:
+    case kWebServiceWorkerClientTypeSharedWorker:
+      return ServiceWorkerClient::Create(*web_client);
+    case kWebServiceWorkerClientTypeLast:
+      NOTREACHED();
       return nullptr;
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return nullptr;
 }
 
-ServiceWorkerClient* ServiceWorkerClient::create(
+ServiceWorkerClient* ServiceWorkerClient::Create(
     const WebServiceWorkerClientInfo& info) {
   return new ServiceWorkerClient(info);
 }
 
 ServiceWorkerClient::ServiceWorkerClient(const WebServiceWorkerClientInfo& info)
-    : m_uuid(info.uuid),
-      m_url(info.url.string()),
-      m_frameType(info.frameType) {}
+    : uuid_(info.uuid),
+      url_(info.url.GetString()),
+      type_(info.client_type),
+      frame_type_(info.frame_type) {}
 
 ServiceWorkerClient::~ServiceWorkerClient() {}
 
-String ServiceWorkerClient::frameType() const {
-  switch (m_frameType) {
-    case WebURLRequest::FrameTypeAuxiliary:
-      return "auxiliary";
-    case WebURLRequest::FrameTypeNested:
-      return "nested";
-    case WebURLRequest::FrameTypeNone:
-      return "none";
-    case WebURLRequest::FrameTypeTopLevel:
-      return "top-level";
+String ServiceWorkerClient::type() const {
+  switch (type_) {
+    case kWebServiceWorkerClientTypeWindow:
+      return "window";
+    case kWebServiceWorkerClientTypeWorker:
+      return "worker";
+    case kWebServiceWorkerClientTypeSharedWorker:
+      return "sharedworker";
+    case kWebServiceWorkerClientTypeAll:
+      NOTREACHED();
+      return String();
   }
 
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return String();
 }
 
-void ServiceWorkerClient::postMessage(ScriptState* scriptState,
+String ServiceWorkerClient::frameType(ScriptState* script_state) const {
+  UseCounter::Count(ExecutionContext::From(script_state),
+                    WebFeature::kServiceWorkerClientFrameType);
+  switch (frame_type_) {
+    case WebURLRequest::kFrameTypeAuxiliary:
+      return "auxiliary";
+    case WebURLRequest::kFrameTypeNested:
+      return "nested";
+    case WebURLRequest::kFrameTypeNone:
+      return "none";
+    case WebURLRequest::kFrameTypeTopLevel:
+      return "top-level";
+  }
+
+  NOTREACHED();
+  return String();
+}
+
+void ServiceWorkerClient::postMessage(ScriptState* script_state,
                                       PassRefPtr<SerializedScriptValue> message,
                                       const MessagePortArray& ports,
-                                      ExceptionState& exceptionState) {
-  ExecutionContext* context = scriptState->getExecutionContext();
+                                      ExceptionState& exception_state) {
+  ExecutionContext* context = ExecutionContext::From(script_state);
   // Disentangle the port in preparation for sending it to the remote context.
   MessagePortChannelArray channels =
-      MessagePort::disentanglePorts(context, ports, exceptionState);
-  if (exceptionState.hadException())
+      MessagePort::DisentanglePorts(context, ports, exception_state);
+  if (exception_state.HadException())
     return;
 
-  WebString messageString = message->toWireString();
-  WebMessagePortChannelArray webChannels =
-      MessagePort::toWebMessagePortChannelArray(std::move(channels));
-  ServiceWorkerGlobalScopeClient::from(context)->postMessageToClient(
-      m_uuid, messageString, std::move(webChannels));
+  WebString message_string = message->ToWireString();
+  WebMessagePortChannelArray web_channels =
+      MessagePort::ToWebMessagePortChannelArray(std::move(channels));
+  ServiceWorkerGlobalScopeClient::From(context)->PostMessageToClient(
+      uuid_, message_string, std::move(web_channels));
 }
 
 }  // namespace blink

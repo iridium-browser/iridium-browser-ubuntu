@@ -12,6 +12,7 @@
 #import "base/mac/scoped_nsobject.h"
 #import "base/mac/scoped_objc_class_swizzler.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -1375,6 +1376,9 @@ TEST_F(NativeWidgetMacTest, NativeProperties) {
   Widget* bubble_widget = BubbleDialogDelegateView::CreateBubble(bubble_view);
   EXPECT_TRUE([bubble_widget->GetNativeWindow() canBecomeKeyWindow]);
   EXPECT_FALSE([bubble_widget->GetNativeWindow() canBecomeMainWindow]);
+  EXPECT_EQ(NSWindowCollectionBehaviorTransient,
+            [bubble_widget->GetNativeWindow() collectionBehavior] &
+                NSWindowCollectionBehaviorTransient);
 
   // But a bubble without a parent should still be able to become main.
   Widget* toplevel_bubble_widget =

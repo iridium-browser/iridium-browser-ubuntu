@@ -18,7 +18,8 @@
 #include "base/process/process_info.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/task_scheduler/task_traits.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -34,14 +35,14 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "components/safe_browsing_db/database_manager.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
-#include "components/user_prefs/tracked/tracked_preference_validation_delegate.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/preferences/public/interfaces/tracked_preference_validation_delegate.mojom.h"
 
 namespace safe_browsing {
 
@@ -121,10 +122,17 @@ PersistentIncidentState ComputeIncidentState(const Incident& incident) {
 // Returns the shutdown behavior for the task runners of the incident reporting
 // service. Current metrics suggest that CONTINUE_ON_SHUTDOWN will reduce the
 // number of browser hangs on shutdown.
-base::SequencedWorkerPool::WorkerShutdown GetShutdownBehavior() {
+base::TaskShutdownBehavior GetShutdownBehavior() {
   return base::FeatureList::IsEnabled(features::kBrowserHangFixesExperiment)
-             ? base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN
-             : base::SequencedWorkerPool::SKIP_ON_SHUTDOWN;
+             ? base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN
+             : base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN;
+}
+
+// Returns a task runner for blocking tasks in the background.
+scoped_refptr<base::TaskRunner> GetBackgroundTaskRunner() {
+  return base::CreateTaskRunnerWithTraits({base::TaskPriority::BACKGROUND,
+                                           GetShutdownBehavior(),
+                                           base::MayBlock()});
 }
 
 }  // namespace
@@ -229,8 +237,9 @@ void IncidentReportingService::Receiver::AddIncidentForProcess(
   } else {
     thread_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&IncidentReportingService::Receiver::AddIncidentOnMainThread,
-                   service_, nullptr, base::Passed(&incident)));
+        base::BindOnce(
+            &IncidentReportingService::Receiver::AddIncidentOnMainThread,
+            service_, nullptr, base::Passed(&incident)));
   }
 }
 
@@ -241,7 +250,7 @@ void IncidentReportingService::Receiver::ClearIncidentForProcess(
   } else {
     thread_runner_->PostTask(
         FROM_HERE,
-        base::Bind(
+        base::BindOnce(
             &IncidentReportingService::Receiver::ClearIncidentOnMainThread,
             service_, nullptr, base::Passed(&incident)));
   }
@@ -317,9 +326,7 @@ IncidentReportingService::IncidentReportingService(
           safe_browsing_service ? safe_browsing_service->url_request_context()
                                 : nullptr),
       collect_environment_data_fn_(&CollectEnvironmentData),
-      environment_collection_task_runner_(
-          content::BrowserThread::GetBlockingPool()
-              ->GetTaskRunnerWithShutdownBehavior(GetShutdownBehavior())),
+      environment_collection_task_runner_(GetBackgroundTaskRunner()),
       environment_collection_pending_(),
       collation_timeout_pending_(),
       collation_timer_(FROM_HERE,
@@ -328,9 +335,7 @@ IncidentReportingService::IncidentReportingService(
                        &IncidentReportingService::OnCollationTimeout),
       delayed_analysis_callbacks_(
           base::TimeDelta::FromMilliseconds(kDefaultCallbackIntervalMs),
-          content::BrowserThread::GetBlockingPool()
-              ->GetTaskRunnerWithShutdownBehavior(GetShutdownBehavior())),
-      download_metadata_manager_(content::BrowserThread::GetBlockingPool()),
+          GetBackgroundTaskRunner()),
       receiver_weak_ptr_factory_(this),
       weak_ptr_factory_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -369,14 +374,14 @@ IncidentReportingService::GetIncidentReceiver() {
   return base::MakeUnique<Receiver>(receiver_weak_ptr_factory_.GetWeakPtr());
 }
 
-std::unique_ptr<TrackedPreferenceValidationDelegate>
+std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
 IncidentReportingService::CreatePreferenceValidationDelegate(Profile* profile) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   if (profile->IsOffTheRecord())
-    return std::unique_ptr<TrackedPreferenceValidationDelegate>();
-  return std::unique_ptr<TrackedPreferenceValidationDelegate>(
-      new PreferenceValidationDelegate(profile, GetIncidentReceiver()));
+    return std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>();
+  return base::MakeUnique<PreferenceValidationDelegate>(profile,
+                                                        GetIncidentReceiver());
 }
 
 void IncidentReportingService::RegisterDelayedAnalysisCallback(
@@ -410,9 +415,7 @@ IncidentReportingService::IncidentReportingService(
                             : nullptr),
       url_request_context_getter_(request_context_getter),
       collect_environment_data_fn_(&CollectEnvironmentData),
-      environment_collection_task_runner_(
-          content::BrowserThread::GetBlockingPool()
-              ->GetTaskRunnerWithShutdownBehavior(GetShutdownBehavior())),
+      environment_collection_task_runner_(GetBackgroundTaskRunner()),
       environment_collection_pending_(),
       collation_timeout_pending_(),
       collation_timer_(FROM_HERE,
@@ -420,7 +423,6 @@ IncidentReportingService::IncidentReportingService(
                        this,
                        &IncidentReportingService::OnCollationTimeout),
       delayed_analysis_callbacks_(delayed_task_interval, delayed_task_runner),
-      download_metadata_manager_(content::BrowserThread::GetBlockingPool()),
       receiver_weak_ptr_factory_(this),
       weak_ptr_factory_(this) {
   notification_registrar_.Add(this,
@@ -439,9 +441,7 @@ void IncidentReportingService::SetCollectEnvironmentHook(
     environment_collection_task_runner_ = task_runner;
   } else {
     collect_environment_data_fn_ = &CollectEnvironmentData;
-    environment_collection_task_runner_ =
-        content::BrowserThread::GetBlockingPool()
-            ->GetTaskRunnerWithShutdownBehavior(GetShutdownBehavior());
+    environment_collection_task_runner_ = GetBackgroundTaskRunner();
   }
 }
 
@@ -694,10 +694,11 @@ void IncidentReportingService::BeginEnvironmentCollection() {
       new ClientIncidentReport_EnvironmentData();
   environment_collection_pending_ =
       environment_collection_task_runner_->PostTaskAndReply(
-          FROM_HERE, base::Bind(collect_environment_data_fn_, environment_data),
-          base::Bind(&IncidentReportingService::OnEnvironmentDataCollected,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     base::Passed(base::WrapUnique(environment_data))));
+          FROM_HERE,
+          base::BindOnce(collect_environment_data_fn_, environment_data),
+          base::BindOnce(&IncidentReportingService::OnEnvironmentDataCollected,
+                         weak_ptr_factory_.GetWeakPtr(),
+                         base::Passed(base::WrapUnique(environment_data))));
 
   // Posting the task will fail if the runner has been shut down. This should
   // never happen since the blocking pool is shut down after this service.

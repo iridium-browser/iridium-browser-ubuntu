@@ -8,7 +8,7 @@
 #include <stddef.h>
 
 #include "cc/base/region.h"
-#include "cc/playback/recording_source.h"
+#include "cc/layers/recording_source.h"
 #include "cc/test/fake_content_layer_client.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "third_party/skia/include/core/SkImage.h"
@@ -48,8 +48,7 @@ class FakeRecordingSource : public RecordingSource {
   }
 
   // RecordingSource overrides.
-  scoped_refptr<RasterSource> CreateRasterSource(
-      bool can_use_lcd) const override;
+  scoped_refptr<RasterSource> CreateRasterSource() const override;
 
   void SetRecordedViewport(const gfx::Rect& recorded_viewport) {
     recorded_viewport_ = recorded_viewport;
@@ -62,6 +61,10 @@ class FakeRecordingSource : public RecordingSource {
 
   void SetClearCanvasWithDebugColor(bool clear) {
     clear_canvas_with_debug_color_ = clear;
+  }
+
+  void set_fill_with_nonsolid_color(bool nonsolid) {
+    client_.set_fill_with_nonsolid_color(nonsolid);
   }
 
   void Rerecord() {
@@ -95,17 +98,20 @@ class FakeRecordingSource : public RecordingSource {
     client_.add_draw_rectf(rect, flags);
   }
 
-  void add_draw_image(sk_sp<const SkImage> image, const gfx::Point& point) {
+  void add_draw_image(sk_sp<SkImage> image, const gfx::Point& point) {
+    client_.add_draw_image(std::move(image), point, default_flags_);
+  }
+  void add_draw_image(PaintImage image, const gfx::Point& point) {
     client_.add_draw_image(std::move(image), point, default_flags_);
   }
 
-  void add_draw_image_with_transform(sk_sp<const SkImage> image,
+  void add_draw_image_with_transform(sk_sp<SkImage> image,
                                      const gfx::Transform& transform) {
     client_.add_draw_image_with_transform(std::move(image), transform,
                                           default_flags_);
   }
 
-  void add_draw_image_with_flags(sk_sp<const SkImage> image,
+  void add_draw_image_with_flags(sk_sp<SkImage> image,
                                  const gfx::Point& point,
                                  const PaintFlags& flags) {
     client_.add_draw_image(std::move(image), point, flags);

@@ -25,28 +25,20 @@
 
 #include "platform/exported/WebActiveGestureAnimation.h"
 
+#include <memory>
+#include "platform/wtf/PtrUtil.h"
 #include "public/platform/WebGestureCurve.h"
 #include "public/platform/WebGestureCurveTarget.h"
-#include "wtf/PtrUtil.h"
-#include <memory>
 
 namespace blink {
 
 std::unique_ptr<WebActiveGestureAnimation>
-WebActiveGestureAnimation::createAtAnimationStart(
-    std::unique_ptr<WebGestureCurve> curve,
-    WebGestureCurveTarget* target) {
-  return WTF::wrapUnique(
-      new WebActiveGestureAnimation(std::move(curve), target, 0, true));
-}
-
-std::unique_ptr<WebActiveGestureAnimation>
-WebActiveGestureAnimation::createWithTimeOffset(
+WebActiveGestureAnimation::CreateWithTimeOffset(
     std::unique_ptr<WebGestureCurve> curve,
     WebGestureCurveTarget* target,
-    double startTime) {
-  return WTF::wrapUnique(new WebActiveGestureAnimation(std::move(curve), target,
-                                                       startTime, false));
+    double start_time) {
+  return WTF::WrapUnique(
+      new WebActiveGestureAnimation(std::move(curve), target, start_time));
 }
 
 WebActiveGestureAnimation::~WebActiveGestureAnimation() {}
@@ -54,21 +46,13 @@ WebActiveGestureAnimation::~WebActiveGestureAnimation() {}
 WebActiveGestureAnimation::WebActiveGestureAnimation(
     std::unique_ptr<WebGestureCurve> curve,
     WebGestureCurveTarget* target,
-    double startTime,
-    bool waitingForFirstTick)
-    : m_startTime(startTime),
-      m_waitingForFirstTick(waitingForFirstTick),
-      m_curve(std::move(curve)),
-      m_target(target) {}
+    double start_time)
+    : start_time_(start_time), curve_(std::move(curve)), target_(target) {}
 
-bool WebActiveGestureAnimation::animate(double time) {
-  if (m_waitingForFirstTick) {
-    m_startTime = time;
-    m_waitingForFirstTick = false;
-  }
+bool WebActiveGestureAnimation::Animate(double time) {
   // All WebGestureCurves assume zero-based time, so we subtract
   // the animation start time before passing to the curve.
-  return m_curve->apply(time - m_startTime, m_target);
+  return curve_->Apply(time - start_time_, target_);
 }
 
 }  // namespace blink

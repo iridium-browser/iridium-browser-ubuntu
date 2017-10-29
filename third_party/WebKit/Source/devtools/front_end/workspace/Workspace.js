@@ -122,6 +122,12 @@ Workspace.Project.prototype = {
   fullDisplayName(uiSourceCode) {},
 
   /**
+   * @param {!Workspace.UISourceCode} uiSourceCode
+   * @return {string}
+   */
+  mimeType(uiSourceCode) {},
+
+  /**
    * @return {boolean}
    */
   canRename() {},
@@ -158,17 +164,17 @@ Workspace.Project.prototype = {
    * @param {string} query
    * @param {boolean} caseSensitive
    * @param {boolean} isRegex
-   * @param {function(!Array.<!Common.ContentProvider.SearchMatch>)} callback
+   * @return {!Promise<!Array<!Common.ContentProvider.SearchMatch>>}
    */
-  searchInFileContent(uiSourceCode, query, caseSensitive, isRegex, callback) {},
+  searchInFileContent(uiSourceCode, query, caseSensitive, isRegex) {},
 
   /**
    * @param {!Workspace.ProjectSearchConfig} searchConfig
    * @param {!Array.<string>} filesMathingFileQuery
    * @param {!Common.Progress} progress
-   * @param {function(!Array.<string>)} callback
+   * @return {!Promise<!Array<string>>}
    */
-  findFilesMatchingSearchRequest(searchConfig, filesMathingFileQuery, progress, callback) {},
+  findFilesMatchingSearchRequest(searchConfig, filesMathingFileQuery, progress) {},
 
   /**
    * @param {!Common.Progress} progress
@@ -453,6 +459,7 @@ Workspace.Workspace = class extends Common.Object {
 Workspace.Workspace.Events = {
   UISourceCodeAdded: Symbol('UISourceCodeAdded'),
   UISourceCodeRemoved: Symbol('UISourceCodeRemoved'),
+  UISourceCodeRenamed: Symbol('UISourceCodeRenamed'),
   WorkingCopyChanged: Symbol('WorkingCopyChanged'),
   WorkingCopyCommitted: Symbol('WorkingCopyCommitted'),
   WorkingCopyCommittedByUser: Symbol('WorkingCopyCommittedByUser'),

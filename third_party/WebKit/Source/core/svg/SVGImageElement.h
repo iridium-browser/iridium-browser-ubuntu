@@ -21,18 +21,22 @@
 #ifndef SVGImageElement_h
 #define SVGImageElement_h
 
-#include "core/SVGNames.h"
+#include "core/html/canvas/ImageElementBase.h"
 #include "core/svg/SVGAnimatedLength.h"
 #include "core/svg/SVGAnimatedPreserveAspectRatio.h"
 #include "core/svg/SVGGraphicsElement.h"
 #include "core/svg/SVGImageLoader.h"
 #include "core/svg/SVGURIReference.h"
+#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class SVGImageElement final : public SVGGraphicsElement,
-                              public SVGURIReference {
+class CORE_EXPORT SVGImageElement final
+    : public SVGGraphicsElement,
+      public ImageElementBase,
+      public SVGURIReference,
+      public ActiveScriptWrappable<SVGImageElement> {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(SVGImageElement);
 
@@ -40,53 +44,59 @@ class SVGImageElement final : public SVGGraphicsElement,
   DECLARE_NODE_FACTORY(SVGImageElement);
   DECLARE_VIRTUAL_TRACE();
 
-  bool currentFrameHasSingleSecurityOrigin() const;
+  bool CurrentFrameHasSingleSecurityOrigin() const;
 
-  SVGAnimatedLength* x() const { return m_x.get(); }
-  SVGAnimatedLength* y() const { return m_y.get(); }
-  SVGAnimatedLength* width() const { return m_width.get(); }
-  SVGAnimatedLength* height() const { return m_height.get(); }
+  SVGAnimatedLength* x() const { return x_.Get(); }
+  SVGAnimatedLength* y() const { return y_.Get(); }
+  SVGAnimatedLength* width() const { return width_.Get(); }
+  SVGAnimatedLength* height() const { return height_.Get(); }
   SVGAnimatedPreserveAspectRatio* preserveAspectRatio() {
-    return m_preserveAspectRatio.get();
+    return preserve_aspect_ratio_.Get();
+  }
+
+  bool HasPendingActivity() const final {
+    return GetImageLoader().HasPendingActivity();
   }
 
   // Exposed for testing.
-  ImageResourceContent* cachedImage() const { return imageLoader().image(); }
+  ImageResourceContent* CachedImage() const {
+    return GetImageLoader().GetImage();
+  }
 
  private:
   explicit SVGImageElement(Document&);
 
-  bool isStructurallyExternal() const override {
-    return !hrefString().isNull();
+  bool IsStructurallyExternal() const override {
+    return !HrefString().IsNull();
   }
 
-  void collectStyleForPresentationAttribute(const QualifiedName&,
+  void CollectStyleForPresentationAttribute(const QualifiedName&,
                                             const AtomicString&,
                                             MutableStylePropertySet*) override;
 
-  void svgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const QualifiedName&) override;
 
-  void attachLayoutTree(const AttachContext& = AttachContext()) override;
-  InsertionNotificationRequest insertedInto(ContainerNode*) override;
+  void AttachLayoutTree(AttachContext&) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
 
-  LayoutObject* createLayoutObject(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
 
-  const AtomicString imageSourceURL() const override;
+  const AtomicString ImageSourceURL() const override;
 
-  bool haveLoadedRequiredResources() override;
+  bool HaveLoadedRequiredResources() override;
 
-  bool selfHasRelativeLengths() const override;
-  void didMoveToNewDocument(Document& oldDocument) override;
-  SVGImageLoader& imageLoader() const { return *m_imageLoader; }
+  bool SelfHasRelativeLengths() const override;
+  void DidMoveToNewDocument(Document& old_document) override;
+  SVGImageLoader& GetImageLoader() const override { return *image_loader_; }
+  FloatSize SourceDefaultObjectSize() override;
 
-  Member<SVGAnimatedLength> m_x;
-  Member<SVGAnimatedLength> m_y;
-  Member<SVGAnimatedLength> m_width;
-  Member<SVGAnimatedLength> m_height;
-  Member<SVGAnimatedPreserveAspectRatio> m_preserveAspectRatio;
+  Member<SVGAnimatedLength> x_;
+  Member<SVGAnimatedLength> y_;
+  Member<SVGAnimatedLength> width_;
+  Member<SVGAnimatedLength> height_;
+  Member<SVGAnimatedPreserveAspectRatio> preserve_aspect_ratio_;
 
-  Member<SVGImageLoader> m_imageLoader;
-  bool m_needsLoaderURIUpdate : 1;
+  Member<SVGImageLoader> image_loader_;
 };
 
 }  // namespace blink

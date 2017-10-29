@@ -9,6 +9,9 @@ from telemetry.story import shared_state as shared_state_module
 _next_story_id = 0
 
 
+_VALID_TAG_RE = re.compile(r'^[\w]+$')
+
+
 class Story(object):
   """A class styled on unittest.TestCase for creating story tests.
 
@@ -45,6 +48,7 @@ class Story(object):
     assert issubclass(shared_state_class,
                       shared_state_module.SharedState)
     self._shared_state_class = shared_state_class
+    assert name, 'All stories must be named.'
     self._name = name
     self._platform_specific = platform_specific
     global _next_story_id
@@ -56,6 +60,14 @@ class Story(object):
       tags = set(tags)
     else:
       assert isinstance(tags, set)
+    for t in tags:
+      if not _VALID_TAG_RE.match(t):
+        raise ValueError(
+            'Invalid tag string: %s. Tag can only contain alphanumeric and '
+            'underscore characters.' % t)
+      if len(t) > 50:
+        raise ValueError('Invalid tag string: %s. Tag can have at most 50 '
+                         'characters')
     self._tags = tags
     self._is_local = is_local
     self._make_javascript_deterministic = make_javascript_deterministic
@@ -90,8 +102,8 @@ class Story(object):
     return self._grouping_keys
 
   @property
-  def display_name_and_grouping_key_tuple(self):
-    return self.display_name, tuple(self.grouping_keys.iteritems())
+  def name_and_grouping_key_tuple(self):
+    return self.name, tuple(self.grouping_keys.iteritems())
 
   def AsDict(self):
     """Converts a story object to a dict suitable for JSON output."""
@@ -111,14 +123,7 @@ class Story(object):
     subclasses.
     """
     # This fail-safe implementation is safe for subclasses to override.
-    return re.sub('[^a-zA-Z0-9]', '_', self.display_name)
-
-  @property
-  def display_name(self):
-    if self.name:
-      return self.name
-    else:
-      return self.__class__.__name__
+    return re.sub('[^a-zA-Z0-9]', '_', self.name)
 
   @property
   def is_local(self):

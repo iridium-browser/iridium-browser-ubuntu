@@ -9,7 +9,7 @@
 
 namespace blink {
 
-NGBlockChildIterator::NGBlockChildIterator(NGLayoutInputNode* first_child,
+NGBlockChildIterator::NGBlockChildIterator(NGLayoutInputNode first_child,
                                            NGBlockBreakToken* break_token)
     : child_(first_child), break_token_(break_token), child_token_idx_(0) {}
 
@@ -34,7 +34,7 @@ NGBlockChildIterator::Entry NGBlockChildIterator::NextChild() {
       // This child break token candidate doesn't match the current node, this
       // node must be unfinished.
       NGBreakToken* child_break_token_candidate =
-          child_break_tokens[child_token_idx_].get();
+          child_break_tokens[child_token_idx_].Get();
       if (child_break_token_candidate->InputNode() != child_)
         break;
 
@@ -45,12 +45,12 @@ NGBlockChildIterator::Entry NGBlockChildIterator::NextChild() {
         child_break_token = child_break_token_candidate;
         break;
       }
-    } while ((child_ = child_->NextSibling()));
+    } while ((child_ = child_.NextSibling()));
   }
 
-  NGLayoutInputNode* child = child_;
+  NGLayoutInputNode child = child_;
   if (child_)
-    child_ = child_->NextSibling();
+    child_ = child_.NextSibling();
 
   return Entry(child, child_break_token);
 }

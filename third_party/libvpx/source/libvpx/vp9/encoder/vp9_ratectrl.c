@@ -209,7 +209,7 @@ int vp9_estimate_bits_at_q(FRAME_TYPE frame_type, int q, int mbs,
   const int bpm =
       (int)(vp9_rc_bits_per_mb(frame_type, q, correction_factor, bit_depth));
   return VPXMAX(FRAME_OVERHEAD_BITS,
-                (int)((uint64_t)bpm * mbs) >> BPER_MB_NORMBITS);
+                (int)(((uint64_t)bpm * mbs) >> BPER_MB_NORMBITS));
 }
 
 int vp9_rc_clamp_pframe_target_size(const VP9_COMP *const cpi, int target) {
@@ -353,6 +353,7 @@ void vp9_rc_init(const VP9EncoderConfig *oxcf, int pass, RATE_CONTROL *rc) {
   rc->af_ratio_onepass_vbr = 10;
   rc->prev_avg_source_sad_lag = 0;
   rc->high_source_sad = 0;
+  rc->reset_high_source_sad = 0;
   rc->high_source_sad_lagindex = -1;
   rc->alt_ref_gf_group = 0;
   rc->fac_active_worst_inter = 150;
@@ -547,6 +548,7 @@ void vp9_rc_update_rate_correction_factors(VP9_COMP *cpi) {
 int vp9_rc_regulate_q(const VP9_COMP *cpi, int target_bits_per_frame,
                       int active_best_quality, int active_worst_quality) {
   const VP9_COMMON *const cm = &cpi->common;
+  CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
   int q = active_worst_quality;
   int last_error = INT_MAX;
   int i, target_bits_per_mb, bits_per_mb_at_this_q;
@@ -561,7 +563,7 @@ int vp9_rc_regulate_q(const VP9_COMP *cpi, int target_bits_per_frame,
 
   do {
     if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ && cm->seg.enabled &&
-        cpi->svc.temporal_layer_id == 0 &&
+        cr->apply_cyclic_refresh &&
         (!cpi->oxcf.gf_cbr_boost_pct || !cpi->refresh_golden_frame)) {
       bits_per_mb_at_this_q =
           (int)vp9_cyclic_refresh_rc_bits_per_mb(cpi, i, correction_factor);
@@ -584,7 +586,7 @@ int vp9_rc_regulate_q(const VP9_COMP *cpi, int target_bits_per_frame,
 
   // In CBR mode, this makes sure q is between oscillating Qs to prevent
   // resonance.
-  if (cpi->oxcf.rc_mode == VPX_CBR &&
+  if (cpi->oxcf.rc_mode == VPX_CBR && !cpi->rc.reset_high_source_sad &&
       (!cpi->oxcf.gf_cbr_boost_pct ||
        !(cpi->refresh_alt_ref_frame || cpi->refresh_golden_frame)) &&
       (cpi->rc.rc_1_frame * cpi->rc.rc_2_frame == -1) &&
@@ -678,7 +680,8 @@ static int calc_active_worst_quality_one_pass_cbr(const VP9_COMP *cpi) {
   int active_worst_quality;
   int ambient_qp;
   unsigned int num_frames_weight_key = 5 * cpi->svc.number_temporal_layers;
-  if (cm->frame_type == KEY_FRAME) return rc->worst_quality;
+  if (cm->frame_type == KEY_FRAME || rc->reset_high_source_sad)
+    return rc->worst_quality;
   // For ambient_qp we use minimum of avg_frame_qindex[KEY_FRAME/INTER_FRAME]
   // for the first few frames following key frame. These are both initialized
   // to worst_quality and updated with (3/4, 1/4) average in postencode_update.
@@ -688,6 +691,17 @@ static int calc_active_worst_quality_one_pass_cbr(const VP9_COMP *cpi) {
                    ? VPXMIN(rc->avg_frame_qindex[INTER_FRAME],
                             rc->avg_frame_qindex[KEY_FRAME])
                    : rc->avg_frame_qindex[INTER_FRAME];
+  // For SVC if the current base spatial layer was key frame, use the QP from
+  // that base layer for ambient_qp.
+  if (cpi->use_svc && cpi->svc.spatial_layer_id > 0) {
+    int layer = LAYER_IDS_TO_IDX(0, cpi->svc.temporal_layer_id,
+                                 cpi->svc.number_temporal_layers);
+    const LAYER_CONTEXT *lc = &cpi->svc.layer_context[layer];
+    if (lc->is_key_frame) {
+      const RATE_CONTROL *lrc = &lc->rc;
+      ambient_qp = VPXMIN(ambient_qp, lrc->last_q[KEY_FRAME]);
+    }
+  }
   active_worst_quality = VPXMIN(rc->worst_quality, ambient_qp * 5 >> 2);
   if (rc->buffer_level > rc->optimal_buffer_level) {
     // Adjust down.
@@ -1352,10 +1366,6 @@ void vp9_rc_postencode_update(VP9_COMP *cpi, uint64_t bytes_used) {
   RATE_CONTROL *const rc = &cpi->rc;
   const int qindex = cm->base_qindex;
 
-  if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ && cm->seg.enabled) {
-    vp9_cyclic_refresh_postencode(cpi);
-  }
-
   // Update rate control heuristics
   rc->projected_frame_size = (int)(bytes_used << 3);
 
@@ -1456,6 +1466,7 @@ void vp9_rc_postencode_update(VP9_COMP *cpi, uint64_t bytes_used) {
   if (oxcf->pass == 0) {
     if (cm->frame_type != KEY_FRAME) compute_frame_low_motion(cpi);
   }
+  if (cm->frame_type != KEY_FRAME) rc->reset_high_source_sad = 0;
 }
 
 void vp9_rc_postencode_update_drop_frame(VP9_COMP *cpi) {
@@ -2062,7 +2073,8 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
   return resize_action;
 }
 
-void adjust_gf_boost_lag_one_pass_vbr(VP9_COMP *cpi, uint64_t avg_sad_current) {
+static void adjust_gf_boost_lag_one_pass_vbr(VP9_COMP *cpi,
+                                             uint64_t avg_sad_current) {
   VP9_COMMON *const cm = &cpi->common;
   RATE_CONTROL *const rc = &cpi->rc;
   int target;
@@ -2165,6 +2177,11 @@ void adjust_gf_boost_lag_one_pass_vbr(VP9_COMP *cpi, uint64_t avg_sad_current) {
     if (rate_err < 2.0 && !high_content) {
       rc->fac_active_worst_inter = 120;
       rc->fac_active_worst_gf = 90;
+    } else if (rate_err > 8.0 && rc->avg_frame_qindex[INTER_FRAME] < 16) {
+      // Increase active_worst faster at low Q if rate fluctuation is high.
+      rc->fac_active_worst_inter = 200;
+      if (rc->avg_frame_qindex[INTER_FRAME] < 8)
+        rc->fac_active_worst_inter = 400;
     }
     if (low_content && rc->avg_frame_low_motion > 80) {
       rc->af_ratio_onepass_vbr = 15;
@@ -2202,7 +2219,7 @@ void adjust_gf_boost_lag_one_pass_vbr(VP9_COMP *cpi, uint64_t avg_sad_current) {
 // in content and allow rate control to react.
 // This function also handles special case of lag_in_frames, to measure content
 // level in #future frames set by the lag_in_frames.
-void vp9_avg_source_sad(VP9_COMP *cpi) {
+void vp9_scene_detection_onepass(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
   RATE_CONTROL *const rc = &cpi->rc;
 #if CONFIG_VP9_HIGHBITDEPTH
@@ -2273,7 +2290,6 @@ void vp9_avg_source_sad(VP9_COMP *cpi) {
         int num_samples = 0;
         int sb_cols = (cm->mi_cols + MI_BLOCK_SIZE - 1) / MI_BLOCK_SIZE;
         int sb_rows = (cm->mi_rows + MI_BLOCK_SIZE - 1) / MI_BLOCK_SIZE;
-        uint64_t avg_source_sad_threshold = 10000;
         if (cpi->oxcf.lag_in_frames > 0) {
           src_y = frames[frame]->y_buffer;
           src_ystride = frames[frame]->y_stride;
@@ -2283,28 +2299,12 @@ void vp9_avg_source_sad(VP9_COMP *cpi) {
         for (sbi_row = 0; sbi_row < sb_rows; ++sbi_row) {
           for (sbi_col = 0; sbi_col < sb_cols; ++sbi_col) {
             // Checker-board pattern, ignore boundary.
-            // If the use_source_sad is on, compute for every superblock.
-            if (cpi->sf.use_source_sad ||
-                ((sbi_row > 0 && sbi_col > 0) &&
+            if (((sbi_row > 0 && sbi_col > 0) &&
                  (sbi_row < sb_rows - 1 && sbi_col < sb_cols - 1) &&
                  ((sbi_row % 2 == 0 && sbi_col % 2 == 0) ||
                   (sbi_row % 2 != 0 && sbi_col % 2 != 0)))) {
               tmp_sad = cpi->fn_ptr[bsize].sdf(src_y, src_ystride, last_src_y,
                                                last_src_ystride);
-              if (cpi->sf.use_source_sad) {
-                unsigned int tmp_sse;
-                unsigned int tmp_variance = vpx_variance64x64(
-                    src_y, src_ystride, last_src_y, last_src_ystride, &tmp_sse);
-                // Note: tmp_sse - tmp_variance = ((sum * sum) >> 12)
-                if (tmp_sad < avg_source_sad_threshold)
-                  cpi->content_state_sb[num_samples] =
-                      ((tmp_sse - tmp_variance) < 25) ? kLowSadLowSumdiff
-                                                      : kLowSadHighSumdiff;
-                else
-                  cpi->content_state_sb[num_samples] =
-                      ((tmp_sse - tmp_variance) < 25) ? kHighSadLowSumdiff
-                                                      : kHighSadHighSumdiff;
-              }
               avg_sad += tmp_sad;
               num_samples++;
             }
@@ -2333,6 +2333,23 @@ void vp9_avg_source_sad(VP9_COMP *cpi) {
           rc->avg_source_sad[lagframe_idx] = avg_sad;
         }
       }
+    }
+    // For CBR non-screen content mode, check if we should reset the rate
+    // control. Reset is done if high_source_sad is detected and the rate
+    // control is at very low QP with rate correction factor at min level.
+    if (cpi->oxcf.rc_mode == VPX_CBR &&
+        cpi->oxcf.content != VP9E_CONTENT_SCREEN && !cpi->use_svc) {
+      if (rc->high_source_sad && rc->last_q[INTER_FRAME] == rc->best_quality &&
+          rc->avg_frame_qindex[INTER_FRAME] < (rc->best_quality << 1) &&
+          rc->rate_correction_factors[INTER_NORMAL] == MIN_BPB_FACTOR) {
+        rc->rate_correction_factors[INTER_NORMAL] = 0.5;
+        rc->avg_frame_qindex[INTER_FRAME] = rc->worst_quality;
+        rc->buffer_level = rc->optimal_buffer_level;
+        rc->bits_off_target = rc->optimal_buffer_level;
+        rc->reset_high_source_sad = 1;
+      }
+      if (cm->frame_type != KEY_FRAME && rc->reset_high_source_sad)
+        rc->this_frame_target = rc->avg_frame_bandwidth;
     }
     // For VBR, under scene change/high content change, force golden refresh.
     if (cpi->oxcf.rc_mode == VPX_VBR && cm->frame_type != KEY_FRAME &&

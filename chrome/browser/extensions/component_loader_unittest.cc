@@ -51,7 +51,7 @@ class MockExtensionService : public TestExtensionService {
   }
 
   void UnloadExtension(const std::string& extension_id,
-                       UnloadedExtensionInfo::Reason reason) override {
+                       UnloadedExtensionReason reason) override {
     ASSERT_TRUE(registry_->enabled_extensions().Contains(extension_id));
     // Remove the extension with the matching id.
     registry_->RemoveEnabled(extension_id);
@@ -59,7 +59,7 @@ class MockExtensionService : public TestExtensionService {
   }
 
   void RemoveComponentExtension(const std::string& extension_id) override {
-    UnloadExtension(extension_id, UnloadedExtensionInfo::REASON_DISABLE);
+    UnloadExtension(extension_id, UnloadedExtensionReason::DISABLE);
   }
 
   bool is_ready() override { return ready_; }
@@ -253,19 +253,17 @@ TEST_F(ComponentLoaderTest, AddOrReplace) {
   size_t const default_count = component_loader_.registered_extensions_count();
   base::FilePath known_extension = GetBasePath()
       .AppendASCII("override_component_extension");
-  base::FilePath unknow_extension = extension_path_;
+  base::FilePath unknown_extension = extension_path_;
   base::FilePath invalid_extension = GetBasePath()
       .AppendASCII("this_path_does_not_exist");
 
   // Replace a default component extension.
   component_loader_.AddOrReplace(known_extension);
-  EXPECT_EQ(default_count,
-            component_loader_.registered_extensions_count());
+  EXPECT_EQ(default_count, component_loader_.registered_extensions_count());
 
   // Add a new component extension.
-  component_loader_.AddOrReplace(unknow_extension);
-  EXPECT_EQ(default_count + 1,
-            component_loader_.registered_extensions_count());
+  component_loader_.AddOrReplace(unknown_extension);
+  EXPECT_EQ(default_count + 1, component_loader_.registered_extensions_count());
 
   extension_service_.set_ready(true);
   component_loader_.LoadAll();

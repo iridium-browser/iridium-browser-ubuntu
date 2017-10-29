@@ -56,7 +56,7 @@ class _JetstreamMeasurement(legacy_page_test.LegacyPageTest):
           }
           return null;
         })();
-        """, timeout=600)
+        """, timeout=60*20)
     result = json.loads(result.partition(': ')[2])
 
     all_score_lists = []
@@ -75,8 +75,7 @@ class _JetstreamMeasurement(legacy_page_test.LegacyPageTest):
     results.AddSummaryValue(list_of_scalar_values.ListOfScalarValues(
         None, 'Score', 'score', all_scores))
 
-
-@benchmark.Disabled('android')
+@benchmark.Owner(emails=['bmeurer@chromium.org', 'mvstanton@chromium.org'])
 class Jetstream(perf_benchmark.PerfBenchmark):
   test = _JetstreamMeasurement
 
@@ -91,5 +90,12 @@ class Jetstream(perf_benchmark.PerfBenchmark):
         cloud_storage_bucket=story.INTERNAL_BUCKET)
     ps.AddStory(page_module.Page(
         'http://browserbench.org/JetStream/', ps, ps.base_dir,
-        make_javascript_deterministic=False))
+        make_javascript_deterministic=False,
+        name='http://browserbench.org/JetStream/'))
     return ps
+
+  def GetExpectations(self):
+    class StoryExpectations(story.expectations.StoryExpectations):
+      def SetExpectations(self):
+        pass # http://browserbench.org/JetStream/ not disabled.
+    return StoryExpectations()

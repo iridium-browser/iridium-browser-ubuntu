@@ -15,6 +15,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
@@ -29,6 +30,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/browser/install_flag.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension.h"
@@ -83,6 +85,7 @@ void SyncExtensionHelper::SetupIfNecessary(SyncTest* test) {
 
 std::string SyncExtensionHelper::InstallExtension(
     Profile* profile, const std::string& name, Manifest::Type type) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   scoped_refptr<Extension> extension = GetExtension(profile, name, type);
   if (!extension.get()) {
     NOTREACHED() << "Could not install extension " << name;

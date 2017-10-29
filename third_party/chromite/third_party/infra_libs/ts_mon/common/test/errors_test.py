@@ -18,7 +18,9 @@ class ErrorsTest(unittest.TestCase):
       (errors.MonitoringNoConfiguredMonitorError, ('test',)),
       (errors.MonitoringNoConfiguredMonitorError, (None,)),
       (errors.MonitoringNoConfiguredTargetError, ('test',)),
-      (errors.UnknownModificationTypeError, ('foo',)),
+      (errors.MonitoringFailedToFlushAllMetricsError, (3,)),
+      (errors.MetricDefinitionError, ('foo')),
+      (errors.WrongFieldsError, ('foo', ['a'], ['a', 'b'])),
   ]
 
   def test_smoke(self):

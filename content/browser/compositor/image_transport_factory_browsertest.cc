@@ -6,7 +6,7 @@
 
 #include "base/run_loop.h"
 #include "build/build_config.h"
-#include "cc/output/context_provider.h"
+#include "components/viz/common/gpu/context_provider.h"
 #include "content/browser/compositor/owned_mailbox.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/test/content_browser_test.h"
@@ -101,7 +101,7 @@ IN_PROC_BROWSER_TEST_F(ImageTransportFactoryTearDownBrowserTest,
   if (!GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor())
     return;
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-  display_compositor::GLHelper* helper = factory->GetGLHelper();
+  viz::GLHelper* helper = factory->GetGLHelper();
   ASSERT_TRUE(helper);
   mailbox_ = new OwnedMailbox(helper);
   EXPECT_FALSE(mailbox_->mailbox().IsZero());

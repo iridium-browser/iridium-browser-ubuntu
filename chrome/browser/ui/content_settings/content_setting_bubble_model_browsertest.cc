@@ -18,6 +18,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/network_session_configurator/common/network_switches.h"
 #include "components/rappor/test_rappor_service.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -82,6 +83,14 @@ class ContentSettingsMixedScriptIgnoreCertErrorsTest
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
   }
+
+  void SetUpOnMainThread() override {
+    ContentSettingBubbleModelMixedScriptTest::SetUpOnMainThread();
+    // Rappor treats local hostnames a little bit special (e.g. records
+    // "127.0.0.1" as "localhost"), so use a non-local hostname for
+    // convenience.
+    host_resolver()->AddRule("*", "127.0.0.1");
+  }
 };
 
 // Tests that a MIXEDSCRIPT type ContentSettingBubbleModel records UMA
@@ -95,10 +104,6 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsMixedScriptIgnoreCertErrorsTest,
                        MainFrameMetrics) {
   GURL url(https_server_->GetURL("/content_setting_bubble/mixed_script.html"));
 
-  // Rappor treats local hostnames a little bit special (e.g. records
-  // "127.0.0.1" as "localhost"), so use a non-local hostname for
-  // convenience.
-  host_resolver()->AddRule("*", "127.0.0.1");
   GURL::Replacements replace_host;
   replace_host.SetHostStr("example.test");
   url = url.ReplaceComponents(replace_host);
@@ -218,10 +223,6 @@ IN_PROC_BROWSER_TEST_F(ContentSettingBubbleModelMediaStreamTest,
                             TabSpecificContentSettings::CAMERA_ACCESSED);
   EXPECT_EQ(GURL("chrome://settings/content#media-stream-mic"),
             GetActiveTab()->GetLastCommittedURL());
-
-  // In ChromeOS, we do not sanitize chrome://settings-frame to
-  // chrome://settings for same-document navigations. See crbug.com/416157. For
-  // this reason, order the tests so no same-document navigation occurs.
 
   // The camera bubble links to camera exceptions.
   ManageMediaStreamSettings(TabSpecificContentSettings::CAMERA_ACCESSED);

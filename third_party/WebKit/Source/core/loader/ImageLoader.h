@@ -23,15 +23,16 @@
 #ifndef ImageLoader_h
 #define ImageLoader_h
 
+#include <memory>
 #include "core/CoreExport.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/loader/resource/ImageResource.h"
 #include "core/loader/resource/ImageResourceContent.h"
 #include "core/loader/resource/ImageResourceObserver.h"
 #include "platform/heap/Handle.h"
-#include "wtf/HashSet.h"
-#include "wtf/WeakPtr.h"
-#include "wtf/text/AtomicString.h"
-#include <memory>
+#include "platform/wtf/HashSet.h"
+#include "platform/wtf/WeakPtr.h"
+#include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
 
@@ -40,13 +41,9 @@ class Element;
 class ImageLoader;
 class LayoutImageResource;
 
-template <typename T>
-class EventSender;
-using ImageEventSender = EventSender<ImageLoader>;
-
 class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
                                 public ImageResourceObserver {
-  USING_PRE_FINALIZER(ImageLoader, dispose);
+  USING_PRE_FINALIZER(ImageLoader, Dispose);
 
  public:
   explicit ImageLoader(Element*);
@@ -58,117 +55,147 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
     // This should be the update behavior when the element is attached to a
     // document, or when DOM mutations trigger a new load. Starts loading if a
     // load hasn't already been started.
-    UpdateNormal,
+    kUpdateNormal,
     // This should be the update behavior when the resource was changed (via
     // 'src', 'srcset' or 'sizes'). Starts a new load even if a previous load of
     // the same resource have failed, to match Firefox's behavior.
     // FIXME - Verify that this is the right behavior according to the spec.
-    UpdateIgnorePreviousError,
+    kUpdateIgnorePreviousError,
     // This forces the image to update its intrinsic size, even if the image
     // source has not changed.
-    UpdateSizeChanged,
+    kUpdateSizeChanged,
     // This force the image to refetch and reload the image source, even if it
     // has not changed.
-    UpdateForcedReload
+    kUpdateForcedReload
   };
 
-  enum BypassMainWorldBehavior { BypassMainWorldCSP, DoNotBypassMainWorldCSP };
+  enum BypassMainWorldBehavior {
+    kBypassMainWorldCSP,
+    kDoNotBypassMainWorldCSP
+  };
 
-  void updateFromElement(UpdateFromElementBehavior = UpdateNormal,
-                         ReferrerPolicy = ReferrerPolicyDefault);
+  void UpdateFromElement(UpdateFromElementBehavior = kUpdateNormal,
+                         ReferrerPolicy = kReferrerPolicyDefault);
 
-  void elementDidMoveToNewDocument();
+  void ElementDidMoveToNewDocument();
 
-  Element* element() const { return m_element; }
-  bool imageComplete() const { return m_imageComplete && !m_pendingTask; }
+  Element* GetElement() const { return element_; }
+  bool ImageComplete() const { return image_complete_ && !pending_task_; }
 
-  ImageResourceContent* image() const { return m_image.get(); }
-  ImageResource* imageResourceForImageDocument() const {
-    return m_imageResourceForImageDocument;
-  }
+  ImageResourceContent* GetImage() const { return image_.Get(); }
+
   // Cancels pending load events, and doesn't dispatch new ones.
-  void setImage(ImageResourceContent*);
+  // Note: ClearImage/SetImage.*() are not a simple setter.
+  // Check the implementation to see what they do.
+  // TODO(hiroshige): Cleanup these methods.
+  void ClearImage();
+  void SetImageForTest(ImageResourceContent*);
 
-  bool isLoadingImageDocument() { return m_loadingImageDocument; }
-  void setLoadingImageDocument() { m_loadingImageDocument = true; }
-
-  bool hasPendingActivity() const {
-    return m_hasPendingLoadEvent || m_hasPendingErrorEvent || m_pendingTask;
+  // Image document loading:
+  // When |loading_image_document_| is true:
+  //   Loading via ImageDocument.
+  //   |image_resource_for_image_document_| points to a ImageResource that is
+  //   not associated with a ResourceLoader.
+  //   The corresponding ImageDocument is responsible for supplying the response
+  //   and data to |image_resource_for_image_document_| and thus |image_|.
+  // Otherwise:
+  //   Normal loading via ResourceFetcher/ResourceLoader.
+  //   |image_resource_for_image_document_| is null.
+  bool IsLoadingImageDocument() { return loading_image_document_; }
+  void SetLoadingImageDocument() { loading_image_document_ = true; }
+  ImageResource* ImageResourceForImageDocument() const {
+    return image_resource_for_image_document_;
   }
 
-  bool hasPendingError() const { return m_hasPendingErrorEvent; }
+  bool HasPendingActivity() const { return HasPendingEvent() || pending_task_; }
 
-  bool hadError() const { return !m_failedLoadURL.isEmpty(); }
+  bool HasPendingError() const { return pending_error_event_.IsActive(); }
 
-  void dispatchPendingEvent(ImageEventSender*);
+  bool HadError() const { return !failed_load_url_.IsEmpty(); }
 
-  static void dispatchPendingLoadEvents();
-  static void dispatchPendingErrorEvents();
-
-  bool getImageAnimationPolicy(ImageAnimationPolicy&) final;
+  bool GetImageAnimationPolicy(ImageAnimationPolicy&) final;
 
  protected:
-  void imageNotifyFinished(ImageResourceContent*) override;
+  void ImageChanged(ImageResourceContent*, const IntRect*) override;
+  void ImageNotifyFinished(ImageResourceContent*) override;
 
  private:
   class Task;
 
   // Called from the task or from updateFromElement to initiate the load.
-  void doUpdateFromElement(BypassMainWorldBehavior,
+  void DoUpdateFromElement(BypassMainWorldBehavior,
                            UpdateFromElementBehavior,
                            const KURL&,
-                           ReferrerPolicy = ReferrerPolicyDefault);
+                           ReferrerPolicy = kReferrerPolicyDefault);
 
-  virtual void dispatchLoadEvent() = 0;
-  virtual void noImageResourceToLoad() {}
+  virtual void DispatchLoadEvent() = 0;
+  virtual void NoImageResourceToLoad() {}
 
-  void updatedHasPendingEvent();
+  bool HasPendingEvent() const;
 
-  void dispatchPendingLoadEvent();
-  void dispatchPendingErrorEvent();
+  void DispatchPendingLoadEvent(std::unique_ptr<IncrementLoadEventDelayCount>);
+  void DispatchPendingErrorEvent(std::unique_ptr<IncrementLoadEventDelayCount>);
 
-  LayoutImageResource* layoutImageResource();
-  void updateLayoutObject();
+  LayoutImageResource* GetLayoutImageResource();
+  void UpdateLayoutObject();
 
-  void setImageWithoutConsideringPendingLoadEvent(ImageResourceContent*);
-  void clearFailedLoadURL();
-  void dispatchErrorEvent();
-  void crossSiteOrCSPViolationOccurred(AtomicString);
-  void enqueueImageLoadingMicroTask(UpdateFromElementBehavior, ReferrerPolicy);
+  // Note: SetImage.*() are not a simple setter.
+  // Check the implementation to see what they do.
+  // TODO(hiroshige): Cleanup these methods.
+  void SetImageForImageDocument(ImageResource*);
+  void SetImageWithoutConsideringPendingLoadEvent(ImageResourceContent*);
+  void UpdateImageState(ImageResourceContent*);
 
-  void timerFired(TimerBase*);
+  void ClearFailedLoadURL();
+  void DispatchErrorEvent();
+  void CrossSiteOrCSPViolationOccurred(AtomicString);
+  void EnqueueImageLoadingMicroTask(UpdateFromElementBehavior, ReferrerPolicy);
 
-  KURL imageSourceToKURL(AtomicString) const;
+  KURL ImageSourceToKURL(AtomicString) const;
 
   // Used to determine whether to immediately initiate the load or to schedule a
   // microtask.
-  bool shouldLoadImmediately(const KURL&) const;
+  bool ShouldLoadImmediately(const KURL&) const;
 
   // For Oilpan, we must run dispose() as a prefinalizer and call
   // m_image->removeClient(this) (and more.) Otherwise, the ImageResource can
   // invoke didAddClient() for the ImageLoader that is about to die in the
   // current lazy sweeping, and the didAddClient() can access on-heap objects
   // that have already been finalized in the current lazy sweeping.
-  void dispose();
+  void Dispose();
 
-  Member<Element> m_element;
-  Member<ImageResourceContent> m_image;
-  Member<ImageResource> m_imageResourceForImageDocument;
-  // FIXME: Oilpan: We might be able to remove this Persistent hack when
-  // ImageResourceClient is traceable.
-  GC_PLUGIN_IGNORE("http://crbug.com/383741")
-  Persistent<Element> m_keepAlive;
+  Member<Element> element_;
+  Member<ImageResourceContent> image_;
+  Member<ImageResource> image_resource_for_image_document_;
 
-  Timer<ImageLoader> m_derefElementTimer;
-  AtomicString m_failedLoadURL;
-  WeakPtr<Task> m_pendingTask;  // owned by Microtask
-  std::unique_ptr<IncrementLoadEventDelayCount> m_loadDelayCounter;
-  bool m_hasPendingLoadEvent : 1;
-  bool m_hasPendingErrorEvent : 1;
-  bool m_imageComplete : 1;
-  bool m_loadingImageDocument : 1;
-  bool m_elementIsProtected : 1;
-  bool m_suppressErrorEvents : 1;
+  AtomicString failed_load_url_;
+  WeakPtr<Task> pending_task_;  // owned by Microtask
+  std::unique_ptr<IncrementLoadEventDelayCount>
+      delay_until_do_update_from_element_;
+
+  // Delaying load event: the timeline should be:
+  // (0) ImageResource::Fetch() is called.
+  // (1) ResourceFetcher::StartLoad(): Resource loading is actually started.
+  // (2) ResourceLoader::DidFinishLoading() etc:
+  //         Resource loading is finished, but SVG document load might be
+  //         incomplete because of asynchronously loaded subresources.
+  // (3) ImageNotifyFinished(): Image is completely loaded.
+  // and we delay Document load event from (1) to (3):
+  // - |ResourceFetcher::loaders_| delays Document load event from (1) to (2).
+  // - |delay_until_image_notify_finished_| delays Document load event from
+  //   the first ImageChanged() (at some time between (1) and (2)) until (3).
+  // Ideally, we might want to delay Document load event from (1) to (3),
+  // but currently we piggyback on ImageChanged() because adding a callback
+  // hook at (1) might complicate the code.
+  std::unique_ptr<IncrementLoadEventDelayCount>
+      delay_until_image_notify_finished_;
+
+  TaskHandle pending_load_event_;
+  TaskHandle pending_error_event_;
+
+  bool image_complete_ : 1;
+  bool loading_image_document_ : 1;
+  bool suppress_error_events_ : 1;
 };
 
 }  // namespace blink

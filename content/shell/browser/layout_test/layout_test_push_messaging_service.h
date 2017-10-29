@@ -12,7 +12,6 @@
 
 #include "base/macros.h"
 #include "content/public/browser/push_messaging_service.h"
-#include "content/public/common/push_messaging_status.h"
 #include "third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h"
 
 namespace content {
@@ -26,34 +25,35 @@ class LayoutTestPushMessagingService : public PushMessagingService {
 
   // PushMessagingService implementation:
   GURL GetEndpoint(bool standard_protocol) const override;
-  void SubscribeFromDocument(
-      const GURL& requesting_origin,
-      int64_t service_worker_registration_id,
-      int renderer_id,
-      int render_frame_id,
-      const PushSubscriptionOptions& options,
-      const PushMessagingService::RegisterCallback& callback) override;
-  void SubscribeFromWorker(
-      const GURL& requesting_origin,
-      int64_t service_worker_registration_id,
-      const PushSubscriptionOptions& options,
-      const PushMessagingService::RegisterCallback& callback) override;
-  void GetEncryptionInfo(
-      const GURL& origin,
-      int64_t service_worker_registration_id,
-      const std::string& sender_id,
-      const PushMessagingService::EncryptionInfoCallback& callback) override;
+  void SubscribeFromDocument(const GURL& requesting_origin,
+                             int64_t service_worker_registration_id,
+                             int renderer_id,
+                             int render_frame_id,
+                             const PushSubscriptionOptions& options,
+                             bool user_gesture,
+                             const RegisterCallback& callback) override;
+  void SubscribeFromWorker(const GURL& requesting_origin,
+                           int64_t service_worker_registration_id,
+                           const PushSubscriptionOptions& options,
+                           const RegisterCallback& callback) override;
+  void GetSubscriptionInfo(const GURL& origin,
+                           int64_t service_worker_registration_id,
+                           const std::string& sender_id,
+                           const std::string& subscription_id,
+                           const SubscriptionInfoCallback& callback) override;
   blink::WebPushPermissionStatus GetPermissionStatus(const GURL& origin,
                                                      bool user_visible)
       override;
   bool SupportNonVisibleMessages() override;
-  void Unsubscribe(const GURL& requesting_origin,
+  void Unsubscribe(mojom::PushUnregistrationReason reason,
+                   const GURL& requesting_origin,
                    int64_t service_worker_registration_id,
                    const std::string& sender_id,
                    const UnregisterCallback& callback) override;
   void DidDeleteServiceWorkerRegistration(
       const GURL& origin,
       int64_t service_worker_registration_id) override;
+  void DidDeleteServiceWorkerDatabase() override;
 
  private:
   int64_t subscribed_service_worker_registration_;

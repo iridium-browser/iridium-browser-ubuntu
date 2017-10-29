@@ -78,7 +78,6 @@ class AppMenuModelTest : public BrowserWithTestWindowTest,
     BrowserWithTestWindowTest::TearDown();
     testing_io_thread_state_.reset();
     TestingBrowserProcess::GetGlobal()->SetLocalState(NULL);
-    DestroyBrowserAndProfile();
   }
 
  private:
@@ -128,7 +127,7 @@ TEST_F(AppMenuModelTest, Basics) {
   EXPECT_GT(itemCount, 10);
 
   UpgradeDetector* detector = UpgradeDetector::GetInstance();
-  detector->NotifyUpgradeRecommended();
+  detector->NotifyUpgrade();
   EXPECT_TRUE(detector->notify_upgrade());
   EXPECT_EQ(browser_defaults::kShowUpgradeMenuItem,
             model.IsCommandIdVisible(IDC_UPGRADE_DIALOG));

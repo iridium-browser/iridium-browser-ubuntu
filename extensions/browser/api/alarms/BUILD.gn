@@ -2,6 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//extensions/features/features.gni")
+
+assert(enable_extensions,
+       "Cannot depend on extensions because enable_extensions=false.")
+
 source_set("alarms") {
   sources = [
     "alarm_manager.cc",
@@ -14,5 +19,9 @@ source_set("alarms") {
 
   deps = [
     "//extensions/common/api",
+  ]
+
+  public_deps = [
+    "//extensions/browser:browser_sources",
   ]
 }

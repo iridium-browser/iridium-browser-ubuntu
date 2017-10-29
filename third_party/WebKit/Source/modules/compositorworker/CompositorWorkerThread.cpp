@@ -4,43 +4,39 @@
 
 #include "modules/compositorworker/CompositorWorkerThread.h"
 
+#include <memory>
+#include "core/workers/GlobalScopeCreationParams.h"
 #include "core/workers/InProcessWorkerObjectProxy.h"
-#include "core/workers/WorkerThreadStartupData.h"
 #include "modules/compositorworker/CompositorWorkerGlobalScope.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
-#include "wtf/Assertions.h"
-#include <memory>
+#include "platform/wtf/Assertions.h"
 
 namespace blink {
 
-std::unique_ptr<CompositorWorkerThread> CompositorWorkerThread::create(
-    PassRefPtr<WorkerLoaderProxy> workerLoaderProxy,
-    InProcessWorkerObjectProxy& workerObjectProxy,
-    double timeOrigin) {
+std::unique_ptr<CompositorWorkerThread> CompositorWorkerThread::Create(
+    ThreadableLoadingContext* loading_context,
+    InProcessWorkerObjectProxy& worker_object_proxy) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("compositor-worker"),
                "CompositorWorkerThread::create");
-  ASSERT(isMainThread());
-  return WTF::wrapUnique(new CompositorWorkerThread(
-      std::move(workerLoaderProxy), workerObjectProxy, timeOrigin));
+  DCHECK(IsMainThread());
+  return WTF::WrapUnique(
+      new CompositorWorkerThread(loading_context, worker_object_proxy));
 }
 
 CompositorWorkerThread::CompositorWorkerThread(
-    PassRefPtr<WorkerLoaderProxy> workerLoaderProxy,
-    InProcessWorkerObjectProxy& workerObjectProxy,
-    double timeOrigin)
-    : AbstractAnimationWorkletThread(std::move(workerLoaderProxy),
-                                     workerObjectProxy),
-      m_workerObjectProxy(workerObjectProxy),
-      m_timeOrigin(timeOrigin) {}
+    ThreadableLoadingContext* loading_context,
+    InProcessWorkerObjectProxy& worker_object_proxy)
+    : AbstractAnimationWorkletThread(loading_context, worker_object_proxy),
+      worker_object_proxy_(worker_object_proxy) {}
 
 CompositorWorkerThread::~CompositorWorkerThread() {}
 
-WorkerOrWorkletGlobalScope* CompositorWorkerThread::createWorkerGlobalScope(
-    std::unique_ptr<WorkerThreadStartupData> startupData) {
+WorkerOrWorkletGlobalScope* CompositorWorkerThread::CreateWorkerGlobalScope(
+    std::unique_ptr<GlobalScopeCreationParams> creation_params) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("compositor-worker"),
                "CompositorWorkerThread::createWorkerGlobalScope");
-  return CompositorWorkerGlobalScope::create(this, std::move(startupData),
-                                             m_timeOrigin);
+  return CompositorWorkerGlobalScope::Create(this, std::move(creation_params),
+                                             time_origin_);
 }
 
 }  // namespace blink

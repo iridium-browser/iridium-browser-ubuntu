@@ -1,16 +1,20 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright (c) 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/quic/quartc/quartc_session.h"
 
-#include "base/rand_util.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
+
+using std::string;
+
+namespace net {
 
 namespace {
 
 // Default priority for incoming QUIC streams.
 // TODO(zhihuang): Determine if this value is correct.
-static const net::SpdyPriority kDefaultPriority = 3;
+static const SpdyPriority kDefaultPriority = 3;
 
 // Arbitrary server port number for net::QuicCryptoClientConfig.
 const int kQuicServerPort = 0;
@@ -22,22 +26,22 @@ const size_t kInputKeyingMaterialLength = 32;
 
 // Used by QuicCryptoServerConfig to provide dummy proof credentials.
 // TODO(zhihuang): Remove when secure P2P QUIC handshake is possible.
-class DummyProofSource : public net::ProofSource {
+class DummyProofSource : public ProofSource {
  public:
   DummyProofSource() {}
   ~DummyProofSource() override {}
 
   // ProofSource override.
-  void GetProof(const net::QuicSocketAddress& server_addr,
-                const std::string& hostname,
-                const std::string& server_config,
-                net::QuicVersion quic_version,
-                base::StringPiece chlo_hash,
-                const net::QuicTagVector& connection_options,
+  void GetProof(const QuicSocketAddress& server_addr,
+                const string& hostname,
+                const string& server_config,
+                QuicVersion quic_version,
+                QuicStringPiece chlo_hash,
+                const QuicTagVector& connection_options,
                 std::unique_ptr<Callback> callback) override {
-    net::QuicReferenceCountedPointer<net::ProofSource::Chain> chain;
-    net::QuicCryptoProof proof;
-    std::vector<std::string> certs;
+    QuicReferenceCountedPointer<ProofSource::Chain> chain;
+    QuicCryptoProof proof;
+    std::vector<string> certs;
     certs.push_back("Dummy cert");
     chain = new ProofSource::Chain(certs);
     proof.signature = "Dummy signature";
@@ -49,41 +53,39 @@ class DummyProofSource : public net::ProofSource {
 // Used by QuicCryptoClientConfig to ignore the peer's credentials
 // and establish an insecure QUIC connection.
 // TODO(zhihuang): Remove when secure P2P QUIC handshake is possible.
-class InsecureProofVerifier : public net::ProofVerifier {
+class InsecureProofVerifier : public ProofVerifier {
  public:
   InsecureProofVerifier() {}
   ~InsecureProofVerifier() override {}
 
   // ProofVerifier override.
-  net::QuicAsyncStatus VerifyProof(
-      const std::string& hostname,
+  QuicAsyncStatus VerifyProof(
+      const string& hostname,
       const uint16_t port,
-      const std::string& server_config,
-      net::QuicVersion quic_version,
-      base::StringPiece chlo_hash,
-      const std::vector<std::string>& certs,
-      const std::string& cert_sct,
-      const std::string& signature,
-      const net::ProofVerifyContext* context,
-      std::string* error_details,
-      std::unique_ptr<net::ProofVerifyDetails>* verify_details,
-      std::unique_ptr<net::ProofVerifierCallback> callback) override {
-    return net::QUIC_SUCCESS;
+      const string& server_config,
+      QuicVersion quic_version,
+      QuicStringPiece chlo_hash,
+      const std::vector<string>& certs,
+      const string& cert_sct,
+      const string& signature,
+      const ProofVerifyContext* context,
+      string* error_details,
+      std::unique_ptr<ProofVerifyDetails>* verify_details,
+      std::unique_ptr<ProofVerifierCallback> callback) override {
+    return QUIC_SUCCESS;
   }
 
-  net::QuicAsyncStatus VerifyCertChain(
-      const std::string& hostname,
-      const std::vector<std::string>& certs,
-      const net::ProofVerifyContext* context,
-      std::string* error_details,
-      std::unique_ptr<net::ProofVerifyDetails>* details,
-      std::unique_ptr<net::ProofVerifierCallback> callback) override {
-    return net::QUIC_SUCCESS;
+  QuicAsyncStatus VerifyCertChain(
+      const string& hostname,
+      const std::vector<string>& certs,
+      const ProofVerifyContext* context,
+      string* error_details,
+      std::unique_ptr<ProofVerifyDetails>* details,
+      std::unique_ptr<ProofVerifierCallback> callback) override {
+    return QUIC_SUCCESS;
   }
 };
-}
-
-namespace net {
+}  // namespace
 
 QuicConnectionId QuartcCryptoServerStreamHelper::GenerateConnectionIdForReject(
     QuicConnectionId connection_id) const {
@@ -93,20 +95,22 @@ QuicConnectionId QuartcCryptoServerStreamHelper::GenerateConnectionIdForReject(
 bool QuartcCryptoServerStreamHelper::CanAcceptClientHello(
     const CryptoHandshakeMessage& message,
     const QuicSocketAddress& self_address,
-    std::string* error_details) const {
+    string* error_details) const {
   return true;
 }
 
 QuartcSession::QuartcSession(std::unique_ptr<QuicConnection> connection,
                              const QuicConfig& config,
-                             const std::string& unique_remote_server_id,
+                             const string& unique_remote_server_id,
                              Perspective perspective,
-                             QuicConnectionHelperInterface* helper)
+                             QuicConnectionHelperInterface* helper,
+                             QuicClock* clock)
     : QuicSession(connection.get(), nullptr /*visitor*/, config),
       unique_remote_server_id_(unique_remote_server_id),
       perspective_(perspective),
       connection_(std::move(connection)),
-      helper_(helper) {
+      helper_(helper),
+      clock_(clock) {
   // Initialization with default crypto configuration.
   if (perspective_ == Perspective::IS_CLIENT) {
     std::unique_ptr<ProofVerifier> proof_verifier(new InsecureProofVerifier);
@@ -114,11 +118,15 @@ QuartcSession::QuartcSession(std::unique_ptr<QuicConnection> connection,
         new QuicCryptoClientConfig(std::move(proof_verifier)));
   } else {
     std::unique_ptr<ProofSource> proof_source(new DummyProofSource);
-    std::string source_address_token_secret =
-        base::RandBytesAsString(kInputKeyingMaterialLength);
+    // Generate a random source address token secret. For long-running servers
+    // it's better to not regenerate it for each connection to enable zero-RTT
+    // handshakes, but for transient clients it does not matter.
+    char source_address_token_secret[kInputKeyingMaterialLength];
+    helper_->GetRandomGenerator()->RandBytes(source_address_token_secret,
+                                             kInputKeyingMaterialLength);
     quic_crypto_server_config_.reset(new QuicCryptoServerConfig(
-        source_address_token_secret, helper_->GetRandomGenerator(),
-        std::move(proof_source)));
+        string(source_address_token_secret, kInputKeyingMaterialLength),
+        helper_->GetRandomGenerator(), std::move(proof_source)));
     // Provide server with serialized config string to prove ownership.
     QuicCryptoServerConfig::ConfigOptions options;
     // The |message| is used to handle the return value of AddDefaultConfig
@@ -131,13 +139,18 @@ QuartcSession::QuartcSession(std::unique_ptr<QuicConnection> connection,
 
 QuartcSession::~QuartcSession() {}
 
-QuicCryptoStream* QuartcSession::GetCryptoStream() {
+const QuicCryptoStream* QuartcSession::GetCryptoStream() const {
+  return crypto_stream_.get();
+}
+
+QuicCryptoStream* QuartcSession::GetMutableCryptoStream() {
   return crypto_stream_.get();
 }
 
 QuartcStream* QuartcSession::CreateOutgoingDynamicStream(
     SpdyPriority priority) {
-  return CreateDataStream(GetNextOutgoingStreamId(), priority);
+  return ActivateDataStream(
+      CreateDataStream(GetNextOutgoingStreamId(), priority));
 }
 
 void QuartcSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
@@ -161,8 +174,23 @@ void QuartcSession::CloseStream(QuicStreamId stream_id) {
   QuicSession::CloseStream(stream_id);
 }
 
+void QuartcSession::CancelStream(QuicStreamId stream_id) {
+  ResetStream(stream_id, QuicRstStreamErrorCode::QUIC_STREAM_CANCELLED);
+}
+
+void QuartcSession::ResetStream(QuicStreamId stream_id,
+                                QuicRstStreamErrorCode error) {
+  if (!IsOpenStream(stream_id)) {
+    return;
+  }
+  QuicStream* stream = QuicSession::GetOrCreateStream(stream_id);
+  if (stream) {
+    stream->Reset(error);
+  }
+}
+
 void QuartcSession::OnConnectionClosed(QuicErrorCode error,
-                                       const std::string& error_details,
+                                       const string& error_details,
                                        ConnectionCloseSource source) {
   QuicSession::OnConnectionClosed(error, error_details, source);
   DCHECK(session_delegate_);
@@ -191,14 +219,14 @@ void QuartcSession::StartCryptoHandshake() {
   }
 }
 
-bool QuartcSession::ExportKeyingMaterial(const std::string& label,
+bool QuartcSession::ExportKeyingMaterial(const string& label,
                                          const uint8_t* context,
                                          size_t context_len,
                                          bool used_context,
                                          uint8_t* result,
                                          size_t result_len) {
-  std::string quic_context(reinterpret_cast<const char*>(context), context_len);
-  std::string quic_result;
+  string quic_context(reinterpret_cast<const char*>(context), context_len);
+  string quic_result;
   bool success = crypto_stream_->ExportKeyingMaterial(label, quic_context,
                                                       result_len, &quic_result);
   quic_result.copy(reinterpret_cast<char*>(result), result_len);
@@ -228,7 +256,7 @@ void QuartcSession::OnTransportCanWrite() {
 }
 
 bool QuartcSession::OnTransportReceived(const char* data, size_t data_len) {
-  QuicReceivedPacket packet(data, data_len, clock_.Now());
+  QuicReceivedPacket packet(data, data_len, clock_->Now());
   ProcessUdpPacket(connection()->self_address(), connection()->peer_address(),
                    packet);
   return true;
@@ -255,30 +283,50 @@ void QuartcSession::SetServerCryptoConfig(
 }
 
 QuicStream* QuartcSession::CreateIncomingDynamicStream(QuicStreamId id) {
-  QuartcStream* stream = CreateDataStream(id, kDefaultPriority);
-  if (stream) {
-    DCHECK(session_delegate_);
-    session_delegate_->OnIncomingStream(stream);
-  }
-  return stream;
+  return ActivateDataStream(CreateDataStream(id, kDefaultPriority));
 }
 
-QuartcStream* QuartcSession::CreateDataStream(QuicStreamId id,
-                                              SpdyPriority priority) {
+std::unique_ptr<QuicStream> QuartcSession::CreateStream(QuicStreamId id) {
+  return CreateDataStream(id, kDefaultPriority);
+}
+
+std::unique_ptr<QuartcStream> QuartcSession::CreateDataStream(
+    QuicStreamId id,
+    SpdyPriority priority) {
   if (crypto_stream_ == nullptr || !crypto_stream_->encryption_established()) {
     // Encryption not active so no stream created
     return nullptr;
   }
-  QuartcStream* stream = new QuartcStream(id, this);
+  auto stream = QuicMakeUnique<QuartcStream>(id, this);
   if (stream) {
-    // Make QuicSession take ownership of the stream.
-    ActivateStream(std::unique_ptr<QuicStream>(stream));
     // Register the stream to the QuicWriteBlockedList. |priority| is clamped
     // between 0 and 7, with 0 being the highest priority and 7 the lowest
     // priority.
     write_blocked_streams()->RegisterStream(stream->id(), priority);
+
+    if (IsIncomingStream(id)) {
+      DCHECK(session_delegate_);
+      // Incoming streams need to be registered with the session_delegate_.
+      session_delegate_->OnIncomingStream(stream.get());
+      // Quartc doesn't send on incoming streams.
+      stream->set_fin_sent(true);
+    } else {
+      // Quartc doesn't receive on outgoing streams.
+      stream->set_fin_received(true);
+    }
   }
   return stream;
+}
+
+QuartcStream* QuartcSession::ActivateDataStream(
+    std::unique_ptr<QuartcStream> stream) {
+  // Transfer ownership of the data stream to the session via ActivateStream().
+  QuartcStream* raw = stream.release();
+  if (raw) {
+    // Make QuicSession take ownership of the stream.
+    ActivateStream(std::unique_ptr<QuicStream>(raw));
+  }
+  return raw;
 }
 
 }  // namespace net

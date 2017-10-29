@@ -17,8 +17,7 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "gpu/command_buffer/service/cmd_buffer_engine.h"
-#include "gpu/command_buffer/service/cmd_parser.h"
+#include "gpu/command_buffer/service/async_api_interface.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "gpu/command_buffer/service/program_cache.h"
 #include "gpu/command_buffer/service/shader_translator.h"
@@ -26,10 +25,13 @@
 
 namespace gpu {
 
+class CommandBufferServiceBase;
+
 // Mocks an AsyncAPIInterface, using GMock.
 class AsyncAPIMock : public AsyncAPIInterface {
  public:
-  explicit AsyncAPIMock(bool default_do_commands);
+  explicit AsyncAPIMock(bool default_do_commands,
+                        CommandBufferServiceBase* command_buffer_service);
   virtual ~AsyncAPIMock();
 
   error::Error FakeDoCommands(unsigned int num_commands,
@@ -59,6 +61,9 @@ class AsyncAPIMock : public AsyncAPIInterface {
     volatile CommandBufferEntry* args_;
   };
 
+  void BeginDecoding() override {}
+  void EndDecoding() override {}
+
   MOCK_METHOD3(DoCommand,
                error::Error(unsigned int command,
                             unsigned int arg_count,
@@ -70,12 +75,7 @@ class AsyncAPIMock : public AsyncAPIInterface {
                             int num_entries,
                             int* entries_processed));
 
-  const char* GetCommandName(unsigned int command_id) const {
-    return "";
-  };
-
-  // Sets the engine, to forward SetToken commands to it.
-  void set_engine(CommandBufferEngine *engine) { engine_ = engine; }
+  base::StringPiece GetLogPrefix() override { return "None"; }
 
   // Forwards the SetToken commands to the engine.
   void SetToken(unsigned int command,
@@ -83,7 +83,7 @@ class AsyncAPIMock : public AsyncAPIInterface {
                 const volatile void* _args);
 
  private:
-  CommandBufferEngine *engine_;
+  CommandBufferServiceBase* command_buffer_service_;
 };
 
 namespace gles2 {
@@ -99,17 +99,16 @@ class MockShaderTranslator : public ShaderTranslatorInterface {
                     ShShaderOutput shader_output_language,
                     ShCompileOptions driver_bug_workarounds,
                     bool gl_shader_interm_output));
-  MOCK_CONST_METHOD10(Translate,
-                      bool(const std::string& shader_source,
-                           std::string* info_log,
-                           std::string* translated_source,
-                           int* shader_version,
-                           AttributeMap* attrib_map,
-                           UniformMap* uniform_map,
-                           VaryingMap* varying_map,
-                           InterfaceBlockMap* interface_block_map,
-                           OutputVariableList* output_variable_list,
-                           NameMap* name_map));
+  MOCK_CONST_METHOD9(Translate,
+                     bool(const std::string& shader_source,
+                          std::string* info_log,
+                          std::string* translated_source,
+                          int* shader_version,
+                          AttributeMap* attrib_map,
+                          UniformMap* uniform_map,
+                          VaryingMap* varying_map,
+                          InterfaceBlockMap* interface_block_map,
+                          OutputVariableList* output_variable_list));
   MOCK_CONST_METHOD0(
       GetStringForOptionsThatWouldAffectCompilation, std::string());
  private:
@@ -121,24 +120,26 @@ class MockProgramCache : public ProgramCache {
   MockProgramCache();
   virtual ~MockProgramCache();
 
-  MOCK_METHOD7(LoadLinkedProgram, ProgramLoadResult(
-      GLuint program,
-      Shader* shader_a,
-      Shader* shader_b,
-      const LocationMap* bind_attrib_location_map,
-      const std::vector<std::string>& transform_feedback_varyings,
-      GLenum transform_feedback_buffer_mode,
-      const ShaderCacheCallback& callback));
+  MOCK_METHOD7(LoadLinkedProgram,
+               ProgramLoadResult(
+                   GLuint program,
+                   Shader* shader_a,
+                   Shader* shader_b,
+                   const LocationMap* bind_attrib_location_map,
+                   const std::vector<std::string>& transform_feedback_varyings,
+                   GLenum transform_feedback_buffer_mode,
+                   GLES2DecoderClient* client));
 
-  MOCK_METHOD7(SaveLinkedProgram, void(
-      GLuint program,
-      const Shader* shader_a,
-      const Shader* shader_b,
-      const LocationMap* bind_attrib_location_map,
-      const std::vector<std::string>& transform_feedback_varyings,
-      GLenum transform_feedback_buffer_mode,
-      const ShaderCacheCallback& callback));
-  MOCK_METHOD1(LoadProgram, void(const std::string&));
+  MOCK_METHOD7(SaveLinkedProgram,
+               void(GLuint program,
+                    const Shader* shader_a,
+                    const Shader* shader_b,
+                    const LocationMap* bind_attrib_location_map,
+                    const std::vector<std::string>& transform_feedback_varyings,
+                    GLenum transform_feedback_buffer_mode,
+                    GLES2DecoderClient* client));
+  MOCK_METHOD2(LoadProgram, void(const std::string&, const std::string&));
+  MOCK_METHOD1(Trim, size_t(size_t));
 
  private:
   MOCK_METHOD0(ClearBackend, void());

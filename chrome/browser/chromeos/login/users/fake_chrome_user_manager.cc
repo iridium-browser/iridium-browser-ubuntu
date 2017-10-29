@@ -6,6 +6,7 @@
 
 #include <set>
 
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
@@ -15,13 +16,14 @@
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/grit/theme_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/login_state.h"
+#include "components/user_manager/known_user.h"
 #include "components/user_manager/user_image/user_image.h"
 #include "components/user_manager/user_names.h"
 #include "components/user_manager/user_type.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace {
@@ -36,12 +38,12 @@ class FakeTaskRunner : public base::TaskRunner {
  private:
   // base::TaskRunner overrides.
   bool PostDelayedTask(const tracked_objects::Location& from_here,
-                       const base::Closure& task,
+                       base::OnceClosure task,
                        base::TimeDelta delay) override {
-    task.Run();
+    std::move(task).Run();
     return true;
   }
-  bool RunsTasksOnCurrentThread() const override { return true; }
+  bool RunsTasksInCurrentSequence() const override { return true; }
 
   DISALLOW_COPY_AND_ASSIGN(FakeTaskRunner);
 };
@@ -76,7 +78,7 @@ const user_manager::User* FakeChromeUserManager::AddUserWithAffiliation(
       account_id.GetUserEmail()));
   user->SetStubImage(base::MakeUnique<user_manager::UserImage>(
                          *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-                             IDR_PROFILE_PICTURE_LOADING)),
+                             IDR_LOGIN_DEFAULT_USER)),
                      user_manager::User::USER_IMAGE_PROFILE, false);
   users_.push_back(user);
   chromeos::ProfileHelper::Get()->SetProfileToUserMappingForTesting(user);
@@ -102,6 +104,16 @@ user_manager::User* FakeChromeUserManager::AddArcKioskAppUser(
   return user;
 }
 
+user_manager::User* FakeChromeUserManager::AddSupervisedUser(
+    const AccountId& account_id) {
+  user_manager::User* user =
+      user_manager::User::CreateSupervisedUser(account_id);
+  user->set_username_hash(ProfileHelper::GetUserIdHashByUserIdForTesting(
+      account_id.GetUserEmail()));
+  users_.push_back(user);
+  return user;
+}
+
 const user_manager::User* FakeChromeUserManager::AddPublicAccountUser(
     const AccountId& account_id) {
   user_manager::User* user =
@@ -110,7 +122,7 @@ const user_manager::User* FakeChromeUserManager::AddPublicAccountUser(
       account_id.GetUserEmail()));
   user->SetStubImage(base::MakeUnique<user_manager::UserImage>(
                          *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-                             IDR_PROFILE_PICTURE_LOADING)),
+                             IDR_LOGIN_DEFAULT_USER)),
                      user_manager::User::USER_IMAGE_PROFILE, false);
   users_.push_back(user);
   chromeos::ProfileHelper::Get()->SetProfileToUserMappingForTesting(user);
@@ -125,6 +137,14 @@ void FakeChromeUserManager::LoginUser(const AccountId& account_id) {
   UserLoggedIn(account_id, ProfileHelper::GetUserIdHashByUserIdForTesting(
                                account_id.GetUserEmail()),
                false /* browser_restart */);
+
+  // NOTE: This does not match production. See function comment.
+  for (auto* user : users_) {
+    if (user->GetAccountId() == account_id) {
+      user->set_profile_is_created();
+      break;
+    }
+  }
 }
 
 BootstrapManager* FakeChromeUserManager::GetBootstrapManager() {
@@ -196,6 +216,10 @@ const AccountId& FakeChromeUserManager::GetOwnerAccountId() const {
 }
 
 void FakeChromeUserManager::OnSessionStarted() {}
+
+void FakeChromeUserManager::OnProfileInitialized(user_manager::User* user) {
+  user->set_profile_ever_initialized(true);
+}
 
 void FakeChromeUserManager::RemoveUser(
     const AccountId& account_id,
@@ -365,7 +389,6 @@ void FakeChromeUserManager::UserLoggedIn(const AccountId& account_id,
   for (auto* user : users_) {
     if (user->username_hash() == username_hash) {
       user->set_is_logged_in(true);
-      user->set_profile_is_created();
       logged_in_users_.push_back(user);
 
       if (!primary_user_)
@@ -373,6 +396,7 @@ void FakeChromeUserManager::UserLoggedIn(const AccountId& account_id,
       break;
     }
   }
+  // TODO(jamescook): This should set active_user_ and call NotifyOnLogin().
 }
 
 void FakeChromeUserManager::SwitchToLastActiveUser() {
@@ -449,7 +473,7 @@ void FakeChromeUserManager::SaveUserDisplayEmail(
 
 std::string FakeChromeUserManager::GetUserDisplayEmail(
     const AccountId& account_id) const {
-  return std::string();
+  return account_id.GetUserEmail();
 }
 
 void FakeChromeUserManager::SaveUserType(
@@ -537,8 +561,13 @@ bool FakeChromeUserManager::AreSupervisedUsersAllowed() const {
   return true;
 }
 
+void FakeChromeUserManager::CreateLocalState() {
+  local_state_ = base::MakeUnique<TestingPrefServiceSimple>();
+  user_manager::known_user::RegisterPrefs(local_state_->registry());
+}
+
 PrefService* FakeChromeUserManager::GetLocalState() const {
-  return nullptr;
+  return local_state_.get();
 }
 
 void FakeChromeUserManager::SetIsCurrentUserNew(bool is_new) {

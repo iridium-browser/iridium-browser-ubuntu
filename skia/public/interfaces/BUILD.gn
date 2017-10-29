@@ -7,16 +7,8 @@ import("//mojo/public/tools/bindings/mojom.gni")
 mojom("interfaces") {
   sources = [
     "bitmap.mojom",
+    "blur_image_filter_tile_mode.mojom",
     "image_filter.mojom",
-  ]
-}
-
-mojom("mojo") {
-  sources = [
-    "bitmap_array.mojom",
-  ]
-  public_deps = [
-    ":interfaces",
   ]
 }
 
@@ -28,7 +20,6 @@ mojom("test_interfaces") {
 
   public_deps = [
     ":interfaces",
-    ":mojo",
   ]
 }
 

@@ -21,6 +21,7 @@ class LayoutTestContentBrowserClient : public ShellContentBrowserClient {
   ~LayoutTestContentBrowserClient() override;
 
   LayoutTestBrowserContext* GetLayoutTestBrowserContext();
+  void SetPopupBlockingEnabled(bool block_popups_);
 
   // Implements the PlatformNotificationService interface.
   LayoutTestNotificationManager* GetLayoutTestNotificationManager();
@@ -28,7 +29,8 @@ class LayoutTestContentBrowserClient : public ShellContentBrowserClient {
   // ContentBrowserClient overrides.
   void RenderProcessWillLaunch(RenderProcessHost* host) override;
   void ExposeInterfacesToRenderer(
-      service_manager::InterfaceRegistry* registry,
+      service_manager::BinderRegistry* registry,
+      AssociatedInterfaceRegistry* associated_registry,
       RenderProcessHost* render_process_host) override;
   void OverrideWebkitPrefs(RenderViewHost* render_view_host,
                            WebPreferences* prefs) override;
@@ -40,13 +42,30 @@ class LayoutTestContentBrowserClient : public ShellContentBrowserClient {
   void GetQuotaSettings(
       content::BrowserContext* context,
       content::StoragePartition* partition,
-      const storage::OptionalQuotaSettingsCallback& callback) override;
+      storage::OptionalQuotaSettingsCallback callback) override;
+  bool DoesSiteRequireDedicatedProcess(BrowserContext* browser_context,
+                                       const GURL& effective_site_url) override;
 
   PlatformNotificationService* GetPlatformNotificationService() override;
+
+  bool CanCreateWindow(content::RenderFrameHost* opener,
+                       const GURL& opener_url,
+                       const GURL& opener_top_level_frame_url,
+                       const GURL& source_origin,
+                       content::mojom::WindowContainerType container_type,
+                       const GURL& target_url,
+                       const content::Referrer& referrer,
+                       const std::string& frame_name,
+                       WindowOpenDisposition disposition,
+                       const blink::mojom::WindowFeatures& features,
+                       bool user_gesture,
+                       bool opener_suppressed,
+                       bool* no_javascript_access) override;
 
  private:
   std::unique_ptr<LayoutTestNotificationManager>
       layout_test_notification_manager_;
+  bool block_popups_ = false;
 };
 
 }  // content

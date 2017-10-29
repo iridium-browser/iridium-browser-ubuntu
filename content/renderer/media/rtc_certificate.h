@@ -11,8 +11,8 @@
 #include "base/macros.h"
 #include "content/common/content_export.h"
 #include "third_party/WebKit/public/platform/WebRTCCertificate.h"
-#include "third_party/webrtc/base/rtccertificate.h"
-#include "third_party/webrtc/base/scoped_ref_ptr.h"
+#include "third_party/webrtc/rtc_base/rtccertificate.h"
+#include "third_party/webrtc/rtc_base/scoped_ref_ptr.h"
 
 namespace content {
 
@@ -26,10 +26,12 @@ class CONTENT_EXPORT RTCCertificate
   ~RTCCertificate() override;
 
   // blink::WebRTCCertificate implementation.
-  std::unique_ptr<blink::WebRTCCertificate> shallowCopy() const override;
-  uint64_t expires() const override;
-  blink::WebRTCCertificatePEM toPEM() const override;
-  bool equals(const blink::WebRTCCertificate& other) const override;
+  std::unique_ptr<blink::WebRTCCertificate> ShallowCopy() const override;
+  uint64_t Expires() const override;
+  blink::WebVector<blink::WebRTCDtlsFingerprint> GetFingerprints()
+      const override;
+  blink::WebRTCCertificatePEM ToPEM() const override;
+  bool Equals(const blink::WebRTCCertificate& other) const override;
 
   const rtc::scoped_refptr<rtc::RTCCertificate>& rtcCertificate() const;
 

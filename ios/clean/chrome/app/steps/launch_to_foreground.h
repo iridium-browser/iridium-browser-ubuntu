@@ -2,9 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// ======                        New Architecture                         =====
-// =         This code is only used in the new iOS Chrome architecture.       =
-// ============================================================================
 
 #ifndef IOS_CLEAN_CHROME_APP_STEPS_LAUNCH_TO_FOREGROUND_H_
 #define IOS_CLEAN_CHROME_APP_STEPS_LAUNCH_TO_FOREGROUND_H_
@@ -35,4 +32,11 @@
 //  Post: Application phase is APPLICATION_FOREGROUNDED.
 @interface CompleteForegrounding : NSObject<ApplicationStep>
 @end
+
+// Performs preparation steps for UIDebuggingInformationOverlay.
+//  Pre:  Application phase is APPLICATION_FOREGROUNDED.
+//  Post: Application phase is (still) APPLICATION_FOREGROUNDED.
+@interface DebuggingInformationOverlay : NSObject<ApplicationStep>
+@end
+
 #endif  // IOS_CLEAN_CHROME_APP_STEPS_LAUNCH_TO_FOREGROUND_H_

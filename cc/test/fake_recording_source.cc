@@ -10,18 +10,15 @@ namespace cc {
 
 FakeRecordingSource::FakeRecordingSource() : playback_allowed_event_(nullptr) {}
 
-scoped_refptr<RasterSource> FakeRecordingSource::CreateRasterSource(
-    bool can_use_lcd) const {
+scoped_refptr<RasterSource> FakeRecordingSource::CreateRasterSource() const {
   return FakeRasterSource::CreateFromRecordingSourceWithWaitable(
-      this, can_use_lcd, playback_allowed_event_);
+      this, playback_allowed_event_);
 }
 
 bool FakeRecordingSource::EqualsTo(const FakeRecordingSource& other) {
   return size_ == other.size_ &&
          slow_down_raster_scale_factor_for_debug_ ==
              other.slow_down_raster_scale_factor_for_debug_ &&
-         generate_discardable_images_metadata_ ==
-             other.generate_discardable_images_metadata_ &&
          requires_clear_ == other.requires_clear_ &&
          is_solid_color_ == other.is_solid_color_ &&
          clear_canvas_with_debug_color_ ==

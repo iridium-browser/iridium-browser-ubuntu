@@ -4,98 +4,65 @@
 
 #include "core/css/cssom/CSSMatrixComponent.h"
 
-#include <cmath>
-#include <memory>
 #include "core/css/CSSPrimitiveValue.h"
-#include "wtf/MathExtras.h"
+#include "core/css/cssom/CSSMatrixComponentOptions.h"
+#include "core/geometry/DOMMatrix.h"
+#include "platform/wtf/MathExtras.h"
 
 namespace blink {
 
-CSSFunctionValue* CSSMatrixComponent::toCSSValue() const {
-  CSSFunctionValue* result =
-      CSSFunctionValue::create(m_is2D ? CSSValueMatrix : CSSValueMatrix3d);
+namespace {
 
-  if (m_is2D) {
-    double values[6] = {a(), b(), c(), d(), e(), f()};
+DOMMatrix* To2DMatrix(DOMMatrixReadOnly* matrix) {
+  DOMMatrix* twoDimensionalMatrix = DOMMatrix::Create();
+  twoDimensionalMatrix->setA(matrix->m11());
+  twoDimensionalMatrix->setB(matrix->m12());
+  twoDimensionalMatrix->setC(matrix->m21());
+  twoDimensionalMatrix->setD(matrix->m22());
+  twoDimensionalMatrix->setE(matrix->m41());
+  twoDimensionalMatrix->setF(matrix->m42());
+  return twoDimensionalMatrix;
+}
+
+}  // namespace
+
+CSSMatrixComponent* CSSMatrixComponent::Create(
+    DOMMatrixReadOnly* matrix,
+    const CSSMatrixComponentOptions& options) {
+  return new CSSMatrixComponent(matrix, options.is2D() || matrix->is2D());
+}
+
+const DOMMatrix* CSSMatrixComponent::AsMatrix() const {
+  if (is2D() && !matrix_->is2D())
+    return To2DMatrix(matrix_);
+
+  return matrix_.Get();
+}
+
+CSSFunctionValue* CSSMatrixComponent::ToCSSValue() const {
+  CSSFunctionValue* result =
+      CSSFunctionValue::Create(is2D() ? CSSValueMatrix : CSSValueMatrix3d);
+
+  if (is2D()) {
+    double values[6] = {matrix_->a(), matrix_->b(), matrix_->c(),
+                        matrix_->d(), matrix_->e(), matrix_->f()};
     for (double value : values) {
-      result->append(*CSSPrimitiveValue::create(
-          value, CSSPrimitiveValue::UnitType::Number));
+      result->Append(*CSSPrimitiveValue::Create(
+          value, CSSPrimitiveValue::UnitType::kNumber));
     }
   } else {
-    double values[16] = {m11(), m12(), m13(), m14(), m21(), m22(),
-                         m23(), m24(), m31(), m32(), m33(), m34(),
-                         m41(), m42(), m43(), m44()};
+    double values[16] = {
+        matrix_->m11(), matrix_->m12(), matrix_->m13(), matrix_->m14(),
+        matrix_->m21(), matrix_->m22(), matrix_->m23(), matrix_->m24(),
+        matrix_->m31(), matrix_->m32(), matrix_->m33(), matrix_->m34(),
+        matrix_->m41(), matrix_->m42(), matrix_->m43(), matrix_->m44()};
     for (double value : values) {
-      result->append(*CSSPrimitiveValue::create(
-          value, CSSPrimitiveValue::UnitType::Number));
+      result->Append(*CSSPrimitiveValue::Create(
+          value, CSSPrimitiveValue::UnitType::kNumber));
     }
   }
 
   return result;
-}
-
-CSSMatrixComponent* CSSMatrixComponent::perspective(double length) {
-  std::unique_ptr<TransformationMatrix> matrix = TransformationMatrix::create();
-  if (length != 0)
-    matrix->setM34(-1 / length);
-  return new CSSMatrixComponent(std::move(matrix), PerspectiveType);
-}
-
-CSSMatrixComponent* CSSMatrixComponent::rotate(double angle) {
-  std::unique_ptr<TransformationMatrix> matrix = TransformationMatrix::create();
-  matrix->rotate(angle);
-  return new CSSMatrixComponent(std::move(matrix), RotationType);
-}
-
-CSSMatrixComponent* CSSMatrixComponent::rotate3d(double angle,
-                                                 double x,
-                                                 double y,
-                                                 double z) {
-  std::unique_ptr<TransformationMatrix> matrix = TransformationMatrix::create();
-  matrix->rotate3d(x, y, z, angle);
-  return new CSSMatrixComponent(std::move(matrix), Rotation3DType);
-}
-
-CSSMatrixComponent* CSSMatrixComponent::scale(double x, double y) {
-  std::unique_ptr<TransformationMatrix> matrix = TransformationMatrix::create();
-  matrix->setM11(x);
-  matrix->setM22(y);
-  return new CSSMatrixComponent(std::move(matrix), ScaleType);
-}
-
-CSSMatrixComponent* CSSMatrixComponent::scale3d(double x, double y, double z) {
-  std::unique_ptr<TransformationMatrix> matrix = TransformationMatrix::create();
-  matrix->setM11(x);
-  matrix->setM22(y);
-  matrix->setM33(z);
-  return new CSSMatrixComponent(std::move(matrix), Scale3DType);
-}
-
-CSSMatrixComponent* CSSMatrixComponent::skew(double ax, double ay) {
-  double tanAx = std::tan(deg2rad(ax));
-  double tanAy = std::tan(deg2rad(ay));
-
-  std::unique_ptr<TransformationMatrix> matrix = TransformationMatrix::create();
-  matrix->setM12(tanAy);
-  matrix->setM21(tanAx);
-  return new CSSMatrixComponent(std::move(matrix), SkewType);
-}
-
-CSSMatrixComponent* CSSMatrixComponent::translate(double x, double y) {
-  std::unique_ptr<TransformationMatrix> matrix = TransformationMatrix::create();
-  matrix->setM41(x);
-  matrix->setM42(y);
-  return new CSSMatrixComponent(std::move(matrix), TranslationType);
-}
-
-CSSMatrixComponent* CSSMatrixComponent::translate3d(double x,
-                                                    double y,
-                                                    double z) {
-  std::unique_ptr<TransformationMatrix> matrix = TransformationMatrix::create();
-  matrix->setM41(x);
-  matrix->setM42(y);
-  matrix->setM43(z);
-  return new CSSMatrixComponent(std::move(matrix), Translation3DType);
 }
 
 }  // namespace blink

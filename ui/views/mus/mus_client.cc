@@ -6,9 +6,9 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
-#include "components/discardable_memory/client/client_discardable_shared_memory_manager.h"
-#include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/ui/public/cpp/gpu/gpu.h"
 #include "services/ui/public/cpp/property_type_converters.h"
@@ -18,10 +18,10 @@
 #include "ui/aura/env.h"
 #include "ui/aura/mus/capture_synchronizer.h"
 #include "ui/aura/mus/mus_context_factory.h"
-#include "ui/aura/mus/os_exchange_data_provider_mus.h"
 #include "ui/aura/mus/property_converter.h"
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/mus/window_tree_host_mus.h"
+#include "ui/aura/mus/window_tree_host_mus_init_params.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/views/mus/aura_init.h"
@@ -35,6 +35,10 @@
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/wm/core/shadow_types.h"
 #include "ui/wm/core/wm_state.h"
+
+#if defined(USE_OZONE)
+#include "ui/base/cursor/ozone/cursor_data_factory_ozone.h"
+#endif
 
 // Widget::InitParams::Type must match that of ui::mojom::WindowType.
 #define WINDOW_TYPES_MATCH(NAME)                                      \
@@ -63,11 +67,22 @@ MusClient* MusClient::instance_ = nullptr;
 MusClient::MusClient(service_manager::Connector* connector,
                      const service_manager::Identity& identity,
                      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-                     bool create_wm_state)
+                     bool create_wm_state,
+                     MusClientTestingState testing_state)
     : identity_(identity) {
   DCHECK(!instance_);
   DCHECK(aura::Env::GetInstance());
   instance_ = this;
+
+#if defined(USE_OZONE)
+  // If we're in a mus client, we aren't going to have all of ozone initialized
+  // even though we're in an ozone build. All the hard coded USE_OZONE ifdefs
+  // that handle cursor code expect that there will be a CursorFactoryOzone
+  // instance. Partially initialize the ozone cursor internals here, like we
+  // partially initialize other ozone subsystems in
+  // ChromeBrowserMainExtraPartsViews.
+  cursor_factory_ozone_ = base::MakeUnique<ui::CursorDataFactoryOzone>();
+#endif
 
   if (!io_task_runner) {
     io_thread_ = base::MakeUnique<base::Thread>("IOThread");
@@ -79,7 +94,7 @@ MusClient::MusClient(service_manager::Connector* connector,
 
   // TODO(msw): Avoid this... use some default value? Allow clients to extend?
   property_converter_ = base::MakeUnique<aura::PropertyConverter>();
-  property_converter_->RegisterProperty(
+  property_converter_->RegisterPrimitiveProperty(
       wm::kShadowElevationKey,
       ui::mojom::WindowManager::kShadowElevation_Property,
       base::Bind(&wm::IsValidShadowElevation));
@@ -87,14 +102,8 @@ MusClient::MusClient(service_manager::Connector* connector,
   if (create_wm_state)
     wm_state_ = base::MakeUnique<wm::WMState>();
 
-  discardable_memory::mojom::DiscardableSharedMemoryManagerPtr manager_ptr;
-  connector->BindInterface(ui::mojom::kServiceName, &manager_ptr);
-
-  discardable_shared_memory_manager_ = base::MakeUnique<
-      discardable_memory::ClientDiscardableSharedMemoryManager>(
-      std::move(manager_ptr), io_task_runner);
-  base::DiscardableMemoryAllocator::SetInstance(
-      discardable_shared_memory_manager_.get());
+  if (testing_state == MusClientTestingState::CREATE_TESTING_STATE)
+    connector->BindInterface(ui::mojom::kServiceName, &server_test_ptr_);
 
   window_tree_client_ = base::MakeUnique<aura::WindowTreeClient>(
       connector, this, nullptr /* window_manager_delegate */,
@@ -112,10 +121,10 @@ MusClient::MusClient(service_manager::Connector* connector,
   clipboard->Init(connector);
   ui::Clipboard::SetClipboardForCurrentThread(std::move(clipboard));
 
-  ui::OSExchangeDataProviderFactory::SetFactory(this);
-
   ViewsDelegate::GetInstance()->set_native_widget_factory(
       base::Bind(&MusClient::CreateNativeWidget, base::Unretained(this)));
+  ViewsDelegate::GetInstance()->set_desktop_window_tree_host_factory(base::Bind(
+      &MusClient::CreateDesktopWindowTreeHost, base::Unretained(this)));
 }
 
 MusClient::~MusClient() {
@@ -128,9 +137,10 @@ MusClient::~MusClient() {
   if (ViewsDelegate::GetInstance()) {
     ViewsDelegate::GetInstance()->set_native_widget_factory(
         ViewsDelegate::NativeWidgetFactory());
+    ViewsDelegate::GetInstance()->set_desktop_window_tree_host_factory(
+        ViewsDelegate::DesktopWindowTreeHostFactory());
   }
 
-  base::DiscardableMemoryAllocator::SetInstance(nullptr);
   DCHECK_EQ(instance_, this);
   instance_ = nullptr;
   DCHECK(aura::Env::GetInstance());
@@ -160,6 +170,10 @@ MusClient::ConfigurePropertiesFromParams(
 
   properties[WindowManager::kFocusable_InitProperty] =
       mojo::ConvertTo<TransportType>(init_params.CanActivate());
+
+  properties[WindowManager::kTranslucent_InitProperty] =
+      mojo::ConvertTo<TransportType>(init_params.opacity ==
+                                     Widget::InitParams::TRANSLUCENT_WINDOW);
 
   if (!init_params.bounds.IsEmpty()) {
     properties[WindowManager::kBounds_InitProperty] =
@@ -221,11 +235,8 @@ NativeWidget* MusClient::CreateNativeWidget(
     native_widget->SetDesktopWindowTreeHost(
         base::WrapUnique(init_params.desktop_window_tree_host));
   } else {
-    std::map<std::string, std::vector<uint8_t>> mus_properties =
-        ConfigurePropertiesFromParams(init_params);
     native_widget->SetDesktopWindowTreeHost(
-        base::MakeUnique<DesktopWindowTreeHostMus>(delegate, native_widget,
-                                                   &mus_properties));
+        CreateDesktopWindowTreeHost(init_params, delegate, native_widget));
   }
   return native_widget;
 }
@@ -254,6 +265,27 @@ void MusClient::RemoveObserver(MusClientObserver* observer) {
 void MusClient::SetMusPropertyMirror(
     std::unique_ptr<MusPropertyMirror> mirror) {
   mus_property_mirror_ = std::move(mirror);
+}
+
+ui::mojom::WindowServerTest* MusClient::GetTestingInterface() const {
+  // This will only be set in tests. CHECK to ensure it doesn't get used
+  // elsewhere.
+  CHECK(server_test_ptr_);
+  return server_test_ptr_.get();
+}
+
+std::unique_ptr<DesktopWindowTreeHost> MusClient::CreateDesktopWindowTreeHost(
+    const Widget::InitParams& init_params,
+    internal::NativeWidgetDelegate* delegate,
+    DesktopNativeWidgetAura* desktop_native_widget_aura) {
+  std::map<std::string, std::vector<uint8_t>> mus_properties =
+      ConfigurePropertiesFromParams(init_params);
+  aura::WindowTreeHostMusInitParams window_tree_host_init_params =
+      aura::CreateInitParamsForTopLevel(MusClient::Get()->window_tree_client(),
+                                        std::move(mus_properties));
+  return base::MakeUnique<DesktopWindowTreeHostMus>(
+      std::move(window_tree_host_init_params), delegate,
+      desktop_native_widget_aura);
 }
 
 void MusClient::OnEmbed(
@@ -292,13 +324,9 @@ aura::Window* MusClient::GetWindowAtScreenPoint(const gfx::Point& point) {
     gfx::Point relative_point(point);
     window_tree_host->ConvertScreenInPixelsToDIP(&relative_point);
     if (gfx::Rect(root->bounds().size()).Contains(relative_point))
-      return root->GetTopWindowContainingPoint(relative_point);
+      return root->GetEventHandlerForPoint(relative_point);
   }
   return nullptr;
-}
-
-std::unique_ptr<OSExchangeData::Provider> MusClient::BuildProvider() {
-  return base::MakeUnique<aura::OSExchangeDataProviderMus>();
 }
 
 }  // namespace views

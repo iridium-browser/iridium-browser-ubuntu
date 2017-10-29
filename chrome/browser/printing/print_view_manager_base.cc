@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
@@ -188,8 +189,11 @@ void PrintViewManagerBase::OnDidPrintPage(
     document->DebugDumpData(bytes.get(), FILE_PATH_LITERAL(".pdf"));
 
     const auto& settings = document->settings();
-    if ((settings.printer_is_ps2() || settings.printer_is_ps3()) &&
-        base::FeatureList::IsEnabled(features::kPostScriptPrinting)) {
+    if (settings.printer_is_textonly()) {
+      print_job_->StartPdfToTextConversion(bytes, params.page_size);
+    } else if ((settings.printer_is_ps2() || settings.printer_is_ps3()) &&
+               !base::FeatureList::IsEnabled(
+                   features::kDisablePostScriptPrinting)) {
       print_job_->StartPdfToPostScriptConversion(bytes, params.content_area,
                                                  params.physical_offsets,
                                                  settings.printer_is_ps2());
@@ -238,9 +242,9 @@ void PrintViewManagerBase::OnPrintingFailed(int cookie) {
 
 void PrintViewManagerBase::OnShowInvalidPrinterSettingsError() {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ShowWarningMessageBox,
-                            l10n_util::GetStringUTF16(
-                                IDS_PRINT_INVALID_PRINTER_SETTINGS)));
+      FROM_HERE, base::BindOnce(&ShowWarningMessageBox,
+                                l10n_util::GetStringUTF16(
+                                    IDS_PRINT_INVALID_PRINTER_SETTINGS)));
 }
 
 void PrintViewManagerBase::DidStartLoading() {
@@ -575,7 +579,7 @@ void PrintViewManagerBase::ReleasePrinterQuery() {
     return;
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&PrinterQuery::StopWorker, printer_query));
+      base::BindOnce(&PrinterQuery::StopWorker, printer_query));
 }
 
 void PrintViewManagerBase::SendPrintingEnabled(bool enabled,

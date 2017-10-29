@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "ash/common/ash_switches.h"
+#include "ash/ash_switches.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -38,15 +38,15 @@
 
 const CommandLinePrefStore::SwitchToPreferenceMapEntry
     ChromeCommandLinePrefStore::string_switch_map_[] = {
-      { switches::kLang, prefs::kApplicationLocale },
-      { data_reduction_proxy::switches::kDataReductionProxy,
-          data_reduction_proxy::prefs::kDataReductionProxy },
-      { switches::kAuthServerWhitelist, prefs::kAuthServerWhitelist },
-      { switches::kSSLVersionMin, ssl_config::prefs::kSSLVersionMin },
-      { switches::kSSLVersionMax, ssl_config::prefs::kSSLVersionMax },
+        {switches::kLang, prefs::kApplicationLocale},
+        {data_reduction_proxy::switches::kDataReductionProxy,
+         data_reduction_proxy::prefs::kDataReductionProxy},
+        {switches::kAuthServerWhitelist, prefs::kAuthServerWhitelist},
+        {switches::kSSLVersionMin, ssl_config::prefs::kSSLVersionMin},
+        {switches::kTLS13Variant, ssl_config::prefs::kTLS13Variant},
 #if defined(OS_ANDROID)
-      { switches::kAuthAndroidNegotiateAccountType,
-          prefs::kAuthAndroidNegotiateAccountType },
+        {switches::kAuthAndroidNegotiateAccountType,
+         prefs::kAuthAndroidNegotiateAccountType},
 #endif
 };
 
@@ -80,6 +80,10 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
         {switches::kUnsafePacUrl, prefs::kPacHttpsUrlStrippingEnabled, false},
         {switches::kEnableLocalSyncBackend,
          syncer::prefs::kEnableLocalSyncBackend, true},
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+        {switches::kUseSystemDefaultPrinter,
+         prefs::kPrintPreviewUseSystemDefaultPrinter, true},
+#endif
 };
 
 const CommandLinePrefStore::SwitchToPreferenceMapEntry
@@ -123,29 +127,27 @@ void ChromeCommandLinePrefStore::ApplySimpleSwitches() {
 
 void ChromeCommandLinePrefStore::ApplyProxyMode() {
   if (command_line()->HasSwitch(switches::kNoProxyServer)) {
-    SetValue(proxy_config::prefs::kProxy,
-             base::WrapUnique(ProxyConfigDictionary::CreateDirect()),
+    SetValue(proxy_config::prefs::kProxy, ProxyConfigDictionary::CreateDirect(),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   } else if (command_line()->HasSwitch(switches::kProxyPacUrl)) {
     std::string pac_script_url =
         command_line()->GetSwitchValueASCII(switches::kProxyPacUrl);
     SetValue(proxy_config::prefs::kProxy,
-             base::WrapUnique(
-                 ProxyConfigDictionary::CreatePacScript(pac_script_url, false)),
+             ProxyConfigDictionary::CreatePacScript(pac_script_url, false),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   } else if (command_line()->HasSwitch(switches::kProxyAutoDetect)) {
     SetValue(proxy_config::prefs::kProxy,
-             base::WrapUnique(ProxyConfigDictionary::CreateAutoDetect()),
+             ProxyConfigDictionary::CreateAutoDetect(),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   } else if (command_line()->HasSwitch(switches::kProxyServer)) {
     std::string proxy_server =
         command_line()->GetSwitchValueASCII(switches::kProxyServer);
     std::string bypass_list =
         command_line()->GetSwitchValueASCII(switches::kProxyBypassList);
-    SetValue(proxy_config::prefs::kProxy,
-             base::WrapUnique(ProxyConfigDictionary::CreateFixedServers(
-                 proxy_server, bypass_list)),
-             WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+    SetValue(
+        proxy_config::prefs::kProxy,
+        ProxyConfigDictionary::CreateFixedServers(proxy_server, bypass_list),
+        WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }
 }
 
@@ -156,6 +158,16 @@ void ChromeCommandLinePrefStore::ApplySSLSwitches() {
         command_line()->GetSwitchValueASCII(switches::kCipherSuiteBlacklist),
         ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL));
     SetValue(ssl_config::prefs::kCipherSuiteBlacklist, std::move(list_value),
+             WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+  }
+
+  // If a non-disabled TLS 1.3 variant flag is set, enable TLS 1.3 in
+  // SSLVersionMax.
+  if (command_line()->HasSwitch(switches::kTLS13Variant) &&
+      command_line()->GetSwitchValueASCII(switches::kTLS13Variant) !=
+          switches::kTLS13VariantDisabled) {
+    SetValue(ssl_config::prefs::kSSLVersionMax,
+             base::MakeUnique<base::Value>(switches::kSSLVersionTLSv13),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }
 }

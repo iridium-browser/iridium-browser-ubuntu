@@ -462,8 +462,7 @@ class MenuViewDragAndDropForDropStayOpen : public MenuViewDragAndDropTest {
 };
 
 int MenuViewDragAndDropForDropStayOpen::GetMenuRunnerFlags() {
-  return views::MenuRunner::HAS_MNEMONICS |
-         views::MenuRunner::NESTED_DRAG |
+  return views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::NESTED_DRAG |
          views::MenuRunner::FOR_DROP;
 }
 

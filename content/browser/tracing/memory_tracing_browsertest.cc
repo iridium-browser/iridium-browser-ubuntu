@@ -8,6 +8,7 @@
 #include "base/callback_forward.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -20,6 +21,7 @@
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using base::trace_event::MemoryDumpArgs;
@@ -42,27 +44,20 @@ class MockDumpProvider : public base::trace_event::MemoryDumpProvider {
 
 class MemoryTracingTest : public ContentBrowserTest {
  public:
-  void DoRequestGlobalDump(const MemoryDumpType& dump_type,
-                           const MemoryDumpLevelOfDetail& level_of_detail,
-                           const base::trace_event::MemoryDumpCallback& cb) {
-    MemoryDumpManager::GetInstance()->RequestGlobalDump(dump_type,
-                                                        level_of_detail, cb);
-  }
-
   // Used as callback argument for MemoryDumpManager::RequestGlobalDump():
   void OnGlobalMemoryDumpDone(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       base::Closure closure,
       uint32_t request_index,
-      uint64_t dump_guid,
-      bool success) {
+      bool success,
+      uint64_t dump_guid) {
     // Make sure we run the RunLoop closure on the same thread that originated
     // the run loop (which is the IN_PROC_BROWSER_TEST_F main thread).
-    if (!task_runner->RunsTasksOnCurrentThread()) {
+    if (!task_runner->RunsTasksInCurrentSequence()) {
       task_runner->PostTask(
           FROM_HERE, base::Bind(&MemoryTracingTest::OnGlobalMemoryDumpDone,
                                 base::Unretained(this), task_runner, closure,
-                                request_index, dump_guid, success));
+                                request_index, success, dump_guid));
       return;
     }
     if (success)
@@ -78,15 +73,20 @@ class MemoryTracingTest : public ContentBrowserTest {
       const MemoryDumpLevelOfDetail& level_of_detail,
       const base::Closure& closure) {
     uint32_t request_index = next_request_index_++;
-    base::trace_event::MemoryDumpCallback callback = base::Bind(
+    base::trace_event::GlobalMemoryDumpCallback callback = base::Bind(
         &MemoryTracingTest::OnGlobalMemoryDumpDone, base::Unretained(this),
         base::ThreadTaskRunnerHandle::Get(), closure, request_index);
     if (from_renderer_thread) {
       PostTaskToInProcessRendererAndWait(base::Bind(
-          &MemoryTracingTest::DoRequestGlobalDump, base::Unretained(this),
+          &memory_instrumentation::MemoryInstrumentation::
+              RequestGlobalDumpAndAppendToTrace,
+          base::Unretained(
+              memory_instrumentation::MemoryInstrumentation::GetInstance()),
           dump_type, level_of_detail, callback));
     } else {
-      DoRequestGlobalDump(dump_type, level_of_detail, callback);
+      memory_instrumentation::MemoryInstrumentation::GetInstance()
+          ->RequestGlobalDumpAndAppendToTrace(dump_type, level_of_detail,
+                                              callback);
     }
   }
 
@@ -302,7 +302,8 @@ IN_PROC_BROWSER_TEST_F(SingleProcessMemoryTracingTest, QueuedDumps) {
 #endif  // !defined(GOOGLE_CHROME_BUILD)
 
 // Non-deterministic races under TSan. crbug.com/529678
-#if defined(THREAD_SANITIZER)
+// Flaky on Linux. crbug.com/709524
+#if defined(THREAD_SANITIZER) || defined(OS_LINUX)
 #define MAYBE_BrowserInitiatedDump DISABLED_BrowserInitiatedDump
 #else
 #define MAYBE_BrowserInitiatedDump BrowserInitiatedDump

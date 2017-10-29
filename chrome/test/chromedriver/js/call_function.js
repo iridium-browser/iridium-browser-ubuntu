@@ -201,11 +201,11 @@ Cache.prototype = {
 /**
  * Returns the root element of the node.  Found by traversing parentNodes until
  * a node with no parent is found.  This node is considered the root.
- * @param {!Node} node The node to find the root element for.
- * @return {!Node} The root node.
+ * @param {?Node} node The node to find the root element for.
+ * @return {?Node} The root node.
  */
 function getNodeRoot(node) {
-  while (node.parentNode) {
+  while (node && node.parentNode) {
     node = node.parentNode;
   }
   return node;
@@ -271,9 +271,16 @@ function wrap(value) {
       return wrapped;
     }
 
-    var obj = (typeof(value.length) == 'number') ? [] : {};
-    for (var prop in value)
-      obj[prop] = wrap(value[prop]);
+    var obj;
+    if (typeof(value.length) == 'number') {
+      obj = [];
+      for (var i = 0; i < value.length; i++)
+        obj[i] = wrap(value[i]);
+    } else {
+      obj = {};
+      for (var prop in value)
+        obj[prop] = wrap(value[prop]);
+    }
     return obj;
   }
   return value;
@@ -292,9 +299,16 @@ function unwrap(value, cache) {
     if (ELEMENT_KEY in value)
       return cache.retrieveItem(value[ELEMENT_KEY]);
 
-    var obj = (typeof(value.length) == 'number') ? [] : {};
-    for (var prop in value)
-      obj[prop] = unwrap(value[prop], cache);
+    var obj;
+    if (typeof(value.length) == 'number') {
+      obj = [];
+      for (var i = 0; i < value.length; i++)
+        obj[i] = unwrap(value[i], cache);
+    } else {
+      obj = {};
+      for (var prop in value)
+        obj[prop] = unwrap(value[prop], cache);
+    }
     return obj;
   }
   return value;

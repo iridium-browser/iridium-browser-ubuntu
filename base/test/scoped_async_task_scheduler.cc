@@ -4,37 +4,42 @@
 
 #include "base/test/scoped_async_task_scheduler.h"
 
-#include <vector>
-
-#include "base/bind.h"
 #include "base/logging.h"
 #include "base/task_scheduler/scheduler_worker_pool_params.h"
 #include "base/task_scheduler/task_scheduler.h"
-#include "base/task_scheduler/task_scheduler_impl.h"
 
 namespace base {
 namespace test {
 
 ScopedAsyncTaskScheduler::ScopedAsyncTaskScheduler() {
   DCHECK(!TaskScheduler::GetInstance());
-  constexpr int kMaxThreads = 1;
+
+  // Instantiate a TaskScheduler with 2 threads in each of its 4 pools. Threads
+  // stay alive even when they don't have work.
+  // Each pool uses two threads to prevent deadlocks in unit tests that have a
+  // sequence that uses WithBaseSyncPrimitives() to wait on the result of
+  // another sequence. This isn't perfect (doesn't solve wait chains) but solves
+  // the basic use case for now.
+  // TODO(fdoray/jeffreyhe): Make the TaskScheduler dynamically replace blocked
+  // threads and get rid of this limitation. http://crbug.com/738104
+  constexpr int kMaxThreads = 2;
   const TimeDelta kSuggestedReclaimTime = TimeDelta::Max();
-  std::vector<SchedulerWorkerPoolParams> worker_pool_params_vector;
-  worker_pool_params_vector.emplace_back(
-      "ScopedAsyncTaskScheduler", ThreadPriority::NORMAL,
-      SchedulerWorkerPoolParams::StandbyThreadPolicy::LAZY, kMaxThreads,
+  const SchedulerWorkerPoolParams worker_pool_params(
+      SchedulerWorkerPoolParams::StandbyThreadPolicy::ONE, kMaxThreads,
       kSuggestedReclaimTime);
-  TaskScheduler::CreateAndSetDefaultTaskScheduler(
-      worker_pool_params_vector,
-      Bind([](const TaskTraits&) -> size_t { return 0; }));
+  TaskScheduler::Create("ScopedAsync");
   task_scheduler_ = TaskScheduler::GetInstance();
+  TaskScheduler::GetInstance()->Start({worker_pool_params, worker_pool_params,
+                                       worker_pool_params, worker_pool_params});
 }
 
 ScopedAsyncTaskScheduler::~ScopedAsyncTaskScheduler() {
   DCHECK_EQ(TaskScheduler::GetInstance(), task_scheduler_);
+  // Without FlushForTesting(), DeleteSoon() and ReleaseSoon() tasks could be
+  // skipped, resulting in memory leaks.
+  TaskScheduler::GetInstance()->FlushForTesting();
   TaskScheduler::GetInstance()->Shutdown();
-  static_cast<internal::TaskSchedulerImpl*>(TaskScheduler::GetInstance())
-      ->JoinForTesting();
+  TaskScheduler::GetInstance()->JoinForTesting();
   TaskScheduler::SetInstance(nullptr);
 }
 

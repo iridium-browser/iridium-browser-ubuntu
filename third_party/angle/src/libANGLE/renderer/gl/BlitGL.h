@@ -28,7 +28,7 @@ class StateManagerGL;
 class TextureGL;
 struct WorkaroundsGL;
 
-class BlitGL : public angle::NonCopyable
+class BlitGL : angle::NonCopyable
 {
   public:
     BlitGL(const FunctionsGL *functions,
@@ -36,7 +36,8 @@ class BlitGL : public angle::NonCopyable
            StateManagerGL *stateManager);
     ~BlitGL();
 
-    gl::Error copyImageToLUMAWorkaroundTexture(GLuint texture,
+    gl::Error copyImageToLUMAWorkaroundTexture(const gl::Context *context,
+                                               GLuint texture,
                                                GLenum textureType,
                                                GLenum target,
                                                GLenum lumaFormat,
@@ -45,7 +46,8 @@ class BlitGL : public angle::NonCopyable
                                                GLenum internalFormat,
                                                const gl::Framebuffer *source);
 
-    gl::Error copySubImageToLUMAWorkaroundTexture(GLuint texture,
+    gl::Error copySubImageToLUMAWorkaroundTexture(const gl::Context *context,
+                                                  GLuint texture,
                                                   GLenum textureType,
                                                   GLenum target,
                                                   GLenum lumaFormat,
@@ -60,8 +62,12 @@ class BlitGL : public angle::NonCopyable
                                         const gl::Rectangle &destArea,
                                         GLenum filter);
 
-    gl::Error copySubTexture(TextureGL *source,
+    gl::Error copySubTexture(const gl::Context *context,
+                             TextureGL *source,
+                             size_t sourceLevel,
                              TextureGL *dest,
+                             GLenum destTarget,
+                             size_t destLevel,
                              const gl::Extents &sourceSize,
                              const gl::Rectangle &sourceArea,
                              const gl::Offset &destOffset,
@@ -72,7 +78,10 @@ class BlitGL : public angle::NonCopyable
                              bool unpackUnmultiplyAlpha);
 
     gl::Error copyTexSubImage(TextureGL *source,
+                              size_t sourceLevel,
                               TextureGL *dest,
+                              GLenum destTarget,
+                              size_t destLevel,
                               const gl::Rectangle &sourceArea,
                               const gl::Offset &destOffset);
 

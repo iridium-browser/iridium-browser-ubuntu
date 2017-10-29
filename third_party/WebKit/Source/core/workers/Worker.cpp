@@ -8,45 +8,54 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/frame/UseCounter.h"
-#include "core/workers/DedicatedWorkerMessagingProxyProvider.h"
-#include "core/workers/InProcessWorkerMessagingProxy.h"
+#include "core/frame/WebLocalFrameBase.h"
+#include "core/workers/DedicatedWorkerMessagingProxy.h"
+#include "core/workers/WorkerContentSettingsClient.h"
+#include "public/platform/WebContentSettingsClient.h"
+#include "public/web/WebFrameClient.h"
 
 namespace blink {
 
+template class CORE_TEMPLATE_EXPORT WorkerClientsInitializer<Worker>;
+
 Worker::Worker(ExecutionContext* context) : InProcessWorkerBase(context) {}
 
-Worker* Worker::create(ExecutionContext* context,
+Worker* Worker::Create(ExecutionContext* context,
                        const String& url,
-                       ExceptionState& exceptionState) {
-  DCHECK(isMainThread());
-  Document* document = toDocument(context);
-  UseCounter::count(context, UseCounter::WorkerStart);
-  if (!document->page()) {
-    exceptionState.throwDOMException(InvalidAccessError,
-                                     "The context provided is invalid.");
+                       ExceptionState& exception_state) {
+  DCHECK(IsMainThread());
+  Document* document = ToDocument(context);
+  UseCounter::Count(context, WebFeature::kWorkerStart);
+  if (!document->GetPage()) {
+    exception_state.ThrowDOMException(kInvalidAccessError,
+                                      "The context provided is invalid.");
     return nullptr;
   }
   Worker* worker = new Worker(context);
-  if (worker->initialize(context, url, exceptionState))
+  if (worker->Initialize(context, url, exception_state))
     return worker;
   return nullptr;
 }
 
 Worker::~Worker() {
-  DCHECK(isMainThread());
+  DCHECK(IsMainThread());
 }
 
-const AtomicString& Worker::interfaceName() const {
+const AtomicString& Worker::InterfaceName() const {
   return EventTargetNames::Worker;
 }
 
-InProcessWorkerMessagingProxy* Worker::createInProcessWorkerMessagingProxy(
+InProcessWorkerMessagingProxy* Worker::CreateInProcessWorkerMessagingProxy(
     ExecutionContext* context) {
-  Document* document = toDocument(context);
-  DedicatedWorkerMessagingProxyProvider* proxyProvider =
-      DedicatedWorkerMessagingProxyProvider::from(*document->page());
-  DCHECK(proxyProvider);
-  return proxyProvider->createWorkerMessagingProxy(this);
+  Document* document = ToDocument(context);
+  WebLocalFrameBase* web_frame =
+      WebLocalFrameBase::FromFrame(document->GetFrame());
+
+  WorkerClients* worker_clients = WorkerClients::Create();
+  WorkerClientsInitializer<Worker>::Run(worker_clients);
+  ProvideContentSettingsClientToWorker(
+      worker_clients, web_frame->Client()->CreateWorkerContentSettingsClient());
+  return new DedicatedWorkerMessagingProxy(this, worker_clients);
 }
 
 }  // namespace blink

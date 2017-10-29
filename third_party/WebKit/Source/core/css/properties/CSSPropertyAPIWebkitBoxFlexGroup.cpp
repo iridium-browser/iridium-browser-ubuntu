@@ -6,12 +6,14 @@
 
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIWebkitBoxFlexGroup::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  return CSSPropertyParserHelpers::consumeInteger(range, 0);
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  return CSSPropertyParserHelpers::ConsumeInteger(range, 0);
 }
 
 }  // namespace blink

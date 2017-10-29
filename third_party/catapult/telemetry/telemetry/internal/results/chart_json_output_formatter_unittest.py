@@ -12,17 +12,19 @@ from telemetry import story
 from telemetry.internal.results import chart_json_output_formatter
 from telemetry.internal.results import page_test_results
 from telemetry import page as page_module
-from telemetry.timeline import trace_data
 from telemetry.value import improvement_direction
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
 from telemetry.value import trace
+from tracing.trace_data import trace_data
 
 
 def _MakeStorySet():
   ps = story.StorySet(base_dir=os.path.dirname(__file__))
-  ps.AddStory(page_module.Page('http://www.foo.com/', ps, ps.base_dir))
-  ps.AddStory(page_module.Page('http://www.bar.com/', ps, ps.base_dir))
+  ps.AddStory(page_module.Page(
+      'http://www.foo.com/', ps, ps.base_dir, name='http://www.foo.com/'))
+  ps.AddStory(page_module.Page(
+      'http://www.bar.com/', ps, ps.base_dir, name='http://www.bar.com/'))
   return ps
 
 class ChartJsonTest(unittest.TestCase):

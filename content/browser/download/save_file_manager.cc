@@ -25,6 +25,7 @@
 #include "content/public/common/previews_state.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory.h"
@@ -299,7 +300,7 @@ void SaveFileManager::OnSaveURL(const GURL& url,
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   const net::URLRequestContext* request_context = context->GetRequestContext();
-  if (!request_context->job_factory()->IsHandledURL(url)) {
+  if (!request_context->job_factory()->IsHandledProtocol(url.scheme())) {
     // Since any URLs which have non-standard scheme have been filtered
     // by save manager(see GURL::SchemeIsStandard). This situation
     // should not happen.
@@ -307,8 +308,27 @@ void SaveFileManager::OnSaveURL(const GURL& url,
     return;
   }
 
-  std::unique_ptr<net::URLRequest> request(
-      request_context->CreateRequest(url, net::DEFAULT_PRIORITY, NULL));
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("save_file_manager", R"(
+        semantics {
+          sender: "Save File"
+          description: "Saving url to local file."
+          trigger:
+            "User clicks on 'Save link as...' context menu command to save a "
+            "link."
+          data: "None."
+          destination: WEBSITE
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store: "user"
+          setting:
+            "This feature cannot be disable by settings. The request is made "
+            "only if user chooses 'Save link as...' in context menu."
+          policy_exception_justification: "Not implemented."
+        })");
+  std::unique_ptr<net::URLRequest> request(request_context->CreateRequest(
+      url, net::DEFAULT_PRIORITY, NULL, traffic_annotation));
   request->set_method("GET");
 
   // The URLRequest needs to be initialized with the referrer and other

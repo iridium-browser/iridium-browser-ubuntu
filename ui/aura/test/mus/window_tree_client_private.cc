@@ -6,6 +6,7 @@
 
 #include "ui/aura/mus/window_port_mus.h"
 #include "ui/aura/mus/window_tree_client.h"
+#include "ui/aura/mus/window_tree_host_mus_init_params.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
 
@@ -29,7 +30,8 @@ void WindowTreeClientPrivate::OnEmbed(ui::mojom::WindowTree* window_tree) {
   const int64_t display_id = 1;
   const Id focused_window_id = 0;
   tree_client_impl_->OnEmbedImpl(window_tree, 1, std::move(root_data),
-                                 display_id, focused_window_id, true);
+                                 display_id, focused_window_id, true,
+                                 base::nullopt);
 }
 
 WindowTreeHostMus* WindowTreeClientPrivate::CallWmNewDisplayAdded(
@@ -48,7 +50,7 @@ WindowTreeHostMus* WindowTreeClientPrivate::CallWmNewDisplayAdded(
     ui::mojom::WindowDataPtr root_data,
     bool parent_drawn) {
   return tree_client_impl_->WmNewDisplayAddedImpl(display, std::move(root_data),
-                                                  parent_drawn);
+                                                  parent_drawn, base::nullopt);
 }
 
 void WindowTreeClientPrivate::CallOnWindowInputEvent(
@@ -62,6 +64,16 @@ void WindowTreeClientPrivate::CallOnWindowInputEvent(
       std::move(event), observer_id);
 }
 
+void WindowTreeClientPrivate::CallOnPointerEventObserved(
+    Window* window,
+    std::unique_ptr<ui::Event> event) {
+  const int64_t display_id = 0;
+  const uint32_t window_id =
+      window ? WindowPortMus::Get(window)->server_id() : 0u;
+  tree_client_impl_->OnPointerEventObserved(std::move(event), window_id,
+                                            display_id);
+}
+
 void WindowTreeClientPrivate::CallOnCaptureChanged(Window* new_capture,
                                                    Window* old_capture) {
   tree_client_impl_->OnCaptureChanged(
@@ -69,11 +81,26 @@ void WindowTreeClientPrivate::CallOnCaptureChanged(Window* new_capture,
       old_capture ? WindowPortMus::Get(old_capture)->server_id() : 0);
 }
 
+void WindowTreeClientPrivate::CallOnConnect() {
+  const ClientSpecificId client_id = 1;
+  tree_client_impl_->OnConnect(client_id);
+}
+
+WindowTreeHostMusInitParams
+WindowTreeClientPrivate::CallCreateInitParamsForNewDisplay() {
+  return tree_client_impl_->CreateInitParamsForNewDisplay();
+}
+
 void WindowTreeClientPrivate::SetTreeAndClientId(
     ui::mojom::WindowTree* window_tree,
     ClientSpecificId client_id) {
   tree_client_impl_->WindowTreeConnectionEstablished(window_tree);
   tree_client_impl_->client_id_ = client_id;
+}
+
+void WindowTreeClientPrivate::SetWindowManagerClient(
+    ui::mojom::WindowManagerClient* client) {
+  tree_client_impl_->window_manager_client_ = client;
 }
 
 bool WindowTreeClientPrivate::HasPointerWatcher() {

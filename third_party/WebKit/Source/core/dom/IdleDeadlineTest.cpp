@@ -5,98 +5,101 @@
 #include "core/dom/IdleDeadline.h"
 
 #include "platform/testing/TestingPlatformSupport.h"
+#include "platform/wtf/CurrentTime.h"
 #include "public/platform/Platform.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/CurrentTime.h"
 
 namespace blink {
 namespace {
 
-class MockScheduler final : public WebScheduler {
+class MockIdleDeadlineScheduler final : public WebScheduler {
  public:
-  MockScheduler() {}
-  ~MockScheduler() override {}
+  MockIdleDeadlineScheduler() {}
+  ~MockIdleDeadlineScheduler() override {}
 
   // WebScheduler implementation:
-  WebTaskRunner* loadingTaskRunner() override { return nullptr; }
-  WebTaskRunner* timerTaskRunner() override { return nullptr; }
-  void shutdown() override {}
-  bool shouldYieldForHighPriorityWork() override { return true; }
-  bool canExceedIdleDeadlineIfRequired() override { return false; }
-  void postIdleTask(const WebTraceLocation&, WebThread::IdleTask*) override {}
-  void postNonNestableIdleTask(const WebTraceLocation&,
+  WebTaskRunner* LoadingTaskRunner() override { return nullptr; }
+  WebTaskRunner* TimerTaskRunner() override { return nullptr; }
+  void Shutdown() override {}
+  bool ShouldYieldForHighPriorityWork() override { return true; }
+  bool CanExceedIdleDeadlineIfRequired() override { return false; }
+  void PostIdleTask(const WebTraceLocation&, WebThread::IdleTask*) override {}
+  void PostNonNestableIdleTask(const WebTraceLocation&,
                                WebThread::IdleTask*) override {}
-  std::unique_ptr<WebViewScheduler> createWebViewScheduler(
+  std::unique_ptr<WebViewScheduler> CreateWebViewScheduler(
       InterventionReporter*,
-      WebViewScheduler::WebViewSchedulerSettings*) override {
+      WebViewScheduler::WebViewSchedulerDelegate*) override {
     return nullptr;
   }
-  void suspendTimerQueue() override {}
-  void resumeTimerQueue() override {}
-  void addPendingNavigation(WebScheduler::NavigatingFrameType) override {}
-  void removePendingNavigation(WebScheduler::NavigatingFrameType) override {}
+  WebTaskRunner* CompositorTaskRunner() override { return nullptr; }
+  void SuspendTimerQueue() override {}
+  void ResumeTimerQueue() override {}
+  void AddPendingNavigation(
+      scheduler::RendererScheduler::NavigatingFrameType) override {}
+  void RemovePendingNavigation(
+      scheduler::RendererScheduler::NavigatingFrameType) override {}
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockScheduler);
+  DISALLOW_COPY_AND_ASSIGN(MockIdleDeadlineScheduler);
 };
 
-class MockThread final : public WebThread {
+class MockIdleDeadlineThread final : public WebThread {
  public:
-  MockThread() {}
-  ~MockThread() override {}
-  bool isCurrentThread() const override { return true; }
-  WebScheduler* scheduler() const override { return &m_scheduler; }
+  MockIdleDeadlineThread() {}
+  ~MockIdleDeadlineThread() override {}
+  bool IsCurrentThread() const override { return true; }
+  WebScheduler* Scheduler() const override { return &scheduler_; }
 
  private:
-  mutable MockScheduler m_scheduler;
-  DISALLOW_COPY_AND_ASSIGN(MockThread);
+  mutable MockIdleDeadlineScheduler scheduler_;
+  DISALLOW_COPY_AND_ASSIGN(MockIdleDeadlineThread);
 };
 
-class MockPlatform : public TestingPlatformSupport {
+class MockIdleDeadlinePlatform : public TestingPlatformSupport {
  public:
-  MockPlatform() {}
-  ~MockPlatform() override {}
-  WebThread* currentThread() override { return &m_thread; }
+  MockIdleDeadlinePlatform() {}
+  ~MockIdleDeadlinePlatform() override {}
+  WebThread* CurrentThread() override { return &thread_; }
 
  private:
-  MockThread m_thread;
-  DISALLOW_COPY_AND_ASSIGN(MockPlatform);
+  MockIdleDeadlineThread thread_;
+  DISALLOW_COPY_AND_ASSIGN(MockIdleDeadlinePlatform);
 };
 
 }  // namespace
 
-class IdleDeadlineTest : public testing::Test {
+class IdleDeadlineTest : public ::testing::Test {
  public:
   void SetUp() override {
-    m_originalTimeFunction = setTimeFunctionsForTesting([] { return 1.0; });
+    original_time_function_ = SetTimeFunctionsForTesting([] { return 1.0; });
   }
 
   void TearDown() override {
-    setTimeFunctionsForTesting(m_originalTimeFunction);
+    SetTimeFunctionsForTesting(original_time_function_);
   }
 
  private:
-  TimeFunction m_originalTimeFunction;
+  TimeFunction original_time_function_;
 };
 
 TEST_F(IdleDeadlineTest, deadlineInFuture) {
   IdleDeadline* deadline =
-      IdleDeadline::create(1.25, IdleDeadline::CallbackType::CalledWhenIdle);
+      IdleDeadline::Create(1.25, IdleDeadline::CallbackType::kCalledWhenIdle);
   // Note: the deadline is computed with reduced resolution.
   EXPECT_FLOAT_EQ(249.995, deadline->timeRemaining());
 }
 
 TEST_F(IdleDeadlineTest, deadlineInPast) {
   IdleDeadline* deadline =
-      IdleDeadline::create(0.75, IdleDeadline::CallbackType::CalledWhenIdle);
+      IdleDeadline::Create(0.75, IdleDeadline::CallbackType::kCalledWhenIdle);
   EXPECT_FLOAT_EQ(0, deadline->timeRemaining());
 }
 
 TEST_F(IdleDeadlineTest, yieldForHighPriorityWork) {
-  ScopedTestingPlatformSupport<MockPlatform> platform;
+  ScopedTestingPlatformSupport<MockIdleDeadlinePlatform> platform;
 
   IdleDeadline* deadline =
-      IdleDeadline::create(1.25, IdleDeadline::CallbackType::CalledWhenIdle);
+      IdleDeadline::Create(1.25, IdleDeadline::CallbackType::kCalledWhenIdle);
   EXPECT_FLOAT_EQ(0, deadline->timeRemaining());
 }
 

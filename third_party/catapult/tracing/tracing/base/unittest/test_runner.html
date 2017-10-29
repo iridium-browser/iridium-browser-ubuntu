@@ -11,11 +11,11 @@ found in the LICENSE file.
 'use strict';
 
 tr.exportTo('tr.b.unittest', function() {
-  var realTvOnAnimationFrameError;
-  var realGlobalOnError;
-  var realGlobalHistoryPushState;
+  let realTvOnAnimationFrameError;
+  let realGlobalOnError;
+  let realGlobalHistoryPushState;
 
-  var NUM_TESTS_PER_RIC = 16;
+  const NUM_TESTS_PER_RIC = 16;
 
   function installGlobalTestHooks(runner) {
     realTvOnAnimationFrameError = tr.b.onAnimationFrameError;
@@ -28,8 +28,9 @@ tr.exportTo('tr.b.unittest', function() {
       global.onerror = function(errorMsg, url, lineNumber) {
         runner.results.addErrorForCurrentTest(
             errorMsg + ' at ' + url + ':' + lineNumber);
-        if (realGlobalOnError)
+        if (realGlobalOnError) {
           return realGlobalOnError(errorMsg, url, lineNumber);
+        }
         return false;
       };
     }
@@ -48,7 +49,7 @@ tr.exportTo('tr.b.unittest', function() {
       global.sessionStorage.clear();
     }
 
-    var e = new tr.b.Event('tr-unittest-will-run');
+    const e = new tr.b.Event('tr-unittest-will-run');
     TestRunner.dispatchEvent(e);
   }
 
@@ -87,14 +88,15 @@ tr.exportTo('tr.b.unittest', function() {
   TestRunner.prototype = {
     __proto__: Object.prototype,
 
-    beginRunning: function() {
-      if (this.pendingTestCases_.length)
+    beginRunning() {
+      if (this.pendingTestCases_.length) {
         throw new Error('Tests still running!');
+      }
 
       this.runCompletedPromise = new Promise(function(resolve, reject) {
         this.runCompletedResolver_ = {
-          resolve: resolve,
-          reject: reject
+          resolve,
+          reject
         };
       }.bind(this));
 
@@ -107,9 +109,10 @@ tr.exportTo('tr.b.unittest', function() {
       return this.runCompletedPromise;
     },
 
-    beginToStopRunning: function() {
-      if (!this.runCompletedResolver_)
+    beginToStopRunning() {
+      if (!this.runCompletedResolver_) {
         throw new Error('Still running');
+      }
       this.pendingTestCases_ = [];
       return this.runCompletedPromise;
     },
@@ -122,21 +125,20 @@ tr.exportTo('tr.b.unittest', function() {
       return this.results_;
     },
 
-    scheduleRunOneTestCase_: function() {
-      if (this.runOneTestCaseScheduled_)
-        return;
+    scheduleRunOneTestCase_() {
+      if (this.runOneTestCaseScheduled_) return;
       this.runOneTestCaseScheduled_ = true;
 
       this.numRunsSinceLastRIC_++;
       if (this.numRunsSinceLastRIC_ === NUM_TESTS_PER_RIC) {
         this.numRunsSinceLastRIC_ = 0;
-        tr.b.requestIdleCallback(this.runOneTestCase_, this);
+        tr.b.idle().then(() => this.runOneTestCase_());
       } else {
-        Promise.resolve().then(this.runOneTestCase_.bind(this));
+        Promise.resolve().then(() => this.runOneTestCase_());
       }
     },
 
-    runOneTestCase_: function() {
+    runOneTestCase_() {
       this.runOneTestCaseScheduled_ = false;
 
       if (this.pendingTestCases_.length === 0) {
@@ -146,8 +148,17 @@ tr.exportTo('tr.b.unittest', function() {
 
       this.currentTestCase_ = this.pendingTestCases_.splice(0, 1)[0];
       this.currentMark_ = tr.b.Timing.mark(
-          'TestRunner', 'RunTest', {testName: this.currentTestCase_.name});
+          'TestRunner', this.currentTestCase_.name);
       this.results_.willRunTest(this.currentTestCase_);
+
+      if (this.isCurrentTestSkipped_()) {
+        this.results_.setCurrentTestSkipped();
+        this.results_.didCurrentTestEnd();
+        this.currentMark_.end();
+        this.currentTestCase_ = undefined;
+        this.scheduleRunOneTestCase_();
+        return;
+      }
 
       if (this.isCurrentTestFlaky_()) {
         this.results_.setCurrentTestFlaky();
@@ -170,8 +181,9 @@ tr.exportTo('tr.b.unittest', function() {
           function pass(result) {
             try {
               this.tearDownCurrentTestCase_(true);
-              if (result)
+              if (result) {
                 this.results_.setReturnValueFromCurrentTest(result);
+              }
               this.results_.didCurrentTestEnd();
               this.currentMark_.end();
               this.currentTestCase_ = undefined;
@@ -196,11 +208,15 @@ tr.exportTo('tr.b.unittest', function() {
           }.bind(this));
     },
 
-    isCurrentTestFlaky_: function() {
-      return !!this.currentTestCase_.options['flaky'];
+    isCurrentTestFlaky_() {
+      return !!this.currentTestCase_.options.flaky;
     },
 
-    setUpCurrentTestCase_: function() {
+    isCurrentTestSkipped_() {
+      return !!this.currentTestCase_.options.skipped;
+    },
+
+    setUpCurrentTestCase_() {
       // Try setting it up. Return true if succeeded.
       installGlobalTestHooks(this);
       try {
@@ -212,10 +228,11 @@ tr.exportTo('tr.b.unittest', function() {
       return true;
     },
 
-    runCurrentTestCase_: function() {
+    runCurrentTestCase_() {
       return new Promise(function(resolve, reject) {
+        let maybePromise;
         try {
-          var maybePromise = this.currentTestCase_.run();
+          maybePromise = this.currentTestCase_.run();
         } catch (error) {
           reject(error);
           return;
@@ -235,19 +252,14 @@ tr.exportTo('tr.b.unittest', function() {
       }.bind(this));
     },
 
-    hadInternalError_: function(outerE) {
-      try {
-        this.results.didRunTests();
-      } catch (e) {
-        console.log('Had another error during hadInternalError_!');
-        console.log(e.stack);
-      }
+    hadInternalError_(outerE) {
+      this.results.didRunTests();
 
       this.runCompletedResolver_.reject(outerE);
       this.runCompletedResolver_ = undefined;
     },
 
-    tearDownCurrentTestCase_: function() {
+    tearDownCurrentTestCase_() {
       try {
         this.currentTestCase_.tearDown();
       } catch (error) {
@@ -257,7 +269,7 @@ tr.exportTo('tr.b.unittest', function() {
       uninstallGlobalTestHooks();
     },
 
-    didFinishRunningAllTests_: function() {
+    didFinishRunningAllTests_() {
       this.results.didRunTests();
       this.runCompletedResolver_.resolve();
       this.runCompletedResolver_ = undefined;

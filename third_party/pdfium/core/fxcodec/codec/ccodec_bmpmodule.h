@@ -7,33 +7,43 @@
 #ifndef CORE_FXCODEC_CODEC_CCODEC_BMPMODULE_H_
 #define CORE_FXCODEC_CODEC_CCODEC_BMPMODULE_H_
 
-#include "core/fxcodec/codec/icodec_bmpmodule.h"
+#include <memory>
+#include <vector>
+
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxcrt/fx_system.h"
 
-class CCodec_BmpModule : public ICodec_BmpModule {
- public:
-  CCodec_BmpModule();
-  ~CCodec_BmpModule() override;
+class CFX_DIBAttribute;
 
-  FXBMP_Context* Start() override;
-  void Finish(FXBMP_Context* pContext) override;
-  uint32_t GetAvailInput(FXBMP_Context* pContext,
-                         uint8_t** avail_buf_ptr) override;
-  void Input(FXBMP_Context* pContext,
-             const uint8_t* src_buf,
-             uint32_t src_size) override;
-  int32_t ReadHeader(FXBMP_Context* pContext,
+class CCodec_BmpModule {
+ public:
+  class Context {
+   public:
+    virtual ~Context() {}
+  };
+
+  class Delegate {
+   public:
+    virtual bool BmpInputImagePositionBuf(uint32_t rcd_pos) = 0;
+    virtual void BmpReadScanline(uint32_t row_num,
+                                 const std::vector<uint8_t>& row_buf) = 0;
+  };
+
+  CCodec_BmpModule();
+  ~CCodec_BmpModule();
+
+  std::unique_ptr<Context> Start(Delegate* pDelegate);
+  uint32_t GetAvailInput(Context* pContext, uint8_t** avail_buf_ptr);
+  void Input(Context* pContext, const uint8_t* src_buf, uint32_t src_size);
+  int32_t ReadHeader(Context* pContext,
                      int32_t* width,
                      int32_t* height,
                      bool* tb_flag,
                      int32_t* components,
                      int32_t* pal_num,
-                     uint32_t** pal_pp,
-                     CFX_DIBAttribute* pAttribute) override;
-  int32_t LoadImage(FXBMP_Context* pContext) override;
-
- protected:
-  FX_CHAR m_szLastError[256];
+                     std::vector<uint32_t>* palette,
+                     CFX_DIBAttribute* pAttribute);
+  int32_t LoadImage(Context* pContext);
 };
 
 #endif  // CORE_FXCODEC_CODEC_CCODEC_BMPMODULE_H_

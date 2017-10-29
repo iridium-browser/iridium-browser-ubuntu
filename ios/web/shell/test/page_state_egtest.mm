@@ -8,12 +8,12 @@
 #import <XCTest/XCTest.h>
 
 #include "base/ios/ios_util.h"
-#include "ios/testing/earl_grey/disabled_test_macros.h"
-#import "ios/web/public/test/http_server.h"
-#include "ios/web/public/test/http_server_util.h"
-#import "ios/web/shell/test/earl_grey/shell_base_test_case.h"
+#include "base/strings/string_number_conversions.h"
+#import "ios/web/public/test/http_server/http_server.h"
+#include "ios/web/public/test/http_server/http_server_util.h"
 #import "ios/web/shell/test/earl_grey/shell_earl_grey.h"
 #import "ios/web/shell/test/earl_grey/shell_matchers.h"
+#import "ios/web/shell/test/earl_grey/web_shell_test_case.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -54,12 +54,23 @@ void WaitForOffset(CGFloat y_offset) {
   GREYAssert([condition waitWithTimeout:10], error_text);
 }
 
+// Loads the long page at |url|, scrolls to the top, and waits for the offset to
+// be {0, 0} before returning.
+void ScrollLongPageToTop(const GURL& url) {
+  // Load the page and swipe down.
+  [ShellEarlGrey loadURL:url];
+  [[EarlGrey selectElementWithMatcher:web::WebViewScrollView()]
+      performAction:grey_scrollToContentEdge(kGREYContentEdgeTop)];
+  // Waits for the {0, 0} offset.
+  WaitForOffset(0.0);
+}
+
 }  // namespace
 
 using web::test::HttpServer;
 
 // Page state test cases for the web shell.
-@interface PageStateTestCase : ShellBaseTestCase
+@interface PageStateTestCase : WebShellTestCase
 @end
 
 @implementation PageStateTestCase
@@ -69,19 +80,15 @@ using web::test::HttpServer;
 - (void)testScrollPositionRestoring {
   web::test::SetUpFileBasedHttpServer();
 
-  // Load first URL which is a long page.
-  [ShellEarlGrey loadURL:HttpServer::MakeUrl(kLongPage1)];
-
   // Scroll the first page and verify the offset.
+  ScrollLongPageToTop(HttpServer::MakeUrl(kLongPage1));
   [[EarlGrey selectElementWithMatcher:web::WebViewScrollView()]
       performAction:grey_scrollInDirection(kGREYDirectionDown, kOffset1)];
   [[EarlGrey selectElementWithMatcher:web::WebViewScrollView()]
       assertWithMatcher:grey_scrollViewContentOffset(CGPointMake(0, kOffset1))];
 
-  // Load second URL, which is also a long page.
-  [ShellEarlGrey loadURL:HttpServer::MakeUrl(kLongPage2)];
-
   // Scroll the second page and verify the offset.
+  ScrollLongPageToTop(HttpServer::MakeUrl(kLongPage2));
   [[EarlGrey selectElementWithMatcher:web::WebViewScrollView()]
       performAction:grey_scrollInDirection(kGREYDirectionDown, kOffset2)];
   [[EarlGrey selectElementWithMatcher:web::WebViewScrollView()]
@@ -96,6 +103,31 @@ using web::test::HttpServer;
   [[EarlGrey selectElementWithMatcher:web::ForwardButton()]
       performAction:grey_tap()];
   WaitForOffset(kOffset2);
+}
+
+// Tests that the content offset of the webview scroll view is {0, 0} after a
+// load.
+- (void)testZeroContentOffsetAfterLoad {
+  // Set up the file-based server to load the tall page.
+  const GURL baseURL = web::test::HttpServer::MakeUrl(kLongPage1);
+  web::test::SetUpFileBasedHttpServer();
+  [ShellEarlGrey loadURL:baseURL];
+
+  // Scroll the page and load again to verify that the new page's scroll offset
+  // is reset to {0, 0}.
+  const CGFloat kOffsetIncrement = 20.0;
+  for (NSInteger i = 0; i < 10; ++i) {
+    // Scroll down the page a bit before re-loading the URL.
+    CGFloat offset = (i + 1) * kOffsetIncrement;
+    [[EarlGrey selectElementWithMatcher:web::WebViewScrollView()]
+        performAction:grey_scrollInDirection(kGREYDirectionDown, offset)];
+    // Add a query parameter so the next load creates another NavigationItem.
+    GURL::Replacements replacements;
+    replacements.SetQueryStr(base::IntToString(i));
+    [ShellEarlGrey loadURL:baseURL.ReplaceComponents(replacements)];
+    // Wait for the content offset to be set to {0, 0}.
+    WaitForOffset(0.0);
+  }
 }
 
 @end

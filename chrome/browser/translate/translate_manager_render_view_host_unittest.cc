@@ -4,7 +4,6 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <memory>
 #include <set>
 #include <tuple>
@@ -14,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -42,11 +42,11 @@
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/browser/translate_language_list.h"
 #include "components/translate/core/browser/translate_manager.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/translate/core/browser/translate_script.h"
 #include "components/translate/core/browser/translate_ui_delegate.h"
 #include "components/translate/core/common/language_detection_details.h"
-#include "components/translate/core/common/translate_pref_names.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
@@ -60,6 +60,7 @@
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_status.h"
+#include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
 #include "url/gurl.h"
@@ -129,26 +130,27 @@ class FakePageImpl : public translate::mojom::Page {
   translate::mojom::PagePtr BindToNewPagePtr() {
     binding_.Close();
     translate_callback_pending_.Reset();
-    return binding_.CreateInterfacePtrAndBind();
+    translate::mojom::PagePtr page;
+    binding_.Bind(mojo::MakeRequest(&page));
+    return page;
   }
 
   // translate::mojom::Page implementation.
   void Translate(const std::string& translate_script,
                  const std::string& source_lang,
                  const std::string& target_lang,
-                 const TranslateCallback& callback) override {
+                 TranslateCallback callback) override {
     // Ensure pending callback gets called.
     if (translate_callback_pending_) {
-      translate_callback_pending_.Run(true, "", "",
-                                      translate::TranslateErrors::NONE);
-      translate_callback_pending_.Reset();
+      std::move(translate_callback_pending_)
+          .Run(true, "", "", translate::TranslateErrors::NONE);
     }
 
     called_translate_ = true;
     source_lang_ = source_lang;
     target_lang_ = target_lang;
 
-    translate_callback_pending_ = callback;
+    translate_callback_pending_ = std::move(callback);
   }
 
   void RevertTranslation() override { called_revert_translation_ = true; }
@@ -157,8 +159,8 @@ class FakePageImpl : public translate::mojom::Page {
                       const std::string& source_lang,
                       const std::string& target_lang,
                       translate::TranslateErrors::Type error) {
-    translate_callback_pending_.Run(cancelled, source_lang, target_lang, error);
-    translate_callback_pending_.Reset();
+    std::move(translate_callback_pending_)
+        .Run(cancelled, source_lang, target_lang, error);
   }
 
   bool called_translate_;
@@ -422,7 +424,7 @@ class TranslateManagerRenderViewHostTest
 
   TestRenderViewContextMenu* CreateContextMenu() {
     content::ContextMenuParams params;
-    params.media_type = blink::WebContextMenuData::MediaTypeNone;
+    params.media_type = blink::WebContextMenuData::kMediaTypeNone;
     params.x = 0;
     params.y = 0;
     params.has_image_contents = true;
@@ -436,7 +438,7 @@ class TranslateManagerRenderViewHostTest
     params.writing_direction_left_to_right = 0;
     params.writing_direction_right_to_left = 0;
 #endif  // OS_MACOSX
-    params.edit_flags = blink::WebContextMenuData::CanTranslate;
+    params.edit_flags = blink::WebContextMenuData::kCanTranslate;
     return new TestRenderViewContextMenu(web_contents()->GetMainFrame(),
                                          params);
   }
@@ -454,17 +456,22 @@ class TranslateManagerRenderViewHostTest
 
  protected:
   virtual void SetUp() {
-    TranslateService::InitializeForTesting();
+    // Setup the test environment, including the threads and message loops. This
+    // must be done before base::ThreadTaskRunnerHandle::Get() is called when
+    // setting up the net::TestURLRequestContextGetter below.
+    ChromeRenderViewHostTestHarness::SetUp();
 
-    // Clears the translate script so it is fetched everytime and sets the
+    // Clears the translate script so it is fetched every time and sets the
     // expiration delay to a large value by default (in case it was zeroed in a
     // previous test).
+    TranslateService::InitializeForTesting();
     translate::TranslateDownloadManager* download_manager =
         translate::TranslateDownloadManager::GetInstance();
     download_manager->ClearTranslateScriptForTesting();
     download_manager->SetTranslateScriptExpirationDelay(60 * 60 * 1000);
+    download_manager->set_request_context(new net::TestURLRequestContextGetter(
+        base::ThreadTaskRunnerHandle::Get()));
 
-    ChromeRenderViewHostTestHarness::SetUp();
     InfoBarService::CreateForWebContents(web_contents());
     ChromeTranslateClient::CreateForWebContents(web_contents());
     ChromeTranslateClient::FromWebContents(web_contents())
@@ -506,9 +513,7 @@ class TranslateManagerRenderViewHostTest
 
   void SimulateSupportedLanguagesURLFetch(
       bool success,
-      const std::vector<std::string>& languages,
-      bool use_alpha_languages,
-      const std::vector<std::string>& alpha_languages) {
+      const std::vector<std::string>& languages) {
     net::Error error = success ? net::OK : net::ERR_FAILED;
 
     std::string data;
@@ -523,20 +528,6 @@ class TranslateManagerRenderViewHostTest
         if (i == 0)
           comma = ",";
       }
-
-      if (use_alpha_languages) {
-        data += base::StringPrintf(
-            "},\"%s\": {",
-            translate::TranslateLanguageList::kAlphaLanguagesKey);
-        comma = "";
-        for (size_t i = 0; i < alpha_languages.size(); ++i) {
-          data += base::StringPrintf(
-              "%s\"%s\": 1", comma, alpha_languages[i].c_str());
-          if (i == 0)
-            comma = ",";
-        }
-      }
-
       data += "}}";
     }
     net::TestURLFetcher* fetcher = url_fetcher_factory_.GetFetcherByID(
@@ -577,17 +568,12 @@ class TranslateManagerRenderViewHostTest
 // Accept-Language list.
 static const char* server_language_list[] =
     {"ach", "ak", "af", "en-CA", "zh", "yi", "fr-FR", "tl", "iw", "in", "xx"};
-static const char* alpha_language_list[] = {"ach", "yi"};
 
 // Test the fetching of languages from the translate server
 TEST_F(TranslateManagerRenderViewHostTest, FetchLanguagesFromTranslateServer) {
   std::vector<std::string> server_languages;
   for (size_t i = 0; i < arraysize(server_language_list); ++i)
     server_languages.push_back(server_language_list[i]);
-
-  std::vector<std::string> alpha_languages;
-  for (size_t i = 0; i < arraysize(alpha_language_list); ++i)
-    alpha_languages.push_back(alpha_language_list[i]);
 
   // First, get the default languages list. Note that calling
   // GetSupportedLanguages() invokes RequestLanguageList() internally.
@@ -604,16 +590,14 @@ TEST_F(TranslateManagerRenderViewHostTest, FetchLanguagesFromTranslateServer) {
   EXPECT_EQ(default_supported_languages, current_supported_languages);
 
   // Also check that it didn't change if we failed the URL fetch.
-  SimulateSupportedLanguagesURLFetch(
-      false, std::vector<std::string>(), true, std::vector<std::string>());
+  SimulateSupportedLanguagesURLFetch(false, std::vector<std::string>());
   current_supported_languages.clear();
   translate::TranslateDownloadManager::GetSupportedLanguages(
       &current_supported_languages);
   EXPECT_EQ(default_supported_languages, current_supported_languages);
 
   // Now check that we got the appropriate set of languages from the server.
-  SimulateSupportedLanguagesURLFetch(
-      true, server_languages, true, alpha_languages);
+  SimulateSupportedLanguagesURLFetch(true, server_languages);
   current_supported_languages.clear();
   translate::TranslateDownloadManager::GetSupportedLanguages(
       &current_supported_languages);
@@ -624,55 +608,7 @@ TEST_F(TranslateManagerRenderViewHostTest, FetchLanguagesFromTranslateServer) {
     const std::string& lang = server_languages[i];
     if (lang == "xx")
       continue;
-    EXPECT_NE(current_supported_languages.end(),
-              std::find(current_supported_languages.begin(),
-                        current_supported_languages.end(),
-                        lang)) << "lang=" << lang;
-    bool is_alpha =
-        std::find(alpha_languages.begin(), alpha_languages.end(), lang) !=
-        alpha_languages.end();
-    EXPECT_EQ(translate::TranslateDownloadManager::IsAlphaLanguage(lang),
-              is_alpha)
-        << "lang=" << lang;
-  }
-}
-
-// Test the fetching of languages from the translate server without 'al'
-// parameter.
-TEST_F(TranslateManagerRenderViewHostTest,
-       FetchLanguagesFromTranslateServerWithoutAlpha) {
-  std::vector<std::string> server_languages;
-  for (size_t i = 0; i < arraysize(server_language_list); ++i)
-    server_languages.push_back(server_language_list[i]);
-
-  std::vector<std::string> alpha_languages;
-  for (size_t i = 0; i < arraysize(alpha_language_list); ++i)
-    alpha_languages.push_back(alpha_language_list[i]);
-
-  // call GetSupportedLanguages to call RequestLanguageList internally.
-  std::vector<std::string> default_supported_languages;
-  translate::TranslateDownloadManager::GetSupportedLanguages(
-      &default_supported_languages);
-
-  SimulateSupportedLanguagesURLFetch(
-      true, server_languages, false, alpha_languages);
-
-  std::vector<std::string> current_supported_languages;
-  translate::TranslateDownloadManager::GetSupportedLanguages(
-      &current_supported_languages);
-
-  // "xx" can't be displayed in the Translate infobar, so this is eliminated.
-  EXPECT_EQ(server_languages.size() - 1, current_supported_languages.size());
-
-  for (size_t i = 0; i < server_languages.size(); ++i) {
-    const std::string& lang = server_languages[i];
-    if (lang == "xx")
-      continue;
-    EXPECT_NE(current_supported_languages.end(),
-              std::find(current_supported_languages.begin(),
-                        current_supported_languages.end(),
-                        lang)) << "lang=" << lang;
-    EXPECT_FALSE(translate::TranslateDownloadManager::IsAlphaLanguage(lang))
+    EXPECT_TRUE(base::ContainsValue(current_supported_languages, lang))
         << "lang=" << lang;
   }
 }

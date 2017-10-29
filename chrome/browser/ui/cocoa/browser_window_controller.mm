@@ -13,6 +13,8 @@
 #import "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #import "base/mac/sdk_forward_declarations.h"
+#include "base/memory/ptr_util.h"
+#include "base/scoped_observer.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
@@ -35,7 +37,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window_state.h"
@@ -44,6 +45,7 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bubble_observer_cocoa.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_editor_controller.h"
 #import "chrome/browser/ui/cocoa/browser/exclusive_access_controller_views.h"
+#include "chrome/browser/ui/cocoa/browser_dialogs_views_mac.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_command_handler.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
@@ -64,6 +66,9 @@
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #include "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
+#import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
+#import "chrome/browser/ui/cocoa/location_bar/star_decoration.h"
+#include "chrome/browser/ui/cocoa/permission_bubble/permission_bubble_cocoa.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_base_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_button_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_icon_controller.h"
@@ -73,9 +78,10 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
+#import "chrome/browser/ui/cocoa/toolbar/app_toolbar_button.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#include "chrome/browser/ui/cocoa/translate/translate_bubble_bridge_views.h"
 #import "chrome/browser/ui/cocoa/translate/translate_bubble_controller.h"
-#include "chrome/browser/ui/cocoa/website_settings/permission_bubble_cocoa.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -87,6 +93,9 @@
 #include "chrome/common/pref_names.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
+#include "components/omnibox/browser/omnibox_edit_model.h"
+#include "components/omnibox/browser/omnibox_popup_model.h"
+#include "components/omnibox/browser/omnibox_popup_model_observer.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/browser/translate_ui_delegate.h"
@@ -185,6 +194,43 @@ using content::WebContents;
 
 namespace {
 
+// This class shows or hides the top arrow of the infobar in accordance with the
+// visibility of the omnibox popup. It hides the top arrow when the omnibox
+// popup is shown, and vice versa.
+class OmniboxPopupModelObserverBridge final : public OmniboxPopupModelObserver {
+ public:
+  explicit OmniboxPopupModelObserverBridge(BrowserWindowController* controller)
+      : controller_(controller),
+        omnibox_popup_model_([controller_ locationBarBridge]
+                                 ->GetOmniboxView()
+                                 ->model()
+                                 ->popup_model()),
+        omnibox_popup_model_observer_(this) {
+    DCHECK(omnibox_popup_model_);
+    omnibox_popup_model_observer_.Add(omnibox_popup_model_);
+  }
+
+  void OnOmniboxPopupShownOrHidden() override {
+    int max_top_arrow_height = 0;
+    if (!omnibox_popup_model_->IsOpen()) {
+      base::scoped_nsobject<BrowserWindowLayout> layout(
+          [[BrowserWindowLayout alloc] init]);
+      [controller_ updateLayoutParameters:layout];
+      max_top_arrow_height = [layout computeLayout].infoBarMaxTopArrowHeight;
+    }
+    [[controller_ infoBarContainerController]
+        setMaxTopArrowHeight:max_top_arrow_height];
+  }
+
+ private:
+  BrowserWindowController* controller_;
+  OmniboxPopupModel* omnibox_popup_model_;
+  ScopedObserver<OmniboxPopupModel, OmniboxPopupModelObserver>
+      omnibox_popup_model_observer_;
+
+  DISALLOW_COPY_AND_ASSIGN(OmniboxPopupModelObserverBridge);
+};
+
 void SetUpBrowserWindowCommandHandler(NSWindow* window) {
   // Make the window handle browser window commands.
   [base::mac::ObjCCastStrict<ChromeEventProcessingWindow>(window)
@@ -244,11 +290,11 @@ bool IsTabDetachingInFullscreenEnabled() {
     [[window contentView] setWantsLayer:YES];
     windowShim_.reset(new BrowserWindowCocoa(browser, self));
 
-    // Set different minimum sizes on tabbed windows vs non-tabbed, e.g. popups.
     // This has to happen before -enforceMinWindowSize: is called further down.
-    NSSize minSize = [self isTabbedWindow] ?
-      NSMakeSize(400, 272) : NSMakeSize(100, 122);
-    [[self window] setMinSize:minSize];
+    [[self window]
+        setMinSize:(browser->is_type_tabbed() ? kMinCocoaTabbedWindowSize
+                                              : kMinCocoaPopupWindowSize)
+                       .ToCGSize()];
 
     // Lion will attempt to automagically save and restore the UI. This
     // functionality appears to be leaky (or at least interacts badly with our
@@ -331,8 +377,10 @@ bool IsTabDetachingInFullscreenEnabled() {
         initWithBrowser:browser_.get()
            initialWidth:NSWidth([[[self window] contentView] frame])
                delegate:self]);
-    // This call triggers an -awakeFromNib for ToolbarView.xib.
-    [[bookmarkBarController_ controlledView] setResizeDelegate:self];
+    // This call loads the view.
+    BookmarkBarToolbarView* bookmarkBarView =
+        [bookmarkBarController_ controlledView];
+    [bookmarkBarView setResizeDelegate:self];
 
     [bookmarkBarController_ setBookmarkBarEnabled:[self supportsBookmarkBar]];
 
@@ -387,6 +435,9 @@ bool IsTabDetachingInFullscreenEnabled() {
             extensions::ExtensionKeybindingRegistry::ALL_EXTENSIONS,
             windowShim_.get()));
 
+    omniboxPopupModelObserverBridge_ =
+        base::MakeUnique<OmniboxPopupModelObserverBridge>(self);
+
     blockLayoutSubviews_ = NO;
 
     // We are done initializing now.
@@ -415,6 +466,10 @@ bool IsTabDetachingInFullscreenEnabled() {
     ignore_result(browser_.release());
 
   [[NSNotificationCenter defaultCenter] removeObserver:self];
+
+  // Explicitly release |omniboxPopupModelObserverBridge_| before sending
+  // |browserWillBeDestroyed| to prevent it from UAFing OmniboxPopupModel.
+  omniboxPopupModelObserverBridge_.reset();
 
   // Inform reference counted objects that the Browser will be destroyed. This
   // ensures they invalidate their weak Browser* to prevent use-after-free.
@@ -1006,8 +1061,10 @@ bool IsTabDetachingInFullscreenEnabled() {
 - (void)setStarredState:(BOOL)isStarred {
   [toolbarController_ setStarredState:isStarred];
 
-  [touchBar_ setIsStarred:isStarred];
-  [self invalidateTouchBar];
+  if ([touchBar_ isStarred] != isStarred) {
+    [touchBar_ setIsStarred:isStarred];
+    [self invalidateTouchBar];
+  }
 }
 
 - (void)setCurrentPageIsTranslated:(BOOL)on {
@@ -1030,8 +1087,10 @@ bool IsTabDetachingInFullscreenEnabled() {
       manager->DisplayPendingRequests();
   }
 
-  if ([self isInAnyFullscreenMode])
-    [[self fullscreenToolbarController] revealToolbarForTabStripChanges];
+  if ([self isInAnyFullscreenMode]) {
+    [[self fullscreenToolbarController] revealToolbarForWebContents:newContents
+                                                       inForeground:YES];
+  }
 }
 
 - (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
@@ -1146,7 +1205,6 @@ bool IsTabDetachingInFullscreenEnabled() {
 - (void)setIsLoading:(BOOL)isLoading force:(BOOL)force {
   [toolbarController_ setIsLoading:isLoading force:force];
   [touchBar_ setIsPageLoading:isLoading];
-  [self invalidateTouchBar];
 }
 
 // Make the location bar the first responder, if possible.
@@ -1359,6 +1417,7 @@ bool IsTabDetachingInFullscreenEnabled() {
     downloadShelfController_.reset([[DownloadShelfController alloc]
         initWithBrowser:browser_.get() resizeDelegate:self]);
     [self.chromeContentView addSubview:[downloadShelfController_ view]];
+    [self layoutSubviews];
   }
 }
 
@@ -1469,9 +1528,18 @@ bool IsTabDetachingInFullscreenEnabled() {
   [infoBarContainerController_ tabDetachedWithContents:contents];
 }
 
-- (void)onTabInsertedInForeground:(BOOL)inForeground {
+- (void)onTabInsertedWithContents:(content::WebContents*)contents
+                     inForeground:(BOOL)inForeground {
   if ([self isInAnyFullscreenMode] && !inForeground)
-    [[self fullscreenToolbarController] revealToolbarForTabStripChanges];
+    [[self fullscreenToolbarController]
+        revealToolbarForWebContents:contents
+                       inForeground:inForeground];
+
+  if (inForeground) {
+    AppToolbarButton* appMenuButton =
+        static_cast<AppToolbarButton*>([toolbarController_ appMenuButton]);
+    [appMenuButton animateIfPossible];
+  }
 }
 
 - (void)userChangedTheme {
@@ -1530,7 +1598,8 @@ bool IsTabDetachingInFullscreenEnabled() {
         gfx::ScreenPointFromNSPoint(ui::ConvertPointFromWindowToScreen(
             [self window], [self bookmarkBubblePoint])),
         [[self window] contentView], bookmarkBubbleObserver_.get(),
-        browser_.get(), url, alreadyMarked);
+        browser_.get(), url, alreadyMarked,
+        [self locationBarBridge]->star_decoration());
   } else {
     BookmarkModel* model =
         BookmarkModelFactory::GetForBrowserContext(browser_->profile());
@@ -1572,6 +1641,11 @@ bool IsTabDetachingInFullscreenEnabled() {
                                      step:(translate::TranslateStep)step
                                 errorType:(translate::TranslateErrors::Type)
                                 errorType {
+  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+    ShowTranslateBubbleViews([self window], [self locationBarBridge], contents,
+                             step, errorType, true);
+    return;
+  }
   // TODO(hajimehoshi): The similar logic exists at TranslateBubbleView::
   // ShowBubble. This should be unified.
   if (translateBubbleController_) {
@@ -1864,6 +1938,10 @@ willAnimateFromState:(BookmarkBar::State)oldState
 - (void)invalidateTouchBar {
   if ([[self window] respondsToSelector:@selector(setTouchBar:)])
     [[self window] performSelector:@selector(setTouchBar:) withObject:nil];
+}
+
+- (BOOL)isToolbarShowing {
+  return [fullscreenToolbarController_ mustShowFullscreenToolbar];
 }
 
 @end  // @implementation BrowserWindowController

@@ -7,6 +7,7 @@
 
 #include "WebCommon.h"
 #include "WebContentDecryptionModuleException.h"
+#include "WebEncryptedMediaKeyInformation.h"
 #include "WebPrivatePtr.h"
 
 namespace blink {
@@ -19,43 +20,47 @@ class WebContentDecryptionModuleResult {
  public:
   enum SessionStatus {
     // New session has been initialized.
-    NewSession,
+    kNewSession,
 
     // CDM could not find the requested session.
-    SessionNotFound,
+    kSessionNotFound,
 
     // CDM already has a non-closed session that matches the provided
     // parameters.
-    SessionAlreadyExists,
+    kSessionAlreadyExists,
   };
 
   WebContentDecryptionModuleResult(const WebContentDecryptionModuleResult& o) {
-    assign(o);
+    Assign(o);
   }
 
-  ~WebContentDecryptionModuleResult() { reset(); }
+  ~WebContentDecryptionModuleResult() { Reset(); }
 
   WebContentDecryptionModuleResult& operator=(
       const WebContentDecryptionModuleResult& o) {
-    assign(o);
+    Assign(o);
     return *this;
   }
 
   // Called when the CDM completes an operation and has no additional data to
   // pass back.
-  BLINK_PLATFORM_EXPORT void complete();
+  BLINK_PLATFORM_EXPORT void Complete();
 
   // Called when a CDM is created.
-  BLINK_PLATFORM_EXPORT void completeWithContentDecryptionModule(
+  BLINK_PLATFORM_EXPORT void CompleteWithContentDecryptionModule(
       WebContentDecryptionModule*);
 
   // Called when the CDM completes a session operation.
-  BLINK_PLATFORM_EXPORT void completeWithSession(SessionStatus);
+  BLINK_PLATFORM_EXPORT void CompleteWithSession(SessionStatus);
+
+  // Called when the CDM completes getting key status for policy.
+  BLINK_PLATFORM_EXPORT void CompleteWithKeyStatus(
+      WebEncryptedMediaKeyInformation::KeyStatus);
 
   // Called when the operation fails.
-  BLINK_PLATFORM_EXPORT void completeWithError(
+  BLINK_PLATFORM_EXPORT void CompleteWithError(
       WebContentDecryptionModuleException,
-      unsigned long systemCode,
+      unsigned long system_code,
       const WebString& message);
 
 #if INSIDE_BLINK
@@ -64,12 +69,12 @@ class WebContentDecryptionModuleResult {
 #endif
 
  private:
-  BLINK_PLATFORM_EXPORT void reset();
-  BLINK_PLATFORM_EXPORT void assign(const WebContentDecryptionModuleResult&);
+  BLINK_PLATFORM_EXPORT void Reset();
+  BLINK_PLATFORM_EXPORT void Assign(const WebContentDecryptionModuleResult&);
 
   WebPrivatePtr<ContentDecryptionModuleResult,
-                WebPrivatePtrDestructionCrossThread>
-      m_impl;
+                kWebPrivatePtrDestructionCrossThread>
+      impl_;
 };
 
 }  // namespace blink

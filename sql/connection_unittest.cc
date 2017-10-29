@@ -854,6 +854,42 @@ TEST_F(SQLConnectionTest, RazeAndCloseDiagnostics) {
 // closely match real life.  That would also allow testing
 // RazeWithTimeout().
 
+// On Windows, truncate silently fails against a memory-mapped file.  One goal
+// of Raze() is to truncate the file to remove blocks which generate I/O errors.
+// Test that Raze() turns off memory mapping so that the file is truncated.
+// [This would not cover the case of multiple connections where one of the other
+// connections is memory-mapped.  That is infrequent in Chromium.]
+TEST_F(SQLConnectionTest, RazeTruncate) {
+  // The empty database has 0 or 1 pages.  Raze() should leave it with exactly 1
+  // page.  Not checking directly because auto_vacuum on Android adds a freelist
+  // page.
+  ASSERT_TRUE(db().Raze());
+  int64_t expected_size;
+  ASSERT_TRUE(base::GetFileSize(db_path(), &expected_size));
+  ASSERT_GT(expected_size, 0);
+
+  // Cause the database to take a few pages.
+  const char* kCreateSql = "CREATE TABLE foo (id INTEGER PRIMARY KEY, value)";
+  ASSERT_TRUE(db().Execute(kCreateSql));
+  for (size_t i = 0; i < 24; ++i) {
+    ASSERT_TRUE(
+        db().Execute("INSERT INTO foo (value) VALUES (randomblob(1024))"));
+  }
+  int64_t db_size;
+  ASSERT_TRUE(base::GetFileSize(db_path(), &db_size));
+  ASSERT_GT(db_size, expected_size);
+
+  // Make a query covering most of the database file to make sure that the
+  // blocks are actually mapped into memory.  Empirically, the truncate problem
+  // doesn't seem to happen if no blocks are mapped.
+  EXPECT_EQ("24576",
+            ExecuteWithResult(&db(), "SELECT SUM(LENGTH(value)) FROM foo"));
+
+  ASSERT_TRUE(db().Raze());
+  ASSERT_TRUE(base::GetFileSize(db_path(), &db_size));
+  ASSERT_EQ(expected_size, db_size);
+}
+
 #if defined(OS_ANDROID)
 TEST_F(SQLConnectionTest, SetTempDirForSQL) {
 
@@ -1546,6 +1582,12 @@ TEST_F(SQLConnectionTest, GetAppropriateMmapSize) {
   ASSERT_TRUE(MetaTable::GetMmapStatus(&db(), &mmap_status));
   ASSERT_EQ(MetaTable::kMmapSuccess, mmap_status);
 
+  // Preload with partial progress of one page.  Should map everything.
+  ASSERT_TRUE(db().Execute("REPLACE INTO meta VALUES ('mmap_status', 1)"));
+  ASSERT_GT(db().GetAppropriateMmapSize(), kMmapAlot);
+  ASSERT_TRUE(MetaTable::GetMmapStatus(&db(), &mmap_status));
+  ASSERT_EQ(MetaTable::kMmapSuccess, mmap_status);
+
   // Failure status maps nothing.
   ASSERT_TRUE(db().Execute("REPLACE INTO meta VALUES ('mmap_status', -2)"));
   ASSERT_EQ(0UL, db().GetAppropriateMmapSize());
@@ -1593,12 +1635,19 @@ TEST_F(SQLConnectionTest, GetAppropriateMmapSizeAltStatus) {
   EXPECT_EQ(base::IntToString(MetaTable::kMmapSuccess),
             ExecuteWithResult(&db(), "SELECT * FROM MmapStatus"));
 
-  // Also maps everything when kMmapSuccess is in the view.
+  // Also maps everything when kMmapSuccess is already in the view.
   ASSERT_GT(db().GetAppropriateMmapSize(), kMmapAlot);
+
+  // Preload with partial progress of one page.  Should map everything.
+  ASSERT_TRUE(db().Execute("DROP VIEW MmapStatus"));
+  ASSERT_TRUE(db().Execute("CREATE VIEW MmapStatus (value) AS SELECT 1"));
+  ASSERT_GT(db().GetAppropriateMmapSize(), kMmapAlot);
+  EXPECT_EQ(base::IntToString(MetaTable::kMmapSuccess),
+            ExecuteWithResult(&db(), "SELECT * FROM MmapStatus"));
 
   // Failure status leads to nothing being mapped.
   ASSERT_TRUE(db().Execute("DROP VIEW MmapStatus"));
-  ASSERT_TRUE(db().Execute("CREATE VIEW MmapStatus AS SELECT -2"));
+  ASSERT_TRUE(db().Execute("CREATE VIEW MmapStatus (value) AS SELECT -2"));
   ASSERT_EQ(0UL, db().GetAppropriateMmapSize());
   EXPECT_EQ(base::IntToString(MetaTable::kMmapFailure),
             ExecuteWithResult(&db(), "SELECT * FROM MmapStatus"));

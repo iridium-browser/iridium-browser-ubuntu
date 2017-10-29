@@ -4,9 +4,6 @@
 
 #include "chrome/browser/chromeos/login/lock/webui_screen_locker.h"
 
-#include "ash/common/wm_shell.h"
-#include "ash/shell.h"
-#include "ash/system/chromeos/power/power_event_observer.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
@@ -15,12 +12,17 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
+#include "chrome/browser/chromeos/ash_config.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
+#include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_factory.h"
+#include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_storage.h"
 #include "chrome/browser/chromeos/login/ui/preloaded_web_view.h"
 #include "chrome/browser/chromeos/login/ui/preloaded_web_view_factory.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_display.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/ui/ash/ash_util.h"
+#include "chrome/browser/ui/ash/session_controller_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/common/chrome_features.h"
@@ -28,6 +30,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "components/login/base_screen_handler_utils.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
 #include "content/public/browser/browser_thread.h"
@@ -37,12 +40,12 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/aura/client/capture_client.h"
+#include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
-#include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_util.h"
 #include "ui/views/controls/webview/webview.h"
 
@@ -81,6 +84,12 @@ void WebUIScreenLocker::RequestPreload() {
 
 // static
 bool WebUIScreenLocker::ShouldPreloadLockScreen() {
+  // Bail for mash because IdleDetector/UserActivityDetector does not work
+  // properly there.
+  // TODO(xiyuan): Revisit after http://crbug.com/626899.
+  if (ash_util::IsRunningInMash())
+    return false;
+
   Profile* profile = ProfileHelper::Get()->GetProfileByUser(
       user_manager::UserManager::Get()->GetActiveUser());
 
@@ -118,22 +127,13 @@ WebUIScreenLocker::WebUIScreenLocker(ScreenLocker* screen_locker)
       network_state_helper_(new login::NetworkStateHelper),
       weak_factory_(this) {
   set_should_emit_login_prompt_visible(false);
-  ash::WmShell::Get()->AddLockStateObserver(this);
-  ash::WmShell::Get()->AddShellObserver(this);
   display::Screen::GetScreen()->AddObserver(this);
   DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
-
-  if (keyboard::KeyboardController::GetInstance()) {
-    keyboard::KeyboardController::GetInstance()->AddObserver(this);
-    is_observing_keyboard_ = true;
-  }
 }
 
 WebUIScreenLocker::~WebUIScreenLocker() {
   DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
   display::Screen::GetScreen()->RemoveObserver(this);
-  ash::WmShell::Get()->RemoveLockStateObserver(this);
-  ash::WmShell::Get()->RemoveShellObserver(this);
   // In case of shutdown, lock_window_ may be deleted before WebUIScreenLocker.
   if (lock_window_) {
     lock_window_->RemoveObserver(this);
@@ -144,10 +144,7 @@ WebUIScreenLocker::~WebUIScreenLocker() {
   if (login_display_.get() && GetOobeUI())
     GetOobeUI()->ResetSigninScreenHandlerDelegate();
 
-  if (keyboard::KeyboardController::GetInstance() && is_observing_keyboard_) {
-    keyboard::KeyboardController::GetInstance()->RemoveObserver(this);
-    is_observing_keyboard_ = false;
-  }
+  ClearLockScreenAppFocusCyclerDelegate();
 
   ResetKeyboardOverscrollOverride();
 
@@ -158,7 +155,7 @@ void WebUIScreenLocker::LockScreen() {
   gfx::Rect bounds = display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
 
   lock_time_ = base::TimeTicks::Now();
-  lock_window_ = new LockWindow(this);
+  lock_window_ = new ash::LockWindow(chromeos::GetAshConfig());
   lock_window_->AddObserver(this);
 
   Init();
@@ -181,10 +178,12 @@ void WebUIScreenLocker::LockScreen() {
   GetOobeUI()->ShowSigninScreen(
       LoginScreenContext(), login_display_.get(), login_display_.get());
 
+  SetLockScreenAppFocusCyclerDelegate();
+
   DisableKeyboardOverscroll();
 }
 
-void WebUIScreenLocker::SetInputEnabled(bool enabled) {
+void WebUIScreenLocker::SetPasswordInputEnabled(bool enabled) {
   login_display_->SetUIEnabled(enabled);
 }
 
@@ -209,7 +208,7 @@ void WebUIScreenLocker::ScreenLockReady() {
   UMA_HISTOGRAM_TIMES("LockScreen.LockReady",
                       base::TimeTicks::Now() - lock_time_);
   screen_locker_->ScreenLockReady();
-  SetInputEnabled(true);
+  SetPasswordInputEnabled(true);
 }
 
 void WebUIScreenLocker::OnLockWindowReady() {
@@ -262,9 +261,43 @@ void WebUIScreenLocker::OnLockBackgroundDisplayed() {
 }
 
 void WebUIScreenLocker::OnHeaderBarVisible() {
-  DCHECK(ash::Shell::HasInstance());
+  SessionControllerClient::Get()->NotifyChromeLockAnimationsComplete();
+}
 
-  ash::Shell::GetInstance()->power_event_observer()->OnLockAnimationsComplete();
+void WebUIScreenLocker::OnAshLockAnimationFinished() {
+  // Release capture if any.
+  aura::client::GetCaptureClient(GetNativeWindow()->GetRootWindow())
+      ->SetCapture(nullptr);
+  GetWebUI()->CallJavascriptFunctionUnsafe(
+      "cr.ui.Oobe.animateOnceFullyDisplayed");
+}
+
+void WebUIScreenLocker::SetFingerprintState(
+    const AccountId& account_id,
+    ScreenLocker::FingerprintState state) {
+  // TODO(xiaoyinh@): Modify JS side to consolidate removeUserPodFingerprintIcon
+  // and setUserPodFingerprintIcon into single JS function.
+  if (state == ScreenLocker::FingerprintState::kRemoved) {
+    GetWebUI()->CallJavascriptFunctionUnsafe(
+        "login.AccountPickerScreen.removeUserPodFingerprintIcon",
+        ::login::MakeValue(account_id));
+    return;
+  }
+
+  chromeos::quick_unlock::QuickUnlockStorage* quick_unlock_storage =
+      chromeos::quick_unlock::QuickUnlockFactory::GetForAccountId(account_id);
+  if (!quick_unlock_storage ||
+      !quick_unlock_storage->IsFingerprintAuthenticationAvailable()) {
+    state = ScreenLocker::FingerprintState::kHidden;
+  }
+  GetWebUI()->CallJavascriptFunctionUnsafe(
+      "login.AccountPickerScreen.setUserPodFingerprintIcon",
+      ::login::MakeValue(account_id),
+      ::login::MakeValue(static_cast<int>(state)));
+}
+
+content::WebContents* WebUIScreenLocker::GetWebContents() {
+  return WebUILoginView::GetWebContents();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -290,7 +323,8 @@ bool WebUIScreenLocker::IsSigninInProgress() const {
 
 void WebUIScreenLocker::Login(const UserContext& user_context,
                               const SigninSpecifics& specifics) {
-  chromeos::ScreenLocker::default_screen_locker()->Authenticate(user_context);
+  chromeos::ScreenLocker::default_screen_locker()->Authenticate(
+      user_context, ScreenLocker::AuthenticateCallback());
 }
 
 void WebUIScreenLocker::MigrateUserData(const std::string& old_password) {
@@ -350,52 +384,38 @@ bool WebUIScreenLocker::IsUserWhitelisted(const AccountId& account_id) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// SessionLockStateObserver:
-
-void WebUIScreenLocker::OnLockStateEvent(
-    ash::LockStateObserver::EventType event) {
-  if (event == ash::LockStateObserver::EVENT_LOCK_ANIMATION_FINISHED) {
-    // Release capture if any.
-    aura::client::GetCaptureClient(GetNativeWindow()->GetRootWindow())->
-        SetCapture(NULL);
-    GetWebUI()->CallJavascriptFunctionUnsafe(
-        "cr.ui.Oobe.animateOnceFullyDisplayed");
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // WidgetObserver:
 
 void WebUIScreenLocker::OnWidgetDestroying(views::Widget* widget) {
   lock_window_->RemoveObserver(this);
-  lock_window_ = NULL;
+  lock_window_ = nullptr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // PowerManagerClient::Observer:
 
-void WebUIScreenLocker::LidEventReceived(bool open,
+void WebUIScreenLocker::LidEventReceived(PowerManagerClient::LidState state,
                                          const base::TimeTicks& time) {
-  if (open) {
+  if (state == PowerManagerClient::LidState::OPEN) {
     content::BrowserThread::PostTask(
         content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&WebUIScreenLocker::FocusUserPod,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&WebUIScreenLocker::FocusUserPod,
+                       weak_factory_.GetWeakPtr()));
   }
 }
 
 void WebUIScreenLocker::SuspendImminent() {
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&WebUIScreenLocker::ResetAndFocusUserPod,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&WebUIScreenLocker::ResetAndFocusUserPod,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void WebUIScreenLocker::SuspendDone(const base::TimeDelta& sleep_duration) {
   content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&WebUIScreenLocker::FocusUserPod, weak_factory_.GetWeakPtr()));
+      content::BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&WebUIScreenLocker::FocusUserPod,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void WebUIScreenLocker::RenderProcessGone(base::TerminationStatus status) {
@@ -405,45 +425,6 @@ void WebUIScreenLocker::RenderProcessGone(base::TerminationStatus status) {
     Signout();
   }
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// ash::ShellObserver:
-
-void WebUIScreenLocker::OnVirtualKeyboardStateChanged(bool activated) {
-  if (keyboard::KeyboardController::GetInstance()) {
-    if (activated) {
-      if (!is_observing_keyboard_) {
-        keyboard::KeyboardController::GetInstance()->AddObserver(this);
-        is_observing_keyboard_ = true;
-      }
-    } else {
-      keyboard::KeyboardController::GetInstance()->RemoveObserver(this);
-      is_observing_keyboard_ = false;
-    }
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// keyboard::KeyboardControllerObserver:
-
-void WebUIScreenLocker::OnKeyboardBoundsChanging(
-    const gfx::Rect& new_bounds) {
-  if (new_bounds.IsEmpty()) {
-    // Keyboard has been hidden.
-    if (GetOobeUI()) {
-      GetOobeUI()->GetCoreOobeView()->ShowControlBar(true);
-      GetOobeUI()->GetCoreOobeView()->ShowPinKeyboard(true);
-    }
-  } else {
-    // Keyboard has been shown.
-    if (GetOobeUI()) {
-      GetOobeUI()->GetCoreOobeView()->ShowControlBar(false);
-      GetOobeUI()->GetCoreOobeView()->ShowPinKeyboard(false);
-    }
-  }
-}
-
-void WebUIScreenLocker::OnKeyboardClosed() {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // display::DisplayObserver:

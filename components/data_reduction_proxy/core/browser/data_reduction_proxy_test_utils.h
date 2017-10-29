@@ -261,6 +261,8 @@ class TestDataStore : public data_reduction_proxy::DataStore {
 
   DataStore::Status Delete(base::StringPiece key) override;
 
+  DataStore::Status RecreateDB() override;
+
   std::map<std::string, std::string>* map() { return &map_; }
 
  private:
@@ -279,12 +281,6 @@ class DataReductionProxyTestContext {
     Builder();
 
     ~Builder();
-
-    // |DataReductionProxyParams| flags to use.
-    Builder& WithParamsFlags(int params_flags);
-
-    // |TestDataReductionProxyParams| flags to use.
-    Builder& WithParamsDefinitions(unsigned int params_definitions);
 
     // The |Client| enum to use for |DataReductionProxyRequestOptions|.
     Builder& WithClient(Client client);
@@ -332,8 +328,6 @@ class DataReductionProxyTestContext {
     std::unique_ptr<DataReductionProxyTestContext> Build();
 
    private:
-    int params_flags_;
-    unsigned int params_definitions_;
     Client client_;
     net::URLRequestContext* request_context_;
     net::MockClientSocketFactory* mock_socket_factory_;

@@ -8,13 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "webrtc/modules/audio_conference_mixer/source/audio_conference_mixer_impl.h"
 #include "webrtc/audio/utility/audio_frame_operations.h"
 #include "webrtc/modules/audio_conference_mixer/include/audio_conference_mixer_defines.h"
-#include "webrtc/modules/audio_conference_mixer/source/audio_conference_mixer_impl.h"
 #include "webrtc/modules/audio_conference_mixer/source/audio_frame_manipulator.h"
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
-#include "webrtc/system_wrappers/include/critical_section_wrapper.h"
-#include "webrtc/system_wrappers/include/trace.h"
+#include "webrtc/rtc_base/logging.h"
 
 namespace webrtc {
 namespace {
@@ -128,14 +127,6 @@ AudioConferenceMixerImpl::AudioConferenceMixerImpl(int id)
       _processCalls(0) {}
 
 bool AudioConferenceMixerImpl::Init() {
-    _crit.reset(CriticalSectionWrapper::CreateCriticalSection());
-    if (_crit.get() == NULL)
-        return false;
-
-    _cbCrit.reset(CriticalSectionWrapper::CreateCriticalSection());
-    if(_cbCrit.get() == NULL)
-        return false;
-
     Config config;
     config.Set<ExperimentalAgc>(new ExperimentalAgc(false));
     _limiter.reset(AudioProcessing::Create(config));
@@ -181,10 +172,9 @@ AudioConferenceMixerImpl::~AudioConferenceMixerImpl() {
 // Process should be called every kProcessPeriodicityInMs ms
 int64_t AudioConferenceMixerImpl::TimeUntilNextProcess() {
     int64_t timeUntilNextProcess = 0;
-    CriticalSectionScoped cs(_crit.get());
+    rtc::CritScope cs(&_crit);
     if(_timeScheduler.TimeToNextUpdate(timeUntilNextProcess) != 0) {
-        WEBRTC_TRACE(kTraceError, kTraceAudioMixerServer, _id,
-                     "failed in TimeToNextUpdate() call");
+        LOG(LS_ERROR) << "failed in TimeToNextUpdate() call";
         // Sanity check
         assert(false);
         return -1;
@@ -196,7 +186,7 @@ void AudioConferenceMixerImpl::Process() {
     size_t remainingParticipantsAllowedToMix =
         kMaximumAmountOfMixedParticipants;
     {
-        CriticalSectionScoped cs(_crit.get());
+        rtc::CritScope cs(&_crit);
         assert(_processCalls == 0);
         _processCalls++;
 
@@ -209,7 +199,7 @@ void AudioConferenceMixerImpl::Process() {
     AudioFrameList additionalFramesList;
     std::map<int, MixerParticipant*> mixedParticipantsMap;
     {
-        CriticalSectionScoped cs(_cbCrit.get());
+        rtc::CritScope cs(&_cbCrit);
 
         int32_t lowFreq = GetLowestMixingFrequency();
         // SILK can run in 12 kHz and 24 kHz. These frequencies are not
@@ -223,9 +213,9 @@ void AudioConferenceMixerImpl::Process() {
             lowFreq = 32000;
         }
         if(lowFreq <= 0) {
-            CriticalSectionScoped cs(_crit.get());
-            _processCalls--;
-            return;
+          rtc::CritScope cs(&_crit);
+          _processCalls--;
+          return;
         } else {
             switch(lowFreq) {
             case 8000:
@@ -251,7 +241,7 @@ void AudioConferenceMixerImpl::Process() {
             default:
                 assert(false);
 
-                CriticalSectionScoped cs(_crit.get());
+                rtc::CritScope cs(&_crit);
                 _processCalls--;
                 return;
             }
@@ -267,14 +257,13 @@ void AudioConferenceMixerImpl::Process() {
     // Get an AudioFrame for mixing from the memory pool.
     AudioFrame* mixedAudio = NULL;
     if(_audioFramePool->PopMemory(mixedAudio) == -1) {
-        WEBRTC_TRACE(kTraceMemory, kTraceAudioMixerServer, _id,
-                     "failed PopMemory() call");
+        LOG(LS_ERROR) << "failed PopMemory() call";
         assert(false);
         return;
     }
 
     {
-        CriticalSectionScoped cs(_crit.get());
+        rtc::CritScope cs(&_crit);
 
         // TODO(henrike): it might be better to decide the number of channels
         //                with an API instead of dynamically.
@@ -311,7 +300,7 @@ void AudioConferenceMixerImpl::Process() {
     }
 
     {
-        CriticalSectionScoped cs(_cbCrit.get());
+        rtc::CritScope cs(&_cbCrit);
         if(_mixReceiver != NULL) {
             const AudioFrame** dummy = NULL;
             _mixReceiver->NewMixedAudio(
@@ -328,7 +317,7 @@ void AudioConferenceMixerImpl::Process() {
     ClearAudioFrameList(&rampOutList);
     ClearAudioFrameList(&additionalFramesList);
     {
-        CriticalSectionScoped cs(_crit.get());
+        rtc::CritScope cs(&_crit);
         _processCalls--;
     }
     return;
@@ -336,7 +325,7 @@ void AudioConferenceMixerImpl::Process() {
 
 int32_t AudioConferenceMixerImpl::RegisterMixedStreamCallback(
     AudioMixerOutputReceiver* mixReceiver) {
-    CriticalSectionScoped cs(_cbCrit.get());
+    rtc::CritScope cs(&_cbCrit);
     if(_mixReceiver != NULL) {
         return -1;
     }
@@ -345,7 +334,7 @@ int32_t AudioConferenceMixerImpl::RegisterMixedStreamCallback(
 }
 
 int32_t AudioConferenceMixerImpl::UnRegisterMixedStreamCallback() {
-    CriticalSectionScoped cs(_cbCrit.get());
+    rtc::CritScope cs(&_cbCrit);
     if(_mixReceiver == NULL) {
         return -1;
     }
@@ -355,7 +344,7 @@ int32_t AudioConferenceMixerImpl::UnRegisterMixedStreamCallback() {
 
 int32_t AudioConferenceMixerImpl::SetOutputFrequency(
     const Frequency& frequency) {
-    CriticalSectionScoped cs(_crit.get());
+    rtc::CritScope cs(&_crit);
 
     _outputFrequency = frequency;
     _sampleSize =
@@ -366,7 +355,7 @@ int32_t AudioConferenceMixerImpl::SetOutputFrequency(
 
 AudioConferenceMixer::Frequency
 AudioConferenceMixerImpl::OutputFrequency() const {
-    CriticalSectionScoped cs(_crit.get());
+    rtc::CritScope cs(&_crit);
     return _outputFrequency;
 }
 
@@ -379,14 +368,13 @@ int32_t AudioConferenceMixerImpl::SetMixabilityStatus(
     }
     size_t numMixedParticipants;
     {
-        CriticalSectionScoped cs(_cbCrit.get());
+        rtc::CritScope cs(&_cbCrit);
         const bool isMixed =
             IsParticipantInList(*participant, _participantList);
         // API must be called with a new state.
         if(!(mixable ^ isMixed)) {
-            WEBRTC_TRACE(kTraceWarning, kTraceAudioMixerServer, _id,
-                         "Mixable is aready %s",
-                         isMixed ? "ON" : "off");
+            LOG(LS_ERROR) << "Mixable is aready " <<
+                (isMixed ? "ON" : "off");
             return -1;
         }
         bool success = false;
@@ -396,9 +384,8 @@ int32_t AudioConferenceMixerImpl::SetMixabilityStatus(
             success = RemoveParticipantFromList(participant, &_participantList);
         }
         if(!success) {
-            WEBRTC_TRACE(kTraceError, kTraceAudioMixerServer, _id,
-                         "failed to %s participant",
-                         mixable ? "add" : "remove");
+            LOG(LS_ERROR) << "failed to " << (mixable ? "add" : "remove")
+                          << " participant";
             assert(false);
             return -1;
         }
@@ -413,28 +400,27 @@ int32_t AudioConferenceMixerImpl::SetMixabilityStatus(
     // A MixerParticipant was added or removed. Make sure the scratch
     // buffer is updated if necessary.
     // Note: The scratch buffer may only be updated in Process().
-    CriticalSectionScoped cs(_crit.get());
+    rtc::CritScope cs(&_crit);
     _numMixedParticipants = numMixedParticipants;
     return 0;
 }
 
 bool AudioConferenceMixerImpl::MixabilityStatus(
     const MixerParticipant& participant) const {
-    CriticalSectionScoped cs(_cbCrit.get());
+    rtc::CritScope cs(&_cbCrit);
     return IsParticipantInList(participant, _participantList);
 }
 
 int32_t AudioConferenceMixerImpl::SetAnonymousMixabilityStatus(
     MixerParticipant* participant, bool anonymous) {
-    CriticalSectionScoped cs(_cbCrit.get());
+    rtc::CritScope cs(&_cbCrit);
     if(IsParticipantInList(*participant, _additionalParticipantList)) {
         if(anonymous) {
             return 0;
         }
         if(!RemoveParticipantFromList(participant,
                                       &_additionalParticipantList)) {
-            WEBRTC_TRACE(kTraceError, kTraceAudioMixerServer, _id,
-                         "unable to remove participant from anonymous list");
+            LOG(LS_ERROR) << "unable to remove participant from anonymous list";
             assert(false);
             return -1;
         }
@@ -446,11 +432,8 @@ int32_t AudioConferenceMixerImpl::SetAnonymousMixabilityStatus(
     const bool mixable = RemoveParticipantFromList(participant,
                                                    &_participantList);
     if(!mixable) {
-        WEBRTC_TRACE(
-            kTraceWarning,
-            kTraceAudioMixerServer,
-            _id,
-            "participant must be registered before turning it into anonymous");
+        LOG(LS_WARNING) <<
+          "participant must be registered before turning it into anonymous";
         // Setting anonymous status is only possible if MixerParticipant is
         // already registered.
         return -1;
@@ -461,7 +444,7 @@ int32_t AudioConferenceMixerImpl::SetAnonymousMixabilityStatus(
 
 bool AudioConferenceMixerImpl::AnonymousMixabilityStatus(
     const MixerParticipant& participant) const {
-    CriticalSectionScoped cs(_cbCrit.get());
+    rtc::CritScope cs(&_cbCrit);
     return IsParticipantInList(participant, _additionalParticipantList);
 }
 
@@ -480,8 +463,8 @@ int32_t AudioConferenceMixerImpl::SetMinimumMixingFrequency(
         _minimumMixingFreq=freq;
         return 0;
     } else {
-        WEBRTC_TRACE(kTraceError, kTraceAudioMixerServer, _id,
-                     "SetMinimumMixingFrequency incorrect frequency: %i",freq);
+        LOG(LS_ERROR) << "SetMinimumMixingFrequency incorrect frequency: "
+                      << freq;
         assert(false);
         return -1;
     }
@@ -525,9 +508,9 @@ void AudioConferenceMixerImpl::UpdateToMix(
     AudioFrameList* rampOutList,
     std::map<int, MixerParticipant*>* mixParticipantList,
     size_t* maxAudioFrameCounter) const {
-    WEBRTC_TRACE(kTraceStream, kTraceAudioMixerServer, _id,
-                 "UpdateToMix(mixList,rampOutList,mixParticipantList,%d)",
-                 *maxAudioFrameCounter);
+    LOG(LS_VERBOSE) <<
+        "UpdateToMix(mixList,rampOutList,mixParticipantList," <<
+        *maxAudioFrameCounter << ")";
     const size_t mixListStartSize = mixList->size();
     AudioFrameList activeList;
     // Struct needed by the passive lists to keep track of which AudioFrame
@@ -548,8 +531,7 @@ void AudioConferenceMixerImpl::UpdateToMix(
         wasMixed = (*participant)->_mixHistory->WasMixed();
         AudioFrame* audioFrame = NULL;
         if(_audioFramePool->PopMemory(audioFrame) == -1) {
-            WEBRTC_TRACE(kTraceMemory, kTraceAudioMixerServer, _id,
-                         "failed PopMemory() call");
+            LOG(LS_ERROR) << "failed PopMemory() call";
             assert(false);
             return;
         }
@@ -557,8 +539,8 @@ void AudioConferenceMixerImpl::UpdateToMix(
 
         auto ret = (*participant)->GetAudioFrameWithMuted(_id, audioFrame);
         if (ret == MixerParticipant::AudioFrameInfo::kError) {
-            WEBRTC_TRACE(kTraceWarning, kTraceAudioMixerServer, _id,
-                         "failed to GetAudioFrameWithMuted() from participant");
+            LOG(LS_WARNING)
+              << "failed to GetAudioFrameWithMuted() from participant";
             _audioFramePool->PushMemory(audioFrame);
             continue;
         }
@@ -573,8 +555,7 @@ void AudioConferenceMixerImpl::UpdateToMix(
         // assert until the problem is fixed on a higher level.
         // assert(audioFrame->vad_activity_ != AudioFrame::kVadUnknown);
         if (audioFrame->vad_activity_ == AudioFrame::kVadUnknown) {
-            WEBRTC_TRACE(kTraceWarning, kTraceAudioMixerServer, _id,
-                         "invalid VAD state from participant");
+            LOG(LS_WARNING) << "invalid VAD state from participant";
         }
 
         if(audioFrame->vad_activity_ == AudioFrame::kVadActive) {
@@ -719,8 +700,7 @@ void AudioConferenceMixerImpl::UpdateToMix(
 
 void AudioConferenceMixerImpl::GetAdditionalAudio(
     AudioFrameList* additionalFramesList) const {
-    WEBRTC_TRACE(kTraceStream, kTraceAudioMixerServer, _id,
-                 "GetAdditionalAudio(additionalFramesList)");
+    LOG(LS_VERBOSE) << "GetAdditionalAudio(additionalFramesList)";
     // The GetAudioFrameWithMuted() callback may result in the participant being
     // removed from additionalParticipantList_. If that happens it will
     // invalidate any iterators. Create a copy of the participants list such
@@ -736,16 +716,15 @@ void AudioConferenceMixerImpl::GetAdditionalAudio(
          ++participant) {
         AudioFrame* audioFrame = NULL;
         if(_audioFramePool->PopMemory(audioFrame) == -1) {
-            WEBRTC_TRACE(kTraceMemory, kTraceAudioMixerServer, _id,
-                         "failed PopMemory() call");
+          LOG(LS_ERROR) << "failed PopMemory() call";
             assert(false);
             return;
         }
         audioFrame->sample_rate_hz_ = _outputFrequency;
         auto ret = (*participant)->GetAudioFrameWithMuted(_id, audioFrame);
         if (ret == MixerParticipant::AudioFrameInfo::kError) {
-            WEBRTC_TRACE(kTraceWarning, kTraceAudioMixerServer, _id,
-                         "failed to GetAudioFrameWithMuted() from participant");
+            LOG(LS_WARNING)
+                << "failed to GetAudioFrameWithMuted() from participant";
             _audioFramePool->PushMemory(audioFrame);
             continue;
         }
@@ -761,8 +740,7 @@ void AudioConferenceMixerImpl::GetAdditionalAudio(
 
 void AudioConferenceMixerImpl::UpdateMixedStatus(
     const std::map<int, MixerParticipant*>& mixedParticipantsMap) const {
-    WEBRTC_TRACE(kTraceStream, kTraceAudioMixerServer, _id,
-                 "UpdateMixedStatus(mixedParticipantsMap)");
+    LOG(LS_VERBOSE) << "UpdateMixedStatus(mixedParticipantsMap)";
     assert(mixedParticipantsMap.size() <= kMaximumAmountOfMixedParticipants);
 
     // Loop through all participants. If they are in the mix map they
@@ -772,8 +750,7 @@ void AudioConferenceMixerImpl::UpdateMixedStatus(
         participant != _participantList.end();
          ++participant) {
         bool isMixed = false;
-        for (std::map<int, MixerParticipant*>::const_iterator it =
-                 mixedParticipantsMap.begin();
+        for (auto it = mixedParticipantsMap.begin();
              it != mixedParticipantsMap.end();
              ++it) {
           if (it->second == *participant) {
@@ -787,8 +764,7 @@ void AudioConferenceMixerImpl::UpdateMixedStatus(
 
 void AudioConferenceMixerImpl::ClearAudioFrameList(
     AudioFrameList* audioFrameList) const {
-    WEBRTC_TRACE(kTraceStream, kTraceAudioMixerServer, _id,
-                 "ClearAudioFrameList(audioFrameList)");
+    LOG(LS_VERBOSE) << "ClearAudioFrameList(audioFrameList)";
     for (AudioFrameList::iterator iter = audioFrameList->begin();
          iter != audioFrameList->end();
          ++iter) {
@@ -800,8 +776,7 @@ void AudioConferenceMixerImpl::ClearAudioFrameList(
 bool AudioConferenceMixerImpl::IsParticipantInList(
     const MixerParticipant& participant,
     const MixerParticipantList& participantList) const {
-    WEBRTC_TRACE(kTraceStream, kTraceAudioMixerServer, _id,
-                 "IsParticipantInList(participant,participantList)");
+    LOG(LS_VERBOSE) << "IsParticipantInList(participant,participantList)";
     for (MixerParticipantList::const_iterator iter = participantList.begin();
          iter != participantList.end();
          ++iter) {
@@ -815,8 +790,7 @@ bool AudioConferenceMixerImpl::IsParticipantInList(
 bool AudioConferenceMixerImpl::AddParticipantToList(
     MixerParticipant* participant,
     MixerParticipantList* participantList) const {
-    WEBRTC_TRACE(kTraceStream, kTraceAudioMixerServer, _id,
-                 "AddParticipantToList(participant, participantList)");
+    LOG(LS_VERBOSE) << "AddParticipantToList(participant, participantList)";
     participantList->push_back(participant);
     // Make sure that the mixed status is correct for new MixerParticipant.
     participant->_mixHistory->ResetMixedStatus();
@@ -826,8 +800,8 @@ bool AudioConferenceMixerImpl::AddParticipantToList(
 bool AudioConferenceMixerImpl::RemoveParticipantFromList(
     MixerParticipant* participant,
     MixerParticipantList* participantList) const {
-    WEBRTC_TRACE(kTraceStream, kTraceAudioMixerServer, _id,
-                 "RemoveParticipantFromList(participant, participantList)");
+    LOG(LS_VERBOSE)
+        << "RemoveParticipantFromList(participant, participantList)";
     for (MixerParticipantList::iterator iter = participantList->begin();
          iter != participantList->end();
          ++iter) {
@@ -844,8 +818,8 @@ bool AudioConferenceMixerImpl::RemoveParticipantFromList(
 int32_t AudioConferenceMixerImpl::MixFromList(
     AudioFrame* mixedAudio,
     const AudioFrameList& audioFrameList) const {
-    WEBRTC_TRACE(kTraceStream, kTraceAudioMixerServer, _id,
-                 "MixFromList(mixedAudio, audioFrameList)");
+
+    LOG(LS_VERBOSE) << "MixFromList(mixedAudio, audioFrameList)";
     if(audioFrameList.empty()) return 0;
 
     uint32_t position = 0;
@@ -865,12 +839,9 @@ int32_t AudioConferenceMixerImpl::MixFromList(
          iter != audioFrameList.end();
          ++iter) {
         if(position >= kMaximumAmountOfMixedParticipants) {
-            WEBRTC_TRACE(
-                kTraceMemory,
-                kTraceAudioMixerServer,
-                _id,
-                "Trying to mix more than max amount of mixed participants:%d!",
-                kMaximumAmountOfMixedParticipants);
+            LOG(LS_ERROR) <<
+                "Trying to mix more than max amount of mixed participants:"
+                       << kMaximumAmountOfMixedParticipants << "!";
             // Assert and avoid crash
             assert(false);
             position = 0;
@@ -889,8 +860,7 @@ int32_t AudioConferenceMixerImpl::MixFromList(
 int32_t AudioConferenceMixerImpl::MixAnonomouslyFromList(
     AudioFrame* mixedAudio,
     const AudioFrameList& audioFrameList) const {
-    WEBRTC_TRACE(kTraceStream, kTraceAudioMixerServer, _id,
-                 "MixAnonomouslyFromList(mixedAudio, audioFrameList)");
+    LOG(LS_VERBOSE) << "MixAnonomouslyFromList(mixedAudio, audioFrameList)";
 
     if(audioFrameList.empty()) return 0;
 
@@ -925,8 +895,7 @@ bool AudioConferenceMixerImpl::LimitMixedAudio(AudioFrame* mixedAudio) const {
     AudioFrameOperations::Add(*mixedAudio, mixedAudio);
 
     if(error != _limiter->kNoError) {
-        WEBRTC_TRACE(kTraceError, kTraceAudioMixerServer, _id,
-                     "Error from AudioProcessing: %d", error);
+        LOG(LS_ERROR) << "Error from AudioProcessing: " << error;
         assert(false);
         return false;
     }

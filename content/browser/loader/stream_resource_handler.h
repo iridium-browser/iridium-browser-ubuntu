@@ -29,7 +29,8 @@ class StreamResourceHandler : public ResourceHandler {
   // how origin check is done on resource loading.
   StreamResourceHandler(net::URLRequest* request,
                         StreamRegistry* registry,
-                        const GURL& origin);
+                        const GURL& origin,
+                        bool immediate_mode);
   ~StreamResourceHandler() override;
 
   // Not needed, as this event handler ought to be the final resource.
@@ -46,8 +47,9 @@ class StreamResourceHandler : public ResourceHandler {
                    std::unique_ptr<ResourceController> controller) override;
 
   // Create a new buffer to store received data.
-  bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
-                  int* buf_size) override;
+  void OnWillRead(scoped_refptr<net::IOBuffer>* buf,
+                  int* buf_size,
+                  std::unique_ptr<ResourceController> controller) override;
 
   // A read was completed, forward the data to the Stream.
   void OnReadCompleted(int bytes_read,

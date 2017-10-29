@@ -9,10 +9,15 @@
 
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
+#include "base/timer/timer.h"
+#include "chromeos/cryptohome/cryptohome_parameters.h"
+#include "chromeos/dbus/cryptohome/key.pb.h"
 #include "chromeos/dbus/cryptohome_client.h"
 
 namespace chromeos {
@@ -31,7 +36,7 @@ class CHROMEOS_EXPORT FakeCryptohomeClient : public CryptohomeClient {
   void WaitForServiceToBeAvailable(
       const WaitForServiceToBeAvailableCallback& callback) override;
   void IsMounted(const BoolDBusMethodCallback& callback) override;
-  bool Unmount(bool* success) override;
+  void Unmount(const BoolDBusMethodCallback& callback) override;
   void AsyncCheckKey(const cryptohome::Identification& cryptohome_id,
                      const std::string& key,
                      const AsyncMethodCallback& callback) override;
@@ -71,8 +76,8 @@ class CHROMEOS_EXPORT FakeCryptohomeClient : public CryptohomeClient {
   bool CallTpmIsOwnedAndBlock(bool* owned) override;
   void TpmIsBeingOwned(const BoolDBusMethodCallback& callback) override;
   bool CallTpmIsBeingOwnedAndBlock(bool* owning) override;
-  void TpmCanAttemptOwnership(const VoidDBusMethodCallback& callback) override;
-  void TpmClearStoredPassword(const VoidDBusMethodCallback& callback) override;
+  void TpmCanAttemptOwnership(VoidDBusMethodCallback callback) override;
+  void TpmClearStoredPassword(VoidDBusMethodCallback callback) override;
   bool CallTpmClearStoredPasswordAndBlock() override;
   void Pkcs11IsTpmTokenReady(const BoolDBusMethodCallback& callback) override;
   void Pkcs11GetTpmTokenInfo(
@@ -164,6 +169,7 @@ class CHROMEOS_EXPORT FakeCryptohomeClient : public CryptohomeClient {
       const cryptohome::Identification& cryptohome_id,
       const std::string& key_prefix,
       const BoolDBusMethodCallback& callback) override;
+  void TpmGetVersion(const StringDBusMethodCallback& callback) override;
   void GetKeyDataEx(const cryptohome::Identification& cryptohome_id,
                     const cryptohome::AuthorizationRequest& auth,
                     const cryptohome::GetKeyDataRequest& request,
@@ -195,12 +201,19 @@ class CHROMEOS_EXPORT FakeCryptohomeClient : public CryptohomeClient {
   void FlushAndSignBootAttributes(
       const cryptohome::FlushAndSignBootAttributesRequest& request,
       const ProtobufMethodCallback& callback) override;
+  void MigrateToDircrypto(const cryptohome::Identification& cryptohome_id,
+                          const cryptohome::MigrateToDircryptoRequest& request,
+                          VoidDBusMethodCallback callback) override;
+  void SetDircryptoMigrationProgressHandler(
+      const DircryptoMigrationProgessHandler& handler) override;
   void RemoveFirmwareManagementParametersFromTpm(
       const cryptohome::RemoveFirmwareManagementParametersRequest& request,
       const ProtobufMethodCallback& callback) override;
   void SetFirmwareManagementParametersInTpm(
       const cryptohome::SetFirmwareManagementParametersRequest& request,
       const ProtobufMethodCallback& callback) override;
+  void NeedsDircryptoMigration(const cryptohome::Identification& cryptohome_id,
+                               const BoolDBusMethodCallback& callback) override;
 
   // Changes the behavior of WaitForServiceToBeAvailable(). This method runs
   // pending callbacks if is_available is true.
@@ -222,6 +235,41 @@ class CHROMEOS_EXPORT FakeCryptohomeClient : public CryptohomeClient {
   // format used by SystemSaltGetter::ConvertRawSaltToHexString()).
   static std::vector<uint8_t> GetStubSystemSalt();
 
+  // Sets the needs dircrypto migration value.
+  void set_needs_dircrypto_migration(bool needs_migration) {
+    needs_dircrypto_migration_ = needs_migration;
+  }
+
+  void set_tpm_attestation_is_enrolled(bool enrolled) {
+    tpm_attestation_is_enrolled_ = enrolled;
+  }
+
+  void set_tpm_attestation_is_prepared(bool prepared) {
+    tpm_attestation_is_prepared_ = prepared;
+  }
+
+  void set_tpm_attestation_does_key_exist_should_succeed(bool should_succeed) {
+    tpm_attestation_does_key_exist_should_succeed_ = should_succeed;
+  }
+
+  void SetTpmAttestationUserCertificate(
+      const cryptohome::Identification& cryptohome_id,
+      const std::string& key_name,
+      const std::string& certificate);
+
+  void SetTpmAttestationDeviceCertificate(const std::string& key_name,
+                                          const std::string& certificate);
+
+  base::Optional<std::string> GetTpmAttestationDeviceKeyPayload(
+      const std::string& key_name) const;
+
+  void SetTpmAttestationDeviceKeyPayload(const std::string& key_name,
+                                         const std::string& payload);
+
+  DircryptoMigrationProgessHandler dircrypto_migration_progress_handler() {
+    return dircrypto_migration_progress_handler_;
+  }
+
  private:
   void ReturnProtobufMethodCallback(
       const cryptohome::BaseReply& reply,
@@ -241,6 +289,10 @@ class CHROMEOS_EXPORT FakeCryptohomeClient : public CryptohomeClient {
   void ReturnAsyncMethodDataInternal(const AsyncMethodCallback& callback,
                                      const std::string& data);
 
+  // This method is used to implement MigrateToDircrypto with simulated progress
+  // updates.
+  void OnDircryptoMigrationProgressUpdated();
+
   bool service_is_available_;
   int async_call_id_;
   AsyncCallStatusHandler async_call_status_handler_;
@@ -255,6 +307,28 @@ class CHROMEOS_EXPORT FakeCryptohomeClient : public CryptohomeClient {
   // associated data blob. Used to implement InstallAttributesSet and -Get.
   std::map<std::string, std::vector<uint8_t>> install_attrs_;
   bool locked_;
+
+  std::map<cryptohome::Identification, cryptohome::KeyData> key_data_map_;
+
+  // User attestation certificate mapped by cryptohome_id and key_name.
+  std::map<std::pair<cryptohome::Identification, std::string>, std::string>
+      user_certificate_map_;
+
+  // Device attestation certificate mapped by key_name.
+  std::map<std::string, std::string> device_certificate_map_;
+
+  // Device key payload data mapped by key_name.
+  std::map<std::string, std::string> device_key_payload_map_;
+
+  DircryptoMigrationProgessHandler dircrypto_migration_progress_handler_;
+  base::RepeatingTimer dircrypto_migration_progress_timer_;
+  uint64_t dircrypto_migration_progress_;
+
+  bool needs_dircrypto_migration_ = false;
+  bool tpm_attestation_is_enrolled_ = true;
+  bool tpm_attestation_is_prepared_ = true;
+  bool tpm_attestation_does_key_exist_should_succeed_ = true;
+
   base::WeakPtrFactory<FakeCryptohomeClient> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeCryptohomeClient);

@@ -8,6 +8,8 @@
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/sequenced_task_runner.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -64,12 +66,8 @@ class SyncFileSystemTest : public extensions::PlatformAppBrowserTest,
   }
 
   scoped_refptr<base::SequencedTaskRunner> MakeSequencedTaskRunner() {
-    scoped_refptr<base::SequencedWorkerPool> worker_pool =
-        content::BrowserThread::GetBlockingPool();
-
-    return worker_pool->GetSequencedTaskRunnerWithShutdownBehavior(
-        worker_pool->GetSequenceToken(),
-        base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+    return base::CreateSequencedTaskRunnerWithTraits(
+        {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   }
 
   void SetUpOnMainThread() override {
@@ -92,7 +90,7 @@ class SyncFileSystemTest : public extensions::PlatformAppBrowserTest,
     remote_service_ = new drive_backend::SyncEngine(
         base::ThreadTaskRunnerHandle::Get(),  // ui_task_runner
         MakeSequencedTaskRunner(), MakeSequencedTaskRunner(),
-        content::BrowserThread::GetBlockingPool(), base_dir_.GetPath(),
+        base_dir_.GetPath(),
         NULL,  // task_logger
         NULL,  // notification_manager
         extension_service,
@@ -125,7 +123,7 @@ class SyncFileSystemTest : public extensions::PlatformAppBrowserTest,
 
   void SignIn() {
     fake_signin_manager_->SetAuthenticatedAccountInfo("12345", "tester");
-    sync_engine()->GoogleSigninSucceeded("12345", "tester", "password");
+    sync_engine()->GoogleSigninSucceeded("12345", "tester");
   }
 
   void SetSyncEnabled(bool enabled) {
@@ -189,7 +187,7 @@ IN_PROC_BROWSER_TEST_F(SyncFileSystemTest, AuthorizationTest) {
   EXPECT_EQ(REMOTE_SERVICE_AUTHENTICATION_REQUIRED,
             sync_engine()->GetCurrentState());
 
-  sync_engine()->GoogleSigninSucceeded("test_account", "tester", "testing");
+  sync_engine()->GoogleSigninSucceeded("test_account", "tester");
   WaitUntilIdle();
 
   bar_created.Reply("resume");

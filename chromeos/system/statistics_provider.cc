@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
@@ -22,6 +23,8 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/sys_info.h"
 #include "base/task_runner.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/task_scheduler/task_traits.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -57,12 +60,12 @@ const char kMachineHardwareInfoDelim[] = " \n";
 
 // File to get ECHO coupon info from, and key/value delimiters of
 // the file.
-const char kEchoCouponFile[] = "/var/cache/echo/vpd_echo.txt";
+const char kEchoCouponFile[] =
+    "/mnt/stateful_partition/unencrypted/cache/vpd/echo/vpd_echo.txt";
 const char kEchoCouponEq[] = "=";
 const char kEchoCouponDelim[] = "\n";
 
-// File to get VPD info from, and key/value delimiters of the file.
-const char kVpdFile[] = "/var/log/vpd_2.0.txt";
+// Key/value delimiters for VPD file.
 const char kVpdEq[] = "=";
 const char kVpdDelim[] = "\n";
 
@@ -115,7 +118,7 @@ bool JoinListValuesToString(const base::DictionaryValue* dictionary,
   bool first = true;
   for (const auto& v : *list) {
     std::string value;
-    if (!v->GetAsString(&value))
+    if (!v.GetAsString(&value))
       return false;
 
     if (first)
@@ -207,9 +210,7 @@ bool HasOemPrefix(const std::string& name) {
 class StatisticsProviderImpl : public StatisticsProvider {
  public:
   // StatisticsProvider implementation:
-  void StartLoadingMachineStatistics(
-      const scoped_refptr<base::TaskRunner>& file_task_runner,
-      bool load_oem_manifest) override;
+  void StartLoadingMachineStatistics(bool load_oem_manifest) override;
   bool GetMachineStatistic(const std::string& name,
                            std::string* result) override;
   bool GetMachineFlag(const std::string& name, bool* result) override;
@@ -263,7 +264,7 @@ class StatisticsProviderImpl : public StatisticsProvider {
   bool oem_manifest_loaded_;
   std::string region_;
   std::unique_ptr<base::Value> regional_data_;
-  base::hash_map<std::string, RegionDataExtractor> regional_data_extractors_;
+  base::flat_map<std::string, RegionDataExtractor> regional_data_extractors_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StatisticsProviderImpl);
@@ -426,7 +427,6 @@ StatisticsProviderImpl::~StatisticsProviderImpl() {
 }
 
 void StatisticsProviderImpl::StartLoadingMachineStatistics(
-    const scoped_refptr<base::TaskRunner>& file_task_runner,
     bool load_oem_manifest) {
   CHECK(!load_statistics_started_);
   load_statistics_started_ = true;
@@ -434,11 +434,12 @@ void StatisticsProviderImpl::StartLoadingMachineStatistics(
   VLOG(1) << "Started loading statistics. Load OEM Manifest: "
           << load_oem_manifest;
 
-  file_task_runner->PostTask(
+  base::PostTaskWithTraits(
       FROM_HERE,
-      base::Bind(&StatisticsProviderImpl::LoadMachineStatistics,
-                 base::Unretained(this),
-                 load_oem_manifest));
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      base::BindOnce(&StatisticsProviderImpl::LoadMachineStatistics,
+                     base::Unretained(this), load_oem_manifest));
 }
 
 void StatisticsProviderImpl::LoadMachineStatistics(bool load_oem_manifest) {
@@ -471,13 +472,22 @@ void StatisticsProviderImpl::LoadMachineStatistics(bool load_oem_manifest) {
     std::string stub_contents =
         "\"serial_number\"=\"stub_" +
         base::Int64ToString(base::Time::Now().ToJavaTime()) + "\"\n";
-    int bytes_written = base::WriteFile(machine_info_path,
-                                        stub_contents.c_str(),
-                                        stub_contents.size());
-    // static_cast<int> is fine because stub_contents is small.
+    int bytes_written = base::WriteFile(
+        machine_info_path, stub_contents.c_str(), stub_contents.size());
     if (bytes_written < static_cast<int>(stub_contents.size())) {
-      LOG(ERROR) << "Error writing machine info stub: "
-                 << machine_info_path.value();
+      PLOG(ERROR) << "Error writing machine info stub "
+                  << machine_info_path.value();
+    }
+  }
+
+  base::FilePath vpd_path;
+  PathService::Get(chromeos::FILE_VPD, &vpd_path);
+  if (!base::SysInfo::IsRunningOnChromeOS() && !base::PathExists(vpd_path)) {
+    std::string stub_contents = "\"ActivateDate\"=\"2000-01\"\n";
+    int bytes_written =
+        base::WriteFile(vpd_path, stub_contents.c_str(), stub_contents.size());
+    if (bytes_written < static_cast<int>(stub_contents.size())) {
+      PLOG(ERROR) << "Error writing vpd stub " << vpd_path.value();
     }
   }
 
@@ -487,7 +497,7 @@ void StatisticsProviderImpl::LoadMachineStatistics(bool load_oem_manifest) {
   parser.GetNameValuePairsFromFile(base::FilePath(kEchoCouponFile),
                                    kEchoCouponEq,
                                    kEchoCouponDelim);
-  parser.GetNameValuePairsFromFile(base::FilePath(kVpdFile),
+  parser.GetNameValuePairsFromFile(vpd_path,
                                    kVpdEq,
                                    kVpdDelim);
 

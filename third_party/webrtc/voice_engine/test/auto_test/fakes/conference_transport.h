@@ -16,11 +16,11 @@
 #include <memory>
 #include <utility>
 
-#include "webrtc/base/basictypes.h"
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/platform_thread.h"
 #include "webrtc/common_types.h"
 #include "webrtc/modules/rtp_rtcp/include/rtp_header_parser.h"
+#include "webrtc/rtc_base/basictypes.h"
+#include "webrtc/rtc_base/criticalsection.h"
+#include "webrtc/rtc_base/platform_thread.h"
 #include "webrtc/system_wrappers/include/event_wrapper.h"
 #include "webrtc/test/gtest.h"
 #include "webrtc/voice_engine/include/voe_base.h"
@@ -30,9 +30,10 @@
 #include "webrtc/voice_engine/include/voe_rtp_rtcp.h"
 #include "webrtc/voice_engine/test/auto_test/fakes/loudest_filter.h"
 
-static const size_t kMaxPacketSizeByte = 1500;
-
+namespace webrtc {
 namespace voetest {
+
+static const size_t kMaxPacketSizeByte = 1500;
 
 // This class is to simulate a conference call. There are two Voice Engines, one
 // for local channels and the other for remote channels. There is a simulated
@@ -146,6 +147,7 @@ class ConferenceTransport: public webrtc::Transport {
   webrtc::VoEBase* local_base_;
   webrtc::VoERTP_RTCP* local_rtp_rtcp_;
   webrtc::VoENetwork* local_network_;
+  rtc::scoped_refptr<webrtc::AudioProcessing> local_apm_;
 
   webrtc::VoiceEngine* remote_voe_;
   webrtc::VoEBase* remote_base_;
@@ -153,11 +155,13 @@ class ConferenceTransport: public webrtc::Transport {
   webrtc::VoERTP_RTCP* remote_rtp_rtcp_;
   webrtc::VoENetwork* remote_network_;
   webrtc::VoEFile* remote_file_;
-
+  rtc::scoped_refptr<webrtc::AudioProcessing> remote_apm_;
   LoudestFilter loudest_filter_;
 
   const std::unique_ptr<webrtc::RtpHeaderParser> rtp_header_parser_;
 };
+
 }  // namespace voetest
+}  // namespace webrtc
 
 #endif  // WEBRTC_VOICE_ENGINE_TEST_AUTO_TEST_FAKES_CONFERENCE_TRANSPORT_H_

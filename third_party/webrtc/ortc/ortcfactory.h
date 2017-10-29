@@ -15,11 +15,11 @@
 #include <string>
 
 #include "webrtc/api/ortc/ortcfactoryinterface.h"
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/scoped_ref_ptr.h"
 #include "webrtc/media/base/mediaengine.h"
 #include "webrtc/media/engine/webrtcmediaengine.h"
 #include "webrtc/pc/channelmanager.h"
+#include "webrtc/rtc_base/constructormagic.h"
+#include "webrtc/rtc_base/scoped_ref_ptr.h"
 
 namespace webrtc {
 
@@ -44,6 +44,12 @@ class OrtcFactory : public OrtcFactoryInterface {
   CreateRtpTransportController() override;
 
   RTCErrorOr<std::unique_ptr<RtpTransportInterface>> CreateRtpTransport(
+      const RtcpParameters& rtcp_parameters,
+      PacketTransportInterface* rtp,
+      PacketTransportInterface* rtcp,
+      RtpTransportControllerInterface* transport_controller) override;
+
+  RTCErrorOr<std::unique_ptr<SrtpTransportInterface>> CreateSrtpTransport(
       const RtcpParameters& rtcp_parameters,
       PacketTransportInterface* rtp,
       PacketTransportInterface* rtcp,
@@ -129,6 +135,7 @@ class OrtcFactory : public OrtcFactoryInterface {
   std::unique_ptr<rtc::Thread> worker_thread_;
   // Media-releated objects.
   std::unique_ptr<RtcEventLog> null_event_log_;
+  rtc::scoped_refptr<AudioEncoderFactory> audio_encoder_factory_;
   rtc::scoped_refptr<AudioDecoderFactory> audio_decoder_factory_;
   std::unique_ptr<cricket::ChannelManager> channel_manager_;
   // Default CNAME to use for RtpTransports if none is passed in.

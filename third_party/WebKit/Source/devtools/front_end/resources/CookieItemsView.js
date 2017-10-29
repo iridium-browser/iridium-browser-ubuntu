@@ -29,22 +29,23 @@
 
 Resources.CookieItemsView = class extends Resources.StorageItemsView {
   /**
-   * @param {!Resources.CookieTreeElement} treeElement
    * @param {!SDK.CookieModel} model
    * @param {string} cookieDomain
    */
-  constructor(treeElement, model, cookieDomain) {
+  constructor(model, cookieDomain) {
     super(Common.UIString('Cookies'), 'cookiesPanel');
 
     this.element.classList.add('storage-view');
 
     this._model = model;
-    this._treeElement = treeElement;
     this._cookieDomain = cookieDomain;
 
     this._totalSize = 0;
     /** @type {?CookieTable.CookiesTable} */
     this._cookiesTable = null;
+    this._refreshThrottler = new Common.Throttler(300);
+    /** @type {!Array<!Common.EventTarget.EventDescriptor>} */
+    this._eventDescriptors = [];
     this.setCookiesDomain(model, cookieDomain);
   }
 
@@ -56,21 +57,23 @@ Resources.CookieItemsView = class extends Resources.StorageItemsView {
     this._model = model;
     this._cookieDomain = domain;
     this.refreshItems();
+    Common.EventTarget.removeEventListeners(this._eventDescriptors);
+    var networkManager = model.target().model(SDK.NetworkManager);
+    this._eventDescriptors =
+        [networkManager.addEventListener(SDK.NetworkManager.Events.ResponseReceived, this._onResponseReceived, this)];
   }
 
   /**
    * @param {!SDK.Cookie} newCookie
    * @param {?SDK.Cookie} oldCookie
-   * @param {function(?string)} callback
+   * @return {!Promise<boolean>}
    */
-  _saveCookie(newCookie, oldCookie, callback) {
-    if (!this._model) {
-      callback(Common.UIString('Unable to save the cookie'));
-      return;
-    }
+  _saveCookie(newCookie, oldCookie) {
+    if (!this._model)
+      return Promise.resolve(false);
     if (oldCookie && (newCookie.name() !== oldCookie.name() || newCookie.url() !== oldCookie.url()))
       this._model.deleteCookie(oldCookie);
-    this._model.saveCookie(newCookie, callback);
+    return this._model.saveCookie(newCookie);
   }
 
   /**
@@ -82,18 +85,22 @@ Resources.CookieItemsView = class extends Resources.StorageItemsView {
   }
 
   /**
-   * @param {!Array.<!SDK.Cookie>} allCookies
+   * @param {!Array<!SDK.Cookie>} allCookies
    */
   _updateWithCookies(allCookies) {
     this._totalSize = allCookies.reduce((size, cookie) => size + cookie.size(), 0);
 
     if (!this._cookiesTable) {
-      const parsedURL = this._cookieDomain.asParsedURL();
-      const domain = parsedURL ? parsedURL.host : '';
       this._cookiesTable = new CookieTable.CookiesTable(
-          this._saveCookie.bind(this), this.refreshItems.bind(this), () => this.setCanDeleteSelected(true),
-          this._deleteCookie.bind(this), domain);
+          this._saveCookie.bind(this),
+          this.refreshItems.bind(this),
+          () => this.setCanDeleteSelected(!!this._cookiesTable.selectedCookie()),
+          this._deleteCookie.bind(this));
     }
+
+    const parsedURL = this._cookieDomain.asParsedURL();
+    const host = parsedURL ? parsedURL.host : '';
+    this._cookiesTable.setCookieDomain(host);
 
     var shownCookies = this.filter(allCookies, cookie => `${cookie.name()} ${cookie.value()} ${cookie.domain()}`);
     this._cookiesTable.setCookies(shownCookies);
@@ -123,6 +130,10 @@ Resources.CookieItemsView = class extends Resources.StorageItemsView {
    * @override
    */
   refreshItems() {
-    this._model.getCookiesForDomain(this._cookieDomain, cookies => this._updateWithCookies(cookies));
+    this._model.getCookiesForDomain(this._cookieDomain).then(this._updateWithCookies.bind(this));
+  }
+
+  _onResponseReceived() {
+    this._refreshThrottler.schedule(() => Promise.resolve(this.refreshItems()));
   }
 };

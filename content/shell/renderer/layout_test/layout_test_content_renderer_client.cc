@@ -19,7 +19,6 @@
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/renderer/layout_test/blink_test_helpers.h"
 #include "content/shell/renderer/layout_test/blink_test_runner.h"
-#include "content/shell/renderer/layout_test/interface_registry_js_wrapper.h"
 #include "content/shell/renderer/layout_test/layout_test_render_frame_observer.h"
 #include "content/shell/renderer/layout_test/layout_test_render_thread_observer.h"
 #include "content/shell/renderer/layout_test/test_media_stream_renderer_factory.h"
@@ -31,12 +30,16 @@
 #include "content/shell/test_runner/web_view_test_proxy.h"
 #include "content/test/mock_webclipboard_impl.h"
 #include "gin/modules/module_registry.h"
+#include "media/base/audio_latency.h"
 #include "media/media_features.h"
+#include "third_party/WebKit/public/platform/WebAudioLatencyHint.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamCenter.h"
+#include "third_party/WebKit/public/platform/WebRTCPeerConnectionHandler.h"
+#include "third_party/WebKit/public/platform/WebRuntimeFeatures.h"
+#include "third_party/WebKit/public/platform/modules/webmidi/WebMIDIAccessor.h"
 #include "third_party/WebKit/public/web/WebFrameWidget.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebPluginParams.h"
-#include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
 #include "third_party/WebKit/public/web/WebTestingSupport.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/gfx/icc_profile.h"
@@ -90,11 +93,11 @@ void WebViewTestProxyCreated(RenderView* render_view,
 
 void WebWidgetTestProxyCreated(blink::WebWidget* web_widget,
                                test_runner::WebWidgetTestProxyBase* proxy) {
-  CHECK(web_widget->isWebFrameWidget());
+  CHECK(web_widget->IsWebFrameWidget());
   proxy->set_web_widget(web_widget);
   blink::WebFrameWidget* web_frame_widget =
       static_cast<blink::WebFrameWidget*>(web_widget);
-  blink::WebView* web_view = web_frame_widget->localRoot()->view();
+  blink::WebView* web_view = web_frame_widget->LocalRoot()->View();
   RenderView* render_view = RenderView::FromWebView(web_view);
   test_runner::WebViewTestProxyBase* view_proxy =
       GetWebViewTestProxyBase(render_view);
@@ -150,7 +153,7 @@ void LayoutTestContentRendererClient::RenderViewCreated(
   // TODO(lfg): We should fix the TestProxy to track the WebWidgets on every
   // local root in WebFrameTestProxy instead of having only the WebWidget for
   // the main frame in WebViewTestProxy.
-  proxy->set_web_widget(render_view->GetWebView()->widget());
+  proxy->set_web_widget(render_view->GetWebView()->GetWidget());
   proxy->Reset();
 
   BlinkTestRunner* test_runner = BlinkTestRunner::Get(render_view);
@@ -162,7 +165,7 @@ void LayoutTestContentRendererClient::RenderViewCreated(
       ->InitializeWebViewWithMocks(render_view->GetWebView());
 }
 
-WebMediaStreamCenter*
+std::unique_ptr<WebMediaStreamCenter>
 LayoutTestContentRendererClient::OverrideCreateWebMediaStreamCenter(
     WebMediaStreamCenterClient* client) {
 #if BUILDFLAG(ENABLE_WEBRTC)
@@ -170,11 +173,11 @@ LayoutTestContentRendererClient::OverrideCreateWebMediaStreamCenter(
       LayoutTestRenderThreadObserver::GetInstance()->test_interfaces();
   return interfaces->CreateMediaStreamCenter(client);
 #else
-  return NULL;
+  return nullptr;
 #endif
 }
 
-WebRTCPeerConnectionHandler*
+std::unique_ptr<WebRTCPeerConnectionHandler>
 LayoutTestContentRendererClient::OverrideCreateWebRTCPeerConnectionHandler(
     WebRTCPeerConnectionHandlerClient* client) {
 #if BUILDFLAG(ENABLE_WEBRTC)
@@ -182,11 +185,11 @@ LayoutTestContentRendererClient::OverrideCreateWebRTCPeerConnectionHandler(
       LayoutTestRenderThreadObserver::GetInstance()->test_interfaces();
   return interfaces->CreateWebRTCPeerConnectionHandler(client);
 #else
-  return NULL;
+  return nullptr;
 #endif
 }
 
-WebMIDIAccessor*
+std::unique_ptr<WebMIDIAccessor>
 LayoutTestContentRendererClient::OverrideCreateMIDIAccessor(
     WebMIDIAccessorClient* client) {
   test_runner::WebTestInterfaces* interfaces =
@@ -194,10 +197,37 @@ LayoutTestContentRendererClient::OverrideCreateMIDIAccessor(
   return interfaces->CreateMIDIAccessor(client);
 }
 
-WebAudioDevice* LayoutTestContentRendererClient::OverrideCreateAudioDevice() {
+std::unique_ptr<WebAudioDevice>
+LayoutTestContentRendererClient::OverrideCreateAudioDevice(
+    const blink::WebAudioLatencyHint& latency_hint) {
+  const double hw_buffer_size = 128;
+  const double hw_sample_rate = 44100;
+  double buffer_size = 0;
+  switch (latency_hint.Category()) {
+    case blink::WebAudioLatencyHint::kCategoryInteractive:
+      buffer_size =
+          media::AudioLatency::GetInteractiveBufferSize(hw_buffer_size);
+      break;
+    case blink::WebAudioLatencyHint::kCategoryBalanced:
+      buffer_size =
+          media::AudioLatency::GetRtcBufferSize(hw_sample_rate, hw_buffer_size);
+      break;
+    case blink::WebAudioLatencyHint::kCategoryPlayback:
+      buffer_size =
+          media::AudioLatency::GetHighLatencyBufferSize(hw_sample_rate, 0);
+      break;
+    case blink::WebAudioLatencyHint::kCategoryExact:
+      buffer_size = media::AudioLatency::GetExactBufferSize(
+          base::TimeDelta::FromSecondsD(latency_hint.Seconds()), hw_sample_rate,
+          hw_buffer_size);
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
   test_runner::WebTestInterfaces* interfaces =
       LayoutTestRenderThreadObserver::GetInstance()->test_interfaces();
-  return interfaces->CreateAudioDevice(44100, 128);
+  return interfaces->CreateAudioDevice(hw_sample_rate, buffer_size);
 }
 
 WebClipboard* LayoutTestContentRendererClient::OverrideWebClipboard() {
@@ -222,51 +252,9 @@ LayoutTestContentRendererClient::CreateMediaStreamRendererFactory() {
 #endif
 }
 
-std::unique_ptr<gfx::ICCProfile>
-LayoutTestContentRendererClient::GetImageDecodeColorProfile() {
-  // TODO(ccameron): Make all platforms use the same color profile for layout
-  // tests.
-#if defined(OS_WIN)
-  return base::WrapUnique(new gfx::ICCProfile(
-      GetTestingICCProfile("sRGB")));
-#elif defined(OS_MACOSX)
-  return base::WrapUnique(new gfx::ICCProfile(
-      GetTestingICCProfile("genericRGB")));
-#else
-  return base::WrapUnique(new gfx::ICCProfile());
-#endif
-}
-
 void LayoutTestContentRendererClient::DidInitializeWorkerContextOnWorkerThread(
     v8::Local<v8::Context> context) {
-  blink::WebTestingSupport::injectInternalsObject(context);
-}
-
-void LayoutTestContentRendererClient::RunScriptsAtDocumentEnd(
-    RenderFrame* render_frame) {
-  v8::Isolate* isolate = blink::mainThreadIsolate();
-  v8::HandleScope handle_scope(isolate);
-  blink::WebLocalFrame* frame = render_frame->GetWebFrame();
-  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
-  v8::Context::Scope context_scope(context);
-
-  gin::ModuleRegistry* registry = gin::ModuleRegistry::From(context);
-  if (registry->available_modules().count(
-          InterfaceRegistryJsWrapper::kPerFrameModuleName)) {
-    return;
-  }
-
-  registry->AddBuiltinModule(
-      isolate, InterfaceRegistryJsWrapper::kPerFrameModuleName,
-      InterfaceRegistryJsWrapper::Create(isolate, context,
-                                         render_frame->GetInterfaceRegistry())
-          .ToV8());
-  registry->AddBuiltinModule(
-      isolate, InterfaceRegistryJsWrapper::kPerProcessModuleName,
-      InterfaceRegistryJsWrapper::Create(
-          isolate, context, RenderThread::Get()->GetInterfaceRegistry())
-          .ToV8());
-  registry->AttemptToLoadMoreModules(isolate);
+  blink::WebTestingSupport::InjectInternalsObject(context);
 }
 
 void LayoutTestContentRendererClient::
@@ -276,11 +264,11 @@ void LayoutTestContentRendererClient::
   v8::V8::SetFlagsFromString(flags.c_str(), static_cast<int>(flags.size()));
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kStableReleaseMode)) {
-    blink::WebRuntimeFeatures::enableTestOnlyFeatures(true);
+    blink::WebRuntimeFeatures::EnableTestOnlyFeatures(true);
   }
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableFontAntialiasing)) {
-    blink::setFontAntialiasingEnabledForTest(true);
+    blink::SetFontAntialiasingEnabledForTest(true);
   }
 }
 

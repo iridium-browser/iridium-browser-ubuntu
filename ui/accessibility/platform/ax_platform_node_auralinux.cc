@@ -364,10 +364,6 @@ void ax_platform_node_auralinux_detach(
 
 G_END_DECLS
 
-//
-// AXPlatformNodeAuraLinux implementation.
-//
-
 namespace ui {
 
 // static
@@ -376,6 +372,16 @@ AXPlatformNode* AXPlatformNode::Create(AXPlatformNodeDelegate* delegate) {
   node->Init(delegate);
   return node;
 }
+
+// static
+AXPlatformNode* AXPlatformNode::FromNativeViewAccessible(
+    gfx::NativeViewAccessible accessible) {
+  return AtkObjectToAXPlatformNodeAuraLinux(accessible);
+}
+
+//
+// AXPlatformNodeAuraLinux implementation.
+//
 
 // static
 AXPlatformNode* AXPlatformNodeAuraLinux::application_ = nullptr;
@@ -415,8 +421,12 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() {
       return ATK_ROLE_COMBO_BOX;
     case ui::AX_ROLE_DIALOG:
       return ATK_ROLE_DIALOG;
+    case ui::AX_ROLE_GENERIC_CONTAINER:
+      return ATK_ROLE_PANEL;
     case ui::AX_ROLE_GROUP:
       return ATK_ROLE_PANEL;
+    case ui::AX_ROLE_IGNORED:
+      return ATK_ROLE_REDUNDANT_OBJECT;
     case ui::AX_ROLE_IMAGE:
       return ATK_ROLE_IMAGE;
     case ui::AX_ROLE_MENU_ITEM:
@@ -455,26 +465,50 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() {
 }
 
 void AXPlatformNodeAuraLinux::GetAtkState(AtkStateSet* atk_state_set) {
-  uint32_t state = GetData().state;
-
-  if (state & (1 << ui::AX_STATE_CHECKED))
-    atk_state_set_add_state(atk_state_set, ATK_STATE_CHECKED);
-  if (state & (1 << ui::AX_STATE_DEFAULT))
+  AXNodeData data = GetData();
+  if (data.HasState(ui::AX_STATE_DEFAULT))
     atk_state_set_add_state(atk_state_set, ATK_STATE_DEFAULT);
-  if (state & (1 << ui::AX_STATE_EDITABLE))
+  if (data.HasState(ui::AX_STATE_EDITABLE))
     atk_state_set_add_state(atk_state_set, ATK_STATE_EDITABLE);
-  if (!(state & (1 << ui::AX_STATE_DISABLED)))
-    atk_state_set_add_state(atk_state_set, ATK_STATE_ENABLED);
-  if (state & (1 << ui::AX_STATE_EXPANDED))
+  if (data.HasState(ui::AX_STATE_EXPANDED))
     atk_state_set_add_state(atk_state_set, ATK_STATE_EXPANDED);
-  if (state & (1 << ui::AX_STATE_FOCUSABLE))
+  if (data.HasState(ui::AX_STATE_FOCUSABLE))
     atk_state_set_add_state(atk_state_set, ATK_STATE_FOCUSABLE);
-  if (state & (1 << ui::AX_STATE_PRESSED))
-    atk_state_set_add_state(atk_state_set, ATK_STATE_PRESSED);
-  if (state & (1 << ui::AX_STATE_SELECTABLE))
-    atk_state_set_add_state(atk_state_set, ATK_STATE_SELECTABLE);
-  if (state & (1 << ui::AX_STATE_SELECTED))
+  if (data.HasState(ui::AX_STATE_HASPOPUP))
+    atk_state_set_add_state(atk_state_set, ATK_STATE_HAS_POPUP);
+  if (data.HasState(ui::AX_STATE_SELECTED))
     atk_state_set_add_state(atk_state_set, ATK_STATE_SELECTED);
+  if (data.HasState(ui::AX_STATE_SELECTABLE))
+    atk_state_set_add_state(atk_state_set, ATK_STATE_SELECTABLE);
+
+  // Checked state
+  const auto checked_state = static_cast<ui::AXCheckedState>(
+      GetIntAttribute(ui::AX_ATTR_CHECKED_STATE));
+  switch (checked_state) {
+    case ui::AX_CHECKED_STATE_MIXED:
+      atk_state_set_add_state(atk_state_set, ATK_STATE_INDETERMINATE);
+      break;
+    case ui::AX_CHECKED_STATE_TRUE:
+      atk_state_set_add_state(atk_state_set,
+                              data.role == ui::AX_ROLE_TOGGLE_BUTTON
+                                  ? ATK_STATE_PRESSED
+                                  : ATK_STATE_CHECKED);
+      break;
+    default:
+      break;
+  }
+
+  switch (GetIntAttribute(ui::AX_ATTR_RESTRICTION)) {
+    case ui::AX_RESTRICTION_NONE:
+      atk_state_set_add_state(atk_state_set, ATK_STATE_ENABLED);
+      break;
+    case ui::AX_RESTRICTION_READ_ONLY:
+      // The following would require ATK 2.16 or later, which many
+      // systems do not have. Since we aren't officially supporting ATK
+      // it's best to leave this out rather than break people's builds:
+      // atk_state_set_add_state(atk_state_set, ATK_STATE_READ_ONLY);
+      break;
+  }
 
   if (delegate_->GetFocus() == GetNativeViewAccessible())
     atk_state_set_add_state(atk_state_set, ATK_STATE_FOCUSED);

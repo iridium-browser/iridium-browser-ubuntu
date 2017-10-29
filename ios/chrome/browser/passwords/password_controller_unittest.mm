@@ -728,26 +728,54 @@ static NSString* kHtmlWithMultiplePasswordForms =
      "<form name=\"f6'\">"
      "<input id=\"un6'\" type='text' name=\"u6'\">"
      "<input id=\"pw6'\" type='password' name=\"p6'\">"
-     "</form>";
+     "</form>"
+     "<iframe name='pf'></iframe>"
+     "<script>"
+     "  var doc = frames['pf'].document.open();"
+     // Add a form inside iframe. It should also be matched and autofilled.
+     "  doc.write('<form><input id=\\'un7\\' type=\\'text\\' name=\\'u4\\'>');"
+     "  doc.write('<input id=\\'pw7\\' type=\\'password\\' name=\\'p4\\'>');"
+     "  doc.write('</form>');"
+     // Add a non-password form inside iframe. It should not be matched.
+     "  doc.write('<form><input id=\\'un8\\' type=\\'text\\' name=\\'u4\\'>');"
+     "  doc.write('<input id=\\'pw8\\' type=\\'text\\' name=\\'p4\\'>');"
+     "  doc.write('</form>');"
+     "  doc.close();"
+     "</script>";
 
-// A script that resets all text fields.
+// A script that resets all text fields, including those in iframes.
 static NSString* kClearInputFieldsScript =
-    @"var inputs = document.getElementsByTagName('input');"
-     "for(var i = 0; i < inputs.length; i++){"
-     "  inputs[i].value = '';"
-     "}";
-
-// A script that we run after autofilling forms.  It returns
-// ids and values of all non-empty fields.
-static NSString* kInputFieldValueVerificationScript =
-    @"var result='';"
-     "var inputs = document.getElementsByTagName('input');"
-     "for(var i = 0; i < inputs.length; i++){"
-     "  var input = inputs[i];"
-     "  if (input.value) {"
-     "    result += input.id + '=' + input.value +';';"
+    @"function clearInputFields(win) {"
+     "  var inputs = win.document.getElementsByTagName('input');"
+     "  for (var i = 0; i < inputs.length; i++) {"
+     "    inputs[i].value = '';"
      "  }"
-     "}; result";
+     "  var frames = win.frames;"
+     "  for (var i = 0; i < frames.length; i++) {"
+     "    clearInputFields(frames[i]);"
+     "  }"
+     "}"
+     "clearInputFields(window);";
+
+// A script that runs after autofilling forms.  It returns ids and values of all
+// non-empty fields, including those in iframes.
+static NSString* kInputFieldValueVerificationScript =
+    @"function findAllInputs(win) {"
+     "  var result = '';"
+     "  var inputs = win.document.getElementsByTagName('input');"
+     "  for (var i = 0; i < inputs.length; i++) {"
+     "    var input = inputs[i];"
+     "    if (input.value) {"
+     "      result += input.id + '=' + input.value + ';';"
+     "    }"
+     "  }"
+     "  var frames = win.frames;"
+     "  for (var i = 0; i < frames.length; i++) {"
+     "    result += findAllInputs(frames[i]);"
+     "  }"
+     "  return result;"
+     "};"
+     "var result = findAllInputs(window); result";
 
 struct FillPasswordFormTestData {
   const std::string origin;
@@ -760,11 +788,9 @@ struct FillPasswordFormTestData {
   NSString* expected_result;
 };
 
-// Test that filling password forms works correctly.
+// Tests that filling password forms works correctly.
 TEST_F(PasswordControllerTest, FillPasswordForm) {
   LoadHtml(kHtmlWithMultiplePasswordForms);
-
-  EXPECT_NSEQ(@YES, ExecuteJavaScript(@"__gCrWeb.hasPasswordField()"));
 
   const std::string base_url = BaseUrl();
   // clang-format off
@@ -780,7 +806,8 @@ TEST_F(PasswordControllerTest, FillPasswordForm) {
       YES,
       @"un0=test_user;pw0=test_password;"
     },
-    // Multiple forms match: they should all be autofilled.
+    // Multiple forms match (including one in iframe): they should all be
+    // autofilled.
     {
       base_url,
       base_url,
@@ -790,6 +817,7 @@ TEST_F(PasswordControllerTest, FillPasswordForm) {
       "test_password",
       YES,
       @"un4=test_user;pw4=test_password;un5=test_user;pw5=test_password;"
+      "un7=test_user;pw7=test_password;"
     },
     // The form matches despite a different action: the only difference
     // is a query and reference.
@@ -943,7 +971,6 @@ TEST_F(PasswordControllerTest, FindAndFillMultiplePasswordForms) {
 
 BOOL PasswordControllerTest::BasicFormFill(NSString* html) {
   LoadHtml(html);
-  EXPECT_NSEQ(@YES, ExecuteJavaScript(@"__gCrWeb.hasPasswordField()"));
   const std::string base_url = BaseUrl();
   PasswordFormFillData form_data;
   SetPasswordFormFillData(form_data, base_url, base_url, "u0", "test_user",
@@ -1269,10 +1296,6 @@ TEST(PasswordControllerTestSimple, SaveOnNonHTMLLandingPage) {
   MockPasswordManagerClient* weak_client = nullptr;
   PasswordController* passwordController =
       CreatePasswordController(&web_state, nullptr, &weak_client);
-  static_cast<TestingPrefServiceSimple*>(weak_client->GetPrefs())
-      ->registry()
-      ->RegisterBooleanPref(
-          password_manager::prefs::kPasswordManagerSavingEnabled, true);
 
   // Use a mock LogManager to detect that OnPasswordFormsRendered has been
   // called. TODO(crbug.com/598672): this is a hack, we should modularize the
@@ -1292,6 +1315,7 @@ TEST(PasswordControllerTestSimple, SaveOnNonHTMLLandingPage) {
   web_state.SetContentIsHTML(false);
   web_state.SetCurrentURL(GURL("https://example.com"));
   [passwordController webState:&web_state didLoadPageWithSuccess:YES];
+  [passwordController detach];
 }
 
 // Tests that an HTTP page without a password field does not update the SSL

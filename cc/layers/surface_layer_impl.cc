@@ -8,6 +8,7 @@
 
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/debug/debug_colors.h"
+#include "cc/layers/append_quads_data.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/surface_draw_quad.h"
 #include "cc/trees/layer_tree_impl.h"
@@ -16,20 +17,17 @@
 namespace cc {
 
 SurfaceLayerImpl::SurfaceLayerImpl(LayerTreeImpl* tree_impl, int id)
-    : LayerImpl(tree_impl, id) {
-  layer_tree_impl()->AddSurfaceLayer(this);
-}
+    : LayerImpl(tree_impl, id) {}
 
-SurfaceLayerImpl::~SurfaceLayerImpl() {
-  layer_tree_impl()->RemoveSurfaceLayer(this);
-}
+SurfaceLayerImpl::~SurfaceLayerImpl() {}
 
 std::unique_ptr<LayerImpl> SurfaceLayerImpl::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
   return SurfaceLayerImpl::Create(tree_impl, id());
 }
 
-void SurfaceLayerImpl::SetPrimarySurfaceInfo(const SurfaceInfo& surface_info) {
+void SurfaceLayerImpl::SetPrimarySurfaceInfo(
+    const viz::SurfaceInfo& surface_info) {
   if (primary_surface_info_ == surface_info)
     return;
 
@@ -37,7 +35,8 @@ void SurfaceLayerImpl::SetPrimarySurfaceInfo(const SurfaceInfo& surface_info) {
   NoteLayerPropertyChanged();
 }
 
-void SurfaceLayerImpl::SetFallbackSurfaceInfo(const SurfaceInfo& surface_info) {
+void SurfaceLayerImpl::SetFallbackSurfaceInfo(
+    const viz::SurfaceInfo& surface_info) {
   if (fallback_surface_info_ == surface_info)
     return;
 
@@ -64,22 +63,39 @@ void SurfaceLayerImpl::PushPropertiesTo(LayerImpl* layer) {
 void SurfaceLayerImpl::AppendQuads(RenderPass* render_pass,
                                    AppendQuadsData* append_quads_data) {
   AppendRainbowDebugBorder(render_pass);
-  auto* primary = CreateSurfaceDrawQuad(
-      render_pass, SurfaceDrawQuadType::PRIMARY, primary_surface_info_);
+  if (!primary_surface_info_.is_valid())
+    return;
+
+  SharedQuadState* common_shared_quad_state = nullptr;
+  auto* primary =
+      CreateSurfaceDrawQuad(render_pass, SurfaceDrawQuadType::PRIMARY,
+                            primary_surface_info_, &common_shared_quad_state);
   // Emitting a fallback SurfaceDrawQuad is unnecessary if the primary and
   // fallback surface Ids match.
   if (primary && fallback_surface_info_.id() != primary_surface_info_.id()) {
-    primary->fallback_quad = CreateSurfaceDrawQuad(
-        render_pass, SurfaceDrawQuadType::FALLBACK, fallback_surface_info_);
+    // Add the primary surface ID as a dependency.
+    append_quads_data->activation_dependencies.push_back(
+        primary_surface_info_.id());
+    if (fallback_surface_info_.is_valid()) {
+      // We can use the same SharedQuadState as the primary SurfaceDrawQuad if
+      // we don't need a different transform on the fallback.
+      bool use_common_shared_quad_state =
+          !stretch_content_to_fill_bounds_ &&
+          primary_surface_info_.device_scale_factor() ==
+              fallback_surface_info_.device_scale_factor();
+      primary->fallback_quad = CreateSurfaceDrawQuad(
+          render_pass, SurfaceDrawQuadType::FALLBACK, fallback_surface_info_,
+          use_common_shared_quad_state ? &common_shared_quad_state : nullptr);
+    }
   }
 }
 
 SurfaceDrawQuad* SurfaceLayerImpl::CreateSurfaceDrawQuad(
     RenderPass* render_pass,
     SurfaceDrawQuadType surface_draw_quad_type,
-    const SurfaceInfo& surface_info) {
-  if (!surface_info.is_valid())
-    return nullptr;
+    const viz::SurfaceInfo& surface_info,
+    SharedQuadState** common_shared_quad_state) {
+  DCHECK(surface_info.is_valid());
 
   gfx::Rect quad_rect(surface_info.size_in_pixels());
   gfx::Rect visible_quad_rect =
@@ -101,33 +117,44 @@ SurfaceDrawQuad* SurfaceLayerImpl::CreateSurfaceDrawQuad(
         surface_info.device_scale_factor();
   }
 
-  visible_quad_rect = gfx::ScaleToEnclosedRect(
+  visible_quad_rect = gfx::ScaleToEnclosingRect(
       visible_quad_rect, layer_to_content_scale_x, layer_to_content_scale_y);
   visible_quad_rect = gfx::IntersectRects(quad_rect, visible_quad_rect);
 
   if (visible_quad_rect.IsEmpty())
     return nullptr;
 
+  // If a |common_shared_quad_state| is provided then use that. Otherwise,
+  // allocate a new SharedQuadState. Assign the new SharedQuadState to
+  // *|common_shared_quad_state| so that it may be reused by another emitted
+  // SurfaceDrawQuad.
   SharedQuadState* shared_quad_state =
-      render_pass->CreateAndAppendSharedQuadState();
-  PopulateScaledSharedQuadState(shared_quad_state, layer_to_content_scale_x,
-                                layer_to_content_scale_y);
+      common_shared_quad_state ? *common_shared_quad_state : nullptr;
+  if (!shared_quad_state) {
+    shared_quad_state = render_pass->CreateAndAppendSharedQuadState();
+    PopulateScaledSharedQuadState(shared_quad_state, layer_to_content_scale_x,
+                                  layer_to_content_scale_y);
+  }
+  if (common_shared_quad_state)
+    *common_shared_quad_state = shared_quad_state;
 
   SurfaceDrawQuad* surface_draw_quad =
       render_pass->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
   surface_draw_quad->SetNew(shared_quad_state, quad_rect, visible_quad_rect,
                             surface_info.id(), surface_draw_quad_type, nullptr);
+
   return surface_draw_quad;
 }
 
 void SurfaceLayerImpl::GetDebugBorderProperties(SkColor* color,
                                                 float* width) const {
   *color = DebugColors::SurfaceLayerBorderColor();
-  *width = DebugColors::SurfaceLayerBorderWidth(layer_tree_impl());
+  *width = DebugColors::SurfaceLayerBorderWidth(
+      layer_tree_impl() ? layer_tree_impl()->device_scale_factor() : 1);
 }
 
 void SurfaceLayerImpl::AppendRainbowDebugBorder(RenderPass* render_pass) {
-  if (!ShowDebugBorders())
+  if (!ShowDebugBorders(DebugBorderType::SURFACE))
     return;
 
   SharedQuadState* shared_quad_state =

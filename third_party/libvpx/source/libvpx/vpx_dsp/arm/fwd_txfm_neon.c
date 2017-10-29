@@ -14,6 +14,7 @@
 #include "vpx_dsp/txfm_common.h"
 #include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_dsp/arm/idct_neon.h"
+#include "vpx_dsp/arm/mem_neon.h"
 
 void vpx_fdct8x8_neon(const int16_t *input, tran_low_t *final_output,
                       int stride) {
@@ -125,6 +126,8 @@ void vpx_fdct8x8_neon(const int16_t *input, tran_low_t *final_output,
       out_7 = vcombine_s16(f, h);  // 34 35 36 37 74 75 76 77
     }
     // transpose 8x8
+    // Can't use transpose_s16_8x8() because the values are arranged in two 4x8
+    // columns.
     {
       // 00 01 02 03 40 41 42 43
       // 10 11 12 13 50 51 52 53
@@ -202,26 +205,5 @@ void vpx_fdct8x8_neon(const int16_t *input, tran_low_t *final_output,
     store_s16q_to_tran_low(final_output + 5 * 8, input_5);
     store_s16q_to_tran_low(final_output + 6 * 8, input_6);
     store_s16q_to_tran_low(final_output + 7 * 8, input_7);
-  }
-}
-
-void vpx_fdct8x8_1_neon(const int16_t *input, tran_low_t *output, int stride) {
-  int r;
-  int16x8_t sum = vld1q_s16(&input[0]);
-  for (r = 1; r < 8; ++r) {
-    const int16x8_t input_00 = vld1q_s16(&input[r * stride]);
-    sum = vaddq_s16(sum, input_00);
-  }
-  {
-    const int32x4_t a = vpaddlq_s16(sum);
-    const int64x2_t b = vpaddlq_s32(a);
-    const int32x2_t c = vadd_s32(vreinterpret_s32_s64(vget_low_s64(b)),
-                                 vreinterpret_s32_s64(vget_high_s64(b)));
-#if CONFIG_VP9_HIGHBITDEPTH
-    output[0] = vget_lane_s32(c, 0);
-#else
-    output[0] = vget_lane_s16(vreinterpret_s16_s32(c), 0);
-#endif
-    output[1] = 0;
   }
 }

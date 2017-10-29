@@ -6,6 +6,7 @@
 
 #include "base/files/file_path.h"
 #include "base/path_service.h"
+#include "base/threading/thread_restrictions.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/notification_types.h"
@@ -21,29 +22,43 @@ ShellApiTest::ShellApiTest() {
 ShellApiTest::~ShellApiTest() {
 }
 
-const Extension* ShellApiTest::LoadApp(const std::string& app_dir) {
+const Extension* ShellApiTest::LoadExtension(const std::string& extension_dir) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::FilePath test_data_dir;
   PathService::Get(extensions::DIR_TEST_DATA, &test_data_dir);
-  test_data_dir = test_data_dir.AppendASCII(app_dir);
+  base::FilePath extension_path = test_data_dir.AppendASCII(extension_dir);
 
-  const Extension* extension = extension_system_->LoadApp(test_data_dir);
-  if (!extension)
-    return NULL;
+  return extension_system_->LoadExtension(extension_path);
+}
 
-  extension_system_->LaunchApp(extension->id());
+const Extension* ShellApiTest::LoadApp(const std::string& app_dir) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::FilePath test_data_dir;
+  PathService::Get(extensions::DIR_TEST_DATA, &test_data_dir);
+  base::FilePath app_path = test_data_dir.AppendASCII(app_dir);
 
+  const Extension* extension = extension_system_->LoadApp(app_path);
+  if (extension)
+    extension_system_->LaunchApp(extension->id());
   return extension;
+}
+
+bool ShellApiTest::RunExtensionTest(const std::string& extension_dir) {
+  ResultCatcher catcher;
+  return RunTest(LoadExtension(extension_dir), &catcher);
 }
 
 bool ShellApiTest::RunAppTest(const std::string& app_dir) {
   ResultCatcher catcher;
+  return RunTest(LoadApp(app_dir), &catcher);
+}
 
-  const Extension* extension = LoadApp(app_dir);
+bool ShellApiTest::RunTest(const Extension* extension, ResultCatcher* catcher) {
   if (!extension)
     return false;
 
-  if (!catcher.GetNextResult()) {
-    message_ = catcher.message();
+  if (!catcher->GetNextResult()) {
+    message_ = catcher->message();
     return false;
   }
 
@@ -54,16 +69,8 @@ void ShellApiTest::UnloadApp(const Extension* app) {
   ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context());
   ASSERT_TRUE(registry->RemoveEnabled(app->id()));
 
-  UnloadedExtensionInfo::Reason reason(UnloadedExtensionInfo::REASON_DISABLE);
+  UnloadedExtensionReason reason(UnloadedExtensionReason::DISABLE);
   registry->TriggerOnUnloaded(app, reason);
-
-  // The following notifications are deprecated and in the future, classes
-  // should only be observing the ExtensionRegistry.
-  UnloadedExtensionInfo details(app, reason);
-  content::NotificationService::current()->Notify(
-      extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
-      content::Source<content::BrowserContext>(browser_context()),
-      content::Details<UnloadedExtensionInfo>(&details));
 
   content::NotificationService::current()->Notify(
       extensions::NOTIFICATION_EXTENSION_REMOVED,

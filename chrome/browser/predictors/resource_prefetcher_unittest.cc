@@ -14,10 +14,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/test/histogram_tester.h"
-#include "chrome/browser/predictors/resource_prefetch_predictor_test_util.h"
-#include "chrome/browser/predictors/resource_prefetcher_manager.h"
+#include "chrome/browser/predictors/loading_test_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request.h"
@@ -30,42 +30,16 @@ using testing::Property;
 
 namespace predictors {
 
-// Wrapper over the ResourcePrefetcher that stubs out the StartURLRequest call
-// since we do not want to do network fetches in this unittest.
-class TestResourcePrefetcher : public ResourcePrefetcher {
- public:
-  TestResourcePrefetcher(ResourcePrefetcher::Delegate* delegate,
-                         const ResourcePrefetchPredictorConfig& config,
-                         const GURL& main_frame_url,
-                         const std::vector<GURL>& urls)
-      : ResourcePrefetcher(delegate, config, main_frame_url, urls) {}
-
-  ~TestResourcePrefetcher() override {}
-
-  MOCK_METHOD1(StartURLRequest, void(net::URLRequest* request));
-
-  void ReadFullResponse(net::URLRequest* request) override {
-    EXPECT_TRUE(request->load_flags() & net::LOAD_PREFETCH);
-    RequestComplete(request);
-    FinishRequest(request);
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestResourcePrefetcher);
-};
-
+constexpr size_t kMaxConcurrentRequests = 5;
+constexpr size_t kMaxConcurrentRequestsPerHost = 2;
 
 // Delegate for ResourcePrefetcher.
-class TestResourcePrefetcherDelegate : public ResourcePrefetcher::Delegate {
+class TestResourcePrefetcherDelegate
+    : public ResourcePrefetcher::Delegate,
+      public base::SupportsWeakPtr<TestResourcePrefetcherDelegate> {
  public:
-  explicit TestResourcePrefetcherDelegate(base::MessageLoop* loop)
-      : request_context_getter_(
-            new net::TestURLRequestContextGetter(loop->task_runner())) {}
-  ~TestResourcePrefetcherDelegate() override {}
-
-  net::URLRequestContext* GetURLRequestContext() override {
-    return request_context_getter_->GetURLRequestContext();
-  }
+  TestResourcePrefetcherDelegate() = default;
+  ~TestResourcePrefetcherDelegate() override = default;
 
   void ResourcePrefetcherFinished(
       ResourcePrefetcher* prefetcher,
@@ -80,12 +54,42 @@ class TestResourcePrefetcherDelegate : public ResourcePrefetcher::Delegate {
   }
 
  private:
-  scoped_refptr<net::TestURLRequestContextGetter> request_context_getter_;
   ResourcePrefetcher* prefetcher_;
 
   DISALLOW_COPY_AND_ASSIGN(TestResourcePrefetcherDelegate);
 };
 
+// Wrapper over the ResourcePrefetcher that stubs out the StartURLRequest call
+// since we do not want to do network fetches in this unittest.
+class TestResourcePrefetcher : public ResourcePrefetcher {
+ public:
+  TestResourcePrefetcher(
+      TestResourcePrefetcherDelegate* delegate,
+      scoped_refptr<net::URLRequestContextGetter> context_getter,
+      size_t max_concurrent_requests,
+      size_t max_concurrent_requests_per_host,
+      const GURL& main_frame_url,
+      const std::vector<GURL>& urls)
+      : ResourcePrefetcher(delegate->AsWeakPtr(),
+                           context_getter,
+                           max_concurrent_requests,
+                           max_concurrent_requests_per_host,
+                           main_frame_url,
+                           urls) {}
+
+  ~TestResourcePrefetcher() override {}
+
+  MOCK_METHOD1(StartURLRequest, void(net::URLRequest* request));
+
+  void ReadFullResponse(net::URLRequest* request) override {
+    EXPECT_TRUE(request->load_flags() & net::LOAD_PREFETCH);
+    RequestComplete(request);
+    FinishRequest(request);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestResourcePrefetcher);
+};
 
 // The following unittest tests most of the ResourcePrefetcher except for:
 // 1. Call to ReadFullResponse. There does not seem to be a good way to test the
@@ -142,22 +146,19 @@ class ResourcePrefetcherTest : public testing::Test {
     prefetcher_->OnResponseStarted(GetInFlightRequest(url), net::OK);
   }
 
-  base::MessageLoop loop_;
-  content::TestBrowserThread io_thread_;
-  ResourcePrefetchPredictorConfig config_;
+  content::TestBrowserThreadBundle thread_bundle_;
   TestResourcePrefetcherDelegate prefetcher_delegate_;
   std::unique_ptr<TestResourcePrefetcher> prefetcher_;
+  scoped_refptr<net::URLRequestContextGetter> context_getter_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ResourcePrefetcherTest);
 };
 
 ResourcePrefetcherTest::ResourcePrefetcherTest()
-    : loop_(base::MessageLoop::TYPE_IO),
-      io_thread_(content::BrowserThread::IO, &loop_),
-      prefetcher_delegate_(&loop_) {
-  config_.max_prefetches_inflight_per_host_per_navigation = 2;
-}
+    : prefetcher_delegate_(),
+      context_getter_(new net::TestURLRequestContextGetter(
+          base::ThreadTaskRunnerHandle::Get())) {}
 
 ResourcePrefetcherTest::~ResourcePrefetcherTest() {
 }
@@ -177,8 +178,9 @@ TEST_F(ResourcePrefetcherTest, TestPrefetcherFinishes) {
                             GURL("http://yahoo.com/resource4.png"),
                             GURL("http://yahoo.com/resource5.png")};
 
-  prefetcher_.reset(new TestResourcePrefetcher(&prefetcher_delegate_, config_,
-                                               main_frame_url, urls));
+  prefetcher_ = base::MakeUnique<TestResourcePrefetcher>(
+      &prefetcher_delegate_, context_getter_, kMaxConcurrentRequests,
+      kMaxConcurrentRequestsPerHost, main_frame_url, urls);
 
   // Starting the prefetcher maxes out the number of possible requests.
   AddStartUrlRequestExpectation("http://www.google.com/resource1.html");
@@ -233,6 +235,7 @@ TEST_F(ResourcePrefetcherTest, TestPrefetcherFinishes) {
   OnResponse("http://yahoo.com/resource3.png");
   CheckPrefetcherState(0, 0, 0);
 
+  base::RunLoop().RunUntilIdle();
   // Expect the final call.
   EXPECT_TRUE(
       prefetcher_delegate_.ResourcePrefetcherFinishedCalled(prefetcher_.get()));
@@ -247,8 +250,9 @@ TEST_F(ResourcePrefetcherTest, TestPrefetcherStopped) {
                             GURL("http://yahoo.com/resource3.png"),
                             GURL("http://m.google.com/resource1.jpg")};
 
-  prefetcher_.reset(new TestResourcePrefetcher(&prefetcher_delegate_, config_,
-                                               main_frame_url, urls));
+  prefetcher_ = base::MakeUnique<TestResourcePrefetcher>(
+      &prefetcher_delegate_, context_getter_, kMaxConcurrentRequests,
+      kMaxConcurrentRequestsPerHost, main_frame_url, urls);
 
   // Starting the prefetcher maxes out the number of possible requests.
   AddStartUrlRequestExpectation("http://www.google.com/resource1.html");
@@ -277,6 +281,7 @@ TEST_F(ResourcePrefetcherTest, TestPrefetcherStopped) {
   OnResponse("http://m.google.com/resource1.jpg");
   CheckPrefetcherState(0, 1, 0);
 
+  base::RunLoop().RunUntilIdle();
   // Expect the final call.
   EXPECT_TRUE(
       prefetcher_delegate_.ResourcePrefetcherFinishedCalled(prefetcher_.get()));
@@ -293,7 +298,8 @@ TEST_F(ResourcePrefetcherTest, TestHistogramsCollected) {
                             GURL("http://www.google.com/resource6.png")};
 
   prefetcher_ = base::MakeUnique<TestResourcePrefetcher>(
-      &prefetcher_delegate_, config_, main_frame_url, urls);
+      &prefetcher_delegate_, context_getter_, kMaxConcurrentRequests,
+      kMaxConcurrentRequestsPerHost, main_frame_url, urls);
 
   // Starting the prefetcher maxes out the number of possible requests.
   AddStartUrlRequestExpectation("http://www.google.com/resource1.png");
@@ -328,6 +334,7 @@ TEST_F(ResourcePrefetcherTest, TestHistogramsCollected) {
   histogram_tester.ExpectTotalCount(
       internal::kResourcePrefetchPredictorPrefetchedSizeHistogram, 1);
 
+  base::RunLoop().RunUntilIdle();
   // Expect the final call.
   EXPECT_TRUE(
       prefetcher_delegate_.ResourcePrefetcherFinishedCalled(prefetcher_.get()));
@@ -341,7 +348,8 @@ TEST_F(ResourcePrefetcherTest, TestReferrer) {
   std::vector<GURL> urls = {GURL(https_resource), GURL(http_resource)};
 
   prefetcher_ = base::MakeUnique<TestResourcePrefetcher>(
-      &prefetcher_delegate_, config_, GURL(url), urls);
+      &prefetcher_delegate_, context_getter_, kMaxConcurrentRequests,
+      kMaxConcurrentRequestsPerHost, GURL(url), urls);
 
   AddStartUrlRequestExpectation(https_resource);
   AddStartUrlRequestExpectation(http_resource);
@@ -358,6 +366,7 @@ TEST_F(ResourcePrefetcherTest, TestReferrer) {
   OnResponse(https_resource);
   OnResponse(http_resource);
 
+  base::RunLoop().RunUntilIdle();
   // Expect the final call.
   EXPECT_TRUE(
       prefetcher_delegate_.ResourcePrefetcherFinishedCalled(prefetcher_.get()));

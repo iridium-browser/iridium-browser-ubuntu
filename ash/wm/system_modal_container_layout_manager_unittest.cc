@@ -2,18 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/wm/system_modal_container_layout_manager.h"
+#include "ash/wm/system_modal_container_layout_manager.h"
 
 #include <memory>
 
-#include "ash/common/session/session_state_delegate.h"
-#include "ash/common/wm/container_finder.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
+#include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/shell_port.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/container_finder.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -30,15 +29,14 @@
 #include "ui/events/test/event_generator.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
+#include "ui/keyboard/keyboard_test_util.h"
 #include "ui/keyboard/keyboard_ui.h"
-#include "ui/keyboard/keyboard_util.h"
 #include "ui/views/test/capture_tracking_view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
-namespace test {
 
 namespace {
 
@@ -48,12 +46,12 @@ aura::Window* GetModalContainer() {
 }
 
 bool AllRootWindowsHaveModalBackgroundsForContainer(int container_id) {
-  WmWindow::Windows containers =
+  aura::Window::Windows containers =
       wm::GetContainersFromAllRootWindows(container_id);
   bool has_modal_screen = !containers.empty();
-  for (WmWindow* container : containers) {
+  for (aura::Window* container : containers) {
     has_modal_screen &= static_cast<SystemModalContainerLayoutManager*>(
-                            container->GetLayoutManager())
+                            container->layout_manager())
                             ->has_window_dimmer();
   }
   return has_modal_screen;
@@ -81,7 +79,9 @@ class TestWindow : public views::WidgetDelegateView {
   }
 
   // Overridden from views::View:
-  gfx::Size GetPreferredSize() const override { return gfx::Size(50, 50); }
+  gfx::Size CalculatePreferredSize() const override {
+    return gfx::Size(50, 50);
+  }
 
   // Overridden from views::WidgetDelegate:
   ui::ModalType GetModalType() const override {
@@ -152,13 +152,19 @@ class SystemModalContainerLayoutManagerTest : public AshTestBase {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         keyboard::switches::kEnableVirtualKeyboard);
     AshTestBase::SetUp();
-    Shell::GetPrimaryRootWindowController()->ActivateKeyboard(
-        keyboard::KeyboardController::GetInstance());
+    // TODO: mash doesn't support virtual keyboard. http://crbug.com/698892.
+    if (Shell::GetAshConfig() != Config::MASH) {
+      Shell::GetPrimaryRootWindowController()->ActivateKeyboard(
+          keyboard::KeyboardController::GetInstance());
+    }
   }
 
   void TearDown() override {
-    Shell::GetPrimaryRootWindowController()->DeactivateKeyboard(
-        keyboard::KeyboardController::GetInstance());
+    // TODO: mash doesn't support virtual keyboard. http://crbug.com/698892.
+    if (Shell::GetAshConfig() != Config::MASH) {
+      Shell::GetPrimaryRootWindowController()->DeactivateKeyboard(
+          keyboard::KeyboardController::GetInstance());
+    }
     AshTestBase::TearDown();
   }
 
@@ -186,8 +192,8 @@ class SystemModalContainerLayoutManagerTest : public AshTestBase {
 
     if (show) {
       keyboard->ShowKeyboard(true);
-      if (keyboard->ui()->GetKeyboardWindow()->bounds().height() == 0) {
-        keyboard->ui()->GetKeyboardWindow()->SetBounds(
+      if (keyboard->ui()->GetContentsWindow()->bounds().height() == 0) {
+        keyboard->ui()->GetContentsWindow()->SetBounds(
             keyboard::FullWidthKeyboardBoundsFromRootBounds(
                 Shell::GetPrimaryRootWindow()->bounds(), 100));
       }
@@ -352,10 +358,14 @@ TEST_F(SystemModalContainerLayoutManagerTest, EventFocusContainers) {
     // Create a window in the lock screen container and ensure that it receives
     // the mouse event instead of the modal window (crbug.com/110920).
     BlockUserSession(static_cast<UserSessionBlockReason>(block_reason));
+
     EventTestWindow* lock_delegate = new EventTestWindow(false);
     std::unique_ptr<aura::Window> lock(lock_delegate->OpenTestWindowWithParent(
         Shell::GetPrimaryRootWindowController()->GetContainer(
             ash::kShellWindowId_LockScreenContainer)));
+    // BlockUserSession could change the workspace size. Make sure |lock| has
+    // the same bounds as |main| so that |lock| gets the generated mouse events.
+    lock->SetBounds(main->bounds());
     EXPECT_TRUE(wm::IsActiveWindow(lock.get()));
     e1.ClickLeftButton();
     EXPECT_EQ(1, lock_delegate->mouse_presses());
@@ -372,6 +382,11 @@ TEST_F(SystemModalContainerLayoutManagerTest, EventFocusContainers) {
     EXPECT_EQ(1, lock_delegate->mouse_presses());
     EXPECT_EQ(1, main_delegate->mouse_presses());
     EXPECT_EQ(1, transient_delegate->mouse_presses());
+
+    // Close |lock| before unlocking so that Shell::OnLockStateChanged does
+    // not DCHECK on finding a system modal in Lock layer when unlocked.
+    lock.reset();
+
     UnblockUserSession();
   }
 }
@@ -410,7 +425,7 @@ TEST_F(SystemModalContainerLayoutManagerTest, ModalTransientChildEvents) {
   aura::test::EventCountDelegate control_delegate;
   control_delegate.set_window_component(HTCLIENT);
   std::unique_ptr<aura::Window> child(new aura::Window(&control_delegate));
-  child->SetType(ui::wm::WINDOW_TYPE_CONTROL);
+  child->SetType(aura::client::WINDOW_TYPE_CONTROL);
   child->Init(ui::LAYER_TEXTURED);
   modal1_transient->AddChild(child.get());
   child->SetBounds(gfx::Rect(100, 100));
@@ -575,6 +590,11 @@ TEST_F(SystemModalContainerLayoutManagerTest, ShowNormalBackgroundOrLocked) {
     EXPECT_TRUE(AllRootWindowsHaveModalBackgrounds());
     EXPECT_FALSE(AllRootWindowsHaveLockedModalBackgrounds());
     TestWindow::CloseTestWindow(modal_window.release());
+
+    // Close |lock_parent| before unlocking so that Shell::OnLockStateChanged
+    // does not DCHECK on finding a system modal in Lock layer when unlocked.
+    lock_parent.reset();
+
     UnblockUserSession();
     // Here we should check the behavior of the locked system modal dialog when
     // unlocked, but such case isn't handled very well right now.
@@ -641,6 +661,10 @@ TEST_F(SystemModalContainerLayoutManagerTest, MultiDisplays) {
 // positioned into the visible area.
 TEST_F(SystemModalContainerLayoutManagerTest,
        SystemModalDialogGetPushedFromKeyboard) {
+  // TODO: mash doesn't support virtual keyboard. http://crbug.com/698892.
+  if (Shell::GetAshConfig() == Config::MASH)
+    return;
+
   const gfx::Rect& container_bounds = GetModalContainer()->bounds();
   // Place the window at the bottom of the screen.
   gfx::Size modal_size(100, 100);
@@ -677,6 +701,10 @@ TEST_F(SystemModalContainerLayoutManagerTest,
 // if centered.
 TEST_F(SystemModalContainerLayoutManagerTest,
        SystemModalDialogGetPushedButNotCroppedFromKeyboard) {
+  // TODO: mash doesn't support virtual keyboard. http://crbug.com/698892.
+  if (Shell::GetAshConfig() == Config::MASH)
+    return;
+
   const gfx::Rect& container_bounds = GetModalContainer()->bounds();
   const gfx::Size screen_size = Shell::GetPrimaryRootWindow()->bounds().size();
   // Place the window at the bottom of the screen.
@@ -710,6 +738,10 @@ TEST_F(SystemModalContainerLayoutManagerTest,
 // if not centered.
 TEST_F(SystemModalContainerLayoutManagerTest,
        SystemModalDialogGetPushedButNotCroppedFromKeyboardIfNotCentered) {
+  // TODO: mash doesn't support virtual keyboard. http://crbug.com/698892.
+  if (Shell::GetAshConfig() == Config::MASH)
+    return;
+
   const gfx::Size screen_size = Shell::GetPrimaryRootWindow()->bounds().size();
   // Place the window at the bottom of the screen.
   gfx::Size modal_size(100, screen_size.height() - 70);
@@ -743,23 +775,23 @@ TEST_F(SystemModalContainerLayoutManagerTest, UpdateModalType) {
       new TestWindow(false), modal_container);
   widget->Show();
   aura::Window* window = widget->GetNativeWindow();
-  EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_FALSE(ShellPort::Get()->IsSystemModalWindowOpen());
 
   window->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_SYSTEM);
-  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(ShellPort::Get()->IsSystemModalWindowOpen());
 
   // Setting twice should not cause error.
   window->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_SYSTEM);
-  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(ShellPort::Get()->IsSystemModalWindowOpen());
 
   window->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_NONE);
-  EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_FALSE(ShellPort::Get()->IsSystemModalWindowOpen());
 
   window->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_SYSTEM);
-  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(ShellPort::Get()->IsSystemModalWindowOpen());
 
   widget->Close();
-  EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_FALSE(ShellPort::Get()->IsSystemModalWindowOpen());
 }
 
 TEST_F(SystemModalContainerLayoutManagerTest, VisibilityChange) {
@@ -769,33 +801,32 @@ TEST_F(SystemModalContainerLayoutManagerTest, VisibilityChange) {
                                              CurrentContext())
           ->GetNativeWindow());
   SystemModalContainerLayoutManager* layout_manager =
-      WmShell::Get()
-          ->GetPrimaryRootWindowController()
-          ->GetSystemModalLayoutManager(WmWindow::Get(modal_window.get()));
+      Shell::GetPrimaryRootWindowController()->GetSystemModalLayoutManager(
+          modal_window.get());
 
-  EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_FALSE(ShellPort::Get()->IsSystemModalWindowOpen());
   EXPECT_FALSE(layout_manager->has_window_dimmer());
 
   modal_window->Show();
-  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(ShellPort::Get()->IsSystemModalWindowOpen());
   EXPECT_TRUE(layout_manager->has_window_dimmer());
 
   // Make sure that a child visibility change should not cause
   // inconsistent state.
   std::unique_ptr<aura::Window> child = base::MakeUnique<aura::Window>(nullptr);
-  child->SetType(ui::wm::WINDOW_TYPE_CONTROL);
+  child->SetType(aura::client::WINDOW_TYPE_CONTROL);
   child->Init(ui::LAYER_TEXTURED);
   modal_window->AddChild(child.get());
   child->Show();
-  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(ShellPort::Get()->IsSystemModalWindowOpen());
   EXPECT_TRUE(layout_manager->has_window_dimmer());
 
   modal_window->Hide();
-  EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_FALSE(ShellPort::Get()->IsSystemModalWindowOpen());
   EXPECT_FALSE(layout_manager->has_window_dimmer());
 
   modal_window->Show();
-  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(ShellPort::Get()->IsSystemModalWindowOpen());
   EXPECT_TRUE(layout_manager->has_window_dimmer());
 }
 
@@ -806,7 +837,7 @@ class InputTestDelegate : public aura::test::TestWindowDelegate {
   InputTestDelegate() {}
   ~InputTestDelegate() override {}
 
-  void RunTest(test::AshTestBase* test_base) {
+  void RunTest(AshTestBase* test_base) {
     std::unique_ptr<aura::Window> window(
         test_base->CreateTestWindowInShellWithDelegate(
             this, 0, gfx::Rect(0, 0, 100, 100)));
@@ -824,7 +855,7 @@ class InputTestDelegate : public aura::test::TestWindowDelegate {
         new TestWindow(true), Shell::GetPrimaryRootWindow(),
         gfx::Rect(200, 200, 100, 100));
     widget->Show();
-    EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+    EXPECT_TRUE(ShellPort::Get()->IsSystemModalWindowOpen());
 
     // Events should be blocked.
     GenerateEvents(window.get());
@@ -836,7 +867,7 @@ class InputTestDelegate : public aura::test::TestWindowDelegate {
     Reset();
 
     widget->Close();
-    EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+    EXPECT_FALSE(ShellPort::Get()->IsSystemModalWindowOpen());
 
     GenerateEvents(window.get());
 
@@ -895,5 +926,4 @@ TEST_F(SystemModalContainerLayoutManagerTest, BlockEventsInMultiDisplays) {
   delegate.RunTest(this);
 }
 
-}  // namespace test
 }  // namespace ash

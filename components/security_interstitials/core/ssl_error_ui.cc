@@ -15,8 +15,8 @@
 namespace security_interstitials {
 namespace {
 
-// URL for help page.
-const char kHelpURL[] = "https://support.google.com/chrome/answer/6098869";
+// Path to the relevant help center page.
+const char kHelpPath[] = "answer/6098869";
 
 bool IsMasked(int options, SSLErrorUI::SSLErrorOptionsMask mask) {
   return ((options & mask) != 0);
@@ -66,10 +66,10 @@ void SSLErrorUI::PopulateStringsForHTML(base::DictionaryValue* load_time_data) {
   common_string_util::PopulateSSLLayoutStrings(cert_error_, load_time_data);
   common_string_util::PopulateSSLDebuggingStrings(ssl_info_, time_triggered_,
                                                   load_time_data);
-  common_string_util::PopulateNewIconStrings(load_time_data);
 
   // Shared values for both the overridable and non-overridable versions.
   load_time_data->SetBoolean("bad_clock", false);
+  load_time_data->SetBoolean("hide_primary_button", false);
   load_time_data->SetString("tabTitle",
                             l10n_util::GetStringUTF16(IDS_SSL_V2_TITLE));
   load_time_data->SetString("heading",
@@ -86,6 +86,22 @@ void SSLErrorUI::PopulateStringsForHTML(base::DictionaryValue* load_time_data) {
     PopulateNonOverridableStrings(load_time_data);
 }
 
+const net::SSLInfo& SSLErrorUI::ssl_info() const {
+  return ssl_info_;
+}
+
+const base::Time& SSLErrorUI::time_triggered() const {
+  return time_triggered_;
+}
+
+ControllerClient* SSLErrorUI::controller() const {
+  return controller_;
+}
+
+int SSLErrorUI::cert_error() const {
+  return cert_error_;
+}
+
 void SSLErrorUI::PopulateOverridableStrings(
     base::DictionaryValue* load_time_data) {
   DCHECK(soft_override_enabled_);
@@ -96,6 +112,7 @@ void SSLErrorUI::PopulateOverridableStrings(
       ssl_info_.cert.get(), request_url_);
 
   load_time_data->SetBoolean("overridable", true);
+  load_time_data->SetBoolean("hide_primary_button", false);
   load_time_data->SetString("explanationParagraph", error_info.details());
   load_time_data->SetString(
       "primaryButtonText",
@@ -114,6 +131,7 @@ void SSLErrorUI::PopulateNonOverridableStrings(
       ssl_errors::ErrorInfo::NetErrorToErrorType(cert_error_);
 
   load_time_data->SetBoolean("overridable", false);
+  load_time_data->SetBoolean("hide_primary_button", false);
   load_time_data->SetString(
       "explanationParagraph",
       l10n_util::GetStringFUTF16(IDS_SSL_NONOVERRIDABLE_MORE, url));
@@ -172,7 +190,8 @@ void SSLErrorUI::HandleCommand(SecurityInterstitialCommands command) {
     case CMD_OPEN_HELP_CENTER:
       controller_->metrics_helper()->RecordUserInteraction(
           security_interstitials::MetricsHelper::SHOW_LEARN_MORE);
-      controller_->OpenUrlInCurrentTab(GURL(kHelpURL));
+      controller_->OpenUrlInNewForegroundTab(
+          controller_->GetBaseHelpCenterUrl().Resolve(kHelpPath));
       break;
     case CMD_RELOAD:
       controller_->metrics_helper()->RecordUserInteraction(
@@ -180,10 +199,10 @@ void SSLErrorUI::HandleCommand(SecurityInterstitialCommands command) {
       controller_->Reload();
       break;
     case CMD_OPEN_REPORTING_PRIVACY:
-      controller_->OpenExtendedReportingPrivacyPolicy();
+      controller_->OpenExtendedReportingPrivacyPolicy(true);
       break;
     case CMD_OPEN_WHITEPAPER:
-      controller_->OpenExtendedReportingWhitepaper();
+      controller_->OpenExtendedReportingWhitepaper(true);
       break;
     case CMD_OPEN_DATE_SETTINGS:
     case CMD_OPEN_DIAGNOSTIC:

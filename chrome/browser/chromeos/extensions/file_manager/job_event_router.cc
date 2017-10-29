@@ -48,7 +48,7 @@ void JobEventRouter::OnJobUpdated(const drive::JobInfo& job_info) {
 
   // Add new job info.
   UpdateBytes(job_info);
-  drive_jobs_[job_info.job_id] = make_linked_ptr(new drive::JobInfo(job_info));
+  drive_jobs_[job_info.job_id] = base::MakeUnique<drive::JobInfo>(job_info);
 
   ScheduleDriveFileTransferEvent(
       job_info, file_manager_private::TRANSFER_STATE_IN_PROGRESS,
@@ -104,8 +104,9 @@ void JobEventRouter::ScheduleDriveFileTransferEvent(
     SendDriveFileTransferEvent();
   } else if (no_pending_task) {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, base::Bind(&JobEventRouter::SendDriveFileTransferEvent,
-                              weak_factory_.GetWeakPtr()),
+        FROM_HERE,
+        base::BindOnce(&JobEventRouter::SendDriveFileTransferEvent,
+                       weak_factory_.GetWeakPtr()),
         event_delay_);
   }
 }

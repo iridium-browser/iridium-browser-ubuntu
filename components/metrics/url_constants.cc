@@ -4,16 +4,12 @@
 
 #include "components/metrics/url_constants.h"
 
-#include "build/build_config.h"
-
 namespace metrics {
 
-#if defined(OS_ANDROID) || defined(OS_IOS)
-const char kDefaultMetricsServerUrl[] =
+const char kNewMetricsServerUrl[] =
     "trk:265:https://clientservices.googleapis.com/uma/v2";
-#else
-const char kDefaultMetricsServerUrl[] = "trk:265:https://clients4.google.com/uma/v2";
-#endif
+
+const char kOldMetricsServerUrl[] = "trk:265:https://clients4.google.com/uma/v2";
 
 const char kDefaultMetricsMimeType[] = "application/vnd.chrome.uma";
 

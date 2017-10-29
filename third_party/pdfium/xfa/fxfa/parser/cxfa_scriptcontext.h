@@ -13,7 +13,7 @@
 
 #include "fxjs/cfxjse_arguments.h"
 #include "xfa/fxfa/cxfa_eventparam.h"
-#include "xfa/fxfa/fm2js/xfa_fm2jscontext.h"
+#include "xfa/fxfa/fm2js/cxfa_fm2jscontext.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
 #include "xfa/fxfa/parser/xfa_resolvenode_rs.h"
 
@@ -32,9 +32,9 @@ class CXFA_ScriptContext {
   bool RunScript(XFA_SCRIPTLANGTYPE eScriptType,
                  const CFX_WideStringC& wsScript,
                  CFXJSE_Value* pRetValue,
-                 CXFA_Object* pThisObject = nullptr);
+                 CXFA_Object* pThisObject);
 
-  int32_t ResolveObjects(CXFA_Object* refNode,
+  int32_t ResolveObjects(CXFA_Object* refObject,
                          const CFX_WideStringC& wsExpression,
                          XFA_RESOLVENODE_RS& resolveNodeRS,
                          uint32_t dwStyles = XFA_RESOLVENODE_Children,
@@ -48,8 +48,8 @@ class CXFA_ScriptContext {
   int32_t GetIndexByClassName(CXFA_Node* refNode);
   void GetSomExpression(CXFA_Node* refNode, CFX_WideString& wsExpression);
 
-  void SetNodesOfRunScript(CXFA_NodeArray* pArray);
-  void AddNodesOfRunScript(const CXFA_NodeArray& nodes);
+  void SetNodesOfRunScript(std::vector<CXFA_Node*>* pArray);
+  void AddNodesOfRunScript(const std::vector<CXFA_Node*>& nodes);
   void AddNodesOfRunScript(CXFA_Node* pNode);
   CFXJSE_Class* GetJseNormalClass();
 
@@ -91,8 +91,8 @@ class CXFA_ScriptContext {
   CXFA_Object* GetVariablesThis(CXFA_Object* pObject, bool bScriptNode = false);
   bool IsStrictScopeInJavaScript();
   XFA_SCRIPTLANGTYPE GetType();
-  CXFA_NodeArray& GetUpObjectArray() { return m_upObjectArray; }
-  CXFA_Document* GetDocument() const { return m_pDocument; }
+  std::vector<CXFA_Node*>* GetUpObjectArray() { return &m_upObjectArray; }
+  CXFA_Document* GetDocument() const { return m_pDocument.Get(); }
 
   static CXFA_Object* ToObject(CFXJSE_Value* pValue, CFXJSE_Class* pClass);
 
@@ -103,18 +103,19 @@ class CXFA_ScriptContext {
   void DefineJsClass();
   void RemoveBuiltInObjs(CFXJSE_Context* pContext) const;
 
-  CXFA_Document* m_pDocument;
+  CFX_UnownedPtr<CXFA_Document> const m_pDocument;
   std::unique_ptr<CFXJSE_Context> m_JsContext;
   v8::Isolate* m_pIsolate;
   CFXJSE_Class* m_pJsClass;
   XFA_SCRIPTLANGTYPE m_eScriptType;
   std::map<CXFA_Object*, std::unique_ptr<CFXJSE_Value>> m_mapObjectToValue;
-  std::map<CXFA_Object*, CFXJSE_Context*> m_mapVariableToContext;
+  std::map<CXFA_Object*, std::unique_ptr<CFXJSE_Context>>
+      m_mapVariableToContext;
   CXFA_EventParam m_eventParam;
-  CXFA_NodeArray m_upObjectArray;
+  std::vector<CXFA_Node*> m_upObjectArray;
   // CacheList holds the NodeList items so we can clean them up when we're done.
   std::vector<std::unique_ptr<CXFA_NodeList>> m_CacheList;
-  CXFA_NodeArray* m_pScriptNodeArray;
+  std::vector<CXFA_Node*>* m_pScriptNodeArray;
   std::unique_ptr<CXFA_ResolveProcessor> m_ResolveProcessor;
   std::unique_ptr<CXFA_FM2JSContext> m_FM2JSContext;
   CXFA_Object* m_pThisObject;

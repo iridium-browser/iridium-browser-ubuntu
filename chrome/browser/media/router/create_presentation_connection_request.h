@@ -10,15 +10,14 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "chrome/browser/media/router/media_route.h"
-#include "chrome/browser/media/router/media_source.h"
 #include "chrome/browser/media/router/presentation_request.h"
 #include "chrome/browser/media/router/render_frame_host_id.h"
+#include "chrome/common/media_router/media_route.h"
 #include "content/public/browser/presentation_service_delegate.h"
 
 namespace content {
 struct PresentationError;
-struct PresentationSessionInfo;
+struct PresentationInfo;
 }  // namespace content
 
 namespace url {
@@ -29,31 +28,31 @@ namespace media_router {
 
 class RouteRequestResult;
 
-// Holds parameters for creating a presentation session.
-// A request object is created by presentation_service_delegate_impl when it
-// gets create-session request. The object is then passed to and owned by the
-// MediaRouterUI. |success_cb| will be invoked when create-session
-// succeeds, or |error_cb| will be invoked when create-session fails or
-// the UI closes.
+// Holds parameters for creating a presentation.  A request object is created by
+// presentation_service_delegate_impl, which is then passed to and owned by the
+// MediaRouterUI. |success_cb| will be invoked when create-session succeeds, or
+// |error_cb| will be invoked when create-session fails or the UI closes.
+// TODO(mfoltz): Combine this with PresentationRequest as it's largely
+// redundant.
 class CreatePresentationConnectionRequest {
  public:
-  using PresentationSessionSuccessCallback =
-      base::Callback<void(const content::PresentationSessionInfo&,
-                          const MediaRoute&)>;
-  using PresentationSessionErrorCallback =
-      content::PresentationSessionErrorCallback;
+  using PresentationConnectionCallback =
+      base::OnceCallback<void(const content::PresentationInfo&,
+                              const MediaRoute&)>;
+  using PresentationConnectionErrorCallback =
+      content::PresentationConnectionErrorCallback;
   // |presentation_url|: The presentation URL of the request. Must be a valid
   //                     URL.
   // |frame_origin|: The origin of the frame that initiated the presentation
   // request.
   // |success_cb|: Callback to invoke when the request succeeds. Must be valid.
-  // |erorr_cb|: Callback to invoke when the request fails. Must be valid.
+  // |error_cb|: Callback to invoke when the request fails. Must be valid.
   CreatePresentationConnectionRequest(
       const RenderFrameHostId& render_frame_host_id,
       const std::vector<GURL>& presentation_urls,
       const url::Origin& frame_origin,
-      const PresentationSessionSuccessCallback& success_cb,
-      const PresentationSessionErrorCallback& error_cb);
+      PresentationConnectionCallback success_cb,
+      PresentationConnectionErrorCallback error_cb);
   ~CreatePresentationConnectionRequest();
 
   const PresentationRequest& presentation_request() const {
@@ -75,8 +74,8 @@ class CreatePresentationConnectionRequest {
 
  private:
   const PresentationRequest presentation_request_;
-  PresentationSessionSuccessCallback success_cb_;
-  PresentationSessionErrorCallback error_cb_;
+  PresentationConnectionCallback success_cb_;
+  PresentationConnectionErrorCallback error_cb_;
   bool cb_invoked_;
 
   DISALLOW_COPY_AND_ASSIGN(CreatePresentationConnectionRequest);

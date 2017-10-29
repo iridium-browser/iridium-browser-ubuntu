@@ -244,9 +244,8 @@ bool SkOpSegment::addExpanded(double newT, const SkOpSpanBase* test, bool* start
 }
 
 // Please keep this in sync with debugAddT()
-SkOpPtT* SkOpSegment::addT(double t) {
+SkOpPtT* SkOpSegment::addT(double t, const SkPoint& pt) {
     debugValidate();
-    SkPoint pt = this->ptAtT(t);
     SkOpSpanBase* spanBase = &fHead;
     do {
         SkOpPtT* result = spanBase->ptT();
@@ -274,6 +273,10 @@ SkOpPtT* SkOpSegment::addT(double t) {
     return nullptr;  // we never get here, but need this to satisfy compiler
 }
 
+SkOpPtT* SkOpSegment::addT(double t) {
+    return addT(t, this->ptAtT(t));
+}
+
 void SkOpSegment::calcAngles() {
     bool activePrior = !fHead.isCanceled();
     if (activePrior && !fHead.simple()) {
@@ -283,8 +286,7 @@ void SkOpSegment::calcAngles() {
     SkOpSpanBase* spanBase = fHead.next();
     while (spanBase != &fTail) {
         if (activePrior) {
-            SkOpAngle* priorAngle = SkOpTAllocator<SkOpAngle>::Allocate(
-                    this->globalState()->allocator());
+            SkOpAngle* priorAngle = this->globalState()->allocator()->make<SkOpAngle>();
             priorAngle->set(spanBase, prior);
             spanBase->setFromAngle(priorAngle);
         }
@@ -292,8 +294,7 @@ void SkOpSegment::calcAngles() {
         bool active = !span->isCanceled();
         SkOpSpanBase* next = span->next();
         if (active) {
-            SkOpAngle* angle = SkOpTAllocator<SkOpAngle>::Allocate(
-                    this->globalState()->allocator());
+            SkOpAngle* angle = this->globalState()->allocator()->make<SkOpAngle>();
             angle->set(span, next);
             span->setToAngle(angle);
         }
@@ -1301,7 +1302,8 @@ checkNextSpan:
 }
 
 // adjacent spans may have points close by
-bool SkOpSegment::spansNearby(const SkOpSpanBase* refSpan, const SkOpSpanBase* checkSpan) const {
+bool SkOpSegment::spansNearby(const SkOpSpanBase* refSpan, const SkOpSpanBase* checkSpan,
+        bool* found) const {
     const SkOpPtT* refHead = refSpan->ptT();
     const SkOpPtT* checkHead = checkSpan->ptT();
 // if the first pt pair from adjacent spans are far apart, assume that all are far enough apart
@@ -1318,7 +1320,8 @@ bool SkOpSegment::spansNearby(const SkOpSpanBase* refSpan, const SkOpSpanBase* c
             dBugRef = dBugRef->next();
         } while (dBugRef != refHead);
 #endif
-        return false;
+        *found = false;
+        return true;
     }
     // check only unique points
     SkScalar distSqBest = SK_ScalarMax;
@@ -1337,6 +1340,7 @@ bool SkOpSegment::spansNearby(const SkOpSpanBase* refSpan, const SkOpSpanBase* c
         }
         const SkOpPtT* check = checkHead;
         const SkOpSegment* refSeg = ref->segment();
+        int escapeHatch = 100000;  // defend against infinite loops
         do {
             if (check->deleted()) {
                 continue;
@@ -1354,18 +1358,22 @@ bool SkOpSegment::spansNearby(const SkOpSpanBase* refSpan, const SkOpSpanBase* c
                 refBest = ref;
                 checkBest = check;
             }
+            if (--escapeHatch <= 0) {
+                return false;
+            }
         } while ((check = check->next()) != checkHead);
-nextRef:
+    nextRef:
         ;
    } while ((ref = ref->next()) != refHead);
 doneCheckingDistance:
-    return checkBest && refBest->segment()->match(refBest, checkBest->segment(), checkBest->fT,
+    *found = checkBest && refBest->segment()->match(refBest, checkBest->segment(), checkBest->fT,
             checkBest->fPt);
+    return true;
 }
 
 // Please keep this function in sync with debugMoveNearby()
 // Move nearby t values and pts so they all hang off the same span. Alignment happens later.
-void SkOpSegment::moveNearby() {
+bool SkOpSegment::moveNearby() {
     debugValidate();
     // release undeleted spans pointing to this seg that are linked to the primary span
     SkOpSpanBase* spanBase = &fHead;
@@ -1379,7 +1387,7 @@ void SkOpSegment::moveNearby() {
                 if (test->final()) {
                     if (spanBase == &fHead) {
                         this->clearAll();
-                        return;
+                        return true;
                     }
                     spanBase->upCast()->release(ptT);
                 } else if (test->prev()) {
@@ -1395,13 +1403,17 @@ void SkOpSegment::moveNearby() {
     spanBase = &fHead;
     do {  // iterate through all spans associated with start
         SkOpSpanBase* test = spanBase->upCast()->next();
-        if (this->spansNearby(spanBase, test)) {
+        bool found;
+        if (!this->spansNearby(spanBase, test, &found)) {
+            return false;
+        }
+        if (found) {
             if (test->final()) {
                 if (spanBase->prev()) {
                     test->merge(spanBase->upCast());
                 } else {
                     this->clearAll();
-                    return;
+                    return true;
                 }
             } else {
                 spanBase->merge(test->upCast());
@@ -1410,6 +1422,7 @@ void SkOpSegment::moveNearby() {
         spanBase = test;
     } while (!spanBase->final());
     debugValidate();
+    return true;
 }
 
 bool SkOpSegment::operand() const {

@@ -76,7 +76,8 @@ struct Static {
   Static() : api(ExtensionAPI::CreateWithDefaultConfiguration()) {}
   std::unique_ptr<ExtensionAPI> api;
 };
-base::LazyInstance<Static> g_global_io_data = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<Static>::DestructorAtExit g_global_io_data =
+    LAZY_INSTANCE_INITIALIZER;
 
 void CommonResponseCallback(IPC::Sender* ipc_sender,
                             int routing_id,
@@ -139,8 +140,6 @@ class ExtensionFunctionDispatcher::UIThreadResponseCallbackWrapper
       dispatcher_->ui_thread_response_callback_wrappers_
           .erase(render_frame_host);
     }
-
-    delete this;
   }
 
   ExtensionFunction::ResponseCallback CreateCallback(int request_id) {
@@ -271,12 +270,6 @@ ExtensionFunctionDispatcher::Delegate::GetVisibleWebContents() const {
   return GetAssociatedWebContents();
 }
 
-bool ExtensionFunctionDispatcher::OverrideFunction(
-    const std::string& name, ExtensionFunctionFactory factory) {
-  return ExtensionFunctionRegistry::GetInstance()->OverrideFunction(name,
-                                                                    factory);
-}
-
 // static
 void ExtensionFunctionDispatcher::DispatchOnIOThread(
     InfoMap* extension_info_map,
@@ -375,9 +368,9 @@ void ExtensionFunctionDispatcher::Dispatch(
       callback_wrapper =
           new UIThreadResponseCallbackWrapper(AsWeakPtr(), render_frame_host);
       ui_thread_response_callback_wrappers_[render_frame_host] =
-          callback_wrapper;
+          base::WrapUnique(callback_wrapper);
     } else {
-      callback_wrapper = iter->second;
+      callback_wrapper = iter->second.get();
     }
     DispatchWithCallbackInternal(
         params, render_frame_host, render_process_id,

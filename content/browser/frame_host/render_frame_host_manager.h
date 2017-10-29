@@ -156,6 +156,10 @@ class CONTENT_EXPORT RenderFrameHostManager
     virtual NavigationEntry*
         GetLastCommittedNavigationEntryForRenderManager() = 0;
 
+    // Returns the interstitial page showing in the delegate, or null if there
+    // is none.
+    virtual InterstitialPageImpl* GetInterstitialForRenderManager() = 0;
+
     // Returns true if the location bar should be focused by default rather than
     // the page contents. The view calls this function when the tab is focused
     // to see what it should do.
@@ -280,11 +284,6 @@ class CONTENT_EXPORT RenderFrameHostManager
   // which one so we tell both.
   void SetIsLoading(bool is_loading);
 
-  // Whether to close the tab or not when there is a hang during an unload
-  // handler. If we are mid-crosssite navigation, then we should proceed
-  // with the navigation instead of closing the tab.
-  bool ShouldCloseTabOnUnresponsiveRenderer();
-
   // Confirms whether we should close the page or navigate away.  This is called
   // before a cross-site request or before a tab/window is closed (as indicated
   // by the first parameter) to allow the appropriate renderer to approve or
@@ -349,25 +348,6 @@ class CONTENT_EXPORT RenderFrameHostManager
   // SiteInstance.
   void CreateProxiesForChildFrame(FrameTreeNode* child);
 
-  // Sets the passed passed interstitial as the currently showing interstitial.
-  // |interstitial_page| should be non NULL (use the remove_interstitial_page
-  // method to unset the interstitial) and no interstitial page should be set
-  // when there is already a non NULL interstitial page set.
-  void set_interstitial_page(InterstitialPageImpl* interstitial_page) {
-    DCHECK(!interstitial_page_ && interstitial_page);
-    interstitial_page_ = interstitial_page;
-  }
-
-  // Unsets the currently showing interstitial.
-  void remove_interstitial_page() {
-    DCHECK(interstitial_page_);
-    interstitial_page_ = NULL;
-  }
-
-  // Returns the currently showing interstitial, NULL if no interstitial is
-  // showing.
-  InterstitialPageImpl* interstitial_page() const { return interstitial_page_; }
-
   // Returns the swapped out RenderViewHost for the given SiteInstance, if any.
   // This method is *deprecated* and GetRenderFrameProxyHost should be used.
   RenderViewHostImpl* GetSwappedOutRenderViewHost(SiteInstance* instance) const;
@@ -425,8 +405,9 @@ class CONTENT_EXPORT RenderFrameHostManager
   // frame proxies.
   void OnDidUpdateName(const std::string& name, const std::string& unique_name);
 
-  // Sends the newly added Content Security Policy header to all the proxies.
-  void OnDidAddContentSecurityPolicy(const ContentSecurityPolicyHeader& header);
+  // Sends the newly added Content Security Policy headers to all the proxies.
+  void OnDidAddContentSecurityPolicies(
+      const std::vector<ContentSecurityPolicyHeader>& headers);
 
   // Resets Content Security Policy in all the proxies.
   void OnDidResetContentSecurityPolicy();
@@ -434,6 +415,12 @@ class CONTENT_EXPORT RenderFrameHostManager
   // Sends updated enforcement of insecure request policy to all frame proxies
   // when the frame changes its setting.
   void OnEnforceInsecureRequestPolicy(blink::WebInsecureRequestPolicy policy);
+
+  // Called when the client changes whether the frame's owner element in the
+  // embedder document should be collapsed, that is, remove from the layout as
+  // if it did not exist. Never called for main frames. Only has an effect for
+  // <iframe> owner elements.
+  void OnDidChangeCollapsedState(bool collapsed);
 
   // Called on a frame to notify it that its out-of-process parent frame
   // changed a property (such as allowFullscreen) on its <iframe> element.
@@ -518,6 +505,15 @@ class CONTENT_EXPORT RenderFrameHostManager
   bool InitRenderView(RenderViewHostImpl* render_view_host,
     RenderFrameProxyHost* proxy);
 
+  // Returns the SiteInstance that should be used to host the navigation handled
+  // by |navigation_request|.
+  // Note: the SiteInstance returned by this function may not have an
+  // initialized RenderProcessHost. It will only be initialized when
+  // GetProcess() is called on the SiteInstance. In particular, calling this
+  // function will never lead to a process being created for the navigation.
+  scoped_refptr<SiteInstance> GetSiteInstanceForNavigationRequest(
+      const NavigationRequest& navigation_request);
+
  private:
   friend class NavigatorTestWithBrowserSideNavigation;
   friend class RenderFrameHostManagerTest;
@@ -564,8 +560,8 @@ class CONTENT_EXPORT RenderFrameHostManager
   void DeleteRenderFrameProxyHost(SiteInstance* site_instance);
 
   // Returns whether this tab should transition to a new renderer for
-  // cross-site URLs.  Enabled unless we see the --process-per-tab command line
-  // switch.  Can be overridden in unit tests.
+  // cross-site URLs.  Enabled unless we see the --single-process command line
+  // switch.
   bool ShouldTransitionCrossSite();
 
   // Returns true if for the navigation from |current_effective_url| to
@@ -707,9 +703,9 @@ class CONTENT_EXPORT RenderFrameHostManager
   void CommitPendingIfNecessary(RenderFrameHostImpl* render_frame_host,
                                 bool was_caused_by_user_gesture);
 
-  // Commits any pending sandbox flag updates when the renderer's frame
-  // navigates.
-  void CommitPendingSandboxFlags();
+  // Commits any pending sandbox flag or feature policy updates when the
+  // renderer's frame navigates.
+  void CommitPendingFramePolicy();
 
   // Runs the unload handler in the old RenderFrameHost, after the new
   // RenderFrameHost has committed.  |old_render_frame_host| will either be
@@ -755,6 +751,11 @@ class CONTENT_EXPORT RenderFrameHostManager
                               SiteInstance* dest_instance,
                               bool was_server_redirect);
 
+  // After a renderer process crash we'd have marked the host as invisible, so
+  // we need to set the visibility of the new View to the correct value here
+  // after reload.
+  void EnsureRenderFrameHostVisibilityConsistent();
+
   // For use in creating RenderFrameHosts.
   FrameTreeNode* frame_tree_node_;
 
@@ -792,10 +793,6 @@ class CONTENT_EXPORT RenderFrameHostManager
   // A list of RenderFrameHosts waiting to shut down after swapping out.
   using RFHPendingDeleteList = std::list<std::unique_ptr<RenderFrameHostImpl>>;
   RFHPendingDeleteList pending_delete_hosts_;
-
-  // The intersitial page currently shown if any, not own by this class
-  // (the InterstitialPage is self-owned, it deletes itself when hidden).
-  InterstitialPageImpl* interstitial_page_;
 
   // PlzNavigate
   // Stores a speculative RenderFrameHost which is created early in a navigation

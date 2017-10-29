@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "third_party/base/logging.h"
 #include "third_party/base/ptr_util.h"
 #include "xfa/fde/css/cfde_csscolorvalue.h"
 #include "xfa/fde/css/cfde_csscomputedstyle.h"
@@ -27,7 +28,7 @@ CFDE_CSSStyleSelector::CFDE_CSSStyleSelector(CFGAS_FontMgr* pFontMgr)
 
 CFDE_CSSStyleSelector::~CFDE_CSSStyleSelector() {}
 
-void CFDE_CSSStyleSelector::SetDefFontSize(FX_FLOAT fFontSize) {
+void CFDE_CSSStyleSelector::SetDefFontSize(float fFontSize) {
   ASSERT(fFontSize > 0);
   m_fDefFontSize = fFontSize;
 }
@@ -47,7 +48,7 @@ void CFDE_CSSStyleSelector::SetUAStyleSheet(
 
 void CFDE_CSSStyleSelector::UpdateStyleIndex() {
   m_UARules.Clear();
-  m_UARules.AddRulesFrom(m_UAStyles.get(), m_pFontMgr);
+  m_UARules.AddRulesFrom(m_UAStyles.get(), m_pFontMgr.Get());
 }
 
 std::vector<const CFDE_CSSDeclaration*>
@@ -56,7 +57,7 @@ CFDE_CSSStyleSelector::MatchDeclarations(const CFX_WideString& tagname) {
   if (m_UARules.CountSelectors() == 0 || tagname.IsEmpty())
     return matchedDecls;
 
-  auto rules = m_UARules.GetTagRuleData(tagname);
+  auto* rules = m_UARules.GetTagRuleData(tagname);
   if (!rules)
     return matchedDecls;
 
@@ -106,19 +107,19 @@ void CFDE_CSSStyleSelector::ApplyDeclarations(
   std::vector<const CFDE_CSSPropertyHolder*> normals;
   std::vector<const CFDE_CSSCustomProperty*> customs;
 
-  for (auto& decl : declArray)
+  for (auto* decl : declArray)
     ExtractValues(decl, &importants, &normals, &customs);
 
   if (extraDecl)
     ExtractValues(extraDecl, &importants, &normals, &customs);
 
-  for (auto& prop : normals)
+  for (auto* prop : normals)
     ApplyProperty(prop->eProperty, prop->pValue, pComputedStyle);
 
-  for (auto& prop : customs)
+  for (auto* prop : customs)
     pComputedStyle->AddCustomStyle(*prop);
 
-  for (auto& prop : importants)
+  for (auto* prop : importants)
     ApplyProperty(prop->eProperty, prop->pValue, pComputedStyle);
 }
 
@@ -141,10 +142,8 @@ void CFDE_CSSStyleSelector::AppendInlineStyle(CFDE_CSSDeclaration* pDecl,
                                               const CFX_WideString& style) {
   ASSERT(pDecl && !style.IsEmpty());
 
-  auto pSyntax = pdfium::MakeUnique<CFDE_CSSSyntaxParser>();
-  if (!pSyntax->Init(style.c_str(), style.GetLength(), 32, true))
-    return;
-
+  auto pSyntax = pdfium::MakeUnique<CFDE_CSSSyntaxParser>(
+      style.c_str(), style.GetLength(), 32, true);
   int32_t iLen2 = 0;
   const FDE_CSSPropertyTable* table = nullptr;
   CFX_WideString wsName;
@@ -185,7 +184,7 @@ void CFDE_CSSStyleSelector::ApplyProperty(
         }
         break;
       case FDE_CSSProperty::FontSize: {
-        FX_FLOAT& fFontSize = pComputedStyle->m_InheritedData.m_fFontSize;
+        float& fFontSize = pComputedStyle->m_InheritedData.m_fFontSize;
         if (eType == FDE_CSSPrimitiveType::Number) {
           fFontSize = pValue.As<CFDE_CSSNumberValue>()->Apply(fFontSize);
         } else if (eType == FDE_CSSPrimitiveType::Enum) {
@@ -412,7 +411,7 @@ void CFDE_CSSStyleSelector::ApplyProperty(
       }
     }
   } else {
-    ASSERT(false);
+    NOTREACHED();
   }
 }
 
@@ -478,7 +477,7 @@ bool CFDE_CSSStyleSelector::SetLengthWithPercent(
     FDE_CSSLength& width,
     FDE_CSSPrimitiveType eType,
     const CFX_RetainPtr<CFDE_CSSValue>& pValue,
-    FX_FLOAT fFontSize) {
+    float fFontSize) {
   if (eType == FDE_CSSPrimitiveType::Number) {
     CFX_RetainPtr<CFDE_CSSNumberValue> v = pValue.As<CFDE_CSSNumberValue>();
     if (v->Kind() == FDE_CSSNumberType::Percent) {
@@ -487,7 +486,7 @@ bool CFDE_CSSStyleSelector::SetLengthWithPercent(
       return width.NonZero();
     }
 
-    FX_FLOAT fValue = v->Apply(fFontSize);
+    float fValue = v->Apply(fFontSize);
     width.Set(FDE_CSSLengthUnit::Point, fValue);
     return width.NonZero();
   } else if (eType == FDE_CSSPrimitiveType::Enum) {
@@ -514,8 +513,8 @@ bool CFDE_CSSStyleSelector::SetLengthWithPercent(
   return false;
 }
 
-FX_FLOAT CFDE_CSSStyleSelector::ToFontSize(FDE_CSSPropertyValue eValue,
-                                           FX_FLOAT fCurFontSize) {
+float CFDE_CSSStyleSelector::ToFontSize(FDE_CSSPropertyValue eValue,
+                                        float fCurFontSize) {
   switch (eValue) {
     case FDE_CSSPropertyValue::XxSmall:
       return m_fDefFontSize / 1.2f / 1.2f / 1.2f;

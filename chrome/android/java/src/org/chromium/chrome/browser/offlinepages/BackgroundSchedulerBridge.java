@@ -9,6 +9,8 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
+import java.util.concurrent.TimeUnit;
+
 /**
  * Provides Java scheduling support from native offlining code as
  * well as JNI interface to tell native code to start processing
@@ -42,34 +44,33 @@ public class BackgroundSchedulerBridge {
 
     @CalledByNative
     private static void schedule(TriggerConditions triggerConditions) {
-        BackgroundScheduler.getInstance(ContextUtils.getApplicationContext())
-                .schedule(triggerConditions);
+        BackgroundScheduler.getInstance().schedule(triggerConditions);
     }
 
     @CalledByNative
     private static void backupSchedule(TriggerConditions triggerConditions, long delayInSeconds) {
-        BackgroundScheduler.getInstance(ContextUtils.getApplicationContext())
-                .scheduleBackup(triggerConditions, delayInSeconds);
+        BackgroundScheduler.getInstance().scheduleBackup(
+                triggerConditions, TimeUnit.SECONDS.toMillis(delayInSeconds));
     }
 
     @CalledByNative
     private static void unschedule() {
-        BackgroundScheduler.getInstance(ContextUtils.getApplicationContext()).cancel();
+        BackgroundScheduler.getInstance().cancel();
     }
 
     @CalledByNative
     private static boolean getPowerConditions() {
-        return BackgroundScheduler.getPowerConditions(ContextUtils.getApplicationContext());
+        return DeviceConditions.isPowerConnected(ContextUtils.getApplicationContext());
     }
 
     @CalledByNative
     private static int getBatteryConditions() {
-        return BackgroundScheduler.getBatteryConditions(ContextUtils.getApplicationContext());
+        return DeviceConditions.getBatteryPercentage(ContextUtils.getApplicationContext());
     }
 
     @CalledByNative
     private static int getNetworkConditions() {
-        return BackgroundScheduler.getNetworkConditions(ContextUtils.getApplicationContext());
+        return DeviceConditions.getNetConnectionType(ContextUtils.getApplicationContext());
     }
 
     /**

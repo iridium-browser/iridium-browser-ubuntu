@@ -44,7 +44,7 @@ CFX_WideString MakeLetters(int num) {
 
   int count = num / nLetterCount + 1;
   count %= nMaxCount;
-  FX_WCHAR ch = L'a' + num % nLetterCount;
+  wchar_t ch = L'a' + num % nLetterCount;
   for (int i = 0; i < count; i++)
     wsLetters += ch;
   return wsLetters;
@@ -74,6 +74,8 @@ CFX_WideString GetLabelNumPortion(int num, const CFX_ByteString& bsStyle) {
 
 CPDF_PageLabel::CPDF_PageLabel(CPDF_Document* pDocument)
     : m_pDocument(pDocument) {}
+
+CPDF_PageLabel::~CPDF_PageLabel() {}
 
 bool CPDF_PageLabel::GetLabel(int nPage, CFX_WideString* wsLabel) const {
   if (!m_pDocument)
@@ -140,5 +142,7 @@ int32_t CPDF_PageLabel::GetPageByLabel(const CFX_ByteStringC& bsLabel) const {
 }
 
 int32_t CPDF_PageLabel::GetPageByLabel(const CFX_WideStringC& wsLabel) const {
-  return GetPageByLabel(PDF_EncodeText(wsLabel.c_str()).AsStringC());
+  // TODO(tsepez): check usage of c_str() below.
+  return GetPageByLabel(
+      PDF_EncodeText(wsLabel.unterminated_c_str()).AsStringC());
 }

@@ -6,10 +6,10 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/base/event.html">
+<link rel="import" href="/tracing/base/math/range.html">
 <link rel="import" href="/tracing/base/raf.html">
-<link rel="import" href="/tracing/base/range.html">
 
-<dom-module id='tr-v-ui-scalar-context-controller'>
+<dom-module id="tr-v-ui-scalar-context-controller">
   <template></template>
 </dom-module>
 
@@ -45,7 +45,7 @@ can push their state to the controller using the following three methods:
      beforehand when removed from a context group).
 
   3. onScalarSpanUpdated(contextGroup, span)
-     This method should be called when a span's value changes.
+     This method should be called when the value of a span changes.
 
 Note: If a span wants to change its context group, it should first call
 onScalarSpanRemoved with the old group and then onScalarSpanAdded with the new
@@ -69,19 +69,19 @@ tr.exportTo('tr.v.ui', function() {
   Polymer({
     is: 'tr-v-ui-scalar-context-controller',
 
-    created: function() {
+    created() {
       this.host_ = undefined;
       this.groupToContext_ = new Map();
       this.dirtyGroups_ = new Set();
     },
 
-    attached: function() {
+    attached() {
       if (this.host_) {
         throw new Error(
             'Scalar context controller is already attached to a host');
       }
 
-      let host = findParentOrHost(this);
+      const host = findParentOrHost(this);
       if (host.__scalarContextController) {
         throw new Error(
             'Multiple scalar context controllers attached to this host');
@@ -91,9 +91,10 @@ tr.exportTo('tr.v.ui', function() {
       this.host_ = host;
     },
 
-    detached: function() {
-      if (!this.host_)
+    detached() {
+      if (!this.host_) {
         throw new Error('Scalar context controller is not attached to a host');
+      }
       if (this.host_.__scalarContextController !== this) {
         throw new Error(
             'Scalar context controller is not attached to its host');
@@ -103,42 +104,45 @@ tr.exportTo('tr.v.ui', function() {
       this.host_ = undefined;
     },
 
-    getContext: function(group) {
+    getContext(group) {
       return this.groupToContext_.get(group);
     },
 
-    onScalarSpanAdded: function(group, span) {
+    onScalarSpanAdded(group, span) {
       let context = this.groupToContext_.get(group);
       if (context === undefined) {
         context = {
           spans: new Set(),
-          range: new tr.b.Range()
+          range: new tr.b.math.Range()
         };
         this.groupToContext_.set(group, context);
       }
-      if (context.spans.has(span))
+      if (context.spans.has(span)) {
         throw new Error('Scalar span already registered with group: ' + group);
+      }
       context.spans.add(span);
-      this._markGroupDirtyAndScheduleUpdate(group);
+      this.markGroupDirtyAndScheduleUpdate_(group);
     },
 
-    onScalarSpanRemoved: function(group, span) {
-      let context = this.groupToContext_.get(group);
-      if (!context.spans.has(span))
+    onScalarSpanRemoved(group, span) {
+      const context = this.groupToContext_.get(group);
+      if (!context.spans.has(span)) {
         throw new Error('Scalar span not registered with group: ' + group);
+      }
       context.spans.delete(span);
-      this._markGroupDirtyAndScheduleUpdate(group);
+      this.markGroupDirtyAndScheduleUpdate_(group);
     },
 
-    onScalarSpanUpdated: function(group, span) {
-      let context = this.groupToContext_.get(group);
-      if (!context.spans.has(span))
+    onScalarSpanUpdated(group, span) {
+      const context = this.groupToContext_.get(group);
+      if (!context.spans.has(span)) {
         throw new Error('Scalar span not registered with group: ' + group);
-      this._markGroupDirtyAndScheduleUpdate(group);
+      }
+      this.markGroupDirtyAndScheduleUpdate_(group);
     },
 
-    _markGroupDirtyAndScheduleUpdate: function(group) {
-      let alreadyDirty = this.dirtyGroups_.size > 0;
+    markGroupDirtyAndScheduleUpdate_(group) {
+      const alreadyDirty = this.dirtyGroups_.size > 0;
       this.dirtyGroups_.add(group);
       if (!alreadyDirty) {
         tr.b.requestAnimationFrameInThisFrameIfPossible(
@@ -146,46 +150,50 @@ tr.exportTo('tr.v.ui', function() {
       }
     },
 
-    updateContext: function() {
-      let groups = this.dirtyGroups_;
-      if (groups.size === 0)
-        return;
+    updateContext() {
+      const groups = this.dirtyGroups_;
+      if (groups.size === 0) return;
       this.dirtyGroups_ = new Set();
 
-      for (let group of groups)
+      for (const group of groups) {
         this.updateGroup_(group);
+      }
 
-      let event = new tr.b.Event('context-updated');
+      const event = new tr.b.Event('context-updated');
       event.groups = groups;
       this.dispatchEvent(event);
     },
 
-    updateGroup_: function(group) {
-      let context = this.groupToContext_.get(group);
+    updateGroup_(group) {
+      const context = this.groupToContext_.get(group);
       if (context.spans.size === 0) {
         this.groupToContext_.delete(group);
         return;
       }
       context.range.reset();
-      for (let span of context.spans)
+      for (const span of context.spans) {
         context.range.addValue(span.value);
+      }
     }
   });
 
   function getScalarContextControllerForElement(element) {
     while (element) {
-      if (element.__scalarContextController)
+      if (element.__scalarContextController) {
         return element.__scalarContextController;
+      }
       element = findParentOrHost(element);
     }
     return undefined;
   }
 
   function findParentOrHost(node) {
-    if (node.parentElement)
+    if (node.parentElement) {
       return node.parentElement;
-    while (Polymer.dom(node).parentNode)
+    }
+    while (Polymer.dom(node).parentNode) {
       node = Polymer.dom(node).parentNode;
+    }
     return node.host;
   }
 

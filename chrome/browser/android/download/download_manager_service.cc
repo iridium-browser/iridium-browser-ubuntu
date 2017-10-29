@@ -6,18 +6,17 @@
 
 #include "base/android/jni_string.h"
 #include "base/location.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/android/chrome_feature_list.h"
 #include "chrome/browser/android/download/download_controller.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/mime_util/mime_util.h"
-#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/download_item.h"
 #include "jni/DownloadInfo_jni.h"
@@ -38,18 +37,19 @@ long kUnknownRemainingTime = -1;
 
 // Finch flag for controlling auto resumption limit.
 int kDefaultAutoResumptionLimit = 5;
-const char kAutoResumptionLimitVariation[] = "AutoResumptionLimit";
+const char kAutoResumptionLimitParamName[] = "AutoResumptionLimit";
 
 bool ShouldShowDownloadItem(content::DownloadItem* item) {
-  return !item->IsTemporary();
+  return !item->IsTemporary() && !item->IsTransient();
 }
 
-void UpdateNotifier(DownloadManagerService* service,
-                    content::DownloadManager* manager,
-                    std::unique_ptr<AllDownloadItemNotifier>& notifier) {
+void UpdateNotifier(
+    DownloadManagerService* service,
+    content::DownloadManager* manager,
+    std::unique_ptr<download::AllDownloadItemNotifier>& notifier) {
   if (manager) {
     if (!notifier || notifier->GetManager() != manager)
-      notifier.reset(new AllDownloadItemNotifier(manager, service));
+      notifier.reset(new download::AllDownloadItemNotifier(manager, service));
   } else {
     notifier.reset(nullptr);
   }
@@ -57,17 +57,13 @@ void UpdateNotifier(DownloadManagerService* service,
 
 ScopedJavaLocalRef<jobject> CreateJavaDownloadItem(
     JNIEnv* env, content::DownloadItem* item) {
+  DCHECK(!item->IsTransient());
   return Java_DownloadItem_createDownloadItem(
       env, DownloadManagerService::CreateJavaDownloadInfo(env, item),
       item->GetStartTime().ToJavaTime(), item->GetFileExternallyRemoved());
 }
 
 }  // namespace
-
-// static
-bool DownloadManagerService::RegisterDownloadManagerService(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
 
 // static
 void DownloadManagerService::OnDownloadCanceled(
@@ -121,16 +117,17 @@ ScopedJavaLocalRef<jobject> DownloadManagerService::CreateJavaDownloadInfo(
       ConvertUTF8ToJavaString(env, original_url),
       ConvertUTF8ToJavaString(env, item->GetReferrerUrl().spec()),
       time_remaining_known ? time_delta.InMilliseconds()
-                           : kUnknownRemainingTime);
+                           : kUnknownRemainingTime,
+      item->GetLastAccessTime().ToJavaTime());
 }
 
 static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
   DownloadManagerService* service = DownloadManagerService::GetInstance();
   service->Init(env, jobj);
-  DownloadService* download_service =
-      DownloadServiceFactory::GetForBrowserContext(profile);
-  DownloadHistory* history = download_service->GetDownloadHistory();
+  DownloadCoreService* download_core_service =
+      DownloadCoreServiceFactory::GetForBrowserContext(profile);
+  DownloadHistory* history = download_core_service->GetDownloadHistory();
   if (history)
     history->AddObserver(service);
   return reinterpret_cast<intptr_t>(service);
@@ -239,6 +236,21 @@ void DownloadManagerService::CheckForExternallyRemovedDownloads(
   manager->CheckForHistoryFilesRemoval();
 }
 
+void DownloadManagerService::UpdateLastAccessTime(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& jdownload_guid,
+    bool is_off_the_record) {
+  std::string download_guid = ConvertJavaStringToUTF8(env, jdownload_guid);
+  content::DownloadManager* manager = GetDownloadManager(is_off_the_record);
+  if (!manager)
+    return;
+
+  content::DownloadItem* item = manager->GetDownloadByGuid(download_guid);
+  if (item)
+    item->SetLastAccessTime(base::Time::Now());
+}
+
 void DownloadManagerService::CancelDownload(
     JNIEnv* env,
     jobject obj,
@@ -285,6 +297,8 @@ void DownloadManagerService::OnHistoryQueryComplete() {
 
 void DownloadManagerService::OnDownloadCreated(
     content::DownloadManager* manager, content::DownloadItem* item) {
+  if (item->IsTransient())
+    return;
 
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_item = CreateJavaDownloadItem(env, item);
@@ -297,7 +311,7 @@ void DownloadManagerService::OnDownloadUpdated(
   if (java_ref_.is_null())
     return;
 
-  if (item->IsTemporary())
+  if (item->IsTemporary() || item->IsTransient())
     return;
 
   JNIEnv* env = base::android::AttachCurrentThread();
@@ -308,7 +322,7 @@ void DownloadManagerService::OnDownloadUpdated(
 
 void DownloadManagerService::OnDownloadRemoved(
     content::DownloadManager* manager, content::DownloadItem* item) {
-  if (java_ref_.is_null())
+  if (java_ref_.is_null() || item->IsTransient())
     return;
 
   JNIEnv* env = base::android::AttachCurrentThread();
@@ -335,7 +349,7 @@ void DownloadManagerService::ResumeDownloadInternal(
     OnResumptionFailed(download_guid);
     return;
   }
-  item->AddObserver(DownloadControllerBase::Get());
+  DownloadControllerBase::Get()->AboutToResumeDownload(item);
   item->Resume();
   if (!resume_callback_for_testing_.is_null())
     resume_callback_for_testing_.Run(true);
@@ -454,14 +468,11 @@ jboolean IsSupportedMimeType(
 // static
 jint GetAutoResumptionLimit(JNIEnv* env,
                             const JavaParamRef<jclass>& clazz) {
-  std::string variation = variations::GetVariationParamValueByFeature(
+  std::string value  = base::GetFieldTrialParamValueByFeature(
       chrome::android::kDownloadAutoResumptionThrottling,
-      kAutoResumptionLimitVariation);
+      kAutoResumptionLimitParamName);
   int auto_resumption_limit;
-  if (!variation.empty() &&
-      base::StringToInt(variation, &auto_resumption_limit)) {
-    return auto_resumption_limit;
-  }
-
-  return kDefaultAutoResumptionLimit;
+  return base::StringToInt(value, &auto_resumption_limit)
+               ? auto_resumption_limit
+               : kDefaultAutoResumptionLimit;
 }

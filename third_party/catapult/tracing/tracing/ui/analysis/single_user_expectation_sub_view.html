@@ -39,7 +39,7 @@ Polymer({
   is: 'tr-ui-a-single-user-expectation-sub-view',
   behaviors: [tr.ui.analysis.AnalysisSubView],
 
-  created: function() {
+  created() {
     this.currentSelection_ = undefined;
   },
 
@@ -55,20 +55,20 @@ Polymer({
     this.$.realView.setSelectionWithoutErrorChecks(selection);
 
     this.$.relatedSamples.selection = selection;
-    if (this.$.relatedSamples.hasRelatedSamples())
+    if (this.$.relatedSamples.hasRelatedSamples()) {
       this.$.events.style.display = '';
-    else
+    } else {
       this.$.events.style.display = 'none';
+    }
   },
 
   get relatedEventsToHighlight() {
-    if (!this.currentSelection_)
-      return undefined;
+    if (!this.currentSelection_) return undefined;
     return tr.b.getOnlyElement(this.currentSelection_).associatedEvents;
   },
 
-  onCustomizeRows_: function(event) {
-    var ue = tr.b.getOnlyElement(this.selection);
+  onCustomizeRows_(event) {
+    const ue = tr.b.getOnlyElement(this.selection);
 
     if (ue.rawCpuMs) {
       event.rows.push({

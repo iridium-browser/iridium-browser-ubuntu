@@ -169,6 +169,27 @@ class GraphJsonTest(testing_common.TestCase):
     self.CheckFlotJson(flot_json_str, 150, 2, 15850, 16000, step=1)
     self.assertEqual('*', response.headers.get('Access-Control-Allow-Origin'))
 
+  def testPost_NanFiltered(self):
+    self._AddTestColumns(start_rev=15700, end_rev=16000, step=1)
+
+    test_key = utils.OldStyleTestKey('ChromiumGPU/win7/dromaeo/jslib')
+    row_key = utils.GetRowKey(test_key, 15900)
+    row = row_key.get()
+    row.value = float('nan')
+    row.put()
+
+    graphs = {
+        'test_path_dict': {
+            'ChromiumGPU/win7/dromaeo/jslib': [],
+        }
+    }
+    # If the request is valid, a valid response will be returned.
+    response = self.testapp.post(
+        '/graph_json', {'graphs': json.dumps(graphs)})
+    flot_json_str = response.body
+    rows = json.loads(flot_json_str)['data']['0']['data']
+    self.assertEqual(149, len(rows))
+
   def testPost_InvalidRequest_ReportsError(self):
     self.testapp.post('/graph_json', {}, status=500)
     self.testapp.post('/graph_json', {'graphs': ''}, status=500)
@@ -665,7 +686,7 @@ class GraphJsonTest(testing_common.TestCase):
     paths = list_tests.GetTestsForTestPathDict(
         {
             'ChromiumGPU/win7/dromaeo/jslib': ['jslib'],
-        }, False)
+        }, False)['tests']
     flot_json_str = graph_json.GetGraphJson(
         paths, rev=15000, num_points=8, is_selected=False)
     flot = json.loads(flot_json_str)
@@ -688,7 +709,7 @@ class GraphJsonTest(testing_common.TestCase):
     for p in test_paths:
       testing_common.AddRows(p, [1])
     path_list = list_tests.GetTestsForTestPathDict(
-        {p: [] for p in test_paths}, False)
+        {p: [] for p in test_paths}, False)['tests']
     response = graph_json.GetGraphJson(path_list, is_selected=False)
     self.assertEqual(
         {'data': {}, 'annotations': {}, 'error_bars': {}},

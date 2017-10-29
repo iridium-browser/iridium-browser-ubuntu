@@ -4,6 +4,7 @@
 
 #include "ui/gfx/skia_paint_util.h"
 
+#include "base/memory/ptr_util.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 #include "third_party/skia/include/effects/SkBlurMaskFilter.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
@@ -13,15 +14,15 @@
 namespace gfx {
 
 sk_sp<cc::PaintShader> CreateImageRepShader(const gfx::ImageSkiaRep& image_rep,
-                                            cc::PaintShader::TileMode tile_mode,
+                                            SkShader::TileMode tile_mode,
                                             const SkMatrix& local_matrix) {
-  return cc::WrapSkShader(CreateImageRepShaderForScale(
-      image_rep, tile_mode, local_matrix, image_rep.scale()));
+  return CreateImageRepShaderForScale(image_rep, tile_mode, local_matrix,
+                                      image_rep.scale());
 }
 
 sk_sp<cc::PaintShader> CreateImageRepShaderForScale(
     const gfx::ImageSkiaRep& image_rep,
-    cc::PaintShader::TileMode tile_mode,
+    SkShader::TileMode tile_mode,
     const SkMatrix& local_matrix,
     SkScalar scale) {
   // Unscale matrix by |scale| such that the bitmap is drawn at the
@@ -36,8 +37,9 @@ sk_sp<cc::PaintShader> CreateImageRepShaderForScale(
   shader_scale.setScaleX(local_matrix.getScaleX() / scale);
   shader_scale.setScaleY(local_matrix.getScaleY() / scale);
 
-  return cc::PaintShader::MakeBitmapShader(image_rep.sk_bitmap(), tile_mode,
-                                           tile_mode, &shader_scale);
+  return cc::PaintShader::MakeImage(
+      SkImage::MakeFromBitmap(image_rep.sk_bitmap()), tile_mode, tile_mode,
+      &shader_scale);
 }
 
 sk_sp<cc::PaintShader> CreateGradientShader(int start_point,
@@ -49,15 +51,8 @@ sk_sp<cc::PaintShader> CreateGradientShader(int start_point,
   grad_points[0].iset(0, start_point);
   grad_points[1].iset(0, end_point);
 
-  return cc::WrapSkShader(SkGradientShader::MakeLinear(
-      grad_points, grad_colors, NULL, 2, cc::PaintShader::kClamp_TileMode));
-}
-
-// TODO(estade): remove. Only exists to support legacy CreateShadowDrawLooper.
-static SkScalar DeprecatedRadiusToSigma(double radius) {
-  // This captures historically what skia did under the hood. Now skia accepts
-  // sigma, not radius, so we perform the conversion.
-  return radius > 0 ? SkDoubleToScalar(0.57735f * radius + 0.5) : 0;
+  return cc::PaintShader::MakeLinearGradient(grad_points, grad_colors, nullptr,
+                                             2, SkShader::kClamp_TileMode);
 }
 
 // This is copied from
@@ -67,41 +62,6 @@ static SkScalar RadiusToSigma(double radius) {
 }
 
 sk_sp<SkDrawLooper> CreateShadowDrawLooper(
-    const std::vector<ShadowValue>& shadows) {
-  if (shadows.empty())
-    return nullptr;
-
-  SkLayerDrawLooper::Builder looper_builder;
-
-  looper_builder.addLayer();  // top layer of the original.
-
-  SkLayerDrawLooper::LayerInfo layer_info;
-  layer_info.fPaintBits |= SkLayerDrawLooper::kMaskFilter_Bit;
-  layer_info.fPaintBits |= SkLayerDrawLooper::kColorFilter_Bit;
-  layer_info.fColorMode = SkBlendMode::kSrc;
-
-  for (size_t i = 0; i < shadows.size(); ++i) {
-    const ShadowValue& shadow = shadows[i];
-
-    layer_info.fOffset.set(SkIntToScalar(shadow.x()),
-                           SkIntToScalar(shadow.y()));
-
-    SkPaint* paint = looper_builder.addLayer(layer_info);
-    // SkBlurMaskFilter's blur radius defines the range to extend the blur from
-    // original mask, which is half of blur amount as defined in ShadowValue.
-    // Note that because this function uses DeprecatedRadiusToSigma, it actually
-    // creates a draw looper with roughly twice the desired blur.
-    paint->setMaskFilter(SkBlurMaskFilter::Make(
-        kNormal_SkBlurStyle, DeprecatedRadiusToSigma(shadow.blur() / 2),
-        SkBlurMaskFilter::kHighQuality_BlurFlag));
-    paint->setColorFilter(
-        SkColorFilter::MakeModeFilter(shadow.color(), SkBlendMode::kSrcIn));
-  }
-
-  return looper_builder.detach();
-}
-
-sk_sp<SkDrawLooper> CreateShadowDrawLooperCorrectBlur(
     const std::vector<ShadowValue>& shadows) {
   if (shadows.empty())
     return nullptr;

@@ -5,15 +5,15 @@
 #ifndef CHROME_BROWSER_CHROMEOS_SETTINGS_CROS_SETTINGS_H_
 #define CHROME_BROWSER_CHROMEOS_SETTINGS_CROS_SETTINGS_H_
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/callback_list.h"
-#include "base/containers/hash_tables.h"
 #include "base/macros.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/sequence_checker.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "chromeos/settings/cros_settings_provider.h"
 
@@ -28,7 +28,7 @@ namespace chromeos {
 class DeviceSettingsService;
 
 // This class manages per-device/global settings.
-class CrosSettings : public base::NonThreadSafe {
+class CrosSettings {
  public:
   // Manage singleton instance.
   static void Initialize();
@@ -112,10 +112,10 @@ class CrosSettings : public base::NonThreadSafe {
       CrosSettingsProvider* provider);
 
   // Add an observer Callback for changes for the given |path|.
-  typedef base::CallbackList<void(void)>::Subscription ObserverSubscription;
+  using ObserverSubscription = base::CallbackList<void(void)>::Subscription;
   std::unique_ptr<ObserverSubscription> AddSettingsObserver(
       const std::string& path,
-      const base::Closure& callback);
+      const base::Closure& callback) WARN_UNUSED_RESULT;
 
   // Returns the provider that handles settings with the |path| or prefix.
   CrosSettingsProvider* GetProvider(const std::string& path) const;
@@ -131,8 +131,10 @@ class CrosSettings : public base::NonThreadSafe {
 
   // A map from settings names to a list of observers. Observers get fired in
   // the order they are added.
-  base::hash_map<std::string, std::unique_ptr<base::CallbackList<void(void)>>>
+  std::map<std::string, std::unique_ptr<base::CallbackList<void(void)>>>
       settings_observers_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(CrosSettings);
 };

@@ -29,8 +29,14 @@ FramebufferImpl *SurfaceGL::createDefaultFramebuffer(const gl::FramebufferState 
                              mRenderer->getWorkarounds(), mRenderer->getBlitter(), true);
 }
 
+egl::Error SurfaceGL::getSyncValues(EGLuint64KHR *ust, EGLuint64KHR *msc, EGLuint64KHR *sbc)
+{
+    UNREACHABLE();
+    return egl::EglBadSurface();
+}
+
 egl::Error SurfaceGL::unMakeCurrent()
 {
-    return egl::Error(EGL_SUCCESS);
+    return egl::NoError();
 }
 }

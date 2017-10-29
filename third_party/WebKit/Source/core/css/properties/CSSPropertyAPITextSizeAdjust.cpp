@@ -7,16 +7,19 @@
 #include "core/CSSValueKeywords.h"
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPITextSizeAdjust::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  if (range.peek().id() == CSSValueAuto)
-    return CSSPropertyParserHelpers::consumeIdent(range);
-  if (range.peek().id() == CSSValueNone)
-    return CSSPropertyParserHelpers::consumeIdent(range);
-  return CSSPropertyParserHelpers::consumePercent(range, ValueRangeNonNegative);
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  if (range.Peek().Id() == CSSValueAuto)
+    return CSSPropertyParserHelpers::ConsumeIdent(range);
+  if (range.Peek().Id() == CSSValueNone)
+    return CSSPropertyParserHelpers::ConsumeIdent(range);
+  return CSSPropertyParserHelpers::ConsumePercent(range,
+                                                  kValueRangeNonNegative);
 }
 
 }  // namespace blink

@@ -11,6 +11,7 @@ import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.test.TestAwContentsClient.DoUpdateVisitedHistoryHelper;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
+import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.net.test.util.TestWebServer;
 
 /**
@@ -66,8 +67,9 @@ public class AwContentsClientVisitedHistoryTest extends AwTestBase {
         AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         AwContents awContents = testView.getAwContents();
 
+        // Load a page with an iframe to make sure the callback only happens for the main frame URL.
         final String path = "/testUpdateVisitedHistoryCallback.html";
-        final String html = "testUpdateVisitedHistoryCallback";
+        final String html = "<iframe src=\"about:blank\"></iframe>";
 
         TestWebServer webServer = TestWebServer.start();
         try {
@@ -79,13 +81,14 @@ public class AwContentsClientVisitedHistoryTest extends AwTestBase {
             doUpdateVisitedHistoryHelper.waitForCallback(callCount);
             assertEquals(pageUrl, doUpdateVisitedHistoryHelper.getUrl());
             assertEquals(false, doUpdateVisitedHistoryHelper.getIsReload());
+            assertEquals(callCount + 1, doUpdateVisitedHistoryHelper.getCallCount());
 
             // Reload
-            callCount = doUpdateVisitedHistoryHelper.getCallCount();
             loadUrlAsync(awContents, pageUrl);
-            doUpdateVisitedHistoryHelper.waitForCallback(callCount);
+            doUpdateVisitedHistoryHelper.waitForCallback(callCount + 1);
             assertEquals(pageUrl, doUpdateVisitedHistoryHelper.getUrl());
             assertEquals(true, doUpdateVisitedHistoryHelper.getIsReload());
+            assertEquals(callCount + 2, doUpdateVisitedHistoryHelper.getCallCount());
         } finally {
             webServer.shutdown();
         }
@@ -134,7 +137,7 @@ public class AwContentsClientVisitedHistoryTest extends AwTestBase {
         final int callCount = visitedHistoryHelper.getCallCount();
         AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         AwContents awContents = testView.getAwContents();
-        loadUrlAsync(awContents, "about:blank");
+        loadUrlAsync(awContents, ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL);
         visitedHistoryHelper.waitForCallback(callCount);
         assertNotNull(visitedHistoryHelper.getCallback());
 

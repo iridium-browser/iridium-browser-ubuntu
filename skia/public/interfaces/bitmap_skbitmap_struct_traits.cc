@@ -22,10 +22,11 @@ SkColorType MojoColorTypeToSk(skia::mojom::ColorType type) {
       return kRGBA_8888_SkColorType;
     case skia::mojom::ColorType::BGRA_8888:
       return kBGRA_8888_SkColorType;
-    case skia::mojom::ColorType::INDEX_8:
-      return kIndex_8_SkColorType;
     case skia::mojom::ColorType::GRAY_8:
       return kGray_8_SkColorType;
+    case skia::mojom::ColorType::INDEX_8:
+      // no longer supported
+      break;
   }
   NOTREACHED();
   return kUnknown_SkColorType;
@@ -71,13 +72,11 @@ skia::mojom::ColorType SkColorTypeToMojo(SkColorType type) {
       return skia::mojom::ColorType::RGBA_8888;
     case kBGRA_8888_SkColorType:
       return skia::mojom::ColorType::BGRA_8888;
-    case kIndex_8_SkColorType:
-      return skia::mojom::ColorType::INDEX_8;
     case kGray_8_SkColorType:
       return skia::mojom::ColorType::GRAY_8;
     case kRGBA_F16_SkColorType:
-      NOTREACHED();
-      return skia::mojom::ColorType::UNKNOWN;
+      // these are unsupported
+      break;
   }
   NOTREACHED();
   return skia::mojom::ColorType::UNKNOWN;
@@ -180,14 +179,12 @@ bool StructTraits<skia::mojom::BitmapDataView, SkBitmap>::Read(
   if (data.width() == 0 || data.height() == 0)
     return true;
 
-  SkAutoPixmapUnlock pixmap;
   mojo::ArrayDataView<uint8_t> data_view;
   data.GetPixelDataDataView(&data_view);
   if (static_cast<uint32_t>(b->width()) != data.width() ||
       static_cast<uint32_t>(b->height()) != data.height() ||
       static_cast<uint64_t>(b->rowBytes()) != data.row_bytes() ||
-      b->getSize() != data_view.size() || !b->requestLock(&pixmap) ||
-      !b->readyToDraw()) {
+      b->getSize() != data_view.size() || !b->readyToDraw()) {
     return false;
   }
 
@@ -198,20 +195,6 @@ bool StructTraits<skia::mojom::BitmapDataView, SkBitmap>::Read(
 
   b->notifyPixelsChanged();
   return true;
-}
-
-// static
-void* StructTraits<skia::mojom::BitmapDataView, SkBitmap>::SetUpContext(
-    const SkBitmap& b) {
-  b.lockPixels();
-  return nullptr;
-}
-
-// static
-void StructTraits<skia::mojom::BitmapDataView, SkBitmap>::TearDownContext(
-    const SkBitmap& b,
-    void* context) {
-  b.unlockPixels();
 }
 
 }  // namespace mojo

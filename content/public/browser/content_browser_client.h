@@ -13,23 +13,25 @@
 #include <utility>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/callback.h"
 #include "base/task_scheduler/task_scheduler.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/navigation_throttle.h"
+#include "content/public/common/associated_interface_registry.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/media_stream_request.h"
 #include "content/public/common/resource_type.h"
-#include "content/public/common/service_info.h"
+#include "content/public/common/sandbox_type.h"
 #include "content/public/common/socket_permission_request.h"
 #include "content/public/common/window_container_type.mojom.h"
-#include "media/audio/audio_manager.h"
 #include "media/media_features.h"
 #include "media/mojo/interfaces/remoting.mojom.h"
 #include "net/base/mime_util.h"
 #include "net/cookies/canonical_cookie.h"
+#include "services/service_manager/embedder/embedded_service_info.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/quota/quota_manager.h"
 #include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
@@ -50,7 +52,6 @@ class GURL;
 namespace base {
 class CommandLine;
 class FilePath;
-class SchedulerWorkerPoolParams;
 }
 
 namespace gfx {
@@ -62,15 +63,23 @@ class GpuChannelEstablishFactory;
 }
 
 namespace media {
+class AudioLogFactory;
+class AudioManager;
 class CdmFactory;
 }
 
+namespace mojo {
+class ScopedInterfaceEndpointHandle;
+}
+
 namespace service_manager {
-class InterfaceRegistry;
 class Service;
+struct BindSourceInfo;
 }
 
 namespace net {
+class ClientCertIdentity;
+using ClientCertIdentityList = std::vector<std::unique_ptr<ClientCertIdentity>>;
 class CookieOptions;
 class NetLog;
 class SSLCertRequestInfo;
@@ -110,7 +119,6 @@ class BrowserURLHandler;
 class ClientCertificateDelegate;
 class ControllerPresentationServiceDelegate;
 class DevToolsManagerDelegate;
-class GpuProcessHost;
 class MediaObserver;
 class MemoryCoordinatorDelegate;
 class NavigationHandle;
@@ -126,6 +134,7 @@ class SiteInstance;
 class SpeechRecognitionManagerDelegate;
 class StoragePartition;
 class TracingDelegate;
+class URLLoaderThrottle;
 class VpnServiceProxy;
 class WebContents;
 class WebContentsViewDelegate;
@@ -160,7 +169,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual void PostAfterStartupTask(
       const tracked_objects::Location& from_here,
       const scoped_refptr<base::TaskRunner>& task_runner,
-      const base::Closure& task);
+      base::OnceClosure task);
 
   // Allows the embedder to indicate whether it considers startup to be
   // complete. May be called on any thread. This should be called on a one-off
@@ -301,6 +310,10 @@ class CONTENT_EXPORT ContentBrowserClient {
   // current SiteInstance, if it does not yet have a site.
   virtual bool ShouldAssignSiteForURL(const GURL& url);
 
+  // Allows the embedder to provide a list of origins that require a dedicated
+  // process.
+  virtual std::vector<url::Origin> GetOriginsRequiringDedicatedProcess();
+
   // Allows the embedder to pass extra command line flags.
   // switches::kProcessType will already be set at this point.
   virtual void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
@@ -316,6 +329,10 @@ class CONTENT_EXPORT ContentBrowserClient {
 
   // Returns the default favicon.  The callee doesn't own the given bitmap.
   virtual const gfx::ImageSkia* GetDefaultFavicon();
+
+  // Returns the fully qualified path to the log file name, or an empty path.
+  // This function is used by the sandbox to allow write access to the log.
+  virtual base::FilePath GetLoggingFileName();
 
   // Allow the embedder to control if an AppCache can be used for the given url.
   // This is called on the IO thread.
@@ -355,9 +372,6 @@ class CONTENT_EXPORT ContentBrowserClient {
                               int render_frame_id,
                               const net::CookieOptions& options);
 
-  // This is called on the IO thread.
-  virtual bool AllowSaveLocalState(ResourceContext* context);
-
   // Allow the embedder to control if access to file system by a shared worker
   // is allowed.
   // This is called on the IO thread.
@@ -375,15 +389,6 @@ class CONTENT_EXPORT ContentBrowserClient {
       const base::string16& name,
       ResourceContext* context,
       const std::vector<std::pair<int, int> >& render_frames);
-
-#if BUILDFLAG(ENABLE_WEBRTC)
-  // Allow the embedder to control if WebRTC identities are allowed to be cached
-  // and potentially reused for future requests (within the same origin).
-  // This is called on the IO thread.
-  virtual bool AllowWebRTCIdentityCache(const GURL& url,
-                                        const GURL& first_party_url,
-                                        ResourceContext* context);
-#endif  // BUILDFLAG(ENABLE_WEBRTC)
 
   // Allow the embedder to control whether we can use Web Bluetooth.
   // TODO(crbug.com/589228): Replace this with a use of the permission system.
@@ -463,7 +468,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual void GetQuotaSettings(
       content::BrowserContext* context,
       content::StoragePartition* partition,
-      const storage::OptionalQuotaSettingsCallback& callback);
+      storage::OptionalQuotaSettingsCallback callback);
 
   // Informs the embedder that a certificate error has occured.  If
   // |overridable| is true and if |strict_enforcement| is false, the user
@@ -478,7 +483,7 @@ class CONTENT_EXPORT ContentBrowserClient {
       bool overridable,
       bool strict_enforcement,
       bool expired_previous_decision,
-      const base::Callback<void(CertificateRequestResultType)>& callback) {}
+      const base::Callback<void(CertificateRequestResultType)>& callback);
 
   // Selects a SSL client certificate and returns it to the |delegate|. Note:
   // |delegate| may be called synchronously or asynchronously.
@@ -487,6 +492,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual void SelectClientCertificate(
       WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
+      net::ClientCertIdentityList client_certs,
       std::unique_ptr<ClientCertificateDelegate> delegate);
 
   // Returns a class to get notifications about media event. The embedder can
@@ -501,10 +507,9 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Returns true if the given page is allowed to open a window of the given
   // type. If true is returned, |no_javascript_access| will indicate whether
   // the window that is created should be scriptable/in the same process.
-  // This is called on the IO thread.
+  // This is called on the UI thread.
   virtual bool CanCreateWindow(
-      int opener_render_process_id,
-      int opener_render_frame_id,
+      RenderFrameHost* opener,
       const GURL& opener_url,
       const GURL& opener_top_level_frame_url,
       const GURL& source_origin,
@@ -516,7 +521,6 @@ class CONTENT_EXPORT ContentBrowserClient {
       const blink::mojom::WindowFeatures& features,
       bool user_gesture,
       bool opener_suppressed,
-      ResourceContext* context,
       bool* no_javascript_access);
 
   // Notifies the embedder that the ResourceDispatcherHost has been created.
@@ -540,23 +544,6 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Notifies that BrowserURLHandler has been created, so that the embedder can
   // optionally add their own handlers.
   virtual void BrowserURLHandlerCreated(BrowserURLHandler* handler) {}
-
-  // Clears browser cache.
-  virtual void ClearCache(RenderFrameHost* rfh) {}
-
-  // Clears browser cookies.
-  virtual void ClearCookies(RenderFrameHost* rfh) {}
-
-  // Clears |browser_context|'s data stored for the given |origin|.
-  // The datatypes to be removed are specified by |remove_cookies|,
-  // |remove_storage|, and |remove_cache|. Note that cookies should be removed
-  // for the entire eTLD+1 of |origin|. Must call |callback| when finished.
-  virtual void ClearSiteData(content::BrowserContext* browser_context,
-                             const url::Origin& origin,
-                             bool remove_cookies,
-                             bool remove_storage,
-                             bool remove_cache,
-                             const base::Closure& callback) {}
 
   // Returns the default download directory.
   // This can be called on any thread.
@@ -660,51 +647,59 @@ class CONTENT_EXPORT ContentBrowserClient {
   // |registry| will by default be run immediately on the IO thread, unless a
   // task runner is provided.
   virtual void ExposeInterfacesToRenderer(
-      service_manager::InterfaceRegistry* registry,
+      service_manager::BinderRegistry* registry,
+      AssociatedInterfaceRegistry* associated_registry,
       RenderProcessHost* render_process_host) {}
 
   // Called when RenderFrameHostImpl connects to the Media service. Expose
   // interfaces to the service using |registry|.
   virtual void ExposeInterfacesToMediaService(
-      service_manager::InterfaceRegistry* registry,
+      service_manager::BinderRegistry* registry,
       RenderFrameHost* render_frame_host) {}
 
-  // Allows to register browser Mojo interfaces exposed through the
-  // RenderFrameHost.
-  virtual void RegisterRenderFrameMojoInterfaces(
-      service_manager::InterfaceRegistry* registry,
-      RenderFrameHost* render_frame_host) {}
+  // Content was unable to bind a request for this interface, so the embedder
+  // should try.
+  virtual void BindInterfaceRequestFromFrame(
+      RenderFrameHost* render_frame_host,
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle interface_pipe) {}
 
-  // Allows to register browser Mojo interfaces exposed through the
-  // GpuProcessHost. Called on the IO thread. Note that interface factory
-  // callbacks added to |registry| will by default be run immediately on the IO
-  // thread, unless a task runner is provided.
-  virtual void ExposeInterfacesToGpuProcess(
-      service_manager::InterfaceRegistry* registry,
-      GpuProcessHost* render_process_host) {}
+  // Content was unable to bind a request for this associated interface, so the
+  // embedder should try. Returns true if the |handle| was actually taken and
+  // bound; false otherwise.
+  virtual bool BindAssociatedInterfaceRequestFromFrame(
+      RenderFrameHost* render_frame_host,
+      const std::string& interface_name,
+      mojo::ScopedInterfaceEndpointHandle* handle);
 
-  using StaticServiceMap = std::map<std::string, ServiceInfo>;
+  // (Currently called only from GPUProcessHost, move somewhere more central).
+  // Called when a request to bind |interface_name| on |interface_pipe| is
+  // received from |source_info.identity|. If the request is bound,
+  // |interface_pipe| will become invalid (taken by the client).
+  virtual void BindInterfaceRequest(
+      const service_manager::BindSourceInfo& source_info,
+      const std::string& interface_name,
+      mojo::ScopedMessagePipeHandle* interface_pipe) {}
+
+  using StaticServiceMap =
+      std::map<std::string, service_manager::EmbeddedServiceInfo>;
 
   // Registers services to be loaded in the browser process by the Service
   // Manager.
   virtual void RegisterInProcessServices(StaticServiceMap* services) {}
 
-  using OutOfProcessServiceMap = std::map<std::string, base::string16>;
+  using OutOfProcessServiceMap =
+      std::map<std::string, std::pair<base::string16, SandboxType>>;
 
-  // Registers services to be loaded out of the browser process, in a sandboxed
-  // utility process. The value of each map entry should be the process name to
-  // use for the service's host process when launched.
-  virtual void RegisterOutOfProcessServices(OutOfProcessServiceMap* services) {}
-
-  // Registers services to be loaded out of the browser process (in a utility
-  // process) without the sandbox.
+  // Registers services to be loaded out of the browser process, in an
+  // utility process. The value of each map entry should be a { process name,
+  // sandbox type } pair to use for the service's host process when launched.
   //
-  // WARNING: This path is NOT recommended! If a service needs another service
-  // that is only available out of the sandbox, it could ask the browser
-  // process to provide it. Only use this method when that approach does not
-  // work.
-  virtual void RegisterUnsandboxedOutOfProcessServices(
-      OutOfProcessServiceMap* services) {}
+  // WARNING: SANDBOX_TYPE_NO_SANDBOX is NOT recommended as it creates an
+  // unsandboxed process! If a service needs another service that is only
+  // available out of the sandbox, it could ask the browser process to provide
+  // it. Only use this method when that approach does not work.
+  virtual void RegisterOutOfProcessServices(OutOfProcessServiceMap* services) {}
 
   // Allow the embedder to provide a dictionary loaded from a JSON file
   // resembling a service manifest whose capabilities section will be merged
@@ -753,6 +748,13 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Allows the embedder to record |metric| for a specific |url|.
   virtual void RecordURLMetric(const std::string& metric, const GURL& url) {}
 
+  // Allows the embedder to map URLs to strings, intended to be used as suffixes
+  // for metric names. For example, the embedder can map
+  // "my-special-site-with-a-complicated-name.example.com/and-complicated-path"
+  // to the string "MySpecialSite", which will cause some UMA involving that URL
+  // to be logged as "UmaName.MySpecialSite".
+  virtual std::string GetMetricSuffixForURL(const GURL& url);
+
   // Allows the embedder to register one or more NavigationThrottles for the
   // navigation indicated by |navigation_handle|.  A NavigationThrottle is used
   // to control the flow of a navigation on the UI thread. The embedder is
@@ -770,7 +772,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Allows the embedder to provide its own AudioManager implementation.
   // If this function returns nullptr, a default platform implementation
   // will be used.
-  virtual media::ScopedAudioManagerPtr CreateAudioManager(
+  virtual std::unique_ptr<media::AudioManager> CreateAudioManager(
       media::AudioLogFactory* audio_log_factory);
   // Creates and returns a factory used for creating CDM instances for playing
   // protected content.
@@ -813,23 +815,16 @@ class CONTENT_EXPORT ContentBrowserClient {
   // Returns the RapporService from the browser process.
   virtual ::rappor::RapporService* GetRapporService();
 
-  // Provides parameters for initializing the global task scheduler. If
-  // |params_vector| is empty, default parameters are used.
-  virtual void GetTaskSchedulerInitializationParams(
-      std::vector<base::SchedulerWorkerPoolParams>* params_vector,
-      base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
-          index_to_traits_callback) {}
+  // Provides parameters for initializing the global task scheduler. Default
+  // params are used if this returns nullptr.
+  virtual std::unique_ptr<base::TaskScheduler::InitParams>
+  GetTaskSchedulerInitParams();
 
-  // Performs any necessary PostTask API redirection to the task scheduler.
-  virtual void PerformExperimentalTaskSchedulerRedirections() {}
-
-  // Returns true if the DOMStorageTaskRunner should be redirected to the task
-  // scheduler.
-  virtual bool ShouldRedirectDOMStorageTaskRunner();
-
-  // If this returns true, all BrowserThreads (but UI/IO) that support it on
-  // this platform will experimentally be redirected to TaskScheduler.
-  virtual bool RedirectNonUINonIOBrowserThreadsToTaskScheduler();
+  // Allows the embedder to register one or more URLLoaderThrottles for a
+  // URL request. This is used only when --enable-network-service is in effect.
+  // This is called on the IO thread.
+  virtual std::vector<std::unique_ptr<URLLoaderThrottle>>
+  CreateURLLoaderThrottles(const base::Callback<WebContents*()>& wc_getter);
 };
 
 }  // namespace content

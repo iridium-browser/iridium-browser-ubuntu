@@ -40,7 +40,7 @@ class DistillerJsRenderFrameObserver : public content::RenderFrameObserver {
 
  private:
   void CreateDistillerPageNotifierService(
-      mojo::InterfaceRequest<mojom::DistillerPageNotifierService> request);
+      mojom::DistillerPageNotifierServiceRequest request);
 
   // RenderFrameObserver implementation.
   void OnDestruct() override;

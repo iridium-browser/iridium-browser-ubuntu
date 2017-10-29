@@ -31,6 +31,15 @@ class AURA_EXPORT WindowTargeter : public ui::EventTargeter {
   virtual bool SubtreeShouldBeExploredForEvent(Window* window,
                                                const ui::LocatedEvent& event);
 
+  Window* FindTargetInRootWindow(Window* root_window,
+                                 const ui::LocatedEvent& event);
+
+  // ui::EventTargeter:
+  ui::EventTarget* FindTargetForEvent(ui::EventTarget* root,
+                                      ui::Event* event) override;
+  ui::EventTarget* FindNextBestTarget(ui::EventTarget* previous_target,
+                                      ui::Event* event) override;
+
  protected:
   // Same as FindTargetForEvent(), but used for positional events. The location
   // etc. of |event| are in |root|'s coordinate system. When finding the target
@@ -54,17 +63,9 @@ class AURA_EXPORT WindowTargeter : public ui::EventTargeter {
   virtual bool EventLocationInsideBounds(Window* target,
                                          const ui::LocatedEvent& event) const;
 
-  // ui::EventTargeter:
-  ui::EventTarget* FindTargetForEvent(ui::EventTarget* root,
-                                      ui::Event* event) override;
-  ui::EventTarget* FindNextBestTarget(ui::EventTarget* previous_target,
-                                      ui::Event* event) override;
-
  private:
   Window* FindTargetForKeyEvent(Window* root_window, const ui::KeyEvent& event);
   Window* FindTargetForNonKeyEvent(Window* root_window, ui::Event* event);
-  Window* FindTargetInRootWindow(Window* root_window,
-                                 const ui::LocatedEvent& event);
   Window* FindTargetForLocatedEventRecursively(Window* root_window,
                                                ui::LocatedEvent* event);
 

@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/macros.h"
@@ -93,6 +94,15 @@ class AddressValidator {
   // If the rules are already in progress of being loaded, it does nothing.
   // Invokes |load_rules_listener| when the loading has finished.
   virtual void LoadRules(const std::string& region_code);
+
+  // Returns the list of sub-regions (recorded as sub-keys) of the region
+  // (recorded as rule) indicated by |region_code|, while the device language
+  // is set to |language|. So, if the |region_code| is
+  // a country code, sub-region means the country's admin area.
+  // This function should be called when the rules are loaded.
+  virtual std::vector<std::pair<std::string, std::string>> GetRegionSubKeys(
+      const std::string& region_code,
+      const std::string& language);
 
   // Validates the |address| and populates |problems| with the validation
   // problems, filtered according to the |filter| parameter.

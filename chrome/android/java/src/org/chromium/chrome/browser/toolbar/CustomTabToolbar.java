@@ -35,26 +35,28 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.WindowDelegate;
 import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.dom_distiller.DomDistillerServiceFactory;
 import org.chromium.chrome.browser.dom_distiller.DomDistillerTabUtils;
 import org.chromium.chrome.browser.ntp.NativePageFactory;
 import org.chromium.chrome.browser.ntp.NewTabPage;
+import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.omnibox.LocationBar;
 import org.chromium.chrome.browser.omnibox.LocationBarLayout;
 import org.chromium.chrome.browser.omnibox.UrlBar;
 import org.chromium.chrome.browser.omnibox.UrlFocusChangeListener;
-import org.chromium.chrome.browser.pageinfo.WebsiteSettingsPopup;
+import org.chromium.chrome.browser.page_info.PageInfoPopup;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.util.AccessibilityUtil;
 import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.components.dom_distiller.core.DomDistillerService;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
+import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
@@ -127,6 +129,8 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     private String mFirstUrl;
     private boolean mShowsOfflinePage;
 
+    protected ToolbarDataProvider mToolbarDataProvider;
+
     private Runnable mTitleAnimationStarter = new Runnable() {
         @Override
         public void run() {
@@ -165,11 +169,6 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     }
 
     @Override
-    protected int getToolbarHeightWithoutShadowResId() {
-        return R.dimen.custom_tabs_control_container_height;
-    }
-
-    @Override
     public void initialize(ToolbarDataProvider toolbarDataProvider,
             ToolbarTabController tabController, AppMenuButtonHelper appMenuButtonHelper) {
         super.initialize(toolbarDataProvider, tabController, appMenuButtonHelper);
@@ -188,8 +187,8 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
                 if (activity == null) return;
                 String publisherName = mState == STATE_TITLE_ONLY
                         ? parsePublisherNameFromUrl(currentTab.getUrl()) : null;
-                WebsiteSettingsPopup.show(activity, currentTab, publisherName,
-                        WebsiteSettingsPopup.OPENED_FROM_TOOLBAR);
+                PageInfoPopup.show(
+                        activity, currentTab, publisherName, PageInfoPopup.OPENED_FROM_TOOLBAR);
             }
         });
     }
@@ -245,6 +244,11 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     @Override
     public Tab getCurrentTab() {
         return getToolbarDataProvider().getTab();
+    }
+
+    @Override
+    public boolean allowKeyboardLearning() {
+        return !super.isIncognito();
     }
 
     @Override
@@ -319,7 +323,7 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         // always return the url. We postpone the title animation until the title is authentic.
         if ((mState == STATE_DOMAIN_AND_TITLE || mState == STATE_TITLE_ONLY)
                 && !title.equals(currentTab.getUrl())
-                && !title.equals(UrlConstants.ABOUT_BLANK_DISPLAY_URL)) {
+                && !title.equals(ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL)) {
             // Delay the title animation until security icon animation finishes.
             ThreadUtils.postOnUiThreadDelayed(mTitleAnimationStarter, TITLE_ANIM_DELAY_MS);
         }
@@ -358,7 +362,7 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         // If we have taken a pre-initialized WebContents, then the starting URL
         // is "about:blank". We should not display it.
         if (NativePageFactory.isNativePageUrl(url, getCurrentTab().isIncognito())
-                || UrlConstants.ABOUT_BLANK_DISPLAY_URL.equals(url)) {
+                || ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL.equals(url)) {
             mUrlBar.setUrl("", null);
             return;
         }
@@ -400,6 +404,16 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     public void updateLoadingState(boolean updateUrl) {
         if (updateUrl) setUrlToPageUrl();
         updateSecurityIcon(getSecurityLevel());
+    }
+
+    @Override
+    public void setToolbarDataProvider(ToolbarDataProvider model) {
+        mToolbarDataProvider = model;
+    }
+
+    @Override
+    public ToolbarDataProvider getToolbarDataProvider() {
+        return mToolbarDataProvider;
     }
 
     @Override
@@ -471,8 +485,9 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
         mSecurityIconType = securityLevel;
 
-        boolean isSmallDevice = !DeviceFormFactor.isTablet(getContext());
-        boolean isOfflinePage = getCurrentTab() != null && getCurrentTab().isOfflinePage();
+        boolean isSmallDevice = !DeviceFormFactor.isTablet();
+        boolean isOfflinePage =
+                getCurrentTab() != null && OfflinePageUtils.isOfflinePage(getCurrentTab());
 
         int id = LocationBarLayout.getSecurityIconResource(
                 securityLevel, isSmallDevice, isOfflinePage);
@@ -639,11 +654,18 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     }
 
     @Override
+    public boolean useLightDrawables() {
+        return !mUseDarkColors;
+    }
+
+    @Override
     public boolean onLongClick(View v) {
         if (v == mCloseButton) {
-            return showAccessibilityToast(v, getResources().getString(R.string.close_tab));
+            return AccessibilityUtil.showAccessibilityToast(
+                    getContext(), v, getResources().getString(R.string.close_tab));
         } else if (v == mCustomActionButton) {
-            return showAccessibilityToast(v, mCustomActionButton.getContentDescription());
+            return AccessibilityUtil.showAccessibilityToast(
+                    getContext(), v, mCustomActionButton.getContentDescription());
         } else if (v == mTitleUrlContainer) {
             ClipboardManager clipboard = (ClipboardManager) getContext()
                     .getSystemService(Context.CLIPBOARD_SERVICE);
@@ -674,10 +696,12 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     // Toolbar and LocationBar calls that are not relevant here.
 
     @Override
-    public void setToolbarDataProvider(ToolbarDataProvider model) {}
+    public void onTextChangedForAutocomplete() {}
 
     @Override
-    public void onTextChangedForAutocomplete(boolean canInlineAutocomplete) {}
+    public void backKeyPressed() {
+        assert false : "The URL bar should never take focus in CCTs.";
+    }
 
     @Override
     public void setUrlFocusChangeListener(UrlFocusChangeListener listener) {}
@@ -738,6 +762,25 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
     @Override
     public boolean mustQueryUrlBarLocationForSuggestions() {
+        return false;
+    }
+
+    // Temporary fix to override ToolbarLayout's highlight-related methods
+    @Override
+    public void setMenuButtonHighlight(boolean highlight) {}
+
+    @Override
+    protected void setMenuButtonHighlightDrawable(boolean highlighting) {}
+
+    @Override
+    public boolean isSuggestionsListShown() {
+        // Custom tabs do not support suggestions.
+        return false;
+    }
+
+    @Override
+    public boolean isSuggestionsListScrolled() {
+        // Custom tabs do not support suggestions.
         return false;
     }
 }

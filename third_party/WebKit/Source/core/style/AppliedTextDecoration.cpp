@@ -7,12 +7,14 @@
 namespace blink {
 
 AppliedTextDecoration::AppliedTextDecoration(TextDecoration line,
-                                             TextDecorationStyle style,
+                                             ETextDecorationStyle style,
                                              Color color)
-    : m_lines(line), m_style(style), m_color(color) {}
+    : lines_(static_cast<unsigned>(line)),
+      style_(static_cast<unsigned>(style)),
+      color_(color) {}
 
 bool AppliedTextDecoration::operator==(const AppliedTextDecoration& o) const {
-  return m_color == o.m_color && m_lines == o.m_lines && m_style == o.m_style;
+  return color_ == o.color_ && lines_ == o.lines_ && style_ == o.style_;
 }
 
 }  // namespace blink

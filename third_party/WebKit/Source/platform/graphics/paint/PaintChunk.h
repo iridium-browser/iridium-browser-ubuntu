@@ -5,13 +5,14 @@
 #ifndef PaintChunk_h
 #define PaintChunk_h
 
+#include <iosfwd>
 #include "platform/geometry/FloatRect.h"
 #include "platform/graphics/paint/DisplayItem.h"
 #include "platform/graphics/paint/PaintChunkProperties.h"
-#include "wtf/Allocator.h"
-#include "wtf/Optional.h"
-#include "wtf/Vector.h"
-#include <iosfwd>
+#include "platform/graphics/paint/RasterInvalidationTracking.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Optional.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 
@@ -23,48 +24,58 @@ namespace blink {
 // This is a Slimming Paint v2 class.
 struct PaintChunk {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-  PaintChunk() : beginIndex(0), endIndex(0), knownToBeOpaque(false) {}
+
+  using Id = DisplayItem::Id;
+
+  enum Cacheable {
+    kCacheable,
+    kUncacheable,
+  };
+
   PaintChunk(size_t begin,
              size_t end,
-             const DisplayItem::Id* chunkId,
-             const PaintChunkProperties& props)
-      : beginIndex(begin),
-        endIndex(end),
+             const Id& id,
+             const PaintChunkProperties& props,
+             Cacheable cacheable = kCacheable)
+      : begin_index(begin),
+        end_index(end),
+        id(id),
         properties(props),
-        knownToBeOpaque(false) {
-    if (chunkId)
-      id.emplace(*chunkId);
-  }
+        outset_for_raster_effects(0),
+        known_to_be_opaque(false),
+        is_cacheable(cacheable == kCacheable),
+        client_is_just_created(id.client.IsJustCreated()) {}
 
   size_t size() const {
-    ASSERT(endIndex >= beginIndex);
-    return endIndex - beginIndex;
+    DCHECK_GE(end_index, begin_index);
+    return end_index - begin_index;
   }
 
   // Check if a new PaintChunk (this) created in the latest paint matches an old
   // PaintChunk created in the previous paint.
-  bool matches(const PaintChunk& old) const {
-    // A PaintChunk without an id doesn't match any other PaintChunks.
-    if (!id || !old.id)
+  bool Matches(const PaintChunk& old) const {
+    return old.is_cacheable && Matches(old.id);
+  }
+
+  bool Matches(const Id& other_id) const {
+    if (!is_cacheable || id != other_id)
       return false;
-    if (*id != *old.id)
-      return false;
-#if CHECK_DISPLAY_ITEM_CLIENT_ALIVENESS
-    CHECK(id->client.isAlive());
+#if DCHECK_IS_ON()
+    DCHECK(id.client.IsAlive());
 #endif
     // A chunk whose client is just created should not match any cached chunk,
     // even if it's id equals the old chunk's id (which may happen if this
     // chunk's client is just created at the same address of the old chunk's
     // deleted client).
-    return !id->client.isJustCreated();
+    return !client_is_just_created;
   }
 
   // Index of the first drawing in this chunk.
-  size_t beginIndex;
+  size_t begin_index;
 
   // Index of the first drawing not in this chunk, so that there are
   // |endIndex - beginIndex| drawings in the chunk.
-  size_t endIndex;
+  size_t end_index;
 
   // Identifier of this chunk. If it has a value, it should be unique. This is
   // used to match a new chunk to a cached old chunk to track changes of chunk
@@ -73,8 +84,7 @@ struct PaintChunk {
   // PaintController is skipping the cache, normally because display items can't
   // be uniquely identified), |id| is nullopt so that the chunk won't match any
   // other chunk.
-  using Id = DisplayItem::Id;
-  Optional<Id> id;
+  Id id;
 
   // The paint properties which apply to this chunk.
   PaintChunkProperties properties;
@@ -83,43 +93,58 @@ struct PaintChunk {
   // the containing transform node.
   FloatRect bounds;
 
-  // True if the bounds are filled entirely with opaque contents.
-  bool knownToBeOpaque;
+  // Some raster effects can exceed |bounds| in the rasterization space. This
+  // is the maximum DisplayItemClient::VisualRectOutsetForRasterEffects() of
+  // all clients of items in this chunk.
+  float outset_for_raster_effects;
 
-  // SPv2 only. Rectangles that need to be re-rasterized in this chunk, in the
-  // coordinate space of the containing transform node.
-  Vector<FloatRect> rasterInvalidationRects;
+  // True if the bounds are filled entirely with opaque contents.
+  bool known_to_be_opaque : 1;
+
+  bool is_cacheable : 1;
+
+  // TODO(wangxianzhu): The following fields are 'mutable' for
+  // ContentLayerClientImpl to clear them, which will be unnecessary if we don't
+  // call PaintArtifactCompositor::Update() when paint artifact is unchanged.
+  mutable bool client_is_just_created : 1;
+
+  // Rectangles that need to be re-rasterized in this chunk, in the coordinate
+  // space of the containing transform node.
+  mutable Vector<FloatRect> raster_invalidation_rects;
+
+  mutable Vector<RasterInvalidationInfo> raster_invalidation_tracking;
 };
 
 inline bool operator==(const PaintChunk& a, const PaintChunk& b) {
-  return a.beginIndex == b.beginIndex && a.endIndex == b.endIndex &&
+  return a.begin_index == b.begin_index && a.end_index == b.end_index &&
          a.id == b.id && a.properties == b.properties && a.bounds == b.bounds &&
-         a.knownToBeOpaque == b.knownToBeOpaque &&
-         a.rasterInvalidationRects == b.rasterInvalidationRects;
+         a.known_to_be_opaque == b.known_to_be_opaque &&
+         a.is_cacheable == b.is_cacheable &&
+         a.raster_invalidation_rects == b.raster_invalidation_rects;
 }
 
 inline bool operator!=(const PaintChunk& a, const PaintChunk& b) {
   return !(a == b);
 }
 
-inline bool chunkLessThanIndex(const PaintChunk& chunk, size_t index) {
-  return chunk.endIndex <= index;
+inline bool ChunkLessThanIndex(const PaintChunk& chunk, size_t index) {
+  return chunk.end_index <= index;
 }
 
-inline Vector<PaintChunk>::iterator findChunkInVectorByDisplayItemIndex(
+inline Vector<PaintChunk>::iterator FindChunkInVectorByDisplayItemIndex(
     Vector<PaintChunk>& chunks,
     size_t index) {
   auto chunk =
-      std::lower_bound(chunks.begin(), chunks.end(), index, chunkLessThanIndex);
+      std::lower_bound(chunks.begin(), chunks.end(), index, ChunkLessThanIndex);
   DCHECK(chunk == chunks.end() ||
-         (index >= chunk->beginIndex && index < chunk->endIndex));
+         (index >= chunk->begin_index && index < chunk->end_index));
   return chunk;
 }
 
-inline Vector<PaintChunk>::const_iterator findChunkInVectorByDisplayItemIndex(
+inline Vector<PaintChunk>::const_iterator FindChunkInVectorByDisplayItemIndex(
     const Vector<PaintChunk>& chunks,
     size_t index) {
-  return findChunkInVectorByDisplayItemIndex(
+  return FindChunkInVectorByDisplayItemIndex(
       const_cast<Vector<PaintChunk>&>(chunks), index);
 }
 

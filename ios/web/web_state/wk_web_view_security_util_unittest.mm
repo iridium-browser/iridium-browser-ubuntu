@@ -9,15 +9,21 @@
 
 #include <memory>
 
+#include "base/mac/foundation_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "crypto/rsa_private_key.h"
 #include "net/cert/x509_cert_types.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
+#include "net/cert/x509_util_ios.h"
 #include "net/ssl/ssl_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
 #include "testing/platform_test.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 namespace {
@@ -37,10 +43,11 @@ NSArray* MakeTestCertChain(const std::string& subject) {
       &der_cert);
 
   base::ScopedCFTypeRef<SecCertificateRef> cert(
-      net::X509Certificate::CreateOSCertHandleFromBytes(der_cert.data(),
-                                                        der_cert.size()));
-  NSArray* result = @[ reinterpret_cast<id>(cert.get()) ];
-  return result;
+      net::x509_util::CreateSecCertificateFromBytes(
+          reinterpret_cast<const uint8_t*>(der_cert.data()), der_cert.size()));
+  if (!cert)
+    return nullptr;
+  return @[ (__bridge id)cert.get() ];
 }
 
 // Returns an autoreleased dictionary, which represents NSError's user info for
@@ -55,7 +62,8 @@ NSDictionary* MakeTestSSLCertErrorUserInfo() {
 base::ScopedCFTypeRef<SecTrustRef> CreateTestTrust(NSArray* cert_chain) {
   base::ScopedCFTypeRef<SecPolicyRef> policy(SecPolicyCreateBasicX509());
   SecTrustRef trust = nullptr;
-  SecTrustCreateWithCertificates(cert_chain, policy, &trust);
+  SecTrustCreateWithCertificates(base::mac::NSToCFCast(cert_chain), policy,
+                                 &trust);
   return base::ScopedCFTypeRef<SecTrustRef>(trust);
 }
 
@@ -68,6 +76,7 @@ typedef PlatformTest WKWebViewSecurityUtilTest;
 TEST_F(WKWebViewSecurityUtilTest, CreationCertFromChain) {
   scoped_refptr<net::X509Certificate> cert =
       CreateCertFromChain(MakeTestCertChain(kTestSubject));
+  ASSERT_TRUE(cert);
   EXPECT_TRUE(cert->subject().GetDisplayName() == kTestSubject);
 }
 
@@ -103,6 +112,7 @@ TEST_F(WKWebViewSecurityUtilTest, CreationCertFromTrust) {
   base::ScopedCFTypeRef<SecTrustRef> trust =
       CreateTestTrust(MakeTestCertChain(kTestSubject));
   scoped_refptr<net::X509Certificate> cert = CreateCertFromTrust(trust);
+  ASSERT_TRUE(cert);
   EXPECT_TRUE(cert->subject().GetDisplayName() == kTestSubject);
 }
 

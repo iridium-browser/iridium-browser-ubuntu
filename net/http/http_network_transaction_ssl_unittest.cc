@@ -9,9 +9,7 @@
 #include "base/deferred_sequenced_task_runner.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_scheduler.h"
 #include "base/threading/thread.h"
 #include "net/base/request_priority.h"
 #include "net/cert/ct_policy_enforcer.h"
@@ -57,26 +55,25 @@ class TokenBindingSSLConfigService : public SSLConfigService {
 
 class HttpNetworkTransactionSSLTest : public testing::Test {
  protected:
-  HttpNetworkTransactionSSLTest()
-      : scoped_task_scheduler_(base::MessageLoop::current()) {}
+  HttpNetworkTransactionSSLTest() = default;
 
   void SetUp() override {
     ssl_config_service_ = new TokenBindingSSLConfigService;
-    session_params_.ssl_config_service = ssl_config_service_.get();
+    session_context_.ssl_config_service = ssl_config_service_.get();
 
     auth_handler_factory_.reset(new HttpAuthHandlerMock::Factory());
-    session_params_.http_auth_handler_factory = auth_handler_factory_.get();
+    session_context_.http_auth_handler_factory = auth_handler_factory_.get();
 
     proxy_service_ = ProxyService::CreateDirect();
-    session_params_.proxy_service = proxy_service_.get();
+    session_context_.proxy_service = proxy_service_.get();
 
-    session_params_.client_socket_factory = &mock_socket_factory_;
-    session_params_.host_resolver = &mock_resolver_;
-    session_params_.http_server_properties = &http_server_properties_;
-    session_params_.cert_verifier = &cert_verifier_;
-    session_params_.transport_security_state = &transport_security_state_;
-    session_params_.cert_transparency_verifier = &ct_verifier_;
-    session_params_.ct_policy_enforcer = &ct_policy_enforcer_;
+    session_context_.client_socket_factory = &mock_socket_factory_;
+    session_context_.host_resolver = &mock_resolver_;
+    session_context_.http_server_properties = &http_server_properties_;
+    session_context_.cert_verifier = &cert_verifier_;
+    session_context_.transport_security_state = &transport_security_state_;
+    session_context_.cert_transparency_verifier = &ct_verifier_;
+    session_context_.ct_policy_enforcer = &ct_policy_enforcer_;
   }
 
   HttpRequestInfo* GetRequestInfo(const std::string& url) {
@@ -86,8 +83,6 @@ class HttpNetworkTransactionSSLTest : public testing::Test {
     request_info_vector_.push_back(base::WrapUnique(request_info));
     return request_info;
   }
-
-  base::test::ScopedTaskScheduler scoped_task_scheduler_;
 
   scoped_refptr<SSLConfigService> ssl_config_service_;
   std::unique_ptr<HttpAuthHandlerMock::Factory> auth_handler_factory_;
@@ -100,14 +95,14 @@ class HttpNetworkTransactionSSLTest : public testing::Test {
   TransportSecurityState transport_security_state_;
   MultiLogCTVerifier ct_verifier_;
   CTPolicyEnforcer ct_policy_enforcer_;
-  HttpNetworkSession::Params session_params_;
+  HttpNetworkSession::Context session_context_;
   std::vector<std::unique_ptr<HttpRequestInfo>> request_info_vector_;
 };
 
 #if !defined(OS_IOS)
 TEST_F(HttpNetworkTransactionSSLTest, TokenBinding) {
   ChannelIDService channel_id_service(new DefaultChannelIDStore(NULL));
-  session_params_.channel_id_service = &channel_id_service;
+  session_context_.channel_id_service = &channel_id_service;
 
   SSLSocketDataProvider ssl_data(ASYNC, OK);
   ssl_data.token_binding_negotiated = true;
@@ -118,7 +113,7 @@ TEST_F(HttpNetworkTransactionSSLTest, TokenBinding) {
   StaticSocketDataProvider data(mock_reads, arraysize(mock_reads), NULL, 0);
   mock_socket_factory_.AddSocketDataProvider(&data);
 
-  HttpNetworkSession session(session_params_);
+  HttpNetworkSession session(HttpNetworkSession::Params(), session_context_);
   HttpNetworkTransaction trans1(DEFAULT_PRIORITY, &session);
 
   TestCompletionCallback callback;
@@ -156,7 +151,7 @@ TEST_F(HttpNetworkTransactionSSLTest, TokenBinding) {
 
 TEST_F(HttpNetworkTransactionSSLTest, NoTokenBindingOverHttp) {
   ChannelIDService channel_id_service(new DefaultChannelIDStore(NULL));
-  session_params_.channel_id_service = &channel_id_service;
+  session_context_.channel_id_service = &channel_id_service;
 
   SSLSocketDataProvider ssl_data(ASYNC, OK);
   ssl_data.token_binding_negotiated = true;
@@ -167,7 +162,7 @@ TEST_F(HttpNetworkTransactionSSLTest, NoTokenBindingOverHttp) {
   StaticSocketDataProvider data(mock_reads, arraysize(mock_reads), NULL, 0);
   mock_socket_factory_.AddSocketDataProvider(&data);
 
-  HttpNetworkSession session(session_params_);
+  HttpNetworkSession session(HttpNetworkSession::Params(), session_context_);
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, &session);
 
   TestCompletionCallback callback;
@@ -193,7 +188,7 @@ TEST_F(HttpNetworkTransactionSSLTest, TokenBindingAsync) {
       new base::DeferredSequencedTaskRunner(channel_id_thread.task_runner());
   ChannelIDService channel_id_service(new DefaultChannelIDStore(nullptr));
   channel_id_service.set_task_runner_for_testing(channel_id_runner);
-  session_params_.channel_id_service = &channel_id_service;
+  session_context_.channel_id_service = &channel_id_service;
 
   SSLSocketDataProvider ssl_data(ASYNC, OK);
   ssl_data.token_binding_negotiated = true;
@@ -210,7 +205,7 @@ TEST_F(HttpNetworkTransactionSSLTest, TokenBindingAsync) {
   request_info.method = "GET";
   request_info.token_binding_referrer = "encrypted.example.com";
 
-  HttpNetworkSession session(session_params_);
+  HttpNetworkSession session(HttpNetworkSession::Params(), session_context_);
   HttpNetworkTransaction trans(DEFAULT_PRIORITY, &session);
 
   TestCompletionCallback callback;

@@ -5,43 +5,51 @@
 #ifndef MEDIA_GPU_AVDA_SHARED_STATE_H_
 #define MEDIA_GPU_AVDA_SHARED_STATE_H_
 
+#include "base/memory/weak_ptr.h"
 #include "base/synchronization/waitable_event.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
+#include "media/base/android/android_overlay.h"
 #include "media/base/android/media_codec_bridge.h"
+#include "media/gpu/android/promotion_hint_aggregator.h"
+#include "media/gpu/avda_shared_state.h"
+#include "media/gpu/avda_surface_bundle.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_image.h"
 #include "ui/gl/gl_surface.h"
 
-namespace gl {
-class SurfaceTexture;
-}
-
 namespace media {
 
-// Shared state to allow communication between the AVDA and the
-// GLImages that configure GL for drawing the frames.
+// State shared by AVDACodecImages.  This holds a reference to the surface
+// bundle that's backing the frames.  If it's an overlay, then we'll
+// automatically drop our reference to the bundle if the overlay's surface gets
+// an OnSurfaceDestroyed.
+// TODO(watk): This doesn't really do anything any more; we should delete it.
 class AVDASharedState : public base::RefCounted<AVDASharedState> {
  public:
-  AVDASharedState();
+  AVDASharedState(scoped_refptr<AVDASurfaceBundle> surface_bundle);
 
   GLuint surface_texture_service_id() const {
-    return surface_texture_service_id_;
+    return surface_texture() ? surface_texture()->GetTextureId() : 0;
   }
 
-  // Signal the "frame available" event.  This may be called from any thread.
-  void SignalFrameAvailable();
+  SurfaceTextureGLOwner* surface_texture() const {
+    return surface_bundle_ ? surface_bundle_->surface_texture.get() : nullptr;
+  }
 
-  void WaitForFrameAvailable();
-
-  void SetSurfaceTexture(scoped_refptr<gl::SurfaceTexture> surface_texture,
-                         GLuint attached_service_id);
+  AndroidOverlay* overlay() const {
+    return surface_bundle_ ? surface_bundle_->overlay.get() : nullptr;
+  }
 
   // Context and surface that |surface_texture_| is bound to, if
   // |surface_texture_| is not null.
-  gl::GLContext* context() const { return context_.get(); }
+  gl::GLContext* context() const {
+    return surface_texture() ? surface_texture()->GetContext() : nullptr;
+  }
 
-  gl::GLSurface* surface() const { return surface_.get(); }
+  gl::GLSurface* surface() const {
+    return surface_texture() ? surface_texture()->GetSurface() : nullptr;
+  }
 
   // Helper method for coordinating the interactions between
   // MediaCodec::ReleaseOutputBuffer() and WaitForFrameAvailable() when
@@ -63,16 +71,24 @@ class AVDASharedState : public base::RefCounted<AVDASharedState> {
   void RenderCodecBufferToSurfaceTexture(MediaCodecBridge* codec,
                                          int codec_buffer_index);
 
+  void WaitForFrameAvailable();
+
   // Helper methods for interacting with |surface_texture_|. See
-  // gfx::SurfaceTexture for method details.
+  // gl::SurfaceTexture for method details.
   void UpdateTexImage();
+
   // Returns a matrix that needs to be y flipped in order to match the
   // StreamTextureMatrix contract. See GLStreamTextureImage::YInvertMatrix().
   void GetTransformMatrix(float matrix[16]) const;
 
   // Resets the last time for RenderCodecBufferToSurfaceTexture(). Should be
   // called during codec changes.
-  void clear_release_time() { release_time_ = base::TimeTicks(); }
+  void ClearReleaseTime();
+
+  void ClearOverlay(AndroidOverlay* overlay);
+
+  void SetPromotionHintCB(PromotionHintAggregator::NotifyPromotionHintCB cb);
+  const PromotionHintAggregator::NotifyPromotionHintCB& GetPromotionHintCB();
 
  protected:
   virtual ~AVDASharedState();
@@ -80,29 +96,14 @@ class AVDASharedState : public base::RefCounted<AVDASharedState> {
  private:
   friend class base::RefCounted<AVDASharedState>;
 
-  scoped_refptr<gl::SurfaceTexture> surface_texture_;
-
-  // Platform gl texture id for |surface_texture_|.
-  GLuint surface_texture_service_id_;
-
-  // For signalling OnFrameAvailable().
-  base::WaitableEvent frame_available_event_;
-
-  // Context and surface that |surface_texture_| is bound to, if
-  // |surface_texture_| is not null.
-  scoped_refptr<gl::GLContext> context_;
-  scoped_refptr<gl::GLSurface> surface_;
-
-  // The time of the last call to RenderCodecBufferToSurfaceTexture(), null if
-  // if there has been no last call or WaitForFrameAvailable() has been called
-  // since the last call.
-  base::TimeTicks release_time_;
-
   // Texture matrix of the front buffer of the surface texture.
   float gl_matrix_[16];
 
-  class OnFrameAvailableHandler;
-  scoped_refptr<OnFrameAvailableHandler> on_frame_available_handler_;
+  scoped_refptr<AVDASurfaceBundle> surface_bundle_;
+
+  PromotionHintAggregator::NotifyPromotionHintCB promotion_hint_cb_;
+
+  base::WeakPtrFactory<AVDASharedState> weak_this_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AVDASharedState);
 };

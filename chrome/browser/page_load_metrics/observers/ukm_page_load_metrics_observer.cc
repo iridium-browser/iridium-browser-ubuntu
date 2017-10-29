@@ -8,9 +8,10 @@
 #include "chrome/browser/net/nqe/ui_network_quality_estimator_service_factory.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/ukm/ukm_entry_builder.h"
-#include "components/ukm/ukm_service.h"
 #include "content/public/browser/web_contents.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_entry_builder.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 
 namespace internal {
 
@@ -19,6 +20,7 @@ const char kUkmParseStartName[] = "ParseTiming.NavigationToParseStart";
 const char kUkmDomContentLoadedName[] =
     "DocumentTiming.NavigationToDOMContentLoadedEventFired";
 const char kUkmLoadEventName[] = "DocumentTiming.NavigationToLoadEventFired";
+const char kUkmFirstPaintName[] = "PaintTiming.NavigationToFirstPaint";
 const char kUkmFirstContentfulPaintName[] =
     "PaintTiming.NavigationToFirstContentfulPaint";
 const char kUkmFirstMeaningfulPaintName[] =
@@ -28,6 +30,9 @@ const char kUkmFailedProvisionaLoadName[] =
     "PageTiming.NavigationToFailedProvisionalLoad";
 const char kUkmEffectiveConnectionType[] =
     "Net.EffectiveConnectionType.OnNavigationStart";
+const char kUkmHttpRttEstimate[] = "Net.HttpRttEstimate.OnNavigationStart";
+const char kUkmTransportRttEstimate[] =
+    "Net.TransportRttEstimate.OnNavigationStart";
 const char kUkmNetErrorCode[] = "Net.ErrorCode.OnFailedProvisionalLoad";
 const char kUkmPageTransition[] = "Navigation.PageTransition";
 
@@ -49,7 +54,7 @@ UINetworkQualityEstimatorService* GetNQEService(
 // static
 std::unique_ptr<page_load_metrics::PageLoadMetricsObserver>
 UkmPageLoadMetricsObserver::CreateIfNeeded(content::WebContents* web_contents) {
-  if (!g_browser_process->ukm_service()) {
+  if (!g_browser_process->ukm_recorder()) {
     return nullptr;
   }
   return base::MakeUnique<UkmPageLoadMetricsObserver>(
@@ -59,8 +64,7 @@ UkmPageLoadMetricsObserver::CreateIfNeeded(content::WebContents* web_contents) {
 UkmPageLoadMetricsObserver::UkmPageLoadMetricsObserver(
     net::NetworkQualityEstimator::NetworkQualityProvider*
         network_quality_provider)
-    : network_quality_provider_(network_quality_provider),
-      source_id_(ukm::UkmService::GetNewSourceID()) {}
+    : network_quality_provider_(network_quality_provider) {}
 
 UkmPageLoadMetricsObserver::~UkmPageLoadMetricsObserver() = default;
 
@@ -81,13 +85,16 @@ UkmPageLoadMetricsObserver::ObservePolicy UkmPageLoadMetricsObserver::OnStart(
   if (network_quality_provider_) {
     effective_connection_type_ =
         network_quality_provider_->GetEffectiveConnectionType();
+    http_rtt_estimate_ = network_quality_provider_->GetHttpRTT();
+    transport_rtt_estimate_ = network_quality_provider_->GetTransportRTT();
   }
   page_transition_ = navigation_handle->GetPageTransition();
   return CONTINUE_OBSERVING;
 }
 
 UkmPageLoadMetricsObserver::ObservePolicy UkmPageLoadMetricsObserver::OnCommit(
-    content::NavigationHandle* navigation_handle) {
+    content::NavigationHandle* navigation_handle,
+    ukm::SourceId source_id) {
   // The PageTransition for the navigation may be updated on commit.
   page_transition_ = navigation_handle->GetPageTransition();
   return CONTINUE_OBSERVING;
@@ -95,19 +102,19 @@ UkmPageLoadMetricsObserver::ObservePolicy UkmPageLoadMetricsObserver::OnCommit(
 
 UkmPageLoadMetricsObserver::ObservePolicy
 UkmPageLoadMetricsObserver::FlushMetricsOnAppEnterBackground(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   RecordPageLoadExtraInfoMetrics(info, base::TimeTicks::Now());
-  RecordTimingMetrics(timing);
+  RecordTimingMetrics(timing, info.source_id);
   return STOP_OBSERVING;
 }
 
 UkmPageLoadMetricsObserver::ObservePolicy UkmPageLoadMetricsObserver::OnHidden(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   RecordPageLoadExtraInfoMetrics(
       info, base::TimeTicks() /* no app_background_time */);
-  RecordTimingMetrics(timing);
+  RecordTimingMetrics(timing, info.source_id);
   return STOP_OBSERVING;
 }
 
@@ -117,65 +124,64 @@ void UkmPageLoadMetricsObserver::OnFailedProvisionalLoad(
   RecordPageLoadExtraInfoMetrics(
       extra_info, base::TimeTicks() /* no app_background_time */);
 
-  ukm::UkmService* ukm_service = g_browser_process->ukm_service();
-  std::unique_ptr<ukm::UkmEntryBuilder> builder =
-      ukm_service->GetEntryBuilder(source_id_, internal::kUkmPageLoadEventName);
   // Error codes have negative values, however we log net error code enum values
   // for UMA histograms using the equivalent positive value. For consistency in
   // UKM, we convert to a positive value here.
   int64_t net_error_code = static_cast<int64_t>(failed_load_info.error) * -1;
   DCHECK_GE(net_error_code, 0);
-  builder->AddMetric(internal::kUkmNetErrorCode, net_error_code);
-  builder->AddMetric(
-      internal::kUkmFailedProvisionaLoadName,
-      failed_load_info.time_to_failed_provisional_load.InMilliseconds());
+  ukm::builders::PageLoad(extra_info.source_id)
+      .SetNet_ErrorCode_OnFailedProvisionalLoad(net_error_code)
+      .SetPageTiming_NavigationToFailedProvisionalLoad(
+          failed_load_info.time_to_failed_provisional_load.InMilliseconds())
+      .Record(g_browser_process->ukm_recorder());
 }
 
 void UkmPageLoadMetricsObserver::OnComplete(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   RecordPageLoadExtraInfoMetrics(
       info, base::TimeTicks() /* no app_background_time */);
-  RecordTimingMetrics(timing);
+  RecordTimingMetrics(timing, info.source_id);
 }
 
 void UkmPageLoadMetricsObserver::RecordTimingMetrics(
-    const page_load_metrics::PageLoadTiming& timing) {
-  ukm::UkmService* ukm_service = g_browser_process->ukm_service();
-  std::unique_ptr<ukm::UkmEntryBuilder> builder =
-      ukm_service->GetEntryBuilder(source_id_, internal::kUkmPageLoadEventName);
-  if (timing.parse_start) {
-    builder->AddMetric(internal::kUkmParseStartName,
-                       timing.parse_start.value().InMilliseconds());
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    ukm::SourceId source_id) {
+  ukm::builders::PageLoad builder(source_id);
+  if (timing.parse_timing->parse_start) {
+    builder.SetParseTiming_NavigationToParseStart(
+        timing.parse_timing->parse_start.value().InMilliseconds());
   }
-  if (timing.dom_content_loaded_event_start) {
-    builder->AddMetric(
-        internal::kUkmDomContentLoadedName,
-        timing.dom_content_loaded_event_start.value().InMilliseconds());
+  if (timing.document_timing->dom_content_loaded_event_start) {
+    builder.SetDocumentTiming_NavigationToDOMContentLoadedEventFired(
+        timing.document_timing->dom_content_loaded_event_start.value()
+            .InMilliseconds());
   }
-  if (timing.load_event_start) {
-    builder->AddMetric(internal::kUkmLoadEventName,
-                       timing.load_event_start.value().InMilliseconds());
+  if (timing.document_timing->load_event_start) {
+    builder.SetDocumentTiming_NavigationToLoadEventFired(
+        timing.document_timing->load_event_start.value().InMilliseconds());
   }
-  if (timing.first_contentful_paint) {
-    builder->AddMetric(internal::kUkmFirstContentfulPaintName,
-                       timing.first_contentful_paint.value().InMilliseconds());
+  if (timing.paint_timing->first_paint) {
+    builder.SetPaintTiming_NavigationToFirstPaint(
+        timing.paint_timing->first_paint.value().InMilliseconds());
   }
-  if (timing.first_meaningful_paint) {
-    builder->AddMetric(internal::kUkmFirstMeaningfulPaintName,
-                       timing.first_meaningful_paint.value().InMilliseconds());
+  if (timing.paint_timing->first_contentful_paint) {
+    builder.SetPaintTiming_NavigationToFirstContentfulPaint(
+        timing.paint_timing->first_contentful_paint.value().InMilliseconds());
   }
+  if (timing.paint_timing->first_meaningful_paint) {
+    builder.SetExperimental_PaintTiming_NavigationToFirstMeaningfulPaint(
+        timing.paint_timing->first_meaningful_paint.value().InMilliseconds());
+  }
+  builder.Record(g_browser_process->ukm_recorder());
 }
 
 void UkmPageLoadMetricsObserver::RecordPageLoadExtraInfoMetrics(
     const page_load_metrics::PageLoadExtraInfo& info,
     base::TimeTicks app_background_time) {
-  ukm::UkmService* ukm_service = g_browser_process->ukm_service();
-  ukm_service->UpdateSourceURL(source_id_, info.start_url);
-  ukm_service->UpdateSourceURL(source_id_, info.url);
-
-  std::unique_ptr<ukm::UkmEntryBuilder> builder =
-      ukm_service->GetEntryBuilder(source_id_, internal::kUkmPageLoadEventName);
+  ukm::UkmRecorder* ukm_recorder = g_browser_process->ukm_recorder();
+  std::unique_ptr<ukm::UkmEntryBuilder> builder = ukm_recorder->GetEntryBuilder(
+      info.source_id, internal::kUkmPageLoadEventName);
   base::Optional<base::TimeDelta> foreground_duration =
       page_load_metrics::GetInitialForegroundDuration(info,
                                                       app_background_time);
@@ -186,6 +192,16 @@ void UkmPageLoadMetricsObserver::RecordPageLoadExtraInfoMetrics(
   if (effective_connection_type_ != net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {
     builder->AddMetric(internal::kUkmEffectiveConnectionType,
                        static_cast<int64_t>(effective_connection_type_));
+  }
+  if (http_rtt_estimate_) {
+    builder->AddMetric(
+        internal::kUkmHttpRttEstimate,
+        static_cast<int64_t>(http_rtt_estimate_.value().InMilliseconds()));
+  }
+  if (transport_rtt_estimate_) {
+    builder->AddMetric(
+        internal::kUkmTransportRttEstimate,
+        static_cast<int64_t>(transport_rtt_estimate_.value().InMilliseconds()));
   }
   // page_transition_ fits in a uint32_t, so we can safely cast to int64_t.
   builder->AddMetric(internal::kUkmPageTransition,

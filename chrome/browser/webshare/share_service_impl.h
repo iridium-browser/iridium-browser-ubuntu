@@ -11,7 +11,6 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
@@ -20,6 +19,7 @@
 
 class DictionaryValue;
 class GURL;
+class WebShareTarget;
 
 // Desktop implementation of the ShareService Mojo service.
 class ShareServiceImpl : public blink::mojom::ShareService {
@@ -33,7 +33,7 @@ class ShareServiceImpl : public blink::mojom::ShareService {
   void Share(const std::string& title,
              const std::string& text,
              const GURL& share_url,
-             const ShareCallback& callback) override;
+             ShareCallback callback) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ShareServiceImplUnittest, ReplacePlaceholders);
@@ -55,9 +55,8 @@ class ShareServiceImpl : public blink::mojom::ShareService {
   // presented to the user. Passes the result to |callback|. If the user picks a
   // target, the result passed to |callback| is the manifest URL of the chosen
   // target, or is null if the user cancelled the share. Virtual for testing.
-  virtual void ShowPickerDialog(
-      const std::vector<std::pair<base::string16, GURL>>& targets,
-      const base::Callback<void(base::Optional<std::string>)>& callback);
+  virtual void ShowPickerDialog(std::vector<WebShareTarget> targets,
+                                chrome::WebShareTargetPickerCallback callback);
 
   // Opens a new tab and navigates to |target_url|.
   // Virtual for testing purposes.
@@ -65,9 +64,7 @@ class ShareServiceImpl : public blink::mojom::ShareService {
 
   // Returns all stored Share Targets that have a high enough engagement score
   // with the user.
-  std::vector<std::pair<base::string16, GURL>>
-  GetTargetsWithSufficientEngagement(
-      const base::DictionaryValue& share_targets);
+  std::vector<WebShareTarget> GetTargetsWithSufficientEngagement();
 
   // Writes to |url_template_filled|, a copy of |url_template| with all
   // instances of "{title}", "{text}", and "{url}" replaced with
@@ -83,12 +80,11 @@ class ShareServiceImpl : public blink::mojom::ShareService {
                                   const GURL& share_url,
                                   std::string* url_template_filled);
 
-  void OnPickerClosed(std::unique_ptr<base::DictionaryValue> share_targets,
-                      const std::string& title,
+  void OnPickerClosed(const std::string& title,
                       const std::string& text,
                       const GURL& share_url,
-                      const ShareCallback& callback,
-                      base::Optional<std::string> result);
+                      ShareCallback callback,
+                      const WebShareTarget* result);
 
   base::WeakPtrFactory<ShareServiceImpl> weak_factory_;
 

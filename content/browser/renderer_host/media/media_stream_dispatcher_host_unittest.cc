@@ -23,19 +23,22 @@
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/media_stream_ui_proxy.h"
+#include "content/browser/renderer_host/media/mock_video_capture_provider.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/common/media/media_stream_messages.h"
 #include "content/common/media/media_stream_options.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/media_device_id.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
 #include "ipc/ipc_message_macros.h"
 #include "media/audio/audio_device_description.h"
+#include "media/audio/audio_system_impl.h"
 #include "media/audio/mock_audio_manager.h"
+#include "media/audio/test_audio_thread.h"
 #include "media/base/media_switches.h"
 #include "media/capture/video/fake_video_capture_device_factory.h"
 #include "net/url_request/url_request_context.h"
@@ -52,16 +55,25 @@ using ::testing::_;
 using ::testing::DeleteArg;
 using ::testing::DoAll;
 using ::testing::InSequence;
+using ::testing::Invoke;
 using ::testing::Return;
 using ::testing::SaveArg;
-
-const int kProcessId = 5;
-const int kRenderId = 6;
-const int kPageRequestId = 7;
 
 namespace content {
 
 namespace {
+
+constexpr int kProcessId = 5;
+constexpr int kRenderId = 6;
+constexpr int kPageRequestId = 7;
+constexpr const char* kRegularVideoDeviceId = "stub_device_0";
+constexpr const char* kDepthVideoDeviceId = "stub_device_1 (depth)";
+constexpr media::VideoCaptureApi kStubCaptureApi =
+    media::VideoCaptureApi::LINUX_V4L2_SINGLE_PLANE;
+constexpr double kStubFocalLengthX = 135.0;
+constexpr double kStubFocalLengthY = 135.6;
+constexpr double kStubDepthNear = 0.0;
+constexpr double kStubDepthFar = 65.535;
 
 void AudioInputDevicesEnumerated(base::Closure quit_closure,
                                  media::AudioDeviceDescriptions* out,
@@ -72,7 +84,7 @@ void AudioInputDevicesEnumerated(base::Closure quit_closure,
   quit_closure.Run();
 }
 
-}  // namespace
+}  // anonymous namespace
 
 class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost,
                                       public TestContentBrowserClient {
@@ -122,6 +134,10 @@ class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost,
         render_frame_id, page_request_id, device_id, type, security_origin);
   }
 
+  void OnStreamStarted(const std::string label) {
+    MediaStreamDispatcherHost::OnStreamStarted(label);
+  }
+
   std::string label_;
   StreamDeviceInfoArray audio_devices_;
   StreamDeviceInfoArray video_devices_;
@@ -164,6 +180,9 @@ class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost,
       StreamDeviceInfoArray video_device_list) {
     OnStreamGenerated(current_ipc_->routing_id(), request_id,
                       audio_device_list.size(), video_device_list.size());
+    // Simulate the stream started event back to host for UI testing.
+    OnStreamStarted(label);
+
     // Notify that the event have occurred.
     base::Closure quit_closure = quit_closures_.front();
     quit_closures_.pop();
@@ -214,10 +233,14 @@ class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost,
 
 class MockMediaStreamUIProxy : public FakeMediaStreamUIProxy {
  public:
-  MOCK_METHOD2(
-      OnStarted,
-      void(const base::Closure& stop,
-           const MediaStreamUIProxy::WindowIdCallback& window_id_callback));
+  void OnStarted(
+      base::OnceClosure stop,
+      MediaStreamUIProxy::WindowIdCallback window_id_callback) override {
+    // gmock cannot handle move-only types:
+    MockOnStarted(base::AdaptCallbackForRepeating(std::move(stop)));
+  }
+
+  MOCK_METHOD1(MockOnStarted, void(base::Closure stop));
 };
 
 class MediaStreamDispatcherHostTest : public testing::Test {
@@ -226,30 +249,21 @@ class MediaStreamDispatcherHostTest : public testing::Test {
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
         old_browser_client_(NULL),
         origin_(GURL("https://test.com")) {
-    audio_manager_.reset(
-        new media::MockAudioManager(base::ThreadTaskRunnerHandle::Get()));
+    audio_manager_.reset(new media::MockAudioManager(
+        base::MakeUnique<media::TestAudioThread>()));
+    audio_system_ = media::AudioSystemImpl::Create(audio_manager_.get());
     // Make sure we use fake devices to avoid long delays.
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kUseFakeDeviceForMediaStream);
+    auto mock_video_capture_provider =
+        base::MakeUnique<MockVideoCaptureProvider>();
+    mock_video_capture_provider_ = mock_video_capture_provider.get();
     // Create our own MediaStreamManager.
-    media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
-    video_capture_device_factory_ =
-        static_cast<media::FakeVideoCaptureDeviceFactory*>(
-            media_stream_manager_->video_capture_manager()
-            ->video_capture_device_factory());
-    DCHECK(video_capture_device_factory_);
-#if defined(OS_WIN)
-    // Override the Video Capture Thread that MediaStreamManager constructs.
-    media_stream_manager_->video_capture_manager()->set_device_task_runner(
-        base::ThreadTaskRunnerHandle::Get());
-#endif
-
-    MockResourceContext* mock_resource_context =
-        static_cast<MockResourceContext*>(
-            browser_context_.GetResourceContext());
+    media_stream_manager_ = base::MakeUnique<MediaStreamManager>(
+        audio_system_.get(), std::move(mock_video_capture_provider));
 
     host_ = new MockMediaStreamDispatcherHost(
-        mock_resource_context->GetMediaDeviceIDSalt(),
+        browser_context_.GetMediaDeviceIDSalt(),
         base::ThreadTaskRunnerHandle::Get(), media_stream_manager_.get());
 
     // Use the fake content client and browser.
@@ -263,15 +277,38 @@ class MediaStreamDispatcherHostTest : public testing::Test {
   }
 
   ~MediaStreamDispatcherHostTest() override {
+    audio_manager_->Shutdown();
 #if defined(OS_CHROMEOS)
     chromeos::CrasAudioHandler::Shutdown();
 #endif
   }
 
   void SetUp() override {
-    video_capture_device_factory_->GetDeviceDescriptors(
-        &physical_video_devices_);
-    ASSERT_GT(physical_video_devices_.size(), 0u);
+    stub_video_device_ids_.emplace_back(kRegularVideoDeviceId);
+    stub_video_device_ids_.emplace_back(kDepthVideoDeviceId);
+    ON_CALL(*mock_video_capture_provider_, DoGetDeviceInfosAsync(_))
+        .WillByDefault(Invoke(
+            [this](
+                VideoCaptureProvider::GetDeviceInfosCallback& result_callback) {
+              std::vector<media::VideoCaptureDeviceInfo> result;
+              for (const auto& device_id : stub_video_device_ids_) {
+                media::VideoCaptureDeviceInfo info;
+                info.descriptor.device_id = device_id;
+                info.descriptor.capture_api = kStubCaptureApi;
+                if (device_id == kDepthVideoDeviceId) {
+                  info.descriptor.camera_calibration.emplace();
+                  info.descriptor.camera_calibration->focal_length_x =
+                      kStubFocalLengthX;
+                  info.descriptor.camera_calibration->focal_length_y =
+                      kStubFocalLengthY;
+                  info.descriptor.camera_calibration->depth_near =
+                      kStubDepthNear;
+                  info.descriptor.camera_calibration->depth_far = kStubDepthFar;
+                }
+                result.push_back(info);
+              }
+              base::ResetAndReturn(&result_callback).Run(result);
+            }));
 
     base::RunLoop run_loop;
     MediaDevicesManager::BoolDeviceTypes devices_to_enumerate;
@@ -279,10 +316,10 @@ class MediaStreamDispatcherHostTest : public testing::Test {
     media_stream_manager_->media_devices_manager()->EnumerateDevices(
         devices_to_enumerate,
         base::Bind(&AudioInputDevicesEnumerated, run_loop.QuitClosure(),
-                   &physical_audio_devices_));
+                   &audio_device_descriptions_));
     run_loop.Run();
 
-    ASSERT_GT(physical_audio_devices_.size(), 0u);
+    ASSERT_GT(audio_device_descriptions_.size(), 0u);
   }
 
   void TearDown() override { host_->OnChannelClosing(); }
@@ -291,7 +328,7 @@ class MediaStreamDispatcherHostTest : public testing::Test {
   virtual void SetupFakeUI(bool expect_started) {
     stream_ui_ = new MockMediaStreamUIProxy();
     if (expect_started) {
-      EXPECT_CALL(*stream_ui_, OnStarted(_, _));
+      EXPECT_CALL(*stream_ui_, MockOnStarted(_));
     }
     media_stream_manager_->UseFakeUIForTests(
         std::unique_ptr<FakeMediaStreamUIProxy>(stream_ui_));
@@ -302,9 +339,10 @@ class MediaStreamDispatcherHostTest : public testing::Test {
                                       const StreamControls& controls) {
     base::RunLoop run_loop;
     int expected_audio_array_size =
-        (controls.audio.requested && !physical_audio_devices_.empty()) ? 1 : 0;
+        (controls.audio.requested && !audio_device_descriptions_.empty()) ? 1
+                                                                          : 0;
     int expected_video_array_size =
-        (controls.video.requested && !physical_video_devices_.empty()) ? 1 : 0;
+        (controls.video.requested && !stub_video_device_ids_.empty()) ? 1 : 0;
     EXPECT_CALL(*host_.get(), OnStreamGenerated(render_frame_id,
                                                 page_request_id,
                                                 expected_audio_array_size,
@@ -351,13 +389,13 @@ class MediaStreamDispatcherHostTest : public testing::Test {
               media::AudioDeviceDescription::kDefaultDeviceId &&
           devices[i].device.id !=
               media::AudioDeviceDescription::kCommunicationsDeviceId) {
-        for (const auto& audio_device : physical_audio_devices_) {
+        for (const auto& audio_device : audio_device_descriptions_) {
           if (audio_device.unique_id == devices[i].device.id)
             return true;
         }
       }
-      for (const auto& video_device : physical_video_devices_) {
-        if (video_device.device_id == devices[i].device.id)
+      for (const std::string& device_id : stub_video_device_ids_) {
+        if (device_id == devices[i].device.id)
           return true;
       }
     }
@@ -369,23 +407,19 @@ class MediaStreamDispatcherHostTest : public testing::Test {
     for (size_t i = 0; i < devices.size(); ++i) {
       bool found_match = false;
       media::AudioDeviceDescriptions::const_iterator audio_it =
-          physical_audio_devices_.begin();
-      for (; audio_it != physical_audio_devices_.end(); ++audio_it) {
+          audio_device_descriptions_.begin();
+      for (; audio_it != audio_device_descriptions_.end(); ++audio_it) {
         if (content::DoesMediaDeviceIDMatchHMAC(
-                browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
-                origin,
-                devices[i].device.id,
-                audio_it->unique_id)) {
+                browser_context_.GetMediaDeviceIDSalt(), origin,
+                devices[i].device.id, audio_it->unique_id)) {
           EXPECT_FALSE(found_match);
           found_match = true;
         }
       }
-      media::VideoCaptureDeviceDescriptors::const_iterator video_it =
-          physical_video_devices_.begin();
-      for (; video_it != physical_video_devices_.end(); ++video_it) {
+      for (const std::string& device_id : stub_video_device_ids_) {
         if (content::DoesMediaDeviceIDMatchHMAC(
-                browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
-                origin, devices[i].device.id, video_it->device_id)) {
+                browser_context_.GetMediaDeviceIDSalt(), origin,
+                devices[i].device.id, device_id)) {
           EXPECT_FALSE(found_match);
           found_match = true;
         }
@@ -417,16 +451,16 @@ class MediaStreamDispatcherHostTest : public testing::Test {
   scoped_refptr<MockMediaStreamDispatcherHost> host_;
   std::unique_ptr<MediaStreamManager> media_stream_manager_;
   content::TestBrowserThreadBundle thread_bundle_;
-  std::unique_ptr<media::AudioManager, media::AudioManagerDeleter>
-      audio_manager_;
+  std::unique_ptr<media::AudioManager> audio_manager_;
+  std::unique_ptr<media::AudioSystem> audio_system_;
   MockMediaStreamUIProxy* stream_ui_;
   ContentBrowserClient* old_browser_client_;
   std::unique_ptr<ContentClient> content_client_;
   content::TestBrowserContext browser_context_;
-  media::AudioDeviceDescriptions physical_audio_devices_;
-  media::VideoCaptureDeviceDescriptors physical_video_devices_;
+  media::AudioDeviceDescriptions audio_device_descriptions_;
+  std::vector<std::string> stub_video_device_ids_;
   url::Origin origin_;
-  media::FakeVideoCaptureDeviceFactory* video_capture_device_factory_;
+  MockVideoCaptureProvider* mock_video_capture_provider_;
 };
 
 TEST_F(MediaStreamDispatcherHostTest, GenerateStreamWithVideoOnly) {
@@ -470,26 +504,20 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateStreamWithAudioAndVideo) {
 }
 
 TEST_F(MediaStreamDispatcherHostTest, GenerateStreamWithDepthVideo) {
-  // Video device on index 1 is depth video capture device.  The number of fake
-  // devices is 2.
-  physical_video_devices_.clear();
-  video_capture_device_factory_->SetToDefaultDevicesConfig(2);
-  video_capture_device_factory_->GetDeviceDescriptors(&physical_video_devices_);
   // We specify to generate both audio and video stream.
   StreamControls controls(true, true);
   std::string source_id = content::GetHMACForMediaDeviceID(
-      browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(), origin_,
-      physical_video_devices_[1].device_id);
-  // |source_id| is related to depth device (the device on index 1). As we can
-  // generate only one video stream using GenerateStreamAndWaitForResult, we
-  // use controls.video.source_id to specify that the stream is depth video.
+      browser_context_.GetMediaDeviceIDSalt(), origin_, kDepthVideoDeviceId);
+  // |source_id| corresponds to the depth device. As we can generate only one
+  // video stream using GenerateStreamAndWaitForResult, we use
+  // controls.video.source_id to specify that the stream is depth video.
   // See also MediaStreamManager::GenerateStream and other tests here.
   controls.video.device_id = source_id;
 
   SetupFakeUI(true);
   GenerateStreamAndWaitForResult(kRenderId, kPageRequestId, controls);
 
-  // There are two fake devices. We specified the generation and expect to get
+  // We specified the generation and expect to get
   // one audio and one depth video stream.
   EXPECT_EQ(host_->audio_devices_.size(), 1u);
   EXPECT_EQ(host_->video_devices_.size(), 1u);
@@ -498,10 +526,10 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateStreamWithDepthVideo) {
   const base::Optional<CameraCalibration> calibration =
       host_->video_devices_[0].device.camera_calibration;
   EXPECT_TRUE(calibration);
-  EXPECT_EQ(calibration->focal_length_x, 135.0);
-  EXPECT_EQ(calibration->focal_length_y, 135.6);
-  EXPECT_EQ(calibration->depth_near, 0.0);
-  EXPECT_EQ(calibration->depth_far, 65.535);
+  EXPECT_EQ(calibration->focal_length_x, kStubFocalLengthX);
+  EXPECT_EQ(calibration->focal_length_y, kStubFocalLengthY);
+  EXPECT_EQ(calibration->depth_near, kStubDepthNear);
+  EXPECT_EQ(calibration->depth_far, kStubDepthFar);
 }
 
 // This test generates two streams with video only using the same render frame
@@ -625,16 +653,14 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateStreamsWithoutWaiting) {
 // Test that we can generate streams where a sourceId is specified in
 // the request.
 TEST_F(MediaStreamDispatcherHostTest, GenerateStreamsWithSourceId) {
-  ASSERT_GE(physical_audio_devices_.size(), 1u);
-  ASSERT_GE(physical_video_devices_.size(), 1u);
+  ASSERT_GE(audio_device_descriptions_.size(), 1u);
+  ASSERT_GE(stub_video_device_ids_.size(), 1u);
 
   media::AudioDeviceDescriptions::const_iterator audio_it =
-      physical_audio_devices_.begin();
-  for (; audio_it != physical_audio_devices_.end(); ++audio_it) {
+      audio_device_descriptions_.begin();
+  for (; audio_it != audio_device_descriptions_.end(); ++audio_it) {
     std::string source_id = content::GetHMACForMediaDeviceID(
-        browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
-        origin_,
-        audio_it->unique_id);
+        browser_context_.GetMediaDeviceIDSalt(), origin_, audio_it->unique_id);
     ASSERT_FALSE(source_id.empty());
     StreamControls controls(true, true);
     controls.audio.device_id = source_id;
@@ -644,12 +670,9 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateStreamsWithSourceId) {
     EXPECT_EQ(host_->audio_devices_[0].device.id, source_id);
   }
 
-  media::VideoCaptureDeviceDescriptors::const_iterator video_it =
-      physical_video_devices_.begin();
-  for (; video_it != physical_video_devices_.end(); ++video_it) {
+  for (const std::string& device_id : stub_video_device_ids_) {
     std::string source_id = content::GetHMACForMediaDeviceID(
-        browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(), origin_,
-        video_it->device_id);
+        browser_context_.GetMediaDeviceIDSalt(), origin_, device_id);
     ASSERT_FALSE(source_id.empty());
     StreamControls controls(true, true);
     controls.video.device_id = source_id;
@@ -679,9 +702,7 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateStreamsWithInvalidAudioSourceId) {
 }
 
 TEST_F(MediaStreamDispatcherHostTest, GenerateStreamsNoAvailableVideoDevice) {
-  physical_video_devices_.clear();
-  video_capture_device_factory_->SetToDefaultDevicesConfig(0);
-  video_capture_device_factory_->GetDeviceDescriptors(&physical_video_devices_);
+  stub_video_device_ids_.clear();
   StreamControls controls(true, true);
 
   SetupFakeUI(false);
@@ -813,7 +834,7 @@ TEST_F(MediaStreamDispatcherHostTest, CloseFromUI) {
   base::Closure close_callback;
   std::unique_ptr<MockMediaStreamUIProxy> stream_ui(
       new MockMediaStreamUIProxy());
-  EXPECT_CALL(*stream_ui, OnStarted(_, _))
+  EXPECT_CALL(*stream_ui, MockOnStarted(_))
       .WillOnce(SaveArg<0>(&close_callback));
   media_stream_manager_->UseFakeUIForTests(std::move(stream_ui));
 
@@ -837,7 +858,7 @@ TEST_F(MediaStreamDispatcherHostTest, VideoDeviceUnplugged) {
   EXPECT_EQ(host_->audio_devices_.size(), 1u);
   EXPECT_EQ(host_->video_devices_.size(), 1u);
 
-  video_capture_device_factory_->SetToDefaultDevicesConfig(0);
+  stub_video_device_ids_.clear();
 
   base::RunLoop run_loop;
   EXPECT_CALL(*host_.get(), OnDeviceStopped(kRenderId))

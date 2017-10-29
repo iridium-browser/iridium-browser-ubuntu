@@ -15,21 +15,21 @@ found in the LICENSE file.
 'use strict';
 
 tr.b.unittest.testSuite(function() {
-  var TestUtils = tr.c.TestUtils;
-  var ThreadSlice = tr.model.ThreadSlice;
+  const TestUtils = tr.c.TestUtils;
+  const ThreadSlice = tr.model.ThreadSlice;
 
   test('metricMapTest', function() {
-    var events = [
+    const events = [
       {name: 'a', args: {}, pid: 52, ts: 524, cat: 'foo', tid: 53, ph: 'B'},
       {name: 'a', args: {}, pid: 52, ts: 560, cat: 'foo', tid: 53, ph: 'E'}
     ];
-    var m = TestUtils.newModelWithEvents(JSON.stringify(events), {
+    const m = TestUtils.newModelWithEvents(JSON.stringify(events), {
       shiftWorldToZero: false,
       pruneEmptyContainers: false,
       trackDetailedModelStats: true,
-      customizeModelCallback: function(m) {
-        var p1 = m.getOrCreateProcess(1);
-        var t2 = p1.getOrCreateThread(2);
+      customizeModelCallback(m) {
+        const p1 = m.getOrCreateProcess(1);
+        const t2 = p1.getOrCreateThread(2);
         t2.sliceGroup.pushSlice(TestUtils.newSliceEx({
           type: ThreadSlice,
           name: 'some_slice',
@@ -44,21 +44,40 @@ tr.b.unittest.testSuite(function() {
     });
 
     assert.throw(function() {
-      var result = new tr.mre.MreResult();
+      const result = new tr.mre.MreResult();
       tr.metrics.metricMapFunction(result, m, {});
     }, Error, 'Metric names should be specified.');
 
     assert.throw(function() {
-      var result = new tr.mre.MreResult();
+      const result = new tr.mre.MreResult();
       tr.metrics.metricMapFunction(result, m, {'metrics': ['wrongMetric']});
     }, Error, '"wrongMetric" is not a registered metric.');
 
-    var result = new tr.mre.MreResult();
+    const result = new tr.mre.MreResult();
     tr.metrics.metricMapFunction(result, m, {'metrics': ['sampleMetric']});
     assert.property(result.pairs, 'histograms');
-    assert.equal(result.pairs.histograms.length, 2);
+    assert.strictEqual(result.pairs.histograms.length, 2);
     assert.property(result.pairs, 'scalars');
-    assert.equal(result.pairs.scalars.length, 6);
+    assert.strictEqual(result.pairs.scalars.length, 6);
+  });
+
+  function invalidDiagnosticNameMetric(histograms, model) {
+    const hist = histograms.createHistogram('a', tr.b.Unit.byName.count, []);
+    hist.diagnostics.set(tr.v.d.RESERVED_NAMES.GROUPING_PATH,
+        new tr.v.d.GroupingPath([]));
+  }
+
+  tr.metrics.MetricRegistry.register(invalidDiagnosticNameMetric);
+
+  test('validateDiagnosticNames', function() {
+    const result = new tr.mre.MreResult();
+    const m = TestUtils.newModel();
+
+    assert.throw(function() {
+      tr.metrics.metricMapFunction(result, m, {
+        'metrics': ['invalidDiagnosticNameMetric'],
+      });
+    }, Error, 'Illegal diagnostic name "grouping path" on Histogram "a"');
   });
 });
 </script>

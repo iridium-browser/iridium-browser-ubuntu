@@ -14,11 +14,12 @@ import sys
 import unittest
 
 from telemetry import benchmark as benchmark_module
-from telemetry.core import discover
 from telemetry import decorators
 from telemetry.internal.browser import browser_finder
 from telemetry.testing import options_for_unittests
 from telemetry.testing import progress_reporter
+
+from py_utils import discover
 
 from benchmarks import battor
 from benchmarks import image_decoding
@@ -27,10 +28,7 @@ from benchmarks import jetstream
 from benchmarks import kraken
 from benchmarks import octane
 from benchmarks import rasterize_and_record_micro
-from benchmarks import repaint
-from benchmarks import spaceport
 from benchmarks import speedometer
-from benchmarks import text_selection
 from benchmarks import v8_browsing
 
 
@@ -95,11 +93,8 @@ _BLACK_LIST_TEST_MODULES = {
     indexeddb_perf,  # Always fails on Win7 & Android Tests builder.
     octane,  # Often fails & take long time to timeout on cq bot.
     rasterize_and_record_micro,  # Always fails on cq bot.
-    repaint,  # Often fails & takes long time to timeout on cq bot.
-    spaceport,  # Takes 451 seconds.
     speedometer,  # Takes 101 seconds.
     jetstream,  # Take 206 seconds.
-    text_selection,  # Always fails on cq bot.
     kraken,  # Flaky on Android, crbug.com/626174.
     v8_browsing, # Flaky on Android, crbug.com/628368.
     battor #Flaky on android, crbug.com/618330.
@@ -128,14 +123,6 @@ def load_tests(loader, standard_tests, pattern):
       index_by_class_name=False).values()
   for benchmark in all_benchmarks:
     if sys.modules[benchmark.__module__] in _BLACK_LIST_TEST_MODULES:
-      continue
-    # TODO(tonyg): Smoke doesn't work with session_restore yet.
-    if (benchmark.Name().startswith('session_restore') or
-        benchmark.Name().startswith('skpicture_printer')):
-      continue
-
-    if hasattr(benchmark, 'generated_profile_archive'):
-      # We'd like to test these, but don't know how yet.
       continue
 
     class BenchmarkSmokeTest(unittest.TestCase):

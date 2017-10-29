@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "ash/common/system/tray/default_system_tray_delegate.h"
+#include "ash/system/tray/system_tray_delegate.h"
 #include "base/macros.h"
 
 namespace ash {
@@ -17,10 +17,8 @@ class NetworkingConfigDelegate;
 // Handles the settings displayed in the system tray menu. For the classic ash
 // version see SystemTrayDelegateChromeOS.
 //
-// Chrome OS only. Other platforms use DefaultSystemTrayDelegate directly.
-//
-// TODO: Support all methods in SystemTrayDelegate. http://crbug.com/647412.
-class SystemTrayDelegateMus : public DefaultSystemTrayDelegate {
+// TODO: Replace with SystemTrayController. http://crbug.com/647412.
+class SystemTrayDelegateMus : public SystemTrayDelegate {
  public:
   SystemTrayDelegateMus();
   ~SystemTrayDelegateMus() override;

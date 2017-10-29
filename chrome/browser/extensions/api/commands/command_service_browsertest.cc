@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
+#include "base/memory/ptr_util.h"
+#include "base/threading/thread_restrictions.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -41,6 +46,7 @@ namespace extensions {
 typedef ExtensionApiTest CommandServiceTest;
 
 IN_PROC_BROWSER_TEST_F(CommandServiceTest, RemoveShortcutSurvivesUpdate) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir scoped_temp_dir;
   EXPECT_TRUE(scoped_temp_dir.CreateUniqueTempDir());
   base::FilePath pem_path = test_data_dir_.
@@ -110,11 +116,11 @@ IN_PROC_BROWSER_TEST_F(CommandServiceTest,
   // another platform.
   std::string anotherPlatformKey = GetAnotherCommandPlatform() + ":Alt+G";
   const char kNamedCommandName[] = "toggle-feature";
-  base::DictionaryValue* keybinding = new base::DictionaryValue();
+  auto keybinding = base::MakeUnique<base::DictionaryValue>();
   keybinding->SetString("extension", extension->id());
   keybinding->SetString("command_name", kNamedCommandName);
   keybinding->SetBoolean("global", false);
-  bindings->Set(anotherPlatformKey, keybinding);
+  bindings->Set(anotherPlatformKey, std::move(keybinding));
 
   CommandService* command_service = CommandService::Get(browser()->profile());
   command_service->RemoveKeybindingPrefs(extension->id(), kNamedCommandName);

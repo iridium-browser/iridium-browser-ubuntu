@@ -16,7 +16,7 @@
 
 class GrContext;
 class GrContextThreadSafeProxy;
-class GrTexture;
+class GrTextureProxy;
 class GrSamplerParams;
 class SkBitmap;
 class SkData;
@@ -35,22 +35,28 @@ public:
     uint32_t uniqueID() const { return fUniqueID; }
 
     /**
-     *  Return a ref to the encoded (i.e. compressed) representation,
-     *  of this data. If the GrContext is non-null, then the caller is only interested in
-     *  gpu-specific formats, so the impl may return null even if they have encoded data,
-     *  assuming they know it is not suitable for the gpu.
+     *  Return a ref to the encoded (i.e. compressed) representation
+     *  of this data.
      *
      *  If non-NULL is returned, the caller is responsible for calling
      *  unref() on the data when it is finished.
      */
-    SkData* refEncodedData(GrContext* ctx = nullptr) {
-        return this->onRefEncodedData(ctx);
+    SkData* refEncodedData() {
+        return this->onRefEncodedData();
     }
 
     /**
      *  Return the ImageInfo associated with this generator.
      */
     const SkImageInfo& getInfo() const { return fInfo; }
+
+    /**
+     *  Can this generator be used to produce images that will be drawable to the specified context
+     *  (or to CPU, if context is nullptr)?
+     */
+    bool isValid(GrContext* context) const {
+        return this->onIsValid(context);
+    }
 
     /**
      *  Decode into the given pixels, a block of memory of size at
@@ -60,7 +66,7 @@ public:
      *  Repeated calls to this function should give the same results,
      *  allowing the PixelRef to be immutable.
      *
-     *  @param info A description of the format (config, size)
+     *  @param info A description of the format
      *         expected by the caller.  This can simply be identical
      *         to the info returned by getInfo().
      *
@@ -70,23 +76,23 @@ public:
      *
      *         A size that does not match getInfo() implies a request
      *         to scale. If the generator cannot perform this scale,
-     *         it will return kInvalidScale.
+     *         it will return false.
      *
-     *  If info is kIndex8_SkColorType, then the caller must provide storage for up to 256
-     *  SkPMColor values in ctable. On success the generator must copy N colors into that storage,
-     *  (where N is the logical number of table entries) and set ctableCount to N.
-     *
-     *  If info is not kIndex8_SkColorType, then the last two parameters may be NULL. If ctableCount
-     *  is not null, it will be set to 0.
+     *         kIndex_8_SkColorType is not supported.
      *
      *  @return true on success.
      */
-    bool getPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
-                   SkPMColor ctable[], int* ctableCount);
+    struct Options {
+        Options()
+            : fBehavior(SkTransferFunctionBehavior::kIgnore)
+        {}
+
+        SkTransferFunctionBehavior fBehavior;
+    };
+    bool getPixels(const SkImageInfo& info, void* pixels, size_t rowBytes, const Options* options);
 
     /**
-     *  Simplified version of getPixels() that asserts that info is NOT kIndex8_SkColorType and
-     *  uses the default Options.
+     *  Simplified version of getPixels() that uses the default Options.
      */
     bool getPixels(const SkImageInfo& info, void* pixels, size_t rowBytes);
 
@@ -112,6 +118,7 @@ public:
      */
     bool getYUV8Planes(const SkYUVSizeInfo& sizeInfo, void* planes[3]);
 
+#if SK_SUPPORT_GPU
     /**
      *  If the generator can natively/efficiently return its pixels as a GPU image (backed by a
      *  texture) this will return that image. If not, this will return NULL.
@@ -130,16 +137,14 @@ public:
      *
      *  Regarding the GrContext parameter:
      *
-     *  The caller may pass NULL for the context. In that case the generator may assume that its
-     *  internal context is current. If it has no internal context, then it should just return
-     *  null.
-     *
-     *  If the caller passes a non-null context, then the generator should only succeed if:
-     *  - it has no intrinsic context, and will use the caller's
+     *  It must be non-NULL. The generator should only succeed if:
      *  - its internal context is the same
      *  - it can somehow convert its texture into one that is valid for the provided context.
      */
-    GrTexture* generateTexture(GrContext*, const SkImageInfo& info, const SkIPoint& origin);
+    sk_sp<GrTextureProxy> generateTexture(GrContext*, const SkImageInfo& info,
+                                          const SkIPoint& origin,
+                                          SkTransferFunctionBehavior behavior);
+#endif
 
     /**
      *  If the default image decoder system can interpret the specified (encoded) data, then
@@ -158,8 +163,6 @@ public:
                                                              SkImage::BitDepth,
                                                              sk_sp<SkColorSpace>);
 
-    bool tryGenerateBitmap(SkBitmap* bm, const SkImageInfo& info, SkBitmap::Allocator* allocator);
-
 protected:
     enum {
         kNeedNewImageUniqueID = 0
@@ -167,25 +170,29 @@ protected:
 
     SkImageGenerator(const SkImageInfo& info, uint32_t uniqueId = kNeedNewImageUniqueID);
 
-    virtual SkData* onRefEncodedData(GrContext* ctx);
+    virtual SkData* onRefEncodedData() { return nullptr; }
+    virtual bool onGetPixels(const SkImageInfo&, void*, size_t, const Options&) { return false; }
+    virtual bool onIsValid(GrContext*) const { return true; }
+    virtual bool onQueryYUV8(SkYUVSizeInfo*, SkYUVColorSpace*) const { return false; }
+    virtual bool onGetYUV8Planes(const SkYUVSizeInfo&, void*[3] /*planes*/) { return false; }
 
-    virtual bool onGetPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
-                             SkPMColor ctable[], int* ctableCount);
+#if SK_SUPPORT_GPU
+    enum class TexGenType {
+        kNone,           //image generator does not implement onGenerateTexture
+        kCheap,          //onGenerateTexture is implemented and it is fast (does not render offscreen)
+        kExpensive,      //onGenerateTexture is implemented and it is relatively slow
+    };
 
-    virtual bool onQueryYUV8(SkYUVSizeInfo*, SkYUVColorSpace*) const {
-        return false;
-    }
-    virtual bool onGetYUV8Planes(const SkYUVSizeInfo&, void*[3] /*planes*/) {
-        return false;
-    }
-
-    virtual GrTexture* onGenerateTexture(GrContext*, const SkImageInfo&, const SkIPoint&) {
-        return nullptr;
-    }
+    virtual TexGenType onCanGenerateTexture() const { return TexGenType::kNone; }
+    virtual sk_sp<GrTextureProxy> onGenerateTexture(GrContext*, const SkImageInfo&, const SkIPoint&,
+                                                    SkTransferFunctionBehavior);  // returns nullptr
+#endif
 
 private:
     const SkImageInfo fInfo;
     const uint32_t fUniqueID;
+
+    friend class SkImage_Lazy;
 
     // This is our default impl, which may be different on different platforms.
     // It is called from NewFromEncoded() after it has checked for any runtime factory.

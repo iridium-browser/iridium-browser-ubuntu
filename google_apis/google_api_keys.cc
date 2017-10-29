@@ -34,10 +34,6 @@
 #define GOOGLE_API_KEY DUMMY_API_TOKEN
 #endif
 
-#if !defined(GOOGLE_API_KEY_REMOTING)
-#define GOOGLE_API_KEY_REMOTING DUMMY_API_TOKEN
-#endif
-
 #if !defined(GOOGLE_CLIENT_ID_MAIN)
 #define GOOGLE_CLIENT_ID_MAIN DUMMY_API_TOKEN
 #endif
@@ -114,14 +110,6 @@ class APIKeyCache {
 #else
     api_key_non_stable_ = api_key_;
 #endif
-
-    api_key_remoting_ =
-        CalculateKeyValue(GOOGLE_API_KEY_REMOTING,
-                          STRINGIZE_NO_EXPANSION(GOOGLE_API_KEY_REMOTING),
-                          NULL,
-                          std::string(),
-                          environment.get(),
-                          command_line);
 
     std::string default_client_id =
         CalculateKeyValue(GOOGLE_DEFAULT_CLIENT_ID,
@@ -206,18 +194,32 @@ class APIKeyCache {
   }
 
   std::string api_key() const { return api_key_; }
+#if defined(OS_IOS)
+  void set_api_key(const std::string& api_key) { api_key_ = api_key; }
+#endif
   std::string api_key_non_stable() const { return api_key_non_stable_; }
-  std::string api_key_remoting() const { return api_key_remoting_; }
 
   std::string GetClientID(OAuth2Client client) const {
     DCHECK_LT(client, CLIENT_NUM_ITEMS);
     return client_ids_[client];
   }
 
+#if defined(OS_IOS)
+  void SetClientID(OAuth2Client client, const std::string& client_id) {
+    client_ids_[client] = client_id;
+  }
+#endif
+
   std::string GetClientSecret(OAuth2Client client) const {
     DCHECK_LT(client, CLIENT_NUM_ITEMS);
     return client_secrets_[client];
   }
+
+#if defined(OS_IOS)
+  void SetClientSecret(OAuth2Client client, const std::string& client_secret) {
+    client_secrets_[client] = client_secret;
+  }
+#endif
 
   std::string GetSpdyProxyAuthValue() {
 #if defined(SPDY_PROXY_AUTH_VALUE)
@@ -231,7 +233,8 @@ class APIKeyCache {
   // Gets a value for a key.  In priority order, this will be the value
   // provided via a command-line switch, the value provided via an
   // environment variable, or finally a value baked into the build.
-  // |command_line_switch| may be NULL.
+  // |command_line_switch| may be NULL. Official Google Chrome builds will not
+  // use the value provided by an environment variable.
   static std::string CalculateKeyValue(const char* baked_in_value,
                                        const char* environment_variable_name,
                                        const char* command_line_switch,
@@ -250,11 +253,17 @@ class APIKeyCache {
               << " with value " << key_value << " from Info.plist.";
     }
 #endif
+
+#if !defined(GOOGLE_CHROME_BUILD)
+    // Don't allow using the environment to override API keys for official
+    // Google Chrome builds. There have been reports of mangled environments
+    // affecting users (crbug.com/710575).
     if (environment->GetVar(environment_variable_name, &temp)) {
       key_value = temp;
       VLOG(1) << "Overriding API key " << environment_variable_name
               << " with value " << key_value << " from environment variable.";
     }
+#endif
 
     if (command_line_switch && command_line->HasSwitch(command_line_switch)) {
       key_value = command_line->GetSwitchValueASCII(command_line_switch);
@@ -284,12 +293,11 @@ class APIKeyCache {
 
   std::string api_key_;
   std::string api_key_non_stable_;
-  std::string api_key_remoting_;
   std::string client_ids_[CLIENT_NUM_ITEMS];
   std::string client_secrets_[CLIENT_NUM_ITEMS];
 };
 
-static base::LazyInstance<APIKeyCache> g_api_key_cache =
+static base::LazyInstance<APIKeyCache>::DestructorAtExit g_api_key_cache =
     LAZY_INSTANCE_INITIALIZER;
 
 bool HasKeysConfigured() {
@@ -315,9 +323,11 @@ std::string GetNonStableAPIKey() {
   return g_api_key_cache.Get().api_key_non_stable();
 }
 
-std::string GetRemotingAPIKey() {
-  return g_api_key_cache.Get().api_key_remoting();
+#if defined(OS_IOS)
+void SetAPIKey(const std::string& api_key) {
+  g_api_key_cache.Get().set_api_key(api_key);
 }
+#endif
 
 std::string GetOAuth2ClientID(OAuth2Client client) {
   return g_api_key_cache.Get().GetClientID(client);
@@ -326,6 +336,17 @@ std::string GetOAuth2ClientID(OAuth2Client client) {
 std::string GetOAuth2ClientSecret(OAuth2Client client) {
   return g_api_key_cache.Get().GetClientSecret(client);
 }
+
+#if defined(OS_IOS)
+void SetOAuth2ClientID(OAuth2Client client, const std::string& client_id) {
+  g_api_key_cache.Get().SetClientID(client, client_id);
+}
+
+void SetOAuth2ClientSecret(OAuth2Client client,
+                           const std::string& client_secret) {
+  g_api_key_cache.Get().SetClientSecret(client, client_secret);
+}
+#endif
 
 std::string GetSpdyProxyAuthValue() {
   return g_api_key_cache.Get().GetSpdyProxyAuthValue();

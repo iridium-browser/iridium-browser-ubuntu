@@ -23,20 +23,22 @@
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/history/core/browser/history_model_worker.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/history/core/browser/typed_url_sync_bridge.h"
+#include "components/history/core/browser/typed_url_syncable_service.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/sync/browser/password_model_worker.h"
-#include "components/reading_list/core/reading_list_switches.h"
-#include "components/reading_list/ios/reading_list_model.h"
+#include "components/reading_list/core/reading_list_model.h"
 #include "components/search_engines/search_engine_data_type_controller.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/sync/base/report_unrecoverable_error.h"
 #include "components/sync/driver/sync_api_component_factory.h"
 #include "components/sync/driver/sync_util.h"
-#include "components/sync/engine/browser_thread_model_worker.h"
 #include "components/sync/engine/passive_model_worker.h"
+#include "components/sync/engine/sequenced_model_worker.h"
 #include "components/sync/engine/ui_model_worker.h"
+#include "components/sync/user_events/user_event_service.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/sync_sessions/favicon_cache.h"
 #include "components/sync_sessions/local_session_event_router.h"
@@ -58,6 +60,7 @@
 #include "ios/chrome/browser/signin/oauth2_token_service_factory.h"
 #include "ios/chrome/browser/sync/glue/sync_start_util.h"
 #include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
+#include "ios/chrome/browser/sync/ios_user_event_service_factory.h"
 #include "ios/chrome/browser/sync/sessions/ios_chrome_local_session_event_router.h"
 #include "ios/chrome/browser/tabs/tab_model_synced_window_delegate_getter.h"
 #include "ios/chrome/browser/undo/bookmark_undo_service_factory.h"
@@ -80,7 +83,13 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
   explicit SyncSessionsClientImpl(ios::ChromeBrowserState* browser_state)
       : browser_state_(browser_state),
         window_delegates_getter_(
-            base::MakeUnique<TabModelSyncedWindowDelegatesGetter>()) {}
+            base::MakeUnique<TabModelSyncedWindowDelegatesGetter>()),
+        local_session_event_router_(
+            base::MakeUnique<IOSChromeLocalSessionEventRouter>(
+                browser_state_,
+                this,
+                ios::sync_start_util::GetFlareForSyncableService(
+                    browser_state_->GetStatePath()))) {}
 
   ~SyncSessionsClientImpl() override {}
 
@@ -93,7 +102,7 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
   favicon::FaviconService* GetFaviconService() override {
     DCHECK_CURRENTLY_ON(web::WebThread::UI);
     return ios::FaviconServiceFactory::GetForBrowserState(
-        browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
+        browser_state_, ServiceAccessType::IMPLICIT_ACCESS);
   }
 
   history::HistoryService* GetHistoryService() override {
@@ -117,19 +126,17 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
     return window_delegates_getter_.get();
   }
 
-  std::unique_ptr<sync_sessions::LocalSessionEventRouter>
-  GetLocalSessionEventRouter() override {
-    syncer::SyncableService::StartSyncFlare flare(
-        ios::sync_start_util::GetFlareForSyncableService(
-            browser_state_->GetStatePath()));
-    return base::MakeUnique<IOSChromeLocalSessionEventRouter>(browser_state_,
-                                                              this, flare);
+  sync_sessions::LocalSessionEventRouter* GetLocalSessionEventRouter()
+      override {
+    return local_session_event_router_.get();
   }
 
  private:
   ios::ChromeBrowserState* const browser_state_;
   const std::unique_ptr<sync_sessions::SyncedWindowDelegatesGetter>
       window_delegates_getter_;
+  const std::unique_ptr<IOSChromeLocalSessionEventRouter>
+      local_session_event_router_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSessionsClientImpl);
 };
@@ -149,10 +156,9 @@ void IOSChromeSyncClient::Initialize() {
 
   web_data_service_ =
       ios::WebDataServiceFactory::GetAutofillWebDataForBrowserState(
-          browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
-  // TODO(crbug.com/558320) Is EXPLICIT_ACCESS appropriate here?
+          browser_state_, ServiceAccessType::IMPLICIT_ACCESS);
   password_store_ = IOSChromePasswordStoreFactory::GetForBrowserState(
-      browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
+      browser_state_, ServiceAccessType::IMPLICIT_ACCESS);
 
   // Component factory may already be set in tests.
   if (!GetSyncApiComponentFactory()) {
@@ -198,7 +204,7 @@ bookmarks::BookmarkModel* IOSChromeSyncClient::GetBookmarkModel() {
 favicon::FaviconService* IOSChromeSyncClient::GetFaviconService() {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
   return ios::FaviconServiceFactory::GetForBrowserState(
-      browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
+      browser_state_, ServiceAccessType::IMPLICIT_ACCESS);
 }
 
 history::HistoryService* IOSChromeSyncClient::GetHistoryService() {
@@ -348,7 +354,6 @@ IOSChromeSyncClient::GetSyncBridgeForModelType(syncer::ModelType type) {
           ->GetDeviceInfoSyncBridge()
           ->AsWeakPtr();
     case syncer::READING_LIST: {
-      DCHECK(reading_list::switches::IsReadingListEnabled());
       ReadingListModel* reading_list_model =
           ReadingListModelFactory::GetForBrowserState(browser_state_);
       return reading_list_model->GetModelTypeSyncBridge()->AsWeakPtr();
@@ -356,6 +361,14 @@ IOSChromeSyncClient::GetSyncBridgeForModelType(syncer::ModelType type) {
     case syncer::AUTOFILL:
       return autofill::AutocompleteSyncBridge::FromWebDataService(
                  web_data_service_.get())
+          ->AsWeakPtr();
+    case syncer::TYPED_URLS:
+      // TODO(gangwu):implement TypedURLSyncBridge and return real
+      // TypedURLSyncBridge here.
+      return base::WeakPtr<syncer::ModelTypeSyncBridge>();
+    case syncer::USER_EVENTS:
+      return IOSUserEventServiceFactory::GetForBrowserState(browser_state_)
+          ->GetSyncBridge()
           ->AsWeakPtr();
     default:
       NOTREACHED();
@@ -368,13 +381,12 @@ IOSChromeSyncClient::CreateModelWorkerForGroup(syncer::ModelSafeGroup group) {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
   switch (group) {
     case syncer::GROUP_DB:
-      return new syncer::BrowserThreadModelWorker(
+      return new syncer::SequencedModelWorker(
           web::WebThread::GetTaskRunnerForThread(web::WebThread::DB),
           syncer::GROUP_DB);
     case syncer::GROUP_FILE:
-      return new syncer::BrowserThreadModelWorker(
-          web::WebThread::GetTaskRunnerForThread(web::WebThread::FILE),
-          syncer::GROUP_FILE);
+      // Not supported on iOS.
+      return nullptr;
     case syncer::GROUP_UI:
       return new syncer::UIModelWorker(
           web::WebThread::GetTaskRunnerForThread(web::WebThread::UI));

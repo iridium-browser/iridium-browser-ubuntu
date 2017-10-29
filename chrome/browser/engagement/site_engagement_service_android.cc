@@ -7,16 +7,12 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/memory/ptr_util.h"
+#include "chrome/browser/engagement/site_engagement_score.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "jni/SiteEngagementService_jni.h"
 #include "url/gurl.h"
 
 using base::android::JavaParamRef;
-
-// static
-bool SiteEngagementServiceAndroid::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
 
 // static
 const base::android::ScopedJavaGlobalRef<jobject>&
@@ -57,15 +53,19 @@ double SiteEngagementServiceAndroid::GetScore(
       GURL(base::android::ConvertJavaStringToUTF16(env, jurl)));
 }
 
-void SiteEngagementServiceAndroid::ResetScoreForURL(
+void SiteEngagementServiceAndroid::ResetBaseScoreForURL(
     JNIEnv* env,
     const JavaParamRef<jobject>& caller,
     const JavaParamRef<jstring>& jurl,
     double score) {
   if (jurl) {
-    service_->ResetScoreForURL(
+    service_->ResetBaseScoreForURL(
         GURL(base::android::ConvertJavaStringToUTF16(env, jurl)), score);
   }
+}
+
+void SetParamValuesForTesting(JNIEnv* env, const JavaParamRef<jclass>& clazz) {
+  SiteEngagementScore::SetParamValuesForTesting();
 }
 
 base::android::ScopedJavaLocalRef<jobject> SiteEngagementServiceForProfile(

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "core/fpdfapi/page/cpdf_pageobjectlist.h"
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxcrt/fx_basic.h"
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_string.h"
@@ -34,10 +35,12 @@ class CPDF_TextObject;
 #define TEXT_SPACE_CHAR L' '
 #define TEXT_LINEFEED_CHAR L'\n'
 #define TEXT_RETURN_CHAR L'\r'
+#define TEXT_HYPHEN_CHAR L'-'
 #define TEXT_EMPTY L""
 #define TEXT_SPACE L" "
 #define TEXT_RETURN_LINEFEED L"\r\n"
 #define TEXT_LINEFEED L"\n"
+#define TEXT_HYPHEN L"-"
 #define TEXT_CHARRATIO_GAPDELTA 0.070
 
 enum class FPDFText_MarkedContent { Pass = 0, Done, Delay };
@@ -49,13 +52,13 @@ class FPDF_CHAR_INFO {
   FPDF_CHAR_INFO();
   ~FPDF_CHAR_INFO();
 
-  FX_WCHAR m_Unicode;
-  FX_WCHAR m_Charcode;
+  wchar_t m_Unicode;
+  wchar_t m_Charcode;
   int32_t m_Flag;
-  FX_FLOAT m_FontSize;
+  float m_FontSize;
   CFX_PointF m_Origin;
   CFX_FloatRect m_CharBox;
-  CPDF_TextObject* m_pTextObj;
+  CFX_UnownedPtr<CPDF_TextObject> m_pTextObj;
   CFX_Matrix m_Matrix;
 };
 
@@ -72,16 +75,20 @@ class PAGECHAR_INFO {
 
   int m_Index;
   int m_CharCode;
-  FX_WCHAR m_Unicode;
+  wchar_t m_Unicode;
   int32_t m_Flag;
   CFX_PointF m_Origin;
   CFX_FloatRect m_CharBox;
-  CPDF_TextObject* m_pTextObj;
+  CFX_UnownedPtr<CPDF_TextObject> m_pTextObj;
   CFX_Matrix m_Matrix;
 };
 
 struct PDFTEXT_Obj {
-  CPDF_TextObject* m_pTextObj;
+  PDFTEXT_Obj();
+  PDFTEXT_Obj(const PDFTEXT_Obj& that);
+  ~PDFTEXT_Obj();
+
+  CFX_UnownedPtr<CPDF_TextObject> m_pTextObj;
   CFX_Matrix m_formMatrix;
 };
 
@@ -103,10 +110,10 @@ class CPDF_TextPage {
   CFX_WideString GetPageText(int start = 0, int nCount = -1) const;
   int CountRects(int start, int nCount);
   void GetRect(int rectIndex,
-               FX_FLOAT& left,
-               FX_FLOAT& top,
-               FX_FLOAT& right,
-               FX_FLOAT& bottom) const;
+               float& left,
+               float& top,
+               float& right,
+               float& bottom) const;
 
   static bool IsRectIntersect(const CFX_FloatRect& rect1,
                               const CFX_FloatRect& rect2);
@@ -125,7 +132,7 @@ class CPDF_TextPage {
     Hyphen,
   };
 
-  bool IsHyphen(FX_WCHAR curChar);
+  bool IsHyphen(wchar_t curChar);
   bool IsControlChar(const PAGECHAR_INFO& charInfo);
   void ProcessObject();
   void ProcessFormObject(CPDF_FormObject* pFormObj,
@@ -137,7 +144,7 @@ class CPDF_TextPage {
                          CPDF_PageObjectList::const_iterator ObjPos);
   GenerateCharacter ProcessInsertObject(const CPDF_TextObject* pObj,
                                         const CFX_Matrix& formMatrix);
-  bool GenerateCharInfo(FX_WCHAR unicode, PAGECHAR_INFO& info);
+  bool GenerateCharInfo(wchar_t unicode, PAGECHAR_INFO& info);
   bool IsSameAsPreTextObject(CPDF_TextObject* pTextObj,
                              const CPDF_PageObjectList* pObjList,
                              CPDF_PageObjectList::const_iterator ObjPos);
@@ -148,26 +155,26 @@ class CPDF_TextPage {
   void ProcessMarkedContent(PDFTEXT_Obj pObj);
   void CheckMarkedContentObject(int32_t& start, int32_t& nCount) const;
   void FindPreviousTextObject();
-  void AddCharInfoByLRDirection(FX_WCHAR wChar, PAGECHAR_INFO info);
-  void AddCharInfoByRLDirection(FX_WCHAR wChar, PAGECHAR_INFO info);
+  void AddCharInfoByLRDirection(wchar_t wChar, PAGECHAR_INFO info);
+  void AddCharInfoByRLDirection(wchar_t wChar, PAGECHAR_INFO info);
   TextOrientation GetTextObjectWritingMode(
       const CPDF_TextObject* pTextObj) const;
   TextOrientation FindTextlineFlowOrientation() const;
-  void AppendGeneratedCharacter(FX_WCHAR unicode, const CFX_Matrix& formMatrix);
+  void AppendGeneratedCharacter(wchar_t unicode, const CFX_Matrix& formMatrix);
 
   void SwapTempTextBuf(int32_t iCharListStartAppend, int32_t iBufStartAppend);
   bool IsRightToLeft(const CPDF_TextObject* pTextObj,
                      const CPDF_Font* pFont,
                      int nItems) const;
 
-  const CPDF_Page* const m_pPage;
+  CFX_UnownedPtr<const CPDF_Page> const m_pPage;
   std::vector<uint16_t> m_CharIndex;
   std::deque<PAGECHAR_INFO> m_CharList;
   std::deque<PAGECHAR_INFO> m_TempCharList;
   CFX_WideTextBuf m_TextBuf;
   CFX_WideTextBuf m_TempTextBuf;
   const FPDFText_Direction m_parserflag;
-  CPDF_TextObject* m_pPreTextObj;
+  CFX_UnownedPtr<CPDF_TextObject> m_pPreTextObj;
   CFX_Matrix m_perMatrix;
   bool m_bIsParsed;
   CFX_Matrix m_DisplayMatrix;

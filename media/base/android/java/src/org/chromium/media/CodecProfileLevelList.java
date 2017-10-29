@@ -75,16 +75,16 @@ class CodecProfileLevelList {
     private static class UnsupportedCodecProfileException extends RuntimeException {}
 
     private static int getCodecFromMime(String mime) {
-        if (mime.endsWith("vp9")) return VideoCodec.kCodecVP9;
-        if (mime.endsWith("vp8")) return VideoCodec.kCodecVP8;
-        if (mime.endsWith("avc")) return VideoCodec.kCodecH264;
-        if (mime.endsWith("hevc")) return VideoCodec.kCodecHEVC;
+        if (mime.endsWith("vp9")) return VideoCodec.CODEC_VP9;
+        if (mime.endsWith("vp8")) return VideoCodec.CODEC_VP8;
+        if (mime.endsWith("avc")) return VideoCodec.CODEC_H264;
+        if (mime.endsWith("hevc")) return VideoCodec.CODEC_HEVC;
         throw new UnsupportedCodecProfileException();
     }
 
     private static int mediaCodecProfileToChromiumMediaProfile(int codec, int profile) {
         switch (codec) {
-            case VideoCodec.kCodecH264:
+            case VideoCodec.CODEC_H264:
                 switch (profile) {
                     case CodecProfileLevel.AVCProfileBaseline:
                         return VideoCodecProfile.H264PROFILE_BASELINE;
@@ -103,14 +103,14 @@ class CodecProfileLevelList {
                     default:
                         throw new UnsupportedCodecProfileException();
                 }
-            case VideoCodec.kCodecVP8:
+            case VideoCodec.CODEC_VP8:
                 switch (profile) {
                     case CodecProfileLevel.VP8ProfileMain:
                         return VideoCodecProfile.VP8PROFILE_ANY;
                     default:
                         throw new UnsupportedCodecProfileException();
                 }
-            case VideoCodec.kCodecVP9:
+            case VideoCodec.CODEC_VP9:
                 switch (profile) {
                     case CodecProfileLevel.VP9Profile0:
                         return VideoCodecProfile.VP9PROFILE_PROFILE0;
@@ -123,7 +123,7 @@ class CodecProfileLevelList {
                     default:
                         throw new UnsupportedCodecProfileException();
                 }
-            case VideoCodec.kCodecHEVC:
+            case VideoCodec.CODEC_HEVC:
                 switch (profile) {
                     case CodecProfileLevel.HEVCProfileMain:
                         return VideoCodecProfile.HEVCPROFILE_MAIN;
@@ -141,7 +141,7 @@ class CodecProfileLevelList {
 
     private static int mediaCodecLevelToChromiumMediaLevel(int codec, int level) {
         switch (codec) {
-            case VideoCodec.kCodecH264:
+            case VideoCodec.CODEC_H264:
                 switch (level) {
                     case CodecProfileLevel.AVCLevel1:
                         return 10;
@@ -178,7 +178,7 @@ class CodecProfileLevelList {
                     default:
                         throw new UnsupportedCodecProfileException();
                 }
-            case VideoCodec.kCodecVP8:
+            case VideoCodec.CODEC_VP8:
                 switch (level) {
                     case CodecProfileLevel.VP8Level_Version0:
                         return 0;
@@ -191,7 +191,7 @@ class CodecProfileLevelList {
                     default:
                         throw new UnsupportedCodecProfileException();
                 }
-            case VideoCodec.kCodecVP9:
+            case VideoCodec.CODEC_VP9:
                 switch (level) {
                     case CodecProfileLevel.VP9Level1:
                         return 10;
@@ -224,32 +224,45 @@ class CodecProfileLevelList {
                     default:
                         throw new UnsupportedCodecProfileException();
                 }
-            case VideoCodec.kCodecHEVC:
+            case VideoCodec.CODEC_HEVC:
                 switch (level) {
+                    case CodecProfileLevel.HEVCHighTierLevel1:
                     case CodecProfileLevel.HEVCMainTierLevel1:
                         return 30;
+                    case CodecProfileLevel.HEVCHighTierLevel2:
                     case CodecProfileLevel.HEVCMainTierLevel2:
                         return 60;
+                    case CodecProfileLevel.HEVCHighTierLevel21:
                     case CodecProfileLevel.HEVCMainTierLevel21:
                         return 63;
+                    case CodecProfileLevel.HEVCHighTierLevel3:
                     case CodecProfileLevel.HEVCMainTierLevel3:
                         return 90;
+                    case CodecProfileLevel.HEVCHighTierLevel31:
                     case CodecProfileLevel.HEVCMainTierLevel31:
                         return 93;
+                    case CodecProfileLevel.HEVCHighTierLevel4:
                     case CodecProfileLevel.HEVCMainTierLevel4:
                         return 120;
+                    case CodecProfileLevel.HEVCHighTierLevel41:
                     case CodecProfileLevel.HEVCMainTierLevel41:
                         return 123;
+                    case CodecProfileLevel.HEVCHighTierLevel5:
                     case CodecProfileLevel.HEVCMainTierLevel5:
                         return 150;
+                    case CodecProfileLevel.HEVCHighTierLevel51:
                     case CodecProfileLevel.HEVCMainTierLevel51:
                         return 153;
+                    case CodecProfileLevel.HEVCHighTierLevel52:
                     case CodecProfileLevel.HEVCMainTierLevel52:
                         return 156;
+                    case CodecProfileLevel.HEVCHighTierLevel6:
                     case CodecProfileLevel.HEVCMainTierLevel6:
                         return 180;
+                    case CodecProfileLevel.HEVCHighTierLevel61:
                     case CodecProfileLevel.HEVCMainTierLevel61:
                         return 183;
+                    case CodecProfileLevel.HEVCHighTierLevel62:
                     case CodecProfileLevel.HEVCMainTierLevel62:
                         return 186;
                     default:

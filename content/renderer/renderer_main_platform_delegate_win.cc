@@ -21,7 +21,7 @@
 #include "content/public/renderer/render_thread.h"
 #include "content/renderer/render_thread_impl.h"
 #include "sandbox/win/src/sandbox.h"
-#include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
+#include "third_party/WebKit/public/platform/WebRuntimeFeatures.h"
 #include "third_party/WebKit/public/web/win/WebFontRendering.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "third_party/skia/include/ports/SkTypeface_win.h"
@@ -57,7 +57,7 @@ void RendererMainPlatformDelegate::PlatformInitialize() {
   InitializeDWriteFontProxy();
 
   // TODO(robliao): This should use WebScreenInfo. See http://crbug.com/604555.
-  blink::WebFontRendering::setDeviceScaleFactor(display::win::GetDPIScale());
+  blink::WebFontRendering::SetDeviceScaleFactor(display::win::GetDPIScale());
 }
 
 void RendererMainPlatformDelegate::PlatformUninitialize() {

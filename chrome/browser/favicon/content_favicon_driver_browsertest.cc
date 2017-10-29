@@ -8,23 +8,23 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
-#include "base/scoped_observer.h"
 #include "base/single_thread_task_runner.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/favicon/core/favicon_driver_observer.h"
 #include "components/favicon/core/favicon_handler.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_types.h"
+#include "components/favicon/core/favicon_service.h"
+#include "components/favicon/core/features.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "net/base/load_flags.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/url_request/url_request.h"
@@ -54,13 +54,6 @@ class TestResourceDispatcherHostDelegate
 
  private:
   // content::ResourceDispatcherHostDelegate:
-  bool ShouldBeginRequest(const std::string& method,
-                          const GURL& url,
-                          content::ResourceType resource_type,
-                          content::ResourceContext* resource_context) override {
-    return true;
-  }
-
   void RequestBeginning(net::URLRequest* request,
                         content::ResourceContext* resource_context,
                         content::AppCacheService* appcache_service,
@@ -82,89 +75,62 @@ class TestResourceDispatcherHostDelegate
   DISALLOW_COPY_AND_ASSIGN(TestResourceDispatcherHostDelegate);
 };
 
-// Checks whether the FaviconDriver is waiting for a download to complete or
-// for data from the FaviconService.
-class FaviconDriverPendingTaskChecker {
- public:
-  virtual ~FaviconDriverPendingTaskChecker() {}
-
-  virtual bool HasPendingTasks() = 0;
-};
-
 // Waits for the following the finish:
 // - The pending navigation.
 // - FaviconHandler's pending favicon database requests.
 // - FaviconHandler's pending downloads.
-class PendingTaskWaiter : public content::NotificationObserver,
-                          public favicon::FaviconDriverObserver {
+// - Optionally, for a specific page URL (as a mechanism to wait of Javascript
+//   completion).
+class PendingTaskWaiter : public content::WebContentsObserver {
  public:
   PendingTaskWaiter(content::WebContents* web_contents,
-                    FaviconDriverPendingTaskChecker* checker)
-      : checker_(checker),
-        load_stopped_(false),
-        scoped_observer_(this),
-        weak_factory_(this) {
-    registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
-                   content::Source<content::NavigationController>(
-                       &web_contents->GetController()));
-    scoped_observer_.Add(
-        favicon::ContentFaviconDriver::FromWebContents(web_contents));
-  }
+                    const GURL& required_url = GURL())
+      : WebContentsObserver(web_contents),
+        required_url_(required_url),
+        weak_factory_(this) {}
   ~PendingTaskWaiter() override {}
 
   void Wait() {
-    if (load_stopped_ && !checker_->HasPendingTasks())
-      return;
-
     base::RunLoop run_loop;
     quit_closure_ = run_loop.QuitClosure();
     run_loop.Run();
   }
 
  private:
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    if (type == content::NOTIFICATION_LOAD_STOP)
-      load_stopped_ = true;
-
-    OnNotification();
-  }
-
-  // favicon::Favicon
-  void OnFaviconUpdated(favicon::FaviconDriver* favicon_driver,
-                        NotificationIconType notification_icon_type,
-                        const GURL& icon_url,
-                        bool icon_url_changed,
-                        const gfx::Image& image) override {
-    OnNotification();
-  }
-
-  void OnNotification() {
-    if (!quit_closure_.is_null()) {
-      // We stop waiting based on changes in state to FaviconHandler which occur
-      // immediately after OnFaviconUpdated() is called. Post a task to check if
-      // we can stop waiting.
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&PendingTaskWaiter::EndLoopIfCanStopWaiting,
-                                weak_factory_.GetWeakPtr()));
+  // content::WebContentsObserver:
+  void DidStopLoading() override {
+    if (!required_url_.is_empty() &&
+        required_url_ != web_contents()->GetLastCommittedURL()) {
+      return;
     }
+
+    // We need to poll periodically because Delegate::OnFaviconUpdated() is not
+    // guaranteed to be called upon completion of the last database request /
+    // download. In particular, OnFaviconUpdated() might not be called if a
+    // database request confirms the data sent in the previous
+    // OnFaviconUpdated() call.
+    CheckStopWaitingPeriodically();
+  }
+
+  void CheckStopWaitingPeriodically() {
+    EndLoopIfCanStopWaiting();
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&PendingTaskWaiter::CheckStopWaitingPeriodically,
+                       weak_factory_.GetWeakPtr()),
+        base::TimeDelta::FromSeconds(1));
   }
 
   void EndLoopIfCanStopWaiting() {
     if (!quit_closure_.is_null() &&
-        load_stopped_ &&
-        !checker_->HasPendingTasks()) {
+        !favicon::ContentFaviconDriver::FromWebContents(web_contents())
+             ->HasPendingTasksForTest()) {
       quit_closure_.Run();
     }
   }
 
-  FaviconDriverPendingTaskChecker* checker_;  // Not owned.
-  bool load_stopped_;
   base::Closure quit_closure_;
-  content::NotificationRegistrar registrar_;
-  ScopedObserver<favicon::FaviconDriver, PendingTaskWaiter> scoped_observer_;
+  const GURL required_url_;
   base::WeakPtrFactory<PendingTaskWaiter> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PendingTaskWaiter);
@@ -172,8 +138,7 @@ class PendingTaskWaiter : public content::NotificationObserver,
 
 }  // namespace
 
-class ContentFaviconDriverTest : public InProcessBrowserTest,
-                                 public FaviconDriverPendingTaskChecker {
+class ContentFaviconDriverTest : public InProcessBrowserTest {
  public:
   ContentFaviconDriverTest() {}
   ~ContentFaviconDriverTest() override {}
@@ -182,10 +147,34 @@ class ContentFaviconDriverTest : public InProcessBrowserTest,
     return browser()->tab_strip_model()->GetActiveWebContents();
   }
 
-  // FaviconDriverPendingTaskChecker:
-  bool HasPendingTasks() override {
-    return favicon::ContentFaviconDriver::FromWebContents(web_contents())
-        ->HasPendingTasksForTest();
+  favicon_base::FaviconRawBitmapResult GetFaviconForPageURL(
+      const GURL& url,
+      favicon_base::IconType icon_type) {
+    favicon::FaviconService* favicon_service =
+        FaviconServiceFactory::GetForProfile(
+            browser()->profile(), ServiceAccessType::EXPLICIT_ACCESS);
+
+    std::vector<favicon_base::FaviconRawBitmapResult> results;
+    base::CancelableTaskTracker tracker;
+    base::RunLoop loop;
+    favicon_service->GetFaviconForPageURL(
+        url, icon_type, /*desired_size_in_dip=*/0,
+        base::Bind(
+            [](std::vector<favicon_base::FaviconRawBitmapResult>* save_results,
+               base::RunLoop* loop,
+               const std::vector<favicon_base::FaviconRawBitmapResult>&
+                   results) {
+              *save_results = results;
+              loop->Quit();
+            },
+            &results, &loop),
+        &tracker);
+    loop.Run();
+    for (const favicon_base::FaviconRawBitmapResult& result : results) {
+      if (result.is_valid())
+        return result;
+    }
+    return favicon_base::FaviconRawBitmapResult();
   }
 
  private:
@@ -206,7 +195,7 @@ IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest, ReloadBypassingCache) {
 
   // Initial visit in order to populate the cache.
   {
-    PendingTaskWaiter waiter(web_contents(), this);
+    PendingTaskWaiter waiter(web_contents());
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), url, WindowOpenDisposition::CURRENT_TAB,
         ui_test_utils::BROWSER_TEST_NONE);
@@ -221,7 +210,7 @@ IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest, ReloadBypassingCache) {
   // A normal visit should fetch the favicon from either the favicon database or
   // the HTTP cache.
   {
-    PendingTaskWaiter waiter(web_contents(), this);
+    PendingTaskWaiter waiter(web_contents());
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), url, WindowOpenDisposition::CURRENT_TAB,
         ui_test_utils::BROWSER_TEST_NONE);
@@ -232,10 +221,147 @@ IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest, ReloadBypassingCache) {
 
   // A reload ignoring the cache should refetch the favicon from the website.
   {
-    PendingTaskWaiter waiter(web_contents(), this);
+    PendingTaskWaiter waiter(web_contents());
     chrome::ExecuteCommand(browser(), IDC_RELOAD_BYPASSING_CACHE);
     waiter.Wait();
   }
   ASSERT_TRUE(delegate->was_requested());
   EXPECT_TRUE(delegate->bypassed_cache());
 }
+
+// Test that loading a page that contains icons only in the Web Manifest causes
+// those icons to be used.
+IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest, LoadIconFromWebManifest) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url = embedded_test_server()->GetURL("/favicon/page_with_manifest.html");
+  GURL icon_url = embedded_test_server()->GetURL("/favicon/icon.png");
+
+  std::unique_ptr<TestResourceDispatcherHostDelegate> delegate(
+      new TestResourceDispatcherHostDelegate(icon_url));
+  content::ResourceDispatcherHost::Get()->SetDelegate(delegate.get());
+
+  PendingTaskWaiter waiter(web_contents());
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), url, WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  waiter.Wait();
+
+#if defined(OS_ANDROID)
+  EXPECT_TRUE(delegate->was_requested());
+  EXPECT_NE(
+      nullptr,
+      GetFaviconForPageURL(url, favicon_base::WEB_MANIFEST_ICON).bitmap_data);
+#else
+  EXPECT_FALSE(delegate->was_requested());
+#endif
+}
+
+// Test that loading a page that contains a Web Manifest without icons and a
+// regular favicon in the HTML reports the icon. The regular icon is initially
+// cached in the Favicon database.
+IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest,
+                       LoadRegularIconDespiteWebManifestWithoutIcons) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url = embedded_test_server()->GetURL(
+      "/favicon/page_with_manifest_without_icons.html");
+  GURL icon_url = embedded_test_server()->GetURL("/favicon/icon.png");
+
+  // Initial visit with the feature disabled, to populate the cache.
+  {
+    base::test::ScopedFeatureList override_features;
+    override_features.InitAndDisableFeature(favicon::kFaviconsFromWebManifest);
+
+    PendingTaskWaiter waiter(web_contents());
+    ui_test_utils::NavigateToURLWithDisposition(
+        browser(), url, WindowOpenDisposition::CURRENT_TAB,
+        ui_test_utils::BROWSER_TEST_NONE);
+    waiter.Wait();
+  }
+  ASSERT_NE(nullptr,
+            GetFaviconForPageURL(url, favicon_base::FAVICON).bitmap_data);
+
+  ui_test_utils::NavigateToURL(browser(), GURL(url::kAboutBlankURL));
+
+  // Visit the page again now that the feature is enabled (default).
+  {
+    PendingTaskWaiter waiter(web_contents());
+    ui_test_utils::NavigateToURLWithDisposition(
+        browser(), url, WindowOpenDisposition::CURRENT_TAB,
+        ui_test_utils::BROWSER_TEST_NONE);
+    waiter.Wait();
+  }
+
+  EXPECT_NE(nullptr,
+            GetFaviconForPageURL(url, favicon_base::FAVICON).bitmap_data);
+}
+
+// Test that a page which uses JavaScript to override document.location.hash
+// gets associated favicons.
+IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest,
+                       AssociateIconWithInitialPageDespiteHashOverride) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url =
+      embedded_test_server()->GetURL("/favicon/page_with_hash_override.html");
+  GURL landing_url = embedded_test_server()->GetURL(
+      "/favicon/page_with_hash_override.html#foo");
+
+  PendingTaskWaiter waiter(web_contents(), landing_url);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), url, WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  waiter.Wait();
+
+  EXPECT_NE(nullptr,
+            GetFaviconForPageURL(url, favicon_base::FAVICON).bitmap_data);
+  EXPECT_NE(
+      nullptr,
+      GetFaviconForPageURL(landing_url, favicon_base::FAVICON).bitmap_data);
+}
+
+// Test that a page which uses JavaScript document.location.replace() to
+// navigate within the page gets associated favicons.
+IN_PROC_BROWSER_TEST_F(
+    ContentFaviconDriverTest,
+    AssociateIconWithInitialPageDespiteLocationOverrideWithinPage) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url = embedded_test_server()->GetURL(
+      "/favicon/page_with_location_override_within_page.html");
+  GURL landing_url = embedded_test_server()->GetURL(
+      "/favicon/page_with_location_override_within_page.html#foo");
+
+  PendingTaskWaiter waiter(web_contents(), landing_url);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), url, WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  waiter.Wait();
+
+  EXPECT_NE(nullptr,
+            GetFaviconForPageURL(url, favicon_base::FAVICON).bitmap_data);
+  EXPECT_NE(
+      nullptr,
+      GetFaviconForPageURL(landing_url, favicon_base::FAVICON).bitmap_data);
+}
+
+#if defined(OS_ANDROID)
+IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest,
+                       LoadIconFromWebManifestDespitePushState) {
+  base::test::ScopedFeatureList override_features;
+  override_features.InitAndEnableFeature(favicon::kFaviconsFromWebManifest);
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL url =
+      embedded_test_server()->GetURL("/favicon/pushstate_with_manifest.html");
+  GURL pushstate_url = embedded_test_server()->GetURL(
+      "/favicon/pushstate_with_manifest.html#pushState");
+
+  PendingTaskWaiter waiter(web_contents(), /*required_url=*/pushstate_url);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), url, WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  waiter.Wait();
+
+  EXPECT_NE(nullptr,
+            GetFaviconForPageURL(pushstate_url, favicon_base::WEB_MANIFEST_ICON)
+                .bitmap_data);
+}
+#endif

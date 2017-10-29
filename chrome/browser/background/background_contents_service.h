@@ -117,6 +117,7 @@ class BackgroundContentsService : private content::NotificationObserver,
   // Source..
   BackgroundContents* CreateBackgroundContents(
       scoped_refptr<content::SiteInstance> site,
+      content::RenderFrameHost* opener,
       int32_t route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
@@ -156,10 +157,9 @@ class BackgroundContentsService : private content::NotificationObserver,
   // extensions::ExtensionRegistryObserver implementation.
   void OnExtensionLoaded(content::BrowserContext* browser_context,
                          const extensions::Extension* extension) override;
-  void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const extensions::Extension* extension,
+                           extensions::UnloadedExtensionReason reason) override;
   void OnExtensionUninstalled(content::BrowserContext* browser_context,
                               const extensions::Extension* extension,
                               extensions::UninstallReason reason) override;

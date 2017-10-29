@@ -29,6 +29,7 @@
 #include "base/power_monitor/power_observer.h"
 #include "base/synchronization/lock.h"
 #include "media/base/audio_decoder.h"
+#include "media/base/audio_decoder_config.h"
 #include "media/base/audio_renderer.h"
 #include "media/base/audio_renderer_sink.h"
 #include "media/base/decryptor.h"
@@ -36,6 +37,7 @@
 #include "media/base/time_source.h"
 #include "media/filters/audio_renderer_algorithm.h"
 #include "media/filters/decoder_stream.h"
+#include "media/renderers/default_renderer_factory.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -62,8 +64,8 @@ class MEDIA_EXPORT AudioRendererImpl
   AudioRendererImpl(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       AudioRendererSink* sink,
-      ScopedVector<AudioDecoder> decoders,
-      const scoped_refptr<MediaLog>& media_log);
+      const CreateAudioDecodersCB& create_audio_decoders_cb,
+      MediaLog* media_log);
   ~AudioRendererImpl() override;
 
   // TimeSource implementation.
@@ -96,16 +98,18 @@ class MEDIA_EXPORT AudioRendererImpl
   // Important detail: being in kPlaying doesn't imply that audio is being
   // rendered. Rather, it means that the renderer is ready to go. The actual
   // rendering of audio is controlled via Start/StopRendering().
+  // Audio renderer can be reinitialized completely by calling Initialize again
+  // when it is in a kFlushed state.
   //
   //   kUninitialized
-  //         | Initialize()
-  //         |
-  //         V
-  //    kInitializing
-  //         | Decoders initialized
-  //         |
-  //         V            Decoders reset
-  //      kFlushed <------------------ kFlushing
+  //  +----> | Initialize()
+  //  |      |
+  //  |      V
+  //  | kInitializing
+  //  |      | Decoders initialized
+  //  |      |
+  //  |      V            Decoders reset
+  //  +-  kFlushed <------------------ kFlushing
   //         | StartPlaying()             ^
   //         |                            |
   //         |                            | Flush()
@@ -183,15 +187,17 @@ class MEDIA_EXPORT AudioRendererImpl
   void OnBufferingStateChange(BufferingState state);
   void OnWaitingForDecryptionKey();
 
+  // Generally called by the AudioBufferStream when a config change occurs. May
+  // also be called internally with an empty config to reset config-based state.
+  // Will notify RenderClient when called with a valid config.
+  void OnConfigChange(const AudioDecoderConfig& config);
+
   // Used to initiate the flush operation once all pending reads have
   // completed.
   void DoFlush_Locked();
 
   // Called when the |decoder_|.Reset() has completed.
   void ResetDecoderDone();
-
-  // Called by the AudioBufferStream when a config change occurs.
-  void OnConfigChange();
 
   // Updates |buffering_state_| and fires |buffering_state_cb_|.
   void SetBufferingState_Locked(BufferingState buffering_state);
@@ -207,6 +213,11 @@ class MEDIA_EXPORT AudioRendererImpl
   // Whether or not we expect to handle config changes.
   bool expecting_config_changes_;
 
+  // Stores the last decoder config that was passed to
+  // RendererClient::OnAudioConfigChange. Used to prevent signaling config
+  // to the upper layers when when the new config is the same.
+  AudioDecoderConfig current_decoder_config_;
+
   // The sink (destination) for rendered audio. |sink_| must only be accessed
   // on |task_runner_|. |sink_| must never be called under |lock_| or else we
   // may deadlock between |task_runner_| and the audio callback thread.
@@ -214,9 +225,9 @@ class MEDIA_EXPORT AudioRendererImpl
 
   std::unique_ptr<AudioBufferStream> audio_buffer_stream_;
 
-  scoped_refptr<MediaLog> media_log_;
+  MediaLog* media_log_;
 
-  // Cached copy of hardware params from |sink_|.
+  // Cached copy of audio params that the renderer is initialized with.
   AudioParameters audio_parameters_;
 
   RendererClient* client_;
@@ -242,6 +253,13 @@ class MEDIA_EXPORT AudioRendererImpl
   // given to the |algorithm_| for efficient playback rate changes.
   ChannelLayout last_decoded_channel_layout_;
 
+  // Whether the stream is possibly encrypted.
+  bool is_encrypted_;
+
+  // Similar to |last_decoded_channel_layout_|, used to configure the channel
+  // mask given to the |algorithm_| for efficient playback rate changes.
+  int last_decoded_channels_;
+
   // After Initialize() has completed, all variables below must be accessed
   // under |lock_|. ------------------------------------------------------------
   base::Lock lock_;
@@ -252,6 +270,10 @@ class MEDIA_EXPORT AudioRendererImpl
 
   // Simple state tracking variable.
   State state_;
+
+  // TODO(servolk): Consider using DecoderFactory here instead of the
+  // CreateAudioDecodersCB.
+  CreateAudioDecodersCB create_audio_decoders_cb_;
 
   BufferingState buffering_state_;
 

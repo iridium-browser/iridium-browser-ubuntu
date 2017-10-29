@@ -20,11 +20,11 @@ namespace bookmarks {
 class UndoManagerBridge : public UndoManagerObserver {
  public:
   explicit UndoManagerBridge(id<UndoManagerBridgeObserver> observer);
-  ~UndoManagerBridge() override{};
+  ~UndoManagerBridge() override {}
 
  private:
   void OnUndoManagerStateChange() override;
-  id<UndoManagerBridgeObserver> observer_;
+  __weak id<UndoManagerBridgeObserver> observer_;
 };
 }  // namespace bookmarks
 

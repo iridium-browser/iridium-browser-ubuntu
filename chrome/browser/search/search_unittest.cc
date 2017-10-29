@@ -438,11 +438,10 @@ TEST_F(SearchTest, UseLocalNTPIfNTPURLIsBlockedForSupervisedUser) {
   // Block access to foo.com in the URL filter.
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile());
-  SupervisedUserURLFilter* url_filter =
-      supervised_user_service->GetURLFilterForUIThread();
+  SupervisedUserURLFilter* url_filter = supervised_user_service->GetURLFilter();
   std::map<std::string, bool> hosts;
   hosts["foo.com"] = false;
-  url_filter->SetManualHosts(&hosts);
+  url_filter->SetManualHosts(std::move(hosts));
 
   EXPECT_EQ(GURL(chrome::kChromeSearchLocalNtpUrl),
             GetNewTabPageURL(profile()));
@@ -533,18 +532,21 @@ TEST_F(SearchTest, IsNTPURL) {
   // No margin.
   profile()->GetPrefs()->SetBoolean(prefs::kSearchSuggestEnabled, true);
   GURL remote_ntp_url(GetInstantURL(profile(), false));
+  GURL remote_ntp_service_worker_url("https://foo.com/newtab-serviceworker.js");
   GURL search_url_with_search_terms("https://foo.com/url?strk&bar=abc");
   GURL search_url_without_search_terms("https://foo.com/url?strk&bar");
 
   EXPECT_FALSE(IsNTPURL(ntp_url, profile()));
   EXPECT_TRUE(IsNTPURL(local_ntp_url, profile()));
   EXPECT_TRUE(IsNTPURL(remote_ntp_url, profile()));
+  EXPECT_TRUE(IsNTPURL(remote_ntp_service_worker_url, profile()));
   EXPECT_FALSE(IsNTPURL(search_url_with_search_terms, profile()));
   EXPECT_FALSE(IsNTPURL(search_url_without_search_terms, profile()));
 
   EXPECT_FALSE(IsNTPURL(ntp_url, NULL));
   EXPECT_FALSE(IsNTPURL(local_ntp_url, NULL));
   EXPECT_FALSE(IsNTPURL(remote_ntp_url, NULL));
+  EXPECT_FALSE(IsNTPURL(remote_ntp_service_worker_url, NULL));
   EXPECT_FALSE(IsNTPURL(search_url_with_search_terms, NULL));
   EXPECT_FALSE(IsNTPURL(search_url_without_search_terms, NULL));
 }

@@ -9,7 +9,6 @@
 
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/safe_browsing/incident_reporting/delayed_analysis_callback.h"
-#include "components/user_prefs/tracked/tracked_preference_validation_delegate.h"
 
 class Profile;
 
@@ -21,11 +20,18 @@ namespace net {
 class URLRequestContextGetter;
 }
 
+namespace prefs {
+namespace mojom {
+class TrackedPreferenceValidationDelegate;
+}
+}
+
 namespace safe_browsing {
 
 class ClientSideDetectionService;
 class DownloadProtectionService;
 class IncidentReportingService;
+class PasswordProtectionService;
 class ResourceRequestDetector;
 struct ResourceRequestInfo;
 class SafeBrowsingService;
@@ -86,8 +92,8 @@ class ServicesDelegate {
 
   // See the SafeBrowsingService methods of the same name.
   virtual void ProcessResourceRequest(const ResourceRequestInfo* request) = 0;
-  virtual std::unique_ptr<TrackedPreferenceValidationDelegate>
-      CreatePreferenceValidationDelegate(Profile* profile) = 0;
+  virtual std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
+  CreatePreferenceValidationDelegate(Profile* profile) = 0;
   virtual void RegisterDelayedAnalysisCallback(
       const DelayedAnalysisCallback& callback) = 0;
   virtual void AddDownloadManager(
@@ -101,6 +107,11 @@ class ServicesDelegate {
     net::URLRequestContextGetter* url_request_context_getter,
     const V4ProtocolConfig& v4_config) = 0;
   virtual void StopOnIOThread(bool shutdown) = 0;
+
+  virtual void CreatePasswordProtectionService(Profile* profile) = 0;
+  virtual void RemovePasswordProtectionService(Profile* profile) = 0;
+  virtual PasswordProtectionService* GetPasswordProtectionService(
+      Profile* profile) const = 0;
 };
 
 }  // namespace safe_browsing

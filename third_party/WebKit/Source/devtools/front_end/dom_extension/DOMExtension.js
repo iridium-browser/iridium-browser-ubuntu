@@ -266,16 +266,6 @@ Node.prototype.getComponentSelection = function() {
 /**
  * @return {boolean}
  */
-Node.prototype.isComponentSelectionCollapsed = function() {
-  // FIXME: crbug.com/447523, use selection.isCollapsed when it is fixed for shadow dom.
-  var selection = this.getComponentSelection();
-  var range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
-  return range ? range.collapsed : true;
-};
-
-/**
- * @return {boolean}
- */
 Node.prototype.hasSelection = function() {
   // TODO(luoe): use contains(node, {includeShadow: true}) when it is fixed for shadow dom.
   var contents = this.querySelectorAll('content');
@@ -283,23 +273,12 @@ Node.prototype.hasSelection = function() {
     if (Array.prototype.some.call(content.getDistributedNodes(), node => node.hasSelection()))
       return true;
   }
-  if (this.isComponentSelectionCollapsed())
+
+  var selection = this.getComponentSelection();
+  if (selection.type !== 'Range')
     return false;
-  return this.getComponentSelection().containsNode(this, true);
-};
-
-/**
- * @return {!Selection}
- */
-Node.prototype.getDeepSelection = function() {
-  var activeElement = this.ownerDocument.activeElement;
-  var shadowRoot = null;
-  while (activeElement && activeElement.shadowRoot) {
-    shadowRoot = activeElement.shadowRoot;
-    activeElement = shadowRoot.activeElement;
-  }
-
-  return shadowRoot ? shadowRoot.getSelection() : this.window().getSelection();
+  return selection.containsNode(this, true) || selection.anchorNode.isSelfOrDescendant(this) ||
+      selection.focusNode.isSelfOrDescendant(this);
 };
 
 /**
@@ -471,6 +450,15 @@ var AnchorBox = class {
     this.y = y || 0;
     this.width = width || 0;
     this.height = height || 0;
+  }
+
+  /**
+   * @param {number} x
+   * @param {number} y
+   * @return {boolean}
+   */
+  contains(x, y) {
+    return x >= this.x && x <= this.x + this.width && y >= this.y && y <= this.y + this.height;
   }
 };
 
@@ -748,6 +736,9 @@ Node.prototype.setTextContentTruncatedIfNeeded = function(text, placeholder) {
  * @return {?Node}
  */
 Event.prototype.deepElementFromPoint = function() {
+  // Some synthetic events have zero coordinates which lead to a wrong element. Better return nothing in this case.
+  if (!this.which && !this.pageX && !this.pageY && !this.clientX && !this.clientY && !this.movementX && !this.movementY)
+    return null;
   var root = this.target && this.target.getComponentRoot();
   return root ? root.deepElementFromPoint(this.pageX, this.pageY) : null;
 };

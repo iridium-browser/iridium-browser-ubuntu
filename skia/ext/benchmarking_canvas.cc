@@ -11,7 +11,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
+#include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
@@ -117,8 +119,7 @@ std::unique_ptr<base::Value> AsValue(SkColor color) {
 }
 
 std::unique_ptr<base::Value> AsValue(SkBlendMode mode) {
-  std::unique_ptr<base::StringValue> val(
-      new base::StringValue(SkBlendMode_Name(mode)));
+  std::unique_ptr<base::Value> val(new base::Value(SkBlendMode_Name(mode)));
 
   return val;
 }
@@ -127,8 +128,7 @@ std::unique_ptr<base::Value> AsValue(SkCanvas::PointMode mode) {
   static const char* gModeStrings[] = { "Points", "Lines", "Polygon" };
   DCHECK_LT(static_cast<size_t>(mode), SK_ARRAY_COUNT(gModeStrings));
 
-  std::unique_ptr<base::StringValue> val(
-      new base::StringValue(gModeStrings[mode]));
+  std::unique_ptr<base::Value> val(new base::Value(gModeStrings[mode]));
 
   return val;
 }
@@ -256,7 +256,7 @@ std::unique_ptr<base::Value> SaveLayerFlagsAsValue(
   builder.addFlag(flags & SkCanvas::kPreserveLCDText_SaveLayerFlag,
                   "kPreserveLCDText");
 
-  std::unique_ptr<base::StringValue> val(new base::StringValue(builder.str()));
+  std::unique_ptr<base::Value> val(new base::Value(builder.str()));
 
   return val;
 }
@@ -271,8 +271,7 @@ std::unique_ptr<base::Value> AsValue(SkClipOp op) {
                                     };
   size_t index = static_cast<size_t>(op);
   DCHECK_LT(index, SK_ARRAY_COUNT(gOpStrings));
-  std::unique_ptr<base::StringValue> val(
-      new base::StringValue(gOpStrings[index]));
+  std::unique_ptr<base::Value> val(new base::Value(gOpStrings[index]));
   return val;
 }
 
@@ -380,24 +379,23 @@ class BenchmarkingCanvas::AutoOp {
 public:
   // AutoOp objects are always scoped within draw call frames,
   // so the paint is guaranteed to be valid for their lifetime.
-  AutoOp(BenchmarkingCanvas* canvas, const char op_name[],
-         const SkPaint* paint = nullptr)
-      : canvas_(canvas)
-      , op_record_(new base::DictionaryValue())
-      , op_params_(new base::ListValue()) {
+ AutoOp(BenchmarkingCanvas* canvas,
+        const char op_name[],
+        const SkPaint* paint = nullptr)
+     : canvas_(canvas), op_record_(new base::DictionaryValue()) {
+   DCHECK(canvas);
+   DCHECK(op_name);
 
-    DCHECK(canvas);
-    DCHECK(op_name);
+   op_record_->SetString("cmd_string", op_name);
+   op_params_ =
+       op_record_->SetList("info", base::MakeUnique<base::ListValue>());
 
-    op_record_->SetString("cmd_string", op_name);
-    op_record_->Set("info", op_params_);
+   if (paint) {
+     this->addParam("paint", AsValue(*paint));
+     filtered_paint_ = *paint;
+   }
 
-    if (paint) {
-      this->addParam("paint", AsValue(*paint));
-      filtered_paint_ = *paint;
-    }
-
-    start_ticks_ = base::TimeTicks::Now();
+   start_ticks_ = base::TimeTicks::Now();
   }
 
   ~AutoOp() {

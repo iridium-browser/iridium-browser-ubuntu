@@ -10,6 +10,10 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "components/cryptauth/cryptauth_device_manager.h"
+#include "components/cryptauth/cryptauth_enroller.h"
+#include "components/cryptauth/cryptauth_enrollment_manager.h"
+#include "components/cryptauth/fake_cryptauth_gcm_manager.h"
+#include "components/cryptauth/fake_cryptauth_service.h"
 #include "components/cryptauth/fake_secure_message_delegate.h"
 #include "components/cryptauth/proto/cryptauth_api.pb.h"
 #include "components/cryptauth/remote_device_loader.h"
@@ -31,8 +35,35 @@ namespace {
 const char kTestUserId[] = "testUserId";
 const char kTestUserPrivateKey[] = "kTestUserPrivateKey";
 
-class TestDelegate : public TetherHostFetcher::Delegate {
+class MockCryptAuthDeviceManager : public cryptauth::CryptAuthDeviceManager {
  public:
+  ~MockCryptAuthDeviceManager() override {}
+
+  MOCK_CONST_METHOD0(GetPixelTetherHosts,
+                     std::vector<cryptauth::ExternalDeviceInfo>());
+};
+
+class MockCryptAuthEnrollmentManager
+    : public cryptauth::CryptAuthEnrollmentManager {
+ public:
+  explicit MockCryptAuthEnrollmentManager(
+      cryptauth::FakeCryptAuthGCMManager* fake_cryptauth_gcm_manager)
+      : cryptauth::CryptAuthEnrollmentManager(
+            nullptr /* clock */,
+            nullptr /* enroller_factory */,
+            nullptr /* secure_message_delegate */,
+            cryptauth::GcmDeviceInfo(),
+            fake_cryptauth_gcm_manager,
+            nullptr /* pref_service */) {}
+  ~MockCryptAuthEnrollmentManager() override {}
+
+  MOCK_CONST_METHOD0(GetUserPrivateKey, std::string());
+};
+
+class FakeCryptAuthServiceWithTracking
+    : public cryptauth::FakeCryptAuthService {
+ public:
+  // FakeCryptAuthService:
   std::unique_ptr<cryptauth::SecureMessageDelegate>
   CreateSecureMessageDelegate() override {
     cryptauth::FakeSecureMessageDelegate* delegate =
@@ -51,14 +82,6 @@ class TestDelegate : public TetherHostFetcher::Delegate {
   std::vector<cryptauth::FakeSecureMessageDelegate*> created_delegates_;
 };
 
-class MockDeviceManager : public cryptauth::CryptAuthDeviceManager {
- public:
-  ~MockDeviceManager() override {}
-
-  MOCK_CONST_METHOD0(GetTetherHosts,
-                     std::vector<cryptauth::ExternalDeviceInfo>());
-};
-
 class MockDeviceLoader : public cryptauth::RemoteDeviceLoader {
  public:
   MockDeviceLoader()
@@ -69,9 +92,9 @@ class MockDeviceLoader : public cryptauth::RemoteDeviceLoader {
             nullptr) {}
   ~MockDeviceLoader() override {}
 
-  MOCK_METHOD1(
+  MOCK_METHOD2(
       Load,
-      void(const cryptauth::RemoteDeviceLoader::RemoteDeviceCallback&));
+      void(bool, const cryptauth::RemoteDeviceLoader::RemoteDeviceCallback&));
 };
 
 std::vector<cryptauth::ExternalDeviceInfo>
@@ -94,7 +117,8 @@ class TetherHostFetcherTest : public testing::Test {
   class TestRemoteDeviceLoaderFactory
       : public cryptauth::RemoteDeviceLoader::Factory {
    public:
-    TestRemoteDeviceLoaderFactory(TetherHostFetcherTest* test) : test_(test) {}
+    explicit TestRemoteDeviceLoaderFactory(TetherHostFetcherTest* test)
+        : test_(test) {}
 
     std::unique_ptr<cryptauth::RemoteDeviceLoader> BuildInstance(
         const std::vector<cryptauth::ExternalDeviceInfo>& device_info_list,
@@ -105,19 +129,21 @@ class TetherHostFetcherTest : public testing::Test {
       EXPECT_EQ(test_->test_device_infos_.size(), device_info_list.size());
       EXPECT_EQ(std::string(kTestUserId), user_id);
       EXPECT_EQ(std::string(kTestUserPrivateKey), user_private_key);
-      test_->test_delegate_->VerifySecureMessageDelegateCreatedByFactory(
-          static_cast<cryptauth::FakeSecureMessageDelegate*>(
-              secure_message_delegate.get()));
+      test_->fake_cryptauth_service_
+          ->VerifySecureMessageDelegateCreatedByFactory(
+              static_cast<cryptauth::FakeSecureMessageDelegate*>(
+                  secure_message_delegate.get()));
 
       std::unique_ptr<MockDeviceLoader> device_loader =
           base::WrapUnique(new NiceMock<MockDeviceLoader>());
-      ON_CALL(*device_loader, Load(_))
+      ON_CALL(*device_loader, Load(false, _))
           .WillByDefault(
               Invoke(this, &TestRemoteDeviceLoaderFactory::MockLoadImpl));
       return std::move(device_loader);
     }
 
     void MockLoadImpl(
+        bool should_load_beacon_seeds,
         const cryptauth::RemoteDeviceLoader::RemoteDeviceCallback& callback) {
       callback_ = callback;
     }
@@ -141,22 +167,34 @@ class TetherHostFetcherTest : public testing::Test {
     device_list_list_.clear();
     single_device_list_.clear();
 
-    std::unique_ptr<TestDelegate> test_delegate =
-        base::WrapUnique(new TestDelegate());
-    test_delegate_ = test_delegate.get();
-
-    mock_device_manager_ = base::WrapUnique(new NiceMock<MockDeviceManager>());
-    ON_CALL(*mock_device_manager_, GetTetherHosts())
+    mock_device_manager_ =
+        base::WrapUnique(new NiceMock<MockCryptAuthDeviceManager>());
+    ON_CALL(*mock_device_manager_, GetPixelTetherHosts())
         .WillByDefault(Return(test_device_infos_));
+
+    fake_cryptauth_gcm_manager_ =
+        base::MakeUnique<cryptauth::FakeCryptAuthGCMManager>("registrationId");
+    mock_enrollment_manager_ =
+        base::WrapUnique(new NiceMock<MockCryptAuthEnrollmentManager>(
+            fake_cryptauth_gcm_manager_.get()));
+    ON_CALL(*mock_enrollment_manager_, GetUserPrivateKey())
+        .WillByDefault(Return(kTestUserPrivateKey));
+
+    fake_cryptauth_service_ =
+        base::WrapUnique(new FakeCryptAuthServiceWithTracking());
+    fake_cryptauth_service_->set_account_id(kTestUserId);
+    fake_cryptauth_service_->set_cryptauth_device_manager(
+        mock_device_manager_.get());
+    fake_cryptauth_service_->set_cryptauth_enrollment_manager(
+        mock_enrollment_manager_.get());
 
     test_device_loader_factory_ =
         base::WrapUnique(new TestRemoteDeviceLoaderFactory(this));
     cryptauth::RemoteDeviceLoader::Factory::SetInstanceForTesting(
         test_device_loader_factory_.get());
 
-    tether_host_fetcher_ = base::MakeUnique<TetherHostFetcher>(
-        std::string(kTestUserId), std::string(kTestUserPrivateKey),
-        std::move(test_delegate), mock_device_manager_.get());
+    tether_host_fetcher_ =
+        base::MakeUnique<TetherHostFetcher>(fake_cryptauth_service_.get());
   }
 
   void OnTetherHostListFetched(const cryptauth::RemoteDeviceList& device_list) {
@@ -174,8 +212,12 @@ class TetherHostFetcherTest : public testing::Test {
   std::vector<cryptauth::RemoteDeviceList> device_list_list_;
   std::vector<std::shared_ptr<cryptauth::RemoteDevice>> single_device_list_;
 
-  TestDelegate* test_delegate_;
-  std::unique_ptr<NiceMock<MockDeviceManager>> mock_device_manager_;
+  std::unique_ptr<FakeCryptAuthServiceWithTracking> fake_cryptauth_service_;
+  std::unique_ptr<cryptauth::FakeCryptAuthGCMManager>
+      fake_cryptauth_gcm_manager_;
+  std::unique_ptr<NiceMock<MockCryptAuthDeviceManager>> mock_device_manager_;
+  std::unique_ptr<NiceMock<MockCryptAuthEnrollmentManager>>
+      mock_enrollment_manager_;
   std::unique_ptr<TestRemoteDeviceLoaderFactory> test_device_loader_factory_;
 
   std::unique_ptr<TetherHostFetcher> tether_host_fetcher_;
@@ -262,4 +304,4 @@ TEST_F(TetherHostFetcherTest, TestMultipleSimultaneousRequests) {
 
 }  // namespace tether
 
-}  // namespace cryptauth
+}  // namespace chromeos

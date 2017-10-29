@@ -5,6 +5,7 @@
 #include "chrome/test/chromedriver/capabilities.h"
 
 #include <map>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -111,7 +112,7 @@ Status ParseDeviceName(const std::string& device_name,
                   status);
   }
 
-  capabilities->device_metrics.reset(device->device_metrics.release());
+  capabilities->device_metrics = std::move(device->device_metrics);
   // Don't override the user agent if blank (like for notebooks).
   if (!device->user_agent.empty())
     capabilities->switches.SetSwitch("user-agent", device->user_agent);
@@ -399,6 +400,18 @@ Status ParsePerfLoggingPrefs(const base::Value& option,
   return Status(kOk);
 }
 
+Status ParseDevToolsEventsLoggingPrefs(const base::Value& option,
+                                       Capabilities* capabilities) {
+  const base::ListValue* devtools_events_logging_prefs = nullptr;
+  if (!option.GetAsList(&devtools_events_logging_prefs))
+    return Status(kUnknownError, "must be a list");
+  if (devtools_events_logging_prefs->empty())
+    return Status(kUnknownError, "list must contain values");
+  capabilities->devtools_events_logging_prefs.reset(
+      devtools_events_logging_prefs->DeepCopy());
+  return Status(kOk);
+}
+
 Status ParseWindowTypes(const base::Value& option, Capabilities* capabilities) {
   const base::ListValue* window_types = NULL;
   if (!option.GetAsList(&window_types))
@@ -437,6 +450,8 @@ Status ParseChromeOptions(
   parser_map["extensions"] = base::Bind(&IgnoreCapability);
 
   parser_map["perfLoggingPrefs"] = base::Bind(&ParsePerfLoggingPrefs);
+  parser_map["devToolsEventsToLog"] = base::Bind(
+          &ParseDevToolsEventsLoggingPrefs);
   parser_map["windowTypes"] = base::Bind(&ParseWindowTypes);
   // Compliance is read when session is initialized and correct response is
   // sent if not parsed correctly.
@@ -474,6 +489,8 @@ Status ParseChromeOptions(
         base::Bind(&ParseString, &capabilities->minidump_path);
     parser_map["mobileEmulation"] = base::Bind(&ParseMobileEmulation);
     parser_map["prefs"] = base::Bind(&ParseDict, &capabilities->prefs);
+    parser_map["useAutomationExtension"] =
+        base::Bind(&ParseBoolean, &capabilities->use_automation_extension);
   }
 
   for (base::DictionaryValue::Iterator it(*chrome_options); !it.IsAtEnd();
@@ -614,7 +631,8 @@ Capabilities::Capabilities()
       detach(false),
       force_devtools_screenshot(true),
       page_load_strategy(PageLoadStrategy::kNormal),
-      network_emulation_enabled(false) {}
+      network_emulation_enabled(false),
+      use_automation_extension(true) {}
 
 Capabilities::~Capabilities() {}
 
@@ -628,7 +646,14 @@ bool Capabilities::IsRemoteBrowser() const {
 
 Status Capabilities::Parse(const base::DictionaryValue& desired_caps) {
   std::map<std::string, Parser> parser_map;
-  parser_map["chromeOptions"] = base::Bind(&ParseChromeOptions);
+  // goog:chromeOptions is the current spec conformance, but chromeOptions is
+  // still supported
+  if (desired_caps.GetDictionary("goog:chromeOptions", nullptr)) {
+    parser_map["goog:chromeOptions"] = base::Bind(&ParseChromeOptions);
+  } else {
+    parser_map["chromeOptions"] = base::Bind(&ParseChromeOptions);
+  }
+
   parser_map["loggingPrefs"] = base::Bind(&ParseLoggingPrefs);
   parser_map["proxy"] = base::Bind(&ParseProxy);
   parser_map["pageLoadStrategy"] = base::Bind(&ParsePageLoadStrategy);
@@ -636,7 +661,9 @@ Status Capabilities::Parse(const base::DictionaryValue& desired_caps) {
       base::Bind(&ParseUnexpectedAlertBehaviour);
   // Network emulation requires device mode, which is only enabled when
   // mobile emulation is on.
-  if (desired_caps.GetDictionary("chromeOptions.mobileEmulation", nullptr)) {
+  if (desired_caps.GetDictionary("goog:chromeOptions.mobileEmulation",
+                                 nullptr) ||
+      desired_caps.GetDictionary("chromeOptions.mobileEmulation", nullptr)) {
     parser_map["networkConnectionEnabled"] =
         base::Bind(&ParseBoolean, &network_emulation_enabled);
   }
@@ -656,10 +683,23 @@ Status Capabilities::Parse(const base::DictionaryValue& desired_caps) {
       WebDriverLog::kPerformanceType);
   if (iter == logging_prefs.end() || iter->second == Log::kOff) {
     const base::DictionaryValue* chrome_options = NULL;
-    if (desired_caps.GetDictionary("chromeOptions", &chrome_options) &&
+    if ((desired_caps.GetDictionary("goog:chromeOptions", &chrome_options) ||
+         desired_caps.GetDictionary("chromeOptions", &chrome_options)) &&
         chrome_options->HasKey("perfLoggingPrefs")) {
       return Status(kUnknownError, "perfLoggingPrefs specified, "
                     "but performance logging was not enabled");
+    }
+  }
+  LoggingPrefs::const_iterator dt_events_logging_iter = logging_prefs.find(
+      WebDriverLog::kDevToolsType);
+  if (dt_events_logging_iter == logging_prefs.end()
+      || dt_events_logging_iter->second == Log::kOff) {
+    const base::DictionaryValue* chrome_options = NULL;
+    if ((desired_caps.GetDictionary("goog:chromeOptions", &chrome_options) ||
+         desired_caps.GetDictionary("chromeOptions", &chrome_options)) &&
+        chrome_options->HasKey("devToolsEventsToLog")) {
+      return Status(kUnknownError, "devToolsEventsToLog specified, "
+                    "but devtools events logging was not enabled");
     }
   }
   return Status(kOk);

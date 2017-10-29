@@ -33,10 +33,11 @@
 
 #include "core/page/Page.h"
 #include "modules/ModulesExport.h"
+#include "modules/quota/StorageQuotaClient.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
+#include "platform/wtf/Forward.h"
 #include "public/platform/WebStorageQuotaType.h"
-#include "wtf/Forward.h"
 
 namespace blink {
 
@@ -45,24 +46,33 @@ class Page;
 class StorageErrorCallback;
 class StorageQuotaCallback;
 
-class StorageQuotaClient : public Supplement<Page> {
+class MODULES_EXPORT StorageQuotaClient
+    : public GarbageCollectedFinalized<StorageQuotaClient>,
+      public Supplement<Page> {
   WTF_MAKE_NONCOPYABLE(StorageQuotaClient);
+  USING_GARBAGE_COLLECTED_MIXIN(StorageQuotaClient);
 
  public:
-  StorageQuotaClient() {}
-  virtual ~StorageQuotaClient() {}
+  static StorageQuotaClient* Create() { return new StorageQuotaClient(); }
 
-  virtual void requestQuota(ScriptState*,
-                            WebStorageQuotaType,
-                            unsigned long long newQuotaInBytes,
-                            StorageQuotaCallback*,
-                            StorageErrorCallback*) = 0;
+  virtual ~StorageQuotaClient();
 
-  static const char* supplementName();
-  static StorageQuotaClient* from(ExecutionContext*);
+  void RequestQuota(ScriptState*,
+                    WebStorageQuotaType,
+                    unsigned long long new_quota_in_bytes,
+                    StorageQuotaCallback*,
+                    StorageErrorCallback*);
+
+  static const char* SupplementName();
+  static StorageQuotaClient* From(ExecutionContext*);
+
+  DEFINE_INLINE_VIRTUAL_TRACE() { Supplement<Page>::Trace(visitor); }
+
+ private:
+  StorageQuotaClient();
 };
 
-MODULES_EXPORT void provideStorageQuotaClientTo(Page&, StorageQuotaClient*);
+MODULES_EXPORT void ProvideStorageQuotaClientTo(Page&, StorageQuotaClient*);
 
 }  // namespace blink
 

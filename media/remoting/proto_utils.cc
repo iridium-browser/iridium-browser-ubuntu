@@ -11,6 +11,7 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "media/base/encryption_scheme.h"
+#include "media/base/timestamp_constants.h"
 #include "media/remoting/proto_enum_utils.h"
 
 namespace media {
@@ -88,11 +89,6 @@ scoped_refptr<DecoderBuffer> ConvertProtoToDecoderBuffer(
         DecoderBuffer::DiscardPadding(front_discard, back_discard));
   }
 
-  if (buffer_message.has_splice_timestamp_usec()) {
-    buffer->set_splice_timestamp(base::TimeDelta::FromMicroseconds(
-        buffer_message.splice_timestamp_usec()));
-  }
-
   if (buffer_message.has_side_data()) {
     buffer->CopySideDataFrom(
         reinterpret_cast<const uint8_t*>(buffer_message.side_data().data()),
@@ -140,8 +136,6 @@ void ConvertDecoderBufferToProto(const DecoderBuffer& decoder_buffer,
       decoder_buffer.discard_padding().first.InMicroseconds());
   buffer_message->set_back_discard_usec(
       decoder_buffer.discard_padding().second.InMicroseconds());
-  buffer_message->set_splice_timestamp_usec(
-      decoder_buffer.splice_timestamp().InMicroseconds());
 
   if (decoder_buffer.side_data_size()) {
     buffer_message->set_side_data(decoder_buffer.side_data(),
@@ -353,12 +347,19 @@ void ConvertProtoToPipelineStatistics(
   // HACK: Set the following to prevent "disable video when hidden" logic in
   // media::blink::WebMediaPlayerImpl.
   stats->video_keyframe_distance_average = base::TimeDelta::Max();
+
+  // This field was added after the initial message definition. Check that
+  // sender provided the value.
+  if (stats_message.has_video_frame_duration_average_usec()) {
+    stats->video_frame_duration_average = base::TimeDelta::FromMicroseconds(
+        stats_message.video_frame_duration_average_usec());
+  }
 }
 
 void ConvertCdmKeyInfoToProto(
     const CdmKeysInfo& keys_information,
     pb::CdmClientOnSessionKeysChange* key_change_message) {
-  for (auto* info : keys_information) {
+  for (auto& info : keys_information) {
     pb::CdmKeyInformation* key = key_change_message->add_key_information();
     key->set_key_id(info->key_id.data(), info->key_id.size());
     key->set_status(ToProtoCdmKeyInformation(info->status).value());

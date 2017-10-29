@@ -243,14 +243,12 @@ class KioskAppManagerTest : public InProcessBrowserTest {
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
-
     // Initialize fake_cws_ to setup web store gallery.
     fake_cws_->Init(embedded_test_server());
   }
 
   void SetUpOnMainThread() override {
-    InProcessBrowserTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
 
     // Start the accept thread as the sandbox host process has already been
     // spawned.
@@ -262,12 +260,6 @@ class KioskAppManagerTest : public InProcessBrowserTest {
   }
 
   void TearDownOnMainThread() override { settings_helper_.RestoreProvider(); }
-
-  void SetUpInProcessBrowserTestFixture() override {
-    InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
-
-    host_resolver()->AddRule("*", "127.0.0.1");
-  }
 
   std::string GetAppIds() const {
     KioskAppManager::Apps apps;
@@ -325,7 +317,7 @@ class KioskAppManagerTest : public InProcessBrowserTest {
     PrefService* local_state = g_browser_process->local_state();
     DictionaryPrefUpdate dict_update(local_state,
                                      KioskAppManager::kKioskDictionaryName);
-    dict_update->Set(KioskAppManager::kKeyApps, apps_dict.release());
+    dict_update->Set(KioskAppDataBase::kKeyApps, std::move(apps_dict));
 
     // Make the app appear in device settings.
     base::ListValue device_local_accounts;
@@ -542,7 +534,7 @@ IN_PROC_BROWSER_TEST_F(KioskAppManagerTest, ClearAppData) {
   const base::DictionaryValue* dict =
       local_state->GetDictionary(KioskAppManager::kKioskDictionaryName);
   const base::DictionaryValue* apps_dict;
-  EXPECT_TRUE(dict->GetDictionary(KioskAppManager::kKeyApps, &apps_dict));
+  EXPECT_TRUE(dict->GetDictionary(KioskAppDataBase::kKeyApps, &apps_dict));
   EXPECT_TRUE(apps_dict->HasKey("app_1"));
 
   manager()->ClearAppData("app_1");

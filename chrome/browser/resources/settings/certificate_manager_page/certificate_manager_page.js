@@ -21,25 +21,33 @@ Polymer({
     /** @type {!Array<!Certificate>} */
     personalCerts: {
       type: Array,
-      value: function() { return []; },
+      value: function() {
+        return [];
+      },
     },
 
     /** @type {!Array<!Certificate>} */
     serverCerts: {
       type: Array,
-      value: function() { return []; },
+      value: function() {
+        return [];
+      },
     },
 
     /** @type {!Array<!Certificate>} */
     caCerts: {
       type: Array,
-      value: function() { return []; },
+      value: function() {
+        return [];
+      },
     },
 
     /** @type {!Array<!Certificate>} */
     otherCerts: {
       type: Array,
-      value: function() { return []; },
+      value: function() {
+        return [];
+      },
     },
 
     /** @private */
@@ -82,6 +90,13 @@ Polymer({
      * @private {null|!CertificatesError|!CertificatesImportError}
      */
     errorDialogModel_: Object,
+
+    /**
+     * The element to return focus to, when the currently shown dialog is
+     * closed.
+     * @private {?HTMLElement}
+     */
+    activeDialogAnchor_: Object,
   },
 
   /** @override */
@@ -110,25 +125,25 @@ Polymer({
         if (event.detail.certificateType == CertificateType.PERSONAL) {
           this.openDialog_(
               'settings-certificate-password-decryption-dialog',
-              'showPasswordDecryptionDialog_');
-        } else if (event.detail.certificateType ==
-            CertificateType.CA) {
+              'showPasswordDecryptionDialog_', event.detail.anchor);
+        } else if (event.detail.certificateType == CertificateType.CA) {
           this.openDialog_(
-              'settings-ca-trust-edit-dialog', 'showCaTrustEditDialog_');
+              'settings-ca-trust-edit-dialog', 'showCaTrustEditDialog_',
+              event.detail.anchor);
         }
       } else {
         if (event.detail.action == CertificateAction.EDIT) {
           this.openDialog_(
-              'settings-ca-trust-edit-dialog', 'showCaTrustEditDialog_');
+              'settings-ca-trust-edit-dialog', 'showCaTrustEditDialog_',
+              event.detail.anchor);
         } else if (event.detail.action == CertificateAction.DELETE) {
           this.openDialog_(
               'settings-certificate-delete-confirmation-dialog',
-              'showDeleteConfirmationDialog_');
-        } else if (event.detail.action ==
-            CertificateAction.EXPORT_PERSONAL) {
+              'showDeleteConfirmationDialog_', event.detail.anchor);
+        } else if (event.detail.action == CertificateAction.EXPORT_PERSONAL) {
           this.openDialog_(
               'settings-certificate-password-encryption-dialog',
-              'showPasswordEncryptionDialog_');
+              'showPasswordEncryptionDialog_', event.detail.anchor);
         }
       }
 
@@ -136,10 +151,11 @@ Polymer({
     }.bind(this));
 
     this.addEventListener('certificates-error', function(event) {
-      this.errorDialogModel_ = event.detail;
+      var detail = /** @type {!CertificatesErrorEventDetail} */ (event.detail);
+      this.errorDialogModel_ = detail.error;
       this.openDialog_(
-          'settings-certificates-error-dialog',
-          'showErrorDialog_');
+          'settings-certificates-error-dialog', 'showErrorDialog_',
+          detail.anchor);
       event.stopPropagation();
     }.bind(this));
   },
@@ -152,14 +168,22 @@ Polymer({
    * @param {string} dialogTagName The tag name of the dialog to be shown.
    * @param {string} domIfBooleanName The name of the boolean variable
    *     corresponding to the dialog.
+   * @param {?HTMLElement} anchor The element to focus when the dialog is
+   *     closed. If null, the previous anchor element should be reused. This
+   *     happens when a 'settings-certificates-error-dialog' is opened,
+   *     which when closed should focus the anchor of the previous dialog (the
+   *     one that generated the error).
    * @private
    */
-  openDialog_: function(dialogTagName, domIfBooleanName) {
+  openDialog_: function(dialogTagName, domIfBooleanName, anchor) {
+    if (anchor)
+      this.activeDialogAnchor_ = anchor;
     this.set(domIfBooleanName, true);
     this.async(function() {
       var dialog = this.$$(dialogTagName);
       dialog.addEventListener('close', function() {
         this.set(domIfBooleanName, false);
+        cr.ui.focusWithoutInk(assert(this.activeDialogAnchor_));
       }.bind(this));
     }.bind(this));
   },

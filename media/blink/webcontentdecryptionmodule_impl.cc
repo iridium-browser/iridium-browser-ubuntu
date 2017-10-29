@@ -25,21 +25,58 @@
 
 namespace media {
 
+namespace {
+
+bool ConvertHdcpVersion(const blink::WebString& hdcp_version_string,
+                        HdcpVersion* hdcp_version) {
+  if (!hdcp_version_string.ContainsOnlyASCII())
+    return false;
+
+  std::string hdcp_version_ascii = hdcp_version_string.Ascii();
+
+  // TODO(xhwang): This implementation assumes exact string match. Update this
+  // when we have the string format speced in the spec/registry.
+  if (hdcp_version_ascii.empty())
+    *hdcp_version = HdcpVersion::kHdcpVersionNone;
+  else if (hdcp_version_ascii == "hdcp-1.0")
+    *hdcp_version = HdcpVersion::kHdcpVersion1_0;
+  else if (hdcp_version_ascii == "hdcp-1.1")
+    *hdcp_version = HdcpVersion::kHdcpVersion1_1;
+  else if (hdcp_version_ascii == "hdcp-1.2")
+    *hdcp_version = HdcpVersion::kHdcpVersion1_2;
+  else if (hdcp_version_ascii == "hdcp-1.3")
+    *hdcp_version = HdcpVersion::kHdcpVersion1_3;
+  else if (hdcp_version_ascii == "hdcp-1.4")
+    *hdcp_version = HdcpVersion::kHdcpVersion1_4;
+  else if (hdcp_version_ascii == "hdcp-2.0")
+    *hdcp_version = HdcpVersion::kHdcpVersion2_0;
+  else if (hdcp_version_ascii == "hdcp-2.1")
+    *hdcp_version = HdcpVersion::kHdcpVersion2_1;
+  else if (hdcp_version_ascii == "hdcp-2.2")
+    *hdcp_version = HdcpVersion::kHdcpVersion2_2;
+  else
+    return false;
+
+  return true;
+}
+
+}  // namespace
+
 void WebContentDecryptionModuleImpl::Create(
     media::CdmFactory* cdm_factory,
     const base::string16& key_system,
     const blink::WebSecurityOrigin& security_origin,
     const CdmConfig& cdm_config,
     std::unique_ptr<blink::WebContentDecryptionModuleResult> result) {
-  DCHECK(!security_origin.isNull());
+  DCHECK(!security_origin.IsNull());
   DCHECK(!key_system.empty());
 
   // TODO(ddorwin): Guard against this in supported types check and remove this.
   // Chromium only supports ASCII key systems.
   if (!base::IsStringASCII(key_system)) {
     NOTREACHED();
-    result->completeWithError(
-        blink::WebContentDecryptionModuleExceptionNotSupportedError, 0,
+    result->CompleteWithError(
+        blink::kWebContentDecryptionModuleExceptionNotSupportedError, 0,
         "Invalid keysystem.");
     return;
   }
@@ -50,16 +87,16 @@ void WebContentDecryptionModuleImpl::Create(
           key_system_ascii)) {
     std::string message =
         "Keysystem '" + key_system_ascii + "' is not supported.";
-    result->completeWithError(
-        blink::WebContentDecryptionModuleExceptionNotSupportedError, 0,
-        blink::WebString::fromUTF8(message));
+    result->CompleteWithError(
+        blink::kWebContentDecryptionModuleExceptionNotSupportedError, 0,
+        blink::WebString::FromUTF8(message));
     return;
   }
 
   // If unique security origin, don't try to create the CDM.
-  if (security_origin.isUnique() || security_origin.toString() == "null") {
-    result->completeWithError(
-        blink::WebContentDecryptionModuleExceptionNotSupportedError, 0,
+  if (security_origin.IsUnique() || security_origin.ToString() == "null") {
+    result->CompleteWithError(
+        blink::kWebContentDecryptionModuleExceptionNotSupportedError, 0,
         "EME use is not allowed on unique origins.");
     return;
   }
@@ -83,13 +120,12 @@ WebContentDecryptionModuleImpl::WebContentDecryptionModuleImpl(
 WebContentDecryptionModuleImpl::~WebContentDecryptionModuleImpl() {
 }
 
-// The caller owns the created session.
-blink::WebContentDecryptionModuleSession*
-WebContentDecryptionModuleImpl::createSession() {
+std::unique_ptr<blink::WebContentDecryptionModuleSession>
+WebContentDecryptionModuleImpl::CreateSession() {
   return adapter_->CreateSession();
 }
 
-void WebContentDecryptionModuleImpl::setServerCertificate(
+void WebContentDecryptionModuleImpl::SetServerCertificate(
     const uint8_t* server_certificate,
     size_t server_certificate_length,
     blink::WebContentDecryptionModuleResult result) {
@@ -99,6 +135,24 @@ void WebContentDecryptionModuleImpl::setServerCertificate(
                            server_certificate + server_certificate_length),
       std::unique_ptr<SimpleCdmPromise>(
           new CdmResultPromise<>(result, std::string())));
+}
+
+void WebContentDecryptionModuleImpl::GetStatusForPolicy(
+    const blink::WebString& min_hdcp_version_string,
+    blink::WebContentDecryptionModuleResult result) {
+  HdcpVersion min_hdcp_version;
+  if (!ConvertHdcpVersion(min_hdcp_version_string, &min_hdcp_version)) {
+    result.CompleteWithError(
+        blink::kWebContentDecryptionModuleExceptionTypeError, 0,
+        "Invalid HDCP version");
+    return;
+  }
+
+  // TODO(xhwang): Enable UMA reporting for GetStatusForPolicy().
+  adapter_->GetStatusForPolicy(
+      min_hdcp_version, std::unique_ptr<KeyStatusCdmPromise>(
+                            new CdmResultPromise<CdmKeyInformation::KeyStatus>(
+                                result, std::string())));
 }
 
 scoped_refptr<ContentDecryptionModule>

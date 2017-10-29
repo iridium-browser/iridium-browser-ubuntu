@@ -6,8 +6,8 @@
 
 #include <memory>
 #include "core/dom/DOMNodeIds.h"
-#include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutView.h"
@@ -17,176 +17,184 @@
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCache.h"
+#include "core/paint/FindPaintOffsetAndVisualRectNeedingUpdate.h"
 #include "core/paint/FindPropertiesNeedingUpdate.h"
 #include "core/paint/ObjectPaintProperties.h"
 #include "core/paint/PaintLayer.h"
 #include "core/paint/SVGRootPainter.h"
 #include "platform/transforms/TransformationMatrix.h"
-#include "wtf/PtrUtil.h"
+#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
-PaintPropertyTreeBuilderContext
-PaintPropertyTreeBuilder::setupInitialContext() {
-  PaintPropertyTreeBuilderContext context;
-  context.current.clip = context.absolutePosition.clip =
-      context.fixedPosition.clip = ClipPaintPropertyNode::root();
-  context.currentEffect = EffectPaintPropertyNode::root();
-  context.inputClipOfCurrentEffect = ClipPaintPropertyNode::root();
-  context.current.transform = context.absolutePosition.transform =
-      context.fixedPosition.transform = TransformPaintPropertyNode::root();
-  context.current.scroll = context.absolutePosition.scroll =
-      context.fixedPosition.scroll = ScrollPaintPropertyNode::root();
-  return context;
+PaintPropertyTreeBuilderFragmentContext::
+    PaintPropertyTreeBuilderFragmentContext()
+    : current_effect(EffectPaintPropertyNode::Root()),
+      input_clip_of_current_effect(ClipPaintPropertyNode::Root()) {
+  current.clip = absolute_position.clip = fixed_position.clip =
+      ClipPaintPropertyNode::Root();
+  current.transform = absolute_position.transform = fixed_position.transform =
+      TransformPaintPropertyNode::Root();
+  current.scroll = absolute_position.scroll = fixed_position.scroll =
+      ScrollPaintPropertyNode::Root();
 }
 
 // True if a new property was created, false if an existing one was updated.
-static bool updatePreTranslation(
-    FrameView& frameView,
+static bool UpdatePreTranslation(
+    LocalFrameView& frame_view,
     PassRefPtr<const TransformPaintPropertyNode> parent,
     const TransformationMatrix& matrix,
     const FloatPoint3D& origin) {
-  DCHECK(!RuntimeEnabledFeatures::rootLayerScrollingEnabled());
-  if (auto* existingPreTranslation = frameView.preTranslation()) {
-    existingPreTranslation->update(std::move(parent), matrix, origin);
+  DCHECK(!RuntimeEnabledFeatures::RootLayerScrollingEnabled());
+  if (auto* existing_pre_translation = frame_view.PreTranslation()) {
+    existing_pre_translation->Update(std::move(parent), matrix, origin);
     return false;
   }
-  frameView.setPreTranslation(
-      TransformPaintPropertyNode::create(std::move(parent), matrix, origin));
+  frame_view.SetPreTranslation(
+      TransformPaintPropertyNode::Create(std::move(parent), matrix, origin));
   return true;
 }
 
 // True if a new property was created, false if an existing one was updated.
-static bool updateContentClip(
-    FrameView& frameView,
+static bool UpdateContentClip(
+    LocalFrameView& frame_view,
     PassRefPtr<const ClipPaintPropertyNode> parent,
-    PassRefPtr<const TransformPaintPropertyNode> localTransformSpace,
-    const FloatRoundedRect& clipRect) {
-  DCHECK(!RuntimeEnabledFeatures::rootLayerScrollingEnabled());
-  if (auto* existingContentClip = frameView.contentClip()) {
-    existingContentClip->update(std::move(parent),
-                                std::move(localTransformSpace), clipRect);
+    PassRefPtr<const TransformPaintPropertyNode> local_transform_space,
+    const FloatRoundedRect& clip_rect,
+    bool& clip_changed) {
+  DCHECK(!RuntimeEnabledFeatures::RootLayerScrollingEnabled());
+  if (auto* existing_content_clip = frame_view.ContentClip()) {
+    if (existing_content_clip->ClipRect() != clip_rect)
+      clip_changed = true;
+    existing_content_clip->Update(std::move(parent),
+                                  std::move(local_transform_space), clip_rect);
     return false;
   }
-  frameView.setContentClip(ClipPaintPropertyNode::create(
-      std::move(parent), std::move(localTransformSpace), clipRect));
+  frame_view.SetContentClip(ClipPaintPropertyNode::Create(
+      std::move(parent), std::move(local_transform_space), clip_rect));
+  clip_changed = true;
   return true;
-}
-
-static CompositorElementId createDomNodeBasedCompositorElementId(
-    const LayoutObject& object) {
-  return createCompositorElementId(DOMNodeIds::idForNode(object.node()),
-                                   CompositorSubElementId::Primary);
 }
 
 // True if a new property was created or a main thread scrolling reason changed
 // (which can affect descendants), false if an existing one was updated.
-static bool updateScrollTranslation(
-    FrameView& frameView,
+static bool UpdateScrollTranslation(
+    LocalFrameView& frame_view,
     PassRefPtr<const TransformPaintPropertyNode> parent,
     const TransformationMatrix& matrix,
     const FloatPoint3D& origin,
-    PassRefPtr<const ScrollPaintPropertyNode> scrollParent,
+    PassRefPtr<const ScrollPaintPropertyNode> scroll_parent,
     const IntSize& clip,
     const IntSize& bounds,
-    bool userScrollableHorizontal,
-    bool userScrollableVertical,
-    MainThreadScrollingReasons mainThreadScrollingReasons,
-    WebLayerScrollClient* scrollClient) {
-  DCHECK(!RuntimeEnabledFeatures::rootLayerScrollingEnabled());
-  CompositorElementId compositorElementId =
-      createDomNodeBasedCompositorElementId(*frameView.layoutView());
-  if (auto* existingScrollTranslation = frameView.scrollTranslation()) {
-    auto existingReasons =
-        existingScrollTranslation->scrollNode()->mainThreadScrollingReasons();
-    existingScrollTranslation->updateScrollTranslation(
-        std::move(parent), matrix, origin, false, 0, CompositingReasonNone,
-        compositorElementId, std::move(scrollParent), clip, bounds,
-        userScrollableHorizontal, userScrollableVertical,
-        mainThreadScrollingReasons, scrollClient);
-    return existingReasons != mainThreadScrollingReasons;
+    bool user_scrollable_horizontal,
+    bool user_scrollable_vertical,
+    MainThreadScrollingReasons main_thread_scrolling_reasons,
+    WebLayerScrollClient* scroll_client) {
+  DCHECK(!RuntimeEnabledFeatures::RootLayerScrollingEnabled());
+  if (auto* existing_scroll_translation = frame_view.ScrollTranslation()) {
+    auto existing_reasons = existing_scroll_translation->ScrollNode()
+                                ->GetMainThreadScrollingReasons();
+    existing_scroll_translation->UpdateScrollTranslation(
+        std::move(parent), matrix, origin, false, 0, kCompositingReasonNone,
+        CompositorElementIdFromLayoutObjectId(
+            frame_view.GetLayoutView()->UniqueId(),
+            CompositorElementIdNamespace::kScrollTranslation),
+        std::move(scroll_parent), clip, bounds, user_scrollable_horizontal,
+        user_scrollable_vertical, main_thread_scrolling_reasons, scroll_client);
+    return existing_reasons != main_thread_scrolling_reasons;
   }
-  frameView.setScrollTranslation(
-      TransformPaintPropertyNode::createScrollTranslation(
-          std::move(parent), matrix, origin, false, 0, CompositingReasonNone,
-          compositorElementId, std::move(scrollParent), clip, bounds,
-          userScrollableHorizontal, userScrollableVertical,
-          mainThreadScrollingReasons, scrollClient));
+  frame_view.SetScrollTranslation(
+      TransformPaintPropertyNode::CreateScrollTranslation(
+          std::move(parent), matrix, origin, false, 0, kCompositingReasonNone,
+          CompositorElementIdFromLayoutObjectId(
+              frame_view.GetLayoutView()->UniqueId(),
+              CompositorElementIdNamespace::kScrollTranslation),
+          std::move(scroll_parent), clip, bounds, user_scrollable_horizontal,
+          user_scrollable_vertical, main_thread_scrolling_reasons,
+          scroll_client));
   return true;
 }
 
-static MainThreadScrollingReasons mainThreadScrollingReasons(
-    const FrameView& frameView,
-    MainThreadScrollingReasons ancestorReasons) {
-  auto reasons = ancestorReasons;
-  if (!frameView.frame().settings()->getThreadedScrollingEnabled())
+static MainThreadScrollingReasons GetMainThreadScrollingReasons(
+    const LocalFrameView& frame_view,
+    MainThreadScrollingReasons ancestor_reasons) {
+  auto reasons = ancestor_reasons;
+  if (!frame_view.GetFrame().GetSettings()->GetThreadedScrollingEnabled())
     reasons |= MainThreadScrollingReason::kThreadedScrollingDisabled;
-  if (frameView.hasBackgroundAttachmentFixedObjects())
+  if (frame_view.HasBackgroundAttachmentFixedObjects())
     reasons |= MainThreadScrollingReason::kHasBackgroundAttachmentFixedObjects;
   return reasons;
 }
 
-void PaintPropertyTreeBuilder::updateProperties(
-    FrameView& frameView,
-    PaintPropertyTreeBuilderContext& context) {
-  if (RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
+void PaintPropertyTreeBuilder::UpdateProperties(
+    LocalFrameView& frame_view,
+    PaintPropertyTreeBuilderContext& full_context) {
+  if (full_context.fragments.IsEmpty())
+    full_context.fragments.push_back(PaintPropertyTreeBuilderFragmentContext());
+
+  PaintPropertyTreeBuilderFragmentContext& context = full_context.fragments[0];
+  if (RuntimeEnabledFeatures::RootLayerScrollingEnabled()) {
     // With root layer scrolling, the LayoutView (a LayoutObject) properties are
     // updated like other objects (see updatePropertiesAndContextForSelf and
     // updatePropertiesAndContextForChildren) instead of needing LayoutView-
     // specific property updates here.
-    context.current.paintOffset.moveBy(frameView.location());
-    context.current.renderingContextId = 0;
-    context.current.shouldFlattenInheritedTransform = true;
-    context.absolutePosition = context.current;
-    context.containerForAbsolutePosition = nullptr;
-    context.fixedPosition = context.current;
+    context.current.paint_offset.MoveBy(frame_view.Location());
+    context.current.rendering_context_id = 0;
+    context.current.should_flatten_inherited_transform = true;
+    context.absolute_position = context.current;
+    full_context.container_for_absolute_position = nullptr;
+    context.fixed_position = context.current;
     return;
   }
 
 #if DCHECK_IS_ON()
-  FindFrameViewPropertiesNeedingUpdateScope checkScope(&frameView, context);
+  FindFrameViewPropertiesNeedingUpdateScope check_scope(
+      &frame_view, full_context.is_actually_needed);
 #endif
 
-  if (frameView.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    TransformationMatrix frameTranslate;
-    frameTranslate.translate(frameView.x() + context.current.paintOffset.x(),
-                             frameView.y() + context.current.paintOffset.y());
-    context.forceSubtreeUpdate |= updatePreTranslation(
-        frameView, context.current.transform, frameTranslate, FloatPoint3D());
+  if (frame_view.NeedsPaintPropertyUpdate() ||
+      full_context.force_subtree_update) {
+    TransformationMatrix frame_translate;
+    frame_translate.Translate(
+        frame_view.X() + context.current.paint_offset.X(),
+        frame_view.Y() + context.current.paint_offset.Y());
+    full_context.force_subtree_update |= UpdatePreTranslation(
+        frame_view, context.current.transform, frame_translate, FloatPoint3D());
 
-    FloatRoundedRect contentClip(
-        IntRect(IntPoint(), frameView.visibleContentSize()));
-    context.forceSubtreeUpdate |=
-        updateContentClip(frameView, context.current.clip,
-                          frameView.preTranslation(), contentClip);
+    FloatRoundedRect content_clip(
+        IntRect(IntPoint(), frame_view.VisibleContentSize()));
+    full_context.force_subtree_update |= UpdateContentClip(
+        frame_view, context.current.clip, frame_view.PreTranslation(),
+        content_clip, full_context.clip_changed);
 
-    ScrollOffset scrollOffset = frameView.getScrollOffset();
-    if (frameView.isScrollable() || !scrollOffset.isZero()) {
-      TransformationMatrix frameScroll;
-      frameScroll.translate(-scrollOffset.width(), -scrollOffset.height());
+    ScrollOffset scroll_offset = frame_view.GetScrollOffset();
+    if (frame_view.IsScrollable() || !scroll_offset.IsZero()) {
+      TransformationMatrix frame_scroll;
+      frame_scroll.Translate(-scroll_offset.Width(), -scroll_offset.Height());
 
-      IntSize scrollClip = frameView.visibleContentSize();
-      IntSize scrollBounds = frameView.contentsSize();
-      bool userScrollableHorizontal =
-          frameView.userInputScrollable(HorizontalScrollbar);
-      bool userScrollableVertical =
-          frameView.userInputScrollable(VerticalScrollbar);
+      IntSize scroll_clip = frame_view.VisibleContentSize();
+      IntSize scroll_bounds = frame_view.ContentsSize();
+      bool user_scrollable_horizontal =
+          frame_view.UserInputScrollable(kHorizontalScrollbar);
+      bool user_scrollable_vertical =
+          frame_view.UserInputScrollable(kVerticalScrollbar);
 
-      auto ancestorReasons =
-          context.current.scroll->mainThreadScrollingReasons();
-      auto reasons = mainThreadScrollingReasons(frameView, ancestorReasons);
+      auto ancestor_reasons =
+          context.current.scroll->GetMainThreadScrollingReasons();
+      auto reasons =
+          GetMainThreadScrollingReasons(frame_view, ancestor_reasons);
 
-      context.forceSubtreeUpdate |= updateScrollTranslation(
-          frameView, frameView.preTranslation(), frameScroll, FloatPoint3D(),
-          context.current.scroll, scrollClip, scrollBounds,
-          userScrollableHorizontal, userScrollableVertical, reasons,
-          frameView.getScrollableArea());
+      full_context.force_subtree_update |= UpdateScrollTranslation(
+          frame_view, frame_view.PreTranslation(), frame_scroll, FloatPoint3D(),
+          context.current.scroll, scroll_clip, scroll_bounds,
+          user_scrollable_horizontal, user_scrollable_vertical, reasons,
+          frame_view.GetScrollableArea());
     } else {
-      if (frameView.scrollTranslation()) {
+      if (frame_view.ScrollTranslation()) {
         // Ensure pre-existing properties are cleared if there is no scrolling.
-        frameView.setScrollTranslation(nullptr);
+        frame_view.SetScrollTranslation(nullptr);
         // Rebuild all descendant properties because a property was removed.
-        context.forceSubtreeUpdate = true;
+        full_context.force_subtree_update = true;
       }
     }
   }
@@ -194,941 +202,1118 @@ void PaintPropertyTreeBuilder::updateProperties(
   // Initialize the context for current, absolute and fixed position cases.
   // They are the same, except that scroll translation does not apply to
   // fixed position descendants.
-  const auto* fixedTransformNode = frameView.preTranslation()
-                                       ? frameView.preTranslation()
-                                       : context.current.transform;
-  auto* fixedScrollNode = context.current.scroll;
-  DCHECK(frameView.preTranslation());
-  context.current.transform = frameView.preTranslation();
-  DCHECK(frameView.contentClip());
-  context.current.clip = frameView.contentClip();
-  if (const auto* scrollTranslation = frameView.scrollTranslation()) {
-    context.current.transform = scrollTranslation;
-    context.current.scroll = scrollTranslation->scrollNode();
+  const auto* fixed_transform_node = frame_view.PreTranslation()
+                                         ? frame_view.PreTranslation()
+                                         : context.current.transform;
+  auto* fixed_scroll_node = context.current.scroll;
+  DCHECK(frame_view.PreTranslation());
+  context.current.transform = frame_view.PreTranslation();
+  DCHECK(frame_view.ContentClip());
+  context.current.clip = frame_view.ContentClip();
+  if (const auto* scroll_translation = frame_view.ScrollTranslation()) {
+    context.current.transform = scroll_translation;
+    context.current.scroll = scroll_translation->ScrollNode();
   }
-  context.current.paintOffset = LayoutPoint();
-  context.current.renderingContextId = 0;
-  context.current.shouldFlattenInheritedTransform = true;
-  context.absolutePosition = context.current;
-  context.containerForAbsolutePosition = nullptr;
-  context.fixedPosition = context.current;
-  context.fixedPosition.transform = fixedTransformNode;
-  context.fixedPosition.scroll = fixedScrollNode;
+  context.current.paint_offset = LayoutPoint();
+  context.current.rendering_context_id = 0;
+  context.current.should_flatten_inherited_transform = true;
+  context.absolute_position = context.current;
+  full_context.container_for_absolute_position = nullptr;
+  context.fixed_position = context.current;
+  context.fixed_position.transform = fixed_transform_node;
+  context.fixed_position.scroll = fixed_scroll_node;
 
-  std::unique_ptr<PropertyTreeState> contentsState(new PropertyTreeState(
-      context.current.transform, context.current.clip, context.currentEffect));
-  frameView.setTotalPropertyTreeStateForContents(std::move(contentsState));
+  std::unique_ptr<PropertyTreeState> contents_state(new PropertyTreeState(
+      context.current.transform, context.current.clip, context.current_effect));
+  frame_view.SetTotalPropertyTreeStateForContents(std::move(contents_state));
 }
 
-void PaintPropertyTreeBuilder::updatePaintOffsetTranslation(
-    const LayoutBoxModelObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  bool usesPaintOffsetTranslation = false;
-  if (RuntimeEnabledFeatures::rootLayerScrollingEnabled() &&
-      object.isLayoutView()) {
+static bool NeedsPaintOffsetTranslation(const LayoutObject& object) {
+  if (!object.IsBoxModelObject())
+    return false;
+  const LayoutBoxModelObject& box_model = ToLayoutBoxModelObject(object);
+  if (RuntimeEnabledFeatures::RootLayerScrollingEnabled() &&
+      box_model.IsLayoutView()) {
     // Root layer scrolling always creates a translation node for LayoutView to
     // ensure fixed and absolute contexts use the correct transform space.
-    usesPaintOffsetTranslation = true;
-  } else if (object.hasLayer() &&
-             context.current.paintOffset != LayoutPoint() &&
-             object.layer()->paintsWithTransform(
-                 GlobalPaintFlattenCompositingLayers)) {
-    usesPaintOffsetTranslation = true;
+    return true;
   }
-
-  if (!usesPaintOffsetTranslation) {
-    if (auto* properties = object.getMutableForPainting().paintProperties())
-      context.forceSubtreeUpdate |= properties->clearPaintOffsetTranslation();
-    return;
+  if (box_model.HasLayer() && box_model.Layer()->PaintsWithTransform(
+                                  kGlobalPaintFlattenCompositingLayers)) {
+    return true;
   }
+  return false;
+}
 
-  // We should use the same subpixel paint offset values for snapping
-  // regardless of whether a transform is present. If there is a transform
-  // we round the paint offset but keep around the residual fractional
-  // component for the transformed content to paint with.  In spv1 this was
-  // called "subpixel accumulation". For more information, see
-  // PaintLayer::subpixelAccumulation() and
-  // PaintLayerPainter::paintFragmentByApplyingTransform.
-  IntPoint roundedPaintOffset = roundedIntPoint(context.current.paintOffset);
-  LayoutPoint fractionalPaintOffset =
-      LayoutPoint(context.current.paintOffset - roundedPaintOffset);
+void PaintPropertyTreeBuilder::UpdatePaintOffsetTranslation(
+    const LayoutBoxModelObject& object,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+  if (NeedsPaintOffsetTranslation(object) &&
+      // As an optimization, skip these paint offset translation nodes when
+      // the offset is an identity. An exception is the layout view because root
+      // layer scrolling needs a transform node to ensure fixed and absolute
+      // descendants use the correct transform space.
+      (object.IsLayoutView() ||
+       context.current.paint_offset != LayoutPoint())) {
+    auto& properties = *object.GetMutableForPainting().PaintProperties();
+    // We should use the same subpixel paint offset values for snapping
+    // regardless of whether a transform is present. If there is a transform
+    // we round the paint offset but keep around the residual fractional
+    // component for the transformed content to paint with.  In spv1 this was
+    // called "subpixel accumulation". For more information, see
+    // PaintLayer::subpixelAccumulation() and
+    // PaintLayerPainter::paintFragmentByApplyingTransform.
+    IntPoint rounded_paint_offset =
+        RoundedIntPoint(context.current.paint_offset);
+    LayoutPoint fractional_paint_offset =
+        LayoutPoint(context.current.paint_offset - rounded_paint_offset);
+    if (fractional_paint_offset != LayoutPoint()) {
+      // If the object has a non-translation transform, discard the fractional
+      // paint offset which can't be transformed by the transform.
+      TransformationMatrix matrix;
+      object.StyleRef().ApplyTransform(
+          matrix, LayoutSize(), ComputedStyle::kExcludeTransformOrigin,
+          ComputedStyle::kIncludeMotionPath,
+          ComputedStyle::kIncludeIndependentTransformProperties);
+      if (!matrix.IsIdentityOrTranslation())
+        fractional_paint_offset = LayoutPoint();
+    }
 
-  auto& properties = object.getMutableForPainting().ensurePaintProperties();
-  context.forceSubtreeUpdate |= properties.updatePaintOffsetTranslation(
-      context.current.transform,
-      TransformationMatrix().translate(roundedPaintOffset.x(),
-                                       roundedPaintOffset.y()),
-      FloatPoint3D(), context.current.shouldFlattenInheritedTransform,
-      context.current.renderingContextId);
+    auto result = properties.UpdatePaintOffsetTranslation(
+        context.current.transform,
+        TransformationMatrix().Translate(rounded_paint_offset.X(),
+                                         rounded_paint_offset.Y()),
+        FloatPoint3D(), context.current.should_flatten_inherited_transform,
+        context.current.rendering_context_id);
+    force_subtree_update |= result.NewNodeCreated();
 
-  context.current.transform = properties.paintOffsetTranslation();
-  context.current.paintOffset = fractionalPaintOffset;
-  if (RuntimeEnabledFeatures::rootLayerScrollingEnabled() &&
-      object.isLayoutView()) {
-    context.absolutePosition.transform = properties.paintOffsetTranslation();
-    context.fixedPosition.transform = properties.paintOffsetTranslation();
-    context.absolutePosition.paintOffset = LayoutPoint();
-    context.fixedPosition.paintOffset = LayoutPoint();
+    context.current.transform = properties.PaintOffsetTranslation();
+    context.current.paint_offset = fractional_paint_offset;
+    if (RuntimeEnabledFeatures::RootLayerScrollingEnabled() &&
+        object.IsLayoutView()) {
+      context.absolute_position.transform = properties.PaintOffsetTranslation();
+      context.fixed_position.transform = properties.PaintOffsetTranslation();
+      context.absolute_position.paint_offset = fractional_paint_offset;
+      context.fixed_position.paint_offset = fractional_paint_offset;
+    }
+  } else {
+    if (auto* properties = object.GetMutableForPainting().PaintProperties())
+      force_subtree_update |= properties->ClearPaintOffsetTranslation();
   }
+}
+
+static bool NeedsTransformForNonRootSVG(const LayoutObject& object) {
+  // TODO(pdr): Check for the presence of a transform instead of the value.
+  // Checking for an identity matrix will cause the property tree structure
+  // to change during animations if the animation passes through the
+  // identity matrix.
+  return object.IsSVGChild() &&
+         !object.LocalToSVGParentTransform().IsIdentity();
 }
 
 // SVG does not use the general transform update of |updateTransform|, instead
 // creating a transform node for SVG-specific transforms without 3D.
-void PaintPropertyTreeBuilder::updateTransformForNonRootSVG(
+void PaintPropertyTreeBuilder::UpdateTransformForNonRootSVG(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  DCHECK(object.isSVGChild());
+    ObjectPaintProperties& properties,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+  DCHECK(object.IsSVGChild());
   // SVG does not use paint offset internally, except for SVGForeignObject which
   // has different SVG and HTML coordinate spaces.
-  DCHECK(object.isSVGForeignObject() ||
-         context.current.paintOffset == LayoutPoint());
+  DCHECK(object.IsSVGForeignObject() ||
+         context.current.paint_offset == LayoutPoint());
 
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    // TODO(pdr): Refactor this so all non-root SVG objects use the same
-    // transform function.
-    const AffineTransform& transform = object.isSVGForeignObject()
-                                           ? object.localSVGTransform()
-                                           : object.localToSVGParentTransform();
-    // TODO(pdr): Check for the presence of a transform instead of the value.
-    // Checking for an identity matrix will cause the property tree structure
-    // to change during animations if the animation passes through the
-    // identity matrix.
-    if (!transform.isIdentity()) {
+  if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+    AffineTransform transform = object.LocalToSVGParentTransform();
+    if (NeedsTransformForNonRootSVG(object)) {
       // The origin is included in the local transform, so leave origin empty.
-      auto& properties = object.getMutableForPainting().ensurePaintProperties();
-      context.forceSubtreeUpdate |= properties.updateTransform(
-          context.current.transform, TransformationMatrix(transform),
-          FloatPoint3D());
+      auto result = properties.UpdateTransform(context.current.transform,
+                                               TransformationMatrix(transform),
+                                               FloatPoint3D());
+      force_subtree_update |= result.NewNodeCreated();
     } else {
-      if (auto* properties = object.getMutableForPainting().paintProperties())
-        context.forceSubtreeUpdate |= properties->clearTransform();
+      force_subtree_update |= properties.ClearTransform();
     }
   }
 
-  if (object.paintProperties() && object.paintProperties()->transform()) {
-    context.current.transform = object.paintProperties()->transform();
-    context.current.shouldFlattenInheritedTransform = false;
-    context.current.renderingContextId = 0;
+  if (properties.Transform()) {
+    context.current.transform = properties.Transform();
+    context.current.should_flatten_inherited_transform = false;
+    context.current.rendering_context_id = 0;
   }
 }
 
-static CompositingReasons compositingReasonsForTransform(const LayoutBox& box) {
-  const ComputedStyle& style = box.styleRef();
-  CompositingReasons compositingReasons = CompositingReasonNone;
-  if (CompositingReasonFinder::requiresCompositingForTransform(box))
-    compositingReasons |= CompositingReason3DTransform;
+static CompositingReasons CompositingReasonsForTransform(const LayoutBox& box) {
+  const ComputedStyle& style = box.StyleRef();
+  CompositingReasons compositing_reasons = kCompositingReasonNone;
+  if (CompositingReasonFinder::RequiresCompositingForTransform(box))
+    compositing_reasons |= kCompositingReason3DTransform;
 
-  if (CompositingReasonFinder::requiresCompositingForTransformAnimation(style))
-    compositingReasons |= CompositingReasonActiveAnimation;
+  if (CompositingReasonFinder::RequiresCompositingForTransformAnimation(style))
+    compositing_reasons |= kCompositingReasonActiveAnimation;
 
-  if (style.hasWillChangeCompositingHint() &&
-      !style.subtreeWillChangeContents())
-    compositingReasons |= CompositingReasonWillChangeCompositingHint;
+  if (style.HasWillChangeCompositingHint() &&
+      !style.SubtreeWillChangeContents())
+    compositing_reasons |= kCompositingReasonWillChangeCompositingHint;
 
-  if (box.hasLayer() && box.layer()->has3DTransformedDescendant()) {
-    if (style.hasPerspective())
-      compositingReasons |= CompositingReasonPerspectiveWith3DDescendants;
-    if (style.usedTransformStyle3D() == TransformStyle3DPreserve3D)
-      compositingReasons |= CompositingReasonPreserve3DWith3DDescendants;
+  if (box.HasLayer() && box.Layer()->Has3DTransformedDescendant()) {
+    if (style.HasPerspective())
+      compositing_reasons |= kCompositingReasonPerspectiveWith3DDescendants;
+    if (style.UsedTransformStyle3D() == ETransformStyle3D::kPreserve3d)
+      compositing_reasons |= kCompositingReasonPreserve3DWith3DDescendants;
   }
 
-  return compositingReasons;
+  return compositing_reasons;
 }
 
-static FloatPoint3D transformOrigin(const LayoutBox& box) {
-  const ComputedStyle& style = box.styleRef();
+static FloatPoint3D TransformOrigin(const LayoutBox& box) {
+  const ComputedStyle& style = box.StyleRef();
   // Transform origin has no effect without a transform or motion path.
-  if (!style.hasTransform())
+  if (!style.HasTransform())
     return FloatPoint3D();
-  FloatSize borderBoxSize(box.size());
+  FloatSize border_box_size(box.Size());
   return FloatPoint3D(
-      floatValueForLength(style.transformOriginX(), borderBoxSize.width()),
-      floatValueForLength(style.transformOriginY(), borderBoxSize.height()),
-      style.transformOriginZ());
+      FloatValueForLength(style.TransformOriginX(), border_box_size.Width()),
+      FloatValueForLength(style.TransformOriginY(), border_box_size.Height()),
+      style.TransformOriginZ());
 }
 
-void PaintPropertyTreeBuilder::updateTransform(
+static bool NeedsTransform(const LayoutObject& object) {
+  if (!object.IsBox())
+    return false;
+  return object.StyleRef().HasTransform() || object.StyleRef().Preserves3D() ||
+         CompositingReasonsForTransform(ToLayoutBox(object)) !=
+             kCompositingReasonNone;
+}
+
+void PaintPropertyTreeBuilder::UpdateTransform(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (object.isSVGChild()) {
-    updateTransformForNonRootSVG(object, context);
+    ObjectPaintProperties& properties,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+  if (object.IsSVGChild()) {
+    UpdateTransformForNonRootSVG(object, properties, context,
+                                 force_subtree_update);
     return;
   }
 
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    const ComputedStyle& style = object.styleRef();
-
+  if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+    const ComputedStyle& style = object.StyleRef();
     // A transform node is allocated for transforms, preserves-3d and any
     // direct compositing reason. The latter is required because this is the
     // only way to represent compositing both an element and its stacking
     // descendants.
-    bool hasTransform = false;
-    if (object.isBox()) {
-      auto& box = toLayoutBox(object);
+    if (NeedsTransform(object)) {
+      auto& box = ToLayoutBox(object);
 
-      CompositingReasons compositingReasons =
-          compositingReasonsForTransform(box);
+      CompositingReasons compositing_reasons =
+          CompositingReasonsForTransform(box);
 
-      if (style.hasTransform() || style.preserves3D() ||
-          compositingReasons != CompositingReasonNone) {
-        TransformationMatrix matrix;
-        style.applyTransform(
-            matrix, box.size(), ComputedStyle::ExcludeTransformOrigin,
-            ComputedStyle::IncludeMotionPath,
-            ComputedStyle::IncludeIndependentTransformProperties);
+      TransformationMatrix matrix;
+      style.ApplyTransform(
+          matrix, box.Size(), ComputedStyle::kExcludeTransformOrigin,
+          ComputedStyle::kIncludeMotionPath,
+          ComputedStyle::kIncludeIndependentTransformProperties);
 
-        // TODO(trchen): transform-style should only be respected if a
-        // PaintLayer is created. If a node with transform-style: preserve-3d
-        // does not exist in an existing rendering context, it establishes a new
-        // one.
-        unsigned renderingContextId = context.current.renderingContextId;
-        if (style.preserves3D() && !renderingContextId)
-          renderingContextId = PtrHash<const LayoutObject>::hash(&object);
+      // TODO(trchen): transform-style should only be respected if a
+      // PaintLayer is created. If a node with transform-style: preserve-3d
+      // does not exist in an existing rendering context, it establishes a new
+      // one.
+      unsigned rendering_context_id = context.current.rendering_context_id;
+      if (style.Preserves3D() && !rendering_context_id)
+        rendering_context_id = PtrHash<const LayoutObject>::GetHash(&object);
 
-        CompositorElementId compositorElementId =
-            style.hasCurrentTransformAnimation()
-                ? createDomNodeBasedCompositorElementId(object)
-                : CompositorElementId();
-
-        auto& properties =
-            object.getMutableForPainting().ensurePaintProperties();
-        context.forceSubtreeUpdate |= properties.updateTransform(
-            context.current.transform, matrix, transformOrigin(box),
-            context.current.shouldFlattenInheritedTransform, renderingContextId,
-            compositingReasons, compositorElementId);
-        hasTransform = true;
-      }
-    }
-    if (!hasTransform) {
-      if (auto* properties = object.getMutableForPainting().paintProperties())
-        context.forceSubtreeUpdate |= properties->clearTransform();
+      auto& properties = *object.GetMutableForPainting().PaintProperties();
+      auto result = properties.UpdateTransform(
+          context.current.transform, matrix, TransformOrigin(box),
+          context.current.should_flatten_inherited_transform,
+          rendering_context_id, compositing_reasons,
+          CompositorElementIdFromLayoutObjectId(
+              object.UniqueId(), CompositorElementIdNamespace::kPrimary));
+      force_subtree_update |= result.NewNodeCreated();
+    } else {
+      force_subtree_update |= properties.ClearTransform();
     }
   }
 
-  const auto* properties = object.paintProperties();
-  if (properties && properties->transform()) {
-    context.current.transform = properties->transform();
-    if (object.styleRef().preserves3D()) {
-      context.current.renderingContextId =
-          properties->transform()->renderingContextId();
-      context.current.shouldFlattenInheritedTransform = false;
+  if (properties.Transform()) {
+    context.current.transform = properties.Transform();
+    if (object.StyleRef().Preserves3D()) {
+      context.current.rendering_context_id =
+          properties.Transform()->RenderingContextId();
+      context.current.should_flatten_inherited_transform = false;
     } else {
-      context.current.renderingContextId = 0;
-      context.current.shouldFlattenInheritedTransform = true;
+      context.current.rendering_context_id = 0;
+      context.current.should_flatten_inherited_transform = true;
     }
   }
 }
 
-static bool computeMaskParameters(IntRect& maskClip,
-                                  ColorFilter& maskColorFilter,
+static bool ComputeMaskParameters(IntRect& mask_clip,
+                                  ColorFilter& mask_color_filter,
                                   const LayoutObject& object,
-                                  const LayoutPoint& paintOffset) {
-  DCHECK(object.isBoxModelObject() || object.isSVGChild());
-  const ComputedStyle& style = object.styleRef();
+                                  const LayoutPoint& paint_offset) {
+  DCHECK(object.IsBoxModelObject() || object.IsSVGChild());
+  const ComputedStyle& style = object.StyleRef();
 
-  if (object.isSVGChild()) {
+  if (object.IsSVGChild()) {
     SVGResources* resources =
-        SVGResourcesCache::cachedResourcesForLayoutObject(&object);
-    LayoutSVGResourceMasker* masker = resources ? resources->masker() : nullptr;
+        SVGResourcesCache::CachedResourcesForLayoutObject(&object);
+    LayoutSVGResourceMasker* masker = resources ? resources->Masker() : nullptr;
     if (!masker)
       return false;
-    maskClip = enclosingIntRect(object.objectBoundingBox());
-    maskColorFilter = masker->style()->svgStyle().maskType() == MT_LUMINANCE
-                          ? ColorFilterLuminanceToAlpha
-                          : ColorFilterNone;
+    mask_clip = EnclosingIntRect(object.ObjectBoundingBox());
+    mask_color_filter = masker->Style()->SvgStyle().MaskType() == MT_LUMINANCE
+                            ? kColorFilterLuminanceToAlpha
+                            : kColorFilterNone;
     return true;
   }
-  if (!style.hasMask())
+  if (!style.HasMask())
     return false;
 
-  LayoutRect maximumMaskRegion;
+  LayoutRect maximum_mask_region;
   // For HTML/CSS objects, the extent of the mask is known as "mask
   // painting area", which is determined by CSS mask-clip property.
   // We don't implement mask-clip:margin-box or no-clip currently,
   // so the maximum we can get is border-box.
-  if (object.isBox()) {
-    maximumMaskRegion = toLayoutBox(object).borderBoxRect();
+  if (object.IsBox()) {
+    maximum_mask_region = ToLayoutBox(object).BorderBoxRect();
   } else {
     // For inline elements, depends on the value of box-decoration-break
     // there could be one box in multiple fragments or multiple boxes.
     // Either way here we are only interested in the bounding box of them.
-    DCHECK(object.isLayoutInline());
-    maximumMaskRegion = toLayoutInline(object).linesBoundingBox();
+    DCHECK(object.IsLayoutInline());
+    maximum_mask_region = ToLayoutInline(object).LinesBoundingBox();
   }
-  maximumMaskRegion.moveBy(paintOffset);
-  maskClip = enclosingIntRect(maximumMaskRegion);
-  maskColorFilter = ColorFilterNone;
+  maximum_mask_region.MoveBy(paint_offset);
+  mask_clip = EnclosingIntRect(maximum_mask_region);
+  mask_color_filter = kColorFilterNone;
   return true;
 }
 
-void PaintPropertyTreeBuilder::updateEffect(
-    const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  const ComputedStyle& style = object.styleRef();
+static bool NeedsEffect(const LayoutObject& object) {
+  const ComputedStyle& style = object.StyleRef();
 
-  const bool isCSSIsolatedGroup =
-      object.isBoxModelObject() && style.isStackingContext();
-  if (!isCSSIsolatedGroup && !object.isSVGChild()) {
-    if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-      if (auto* properties = object.getMutableForPainting().paintProperties()) {
-        context.forceSubtreeUpdate |= properties->clearEffect();
-        context.forceSubtreeUpdate |= properties->clearMask();
-        context.forceSubtreeUpdate |= properties->clearMaskClip();
-      }
+  const bool is_css_isolated_group =
+      object.IsBoxModelObject() && style.IsStackingContext();
+
+  if (!is_css_isolated_group && !object.IsSVGChild())
+    return false;
+
+  if (object.IsSVG()) {
+    // This handles SVGRoot objects which have PaintLayers.
+    if (object.IsSVGRoot() && object.HasNonIsolatedBlendingDescendants())
+      return true;
+    if (SVGLayoutSupport::IsIsolationRequired(&object))
+      return true;
+  } else if (object.IsBoxModelObject()) {
+    if (PaintLayer* layer = ToLayoutBoxModelObject(object).Layer()) {
+      if (layer->HasNonIsolatedDescendantWithBlendMode())
+        return true;
     }
-    return;
   }
+
+  SkBlendMode blend_mode = object.IsBlendingAllowed()
+                               ? WebCoreCompositeToSkiaComposite(
+                                     kCompositeSourceOver, style.BlendMode())
+                               : SkBlendMode::kSrcOver;
+  if (blend_mode != SkBlendMode::kSrcOver)
+    return true;
+
+  float opacity = style.Opacity();
+  if (opacity != 1.0f)
+    return true;
+
+  if (CompositingReasonFinder::RequiresCompositingForOpacityAnimation(style))
+    return true;
+
+  if (object.IsSVGChild()) {
+    if (SVGResources* resources =
+            SVGResourcesCache::CachedResourcesForLayoutObject(&object)) {
+      if (resources->Masker())
+        return true;
+    }
+  }
+
+  if (object.StyleRef().HasMask())
+    return true;
+
+  return false;
+}
+
+void PaintPropertyTreeBuilder::UpdateEffect(
+    const LayoutObject& object,
+    ObjectPaintProperties& properties,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update,
+    bool& clip_changed) {
+  const ComputedStyle& style = object.StyleRef();
 
   // TODO(trchen): Can't omit effect node if we have 3D children.
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    const ClipPaintPropertyNode* outputClip = context.inputClipOfCurrentEffect;
+  if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+    const ClipPaintPropertyNode* output_clip =
+        context.input_clip_of_current_effect;
+    bool local_clip_added_or_removed = false;
+    bool local_clip_changed = false;
+    if (NeedsEffect(object)) {
 
-    bool effectNodeNeeded = false;
+      // We may begin to composite our subtree prior to an animation starts,
+      // but a compositor element ID is only needed when an animation is
+      // current.
+      CompositingReasons compositing_reasons = kCompositingReasonNone;
+      if (CompositingReasonFinder::RequiresCompositingForOpacityAnimation(
+              style)) {
+        compositing_reasons = kCompositingReasonActiveAnimation;
+      }
 
-    // Can't omit effect node if we have paint children with exotic blending.
-    if (object.isSVG()) {
-      // Yes, including LayoutSVGRoot, because SVG layout objects don't create
-      // PaintLayer so PaintLayer::hasNonIsolatedDescendantWithBlendMode()
-      // doesn't catch SVG descendants.
-      if (SVGLayoutSupport::isIsolationRequired(&object))
-        effectNodeNeeded = true;
-    } else if (PaintLayer* layer = toLayoutBoxModelObject(object).layer()) {
-      if (layer->hasNonIsolatedDescendantWithBlendMode())
-        effectNodeNeeded = true;
-    }
-
-    SkBlendMode blendMode = object.isBlendingAllowed()
-                                ? WebCoreCompositeToSkiaComposite(
-                                      CompositeSourceOver, style.blendMode())
-                                : SkBlendMode::kSrcOver;
-    if (blendMode != SkBlendMode::kSrcOver)
-      effectNodeNeeded = true;
-
-    float opacity = style.opacity();
-    if (opacity != 1.0f)
-      effectNodeNeeded = true;
-
-    // We may begin to composite our subtree prior to an animation starts,
-    // but a compositor element ID is only needed when an animation is current.
-    CompositorElementId compositorElementId =
-        style.hasCurrentOpacityAnimation()
-            ? createDomNodeBasedCompositorElementId(object)
-            : CompositorElementId();
-    CompositingReasons compositingReasons = CompositingReasonNone;
-    if (CompositingReasonFinder::requiresCompositingForOpacityAnimation(
-            style)) {
-      compositingReasons = CompositingReasonActiveAnimation;
-      effectNodeNeeded = true;
-    }
-    DCHECK(!style.hasCurrentOpacityAnimation() ||
-           compositingReasons != CompositingReasonNone);
-
-    IntRect maskClip;
-    ColorFilter maskColorFilter;
-    bool hasMask = computeMaskParameters(maskClip, maskColorFilter, object,
-                                         context.current.paintOffset);
-    if (hasMask) {
-      effectNodeNeeded = true;
-
-      auto& properties = object.getMutableForPainting().ensurePaintProperties();
-      context.forceSubtreeUpdate |= properties.updateMaskClip(
-          context.current.clip, context.current.transform,
-          FloatRoundedRect(maskClip));
-      outputClip = properties.maskClip();
-
-      // TODO(crbug.com/683425): PaintArtifactCompositor does not handle
-      // grouping (i.e. descendant-dependent compositing reason) properly yet.
-      // This forces masked subtree always create a layer for now.
-      compositingReasons |= CompositingReasonIsolateCompositedDescendants;
-    } else {
-      if (auto* properties = object.getMutableForPainting().paintProperties())
-        context.forceSubtreeUpdate |= properties->clearMaskClip();
-    }
-
-    if (effectNodeNeeded) {
-      auto& properties = object.getMutableForPainting().ensurePaintProperties();
-      context.forceSubtreeUpdate |= properties.updateEffect(
-          context.currentEffect, context.current.transform, outputClip,
-          ColorFilterNone, CompositorFilterOperations(), opacity, blendMode,
-          compositingReasons, compositorElementId);
-      if (hasMask) {
-        // TODO(crbug.com/683425): PaintArtifactCompositor does not handle
-        // grouping (i.e. descendant-dependent compositing reason) properly yet.
-        // Adding CompositingReasonSquashingDisallowed forces mask not getting
-        // squashed into a child effect. Have no compositing reason otherwise.
-        context.forceSubtreeUpdate |= properties.updateMask(
-            properties.effect(), context.current.transform, outputClip,
-            maskColorFilter, CompositorFilterOperations(), 1.f,
-            SkBlendMode::kDstIn, CompositingReasonSquashingDisallowed,
-            CompositorElementId());
+      IntRect mask_clip;
+      ColorFilter mask_color_filter;
+      bool has_mask = ComputeMaskParameters(
+          mask_clip, mask_color_filter, object, context.current.paint_offset);
+      if (has_mask) {
+        FloatRoundedRect rounded_mask_clip(mask_clip);
+        if (properties.MaskClip() &&
+            rounded_mask_clip != properties.MaskClip()->ClipRect())
+          local_clip_changed = true;
+        auto result = properties.UpdateMaskClip(context.current.clip,
+                                                context.current.transform,
+                                                FloatRoundedRect(mask_clip));
+        local_clip_added_or_removed |= result.NewNodeCreated();
+        output_clip = properties.MaskClip();
       } else {
-        context.forceSubtreeUpdate |= properties.clearMask();
+        force_subtree_update |= properties.ClearMaskClip();
+      }
+
+      SkBlendMode blend_mode =
+          object.IsBlendingAllowed()
+              ? WebCoreCompositeToSkiaComposite(kCompositeSourceOver,
+                                                style.BlendMode())
+              : SkBlendMode::kSrcOver;
+
+      DCHECK(!style.HasCurrentOpacityAnimation() ||
+             compositing_reasons != kCompositingReasonNone);
+      auto result = properties.UpdateEffect(
+          context.current_effect, context.current.transform, output_clip,
+          kColorFilterNone, CompositorFilterOperations(), style.Opacity(),
+          blend_mode, compositing_reasons,
+          CompositorElementIdFromLayoutObjectId(
+              object.UniqueId(), CompositorElementIdNamespace::kPrimary));
+      force_subtree_update |= result.NewNodeCreated();
+      if (has_mask) {
+        auto result = properties.UpdateMask(
+            properties.Effect(), context.current.transform, output_clip,
+            mask_color_filter, CompositorFilterOperations(), 1.f,
+            SkBlendMode::kDstIn, kCompositingReasonNone,
+            CompositorElementIdFromLayoutObjectId(
+                object.UniqueId(), CompositorElementIdNamespace::kEffectMask));
+        force_subtree_update |= result.NewNodeCreated();
+      } else {
+        force_subtree_update |= properties.ClearMask();
       }
     } else {
-      if (auto* properties = object.getMutableForPainting().paintProperties()) {
-        context.forceSubtreeUpdate |= properties->clearEffect();
-        context.forceSubtreeUpdate |= properties->clearMask();
-      }
+      auto* properties = object.GetMutableForPainting().PaintProperties();
+      force_subtree_update |= properties->ClearEffect();
+      force_subtree_update |= properties->ClearMask();
+      local_clip_added_or_removed |= properties->ClearMaskClip();
     }
+    force_subtree_update |= local_clip_added_or_removed;
+    clip_changed |= local_clip_changed || local_clip_added_or_removed;
   }
 
-  const auto* properties = object.paintProperties();
-  if (properties && properties->effect()) {
-    context.currentEffect = properties->effect();
-    if (properties->maskClip()) {
-      context.inputClipOfCurrentEffect = context.current.clip =
-          context.absolutePosition.clip = context.fixedPosition.clip =
-              properties->maskClip();
+  if (properties.Effect()) {
+    context.current_effect = properties.Effect();
+    if (properties.MaskClip()) {
+      context.input_clip_of_current_effect = context.current.clip =
+          context.absolute_position.clip = context.fixed_position.clip =
+              properties.MaskClip();
     }
   }
 }
 
-void PaintPropertyTreeBuilder::updateFilter(
+static bool NeedsFilter(const LayoutObject& object) {
+  // TODO(trchen): SVG caches filters in SVGResources. Implement it.
+  return object.IsBoxModelObject() && ToLayoutBoxModelObject(object).Layer() &&
+         (object.StyleRef().HasFilter() || object.HasReflection());
+}
+
+void PaintPropertyTreeBuilder::UpdateFilter(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  const ComputedStyle& style = object.styleRef();
+    ObjectPaintProperties& properties,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+  const ComputedStyle& style = object.StyleRef();
 
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    CompositorFilterOperations filter;
-    if (object.isSVGChild()) {
-      // TODO(trchen): SVG caches filters in SVGResources. Implement it.
-    } else if (PaintLayer* layer = toLayoutBoxModelObject(object).layer()) {
-      // TODO(trchen): Eliminate PaintLayer dependency.
-      filter = layer->createCompositorFilterOperationsForFilter(style);
-    }
+  if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+    if (NeedsFilter(object)) {
+      CompositorFilterOperations filter =
+          ToLayoutBoxModelObject(object)
+              .Layer()
+              ->CreateCompositorFilterOperationsForFilter(style);
 
-    // The CSS filter spec didn't specify how filters interact with overflow
-    // clips. The implementation here mimics the old Blink/WebKit behavior for
-    // backward compatibility.
-    // Basically the output of the filter will be affected by clips that applies
-    // to the current element. The descendants that paints into the input of the
-    // filter ignores any clips collected so far. For example:
-    // <div style="overflow:scroll">
-    //   <div style="filter:blur(1px);">
-    //     <div>A</div>
-    //     <div style="position:absolute;">B</div>
-    //   </div>
-    // </div>
-    // In this example "A" should be clipped if the filter was not present.
-    // With the filter, "A" will be rastered without clipping, but instead
-    // the blurred result will be clipped.
-    // On the other hand, "B" should not be clipped because the overflow clip is
-    // not in its containing block chain, but as the filter output will be
-    // clipped, so a blurred "B" may still be invisible.
-    const ClipPaintPropertyNode* outputClip = context.current.clip;
+      // The CSS filter spec didn't specify how filters interact with overflow
+      // clips. The implementation here mimics the old Blink/WebKit behavior for
+      // backward compatibility.
+      // Basically the output of the filter will be affected by clips that
+      // applies to the current element. The descendants that paints into the
+      // input of the filter ignores any clips collected so far. For example:
+      // <div style="overflow:scroll">
+      //   <div style="filter:blur(1px);">
+      //     <div>A</div>
+      //     <div style="position:absolute;">B</div>
+      //   </div>
+      // </div>
+      // In this example "A" should be clipped if the filter was not present.
+      // With the filter, "A" will be rastered without clipping, but instead
+      // the blurred result will be clipped.
+      // On the other hand, "B" should not be clipped because the overflow clip
+      // is not in its containing block chain, but as the filter output will be
+      // clipped, so a blurred "B" may still be invisible.
+      const ClipPaintPropertyNode* output_clip = context.current.clip;
 
-    // TODO(trchen): A filter may contain spatial operations such that an
-    // output pixel may depend on an input pixel outside of the output clip.
-    // We should generate a special clip node to represent this expansion.
+      // TODO(trchen): A filter may contain spatial operations such that an
+      // output pixel may depend on an input pixel outside of the output clip.
+      // We should generate a special clip node to represent this expansion.
 
-    // We may begin to composite our subtree prior to an animation starts,
-    // but a compositor element ID is only needed when an animation is current.
-    CompositorElementId compositorElementId =
-        style.hasCurrentFilterAnimation()
-            ? createDomNodeBasedCompositorElementId(object)
-            : CompositorElementId();
-    CompositingReasons compositingReasons =
-        CompositingReasonFinder::requiresCompositingForFilterAnimation(style)
-            ? CompositingReasonActiveAnimation
-            : CompositingReasonNone;
-    DCHECK(!style.hasCurrentFilterAnimation() ||
-           compositingReasons != CompositingReasonNone);
+      // We may begin to composite our subtree prior to an animation starts,
+      // but a compositor element ID is only needed when an animation is
+      // current.
+      CompositingReasons compositing_reasons =
+          CompositingReasonFinder::RequiresCompositingForFilterAnimation(style)
+              ? kCompositingReasonActiveAnimation
+              : kCompositingReasonNone;
+      DCHECK(!style.HasCurrentFilterAnimation() ||
+             compositing_reasons != kCompositingReasonNone);
 
-    if (compositingReasons == CompositingReasonNone && filter.isEmpty()) {
-      if (auto* properties = object.getMutableForPainting().paintProperties())
-        context.forceSubtreeUpdate |= properties->clearFilter();
+      auto result = properties.UpdateFilter(
+          context.current_effect, context.current.transform, output_clip,
+          kColorFilterNone, std::move(filter), 1.f, SkBlendMode::kSrcOver,
+          compositing_reasons,
+          CompositorElementIdFromLayoutObjectId(
+              object.UniqueId(), CompositorElementIdNamespace::kEffectFilter));
+      force_subtree_update |= result.NewNodeCreated();
     } else {
-      auto& properties = object.getMutableForPainting().ensurePaintProperties();
-      context.forceSubtreeUpdate |= properties.updateFilter(
-          context.currentEffect, context.current.transform, outputClip,
-          ColorFilterNone, std::move(filter), 1.f, SkBlendMode::kSrcOver,
-          compositingReasons, compositorElementId);
+      force_subtree_update |= properties.ClearFilter();
     }
   }
 
-  const auto* properties = object.paintProperties();
-  if (properties && properties->filter()) {
-    context.currentEffect = properties->filter();
+  if (properties.Filter()) {
+    context.current_effect = properties.Filter();
     // TODO(trchen): Change input clip to expansion hint once implemented.
-    const ClipPaintPropertyNode* inputClip = properties->filter()->outputClip();
-    context.inputClipOfCurrentEffect = context.current.clip =
-        context.absolutePosition.clip = context.fixedPosition.clip = inputClip;
+    const ClipPaintPropertyNode* input_clip = properties.Filter()->OutputClip();
+    context.input_clip_of_current_effect = context.current.clip =
+        context.absolute_position.clip = context.fixed_position.clip =
+            input_clip;
   }
 }
 
-void PaintPropertyTreeBuilder::updateCssClip(
+static bool NeedsCssClip(const LayoutObject& object) {
+  return object.HasClip();
+}
+
+void PaintPropertyTreeBuilder::UpdateCssClip(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    if (object.hasClip()) {
+    ObjectPaintProperties& properties,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update,
+    bool& clip_changed) {
+  if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+    bool local_clip_added_or_removed = false;
+    bool local_clip_changed = false;
+    if (NeedsCssClip(object)) {
       // Create clip node for descendants that are not fixed position.
       // We don't have to setup context.absolutePosition.clip here because this
       // object must be a container for absolute position descendants, and will
       // copy from in-flow context later at updateOutOfFlowContext() step.
-      DCHECK(object.canContainAbsolutePositionObjects());
-      LayoutRect clipRect =
-          toLayoutBox(object).clipRect(context.current.paintOffset);
-      auto& properties = object.getMutableForPainting().ensurePaintProperties();
-      context.forceSubtreeUpdate |= properties.updateCssClip(
+      DCHECK(object.CanContainAbsolutePositionObjects());
+      LayoutRect clip_rect =
+          ToLayoutBox(object).ClipRect(context.current.paint_offset);
+
+      FloatRoundedRect rounded_clip_rect((FloatRect(clip_rect)));
+      if (properties.CssClip() &&
+          properties.CssClip()->ClipRect() != rounded_clip_rect)
+        local_clip_changed = true;
+
+      auto result = properties.UpdateCssClip(
           context.current.clip, context.current.transform,
-          FloatRoundedRect(FloatRect(clipRect)));
+          FloatRoundedRect(FloatRect(clip_rect)));
+      local_clip_added_or_removed |= result.NewNodeCreated();
     } else {
-      if (auto* properties = object.getMutableForPainting().paintProperties())
-        context.forceSubtreeUpdate |= properties->clearCssClip();
+      local_clip_added_or_removed |= properties.ClearCssClip();
     }
+    force_subtree_update |= local_clip_added_or_removed;
+    clip_changed |= local_clip_changed || local_clip_added_or_removed;
   }
 
-  const auto* properties = object.paintProperties();
-  if (properties && properties->cssClip())
-    context.current.clip = properties->cssClip();
+  if (properties.CssClip())
+    context.current.clip = properties.CssClip();
 }
 
-void PaintPropertyTreeBuilder::updateLocalBorderBoxContext(
+void PaintPropertyTreeBuilder::UpdateLocalBorderBoxContext(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (!object.needsPaintPropertyUpdate() && !context.forceSubtreeUpdate)
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+  if (!object.NeedsPaintPropertyUpdate() && !force_subtree_update)
     return;
 
-  // Avoid adding an ObjectPaintProperties for non-boxes to save memory, since
-  // we don't need them at the moment.
-  if (!object.isBox() && !object.hasLayer()) {
-    if (auto* properties = object.getMutableForPainting().paintProperties())
-      properties->clearLocalBorderBoxProperties();
+  // We only need to cache the local border box properties for layered objects.
+  if (!object.HasLayer()) {
+    object.GetMutableForPainting().ClearLocalBorderBoxProperties();
   } else {
-    auto& properties = object.getMutableForPainting().ensurePaintProperties();
-    properties.updateLocalBorderBoxProperties(
-        context.current.transform, context.current.clip, context.currentEffect);
+    PropertyTreeState local_border_box =
+        PropertyTreeState(context.current.transform, context.current.clip,
+                          context.current_effect);
+    object.GetMutableForPainting().SetLocalBorderBoxProperties(
+        local_border_box);
   }
+}
+
+static bool NeedsScrollbarPaintOffset(const LayoutObject& object) {
+  if (!object.IsBoxModelObject())
+    return false;
+  if (auto* area = ToLayoutBoxModelObject(object).GetScrollableArea()) {
+    if (area->HorizontalScrollbar() || area->VerticalScrollbar())
+      return true;
+  }
+  return false;
 }
 
 // TODO(trchen): Remove this once we bake the paint offset into frameRect.
-void PaintPropertyTreeBuilder::updateScrollbarPaintOffset(
+void PaintPropertyTreeBuilder::UpdateScrollbarPaintOffset(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (!object.needsPaintPropertyUpdate() && !context.forceSubtreeUpdate)
+    ObjectPaintProperties& properties,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+  if (!object.NeedsPaintPropertyUpdate() && !force_subtree_update)
     return;
 
-  bool needsScrollbarPaintOffset = false;
-  IntPoint roundedPaintOffset = roundedIntPoint(context.current.paintOffset);
-  if (roundedPaintOffset != IntPoint() && object.isBoxModelObject()) {
-    if (auto* area = toLayoutBoxModelObject(object).getScrollableArea()) {
-      if (area->horizontalScrollbar() || area->verticalScrollbar()) {
-        auto paintOffset = TransformationMatrix().translate(
-            roundedPaintOffset.x(), roundedPaintOffset.y());
-        auto& properties =
-            object.getMutableForPainting().ensurePaintProperties();
-        context.forceSubtreeUpdate |= properties.updateScrollbarPaintOffset(
-            context.current.transform, paintOffset, FloatPoint3D());
-        needsScrollbarPaintOffset = true;
-      }
-    }
+  if (NeedsScrollbarPaintOffset(object)) {
+    IntPoint rounded_paint_offset =
+        RoundedIntPoint(context.current.paint_offset);
+    auto paint_offset = TransformationMatrix().Translate(
+        rounded_paint_offset.X(), rounded_paint_offset.Y());
+    auto result = properties.UpdateScrollbarPaintOffset(
+        context.current.transform, paint_offset, FloatPoint3D());
+    force_subtree_update |= result.NewNodeCreated();
+  } else {
+    force_subtree_update |= properties.ClearScrollbarPaintOffset();
   }
-
-  auto* properties = object.getMutableForPainting().paintProperties();
-  if (!needsScrollbarPaintOffset && properties)
-    context.forceSubtreeUpdate |= properties->clearScrollbarPaintOffset();
 }
 
-void PaintPropertyTreeBuilder::updateOverflowClip(
+static bool NeedsOverflowClip(const LayoutObject& object) {
+  return object.IsBox() && ToLayoutBox(object).ShouldClipOverflow();
+}
+
+void PaintPropertyTreeBuilder::UpdateOverflowClip(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (!object.isBox())
-    return;
+    ObjectPaintProperties& properties,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update,
+    bool& clip_changed) {
+  if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+    bool local_clip_added_or_removed = false;
+    bool local_clip_changed = false;
+    if (NeedsOverflowClip(object)) {
+      const LayoutBox& box = ToLayoutBox(object);
+      LayoutRect clip_rect;
+      clip_rect =
+          LayoutRect(box.OverflowClipRect(context.current.paint_offset));
 
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    const LayoutBox& box = toLayoutBox(object);
-    // The <input> elements can't have contents thus CSS overflow property
-    // doesn't apply.  However for layout purposes we do generate child layout
-    // objects for them, e.g. button label.  We should clip the overflow from
-    // those children. This is called control clip and we technically treat them
-    // like overflow clip.
-    LayoutRect clipRect;
-    if (box.shouldClipOverflow()) {
-      clipRect = LayoutRect(box.overflowClipRect(context.current.paintOffset));
-    } else {
-      if (auto* properties = object.getMutableForPainting().paintProperties()) {
-        context.forceSubtreeUpdate |= properties->clearInnerBorderRadiusClip();
-        context.forceSubtreeUpdate |= properties->clearOverflowClip();
+      const auto* current_clip = context.current.clip;
+      if (box.StyleRef().HasBorderRadius()) {
+        auto inner_border = box.StyleRef().GetRoundedInnerBorderFor(
+            LayoutRect(context.current.paint_offset, box.Size()));
+        auto result = properties.UpdateInnerBorderRadiusClip(
+            context.current.clip, context.current.transform, inner_border);
+        local_clip_added_or_removed |= result.NewNodeCreated();
+        current_clip = properties.InnerBorderRadiusClip();
+      } else {
+        local_clip_added_or_removed |= properties.ClearInnerBorderRadiusClip();
       }
-      return;
-    }
 
-    auto& properties = object.getMutableForPainting().ensurePaintProperties();
-    const auto* currentClip = context.current.clip;
-    if (box.styleRef().hasBorderRadius()) {
-      auto innerBorder = box.styleRef().getRoundedInnerBorderFor(
-          LayoutRect(context.current.paintOffset, box.size()));
-      context.forceSubtreeUpdate |= properties.updateInnerBorderRadiusClip(
-          context.current.clip, context.current.transform, innerBorder);
-      currentClip = properties.innerBorderRadiusClip();
+      FloatRoundedRect clipping_rect((FloatRect(clip_rect)));
+      if (properties.OverflowClip() &&
+          clipping_rect != properties.OverflowClip()->ClipRect()) {
+        local_clip_changed = true;
+      }
+
+      auto result =
+          properties.UpdateOverflowClip(current_clip, context.current.transform,
+                                        FloatRoundedRect(FloatRect(clip_rect)));
+      local_clip_added_or_removed |= result.NewNodeCreated();
     } else {
-      context.forceSubtreeUpdate |= properties.clearInnerBorderRadiusClip();
+      local_clip_added_or_removed |= properties.ClearInnerBorderRadiusClip();
+      local_clip_added_or_removed |= properties.ClearOverflowClip();
     }
-
-    context.forceSubtreeUpdate |=
-        properties.updateOverflowClip(currentClip, context.current.transform,
-                                      FloatRoundedRect(FloatRect(clipRect)));
+    force_subtree_update |= local_clip_added_or_removed;
+    clip_changed |= local_clip_changed || local_clip_added_or_removed;
   }
 
-  const auto* properties = object.paintProperties();
-  if (properties && properties->overflowClip())
-    context.current.clip = properties->overflowClip();
+  if (properties.OverflowClip())
+    context.current.clip = properties.OverflowClip();
 }
 
-static FloatPoint perspectiveOrigin(const LayoutBox& box) {
-  const ComputedStyle& style = box.styleRef();
+static FloatPoint PerspectiveOrigin(const LayoutBox& box) {
+  const ComputedStyle& style = box.StyleRef();
   // Perspective origin has no effect without perspective.
-  DCHECK(style.hasPerspective());
-  FloatSize borderBoxSize(box.size());
+  DCHECK(style.HasPerspective());
+  FloatSize border_box_size(box.Size());
   return FloatPoint(
-      floatValueForLength(style.perspectiveOriginX(), borderBoxSize.width()),
-      floatValueForLength(style.perspectiveOriginY(), borderBoxSize.height()));
+      FloatValueForLength(style.PerspectiveOriginX(), border_box_size.Width()),
+      FloatValueForLength(style.PerspectiveOriginY(),
+                          border_box_size.Height()));
 }
 
-void PaintPropertyTreeBuilder::updatePerspective(
+static bool NeedsPerspective(const LayoutObject& object) {
+  return object.IsBox() && object.StyleRef().HasPerspective();
+}
+
+void PaintPropertyTreeBuilder::UpdatePerspective(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    const ComputedStyle& style = object.styleRef();
-    if (object.isBox() && style.hasPerspective()) {
+    ObjectPaintProperties& properties,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+  if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+    if (NeedsPerspective(object)) {
+      const ComputedStyle& style = object.StyleRef();
       // The perspective node must not flatten (else nothing will get
       // perspective), but it should still extend the rendering context as
       // most transform nodes do.
       TransformationMatrix matrix =
-          TransformationMatrix().applyPerspective(style.perspective());
-      FloatPoint3D origin = perspectiveOrigin(toLayoutBox(object)) +
-                            toLayoutSize(context.current.paintOffset);
-      auto& properties = object.getMutableForPainting().ensurePaintProperties();
-      context.forceSubtreeUpdate |= properties.updatePerspective(
+          TransformationMatrix().ApplyPerspective(style.Perspective());
+      FloatPoint3D origin = PerspectiveOrigin(ToLayoutBox(object)) +
+                            ToLayoutSize(context.current.paint_offset);
+      auto result = properties.UpdatePerspective(
           context.current.transform, matrix, origin,
-          context.current.shouldFlattenInheritedTransform,
-          context.current.renderingContextId);
+          context.current.should_flatten_inherited_transform,
+          context.current.rendering_context_id);
+      force_subtree_update |= result.NewNodeCreated();
     } else {
-      if (auto* properties = object.getMutableForPainting().paintProperties())
-        context.forceSubtreeUpdate |= properties->clearPerspective();
+      force_subtree_update |= properties.ClearPerspective();
     }
   }
 
-  const auto* properties = object.paintProperties();
-  if (properties && properties->perspective()) {
-    context.current.transform = properties->perspective();
-    context.current.shouldFlattenInheritedTransform = false;
+  if (properties.Perspective()) {
+    context.current.transform = properties.Perspective();
+    context.current.should_flatten_inherited_transform = false;
   }
 }
 
-void PaintPropertyTreeBuilder::updateSvgLocalToBorderBoxTransform(
+static bool NeedsSVGLocalToBorderBoxTransform(const LayoutObject& object) {
+  return object.IsSVGRoot();
+}
+
+void PaintPropertyTreeBuilder::UpdateSvgLocalToBorderBoxTransform(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (!object.isSVGRoot())
+    ObjectPaintProperties& properties,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+  if (!object.IsSVGRoot())
     return;
 
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    AffineTransform transformToBorderBox =
-        SVGRootPainter(toLayoutSVGRoot(object))
-            .transformToPixelSnappedBorderBox(context.current.paintOffset);
-    if (!transformToBorderBox.isIdentity()) {
-      auto& properties = object.getMutableForPainting().ensurePaintProperties();
-      context.forceSubtreeUpdate |=
-          properties.updateSvgLocalToBorderBoxTransform(
-              context.current.transform, transformToBorderBox, FloatPoint3D());
+  if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+    AffineTransform transform_to_border_box =
+        SVGRootPainter(ToLayoutSVGRoot(object))
+            .TransformToPixelSnappedBorderBox(context.current.paint_offset);
+    if (!transform_to_border_box.IsIdentity() &&
+        NeedsSVGLocalToBorderBoxTransform(object)) {
+      auto result = properties.UpdateSvgLocalToBorderBoxTransform(
+          context.current.transform, transform_to_border_box, FloatPoint3D());
+      force_subtree_update |= result.NewNodeCreated();
     } else {
-      if (auto* properties = object.getMutableForPainting().paintProperties()) {
-        context.forceSubtreeUpdate |=
-            properties->clearSvgLocalToBorderBoxTransform();
-      }
+      force_subtree_update |= properties.ClearSvgLocalToBorderBoxTransform();
     }
   }
 
-  const auto* properties = object.paintProperties();
-  if (properties && properties->svgLocalToBorderBoxTransform()) {
-    context.current.transform = properties->svgLocalToBorderBoxTransform();
-    context.current.shouldFlattenInheritedTransform = false;
-    context.current.renderingContextId = 0;
+  if (properties.SvgLocalToBorderBoxTransform()) {
+    context.current.transform = properties.SvgLocalToBorderBoxTransform();
+    context.current.should_flatten_inherited_transform = false;
+    context.current.rendering_context_id = 0;
   }
   // The paint offset is included in |transformToBorderBox| so SVG does not need
   // to handle paint offset internally.
-  context.current.paintOffset = LayoutPoint();
+  context.current.paint_offset = LayoutPoint();
 }
 
-static MainThreadScrollingReasons mainThreadScrollingReasons(
+static MainThreadScrollingReasons GetMainThreadScrollingReasons(
     const LayoutObject& object,
-    MainThreadScrollingReasons ancestorReasons) {
+    MainThreadScrollingReasons ancestor_reasons) {
   // The current main thread scrolling reasons implementation only changes
   // reasons at frame boundaries, so we can early-out when not at a LayoutView.
   // TODO(pdr): Need to find a solution to the style-related main thread
   // scrolling reasons such as opacity and transform which violate this.
-  if (!object.isLayoutView())
-    return ancestorReasons;
-  return mainThreadScrollingReasons(*object.frameView(), ancestorReasons);
+  if (!object.IsLayoutView())
+    return ancestor_reasons;
+  return GetMainThreadScrollingReasons(*object.GetFrameView(),
+                                       ancestor_reasons);
 }
 
-void PaintPropertyTreeBuilder::updateScrollAndScrollTranslation(
+static bool NeedsScrollTranslation(const LayoutObject& object) {
+  if (!object.HasOverflowClip())
+    return false;
+  const LayoutBox& box = ToLayoutBox(object);
+  auto* scrollable_area = box.GetScrollableArea();
+  IntSize scroll_offset = box.ScrolledContentOffset();
+  return !scroll_offset.IsZero() || scrollable_area->ScrollsOverflow();
+}
+
+void PaintPropertyTreeBuilder::UpdateScrollAndScrollTranslation(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    bool needsScrollProperties = false;
-    if (object.hasOverflowClip()) {
-      auto ancestorReasons =
-          context.current.scroll->mainThreadScrollingReasons();
-      auto reasons = mainThreadScrollingReasons(object, ancestorReasons);
-      bool scrollNodeNeededForMainThreadReasons = ancestorReasons != reasons;
+    ObjectPaintProperties& properties,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+  if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+    if (NeedsScrollTranslation(object)) {
+      const LayoutBox& box = ToLayoutBox(object);
+      auto* scrollable_area = box.GetScrollableArea();
+      IntSize scroll_offset = box.ScrolledContentOffset();
 
-      const LayoutBox& box = toLayoutBox(object);
-      auto* scrollableArea = box.getScrollableArea();
-      IntSize scrollOffset = box.scrolledContentOffset();
-      if (scrollNodeNeededForMainThreadReasons || !scrollOffset.isZero() ||
-          scrollableArea->scrollsOverflow()) {
-        needsScrollProperties = true;
-        auto& properties =
-            object.getMutableForPainting().ensurePaintProperties();
+      auto clip_rect = box.OverflowClipRect(context.current.paint_offset);
+      // The container bounds are snapped to integers to match the equivalent
+      // bounds on cc::ScrollNode.
+      IntSize container_bounds = PixelSnappedIntRect(clip_rect).Size();
 
-        IntSize scrollClip = scrollableArea->visibleContentRect().size();
-        IntSize scrollBounds = scrollableArea->contentsSize();
-        bool userScrollableHorizontal =
-            scrollableArea->userInputScrollable(HorizontalScrollbar);
-        bool userScrollableVertical =
-            scrollableArea->userInputScrollable(VerticalScrollbar);
+      IntSize scroll_bounds = scrollable_area->ContentsSize();
+      bool user_scrollable_horizontal =
+          scrollable_area->UserInputScrollable(kHorizontalScrollbar);
+      bool user_scrollable_vertical =
+          scrollable_area->UserInputScrollable(kVerticalScrollbar);
 
-        // Main thread scrolling reasons depend on their ancestor's reasons
-        // so ensure the entire subtree is updated when reasons change.
-        if (auto* existingScrollTranslation = properties.scrollTranslation()) {
-          auto* existingScrollNode = existingScrollTranslation->scrollNode();
-          if (existingScrollNode->mainThreadScrollingReasons() != reasons)
-            context.forceSubtreeUpdate = true;
-        }
+      auto ancestor_reasons =
+          context.current.scroll->GetMainThreadScrollingReasons();
+      auto reasons = GetMainThreadScrollingReasons(object, ancestor_reasons);
 
-        CompositorElementId compositorElementId =
-            createDomNodeBasedCompositorElementId(object);
-        TransformationMatrix matrix = TransformationMatrix().translate(
-            -scrollOffset.width(), -scrollOffset.height());
-        context.forceSubtreeUpdate |= properties.updateScrollTranslation(
-            context.current.transform, matrix, FloatPoint3D(),
-            context.current.shouldFlattenInheritedTransform,
-            context.current.renderingContextId, CompositingReasonNone,
-            compositorElementId, context.current.scroll, scrollClip,
-            scrollBounds, userScrollableHorizontal, userScrollableVertical,
-            reasons, scrollableArea);
+      // Main thread scrolling reasons depend on their ancestor's reasons
+      // so ensure the entire subtree is updated when reasons change.
+      if (auto* existing_scroll_translation = properties.ScrollTranslation()) {
+        auto* existing_scroll_node = existing_scroll_translation->ScrollNode();
+        if (existing_scroll_node->GetMainThreadScrollingReasons() != reasons)
+          force_subtree_update = true;
       }
-    }
 
-    if (!needsScrollProperties) {
+      TransformationMatrix matrix = TransformationMatrix().Translate(
+          -scroll_offset.Width(), -scroll_offset.Height());
+      auto result = properties.UpdateScrollTranslation(
+          context.current.transform, matrix, FloatPoint3D(),
+          context.current.should_flatten_inherited_transform,
+          context.current.rendering_context_id, kCompositingReasonNone,
+          CompositorElementIdFromLayoutObjectId(
+              object.UniqueId(),
+              CompositorElementIdNamespace::kScrollTranslation),
+          context.current.scroll, container_bounds, scroll_bounds,
+          user_scrollable_horizontal, user_scrollable_vertical, reasons,
+          scrollable_area);
+      force_subtree_update |= result.NewNodeCreated();
+    } else {
       // Ensure pre-existing properties are cleared.
-      if (auto* properties = object.getMutableForPainting().paintProperties())
-        context.forceSubtreeUpdate |= properties->clearScrollTranslation();
+      force_subtree_update |= properties.ClearScrollTranslation();
     }
   }
 
-  if (object.paintProperties() &&
-      object.paintProperties()->scrollTranslation()) {
-    context.current.transform = object.paintProperties()->scrollTranslation();
-    context.current.scroll = context.current.transform->scrollNode();
-    context.current.shouldFlattenInheritedTransform = false;
+  if (properties.ScrollTranslation()) {
+    context.current.transform = properties.ScrollTranslation();
+    context.current.scroll = context.current.transform->ScrollNode();
+    context.current.should_flatten_inherited_transform = false;
   }
 }
 
-void PaintPropertyTreeBuilder::updateOutOfFlowContext(
+void PaintPropertyTreeBuilder::UpdateOutOfFlowContext(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (object.isLayoutBlock())
-    context.paintOffsetForFloat = context.current.paintOffset;
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+  if (!object.IsBoxModelObject() && !object.PaintProperties())
+    return;
 
-  if (object.canContainAbsolutePositionObjects()) {
-    context.absolutePosition = context.current;
-    context.containerForAbsolutePosition = &object;
-  }
+  if (object.IsLayoutBlock())
+    context.paint_offset_for_float = context.current.paint_offset;
 
-  if (object.isLayoutView()) {
-    if (RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
-      const auto* initialFixedTransform = context.fixedPosition.transform;
-      const auto* initialFixedScroll = context.fixedPosition.scroll;
+  if (object.CanContainAbsolutePositionObjects())
+    context.absolute_position = context.current;
 
-      context.fixedPosition = context.current;
+  if (object.IsLayoutView()) {
+    if (RuntimeEnabledFeatures::RootLayerScrollingEnabled()) {
+      const auto* initial_fixed_transform = context.fixed_position.transform;
+      const auto* initial_fixed_scroll = context.fixed_position.scroll;
+
+      context.fixed_position = context.current;
 
       // Fixed position transform and scroll nodes should not be affected.
-      context.fixedPosition.transform = initialFixedTransform;
-      context.fixedPosition.scroll = initialFixedScroll;
+      context.fixed_position.transform = initial_fixed_transform;
+      context.fixed_position.scroll = initial_fixed_scroll;
     }
-  } else if (object.canContainFixedPositionObjects()) {
-    context.fixedPosition = context.current;
-  } else if (object.getMutableForPainting().paintProperties() &&
-             object.paintProperties()->cssClip()) {
+  } else if (object.CanContainFixedPositionObjects()) {
+    context.fixed_position = context.current;
+  } else if (object.GetMutableForPainting().PaintProperties() &&
+             object.PaintProperties()->CssClip()) {
     // CSS clip applies to all descendants, even if this object is not a
     // containing block ancestor of the descendant. It is okay for
     // absolute-position descendants because having CSS clip implies being
     // absolute position container. However for fixed-position descendants we
     // need to insert the clip here if we are not a containing block ancestor of
     // them.
-    auto* cssClip = object.getMutableForPainting().paintProperties()->cssClip();
+    auto& properties = *object.GetMutableForPainting().PaintProperties();
+    auto* css_clip = properties.CssClip();
 
     // Before we actually create anything, check whether in-flow context and
     // fixed-position context has exactly the same clip. Reuse if possible.
-    if (context.fixedPosition.clip == cssClip->parent()) {
-      context.fixedPosition.clip = cssClip;
+    if (context.fixed_position.clip == css_clip->Parent()) {
+      context.fixed_position.clip = css_clip;
     } else {
-      if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-        auto& properties =
-            object.getMutableForPainting().ensurePaintProperties();
-        context.forceSubtreeUpdate |= properties.updateCssClipFixedPosition(
-            context.fixedPosition.clip, const_cast<TransformPaintPropertyNode*>(
-                                            cssClip->localTransformSpace()),
-            cssClip->clipRect());
+      if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+        auto result = properties.UpdateCssClipFixedPosition(
+            context.fixed_position.clip,
+            const_cast<TransformPaintPropertyNode*>(
+                css_clip->LocalTransformSpace()),
+            css_clip->ClipRect());
+        force_subtree_update |= result.NewNodeCreated();
       }
-      const auto* properties = object.paintProperties();
-      if (properties && properties->cssClipFixedPosition())
-        context.fixedPosition.clip = properties->cssClipFixedPosition();
+      if (properties.CssClipFixedPosition())
+        context.fixed_position.clip = properties.CssClipFixedPosition();
       return;
     }
   }
 
-  if (object.needsPaintPropertyUpdate() || context.forceSubtreeUpdate) {
-    if (auto* properties = object.getMutableForPainting().paintProperties())
-      context.forceSubtreeUpdate |= properties->clearCssClipFixedPosition();
+  if (object.NeedsPaintPropertyUpdate() || force_subtree_update) {
+    if (auto* properties = object.GetMutableForPainting().PaintProperties())
+      force_subtree_update |= properties->ClearCssClipFixedPosition();
   }
 }
 
-void PaintPropertyTreeBuilder::updatePaintOffset(
+void PaintPropertyTreeBuilder::UpdatePaintOffset(
     const LayoutBoxModelObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (object.isFloating())
-    context.current.paintOffset = context.paintOffsetForFloat;
+    PaintPropertyTreeBuilderFragmentContext& context,
+    const LayoutObject* container_for_absolute_position) {
+  if (object.IsFloating())
+    context.current.paint_offset = context.paint_offset_for_float;
 
   // Multicolumn spanners are painted starting at the multicolumn container (but
   // still inherit properties in layout-tree order) so reset the paint offset.
-  if (object.isColumnSpanAll())
-    context.current.paintOffset = object.container()->paintOffset();
+  if (object.IsColumnSpanAll())
+    context.current.paint_offset = object.Container()->PaintOffset();
 
-  switch (object.styleRef().position()) {
+  switch (object.StyleRef().GetPosition()) {
     case EPosition::kStatic:
       break;
     case EPosition::kRelative:
-      context.current.paintOffset += object.offsetForInFlowPosition();
+      context.current.paint_offset += object.OffsetForInFlowPosition();
       break;
     case EPosition::kAbsolute: {
-      DCHECK(context.containerForAbsolutePosition == object.container());
-      context.current = context.absolutePosition;
+      DCHECK(container_for_absolute_position == object.Container());
+      context.current = context.absolute_position;
 
       // Absolutely positioned content in an inline should be positioned
       // relative to the inline.
-      const LayoutObject* container = context.containerForAbsolutePosition;
-      if (container && container->isInFlowPositioned() &&
-          container->isLayoutInline()) {
-        DCHECK(object.isBox());
-        context.current.paintOffset +=
-            toLayoutInline(container)->offsetForInFlowPositionedInline(
-                toLayoutBox(object));
+      const LayoutObject* container = container_for_absolute_position;
+      if (container && container->IsInFlowPositioned() &&
+          container->IsLayoutInline()) {
+        DCHECK(object.IsBox());
+        context.current.paint_offset +=
+            ToLayoutInline(container)->OffsetForInFlowPositionedInline(
+                ToLayoutBox(object));
       }
       break;
     }
     case EPosition::kSticky:
-      context.current.paintOffset += object.offsetForInFlowPosition();
+      context.current.paint_offset += object.OffsetForInFlowPosition();
       break;
     case EPosition::kFixed:
-      context.current = context.fixedPosition;
+      context.current = context.fixed_position;
       break;
     default:
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
   }
 
-  if (object.isBox()) {
+  if (object.IsBox()) {
     // TODO(pdr): Several calls in this function walk back up the tree to
     // calculate containers (e.g., physicalLocation, offsetForInFlowPosition*).
     // The containing block and other containers can be stored on
-    // PaintPropertyTreeBuilderContext instead of recomputing them.
-    context.current.paintOffset.moveBy(toLayoutBox(object).physicalLocation());
+    // PaintPropertyTreeBuilderFragmentContext instead of recomputing them.
+    context.current.paint_offset.MoveBy(ToLayoutBox(object).PhysicalLocation());
     // This is a weird quirk that table cells paint as children of table rows,
     // but their location have the row's location baked-in.
     // Similar adjustment is done in LayoutTableCell::offsetFromContainer().
-    if (object.isTableCell()) {
-      LayoutObject* parentRow = object.parent();
-      DCHECK(parentRow && parentRow->isTableRow());
-      context.current.paintOffset.moveBy(
-          -toLayoutBox(parentRow)->physicalLocation());
+    if (object.IsTableCell()) {
+      LayoutObject* parent_row = object.Parent();
+      DCHECK(parent_row && parent_row->IsTableRow());
+      context.current.paint_offset.MoveBy(
+          -ToLayoutBox(parent_row)->PhysicalLocation());
     }
   }
 }
 
-void PaintPropertyTreeBuilder::updateForObjectLocationAndSize(
+void PaintPropertyTreeBuilder::UpdateForObjectLocationAndSize(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  if (object.isBoxModelObject()) {
-    updatePaintOffset(toLayoutBoxModelObject(object), context);
-    updatePaintOffsetTranslation(toLayoutBoxModelObject(object), context);
+    const LayoutObject* container_for_absolute_position,
+    bool& is_actually_needed,
+    PaintPropertyTreeBuilderFragmentContext& context,
+    bool& force_subtree_update) {
+#if DCHECK_IS_ON()
+  FindPaintOffsetNeedingUpdateScope check_scope(object, is_actually_needed);
+#endif
+
+  if (object.IsBoxModelObject()) {
+    UpdatePaintOffset(ToLayoutBoxModelObject(object), context,
+                      container_for_absolute_position);
+    UpdatePaintOffsetTranslation(ToLayoutBoxModelObject(object), context,
+                                 force_subtree_update);
   }
 
-  if (object.paintOffset() != context.current.paintOffset) {
+  if (object.PaintOffset() != context.current.paint_offset) {
     // Many paint properties depend on paint offset so we force an update of
     // the entire subtree on paint offset changes.
-    context.forceSubtreeUpdate = true;
+    force_subtree_update = true;
 
-    if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
-      object.getMutableForPainting().setShouldDoFullPaintInvalidation(
-          PaintInvalidationLocationChange);
+    if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+      object.GetMutableForPainting().SetShouldDoFullPaintInvalidation(
+          PaintInvalidationReason::kGeometry);
     }
-    object.getMutableForPainting().setPaintOffset(context.current.paintOffset);
+    object.GetMutableForPainting().SetPaintOffset(context.current.paint_offset);
   }
 
-  if (!object.isBox())
+  if (!object.IsBox())
     return;
-  const LayoutBox& box = toLayoutBox(object);
-  if (box.size() == box.previousSize())
+  const LayoutBox& box = ToLayoutBox(object);
+  if (box.Size() == box.PreviousSize())
     return;
 
+  // CSS mask and clip-path comes with an implicit clip to the border box.
+  // Currently only SPv2 generate and take advantage of those.
+  const bool box_generates_property_nodes_for_mask_and_clip_path =
+      RuntimeEnabledFeatures::SlimmingPaintV2Enabled() &&
+      (box.HasMask() || box.HasClipPath());
   // The overflow clip paint property depends on the border box rect through
   // overflowClipRect(). The border box rect's size equals the frame rect's
   // size so we trigger a paint property update when the frame rect changes.
-  if (box.shouldClipOverflow() ||
+  if (box.ShouldClipOverflow() ||
       // The used value of CSS clip may depend on size of the box, e.g. for
       // clip: rect(auto auto auto -5px).
-      box.hasClip() ||
+      box.HasClip() ||
       // Relative lengths (e.g., percentage values) in transform, perspective,
       // transform-origin, and perspective-origin can depend on the size of the
       // frame rect, so force a property update if it changes. TODO(pdr): We
       // only need to update properties if there are relative lengths.
-      box.styleRef().hasTransform() || box.styleRef().hasPerspective())
-    box.getMutableForPainting().setNeedsPaintPropertyUpdate();
+      box.StyleRef().HasTransform() || box.StyleRef().HasPerspective() ||
+      box_generates_property_nodes_for_mask_and_clip_path)
+    box.GetMutableForPainting().SetNeedsPaintPropertyUpdate();
 }
 
-void PaintPropertyTreeBuilder::updatePropertiesForSelf(
+void PaintPropertyTreeBuilder::UpdatePaintProperties(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
-  // This is not in FindObjectPropertiesNeedingUpdateScope because paint offset
-  // can change without needsPaintPropertyUpdate.
-  updateForObjectLocationAndSize(object, context);
+    PaintPropertyTreeBuilderContext& full_context) {
+  bool needs_paint_properties =
+      NeedsPaintOffsetTranslation(object) || NeedsTransform(object) ||
+      NeedsEffect(object) || NeedsTransformForNonRootSVG(object) ||
+      NeedsFilter(object) || NeedsCssClip(object) ||
+      NeedsScrollbarPaintOffset(object) || NeedsOverflowClip(object) ||
+      NeedsPerspective(object) || NeedsSVGLocalToBorderBoxTransform(object) ||
+      NeedsScrollTranslation(object);
 
-#if DCHECK_IS_ON()
-  FindObjectPropertiesNeedingUpdateScope checkNeedsUpdateScope(object, context);
-#endif
+  bool had_paint_properties = object.PaintProperties();
 
-  if (object.isBoxModelObject() || object.isSVG()) {
-    updateTransform(object, context);
-    if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
-      updateEffect(object, context);
-      updateFilter(object, context);
-    }
-    updateCssClip(object, context);
-    updateLocalBorderBoxContext(object, context);
-    if (RuntimeEnabledFeatures::slimmingPaintV2Enabled())
-      updateScrollbarPaintOffset(object, context);
+  if (needs_paint_properties && !had_paint_properties) {
+    object.GetMutableForPainting().EnsurePaintProperties();
+  } else if (!needs_paint_properties && had_paint_properties) {
+    object.GetMutableForPainting().ClearPaintProperties();
+    full_context.force_subtree_update = true;
   }
 }
 
-void PaintPropertyTreeBuilder::updatePropertiesForChildren(
+static inline bool ObjectTypeMightNeedPaintProperties(
+    const LayoutObject& object) {
+  return object.IsBoxModelObject() || object.IsSVG();
+}
+
+void PaintPropertyTreeBuilder::UpdatePropertiesForSelf(
     const LayoutObject& object,
-    PaintPropertyTreeBuilderContext& context) {
+    PaintPropertyTreeBuilderContext& full_context) {
+  PaintPropertyTreeBuilderFragmentContext& context = full_context.fragments[0];
+  if (object.IsSVGHiddenContainer()) {
+    // SVG resources are painted within one or more other locations in the
+    // SVG during paint, and hence have their own independent paint property
+    // trees, paint offset, etc.
+    context = PaintPropertyTreeBuilderFragmentContext();
+  }
+
+  if (ObjectTypeMightNeedPaintProperties(object))
+    UpdatePaintProperties(object, full_context);
+
+  bool is_actually_needed = false;
 #if DCHECK_IS_ON()
-  FindObjectPropertiesNeedingUpdateScope checkNeedsUpdateScope(object, context);
+  is_actually_needed = full_context.is_actually_needed;
 #endif
 
-  if (!object.isBoxModelObject() && !object.isSVG())
+  // This is not in FindObjectPropertiesNeedingUpdateScope because paint offset
+  // can change without needsPaintPropertyUpdate.
+  UpdateForObjectLocationAndSize(
+      object, full_context.container_for_absolute_position, is_actually_needed,
+      context, full_context.force_subtree_update);
+
+#if DCHECK_IS_ON()
+  FindObjectPropertiesNeedingUpdateScope check_needs_update_scope(
+      object, full_context.force_subtree_update);
+#endif
+
+  if (object.PaintProperties()) {
+    ObjectPaintProperties* properties =
+        object.GetMutableForPainting().PaintProperties();
+    UpdateTransform(object, *properties, context,
+                    full_context.force_subtree_update);
+    UpdateCssClip(object, *properties, context,
+                  full_context.force_subtree_update, full_context.clip_changed);
+    if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+      UpdateEffect(object, *properties, context,
+                   full_context.force_subtree_update,
+                   full_context.clip_changed);
+      UpdateFilter(object, *properties, context,
+                   full_context.force_subtree_update);
+    }
+  }
+  UpdateLocalBorderBoxContext(object, context,
+                              full_context.force_subtree_update);
+  if (object.PaintProperties()) {
+    ObjectPaintProperties* properties =
+        object.GetMutableForPainting().PaintProperties();
+    if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+      UpdateScrollbarPaintOffset(object, *properties, context,
+                                 full_context.force_subtree_update);
+    }
+  }
+}
+
+void PaintPropertyTreeBuilder::UpdatePropertiesForChildren(
+    const LayoutObject& object,
+    PaintPropertyTreeBuilderContext& context) {
+  if (!ObjectTypeMightNeedPaintProperties(object))
     return;
 
-  updateOverflowClip(object, context);
-  updatePerspective(object, context);
-  updateSvgLocalToBorderBoxTransform(object, context);
-  updateScrollAndScrollTranslation(object, context);
-  updateOutOfFlowContext(object, context);
+  for (auto& fragment_context : context.fragments) {
+#if DCHECK_IS_ON()
+    FindObjectPropertiesNeedingUpdateScope check_needs_update_scope(
+        object, context.force_subtree_update);
+#endif
 
-  context.forceSubtreeUpdate |= object.subtreeNeedsPaintPropertyUpdate();
+    if (object.PaintProperties()) {
+      ObjectPaintProperties* properties =
+          object.GetMutableForPainting().PaintProperties();
+      UpdateOverflowClip(object, *properties, fragment_context,
+                         context.force_subtree_update, context.clip_changed);
+      UpdatePerspective(object, *properties, fragment_context,
+                        context.force_subtree_update);
+      UpdateSvgLocalToBorderBoxTransform(object, *properties, fragment_context,
+                                         context.force_subtree_update);
+      UpdateScrollAndScrollTranslation(object, *properties, fragment_context,
+                                       context.force_subtree_update);
+    }
+
+    UpdateOutOfFlowContext(object, fragment_context,
+                           context.force_subtree_update);
+
+    context.force_subtree_update |= object.SubtreeNeedsPaintPropertyUpdate();
+  }
+
+  if (object.CanContainAbsolutePositionObjects())
+    context.container_for_absolute_position = &object;
 }
 
 }  // namespace blink

@@ -53,7 +53,8 @@ VideoCodec VideoCodecProfileToVideoCodec(VideoCodecProfile profile) {
 VideoDecoderConfig::VideoDecoderConfig()
     : codec_(kUnknownVideoCodec),
       profile_(VIDEO_CODEC_PROFILE_UNKNOWN),
-      format_(PIXEL_FORMAT_UNKNOWN) {}
+      format_(PIXEL_FORMAT_UNKNOWN),
+      color_space_(COLOR_SPACE_UNSPECIFIED) {}
 
 VideoDecoderConfig::VideoDecoderConfig(
     VideoCodec codec,
@@ -75,11 +76,11 @@ VideoDecoderConfig::VideoDecoderConfig(const VideoDecoderConfig& other) =
 VideoDecoderConfig::~VideoDecoderConfig() {}
 
 void VideoDecoderConfig::set_color_space_info(
-    const gfx::ColorSpace& color_space_info) {
+    const VideoColorSpace& color_space_info) {
   color_space_info_ = color_space_info;
 }
 
-gfx::ColorSpace VideoDecoderConfig::color_space_info() const {
+const VideoColorSpace& VideoDecoderConfig::color_space_info() const {
   return color_space_info_;
 }
 
@@ -87,7 +88,7 @@ void VideoDecoderConfig::set_hdr_metadata(const HDRMetadata& hdr_metadata) {
   hdr_metadata_ = hdr_metadata;
 }
 
-base::Optional<HDRMetadata> VideoDecoderConfig::hdr_metadata() const {
+const base::Optional<HDRMetadata>& VideoDecoderConfig::hdr_metadata() const {
   return hdr_metadata_;
 }
 
@@ -112,13 +113,13 @@ void VideoDecoderConfig::Initialize(VideoCodec codec,
 
   switch (color_space) {
     case ColorSpace::COLOR_SPACE_JPEG:
-      color_space_info_ = gfx::ColorSpace::CreateJpeg();
+      color_space_info_ = VideoColorSpace::JPEG();
       break;
     case ColorSpace::COLOR_SPACE_HD_REC709:
-      color_space_info_ = gfx::ColorSpace::CreateREC709();
+      color_space_info_ = VideoColorSpace::REC709();
       break;
     case ColorSpace::COLOR_SPACE_SD_REC601:
-      color_space_info_ = gfx::ColorSpace::CreateREC601();
+      color_space_info_ = VideoColorSpace::REC601();
       break;
     case ColorSpace::COLOR_SPACE_UNSPECIFIED:
     default:

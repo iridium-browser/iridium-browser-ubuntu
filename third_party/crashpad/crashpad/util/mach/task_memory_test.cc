@@ -25,6 +25,7 @@
 #include "base/mac/scoped_mach_vm.h"
 #include "gtest/gtest.h"
 #include "test/mac/mach_errors.h"
+#include "util/misc/from_pointer_cast.h"
 
 namespace crashpad {
 namespace test {
@@ -35,7 +36,7 @@ TEST(TaskMemory, ReadSelf) {
   const vm_size_t kSize = 4 * PAGE_SIZE;
   kern_return_t kr =
       vm_allocate(mach_task_self(), &address, kSize, VM_FLAGS_ANYWHERE);
-  ASSERT_EQ(KERN_SUCCESS, kr) << MachErrorMessage(kr, "vm_allocate");
+  ASSERT_EQ(kr, KERN_SUCCESS) << MachErrorMessage(kr, "vm_allocate");
   base::mac::ScopedMachVM vm_owner(address, mach_vm_round_page(kSize));
 
   char* region = reinterpret_cast<char*>(address);
@@ -51,51 +52,51 @@ TEST(TaskMemory, ReadSelf) {
 
   // Ensure that the entire region can be read.
   ASSERT_TRUE(memory.Read(address, kSize, &result[0]));
-  EXPECT_EQ(0, memcmp(region, &result[0], kSize));
+  EXPECT_EQ(memcmp(region, &result[0], kSize), 0);
   ASSERT_TRUE((mapped = memory.ReadMapped(address, kSize)));
-  EXPECT_EQ(0, memcmp(region, mapped->data(), kSize));
+  EXPECT_EQ(memcmp(region, mapped->data(), kSize), 0);
 
   // Ensure that a read of length 0 succeeds and doesn’t touch the result.
   result.assign(kSize, '\0');
   std::string zeroes = result;
   ASSERT_TRUE(memory.Read(address, 0, &result[0]));
-  EXPECT_EQ(zeroes, result);
+  EXPECT_EQ(result, zeroes);
   ASSERT_TRUE((mapped = memory.ReadMapped(address, 0)));
 
   // Ensure that a read starting at an unaligned address works.
   ASSERT_TRUE(memory.Read(address + 1, kSize - 1, &result[0]));
-  EXPECT_EQ(0, memcmp(region + 1, &result[0], kSize - 1));
+  EXPECT_EQ(memcmp(region + 1, &result[0], kSize - 1), 0);
   ASSERT_TRUE((mapped = memory.ReadMapped(address + 1, kSize - 1)));
-  EXPECT_EQ(0, memcmp(region + 1, mapped->data(), kSize - 1));
+  EXPECT_EQ(memcmp(region + 1, mapped->data(), kSize - 1), 0);
 
   // Ensure that a read ending at an unaligned address works.
   ASSERT_TRUE(memory.Read(address, kSize - 1, &result[0]));
-  EXPECT_EQ(0, memcmp(region, &result[0], kSize - 1));
+  EXPECT_EQ(memcmp(region, &result[0], kSize - 1), 0);
   ASSERT_TRUE((mapped = memory.ReadMapped(address, kSize - 1)));
-  EXPECT_EQ(0, memcmp(region, mapped->data(), kSize - 1));
+  EXPECT_EQ(memcmp(region, mapped->data(), kSize - 1), 0);
 
   // Ensure that a read starting and ending at unaligned addresses works.
   ASSERT_TRUE(memory.Read(address + 1, kSize - 2, &result[0]));
-  EXPECT_EQ(0, memcmp(region + 1, &result[0], kSize - 2));
+  EXPECT_EQ(memcmp(region + 1, &result[0], kSize - 2), 0);
   ASSERT_TRUE((mapped = memory.ReadMapped(address + 1, kSize - 2)));
-  EXPECT_EQ(0, memcmp(region + 1, mapped->data(), kSize - 2));
+  EXPECT_EQ(memcmp(region + 1, mapped->data(), kSize - 2), 0);
 
   // Ensure that a read of exactly one page works.
   ASSERT_TRUE(memory.Read(address + PAGE_SIZE, PAGE_SIZE, &result[0]));
-  EXPECT_EQ(0, memcmp(region + PAGE_SIZE, &result[0], PAGE_SIZE));
+  EXPECT_EQ(memcmp(region + PAGE_SIZE, &result[0], PAGE_SIZE), 0);
   ASSERT_TRUE((mapped = memory.ReadMapped(address + PAGE_SIZE, PAGE_SIZE)));
-  EXPECT_EQ(0, memcmp(region + PAGE_SIZE, mapped->data(), PAGE_SIZE));
+  EXPECT_EQ(memcmp(region + PAGE_SIZE, mapped->data(), PAGE_SIZE), 0);
 
   // Ensure that a read of a single byte works.
   ASSERT_TRUE(memory.Read(address + 2, 1, &result[0]));
-  EXPECT_EQ(region[2], result[0]);
+  EXPECT_EQ(result[0], region[2]);
   ASSERT_TRUE((mapped = memory.ReadMapped(address + 2, 1)));
-  EXPECT_EQ(region[2], reinterpret_cast<const char*>(mapped->data())[0]);
+  EXPECT_EQ(reinterpret_cast<const char*>(mapped->data())[0], region[2]);
 
   // Ensure that a read of length zero works and doesn’t touch the data.
   result[0] = 'M';
   ASSERT_TRUE(memory.Read(address + 3, 0, &result[0]));
-  EXPECT_EQ('M', result[0]);
+  EXPECT_EQ(result[0], 'M');
   ASSERT_TRUE((mapped = memory.ReadMapped(address + 3, 0)));
 }
 
@@ -104,7 +105,7 @@ TEST(TaskMemory, ReadSelfUnmapped) {
   const vm_size_t kSize = 2 * PAGE_SIZE;
   kern_return_t kr =
       vm_allocate(mach_task_self(), &address, kSize, VM_FLAGS_ANYWHERE);
-  ASSERT_EQ(KERN_SUCCESS, kr) << MachErrorMessage(kr, "vm_allocate");
+  ASSERT_EQ(kr, KERN_SUCCESS) << MachErrorMessage(kr, "vm_allocate");
   base::mac::ScopedMachVM vm_owner(address, mach_vm_round_page(kSize));
 
   char* region = reinterpret_cast<char*>(address);
@@ -116,7 +117,7 @@ TEST(TaskMemory, ReadSelfUnmapped) {
 
   kr = vm_protect(
       mach_task_self(), address + PAGE_SIZE, PAGE_SIZE, FALSE, VM_PROT_NONE);
-  ASSERT_EQ(KERN_SUCCESS, kr) << MachErrorMessage(kr, "vm_protect");
+  ASSERT_EQ(kr, KERN_SUCCESS) << MachErrorMessage(kr, "vm_protect");
 
   TaskMemory memory(mach_task_self());
   std::string result(kSize, '\0');
@@ -141,7 +142,7 @@ TEST(TaskMemory, ReadSelfUnmapped) {
   // portion of the test may be flaky in the presence of other threads, if
   // another thread maps something in the region that is deallocated here.
   kr = vm_deallocate(mach_task_self(), address + PAGE_SIZE, PAGE_SIZE);
-  ASSERT_EQ(KERN_SUCCESS, kr) << MachErrorMessage(kr, "vm_deallocate");
+  ASSERT_EQ(kr, KERN_SUCCESS) << MachErrorMessage(kr, "vm_deallocate");
   vm_owner.reset(address, PAGE_SIZE);
 
   EXPECT_FALSE(memory.Read(address, kSize, &result[0]));
@@ -165,7 +166,7 @@ TEST(TaskMemory, ReadSelfUnmapped) {
 bool ReadCStringSelf(TaskMemory* memory,
                      const char* pointer,
                      std::string* result) {
-  return memory->ReadCString(reinterpret_cast<mach_vm_address_t>(pointer),
+  return memory->ReadCString(FromPointerCast<mach_vm_address_t>(pointer),
                              result);
 }
 
@@ -176,27 +177,27 @@ TEST(TaskMemory, ReadCStringSelf) {
   const char kConstCharEmpty[] = "";
   ASSERT_TRUE(ReadCStringSelf(&memory, kConstCharEmpty, &result));
   EXPECT_TRUE(result.empty());
-  EXPECT_EQ(kConstCharEmpty, result);
+  EXPECT_EQ(result, kConstCharEmpty);
 
   const char kConstCharShort[] = "A short const char[]";
   ASSERT_TRUE(ReadCStringSelf(&memory, kConstCharShort, &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(kConstCharShort, result);
+  EXPECT_EQ(result, kConstCharShort);
 
   static const char kStaticConstCharEmpty[] = "";
   ASSERT_TRUE(ReadCStringSelf(&memory, kStaticConstCharEmpty, &result));
   EXPECT_TRUE(result.empty());
-  EXPECT_EQ(kStaticConstCharEmpty, result);
+  EXPECT_EQ(result, kStaticConstCharEmpty);
 
   static const char kStaticConstCharShort[] = "A short static const char[]";
   ASSERT_TRUE(ReadCStringSelf(&memory, kStaticConstCharShort, &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(kStaticConstCharShort, result);
+  EXPECT_EQ(result, kStaticConstCharShort);
 
   std::string string_short("A short std::string in a function");
   ASSERT_TRUE(ReadCStringSelf(&memory, &string_short[0], &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(string_short, result);
+  EXPECT_EQ(result, string_short);
 
   std::string string_long;
   const size_t kStringLongSize = 4 * PAGE_SIZE;
@@ -205,11 +206,11 @@ TEST(TaskMemory, ReadCStringSelf) {
     // a NUL.
     string_long.append(1, (index % 255) + 1);
   }
-  ASSERT_EQ(kStringLongSize, string_long.size());
+  ASSERT_EQ(string_long.size(), kStringLongSize);
   ASSERT_TRUE(ReadCStringSelf(&memory, &string_long[0], &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(kStringLongSize, result.size());
-  EXPECT_EQ(string_long, result);
+  EXPECT_EQ(result.size(), kStringLongSize);
+  EXPECT_EQ(result, string_long);
 }
 
 TEST(TaskMemory, ReadCStringSelfUnmapped) {
@@ -217,7 +218,7 @@ TEST(TaskMemory, ReadCStringSelfUnmapped) {
   const vm_size_t kSize = 2 * PAGE_SIZE;
   kern_return_t kr =
       vm_allocate(mach_task_self(), &address, kSize, VM_FLAGS_ANYWHERE);
-  ASSERT_EQ(KERN_SUCCESS, kr) << MachErrorMessage(kr, "vm_allocate");
+  ASSERT_EQ(kr, KERN_SUCCESS) << MachErrorMessage(kr, "vm_allocate");
   base::mac::ScopedMachVM vm_owner(address, mach_vm_round_page(kSize));
 
   char* region = reinterpret_cast<char*>(address);
@@ -229,7 +230,7 @@ TEST(TaskMemory, ReadCStringSelfUnmapped) {
 
   kr = vm_protect(
       mach_task_self(), address + PAGE_SIZE, PAGE_SIZE, FALSE, VM_PROT_NONE);
-  ASSERT_EQ(KERN_SUCCESS, kr) << MachErrorMessage(kr, "vm_protect");
+  ASSERT_EQ(kr, KERN_SUCCESS) << MachErrorMessage(kr, "vm_protect");
 
   TaskMemory memory(mach_task_self());
   std::string result;
@@ -241,15 +242,15 @@ TEST(TaskMemory, ReadCStringSelfUnmapped) {
   std::swap(region[PAGE_SIZE - 1], terminator_or_not);
   ASSERT_TRUE(memory.ReadCString(address, &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(PAGE_SIZE - 1u, result.size());
-  EXPECT_EQ(region, result);
+  EXPECT_EQ(result.size(), PAGE_SIZE - 1u);
+  EXPECT_EQ(result, region);
 
   // Repeat the test with an unmapped page instead of an unreadable one. This
   // portion of the test may be flaky in the presence of other threads, if
   // another thread maps something in the region that is deallocated here.
   std::swap(region[PAGE_SIZE - 1], terminator_or_not);
   kr = vm_deallocate(mach_task_self(), address + PAGE_SIZE, PAGE_SIZE);
-  ASSERT_EQ(KERN_SUCCESS, kr) << MachErrorMessage(kr, "vm_deallocate");
+  ASSERT_EQ(kr, KERN_SUCCESS) << MachErrorMessage(kr, "vm_deallocate");
   vm_owner.reset(address, PAGE_SIZE);
 
   EXPECT_FALSE(memory.ReadCString(address, &result));
@@ -261,8 +262,8 @@ TEST(TaskMemory, ReadCStringSelfUnmapped) {
   std::swap(region[PAGE_SIZE - 1], terminator_or_not);
   ASSERT_TRUE(memory.ReadCString(address, &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(PAGE_SIZE - 1u, result.size());
-  EXPECT_EQ(region, result);
+  EXPECT_EQ(result.size(), PAGE_SIZE - 1u);
+  EXPECT_EQ(result, region);
 }
 
 // This function consolidates the cast from a char* to mach_vm_address_t in one
@@ -272,7 +273,7 @@ bool ReadCStringSizeLimitedSelf(TaskMemory* memory,
                                 size_t size,
                                 std::string* result) {
   return memory->ReadCStringSizeLimited(
-      reinterpret_cast<mach_vm_address_t>(pointer), size, result);
+      FromPointerCast<mach_vm_address_t>(pointer), size, result);
 }
 
 TEST(TaskMemory, ReadCStringSizeLimited_ConstCharEmpty) {
@@ -283,18 +284,18 @@ TEST(TaskMemory, ReadCStringSizeLimited_ConstCharEmpty) {
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(
       &memory, kConstCharEmpty, arraysize(kConstCharEmpty), &result));
   EXPECT_TRUE(result.empty());
-  EXPECT_EQ(kConstCharEmpty, result);
+  EXPECT_EQ(result, kConstCharEmpty);
 
   result.clear();
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(
       &memory, kConstCharEmpty, arraysize(kConstCharEmpty) + 1, &result));
   EXPECT_TRUE(result.empty());
-  EXPECT_EQ(kConstCharEmpty, result);
+  EXPECT_EQ(result, kConstCharEmpty);
 
   result.clear();
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(&memory, kConstCharEmpty, 0, &result));
   EXPECT_TRUE(result.empty());
-  EXPECT_EQ(kConstCharEmpty, result);
+  EXPECT_EQ(result, kConstCharEmpty);
 }
 
 TEST(TaskMemory, ReadCStringSizeLimited_ConstCharShort) {
@@ -305,13 +306,13 @@ TEST(TaskMemory, ReadCStringSizeLimited_ConstCharShort) {
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(
       &memory, kConstCharShort, arraysize(kConstCharShort), &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(kConstCharShort, result);
+  EXPECT_EQ(result, kConstCharShort);
 
   result.clear();
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(
       &memory, kConstCharShort, arraysize(kConstCharShort) + 1, &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(kConstCharShort, result);
+  EXPECT_EQ(result, kConstCharShort);
 
   ASSERT_FALSE(ReadCStringSizeLimitedSelf(
       &memory, kConstCharShort, arraysize(kConstCharShort) - 1, &result));
@@ -327,7 +328,7 @@ TEST(TaskMemory, ReadCStringSizeLimited_StaticConstCharEmpty) {
                                          arraysize(kStaticConstCharEmpty),
                                          &result));
   EXPECT_TRUE(result.empty());
-  EXPECT_EQ(kStaticConstCharEmpty, result);
+  EXPECT_EQ(result, kStaticConstCharEmpty);
 
   result.clear();
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(&memory,
@@ -335,13 +336,13 @@ TEST(TaskMemory, ReadCStringSizeLimited_StaticConstCharEmpty) {
                                          arraysize(kStaticConstCharEmpty) + 1,
                                          &result));
   EXPECT_TRUE(result.empty());
-  EXPECT_EQ(kStaticConstCharEmpty, result);
+  EXPECT_EQ(result, kStaticConstCharEmpty);
 
   result.clear();
   ASSERT_TRUE(
       ReadCStringSizeLimitedSelf(&memory, kStaticConstCharEmpty, 0, &result));
   EXPECT_TRUE(result.empty());
-  EXPECT_EQ(kStaticConstCharEmpty, result);
+  EXPECT_EQ(result, kStaticConstCharEmpty);
 }
 
 TEST(TaskMemory, ReadCStringSizeLimited_StaticConstCharShort) {
@@ -354,7 +355,7 @@ TEST(TaskMemory, ReadCStringSizeLimited_StaticConstCharShort) {
                                          arraysize(kStaticConstCharShort),
                                          &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(kStaticConstCharShort, result);
+  EXPECT_EQ(result, kStaticConstCharShort);
 
   result.clear();
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(&memory,
@@ -362,7 +363,7 @@ TEST(TaskMemory, ReadCStringSizeLimited_StaticConstCharShort) {
                                          arraysize(kStaticConstCharShort) + 1,
                                          &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(kStaticConstCharShort, result);
+  EXPECT_EQ(result, kStaticConstCharShort);
 
   ASSERT_FALSE(ReadCStringSizeLimitedSelf(&memory,
                                           kStaticConstCharShort,
@@ -378,13 +379,13 @@ TEST(TaskMemory, ReadCStringSizeLimited_StringShort) {
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(
       &memory, &string_short[0], string_short.size() + 1, &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(string_short, result);
+  EXPECT_EQ(result, string_short);
 
   result.clear();
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(
       &memory, &string_short[0], string_short.size() + 2, &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(string_short, result);
+  EXPECT_EQ(result, string_short);
 
   ASSERT_FALSE(ReadCStringSizeLimitedSelf(
       &memory, &string_short[0], string_short.size(), &result));
@@ -401,19 +402,19 @@ TEST(TaskMemory, ReadCStringSizeLimited_StringLong) {
     // a NUL.
     string_long.append(1, (index % 255) + 1);
   }
-  ASSERT_EQ(kStringLongSize, string_long.size());
+  ASSERT_EQ(string_long.size(), kStringLongSize);
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(
       &memory, &string_long[0], string_long.size() + 1, &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(kStringLongSize, result.size());
-  EXPECT_EQ(string_long, result);
+  EXPECT_EQ(result.size(), kStringLongSize);
+  EXPECT_EQ(result, string_long);
 
   result.clear();
   ASSERT_TRUE(ReadCStringSizeLimitedSelf(
       &memory, &string_long[0], string_long.size() + 2, &result));
   EXPECT_FALSE(result.empty());
-  EXPECT_EQ(kStringLongSize, result.size());
-  EXPECT_EQ(string_long, result);
+  EXPECT_EQ(result.size(), kStringLongSize);
+  EXPECT_EQ(result, string_long);
 
   ASSERT_FALSE(ReadCStringSizeLimitedSelf(
       &memory, &string_long[0], string_long.size(), &result));
@@ -462,9 +463,9 @@ TEST(TaskMemory, MappedMemoryDeallocates) {
 
   static const char kTestBuffer[] = "hello!";
   mach_vm_address_t test_address =
-      reinterpret_cast<mach_vm_address_t>(&kTestBuffer);
+      FromPointerCast<mach_vm_address_t>(&kTestBuffer);
   ASSERT_TRUE((mapped = memory.ReadMapped(test_address, sizeof(kTestBuffer))));
-  EXPECT_EQ(0, memcmp(kTestBuffer, mapped->data(), sizeof(kTestBuffer)));
+  EXPECT_EQ(memcmp(kTestBuffer, mapped->data(), sizeof(kTestBuffer)), 0);
 
   vm_address_t mapped_address = reinterpret_cast<vm_address_t>(mapped->data());
   EXPECT_TRUE(IsAddressMapped(mapped_address));
@@ -477,7 +478,7 @@ TEST(TaskMemory, MappedMemoryDeallocates) {
   // deallocated.
   const size_t kBigSize = 4 * PAGE_SIZE;
   std::unique_ptr<char[]> big_buffer(new char[kBigSize]);
-  test_address = reinterpret_cast<mach_vm_address_t>(&big_buffer[0]);
+  test_address = FromPointerCast<mach_vm_address_t>(&big_buffer[0]);
   ASSERT_TRUE((mapped = memory.ReadMapped(test_address, kBigSize)));
 
   mapped_address = reinterpret_cast<vm_address_t>(mapped->data());
@@ -499,24 +500,24 @@ TEST(TaskMemory, MappedMemoryReadCString) {
 
   static const char kTestBuffer[] = "0\0" "2\0" "45\0" "789";
   const mach_vm_address_t kTestAddress =
-      reinterpret_cast<mach_vm_address_t>(&kTestBuffer);
+      FromPointerCast<mach_vm_address_t>(&kTestBuffer);
   ASSERT_TRUE((mapped = memory.ReadMapped(kTestAddress, 10)));
 
   std::string string;
   ASSERT_TRUE(mapped->ReadCString(0, &string));
-  EXPECT_EQ("0", string);
+  EXPECT_EQ(string, "0");
   ASSERT_TRUE(mapped->ReadCString(1, &string));
-  EXPECT_EQ("", string);
+  EXPECT_EQ(string, "");
   ASSERT_TRUE(mapped->ReadCString(2, &string));
-  EXPECT_EQ("2", string);
+  EXPECT_EQ(string, "2");
   ASSERT_TRUE(mapped->ReadCString(3, &string));
-  EXPECT_EQ("", string);
+  EXPECT_EQ(string, "");
   ASSERT_TRUE(mapped->ReadCString(4, &string));
-  EXPECT_EQ("45", string);
+  EXPECT_EQ(string, "45");
   ASSERT_TRUE(mapped->ReadCString(5, &string));
-  EXPECT_EQ("5", string);
+  EXPECT_EQ(string, "5");
   ASSERT_TRUE(mapped->ReadCString(6, &string));
-  EXPECT_EQ("", string);
+  EXPECT_EQ(string, "");
 
   // kTestBuffer’s NUL terminator was not read, so these will see an
   // unterminated string and fail.
@@ -533,17 +534,17 @@ TEST(TaskMemory, MappedMemoryReadCString) {
   ASSERT_TRUE((mapped = memory.ReadMapped(kTestAddress, 11)));
 
   ASSERT_TRUE(mapped->ReadCString(6, &string));
-  EXPECT_EQ("", string);
+  EXPECT_EQ(string, "");
 
   // These should now succeed.
   ASSERT_TRUE(mapped->ReadCString(7, &string));
-  EXPECT_EQ("789", string);
+  EXPECT_EQ(string, "789");
   ASSERT_TRUE(mapped->ReadCString(8, &string));
-  EXPECT_EQ("89", string);
+  EXPECT_EQ(string, "89");
   ASSERT_TRUE(mapped->ReadCString(9, &string));
-  EXPECT_EQ("9", string);
+  EXPECT_EQ(string, "9");
   EXPECT_TRUE(mapped->ReadCString(10, &string));
-  EXPECT_EQ("", string);
+  EXPECT_EQ(string, "");
 
   // These are still out of range.
   EXPECT_FALSE(mapped->ReadCString(11, &string));

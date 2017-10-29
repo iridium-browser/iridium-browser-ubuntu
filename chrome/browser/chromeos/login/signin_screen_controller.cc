@@ -49,18 +49,17 @@ SignInScreenController::~SignInScreenController() {
   instance_ = nullptr;
 }
 
-void SignInScreenController::Init(const user_manager::UserList& users,
-                                  bool show_guest) {
+void SignInScreenController::Init(const user_manager::UserList& users) {
   // TODO(antrim) : This dependency should be inverted, screen should ask about
   // users.
-  user_selection_screen_->Init(users, show_guest);
+  user_selection_screen_->Init(users);
 }
 
 void SignInScreenController::OnSigninScreenReady() {
   gaia_screen_->MaybePreloadAuthExtension();
   user_selection_screen_->InitEasyUnlock();
   if (ScreenLocker::default_screen_locker())
-    ScreenLocker::default_screen_locker()->web_ui()->OnLockWebUIReady();
+    ScreenLocker::default_screen_locker()->delegate()->OnLockWebUIReady();
 }
 
 void SignInScreenController::RemoveUser(const AccountId& account_id) {

@@ -4,6 +4,8 @@
 
 #include "content/browser/screen_orientation/screen_orientation_provider.h"
 
+#include <utility>
+
 #include "base/callback_helpers.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -28,12 +30,12 @@ ScreenOrientationProvider::~ScreenOrientationProvider() = default;
 
 void ScreenOrientationProvider::LockOrientation(
     blink::WebScreenOrientationLockType orientation,
-    const LockOrientationCallback& callback) {
+    LockOrientationCallback callback) {
   // Cancel any pending lock request.
   NotifyLockResult(ScreenOrientationLockResult::
                        SCREEN_ORIENTATION_LOCK_RESULT_ERROR_CANCELED);
   // Record new pending lock request.
-  pending_callback_ = callback;
+  pending_callback_ = std::move(callback);
 
   if (!delegate_ || !delegate_->ScreenOrientationProviderSupported()) {
     NotifyLockResult(ScreenOrientationLockResult::
@@ -58,9 +60,9 @@ void ScreenOrientationProvider::LockOrientation(
     }
   }
 
-  if (orientation == blink::WebScreenOrientationLockNatural) {
+  if (orientation == blink::kWebScreenOrientationLockNatural) {
     orientation = GetNaturalLockType();
-    if (orientation == blink::WebScreenOrientationLockDefault) {
+    if (orientation == blink::kWebScreenOrientationLockDefault) {
       // We are in a broken state, let's pretend we got canceled.
       NotifyLockResult(ScreenOrientationLockResult::
                            SCREEN_ORIENTATION_LOCK_RESULT_ERROR_CANCELED);
@@ -137,7 +139,8 @@ void ScreenOrientationProvider::DidToggleFullscreenModeForTab(
 void ScreenOrientationProvider::DidFinishNavigation(
     NavigationHandle* navigation_handle) {
   if (!navigation_handle->IsInMainFrame() ||
-      !navigation_handle->HasCommitted() || navigation_handle->IsSamePage()) {
+      !navigation_handle->HasCommitted() ||
+      navigation_handle->IsSameDocument()) {
     return;
   }
   UnlockOrientation();
@@ -147,7 +150,7 @@ blink::WebScreenOrientationLockType
 ScreenOrientationProvider::GetNaturalLockType() const {
   RenderWidgetHost* rwh = web_contents()->GetRenderViewHost()->GetWidget();
   if (!rwh)
-    return blink::WebScreenOrientationLockDefault;
+    return blink::kWebScreenOrientationLockDefault;
 
   ScreenInfo screen_info;
   rwh->GetScreenInfo(&screen_info);
@@ -157,22 +160,22 @@ ScreenOrientationProvider::GetNaturalLockType() const {
     case SCREEN_ORIENTATION_VALUES_PORTRAIT_SECONDARY:
       if (screen_info.orientation_angle == 0 ||
           screen_info.orientation_angle == 180) {
-        return blink::WebScreenOrientationLockPortraitPrimary;
+        return blink::kWebScreenOrientationLockPortraitPrimary;
       }
-      return blink::WebScreenOrientationLockLandscapePrimary;
+      return blink::kWebScreenOrientationLockLandscapePrimary;
     case SCREEN_ORIENTATION_VALUES_LANDSCAPE_PRIMARY:
     case SCREEN_ORIENTATION_VALUES_LANDSCAPE_SECONDARY:
       if (screen_info.orientation_angle == 0 ||
           screen_info.orientation_angle == 180) {
-        return blink::WebScreenOrientationLockLandscapePrimary;
+        return blink::kWebScreenOrientationLockLandscapePrimary;
       }
-      return blink::WebScreenOrientationLockPortraitPrimary;
+      return blink::kWebScreenOrientationLockPortraitPrimary;
     default:
       break;
   }
 
   NOTREACHED();
-  return blink::WebScreenOrientationLockDefault;
+  return blink::kWebScreenOrientationLockDefault;
 }
 
 bool ScreenOrientationProvider::LockMatchesCurrentOrientation(
@@ -185,32 +188,32 @@ bool ScreenOrientationProvider::LockMatchesCurrentOrientation(
   rwh->GetScreenInfo(&screen_info);
 
   switch (lock) {
-    case blink::WebScreenOrientationLockPortraitPrimary:
+    case blink::kWebScreenOrientationLockPortraitPrimary:
       return screen_info.orientation_type ==
              SCREEN_ORIENTATION_VALUES_PORTRAIT_PRIMARY;
-    case blink::WebScreenOrientationLockPortraitSecondary:
+    case blink::kWebScreenOrientationLockPortraitSecondary:
       return screen_info.orientation_type ==
              SCREEN_ORIENTATION_VALUES_PORTRAIT_SECONDARY;
-    case blink::WebScreenOrientationLockLandscapePrimary:
+    case blink::kWebScreenOrientationLockLandscapePrimary:
       return screen_info.orientation_type ==
              SCREEN_ORIENTATION_VALUES_LANDSCAPE_PRIMARY;
-    case blink::WebScreenOrientationLockLandscapeSecondary:
+    case blink::kWebScreenOrientationLockLandscapeSecondary:
       return screen_info.orientation_type ==
              SCREEN_ORIENTATION_VALUES_LANDSCAPE_SECONDARY;
-    case blink::WebScreenOrientationLockLandscape:
+    case blink::kWebScreenOrientationLockLandscape:
       return screen_info.orientation_type ==
                  SCREEN_ORIENTATION_VALUES_LANDSCAPE_PRIMARY ||
              screen_info.orientation_type ==
                  SCREEN_ORIENTATION_VALUES_LANDSCAPE_SECONDARY;
-    case blink::WebScreenOrientationLockPortrait:
+    case blink::kWebScreenOrientationLockPortrait:
       return screen_info.orientation_type ==
                  SCREEN_ORIENTATION_VALUES_PORTRAIT_PRIMARY ||
              screen_info.orientation_type ==
                  SCREEN_ORIENTATION_VALUES_PORTRAIT_SECONDARY;
-    case blink::WebScreenOrientationLockAny:
+    case blink::kWebScreenOrientationLockAny:
       return true;
-    case blink::WebScreenOrientationLockNatural:
-    case blink::WebScreenOrientationLockDefault:
+    case blink::kWebScreenOrientationLockNatural:
+    case blink::kWebScreenOrientationLockDefault:
       NOTREACHED();
       return false;
   }

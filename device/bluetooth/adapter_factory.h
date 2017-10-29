@@ -25,10 +25,10 @@ class AdapterFactory : public mojom::AdapterFactory {
   static void Create(mojom::AdapterFactoryRequest request);
 
   // mojom::AdapterFactory overrides:
-  void GetAdapter(const GetAdapterCallback& callback) override;
+  void GetAdapter(GetAdapterCallback callback) override;
 
  private:
-  void OnGetAdapter(const GetAdapterCallback& callback,
+  void OnGetAdapter(GetAdapterCallback callback,
                     scoped_refptr<device::BluetoothAdapter> adapter);
 
   base::WeakPtrFactory<AdapterFactory> weak_ptr_factory_;

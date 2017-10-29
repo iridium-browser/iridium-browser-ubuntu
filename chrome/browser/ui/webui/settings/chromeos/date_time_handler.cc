@@ -170,15 +170,12 @@ void DateTimeHandler::NotifyTimezoneAutomaticDetectionPolicy() {
                            ->GetTimezoneResolverManager()
                            ->ShouldApplyResolvedTimezone();
 
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("time-zone-auto-detect-policy"),
-                         base::Value(managed), base::Value(force_enabled));
+  FireWebUIListener("time-zone-auto-detect-policy", base::Value(managed),
+                    base::Value(force_enabled));
 }
 
 void DateTimeHandler::SystemClockCanSetTimeChanged(bool can_set_time) {
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("can-set-date-time-changed"),
-                         base::Value(can_set_time));
+  FireWebUIListener("can-set-date-time-changed", base::Value(can_set_time));
 }
 
 }  // namespace settings

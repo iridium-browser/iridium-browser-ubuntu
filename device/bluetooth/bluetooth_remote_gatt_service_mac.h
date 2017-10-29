@@ -14,6 +14,7 @@
 #include "device/bluetooth/bluetooth_remote_gatt_service.h"
 
 @class CBCharacteristic;
+@class CBDescriptor;
 @class CBPeripheral;
 @class CBService;
 
@@ -22,6 +23,7 @@ namespace device {
 class BluetoothAdapterMac;
 class BluetoothDevice;
 class BluetoothRemoteGattCharacteristicMac;
+class BluetoothRemoteGattDescriptorMac;
 class BluetoothLowEnergyDeviceMac;
 
 class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattServiceMac
@@ -60,16 +62,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattServiceMac
   // Sends notification if this service is ready with all characteristics
   // discovered.
   void SendNotificationIfComplete();
-  // Called by the BluetoothLowEnergyDeviceMac instance when the
-  // characteristics value has been read.
-  void DidUpdateValue(CBCharacteristic* characteristic, NSError* error);
-  // Called by the BluetoothLowEnergyDeviceMac instance when the
-  // characteristics value has been written.
-  void DidWriteValue(CBCharacteristic* characteristic, NSError* error);
-  // Called by the BluetoothLowEnergyDeviceMac instance when the notify session
-  // has been started or failed.
-  void DidUpdateNotificationState(CBCharacteristic* characteristic,
-                                  NSError* error);
   // Returns true if the characteristics has been discovered.
   bool IsDiscoveryComplete() const;
 
@@ -81,7 +73,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattServiceMac
   CBService* GetService() const;
   // Returns a remote characteristic based on the CBCharacteristic.
   BluetoothRemoteGattCharacteristicMac* GetBluetoothRemoteGattCharacteristicMac(
-      CBCharacteristic* characteristic) const;
+      CBCharacteristic* cb_characteristic) const;
+  // Returns a remote descriptor based on the CBDescriptor.
+  BluetoothRemoteGattDescriptorMac* GetBluetoothRemoteGattDescriptorMac(
+      CBDescriptor* cb_descriptor) const;
 
   // bluetooth_device_mac_ owns instances of this class.
   BluetoothLowEnergyDeviceMac* bluetooth_device_mac_;
@@ -96,11 +91,20 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattServiceMac
   std::string identifier_;
   // Service UUID.
   BluetoothUUID uuid_;
-  // Is true if the characteristics has been discovered.
+  // Is true if the characteristics has been discovered and
+  // discovery_pending_count_ is 0.
   bool is_discovery_complete_;
+  // Increased each time DiscoverCharacteristics() is called. And decreased when
+  // DidDiscoverCharacteristics() is called.
+  int discovery_pending_count_;
 
   DISALLOW_COPY_AND_ASSIGN(BluetoothRemoteGattServiceMac);
 };
+
+// Stream operator for logging.
+DEVICE_BLUETOOTH_EXPORT std::ostream& operator<<(
+    std::ostream& out,
+    const BluetoothRemoteGattServiceMac& service);
 
 }  // namespace device
 

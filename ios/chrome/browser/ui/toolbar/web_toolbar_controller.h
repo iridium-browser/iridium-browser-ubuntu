@@ -7,12 +7,14 @@
 
 #import <UIKit/UIKit.h>
 
-#include "ios/chrome/browser/ui/omnibox/location_bar_view_ios.h"
 #include "ios/chrome/browser/ui/omnibox/omnibox_popup_positioner.h"
 #include "ios/chrome/browser/ui/qr_scanner/qr_scanner_view_controller.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
 #include "ios/public/provider/chrome/browser/voice/voice_search_controller_delegate.h"
+#include "ios/web/public/navigation_item_list.h"
 
+@protocol ApplicationCommands;
+@protocol BrowserCommands;
 @protocol PreloadProvider;
 @class Tab;
 @protocol ToolbarFrameDelegate;
@@ -46,9 +48,6 @@ extern const CGFloat kiPhoneOmniboxPlaceholderColorBrightness;
 - (IBAction)locationBarBeganEdit:(id)sender;
 // Called when the stack view controller is about to be shown.
 - (IBAction)prepareToEnterTabSwitcher:(id)sender;
-// Loads the text entered in the location bar as javascript.
-// Note: The JavaScript is executed asynchronously.
-- (void)loadJavaScriptFromLocationBar:(NSString*)script;
 // Returns the WebState.
 - (web::WebState*)currentWebState;
 // Called when the toolbar height changes. Other elements, such as the web view,
@@ -87,11 +86,12 @@ extern const CGFloat kiPhoneOmniboxPlaceholderColorBrightness;
                         QRScannerViewControllerDelegate,
                         VoiceSearchControllerDelegate>
 
-@property(nonatomic, assign) id<WebToolbarDelegate> delegate;
-@property(nonatomic, assign, readonly) id<UrlLoader> urlLoader;
+@property(nonatomic, weak) id<WebToolbarDelegate> delegate;
+@property(nonatomic, weak, readonly) id<UrlLoader> urlLoader;
 
 // Mark inherited initializer as unavailable.
-- (instancetype)initWithStyle:(ToolbarControllerStyle)style NS_UNAVAILABLE;
+- (instancetype)initWithStyle:(ToolbarControllerStyle)style
+                   dispatcher:(id<BrowserCommands>)dispatcher NS_UNAVAILABLE;
 
 // Create a new web toolbar controller whose omnibox is backed by
 // |browserState|.
@@ -99,6 +99,8 @@ extern const CGFloat kiPhoneOmniboxPlaceholderColorBrightness;
                        urlLoader:(id<UrlLoader>)urlLoader
                     browserState:(ios::ChromeBrowserState*)browserState
                  preloadProvider:(id<PreloadProvider>)preloader
+                      dispatcher:
+                          (id<ApplicationCommands, BrowserCommands>)dispatcher
     NS_DESIGNATED_INITIALIZER;
 
 // Called when the browser state this object was initialized with is being
@@ -150,7 +152,7 @@ extern const CGFloat kiPhoneOmniboxPlaceholderColorBrightness;
 
 // Shows the tab history popup inside |view|.
 - (void)showTabHistoryPopupInView:(UIView*)view
-               withSessionEntries:(NSArray*)sessionEntries
+                        withItems:(const web::NavigationItemList&)items
                    forBackHistory:(BOOL)isBackHistory;
 
 // Dismisses the tab history popup.

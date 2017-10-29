@@ -6,12 +6,11 @@
 
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "chrome/browser/ui/views/website_settings/website_settings_popup_view.h"
+#include "chrome/browser/ui/views/page_info/page_info_bubble_view.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
-#include "components/grit/components_scaled_resources.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/label.h"
 
@@ -20,10 +19,10 @@ using content::WebContents;
 LocationIconView::LocationIconView(const gfx::FontList& font_list,
                                    LocationBarView* location_bar)
     : IconLabelBubbleView(font_list, true),
-      suppress_mouse_released_action_(false),
       location_bar_(location_bar),
       animation_(this) {
   set_id(VIEW_ID_LOCATION_ICON);
+  SetInkDropMode(InkDropMode::ON);
 
 #if defined(OS_MACOSX)
   SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
@@ -53,37 +52,13 @@ bool LocationIconView::OnMousePressed(const ui::MouseEvent& event) {
       model->PasteAndGo(text);
   }
 
-  suppress_mouse_released_action_ =
-      WebsiteSettingsPopupView::GetShownPopupType() !=
-      WebsiteSettingsPopupView::POPUP_NONE;
+  IconLabelBubbleView::OnMousePressed(event);
   return true;
 }
 
 bool LocationIconView::OnMouseDragged(const ui::MouseEvent& event) {
   location_bar_->GetOmniboxView()->CloseOmniboxPopup();
-  return false;
-}
-
-void LocationIconView::OnMouseReleased(const ui::MouseEvent& event) {
-  if (event.IsOnlyMiddleMouseButton())
-    return;
-
-  // If this is the second click on this view then the bubble was showing on
-  // the mouse pressed event and is hidden now. Prevent the bubble from
-  // reshowing by doing nothing here.
-  if (suppress_mouse_released_action_) {
-    suppress_mouse_released_action_ = false;
-    return;
-  }
-
-  OnClickOrTap(event);
-}
-
-void LocationIconView::OnGestureEvent(ui::GestureEvent* event) {
-  if (event->type() != ui::ET_GESTURE_TAP)
-    return;
-  OnClickOrTap(*event);
-  event->SetHandled();
+  return IconLabelBubbleView::OnMouseDragged(event);
 }
 
 bool LocationIconView::GetTooltipText(const gfx::Point& p,
@@ -97,11 +72,11 @@ SkColor LocationIconView::GetTextColor() const {
   return location_bar_->GetColor(LocationBarView::SECURITY_CHIP_TEXT);
 }
 
-bool LocationIconView::OnActivate(const ui::Event& event) {
+bool LocationIconView::ShowBubble(const ui::Event& event) {
   WebContents* contents = location_bar_->GetWebContents();
   if (!contents)
     return false;
-  location_bar_->delegate()->ShowWebsiteSettings(contents);
+  location_bar_->delegate()->ShowPageInfo(contents);
   return true;
 }
 
@@ -110,9 +85,14 @@ void LocationIconView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ui::AX_ROLE_POP_UP_BUTTON;
 }
 
+bool LocationIconView::IsBubbleShowing() const {
+  return PageInfoBubbleView::GetShownBubbleType() !=
+         PageInfoBubbleView::BUBBLE_NONE;
+}
+
 gfx::Size LocationIconView::GetMinimumSizeForLabelText(
     const base::string16& text) const {
-  views::Label label(text, font_list());
+  views::Label label(text, {font_list()});
   return GetMinimumSizeForPreferredSize(
       GetSizeForLabelWidth(label.GetPreferredSize().width()));
 }
@@ -130,6 +110,20 @@ void LocationIconView::SetTextVisibility(bool should_show,
   OnNativeThemeChanged(GetNativeTheme());
 }
 
+bool LocationIconView::IsTriggerableEvent(const ui::Event& event) {
+  if (location_bar_->GetOmniboxView()->IsEditingOrEmpty())
+    return false;
+
+  if (event.IsMouseEvent()) {
+    if (event.AsMouseEvent()->IsOnlyMiddleMouseButton())
+      return false;
+  } else if (event.IsGestureEvent() && event.type() != ui::ET_GESTURE_TAP) {
+    return false;
+  }
+
+  return IconLabelBubbleView::IsTriggerableEvent(event);
+}
+
 double LocationIconView::WidthMultiplier() const {
   return animation_.GetCurrentValue();
 }
@@ -139,23 +133,10 @@ void LocationIconView::AnimationProgressed(const gfx::Animation*) {
   location_bar_->SchedulePaint();
 }
 
-void LocationIconView::ProcessLocatedEvent(const ui::LocatedEvent& event) {
-  if (HitTestPoint(event.location()))
-    OnActivate(event);
-}
-
 gfx::Size LocationIconView::GetMinimumSizeForPreferredSize(
     gfx::Size size) const {
   const int kMinCharacters = 10;
   size.SetToMin(
       GetSizeForLabelWidth(font_list().GetExpectedTextWidth(kMinCharacters)));
   return size;
-}
-
-void LocationIconView::OnClickOrTap(const ui::LocatedEvent& event) {
-  // Do not show page info if the user has been editing the location bar or the
-  // location bar is at the NTP.
-  if (location_bar_->GetOmniboxView()->IsEditingOrEmpty())
-    return;
-  ProcessLocatedEvent(event);
 }

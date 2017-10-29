@@ -39,9 +39,7 @@ namespace {
 
 const wchar_t kTestProductGuid[] = L"{89F1B351-B15D-48D4-8F10-1298721CF13D}";
 
-#if defined(GOOGLE_CHROME_BUILD)
 const wchar_t kTestExperimentLabel[] = L"test_label_value";
-#endif
 
 // This test fixture redirects the HKLM and HKCU registry hives for
 // the duration of the test to make it independent of the machine
@@ -70,11 +68,7 @@ class GoogleUpdateSettingsTest : public testing::Test {
     // Install a basic InstallDetails instance.
     install_static::ScopedInstallDetails details(install == SYSTEM_INSTALL);
 
-    BrowserDistribution* chrome = BrowserDistribution::GetDistribution();
     base::string16 value;
-#if defined(GOOGLE_CHROME_BUILD)
-    EXPECT_TRUE(chrome->ShouldSetExperimentLabels());
-
     // Before anything is set, ReadExperimentLabels should succeed but return
     // an empty string.
     EXPECT_TRUE(GoogleUpdateSettings::ReadExperimentLabels(
@@ -88,6 +82,7 @@ class GoogleUpdateSettingsTest : public testing::Test {
     RegKey key;
     HKEY root = install == SYSTEM_INSTALL ?
         HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+    BrowserDistribution* chrome = BrowserDistribution::GetDistribution();
     base::string16 state_key = install == SYSTEM_INSTALL ?
         chrome->GetStateMediumKey() : chrome->GetStateKey();
 
@@ -113,11 +108,6 @@ class GoogleUpdateSettingsTest : public testing::Test {
         install == SYSTEM_INSTALL, &value));
     EXPECT_EQ(base::string16(), value);
     key.Close();
-#else
-    EXPECT_FALSE(chrome->ShouldSetExperimentLabels());
-    EXPECT_FALSE(GoogleUpdateSettings::ReadExperimentLabels(
-        install == SYSTEM_INSTALL, &value));
-#endif  // GOOGLE_CHROME_BUILD
   }
 
   // Creates "ap" key with the value given as parameter. Also adds work
@@ -783,6 +773,8 @@ TEST_F(GoogleUpdateSettingsTest, UpdatesDisabledByTimeout) {
   EXPECT_TRUE(GoogleUpdateSettings::AreAutoupdatesEnabled());
 }
 
+#endif  // defined(GOOGLE_CHROME_BUILD)
+
 TEST_F(GoogleUpdateSettingsTest, ExperimentsLabelHelperSystem) {
   TestExperimentsLabelHelper(SYSTEM_INSTALL);
 }
@@ -790,8 +782,6 @@ TEST_F(GoogleUpdateSettingsTest, ExperimentsLabelHelperSystem) {
 TEST_F(GoogleUpdateSettingsTest, ExperimentsLabelHelperUser) {
   TestExperimentsLabelHelper(USER_INSTALL);
 }
-
-#endif  // defined(GOOGLE_CHROME_BUILD)
 
 TEST_F(GoogleUpdateSettingsTest, GetDownloadPreference) {
   RegKey policy_key;

@@ -10,6 +10,8 @@
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/test/test_cursor_client.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_event_dispatcher.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/touch/touch_editing_controller.h"
 #include "ui/base/ui_base_switches.h"
@@ -19,10 +21,8 @@
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/render_text.h"
-#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_test_api.h"
-#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/touchui/touch_selection_controller_impl.h"
 #include "ui/views/views_touch_selection_controller_factory.h"
@@ -794,8 +794,9 @@ TEST_F(TouchSelectionControllerImplTest, HandlesStackAboveParent) {
   if (IsMus())
     return;
 
-  ui::EventTarget* root = GetContext();
-  ui::EventTargeter* targeter = root->GetEventTargeter();
+  aura::Window* root = GetContext();
+  ui::EventTargeter* targeter =
+      root->GetHost()->dispatcher()->GetDefaultEventTargeter();
 
   // Create the first window containing a Views::Textfield.
   CreateTextfield();

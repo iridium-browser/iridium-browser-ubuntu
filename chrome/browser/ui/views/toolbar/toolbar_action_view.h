@@ -64,6 +64,7 @@ class ToolbarActionView : public views::MenuButton,
       const override;
   bool IsTriggerableEvent(const ui::Event& event) override;
   SkColor GetInkDropBaseColor() const override;
+  bool ShouldUseFloodFillInkDrop() const override;
   std::unique_ptr<views::InkDrop> CreateInkDrop() override;
 
   // ToolbarActionViewDelegateViews:
@@ -90,7 +91,7 @@ class ToolbarActionView : public views::MenuButton,
 
  private:
   // views::MenuButton:
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   void OnDragDone() override;

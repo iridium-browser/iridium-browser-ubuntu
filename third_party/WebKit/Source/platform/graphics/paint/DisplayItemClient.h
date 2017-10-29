@@ -8,10 +8,8 @@
 #include "platform/PlatformExport.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/PaintInvalidationReason.h"
-#include "wtf/Assertions.h"
-#include "wtf/text/WTFString.h"
-
-#define CHECK_DISPLAY_ITEM_CLIENT_ALIVENESS DCHECK_IS_ON()
+#include "platform/wtf/Assertions.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -22,39 +20,32 @@ namespace blink {
 // dereferenced unless we can make sure the client is still valid.
 class PLATFORM_EXPORT DisplayItemClient {
  public:
-#if CHECK_DISPLAY_ITEM_CLIENT_ALIVENESS
+#if DCHECK_IS_ON()
   DisplayItemClient();
   virtual ~DisplayItemClient();
 
   // Tests if this DisplayItemClient object has been created and has not been
   // deleted yet.
-  bool isAlive() const;
-
-  // Called when any DisplayItem of this DisplayItemClient is added into
-  // PaintController using PaintController::createAndAppend() or into a cached
-  // subsequence.
-  void beginShouldKeepAlive(const void* owner) const;
-
-  // Called when the DisplayItemClient is sure that it can safely die before its
-  // owners have chance to remove it from the aliveness control.
-  void endShouldKeepAlive() const;
-
-  // Clears all should-keep-alive DisplayItemClients of a PaintController.
-  // Called after PaintController commits new display items or the subsequence
-  // owner is invalidated.
-  static void endShouldKeepAliveAllClients(const void* owner);
-  static void endShouldKeepAliveAllClients();
+  bool IsAlive() const;
 #else
   DisplayItemClient() {}
   virtual ~DisplayItemClient() {}
 #endif
 
-  virtual String debugName() const = 0;
+  virtual String DebugName() const = 0;
 
-  // The visual rect of this DisplayItemClient, in the object space of the
-  // object that owns the GraphicsLayer, i.e. offset by
-  // offsetFromLayoutObjectWithSubpixelAccumulation().
-  virtual LayoutRect visualRect() const = 0;
+  // The visual rect of this DisplayItemClient. For SPv1, it's in the object
+  // space of the object that owns the GraphicsLayer, i.e. offset by
+  // GraphicsLayer::OffsetFromLayoutObjectWithSubpixelAccumulation().
+  // For SPv2, it's in the space of the parent transform node.
+  virtual LayoutRect VisualRect() const = 0;
+
+  // The outset will be used to inflate visual rect after the visual rect is
+  // mapped into the space of the composited layer, for any special raster
+  // effects that might expand the rastered pixel area.
+  virtual LayoutUnit VisualRectOutsetForRasterEffects() const {
+    return LayoutUnit();
+  }
 
   // This is declared here instead of in LayoutObject for verifying the
   // condition in DrawingRecorder.
@@ -66,31 +57,27 @@ class PLATFORM_EXPORT DisplayItemClient {
   // shouldDoFullPaintInvalidation is false, but mayNeedPaintInvalidation or
   // childShouldCheckForPaintInvalidation is true) to avoid unnecessary paint
   // invalidations of empty areas covered by such objects.
-  virtual bool paintedOutputOfObjectHasNoEffectRegardlessOfSize() const {
+  virtual bool PaintedOutputOfObjectHasNoEffectRegardlessOfSize() const {
     return false;
   }
 
-  void setDisplayItemsUncached(
-      PaintInvalidationReason reason = PaintInvalidationFull) const {
-    m_cacheGenerationOrInvalidationReason.invalidate(reason);
-#if CHECK_DISPLAY_ITEM_CLIENT_ALIVENESS
-    // Clear should-keep-alive of DisplayItemClients in a subsequence if this
-    // object is a subsequence.
-    endShouldKeepAliveAllClients(this);
-#endif
+  void SetDisplayItemsUncached(
+      PaintInvalidationReason reason = PaintInvalidationReason::kFull) const {
+    cache_generation_or_invalidation_reason_.Invalidate(reason);
   }
 
-  PaintInvalidationReason getPaintInvalidationReason() const {
-    return m_cacheGenerationOrInvalidationReason.getPaintInvalidationReason();
+  PaintInvalidationReason GetPaintInvalidationReason() const {
+    return cache_generation_or_invalidation_reason_
+        .GetPaintInvalidationReason();
   }
 
   // A client is considered "just created" if its display items have never been
   // committed.
-  bool isJustCreated() const {
-    return m_cacheGenerationOrInvalidationReason.isJustCreated();
+  bool IsJustCreated() const {
+    return cache_generation_or_invalidation_reason_.IsJustCreated();
   }
-  void clearIsJustCreated() const {
-    m_cacheGenerationOrInvalidationReason.clearIsJustCreated();
+  void ClearIsJustCreated() const {
+    cache_generation_or_invalidation_reason_.ClearIsJustCreated();
   }
 
  private:
@@ -119,59 +106,62 @@ class PLATFORM_EXPORT DisplayItemClient {
     DISALLOW_NEW();
 
    public:
-    CacheGenerationOrInvalidationReason() : m_value(kJustCreated) {}
+    CacheGenerationOrInvalidationReason() : value_(kJustCreated) {}
 
-    void invalidate(PaintInvalidationReason reason = PaintInvalidationFull) {
-      if (m_value != kJustCreated)
-        m_value = static_cast<ValueType>(reason);
+    void Invalidate(
+        PaintInvalidationReason reason = PaintInvalidationReason::kFull) {
+      if (value_ != kJustCreated)
+        value_ = static_cast<ValueType>(reason);
     }
 
-    static CacheGenerationOrInvalidationReason next() {
+    static CacheGenerationOrInvalidationReason Next() {
       // In case the value overflowed in the previous call.
-      if (s_nextGeneration < kFirstValidGeneration)
-        s_nextGeneration = kFirstValidGeneration;
-      return CacheGenerationOrInvalidationReason(s_nextGeneration++);
+      if (next_generation_ < kFirstValidGeneration)
+        next_generation_ = kFirstValidGeneration;
+      return CacheGenerationOrInvalidationReason(next_generation_++);
     }
 
-    bool matches(const CacheGenerationOrInvalidationReason& other) const {
-      return m_value >= kFirstValidGeneration &&
-             other.m_value >= kFirstValidGeneration && m_value == other.m_value;
+    bool Matches(const CacheGenerationOrInvalidationReason& other) const {
+      return value_ >= kFirstValidGeneration &&
+             other.value_ >= kFirstValidGeneration && value_ == other.value_;
     }
 
-    PaintInvalidationReason getPaintInvalidationReason() const {
-      return m_value < kJustCreated
-                 ? static_cast<PaintInvalidationReason>(m_value)
-                 : PaintInvalidationNone;
+    PaintInvalidationReason GetPaintInvalidationReason() const {
+      if (value_ == kJustCreated)
+        return PaintInvalidationReason::kAppeared;
+      if (value_ < kJustCreated)
+        return static_cast<PaintInvalidationReason>(value_);
+      return PaintInvalidationReason::kNone;
     }
 
-    bool isJustCreated() const { return m_value == kJustCreated; }
-    void clearIsJustCreated() {
-      m_value = static_cast<ValueType>(PaintInvalidationFull);
+    bool IsJustCreated() const { return value_ == kJustCreated; }
+    void ClearIsJustCreated() {
+      value_ = static_cast<ValueType>(PaintInvalidationReason::kFull);
     }
 
    private:
     typedef uint32_t ValueType;
     explicit CacheGenerationOrInvalidationReason(ValueType value)
-        : m_value(value) {}
+        : value_(value) {}
 
     static const ValueType kJustCreated =
-        static_cast<ValueType>(PaintInvalidationReasonMax) + 1;
+        static_cast<ValueType>(PaintInvalidationReason::kMax) + 1;
     static const ValueType kFirstValidGeneration =
-        static_cast<ValueType>(PaintInvalidationReasonMax) + 2;
-    static ValueType s_nextGeneration;
-    ValueType m_value;
+        static_cast<ValueType>(PaintInvalidationReason::kMax) + 2;
+    static ValueType next_generation_;
+    ValueType value_;
   };
 
-  bool displayItemsAreCached(CacheGenerationOrInvalidationReason other) const {
-    return m_cacheGenerationOrInvalidationReason.matches(other);
+  bool DisplayItemsAreCached(CacheGenerationOrInvalidationReason other) const {
+    return cache_generation_or_invalidation_reason_.Matches(other);
   }
-  void setDisplayItemsCached(
-      CacheGenerationOrInvalidationReason cacheGeneration) const {
-    m_cacheGenerationOrInvalidationReason = cacheGeneration;
+  void SetDisplayItemsCached(
+      CacheGenerationOrInvalidationReason cache_generation) const {
+    cache_generation_or_invalidation_reason_ = cache_generation;
   }
 
   mutable CacheGenerationOrInvalidationReason
-      m_cacheGenerationOrInvalidationReason;
+      cache_generation_or_invalidation_reason_;
 
   DISALLOW_COPY_AND_ASSIGN(DisplayItemClient);
 };

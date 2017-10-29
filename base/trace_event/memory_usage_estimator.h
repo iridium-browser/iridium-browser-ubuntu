@@ -22,9 +22,10 @@
 #include <vector>
 
 #include "base/base_export.h"
+#include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
 #include "base/containers/linked_list.h"
 #include "base/strings/string16.h"
-#include "base/template_util.h"
 
 // Composable memory usage estimators.
 //
@@ -151,6 +152,12 @@ size_t EstimateMemoryUsage(const std::priority_queue<T, C>& queue);
 template <class T, class C>
 size_t EstimateMemoryUsage(const std::stack<T, C>& stack);
 
+template <class T, class C>
+size_t EstimateMemoryUsage(const base::flat_set<T, C>& set);
+
+template <class K, class V, class C>
+size_t EstimateMemoryUsage(const base::flat_map<K, V, C>& map);
+
 // TODO(dskiba):
 //   std::forward_list
 
@@ -207,7 +214,7 @@ template <class T>
 struct EMUCaller<
     T,
     typename std::enable_if<!HasEMU<T>::value &&
-                            is_trivially_destructible<T>::value>::type> {
+                            std::is_trivially_destructible<T>::value>::type> {
   static size_t Call(const T& value) { return 0; }
 };
 
@@ -541,6 +548,20 @@ size_t EstimateMemoryUsage(const std::priority_queue<T, C>& queue) {
 template <class T, class C>
 size_t EstimateMemoryUsage(const std::stack<T, C>& stack) {
   return EstimateMemoryUsage(internal::GetUnderlyingContainer(stack));
+}
+
+// Flat containers
+
+template <class T, class C>
+size_t EstimateMemoryUsage(const base::flat_set<T, C>& set) {
+  using value_type = typename base::flat_set<T, C>::value_type;
+  return sizeof(value_type) * set.capacity() + EstimateIterableMemoryUsage(set);
+}
+
+template <class K, class V, class C>
+size_t EstimateMemoryUsage(const base::flat_map<K, V, C>& map) {
+  using value_type = typename base::flat_map<K, V, C>::value_type;
+  return sizeof(value_type) * map.capacity() + EstimateIterableMemoryUsage(map);
 }
 
 }  // namespace trace_event

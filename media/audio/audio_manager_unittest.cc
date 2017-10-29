@@ -12,23 +12,32 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "media/audio/audio_device_description.h"
+#include "media/audio/audio_device_info_accessor_for_tests.h"
 #include "media/audio/audio_device_name.h"
 #include "media/audio/audio_output_proxy.h"
 #include "media/audio/audio_unittest_util.h"
 #include "media/audio/fake_audio_log_factory.h"
 #include "media/audio/fake_audio_manager.h"
+#include "media/audio/test_audio_thread.h"
+#include "media/base/limits.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(USE_ALSA)
 #include "media/audio/alsa/audio_manager_alsa.h"
 #endif  // defined(USE_ALSA)
+
+#if defined(OS_MACOSX)
+#include "media/audio/mac/audio_manager_mac.h"
+#include "media/base/mac/audio_latency_mac.h"
+#endif
 
 #if defined(OS_WIN)
 #include "base/win/scoped_com_initializer.h"
@@ -37,6 +46,7 @@
 
 #if defined(USE_PULSEAUDIO)
 #include "media/audio/pulse/audio_manager_pulse.h"
+#include "media/audio/pulse/pulse_util.h"
 #endif  // defined(USE_PULSEAUDIO)
 
 #if defined(USE_CRAS)
@@ -53,32 +63,34 @@ namespace {
 
 template <typename T>
 struct TestAudioManagerFactory {
-  static ScopedAudioManagerPtr Create(AudioLogFactory* audio_log_factory) {
-    return ScopedAudioManagerPtr(new T(base::ThreadTaskRunnerHandle::Get(),
-                                       base::ThreadTaskRunnerHandle::Get(),
-                                       audio_log_factory));
+  static std::unique_ptr<AudioManager> Create(
+      AudioLogFactory* audio_log_factory) {
+    return base::MakeUnique<T>(base::MakeUnique<TestAudioThread>(),
+                               audio_log_factory);
   }
 };
 
 #if defined(USE_PULSEAUDIO)
 template <>
 struct TestAudioManagerFactory<AudioManagerPulse> {
-  static ScopedAudioManagerPtr Create(AudioLogFactory* audio_log_factory) {
-    std::unique_ptr<AudioManagerPulse, AudioManagerDeleter> manager(
-        new AudioManagerPulse(base::ThreadTaskRunnerHandle::Get(),
-                              base::ThreadTaskRunnerHandle::Get(),
-                              audio_log_factory));
-    if (!manager->Init())
-      manager.reset();
-    return std::move(manager);
+  static std::unique_ptr<AudioManager> Create(
+      AudioLogFactory* audio_log_factory) {
+    pa_threaded_mainloop* pa_mainloop = nullptr;
+    pa_context* pa_context = nullptr;
+    if (!pulse::InitPulse(&pa_mainloop, &pa_context))
+      return nullptr;
+    return base::MakeUnique<AudioManagerPulse>(
+        base::MakeUnique<TestAudioThread>(), audio_log_factory, pa_mainloop,
+        pa_context);
   }
 };
 #endif  // defined(USE_PULSEAUDIO)
 
 template <>
 struct TestAudioManagerFactory<std::nullptr_t> {
-  static ScopedAudioManagerPtr Create(AudioLogFactory* audio_log_factory) {
-    return AudioManager::CreateForTesting(base::ThreadTaskRunnerHandle::Get());
+  static std::unique_ptr<AudioManager> Create(
+      AudioLogFactory* audio_log_factory) {
+    return AudioManager::CreateForTesting(base::MakeUnique<TestAudioThread>());
   }
 };
 
@@ -203,13 +215,13 @@ class AudioManagerTest : public ::testing::Test {
   }
 
   void GetDefaultOutputStreamParameters(media::AudioParameters* params) {
-    *params = audio_manager_->GetDefaultOutputStreamParameters();
+    *params = device_info_accessor_->GetDefaultOutputStreamParameters();
   }
 
   void GetAssociatedOutputDeviceID(const std::string& input_device_id,
                                    std::string* output_device_id) {
     *output_device_id =
-        audio_manager_->GetAssociatedOutputDeviceID(input_device_id);
+        device_info_accessor_->GetAssociatedOutputDeviceID(input_device_id);
   }
 
 #if defined(USE_CRAS)
@@ -233,7 +245,7 @@ class AudioManagerTest : public ::testing::Test {
 
  protected:
   AudioManagerTest() { CreateAudioManagerForTesting(); }
-  ~AudioManagerTest() override {}
+  ~AudioManagerTest() override { audio_manager_->Shutdown(); }
 
   // Helper method which verifies that the device list starts with a valid
   // default record followed by non-default device names.
@@ -319,10 +331,10 @@ class AudioManagerTest : public ::testing::Test {
 #endif  // defined(USE_CRAS)
 
   bool InputDevicesAvailable() {
-    return audio_manager_->HasAudioInputDevices();
+    return device_info_accessor_->HasAudioInputDevices();
   }
   bool OutputDevicesAvailable() {
-    return audio_manager_->HasAudioOutputDevices();
+    return device_info_accessor_->HasAudioOutputDevices();
   }
 
   template <typename T = std::nullptr_t>
@@ -330,8 +342,10 @@ class AudioManagerTest : public ::testing::Test {
     // Only one AudioManager may exist at a time, so destroy the one we're
     // currently holding before creating a new one.
     // Flush the message loop to run any shutdown tasks posted by AudioManager.
-    audio_manager_.reset();
-    base::RunLoop().RunUntilIdle();
+    if (audio_manager_) {
+      audio_manager_->Shutdown();
+      audio_manager_.reset();
+    }
 
     audio_manager_ =
         TestAudioManagerFactory<T>::Create(&fake_audio_log_factory_);
@@ -340,11 +354,14 @@ class AudioManagerTest : public ::testing::Test {
     // initialized and ready to use before returning from this function.
     // TODO(alokp): We should perhaps do this in AudioManager::Create().
     base::RunLoop().RunUntilIdle();
+    device_info_accessor_ =
+        base::MakeUnique<AudioDeviceInfoAccessorForTests>(audio_manager_.get());
   }
 
   base::TestMessageLoop message_loop_;
   FakeAudioLogFactory fake_audio_log_factory_;
-  ScopedAudioManagerPtr audio_manager_;
+  std::unique_ptr<AudioManager> audio_manager_;
+  std::unique_ptr<AudioDeviceInfoAccessorForTests> device_info_accessor_;
 
 #if defined(USE_CRAS)
   chromeos::CrasAudioHandler* cras_audio_handler_ = nullptr;  // Not owned.
@@ -354,8 +371,7 @@ class AudioManagerTest : public ::testing::Test {
 };
 
 #if defined(USE_CRAS)
-// TODO(warx): enable the test once crbug.com/554168 is fixed.
-TEST_F(AudioManagerTest, DISABLED_EnumerateInputDevicesCras) {
+TEST_F(AudioManagerTest, EnumerateInputDevicesCras) {
   // Setup the devices without internal mic, so that it doesn't exist
   // beamforming capable mic.
   AudioNodeList audio_nodes;
@@ -380,12 +396,11 @@ TEST_F(AudioManagerTest, DISABLED_EnumerateInputDevicesCras) {
   DVLOG(2) << "Testing AudioManagerCras.";
   CreateAudioManagerForTesting<AudioManagerCras>();
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptionsCras(device_descriptions, expectation);
 }
 
-// TODO(warx): enable the test once crbug.com/554168 is fixed.
-TEST_F(AudioManagerTest, DISABLED_EnumerateOutputDevicesCras) {
+TEST_F(AudioManagerTest, EnumerateOutputDevicesCras) {
   // Setup the devices without internal mic, so that it doesn't exist
   // beamforming capable mic.
   AudioNodeList audio_nodes;
@@ -408,7 +423,7 @@ TEST_F(AudioManagerTest, DISABLED_EnumerateOutputDevicesCras) {
   DVLOG(2) << "Testing AudioManagerCras.";
   CreateAudioManagerForTesting<AudioManagerCras>();
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioOutputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptionsCras(device_descriptions, expectation);
 }
 #else  // !defined(USE_CRAS)
@@ -426,7 +441,7 @@ TEST_F(AudioManagerTest, EnumerateInputDevices) {
   ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
 
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 
@@ -435,7 +450,7 @@ TEST_F(AudioManagerTest, EnumerateOutputDevices) {
   ABORT_AUDIO_TEST_IF_NOT(OutputDevicesAvailable());
 
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioOutputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 
@@ -450,7 +465,7 @@ TEST_F(AudioManagerTest, EnumerateInputDevicesWinMMDevice) {
   ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable());
 
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 
@@ -458,7 +473,7 @@ TEST_F(AudioManagerTest, EnumerateOutputDevicesWinMMDevice) {
   ABORT_AUDIO_TEST_IF_NOT(OutputDevicesAvailable());
 
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioOutputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 #endif  // defined(OS_WIN)
@@ -474,7 +489,8 @@ TEST_F(AudioManagerTest, EnumerateInputDevicesPulseaudio) {
   CreateAudioManagerForTesting<AudioManagerPulse>();
   if (audio_manager_.get()) {
     AudioDeviceDescriptions device_descriptions;
-    audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+    device_info_accessor_->GetAudioInputDeviceDescriptions(
+        &device_descriptions);
     CheckDeviceDescriptions(device_descriptions);
   } else {
     LOG(WARNING) << "No pulseaudio on this system.";
@@ -487,7 +503,8 @@ TEST_F(AudioManagerTest, EnumerateOutputDevicesPulseaudio) {
   CreateAudioManagerForTesting<AudioManagerPulse>();
   if (audio_manager_.get()) {
     AudioDeviceDescriptions device_descriptions;
-    audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
+    device_info_accessor_->GetAudioOutputDeviceDescriptions(
+        &device_descriptions);
     CheckDeviceDescriptions(device_descriptions);
   } else {
     LOG(WARNING) << "No pulseaudio on this system.";
@@ -506,7 +523,7 @@ TEST_F(AudioManagerTest, EnumerateInputDevicesAlsa) {
   DVLOG(2) << "Testing AudioManagerAlsa.";
   CreateAudioManagerForTesting<AudioManagerAlsa>();
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 
@@ -516,7 +533,7 @@ TEST_F(AudioManagerTest, EnumerateOutputDevicesAlsa) {
   DVLOG(2) << "Testing AudioManagerAlsa.";
   CreateAudioManagerForTesting<AudioManagerAlsa>();
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioOutputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioOutputDeviceDescriptions(&device_descriptions);
   CheckDeviceDescriptions(device_descriptions);
 }
 #endif  // defined(USE_ALSA)
@@ -536,7 +553,7 @@ TEST_F(AudioManagerTest, GetAssociatedOutputDeviceID) {
   ABORT_AUDIO_TEST_IF_NOT(InputDevicesAvailable() && OutputDevicesAvailable());
 
   AudioDeviceDescriptions device_descriptions;
-  audio_manager_->GetAudioInputDeviceDescriptions(&device_descriptions);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&device_descriptions);
   bool found_an_associated_device = false;
   for (const auto& description : device_descriptions) {
     EXPECT_FALSE(description.unique_id.empty());
@@ -559,10 +576,8 @@ TEST_F(AudioManagerTest, GetAssociatedOutputDeviceID) {
 class MockAudioDebugRecordingManager : public AudioDebugRecordingManager {
  public:
   MockAudioDebugRecordingManager(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner)
-      : AudioDebugRecordingManager(std::move(task_runner),
-                                   std::move(file_task_runner)) {}
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+      : AudioDebugRecordingManager(std::move(task_runner)) {}
 
   ~MockAudioDebugRecordingManager() override {}
 
@@ -579,11 +594,9 @@ class TestAudioManager : public FakeAudioManager {
   // Default input is input1.
   // Default output is output2.
  public:
-  TestAudioManager(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
-      AudioLogFactory* audio_log_factory)
-      : FakeAudioManager(task_runner, worker_task_runner, audio_log_factory) {}
+  TestAudioManager(std::unique_ptr<AudioThread> audio_thread,
+                   AudioLogFactory* audio_log_factory)
+      : FakeAudioManager(std::move(audio_thread), audio_log_factory) {}
 
   std::string GetDefaultOutputDeviceID() override { return "output4"; }
 
@@ -615,10 +628,9 @@ class TestAudioManager : public FakeAudioManager {
   }
 
   std::unique_ptr<AudioDebugRecordingManager> CreateAudioDebugRecordingManager(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner) override {
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) override {
     return base::MakeUnique<MockAudioDebugRecordingManager>(
-        std::move(task_runner), std::move(file_task_runner));
+        std::move(task_runner));
   }
 };
 
@@ -631,9 +643,9 @@ TEST_F(AudioManagerTest, GroupId) {
   // output3
   // output4, default output
   AudioDeviceDescriptions inputs;
-  audio_manager_->GetAudioInputDeviceDescriptions(&inputs);
+  device_info_accessor_->GetAudioInputDeviceDescriptions(&inputs);
   AudioDeviceDescriptions outputs;
-  audio_manager_->GetAudioOutputDeviceDescriptions(&outputs);
+  device_info_accessor_->GetAudioOutputDeviceDescriptions(&outputs);
   EXPECT_EQ(inputs[0].group_id, outputs[1].group_id);
   EXPECT_EQ(inputs[1].group_id, outputs[1].group_id);
   EXPECT_EQ(inputs[2].group_id, outputs[2].group_id);
@@ -653,8 +665,7 @@ TEST_F(AudioManagerTest, AudioDebugRecording) {
 
   // Initialize is normally done in AudioManager::Create(), but since we don't
   // use that in this test, we need to initialize here.
-  audio_manager_->InitializeOutputDebugRecording(
-      audio_manager_->GetTaskRunner());
+  audio_manager_->InitializeOutputDebugRecording();
 
   MockAudioDebugRecordingManager* mock_debug_recording_manager =
       static_cast<MockAudioDebugRecordingManager*>(
@@ -671,5 +682,98 @@ TEST_F(AudioManagerTest, AudioDebugRecording) {
   EXPECT_CALL(*mock_debug_recording_manager, DisableDebugRecording());
   audio_manager_->DisableOutputDebugRecording();
 }
+
+#if defined(OS_MACOSX) || defined(USE_CRAS)
+class TestAudioSourceCallback : public AudioOutputStream::AudioSourceCallback {
+ public:
+  TestAudioSourceCallback(int expected_frames_per_buffer,
+                          base::WaitableEvent* event)
+      : expected_frames_per_buffer_(expected_frames_per_buffer),
+        event_(event){};
+  ~TestAudioSourceCallback() override{};
+
+  int OnMoreData(base::TimeDelta,
+                 base::TimeTicks,
+                 int,
+                 AudioBus* dest) override {
+    EXPECT_EQ(dest->frames(), expected_frames_per_buffer_);
+    event_->Signal();
+    return 0;
+  }
+
+  void OnError() override { FAIL(); }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestAudioSourceCallback);
+
+  const int expected_frames_per_buffer_;
+  base::WaitableEvent* event_;
+};
+
+// Test that we can create an AudioOutputStream with kMinAudioBufferSize and
+// kMaxAudioBufferSize and that the callback AudioBus is the expected size.
+TEST_F(AudioManagerTest, CheckMinMaxAudioBufferSizeCallbacks) {
+  ABORT_AUDIO_TEST_IF_NOT(OutputDevicesAvailable());
+
+#if defined(OS_MACOSX)
+  CreateAudioManagerForTesting<AudioManagerMac>();
+#elif defined(USE_CRAS)
+  CreateAudioManagerForTesting<AudioManagerCras>();
+#endif
+
+  DCHECK(audio_manager_);
+
+  AudioParameters default_params;
+  GetDefaultOutputStreamParameters(&default_params);
+  ASSERT_LT(default_params.frames_per_buffer(),
+            media::limits::kMaxAudioBufferSize);
+
+#if defined(OS_MACOSX)
+  // On OSX the preferred output buffer size is higher than the minimum
+  // but users may request the minimum size explicitly.
+  ASSERT_GT(default_params.frames_per_buffer(),
+            GetMinAudioBufferSizeMacOS(media::limits::kMinAudioBufferSize,
+                                       default_params.sample_rate()));
+#elif defined(USE_CRAS)
+  // On CRAS the preferred output buffer size varies per board and may be as low
+  // as the minimum for some boards.
+  ASSERT_GE(default_params.frames_per_buffer(),
+            media::limits::kMinAudioBufferSize);
+#else
+  NOTREACHED();
+#endif
+
+  AudioOutputStream* stream;
+  base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                            base::WaitableEvent::InitialState::NOT_SIGNALED);
+
+  // Create an output stream with the minimum buffer size parameters and ensure
+  // that no errors are returned.
+  AudioParameters min_params = default_params;
+  min_params.set_frames_per_buffer(media::limits::kMinAudioBufferSize);
+  stream = audio_manager_->MakeAudioOutputStreamProxy(min_params, "");
+  ASSERT_TRUE(stream);
+  EXPECT_TRUE(stream->Open());
+  event.Reset();
+  TestAudioSourceCallback min_source(min_params.frames_per_buffer(), &event);
+  stream->Start(&min_source);
+  event.Wait();
+  stream->Stop();
+  stream->Close();
+
+  // Verify the same for the maximum buffer size.
+  AudioParameters max_params = default_params;
+  max_params.set_frames_per_buffer(media::limits::kMaxAudioBufferSize);
+  stream = audio_manager_->MakeAudioOutputStreamProxy(max_params, "");
+  ASSERT_TRUE(stream);
+  EXPECT_TRUE(stream->Open());
+  event.Reset();
+  TestAudioSourceCallback max_source(max_params.frames_per_buffer(), &event);
+  stream->Start(&max_source);
+  event.Wait();
+  stream->Stop();
+  stream->Close();
+}
+#endif
 
 }  // namespace media

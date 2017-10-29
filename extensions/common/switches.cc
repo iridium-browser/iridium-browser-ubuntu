@@ -56,12 +56,12 @@ const char kExtensionsOnChromeURLs[] = "extensions-on-chrome-urls";
 // Whether to force developer mode extensions highlighting.
 const char kForceDevModeHighlighting[] = "force-dev-mode-highlighting";
 
-// Enables site isolation for all chrome-extension:// urls.
-const char kIsolateExtensions[] = "isolate-extensions";
-
-// Path to a comma-separated list of apps to load at startup.  The first app in
+// Comma-separated list of paths to apps to load at startup. The first app in
 // the list will be launched.
 const char kLoadApps[] = "load-apps";
+
+// Comma-separated list of paths to extensions to load at startup.
+const char kLoadExtension[] = "load-extension";
 
 // Notify the user and require consent for extensions running scripts.
 // Appending --scripts-require-action=1 has the same effect as
@@ -96,6 +96,10 @@ const char kNativeCrxBindings[] = "native-crx-bindings";
 // Enable package hash check: the .crx file sha256 hash sum should be equal to
 // the one received from update manifest.
 const char kEnableCrxHashCheck[] = "enable-crx-hash-check";
+
+// Whether to split content script injections into multiple tasks.
+const char kYieldBetweenContentScriptRuns[] =
+    "yield-between-content-script-runs";
 
 }  // namespace switches
 

@@ -145,11 +145,10 @@ void VideoSender::InsertRawVideoFrame(
                             rtp_timestamp);
 
   // Used by chrome/browser/extension/api/cast_streaming/performance_test.cc
-  TRACE_EVENT_INSTANT2(
-      "cast_perf_test", "InsertRawVideoFrame",
-      TRACE_EVENT_SCOPE_THREAD,
-      "timestamp", reference_time.ToInternalValue(),
-      "rtp_timestamp", rtp_timestamp.lower_32_bits());
+  TRACE_EVENT_INSTANT2("cast_perf_test", "InsertRawVideoFrame",
+                       TRACE_EVENT_SCOPE_THREAD, "timestamp",
+                       (reference_time - base::TimeTicks()).InMicroseconds(),
+                       "rtp_timestamp", rtp_timestamp.lower_32_bits());
 
   bool low_latency_mode;
   if (video_frame->metadata()->GetBoolean(
@@ -250,20 +249,18 @@ void VideoSender::InsertRawVideoFrame(
 
   TRACE_COUNTER_ID1("cast.stream", "Video Target Bitrate", this, bitrate);
 
-  MaybeRenderPerformanceMetricsOverlay(
-      GetTargetPlayoutDelay(), low_latency_mode_, bitrate,
-      frames_in_encoder_ + 1, last_reported_encoder_utilization_,
-      last_reported_lossy_utilization_, video_frame.get());
-
+  const scoped_refptr<VideoFrame> frame_to_encode =
+      MaybeRenderPerformanceMetricsOverlay(
+          GetTargetPlayoutDelay(), low_latency_mode_, bitrate,
+          frames_in_encoder_ + 1, last_reported_encoder_utilization_,
+          last_reported_lossy_utilization_, video_frame);
   if (video_encoder_->EncodeVideoFrame(
-          video_frame,
-          reference_time,
-          base::Bind(&VideoSender::OnEncodedVideoFrame,
-                     weak_factory_.GetWeakPtr(),
-                     video_frame,
-                     bitrate))) {
-    TRACE_EVENT_ASYNC_BEGIN1("cast.stream", "Video Encode", video_frame.get(),
-                             "rtp_timestamp", rtp_timestamp.lower_32_bits());
+          frame_to_encode, reference_time,
+          base::Bind(&VideoSender::OnEncodedVideoFrame, AsWeakPtr(),
+                     frame_to_encode, bitrate))) {
+    TRACE_EVENT_ASYNC_BEGIN1("cast.stream", "Video Encode",
+                             frame_to_encode.get(), "rtp_timestamp",
+                             rtp_timestamp.lower_32_bits());
     frames_in_encoder_++;
     duration_in_encoder_ += duration_added_by_next_frame;
     last_enqueued_frame_rtp_timestamp_ = rtp_timestamp;
@@ -278,6 +275,10 @@ void VideoSender::InsertRawVideoFrame(
 
 std::unique_ptr<VideoFrameFactory> VideoSender::CreateVideoFrameFactory() {
   return video_encoder_ ? video_encoder_->CreateVideoFrameFactory() : nullptr;
+}
+
+base::WeakPtr<VideoSender> VideoSender::AsWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 int VideoSender::GetNumberOfFramesInEncoder() const {

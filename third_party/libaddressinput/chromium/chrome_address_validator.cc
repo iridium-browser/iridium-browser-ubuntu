@@ -17,6 +17,7 @@
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_normalizer.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/source.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/storage.h"
+#include "third_party/libaddressinput/src/cpp/src/rule.h"
 
 namespace autofill {
 namespace {
@@ -27,6 +28,7 @@ using ::i18n::addressinput::AddressNormalizer;
 using ::i18n::addressinput::BuildCallback;
 using ::i18n::addressinput::FieldProblemMap;
 using ::i18n::addressinput::PreloadSupplier;
+using ::i18n::addressinput::Rule;
 using ::i18n::addressinput::Source;
 using ::i18n::addressinput::Storage;
 
@@ -56,6 +58,41 @@ AddressValidator::~AddressValidator() {}
 void AddressValidator::LoadRules(const std::string& region_code) {
   attempts_number_[region_code] = 0;
   supplier_->LoadRules(region_code, *rules_loaded_);
+}
+
+std::vector<std::pair<std::string, std::string>>
+AddressValidator::GetRegionSubKeys(const std::string& region_code,
+                                   const std::string& language) {
+  std::vector<std::pair<std::string, std::string>> subkeys_codes_names;
+  if (!AreRulesLoadedForRegion(region_code))
+    return subkeys_codes_names;
+
+  auto rules = supplier_->GetRulesForRegion(region_code);
+  auto rule_iterator = rules.find("data/" + region_code);
+  // This happens if the rules are bad.
+  if (rule_iterator == rules.end() || !rule_iterator->second)
+    return subkeys_codes_names;
+
+  auto subkeys_codes = rule_iterator->second->GetSubKeys();
+
+  // If the device language is available, show the names in that language.
+  // Otherwise, show the default names.
+  std::string lang_suffix = "";
+  if (rules.find("data/" + region_code + "--" + language) != rules.end())
+    lang_suffix = "--" + language;  // ex: --fr
+
+  for (auto subkey_code : subkeys_codes) {
+    auto rule = rules.find("data/" + region_code + '/' + subkey_code +
+                           lang_suffix);  // exp: data/CA/QC--fr
+    // This happens if the rules are bad.
+    if (rule == rules.end() || !rule_iterator->second)
+      continue;
+    auto subkey_name = rule->second->GetName();
+    if (subkey_name.empty())  // For some cases, the name is not available.
+      subkey_name = subkey_code;
+    subkeys_codes_names.push_back(make_pair(subkey_code, subkey_name));
+  }
+  return subkeys_codes_names;
 }
 
 AddressValidator::Status AddressValidator::ValidateAddress(

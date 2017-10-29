@@ -8,38 +8,54 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/printing/specifics_translation.h"
 #include "chromeos/printing/printer_configuration.h"
 #include "components/sync/protocol/printer_specifics.pb.h"
 
 namespace chromeos {
-namespace printing {
 
 namespace {
 
 Printer::PpdReference SpecificsToPpd(
     const sync_pb::PrinterPPDReference& specifics) {
   Printer::PpdReference ref;
-  if (specifics.has_user_supplied_ppd_url()) {
+  if (specifics.autoconf()) {
+    ref.autoconf = specifics.autoconf();
+  } else if (specifics.has_user_supplied_ppd_url()) {
     ref.user_supplied_ppd_url = specifics.user_supplied_ppd_url();
-  }
-
-  if (specifics.has_effective_make_and_model()) {
+  } else if (specifics.has_effective_make_and_model()) {
     ref.effective_make_and_model = specifics.effective_make_and_model();
   }
 
   return ref;
 }
 
+// Overwrite fields in |specifics| with an appropriately filled field from
+// |ref|.  If |ref| is the default object, nothing will be changed in
+// |specifics|.
 void MergeReferenceToSpecifics(sync_pb::PrinterPPDReference* specifics,
                                const Printer::PpdReference& ref) {
-  if (!ref.user_supplied_ppd_url.empty()) {
+  if (ref.autoconf) {
+    specifics->Clear();
+    specifics->set_autoconf(ref.autoconf);
+  } else if (!ref.user_supplied_ppd_url.empty()) {
+    specifics->Clear();
     specifics->set_user_supplied_ppd_url(ref.user_supplied_ppd_url);
-  }
-
-  if (!ref.effective_make_and_model.empty()) {
+  } else if (!ref.effective_make_and_model.empty()) {
+    specifics->Clear();
     specifics->set_effective_make_and_model(ref.effective_make_and_model);
   }
+}
+
+// Combines |make| and |model| with a space to generate a make and model string.
+// If |model| already represents the make and model, the string is just |model|.
+// This is to prevent strings of the form '<make> <make> <model>'.
+std::string MakeAndModel(base::StringPiece make, base::StringPiece model) {
+  return model.starts_with(make) ? model.as_string()
+                                 : base::JoinString({make, model}, " ");
 }
 
 }  // namespace
@@ -53,6 +69,12 @@ std::unique_ptr<Printer> SpecificsToPrinter(
   printer->set_description(specifics.description());
   printer->set_manufacturer(specifics.manufacturer());
   printer->set_model(specifics.model());
+  if (!specifics.make_and_model().empty()) {
+    printer->set_make_and_model(specifics.make_and_model());
+  } else {
+    printer->set_make_and_model(
+        MakeAndModel(specifics.manufacturer(), specifics.model()));
+  }
   printer->set_uri(specifics.uri());
   printer->set_uuid(specifics.uuid());
 
@@ -88,6 +110,9 @@ void MergePrinterToSpecifics(const Printer& printer,
   if (!printer.model().empty())
     specifics->set_model(printer.model());
 
+  if (!printer.make_and_model().empty())
+    specifics->set_make_and_model(printer.make_and_model());
+
   if (!printer.uri().empty())
     specifics->set_uri(printer.uri());
 
@@ -98,5 +123,4 @@ void MergePrinterToSpecifics(const Printer& printer,
                             printer.ppd_reference());
 }
 
-}  // namespace printing
 }  // namespace chromeos

@@ -34,7 +34,7 @@ bool DefaultUserFlow::CanStartArc() {
   return true;
 }
 
-bool DefaultUserFlow::ShouldShowSettings() {
+bool DefaultUserFlow::ShouldEnableSettings() {
   return true;
 }
 
@@ -51,6 +51,10 @@ bool DefaultUserFlow::ShouldSkipPostLoginScreens() {
 }
 
 bool DefaultUserFlow::SupportsEarlyRestartToApplyFlags() {
+  return true;
+}
+
+bool DefaultUserFlow::AllowsNotificationBalloons() {
   return true;
 }
 
@@ -80,11 +84,15 @@ ExtendedUserFlow::~ExtendedUserFlow() {
 void ExtendedUserFlow::AppendAdditionalCommandLineSwitches() {
 }
 
-bool ExtendedUserFlow::ShouldShowSettings() {
+bool ExtendedUserFlow::ShouldEnableSettings() {
   return true;
 }
 
 bool ExtendedUserFlow::ShouldShowNotificationTray() {
+  return true;
+}
+
+bool ExtendedUserFlow::AllowsNotificationBalloons() {
   return true;
 }
 
@@ -95,8 +103,8 @@ void ExtendedUserFlow::HandleOAuthTokenStatusChange(
 void ExtendedUserFlow::UnregisterFlowSoon() {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&ChromeUserManager::ResetUserFlow,
-                 base::Unretained(ChromeUserManager::Get()), account_id()));
+      base::BindOnce(&ChromeUserManager::ResetUserFlow,
+                     base::Unretained(ChromeUserManager::Get()), account_id()));
 }
 
 }  // namespace chromeos

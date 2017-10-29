@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.preferences.website;
 
+import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.util.MathUtils;
 
 import java.io.Serializable;
@@ -26,6 +27,7 @@ public class Website implements Serializable {
     private final WebsiteAddress mOrigin;
     private final WebsiteAddress mEmbedder;
 
+    private ContentSettingException mAdsException;
     private ContentSettingException mAutoplayExceptionInfo;
     private ContentSettingException mBackgroundSyncExceptionInfo;
     private CameraInfo mCameraInfo;
@@ -82,6 +84,45 @@ public class Website implements Serializable {
     public int compareByStorageTo(Website to) {
         if (this == to) return 0;
         return MathUtils.compareLongs(to.getTotalUsage(), getTotalUsage());
+    }
+
+    /**
+     * Sets the Ads exception info for this Website.
+     */
+    public void setAdsException(ContentSettingException exception) {
+        mAdsException = exception;
+    }
+
+    /**
+     * Returns the Ads exception info for this Website.
+     */
+    public ContentSettingException getAdsException() {
+        return mAdsException;
+    }
+
+    /**
+     * Returns what permission governs the Ads setting.
+     */
+    public ContentSetting getAdsPermission() {
+        if (mAdsException != null) {
+            return mAdsException.getContentSetting();
+        }
+        return null;
+    }
+
+    /**
+     * Sets the Ads permission.
+     */
+    public void setAdsPermission(ContentSetting value) {
+        // It is possible to set the permission without having an existing exception, because we can
+        // show the BLOCK state even when this permission is set to the default. In that case, just
+        // set an exception now to BLOCK to enable changing the permission.
+        if (mAdsException == null) {
+            setAdsException(
+                    new ContentSettingException(ContentSettingsType.CONTENT_SETTINGS_TYPE_ADS,
+                            getAddress().getOrigin(), ContentSetting.BLOCK, ""));
+        }
+        mAdsException.setContentSetting(value);
     }
 
     /**

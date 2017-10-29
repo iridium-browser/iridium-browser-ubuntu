@@ -19,7 +19,6 @@
 #include "chrome/browser/chromeos/extensions/dictionary_event_router.h"
 #include "chrome/browser/chromeos/extensions/ime_menu_event_router.h"
 #include "chrome/browser/chromeos/extensions/input_method_event_router.h"
-#include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/extensions/api/input_ime/input_ime_api.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
@@ -39,6 +38,7 @@
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/base/ime/chromeos/input_method_util.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_util.h"
 
@@ -98,7 +98,7 @@ InputMethodPrivateGetCurrentInputMethodFunction::Run() {
 #else
   chromeos::input_method::InputMethodManager* manager =
       chromeos::input_method::InputMethodManager::Get();
-  return RespondNow(OneArgument(base::MakeUnique<base::StringValue>(
+  return RespondNow(OneArgument(base::MakeUnique<base::Value>(
       manager->GetActiveIMEState()->GetCurrentInputMethod().id())));
 #endif
 }
@@ -257,7 +257,7 @@ InputMethodPrivateShowInputViewFunction::Run() {
   // Forcibly enables the a11y onscreen keyboard if there is on keyboard enabled
   // for now. And re-disables it after showing once.
   keyboard::SetAccessibilityKeyboardEnabled(true);
-  ash::Shell::GetInstance()->CreateKeyboard();
+  ash::Shell::Get()->CreateKeyboard();
   keyboard_controller = keyboard::KeyboardController::GetInstance();
   if (!keyboard_controller) {
     keyboard::SetAccessibilityKeyboardEnabled(false);
@@ -367,8 +367,9 @@ void InputMethodAPI::OnListenerAdded(
   }
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<InputMethodAPI> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<InputMethodAPI>>::DestructorAtExit g_factory =
+    LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<InputMethodAPI>*

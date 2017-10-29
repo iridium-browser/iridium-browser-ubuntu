@@ -25,7 +25,6 @@
 #include "ui/gfx/geometry/size.h"
 
 struct PrintMsg_Print_Params;
-struct PrintMsg_PrintPage_Params;
 struct PrintMsg_PrintPages_Params;
 struct PrintHostMsg_SetOptionsFromDocument_Params;
 
@@ -45,7 +44,6 @@ class DictionaryValue;
 }
 
 namespace blink {
-class WebFrame;
 class WebLocalFrame;
 class WebView;
 }
@@ -108,6 +106,15 @@ class PrintWebViewHelper
     // Returns true if printing is overridden and the default behavior should be
     // skipped for |frame|.
     virtual bool OverridePrint(blink::WebLocalFrame* frame) = 0;
+
+#if defined(OS_MACOSX)
+    // If true, all the printed pages are returned in the first
+    // PrintHostMsg_DidPrintPage metafile, like on Linux and Windows.
+    // NOTE: PrintHostMsg_DidPrintPage messages for all pages contain the same
+    // page and content area, which may lead to bug when these two parameters
+    // are different per page.
+    virtual bool UseSingleMetafile();
+#endif
   };
 
   PrintWebViewHelper(content::RenderFrame* render_frame,
@@ -147,6 +154,7 @@ class PrintWebViewHelper
     FAIL_PRINT,
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
     FAIL_PREVIEW,
+    INVALID_SETTINGS,
 #endif
   };
 
@@ -283,10 +291,14 @@ class PrintWebViewHelper
 
   // Prints the page listed in |params|.
 #if defined(OS_MACOSX)
-  void PrintPageInternal(const PrintMsg_PrintPage_Params& params,
-                         blink::WebLocalFrame* frame);
+  void PrintPagesInternal(const PrintMsg_Print_Params& params,
+                          const std::vector<int>& printed_pages,
+                          int page_count,
+                          blink::WebLocalFrame* frame);
 #else
-  void PrintPageInternal(const PrintMsg_PrintPage_Params& params,
+  void PrintPageInternal(const PrintMsg_Print_Params& params,
+                         int page_number,
+                         int page_count,
                          blink::WebLocalFrame* frame,
                          PdfMetafileSkia* metafile,
                          gfx::Size* page_size_in_dpi,
@@ -298,6 +310,7 @@ class PrintWebViewHelper
 #if defined(OS_MACOSX)
   void RenderPage(const PrintMsg_Print_Params& params,
                   int page_number,
+                  int page_count,
                   blink::WebLocalFrame* frame,
                   bool is_preview,
                   PdfMetafileSkia* metafile,
@@ -309,7 +322,7 @@ class PrintWebViewHelper
   // |page_number| is zero-based.
   // When method is called, canvas should be setup to draw to |canvas_area|
   // with |scale_factor|.
-  static float RenderPageContent(blink::WebFrame* frame,
+  static float RenderPageContent(blink::WebLocalFrame* frame,
                                  int page_number,
                                  const gfx::Rect& canvas_area,
                                  const gfx::Rect& content_area,
@@ -336,17 +349,15 @@ class PrintWebViewHelper
       const PrintMsg_PrintPages_Params& params,
       int page_count);
 
-#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
-  // Given the |device| and |canvas| to draw on, prints the appropriate headers
-  // and footers using strings from |header_footer_info| on to the canvas.
+  // Given the |canvas| to draw on, prints the appropriate headers and footers
+  // to |canvas| using information from the remaining parameters.
   static void PrintHeaderAndFooter(blink::WebCanvas* canvas,
                                    int page_number,
                                    int total_pages,
-                                   const blink::WebFrame& source_frame,
+                                   const blink::WebLocalFrame& source_frame,
                                    float webkit_scale_factor,
                                    const PageSizeMargins& page_layout_in_points,
                                    const PrintMsg_Print_Params& params);
-#endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
   // Script Initiated Printing ------------------------------------------------
 
@@ -439,7 +450,7 @@ class PrintWebViewHelper
     // Helper functions
     int GetNextPageNumber();
     bool IsRendering() const;
-    bool IsModifiable();
+    bool IsModifiable() const;
     bool HasSelection();
     bool IsLastPageOfPrintReadyMetafile() const;
     bool IsFinalPageRendered() const;
@@ -477,6 +488,8 @@ class PrintWebViewHelper
     // Reset some of the internal rendering context.
     void ClearContext();
 
+    void CalculateIsModifiable();
+
     // Specifies what to render for print preview.
     FrameReference source_frame_;
     blink::WebNode source_node_;
@@ -496,6 +509,9 @@ class PrintWebViewHelper
     // True, when draft pages needs to be generated.
     bool generate_draft_pages_;
 
+    // True, if the document source is modifiable. e.g. HTML and not PDF.
+    bool is_modifiable_;
+
     // Specifies the total number of pages in the print ready metafile.
     int print_ready_metafile_page_count_;
 
@@ -505,6 +521,8 @@ class PrintWebViewHelper
     enum PrintPreviewErrorBuckets error_;
 
     State state_;
+
+    DISALLOW_COPY_AND_ASSIGN(PrintPreviewContext);
   };
 
   class ScriptingThrottler {
@@ -531,6 +549,7 @@ class PrintWebViewHelper
   bool is_loading_;
   bool is_scripted_preview_delayed_;
   int ipc_nesting_level_;
+  bool render_frame_gone_;
 
   // Used to fix a race condition where the source is a PDF and print preview
   // hangs because RequestPrintPreview is called before DidStopLoading() is

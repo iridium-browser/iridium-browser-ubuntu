@@ -4,6 +4,7 @@
 
 package org.chromium.base;
 
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -23,6 +24,7 @@ import java.util.regex.Pattern;
 public class SysUtils {
     // A device reporting strictly more total memory in megabytes cannot be considered 'low-end'.
     private static final int ANDROID_LOW_MEMORY_DEVICE_THRESHOLD_MB = 512;
+    private static final int ANDROID_O_LOW_MEMORY_DEVICE_THRESHOLD_MB = 1024;
 
     private static final String TAG = "SysUtils";
 
@@ -103,6 +105,19 @@ public class SysUtils {
     }
 
     /**
+     * @return Whether or not the system has low available memory.
+     */
+    @CalledByNative
+    private static boolean isCurrentlyLowMemory() {
+        ActivityManager am =
+                (ActivityManager) ContextUtils.getApplicationContext().getSystemService(
+                        Context.ACTIVITY_SERVICE);
+        ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
+        am.getMemoryInfo(info);
+        return info.lowMemory;
+    }
+
+    /**
      * Resets the cached value, if any.
      */
     @VisibleForTesting
@@ -130,6 +145,11 @@ public class SysUtils {
         }
 
         int ramSizeKB = amountOfPhysicalMemoryKB();
-        return (ramSizeKB > 0 && ramSizeKB / 1024 <= ANDROID_LOW_MEMORY_DEVICE_THRESHOLD_MB);
+        if (ramSizeKB <= 0) return false;
+
+        if (BuildInfo.isAtLeastO()) {
+            return ramSizeKB / 1024 <= ANDROID_O_LOW_MEMORY_DEVICE_THRESHOLD_MB;
+        }
+        return ramSizeKB / 1024 <= ANDROID_LOW_MEMORY_DEVICE_THRESHOLD_MB;
     }
 }

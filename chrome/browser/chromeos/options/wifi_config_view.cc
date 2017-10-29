@@ -6,16 +6,17 @@
 
 #include <stddef.h>
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/enrollment_dialog_view.h"
 #include "chrome/browser/chromeos/net/shill_error.h"
 #include "chrome/browser/chromeos/options/passphrase_textfield.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/views/harmony/layout_delegate.h"
-#include "chrome/browser/ui/views/layout_utils.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "chromeos/login/login_state.h"
@@ -41,6 +42,7 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_client_view.h"
 
@@ -57,8 +59,8 @@ class ComboboxWithWidth : public views::Combobox {
         width_(width) {
   }
   ~ComboboxWithWidth() override {}
-  gfx::Size GetPreferredSize() const override {
-    gfx::Size size = Combobox::GetPreferredSize();
+  gfx::Size CalculatePreferredSize() const override {
+    gfx::Size size = Combobox::CalculatePreferredSize();
     size.set_width(width_);
     return size;
   }
@@ -326,6 +328,8 @@ int UserCertComboboxModel::GetItemCount() const {
       CertLibrary::Get()->NumCertificates(CertLibrary::CERT_TYPE_USER);
   if (num_certs == 0)
     return 1;  // "None installed"
+  if (owner_->ManagedUserCertNotFound())
+    return 1;  // Empty: no user cert found, but managed (not editable).
   return num_certs;
 }
 
@@ -339,6 +343,9 @@ base::string16 UserCertComboboxModel::GetItemAt(int index) {
   if (CertLibrary::Get()->NumCertificates(CertLibrary::CERT_TYPE_USER) == 0)
     return l10n_util::GetStringUTF16(
         IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_USER_CERT_NONE_INSTALLED);
+  if (owner_->ManagedUserCertNotFound())
+    return base::string16();  // Empty: no user cert found, but managed (not
+                              // editable).
   return CertLibrary::Get()->GetCertDisplayStringAt(
       CertLibrary::CERT_TYPE_USER, index);
 }
@@ -890,12 +897,12 @@ void WifiConfigView::SetEapProperties(base::DictionaryValue* properties,
     properties->SetStringWithoutPathExpansion(
         shill::kEapPasswordProperty, GetPassphrase());
   }
-  base::ListValue* pem_list = new base::ListValue;
+  auto pem_list = base::MakeUnique<base::ListValue>();
   std::string ca_cert_pem = GetEapServerCaCertPEM();
   if (!ca_cert_pem.empty())
     pem_list->AppendString(ca_cert_pem);
-  properties->SetWithoutPathExpansion(
-      shill::kEapCaCertPemProperty, pem_list);
+  properties->SetWithoutPathExpansion(shill::kEapCaCertPemProperty,
+                                      std::move(pem_list));
 }
 
 void WifiConfigView::Cancel() {
@@ -936,8 +943,8 @@ void WifiConfigView::Init(bool show_8021x) {
       ParseUIProperty(&passphrase_ui_data_, network, ::onc::wifi::kPassphrase);
   }
 
-  views::GridLayout* layout = layout_utils::CreatePanelLayout(this);
-  LayoutDelegate* delegate = LayoutDelegate::Get();
+  views::GridLayout* layout = views::GridLayout::CreatePanel(this);
+  views::LayoutProvider* provider = views::LayoutProvider::Get();
 
   const int column_view_set_id = 0;
   views::ColumnSet* column_set = layout->AddColumnSet(column_view_set_id);
@@ -954,15 +961,15 @@ void WifiConfigView::Init(bool show_8021x) {
                           1, views::GridLayout::USE_PREF, 0, 0);
   }
   column_set->AddPaddingColumn(
-      0, delegate->GetMetric(
-             LayoutDelegate::Metric::RELATED_CONTROL_HORIZONTAL_SPACING));
+      0,
+      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL));
   // Textfield, combobox.
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
                         views::GridLayout::USE_PREF, 0,
                         ChildNetworkConfigView::kInputFieldMinWidth);
   column_set->AddPaddingColumn(
-      0, delegate->GetMetric(
-             LayoutDelegate::Metric::RELATED_CONTROL_HORIZONTAL_SPACING));
+      0,
+      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL));
   // Password visible button / policy indicator.
   column_set->AddColumn(views::GridLayout::CENTER, views::GridLayout::FILL, 0,
                         views::GridLayout::FIXED, kPasswordVisibleWidth, 0);
@@ -990,9 +997,8 @@ void WifiConfigView::Init(bool show_8021x) {
       label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
       layout->AddView(label);
     }
-    layout->AddPaddingRow(
-        0, delegate->GetMetric(
-               LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+    layout->AddPaddingRow(0, provider->GetDistanceMetric(
+                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
   }
 
   // Security select
@@ -1013,9 +1019,8 @@ void WifiConfigView::Init(bool show_8021x) {
       layout->AddView(security_combobox_);
     }
     layout->AddView(security_combobox_);
-    layout->AddPaddingRow(
-        0, delegate->GetMetric(
-               LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+    layout->AddPaddingRow(0, provider->GetDistanceMetric(
+                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
   }
 
   // Only enumerate certificates in the data model for 802.1X networks.
@@ -1042,9 +1047,8 @@ void WifiConfigView::Init(bool show_8021x) {
       layout->AddView(eap_method_combobox_);
     }
     layout->AddView(new ControlledSettingIndicatorView(eap_method_ui_data_));
-    layout->AddPaddingRow(
-        0, delegate->GetMetric(
-               LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+    layout->AddPaddingRow(0, provider->GetDistanceMetric(
+                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
     // Phase 2 authentication
     layout->StartRow(0, column_view_set_id);
@@ -1068,9 +1072,8 @@ void WifiConfigView::Init(bool show_8021x) {
       layout->AddView(phase_2_auth_combobox_);
     }
     layout->AddView(new ControlledSettingIndicatorView(phase_2_auth_ui_data_));
-    layout->AddPaddingRow(
-        0, delegate->GetMetric(
-               LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+    layout->AddPaddingRow(0, provider->GetDistanceMetric(
+                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
     // Server CA certificate
     layout->StartRow(0, column_view_set_id);
@@ -1096,9 +1099,8 @@ void WifiConfigView::Init(bool show_8021x) {
     }
     layout->AddView(
         new ControlledSettingIndicatorView(server_ca_cert_ui_data_));
-    layout->AddPaddingRow(
-        0, delegate->GetMetric(
-               LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+    layout->AddPaddingRow(0, provider->GetDistanceMetric(
+                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
     // Subject Match
     layout->StartRow(0, column_view_set_id);
@@ -1116,11 +1118,11 @@ void WifiConfigView::Init(bool show_8021x) {
     } else {
       layout->AddView(subject_match_textfield_);
     }
-    layout->AddPaddingRow(
-        0, delegate->GetMetric(
-               LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+    layout->AddPaddingRow(0, provider->GetDistanceMetric(
+                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
     // User certificate
+    managed_user_cert_not_found_ = false;
     layout->StartRow(0, column_view_set_id);
     base::string16 user_cert_label_text = l10n_util::GetStringUTF16(
         IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT);
@@ -1140,9 +1142,8 @@ void WifiConfigView::Init(bool show_8021x) {
       layout->AddView(user_cert_combobox_);
     }
     layout->AddView(new ControlledSettingIndicatorView(user_cert_ui_data_));
-    layout->AddPaddingRow(
-        0, delegate->GetMetric(
-               LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+    layout->AddPaddingRow(0, provider->GetDistanceMetric(
+                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
     // Identity
     layout->StartRow(0, column_view_set_id);
@@ -1162,9 +1163,8 @@ void WifiConfigView::Init(bool show_8021x) {
       layout->AddView(identity_textfield_);
     }
     layout->AddView(new ControlledSettingIndicatorView(identity_ui_data_));
-    layout->AddPaddingRow(
-        0, delegate->GetMetric(
-               LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+    layout->AddPaddingRow(0, provider->GetDistanceMetric(
+                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
   }
 
   // Passphrase input
@@ -1224,8 +1224,7 @@ void WifiConfigView::Init(bool show_8021x) {
   }
 
   layout->AddPaddingRow(
-      0, delegate->GetMetric(
-             LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+      0, provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
   if (show_8021x) {
     // Anonymous identity
@@ -1247,16 +1246,14 @@ void WifiConfigView::Init(bool show_8021x) {
     }
     layout->AddView(
         new ControlledSettingIndicatorView(identity_anonymous_ui_data_));
-    layout->AddPaddingRow(
-        0, delegate->GetMetric(
-               LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+    layout->AddPaddingRow(0, provider->GetDistanceMetric(
+                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
   }
 
   if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
     // We need a little bit more padding above Checkboxes.
-    layout->AddPaddingRow(
-        0, delegate->GetMetric(
-               LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+    layout->AddPaddingRow(0, provider->GetDistanceMetric(
+                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
   }
 
   // Checkboxes.
@@ -1285,8 +1282,7 @@ void WifiConfigView::Init(bool show_8021x) {
     layout->AddView(share_network_checkbox_);
   }
   layout->AddPaddingRow(
-      0, delegate->GetMetric(
-             LayoutDelegate::Metric::RELATED_CONTROL_VERTICAL_SPACING));
+      0, provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
   // Create an error label.
   layout->StartRow(0, column_view_set_id);
@@ -1413,6 +1409,17 @@ void WifiConfigView::InitFromProperties(
           CertLibrary::Get()->GetUserCertIndexByPkcs11Id(pkcs11_id);
       if (cert_index >= 0)
         user_cert_combobox_->SetSelectedIndex(cert_index);
+    } else if (!user_cert_ui_data_.IsEditable() &&
+               CertLibrary::Get()->NumCertificates(
+                   CertLibrary::CERT_TYPE_USER) > 0) {
+      // The cert is not configured (e.g. policy-provided client cert pattern
+      // did not match anything), and the cert selection is not editable
+      // (probably because the network is configured by policy). In this case,
+      // we don't want to display the first certificate in the list, as that
+      // would be misleading.
+      managed_user_cert_not_found_ = true;
+      user_cert_combobox_->ModelChanged();
+      user_cert_combobox_->SetSelectedIndex(0);
     }
   }
 

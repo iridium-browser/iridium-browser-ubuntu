@@ -11,30 +11,38 @@ namespace blink {
 
 class CSSNumberInterpolationType : public CSSInterpolationType {
  public:
-  CSSNumberInterpolationType(PropertyHandle property)
-      : CSSInterpolationType(property) {}
+  CSSNumberInterpolationType(PropertyHandle property,
+                             const PropertyRegistration* registration = nullptr,
+                             bool round_to_integer = false)
+      : CSSInterpolationType(property, registration),
+        round_to_integer_(round_to_integer) {
+    // This integer flag only applies to registered custom properties.
+    DCHECK(!round_to_integer_ || property.IsCSSCustomProperty());
+  }
 
-  InterpolationValue maybeConvertStandardPropertyUnderlyingValue(
+  InterpolationValue MaybeConvertStandardPropertyUnderlyingValue(
       const ComputedStyle&) const final;
-  void applyStandardPropertyValue(const InterpolableValue&,
+  void ApplyStandardPropertyValue(const InterpolableValue&,
                                   const NonInterpolableValue*,
                                   StyleResolverState&) const final;
 
-  const CSSValue* createCSSValue(const InterpolableValue&,
+  const CSSValue* CreateCSSValue(const InterpolableValue&,
                                  const NonInterpolableValue*,
                                  const StyleResolverState&) const final;
 
  private:
-  InterpolationValue createNumberValue(double number) const;
-  InterpolationValue maybeConvertNeutral(const InterpolationValue& underlying,
+  InterpolationValue CreateNumberValue(double number) const;
+  InterpolationValue MaybeConvertNeutral(const InterpolationValue& underlying,
                                          ConversionCheckers&) const final;
-  InterpolationValue maybeConvertInitial(const StyleResolverState&,
+  InterpolationValue MaybeConvertInitial(const StyleResolverState&,
                                          ConversionCheckers&) const final;
-  InterpolationValue maybeConvertInherit(const StyleResolverState&,
+  InterpolationValue MaybeConvertInherit(const StyleResolverState&,
                                          ConversionCheckers&) const final;
-  InterpolationValue maybeConvertValue(const CSSValue&,
+  InterpolationValue MaybeConvertValue(const CSSValue&,
                                        const StyleResolverState*,
                                        ConversionCheckers&) const final;
+
+  const bool round_to_integer_;
 };
 
 }  // namespace blink

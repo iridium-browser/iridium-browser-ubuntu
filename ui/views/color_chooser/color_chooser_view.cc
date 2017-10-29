@@ -18,6 +18,7 @@
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/color_chooser/color_chooser_listener.h"
@@ -104,8 +105,8 @@ void DrawGradientRect(const gfx::Rect& rect, SkColor start_color,
   else
     points[1].iset(0, rect.height() + 1);
   cc::PaintFlags flags;
-  flags.setShader(cc::WrapSkShader(SkGradientShader::MakeLinear(
-      points, colors, NULL, 2, SkShader::kClamp_TileMode)));
+  flags.setShader(cc::PaintShader::MakeLinearGradient(
+      points, colors, nullptr, 2, SkShader::kClamp_TileMode));
   canvas->DrawRect(rect, flags);
 }
 
@@ -129,7 +130,7 @@ class ColorChooserView::HueView : public LocatedEventHandlerView {
   void ProcessEventAtLocation(const gfx::Point& point) override;
 
   // View overrides:
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
   void OnPaint(gfx::Canvas* canvas) override;
 
   ColorChooserView* chooser_view_;
@@ -164,7 +165,7 @@ void ColorChooserView::HueView::ProcessEventAtLocation(
   SchedulePaint();
 }
 
-gfx::Size ColorChooserView::HueView::GetPreferredSize() const {
+gfx::Size ColorChooserView::HueView::CalculatePreferredSize() const {
   // We put indicators on the both sides of the hue bar.
   return gfx::Size(kHueBarWidth + kHueIndicatorSize * 2 + kBorderWidth * 2,
                    kSaturationValueSize + kBorderWidth * 2);
@@ -236,7 +237,7 @@ class ColorChooserView::SaturationValueView : public LocatedEventHandlerView {
   void ProcessEventAtLocation(const gfx::Point& point) override;
 
   // View overrides:
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
   void OnPaint(gfx::Canvas* canvas) override;
 
   ColorChooserView* chooser_view_;
@@ -285,7 +286,8 @@ void ColorChooserView::SaturationValueView::ProcessEventAtLocation(
   chooser_view_->OnSaturationValueChosen(saturation, value);
 }
 
-gfx::Size ColorChooserView::SaturationValueView::GetPreferredSize() const {
+gfx::Size ColorChooserView::SaturationValueView::CalculatePreferredSize()
+    const {
   return gfx::Size(kSaturationValueSize + kBorderWidth * 2,
                    kSaturationValueSize + kBorderWidth * 2);
 }
@@ -346,7 +348,7 @@ ColorChooserView::SelectedColorPatchView::SelectedColorPatchView() {
 
 void ColorChooserView::SelectedColorPatchView::SetColor(SkColor color) {
   if (!background())
-    set_background(Background::CreateSolidBackground(color));
+    SetBackground(CreateSolidBackground(color));
   else
     background()->SetNativeControlColor(color);
   SchedulePaint();
@@ -361,13 +363,13 @@ ColorChooserView::ColorChooserView(ColorChooserListener* listener,
     : listener_(listener) {
   DCHECK(listener_);
 
-  set_background(Background::CreateSolidBackground(SK_ColorLTGRAY));
-  SetLayoutManager(new BoxLayout(BoxLayout::kVertical, kMarginWidth,
-                                 kMarginWidth, kMarginWidth));
+  SetBackground(CreateSolidBackground(SK_ColorLTGRAY));
+  SetLayoutManager(new BoxLayout(BoxLayout::kVertical,
+                                 gfx::Insets(kMarginWidth), kMarginWidth));
 
   View* container = new View();
-  container->SetLayoutManager(new BoxLayout(BoxLayout::kHorizontal, 0, 0,
-                                            kMarginWidth));
+  container->SetLayoutManager(
+      new BoxLayout(BoxLayout::kHorizontal, gfx::Insets(), kMarginWidth));
   saturation_value_ = new SaturationValueView(this);
   container->AddChildView(saturation_value_);
   hue_ = new HueView(this);

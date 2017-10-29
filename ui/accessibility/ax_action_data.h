@@ -45,6 +45,9 @@ struct AX_EXPORT AXActionData {
   int focus_node_id;
   int focus_offset;
 
+  // For custom action.
+  int custom_action_id;
+
   // The target rect for the action.
   gfx::Rect target_rect;
 
@@ -53,6 +56,9 @@ struct AX_EXPORT AXActionData {
 
   // The new value for a node, for the SET_VALUE action.
   base::string16 value;
+
+  // The event to fire in response to a HIT_TEST action.
+  AXEvent hit_test_event_to_fire;
 };
 
 }  // namespace ui

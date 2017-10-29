@@ -106,20 +106,19 @@ void GrGLPathRendering::resetContext() {
     fHWPathStencilSettings.invalidate();
 }
 
-GrPath* GrGLPathRendering::createPath(const SkPath& inPath, const GrStyle& style) {
-    return new GrGLPath(this->gpu(), inPath, style);
+sk_sp<GrPath> GrGLPathRendering::createPath(const SkPath& inPath, const GrStyle& style) {
+    return sk_make_sp<GrGLPath>(this->gpu(), inPath, style);
 }
 
-GrPathRange* GrGLPathRendering::createPathRange(GrPathRange::PathGenerator* pathGenerator,
-                                                const GrStyle& style) {
-    return new GrGLPathRange(this->gpu(), pathGenerator, style);
+sk_sp<GrPathRange> GrGLPathRendering::createPathRange(GrPathRange::PathGenerator* pathGenerator,
+                                                      const GrStyle& style) {
+    return sk_make_sp<GrGLPathRange>(this->gpu(), pathGenerator, style);
 }
 
 void GrGLPathRendering::onStencilPath(const StencilPathArgs& args, const GrPath* path) {
     GrGLGpu* gpu = this->gpu();
     SkASSERT(gpu->caps()->shaderCaps()->pathRenderingSupport());
     gpu->flushColorWrite(false);
-    gpu->flushDrawFace(GrDrawFace::kBoth);
 
     GrGLRenderTarget* rt = static_cast<GrGLRenderTarget*>(args.fRenderTarget);
     SkISize size = SkISize::Make(rt->width(), rt->height());

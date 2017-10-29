@@ -33,72 +33,78 @@ namespace blink {
 
 // See WebFrameLoadType in public/web/WebFrameLoadType.h for details.
 enum FrameLoadType {
-  FrameLoadTypeStandard,
-  FrameLoadTypeBackForward,
-  FrameLoadTypeReload,
-  FrameLoadTypeReloadMainResource,
-  FrameLoadTypeReplaceCurrentItem,
-  FrameLoadTypeInitialInChildFrame,
-  FrameLoadTypeInitialHistoryLoad,
-  FrameLoadTypeReloadBypassingCache,
+  kFrameLoadTypeStandard,
+  kFrameLoadTypeBackForward,
+  kFrameLoadTypeReload,
+  kFrameLoadTypeReplaceCurrentItem,
+  kFrameLoadTypeInitialInChildFrame,
+  kFrameLoadTypeInitialHistoryLoad,
+  kFrameLoadTypeReloadBypassingCache,
 };
 
 enum NavigationType {
-  NavigationTypeLinkClicked,
-  NavigationTypeFormSubmitted,
-  NavigationTypeBackForward,
-  NavigationTypeReload,
-  NavigationTypeFormResubmitted,
-  NavigationTypeOther
+  kNavigationTypeLinkClicked,
+  kNavigationTypeFormSubmitted,
+  kNavigationTypeBackForward,
+  kNavigationTypeReload,
+  kNavigationTypeFormResubmitted,
+  kNavigationTypeOther
 };
 
-enum ObjectContentType {
-  ObjectContentNone,
-  ObjectContentImage,
-  ObjectContentFrame,
-  ObjectContentNetscapePlugin,
-};
+enum ShouldSendReferrer { kMaybeSendReferrer, kNeverSendReferrer };
 
-enum ShouldSendReferrer { MaybeSendReferrer, NeverSendReferrer };
-
-enum ShouldSetOpener { MaybeSetOpener, NeverSetOpener };
+enum ShouldSetOpener { kMaybeSetOpener, kNeverSetOpener };
 
 enum ReasonForCallingAllowPlugins {
-  AboutToInstantiatePlugin,
-  NotAboutToInstantiatePlugin
+  kAboutToInstantiatePlugin,
+  kNotAboutToInstantiatePlugin
 };
 
 enum LoadStartType {
-  NavigationToDifferentDocument,
-  NavigationWithinSameDocument
+  kNavigationToDifferentDocument,
+  kNavigationWithinSameDocument
 };
 
 enum SameDocumentNavigationSource {
-  SameDocumentNavigationDefault,
-  SameDocumentNavigationHistoryApi,
+  kSameDocumentNavigationDefault,
+  kSameDocumentNavigationHistoryApi,
 };
 
-enum HistoryLoadType { HistorySameDocumentLoad, HistoryDifferentDocumentLoad };
+enum HistoryLoadType {
+  kHistorySameDocumentLoad,
+  kHistoryDifferentDocumentLoad
+};
 
 enum HistoryCommitType {
-  StandardCommit,
-  BackForwardCommit,
-  InitialCommitInChildFrame,
-  HistoryInertCommit
+  kStandardCommit,
+  kBackForwardCommit,
+  kInitialCommitInChildFrame,
+  kHistoryInertCommit
 };
 
 enum HistoryScrollRestorationType {
-  ScrollRestorationAuto,
-  ScrollRestorationManual
+  kScrollRestorationAuto,
+  kScrollRestorationManual
 };
 
 enum class ProgressBarCompletion {
-  LoadEvent,
-  ResourcesBeforeDCL,
-  DOMContentLoaded,
-  ResourcesBeforeDCLAndSameOriginIFrames
+  kLoadEvent,
+  kResourcesBeforeDCL,
+  kDOMContentLoaded,
+  kResourcesBeforeDCLAndSameOriginIFrames
 };
 
+// This enum is used to index different kinds of single-page-application
+// navigations for UMA enum histogram. New enum values can be added, but
+// existing enums must never be renumbered or deleted and reused.
+// This enum should be consistent with SinglePageAppNavigationType in
+// tools/metrics/histograms/enums.xml.
+enum SinglePageAppNavigationType {
+  kSPANavTypeHistoryPushStateOrReplaceState = 0,
+  kSPANavTypeSameDocumentBackwardOrForward = 1,
+  kSPANavTypeOtherFragmentNavigation = 2,
+  kSPANavTypeCount
+};
 }  // namespace blink
 
 #endif

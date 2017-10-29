@@ -72,6 +72,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/shared_memory.h"
+#include "base/memory/shared_memory_handle.h"
 #include "base/metrics/persistent_memory_allocator.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/pickle.h"
@@ -563,19 +564,17 @@ class BASE_EXPORT FieldTrialList {
       const char* disable_features_switch,
       FeatureList* feature_list);
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_FUCHSIA)
   // On Windows, we need to explicitly pass down any handles to be inherited.
   // This function adds the shared memory handle to field trial state to the
   // list of handles to be inherited.
   static void AppendFieldTrialHandleIfNeeded(
       base::HandlesToInheritVector* handles);
-#endif
-
-#if defined(OS_POSIX) && !defined(OS_NACL)
+#elif defined(OS_POSIX) && !defined(OS_NACL)
   // On POSIX, we also need to explicitly pass down this file descriptor that
-  // should be shared with the child process. Returns kInvalidPlatformFile if no
-  // handle exists or was not initialized properly.
-  static PlatformFile GetFieldTrialHandle();
+  // should be shared with the child process. Returns an invalid handle if it
+  // was not initialized properly.
+  static base::SharedMemoryHandle GetFieldTrialHandle();
 #endif
 
   // Adds a switch to the command line containing the field trial state as a
@@ -645,19 +644,37 @@ class BASE_EXPORT FieldTrialList {
                            DoNotAddSimulatedFieldTrialsToAllocator);
   FRIEND_TEST_ALL_PREFIXES(FieldTrialListTest, AssociateFieldTrialParams);
   FRIEND_TEST_ALL_PREFIXES(FieldTrialListTest, ClearParamsFromSharedMemory);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialListTest,
+                           SerializeSharedMemoryHandleMetadata);
 
-#if defined(OS_WIN)
+  // Serialization is used to pass information about the handle to child
+  // processes. It passes a reference to the relevant OS resource, and it passes
+  // a GUID. Serialization and deserialization doesn't actually transport the
+  // underlying OS resource - that must be done by the Process launcher.
+  static std::string SerializeSharedMemoryHandleMetadata(
+      const SharedMemoryHandle& shm);
+#if defined(OS_WIN) || defined(OS_FUCHSIA)
+  static SharedMemoryHandle DeserializeSharedMemoryHandleMetadata(
+      const std::string& switch_value);
+#elif defined(OS_POSIX) && !defined(OS_NACL)
+  static SharedMemoryHandle DeserializeSharedMemoryHandleMetadata(
+      int fd,
+      const std::string& switch_value);
+#endif
+
+#if defined(OS_WIN) || defined(OS_FUCHSIA)
   // Takes in |handle_switch| from the command line which represents the shared
   // memory handle for field trials, parses it, and creates the field trials.
   // Returns true on success, false on failure.
-  static bool CreateTrialsFromHandleSwitch(const std::string& handle_switch);
-#endif
-
-#if defined(OS_POSIX) && !defined(OS_NACL)
+  // |switch_value| also contains the serialized GUID.
+  static bool CreateTrialsFromSwitchValue(const std::string& switch_value);
+#elif defined(OS_POSIX) && !defined(OS_NACL)
   // On POSIX systems that use the zygote, we look up the correct fd that backs
   // the shared memory segment containing the field trials by looking it up via
   // an fd key in GlobalDescriptors. Returns true on success, false on failure.
-  static bool CreateTrialsFromDescriptor(int fd_key);
+  // |switch_value| also contains the serialized GUID.
+  static bool CreateTrialsFromDescriptor(int fd_key,
+                                         const std::string& switch_value);
 #endif
 
   // Takes an unmapped SharedMemoryHandle, creates a SharedMemory object from it
@@ -731,7 +748,7 @@ class BASE_EXPORT FieldTrialList {
   // Readonly copy of the handle to the allocator. Needs to be a member variable
   // because it's needed from both CopyFieldTrialStateToFlags() and
   // AppendFieldTrialHandleIfNeeded().
-  PlatformFile readonly_allocator_handle_ = kInvalidPlatformFile;
+  base::SharedMemoryHandle readonly_allocator_handle_;
 
   // Tracks whether CreateTrialsFromCommandLine() has been called.
   bool create_trials_from_command_line_called_ = false;

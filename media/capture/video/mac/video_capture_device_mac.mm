@@ -21,6 +21,7 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "media/base/timestamp_constants.h"
@@ -321,8 +322,9 @@ void VideoCaptureDeviceMac::AllocateAndStart(
 
   [capture_device_ setFrameReceiver:this];
 
-  if (![capture_device_ setCaptureDevice:deviceId]) {
-    SetErrorState(FROM_HERE, "Could not open capture device.");
+  NSString* errorMessage = nil;
+  if (![capture_device_ setCaptureDevice:deviceId errorMessage:&errorMessage]) {
+    SetErrorState(FROM_HERE, base::SysNSStringToUTF8(errorMessage));
     return;
   }
 
@@ -367,7 +369,10 @@ void VideoCaptureDeviceMac::StopAndDeAllocate() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(state_ == kCapturing || state_ == kError) << state_;
 
-  [capture_device_ setCaptureDevice:nil];
+  NSString* errorMessage = nil;
+  if (![capture_device_ setCaptureDevice:nil errorMessage:&errorMessage])
+    LogMessage(base::SysNSStringToUTF8(errorMessage));
+
   [capture_device_ setFrameReceiver:nil];
   client_.reset();
   state_ = kIdle;
@@ -382,6 +387,49 @@ void VideoCaptureDeviceMac::TakePhoto(TakePhotoCallback callback) {
 
   photo_callback_.reset(new TakePhotoCallback(std::move(callback)));
   [capture_device_ takePhoto];
+}
+
+void VideoCaptureDeviceMac::GetPhotoState(GetPhotoStateCallback callback) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+
+  auto photo_state = mojom::PhotoState::New();
+
+  photo_state->exposure_compensation = mojom::Range::New();
+  photo_state->color_temperature = mojom::Range::New();
+  photo_state->iso = mojom::Range::New();
+
+  photo_state->brightness = mojom::Range::New();
+  photo_state->contrast = mojom::Range::New();
+  photo_state->saturation = mojom::Range::New();
+  photo_state->sharpness = mojom::Range::New();
+
+  photo_state->zoom = mojom::Range::New();
+
+  photo_state->red_eye_reduction = mojom::RedEyeReduction::NEVER;
+  photo_state->height = mojom::Range::New(
+      capture_format_.frame_size.height(), capture_format_.frame_size.height(),
+      capture_format_.frame_size.height(), 0 /* step */);
+  photo_state->width = mojom::Range::New(
+      capture_format_.frame_size.width(), capture_format_.frame_size.width(),
+      capture_format_.frame_size.width(), 0 /* step */);
+  photo_state->torch = false;
+
+  callback.Run(std::move(photo_state));
+}
+
+void VideoCaptureDeviceMac::SetPhotoOptions(mojom::PhotoSettingsPtr settings,
+                                            SetPhotoOptionsCallback callback) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  // Drop |callback| and return if there are any unsupported |settings|.
+  // TODO(mcasas): centralise checks elsewhere, https://crbug.com/724285.
+  if ((settings->has_width &&
+       settings->width != capture_format_.frame_size.width()) ||
+      (settings->has_height &&
+       settings->height != capture_format_.frame_size.height()) ||
+      settings->has_fill_light_mode || settings->has_red_eye_reduction) {
+    return;
+  }
+  callback.Run(true);
 }
 
 bool VideoCaptureDeviceMac::Init(VideoCaptureApi capture_api_type) {

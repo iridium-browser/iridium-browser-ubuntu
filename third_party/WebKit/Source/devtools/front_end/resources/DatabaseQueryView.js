@@ -35,13 +35,11 @@ Resources.DatabaseQueryView = class extends UI.VBox {
     this.element.classList.add('storage-view', 'query', 'monospace');
     this.element.addEventListener('selectstart', this._selectStart.bind(this), false);
 
-    this._promptIcon = UI.Icon.create('smallicon-text-prompt', 'prompt-icon');
-    this._promptElement = createElement('div');
-    this._promptElement.appendChild(this._promptIcon);
+    this._promptContainer = this.element.createChild('div', 'database-query-prompt-container');
+    this._promptContainer.appendChild(UI.Icon.create('smallicon-text-prompt', 'prompt-icon'));
+    this._promptElement = this._promptContainer.createChild('div');
     this._promptElement.className = 'database-query-prompt';
-    this._promptElement.appendChild(createElement('br'));
     this._promptElement.addEventListener('keydown', this._promptKeyDown.bind(this), true);
-    this.element.appendChild(this._promptElement);
 
     this._prompt = new UI.TextPrompt();
     this._prompt.initialize(this.completions.bind(this), ' ');
@@ -51,7 +49,7 @@ Resources.DatabaseQueryView = class extends UI.VBox {
   }
 
   _messagesClicked() {
-    if (!this._prompt.isCaretInsidePrompt() && this.element.isComponentSelectionCollapsed())
+    if (!this._prompt.isCaretInsidePrompt() && !this.element.hasSelection())
       this._prompt.moveCaretToEndOfPrompt();
   }
 
@@ -61,38 +59,16 @@ Resources.DatabaseQueryView = class extends UI.VBox {
    * @param {boolean=} force
    * @return {!Promise<!UI.SuggestBox.Suggestions>}
    */
-  completions(expression, prefix, force) {
+  async completions(expression, prefix, force) {
     if (!prefix)
-      return Promise.resolve([]);
-    var fulfill;
-    var promise = new Promise(x => fulfill = x);
-    var results = [];
+      return [];
 
     prefix = prefix.toLowerCase();
-
-    function accumulateMatches(textArray) {
-      for (var i = 0; i < textArray.length; ++i) {
-        var text = textArray[i].toLowerCase();
-        if (text.length < prefix.length)
-          continue;
-        if (!text.startsWith(prefix))
-          continue;
-        results.push(textArray[i]);
-      }
-    }
-    function tableNamesCallback(tableNames) {
-      accumulateMatches(tableNames.map(function(name) {
-        return name + ' ';
-      }));
-      accumulateMatches([
-        'SELECT ', 'FROM ', 'WHERE ', 'LIMIT ', 'DELETE FROM ', 'CREATE ', 'DROP ', 'TABLE ', 'INDEX ', 'UPDATE ',
-        'INSERT INTO ', 'VALUES ('
-      ]);
-
-      fulfill(results.map(completion => ({text: completion})));
-    }
-    this.database.getTableNames(tableNamesCallback);
-    return promise;
+    var tableNames = await this.database.tableNames();
+    return tableNames.map(name => name + ' ')
+        .concat(Resources.DatabaseQueryView._SQL_BUILT_INS)
+        .filter(proposal => proposal.toLowerCase().startsWith(prefix))
+        .map(completion => ({text: completion}));
   }
 
   _selectStart(event) {
@@ -106,7 +82,7 @@ Resources.DatabaseQueryView = class extends UI.VBox {
      */
     function moveBackIfOutside() {
       delete this._selectionTimeout;
-      if (!this._prompt.isCaretInsidePrompt() && this.element.isComponentSelectionCollapsed())
+      if (!this._prompt.isCaretInsidePrompt() && !this.element.hasSelection())
         this._prompt.moveCaretToEndOfPrompt();
       this._prompt.autoCompleteSoon();
     }
@@ -131,7 +107,6 @@ Resources.DatabaseQueryView = class extends UI.VBox {
       return;
 
     this._prompt.setText('');
-    this._promptElement.insertBefore(this._promptIcon, this._promptElement.firstChild);
 
     this.database.executeSql(query, this._queryFinished.bind(this, query), this._queryError.bind(this, query));
   }
@@ -141,6 +116,7 @@ Resources.DatabaseQueryView = class extends UI.VBox {
     var trimmedQuery = query.trim();
 
     if (dataGrid) {
+      dataGrid.setStriped(true);
       dataGrid.renderInline();
       this._appendViewQueryResult(trimmedQuery, dataGrid.asWidget());
       dataGrid.autoSizeColumns(5);
@@ -184,7 +160,7 @@ Resources.DatabaseQueryView = class extends UI.VBox {
     var element = createElement('div');
     element.className = 'database-user-query';
     element.appendChild(UI.Icon.create('smallicon-user-command', 'prompt-icon'));
-    this.element.insertBefore(element, this._proxyElement);
+    this.element.insertBefore(element, this._promptContainer);
 
     var commandTextElement = createElement('span');
     commandTextElement.className = 'database-query-text';
@@ -202,3 +178,8 @@ Resources.DatabaseQueryView = class extends UI.VBox {
 Resources.DatabaseQueryView.Events = {
   SchemaUpdated: Symbol('SchemaUpdated')
 };
+
+Resources.DatabaseQueryView._SQL_BUILT_INS = [
+  'SELECT ', 'FROM ', 'WHERE ', 'LIMIT ', 'DELETE FROM ', 'CREATE ', 'DROP ', 'TABLE ', 'INDEX ', 'UPDATE ',
+  'INSERT INTO ', 'VALUES ('
+];

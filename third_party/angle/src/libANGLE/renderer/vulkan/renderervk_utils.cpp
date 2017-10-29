@@ -177,20 +177,18 @@ gl::Error Error::toGL(GLenum glErrorCode) const
     }
 
     // TODO(jmadill): Set extended error code to 'vulkan internal error'.
-    const std::string &message = toString();
-    return gl::Error(glErrorCode, message.c_str());
+    return gl::Error(glErrorCode, glErrorCode, toString());
 }
 
 egl::Error Error::toEGL(EGLint eglErrorCode) const
 {
     if (!isError())
     {
-        return egl::Error(EGL_SUCCESS);
+        return egl::NoError();
     }
 
     // TODO(jmadill): Set extended error code to 'vulkan internal error'.
-    const std::string &message = toString();
-    return egl::Error(eglErrorCode, message.c_str());
+    return egl::Error(eglErrorCode, eglErrorCode, toString());
 }
 
 std::string Error::toString() const
@@ -238,7 +236,7 @@ Error CommandPool::init(VkDevice device, const VkCommandPoolCreateInfo &createIn
 }
 
 // CommandBuffer implementation.
-CommandBuffer::CommandBuffer() : mCommandPool(nullptr)
+CommandBuffer::CommandBuffer() : mStarted(false), mCommandPool(nullptr)
 {
 }
 
@@ -250,6 +248,11 @@ void CommandBuffer::setCommandPool(CommandPool *commandPool)
 
 Error CommandBuffer::begin(VkDevice device)
 {
+    if (mStarted)
+    {
+        return NoError();
+    }
+
     if (mHandle == VK_NULL_HANDLE)
     {
         VkCommandBufferAllocateInfo commandBufferInfo;
@@ -266,6 +269,8 @@ Error CommandBuffer::begin(VkDevice device)
         reset();
     }
 
+    mStarted = true;
+
     VkCommandBufferBeginInfo beginInfo;
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.pNext = nullptr;
@@ -280,6 +285,8 @@ Error CommandBuffer::begin(VkDevice device)
 
 Error CommandBuffer::end()
 {
+    mStarted = false;
+
     ASSERT(valid());
     ANGLE_VK_TRY(vkEndCommandBuffer(mHandle));
     return NoError();
@@ -287,6 +294,8 @@ Error CommandBuffer::end()
 
 Error CommandBuffer::reset()
 {
+    mStarted = false;
+
     ASSERT(valid());
     ANGLE_VK_TRY(vkResetCommandBuffer(mHandle, 0));
     return NoError();
@@ -664,6 +673,14 @@ StagingImage::StagingImage() : mSize(0)
 {
 }
 
+StagingImage::StagingImage(StagingImage &&other)
+    : mImage(std::move(other.mImage)),
+      mDeviceMemory(std::move(other.mDeviceMemory)),
+      mSize(other.mSize)
+{
+    other.mSize = 0;
+}
+
 void StagingImage::destroy(VkDevice device)
 {
     mImage.destroy(device);
@@ -851,47 +868,6 @@ Error Fence::init(VkDevice device, const VkFenceCreateInfo &createInfo)
 VkResult Fence::getStatus(VkDevice device) const
 {
     return vkGetFenceStatus(device, mHandle);
-}
-
-// FenceAndCommandBuffer implementation.
-FenceAndCommandBuffer::FenceAndCommandBuffer(Serial queueSerial,
-                                             Fence &&fence,
-                                             CommandBuffer &&commandBuffer)
-    : mQueueSerial(queueSerial), mFence(std::move(fence)), mCommandBuffer(std::move(commandBuffer))
-{
-}
-
-FenceAndCommandBuffer::FenceAndCommandBuffer(FenceAndCommandBuffer &&other)
-    : mQueueSerial(std::move(other.mQueueSerial)),
-      mFence(std::move(other.mFence)),
-      mCommandBuffer(std::move(other.mCommandBuffer))
-{
-}
-
-void FenceAndCommandBuffer::destroy(VkDevice device)
-{
-    mFence.destroy(device);
-    mCommandBuffer.destroy(device);
-}
-
-vk::ErrorOrResult<bool> FenceAndCommandBuffer::finished(VkDevice device) const
-{
-    VkResult result = mFence.getStatus(device);
-    // Should this be a part of ANGLE_VK_TRY?
-    if (result == VK_NOT_READY)
-    {
-        return false;
-    }
-    ANGLE_VK_TRY(result);
-    return true;
-}
-
-FenceAndCommandBuffer &FenceAndCommandBuffer::operator=(FenceAndCommandBuffer &&other)
-{
-    std::swap(mQueueSerial, other.mQueueSerial);
-    mFence         = std::move(other.mFence);
-    mCommandBuffer = std::move(other.mCommandBuffer);
-    return *this;
 }
 
 }  // namespace vk

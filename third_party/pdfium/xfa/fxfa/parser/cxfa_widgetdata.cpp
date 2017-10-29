@@ -6,22 +6,24 @@
 
 #include "xfa/fxfa/parser/cxfa_widgetdata.h"
 
-#include "core/fxcrt/fx_ext.h"
+#include "core/fxcrt/cfx_decimal.h"
+#include "core/fxcrt/fx_extension.h"
+#include "fxbarcode/BC_Library.h"
 #include "third_party/base/stl_util.h"
-#include "xfa/fxbarcode/BC_Library.h"
-#include "xfa/fxfa/app/xfa_ffnotify.h"
+#include "xfa/fxfa/app/cxfa_ffnotify.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
 #include "xfa/fxfa/parser/cxfa_event.h"
+#include "xfa/fxfa/parser/cxfa_localevalue.h"
 #include "xfa/fxfa/parser/cxfa_measurement.h"
-#include "xfa/fxfa/parser/xfa_localevalue.h"
-#include "xfa/fxfa/parser/xfa_object.h"
+#include "xfa/fxfa/parser/cxfa_node.h"
+#include "xfa/fxfa/parser/xfa_utils.h"
 
 namespace {
 
-FX_FLOAT GetEdgeThickness(const std::vector<CXFA_Stroke>& strokes,
-                          bool b3DStyle,
-                          int32_t nIndex) {
-  FX_FLOAT fThickness = 0;
+float GetEdgeThickness(const std::vector<CXFA_Stroke>& strokes,
+                       bool b3DStyle,
+                       int32_t nIndex) {
+  float fThickness = 0;
 
   if (strokes[nIndex * 2 + 1].GetPresence() == XFA_ATTRIBUTEENUM_Visible) {
     if (nIndex == 0)
@@ -49,24 +51,12 @@ bool SplitDateTime(const CFX_WideString& wsDateTime,
 
   wsDate = wsDateTime.Left(nSplitIndex);
   if (!wsDate.IsEmpty()) {
-    int32_t iCount = wsDate.GetLength();
-    int32_t i = 0;
-    for (i = 0; i < iCount; i++) {
-      if (wsDate[i] >= '0' && wsDate[i] <= '9')
-        break;
-    }
-    if (i == iCount)
+    if (!std::any_of(wsDate.begin(), wsDate.end(), std::iswdigit))
       return false;
   }
   wsTime = wsDateTime.Right(wsDateTime.GetLength() - nSplitIndex - 1);
   if (!wsTime.IsEmpty()) {
-    int32_t iCount = wsTime.GetLength();
-    int32_t i = 0;
-    for (i = 0; i < iCount; i++) {
-      if (wsTime[i] >= '0' && wsTime[i] <= '9')
-        break;
-    }
-    if (i == iCount)
+    if (!std::any_of(wsTime.begin(), wsTime.end(), std::iswdigit))
       return false;
   }
   return true;
@@ -225,7 +215,7 @@ CFX_WideStringC GetAttributeDefaultValue_Cdata(XFA_Element eElement,
   void* pValue;
   if (XFA_GetAttributeDefaultValue(pValue, eElement, eAttribute,
                                    XFA_ATTRIBUTETYPE_Cdata, dwPacket)) {
-    return (const FX_WCHAR*)pValue;
+    return (const wchar_t*)pValue;
   }
   return nullptr;
 }
@@ -266,13 +256,7 @@ CFX_WideString CXFA_WidgetData::GetRawValue() {
   return m_pNode->GetContent();
 }
 
-int32_t CXFA_WidgetData::GetAccess(bool bTemplate) {
-  if (bTemplate) {
-    CXFA_Node* pNode = m_pNode->GetTemplateNode();
-    if (pNode)
-      return pNode->GetEnum(XFA_ATTRIBUTE_Access);
-    return XFA_ATTRIBUTEENUM_Open;
-  }
+int32_t CXFA_WidgetData::GetAccess() {
   CXFA_Node* pNode = m_pNode;
   while (pNode) {
     int32_t iAcc = pNode->GetEnum(XFA_ATTRIBUTE_Access);
@@ -299,67 +283,62 @@ CXFA_Border CXFA_WidgetData::GetBorder(bool bModified) {
   return CXFA_Border(m_pNode->GetProperty(0, XFA_Element::Border, bModified));
 }
 
-CXFA_Caption CXFA_WidgetData::GetCaption(bool bModified) {
-  return CXFA_Caption(m_pNode->GetProperty(0, XFA_Element::Caption, bModified));
+CXFA_Caption CXFA_WidgetData::GetCaption() {
+  return CXFA_Caption(m_pNode->GetProperty(0, XFA_Element::Caption, false));
 }
 
 CXFA_Font CXFA_WidgetData::GetFont(bool bModified) {
   return CXFA_Font(m_pNode->GetProperty(0, XFA_Element::Font, bModified));
 }
 
-CXFA_Margin CXFA_WidgetData::GetMargin(bool bModified) {
-  return CXFA_Margin(m_pNode->GetProperty(0, XFA_Element::Margin, bModified));
+CXFA_Margin CXFA_WidgetData::GetMargin() {
+  return CXFA_Margin(m_pNode->GetProperty(0, XFA_Element::Margin, false));
 }
 
-CXFA_Para CXFA_WidgetData::GetPara(bool bModified) {
-  return CXFA_Para(m_pNode->GetProperty(0, XFA_Element::Para, bModified));
+CXFA_Para CXFA_WidgetData::GetPara() {
+  return CXFA_Para(m_pNode->GetProperty(0, XFA_Element::Para, false));
 }
 
-void CXFA_WidgetData::GetEventList(CXFA_NodeArray& events) {
-  m_pNode->GetNodeList(events, 0, XFA_Element::Event);
+std::vector<CXFA_Node*> CXFA_WidgetData::GetEventList() {
+  return m_pNode->GetNodeList(0, XFA_Element::Event);
 }
 
-int32_t CXFA_WidgetData::GetEventByActivity(int32_t iActivity,
-                                            CXFA_NodeArray& events,
-                                            bool bIsFormReady) {
-  CXFA_NodeArray allEvents;
-  GetEventList(allEvents);
-  int32_t iCount = allEvents.GetSize();
-  for (int32_t i = 0; i < iCount; i++) {
-    CXFA_Event event(allEvents[i]);
+std::vector<CXFA_Node*> CXFA_WidgetData::GetEventByActivity(int32_t iActivity,
+                                                            bool bIsFormReady) {
+  std::vector<CXFA_Node*> events;
+  for (CXFA_Node* pNode : GetEventList()) {
+    CXFA_Event event(pNode);
     if (event.GetActivity() == iActivity) {
       if (iActivity == XFA_ATTRIBUTEENUM_Ready) {
         CFX_WideStringC wsRef;
         event.GetRef(wsRef);
         if (bIsFormReady) {
           if (wsRef == CFX_WideStringC(L"$form"))
-            events.Add(allEvents[i]);
+            events.push_back(pNode);
         } else {
           if (wsRef == CFX_WideStringC(L"$layout"))
-            events.Add(allEvents[i]);
+            events.push_back(pNode);
         }
       } else {
-        events.Add(allEvents[i]);
+        events.push_back(pNode);
       }
     }
   }
-  return events.GetSize();
+  return events;
 }
 
-CXFA_Value CXFA_WidgetData::GetDefaultValue(bool bModified) {
+CXFA_Value CXFA_WidgetData::GetDefaultValue() {
   CXFA_Node* pTemNode = m_pNode->GetTemplateNode();
   return CXFA_Value(
-      pTemNode ? pTemNode->GetProperty(0, XFA_Element::Value, bModified)
-               : nullptr);
+      pTemNode ? pTemNode->GetProperty(0, XFA_Element::Value, false) : nullptr);
 }
 
-CXFA_Value CXFA_WidgetData::GetFormValue(bool bModified) {
-  return CXFA_Value(m_pNode->GetProperty(0, XFA_Element::Value, bModified));
+CXFA_Value CXFA_WidgetData::GetFormValue() {
+  return CXFA_Value(m_pNode->GetProperty(0, XFA_Element::Value, false));
 }
 
-CXFA_Calculate CXFA_WidgetData::GetCalculate(bool bModified) {
-  return CXFA_Calculate(
-      m_pNode->GetProperty(0, XFA_Element::Calculate, bModified));
+CXFA_Calculate CXFA_WidgetData::GetCalculate() {
+  return CXFA_Calculate(m_pNode->GetProperty(0, XFA_Element::Calculate, false));
 }
 
 CXFA_Validate CXFA_WidgetData::GetValidate(bool bModified) {
@@ -367,35 +346,35 @@ CXFA_Validate CXFA_WidgetData::GetValidate(bool bModified) {
       m_pNode->GetProperty(0, XFA_Element::Validate, bModified));
 }
 
-CXFA_Bind CXFA_WidgetData::GetBind(bool bModified) {
-  return CXFA_Bind(m_pNode->GetProperty(0, XFA_Element::Bind, bModified));
+CXFA_Bind CXFA_WidgetData::GetBind() {
+  return CXFA_Bind(m_pNode->GetProperty(0, XFA_Element::Bind, false));
 }
 
-CXFA_Assist CXFA_WidgetData::GetAssist(bool bModified) {
-  return CXFA_Assist(m_pNode->GetProperty(0, XFA_Element::Assist, bModified));
+CXFA_Assist CXFA_WidgetData::GetAssist() {
+  return CXFA_Assist(m_pNode->GetProperty(0, XFA_Element::Assist, false));
 }
 
-bool CXFA_WidgetData::GetWidth(FX_FLOAT& fWidth) {
+bool CXFA_WidgetData::GetWidth(float& fWidth) {
   return TryMeasure(XFA_ATTRIBUTE_W, fWidth);
 }
 
-bool CXFA_WidgetData::GetHeight(FX_FLOAT& fHeight) {
+bool CXFA_WidgetData::GetHeight(float& fHeight) {
   return TryMeasure(XFA_ATTRIBUTE_H, fHeight);
 }
 
-bool CXFA_WidgetData::GetMinWidth(FX_FLOAT& fMinWidth) {
+bool CXFA_WidgetData::GetMinWidth(float& fMinWidth) {
   return TryMeasure(XFA_ATTRIBUTE_MinW, fMinWidth);
 }
 
-bool CXFA_WidgetData::GetMinHeight(FX_FLOAT& fMinHeight) {
+bool CXFA_WidgetData::GetMinHeight(float& fMinHeight) {
   return TryMeasure(XFA_ATTRIBUTE_MinH, fMinHeight);
 }
 
-bool CXFA_WidgetData::GetMaxWidth(FX_FLOAT& fMaxWidth) {
+bool CXFA_WidgetData::GetMaxWidth(float& fMaxWidth) {
   return TryMeasure(XFA_ATTRIBUTE_MaxW, fMaxWidth);
 }
 
-bool CXFA_WidgetData::GetMaxHeight(FX_FLOAT& fMaxHeight) {
+bool CXFA_WidgetData::GetMaxHeight(float& fMaxHeight) {
   return TryMeasure(XFA_ATTRIBUTE_MaxH, fMaxHeight);
 }
 
@@ -419,14 +398,14 @@ CFX_RectF CXFA_WidgetData::GetUIMargin() {
   if (border && border.GetPresence() != XFA_ATTRIBUTEENUM_Visible)
     return CFX_RectF();
 
-  FX_FLOAT fLeftInset, fTopInset, fRightInset, fBottomInset;
+  float fLeftInset, fTopInset, fRightInset, fBottomInset;
   bool bLeft = mgUI.GetLeftInset(fLeftInset);
   bool bTop = mgUI.GetTopInset(fTopInset);
   bool bRight = mgUI.GetRightInset(fRightInset);
   bool bBottom = mgUI.GetBottomInset(fBottomInset);
   if (border) {
     bool bVisible = false;
-    FX_FLOAT fThickness = 0;
+    float fThickness = 0;
     border.Get3DStyle(bVisible, fThickness);
     if (!bLeft || !bTop || !bRight || !bBottom) {
       std::vector<CXFA_Stroke> strokes;
@@ -509,7 +488,7 @@ bool CXFA_WidgetData::IsRadioButton() {
   return false;
 }
 
-FX_FLOAT CXFA_WidgetData::GetCheckButtonSize() {
+float CXFA_WidgetData::GetCheckButtonSize() {
   CXFA_Node* pUIChild = GetUIChild();
   if (pUIChild)
     return pUIChild->GetMeasure(XFA_ATTRIBUTE_Size).ToUnit(XFA_UNIT_Pt);
@@ -733,35 +712,32 @@ int32_t CXFA_WidgetData::GetChoiceListOpen() {
 
 bool CXFA_WidgetData::IsListBox() {
   int32_t iOpenMode = GetChoiceListOpen();
-  return (iOpenMode == XFA_ATTRIBUTEENUM_Always ||
-          iOpenMode == XFA_ATTRIBUTEENUM_MultiSelect);
+  return iOpenMode == XFA_ATTRIBUTEENUM_Always ||
+         iOpenMode == XFA_ATTRIBUTEENUM_MultiSelect;
 }
 
 int32_t CXFA_WidgetData::CountChoiceListItems(bool bSaveValue) {
-  CXFA_NodeArray pItems;
-  CXFA_Node* pItem = nullptr;
+  std::vector<CXFA_Node*> pItems;
   int32_t iCount = 0;
-  CXFA_Node* pNode = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild);
-  for (; pNode; pNode = pNode->GetNodeItem(XFA_NODEITEM_NextSibling)) {
+  for (CXFA_Node* pNode = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild); pNode;
+       pNode = pNode->GetNodeItem(XFA_NODEITEM_NextSibling)) {
     if (pNode->GetElementType() != XFA_Element::Items)
       continue;
-
     iCount++;
-    pItems.Add(pNode);
+    pItems.push_back(pNode);
     if (iCount == 2)
       break;
   }
   if (iCount == 0)
     return 0;
 
-  pItem = pItems[0];
+  CXFA_Node* pItem = pItems[0];
   if (iCount > 1) {
     bool bItemOneHasSave = pItems[0]->GetBoolean(XFA_ATTRIBUTE_Save);
     bool bItemTwoHasSave = pItems[1]->GetBoolean(XFA_ATTRIBUTE_Save);
     if (bItemOneHasSave != bItemTwoHasSave && bSaveValue == bItemTwoHasSave)
       pItem = pItems[1];
   }
-  pItems.RemoveAll();
   return pItem->CountChildren(XFA_Element::Unknown);
 }
 
@@ -769,16 +745,15 @@ bool CXFA_WidgetData::GetChoiceListItem(CFX_WideString& wsText,
                                         int32_t nIndex,
                                         bool bSaveValue) {
   wsText.clear();
-  CXFA_NodeArray pItemsArray;
+  std::vector<CXFA_Node*> pItemsArray;
   CXFA_Node* pItems = nullptr;
   int32_t iCount = 0;
   CXFA_Node* pNode = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild);
   for (; pNode; pNode = pNode->GetNodeItem(XFA_NODEITEM_NextSibling)) {
     if (pNode->GetElementType() != XFA_Element::Items)
       continue;
-
     iCount++;
-    pItemsArray.Add(pNode);
+    pItemsArray.push_back(pNode);
     if (iCount == 2)
       break;
   }
@@ -802,97 +777,74 @@ bool CXFA_WidgetData::GetChoiceListItem(CFX_WideString& wsText,
   return false;
 }
 
-void CXFA_WidgetData::GetChoiceListItems(
-    std::vector<CFX_WideString>& wsTextArray,
+std::vector<CFX_WideString> CXFA_WidgetData::GetChoiceListItems(
     bool bSaveValue) {
-  CXFA_NodeArray pItems;
-  CXFA_Node* pItem = nullptr;
-  int32_t iCount = 0;
-  CXFA_Node* pNode = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild);
-  for (; pNode; pNode = pNode->GetNodeItem(XFA_NODEITEM_NextSibling)) {
-    if (pNode->GetElementType() != XFA_Element::Items)
-      continue;
-
-    iCount++;
-    pItems.Add(pNode);
-    if (iCount == 2)
-      break;
+  std::vector<CXFA_Node*> items;
+  for (CXFA_Node* pNode = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild);
+       pNode && items.size() < 2;
+       pNode = pNode->GetNodeItem(XFA_NODEITEM_NextSibling)) {
+    if (pNode->GetElementType() == XFA_Element::Items)
+      items.push_back(pNode);
   }
-  if (iCount == 0)
-    return;
+  if (items.empty())
+    return std::vector<CFX_WideString>();
 
-  pItem = pItems[0];
-  if (iCount > 1) {
-    bool bItemOneHasSave = pItems[0]->GetBoolean(XFA_ATTRIBUTE_Save);
-    bool bItemTwoHasSave = pItems[1]->GetBoolean(XFA_ATTRIBUTE_Save);
+  CXFA_Node* pItem = items.front();
+  if (items.size() > 1) {
+    bool bItemOneHasSave = items[0]->GetBoolean(XFA_ATTRIBUTE_Save);
+    bool bItemTwoHasSave = items[1]->GetBoolean(XFA_ATTRIBUTE_Save);
     if (bItemOneHasSave != bItemTwoHasSave && bSaveValue == bItemTwoHasSave)
-      pItem = pItems[1];
+      pItem = items[1];
   }
-  pItems.RemoveAll();
-  pNode = pItem->GetNodeItem(XFA_NODEITEM_FirstChild);
-  for (; pNode; pNode = pNode->GetNodeItem(XFA_NODEITEM_NextSibling)) {
+
+  std::vector<CFX_WideString> wsTextArray;
+  for (CXFA_Node* pNode = pItem->GetNodeItem(XFA_NODEITEM_FirstChild); pNode;
+       pNode = pNode->GetNodeItem(XFA_NODEITEM_NextSibling)) {
     wsTextArray.emplace_back();
     pNode->TryContent(wsTextArray.back());
   }
+  return wsTextArray;
 }
 
 int32_t CXFA_WidgetData::CountSelectedItems() {
-  std::vector<CFX_WideString> wsValueArray;
-  GetSelectedItemsValue(wsValueArray);
+  std::vector<CFX_WideString> wsValueArray = GetSelectedItemsValue();
   if (IsListBox() || !IsChoiceListAllowTextEntry())
     return pdfium::CollectionSize<int32_t>(wsValueArray);
 
   int32_t iSelected = 0;
-  std::vector<CFX_WideString> wsSaveTextArray;
-  GetChoiceListItems(wsSaveTextArray, true);
-  int32_t iValues = pdfium::CollectionSize<int32_t>(wsValueArray);
-  for (int32_t i = 0; i < iValues; i++) {
-    int32_t iSaves = pdfium::CollectionSize<int32_t>(wsSaveTextArray);
-    for (int32_t j = 0; j < iSaves; j++) {
-      if (wsValueArray[i] == wsSaveTextArray[j]) {
-        iSelected++;
-        break;
-      }
-    }
+  std::vector<CFX_WideString> wsSaveTextArray = GetChoiceListItems(true);
+  for (const auto& value : wsValueArray) {
+    if (pdfium::ContainsValue(wsSaveTextArray, value))
+      iSelected++;
   }
   return iSelected;
 }
 
 int32_t CXFA_WidgetData::GetSelectedItem(int32_t nIndex) {
-  std::vector<CFX_WideString> wsValueArray;
-  GetSelectedItemsValue(wsValueArray);
-  std::vector<CFX_WideString> wsSaveTextArray;
-  GetChoiceListItems(wsSaveTextArray, true);
-  int32_t iSaves = pdfium::CollectionSize<int32_t>(wsSaveTextArray);
-  for (int32_t j = 0; j < iSaves; j++) {
-    if (wsValueArray[nIndex] == wsSaveTextArray[j])
-      return j;
-  }
-  return -1;
+  std::vector<CFX_WideString> wsValueArray = GetSelectedItemsValue();
+  if (!pdfium::IndexInBounds(wsValueArray, nIndex))
+    return -1;
+
+  std::vector<CFX_WideString> wsSaveTextArray = GetChoiceListItems(true);
+  auto it = std::find(wsSaveTextArray.begin(), wsSaveTextArray.end(),
+                      wsValueArray[nIndex]);
+  return it != wsSaveTextArray.end() ? it - wsSaveTextArray.begin() : -1;
 }
 
-void CXFA_WidgetData::GetSelectedItems(CFX_ArrayTemplate<int32_t>& iSelArray) {
-  std::vector<CFX_WideString> wsValueArray;
-  GetSelectedItemsValue(wsValueArray);
-  int32_t iValues = pdfium::CollectionSize<int32_t>(wsValueArray);
-  if (iValues < 1)
-    return;
-
-  std::vector<CFX_WideString> wsSaveTextArray;
-  GetChoiceListItems(wsSaveTextArray, true);
-  int32_t iSaves = pdfium::CollectionSize<int32_t>(wsSaveTextArray);
-  for (int32_t i = 0; i < iValues; i++) {
-    for (int32_t j = 0; j < iSaves; j++) {
-      if (wsValueArray[i] == wsSaveTextArray[j]) {
-        iSelArray.Add(j);
-        break;
-      }
-    }
+std::vector<int32_t> CXFA_WidgetData::GetSelectedItems() {
+  std::vector<int32_t> iSelArray;
+  std::vector<CFX_WideString> wsValueArray = GetSelectedItemsValue();
+  std::vector<CFX_WideString> wsSaveTextArray = GetChoiceListItems(true);
+  for (const auto& value : wsValueArray) {
+    auto it = std::find(wsSaveTextArray.begin(), wsSaveTextArray.end(), value);
+    if (it != wsSaveTextArray.end())
+      iSelArray.push_back(it - wsSaveTextArray.begin());
   }
+  return iSelArray;
 }
 
-void CXFA_WidgetData::GetSelectedItemsValue(
-    std::vector<CFX_WideString>& wsSelTextArray) {
+std::vector<CFX_WideString> CXFA_WidgetData::GetSelectedItemsValue() {
+  std::vector<CFX_WideString> wsSelTextArray;
   CFX_WideString wsValue = GetRawValue();
   if (GetChoiceListOpen() == XFA_ATTRIBUTEENUM_MultiSelect) {
     if (!wsValue.IsEmpty()) {
@@ -905,7 +857,6 @@ void CXFA_WidgetData::GetSelectedItemsValue(
         iStart = iEnd + 1;
         if (iStart >= iLength)
           break;
-
         iEnd = wsValue.Find(L'\n', iStart);
         if (iEnd < 0)
           wsSelTextArray.push_back(wsValue.Mid(iStart, iLength - iStart));
@@ -914,25 +865,14 @@ void CXFA_WidgetData::GetSelectedItemsValue(
   } else {
     wsSelTextArray.push_back(wsValue);
   }
+  return wsSelTextArray;
 }
 
 bool CXFA_WidgetData::GetItemState(int32_t nIndex) {
-  if (nIndex < 0)
-    return false;
-
-  std::vector<CFX_WideString> wsSaveTextArray;
-  GetChoiceListItems(wsSaveTextArray, true);
-  if (pdfium::CollectionSize<int32_t>(wsSaveTextArray) <= nIndex)
-    return false;
-
-  std::vector<CFX_WideString> wsValueArray;
-  GetSelectedItemsValue(wsValueArray);
-  int32_t iValues = pdfium::CollectionSize<int32_t>(wsValueArray);
-  for (int32_t j = 0; j < iValues; j++) {
-    if (wsValueArray[j] == wsSaveTextArray[nIndex])
-      return true;
-  }
-  return false;
+  std::vector<CFX_WideString> wsSaveTextArray = GetChoiceListItems(true);
+  return pdfium::IndexInBounds(wsSaveTextArray, nIndex) &&
+         pdfium::ContainsValue(GetSelectedItemsValue(),
+                               wsSaveTextArray[nIndex]);
 }
 
 void CXFA_WidgetData::SetItemState(int32_t nIndex,
@@ -940,24 +880,17 @@ void CXFA_WidgetData::SetItemState(int32_t nIndex,
                                    bool bNotify,
                                    bool bScriptModify,
                                    bool bSyncData) {
-  if (nIndex < 0)
-    return;
-
-  std::vector<CFX_WideString> wsSaveTextArray;
-  GetChoiceListItems(wsSaveTextArray, true);
-  if (pdfium::CollectionSize<int32_t>(wsSaveTextArray) <= nIndex)
+  std::vector<CFX_WideString> wsSaveTextArray = GetChoiceListItems(true);
+  if (!pdfium::IndexInBounds(wsSaveTextArray, nIndex))
     return;
 
   int32_t iSel = -1;
-  std::vector<CFX_WideString> wsValueArray;
-  GetSelectedItemsValue(wsValueArray);
-  int32_t iValues = pdfium::CollectionSize<int32_t>(wsValueArray);
-  for (int32_t j = 0; j < iValues; j++) {
-    if (wsValueArray[j] == wsSaveTextArray[nIndex]) {
-      iSel = j;
-      break;
-    }
-  }
+  std::vector<CFX_WideString> wsValueArray = GetSelectedItemsValue();
+  auto it = std::find(wsValueArray.begin(), wsValueArray.end(),
+                      wsSaveTextArray[nIndex]);
+  if (it != wsValueArray.end())
+    iSel = it - wsValueArray.begin();
+
   if (GetChoiceListOpen() == XFA_ATTRIBUTEENUM_MultiSelect) {
     if (bSelected) {
       if (iSel < 0) {
@@ -970,14 +903,10 @@ void CXFA_WidgetData::SetItemState(int32_t nIndex,
                             bSyncData);
       }
     } else if (iSel >= 0) {
-      CFX_ArrayTemplate<int32_t> iSelArray;
-      GetSelectedItems(iSelArray);
-      for (int32_t i = 0; i < iSelArray.GetSize(); i++) {
-        if (iSelArray[i] == nIndex) {
-          iSelArray.RemoveAt(i);
-          break;
-        }
-      }
+      std::vector<int32_t> iSelArray = GetSelectedItems();
+      auto it = std::find(iSelArray.begin(), iSelArray.end(), nIndex);
+      if (it != iSelArray.end())
+        iSelArray.erase(it);
       SetSelectedItems(iSelArray, bNotify, bScriptModify, bSyncData);
     }
   } else {
@@ -996,15 +925,14 @@ void CXFA_WidgetData::SetItemState(int32_t nIndex,
   }
 }
 
-void CXFA_WidgetData::SetSelectedItems(CFX_ArrayTemplate<int32_t>& iSelArray,
+void CXFA_WidgetData::SetSelectedItems(const std::vector<int32_t>& iSelArray,
                                        bool bNotify,
                                        bool bScriptModify,
                                        bool bSyncData) {
   CFX_WideString wsValue;
-  int32_t iSize = iSelArray.GetSize();
+  int32_t iSize = pdfium::CollectionSize<int32_t>(iSelArray);
   if (iSize >= 1) {
-    std::vector<CFX_WideString> wsSaveTextArray;
-    GetChoiceListItems(wsSaveTextArray, true);
+    std::vector<CFX_WideString> wsSaveTextArray = GetChoiceListItems(true);
     CFX_WideString wsItemValue;
     for (int32_t i = 0; i < iSize; i++) {
       wsItemValue = (iSize == 1) ? wsSaveTextArray[iSelArray[i]]
@@ -1032,24 +960,19 @@ void CXFA_WidgetData::ClearAllSelections() {
 
 void CXFA_WidgetData::InsertItem(const CFX_WideString& wsLabel,
                                  const CFX_WideString& wsValue,
-                                 int32_t nIndex,
                                  bool bNotify) {
+  int32_t nIndex = -1;
   CFX_WideString wsNewValue(wsValue);
   if (wsNewValue.IsEmpty())
     wsNewValue = wsLabel;
 
-  CXFA_NodeArray listitems;
-  int32_t iCount = 0;
-  CXFA_Node* pItemNode = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild);
-  for (; pItemNode;
-       pItemNode = pItemNode->GetNodeItem(XFA_NODEITEM_NextSibling)) {
-    if (pItemNode->GetElementType() != XFA_Element::Items)
-      continue;
-
-    listitems.Add(pItemNode);
-    iCount++;
+  std::vector<CXFA_Node*> listitems;
+  for (CXFA_Node* pItem = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild); pItem;
+       pItem = pItem->GetNodeItem(XFA_NODEITEM_NextSibling)) {
+    if (pItem->GetElementType() == XFA_Element::Items)
+      listitems.push_back(pItem);
   }
-  if (iCount < 1) {
+  if (listitems.empty()) {
     CXFA_Node* pItems = m_pNode->CreateSamePacketNode(XFA_Element::Items);
     m_pNode->InsertChild(-1, pItems);
     InsertListTextItem(pItems, wsLabel, nIndex);
@@ -1057,7 +980,7 @@ void CXFA_WidgetData::InsertItem(const CFX_WideString& wsLabel,
     m_pNode->InsertChild(-1, pSaveItems);
     pSaveItems->SetBoolean(XFA_ATTRIBUTE_Save, true);
     InsertListTextItem(pSaveItems, wsNewValue, nIndex);
-  } else if (iCount > 1) {
+  } else if (listitems.size() > 1) {
     for (int32_t i = 0; i < 2; i++) {
       CXFA_Node* pNode = listitems[i];
       bool bHasSave = pNode->GetBoolean(XFA_ATTRIBUTE_Save);
@@ -1074,7 +997,6 @@ void CXFA_WidgetData::InsertItem(const CFX_WideString& wsLabel,
     m_pNode->InsertChild(-1, pSaveItems);
     pSaveItems->SetBoolean(XFA_ATTRIBUTE_Save, true);
     pSaveItems->SetEnum(XFA_ATTRIBUTE_Presence, XFA_ATTRIBUTEENUM_Hidden);
-    listitems.RemoveAll();
     CXFA_Node* pListNode = pNode->GetNodeItem(XFA_NODEITEM_FirstChild);
     int32_t i = 0;
     while (pListNode) {
@@ -1097,14 +1019,13 @@ void CXFA_WidgetData::InsertItem(const CFX_WideString& wsLabel,
 void CXFA_WidgetData::GetItemLabel(const CFX_WideStringC& wsValue,
                                    CFX_WideString& wsLabel) {
   int32_t iCount = 0;
-  CXFA_NodeArray listitems;
+  std::vector<CXFA_Node*> listitems;
   CXFA_Node* pItems = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild);
   for (; pItems; pItems = pItems->GetNodeItem(XFA_NODEITEM_NextSibling)) {
     if (pItems->GetElementType() != XFA_Element::Items)
       continue;
-
     iCount++;
-    listitems.Add(pItems);
+    listitems.push_back(pItems);
   }
   if (iCount <= 1) {
     wsLabel = wsValue;
@@ -1143,14 +1064,13 @@ void CXFA_WidgetData::GetItemLabel(const CFX_WideStringC& wsValue,
 void CXFA_WidgetData::GetItemValue(const CFX_WideStringC& wsLabel,
                                    CFX_WideString& wsValue) {
   int32_t iCount = 0;
-  CXFA_NodeArray listitems;
-  CXFA_Node* pItems = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild);
-  for (; pItems; pItems = pItems->GetNodeItem(XFA_NODEITEM_NextSibling)) {
+  std::vector<CXFA_Node*> listitems;
+  for (CXFA_Node* pItems = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild);
+       pItems; pItems = pItems->GetNodeItem(XFA_NODEITEM_NextSibling)) {
     if (pItems->GetElementType() != XFA_Element::Items)
       continue;
-
     iCount++;
-    listitems.Add(pItems);
+    listitems.push_back(pItems);
   }
   if (iCount <= 1) {
     wsValue = wsLabel;
@@ -1186,8 +1106,7 @@ void CXFA_WidgetData::GetItemValue(const CFX_WideStringC& wsLabel,
 
 bool CXFA_WidgetData::DeleteItem(int32_t nIndex,
                                  bool bNotify,
-                                 bool bScriptModify,
-                                 bool bSyncData) {
+                                 bool bScriptModify) {
   bool bSetValue = false;
   CXFA_Node* pItems = m_pNode->GetNodeItem(XFA_NODEITEM_FirstChild);
   for (; pItems; pItems = pItems->GetNodeItem(XFA_NODEITEM_NextSibling)) {
@@ -1200,7 +1119,7 @@ bool CXFA_WidgetData::DeleteItem(int32_t nIndex,
       }
     } else {
       if (!bSetValue && pItems->GetBoolean(XFA_ATTRIBUTE_Save)) {
-        SetItemState(nIndex, false, true, bScriptModify, bSyncData);
+        SetItemState(nIndex, false, true, bScriptModify, true);
         bSetValue = true;
       }
       int32_t i = 0;
@@ -1242,32 +1161,32 @@ CFX_WideString CXFA_WidgetData::GetBarcodeType() {
                   : CFX_WideString();
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_CharEncoding(int32_t& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_CharEncoding(int32_t* val) {
   CXFA_Node* pUIChild = GetUIChild();
   CFX_WideString wsCharEncoding;
   if (pUIChild->TryCData(XFA_ATTRIBUTE_CharEncoding, wsCharEncoding)) {
     if (wsCharEncoding.CompareNoCase(L"UTF-16")) {
-      val = CHAR_ENCODING_UNICODE;
+      *val = CHAR_ENCODING_UNICODE;
       return true;
     }
     if (wsCharEncoding.CompareNoCase(L"UTF-8")) {
-      val = CHAR_ENCODING_UTF8;
+      *val = CHAR_ENCODING_UTF8;
       return true;
     }
   }
   return false;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_Checksum(bool& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_Checksum(bool* val) {
   CXFA_Node* pUIChild = GetUIChild();
   XFA_ATTRIBUTEENUM eChecksum;
   if (pUIChild->TryEnum(XFA_ATTRIBUTE_Checksum, eChecksum)) {
     switch (eChecksum) {
       case XFA_ATTRIBUTEENUM_None:
-        val = false;
+        *val = false;
         return true;
       case XFA_ATTRIBUTEENUM_Auto:
-        val = true;
+        *val = true;
         return true;
       case XFA_ATTRIBUTEENUM_1mod10:
         break;
@@ -1282,99 +1201,99 @@ bool CXFA_WidgetData::GetBarcodeAttribute_Checksum(bool& val) {
   return false;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_DataLength(int32_t& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_DataLength(int32_t* val) {
   CXFA_Node* pUIChild = GetUIChild();
   CFX_WideString wsDataLength;
   if (pUIChild->TryCData(XFA_ATTRIBUTE_DataLength, wsDataLength)) {
-    val = FXSYS_wtoi(wsDataLength.c_str());
+    *val = FXSYS_wtoi(wsDataLength.c_str());
     return true;
   }
   return false;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_StartChar(FX_CHAR& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_StartChar(char* val) {
   CXFA_Node* pUIChild = GetUIChild();
   CFX_WideStringC wsStartEndChar;
   if (pUIChild->TryCData(XFA_ATTRIBUTE_StartChar, wsStartEndChar)) {
     if (wsStartEndChar.GetLength()) {
-      val = (FX_CHAR)wsStartEndChar.GetAt(0);
+      *val = static_cast<char>(wsStartEndChar.GetAt(0));
       return true;
     }
   }
   return false;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_EndChar(FX_CHAR& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_EndChar(char* val) {
   CXFA_Node* pUIChild = GetUIChild();
   CFX_WideStringC wsStartEndChar;
   if (pUIChild->TryCData(XFA_ATTRIBUTE_EndChar, wsStartEndChar)) {
     if (wsStartEndChar.GetLength()) {
-      val = (FX_CHAR)wsStartEndChar.GetAt(0);
+      *val = static_cast<char>(wsStartEndChar.GetAt(0));
       return true;
     }
   }
   return false;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_ECLevel(int32_t& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_ECLevel(int32_t* val) {
   CXFA_Node* pUIChild = GetUIChild();
   CFX_WideString wsECLevel;
   if (pUIChild->TryCData(XFA_ATTRIBUTE_ErrorCorrectionLevel, wsECLevel)) {
-    val = FXSYS_wtoi(wsECLevel.c_str());
+    *val = FXSYS_wtoi(wsECLevel.c_str());
     return true;
   }
   return false;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_ModuleWidth(int32_t& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_ModuleWidth(int32_t* val) {
   CXFA_Node* pUIChild = GetUIChild();
   CXFA_Measurement mModuleWidthHeight;
   if (pUIChild->TryMeasure(XFA_ATTRIBUTE_ModuleWidth, mModuleWidthHeight)) {
-    val = (int32_t)mModuleWidthHeight.ToUnit(XFA_UNIT_Pt);
+    *val = static_cast<int32_t>(mModuleWidthHeight.ToUnit(XFA_UNIT_Pt));
     return true;
   }
   return false;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_ModuleHeight(int32_t& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_ModuleHeight(int32_t* val) {
   CXFA_Node* pUIChild = GetUIChild();
   CXFA_Measurement mModuleWidthHeight;
   if (pUIChild->TryMeasure(XFA_ATTRIBUTE_ModuleHeight, mModuleWidthHeight)) {
-    val = (int32_t)mModuleWidthHeight.ToUnit(XFA_UNIT_Pt);
+    *val = static_cast<int32_t>(mModuleWidthHeight.ToUnit(XFA_UNIT_Pt));
     return true;
   }
   return false;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_PrintChecksum(bool& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_PrintChecksum(bool* val) {
   CXFA_Node* pUIChild = GetUIChild();
   bool bPrintCheckDigit;
   if (pUIChild->TryBoolean(XFA_ATTRIBUTE_PrintCheckDigit, bPrintCheckDigit)) {
-    val = bPrintCheckDigit;
+    *val = bPrintCheckDigit;
     return true;
   }
   return false;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_TextLocation(int32_t& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_TextLocation(int32_t* val) {
   CXFA_Node* pUIChild = GetUIChild();
   XFA_ATTRIBUTEENUM eTextLocation;
   if (pUIChild->TryEnum(XFA_ATTRIBUTE_TextLocation, eTextLocation)) {
     switch (eTextLocation) {
       case XFA_ATTRIBUTEENUM_None:
-        val = BC_TEXT_LOC_NONE;
+        *val = BC_TEXT_LOC_NONE;
         return true;
       case XFA_ATTRIBUTEENUM_Above:
-        val = BC_TEXT_LOC_ABOVE;
+        *val = BC_TEXT_LOC_ABOVE;
         return true;
       case XFA_ATTRIBUTEENUM_Below:
-        val = BC_TEXT_LOC_BELOW;
+        *val = BC_TEXT_LOC_BELOW;
         return true;
       case XFA_ATTRIBUTEENUM_AboveEmbedded:
-        val = BC_TEXT_LOC_ABOVEEMBED;
+        *val = BC_TEXT_LOC_ABOVEEMBED;
         return true;
       case XFA_ATTRIBUTEENUM_BelowEmbedded:
-        val = BC_TEXT_LOC_BELOWEMBED;
+        *val = BC_TEXT_LOC_BELOWEMBED;
         return true;
       default:
         break;
@@ -1383,32 +1302,32 @@ bool CXFA_WidgetData::GetBarcodeAttribute_TextLocation(int32_t& val) {
   return false;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_Truncate(bool& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_Truncate(bool* val) {
   CXFA_Node* pUIChild = GetUIChild();
   bool bTruncate;
-  if (pUIChild->TryBoolean(XFA_ATTRIBUTE_Truncate, bTruncate)) {
-    val = bTruncate;
-    return true;
-  }
-  return false;
+  if (!pUIChild->TryBoolean(XFA_ATTRIBUTE_Truncate, bTruncate))
+    return false;
+
+  *val = bTruncate;
+  return true;
 }
 
-bool CXFA_WidgetData::GetBarcodeAttribute_WideNarrowRatio(FX_FLOAT& val) {
+bool CXFA_WidgetData::GetBarcodeAttribute_WideNarrowRatio(float* val) {
   CXFA_Node* pUIChild = GetUIChild();
   CFX_WideString wsWideNarrowRatio;
   if (pUIChild->TryCData(XFA_ATTRIBUTE_WideNarrowRatio, wsWideNarrowRatio)) {
     FX_STRSIZE ptPos = wsWideNarrowRatio.Find(':');
-    FX_FLOAT fRatio = 0;
+    float fRatio = 0;
     if (ptPos >= 0) {
-      fRatio = (FX_FLOAT)FXSYS_wtoi(wsWideNarrowRatio.c_str());
+      fRatio = (float)FXSYS_wtoi(wsWideNarrowRatio.c_str());
     } else {
       int32_t fA, fB;
       fA = FXSYS_wtoi(wsWideNarrowRatio.Left(ptPos).c_str());
       fB = FXSYS_wtoi(wsWideNarrowRatio.Mid(ptPos + 1).c_str());
       if (fB)
-        fRatio = (FX_FLOAT)fA / fB;
+        fRatio = (float)fA / fB;
     }
-    val = fRatio;
+    *val = fRatio;
     return true;
   }
   return false;
@@ -1548,7 +1467,7 @@ bool CXFA_WidgetData::GetPictureContent(CFX_WideString& wsPicture,
             return true;
         }
       }
-      CFX_WideString wsDataPicture, wsTimePicture;
+
       IFX_Locale* pLocale = GetLocal();
       if (!pLocale)
         return false;
@@ -1556,19 +1475,18 @@ bool CXFA_WidgetData::GetPictureContent(CFX_WideString& wsPicture,
       uint32_t dwType = widgetValue.GetType();
       switch (dwType) {
         case XFA_VT_DATE:
-          pLocale->GetDatePattern(FX_LOCALEDATETIMESUBCATEGORY_Medium,
-                                  wsPicture);
+          wsPicture =
+              pLocale->GetDatePattern(FX_LOCALEDATETIMESUBCATEGORY_Medium);
           break;
         case XFA_VT_TIME:
-          pLocale->GetTimePattern(FX_LOCALEDATETIMESUBCATEGORY_Medium,
-                                  wsPicture);
+          wsPicture =
+              pLocale->GetTimePattern(FX_LOCALEDATETIMESUBCATEGORY_Medium);
           break;
         case XFA_VT_DATETIME:
-          pLocale->GetDatePattern(FX_LOCALEDATETIMESUBCATEGORY_Medium,
-                                  wsDataPicture);
-          pLocale->GetTimePattern(FX_LOCALEDATETIMESUBCATEGORY_Medium,
-                                  wsTimePicture);
-          wsPicture = wsDataPicture + L"T" + wsTimePicture;
+          wsPicture =
+              pLocale->GetDatePattern(FX_LOCALEDATETIMESUBCATEGORY_Medium) +
+              L"T" +
+              pLocale->GetTimePattern(FX_LOCALEDATETIMESUBCATEGORY_Medium);
           break;
         case XFA_VT_DECIMAL:
         case XFA_VT_FLOAT:
@@ -1578,7 +1496,6 @@ bool CXFA_WidgetData::GetPictureContent(CFX_WideString& wsPicture,
       }
       return true;
     }
-
     case XFA_VALUEPICTURE_Edit: {
       CXFA_Node* pUI = m_pNode->GetChild(0, XFA_Element::Ui);
       if (pUI) {
@@ -1587,32 +1504,29 @@ bool CXFA_WidgetData::GetPictureContent(CFX_WideString& wsPicture,
             return true;
         }
       }
-      {
-        CFX_WideString wsDataPicture, wsTimePicture;
-        IFX_Locale* pLocale = GetLocal();
-        if (!pLocale) {
-          return false;
-        }
-        uint32_t dwType = widgetValue.GetType();
-        switch (dwType) {
-          case XFA_VT_DATE:
-            pLocale->GetDatePattern(FX_LOCALEDATETIMESUBCATEGORY_Short,
-                                    wsPicture);
-            break;
-          case XFA_VT_TIME:
-            pLocale->GetTimePattern(FX_LOCALEDATETIMESUBCATEGORY_Short,
-                                    wsPicture);
-            break;
-          case XFA_VT_DATETIME:
-            pLocale->GetDatePattern(FX_LOCALEDATETIMESUBCATEGORY_Short,
-                                    wsDataPicture);
-            pLocale->GetTimePattern(FX_LOCALEDATETIMESUBCATEGORY_Short,
-                                    wsTimePicture);
-            wsPicture = wsDataPicture + L"T" + wsTimePicture;
-            break;
-          default:
-            break;
-        }
+
+      IFX_Locale* pLocale = GetLocal();
+      if (!pLocale)
+        return false;
+
+      uint32_t dwType = widgetValue.GetType();
+      switch (dwType) {
+        case XFA_VT_DATE:
+          wsPicture =
+              pLocale->GetDatePattern(FX_LOCALEDATETIMESUBCATEGORY_Short);
+          break;
+        case XFA_VT_TIME:
+          wsPicture =
+              pLocale->GetTimePattern(FX_LOCALEDATETIMESUBCATEGORY_Short);
+          break;
+        case XFA_VT_DATETIME:
+          wsPicture =
+              pLocale->GetDatePattern(FX_LOCALEDATETIMESUBCATEGORY_Short) +
+              L"T" +
+              pLocale->GetTimePattern(FX_LOCALEDATETIMESUBCATEGORY_Short);
+          break;
+        default:
+          break;
       }
       return true;
     }
@@ -1659,7 +1573,7 @@ bool CXFA_WidgetData::GetValue(CFX_WideString& wsValue,
       if (eValueType == XFA_VALUEPICTURE_Display) {
         int32_t iSelItemIndex = GetSelectedItem(0);
         if (iSelItemIndex >= 0) {
-          GetChoiceListItem(wsValue, iSelItemIndex);
+          GetChoiceListItem(wsValue, iSelItemIndex, false);
           wsPicture.clear();
         }
       }
@@ -1845,8 +1759,8 @@ void CXFA_WidgetData::FormatNumStr(const CFX_WideString& wsValue,
     return;
 
   CFX_WideString wsSrcNum = wsValue;
-  CFX_WideString wsGroupSymbol;
-  pLocale->GetNumbericSymbol(FX_LOCALENUMSYMBOL_Grouping, wsGroupSymbol);
+  CFX_WideString wsGroupSymbol =
+      pLocale->GetNumbericSymbol(FX_LOCALENUMSYMBOL_Grouping);
   bool bNeg = false;
   if (wsSrcNum[0] == '-') {
     bNeg = true;
@@ -1868,15 +1782,12 @@ void CXFA_WidgetData::FormatNumStr(const CFX_WideString& wsValue,
       wsOutput += wsSrcNum[i];
     }
     if (dot_index < len) {
-      CFX_WideString wsSymbol;
-      pLocale->GetNumbericSymbol(FX_LOCALENUMSYMBOL_Decimal, wsSymbol);
-      wsOutput += wsSymbol;
+      wsOutput += pLocale->GetNumbericSymbol(FX_LOCALENUMSYMBOL_Decimal);
       wsOutput += wsSrcNum.Right(len - dot_index - 1);
     }
     if (bNeg) {
-      CFX_WideString wsMinusymbol;
-      pLocale->GetNumbericSymbol(FX_LOCALENUMSYMBOL_Minus, wsMinusymbol);
-      wsOutput = wsMinusymbol + wsOutput;
+      wsOutput =
+          pLocale->GetNumbericSymbol(FX_LOCALENUMSYMBOL_Minus) + wsOutput;
     }
   }
 }
@@ -1919,7 +1830,7 @@ CFX_WideString CXFA_WidgetData::NumericLimit(const CFX_WideString& wsValue,
     i++;
   }
   for (; i < iCount; i++) {
-    FX_WCHAR wc = wsValue[i];
+    wchar_t wc = wsValue[i];
     if (FXSYS_isDecimalDigit(wc)) {
       if (iLead >= 0) {
         iLead_++;

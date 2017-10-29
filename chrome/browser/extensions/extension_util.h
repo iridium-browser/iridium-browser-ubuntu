@@ -8,8 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "url/gurl.h"
-
 namespace base {
 class DictionaryValue;
 }
@@ -29,10 +27,6 @@ namespace extensions {
 class Extension;
 
 namespace util {
-
-// Returns true if |extension_id| can run in an incognito window.
-bool IsIncognitoEnabled(const std::string& extension_id,
-                        content::BrowserContext* context);
 
 // Sets whether |extension_id| can run in an incognito window. Reloads the
 // extension if it's enabled since this permission is applied at loading time
@@ -91,11 +85,6 @@ bool ShouldSync(const Extension* extension, content::BrowserContext* context);
 // as updating.
 bool IsExtensionIdle(const std::string& extension_id,
                      content::BrowserContext* context);
-
-// Returns the site of the |extension_id|, given the associated |context|.
-// Suitable for use with BrowserContext::GetStoragePartitionForSite().
-GURL GetSiteForExtensionId(const std::string& extension_id,
-                           content::BrowserContext* context);
 
 // Sets the name, id, and icon resource path of the given extension into the
 // returned dictionary.

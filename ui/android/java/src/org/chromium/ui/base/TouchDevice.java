@@ -4,10 +4,10 @@
 
 package org.chromium.ui.base;
 
-import android.content.Context;
 import android.content.pm.PackageManager;
 import android.view.InputDevice;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
@@ -26,22 +26,22 @@ public class TouchDevice {
      * @return Maximum supported touch points.
      */
     @CalledByNative
-    private static int maxTouchPoints(Context context) {
+    private static int maxTouchPoints() {
         // Android only tells us if the device belongs to a "Touchscreen Class" which only
         // guarantees a minimum number of touch points. Be conservative and return the minimum,
         // checking membership from the highest class down.
 
-        if (context.getPackageManager().hasSystemFeature(
-                PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH_JAZZHAND)) {
+        if (ContextUtils.getApplicationContext().getPackageManager().hasSystemFeature(
+                    PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH_JAZZHAND)) {
             return 5;
-        } else if (context.getPackageManager().hasSystemFeature(
-                PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH_DISTINCT)) {
+        } else if (ContextUtils.getApplicationContext().getPackageManager().hasSystemFeature(
+                           PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH_DISTINCT)) {
             return 2;
-        } else if (context.getPackageManager().hasSystemFeature(
-                PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH)) {
+        } else if (ContextUtils.getApplicationContext().getPackageManager().hasSystemFeature(
+                           PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH)) {
             return 2;
-        } else if (context.getPackageManager().hasSystemFeature(
-                PackageManager.FEATURE_TOUCHSCREEN)) {
+        } else if (ContextUtils.getApplicationContext().getPackageManager().hasSystemFeature(
+                           PackageManager.FEATURE_TOUCHSCREEN)) {
             return 1;
         } else {
             return 0;
@@ -49,13 +49,12 @@ public class TouchDevice {
     }
 
     /**
-     * @return the pointer-types supported by the device, as the union (bitwise OR) of PointerType
-     *         bits in result[0]
-     *         the hover-types supported by the device, as the union (bitwise OR) of HoverType bits
-     *         in result[1].
+     * @return an array of two ints: result[0] represents the pointer-types and result[1] represents
+     *         the hover-types supported by the device, where each int is the union (bitwise OR) of
+     *         corresponding type (PointerType/HoverType) bits.
      */
     @CalledByNative
-    private static int[] availablePointerAndHoverTypes(Context context) {
+    private static int[] availablePointerAndHoverTypes() {
         int[] result = new int[2];
         result[0] = result[1] = 0;
 
@@ -80,7 +79,7 @@ public class TouchDevice {
                 result[1] |= HoverType.HOVER;
             } else if (hasSource(sources, InputDevice.SOURCE_STYLUS)
                     || hasSource(sources, InputDevice.SOURCE_TOUCHSCREEN)) {
-                result[1] |= HoverType.ON_DEMAND;
+                result[1] |= HoverType.NONE;
             }
 
             // Remaining InputDevice sources: SOURCE_DPAD, SOURCE_GAMEPAD, SOURCE_JOYSTICK,

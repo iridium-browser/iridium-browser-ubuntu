@@ -24,8 +24,8 @@
 #ifndef ValidityState_h
 #define ValidityState_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/html/ListedElement.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -35,14 +35,14 @@ class ValidityState final : public GarbageCollected<ValidityState>,
   WTF_MAKE_NONCOPYABLE(ValidityState);
 
  public:
-  static ValidityState* create(ListedElement* control) {
+  static ValidityState* Create(ListedElement* control) {
     return new ValidityState(control);
   }
-  DEFINE_INLINE_TRACE() { visitor->trace(m_control); }
+  DEFINE_INLINE_TRACE() { visitor->Trace(control_); }
 
-  String validationMessage() const;
+  String ValidationMessage() const;
 
-  void setCustomErrorMessage(const String&);
+  void SetCustomErrorMessage(const String&);
 
   bool valueMissing() const;
   bool typeMismatch() const;
@@ -57,9 +57,9 @@ class ValidityState final : public GarbageCollected<ValidityState>,
   bool valid() const;
 
  private:
-  explicit ValidityState(ListedElement* control) : m_control(control) {}
+  explicit ValidityState(ListedElement* control) : control_(control) {}
 
-  Member<ListedElement> m_control;
+  Member<ListedElement> control_;
 };
 
 }  // namespace blink

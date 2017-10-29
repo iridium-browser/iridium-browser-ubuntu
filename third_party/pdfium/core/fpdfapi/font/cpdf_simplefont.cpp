@@ -6,16 +6,15 @@
 
 #include "core/fpdfapi/font/cpdf_simplefont.h"
 
-#include "core/fpdfapi/font/font_int.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fxge/fx_freetype.h"
 #include "third_party/base/numerics/safe_math.h"
 
 CPDF_SimpleFont::CPDF_SimpleFont() : m_BaseEncoding(PDFFONT_ENCODING_BUILTIN) {
-  FXSYS_memset(m_CharWidth, 0xff, sizeof(m_CharWidth));
-  FXSYS_memset(m_GlyphIndex, 0xff, sizeof(m_GlyphIndex));
-  FXSYS_memset(m_ExtGID, 0xff, sizeof(m_ExtGID));
+  memset(m_CharWidth, 0xff, sizeof(m_CharWidth));
+  memset(m_GlyphIndex, 0xff, sizeof(m_GlyphIndex));
+  memset(m_ExtGID, 0xff, sizeof(m_ExtGID));
   for (size_t i = 0; i < FX_ArraySize(m_CharBBox); ++i)
     m_CharBBox[i] = FX_RECT(-1, -1, -1, -1);
 }
@@ -29,8 +28,11 @@ int CPDF_SimpleFont::GlyphFromCharCode(uint32_t charcode, bool* pVertGlyph) {
   if (charcode > 0xff)
     return -1;
 
-  int index = m_GlyphIndex[(uint8_t)charcode];
-  return index != 0xffff ? index : -1;
+  int index = m_GlyphIndex[charcode];
+  if (index == 0xffff || (index == 0 && IsTrueTypeFont()))
+    return -1;
+
+  return index;
 }
 
 void CPDF_SimpleFont::LoadCharMetrics(int charcode) {
@@ -198,15 +200,19 @@ CFX_WideString CPDF_SimpleFont::UnicodeFromCharCode(uint32_t charcode) const {
   CFX_WideString unicode = CPDF_Font::UnicodeFromCharCode(charcode);
   if (!unicode.IsEmpty())
     return unicode;
-  FX_WCHAR ret = m_Encoding.UnicodeFromCharCode((uint8_t)charcode);
+  wchar_t ret = m_Encoding.UnicodeFromCharCode((uint8_t)charcode);
   if (ret == 0)
     return CFX_WideString();
   return ret;
 }
 
-uint32_t CPDF_SimpleFont::CharCodeFromUnicode(FX_WCHAR unicode) const {
+uint32_t CPDF_SimpleFont::CharCodeFromUnicode(wchar_t unicode) const {
   uint32_t ret = CPDF_Font::CharCodeFromUnicode(unicode);
   if (ret)
     return ret;
   return m_Encoding.CharCodeFromUnicode(unicode);
+}
+
+bool CPDF_SimpleFont::HasFontWidths() const {
+  return !m_bUseFontWidth;
 }

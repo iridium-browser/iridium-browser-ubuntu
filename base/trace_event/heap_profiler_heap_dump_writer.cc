@@ -16,10 +16,11 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/heap_profiler_serialization_state.h"
 #include "base/trace_event/heap_profiler_stack_frame_deduplicator.h"
 #include "base/trace_event/heap_profiler_type_name_deduplicator.h"
-#include "base/trace_event/memory_dump_session_state.h"
 #include "base/trace_event/trace_config.h"
+#include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "base/trace_event/trace_log.h"
 
@@ -78,8 +79,7 @@ bool operator<(const Bucket& lhs, const Bucket& rhs) {
 // |is_broken_down_by_type_name| set depending on the property to group by.
 std::vector<Bucket> GetSubbuckets(const Bucket& bucket,
                                   BreakDownMode break_by) {
-  base::hash_map<const void*, Bucket> breakdown;
-
+  std::unordered_map<const void*, Bucket> breakdown;
 
   if (break_by == BreakDownMode::kByBacktrace) {
     for (const auto& context_and_metrics : bucket.metrics_by_context) {
@@ -184,8 +184,7 @@ HeapDumpWriter::HeapDumpWriter(StackFrameDeduplicator* stack_frame_deduplicator,
                                uint32_t breakdown_threshold_bytes)
     : stack_frame_deduplicator_(stack_frame_deduplicator),
       type_name_deduplicator_(type_name_deduplicator),
-      breakdown_threshold_bytes_(breakdown_threshold_bytes) {
-}
+      breakdown_threshold_bytes_(breakdown_threshold_bytes) {}
 
 HeapDumpWriter::~HeapDumpWriter() {}
 
@@ -202,8 +201,8 @@ bool HeapDumpWriter::AddEntryForBucket(const Bucket& bucket) {
   DCHECK_LE(bucket.backtrace_cursor, arraysize(context->backtrace.frames));
 
   Entry entry;
-  entry.stack_frame_id = stack_frame_deduplicator_->Insert(
-      backtrace_begin, backtrace_end);
+  entry.stack_frame_id =
+      stack_frame_deduplicator_->Insert(backtrace_begin, backtrace_end);
 
   // Deduplicate the type name, or use ID -1 if type name is not set.
   entry.type_id = bucket.is_broken_down_by_type_name
@@ -218,11 +217,9 @@ bool HeapDumpWriter::AddEntryForBucket(const Bucket& bucket) {
 }
 
 void HeapDumpWriter::BreakDown(const Bucket& bucket) {
-  auto by_backtrace = BreakDownBy(bucket,
-                                  BreakDownMode::kByBacktrace,
+  auto by_backtrace = BreakDownBy(bucket, BreakDownMode::kByBacktrace,
                                   breakdown_threshold_bytes_);
-  auto by_type_name = BreakDownBy(bucket,
-                                  BreakDownMode::kByTypeName,
+  auto by_type_name = BreakDownBy(bucket, BreakDownMode::kByTypeName,
                                   breakdown_threshold_bytes_);
 
   // Insert entries for the buckets. If a bucket was not present before, it has
@@ -241,7 +238,8 @@ void HeapDumpWriter::BreakDown(const Bucket& bucket) {
 }
 
 const std::set<Entry>& HeapDumpWriter::Summarize(
-    const hash_map<AllocationContext, AllocationMetrics>& metrics_by_context) {
+    const std::unordered_map<AllocationContext, AllocationMetrics>&
+        metrics_by_context) {
   // Start with one bucket that represents the entire heap. Iterate by
   // reference, because the allocation contexts are going to point to allocation
   // contexts stored in |metrics_by_context|.
@@ -309,12 +307,15 @@ std::unique_ptr<TracedValue> Serialize(const std::set<Entry>& entries) {
 }  // namespace internal
 
 std::unique_ptr<TracedValue> ExportHeapDump(
-    const hash_map<AllocationContext, AllocationMetrics>& metrics_by_context,
-    const MemoryDumpSessionState& session_state) {
+    const std::unordered_map<AllocationContext, AllocationMetrics>&
+        metrics_by_context,
+    const HeapProfilerSerializationState& heap_profiler_serialization_state) {
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("memory-infra"), "ExportHeapDump");
   internal::HeapDumpWriter writer(
-      session_state.stack_frame_deduplicator(),
-      session_state.type_name_deduplicator(),
-      session_state.heap_profiler_breakdown_threshold_bytes());
+      heap_profiler_serialization_state.stack_frame_deduplicator(),
+      heap_profiler_serialization_state.type_name_deduplicator(),
+      heap_profiler_serialization_state
+          .heap_profiler_breakdown_threshold_bytes());
   return Serialize(writer.Summarize(metrics_by_context));
 }
 

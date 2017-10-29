@@ -11,16 +11,16 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
-#include "base/threading/sequenced_worker_pool.h"
-#include "chrome/browser/android/offline_pages/background_loader_offliner.h"
-#include "chrome/browser/android/offline_pages/background_scheduler_bridge.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/android/offline_pages/downloads/offline_page_notification_bridge.h"
 #include "chrome/browser/android/offline_pages/evaluation/evaluation_test_scheduler.h"
-#include "chrome/browser/android/offline_pages/offline_page_model_factory.h"
-#include "chrome/browser/android/offline_pages/prerendering_offliner.h"
-#include "chrome/browser/android/offline_pages/request_coordinator_factory.h"
 #include "chrome/browser/net/nqe/ui_network_quality_estimator_service.h"
 #include "chrome/browser/net/nqe/ui_network_quality_estimator_service_factory.h"
+#include "chrome/browser/offline_pages/android/background_scheduler_bridge.h"
+#include "chrome/browser/offline_pages/android/prerendering_offliner.h"
+#include "chrome/browser/offline_pages/background_loader_offliner.h"
+#include "chrome/browser/offline_pages/offline_page_model_factory.h"
+#include "chrome/browser/offline_pages/request_coordinator_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/common/chrome_constants.h"
@@ -36,7 +36,6 @@
 #include "components/offline_pages/core/offline_page_item.h"
 #include "components/offline_pages/core/offline_page_model.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_thread.h"
 #include "jni/OfflinePageEvaluationBridge_jni.h"
 #include "jni/SavePageRequest_jni.h"
 
@@ -51,6 +50,8 @@ namespace android {
 
 namespace {
 const char kNativeTag[] = "OPNative";
+const base::FilePath::CharType kTestRequestQueueDirname[] =
+    FILE_PATH_LITERAL("Offline Pages/test_request_queue");
 
 void ToJavaOfflinePageList(JNIEnv* env,
                            jobject j_result_obj,
@@ -132,11 +133,10 @@ std::unique_ptr<KeyedService> GetTestingRequestCoordinator(
     std::unique_ptr<OfflinerPolicy> policy,
     std::unique_ptr<Offliner> offliner) {
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
-      content::BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
-          content::BrowserThread::GetBlockingPool()->GetSequenceToken());
+      base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()});
   Profile* profile = Profile::FromBrowserContext(context);
   base::FilePath queue_store_path =
-      profile->GetPath().Append(chrome::kOfflinePageRequestQueueDirname);
+      profile->GetPath().Append(kTestRequestQueueDirname);
 
   std::unique_ptr<RequestQueueStoreSQL> queue_store(
       new RequestQueueStoreSQL(background_task_runner, queue_store_path));
@@ -146,8 +146,6 @@ std::unique_ptr<KeyedService> GetTestingRequestCoordinator(
   net::NetworkQualityEstimator::NetworkQualityProvider*
       network_quality_estimator =
           UINetworkQualityEstimatorServiceFactory::GetForProfile(profile);
-  // TODO(fgorski): Something needs to keep the handle to the Notification
-  // dispatcher.
   std::unique_ptr<RequestCoordinator> request_coordinator =
       base::MakeUnique<RequestCoordinator>(
           std::move(policy), std::move(offliner), std::move(queue),
@@ -178,7 +176,8 @@ std::unique_ptr<KeyedService> GetTestBackgroundLoaderRequestCoordinator(
   std::unique_ptr<OfflinerPolicy> policy(new OfflinerPolicy());
   std::unique_ptr<Offliner> offliner(new BackgroundLoaderOffliner(
       context, policy.get(),
-      OfflinePageModelFactory::GetForBrowserContext(context)));
+      OfflinePageModelFactory::GetForBrowserContext(context),
+      nullptr));  // no need to connect LoadTerminationListener for harness.
   return GetTestingRequestCoordinator(context, std::move(policy),
                                       std::move(offliner));
 }
@@ -199,11 +198,6 @@ RequestCoordinator* GetRequestCoordinator(Profile* profile,
           profile, &GetTestPrerenderRequestCoordinator));
 }
 }  // namespace
-
-// static
-bool OfflinePageEvaluationBridge::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
 
 static jlong CreateBridgeForProfile(JNIEnv* env,
                                     const JavaParamRef<jobject>& obj,
@@ -249,7 +243,7 @@ OfflinePageEvaluationBridge::OfflinePageEvaluationBridge(
 
 OfflinePageEvaluationBridge::~OfflinePageEvaluationBridge() {}
 
-void OfflinePageEvaluationBridge::Destory(JNIEnv* env,
+void OfflinePageEvaluationBridge::Destroy(JNIEnv* env,
                                           const JavaParamRef<jobject>&) {
   offline_page_model_->RemoveObserver(this);
   request_coordinator_->RemoveObserver(this);
@@ -268,8 +262,7 @@ void OfflinePageEvaluationBridge::OfflinePageAdded(
     const OfflinePageItem& added_page) {}
 
 void OfflinePageEvaluationBridge::OfflinePageDeleted(
-    int64_t offline_id,
-    const ClientId& client_id) {}
+    const OfflinePageModel::DeletedPageInfo& page_info) {}
 
 // Implement RequestCoordinator::Observer
 void OfflinePageEvaluationBridge::OnAdded(const SavePageRequest& request) {

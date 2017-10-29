@@ -191,7 +191,10 @@ void StorageManagerHandler::HandleOpenDownloads(
 
 void StorageManagerHandler::HandleOpenArcStorage(
     const base::ListValue* unused_args) {
-  arc::ArcStorageManager::Get()->OpenPrivateVolumeSettings();
+  auto* arc_storage_manager = arc::ArcStorageManager::GetForBrowserContext(
+      Profile::FromWebUI(web_ui()));
+  if (arc_storage_manager)
+    arc_storage_manager->OpenPrivateVolumeSettings();
 }
 
 void StorageManagerHandler::HandleClearDriveCache(
@@ -212,8 +215,7 @@ void StorageManagerHandler::UpdateSizeStat() {
   int64_t* total_size = new int64_t(0);
   int64_t* available_size = new int64_t(0);
   base::PostTaskWithTraitsAndReply(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&GetSizeStatAsync, downloads_path, total_size, available_size),
       base::Bind(&StorageManagerHandler::OnGetSizeStat,
                  weak_ptr_factory_.GetWeakPtr(), base::Owned(total_size),
@@ -250,8 +252,7 @@ void StorageManagerHandler::UpdateDownloadsSize() {
       file_manager::util::GetDownloadsFolderForProfile(profile);
 
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&base::ComputeDirectorySize, downloads_path),
       base::Bind(&StorageManagerHandler::OnGetDownloadsSize,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -261,7 +262,7 @@ void StorageManagerHandler::OnGetDownloadsSize(int64_t size) {
   updating_downloads_size_ = false;
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.StorageManager.setDownloadsSize",
-      base::StringValue(ui::FormatBytes(size)));
+      base::Value(ui::FormatBytes(size)));
 }
 
 void StorageManagerHandler::UpdateDriveCacheSize() {
@@ -286,7 +287,7 @@ void StorageManagerHandler::OnGetDriveCacheSize(int64_t size) {
   updating_drive_cache_size_ = false;
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.StorageManager.setDriveCacheSize",
-      base::StringValue(ui::FormatBytes(size)));
+      base::Value(ui::FormatBytes(size)));
 }
 
 void StorageManagerHandler::UpdateBrowsingDataSize() {
@@ -332,7 +333,7 @@ void StorageManagerHandler::UpdateBrowsingDataSize() {
                  weak_ptr_factory_.GetWeakPtr(), true));
 }
 
-void StorageManagerHandler::OnGetCacheSize(int64_t size, bool is_upper_limit) {
+void StorageManagerHandler::OnGetCacheSize(bool is_upper_limit, int64_t size) {
   DCHECK(!is_upper_limit);
   OnGetBrowsingDataSize(false, size);
 }
@@ -357,8 +358,7 @@ void StorageManagerHandler::OnGetBrowsingDataSize(bool is_site_data,
     }
     updating_browsing_data_size_ = false;
     web_ui()->CallJavascriptFunctionUnsafe(
-        "options.StorageManager.setBrowsingDataSize",
-        base::StringValue(size_string));
+        "options.StorageManager.setBrowsingDataSize", base::Value(size_string));
   }
 }
 
@@ -385,7 +385,7 @@ void StorageManagerHandler::UpdateOtherUsersSize() {
     updating_other_users_size_ = false;
     web_ui()->CallJavascriptFunctionUnsafe(
         "options.StorageManager.setOtherUsersSize",
-        base::StringValue(ui::FormatBytes(0)));
+        base::Value(ui::FormatBytes(0)));
   }
 }
 
@@ -403,8 +403,7 @@ void StorageManagerHandler::OnGetOtherUserSize(bool success, int64_t size) {
     }
     updating_other_users_size_ = false;
     web_ui()->CallJavascriptFunctionUnsafe(
-        "options.StorageManager.setOtherUsersSize",
-        base::StringValue(size_string));
+        "options.StorageManager.setOtherUsersSize", base::Value(size_string));
   }
 }
 
@@ -422,9 +421,13 @@ void StorageManagerHandler::UpdateArcSize() {
   // Shows the item "Android apps and cache" and start calculating size.
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.StorageManager.showArcItem");
-  bool success = arc::ArcStorageManager::Get()->GetApplicationsSize(
-      base::Bind(&StorageManagerHandler::OnGetArcSize,
-                 weak_ptr_factory_.GetWeakPtr()));
+  bool success = false;
+  auto* arc_storage_manager =
+      arc::ArcStorageManager::GetForBrowserContext(profile);
+  if (arc_storage_manager) {
+    success = arc_storage_manager->GetApplicationsSize(base::Bind(
+        &StorageManagerHandler::OnGetArcSize, weak_ptr_factory_.GetWeakPtr()));
+  }
   if (!success)
     updating_arc_size_ = false;
 }
@@ -443,7 +446,7 @@ void StorageManagerHandler::OnGetArcSize(bool succeeded,
   }
   updating_arc_size_ = false;
   web_ui()->CallJavascriptFunctionUnsafe("options.StorageManager.setArcSize",
-                                         base::StringValue(size_string));
+                                         base::Value(size_string));
 }
 
 void StorageManagerHandler::OnClearDriveCacheDone(bool success) {

@@ -8,6 +8,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/component_extensions_whitelist/whitelist.h"
+#include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -27,10 +28,6 @@
 #include "chrome/browser/ui/app_list/google_now_extension.h"
 #endif
 
-#if defined(ENABLE_MEDIA_ROUTER)
-#include "chrome/browser/media/router/media_router_feature.h"
-#endif
-
 namespace extensions {
 
 ExternalComponentLoader::ExternalComponentLoader(Profile* profile)
@@ -41,7 +38,9 @@ ExternalComponentLoader::~ExternalComponentLoader() {}
 
 void ExternalComponentLoader::StartLoading() {
   prefs_.reset(new base::DictionaryValue());
+#if defined(GOOGLE_CHROME_BUILD)
   AddExternalExtension(extension_misc::kInAppPaymentsSupportAppId);
+#endif  // defined(GOOGLE_CHROME_BUILD)
 
   if (HotwordServiceFactory::IsHotwordAllowed(profile_))
     AddExternalExtension(extension_misc::kHotwordSharedModuleId);
@@ -55,12 +54,10 @@ void ExternalComponentLoader::StartLoading() {
   }
 #endif
 
-#if defined(ENABLE_MEDIA_ROUTER)
   if (media_router::MediaRouterEnabled(profile_) &&
       FeatureSwitch::load_media_router_component_extension()->IsEnabled()) {
     AddExternalExtension(extension_misc::kMediaRouterStableExtensionId);
   }
-#endif  // defined(ENABLE_MEDIA_ROUTER)
 
 #if BUILDFLAG(ENABLE_APP_LIST) && defined(OS_CHROMEOS)
   std::string google_now_extension_id;

@@ -42,11 +42,11 @@ class CFWL_ListBox : public CFWL_Widget {
   FWL_Type GetClassID() const override;
   void Update() override;
   FWL_WidgetHit HitTest(const CFX_PointF& point) override;
-  void DrawWidget(CFX_Graphics* pGraphics, const CFX_Matrix* pMatrix) override;
+  void DrawWidget(CXFA_Graphics* pGraphics, const CFX_Matrix* pMatrix) override;
   void SetThemeProvider(IFWL_ThemeProvider* pThemeProvider) override;
   void OnProcessMessage(CFWL_Message* pMessage) override;
   void OnProcessEvent(CFWL_Event* pEvent) override;
-  void OnDrawWidget(CFX_Graphics* pGraphics,
+  void OnDrawWidget(CXFA_Graphics* pGraphics,
                     const CFX_Matrix* pMatrix) override;
 
   int32_t CountItems(const CFWL_Widget* pWidget) const;
@@ -63,8 +63,8 @@ class CFWL_ListBox : public CFWL_Widget {
   int32_t GetSelIndex(int32_t nIndex);
   void SetSelItem(CFWL_ListItem* hItem, bool bSelect);
 
-  FX_FLOAT GetItemHeight() const { return m_fItemHeight; }
-  FX_FLOAT CalcItemHeight();
+  float GetItemHeight() const { return m_fItemHeight; }
+  float CalcItemHeight();
 
  protected:
   CFWL_ListItem* GetListItem(CFWL_ListItem* hItem, uint32_t dwKeyCode);
@@ -85,27 +85,27 @@ class CFWL_ListBox : public CFWL_Widget {
   void SelectAll();
   CFWL_ListItem* GetFocusedItem();
   void SetFocusItem(CFWL_ListItem* hItem);
-  void DrawBkground(CFX_Graphics* pGraphics,
+  void DrawBkground(CXFA_Graphics* pGraphics,
                     IFWL_ThemeProvider* pTheme,
                     const CFX_Matrix* pMatrix);
-  void DrawItems(CFX_Graphics* pGraphics,
+  void DrawItems(CXFA_Graphics* pGraphics,
                  IFWL_ThemeProvider* pTheme,
                  const CFX_Matrix* pMatrix);
-  void DrawItem(CFX_Graphics* pGraphics,
+  void DrawItem(CXFA_Graphics* pGraphics,
                 IFWL_ThemeProvider* pTheme,
                 CFWL_ListItem* hItem,
                 int32_t Index,
                 const CFX_RectF& rtItem,
                 const CFX_Matrix* pMatrix);
-  void DrawStatic(CFX_Graphics* pGraphics, IFWL_ThemeProvider* pTheme);
+  void DrawStatic(CXFA_Graphics* pGraphics, IFWL_ThemeProvider* pTheme);
   CFX_SizeF CalcSize(bool bAutoSize);
   void UpdateItemSize(CFWL_ListItem* hItem,
                       CFX_SizeF& size,
-                      FX_FLOAT fWidth,
-                      FX_FLOAT fHeight,
+                      float fWidth,
+                      float fHeight,
                       bool bAutoSize) const;
-  FX_FLOAT GetMaxTextWidth();
-  FX_FLOAT GetScrollWidth();
+  float GetMaxTextWidth();
+  float GetScrollWidth();
 
   void OnFocusChanged(CFWL_Message* pMsg, bool bSet);
   void OnLButtonDown(CFWL_MessageMouse* pMsg);
@@ -115,7 +115,7 @@ class CFWL_ListBox : public CFWL_Widget {
   void OnVK(CFWL_ListItem* hItem, bool bShift, bool bCtrl);
   bool OnScroll(CFWL_ScrollBar* pScrollBar,
                 CFWL_EventScroll::Code dwCode,
-                FX_FLOAT fPos);
+                float fPos);
 
   CFX_RectF m_rtClient;
   CFX_RectF m_rtStatic;
@@ -125,8 +125,8 @@ class CFWL_ListBox : public CFWL_Widget {
   uint32_t m_dwTTOStyles;
   int32_t m_iTTOAligns;
   CFWL_ListItem* m_hAnchor;
-  FX_FLOAT m_fItemHeight;
-  FX_FLOAT m_fScorllBarWidth;
+  float m_fItemHeight;
+  float m_fScorllBarWidth;
   bool m_bLButtonDown;
   IFWL_ThemeProvider* m_pScrollBarTP;
   std::vector<std::unique_ptr<CFWL_ListItem>> m_ItemArray;

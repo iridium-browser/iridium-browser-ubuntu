@@ -11,8 +11,8 @@
 
 namespace {
 
-base::LazyInstance<PortableDeviceMapService> g_portable_device_map_service =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<PortableDeviceMapService>::DestructorAtExit
+    g_portable_device_map_service = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -58,7 +58,7 @@ IPortableDevice* PortableDeviceMapService::GetPortableDevice(
   base::AutoLock lock(lock_);
   PortableDeviceMap::const_iterator it = device_map_.find(device_location);
   return (it == device_map_.end() || it->second.scheduled_to_delete) ?
-      NULL : it->second.portable_device.get();
+      NULL : it->second.portable_device.Get();
 }
 
 PortableDeviceMapService::PortableDeviceInfo::PortableDeviceInfo()

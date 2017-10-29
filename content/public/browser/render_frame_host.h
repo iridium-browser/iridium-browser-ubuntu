@@ -14,18 +14,27 @@
 #include "content/public/common/file_chooser_params.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
+#include "third_party/WebKit/public/platform/WebSuddenTerminationDisablerType.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
+namespace blink {
+enum class WebFeaturePolicyFeature;
+}
+
 namespace base {
 class Value;
 }
 
+namespace resource_coordinator {
+class ResourceCoordinatorInterface;
+}
+
 namespace service_manager {
-class InterfaceRegistry;
 class InterfaceProvider;
 }
 
@@ -34,6 +43,7 @@ struct AXActionData;
 }
 
 namespace content {
+
 class AssociatedInterfaceProvider;
 class RenderProcessHost;
 class RenderViewHost;
@@ -45,6 +55,9 @@ struct FileChooserFileInfo;
 class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
                                        public IPC::Sender {
  public:
+  // Constant used to denote that a lookup of a FrameTreeNode ID has failed.
+  static const int kNoFrameTreeNodeId = -1;
+
   // Returns the RenderFrameHost given its ID and the ID of its render process.
   // Returns nullptr if the IDs do not correspond to a live RenderFrameHost.
   static RenderFrameHost* FromID(int render_process_id, int render_frame_id);
@@ -54,10 +67,20 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // is present only to support Android WebView and must not be used in other
   // configurations.
   static void AllowInjectingJavaScriptForAndroidWebView();
+
+  // Temporary hack to enable data URLs on Android Webview until PlzNavigate
+  // ships.
+  static void AllowDataUrlNavigationForAndroidWebView();
+  static bool IsDataUrlNavigationAllowedForAndroidWebView();
 #endif
 
   // Returns a RenderFrameHost given its accessibility tree ID.
   static RenderFrameHost* FromAXTreeID(int ax_tree_id);
+
+  // Returns the FrameTreeNode ID corresponding to the specified |process_id|
+  // and |routing_id|. This routing ID pair may represent a placeholder for
+  // frame that is currently rendered in a different process than |process_id|.
+  static int GetFrameTreeNodeIdForRoutingId(int process_id, int routing_id);
 
   ~RenderFrameHost() override {}
 
@@ -71,6 +94,11 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // access to this RenderFrameHost, and must therefore live in the same
   // process.
   virtual SiteInstance* GetSiteInstance() = 0;
+
+  // Returns the interface for the Global Resource Coordinator
+  // for this frame.
+  virtual resource_coordinator::ResourceCoordinatorInterface*
+  GetFrameResourceCoordinator() = 0;
 
   // Returns the process for this frame.
   virtual RenderProcessHost* GetProcess() = 0;
@@ -174,9 +202,9 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // RenderViewHost for this frame.
   virtual RenderViewHost* GetRenderViewHost() = 0;
 
-  // Returns the InterfaceRegistry that this process uses to expose interfaces
+  // Returns the BinderRegistry that this process uses to expose interfaces
   // to the application running in this frame.
-  virtual service_manager::InterfaceRegistry* GetInterfaceRegistry() = 0;
+  virtual service_manager::BinderRegistry* GetInterfaceRegistry() = 0;
 
   // Returns the InterfaceProvider that this process can use to bind
   // interfaces exposed to it by the application running in this frame.
@@ -193,6 +221,16 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // Returns whether the RenderFrame in the renderer process has been created
   // and still has a connection.  This is valid for all frames.
   virtual bool IsRenderFrameLive() = 0;
+
+  // Returns true if this is the currently-visible RenderFrameHost for our frame
+  // tree node. During process transfer, a RenderFrameHost may be created that
+  // is not current. After process transfer, the old RenderFrameHost becomes
+  // non-current until it is deleted (which may not happen until its unload
+  // handler runs).
+  //
+  // Changes to the IsCurrent() state of a RenderFrameHost may be observed via
+  // WebContentsObserver::RenderFrameHostChanged().
+  virtual bool IsCurrent() = 0;
 
   // Get the number of proxies to this frame, in all processes. Exposed for
   // use by resource metrics.
@@ -223,6 +261,39 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // Returns a bitwise OR of bindings types that have been enabled for this
   // RenderFrame. See BindingsPolicy for details.
   virtual int GetEnabledBindings() const = 0;
+
+  // Causes all new requests for the root RenderFrameHost and its children to
+  // be blocked (not being started) until ResumeBlockedRequestsForFrame is
+  // called.
+  virtual void BlockRequestsForFrame() = 0;
+
+  // Resumes any blocked request for the specified root RenderFrameHost and
+  // child frame hosts.
+  virtual void ResumeBlockedRequestsForFrame() = 0;
+
+#if defined(OS_ANDROID)
+  // Returns an InterfaceProvider for Java-implemented interfaces that are
+  // scoped to this RenderFrameHost. This provides access to interfaces
+  // implemented in Java in the browser process to C++ code in the browser
+  // process.
+  virtual service_manager::InterfaceProvider* GetJavaInterfaces() = 0;
+#endif  // OS_ANDROID
+
+  // Stops and disables the hang monitor for beforeunload. This avoids flakiness
+  // in tests that need to observe beforeunload dialogs, which could fail if the
+  // timeout skips the dialog.
+  virtual void DisableBeforeUnloadHangMonitorForTesting() = 0;
+  virtual bool IsBeforeUnloadHangMonitorDisabledForTesting() = 0;
+
+  // Check whether the specific Blink feature is currently preventing fast
+  // shutdown of the frame.
+  virtual bool GetSuddenTerminationDisablerState(
+      blink::WebSuddenTerminationDisablerType disabler_type) = 0;
+
+  // Returns true if the given Feature Policy |feature| is enabled for this
+  // RenderFrameHost and is allowed to be used by it. Use this in the browser
+  // process to determine whether access to a feature is allowed.
+  virtual bool IsFeatureEnabled(blink::WebFeaturePolicyFeature feature) = 0;
 
  private:
   // This interface should only be implemented inside content.

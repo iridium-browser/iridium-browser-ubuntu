@@ -10,8 +10,9 @@
 namespace ui {
 
 StubWindow::StubWindow(PlatformWindowDelegate* delegate,
-                       bool use_default_accelerated_widget)
-    : delegate_(delegate) {
+                       bool use_default_accelerated_widget,
+                       const gfx::Rect& bounds)
+    : delegate_(delegate), bounds_(bounds) {
   DCHECK(delegate);
   if (use_default_accelerated_widget)
     delegate_->OnAcceleratedWidgetAvailable(gfx::kNullAcceleratedWidget, 1.f);
@@ -30,9 +31,12 @@ void StubWindow::Close() {
   delegate_->OnClosed();
 }
 
+void StubWindow::PrepareForShutdown() {}
+
 void StubWindow::SetBounds(const gfx::Rect& bounds) {
-  if (bounds_ == bounds)
-    return;
+  // Even if the pixel bounds didn't change this call to the delegate should
+  // still happen. The device scale factor may have changed which effectively
+  // changes the bounds.
   bounds_ = bounds;
   delegate_->OnBoundsChanged(bounds);
 }

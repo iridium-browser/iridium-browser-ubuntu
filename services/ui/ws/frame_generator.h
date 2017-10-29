@@ -8,18 +8,13 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/timer/timer.h"
-#include "cc/ipc/display_compositor.mojom.h"
-#include "cc/surfaces/frame_sink_id.h"
-#include "cc/surfaces/local_surface_id_allocator.h"
-#include "cc/surfaces/surface_id.h"
-#include "cc/surfaces/surface_reference.h"
-#include "services/ui/public/interfaces/window_tree_constants.mojom.h"
-#include "services/ui/ws/ids.h"
-#include "services/ui/ws/server_window_delegate.h"
-#include "services/ui/ws/server_window_tracker.h"
+#include "cc/ipc/compositor_frame_sink.mojom.h"
+#include "cc/scheduler/begin_frame_source.h"
+#include "components/viz/common/surfaces/local_surface_id_allocator.h"
+#include "components/viz/common/surfaces/surface_id.h"
+#include "components/viz/common/surfaces/surface_info.h"
+#include "services/ui/ws/compositor_frame_sink_client_binding.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/native_widget_types.h"
 
 namespace cc {
 class RenderPass;
@@ -28,59 +23,58 @@ class RenderPass;
 namespace ui {
 namespace ws {
 
-namespace test {
-class FrameGeneratorTest;
-}
-
-class FrameGeneratorDelegate;
-class ServerWindow;
-
 // Responsible for redrawing the display in response to the redraw requests by
 // submitting CompositorFrames to the owned CompositorFrameSink.
-class FrameGenerator : public cc::mojom::MojoCompositorFrameSinkClient {
+class FrameGenerator : public cc::mojom::CompositorFrameSinkClient {
  public:
-  FrameGenerator(FrameGeneratorDelegate* delegate,
-                 ServerWindow* root_window,
-                 gfx::AcceleratedWidget widget);
+  FrameGenerator();
   ~FrameGenerator() override;
 
   void SetDeviceScaleFactor(float device_scale_factor);
+  void SetHighContrastMode(bool enabled);
 
   // Updates the WindowManager's SurfaceInfo.
-  void OnSurfaceCreated(const cc::SurfaceInfo& surface_info);
+  void OnSurfaceCreated(const viz::SurfaceInfo& surface_info);
+
+  // Swaps the |window_manager_surface_info_| with that of |other|.
+  void SwapSurfaceWith(FrameGenerator* other);
 
   void OnWindowDamaged();
+  void OnWindowSizeChanged(const gfx::Size& pixel_size);
+  void Bind(
+      std::unique_ptr<cc::mojom::CompositorFrameSink> compositor_frame_sink);
 
  private:
-  friend class ui::ws::test::FrameGeneratorTest;
-
-  // cc::mojom::MojoCompositorFrameSinkClient implementation:
-  void DidReceiveCompositorFrameAck() override;
-  void OnBeginFrame(const cc::BeginFrameArgs& begin_frame_arags) override;
-  void ReclaimResources(const cc::ReturnedResourceArray& resources) override;
-  void WillDrawSurface(const cc::LocalSurfaceId& local_surface_id,
-                       const gfx::Rect& damage_rect) override;
+  // cc::mojom::CompositorFrameSinkClient implementation:
+  void DidReceiveCompositorFrameAck(
+      const std::vector<cc::ReturnedResource>& resources) override;
+  void OnBeginFrame(const cc::BeginFrameArgs& args) override;
+  void OnBeginFramePausedChanged(bool paused) override {}
+  void ReclaimResources(
+      const std::vector<cc::ReturnedResource>& resources) override;
 
   // Generates the CompositorFrame.
-  cc::CompositorFrame GenerateCompositorFrame(const gfx::Rect& output_rect);
+  cc::CompositorFrame GenerateCompositorFrame();
 
   // DrawWindow creates SurfaceDrawQuad for the window manager and appends it to
   // the provided cc::RenderPass.
   void DrawWindow(cc::RenderPass* pass);
 
-  FrameGeneratorDelegate* delegate_;
-  ServerWindow* const root_window_;
+  void SetNeedsBeginFrame(bool needs_begin_frame);
+
   float device_scale_factor_ = 1.f;
+  gfx::Size pixel_size_;
 
+  std::unique_ptr<cc::mojom::CompositorFrameSink> compositor_frame_sink_;
+  cc::BeginFrameArgs last_begin_frame_args_;
+  cc::BeginFrameAck current_begin_frame_ack_;
+  bool high_contrast_mode_enabled_ = false;
   gfx::Size last_submitted_frame_size_;
-  cc::LocalSurfaceId local_surface_id_;
-  cc::LocalSurfaceIdAllocator id_allocator_;
-  cc::mojom::MojoCompositorFrameSinkAssociatedPtr compositor_frame_sink_;
-  cc::mojom::DisplayPrivateAssociatedPtr display_private_;
+  viz::LocalSurfaceId local_surface_id_;
+  viz::LocalSurfaceIdAllocator id_allocator_;
+  float last_device_scale_factor_ = 0.0f;
 
-  cc::SurfaceInfo window_manager_surface_info_;
-
-  mojo::Binding<cc::mojom::MojoCompositorFrameSinkClient> binding_;
+  viz::SurfaceInfo window_manager_surface_info_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameGenerator);
 };

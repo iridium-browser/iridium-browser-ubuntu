@@ -33,7 +33,7 @@ namespace keyboard {
 class WindowBoundsChangeObserver;
 
 // An implementation of KeyboardUI that uses a content::WebContents to implement
-//the keyboard.
+// the keyboard.
 class KEYBOARD_EXPORT KeyboardUIContent : public KeyboardUI,
                                           public aura::WindowObserver {
  public:
@@ -59,16 +59,12 @@ class KEYBOARD_EXPORT KeyboardUIContent : public KeyboardUI,
       const content::MediaStreamRequest& request,
       const content::MediaResponseCallback& callback) = 0;
 
-  // Loads system virtual keyboard. Noop if the current virtual keyboard is
-  // system virtual keyboard.
-  virtual void LoadSystemKeyboard();
-
   // Called when a window being observed changes bounds, to update its insets.
   void UpdateInsetsForWindow(aura::Window* window);
 
   // Overridden from KeyboardUI:
-  aura::Window* GetKeyboardWindow() override;
-  bool HasKeyboardWindow() const override;
+  aura::Window* GetContentsWindow() override;
+  bool HasContentsWindow() const override;
   bool ShouldWindowOverscroll(aura::Window* window) const override;
   void ReloadKeyboardIfNeeded() override;
   void InitInsets(const gfx::Rect& new_bounds) override;
@@ -86,10 +82,14 @@ class KEYBOARD_EXPORT KeyboardUIContent : public KeyboardUI,
                              const gfx::Rect& old_bounds,
                              const gfx::Rect& new_bounds) override;
   void OnWindowDestroyed(aura::Window* window) override;
+  void OnWindowParentChanged(aura::Window* window,
+                             aura::Window* parent) override;
 
   content::BrowserContext* browser_context() { return browser_context_; }
 
   const aura::Window* GetKeyboardRootWindow() const;
+
+  virtual content::WebContents* CreateWebContents();
 
  private:
   friend class TestApi;
@@ -107,6 +107,10 @@ class KEYBOARD_EXPORT KeyboardUIContent : public KeyboardUI,
   // position while the keyboard is displayed. Any window repositioning
   // invalidates insets for overscrolling.
   void AddBoundsChangedObserver(aura::Window* window);
+
+  // Sets shadow around the keyboard. If shadow has not been created yet,
+  // this method creates it.
+  void SetShadowAroundKeyboard();
 
   // The BrowserContext to use for creating the WebContents hosting the
   // keyboard.

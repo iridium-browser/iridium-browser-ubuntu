@@ -124,9 +124,12 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   extensions::ExtensionNavigationUIData* GetExtensionNavigationUIData(
       net::URLRequest* request) override;
   KioskDelegate* GetKioskDelegate() override;
+  bool IsLockScreenContext(content::BrowserContext* context) override;
+
+  static void set_did_chrome_update_for_testing(bool did_update);
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<ChromeExtensionsBrowserClient>;
+  friend struct base::LazyInstanceTraitsBase<ChromeExtensionsBrowserClient>;
 
   // Support for ProcessManager.
   std::unique_ptr<ChromeProcessManagerDelegate> process_manager_delegate_;

@@ -18,16 +18,18 @@
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl_io_data.h"
-#include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
 #include "chrome/common/features.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/host_zoom_map.h"
 #include "extensions/features/features.h"
 
-class PrefService;
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
+#include "content/public/browser/host_zoom_map.h"
+#endif
 
-class TrackedPreferenceValidationDelegate;
+class MediaDeviceIDSalt;
+class PrefService;
 
 #if defined(OS_CHROMEOS)
 namespace chromeos {
@@ -75,8 +77,10 @@ class ProfileImpl : public Profile {
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // content::BrowserContext implementation:
+#if !defined(OS_ANDROID)
   std::unique_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
       const base::FilePath& partition_path) override;
+#endif
   base::FilePath GetPath() const override;
   content::DownloadManagerDelegate* GetDownloadManagerDelegate() override;
   content::ResourceContext* GetResourceContext() override;
@@ -84,6 +88,8 @@ class ProfileImpl : public Profile {
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
+  content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
+      override;
   content::PermissionManager* GetPermissionManager() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   net::URLRequestContextGetter* CreateRequestContext(
@@ -98,6 +104,8 @@ class ProfileImpl : public Profile {
   net::URLRequestContextGetter* CreateMediaRequestContextForStoragePartition(
       const base::FilePath& partition_path,
       bool in_memory) override;
+  void RegisterInProcessServices(StaticServiceMap* services) override;
+  std::string GetMediaDeviceIDSalt() override;
 
   // Profile implementation:
   scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() override;
@@ -116,8 +124,11 @@ class ProfileImpl : public Profile {
   ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy() override;
   PrefService* GetPrefs() override;
   const PrefService* GetPrefs() const override;
+#if !defined(OS_ANDROID)
   ChromeZoomLevelPrefs* GetZoomLevelPrefs() override;
+#endif
   PrefService* GetOffTheRecordPrefs() override;
+  PrefService* GetReadOnlyOffTheRecordPrefs() override;
   net::URLRequestContextGetter* GetRequestContext() override;
   net::URLRequestContextGetter* GetRequestContextForExtensions() override;
   net::SSLConfigService* GetSSLConfigService() override;
@@ -191,6 +202,10 @@ class ProfileImpl : public Profile {
   std::unique_ptr<domain_reliability::DomainReliabilityMonitor>
   CreateDomainReliabilityMonitor(PrefService* local_state);
 
+  // Creates an instance of the Identity Service for this Profile, populating it
+  // with the appropriate instances of its dependencies.
+  std::unique_ptr<service_manager::Service> CreateIdentityService();
+
   PrefChangeRegistrar pref_change_registrar_;
 
   base::FilePath path_;
@@ -213,17 +228,14 @@ class ProfileImpl : public Profile {
       configuration_policy_provider_;
   std::unique_ptr<policy::ProfilePolicyConnector> profile_policy_connector_;
 
-  // Keep |pref_validation_delegate_| above |prefs_| so that the former outlives
-  // the latter.
-  std::unique_ptr<TrackedPreferenceValidationDelegate>
-      pref_validation_delegate_;
-
   // Keep |prefs_| on top for destruction order because |extension_prefs_|,
   // |io_data_| and others store pointers to |prefs_| and shall be destructed
   // first.
   scoped_refptr<user_prefs::PrefRegistrySyncable> pref_registry_;
   std::unique_ptr<sync_preferences::PrefServiceSyncable> prefs_;
-  std::unique_ptr<sync_preferences::PrefServiceSyncable> otr_prefs_;
+  // See comment in GetOffTheRecordPrefs. Field exists so something owns the
+  // dummy.
+  std::unique_ptr<sync_preferences::PrefServiceSyncable> dummy_otr_prefs_;
   ProfileImplIOData::Handle io_data_;
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   scoped_refptr<ExtensionSpecialStoragePolicy>
@@ -252,6 +264,11 @@ class ProfileImpl : public Profile {
 #endif
 
   std::unique_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
+
+  // TODO(mmenke):  This should be removed from the Profile, and use a
+  // BrowserContextKeyedService instead.
+  // See https://crbug.com/713733
+  scoped_refptr<MediaDeviceIDSalt> media_device_id_salt_;
 
   // STOP!!!! DO NOT ADD ANY MORE ITEMS HERE!!!!
   //

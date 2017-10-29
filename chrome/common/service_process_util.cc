@@ -27,6 +27,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/cloud_devices/common/cloud_devices_switches.h"
+#include "components/network_session_configurator/common/network_switches.h"
 #include "components/version_info/version_info.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
@@ -162,7 +163,7 @@ std::unique_ptr<base::CommandLine> CreateServiceProcessCommandLine() {
   std::unique_ptr<base::CommandLine> command_line(
       new base::CommandLine(exe_path));
   command_line->AppendSwitchASCII(switches::kProcessType,
-                                  switches::kServiceProcess);
+                                  switches::kCloudPrintServiceProcess);
 
 #if defined(OS_WIN)
   command_line->AppendArg(switches::kPrefetchArgumentOther);

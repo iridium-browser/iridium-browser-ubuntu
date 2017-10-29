@@ -11,11 +11,16 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.res.Resources;
+import android.graphics.drawable.Drawable;
 import android.location.LocationManager;
+import android.support.graphics.drawable.VectorDrawableCompat;
+import android.support.v4.graphics.drawable.DrawableCompat;
 import android.text.SpannableString;
 import android.text.TextUtils;
 import android.view.View;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
@@ -67,6 +72,13 @@ public class BluetoothChooserDialog
     // bluetooth devices. For valid values see SecurityStateModel::SecurityLevel.
     int mSecurityLevel;
 
+    @VisibleForTesting
+    Drawable mConnectedIcon;
+    @VisibleForTesting
+    String mConnectedIconDescription;
+    @VisibleForTesting
+    Drawable[] mSignalStrengthLevelIcon;
+
     // A pointer back to the native part of the implementation for this dialog.
     long mNativeBluetoothChooserDialogPtr;
 
@@ -117,6 +129,18 @@ public class BluetoothChooserDialog
         mSecurityLevel = securityLevel;
         mNativeBluetoothChooserDialogPtr = nativeBluetoothChooserDialogPtr;
         mAdapter = BluetoothAdapter.getDefaultAdapter();
+
+        // Initialize icons.
+        mConnectedIcon = getIconWithRowIconColorStateList(R.drawable.ic_bluetooth_connected);
+        mConnectedIconDescription = mActivity.getString(R.string.bluetooth_device_connected);
+
+        mSignalStrengthLevelIcon = new Drawable[] {
+                getIconWithRowIconColorStateList(R.drawable.ic_signal_cellular_0_bar),
+                getIconWithRowIconColorStateList(R.drawable.ic_signal_cellular_1_bar),
+                getIconWithRowIconColorStateList(R.drawable.ic_signal_cellular_2_bar),
+                getIconWithRowIconColorStateList(R.drawable.ic_signal_cellular_3_bar),
+                getIconWithRowIconColorStateList(R.drawable.ic_signal_cellular_4_bar)};
+
         if (mAdapter == null) {
             Log.i(TAG, "BluetoothChooserDialog: Default Bluetooth adapter not found.");
         }
@@ -124,6 +148,15 @@ public class BluetoothChooserDialog
                 SpanApplier.applySpans(mActivity.getString(R.string.bluetooth_adapter_off_help),
                         new SpanInfo("<link>", "</link>",
                                 new BluetoothClickableSpan(LinkType.ADAPTER_OFF_HELP, mActivity)));
+    }
+
+    private Drawable getIconWithRowIconColorStateList(int icon) {
+        Resources res = mActivity.getResources();
+
+        Drawable drawable = VectorDrawableCompat.create(res, icon, mActivity.getTheme());
+        DrawableCompat.setTintList(drawable,
+                ApiCompatibilityUtils.getColorStateList(res, R.color.item_chooser_row_icon_color));
+        return drawable;
     }
 
     /**
@@ -286,9 +319,6 @@ public class BluetoothChooserDialog
                 case EXPLAIN_BLUETOOTH: {
                     // No need to close the dialog here because
                     // ShowBluetoothOverviewLink will close it.
-                    // TODO(ortuno): The BluetoothChooserDialog should dismiss
-                    // itself when a new tab is opened or the current tab navigates.
-                    // https://crbug.com/588127
                     nativeShowBluetoothOverviewLink(mNativeBluetoothChooserDialogPtr);
                     break;
                 }
@@ -304,23 +334,23 @@ public class BluetoothChooserDialog
                 }
                 case ADAPTER_OFF_HELP: {
                     nativeShowBluetoothAdapterOffLink(mNativeBluetoothChooserDialogPtr);
-                    closeDialog();
                     break;
                 }
                 case REQUEST_LOCATION_PERMISSION: {
+                    mItemChooserDialog.setIgnorePendingWindowFocusChangeForClose(true);
                     mWindowAndroid.requestPermissions(
                             new String[] {Manifest.permission.ACCESS_COARSE_LOCATION},
                             BluetoothChooserDialog.this);
                     break;
                 }
                 case REQUEST_LOCATION_SERVICES: {
+                    mItemChooserDialog.setIgnorePendingWindowFocusChangeForClose(true);
                     mContext.startActivity(
                             LocationUtils.getInstance().getSystemLocationSettingsIntent());
                     break;
                 }
                 case NEED_LOCATION_PERMISSION_HELP: {
                     nativeShowNeedLocationPermissionLink(mNativeBluetoothChooserDialogPtr);
-                    closeDialog();
                     break;
                 }
                 case RESTART_SEARCH: {
@@ -355,8 +385,21 @@ public class BluetoothChooserDialog
 
     @VisibleForTesting
     @CalledByNative
-    void addOrUpdateDevice(String deviceId, String deviceName) {
-        mItemChooserDialog.addOrUpdateItem(deviceId, deviceName);
+    void addOrUpdateDevice(
+            String deviceId, String deviceName, boolean isGATTConnected, int signalStrengthLevel) {
+        Drawable icon = null;
+        String iconDescription = null;
+        if (isGATTConnected) {
+            icon = mConnectedIcon.getConstantState().newDrawable();
+            iconDescription = mConnectedIconDescription;
+        } else if (signalStrengthLevel != -1) {
+            icon = mSignalStrengthLevelIcon[signalStrengthLevel].getConstantState().newDrawable();
+            iconDescription = mActivity.getResources().getQuantityString(
+                    R.plurals.signal_strength_level_n_bars, signalStrengthLevel,
+                    signalStrengthLevel);
+        }
+
+        mItemChooserDialog.addOrUpdateItem(deviceId, deviceName, icon, iconDescription);
     }
 
     @VisibleForTesting
@@ -364,12 +407,6 @@ public class BluetoothChooserDialog
     void closeDialog() {
         mNativeBluetoothChooserDialogPtr = 0;
         mItemChooserDialog.dismiss();
-    }
-
-    @VisibleForTesting
-    @CalledByNative
-    void removeDevice(String deviceId) {
-        mItemChooserDialog.setEnabled(deviceId, false);
     }
 
     @VisibleForTesting

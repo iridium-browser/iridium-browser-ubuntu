@@ -28,117 +28,104 @@
 
 #include "bindings/core/v8/ScriptStreamer.h"
 #include "core/CoreExport.h"
-#include "core/loader/resource/ScriptResource.h"
-#include "platform/MemoryCoordinator.h"
+#include "core/dom/Script.h"
+#include "core/dom/ScriptElementBase.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "platform/loader/fetch/ResourceOwner.h"
-#include "wtf/Noncopyable.h"
-#include "wtf/text/TextPosition.h"
+#include "platform/weborigin/KURL.h"
+#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/text/TextPosition.h"
 
 namespace blink {
 
-class Element;
+class Document;
 class PendingScript;
-class ScriptSourceCode;
 
 class CORE_EXPORT PendingScriptClient : public GarbageCollectedMixin {
  public:
   virtual ~PendingScriptClient() {}
 
-  // Invoked when the pending script has finished loading. This could be during
-  // |watchForLoad| (if the pending script was already ready), or when the
+  // Invoked when the pending script is ready. This could be during
+  // WatchForLoad() (if the pending script was already ready), or when the
   // resource loads (if script streaming is not occurring), or when script
   // streaming finishes.
-  virtual void pendingScriptFinished(PendingScript*) = 0;
+  virtual void PendingScriptFinished(PendingScript*) = 0;
 
   DEFINE_INLINE_VIRTUAL_TRACE() {}
 };
 
 // A container for an external script which may be loaded and executed.
-//
-// TODO(kochi): The comment below is from pre-oilpan age and may not be correct
-// now.
-// A RefPtr alone does not prevent the underlying Resource from purging its data
-// buffer. This class holds a dummy client open for its lifetime in order to
-// guarantee that the data buffer will not be purged.
-class CORE_EXPORT PendingScript final
+// This is used to receive a notification of "script is ready"
+// https://html.spec.whatwg.org/#the-script-is-ready via PendingScriptClient.
+class CORE_EXPORT PendingScript
     : public GarbageCollectedFinalized<PendingScript>,
-      public ResourceOwner<ScriptResource>,
-      public MemoryCoordinatorClient {
-  USING_GARBAGE_COLLECTED_MIXIN(PendingScript);
-  USING_PRE_FINALIZER(PendingScript, dispose);
+      public TraceWrapperBase {
   WTF_MAKE_NONCOPYABLE(PendingScript);
 
  public:
-  // For script from an external file.
-  static PendingScript* create(Element*, ScriptResource*);
-  // For inline script.
-  static PendingScript* create(Element*, const TextPosition&);
+  virtual ~PendingScript();
 
-  static PendingScript* createForTesting(ScriptResource*);
-
-  ~PendingScript() override;
-
-  TextPosition startingPosition() const { return m_startingPosition; }
-  void markParserBlockingLoadStartTime();
+  TextPosition StartingPosition() const { return starting_position_; }
+  void MarkParserBlockingLoadStartTime();
   // Returns the time the load of this script started blocking the parser, or
   // zero if this script hasn't yet blocked the parser, in
   // monotonicallyIncreasingTime.
-  double parserBlockingLoadStartTime() const {
-    return m_parserBlockingLoadStartTime;
+  double ParserBlockingLoadStartTime() const {
+    return parser_blocking_load_start_time_;
   }
 
-  void watchForLoad(PendingScriptClient*);
-  void stopWatchingForLoad();
+  void WatchForLoad(PendingScriptClient*);
+  void StopWatchingForLoad();
 
-  Element* element() const;
+  ScriptElementBase* GetElement() const;
 
-  DECLARE_TRACE();
+  virtual ScriptType GetScriptType() const = 0;
 
-  ScriptSourceCode getSource(const KURL& documentURL,
-                             bool& errorOccurred) const;
+  DECLARE_VIRTUAL_TRACE();
 
-  void setStreamer(ScriptStreamer*);
-  void streamingFinished();
+  virtual Script* GetSource(const KURL& document_url,
+                            bool& error_occurred) const = 0;
 
-  bool isReady() const;
-  bool errorOccurred() const;
+  // https://html.spec.whatwg.org/#the-script-is-ready
+  virtual bool IsReady() const = 0;
 
-  void dispose();
+  virtual bool IsExternal() const = 0;
+  virtual bool ErrorOccurred() const = 0;
+  virtual bool WasCanceled() const = 0;
+  virtual void StartStreamingIfPossible(Document*, ScriptStreamer::Type) = 0;
+
+  // The following two methods are used for document.write() intervention and
+  // have effects only for classic scripts.
+  virtual KURL UrlForClassicScript() const = 0;
+  virtual void RemoveFromMemoryCache() = 0;
+
+  // Used for DCHECK()s.
+  bool IsExternalOrModule() const {
+    return IsExternal() || GetScriptType() == ScriptType::kModule;
+  }
+
+  void Dispose();
+
+ protected:
+  PendingScript(ScriptElementBase*, const TextPosition& starting_position);
+
+  virtual void DisposeInternal() = 0;
+
+  PendingScriptClient* Client() { return client_; }
+  bool IsWatchingForLoad() const { return client_; }
+
+  virtual void CheckState() const = 0;
 
  private:
-  PendingScript(Element*,
-                ScriptResource*,
-                const TextPosition&,
-                bool isForTesting = false);
-  PendingScript() = delete;
+  // |m_element| must points to the corresponding ScriptLoader's
+  // ScriptElementBase and thus must be non-null before dispose() is called
+  // (except for unit tests).
+  Member<ScriptElementBase> element_;
 
-  void checkState() const;
+  TextPosition starting_position_;  // Only used for inline script tags.
+  double parser_blocking_load_start_time_;
 
-  // ScriptResourceClient
-  void notifyFinished(Resource*) override;
-  String debugName() const override { return "PendingScript"; }
-  void notifyAppendData(ScriptResource*) override;
-
-  // MemoryCoordinatorClient
-  void onPurgeMemory() override;
-
-  bool m_watchingForLoad;
-
-  // |m_element| must points to the corresponding ScriptLoader's element and
-  // thus must be non-null before dispose() is called (except for unit tests).
-  Member<Element> m_element;
-
-  TextPosition m_startingPosition;  // Only used for inline script tags.
-  bool m_integrityFailure;
-  double m_parserBlockingLoadStartTime;
-
-  Member<ScriptStreamer> m_streamer;
-  Member<PendingScriptClient> m_client;
-
-  // This flag is used to skip non-null checks of |m_element| in unit tests,
-  // because |m_element| can be null in unit tests.
-  const bool m_isForTesting;
+  Member<PendingScriptClient> client_;
 };
 
 }  // namespace blink

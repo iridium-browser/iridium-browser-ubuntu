@@ -31,8 +31,8 @@
 #ifndef WebScriptSource_h
 #define WebScriptSource_h
 
-#include "../platform/WebString.h"
-#include "../platform/WebURL.h"
+#include "public/platform/WebString.h"
+#include "public/platform/WebURL.h"
 
 namespace blink {
 
@@ -41,16 +41,16 @@ class ScriptSourceCode;
 struct WebScriptSource {
   WebString code;
   WebURL url;
-  int startLine;
+  int start_line;
 
-  WebScriptSource(const WebString& code) : code(code), startLine(1) {}
+  WebScriptSource(const WebString& code) : code(code), start_line(1) {}
   WebScriptSource(const WebString& code, const WebURL& url)
-      : code(code), url(url), startLine(1) {}
-  WebScriptSource(const WebString& code, const WebURL& url, int startLine)
-      : code(code), url(url), startLine(startLine) {}
+      : code(code), url(url), start_line(1) {}
+  WebScriptSource(const WebString& code, const WebURL& url, int start_line)
+      : code(code), url(url), start_line(start_line) {}
 
 #if BLINK_IMPLEMENTATION
-  operator ScriptSourceCode() const;
+  BLINK_EXPORT operator ScriptSourceCode() const;
 #endif
 };
 

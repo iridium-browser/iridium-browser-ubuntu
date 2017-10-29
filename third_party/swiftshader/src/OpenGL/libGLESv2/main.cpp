@@ -19,7 +19,7 @@
 #include "libGLESv2.hpp"
 #include "Framebuffer.h"
 #include "libEGL/main.h"
-#include "libEGL/EGLSurface.h"
+#include "common/Surface.hpp"
 #include "Common/Thread.hpp"
 #include "Common/SharedLibrary.hpp"
 #include "common/debug.h"
@@ -93,14 +93,14 @@ es2::Context *getContext()
 		return static_cast<es2::Context*>(context);
 	}
 
-	return 0;
+	return nullptr;
 }
 
 Device *getDevice()
 {
 	Context *context = getContext();
 
-	return context ? context->getDevice() : 0;
+	return context ? context->getDevice() : nullptr;
 }
 
 // Records an error code
@@ -269,6 +269,7 @@ void ReadnPixelsEXT(GLint x, GLint y, GLsizei width, GLsizei height,
                     GLenum format, GLenum type, GLsizei bufSize, GLvoid *data);
 void ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid* pixels);
 void ReleaseShaderCompiler(void);
+void RenderbufferStorageMultisample(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
 void RenderbufferStorageMultisampleANGLE(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
 void RenderbufferStorage(GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
 void SampleCoverage(GLclampf value, GLboolean invert);
@@ -1007,6 +1008,11 @@ GL_APICALL void GL_APIENTRY glReleaseShaderCompiler(void)
 	return es2::ReleaseShaderCompiler();
 }
 
+GL_APICALL void GL_APIENTRY glRenderbufferStorageMultisample(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height)
+{
+	return es2::RenderbufferStorageMultisample(target, samples, internalformat, width, height);
+}
+
 GL_APICALL void GL_APIENTRY glRenderbufferStorageMultisampleANGLE(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height)
 {
 	return es2::RenderbufferStorageMultisampleANGLE(target, samples, internalformat, width, height);
@@ -1332,10 +1338,10 @@ void GL_APIENTRY Register(const char *licenseKey)
 }
 }
 
-egl::Context *es2CreateContext(egl::Display *display, const egl::Context *shareContext, int clientVersion);
+egl::Context *es2CreateContext(egl::Display *display, const egl::Context *shareContext, int clientVersion, const egl::Config *config);
 extern "C" __eglMustCastToProperFunctionPointerType es2GetProcAddress(const char *procname);
-egl::Image *createBackBuffer(int width, int height, const egl::Config *config);
-egl::Image *createDepthStencil(unsigned int width, unsigned int height, sw::Format format, int multiSampleDepth, bool discard);
+egl::Image *createBackBuffer(int width, int height, sw::Format format, int multiSampleDepth);
+egl::Image *createDepthStencil(int width, int height, sw::Format format, int multiSampleDepth);
 sw::FrameBuffer *createFrameBuffer(void *nativeDisplay, EGLNativeWindowType window, int width, int height);
 
 LibGLESv2exports::LibGLESv2exports()
@@ -1456,6 +1462,7 @@ LibGLESv2exports::LibGLESv2exports()
 	this->glReadnPixelsEXT = es2::ReadnPixelsEXT;
 	this->glReadPixels = es2::ReadPixels;
 	this->glReleaseShaderCompiler = es2::ReleaseShaderCompiler;
+	this->glRenderbufferStorageMultisample = es2::RenderbufferStorageMultisample;
 	this->glRenderbufferStorageMultisampleANGLE = es2::RenderbufferStorageMultisampleANGLE;
 	this->glRenderbufferStorage = es2::RenderbufferStorage;
 	this->glSampleCoverage = es2::SampleCoverage;

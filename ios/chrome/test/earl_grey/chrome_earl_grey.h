@@ -34,19 +34,67 @@ id ExecuteJavaScript(NSString* javascript,
 // Clears browsing history.
 + (void)clearBrowsingHistory;
 
+#pragma mark - Cookie Utilities
+
+// Returns cookies as key value pairs, where key is a cookie name and value is a
+// cookie value.
+// NOTE: this method fails the test if there are errors getting cookies.
++ (NSDictionary*)cookies;
+
 #pragma mark - Navigation Utilities
 
-// Loads |URL| in the current WebState with transition of type
-// ui::PAGE_TRANSITION_TYPED, and waits for the page to complete loading, or
-// a timeout.
-+ (void)loadURL:(GURL)URL;
+// Loads |URL| in the current WebState with transition type
+// ui::PAGE_TRANSITION_TYPED, and waits for the loading to complete within a
+// timeout, or a GREYAssert is induced.
++ (void)loadURL:(const GURL&)URL;
 
-// Waits for the page to finish loading or a timeout.
+// Reloads the page and waits for the loading to complete within a timeout, or a
+// GREYAssert is induced.
++ (void)reload;
+
+// Navigates back to the previous page and waits for the loading to complete
+// within a timeout, or a GREYAssert is induced.
++ (void)goBack;
+
+// Navigates forward to the next page and waits for the loading to complete
+// within a timeout, or a GREYAssert is induced.
++ (void)goForward;
+
+// Waits for the page to finish loading within a timeout, or a GREYAssert is
+// induced.
 + (void)waitForPageToFinishLoading;
 
 // Taps html element with |elementID| in the current web view.
 + (void)tapWebViewElementWithID:(NSString*)elementID;
 
+// Waits for a static html view containing |text|. If the condition is not met
+// within a timeout, a GREYAssert is induced.
++ (void)waitForStaticHTMLViewContainingText:(NSString*)text;
+
+// Waits for there to be no static html view, or a static html view that does
+// not contain |text|. If the condition is not met within a timeout, a
+// GREYAssert is induced.
++ (void)waitForStaticHTMLViewNotContainingText:(NSString*)text;
+
+// Waits for a Chrome error page. If it is not found within a timeout, a
+// GREYAssert is induced.
++ (void)waitForErrorPage;
+
+// Waits for the current web view to contain |text|. If the condition is not met
+// within a timeout, a GREYAssert is induced.
++ (void)waitForWebViewContainingText:(std::string)text;
+
+// Waits for there to be no web view containing |text|. If the condition is not
+// met within a timeout, a GREYAssert is induced.
++ (void)waitForWebViewNotContainingText:(std::string)text;
+
+// Waits for there to be |count| number of non-incognito tabs. If the condition
+// is not met within a timeout, a GREYAssert is induced.
++ (void)waitForMainTabCount:(NSUInteger)count;
+
+// Waits for there to be |count| number of incognito tabs. If the condition is
+// not met within a timeout, a GREYAssert is induced.
++ (void)waitForIncognitoTabCount:(NSUInteger)count;
 @end
 
 #endif  // IOS_CHROME_TEST_EARL_GREY_CHROME_EARL_GREY_H_

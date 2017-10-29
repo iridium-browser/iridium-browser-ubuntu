@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include "SkSLErrorReporter.h"
+#include "ir/SkSLLayout.h"
 #include "SkSLToken.h"
 
 struct yy_buffer_state;
@@ -42,7 +43,6 @@ struct ASTSwitchStatement;
 struct ASTType;
 struct ASTWhileStatement;
 struct ASTVarDeclarations;
-struct Layout;
 struct Modifiers;
 class SymbolTable;
 
@@ -51,7 +51,7 @@ class SymbolTable;
  */
 class Parser {
 public:
-    Parser(SkString text, SymbolTable& types, ErrorReporter& errors);
+    Parser(String text, SymbolTable& types, ErrorReporter& errors);
 
     ~Parser();
 
@@ -64,7 +64,12 @@ public:
 
 private:
     /**
-     * Return the next token from the parse stream.
+     * Return the next token, including whitespace tokens, from the parse stream.
+     */
+    Token nextRawToken();
+
+    /**
+     * Return the next non-whitespace token from the parse stream.
      */
     Token nextToken();
 
@@ -76,13 +81,19 @@ private:
     void pushback(Token t);
 
     /**
-     * Returns the next token without consuming it from the stream.
+     * Returns the next non-whitespace token without consuming it from the stream.
      */
     Token peek();
 
     /**
-     * Reads the next token and generates an error if it is not the expected type. The 'expected'
-     * string is part of the error message, which reads:
+     * Checks to see if the next token is of the specified type. If so, stores it in result (if
+     * result is non-null) and returns true. Otherwise, pushes it back and returns false.
+     */
+    bool checkNext(Token::Kind kind, Token* result = nullptr);
+
+    /**
+     * Reads the next non-whitespace token and generates an error if it is not the expected type.
+     * The 'expected' string is part of the error message, which reads:
      *
      * "expected <expected>, but found '<actual text>'"
      *
@@ -90,16 +101,16 @@ private:
      * Returns true if the read token was as expected, false otherwise.
      */
     bool expect(Token::Kind kind, const char* expected, Token* result = nullptr);
-    bool expect(Token::Kind kind, SkString expected, Token* result = nullptr);
+    bool expect(Token::Kind kind, String expected, Token* result = nullptr);
 
     void error(Position p, const char* msg);
-    void error(Position p, SkString msg);
-   
+    void error(Position p, String msg);
+
     /**
      * Returns true if the 'name' identifier refers to a type name. For instance, isType("int") will
      * always return true.
      */
-    bool isType(SkString name);
+    bool isType(String name);
 
     // these functions parse individual grammar rules from the current parse position; you probably
     // don't need to call any of these outside of the parser. The function declarations in the .cpp
@@ -108,6 +119,8 @@ private:
     std::unique_ptr<ASTDeclaration> precision();
 
     std::unique_ptr<ASTDeclaration> directive();
+
+    std::unique_ptr<ASTDeclaration> section();
 
     std::unique_ptr<ASTDeclaration> declaration();
 
@@ -119,12 +132,16 @@ private:
 
     std::unique_ptr<ASTVarDeclarations> varDeclarationEnd(Modifiers modifiers,
                                                           std::unique_ptr<ASTType> type,
-                                                          SkString name);
+                                                          String name);
 
     std::unique_ptr<ASTParameter> parameter();
 
     int layoutInt();
-   
+
+    String layoutCode();
+
+    Layout::Key layoutKey();
+
     Layout layout();
 
     Modifiers modifiers();
@@ -163,8 +180,10 @@ private:
 
     std::unique_ptr<ASTExpression> expression();
 
+    std::unique_ptr<ASTExpression> commaExpression();
+
     std::unique_ptr<ASTExpression> assignmentExpression();
-   
+
     std::unique_ptr<ASTExpression> ternaryExpression();
 
     std::unique_ptr<ASTExpression> logicalOrExpression();
@@ -203,7 +222,7 @@ private:
 
     bool boolLiteral(bool* dest);
 
-    bool identifier(SkString* dest);
+    bool identifier(String* dest);
 
     void* fScanner;
     void* fLayoutScanner;

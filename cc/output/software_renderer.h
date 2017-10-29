@@ -6,9 +6,9 @@
 #define CC_OUTPUT_SOFTWARE_RENDERER_H_
 
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/output/direct_renderer.h"
-#include "ui/events/latency_info.h"
+#include "ui/latency/latency_info.h"
 
 namespace cc {
 class DebugBorderDrawQuad;
@@ -23,7 +23,7 @@ class TileDrawQuad;
 
 class CC_EXPORT SoftwareRenderer : public DirectRenderer {
  public:
-  SoftwareRenderer(const RendererSettings* settings,
+  SoftwareRenderer(const viz::RendererSettings* settings,
                    OutputSurface* output_surface,
                    ResourceProvider* resource_provider);
 
@@ -37,7 +37,7 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
 
  protected:
   bool CanPartialSwap() override;
-  ResourceFormat BackbufferFormat() const override;
+  viz::ResourceFormat BackbufferFormat() const override;
   void BindFramebufferToOutputSurface() override;
   bool BindFramebufferToTexture(const ScopedResource* texture) override;
   void SetScissorTestRect(const gfx::Rect& scissor_rect) override;
@@ -51,6 +51,7 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
   void EnsureScissorTestDisabled() override;
   void CopyCurrentRenderPassToBitmap(
       std::unique_ptr<CopyOutputRequest> request) override;
+  void SetEnableDCLayers(bool enable) override;
   void DidChangeVisibility() override;
 
  private:

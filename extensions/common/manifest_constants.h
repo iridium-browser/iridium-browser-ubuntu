@@ -190,6 +190,8 @@ extern const char kWebviewPartitions[];
 extern const char kWhitelist[];
 #if defined(OS_CHROMEOS)
 extern const char kActionHandlers[];
+extern const char kActionHandlerActionKey[];
+extern const char kActionHandlerEnabledOnLockScreenKey[];
 extern const char kFileSystemProviderCapabilities[];
 #endif
 }  // namespace manifest_keys
@@ -263,6 +265,7 @@ extern const char kCannotChangeExtensionID[];
 extern const char kCannotClaimAllHostsInExtent[];
 extern const char kCannotClaimAllURLsInExtent[];
 extern const char kCannotScriptGallery[];
+extern const char kCannotScriptNtp[];
 extern const char kCannotScriptSigninPage[];
 extern const char kCannotUninstallManagedExtension[];
 extern const char kChromeVersionTooLow[];
@@ -478,7 +481,6 @@ extern const char kManifestParseError[];
 extern const char kManifestUnreadable[];
 extern const char kMissingFile[];
 extern const char kMultipleOverrides[];
-extern const char kNoPermissionForMIMETypes[];
 extern const char kNoWildCardsInPaths[];
 extern const char kOneUISurfaceOnly[];
 extern const char kPermissionMustBeOptional[];
@@ -490,7 +492,9 @@ extern const char kUnrecognizedManifestKey[];
 extern const char kUnrecognizedManifestProperty[];
 extern const char kWebRequestConflictsWithLazyBackground[];
 #if defined(OS_CHROMEOS)
+extern const char kDuplicateActionHandlerFound[];
 extern const char kIllegalPlugins[];
+extern const char kInvalidActionHandlerDictionary[];
 extern const char kInvalidActionHandlersActionType[];
 extern const char kInvalidActionHandlersType[];
 extern const char kInvalidFileSystemProviderMissingCapabilities[];

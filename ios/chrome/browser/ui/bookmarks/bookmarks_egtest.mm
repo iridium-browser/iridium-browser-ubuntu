@@ -21,7 +21,7 @@
 #import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
 #include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_menu_view_controller.h"
+#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/bookmarks_test_util.h"
@@ -36,8 +36,8 @@
 #import "ios/public/provider/chrome/browser/signin/fake_chrome_identity.h"
 #import "ios/public/provider/chrome/browser/signin/fake_chrome_identity_service.h"
 #import "ios/testing/wait_util.h"
-#import "ios/web/public/test/http_server.h"
-#include "ios/web/public/test/http_server_util.h"
+#import "ios/web/public/test/http_server/http_server.h"
+#include "ios/web/public/test/http_server/http_server_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/tree_node_iterator.h"
 #include "url/gurl.h"
@@ -214,9 +214,7 @@ id<GREYMatcher> ActionSheet(Action action) {
   }
 
   // Close the opened tab.
-  GenericChromeCommand* command =
-      [[GenericChromeCommand alloc] initWithTag:IDC_CLOSE_TAB];
-  chrome_test_util::RunCommandWithActiveViewController(command);
+  [chrome_test_util::BrowserCommandDispatcherForMainBVC() closeCurrentTab];
 }
 
 // Tests that tapping a bookmark on the NTP navigates to the proper URL.

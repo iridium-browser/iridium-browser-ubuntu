@@ -22,6 +22,7 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/event_processor.h"
 #include "ui/events/event_targeter.h"
+#include "ui/events/fraction_of_time_without_user_input_recorder.h"
 #include "ui/events/gestures/gesture_recognizer.h"
 #include "ui/events/gestures/gesture_types.h"
 #include "ui/gfx/geometry/point.h"
@@ -37,7 +38,7 @@ class TouchEvent;
 namespace aura {
 class MusMouseLocationUpdater;
 class TestScreen;
-class EnvInputStateController;
+class WindowTargeter;
 class WindowTreeHost;
 
 namespace test {
@@ -60,6 +61,9 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
   Window* mouse_pressed_handler() { return mouse_pressed_handler_; }
   Window* mouse_moved_handler() { return mouse_moved_handler_; }
 
+  // Overridden from ui::EventProcessor:
+  ui::EventTargeter* GetDefaultEventTargeter() override;
+
   // Repost event for re-processing. Used when exiting context menus.
   // We support the ET_MOUSE_PRESSED, ET_TOUCH_PRESSED and ET_GESTURE_TAP_DOWN
   // event types (although the latter is currently a no-op).
@@ -71,11 +75,13 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
   void DispatchCancelModeEvent();
 
   // Dispatches a ui::ET_MOUSE_EXITED event at |point| to the |target|
-  // If the |target| is NULL, we will dispatch the event to the root-window
+  // If the |target| is NULL, we will dispatch the event to the root-window.
+  // |event_flags| will be set on the dispatched exit event.
   // TODO(beng): needed only for WTH::OnCursorVisibilityChanged().
-  ui::EventDispatchDetails DispatchMouseExitAtPoint(Window* target,
-                                                    const gfx::Point& point)
-      WARN_UNUSED_RESULT;
+  ui::EventDispatchDetails DispatchMouseExitAtPoint(
+      Window* target,
+      const gfx::Point& point,
+      int event_flags = ui::EF_NONE) WARN_UNUSED_RESULT;
 
   // Gesture Recognition -------------------------------------------------------
 
@@ -88,7 +94,8 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
   // space, in DIPs.
   virtual void ProcessedTouchEvent(uint32_t unique_event_id,
                                    Window* window,
-                                   ui::EventResult result);
+                                   ui::EventResult result,
+                                   bool is_source_touch_event_set_non_blocking);
 
   // These methods are used to defer the processing of mouse/touch events
   // related to resize. A client (typically a RenderWidgetHostViewAura) can call
@@ -115,6 +122,10 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
   //             it. I would however like to find a way to do this via an
   //             observer.
   void OnPostNotifiedWindowDestroying(Window* window);
+
+  // True to skip sending event to the InputMethod.
+  void set_skip_ime(bool skip_ime) { skip_ime_ = skip_ime; }
+  bool should_skip_ime() const { return skip_ime_; }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(WindowEventDispatcherTest,
@@ -173,7 +184,7 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
   void ReleaseNativeCapture() override;
 
   // Overridden from ui::EventProcessor:
-  ui::EventTarget* GetRootTarget() override;
+  ui::EventTarget* GetRootForEvent(ui::Event* event) override;
   void OnEventProcessingStarted(ui::Event* event) override;
   void OnEventProcessingFinished(ui::Event* event) override;
 
@@ -234,6 +245,7 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
                                                  ui::MouseEvent* event);
   ui::EventDispatchDetails PreDispatchTouchEvent(Window* target,
                                                  ui::TouchEvent* event);
+  ui::EventDispatchDetails PreDispatchKeyEvent(ui::KeyEvent* event);
 
   WindowTreeHost* host_;
 
@@ -241,6 +253,9 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
   Window* mouse_moved_handler_;
   Window* event_dispatch_target_;
   Window* old_dispatch_target_;
+
+  ui::FractionOfTimeWithoutUserInputRecorder
+      fraction_of_time_without_user_input_recorder_;
 
   bool synthesize_mouse_move_;
 
@@ -258,9 +273,12 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
 
   ScopedObserver<aura::Window, aura::WindowObserver> observer_manager_;
 
-  std::unique_ptr<EnvInputStateController> env_controller_;
-
   std::unique_ptr<MusMouseLocationUpdater> mus_mouse_location_updater_;
+
+  // The default EventTargeter for WindowEventDispatcher generated events.
+  std::unique_ptr<WindowTargeter> event_targeter_;
+
+  bool skip_ime_;
 
   // Used to schedule reposting an event.
   base::WeakPtrFactory<WindowEventDispatcher> repost_event_factory_;

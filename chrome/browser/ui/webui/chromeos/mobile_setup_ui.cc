@@ -31,7 +31,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/locale_settings.h"
 #include "chromeos/network/device_state.h"
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_event_log.h"
@@ -158,6 +157,11 @@ class MobileSetupUIHTMLSource : public content::URLDataSource {
     return "text/html";
   }
   bool ShouldAddContentSecurityPolicy() const override { return false; }
+  bool AllowCaching() const override {
+    // Should not be cached to reflect dynamically-generated contents that may
+    // depend on current settings.
+    return false;
+  }
 
  private:
   ~MobileSetupUIHTMLSource() override {}

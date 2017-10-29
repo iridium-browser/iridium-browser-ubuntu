@@ -49,10 +49,6 @@ class ProtocolHandlerRegistry : public KeyedService {
     virtual void RegisterExternalHandler(const std::string& protocol);
     virtual void DeregisterExternalHandler(const std::string& protocol);
     virtual bool IsExternalHandlerRegistered(const std::string& protocol);
-    virtual scoped_refptr<shell_integration::DefaultProtocolClientWorker>
-    CreateShellWorker(
-        const shell_integration::DefaultWebClientWorkerCallback& callback,
-        const std::string& protocol);
     virtual void RegisterWithOSAsDefaultClient(
         const std::string& protocol,
         ProtocolHandlerRegistry* registry);
@@ -93,7 +89,6 @@ class ProtocolHandlerRegistry : public KeyedService {
         net::NetworkDelegate* network_delegate) const override;
 
     bool IsHandledProtocol(const std::string& scheme) const override;
-    bool IsHandledURL(const GURL& url) const override;
     bool IsSafeRedirectTarget(const GURL& location) const override;
 
    private:

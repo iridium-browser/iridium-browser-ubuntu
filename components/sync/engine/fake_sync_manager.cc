@@ -190,7 +190,7 @@ void FakeSyncManager::SaveChanges() {
 }
 
 void FakeSyncManager::ShutdownOnSyncThread(ShutdownReason reason) {
-  DCHECK(sync_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(sync_task_runner_->RunsTasksInCurrentSequence());
   test_user_share_.TearDown();
 }
 
@@ -260,7 +260,7 @@ void FakeSyncManager::SetInvalidatorEnabled(bool invalidator_enabled) {
   // Do nothing.
 }
 
-void FakeSyncManager::ClearServerData(const ClearServerDataCallback& callback) {
+void FakeSyncManager::ClearServerData(const base::Closure& callback) {
   callback.Run();
 }
 

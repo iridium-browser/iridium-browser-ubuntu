@@ -16,7 +16,8 @@
 #include "content/public/common/content_switches.h"
 #include "mojo/edk/embedder/platform_handle.h"
 #include "services/catalog/public/cpp/manifest_parsing_util.h"
-#include "services/service_manager/public/cpp/shared_file_util.h"
+#include "services/service_manager/embedder/shared_file_util.h"
+#include "services/service_manager/embedder/switches.h"
 
 namespace content {
 namespace internal {
@@ -79,9 +80,12 @@ std::unique_ptr<FileDescriptorInfo> CreateDefaultPosixFilesToMap(
   std::unique_ptr<FileDescriptorInfo> files_to_register(
       FileDescriptorInfoImpl::Create());
 
-  int field_trial_handle = base::FieldTrialList::GetFieldTrialHandle();
-  if (field_trial_handle != base::kInvalidPlatformFile)
-    files_to_register->Share(kFieldTrialDescriptor, field_trial_handle);
+  base::SharedMemoryHandle shm = base::FieldTrialList::GetFieldTrialHandle();
+  if (shm.IsValid()) {
+    files_to_register->Share(
+        kFieldTrialDescriptor,
+        base::SharedMemory::GetFdFromSharedMemoryHandle(shm));
+  }
 
   DCHECK(mojo_client_handle.is_valid());
   files_to_register->Share(kMojoIPCChannel, mojo_client_handle.handle);
@@ -111,7 +115,8 @@ std::unique_ptr<FileDescriptorInfo> CreateDefaultPosixFilesToMap(
       base::PlatformFile file =
           OpenFileIfNecessary(key_path_iter.second, &region);
       if (file == base::kInvalidPlatformFile) {
-        DLOG(ERROR) << "Ignoring invalid file " << key_path_iter.second.value();
+        DLOG(WARNING) << "Ignoring invalid file "
+                      << key_path_iter.second.value();
         continue;
       }
       file_switch_value_builder.AddEntry(key_path_iter.first, key);
@@ -119,7 +124,7 @@ std::unique_ptr<FileDescriptorInfo> CreateDefaultPosixFilesToMap(
       key++;
       DCHECK(key < kContentDynamicDescriptorMax);
     }
-    command_line->AppendSwitchASCII(switches::kSharedFiles,
+    command_line->AppendSwitchASCII(service_manager::switches::kSharedFiles,
                                     file_switch_value_builder.switch_value());
   }
 
@@ -139,6 +144,10 @@ void SetFilesToShareForServicePosix(const std::string& service_name,
 
   DCHECK(GetRequiredFilesByServiceMap().count(service_name) == 0);
   GetRequiredFilesByServiceMap()[service_name] = std::move(required_files);
+}
+
+void ResetFilesToShareForTestingPosix() {
+  GetRequiredFilesByServiceMap().clear();
 }
 
 }  // namespace internal

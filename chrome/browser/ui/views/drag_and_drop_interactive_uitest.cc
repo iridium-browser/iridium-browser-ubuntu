@@ -695,39 +695,15 @@ class DragAndDropBrowserTest : public InProcessBrowserTest,
     frame = GetFrameByName(frame_name);
     DCHECK(frame);
 
-    // Wait until frame contents (e.g. images) have painted (which should happen
-    // in the animation frame that *starts* after the onload event - therefore
-    // we need to wait for 2 animation frames).
-    script = std::string(
-        "requestAnimationFrame(function() {\n"
-        "  requestAnimationFrame(function() {\n"
-        "    domAutomationController.send(43);\n"
-        "  });\n"
-        "});\n");
-    if (!content::ExecuteScriptAndExtractInt(frame, script, &response))
-      return false;
-    if (response != 43)
-      return false;
+    // Wait until frame contents have painted and are ready for hit testing.
+    WaitForChildFrameSurfaceReady(frame);
 
     return true;
   }
 
   content::RenderFrameHost* GetFrameByName(const std::string& name_to_find) {
-    content::RenderFrameHost* result = nullptr;
-    for (content::RenderFrameHost* rfh : web_contents()->GetAllFrames()) {
-      if (rfh->GetFrameName() == name_to_find) {
-        if (result) {
-          ADD_FAILURE() << "More than one frame named "
-                        << "'" << name_to_find << "'";
-          return nullptr;
-        }
-        result = rfh;
-      }
-    }
-
-    EXPECT_TRUE(result) << "Couldn't find a frame named "
-                        << "'" << name_to_find << "'";
-    return result;
+    return content::FrameMatchingPredicate(
+        web_contents(), base::Bind(&content::FrameMatchesName, name_to_find));
   }
 
   void AssertTestPageIsLoaded() {
@@ -1234,10 +1210,9 @@ void DragAndDropBrowserTest::CrossSiteDrag_Step2(
     // the test before the event has had a chance to be reported back to the
     // browser.
     std::string expected_response = base::StringPrintf("\"i%d\"", i);
-    right_frame()->ExecuteJavaScriptWithUserGestureForTests(base::UTF8ToUTF16(
-        base::StringPrintf("domAutomationController.setAutomationId(0);\n"
-                           "domAutomationController.send(%s);\n",
-                           expected_response.c_str())));
+    right_frame()->ExecuteJavaScriptWithUserGestureForTests(
+        base::UTF8ToUTF16(base::StringPrintf(
+            "domAutomationController.send(%s);", expected_response.c_str())));
 
     // Wait until our response comes back (it might be mixed with responses
     // carrying events that are sent by event_monitoring.js).

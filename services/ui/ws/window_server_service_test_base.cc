@@ -18,7 +18,7 @@ namespace ui {
 
 namespace {
 
-const char kTestAppName[] = "mus_ws_unittests_app";
+const char kTestAppName[] = "ui_service_unittests";
 
 class WindowServerServiceTestClient
     : public service_manager::test::ServiceTestClient {
@@ -29,9 +29,11 @@ class WindowServerServiceTestClient
 
  private:
   // service_manager::test::ServiceTestClient:
-  bool OnConnect(const service_manager::ServiceInfo& remote_info,
-                 service_manager::InterfaceRegistry* registry) override {
-    return test_->OnConnect(remote_info.identity, registry);
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override {
+    test_->OnBindInterface(source_info, interface_name,
+                           std::move(interface_pipe));
   }
 
   WindowServerServiceTestBase* test_;

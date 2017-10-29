@@ -110,7 +110,8 @@ class ScopedPixelUnpackBufferOverride {
     GLint orig_binding_;
 };
 
-bool IsWebGLDrawBuffersSupported(GLenum depth_texture_internal_format,
+bool IsWebGLDrawBuffersSupported(bool webglCompatibilityContext,
+                                 GLenum depth_texture_internal_format,
                                  GLenum depth_stencil_texture_internal_format) {
   // This is called after we make sure GL_EXT_draw_buffers is supported.
   GLint max_draw_buffers = 0;
@@ -175,17 +176,32 @@ bool IsWebGLDrawBuffersSupported(GLenum depth_texture_internal_format,
                                 GL_TEXTURE_2D, 0, 0);
     }
     if (depth_stencil_texture != 0) {
-      // For ES 2.0 contexts DEPTH_STENCIL is not available natively, so we
-      // emulate it at the command buffer level for WebGL contexts.
-      glFramebufferTexture2DEXT(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-                                GL_TEXTURE_2D, depth_stencil_texture, 0);
+      // WebGL compatibility contexts do not allow the same texture bound to the
+      // DEPTH and STENCIL attachment points, instead the texture must be bound
+      // to the DEPTH_STENCIL.
+      if (webglCompatibilityContext) {
+        glFramebufferTexture2DEXT(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                                  GL_TEXTURE_2D, depth_stencil_texture, 0);
+      } else {
+        glFramebufferTexture2DEXT(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                  GL_TEXTURE_2D, depth_stencil_texture, 0);
+        glFramebufferTexture2DEXT(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                                  GL_TEXTURE_2D, depth_stencil_texture, 0);
+      }
       if (glCheckFramebufferStatusEXT(GL_FRAMEBUFFER) !=
           GL_FRAMEBUFFER_COMPLETE) {
         result = false;
         break;
       }
-      glFramebufferTexture2DEXT(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-                                GL_TEXTURE_2D, 0, 0);
+      if (webglCompatibilityContext) {
+        glFramebufferTexture2DEXT(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                                  GL_TEXTURE_2D, 0, 0);
+      } else {
+        glFramebufferTexture2DEXT(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                  GL_TEXTURE_2D, 0, 0);
+        glFramebufferTexture2DEXT(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
+                                  GL_TEXTURE_2D, 0, 0);
+      }
     }
   }
 
@@ -743,7 +759,9 @@ void FeatureInfo::InitializeFeatures() {
   // If neither is present, we expose texture storage.
   // When creating ES3 contexts, we do need to expose texture storage, so we
   // disable BGRA if we have to.
-  // When WebGL contexts, BRGA is not needed, because WebGL doesn't expose it.
+  // In WebGL contexts, BRGA is used for hardware overlay and WebGL 2.0 exposes
+  // glTexStorage2D. WebGL never uses both BGRA and glTexStorage2D together
+  // because WebGL API doesn't expose BGRA format. So allow both.
   bool has_apple_bgra = extensions.Contains("GL_APPLE_texture_format_BGRA8888");
   bool has_ext_bgra = extensions.Contains("GL_EXT_texture_format_BGRA8888");
   bool enable_texture_format_bgra8888 =
@@ -767,9 +785,10 @@ void FeatureInfo::InitializeFeatures() {
         enable_texture_storage = false;
         break;
       case CONTEXT_TYPE_OPENGLES3:
+        enable_texture_format_bgra8888 = false;
+        break;
       case CONTEXT_TYPE_WEBGL1:
       case CONTEXT_TYPE_WEBGL2:
-        enable_texture_format_bgra8888 = false;
         break;
     }
   }
@@ -865,7 +884,7 @@ void FeatureInfo::InitializeFeatures() {
         extensions.Contains("GL_EXT_framebuffer_multisample") ||
         gl_version_info_->is_es3 ||
         gl_version_info_->is_desktop_core_profile;
-    if (gl_version_info_->is_angle) {
+    if (gl_version_info_->is_angle || gl_version_info_->is_swiftshader) {
       feature_flags_.angle_framebuffer_multisample =
           extensions.Contains("GL_ANGLE_framebuffer_multisample");
       ext_has_multisample |= feature_flags_.angle_framebuffer_multisample;
@@ -913,6 +932,7 @@ void FeatureInfo::InitializeFeatures() {
              (gl_version_info_->IsAtLeastGLES(3, 1) ||
               (gl_version_info_->IsAtLeastGL(3, 0) &&
                extensions.Contains("GL_ARB_shading_language_420pack") &&
+               extensions.Contains("GL_ARB_texture_storage") &&
                extensions.Contains("GL_ARB_texture_gather") &&
                extensions.Contains("GL_ARB_explicit_uniform_location") &&
                extensions.Contains("GL_ARB_explicit_attrib_location") &&
@@ -1098,13 +1118,16 @@ void FeatureInfo::InitializeFeatures() {
       extensions.Contains("GL_EXT_draw_buffers");
   bool can_emulate_es2_draw_buffers_on_es3_nv =
       gl_version_info_->is_es3 && extensions.Contains("GL_NV_draw_buffers");
+  bool is_webgl_compatbility_context =
+      extensions.Contains("GL_ANGLE_webgl_compatibility");
   bool have_es2_draw_buffers =
       !workarounds_.disable_ext_draw_buffers &&
       (have_es2_draw_buffers_vendor_agnostic ||
        can_emulate_es2_draw_buffers_on_es3_nv) &&
       (context_type_ == CONTEXT_TYPE_OPENGLES2 ||
        (context_type_ == CONTEXT_TYPE_WEBGL1 &&
-        IsWebGLDrawBuffersSupported(depth_texture_format,
+        IsWebGLDrawBuffersSupported(is_webgl_compatbility_context,
+                                    depth_texture_format,
                                     depth_stencil_texture_format)));
   if (have_es2_draw_buffers) {
     AddExtensionString("GL_EXT_draw_buffers");
@@ -1292,6 +1315,19 @@ void FeatureInfo::InitializeFeatures() {
   }
   UMA_HISTOGRAM_BOOLEAN("GPU.TextureRG", feature_flags_.ext_texture_rg);
 
+  if (gl_version_info_->is_desktop_core_profile ||
+      extensions.Contains("GL_EXT_texture_norm16")) {
+    feature_flags_.ext_texture_norm16 = true;
+    AddExtensionString("GL_EXT_texture_norm16");
+
+    // Note: EXT_texture_norm16 is not exposed through WebGL API so we validate
+    // only the combinations used internally.
+    validators_.texture_format.AddValue(GL_RED_EXT);
+    validators_.texture_internal_format.AddValue(GL_R16_EXT);
+    validators_.texture_internal_format.AddValue(GL_RED_EXT);
+    validators_.texture_unsized_internal_format.AddValue(GL_RED_EXT);
+  }
+
   bool has_opengl_dual_source_blending =
       gl_version_info_->IsAtLeastGL(3, 3) ||
       (gl_version_info_->IsAtLeastGL(3, 2) &&
@@ -1349,14 +1385,19 @@ void FeatureInfo::InitializeFeatures() {
 
   feature_flags_.chromium_bind_generates_resource =
       extensions.Contains("GL_CHROMIUM_bind_generates_resource");
-  feature_flags_.angle_webgl_compatibility =
-      extensions.Contains("GL_ANGLE_webgl_compatibility");
+  feature_flags_.angle_webgl_compatibility = is_webgl_compatbility_context;
   feature_flags_.chromium_copy_texture =
       extensions.Contains("GL_CHROMIUM_copy_texture");
   feature_flags_.chromium_copy_compressed_texture =
       extensions.Contains("GL_CHROMIUM_copy_compressed_texture");
   feature_flags_.angle_client_arrays =
       extensions.Contains("GL_ANGLE_client_arrays");
+  feature_flags_.angle_request_extension =
+      extensions.Contains("GL_ANGLE_request_extension");
+  feature_flags_.ext_debug_marker = extensions.Contains("GL_EXT_debug_marker");
+  feature_flags_.arb_robustness = extensions.Contains("GL_ARB_robustness");
+  feature_flags_.khr_robustness = extensions.Contains("GL_KHR_robustness");
+  feature_flags_.ext_robustness = extensions.Contains("GL_EXT_robustness");
 }
 
 void FeatureInfo::InitializeFloatAndHalfFloatFeatures(
@@ -1393,22 +1434,23 @@ void FeatureInfo::InitializeFloatAndHalfFloatFeatures(
     // formats as GL_OES_texture_float(i.e.LUMINANCE_ALPHA,LUMINANCE and Alpha)
     if (extensions.Contains("GL_OES_texture_float")) {
       enable_texture_float = true;
-      if (extensions.Contains("GL_OES_texture_float_linear")) {
-        enable_texture_float_linear = true;
-      }
-
-      if (enable_ext_color_buffer_float || gl_version_info_->is_angle) {
+      if (enable_ext_color_buffer_float) {
         may_enable_chromium_color_buffer_float = true;
       }
+    }
+
+    if (extensions.Contains("GL_OES_texture_float_linear")) {
+      enable_texture_float_linear = true;
     }
 
     // TODO(dshwang): GLES3 supports half float by default but GL_HALF_FLOAT_OES
     // isn't equal to GL_HALF_FLOAT.
     if (extensions.Contains("GL_OES_texture_half_float")) {
       enable_texture_half_float = true;
-      if (extensions.Contains("GL_OES_texture_half_float_linear")) {
-        enable_texture_half_float_linear = true;
-      }
+    }
+
+    if (extensions.Contains("GL_OES_texture_half_float_linear")) {
+      enable_texture_half_float_linear = true;
     }
   }
 
@@ -1416,25 +1458,45 @@ void FeatureInfo::InitializeFloatAndHalfFloatFeatures(
     validators_.pixel_type.AddValue(GL_FLOAT);
     validators_.read_pixel_type.AddValue(GL_FLOAT);
     AddExtensionString("GL_OES_texture_float");
-    if (enable_texture_float_linear) {
-      oes_texture_float_linear_available_ = true;
-      if (!disallowed_features_.oes_texture_float_linear)
-        EnableOESTextureFloatLinear();
-    }
+  }
+
+  if (enable_texture_float_linear) {
+    oes_texture_float_linear_available_ = true;
+    if (!disallowed_features_.oes_texture_float_linear)
+      EnableOESTextureFloatLinear();
   }
 
   if (enable_texture_half_float) {
     validators_.pixel_type.AddValue(GL_HALF_FLOAT_OES);
     validators_.read_pixel_type.AddValue(GL_HALF_FLOAT_OES);
     AddExtensionString("GL_OES_texture_half_float");
-    if (enable_texture_half_float_linear) {
-      oes_texture_half_float_linear_available_ = true;
-      if (!disallowed_features_.oes_texture_half_float_linear)
-        EnableOESTextureHalfFloatLinear();
+  }
+
+  if (enable_texture_half_float_linear) {
+    oes_texture_half_float_linear_available_ = true;
+    if (!disallowed_features_.oes_texture_half_float_linear)
+      EnableOESTextureHalfFloatLinear();
+  }
+
+  bool had_native_chromium_color_buffer_float_ext = false;
+  if (extensions.Contains("GL_CHROMIUM_color_buffer_float_rgb")) {
+    had_native_chromium_color_buffer_float_ext = true;
+    feature_flags_.chromium_color_buffer_float_rgb = true;
+    if (!disallowed_features_.chromium_color_buffer_float_rgb) {
+      EnableCHROMIUMColorBufferFloatRGB();
     }
   }
 
-  if (may_enable_chromium_color_buffer_float) {
+  if (extensions.Contains("GL_CHROMIUM_color_buffer_float_rgba")) {
+    had_native_chromium_color_buffer_float_ext = true;
+    feature_flags_.chromium_color_buffer_float_rgba = true;
+    if (!disallowed_features_.chromium_color_buffer_float_rgba) {
+      EnableCHROMIUMColorBufferFloatRGBA();
+    }
+  }
+
+  if (may_enable_chromium_color_buffer_float &&
+      !had_native_chromium_color_buffer_float_ext) {
     static_assert(GL_RGBA32F_ARB == GL_RGBA32F &&
                       GL_RGBA32F_EXT == GL_RGBA32F &&
                       GL_RGB32F_ARB == GL_RGB32F && GL_RGB32F_EXT == GL_RGB32F,
@@ -1489,8 +1551,10 @@ void FeatureInfo::InitializeFloatAndHalfFloatFeatures(
       }
       enable_ext_color_buffer_float = full_float_support;
     }
-    // Likewise for EXT_color_buffer_half_float on ES2 contexts.
-    if (IsWebGL1OrES2Context() && !enable_ext_color_buffer_half_float) {
+    // Likewise for EXT_color_buffer_half_float on ES2 contexts. On desktop,
+    // require at least GL 3.0, to ensure that all formats are defined.
+    if (IsWebGL1OrES2Context() && !enable_ext_color_buffer_half_float &&
+        (gl_version_info_->is_es || gl_version_info_->IsAtLeastGL(3, 0))) {
       bool full_half_float_support = true;
       GLenum internal_formats[] = {
           GL_R16F, GL_RG16F, GL_RGBA16F,

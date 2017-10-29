@@ -125,7 +125,7 @@ function testMarkCopied_FiresChangedEvent(callback) {
                       function() {
                         recorder.assertCallCount(1);
                         assertEquals(
-                            importer.ImportHistory.State.COPIED,
+                            importer.ImportHistoryState.COPIED,
                             recorder.getLastArguments()[0]['state']);
                       });
             });
@@ -202,7 +202,7 @@ function testMarkImport_FiresChangedEvent(callback) {
                       function() {
                         recorder.assertCallCount(1);
                         assertEquals(
-                            importer.ImportHistory.State.IMPORTED,
+                            importer.ImportHistoryState.IMPORTED,
                             recorder.getLastArguments()[0]['state']);
                       });
             });
@@ -319,6 +319,21 @@ function testRecordStorage_SerializingOperations(callback) {
           });
 
   reportPromise(testPromise, callback);
+}
+
+function testCreateMetadataHashcode(callback) {
+  var promise =
+      importer.createMetadataHashcode(testFileEntry).then(function(hashcode) {
+        // Note that the expression matches at least 4 numbers
+        // in the last segment, since we hard code the byte
+        // size in our test file to a four digit size.
+        // In reality it will vary.
+        assertEquals(
+            0, hashcode.search(/[\-0-9]{9,}_[0-9]{4,}/),
+            'Hashcode (' + hashcode + ') does not match next pattern.');
+      });
+
+  reportPromise(promise, callback);
 }
 
 /**

@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/test/histogram_tester.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
@@ -24,6 +25,7 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_server.h"
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
 #include "components/prefs/pref_service.h"
+#include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_response_headers.h"
@@ -31,6 +33,7 @@
 #include "net/proxy/proxy_server.h"
 #include "net/socket/socket_test_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context_storage.h"
 #include "net/url_request/url_request_intercepting_job_factory.h"
@@ -113,8 +116,6 @@ class DataReductionProxyInterceptorTest : public testing::Test {
   DataReductionProxyInterceptorTest() {
     test_context_ =
         DataReductionProxyTestContext::Builder()
-            .WithParamsFlags(0)
-            .WithParamsDefinitions(TestDataReductionProxyParams::HAS_EVERYTHING)
             .Build();
     default_context_.reset(new TestURLRequestContextWithDataReductionProxy(
         test_context_->config()
@@ -125,6 +126,7 @@ class DataReductionProxyInterceptorTest : public testing::Test {
         &default_network_delegate_));
     default_context_->set_network_delegate(&default_network_delegate_);
     default_context_->set_net_log(test_context_->net_log());
+    test_context_->config()->test_params()->UseNonSecureProxiesForHttp();
   }
 
   ~DataReductionProxyInterceptorTest() override {
@@ -171,8 +173,9 @@ TEST_F(DataReductionProxyInterceptorTest, MAYBE_TestJobFactoryChaining) {
   Init(std::move(factory1));
 
   net::TestDelegate d;
-  std::unique_ptr<net::URLRequest> req(default_context_->CreateRequest(
-      GURL("http://foo"), net::DEFAULT_PRIORITY, &d));
+  std::unique_ptr<net::URLRequest> req(
+      default_context_->CreateRequest(GURL("http://foo"), net::DEFAULT_PRIORITY,
+                                      &d, TRAFFIC_ANNOTATION_FOR_TESTS));
 
   req->Start();
   base::RunLoop().Run();
@@ -211,7 +214,6 @@ class DataReductionProxyInterceptorWithServerTest : public testing::Test {
     ASSERT_TRUE(direct_.Start());
 
     test_context_ = DataReductionProxyTestContext::Builder()
-                        .WithParamsFlags(0)
                         .WithURLRequestContext(&context_)
                         .Build();
     std::string spec;
@@ -261,7 +263,8 @@ TEST_F(DataReductionProxyInterceptorWithServerTest, TestBypass) {
   // DataReductionProxyProtocolTest.
   net::TestDelegate delegate;
   std::unique_ptr<net::URLRequest> request(context().CreateRequest(
-      direct().GetURL("/block10.html"), net::DEFAULT_PRIORITY, &delegate));
+      direct().GetURL("/block10.html"), net::DEFAULT_PRIORITY, &delegate,
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   request->Start();
   EXPECT_TRUE(request->is_pending());
   base::RunLoop().Run();
@@ -273,7 +276,8 @@ TEST_F(DataReductionProxyInterceptorWithServerTest, TestBypass) {
 TEST_F(DataReductionProxyInterceptorWithServerTest, TestNoBypass) {
   net::TestDelegate delegate;
   std::unique_ptr<net::URLRequest> request(context().CreateRequest(
-      direct().GetURL("/noblock.html"), net::DEFAULT_PRIORITY, &delegate));
+      direct().GetURL("/noblock.html"), net::DEFAULT_PRIORITY, &delegate,
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   request->Start();
   EXPECT_TRUE(request->is_pending());
   base::RunLoop().Run();
@@ -295,6 +299,7 @@ class DataReductionProxyInterceptorEndToEndTest : public testing::Test {
             .WithURLRequestContext(&context_)
             .WithMockClientSocketFactory(&mock_socket_factory_)
             .Build();
+    drp_test_context_->config()->test_params()->UseNonSecureProxiesForHttp();
     drp_test_context_->AttachToURLRequestContext(&context_storage_);
     context_.set_client_socket_factory(&mock_socket_factory_);
     proxy_delegate_ = drp_test_context_->io_data()->CreateProxyDelegate();
@@ -311,8 +316,8 @@ class DataReductionProxyInterceptorEndToEndTest : public testing::Test {
   // Creates a URLRequest using the test's TestURLRequestContext and executes
   // it. Returns the created URLRequest.
   std::unique_ptr<net::URLRequest> CreateAndExecuteRequest(const GURL& url) {
-    std::unique_ptr<net::URLRequest> request(
-        context_.CreateRequest(url, net::IDLE, &delegate_));
+    std::unique_ptr<net::URLRequest> request(context_.CreateRequest(
+        url, net::IDLE, &delegate_, TRAFFIC_ANNOTATION_FOR_TESTS));
     request->Start();
     drp_test_context_->RunUntilIdle();
     return request;
@@ -399,6 +404,64 @@ TEST_F(DataReductionProxyInterceptorEndToEndTest, RedirectWithoutRetry) {
   EXPECT_EQ(1, delegate().received_redirect_count());
 }
 
+// Test that data reduction proxy is byppassed if there is a URL redirect cycle.
+TEST_F(DataReductionProxyInterceptorEndToEndTest, URLRedirectCycle) {
+  base::HistogramTester histogram_tester;
+  MockRead redirect_mock_reads_1[] = {
+      MockRead("HTTP/1.1 302 Found\r\n"
+               "Via: 1.1 Chrome-Compression-Proxy\r\n"
+               "Location: http://bar.com/\r\n\r\n"),
+      MockRead(""), MockRead(net::SYNCHRONOUS, net::OK),
+  };
+  net::StaticSocketDataProvider redirect_socket_data_provider_1(
+      redirect_mock_reads_1, arraysize(redirect_mock_reads_1), nullptr, 0);
+  mock_socket_factory()->AddSocketDataProvider(
+      &redirect_socket_data_provider_1);
+
+  MockRead redirect_mock_reads_2[] = {
+      MockRead("HTTP/1.1 302 Found\r\n"
+               "Via: 1.1 Chrome-Compression-Proxy\r\n"
+               "Location: http://foo.com/\r\n\r\n"),
+      MockRead(""), MockRead(net::SYNCHRONOUS, net::OK),
+  };
+  net::StaticSocketDataProvider redirect_socket_data_provider_2(
+      redirect_mock_reads_2, arraysize(redirect_mock_reads_2), nullptr, 0);
+  mock_socket_factory()->AddSocketDataProvider(
+      &redirect_socket_data_provider_2);
+
+  // Redirect cycle.
+  MockRead redirect_mock_reads_3[] = {
+      MockRead("HTTP/1.1 302 Found\r\n"
+               "Via: 1.1 Chrome-Compression-Proxy\r\n"
+               "Location: http://bar.com/\r\n\r\n"),
+      MockRead(""), MockRead(net::SYNCHRONOUS, net::OK),
+  };
+  net::StaticSocketDataProvider redirect_socket_data_provider_3(
+      redirect_mock_reads_3, arraysize(redirect_mock_reads_3), nullptr, 0);
+  mock_socket_factory()->AddSocketDataProvider(
+      &redirect_socket_data_provider_3);
+
+  // Data reduction proxy should be bypassed.
+  MockRead redirect_mock_reads_4[] = {
+      MockRead("HTTP/1.1 200 OK\r\n\r\n"), MockRead(kBody.c_str()),
+      MockRead(net::SYNCHRONOUS, net::OK),
+  };
+  net::StaticSocketDataProvider redirect_socket_data_provider_4(
+      redirect_mock_reads_4, arraysize(redirect_mock_reads_4), nullptr, 0);
+  mock_socket_factory()->AddSocketDataProvider(
+      &redirect_socket_data_provider_4);
+
+  std::unique_ptr<net::URLRequest> request =
+      CreateAndExecuteRequest(GURL("http://foo.com"));
+
+  EXPECT_EQ(net::OK, delegate().request_status());
+  EXPECT_EQ(200, request->GetResponseCode());
+  EXPECT_EQ(kBody, delegate().data_received());
+  EXPECT_FALSE(request->was_fetched_via_proxy());
+  histogram_tester.ExpectTotalCount(
+      "DataReductionProxy.BypassedBytes.URLRedirectCycle", 1);
+}
+
 TEST_F(DataReductionProxyInterceptorEndToEndTest, ResponseWithBypassAndRetry) {
   // The first try gives a bypass.
   MockRead initial_mock_reads[] = {
@@ -482,13 +545,7 @@ TEST_F(DataReductionProxyInterceptorEndToEndTest, RedirectWithBypassAndRetry) {
   EXPECT_EQ(std::vector<GURL>(1, GURL("http://foo.com")), request->url_chain());
 }
 
-// https://crbug.com/668197: Flaky on android_n5x_swarming_rel bot.
-#if defined(OS_ANDROID)
-#define MAYBE_RedirectChainToHttps DISABLED_RedirectChainToHttps
-#else
-#define MAYBE_RedirectChainToHttps RedirectChainToHttps
-#endif
-TEST_F(DataReductionProxyInterceptorEndToEndTest, MAYBE_RedirectChainToHttps) {
+TEST_F(DataReductionProxyInterceptorEndToEndTest, RedirectChainToHttps) {
   // First, a redirect is successfully received through the Data Reduction
   // Proxy. HSTS is forced for play.google.com and prebaked into Chrome, so
   // http://play.google.com will automatically be redirected to
@@ -520,6 +577,9 @@ TEST_F(DataReductionProxyInterceptorEndToEndTest, MAYBE_RedirectChainToHttps) {
 
   std::unique_ptr<net::URLRequest> request =
       CreateAndExecuteRequest(GURL("http://music.google.com"));
+  request->SetLoadFlags(net::LOAD_DISABLE_CACHE |
+                        net::LOAD_DO_NOT_SEND_COOKIES |
+                        net::LOAD_DO_NOT_SAVE_COOKIES);
   EXPECT_FALSE(delegate().request_failed());
   EXPECT_EQ(kBody, delegate().data_received());
 

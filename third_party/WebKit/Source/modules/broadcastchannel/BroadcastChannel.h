@@ -5,14 +5,16 @@
 #ifndef BroadcastChannel_h
 #define BroadcastChannel_h
 
-#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
+#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "third_party/WebKit/public/platform/modules/broadcastchannel/broadcast_channel.mojom-blink.h"
+#include "public/platform/modules/broadcastchannel/broadcast_channel.mojom-blink.h"
 
 namespace blink {
+
+class ScriptValue;
 
 class BroadcastChannel final : public EventTargetWithInlineData,
                                public ActiveScriptWrappable<BroadcastChannel>,
@@ -20,33 +22,34 @@ class BroadcastChannel final : public EventTargetWithInlineData,
                                public mojom::blink::BroadcastChannelClient {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(BroadcastChannel);
-  USING_PRE_FINALIZER(BroadcastChannel, dispose);
+  USING_PRE_FINALIZER(BroadcastChannel, Dispose);
   WTF_MAKE_NONCOPYABLE(BroadcastChannel);
 
  public:
-  static BroadcastChannel* create(ExecutionContext*,
+  static BroadcastChannel* Create(ExecutionContext*,
                                   const String& name,
                                   ExceptionState&);
   ~BroadcastChannel() override;
-  void dispose();
+  void Dispose();
 
   // IDL
-  String name() const { return m_name; }
+  String name() const { return name_; }
   void postMessage(const ScriptValue&, ExceptionState&);
   void close();
   DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(messageerror);
 
   // EventTarget:
-  const AtomicString& interfaceName() const override;
-  ExecutionContext* getExecutionContext() const override {
-    return ContextLifecycleObserver::getExecutionContext();
+  const AtomicString& InterfaceName() const override;
+  ExecutionContext* GetExecutionContext() const override {
+    return ContextLifecycleObserver::GetExecutionContext();
   }
 
   // ScriptWrappable:
-  bool hasPendingActivity() const override;
+  bool HasPendingActivity() const override;
 
   // ContextLifecycleObserver:
-  void contextDestroyed(ExecutionContext*) override;
+  void ContextDestroyed(ExecutionContext*) override;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -57,13 +60,13 @@ class BroadcastChannel final : public EventTargetWithInlineData,
   void OnMessage(const WTF::Vector<uint8_t>& message) override;
 
   // Called when the mojo binding disconnects.
-  void onError();
+  void OnError();
 
-  RefPtr<SecurityOrigin> m_origin;
-  String m_name;
+  RefPtr<SecurityOrigin> origin_;
+  String name_;
 
-  mojo::AssociatedBinding<mojom::blink::BroadcastChannelClient> m_binding;
-  mojom::blink::BroadcastChannelClientAssociatedPtr m_remoteClient;
+  mojo::AssociatedBinding<mojom::blink::BroadcastChannelClient> binding_;
+  mojom::blink::BroadcastChannelClientAssociatedPtr remote_client_;
 };
 
 }  // namespace blink

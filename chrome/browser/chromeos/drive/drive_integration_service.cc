@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/drive/debug_info_collector.h"
@@ -19,9 +19,8 @@
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/chromeos/profiles/profile_util.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/drive/drive_notification_manager_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
@@ -49,8 +48,14 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/common/service_manager_connection.h"
 #include "content/public/common/user_agent.h"
 #include "google_apis/drive/auth_service.h"
+#include "mojo/public/cpp/bindings/interface_request.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/device/public/interfaces/constants.mojom.h"
+#include "services/device/public/interfaces/wake_lock_provider.mojom.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -249,9 +254,8 @@ DriveIntegrationService::DriveIntegrationService(
   DCHECK(profile && !profile->IsOffTheRecord());
 
   logger_.reset(new EventLogger);
-  base::SequencedWorkerPool* blocking_pool = BrowserThread::GetBlockingPool();
-  blocking_task_runner_ = blocking_pool->GetSequencedTaskRunner(
-      blocking_pool->GetSequenceToken());
+  blocking_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::USER_BLOCKING});
 
   ProfileOAuth2TokenService* oauth_service =
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
@@ -264,13 +268,19 @@ DriveIntegrationService::DriveIntegrationService(
         blocking_task_runner_.get(),
         GURL(google_apis::DriveApiUrlGenerator::kBaseUrlForProduction),
         GURL(google_apis::DriveApiUrlGenerator::kBaseThumbnailUrlForProduction),
-        GetDriveUserAgent()));
+        GetDriveUserAgent(), NO_TRAFFIC_ANNOTATION_YET));
   }
+
+  device::mojom::WakeLockProviderPtr wake_lock_provider;
+  DCHECK(content::ServiceManagerConnection::GetForProcess());
+  auto* connector =
+      content::ServiceManagerConnection::GetForProcess()->GetConnector();
+  connector->BindInterface(device::mojom::kServiceName,
+                           mojo::MakeRequest(&wake_lock_provider));
+
   scheduler_.reset(new JobScheduler(
-      profile_->GetPrefs(),
-      logger_.get(),
-      drive_service_.get(),
-      blocking_task_runner_.get()));
+      profile_->GetPrefs(), logger_.get(), drive_service_.get(),
+      blocking_task_runner_.get(), std::move(wake_lock_provider)));
   metadata_storage_.reset(new internal::ResourceMetadataStorage(
       cache_root_directory_.Append(kMetadataDirectory),
       blocking_task_runner_.get()));
@@ -284,15 +294,13 @@ DriveIntegrationService::DriveIntegrationService(
   resource_metadata_.reset(new internal::ResourceMetadata(
       metadata_storage_.get(), cache_.get(), blocking_task_runner_));
 
-  file_task_runner_ =
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE);
   file_system_.reset(
       test_file_system
           ? test_file_system
           : new FileSystem(
                 profile_->GetPrefs(), logger_.get(), cache_.get(),
                 scheduler_.get(), resource_metadata_.get(),
-                blocking_task_runner_.get(), file_task_runner_.get(),
+                blocking_task_runner_.get(),
                 cache_root_directory_.Append(kTemporaryFileDirectory)));
   download_handler_.reset(new DownloadHandler(file_system()));
   debug_info_collector_.reset(new DebugInfoCollector(
@@ -638,7 +646,7 @@ DriveIntegrationServiceFactory::DriveIntegrationServiceFactory()
         BrowserContextDependencyManager::GetInstance()) {
   DependsOn(ProfileOAuth2TokenServiceFactory::GetInstance());
   DependsOn(DriveNotificationManagerFactory::GetInstance());
-  DependsOn(DownloadServiceFactory::GetInstance());
+  DependsOn(DownloadCoreServiceFactory::GetInstance());
 }
 
 DriveIntegrationServiceFactory::~DriveIntegrationServiceFactory() {

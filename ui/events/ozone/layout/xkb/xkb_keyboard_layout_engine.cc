@@ -686,10 +686,8 @@ bool XkbKeyboardLayoutEngine::SetCurrentLayoutByName(
   LoadKeymapCallback reply_callback = base::Bind(
       &XkbKeyboardLayoutEngine::OnKeymapLoaded, weak_ptr_factory_.GetWeakPtr());
   base::PostTaskWithTraits(
-      FROM_HERE, base::TaskTraits()
-                     .WithShutdownBehavior(
-                         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN)
-                     .MayBlock(),
+      FROM_HERE,
+      {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&LoadKeymap, layout_name, base::ThreadTaskRunnerHandle::Get(),
                  reply_callback));
 #else
@@ -742,8 +740,12 @@ bool XkbKeyboardLayoutEngine::Lookup(DomCode dom_code,
   // Obtain keysym and character.
   xkb_keysym_t xkb_keysym;
   uint32_t character = 0;
-  if (!XkbLookup(xkb_keycode, xkb_flags, &xkb_keysym, &character))
-    return false;
+  if (!XkbLookup(xkb_keycode, xkb_flags, &xkb_keysym, &character)) {
+    // If we do not have matching legacy Xkb keycode for the Dom code,
+    // we could be dealing with a newer application launcher or similar
+    // key. Let's see if we have a basic mapping for it.
+    return DomCodeToNonPrintableDomKey(dom_code, dom_key, key_code);
+  }
 
   // Classify the keysym and convert to DOM and VKEY representations.
   if (xkb_keysym != XKB_KEY_at || (flags & EF_CONTROL_DOWN) == 0) {

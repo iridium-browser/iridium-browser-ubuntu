@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.tab;
 
+import android.annotation.SuppressLint;
 import android.os.Handler;
 import android.os.Message;
 
@@ -39,6 +40,7 @@ public class TabStateBrowserControlsVisibilityDelegate
         mTab = tab;
 
         mTab.addObserver(new EmptyTabObserver() {
+            @SuppressLint("HandlerLeak")
             private Handler mHandler = new Handler() {
                 @Override
                 public void handleMessage(Message msg) {
@@ -84,7 +86,7 @@ public class TabStateBrowserControlsVisibilityDelegate
 
             @Override
             public void onDidFinishNavigation(Tab tab, String url, boolean isInMainFrame,
-                    boolean isErrorPage, boolean hasCommitted, boolean isSamePage,
+                    boolean isErrorPage, boolean hasCommitted, boolean isSameDocument,
                     boolean isFragmentNavigation, Integer pageTransition, int errorCode,
                     int httpStatusCode) {
                 if (!hasCommitted || !isInMainFrame) return;
@@ -129,7 +131,7 @@ public class TabStateBrowserControlsVisibilityDelegate
     }
 
     @Override
-    public boolean isHidingBrowserControlsEnabled() {
+    public boolean canAutoHideBrowserControls() {
         WebContents webContents = mTab.getWebContents();
         if (webContents == null || webContents.isDestroyed()) return false;
 
@@ -142,8 +144,7 @@ public class TabStateBrowserControlsVisibilityDelegate
         enableHidingBrowserControls &= (securityState != ConnectionSecurityLevel.DANGEROUS
                 && securityState != ConnectionSecurityLevel.SECURITY_WARNING);
 
-        enableHidingBrowserControls &=
-                !AccessibilityUtil.isAccessibilityEnabled(mTab.getApplicationContext());
+        enableHidingBrowserControls &= !AccessibilityUtil.isAccessibilityEnabled();
 
         ContentViewCore cvc = mTab.getContentViewCore();
         enableHidingBrowserControls &= cvc == null || !cvc.isFocusedNodeEditable();
@@ -158,7 +159,7 @@ public class TabStateBrowserControlsVisibilityDelegate
     }
 
     @Override
-    public boolean isShowingBrowserControlsEnabled() {
+    public boolean canShowBrowserControls() {
         if (mTab.getFullscreenManager() == null) return true;
         return !mTab.getFullscreenManager().getPersistentFullscreenMode();
     }

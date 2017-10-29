@@ -25,23 +25,23 @@ tr.exportTo('tr.c', function() {
   Filter.prototype = {
     __proto__: Object.prototype,
 
-    matchCounter: function(counter) {
+    matchCounter(counter) {
       return true;
     },
 
-    matchCpu: function(cpu) {
+    matchCpu(cpu) {
       return true;
     },
 
-    matchProcess: function(process) {
+    matchProcess(process) {
       return true;
     },
 
-    matchSlice: function(slice) {
+    matchSlice(slice) {
       return true;
     },
 
-    matchThread: function(thread) {
+    matchThread(thread) {
       return true;
     }
   };
@@ -55,15 +55,17 @@ tr.exportTo('tr.c', function() {
     Filter.call(this);
     this.regex_ = makeCaseInsensitiveRegex(text);
 
-    if (!text.length)
+    if (!text.length) {
       throw new Error('Filter text is empty.');
+    }
   }
   TitleOrCategoryFilter.prototype = {
     __proto__: Filter.prototype,
 
-    matchSlice: function(slice) {
-      if (slice.title === undefined && slice.category === undefined)
+    matchSlice(slice) {
+      if (slice.title === undefined && slice.category === undefined) {
         return false;
+      }
 
       return this.regex_.test(slice.title) ||
           (!!slice.category && this.regex_.test(slice.category));
@@ -77,13 +79,14 @@ tr.exportTo('tr.c', function() {
     Filter.call(this);
     this.text_ = text;
 
-    if (!text.length)
+    if (!text.length) {
       throw new Error('Filter text is empty.');
+    }
   }
   ExactTitleFilter.prototype = {
     __proto__: Filter.prototype,
 
-    matchSlice: function(slice) {
+    matchSlice(slice) {
       return slice.title === this.text_;
     }
   };
@@ -102,21 +105,17 @@ tr.exportTo('tr.c', function() {
   FullTextFilter.prototype = {
     __proto__: Filter.prototype,
 
-    matchObject_: function(obj) {
-      for (var key in obj) {
-        if (!obj.hasOwnProperty(key))
-          continue;
-        if (this.regex_.test(key))
-          return true;
-        if (this.regex_.test(obj[key]))
-          return true;
+    matchObject_(obj) {
+      for (const key in obj) {
+        if (!obj.hasOwnProperty(key)) continue;
+        if (this.regex_.test(key)) return true;
+        if (this.regex_.test(obj[key])) return true;
       }
       return false;
     },
 
-    matchSlice: function(slice) {
-      if (this.titleOrCategoryFilter_.matchSlice(slice))
-        return true;
+    matchSlice(slice) {
+      if (this.titleOrCategoryFilter_.matchSlice(slice)) return true;
       return this.matchObject_(slice.args);
     }
   };

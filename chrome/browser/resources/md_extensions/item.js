@@ -109,7 +109,7 @@ cr.define('extensions', function() {
      */
     computeErrorsHidden_: function() {
       return !this.data.manifestErrors.length &&
-             !this.data.runtimeErrors.length;
+          !this.data.runtimeErrors.length;
     },
 
     /** @private */
@@ -119,8 +119,8 @@ cr.define('extensions', function() {
 
     /** @private */
     onEnableChange_: function() {
-      this.delegate.setItemEnabled(this.data.id,
-                                   this.$['enable-toggle'].checked);
+      this.delegate.setItemEnabled(
+          this.data.id, this.$['enable-toggle'].checked);
     },
 
     /** @private */
@@ -157,20 +157,19 @@ cr.define('extensions', function() {
     },
 
     /**
-     * Returns true if the extension is enabled, including terminated
-     * extensions.
      * @return {boolean}
      * @private
      */
     isEnabled_: function() {
-      switch (this.data.state) {
-        case chrome.developerPrivate.ExtensionState.ENABLED:
-        case chrome.developerPrivate.ExtensionState.TERMINATED:
-          return true;
-        case chrome.developerPrivate.ExtensionState.DISABLED:
-          return false;
-      }
-      assertNotReached();  // FileNotFound.
+      return extensions.isEnabled(this.data.state);
+    },
+
+    /**
+     * @return {boolean}
+     * @private
+     */
+    isEnableToggleEnabled_: function() {
+      return extensions.userCanChangeEnablement(this.data);
     },
 
     /**
@@ -227,8 +226,9 @@ cr.define('extensions', function() {
      */
     computeSourceIndicatorText_: function() {
       var sourceType = extensions.getItemSource(this.data);
-      return sourceType == SourceType.WEBSTORE ? '' :
-             extensions.getItemSourceString(sourceType);
+      return sourceType == SourceType.WEBSTORE ?
+          '' :
+          extensions.getItemSourceString(sourceType);
     },
 
     /**
@@ -244,22 +244,15 @@ cr.define('extensions', function() {
      * @private
      */
     computeFirstInspectLabel_: function() {
-      var view = this.data.views[0];
-      // Trim the "chrome-extension://<id>/".
-      var url = new URL(view.url);
-      var label = view.url;
-      if (url.protocol == 'chrome-extension:')
-        label = url.pathname.substring(1);
-      if (label == '_generated_background_page.html')
-        label = this.i18n('viewBackgroundPage');
-      // Add any qualifiers.
-      label += (view.incognito ? ' ' + this.i18n('viewIncognito') : '') +
-               (view.renderProcessId == -1 ?
-                    ' ' + this.i18n('viewInactive') : '') +
-               (view.isIframe ? ' ' + this.i18n('viewIframe') : '');
-      var index = this.data.views.indexOf(view);
-      assert(index >= 0);
-      if (index < this.data.views.length - 1)
+      // Note: theoretically, this wouldn't be called without any inspectable
+      // views (because it's in a dom-if="!computeInspectViewsHidden_()").
+      // However, due to the recycling behavior of iron list, it seems that
+      // sometimes it can. Even when it is, the UI behaves properly, but we
+      // need to handle the case gracefully.
+      if (this.data.views.length == 0)
+        return '';
+      var label = extensions.computeInspectableViewLabel(this.data.views[0]);
+      if (this.data.views.length > 1)
         label += ',';
       return label;
     },
@@ -273,12 +266,26 @@ cr.define('extensions', function() {
     },
 
     /**
+     * @return {boolean}
+     * @private
+     */
+    computeDevReloadButtonHidden_: function() {
+      // Only display the reload spinner if the extension is unpacked and
+      // not terminated (since if it's terminated, we'll show a crashed reload
+      // buton).
+      var showIcon =
+          this.data.location == chrome.developerPrivate.Location.UNPACKED &&
+          this.data.state != chrome.developerPrivate.ExtensionState.TERMINATED;
+      return !showIcon;
+    },
+
+    /**
      * @return {string}
      * @private
      */
     computeExtraInspectLabel_: function() {
-      return loadTimeData.getStringF('itemInspectViewsExtra',
-                                     this.data.views.length - 1);
+      return loadTimeData.getStringF(
+          'itemInspectViewsExtra', this.data.views.length - 1);
     },
 
     /**
@@ -287,8 +294,8 @@ cr.define('extensions', function() {
      */
     hasWarnings_: function() {
       return this.data.disableReasons.corruptInstall ||
-             this.data.disableReasons.suspiciousInstall ||
-             !!this.data.blacklistText;
+          this.data.disableReasons.suspiciousInstall ||
+          !!this.data.blacklistText;
     },
 
     /**
@@ -305,4 +312,3 @@ cr.define('extensions', function() {
     ItemDelegate: ItemDelegate,
   };
 });
-

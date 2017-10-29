@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkBlurMask.h"
 #include "SkBlurMaskFilter.h"
 #include "SkReadBuffer.h"
@@ -187,7 +188,7 @@ DEF_SIMPLE_GM(texteffects, canvas, 460, 680) {
             //  paint.setMaskFilter(nullptr);
             //  paint.setColor(SK_ColorBLACK);
 
-            canvas->drawText(str.c_str(), str.size(), x, y, paint);
+            canvas->drawString(str, x, y, paint);
 
             y += paint.getFontSpacing();
         }

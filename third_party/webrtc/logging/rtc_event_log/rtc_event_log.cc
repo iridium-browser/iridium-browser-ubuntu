@@ -11,16 +11,12 @@
 #include "webrtc/logging/rtc_event_log/rtc_event_log.h"
 
 #include <limits>
+#include <utility>
 #include <vector>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/event.h"
-#include "webrtc/base/swap_queue.h"
-#include "webrtc/base/thread_checker.h"
-#include "webrtc/base/timeutils.h"
-#include "webrtc/call/call.h"
 #include "webrtc/logging/rtc_event_log/rtc_event_log_helper_thread.h"
+#include "webrtc/modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor.h"
+#include "webrtc/modules/remote_bitrate_estimator/include/bwe_defines.h"
 #include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "webrtc/modules/rtp_rtcp/source/byte_io.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/app.h"
@@ -28,16 +24,24 @@
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/common_header.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/extended_jitter_report.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/extended_reports.h"
-#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/psfb.h"
+#include "webrtc/modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/rtpfb.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/sdes.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/sender_report.h"
+#include "webrtc/rtc_base/atomicops.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/constructormagic.h"
+#include "webrtc/rtc_base/event.h"
+#include "webrtc/rtc_base/logging.h"
+#include "webrtc/rtc_base/protobuf_utils.h"
+#include "webrtc/rtc_base/swap_queue.h"
+#include "webrtc/rtc_base/thread_checker.h"
+#include "webrtc/rtc_base/timeutils.h"
 #include "webrtc/system_wrappers/include/file_wrapper.h"
-#include "webrtc/system_wrappers/include/logging.h"
 
 #ifdef ENABLE_RTC_EVENT_LOG
-// Files generated at build-time by the protobuf compiler.
+// *.pb.h files are generated at build-time by the protobuf compiler.
 #ifdef WEBRTC_ANDROID_PLATFORM_BUILD
 #include "external/webrtc/webrtc/logging/rtc_event_log/rtc_event_log.pb.h"
 #else
@@ -50,8 +54,9 @@ namespace webrtc {
 #ifdef ENABLE_RTC_EVENT_LOG
 
 class RtcEventLogImpl final : public RtcEventLog {
+  friend std::unique_ptr<RtcEventLog> RtcEventLog::Create();
+
  public:
-  RtcEventLogImpl();
   ~RtcEventLogImpl() override;
 
   bool StartLogging(const std::string& file_name,
@@ -59,23 +64,18 @@ class RtcEventLogImpl final : public RtcEventLog {
   bool StartLogging(rtc::PlatformFile platform_file,
                     int64_t max_size_bytes) override;
   void StopLogging() override;
-  void LogVideoReceiveStreamConfig(
-      const VideoReceiveStream::Config& config) override;
-  void LogVideoSendStreamConfig(const VideoSendStream::Config& config) override;
-  void LogAudioReceiveStreamConfig(
-      const AudioReceiveStream::Config& config) override;
-  void LogAudioSendStreamConfig(const AudioSendStream::Config& config) override;
+  void LogVideoReceiveStreamConfig(const rtclog::StreamConfig& config) override;
+  void LogVideoSendStreamConfig(const rtclog::StreamConfig& config) override;
+  void LogAudioReceiveStreamConfig(const rtclog::StreamConfig& config) override;
+  void LogAudioSendStreamConfig(const rtclog::StreamConfig& config) override;
   void LogRtpHeader(PacketDirection direction,
-                    MediaType media_type,
                     const uint8_t* header,
                     size_t packet_length) override;
   void LogRtpHeader(PacketDirection direction,
-                    MediaType media_type,
                     const uint8_t* header,
                     size_t packet_length,
                     int probe_cluster_id) override;
   void LogRtcpPacket(PacketDirection direction,
-                     MediaType media_type,
                      const uint8_t* packet,
                      size_t length) override;
   void LogAudioPlayout(uint32_t ssrc) override;
@@ -85,7 +85,7 @@ class RtcEventLogImpl final : public RtcEventLog {
   void LogDelayBasedBweUpdate(int32_t bitrate_bps,
                               BandwidthUsage detector_state) override;
   void LogAudioNetworkAdaptation(
-      const AudioNetworkAdaptor::EncoderRuntimeConfig& config) override;
+      const AudioEncoderRuntimeConfig& config) override;
   void LogProbeClusterCreated(int id,
                               int bitrate_bps,
                               int min_probes,
@@ -95,10 +95,15 @@ class RtcEventLogImpl final : public RtcEventLog {
                              ProbeFailureReason failure_reason) override;
 
  private:
-  void StoreEvent(std::unique_ptr<rtclog::Event>* event);
+  // Private constructor to ensure that creation is done by RtcEventLog::Create.
+  RtcEventLogImpl();
+
+  void StoreEvent(std::unique_ptr<rtclog::Event> event);
   void LogProbeResult(int id,
                       rtclog::BweProbeResult::ResultType result,
                       int bitrate_bps);
+
+  static volatile int log_count_;
 
   // Message queue for passing control messages to the logging thread.
   SwapQueue<RtcEventLogHelperThread::ControlMessage> message_queue_;
@@ -129,21 +134,6 @@ rtclog::VideoReceiveConfig_RtcpMode ConvertRtcpMode(RtcpMode rtcp_mode) {
   }
   RTC_NOTREACHED();
   return rtclog::VideoReceiveConfig::RTCP_COMPOUND;
-}
-
-rtclog::MediaType ConvertMediaType(MediaType media_type) {
-  switch (media_type) {
-    case MediaType::ANY:
-      return rtclog::MediaType::ANY;
-    case MediaType::AUDIO:
-      return rtclog::MediaType::AUDIO;
-    case MediaType::VIDEO:
-      return rtclog::MediaType::VIDEO;
-    case MediaType::DATA:
-      return rtclog::MediaType::DATA;
-  }
-  RTC_NOTREACHED();
-  return rtclog::ANY;
 }
 
 rtclog::DelayBasedBweUpdate::DetectorState ConvertDetectorState(
@@ -180,6 +170,8 @@ static const int kEventsPerSecond = 1000;
 static const int kControlMessagesPerSecond = 10;
 }  // namespace
 
+volatile int RtcEventLogImpl::log_count_ = 0;
+
 // RtcEventLogImpl member functions.
 RtcEventLogImpl::RtcEventLogImpl()
     // Allocate buffers for roughly one second of history.
@@ -193,6 +185,8 @@ RtcEventLogImpl::RtcEventLogImpl()
 RtcEventLogImpl::~RtcEventLogImpl() {
   // The RtcEventLogHelperThread destructor closes the file
   // and waits for the thread to terminate.
+  int count = rtc::AtomicOps::Decrement(&RtcEventLogImpl::log_count_);
+  RTC_DCHECK_GE(count, 0);
 }
 
 bool RtcEventLogImpl::StartLogging(const std::string& file_name,
@@ -274,121 +268,127 @@ void RtcEventLogImpl::StopLogging() {
 }
 
 void RtcEventLogImpl::LogVideoReceiveStreamConfig(
-    const VideoReceiveStream::Config& config) {
+    const rtclog::StreamConfig& config) {
   std::unique_ptr<rtclog::Event> event(new rtclog::Event());
   event->set_timestamp_us(rtc::TimeMicros());
   event->set_type(rtclog::Event::VIDEO_RECEIVER_CONFIG_EVENT);
 
   rtclog::VideoReceiveConfig* receiver_config =
       event->mutable_video_receiver_config();
-  receiver_config->set_remote_ssrc(config.rtp.remote_ssrc);
-  receiver_config->set_local_ssrc(config.rtp.local_ssrc);
+  receiver_config->set_remote_ssrc(config.remote_ssrc);
+  receiver_config->set_local_ssrc(config.local_ssrc);
 
-  receiver_config->set_rtcp_mode(ConvertRtcpMode(config.rtp.rtcp_mode));
-  receiver_config->set_remb(config.rtp.remb);
+  // TODO(perkj): Add field for rsid.
+  receiver_config->set_rtcp_mode(ConvertRtcpMode(config.rtcp_mode));
+  receiver_config->set_remb(config.remb);
 
-  for (const auto& kv : config.rtp.rtx_payload_types) {
-    rtclog::RtxMap* rtx = receiver_config->add_rtx_map();
-    rtx->set_payload_type(kv.first);
-    rtx->mutable_config()->set_rtx_ssrc(config.rtp.rtx_ssrc);
-    rtx->mutable_config()->set_rtx_payload_type(kv.second);
-  }
-
-  for (const auto& e : config.rtp.extensions) {
+  for (const auto& e : config.rtp_extensions) {
     rtclog::RtpHeaderExtension* extension =
         receiver_config->add_header_extensions();
     extension->set_name(e.uri);
     extension->set_id(e.id);
   }
 
-  for (const auto& d : config.decoders) {
+  for (const auto& d : config.codecs) {
     rtclog::DecoderConfig* decoder = receiver_config->add_decoders();
     decoder->set_name(d.payload_name);
     decoder->set_payload_type(d.payload_type);
+    if (d.rtx_payload_type != 0) {
+      rtclog::RtxMap* rtx = receiver_config->add_rtx_map();
+      rtx->set_payload_type(d.payload_type);
+      rtx->mutable_config()->set_rtx_ssrc(config.rtx_ssrc);
+      rtx->mutable_config()->set_rtx_payload_type(d.rtx_payload_type);
+    }
   }
-  StoreEvent(&event);
+  StoreEvent(std::move(event));
 }
 
 void RtcEventLogImpl::LogVideoSendStreamConfig(
-    const VideoSendStream::Config& config) {
+    const rtclog::StreamConfig& config) {
   std::unique_ptr<rtclog::Event> event(new rtclog::Event());
   event->set_timestamp_us(rtc::TimeMicros());
   event->set_type(rtclog::Event::VIDEO_SENDER_CONFIG_EVENT);
 
   rtclog::VideoSendConfig* sender_config = event->mutable_video_sender_config();
 
-  for (const auto& ssrc : config.rtp.ssrcs) {
-    sender_config->add_ssrcs(ssrc);
+  // TODO(perkj): rtclog::VideoSendConfig should only contain one SSRC.
+  sender_config->add_ssrcs(config.local_ssrc);
+  if (config.rtx_ssrc != 0) {
+    sender_config->add_rtx_ssrcs(config.rtx_ssrc);
   }
 
-  for (const auto& e : config.rtp.extensions) {
+  for (const auto& e : config.rtp_extensions) {
     rtclog::RtpHeaderExtension* extension =
         sender_config->add_header_extensions();
     extension->set_name(e.uri);
     extension->set_id(e.id);
   }
 
-  for (const auto& rtx_ssrc : config.rtp.rtx.ssrcs) {
-    sender_config->add_rtx_ssrcs(rtx_ssrc);
-  }
-  sender_config->set_rtx_payload_type(config.rtp.rtx.payload_type);
+  // TODO(perkj): rtclog::VideoSendConfig should contain many possible codec
+  // configurations.
+  for (const auto& codec : config.codecs) {
+    sender_config->set_rtx_payload_type(codec.rtx_payload_type);
+    rtclog::EncoderConfig* encoder = sender_config->mutable_encoder();
+    encoder->set_name(codec.payload_name);
+    encoder->set_payload_type(codec.payload_type);
 
-  rtclog::EncoderConfig* encoder = sender_config->mutable_encoder();
-  encoder->set_name(config.encoder_settings.payload_name);
-  encoder->set_payload_type(config.encoder_settings.payload_type);
-  StoreEvent(&event);
+    if (config.codecs.size() > 1) {
+      LOG(WARNING) << "LogVideoSendStreamConfig currently only supports one "
+                   << "codec. Logging codec :" << codec.payload_name;
+      break;
+    }
+  }
+
+  StoreEvent(std::move(event));
 }
 
 void RtcEventLogImpl::LogAudioReceiveStreamConfig(
-    const AudioReceiveStream::Config& config) {
+    const rtclog::StreamConfig& config) {
   std::unique_ptr<rtclog::Event> event(new rtclog::Event());
   event->set_timestamp_us(rtc::TimeMicros());
   event->set_type(rtclog::Event::AUDIO_RECEIVER_CONFIG_EVENT);
 
   rtclog::AudioReceiveConfig* receiver_config =
       event->mutable_audio_receiver_config();
-  receiver_config->set_remote_ssrc(config.rtp.remote_ssrc);
-  receiver_config->set_local_ssrc(config.rtp.local_ssrc);
+  receiver_config->set_remote_ssrc(config.remote_ssrc);
+  receiver_config->set_local_ssrc(config.local_ssrc);
 
-  for (const auto& e : config.rtp.extensions) {
+  for (const auto& e : config.rtp_extensions) {
     rtclog::RtpHeaderExtension* extension =
         receiver_config->add_header_extensions();
     extension->set_name(e.uri);
     extension->set_id(e.id);
   }
-  StoreEvent(&event);
+  StoreEvent(std::move(event));
 }
 
 void RtcEventLogImpl::LogAudioSendStreamConfig(
-    const AudioSendStream::Config& config) {
+    const rtclog::StreamConfig& config) {
   std::unique_ptr<rtclog::Event> event(new rtclog::Event());
   event->set_timestamp_us(rtc::TimeMicros());
   event->set_type(rtclog::Event::AUDIO_SENDER_CONFIG_EVENT);
 
   rtclog::AudioSendConfig* sender_config = event->mutable_audio_sender_config();
 
-  sender_config->set_ssrc(config.rtp.ssrc);
+  sender_config->set_ssrc(config.local_ssrc);
 
-  for (const auto& e : config.rtp.extensions) {
+  for (const auto& e : config.rtp_extensions) {
     rtclog::RtpHeaderExtension* extension =
         sender_config->add_header_extensions();
     extension->set_name(e.uri);
     extension->set_id(e.id);
   }
 
-  StoreEvent(&event);
+  StoreEvent(std::move(event));
 }
 
 void RtcEventLogImpl::LogRtpHeader(PacketDirection direction,
-                                   MediaType media_type,
                                    const uint8_t* header,
                                    size_t packet_length) {
-  LogRtpHeader(direction, media_type, header, packet_length,
-               PacedPacketInfo::kNotAProbe);
+  LogRtpHeader(direction, header, packet_length, PacedPacketInfo::kNotAProbe);
 }
 
 void RtcEventLogImpl::LogRtpHeader(PacketDirection direction,
-                                   MediaType media_type,
                                    const uint8_t* header,
                                    size_t packet_length,
                                    int probe_cluster_id) {
@@ -412,23 +412,20 @@ void RtcEventLogImpl::LogRtpHeader(PacketDirection direction,
   rtp_event->set_timestamp_us(rtc::TimeMicros());
   rtp_event->set_type(rtclog::Event::RTP_EVENT);
   rtp_event->mutable_rtp_packet()->set_incoming(direction == kIncomingPacket);
-  rtp_event->mutable_rtp_packet()->set_type(ConvertMediaType(media_type));
   rtp_event->mutable_rtp_packet()->set_packet_length(packet_length);
   rtp_event->mutable_rtp_packet()->set_header(header, header_length);
   if (probe_cluster_id != PacedPacketInfo::kNotAProbe)
     rtp_event->mutable_rtp_packet()->set_probe_cluster_id(probe_cluster_id);
-  StoreEvent(&rtp_event);
+  StoreEvent(std::move(rtp_event));
 }
 
 void RtcEventLogImpl::LogRtcpPacket(PacketDirection direction,
-                                    MediaType media_type,
                                     const uint8_t* packet,
                                     size_t length) {
   std::unique_ptr<rtclog::Event> rtcp_event(new rtclog::Event());
   rtcp_event->set_timestamp_us(rtc::TimeMicros());
   rtcp_event->set_type(rtclog::Event::RTCP_EVENT);
   rtcp_event->mutable_rtcp_packet()->set_incoming(direction == kIncomingPacket);
-  rtcp_event->mutable_rtcp_packet()->set_type(ConvertMediaType(media_type));
 
   rtcp::CommonHeader header;
   const uint8_t* block_begin = packet;
@@ -467,7 +464,7 @@ void RtcEventLogImpl::LogRtcpPacket(PacketDirection direction,
     block_begin += block_size;
   }
   rtcp_event->mutable_rtcp_packet()->set_packet_data(buffer, buffer_length);
-  StoreEvent(&rtcp_event);
+  StoreEvent(std::move(rtcp_event));
 }
 
 void RtcEventLogImpl::LogAudioPlayout(uint32_t ssrc) {
@@ -476,7 +473,7 @@ void RtcEventLogImpl::LogAudioPlayout(uint32_t ssrc) {
   event->set_type(rtclog::Event::AUDIO_PLAYOUT_EVENT);
   auto playout_event = event->mutable_audio_playout_event();
   playout_event->set_local_ssrc(ssrc);
-  StoreEvent(&event);
+  StoreEvent(std::move(event));
 }
 
 void RtcEventLogImpl::LogLossBasedBweUpdate(int32_t bitrate_bps,
@@ -489,7 +486,7 @@ void RtcEventLogImpl::LogLossBasedBweUpdate(int32_t bitrate_bps,
   bwe_event->set_bitrate_bps(bitrate_bps);
   bwe_event->set_fraction_loss(fraction_loss);
   bwe_event->set_total_packets(total_packets);
-  StoreEvent(&event);
+  StoreEvent(std::move(event));
 }
 
 void RtcEventLogImpl::LogDelayBasedBweUpdate(int32_t bitrate_bps,
@@ -500,11 +497,11 @@ void RtcEventLogImpl::LogDelayBasedBweUpdate(int32_t bitrate_bps,
   auto bwe_event = event->mutable_delay_based_bwe_update();
   bwe_event->set_bitrate_bps(bitrate_bps);
   bwe_event->set_detector_state(ConvertDetectorState(detector_state));
-  StoreEvent(&event);
+  StoreEvent(std::move(event));
 }
 
 void RtcEventLogImpl::LogAudioNetworkAdaptation(
-    const AudioNetworkAdaptor::EncoderRuntimeConfig& config) {
+    const AudioEncoderRuntimeConfig& config) {
   std::unique_ptr<rtclog::Event> event(new rtclog::Event());
   event->set_timestamp_us(rtc::TimeMicros());
   event->set_type(rtclog::Event::AUDIO_NETWORK_ADAPTATION_EVENT);
@@ -523,7 +520,7 @@ void RtcEventLogImpl::LogAudioNetworkAdaptation(
     audio_network_adaptation->set_enable_dtx(*config.enable_dtx);
   if (config.num_channels)
     audio_network_adaptation->set_num_channels(*config.num_channels);
-  StoreEvent(&event);
+  StoreEvent(std::move(event));
 }
 
 void RtcEventLogImpl::LogProbeClusterCreated(int id,
@@ -539,7 +536,7 @@ void RtcEventLogImpl::LogProbeClusterCreated(int id,
   probe_cluster->set_bitrate_bps(bitrate_bps);
   probe_cluster->set_min_packets(min_probes);
   probe_cluster->set_min_bytes(min_bytes);
-  StoreEvent(&event);
+  StoreEvent(std::move(event));
 }
 
 void RtcEventLogImpl::LogProbeResultSuccess(int id, int bitrate_bps) {
@@ -565,11 +562,12 @@ void RtcEventLogImpl::LogProbeResult(int id,
   probe_result->set_result(result);
   if (result == rtclog::BweProbeResult::SUCCESS)
     probe_result->set_bitrate_bps(bitrate_bps);
-  StoreEvent(&event);
+  StoreEvent(std::move(event));
 }
 
-void RtcEventLogImpl::StoreEvent(std::unique_ptr<rtclog::Event>* event) {
-  if (!event_queue_.Insert(event)) {
+void RtcEventLogImpl::StoreEvent(std::unique_ptr<rtclog::Event> event) {
+  RTC_DCHECK(event.get() != nullptr);
+  if (!event_queue_.Insert(&event)) {
     LOG(LS_ERROR) << "WebRTC event log queue full. Dropping event.";
   }
   helper_thread_.SignalNewEvent();
@@ -583,7 +581,7 @@ bool RtcEventLog::ParseRtcEventLog(const std::string& file_name,
   if (!dump_file->OpenFile(file_name.c_str(), true)) {
     return false;
   }
-  std::string dump_buffer;
+  ProtoString dump_buffer;
   while ((bytes_read = dump_file->Read(tmp_buffer, sizeof(tmp_buffer))) > 0) {
     dump_buffer.append(tmp_buffer, bytes_read);
   }
@@ -593,18 +591,17 @@ bool RtcEventLog::ParseRtcEventLog(const std::string& file_name,
 
 #endif  // ENABLE_RTC_EVENT_LOG
 
-bool RtcEventLogNullImpl::StartLogging(rtc::PlatformFile platform_file,
-                                       int64_t max_size_bytes) {
-  // The platform_file is open and needs to be closed.
-  if (!rtc::ClosePlatformFile(platform_file)) {
-    LOG(LS_ERROR) << "Can't close file.";
-  }
-  return false;
-}
-
 // RtcEventLog member functions.
 std::unique_ptr<RtcEventLog> RtcEventLog::Create() {
 #ifdef ENABLE_RTC_EVENT_LOG
+  constexpr int kMaxLogCount = 5;
+  int count = rtc::AtomicOps::Increment(&RtcEventLogImpl::log_count_);
+  if (count > kMaxLogCount) {
+    LOG(LS_WARNING) << "Denied creation of additional WebRTC event logs. "
+                    << count - 1 << " logs open already.";
+    rtc::AtomicOps::Decrement(&RtcEventLogImpl::log_count_);
+    return std::unique_ptr<RtcEventLog>(new RtcEventLogNullImpl());
+  }
   return std::unique_ptr<RtcEventLog>(new RtcEventLogImpl());
 #else
   return std::unique_ptr<RtcEventLog>(new RtcEventLogNullImpl());

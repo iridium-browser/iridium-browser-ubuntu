@@ -8,9 +8,9 @@ import android.os.Build;
 import android.os.ConditionVariable;
 import android.os.StrictMode;
 import android.support.test.filters.SmallTest;
-import android.test.MoreAsserts;
-import android.util.Log;
 
+import org.chromium.base.Log;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.net.TestUrlRequestCallback.FailureType;
 import org.chromium.net.TestUrlRequestCallback.ResponseStep;
@@ -155,7 +155,7 @@ public class CronetUrlRequestTest extends CronetTestBase {
 
     void runConnectionMigrationTest(boolean disableConnectionMigration) {
         // URLRequest load flags at net/base/load_flags_list.h.
-        int connectionMigrationLoadFlag = 1 << 18;
+        int connectionMigrationLoadFlag = 1 << 17;
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
         callback.setAutoAdvance(false);
         // Create builder, start a request, and check if default load_flags are set correctly.
@@ -558,11 +558,15 @@ public class CronetUrlRequestTest extends CronetTestBase {
         List<Map.Entry<String, String>> responseHeaders =
                 callback.mResponseInfo.getAllHeadersAsList();
 
-        MoreAsserts.assertContentsInOrder(responseHeaders,
-                new AbstractMap.SimpleEntry<>("Content-Type", "text/plain"),
-                new AbstractMap.SimpleEntry<>("Access-Control-Allow-Origin", "*"),
-                new AbstractMap.SimpleEntry<>("header-name", "header-value"),
-                new AbstractMap.SimpleEntry<>("multi-header-name", "header-value1"),
+        assertEquals(responseHeaders.get(0),
+                new AbstractMap.SimpleEntry<>("Content-Type", "text/plain"));
+        assertEquals(responseHeaders.get(1),
+                new AbstractMap.SimpleEntry<>("Access-Control-Allow-Origin", "*"));
+        assertEquals(responseHeaders.get(2),
+                new AbstractMap.SimpleEntry<>("header-name", "header-value"));
+        assertEquals(responseHeaders.get(3),
+                new AbstractMap.SimpleEntry<>("multi-header-name", "header-value1"));
+        assertEquals(responseHeaders.get(4),
                 new AbstractMap.SimpleEntry<>("multi-header-name", "header-value2"));
     }
 
@@ -646,6 +650,7 @@ public class CronetUrlRequestTest extends CronetTestBase {
         assertEquals(ResponseStep.ON_FAILED, callback.mResponseStep);
     }
 
+    @DisabledTest(message = "crbug.com/738183")
     @SmallTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet // Java impl doesn't support MockUrlRequestJobFactory
@@ -2113,6 +2118,41 @@ public class CronetUrlRequestTest extends CronetTestBase {
             assertNotNull(callback.mError);
             assertEquals(cleartextNotPermitted,
                     ((NetworkException) callback.mError).getCronetInternalErrorCode());
+        }
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    /**
+     * Open many connections and cancel them right away. This test verifies all internal
+     * sockets and other Closeables are properly closed. See crbug.com/726193.
+     */
+    public void testGzipCancel() throws Exception {
+        String url = NativeTestServer.getFileURL("/gzipped.html");
+        for (int i = 0; i < 100; i++) {
+            TestUrlRequestCallback callback = new TestUrlRequestCallback();
+            callback.setAutoAdvance(false);
+            UrlRequest urlRequest =
+                    mTestFramework.mCronetEngine
+                            .newUrlRequestBuilder(url, callback, callback.getExecutor())
+                            .build();
+            urlRequest.start();
+            urlRequest.cancel();
+            // If the test blocks until each UrlRequest finishes before starting the next UrlRequest
+            // then it never catches the leak. If it starts all UrlRequests and then blocks until
+            // all UrlRequests finish, it only catches the leak ~10% of the time. In its current
+            // form it appears to catch the leak ~70% of the time.
+            // Catching the leak may require a lot of busy threads so that the cancel() happens
+            // before the UrlRequest has made much progress (and set mCurrentUrlConnection and
+            // mResponseChannel).  This may be why blocking until each UrlRequest finishes doesn't
+            // catch the leak.
+            // The other quirk of this is that from teardown(), JavaCronetEngine.shutdown() is
+            // called which calls ExecutorService.shutdown() which doesn't wait for the thread to
+            // finish running tasks, and then teardown() calls GC looking for leaks. One possible
+            // modification would be to expose the ExecutorService and then have tests call
+            // awaitTermination() but this would complicate things, and adding a 1s sleep() to
+            // allow the ExecutorService to terminate did not increase the chances of catching the
+            // leak.
         }
     }
 }

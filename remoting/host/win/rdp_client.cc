@@ -12,6 +12,7 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/single_thread_task_runner.h"
 #include "net/base/ip_address.h"
@@ -102,19 +103,19 @@ RdpClient::RdpClient(
 }
 
 RdpClient::~RdpClient() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   core_->Disconnect();
 }
 
 void RdpClient::InjectSas() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   core_->InjectSas();
 }
 
 void RdpClient::ChangeResolution(const ScreenResolution& resolution) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   core_->ChangeResolution(resolution);
 }

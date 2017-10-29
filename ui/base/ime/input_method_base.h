@@ -43,6 +43,7 @@ class UI_BASE_IME_EXPORT InputMethodBase
   void SetFocusedTextInputClient(TextInputClient* client) override;
   void DetachTextInputClient(TextInputClient* client) override;
   TextInputClient* GetTextInputClient() const override;
+  void SetOnScreenKeyboardBounds(const gfx::Rect& new_bounds) override;
 
   // If a derived class overrides this method, it should call parent's
   // implementation.
@@ -93,8 +94,8 @@ class UI_BASE_IME_EXPORT InputMethodBase
 
   // Convenience method to call delegate_->DispatchKeyEventPostIME().
   // Returns true if the event was processed
-  ui::EventDispatchDetails DispatchKeyEventPostIME(
-      ui::KeyEvent* event) const;
+  ui::EventDispatchDetails DispatchKeyEventPostIME(ui::KeyEvent* event) const
+      WARN_UNUSED_RESULT;
 
   // Convenience method to notify all observers of TextInputClient changes.
   void NotifyTextInputStateChanged(const TextInputClient* client);
@@ -123,6 +124,9 @@ class UI_BASE_IME_EXPORT InputMethodBase
   base::ObserverList<InputMethodObserver> observer_list_;
 
   std::vector<std::unique_ptr<ui::KeyEvent>> key_events_for_testing_;
+
+  // Screen bounds of a on-screen keyboard.
+  gfx::Rect keyboard_bounds_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMethodBase);
 };

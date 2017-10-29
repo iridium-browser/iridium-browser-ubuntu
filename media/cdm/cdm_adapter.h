@@ -19,6 +19,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_native_library.h"
 #include "base/threading/thread.h"
+#include "media/base/audio_buffer.h"
 #include "media/base/cdm_config.h"
 #include "media/base/cdm_context.h"
 #include "media/base/cdm_factory.h"
@@ -47,7 +48,8 @@ using CreateCdmFileIOCB =
 class MEDIA_EXPORT CdmAdapter : public ContentDecryptionModule,
                                 public CdmContext,
                                 public Decryptor,
-                                NON_EXPORTED_BASE(public cdm::Host_8) {
+                                NON_EXPORTED_BASE(public cdm::Host_8),
+                                NON_EXPORTED_BASE(public cdm::Host_9) {
  public:
   // Create the CDM using |cdm_path| and initialize it using |key_system| and
   // |cdm_config|. |allocator| is to be used whenever the CDM needs memory
@@ -109,14 +111,48 @@ class MEDIA_EXPORT CdmAdapter : public ContentDecryptionModule,
   void ResetDecoder(StreamType stream_type) final;
   void DeinitializeDecoder(StreamType stream_type) final;
 
-  // cdm::Host_8 implementation.
+  // cdm::Host_9 implementation.
   cdm::Buffer* Allocate(uint32_t capacity) override;
   void SetTimer(int64_t delay_ms, void* context) override;
   cdm::Time GetCurrentWallTime() override;
+  void OnResolveKeyStatusPromise(uint32_t promise_id,
+                                 cdm::KeyStatus key_status) override;
   void OnResolveNewSessionPromise(uint32_t promise_id,
                                   const char* session_id,
                                   uint32_t session_id_size) override;
   void OnResolvePromise(uint32_t promise_id) override;
+  void OnRejectPromise(uint32_t promise_id,
+                       cdm::Exception exception,
+                       uint32_t system_code,
+                       const char* error_message,
+                       uint32_t error_message_size) override;
+  void OnSessionMessage(const char* session_id,
+                        uint32_t session_id_size,
+                        cdm::MessageType message_type,
+                        const char* message,
+                        uint32_t message_size) override;
+  void OnSessionKeysChange(const char* session_id,
+                           uint32_t session_id_size,
+                           bool has_additional_usable_key,
+                           const cdm::KeyInformation* keys_info,
+                           uint32_t keys_info_count) override;
+  void OnExpirationChange(const char* session_id,
+                          uint32_t session_id_size,
+                          cdm::Time new_expiry_time) override;
+  void OnSessionClosed(const char* session_id,
+                       uint32_t session_id_size) override;
+  void SendPlatformChallenge(const char* service_id,
+                             uint32_t service_id_size,
+                             const char* challenge,
+                             uint32_t challenge_size) override;
+  void EnableOutputProtection(uint32_t desired_protection_mask) override;
+  void QueryOutputProtectionStatus() override;
+  void OnDeferredInitializationDone(cdm::StreamType stream_type,
+                                    cdm::Status decoder_status) override;
+  cdm::FileIO* CreateFileIO(cdm::FileIOClient* client) override;
+  void RequestStorageId() override;
+
+  // cdm::Host_8 specific implementation.
   void OnRejectPromise(uint32_t promise_id,
                        cdm::Error error,
                        uint32_t system_code,
@@ -129,31 +165,12 @@ class MEDIA_EXPORT CdmAdapter : public ContentDecryptionModule,
                         uint32_t message_size,
                         const char* legacy_destination_url,
                         uint32_t legacy_destination_url_size) override;
-  void OnSessionKeysChange(const char* session_id,
-                           uint32_t session_id_size,
-                           bool has_additional_usable_key,
-                           const cdm::KeyInformation* keys_info,
-                           uint32_t keys_info_count) override;
-  void OnExpirationChange(const char* session_id,
-                          uint32_t session_id_size,
-                          cdm::Time new_expiry_time) override;
-  void OnSessionClosed(const char* session_id,
-                       uint32_t session_id_size) override;
   void OnLegacySessionError(const char* session_id,
                             uint32_t session_id_size,
                             cdm::Error error,
                             uint32_t system_code,
                             const char* error_message,
                             uint32_t error_message_size) override;
-  void SendPlatformChallenge(const char* service_id,
-                             uint32_t service_id_size,
-                             const char* challenge,
-                             uint32_t challenge_size) override;
-  void EnableOutputProtection(uint32_t desired_protection_mask) override;
-  void QueryOutputProtectionStatus() override;
-  void OnDeferredInitializationDone(cdm::StreamType stream_type,
-                                    cdm::Status decoder_status) override;
-  cdm::FileIO* CreateFileIO(cdm::FileIOClient* client) override;
 
  private:
   CdmAdapter(const std::string& key_system,
@@ -223,6 +240,8 @@ class MEDIA_EXPORT CdmAdapter : public ContentDecryptionModule,
   CreateCdmFileIOCB create_cdm_file_io_cb_;
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
+  scoped_refptr<AudioBufferMemoryPool> pool_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<CdmAdapter> weak_factory_;

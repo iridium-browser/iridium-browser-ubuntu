@@ -80,13 +80,13 @@ class MojoDiscardableSharedMemoryManagerImpl
   void AllocateLockedDiscardableSharedMemory(
       uint32_t size,
       int32_t id,
-      const AllocateLockedDiscardableSharedMemoryCallback& callback) override {
+      AllocateLockedDiscardableSharedMemoryCallback callback) override {
     base::SharedMemoryHandle handle;
     manager_->AllocateLockedDiscardableSharedMemoryForClient(client_id_, size,
                                                              id, &handle);
     mojo::ScopedSharedBufferHandle memory =
         mojo::WrapSharedMemoryHandle(handle, size, false /* read_only */);
-    return callback.Run(std::move(memory));
+    std::move(callback).Run(std::move(memory));
   }
 
   void DeletedDiscardableSharedMemory(int32_t id) override {
@@ -209,7 +209,7 @@ int64_t GetDefaultMemoryLimit() {
 const int kEnforceMemoryPolicyDelayMs = 1000;
 
 // Global atomic to generate unique discardable shared memory IDs.
-base::StaticAtomicSequenceNumber g_next_discardable_shared_memory_id;
+base::AtomicSequenceNumber g_next_discardable_shared_memory_id;
 
 }  // namespace
 
@@ -247,7 +247,8 @@ DiscardableSharedMemoryManager::~DiscardableSharedMemoryManager() {
 }
 
 void DiscardableSharedMemoryManager::Bind(
-    mojom::DiscardableSharedMemoryManagerRequest request) {
+    mojom::DiscardableSharedMemoryManagerRequest request,
+    const service_manager::BindSourceInfo& source_info) {
   mojo::MakeStrongBinding(
       base::MakeUnique<MojoDiscardableSharedMemoryManagerImpl>(
           next_client_id_++, this),
@@ -440,7 +441,7 @@ void DiscardableSharedMemoryManager::AllocateLockedDiscardableSharedMemory(
   MemorySegmentMap& client_segments = clients_[client_id];
   if (client_segments.find(id) != client_segments.end()) {
     LOG(ERROR) << "Invalid discardable shared memory ID";
-    *shared_memory_handle = base::SharedMemory::NULLHandle();
+    *shared_memory_handle = base::SharedMemoryHandle();
     return;
   }
 
@@ -461,14 +462,14 @@ void DiscardableSharedMemoryManager::AllocateLockedDiscardableSharedMemory(
   std::unique_ptr<base::DiscardableSharedMemory> memory(
       new base::DiscardableSharedMemory);
   if (!memory->CreateAndMap(size)) {
-    *shared_memory_handle = base::SharedMemory::NULLHandle();
+    *shared_memory_handle = base::SharedMemoryHandle();
     return;
   }
 
   base::CheckedNumeric<size_t> checked_bytes_allocated = bytes_allocated_;
   checked_bytes_allocated += memory->mapped_size();
   if (!checked_bytes_allocated.IsValid()) {
-    *shared_memory_handle = base::SharedMemory::NULLHandle();
+    *shared_memory_handle = base::SharedMemoryHandle();
     return;
   }
 

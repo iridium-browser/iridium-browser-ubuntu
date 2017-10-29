@@ -12,14 +12,14 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/sequence_checker.h"
 #include "base/timer/timer.h"
 #include "base/win/scoped_comptr.h"
 
 namespace remoting {
 
 // A class for getting an OAuth authorization code.
-class AuthCodeGetter : public base::NonThreadSafe {
+class AuthCodeGetter {
  public:
   AuthCodeGetter();
   ~AuthCodeGetter();
@@ -43,11 +43,13 @@ class AuthCodeGetter : public base::NonThreadSafe {
   // The authorization code callback.
   base::Callback<void(const std::string&)> on_auth_code_;
   // The browser through which the user requests an authorization code.
-  base::win::ScopedComPtr<IWebBrowser2, &IID_IWebBrowser2> browser_;
+  base::win::ScopedComPtr<IWebBrowser2> browser_;
   // A timer used to poll the browser's URL.
   base::OneShotTimer timer_;
   // The interval at which the timer fires.
   base::TimeDelta timer_interval_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(AuthCodeGetter);
 };

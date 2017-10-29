@@ -20,7 +20,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/sys_info.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/metrics/perf/windowed_incognito_observer.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -122,7 +121,8 @@ void ExtractVersionNumbers(const std::string& version,
 
 // Returns if a micro-architecture supports LBR callgraph profiling.
 bool MicroarchitectureHasLBRCallgraph(const std::string& uarch) {
-  return uarch == "Haswell" || uarch == "Broadwell" || uarch == "Skylake";
+  return uarch == "Haswell" || uarch == "Broadwell" || uarch == "Skylake" ||
+         uarch == "Kabylake";
 }
 
 // Returns if a kernel release supports LBR callgraph profiling.
@@ -158,6 +158,9 @@ const char kPerfRecordInstructionTLBMissesCmd[] =
 const char kPerfRecordDataTLBMissesCmd[] =
   "perf record -a -e dTLB-misses -c 2003";
 
+const char kPerfRecordCacheMissesCmd[] =
+    "perf record -a -e cache-misses -c 10007";
+
 const char kPerfStatMemoryBandwidthCmd[] =
   "perf stat -a -e cycles -e instructions "
   "-e uncore_imc/data_reads/ -e uncore_imc/data_writes/ "
@@ -184,35 +187,41 @@ const std::vector<RandomSelector::WeightAndValue> GetDefaultCommands_x86_64(
   if (intel_uarch == "IvyBridge" ||
       intel_uarch == "Haswell" ||
       intel_uarch == "Broadwell") {
-    cmds.push_back(WeightAndValue(50.0, kPerfRecordCyclesCmd));
+    cmds.push_back(WeightAndValue(45.0, kPerfRecordCyclesCmd));
     cmds.push_back(WeightAndValue(20.0, callgraph_cmd));
     cmds.push_back(WeightAndValue(15.0, kPerfRecordLBRCmd));
     cmds.push_back(WeightAndValue(5.0, kPerfRecordInstructionTLBMissesCmd));
     cmds.push_back(WeightAndValue(5.0, kPerfRecordDataTLBMissesCmd));
     cmds.push_back(WeightAndValue(5.0, kPerfStatMemoryBandwidthCmd));
+    cmds.push_back(WeightAndValue(5.0, kPerfRecordCacheMissesCmd));
     return cmds;
   }
-  if (intel_uarch == "SandyBridge" || intel_uarch == "Skylake") {
-    cmds.push_back(WeightAndValue(55.0, kPerfRecordCyclesCmd));
+  if (intel_uarch == "SandyBridge" || intel_uarch == "Skylake" ||
+      intel_uarch == "Kabylake") {
+    cmds.push_back(WeightAndValue(50.0, kPerfRecordCyclesCmd));
     cmds.push_back(WeightAndValue(20.0, callgraph_cmd));
     cmds.push_back(WeightAndValue(15.0, kPerfRecordLBRCmd));
     cmds.push_back(WeightAndValue(5.0, kPerfRecordInstructionTLBMissesCmd));
     cmds.push_back(WeightAndValue(5.0, kPerfRecordDataTLBMissesCmd));
+    cmds.push_back(WeightAndValue(5.0, kPerfRecordCacheMissesCmd));
     return cmds;
   }
-  if (intel_uarch == "Silvermont" || intel_uarch == "Airmont") {
-    cmds.push_back(WeightAndValue(55.0, kPerfRecordCyclesCmd));
+  if (intel_uarch == "Silvermont" || intel_uarch == "Airmont" ||
+      intel_uarch == "Goldmont") {
+    cmds.push_back(WeightAndValue(50.0, kPerfRecordCyclesCmd));
     cmds.push_back(WeightAndValue(20.0, callgraph_cmd));
     cmds.push_back(WeightAndValue(15.0, kPerfRecordLBRCmdAtom));
     cmds.push_back(WeightAndValue(5.0, kPerfRecordInstructionTLBMissesCmd));
     cmds.push_back(WeightAndValue(5.0, kPerfRecordDataTLBMissesCmd));
+    cmds.push_back(WeightAndValue(5.0, kPerfRecordCacheMissesCmd));
     return cmds;
   }
   // Other 64-bit x86
-  cmds.push_back(WeightAndValue(70.0, kPerfRecordCyclesCmd));
+  cmds.push_back(WeightAndValue(65.0, kPerfRecordCyclesCmd));
   cmds.push_back(WeightAndValue(20.0, callgraph_cmd));
   cmds.push_back(WeightAndValue(5.0, kPerfRecordInstructionTLBMissesCmd));
   cmds.push_back(WeightAndValue(5.0, kPerfRecordDataTLBMissesCmd));
+  cmds.push_back(WeightAndValue(5.0, kPerfRecordCacheMissesCmd));
   return cmds;
 }
 
@@ -309,6 +318,7 @@ PerfProvider::PerfProvider()
 }
 
 PerfProvider::~PerfProvider() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   chromeos::LoginState::Get()->RemoveObserver(&login_observer_);
 }
 
@@ -453,7 +463,7 @@ void PerfProvider::SetCollectionParamsFromVariationParams(
 
 bool PerfProvider::GetSampledProfiles(
     std::vector<SampledProfile>* sampled_profiles) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (cached_perf_data_.empty()) {
     AddToPerfHistogram(NOT_READY_TO_UPLOAD);
     return false;
@@ -488,7 +498,7 @@ void PerfProvider::ParseOutputProtoIfValid(
     std::unique_ptr<SampledProfile> sampled_profile,
     PerfSubcommand subcommand,
     const std::string& perf_stdout) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // |perf_output_call_| called us, and owns |perf_stdout|. We must delete it,
   // but not before parsing |perf_stdout|, and we may return early.
@@ -639,7 +649,7 @@ void PerfProvider::Deactivate() {
 }
 
 void PerfProvider::ScheduleIntervalCollection() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (timer_.IsRunning())
     return;
 
@@ -671,7 +681,7 @@ void PerfProvider::ScheduleIntervalCollection() {
 
 void PerfProvider::CollectIfNecessary(
     std::unique_ptr<SampledProfile> sampled_profile) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Schedule another interval collection. This call makes sense regardless of
   // whether or not the current collection was interval-triggered. If it had
@@ -712,7 +722,6 @@ void PerfProvider::CollectIfNecessary(
   PerfSubcommand subcommand = GetPerfSubcommandType(command);
 
   perf_output_call_.reset(new PerfOutputCall(
-      make_scoped_refptr(content::BrowserThread::GetBlockingPool()),
       collection_params_.collection_duration(), command,
       base::Bind(&PerfProvider::ParseOutputProtoIfValid,
                  weak_factory_.GetWeakPtr(), base::Passed(&incognito_observer),

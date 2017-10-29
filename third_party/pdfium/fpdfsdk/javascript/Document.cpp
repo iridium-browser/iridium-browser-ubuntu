@@ -273,11 +273,6 @@ bool Document::exportAsXFDF(CJS_Runtime* pRuntime,
   return true;
 }
 
-// Maps a field object in PDF document to a JavaScript variable
-// comment:
-// note: the paremter cName, this is clue how to treat if the cName is not a
-// valiable filed name in this document
-
 bool Document::getField(CJS_Runtime* pRuntime,
                         const std::vector<CJS_Value>& params,
                         CJS_Value& vRet,
@@ -1211,7 +1206,7 @@ bool Document::addIcon(CJS_Runtime* pRuntime,
   }
 
   v8::Local<v8::Object> pJSIcon = params[1].ToV8Object(pRuntime);
-  if (pRuntime->GetObjDefnID(pJSIcon) != CJS_Icon::g_nObjDefnID) {
+  if (CFXJS_Engine::GetObjDefnID(pJSIcon) != CJS_Icon::g_nObjDefnID) {
     sError = JSGetStringFromID(IDS_STRING_JSTYPEERROR);
     return false;
   }
@@ -1468,7 +1463,7 @@ int Document::CountWords(CPDF_TextObject* pTextObj) {
 
   for (int i = 0, sz = pTextObj->CountChars(); i < sz; i++) {
     uint32_t charcode = CPDF_Font::kInvalidCharCode;
-    FX_FLOAT kerning;
+    float kerning;
 
     pTextObj->GetCharInfo(i, &charcode, &kerning);
     CFX_WideString swUnicode = pFont->UnicodeFromCharCode(charcode);
@@ -1501,7 +1496,7 @@ CFX_WideString Document::GetObjWordStr(CPDF_TextObject* pTextObj,
 
   for (int i = 0, sz = pTextObj->CountChars(); i < sz; i++) {
     uint32_t charcode = CPDF_Font::kInvalidCharCode;
-    FX_FLOAT kerning;
+    float kerning;
 
     pTextObj->GetCharInfo(i, &charcode, &kerning);
     CFX_WideString swUnicode = pFont->UnicodeFromCharCode(charcode);
@@ -1599,36 +1594,27 @@ bool Document::gotoNamedDest(CJS_Runtime* pRuntime,
     return false;
   }
   CFX_WideString wideName = params[0].ToCFXWideString(pRuntime);
-  CFX_ByteString utf8Name = wideName.UTF8Encode();
   CPDF_Document* pDocument = m_pFormFillEnv->GetPDFDocument();
   if (!pDocument)
     return false;
 
   CPDF_NameTree nameTree(pDocument, "Dests");
-  CPDF_Array* destArray = nameTree.LookupNamedDest(pDocument, utf8Name);
+  CPDF_Array* destArray = nameTree.LookupNamedDest(pDocument, wideName);
   if (!destArray)
     return false;
 
   CPDF_Dest dest(destArray);
   const CPDF_Array* arrayObject = ToArray(dest.GetObject());
-
-  std::unique_ptr<float[]> scrollPositionArray;
-  int scrollPositionArraySize = 0;
-
+  std::vector<float> scrollPositionArray;
   if (arrayObject) {
-    scrollPositionArray.reset(new float[arrayObject->GetCount()]);
-    int j = 0;
     for (size_t i = 2; i < arrayObject->GetCount(); i++)
-      scrollPositionArray[j++] = arrayObject->GetFloatAt(i);
-    scrollPositionArraySize = j;
+      scrollPositionArray.push_back(arrayObject->GetFloatAt(i));
   }
-
   pRuntime->BeginBlock();
   m_pFormFillEnv->DoGoToAction(dest.GetPageIndex(pDocument), dest.GetZoomMode(),
-                               scrollPositionArray.get(),
-                               scrollPositionArraySize);
+                               scrollPositionArray.data(),
+                               scrollPositionArray.size());
   pRuntime->EndBlock();
-
   return true;
 }
 
@@ -1654,5 +1640,5 @@ void Document::DoFieldDelay(const CFX_WideString& sFieldName,
 }
 
 CJS_Document* Document::GetCJSDoc() const {
-  return static_cast<CJS_Document*>(m_pJSObject);
+  return static_cast<CJS_Document*>(m_pJSObject.Get());
 }

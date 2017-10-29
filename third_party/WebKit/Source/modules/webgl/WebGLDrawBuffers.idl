@@ -23,10 +23,12 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://www.khronos.org/registry/webgl/extensions/WEBGL_draw_buffers/
+
 [
     DependentLifetime,
     NoInterfaceObject,
-    DoNotCheckConstants,
+    DoNotCheckConstants
 ] interface WebGLDrawBuffers {
     const GLenum COLOR_ATTACHMENT0_WEBGL = 0x8CE0;
     const GLenum COLOR_ATTACHMENT1_WEBGL = 0x8CE1;

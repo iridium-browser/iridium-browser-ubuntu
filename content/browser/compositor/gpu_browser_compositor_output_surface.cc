@@ -9,7 +9,7 @@
 #include "build/build_config.h"
 #include "cc/output/output_surface_client.h"
 #include "cc/output/output_surface_frame.h"
-#include "components/display_compositor/compositor_overlay_candidate_validator.h"
+#include "components/viz/service/display_embedder/compositor_overlay_candidate_validator.h"
 #include "content/browser/compositor/reflector_impl.h"
 #include "content/browser/compositor/reflector_texture.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
@@ -23,7 +23,7 @@ namespace content {
 GpuBrowserCompositorOutputSurface::GpuBrowserCompositorOutputSurface(
     scoped_refptr<ui::ContextProviderCommandBuffer> context,
     const UpdateVSyncParametersCallback& update_vsync_parameters_callback,
-    std::unique_ptr<display_compositor::CompositorOverlayCandidateValidator>
+    std::unique_ptr<viz::CompositorOverlayCandidateValidator>
         overlay_candidate_validator)
     : BrowserCompositorOutputSurface(std::move(context),
                                      update_vsync_parameters_callback,
@@ -54,7 +54,7 @@ void GpuBrowserCompositorOutputSurface::OnGpuSwapBuffersCompleted(
     const std::vector<ui::LatencyInfo>& latency_info,
     gfx::SwapResult result,
     const gpu::GpuProcessHostedCALayerTreeParamsMac* params_mac) {
-  RenderWidgetHostImpl::CompositorFrameDrawn(latency_info);
+  RenderWidgetHostImpl::OnGpuSwapBuffersCompleted(latency_info);
   client_->DidReceiveSwapBuffersAck();
 }
 
@@ -105,7 +105,7 @@ void GpuBrowserCompositorOutputSurface::Reshape(
 
 void GpuBrowserCompositorOutputSurface::SwapBuffers(
     cc::OutputSurfaceFrame frame) {
-  GetCommandBufferProxy()->SetLatencyInfo(frame.latency_info);
+  GetCommandBufferProxy()->AddLatencyInfo(frame.latency_info);
 
   gfx::Size surface_size = frame.size;
   if (reflector_) {
@@ -143,6 +143,11 @@ bool GpuBrowserCompositorOutputSurface::IsDisplayedAsOverlayPlane() const {
 
 unsigned GpuBrowserCompositorOutputSurface::GetOverlayTextureId() const {
   return 0;
+}
+
+gfx::BufferFormat GpuBrowserCompositorOutputSurface::GetOverlayBufferFormat()
+    const {
+  return gfx::BufferFormat::RGBX_8888;
 }
 
 bool GpuBrowserCompositorOutputSurface::SurfaceIsSuspendForRecycle() const {

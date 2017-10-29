@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.history;
 
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.chrome.browser.profiles.Profile;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,8 +16,8 @@ public class BrowsingHistoryBridge implements HistoryProvider {
     private boolean mRemovingItems;
     private boolean mHasPendingRemoveRequest;
 
-    public BrowsingHistoryBridge() {
-        mNativeHistoryBridge = nativeInit(Profile.getLastUsedProfile());
+    public BrowsingHistoryBridge(boolean isIncognito) {
+        mNativeHistoryBridge = nativeInit(isIncognito);
     }
 
     @Override
@@ -41,7 +40,7 @@ public class BrowsingHistoryBridge implements HistoryProvider {
 
     @Override
     public void markItemForRemoval(HistoryItem item) {
-        nativeMarkItemForRemoval(mNativeHistoryBridge, item.getUrl(), item.getTimestamps());
+        nativeMarkItemForRemoval(mNativeHistoryBridge, item.getUrl(), item.getNativeTimestamps());
     }
 
     @Override
@@ -58,10 +57,11 @@ public class BrowsingHistoryBridge implements HistoryProvider {
     }
 
     @CalledByNative
-    public static void createHistoryItemAndAddToList(
-            List<HistoryItem> items, String url, String domain, String title, long[] timestamps,
+    public static void createHistoryItemAndAddToList(List<HistoryItem> items, String url,
+            String domain, String title, long mostRecentJavaTimestamp, long[] nativeTimestamps,
             boolean blockedVisit) {
-        items.add(new HistoryItem(url, domain, title, timestamps, blockedVisit));
+        items.add(new HistoryItem(
+                url, domain, title, mostRecentJavaTimestamp, nativeTimestamps, blockedVisit));
     }
 
     @CalledByNative
@@ -94,11 +94,11 @@ public class BrowsingHistoryBridge implements HistoryProvider {
         }
     }
 
-    private native long nativeInit(Profile profile);
+    private native long nativeInit(boolean isIncognito);
     private native void nativeDestroy(long nativeBrowsingHistoryBridge);
     private native void nativeQueryHistory(long nativeBrowsingHistoryBridge,
             List<HistoryItem> historyItems, String query, long queryEndTime);
-    private native void nativeMarkItemForRemoval(long nativeBrowsingHistoryBridge,
-            String url, long[] timestamps);
+    private native void nativeMarkItemForRemoval(
+            long nativeBrowsingHistoryBridge, String url, long[] nativeTimestamps);
     private native void nativeRemoveItems(long nativeBrowsingHistoryBridge);
 }

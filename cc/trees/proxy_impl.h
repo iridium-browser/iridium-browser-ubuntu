@@ -33,8 +33,9 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
   void UpdateBrowserControlsStateOnImpl(BrowserControlsState constraints,
                                         BrowserControlsState current,
                                         bool animate);
-  void InitializeCompositorFrameSinkOnImpl(
-      CompositorFrameSink* compositor_frame_sink);
+  void InitializeLayerTreeFrameSinkOnImpl(
+      LayerTreeFrameSink* layer_tree_frame_sink,
+      base::WeakPtr<ProxyMain> proxy_main_frame_sink_bound_weak_ptr);
   void InitializeMutatorOnImpl(std::unique_ptr<LayerTreeMutator> mutator);
   void MainThreadHasStoppedFlingingOnImpl();
   void SetInputThrottledUntilCommitOnImpl(bool is_throttled);
@@ -46,7 +47,7 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
       base::TimeTicks main_thread_start_time,
       std::vector<std::unique_ptr<SwapPromise>> swap_promises);
   void SetVisibleOnImpl(bool visible);
-  void ReleaseCompositorFrameSinkOnImpl(CompletionEvent* completion);
+  void ReleaseLayerTreeFrameSinkOnImpl(CompletionEvent* completion);
   void FinishGLOnImpl(CompletionEvent* completion);
   void NotifyReadyToCommitOnImpl(CompletionEvent* completion,
                                  LayerTreeHost* layer_tree_host,
@@ -55,6 +56,10 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
 
   void MainFrameWillHappenOnImplForTesting(CompletionEvent* completion,
                                            bool* main_frame_will_happen);
+
+  void RequestBeginMainFrameNotExpected(bool new_state) override;
+
+  NOINLINE void DumpForBeginMainFrameHang();
 
  private:
   // The members of this struct should be accessed on the impl thread only when
@@ -66,7 +71,7 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
   };
 
   // LayerTreeHostImplClient implementation
-  void DidLoseCompositorFrameSinkOnImplThread() override;
+  void DidLoseLayerTreeFrameSinkOnImplThread() override;
   void SetBeginFrameSource(BeginFrameSource* source) override;
   void DidReceiveCompositorFrameAckOnImplThread() override;
   void OnCanDrawStateChanged(bool can_draw) override;
@@ -89,22 +94,26 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
   void WillPrepareTiles() override;
   void DidPrepareTiles() override;
   void DidCompletePageScaleAnimationOnImplThread() override;
-  void OnDrawForCompositorFrameSink(bool resourceless_software_draw) override;
+  void OnDrawForLayerTreeFrameSink(bool resourceless_software_draw) override;
   void NeedsImplSideInvalidation() override;
+  void NotifyImageDecodeRequestFinished() override;
 
   // SchedulerClient implementation
   void WillBeginImplFrame(const BeginFrameArgs& args) override;
   void DidFinishImplFrame() override;
+  void DidNotProduceFrame(const BeginFrameAck& ack) override;
   void ScheduledActionSendBeginMainFrame(const BeginFrameArgs& args) override;
   DrawResult ScheduledActionDrawIfPossible() override;
   DrawResult ScheduledActionDrawForced() override;
   void ScheduledActionCommit() override;
   void ScheduledActionActivateSyncTree() override;
-  void ScheduledActionBeginCompositorFrameSinkCreation() override;
+  void ScheduledActionBeginLayerTreeFrameSinkCreation() override;
   void ScheduledActionPrepareTiles() override;
-  void ScheduledActionInvalidateCompositorFrameSink() override;
+  void ScheduledActionInvalidateLayerTreeFrameSink() override;
   void ScheduledActionPerformImplSideInvalidation() override;
   void SendBeginMainFrameNotExpectedSoon() override;
+  void ScheduledActionBeginMainFrameNotExpectedUntil(
+      base::TimeTicks time) override;
 
   DrawResult DrawInternal(bool forced_draw);
 
@@ -146,6 +155,10 @@ class CC_EXPORT ProxyImpl : public NON_EXPORTED_BASE(LayerTreeHostImplClient),
 
   // Used to post tasks to ProxyMain on the main thread.
   base::WeakPtr<ProxyMain> proxy_main_weak_ptr_;
+
+  // A weak pointer to ProxyMain that is invalidated when LayerTreeFrameSink is
+  // released.
+  base::WeakPtr<ProxyMain> proxy_main_frame_sink_bound_weak_ptr_;
 
   DISALLOW_COPY_AND_ASSIGN(ProxyImpl);
 };

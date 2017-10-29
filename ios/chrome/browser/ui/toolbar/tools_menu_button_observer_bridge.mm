@@ -6,8 +6,12 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "components/reading_list/ios/reading_list_model.h"
+#include "components/reading_list/core/reading_list_model.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_tools_menu_button.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 @interface ToolsMenuButtonObserverBridge ()
 - (void)updateButtonWithModel:(const ReadingListModel*)model;
@@ -15,7 +19,7 @@
 @end
 
 @implementation ToolsMenuButtonObserverBridge {
-  base::scoped_nsobject<ToolbarToolsMenuButton> _button;
+  ToolbarToolsMenuButton* _button;
   ReadingListModel* _model;
   std::unique_ptr<ReadingListModelBridge> _modelBridge;
 }
@@ -24,7 +28,7 @@
                 toolbarButton:(ToolbarToolsMenuButton*)button {
   self = [super init];
   if (self) {
-    _button.reset([button retain]);
+    _button = button;
     _model = readingListModel;
     [_button addTarget:self
                   action:@selector(buttonPressed:)
@@ -59,6 +63,7 @@
 
 - (void)readingListModelBeingDeleted:(const ReadingListModel*)model {
   DCHECK(model == _model);
+  _modelBridge.reset();
   _model = nullptr;
 }
 

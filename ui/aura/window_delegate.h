@@ -23,6 +23,10 @@ namespace ui {
 class PaintContext;
 }
 
+namespace viz {
+class SurfaceInfo;
+}
+
 namespace aura {
 
 // Delegate interface for aura::Window.
@@ -93,6 +97,8 @@ class AURA_EXPORT WindowDelegate : public ui::EventHandler {
   // Called from Window::HitTest to retrieve hit test mask when HasHitTestMask
   // above returns true.
   virtual void GetHitTestMask(gfx::Path* mask) const = 0;
+
+  virtual void OnWindowSurfaceChanged(const viz::SurfaceInfo& surface_info) {}
 
  protected:
   ~WindowDelegate() override {}

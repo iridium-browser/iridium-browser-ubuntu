@@ -2,22 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/shelf/shelf_layout_manager.h"
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/wm_window.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_layout_manager.h"
+#include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/status_bubble.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chromeos/chromeos_switches.h"
+#include "components/user_manager/user_names.h"
 
-typedef InProcessBrowserTest ShelfBrowserTest;
+using ShelfBrowserTest = InProcessBrowserTest;
 
 // Confirm that a status bubble doesn't cause the shelf to darken.
 IN_PROC_BROWSER_TEST_F(ShelfBrowserTest, StatusBubble) {
   ash::ShelfLayoutManager* shelf_layout_manager =
-      ash::WmShelf::ForWindow(
-          ash::WmWindow::Get(browser()->window()->GetNativeWindow()))
+      ash::Shelf::ForWindow(browser()->window()->GetNativeWindow())
           ->shelf_layout_manager();
   EXPECT_TRUE(shelf_layout_manager->IsVisible());
 
@@ -39,4 +41,24 @@ IN_PROC_BROWSER_TEST_F(ShelfBrowserTest, StatusBubble) {
   bounds.Offset(0, 1);
   browser()->window()->SetBounds(bounds);
   EXPECT_TRUE(shelf_layout_manager->window_overlaps_shelf());
+}
+
+class ShelfGuestSessionBrowserTest : public InProcessBrowserTest {
+ protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(chromeos::switches::kGuestSession);
+    command_line->AppendSwitch(::switches::kIncognito);
+    command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "hash");
+    command_line->AppendSwitchASCII(
+        chromeos::switches::kLoginUser,
+        user_manager::GuestAccountId().GetUserEmail());
+  }
+};
+
+// Tests that in guest session, shelf alignment could be initialized to bottom
+// aligned, instead of bottom locked (crbug.com/699661).
+IN_PROC_BROWSER_TEST_F(ShelfGuestSessionBrowserTest, ShelfAlignment) {
+  ash::Shelf* shelf =
+      ash::Shelf::ForWindow(browser()->window()->GetNativeWindow());
+  EXPECT_EQ(ash::SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
 }

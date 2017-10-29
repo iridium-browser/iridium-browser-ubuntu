@@ -1,11 +1,13 @@
-{% from "macros.tmpl" import license %}
+{% from "templates/macros.tmpl" import license, source_files_for_generated_file %}
 {{ license() }}
+
+{{source_files_for_generated_file(template_file, input_files)}}
 
 #ifndef {{namespace}}ElementLookupTrie_h
 #define {{namespace}}ElementLookupTrie_h
 
 #include "core/CoreExport.h"
-#include "wtf/text/StringImpl.h"
+#include "platform/wtf/text/StringImpl.h"
 
 namespace blink {
 

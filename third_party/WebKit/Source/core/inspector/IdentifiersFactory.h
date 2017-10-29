@@ -27,8 +27,8 @@
 #define IdentifiersFactory_h
 
 #include "core/CoreExport.h"
-#include "wtf/Allocator.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -40,19 +40,19 @@ class CORE_EXPORT IdentifiersFactory {
   STATIC_ONLY(IdentifiersFactory);
 
  public:
-  static String createIdentifier();
+  static String CreateIdentifier();
 
-  static String requestId(unsigned long identifier);
+  static String RequestId(unsigned long identifier);
 
-  static String frameId(LocalFrame*);
-  static LocalFrame* frameById(InspectedFrames*, const String&);
+  static String FrameId(LocalFrame*);
+  static LocalFrame* FrameById(InspectedFrames*, const String&);
 
-  static String loaderId(DocumentLoader*);
-  static DocumentLoader* loaderById(InspectedFrames*, const String&);
+  static String LoaderId(DocumentLoader*);
+  static DocumentLoader* LoaderById(InspectedFrames*, const String&);
 
  private:
-  static String addProcessIdPrefixTo(int id);
-  static int removeProcessIdPrefixFrom(const String&, bool* ok);
+  static String AddProcessIdPrefixTo(int id);
+  static int RemoveProcessIdPrefixFrom(const String&, bool* ok);
 };
 
 }  // namespace blink

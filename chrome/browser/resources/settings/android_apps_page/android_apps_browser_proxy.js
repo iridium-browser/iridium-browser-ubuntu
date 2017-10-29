@@ -8,48 +8,47 @@
  */
 
 /**
- * @typedef {{appReady: boolean}}
+ * Type definition of AndroidAppsInfo entry. |playStoreEnabled| indicates that
+ * Play Store is enabled. |settingsAppAvailable| indicates that Android settings
+ * app is registered in the system.
+ * @typedef {{
+ *   playStoreEnabled: boolean,
+ *   settingsAppAvailable: boolean,
+ * }}
  * @see chrome/browser/ui/webui/settings/chromeos/android_apps_handler.cc
  */
 var AndroidAppsInfo;
 
 cr.define('settings', function() {
   /** @interface */
-  function AndroidAppsBrowserProxy() {
-  }
-
-  AndroidAppsBrowserProxy.prototype = {
-    requestAndroidAppsInfo: function() {},
+  class AndroidAppsBrowserProxy {
+    requestAndroidAppsInfo() {}
 
     /**
      * @param {boolean} keyboardAction True if the app was opened using a
      *     keyboard action.
      */
-    showAndroidAppsSettings: function(keyboardAction) {},
-  };
+    showAndroidAppsSettings(keyboardAction) {}
+  }
 
   /**
-   * @constructor
    * @implements {settings.AndroidAppsBrowserProxy}
    */
-  function AndroidAppsBrowserProxyImpl() {
+  class AndroidAppsBrowserProxyImpl {
+    /** @override */
+    requestAndroidAppsInfo() {
+      chrome.send('requestAndroidAppsInfo');
+    }
+
+    /** @override */
+    showAndroidAppsSettings(keyboardAction) {
+      chrome.send('showAndroidAppsSettings', [keyboardAction]);
+    }
   }
 
   // The singleton instance_ can be replaced with a test version of this wrapper
   // during testing.
   cr.addSingletonGetter(AndroidAppsBrowserProxyImpl);
-
-  AndroidAppsBrowserProxyImpl.prototype = {
-    /** @override */
-    requestAndroidAppsInfo: function() {
-      chrome.send('requestAndroidAppsInfo');
-    },
-
-    /** @override */
-    showAndroidAppsSettings: function(keyboardAction) {
-      chrome.send('showAndroidAppsSettings', [keyboardAction]);
-    },
-  };
 
   return {
     AndroidAppsBrowserProxy: AndroidAppsBrowserProxy,

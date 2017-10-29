@@ -45,6 +45,7 @@ import org.chromium.base.TraceEvent;
 import org.chromium.content.app.ContentApplication;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.common.ContentUrlConstants;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -55,7 +56,7 @@ import java.net.URISyntaxException;
 public class AwShellActivity extends Activity {
     private static final String TAG = "cr.AwShellActivity";
     private static final String PREFERENCES_NAME = "AwShellPrefs";
-    private static final String INITIAL_URL = "about:blank";
+    private static final String INITIAL_URL = ContentUrlConstants.ABOUT_BLANK_DISPLAY_URL;
     private AwBrowserContext mBrowserContext;
     private AwDevToolsServer mDevToolsServer;
     private AwTestContainerView mAwTestContainerView;
@@ -246,7 +247,7 @@ public class AwShellActivity extends Activity {
                 mNextButton.setVisibility(hasFocus ? View.GONE : View.VISIBLE);
                 mPrevButton.setVisibility(hasFocus ? View.GONE : View.VISIBLE);
                 if (!hasFocus) {
-                    mUrlTextView.setText(mWebContents.getUrl());
+                    mUrlTextView.setText(mWebContents.getVisibleUrl());
                 }
             }
         });

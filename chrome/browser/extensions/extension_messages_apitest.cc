@@ -24,6 +24,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/messaging/incognito_connectability.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/test_extension_dir.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -39,8 +40,11 @@
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/browser/process_manager.h"
+#include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/common/api/runtime.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/value_builder.h"
@@ -82,9 +86,9 @@ class MessageSender : public content::NotificationObserver {
       std::unique_ptr<base::ListValue> event_args,
       Profile* profile,
       GURL event_url) {
-    std::unique_ptr<Event> event(new Event(
-        events::TEST_ON_MESSAGE, "test.onMessage", std::move(event_args)));
-    event->restrict_to_browser_context = profile;
+    auto event =
+        base::MakeUnique<Event>(events::TEST_ON_MESSAGE, "test.onMessage",
+                                std::move(event_args), profile);
     event->event_url = event_url;
     return event;
   }
@@ -120,21 +124,29 @@ class MessageSender : public content::NotificationObserver {
   content::NotificationRegistrar registrar_;
 };
 
+class MessagingApiTest : public ExtensionApiTest {
+ public:
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
+    ASSERT_TRUE(StartEmbeddedTestServer());
+  }
+};
+
 // Tests that message passing between extensions and content scripts works.
-#if defined(MEMORY_SANITIZER) || defined(OS_MACOSX)
+#if defined(MEMORY_SANITIZER) || defined(OS_MACOSX) || defined(OS_WIN)
 // https://crbug.com/582185 - flakily times out on Linux/CrOS MSAN
 // https://crbug.com/681705 - flakily times out on mac_chromium_rel_ng
+// https://crbug.com/681705 - flakily times out on win_chromium_rel_ng
 #define MAYBE_Messaging DISABLED_Messaging
 #else
 #define MAYBE_Messaging Messaging
 #endif
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_Messaging) {
-  ASSERT_TRUE(StartEmbeddedTestServer());
+IN_PROC_BROWSER_TEST_F(MessagingApiTest, MAYBE_Messaging) {
   ASSERT_TRUE(RunExtensionTest("messaging/connect")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingCrash) {
-  ASSERT_TRUE(StartEmbeddedTestServer());
+IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingCrash) {
   ExtensionTestMessageListener ready_to_crash("ready_to_crash", false);
   ASSERT_TRUE(LoadExtension(
           test_data_dir_.AppendASCII("messaging/connect_crash")));
@@ -150,7 +162,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingCrash) {
 }
 
 // Tests that message passing from one extension to another works.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingExternal) {
+IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingExternal) {
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("..").AppendASCII("good")
                     .AppendASCII("Extensions")
@@ -162,27 +174,26 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingExternal) {
 
 // Tests that a content script can exchange messages with a tab even if there is
 // no background page.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingNoBackground) {
-  ASSERT_TRUE(StartEmbeddedTestServer());
+IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingNoBackground) {
   ASSERT_TRUE(RunExtensionSubtest("messaging/connect_nobackground",
                                   "page_in_main_frame.html")) << message_;
 }
 
 // Tests that messages with event_urls are only passed to extensions with
 // appropriate permissions.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingEventURL) {
+IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingEventURL) {
   MessageSender sender;
   ASSERT_TRUE(RunExtensionTest("messaging/event_url")) << message_;
 }
 
 // Tests that messages cannot be received from the same frame.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingBackgroundOnly) {
+IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingBackgroundOnly) {
   ASSERT_TRUE(RunExtensionTest("messaging/background_only")) << message_;
 }
 
 // Tests whether an extension in an interstitial page can send messages to the
 // background page.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingInterstitial) {
+IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingInterstitial) {
   net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
   https_server.SetSSLConfig(net::EmbeddedTestServer::CERT_MISMATCHED_NAME);
   ASSERT_TRUE(https_server.Start());
@@ -202,7 +213,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingInterstitial) {
 // but not with externally_connectable set in the manifest.
 //
 // TODO(kalman): Test with host permissions.
-class ExternallyConnectableMessagingTest : public ExtensionApiTest {
+class ExternallyConnectableMessagingTest : public MessagingApiTest {
  protected:
   // Result codes from the test. These must match up with |results| in
   // c/t/d/extensions/api_test/externally_connectable/assertions.json.
@@ -348,17 +359,16 @@ class ExternallyConnectableMessagingTest : public ExtensionApiTest {
   }
 
   scoped_refptr<const Extension> LoadChromiumConnectableExtension() {
-    scoped_refptr<const Extension> extension =
-        LoadExtensionIntoDir(&web_connectable_dir_,
-                             base::StringPrintf(
-                                 "{"
-                                 "  \"name\": \"chromium_connectable\","
-                                 "  %s,"
-                                 "  \"externally_connectable\": {"
-                                 "    \"matches\": [\"*://*.chromium.org:*/*\"]"
-                                 "  }"
-                                 "}",
-                                 common_manifest()));
+    scoped_refptr<const Extension> extension = LoadExtensionIntoDir(
+        &web_connectable_dir_extension_,
+        base::StringPrintf("{"
+                           "  \"name\": \"chromium_connectable\","
+                           "  %s,"
+                           "  \"externally_connectable\": {"
+                           "    \"matches\": [\"*://*.chromium.org:*/*\"]"
+                           "  }"
+                           "}",
+                           common_manifest()));
     CHECK(extension.get());
     return extension;
   }
@@ -366,7 +376,7 @@ class ExternallyConnectableMessagingTest : public ExtensionApiTest {
   scoped_refptr<const Extension> LoadChromiumConnectableApp(
       bool with_event_handlers = true) {
     scoped_refptr<const Extension> extension =
-        LoadExtensionIntoDir(&web_connectable_dir_,
+        LoadExtensionIntoDir(&web_connectable_dir_app_,
                              "{"
                              "  \"app\": {"
                              "    \"background\": {"
@@ -425,13 +435,12 @@ class ExternallyConnectableMessagingTest : public ExtensionApiTest {
     return hosted_app;
   }
 
-  void InitializeTestServer() {
+  void SetUpOnMainThread() override {
     base::FilePath test_data;
     EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data));
     embedded_test_server()->ServeFilesFromDirectory(test_data.AppendASCII(
         "extensions/api_test/messaging/externally_connectable/sites"));
-    ASSERT_TRUE(embedded_test_server()->Start());
-    host_resolver()->AddRule("*", embedded_test_server()->base_url().host());
+    MessagingApiTest::SetUpOnMainThread();
   }
 
   const char* close_background_message() {
@@ -509,15 +518,14 @@ class ExternallyConnectableMessagingTest : public ExtensionApiTest {
     return result;
   }
 
-  TestExtensionDir web_connectable_dir_;
+  TestExtensionDir web_connectable_dir_extension_;
+  TestExtensionDir web_connectable_dir_app_;
   TestExtensionDir not_connectable_dir_;
   TestExtensionDir tls_channel_id_connectable_dir_;
   TestExtensionDir hosted_app_dir_;
 };
 
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, NotInstalled) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> extension =
       ExtensionBuilder()
           .SetID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -542,8 +550,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, NotInstalled) {
 // Tests two extensions on the same sites: one web connectable, one not.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        WebConnectableAndNotConnectable) {
-  InitializeTestServer();
-
   // Install the web connectable extension. chromium.org can connect to it,
   // google.com can't.
   scoped_refptr<const Extension> chromium_connectable =
@@ -579,8 +585,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 // See http://crbug.com/297866
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        DISABLED_BackgroundPageClosesOnMessageReceipt) {
-  InitializeTestServer();
-
   // Install the web connectable extension.
   scoped_refptr<const Extension> chromium_connectable =
       LoadChromiumConnectableExtension();
@@ -599,8 +603,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 // Tests a web connectable extension that doesn't receive TLS channel id.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        WebConnectableWithoutTlsChannelId) {
-  InitializeTestServer();
-
   // Install the web connectable extension. chromium.org can connect to it,
   // google.com can't.
   scoped_refptr<const Extension> chromium_connectable =
@@ -624,8 +626,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 // that can't connect to it.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        WebConnectableWithTlsChannelIdWithNonMatchingSite) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> chromium_connectable =
       LoadChromiumConnectableExtensionWithTlsChannelId();
   ASSERT_TRUE(chromium_connectable.get());
@@ -647,8 +647,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 // that can connect to it, but with no TLS channel ID having been generated.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        WebConnectableWithTlsChannelIdWithEmptyTlsChannelId) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> chromium_connectable =
       LoadChromiumConnectableExtensionWithTlsChannelId();
   ASSERT_TRUE(chromium_connectable.get());
@@ -674,8 +672,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 // immediately closes its background page upon receipt of a message.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
     DISABLED_WebConnectableWithEmptyTlsChannelIdAndClosedBackgroundPage) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> chromium_connectable =
       LoadChromiumConnectableExtensionWithTlsChannelId();
 
@@ -702,8 +698,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 // host.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        EnablingAndDisabling) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> chromium_connectable =
       LoadChromiumConnectableExtension();
   scoped_refptr<const Extension> not_connectable =
@@ -736,8 +730,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 // TODO(kalman): test messages from incognito extensions too.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        FromIncognitoDenyApp) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> app = LoadChromiumConnectableApp();
   ASSERT_TRUE(app->is_platform_app());
 
@@ -771,10 +763,9 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
-                       FromIncognitoDenyExtension) {
-  InitializeTestServer();
-
+                       FromIncognitoDenyExtensionAndApp) {
   scoped_refptr<const Extension> extension = LoadChromiumConnectableExtension();
+  EXPECT_FALSE(util::IsIncognitoEnabled(extension->id(), profile()));
 
   Browser* incognito_browser = OpenURLOffTheRecord(
       profile()->GetOffTheRecordProfile(), chromium_org_url());
@@ -783,30 +774,45 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
           ->GetActiveWebContents()
           ->GetMainFrame();
 
-  {
-    IncognitoConnectability::ScopedAlertTracker alert_tracker(
-        IncognitoConnectability::ScopedAlertTracker::ALWAYS_DENY);
+  IncognitoConnectability::ScopedAlertTracker alert_tracker(
+      IncognitoConnectability::ScopedAlertTracker::ALWAYS_DENY);
 
-    // The alert doesn't show for extensions.
-    EXPECT_EQ(COULD_NOT_ESTABLISH_CONNECTION_ERROR,
-              CanConnectAndSendMessagesToFrame(
-                  incognito_frame, extension.get(), NULL));
-    EXPECT_EQ(0, alert_tracker.GetAndResetAlertCount());
-  }
+  // |extension| won't be loaded in the incognito renderer since it's not
+  // enabled for incognito. Since there is no externally connectible extension
+  // loaded into the incognito renderer, the chrome.runtime API won't be
+  // defined.
+  EXPECT_EQ(NAMESPACE_NOT_DEFINED,
+            CanConnectAndSendMessagesToFrame(incognito_frame, extension.get(),
+                                             nullptr));
 
-  // Allowing the extension in incognito mode will bypass the deny.
-  ExtensionPrefs::Get(profile())->SetIsIncognitoEnabled(extension->id(), true);
-  EXPECT_EQ(
-      OK,
-      CanConnectAndSendMessagesToFrame(incognito_frame, extension.get(), NULL));
+  // Loading a platform app in the renderer should cause the chrome.runtime
+  // bindings to be generated in the renderer. A platform app is always loaded
+  // in the incognito renderer.
+  LoadChromiumConnectableApp();
+  EXPECT_EQ(COULD_NOT_ESTABLISH_CONNECTION_ERROR,
+            CanConnectAndSendMessagesToFrame(incognito_frame, extension.get(),
+                                             nullptr));
+
+  // Allowing the extension in incognito mode loads the extension in the
+  // incognito renderer, allowing it to receive connections.
+  TestExtensionRegistryObserver observer(
+      ExtensionRegistry::Get(profile()->GetOffTheRecordProfile()),
+      extension->id());
+  util::SetIsIncognitoEnabled(extension->id(),
+                              profile()->GetOffTheRecordProfile(), true);
+  const Extension* loaded_extension = observer.WaitForExtensionLoaded();
+  EXPECT_EQ(OK, CanConnectAndSendMessagesToFrame(incognito_frame,
+                                                 loaded_extension, nullptr));
+
+  // No alert is shown for extensions since they support being enabled in
+  // incognito mode.
+  EXPECT_EQ(0, alert_tracker.GetAndResetAlertCount());
 }
 
 // Tests connection from incognito tabs when the extension doesn't have an event
 // handler for the connection event.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        FromIncognitoNoEventHandlerInApp) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> app = LoadChromiumConnectableApp(false);
   ASSERT_TRUE(app->is_platform_app());
 
@@ -837,8 +843,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 // TODO(kalman): see comment above about split mode.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        FromIncognitoAllowApp) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> app = LoadChromiumConnectableApp();
   ASSERT_TRUE(app->is_platform_app());
 
@@ -874,8 +878,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 // same origin. The user should only need to accept the connection request once.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        FromIncognitoPromptApp) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> app = LoadChromiumConnectableApp();
   ASSERT_TRUE(app->is_platform_app());
 
@@ -935,7 +937,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, IllegalArguments) {
   // Tests that malformed arguments to connect() don't crash.
   // Regression test for crbug.com/472700.
-  InitializeTestServer();
   LoadChromiumConnectableExtension();
   ui_test_utils::NavigateToURL(browser(), chromium_org_url());
   bool result;
@@ -947,9 +948,8 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, IllegalArguments) {
 
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        FromIncognitoAllowExtension) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> extension = LoadChromiumConnectableExtension();
+  EXPECT_FALSE(util::IsIncognitoEnabled(extension->id(), profile()));
 
   Browser* incognito_browser = OpenURLOffTheRecord(
       profile()->GetOffTheRecordProfile(), chromium_org_url());
@@ -958,30 +958,38 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
           ->GetActiveWebContents()
           ->GetMainFrame();
 
-  {
-    IncognitoConnectability::ScopedAlertTracker alert_tracker(
-        IncognitoConnectability::ScopedAlertTracker::ALWAYS_ALLOW);
+  IncognitoConnectability::ScopedAlertTracker alert_tracker(
+      IncognitoConnectability::ScopedAlertTracker::ALWAYS_ALLOW);
 
-    // No alert is shown.
-    EXPECT_EQ(COULD_NOT_ESTABLISH_CONNECTION_ERROR,
-              CanConnectAndSendMessagesToFrame(
-                  incognito_frame, extension.get(), NULL));
-    EXPECT_EQ(0, alert_tracker.GetAndResetAlertCount());
-  }
+  // |extension| won't be loaded in the incognito renderer since it's not
+  // enabled for incognito. Since there is no externally connectible extension
+  // loaded into the incognito renderer, the chrome.runtime API won't be
+  // defined.
+  EXPECT_EQ(NAMESPACE_NOT_DEFINED,
+            CanConnectAndSendMessagesToFrame(incognito_frame, extension.get(),
+                                             nullptr));
 
-  // Allowing the extension in incognito mode is what allows connections.
-  ExtensionPrefs::Get(profile())->SetIsIncognitoEnabled(extension->id(), true);
-  EXPECT_EQ(
-      OK,
-      CanConnectAndSendMessagesToFrame(incognito_frame, extension.get(), NULL));
+  // Allowing the extension in incognito mode loads the extension in the
+  // incognito renderer, causing the chrome.runtime bindings to be generated in
+  // the renderer and allowing the extension to receive connections.
+  TestExtensionRegistryObserver observer(
+      ExtensionRegistry::Get(profile()->GetOffTheRecordProfile()),
+      extension->id());
+  util::SetIsIncognitoEnabled(extension->id(),
+                              profile()->GetOffTheRecordProfile(), true);
+  const Extension* loaded_extension = observer.WaitForExtensionLoaded();
+  EXPECT_EQ(OK, CanConnectAndSendMessagesToFrame(incognito_frame,
+                                                 loaded_extension, nullptr));
+
+  // No alert is shown for extensions which support being enabled in incognito
+  // mode.
+  EXPECT_EQ(0, alert_tracker.GetAndResetAlertCount());
 }
 
 // Tests a connection from an iframe within a tab which doesn't have
 // permission. Iframe should work.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        FromIframeWithPermission) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> extension = LoadChromiumConnectableExtension();
 
   ui_test_utils::NavigateToURL(browser(), google_com_url());
@@ -999,8 +1007,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 // Iframe shouldn't work.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        FromIframeWithoutPermission) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> extension = LoadChromiumConnectableExtension();
 
   ui_test_utils::NavigateToURL(browser(), chromium_org_url());
@@ -1018,7 +1024,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, FromPopup) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePopupBlocking);
 
-  InitializeTestServer();
   scoped_refptr<const Extension> extension = LoadChromiumConnectableExtension();
 
   // This will let us wait for the chromium.org.html page to load in a popup.
@@ -1068,10 +1073,11 @@ class ExternallyConnectableMessagingWithTlsChannelIdTest :
     net::ChannelIDService::Request request;
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
-        base::Bind(&ExternallyConnectableMessagingWithTlsChannelIdTest::
-                       CreateDomainBoundCertOnIOThread,
-                   base::Unretained(this), base::Unretained(&channel_id_key),
-                   base::Unretained(&request), request_context_getter));
+        base::BindOnce(&ExternallyConnectableMessagingWithTlsChannelIdTest::
+                           CreateDomainBoundCertOnIOThread,
+                       base::Unretained(this),
+                       base::Unretained(&channel_id_key),
+                       base::Unretained(&request), request_context_getter));
     tls_channel_id_created_.Wait();
     // Create the expected value.
     std::vector<uint8_t> spki_vector;
@@ -1118,7 +1124,6 @@ class ExternallyConnectableMessagingWithTlsChannelIdTest :
 // that can connect to it, with a TLS channel ID having been generated.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingWithTlsChannelIdTest,
                        WebConnectableWithNonEmptyTlsChannelId) {
-  InitializeTestServer();
   std::string expected_tls_channel_id_value = CreateTlsChannelId();
 
   scoped_refptr<const Extension> chromium_connectable =
@@ -1175,7 +1180,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingWithTlsChannelIdTest,
 // Same flakiness seen in http://crbug.com/297866
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingWithTlsChannelIdTest,
     DISABLED_WebConnectableWithNonEmptyTlsChannelIdAndClosedBackgroundPage) {
-  InitializeTestServer();
   std::string expected_tls_channel_id_value = CreateTlsChannelId();
 
   scoped_refptr<const Extension> chromium_connectable =
@@ -1243,8 +1247,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingUserGesture) {
 // Tests that a hosted app on a connectable site doesn't interfere with the
 // connectability of that site.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, HostedAppOnWebsite) {
-  InitializeTestServer();
-
   scoped_refptr<const Extension> app = LoadChromiumHostedApp();
 
   // The presence of the hosted app shouldn't give the ability to send messages.
@@ -1265,8 +1267,6 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, HostedAppOnWebsite) {
 // This is a regression test for http://crbug.com/326250#c12.
 IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
                        InvalidExtensionIDFromHostedApp) {
-  InitializeTestServer();
-
   // The presence of the chromium hosted app triggers this bug. The chromium
   // connectable extension needs to be installed to set up the runtime bindings.
   LoadChromiumHostedApp();
@@ -1291,9 +1291,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
 #endif  // !defined(OS_WIN) - http://crbug.com/350517.
 
 // Tests that messages sent in the unload handler of a window arrive.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingOnUnload) {
-  host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(StartEmbeddedTestServer());
+IN_PROC_BROWSER_TEST_F(MessagingApiTest, MessagingOnUnload) {
   const Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("messaging/on_unload"));
   ExtensionTestMessageListener listener("listening", false);

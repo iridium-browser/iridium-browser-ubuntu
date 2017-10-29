@@ -35,10 +35,6 @@
                          checked to determine if loaded. */
 }
 
-.disable-pin-animation .pin-container {
-  transition: none;
-}
-
 #scroll-container {
   bottom: 0;        /* Allows content overlap with control bar. */
   left: 0;
@@ -67,20 +63,6 @@
   pointer-events: none;
 }
 
-#oobe-shield {
-  display: none;
-}
-
-#oobe-shield[md-mode] {
-  background-color: rgba(20, 29, 40, .8); /* #141D28 80% */
-  display: block;
-  height: 100%;
-  left: 0;
-  position: absolute;
-  top: 0;
-  width: 100%;
-}
-
 #oobe[md-mode] #progress-dots {
   display: none;
 }
@@ -100,7 +82,7 @@
 #oobe.oauth-enrollment #inner-container,
 #oobe.password-changed #inner-container,
 #oobe.ad-password-change #inner-container,
-#oobe.reset #inner-container,
+#oobe:not([md-mode]).reset #inner-container,
 #oobe.supervised-user-creation #inner-container,
 #oobe.supervised-user-creation-dialog #inner-container,
 #oobe.terms-of-service #inner-container,

@@ -10,8 +10,10 @@
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/message_loop/message_loop.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
 #include "ios/web/public/browser_state.h"
@@ -30,8 +32,9 @@ base::LazyInstance<base::Lock>::Leaky g_delete_lock = LAZY_INSTANCE_INITIALIZER;
 
 URLDataManagerIOS* GetFromBrowserState(BrowserState* browser_state) {
   if (!browser_state->GetUserData(kURLDataManagerIOSKeyName)) {
-    browser_state->SetUserData(kURLDataManagerIOSKeyName,
-                               new URLDataManagerIOS(browser_state));
+    browser_state->SetUserData(
+        kURLDataManagerIOSKeyName,
+        base::MakeUnique<URLDataManagerIOS>(browser_state));
   }
   return static_cast<URLDataManagerIOS*>(
       browser_state->GetUserData(kURLDataManagerIOSKeyName));
@@ -127,8 +130,7 @@ bool URLDataManagerIOS::IsScheduledForDeletion(
   base::AutoLock lock(g_delete_lock.Get());
   if (!data_sources_)
     return false;
-  return std::find(data_sources_->begin(), data_sources_->end(), data_source) !=
-         data_sources_->end();
+  return base::ContainsValue(*data_sources_, data_source);
 }
 
 }  // namespace web

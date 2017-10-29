@@ -13,6 +13,7 @@ found in the LICENSE file.
 <link rel="import" href="/components/paper-listbox/paper-listbox.html">
 <link rel="import" href="/components/polymer/polymer.html">
 
+<link rel="import" href="/dashboard/elements/speed-releasing-alerts.html">
 <link rel="import" href="/dashboard/elements/speed-releasing-landing-page.html">
 <link rel="import" href="/dashboard/elements/speed-releasing-table.html">
 <link rel="import" href="/dashboard/static/uri.html">
@@ -57,6 +58,8 @@ found in the LICENSE file.
           <template is="dom-if" if="{{!showList}}">
             <speed-releasing-table table-name="{{tableName}}">
             </speed-releasing-table>
+            <speed-releasing-alerts table-name="{{tableName}}">
+            </speed-releasing-alerts>
           </template>
           <template is="dom-if" if="{{showList}}">
             <speed-releasing-landing-page list="{{tableList}}">
@@ -96,17 +99,17 @@ found in the LICENSE file.
         },
       },
 
-      ready: function() {
-        var params = {};
-        var path = uri.getPathName();
+      ready() {
+        const params = {};
+        let path = uri.getPathName();
         if (!path) { // Go get the list.
           path = '';
           simple_xhr.send('/speed_releasing/' + path, params,
               function(response) {
                 this.loading = false;
-                this.tableName = response['name'];
-                this.showList = response['show_list'];
-                this.tableList = response['list'];
+                this.tableName = response.name;
+                this.showList = response.show_list;
+                this.tableList = response.list;
               }.bind(this),
               function(msg) {
                 this.error = msg;

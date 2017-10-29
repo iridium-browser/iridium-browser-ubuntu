@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace chromeos {
@@ -37,14 +38,14 @@ class FreezerCgroupProcessManager::FileWorker {
         file_thread_(file_thread),
         enabled_(false),
         froze_successfully_(false) {
-    DCHECK(ui_thread_->RunsTasksOnCurrentThread());
+    DCHECK(ui_thread_->RunsTasksInCurrentSequence());
   }
 
   // Called on FILE thread.
-  virtual ~FileWorker() { DCHECK(file_thread_->RunsTasksOnCurrentThread()); }
+  virtual ~FileWorker() { DCHECK(file_thread_->RunsTasksInCurrentSequence()); }
 
   void Start() {
-    DCHECK(file_thread_->RunsTasksOnCurrentThread());
+    DCHECK(file_thread_->RunsTasksInCurrentSequence());
 
     default_control_path_ = base::FilePath(kFreezerPath).Append(kCgroupProcs);
     to_be_frozen_control_path_ = base::FilePath(kFreezerPath)
@@ -64,7 +65,7 @@ class FreezerCgroupProcessManager::FileWorker {
   }
 
   void SetShouldFreezeRenderer(base::ProcessHandle handle, bool frozen) {
-    DCHECK(file_thread_->RunsTasksOnCurrentThread());
+    DCHECK(file_thread_->RunsTasksInCurrentSequence());
 
     WriteCommandToFile(base::IntToString(handle),
                        frozen ? to_be_frozen_control_path_
@@ -72,7 +73,7 @@ class FreezerCgroupProcessManager::FileWorker {
   }
 
   void FreezeRenderers() {
-    DCHECK(file_thread_->RunsTasksOnCurrentThread());
+    DCHECK(file_thread_->RunsTasksInCurrentSequence());
 
     if (!enabled_) {
       LOG(ERROR) << "Attempting to freeze renderers when the freezer cgroup is "
@@ -85,7 +86,7 @@ class FreezerCgroupProcessManager::FileWorker {
   }
 
   void ThawRenderers(ResultCallback callback) {
-    DCHECK(file_thread_->RunsTasksOnCurrentThread());
+    DCHECK(file_thread_->RunsTasksInCurrentSequence());
 
     if (!enabled_) {
       LOG(ERROR) << "Attempting to thaw renderers when the freezer cgroup is "
@@ -105,7 +106,7 @@ class FreezerCgroupProcessManager::FileWorker {
   }
 
   void CheckCanFreezeRenderers(ResultCallback callback) {
-    DCHECK(file_thread_->RunsTasksOnCurrentThread());
+    DCHECK(file_thread_->RunsTasksInCurrentSequence());
 
     ui_thread_->PostTask(FROM_HERE, base::Bind(callback, enabled_));
   }
@@ -146,8 +147,8 @@ class FreezerCgroupProcessManager::FileWorker {
 };
 
 FreezerCgroupProcessManager::FreezerCgroupProcessManager()
-    : file_thread_(content::BrowserThread::GetTaskRunnerForThread(
-          content::BrowserThread::FILE)),
+    : file_thread_(base::CreateSequencedTaskRunnerWithTraits(
+          {base::TaskPriority::BACKGROUND, base::MayBlock()})),
       file_worker_(new FileWorker(file_thread_)) {
   file_thread_->PostTask(FROM_HERE,
                          base::Bind(&FileWorker::Start,

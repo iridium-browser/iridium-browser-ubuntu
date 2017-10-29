@@ -24,6 +24,7 @@ component("mus") {
     "mus_client.h",
     "mus_client_observer.h",
     "mus_export.h",
+    "mus_property_mirror.h",
     "pointer_watcher_event_router.cc",
     "pointer_watcher_event_router.h",
     "screen_mus.cc",
@@ -48,8 +49,6 @@ component("mus") {
     "//base/third_party/dynamic_annotations",
     "//cc",
     "//cc/surfaces",
-    "//components/discardable_memory/client",
-    "//components/discardable_memory/public/interfaces",
     "//mojo/common",
     "//mojo/public/cpp/bindings",
     "//net",
@@ -77,6 +76,7 @@ component("mus") {
     "//ui/platform_window/stub",
     "//ui/views",
     "//ui/wm",
+    "//ui/wm/public",
   ]
 
   if (is_linux && !is_android) {
@@ -125,17 +125,22 @@ static_library("test_support") {
     "//mojo/edk/system",
     "//services/catalog:lib",
     "//services/service_manager/background:lib",
-    "//services/service_manager/public/cpp:sources",
+    "//services/service_manager/public/cpp",
     "//services/ui/common:mus_common",
     "//testing/gtest",
     "//ui/aura",
     "//ui/aura:test_support",
+    "//ui/compositor:test_support",
     "//ui/gl:test_support",
     "//ui/resources",
     "//ui/resources:ui_test_pak",
     "//ui/views",
     "//ui/views:test_support_internal",
   ]
+
+  if (use_ozone) {
+    deps += [ "//ui/ozone" ]
+  }
 
   data_deps = [
     ":views_mus_tests_catalog",
@@ -230,6 +235,7 @@ test("views_mus_interactive_ui_tests") {
   sources = [
     "../widget/widget_interactive_uitest.cc",
     "clipboard_unittest.cc",
+    "drag_interactive_uitest.cc",
     "interactive_ui_tests_mus.cc",
   ]
 
@@ -237,9 +243,11 @@ test("views_mus_interactive_ui_tests") {
     ":mus",
     ":test_support",
     "//base",
+    "//mojo/edk/system",
     "//testing/gmock",
     "//testing/gtest",
     "//ui/aura",
+    "//ui/aura:test_support",
     "//ui/base",
     "//ui/base/ime",
     "//ui/events:events_base",
@@ -249,6 +257,7 @@ test("views_mus_interactive_ui_tests") {
     "//ui/views",
     "//ui/views:test_support_internal",
     "//ui/wm",
+    "//ui/wm/public",
   ]
 
   data_deps = [

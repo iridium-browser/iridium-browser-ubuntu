@@ -20,9 +20,8 @@ void MockBeginFrameObserver::AsValueInto(
 
 MockBeginFrameObserver::MockBeginFrameObserver()
     : last_begin_frame_args(kDefaultBeginFrameArgs) {
-  EXPECT_CALL(*this, LastUsedBeginFrameArgs())
-      .Times(::testing::AnyNumber())
-      .WillRepeatedly(::testing::ReturnPointee(&last_begin_frame_args));
+  ON_CALL(*this, LastUsedBeginFrameArgs())
+      .WillByDefault(::testing::ReturnPointee(&last_begin_frame_args));
 }
 
 MockBeginFrameObserver::~MockBeginFrameObserver() {}
@@ -35,7 +34,7 @@ const BeginFrameArgs MockBeginFrameObserver::kDefaultBeginFrameArgs =
         FROM_HERE_WITH_EXPLICIT_FUNCTION(
             "MockBeginFrameObserver::kDefaultBeginFrameArgs"),
 #endif
-        UINT32_MAX,
+        BeginFrameArgs::kManualSourceId,
         BeginFrameArgs::kStartingFrameNumber,
         -1,
         -1,

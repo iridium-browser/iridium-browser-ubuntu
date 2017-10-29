@@ -14,7 +14,10 @@
 
 #include "base/barrier_closure.h"
 #include "base/memory/ptr_util.h"
+#include "base/values.h"
 #include "device/base/device_client.h"
+#include "device/usb/public/cpp/filter_utils.h"
+#include "device/usb/public/interfaces/device_manager.mojom.h"
 #include "device/usb/usb_descriptors.h"
 #include "device/usb/usb_device_handle.h"
 #include "device/usb/usb_service.h"
@@ -49,15 +52,17 @@ namespace ResetDevice = usb::ResetDevice;
 namespace SetInterfaceAlternateSetting = usb::SetInterfaceAlternateSetting;
 
 using content::BrowserThread;
+using device::mojom::UsbDeviceFilterPtr;
 using device::UsbConfigDescriptor;
+using device::UsbControlTransferRecipient;
+using device::UsbControlTransferType;
 using device::UsbDevice;
-using device::UsbDeviceFilter;
 using device::UsbDeviceHandle;
 using device::UsbEndpointDescriptor;
-using device::UsbEndpointDirection;
 using device::UsbInterfaceDescriptor;
 using device::UsbService;
 using device::UsbSynchronizationType;
+using device::UsbTransferDirection;
 using device::UsbTransferStatus;
 using device::UsbTransferType;
 using device::UsbUsageType;
@@ -126,13 +131,13 @@ const int kMaxPackets = 4 * 1024 * 1024;
 const int kMaxPacketLength = 64 * 1024;
 
 bool ConvertDirectionFromApi(const Direction& input,
-                             UsbEndpointDirection* output) {
+                             UsbTransferDirection* output) {
   switch (input) {
     case usb::DIRECTION_IN:
-      *output = device::USB_DIRECTION_INBOUND;
+      *output = UsbTransferDirection::INBOUND;
       return true;
     case usb::DIRECTION_OUT:
-      *output = device::USB_DIRECTION_OUTBOUND;
+      *output = UsbTransferDirection::OUTBOUND;
       return true;
     default:
       NOTREACHED();
@@ -141,19 +146,19 @@ bool ConvertDirectionFromApi(const Direction& input,
 }
 
 bool ConvertRequestTypeFromApi(const RequestType& input,
-                               UsbDeviceHandle::TransferRequestType* output) {
+                               UsbControlTransferType* output) {
   switch (input) {
     case usb::REQUEST_TYPE_STANDARD:
-      *output = UsbDeviceHandle::STANDARD;
+      *output = UsbControlTransferType::STANDARD;
       return true;
     case usb::REQUEST_TYPE_CLASS:
-      *output = UsbDeviceHandle::CLASS;
+      *output = UsbControlTransferType::CLASS;
       return true;
     case usb::REQUEST_TYPE_VENDOR:
-      *output = UsbDeviceHandle::VENDOR;
+      *output = UsbControlTransferType::VENDOR;
       return true;
     case usb::REQUEST_TYPE_RESERVED:
-      *output = UsbDeviceHandle::RESERVED;
+      *output = UsbControlTransferType::RESERVED;
       return true;
     default:
       NOTREACHED();
@@ -162,19 +167,19 @@ bool ConvertRequestTypeFromApi(const RequestType& input,
 }
 
 bool ConvertRecipientFromApi(const Recipient& input,
-                             UsbDeviceHandle::TransferRecipient* output) {
+                             UsbControlTransferRecipient* output) {
   switch (input) {
     case usb::RECIPIENT_DEVICE:
-      *output = UsbDeviceHandle::DEVICE;
+      *output = UsbControlTransferRecipient::DEVICE;
       return true;
     case usb::RECIPIENT_INTERFACE:
-      *output = UsbDeviceHandle::INTERFACE;
+      *output = UsbControlTransferRecipient::INTERFACE;
       return true;
     case usb::RECIPIENT_ENDPOINT:
-      *output = UsbDeviceHandle::ENDPOINT;
+      *output = UsbControlTransferRecipient::ENDPOINT;
       return true;
     case usb::RECIPIENT_OTHER:
-      *output = UsbDeviceHandle::OTHER;
+      *output = UsbControlTransferRecipient::OTHER;
       return true;
     default:
       NOTREACHED();
@@ -203,7 +208,7 @@ bool GetTransferSize(const T& input, size_t* output) {
 template <class T>
 scoped_refptr<net::IOBuffer> CreateBufferForTransfer(
     const T& input,
-    UsbEndpointDirection direction,
+    UsbTransferDirection direction,
     size_t size) {
   if (size >= kMaxTransferLength)
     return NULL;
@@ -214,9 +219,9 @@ scoped_refptr<net::IOBuffer> CreateBufferForTransfer(
   scoped_refptr<net::IOBuffer> buffer =
       new net::IOBuffer(std::max(static_cast<size_t>(1), size));
 
-  if (direction == device::USB_DIRECTION_INBOUND) {
+  if (direction == UsbTransferDirection::INBOUND) {
     return buffer;
-  } else if (direction == device::USB_DIRECTION_OUTBOUND) {
+  } else if (direction == UsbTransferDirection::OUTBOUND) {
     if (input.data.get() && size <= input.data->size()) {
       memcpy(buffer->data(), input.data->data(), size);
       return buffer;
@@ -228,21 +233,21 @@ scoped_refptr<net::IOBuffer> CreateBufferForTransfer(
 
 const char* ConvertTransferStatusToApi(const UsbTransferStatus status) {
   switch (status) {
-    case device::USB_TRANSFER_COMPLETED:
+    case UsbTransferStatus::COMPLETED:
       return "";
-    case device::USB_TRANSFER_ERROR:
+    case UsbTransferStatus::TRANSFER_ERROR:
       return kErrorGeneric;
-    case device::USB_TRANSFER_TIMEOUT:
+    case UsbTransferStatus::TIMEOUT:
       return kErrorTimeout;
-    case device::USB_TRANSFER_CANCELLED:
+    case UsbTransferStatus::CANCELLED:
       return kErrorCancelled;
-    case device::USB_TRANSFER_STALLED:
+    case UsbTransferStatus::STALLED:
       return kErrorStalled;
-    case device::USB_TRANSFER_DISCONNECT:
+    case UsbTransferStatus::DISCONNECT:
       return kErrorDisconnect;
-    case device::USB_TRANSFER_OVERFLOW:
+    case UsbTransferStatus::BABBLE:
       return kErrorOverflow;
-    case device::USB_TRANSFER_LENGTH_SHORT:
+    case UsbTransferStatus::SHORT_PACKET:
       return kErrorTransferLength;
     default:
       NOTREACHED();
@@ -262,13 +267,13 @@ std::unique_ptr<base::Value> PopulateConnectionHandle(int handle,
 
 TransferType ConvertTransferTypeToApi(const UsbTransferType& input) {
   switch (input) {
-    case device::USB_TRANSFER_CONTROL:
+    case UsbTransferType::CONTROL:
       return usb::TRANSFER_TYPE_CONTROL;
-    case device::USB_TRANSFER_INTERRUPT:
+    case UsbTransferType::INTERRUPT:
       return usb::TRANSFER_TYPE_INTERRUPT;
-    case device::USB_TRANSFER_ISOCHRONOUS:
+    case UsbTransferType::ISOCHRONOUS:
       return usb::TRANSFER_TYPE_ISOCHRONOUS;
-    case device::USB_TRANSFER_BULK:
+    case UsbTransferType::BULK:
       return usb::TRANSFER_TYPE_BULK;
     default:
       NOTREACHED();
@@ -276,11 +281,11 @@ TransferType ConvertTransferTypeToApi(const UsbTransferType& input) {
   }
 }
 
-Direction ConvertDirectionToApi(const UsbEndpointDirection& input) {
+Direction ConvertDirectionToApi(const UsbTransferDirection& input) {
   switch (input) {
-    case device::USB_DIRECTION_INBOUND:
+    case UsbTransferDirection::INBOUND:
       return usb::DIRECTION_IN;
-    case device::USB_DIRECTION_OUTBOUND:
+    case UsbTransferDirection::OUTBOUND:
       return usb::DIRECTION_OUT;
     default:
       NOTREACHED();
@@ -366,18 +371,30 @@ ConfigDescriptor ConvertConfigDescriptor(const UsbConfigDescriptor& input) {
   return output;
 }
 
-void ConvertDeviceFilter(const usb::DeviceFilter& input,
-                         UsbDeviceFilter* output) {
-  if (input.vendor_id)
+device::mojom::UsbDeviceFilterPtr ConvertDeviceFilter(
+    const usb::DeviceFilter& input) {
+  auto output = device::mojom::UsbDeviceFilter::New();
+  if (input.vendor_id) {
+    output->has_vendor_id = true;
     output->vendor_id = *input.vendor_id;
-  if (input.product_id)
+  }
+  if (input.product_id) {
+    output->has_product_id = true;
     output->product_id = *input.product_id;
-  if (input.interface_class)
-    output->interface_class = *input.interface_class;
-  if (input.interface_subclass)
-    output->interface_subclass = *input.interface_subclass;
-  if (input.interface_protocol)
-    output->interface_protocol = *input.interface_protocol;
+  }
+  if (input.interface_class) {
+    output->has_class_code = true;
+    output->class_code = *input.interface_class;
+  }
+  if (input.interface_subclass) {
+    output->has_subclass_code = true;
+    output->subclass_code = *input.interface_subclass;
+  }
+  if (input.interface_protocol) {
+    output->has_protocol_code = true;
+    output->protocol_code = *input.interface_protocol;
+  }
+  return output;
 }
 
 }  // namespace
@@ -462,16 +479,17 @@ void UsbTransferFunction::OnCompleted(UsbTransferStatus status,
                                       size_t length) {
   std::unique_ptr<base::DictionaryValue> transfer_info(
       new base::DictionaryValue());
-  transfer_info->SetInteger(kResultCodeKey, status);
+  transfer_info->SetInteger(kResultCodeKey, static_cast<int>(status));
 
   if (data) {
-    transfer_info->Set(kDataKey, base::BinaryValue::CreateWithCopiedBuffer(
-                                     data->data(), length));
+    transfer_info->Set(
+        kDataKey, base::Value::CreateWithCopiedBuffer(data->data(), length));
   } else {
-    transfer_info->Set(kDataKey, new base::Value(base::Value::Type::BINARY));
+    transfer_info->Set(
+        kDataKey, base::MakeUnique<base::Value>(base::Value::Type::BINARY));
   }
 
-  if (status == device::USB_TRANSFER_COMPLETED) {
+  if (status == UsbTransferStatus::COMPLETED) {
     Respond(OneArgument(std::move(transfer_info)));
   } else {
     std::unique_ptr<base::ListValue> error_args(new base::ListValue());
@@ -586,16 +604,19 @@ ExtensionFunction::ResponseAction UsbGetDevicesFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(parameters.get());
 
   if (parameters->options.filters) {
-    filters_.resize(parameters->options.filters->size());
-    for (size_t i = 0; i < parameters->options.filters->size(); ++i) {
-      ConvertDeviceFilter(parameters->options.filters->at(i), &filters_[i]);
-    }
+    filters_.reserve(parameters->options.filters->size());
+    for (const auto& filter : *parameters->options.filters)
+      filters_.push_back(ConvertDeviceFilter(filter));
   }
   if (parameters->options.vendor_id) {
-    filters_.resize(filters_.size() + 1);
-    filters_.back().vendor_id = *parameters->options.vendor_id;
-    if (parameters->options.product_id)
-      filters_.back().product_id = *parameters->options.product_id;
+    auto filter = device::mojom::UsbDeviceFilter::New();
+    filter->has_vendor_id = true;
+    filter->vendor_id = *parameters->options.vendor_id;
+    if (parameters->options.product_id) {
+      filter->has_product_id = true;
+      filter->product_id = *parameters->options.product_id;
+    }
+    filters_.push_back(std::move(filter));
   }
 
   UsbService* service = device::DeviceClient::Get()->GetUsbService();
@@ -613,7 +634,7 @@ void UsbGetDevicesFunction::OnGetDevicesComplete(
   std::unique_ptr<base::ListValue> result(new base::ListValue());
   UsbGuidMap* guid_map = UsbGuidMap::Get(browser_context());
   for (const scoped_refptr<UsbDevice>& device : devices) {
-    if (UsbDeviceFilter::MatchesAny(device, filters_) &&
+    if (UsbDeviceFilterMatchesAny(filters_, *device) &&
         HasDevicePermission(device)) {
       Device api_device;
       guid_map->GetApiDevice(device, &api_device);
@@ -644,12 +665,11 @@ ExtensionFunction::ResponseAction UsbGetUserSelectedDevicesFunction::Run() {
     multiple = *parameters->options.multiple;
   }
 
-  std::vector<UsbDeviceFilter> filters;
+  std::vector<UsbDeviceFilterPtr> filters;
   if (parameters->options.filters) {
-    filters.resize(parameters->options.filters->size());
-    for (size_t i = 0; i < parameters->options.filters->size(); ++i) {
-      ConvertDeviceFilter(parameters->options.filters->at(i), &filters[i]);
-    }
+    filters.reserve(parameters->options.filters->size());
+    for (const auto& filter : *parameters->options.filters)
+      filters.push_back(ConvertDeviceFilter(filter));
   }
 
   prompt_ = ExtensionsAPIClient::Get()->CreateDevicePermissionsPrompt(
@@ -659,7 +679,7 @@ ExtensionFunction::ResponseAction UsbGetUserSelectedDevicesFunction::Run() {
   }
 
   prompt_->AskForUsbDevices(
-      extension(), browser_context(), multiple, filters,
+      extension(), browser_context(), multiple, std::move(filters),
       base::Bind(&UsbGetUserSelectedDevicesFunction::OnDevicesChosen, this));
   return RespondLater();
 }
@@ -1015,9 +1035,9 @@ ExtensionFunction::ResponseAction UsbControlTransferFunction::Run() {
   }
 
   const ControlTransferInfo& transfer = parameters->transfer_info;
-  UsbEndpointDirection direction = device::USB_DIRECTION_INBOUND;
-  UsbDeviceHandle::TransferRequestType request_type;
-  UsbDeviceHandle::TransferRecipient recipient;
+  UsbTransferDirection direction = UsbTransferDirection::INBOUND;
+  UsbControlTransferType request_type;
+  UsbControlTransferRecipient recipient;
   size_t size = 0;
 
   if (!ConvertDirectionFromApi(transfer.direction, &direction)) {
@@ -1072,7 +1092,7 @@ ExtensionFunction::ResponseAction UsbBulkTransferFunction::Run() {
   }
 
   const GenericTransferInfo& transfer = parameters->transfer_info;
-  UsbEndpointDirection direction = device::USB_DIRECTION_INBOUND;
+  UsbTransferDirection direction = UsbTransferDirection::INBOUND;
   size_t size = 0;
 
   if (!ConvertDirectionFromApi(transfer.direction, &direction)) {
@@ -1118,7 +1138,7 @@ ExtensionFunction::ResponseAction UsbInterruptTransferFunction::Run() {
   }
 
   const GenericTransferInfo& transfer = parameters->transfer_info;
-  UsbEndpointDirection direction = device::USB_DIRECTION_INBOUND;
+  UsbTransferDirection direction = UsbTransferDirection::INBOUND;
   size_t size = 0;
 
   if (!ConvertDirectionFromApi(transfer.direction, &direction)) {
@@ -1166,7 +1186,7 @@ ExtensionFunction::ResponseAction UsbIsochronousTransferFunction::Run() {
   const IsochronousTransferInfo& transfer = parameters->transfer_info;
   const GenericTransferInfo& generic_transfer = transfer.transfer_info;
   size_t size = 0;
-  UsbEndpointDirection direction = device::USB_DIRECTION_INBOUND;
+  UsbTransferDirection direction = UsbTransferDirection::INBOUND;
 
   if (!ConvertDirectionFromApi(generic_transfer.direction, &direction))
     return RespondNow(Error(kErrorConvertDirection));
@@ -1192,7 +1212,7 @@ ExtensionFunction::ResponseAction UsbIsochronousTransferFunction::Run() {
   if (timeout < 0)
     return RespondNow(Error(kErrorInvalidTimeout));
 
-  if (direction == device::USB_DIRECTION_INBOUND) {
+  if (direction == UsbTransferDirection::INBOUND) {
     device_handle->IsochronousTransferIn(
         generic_transfer.endpoint, packet_lengths, timeout,
         base::Bind(&UsbIsochronousTransferFunction::OnCompleted, this));
@@ -1217,32 +1237,31 @@ void UsbIsochronousTransferFunction::OnCompleted(
       [](const size_t& a, const UsbDeviceHandle::IsochronousPacket& packet) {
         return a + packet.transferred_length;
       });
-  std::unique_ptr<char[]> buffer(new char[length]);
+  std::vector<char> buffer;
+  buffer.reserve(length);
 
-  UsbTransferStatus status = device::USB_TRANSFER_COMPLETED;
-  size_t buffer_offset = 0;
-  size_t data_offset = 0;
+  UsbTransferStatus status = UsbTransferStatus::COMPLETED;
+  const char* data_ptr = data ? data->data() : nullptr;
   for (const auto& packet : packets) {
     // Capture the error status of the first unsuccessful packet.
-    if (status == device::USB_TRANSFER_COMPLETED &&
-        packet.status != device::USB_TRANSFER_COMPLETED) {
+    if (status == UsbTransferStatus::COMPLETED &&
+        packet.status != UsbTransferStatus::COMPLETED) {
       status = packet.status;
     }
 
     if (data) {
-      memcpy(&buffer[buffer_offset], data->data() + data_offset,
-             packet.transferred_length);
+      buffer.insert(buffer.end(), data_ptr,
+                    data_ptr + packet.transferred_length);
+      data_ptr += packet.length;
     }
-    buffer_offset += packet.transferred_length;
-    data_offset += packet.length;
   }
 
   std::unique_ptr<base::DictionaryValue> transfer_info(
       new base::DictionaryValue());
-  transfer_info->SetInteger(kResultCodeKey, status);
-  transfer_info->Set(kDataKey, new base::BinaryValue(std::vector<char>(
-                                   buffer.get(), buffer.get() + length)));
-  if (status == device::USB_TRANSFER_COMPLETED) {
+  transfer_info->SetInteger(kResultCodeKey, static_cast<int>(status));
+  transfer_info->Set(kDataKey,
+                     base::MakeUnique<base::Value>(std::move(buffer)));
+  if (status == UsbTransferStatus::COMPLETED) {
     Respond(OneArgument(std::move(transfer_info)));
   } else {
     std::unique_ptr<base::ListValue> error_args(new base::ListValue());

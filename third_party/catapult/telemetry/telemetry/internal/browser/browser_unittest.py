@@ -4,6 +4,7 @@
 
 import logging
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -19,6 +20,8 @@ from telemetry.internal.util import path
 from telemetry.testing import browser_test_case
 from telemetry.testing import options_for_unittests
 from telemetry.timeline import tracing_config
+
+from devil.android import app_ui
 
 import mock
 import py_utils
@@ -122,6 +125,19 @@ class BrowserTest(browser_test_case.BrowserTestCase):
   def testGetSystemTotalMemory(self):
     self.assertTrue(self._browser.memory_stats['SystemTotalPhysicalMemory'] > 0)
 
+  def testSystemInfoModelNameOnMac(self):
+    if self._browser.platform.GetOSName() != 'mac':
+      self.skipTest('This test is only run on macOS')
+      return
+
+    if not self._browser.supports_system_info:
+      logging.warning(
+          'Browser does not support getting system info, skipping test.')
+      return
+
+    info = self._browser.GetSystemInfo()
+    model_name_re = r"[a-zA-Z]* [0-9.]*"
+    self.assertNotEqual(re.match(model_name_re, info.model_name), None)
 
   # crbug.com/628836 (CrOS, where system-guest indicates ChromeOS guest)
   # github.com/catapult-project/catapult/issues/3130 (Windows)
@@ -137,6 +153,13 @@ class BrowserTest(browser_test_case.BrowserTestCase):
     self.assertTrue(tracing_controller.is_tracing_running)
     tracing_controller.StopTracing()
     self.assertFalse(tracing_controller.is_tracing_running)
+
+  @decorators.Enabled('android')
+  def testGetAppUi(self):
+    self.assertTrue(self._browser.supports_app_ui_interactions)
+    ui = self._browser.GetAppUi()
+    self.assertTrue(isinstance(ui, app_ui.AppUi))
+    self.assertIsNotNone(ui.WaitForUiNode(resource_id='action_bar_root'))
 
 
 class CommandLineBrowserTest(browser_test_case.BrowserTestCase):
@@ -264,7 +287,9 @@ class BrowserRestoreSessionTest(unittest.TestCase):
 
 class TestBrowserOperationDoNotLeakTempFiles(unittest.TestCase):
 
-  @decorators.Enabled('win', 'mac', 'linux')
+  @decorators.Enabled('win', 'linux')
+  # TODO(ashleymarie): Re-enable on mac
+  # BUG=catapult:#3523
   @decorators.Isolated
   def testBrowserNotLeakingTempFiles(self):
     options = options_for_unittests.GetCopy()

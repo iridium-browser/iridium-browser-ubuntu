@@ -66,6 +66,15 @@ enum class ProgressBarCompletion {
   LAST = RESOURCES_BEFORE_DCL_AND_SAME_ORIGIN_IFRAMES
 };
 
+// Defines the autoplay policy to be used. Should match the class in
+// WebSettings.h.
+enum class AutoplayPolicy {
+  kNoUserGestureRequired,
+  kUserGestureRequired,
+  kUserGestureRequiredForCrossOrigin,
+  kDocumentUserActivationRequired,
+};
+
 // The ISO 15924 script code for undetermined script aka Common. It's the
 // default used on WebKit's side to get/set a font setting when no script is
 // specified.
@@ -93,7 +102,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool context_menu_on_mouse_up;
   bool javascript_enabled;
   bool web_security_enabled;
-  bool javascript_can_open_windows_automatically;
   bool loads_images_automatically;
   bool images_enabled;
   bool plugins_enabled;
@@ -160,8 +168,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool should_clear_document_background;
   bool enable_scroll_animator;
   bool touch_event_feature_detection_enabled;
-  // TODO(mustaq): Nuke when the new API is ready
-  bool device_supports_touch;
   bool touch_adjustment_enabled;
   int pointer_events_max_touch_points;
   int available_pointer_types;
@@ -170,8 +176,6 @@ struct CONTENT_EXPORT WebPreferences {
   ui::HoverType primary_hover_type;
   bool sync_xhr_in_documents_enabled;
   bool color_correct_rendering_enabled = false;
-  bool color_correct_rendering_default_mode_enabled = false;
-  bool true_color_rendering_enabled = false;
   bool should_respect_image_orientation;
   int number_of_cpu_cores;
   EditingBehavior editing_behavior;
@@ -188,7 +192,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool use_solid_color_scrollbars;
   bool navigate_on_drag_drop;
   V8CacheOptions v8_cache_options;
-  bool inert_visual_viewport;
   bool record_whole_document;
 
   // This flags corresponds to a Page's Settings' setCookieEnabled state. It
@@ -211,13 +214,7 @@ struct CONTENT_EXPORT WebPreferences {
   // Cues will not be placed in this margin area.
   float text_track_margin_percentage;
 
-  // Specifies aggressiveness of background tab throttling.
-  // expensive_background_throttling_cpu_budget is given in percentages,
-  // other values are in seconds.
-  float expensive_background_throttling_cpu_budget;
-  float expensive_background_throttling_initial_budget;
-  float expensive_background_throttling_max_budget;
-  float expensive_background_throttling_max_delay;
+  bool page_popups_suppressed;
 
 #if defined(OS_ANDROID)
   bool text_autosizing_enabled;
@@ -226,7 +223,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool force_enable_zoom;
   bool fullscreen_supported;
   bool double_tap_to_zoom_enabled;
-  bool user_gesture_required_for_media_playback;
   std::string media_playback_gesture_whitelist_scope;
   GURL default_video_poster_url;
   bool support_deprecated_target_density_dpi;
@@ -250,11 +246,17 @@ struct CONTENT_EXPORT WebPreferences {
   bool spellcheck_enabled_by_default;
   // If enabled, when a video goes fullscreen, the orientation should be locked.
   bool video_fullscreen_orientation_lock_enabled;
+  // If enabled, fullscreen should be entered/exited when the device is rotated
+  // to/from the orientation of the video.
+  bool video_rotate_to_fullscreen_enabled;
   // If enabled, video fullscreen detection will be enabled.
   bool video_fullscreen_detection_enabled;
   bool embedded_media_experience_enabled;
+  // Enable support for document.scrollingElement
+  // WebView sets this to false to retain old documentElement behaviour
+  // (http://crbug.com/761016).
+  bool scroll_top_left_interop_enabled;
 #else  // defined(OS_ANDROID)
-  bool cross_origin_media_playback_requires_user_gesture;
 #endif  // defined(OS_ANDROID)
 
   // Default (used if the page or UA doesn't override these) values for page
@@ -269,21 +271,6 @@ struct CONTENT_EXPORT WebPreferences {
   // If enabled, disabled video track when the video is in the background.
   bool background_video_track_optimization_enabled;
 
-  // If background video track optimization is enabled, don't disable video
-  // track for videos with the average keyframe distance greater than this
-  // value.
-  // TODO(avayvod, asvitkine): Query the value directly when it is available in
-  // the renderer process. See https://crbug.com/681160.
-  base::TimeDelta max_keyframe_distance_to_disable_background_video;
-
-  // When memory pressure based garbage collection is enabled for MSE, the
-  // |enable_instant_source_buffer_gc| flag controls whether the GC is done
-  // immediately on memory pressure notification or during the next SourceBuffer
-  // append (slower, but is MSE-spec compliant).
-  // TODO(servolk, asvitkine): Query the value directly when it is available in
-  // the renderer process. See https://crbug.com/681160.
-  bool enable_instant_source_buffer_gc;
-
   // Whether it is a presentation receiver.
   bool presentation_receiver;
 
@@ -295,6 +282,9 @@ struct CONTENT_EXPORT WebPreferences {
   // https://crbug.com/699943 for details.
   // TODO(changwan): remove this once we no longer support Android N.
   bool do_not_update_selection_on_mutating_selection_range;
+
+  // Defines the current autoplay policy.
+  AutoplayPolicy autoplay_policy;
 
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for

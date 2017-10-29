@@ -75,8 +75,15 @@ class DefaultFlavorUtils(object):
   copying files between the host and Android device, as well as the
   'step' function, so that commands may be run through ADB.
   """
-  def __init__(self, m):
-    self.m = m
+  def __init__(self, module):
+    # Store a pointer to the parent recipe module (SkiaFlavorApi) so that
+    # FlavorUtils objects can do recipe module-like things, like run steps or
+    # access module-level resources.
+    self.module = module
+
+    # self.m is just a shortcut so that FlavorUtils objects can use the same
+    # syntax as regular recipe modules to run steps, eg: self.m.step(...)
+    self.m = module.m
     self._chrome_path = None
     self._win_toolchain_dir = self.m.vars.slave_dir.join(WIN_TOOLCHAIN_DIR)
     win_toolchain_asset_path = self.m.vars.infrabots_dir.join(
@@ -104,7 +111,7 @@ class DefaultFlavorUtils(object):
       raise ValueError('For builders who do not have attached devices, copying '
                        'from host to device is undefined and only allowed if '
                        'host_path and device_path are the same (%s vs %s).' % (
-                       str(host_dir), str(device_dir)))  # pragma: no cover
+                       str(host_dir), str(device_dir)))
 
   def copy_directory_contents_to_host(self, device_dir, host_dir):
     """Like shutil.copytree(), but for copying from a connected device."""
@@ -114,13 +121,13 @@ class DefaultFlavorUtils(object):
       raise ValueError('For builders who do not have attached devices, copying '
                        'from device to host is undefined and only allowed if '
                        'host_path and device_path are the same (%s vs %s).' % (
-                       str(host_dir), str(device_dir)))  # pragma: no cover
+                       str(host_dir), str(device_dir)))
 
   def copy_file_to_device(self, host_path, device_path):
     """Like shutil.copyfile, but for copying to a connected device."""
     # For "normal" builders who don't have an attached device, we expect
     # host_dir and device_dir to be the same.
-    if str(host_path) != str(device_path):  # pragma: no cover
+    if str(host_path) != str(device_path):
       raise ValueError('For builders who do not have attached devices, copying '
                        'from host to device is undefined and only allowed if '
                        'host_path and device_path are the same (%s vs %s).' % (
@@ -133,8 +140,8 @@ class DefaultFlavorUtils(object):
   def create_clean_host_dir(self, path):
     """Convenience function for creating a clean directory."""
     self.m.run.rmtree(path)
-    self.m.file.makedirs(
-        self.m.path.basename(path), path, infra_step=True)
+    self.m.file.ensure_directory(
+        'makedirs %s' % self.m.path.basename(path), path)
 
   def install(self):
     """Run device-specific installation steps."""

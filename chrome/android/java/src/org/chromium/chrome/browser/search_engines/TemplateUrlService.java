@@ -18,6 +18,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import javax.annotation.Nullable;
+
 /**
  * Android wrapper of the TemplateUrlService which provides access from the Java
  * layer.
@@ -167,6 +169,43 @@ public class TemplateUrlService {
     }
 
     /**
+     * Ensure the TemplateUrlService is loaded before running the specified action.  If the service
+     * is already loaded, then run the action immediately.
+     * <p>
+     * Because this can introduce an arbitrary delay in the action being executed, ensure the state
+     * is still valid in the action before interacting with anything that might no longer be
+     * available (i.e. an Activity that has since been destroyed).
+     *
+     * @param action The action to be run.
+     */
+    public void runWhenLoaded(final Runnable action) {
+        if (isLoaded()) {
+            action.run();
+        } else {
+            registerLoadListener(new LoadListener() {
+                @Override
+                public void onTemplateUrlServiceLoaded() {
+                    unregisterLoadListener(this);
+                    action.run();
+                }
+            });
+            load();
+        }
+    }
+
+    /**
+     * Sets whether filtering of the search engines is enabled.  Filtering ensures the list of
+     * search engines is appropriate for displaying in settings, but can cause issues if you expect
+     * the list of search engines returned here to match the underlying TemplateUrlService in
+     * native.
+     *
+     * @param disableFiltering Whether to disable filtering.
+     */
+    public void setFilteringDisabled(boolean disableFiltering) {
+        nativeSetFilteringDisabled(mNativeTemplateUrlServiceAndroid, disableFiltering);
+    }
+
+    /**
      * Returns a list of the prepopulated search engines.
      *
      * Warning: TemplateUrl.getIndex() is *not* an index into this list, since this list contains
@@ -225,9 +264,10 @@ public class TemplateUrlService {
     }
 
     /**
-     * @return {@link TemplateUrlService.TemplateUrl} for the default search engine.
+     * @return {@link TemplateUrlService.TemplateUrl} for the default search engine.  This can
+     *         be null if DSEs are disabled entirely by administrators.
      */
-    public TemplateUrl getDefaultSearchEngineTemplateUrl() {
+    public @Nullable TemplateUrl getDefaultSearchEngineTemplateUrl() {
         if (!isLoaded()) return null;
 
         int defaultSearchEngineIndex = getDefaultSearchEngineIndex();
@@ -246,8 +286,12 @@ public class TemplateUrlService {
                 mNativeTemplateUrlServiceAndroid, selectedKeyword);
     }
 
-    public boolean isSearchProviderManaged() {
-        return nativeIsSearchProviderManaged(mNativeTemplateUrlServiceAndroid);
+    /**
+     * @return Whether the default search engine is managed and controlled by policy.  If true, the
+     *         DSE can not be modified by the user.
+     */
+    public boolean isDefaultSearchManaged() {
+        return nativeIsDefaultSearchManaged(mNativeTemplateUrlServiceAndroid);
     }
 
     /**
@@ -263,6 +307,21 @@ public class TemplateUrlService {
      */
     public boolean isDefaultSearchEngineGoogle() {
         return nativeIsDefaultSearchEngineGoogle(mNativeTemplateUrlServiceAndroid);
+    }
+
+    public boolean doesDefaultSearchEngineHaveLogo() {
+        return nativeDoesDefaultSearchEngineHaveLogo(mNativeTemplateUrlServiceAndroid);
+    }
+
+    /**
+     * Checks whether a search result page is from a default search provider.
+     * @param url The url for the search result page.
+     * @return Whether the search result page with the given url from the default search provider.
+     */
+    public boolean isSearchResultsPageFromDefaultSearchProvider(String url) {
+        ThreadUtils.assertOnUiThread();
+        return nativeIsSearchResultsPageFromDefaultSearchProvider(
+                mNativeTemplateUrlServiceAndroid, url);
     }
 
     /**
@@ -390,14 +449,20 @@ public class TemplateUrlService {
     private native long nativeInit();
     private native void nativeLoad(long nativeTemplateUrlServiceAndroid);
     private native boolean nativeIsLoaded(long nativeTemplateUrlServiceAndroid);
+    private native void nativeSetFilteringDisabled(
+            long nativeTemplateUrlServiceAndroid, boolean disableFiltering);
     private native int nativeGetTemplateUrlCount(long nativeTemplateUrlServiceAndroid);
     private native TemplateUrl nativeGetTemplateUrlAt(long nativeTemplateUrlServiceAndroid, int i);
     private native void nativeSetUserSelectedDefaultSearchProvider(
             long nativeTemplateUrlServiceAndroid, String selectedKeyword);
     private native int nativeGetDefaultSearchProviderIndex(long nativeTemplateUrlServiceAndroid);
-    private native boolean nativeIsSearchProviderManaged(long nativeTemplateUrlServiceAndroid);
+    private native boolean nativeIsDefaultSearchManaged(long nativeTemplateUrlServiceAndroid);
+    private native boolean nativeIsSearchResultsPageFromDefaultSearchProvider(
+            long nativeTemplateUrlServiceAndroid, String url);
     private native boolean nativeIsSearchByImageAvailable(long nativeTemplateUrlServiceAndroid);
     private native boolean nativeIsDefaultSearchEngineGoogle(long nativeTemplateUrlServiceAndroid);
+    private native boolean nativeDoesDefaultSearchEngineHaveLogo(
+            long nativeTemplateUrlServiceAndroid);
     private native String nativeGetUrlForSearchQuery(long nativeTemplateUrlServiceAndroid,
             String query);
     private native String nativeGetUrlForVoiceSearchQuery(long nativeTemplateUrlServiceAndroid,

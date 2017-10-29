@@ -14,16 +14,31 @@
  * </settings-lock-screen>
  */
 
+/**
+ * Possible values of the proximity threshould displayed to the user.
+ * This should be kept in sync with the enum defined here:
+ * components/proximity_auth/proximity_monitor_impl.cc
+ */
+settings.EasyUnlockProximityThreshold = {
+  VERY_CLOSE: 0,
+  CLOSE: 1,
+  FAR: 2,
+  VERY_FAR: 3,
+};
+
 Polymer({
   is: 'settings-lock-screen',
 
-  behaviors: [I18nBehavior, LockStateBehavior, settings.RouteObserverBehavior],
+  behaviors: [
+    I18nBehavior,
+    LockStateBehavior,
+    WebUIListenerBehavior,
+    settings.RouteObserverBehavior,
+  ],
 
   properties: {
     /** Preferences state. */
-    prefs: {
-      type: Object
-    },
+    prefs: {type: Object},
 
     /**
      * setModes_ is a partially applied function that stores the previously
@@ -35,7 +50,7 @@ Polymer({
      */
     setModes_: {
       type: Object,
-      observer: 'onSetModesChanged_'
+      observer: 'onSetModesChanged_',
     },
 
     /**
@@ -47,17 +62,19 @@ Polymer({
      */
     writeUma_: {
       type: Object,
-      value: function() { return settings.recordLockScreenProgress; }
+      value: function() {
+        return settings.recordLockScreenProgress;
+      },
     },
 
     /**
-     * True if pin unlock settings should be displayed on this machine.
+     * True if quick unlock settings should be displayed on this machine.
      * @private
      */
-    pinUnlockEnabled_: {
+    quickUnlockEnabled_: {
       type: Boolean,
       value: function() {
-        return loadTimeData.getBoolean('pinUnlockEnabled');
+        return loadTimeData.getBoolean('quickUnlockEnabled');
       },
       readOnly: true,
     },
@@ -79,22 +96,97 @@ Polymer({
       type: Number,
       value: 0,
     },
+
+    /**
+     * True if Easy Unlock is allowed on this machine.
+     */
+    easyUnlockAllowed_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('easyUnlockAllowed');
+      },
+      readOnly: true,
+    },
+
+    /**
+     * True if Easy Unlock is enabled.
+     */
+    easyUnlockEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('easyUnlockEnabled');
+      },
+    },
+
+    /**
+     * Returns the proximity threshold mapping to be displayed in the
+     * threshold selector dropdown menu.
+     */
+    easyUnlockProximityThresholdMapping_: {
+      type: Array,
+      value: function() {
+        return [
+          {
+            value: settings.EasyUnlockProximityThreshold.VERY_CLOSE,
+            name:
+                loadTimeData.getString('easyUnlockProximityThresholdVeryClose')
+          },
+          {
+            value: settings.EasyUnlockProximityThreshold.CLOSE,
+            name: loadTimeData.getString('easyUnlockProximityThresholdClose')
+          },
+          {
+            value: settings.EasyUnlockProximityThreshold.FAR,
+            name: loadTimeData.getString('easyUnlockProximityThresholdFar')
+          },
+          {
+            value: settings.EasyUnlockProximityThreshold.VERY_FAR,
+            name: loadTimeData.getString('easyUnlockProximityThresholdVeryFar')
+          }
+        ];
+      },
+      readOnly: true,
+    },
+
+    /** @private */
+    showEasyUnlockTurnOffDialog_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /** @private */
+    showPasswordPromptDialog_: Boolean,
+
+    /** @private */
+    showSetupPinDialog_: Boolean,
   },
 
+  /** @private {?settings.EasyUnlockBrowserProxy} */
+  easyUnlockBrowserProxy_: null,
+
   /** @private {?settings.FingerprintBrowserProxy} */
-  browserProxy_: null,
+  fingerprintBrowserProxy_: null,
 
   /** selectedUnlockType is defined in LockStateBehavior. */
   observers: ['selectedUnlockTypeChanged_(selectedUnlockType)'],
 
   /** @override */
   attached: function() {
-    // currentRouteChanged is not called during the initial navigation. If the
-    // user navigates directly to the lockScreen page, we still want to show the
-    // password prompt page.
-    this.currentRouteChanged(settings.Route.LOCK_SCREEN,
-        settings.Route.LOCK_SCREEN);
-    this.browserProxy_ = settings.FingerprintBrowserProxyImpl.getInstance();
+    if (this.shouldAskForPassword_(settings.getCurrentRoute()))
+      this.openPasswordPromptDialog_();
+
+    this.easyUnlockBrowserProxy_ =
+        settings.EasyUnlockBrowserProxyImpl.getInstance();
+    this.fingerprintBrowserProxy_ =
+        settings.FingerprintBrowserProxyImpl.getInstance();
+
+    if (this.easyUnlockAllowed_) {
+      this.addWebUIListener(
+          'easy-unlock-enabled-status',
+          this.handleEasyUnlockEnabledStatusChanged_.bind(this));
+      this.easyUnlockBrowserProxy_.getEnabledStatus().then(
+          this.handleEasyUnlockEnabledStatusChanged_.bind(this));
+    }
   },
 
   /**
@@ -104,19 +196,19 @@ Polymer({
    * @protected
    */
   currentRouteChanged: function(newRoute, oldRoute) {
-    if (newRoute == settings.Route.LOCK_SCREEN &&
-        this.fingerprintUnlockEnabled_ &&
-        this.browserProxy_) {
-      this.browserProxy_.getNumFingerprints().then(
+    if (newRoute == settings.routes.LOCK_SCREEN &&
+        this.fingerprintUnlockEnabled_ && this.fingerprintBrowserProxy_) {
+      this.fingerprintBrowserProxy_.getNumFingerprints().then(
           function(numFingerprints) {
             this.numFingerprints_ = numFingerprints;
           }.bind(this));
     }
 
-    if (newRoute == settings.Route.LOCK_SCREEN && !this.setModes_) {
-      this.$.passwordPrompt.open();
-    } else if (newRoute != settings.Route.FINGERPRINT &&
-        oldRoute != settings.Route.FINGERPRINT) {
+    if (this.shouldAskForPassword_(newRoute)) {
+      this.openPasswordPromptDialog_();
+    } else if (
+        newRoute != settings.routes.FINGERPRINT &&
+        oldRoute != settings.routes.FINGERPRINT) {
       // If the user navigated away from the lock screen settings page they will
       // have to re-enter their password. An exception is if they are navigating
       // to or from the fingerprint subpage.
@@ -142,22 +234,40 @@ Polymer({
 
   /** @private */
   onSetModesChanged_: function() {
-    if (settings.getCurrentRoute() == settings.Route.LOCK_SCREEN &&
-        !this.setModes_) {
-      this.$.setupPin.close();
-      this.$.passwordPrompt.open();
+    if (this.shouldAskForPassword_(settings.getCurrentRoute())) {
+      this.showSetupPinDialog_ = false;
+      this.openPasswordPromptDialog_();
     }
   },
 
   /** @private */
-  onPasswordClosed_: function() {
-    if (!this.setModes_)
-      settings.navigateTo(settings.Route.PEOPLE);
+  openPasswordPromptDialog_: function() {
+    this.showPasswordPromptDialog_ = true;
   },
 
   /** @private */
-  onPinSetupDone_: function() {
-    this.$.setupPin.close();
+  onPasswordPromptDialogClose_: function() {
+    this.showPasswordPromptDialog_ = false;
+    if (!this.setModes_)
+      settings.navigateToPreviousRoute();
+    else
+      cr.ui.focusWithoutInk(assert(this.$$('#unlockType')));
+  },
+
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onConfigurePin_: function(e) {
+    e.preventDefault();
+    this.writeUma_(LockScreenProgress.CHOOSE_PIN_OR_PASSWORD);
+    this.showSetupPinDialog_ = true;
+  },
+
+  /** @private */
+  onSetupPinDialogClose_: function() {
+    this.showSetupPinDialog_ = false;
+    cr.ui.focusWithoutInk(assert(this.$$('#setupPinButton')));
   },
 
   /**
@@ -170,9 +280,12 @@ Polymer({
     return selectedUnlockType === LockScreenUnlockType.PIN_PASSWORD;
   },
 
-  /** @private */
-  getSetupPinText_: function() {
-    if (this.hasPin)
+  /**
+   * @param {boolean} hasPin
+   * @private
+   */
+  getSetupPinText_: function(hasPin) {
+    if (hasPin)
       return this.i18n('lockScreenChangePinButton');
     return this.i18n('lockScreenSetupPinButton');
   },
@@ -180,25 +293,79 @@ Polymer({
   /** @private */
   getDescriptionText_: function() {
     if (this.numFingerprints_ > 0) {
-      return this.i18n('lockScreenNumberFingerprints',
-          this.numFingerprints_.toString());
+      return this.i18n(
+          'lockScreenNumberFingerprints', this.numFingerprints_.toString());
     }
 
     return this.i18n('lockScreenEditFingerprintsDescription');
+  },
+
+  /** @private */
+  onEditFingerprints_: function() {
+    settings.navigateTo(settings.routes.FINGERPRINT);
+  },
+
+  /**
+   * @param {!settings.Route} route
+   * @return {boolean} Whether the password dialog should be shown.
+   * @private
+   */
+  shouldAskForPassword_: function(route) {
+    return route == settings.routes.LOCK_SCREEN && !this.setModes_;
+  },
+
+  /**
+   * Handler for when the Easy Unlock enabled status has changed.
+   * @private
+   */
+  handleEasyUnlockEnabledStatusChanged_: function(easyUnlockEnabled) {
+    this.easyUnlockEnabled_ = easyUnlockEnabled;
+    this.showEasyUnlockTurnOffDialog_ =
+        easyUnlockEnabled && this.showEasyUnlockTurnOffDialog_;
+  },
+
+  /** @private */
+  onEasyUnlockSetupTap_: function() {
+    this.easyUnlockBrowserProxy_.startTurnOnFlow();
   },
 
   /**
    * @param {!Event} e
    * @private
    */
-  onConfigurePin_: function(e) {
+  onEasyUnlockTurnOffTap_: function(e) {
+    // Prevent the end of the tap event from focusing what is underneath the
+    // button.
     e.preventDefault();
-    this.$.setupPin.open();
-    this.writeUma_(LockScreenProgress.CHOOSE_PIN_OR_PASSWORD);
+    this.showEasyUnlockTurnOffDialog_ = true;
   },
 
   /** @private */
-  onEditFingerprints_: function() {
-    settings.navigateTo(settings.Route.FINGERPRINT);
+  onEasyUnlockTurnOffDialogClose_: function() {
+    this.showEasyUnlockTurnOffDialog_ = false;
+
+    // Restores focus on close to either the turn-off or set-up button,
+    // whichever is being displayed.
+    cr.ui.focusWithoutInk(assert(this.$$('.secondary-button')));
+  },
+
+  /**
+   * @param {boolean} enabled
+   * @param {!string} enabledStr
+   * @param {!string} disabledStr
+   * @private
+   */
+  getEasyUnlockDescription_: function(enabled, enabledStr, disabledStr) {
+    return enabled ? enabledStr : disabledStr;
+  },
+
+  /**
+   * @param {boolean} easyUnlockEnabled
+   * @param {boolean} proximityDetectionAllowed
+   * @private
+   */
+  getShowEasyUnlockToggle_: function(
+      easyUnlockEnabled, proximityDetectionAllowed) {
+    return easyUnlockEnabled && proximityDetectionAllowed;
   },
 });

@@ -31,6 +31,8 @@
   'variables': {
     'v8_enable_disassembler%': 0,
 
+    'v8_promise_internal_field_count%': 0,
+
     'v8_enable_gdbjit%': 0,
 
     'v8_enable_verify_csa%': 0,
@@ -71,11 +73,17 @@
 
     # Enable/disable JavaScript API accessors.
     'v8_js_accessors%': 0,
+
+    # Temporary flag to allow embedders to update their microtasks scopes.
+    'v8_check_microtasks_scopes_consistency%': 'false',
   },
   'target_defaults': {
     'conditions': [
       ['v8_enable_disassembler==1', {
         'defines': ['ENABLE_DISASSEMBLER',],
+      }],
+      ['v8_promise_internal_field_count!=0', {
+        'defines': ['V8_PROMISE_INTERNAL_FIELD_COUNT','v8_promise_internal_field_count'],
       }],
       ['v8_enable_gdbjit==1', {
         'defines': ['ENABLE_GDB_JIT_INTERFACE',],
@@ -90,7 +98,7 @@
         'defines': ['VERIFY_HEAP',],
       }],
       ['v8_trace_maps==1', {
-        'defines': ['TRACE_MAPS',],
+        'defines': ['V8_TRACE_MAPS',],
       }],
       ['v8_enable_verify_predictable==1', {
         'defines': ['VERIFY_PREDICTABLE',],
@@ -105,13 +113,16 @@
         'defines': ['V8_IMMINENT_DEPRECATION_WARNINGS',],
       }],
       ['v8_enable_i18n_support==1', {
-        'defines': ['V8_I18N_SUPPORT',],
+        'defines': ['V8_INTL_SUPPORT',],
       }],
       ['v8_use_snapshot=="true" and v8_use_external_startup_data==1', {
         'defines': ['V8_USE_EXTERNAL_STARTUP_DATA',],
       }],
       ['dcheck_always_on!=0', {
         'defines': ['DEBUG',],
+      }],
+      ['v8_check_microtasks_scopes_consistency=="true"', {
+        'defines': ['V8_CHECK_MICROTASKS_SCOPES_CONSISTENCY',],
       }],
     ],  # conditions
     'configurations': {
@@ -137,5 +148,8 @@
         ],  # conditions
       },  # Release
     },  # configurations
+    'defines': [
+      'V8_GYP_BUILD',
+    ],  # defines
   },  # target_defaults
 }

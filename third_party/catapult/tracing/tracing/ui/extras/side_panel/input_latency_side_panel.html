@@ -5,7 +5,7 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<link rel="import" href="/tracing/base/statistics.html">
+<link rel="import" href="/tracing/base/math/statistics.html">
 <link rel="import" href="/tracing/model/event_set.html">
 <link rel="import" href="/tracing/model/helpers/chrome_model_helper.html">
 <link rel="import" href="/tracing/ui/base/dom_helpers.html">
@@ -45,8 +45,8 @@ Polymer({
   behaviors: [tr.ui.behaviors.SidePanel],
 
 
-  ready: function() {
-    this.rangeOfInterest_ = new tr.b.Range();
+  ready() {
+    this.rangeOfInterest_ = new tr.b.math.Range();
     this.frametimeType_ = tr.model.helpers.IMPL_FRAMETIME_TYPE;
     this.latencyChart_ = undefined;
     this.frametimeChart_ = undefined;
@@ -77,8 +77,8 @@ Polymer({
   },
 
   set frametimeType(type) {
-    if (this.frametimeType_ === type)
-      return;
+    if (this.frametimeType_ === type) return;
+
     this.frametimeType_ = type;
     this.updateContents_();
   },
@@ -88,30 +88,29 @@ Polymer({
   },
 
   set selectedProcessId(process) {
-    if (this.selectedProcessId_ === process)
-      return;
+    if (this.selectedProcessId_ === process) return;
+
     this.selectedProcessId_ = process;
     this.updateContents_();
   },
 
   set selection(selection) {
-    if (this.latencyChart_ === undefined)
-      return;
+    if (this.latencyChart_ === undefined) return;
+
     this.latencyChart_.brushedRange = selection.bounds;
   },
 
   // This function is for testing purpose.
-  setBrushedIndices: function(mouseDownIndex, curIndex) {
+  setBrushedIndices(mouseDownIndex, curIndex) {
     this.mouseDownIndex_ = mouseDownIndex;
     this.curMouseIndex_ = curIndex;
     this.updateBrushedRange_();
   },
 
-  updateBrushedRange_: function() {
-    if (this.latencyChart_ === undefined)
-      return;
+  updateBrushedRange_() {
+    if (this.latencyChart_ === undefined) return;
 
-    var r = new tr.b.Range();
+    let r = new tr.b.math.Range();
     if (this.mouseDownIndex_ === undefined) {
       this.latencyChart_.brushedRange = r;
       return;
@@ -122,20 +121,23 @@ Polymer({
 
     // Based on the brushed range, update the selection of LatencyInfo in
     // the timeline view by sending a selectionChange event.
-    var latencySlices = [];
-    for (var thread of this.model_.getAllThreads())
-      for (var event of thread.getDescendantEvents())
-        if (event.title.indexOf('InputLatency:') === 0)
+    let latencySlices = [];
+    for (const thread of this.model_.getAllThreads()) {
+      for (const event of thread.getDescendantEvents()) {
+        if (event.title.indexOf('InputLatency:') === 0) {
           latencySlices.push(event);
+        }
+      }
+    }
     latencySlices = tr.model.helpers.getSlicesIntersectingRange(
         r, latencySlices);
 
-    var event = new tr.model.RequestSelectionChangeEvent();
+    const event = new tr.model.RequestSelectionChangeEvent();
     event.selection = new tr.model.EventSet(latencySlices);
     this.latencyChart_.dispatchEvent(event);
   },
 
-  registerMouseEventForLatencyChart_: function() {
+  registerMouseEventForLatencyChart_() {
     this.latencyChart_.addEventListener('item-mousedown', function(e) {
       this.mouseDownIndex_ = e.index;
       this.curMouseIndex_ = e.index;
@@ -143,8 +145,8 @@ Polymer({
     }.bind(this));
 
     this.latencyChart_.addEventListener('item-mousemove', function(e) {
-      if (e.button === undefined)
-        return;
+      if (e.button === undefined) return;
+
       this.curMouseIndex_ = e.index;
       this.updateBrushedRange_();
     }.bind(this));
@@ -155,27 +157,26 @@ Polymer({
     }.bind(this));
   },
 
-  updateToolbar_: function() {
-    var browserProcess = this.modelHelper_.browserProcess;
-    var labels = [];
+  updateToolbar_() {
+    const browserProcess = this.modelHelper_.browserProcess;
+    const labels = [];
 
     if (browserProcess !== undefined) {
-      var labelStr = 'Browser: ' + browserProcess.pid;
+      const labelStr = 'Browser: ' + browserProcess.pid;
       labels.push({label: labelStr, value: browserProcess.pid});
     }
 
-    for (var rendererHelper of
+    for (const rendererHelper of
         Object.values(this.modelHelper_.rendererHelpers)) {
-      var rendererProcess = rendererHelper.process;
-      var labelStr = 'Renderer: ' + rendererProcess.userFriendlyName;
+      const rendererProcess = rendererHelper.process;
+      const labelStr = 'Renderer: ' + rendererProcess.userFriendlyName;
       labels.push({label: labelStr, value: rendererProcess.userFriendlyName});
     }
 
-    if (labels.length === 0)
-      return;
+    if (labels.length === 0) return;
 
     this.selectedProcessId_ = labels[0].value;
-    var toolbarEl = this.$.toolbar;
+    const toolbarEl = this.$.toolbar;
     Polymer.dom(toolbarEl).appendChild(tr.ui.b.createSelector(
         this, 'frametimeType',
         'inputLatencySidePanel.frametimeType', this.frametimeType_,
@@ -193,15 +194,16 @@ Polymer({
 
   // TODO(charliea): Delete this function in favor of rangeOfInterest.
   get currentRangeOfInterest() {
-    if (this.rangeOfInterest_.isEmpty)
+    if (this.rangeOfInterest_.isEmpty) {
       return this.model_.bounds;
+    }
     return this.rangeOfInterest_;
   },
 
-  createLatencyLineChart: function(data, title, parentNode) {
-    var chart = new tr.ui.b.LineChart();
+  createLatencyLineChart(data, title, parentNode) {
+    const chart = new tr.ui.b.LineChart();
     Polymer.dom(parentNode).appendChild(chart);
-    var width = 600;
+    let width = 600;
     if (document.body.clientWidth !== undefined) {
       width = document.body.clientWidth * 0.5;
     }
@@ -211,60 +213,60 @@ Polymer({
     return chart;
   },
 
-  updateContents_: function() {
-    var resultArea = this.$.result_area;
+  updateContents_() {
+    const resultArea = this.$.result_area;
     this.latencyChart_ = undefined;
     this.frametimeChart_ = undefined;
     Polymer.dom(resultArea).textContent = '';
 
-    if (this.modelHelper_ === undefined)
-      return;
+    if (this.modelHelper_ === undefined) return;
 
-    var rangeOfInterest = this.currentRangeOfInterest;
+    const rangeOfInterest = this.currentRangeOfInterest;
 
-    var chromeProcess;
-    if (this.modelHelper_.rendererHelpers[this.selectedProcessId_])
+    let chromeProcess;
+    if (this.modelHelper_.rendererHelpers[this.selectedProcessId_]) {
       chromeProcess = this.modelHelper_.rendererHelpers[
         this.selectedProcessId_
       ];
-    else
+    } else {
       chromeProcess = this.modelHelper_.browserHelper;
+    }
 
-    var frameEvents = chromeProcess.getFrameEventsInRange(
+    const frameEvents = chromeProcess.getFrameEventsInRange(
         this.frametimeType, rangeOfInterest);
 
-    var frametimeData = tr.model.helpers.getFrametimeDataFromEvents(
+    const frametimeData = tr.model.helpers.getFrametimeDataFromEvents(
         frameEvents);
-    var averageFrametime = tr.b.Statistics.mean(frametimeData, function(d) {
-      return d.frametime;
-    });
+    const averageFrametime = tr.b.math.Statistics.mean(frametimeData, d =>
+      d.frametime
+    );
 
-    var latencyEvents = this.modelHelper_.browserHelper.
+    const latencyEvents = this.modelHelper_.browserHelper.
       getLatencyEventsInRange(
         rangeOfInterest);
 
-    var latencyData = [];
+    const latencyData = [];
     latencyEvents.forEach(function(event) {
-      if (event.inputLatency === undefined)
-        return;
+      if (event.inputLatency === undefined) return;
+
       latencyData.push({
         x: event.start,
         latency: event.inputLatency / 1000
       });
     });
 
-    var averageLatency = tr.b.Statistics.mean(latencyData, function(d) {
+    const averageLatency = tr.b.math.Statistics.mean(latencyData, function(d) {
       return d.latency;
     });
 
     // Create summary.
-    var latencySummaryText = document.createElement('div');
+    const latencySummaryText = document.createElement('div');
     Polymer.dom(latencySummaryText).appendChild(tr.ui.b.createSpan({
       textContent: 'Average Latency ' + averageLatency + ' ms',
       bold: true}));
     Polymer.dom(resultArea).appendChild(latencySummaryText);
 
-    var frametimeSummaryText = document.createElement('div');
+    const frametimeSummaryText = document.createElement('div');
     Polymer.dom(frametimeSummaryText).appendChild(tr.ui.b.createSpan({
       textContent: 'Average Frame Time ' + averageFrametime + ' ms',
       bold: true}));
@@ -291,7 +293,7 @@ Polymer({
     this.updateContents_();
   },
 
-  supportsModel: function(m) {
+  supportsModel(m) {
     if (m === undefined) {
       return {
         supported: false,
@@ -306,7 +308,7 @@ Polymer({
       };
     }
 
-    var modelHelper = m.getOrCreateHelper(tr.model.helpers.ChromeModelHelper);
+    const modelHelper = m.getOrCreateHelper(tr.model.helpers.ChromeModelHelper);
     if (modelHelper.browserHelper &&
       modelHelper.browserHelper.hasLatencyEvents) {
       return {

@@ -14,7 +14,8 @@
 
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/NativeValueTraits.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 
@@ -32,9 +33,9 @@ class CORE_EXPORT DoubleOrString final {
   static DoubleOrString fromDouble(double);
 
   bool isString() const { return m_type == SpecificTypeString; }
-  String getAsString() const;
-  void setString(String);
-  static DoubleOrString fromString(String);
+  const String& getAsString() const;
+  void setString(const String&);
+  static DoubleOrString fromString(const String&);
 
   DoubleOrString(const DoubleOrString&);
   ~DoubleOrString();
@@ -63,18 +64,23 @@ class V8DoubleOrString final {
 CORE_EXPORT v8::Local<v8::Value> ToV8(const DoubleOrString&, v8::Local<v8::Object>, v8::Isolate*);
 
 template <class CallbackInfo>
-inline void v8SetReturnValue(const CallbackInfo& callbackInfo, DoubleOrString& impl) {
-  v8SetReturnValue(callbackInfo, ToV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
+inline void V8SetReturnValue(const CallbackInfo& callbackInfo, DoubleOrString& impl) {
+  V8SetReturnValue(callbackInfo, ToV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
 }
 
 template <class CallbackInfo>
-inline void v8SetReturnValue(const CallbackInfo& callbackInfo, DoubleOrString& impl, v8::Local<v8::Object> creationContext) {
-  v8SetReturnValue(callbackInfo, ToV8(impl, creationContext, callbackInfo.GetIsolate()));
+inline void V8SetReturnValue(const CallbackInfo& callbackInfo, DoubleOrString& impl, v8::Local<v8::Object> creationContext) {
+  V8SetReturnValue(callbackInfo, ToV8(impl, creationContext, callbackInfo.GetIsolate()));
 }
 
 template <>
-struct NativeValueTraits<DoubleOrString> {
-  CORE_EXPORT static DoubleOrString nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+struct NativeValueTraits<DoubleOrString> : public NativeValueTraitsBase<DoubleOrString> {
+  CORE_EXPORT static DoubleOrString NativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+};
+
+template <>
+struct V8TypeOf<DoubleOrString> {
+  typedef V8DoubleOrString Type;
 };
 
 }  // namespace blink

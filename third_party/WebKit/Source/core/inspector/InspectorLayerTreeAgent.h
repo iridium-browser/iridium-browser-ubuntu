@@ -33,10 +33,11 @@
 #include "core/CoreExport.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/protocol/LayerTree.h"
+#include "core/page/PageOverlay.h"
 #include "platform/Timer.h"
-#include "wtf/Noncopyable.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -53,80 +54,86 @@ class CORE_EXPORT InspectorLayerTreeAgent final
   WTF_MAKE_NONCOPYABLE(InspectorLayerTreeAgent);
 
  public:
-  static InspectorLayerTreeAgent* create(InspectedFrames* inspectedFrames) {
-    return new InspectorLayerTreeAgent(inspectedFrames);
+  class Client {
+   public:
+    virtual ~Client() {}
+    virtual bool IsInspectorLayer(GraphicsLayer*) = 0;
+  };
+
+  static InspectorLayerTreeAgent* Create(InspectedFrames* inspected_frames,
+                                         Client* client) {
+    return new InspectorLayerTreeAgent(inspected_frames, client);
   }
+
   ~InspectorLayerTreeAgent() override;
   DECLARE_VIRTUAL_TRACE();
 
-  void restore() override;
-
-  // Called from InspectorController
-  void willAddPageOverlay(const GraphicsLayer*);
-  void didRemovePageOverlay(const GraphicsLayer*);
+  void Restore() override;
 
   // Called from InspectorInstrumentation
-  void layerTreeDidChange();
-  void didPaint(const GraphicsLayer*, GraphicsContext&, const LayoutRect&);
+  void LayerTreeDidChange();
+  void DidPaint(const GraphicsLayer*, GraphicsContext&, const LayoutRect&);
 
   // Called from the front-end.
-  Response enable() override;
-  Response disable() override;
-  Response compositingReasons(
-      const String& layerId,
-      std::unique_ptr<protocol::Array<String>>* compositingReasons) override;
-  Response makeSnapshot(const String& layerId, String* snapshotId) override;
-  Response loadSnapshot(
+  protocol::Response enable() override;
+  protocol::Response disable() override;
+  protocol::Response compositingReasons(
+      const String& layer_id,
+      std::unique_ptr<protocol::Array<String>>* compositing_reasons) override;
+  protocol::Response makeSnapshot(const String& layer_id,
+                                  String* snapshot_id) override;
+  protocol::Response loadSnapshot(
       std::unique_ptr<protocol::Array<protocol::LayerTree::PictureTile>> tiles,
-      String* snapshotId) override;
-  Response releaseSnapshot(const String& snapshotId) override;
-  Response profileSnapshot(
-      const String& snapshotId,
-      Maybe<int> minRepeatCount,
-      Maybe<double> minDuration,
-      Maybe<protocol::DOM::Rect> clipRect,
+      String* snapshot_id) override;
+  protocol::Response releaseSnapshot(const String& snapshot_id) override;
+  protocol::Response profileSnapshot(
+      const String& snapshot_id,
+      protocol::Maybe<int> min_repeat_count,
+      protocol::Maybe<double> min_duration,
+      protocol::Maybe<protocol::DOM::Rect> clip_rect,
       std::unique_ptr<protocol::Array<protocol::Array<double>>>* timings)
       override;
-  Response replaySnapshot(const String& snapshotId,
-                          Maybe<int> fromStep,
-                          Maybe<int> toStep,
-                          Maybe<double> scale,
-                          String* dataURL) override;
-  Response snapshotCommandLog(
-      const String& snapshotId,
-      std::unique_ptr<protocol::Array<protocol::DictionaryValue>>* commandLog)
+  protocol::Response replaySnapshot(const String& snapshot_id,
+                                    protocol::Maybe<int> from_step,
+                                    protocol::Maybe<int> to_step,
+                                    protocol::Maybe<double> scale,
+                                    String* data_url) override;
+  protocol::Response snapshotCommandLog(
+      const String& snapshot_id,
+      std::unique_ptr<protocol::Array<protocol::DictionaryValue>>* command_log)
       override;
 
   // Called by other agents.
-  std::unique_ptr<protocol::Array<protocol::LayerTree::Layer>> buildLayerTree();
+  std::unique_ptr<protocol::Array<protocol::LayerTree::Layer>> BuildLayerTree();
 
  private:
-  static unsigned s_lastSnapshotId;
+  static unsigned last_snapshot_id_;
 
-  explicit InspectorLayerTreeAgent(InspectedFrames*);
+  InspectorLayerTreeAgent(InspectedFrames*, Client*);
 
-  GraphicsLayer* rootGraphicsLayer();
+  GraphicsLayer* RootGraphicsLayer();
 
-  PaintLayerCompositor* paintLayerCompositor();
-  Response layerById(const String& layerId, GraphicsLayer*&);
-  Response snapshotById(const String& snapshotId, const PictureSnapshot*&);
+  PaintLayerCompositor* GetPaintLayerCompositor();
+  protocol::Response LayerById(const String& layer_id, GraphicsLayer*&);
+  protocol::Response GetSnapshotById(const String& snapshot_id,
+                                     const PictureSnapshot*&);
 
   typedef HashMap<int, int> LayerIdToNodeIdMap;
-  void buildLayerIdToNodeIdMap(PaintLayer*, LayerIdToNodeIdMap&);
-  void gatherGraphicsLayers(
+  void BuildLayerIdToNodeIdMap(PaintLayer*, LayerIdToNodeIdMap&);
+  void GatherGraphicsLayers(
       GraphicsLayer*,
-      HashMap<int, int>& layerIdToNodeIdMap,
+      HashMap<int, int>& layer_id_to_node_id_map,
       std::unique_ptr<protocol::Array<protocol::LayerTree::Layer>>&,
-      bool hasWheelEventHandlers,
-      int scrollingRootLayerId);
-  int idForNode(Node*);
+      bool has_wheel_event_handlers,
+      int scrolling_root_layer_id);
+  int IdForNode(Node*);
 
-  Member<InspectedFrames> m_inspectedFrames;
-  Vector<int, 2> m_pageOverlayLayerIds;
+  Member<InspectedFrames> inspected_frames_;
+  Client* client_;
 
   typedef HashMap<String, RefPtr<PictureSnapshot>> SnapshotById;
-  SnapshotById m_snapshotById;
-  bool m_suppressLayerPaintEvents;
+  SnapshotById snapshot_by_id_;
+  bool suppress_layer_paint_events_;
 };
 
 }  // namespace blink

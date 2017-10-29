@@ -39,7 +39,6 @@ public class DeviceSensorsTest extends AndroidTestCase {
                 mDeviceSensors.mActiveSensors.containsAll(DeviceSensors.DEVICE_MOTION_SENSORS));
         assertTrue(mDeviceSensors.mDeviceMotionIsActive);
         assertFalse(mDeviceSensors.mDeviceOrientationIsActive);
-        assertFalse(mDeviceSensors.mDeviceLightIsActive);
 
         assertEquals(DeviceSensors.DEVICE_MOTION_SENSORS.size(), mMockSensorManager.mNumRegistered);
         assertEquals(0, mMockSensorManager.mNumUnRegistered);
@@ -56,7 +55,6 @@ public class DeviceSensorsTest extends AndroidTestCase {
                 mDeviceSensors.mActiveSensors.containsAll(
                         DeviceSensors.DEVICE_ORIENTATION_SENSORS_A));
         assertFalse(mDeviceSensors.mDeviceMotionIsActive);
-        assertFalse(mDeviceSensors.mDeviceLightIsActive);
         assertTrue(mDeviceSensors.mDeviceOrientationIsActive);
         assertFalse(mDeviceSensors.mDeviceOrientationIsActiveWithBackupSensors);
         assertEquals(OrientationSensorType.GAME_ROTATION_VECTOR,
@@ -149,7 +147,6 @@ public class DeviceSensorsTest extends AndroidTestCase {
         assertEquals(union.size(), mDeviceSensors.mActiveSensors.size());
         assertTrue(mDeviceSensors.mDeviceMotionIsActive);
         assertTrue(mDeviceSensors.mDeviceOrientationIsActive);
-        assertFalse(mDeviceSensors.mDeviceLightIsActive);
         assertEquals(union.size(), mMockSensorManager.mNumRegistered);
         assertEquals(0, mMockSensorManager.mNumUnRegistered);
         assertEquals(DeviceSensors.DEVICE_MOTION_SENSORS.size(),
@@ -163,14 +160,14 @@ public class DeviceSensorsTest extends AndroidTestCase {
         assertTrue(start);
         assertTrue("should contain all absolute orientation sensors",
                 mDeviceSensors.mActiveSensors.containsAll(
-                        DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS));
+                        DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS_A));
         assertFalse(mDeviceSensors.mDeviceMotionIsActive);
-        assertFalse(mDeviceSensors.mDeviceLightIsActive);
         assertFalse(mDeviceSensors.mDeviceOrientationIsActive);
         assertFalse(mDeviceSensors.mDeviceOrientationIsActiveWithBackupSensors);
+        assertFalse(mDeviceSensors.mDeviceOrientationAbsoluteIsActiveWithBackupSensors);
         assertTrue(mDeviceSensors.mDeviceOrientationAbsoluteIsActive);
 
-        assertEquals(DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS.size(),
+        assertEquals(DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS_A.size(),
                 mMockSensorManager.mNumRegistered);
         assertEquals(0, mMockSensorManager.mNumUnRegistered);
     }
@@ -183,10 +180,30 @@ public class DeviceSensorsTest extends AndroidTestCase {
         assertTrue("should contain no sensors", mDeviceSensors.mActiveSensors.isEmpty());
         assertFalse(mDeviceSensors.mDeviceMotionIsActive);
         assertFalse(mDeviceSensors.mDeviceOrientationIsActive);
+        assertFalse(mDeviceSensors.mDeviceOrientationAbsoluteIsActive);
         assertFalse(mDeviceSensors.mDeviceOrientationIsActiveWithBackupSensors);
-        assertFalse(mDeviceSensors.mDeviceLightIsActive);
-        assertEquals(DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS.size(),
+        assertFalse(mDeviceSensors.mDeviceOrientationAbsoluteIsActiveWithBackupSensors);
+        assertEquals(DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS_A.size(),
                 mMockSensorManager.mNumUnRegistered);
+    }
+
+    @SmallTest
+    public void testRegisterSensorsDeviceOrientationAbsoluteRotationVectorNotAvailable() {
+        MockSensorManager mockSensorManager = new MockSensorManager();
+        mockSensorManager.setRotationVectorAvailable(false);
+        mDeviceSensors.setSensorManagerProxy(mockSensorManager);
+        boolean startOrientation = mDeviceSensors.start(0, ConsumerType.ORIENTATION_ABSOLUTE, 100);
+
+        assertTrue(startOrientation);
+        assertFalse(mDeviceSensors.mDeviceOrientationIsActive);
+        assertTrue(mDeviceSensors.mDeviceOrientationAbsoluteIsActive);
+        assertTrue(mDeviceSensors.mDeviceOrientationAbsoluteIsActiveWithBackupSensors);
+        assertTrue("should contain option B orientation absolute sensors",
+                mDeviceSensors.mActiveSensors.containsAll(
+                        DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS_B));
+        assertEquals(DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS_B.size(),
+                mockSensorManager.mNumRegistered);
+        assertEquals(0, mockSensorManager.mNumUnRegistered);
     }
 
     @SmallTest
@@ -202,30 +219,16 @@ public class DeviceSensorsTest extends AndroidTestCase {
                         DeviceSensors.DEVICE_ORIENTATION_SENSORS_A));
         assertTrue("should contain all absolute orientation sensors",
                 mDeviceSensors.mActiveSensors.containsAll(
-                        DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS));
+                        DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS_A));
 
         Set<Integer> union = new HashSet<Integer>(DeviceSensors.DEVICE_ORIENTATION_SENSORS_A);
-        union.addAll(DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS);
+        union.addAll(DeviceSensors.DEVICE_ORIENTATION_ABSOLUTE_SENSORS_A);
 
         assertEquals(union.size(), mDeviceSensors.mActiveSensors.size());
         assertTrue(mDeviceSensors.mDeviceOrientationIsActive);
         assertTrue(mDeviceSensors.mDeviceOrientationAbsoluteIsActive);
         assertFalse(mDeviceSensors.mDeviceMotionIsActive);
-        assertFalse(mDeviceSensors.mDeviceLightIsActive);
         assertEquals(union.size(), mMockSensorManager.mNumRegistered);
-        assertEquals(0, mMockSensorManager.mNumUnRegistered);
-    }
-
-    @SmallTest
-    public void testRegisterSensorsDeviceLight() {
-        boolean start = mDeviceSensors.start(0, ConsumerType.LIGHT, 100);
-
-        assertTrue(start);
-        assertTrue(mDeviceSensors.mDeviceLightIsActive);
-        assertFalse(mDeviceSensors.mDeviceMotionIsActive);
-        assertFalse(mDeviceSensors.mDeviceOrientationIsActive);
-
-        assertEquals(DeviceSensors.DEVICE_LIGHT_SENSORS.size(), mMockSensorManager.mNumRegistered);
         assertEquals(0, mMockSensorManager.mNumUnRegistered);
     }
 
@@ -237,7 +240,6 @@ public class DeviceSensorsTest extends AndroidTestCase {
         assertTrue("should contain no sensors", mDeviceSensors.mActiveSensors.isEmpty());
         assertFalse(mDeviceSensors.mDeviceMotionIsActive);
         assertFalse(mDeviceSensors.mDeviceOrientationIsActive);
-        assertFalse(mDeviceSensors.mDeviceLightIsActive);
         assertEquals(
                 DeviceSensors.DEVICE_MOTION_SENSORS.size(), mMockSensorManager.mNumUnRegistered);
         assertEquals(0, mDeviceSensors.getNumberActiveDeviceMotionSensors());
@@ -252,7 +254,6 @@ public class DeviceSensorsTest extends AndroidTestCase {
         assertFalse(mDeviceSensors.mDeviceMotionIsActive);
         assertFalse(mDeviceSensors.mDeviceOrientationIsActive);
         assertFalse(mDeviceSensors.mDeviceOrientationIsActiveWithBackupSensors);
-        assertFalse(mDeviceSensors.mDeviceLightIsActive);
         assertEquals(DeviceSensors.DEVICE_ORIENTATION_SENSORS_A.size(),
                 mMockSensorManager.mNumUnRegistered);
     }
@@ -278,30 +279,6 @@ public class DeviceSensorsTest extends AndroidTestCase {
         assertEquals(diff.size() + DeviceSensors.DEVICE_ORIENTATION_SENSORS_A.size(),
                 mMockSensorManager.mNumUnRegistered);
         assertEquals(0, mDeviceSensors.getNumberActiveDeviceMotionSensors());
-    }
-
-    @SmallTest
-    public void testUnregisterSensorsLight() {
-        mDeviceSensors.start(0, ConsumerType.LIGHT, 100);
-        mDeviceSensors.stop(ConsumerType.LIGHT);
-
-        assertTrue("should contain no sensors", mDeviceSensors.mActiveSensors.isEmpty());
-        assertFalse(mDeviceSensors.mDeviceMotionIsActive);
-        assertFalse(mDeviceSensors.mDeviceOrientationIsActive);
-        assertFalse(mDeviceSensors.mDeviceLightIsActive);
-    }
-
-    @SmallTest
-    public void testSensorChangedGotLight() {
-        boolean startLight = mDeviceSensors.start(0, ConsumerType.LIGHT, 100);
-
-        assertTrue(startLight);
-        assertTrue(mDeviceSensors.mDeviceLightIsActive);
-
-        float[] values = {200};
-        mDeviceSensors.sensorChanged(Sensor.TYPE_LIGHT, values);
-        mDeviceSensors.verifyCalls("gotLight");
-        mDeviceSensors.verifyValue(200);
     }
 
     /**
@@ -520,7 +497,7 @@ public class DeviceSensorsTest extends AndroidTestCase {
         private String mCalls = "";
 
         private DeviceSensorsForTests(Context context) {
-            super(context);
+            super();
         }
 
         static DeviceSensorsForTests getInstance(Context context) {
@@ -545,12 +522,6 @@ public class DeviceSensorsTest extends AndroidTestCase {
 
         private void verifyCalls(String names) {
             assertEquals(mCalls, names);
-        }
-
-        @Override
-        protected void gotLight(double light) {
-            mValue1 = light;
-            mCalls = mCalls.concat("gotLight");
         }
 
         @Override

@@ -10,10 +10,9 @@
 
 #include "webrtc/modules/audio_processing/level_estimator_impl.h"
 
-#include "webrtc/base/array_view.h"
 #include "webrtc/modules/audio_processing/audio_buffer.h"
 #include "webrtc/modules/audio_processing/rms_level.h"
-#include "webrtc/system_wrappers/include/critical_section_wrapper.h"
+#include "webrtc/rtc_base/array_view.h"
 
 namespace webrtc {
 

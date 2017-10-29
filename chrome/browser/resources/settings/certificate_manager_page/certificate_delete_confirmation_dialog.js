@@ -10,15 +10,15 @@ Polymer({
   is: 'settings-certificate-delete-confirmation-dialog',
 
   properties: {
-    /** @private {!settings.CertificatesBrowserProxy} */
-    browserProxy_: Object,
-
     /** @type {!CertificateSubnode} */
     model: Object,
 
     /** @type {!CertificateType} */
     certificateType: String,
   },
+
+  /** @private {?settings.CertificatesBrowserProxy} */
+  browserProxy_: null,
 
   /** @override */
   ready: function() {
@@ -82,14 +82,15 @@ Polymer({
 
   /** @private */
   onOkTap_: function() {
-    this.browserProxy_.deleteCertificate(this.model.id).then(
-        function() {
-          /** @type {!CrDialogElement} */ (this.$.dialog).close();
-        }.bind(this),
-        /** @param {!CertificatesError} error */
-        function(error) {
-          /** @type {!CrDialogElement} */ (this.$.dialog).close();
-          this.fire('certificates-error', error);
-        }.bind(this));
+    this.browserProxy_.deleteCertificate(this.model.id)
+        .then(
+            function() {
+              /** @type {!CrDialogElement} */ (this.$.dialog).close();
+            }.bind(this),
+            /** @param {!CertificatesError} error */
+            function(error) {
+              /** @type {!CrDialogElement} */ (this.$.dialog).close();
+              this.fire('certificates-error', {error: error, anchor: null});
+            }.bind(this));
   },
 });

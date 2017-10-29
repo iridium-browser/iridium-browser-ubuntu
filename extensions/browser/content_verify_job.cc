@@ -41,14 +41,14 @@ class ScopedElapsedTimer {
 }  // namespace
 
 ContentVerifyJob::ContentVerifyJob(ContentHashReader* hash_reader,
-                                   const FailureCallback& failure_callback)
+                                   FailureCallback failure_callback)
     : done_reading_(false),
       hashes_ready_(false),
       total_bytes_read_(0),
       current_block_(0),
       current_hash_byte_count_(0),
       hash_reader_(hash_reader),
-      failure_callback_(failure_callback),
+      failure_callback_(std::move(failure_callback)),
       failed_(false) {
   // It's ok for this object to be constructed on a different thread from where
   // it's used.
@@ -66,9 +66,7 @@ void ContentVerifyJob::Start() {
     g_test_observer->JobStarted(hash_reader_->extension_id(),
                                 hash_reader_->relative_path());
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE,
-      base::TaskTraits().MayBlock().WithPriority(
-          base::TaskPriority::USER_VISIBLE),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
       base::Bind(&ContentHashReader::Init, hash_reader_),
       base::Bind(&ContentVerifyJob::OnHashesReady, this));
 }
@@ -134,17 +132,28 @@ void ContentVerifyJob::DoneReading() {
   }
   done_reading_ = true;
   if (hashes_ready_) {
-    if (!FinishBlock())
+    if (!FinishBlock()) {
       DispatchFailureCallback(HASH_MISMATCH);
-    else if (g_test_observer)
+    } else if (g_test_observer) {
       g_test_observer->JobFinished(hash_reader_->extension_id(),
-                                   hash_reader_->relative_path(), failed_);
+                                   hash_reader_->relative_path(), NONE);
+    }
   }
 }
 
 bool ContentVerifyJob::FinishBlock() {
-  if (current_hash_byte_count_ <= 0)
-    return true;
+  if (current_hash_byte_count_ == 0) {
+    if (!done_reading_ ||
+        // If we have checked all blocks already, then nothing else to do here.
+        current_block_ == hash_reader_->block_count()) {
+      return true;
+    }
+  }
+  if (!current_hash_) {
+    // This happens when we fail to read the resource. Compute empty content's
+    // hash in this case.
+    current_hash_ = crypto::SecureHash::Create(crypto::SecureHash::SHA256);
+  }
   std::string final(crypto::kSHA256Length, 0);
   current_hash_->Finish(base::string_as_array(& final), final.size());
   current_hash_.reset();
@@ -154,23 +163,33 @@ bool ContentVerifyJob::FinishBlock() {
 
   const std::string* expected_hash = NULL;
   if (!hash_reader_->GetHashForBlock(block, &expected_hash) ||
-      *expected_hash != final)
+      *expected_hash != final) {
     return false;
+  }
 
   return true;
 }
 
 void ContentVerifyJob::OnHashesReady(bool success) {
   if (!success && !g_test_delegate) {
-    if (!hash_reader_->content_exists()) {
-      // Ignore verification of non-existent resources.
-      return;
-    } else if (hash_reader_->have_verified_contents() &&
-               hash_reader_->have_computed_hashes()) {
-      DispatchFailureCallback(NO_HASHES_FOR_FILE);
-    } else {
+    // TODO(lazyboy): Make ContentHashReader::Init return an enum instead of
+    // bool. This should make the following checks on |hash_reader_| easier
+    // to digest and will avoid future bugs from creeping up.
+    if (!hash_reader_->have_verified_contents() ||
+        !hash_reader_->have_computed_hashes()) {
       DispatchFailureCallback(MISSING_ALL_HASHES);
+      return;
     }
+
+    if (hash_reader_->file_missing_from_verified_contents()) {
+      // Ignore verification of non-existent resources.
+      if (g_test_observer) {
+        g_test_observer->JobFinished(hash_reader_->extension_id(),
+                                     hash_reader_->relative_path(), NONE);
+      }
+      return;
+    }
+    DispatchFailureCallback(NO_HASHES_FOR_FILE);
     return;
   }
 
@@ -186,7 +205,7 @@ void ContentVerifyJob::OnHashesReady(bool success) {
       DispatchFailureCallback(HASH_MISMATCH);
     } else if (g_test_observer) {
       g_test_observer->JobFinished(hash_reader_->extension_id(),
-                                   hash_reader_->relative_path(), failed_);
+                                   hash_reader_->relative_path(), NONE);
     }
   }
 }
@@ -211,12 +230,12 @@ void ContentVerifyJob::DispatchFailureCallback(FailureReason reason) {
     VLOG(1) << "job failed for " << hash_reader_->extension_id() << " "
             << hash_reader_->relative_path().MaybeAsASCII()
             << " reason:" << reason;
-    failure_callback_.Run(reason);
-    failure_callback_.Reset();
+    std::move(failure_callback_).Run(reason);
   }
-  if (g_test_observer)
-    g_test_observer->JobFinished(
-        hash_reader_->extension_id(), hash_reader_->relative_path(), failed_);
+  if (g_test_observer) {
+    g_test_observer->JobFinished(hash_reader_->extension_id(),
+                                 hash_reader_->relative_path(), reason);
+  }
 }
 
 }  // namespace extensions

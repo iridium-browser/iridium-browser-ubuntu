@@ -6,44 +6,43 @@
 #define Worklet_h
 
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/ScriptPromiseResolver.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/loader/WorkletScriptLoader.h"
+#include "core/workers/WorkletGlobalScopeProxy.h"
+#include "core/workers/WorkletOptions.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "platform/loader/fetch/ResourceFetcher.h"
 
 namespace blink {
 
 class LocalFrame;
-class WorkletGlobalScopeProxy;
+class ScriptPromiseResolver;
 
+// This is the base implementation of Worklet interface defined in the spec:
+// https://drafts.css-houdini.org/worklets/#worklet
+// Although some worklets run off the main thread, this must be created and
+// destroyed on the main thread.
 class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
-                            public WorkletScriptLoader::Client,
                             public ScriptWrappable,
                             public ContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(Worklet);
+  // Eager finalization is needed to notify parent object destruction of the
+  // GC-managed messaging proxy and to initiate worklet termination.
+  EAGERLY_FINALIZE();
   WTF_MAKE_NONCOPYABLE(Worklet);
 
  public:
-  virtual ~Worklet() = default;
+  virtual ~Worklet();
 
-  virtual void initialize() {}
-  virtual bool isInitialized() const { return true; }
-
-  virtual WorkletGlobalScopeProxy* workletGlobalScopeProxy() const = 0;
-
-  // Worklet
-  ScriptPromise import(ScriptState*, const String& url);
-
-  // WorkletScriptLoader::Client
-  void notifyWorkletScriptLoadingFinished(WorkletScriptLoader*,
-                                          const ScriptSourceCode&) final;
+  // Worklet.idl
+  // addModule() imports ES6 module scripts.
+  ScriptPromise addModule(ScriptState*,
+                          const String& module_url,
+                          const WorkletOptions&);
 
   // ContextLifecycleObserver
-  void contextDestroyed(ExecutionContext*) final;
+  void ContextDestroyed(ExecutionContext*) override;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -51,10 +50,27 @@ class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
   // The Worklet inherits the url and userAgent from the frame->document().
   explicit Worklet(LocalFrame*);
 
+  // Returns one of available global scopes.
+  WorkletGlobalScopeProxy* FindAvailableGlobalScope() const;
+
+  size_t GetNumberOfGlobalScopes() const { return proxies_.size(); }
+
  private:
-  Member<LocalFrame> m_frame;
-  HeapHashMap<Member<WorkletScriptLoader>, Member<ScriptPromiseResolver>>
-      m_loaderAndResolvers;
+  virtual void FetchAndInvokeScript(const KURL& module_url_record,
+                                    const WorkletOptions&,
+                                    ScriptPromiseResolver*);
+
+  // Returns true if there are no global scopes or additional global scopes are
+  // necessary. CreateGlobalScope() will be called in that case. Each worklet
+  // can define how to pool global scopes here.
+  virtual bool NeedsToCreateGlobalScope() = 0;
+  virtual WorkletGlobalScopeProxy* CreateGlobalScope() = 0;
+
+  // "A Worklet has a list of the worklet's WorkletGlobalScopes. Initially this
+  // list is empty; it is populated when the user agent chooses to create its
+  // WorkletGlobalScope."
+  // https://drafts.css-houdini.org/worklets/#worklet-section
+  HeapHashSet<Member<WorkletGlobalScopeProxy>> proxies_;
 };
 
 }  // namespace blink

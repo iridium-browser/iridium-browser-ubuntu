@@ -20,6 +20,7 @@
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -62,6 +63,7 @@
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "net/base/escape.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -117,7 +119,7 @@ void GetDownloadFilePath(
   if (!base::DirectoryExists(download_directory)) {
     if (!base::CreateDirectory(download_directory)) {
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                              base::Bind(callback, base::FilePath()));
+                              base::BindOnce(callback, base::FilePath()));
       return;
     }
   }
@@ -140,7 +142,7 @@ void GetDownloadFilePath(
   }
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(callback, file));
+                          base::BindOnce(callback, file));
 }
 
 void MaybeAppendAuthUserParameter(const std::string& authuser, GURL* url) {
@@ -213,10 +215,12 @@ GURL WebstoreInstaller::GetWebstoreInstallURL(
     return GURL(base::StringPrintf(download_url.c_str(),
                                    extension_id.c_str()));
   }
-  std::vector<std::string> params;
-  params.push_back("id=" + extension_id);
+  std::vector<base::StringPiece> params;
+  std::string extension_param = "id=" + extension_id;
+  std::string installsource_param = "installsource=" + install_source;
+  params.push_back(extension_param);
   if (!install_source.empty())
-    params.push_back("installsource=" + install_source);
+    params.push_back(installsource_param);
   params.push_back("uc");
   std::string url_string = extension_urls::GetWebstoreUpdateUrl().spec();
 
@@ -493,12 +497,12 @@ void WebstoreInstaller::OnDownloadStarted(
     if (version_required.IsValid()) {
       approval->minimum_version.reset(new base::Version(version_required));
     }
-    download_item_->SetUserData(kApprovalKey, approval.release());
+    download_item_->SetUserData(kApprovalKey, std::move(approval));
   } else {
     // It is for the main module of the extension. We should use the provided
     // |approval_|.
     if (approval_)
-      download_item_->SetUserData(kApprovalKey, approval_.release());
+      download_item_->SetUserData(kApprovalKey, std::move(approval_));
   }
 
   if (!download_started_) {
@@ -599,8 +603,9 @@ void WebstoreInstaller::DownloadCrx(
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&GetDownloadFilePath, download_directory, extension_id,
-        base::Bind(&WebstoreInstaller::StartDownload, this, extension_id)));
+      base::BindOnce(
+          &GetDownloadFilePath, download_directory, extension_id,
+          base::Bind(&WebstoreInstaller::StartDownload, this, extension_id)));
 }
 
 // http://crbug.com/165634
@@ -663,15 +668,45 @@ void WebstoreInstaller::StartDownload(const std::string& extension_id,
   content::StoragePartition* storage_partition =
       BrowserContext::GetStoragePartition(profile_,
                                           render_frame_host->GetSiteInstance());
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("webstore_installer", R"(
+        semantics {
+          sender: "Webstore Installer"
+          description: "Downloads an extension for installation."
+          trigger:
+            "User initiates a webstore extension installation flow, including "
+            "installing from the webstore, inline installation from a site, "
+            "re-installing a corrupted extension, and others."
+          data:
+            "The id of the extension to be installed and information about the "
+            "user's installation, including version, language, distribution "
+            "(Chrome vs Chromium), NaCl architecture, installation source (as "
+            "an enum), and accepted crx formats."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store: "user"
+          setting:
+            "This feature cannot be disabled. It is only activated if the user "
+            "triggers an extension installation."
+          chrome_policy {
+            ExtensionInstallBlacklist {
+              ExtensionInstallBlacklist: {
+                entries: '*'
+              }
+            }
+          }
+        })");
   std::unique_ptr<DownloadUrlParameters> params(new DownloadUrlParameters(
       download_url_, render_process_host_id, render_view_host_routing_id,
       render_frame_host->GetRoutingID(),
-      storage_partition->GetURLRequestContext()));
+      storage_partition->GetURLRequestContext(), traffic_annotation));
   params->set_file_path(file);
   if (controller.GetVisibleEntry())
     params->set_referrer(content::Referrer::SanitizeForRequest(
         download_url_, content::Referrer(controller.GetVisibleEntry()->GetURL(),
-                                         blink::WebReferrerPolicyDefault)));
+                                         blink::kWebReferrerPolicyDefault)));
   params->set_callback(base::Bind(&WebstoreInstaller::OnDownloadStarted,
                                   this,
                                   extension_id));

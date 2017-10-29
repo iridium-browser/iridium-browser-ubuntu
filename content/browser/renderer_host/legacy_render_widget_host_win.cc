@@ -4,17 +4,20 @@
 
 #include "content/browser/renderer_host/legacy_render_widget_host_win.h"
 
+#include <objbase.h>
+
 #include <memory>
+#include <utility>
 
 #include "base/command_line.h"
 #include "base/win/win_util.h"
-#include "base/win/windows_version.h"
 #include "content/browser/accessibility/browser_accessibility_manager_win.h"
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/browser/accessibility/browser_accessibility_win.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
 #include "content/public/common/content_switches.h"
+#include "ui/accessibility/platform/ax_system_caret_win.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/win/internal_constants.h"
 #include "ui/base/win/window_event_target.h"
@@ -85,6 +88,11 @@ void LegacyRenderWidgetHostHWND::SetBounds(const gfx::Rect& bounds) {
     direct_manipulation_helper_->SetBounds(bounds_in_pixel);
 }
 
+void LegacyRenderWidgetHostHWND::MoveCaretTo(const gfx::Rect& bounds) {
+  DCHECK(ax_system_caret_);
+  ax_system_caret_->MoveCaretTo(bounds);
+}
+
 void LegacyRenderWidgetHostHWND::OnFinalMessage(HWND hwnd) {
   if (host_) {
     host_->OnLegacyWindowDestroyed();
@@ -98,12 +106,15 @@ void LegacyRenderWidgetHostHWND::OnFinalMessage(HWND hwnd) {
 }
 
 LegacyRenderWidgetHostHWND::LegacyRenderWidgetHostHWND(HWND parent)
-    : mouse_tracking_enabled_(false),
-      host_(NULL) {
+    : mouse_tracking_enabled_(false), host_(nullptr) {
   RECT rect = {0};
   Base::Create(parent, rect, L"Chrome Legacy Window",
                WS_CHILDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
                WS_EX_TRANSPARENT);
+  // We create a system caret regardless of accessibility mode since not all
+  // assistive software that makes use of a caret is classified as a screen
+  // reader, e.g. the built-in Windows Magnifier.
+  ax_system_caret_ = std::make_unique<ui::AXSystemCaretWin>(hwnd());
 }
 
 LegacyRenderWidgetHostHWND::~LegacyRenderWidgetHostHWND() {
@@ -111,17 +122,15 @@ LegacyRenderWidgetHostHWND::~LegacyRenderWidgetHostHWND() {
 }
 
 bool LegacyRenderWidgetHostHWND::Init() {
-  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
-    RegisterTouchWindow(hwnd(), TWF_WANTPALM);
+  RegisterTouchWindow(hwnd(), TWF_WANTPALM);
 
-  HRESULT hr = ::CreateStdAccessibleObject(
-      hwnd(), OBJID_WINDOW, IID_IAccessible,
-      reinterpret_cast<void **>(window_accessible_.Receive()));
+  HRESULT hr = ::CreateStdAccessibleObject(hwnd(), OBJID_WINDOW,
+                                           IID_PPV_ARGS(&window_accessible_));
   DCHECK(SUCCEEDED(hr));
 
   AccessibilityMode mode =
       BrowserAccessibilityStateImpl::GetInstance()->accessibility_mode();
-  if (!(mode & ACCESSIBILITY_MODE_FLAG_NATIVE_APIS)) {
+  if (!mode.has_mode(AccessibilityMode::kNativeAPIs)) {
     // Attempt to detect screen readers or other clients who want full
     // accessibility support, by seeing if they respond to this event.
     NotifyWinEvent(EVENT_SYSTEM_ALERT, hwnd(), kIdScreenReaderHoneyPot,
@@ -166,29 +175,40 @@ LRESULT LegacyRenderWidgetHostHWND::OnGetObject(UINT message,
     // enable basic accessibility support. (Full screen reader support is
     // detected later when specific more advanced APIs are accessed.)
     BrowserAccessibilityStateImpl::GetInstance()->AddAccessibilityModeFlags(
-        ACCESSIBILITY_MODE_FLAG_NATIVE_APIS |
-        ACCESSIBILITY_MODE_FLAG_WEB_CONTENTS);
+        AccessibilityMode::kNativeAPIs | AccessibilityMode::kWebContents);
     return static_cast<LRESULT>(0L);
   }
 
-  if (static_cast<DWORD>(OBJID_CLIENT) != obj_id || !host_)
+  if (!host_)
     return static_cast<LRESULT>(0L);
 
-  RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(
-      host_->GetRenderWidgetHost());
-  if (!rwhi)
-    return static_cast<LRESULT>(0L);
+  if (static_cast<DWORD>(OBJID_CLIENT) == obj_id) {
+    RenderWidgetHostImpl* rwhi =
+        RenderWidgetHostImpl::From(host_->GetRenderWidgetHost());
+    if (!rwhi)
+      return static_cast<LRESULT>(0L);
 
-  BrowserAccessibilityManagerWin* manager =
-      static_cast<BrowserAccessibilityManagerWin*>(
-          rwhi->GetRootBrowserAccessibilityManager());
-  if (!manager)
-    return static_cast<LRESULT>(0L);
+    BrowserAccessibilityManagerWin* manager =
+        static_cast<BrowserAccessibilityManagerWin*>(
+            rwhi->GetRootBrowserAccessibilityManager());
+    if (!manager || !manager->GetRoot())
+      return static_cast<LRESULT>(0L);
 
-  base::win::ScopedComPtr<IAccessible> root(
-      ToBrowserAccessibilityWin(manager->GetRoot()));
-  return LresultFromObject(IID_IAccessible, w_param,
-      static_cast<IAccessible*>(root.Detach()));
+    base::win::ScopedComPtr<IAccessible> root(
+        ToBrowserAccessibilityWin(manager->GetRoot())->GetCOM());
+    return LresultFromObject(IID_IAccessible, w_param,
+                             static_cast<IAccessible*>(root.Detach()));
+  }
+
+  if (static_cast<DWORD>(OBJID_CARET) == obj_id && host_->HasFocus()) {
+    DCHECK(ax_system_caret_);
+    base::win::ScopedComPtr<IAccessible> ax_system_caret_accessible =
+        ax_system_caret_->GetCaret();
+    return LresultFromObject(IID_IAccessible, w_param,
+                             ax_system_caret_accessible.Detach());
+  }
+
+  return static_cast<LRESULT>(0L);
 }
 
 // We send keyboard/mouse/touch messages to the parent window via SendMessage.
@@ -311,6 +331,19 @@ LRESULT LegacyRenderWidgetHostHWND::OnMouseActivate(UINT message,
     return MA_NOACTIVATE;
   }
   return MA_ACTIVATE;
+}
+
+LRESULT LegacyRenderWidgetHostHWND::OnPointer(UINT message,
+                                              WPARAM w_param,
+                                              LPARAM l_param) {
+  LRESULT ret = 0;
+  if (GetWindowEventTarget(GetParent())) {
+    bool msg_handled = false;
+    ret = GetWindowEventTarget(GetParent())
+              ->HandlePointerMessage(message, w_param, l_param, &msg_handled);
+    SetMsgHandled(msg_handled);
+  }
+  return ret;
 }
 
 LRESULT LegacyRenderWidgetHostHWND::OnTouch(UINT message,

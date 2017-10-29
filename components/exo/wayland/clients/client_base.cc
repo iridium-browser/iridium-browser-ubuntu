@@ -16,11 +16,13 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkSurface.h"
+#include "third_party/skia/include/gpu/GrBackendSurface.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 #include "third_party/skia/include/gpu/gl/GrGLAssembleInterface.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
@@ -33,6 +35,8 @@
 #include <drm_fourcc.h>
 #include <gbm.h>
 #include <xf86drm.h>
+
+#include "ui/ozone/public/ozone_platform.h"  // nogncheck
 #endif
 
 namespace exo {
@@ -110,17 +114,6 @@ void BufferRelease(void* data, wl_buffer* /* buffer */) {
 }
 
 #if defined(OZONE_PLATFORM_GBM)
-void LinuxBufferParamsCreated(void* data,
-                              zwp_linux_buffer_params_v1* params,
-                              wl_buffer* new_buffer) {
-  ClientBase::Buffer* buffer = static_cast<ClientBase::Buffer*>(data);
-  buffer->buffer.reset(new_buffer);
-}
-
-void LinuxBufferParamsFailed(void* data, zwp_linux_buffer_params_v1* params) {
-  LOG(ERROR) << "Linux buffer params failed";
-}
-
 const GrGLInterface* GrGLCreateNativeInterface() {
   return GrGLAssembleInterface(nullptr, [](void* ctx, const char name[]) {
     return eglGetProcAddress(name);
@@ -132,15 +125,16 @@ wl_registry_listener g_registry_listener = {RegistryHandler, RegistryRemover};
 
 wl_buffer_listener g_buffer_listener = {BufferRelease};
 
-zwp_linux_buffer_params_v1_listener g_params_listener = {
-    LinuxBufferParamsCreated, LinuxBufferParamsFailed};
-
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // ClientBase::InitParams, public:
 
-ClientBase::InitParams::InitParams() {}
+ClientBase::InitParams::InitParams() {
+#if defined(OZONE_PLATFORM_GBM)
+  drm_format = DRM_FORMAT_ABGR8888;
+#endif
+}
 
 ClientBase::InitParams::~InitParams() {}
 
@@ -268,7 +262,10 @@ bool ClientBase::Init(const InitParams& params) {
       LOG(ERROR) << "Can't create gbm device";
       return false;
     }
-
+    ui_loop_.reset(new base::MessageLoopForUI);
+    ui::OzonePlatform::InitParams params;
+    params.single_process = true;
+    ui::OzonePlatform::InitializeForGPU(params);
     bool gl_initialized = gl::init::InitializeGLOneOff();
     DCHECK(gl_initialized);
     gl_surface_ = gl::init::CreateOffscreenGLSurface(gfx::Size());
@@ -304,10 +301,11 @@ bool ClientBase::Init(const InitParams& params) {
     buffers_.push_back(std::move(buffer));
   }
 
-  wl_display_roundtrip(display_.get());
   for (size_t i = 0; i < buffers_.size(); ++i) {
+    // If the buffer handle doesn't exist, we would either be killed by the
+    // server or die here.
     if (!buffers_[i]->buffer) {
-      LOG(ERROR) << "LinuxBufferParamsCreated was not called on the buffer.";
+      LOG(ERROR) << "buffer handle uninitialized.";
       return false;
     }
 
@@ -366,8 +364,8 @@ ClientBase::~ClientBase() {}
 
 std::unique_ptr<ClientBase::Buffer> ClientBase::CreateBuffer(
     int32_t drm_format) {
-#if defined(OZONE_PLATFORM_GBM)
   std::unique_ptr<Buffer> buffer(new Buffer());
+#if defined(OZONE_PLATFORM_GBM)
   if (device_) {
     buffer->bo.reset(gbm_bo_create(device_.get(), width_, height_, drm_format,
                                    GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING));
@@ -379,8 +377,6 @@ std::unique_ptr<ClientBase::Buffer> ClientBase::CreateBuffer(
 
     buffer->params.reset(
         zwp_linux_dmabuf_v1_create_params(globals_.linux_dmabuf.get()));
-    zwp_linux_buffer_params_v1_add_listener(buffer->params.get(),
-                                            &g_params_listener, buffer.get());
     for (size_t i = 0; i < gbm_bo_get_num_planes(buffer->bo.get()); ++i) {
       base::ScopedFD fd(gbm_bo_get_plane_fd(buffer->bo.get(), i));
       uint32_t stride = gbm_bo_get_plane_stride(buffer->bo.get(), i);
@@ -388,8 +384,8 @@ std::unique_ptr<ClientBase::Buffer> ClientBase::CreateBuffer(
       zwp_linux_buffer_params_v1_add(buffer->params.get(), fd.get(), i, offset,
                                      stride, 0, 0);
     }
-    zwp_linux_buffer_params_v1_create(buffer->params.get(), width_, height_,
-                                      drm_format, 0);
+    buffer->buffer.reset(zwp_linux_buffer_params_v1_create_immed(
+        buffer->params.get(), width_, height_, drm_format, 0));
 
     if (gbm_bo_get_num_planes(buffer->bo.get()) != 1)
       return buffer;
@@ -423,16 +419,11 @@ std::unique_ptr<ClientBase::Buffer> ClientBase::CreateBuffer(
     GrGLTextureInfo texture_info;
     texture_info.fID = buffer->texture->get();
     texture_info.fTarget = GL_TEXTURE_2D;
-    GrBackendTextureDesc desc;
-    desc.fFlags = kRenderTarget_GrBackendTextureFlag;
-    desc.fWidth = width_;
-    desc.fHeight = height_;
-    desc.fConfig = kGrPixelConfig;
-    desc.fOrigin = kTopLeft_GrSurfaceOrigin;
-    desc.fTextureHandle = reinterpret_cast<GrBackendObject>(&texture_info);
-
+    GrBackendTexture backend_texture(width_, height_, kGrPixelConfig,
+                                     texture_info);
     buffer->sk_surface = SkSurface::MakeFromBackendTextureAsRenderTarget(
-        gr_context_.get(), desc, nullptr);
+        gr_context_.get(), backend_texture, kTopLeft_GrSurfaceOrigin,
+        /* sampleCnt */ 0, /* colorSpace */ nullptr, /* props */ nullptr);
     DCHECK(buffer->sk_surface);
     return buffer;
   }
@@ -441,9 +432,9 @@ std::unique_ptr<ClientBase::Buffer> ClientBase::CreateBuffer(
   size_t stride = width_ * kBytesPerPixel;
   buffer->shared_memory.reset(new base::SharedMemory());
   buffer->shared_memory->CreateAndMapAnonymous(stride * height_);
-  buffer->shm_pool.reset(
-      wl_shm_create_pool(globals_.shm.get(), buffer->shared_memory->handle().fd,
-                         buffer->shared_memory->requested_size()));
+  buffer->shm_pool.reset(wl_shm_create_pool(
+      globals_.shm.get(), buffer->shared_memory->handle().GetHandle(),
+      buffer->shared_memory->requested_size()));
 
   buffer->buffer.reset(static_cast<wl_buffer*>(wl_shm_pool_create_buffer(
       buffer->shm_pool.get(), 0, width_, height_, stride, kShmFormat)));

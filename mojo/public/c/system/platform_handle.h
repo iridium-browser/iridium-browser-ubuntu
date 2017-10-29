@@ -30,6 +30,8 @@ extern "C" {
 //   |MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT| - A Mach port. Only valid on OS X.
 //   |MOJO_PLATFORM_HANDLE_TYPE_WINDOWS_HANDLE| - A Windows HANDLE value. Only
 //       valid on Windows.
+//   |MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE| - A Fuchsia mx_handle_t value.
+//       Only valid on Fuchsia.
 
 typedef uint32_t MojoPlatformHandleType;
 
@@ -38,19 +40,25 @@ const MojoPlatformHandleType MOJO_PLATFORM_HANDLE_TYPE_INVALID = 0;
 const MojoPlatformHandleType MOJO_PLATFORM_HANDLE_TYPE_FILE_DESCRIPTOR = 1;
 const MojoPlatformHandleType MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT = 2;
 const MojoPlatformHandleType MOJO_PLATFORM_HANDLE_TYPE_WINDOWS_HANDLE = 3;
+const MojoPlatformHandleType MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE = 4;
 #else
 #define MOJO_PLATFORM_HANDLE_TYPE_INVALID ((MojoPlatformHandleType)0)
 #define MOJO_PLATFORM_HANDLE_TYPE_FILE_DESCRIPTOR ((MojoPlatformHandleType)1)
 #define MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT ((MojoPlatformHandleType)2)
 #define MOJO_PLATFORM_HANDLE_TYPE_WINDOWS_HANDLE ((MojoPlatformHandleType)3)
+#define MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE ((MojoPlatformHandleType)4)
 #endif
 
-// |MojoPlatformHandle|: A handle to an OS object.
+// |MojoPlatformHandle|: A handle to a native platform object.
+//
 //     |uint32_t struct_size|: The size of this structure. Used for versioning
 //         to allow for future extensions.
+//
 //     |MojoPlatformHandleType type|: The type of handle stored in |value|.
+//
 //     |uint64_t value|: The value of this handle. Ignored if |type| is
-//         MOJO_PLATFORM_HANDLE_TYPE_INVALID.
+//         MOJO_PLATFORM_HANDLE_TYPE_INVALID. Otherwise the meaning of this
+//         value depends on the value of |type|.
 //
 
 struct MOJO_ALIGNAS(8) MojoPlatformHandle {
@@ -60,6 +68,13 @@ struct MOJO_ALIGNAS(8) MojoPlatformHandle {
 };
 MOJO_STATIC_ASSERT(sizeof(MojoPlatformHandle) == 16,
                    "MojoPlatformHandle has wrong size");
+
+// |MojoSharedBufferGuid|: A GUID used to identify the buffer backing a shared
+//     buffer handle.
+struct MOJO_ALIGNAS(8) MojoSharedBufferGuid {
+  uint64_t high;
+  uint64_t low;
+};
 
 // |MojoPlatformSharedBufferHandleFlags|: Flags relevant to wrapped platform
 //     shared buffers.
@@ -72,20 +87,21 @@ typedef uint32_t MojoPlatformSharedBufferHandleFlags;
 
 #ifdef __cplusplus
 const MojoPlatformSharedBufferHandleFlags
-MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_NONE = 0;
+    MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_NONE = 0;
 
 const MojoPlatformSharedBufferHandleFlags
-MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_READ_ONLY = 1 << 0;
+    MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_READ_ONLY = 1 << 0;
 #else
 #define MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_NONE \
-    ((MojoPlatformSharedBufferHandleFlags)0)
+  ((MojoPlatformSharedBufferHandleFlags)0)
 
 #define MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_READ_ONLY \
-    ((MojoPlatformSharedBufferHandleFlags)1 << 0)
+  ((MojoPlatformSharedBufferHandleFlags)1 << 0)
 #endif
 
-// Wraps a generic platform handle as a Mojo handle which can be transferred
-// over a message pipe. Takes ownership of the underlying platform object.
+// Wraps a native platform handle as a Mojo handle which can be transferred
+// over a message pipe. Takes ownership of the underlying native platform
+// object.
 //
 // |platform_handle|: The platform handle to wrap.
 //
@@ -103,12 +119,12 @@ MOJO_SYSTEM_EXPORT MojoResult
 MojoWrapPlatformHandle(const struct MojoPlatformHandle* platform_handle,
                        MojoHandle* mojo_handle);  // Out
 
-// Unwraps a generic platform handle from a Mojo handle. If this call succeeds,
-// ownership of the underlying platform object is bound to the returned platform
-// handle and becomes the caller's responsibility. The Mojo handle is always
-// closed regardless of success or failure.
+// Unwraps a native platform handle from a Mojo handle. If this call succeeds,
+// ownership of the underlying platform object is assumed by the caller. The
+// The Mojo handle is always closed regardless of success or failure.
 //
-// |mojo_handle|: The Mojo handle from which to unwrap the platform handle.
+// |mojo_handle|: The Mojo handle from which to unwrap the native platform
+//     handle.
 //
 // Returns:
 //     |MOJO_RESULT_OK| if the handle was successfully unwrapped. In this case
@@ -119,11 +135,13 @@ MOJO_SYSTEM_EXPORT MojoResult
 MojoUnwrapPlatformHandle(MojoHandle mojo_handle,
                          struct MojoPlatformHandle* platform_handle);  // Out
 
-// Wraps a platform shared buffer handle as a Mojo shared buffer handle which
-// can be transferred over a message pipe. Takes ownership of the platform
-// shared buffer handle.
+// Wraps a native platform shared buffer handle as a Mojo shared buffer handle
+// which can be used exactly like a shared buffer handle created by
+// |MojoCreateSharedBuffer()| or |MojoDuplicateBufferHandle()|.
 //
-// |platform_handle|: The platform handle to wrap. Must be a handle to a
+// Takes ownership of the native platform shared buffer handle.
+//
+// |platform_handle|: The platform handle to wrap. Must be a native handle to a
 //     shared buffer object.
 // |num_bytes|: The size of the shared buffer in bytes.
 // |flags|: Flags which influence the treatment of the shared buffer object. See
@@ -141,18 +159,18 @@ MojoUnwrapPlatformHandle(MojoHandle mojo_handle,
 //         |*mojo_handle| contains a Mojo shared buffer handle.
 //     |MOJO_RESULT_INVALID_ARGUMENT| if |platform_handle| was not a valid
 //         platform shared buffer handle.
-MOJO_SYSTEM_EXPORT MojoResult
-MojoWrapPlatformSharedBufferHandle(
+MOJO_SYSTEM_EXPORT MojoResult MojoWrapPlatformSharedBufferHandle(
     const struct MojoPlatformHandle* platform_handle,
     size_t num_bytes,
+    const struct MojoSharedBufferGuid* guid,
     MojoPlatformSharedBufferHandleFlags flags,
     MojoHandle* mojo_handle);  // Out
 
-// Unwraps a platform shared buffer handle from a Mojo shared buffer handle.
-// If this call succeeds, ownership of the underlying shared buffer object is
-// bound to the returned platform handle and becomes the caller's
-// responsibility. The Mojo handle is always closed regardless of success or
-// failure.
+// Unwraps a native platform shared buffer handle from a Mojo shared buffer
+// handle. If this call succeeds, ownership of the underlying shared buffer
+// object is assumed by the caller.
+//
+// The Mojo handle is always closed regardless of success or failure.
 //
 // |mojo_handle|: The Mojo shared buffer handle to unwrap.
 //
@@ -170,11 +188,11 @@ MojoWrapPlatformSharedBufferHandle(
 // Flags which may be set in |*flags| upon success:
 //    |MOJO_PLATFORM_SHARED_BUFFER_FLAG_READ_ONLY| is set iff the unwrapped
 //        shared buffer handle may only be mapped as read-only.
-MOJO_SYSTEM_EXPORT MojoResult
-MojoUnwrapPlatformSharedBufferHandle(
+MOJO_SYSTEM_EXPORT MojoResult MojoUnwrapPlatformSharedBufferHandle(
     MojoHandle mojo_handle,
     struct MojoPlatformHandle* platform_handle,
     size_t* num_bytes,
+    struct MojoSharedBufferGuid* guid,
     MojoPlatformSharedBufferHandleFlags* flags);
 
 #ifdef __cplusplus

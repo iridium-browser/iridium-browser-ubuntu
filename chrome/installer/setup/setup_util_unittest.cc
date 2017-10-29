@@ -26,7 +26,6 @@
 #include "base/version.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
-#include "base/win/windows_version.h"
 #include "chrome/install_static/install_details.h"
 #include "chrome/installer/setup/installer_state.h"
 #include "chrome/installer/setup/setup_constants.h"
@@ -37,59 +36,6 @@
 #include "chrome/installer/util/updating_app_registration_data.h"
 #include "chrome/installer/util/util_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-namespace {
-
-// The privilege tested in ScopeTokenPrivilege tests below.
-// Use SE_RESTORE_NAME as it is one of the many privileges that is available,
-// but not enabled by default on processes running at high integrity.
-static const wchar_t kTestedPrivilege[] = SE_RESTORE_NAME;
-
-// Returns true if the current process' token has privilege |privilege_name|
-// enabled.
-bool CurrentProcessHasPrivilege(const wchar_t* privilege_name) {
-  HANDLE temp_handle;
-  if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY,
-                          &temp_handle)) {
-    ADD_FAILURE();
-    return false;
-  }
-
-  base::win::ScopedHandle token(temp_handle);
-
-  // First get the size of the buffer needed for |privileges| below.
-  DWORD size;
-  EXPECT_FALSE(::GetTokenInformation(token.Get(), TokenPrivileges, NULL, 0,
-                                     &size));
-
-  std::unique_ptr<BYTE[]> privileges_bytes(new BYTE[size]);
-  TOKEN_PRIVILEGES* privileges =
-      reinterpret_cast<TOKEN_PRIVILEGES*>(privileges_bytes.get());
-
-  if (!::GetTokenInformation(token.Get(), TokenPrivileges, privileges, size,
-                             &size)) {
-    ADD_FAILURE();
-    return false;
-  }
-
-  // There is no point getting a buffer to store more than |privilege_name|\0 as
-  // anything longer will obviously not be equal to |privilege_name|.
-  const DWORD desired_size = static_cast<DWORD>(wcslen(privilege_name));
-  const DWORD buffer_size = desired_size + 1;
-  std::unique_ptr<wchar_t[]> name_buffer(new wchar_t[buffer_size]);
-  for (int i = privileges->PrivilegeCount - 1; i >= 0 ; --i) {
-    LUID_AND_ATTRIBUTES& luid_and_att = privileges->Privileges[i];
-    DWORD size = buffer_size;
-    ::LookupPrivilegeName(NULL, &luid_and_att.Luid, name_buffer.get(), &size);
-    if (size == desired_size &&
-        wcscmp(name_buffer.get(), privilege_name) == 0) {
-      return luid_and_att.Attributes == SE_PRIVILEGE_ENABLED;
-    }
-  }
-  return false;
-}
-
-}  // namespace
 
 // Test that we are parsing Chrome version correctly.
 TEST(SetupUtilTest, GetMaxVersionFromArchiveDirTest) {
@@ -142,52 +88,6 @@ TEST(SetupUtilTest, DeleteFileFromTempProcess) {
   EXPECT_TRUE(installer::DeleteFileFromTempProcess(test_file, 0));
   base::PlatformThread::Sleep(TestTimeouts::tiny_timeout() * 3);
   EXPECT_FALSE(base::PathExists(test_file)) << test_file.value();
-}
-
-// Note: This test is only valid when run at high integrity (i.e. it will fail
-// at medium integrity).
-TEST(SetupUtilTest, ScopedTokenPrivilegeBasic) {
-  ASSERT_FALSE(CurrentProcessHasPrivilege(kTestedPrivilege));
-
-  if (!::IsUserAnAdmin()) {
-    LOG(WARNING) << "Skipping SetupUtilTest.ScopedTokenPrivilegeBasic due to "
-                    "not running as admin.";
-    return;
-  }
-
-  {
-    installer::ScopedTokenPrivilege test_scoped_privilege(kTestedPrivilege);
-    ASSERT_TRUE(test_scoped_privilege.is_enabled());
-    ASSERT_TRUE(CurrentProcessHasPrivilege(kTestedPrivilege));
-  }
-
-  ASSERT_FALSE(CurrentProcessHasPrivilege(kTestedPrivilege));
-}
-
-// Note: This test is only valid when run at high integrity (i.e. it will fail
-// at medium integrity).
-TEST(SetupUtilTest, ScopedTokenPrivilegeAlreadyEnabled) {
-  ASSERT_FALSE(CurrentProcessHasPrivilege(kTestedPrivilege));
-
-  if (!::IsUserAnAdmin()) {
-    LOG(WARNING) << "Skipping SetupUtilTest.ScopedTokenPrivilegeAlreadyEnabled "
-                    "due to not running as admin.";
-    return;
-  }
-
-  {
-    installer::ScopedTokenPrivilege test_scoped_privilege(kTestedPrivilege);
-    ASSERT_TRUE(test_scoped_privilege.is_enabled());
-    ASSERT_TRUE(CurrentProcessHasPrivilege(kTestedPrivilege));
-    {
-      installer::ScopedTokenPrivilege dup_scoped_privilege(kTestedPrivilege);
-      ASSERT_TRUE(dup_scoped_privilege.is_enabled());
-      ASSERT_TRUE(CurrentProcessHasPrivilege(kTestedPrivilege));
-    }
-    ASSERT_TRUE(CurrentProcessHasPrivilege(kTestedPrivilege));
-  }
-
-  ASSERT_FALSE(CurrentProcessHasPrivilege(kTestedPrivilege));
 }
 
 TEST(SetupUtilTest, GuidToSquid) {
@@ -307,10 +207,41 @@ TEST(SetupUtilTest, AdjustFromBelowNormalPriority) {
   std::unique_ptr<ScopedPriorityClass> below_normal =
       ScopedPriorityClass::Create(BELOW_NORMAL_PRIORITY_CLASS);
   ASSERT_TRUE(below_normal);
-  if (base::win::GetVersion() > base::win::VERSION_SERVER_2003)
-    EXPECT_EQ(PCCR_CHANGED, RelaunchAndDoProcessPriorityAdjustment());
-  else
-    EXPECT_EQ(PCCR_UNCHANGED, RelaunchAndDoProcessPriorityAdjustment());
+  EXPECT_EQ(PCCR_CHANGED, RelaunchAndDoProcessPriorityAdjustment());
+}
+
+TEST(SetupUtilTest, GetInstallAge) {
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  installer::InstallerState installer_state;
+  installer_state.set_target_path_for_testing(temp_dir.GetPath());
+
+  // Wait a beat to let time advance.
+  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());
+  EXPECT_GE(0, installer::GetInstallAge(installer_state));
+
+  // Crank back the directory's creation time.
+  constexpr int kAgeDays = 28;
+  base::Time now = base::Time::Now();
+  base::win::ScopedHandle dir(::CreateFile(
+      temp_dir.GetPath().value().c_str(),
+      FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr));
+  ASSERT_TRUE(dir.IsValid());
+
+  FILE_BASIC_INFO info = {};
+  ASSERT_NE(0, ::GetFileInformationByHandleEx(dir.Get(), FileBasicInfo, &info,
+                                              sizeof(info)));
+  FILETIME creation_time =
+      (now - base::TimeDelta::FromDays(kAgeDays)).ToFileTime();
+  info.CreationTime.u.LowPart = creation_time.dwLowDateTime;
+  info.CreationTime.u.HighPart = creation_time.dwHighDateTime;
+  ASSERT_NE(0, ::SetFileInformationByHandle(dir.Get(), FileBasicInfo, &info,
+                                            sizeof(info)));
+
+  EXPECT_EQ(kAgeDays, installer::GetInstallAge(installer_state));
 }
 
 TEST(SetupUtilTest, RecordUnPackMetricsTest) {
@@ -518,6 +449,11 @@ TEST(SetupUtilTest, GetRegistrationDataCommandKey) {
                              base::CompareCase::SENSITIVE));
 }
 
+TEST(SetupUtilTest, GetConsoleSessionStartTime) {
+  base::Time start_time = installer::GetConsoleSessionStartTime();
+  EXPECT_FALSE(start_time.is_null());
+}
+
 namespace installer {
 
 class DeleteRegistryKeyPartialTest : public ::testing::Test {
@@ -644,6 +580,9 @@ class LegacyCleanupsTest : public ::testing::Test {
     ASSERT_TRUE(base::win::RegKey(HKEY_CURRENT_USER, kBinariesClientsKeyPath,
                                   KEY_WRITE | KEY_WOW64_32KEY)
                     .Valid());
+    ASSERT_TRUE(base::win::RegKey(HKEY_CURRENT_USER, kCommandExecuteImplClsid,
+                                  KEY_WRITE)
+                    .Valid());
 #if defined(GOOGLE_CHROME_BUILD)
     ASSERT_TRUE(base::win::RegKey(HKEY_CURRENT_USER, kGCFClientsKeyPath,
                                   KEY_WRITE | KEY_WOW64_32KEY)
@@ -665,6 +604,12 @@ class LegacyCleanupsTest : public ::testing::Test {
   bool HasBinariesVersionKey() const {
     return base::win::RegKey(HKEY_CURRENT_USER, kBinariesClientsKeyPath,
                              KEY_QUERY_VALUE | KEY_WOW64_32KEY)
+        .Valid();
+  }
+
+  bool HasCommandExecuteImplClassKey() const {
+    return base::win::RegKey(HKEY_CURRENT_USER, kCommandExecuteImplClsid,
+                             KEY_QUERY_VALUE)
         .Valid();
   }
 
@@ -721,6 +666,7 @@ class LegacyCleanupsTest : public ::testing::Test {
 #endif  // GOOGLE_CHROME_BUILD
 
   static const wchar_t kBinariesClientsKeyPath[];
+  static const wchar_t kCommandExecuteImplClsid[];
 #if defined(GOOGLE_CHROME_BUILD)
   static const wchar_t kGCFClientsKeyPath[];
   static const wchar_t kAppLauncherClientsKeyPath[];
@@ -736,6 +682,8 @@ class LegacyCleanupsTest : public ::testing::Test {
 const wchar_t LegacyCleanupsTest::kBinariesClientsKeyPath[] =
     L"SOFTWARE\\Google\\Update\\Clients\\"
     L"{4DC8B4CA-1BDA-483e-B5FA-D3C12E15B62D}";
+const wchar_t LegacyCleanupsTest::kCommandExecuteImplClsid[] =
+    L"Software\\Classes\\CLSID\\{5C65F4B0-3651-4514-B207-D10CB699B14B}";
 const wchar_t LegacyCleanupsTest::kGCFClientsKeyPath[] =
     L"SOFTWARE\\Google\\Update\\Clients\\"
     L"{8BA986DA-5100-405E-AA35-86F34A02ACBF}";
@@ -745,11 +693,14 @@ const wchar_t LegacyCleanupsTest::kAppLauncherClientsKeyPath[] =
 #else   // GOOGLE_CHROME_BUILD
 const wchar_t LegacyCleanupsTest::kBinariesClientsKeyPath[] =
     L"SOFTWARE\\Chromium Binaries";
+const wchar_t LegacyCleanupsTest::kCommandExecuteImplClsid[] =
+    L"Software\\Classes\\CLSID\\{A2DF06F9-A21A-44A8-8A99-8B9C84F29160}";
 #endif  // !GOOGLE_CHROME_BUILD
 
 TEST_F(LegacyCleanupsTest, NoOpOnFailedUpdate) {
   DoLegacyCleanups(installer_state(), INSTALL_FAILED);
   EXPECT_TRUE(HasBinariesVersionKey());
+  EXPECT_TRUE(HasCommandExecuteImplClassKey());
 #if defined(GOOGLE_CHROME_BUILD)
   EXPECT_TRUE(HasMultiGCFVersionKey());
   EXPECT_TRUE(HasAppLauncherVersionKey());
@@ -761,6 +712,7 @@ TEST_F(LegacyCleanupsTest, NoOpOnFailedUpdate) {
 TEST_F(LegacyCleanupsTest, Do) {
   DoLegacyCleanups(installer_state(), NEW_VERSION_UPDATED);
   EXPECT_FALSE(HasBinariesVersionKey());
+  EXPECT_FALSE(HasCommandExecuteImplClassKey());
 #if defined(GOOGLE_CHROME_BUILD)
   EXPECT_FALSE(HasMultiGCFVersionKey());
   EXPECT_FALSE(HasAppLauncherVersionKey());

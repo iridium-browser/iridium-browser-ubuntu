@@ -11,11 +11,9 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "build/build_config.h"
-#include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkTypeface.h"
 #include "ui/gfx/font_render_params.h"
 #include "ui/gfx/platform_font.h"
-
-class SkTypeface;
 
 namespace gfx {
 
@@ -26,6 +24,11 @@ class GFX_EXPORT PlatformFontLinux : public PlatformFont {
   // multiple font families) everywhere. See http://crbug.com/398885#c16.
   PlatformFontLinux();
   PlatformFontLinux(const std::string& font_name, int font_size_pixels);
+
+  // Initials the default PlatformFont. Returns true if this is successful, or
+  // false if fonts resources are not available. If this returns false, the
+  // calling service should shut down.
+  static bool InitDefaultFont();
 
   // Resets and reloads the cached system font used by the default constructor.
   // This function is useful when the system font has changed, for example, when
@@ -52,6 +55,8 @@ class GFX_EXPORT PlatformFontLinux : public PlatformFont {
   std::string GetActualFontNameForTesting() const override;
   int GetFontSize() const override;
   const FontRenderParams& GetFontRenderParams() override;
+
+  sk_sp<SkTypeface> typeface() const { return typeface_; }
 
  private:
   // Create a new instance of this object with the specified properties. Called

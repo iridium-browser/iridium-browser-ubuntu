@@ -7,10 +7,13 @@ package org.chromium.chrome.browser.history;
 import android.app.Activity;
 import android.view.View;
 
+import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.BasicNativePage;
 import org.chromium.chrome.browser.NativePageHost;
 import org.chromium.chrome.browser.UrlConstants;
+import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
 
 /**
  * Native page for managing browsing history.
@@ -18,6 +21,7 @@ import org.chromium.chrome.browser.UrlConstants;
 public class HistoryPage extends BasicNativePage {
     private HistoryManager mHistoryManager;
     private String mTitle;
+    private int mThemeColor;
 
     /**
      * Create a new instance of the history page.
@@ -27,11 +31,16 @@ public class HistoryPage extends BasicNativePage {
      */
     public HistoryPage(Activity activity, NativePageHost host) {
         super(activity, host);
+
+        mThemeColor = !host.isIncognito() ? super.getThemeColor()
+                                          : ApiCompatibilityUtils.getColor(activity.getResources(),
+                                                    R.color.incognito_primary_color);
     }
 
     @Override
     protected void initialize(Activity activity, final NativePageHost host) {
-        mHistoryManager = new HistoryManager(activity, this);
+        mHistoryManager = new HistoryManager(activity, false,
+                ((SnackbarManageable) activity).getSnackbarManager(), host.isIncognito());
         mTitle = activity.getString(R.string.menu_history);
     }
 
@@ -55,5 +64,15 @@ public class HistoryPage extends BasicNativePage {
         mHistoryManager.onDestroyed();
         mHistoryManager = null;
         super.destroy();
+    }
+
+    @Override
+    public int getThemeColor() {
+        return mThemeColor;
+    }
+
+    @VisibleForTesting
+    public HistoryManager getHistoryManagerForTesting() {
+        return mHistoryManager;
     }
 }

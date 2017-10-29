@@ -70,7 +70,7 @@ void MojoAudioDecoder::Initialize(const AudioDecoderConfig& config,
   // Using base::Unretained(this) is safe because |this| owns |remote_decoder_|,
   // and the callback won't be dispatched if |remote_decoder_| is destroyed.
   remote_decoder_->Initialize(
-      mojom::AudioDecoderConfig::From(config), cdm_id,
+      config, cdm_id,
       base::Bind(&MojoAudioDecoder::OnInitialized, base::Unretained(this)));
 }
 
@@ -141,7 +141,7 @@ void MojoAudioDecoder::BindRemoteDecoder() {
       base::Bind(&MojoAudioDecoder::OnConnectionError, base::Unretained(this)));
 
   mojom::AudioDecoderClientAssociatedPtrInfo client_ptr_info;
-  client_binding_.Bind(&client_ptr_info);
+  client_binding_.Bind(mojo::MakeRequest(&client_ptr_info));
 
   remote_decoder_->Construct(std::move(client_ptr_info));
 }

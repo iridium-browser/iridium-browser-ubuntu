@@ -12,7 +12,6 @@
 #include "core/fpdfapi/cpdf_pagerendercontext.h"
 #include "core/fpdfapi/page/cpdf_contentparser.h"
 #include "core/fpdfapi/page/cpdf_pageobject.h"
-#include "core/fpdfapi/page/pageint.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_object.h"
@@ -23,44 +22,33 @@
 CPDF_Page::CPDF_Page(CPDF_Document* pDocument,
                      CPDF_Dictionary* pPageDict,
                      bool bPageCache)
-    : m_PageWidth(100),
+    : CPDF_PageObjectHolder(pDocument, pPageDict),
+      m_PageWidth(100),
       m_PageHeight(100),
-      m_pView(nullptr),
-      m_pPageRender(bPageCache ? new CPDF_PageRenderCache(this) : nullptr) {
-  m_pFormDict = pPageDict;
-  m_pDocument = pDocument;
+      m_pView(nullptr) {
+  if (bPageCache)
+    m_pPageRender = pdfium::MakeUnique<CPDF_PageRenderCache>(this);
   if (!pPageDict)
     return;
 
-  CPDF_Object* pageAttr = GetPageAttr("Resources");
-  m_pResources = pageAttr ? pageAttr->GetDict() : nullptr;
+  CPDF_Object* pPageAttr = GetPageAttr("Resources");
+  m_pResources = pPageAttr ? pPageAttr->GetDict() : nullptr;
   m_pPageResources = m_pResources;
-  CPDF_Object* pRotate = GetPageAttr("Rotate");
-  int rotate = pRotate ? pRotate->GetInteger() / 90 % 4 : 0;
-  if (rotate < 0)
-    rotate += 4;
 
-  CPDF_Array* pMediaBox = ToArray(GetPageAttr("MediaBox"));
-  CFX_FloatRect mediabox;
-  if (pMediaBox) {
-    mediabox = pMediaBox->GetRect();
-    mediabox.Normalize();
-  }
+  CFX_FloatRect mediabox = GetBox("MediaBox");
   if (mediabox.IsEmpty())
     mediabox = CFX_FloatRect(0, 0, 612, 792);
 
-  CPDF_Array* pCropBox = ToArray(GetPageAttr("CropBox"));
-  if (pCropBox) {
-    m_BBox = pCropBox->GetRect();
-    m_BBox.Normalize();
-  }
+  m_BBox = GetBox("CropBox");
   if (m_BBox.IsEmpty())
     m_BBox = mediabox;
   else
     m_BBox.Intersect(mediabox);
 
-  m_PageWidth = m_BBox.right - m_BBox.left;
-  m_PageHeight = m_BBox.top - m_BBox.bottom;
+  m_PageWidth = m_BBox.Width();
+  m_PageHeight = m_BBox.Height();
+
+  int rotate = GetPageRotation();
   if (rotate % 2)
     std::swap(m_PageWidth, m_PageHeight);
 
@@ -86,6 +74,10 @@ CPDF_Page::CPDF_Page(CPDF_Document* pDocument,
 
 CPDF_Page::~CPDF_Page() {}
 
+bool CPDF_Page::IsPage() const {
+  return true;
+}
+
 void CPDF_Page::StartParse() {
   if (m_ParseState == CONTENT_PARSED || m_ParseState == CONTENT_PARSING)
     return;
@@ -106,7 +98,7 @@ void CPDF_Page::SetRenderContext(
 }
 
 CPDF_Object* CPDF_Page::GetPageAttr(const CFX_ByteString& name) const {
-  CPDF_Dictionary* pPageDict = m_pFormDict;
+  CPDF_Dictionary* pPageDict = m_pFormDict.Get();
   std::set<CPDF_Dictionary*> visited;
   while (1) {
     visited.insert(pPageDict);
@@ -118,6 +110,16 @@ CPDF_Object* CPDF_Page::GetPageAttr(const CFX_ByteString& name) const {
       break;
   }
   return nullptr;
+}
+
+CFX_FloatRect CPDF_Page::GetBox(const CFX_ByteString& name) const {
+  CFX_FloatRect box;
+  CPDF_Array* pBox = ToArray(GetPageAttr(name));
+  if (pBox) {
+    box = pBox->GetRect();
+    box.Normalize();
+  }
+  return box;
 }
 
 CFX_Matrix CPDF_Page::GetDisplayMatrix(int xPos,
@@ -176,12 +178,22 @@ CFX_Matrix CPDF_Page::GetDisplayMatrix(int xPos,
   return matrix;
 }
 
+int CPDF_Page::GetPageRotation() const {
+  CPDF_Object* pRotate = GetPageAttr("Rotate");
+  int rotate = pRotate ? (pRotate->GetInteger() / 90) % 4 : 0;
+  return (rotate < 0) ? (rotate + 4) : rotate;
+}
+
 bool GraphicsData::operator<(const GraphicsData& other) const {
   if (fillAlpha != other.fillAlpha)
     return fillAlpha < other.fillAlpha;
-  return strokeAlpha < other.strokeAlpha;
+  if (strokeAlpha != other.strokeAlpha)
+    return strokeAlpha < other.strokeAlpha;
+  return blendType < other.blendType;
 }
 
 bool FontData::operator<(const FontData& other) const {
-  return baseFont < other.baseFont;
+  if (baseFont != other.baseFont)
+    return baseFont < other.baseFont;
+  return type < other.type;
 }

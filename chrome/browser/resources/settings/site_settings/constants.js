@@ -16,11 +16,11 @@ settings.ContentSettingsTypes = {
   COOKIES: 'cookies',
   IMAGES: 'images',
   JAVASCRIPT: 'javascript',
-  PLUGINS: 'plugins',
+  PLUGINS: 'plugins',  // AKA Flash.
   POPUPS: 'popups',
   GEOLOCATION: 'location',
   NOTIFICATIONS: 'notifications',
-  MIC: 'media-stream-mic',
+  MIC: 'media-stream-mic',  // AKA Microphone.
   CAMERA: 'media-stream-camera',
   PROTOCOL_HANDLERS: 'register-protocol-handler',
   UNSANDBOXED_PLUGINS: 'ppapi-broker',
@@ -29,19 +29,19 @@ settings.ContentSettingsTypes = {
   MIDI_DEVICES: 'midi-sysex',
   USB_DEVICES: 'usb-chooser-data',
   ZOOM_LEVELS: 'zoom-levels',
-// <if expr="chromeos">
+  // <if expr="chromeos">
   PROTECTED_CONTENT: 'protectedContent',
-// </if>
+  // </if>
+  ADS: 'ads',
 };
 
 /**
- * Contains the possible string values for a given contentSettingsType.
+ * Contains the possible string values for a given ContentSettingsTypes.
+ * This should be kept in sync with the |ContentSetting| enum in
+ * components/content_settings/core/common/content_settings.h
  * @enum {string}
- *
- * TODO(dschuyler): This should be rename as ContentSetting to maintain
- * nomenclature with C++.
  */
-settings.PermissionValues = {
+settings.ContentSetting = {
   DEFAULT: 'default',
   ALLOW: 'allow',
   BLOCK: 'block',

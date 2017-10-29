@@ -40,7 +40,7 @@ cr.define('print_preview.ticket_items', function() {
      * @private {!Object<string>}
      */
     this.items_ = {};
-  };
+  }
 
   VendorItems.prototype = {
     __proto__: cr.EventTarget.prototype,
@@ -63,17 +63,16 @@ cr.define('print_preview.ticket_items', function() {
     /** @return {Object} Vendor capabilities of the selected destination. */
     get capability() {
       var destination = this.destinationStore_ ?
-          this.destinationStore_.selectedDestination : null;
+          this.destinationStore_.selectedDestination :
+          null;
       if (!destination)
         return null;
-      if (destination.id == print_preview.Destination.GooglePromotedId.FEDEX ||
-          destination.type == print_preview.Destination.Type.MOBILE) {
+      if (destination.type == print_preview.DestinationType.MOBILE) {
         return null;
       }
-      return (destination.capabilities &&
-              destination.capabilities.printer &&
+      return (destination.capabilities && destination.capabilities.printer &&
               destination.capabilities.printer.vendor_capability) ||
-             null;
+          null;
     },
 
     /**
@@ -101,13 +100,11 @@ cr.define('print_preview.ticket_items', function() {
 
       if (this.appState_) {
         this.appState_.persistField(
-            print_preview.AppState.Field.VENDOR_OPTIONS, this.items_);
+            print_preview.AppStateField.VENDOR_OPTIONS, this.items_);
       }
     }
   };
 
   // Export
-  return {
-    VendorItems: VendorItems
-  };
+  return {VendorItems: VendorItems};
 });

@@ -2,15 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/scoped_root_window_for_new_windows.h"
-#include "ash/common/wm/window_positioner.h"
-#include "ash/common/wm/window_resizer.h"
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
+#include "ash/scoped_root_window_for_new_windows.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/window_positioner.h"
+#include "ash/wm/window_resizer.h"
+#include "ash/wm/window_state.h"
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/ash/ash_util.h"
@@ -30,7 +27,7 @@
 #include "ui/display/screen.h"
 #include "ui/wm/public/activation_client.h"
 
-typedef ash::test::AshTestBase WindowSizerAshTest;
+using WindowSizerAshTest = ash::AshTestBase;
 
 namespace {
 
@@ -573,7 +570,8 @@ TEST_F(WindowSizerAshTest, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
   BrowserWindow* browser_window = browser->window();
   gfx::NativeWindow native_window = browser_window->GetNativeWindow();
   browser_window->Show();
-  EXPECT_EQ(native_window->GetRootWindow(), ash::Shell::GetTargetRootWindow());
+  EXPECT_EQ(native_window->GetRootWindow(),
+            ash::Shell::GetRootWindowForNewWindows());
 
   Browser::CreateParams another_params(profile.get(), true);
   std::unique_ptr<Browser> another_browser(
@@ -591,7 +589,7 @@ TEST_F(WindowSizerAshTest, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
 
   // Make sure the primary root is active.
   ASSERT_EQ(ash::Shell::GetPrimaryRootWindow(),
-            ash::Shell::GetTargetRootWindow());
+            ash::Shell::GetRootWindowForNewWindows());
 
   // First new window should be in the primary.
   {
@@ -614,10 +612,10 @@ TEST_F(WindowSizerAshTest, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
     browser_window->GetNativeWindow()->SetBoundsInScreen(
         gfx::Rect(secondary_bounds.CenterPoint().x() - 100, 10, 200, 200),
         second_display);
-    aura::client::GetActivationClient(native_window->GetRootWindow())
+    wm::GetActivationClient(native_window->GetRootWindow())
         ->ActivateWindow(native_window);
     EXPECT_NE(ash::Shell::GetPrimaryRootWindow(),
-              ash::Shell::GetTargetRootWindow());
+              ash::Shell::GetRootWindowForNewWindows());
     gfx::Rect window_bounds;
     ui::WindowShowState out_show_state = ui::SHOW_STATE_DEFAULT;
     GetWindowBoundsAndShowState(
@@ -633,10 +631,10 @@ TEST_F(WindowSizerAshTest, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
   // Activate another window in the primary display and create a new window.
   // It should be created in the primary display.
   {
-    aura::client::GetActivationClient(another_native_window->GetRootWindow())
+    wm::GetActivationClient(another_native_window->GetRootWindow())
         ->ActivateWindow(another_native_window);
     EXPECT_EQ(ash::Shell::GetPrimaryRootWindow(),
-              ash::Shell::GetTargetRootWindow());
+              ash::Shell::GetRootWindowForNewWindows());
 
     gfx::Rect window_bounds;
     GetWindowBounds(p1600x1200, p1600x1200, secondary_bounds, gfx::Rect(),
@@ -823,8 +821,8 @@ TEST_F(WindowSizerAshTest, DefaultBoundsInTargetDisplay) {
   UpdateDisplay("500x500,600x600");
 
   // By default windows are placed on the primary display.
-  ash::WmWindow* first_root = ash::WmShell::Get()->GetAllRootWindows()[0];
-  EXPECT_EQ(first_root, ash::WmShell::Get()->GetRootWindowForNewWindows());
+  aura::Window* first_root = ash::Shell::GetAllRootWindows()[0];
+  EXPECT_EQ(first_root, ash::Shell::GetRootWindowForNewWindows());
   gfx::Rect bounds;
   ui::WindowShowState show_state;
   WindowSizer::GetBrowserWindowBoundsAndShowState(std::string(), gfx::Rect(),
@@ -833,7 +831,7 @@ TEST_F(WindowSizerAshTest, DefaultBoundsInTargetDisplay) {
 
   {
     // When the second display is active new windows are placed there.
-    ash::WmWindow* second_root = ash::WmShell::Get()->GetAllRootWindows()[1];
+    aura::Window* second_root = ash::Shell::GetAllRootWindows()[1];
     ash::ScopedRootWindowForNewWindows tmp(second_root);
     gfx::Rect bounds;
     ui::WindowShowState show_state;

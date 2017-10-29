@@ -5,12 +5,17 @@
 #include "chromeos/components/tether/host_scan_scheduler.h"
 
 #include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "chromeos/components/tether/host_scanner.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
+#include "chromeos/network/network_state_test.h"
+#include "chromeos/network/network_type_pattern.h"
 #include "components/cryptauth/cryptauth_device_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,208 +24,291 @@ namespace chromeos {
 
 namespace tether {
 
-class HostScanSchedulerTest : public testing::Test {
+namespace {
+
+class FakeHostScanner : public HostScanner {
+ public:
+  FakeHostScanner()
+      : HostScanner(nullptr,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    nullptr),
+        num_scans_started_(0) {}
+  ~FakeHostScanner() override {}
+
+  void StartScan() override {
+    is_scan_active_ = true;
+    num_scans_started_++;
+  }
+
+  void StopScan() {
+    is_scan_active_ = false;
+    NotifyScanFinished();
+  }
+
+  bool IsScanActive() override { return is_scan_active_; }
+
+  int num_scans_started() { return num_scans_started_; }
+
+ private:
+  bool is_scan_active_ = false;
+  int num_scans_started_ = 0;
+};
+
+const char kEthernetServiceGuid[] = "ethernetServiceGuid";
+const char kWifiServiceGuid[] = "wifiServiceGuid";
+const char kTetherGuid[] = "tetherGuid";
+
+std::string CreateConfigurationJsonString(const std::string& guid,
+                                          const std::string& type) {
+  std::stringstream ss;
+  ss << "{"
+     << "  \"GUID\": \"" << guid << "\","
+     << "  \"Type\": \"" << type << "\","
+     << "  \"State\": \"" << shill::kStateReady << "\""
+     << "}";
+  return ss.str();
+}
+
+}  // namespace
+
+class HostScanSchedulerTest : public NetworkStateTest {
  protected:
-  class TestDelegate : public HostScanScheduler::Delegate {
-   public:
-    TestDelegate(HostScanSchedulerTest* test)
-        : test_(test),
-          observer_(nullptr),
-          is_authenticated_user_logged_in(true),
-          is_network_connected_or_connecting(false),
-          are_tether_hosts_synced(true) {}
-
-    void AddObserver(HostScanScheduler* host_scan_scheduler) override {
-      observer_ = host_scan_scheduler;
-    }
-
-    void RemoveObserver(HostScanScheduler* host_scan_scheduler) override {
-      if (observer_ == host_scan_scheduler) {
-        observer_ = nullptr;
-      }
-      EXPECT_FALSE(IsObserverSet());
-    }
-
-    bool IsAuthenticatedUserLoggedIn() const override {
-      return is_authenticated_user_logged_in;
-    }
-
-    bool IsNetworkConnectedOrConnecting() const override {
-      return is_network_connected_or_connecting;
-    }
-
-    bool AreTetherHostsSynced() const override {
-      return are_tether_hosts_synced;
-    }
-
-    bool IsObserverSet() const {
-      return observer_ != nullptr &&
-             observer_ == test_->host_scan_scheduler_.get();
-    }
-
-    void set_is_authenticated_user_logged_in(bool value) {
-      is_authenticated_user_logged_in = value;
-    }
-
-    void set_is_network_connected_or_connecting(bool value) {
-      is_network_connected_or_connecting = value;
-    }
-
-    void set_are_tether_hosts_synced(bool value) {
-      are_tether_hosts_synced = value;
-    }
-
-   private:
-    const HostScanSchedulerTest* test_;
-
-    HostScanScheduler* observer_;
-    bool is_authenticated_user_logged_in;
-    bool is_network_connected_or_connecting;
-    bool are_tether_hosts_synced;
-  };
-
-  class FakeHostScanner : public HostScanner {
-   public:
-    FakeHostScanner() : num_scans_started_(0) {}
-    ~FakeHostScanner() override {}
-
-    void StartScan() override { num_scans_started_++; }
-
-    int num_scans_started() { return num_scans_started_; }
-
-   private:
-    int num_scans_started_;
-  };
-
-  HostScanSchedulerTest() {}
-
   void SetUp() override {
-    test_delegate_ = new TestDelegate(this);
-    fake_host_scanner_ = new FakeHostScanner();
+    DBusThreadManager::Initialize();
+    NetworkStateTest::SetUp();
 
-    host_scan_scheduler_.reset(
-        new HostScanScheduler(base::WrapUnique(test_delegate_),
-                              base::WrapUnique(fake_host_scanner_)));
+    ethernet_service_path_ = ConfigureService(CreateConfigurationJsonString(
+        kEthernetServiceGuid, shill::kTypeEthernet));
+    test_manager_client()->SetManagerProperty(
+        shill::kDefaultServiceProperty, base::Value(ethernet_service_path_));
 
-    EXPECT_FALSE(test_delegate_->IsObserverSet());
-    host_scan_scheduler_->InitializeAutomaticScans();
-    EXPECT_TRUE(test_delegate_->IsObserverSet());
+    network_state_handler()->SetTetherTechnologyState(
+        NetworkStateHandler::TECHNOLOGY_ENABLED);
+
+    fake_host_scanner_ = base::MakeUnique<FakeHostScanner>();
+
+    host_scan_scheduler_ = base::WrapUnique(new HostScanScheduler(
+        network_state_handler(), fake_host_scanner_.get()));
   }
 
   void TearDown() override {
-    EXPECT_TRUE(test_delegate_->IsObserverSet());
     host_scan_scheduler_.reset();
+
+    ShutdownNetworkState();
+    NetworkStateTest::TearDown();
+    DBusThreadManager::Shutdown();
   }
 
-  void TestScheduleScanNowIfPossible(bool is_authenticated_user_logged_in,
-                                     bool is_network_connected_or_connecting,
-                                     bool are_tether_hosts_synced,
-                                     int num_expected_scans) {
-    test_delegate_->set_is_authenticated_user_logged_in(
-        is_authenticated_user_logged_in);
-    test_delegate_->set_is_network_connected_or_connecting(
-        is_network_connected_or_connecting);
-    test_delegate_->set_are_tether_hosts_synced(are_tether_hosts_synced);
-    host_scan_scheduler_->ScheduleScanNowIfPossible();
-    EXPECT_EQ(num_expected_scans, fake_host_scanner_->num_scans_started());
+  // Disconnects the Ethernet network and manually sets the default network to
+  // |new_default_service_path|. If |new_default_service_path| is empty then no
+  // default network is set.
+  void SetEthernetNetworkDisconnected(
+      const std::string& new_default_service_path) {
+    SetServiceProperty(ethernet_service_path_,
+                       std::string(shill::kStateProperty),
+                       base::Value(shill::kStateIdle));
+    if (new_default_service_path.empty())
+      return;
+
+    test_manager_client()->SetManagerProperty(
+        shill::kDefaultServiceProperty, base::Value(new_default_service_path));
   }
+
+  void SetEthernetNetworkConnecting() {
+    SetServiceProperty(ethernet_service_path_,
+                       std::string(shill::kStateProperty),
+                       base::Value(shill::kStateAssociation));
+    test_manager_client()->SetManagerProperty(
+        shill::kDefaultServiceProperty, base::Value(ethernet_service_path_));
+  }
+
+  void SetEthernetNetworkConnected() {
+    SetServiceProperty(ethernet_service_path_,
+                       std::string(shill::kStateProperty),
+                       base::Value(shill::kStateReady));
+    test_manager_client()->SetManagerProperty(
+        shill::kDefaultServiceProperty, base::Value(ethernet_service_path_));
+  }
+
+  // Adds a Tether network state, adds a Wifi network to be used as the Wifi
+  // hotspot, and associates the two networks. Returns the service path of the
+  // Wifi network.
+  std::string AddTetherNetworkState() {
+    network_state_handler()->AddTetherNetworkState(
+        kTetherGuid, "name", "carrier", 100 /* battery_percentage */,
+        100 /* signal strength */, false /* has_connected_to_host */);
+    std::string wifi_service_path = ConfigureService(
+        CreateConfigurationJsonString(kWifiServiceGuid, shill::kTypeWifi));
+    network_state_handler()->AssociateTetherNetworkStateWithWifiNetwork(
+        kTetherGuid, kWifiServiceGuid);
+    return wifi_service_path;
+  }
+
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  std::string ethernet_service_path_;
+
+  std::unique_ptr<FakeHostScanner> fake_host_scanner_;
 
   std::unique_ptr<HostScanScheduler> host_scan_scheduler_;
-
-  TestDelegate* test_delegate_;
-  FakeHostScanner* fake_host_scanner_;
 };
 
-TEST_F(HostScanSchedulerTest, TestObserverAddedAndRemoved) {
-  // Intentionally empty. This test just ensures that adding/removing observers
-  // (in setUp() and tearDown()) works.
+TEST_F(HostScanSchedulerTest, ScheduleScan) {
+  EXPECT_EQ(0, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  host_scan_scheduler_->ScheduleScan();
+
+  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
+  EXPECT_TRUE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 }
 
-TEST_F(HostScanSchedulerTest, TestScheduleScanNowIfPossible) {
+TEST_F(HostScanSchedulerTest, ScanRequested) {
   EXPECT_EQ(0, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 
-  // A scan should only be started when an authenticated user is logged in,
-  // the network is not connected/connecting, and tether hosts are synced.
-  TestScheduleScanNowIfPossible(false, false, false, 0);
-  TestScheduleScanNowIfPossible(true, false, false, 0);
-  TestScheduleScanNowIfPossible(false, true, false, 0);
-  TestScheduleScanNowIfPossible(false, false, true, 0);
-  TestScheduleScanNowIfPossible(true, true, false, 0);
-  TestScheduleScanNowIfPossible(true, false, true, 1);
-  TestScheduleScanNowIfPossible(false, true, true, 1);
-  TestScheduleScanNowIfPossible(true, true, true, 1);
+  // Begin scanning.
+  host_scan_scheduler_->ScanRequested();
+  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
+  EXPECT_TRUE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  // Should not begin a new scan while a scan is active.
+  host_scan_scheduler_->ScanRequested();
+  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
+  EXPECT_TRUE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  fake_host_scanner_->StopScan();
+  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  // A new scan should be allowed once a scan is not active.
+  host_scan_scheduler_->ScanRequested();
+  EXPECT_EQ(2, fake_host_scanner_->num_scans_started());
+  EXPECT_TRUE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 }
 
-TEST_F(HostScanSchedulerTest, TestLoggedInStateChange) {
-  EXPECT_EQ(0, fake_host_scanner_->num_scans_started());
+TEST_F(HostScanSchedulerTest, HostScanSchedulerDestroyed) {
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 
-  test_delegate_->set_is_authenticated_user_logged_in(true);
-  test_delegate_->set_is_network_connected_or_connecting(false);
-  test_delegate_->set_are_tether_hosts_synced(true);
+  host_scan_scheduler_->ScheduleScan();
+  EXPECT_TRUE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 
-  host_scan_scheduler_->LoggedInStateChanged();
-  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
-
-  // Change a condition so that it should not scan, and re-trigger; there should
-  // still be only 1 started scan.
-  test_delegate_->set_is_authenticated_user_logged_in(false);
-  host_scan_scheduler_->LoggedInStateChanged();
-  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
+  host_scan_scheduler_.reset();
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 }
 
-TEST_F(HostScanSchedulerTest, TestSuspendDone) {
+TEST_F(HostScanSchedulerTest, DefaultNetworkChanged) {
+  // When no Tether network is present, a scan should start when the default
+  // network is disconnected.
   EXPECT_EQ(0, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 
-  test_delegate_->set_is_authenticated_user_logged_in(true);
-  test_delegate_->set_is_network_connected_or_connecting(false);
-  test_delegate_->set_are_tether_hosts_synced(true);
-
-  host_scan_scheduler_->SuspendDone(base::TimeDelta::FromSeconds(1));
-  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
-
-  // Change a condition so that it should not scan, and re-trigger; there should
-  // still be only 1 started scan.
-  test_delegate_->set_is_authenticated_user_logged_in(false);
-  host_scan_scheduler_->SuspendDone(base::TimeDelta::FromSeconds(1));
-  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
-}
-
-TEST_F(HostScanSchedulerTest, TestNetworkConnectionStateChanged) {
+  SetEthernetNetworkConnecting();
   EXPECT_EQ(0, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 
-  test_delegate_->set_is_authenticated_user_logged_in(true);
-  test_delegate_->set_is_network_connected_or_connecting(false);
-  test_delegate_->set_are_tether_hosts_synced(true);
-
-  host_scan_scheduler_->NetworkConnectionStateChanged(nullptr);
-  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
-
-  // Change a condition so that it should not scan, and re-trigger; there should
-  // still be only 1 started scan.
-  test_delegate_->set_is_network_connected_or_connecting(true);
-  host_scan_scheduler_->NetworkConnectionStateChanged(nullptr);
-  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
-}
-
-TEST_F(HostScanSchedulerTest, TestOnSyncFinished) {
+  SetEthernetNetworkConnected();
   EXPECT_EQ(0, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 
-  test_delegate_->set_is_authenticated_user_logged_in(true);
-  test_delegate_->set_is_network_connected_or_connecting(false);
-  test_delegate_->set_are_tether_hosts_synced(true);
-
-  host_scan_scheduler_->OnSyncFinished(
-      cryptauth::CryptAuthDeviceManager::SyncResult::SUCCESS,
-      cryptauth::CryptAuthDeviceManager::DeviceChangeResult::CHANGED);
+  SetEthernetNetworkDisconnected(std::string() /* default_service_path */);
   EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
+  EXPECT_TRUE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 
-  // Change a condition so that it should not scan, and re-trigger; there should
-  // still be only 1 started scan.
-  test_delegate_->set_are_tether_hosts_synced(false);
-  host_scan_scheduler_->OnSyncFinished(
-      cryptauth::CryptAuthDeviceManager::SyncResult::SUCCESS,
-      cryptauth::CryptAuthDeviceManager::DeviceChangeResult::UNCHANGED);
+  fake_host_scanner_->StopScan();
+
+  // When Tether is present but disconnected, a scan should start when the
+  // default network is disconnected.
+  std::string tether_service_path = AddTetherNetworkState();
+
   EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  SetEthernetNetworkConnecting();
+  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  SetEthernetNetworkConnected();
+  EXPECT_EQ(1, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  SetEthernetNetworkDisconnected(std::string() /* default_service_path */);
+  EXPECT_EQ(2, fake_host_scanner_->num_scans_started());
+  EXPECT_TRUE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  fake_host_scanner_->StopScan();
+
+  // When Tether is present and connecting, no scan should start when an
+  // Ethernet network becomes the default network and then disconnects.
+  network_state_handler()->SetTetherNetworkStateConnecting(kTetherGuid);
+
+  EXPECT_EQ(2, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  SetEthernetNetworkConnecting();
+  EXPECT_EQ(2, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  SetEthernetNetworkConnected();
+  EXPECT_EQ(2, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  SetEthernetNetworkDisconnected(tether_service_path);
+  EXPECT_EQ(2, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  fake_host_scanner_->StopScan();
+
+  // When Tether is present and connected, no scan should start when an Ethernet
+  // network becomes the default network and then disconnects.
+  base::RunLoop().RunUntilIdle();
+  network_state_handler()->SetTetherNetworkStateConnected(kTetherGuid);
+
+  EXPECT_EQ(2, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  SetEthernetNetworkConnecting();
+  EXPECT_EQ(2, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  SetEthernetNetworkConnected();
+  EXPECT_EQ(2, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
+
+  SetEthernetNetworkDisconnected(tether_service_path);
+  EXPECT_EQ(2, fake_host_scanner_->num_scans_started());
+  EXPECT_FALSE(
+      network_state_handler()->GetScanningByType(NetworkTypePattern::Tether()));
 }
 
 }  // namespace tether

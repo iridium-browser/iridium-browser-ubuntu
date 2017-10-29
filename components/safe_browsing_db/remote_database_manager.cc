@@ -13,6 +13,7 @@
 #include "base/timer/elapsed_timer.h"
 #include "components/safe_browsing_db/safe_browsing_api_handler.h"
 #include "components/safe_browsing_db/v4_get_hash_protocol_manager.h"
+#include "components/safe_browsing_db/v4_protocol_manager_util.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -22,15 +23,21 @@ namespace net {
 class URLRequestContextGetter;
 }  // namespace net
 
+namespace safe_browsing {
+
 namespace {
 
 // Android field trial for controlling types_to_check.
 const char kAndroidFieldExperiment[] = "SafeBrowsingAndroid";
 const char kAndroidTypesToCheckParam[] = "types_to_check";
 
+void LogPendingChecks(size_t current_requests_size) {
+  UMA_HISTOGRAM_COUNTS_10000("SB2.RemoteCall.ChecksPending",
+                             current_requests_size);
+}
+
 }  // namespace
 
-namespace safe_browsing {
 
 //
 // RemoteSafeBrowsingDatabaseManager::ClientRequest methods
@@ -99,6 +106,10 @@ void RemoteSafeBrowsingDatabaseManager::ClientRequest::OnRequestDone(
 
 // TODO(nparker): Add more tests for this class
 RemoteSafeBrowsingDatabaseManager::RemoteSafeBrowsingDatabaseManager() {
+  // Avoid memory allocations growing the underlying vector. Although this
+  // usually wastes a bit of memory, it will still be less than the default
+  // vector allocation strategy.
+  resource_types_to_check_.reserve(content::RESOURCE_TYPE_LAST_TYPE + 1);
   // Decide which resource types to check. These two are the minimum.
   resource_types_to_check_.insert(content::RESOURCE_TYPE_MAIN_FRAME);
   resource_types_to_check_.insert(content::RESOURCE_TYPE_SUB_FRAME);
@@ -162,18 +173,26 @@ bool RemoteSafeBrowsingDatabaseManager::CanCheckResourceType(
   return resource_types_to_check_.count(resource_type) > 0;
 }
 
+bool RemoteSafeBrowsingDatabaseManager::CanCheckSubresourceFilter() const {
+  return true;
+}
+
 bool RemoteSafeBrowsingDatabaseManager::CanCheckUrl(const GURL& url) const {
-  return url.SchemeIs(url::kHttpsScheme) || url.SchemeIs(url::kHttpScheme) ||
-         url.SchemeIs(url::kFtpScheme);
+  return url.SchemeIsHTTPOrHTTPS() || url.SchemeIs(url::kFtpScheme) ||
+         url.SchemeIsWSOrWSS();
 }
 
 bool RemoteSafeBrowsingDatabaseManager::ChecksAreAlwaysAsync() const {
   return true;
 }
 
-bool RemoteSafeBrowsingDatabaseManager::CheckBrowseUrl(const GURL& url,
-                                                       Client* client) {
+bool RemoteSafeBrowsingDatabaseManager::CheckBrowseUrl(
+    const GURL& url,
+    const SBThreatTypeSet& threat_types,
+    Client* client) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK(!threat_types.empty());
+  DCHECK(SBThreatTypeSetIsValidForCheckBrowseUrl(threat_types));
   if (!enabled_)
     return true;
 
@@ -183,19 +202,18 @@ bool RemoteSafeBrowsingDatabaseManager::CheckBrowseUrl(const GURL& url,
     return true;  // Safe, continue right away.
 
   std::unique_ptr<ClientRequest> req(new ClientRequest(client, this, url));
-  std::vector<SBThreatType> threat_types;  // Not currently used.
 
   DVLOG(1) << "Checking for client " << client << " and URL " << url;
   SafeBrowsingApiHandler* api_handler = SafeBrowsingApiHandler::GetInstance();
-  // This shouldn't happen since SafeBrowsingResourceThrottle checks
-  // IsSupported() earlier.
+  // This shouldn't happen since SafeBrowsingResourceThrottle and
+  // SubresourceFilterSafeBrowsingActivationThrottle check IsSupported()
+  // earlier.
   DCHECK(api_handler) << "SafeBrowsingApiHandler was never constructed";
   api_handler->StartURLCheck(
       base::Bind(&ClientRequest::OnRequestDoneWeak, req->GetWeakPtr()), url,
       threat_types);
 
-  UMA_HISTOGRAM_COUNTS_10000("SB2.RemoteCall.ChecksPending",
-                             current_requests_.size());
+  LogPendingChecks(current_requests_.size());
   current_requests_.push_back(req.release());
 
   // Defer the resource load.
@@ -225,8 +243,37 @@ bool RemoteSafeBrowsingDatabaseManager::CheckResourceUrl(const GURL& url,
 bool RemoteSafeBrowsingDatabaseManager::CheckUrlForSubresourceFilter(
     const GURL& url,
     Client* client) {
-  NOTREACHED();
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK(CanCheckSubresourceFilter());
+
+  if (!enabled_ || !CanCheckUrl(url))
+    return true;
+
+  std::unique_ptr<ClientRequest> req(new ClientRequest(client, this, url));
+
+  DVLOG(1) << "Checking for client " << client << " and URL " << url;
+  SafeBrowsingApiHandler* api_handler = SafeBrowsingApiHandler::GetInstance();
+  // This shouldn't happen since SafeBrowsingResourceThrottle and
+  // SubresourceFilterSafeBrowsingActivationThrottle check IsSupported()
+  // earlier.
+  DCHECK(api_handler) << "SafeBrowsingApiHandler was never constructed";
+  api_handler->StartURLCheck(
+      base::Bind(&ClientRequest::OnRequestDoneWeak, req->GetWeakPtr()), url,
+      CreateSBThreatTypeSet(
+          {SB_THREAT_TYPE_SUBRESOURCE_FILTER, SB_THREAT_TYPE_URL_PHISHING}));
+
+  LogPendingChecks(current_requests_.size());
+  current_requests_.push_back(req.release());
+
+  // Defer the resource load.
   return false;
+}
+
+AsyncMatch RemoteSafeBrowsingDatabaseManager::CheckCsdWhitelistUrl(
+    const GURL& url,
+    Client* client) {
+  NOTREACHED();
+  return AsyncMatch::MATCH;
 }
 
 bool RemoteSafeBrowsingDatabaseManager::MatchCsdWhitelistUrl(const GURL& url) {

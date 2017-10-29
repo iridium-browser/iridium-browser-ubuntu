@@ -10,10 +10,12 @@
 #include <memory>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory.h"
 #include "base/task_runner_util.h"
 #include "base/tuple.h"
@@ -67,7 +69,12 @@ struct DescThunker {
   explicit DescThunker(NaClIPCAdapter* adapter_arg)
       : adapter(adapter_arg) {
   }
+
+  ~DescThunker() { adapter->CloseChannel(); }
+
   scoped_refptr<NaClIPCAdapter> adapter;
+
+  DISALLOW_COPY_AND_ASSIGN(DescThunker);
 };
 
 NaClIPCAdapter* ToAdapter(void* handle) {
@@ -250,10 +257,10 @@ std::unique_ptr<NaClDescWrapper> MakeShmNaClDesc(
 
 }  // namespace
 
-class NaClIPCAdapter::RewrittenMessage
-    : public base::RefCounted<RewrittenMessage> {
+class NaClIPCAdapter::RewrittenMessage {
  public:
   RewrittenMessage();
+  ~RewrittenMessage() {}
 
   bool is_consumed() const { return data_read_cursor_ == data_len_; }
 
@@ -262,14 +269,13 @@ class NaClIPCAdapter::RewrittenMessage
 
   int Read(NaClImcTypedMsgHdr* msg);
 
-  void AddDescriptor(NaClDescWrapper* desc) { descs_.push_back(desc); }
+  void AddDescriptor(std::unique_ptr<NaClDescWrapper> desc) {
+    descs_.push_back(std::move(desc));
+  }
 
   size_t desc_count() const { return descs_.size(); }
 
  private:
-  friend class base::RefCounted<RewrittenMessage>;
-  ~RewrittenMessage() {}
-
   std::unique_ptr<char[]> data_;
   size_t data_len_;
 
@@ -278,7 +284,7 @@ class NaClIPCAdapter::RewrittenMessage
   size_t data_read_cursor_;
 
   // Wrapped descriptors for transfer to untrusted code.
-  ScopedVector<NaClDescWrapper> descs_;
+  std::vector<std::unique_ptr<NaClDescWrapper>> descs_;
 };
 
 NaClIPCAdapter::RewrittenMessage::RewrittenMessage()
@@ -318,7 +324,7 @@ int NaClIPCAdapter::RewrittenMessage::Read(NaClImcTypedMsgHdr* msg) {
     msg->ndesc_length = desc_count;
     for (nacl_abi_size_t i = 0; i < desc_count; i++) {
       // Copy the NaClDesc to the buffer and add a ref so it won't be freed
-      // when we clear our ScopedVector.
+      // when we clear our vector.
       msg->ndescv[i] = descs_[i]->desc();
       NaClDescRef(descs_[i]->desc());
     }
@@ -539,7 +545,7 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
 bool NaClIPCAdapter::RewriteMessage(const IPC::Message& msg, uint32_t type) {
   {
     base::AutoLock lock(lock_);
-    scoped_refptr<RewrittenMessage> rewritten_msg(new RewrittenMessage);
+    std::unique_ptr<RewrittenMessage> rewritten_msg(new RewrittenMessage);
 
     typedef std::vector<ppapi::proxy::SerializedHandle> Handles;
     Handles handles;
@@ -598,12 +604,12 @@ bool NaClIPCAdapter::RewriteMessage(const IPC::Message& msg, uint32_t type) {
         // No default, so the compiler will warn us if new types get added.
       }
       if (nacl_desc.get())
-        rewritten_msg->AddDescriptor(nacl_desc.release());
+        rewritten_msg->AddDescriptor(std::move(nacl_desc));
     }
     if (new_msg)
-      SaveMessage(*new_msg, rewritten_msg.get());
+      SaveMessage(*new_msg, std::move(rewritten_msg));
     else
-      SaveMessage(msg, rewritten_msg.get());
+      SaveMessage(msg, std::move(rewritten_msg));
     cond_var_.Signal();
   }
   return true;
@@ -668,11 +674,11 @@ void NaClIPCAdapter::SaveOpenResourceMessage(
 #endif
             NACL_ABI_O_RDONLY)));
 
-    scoped_refptr<RewrittenMessage> rewritten_msg(new RewrittenMessage);
-    rewritten_msg->AddDescriptor(desc_wrapper.release());
+    std::unique_ptr<RewrittenMessage> rewritten_msg(new RewrittenMessage);
+    rewritten_msg->AddDescriptor(std::move(desc_wrapper));
     {
       base::AutoLock lock(lock_);
-      SaveMessage(*new_msg, rewritten_msg.get());
+      SaveMessage(*new_msg, std::move(rewritten_msg));
       cond_var_.Signal();
     }
     return;
@@ -686,14 +692,14 @@ void NaClIPCAdapter::SaveOpenResourceMessage(
   ppapi::proxy::SerializedHandle sh;
   sh.set_file_handle(ipc_fd, PP_FILEOPENFLAG_READ, 0);
   std::unique_ptr<IPC::Message> new_msg = CreateOpenResourceReply(orig_msg, sh);
-  scoped_refptr<RewrittenMessage> rewritten_msg(new RewrittenMessage);
+  std::unique_ptr<RewrittenMessage> rewritten_msg(new RewrittenMessage);
 
   struct NaClDesc* desc =
       NaClDescCreateWithFilePathMetadata(handle, file_path_str.c_str());
-  rewritten_msg->AddDescriptor(new NaClDescWrapper(desc));
+  rewritten_msg->AddDescriptor(base::MakeUnique<NaClDescWrapper>(desc));
   {
     base::AutoLock lock(lock_);
-    SaveMessage(*new_msg, rewritten_msg.get());
+    SaveMessage(*new_msg, std::move(rewritten_msg));
     cond_var_.Signal();
   }
 }
@@ -715,13 +721,12 @@ int NaClIPCAdapter::LockedReceive(NaClImcTypedMsgHdr* msg) {
 
   if (locked_data_.to_be_received_.empty())
     return 0;
-  scoped_refptr<RewrittenMessage> current =
-      locked_data_.to_be_received_.front();
+  RewrittenMessage& current = *locked_data_.to_be_received_.front();
 
-  int retval = current->Read(msg);
+  int retval = current.Read(msg);
 
-  // When a message is entirely consumed, remove if from the waiting queue.
-  if (current->is_consumed())
+  // When a message is entirely consumed, remove it from the waiting queue.
+  if (current.is_consumed())
     locked_data_.to_be_received_.pop();
 
   return retval;
@@ -826,8 +831,9 @@ void NaClIPCAdapter::SendMessageOnIOThread(
   io_thread_data_.channel_->Send(message.release());
 }
 
-void NaClIPCAdapter::SaveMessage(const IPC::Message& msg,
-                                 RewrittenMessage* rewritten_msg) {
+void NaClIPCAdapter::SaveMessage(
+    const IPC::Message& msg,
+    std::unique_ptr<RewrittenMessage> rewritten_msg) {
   lock_.AssertAcquired();
   // There is some padding in this structure (the "padding" member is 16
   // bits but this then gets padded to 32 bits). We want to be sure not to
@@ -842,7 +848,7 @@ void NaClIPCAdapter::SaveMessage(const IPC::Message& msg,
   header.num_fds = static_cast<uint16_t>(rewritten_msg->desc_count());
 
   rewritten_msg->SetData(header, msg.payload(), msg.payload_size());
-  locked_data_.to_be_received_.push(rewritten_msg);
+  locked_data_.to_be_received_.push(std::move(rewritten_msg));
 }
 
 int TranslatePepperFileReadWriteOpenFlagsForTesting(int32_t pp_open_flags) {

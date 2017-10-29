@@ -11,26 +11,23 @@
 
 namespace blink {
 
+class SpellChecker;
+
 class SpellCheckTestBase : public EditingTestBase {
  protected:
   void SetUp() override;
+
+  SpellChecker& GetSpellChecker() const;
 
  private:
   class DummySpellCheckerClient : public EmptySpellCheckerClient {
    public:
     virtual ~DummySpellCheckerClient() {}
 
-    bool isSpellCheckingEnabled() override { return true; }
-
-    TextCheckerClient& textChecker() override {
-      return m_emptyTextCheckerClient;
-    }
-
-   private:
-    EmptyTextCheckerClient m_emptyTextCheckerClient;
+    bool IsSpellCheckingEnabled() override { return true; }
   };
 
-  std::unique_ptr<DummySpellCheckerClient> m_spellCheckerClient;
+  std::unique_ptr<DummySpellCheckerClient> spell_checker_client_;
 };
 
 }  // namespace blink

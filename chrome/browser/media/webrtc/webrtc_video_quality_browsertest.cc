@@ -16,6 +16,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -96,8 +97,8 @@ static const struct VideoQualityTestConfig {
 // * ffmpeg 0.11.1 or compatible version (see http://www.ffmpeg.org)
 //
 // The test runs several custom binaries - rgba_to_i420 converter and
-// frame_analyzer. Both tools can be found under third_party/webrtc/tools. The
-// test also runs a stand alone Python implementation of a WebSocket server
+// frame_analyzer. Both tools can be found under third_party/webrtc/rtc_tools.
+// The test also runs a stand alone Python implementation of a WebSocket server
 // (pywebsocket) and a barcode_decoder script.
 class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     public testing::WithParamInterface<VideoQualityTestConfig> {
@@ -193,7 +194,7 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     base::FilePath path_to_analyzer = base::MakeAbsoluteFilePath(
         GetBrowserDir().Append(kFrameAnalyzerExecutable));
     base::FilePath path_to_compare_script = GetSourceDir().Append(
-        FILE_PATH_LITERAL("third_party/webrtc/tools/compare_videos.py"));
+        FILE_PATH_LITERAL("third_party/webrtc/rtc_tools/compare_videos.py"));
 
     if (!base::PathExists(path_to_analyzer)) {
       LOG(ERROR) << "Missing frame analyzer: should be in "
@@ -344,11 +345,13 @@ INSTANTIATE_TEST_CASE_P(
 
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
                        MANUAL_TestVideoQualityVp8) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   TestVideoQuality("VP8");
 }
 
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
                        MANUAL_TestVideoQualityVp9) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   TestVideoQuality("VP9");
 }
 
@@ -356,6 +359,7 @@ IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(WebRtcVideoQualityBrowserTest,
                        MANUAL_TestVideoQualityH264) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   // Only run test if run-time feature corresponding to |rtc_use_h264| is on.
   if (!base::FeatureList::IsEnabled(content::kWebRtcH264WithOpenH264FFmpeg)) {
     LOG(WARNING) << "Run-time feature WebRTC-H264WithOpenH264FFmpeg disabled. "

@@ -51,18 +51,23 @@ const CGFloat kAnimationDuration = 0.2;
                          ? NSRightTextAlignment
                          : NSLeftTextAlignment];
 
-  // Disable Force Touch in the Omnibox. Note that this API is defined in
-  // 10.10.3 and higher so have to check more than just isYosmiteOrLater().
-  // Also, because NSPressureConfiguration is not in the original 10.10 SDK,
-  // use NSClassFromString() to instantiate it (otherwise there's a
-  // linker error).
+  // Disable Force Touch in the Omnibox. Note that this API is documented as
+  // being available in 10.11 or higher, but if the API is available in an older
+  // version we still want to use it. That prevents us from guarding the call
+  // with @available, so instead we use respondsToSelector and silence the
+  // availability warning. Also, because NSPressureConfiguration is not in the
+  // original 10.10 SDK, use NSClassFromString() to instantiate it (otherwise
+  // there's a linker error).
   if (base::mac::IsAtLeastOS10_10() &&
       [self respondsToSelector:@selector(setPressureConfiguration:)]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability"
     NSPressureConfiguration* pressureConfiguration =
         [[[NSClassFromString(@"NSPressureConfiguration") alloc]
             initWithPressureBehavior:NSPressureBehaviorPrimaryClick]
                 autorelease];
     [self setPressureConfiguration:pressureConfiguration];
+#pragma clang diagnostic pop
   }
 }
 
@@ -288,23 +293,22 @@ const CGFloat kAnimationDuration = 0.2;
 }
 
 - (NSPoint)bubblePointForDecoration:(LocationBarDecoration*)decoration {
-  NSPoint point;
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
-    // Under MD, dialogs have no arrow and anchor to corner of the decoration
-    // frame, not a specific point within it. See http://crbug.com/566115.
-    BOOL isLeftDecoration;
-    const NSRect frame =
-        [[self cell] backgroundFrameForDecoration:decoration
-                                          inFrame:[self bounds]
-                                 isLeftDecoration:&isLeftDecoration];
-    point.y = NSMaxY(frame);
-    point.x = isLeftDecoration ? NSMinX(frame) : NSMaxX(frame);
-  } else {
-    const NSRect frame =
-        [[self cell] frameForDecoration:decoration inFrame:[self bounds]];
-    point = decoration->GetBubblePointInFrame(frame);
-  }
+  if (!ui::MaterialDesignController::IsSecondaryUiMaterial())
+    return [self arrowAnchorPointForDecoration:decoration];
 
+  // Under MD, dialogs have no arrow and anchor to corner of the location bar
+  // frame, not a specific point within it. See http://crbug.com/566115.
+  BOOL isLeftDecoration = [[self cell] isLeftDecoration:decoration];
+  const NSRect frame = [self bounds];
+  NSPoint point = NSMakePoint(isLeftDecoration ? NSMinX(frame) : NSMaxX(frame),
+                              NSMaxY(frame));
+  return [self convertPoint:point toView:nil];
+}
+
+- (NSPoint)arrowAnchorPointForDecoration:(LocationBarDecoration*)decoration {
+  const NSRect frame =
+      [[self cell] frameForDecoration:decoration inFrame:[self bounds]];
+  NSPoint point = decoration->GetBubblePointInFrame(frame);
   return [self convertPoint:point toView:nil];
 }
 
@@ -505,12 +509,6 @@ const CGFloat kAnimationDuration = 0.2;
 
 // (URLDropTarget protocol)
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
-  // Make ourself the first responder, which will select the text to indicate
-  // that our contents would be replaced by a drop.
-  // TODO(viettrungluu): crbug.com/30809 -- this is a hack since it steals focus
-  // and doesn't return it.
-  [[self window] makeFirstResponder:self];
-
   bool canDropAtLocation =
       [[self cell] canDropAtLocationInWindow:[sender draggingLocation]
                                       ofView:self];

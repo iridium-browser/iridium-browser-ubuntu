@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "ash/host/root_window_transformer.h"
-#include "ash/ime/input_method_event_handler.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "ui/aura/window.h"
@@ -33,7 +32,7 @@ class UnifiedEventTargeter : public aura::WindowTargeter {
             static_cast<aura::Window*>(nullptr), dst_root_);
       }
       ignore_result(
-          dst_root_->GetHost()->event_processor()->OnEventFromSource(event));
+          dst_root_->GetHost()->event_sink()->OnEventFromSource(event));
       return nullptr;
     } else {
       NOTREACHED() << "event type:" << event->type();

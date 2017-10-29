@@ -37,9 +37,6 @@ static bool compare(const SkBitmap& ref, const SkIRect& iref,
     const int xOff = itest.fLeft - iref.fLeft;
     const int yOff = itest.fTop - iref.fTop;
 
-    SkAutoLockPixels alpRef(ref);
-    SkAutoLockPixels alpTest(test);
-
     for (int y = 0; y < test.height(); ++y) {
         for (int x = 0; x < test.width(); ++x) {
             SkColor testColor = test.getColor(x, y);
@@ -123,11 +120,49 @@ DEF_TEST(DrawText_weirdCoordinates, r) {
     SkScalar oddballs[] = { 0.0f, (float)INFINITY, (float)NAN, 34359738368.0f };
 
     for (auto x : oddballs) {
-        canvas->drawText("a", 1, +x, 0.0f, SkPaint());
-        canvas->drawText("a", 1, -x, 0.0f, SkPaint());
+        canvas->drawString("a", +x, 0.0f, SkPaint());
+        canvas->drawString("a", -x, 0.0f, SkPaint());
     }
     for (auto y : oddballs) {
-        canvas->drawText("a", 1, 0.0f, +y, SkPaint());
-        canvas->drawText("a", 1, 0.0f, -y, SkPaint());
+        canvas->drawString("a", 0.0f, +y, SkPaint());
+        canvas->drawString("a", 0.0f, -y, SkPaint());
+    }
+}
+
+// Test drawing text with some unusual matricies.
+// We measure success by not crashing or asserting.
+DEF_TEST(DrawText_weirdMatricies, r) {
+    auto surface = SkSurface::MakeRasterN32Premul(100,100);
+    auto canvas = surface->getCanvas();
+
+    SkPaint paint;
+    paint.setAntiAlias(true);
+    paint.setLCDRenderText(true);
+
+    struct {
+        SkScalar textSize;
+        SkScalar matrix[9];
+    } testCases[] = {
+        // 2x2 singular
+        {10, { 0,  0,  0,  0,  0,  0,  0,  0,  1}},
+        {10, { 0,  0,  0,  0,  1,  0,  0,  0,  1}},
+        {10, { 0,  0,  0,  1,  0,  0,  0,  0,  1}},
+        {10, { 0,  0,  0,  1,  1,  0,  0,  0,  1}},
+        {10, { 0,  1,  0,  0,  1,  0,  0,  0,  1}},
+        {10, { 1,  0,  0,  0,  0,  0,  0,  0,  1}},
+        {10, { 1,  0,  0,  1,  0,  0,  0,  0,  1}},
+        {10, { 1,  1,  0,  0,  0,  0,  0,  0,  1}},
+        {10, { 1,  1,  0,  1,  1,  0,  0,  0,  1}},
+        // See https://bugzilla.mozilla.org/show_bug.cgi?id=1305085 .
+        { 1, {10, 20,  0, 20, 40,  0,  0,  0,  1}},
+    };
+
+    for (const auto& testCase : testCases) {
+        paint.setTextSize(testCase.textSize);
+        const SkScalar(&m)[9] = testCase.matrix;
+        SkMatrix mat;
+        mat.setAll(m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]);
+        canvas->setMatrix(mat);
+        canvas->drawString("Hamburgefons", 10, 10, paint);
     }
 }

@@ -18,6 +18,7 @@
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "fpdfsdk/fsdk_define.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
@@ -137,8 +138,8 @@ class CPDF_PageOrganizer {
   bool UpdateReference(CPDF_Object* pObj, ObjectNumberMap* pObjNumberMap);
   uint32_t GetNewObjId(ObjectNumberMap* pObjNumberMap, CPDF_Reference* pRef);
 
-  CPDF_Document* m_pDestPDFDoc;
-  CPDF_Document* m_pSrcPDFDoc;
+  CFX_UnownedPtr<CPDF_Document> m_pDestPDFDoc;
+  CFX_UnownedPtr<CPDF_Document> m_pSrcPDFDoc;
 };
 
 CPDF_PageOrganizer::CPDF_PageOrganizer(CPDF_Document* pDestPDFDoc,
@@ -170,7 +171,7 @@ bool CPDF_PageOrganizer::PDFDocInit() {
       pElement ? ToDictionary(pElement->GetDirect()) : nullptr;
   if (!pNewPages) {
     pNewPages = m_pDestPDFDoc->NewIndirect<CPDF_Dictionary>();
-    pNewRoot->SetNewFor<CPDF_Reference>("Pages", m_pDestPDFDoc,
+    pNewRoot->SetNewFor<CPDF_Reference>("Pages", m_pDestPDFDoc.Get(),
                                         pNewPages->GetObjNum());
   }
 
@@ -181,7 +182,7 @@ bool CPDF_PageOrganizer::PDFDocInit() {
   if (!pNewPages->GetArrayFor("Kids")) {
     pNewPages->SetNewFor<CPDF_Number>("Count", 0);
     pNewPages->SetNewFor<CPDF_Reference>(
-        "Kids", m_pDestPDFDoc,
+        "Kids", m_pDestPDFDoc.Get(),
         m_pDestPDFDoc->NewIndirect<CPDF_Array>()->GetObjNum());
   }
 
@@ -210,16 +211,18 @@ bool CPDF_PageOrganizer::ExportPage(const std::vector<uint16_t>& pageNums,
     }
 
     // inheritable item
+    // Even though some entries are required by the PDF spec, there exist
+    // PDFs that omit them. Set some defaults in this case.
     // 1 MediaBox - required
     if (!CopyInheritable(pCurPageDict, pSrcPageDict, "MediaBox")) {
-      // Search for "CropBox" in the source page dictionary,
-      // if it does not exists, use the default letter size.
+      // Search for "CropBox" in the source page dictionary.
+      // If it does not exist, use the default letter size.
       CPDF_Object* pInheritable =
           PageDictGetInheritableTag(pSrcPageDict, "CropBox");
       if (pInheritable) {
         pCurPageDict->SetFor("MediaBox", pInheritable->Clone());
       } else {
-        // Make the default size to be letter size (8.5'x11')
+        // Make the default size letter size (8.5"x11")
         CPDF_Array* pArray = pCurPageDict->SetNewFor<CPDF_Array>("MediaBox");
         pArray->AddNew<CPDF_Number>(0);
         pArray->AddNew<CPDF_Number>(0);
@@ -229,8 +232,10 @@ bool CPDF_PageOrganizer::ExportPage(const std::vector<uint16_t>& pageNums,
     }
 
     // 2 Resources - required
-    if (!CopyInheritable(pCurPageDict, pSrcPageDict, "Resources"))
-      return false;
+    if (!CopyInheritable(pCurPageDict, pSrcPageDict, "Resources")) {
+      // Use a default empty resources if it does not exist.
+      pCurPageDict->SetNewFor<CPDF_Dictionary>("Resources");
+    }
 
     // 3 CropBox - optional
     CopyInheritable(pCurPageDict, pSrcPageDict, "CropBox");
@@ -256,7 +261,7 @@ bool CPDF_PageOrganizer::UpdateReference(CPDF_Object* pObj,
       uint32_t newobjnum = GetNewObjId(pObjNumberMap, pReference);
       if (newobjnum == 0)
         return false;
-      pReference->SetRef(m_pDestPDFDoc, newobjnum);
+      pReference->SetRef(m_pDestPDFDoc.Get(), newobjnum);
       break;
     }
     case CPDF_Object::DICTIONARY: {

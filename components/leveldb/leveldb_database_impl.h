@@ -7,69 +7,79 @@
 
 #include <memory>
 
+#include "base/trace_event/memory_dump_provider.h"
 #include "base/unguessable_token.h"
 #include "components/leveldb/public/interfaces/leveldb.mojom.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
+#include "third_party/leveldatabase/src/include/leveldb/cache.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 
 namespace leveldb {
 
 // The backing to a database object that we pass to our called.
-class LevelDBDatabaseImpl : public mojom::LevelDBDatabase {
+class LevelDBDatabaseImpl : public mojom::LevelDBDatabase,
+                            public base::trace_event::MemoryDumpProvider {
  public:
   LevelDBDatabaseImpl(std::unique_ptr<leveldb::Env> environment,
-                      std::unique_ptr<leveldb::DB> db);
+                      std::unique_ptr<leveldb::DB> db,
+                      std::unique_ptr<leveldb::Cache> cache,
+                      base::Optional<base::trace_event::MemoryAllocatorDumpGuid>
+                          memory_dump_id);
   ~LevelDBDatabaseImpl() override;
 
   // Overridden from LevelDBDatabase:
   void Put(const std::vector<uint8_t>& key,
            const std::vector<uint8_t>& value,
-           const PutCallback& callback) override;
+           PutCallback callback) override;
   void Delete(const std::vector<uint8_t>& key,
-              const DeleteCallback& callback) override;
+              DeleteCallback callback) override;
   void DeletePrefixed(const std::vector<uint8_t>& key_prefix,
-                      const DeletePrefixedCallback& callback) override;
+                      DeletePrefixedCallback callback) override;
   void Write(std::vector<mojom::BatchedOperationPtr> operations,
-             const WriteCallback& callback) override;
-  void Get(const std::vector<uint8_t>& key,
-           const GetCallback& callback) override;
+             WriteCallback callback) override;
+  void Get(const std::vector<uint8_t>& key, GetCallback callback) override;
   void GetPrefixed(const std::vector<uint8_t>& key_prefix,
-                   const GetPrefixedCallback& callback) override;
-  void GetSnapshot(const GetSnapshotCallback& callback) override;
+                   GetPrefixedCallback callback) override;
+  void GetSnapshot(GetSnapshotCallback callback) override;
   void ReleaseSnapshot(const base::UnguessableToken& snapshot) override;
   void GetFromSnapshot(const base::UnguessableToken& snapshot,
                        const std::vector<uint8_t>& key,
-                       const GetCallback& callback) override;
-  void NewIterator(const NewIteratorCallback& callback) override;
+                       GetCallback callback) override;
+  void NewIterator(NewIteratorCallback callback) override;
   void NewIteratorFromSnapshot(
       const base::UnguessableToken& snapshot,
-      const NewIteratorFromSnapshotCallback& callback) override;
+      NewIteratorFromSnapshotCallback callback) override;
   void ReleaseIterator(const base::UnguessableToken& iterator) override;
-  void IteratorSeekToFirst(
-      const base::UnguessableToken& iterator,
-      const IteratorSeekToFirstCallback& callback) override;
+  void IteratorSeekToFirst(const base::UnguessableToken& iterator,
+                           IteratorSeekToFirstCallback callback) override;
   void IteratorSeekToLast(const base::UnguessableToken& iterator,
-                          const IteratorSeekToLastCallback& callback) override;
+                          IteratorSeekToLastCallback callback) override;
   void IteratorSeek(const base::UnguessableToken& iterator,
                     const std::vector<uint8_t>& target,
-                    const IteratorSeekToLastCallback& callback) override;
+                    IteratorSeekToLastCallback callback) override;
   void IteratorNext(const base::UnguessableToken& iterator,
-                    const IteratorNextCallback& callback) override;
+                    IteratorNextCallback callback) override;
   void IteratorPrev(const base::UnguessableToken& iterator,
-                    const IteratorPrevCallback& callback) override;
+                    IteratorPrevCallback callback) override;
+
+  // base::trace_event::MemoryDumpProvider implementation.
+  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
+                    base::trace_event::ProcessMemoryDump* pmd) override;
 
  private:
   // Returns the state of |it| to a caller. Note: This assumes that all the
   // iterator movement methods have the same callback signature. We don't
   // directly reference the underlying type in case of bindings change.
   void ReplyToIteratorMessage(leveldb::Iterator* it,
-                              const IteratorSeekToFirstCallback& callback);
+                              IteratorSeekToFirstCallback callback);
 
   leveldb::Status DeletePrefixedHelper(const leveldb::Slice& key_prefix,
                                        leveldb::WriteBatch* batch);
 
   std::unique_ptr<leveldb::Env> environment_;
+  std::unique_ptr<leveldb::Cache> cache_;
   std::unique_ptr<leveldb::DB> db_;
+  base::Optional<base::trace_event::MemoryAllocatorDumpGuid> memory_dump_id_;
 
   std::map<base::UnguessableToken, const Snapshot*> snapshot_map_;
 

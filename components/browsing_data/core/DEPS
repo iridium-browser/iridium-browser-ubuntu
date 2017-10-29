@@ -1,6 +1,8 @@
 include_rules = [
   "+components/autofill/core/browser",
+  "+components/bookmarks/browser",
   "+components/browser_sync",
+  "+components/content_settings",
   "+components/history/core/browser",
   "+components/history/core/test",
   "+components/password_manager/core/browser",
@@ -10,6 +12,7 @@ include_rules = [
   "+components/strings/grit/components_strings.h",
   "+components/sync/base",
   "+components/sync/driver",
+  "+components/sync_preferences",
   "+components/version_info",
   "+components/webdata/common",
   "+net",

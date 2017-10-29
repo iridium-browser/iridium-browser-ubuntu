@@ -47,10 +47,10 @@
 #include <vector>
 
 #include "content/browser/renderer_host/media/audio_output_authorization_handler.h"
-#include "content/browser/renderer_host/media/audio_output_delegate.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/render_process_host.h"
+#include "media/audio/audio_output_delegate.h"
 
 namespace base {
 class SharedMemory;
@@ -60,6 +60,7 @@ class CancelableSyncSocket;
 namespace media {
 class AudioManager;
 class AudioParameters;
+class AudioSystem;
 }
 
 namespace content {
@@ -69,19 +70,15 @@ class MediaStreamManager;
 
 class CONTENT_EXPORT AudioRendererHost
     : public BrowserMessageFilter,
-      public AudioOutputDelegate::EventHandler {
+      public media::AudioOutputDelegate::EventHandler {
  public:
   // Called from UI thread from the owner of this object.
   AudioRendererHost(int render_process_id,
                     media::AudioManager* audio_manager,
+                    media::AudioSystem* audio_system,
                     AudioMirroringManager* mirroring_manager,
                     MediaStreamManager* media_stream_manager,
                     const std::string& salt);
-
-  // Calls |callback| with the list of AudioOutputControllers for this object.
-  void GetOutputControllers(
-      const RenderProcessHost::GetAudioOutputControllersCallback&
-          callback) const;
 
   // BrowserMessageFilter implementation.
   void OnChannelClosing() override;
@@ -89,9 +86,10 @@ class CONTENT_EXPORT AudioRendererHost
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // AudioOutputDelegate::EventHandler implementation
-  void OnStreamCreated(int stream_id,
-                       base::SharedMemory* shared_memory,
-                       base::CancelableSyncSocket* foreign_socket) override;
+  void OnStreamCreated(
+      int stream_id,
+      const base::SharedMemory* shared_memory,
+      std::unique_ptr<base::CancelableSyncSocket> foreign_socket) override;
   void OnStreamError(int stream_id) override;
 
   void OverrideDevicePermissionsForTesting(bool has_access);
@@ -105,12 +103,8 @@ class CONTENT_EXPORT AudioRendererHost
   FRIEND_TEST_ALL_PREFIXES(AudioRendererHostTest, CreateMockStream);
   FRIEND_TEST_ALL_PREFIXES(AudioRendererHostTest, MockStreamDataConversation);
 
-  // Internal callback type for access requests to output devices.
-  // |have_access| is true only if there is permission to access the device.
-  typedef base::Callback<void(bool have_access)> OutputDeviceAccessCB;
-
   using AudioOutputDelegateVector =
-      std::vector<std::unique_ptr<AudioOutputDelegate>>;
+      std::vector<std::unique_ptr<media::AudioOutputDelegate>>;
 
   // The type of a function that is run on the UI thread to check whether the
   // routing IDs reference a valid RenderFrameHost. The function then runs
@@ -118,7 +112,7 @@ class CONTENT_EXPORT AudioRendererHost
   using ValidateRenderFrameIdFunction =
       void (*)(int render_process_id,
                int render_frame_id,
-               const base::Callback<void(bool)>& callback);
+               base::OnceCallback<void(bool)> callback);
 
   ~AudioRendererHost() override;
 
@@ -141,12 +135,11 @@ class CONTENT_EXPORT AudioRendererHost
                                     const url::Origin& security_origin);
 
   void AuthorizationCompleted(int stream_id,
-                              const url::Origin& security_origin,
                               base::TimeTicks auth_start_time,
                               media::OutputDeviceStatus status,
-                              bool should_send_id,
                               const media::AudioParameters& params,
-                              const std::string& raw_device_id);
+                              const std::string& raw_device_id,
+                              const std::string& device_id_for_renderer);
 
   // Creates an audio output stream with the specified format.
   // Upon success/failure, the peer is notified via the NotifyStreamCreated
@@ -177,8 +170,6 @@ class CONTENT_EXPORT AudioRendererHost
   // the number of playing streams.
   void StreamStateChanged(int stream_id, bool is_playing);
 
-  RenderProcessHost::AudioOutputControllerList DoGetOutputControllers() const;
-
   // Send an error message to the renderer.
   void SendErrorMessage(int stream_id);
 
@@ -186,18 +177,11 @@ class CONTENT_EXPORT AudioRendererHost
   // Returns delegates_.end() if not found.
   AudioOutputDelegateVector::iterator LookupIteratorById(int stream_id);
   // Returns nullptr if not found.
-  AudioOutputDelegate* LookupById(int stream_id);
+  media::AudioOutputDelegate* LookupById(int stream_id);
 
   // Helper method to check if the authorization procedure for stream
   // |stream_id| has started.
   bool IsAuthorizationStarted(int stream_id);
-
-  // Called from AudioRendererHostTest to override the function that checks for
-  // the existence of the RenderFrameHost at stream creation time.
-  void set_render_frame_id_validate_function_for_testing(
-      ValidateRenderFrameIdFunction function) {
-    validate_render_frame_id_function_ = function;
-  }
 
   // ID of the RenderProcessHost that owns this instance.
   const int render_process_id_;
@@ -219,11 +203,6 @@ class CONTENT_EXPORT AudioRendererHost
   // is a bool that is true if the authorization process completes successfully.
   // The second element contains the unique ID of the authorized device.
   std::map<int, std::pair<bool, std::string>> authorizations_;
-
-  // At stream creation time, AudioRendererHost will call this function on the
-  // UI thread to validate render frame IDs. A default is set by the
-  // constructor, but this can be overridden by unit tests.
-  ValidateRenderFrameIdFunction validate_render_frame_id_function_;
 
   AudioOutputAuthorizationHandler authorization_handler_;
 

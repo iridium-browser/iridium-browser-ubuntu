@@ -23,7 +23,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/sequence_checker.h"
 #include "base/values.h"
 #include "components/prefs/base_prefs_export.h"
 #include "components/prefs/persistent_pref_store.h"
@@ -39,6 +39,10 @@ namespace base {
 class FilePath;
 }
 
+namespace prefs {
+class ScopedDictionaryPrefUpdate;
+}
+
 namespace subtle {
 class PrefMemberBase;
 class ScopedUserPrefUpdateBase;
@@ -51,13 +55,18 @@ class ScopedUserPrefUpdateBase;
 // Settings and storage accessed through this class represent
 // user-selected preferences and information and MUST not be
 // extracted, overwritten or modified except through the defined APIs.
-class COMPONENTS_PREFS_EXPORT PrefService : public base::NonThreadSafe {
+class COMPONENTS_PREFS_EXPORT PrefService {
  public:
   enum PrefInitializationStatus {
     INITIALIZATION_STATUS_WAITING,
     INITIALIZATION_STATUS_SUCCESS,
     INITIALIZATION_STATUS_CREATED_NEW_PREF_STORE,
     INITIALIZATION_STATUS_ERROR
+  };
+
+  enum IncludeDefaults {
+    INCLUDE_DEFAULTS,
+    EXCLUDE_DEFAULTS,
   };
 
   // A helper class to store all the information associated with a preference.
@@ -168,6 +177,11 @@ class COMPONENTS_PREFS_EXPORT PrefService : public base::NonThreadSafe {
   // immediately (basically, during shutdown).
   void CommitPendingWrite();
 
+  // Lands pending writes to disk. This should only be used if we need to save
+  // immediately. |done_callback| will be invoked when changes have been
+  // written.
+  void CommitPendingWrite(base::OnceClosure done_callback);
+
   // Schedule a write if there is any lossy data pending. Unlike
   // CommitPendingWrite() this does not immediately sync to disk, instead it
   // triggers an eventual write if there is lossy data pending and if there
@@ -250,23 +264,22 @@ class COMPONENTS_PREFS_EXPORT PrefService : public base::NonThreadSafe {
   // this checks if a value exists for the path.
   bool HasPrefPath(const std::string& path) const;
 
-  // Returns a dictionary with effective preference values.
-  std::unique_ptr<base::DictionaryValue> GetPreferenceValues() const;
+  // Issues a callback for every preference value. The preferences must not be
+  // mutated during iteration.
+  void IteratePreferenceValues(
+      base::RepeatingCallback<void(const std::string& key,
+                                   const base::Value& value)> callback) const;
 
-  // Returns a dictionary with effective preference values, omitting prefs that
-  // are at their default values.
-  std::unique_ptr<base::DictionaryValue> GetPreferenceValuesOmitDefaults()
-      const;
-
-  // Returns a dictionary with effective preference values. Contrary to
-  // GetPreferenceValues(), the paths of registered preferences are not split on
-  // '.' characters. If a registered preference stores a dictionary, however,
-  // the hierarchical structure inside the preference will be preserved.
-  // For example, if "foo.bar" is a registered preference, the result could look
-  // like this:
-  //   {"foo.bar": {"a": {"b": true}}}.
-  std::unique_ptr<base::DictionaryValue>
-  GetPreferenceValuesWithoutPathExpansion() const;
+  // Returns a dictionary with effective preference values. This is an expensive
+  // operation which does a deep copy. Use only if you really need the results
+  // in a base::Value (for example, for JSON serialization). Otherwise use
+  // IteratePreferenceValues above to avoid the copies.
+  //
+  // If INCLUDE_DEFAULTS is requested, preferences set to their default values
+  // will be included. Otherwise, these will be omitted from the returned
+  // dictionary.
+  std::unique_ptr<base::DictionaryValue> GetPreferenceValues(
+      IncludeDefaults include_defaults) const;
 
   bool ReadOnly() const;
 
@@ -327,6 +340,7 @@ class COMPONENTS_PREFS_EXPORT PrefService : public base::NonThreadSafe {
   // Give access to ReportUserPrefChanged() and GetMutableUserPref().
   friend class subtle::ScopedUserPrefUpdateBase;
   friend class PrefServiceTest_WriteablePrefStoreFlags_Test;
+  friend class prefs::ScopedDictionaryPrefUpdate;
 
   // Registration of pref change observers must be done using the
   // PrefChangeRegistrar, which is declared as a friend here to grant it
@@ -350,12 +364,17 @@ class COMPONENTS_PREFS_EXPORT PrefService : public base::NonThreadSafe {
   virtual void RemovePrefObserver(const std::string& path, PrefObserver* obs);
 
   // Sends notification of a changed preference. This needs to be called by
-  // a ScopedUserPrefUpdate if a DictionaryValue or ListValue is changed.
+  // a ScopedUserPrefUpdate or ScopedDictionaryPrefUpdate if a DictionaryValue
+  // or ListValue is changed.
   void ReportUserPrefChanged(const std::string& key);
+  void ReportUserPrefChanged(
+      const std::string& key,
+      std::set<std::vector<std::string>> path_components);
 
   // Sets the value for this pref path in the user pref store and informs the
   // PrefNotifier of the change.
-  void SetUserPrefValue(const std::string& path, base::Value* new_value);
+  void SetUserPrefValue(const std::string& path,
+                        std::unique_ptr<base::Value> new_value);
 
   // Load preferences from storage, attempting to diagnose and handle errors.
   // This should only be called from the constructor.
@@ -382,6 +401,8 @@ class COMPONENTS_PREFS_EXPORT PrefService : public base::NonThreadSafe {
   // is authoritative with respect to what the types and default values
   // of registered preferences are.
   mutable PreferenceMap prefs_map_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(PrefService);
 };

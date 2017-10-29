@@ -44,7 +44,7 @@ int CallFstat(int fd, stat_wrapper_t *sb) {
 
 // NaCl doesn't provide the following system calls, so either simulate them or
 // wrap them in order to minimize the number of #ifdef's in this file.
-#if !defined(OS_NACL)
+#if !defined(OS_NACL) && !defined(OS_AIX)
 bool IsOpenAppend(PlatformFile file) {
   return (fcntl(file, F_GETFL) & O_APPEND) != 0;
 }
@@ -70,6 +70,7 @@ int CallFutimes(PlatformFile file, const struct timeval times[2]) {
 #endif
 }
 
+#if !defined(OS_FUCHSIA)
 File::Error CallFcntlFlock(PlatformFile file, bool do_lock) {
   struct flock lock;
   lock.l_type = do_lock ? F_WRLCK : F_UNLCK;
@@ -80,7 +81,9 @@ File::Error CallFcntlFlock(PlatformFile file, bool do_lock) {
     return File::OSErrorToFileError(errno);
   return File::FILE_OK;
 }
-#else  // defined(OS_NACL)
+#endif
+
+#else   // defined(OS_NACL) && !defined(OS_AIX)
 
 bool IsOpenAppend(PlatformFile file) {
   // NaCl doesn't implement fcntl. Since NaCl's write conforms to the POSIX
@@ -360,6 +363,7 @@ bool File::GetInfo(Info* info) {
   return true;
 }
 
+#if !defined(OS_FUCHSIA)
 File::Error File::Lock() {
   SCOPED_FILE_TRACE("Lock");
   return CallFcntlFlock(file_.get(), true);
@@ -369,6 +373,7 @@ File::Error File::Unlock() {
   SCOPED_FILE_TRACE("Unlock");
   return CallFcntlFlock(file_.get(), false);
 }
+#endif
 
 File File::Duplicate() const {
   if (!IsValid())

@@ -4,8 +4,11 @@
 
 #include "headless/lib/headless_content_main_delegate.h"
 
+#include <utility>
+
 #include "base/base_switches.h"
 #include "base/command_line.h"
+#include "base/environment.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
@@ -29,16 +32,28 @@
 #include "headless/embedded_resource_pak.h"
 #endif
 
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#include "components/crash/content/app/crashpad.h"
+#endif
+
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
+#include "headless/lib/renderer/headless_content_renderer_client.h"
+#endif
+
 namespace headless {
 namespace {
 // Keep in sync with content/common/content_constants_internal.h.
+#if !defined(CHROME_MULTIPLE_DLL_CHILD)
 // TODO(skyostil): Add a tracing test for this.
 const int kTraceEventBrowserProcessSortIndex = -6;
+#endif
 
 HeadlessContentMainDelegate* g_current_headless_content_main_delegate = nullptr;
 
 base::LazyInstance<HeadlessCrashReporterClient>::Leaky g_headless_crash_client =
     LAZY_INSTANCE_INITIALIZER;
+
+const char kLogFileName[] = "CHROME_LOG_FILE";
 }  // namespace
 
 HeadlessContentMainDelegate::HeadlessContentMainDelegate(
@@ -72,11 +87,13 @@ bool HeadlessContentMainDelegate::BasicStartupComplete(int* exit_code) {
   command_line->AppendSwitchASCII(switches::kOzonePlatform, "headless");
 #endif
 
-  if (!browser_->options()->gl_implementation.empty()) {
-    command_line->AppendSwitchASCII(switches::kUseGL,
-                                    browser_->options()->gl_implementation);
-  } else {
-    command_line->AppendSwitch(switches::kDisableGpu);
+  if (!command_line->HasSwitch(switches::kUseGL)) {
+    if (!browser_->options()->gl_implementation.empty()) {
+      command_line->AppendSwitchASCII(switches::kUseGL,
+                                      browser_->options()->gl_implementation);
+    } else {
+      command_line->AppendSwitch(switches::kDisableGpu);
+    }
   }
 
   SetContentClient(&content_client_);
@@ -85,10 +102,16 @@ bool HeadlessContentMainDelegate::BasicStartupComplete(int* exit_code) {
 
 void HeadlessContentMainDelegate::InitLogging(
     const base::CommandLine& command_line) {
+  const std::string process_type =
+      command_line.GetSwitchValueASCII(switches::kProcessType);
 #if !defined(OS_WIN)
   if (!command_line.HasSwitch(switches::kEnableLogging))
     return;
-#endif
+#else
+  // Child processes in Windows are not able to initialize logging.
+  if (!process_type.empty())
+    return;
+#endif  // !defined(OS_WIN)
 
   logging::LoggingDestination log_mode;
   base::FilePath log_filename(FILE_PATH_LITERAL("chrome_debug.log"));
@@ -127,8 +150,11 @@ void HeadlessContentMainDelegate::InitLogging(
     log_path = log_filename;
   }
 
-  const std::string process_type =
-      command_line.GetSwitchValueASCII(switches::kProcessType);
+  std::string filename;
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
+  if (env->GetVar(kLogFileName, &filename) && !filename.empty()) {
+    log_path = base::FilePath::FromUTF8Unsafe(filename);
+  }
 
   settings.logging_dest = log_mode;
   settings.log_file = log_path.value().c_str();
@@ -147,16 +173,22 @@ void HeadlessContentMainDelegate::InitCrashReporter(
   g_headless_crash_client.Pointer()->set_crash_dumps_dir(
       browser_->options()->crash_dumps_dir);
 
-#if !defined(OS_MACOSX)
+#if defined(HEADLESS_USE_BREAKPAD)
   if (!browser_->options()->enable_crash_reporter) {
     DCHECK(!breakpad::IsCrashReporterEnabled());
     return;
   }
-#if defined(HEADLESS_USE_BREAKPAD)
   if (process_type != switches::kZygoteProcess)
     breakpad::InitCrashReporter(process_type);
+#elif defined(OS_MACOSX)
+  crash_reporter::InitializeCrashpad(process_type.empty(), process_type);
+// Avoid adding this dependency in Windows Chrome non component builds, since
+// crashpad is already enabled.
+// TODO(dvallet): Ideally we would also want to avoid this for component builds.
+#elif defined(OS_WIN) && !defined(CHROME_MULTIPLE_DLL)
+  crash_reporter::InitializeCrashpadWithEmbeddedHandler(process_type.empty(),
+                                                        process_type);
 #endif  // defined(HEADLESS_USE_BREAKPAD)
-#endif  // !defined(OS_MACOSX)
 }
 
 void HeadlessContentMainDelegate::PreSandboxStartup() {
@@ -169,16 +201,16 @@ void HeadlessContentMainDelegate::PreSandboxStartup() {
 #else
   if (command_line.HasSwitch(switches::kEnableLogging))
     InitLogging(command_line);
-#endif
-#if !defined(OS_MACOSX)
+#endif  // defined(OS_WIN)
   InitCrashReporter(command_line);
-#endif
   InitializeResourceBundle();
 }
 
+#if !defined(CHROME_MULTIPLE_DLL_CHILD)
 int HeadlessContentMainDelegate::RunProcess(
     const std::string& process_type,
     const content::MainFunctionParams& main_function_params) {
+
   if (!process_type.empty())
     return -1;
 
@@ -201,6 +233,7 @@ int HeadlessContentMainDelegate::RunProcess(
   // Return value >=0 here to disable calling content::BrowserMain.
   return 0;
 }
+#endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
 
 #if !defined(OS_MACOSX) && defined(OS_POSIX) && !defined(OS_ANDROID)
 void HeadlessContentMainDelegate::ZygoteForked() {
@@ -211,7 +244,9 @@ void HeadlessContentMainDelegate::ZygoteForked() {
   // Unconditionally try to turn on crash reporting since we do not have access
   // to the latest browser options at this point when testing. Breakpad will
   // bail out gracefully if the browser process hasn't enabled crash reporting.
+#if defined(HEADLESS_USE_BREAKPAD)
   breakpad::InitCrashReporter(process_type);
+#endif
 }
 #endif
 
@@ -245,15 +280,32 @@ void HeadlessContentMainDelegate::InitializeResourceBundle() {
   pak_file = dir_module.Append(FILE_PATH_LITERAL("headless_lib.pak"));
   if (!base::PathExists(pak_file))
     pak_file = dir_module.Append(FILE_PATH_LITERAL("resources.pak"));
+#if defined(OS_MACOSX) && !defined(COMPONENT_BUILD)
+  // In non component builds, check if fall back in Resources/ folder is
+  // available.
+  if (!base::PathExists(pak_file))
+    pak_file = dir_module.Append(FILE_PATH_LITERAL("Resources/resources.pak"));
+#endif
   ResourceBundle::GetSharedInstance().AddDataPackFromPath(
       pak_file, ui::SCALE_FACTOR_NONE);
 #endif
 }
 
+#if !defined(CHROME_MULTIPLE_DLL_CHILD)
 content::ContentBrowserClient*
 HeadlessContentMainDelegate::CreateContentBrowserClient() {
-  browser_client_.reset(new HeadlessContentBrowserClient(browser_.get()));
+  browser_client_ =
+      base::MakeUnique<HeadlessContentBrowserClient>(browser_.get());
   return browser_client_.get();
 }
+#endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
+
+#if !defined(CHROME_MULTIPLE_DLL_BROWSER)
+content::ContentRendererClient*
+HeadlessContentMainDelegate::CreateContentRendererClient() {
+  renderer_client_ = base::MakeUnique<HeadlessContentRendererClient>();
+  return renderer_client_.get();
+}
+#endif  // !defined(CHROME_MULTIPLE_DLL_BROWSER)
 
 }  // namespace headless

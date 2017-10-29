@@ -11,10 +11,10 @@
 
 #include "common/string_utils.h"
 #include "libANGLE/renderer/d3d/CompilerD3D.h"
-#include "libANGLE/renderer/d3d/ShaderD3D.h"
 #include "libANGLE/renderer/d3d/ProgramD3D.h"
 #include "libANGLE/renderer/d3d/RenderbufferD3D.h"
 #include "libANGLE/renderer/d3d/SamplerD3D.h"
+#include "libANGLE/renderer/d3d/ShaderD3D.h"
 #include "libANGLE/renderer/d3d/TextureD3D.h"
 #include "libANGLE/renderer/d3d/d3d9/Buffer9.h"
 #include "libANGLE/renderer/d3d/d3d9/Fence9.h"
@@ -135,56 +135,66 @@ gl::Error Context9::finish()
     return mRenderer->finish();
 }
 
-gl::Error Context9::drawArrays(GLenum mode, GLint first, GLsizei count)
+gl::Error Context9::drawArrays(const gl::Context *context, GLenum mode, GLint first, GLsizei count)
 {
-    return mRenderer->genericDrawArrays(this, mode, first, count, 0);
+    return mRenderer->genericDrawArrays(context, mode, first, count, 0);
 }
 
-gl::Error Context9::drawArraysInstanced(GLenum mode,
+gl::Error Context9::drawArraysInstanced(const gl::Context *context,
+                                        GLenum mode,
                                         GLint first,
                                         GLsizei count,
                                         GLsizei instanceCount)
 {
-    return mRenderer->genericDrawArrays(this, mode, first, count, instanceCount);
+    return mRenderer->genericDrawArrays(context, mode, first, count, instanceCount);
 }
 
-gl::Error Context9::drawElements(GLenum mode,
+gl::Error Context9::drawElements(const gl::Context *context,
+                                 GLenum mode,
                                  GLsizei count,
                                  GLenum type,
-                                 const GLvoid *indices,
+                                 const void *indices,
                                  const gl::IndexRange &indexRange)
 {
-    return mRenderer->genericDrawElements(this, mode, count, type, indices, 0, indexRange);
+    return mRenderer->genericDrawElements(context, mode, count, type, indices, 0, indexRange);
 }
 
-gl::Error Context9::drawElementsInstanced(GLenum mode,
+gl::Error Context9::drawElementsInstanced(const gl::Context *context,
+                                          GLenum mode,
                                           GLsizei count,
                                           GLenum type,
-                                          const GLvoid *indices,
+                                          const void *indices,
                                           GLsizei instances,
                                           const gl::IndexRange &indexRange)
 {
-    return mRenderer->genericDrawElements(this, mode, count, type, indices, instances, indexRange);
+    return mRenderer->genericDrawElements(context, mode, count, type, indices, instances,
+                                          indexRange);
 }
 
-gl::Error Context9::drawRangeElements(GLenum mode,
+gl::Error Context9::drawRangeElements(const gl::Context *context,
+                                      GLenum mode,
                                       GLuint start,
                                       GLuint end,
                                       GLsizei count,
                                       GLenum type,
-                                      const GLvoid *indices,
+                                      const void *indices,
                                       const gl::IndexRange &indexRange)
 {
-    return mRenderer->genericDrawElements(this, mode, count, type, indices, 0, indexRange);
+    return mRenderer->genericDrawElements(context, mode, count, type, indices, 0, indexRange);
 }
 
-gl::Error Context9::drawArraysIndirect(GLenum mode, const GLvoid *indirect)
+gl::Error Context9::drawArraysIndirect(const gl::Context *context,
+                                       GLenum mode,
+                                       const void *indirect)
 {
     UNREACHABLE();
     return gl::InternalError() << "D3D9 doesn't support ES 3.1 DrawArraysIndirect API";
 }
 
-gl::Error Context9::drawElementsIndirect(GLenum mode, GLenum type, const GLvoid *indirect)
+gl::Error Context9::drawElementsIndirect(const gl::Context *context,
+                                         GLenum mode,
+                                         GLenum type,
+                                         const void *indirect)
 {
     UNREACHABLE();
     return gl::InternalError() << "D3D9 doesn't support ES 3.1 DrawElementsIndirect API";
@@ -228,7 +238,7 @@ void Context9::popGroupMarker()
     mRenderer->getAnnotator()->endEvent();
 }
 
-void Context9::syncState(const gl::State::DirtyBits &dirtyBits)
+void Context9::syncState(const gl::Context *context, const gl::State::DirtyBits &dirtyBits)
 {
     mRenderer->getStateManager()->syncState(mState.getState(), dirtyBits);
 }
@@ -243,7 +253,7 @@ GLint64 Context9::getTimestamp()
     return mRenderer->getTimestamp();
 }
 
-void Context9::onMakeCurrent(const gl::ContextState &data)
+void Context9::onMakeCurrent(const gl::Context *context)
 {
 }
 
@@ -265,6 +275,15 @@ const gl::Extensions &Context9::getNativeExtensions() const
 const gl::Limitations &Context9::getNativeLimitations() const
 {
     return mRenderer->getNativeLimitations();
+}
+
+gl::Error Context9::dispatchCompute(const gl::Context *context,
+                                    GLuint numGroupsX,
+                                    GLuint numGroupsY,
+                                    GLuint numGroupsZ)
+{
+    UNREACHABLE();
+    return gl::InternalError() << "D3D9 doesn't support ES 3.1 DispatchCompute API";
 }
 
 }  // namespace rx

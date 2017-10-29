@@ -166,7 +166,7 @@ const char* TableHeader::GetClassName() const {
   return kViewClassName;
 }
 
-gfx::Size TableHeader::GetPreferredSize() const {
+gfx::Size TableHeader::CalculatePreferredSize() const {
   return gfx::Size(1, kVerticalPadding * 2 + font_list_.GetHeight());
 }
 
@@ -227,7 +227,7 @@ void TableHeader::OnGestureEvent(ui::GestureEvent* event) {
 }
 
 void TableHeader::OnNativeThemeChanged(const ui::NativeTheme* theme) {
-  set_background(Background::CreateSolidBackground(
+  SetBackground(CreateSolidBackground(
       theme->GetSystemColor(ui::NativeTheme::kColorId_TableHeaderBackground)));
 }
 

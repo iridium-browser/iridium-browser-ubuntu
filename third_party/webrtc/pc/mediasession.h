@@ -309,6 +309,16 @@ class MediaContentDescription : public ContentDescription {
   }
   int buffered_mode_latency() const { return buffered_mode_latency_; }
 
+  // https://tools.ietf.org/html/rfc4566#section-5.7
+  // May be present at the media or session level of SDP. If present at both
+  // levels, the media-level attribute overwrites the session-level one.
+  void set_connection_address(const rtc::SocketAddress& address) {
+    connection_address_ = address;
+  }
+  const rtc::SocketAddress& connection_address() const {
+    return connection_address_;
+  }
+
  protected:
   bool rtcp_mux_ = false;
   bool rtcp_reduced_size_ = false;
@@ -324,6 +334,7 @@ class MediaContentDescription : public ContentDescription {
   bool partial_ = false;
   int buffered_mode_latency_ = kBufferedModeDisabled;
   MediaContentDirection direction_ = MD_SENDRECV;
+  rtc::SocketAddress connection_address_;
 };
 
 template <class C>
@@ -464,6 +475,10 @@ class MediaSessionDescriptionFactory {
   // applications. |add_legacy_| is true per default.
   void set_add_legacy_streams(bool add_legacy) { add_legacy_ = add_legacy; }
 
+  void set_enable_encrypted_rtp_header_extensions(bool enable) {
+    enable_encrypted_rtp_header_extensions_ = enable;
+  }
+
   SessionDescription* CreateOffer(
       const MediaSessionOptions& options,
       const SessionDescription* current_description) const;
@@ -563,6 +578,7 @@ class MediaSessionDescriptionFactory {
   DataCodecs data_codecs_;
   SecurePolicy secure_;
   bool add_legacy_;
+  bool enable_encrypted_rtp_header_extensions_ = false;
   std::string lang_;
   const TransportDescriptionFactory* transport_desc_factory_;
 };
@@ -602,21 +618,21 @@ VideoContentDescription* GetFirstVideoContentDescription(
 DataContentDescription* GetFirstDataContentDescription(
     SessionDescription* sdesc);
 
-void GetSupportedAudioCryptoSuites(const rtc::CryptoOptions& crypto_options,
-    std::vector<int>* crypto_suites);
-void GetSupportedVideoCryptoSuites(const rtc::CryptoOptions& crypto_options,
-    std::vector<int>* crypto_suites);
-void GetSupportedDataCryptoSuites(const rtc::CryptoOptions& crypto_options,
-    std::vector<int>* crypto_suites);
-void GetDefaultSrtpCryptoSuites(const rtc::CryptoOptions& crypto_options,
-    std::vector<int>* crypto_suites);
-void GetSupportedAudioCryptoSuiteNames(const rtc::CryptoOptions& crypto_options,
+// Helper functions to return crypto suites used for SDES.
+void GetSupportedAudioSdesCryptoSuites(const rtc::CryptoOptions& crypto_options,
+                                       std::vector<int>* crypto_suites);
+void GetSupportedVideoSdesCryptoSuites(const rtc::CryptoOptions& crypto_options,
+                                       std::vector<int>* crypto_suites);
+void GetSupportedDataSdesCryptoSuites(const rtc::CryptoOptions& crypto_options,
+                                      std::vector<int>* crypto_suites);
+void GetSupportedAudioSdesCryptoSuiteNames(
+    const rtc::CryptoOptions& crypto_options,
     std::vector<std::string>* crypto_suite_names);
-void GetSupportedVideoCryptoSuiteNames(const rtc::CryptoOptions& crypto_options,
+void GetSupportedVideoSdesCryptoSuiteNames(
+    const rtc::CryptoOptions& crypto_options,
     std::vector<std::string>* crypto_suite_names);
-void GetSupportedDataCryptoSuiteNames(const rtc::CryptoOptions& crypto_options,
-    std::vector<std::string>* crypto_suite_names);
-void GetDefaultSrtpCryptoSuiteNames(const rtc::CryptoOptions& crypto_options,
+void GetSupportedDataSdesCryptoSuiteNames(
+    const rtc::CryptoOptions& crypto_options,
     std::vector<std::string>* crypto_suite_names);
 
 }  // namespace cricket

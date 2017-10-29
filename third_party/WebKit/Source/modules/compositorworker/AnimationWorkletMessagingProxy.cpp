@@ -5,21 +5,26 @@
 #include "modules/compositorworker/AnimationWorkletMessagingProxy.h"
 
 #include "core/workers/ThreadedWorkletObjectProxy.h"
+#include "core/workers/WorkerClients.h"
 #include "modules/compositorworker/AnimationWorkletThread.h"
 
 namespace blink {
 
 AnimationWorkletMessagingProxy::AnimationWorkletMessagingProxy(
-    ExecutionContext* executionContext,
-    AnimationWorkletProxyClient* proxyClient)
-    : ThreadedWorkletMessagingProxy(executionContext),
-      m_proxyClient(proxyClient) {}
+    ExecutionContext* execution_context,
+    WorkerClients* worker_clients)
+    : ThreadedWorkletMessagingProxy(execution_context, worker_clients) {}
+
+DEFINE_TRACE(AnimationWorkletMessagingProxy) {
+  ThreadedWorkletMessagingProxy::Trace(visitor);
+}
 
 AnimationWorkletMessagingProxy::~AnimationWorkletMessagingProxy() {}
 
 std::unique_ptr<WorkerThread>
-AnimationWorkletMessagingProxy::createWorkerThread(double originTime) {
-  return AnimationWorkletThread::create(loaderProxy(), workletObjectProxy());
+AnimationWorkletMessagingProxy::CreateWorkerThread() {
+  return AnimationWorkletThread::Create(CreateThreadableLoadingContext(),
+                                        WorkletObjectProxy());
 }
 
 }  // namespace blink

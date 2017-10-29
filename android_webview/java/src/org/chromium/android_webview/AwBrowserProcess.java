@@ -13,7 +13,9 @@ import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.os.StrictMode;
+import android.webkit.ValueCallback;
 
+import org.chromium.android_webview.command_line.CommandLineUtil;
 import org.chromium.android_webview.crash.CrashReceiverService;
 import org.chromium.android_webview.crash.ICrashReceiverService;
 import org.chromium.android_webview.policy.AwPolicyProvider;
@@ -22,13 +24,15 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.components.minidump_uploader.CrashFileManager;
 import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content.browser.ChildProcessCreationParams;
-import org.chromium.content.browser.ChildProcessLauncher;
+import org.chromium.content.browser.ChildProcessLauncherHelper;
 import org.chromium.policy.CombinedPolicyProvider;
 
 import java.io.File;
@@ -40,15 +44,15 @@ import java.nio.channels.FileLock;
 /**
  * Wrapper for the steps needed to initialize the java and native sides of webview chromium.
  */
-public abstract class AwBrowserProcess {
+@JNINamespace("android_webview")
+public final class AwBrowserProcess {
     public static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "webview";
 
     private static final String TAG = "AwBrowserProcess";
     private static final String EXCLUSIVE_LOCK_FILE = "webview_data.lock";
     private static RandomAccessFile sLockFile;
     private static FileLock sExclusiveFileLock;
-
-    private static final int MAX_MINIDUMP_UPLOAD_TRIES = 3;
+    private static String sWebViewPackageName;
 
     /**
      * Loads the native library, and performs basic static construction of objects needed
@@ -97,14 +101,7 @@ public abstract class AwBrowserProcess {
                 boolean multiProcess = CommandLine.getInstance().hasSwitch(
                         AwSwitches.WEBVIEW_SANDBOXED_RENDERER);
                 if (multiProcess) {
-                    // Have a background thread warm up a renderer process now, so that this can
-                    // proceed in parallel to the browser process initialisation.
-                    AsyncTask.THREAD_POOL_EXECUTOR.execute(new Runnable() {
-                        @Override
-                        public void run() {
-                            ChildProcessLauncher.warmUp(appContext);
-                        }
-                    });
+                    ChildProcessLauncherHelper.warmUp(appContext);
                 }
                 // The policies are used by browser startup, so we need to register the policy
                 // providers before starting the browser process. This only registers java objects
@@ -156,6 +153,54 @@ public abstract class AwBrowserProcess {
         }
     }
 
+    public static void setWebViewPackageName(String webViewPackageName) {
+        assert sWebViewPackageName == null || sWebViewPackageName.equals(webViewPackageName);
+        sWebViewPackageName = webViewPackageName;
+    }
+
+    public static String getWebViewPackageName() {
+        if (sWebViewPackageName == null) return ""; // May be null in testing.
+        return sWebViewPackageName;
+    }
+
+    /**
+     * Trigger minidump copying, which in turn triggers minidump uploading.
+     */
+    @CalledByNative
+    private static void triggerMinidumpUploading() {
+        handleMinidumpsAndSetMetricsConsent(sWebViewPackageName, false /* updateMetricsConsent */);
+    }
+
+    /**
+     * Trigger minidump uploading, and optionaly also update the metrics-consent value depending on
+     * whether the Android Checkbox is toggled on.
+     * @param updateMetricsConsent whether to update the metrics-consent value to represent the
+     * Android Checkbox toggle.
+     */
+    public static void handleMinidumpsAndSetMetricsConsent(
+            final String webViewPackageName, final boolean updateMetricsConsent) {
+        final boolean enableMinidumpUploadingForTesting = CommandLine.getInstance().hasSwitch(
+                CommandLineUtil.CRASH_UPLOADS_ENABLED_FOR_TESTING_SWITCH);
+        if (enableMinidumpUploadingForTesting) {
+            AwBrowserProcess.handleMinidumps(webViewPackageName, true /* enabled */);
+        }
+
+        PlatformServiceBridge.getInstance().queryMetricsSetting(new ValueCallback<Boolean>() {
+            // Actions conditioned on whether the Android Checkbox is toggled on
+            public void onReceiveValue(Boolean enabled) {
+                ThreadUtils.assertOnUiThread();
+                if (updateMetricsConsent) {
+                    AwMetricsServiceClient.setConsentSetting(
+                            ContextUtils.getApplicationContext(), enabled);
+                }
+
+                if (!enableMinidumpUploadingForTesting) {
+                    AwBrowserProcess.handleMinidumps(webViewPackageName, enabled);
+                }
+            }
+        });
+    }
+
     /**
      * Pass Minidumps to a separate Service declared in the WebView provider package.
      * That Service will copy the Minidumps to its own data directory - at which point we can delete
@@ -172,8 +217,11 @@ public abstract class AwBrowserProcess {
                 final File crashSpoolDir = new File(appContext.getCacheDir().getPath(), "WebView");
                 if (!crashSpoolDir.isDirectory()) return null;
                 final CrashFileManager crashFileManager = new CrashFileManager(crashSpoolDir);
-                final File[] minidumpFiles =
-                        crashFileManager.getAllMinidumpFiles(MAX_MINIDUMP_UPLOAD_TRIES);
+
+                // The lifecycle of a minidump in the app directory is very simple: foo.dmpNNNNN --
+                // where NNNNN is a Process ID (PID) -- gets created, and is either deleted or
+                // copied over to the shared crash directory for all WebView-using apps.
+                final File[] minidumpFiles = crashFileManager.getMinidumpsSansLogcat();
                 if (minidumpFiles.length == 0) return null;
 
                 // Delete the minidumps if the user doesn't allow crash data uploading.
@@ -241,6 +289,12 @@ public abstract class AwBrowserProcess {
                 }
                 return null;
             }
-        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+            // To avoid any potential synchronization issues we post all minidump-copying actions to
+            // the same thread to be run serially.
+        }
+                .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
+
+    // Do not instantiate this class.
+    private AwBrowserProcess() {}
 }

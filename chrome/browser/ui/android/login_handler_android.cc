@@ -11,6 +11,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/android/chrome_http_auth_handler.h"
 #include "chrome/browser/ui/android/view_android_helper.h"
+#include "chrome/browser/vr/vr_tab_helper.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/auth.h"
@@ -50,9 +51,14 @@ class LoginHandlerAndroid : public LoginHandler {
     ViewAndroidHelper* view_helper = ViewAndroidHelper::FromWebContents(
         web_contents);
 
+    if (vr::VrTabHelper::IsInVr(web_contents)) {
+      CancelAuth();
+      return;
+    }
+
     // Notify WindowAndroid that HTTP authentication is required.
-    if (view_helper->GetViewAndroid()
-        && view_helper->GetViewAndroid()->GetWindowAndroid()) {
+    if (view_helper->GetViewAndroid() &&
+        view_helper->GetViewAndroid()->GetWindowAndroid()) {
       chrome_http_auth_handler_.reset(
           new ChromeHttpAuthHandler(authority, explanation));
       chrome_http_auth_handler_->Init();

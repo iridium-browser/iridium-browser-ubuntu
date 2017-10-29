@@ -26,7 +26,7 @@ namespace {
 // back end; in that case the tx will already have sent an abort to the request
 // so this would be ignored.
 IndexedDBDatabaseError CreateCursorClosedError() {
-  return IndexedDBDatabaseError(blink::WebIDBDatabaseExceptionUnknownError,
+  return IndexedDBDatabaseError(blink::kWebIDBDatabaseExceptionUnknownError,
                                 "The cursor has been closed.");
 }
 
@@ -34,7 +34,7 @@ leveldb::Status InvokeOrSucceed(base::WeakPtr<IndexedDBCursor> weak_cursor,
                                 IndexedDBTransaction::Operation operation,
                                 IndexedDBTransaction* transaction) {
   if (weak_cursor)
-    return operation.Run(transaction);
+    return std::move(operation).Run(transaction);
   return leveldb::Status::OK();
 }
 
@@ -47,10 +47,10 @@ IndexedDBTransaction::Operation BindWeakOperation(
     Args&&... args) {
   DCHECK(weak_cursor);
   IndexedDBCursor* cursor_ptr = weak_cursor.get();
-  return base::Bind(
-      &InvokeOrSucceed, std::move(weak_cursor),
-      base::Bind(std::forward<Functor>(functor), base::Unretained(cursor_ptr),
-                 std::forward<Args>(args)...));
+  return base::BindOnce(&InvokeOrSucceed, std::move(weak_cursor),
+                        base::BindOnce(std::forward<Functor>(functor),
+                                       base::Unretained(cursor_ptr),
+                                       std::forward<Args>(args)...));
 }
 
 }  // namespace
@@ -65,9 +65,16 @@ IndexedDBCursor::IndexedDBCursor(
       transaction_(transaction),
       cursor_(std::move(cursor)),
       closed_(false),
-      ptr_factory_(this) {}
+      ptr_factory_(this) {
+  IDB_ASYNC_TRACE_BEGIN("IndexedDBCursor::open", this);
+}
 
-IndexedDBCursor::~IndexedDBCursor() {}
+IndexedDBCursor::~IndexedDBCursor() {
+  if (transaction_)
+    transaction_->UnregisterOpenCursor(this);
+  // Call to make sure we complete our lifetime trace.
+  Close();
+}
 
 void IndexedDBCursor::Continue(std::unique_ptr<IndexedDBKey> key,
                                std::unique_ptr<IndexedDBKey> primary_key,
@@ -101,11 +108,6 @@ void IndexedDBCursor::Advance(uint32_t count,
                         ptr_factory_.GetWeakPtr(), count, callbacks));
 }
 
-void IndexedDBCursor::RemoveCursorFromTransaction() {
-  if (transaction_)
-    transaction_->UnregisterOpenCursor(this);
-}
-
 leveldb::Status IndexedDBCursor::CursorAdvanceOperation(
     uint32_t count,
     scoped_refptr<IndexedDBCallbacks> callbacks,
@@ -121,7 +123,7 @@ leveldb::Status IndexedDBCursor::CursorAdvanceOperation(
     }
     Close();
     callbacks->OnError(IndexedDBDatabaseError(
-        blink::WebIDBDatabaseExceptionUnknownError, "Error advancing cursor"));
+        blink::kWebIDBDatabaseExceptionUnknownError, "Error advancing cursor"));
     return s;
   }
 
@@ -148,7 +150,7 @@ leveldb::Status IndexedDBCursor::CursorIterationOperation(
     }
     Close();
     callbacks->OnError(
-        IndexedDBDatabaseError(blink::WebIDBDatabaseExceptionUnknownError,
+        IndexedDBDatabaseError(blink::kWebIDBDatabaseExceptionUnknownError,
                                "Error continuing cursor."));
     return s;
   }
@@ -201,7 +203,7 @@ leveldb::Status IndexedDBCursor::CursorPrefetchIterationOperation(
       }
       Close();
       callbacks->OnError(
-          IndexedDBDatabaseError(blink::WebIDBDatabaseExceptionUnknownError,
+          IndexedDBDatabaseError(blink::kWebIDBDatabaseExceptionUnknownError,
                                  "Error continuing cursor."));
       return s;
     }
@@ -268,6 +270,9 @@ leveldb::Status IndexedDBCursor::PrefetchReset(int used_prefetches,
 }
 
 void IndexedDBCursor::Close() {
+  if (closed_)
+    return;
+  IDB_ASYNC_TRACE_END("IndexedDBCursor::open", this);
   IDB_TRACE("IndexedDBCursor::Close");
   closed_ = true;
   cursor_.reset();

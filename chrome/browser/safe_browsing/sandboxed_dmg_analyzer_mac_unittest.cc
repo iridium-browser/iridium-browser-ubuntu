@@ -9,12 +9,13 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/safe_browsing/zip_analyzer_results.h"
+#include "chrome/common/safe_browsing/archive_analyzer_results.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -29,7 +30,7 @@ class SandboxedDMGAnalyzerTest : public testing::Test {
   }
 
   void AnalyzeFile(const base::FilePath& path,
-                   zip_analyzer::Results* results) {
+                   ArchiveAnalyzerResults* results) {
     base::RunLoop run_loop;
     ResultsGetter results_getter(run_loop.QuitClosure(), results);
     scoped_refptr<SandboxedDMGAnalyzer> analyzer(
@@ -47,27 +48,27 @@ class SandboxedDMGAnalyzerTest : public testing::Test {
   }
 
  private:
-  // A helper class to store the results from the ResultsCallback and run
-  // another closure.
+  // A helper that provides a SandboxedDMGAnalyzer::ResultCallback that will
+  // store a copy of an analyzer's results and then run a closure.
   class ResultsGetter {
    public:
     ResultsGetter(const base::Closure& next_closure,
-                  zip_analyzer::Results* results)
+                  ArchiveAnalyzerResults* results)
         : next_closure_(next_closure), results_(results) {}
 
-    SandboxedDMGAnalyzer::ResultsCallback GetCallback() {
+    SandboxedDMGAnalyzer::ResultCallback GetCallback() {
       return base::Bind(&ResultsGetter::ResultsCallback,
                         base::Unretained(this));
     }
 
    private:
-    void ResultsCallback(const zip_analyzer::Results& results) {
+    void ResultsCallback(const ArchiveAnalyzerResults& results) {
       *results_ = results;
       next_closure_.Run();
     }
 
     base::Closure next_closure_;
-    zip_analyzer::Results* results_;
+    ArchiveAnalyzerResults* results_;
 
     DISALLOW_COPY_AND_ASSIGN(ResultsGetter);
   };
@@ -80,7 +81,7 @@ TEST_F(SandboxedDMGAnalyzerTest, AnalyzeDMG) {
   base::FilePath path;
   ASSERT_NO_FATAL_FAILURE(path = GetFilePath("mach_o_in_dmg.dmg"));
 
-  zip_analyzer::Results results;
+  ArchiveAnalyzerResults results;
   AnalyzeFile(path, &results);
 
   EXPECT_TRUE(results.success);
@@ -139,6 +140,45 @@ TEST_F(SandboxedDMGAnalyzerTest, AnalyzeDMG) {
 
   EXPECT_TRUE(got_executable);
   EXPECT_TRUE(got_dylib);
+}
+
+TEST_F(SandboxedDMGAnalyzerTest, AnalyzeDmgNoSignature) {
+  base::FilePath unsigned_dmg;
+  ASSERT_NO_FATAL_FAILURE(unsigned_dmg = GetFilePath("mach_o_in_dmg.dmg"));
+
+  ArchiveAnalyzerResults results;
+  AnalyzeFile(unsigned_dmg, &results);
+
+  EXPECT_TRUE(results.success);
+  EXPECT_EQ(0u, results.signature_blob.size());
+  EXPECT_EQ(nullptr, results.signature_blob.data());
+}
+
+TEST_F(SandboxedDMGAnalyzerTest, AnalyzeDmgWithSignature) {
+  base::FilePath signed_dmg;
+  EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &signed_dmg));
+  signed_dmg = signed_dmg.AppendASCII("safe_browsing")
+                   .AppendASCII("mach_o")
+                   .AppendASCII("signed-archive.dmg");
+
+  ArchiveAnalyzerResults results;
+  AnalyzeFile(signed_dmg, &results);
+
+  EXPECT_TRUE(results.success);
+  EXPECT_EQ(2215u, results.signature_blob.size());
+
+  base::FilePath signed_dmg_signature;
+  EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &signed_dmg_signature));
+  signed_dmg_signature = signed_dmg_signature.AppendASCII("safe_browsing")
+                             .AppendASCII("mach_o")
+                             .AppendASCII("signed-archive-signature.data");
+
+  std::string from_file;
+  base::ReadFileToString(signed_dmg_signature, &from_file);
+  EXPECT_EQ(2215u, from_file.length());
+  std::string signature(results.signature_blob.begin(),
+                        results.signature_blob.end());
+  EXPECT_EQ(from_file, signature);
 }
 
 }  // namespace

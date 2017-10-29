@@ -75,7 +75,7 @@ bool ShouldSkipWindow(const sessions::SessionWindow& window) {
 
 bool ShouldSkipSession(const SyncedSession& session) {
   for (const auto& window_pair : session.windows) {
-    const sessions::SessionWindow& window = *(window_pair.second.get());
+    const sessions::SessionWindow& window = window_pair.second->wrapped_window;
     if (!ShouldSkipWindow(window))
       return false;
   }
@@ -120,7 +120,7 @@ void CopySessionToJava(
     const SyncedSession& session,
     ScopedJavaLocalRef<jobject>& j_session) {
   for (const auto& window_pair : session.windows) {
-    const sessions::SessionWindow& window = *(window_pair.second.get());
+    const sessions::SessionWindow& window = window_pair.second->wrapped_window;
 
     if (ShouldSkipWindow(window))
       continue;
@@ -319,9 +319,4 @@ void ForeignSessionHelper::DeleteForeignSession(
   OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate(profile_);
   if (open_tabs)
     open_tabs->DeleteForeignSession(ConvertJavaStringToUTF8(env, session_tag));
-}
-
-// static
-bool ForeignSessionHelper::RegisterForeignSessionHelper(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }

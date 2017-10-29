@@ -79,7 +79,7 @@ class ToggleButton::ThumbView : public InkDropHostView {
                     0x99));
     shadows.push_back(shadow.Scale(dsf));
     cc::PaintFlags thumb_flags;
-    thumb_flags.setLooper(gfx::CreateShadowDrawLooperCorrectBlur(shadows));
+    thumb_flags.setLooper(gfx::CreateShadowDrawLooper(shadows));
     thumb_flags.setAntiAlias(true);
     const SkColor thumb_on_color = GetNativeTheme()->GetSystemColor(
         ui::NativeTheme::kColorId_ProminentButtonColor);
@@ -143,11 +143,7 @@ void ToggleButton::SetIsOn(bool is_on, bool animate) {
   }
 }
 
-void ToggleButton::SetFocusPainter(std::unique_ptr<Painter> focus_painter) {
-  focus_painter_ = std::move(focus_painter);
-}
-
-gfx::Size ToggleButton::GetPreferredSize() const {
+gfx::Size ToggleButton::CalculatePreferredSize() const {
   gfx::Rect rect(kTrackWidth, kTrackHeight);
   rect.Inset(gfx::Insets(-kTrackVerticalMargin, -kTrackHorizontalMargin));
   if (border())
@@ -189,7 +185,29 @@ const char* ToggleButton::GetClassName() const {
   return kViewClassName;
 }
 
-void ToggleButton::OnPaint(gfx::Canvas* canvas) {
+void ToggleButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  UpdateThumb();
+}
+
+void ToggleButton::OnNativeThemeChanged(const ui::NativeTheme* theme) {
+  SchedulePaint();
+}
+
+void ToggleButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  CustomButton::GetAccessibleNodeData(node_data);
+
+  node_data->role = ui::AX_ROLE_SWITCH;
+  const ui::AXCheckedState checked_state =
+      is_on_ ? ui::AX_CHECKED_STATE_TRUE : ui::AX_CHECKED_STATE_FALSE;
+  node_data->AddIntAttribute(ui::AX_ATTR_CHECKED_STATE, checked_state);
+}
+
+void ToggleButton::NotifyClick(const ui::Event& event) {
+  SetIsOn(!is_on(), true);
+  CustomButton::NotifyClick(event);
+}
+
+void ToggleButton::PaintButtonContents(gfx::Canvas* canvas) {
   // Paint the toggle track. To look sharp even at fractional scale factors,
   // round up to pixel boundaries.
   canvas->Save();
@@ -205,41 +223,6 @@ void ToggleButton::OnPaint(gfx::Canvas* canvas) {
       static_cast<SkAlpha>(SK_AlphaOPAQUE * color_ratio)));
   canvas->DrawRoundRect(track_rect, track_rect.height() / 2, track_flags);
   canvas->Restore();
-
-  Painter::PaintFocusPainter(this, canvas, focus_painter_.get());
-}
-
-void ToggleButton::OnFocus() {
-  CustomButton::OnFocus();
-  if (focus_painter_)
-    SchedulePaint();
-}
-
-void ToggleButton::OnBlur() {
-  CustomButton::OnBlur();
-  if (focus_painter_)
-    SchedulePaint();
-}
-
-void ToggleButton::OnBoundsChanged(const gfx::Rect& previous_bounds) {
-  UpdateThumb();
-}
-
-void ToggleButton::OnNativeThemeChanged(const ui::NativeTheme* theme) {
-  SchedulePaint();
-}
-
-void ToggleButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  CustomButton::GetAccessibleNodeData(node_data);
-
-  node_data->role = ui::AX_ROLE_SWITCH;
-  if (is_on_)
-    node_data->AddStateFlag(ui::AX_STATE_CHECKED);
-}
-
-void ToggleButton::NotifyClick(const ui::Event& event) {
-  SetIsOn(!is_on(), true);
-  CustomButton::NotifyClick(event);
 }
 
 void ToggleButton::AddInkDropLayer(ui::Layer* ink_drop_layer) {

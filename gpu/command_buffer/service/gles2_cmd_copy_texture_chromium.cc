@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "gpu/command_buffer/service/gl_utils.h"
+#include "gpu/command_buffer/service/gles2_cmd_copy_tex_image.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "ui/gl/gl_version_info.h"
@@ -74,6 +75,7 @@ enum {
   D_FORMAT_RGBA16F,
   D_FORMAT_RGBA32F,
   D_FORMAT_R11F_G11F_B10F,
+  D_FORMAT_RGB10_A2,
   NUM_D_FORMAT
 };
 
@@ -143,6 +145,7 @@ ShaderId GetFragmentShaderId(bool premultiply_alpha,
       sourceFormatIndex = S_FORMAT_LUMINANCE_ALPHA;
       break;
     case GL_RED:
+    case GL_R16_EXT:
       sourceFormatIndex = S_FORMAT_RED;
       break;
     case GL_RGB:
@@ -269,6 +272,9 @@ ShaderId GetFragmentShaderId(bool premultiply_alpha,
     case GL_R11F_G11F_B10F:
       destFormatIndex = D_FORMAT_R11F_G11F_B10F;
       break;
+    case GL_RGB10_A2:
+      destFormatIndex = D_FORMAT_RGB10_A2;
+      break;
     default:
       NOTREACHED();
       break;
@@ -281,7 +287,11 @@ ShaderId GetFragmentShaderId(bool premultiply_alpha,
 const char* kShaderPrecisionPreamble =
     "#ifdef GL_ES\n"
     "precision mediump float;\n"
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
+    "#define TexCoordPrecision highp\n"
+    "#else\n"
     "#define TexCoordPrecision mediump\n"
+    "#endif\n"
     "#else\n"
     "#define TexCoordPrecision\n"
     "#endif\n";
@@ -357,42 +367,20 @@ std::string GetFragmentShaderSource(const gl::GLVersionInfo& gl_version_info,
   // Preamble for texture precision.
   source += kShaderPrecisionPreamble;
 
-  if (gpu::gles2::GLES2Util::IsSignedIntegerFormat(dest_format)) {
-    source += "#define TextureType ivec4\n";
-    source += "#define ZERO 0\n";
-    source += "#define MAX_COLOR 255\n";
-    if (gpu::gles2::GLES2Util::IsSignedIntegerFormat(source_format))
-      source += "#define InnerScaleValue 1\n";
-    else if (gpu::gles2::GLES2Util::IsUnsignedIntegerFormat(source_format))
-      source += "#define InnerScaleValue 1u\n";
-    else
-      source += "#define InnerScaleValue 255.0\n";
-    source += "#define OuterScaleValue 1\n";
-  } else if (gpu::gles2::GLES2Util::IsUnsignedIntegerFormat(dest_format)) {
+  // According to the spec, |dest_format| can be unsigned integer format, float
+  // format or unsigned normalized fixed-point format. |source_format| can only
+  // be unsigned normalized fixed-point format.
+  if (gpu::gles2::GLES2Util::IsUnsignedIntegerFormat(dest_format)) {
     source += "#define TextureType uvec4\n";
     source += "#define ZERO 0u\n";
     source += "#define MAX_COLOR 255u\n";
-    if (gpu::gles2::GLES2Util::IsSignedIntegerFormat(source_format))
-      source += "#define InnerScaleValue 1\n";
-    else if (gpu::gles2::GLES2Util::IsUnsignedIntegerFormat(source_format))
-      source += "#define InnerScaleValue 1u\n";
-    else
-      source += "#define InnerScaleValue 255.0\n";
-    source += "#define OuterScaleValue 1u\n";
+    source += "#define ScaleValue 255.0\n";
   } else {
+    DCHECK(!gpu::gles2::GLES2Util::IsIntegerFormat(dest_format));
     source += "#define TextureType vec4\n";
     source += "#define ZERO 0.0\n";
     source += "#define MAX_COLOR 1.0\n";
-    if (gpu::gles2::GLES2Util::IsSignedIntegerFormat(source_format)) {
-      source += "#define InnerScaleValue 1\n";
-      source += "#define OuterScaleValue (1.0 / 255.0)\n";
-    } else if (gpu::gles2::GLES2Util::IsUnsignedIntegerFormat(source_format)) {
-      source += "#define InnerScaleValue 1u\n";
-      source += "#define OuterScaleValue (1.0 / 255.0)\n";
-    } else {
-      source += "#define InnerScaleValue 1.0\n";
-      source += "#define OuterScaleValue 1.0\n";
-    }
+    source += "#define ScaleValue 1.0\n";
   }
   if (gl_version_info.is_es2 || gl_version_info.IsLowerThanGL(3, 2) ||
       target == GL_TEXTURE_EXTERNAL_OES) {
@@ -441,25 +429,19 @@ std::string GetFragmentShaderSource(const gl::GLVersionInfo& gl_version_info,
       "void main(void) {\n"
       "  TexCoordPrecision vec4 uv =\n"
       "      u_tex_coord_transform * vec4(v_uv, 0, 1);\n"
-      "  vec4 color = TextureLookup(u_sampler, uv.st);\n"
-      "  FRAGCOLOR = TextureType(color * InnerScaleValue) * OuterScaleValue;\n";
+      "  vec4 color = TextureLookup(u_sampler, uv.st);\n";
 
-  // Post-processing to premultiply or un-premultiply alpha.
-  // Check dest format has alpha channel first.
-  if ((gpu::gles2::GLES2Util::GetChannelsForFormat(dest_format) & 0x0008) !=
-      0) {
-    if (premultiply_alpha) {
-      source += "  FRAGCOLOR.rgb *= FRAGCOLOR.a;\n";
-      source += "  FRAGCOLOR.rgb /= MAX_COLOR;\n";
-    }
-    if (unpremultiply_alpha) {
-      source +=
-          "  if (FRAGCOLOR.a > ZERO) {\n"
-          "    FRAGCOLOR.rgb /= FRAGCOLOR.a;\n"
-          "    FRAGCOLOR.rgb *= MAX_COLOR;\n"
-          "  }\n";
-    }
+  // Premultiply or un-premultiply alpha. Must always do this, even
+  // if the destination format doesn't have an alpha channel.
+  if (premultiply_alpha) {
+    source += "  color.rgb *= color.a;\n";
+  } else if (unpremultiply_alpha) {
+    source += "  if (color.a > 0.0) {\n";
+    source += "    color.rgb /= color.a;\n";
+    source += "  }\n";
   }
+
+  source += "  FRAGCOLOR = TextureType(color * ScaleValue);\n";
 
   // Main function end.
   source += "}\n";
@@ -493,14 +475,16 @@ void CompileShader(GLuint shader, const char* shader_source) {
   glShaderSource(shader, 1, &shader_source, 0);
   glCompileShader(shader);
 #if DCHECK_IS_ON()
-  GLint compile_status;
-  glGetShaderiv(shader, GL_COMPILE_STATUS, &compile_status);
-  if (GL_TRUE != compile_status) {
-    char buffer[1024];
-    GLsizei length = 0;
-    glGetShaderInfoLog(shader, sizeof(buffer), &length, buffer);
-    std::string log(buffer, length);
-    DLOG(ERROR) << "CopyTextureCHROMIUM: shader compilation failure: " << log;
+  {
+    GLint compile_status;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compile_status);
+    if (GL_TRUE != compile_status) {
+      char buffer[1024];
+      GLsizei length = 0;
+      glGetShaderInfoLog(shader, sizeof(buffer), &length, buffer);
+      std::string log(buffer, length);
+      DLOG(ERROR) << "CopyTextureCHROMIUM: shader compilation failure: " << log;
+    }
   }
 #endif
 }
@@ -539,17 +523,20 @@ bool BindFramebufferTexture2D(GLenum target,
   return true;
 }
 
-void DoCopyTexImage2D(const gpu::gles2::GLES2Decoder* decoder,
-                      GLenum source_target,
-                      GLuint source_id,
-                      GLint source_level,
-                      GLenum dest_target,
-                      GLuint dest_id,
-                      GLint dest_level,
-                      GLenum dest_internal_format,
-                      GLsizei width,
-                      GLsizei height,
-                      GLuint framebuffer) {
+void DoCopyTexImage2D(
+    const gpu::gles2::GLES2Decoder* decoder,
+    GLenum source_target,
+    GLuint source_id,
+    GLint source_level,
+    GLenum source_internal_format,
+    GLenum dest_target,
+    GLuint dest_id,
+    GLint dest_level,
+    GLenum dest_internal_format,
+    GLsizei width,
+    GLsizei height,
+    GLuint framebuffer,
+    gpu::gles2::CopyTexImageResourceManager* luma_emulation_blitter) {
   DCHECK_EQ(static_cast<GLenum>(GL_TEXTURE_2D), source_target);
   GLenum dest_binding_target =
       gpu::gles2::GLES2Util::GLFaceTargetToTextureTarget(dest_target);
@@ -563,8 +550,23 @@ void DoCopyTexImage2D(const gpu::gles2::GLES2Decoder* decoder,
     glTexParameterf(dest_binding_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(dest_binding_target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(dest_binding_target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glCopyTexImage2D(dest_target, dest_level, dest_internal_format, 0 /* x */,
-                     0 /* y */, width, height, 0 /* border */);
+
+    // The blitter will only be non-null if we're on the desktop core
+    // profile. Use it only if it's needed.
+    if (luma_emulation_blitter &&
+        gpu::gles2::CopyTexImageResourceManager::CopyTexImageRequiresBlit(
+            decoder->GetFeatureInfo(), dest_internal_format)) {
+      luma_emulation_blitter->DoCopyTexImage2DToLUMACompatibilityTexture(
+          decoder, dest_id, dest_binding_target, dest_target,
+          dest_internal_format,
+          gpu::gles2::TextureManager::ExtractTypeFromStorageFormat(
+              dest_internal_format),
+          dest_level, dest_internal_format, 0 /* x */, 0 /* y */, width, height,
+          framebuffer, source_internal_format);
+    } else {
+      glCopyTexImage2D(dest_target, dest_level, dest_internal_format, 0 /* x */,
+                       0 /* y */, width, height, 0 /* border */);
+    }
   }
 
   decoder->RestoreTextureState(source_id);
@@ -574,20 +576,24 @@ void DoCopyTexImage2D(const gpu::gles2::GLES2Decoder* decoder,
   decoder->RestoreFramebufferBindings();
 }
 
-void DoCopyTexSubImage2D(const gpu::gles2::GLES2Decoder* decoder,
-                         GLenum source_target,
-                         GLuint source_id,
-                         GLint source_level,
-                         GLenum dest_target,
-                         GLuint dest_id,
-                         GLint dest_level,
-                         GLint xoffset,
-                         GLint yoffset,
-                         GLint source_x,
-                         GLint source_y,
-                         GLsizei source_width,
-                         GLsizei source_height,
-                         GLuint framebuffer) {
+void DoCopyTexSubImage2D(
+    const gpu::gles2::GLES2Decoder* decoder,
+    GLenum source_target,
+    GLuint source_id,
+    GLint source_level,
+    GLenum source_internal_format,
+    GLenum dest_target,
+    GLuint dest_id,
+    GLint dest_level,
+    GLenum dest_internal_format,
+    GLint xoffset,
+    GLint yoffset,
+    GLint source_x,
+    GLint source_y,
+    GLsizei source_width,
+    GLsizei source_height,
+    GLuint framebuffer,
+    gpu::gles2::CopyTexImageResourceManager* luma_emulation_blitter) {
   DCHECK(source_target == GL_TEXTURE_2D ||
          source_target == GL_TEXTURE_RECTANGLE_ARB);
   GLenum dest_binding_target =
@@ -602,8 +608,23 @@ void DoCopyTexSubImage2D(const gpu::gles2::GLES2Decoder* decoder,
     glTexParameterf(dest_binding_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(dest_binding_target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(dest_binding_target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glCopyTexSubImage2D(dest_target, dest_level, xoffset, yoffset, source_x,
-                        source_y, source_width, source_height);
+
+    // The blitter will only be non-null if we're on the desktop core
+    // profile. Use it only if it's needed.
+    if (luma_emulation_blitter &&
+        gpu::gles2::CopyTexImageResourceManager::CopyTexImageRequiresBlit(
+            decoder->GetFeatureInfo(), dest_internal_format)) {
+      luma_emulation_blitter->DoCopyTexSubImageToLUMACompatibilityTexture(
+          decoder, dest_id, dest_binding_target, dest_target,
+          dest_internal_format,
+          gpu::gles2::TextureManager::ExtractTypeFromStorageFormat(
+              dest_internal_format),
+          dest_level, xoffset, yoffset, 0 /* zoffset */, source_x, source_y,
+          source_width, source_height, framebuffer, source_internal_format);
+    } else {
+      glCopyTexSubImage2D(dest_target, dest_level, xoffset, yoffset, source_x,
+                          source_y, source_width, source_height);
+    }
   }
 
   decoder->RestoreTextureState(source_id);
@@ -611,6 +632,196 @@ void DoCopyTexSubImage2D(const gpu::gles2::GLES2Decoder* decoder,
   decoder->RestoreTextureUnitBindings(0);
   decoder->RestoreActiveTexture();
   decoder->RestoreFramebufferBindings();
+}
+
+// Convert RGBA/UNSIGNED_BYTE source to RGB/UNSIGNED_BYTE destination.
+void convertToRGB(const uint8_t* source,
+                  uint8_t* destination,
+                  unsigned length) {
+  for (unsigned i = 0; i < length; ++i) {
+    destination[0] = source[0];
+    destination[1] = source[1];
+    destination[2] = source[2];
+    source += 4;
+    destination += 3;
+  }
+}
+
+// Convert RGBA/UNSIGNED_BYTE source to RGB/FLOAT destination.
+void convertToRGBFloat(const uint8_t* source,
+                       float* destination,
+                       unsigned length) {
+  const float scaleFactor = 1.0f / 255.0f;
+  for (unsigned i = 0; i < length; ++i) {
+    destination[0] = source[0] * scaleFactor;
+    destination[1] = source[1] * scaleFactor;
+    destination[2] = source[2] * scaleFactor;
+    source += 4;
+    destination += 3;
+  }
+}
+
+// Prepare the image data to be uploaded to a texture in pixel unpack buffer.
+void prepareUnpackBuffer(GLuint buffer[2],
+                         bool is_es,
+                         GLenum format,
+                         GLenum type,
+                         GLsizei width,
+                         GLsizei height) {
+  uint32_t pixel_num = width * height;
+
+  // Result of glReadPixels with format == GL_RGB and type == GL_UNSIGNED_BYTE
+  // from read framebuffer in RGBA fromat is not correct on desktop core
+  // profile on both Linux Mesa and Linux NVIDIA. This may be a driver bug.
+  bool is_rgb_unsigned_byte = format == GL_RGB && type == GL_UNSIGNED_BYTE;
+  if ((!is_es && !is_rgb_unsigned_byte) ||
+      (format == GL_RGBA && type == GL_UNSIGNED_BYTE)) {
+    uint32_t bytes_per_group =
+        gpu::gles2::GLES2Util::ComputeImageGroupSize(format, type);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, buffer[0]);
+    glBufferData(GL_PIXEL_PACK_BUFFER, pixel_num * bytes_per_group, 0,
+                 GL_STATIC_READ);
+    glReadPixels(0, 0, width, height, format, type, 0);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer[0]);
+    return;
+  }
+
+  uint32_t bytes_per_group =
+      gpu::gles2::GLES2Util::ComputeImageGroupSize(GL_RGBA, GL_UNSIGNED_BYTE);
+  uint32_t buf_size = pixel_num * bytes_per_group;
+
+  if (format == GL_RGB && type == GL_FLOAT) {
+#if defined(OS_ANDROID)
+    // Reading pixels to pbo with glReadPixels will cause random failures of
+    // GLCopyTextureCHROMIUMES3Test.FormatCombinations in gl_tests. This is seen
+    // on Nexus 5 but not Nexus 4. Read pixels to client memory, then upload to
+    // pixel unpack buffer with glBufferData.
+    std::unique_ptr<uint8_t[]> pixels(new uint8_t[width * height * 4]);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.get());
+    std::unique_ptr<float[]> data(new float[width * height * 3]);
+    convertToRGBFloat(pixels.get(), data.get(), pixel_num);
+    bytes_per_group =
+        gpu::gles2::GLES2Util::ComputeImageGroupSize(format, type);
+    buf_size = pixel_num * bytes_per_group;
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer[1]);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, buf_size, data.get(), GL_STATIC_DRAW);
+#else
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, buffer[0]);
+    glBufferData(GL_PIXEL_PACK_BUFFER, buf_size, 0, GL_STATIC_READ);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+    void* pixels =
+        glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, buf_size, GL_MAP_READ_BIT);
+
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer[1]);
+    bytes_per_group =
+        gpu::gles2::GLES2Util::ComputeImageGroupSize(format, type);
+    buf_size = pixel_num * bytes_per_group;
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, buf_size, 0, GL_STATIC_DRAW);
+    void* data =
+        glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, buf_size, GL_MAP_WRITE_BIT);
+    convertToRGBFloat(static_cast<uint8_t*>(pixels), static_cast<float*>(data),
+                      pixel_num);
+    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+#endif
+    return;
+  }
+
+  if (format == GL_RGB && type == GL_UNSIGNED_BYTE) {
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, buffer[0]);
+    glBufferData(GL_PIXEL_PACK_BUFFER, buf_size, 0, GL_DYNAMIC_DRAW);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+    void* pixels = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, buf_size,
+                                    GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
+    void* data = pixels;
+    convertToRGB((uint8_t*)pixels, (uint8_t*)data, pixel_num);
+    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer[0]);
+    return;
+  }
+
+  NOTREACHED();
+}
+
+enum TexImageCommandType {
+  kTexImage,
+  kTexSubImage,
+};
+
+void DoReadbackAndTexImage(TexImageCommandType command_type,
+                           const gpu::gles2::GLES2Decoder* decoder,
+                           GLenum source_target,
+                           GLuint source_id,
+                           GLint source_level,
+                           GLenum dest_target,
+                           GLuint dest_id,
+                           GLint dest_level,
+                           GLenum dest_internal_format,
+                           GLint xoffset,
+                           GLint yoffset,
+                           GLsizei width,
+                           GLsizei height,
+                           GLuint framebuffer) {
+  DCHECK_EQ(static_cast<GLenum>(GL_TEXTURE_2D), source_target);
+  GLenum dest_binding_target =
+      gpu::gles2::GLES2Util::GLFaceTargetToTextureTarget(dest_target);
+  DCHECK(dest_binding_target == GL_TEXTURE_2D ||
+         dest_binding_target == GL_TEXTURE_CUBE_MAP);
+  DCHECK(source_level == 0 || decoder->GetFeatureInfo()->IsES3Capable());
+  if (BindFramebufferTexture2D(source_target, source_id, source_level,
+                               framebuffer)) {
+    glBindTexture(dest_binding_target, dest_id);
+    glTexParameterf(dest_binding_target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameterf(dest_binding_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(dest_binding_target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(dest_binding_target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+    GLenum format = GL_RGBA;
+    GLenum type = GL_UNSIGNED_BYTE;
+    switch (dest_internal_format) {
+      case GL_RGB9_E5:
+        format = GL_RGB;
+        type = GL_FLOAT;
+        break;
+      case GL_SRGB_EXT:
+      case GL_SRGB8:
+        format = GL_RGB;
+        break;
+      case GL_RGB5_A1:
+      case GL_SRGB_ALPHA_EXT:
+      case GL_SRGB8_ALPHA8:
+        break;
+      default:
+        NOTREACHED();
+        break;
+    }
+
+    // TODO(qiankun.miao@intel.com): PIXEL_PACK_BUFFER and PIXEL_UNPACK_BUFFER
+    // are not supported in ES2.
+    bool is_es = decoder->GetFeatureInfo()->gl_version_info().is_es;
+    DCHECK(!decoder->GetFeatureInfo()->gl_version_info().is_es2);
+
+    uint32_t buffer_num = is_es && format == GL_RGB && type == GL_FLOAT ? 2 : 1;
+    GLuint buffer[2] = {0u};
+    glGenBuffersARB(buffer_num, buffer);
+    prepareUnpackBuffer(buffer, is_es, format, type, width, height);
+
+    if (command_type == kTexImage) {
+      glTexImage2D(dest_target, dest_level, dest_internal_format, width, height,
+                   0, format, type, 0);
+    } else {
+      glTexSubImage2D(dest_target, dest_level, xoffset, yoffset, width, height,
+                      format, type, 0);
+    }
+    glDeleteBuffersARB(buffer_num, buffer);
+  }
+
+  decoder->RestoreTextureState(source_id);
+  decoder->RestoreTextureState(dest_id);
+  decoder->RestoreTextureUnitBindings(0);
+  decoder->RestoreActiveTexture();
+  decoder->RestoreFramebufferBindings();
+  decoder->RestoreBufferBindings();
 }
 
 }  // namespace
@@ -717,20 +928,13 @@ void CopyTextureCHROMIUMResourceManager::DoCopyTexture(
     bool flip_y,
     bool premultiply_alpha,
     bool unpremultiply_alpha,
-    CopyTextureMethod method) {
-  bool premultiply_alpha_change = premultiply_alpha ^ unpremultiply_alpha;
-  GLenum dest_binding_target =
-      gpu::gles2::GLES2Util::GLFaceTargetToTextureTarget(dest_target);
-
-  // GL_TEXTURE_RECTANGLE_ARB on FBO is supported by OpenGL, not GLES2,
-  // so restrict this to GL_TEXTURE_2D and GL_TEXTURE_CUBE_MAP.
-  if (source_target == GL_TEXTURE_2D &&
-      (dest_binding_target == GL_TEXTURE_2D ||
-       dest_binding_target == GL_TEXTURE_CUBE_MAP) &&
-      !flip_y && !premultiply_alpha_change && method == DIRECT_COPY) {
+    CopyTextureMethod method,
+    gpu::gles2::CopyTexImageResourceManager* luma_emulation_blitter) {
+  if (method == DIRECT_COPY) {
     DoCopyTexImage2D(decoder, source_target, source_id, source_level,
-                     dest_target, dest_id, dest_level, dest_internal_format,
-                     width, height, framebuffer_);
+                     source_internal_format, dest_target, dest_id, dest_level,
+                     dest_internal_format, width, height, framebuffer_,
+                     luma_emulation_blitter);
     return;
   }
 
@@ -740,9 +944,11 @@ void CopyTextureCHROMIUMResourceManager::DoCopyTexture(
   GLint original_dest_level = dest_level;
   GLenum original_dest_target = dest_target;
   GLenum original_internal_format = dest_internal_format;
-  if (method == DRAW_AND_COPY) {
+  if (method == DRAW_AND_COPY || method == DRAW_AND_READBACK) {
     GLenum adjusted_internal_format =
-        getIntermediateFormat(dest_internal_format);
+        method == DRAW_AND_READBACK
+            ? GL_RGBA
+            : getIntermediateFormat(dest_internal_format);
     dest_target = GL_TEXTURE_2D;
     glGenTextures(1, &intermediate_texture);
     glBindTexture(dest_target, intermediate_texture);
@@ -758,16 +964,25 @@ void CopyTextureCHROMIUMResourceManager::DoCopyTexture(
     dest_internal_format = adjusted_internal_format;
   }
   // Use kIdentityMatrix if no transform passed in.
-  DoCopyTextureWithTransform(
-      decoder, source_target, source_id, source_level, source_internal_format,
-      dest_target, dest_texture, dest_level, dest_internal_format, width,
-      height, flip_y, premultiply_alpha, unpremultiply_alpha, kIdentityMatrix);
+  DoCopyTextureWithTransform(decoder, source_target, source_id, source_level,
+                             source_internal_format, dest_target, dest_texture,
+                             dest_level, dest_internal_format, width, height,
+                             flip_y, premultiply_alpha, unpremultiply_alpha,
+                             kIdentityMatrix, luma_emulation_blitter);
 
-  if (method == DRAW_AND_COPY) {
+  if (method == DRAW_AND_COPY || method == DRAW_AND_READBACK) {
     source_level = 0;
-    DoCopyTexImage2D(decoder, dest_target, intermediate_texture, source_level,
-                     original_dest_target, dest_id, original_dest_level,
-                     original_internal_format, width, height, framebuffer_);
+    if (method == DRAW_AND_COPY) {
+      DoCopyTexImage2D(decoder, dest_target, intermediate_texture, source_level,
+                       dest_internal_format, original_dest_target, dest_id,
+                       original_dest_level, original_internal_format, width,
+                       height, framebuffer_, luma_emulation_blitter);
+    } else if (method == DRAW_AND_READBACK) {
+      DoReadbackAndTexImage(
+          kTexImage, decoder, dest_target, intermediate_texture, source_level,
+          original_dest_target, dest_id, original_dest_level,
+          original_internal_format, 0, 0, width, height, framebuffer_);
+    }
     glDeleteTextures(1, &intermediate_texture);
   }
 }
@@ -795,20 +1010,13 @@ void CopyTextureCHROMIUMResourceManager::DoCopySubTexture(
     bool flip_y,
     bool premultiply_alpha,
     bool unpremultiply_alpha,
-    CopyTextureMethod method) {
-  bool premultiply_alpha_change = premultiply_alpha ^ unpremultiply_alpha;
-  GLenum dest_binding_target =
-      gpu::gles2::GLES2Util::GLFaceTargetToTextureTarget(dest_target);
-
-  // GL_TEXTURE_RECTANGLE_ARB on FBO is supported by OpenGL, not GLES2,
-  // so restrict this to GL_TEXTURE_2D and GL_TEXTURE_CUBE_MAP.
-  if (source_target == GL_TEXTURE_2D &&
-      (dest_binding_target == GL_TEXTURE_2D ||
-       dest_binding_target == GL_TEXTURE_CUBE_MAP) &&
-      !flip_y && !premultiply_alpha_change && method == DIRECT_COPY) {
+    CopyTextureMethod method,
+    gpu::gles2::CopyTexImageResourceManager* luma_emulation_blitter) {
+  if (method == DIRECT_COPY) {
     DoCopyTexSubImage2D(decoder, source_target, source_id, source_level,
-                        dest_target, dest_id, dest_level, xoffset, yoffset, x,
-                        y, width, height, framebuffer_);
+                        source_internal_format, dest_target, dest_id,
+                        dest_level, dest_internal_format, xoffset, yoffset, x,
+                        y, width, height, framebuffer_, luma_emulation_blitter);
     return;
   }
 
@@ -819,9 +1027,12 @@ void CopyTextureCHROMIUMResourceManager::DoCopySubTexture(
   GLint original_dest_level = dest_level;
   GLenum original_dest_target = dest_target;
   GLuint intermediate_texture = 0;
-  if (method == DRAW_AND_COPY) {
+  GLenum original_internal_format = dest_internal_format;
+  if (method == DRAW_AND_COPY || method == DRAW_AND_READBACK) {
     GLenum adjusted_internal_format =
-        getIntermediateFormat(dest_internal_format);
+        method == DRAW_AND_READBACK
+            ? GL_RGBA
+            : getIntermediateFormat(dest_internal_format);
     dest_target = GL_TEXTURE_2D;
     glGenTextures(1, &intermediate_texture);
     glBindTexture(dest_target, intermediate_texture);
@@ -846,14 +1057,23 @@ void CopyTextureCHROMIUMResourceManager::DoCopySubTexture(
       dest_target, dest_texture, dest_level, dest_internal_format, dest_xoffset,
       dest_yoffset, x, y, width, height, dest_width, dest_height, source_width,
       source_height, flip_y, premultiply_alpha, unpremultiply_alpha,
-      kIdentityMatrix);
+      kIdentityMatrix, luma_emulation_blitter);
 
-  if (method == DRAW_AND_COPY) {
+  if (method == DRAW_AND_COPY || method == DRAW_AND_READBACK) {
     source_level = 0;
-    DoCopyTexSubImage2D(decoder, dest_target, intermediate_texture,
-                        source_level, original_dest_target, dest_id,
-                        original_dest_level, xoffset, yoffset, 0, 0, width,
-                        height, framebuffer_);
+    if (method == DRAW_AND_COPY) {
+      DoCopyTexSubImage2D(decoder, dest_target, intermediate_texture,
+                          source_level, dest_internal_format,
+                          original_dest_target, dest_id, original_dest_level,
+                          original_internal_format, xoffset, yoffset, 0, 0,
+                          width, height, framebuffer_, luma_emulation_blitter);
+    } else if (method == DRAW_AND_READBACK) {
+      DoReadbackAndTexImage(kTexSubImage, decoder, dest_target,
+                            intermediate_texture, source_level,
+                            original_dest_target, dest_id, original_dest_level,
+                            original_internal_format, xoffset, yoffset, width,
+                            height, framebuffer_);
+    }
     glDeleteTextures(1, &intermediate_texture);
   }
 }
@@ -881,12 +1101,14 @@ void CopyTextureCHROMIUMResourceManager::DoCopySubTextureWithTransform(
     bool flip_y,
     bool premultiply_alpha,
     bool unpremultiply_alpha,
-    const GLfloat transform_matrix[16]) {
+    const GLfloat transform_matrix[16],
+    gpu::gles2::CopyTexImageResourceManager* luma_emulation_blitter) {
   DoCopyTextureInternal(
       decoder, source_target, source_id, source_level, source_internal_format,
       dest_target, dest_id, dest_level, dest_internal_format, xoffset, yoffset,
       x, y, width, height, dest_width, dest_height, source_width, source_height,
-      flip_y, premultiply_alpha, unpremultiply_alpha, transform_matrix);
+      flip_y, premultiply_alpha, unpremultiply_alpha, transform_matrix,
+      luma_emulation_blitter);
 }
 
 void CopyTextureCHROMIUMResourceManager::DoCopyTextureWithTransform(
@@ -904,14 +1126,15 @@ void CopyTextureCHROMIUMResourceManager::DoCopyTextureWithTransform(
     bool flip_y,
     bool premultiply_alpha,
     bool unpremultiply_alpha,
-    const GLfloat transform_matrix[16]) {
+    const GLfloat transform_matrix[16],
+    gpu::gles2::CopyTexImageResourceManager* luma_emulation_blitter) {
   GLsizei dest_width = width;
   GLsizei dest_height = height;
-  DoCopyTextureInternal(decoder, source_target, source_id, source_level,
-                        source_format, dest_target, dest_id, dest_level,
-                        dest_format, 0, 0, 0, 0, width, height, dest_width,
-                        dest_height, width, height, flip_y, premultiply_alpha,
-                        unpremultiply_alpha, transform_matrix);
+  DoCopyTextureInternal(
+      decoder, source_target, source_id, source_level, source_format,
+      dest_target, dest_id, dest_level, dest_format, 0, 0, 0, 0, width, height,
+      dest_width, dest_height, width, height, flip_y, premultiply_alpha,
+      unpremultiply_alpha, transform_matrix, luma_emulation_blitter);
 }
 
 void CopyTextureCHROMIUMResourceManager::DoCopyTextureInternal(
@@ -937,7 +1160,8 @@ void CopyTextureCHROMIUMResourceManager::DoCopyTextureInternal(
     bool flip_y,
     bool premultiply_alpha,
     bool unpremultiply_alpha,
-    const GLfloat transform_matrix[16]) {
+    const GLfloat transform_matrix[16],
+    gpu::gles2::CopyTexImageResourceManager* luma_emulation_blitter) {
   DCHECK(source_target == GL_TEXTURE_2D ||
          source_target == GL_TEXTURE_RECTANGLE_ARB ||
          source_target == GL_TEXTURE_EXTERNAL_OES);
@@ -1004,11 +1228,19 @@ void CopyTextureCHROMIUMResourceManager::DoCopyTextureInternal(
     glAttachShader(info->program, *fragment_shader);
     glBindAttribLocation(info->program, kVertexPositionAttrib, "a_position");
     glLinkProgram(info->program);
-#ifndef NDEBUG
-    GLint linked;
-    glGetProgramiv(info->program, GL_LINK_STATUS, &linked);
-    if (!linked)
-      DLOG(ERROR) << "CopyTextureCHROMIUM: program link failure.";
+
+#if DCHECK_IS_ON()
+    {
+      GLint linked;
+      glGetProgramiv(info->program, GL_LINK_STATUS, &linked);
+      if (!linked) {
+        char buffer[1024];
+        GLsizei length = 0;
+        glGetProgramInfoLog(info->program, sizeof(buffer), &length, buffer);
+        std::string log(buffer, length);
+        DLOG(ERROR) << "CopyTextureCHROMIUM: program link failure: " << log;
+      }
+    }
 #endif
     info->vertex_dest_mult_handle =
         glGetUniformLocation(info->program, "u_vertex_dest_mult");

@@ -32,14 +32,18 @@ def _FindDuplicates(entries):
   return duplicates
 
 def _CheckForDuplicateFeatures(enable_features, disable_features):
+  enable_features = [f.split('<')[0] for f in enable_features]
   enable_features_set = set(enable_features)
   if len(enable_features_set) != len(enable_features):
     raise Exception('Duplicate feature(s) in enable_features: ' +
                     ', '.join(_FindDuplicates(enable_features)))
+
+  disable_features = [f.split('<')[0] for f in disable_features]
   disable_features_set = set(disable_features)
   if len(disable_features_set) != len(disable_features):
     raise Exception('Duplicate feature(s) in disable_features: ' +
                     ', '.join(_FindDuplicates(disable_features)))
+
   features_in_both = enable_features_set.intersection(disable_features_set)
   if len(features_in_both) > 0:
     raise Exception('Conflicting features set as both enabled and disabled: ' +
@@ -79,10 +83,10 @@ def GenerateArgs(config_path, platform):
        param_list = [_escape(x) for x in param_list]
        param = '%s:%s' % ('.'.join(selected_study), '/'.join(param_list))
        params.append(param)
-    if 'enable_features' in experiment:
-      enable_features.extend(experiment['enable_features'])
-    if 'disable_features' in experiment:
-      disable_features.extend(experiment['disable_features'])
+    for feature in experiment.get('enable_features', []):
+      enable_features.append(feature + '<' + study_name)
+    for feature in experiment.get('disable_features', []):
+      disable_features.append(feature + '<' + study_name)
 
   if not len(studies):
     return []
@@ -99,7 +103,10 @@ def GenerateArgs(config_path, platform):
 def main():
   if len(sys.argv) < 3:
     print 'Usage: fieldtrial_util.py [config_path] [platform]'
+    print 'Optionally pass \'shell_cmd\' as an extra argument to print'
+    print 'quoted command line arguments.'
     exit(-1)
+  print_shell_cmd = len(sys.argv) >= 4 and sys.argv[3] == 'shell_cmd'
 
   supported_platforms = ['android', 'chromeos', 'ios', 'linux', 'mac', 'win']
   if sys.argv[2] not in supported_platforms:
@@ -107,7 +114,11 @@ def main():
         (sys.argv[2], supported_platforms))
     exit(-1)
 
-  print GenerateArgs(sys.argv[1], sys.argv[2])
+  generated_args = GenerateArgs(sys.argv[1], sys.argv[2])
+  if print_shell_cmd:
+    print " ".join(map((lambda arg: '"{0}"'.format(arg)), generated_args))
+  else:
+    print generated_args
 
 if __name__ == '__main__':
   main()

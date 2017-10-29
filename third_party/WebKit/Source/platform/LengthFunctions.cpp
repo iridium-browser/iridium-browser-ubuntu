@@ -26,108 +26,111 @@
 #include "platform/LayoutUnit.h"
 #include "platform/LengthPoint.h"
 #include "platform/LengthSize.h"
+#include "platform/geometry/FloatPoint.h"
+#include "platform/geometry/FloatSize.h"
 
 namespace blink {
 
-int intValueForLength(const Length& length, int maximumValue) {
-  return valueForLength(length, LayoutUnit(maximumValue)).toInt();
+int IntValueForLength(const Length& length, int maximum_value) {
+  return ValueForLength(length, LayoutUnit(maximum_value)).ToInt();
 }
 
-float floatValueForLength(const Length& length, float maximumValue) {
-  switch (length.type()) {
-    case Fixed:
-      return length.getFloatValue();
-    case Percent:
-      return static_cast<float>(maximumValue * length.percent() / 100.0f);
-    case FillAvailable:
-    case Auto:
-      return static_cast<float>(maximumValue);
-    case Calculated:
-      return length.nonNanCalculatedValue(LayoutUnit(maximumValue));
-    case MinContent:
-    case MaxContent:
-    case FitContent:
-    case ExtendToZoom:
-    case DeviceWidth:
-    case DeviceHeight:
-    case MaxSizeNone:
-      ASSERT_NOT_REACHED();
+float FloatValueForLength(const Length& length, float maximum_value) {
+  switch (length.GetType()) {
+    case kFixed:
+      return length.GetFloatValue();
+    case kPercent:
+      return static_cast<float>(maximum_value * length.Percent() / 100.0f);
+    case kFillAvailable:
+    case kAuto:
+      return static_cast<float>(maximum_value);
+    case kCalculated:
+      return length.NonNanCalculatedValue(LayoutUnit(maximum_value));
+    case kMinContent:
+    case kMaxContent:
+    case kFitContent:
+    case kExtendToZoom:
+    case kDeviceWidth:
+    case kDeviceHeight:
+    case kMaxSizeNone:
+      NOTREACHED();
       return 0;
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return 0;
 }
 
-LayoutUnit minimumValueForLength(const Length& length,
-                                 LayoutUnit maximumValue) {
-  switch (length.type()) {
-    case Fixed:
-      return LayoutUnit(length.value());
-    case Percent:
+LayoutUnit MinimumValueForLength(const Length& length,
+                                 LayoutUnit maximum_value) {
+  switch (length.GetType()) {
+    case kFixed:
+      return LayoutUnit(length.Value());
+    case kPercent:
       // Don't remove the extra cast to float. It is needed for rounding on
       // 32-bit Intel machines that use the FPU stack.
       return LayoutUnit(
-          static_cast<float>(maximumValue * length.percent() / 100.0f));
-    case Calculated:
-      return LayoutUnit(length.nonNanCalculatedValue(maximumValue));
-    case FillAvailable:
-    case Auto:
+          static_cast<float>(maximum_value * length.Percent() / 100.0f));
+    case kCalculated:
+      return LayoutUnit(length.NonNanCalculatedValue(maximum_value));
+    case kFillAvailable:
+    case kAuto:
       return LayoutUnit();
-    case MinContent:
-    case MaxContent:
-    case FitContent:
-    case ExtendToZoom:
-    case DeviceWidth:
-    case DeviceHeight:
-    case MaxSizeNone:
-      ASSERT_NOT_REACHED();
+    case kMinContent:
+    case kMaxContent:
+    case kFitContent:
+    case kExtendToZoom:
+    case kDeviceWidth:
+    case kDeviceHeight:
+    case kMaxSizeNone:
+      NOTREACHED();
       return LayoutUnit();
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return LayoutUnit();
 }
 
-LayoutUnit roundedMinimumValueForLength(const Length& length,
-                                        LayoutUnit maximumValue) {
-  if (length.type() == Percent)
+LayoutUnit RoundedMinimumValueForLength(const Length& length,
+                                        LayoutUnit maximum_value) {
+  if (length.GetType() == kPercent)
     return static_cast<LayoutUnit>(
-        round(maximumValue * length.percent() / 100.0f));
-  return minimumValueForLength(length, maximumValue);
+        round(maximum_value * length.Percent() / 100.0f));
+  return MinimumValueForLength(length, maximum_value);
 }
 
-LayoutUnit valueForLength(const Length& length, LayoutUnit maximumValue) {
-  switch (length.type()) {
-    case Fixed:
-    case Percent:
-    case Calculated:
-      return minimumValueForLength(length, maximumValue);
-    case FillAvailable:
-    case Auto:
-      return maximumValue;
-    case MinContent:
-    case MaxContent:
-    case FitContent:
-    case ExtendToZoom:
-    case DeviceWidth:
-    case DeviceHeight:
-    case MaxSizeNone:
-      ASSERT_NOT_REACHED();
+LayoutUnit ValueForLength(const Length& length, LayoutUnit maximum_value) {
+  switch (length.GetType()) {
+    case kFixed:
+    case kPercent:
+    case kCalculated:
+      return MinimumValueForLength(length, maximum_value);
+    case kFillAvailable:
+    case kAuto:
+      return maximum_value;
+    case kMinContent:
+    case kMaxContent:
+    case kFitContent:
+    case kExtendToZoom:
+    case kDeviceWidth:
+    case kDeviceHeight:
+    case kMaxSizeNone:
+      NOTREACHED();
       return LayoutUnit();
   }
-  ASSERT_NOT_REACHED();
+  NOTREACHED();
   return LayoutUnit();
 }
 
-FloatSize floatSizeForLengthSize(const LengthSize& lengthSize,
-                                 const FloatSize& boxSize) {
-  return FloatSize(floatValueForLength(lengthSize.width(), boxSize.width()),
-                   floatValueForLength(lengthSize.height(), boxSize.height()));
+FloatSize FloatSizeForLengthSize(const LengthSize& length_size,
+                                 const FloatSize& box_size) {
+  return FloatSize(
+      FloatValueForLength(length_size.Width(), box_size.Width()),
+      FloatValueForLength(length_size.Height(), box_size.Height()));
 }
 
-FloatPoint floatPointForLengthPoint(const LengthPoint& LengthPoint,
-                                    const FloatSize& boxSize) {
-  return FloatPoint(floatValueForLength(LengthPoint.x(), boxSize.width()),
-                    floatValueForLength(LengthPoint.y(), boxSize.height()));
+FloatPoint FloatPointForLengthPoint(const LengthPoint& length_point,
+                                    const FloatSize& box_size) {
+  return FloatPoint(FloatValueForLength(length_point.X(), box_size.Width()),
+                    FloatValueForLength(length_point.Y(), box_size.Height()));
 }
 
 }  // namespace blink

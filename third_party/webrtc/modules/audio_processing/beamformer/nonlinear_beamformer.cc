@@ -17,9 +17,9 @@
 #include <numeric>
 #include <vector>
 
-#include "webrtc/base/arraysize.h"
 #include "webrtc/common_audio/window_generator.h"
 #include "webrtc/modules/audio_processing/beamformer/covariance_matrix_generator.h"
+#include "webrtc/rtc_base/arraysize.h"
 
 namespace webrtc {
 namespace {
@@ -267,8 +267,10 @@ void NonlinearBeamformer::Initialize(int chunk_size_ms, int sample_rate_hz) {
 //             low_mean_end_bin_       high_mean_end_bin_
 //
 void NonlinearBeamformer::InitLowFrequencyCorrectionRanges() {
-  low_mean_start_bin_ = Round(kLowMeanStartHz * kFftSize / sample_rate_hz_);
-  low_mean_end_bin_ = Round(kLowMeanEndHz * kFftSize / sample_rate_hz_);
+  low_mean_start_bin_ = Round(static_cast<float>(kLowMeanStartHz) *
+                                  kFftSize / sample_rate_hz_);
+  low_mean_end_bin_ = Round(static_cast<float>(kLowMeanEndHz) *
+                                  kFftSize / sample_rate_hz_);
 
   RTC_DCHECK_GT(low_mean_start_bin_, 0U);
   RTC_DCHECK_LT(low_mean_start_bin_, low_mean_end_bin_);

@@ -5,6 +5,7 @@
 #include "components/favicon/ios/web_favicon_driver.h"
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "components/favicon/core/favicon_url.h"
 #include "components/favicon/ios/favicon_url_util.h"
@@ -17,6 +18,10 @@
 #include "skia/ext/skia_utils_ios.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 DEFINE_WEB_STATE_USER_DATA_KEY(favicon::WebFaviconDriver);
 
@@ -39,9 +44,9 @@ void WebFaviconDriver::CreateForWebState(
   if (FromWebState(web_state))
     return;
 
-  web_state->SetUserData(UserDataKey(),
-                         new WebFaviconDriver(web_state, favicon_service,
-                                              history_service, bookmark_model));
+  web_state->SetUserData(UserDataKey(), base::WrapUnique(new WebFaviconDriver(
+                                            web_state, favicon_service,
+                                            history_service, bookmark_model)));
 }
 
 void WebFaviconDriver::FetchFavicon(const GURL& url) {
@@ -70,11 +75,6 @@ GURL WebFaviconDriver::GetActiveURL() {
 int WebFaviconDriver::DownloadImage(const GURL& url,
                                     int max_image_size,
                                     ImageDownloadCallback callback) {
-  if (WasUnableToDownloadFavicon(url)) {
-    DVLOG(1) << "Skip Failed FavIcon: " << url;
-    return 0;
-  }
-
   static int downloaded_image_count = 0;
   int local_download_id = ++downloaded_image_count;
 
@@ -82,8 +82,8 @@ int WebFaviconDriver::DownloadImage(const GURL& url,
 
   image_fetcher::IOSImageDataFetcherCallback local_callback =
       ^(NSData* data, const image_fetcher::RequestMetadata& metadata) {
-        if (metadata.response_code ==
-            image_fetcher::ImageDataFetcher::RESPONSE_CODE_INVALID)
+        if (metadata.http_response_code ==
+            image_fetcher::RequestMetadata::RESPONSE_CODE_INVALID)
           return;
 
         std::vector<SkBitmap> frames;
@@ -94,12 +94,17 @@ int WebFaviconDriver::DownloadImage(const GURL& url,
             sizes.push_back(gfx::Size(frame.width(), frame.height()));
           }
         }
-        callback.Run(local_download_id, metadata.response_code, local_url,
+        callback.Run(local_download_id, metadata.http_response_code, local_url,
                      frames, sizes);
       };
   image_fetcher_.FetchImageDataWebpDecoded(url, local_callback);
 
   return downloaded_image_count;
+}
+
+void WebFaviconDriver::DownloadManifest(const GURL& url,
+                                        ManifestDownloadCallback callback) {
+  NOTREACHED();
 }
 
 bool WebFaviconDriver::IsOffTheRecord() {
@@ -141,7 +146,8 @@ WebFaviconDriver::~WebFaviconDriver() {
 void WebFaviconDriver::FaviconUrlUpdated(
     const std::vector<web::FaviconURL>& candidates) {
   DCHECK(!candidates.empty());
-  OnUpdateFaviconURL(GetActiveURL(), FaviconURLsFromWebFaviconURLs(candidates));
+  OnUpdateCandidates(GetActiveURL(), FaviconURLsFromWebFaviconURLs(candidates),
+                     GURL());
 }
 
 }  // namespace favicon

@@ -20,9 +20,11 @@
 #include "base/macros.h"
 #include "base/process/kill.h"
 #include "build/build_config.h"
+#include "content/browser/renderer_host/input/input_device_change_observer.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_owner_delegate.h"
 #include "content/browser/site_instance_impl.h"
+#include "content/common/render_message_filter.mojom.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/render_view_host.h"
@@ -36,6 +38,7 @@
 namespace content {
 
 struct FrameReplicationState;
+class TimeoutMonitor;
 
 // This implements the RenderViewHost interface that is exposed to
 // embedders of content, and adds things only visible to content.
@@ -112,7 +115,6 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   void SelectWordAroundCaret() override;
 
   // RenderProcessHostObserver implementation
-  void RenderProcessReady(RenderProcessHost* host) override;
   void RenderProcessExited(RenderProcessHost* host,
                            base::TerminationStatus status,
                            int exit_code) override;
@@ -176,19 +178,16 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
 
   // Creates a new RenderWidget with the given route id.  |popup_type| indicates
   // if this widget is a popup and what kind of popup it is (select, autofill).
-  void CreateNewWidget(int32_t route_id, blink::WebPopupType popup_type);
+  void CreateNewWidget(int32_t route_id,
+                       mojom::WidgetPtr widget,
+                       blink::WebPopupType popup_type);
 
   // Creates a full screen RenderWidget.
-  void CreateNewFullscreenWidget(int32_t route_id);
+  void CreateNewFullscreenWidget(int32_t route_id, mojom::WidgetPtr widget);
 
   // Send RenderViewReady to observers once the process is launched, but not
   // re-entrantly.
   void PostRenderViewReady();
-
-  // TODO(creis): Remove after debugging https:/crbug.com/575245.
-  int main_frame_routing_id() const {
-    return main_frame_routing_id_;
-  }
 
   void set_main_frame_routing_id(int routing_id) {
     main_frame_routing_id_ = routing_id;
@@ -217,6 +216,7 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   void RenderWidgetDidInit() override;
   void RenderWidgetWillSetIsLoading(bool is_loading) override;
   void RenderWidgetGotFocus() override;
+  void RenderWidgetLostFocus() override;
   void RenderWidgetDidForwardMouseEvent(
       const blink::WebMouseEvent& mouse_event) override;
   bool MayRenderWidgetForwardKeyboardEvent(
@@ -252,10 +252,15 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   FRIEND_TEST_ALL_PREFIXES(RenderViewHostTest, RoutingIdSane);
   FRIEND_TEST_ALL_PREFIXES(RenderFrameHostManagerTest,
                            CleanUpSwappedOutRVHOnProcessCrash);
+  FRIEND_TEST_ALL_PREFIXES(RenderFrameHostManagerTest,
+                           CloseWithPendingWhileUnresponsive);
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest,
                            NavigateMainFrameToChildSite);
 
   void RenderViewReady();
+
+  // Called by |close_timeout_| when the page closing timeout fires.
+  void ClosePageTimeout();
 
   // TODO(creis): Move to a private namespace on RenderFrameHostImpl.
   // Delay to wait on closing the WebContents for a beforeunload/unload handler
@@ -312,9 +317,16 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   // values depend on.
   std::unique_ptr<WebPreferences> web_preferences_;
 
-  bool updating_web_preferences_;
+  // The timeout monitor that runs from when the page close is started in
+  // ClosePage() until either the render process ACKs the close with an IPC to
+  // OnClosePageACK(), or until the timeout triggers and the page is forcibly
+  // closed.
+  std::unique_ptr<TimeoutMonitor> close_timeout_;
 
-  bool render_view_ready_on_process_launch_;
+  // This monitors input changes so they can be reflected to the interaction MQ.
+  std::unique_ptr<InputDeviceChangeObserver> input_device_change_observer_;
+
+  bool updating_web_preferences_;
 
   base::WeakPtrFactory<RenderViewHostImpl> weak_factory_;
 

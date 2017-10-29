@@ -109,7 +109,8 @@ public class SingleCategoryPreferences extends PreferenceFragment
             return;
         }
 
-        WebsitePermissionsFetcher fetcher = new WebsitePermissionsFetcher(new ResultsPopulator());
+        WebsitePermissionsFetcher fetcher =
+                new WebsitePermissionsFetcher(new ResultsPopulator(), false);
         fetcher.fetchPreferencesForCategory(mCategory);
     }
 
@@ -165,6 +166,12 @@ public class SingleCategoryPreferences extends PreferenceFragment
                         }
                     }
 
+                    // For the ads permission, the Allowed list should appear first. Default
+                    // collapsed settings should not change.
+                    if (mCategory.showAdsSites()) {
+                        blockedGroup.setOrder(allowedGroup.getOrder() + 1);
+                    }
+
                     // The default, when the two lists are shown for the first time, is for the
                     // Blocked list to be collapsed and Allowed expanded -- because the data in
                     // the Allowed list is normally more useful than the data in the Blocked
@@ -208,7 +215,9 @@ public class SingleCategoryPreferences extends PreferenceFragment
      */
     private boolean isOnBlockList(WebsitePreference website) {
         // This list is ordered alphabetically by permission.
-        if (mCategory.showAutoplaySites()) {
+        if (mCategory.showAdsSites()) {
+            return website.site().getAdsPermission() == ContentSetting.BLOCK;
+        } else if (mCategory.showAutoplaySites()) {
             return website.site().getAutoplayPermission() == ContentSetting.BLOCK;
         } else if (mCategory.showBackgroundSyncSites()) {
             return website.site().getBackgroundSyncPermission() == ContentSetting.BLOCK;
@@ -467,7 +476,9 @@ public class SingleCategoryPreferences extends PreferenceFragment
         if (READ_WRITE_TOGGLE_KEY.equals(preference.getKey())) {
             assert !mCategory.isManaged();
 
-            if (mCategory.showAutoplaySites()) {
+            if (mCategory.showAdsSites()) {
+                PrefServiceBridge.getInstance().setAllowAdsEnabled((boolean) newValue);
+            } else if (mCategory.showAutoplaySites()) {
                 PrefServiceBridge.getInstance().setAutoplayEnabled((boolean) newValue);
             } else if (mCategory.showBackgroundSyncSites()) {
                 PrefServiceBridge.getInstance().setBackgroundSyncEnabled((boolean) newValue);
@@ -691,7 +702,9 @@ public class SingleCategoryPreferences extends PreferenceFragment
                         return mCategory.isManagedByCustodian();
                     }
                 });
-                if (mCategory.showAutoplaySites()) {
+                if (mCategory.showAdsSites()) {
+                    globalToggle.setChecked(PrefServiceBridge.getInstance().adsEnabled());
+                } else if (mCategory.showAutoplaySites()) {
                     globalToggle.setChecked(
                             PrefServiceBridge.getInstance().isAutoplayEnabled());
                 } else if (mCategory.showBackgroundSyncSites()) {
@@ -725,6 +738,8 @@ public class SingleCategoryPreferences extends PreferenceFragment
     private void updateThirdPartyCookiesCheckBox() {
         ChromeBaseCheckBoxPreference thirdPartyCookiesPref = (ChromeBaseCheckBoxPreference)
                 getPreferenceScreen().findPreference(THIRD_PARTY_COOKIES_TOGGLE_KEY);
+        thirdPartyCookiesPref.setChecked(
+                !PrefServiceBridge.getInstance().isBlockThirdPartyCookiesEnabled());
         thirdPartyCookiesPref.setEnabled(PrefServiceBridge.getInstance().isAcceptCookiesEnabled());
         thirdPartyCookiesPref.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
             @Override

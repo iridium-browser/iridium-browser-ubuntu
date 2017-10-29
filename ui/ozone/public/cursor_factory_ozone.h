@@ -23,19 +23,20 @@ class OZONE_BASE_EXPORT CursorFactoryOzone {
   CursorFactoryOzone();
   virtual ~CursorFactoryOzone();
 
-  // Returns the singleton instance.
+  // Returns the thread-local instance.
   static CursorFactoryOzone* GetInstance();
 
   // Return the default cursor of the specified type. The types are listed in
   // ui/base/cursor/cursor.h. Default cursors are managed by the implementation
   // and must live indefinitely; there's no way to know when to free them.
-  virtual PlatformCursor GetDefaultCursor(int type);
+  virtual PlatformCursor GetDefaultCursor(CursorType type);
 
   // Return a image cursor from the specified image & hotspot. Image cursors
   // are referenced counted and have an initial refcount of 1. Therefore, each
   // CreateImageCursor call must be matched with a call to UnrefImageCursor.
   virtual PlatformCursor CreateImageCursor(const SkBitmap& bitmap,
-                                           const gfx::Point& hotspot);
+                                           const gfx::Point& hotspot,
+                                           float bitmap_dpi);
 
   // Return a animated cursor from the specified image & hotspot. Animated
   // cursors are referenced counted and have an initial refcount of 1.
@@ -44,16 +45,14 @@ class OZONE_BASE_EXPORT CursorFactoryOzone {
   virtual PlatformCursor CreateAnimatedCursor(
       const std::vector<SkBitmap>& bitmaps,
       const gfx::Point& hotspot,
-      int frame_delay_ms);
+      int frame_delay_ms,
+      float bitmap_dpi);
 
   // Increment platform image cursor refcount.
   virtual void RefImageCursor(PlatformCursor cursor);
 
   // Decrement platform image cursor refcount.
   virtual void UnrefImageCursor(PlatformCursor cursor);
-
- private:
-  static CursorFactoryOzone* impl_;  // not owned
 };
 
 }  // namespace ui

@@ -9,9 +9,13 @@
 #include <algorithm>
 #include <vector>
 
-#include "ash/common/system/chromeos/devicetype_utils.h"
+#include "ash/login/ui/login_constants.h"
 #include "ash/public/interfaces/constants.mojom.h"
+#include "ash/public/interfaces/tray_action.mojom.h"
 #include "ash/shell.h"
+#include "ash/shutdown_reason.h"
+#include "ash/system/devicetype_utils.h"
+#include "ash/wallpaper/wallpaper_controller.h"
 #include "ash/wm/lock_state_controller.h"
 #include "base/bind.h"
 #include "base/i18n/number_formatting.h"
@@ -33,12 +37,13 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
-#include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/language_preferences.h"
+#include "chrome/browser/chromeos/lock_screen_apps/state_controller.h"
 #include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
 #include "chrome/browser/chromeos/login/hwid_checker.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/lock/webui_screen_locker.h"
+#include "chrome/browser/chromeos/login/lock_screen_utils.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_factory.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_storage.h"
 #include "chrome/browser/chromeos/login/reauth_stats.h"
@@ -70,7 +75,6 @@
 #include "chrome/common/channel_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -99,7 +103,10 @@
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/base/ime/chromeos/input_method_util.h"
 #include "ui/base/webui/web_ui_util.h"
+#include "ui/gfx/color_analysis.h"
+#include "ui/gfx/color_utils.h"
 
 namespace {
 
@@ -120,10 +127,28 @@ const int kMaxGaiaReloadForProxyAuthDialog = 3;
 const char kSourceGaiaSignin[] = "gaia-signin";
 const char kSourceAccountPicker[] = "account-picker";
 
-static bool Contains(const std::vector<std::string>& container,
-                     const std::string& value) {
-  return std::find(container.begin(), container.end(), value) !=
-         container.end();
+// Constants for lock screen apps activity state values:
+const char kNoLockScreenApps[] = "LOCK_SCREEN_APPS_STATE.NONE";
+const char kBackgroundLockScreenApps[] = "LOCK_SCREEN_APPS_STATE.BACKGROUND";
+const char kForegroundLockScreenApps[] = "LOCK_SCREEN_APPS_STATE.FOREGROUND";
+const char kAvailableLockScreenApps[] = "LOCK_SCREEN_APPS_STATE.AVAILABLE";
+
+// Constants for new lock screen note request type.
+const char kNewNoteRequestTap[] = "NEW_NOTE_REQUEST.TAP";
+const char kNewNoteRequestSwipe[] = "NEW_NOTE_REQUEST.SWIPE";
+const char kNewNoteRequestKeyboard[] = "NEW_NOTE_REQUEST.KEYBOARD";
+
+// Constants for reporting action taken on lock screen UI when lock screen app
+// window was in background.
+const char kRequestShutdownFromLockScreenAppUnlockUi[] =
+    "LOCK_SCREEN_APPS_UNLOCK_ACTION.SHUTDOWN";
+const char kRequestSignoutFromLockScreenAppUnlockUi[] =
+    "LOCK_SCREEN_APPS_UNLOCK_ACTION.SIGN_OUT";
+
+ash::WallpaperController* GetWallpaperController() {
+  if (!ash::Shell::HasInstance())
+    return nullptr;
+  return ash::Shell::Get()->wallpaper_controller();
 }
 
 class CallOnReturn {
@@ -197,72 +222,6 @@ std::string GetNetworkName(const std::string& service_path) {
   return network->name();
 }
 
-static bool SetUserInputMethodImpl(
-    const std::string& username,
-    const std::string& user_input_method,
-    input_method::InputMethodManager::State* ime_state) {
-  if (!chromeos::input_method::InputMethodManager::Get()->IsLoginKeyboard(
-          user_input_method)) {
-    LOG(WARNING) << "SetUserInputMethod('" << username
-                 << "'): stored user LRU input method '" << user_input_method
-                 << "' is no longer Full Latin Keyboard Language"
-                 << " (entry dropped). Use hardware default instead.";
-
-    PrefService* const local_state = g_browser_process->local_state();
-    DictionaryPrefUpdate updater(local_state, prefs::kUsersLRUInputMethod);
-
-    base::DictionaryValue* const users_lru_input_methods = updater.Get();
-    if (users_lru_input_methods != nullptr) {
-      users_lru_input_methods->SetStringWithoutPathExpansion(username, "");
-    }
-    return false;
-  }
-
-  if (!Contains(ime_state->GetActiveInputMethodIds(), user_input_method)) {
-    if (!ime_state->EnableInputMethod(user_input_method)) {
-      DLOG(ERROR) << "SigninScreenHandler::SetUserInputMethod('" << username
-                  << "'): user input method '" << user_input_method
-                  << "' is not enabled and enabling failed (ignored!).";
-    }
-  }
-  ime_state->ChangeInputMethod(user_input_method, false /* show_message */);
-
-  return true;
-}
-
-void EnforcePolicyInputMethods(std::string user_input_method) {
-  chromeos::CrosSettings* cros_settings = chromeos::CrosSettings::Get();
-  const base::ListValue* login_screen_input_methods = nullptr;
-  if (!cros_settings->GetList(chromeos::kDeviceLoginScreenInputMethods,
-                              &login_screen_input_methods)) {
-    return;
-  }
-
-  std::vector<std::string> allowed_input_methods;
-
-  // Add user's input method first so it is pre-selected.
-  if (!user_input_method.empty()) {
-    allowed_input_methods.push_back(user_input_method);
-  }
-
-  std::string input_method;
-  for (const auto& input_method_entry : *login_screen_input_methods) {
-    if (input_method_entry->GetAsString(&input_method))
-      allowed_input_methods.push_back(input_method);
-  }
-  chromeos::input_method::InputMethodManager* imm =
-      chromeos::input_method::InputMethodManager::Get();
-  imm->GetActiveIMEState()->SetAllowedInputMethods(allowed_input_methods);
-}
-
-void StopEnforcingPolicyInputMethods() {
-  // Empty means all input methods are allowed
-  std::vector<std::string> allowed_input_methods;
-  chromeos::input_method::InputMethodManager* imm =
-      chromeos::input_method::InputMethodManager::Get();
-  imm->GetActiveIMEState()->SetAllowedInputMethods(allowed_input_methods);
-}
-
 }  // namespace
 
 // LoginScreenContext implementation ------------------------------------------
@@ -293,7 +252,7 @@ SigninScreenHandler::SigninScreenHandler(
     CoreOobeView* core_oobe_view,
     GaiaScreenHandler* gaia_screen_handler,
     JSCallsContainer* js_calls_container)
-    : BaseScreenHandler(js_calls_container),
+    : BaseWebUIHandler(js_calls_container),
       network_state_informer_(network_state_informer),
       error_screen_(error_screen),
       core_oobe_view_(core_oobe_view),
@@ -304,6 +263,7 @@ SigninScreenHandler::SigninScreenHandler(
       gaia_screen_handler_(gaia_screen_handler),
       touch_view_binding_(this),
       histogram_helper_(new ErrorScreensHistogramHelper("Signin")),
+      lock_screen_apps_observer_(this),
       weak_factory_(this) {
   DCHECK(network_state_informer_.get());
   DCHECK(error_screen_);
@@ -329,7 +289,6 @@ SigninScreenHandler::SigninScreenHandler(
       chromeos::input_method::InputMethodManager::Get()->GetImeKeyboard();
   if (keyboard)
     keyboard->AddObserver(this);
-  OnAllowedInputMethodsChanged();
   allowed_input_methods_subscription_ =
       chromeos::CrosSettings::Get()->AddSettingsObserver(
           chromeos::kDeviceLoginScreenInputMethods,
@@ -339,8 +298,14 @@ SigninScreenHandler::SigninScreenHandler(
   content::ServiceManagerConnection::GetForProcess()
       ->GetConnector()
       ->BindInterface(ash::mojom::kServiceName, &touch_view_manager_ptr_);
-  touch_view_manager_ptr_->AddObserver(
-      touch_view_binding_.CreateInterfacePtrAndBind());
+  ash::mojom::TouchViewObserverPtr observer;
+  touch_view_binding_.Bind(mojo::MakeRequest(&observer));
+  touch_view_manager_ptr_->AddObserver(std::move(observer));
+  if (lock_screen_apps::StateController::IsEnabled())
+    lock_screen_apps_observer_.Add(lock_screen_apps::StateController::Get());
+  ash::WallpaperController* wallpaper_controller = GetWallpaperController();
+  DCHECK(wallpaper_controller);
+  wallpaper_controller->AddObserver(this);
 }
 
 SigninScreenHandler::~SigninScreenHandler() {
@@ -353,63 +318,16 @@ SigninScreenHandler::~SigninScreenHandler() {
       chromeos::input_method::InputMethodManager::Get()->GetImeKeyboard();
   if (keyboard)
     keyboard->RemoveObserver(this);
-  StopEnforcingPolicyInputMethods();
+  lock_screen_utils::StopEnforcingPolicyInputMethods();
   weak_factory_.InvalidateWeakPtrs();
   if (delegate_)
     delegate_->SetWebUIHandler(nullptr);
   network_state_informer_->RemoveObserver(this);
   proximity_auth::ScreenlockBridge::Get()->SetLockHandler(nullptr);
   proximity_auth::ScreenlockBridge::Get()->SetFocusedUser(EmptyAccountId());
-}
-
-// static
-std::string SigninScreenHandler::GetUserLRUInputMethod(
-    const std::string& username) {
-  PrefService* const local_state = g_browser_process->local_state();
-  const base::DictionaryValue* users_lru_input_methods =
-      local_state->GetDictionary(prefs::kUsersLRUInputMethod);
-
-  if (!users_lru_input_methods) {
-    DLOG(WARNING) << "GetUserLRUInputMethod('" << username
-                  << "'): no kUsersLRUInputMethod";
-    return std::string();
-  }
-
-  std::string input_method;
-
-  if (!users_lru_input_methods->GetStringWithoutPathExpansion(username,
-                                                              &input_method)) {
-    DVLOG(0) << "GetUserLRUInputMethod('" << username
-             << "'): no input method for this user";
-    return std::string();
-  }
-
-  return input_method;
-}
-
-// static
-// Update keyboard layout to least recently used by the user.
-void SigninScreenHandler::SetUserInputMethod(
-    const std::string& username,
-    input_method::InputMethodManager::State* ime_state) {
-  bool succeed = false;
-
-  const std::string input_method = GetUserLRUInputMethod(username);
-
-  EnforcePolicyInputMethods(input_method);
-
-  if (!input_method.empty())
-    succeed = SetUserInputMethodImpl(username, input_method, ime_state);
-
-  // This is also a case when LRU layout is set only for a few local users,
-  // thus others need to be switched to default locale.
-  // Otherwise they will end up using another user's locale to log in.
-  if (!succeed) {
-    DVLOG(0) << "SetUserInputMethod('" << username
-             << "'): failed to set user layout. Switching to default.";
-
-    ime_state->SetInputMethodLoginDefault();
-  }
+  ash::WallpaperController* wallpaper_controller = GetWallpaperController();
+  if (wallpaper_controller)
+    wallpaper_controller->RemoveObserver(this);
 }
 
 void SigninScreenHandler::DeclareLocalizedValues(
@@ -427,6 +345,10 @@ void SigninScreenHandler::DeclareLocalizedValues(
                IDS_PIN_KEYBOARD_HINT_TEXT_PIN_PASSWORD);
   builder->Add("pinKeyboardDeleteAccessibleName",
                IDS_PIN_KEYBOARD_DELETE_ACCESSIBLE_NAME);
+  builder->Add("fingerprintHint", IDS_FINGERPRINT_HINT_TEXT);
+  builder->Add("fingerprintIconMessage", IDS_FINGERPRINT_ICON_MESSAGE);
+  builder->Add("fingerprintSigningin", IDS_FINGERPRINT_LOGIN_TEXT);
+  builder->Add("fingerprintSigninFailed", IDS_FINGERPRINT_LOGIN_FAILED_TEXT);
   builder->Add("signingIn", IDS_LOGIN_POD_SIGNING_IN);
   builder->Add("podMenuButtonAccessibleName",
                IDS_LOGIN_POD_MENU_BUTTON_ACCESSIBLE_NAME);
@@ -441,12 +363,13 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("restart", IDS_RESTART_BUTTON);
   builder->Add("shutDown", IDS_SHUTDOWN_BUTTON);
   builder->Add("addUser", IDS_ADD_USER_BUTTON);
-  builder->Add("browseAsGuest", IDS_GO_INCOGNITO_BUTTON);
+  builder->Add("browseAsGuest", IDS_BROWSE_AS_GUEST_BUTTON);
   builder->Add("moreOptions", IDS_MORE_OPTIONS_BUTTON);
   builder->Add("addSupervisedUser",
                IDS_CREATE_LEGACY_SUPERVISED_USER_MENU_LABEL);
   builder->Add("cancel", IDS_CANCEL);
   builder->Add("signOutUser", IDS_SCREEN_LOCK_SIGN_OUT);
+  builder->Add("unlockUser", IDS_SCREEN_LOCK_UNLOCK_USER_BUTTON);
   builder->Add("offlineLogin", IDS_OFFLINE_LOGIN_HTML);
   builder->Add("ownerUserPattern", IDS_LOGIN_POD_OWNER_USER);
   builder->Add("removeUser", IDS_LOGIN_POD_REMOVE_USER);
@@ -518,7 +441,7 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("removeUserWarningTextHistory", base::string16());
   builder->Add("removeUserWarningTextPasswords", base::string16());
   builder->Add("removeUserWarningTextBookmarks", base::string16());
-  builder->Add("removeUserWarningTextSettings", base::string16());
+  builder->Add("removeUserWarningTextAutofill", base::string16());
   builder->Add("removeUserWarningTextCalculating", base::string16());
   builder->Add("removeUserWarningTextSyncNoStats", base::string16());
   builder->Add("removeUserWarningTextSyncCalculating", base::string16());
@@ -570,6 +493,9 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("adPasswordChangeMessage", IDS_AD_PASSWORD_CHANGE_MESSAGE);
   builder->Add("adOldPasswordError", IDS_AD_PASSWORD_CHANGE_INVALID_PASSWORD);
   builder->Add("adNewPasswordError", IDS_AD_PASSWORD_CHANGE_PASSWORDS_MISMATCH);
+
+  builder->Add("newLockScreenNoteButton",
+               IDS_LOGIN_NEW_LOCK_SCREEN_NOTE_BUTTON_TITLE);
 }
 
 void SigninScreenHandler::RegisterMessages() {
@@ -583,12 +509,9 @@ void SigninScreenHandler::RegisterMessages() {
   AddCallback("rebootSystem", &SigninScreenHandler::HandleRebootSystem);
   AddRawCallback("showAddUser", &SigninScreenHandler::HandleShowAddUser);
   AddCallback("shutdownSystem", &SigninScreenHandler::HandleShutdownSystem);
-  AddCallback("loadWallpaper", &SigninScreenHandler::HandleLoadWallpaper);
   AddCallback("removeUser", &SigninScreenHandler::HandleRemoveUser);
   AddCallback("toggleEnrollmentScreen",
               &SigninScreenHandler::HandleToggleEnrollmentScreen);
-  AddCallback("toggleEnrollmentAd",
-              &SigninScreenHandler::HandleToggleEnrollmentAd);
   AddCallback("toggleEnableDebuggingScreen",
               &SigninScreenHandler::HandleToggleEnableDebuggingScreen);
   AddCallback("toggleKioskEnableScreen",
@@ -631,6 +554,12 @@ void SigninScreenHandler::RegisterMessages() {
   AddCallback("launchKioskApp", &SigninScreenHandler::HandleLaunchKioskApp);
   AddCallback("launchArcKioskApp",
               &SigninScreenHandler::HandleLaunchArcKioskApp);
+  AddCallback("setLockScreenAppsState",
+              &SigninScreenHandler::HandleSetLockScreenAppsState);
+  AddCallback("recordLockScreenAppUnlockAction",
+              &SigninScreenHandler::HandleRecordLockScreenAppUnlockUIAction);
+  AddCallback("requestNewLockScreenNote",
+              &SigninScreenHandler::HandleRequestNewNoteAction);
 }
 
 void SigninScreenHandler::Show(const LoginScreenContext& context) {
@@ -707,7 +636,7 @@ void SigninScreenHandler::ShowImpl() {
     OnShowAddUser();
   } else {
     // Populates account picker. Animation is turned off for now until we
-    // figure out how to make it fast enough.
+    // figure out how to make it fast enough. This will call LoadUsers.
     delegate_->HandleGetUsers();
 
     // Reset Caps Lock state when login screen is shown.
@@ -718,6 +647,14 @@ void SigninScreenHandler::ShowImpl() {
     base::DictionaryValue params;
     params.SetBoolean("disableAddUser", AllWhitelistedUsersPresent());
     UpdateUIState(UI_STATE_ACCOUNT_PICKER, &params);
+  }
+
+  // Enable pin for any users who can use it.
+  if (user_manager::UserManager::IsInitialized()) {
+    for (user_manager::User* user :
+         user_manager::UserManager::Get()->GetLoggedInUsers()) {
+      UpdatePinKeyboardState(user->GetAccountId());
+    }
   }
 }
 
@@ -953,11 +890,34 @@ void SigninScreenHandler::ReloadGaia(bool force_reload) {
   gaia_screen_handler_->ReloadGaia(force_reload);
 }
 
+void SigninScreenHandler::UpdateAccountPickerColors() {
+  color_utils::ColorProfile color_profile(color_utils::LumaRange::DARK,
+                                          color_utils::SaturationRange::MUTED);
+  ash::WallpaperController* wallpaper_controller = GetWallpaperController();
+  SkColor dark_muted_color =
+      wallpaper_controller
+          ? wallpaper_controller->GetProminentColor(color_profile)
+          : ash::login_constants::kDefaultBaseColor;
+  if (dark_muted_color == ash::WallpaperController::kInvalidColor)
+    dark_muted_color = ash::login_constants::kDefaultBaseColor;
+
+  dark_muted_color = SkColorSetA(dark_muted_color, 0xFF);
+  SkColor base_color = color_utils::GetResultingPaintColor(
+      SkColorSetA(ash::login_constants::kDefaultBaseColor,
+                  ash::login_constants::kTranslucentColorDarkenAlpha),
+      dark_muted_color);
+  SkColor scroll_color =
+      SkColorSetA(base_color, ash::login_constants::kScrollTranslucentAlpha);
+  CallJS("login.AccountPickerScreen.setOverlayColors",
+         color_utils::SkColorToRgbaString(dark_muted_color),
+         color_utils::SkColorToRgbaString(scroll_color));
+}
+
 void SigninScreenHandler::Initialize() {
   // Preload PIN keyboard if any of the users can authenticate via PIN.
   if (user_manager::UserManager::IsInitialized()) {
     for (user_manager::User* user :
-         user_manager::UserManager::Get()->GetLoggedInUsers()) {
+         user_manager::UserManager::Get()->GetUnlockUsers()) {
       chromeos::quick_unlock::QuickUnlockStorage* quick_unlock_storage =
           chromeos::quick_unlock::QuickUnlockFactory::GetForUser(user);
       if (quick_unlock_storage &&
@@ -982,7 +942,7 @@ gfx::NativeWindow SigninScreenHandler::GetNativeWindow() {
 }
 
 void SigninScreenHandler::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterDictionaryPref(prefs::kUsersLRUInputMethod);
+  registry->RegisterDictionaryPref(prefs::kUsersLastInputMethod);
 }
 
 void SigninScreenHandler::OnCurrentScreenChanged(OobeScreen current_screen,
@@ -992,6 +952,12 @@ void SigninScreenHandler::OnCurrentScreenChanged(OobeScreen current_screen,
     input_method::InputMethodManager::Get()->SetState(ime_state_);
   }
 }
+
+void SigninScreenHandler::OnWallpaperColorsChanged() {
+  UpdateAccountPickerColors();
+}
+
+void SigninScreenHandler::OnWallpaperDataChanged() {}
 
 void SigninScreenHandler::ClearAndEnablePassword() {
   core_oobe_view_->ResetSignInUI(false);
@@ -1005,12 +971,15 @@ void SigninScreenHandler::RefocusCurrentPod() {
   core_oobe_view_->RefocusCurrentPod();
 }
 
-void SigninScreenHandler::HidePinKeyboardIfNeeded(const AccountId& account_id) {
+void SigninScreenHandler::UpdatePinKeyboardState(const AccountId& account_id) {
   chromeos::quick_unlock::QuickUnlockStorage* quick_unlock_storage =
       chromeos::quick_unlock::QuickUnlockFactory::GetForAccountId(account_id);
-  if (quick_unlock_storage &&
-      !quick_unlock_storage->IsPinAuthenticationAvailable())
-    CallJS("login.AccountPickerScreen.disablePinKeyboardForUser", account_id);
+  if (!quick_unlock_storage)
+    return;
+
+  bool is_enabled = quick_unlock_storage->IsPinAuthenticationAvailable();
+  CallJS("login.AccountPickerScreen.setPinEnabledForUser", account_id,
+         is_enabled);
 }
 
 void SigninScreenHandler::OnUserRemoved(const AccountId& account_id,
@@ -1022,8 +991,6 @@ void SigninScreenHandler::OnUserRemoved(const AccountId& account_id,
 
 void SigninScreenHandler::OnUserImageChanged(const user_manager::User& user) {
   if (page_is_ready()) {
-    // TODO(jdufault): Remove DCHECK after resolving crbug.com/699798
-    DCHECK(is_js_initialized_and_ready());
     CallJSOrDefer("login.AccountPickerScreen.updateUserImage",
                   user.GetAccountId());
   }
@@ -1059,6 +1026,7 @@ void SigninScreenHandler::OnPreferencesChanged() {
     // has changed so that reloaded GAIA shows/hides the option to create a new
     // account.
     UpdateUIState(UI_STATE_ACCOUNT_PICKER, nullptr);
+    UpdateAddButtonStatus();
   }
 }
 
@@ -1137,13 +1105,38 @@ void SigninScreenHandler::Observe(int type,
 void SigninScreenHandler::SuspendDone(const base::TimeDelta& sleep_duration) {
   for (user_manager::User* user :
        user_manager::UserManager::Get()->GetUnlockUsers()) {
-    HidePinKeyboardIfNeeded(user->GetAccountId());
+    UpdatePinKeyboardState(user->GetAccountId());
   }
 }
 
 void SigninScreenHandler::OnTouchViewToggled(bool enabled) {
   touch_view_enabled_ = enabled;
   CallJSOrDefer("login.AccountPickerScreen.setTouchViewState", enabled);
+}
+
+void SigninScreenHandler::OnLockScreenNoteStateChanged(
+    ash::mojom::TrayActionState state) {
+  if (!ScreenLocker::default_screen_locker())
+    return;
+
+  std::string lock_screen_apps_state;
+  switch (state) {
+    case ash::mojom::TrayActionState::kLaunching:
+    case ash::mojom::TrayActionState::kActive:
+      lock_screen_apps_state = kForegroundLockScreenApps;
+      break;
+    case ash::mojom::TrayActionState::kBackground:
+      lock_screen_apps_state = kBackgroundLockScreenApps;
+      break;
+    case ash::mojom::TrayActionState::kAvailable:
+      lock_screen_apps_state = kAvailableLockScreenApps;
+      break;
+    case ash::mojom::TrayActionState::kNotAvailable:
+      lock_screen_apps_state = kNoLockScreenApps;
+      break;
+  }
+  CallJSOrDefer("login.AccountPickerScreen.setLockScreenAppsState",
+                lock_screen_apps_state);
 }
 
 bool SigninScreenHandler::ShouldLoadGaia() const {
@@ -1180,7 +1173,7 @@ void SigninScreenHandler::HandleAuthenticateUser(const AccountId& account_id,
     user_context.SetUserType(user_manager::USER_TYPE_ACTIVE_DIRECTORY);
   delegate_->Login(user_context, SigninSpecifics());
 
-  HidePinKeyboardIfNeeded(account_id);
+  UpdatePinKeyboardState(account_id);
 }
 
 void SigninScreenHandler::HandleLaunchIncognito() {
@@ -1225,12 +1218,8 @@ void SigninScreenHandler::HandleOfflineLogin(const base::ListValue* args) {
 }
 
 void SigninScreenHandler::HandleShutdownSystem() {
-  ash::Shell::GetInstance()->lock_state_controller()->RequestShutdown();
-}
-
-void SigninScreenHandler::HandleLoadWallpaper(const AccountId& account_id) {
-  if (delegate_)
-    delegate_->LoadWallpaper(account_id);
+  ash::Shell::Get()->lock_state_controller()->RequestShutdown(
+      ash::ShutdownReason::LOGIN_SHUT_DOWN_BUTTON);
 }
 
 void SigninScreenHandler::HandleRebootSystem() {
@@ -1272,17 +1261,6 @@ void SigninScreenHandler::HandleToggleEnrollmentScreen() {
     delegate_->ShowEnterpriseEnrollmentScreen();
 }
 
-void SigninScreenHandler::HandleToggleEnrollmentAd() {
-  // TODO(rsorokin): Cleanup enrollment flow for Active Directory. (see
-  // crbug.com/668491).
-  if (chrome::GetChannel() == version_info::Channel::BETA ||
-      chrome::GetChannel() == version_info::Channel::STABLE) {
-    return;
-  }
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      chromeos::switches::kEnableAd);
-}
-
 void SigninScreenHandler::HandleToggleEnableDebuggingScreen() {
   if (delegate_)
     delegate_->ShowEnableDebuggingScreen();
@@ -1305,10 +1283,8 @@ void SigninScreenHandler::HandleToggleKioskAutolaunchScreen() {
     delegate_->ShowKioskAutolaunchScreen();
 }
 
-void SigninScreenHandler::LoadUsers(const base::ListValue& users_list,
-                                    bool showGuest) {
-  // TODO(jdufault): Remove DCHECK after resolving crbug.com/699798
-  DCHECK(is_js_initialized_and_ready());
+void SigninScreenHandler::LoadUsers(const user_manager::UserList& users,
+                                    const base::ListValue& users_list) {
   CallJSOrDefer("login.AccountPickerScreen.loadUsers", users_list,
                 delegate_->IsShowGuest());
 }
@@ -1338,6 +1314,13 @@ void SigninScreenHandler::HandleAccountPickerReady() {
 
   is_account_picker_showing_first_time_ = true;
 
+  if (lock_screen_apps::StateController::IsEnabled()) {
+    OnLockScreenNoteStateChanged(
+        lock_screen_apps::StateController::Get()->GetLockScreenNoteState());
+  }
+  // Color calculation of the first wallpaper may have completed before the
+  // instance is initialized, so make sure the colors are properly updated.
+  UpdateAccountPickerColors();
   if (delegate_)
     delegate_->OnSigninScreenReady();
 }
@@ -1345,7 +1328,7 @@ void SigninScreenHandler::HandleAccountPickerReady() {
 void SigninScreenHandler::HandleWallpaperReady() {
   if (ScreenLocker::default_screen_locker()) {
     ScreenLocker::default_screen_locker()
-        ->web_ui()
+        ->delegate()
         ->OnLockBackgroundDisplayed();
   }
 }
@@ -1375,6 +1358,7 @@ void SigninScreenHandler::HandleLoginVisible(const std::string& source) {
   webui_visible_ = true;
   if (preferences_changed_delayed_)
     OnPreferencesChanged();
+  OnAllowedInputMethodsChanged();
 }
 
 void SigninScreenHandler::HandleCancelPasswordChangedFlow(
@@ -1439,7 +1423,8 @@ void SigninScreenHandler::HandleShowLoadingTimeoutError() {
   UpdateState(NetworkError::ERROR_REASON_LOADING_TIMEOUT);
 }
 
-void SigninScreenHandler::HandleFocusPod(const AccountId& account_id) {
+void SigninScreenHandler::HandleFocusPod(const AccountId& account_id,
+                                         bool load_wallpaper) {
   proximity_auth::ScreenlockBridge::Get()->SetFocusedUser(account_id);
   if (delegate_)
     delegate_->CheckUserStatus(account_id);
@@ -1454,9 +1439,11 @@ void SigninScreenHandler::HandleFocusPod(const AccountId& account_id) {
   if (user && user->is_logged_in() && !user->is_active()) {
     SessionControllerClient::DoSwitchActiveUser(account_id);
   } else {
-    SetUserInputMethod(account_id.GetUserEmail(), ime_state_.get());
-    SetKeyboardSettings(account_id);
-    WallpaperManager::Get()->SetUserWallpaperDelayed(account_id);
+    lock_screen_utils::SetUserInputMethod(account_id.GetUserEmail(),
+                                          ime_state_.get());
+    lock_screen_utils::SetKeyboardSettings(account_id);
+    if (delegate_ && load_wallpaper)
+      delegate_->LoadWallpaper(account_id);
 
     bool use_24hour_clock = false;
     if (user_manager::known_user::GetBooleanPref(
@@ -1471,7 +1458,7 @@ void SigninScreenHandler::HandleFocusPod(const AccountId& account_id) {
 
 void SigninScreenHandler::HandleNoPodFocused() {
   focused_pod_account_id_.reset();
-  EnforcePolicyInputMethods(std::string());
+  lock_screen_utils::EnforcePolicyInputMethods(std::string());
 }
 
 void SigninScreenHandler::HandleGetPublicSessionKeyboardLayouts(
@@ -1542,6 +1529,56 @@ void SigninScreenHandler::HandleSendFeedbackAndResyncUserData() {
                                       weak_factory_.GetWeakPtr()));
 }
 
+void SigninScreenHandler::HandleRequestNewNoteAction(
+    const std::string& request_type) {
+  lock_screen_apps::StateController* state_controller =
+      lock_screen_apps::StateController::Get();
+
+  if (request_type == kNewNoteRequestTap) {
+    state_controller->HandleNewNoteRequestFromLockScreen(
+        lock_screen_apps::StateController::NewNoteRequestType::
+            kLockScreenUiTap);
+  } else if (request_type == kNewNoteRequestSwipe) {
+    state_controller->HandleNewNoteRequestFromLockScreen(
+        lock_screen_apps::StateController::NewNoteRequestType::
+            kLockScreenUiSwipe);
+  } else if (request_type == kNewNoteRequestKeyboard) {
+    state_controller->HandleNewNoteRequestFromLockScreen(
+        lock_screen_apps::StateController::NewNoteRequestType::
+            kLockScreenUiKeyboard);
+  } else {
+    NOTREACHED() << "Unknown request type " << request_type;
+  }
+}
+
+void SigninScreenHandler::HandleRecordLockScreenAppUnlockUIAction(
+    const std::string& action) {
+  lock_screen_apps::StateController* state_controller =
+      lock_screen_apps::StateController::Get();
+
+  if (action == kRequestShutdownFromLockScreenAppUnlockUi) {
+    state_controller->RecordLockScreenAppUnlockAction(
+        lock_screen_apps::StateController::LockScreenUnlockAction::kShutdown);
+  } else if (action == kRequestSignoutFromLockScreenAppUnlockUi) {
+    state_controller->RecordLockScreenAppUnlockAction(
+        lock_screen_apps::StateController::LockScreenUnlockAction::kSignOut);
+  } else {
+    NOTREACHED() << "Unknown action " << action;
+  }
+}
+
+void SigninScreenHandler::HandleSetLockScreenAppsState(
+    const std::string& state) {
+  lock_screen_apps::StateController* state_controller =
+      lock_screen_apps::StateController::Get();
+
+  if (state == kBackgroundLockScreenApps) {
+    state_controller->MoveToBackground();
+  } else if (state == kForegroundLockScreenApps) {
+    state_controller->MoveToForeground();
+  }
+}
+
 bool SigninScreenHandler::AllWhitelistedUsersPresent() {
   CrosSettings* cros_settings = CrosSettings::Get();
   bool allow_new_user = false;
@@ -1601,6 +1638,7 @@ bool SigninScreenHandler::IsGuestSigninAllowed() const {
 
 void SigninScreenHandler::OnShowAddUser() {
   is_account_picker_showing_first_time_ = false;
+  lock_screen_utils::EnforcePolicyInputMethods(std::string());
   gaia_screen_handler_->ShowGaiaAsync();
 }
 
@@ -1622,41 +1660,16 @@ void SigninScreenHandler::OnFeedbackFinished() {
 }
 
 void SigninScreenHandler::OnAllowedInputMethodsChanged() {
-  if (focused_pod_account_id_) {
-    std::string user_input_method =
-        GetUserLRUInputMethod(focused_pod_account_id_->GetUserEmail());
-    EnforcePolicyInputMethods(user_input_method);
-  } else {
-    EnforcePolicyInputMethods(std::string());
-  }
-}
-
-void SigninScreenHandler::SetKeyboardSettings(const AccountId& account_id) {
-  bool auto_repeat_enabled = language_prefs::kXkbAutoRepeatEnabled;
-  if (user_manager::known_user::GetBooleanPref(
-          account_id, prefs::kLanguageXkbAutoRepeatEnabled,
-          &auto_repeat_enabled) &&
-      !auto_repeat_enabled) {
-    input_method::InputMethodManager::Get()
-        ->GetImeKeyboard()
-        ->SetAutoRepeatEnabled(false);
+  if (!webui_visible_)
     return;
-  }
 
-  int auto_repeat_delay = language_prefs::kXkbAutoRepeatDelayInMs;
-  int auto_repeat_interval = language_prefs::kXkbAutoRepeatIntervalInMs;
-  user_manager::known_user::GetIntegerPref(
-      account_id, prefs::kLanguageXkbAutoRepeatDelay, &auto_repeat_delay);
-  user_manager::known_user::GetIntegerPref(
-      account_id, prefs::kLanguageXkbAutoRepeatInterval, &auto_repeat_interval);
-  input_method::AutoRepeatRate rate;
-  rate.initial_delay_in_ms = auto_repeat_delay;
-  rate.repeat_interval_in_ms = auto_repeat_interval;
-  input_method::InputMethodManager::Get()
-      ->GetImeKeyboard()
-      ->SetAutoRepeatEnabled(true);
-  input_method::InputMethodManager::Get()->GetImeKeyboard()->SetAutoRepeatRate(
-      rate);
+  if (focused_pod_account_id_) {
+    std::string user_input_method = lock_screen_utils::GetUserLastInputMethod(
+        focused_pod_account_id_->GetUserEmail());
+    lock_screen_utils::EnforcePolicyInputMethods(user_input_method);
+  } else {
+    lock_screen_utils::EnforcePolicyInputMethods(std::string());
+  }
 }
 
 }  // namespace chromeos

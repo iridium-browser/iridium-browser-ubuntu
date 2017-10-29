@@ -9,8 +9,10 @@
 #include <string>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -35,6 +37,10 @@
 #include "components/search_engines/template_url_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(OS_IOS)
+#include "components/open_from_clipboard/clipboard_recent_content_generic.h"
+#endif
 
 namespace {
 
@@ -199,6 +205,7 @@ AutocompleteController::AutocompleteController(
       stop_timer_duration_(OmniboxFieldTrial::StopTimerFieldTrialDuration()),
       done_(true),
       in_start_(false),
+      search_service_worker_signal_sent_(false),
       template_url_service_(provider_client_->GetTemplateURLService()) {
   provider_types &= ~OmniboxFieldTrial::GetDisabledProviderTypes();
   if (provider_types & AutocompleteProvider::TYPE_BOOKMARK)
@@ -229,12 +236,24 @@ AutocompleteController::AutocompleteController(
       providers_.push_back(zero_suggest_provider_);
   }
   if (provider_types & AutocompleteProvider::TYPE_CLIPBOARD_URL) {
-    ClipboardRecentContent* clipboard_recent_content =
-        ClipboardRecentContent::GetInstance();
-    if (clipboard_recent_content) {
-      providers_.push_back(new ClipboardURLProvider(provider_client_.get(),
-                                                    history_url_provider_,
-                                                    clipboard_recent_content));
+#if !defined(OS_IOS)
+    // On iOS, a global ClipboardRecentContent should've been created by now
+    // (if enabled).  If none has been created (e.g., we're on a different
+    // platform), use the generic implementation, which AutocompleteController
+    // will own.  Don't try to create a generic implementation on iOS because
+    // iOS doesn't want/need to link in the implementation and the libraries
+    // that would come with it.
+    if (!ClipboardRecentContent::GetInstance()) {
+      ClipboardRecentContent::SetInstance(
+          base::MakeUnique<ClipboardRecentContentGeneric>());
+    }
+#endif
+    // ClipboardRecentContent can be null in iOS tests.  For non-iOS, we
+    // create a ClipboardRecentContent as above (for both Chrome and tests).
+    if (ClipboardRecentContent::GetInstance()) {
+      providers_.push_back(new ClipboardURLProvider(
+          provider_client_.get(), history_url_provider_,
+          ClipboardRecentContent::GetInstance()));
     }
   }
   if (provider_types & AutocompleteProvider::TYPE_PHYSICAL_WEB) {
@@ -324,6 +343,25 @@ void AutocompleteController::Start(const AutocompleteInput& input) {
   // need the edit model to update the display.
   UpdateResult(false, true);
 
+  // If the input looks like a query and we're not in incognito mode, send a
+  // signal predicting that the user is going to issue a search (either to the
+  // default search engine or to a keyword search engine, as indicated by the
+  // destination_url). This allows any associated service worker to start up
+  // early and reduce the latency of a resulting search. However, to avoid a
+  // potentially expensive operation, we only do this once per session.
+  // Additionally, a default match is expected to be available at this point but
+  // we check anyway to guard against an invalid dereference.
+  if (base::FeatureList::IsEnabled(
+          omnibox::kSpeculativeServiceWorkerStartOnQueryInput) &&
+      !provider_client_->IsOffTheRecord() &&
+      (input.type() == metrics::OmniboxInputType::QUERY) &&
+      !search_service_worker_signal_sent_ &&
+      (result_.default_match() != result_.end())) {
+    search_service_worker_signal_sent_ = true;
+    provider_client_->StartServiceWorker(
+        result_.default_match()->destination_url);
+  }
+
   if (!done_) {
     StartExpireTimer();
     StartStopTimer();
@@ -383,6 +421,8 @@ void AutocompleteController::AddProvidersInfo(
 }
 
 void AutocompleteController::ResetSession() {
+  search_service_worker_signal_sent_ = false;
+
   for (Providers::const_iterator i(providers_.begin()); i != providers_.end();
        ++i)
     (*i)->ResetSession();
@@ -413,7 +453,7 @@ void AutocompleteController::UpdateMatchDestinationURLWithQueryFormulationTime(
 void AutocompleteController::UpdateMatchDestinationURL(
     const TemplateURLRef::SearchTermsArgs& search_terms_args,
     AutocompleteMatch* match) const {
-  TemplateURL* template_url = match->GetTemplateURL(
+  const TemplateURL* template_url = match->GetTemplateURL(
       template_url_service_, false);
   if (!template_url)
     return;

@@ -32,6 +32,8 @@ Dromaeo
 inspector
 
 Canvas/drawimage.html
+# crbug.com/727919, crbug.com/736374
+Canvas/getImageDataColorManaged.html
 
 # Redundant with chromium's page cyclers.
 Replay
@@ -50,3 +52,4 @@ Animation/overlay-background-color-transitions.html
 
 # Assumes window.eventSender is always supported; it only is for "content-shell" performance runs.
 DOM/click_webkit_user_select_none.html
+Editing/mouse-move-with-hidden-elements.html

@@ -9,6 +9,8 @@ if(WIN32)
   set(CMAKE_GENERATOR_CC cl)
 endif()
 
+include(sources.cmake)
+
 enable_language(C)
 enable_language(CXX)
 
@@ -34,12 +36,22 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set(C_CXX_FLAGS "-Wall -Werror -Wformat=2 -Wsign-compare -Wmissing-field-initializers -Wwrite-strings -ggdb -fvisibility=hidden -fno-common")
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wnewline-eof")
+  else()
+    # GCC (at least 4.8.4) has a bug where it'll find unreachable free() calls
+    # and declare that the code is trying to free a stack pointer.
+    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wno-free-nonheap-object")
   endif()
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${C_CXX_FLAGS} -Wmissing-prototypes -Wold-style-definition -Wstrict-prototypes")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ${C_CXX_FLAGS} -Wmissing-declarations")
-  # Clang's integerated assembler does not support debug symbols.
-  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wa,-g")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 ${C_CXX_FLAGS} -Wmissing-declarations -fno-exceptions")
+  # In GCC, -Wmissing-declarations is the C++ spelling of -Wmissing-prototypes
+  # and using the wrong one is an error. In Clang, -Wmissing-prototypes is the
+  # spelling for both and -Wmissing-declarations is some other warning.
+  #
+  # https://gcc.gnu.org/onlinedocs/gcc-7.1.0/gcc/Warning-Options.html#Warning-Options
+  # https://clang.llvm.org/docs/DiagnosticsReference.html#wmissing-prototypes
+  # https://clang.llvm.org/docs/DiagnosticsReference.html#wmissing-declarations
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wmissing-prototypes -Wimplicit-fallthrough")
   endif()
 elseif(MSVC)
   set(MSVC_DISABLED_WARNINGS_LIST
@@ -107,7 +119,10 @@ elseif(MSVC)
   add_definitions(-D_HAS_EXCEPTIONS=0)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
   add_definitions(-DNOMINMAX)
-  add_definitions(-D_CRT_SECURE_NO_WARNINGS) # Allow use of fopen
+  # Allow use of fopen.
+  add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+  # VS 2017 and higher supports STL-only warning suppressions.
+  add_definitions("-D_STL_EXTRA_DISABLED_WARNINGS=4774 4987")
 endif()
 
 if((CMAKE_COMPILER_IS_GNUCXX AND CMAKE_C_COMPILER_VERSION VERSION_GREATER "4.7.99") OR
@@ -143,8 +158,8 @@ if(FUZZ)
     set(RUNNER_ARGS ${RUNNER_ARGS} "-fuzzer" "-shim-config" "fuzzer_mode.json")
   endif()
 
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fsanitize-coverage=edge,indirect-calls,8bit-counters")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize-coverage=edge,indirect-calls,8bit-counters")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fsanitize-coverage=edge,indirect-calls,trace-pc-guard")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize-coverage=edge,indirect-calls,trace-pc-guard")
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address")
   link_directories(.)
 endif()
@@ -158,7 +173,64 @@ if (BUILD_SHARED_LIBS)
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 endif()
 
-if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
+if (MSAN)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "Cannot enable MSAN unless using Clang")
+  endif()
+
+  if (ASAN)
+    message(FATAL_ERROR "ASAN and MSAN are mutually exclusive")
+  endif()
+
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer")
+  set(OPENSSL_NO_ASM "1")
+endif()
+
+if (ASAN)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "Cannot enable ASAN unless using Clang")
+  endif()
+
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
+  set(OPENSSL_NO_ASM "1")
+endif()
+
+if (GCOV)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+endif()
+
+if(FIPS)
+  add_definitions(-DBORINGSSL_FIPS)
+  if(FIPS_BREAK_TEST)
+    add_definitions("-DBORINGSSL_FIPS_BREAK_${FIPS_BREAK_TEST}=1")
+  endif()
+  # Delocate does not work for ASan and MSan builds.
+  if(NOT ASAN AND NOT MSAN)
+    set(FIPS_DELOCATE "1")
+  endif()
+endif()
+
+# CMake's iOS support uses Apple's multiple-architecture toolchain. It takes an
+# architecture list from CMAKE_OSX_ARCHITECTURES, leaves CMAKE_SYSTEM_PROCESSOR
+# alone, and expects all architecture-specific logic to be conditioned within
+# the source files rather than the build. This does not work for our assembly
+# files, so we fix CMAKE_SYSTEM_PROCESSOR and only support single-architecture
+# builds.
+if (NOT OPENSSL_NO_ASM AND CMAKE_OSX_ARCHITECTURES)
+  list(LENGTH CMAKE_OSX_ARCHITECTURES NUM_ARCHES)
+  if (NOT ${NUM_ARCHES} EQUAL 1)
+    message(FATAL_ERROR "Universal binaries not supported.")
+  endif()
+  list(GET CMAKE_OSX_ARCHITECTURES 0 CMAKE_SYSTEM_PROCESSOR)
+endif()
+
+if (OPENSSL_NO_ASM)
+  add_definitions(-DOPENSSL_NO_ASM)
+  set(ARCH "generic")
+elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
   set(ARCH "x86_64")
 elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "amd64")
   set(ARCH "x86_64")
@@ -175,10 +247,12 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "i386")
   set(ARCH "x86")
 elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "i686")
   set(ARCH "x86")
-elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "^arm*")
-  set(ARCH "arm")
 elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
   set(ARCH "aarch64")
+elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "arm64")
+  set(ARCH "aarch64")
+elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "^arm*")
+  set(ARCH "arm")
 elseif (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "mips")
   # Just to avoid the “unknown processor” error.
   set(ARCH "generic")
@@ -202,40 +276,6 @@ if (${ARCH} STREQUAL "x86" AND APPLE)
   set(ARCH "x86_64")
 endif()
 
-if (MSAN)
-  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "Cannot enable MSAN unless using Clang")
-  endif()
-
-  if (ASAN)
-    message(FATAL_ERROR "ASAN and MSAN are mutually exclusive")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer")
-  set(OPENSSL_NO_ASM "1")
-endif()
-
-if (ASAN)
-  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    message(FATAL_ERROR "Cannot enable ASAN unless using Clang")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
-  set(OPENSSL_NO_ASM "1")
-endif()
-
-if (GCOV)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
-endif()
-
-if (OPENSSL_NO_ASM)
-  add_definitions(-DOPENSSL_NO_ASM)
-  set(ARCH "generic")
-endif()
-
 # Add minimal googletest targets. The provided one has many side-effects, and
 # googletest has a very straightforward build.
 add_library(gtest third_party/googletest/src/gtest-all.cc)
@@ -247,13 +287,31 @@ include_directories(third_party/googletest/include)
 # themselves as dependencies next to the target definition.
 add_custom_target(all_tests)
 
+add_custom_command(
+  OUTPUT crypto_test_data.cc
+  COMMAND ${GO_EXECUTABLE} run util/embed_test_data.go ${CRYPTO_TEST_DATA} >
+  ${CMAKE_CURRENT_BINARY_DIR}/crypto_test_data.cc
+  DEPENDS util/embed_test_data.go ${CRYPTO_TEST_DATA}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(crypto_test_data OBJECT crypto_test_data.cc)
+
 add_subdirectory(crypto)
 add_subdirectory(ssl)
 add_subdirectory(ssl/test)
+add_subdirectory(fipstools)
 add_subdirectory(tool)
 add_subdirectory(decrepit)
 
 if(FUZZ)
+  if(LIBFUZZER_FROM_DEPS)
+    file(GLOB LIBFUZZER_SOURCES "util/bot/libFuzzer/*.cpp")
+    add_library(Fuzzer STATIC ${LIBFUZZER_SOURCES})
+    # libFuzzer does not pass our aggressive warnings. It also must be built
+    # without -fsanitize-coverage options or clang crashes.
+    set_target_properties(Fuzzer PROPERTIES COMPILE_FLAGS "-Wno-shadow -Wno-format-nonliteral -Wno-missing-prototypes -fsanitize-coverage=0")
+  endif()
+
   add_subdirectory(fuzz)
 endif()
 

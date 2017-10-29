@@ -130,7 +130,6 @@ HttpResponseInfo::HttpResponseInfo()
       was_fetched_via_proxy(false),
       did_use_http_auth(false),
       unused_since_prefetch(false),
-      async_revalidation_required(false),
       connection_info(CONNECTION_INFO_UNKNOWN) {}
 
 HttpResponseInfo::HttpResponseInfo(const HttpResponseInfo& rhs)
@@ -144,7 +143,6 @@ HttpResponseInfo::HttpResponseInfo(const HttpResponseInfo& rhs)
       proxy_server(rhs.proxy_server),
       did_use_http_auth(rhs.did_use_http_auth),
       unused_since_prefetch(rhs.unused_since_prefetch),
-      async_revalidation_required(rhs.async_revalidation_required),
       socket_address(rhs.socket_address),
       alpn_negotiated_protocol(rhs.alpn_negotiated_protocol),
       connection_info(rhs.connection_info),
@@ -171,7 +169,6 @@ HttpResponseInfo& HttpResponseInfo::operator=(const HttpResponseInfo& rhs) {
   was_fetched_via_proxy = rhs.was_fetched_via_proxy;
   did_use_http_auth = rhs.did_use_http_auth;
   unused_since_prefetch = rhs.unused_since_prefetch;
-  async_revalidation_required = rhs.async_revalidation_required;
   socket_address = rhs.socket_address;
   alpn_negotiated_protocol = rhs.alpn_negotiated_protocol;
   connection_info = rhs.connection_info;
@@ -242,6 +239,12 @@ bool HttpResponseInfo::InitFromPickle(const base::Pickle& pickle,
     int connection_status;
     if (!iter.ReadInt(&connection_status))
       return false;
+
+    // SSLv3 is gone, so drop cached entries that were loaded over SSLv3.
+    if (SSLConnectionStatusToVersion(connection_status) ==
+        SSL_CONNECTION_VERSION_SSL3) {
+      return false;
+    }
     ssl_info.connection_status = connection_status;
   }
 
@@ -440,6 +443,8 @@ bool HttpResponseInfo::DidUseQuic() const {
     case CONNECTION_INFO_QUIC_36:
     case CONNECTION_INFO_QUIC_37:
     case CONNECTION_INFO_QUIC_38:
+    case CONNECTION_INFO_QUIC_39:
+    case CONNECTION_INFO_QUIC_40:
       return true;
     case NUM_OF_CONNECTION_INFOS:
       NOTREACHED();
@@ -486,6 +491,10 @@ std::string HttpResponseInfo::ConnectionInfoToString(
       return "http/2+quic/37";
     case CONNECTION_INFO_QUIC_38:
       return "http/2+quic/38";
+    case CONNECTION_INFO_QUIC_39:
+      return "http/2+quic/39";
+    case CONNECTION_INFO_QUIC_40:
+      return "http/2+quic/40";
     case CONNECTION_INFO_HTTP0_9:
       return "http/0.9";
     case CONNECTION_INFO_HTTP1_0:

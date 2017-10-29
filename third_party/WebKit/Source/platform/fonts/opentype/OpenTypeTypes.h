@@ -25,8 +25,8 @@
 #ifndef OpenTypeTypes_h
 #define OpenTypeTypes_h
 
-#include "platform/SharedBuffer.h"
-#include "wtf/ByteOrder.h"
+#include "platform/wtf/ByteOrder.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 namespace OpenType {
@@ -64,18 +64,17 @@ typedef UInt16 Offset;
 typedef UInt16 GlyphID;
 
 template <typename T>
-static const T* validateTable(const RefPtr<SharedBuffer>& buffer,
-                              size_t count = 1) {
-  if (!buffer || buffer->size() < sizeof(T) * count)
-    return 0;
-  return reinterpret_cast<const T*>(buffer->data());
+static const T* ValidateTable(const Vector<char>& buffer, size_t count = 1) {
+  if (buffer.size() < sizeof(T) * count)
+    return nullptr;
+  return reinterpret_cast<const T*>(buffer.data());
 }
 
 struct TableBase {
   DISALLOW_NEW();
 
  protected:
-  static bool isValidEnd(const SharedBuffer& buffer, const void* position) {
+  static bool IsValidEnd(const Vector<char>& buffer, const void* position) {
     if (position < buffer.data())
       return false;
     size_t offset = reinterpret_cast<const char*>(position) - buffer.data();
@@ -83,17 +82,17 @@ struct TableBase {
   }
 
   template <typename T>
-  static const T* validatePtr(const SharedBuffer& buffer,
+  static const T* ValidatePtr(const Vector<char>& buffer,
                               const void* position) {
     const T* casted = reinterpret_cast<const T*>(position);
-    if (!isValidEnd(buffer, &casted[1]))
-      return 0;
+    if (!IsValidEnd(buffer, &casted[1]))
+      return nullptr;
     return casted;
   }
 
   template <typename T>
-  const T* validateOffset(const SharedBuffer& buffer, uint16_t offset) const {
-    return validatePtr<T>(buffer,
+  const T* ValidateOffset(const Vector<char>& buffer, uint16_t offset) const {
+    return ValidatePtr<T>(buffer,
                           reinterpret_cast<const int8_t*>(this) + offset);
   }
 };

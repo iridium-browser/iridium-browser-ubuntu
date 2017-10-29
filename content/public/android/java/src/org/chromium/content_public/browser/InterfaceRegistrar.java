@@ -6,6 +6,7 @@ package org.chromium.content_public.browser;
 
 import android.content.Context;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.services.service_manager.InterfaceRegistry;
 
 import java.util.ArrayList;
@@ -25,16 +26,17 @@ public interface InterfaceRegistrar<ParamType> {
     public static class Registry<ParamType> {
         private static Registry<Context> sContextRegistry;
         private static Registry<WebContents> sWebContentsRegistry;
+        private static Registry<RenderFrameHost> sRenderFrameHostRegistry;
 
         private List<InterfaceRegistrar<ParamType>> mRegistrars =
                 new ArrayList<InterfaceRegistrar<ParamType>>();
 
-        public static void applyContextRegistrars(
-                InterfaceRegistry interfaceRegistry, Context context) {
+        public static void applyContextRegistrars(InterfaceRegistry interfaceRegistry) {
             if (sContextRegistry == null) {
                 return;
             }
-            sContextRegistry.applyRegistrars(interfaceRegistry, context);
+            sContextRegistry.applyRegistrars(
+                    interfaceRegistry, ContextUtils.getApplicationContext());
         }
 
         public static void applyWebContentsRegistrars(
@@ -43,6 +45,14 @@ public interface InterfaceRegistrar<ParamType> {
                 return;
             }
             sWebContentsRegistry.applyRegistrars(interfaceRegistry, webContents);
+        }
+
+        public static void applyRenderFrameHostRegistrars(
+                InterfaceRegistry interfaceRegistry, RenderFrameHost renderFrameHost) {
+            if (sRenderFrameHostRegistry == null) {
+                return;
+            }
+            sRenderFrameHostRegistry.applyRegistrars(interfaceRegistry, renderFrameHost);
         }
 
         public static void addContextRegistrar(InterfaceRegistrar<Context> registrar) {
@@ -57,6 +67,14 @@ public interface InterfaceRegistrar<ParamType> {
                 sWebContentsRegistry = new Registry<WebContents>();
             }
             sWebContentsRegistry.addRegistrar(registrar);
+        }
+
+        public static void addRenderFrameHostRegistrar(
+                InterfaceRegistrar<RenderFrameHost> registrar) {
+            if (sRenderFrameHostRegistry == null) {
+                sRenderFrameHostRegistry = new Registry<RenderFrameHost>();
+            }
+            sRenderFrameHostRegistry.addRegistrar(registrar);
         }
 
         private Registry() {}

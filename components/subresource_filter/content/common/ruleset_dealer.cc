@@ -10,25 +10,25 @@
 namespace subresource_filter {
 
 RulesetDealer::RulesetDealer() {
-  DetachFromThread();
+  sequence_checker_.DetachFromSequence();
 }
 
 RulesetDealer::~RulesetDealer() = default;
 
 void RulesetDealer::SetRulesetFile(base::File ruleset_file) {
-  DCHECK(CalledOnValidThread());
+  DCHECK(sequence_checker_.CalledOnValidSequence());
   DCHECK(ruleset_file.IsValid());
   ruleset_file_ = std::move(ruleset_file);
   weak_cached_ruleset_.reset();
 }
 
 bool RulesetDealer::IsRulesetFileAvailable() const {
-  DCHECK(CalledOnValidThread());
+  DCHECK(sequence_checker_.CalledOnValidSequence());
   return ruleset_file_.IsValid();
 }
 
 scoped_refptr<const MemoryMappedRuleset> RulesetDealer::GetRuleset() {
-  DCHECK(CalledOnValidThread());
+  DCHECK(sequence_checker_.CalledOnValidSequence());
   if (!ruleset_file_.IsValid())
     return nullptr;
 
@@ -42,6 +42,10 @@ scoped_refptr<const MemoryMappedRuleset> RulesetDealer::GetRuleset() {
     weak_cached_ruleset_ = ruleset->AsWeakPtr();
   }
   return strong_ruleset_ref;
+}
+
+base::File RulesetDealer::DuplicateRulesetFile() {
+  return ruleset_file_.Duplicate();
 }
 
 }  // namespace subresource_filter

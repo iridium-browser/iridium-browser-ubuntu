@@ -9,12 +9,13 @@ import android.util.AttributeSet;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.View.OnLongClickListener;
-import android.view.ViewGroup.MarginLayoutParams;
 import android.widget.Checkable;
 import android.widget.FrameLayout;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.widget.displaystyle.HorizontalDisplayStyle;
+import org.chromium.chrome.browser.widget.displaystyle.MarginResizer;
+import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate.SelectionObserver;
 
 import java.util.List;
@@ -59,6 +60,19 @@ public abstract class SelectableItemView<E> extends FrameLayout implements Check
             mSelectionDelegate = delegate;
             mSelectionDelegate.addObserver(this);
         }
+    }
+
+    /**
+     * Sets the lateral margins used in {@link HorizontalDisplayStyle#WIDE} and
+     * {@link HorizontalDisplayStyle#REGULAR}. This should be called when the item uses the
+     * list_item* 9-patches as a background and the SelectableListLayout that contains the item
+     * is width constrained.
+     *
+     * @param uiConfig The UiConfig used to observe display style changes.
+     */
+    public void configureWideDisplayStyle(UiConfig uiConfig) {
+        MarginResizer.createAndAttach(this, uiConfig,
+                SelectableListLayout.getDefaultListItemLateralMarginPx(getResources()), 0);
     }
 
     /**
@@ -107,7 +121,7 @@ public abstract class SelectableItemView<E> extends FrameLayout implements Check
     public final void onClick(View view) {
         assert view == this;
 
-        if (mSelectionDelegate.isSelectionEnabled()) {
+        if (isSelectionModeActive()) {
             onLongClick(view);
         }  else {
             onClick();
@@ -118,9 +132,25 @@ public abstract class SelectableItemView<E> extends FrameLayout implements Check
     @Override
     public boolean onLongClick(View view) {
         assert view == this;
-        boolean checked = mSelectionDelegate.toggleSelectionForItem(mItem);
+        boolean checked = toggleSelectionForItem(mItem);
         setChecked(checked);
         return true;
+    }
+
+    /**
+     * @return Whether we are currently in selection mode.
+     */
+    protected boolean isSelectionModeActive() {
+        return mSelectionDelegate.isSelectionEnabled();
+    }
+
+    /**
+     * Toggles the selection state for a given item.
+     * @param item The given item.
+     * @return Whether the item was in selected state after the toggle.
+     */
+    protected boolean toggleSelectionForItem(E item) {
+        return mSelectionDelegate.toggleSelectionForItem(item);
     }
 
     // Checkable implementations.
@@ -173,32 +203,5 @@ public abstract class SelectableItemView<E> extends FrameLayout implements Check
         }
 
         setBackgroundResource(backgroundResource);
-    }
-
-    /**
-     * Sets lateral margins to effectively hide the lateral shadow and rounded corners on the
-     * list_item* 9-patches used as backgrounds.
-     * @param contentView The container view surrounding the list item content. Extra start and end
-     *                    padding will be added to this view to account for incorrect internal
-     *                    padding in the 9-patches.
-     */
-    public void setLateralMarginsForDefaultDisplay(View contentView) {
-        MarginLayoutParams layoutParams = (MarginLayoutParams) getLayoutParams();
-        layoutParams.setMargins(
-                SelectableListLayout.getDefaultListItemLateralMarginPx(getResources()),
-                layoutParams.topMargin,
-                SelectableListLayout.getDefaultListItemLateralMarginPx(getResources()),
-                layoutParams.bottomMargin);
-
-        // TODO(twellington): remove this when new assets with the correct built in padding are
-        //                    available. This can move to XML once the bookmark and download layouts
-        //                    are width constrained to 600dp.
-        int lateralPaddingOffset =
-                getResources().getDimensionPixelSize(R.dimen.list_item_lateral_padding);
-        int startPadding = ApiCompatibilityUtils.getPaddingStart(contentView);
-        int endPadding = ApiCompatibilityUtils.getPaddingEnd(contentView);
-        ApiCompatibilityUtils.setPaddingRelative(contentView, startPadding + lateralPaddingOffset,
-                contentView.getPaddingTop(), endPadding + lateralPaddingOffset,
-                contentView.getPaddingBottom());
     }
 }

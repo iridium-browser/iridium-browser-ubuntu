@@ -4,6 +4,7 @@
 
 #include "ios/web/public/payments/payment_request.h"
 
+#include "base/json/json_reader.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 
@@ -12,29 +13,12 @@ namespace {
 // All of these are defined here (even though most are only used once each) so
 // the format details are easy to locate and update or compare to the spec doc.
 // (https://w3c.github.io/browser-payment-api/).
-static const char kAddressAddressLine[] = "addressLine";
-static const char kAddressCity[] = "city";
-static const char kAddressCountry[] = "country";
-static const char kAddressDependentLocality[] = "dependentLocality";
-static const char kAddressLanguageCode[] = "languageCode";
-static const char kAddressOrganization[] = "organization";
-static const char kAddressPhone[] = "phone";
-static const char kAddressPostalCode[] = "postalCode";
-static const char kAddressRecipient[] = "recipient";
-static const char kAddressRegion[] = "region";
-static const char kAddressSortingCode[] = "sortingCode";
-static const char kCardBillingAddress[] = "billingAddress";
-static const char kCardCardholderName[] = "cardholderName";
-static const char kCardCardNumber[] = "cardNumber";
-static const char kCardCardSecurityCode[] = "cardSecurityCode";
-static const char kCardExpiryMonth[] = "expiryMonth";
-static const char kCardExpiryYear[] = "expiryYear";
-static const char kMethodDataData[] = "data";
 static const char kPaymentCurrencyAmountCurrencySystemISO4217[] =
     "urn:iso:std:iso:4217";
 static const char kPaymentCurrencyAmountCurrencySystem[] = "currencySystem";
 static const char kPaymentCurrencyAmountCurrency[] = "currency";
 static const char kPaymentCurrencyAmountValue[] = "value";
+static const char kPaymentDetailsId[] = "id";
 static const char kPaymentDetailsDisplayItems[] = "displayItems";
 static const char kPaymentDetailsError[] = "error";
 static const char kPaymentDetailsShippingOptions[] = "shippingOptions";
@@ -50,9 +34,10 @@ static const char kPaymentOptionsShippingTypeDelivery[] = "delivery";
 static const char kPaymentOptionsShippingTypePickup[] = "pickup";
 static const char kPaymentOptionsShippingType[] = "shippingType";
 static const char kPaymentRequestDetails[] = "details";
-static const char kPaymentRequestId[] = "paymentRequestID";
+static const char kPaymentRequestId[] = "id";
 static const char kPaymentRequestMethodData[] = "methodData";
 static const char kPaymentRequestOptions[] = "options";
+static const char kPaymentResponseId[] = "requestId";
 static const char kPaymentResponseDetails[] = "details";
 static const char kPaymentResponseMethodName[] = "methodName";
 static const char kPaymentResponsePayerEmail[] = "payerEmail";
@@ -64,107 +49,10 @@ static const char kPaymentShippingOptionAmount[] = "amount";
 static const char kPaymentShippingOptionId[] = "id";
 static const char kPaymentShippingOptionLabel[] = "label";
 static const char kPaymentShippingOptionSelected[] = "selected";
-static const char kSupportedMethods[] = "supportedMethods";
 
 }  // namespace
 
 namespace web {
-
-PaymentAddress::PaymentAddress() {}
-PaymentAddress::PaymentAddress(const PaymentAddress& other) = default;
-PaymentAddress::~PaymentAddress() = default;
-
-bool PaymentAddress::operator==(const PaymentAddress& other) const {
-  return this->country == other.country &&
-         this->address_line == other.address_line &&
-         this->region == other.region && this->city == other.city &&
-         this->dependent_locality == other.dependent_locality &&
-         this->postal_code == other.postal_code &&
-         this->sorting_code == other.sorting_code &&
-         this->language_code == other.language_code &&
-         this->organization == other.organization &&
-         this->recipient == other.recipient && this->care_of == other.care_of &&
-         this->phone == other.phone;
-}
-
-bool PaymentAddress::operator!=(const PaymentAddress& other) const {
-  return !(*this == other);
-}
-
-std::unique_ptr<base::DictionaryValue> PaymentAddress::ToDictionaryValue()
-    const {
-  std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
-
-  if (!this->country.empty())
-    result->SetString(kAddressCountry, this->country);
-
-  if (!this->address_line.empty()) {
-    std::unique_ptr<base::ListValue> address_line(new base::ListValue);
-    for (base::string16 address_line_string : this->address_line) {
-      if (!address_line_string.empty())
-        address_line->AppendString(address_line_string);
-    }
-    result->Set(kAddressAddressLine, std::move(address_line));
-  }
-
-  if (!this->region.empty())
-    result->SetString(kAddressRegion, this->region);
-  if (!this->city.empty())
-    result->SetString(kAddressCity, this->city);
-  if (!this->dependent_locality.empty())
-    result->SetString(kAddressDependentLocality, this->dependent_locality);
-  if (!this->postal_code.empty())
-    result->SetString(kAddressPostalCode, this->postal_code);
-  if (!this->sorting_code.empty())
-    result->SetString(kAddressSortingCode, this->sorting_code);
-  if (!this->language_code.empty())
-    result->SetString(kAddressLanguageCode, this->language_code);
-  if (!this->organization.empty())
-    result->SetString(kAddressOrganization, this->organization);
-  if (!this->recipient.empty())
-    result->SetString(kAddressRecipient, this->recipient);
-  if (!this->phone.empty())
-    result->SetString(kAddressPhone, this->phone);
-
-  return result;
-}
-
-PaymentMethodData::PaymentMethodData() {}
-PaymentMethodData::PaymentMethodData(const PaymentMethodData& other) = default;
-PaymentMethodData::~PaymentMethodData() = default;
-
-bool PaymentMethodData::operator==(const PaymentMethodData& other) const {
-  return this->supported_methods == other.supported_methods &&
-         this->data == other.data;
-}
-
-bool PaymentMethodData::operator!=(const PaymentMethodData& other) const {
-  return !(*this == other);
-}
-
-bool PaymentMethodData::FromDictionaryValue(
-    const base::DictionaryValue& value) {
-  this->supported_methods.clear();
-
-  const base::ListValue* supported_methods_list = nullptr;
-  // At least one supported method is required.
-  if (!value.GetList(kSupportedMethods, &supported_methods_list) ||
-      supported_methods_list->GetSize() == 0) {
-    return false;
-  }
-  for (size_t i = 0; i < supported_methods_list->GetSize(); ++i) {
-    base::string16 supported_method;
-    if (!supported_methods_list->GetString(i, &supported_method)) {
-      return false;
-    }
-    this->supported_methods.push_back(supported_method);
-  }
-
-  // Data is optional.
-  value.GetString(kMethodDataData, &this->data);
-
-  return true;
-}
 
 PaymentCurrencyAmount::PaymentCurrencyAmount()
     // By default, the currency is defined by [ISO4217]. For example, USD for
@@ -293,7 +181,7 @@ PaymentDetails::PaymentDetails(const PaymentDetails& other) = default;
 PaymentDetails::~PaymentDetails() = default;
 
 bool PaymentDetails::operator==(const PaymentDetails& other) const {
-  return this->total == other.total &&
+  return this->id == other.id && this->total == other.total &&
          this->display_items == other.display_items &&
          this->shipping_options == other.shipping_options &&
          this->modifiers == other.modifiers && this->error == other.error;
@@ -303,16 +191,21 @@ bool PaymentDetails::operator!=(const PaymentDetails& other) const {
   return !(*this == other);
 }
 
-bool PaymentDetails::FromDictionaryValue(const base::DictionaryValue& value) {
+bool PaymentDetails::FromDictionaryValue(const base::DictionaryValue& value,
+                                         bool requires_total) {
   this->display_items.clear();
   this->shipping_options.clear();
   this->modifiers.clear();
 
+  // ID is optional.
+  value.GetString(kPaymentDetailsId, &this->id);
+
   const base::DictionaryValue* total_dict = nullptr;
-  if (!value.GetDictionary(kPaymentDetailsTotal, &total_dict)) {
+  if (!value.GetDictionary(kPaymentDetailsTotal, &total_dict) &&
+      requires_total) {
     return false;
   }
-  if (!this->total.FromDictionaryValue(*total_dict)) {
+  if (total_dict && !this->total.FromDictionaryValue(*total_dict)) {
     return false;
   }
 
@@ -357,7 +250,7 @@ PaymentOptions::PaymentOptions()
       request_payer_email(false),
       request_payer_phone(false),
       request_shipping(false),
-      shipping_type(PaymentShippingType::SHIPPING) {}
+      shipping_type(payments::PaymentShippingType::SHIPPING) {}
 PaymentOptions::~PaymentOptions() = default;
 
 bool PaymentOptions::operator==(const PaymentOptions& other) const {
@@ -387,12 +280,12 @@ bool PaymentOptions::FromDictionaryValue(const base::DictionaryValue& value) {
   value.GetString(kPaymentOptionsShippingType, &shipping_type);
   if (shipping_type ==
       base::ASCIIToUTF16(kPaymentOptionsShippingTypeDelivery)) {
-    this->shipping_type = PaymentShippingType::DELIVERY;
+    this->shipping_type = payments::PaymentShippingType::DELIVERY;
   } else if (shipping_type ==
              base::ASCIIToUTF16(kPaymentOptionsShippingTypePickup)) {
-    this->shipping_type = PaymentShippingType::PICKUP;
+    this->shipping_type = payments::PaymentShippingType::PICKUP;
   } else {
-    this->shipping_type = PaymentShippingType::SHIPPING;
+    this->shipping_type = payments::PaymentShippingType::SHIPPING;
   }
 
   return true;
@@ -417,6 +310,10 @@ bool PaymentRequest::operator!=(const PaymentRequest& other) const {
 bool PaymentRequest::FromDictionaryValue(const base::DictionaryValue& value) {
   this->method_data.clear();
 
+  if (!value.GetString(kPaymentRequestId, &this->payment_request_id)) {
+    return false;
+  }
+
   // Parse the payment method data.
   const base::ListValue* method_data_list = nullptr;
   // At least one method is required.
@@ -429,7 +326,7 @@ bool PaymentRequest::FromDictionaryValue(const base::DictionaryValue& value) {
     if (!method_data_list->GetDictionary(i, &method_data_dict))
       return false;
 
-    PaymentMethodData method_data;
+    payments::PaymentMethodData method_data;
     if (!method_data.FromDictionaryValue(*method_data_dict))
       return false;
     this->method_data.push_back(method_data);
@@ -438,7 +335,8 @@ bool PaymentRequest::FromDictionaryValue(const base::DictionaryValue& value) {
   // Parse the payment details.
   const base::DictionaryValue* payment_details_dict = nullptr;
   if (!value.GetDictionary(kPaymentRequestDetails, &payment_details_dict) ||
-      !this->details.FromDictionaryValue(*payment_details_dict)) {
+      !this->details.FromDictionaryValue(*payment_details_dict,
+                                         /*requires_total=*/true)) {
     return false;
   }
 
@@ -450,42 +348,6 @@ bool PaymentRequest::FromDictionaryValue(const base::DictionaryValue& value) {
       return false;
 
   return true;
-}
-
-BasicCardResponse::BasicCardResponse() {}
-BasicCardResponse::BasicCardResponse(const BasicCardResponse& other) = default;
-BasicCardResponse::~BasicCardResponse() = default;
-
-bool BasicCardResponse::operator==(const BasicCardResponse& other) const {
-  return this->cardholder_name == other.cardholder_name &&
-         this->card_number == other.card_number &&
-         this->expiry_month == other.expiry_month &&
-         this->expiry_year == other.expiry_year &&
-         this->card_security_code == other.card_security_code &&
-         this->billing_address == other.billing_address;
-}
-
-bool BasicCardResponse::operator!=(const BasicCardResponse& other) const {
-  return !(*this == other);
-}
-
-std::unique_ptr<base::DictionaryValue> BasicCardResponse::ToDictionaryValue()
-    const {
-  std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
-
-  if (!this->cardholder_name.empty())
-    result->SetString(kCardCardholderName, this->cardholder_name);
-  result->SetString(kCardCardNumber, this->card_number);
-  if (!this->expiry_month.empty())
-    result->SetString(kCardExpiryMonth, this->expiry_month);
-  if (!this->expiry_year.empty())
-    result->SetString(kCardExpiryYear, this->expiry_year);
-  if (!this->card_security_code.empty())
-    result->SetString(kCardCardSecurityCode, this->card_security_code);
-  if (!this->billing_address.ToDictionaryValue()->empty())
-    result->Set(kCardBillingAddress, this->billing_address.ToDictionaryValue());
-
-  return result;
 }
 
 PaymentResponse::PaymentResponse() {}
@@ -511,9 +373,15 @@ std::unique_ptr<base::DictionaryValue> PaymentResponse::ToDictionaryValue()
     const {
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
 
-  result->SetString(kPaymentRequestId, this->payment_request_id);
+  result->SetString(kPaymentResponseId, this->payment_request_id);
   result->SetString(kPaymentResponseMethodName, this->method_name);
-  result->Set(kPaymentResponseDetails, this->details.ToDictionaryValue());
+  // |this.details| is a json-serialized string. Parse it to a base::Value so
+  // that when |this| is converted to a JSON string, |this.details| won't get
+  // json-escaped.
+  std::unique_ptr<base::Value> details =
+      base::JSONReader().ReadToValue(this->details);
+  if (details)
+    result->Set(kPaymentResponseDetails, std::move(details));
   if (!this->shipping_address.ToDictionaryValue()->empty()) {
     result->Set(kPaymentResponseShippingAddress,
                 this->shipping_address.ToDictionaryValue());

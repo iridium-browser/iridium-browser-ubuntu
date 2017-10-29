@@ -26,6 +26,12 @@
 
 namespace google_apis {
 
+// Callback used for requests that the server returns TeamDrive data
+// formatted into JSON value.
+typedef base::Callback<void(DriveApiErrorCode error,
+                            std::unique_ptr<TeamDriveList> entry)>
+    TeamDriveListCallback;
+
 // Callback used for requests that the server returns FileList data
 // formatted into JSON value.
 typedef base::Callback<void(DriveApiErrorCode error,
@@ -466,6 +472,42 @@ class FilesCopyRequest : public DriveApiDataRequest<FileResource> {
   DISALLOW_COPY_AND_ASSIGN(FilesCopyRequest);
 };
 
+//========================== TeamDriveListRequest =============================
+
+// This class performs the request for fetching TeamDrive list.
+// The result may contain only first part of the result. The remaining result
+// should be able to be fetched by another request using this class, by
+// setting the next_page_token from previous call, to page_token.
+// This request is mapped to
+// https://developers.google.com/drive/v2/teamdrives/
+class TeamDriveListRequest : public DriveApiDataRequest<TeamDriveList> {
+ public:
+  TeamDriveListRequest(RequestSender* sender,
+                       const DriveApiUrlGenerator& url_generator,
+                       const TeamDriveListCallback& callback);
+  ~TeamDriveListRequest() override;
+
+  // Optional parameter
+  int max_results() const { return max_results_; }
+  void set_max_results(int max_results) { max_results_ = max_results; }
+
+  const std::string& page_token() const { return page_token_; }
+  void set_page_token(const std::string& page_token) {
+    page_token_ = page_token;
+  }
+
+ protected:
+  // Overridden from DriveApiDataRequest.
+  GURL GetURLInternal() const override;
+
+ private:
+  const DriveApiUrlGenerator url_generator_;
+  int max_results_;
+  std::string page_token_;
+
+  DISALLOW_COPY_AND_ASSIGN(TeamDriveListRequest);
+};
+
 //============================= FilesListRequest =============================
 
 // This class performs the request for fetching FileList.
@@ -490,6 +532,14 @@ class FilesListRequest : public DriveApiDataRequest<FileList> {
     page_token_ = page_token;
   }
 
+  FilesListCorpora corpora() const { return corpora_; }
+  void set_corpora(FilesListCorpora corpora) { corpora_ = corpora; }
+
+  const std::string& team_drive_id() const { return team_drive_id_; }
+  void set_team_drive_id(const std::string& team_drive_id) {
+    team_drive_id_ = team_drive_id;
+  }
+
   const std::string& q() const { return q_; }
   void set_q(const std::string& q) { q_ = q; }
 
@@ -501,6 +551,8 @@ class FilesListRequest : public DriveApiDataRequest<FileList> {
   const DriveApiUrlGenerator url_generator_;
   int max_results_;
   std::string page_token_;
+  FilesListCorpora corpora_;
+  std::string team_drive_id_;
   std::string q_;
 
   DISALLOW_COPY_AND_ASSIGN(FilesListRequest);
@@ -648,6 +700,11 @@ class ChangesListRequest : public DriveApiDataRequest<ChangeList> {
     start_change_id_ = start_change_id;
   }
 
+  const std::string& team_drive_id() const { return team_drive_id_; }
+  void set_team_drive_id(const std::string& team_drive_id) {
+    team_drive_id_ = team_drive_id;
+  }
+
  protected:
   // Overridden from DriveApiDataRequest.
   GURL GetURLInternal() const override;
@@ -658,6 +715,7 @@ class ChangesListRequest : public DriveApiDataRequest<ChangeList> {
   int max_results_;
   std::string page_token_;
   int64_t start_change_id_;
+  std::string team_drive_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ChangesListRequest);
 };

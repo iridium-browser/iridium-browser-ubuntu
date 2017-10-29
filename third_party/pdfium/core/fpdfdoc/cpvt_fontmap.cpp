@@ -11,6 +11,8 @@
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfdoc/cpdf_interform.h"
+#include "core/fxcrt/fx_codepage.h"
+#include "third_party/base/logging.h"
 
 CPVT_FontMap::CPVT_FontMap(CPDF_Document* pDoc,
                            CPDF_Dictionary* pResDict,
@@ -19,43 +21,39 @@ CPVT_FontMap::CPVT_FontMap(CPDF_Document* pDoc,
     : m_pDocument(pDoc),
       m_pResDict(pResDict),
       m_pDefFont(pDefFont),
-      m_sDefFontAlias(sDefFontAlias),
-      m_pSysFont(nullptr),
-      m_sSysFontAlias() {}
+      m_sDefFontAlias(sDefFontAlias) {}
 
 CPVT_FontMap::~CPVT_FontMap() {}
 
-void CPVT_FontMap::GetAnnotSysPDFFont(CPDF_Document* pDoc,
-                                      const CPDF_Dictionary* pResDict,
-                                      CPDF_Font*& pSysFont,
-                                      CFX_ByteString& sSysFontAlias) {
+CPDF_Font* CPVT_FontMap::GetAnnotSysPDFFont(CPDF_Document* pDoc,
+                                            const CPDF_Dictionary* pResDict,
+                                            CFX_ByteString* sSysFontAlias) {
   if (!pDoc || !pResDict)
-    return;
+    return nullptr;
 
-  CFX_ByteString sFontAlias;
   CPDF_Dictionary* pFormDict = pDoc->GetRoot()->GetDictFor("AcroForm");
   CPDF_Font* pPDFFont = AddNativeInterFormFont(pFormDict, pDoc, sSysFontAlias);
   if (!pPDFFont)
-    return;
+    return nullptr;
 
   CPDF_Dictionary* pFontList = pResDict->GetDictFor("Font");
-  if (pFontList && !pFontList->KeyExist(sSysFontAlias)) {
-    pFontList->SetNewFor<CPDF_Reference>(sSysFontAlias, pDoc,
+  if (pFontList && !pFontList->KeyExist(*sSysFontAlias)) {
+    pFontList->SetNewFor<CPDF_Reference>(*sSysFontAlias, pDoc,
                                          pPDFFont->GetFontDict()->GetObjNum());
   }
-  pSysFont = pPDFFont;
+  return pPDFFont;
 }
 
 CPDF_Font* CPVT_FontMap::GetPDFFont(int32_t nFontIndex) {
   switch (nFontIndex) {
     case 0:
-      return m_pDefFont;
+      return m_pDefFont.Get();
     case 1:
       if (!m_pSysFont) {
-        GetAnnotSysPDFFont(m_pDocument, m_pResDict, m_pSysFont,
-                           m_sSysFontAlias);
+        m_pSysFont = GetAnnotSysPDFFont(m_pDocument.Get(), m_pResDict.Get(),
+                                        &m_sSysFontAlias);
       }
-      return m_pSysFont;
+      return m_pSysFont.Get();
     default:
       return nullptr;
   }
@@ -67,28 +65,28 @@ CFX_ByteString CPVT_FontMap::GetPDFFontAlias(int32_t nFontIndex) {
       return m_sDefFontAlias;
     case 1:
       if (!m_pSysFont) {
-        GetAnnotSysPDFFont(m_pDocument, m_pResDict, m_pSysFont,
-                           m_sSysFontAlias);
+        m_pSysFont = GetAnnotSysPDFFont(m_pDocument.Get(), m_pResDict.Get(),
+                                        &m_sSysFontAlias);
       }
       return m_sSysFontAlias;
     default:
-      return "";
+      return CFX_ByteString();
   }
 }
 
 int32_t CPVT_FontMap::GetWordFontIndex(uint16_t word,
                                        int32_t charset,
                                        int32_t nFontIndex) {
-  ASSERT(false);
+  NOTREACHED();
   return 0;
 }
 
 int32_t CPVT_FontMap::CharCodeFromUnicode(int32_t nFontIndex, uint16_t word) {
-  ASSERT(false);
+  NOTREACHED();
   return 0;
 }
 
 int32_t CPVT_FontMap::CharSetFromUnicode(uint16_t word, int32_t nOldCharset) {
-  ASSERT(false);
-  return FXFONT_ANSI_CHARSET;
+  NOTREACHED();
+  return FX_CHARSET_ANSI;
 }

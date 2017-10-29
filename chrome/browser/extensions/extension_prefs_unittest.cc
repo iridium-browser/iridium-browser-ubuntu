@@ -4,11 +4,14 @@
 
 #include "chrome/browser/extensions/extension_prefs_unittest.h"
 
+#include <utility>
+
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/common/chrome_paths.h"
@@ -32,7 +35,6 @@
 
 using base::Time;
 using base::TimeDelta;
-using content::BrowserThread;
 
 namespace extensions {
 
@@ -42,9 +44,7 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
 }
 
 ExtensionPrefsTest::ExtensionPrefsTest()
-    : ui_thread_(BrowserThread::UI, &message_loop_),
-      prefs_(message_loop_.task_runner().get()) {
-}
+    : prefs_(base::ThreadTaskRunnerHandle::Get()) {}
 
 ExtensionPrefsTest::~ExtensionPrefsTest() {
 }
@@ -572,7 +572,7 @@ class ExtensionPrefsFinishDelayedInstallInfo : public ExtensionPrefsTest {
     manifest.SetString(manifest_keys::kVersion, "0.2");
     std::unique_ptr<base::ListValue> scripts(new base::ListValue);
     scripts->AppendString("test.js");
-    manifest.Set(manifest_keys::kBackgroundScripts, scripts.release());
+    manifest.Set(manifest_keys::kBackgroundScripts, std::move(scripts));
     base::FilePath path =
         prefs_.extensions_dir().AppendASCII("test_0.2");
     std::string errors;

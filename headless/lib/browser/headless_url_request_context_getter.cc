@@ -9,9 +9,10 @@
 #include <vector>
 
 #include "base/memory/ptr_util.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task_scheduler/post_task.h"
 #include "content/public/browser/browser_thread.h"
 #include "headless/lib/browser/headless_browser_context_options.h"
+#include "headless/lib/browser/headless_network_delegate.h"
 #include "net/dns/mapped_host_resolver.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
@@ -21,17 +22,19 @@ namespace headless {
 
 HeadlessURLRequestContextGetter::HeadlessURLRequestContextGetter(
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
     content::ProtocolHandlerMap* protocol_handlers,
     ProtocolHandlerMap context_protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors,
-    HeadlessBrowserContextOptions* options)
+    HeadlessBrowserContextOptions* options,
+    net::NetLog* net_log,
+    HeadlessBrowserContextImpl* headless_browser_context)
     : io_task_runner_(std::move(io_task_runner)),
-      file_task_runner_(std::move(file_task_runner)),
       user_agent_(options->user_agent()),
       host_resolver_rules_(options->host_resolver_rules()),
-      proxy_server_(options->proxy_server()),
-      request_interceptors_(std::move(request_interceptors)) {
+      proxy_config_(options->proxy_config()),
+      request_interceptors_(std::move(request_interceptors)),
+      net_log_(net_log),
+      headless_browser_context_(headless_browser_context) {
   // Must first be created on the UI thread.
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -47,9 +50,9 @@ HeadlessURLRequestContextGetter::HeadlessURLRequestContextGetter(
   // We must create the proxy config service on the UI loop on Linux because it
   // must synchronously run on the glib message loop. This will be passed to
   // the URLRequestContextStorage on the IO thread in GetURLRequestContext().
-  if (proxy_server_.IsEmpty()) {
-    proxy_config_service_ = net::ProxyService::CreateSystemProxyConfigService(
-        io_task_runner_, file_task_runner_);
+  if (!proxy_config_) {
+    proxy_config_service_ =
+        net::ProxyService::CreateSystemProxyConfigService(io_task_runner_);
   }
 }
 
@@ -65,18 +68,17 @@ HeadlessURLRequestContextGetter::GetURLRequestContext() {
     // TODO(skyostil): Make these configurable.
     builder.set_data_enabled(true);
     builder.set_file_enabled(true);
-    builder.SetFileTaskRunner(content::BrowserThread::GetTaskRunnerForThread(
-        content::BrowserThread::FILE));
-    if (!proxy_server_.IsEmpty()) {
-      builder.set_proxy_service(
-          net::ProxyService::CreateFixed(proxy_server_.ToString()));
+    if (proxy_config_) {
+      builder.set_proxy_service(net::ProxyService::CreateFixed(*proxy_config_));
     } else {
       builder.set_proxy_config_service(std::move(proxy_config_service_));
     }
+    builder.set_network_delegate(
+        base::MakeUnique<HeadlessNetworkDelegate>(headless_browser_context_));
 
     if (!host_resolver_rules_.empty()) {
       std::unique_ptr<net::HostResolver> host_resolver(
-          net::HostResolver::CreateDefaultResolver(nullptr /* net_log */));
+          net::HostResolver::CreateDefaultResolver(net_log_));
       std::unique_ptr<net::MappedHostResolver> mapped_host_resolver(
           new net::MappedHostResolver(std::move(host_resolver)));
       mapped_host_resolver->SetRulesFromString(host_resolver_rules_);
@@ -91,6 +93,7 @@ HeadlessURLRequestContextGetter::GetURLRequestContext() {
     builder.SetInterceptors(std::move(request_interceptors_));
 
     url_request_context_ = builder.Build();
+    url_request_context_->set_net_log(net_log_);
   }
 
   return url_request_context_.get();
@@ -98,8 +101,7 @@ HeadlessURLRequestContextGetter::GetURLRequestContext() {
 
 scoped_refptr<base::SingleThreadTaskRunner>
 HeadlessURLRequestContextGetter::GetNetworkTaskRunner() const {
-  return content::BrowserThread::GetTaskRunnerForThread(
-      content::BrowserThread::IO);
+  return io_task_runner_;
 }
 
 net::HostResolver* HeadlessURLRequestContextGetter::host_resolver() const {

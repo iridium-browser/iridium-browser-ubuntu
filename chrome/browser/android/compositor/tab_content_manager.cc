@@ -278,7 +278,8 @@ void TabContentManager::InvalidateIfChanged(JNIEnv* env,
 void TabContentManager::UpdateVisibleIds(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
-    const JavaParamRef<jintArray>& priority) {
+    const JavaParamRef<jintArray>& priority,
+    jint primary_tab_id) {
   std::list<int> priority_ids;
   jsize length = env->GetArrayLength(priority);
   jint* ints = env->GetIntArrayElements(priority, nullptr);
@@ -286,17 +287,21 @@ void TabContentManager::UpdateVisibleIds(
     priority_ids.push_back(static_cast<int>(ints[i]));
 
   env->ReleaseIntArrayElements(priority, ints, JNI_ABORT);
-  thumbnail_cache_->UpdateVisibleIds(priority_ids);
+  thumbnail_cache_->UpdateVisibleIds(priority_ids, primary_tab_id);
 }
 
-void TabContentManager::RemoveTabThumbnail(JNIEnv* env,
-                                           const JavaParamRef<jobject>& obj,
-                                           jint tab_id) {
+void TabContentManager::NativeRemoveTabThumbnail(int tab_id) {
   TabReadbackRequestMap::iterator readback_iter =
       pending_tab_readbacks_.find(tab_id);
   if (readback_iter != pending_tab_readbacks_.end())
     readback_iter->second->SetToDropAfterReadback();
   thumbnail_cache_->Remove(tab_id);
+}
+
+void TabContentManager::RemoveTabThumbnail(JNIEnv* env,
+                                           const JavaParamRef<jobject>& obj,
+                                           jint tab_id) {
+  NativeRemoveTabThumbnail(tab_id);
 }
 
 void TabContentManager::GetDecompressedThumbnail(
@@ -331,10 +336,6 @@ void TabContentManager::PutThumbnailIntoCache(int tab_id,
 
   if (thumbnail_scale > 0 && !bitmap.empty())
     thumbnail_cache_->Put(tab_id, bitmap, thumbnail_scale);
-}
-
-bool RegisterTabContentManager(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 // ----------------------------------------------------------------------------

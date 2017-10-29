@@ -11,6 +11,7 @@
 #include <string>
 
 #include "base/base_export.h"
+#include "base/gtest_prod_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/trace_event/memory_allocator_dump_guid.h"
@@ -31,6 +32,9 @@ class BASE_EXPORT MemoryAllocatorDump {
     // A dump marked weak will be discarded by TraceViewer.
     WEAK = 1 << 0,
   };
+
+  static MemoryAllocatorDumpGuid GetDumpIdFromName(
+      const std::string& absolute_name);
 
   // MemoryAllocatorDump is owned by ProcessMemoryDump.
   MemoryAllocatorDump(const std::string& absolute_name,
@@ -69,6 +73,11 @@ class BASE_EXPORT MemoryAllocatorDump {
   // Called at trace generation time to populate the TracedValue.
   void AsValueInto(TracedValue* value) const;
 
+  // Get the size for this dump.
+  // The size is the value set with AddScalar(kNameSize, kUnitsBytes, size);
+  // TODO(hjd): Transitional until we send the full PMD. See crbug.com/704203
+  uint64_t GetSizeInternal() const { return size_; };
+
   // Use enum Flags to set values.
   void set_flags(int flags) { flags_ |= flags; }
   void clear_flags(int flags) { flags_ &= ~flags; }
@@ -90,6 +99,7 @@ class BASE_EXPORT MemoryAllocatorDump {
   std::unique_ptr<TracedValue> attributes_;
   MemoryAllocatorDumpGuid guid_;
   int flags_;  // See enum Flags.
+  uint64_t size_;
 
   // A local buffer for Sprintf conversion on fastpath. Avoids allocating
   // temporary strings on each AddScalar() call.

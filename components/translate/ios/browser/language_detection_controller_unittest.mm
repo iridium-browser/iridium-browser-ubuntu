@@ -5,14 +5,19 @@
 #import "components/translate/ios/browser/language_detection_controller.h"
 
 #include "base/mac/bind_objc_block.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
-#include "components/translate/core/common/translate_pref_names.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #import "components/translate/ios/browser/js_language_detection_manager.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 @interface MockJsLanguageDetectionManager : JsLanguageDetectionManager
 @end
@@ -33,10 +38,10 @@ class LanguageDetectionControllerTest : public PlatformTest {
   LanguageDetectionControllerTest() {
     prefs_.registry()->RegisterBooleanPref(prefs::kEnableTranslate, true);
 
-    base::scoped_nsobject<MockJsLanguageDetectionManager> js_manager(
-        [[MockJsLanguageDetectionManager alloc] init]);
-    controller_.reset(new LanguageDetectionController(
-        &web_state_, js_manager.get(), &prefs_));
+    MockJsLanguageDetectionManager* js_manager =
+        [[MockJsLanguageDetectionManager alloc] init];
+    controller_ = base::MakeUnique<LanguageDetectionController>(
+        &web_state_, js_manager, &prefs_);
   }
 
   LanguageDetectionController* controller() { return controller_.get(); }
@@ -54,14 +59,17 @@ class LanguageDetectionControllerTest : public PlatformTest {
 TEST_F(LanguageDetectionControllerTest, OnTextCaptured) {
   const std::string kRootLanguage("en");
   const std::string kContentLanguage("fr");
+  const std::string kUndefined("und");
 
   __block bool block_was_called = false;
   auto subscription =
-      controller()->RegisterLanguageDetectionCallback(base::BindBlock(
+      controller()->RegisterLanguageDetectionCallback(base::BindBlockArc(
           ^(const LanguageDetectionController::DetectionDetails& details) {
             block_was_called = true;
             EXPECT_EQ(kRootLanguage, details.html_root_language);
             EXPECT_EQ(kContentLanguage, details.content_language);
+            EXPECT_FALSE(details.is_cld_reliable);
+            EXPECT_EQ(kUndefined, details.cld_language);
           }));
 
   base::DictionaryValue command;

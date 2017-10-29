@@ -8,16 +8,18 @@
 #include "core/css/properties/CSSPropertyAlignmentUtils.h"
 #include "platform/RuntimeEnabledFeatures.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIAlignItems::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  DCHECK(RuntimeEnabledFeatures::cssGridLayoutEnabled());
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  DCHECK(RuntimeEnabledFeatures::CSSGridLayoutEnabled());
   // align-items property does not allow the 'auto' value.
-  if (CSSPropertyParserHelpers::identMatches<CSSValueAuto>(range.peek().id()))
+  if (CSSPropertyParserHelpers::IdentMatches<CSSValueAuto>(range.Peek().Id()))
     return nullptr;
-  return CSSPropertyAlignmentUtils::consumeSelfPositionOverflowPosition(range);
+  return CSSPropertyAlignmentUtils::ConsumeSelfPositionOverflowPosition(range);
 }
 
 }  // namespace blink

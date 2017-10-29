@@ -9,10 +9,13 @@
 
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -30,9 +33,9 @@ std::unique_ptr<base::Value> ValueResultFromWKResult(id wk_result,
     return result;
   }
 
-  CFTypeID result_type = CFGetTypeID(wk_result);
+  CFTypeID result_type = CFGetTypeID((__bridge CFTypeRef)wk_result);
   if (result_type == CFStringGetTypeID()) {
-    result.reset(new base::StringValue(base::SysNSStringToUTF16(wk_result)));
+    result.reset(new base::Value(base::SysNSStringToUTF16(wk_result)));
     DCHECK(result->IsType(base::Value::Type::STRING));
   } else if (result_type == CFNumberGetTypeID()) {
     result.reset(new base::Value([wk_result doubleValue]));
@@ -41,7 +44,7 @@ std::unique_ptr<base::Value> ValueResultFromWKResult(id wk_result,
     result.reset(new base::Value(static_cast<bool>([wk_result boolValue])));
     DCHECK(result->IsType(base::Value::Type::BOOLEAN));
   } else if (result_type == CFNullGetTypeID()) {
-    result = base::Value::CreateNullValue();
+    result = base::MakeUnique<base::Value>();
     DCHECK(result->IsType(base::Value::Type::NONE));
   } else if (result_type == CFDictionaryGetTypeID()) {
     std::unique_ptr<base::DictionaryValue> dictionary =
@@ -91,10 +94,10 @@ void ExecuteJavaScript(WKWebView* web_view,
     dispatch_async(dispatch_get_main_queue(), ^{
       NSString* error_message =
           @"JS evaluation failed because there is no web view.";
-      base::scoped_nsobject<NSError> error([[NSError alloc]
+      NSError* error = [[NSError alloc]
           initWithDomain:kJSEvaluationErrorDomain
                     code:JS_EVALUATION_ERROR_CODE_NO_WEB_VIEW
-                userInfo:@{NSLocalizedDescriptionKey : error_message}]);
+                userInfo:@{NSLocalizedDescriptionKey : error_message}];
       completion_handler(nil, error);
     });
     return;

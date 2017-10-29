@@ -13,15 +13,15 @@
 #include "net/quic/core/quic_stream.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_string_piece.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/mock_clock.h"
+#include "net/quic/test_tools/quic_spdy_session_peer.h"
 #include "net/quic/test_tools/quic_stream_sequencer_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/test/gtest_util.h"
-#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gmock_mutant.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
-using base::StringPiece;
 using std::string;
 using testing::_;
 using testing::AnyNumber;
@@ -59,7 +59,7 @@ namespace {
 static const char kPayload[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-class QuicStreamSequencerTest : public ::testing::Test {
+class QuicStreamSequencerTest : public QuicTest {
  public:
   void ConsumeData(size_t num_bytes) {
     char buffer[1024];
@@ -112,7 +112,7 @@ class QuicStreamSequencerTest : public ::testing::Test {
     return true;
   }
 
-  bool VerifyIovec(const iovec& iovec, StringPiece expected) {
+  bool VerifyIovec(const iovec& iovec, QuicStringPiece expected) {
     if (iovec.iov_len != expected.length()) {
       QUIC_LOG(ERROR) << "Invalid length: " << iovec.iov_len << " vs "
                       << expected.length();
@@ -570,11 +570,13 @@ TEST_F(QuicStreamSequencerTest, MarkConsumedWithMissingPacket) {
 TEST_F(QuicStreamSequencerTest, DontAcceptOverlappingFrames) {
   // The peer should never send us non-identical stream frames which contain
   // overlapping byte ranges - if they do, we close the connection.
+  QuicStreamId id =
+      QuicSpdySessionPeer::GetNthClientInitiatedStreamId(session_, 0);
 
-  QuicStreamFrame frame1(kClientDataStreamId1, false, 1, StringPiece("hello"));
+  QuicStreamFrame frame1(id, false, 1, QuicStringPiece("hello"));
   sequencer_->OnStreamFrame(frame1);
 
-  QuicStreamFrame frame2(kClientDataStreamId1, false, 2, StringPiece("hello"));
+  QuicStreamFrame frame2(id, false, 2, QuicStringPiece("hello"));
   EXPECT_CALL(stream_,
               CloseConnectionWithDetails(QUIC_OVERLAPPING_STREAM_DATA, _))
       .Times(1);
@@ -666,9 +668,11 @@ TEST_F(QuicStreamSequencerTest, OutOfOrderTimestamps) {
 TEST_F(QuicStreamSequencerTest, OnStreamFrameWithNullSource) {
   // Pass in a frame with data pointing to null address, expect to close
   // connection with error.
-  StringPiece source;
+  QuicStringPiece source;
   source.set(nullptr, 5u);
-  QuicStreamFrame frame(kClientDataStreamId1, false, 1, source);
+  QuicStreamFrame frame(
+      QuicSpdySessionPeer::GetNthClientInitiatedStreamId(session_, 0), false, 1,
+      source);
   EXPECT_CALL(stream_, CloseConnectionWithDetails(
                            QUIC_STREAM_SEQUENCER_INVALID_STATE, _));
   sequencer_->OnStreamFrame(frame);

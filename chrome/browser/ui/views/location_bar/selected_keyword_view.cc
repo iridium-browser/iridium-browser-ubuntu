@@ -9,14 +9,13 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/omnibox/browser/vector_icons.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/native_theme/native_theme.h"
 
 SelectedKeywordView::SelectedKeywordView(const gfx::FontList& font_list,
@@ -33,7 +32,7 @@ SelectedKeywordView::~SelectedKeywordView() {
 }
 
 void SelectedKeywordView::ResetImage() {
-  SetImage(gfx::CreateVectorIcon(omnibox::kSearchIcon,
+  SetImage(gfx::CreateVectorIcon(vector_icons::kSearchIcon,
                                  LocationBarView::kIconWidth, GetTextColor()));
 }
 
@@ -44,7 +43,7 @@ SkColor SelectedKeywordView::GetTextColor() const {
           : ui::NativeTheme::kColorId_LinkEnabled);
 }
 
-gfx::Size SelectedKeywordView::GetPreferredSize() const {
+gfx::Size SelectedKeywordView::CalculatePreferredSize() const {
   // Height will be ignored by the LocationBarView.
   return GetSizeForLabelWidth(full_label_.GetPreferredSize().width());
 }

@@ -19,18 +19,19 @@ class FetchTestingPlatformSupport
   FetchTestingPlatformSupport();
   ~FetchTestingPlatformSupport() override;
 
-  MockFetchContext* context();
+  MockFetchContext* Context();
 
   // Platform:
-  WebURLError cancelledError(const WebURL&) const override;
-  WebURLLoaderMockFactory* getURLLoaderMockFactory() override;
-  WebURLLoader* createURLLoader() override;
+  WebURLLoaderMockFactory* GetURLLoaderMockFactory() override;
+  std::unique_ptr<WebURLLoader> CreateURLLoader(
+      const blink::WebURLRequest&,
+      base::SingleThreadTaskRunner*) override;
 
  private:
   class FetchTestingWebURLLoaderMockFactory;
 
-  Persistent<MockFetchContext> m_context;
-  std::unique_ptr<WebURLLoaderMockFactory> m_urlLoaderMockFactory;
+  Persistent<MockFetchContext> context_;
+  std::unique_ptr<WebURLLoaderMockFactory> url_loader_mock_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FetchTestingPlatformSupport);
 };

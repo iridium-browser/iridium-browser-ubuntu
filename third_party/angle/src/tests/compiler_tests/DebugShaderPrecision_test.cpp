@@ -798,7 +798,7 @@ TEST_F(DebugShaderPrecisionTest, ConstructorRounding)
         "precision mediump int;\n"
         "uniform float u1;\n"
         "uniform float u2;\n"
-        "uniform float u3;\n"
+        "uniform lowp float u3;\n"
         "uniform float u4;\n"
         "uniform ivec4 uiv;\n"
         "void main() {\n"
@@ -807,13 +807,10 @@ TEST_F(DebugShaderPrecisionTest, ConstructorRounding)
         "   gl_FragColor = v1 + v2;\n"
         "}\n";
     compile(shaderString);
-    // Note: this is suboptimal for the case taking four floats, but optimizing would be tricky.
-    ASSERT_TRUE(foundInAllGLSLCode(
-        "v1 = angle_frm(vec4(angle_frm(u1), angle_frm(u2), angle_frm(u3), angle_frm(u4)))"));
+    ASSERT_TRUE(foundInAllGLSLCode("v1 = angle_frm(vec4(u1, u2, angle_frl(u3), u4))"));
     ASSERT_TRUE(foundInAllGLSLCode("v2 = angle_frm(vec4(uiv))"));
 
-    ASSERT_TRUE(foundInHLSLCode(
-        "v1 = angle_frm(vec4(angle_frm(_u1), angle_frm(_u2), angle_frm(_u3), angle_frm(_u4)))"));
+    ASSERT_TRUE(foundInHLSLCode("v1 = angle_frm(vec4(_u1, _u2, angle_frl(_u3), _u4))"));
     ASSERT_TRUE(foundInHLSLCode("v2 = angle_frm(vec4(_uiv))"));
 }
 
@@ -895,7 +892,7 @@ TEST_F(DebugShaderPrecisionTest, FunctionCallParameterQualifiersFromDefinition)
     // otherwise.
     // Test in parameters
     ASSERT_TRUE(foundInAllGLSLCode("v = add(angle_frm(u1), angle_frm(u2))"));
-    ASSERT_TRUE(foundInHLSLCode("v = _add_float4_float4(angle_frm(_u1), angle_frm(_u2))"));
+    ASSERT_TRUE(foundInHLSLCode("v = f_add_float4_float4(angle_frm(_u1), angle_frm(_u2))"));
     // Test inout parameter
     ASSERT_TRUE(foundInAllGLSLCode("compound_add(v, angle_frm(u3))"));
     ASSERT_TRUE(foundInHLSLCode("compound_add_float4_float4(_v, angle_frm(_u3))"));
@@ -936,7 +933,7 @@ TEST_F(DebugShaderPrecisionTest, FunctionCallParameterQualifiersFromPrototype)
     compile(shaderString);
     // Test in parameters
     ASSERT_TRUE(foundInAllGLSLCode("v = add(angle_frm(u1), angle_frm(u2))"));
-    ASSERT_TRUE(foundInHLSLCode("v = _add_float4_float4(angle_frm(_u1), angle_frm(_u2))"));
+    ASSERT_TRUE(foundInHLSLCode("v = f_add_float4_float4(angle_frm(_u1), angle_frm(_u2))"));
     // Test inout parameter
     ASSERT_TRUE(foundInAllGLSLCode("compound_add(v, angle_frm(u3))"));
     ASSERT_TRUE(foundInHLSLCode("compound_add_float4_float4(_v, angle_frm(_u3))"));
@@ -969,9 +966,9 @@ TEST_F(DebugShaderPrecisionTest, NestedFunctionCalls)
     // Test nested calls
     ASSERT_TRUE(foundInAllGLSLCode(
         "v2 = add(compound_add(v, angle_frm(u2)), angle_frm(fract(angle_frm(u3))))"));
-    ASSERT_TRUE(
-        foundInHLSLCode("v2 = _add_float4_float4(_compound_add_float4_float4(_v, angle_frm(_u2)), "
-                        "angle_frm(frac(angle_frm(_u3))))"));
+    ASSERT_TRUE(foundInHLSLCode(
+        "v2 = f_add_float4_float4(f_compound_add_float4_float4(_v, angle_frm(_u2)), "
+        "angle_frm(frac(angle_frm(_u3))))"));
 }
 
 // Test that code inside an index of a function out parameter gets processed.
@@ -1045,3 +1042,36 @@ TEST(DebugShaderPrecisionNegativeTest, HLSL3Unsupported)
                                    shaderString, &resources, 0, &translatedCode, &infoLog));
 }
 #endif  // defined(ANGLE_ENABLE_HLSL)
+
+// Test that compound assignment inside an expression compiles correctly. This is a test for a bug
+// where incorrect type information on the compound assignment call node caused an assert to trigger
+// in the debug build.
+TEST_F(DebugShaderPrecisionTest, CompoundAssignmentInsideExpression)
+{
+    const std::string &shaderString =
+        "#version 300 es\n"
+        "precision mediump float;\n"
+        "out vec4 my_FragColor;\n"
+        "void main() {\n"
+        "   float f = 0.0;\n"
+        "   my_FragColor = vec4(abs(f += 1.0), 0, 0, 1);\n"
+        "}\n";
+    compile(shaderString);
+    ASSERT_TRUE(foundInAllGLSLCode("abs(angle_compound_add_frm(f, 1.0))"));
+}
+
+// Test that having rounded values inside the right hand side of logical or doesn't trigger asserts
+// in HLSL output.
+TEST_F(DebugShaderPrecisionTest, RoundedValueOnRightSideOfLogicalOr)
+{
+    const std::string &shaderString =
+        "#version 300 es\n"
+        "precision mediump float;\n"
+        "out vec4 my_FragColor;\n"
+        "uniform float u1, u2;\n"
+        "void main() {\n"
+        "   my_FragColor = vec4(u1 == 0.0 || u2 == 0.0);\n"
+        "}\n";
+    compile(shaderString);
+    ASSERT_TRUE(foundInHLSLCode("angle_frm(_u2) == 0.0"));
+}

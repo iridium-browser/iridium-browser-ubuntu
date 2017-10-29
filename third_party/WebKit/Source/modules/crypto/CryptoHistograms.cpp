@@ -12,125 +12,125 @@
 
 namespace blink {
 
-static UseCounter::Feature algorithmIdToFeature(WebCryptoAlgorithmId id) {
+static WebFeature AlgorithmIdToFeature(WebCryptoAlgorithmId id) {
   switch (id) {
-    case WebCryptoAlgorithmIdAesCbc:
-      return UseCounter::CryptoAlgorithmAesCbc;
-    case WebCryptoAlgorithmIdHmac:
-      return UseCounter::CryptoAlgorithmHmac;
-    case WebCryptoAlgorithmIdRsaSsaPkcs1v1_5:
-      return UseCounter::CryptoAlgorithmRsaSsaPkcs1v1_5;
-    case WebCryptoAlgorithmIdSha1:
-      return UseCounter::CryptoAlgorithmSha1;
-    case WebCryptoAlgorithmIdSha256:
-      return UseCounter::CryptoAlgorithmSha256;
-    case WebCryptoAlgorithmIdSha384:
-      return UseCounter::CryptoAlgorithmSha384;
-    case WebCryptoAlgorithmIdSha512:
-      return UseCounter::CryptoAlgorithmSha512;
-    case WebCryptoAlgorithmIdAesGcm:
-      return UseCounter::CryptoAlgorithmAesGcm;
-    case WebCryptoAlgorithmIdRsaOaep:
-      return UseCounter::CryptoAlgorithmRsaOaep;
-    case WebCryptoAlgorithmIdAesCtr:
-      return UseCounter::CryptoAlgorithmAesCtr;
-    case WebCryptoAlgorithmIdAesKw:
-      return UseCounter::CryptoAlgorithmAesKw;
-    case WebCryptoAlgorithmIdRsaPss:
-      return UseCounter::CryptoAlgorithmRsaPss;
-    case WebCryptoAlgorithmIdEcdsa:
-      return UseCounter::CryptoAlgorithmEcdsa;
-    case WebCryptoAlgorithmIdEcdh:
-      return UseCounter::CryptoAlgorithmEcdh;
-    case WebCryptoAlgorithmIdHkdf:
-      return UseCounter::CryptoAlgorithmHkdf;
-    case WebCryptoAlgorithmIdPbkdf2:
-      return UseCounter::CryptoAlgorithmPbkdf2;
+    case kWebCryptoAlgorithmIdAesCbc:
+      return WebFeature::kCryptoAlgorithmAesCbc;
+    case kWebCryptoAlgorithmIdHmac:
+      return WebFeature::kCryptoAlgorithmHmac;
+    case kWebCryptoAlgorithmIdRsaSsaPkcs1v1_5:
+      return WebFeature::kCryptoAlgorithmRsaSsaPkcs1v1_5;
+    case kWebCryptoAlgorithmIdSha1:
+      return WebFeature::kCryptoAlgorithmSha1;
+    case kWebCryptoAlgorithmIdSha256:
+      return WebFeature::kCryptoAlgorithmSha256;
+    case kWebCryptoAlgorithmIdSha384:
+      return WebFeature::kCryptoAlgorithmSha384;
+    case kWebCryptoAlgorithmIdSha512:
+      return WebFeature::kCryptoAlgorithmSha512;
+    case kWebCryptoAlgorithmIdAesGcm:
+      return WebFeature::kCryptoAlgorithmAesGcm;
+    case kWebCryptoAlgorithmIdRsaOaep:
+      return WebFeature::kCryptoAlgorithmRsaOaep;
+    case kWebCryptoAlgorithmIdAesCtr:
+      return WebFeature::kCryptoAlgorithmAesCtr;
+    case kWebCryptoAlgorithmIdAesKw:
+      return WebFeature::kCryptoAlgorithmAesKw;
+    case kWebCryptoAlgorithmIdRsaPss:
+      return WebFeature::kCryptoAlgorithmRsaPss;
+    case kWebCryptoAlgorithmIdEcdsa:
+      return WebFeature::kCryptoAlgorithmEcdsa;
+    case kWebCryptoAlgorithmIdEcdh:
+      return WebFeature::kCryptoAlgorithmEcdh;
+    case kWebCryptoAlgorithmIdHkdf:
+      return WebFeature::kCryptoAlgorithmHkdf;
+    case kWebCryptoAlgorithmIdPbkdf2:
+      return WebFeature::kCryptoAlgorithmPbkdf2;
   }
 
-  ASSERT_NOT_REACHED();
-  return static_cast<UseCounter::Feature>(0);
+  NOTREACHED();
+  return static_cast<WebFeature>(0);
 }
 
-static void histogramAlgorithmId(ExecutionContext* context,
-                                 WebCryptoAlgorithmId algorithmId) {
-  UseCounter::Feature feature = algorithmIdToFeature(algorithmId);
-  if (feature)
-    UseCounter::count(context, feature);
+static void HistogramAlgorithmId(ExecutionContext* context,
+                                 WebCryptoAlgorithmId algorithm_id) {
+  WebFeature feature = AlgorithmIdToFeature(algorithm_id);
+  if (static_cast<bool>(feature))
+    UseCounter::Count(context, feature);
 }
 
-void histogramAlgorithm(ExecutionContext* context,
+void HistogramAlgorithm(ExecutionContext* context,
                         const WebCryptoAlgorithm& algorithm) {
-  histogramAlgorithmId(context, algorithm.id());
+  HistogramAlgorithmId(context, algorithm.Id());
 
   // Histogram any interesting parameters for the algorithm. For instance
   // the inner hash for algorithms which include one (HMAC, RSA-PSS, etc)
-  switch (algorithm.paramsType()) {
-    case WebCryptoAlgorithmParamsTypeHmacImportParams:
-      histogramAlgorithm(context, algorithm.hmacImportParams()->hash());
+  switch (algorithm.ParamsType()) {
+    case kWebCryptoAlgorithmParamsTypeHmacImportParams:
+      HistogramAlgorithm(context, algorithm.HmacImportParams()->GetHash());
       break;
-    case WebCryptoAlgorithmParamsTypeHmacKeyGenParams:
-      histogramAlgorithm(context, algorithm.hmacKeyGenParams()->hash());
+    case kWebCryptoAlgorithmParamsTypeHmacKeyGenParams:
+      HistogramAlgorithm(context, algorithm.HmacKeyGenParams()->GetHash());
       break;
-    case WebCryptoAlgorithmParamsTypeRsaHashedKeyGenParams:
-      histogramAlgorithm(context, algorithm.rsaHashedKeyGenParams()->hash());
+    case kWebCryptoAlgorithmParamsTypeRsaHashedKeyGenParams:
+      HistogramAlgorithm(context, algorithm.RsaHashedKeyGenParams()->GetHash());
       break;
-    case WebCryptoAlgorithmParamsTypeRsaHashedImportParams:
-      histogramAlgorithm(context, algorithm.rsaHashedImportParams()->hash());
+    case kWebCryptoAlgorithmParamsTypeRsaHashedImportParams:
+      HistogramAlgorithm(context, algorithm.RsaHashedImportParams()->GetHash());
       break;
-    case WebCryptoAlgorithmParamsTypeEcdsaParams:
-      histogramAlgorithm(context, algorithm.ecdsaParams()->hash());
+    case kWebCryptoAlgorithmParamsTypeEcdsaParams:
+      HistogramAlgorithm(context, algorithm.EcdsaParams()->GetHash());
       break;
-    case WebCryptoAlgorithmParamsTypeHkdfParams:
-      histogramAlgorithm(context, algorithm.hkdfParams()->hash());
+    case kWebCryptoAlgorithmParamsTypeHkdfParams:
+      HistogramAlgorithm(context, algorithm.HkdfParams()->GetHash());
       break;
-    case WebCryptoAlgorithmParamsTypePbkdf2Params:
-      histogramAlgorithm(context, algorithm.pbkdf2Params()->hash());
+    case kWebCryptoAlgorithmParamsTypePbkdf2Params:
+      HistogramAlgorithm(context, algorithm.Pbkdf2Params()->GetHash());
       break;
-    case WebCryptoAlgorithmParamsTypeEcdhKeyDeriveParams:
-    case WebCryptoAlgorithmParamsTypeNone:
-    case WebCryptoAlgorithmParamsTypeAesCbcParams:
-    case WebCryptoAlgorithmParamsTypeAesGcmParams:
-    case WebCryptoAlgorithmParamsTypeAesKeyGenParams:
-    case WebCryptoAlgorithmParamsTypeRsaOaepParams:
-    case WebCryptoAlgorithmParamsTypeAesCtrParams:
-    case WebCryptoAlgorithmParamsTypeRsaPssParams:
-    case WebCryptoAlgorithmParamsTypeEcKeyGenParams:
-    case WebCryptoAlgorithmParamsTypeEcKeyImportParams:
-    case WebCryptoAlgorithmParamsTypeAesDerivedKeyParams:
+    case kWebCryptoAlgorithmParamsTypeEcdhKeyDeriveParams:
+    case kWebCryptoAlgorithmParamsTypeNone:
+    case kWebCryptoAlgorithmParamsTypeAesCbcParams:
+    case kWebCryptoAlgorithmParamsTypeAesGcmParams:
+    case kWebCryptoAlgorithmParamsTypeAesKeyGenParams:
+    case kWebCryptoAlgorithmParamsTypeRsaOaepParams:
+    case kWebCryptoAlgorithmParamsTypeAesCtrParams:
+    case kWebCryptoAlgorithmParamsTypeRsaPssParams:
+    case kWebCryptoAlgorithmParamsTypeEcKeyGenParams:
+    case kWebCryptoAlgorithmParamsTypeEcKeyImportParams:
+    case kWebCryptoAlgorithmParamsTypeAesDerivedKeyParams:
       break;
   }
 }
 
-void histogramKey(ExecutionContext* context, const WebCryptoKey& key) {
-  const WebCryptoKeyAlgorithm& algorithm = key.algorithm();
+void HistogramKey(ExecutionContext* context, const WebCryptoKey& key) {
+  const WebCryptoKeyAlgorithm& algorithm = key.Algorithm();
 
-  histogramAlgorithmId(context, algorithm.id());
+  HistogramAlgorithmId(context, algorithm.Id());
 
   // Histogram any interesting parameters that are attached to the key. For
   // instance the inner hash being used for HMAC.
-  switch (algorithm.paramsType()) {
-    case WebCryptoKeyAlgorithmParamsTypeHmac:
-      histogramAlgorithm(context, algorithm.hmacParams()->hash());
+  switch (algorithm.ParamsType()) {
+    case kWebCryptoKeyAlgorithmParamsTypeHmac:
+      HistogramAlgorithm(context, algorithm.HmacParams()->GetHash());
       break;
-    case WebCryptoKeyAlgorithmParamsTypeRsaHashed:
-      histogramAlgorithm(context, algorithm.rsaHashedParams()->hash());
+    case kWebCryptoKeyAlgorithmParamsTypeRsaHashed:
+      HistogramAlgorithm(context, algorithm.RsaHashedParams()->GetHash());
       break;
-    case WebCryptoKeyAlgorithmParamsTypeNone:
-    case WebCryptoKeyAlgorithmParamsTypeAes:
-    case WebCryptoKeyAlgorithmParamsTypeEc:
+    case kWebCryptoKeyAlgorithmParamsTypeNone:
+    case kWebCryptoKeyAlgorithmParamsTypeAes:
+    case kWebCryptoKeyAlgorithmParamsTypeEc:
       break;
   }
 }
 
-void histogramAlgorithmAndKey(ExecutionContext* context,
+void HistogramAlgorithmAndKey(ExecutionContext* context,
                               const WebCryptoAlgorithm& algorithm,
                               const WebCryptoKey& key) {
   // Note that the algorithm ID for |algorithm| and |key| will usually be the
   // same. This is OK because UseCounter only increments things once per the
   // context.
-  histogramAlgorithm(context, algorithm);
-  histogramKey(context, key);
+  HistogramAlgorithm(context, algorithm);
+  HistogramKey(context, key);
 }
 
 }  // namespace blink

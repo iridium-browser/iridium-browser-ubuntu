@@ -6,13 +6,24 @@ static_library("navigation_metrics") {
   sources = [
     "navigation_metrics.cc",
     "navigation_metrics.h",
-    "origins_seen_service.cc",
-    "origins_seen_service.h",
   ]
 
   deps = [
     "//base",
-    "//components/keyed_service/core",
+    "//components/dom_distiller/core:core",
+    "//url",
+  ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "navigation_metrics_unittest.cc",
+  ]
+  deps = [
+    ":navigation_metrics",
+    "//base/test:test_support",
+    "//testing/gtest",
     "//url",
   ]
 }

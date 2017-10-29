@@ -7,7 +7,9 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -15,6 +17,7 @@
 #include "base/time/time.h"
 #include "components/previews/core/previews_decider.h"
 #include "components/previews/core/previews_experiments.h"
+#include "net/nqe/effective_connection_type.h"
 
 class GURL;
 
@@ -26,6 +29,8 @@ namespace previews {
 class PreviewsBlackList;
 class PreviewsOptOutStore;
 class PreviewsUIService;
+
+typedef base::Callback<bool(PreviewsType)> PreviewsIsEnabledCallback;
 
 // A class to manage the IO portion of inter-thread communication between
 // previews/ objects. Created on the UI thread, but used only on the IO thread
@@ -39,8 +44,10 @@ class PreviewsIOData : public PreviewsDecider {
 
   // Stores |previews_ui_service| as |previews_ui_service_| and posts a task to
   // InitializeOnIOThread on the IO thread.
-  void Initialize(base::WeakPtr<PreviewsUIService> previews_ui_service,
-                  std::unique_ptr<PreviewsOptOutStore> previews_opt_out_store);
+  virtual void Initialize(
+      base::WeakPtr<PreviewsUIService> previews_ui_service,
+      std::unique_ptr<PreviewsOptOutStore> previews_opt_out_store,
+      const PreviewsIsEnabledCallback& is_enabled_callback);
 
   // Adds a navigation to |url| to the black list with result |opt_out|.
   void AddPreviewNavigation(const GURL& url, bool opt_out, PreviewsType type);
@@ -55,6 +62,12 @@ class PreviewsIOData : public PreviewsDecider {
   // PreviewsDecider implementation:
   bool ShouldAllowPreview(const net::URLRequest& request,
                           PreviewsType type) const override;
+  bool ShouldAllowPreviewAtECT(
+      const net::URLRequest& request,
+      PreviewsType type,
+      net::EffectiveConnectionType effective_connection_type_threshold,
+      const std::vector<std::string>& host_blacklist_from_server)
+      const override;
 
  protected:
   // Posts a task to SetIOData for |previews_ui_service_| on the UI thread with
@@ -74,6 +87,9 @@ class PreviewsIOData : public PreviewsDecider {
   // happening on the IO thread.
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+
+  // Whether the preview is enabled. Valid after Initialize() is called.
+  PreviewsIsEnabledCallback is_enabled_callback_;
 
   base::WeakPtrFactory<PreviewsIOData> weak_factory_;
 

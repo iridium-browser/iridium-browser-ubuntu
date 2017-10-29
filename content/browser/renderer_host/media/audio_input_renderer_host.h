@@ -35,8 +35,13 @@
 #include "content/public/browser/browser_message_filter.h"
 #include "media/audio/audio_input_controller.h"
 
+namespace base {
+class FilePath;
+}
+
 namespace media {
 class AudioManager;
+class AudioLog;
 class UserInputMonitor;
 }
 
@@ -57,37 +62,37 @@ class CONTENT_EXPORT AudioInputRendererHost
     UNKNOWN_ERROR = 0,
 
     // Failed to look up audio intry for the provided stream id.
-    INVALID_AUDIO_ENTRY,  // = 1
+    INVALID_AUDIO_ENTRY = 1,
 
     // A stream with the specified stream id already exists.
-    STREAM_ALREADY_EXISTS,  // = 2
+    STREAM_ALREADY_EXISTS = 2,
 
     // The page does not have permission to open the specified capture device.
-    PERMISSION_DENIED,  // = 3
+    PERMISSION_DENIED = 3,
 
     // Failed to create shared memory.
-    SHARED_MEMORY_CREATE_FAILED,  // = 4
+    // Obsolete, merged with SYNC_WRITER_INIT_FAILED.
+    // SHARED_MEMORY_CREATE_FAILED = 4
 
     // Failed to initialize the AudioInputSyncWriter instance.
-    SYNC_WRITER_INIT_FAILED,  // = 5
+    SYNC_WRITER_INIT_FAILED = 5,
 
     // Failed to create native audio input stream.
-    STREAM_CREATE_ERROR,  // = 6
+    STREAM_CREATE_ERROR = 6,
 
     // Failed to map and share the shared memory.
-    MEMORY_SHARING_FAILED,  // = 7,
+    MEMORY_SHARING_FAILED = 7,
 
     // Unable to prepare the foreign socket handle.
-    SYNC_SOCKET_ERROR,  // = 8,
+    SYNC_SOCKET_ERROR = 8,
 
     // This error message comes from the AudioInputController instance.
-    AUDIO_INPUT_CONTROLLER_ERROR,  // = 9,
+    AUDIO_INPUT_CONTROLLER_ERROR = 9,
   };
 
   // Called from UI thread from the owner of this object.
   // |user_input_monitor| is used for typing detection and can be NULL.
   AudioInputRendererHost(int render_process_id,
-                         int32_t renderer_pid,
                          media::AudioManager* audio_manager,
                          MediaStreamManager* media_stream_manager,
                          AudioMirroringManager* audio_mirroring_manager,
@@ -105,11 +110,13 @@ class CONTENT_EXPORT AudioInputRendererHost
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // AudioInputController::EventHandler implementation.
-  void OnCreated(media::AudioInputController* controller) override;
+  void OnCreated(media::AudioInputController* controller,
+                 bool initially_muted) override;
   void OnError(media::AudioInputController* controller,
                media::AudioInputController::ErrorCode error_code) override;
   void OnLog(media::AudioInputController* controller,
              const std::string& message) override;
+  void OnMuted(media::AudioInputController* controller, bool is_muted) override;
 
   // Sets the PID renderer. This is used for constructing the debug recording
   // filename.
@@ -159,7 +166,8 @@ class CONTENT_EXPORT AudioInputRendererHost
   // Complete the process of creating an audio input stream. This will set up
   // the shared memory or shared socket in low latency mode and send the
   // NotifyStreamCreated message to the peer.
-  void DoCompleteCreation(media::AudioInputController* controller);
+  void DoCompleteCreation(media::AudioInputController* controller,
+                          bool initially_muted);
 
   // Send a state change message to the renderer.
   void DoSendRecordingMessage(media::AudioInputController* controller);
@@ -171,6 +179,10 @@ class CONTENT_EXPORT AudioInputRendererHost
   // Log audio level of captured audio stream.
   void DoLog(media::AudioInputController* controller,
              const std::string& message);
+
+  // Notify renderer of a change to a stream's muted state.
+  void DoNotifyMutedState(media::AudioInputController* controller,
+                          bool is_muted);
 
   // Send an error message to the renderer.
   void SendErrorMessage(int stream_id, ErrorCode error_code);
@@ -203,12 +215,19 @@ class CONTENT_EXPORT AudioInputRendererHost
       const AudioInputHostMsg_CreateStream_Config& config);
 
 #if BUILDFLAG(ENABLE_WEBRTC)
+  // TODO(grunell): Move debug recording handling to AudioManager.
   void MaybeEnableDebugRecordingForId(int stream_id);
 
   base::FilePath GetDebugRecordingFilePathWithExtensions(
       const base::FilePath& file);
 
   void EnableDebugRecordingForId(const base::FilePath& file, int stream_id);
+
+  // Calls GetDebugRecordingFilePathWithExtensions() and
+  // EnableDebugRecordingForId().
+  void AddExtensionsToPathAndEnableDebugRecordingForId(
+      const base::FilePath& file,
+      int stream_id);
 
   void DoEnableDebugRecording(int stream_id, base::File file);
   void DoDisableDebugRecording(int stream_id);

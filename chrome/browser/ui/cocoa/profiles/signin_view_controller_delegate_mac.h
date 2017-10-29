@@ -46,10 +46,10 @@ class SigninViewControllerDelegateMac : public ConstrainedWindowMacDelegate,
       signin_metrics::AccessPoint access_point);
 
   static std::unique_ptr<content::WebContents>
-  CreateSyncConfirmationWebContents(Profile* profile);
+  CreateSyncConfirmationWebContents(Browser* browser);
 
   static std::unique_ptr<content::WebContents> CreateSigninErrorWebContents(
-      Profile* profile);
+      Browser* browser);
 
  private:
   friend SigninViewControllerDelegate;
@@ -79,6 +79,12 @@ class SigninViewControllerDelegateMac : public ConstrainedWindowMacDelegate,
   // Cleans up and deletes this object.
   void CleanupAndDeleteThis();
 
+  // Creates a WebContents for a dialog with the specified URL.
+  static std::unique_ptr<content::WebContents> CreateDialogWebContents(
+      Browser* browser,
+      const std::string& url,
+      int dialog_height);
+
   // The constrained window opened by this delegate to display signin flow
   // content.
   std::unique_ptr<ConstrainedWindowMac> constrained_window_;
@@ -86,7 +92,6 @@ class SigninViewControllerDelegateMac : public ConstrainedWindowMacDelegate,
   // The web contents displayed in the constrained window.
   std::unique_ptr<content::WebContents> web_contents_;
   base::scoped_nsobject<ConstrainedWindowCustomWindow> window_;
-  Browser* browser_;
 
   // The dialog modal presentation type.
   ui::ModalType dialog_modal_type_;

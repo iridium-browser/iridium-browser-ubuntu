@@ -42,6 +42,13 @@ extern "C" {
 #define EGL_CONTEXT_CLIENT_ARRAYS_ENABLED_ANGLE 0x3452
 #endif /* EGL_ANGLE_create_context_client_arrays */
 
+#ifndef EGL_CONTEXT_PRIORITY_LEVEL_IMG
+#define EGL_CONTEXT_PRIORITY_LEVEL_IMG 0x3100
+#define EGL_CONTEXT_PRIORITY_HIGH_IMG 0x3101
+#define EGL_CONTEXT_PRIORITY_MEDIUM_IMG 0x3102
+#define EGL_CONTEXT_PRIORITY_LOW_IMG 0x3103
+#endif /* EGL_CONTEXT_PRIORITY_LEVEL */
+
 using ui::GetLastEGLErrorString;
 
 namespace gl {
@@ -51,9 +58,7 @@ GLContextEGL::GLContextEGL(GLShareGroup* share_group)
       context_(nullptr),
       display_(nullptr),
       config_(nullptr),
-      unbind_fbo_on_makecurrent_(false),
-      swap_interval_(1) {
-}
+      unbind_fbo_on_makecurrent_(false) {}
 
 bool GLContextEGL::Initialize(GLSurface* compatible_surface,
                               const GLContextAttribs& attribs) {
@@ -135,6 +140,20 @@ bool GLContextEGL::Initialize(GLSurface* compatible_surface,
     DCHECK(!attribs.webgl_compatibility_context);
   }
 
+  if (GLSurfaceEGL::IsEGLContextPrioritySupported()) {
+    // Medium priority is the default, only set the attribute if
+    // a different priority is requested.
+    if (attribs.context_priority == ContextPriorityLow) {
+      DVLOG(1) << __FUNCTION__ << ": setting ContextPriorityLow";
+      context_attributes.push_back(EGL_CONTEXT_PRIORITY_LEVEL_IMG);
+      context_attributes.push_back(EGL_CONTEXT_PRIORITY_LOW_IMG);
+    } else if (attribs.context_priority == ContextPriorityHigh) {
+      DVLOG(1) << __FUNCTION__ << ": setting ContextPriorityHigh";
+      context_attributes.push_back(EGL_CONTEXT_PRIORITY_LEVEL_IMG);
+      context_attributes.push_back(EGL_CONTEXT_PRIORITY_HIGH_IMG);
+    }
+  }
+
   if (GLSurfaceEGL::HasEGLExtension("EGL_ANGLE_display_texture_share_group")) {
     context_attributes.push_back(EGL_DISPLAY_TEXTURE_SHARE_GROUP_ANGLE);
     context_attributes.push_back(
@@ -211,8 +230,6 @@ bool GLContextEGL::MakeCurrent(GLSurface* surface) {
     return false;
   }
 
-  surface->OnSetSwapInterval(swap_interval_);
-
   release_current.Cancel();
   return true;
 }
@@ -271,9 +288,6 @@ void GLContextEGL::OnSetSwapInterval(int interval) {
   if (!eglSwapInterval(display_, interval)) {
     LOG(ERROR) << "eglSwapInterval failed with error "
                << GetLastEGLErrorString();
-  } else {
-    swap_interval_ = interval;
-    GLSurface::GetCurrent()->OnSetSwapInterval(interval);
   }
 }
 

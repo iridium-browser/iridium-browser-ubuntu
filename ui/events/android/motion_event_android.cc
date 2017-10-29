@@ -15,6 +15,7 @@
 #include "ui/events/event_utils.h"
 
 using base::android::AttachCurrentThread;
+using base::android::ScopedJavaLocalRef;
 using namespace JNI_MotionEvent;
 
 namespace ui {
@@ -151,6 +152,18 @@ size_t ToValidHistorySize(jint history_size, ui::MotionEvent::Action action) {
   return history_size;
 }
 
+// Convert tilt and orientation to tilt_x and tilt_y. Tilt_x and tilt_y will lie
+// in [-90, 90].
+void ConvertTiltOrientationToTiltXY(float tilt_rad,
+                                    float orientation_rad,
+                                    float* tilt_x,
+                                    float* tilt_y) {
+  float r = sin(tilt_rad);
+  float z = cos(tilt_rad);
+  *tilt_x = atan2(sin(-orientation_rad) * r, z) * 180.f / M_PI;
+  *tilt_y = atan2(cos(-orientation_rad) * r, z) * 180.f / M_PI;
+}
+
 }  // namespace
 
 MotionEventAndroid::Pointer::Pointer(jint id,
@@ -176,18 +189,22 @@ MotionEventAndroid::CachedPointer::CachedPointer()
       touch_major(0),
       touch_minor(0),
       orientation(0),
-      tilt(0),
-      tool_type(TOOL_TYPE_UNKNOWN) {
-}
+      tilt_x(0),
+      tilt_y(0),
+      tool_type(TOOL_TYPE_UNKNOWN) {}
 
-MotionEventAndroid::MotionEventAndroid(float pix_to_dip,
-                                       JNIEnv* env,
+MotionEventAndroid::MotionEventAndroid(JNIEnv* env,
                                        jobject event,
+                                       jfloat pix_to_dip,
+                                       jfloat ticks_x,
+                                       jfloat ticks_y,
+                                       jfloat tick_multiplier,
                                        jlong time_ms,
                                        jint android_action,
                                        jint pointer_count,
                                        jint history_size,
                                        jint action_index,
+                                       jint android_action_button,
                                        jint android_button_state,
                                        jint android_meta_state,
                                        jfloat raw_offset_x_pixels,
@@ -195,11 +212,16 @@ MotionEventAndroid::MotionEventAndroid(float pix_to_dip,
                                        const Pointer* const pointer0,
                                        const Pointer* const pointer1)
     : pix_to_dip_(pix_to_dip),
+      ticks_x_(ticks_x),
+      ticks_y_(ticks_y),
+      tick_multiplier_(tick_multiplier),
+      time_sec_(time_ms / 1000),
       cached_time_(FromAndroidTime(time_ms)),
       cached_action_(FromAndroidAction(android_action)),
       cached_pointer_count_(pointer_count),
       cached_history_size_(ToValidHistorySize(history_size, cached_action_)),
       cached_action_index_(action_index),
+      cached_action_button_(android_action_button),
       cached_button_state_(FromAndroidButtonState(android_button_state)),
       cached_flags_(ToEventFlags(android_meta_state, android_button_state)),
       cached_raw_position_offset_(ToDips(raw_offset_x_pixels),
@@ -217,6 +239,41 @@ MotionEventAndroid::MotionEventAndroid(float pix_to_dip,
     cached_pointers_[1] = FromAndroidPointer(*pointer1);
 }
 
+MotionEventAndroid::MotionEventAndroid(const MotionEventAndroid& e)
+    : event_(e.event_),
+      pix_to_dip_(e.pix_to_dip_),
+      ticks_x_(e.ticks_x_),
+      ticks_y_(e.ticks_y_),
+      tick_multiplier_(e.tick_multiplier_),
+      time_sec_(e.time_sec_),
+      cached_time_(e.cached_time_),
+      cached_action_(e.cached_action_),
+      cached_pointer_count_(e.cached_pointer_count_),
+      cached_history_size_(e.cached_history_size_),
+      cached_action_index_(e.cached_action_index_),
+      cached_action_button_(e.cached_action_button_),
+      cached_button_state_(e.cached_button_state_),
+      cached_flags_(e.cached_flags_),
+      cached_raw_position_offset_(e.cached_raw_position_offset_),
+      unique_event_id_(ui::GetNextTouchEventId()) {
+  cached_pointers_[0] = e.cached_pointers_[0];
+  if (cached_pointer_count_ > 1)
+    cached_pointers_[1] = e.cached_pointers_[1];
+}
+
+std::unique_ptr<MotionEventAndroid> MotionEventAndroid::CreateFor(
+    const gfx::PointF& point) const {
+  std::unique_ptr<MotionEventAndroid> event(new MotionEventAndroid(*this));
+  if (cached_pointer_count_ > 1) {
+    gfx::Vector2dF diff = event->cached_pointers_[1].position -
+                          event->cached_pointers_[0].position;
+    event->cached_pointers_[1] =
+        CreateCachedPointer(cached_pointers_[1], point + diff);
+  }
+  event->cached_pointers_[0] = CreateCachedPointer(cached_pointers_[0], point);
+  return event;
+}
+
 MotionEventAndroid::~MotionEventAndroid() {
 }
 
@@ -226,6 +283,18 @@ uint32_t MotionEventAndroid::GetUniqueEventId() const {
 
 MotionEventAndroid::Action MotionEventAndroid::GetAction() const {
   return cached_action_;
+}
+
+int MotionEventAndroid::GetActionButton() const {
+  return cached_action_button_;
+}
+
+float MotionEventAndroid::GetTickMultiplier() const {
+  return ToDips(tick_multiplier_);
+}
+
+ScopedJavaLocalRef<jobject> MotionEventAndroid::GetJavaObject() const {
+  return ScopedJavaLocalRef<jobject>(event_);
 }
 
 int MotionEventAndroid::GetActionIndex() const {
@@ -310,14 +379,34 @@ float MotionEventAndroid::GetPressure(size_t pointer_index) const {
                                          pointer_index);
 }
 
-float MotionEventAndroid::GetTilt(size_t pointer_index) const {
+float MotionEventAndroid::GetTiltX(size_t pointer_index) const {
   DCHECK_LT(pointer_index, cached_pointer_count_);
   if (pointer_index < MAX_POINTERS_TO_CACHE)
-    return cached_pointers_[pointer_index].tilt;
+    return cached_pointers_[pointer_index].tilt_x;
   if (!event_.obj())
     return 0.f;
-  return ToValidFloat(Java_MotionEvent_getAxisValueF_I_I(
+  float tilt_x, tilt_y;
+  float tilt_rad = ToValidFloat(Java_MotionEvent_getAxisValueF_I_I(
       AttachCurrentThread(), event_, AXIS_TILT, pointer_index));
+  float orientation_rad = ToValidFloat(Java_MotionEvent_getOrientationF_I(
+      AttachCurrentThread(), event_, pointer_index));
+  ConvertTiltOrientationToTiltXY(tilt_rad, orientation_rad, &tilt_x, &tilt_y);
+  return tilt_x;
+}
+
+float MotionEventAndroid::GetTiltY(size_t pointer_index) const {
+  DCHECK_LT(pointer_index, cached_pointer_count_);
+  if (pointer_index < MAX_POINTERS_TO_CACHE)
+    return cached_pointers_[pointer_index].tilt_y;
+  if (!event_.obj())
+    return 0.f;
+  float tilt_x, tilt_y;
+  float tilt_rad = ToValidFloat(Java_MotionEvent_getAxisValueF_I_I(
+      AttachCurrentThread(), event_, AXIS_TILT, pointer_index));
+  float orientation_rad = ToValidFloat(Java_MotionEvent_getOrientationF_I(
+      AttachCurrentThread(), event_, pointer_index));
+  ConvertTiltOrientationToTiltXY(tilt_rad, orientation_rad, &tilt_x, &tilt_y);
+  return tilt_y;
 }
 
 base::TimeTicks MotionEventAndroid::GetEventTime() const {
@@ -383,9 +472,26 @@ MotionEventAndroid::CachedPointer MotionEventAndroid::FromAndroidPointer(
   result.touch_major = ToDips(pointer.touch_major_pixels);
   result.touch_minor = ToDips(pointer.touch_minor_pixels);
   result.orientation = ToValidFloat(pointer.orientation_rad);
-  result.tilt = ToValidFloat(pointer.tilt_rad);
+  float tilt_rad = ToValidFloat(pointer.tilt_rad);
+  ConvertTiltOrientationToTiltXY(tilt_rad, result.orientation, &result.tilt_x,
+                                 &result.tilt_y);
   result.tool_type = FromAndroidToolType(pointer.tool_type);
   return result;
 }
 
-}  // namespace content
+MotionEventAndroid::CachedPointer MotionEventAndroid::CreateCachedPointer(
+    const CachedPointer& pointer,
+    const gfx::PointF& point) const {
+  CachedPointer result;
+  result.id = pointer.id;
+  result.position = point;
+  result.touch_major = pointer.touch_major;
+  result.touch_minor = pointer.touch_minor;
+  result.orientation = pointer.orientation;
+  result.tilt_x = pointer.tilt_x;
+  result.tilt_y = pointer.tilt_y;
+  result.tool_type = pointer.tool_type;
+  return result;
+}
+
+}  // namespace ui

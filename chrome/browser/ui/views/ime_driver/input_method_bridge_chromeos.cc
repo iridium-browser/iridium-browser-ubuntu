@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/ime_driver/input_method_bridge_chromeos.h"
 
+#include <utility>
+
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/ui/views/ime_driver/remote_text_input_client.h"
 
@@ -28,20 +30,15 @@ void InputMethodBridge::OnCaretBoundsChanged(const gfx::Rect& caret_bounds) {
   input_method_chromeos_->OnCaretBoundsChanged(client_.get());
 }
 
-void InputMethodBridge::ProcessKeyEvent(
-    std::unique_ptr<ui::Event> event,
-    const ProcessKeyEventCallback& callback) {
+void InputMethodBridge::ProcessKeyEvent(std::unique_ptr<ui::Event> event,
+                                        ProcessKeyEventCallback callback) {
   DCHECK(event->IsKeyEvent());
   ui::KeyEvent* key_event = event->AsKeyEvent();
   if (!key_event->is_char()) {
-    input_method_chromeos_->DispatchKeyEvent(
-        key_event, base::MakeUnique<base::Callback<void(bool)>>(callback));
+    input_method_chromeos_->DispatchKeyEvent(key_event, std::move(callback));
   } else {
-    // On Linux (include ChromeOS), the mus emulates the WM_CHAR generation
-    // behaviour of Windows. But for ChromeOS, we don't expect those char
-    // events, so we filter them out.
-    const bool handled = true;
-    callback.Run(handled);
+    const bool handled = false;
+    std::move(callback).Run(handled);
   }
 }
 

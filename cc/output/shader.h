@@ -9,7 +9,7 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 
 namespace gfx {
 class ColorTransform;
@@ -276,6 +276,9 @@ class FragmentShader {
 
   bool has_background_color_ = false;
   int background_color_location_ = -1;
+
+  bool has_tex_clamp_rect_ = false;
+  int tex_clamp_rect_location_ = -1;
 
   TexCoordPrecision tex_coord_precision_ = TEX_COORD_PRECISION_NA;
   SamplerType sampler_type_ = SAMPLER_TYPE_NA;

@@ -4,4 +4,19 @@
 
 #include "core/css/properties/CSSPropertyAPIAlignOrJustifyContent.h"
 
-namespace blink {}  // namespace blink
+#include "core/css/properties/CSSPropertyAlignmentUtils.h"
+#include "platform/RuntimeEnabledFeatures.h"
+
+class CSSParserLocalContext;
+namespace blink {
+
+const CSSValue* CSSPropertyAPIAlignOrJustifyContent::parseSingleValue(
+    CSSParserTokenRange& range,
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  DCHECK(RuntimeEnabledFeatures::CSSGridLayoutEnabled());
+  return CSSPropertyAlignmentUtils::ConsumeContentDistributionOverflowPosition(
+      range);
+}
+
+}  // namespace blink

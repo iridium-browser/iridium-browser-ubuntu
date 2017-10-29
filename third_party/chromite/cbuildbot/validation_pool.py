@@ -19,7 +19,6 @@ import time
 from xml.dom import minidom
 
 from chromite.cbuildbot import lkgm_manager
-from chromite.cbuildbot import tree_status
 from chromite.cbuildbot import patch_series
 from chromite.lib import config_lib
 from chromite.lib import constants
@@ -31,9 +30,11 @@ from chromite.lib import failures_lib
 from chromite.lib import gerrit
 from chromite.lib import git
 from chromite.lib import gob_util
+from chromite.lib import metrics
 from chromite.lib import parallel
 from chromite.lib import patch as cros_patch
 from chromite.lib import timeout_util
+from chromite.lib import tree_status
 from chromite.lib import triage_lib
 
 
@@ -64,9 +65,8 @@ CQ_PIPELINE_CONFIGS = {CQ_CONFIG, PRE_CQ_LAUNCHER_CONFIG}
 # normal.  Setting timeout to 3 minutes to be safe-ish.
 SUBMITTED_WAIT_TIMEOUT = 3 * 60 # Time in seconds.
 
-# Default sleep time (second) in the apply_patch loop
-DEFAULT_APPLY_PATCH_SLEEP_TIME = 1
-
+# Default timeout (second) for computing dependency map.
+COMPUTE_DEPENDENCY_MAP_TIMEOUT = 5 * 60
 
 class TreeIsClosedException(Exception):
   """Raised when the tree is closed and we wanted to submit changes."""
@@ -196,9 +196,9 @@ class ValidationPool(object):
   REJECTION_GRACE_PERIOD = 30 * 60
 
   # How many CQ runs to go back when making a decision about the CQ health.
-  # Note this impacts the max exponential fallback (2^10=1024 max exponential
+  # Note this impacts the max exponential fallback (1.5^4 ~= 5 max exponential
   # divisor)
-  CQ_SEARCH_HISTORY = 10
+  CQ_SEARCH_HISTORY = 4
 
 
   def __init__(self, overlays, build_root, build_number, builder_name,
@@ -299,6 +299,9 @@ class ValidationPool(object):
     # Set to False if the tree was not open when we acquired changes.
     self.tree_was_open = tree_was_open
 
+    # A set of changes filtered by throttling, default to None.
+    self.filtered_set = None
+
   def GetAppliedPatches(self):
     """Get the applied_patches instance.
 
@@ -309,6 +312,10 @@ class ValidationPool(object):
     """
     return self.applied_patches or patch_series.PatchSeries(
         self.build_root, helper_pool=self._helper_pool)
+
+  def HasPickedUpCLs(self):
+    """Returns True if this pool has picked up chump CLs or applied new CLs."""
+    return self.has_chump_cls or self.applied
 
   @property
   def build_log(self):
@@ -384,12 +391,16 @@ class ValidationPool(object):
     for helper in self._helper_pool:
       changes = helper.Query(gerrit_query, sort='lastUpdated')
       changes.reverse()
+      logging.info('Queried changes: %s', cros_patch.GetChangesAsString(
+          changes))
 
       if ready_fn:
         # The query passed in may include a dictionary of flags to use for
         # revalidating the query results. We need to do this because Gerrit
         # caches are sometimes stale and need sanity checking.
         changes = [x for x in changes if ready_fn(x)]
+        logging.info('Ready changes: %s', cros_patch.GetChangesAsString(
+            changes))
 
       # Tell users to publish drafts before marking them commit ready.
       for change in changes:
@@ -448,14 +459,13 @@ class ValidationPool(object):
     # We choose a longer wait here as we haven't committed to anything yet. By
     # doing this here we can reduce the number of builder cycles.
     timeout = cls.DEFAULT_TIMEOUT
-    if builder_run is not None:
-      build_id, db = builder_run.GetCIDBHandle()
-      if db:
-        time_to_deadline = db.GetTimeToDeadline(build_id)
-        if time_to_deadline is not None:
-          # We must leave enough time before the deadline to allow us to extend
-          # the deadline in case we hit this timeout.
-          timeout = time_to_deadline - cls.EXTENSION_TIMEOUT_BUFFER
+    build_id, db = builder_run.GetCIDBHandle()
+    if db:
+      time_to_deadline = db.GetTimeToDeadline(build_id)
+      if time_to_deadline is not None:
+        # We must leave enough time before the deadline to allow us to extend
+        # the deadline in case we hit this timeout.
+        timeout = time_to_deadline - cls.EXTENSION_TIMEOUT_BUFFER
 
     end_time = time.time() + timeout
     status = constants.TREE_OPEN
@@ -478,6 +488,11 @@ class ValidationPool(object):
 
       gerrit_query, ready_fn = query
       tree_was_open = (status == constants.TREE_OPEN)
+
+      experimental_builders = tree_status.GetExperimentalBuilders()
+      builder_run.attrs.metadata.UpdateWithDict({
+          constants.METADATA_EXPERIMENTAL_BUILDERS: experimental_builders
+      })
 
       pool = ValidationPool(overlays, repo.directory, build_number,
                             builder_name, True, dryrun, builder_run=builder_run,
@@ -620,18 +635,19 @@ class ValidationPool(object):
 
     return changes_in_manifest, changes_not_in_manifest
 
-  @classmethod
-  def _FilterDependencyErrors(cls, errors):
+  def _FilterDependencyErrors(self, errors):
     """Filter out ignorable DependencyError exceptions.
 
     If a dependency isn't marked as ready, or a dependency fails to apply,
     we only complain after REJECTION_GRACE_PERIOD has passed since the patch
     was uploaded.
 
-    This helps in two situations:
-      1) If the developer is in the middle of marking a stack of changes as
+    This helps in three situations:
+      1) crbug.com/705023: if the error is a DependencyError, and the dependent
+         CL was filtered by a throttled tree, do not reject the CL set.
+      2) If the developer is in the middle of marking a stack of changes as
          ready, we won't reject their work until the grace period has passed.
-      2) If the developer marks a big circular stack of changes as ready, and
+      3) If the developer marks a big circular stack of changes as ready, and
          some change in the middle of the stack doesn't apply, the user will
          get a chance to rebase their change before we mark all the changes as
          'not ready'.
@@ -645,10 +661,21 @@ class ValidationPool(object):
     Returns:
       List of unfiltered exceptions.
     """
-    reject_timestamp = time.time() - cls.REJECTION_GRACE_PERIOD
+    reject_timestamp = time.time() - self.REJECTION_GRACE_PERIOD
     results = []
     for error in errors:
       results.append(error)
+
+      if self.filtered_set and isinstance(error, cros_patch.DependencyError):
+        root_error = error.GetRootError()
+        if (isinstance(root_error, patch_series.PatchNotEligible) and
+            root_error.patch in self.filtered_set):
+          logging.info('Ignoring dependency errors for %s as its dependency '
+                       'change %s was filtered out by throttling.', error.patch,
+                       root_error.patch)
+          results.pop()
+          continue
+
       is_ready = error.patch.HasReadyFlag()
       if not is_ready or reject_timestamp < error.patch.approval_timestamp:
         while error is not None:
@@ -705,6 +732,11 @@ class ValidationPool(object):
       if change.pass_count > 0:
         s += ' | passed:%d' % change.pass_count
 
+      # Add the subject line of the commit message.
+      if change.commit_message:
+        s += ' | %s' % cros_build_lib.TruncateStringToLine(
+            change.commit_message, 80)
+
       logging.PrintBuildbotLink(s, change.url)
 
   def FilterChangesForThrottledTree(self):
@@ -725,6 +757,14 @@ class ValidationPool(object):
     fail_streak = self._GetFailStreak()
     test_pool_size = max(1, int(len(self.candidates) / (1.5**fail_streak)))
     random.shuffle(self.candidates)
+
+    removed = self.candidates[test_pool_size:]
+    if removed:
+      self.filtered_set = set(removed)
+      logging.info('As the tree is throttled, it only picks a random subset of '
+                   'candidate changes. Changes not picked up in this run: %s ',
+                   cros_patch.GetChangesAsString(removed))
+
     self.candidates = self.candidates[:test_pool_size]
 
   def ApplyPoolIntoRepo(self, manifest=None, filter_fn=lambda p: True):
@@ -798,6 +838,7 @@ class ValidationPool(object):
       # Slaves do not need to create transactions and should simply
       # apply the changes serially, based on the order that the
       # changes were listed on the manifest.
+      self.applied_patches.FetchChanges(self.candidates, manifest=manifest)
       for change in self.candidates:
         try:
           # pylint: disable=E1123
@@ -808,8 +849,6 @@ class ValidationPool(object):
           raise
         else:
           applied.append(change)
-        finally:
-          time.sleep(DEFAULT_APPLY_PATCH_SLEEP_TIME)
 
     self.RecordPatchesInMetadataAndDatabase(applied)
     self.PrintLinksToChanges(applied)
@@ -880,75 +919,81 @@ class ValidationPool(object):
       A dict mapping a change (patch.GerritPatch instance) to a set of changes
       (patch.GerritPatch instances) depending on this change.
     """
-    dependency_map = {}
-
+    # 1. We want the set of nodes S = {x : x has a path to n in G}.
+    # 2. There is a path from x to n in G if and only if there is a path from
+    #    n to x in flip(G).
+    # 3. So S = {x : x has a path to n in G}
+    #         = {x : n has a path to x in flip(G)}
+    logging.info('Computing dependency map for changes: %s',
+                 cros_patch.GetChangesAsString(changes))
+    flipped_graph = {}
     for change in changes:
       gerrit_deps, cq_deps = patches.GetDepChangesForChange(change)
-
       for dep in gerrit_deps + cq_deps:
         # Maps each change to the changes directly depending on it.
-        dependency_map.setdefault(dep, set()).add(change)
+        flipped_graph.setdefault(dep, set()).add(change)
 
-    visited = set()
-    visiting = set()
-    for change in changes:
-      # Update dependency_map to map each change to all changes directly or
-      # indirectly depending on it.
-      self._UpdateDependencyMap(dependency_map, change, visiting, visited)
+    try:
+      return self.GetTransitiveDependMap(changes, flipped_graph)
+    except timeout_util.TimeoutError as e:
+      logging.error('Timeout error at getting transitive dependency map for '
+                    'changes: %s', e)
 
-    return dependency_map
+    return flipped_graph
 
-  def _UpdateDependencyMap(self, dependency_map, change, visiting, visited):
-    """For a change, find all changes depending on it and update dependency map.
-
-    The value part of a change key in the dependency map is a set of changes
-    depending on it. Some other changes may indirectly depend on this change.
-    Given the change and the dependency map, search through the dependency map
-    to find all changes (directly and indirectly) depending on this change,
-    add all the changes to the value of this change key in the dependency map.
+  @timeout_util.TimeoutDecorator(COMPUTE_DEPENDENCY_MAP_TIMEOUT)
+  def GetTransitiveDependMap(self, changes, flipped_graph):
+    """Get the transitive dependency map for given changes.
 
     Args:
-      dependency_map: A dict mapping a change (patch.GerritPatch instance)
-        to a set of changes (patch.GerritPatch instances) depending on this
-        change.
-      change: The change (patch.GerritPatch instance) to update.
-      visiting: A set of changes (patch.GerritPatch instance) in visiting
-        status in this search.
-      visited: A set of changes (patch.GerritPatch instance) has been visited
-        and updated with all changes depending on them.
+      changes: A list of changes to parse to generate the dependency map.
+      flipped_graph: A dict mapping a change (patch.GerritPatch instance) to a
+        set of changes (patch.GerritPatch instances) directly depending on it.
 
     Returns:
-      A set of changes (patch.GerritPatch instance) depending on the change,
-         or None if no change depends on this change.
+      A dict mapping a change (patch.GerritPatch instance) to a set of changes
+      (patch.GerritPatch instances) directly or indirectly depending on it.
     """
-    if change in visited:
-      return dependency_map.get(change)
+    transitive_dependency_map = {}
+    for change in changes:
+      logging.info('Getting transitive dependency map for change: %s ',
+                   change.PatchLink())
+      # Update dependency_map to map each change to all changes directly or
+      # indirectly depending on it.
+      visited = self._DepthFirstSearch(flipped_graph, change)
+      visited.remove(change)
+      if visited:
+        transitive_dependency_map[change] = visited
 
-    if change in visiting:
-      return {change}
+    return transitive_dependency_map
 
-    visiting.add(change)
+  def _DepthFirstSearch(self, graph, node):
+    """Returns a set of nodes reachable from a node in a graph.
 
-    if change in dependency_map:
-      updated_deps = set()
-      for dep in dependency_map[change]:
-        dep_deps = self._UpdateDependencyMap(
-            dependency_map, dep, visiting, visited)
+    Performs depth-first-search, keeping track of a set of visited nodes to
+    avoid exponential blowup from diamond-shaped graphs, and to avoid infinite
+    loops from cycles. Returns the set of visited nodes, including the start
+    node.
 
-        if dep_deps:
-          updated_deps.update(dep_deps)
+    Args:
+      graph: The graph as an adjacency map. It maps nodes to a collection of
+             their neighbors.
+      node: The current node we are at.
 
-      updated_deps.discard(change)
-      dependency_map[change].update(updated_deps)
+    Returns:
+      A set of nodes reachable from the start node.
+    """
+    visited = set()
+    visiting = [node]
+    while visiting:
+      node = visiting.pop()
+      visited.add(node)
+      children = graph.get(node, set())
+      # Don't re-visit nodes, or the algorithm becomes exponential-time.
+      visiting.extend(children - visited)
 
-    visiting.remove(change)
+    return visited
 
-    depends = dependency_map.get(change)
-
-    if not depends or not visiting.intersection(depends):
-      visited.add(change)
-
-    return depends
 
   @staticmethod
   def Load(filename, builder_run=None):
@@ -1463,36 +1508,17 @@ class ValidationPool(object):
     # tried to submit changes that failed to submit.
     self._InsertCLActionToDatabase(change, action, reason)
 
-  def _RemoveCodeReview(self, failure):
-    """Determine whether to remove the 'Code-Review' ready label.
-
-    Args:
-      failure: cros_patch.PatchException instance.
-
-    Returns:
-      Boolean indicating whether to reset the Code-Review to 0.
-    """
-    if (self._builder_name == constants.PRE_CQ_LAUNCHER_NAME and
-        (isinstance(failure, cros_patch.BrokenCQDepends) or
-         isinstance(failure, cros_patch.BrokenChangeID))):
-      return True
-    else:
-      return False
-
-  def RemoveReady(self, change, failure=None, reason=None):
+  def RemoveReady(self, change, reason=None):
     """Remove the commit ready and trybot ready bits for |change|.
 
     Args:
-      change: A GerritPatch or GerritPatchTuple object.
-      failure: A cros_patch.PatchException instance.
-      reason: string reason for submission to be recorded in cidb. (Should be
-              None or constant with name STRATEGY_* from constants.py):
+      change: An instance of cros_patch.GerritPatch.
+      reason: The reason to remove the ready bit for the |change|. None by
+        default.
     """
     try:
-      extra_labels = ({'Code-Review'} if self._RemoveCodeReview(failure)
-                      else None)
       self._helper_pool.ForChange(change).RemoveReady(
-          change, extra_labels=extra_labels, dryrun=self.dryrun)
+          change, dryrun=self.dryrun)
     except gob_util.GOBError as e:
       if (e.http_status == httplib.CONFLICT and
           e.reason == gob_util.GOB_ERROR_REASON_CLOSED_CHANGE):
@@ -1505,6 +1531,10 @@ class ValidationPool(object):
       timestamp = int(time.time())
       metadata.RecordCLAction(change, constants.CL_ACTION_KICKED_OUT,
                               timestamp)
+
+    if reason in constants.SUSPECT_REASONS:
+      metrics.Counter(constants.MON_CL_REJECT_COUNT).increment(
+          fields={'reason': reason})
 
     self._InsertCLActionToDatabase(change, constants.CL_ACTION_KICKED_OUT,
                                    reason)
@@ -1583,7 +1613,8 @@ class ValidationPool(object):
       self._HandleApplyFailure(self.changes_that_failed_to_apply_earlier)
 
   def SubmitPartialPool(self, changes, messages, changes_by_config,
-                        subsys_by_config, failing, inflight, no_stat):
+                        subsys_by_config, passed_in_history_slaves_by_change,
+                        failing, inflight, no_stat):
     """If the build failed, push any CLs that don't care about the failure.
 
     In this function we calculate what CLs are definitely innocent and submit
@@ -1596,12 +1627,14 @@ class ValidationPool(object):
 
     Args:
       changes: A list of GerritPatch instances to examine.
-      messages: A list of BuildFailureMessage or NoneType objects from
-        the failed slaves.
+      messages: A list of build_failure_message.BuildFailureMessage or NoneType
+        objects from the failed slaves.
       changes_by_config: A dictionary of relevant changes indexed by the
         config names.
       subsys_by_config: A dictionary of pass/fail HWTest subsystems indexed
         by the config names.
+      passed_in_history_slaves_by_change: A dict mapping changes to their
+        relevant slaves (build config name strings) which passed in history.
       failing: Names of the builders that failed.
       inflight: Names of the builders that timed out.
       no_stat: Set of builder names of slave builders that had status None.
@@ -1610,8 +1643,9 @@ class ValidationPool(object):
       A set of the non-submittable changes.
     """
     fully_verified = triage_lib.CalculateSuspects.GetFullyVerifiedChanges(
-        changes, changes_by_config, subsys_by_config, failing, inflight,
-        no_stat, messages, self.build_root)
+        changes, changes_by_config, subsys_by_config,
+        passed_in_history_slaves_by_change, failing, inflight, no_stat,
+        messages, self.build_root)
     fully_verified_cls = fully_verified.keys()
     if fully_verified_cls:
       logging.info('The following changes will be submitted using '
@@ -1645,7 +1679,7 @@ class ValidationPool(object):
     msg = ('%(queue)s failed to apply your change in %(build_log)s .'
            ' %(failure)s')
     self.SendNotification(failure.patch, msg, failure=failure)
-    self.RemoveReady(failure.patch, failure=failure)
+    self.RemoveReady(failure.patch)
 
   def _HandleIncorrectSubmission(self, failure):
     """Handler for when Paladin incorrectly submits a change."""
@@ -1807,8 +1841,8 @@ class ValidationPool(object):
     Args:
       change: The change to mark as failed.
       messages: A list of build failure messages from supporting builders.
-          These must be BuildFailureMessage objects.
-      suspects: The list of changes that are suspected of breaking the build.
+          These must be build_failure_message.BuildFailureMessage objects.
+      suspects: An instance of triage_lib.SuspectChanges.
       sanity: A boolean indicating whether the build was considered sane. If
         not sane, none of the changes will have their CommitReady bit modified.
       infra_fail: The build failed purely due to infrastructure failures.
@@ -1816,7 +1850,7 @@ class ValidationPool(object):
       no_stat: A list of builders which failed prematurely without reporting
         status.
     """
-    retry = not sanity or lab_fail or change not in suspects
+    retry = not sanity or lab_fail or change not in suspects.keys()
     msg = cl_messages.CreateValidationFailureMessage(
         self.pre_cq_trybot, change, suspects, messages,
         sanity, infra_fail, lab_fail, no_stat, retry)
@@ -1824,10 +1858,10 @@ class ValidationPool(object):
     if retry:
       self.MarkForgiven(change)
     else:
-      self.RemoveReady(change)
+      self.RemoveReady(change, reason=suspects.get(change))
 
   def HandleValidationFailure(self, messages, changes=None, sanity=True,
-                              no_stat=None):
+                              no_stat=None, failed_hwtests=None):
     """Handles a list of validation failure messages from slave builders.
 
     This handler parses a list of failure messages from our list of builders
@@ -1837,13 +1871,15 @@ class ValidationPool(object):
 
     Args:
       messages: A list of build failure messages from supporting builders.
-          These must be BuildFailureMessage objects or NoneType objects.
+          These must be build_failure_message.BuildFailureMessage objects or
+          NoneType objects.
       changes: A list of cros_patch.GerritPatch instances to mark as failed.
         By default, mark all of the changes as failed.
       sanity: A boolean indicating whether the build was considered sane. If
         not sane, none of the changes will have their CommitReady bit modified.
       no_stat: A list of builders which failed prematurely without reporting
         status. If not None, this implies there were infrastructure issues.
+      failed_hwtests: A list of names (strings) of failed hwtests.
     """
     if changes is None:
       changes = self.applied
@@ -1851,18 +1887,24 @@ class ValidationPool(object):
     candidates = []
 
     if self.pre_cq_trybot:
-      _, db = self._run.GetCIDBHandle()
+      build_id, db = self._run.GetCIDBHandle()
       action_history = []
       if db:
         action_history = db.GetActionsForChanges(changes)
 
-      for change in changes:
-        # Don't reject changes that have already passed the pre-cq.
-        pre_cq_status = clactions.GetCLPreCQStatus(
-            change, action_history)
-        if pre_cq_status == constants.CL_STATUS_PASSED:
-          continue
-        candidates.append(change)
+      cancelled_pre_cqs = clactions.GetCancelledPreCQBuilds(action_history)
+      cancelled_build_ids = set([x.build_id for x in cancelled_pre_cqs])
+      if build_id in cancelled_build_ids:
+        logging.info('This Pre-CQ build was cancelled on demand, do not blame '
+                     'on CLs.')
+      else:
+        for change in changes:
+          # Don't reject changes that have already passed the pre-cq.
+          pre_cq_status = clactions.GetCLPreCQStatus(
+              change, action_history)
+          if pre_cq_status == constants.CL_STATUS_PASSED:
+            continue
+          candidates.append(change)
     else:
       candidates.extend(changes)
 
@@ -1872,8 +1914,8 @@ class ValidationPool(object):
     infra_fail = triage_lib.CalculateSuspects.OnlyInfraFailures(
         messages, no_stat)
     suspects = triage_lib.CalculateSuspects.FindSuspects(
-        candidates, messages, infra_fail=infra_fail, lab_fail=lab_fail,
-        sanity=sanity)
+        candidates, messages, build_root=self.build_root, infra_fail=infra_fail,
+        lab_fail=lab_fail, failed_hwtests=failed_hwtests, sanity=sanity)
 
     # Send out failure notifications for each change.
     inputs = [[change, messages, suspects, sanity, infra_fail,

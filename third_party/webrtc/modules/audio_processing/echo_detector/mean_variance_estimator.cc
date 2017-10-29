@@ -12,7 +12,7 @@
 
 #include <math.h>
 
-#include "webrtc/base/checks.h"
+#include "webrtc/rtc_base/checks.h"
 
 namespace webrtc {
 namespace {
@@ -26,6 +26,8 @@ void MeanVarianceEstimator::Update(float value) {
   mean_ = (1.f - kAlpha) * mean_ + kAlpha * value;
   variance_ =
       (1.f - kAlpha) * variance_ + kAlpha * (value - mean_) * (value - mean_);
+  RTC_DCHECK(isfinite(mean_));
+  RTC_DCHECK(isfinite(variance_));
 }
 
 float MeanVarianceEstimator::std_deviation() const {

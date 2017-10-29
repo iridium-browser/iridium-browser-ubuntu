@@ -7,133 +7,166 @@
 #include "core/HTMLNames.h"
 #include "core/InputTypeNames.h"
 #include "core/dom/ElementRareData.h"
+#include "core/dom/ShadowRoot.h"
 #include "core/dom/Text.h"
-#include "core/dom/shadow/ShadowRoot.h"
-#include "core/html/HTMLDivElement.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLImageLoader.h"
 #include "core/html/HTMLInputElement.h"
+#include "core/html/HTMLSpanElement.h"
 #include "core/html/HTMLStyleElement.h"
-#include "wtf/text/StringBuilder.h"
+#include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
 
 using namespace HTMLNames;
 
-static bool noImageSourceSpecified(const Element& element) {
-  bool noSrcSpecified = !element.hasAttribute(srcAttr) ||
-                        element.getAttribute(srcAttr).isNull() ||
-                        element.getAttribute(srcAttr).isEmpty();
-  bool noSrcsetSpecified = !element.hasAttribute(srcsetAttr) ||
-                           element.getAttribute(srcsetAttr).isNull() ||
-                           element.getAttribute(srcsetAttr).isEmpty();
-  return noSrcSpecified && noSrcsetSpecified;
+static bool ImageSmallerThanAltImage(int pixels_for_alt_image,
+                                     const Length width,
+                                     const Length height) {
+  // We don't have a layout tree so can't compute the size of an image
+  // relative dimensions - so we just assume we should display the alt image.
+  if (!width.IsFixed() && !height.IsFixed())
+    return false;
+  if (height.IsFixed() && height.Value() < pixels_for_alt_image)
+    return true;
+  return width.IsFixed() && width.Value() < pixels_for_alt_image;
 }
 
-void HTMLImageFallbackHelper::createAltTextShadowTree(Element& element) {
-  ShadowRoot& root = element.ensureUserAgentShadowRoot();
+void HTMLImageFallbackHelper::CreateAltTextShadowTree(Element& element) {
+  ShadowRoot& root = element.EnsureUserAgentShadowRoot();
 
-  HTMLDivElement* container = HTMLDivElement::create(element.document());
-  root.appendChild(container);
+  HTMLSpanElement* container = HTMLSpanElement::Create(element.GetDocument());
+  root.AppendChild(container);
   container->setAttribute(idAttr, AtomicString("alttext-container"));
-  container->setInlineStyleProperty(CSSPropertyOverflow, CSSValueHidden);
-  container->setInlineStyleProperty(CSSPropertyBorderWidth, 1,
-                                    CSSPrimitiveValue::UnitType::Pixels);
-  container->setInlineStyleProperty(CSSPropertyBorderStyle, CSSValueSolid);
-  container->setInlineStyleProperty(CSSPropertyBorderColor, CSSValueSilver);
-  container->setInlineStyleProperty(CSSPropertyDisplay, CSSValueInlineBlock);
-  container->setInlineStyleProperty(CSSPropertyBoxSizing, CSSValueBorderBox);
-  container->setInlineStyleProperty(CSSPropertyPadding, 1,
-                                    CSSPrimitiveValue::UnitType::Pixels);
 
-  HTMLImageElement* brokenImage = HTMLImageElement::create(element.document());
-  container->appendChild(brokenImage);
-  brokenImage->setIsFallbackImage();
-  brokenImage->setAttribute(idAttr, AtomicString("alttext-image"));
-  brokenImage->setAttribute(widthAttr, AtomicString("16"));
-  brokenImage->setAttribute(heightAttr, AtomicString("16"));
-  brokenImage->setAttribute(alignAttr, AtomicString("left"));
-  brokenImage->setInlineStyleProperty(CSSPropertyMargin, 0,
-                                      CSSPrimitiveValue::UnitType::Pixels);
+  HTMLImageElement* broken_image =
+      HTMLImageElement::Create(element.GetDocument());
+  container->AppendChild(broken_image);
+  broken_image->SetIsFallbackImage();
+  broken_image->setAttribute(idAttr, AtomicString("alttext-image"));
+  broken_image->setAttribute(widthAttr, AtomicString("16"));
+  broken_image->setAttribute(heightAttr, AtomicString("16"));
+  broken_image->setAttribute(alignAttr, AtomicString("left"));
+  broken_image->SetInlineStyleProperty(CSSPropertyMargin, 0,
+                                       CSSPrimitiveValue::UnitType::kPixels);
 
-  HTMLDivElement* altText = HTMLDivElement::create(element.document());
-  container->appendChild(altText);
-  altText->setAttribute(idAttr, AtomicString("alttext"));
-  altText->setInlineStyleProperty(CSSPropertyOverflow, CSSValueHidden);
-  altText->setInlineStyleProperty(CSSPropertyDisplay, CSSValueBlock);
+  HTMLSpanElement* alt_text = HTMLSpanElement::Create(element.GetDocument());
+  container->AppendChild(alt_text);
+  alt_text->setAttribute(idAttr, AtomicString("alttext"));
 
   Text* text =
-      Text::create(element.document(), toHTMLElement(element).altText());
-  altText->appendChild(text);
+      Text::Create(element.GetDocument(), ToHTMLElement(element).AltText());
+  alt_text->AppendChild(text);
 }
 
-PassRefPtr<ComputedStyle> HTMLImageFallbackHelper::customStyleForAltText(
+PassRefPtr<ComputedStyle> HTMLImageFallbackHelper::CustomStyleForAltText(
     Element& element,
-    PassRefPtr<ComputedStyle> newStyle) {
+    PassRefPtr<ComputedStyle> new_style) {
   // If we have an author shadow root or have not created the UA shadow root
   // yet, bail early. We can't use ensureUserAgentShadowRoot() here because that
   // would alter the DOM tree during style recalc.
-  if (element.authorShadowRoot() || !element.userAgentShadowRoot())
-    return newStyle;
+  if (element.AuthorShadowRoot() || !element.UserAgentShadowRoot())
+    return new_style;
 
-  Element* placeHolder =
-      element.userAgentShadowRoot()->getElementById("alttext-container");
-  Element* brokenImage =
-      element.userAgentShadowRoot()->getElementById("alttext-image");
+  Element* place_holder =
+      element.UserAgentShadowRoot()->getElementById("alttext-container");
+  Element* broken_image =
+      element.UserAgentShadowRoot()->getElementById("alttext-image");
   // Input elements have a UA shadow root of their own. We may not have replaced
   // it with fallback content yet.
-  if (!placeHolder || !brokenImage)
-    return newStyle;
+  if (!place_holder || !broken_image)
+    return new_style;
 
-  if (element.document().inQuirksMode()) {
+  if (element.GetDocument().InQuirksMode()) {
     // Mimic the behaviour of the image host by setting symmetric dimensions if
     // only one dimension is specified.
-    if (newStyle->width().isSpecifiedOrIntrinsic() &&
-        newStyle->height().isAuto())
-      newStyle->setHeight(newStyle->width());
-    else if (newStyle->height().isSpecifiedOrIntrinsic() &&
-             newStyle->width().isAuto())
-      newStyle->setWidth(newStyle->height());
-    if (newStyle->width().isSpecifiedOrIntrinsic() &&
-        newStyle->height().isSpecifiedOrIntrinsic()) {
-      placeHolder->setInlineStyleProperty(CSSPropertyVerticalAlign,
-                                          CSSValueBaseline);
+    if (new_style->Width().IsSpecifiedOrIntrinsic() &&
+        new_style->Height().IsAuto())
+      new_style->SetHeight(new_style->Width());
+    else if (new_style->Height().IsSpecifiedOrIntrinsic() &&
+             new_style->Width().IsAuto())
+      new_style->SetWidth(new_style->Height());
+    if (new_style->Width().IsSpecifiedOrIntrinsic() &&
+        new_style->Height().IsSpecifiedOrIntrinsic()) {
+      place_holder->SetInlineStyleProperty(CSSPropertyVerticalAlign,
+                                           CSSValueBaseline);
     }
   }
 
-  // If the image has specified dimensions allow the alt-text container expand
-  // to fill them.
-  if (newStyle->width().isSpecifiedOrIntrinsic() &&
-      newStyle->height().isSpecifiedOrIntrinsic()) {
-    placeHolder->setInlineStyleProperty(
-        CSSPropertyWidth, 100, CSSPrimitiveValue::UnitType::Percentage);
-    placeHolder->setInlineStyleProperty(
-        CSSPropertyHeight, 100, CSSPrimitiveValue::UnitType::Percentage);
+  bool image_has_intrinsic_dimensions =
+      new_style->Width().IsSpecifiedOrIntrinsic() &&
+      new_style->Height().IsSpecifiedOrIntrinsic();
+  bool image_has_no_alt_attribute = ToHTMLElement(element).AltText().IsNull();
+  bool treat_as_replaced =
+      image_has_intrinsic_dimensions &&
+      (element.GetDocument().InQuirksMode() || image_has_no_alt_attribute);
+  if (treat_as_replaced) {
+    // https://html.spec.whatwg.org/multipage/rendering.html#images-3:
+    // "If the element does not represent an image, but the element already has
+    // intrinsic dimensions (e.g. from the dimension attributes or CSS rules),
+    // and either: the user agent has reason to believe that the image will
+    // become available and be rendered in due course, or the element has no alt
+    // attribute, or the Document is in quirks mode The user agent is expected
+    // to treat the element as a replaced element whose content is the text that
+    // the element represents, if any."
+    place_holder->SetInlineStyleProperty(CSSPropertyOverflow, CSSValueHidden);
+    place_holder->SetInlineStyleProperty(CSSPropertyDisplay,
+                                         CSSValueInlineBlock);
+    CSSPrimitiveValue::UnitType unit =
+        new_style->Height().IsPercent()
+            ? CSSPrimitiveValue::UnitType::kPercentage
+            : CSSPrimitiveValue::UnitType::kPixels;
+    place_holder->SetInlineStyleProperty(CSSPropertyHeight,
+                                         new_style->Height().Value(), unit);
+    place_holder->SetInlineStyleProperty(CSSPropertyWidth,
+                                         new_style->Width().Value(), unit);
+
+    // 16px for the image and 2px for its top/left border/padding offset.
+    int pixels_for_alt_image = 18;
+    if (ImageSmallerThanAltImage(pixels_for_alt_image, new_style->Width(),
+                                 new_style->Height())) {
+      broken_image->SetInlineStyleProperty(CSSPropertyDisplay, CSSValueNone);
+    } else {
+      place_holder->SetInlineStyleProperty(
+          CSSPropertyBorderWidth, 1, CSSPrimitiveValue::UnitType::kPixels);
+      place_holder->SetInlineStyleProperty(CSSPropertyBorderStyle,
+                                           CSSValueSolid);
+      place_holder->SetInlineStyleProperty(CSSPropertyBorderColor,
+                                           CSSValueSilver);
+      place_holder->SetInlineStyleProperty(
+          CSSPropertyPadding, 1, CSSPrimitiveValue::UnitType::kPixels);
+      place_holder->SetInlineStyleProperty(CSSPropertyBoxSizing,
+                                           CSSValueBorderBox);
+      broken_image->SetInlineStyleProperty(CSSPropertyDisplay, CSSValueInline);
+      // Make sure the broken image icon appears on the appropriate side of the
+      // image for the element's writing direction.
+      broken_image->SetInlineStyleProperty(
+          CSSPropertyFloat,
+          AtomicString(new_style->Direction() == TextDirection::kLtr
+                           ? "left"
+                           : "right"));
+    }
+  } else {
+    // "If the element is an img element that represents nothing and the user
+    // agent does not expect this to change the user agent is expected to treat
+    // the element as an empty inline element."
+    //  - We achieve this by hiding the broken image so that the span is empty.
+    // "If the element is an img element that represents some text and the user
+    // agent does not expect this to change the user agent is expected to treat
+    // the element as a non-replaced phrasing element whose content is the text,
+    // optionally with an icon indicating that an image is missing, so that the
+    // user can request the image be displayed or investigate why it is not
+    // rendering."
+    //  - We opt not to display an icon, like Firefox.
+    if (new_style->Display() == EDisplay::kInline) {
+      new_style->SetWidth(Length());
+      new_style->SetHeight(Length());
+    }
+    broken_image->SetInlineStyleProperty(CSSPropertyDisplay, CSSValueNone);
   }
 
-  // Make sure the broken image icon appears on the appropriate side of the
-  // image for the element's writing direction.
-  brokenImage->setInlineStyleProperty(
-      CSSPropertyFloat,
-      AtomicString(newStyle->direction() == TextDirection::kLtr ? "left"
-                                                                : "right"));
-
-  // This is an <img> with no attributes, so don't display anything.
-  if (noImageSourceSpecified(element) &&
-      !newStyle->width().isSpecifiedOrIntrinsic() &&
-      !newStyle->height().isSpecifiedOrIntrinsic() &&
-      toHTMLElement(element).altText().isEmpty())
-    newStyle->setDisplay(EDisplay::None);
-
-  // This preserves legacy behaviour originally defined when alt-text was
-  // managed by LayoutImage.
-  if (noImageSourceSpecified(element))
-    brokenImage->setInlineStyleProperty(CSSPropertyDisplay, CSSValueNone);
-  else
-    brokenImage->setInlineStyleProperty(CSSPropertyDisplay, CSSValueInline);
-
-  return newStyle;
+  return new_style;
 }
 
 }  // namespace blink

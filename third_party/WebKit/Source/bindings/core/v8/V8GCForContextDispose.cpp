@@ -30,50 +30,86 @@
 
 #include "bindings/core/v8/V8GCForContextDispose.h"
 
-#include "bindings/core/v8/V8PerIsolateData.h"
+#include "build/build_config.h"
+#include "platform/Histogram.h"
+#include "platform/MemoryCoordinator.h"
+#include "platform/bindings/V8PerIsolateData.h"
+#include "platform/wtf/CurrentTime.h"
+#include "platform/wtf/ProcessMetrics.h"
+#include "platform/wtf/StdLibExtras.h"
 #include "public/platform/Platform.h"
 #include "v8/include/v8.h"
-#include "wtf/CurrentTime.h"
-#include "wtf/StdLibExtras.h"
+
+size_t GetMemoryUsage() {
+  size_t usage = WTF::GetMallocUsage() + WTF::Partitions::TotalActiveBytes() +
+                 blink::ProcessHeap::TotalAllocatedObjectSize() +
+                 blink::ProcessHeap::TotalMarkedObjectSize();
+  v8::HeapStatistics v8_heap_statistics;
+  blink::V8PerIsolateData::MainThreadIsolate()->GetHeapStatistics(
+      &v8_heap_statistics);
+  usage = v8_heap_statistics.total_heap_size();
+  return usage;
+}
 
 namespace blink {
 
 V8GCForContextDispose::V8GCForContextDispose()
-    : m_pseudoIdleTimer(this, &V8GCForContextDispose::pseudoIdleTimerFired) {
-  reset();
+    : pseudo_idle_timer_(this, &V8GCForContextDispose::PseudoIdleTimerFired) {
+  Reset();
 }
 
-void V8GCForContextDispose::notifyContextDisposed(bool isMainFrame) {
-  m_didDisposeContextForMainFrame = isMainFrame;
-  m_lastContextDisposalTime = WTF::currentTime();
-  V8PerIsolateData::mainThreadIsolate()->ContextDisposedNotification(
-      !isMainFrame);
-  m_pseudoIdleTimer.stop();
+void V8GCForContextDispose::NotifyContextDisposed(
+    bool is_main_frame,
+    WindowProxy::FrameReuseStatus frame_reuse_status) {
+  did_dispose_context_for_main_frame_ = is_main_frame;
+  last_context_disposal_time_ = WTF::CurrentTime();
+#if defined(OS_ANDROID)
+  // When a low end device is in a low memory situation we should prioritize
+  // memory use and trigger a V8+Blink GC. However, on Android, if the frame
+  // will not be reused, the process will likely to be killed soon so skip this.
+  if (is_main_frame && frame_reuse_status == WindowProxy::kFrameWillBeReused &&
+      MemoryCoordinator::IsLowEndDevice() &&
+      MemoryCoordinator::IsCurrentlyLowMemory()) {
+    size_t pre_gc_memory_usage = GetMemoryUsage();
+    V8PerIsolateData::MainThreadIsolate()->MemoryPressureNotification(
+        v8::MemoryPressureLevel::kCritical);
+    size_t post_gc_memory_usage = GetMemoryUsage();
+    int reduction = static_cast<int>(pre_gc_memory_usage) -
+                    static_cast<int>(post_gc_memory_usage);
+    DEFINE_STATIC_LOCAL(
+        CustomCountHistogram, reduction_histogram,
+        ("BlinkGC.LowMemoryPageNavigationGC.Reduction", 1, 512, 50));
+    reduction_histogram.Count(reduction / 1024 / 1024);
+  }
+#endif
+  V8PerIsolateData::MainThreadIsolate()->ContextDisposedNotification(
+      !is_main_frame);
+  pseudo_idle_timer_.Stop();
 }
 
-void V8GCForContextDispose::notifyIdle() {
-  double maxTimeSinceLastContextDisposal = .2;
-  if (!m_didDisposeContextForMainFrame && !m_pseudoIdleTimer.isActive() &&
-      m_lastContextDisposalTime + maxTimeSinceLastContextDisposal >=
-          WTF::currentTime()) {
-    m_pseudoIdleTimer.startOneShot(0, BLINK_FROM_HERE);
+void V8GCForContextDispose::NotifyIdle() {
+  double max_time_since_last_context_disposal = .2;
+  if (!did_dispose_context_for_main_frame_ && !pseudo_idle_timer_.IsActive() &&
+      last_context_disposal_time_ + max_time_since_last_context_disposal >=
+          WTF::CurrentTime()) {
+    pseudo_idle_timer_.StartOneShot(0, BLINK_FROM_HERE);
   }
 }
 
-V8GCForContextDispose& V8GCForContextDispose::instance() {
-  DEFINE_STATIC_LOCAL(V8GCForContextDispose, staticInstance, ());
-  return staticInstance;
+V8GCForContextDispose& V8GCForContextDispose::Instance() {
+  DEFINE_STATIC_LOCAL(V8GCForContextDispose, static_instance, ());
+  return static_instance;
 }
 
-void V8GCForContextDispose::pseudoIdleTimerFired(TimerBase*) {
-  V8PerIsolateData::mainThreadIsolate()->IdleNotificationDeadline(
-      monotonicallyIncreasingTime());
-  reset();
+void V8GCForContextDispose::PseudoIdleTimerFired(TimerBase*) {
+  V8PerIsolateData::MainThreadIsolate()->IdleNotificationDeadline(
+      MonotonicallyIncreasingTime());
+  Reset();
 }
 
-void V8GCForContextDispose::reset() {
-  m_didDisposeContextForMainFrame = false;
-  m_lastContextDisposalTime = -1;
+void V8GCForContextDispose::Reset() {
+  did_dispose_context_for_main_frame_ = false;
+  last_context_disposal_time_ = -1;
 }
 
 }  // namespace blink

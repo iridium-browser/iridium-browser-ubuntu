@@ -22,6 +22,7 @@ function LocalNTP() {
  * @return {HTMLElement} The found element or null if not found.
  */
 function $(id) {
+  // eslint-disable-next-line no-restricted-properties
   return document.getElementById(id);
 }
 
@@ -226,37 +227,27 @@ function onThemeChange() {
 
 /**
  * Updates the NTP style according to theme.
- * @param {Object=} opt_themeInfo The information about the theme. If it is
- * omitted the style will be reverted to the default.
+ * @param {Object} themeInfo The information about the theme.
  * @private
  */
-// TODO(treib): We actually never call this without a themeInfo. Should we?
-function setCustomThemeStyle(opt_themeInfo) {
+function setCustomThemeStyle(themeInfo) {
   var customStyleElement = $(IDS.CUSTOM_THEME_STYLE);
   var head = document.head;
-  if (opt_themeInfo && !opt_themeInfo.usingDefaultTheme) {
+  if (!themeInfo.usingDefaultTheme) {
     $(IDS.NTP_CONTENTS).classList.remove(CLASSES.DEFAULT_THEME);
     var themeStyle =
       '#attribution {' +
-      '  color: ' + convertToRGBAColor(opt_themeInfo.textColorLightRgba) + ';' +
+      '  color: ' + convertToRGBAColor(themeInfo.textColorLightRgba) + ';' +
       '}' +
       '#mv-msg {' +
-      '  color: ' + convertToRGBAColor(opt_themeInfo.textColorRgba) + ';' +
+      '  color: ' + convertToRGBAColor(themeInfo.textColorRgba) + ';' +
       '}' +
       '#mv-notice-links span {' +
-      '  color: ' + convertToRGBAColor(opt_themeInfo.textColorLightRgba) + ';' +
+      '  color: ' + convertToRGBAColor(themeInfo.textColorLightRgba) + ';' +
       '}' +
       '#mv-notice-x {' +
       '  -webkit-filter: drop-shadow(0 0 0 ' +
-          convertToRGBAColor(opt_themeInfo.textColorRgba) + ');' +
-      '}' +
-      '.mv-page-ready .mv-mask {' +
-      '  border: 1px solid ' +
-          convertToRGBAColor(opt_themeInfo.sectionBorderColorRgba) + ';' +
-      '}' +
-      '.mv-page-ready:hover .mv-mask, .mv-page-ready .mv-focused ~ .mv-mask {' +
-      '  border-color: ' +
-          convertToRGBAColor(opt_themeInfo.headerColorRgba) + ';' +
+          convertToRGBAColor(themeInfo.textColorRgba) + ');' +
       '}';
 
     if (customStyleElement) {
@@ -623,6 +614,17 @@ function init() {
 
     // Update the fakebox style to match the current key capturing state.
     setFakeboxFocus(searchboxApiHandle.isKeyCaptureEnabled);
+
+    // Inject the OneGoogleBar loader script. It'll create a global variable
+    // named "og" with the following fields:
+    //  .html - the main bar HTML.
+    //  .end_of_body_html - HTML to be inserted at the end of the body.
+    var ogScript = document.createElement('script');
+    ogScript.src = 'chrome-search://local-ntp/one-google.js';
+    document.body.appendChild(ogScript);
+    ogScript.onload = function() {
+      injectOneGoogleBar(og.html, og.end_of_body_html);
+    };
   } else {
     document.body.classList.add(CLASSES.NON_GOOGLE_PAGE);
   }
@@ -668,6 +670,45 @@ function init() {
 function listen() {
   document.addEventListener('DOMContentLoaded', init);
 }
+
+
+/**
+ * Injects the One Google Bar into the page. Called asynchronously, so that it
+ * doesn't block the main page load.
+ */
+function injectOneGoogleBar(barHtml, endOfBodyHtml) {
+  var inHeadStyle = document.createElement('link');
+  inHeadStyle.rel = "stylesheet";
+  inHeadStyle.href = 'chrome-search://local-ntp/one-google/in-head.css';
+  document.head.appendChild(inHeadStyle);
+
+  inHeadStyle.onload = function() {
+    var inHeadScript = document.createElement('script');
+    inHeadScript.src = 'chrome-search://local-ntp/one-google/in-head.js';
+    document.head.appendChild(inHeadScript);
+
+    inHeadScript.onload = function() {
+      var ogElem = $('one-google');
+      ogElem.innerHTML = barHtml;
+      ogElem.classList.remove('hidden');
+
+      var afterBarScript = document.createElement('script');
+      afterBarScript.src =
+          'chrome-search://local-ntp/one-google/after-bar.js';
+      ogElem.parentNode.insertBefore(afterBarScript, ogElem.nextSibling);
+
+      afterBarScript.onload = function() {
+        $('one-google-end-of-body').innerHTML = endOfBodyHtml;
+
+        var endOfBodyScript = document.createElement('script');
+        endOfBodyScript.src =
+            'chrome-search://local-ntp/one-google/end-of-body.js';
+        document.body.appendChild(endOfBodyScript);
+      };
+    };
+  };
+}
+
 
 return {
   init: init,  // Exposed for testing.

@@ -11,9 +11,10 @@ namespace blink {
 
 // Fuzzer for blink::MHTMLParser.
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+  static BlinkFuzzerTestSupport test_support = BlinkFuzzerTestSupport();
   WebString string =
-      WebString::fromUTF8(reinterpret_cast<const char*>(data), size);
-  WebIconSizesParser::parseIconSizes(string);
+      WebString::FromUTF8(reinterpret_cast<const char*>(data), size);
+  WebIconSizesParser::ParseIconSizes(string);
   return 0;
 }
 
@@ -21,9 +22,4 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   return blink::LLVMFuzzerTestOneInput(data, size);
-}
-
-extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
-  blink::InitializeBlinkFuzzTest(argc, argv);
-  return 0;
 }

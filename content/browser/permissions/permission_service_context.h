@@ -6,17 +6,11 @@
 #define CONTENT_BROWSER_PERMISSIONS_PERMISSION_SERVICE_CONTEXT_H_
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
+#include "content/common/content_export.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
-
-namespace blink {
-namespace mojom {
-class PermissionObserver;
-class PermissionService;
-}
-}
+#include "mojo/public/cpp/bindings/strong_binding_set.h"
+#include "third_party/WebKit/public/platform/modules/permissions/permission.mojom.h"
 
 namespace url {
 class Origin;
@@ -24,7 +18,6 @@ class Origin;
 
 namespace content {
 
-class PermissionServiceImpl;
 class RenderFrameHost;
 class RenderProcessHost;
 
@@ -33,23 +26,17 @@ class RenderProcessHost;
 // There is one PermissionServiceContext per RenderFrameHost/RenderProcessHost
 // which owns it. It then owns all PermissionServiceImpl associated to their
 // owner.
-class PermissionServiceContext : public WebContentsObserver {
+class CONTENT_EXPORT PermissionServiceContext : public WebContentsObserver {
  public:
   explicit PermissionServiceContext(RenderFrameHost* render_frame_host);
   explicit PermissionServiceContext(RenderProcessHost* render_process_host);
   ~PermissionServiceContext() override;
 
-  void CreateService(
-      mojo::InterfaceRequest<blink::mojom::PermissionService> request);
+  void CreateService(blink::mojom::PermissionServiceRequest request);
 
-  void CreateSubscription(
-      PermissionType permission_type,
-      const url::Origin& origin,
-      mojo::InterfacePtr<blink::mojom::PermissionObserver> observer);
-
-  // Called by a PermissionServiceImpl identified as |service| when it has a
-  // connection error in order to get unregistered and killed.
-  void ServiceHadConnectionError(PermissionServiceImpl* service);
+  void CreateSubscription(PermissionType permission_type,
+                          const url::Origin& origin,
+                          blink::mojom::PermissionObserverPtr observer);
 
   // Called when the connection to a PermissionObserver has an error.
   void ObserverHadConnectionError(int subscription_id);
@@ -68,11 +55,11 @@ class PermissionServiceContext : public WebContentsObserver {
   void FrameDeleted(RenderFrameHost* render_frame_host) override;
   void DidFinishNavigation(NavigationHandle* navigation_handle) override;
 
-  void CancelPendingOperations(RenderFrameHost*);
+  void CloseBindings(RenderFrameHost*);
 
   RenderFrameHost* render_frame_host_;
   RenderProcessHost* render_process_host_;
-  std::vector<std::unique_ptr<PermissionServiceImpl>> services_;
+  mojo::StrongBindingSet<blink::mojom::PermissionService> services_;
   std::unordered_map<int, std::unique_ptr<PermissionSubscription>>
       subscriptions_;
 

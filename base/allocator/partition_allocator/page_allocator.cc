@@ -6,11 +6,16 @@
 
 #include <limits.h>
 
+#include <atomic>
+
 #include "base/allocator/partition_allocator/address_space_randomization.h"
-#include "base/atomicops.h"
 #include "base/base_export.h"
 #include "base/logging.h"
 #include "build/build_config.h"
+
+#if defined(OS_MACOSX)
+#include <mach/mach.h>
+#endif
 
 #if defined(OS_POSIX)
 
@@ -27,7 +32,7 @@
 
 // On POSIX |mmap| uses a nearby address if the hint address is blocked.
 static const bool kHintIsAdvisory = true;
-static volatile base::subtle::Atomic32 s_allocPageErrorCode = 0;
+static std::atomic<int32_t> s_allocPageErrorCode{0};
 
 #elif defined(OS_WIN)
 
@@ -35,7 +40,7 @@ static volatile base::subtle::Atomic32 s_allocPageErrorCode = 0;
 
 // |VirtualAlloc| will fail if allocation at the hint address is blocked.
 static const bool kHintIsAdvisory = false;
-static base::subtle::Atomic32 s_allocPageErrorCode = ERROR_SUCCESS;
+static std::atomic<int32_t> s_allocPageErrorCode{ERROR_SUCCESS};
 
 #else
 #error Unknown OS
@@ -58,14 +63,23 @@ static void* SystemAllocPages(
       page_accessibility == PageAccessible ? PAGE_READWRITE : PAGE_NOACCESS;
   ret = VirtualAlloc(hint, length, MEM_RESERVE | MEM_COMMIT, access_flag);
   if (!ret)
-    base::subtle::Release_Store(&s_allocPageErrorCode, GetLastError());
+    s_allocPageErrorCode = GetLastError();
 #else
+
+#if defined(OS_MACOSX)
+  // Use a custom tag to make it easier to distinguish partition alloc regions
+  // in vmmap.
+  int fd = VM_MAKE_TAG(254);
+#else
+  int fd = -1;
+#endif
+
   int access_flag = page_accessibility == PageAccessible
                         ? (PROT_READ | PROT_WRITE)
                         : PROT_NONE;
-  ret = mmap(hint, length, access_flag, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  ret = mmap(hint, length, access_flag, MAP_ANONYMOUS | MAP_PRIVATE, fd, 0);
   if (ret == MAP_FAILED) {
-    base::subtle::Release_Store(&s_allocPageErrorCode, errno);
+    s_allocPageErrorCode = errno;
     ret = 0;
   }
 #endif
@@ -215,7 +229,14 @@ bool SetSystemPagesAccessible(void* address, size_t length) {
 void DecommitSystemPages(void* address, size_t length) {
   DCHECK(!(length & kSystemPageOffsetMask));
 #if defined(OS_POSIX)
+#if defined(OS_MACOSX)
+  // On macOS, MADV_FREE_REUSABLE has comparable behavior to MADV_FREE, but also
+  // marks the pages with the reusable bit, which allows both Activity Monitor
+  // and memory-infra to correctly track the pages.
+  int ret = madvise(address, length, MADV_FREE_REUSABLE);
+#else
   int ret = madvise(address, length, MADV_FREE);
+#endif
   if (ret != 0 && errno == EINVAL) {
     // MADV_FREE only works on Linux 4.5+ . If request failed,
     // retry with older MADV_DONTNEED . Note that MADV_FREE
@@ -272,7 +293,7 @@ void DiscardSystemPages(void* address, size_t length) {
 }
 
 uint32_t GetAllocPageErrorCode() {
-  return base::subtle::Acquire_Load(&s_allocPageErrorCode);
+  return s_allocPageErrorCode;
 }
 
 }  // namespace base

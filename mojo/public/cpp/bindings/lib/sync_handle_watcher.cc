@@ -21,7 +21,7 @@ SyncHandleWatcher::SyncHandleWatcher(
       destroyed_(new base::RefCountedData<bool>(false)) {}
 
 SyncHandleWatcher::~SyncHandleWatcher() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (registered_)
     registry_->UnregisterHandle(handle_);
 
@@ -29,23 +29,23 @@ SyncHandleWatcher::~SyncHandleWatcher() {
 }
 
 void SyncHandleWatcher::AllowWokenUpBySyncWatchOnSameThread() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   IncrementRegisterCount();
 }
 
 bool SyncHandleWatcher::SyncWatch(const bool* should_stop) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   IncrementRegisterCount();
   if (!registered_) {
     DecrementRegisterCount();
     return false;
   }
 
-  // This object may be destroyed during the WatchAllHandles() call. So we have
-  // to preserve the boolean that WatchAllHandles uses.
+  // This object may be destroyed during the Wait() call. So we have to preserve
+  // the boolean that Wait uses.
   auto destroyed = destroyed_;
   const bool* should_stop_array[] = {should_stop, &destroyed->data};
-  bool result = registry_->WatchAllHandles(should_stop_array, 2);
+  bool result = registry_->Wait(should_stop_array, 2);
 
   // This object has been destroyed.
   if (destroyed->data)

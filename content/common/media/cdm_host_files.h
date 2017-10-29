@@ -59,40 +59,44 @@ class CdmHostFiles {
   static std::unique_ptr<CdmHostFiles> Create(
       const base::FilePath& cdm_adapter_path);
 
-  // Verifies |cdm_adapter_path| CDM files by calling the function exported
+  // Status of CDM host verification.
+  // Note: Reported to UMA. Do not change the values.
+  enum class Status {
+    kNotCalled = 0,
+    kSuccess = 1,
+    kCdmLoadFailed = 2,
+    kGetFunctionFailed = 3,
+    kInitVerificationFailed = 4,
+    kStatusCount
+  };
+
+  // Initializes the verification of CDM files by calling the function exported
   // by the CDM. If unexpected error happens, all files will be closed.
   // Otherwise, the PlatformFiles are passed to the CDM which will close the
   // files later.
-  // Only returns false if the CDM returns false (when there's an immediate
-  // failure). Otherwise always returns true for backward compatibility, e.g.
-  // when using an old CDM which doesn't implement the verification API.
-  bool VerifyFiles(base::NativeLibrary cdm_adapter_library,
-                   const base::FilePath& cdm_adapter_path);
+  Status InitVerification(base::NativeLibrary cdm_adapter_library,
+                          const base::FilePath& cdm_adapter_path);
 
  private:
 #if defined(POSIX_WITH_ZYGOTE)
   // Opens all common files and CDM specific files for all registered CDMs.
-  bool OpenFilesForAllRegisteredCdms();
+  void OpenFilesForAllRegisteredCdms();
 #endif
 
   // Opens all common files and CDM specific files for the CDM adapter
   // registered at |cdm_adapter_path|.
-  bool OpenFiles(const base::FilePath& cdm_adapter_path);
+  void OpenFiles(const base::FilePath& cdm_adapter_path);
 
-  // Opens common CDM host files shared by all CDMs. Upon failure, close all
-  // files opened.
-  bool OpenCommonFiles();
+  // Opens common CDM host files shared by all CDMs.
+  void OpenCommonFiles();
 
   // Opens CDM specific files for the CDM adapter registered at
-  // |cdm_adapter_path|. Returns whether all CDM specific files are opened.
-  // Upon failure, close all files opened.
-  bool OpenCdmFiles(const base::FilePath& cdm_adapter_path);
+  // |cdm_adapter_path|.
+  void OpenCdmFiles(const base::FilePath& cdm_adapter_path);
 
   // Fills |cdm_host_files| with common and CDM specific files for
   // |cdm_adapter_path|. The ownership of those files are also transferred.
-  // Returns true upon success where the remaining files will be closed.
-  // Returns false upon any failure and all files will be closed.
-  bool TakePlatformFiles(const base::FilePath& cdm_adapter_path,
+  void TakePlatformFiles(const base::FilePath& cdm_adapter_path,
                          std::vector<cdm::HostFile>* cdm_host_files);
 
   void CloseAllFiles();

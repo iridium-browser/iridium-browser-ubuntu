@@ -24,6 +24,7 @@
 namespace base {
 class CommandLine;
 class DictionaryValue;
+class ListValue;
 }
 
 class Status;
@@ -150,11 +151,15 @@ struct Capabilities {
 
   PerfLoggingPrefs perf_logging_prefs;
 
+  std::unique_ptr<base::ListValue> devtools_events_logging_prefs;
+
   std::unique_ptr<base::DictionaryValue> prefs;
 
   Switches switches;
 
   std::set<WebViewInfo::Type> window_types;
+
+  bool use_automation_extension;
 };
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CAPABILITIES_H_

@@ -31,17 +31,18 @@
 #ifndef ClipboardUtilities_h
 #define ClipboardUtilities_h
 
+#include "build/build_config.h"
 #include "platform/PlatformExport.h"
-#include "wtf/Forward.h"
-#include "wtf/build_config.h"
+#include "platform/wtf/Forward.h"
+#include "platform/wtf/build_config.h"
 
 namespace blink {
 
-#if OS(WIN)
-PLATFORM_EXPORT void replaceNewlinesWithWindowsStyleNewlines(String&);
+#if defined(OS_WIN)
+PLATFORM_EXPORT void ReplaceNewlinesWithWindowsStyleNewlines(String&);
 #endif
-PLATFORM_EXPORT void replaceNBSPWithSpace(String&);
-PLATFORM_EXPORT String convertURIListToURL(const String& uriList);
+PLATFORM_EXPORT void ReplaceNBSPWithSpace(String&);
+PLATFORM_EXPORT String ConvertURIListToURL(const String& uri_list);
 
 }  // namespace blink
 

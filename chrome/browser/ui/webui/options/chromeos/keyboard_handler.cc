@@ -9,8 +9,8 @@
 #include <memory>
 #include <utility>
 
-#include "ash/common/new_window_controller.h"
-#include "ash/common/wm_shell.h"
+#include "ash/new_window_controller.h"
+#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -139,7 +139,7 @@ void KeyboardHandler::GetLocalizedValues(
           IDS_OPTIONS_SETTINGS_SHOW_KEYBOARD_SHORTCUTS));
 
   for (size_t i = 0; i < arraysize(kDataValuesNames); ++i) {
-    base::ListValue* list_value = new base::ListValue();
+    auto list_value = base::MakeUnique<base::ListValue>();
     for (size_t j = 0; j < arraysize(kModifierKeysSelectItems); ++j) {
       const input_method::ModifierKey value =
           kModifierKeysSelectItems[j].value;
@@ -149,7 +149,7 @@ void KeyboardHandler::GetLocalizedValues(
       option->AppendString(l10n_util::GetStringUTF16(message_id));
       list_value->Append(std::move(option));
     }
-    localized_strings->Set(kDataValuesNames[i], list_value);
+    localized_strings->Set(kDataValuesNames[i], std::move(list_value));
   }
 }
 
@@ -178,7 +178,7 @@ void KeyboardHandler::OnKeyboardDeviceConfigurationChanged() {
 }
 
 void KeyboardHandler::HandleShowKeyboardShortcuts(const base::ListValue* args) {
-  ash::WmShell::Get()->new_window_controller()->ShowKeyboardOverlay();
+  ash::Shell::Get()->new_window_controller()->ShowKeyboardOverlay();
 }
 
 void KeyboardHandler::UpdateCapsLockOptions() const {

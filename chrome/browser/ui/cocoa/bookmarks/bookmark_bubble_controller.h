@@ -2,17 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BUBBLE_CONTROLLER_H_
+#define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BUBBLE_CONTROLLER_H_
+
 #import <Cocoa/Cocoa.h>
 
 #include <memory>
 
+#include "base/mac/availability.h"
 #include "base/mac/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_model_observer_for_cocoa.h"
 #import "chrome/browser/ui/cocoa/has_weak_browser_pointer.h"
 #import "chrome/browser/ui/cocoa/omnibox_decoration_bubble_controller.h"
+#import "ui/base/cocoa/touch_bar_forward_declarations.h"
 
 @class BookmarkBubbleController;
 @class BubbleSyncPromoController;
+@class DialogTextFieldEditor;
 
 namespace bookmarks {
 class BookmarkBubbleObserver;
@@ -26,7 +32,8 @@ class ManagedBookmarkService;
 // add or remove it as a bookmark.  This bubble allows for editing of
 // the bookmark in various ways (name, folder, etc.)
 @interface BookmarkBubbleController
-    : OmniboxDecorationBubbleController<HasWeakBrowserPointer> {
+    : OmniboxDecorationBubbleController<NSTouchBarDelegate,
+                                        HasWeakBrowserPointer> {
  @private
   // |managed_|, |model_| and |node_| are weak and owned by the current
   // browser's profile.
@@ -45,10 +52,15 @@ class ManagedBookmarkService;
   // Sync promo controller, if the sync promo is displayed.
   base::scoped_nsobject<BubbleSyncPromoController> syncPromoController_;
 
+  // Field editor for |nameTextField_|.
+  base::scoped_nsobject<DialogTextFieldEditor> textFieldEditor_;
+
   IBOutlet NSTextField* bigTitle_;   // "Bookmark" or "Bookmark Added!"
   IBOutlet NSTextField* nameTextField_;
   IBOutlet NSPopUpButton* folderPopUpButton_;
   IBOutlet NSView* syncPromoPlaceholder_;
+  IBOutlet NSView* fieldLabelsContainer_;
+  IBOutlet NSView* trailingButtonContainer_;
 }
 
 @property(readonly, nonatomic) const bookmarks::BookmarkNode* node;
@@ -75,6 +87,9 @@ class ManagedBookmarkService;
 - (IBAction)edit:(id)sender;
 - (IBAction)folderChanged:(id)sender;
 
+// Overridden to customize the touch bar.
+- (NSTouchBar*)makeTouchBar API_AVAILABLE(macos(10.12.2));
+
 @end
 
 
@@ -94,3 +109,5 @@ class ManagedBookmarkService;
 + (NSString*)chooseAnotherFolderString;
 - (NSPopUpButton*)folderPopUpButton;
 @end
+
+#endif  // CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_BUBBLE_CONTROLLER_H_

@@ -5,16 +5,9 @@
 #ifndef PRINTING_PDF_RENDER_SETTINGS_H_
 #define PRINTING_PDF_RENDER_SETTINGS_H_
 
-#include <stdint.h>
-
-#include "ipc/ipc_message_macros.h"
-#include "ipc/ipc_message_utils.h"
-#include "ipc/ipc_param_traits.h"
-#include "printing/printing_export.h"
+#include "build/build_config.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/ipc/geometry/gfx_param_traits.h"
-#include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
 
 namespace printing {
 
@@ -23,6 +16,7 @@ struct PdfRenderSettings {
   enum Mode {
     NORMAL = 0,
 #if defined(OS_WIN)
+    TEXTONLY,
     GDI_TEXT,
     POSTSCRIPT_LEVEL2,
     POSTSCRIPT_LEVEL3,
@@ -33,8 +27,8 @@ struct PdfRenderSettings {
   };
 
   PdfRenderSettings() : dpi(0), autorotate(false), mode(Mode::NORMAL) {}
-  PdfRenderSettings(gfx::Rect area,
-                    gfx::Point offsets,
+  PdfRenderSettings(const gfx::Rect& area,
+                    const gfx::Point& offsets,
                     int dpi,
                     bool autorotate,
                     Mode mode)

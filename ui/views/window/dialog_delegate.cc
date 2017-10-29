@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -15,9 +16,8 @@
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/button/label_button.h"
-#include "ui/views/layout/layout_constants.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/style/platform_style.h"
-#include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 #include "ui/views/window/dialog_client_view.h"
@@ -31,7 +31,9 @@ namespace views {
 ////////////////////////////////////////////////////////////////////////////////
 // DialogDelegate:
 
-DialogDelegate::DialogDelegate() : supports_custom_frame_(true) {}
+DialogDelegate::DialogDelegate() : supports_custom_frame_(true) {
+  UMA_HISTOGRAM_BOOLEAN("Dialog.DialogDelegate.Create", true);
+}
 
 DialogDelegate::~DialogDelegate() {}
 
@@ -129,6 +131,10 @@ void DialogDelegate::UpdateButton(LabelButton* button, ui::DialogButton type) {
   button->SetIsDefault(is_default);
 }
 
+bool DialogDelegate::ShouldSnapFrameWidth() const {
+  return GetDialogButtons() != ui::DIALOG_BUTTON_NONE;
+}
+
 int DialogDelegate::GetDialogButtons() const {
   return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
 }
@@ -139,10 +145,6 @@ int DialogDelegate::GetDefaultDialogButton() const {
   if (GetDialogButtons() & ui::DIALOG_BUTTON_CANCEL)
     return ui::DIALOG_BUTTON_CANCEL;
   return ui::DIALOG_BUTTON_NONE;
-}
-
-bool DialogDelegate::ShouldDefaultButtonBeBlue() const {
-  return false;
 }
 
 base::string16 DialogDelegate::GetDialogButtonLabel(
@@ -192,17 +194,15 @@ ClientView* DialogDelegate::CreateClientView(Widget* widget) {
 
 NonClientFrameView* DialogDelegate::CreateNonClientFrameView(Widget* widget) {
   if (ShouldUseCustomFrame())
-    return CreateDialogFrameView(widget, gfx::Insets());
+    return CreateDialogFrameView(widget);
   return WidgetDelegate::CreateNonClientFrameView(widget);
 }
 
 // static
-NonClientFrameView* DialogDelegate::CreateDialogFrameView(
-    Widget* widget,
-    const gfx::Insets& content_margins) {
+NonClientFrameView* DialogDelegate::CreateDialogFrameView(Widget* widget) {
   BubbleFrameView* frame = new BubbleFrameView(
-      ViewsDelegate::GetInstance()->GetDialogFrameViewInsets(),
-      content_margins);
+      LayoutProvider::Get()->GetInsetsMetric(INSETS_DIALOG_TITLE),
+      gfx::Insets());
   const BubbleBorder::Shadow kShadow = BubbleBorder::SMALL_SHADOW;
   std::unique_ptr<BubbleBorder> border(
       new BubbleBorder(BubbleBorder::FLOAT, kShadow, gfx::kPlaceholderColor));
@@ -236,6 +236,7 @@ ui::AXRole DialogDelegate::GetAccessibleWindowRole() const {
 DialogDelegateView::DialogDelegateView() {
   // A WidgetDelegate should be deleted on DeleteDelegate.
   set_owned_by_client();
+  UMA_HISTOGRAM_BOOLEAN("Dialog.DialogDelegateView.Create", true);
 }
 
 DialogDelegateView::~DialogDelegateView() {}
@@ -254,11 +255,6 @@ const Widget* DialogDelegateView::GetWidget() const {
 
 View* DialogDelegateView::GetContentsView() {
   return this;
-}
-
-void DialogDelegateView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  node_data->SetName(GetWindowTitle());
-  node_data->role = ui::AX_ROLE_DIALOG;
 }
 
 void DialogDelegateView::ViewHierarchyChanged(

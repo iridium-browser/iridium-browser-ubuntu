@@ -11,16 +11,16 @@
 #include "base/event_types.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
-#include "cc/surfaces/frame_sink_id.h"
+#include "components/viz/common/surfaces/frame_sink_id.h"
 #include "ui/aura/aura_export.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/ime/input_method_delegate.h"
+#include "ui/display/display_observer.h"
 #include "ui/events/event_source.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace gfx {
-class ICCProfile;
 class Insets;
 class Point;
 class Rect;
@@ -30,7 +30,7 @@ class Transform;
 
 namespace ui {
 class Compositor;
-class EventProcessor;
+class EventSink;
 class InputMethod;
 class ViewProp;
 }
@@ -48,7 +48,8 @@ class WindowTreeHostObserver;
 // It provides the accelerated widget and maps events from the native os to
 // aura.
 class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
-                                   public ui::EventSource {
+                                   public ui::EventSource,
+                                   public display::DisplayObserver {
  public:
   ~WindowTreeHost() override;
 
@@ -67,7 +68,7 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   Window* window() { return window_; }
   const Window* window() const { return window_; }
 
-  ui::EventProcessor* event_processor();
+  ui::EventSink* event_sink();
 
   WindowEventDispatcher* dispatcher() {
     return const_cast<WindowEventDispatcher*>(
@@ -133,6 +134,7 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
 
   // Gets the InputMethod instance, if NULL, creates & owns it.
   ui::InputMethod* GetInputMethod();
+  bool has_input_method() const { return input_method_ != nullptr; }
 
   // Sets a shared unowned InputMethod. This is used when there is a singleton
   // InputMethod shared between multiple WindowTreeHost instances.
@@ -156,8 +158,7 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   void SetSharedInputMethod(ui::InputMethod* input_method);
 
   // Overridden from ui::internal::InputMethodDelegate:
-  ui::EventDispatchDetails DispatchKeyEventPostIME(
-      ui::KeyEvent* event) override;
+  ui::EventDispatchDetails DispatchKeyEventPostIME(ui::KeyEvent* event) final;
 
   // Returns the EventSource responsible for dispatching events to the window
   // tree.
@@ -194,7 +195,7 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   // If frame_sink_id is not passed in, one will be grabbed from
   // ContextFactoryPrivate.
   void CreateCompositor(
-      const cc::FrameSinkId& frame_sink_id = cc::FrameSinkId());
+      const viz::FrameSinkId& frame_sink_id = viz::FrameSinkId());
 
   void InitCompositor();
   void OnAcceleratedWidgetAvailable();
@@ -216,7 +217,7 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   virtual void MoveCursorToScreenLocationInPixels(
       const gfx::Point& location_in_pixels) = 0;
 
-  // kCalled when the cursor visibility has changed.
+  // Called when the cursor visibility has changed.
   virtual void OnCursorVisibilityChangedNative(bool show) = 0;
 
   // Shows the WindowTreeHost.
@@ -225,10 +226,14 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   // Hides the WindowTreeHost.
   virtual void HideImpl() = 0;
 
-  virtual gfx::ICCProfile GetICCProfileForCurrentDisplay();
-
   // Overridden from ui::EventSource:
-  ui::EventProcessor* GetEventProcessor() override;
+  ui::EventSink* GetEventSink() override;
+
+  // display::DisplayObserver implementation.
+  void OnDisplayAdded(const display::Display& new_display) override;
+  void OnDisplayRemoved(const display::Display& old_display) override;
+  void OnDisplayMetricsChanged(const display::Display& display,
+                               uint32_t metrics) override;
 
  private:
   friend class test::WindowTreeHostTestApi;

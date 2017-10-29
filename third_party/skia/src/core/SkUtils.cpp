@@ -8,22 +8,6 @@
 
 #include "SkUtils.h"
 
-void sk_memset16(uint16_t buffer[], uint16_t value, int count) {
-    for (int i = 0; i < count; i++) {
-        buffer[i] = value;
-    }
-}
-void sk_memset32(uint32_t buffer[], uint32_t value, int count) {
-    for (int i = 0; i < count; i++) {
-        buffer[i] = value;
-    }
-}
-void sk_memset64(uint64_t buffer[], uint64_t value, int count) {
-    for (int i = 0; i < count; i++) {
-        buffer[i] = value;
-    }
-}
-
 /*  0xxxxxxx    1 total
     10xxxxxx    // never a leading byte
     110xxxxx    2 total
@@ -371,3 +355,9 @@ size_t SkUTF16_ToUTF8(const uint16_t utf16[], int numberOf16BitValues,
     }
     return size;
 }
+
+const char SkHexadecimalDigits::gUpper[16] =
+           { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+const char SkHexadecimalDigits::gLower[16] =
+           { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+

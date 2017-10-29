@@ -25,7 +25,7 @@ LLVM_BOOTSTRAP_INSTALL_DIR = os.path.join(THIRD_PARTY_DIR,
                                           'llvm-bootstrap-install')
 LLVM_BUILD_DIR = os.path.join(THIRD_PARTY_DIR, 'llvm-build')
 LLVM_RELEASE_DIR = os.path.join(LLVM_BUILD_DIR, 'Release+Asserts')
-LLVM_LTO_GOLD_PLUGIN_DIR = os.path.join(THIRD_PARTY_DIR, 'llvm-lto-gold-plugin')
+LLVM_LTO_LLD_DIR = os.path.join(THIRD_PARTY_DIR, 'llvm-lto-lld')
 STAMP_FILE = os.path.join(LLVM_BUILD_DIR, 'cr_build_revision')
 
 
@@ -104,10 +104,59 @@ def MaybeUpload(args, archive_name, platform):
     exit_code = RunGsutil(gsutil_args)
     if exit_code != 0:
       print "gsutil failed, exit_code: %s" % exit_code
-      os.exit(exit_code)
+      sys.exit(exit_code)
   else:
     print 'To upload, run:'
     print ('gsutil %s' % ' '.join(gsutil_args))
+
+
+def UploadPDBToSymbolServer():
+  assert sys.platform == 'win32'
+  # Upload PDB and binary to the symbol server on Windows.  Put them into the
+  # chromium-browser-symsrv bucket, since chrome devs have that in their
+  # _NT_SYMBOL_PATH already. Executable and PDB must be at paths following a
+  # certain pattern for the Microsoft debuggers to be able to load them.
+  # Executable:
+  #  chromium-browser-symsrv/clang-cl.exe/ABCDEFAB01234/clang-cl.ex_
+  #    ABCDEFAB is the executable's timestamp in %08X format, 01234 is the
+  #    executable's image size in %x format. tools/symsrc/img_fingerprint.py
+  #    can compute this ABCDEFAB01234 string for us, so use that.
+  #    The .ex_ instead of .exe at the end means that the file is compressed.
+  # PDB:
+  # gs://chromium-browser-symsrv/clang-cl.exe.pdb/AABBCCDD/clang-cl.dll.pd_
+  #   AABBCCDD here is computed from the output of
+  #      dumpbin /all mybinary.exe | find "Format: RSDS"
+  #   but tools/symsrc/pdb_fingerprint_from_img.py can compute it already, so
+  #   again just use that.
+  sys.path.insert(0, os.path.join(CHROMIUM_DIR, 'tools', 'symsrc'))
+  import img_fingerprint, pdb_fingerprint_from_img
+
+  binaries = [ 'bin/clang-cl.exe', 'bin/lld-link.exe' ]
+  for binary_path in binaries:
+    binary_path = os.path.join(LLVM_RELEASE_DIR, binary_path)
+    binary_id = img_fingerprint.GetImgFingerprint(binary_path)
+    (pdb_id, pdb_path) = pdb_fingerprint_from_img.GetPDBInfoFromImg(binary_path)
+
+    # The build process builds clang.exe and then copies it to clang-cl.exe
+    # (both are the same binary and they behave differently on what their
+    # filename is).  Hence, the pdb is at clang.pdb, not at clang-cl.pdb.
+    # Likewise, lld-link.exe's PDB file is called lld.pdb.
+
+    # Compress and upload.
+    for f, f_id in ((binary_path, binary_id), (pdb_path, pdb_id)):
+      subprocess.check_call(
+          ['makecab', '/D', 'CompressionType=LZX', '/D', 'CompressionMemory=21',
+           f, '/L', os.path.dirname(f)], stdout=open(os.devnull, 'w'))
+      f_cab = f[:-1] + '_'
+
+      dest = '%s/%s/%s' % (os.path.basename(f), f_id, os.path.basename(f_cab))
+      print 'Uploading %s to Google Cloud Storage...' % dest
+      gsutil_args = ['cp', '-n', '-a', 'public-read', f_cab,
+                     'gs://chromium-browser-symsrv/' + dest]
+      exit_code = RunGsutil(gsutil_args)
+      if exit_code != 0:
+        print "gsutil failed, exit_code: %s" % exit_code
+        sys.exit(exit_code)
 
 
 def main():
@@ -125,7 +174,6 @@ def main():
 
   expected_stamp = GetExpectedStamp()
   pdir = 'clang-' + expected_stamp
-  golddir = 'llvmgold-' + expected_stamp
   print pdir
 
   if sys.platform == 'darwin':
@@ -136,15 +184,10 @@ def main():
     platform = 'Linux_x64'
 
   # Check if Google Cloud Storage already has the artifacts we want to build.
-  if (args.upload and GsutilArchiveExists(pdir, platform) and
-      not sys.platform.startswith('linux') or
-      GsutilArchiveExists(golddir, platform)):
+  if args.upload and GsutilArchiveExists(pdir, platform):
     print ('Desired toolchain revision %s is already available '
            'in Google Cloud Storage:') % expected_stamp
     print 'gs://chromium-browser-clang-staging/%s/%s.tgz' % (platform, pdir)
-    if sys.platform.startswith('linux'):
-      print 'gs://chromium-browser-clang-staging/%s/%s.tgz' % (platform,
-                                                               golddir)
     return 0
 
   with open('buildlog.txt', 'w') as log:
@@ -179,7 +222,7 @@ def main():
 
     opt_flags = []
     if sys.platform.startswith('linux'):
-      opt_flags += ['--lto-gold-plugin']
+      opt_flags += ['--lto-lld']
     build_cmd = [sys.executable, os.path.join(THIS_DIR, 'update.py'),
                  '--bootstrap', '--force-local-build',
                  '--run-tests'] + opt_flags
@@ -218,10 +261,17 @@ def main():
                  'lib/clang/*/lib/darwin/*asan_iossim*',
                  'lib/clang/*/lib/darwin/*profile_osx*',
                  'lib/clang/*/lib/darwin/*profile_iossim*',
+                 # And the OSX and ios builtin libraries (iossim is lipo'd into
+                 # ios) for the _IsOSVersionAtLeast runtime function.
+                 'lib/clang/*/lib/darwin/*.ios.a',
+                 'lib/clang/*/lib/darwin/*.osx.a',
                  ])
   elif sys.platform.startswith('linux'):
     # Copy the libstdc++.so.6 we linked Clang against so it can run.
     want.append('lib/libstdc++.so.6')
+    # Add llvm-ar and lld for LTO.
+    want.append('bin/llvm-ar')
+    want.append('bin/lld')
     # Copy only
     # lib/clang/*/lib/linux/libclang_rt.{[atm]san,san,ubsan,profile}-*.a ,
     # but not dfsan.
@@ -262,6 +312,10 @@ def main():
     os.symlink('clang', os.path.join(pdir, 'bin', 'clang++'))
     os.symlink('clang', os.path.join(pdir, 'bin', 'clang-cl'))
 
+  if sys.platform.startswith('linux'):
+    os.symlink('lld', os.path.join(pdir, 'bin', 'ld.lld'))
+    os.symlink('lld', os.path.join(pdir, 'bin', 'lld-link'))
+
   # Copy libc++ headers.
   if sys.platform == 'darwin':
     shutil.copytree(os.path.join(LLVM_BOOTSTRAP_INSTALL_DIR, 'include', 'c++'),
@@ -280,17 +334,6 @@ def main():
 
   MaybeUpload(args, pdir, platform)
 
-  # Zip up gold plugin on Linux.
-  if sys.platform.startswith('linux'):
-    shutil.rmtree(golddir, ignore_errors=True)
-    os.makedirs(os.path.join(golddir, 'lib'))
-    shutil.copy(os.path.join(LLVM_LTO_GOLD_PLUGIN_DIR, 'lib', 'LLVMgold.so'),
-                os.path.join(golddir, 'lib'))
-    with tarfile.open(golddir + '.tgz', 'w:gz') as tar:
-      tar.add(os.path.join(golddir, 'lib'), arcname='lib',
-              filter=PrintTarProgress)
-    MaybeUpload(args, golddir, platform)
-
   # Zip up llvm-objdump for sanitizer coverage.
   objdumpdir = 'llvmobjdump-' + stamp
   shutil.rmtree(objdumpdir, ignore_errors=True)
@@ -301,6 +344,21 @@ def main():
     tar.add(os.path.join(objdumpdir, 'bin'), arcname='bin',
             filter=PrintTarProgress)
   MaybeUpload(args, objdumpdir, platform)
+
+  # Zip up the translation_unit tool.
+  translation_unit_dir = 'translation_unit-' + stamp
+  shutil.rmtree(translation_unit_dir, ignore_errors=True)
+  os.makedirs(os.path.join(translation_unit_dir, 'bin'))
+  shutil.copy(os.path.join(LLVM_RELEASE_DIR, 'bin', 'translation_unit' +
+                           exe_ext),
+              os.path.join(translation_unit_dir, 'bin'))
+  with tarfile.open(translation_unit_dir + '.tgz', 'w:gz') as tar:
+    tar.add(os.path.join(translation_unit_dir, 'bin'), arcname='bin',
+            filter=PrintTarProgress)
+  MaybeUpload(args, translation_unit_dir, platform)
+
+  if sys.platform == 'win32' and args.upload:
+    UploadPDBToSymbolServer()
 
   # FIXME: Warn if the file already exists on the server.
 

@@ -16,6 +16,55 @@ class GpuIntegrationTest(
 
   _cached_expectations = None
 
+  # Several of the tests in this directory need to be able to relaunch
+  # the browser on demand with a new set of command line arguments
+  # than were originally specified. To enable this, the necessary
+  # static state is hoisted here.
+
+  # We store a deep copy of the original browser finder options in
+  # order to be able to restart the browser multiple times, with a
+  # different set of command line arguments each time.
+  _original_finder_options = None
+
+  # We keep track of the set of command line arguments used to launch
+  # the browser most recently in order to figure out whether we need
+  # to relaunch it, if a new pixel test requires a different set of
+  # arguments.
+  _last_launched_browser_args = set()
+
+  @classmethod
+  def SetUpProcess(cls):
+    super(GpuIntegrationTest, cls).SetUpProcess()
+    cls._original_finder_options = cls._finder_options.Copy()
+
+  @classmethod
+  def CustomizeBrowserArgs(cls, browser_args):
+    """Customizes the browser's command line arguments.
+
+    NOTE that redefining this method in subclasses will NOT do what
+    you expect! Do not attempt to redefine this method!
+    """
+    if not browser_args:
+      browser_args = []
+    cls._finder_options = cls._original_finder_options.Copy()
+    browser_options = cls._finder_options.browser_options
+    # Append the new arguments.
+    browser_options.AppendExtraBrowserArgs(browser_args)
+    cls._last_launched_browser_args = set(browser_args)
+    cls.SetBrowserOptions(cls._finder_options)
+
+  @classmethod
+  def RestartBrowserIfNecessaryWithArgs(cls, browser_args):
+    if not browser_args:
+      browser_args = []
+    if set(browser_args) != cls._last_launched_browser_args:
+      logging.info('Restarting browser with arguments: ' + str(browser_args))
+      cls.StopBrowser()
+      cls.CustomizeBrowserArgs(browser_args)
+      cls.StartBrowser()
+
+  # The following is the rest of the framework for the GPU integration tests.
+
   @classmethod
   def GenerateTestCases__RunGpuTest(cls, options):
     for test_name, url, args in cls.GenerateGpuTests(options):
@@ -23,15 +72,18 @@ class GpuIntegrationTest(
 
   @classmethod
   def StartBrowser(cls):
+    # We still need to retry the browser's launch even though
+    # desktop_browser_finder does so too, because it wasn't possible
+    # to push the fetch of the first tab into the lower retry loop
+    # without breaking Telemetry's unit tests, and that hook is used
+    # to implement the gpu_integration_test_unittests.
     for x in range(0, 3):
       try:
-        restart = 'Starting browser, attempt %d of 3' % (x + 1)
-        logging.warning(restart)
         super(GpuIntegrationTest, cls).StartBrowser()
         cls.tab = cls.browser.tabs[0]
-        logging.warning('Started browser successfully.')
         return
       except Exception:
+        logging.warning('Browser start failed (attempt %d of 3)', (x + 1))
         # If we are on the last try and there is an exception take a screenshot
         # to try and capture more about the browser failure and raise
         if x == 2:

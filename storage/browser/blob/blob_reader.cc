@@ -15,7 +15,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/debug/stack_trace.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "net/base/io_buffer.h"
@@ -27,9 +27,12 @@
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_url.h"
 #include "storage/common/data_element.h"
+#include "storage/common/storage_histograms.h"
 
 namespace storage {
 namespace {
+const char kCacheStorageRecordBytesLabel[] = "DiskCache.CacheStorage";
+
 bool IsFileType(DataElement::Type type) {
   switch (type) {
     case DataElement::TYPE_FILE:
@@ -58,6 +61,7 @@ int ConvertBlobErrorToNetError(BlobStatus reason) {
     case BlobStatus::PENDING_QUOTA:
     case BlobStatus::PENDING_TRANSPORT:
     case BlobStatus::PENDING_INTERNALS:
+    case BlobStatus::PENDING_CONSTRUCTION:
       NOTREACHED();
   }
   NOTREACHED();
@@ -69,10 +73,10 @@ BlobReader::FileStreamReaderProvider::~FileStreamReaderProvider() {}
 
 BlobReader::BlobReader(
     const BlobDataHandle* blob_handle,
-    std::unique_ptr<FileStreamReaderProvider> file_stream_provider,
-    base::SequencedTaskRunner* file_task_runner)
+    std::unique_ptr<FileStreamReaderProvider> file_stream_provider)
     : file_stream_provider_(std::move(file_stream_provider)),
-      file_task_runner_(file_task_runner),
+      file_task_runner_(base::CreateTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::USER_VISIBLE})),
       net_error_(net::OK),
       weak_factory_(this) {
   if (blob_handle) {
@@ -145,6 +149,8 @@ void BlobReader::DidReadDiskCacheEntrySideData(const StatusCallback& done,
                                                int result) {
   if (result >= 0) {
     DCHECK_EQ(expected_size, result);
+    if (result > 0)
+      storage::RecordBytesRead(kCacheStorageRecordBytesLabel, result);
     done.Run(Status::DONE);
     return;
   }
@@ -584,6 +590,8 @@ BlobReader::Status BlobReader::ReadDiskCacheEntryItem(const BlobDataItem& item,
 void BlobReader::DidReadDiskCacheEntry(int result) {
   TRACE_EVENT_ASYNC_END1("Blob", "BlobRequest::ReadDiskCacheItem", this, "uuid",
                          blob_data_->uuid());
+  if (result > 0)
+    storage::RecordBytesRead(kCacheStorageRecordBytesLabel, result);
   DidReadItem(result);
 }
 

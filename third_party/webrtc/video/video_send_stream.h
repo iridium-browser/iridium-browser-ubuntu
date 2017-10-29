@@ -16,13 +16,12 @@
 #include <vector>
 
 #include "webrtc/call/bitrate_allocator.h"
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/event.h"
-#include "webrtc/base/task_queue.h"
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
 #include "webrtc/modules/video_coding/protection_bitrate_calculator.h"
+#include "webrtc/rtc_base/criticalsection.h"
+#include "webrtc/rtc_base/event.h"
+#include "webrtc/rtc_base/task_queue.h"
 #include "webrtc/video/encoder_rtcp_feedback.h"
-#include "webrtc/video/payload_router.h"
 #include "webrtc/video/send_delay_stats.h"
 #include "webrtc/video/send_statistics_proxy.h"
 #include "webrtc/video/vie_encoder.h"
@@ -31,14 +30,12 @@
 
 namespace webrtc {
 
-class BitrateAllocator;
 class CallStats;
-class CongestionController;
+class SendSideCongestionController;
 class IvfFileWriter;
-class PacketRouter;
 class ProcessThread;
 class RtpRtcp;
-class VieRemb;
+class RtpTransportControllerSendInterface;
 class RtcEventLog;
 
 namespace internal {
@@ -54,15 +51,14 @@ class VideoSendStream : public webrtc::VideoSendStream {
                   ProcessThread* module_process_thread,
                   rtc::TaskQueue* worker_queue,
                   CallStats* call_stats,
-                  CongestionController* congestion_controller,
-                  PacketRouter* packet_router,
+                  RtpTransportControllerSendInterface* transport,
                   BitrateAllocator* bitrate_allocator,
                   SendDelayStats* send_delay_stats,
-                  VieRemb* remb,
                   RtcEventLog* event_log,
                   VideoSendStream::Config config,
                   VideoEncoderConfig encoder_config,
-                  const std::map<uint32_t, RtpState>& suspended_ssrcs);
+                  const std::map<uint32_t, RtpState>& suspended_ssrcs,
+                  const RtpKeepAliveConfig& keepalive_config);
 
   ~VideoSendStream() override;
 

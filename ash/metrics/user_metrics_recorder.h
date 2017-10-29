@@ -8,8 +8,8 @@
 #include <memory>
 
 #include "ash/ash_export.h"
-#include "ash/common/metrics/user_metrics_action.h"
 #include "ash/metrics/task_switch_metrics_recorder.h"
+#include "ash/metrics/user_metrics_action.h"
 #include "base/macros.h"
 #include "base/timer/timer.h"
 
@@ -17,10 +17,6 @@ namespace ash {
 
 class DesktopTaskSwitchMetricRecorder;
 class PointerMetricsRecorder;
-
-namespace test {
-class UserMetricsRecorderTestAPI;
-}
 
 // User Metrics Recorder provides a repeating callback (RecordPeriodicMetrics)
 // on a timer to allow recording of state data over time to the UMA records.
@@ -49,7 +45,7 @@ class ASH_EXPORT UserMetricsRecorder {
   void OnShellShuttingDown();
 
  private:
-  friend class test::UserMetricsRecorderTestAPI;
+  friend class UserMetricsRecorderTestAPI;
 
   // Creates a UserMetricsRecorder and will only record periodic metrics if
   // |record_periodic_metrics| is true. This is used by tests that do not want

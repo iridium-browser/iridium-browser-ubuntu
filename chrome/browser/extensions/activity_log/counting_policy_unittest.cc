@@ -14,6 +14,7 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_split.h"
@@ -22,6 +23,7 @@
 #include "base/test/simple_test_clock.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -73,7 +75,7 @@ class CountingPolicyTest : public testing::Test {
   // Wait for the task queue for the specified thread to empty.
   void WaitOnThread(const BrowserThread::ID& thread) {
     BrowserThread::PostTaskAndReply(
-        thread, FROM_HERE, base::Bind(&base::DoNothing),
+        thread, FROM_HERE, base::BindOnce(&base::DoNothing),
         base::MessageLoop::current()->QuitWhenIdleClosure());
     base::RunLoop().Run();
   }
@@ -433,8 +435,8 @@ TEST_F(CountingPolicyTest, LogWithStrippedArguments) {
   extension_service_->AddExtension(extension.get());
 
   std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->Set(0, new base::StringValue("hello"));
-  args->Set(1, new base::StringValue("world"));
+  args->Set(0, base::MakeUnique<base::Value>("hello"));
+  args->Set(1, base::MakeUnique<base::Value>("world"));
   scoped_refptr<Action> action = new Action(extension->id(),
                                             base::Time::Now(),
                                             Action::ACTION_API_CALL,

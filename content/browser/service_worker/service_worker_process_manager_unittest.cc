@@ -4,11 +4,9 @@
 
 #include "content/browser/service_worker/service_worker_process_manager.h"
 
-#include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/run_loop.h"
-#include "content/browser/service_worker/service_worker_test_utils.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/common/service_worker/embedded_worker_settings.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -20,24 +18,6 @@
 
 namespace content {
 
-namespace {
-
-void DidAllocateWorkerProcess(const base::Closure& quit_closure,
-                              ServiceWorkerStatusCode* status_out,
-                              int* process_id_out,
-                              bool* is_new_process_out,
-                              ServiceWorkerStatusCode status,
-                              int process_id,
-                              bool is_new_process,
-                              const EmbeddedWorkerSettings& settings) {
-  *status_out = status;
-  *process_id_out = process_id;
-  *is_new_process_out = is_new_process;
-  quit_closure.Run();
-}
-
-}  // namespace
-
 class ServiceWorkerProcessManagerTest : public testing::Test {
  public:
   ServiceWorkerProcessManagerTest() {}
@@ -48,11 +28,16 @@ class ServiceWorkerProcessManagerTest : public testing::Test {
         new ServiceWorkerProcessManager(browser_context_.get()));
     pattern_ = GURL("http://www.example.com/");
     script_url_ = GURL("http://www.example.com/sw.js");
+    render_process_host_factory_.reset(new MockRenderProcessHostFactory());
+    RenderProcessHostImpl::set_render_process_host_factory(
+        render_process_host_factory_.get());
   }
 
   void TearDown() override {
     process_manager_->Shutdown();
     process_manager_.reset();
+    RenderProcessHostImpl::set_render_process_host_factory(nullptr);
+    render_process_host_factory_.reset();
   }
 
   std::unique_ptr<MockRenderProcessHost> CreateRenderProcessHost() {
@@ -60,13 +45,14 @@ class ServiceWorkerProcessManagerTest : public testing::Test {
   }
 
  protected:
+  content::TestBrowserThreadBundle thread_bundle_;
   std::unique_ptr<TestBrowserContext> browser_context_;
   std::unique_ptr<ServiceWorkerProcessManager> process_manager_;
   GURL pattern_;
   GURL script_url_;
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  std::unique_ptr<MockRenderProcessHostFactory> render_process_host_factory_;
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerProcessManagerTest);
 };
 
@@ -142,21 +128,16 @@ TEST_F(ServiceWorkerProcessManagerTest,
       process_manager_->instance_info_;
 
   // (1) Allocate a process to a worker.
-  base::RunLoop run_loop1;
-  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_MAX_VALUE;
-  int process_id = -10;
-  bool is_new_process = true;
-  process_manager_->AllocateWorkerProcess(
+  ServiceWorkerProcessManager::AllocatedProcessInfo process_info;
+  ServiceWorkerStatusCode status = process_manager_->AllocateWorkerProcess(
       kEmbeddedWorkerId1, scope1, script_url_,
-      true /* can_use_existing_process */,
-      base::Bind(&DidAllocateWorkerProcess, run_loop1.QuitClosure(), &status,
-                 &process_id, &is_new_process));
-  run_loop1.Run();
+      true /* can_use_existing_process */, &process_info);
 
   // An existing process should be allocated to the worker.
   EXPECT_EQ(SERVICE_WORKER_OK, status);
-  EXPECT_EQ(host1->GetID(), process_id);
-  EXPECT_FALSE(is_new_process);
+  EXPECT_EQ(host1->GetID(), process_info.process_id);
+  EXPECT_EQ(ServiceWorkerMetrics::StartSituation::EXISTING_READY_PROCESS,
+            process_info.start_situation);
   EXPECT_EQ(1u, host1->GetWorkerRefCount());
   EXPECT_EQ(0u, host2->GetWorkerRefCount());
   EXPECT_EQ(1u, instance_info.size());
@@ -167,21 +148,15 @@ TEST_F(ServiceWorkerProcessManagerTest,
 
   // (2) Allocate a process to another worker whose scope is the same with the
   // first worker.
-  base::RunLoop run_loop2;
-  status = SERVICE_WORKER_ERROR_MAX_VALUE;
-  process_id = -10;
-  is_new_process = true;
-  process_manager_->AllocateWorkerProcess(
+  status = process_manager_->AllocateWorkerProcess(
       kEmbeddedWorkerId2, scope1, script_url_,
-      true /* can_use_existing_process */,
-      base::Bind(&DidAllocateWorkerProcess, run_loop2.QuitClosure(), &status,
-                 &process_id, &is_new_process));
-  run_loop2.Run();
+      true /* can_use_existing_process */, &process_info);
 
   // The same process should be allocated to the second worker.
   EXPECT_EQ(SERVICE_WORKER_OK, status);
-  EXPECT_EQ(host1->GetID(), process_id);
-  EXPECT_FALSE(is_new_process);
+  EXPECT_EQ(host1->GetID(), process_info.process_id);
+  EXPECT_EQ(ServiceWorkerMetrics::StartSituation::EXISTING_READY_PROCESS,
+            process_info.start_situation);
   EXPECT_EQ(2u, host1->GetWorkerRefCount());
   EXPECT_EQ(0u, host2->GetWorkerRefCount());
   EXPECT_EQ(2u, instance_info.size());
@@ -191,21 +166,15 @@ TEST_F(ServiceWorkerProcessManagerTest,
 
   // (3) Allocate a process to a third worker whose scope is different from
   // other workers.
-  base::RunLoop run_loop3;
-  status = SERVICE_WORKER_ERROR_MAX_VALUE;
-  process_id = -10;
-  is_new_process = true;
-  process_manager_->AllocateWorkerProcess(
+  status = process_manager_->AllocateWorkerProcess(
       kEmbeddedWorkerId3, scope2, script_url_,
-      true /* can_use_existing_process */,
-      base::Bind(&DidAllocateWorkerProcess, run_loop3.QuitClosure(), &status,
-                 &process_id, &is_new_process));
-  run_loop3.Run();
+      true /* can_use_existing_process */, &process_info);
 
   // A different existing process should be allocated to the third worker.
   EXPECT_EQ(SERVICE_WORKER_OK, status);
-  EXPECT_EQ(host2->GetID(), process_id);
-  EXPECT_FALSE(is_new_process);
+  EXPECT_EQ(host2->GetID(), process_info.process_id);
+  EXPECT_EQ(ServiceWorkerMetrics::StartSituation::EXISTING_READY_PROCESS,
+            process_info.start_situation);
   EXPECT_EQ(2u, host1->GetWorkerRefCount());
   EXPECT_EQ(1u, host2->GetWorkerRefCount());
   EXPECT_EQ(3u, instance_info.size());
@@ -233,24 +202,102 @@ TEST_F(ServiceWorkerProcessManagerTest,
   EXPECT_TRUE(instance_info.empty());
 }
 
+TEST_F(ServiceWorkerProcessManagerTest,
+       AllocateWorkerProcess_WithProcessReuse) {
+  const int kEmbeddedWorkerId = 100;
+  const GURL kSiteUrl = GURL("http://example.com");
+
+  // Create a process that is hosting a frame with URL |pattern_|.
+  std::unique_ptr<MockRenderProcessHost> host(CreateRenderProcessHost());
+  host->Init();
+  RenderProcessHostImpl::AddFrameWithSite(browser_context_.get(), host.get(),
+                                          kSiteUrl);
+
+  std::map<int, ServiceWorkerProcessManager::ProcessInfo>& instance_info =
+      process_manager_->instance_info_;
+  EXPECT_TRUE(instance_info.empty());
+
+  // Allocate a process to a worker, when process reuse is authorized.
+  ServiceWorkerProcessManager::AllocatedProcessInfo process_info;
+  ServiceWorkerStatusCode status = process_manager_->AllocateWorkerProcess(
+      kEmbeddedWorkerId, pattern_, script_url_,
+      true /* can_use_existing_process */, &process_info);
+
+  // An existing process should be allocated to the worker.
+  EXPECT_EQ(SERVICE_WORKER_OK, status);
+  EXPECT_EQ(host->GetID(), process_info.process_id);
+  EXPECT_EQ(ServiceWorkerMetrics::StartSituation::EXISTING_UNREADY_PROCESS,
+            process_info.start_situation);
+  EXPECT_EQ(1u, host->GetWorkerRefCount());
+  EXPECT_EQ(1u, instance_info.size());
+  std::map<int, ServiceWorkerProcessManager::ProcessInfo>::iterator found =
+      instance_info.find(kEmbeddedWorkerId);
+  ASSERT_TRUE(found != instance_info.end());
+  EXPECT_EQ(host->GetID(), found->second.process_id);
+
+  // Release the process.
+  process_manager_->ReleaseWorkerProcess(kEmbeddedWorkerId);
+  EXPECT_EQ(0u, host->GetWorkerRefCount());
+  EXPECT_TRUE(instance_info.empty());
+
+  RenderProcessHostImpl::RemoveFrameWithSite(browser_context_.get(), host.get(),
+                                             kSiteUrl);
+}
+
+TEST_F(ServiceWorkerProcessManagerTest,
+       AllocateWorkerProcess_WithoutProcessReuse) {
+  const int kEmbeddedWorkerId = 100;
+  const GURL kSiteUrl = GURL("http://example.com");
+
+  // Create a process that is hosting a frame with URL |pattern_|.
+  std::unique_ptr<MockRenderProcessHost> host(CreateRenderProcessHost());
+  RenderProcessHostImpl::AddFrameWithSite(browser_context_.get(), host.get(),
+                                          kSiteUrl);
+
+  std::map<int, ServiceWorkerProcessManager::ProcessInfo>& instance_info =
+      process_manager_->instance_info_;
+  EXPECT_TRUE(instance_info.empty());
+
+  // Allocate a process to a worker, when process reuse is disallowed.
+  ServiceWorkerProcessManager::AllocatedProcessInfo process_info;
+  ServiceWorkerStatusCode status = process_manager_->AllocateWorkerProcess(
+      kEmbeddedWorkerId, pattern_, script_url_,
+      false /* can_use_existing_process */, &process_info);
+
+  // A new process should be allocated to the worker.
+  EXPECT_EQ(SERVICE_WORKER_OK, status);
+  EXPECT_NE(host->GetID(), process_info.process_id);
+  EXPECT_EQ(ServiceWorkerMetrics::StartSituation::NEW_PROCESS,
+            process_info.start_situation);
+  EXPECT_EQ(0u, host->GetWorkerRefCount());
+  EXPECT_EQ(1u, instance_info.size());
+  std::map<int, ServiceWorkerProcessManager::ProcessInfo>::iterator found =
+      instance_info.find(kEmbeddedWorkerId);
+  ASSERT_TRUE(found != instance_info.end());
+  EXPECT_NE(host->GetID(), found->second.process_id);
+
+  // Release the process.
+  process_manager_->ReleaseWorkerProcess(kEmbeddedWorkerId);
+  EXPECT_TRUE(instance_info.empty());
+
+  RenderProcessHostImpl::RemoveFrameWithSite(browser_context_.get(), host.get(),
+                                             kSiteUrl);
+}
+
 TEST_F(ServiceWorkerProcessManagerTest, AllocateWorkerProcess_InShutdown) {
   process_manager_->Shutdown();
   ASSERT_TRUE(process_manager_->IsShutdown());
 
-  base::RunLoop run_loop;
-  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_MAX_VALUE;
-  int process_id = -10;
-  bool is_new_process = true;
-  process_manager_->AllocateWorkerProcess(
+  ServiceWorkerProcessManager::AllocatedProcessInfo process_info;
+  ServiceWorkerStatusCode status = process_manager_->AllocateWorkerProcess(
       1, pattern_, script_url_, true /* can_use_existing_process */,
-      base::Bind(&DidAllocateWorkerProcess, run_loop.QuitClosure(), &status,
-                 &process_id, &is_new_process));
-  run_loop.Run();
+      &process_info);
 
   // Allocating a process in shutdown should abort.
   EXPECT_EQ(SERVICE_WORKER_ERROR_ABORT, status);
-  EXPECT_EQ(ChildProcessHost::kInvalidUniqueID, process_id);
-  EXPECT_FALSE(is_new_process);
+  EXPECT_EQ(ChildProcessHost::kInvalidUniqueID, process_info.process_id);
+  EXPECT_EQ(ServiceWorkerMetrics::StartSituation::UNKNOWN,
+            process_info.start_situation);
   EXPECT_TRUE(process_manager_->instance_info_.empty());
 }
 

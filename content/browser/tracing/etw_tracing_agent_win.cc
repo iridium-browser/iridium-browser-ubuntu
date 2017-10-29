@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include <utility>
+
 #include "base/base64.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/lazy_instance.h"
@@ -15,6 +17,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event_impl.h"
+#include "base/values.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace content {
@@ -165,49 +168,44 @@ void EtwTracingAgent::AddSyncEventToBuffer() {
   now_in_us.QuadPart = now.ToInternalValue();
 
   // Add fields to the event.
-  std::unique_ptr<base::DictionaryValue> value(new base::DictionaryValue());
-  value->Set("guid", new base::StringValue("ClockSync"));
-  value->Set("walltime", new base::StringValue(
-      base::StringPrintf("%08X%08X",
-                         walltime_in_us.HighPart,
-                         walltime_in_us.LowPart)));
-  value->Set("tick", new base::StringValue(
-      base::StringPrintf("%08X%08X",
-                         now_in_us.HighPart,
-                         now_in_us.LowPart)));
+  auto value = base::MakeUnique<base::DictionaryValue>();
+  value->SetString("guid", "ClockSync");
+  value->SetString("walltime",
+                   base::StringPrintf("%08X%08X", walltime_in_us.HighPart,
+                                      walltime_in_us.LowPart));
+  value->SetString("tick", base::StringPrintf("%08X%08X", now_in_us.HighPart,
+                                              now_in_us.LowPart));
 
   // Append it to the events buffer.
-  events_->Append(value.release());
+  events_->Append(std::move(value));
 }
 
 void EtwTracingAgent::AppendEventToBuffer(EVENT_TRACE* event) {
-  using base::Value;
-
-  std::unique_ptr<base::DictionaryValue> value(new base::DictionaryValue());
+  auto value = base::MakeUnique<base::DictionaryValue>();
 
   // Add header fields to the event.
   LARGE_INTEGER ts_us;
   ts_us.QuadPart = event->Header.TimeStamp.QuadPart / 10;
-  value->Set("ts", new base::StringValue(
-      base::StringPrintf("%08X%08X", ts_us.HighPart, ts_us.LowPart)));
+  value->SetString(
+      "ts", base::StringPrintf("%08X%08X", ts_us.HighPart, ts_us.LowPart));
 
-  value->Set("guid", new base::StringValue(GuidToString(event->Header.Guid)));
+  value->SetString("guid", GuidToString(event->Header.Guid));
 
-  value->Set("op", new Value(event->Header.Class.Type));
-  value->Set("ver", new Value(event->Header.Class.Version));
-  value->Set("pid", new Value(static_cast<int>(event->Header.ProcessId)));
-  value->Set("tid", new Value(static_cast<int>(event->Header.ThreadId)));
-  value->Set("cpu", new Value(event->BufferContext.ProcessorNumber));
+  value->SetInteger("op", event->Header.Class.Type);
+  value->SetInteger("ver", event->Header.Class.Version);
+  value->SetInteger("pid", static_cast<int>(event->Header.ProcessId));
+  value->SetInteger("tid", static_cast<int>(event->Header.ThreadId));
+  value->SetInteger("cpu", event->BufferContext.ProcessorNumber);
 
   // Base64 encode the payload bytes.
   base::StringPiece buffer(static_cast<const char*>(event->MofData),
                            event->MofLength);
   std::string payload;
   base::Base64Encode(buffer, &payload);
-  value->Set("payload", new base::StringValue(payload));
+  value->SetString("payload", payload);
 
   // Append it to the events buffer.
-  events_->Append(value.release());
+  events_->Append(std::move(value));
 }
 
 void EtwTracingAgent::TraceAndConsumeOnThread() {
@@ -227,11 +225,11 @@ void EtwTracingAgent::TraceAndConsumeOnThread() {
 void EtwTracingAgent::FlushOnThread(
     const StopAgentTracingCallback& callback) {
   // Add the header information to the stream.
-  std::unique_ptr<base::DictionaryValue> header(new base::DictionaryValue());
-  header->Set("name", new base::StringValue("ETW"));
+  auto header = base::MakeUnique<base::DictionaryValue>();
+  header->SetString("name", "ETW");
 
   // Release and pass the events buffer.
-  header->Set("content", events_.release());
+  header->Set("content", std::move(events_));
 
   // Serialize the results as a JSon string.
   std::string output;

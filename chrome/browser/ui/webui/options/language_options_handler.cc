@@ -15,6 +15,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -23,7 +25,6 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -57,7 +58,7 @@ void LanguageOptionsHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-base::ListValue* LanguageOptionsHandler::GetLanguageList() {
+std::unique_ptr<base::ListValue> LanguageOptionsHandler::GetLanguageList() {
   // Collect the language codes from the supported accept-languages.
   const std::string app_locale = g_browser_process->GetApplicationLocale();
   std::vector<std::string> language_codes;
@@ -91,7 +92,7 @@ base::ListValue* LanguageOptionsHandler::GetLanguageList() {
   l10n_util::SortStrings16(app_locale, &display_names);
 
   // Build the language list from the language map.
-  base::ListValue* language_list = new base::ListValue();
+  auto language_list = base::MakeUnique<base::ListValue>();
   for (size_t i = 0; i < display_names.size(); ++i) {
     base::string16& display_name = display_names[i];
     base::string16 adjusted_display_name(display_name);
@@ -123,7 +124,7 @@ void LanguageOptionsHandler::SetApplicationLocale(
 }
 
 void LanguageOptionsHandler::RestartCallback(const base::ListValue* args) {
-  content::RecordAction(UserMetricsAction("LanguageOptions_Restart"));
+  base::RecordAction(UserMetricsAction("LanguageOptions_Restart"));
   chrome::AttemptRestart();
 }
 

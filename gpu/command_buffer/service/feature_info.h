@@ -86,6 +86,7 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool blend_equation_advanced = false;
     bool blend_equation_advanced_coherent = false;
     bool ext_texture_rg = false;
+    bool ext_texture_norm16 = false;
     bool chromium_image_ycbcr_420v = false;
     bool chromium_image_ycbcr_422 = false;
     bool emulate_primitive_restart_fixed_index = false;
@@ -108,6 +109,11 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool angle_framebuffer_multisample = false;
     bool ext_disjoint_timer_query = false;
     bool angle_client_arrays = false;
+    bool angle_request_extension = false;
+    bool ext_debug_marker = false;
+    bool arb_robustness = false;
+    bool khr_robustness = false;
+    bool ext_robustness = false;
   };
 
   FeatureInfo();

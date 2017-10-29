@@ -9,8 +9,8 @@
 #ifndef GrGLTypes_DEFINED
 #define GrGLTypes_DEFINED
 
-#include "GrExternalTextureData.h"
 #include "GrGLConfig.h"
+#include "SkRefCnt.h"
 
 /**
  * Classifies GL contexts by which standard they implement (currently as OpenGL vs. OpenGL ES).
@@ -59,7 +59,7 @@ typedef signed long int GrGLintptr;
 typedef signed long int GrGLsizeiptr;
 #endif
 typedef void* GrGLeglImage;
-typedef void* GrGLsync;
+typedef struct __GLsync* GrGLsync;
 
 struct GrGLDrawArraysIndirectCommand {
     GrGLuint fCount;
@@ -113,23 +113,12 @@ struct GrGLTextureInfo {
     GrGLuint fID;
 };
 
-class GrGLExternalTextureData : public GrExternalTextureData {
-public:
-    GrGLExternalTextureData(const GrGLTextureInfo& info, GrFence fence)
-            : INHERITED(fence)
-            , fInfo(info) {}
-    GrBackend getBackend() const override { return kOpenGL_GrBackend; }
+GR_STATIC_ASSERT(sizeof(GrBackendObject) >= sizeof(const GrGLTextureInfo*));
 
-protected:
-    GrBackendObject getBackendObject() const override {
-        return reinterpret_cast<GrBackendObject>(&fInfo);
-    }
-
-    GrGLTextureInfo fInfo;
-
-    typedef GrExternalTextureData INHERITED;
+struct GrGLFramebufferInfo {
+    GrGLuint fFBOID;
 };
 
-GR_STATIC_ASSERT(sizeof(GrBackendObject) >= sizeof(const GrGLTextureInfo*));
+GR_STATIC_ASSERT(sizeof(GrBackendObject) >= sizeof(const GrGLFramebufferInfo*));
 
 #endif

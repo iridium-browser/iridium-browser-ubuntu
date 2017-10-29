@@ -247,7 +247,7 @@ void SyncManagerImpl::Init(InitArgs* args) {
 
   DCHECK(backing_store.get());
   share_.directory = base::MakeUnique<syncable::Directory>(
-      backing_store.release(), args->unrecoverable_error_handler,
+      std::move(backing_store), args->unrecoverable_error_handler,
       report_unrecoverable_error_function_, sync_encryption_handler_.get(),
       sync_encryption_handler_->GetCryptographerUnsafe());
   share_.sync_credentials = args->credentials;
@@ -995,7 +995,7 @@ void SyncManagerImpl::RequestEmitDebugInfo() {
   model_type_registry_->RequestEmitDebugInfo();
 }
 
-void SyncManagerImpl::ClearServerData(const ClearServerDataCallback& callback) {
+void SyncManagerImpl::ClearServerData(const base::Closure& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   scheduler_->Start(SyncScheduler::CLEAR_SERVER_DATA_MODE, base::Time());
   ClearParams params(callback);

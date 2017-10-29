@@ -20,6 +20,7 @@
 #include "ui/events/ozone/evdev/event_device_info.h"
 #include "ui/events/ozone/evdev/events_ozone_evdev_export.h"
 #include "ui/events/ozone/evdev/input_device_settings_evdev.h"
+#include "ui/ozone/public/input_controller.h"
 
 namespace ui {
 
@@ -33,11 +34,6 @@ class DeviceEventDispatcherEvdev;
 #if defined(USE_EVDEV_GESTURES)
 class GesturePropertyProvider;
 #endif
-
-typedef base::Callback<void(std::unique_ptr<std::string>)>
-    GetTouchDeviceStatusReply;
-typedef base::Callback<void(std::unique_ptr<std::vector<base::FilePath>>)>
-    GetTouchEventLogReply;
 
 // Manager for event device objects. All device I/O starts here.
 class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
@@ -61,9 +57,9 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
 
   // Bits from InputController that have to be answered on IO.
   void UpdateInputDeviceSettings(const InputDeviceSettingsEvdev& settings);
-  void GetTouchDeviceStatus(const GetTouchDeviceStatusReply& reply);
+  void GetTouchDeviceStatus(InputController::GetTouchDeviceStatusReply reply);
   void GetTouchEventLog(const base::FilePath& out_dir,
-                        const GetTouchEventLogReply& reply);
+                        InputController::GetTouchEventLogReply reply);
 
   base::WeakPtr<InputDeviceFactoryEvdev> GetWeakPtr();
 
@@ -90,6 +86,7 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
   void NotifyTouchscreensUpdated();
   void NotifyMouseDevicesUpdated();
   void NotifyTouchpadDevicesUpdated();
+  void NotifyGamepadDevicesUpdated();
 
   void SetIntPropertyForOneType(const EventDeviceType type,
                                 const std::string& name,
@@ -97,9 +94,6 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
   void SetBoolPropertyForOneType(const EventDeviceType type,
                                  const std::string& name,
                                  bool value);
-
-  // Owned per-device event converters (by path).
-  std::map<base::FilePath, std::unique_ptr<EventConverterEvdev>> converters_;
 
   // Task runner for our thread.
   scoped_refptr<base::TaskRunner> task_runner_;
@@ -121,6 +115,7 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
   bool keyboard_list_dirty_ = true;
   bool mouse_list_dirty_ = true;
   bool touchpad_list_dirty_ = true;
+  bool gamepad_list_dirty_ = true;
 
   // Whether we have a list of devices that were present at startup.
   bool startup_devices_enumerated_ = false;
@@ -136,6 +131,10 @@ class EVENTS_OZONE_EVDEV_EXPORT InputDeviceFactoryEvdev {
 
   // Device settings. These primarily affect libgestures behavior.
   InputDeviceSettingsEvdev input_device_settings_;
+
+  // Owned per-device event converters (by path).
+  // NB: This should be destroyed early, before any shared state.
+  std::map<base::FilePath, std::unique_ptr<EventConverterEvdev>> converters_;
 
   // Support weak pointers for attach & detach callbacks.
   base::WeakPtrFactory<InputDeviceFactoryEvdev> weak_ptr_factory_;

@@ -26,12 +26,14 @@
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/process/process_handle.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_byteorder.h"
+#include "base/values.h"
 #include "base/win/registry.h"
 #include "base/win/win_util.h"
 #include "components/policy/core/common/async_policy_provider.h"
@@ -153,8 +155,12 @@ class ScopedGroupPolicyRegistrySandbox {
   ScopedGroupPolicyRegistrySandbox();
   ~ScopedGroupPolicyRegistrySandbox();
 
- private:
+  // Activates the registry keys overrides. This must be called before doing any
+  // writes to registry and the call should be wrapped in
+  // ASSERT_NO_FATAL_FAILURE.
   void ActivateOverrides();
+
+ private:
   void RemoveOverrides();
 
   // Deletes the sandbox keys.
@@ -293,7 +299,14 @@ class PRegTestHarness : public PolicyProviderTestHarness,
   DISALLOW_COPY_AND_ASSIGN(PRegTestHarness);
 };
 
-ScopedGroupPolicyRegistrySandbox::ScopedGroupPolicyRegistrySandbox() {
+ScopedGroupPolicyRegistrySandbox::ScopedGroupPolicyRegistrySandbox() {}
+
+ScopedGroupPolicyRegistrySandbox::~ScopedGroupPolicyRegistrySandbox() {
+  RemoveOverrides();
+  DeleteKeys();
+}
+
+void ScopedGroupPolicyRegistrySandbox::ActivateOverrides() {
   // Generate a unique registry key for the override for each test. This
   // makes sure that tests executing in parallel won't delete each other's
   // key, at DeleteKeys().
@@ -301,6 +314,11 @@ ScopedGroupPolicyRegistrySandbox::ScopedGroupPolicyRegistrySandbox() {
         "SOFTWARE\\chromium unittest %d", base::GetCurrentProcId()));
   std::wstring hklm_key_name = key_name_ + L"\\HKLM";
   std::wstring hkcu_key_name = key_name_ + L"\\HKCU";
+
+  // Delete the registry test keys if they already exist (this could happen if
+  // the process id got recycled and the last test running under the same
+  // process id crashed ).
+  DeleteKeys();
 
   // Create the subkeys to hold the overridden HKLM and HKCU
   // policy settings.
@@ -311,19 +329,22 @@ ScopedGroupPolicyRegistrySandbox::ScopedGroupPolicyRegistrySandbox() {
                              hkcu_key_name.c_str(),
                              KEY_ALL_ACCESS);
 
-  ActivateOverrides();
-}
+  auto result_override_hklm =
+      RegOverridePredefKey(HKEY_LOCAL_MACHINE, temp_hklm_hive_key_.Handle());
+  auto result_override_hkcu =
+      RegOverridePredefKey(HKEY_CURRENT_USER, temp_hkcu_hive_key_.Handle());
 
-ScopedGroupPolicyRegistrySandbox::~ScopedGroupPolicyRegistrySandbox() {
-  RemoveOverrides();
-  DeleteKeys();
-}
+  if (result_override_hklm != ERROR_SUCCESS ||
+      result_override_hkcu != ERROR_SUCCESS) {
+    // We need to remove the overrides first in case one succeeded and one
+    // failed, otherwise deleting the keys fails.
+    RemoveOverrides();
+    DeleteKeys();
 
-void ScopedGroupPolicyRegistrySandbox::ActivateOverrides() {
-  ASSERT_HRESULT_SUCCEEDED(RegOverridePredefKey(HKEY_LOCAL_MACHINE,
-                                                temp_hklm_hive_key_.Handle()));
-  ASSERT_HRESULT_SUCCEEDED(RegOverridePredefKey(HKEY_CURRENT_USER,
-                                                temp_hkcu_hive_key_.Handle()));
+    // Assert on the actual results to print the error code in failure case.
+    ASSERT_HRESULT_SUCCEEDED(result_override_hklm);
+    ASSERT_HRESULT_SUCCEEDED(result_override_hkcu);
+  }
 }
 
 void ScopedGroupPolicyRegistrySandbox::RemoveOverrides() {
@@ -345,7 +366,12 @@ RegistryTestHarness::RegistryTestHarness(HKEY hive, PolicyScope scope)
 
 RegistryTestHarness::~RegistryTestHarness() {}
 
-void RegistryTestHarness::SetUp() {}
+void RegistryTestHarness::SetUp() {
+  // SetUp is called at gtest SetUp time, and gtest documentation guarantees
+  // that the test will not be executed if SetUp has a fatal failure. This is
+  // important, see crbug.com/721691.
+  ASSERT_NO_FATAL_FAILURE(registry_sandbox_.ActivateOverrides());
+}
 
 ConfigurationPolicyProvider* RegistryTestHarness::CreateProvider(
     SchemaRegistry* registry,
@@ -398,7 +424,7 @@ void RegistryTestHarness::InstallStringListPolicy(
        element != policy_value->end();
        ++element) {
     std::string element_value;
-    if (!(*element)->GetAsString(&element_value))
+    if (!element->GetAsString(&element_value))
       continue;
     std::string name(base::IntToString(index++));
     key.WriteValue(UTF8ToUTF16(name).c_str(),
@@ -712,6 +738,11 @@ class PolicyLoaderWinTest : public PolicyTestBase,
     base::win::SetDomainStateForTesting(false);
     PolicyTestBase::SetUp();
 
+    // Activate overrides of registry keys. gtest documentation guarantees
+    // that the test will not be executed if SetUp has a fatal failure. This is
+    // important, see crbug.com/721691.
+    ASSERT_NO_FATAL_FAILURE(registry_sandbox_.ActivateOverrides());
+
     ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir_));
     test_data_dir_ = test_data_dir_.AppendASCII("chrome")
                                    .AppendASCII("test")
@@ -778,10 +809,10 @@ class PolicyLoaderWinTest : public PolicyTestBase,
     expected_policy.SetBoolean(test_keys::kKeyBoolean, true);
     expected_policy.SetString(test_keys::kKeyString, "GPO");
     expected_policy.SetInteger(test_keys::kKeyInteger, 42);
-    std::unique_ptr<base::ListValue> list(new base::ListValue());
+    auto list = base::MakeUnique<base::ListValue>();
     list->AppendString("GPO 1");
     list->AppendString("GPO 2");
-    expected_policy.Set(test_keys::kKeyStringList, list.release());
+    expected_policy.Set(test_keys::kKeyStringList, std::move(list));
     PolicyBundle expected;
     expected.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
         .LoadFrom(&expected_policy, POLICY_LEVEL_MANDATORY,
@@ -812,7 +843,7 @@ TEST_F(PolicyLoaderWinTest, HKLMOverHKCU) {
   PolicyBundle expected;
   expected.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
       .Set(test_keys::kKeyString, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
-           POLICY_SOURCE_PLATFORM, base::MakeUnique<base::StringValue>("hklm"),
+           POLICY_SOURCE_PLATFORM, base::MakeUnique<base::Value>("hklm"),
            nullptr);
   EXPECT_TRUE(Matches(expected));
 }
@@ -865,17 +896,17 @@ TEST_F(PolicyLoaderWinTest, Merge3rdPartyPolicies) {
   PolicyMap& expected_policy = expected.Get(ns);
   expected_policy.Set(
       "a", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE, POLICY_SOURCE_PLATFORM,
-      base::MakeUnique<base::StringValue>(kMachineMandatory), nullptr);
-  expected_policy.Set(
-      "b", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER, POLICY_SOURCE_PLATFORM,
-      base::MakeUnique<base::StringValue>(kUserMandatory), nullptr);
+      base::MakeUnique<base::Value>(kMachineMandatory), nullptr);
+  expected_policy.Set("b", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+                      POLICY_SOURCE_PLATFORM,
+                      base::MakeUnique<base::Value>(kUserMandatory), nullptr);
   expected_policy.Set("c", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_MACHINE,
                       POLICY_SOURCE_PLATFORM,
-                      base::MakeUnique<base::StringValue>(kMachineRecommended),
+                      base::MakeUnique<base::Value>(kMachineRecommended),
                       nullptr);
-  expected_policy.Set(
-      "d", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_USER, POLICY_SOURCE_PLATFORM,
-      base::MakeUnique<base::StringValue>(kUserRecommended), nullptr);
+  expected_policy.Set("d", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_USER,
+                      POLICY_SOURCE_PLATFORM,
+                      base::MakeUnique<base::Value>(kUserRecommended), nullptr);
   EXPECT_TRUE(Matches(expected));
 }
 
@@ -902,19 +933,19 @@ TEST_F(PolicyLoaderWinTest, LoadStringEncodedValues) {
       "}"));
 
   base::DictionaryValue policy;
-  policy.Set("null", base::Value::CreateNullValue());
+  policy.Set("null", base::MakeUnique<base::Value>());
   policy.SetBoolean("bool", true);
   policy.SetInteger("int", -123);
   policy.SetDouble("double", 456.78e9);
   base::ListValue list;
-  list.Append(policy.DeepCopy());
-  list.Append(policy.DeepCopy());
-  policy.Set("list", list.DeepCopy());
+  list.Append(base::MakeUnique<base::Value>(policy));
+  list.Append(base::MakeUnique<base::Value>(policy));
+  policy.Set("list", base::MakeUnique<base::Value>(list));
   // Encode |policy| before adding the "dict" entry.
   std::string encoded_dict;
   base::JSONWriter::Write(policy, &encoded_dict);
   ASSERT_FALSE(encoded_dict.empty());
-  policy.Set("dict", policy.DeepCopy());
+  policy.Set("dict", base::MakeUnique<base::Value>(policy));
   std::string encoded_list;
   base::JSONWriter::Write(list, &encoded_list);
   ASSERT_FALSE(encoded_list.empty());
@@ -1001,7 +1032,7 @@ TEST_F(PolicyLoaderWinTest, DefaultPropertySchemaType) {
   policy.SetString("double2", "123.456e7");
   policy.SetString("invalid", "omg");
   base::DictionaryValue all_policies;
-  all_policies.Set("policy", policy.DeepCopy());
+  all_policies.Set("policy", base::MakeUnique<base::Value>(policy));
 
   const base::string16 kPathSuffix =
       kTestPolicyKey + base::ASCIIToUTF16("\\3rdparty\\extensions\\test");
@@ -1014,7 +1045,8 @@ TEST_F(PolicyLoaderWinTest, DefaultPropertySchemaType) {
   expected_policy.SetDouble("double1", 789.0);
   expected_policy.SetDouble("double2", 123.456e7);
   base::DictionaryValue expected_policies;
-  expected_policies.Set("policy", expected_policy.DeepCopy());
+  expected_policies.Set("policy",
+                        base::MakeUnique<base::Value>(expected_policy));
   PolicyBundle expected;
   expected.Get(ns).LoadFrom(&expected_policies, POLICY_LEVEL_MANDATORY,
                             POLICY_SCOPE_USER, POLICY_SOURCE_PLATFORM);

@@ -10,9 +10,6 @@ Polymer({
   is: 'settings-certificate-password-encryption-dialog',
 
   properties: {
-    /** @private {!settings.CertificatesBrowserProxy} */
-    browserProxy_: Object,
-
     /** @type {!CertificateSubnode} */
     model: Object,
 
@@ -28,6 +25,9 @@ Polymer({
       value: '',
     },
   },
+
+  /** @private {?settings.CertificatesBrowserProxy} */
+  browserProxy_: null,
 
   /** @override */
   ready: function() {
@@ -46,31 +46,22 @@ Polymer({
 
   /** @private */
   onOkTap_: function() {
-    this.browserProxy_.exportPersonalCertificatePasswordSelected(
-        this.password_).then(
+    this.browserProxy_.exportPersonalCertificatePasswordSelected(this.password_)
+        .then(
             function() {
               this.$.dialog.close();
             }.bind(this),
             /** @param {!CertificatesError} error */
             function(error) {
               this.$.dialog.close();
-              this.fire('certificates-error', error);
+              this.fire('certificates-error', {error: error, anchor: null});
             }.bind(this));
-  },
-
-  /**
-   * @param {!KeyboardEvent} e
-   * @private
-   */
-  onKeypress_: function(e) {
-    if (e.key == 'Enter' && !this.$.ok.disabled)
-      this.onOkTap_();
   },
 
   /** @private */
   validate_: function() {
-    var isValid = this.password_ != '' &&
-        this.password_ == this.confirmPassword_;
+    var isValid =
+        this.password_ != '' && this.password_ == this.confirmPassword_;
     this.$.ok.disabled = !isValid;
   },
 });

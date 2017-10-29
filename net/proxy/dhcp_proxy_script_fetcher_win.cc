@@ -63,6 +63,7 @@ DhcpProxyScriptFetcherWin::DhcpProxyScriptFetcherWin(
 }
 
 DhcpProxyScriptFetcherWin::~DhcpProxyScriptFetcherWin() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   // Count as user-initiated if we are not yet in STATE_DONE.
   Cancel();
 
@@ -76,11 +77,14 @@ int DhcpProxyScriptFetcherWin::Fetch(base::string16* utf16_text,
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "476182 DhcpProxyScriptFetcherWin::Fetch 1"));
 
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (state_ != STATE_START && state_ != STATE_DONE) {
     NOTREACHED();
     return ERR_UNEXPECTED;
   }
+
+  if (!url_request_context_)
+    return ERR_CONTEXT_SHUT_DOWN;
 
   state_ = STATE_WAIT_ADAPTERS;
   callback_ = callback;
@@ -105,13 +109,30 @@ int DhcpProxyScriptFetcherWin::Fetch(base::string16* utf16_text,
 }
 
 void DhcpProxyScriptFetcherWin::Cancel() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   CancelImpl();
 }
 
+void DhcpProxyScriptFetcherWin::OnShutdown() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+  // Back up callback, if there is one, as CancelImpl() will destroy it.
+  net::CompletionCallback callback = std::move(callback_);
+
+  // Cancel current request, if there is one.
+  CancelImpl();
+
+  // Prevent future network requests.
+  url_request_context_ = nullptr;
+
+  // Invoke callback with error, if present.
+  if (callback)
+    callback.Run(ERR_CONTEXT_SHUT_DOWN);
+}
+
 void DhcpProxyScriptFetcherWin::CancelImpl() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (state_ != STATE_DONE) {
     callback_.Reset();
@@ -136,7 +157,7 @@ void DhcpProxyScriptFetcherWin::OnGetCandidateAdapterNamesDone(
           "476182 "
           "DhcpProxyScriptFetcherWin::OnGetCandidateAdapterNamesDone 1"));
 
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // This can happen if this object is reused for multiple queries,
   // and a previous query was cancelled before it completed.
@@ -187,12 +208,12 @@ void DhcpProxyScriptFetcherWin::OnGetCandidateAdapterNamesDone(
 }
 
 std::string DhcpProxyScriptFetcherWin::GetFetcherName() const {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return "win";
 }
 
 const GURL& DhcpProxyScriptFetcherWin::GetPacURL() const {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_EQ(state_, STATE_DONE);
 
   return pac_url_;

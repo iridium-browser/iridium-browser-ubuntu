@@ -12,25 +12,18 @@
 
 #if defined(_WIN32)
 // Windows needs to be included before mmsystem.h
-#include "webrtc/base/win32.h"
+#include "webrtc/rtc_base/win32.h"
 #include <MMSystem.h>
 #elif ((defined WEBRTC_LINUX) || (defined WEBRTC_MAC))
 #include <sys/time.h>
 #include <time.h>
 #endif
 
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/timeutils.h"
+#include "webrtc/rtc_base/criticalsection.h"
+#include "webrtc/rtc_base/timeutils.h"
 #include "webrtc/system_wrappers/include/rw_lock_wrapper.h"
 
 namespace webrtc {
-
-NtpTime Clock::CurrentNtpTime() const {
-  uint32_t seconds;
-  uint32_t fractions;
-  CurrentNtp(seconds, fractions);
-  return NtpTime(seconds, fractions);
-}
 
 class RealTimeClock : public Clock {
   // Return a timestamp in milliseconds relative to some arbitrary source; the
@@ -45,13 +38,15 @@ class RealTimeClock : public Clock {
     return rtc::TimeMicros();
   }
 
-  // Retrieve an NTP absolute timestamp in seconds and fractions of a second.
-  void CurrentNtp(uint32_t& seconds, uint32_t& fractions) const override {
+  // Retrieve an NTP absolute timestamp.
+  NtpTime CurrentNtpTime() const override {
     timeval tv = CurrentTimeVal();
     double microseconds_in_seconds;
+    uint32_t seconds;
     Adjust(tv, &seconds, &microseconds_in_seconds);
-    fractions = static_cast<uint32_t>(
+    uint32_t fractions = static_cast<uint32_t>(
         microseconds_in_seconds * kMagicNtpFractionalUnit + 0.5);
+    return NtpTime(seconds, fractions);
   }
 
   // Retrieve an NTP absolute timestamp in milliseconds.
@@ -247,11 +242,12 @@ int64_t SimulatedClock::TimeInMicroseconds() const {
   return time_us_;
 }
 
-void SimulatedClock::CurrentNtp(uint32_t& seconds, uint32_t& fractions) const {
+NtpTime SimulatedClock::CurrentNtpTime() const {
   int64_t now_ms = TimeInMilliseconds();
-  seconds = (now_ms / 1000) + kNtpJan1970;
-  fractions =
+  uint32_t seconds = (now_ms / 1000) + kNtpJan1970;
+  uint32_t fractions =
       static_cast<uint32_t>((now_ms % 1000) * kMagicNtpFractionalUnit / 1000);
+  return NtpTime(seconds, fractions);
 }
 
 int64_t SimulatedClock::CurrentNtpInMilliseconds() const {

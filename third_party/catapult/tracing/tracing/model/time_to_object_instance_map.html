@@ -4,8 +4,8 @@ Copyright (c) 2013 The Chromium Authors. All rights reserved.
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
-<link rel="import" href="/tracing/base/range.html">
-<link rel="import" href="/tracing/base/sorted_array_utils.html">
+<link rel="import" href="/tracing/base/math/range.html">
+<link rel="import" href="/tracing/base/math/sorted_array_utils.html">
 
 <script>
 'use strict';
@@ -33,7 +33,7 @@ tr.exportTo('tr.model', function() {
   }
 
   TimeToObjectInstanceMap.prototype = {
-    idWasCreated: function(category, name, ts) {
+    idWasCreated(category, name, ts) {
       if (this.instances.length === 0) {
         this.instances.push(this.createObjectInstanceFunction_(
             this.parent, this.scopedId, category, name, ts));
@@ -41,7 +41,7 @@ tr.exportTo('tr.model', function() {
         return this.instances[0];
       }
 
-      var lastInstance = this.instances[this.instances.length - 1];
+      let lastInstance = this.instances[this.instances.length - 1];
       if (ts < lastInstance.deletionTs) {
         throw new Error('Mutation of the TimeToObjectInstanceMap must be ' +
                         'done in ascending timestamp order.');
@@ -53,19 +53,19 @@ tr.exportTo('tr.model', function() {
       return lastInstance;
     },
 
-    addSnapshot: function(category, name, ts, args, opt_baseTypeName) {
+    addSnapshot(category, name, ts, args, opt_baseTypeName) {
       if (this.instances.length === 0) {
         this.instances.push(this.createObjectInstanceFunction_(
             this.parent, this.scopedId, category, name, ts, opt_baseTypeName));
       }
 
-      var i = tr.b.findIndexInSortedIntervals(
+      const i = tr.b.math.findIndexInSortedIntervals(
           this.instances,
           function(inst) { return inst.creationTs; },
           function(inst) { return inst.deletionTs - inst.creationTs; },
           ts);
 
-      var instance;
+      let instance;
       if (i < 0) {
         instance = this.instances[0];
         if (ts > instance.deletionTs ||
@@ -99,14 +99,14 @@ tr.exportTo('tr.model', function() {
           // Search backward from the right for an instance that was definitely
           // deleted before this ts. Any time an instance is found that has a
           // moveable creationTs
-          var lastValidIndex;
-          for (var i = this.instances.length - 1; i >= 0; i--) {
-            var tmp = this.instances[i];
-            if (ts >= tmp.deletionTs)
-              break;
+          let lastValidIndex;
+          for (let i = this.instances.length - 1; i >= 0; i--) {
+            const tmp = this.instances[i];
+            if (ts >= tmp.deletionTs) break;
             if (tmp.creationTsWasExplicit === false &&
-                tmp.snapshots.length === 0)
+                tmp.snapshots.length === 0) {
               lastValidIndex = i;
+            }
           }
           if (lastValidIndex === undefined) {
             throw new Error(
@@ -123,26 +123,27 @@ tr.exportTo('tr.model', function() {
     },
 
     get lastInstance() {
-      if (this.instances.length === 0)
-        return undefined;
+      if (this.instances.length === 0) return undefined;
       return this.instances[this.instances.length - 1];
     },
 
-    idWasDeleted: function(category, name, ts) {
+    idWasDeleted(category, name, ts) {
       if (this.instances.length === 0) {
         this.instances.push(this.createObjectInstanceFunction_(
             this.parent, this.scopedId, category, name, ts));
       }
-      var lastInstance = this.instances[this.instances.length - 1];
-      if (ts < lastInstance.creationTs)
+      let lastInstance = this.instances[this.instances.length - 1];
+      if (ts < lastInstance.creationTs) {
         throw new Error('Cannot delete an id before it was created');
+      }
       if (lastInstance.deletionTs === Number.MAX_VALUE) {
         lastInstance.wasDeleted(ts);
         return lastInstance;
       }
 
-      if (ts < lastInstance.deletionTs)
+      if (ts < lastInstance.deletionTs) {
         throw new Error('id was already deleted earlier.');
+      }
 
       // A new instance was deleted with no snapshots in-between.
       // Create an instance then kill it.
@@ -153,37 +154,21 @@ tr.exportTo('tr.model', function() {
       return lastInstance;
     },
 
-    getInstanceAt: function(ts) {
-      var i = tr.b.findIndexInSortedIntervals(
+    getInstanceAt(ts) {
+      const i = tr.b.math.findIndexInSortedIntervals(
           this.instances,
           function(inst) { return inst.creationTs; },
           function(inst) { return inst.deletionTs - inst.creationTs; },
           ts);
       if (i < 0) {
-        if (this.instances[0].creationTsWasExplicit)
+        if (this.instances[0].creationTsWasExplicit) {
           return undefined;
+        }
         return this.instances[0];
       } else if (i >= this.instances.length) {
         return undefined;
       }
       return this.instances[i];
-    },
-
-    logToConsole: function() {
-      for (var i = 0; i < this.instances.length; i++) {
-        var instance = this.instances[i];
-        var cEF = '';
-        var dEF = '';
-        if (instance.creationTsWasExplicit)
-          cEF = '(explicitC)';
-        if (instance.deletionTsWasExplicit)
-          dEF = '(explicit)';
-        console.log(instance.creationTs, cEF,
-            instance.deletionTs, dEF,
-            instance.category,
-            instance.name,
-            instance.snapshots.length + ' snapshots');
-      }
     }
   };
 

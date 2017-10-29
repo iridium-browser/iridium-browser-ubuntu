@@ -23,3 +23,10 @@ struct BeginFrameArgs {
   BeginFrameArgsType type;
   bool on_critical_path;
 };
+
+// See cc/output/begin_frame_args.h.
+struct BeginFrameAck {
+  uint64 sequence_number;
+  uint32 source_id;
+  // |has_damage| is implicit through IPC message name, so not transmitted.
+};

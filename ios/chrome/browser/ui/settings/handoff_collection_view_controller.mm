@@ -15,6 +15,10 @@
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 
 typedef NS_ENUM(NSInteger, SectionIdentifier) {
@@ -44,7 +48,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
 
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
   DCHECK(browserState);
-  self = [super initWithStyle:CollectionViewControllerStyleAppBar];
+  UICollectionViewLayout* layout = [[MDCCollectionViewFlowLayout alloc] init];
+  self =
+      [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
   if (self) {
     self.title = l10n_util::GetNSString(IDS_IOS_OPTIONS_CONTINUITY_LABEL);
     _handoffEnabled.Init(prefs::kIosHandoffToOtherDevices,
@@ -61,8 +67,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
   CollectionViewModel* model = self.collectionViewModel;
 
   [model addSectionWithIdentifier:SectionIdentifierSwitch];
-  CollectionViewSwitchItem* switchItem = [[[CollectionViewSwitchItem alloc]
-      initWithType:ItemTypeSwitch] autorelease];
+  CollectionViewSwitchItem* switchItem =
+      [[CollectionViewSwitchItem alloc] initWithType:ItemTypeSwitch];
   switchItem.text =
       l10n_util::GetNSString(IDS_IOS_OPTIONS_ENABLE_HANDOFF_TO_OTHER_DEVICES);
   switchItem.on = _handoffEnabled.GetValue();
@@ -72,8 +78,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
   // drawing bug in MDC.
   // TODO(crbug.com/650424) Use setFooter:forSectionWithIdentifier:.
   [model addSectionWithIdentifier:SectionIdentifierFooter];
-  CollectionViewFooterItem* footer = [[[CollectionViewFooterItem alloc]
-      initWithType:ItemTypeFooter] autorelease];
+  CollectionViewFooterItem* footer =
+      [[CollectionViewFooterItem alloc] initWithType:ItemTypeFooter];
   footer.text = l10n_util::GetNSString(
       IDS_IOS_OPTIONS_ENABLE_HANDOFF_TO_OTHER_DEVICES_DETAILS);
   [model addItem:footer toSectionWithIdentifier:SectionIdentifierFooter];

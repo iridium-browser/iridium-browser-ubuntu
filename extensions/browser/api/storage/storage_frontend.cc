@@ -17,6 +17,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/api/extensions_api_client.h"
+#include "extensions/browser/api/storage/backend_task_runner.h"
 #include "extensions/browser/api/storage/local_value_store_cache.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_registry.h"
@@ -31,8 +32,8 @@ namespace extensions {
 
 namespace {
 
-base::LazyInstance<BrowserContextKeyedAPIFactory<StorageFrontend> > g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<BrowserContextKeyedAPIFactory<StorageFrontend>>::
+    DestructorAtExit g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // Settings change Observer which forwards changes on to the extension
 // processes for |context| and its incognito partner if it exists.
@@ -118,7 +119,7 @@ StorageFrontend::~StorageFrontend() {
   for (CacheMap::iterator it = caches_.begin(); it != caches_.end(); ++it) {
     ValueStoreCache* cache = it->second;
     cache->ShutdownOnUI();
-    BrowserThread::DeleteSoon(BrowserThread::FILE, FROM_HERE, cache);
+    GetBackendTaskRunner()->DeleteSoon(FROM_HERE, cache);
   }
 }
 
@@ -145,21 +146,18 @@ void StorageFrontend::RunWithStorage(
   ValueStoreCache* cache = caches_[settings_namespace];
   CHECK(cache);
 
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&ValueStoreCache::RunWithValueStoreForExtension,
-                 base::Unretained(cache), callback, extension));
+  GetBackendTaskRunner()->PostTask(
+      FROM_HERE, base::Bind(&ValueStoreCache::RunWithValueStoreForExtension,
+                            base::Unretained(cache), callback, extension));
 }
 
 void StorageFrontend::DeleteStorageSoon(const std::string& extension_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   for (CacheMap::iterator it = caches_.begin(); it != caches_.end(); ++it) {
     ValueStoreCache* cache = it->second;
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        base::Bind(&ValueStoreCache::DeleteStorageSoon,
-                   base::Unretained(cache),
-                   extension_id));
+    GetBackendTaskRunner()->PostTask(
+        FROM_HERE, base::Bind(&ValueStoreCache::DeleteStorageSoon,
+                              base::Unretained(cache), extension_id));
   }
 }
 
@@ -174,7 +172,7 @@ void StorageFrontend::DisableStorageForTesting(
   if (it != caches_.end()) {
     ValueStoreCache* cache = it->second;
     cache->ShutdownOnUI();
-    BrowserThread::DeleteSoon(BrowserThread::FILE, FROM_HERE, cache);
+    GetBackendTaskRunner()->DeleteSoon(FROM_HERE, cache);
     caches_.erase(it);
   }
 }

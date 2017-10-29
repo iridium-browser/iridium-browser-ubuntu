@@ -121,8 +121,9 @@ class PrerenderManager::OnCloseWebContentsDeleter
     tab_->SetDelegate(this);
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&OnCloseWebContentsDeleter::ScheduleWebContentsForDeletion,
-                   AsWeakPtr(), true),
+        base::BindOnce(
+            &OnCloseWebContentsDeleter::ScheduleWebContentsForDeletion,
+            AsWeakPtr(), true),
         base::TimeDelta::FromSeconds(kDeleteWithExtremePrejudiceSeconds));
   }
 
@@ -526,35 +527,6 @@ void PrerenderManager::MoveEntryToPendingDelete(PrerenderContents* entry,
   PostCleanupTask();
 }
 
-void PrerenderManager::RecordPageLoadTimeNotSwappedIn(
-    Origin origin,
-    base::TimeDelta page_load_time,
-    const GURL& url) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  histograms_->RecordPageLoadTimeNotSwappedIn(origin, page_load_time, url);
-}
-
-void PrerenderManager::RecordPerceivedPageLoadTime(
-    Origin origin,
-    NavigationType navigation_type,
-    base::TimeDelta perceived_page_load_time,
-    double fraction_plt_elapsed_at_swap_in,
-    const GURL& url) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (GetPredictionStatusForOrigin(origin)
-      != NetworkPredictionStatus::ENABLED) {
-    return;
-  }
-
-  histograms_->RecordPerceivedPageLoadTime(
-      origin, perceived_page_load_time, navigation_type, url);
-
-  if (navigation_type == NAVIGATION_TYPE_PRERENDERED) {
-    histograms_->RecordPercentLoadDoneAtSwapin(
-        origin, fraction_plt_elapsed_at_swap_in);
-  }
-}
-
 void PrerenderManager::RecordPrefetchResponseReceived(Origin origin,
                                                       bool is_main_resource,
                                                       bool is_redirect,
@@ -797,11 +769,11 @@ bool PrerenderManager::DoesSubresourceURLHaveValidScheme(const GURL& url) {
   return DoesURLHaveValidScheme(url) || url == url::kAboutBlankURL;
 }
 
-std::unique_ptr<base::DictionaryValue> PrerenderManager::GetAsValue() const {
+std::unique_ptr<base::DictionaryValue> PrerenderManager::CopyAsValue() const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   auto dict_value = base::MakeUnique<base::DictionaryValue>();
-  dict_value->Set("history", prerender_history_->GetEntriesAsValue());
+  dict_value->Set("history", prerender_history_->CopyEntriesAsValue());
   dict_value->Set("active", GetActivePrerendersAsValue());
   dict_value->SetBoolean("enabled",
       GetPredictionStatus() == NetworkPredictionStatus::ENABLED);
@@ -941,10 +913,6 @@ std::unique_ptr<PrerenderHandle> PrerenderManager::AddPrerender(
 
   GURL url = url_arg;
   GURL alias_url;
-
-  // From here on, we will record a FinalStatus so we need to register with the
-  // histogram tracking.
-  histograms_->RecordPrerender();
 
   if (profile_->GetPrefs()->GetBoolean(prefs::kBlockThirdPartyCookies) &&
       origin != ORIGIN_OFFLINE) {
@@ -1114,8 +1082,8 @@ void PrerenderManager::PeriodicCleanup() {
 void PrerenderManager::PostCleanupTask() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&PrerenderManager::PeriodicCleanup,
-                            weak_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&PrerenderManager::PeriodicCleanup,
+                                weak_factory_.GetWeakPtr()));
 }
 
 base::TimeTicks PrerenderManager::GetExpiryTimeForNewPrerender(

@@ -34,13 +34,6 @@ const int kMaximumSnapHeight = 16;
 // this, entire edge will be used as a draggable space.
 const int kMinimumIndicatorHeight = 200;
 
-// Helper method that maps a display::Display to an aura::Window.
-aura::Window* GetRootWindowForDisplayId(int64_t display_id) {
-  return Shell::GetInstance()
-      ->window_tree_host_manager()
-      ->GetRootWindowForDisplayId(display_id);
-}
-
 // Helper method that maps an aura::Window to display id;
 int64_t GetDisplayIdFromWindow(aura::Window* window) {
   return display::Screen::GetScreen()->GetDisplayNearestWindow(window).id();
@@ -75,11 +68,13 @@ ExtendedMouseWarpController::WarpRegion::WarpRegion(
       b_indicator_bounds_(b_indicator_bounds),
       shared_display_edge_indicator_(nullptr) {
   // Initialize edge bounds from indicator bounds.
-  aura::Window* a_window = GetRootWindowForDisplayId(a_display_id);
-  aura::Window* b_window = GetRootWindowForDisplayId(b_display_id);
+  aura::Window* a_window = Shell::GetRootWindowForDisplayId(a_display_id);
+  aura::Window* b_window = Shell::GetRootWindowForDisplayId(b_display_id);
 
-  AshWindowTreeHost* a_ash_host = GetRootWindowController(a_window)->ash_host();
-  AshWindowTreeHost* b_ash_host = GetRootWindowController(b_window)->ash_host();
+  AshWindowTreeHost* a_ash_host =
+      RootWindowController::ForWindow(a_window)->ash_host();
+  AshWindowTreeHost* b_ash_host =
+      RootWindowController::ForWindow(b_window)->ash_host();
 
   a_edge_bounds_in_native_ =
       GetNativeEdgeBounds(a_ash_host, a_indicator_bounds);
@@ -101,8 +96,7 @@ ExtendedMouseWarpController::WarpRegion::GetIndicatorBoundsForTest(
 ExtendedMouseWarpController::ExtendedMouseWarpController(
     aura::Window* drag_source)
     : drag_source_root_(drag_source), allow_non_native_event_(false) {
-  display::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  display::DisplayManager* display_manager = Shell::Get()->display_manager();
   int64_t drag_source_id = drag_source ? GetDisplayIdFromWindow(drag_source)
                                        : display::kInvalidDisplayId;
   display::Displays display_list = display_manager->active_display_list();
@@ -188,10 +182,10 @@ bool ExtendedMouseWarpController::WarpMouseCursorInNativeCoords(
       continue;
 
     // The mouse must move.
-    aura::Window* dst_window = GetRootWindowForDisplayId(
+    aura::Window* dst_window = Shell::GetRootWindowForDisplayId(
         in_a_edge ? warp->b_display_id_ : warp->a_display_id_);
     AshWindowTreeHost* target_ash_host =
-        GetRootWindowController(dst_window)->ash_host();
+        RootWindowController::ForWindow(dst_window)->ash_host();
 
     MoveCursorTo(target_ash_host, point_in_screen, update_mouse_location_now);
     return true;

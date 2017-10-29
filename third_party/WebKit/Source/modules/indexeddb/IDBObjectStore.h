@@ -26,8 +26,7 @@
 #ifndef IDBObjectStore_h
 #define IDBObjectStore_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/core/v8/SerializedScriptValue.h"
+#include "bindings/core/v8/serialization/SerializedScriptValue.h"
 #include "modules/indexeddb/IDBCursor.h"
 #include "modules/indexeddb/IDBIndex.h"
 #include "modules/indexeddb/IDBIndexParameters.h"
@@ -36,11 +35,12 @@
 #include "modules/indexeddb/IDBMetadata.h"
 #include "modules/indexeddb/IDBRequest.h"
 #include "modules/indexeddb/IDBTransaction.h"
+#include "platform/bindings/ScriptWrappable.h"
+#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/text/WTFString.h"
 #include "public/platform/modules/indexeddb/WebIDBCursor.h"
 #include "public/platform/modules/indexeddb/WebIDBDatabase.h"
 #include "public/platform/modules/indexeddb/WebIDBTypes.h"
-#include "wtf/RefPtr.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -48,29 +48,30 @@ class DOMStringList;
 class IDBAny;
 class ExceptionState;
 
-class IDBObjectStore final : public GarbageCollectedFinalized<IDBObjectStore>,
-                             public ScriptWrappable {
+class MODULES_EXPORT IDBObjectStore final
+    : public GarbageCollectedFinalized<IDBObjectStore>,
+      public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static IDBObjectStore* create(RefPtr<IDBObjectStoreMetadata> metadata,
+  static IDBObjectStore* Create(RefPtr<IDBObjectStoreMetadata> metadata,
                                 IDBTransaction* transaction) {
     return new IDBObjectStore(std::move(metadata), transaction);
   }
   ~IDBObjectStore() {}
   DECLARE_TRACE();
 
-  const IDBObjectStoreMetadata& metadata() const { return *m_metadata; }
-  const IDBKeyPath& idbKeyPath() const { return metadata().keyPath; }
+  const IDBObjectStoreMetadata& Metadata() const { return *metadata_; }
+  const IDBKeyPath& IdbKeyPath() const { return Metadata().key_path; }
 
   // Implement the IDBObjectStore IDL
-  int64_t id() const { return metadata().id; }
-  const String& name() const { return metadata().name; }
+  int64_t Id() const { return Metadata().id; }
+  const String& name() const { return Metadata().name; }
   void setName(const String& name, ExceptionState&);
   ScriptValue keyPath(ScriptState*) const;
   DOMStringList* indexNames() const;
-  IDBTransaction* transaction() const { return m_transaction.get(); }
-  bool autoIncrement() const { return metadata().autoIncrement; }
+  IDBTransaction* transaction() const { return transaction_.Get(); }
+  bool autoIncrement() const { return Metadata().auto_increment; }
 
   IDBRequest* openCursor(ScriptState*,
                          const ScriptValue& range,
@@ -84,12 +85,12 @@ class IDBObjectStore final : public GarbageCollectedFinalized<IDBObjectStore>,
   IDBRequest* getKey(ScriptState*, const ScriptValue& key, ExceptionState&);
   IDBRequest* getAll(ScriptState*,
                      const ScriptValue& range,
-                     unsigned long maxCount,
+                     unsigned long max_count,
                      ExceptionState&);
   IDBRequest* getAll(ScriptState*, const ScriptValue& range, ExceptionState&);
   IDBRequest* getAllKeys(ScriptState*,
                          const ScriptValue& range,
-                         unsigned long maxCount,
+                         unsigned long max_count,
                          ExceptionState&);
   IDBRequest* getAllKeys(ScriptState*,
                          const ScriptValue& range,
@@ -107,13 +108,13 @@ class IDBObjectStore final : public GarbageCollectedFinalized<IDBObjectStore>,
                              ExceptionState&);
   IDBRequest* clear(ScriptState*, ExceptionState&);
 
-  IDBIndex* createIndex(ScriptState* scriptState,
+  IDBIndex* createIndex(ScriptState* script_state,
                         const String& name,
-                        const StringOrStringSequence& keyPath,
+                        const StringOrStringSequence& key_path,
                         const IDBIndexParameters& options,
-                        ExceptionState& exceptionState) {
-    return createIndex(scriptState, name, IDBKeyPath(keyPath), options,
-                       exceptionState);
+                        ExceptionState& exception_state) {
+    return createIndex(script_state, name, IDBKeyPath(key_path), options,
+                       exception_state);
   }
   IDBIndex* index(const String& name, ExceptionState&);
   void deleteIndex(const String& name, ExceptionState&);
@@ -129,23 +130,25 @@ class IDBObjectStore final : public GarbageCollectedFinalized<IDBObjectStore>,
                   ExceptionState&);
 
   // Used internally and by InspectorIndexedDBAgent:
-  IDBRequest* openCursor(ScriptState*,
-                         IDBKeyRange*,
-                         WebIDBCursorDirection,
-                         WebIDBTaskType = WebIDBTaskTypeNormal);
+  IDBRequest* openCursor(
+      ScriptState*,
+      IDBKeyRange*,
+      WebIDBCursorDirection,
+      WebIDBTaskType = kWebIDBTaskTypeNormal,
+      IDBRequest::AsyncTraceState = IDBRequest::AsyncTraceState());
 
-  void markDeleted();
-  bool isDeleted() const { return m_deleted; }
+  void MarkDeleted();
+  bool IsDeleted() const { return deleted_; }
 
   // True if this object store was created in its associated transaction.
   // Only valid if the store's associated transaction is a versionchange.
-  bool isNewlyCreated() const {
-    DCHECK(m_transaction->isVersionChange());
+  bool IsNewlyCreated() const {
+    DCHECK(transaction_->IsVersionChange());
     // Object store IDs are allocated sequentially, so we can tell if an object
     // store was created in this transaction by comparing its ID against the
     // database's maximum object store ID at the time when the transaction was
     // started.
-    return id() > m_transaction->oldMaxObjectStoreId();
+    return Id() > transaction_->OldMaxObjectStoreId();
   }
 
   // Clears the cache used to implement the index() method.
@@ -160,7 +163,7 @@ class IDBObjectStore final : public GarbageCollectedFinalized<IDBObjectStore>,
   // same transaction. Those stores will remain marked for deletion even if
   // the transaction aborts, so the transaction can forget about them (and
   // clear their index caches) right when they are deleted.
-  void clearIndexCache();
+  void ClearIndexCache();
 
   // Sets the object store's metadata to a previous version.
   //
@@ -169,17 +172,17 @@ class IDBObjectStore final : public GarbageCollectedFinalized<IDBObjectStore>,
   // IDBIndex metadata for indexes that were deleted in this transaction.
   //
   // Used when a versionchange transaction is aborted.
-  void revertMetadata(RefPtr<IDBObjectStoreMetadata> previousMetadata);
-  // This relies on the changes made by revertMetadata().
-  void revertDeletedIndexMetadata(IDBIndex& deletedIndex);
+  void RevertMetadata(RefPtr<IDBObjectStoreMetadata> previous_metadata);
+  // This relies on the changes made by RevertMetadata().
+  void RevertDeletedIndexMetadata(IDBIndex& deleted_index);
 
   // Used by IDBIndex::setName:
-  bool containsIndex(const String& name) const {
-    return findIndexId(name) != IDBIndexMetadata::InvalidId;
+  bool ContainsIndex(const String& name) const {
+    return FindIndexId(name) != IDBIndexMetadata::kInvalidId;
   }
-  void renameIndex(int64_t indexId, const String& newName);
+  void RenameIndex(int64_t index_id, const String& new_name);
 
-  WebIDBDatabase* backendDB() const;
+  WebIDBDatabase* BackendDB() const;
 
  private:
   using IDBIndexMap = HeapHashMap<String, Member<IDBIndex>>;
@@ -198,13 +201,13 @@ class IDBObjectStore final : public GarbageCollectedFinalized<IDBObjectStore>,
                   const ScriptValue& key,
                   ExceptionState&);
 
-  int64_t findIndexId(const String& name) const;
+  int64_t FindIndexId(const String& name) const;
 
   // The IDBObjectStoreMetadata is shared with the object store map in the
   // database's metadata.
-  RefPtr<IDBObjectStoreMetadata> m_metadata;
-  Member<IDBTransaction> m_transaction;
-  bool m_deleted = false;
+  RefPtr<IDBObjectStoreMetadata> metadata_;
+  Member<IDBTransaction> transaction_;
+  bool deleted_ = false;
 
   // Caches the IDBIndex instances returned by the index() method.
   //
@@ -214,10 +217,10 @@ class IDBObjectStore final : public GarbageCollectedFinalized<IDBObjectStore>,
   //
   // index() throws for completed/aborted transactions, so this is not used
   // after a transaction is finished, and can be cleared.
-  IDBIndexMap m_indexMap;
+  IDBIndexMap index_map_;
 
 #if DCHECK_IS_ON()
-  bool m_clearIndexCacheCalled = false;
+  bool clear_index_cache_called_ = false;
 #endif  // DCHECK_IS_ON()
 };
 

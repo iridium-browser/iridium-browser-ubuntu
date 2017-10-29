@@ -261,7 +261,7 @@ class AutoLaunchedKioskTest : public ExtensionApiTest {
  public:
   AutoLaunchedKioskTest()
       : install_attributes_(
-            chromeos::ScopedStubInstallAttributes::CreateEnterprise(
+            chromeos::ScopedStubInstallAttributes::CreateCloudManaged(
                 "domain.com",
                 "device_id")),
         owner_key_util_(new ownership::MockOwnerKeyUtil()),
@@ -324,18 +324,17 @@ class AutoLaunchedKioskTest : public ExtensionApiTest {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
   }
 
+  void PreRunTestOnMainThread() override {
+    termination_observer_.reset(new TerminationObserver());
+    InProcessBrowserTest::PreRunTestOnMainThread();
+  }
+
   void SetUpOnMainThread() override {
     extensions::browsertest_util::CreateAndInitializeLocalCache();
 
     embedded_test_server()->StartAcceptingConnections();
 
     ExtensionApiTest::SetUpOnMainThread();
-  }
-
-  void RunTestOnMainThreadLoop() override {
-    termination_observer_.reset(new TerminationObserver());
-
-    ExtensionApiTest::RunTestOnMainThreadLoop();
   }
 
   void TearDownOnMainThread() override {

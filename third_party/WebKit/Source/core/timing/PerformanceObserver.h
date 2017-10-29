@@ -5,11 +5,11 @@
 #ifndef PerformanceObserver_h
 #define PerformanceObserver_h
 
-#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/CoreExport.h"
 #include "core/timing/PerformanceEntry.h"
+#include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Vector.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 
@@ -31,32 +31,31 @@ class CORE_EXPORT PerformanceObserver final
   friend class PerformanceObserverTest;
 
  public:
-  static PerformanceObserver* create(ExecutionContext*,
-                                     PerformanceBase*,
+  static PerformanceObserver* Create(ScriptState*,
                                      PerformanceObserverCallback*);
-  static void resumeSuspendedObservers();
+  static void ResumeSuspendedObservers();
 
   void observe(const PerformanceObserverInit&, ExceptionState&);
   void disconnect();
-  void enqueuePerformanceEntry(PerformanceEntry&);
-  PerformanceEntryTypeMask filterOptions() const { return m_filterOptions; }
+  void EnqueuePerformanceEntry(PerformanceEntry&);
+  PerformanceEntryTypeMask FilterOptions() const { return filter_options_; }
 
   DECLARE_TRACE();
   DECLARE_TRACE_WRAPPERS();
 
  private:
-  PerformanceObserver(ExecutionContext*,
+  PerformanceObserver(ScriptState*,
                       PerformanceBase*,
                       PerformanceObserverCallback*);
-  void deliver();
-  bool shouldBeSuspended() const;
+  void Deliver();
+  bool ShouldBeSuspended() const;
 
-  Member<ExecutionContext> m_executionContext;
-  TraceWrapperMember<PerformanceObserverCallback> m_callback;
-  WeakMember<PerformanceBase> m_performance;
-  PerformanceEntryVector m_performanceEntries;
-  PerformanceEntryTypeMask m_filterOptions;
-  bool m_isRegistered;
+  Member<ExecutionContext> execution_context_;
+  TraceWrapperMember<PerformanceObserverCallback> callback_;
+  WeakMember<PerformanceBase> performance_;
+  PerformanceEntryVector performance_entries_;
+  PerformanceEntryTypeMask filter_options_;
+  bool is_registered_;
 };
 
 }  // namespace blink

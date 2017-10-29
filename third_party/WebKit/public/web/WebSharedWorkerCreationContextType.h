@@ -5,7 +5,7 @@
 #ifndef WebSharedWorkerCreationContextType_h
 #define WebSharedWorkerCreationContextType_h
 
-#include "../platform/WebCommon.h"
+#include "public/platform/WebCommon.h"
 
 namespace blink {
 
@@ -13,11 +13,11 @@ namespace blink {
 // SharedWorker.
 enum WebSharedWorkerCreationContextType {
   // The shared worker was created from a nonsecure context.
-  WebSharedWorkerCreationContextTypeNonsecure = 0,
+  kWebSharedWorkerCreationContextTypeNonsecure = 0,
   // The shared worker was created from a secure context.
-  WebSharedWorkerCreationContextTypeSecure,
-  WebSharedWorkerCreationContextTypeLast =
-      WebSharedWorkerCreationContextTypeSecure
+  kWebSharedWorkerCreationContextTypeSecure,
+  kWebSharedWorkerCreationContextTypeLast =
+      kWebSharedWorkerCreationContextTypeSecure
 };
 
 }  // namespace blink

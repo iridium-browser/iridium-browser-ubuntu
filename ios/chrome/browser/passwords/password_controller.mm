@@ -12,15 +12,14 @@
 #include <utility>
 #include <vector>
 
-#import "base/ios/weak_nsobject.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/mac/foundation_util.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/values.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/autofill/core/common/password_form_fill_data.h"
 #include "components/browser_sync/profile_sync_service.h"
@@ -45,6 +44,10 @@
 #import "ios/web/public/web_state/web_state.h"
 #include "url/gurl.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 using password_manager::PasswordFormManager;
 using password_manager::PasswordGenerationManager;
 using password_manager::PasswordManager;
@@ -60,6 +63,9 @@ enum class PasswordInfoBarType { SAVE, UPDATE };
 
 // This is set to YES as soon as the associated WebState is destroyed.
 @property(readonly) BOOL isWebStateDestroyed;
+
+// Accessor for property inside block.
+@property(readonly) PasswordManager* passwordManager;
 
 @end
 
@@ -220,14 +226,14 @@ NSString* SerializePasswordFormFillData(
   auto usernameField = base::MakeUnique<base::DictionaryValue>();
   usernameField->SetString("name", formData.username_field.name);
   usernameField->SetString("value", formData.username_field.value);
-  fieldList->Append(usernameField.release());
+  fieldList->Append(std::move(usernameField));
 
   auto passwordField = base::MakeUnique<base::DictionaryValue>();
   passwordField->SetString("name", formData.password_field.name);
   passwordField->SetString("value", formData.password_field.value);
-  fieldList->Append(passwordField.release());
+  fieldList->Append(std::move(passwordField));
 
-  rootDict.Set("fields", fieldList.release());
+  rootDict.Set("fields", std::move(fieldList));
 
   std::string jsonString;
   base::JSONWriter::Write(rootDict, &jsonString);
@@ -252,7 +258,7 @@ bool GetPageURLAndCheckTrustLevel(web::WebState* web_state, GURL* page_url) {
   std::unique_ptr<PasswordGenerationManager> passwordGenerationManager_;
   std::unique_ptr<PasswordManagerClient> passwordManagerClient_;
   std::unique_ptr<PasswordManagerDriver> passwordManagerDriver_;
-  base::scoped_nsobject<PasswordGenerationAgent> passwordGenerationAgent_;
+  PasswordGenerationAgent* passwordGenerationAgent_;
 
   JsPasswordManager* passwordJsManager_;  // weak
   web::WebState* webState_;               // weak
@@ -289,14 +295,14 @@ bool GetPageURLAndCheckTrustLevel(web::WebState* web_state, GURL* page_url) {
     passwordManager_.reset(new PasswordManager(passwordManagerClient_.get()));
     passwordManagerDriver_.reset(new IOSChromePasswordManagerDriver(self));
     if (experimental_flags::IsPasswordGenerationEnabled() &&
-        !passwordManagerClient_->IsOffTheRecord()) {
+        !passwordManagerClient_->IsIncognito()) {
       passwordGenerationManager_.reset(new PasswordGenerationManager(
           passwordManagerClient_.get(), passwordManagerDriver_.get()));
-      passwordGenerationAgent_.reset([[PasswordGenerationAgent alloc]
+      passwordGenerationAgent_ = [[PasswordGenerationAgent alloc]
                initWithWebState:webState
                 passwordManager:passwordManager_.get()
           passwordManagerDriver:passwordManagerDriver_.get()
-            passwordsUiDelegate:UIDelegate]);
+            passwordsUiDelegate:UIDelegate];
     }
 
     passwordJsManager_ = base::mac::ObjCCastStrict<JsPasswordManager>(
@@ -315,7 +321,6 @@ bool GetPageURLAndCheckTrustLevel(web::WebState* web_state, GURL* page_url) {
 
 - (void)dealloc {
   [self detach];
-  [super dealloc];
 }
 
 - (ios::ChromeBrowserState*)browserState {
@@ -333,7 +338,7 @@ bool GetPageURLAndCheckTrustLevel(web::WebState* web_state, GURL* page_url) {
 - (void)detach {
   webState_ = nullptr;
   webStateObserverBridge_.reset();
-  passwordGenerationAgent_.reset();
+  passwordGenerationAgent_ = nil;
   passwordGenerationManager_.reset();
   passwordManagerDriver_.reset();
   passwordManager_.reset();
@@ -390,7 +395,7 @@ bool GetPageURLAndCheckTrustLevel(web::WebState* web_state, GURL* page_url) {
 
   // Read all password forms from the page and send them to the password
   // manager.
-  base::WeakNSObject<PasswordController> weakSelf(self);
+  __weak PasswordController* weakSelf = self;
   [self findPasswordFormsWithCompletionHandler:^(
             const std::vector<autofill::PasswordForm>& forms) {
     [weakSelf didFinishPasswordFormExtraction:forms];
@@ -400,15 +405,16 @@ bool GetPageURLAndCheckTrustLevel(web::WebState* web_state, GURL* page_url) {
 - (void)webState:(web::WebState*)webState
     didSubmitDocumentWithFormNamed:(const std::string&)formName
                      userInitiated:(BOOL)userInitiated {
-  base::WeakNSObject<PasswordController> weakSelf(self);
+  __weak PasswordController* weakSelf = self;
   // This code is racing against the new page loading and will not get the
   // password form data if the page has changed. In most cases this code wins
   // the race.
   // TODO(crbug.com/418827): Fix this by passing in more data from the JS side.
   id completionHandler = ^(BOOL found, const autofill::PasswordForm& form) {
-    if (weakSelf && ![weakSelf isWebStateDestroyed]) {
-      weakSelf.get()->passwordManager_->OnPasswordFormSubmitted(
-          weakSelf.get()->passwordManagerDriver_.get(), form);
+    PasswordController* strongSelf = weakSelf;
+    if (strongSelf && ![strongSelf isWebStateDestroyed]) {
+      strongSelf.passwordManager->OnPasswordFormSubmitted(
+          strongSelf.passwordManagerDriver, form);
     }
   };
   [self extractSubmittedPasswordForm:formName
@@ -433,7 +439,7 @@ bool GetPageURLAndCheckTrustLevel(web::WebState* web_state, GURL* page_url) {
     return;
   }
 
-  base::WeakNSObject<PasswordController> weakSelf(self);
+  __weak PasswordController* weakSelf = self;
   [passwordJsManager_ findPasswordFormsWithCompletionHandler:^(
                           NSString* jsonString) {
     std::vector<autofill::PasswordForm> forms;
@@ -495,7 +501,7 @@ bool GetPageURLAndCheckTrustLevel(web::WebState* web_state, GURL* page_url) {
     return;
   }
 
-  base::WeakNSObject<PasswordController> weakSelf(self);
+  __weak PasswordController* weakSelf = self;
   id extractSubmittedFormCompletionHandler = ^(NSString* jsonString) {
     autofill::PasswordForm form;
     BOOL found = [weakSelf getPasswordForm:&form
@@ -826,7 +832,7 @@ bool GetPageURLAndCheckTrustLevel(web::WebState* web_state, GURL* page_url) {
 }
 
 - (PasswordGenerationAgent*)passwordGenerationAgent {
-  return passwordGenerationAgent_.get();
+  return passwordGenerationAgent_;
 }
 
 - (PasswordGenerationManager*)passwordGenerationManager {

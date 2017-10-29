@@ -25,6 +25,10 @@ extern const char kNormalInstalled[];
 extern const char kBlockedPermissions[];
 extern const char kAllowedPermissions[];
 
+extern const char kRuntimeBlockedHosts[];
+extern const char kRuntimeAllowedHosts[];
+extern const size_t kMaxItemsURLPatternSet;
+
 extern const char kUpdateUrl[];
 extern const char kInstallSources[];
 extern const char kAllowedTypes[];
@@ -32,6 +36,10 @@ extern const char kAllowedTypes[];
 extern const char kMinimumVersionRequired[];
 
 extern const char kUpdateUrlPrefix[];
+
+// If the install of an extension is blocked this admin defined message is
+// appended to the error message displayed in the Chrome Webstore.
+extern const char kBlockedInstallMessage[];
 
 struct AllowedTypesMapEntry {
   // Name of allowed types of extensions used in schema of extension

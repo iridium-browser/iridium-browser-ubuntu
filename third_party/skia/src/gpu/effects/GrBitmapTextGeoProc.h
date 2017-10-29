@@ -21,16 +21,16 @@ class GrInvariantOutput;
  */
 class GrBitmapTextGeoProc : public GrGeometryProcessor {
 public:
-    static sk_sp<GrGeometryProcessor> Make(GrContext* context, GrColor color,
+    static sk_sp<GrGeometryProcessor> Make(GrColor color,
                                            sk_sp<GrTextureProxy> proxy, const GrSamplerParams& p,
                                            GrMaskFormat format, const SkMatrix& localMatrix,
                                            bool usesLocalCoords) {
         return sk_sp<GrGeometryProcessor>(
-            new GrBitmapTextGeoProc(context, color, std::move(proxy), p, format,
+            new GrBitmapTextGeoProc(color, std::move(proxy), p, format,
                                     localMatrix, usesLocalCoords));
     }
 
-    virtual ~GrBitmapTextGeoProc() {}
+    ~GrBitmapTextGeoProc() override {}
 
     const char* name() const override { return "Texture"; }
 
@@ -48,7 +48,8 @@ public:
     GrGLSLPrimitiveProcessor* createGLSLInstance(const GrShaderCaps& caps) const override;
 
 private:
-    GrBitmapTextGeoProc(GrContext*, GrColor, sk_sp<GrTextureProxy>, const GrSamplerParams& params,
+    GrBitmapTextGeoProc(GrColor, sk_sp<GrTextureProxy>,
+                        const GrSamplerParams& params,
                         GrMaskFormat format, const SkMatrix& localMatrix, bool usesLocalCoords);
 
     GrColor          fColor;
@@ -60,7 +61,7 @@ private:
     const Attribute* fInTextureCoords;
     GrMaskFormat     fMaskFormat;
 
-    GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
+    GR_DECLARE_GEOMETRY_PROCESSOR_TEST
 
     typedef GrGeometryProcessor INHERITED;
 };

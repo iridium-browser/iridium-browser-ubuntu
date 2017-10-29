@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "ash/common/accessibility_types.h"
+#include "ash/accessibility_types.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
@@ -14,6 +14,7 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/login/helper.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
@@ -43,12 +44,11 @@ void SetMagnifierType(ash::MagnifierType type) {
 }
 
 void SetFullScreenMagnifierScale(double scale) {
-  ash::Shell::GetInstance()->
-      magnification_controller()->SetScale(scale, false);
+  ash::Shell::Get()->magnification_controller()->SetScale(scale, false);
 }
 
 double GetFullScreenMagnifierScale() {
-  return ash::Shell::GetInstance()->magnification_controller()->GetScale();
+  return ash::Shell::Get()->magnification_controller()->GetScale();
 }
 
 void SetSavedFullScreenMagnifierScale(double scale) {
@@ -102,8 +102,19 @@ void PrepareNonNewProfile(const AccountId& account_id) {
   // To prepare a non-new profile for tests, we must ensure the profile
   // directory and the preference files are created, because that's what
   // Profile::IsNewProfile() checks. CreateSession(), however, does not yet
-  // create the profile directory until GetActiveUserProfile() is called.
-  ProfileManager::GetActiveUserProfile();
+  // create the profile directory until GetProfileByUserIdHashForTest() is
+  // called.
+  ProfileHelper::Get()->GetProfileByUserIdHashForTest(
+      account_id.GetUserEmail());
+}
+
+// Simulates how UserSessionManager starts a user session by loading user
+// profile and mark session as started.
+void StartUserSession(const AccountId& account_id) {
+  ProfileHelper::GetProfileByUserIdHashForTest(
+      user_manager::UserManager::Get()->FindUser(account_id)->username_hash());
+
+  session_manager::SessionManager::Get()->SessionStarted();
 }
 
 }  // namespace
@@ -194,7 +205,7 @@ IN_PROC_BROWSER_TEST_F(MagnificationManagerTest, LoginOffToOff) {
   // Confirms that magnifier is still disabled just after login.
   EXPECT_FALSE(IsMagnifierEnabled());
 
-  session_manager::SessionManager::Get()->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that magnifier is still disabled just after session starts.
   EXPECT_FALSE(IsMagnifierEnabled());
@@ -235,7 +246,7 @@ IN_PROC_BROWSER_TEST_F(MagnificationManagerTest, LoginFullToOff) {
   EXPECT_TRUE(IsMagnifierEnabled());
   EXPECT_EQ(ash::MAGNIFIER_FULL, GetMagnifierType());
 
-  session_manager::SessionManager::Get()->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that magnifier is disabled just after session start.
   EXPECT_FALSE(IsMagnifierEnabled());
@@ -264,7 +275,7 @@ IN_PROC_BROWSER_TEST_F(MagnificationManagerTest, LoginOffToFull) {
   // Confirms that magnifier is keeping disabled.
   EXPECT_FALSE(IsMagnifierEnabled());
 
-  session_manager::SessionManager::Get()->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that the magnifier is enabled and configured according to the
   // explicitly set prefs just after session start.
@@ -301,7 +312,7 @@ IN_PROC_BROWSER_TEST_F(MagnificationManagerTest, LoginFullToFull) {
   EXPECT_TRUE(IsMagnifierEnabled());
   EXPECT_EQ(ash::MAGNIFIER_FULL, GetMagnifierType());
 
-  session_manager::SessionManager::Get()->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that the magnifier is enabled and configured according to the
   // explicitly set prefs just after session start.
@@ -331,7 +342,7 @@ IN_PROC_BROWSER_TEST_F(MagnificationManagerTest, LoginFullToUnset) {
   EXPECT_TRUE(IsMagnifierEnabled());
   EXPECT_EQ(ash::MAGNIFIER_FULL, GetMagnifierType());
 
-  session_manager::SessionManager::Get()->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that magnifier is disabled.
   EXPECT_FALSE(IsMagnifierEnabled());
@@ -352,7 +363,7 @@ IN_PROC_BROWSER_TEST_F(MagnificationManagerTest, LoginAsNewUserOff) {
   // Confirms that magnifier is keeping disabled.
   EXPECT_FALSE(IsMagnifierEnabled());
 
-  session_manager::SessionManager::Get()->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that magnifier is keeping disabled.
   EXPECT_FALSE(IsMagnifierEnabled());
@@ -376,7 +387,7 @@ IN_PROC_BROWSER_TEST_F(MagnificationManagerTest, LoginAsNewUserFull) {
   EXPECT_TRUE(IsMagnifierEnabled());
   EXPECT_EQ(ash::MAGNIFIER_FULL, GetMagnifierType());
 
-  session_manager::SessionManager::Get()->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that magnifier keeps enabled.
   EXPECT_TRUE(IsMagnifierEnabled());
@@ -396,7 +407,7 @@ IN_PROC_BROWSER_TEST_F(MagnificationManagerTest, LoginAsNewUserUnset) {
   // Confirms that magnifier is keeping disabled.
   EXPECT_FALSE(IsMagnifierEnabled());
 
-  session_manager::SessionManager::Get()->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that magnifier is keeping disabled.
   EXPECT_FALSE(IsMagnifierEnabled());
@@ -464,7 +475,7 @@ IN_PROC_BROWSER_TEST_F(MagnificationManagerTest, TypePref) {
   // Logs in
   session_manager::SessionManager::Get()->CreateSession(test_account_id_,
                                                         kTestUserName);
-  session_manager::SessionManager::Get()->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that magnifier is disabled just after login.
   EXPECT_FALSE(IsMagnifierEnabled());

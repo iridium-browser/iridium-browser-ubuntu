@@ -9,28 +9,36 @@
 // These are also used in the IPCs for coordinating inter-process memory dumps.
 
 #include <stdint.h>
+#include <map>
+#include <memory>
 #include <string>
 
 #include "base/base_export.h"
 #include "base/callback.h"
+#include "base/optional.h"
+#include "base/process/process_handle.h"
+#include "base/trace_event/process_memory_totals.h"
 
 namespace base {
 namespace trace_event {
 
+class ProcessMemoryDump;
+
 // Captures the reason why a memory dump is being requested. This is to allow
-// selective enabling of dumps, filtering and post-processing. Important: this
-// must be kept consistent with
-// services/resource_coordinator/public/cpp/memory/memory_infra_traits.cc.
+// selective enabling of dumps, filtering and post-processing. Keep this
+// consistent with memory_instrumentation.mojo and
+// memory_instrumentation_struct_traits.{h,cc}
 enum class MemoryDumpType {
   PERIODIC_INTERVAL,     // Dumping memory at periodic intervals.
   EXPLICITLY_TRIGGERED,  // Non maskable dump request.
   PEAK_MEMORY_USAGE,     // Dumping memory at detected peak total memory usage.
-  LAST = PEAK_MEMORY_USAGE  // For IPC macros.
+  SUMMARY_ONLY,          // Calculate just the summary & don't add to the trace.
+  LAST = SUMMARY_ONLY
 };
 
 // Tells the MemoryDumpProvider(s) how much detailed their dumps should be.
-// Important: this must be kept consistent with
-// services/resource_Coordinator/public/cpp/memory/memory_infra_traits.cc.
+// Keep this consistent with memory_instrumentation.mojo and
+// memory_instrumentation_struct_traits.{h,cc}
 enum class MemoryDumpLevelOfDetail : uint32_t {
   FIRST,
 
@@ -53,8 +61,8 @@ enum class MemoryDumpLevelOfDetail : uint32_t {
 };
 
 // Initial request arguments for a global memory dump. (see
-// MemoryDumpManager::RequestGlobalMemoryDump()). Important: this must be kept
-// consistent with services/memory_infra/public/cpp/memory_infra_traits.cc.
+// MemoryDumpManager::RequestGlobalMemoryDump()). Keep this consistent with
+// memory_instrumentation.mojo and memory_instrumentation_struct_traits.{h,cc}
 struct BASE_EXPORT MemoryDumpRequestArgs {
   // Globally unique identifier. In multi-process dumps, all processes issue a
   // local dump with the same guid. This allows the trace importers to
@@ -72,7 +80,47 @@ struct MemoryDumpArgs {
   MemoryDumpLevelOfDetail level_of_detail;
 };
 
-using MemoryDumpCallback = Callback<void(uint64_t dump_guid, bool success)>;
+// TODO(hjd): Not used yet, see crbug.com/703184
+// Summarises information about memory use as seen by a single process.
+// This information will eventually be passed to a service to be colated
+// and reported.
+struct BASE_EXPORT MemoryDumpCallbackResult {
+  struct OSMemDump {
+    uint32_t resident_set_kb = 0;
+    ProcessMemoryTotals::PlatformPrivateFootprint platform_private_footprint;
+  };
+  struct ChromeMemDump {
+    uint32_t malloc_total_kb = 0;
+    uint32_t command_buffer_total_kb = 0;
+    uint32_t partition_alloc_total_kb = 0;
+    uint32_t blink_gc_total_kb = 0;
+    uint32_t v8_total_kb = 0;
+  };
+
+  // These are for the current process.
+  OSMemDump os_dump;
+  ChromeMemDump chrome_dump;
+
+  // In some cases, OS stats can only be dumped from a privileged process to
+  // get around to sandboxing/selinux restrictions (see crbug.com/461788).
+  std::map<ProcessId, OSMemDump> extra_processes_dumps;
+
+  MemoryDumpCallbackResult();
+  MemoryDumpCallbackResult(const MemoryDumpCallbackResult&);
+  ~MemoryDumpCallbackResult();
+};
+
+using GlobalMemoryDumpCallback =
+    Callback<void(bool success, uint64_t dump_guid)>;
+
+// TODO(ssid): This should just sent a single PMD once the support for multi
+// process dumps are removed from MemoryDumpManager.
+using ProcessMemoryDumpsMap =
+    std::map<ProcessId, std::unique_ptr<ProcessMemoryDump>>;
+using ProcessMemoryDumpCallback =
+    Callback<void(bool success,
+                  uint64_t dump_guid,
+                  const ProcessMemoryDumpsMap& process_dumps)>;
 
 BASE_EXPORT const char* MemoryDumpTypeToString(const MemoryDumpType& dump_type);
 

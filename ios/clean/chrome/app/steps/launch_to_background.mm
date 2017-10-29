@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// ======                        New Architecture                         =====
-// =         This code is only used in the new iOS Chrome architecture.       =
-// ============================================================================
-
 #import "ios/clean/chrome/app/steps/launch_to_background.h"
 
 #include <memory>
@@ -82,7 +78,7 @@ const char kChromeMainKey[] = "chrome_main";
   // Create and persist an IOSChromeMain instance.
   state.persistentState->SetUserData(
       kChromeMainKey,
-      new ChromeMainContainer(base::MakeUnique<IOSChromeMain>()));
+      base::MakeUnique<ChromeMainContainer>(base::MakeUnique<IOSChromeMain>()));
 
   // Add a step to the termination steps of |state| that will stop and remove
   // the IOSChromeMain instance.

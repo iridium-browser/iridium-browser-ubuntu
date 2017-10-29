@@ -8,24 +8,18 @@
 
 #include <vector>
 
-#include "base/callback.h"
+#include "ash/public/interfaces/constants.mojom.h"
 #include "base/command_line.h"
-#include "base/files/file_path.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/profiler/scoped_tracker.h"
-#include "base/stl_util.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/lifetime/scoped_keep_alive.h"
-#include "chrome/browser/profiles/profile_attributes_entry.h"
-#include "chrome/browser/profiles/profile_attributes_storage.h"
-#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
-#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "chrome/browser/ui/app_list/custom_launcher_page_contents.h"
@@ -34,69 +28,65 @@
 #include "chrome/browser/ui/app_list/search/search_resource_manager.h"
 #include "chrome/browser/ui/app_list/start_page_service.h"
 #include "chrome/browser/ui/apps/chrome_app_delegate.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/ash/app_list/app_sync_ui_state_watcher.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
-#include "chrome/browser/web_applications/web_app.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "components/user_prefs/user_prefs.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/speech_recognition_session_preamble.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/service_manager_connection.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/launcher_page_info.h"
+#include "services/service_manager/public/cpp/connector.h"
+#include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_switches.h"
+#include "ui/app_list/app_list_view_delegate_observer.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_controller.h"
 #include "ui/app_list/speech_ui_model.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/views/controls/webview/webview.h"
-
-#if defined(USE_AURA)
 #include "ui/keyboard/keyboard_util.h"
-#endif
-
-#if defined(USE_ASH)
-#include "chrome/browser/ui/ash/app_list/app_sync_ui_state_watcher.h"
-#endif
-
-namespace chrome {
-const char kAppLauncherCategoryTag[] = "AppLauncher";
-}  // namespace chrome
+#include "ui/views/controls/webview/webview.h"
 
 namespace {
 
 const int kAutoLaunchDefaultTimeoutMilliSec = 50;
 
-void PopulateUsers(const base::FilePath& active_profile_path,
-                   app_list::AppListViewDelegate::Users* users) {
-  users->clear();
-  std::vector<ProfileAttributesEntry*> entries = g_browser_process->
-      profile_manager()->GetProfileAttributesStorage().
-      GetAllProfilesAttributesSortedByName();
-  for (const auto* entry : entries) {
-    app_list::AppListViewDelegate::User user;
-    user.name = entry->GetName();
-    user.email = entry->GetUserName();
-    user.profile_path = entry->GetPath();
-    user.active = active_profile_path == user.profile_path;
-    users->push_back(user);
+// The UMA histogram that logs which state search results are opened from.
+const char kAppListSearchResultOpenSourceHistogram[] =
+    "Apps.AppListSearchResultOpenedSource";
+
+// The different sources from which a search result is displayed. These values
+// are written to logs.  New enum values can be added, but existing enums must
+// never be renumbered or deleted and reused.
+enum ApplistSearchResultOpenedSource {
+  kHalfClamshell = 0,
+  kFullscreenClamshell = 1,
+  kFullscreenTablet = 2,
+  kMaxApplistSearchResultOpenedSource = 3,
+};
+
+void RecordHistogram(bool is_tablet_mode,
+                     app_list::AppListView::AppListState state) {
+  ApplistSearchResultOpenedSource source;
+
+  if (is_tablet_mode) {
+    source = kFullscreenTablet;
+  } else {
+    source = state == app_list::AppListView::HALF ? kHalfClamshell
+                                                  : kFullscreenClamshell;
   }
+  UMA_HISTOGRAM_ENUMERATION(kAppListSearchResultOpenSourceHistogram, source,
+                            kMaxApplistSearchResultOpenedSource);
 }
 
 // Gets a list of URLs of the custom launcher pages to show in the launcher.
@@ -133,8 +123,7 @@ void GetCustomLauncherPageUrls(content::BrowserContext* browser_context,
   const extensions::ExtensionSet& enabled_extensions =
       extension_registry->enabled_extensions();
   for (extensions::ExtensionSet::const_iterator it = enabled_extensions.begin();
-       it != enabled_extensions.end();
-       ++it) {
+       it != enabled_extensions.end(); ++it) {
     const extensions::Extension* extension = it->get();
     extensions::LauncherPageInfo* info =
         extensions::LauncherPageHandler::GetInfo(extension);
@@ -149,33 +138,12 @@ void GetCustomLauncherPageUrls(content::BrowserContext* browser_context,
 
 AppListViewDelegate::AppListViewDelegate(AppListControllerDelegate* controller)
     : controller_(controller),
-      profile_(NULL),
-      model_(NULL),
-      is_voice_query_(false),
+      profile_(nullptr),
+      model_(nullptr),
       template_url_service_observer_(this),
-      scoped_observer_(this) {
+      observer_binding_(this),
+      weak_ptr_factory_(this) {
   CHECK(controller_);
-  // The SigninManagerFactor and the SigninManagers are observed to keep the
-  // profile switcher menu up to date, with the correct list of profiles and the
-  // correct email address (or none for signed out users) for each.
-  SigninManagerFactory::GetInstance()->AddObserver(this);
-
-  // Start observing all already-created SigninManagers.
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  std::vector<Profile*> profiles = profile_manager->GetLoadedProfiles();
-
-  for (std::vector<Profile*>::iterator i = profiles.begin();
-       i != profiles.end();
-       ++i) {
-    SigninManagerBase* manager =
-        SigninManagerFactory::GetForProfileIfExists(*i);
-    if (manager) {
-      DCHECK(!scoped_observer_.IsObserving(manager));
-      scoped_observer_.Add(manager);
-    }
-  }
-
-  profile_manager->GetProfileAttributesStorage().AddObserver(this);
   speech_ui_.reset(new app_list::SpeechUIModel);
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -191,22 +159,22 @@ AppListViewDelegate::AppListViewDelegate(AppListControllerDelegate* controller)
   speech_ui_->set_logo(*image);
 #endif
 
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_APP_TERMINATING,
+  registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
+
+  content::ServiceManagerConnection::GetForProcess()
+      ->GetConnector()
+      ->BindInterface(ash::mojom::kServiceName, &wallpaper_controller_ptr_);
+  ash::mojom::WallpaperObserverAssociatedPtrInfo ptr_info;
+  observer_binding_.Bind(mojo::MakeRequest(&ptr_info));
+  wallpaper_controller_ptr_->AddObserver(std::move(ptr_info));
 }
 
 AppListViewDelegate::~AppListViewDelegate() {
-  // Note that the destructor is not always called. E.g. on Mac, this is owned
-  // by a leaky singleton. Essential shutdown work must be done by observing
-  // chrome::NOTIFICATION_APP_TERMINATING.
-  SetProfile(NULL);
-  g_browser_process->profile_manager()->GetProfileAttributesStorage().
-      RemoveObserver(this);
-
-  SigninManagerFactory* factory = SigninManagerFactory::GetInstance();
-  if (factory)
-    factory->RemoveObserver(this);
+  // The destructor might not be called since the delegate is owned by a leaky
+  // singleton. This matches the shutdown work done in Observe() in response to
+  // chrome::NOTIFICATION_APP_TERMINATING, which may happen before this.
+  SetProfile(nullptr);
 }
 
 void AppListViewDelegate::SetProfile(Profile* new_profile) {
@@ -224,9 +192,7 @@ void AppListViewDelegate::SetProfile(Profile* new_profile) {
         app_list::StartPageService::Get(profile_);
     if (start_page_service)
       start_page_service->RemoveObserver(this);
-#if defined(USE_ASH)
     app_sync_ui_state_watcher_.reset();
-#endif
     model_ = NULL;
   }
 
@@ -258,19 +224,27 @@ void AppListViewDelegate::SetProfile(Profile* new_profile) {
     model_ = app_list::AppListSyncableServiceFactory::GetForProfile(profile_)
                  ->GetModel();
 
-#if defined(USE_ASH)
+    // After |model_| is initialized, make a GetWallpaperColors mojo call to set
+    // wallpaper colors for |model_|.
+    wallpaper_controller_ptr_->GetWallpaperColors(
+        base::Bind(&AppListViewDelegate::OnGetWallpaperColorsCallback,
+                   weak_ptr_factory_.GetWeakPtr()));
+
     app_sync_ui_state_watcher_.reset(
         new AppSyncUIStateWatcher(profile_, model_));
-#endif
 
     SetUpSearchUI();
-    SetUpProfileSwitcher();
     SetUpCustomLauncherPages();
     OnTemplateURLServiceChanged();
   }
 
   // Clear search query.
-  model_->search_box()->SetText(base::string16());
+  model_->search_box()->Update(base::string16(), false);
+}
+
+void AppListViewDelegate::OnGetWallpaperColorsCallback(
+    const std::vector<SkColor>& colors) {
+  OnWallpaperColorsChanged(colors);
 }
 
 void AppListViewDelegate::SetUpSearchUI() {
@@ -285,26 +259,9 @@ void AppListViewDelegate::SetUpSearchUI() {
                                         false);
 
   search_resource_manager_.reset(new app_list::SearchResourceManager(
-      profile_,
-      model_->search_box(),
-      speech_ui_.get()));
+      profile_, model_->search_box(), speech_ui_.get()));
 
   search_controller_ = CreateSearchController(profile_, model_, controller_);
-}
-
-void AppListViewDelegate::SetUpProfileSwitcher() {
-  // If a profile change is observed when there is no app list, there is nothing
-  // to update until SetProfile() calls this function again.
-  if (!profile_)
-    return;
-
-#if defined(USE_ASH)
-  // Don't populate the app list users if we are on the ash desktop.
-  return;
-#endif  // USE_ASH
-
-  // Populate the app list users.
-  PopulateUsers(profile_->GetPath(), &users_);
 }
 
 void AppListViewDelegate::SetUpCustomLauncherPages() {
@@ -324,14 +281,24 @@ void AppListViewDelegate::SetUpCustomLauncherPages() {
 
   std::string first_launcher_page_app_id = custom_launcher_page_urls[0].host();
   const extensions::Extension* extension =
-      extensions::ExtensionRegistry::Get(profile_)
-          ->GetExtensionById(first_launcher_page_app_id,
-                             extensions::ExtensionRegistry::EVERYTHING);
+      extensions::ExtensionRegistry::Get(profile_)->GetExtensionById(
+          first_launcher_page_app_id,
+          extensions::ExtensionRegistry::EVERYTHING);
   model_->set_custom_launcher_page_name(extension->name());
   // Only the first custom launcher page gets events dispatched to it.
   launcher_page_event_dispatcher_.reset(
       new app_list::LauncherPageEventDispatcher(profile_,
                                                 first_launcher_page_app_id));
+}
+
+void AppListViewDelegate::OnWallpaperColorsChanged(
+    const std::vector<SkColor>& prominent_colors) {
+  if (wallpaper_prominent_colors_ == prominent_colors)
+    return;
+
+  wallpaper_prominent_colors_ = prominent_colors;
+  for (auto& observer : observers_)
+    observer.OnWallpaperColorsChanged();
 }
 
 void AppListViewDelegate::OnHotwordStateChanged(bool started) {
@@ -353,58 +320,6 @@ void AppListViewDelegate::OnHotwordRecognized(
   StartSpeechRecognitionForHotword(preamble);
 }
 
-void AppListViewDelegate::SigninManagerCreated(SigninManagerBase* manager) {
-  scoped_observer_.Add(manager);
-}
-
-void AppListViewDelegate::SigninManagerShutdown(SigninManagerBase* manager) {
-  if (scoped_observer_.IsObserving(manager))
-    scoped_observer_.Remove(manager);
-}
-
-void AppListViewDelegate::GoogleSigninFailed(
-    const GoogleServiceAuthError& error) {
-  SetUpProfileSwitcher();
-}
-
-void AppListViewDelegate::GoogleSigninSucceeded(const std::string& account_id,
-                                                const std::string& username,
-                                                const std::string& password) {
-  SetUpProfileSwitcher();
-}
-
-void AppListViewDelegate::GoogleSignedOut(const std::string& account_id,
-                                          const std::string& username) {
-  SetUpProfileSwitcher();
-}
-
-void AppListViewDelegate::OnProfileAdded(const base::FilePath& profile_path) {
-  SetUpProfileSwitcher();
-}
-
-void AppListViewDelegate::OnProfileWasRemoved(
-    const base::FilePath& profile_path,
-    const base::string16& profile_name) {
-  SetUpProfileSwitcher();
-}
-
-void AppListViewDelegate::OnProfileNameChanged(
-    const base::FilePath& profile_path,
-    const base::string16& old_profile_name) {
-  SetUpProfileSwitcher();
-}
-
-bool AppListViewDelegate::ForceNativeDesktop() const {
-  return controller_->ForceNativeDesktop();
-}
-
-void AppListViewDelegate::SetProfileByPath(const base::FilePath& profile_path) {
-  DCHECK(model_);
-  // The profile must be loaded before this is called.
-  SetProfile(
-      g_browser_process->profile_manager()->GetProfileByPath(profile_path));
-}
-
 app_list::AppListModel* AppListViewDelegate::GetModel() {
   return model_;
 }
@@ -415,24 +330,20 @@ app_list::SpeechUIModel* AppListViewDelegate::GetSpeechUI() {
 
 void AppListViewDelegate::StartSearch() {
   if (search_controller_) {
-    search_controller_->Start(is_voice_query_);
+    search_controller_->Start();
     controller_->OnSearchStarted();
   }
 }
 
-void AppListViewDelegate::StopSearch() {
-  if (search_controller_)
-    search_controller_->Stop();
-}
-
-void AppListViewDelegate::OpenSearchResult(
-    app_list::SearchResult* result,
-    bool auto_launch,
-    int event_flags) {
+void AppListViewDelegate::OpenSearchResult(app_list::SearchResult* result,
+                                           bool auto_launch,
+                                           int event_flags) {
   if (auto_launch)
     base::RecordAction(base::UserMetricsAction("AppList_AutoLaunched"));
+
+  RecordHistogram(model_->tablet_mode(), model_->state_fullscreen());
+
   search_controller_->OpenResult(result, event_flags);
-  is_voice_query_ = false;
 }
 
 void AppListViewDelegate::InvokeSearchResultAction(
@@ -447,10 +358,8 @@ base::TimeDelta AppListViewDelegate::GetAutoLaunchTimeout() {
 }
 
 void AppListViewDelegate::AutoLaunchCanceled() {
-  if (is_voice_query_) {
+  if (model_ && model_->search_box()->is_voice_query()) {
     base::RecordAction(base::UserMetricsAction("AppList_AutoLaunchCanceled"));
-    // Cancelling the auto launch means we are no longer in a voice query.
-    is_voice_query_ = false;
   }
   auto_launch_timeout_ = base::TimeDelta();
 }
@@ -470,7 +379,7 @@ void AppListViewDelegate::ViewInitialized() {
   }
 }
 
-void AppListViewDelegate::Dismiss()  {
+void AppListViewDelegate::Dismiss() {
   controller_->DismissView();
 }
 
@@ -505,21 +414,6 @@ void AppListViewDelegate::ViewClosing() {
       }
     }
   }
-}
-
-void AppListViewDelegate::OpenHelp() {
-  chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
-  content::OpenURLParams params(GURL(chrome::kAppLauncherHelpURL),
-                                content::Referrer(),
-                                WindowOpenDisposition::NEW_FOREGROUND_TAB,
-                                ui::PAGE_TRANSITION_LINK, false);
-  displayer.browser()->OpenURL(params);
-}
-
-void AppListViewDelegate::OpenFeedback() {
-  Browser* browser = chrome::FindTabbedBrowser(profile_, false);
-  chrome::ShowFeedbackPage(browser, std::string(),
-                           chrome::kAppLauncherCategoryTag);
 }
 
 void AppListViewDelegate::StartSpeechRecognition() {
@@ -566,19 +460,13 @@ void AppListViewDelegate::StartSpeechRecognitionForHotword(
   }
 }
 
-void AppListViewDelegate::ShowForProfileByPath(
-    const base::FilePath& profile_path) {
-  controller_->ShowForProfileByPath(profile_path);
-}
-
 void AppListViewDelegate::OnSpeechResult(const base::string16& result,
                                          bool is_final) {
   speech_ui_->SetSpeechResult(result, is_final);
   if (is_final) {
-    auto_launch_timeout_ = base::TimeDelta::FromMilliseconds(
-        kAutoLaunchDefaultTimeoutMilliSec);
-    is_voice_query_ = true;
-    model_->search_box()->SetText(result);
+    auto_launch_timeout_ =
+        base::TimeDelta::FromMilliseconds(kAutoLaunchDefaultTimeoutMilliSec);
+    model_->search_box()->Update(result, true);
   }
 }
 
@@ -595,9 +483,8 @@ void AppListViewDelegate::OnSpeechRecognitionStateChanged(
   // With the new hotword extension, we need to re-request hotwording after
   // speech recognition has stopped. Do not request hotwording after the app
   // list has already closed.
-  if (new_state == app_list::SPEECH_RECOGNITION_READY &&
-      service && service->HotwordEnabled() &&
-      controller_->GetAppListWindow()) {
+  if (new_state == app_list::SPEECH_RECOGNITION_READY && service &&
+      service->HotwordEnabled() && controller_->GetAppListWindow()) {
     HotwordService* hotword_service =
         HotwordServiceFactory::GetForProfile(profile_);
     if (hotword_service) {
@@ -606,7 +493,6 @@ void AppListViewDelegate::OnSpeechRecognitionStateChanged(
   }
 }
 
-#if defined(TOOLKIT_VIEWS)
 views::View* AppListViewDelegate::CreateStartPageWebView(
     const gfx::Size& size) {
   app_list::StartPageService* service =
@@ -621,8 +507,8 @@ views::View* AppListViewDelegate::CreateStartPageWebView(
     return NULL;
 
   DCHECK_EQ(profile_, web_contents->GetBrowserContext());
-  views::WebView* web_view = new views::WebView(
-      web_contents->GetBrowserContext());
+  views::WebView* web_view =
+      new views::WebView(web_contents->GetBrowserContext());
   web_view->SetPreferredSize(size);
   web_view->SetResizeBackgroundColor(SK_ColorTRANSPARENT);
   web_view->SetWebContents(web_contents);
@@ -666,7 +552,6 @@ void AppListViewDelegate::CustomLauncherPagePopSubpage() {
   if (launcher_page_event_dispatcher_)
     launcher_page_event_dispatcher_->PopSubpage();
 }
-#endif
 
 bool AppListViewDelegate::IsSpeechRecognitionEnabled() {
   app_list::StartPageService* service =
@@ -674,9 +559,19 @@ bool AppListViewDelegate::IsSpeechRecognitionEnabled() {
   return service && service->GetSpeechRecognitionContents();
 }
 
-const app_list::AppListViewDelegate::Users&
-AppListViewDelegate::GetUsers() const {
-  return users_;
+void AppListViewDelegate::GetWallpaperProminentColors(
+    std::vector<SkColor>* colors) {
+  *colors = wallpaper_prominent_colors_;
+}
+
+void AppListViewDelegate::AddObserver(
+    app_list::AppListViewDelegateObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void AppListViewDelegate::RemoveObserver(
+    app_list::AppListViewDelegateObserver* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 void AppListViewDelegate::OnTemplateURLServiceChanged() {
@@ -684,10 +579,9 @@ void AppListViewDelegate::OnTemplateURLServiceChanged() {
       TemplateURLServiceFactory::GetForProfile(profile_);
   const TemplateURL* default_provider =
       template_url_service->GetDefaultSearchProvider();
-  bool is_google =
+  const bool is_google =
       default_provider->GetEngineType(
-          template_url_service->search_terms_data()) ==
-      SEARCH_ENGINE_GOOGLE;
+          template_url_service->search_terms_data()) == SEARCH_ENGINE_GOOGLE;
 
   model_->SetSearchEngineIsGoogle(is_google);
 
@@ -703,9 +597,4 @@ void AppListViewDelegate::Observe(int type,
   DCHECK_EQ(chrome::NOTIFICATION_APP_TERMINATING, type);
 
   SetProfile(nullptr);  // Ensures launcher page web contents are torn down.
-
-  // SigninManagerFactory is not a leaky singleton (unlike this class), and
-  // its destructor will check that it has no remaining observers.
-  scoped_observer_.RemoveAll();
-  SigninManagerFactory::GetInstance()->RemoveObserver(this);
 }

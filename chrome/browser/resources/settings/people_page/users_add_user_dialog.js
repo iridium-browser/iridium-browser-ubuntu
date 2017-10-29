@@ -16,8 +16,8 @@
  *     e.g. 'john'
  * @const {!RegExp}
  */
-var NAME_ONLY_REGEX = new RegExp(
-    '^\\s*([\\w\\.!#\\$%&\'\\*\\+-\\/=\\?\\^`\\{\\|\\}~]+)\\s*$');
+var NAME_ONLY_REGEX =
+    new RegExp('^\\s*([\\w\\.!#\\$%&\'\\*\\+-\\/=\\?\\^`\\{\\|\\}~]+)\\s*$');
 
 /**
  * Regular expression for adding a user where the string provided is a full
@@ -32,7 +32,16 @@ var EMAIL_REGEX = new RegExp(
 Polymer({
   is: 'settings-users-add-user-dialog',
 
+  properties: {
+    /** @private */
+    isValid_: {
+      type: Boolean,
+      value: false,
+    },
+  },
+
   open: function() {
+    this.isValid_ = false;
     this.$.dialog.showModal();
   },
 
@@ -48,11 +57,8 @@ Polymer({
    */
   validate_: function() {
     var input = this.$.addUserInput.value;
-    var valid = NAME_ONLY_REGEX.test(input) || EMAIL_REGEX.test(input);
-
-    this.$.add.disabled = !valid;
-    this.$.addUserInput.invalid = !valid;
-    return valid;
+    this.isValid_ = NAME_ONLY_REGEX.test(input) || EMAIL_REGEX.test(input);
+    return this.isValid_;
   },
 
   /** @private */

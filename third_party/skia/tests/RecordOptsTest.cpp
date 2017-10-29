@@ -8,6 +8,7 @@
 #include "Test.h"
 #include "RecordTestUtils.h"
 
+#include "SkBlurImageFilter.h"
 #include "SkColorFilter.h"
 #include "SkRecord.h"
 #include "SkRecordOpts.h"
@@ -100,6 +101,7 @@ DEF_TEST(RecordOpts_SaveSaveLayerRestoreRestore, r) {
     }
 }
 
+#ifndef SK_BUILD_FOR_ANDROID_FRAMEWORK
 static void assert_savelayer_restore(skiatest::Reporter* r,
                                      SkRecord* record,
                                      int i,
@@ -128,7 +130,6 @@ static void assert_savelayer_draw_restore(skiatest::Reporter* r,
     }
 }
 
-#include "SkBlurImageFilter.h"
 DEF_TEST(RecordOpts_NoopSaveLayerDrawRestore, r) {
     SkRecord record;
     SkRecorder recorder(&record, W, H);
@@ -189,11 +190,22 @@ DEF_TEST(RecordOpts_NoopSaveLayerDrawRestore, r) {
 
     // saveLayer w/ backdrop should NOT go away
     sk_sp<SkImageFilter> filter(SkBlurImageFilter::Make(3, 3, nullptr));
-    recorder.saveLayer({ nullptr, nullptr, filter.get(), 0});
+    recorder.saveLayer({ nullptr, nullptr, filter.get(), nullptr, nullptr, 0});
         recorder.drawRect(draw, opaqueDrawPaint);
     recorder.restore();
     assert_savelayer_draw_restore(r, &record, 18, false);
+
+    // saveLayer w/ clip mask should also NOT go away
+    {
+        sk_sp<SkSurface> surface(SkSurface::MakeRasterN32Premul(10, 10));
+        recorder.saveLayer({ nullptr, nullptr, nullptr, surface->makeImageSnapshot().get(),
+                             nullptr, 0});
+            recorder.drawRect(draw, opaqueDrawPaint);
+        recorder.restore();
+        assert_savelayer_draw_restore(r, &record, 21, false);
+    }
 }
+#endif
 
 static void assert_merge_svg_opacity_and_filter_layers(skiatest::Reporter* r,
                                                        SkRecord* record,
@@ -263,16 +275,20 @@ DEF_TEST(RecordOpts_MergeSvgOpacityAndFilterLayers, r) {
                             for (size_t m = 0; m < SK_ARRAY_COUNT(secondPaints); ++m) {
                                 bool innerNoOped = !secondBounds[k] && !secondPaints[m] && !innerF;
 
-                                recorder.saveLayer({firstBounds[i], firstPaints[j], outerF, 0});
+                                recorder.saveLayer({firstBounds[i], firstPaints[j], outerF,
+                                                    nullptr, nullptr, 0});
                                 recorder.save();
                                 recorder.clipRect(clip);
-                                recorder.saveLayer({secondBounds[k], secondPaints[m], innerF, 0});
+                                recorder.saveLayer({secondBounds[k], secondPaints[m], innerF,
+                                                    nullptr, nullptr, 0});
                                 recorder.restore();
                                 recorder.restore();
                                 recorder.restore();
                                 assert_merge_svg_opacity_and_filter_layers(r, &record, index,
                                                                            outerNoOped);
+                            #ifndef SK_BUILD_FOR_ANDROID_FRAMEWORK
                                 assert_savelayer_restore(r, &record, index + 3, innerNoOped);
+                            #endif
                                 index += 7;
                             }
                         }

@@ -12,11 +12,10 @@
 #include "base/files/file.h"
 #include "base/memory/ptr_util.h"
 #include "base/time/time.h"
-#include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_record.h"
 #include "cc/paint/paint_recorder.h"
+#include "cc/paint/skia_paint_canvas.h"
 #include "printing/print_settings.h"
-#include "third_party/skia/include/core/SkDocument.h"
 #include "third_party/skia/include/core/SkStream.h"
 // Note that headers in third_party/skia/src are fragile.  This is
 // an experimental, fragile, and diagnostic-only document type.
@@ -43,35 +42,6 @@ bool WriteAssetToBuffer(const SkStreamAsset* asset,
   if (length > size)
     return false;
   return (length == assetCopy->read(buffer, length));
-}
-
-SkTime::DateTime TimeToSkTime(base::Time time) {
-  base::Time::Exploded exploded;
-  time.UTCExplode(&exploded);
-  SkTime::DateTime skdate;
-  skdate.fTimeZoneMinutes = 0;
-  skdate.fYear = exploded.year;
-  skdate.fMonth = exploded.month;
-  skdate.fDayOfWeek = exploded.day_of_week;
-  skdate.fDay = exploded.day_of_month;
-  skdate.fHour = exploded.hour;
-  skdate.fMinute = exploded.minute;
-  skdate.fSecond = exploded.second;
-  return skdate;
-}
-
-sk_sp<SkDocument> MakePdfDocument(SkWStream* wStream) {
-  SkDocument::PDFMetadata metadata;
-  SkTime::DateTime now = TimeToSkTime(base::Time::Now());
-  metadata.fCreation.fEnabled = true;
-  metadata.fCreation.fDateTime = now;
-  metadata.fModified.fEnabled = true;
-  metadata.fModified.fDateTime = now;
-  const std::string& agent = printing::GetAgent();
-  metadata.fCreator = agent.empty() ? SkString("Chromium")
-                                    : SkString(agent.c_str(), agent.size());
-  return SkDocument::MakePDF(wStream, SK_ScalarDefaultRasterDPI, metadata,
-                             nullptr, false);
 }
 
 }  // namespace
@@ -192,7 +162,7 @@ bool PdfMetafileSkia::FinishDocument() {
   sk_sp<SkDocument> doc;
   switch (data_->type_) {
     case PDF_SKIA_DOCUMENT_TYPE:
-      doc = MakePdfDocument(&stream);
+      doc = MakePdfDocument(printing::GetAgent(), &stream);
       break;
     case MSKP_SKIA_DOCUMENT_TYPE:
       doc = SkMakeMultiPictureDocument(&stream);
@@ -200,14 +170,14 @@ bool PdfMetafileSkia::FinishDocument() {
   }
 
   for (const Page& page : data_->pages_) {
-    cc::PaintCanvas* canvas(
+    cc::SkiaPaintCanvas canvas(
         doc->beginPage(page.size_.width(), page.size_.height()));
-    canvas->drawPicture(page.content_);
+    canvas.drawPicture(page.content_);
     doc->endPage();
   }
   doc->close();
 
-  data_->pdf_data_.reset(stream.detachAsStream());
+  data_->pdf_data_ = stream.detachAsStream();
   return true;
 }
 

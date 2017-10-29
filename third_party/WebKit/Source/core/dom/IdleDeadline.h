@@ -5,7 +5,8 @@
 #ifndef IdleDeadline_h
 #define IdleDeadline_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "core/CoreExport.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -15,11 +16,11 @@ class CORE_EXPORT IdleDeadline : public GarbageCollected<IdleDeadline>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  enum class CallbackType { CalledWhenIdle, CalledByTimeout };
+  enum class CallbackType { kCalledWhenIdle, kCalledByTimeout };
 
-  static IdleDeadline* create(double deadlineSeconds,
-                              CallbackType callbackType) {
-    return new IdleDeadline(deadlineSeconds, callbackType);
+  static IdleDeadline* Create(double deadline_seconds,
+                              CallbackType callback_type) {
+    return new IdleDeadline(deadline_seconds, callback_type);
   }
 
   DEFINE_INLINE_TRACE() {}
@@ -27,14 +28,14 @@ class CORE_EXPORT IdleDeadline : public GarbageCollected<IdleDeadline>,
   double timeRemaining() const;
 
   bool didTimeout() const {
-    return m_callbackType == CallbackType::CalledByTimeout;
+    return callback_type_ == CallbackType::kCalledByTimeout;
   }
 
  private:
-  IdleDeadline(double deadlineSeconds, CallbackType);
+  IdleDeadline(double deadline_seconds, CallbackType);
 
-  double m_deadlineSeconds;
-  CallbackType m_callbackType;
+  double deadline_seconds_;
+  CallbackType callback_type_;
 };
 
 }  // namespace blink

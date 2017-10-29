@@ -9,6 +9,7 @@
 
 #include "SkBlurImageFilter.h"
 #include "SkCanvas.h"
+#include "SkColorSpaceXformer.h"
 #include "SkReadBuffer.h"
 #include "SkSpecialImage.h"
 #include "SkSpecialSurface.h"
@@ -45,9 +46,7 @@ sk_sp<SkFlattenable> SkDropShadowImageFilter::CreateProc(SkReadBuffer& buffer) {
     SkScalar sigmaX = buffer.readScalar();
     SkScalar sigmaY = buffer.readScalar();
     SkColor color = buffer.readColor();
-    ShadowMode shadowMode = buffer.isVersionLT(SkReadBuffer::kDropShadowMode_Version) ?
-                            kDrawShadowAndForeground_ShadowMode :
-                            static_cast<ShadowMode>(buffer.readInt());
+    ShadowMode shadowMode = static_cast<ShadowMode>(buffer.readInt());
     return Make(dx, dy, sigmaX, sigmaY, color, shadowMode, common.getInput(0), &common.cropRect());
 }
 
@@ -110,6 +109,18 @@ sk_sp<SkSpecialImage> SkDropShadowImageFilter::onFilterImage(SkSpecialImage* sou
     offset->fX = bounds.fLeft;
     offset->fY = bounds.fTop;
     return surf->makeImageSnapshot();
+}
+
+sk_sp<SkImageFilter> SkDropShadowImageFilter::onMakeColorSpace(SkColorSpaceXformer* xformer) const {
+    SkASSERT(1 == this->countInputs());
+
+    sk_sp<SkImageFilter> input = xformer->apply(this->getInput(0));
+    SkColor color = xformer->apply(fColor);
+    if (input.get() != this->getInput(0) || color != fColor) {
+        return SkDropShadowImageFilter::Make(fDx, fDy, fSigmaX, fSigmaY, color,
+                                             fShadowMode, input, this->getCropRectIfSet());
+    }
+    return this->refMe();
 }
 
 SkRect SkDropShadowImageFilter::computeFastBounds(const SkRect& src) const {

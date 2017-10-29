@@ -16,9 +16,10 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "base/sequence_checker.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/task_scheduler/task_traits.h"
 
 namespace device {
 
@@ -28,7 +29,7 @@ class UsbDevice;
 // used to manage and dispatch USB events. It is also responsible for device
 // discovery on the system, which allows it to re-use device handles to prevent
 // competition for the same USB device.
-class UsbService : public base::NonThreadSafe {
+class UsbService {
  public:
   using GetDevicesCallback =
       base::Callback<void(const std::vector<scoped_refptr<UsbDevice>>&)>;
@@ -49,19 +50,21 @@ class UsbService : public base::NonThreadSafe {
     virtual void WillDestroyUsbService();
   };
 
-  // The file task runner reference is used for blocking I/O operations.
+  // These task traits are to be used for posting blocking tasks to the task
+  // scheduler.
+  static constexpr base::TaskTraits kBlockingTaskTraits = {
+      base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+      base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN};
+
   // Returns nullptr when initialization fails.
-  static std::unique_ptr<UsbService> Create(
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
+  static std::unique_ptr<UsbService> Create();
+
+  // Creates a SequencedTaskRunner with kBlockingTaskTraits.
+  static scoped_refptr<base::SequencedTaskRunner> CreateBlockingTaskRunner();
 
   virtual ~UsbService();
 
   scoped_refptr<UsbDevice> GetDevice(const std::string& guid);
-
-  // Shuts down the UsbService. Must be called before destroying the UsbService
-  // when tasks can still be posted to the |blocking_task_runner| provided to
-  // Create().
-  virtual void Shutdown();
 
   // Enumerates available devices.
   virtual void GetDevices(const GetDevicesCallback& callback);
@@ -93,16 +96,14 @@ class UsbService : public base::NonThreadSafe {
     return devices_;
   }
 
+  SEQUENCE_CHECKER(sequence_checker_);
+
  private:
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   std::unordered_map<std::string, scoped_refptr<UsbDevice>> devices_;
   std::unordered_set<std::string> testing_devices_;
   base::ObserverList<Observer, true> observer_list_;
-
-#if DCHECK_IS_ON()
-  bool did_shutdown_ = false;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(UsbService);
 };

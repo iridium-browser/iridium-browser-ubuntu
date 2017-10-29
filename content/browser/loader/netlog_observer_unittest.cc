@@ -20,8 +20,9 @@
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_event_type.h"
 #include "net/quic/core/quic_types.h"
-#include "net/spdy/spdy_header_block.h"
-#include "net/spdy/spdy_protocol.h"
+#include "net/spdy/core/spdy_header_block.h"
+#include "net/spdy/core/spdy_protocol.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_netlog_params.h"
 #include "net/url_request/url_request_test_util.h"
@@ -62,37 +63,36 @@ class NetLogObserverTest : public testing::Test {
     context_.set_net_log(&net_log_);
     NetLogObserver::Attach(context_.net_log());
     request_ = context_.CreateRequest(GURL(kDefaultURL), net::DEFAULT_PRIORITY,
-                                      nullptr);
+                                      nullptr, TRAFFIC_ANNOTATION_FOR_TESTS);
     resource_context_ = base::MakeUnique<MockResourceContext>(&context_);
     requester_info_ = ResourceRequesterInfo::CreateForRendererTesting(1);
     ResourceRequestInfoImpl* info = new ResourceRequestInfoImpl(
         requester_info_,
-        0,                                     // route_id
-        -1,                                    // frame_tree_node_id
-        0,                                     // origin_pid
-        0,                                     // request_id
-        0,                                     // render_frame_id
-        false,                                 // is_main_frame
-        false,                                 // parent_is_main_frame
-        RESOURCE_TYPE_IMAGE,                   // resource_type
-        ui::PAGE_TRANSITION_LINK,              // transition_type
-        false,                                 // should_replace_current_entry
-        false,                                 // is_download
-        false,                                 // is_stream
-        false,                                 // allow_download
-        false,                                 // has_user_gesture
-        false,                                 // enable load timing
-        false,                                 // enable upload progress
-        false,                                 // do_not_prompt_for_login
-        blink::WebReferrerPolicyDefault,       // referrer_policy
-        blink::WebPageVisibilityStateVisible,  // visibility_state
-        resource_context_.get(),               // context
-        true,                                  // report_raw_headers
-        true,                                  // is_async
-        PREVIEWS_OFF,                          // previews_state
-        std::string(),                         // original_headers
-        nullptr,                               // body
-        false);                                // initiated_in_secure_context
+        0,                                      // route_id
+        -1,                                     // frame_tree_node_id
+        0,                                      // origin_pid
+        0,                                      // request_id
+        0,                                      // render_frame_id
+        false,                                  // is_main_frame
+        false,                                  // parent_is_main_frame
+        RESOURCE_TYPE_IMAGE,                    // resource_type
+        ui::PAGE_TRANSITION_LINK,               // transition_type
+        false,                                  // should_replace_current_entry
+        false,                                  // is_download
+        false,                                  // is_stream
+        false,                                  // allow_download
+        false,                                  // has_user_gesture
+        false,                                  // enable load timing
+        false,                                  // enable upload progress
+        false,                                  // do_not_prompt_for_login
+        blink::kWebReferrerPolicyDefault,       // referrer_policy
+        blink::kWebPageVisibilityStateVisible,  // visibility_state
+        resource_context_.get(),                // context
+        true,                                   // report_raw_headers
+        true,                                   // is_async
+        PREVIEWS_OFF,                           // previews_state
+        nullptr,                                // body
+        false);                                 // initiated_in_secure_context
     info->AssociateWithRequest(request_.get());
     std::string method = "GET";
     GURL url(kDefaultURL);

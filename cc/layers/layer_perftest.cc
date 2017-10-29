@@ -6,7 +6,7 @@
 
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/animation/animation_host.h"
-#include "cc/debug/lap_timer.h"
+#include "cc/base/lap_timer.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host.h"
 #include "cc/test/fake_layer_tree_host_client.h"
@@ -79,8 +79,6 @@ TEST_F(LayerPerfTest, PushPropertiesTo) {
     test_layer->SetDoubleSided(double_sided);
     test_layer->SetHideLayerAndSubtree(hide_layer_and_subtree);
     test_layer->SetMasksToBounds(masks_to_bounds);
-    test_layer->SetScrollClipLayerId(scrollable ? test_layer->id()
-                                                : Layer::INVALID_ID);
     test_layer->PushPropertiesTo(impl_layer.get());
 
     transform_origin_z += 0.01f;

@@ -32,6 +32,11 @@ public abstract class ChildNode implements TreeNode {
         mParent = null;
     }
 
+    /** @return Whether the node is attached to a parent node. */
+    protected boolean isAttached() {
+        return mParent != null;
+    }
+
     @Override
     public final int getItemCount() {
         assert mNumItems == getItemCountForDebugging();
@@ -66,6 +71,12 @@ public abstract class ChildNode implements TreeNode {
         notifyItemRangeChanged(index, 1, callback);
     }
 
+    /**
+     * @deprecated Change notifications without payload recreate the view holder. Is that on
+     * purpose? Use {@link #notifyItemChanged(int, PartialBindCallback)} if the item to be notified
+     * should not be entirely replaced. (see https://crbug.com/704130)
+     */
+    @Deprecated // Can be valid in specific cases, but marked as deprecated to provide the warning.
     protected void notifyItemChanged(int index) {
         notifyItemRangeChanged(index, 1);
     }

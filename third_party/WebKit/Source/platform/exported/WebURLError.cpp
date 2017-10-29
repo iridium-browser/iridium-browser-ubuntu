@@ -30,27 +30,34 @@
 
 #include "public/platform/WebURLError.h"
 
-#include "platform/network/ResourceError.h"
+#include "platform/loader/fetch/ResourceError.h"
 #include "platform/weborigin/KURL.h"
 
 namespace blink {
+
+WebURLError::WebURLError(const WebURL& unreachable_url,
+                         bool stale_copy_in_cache,
+                         int reason) {
+  // This is implemented in ResourceError.h due to a DEPS restriction.
+  ResourceError::InitializeWebURLError(this, unreachable_url,
+                                       stale_copy_in_cache, reason);
+}
 
 WebURLError::WebURLError(const ResourceError& error) {
   *this = error;
 }
 
 WebURLError& WebURLError::operator=(const ResourceError& error) {
-  if (error.isNull()) {
+  if (error.IsNull()) {
     *this = WebURLError();
   } else {
-    domain = error.domain();
-    reason = error.errorCode();
-    unreachableURL = KURL(ParsedURLString, error.failingURL());
-    isCancellation = error.isCancellation();
-    staleCopyInCache = error.staleCopyInCache();
-    localizedDescription = error.localizedDescription();
-    wasIgnoredByHandler = error.wasIgnoredByHandler();
-    isCacheMiss = error.isCacheMiss();
+    domain = error.Domain();
+    reason = error.ErrorCode();
+    unreachable_url = KURL(kParsedURLString, error.FailingURL());
+    stale_copy_in_cache = error.StaleCopyInCache();
+    localized_description = error.LocalizedDescription();
+    was_ignored_by_handler = error.WasIgnoredByHandler();
+    is_web_security_violation = error.IsAccessCheck();
   }
   return *this;
 }
@@ -58,13 +65,12 @@ WebURLError& WebURLError::operator=(const ResourceError& error) {
 WebURLError::operator ResourceError() const {
   if (!reason)
     return ResourceError();
-  ResourceError resourceError = ResourceError(
-      domain, reason, unreachableURL.string(), localizedDescription);
-  resourceError.setIsCancellation(isCancellation);
-  resourceError.setStaleCopyInCache(staleCopyInCache);
-  resourceError.setWasIgnoredByHandler(wasIgnoredByHandler);
-  resourceError.setIsCacheMiss(isCacheMiss);
-  return resourceError;
+  ResourceError resource_error =
+      ResourceError(domain, reason, unreachable_url, localized_description);
+  resource_error.SetStaleCopyInCache(stale_copy_in_cache);
+  resource_error.SetWasIgnoredByHandler(was_ignored_by_handler);
+  resource_error.SetIsAccessCheck(is_web_security_violation);
+  return resource_error;
 }
 
 }  // namespace blink

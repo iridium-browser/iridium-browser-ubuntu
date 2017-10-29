@@ -13,7 +13,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/service_manager_connection.h"
 #include "ipc/ipc_channel.h"
-#include "services/image_decoder/public/cpp/decode.h"
+#include "services/data_decoder/public/cpp/decode_image.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/geometry/size.h"
@@ -24,7 +24,7 @@ const int64_t kMaxImageSizeInBytes =
     static_cast<int64_t>(IPC::Channel::kMaximumMessageSize);
 
 // Note that this is always called on the thread which initiated the
-// corresponding image_decoder::Decode request.
+// corresponding data_decoder::DecodeImage request.
 void OnDecodeImageDone(
     base::Callback<void(int)> fail_callback,
     base::Callback<void(const SkBitmap&, int)> success_callback,
@@ -40,7 +40,7 @@ void BindToBrowserConnector(service_manager::mojom::ConnectorRequest request) {
   if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
     content::BrowserThread::PostTask(
         content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&BindToBrowserConnector, base::Passed(&request)));
+        base::BindOnce(&BindToBrowserConnector, base::Passed(&request)));
     return;
   }
 
@@ -49,18 +49,18 @@ void BindToBrowserConnector(service_manager::mojom::ConnectorRequest request) {
 }
 
 void RunDecodeCallbackOnTaskRunner(
-    const image_decoder::mojom::ImageDecoder::DecodeImageCallback& callback,
+    data_decoder::mojom::ImageDecoder::DecodeImageCallback callback,
     scoped_refptr<base::SequencedTaskRunner> task_runner,
     const SkBitmap& image) {
-  task_runner->PostTask(FROM_HERE, base::Bind(callback, image));
+  task_runner->PostTask(FROM_HERE, base::BindOnce(std::move(callback), image));
 }
 
 void DecodeImage(
     std::vector<uint8_t> image_data,
-    image_decoder::mojom::ImageCodec codec,
+    data_decoder::mojom::ImageCodec codec,
     bool shrink_to_fit,
     const gfx::Size& desired_image_frame_size,
-    const image_decoder::mojom::ImageDecoder::DecodeImageCallback& callback,
+    data_decoder::mojom::ImageDecoder::DecodeImageCallback callback,
     scoped_refptr<base::SequencedTaskRunner> callback_task_runner) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
@@ -69,10 +69,11 @@ void DecodeImage(
       service_manager::Connector::Create(&connector_request);
   BindToBrowserConnector(std::move(connector_request));
 
-  image_decoder::Decode(connector.get(), image_data, codec, shrink_to_fit,
-                        kMaxImageSizeInBytes, desired_image_frame_size,
-                        base::Bind(&RunDecodeCallbackOnTaskRunner, callback,
-                                   callback_task_runner));
+  data_decoder::DecodeImage(
+      connector.get(), image_data, codec, shrink_to_fit, kMaxImageSizeInBytes,
+      desired_image_frame_size,
+      base::BindOnce(&RunDecodeCallbackOnTaskRunner, std::move(callback),
+                     std::move(callback_task_runner)));
 }
 
 }  // namespace
@@ -152,13 +153,13 @@ void ImageDecoder::StartWithOptionsImpl(
     image_request_id_map_.insert(std::make_pair(request_id, image_request));
   }
 
-  image_decoder::mojom::ImageCodec codec =
-      image_decoder::mojom::ImageCodec::DEFAULT;
+  data_decoder::mojom::ImageCodec codec =
+      data_decoder::mojom::ImageCodec::DEFAULT;
 #if defined(OS_CHROMEOS)
   if (image_codec == ROBUST_JPEG_CODEC)
-    codec = image_decoder::mojom::ImageCodec::ROBUST_JPEG;
+    codec = data_decoder::mojom::ImageCodec::ROBUST_JPEG;
   if (image_codec == ROBUST_PNG_CODEC)
-    codec = image_decoder::mojom::ImageCodec::ROBUST_PNG;
+    codec = data_decoder::mojom::ImageCodec::ROBUST_PNG;
 #endif  // defined(OS_CHROMEOS)
 
   auto callback = base::Bind(
@@ -173,9 +174,9 @@ void ImageDecoder::StartWithOptionsImpl(
   // implementation.
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&DecodeImage, base::Passed(&image_data), codec, shrink_to_fit,
-                 desired_image_frame_size, callback,
-                 make_scoped_refptr(image_request->task_runner())));
+      base::BindOnce(&DecodeImage, base::Passed(&image_data), codec,
+                     shrink_to_fit, desired_image_frame_size, callback,
+                     make_scoped_refptr(image_request->task_runner())));
 }
 
 // static
@@ -209,7 +210,7 @@ void ImageDecoder::OnDecodeImageSucceeded(
     image_request_id_map_.erase(it);
   }
 
-  DCHECK(image_request->task_runner()->RunsTasksOnCurrentThread());
+  DCHECK(image_request->task_runner()->RunsTasksInCurrentSequence());
   image_request->OnImageDecoded(decoded_image);
 }
 
@@ -224,6 +225,6 @@ void ImageDecoder::OnDecodeImageFailed(int request_id) {
     image_request_id_map_.erase(it);
   }
 
-  DCHECK(image_request->task_runner()->RunsTasksOnCurrentThread());
+  DCHECK(image_request->task_runner()->RunsTasksInCurrentSequence());
   image_request->OnDecodeImageFailed();
 }

@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/memory/aligned_memory.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -128,6 +129,23 @@ TEST_F(AudioBusTest, CreateUsingAudioParameters) {
   std::unique_ptr<AudioBus> bus = AudioBus::Create(
       AudioParameters(AudioParameters::AUDIO_PCM_LINEAR, kChannelLayout,
                       kSampleRate, 32, kFrameCount));
+  VerifyChannelAndFrameCount(bus.get());
+  VerifyReadWriteAndAlignment(bus.get());
+}
+
+// Verify an AudioBus created via CreateWrapper(...) works as advertised.
+TEST_F(AudioBusTest, CreateWrapper) {
+  data_.reserve(kChannels);
+  for (int i = 0; i < kChannels; ++i) {
+    data_.push_back(static_cast<float*>(base::AlignedAlloc(
+        sizeof(*data_[i]) * kFrameCount, AudioBus::kChannelAlignment)));
+  }
+
+  std::unique_ptr<AudioBus> bus = AudioBus::CreateWrapper(kChannels);
+  bus->set_frames(kFrameCount);
+  for (int i = 0; i < bus->channels(); ++i)
+    bus->SetChannelData(i, data_[i]);
+
   VerifyChannelAndFrameCount(bus.get());
   VerifyReadWriteAndAlignment(bus.get());
 }

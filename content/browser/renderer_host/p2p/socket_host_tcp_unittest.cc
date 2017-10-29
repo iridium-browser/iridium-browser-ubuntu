@@ -10,6 +10,7 @@
 #include <deque>
 
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/sys_byteorder.h"
 #include "content/browser/renderer_host/p2p/socket_host_test_utils.h"
@@ -184,6 +185,19 @@ TEST_F(P2PSocketHostTcpTest, SendDataNoAuth) {
   EXPECT_EQ(0U, sent_data_.size());
 }
 
+// Verify that SetOption() doesn't crash after an error.
+TEST_F(P2PSocketHostTcpTest, SetOptionAfterError) {
+  // Get the sender into the error state.
+  EXPECT_CALL(sender_,
+              Send(MatchMessage(static_cast<uint32_t>(P2PMsg_OnError::ID))))
+      .WillOnce(DoAll(DeleteArg<0>(), Return(true)));
+  socket_host_->Send(dest_.ip_address, {1, 2, 3, 4}, rtc::PacketOptions(), 0);
+  testing::Mock::VerifyAndClearExpectations(&sender_);
+
+  // Verify that SetOptions() fails, but doesn't crash.
+  EXPECT_FALSE(socket_host_->SetOption(P2P_SOCKET_OPT_RCVBUF, 2048));
+}
+
 // Verify that we can send data after we've received STUN response
 // from the other side.
 TEST_F(P2PSocketHostTcpTest, SendAfterStunRequest) {
@@ -245,6 +259,35 @@ TEST_F(P2PSocketHostTcpTest, AsyncWrites) {
   expected_data.append(packet1.begin(), packet1.end());
   expected_data.append(IntToSize(packet2.size()));
   expected_data.append(packet2.begin(), packet2.end());
+
+  EXPECT_EQ(expected_data, sent_data_);
+}
+
+TEST_F(P2PSocketHostTcpTest, PacketIdIsPropagated) {
+  base::MessageLoop message_loop;
+
+  socket_->set_async_write(true);
+
+  const int32_t kRtcPacketId = 1234;
+
+  base::TimeTicks now = base::TimeTicks::Now();
+
+  EXPECT_CALL(sender_, Send(MatchSendPacketMetrics(kRtcPacketId, now)))
+      .Times(1)
+      .WillRepeatedly(DoAll(DeleteArg<0>(), Return(true)));
+
+  rtc::PacketOptions options;
+  options.packet_id = kRtcPacketId;
+  std::vector<char> packet1;
+  CreateStunRequest(&packet1);
+
+  socket_host_->Send(dest_.ip_address, packet1, options, 0);
+
+  base::RunLoop().RunUntilIdle();
+
+  std::string expected_data;
+  expected_data.append(IntToSize(packet1.size()));
+  expected_data.append(packet1.begin(), packet1.end());
 
   EXPECT_EQ(expected_data, sent_data_);
 }

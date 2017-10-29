@@ -12,8 +12,10 @@
 
 #include "GrContext.h"
 #include "GrContextPriv.h"
+#include "GrResourceProvider.h"
 #include "GrSurfaceContext.h"
 #include "GrSurfaceProxy.h"
+#include "GrTextureProxy.h"
 #include "SkCanvas.h"
 #include "SkSurface.h"
 
@@ -55,17 +57,16 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ReadWriteAlpha, reporter, ctxInfo) {
         // We are initializing the texture with zeros here
         memset(alphaData, 0, X_SIZE * Y_SIZE);
 
-        sk_sp<GrSurfaceProxy> sProxy(GrSurfaceProxy::MakeDeferred(*context->caps(),
-                                                                  context->textureProvider(),
-                                                                  desc,
-                                                                  SkBudgeted::kNo,
-                                                                  alphaData, 0));
-        if (!sProxy) {
+        sk_sp<GrTextureProxy> proxy(GrSurfaceProxy::MakeDeferred(context->resourceProvider(),
+                                                                 desc,
+                                                                 SkBudgeted::kNo,
+                                                                 alphaData, 0));
+        if (!proxy) {
             ERRORF(reporter, "Could not create alpha texture.");
             return;
         }
         sk_sp<GrSurfaceContext> sContext(context->contextPriv().makeWrappedSurfaceContext(
-                                                                  sProxy, nullptr));
+                                                                  std::move(proxy), nullptr));
 
         const SkImageInfo ii = SkImageInfo::MakeA8(X_SIZE, Y_SIZE);
         sk_sp<SkSurface> surf(SkSurface::MakeRenderTarget(context, SkBudgeted::kNo, ii));
@@ -142,13 +143,17 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ReadWriteAlpha, reporter, ctxInfo) {
         }
     }
 
+    const SkImageInfo dstInfo = SkImageInfo::Make(X_SIZE, Y_SIZE,
+                                                  kAlpha_8_SkColorType,
+                                                  kPremul_SkAlphaType);
+
     // Attempt to read back just alpha from a RGBA/BGRA texture. Once with a texture-only src and
     // once with a render target.
-    for (auto cfg : kRGBAConfigs) {
+    for (auto config : kRGBAConfigs) {
         for (int rt = 0; rt < 2; ++rt) {
             GrSurfaceDesc desc;
             desc.fFlags     = rt ? kRenderTarget_GrSurfaceFlag : kNone_GrSurfaceFlags;
-            desc.fConfig    = cfg;
+            desc.fConfig    = config;
             desc.fWidth     = X_SIZE;
             desc.fHeight    = Y_SIZE;
 
@@ -159,15 +164,19 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ReadWriteAlpha, reporter, ctxInfo) {
                     rgbaData[y * X_SIZE + x] = GrColorPackRGBA(6, 7, 8, alphaData[y * X_SIZE + x]);
                 }
             }
-            sk_sp<GrTexture> texture(
-                context->textureProvider()->createTexture(desc, SkBudgeted::kNo, rgbaData, 0));
-            if (!texture) {
+            sk_sp<GrTextureProxy> proxy =
+                GrSurfaceProxy::MakeDeferred(context->resourceProvider(), desc, SkBudgeted::kNo,
+                                             rgbaData, 0);
+            if (!proxy) {
                 // We always expect to be able to create a RGBA texture
                 if (!rt  && kRGBA_8888_GrPixelConfig == desc.fConfig) {
                     ERRORF(reporter, "Failed to create RGBA texture.");
                 }
                 continue;
             }
+
+            sk_sp<GrSurfaceContext> sContext = context->contextPriv().makeWrappedSurfaceContext(
+                                                                       std::move(proxy), nullptr);
 
             for (auto rowBytes : kRowBytes) {
                 size_t nonZeroRowBytes = rowBytes ? rowBytes : X_SIZE;
@@ -177,9 +186,7 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ReadWriteAlpha, reporter, ctxInfo) {
                 memset(readback.get(), kClearValue, nonZeroRowBytes * Y_SIZE);
 
                 // read the texture back
-                bool result = texture->readPixels(0, 0, desc.fWidth, desc.fHeight,
-                                                  kAlpha_8_GrPixelConfig,
-                                                  readback.get(), rowBytes);
+                bool result = sContext->readPixels(dstInfo, readback.get(), rowBytes, 0, 0);
                 REPORTER_ASSERT_MESSAGE(reporter, result, "8888 readPixels failed");
 
                 // make sure the original & read back versions match

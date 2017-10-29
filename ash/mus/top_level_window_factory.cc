@@ -4,10 +4,6 @@
 
 #include "ash/mus/top_level_window_factory.h"
 
-#include "ash/common/wm/container_finder.h"
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
 #include "ash/mus/disconnected_app_handler.h"
 #include "ash/mus/frame/detached_title_area_renderer.h"
 #include "ash/mus/non_client_frame_controller.h"
@@ -16,6 +12,9 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/root_window_settings.h"
+#include "ash/shell.h"
+#include "ash/wm/container_finder.h"
+#include "ash/wm/window_state.h"
 #include "mojo/public/cpp/bindings/type_converter.h"
 #include "services/ui/public/cpp/property_type_converters.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
@@ -26,6 +25,8 @@
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
+#include "ui/display/screen.h"
+#include "ui/views/widget/widget.h"
 
 namespace ash {
 namespace mus {
@@ -72,8 +73,7 @@ RootWindowController* GetRootWindowControllerForNewTopLevelWindow(
       }
     }
   }
-  return RootWindowController::ForWindow(
-      WmShell::Get()->GetRootWindowForNewWindows()->aura_window());
+  return RootWindowController::ForWindow(Shell::GetRootWindowForNewWindows());
 }
 
 // Returns the bounds for the new window.
@@ -96,7 +96,8 @@ gfx::Rect CalculateDefaultBounds(
       gfx::Rect bounds(root_size);
       if (!container_window) {
         const display::Display display =
-            root_window_controller->GetWindow()->GetDisplayNearestWindow();
+            display::Screen::GetScreen()->GetDisplayNearestWindow(
+                root_window_controller->GetRootWindow());
         bounds.Offset(display.bounds().OffsetFromOrigin());
       }
       return bounds;
@@ -131,9 +132,8 @@ aura::Window* CreateAndParentTopLevelWindowInRoot(
   aura::Window* context = nullptr;
   aura::Window* container_window = nullptr;
   if (GetInitialContainerId(*properties, &container_id)) {
-    container_window = root_window_controller->GetWindow()
-                           ->GetChildByShellWindowId(container_id)
-                           ->aura_window();
+    container_window =
+        root_window_controller->GetRootWindow()->GetChildById(container_id);
   } else {
     context = root_window_controller->GetRootWindow();
   }
@@ -160,9 +160,8 @@ aura::Window* CreateAndParentTopLevelWindowInRoot(
     // Pick a parent so display information is obtained. Will pick the real one
     // once transient parent found.
     aura::Window* unparented_control_container =
-        root_window_controller->GetWindow()
-            ->GetChildByShellWindowId(kShellWindowId_UnparentedControlContainer)
-            ->aura_window();
+        root_window_controller->GetRootWindow()->GetChildById(
+            kShellWindowId_UnparentedControlContainer);
     // DetachedTitleAreaRendererForClient is owned by the client.
     DetachedTitleAreaRendererForClient* renderer =
         new DetachedTitleAreaRendererForClient(unparented_control_container,
@@ -172,7 +171,8 @@ aura::Window* CreateAndParentTopLevelWindowInRoot(
 
   aura::Window* window = new aura::Window(nullptr);
   aura::SetWindowType(window, window_type);
-  window->SetProperty(aura::client::kTopLevelWindowInWM, true);
+  window->SetProperty(aura::client::kEmbedType,
+                      aura::client::WindowEmbedType::TOP_LEVEL_IN_WM);
   ApplyProperties(window, property_converter, *properties);
   window->Init(ui::LAYER_TEXTURED);
   window->SetBounds(bounds);
@@ -180,18 +180,15 @@ aura::Window* CreateAndParentTopLevelWindowInRoot(
   if (container_window) {
     container_window->AddChild(window);
   } else {
-    WmWindow* root = root_window_controller->GetWindow();
-    gfx::Point origin =
-        root->ConvertPointToTarget(root->GetRootWindow(), gfx::Point());
-    origin += root_window_controller->GetWindow()
-                  ->GetDisplayNearestWindow()
-                  .bounds()
-                  .OffsetFromOrigin();
+    aura::Window* root = root_window_controller->GetRootWindow();
+    gfx::Point origin;
+    aura::Window::ConvertPointToTarget(root, root->GetRootWindow(), &origin);
+    const display::Display display =
+        display::Screen::GetScreen()->GetDisplayNearestWindow(
+            root_window_controller->GetRootWindow());
+    origin += display.bounds().OffsetFromOrigin();
     gfx::Rect bounds_in_screen(origin, bounds.size());
-    ash::wm::GetDefaultParent(WmWindow::Get(context), WmWindow::Get(window),
-                              bounds_in_screen)
-        ->aura_window()
-        ->AddChild(window);
+    ash::wm::GetDefaultParent(window, bounds_in_screen)->AddChild(window);
   }
   return window;
 }
@@ -211,7 +208,7 @@ aura::Window* CreateAndParentTopLevelWindow(
   auto ignored_by_shelf_iter = properties->find(
       ui::mojom::WindowManager::kWindowIgnoredByShelf_InitProperty);
   if (ignored_by_shelf_iter != properties->end()) {
-    wm::WindowState* window_state = WmWindow::Get(window)->GetWindowState();
+    wm::WindowState* window_state = wm::GetWindowState(window);
     window_state->set_ignored_by_shelf(
         mojo::ConvertTo<bool>(ignored_by_shelf_iter->second));
     // No need to persist this value.
@@ -230,6 +227,16 @@ aura::Window* CreateAndParentTopLevelWindow(
     // No need to persist this value.
     properties->erase(focusable_iter);
   }
+
+  auto translucent_iter =
+      properties->find(ui::mojom::WindowManager::kTranslucent_InitProperty);
+  if (translucent_iter != properties->end()) {
+    bool translucent = mojo::ConvertTo<bool>(translucent_iter->second);
+    window->SetTransparent(translucent);
+    // No need to persist this value.
+    properties->erase(translucent_iter);
+  }
+
   return window;
 }
 

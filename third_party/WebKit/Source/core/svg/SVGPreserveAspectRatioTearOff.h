@@ -31,9 +31,9 @@
 #ifndef SVGPreserveAspectRatioTearOff_h
 #define SVGPreserveAspectRatioTearOff_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/svg/SVGPreserveAspectRatio.h"
 #include "core/svg/properties/SVGPropertyTearOff.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -75,28 +75,27 @@ class SVGPreserveAspectRatioTearOff final
     kSvgMeetorsliceSlice = SVGPreserveAspectRatio::kSvgMeetorsliceSlice
   };
 
-  static SVGPreserveAspectRatioTearOff* create(
+  static SVGPreserveAspectRatioTearOff* Create(
       SVGPreserveAspectRatio* target,
-      SVGElement* contextElement,
-      PropertyIsAnimValType propertyIsAnimVal,
-      const QualifiedName& attributeName = QualifiedName::null()) {
-    return new SVGPreserveAspectRatioTearOff(target, contextElement,
-                                             propertyIsAnimVal, attributeName);
+      SVGElement* context_element,
+      PropertyIsAnimValType property_is_anim_val,
+      const QualifiedName& attribute_name) {
+    return new SVGPreserveAspectRatioTearOff(
+        target, context_element, property_is_anim_val, attribute_name);
   }
 
   void setAlign(unsigned short, ExceptionState&);
-  unsigned short align() { return target()->align(); }
+  unsigned short align() { return Target()->Align(); }
   void setMeetOrSlice(unsigned short, ExceptionState&);
-  unsigned short meetOrSlice() { return target()->meetOrSlice(); }
+  unsigned short meetOrSlice() { return Target()->MeetOrSlice(); }
 
   DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
  private:
-  SVGPreserveAspectRatioTearOff(
-      SVGPreserveAspectRatio*,
-      SVGElement* contextElement,
-      PropertyIsAnimValType,
-      const QualifiedName& attributeName = QualifiedName::null());
+  SVGPreserveAspectRatioTearOff(SVGPreserveAspectRatio*,
+                                SVGElement* context_element,
+                                PropertyIsAnimValType,
+                                const QualifiedName& attribute_name);
 };
 
 }  // namespace blink

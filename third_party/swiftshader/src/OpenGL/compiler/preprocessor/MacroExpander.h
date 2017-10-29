@@ -75,7 +75,7 @@ private:
 	Diagnostics* mDiagnostics;
 	const bool mParseDefined;
 
-	std::auto_ptr<Token> mReserveToken;
+	Token* mReserveToken;
 	std::vector<MacroContext*> mContextStack;
 };
 

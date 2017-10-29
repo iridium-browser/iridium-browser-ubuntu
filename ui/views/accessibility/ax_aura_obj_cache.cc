@@ -19,6 +19,12 @@
 
 namespace views {
 
+aura::client::FocusClient* GetFocusClient(aura::Window* root_window) {
+  if (!root_window)
+    return nullptr;
+  return aura::client::GetFocusClient(root_window);
+}
+
 // static
 AXAuraObjCache* AXAuraObjCache::GetInstance() {
   return base::Singleton<AXAuraObjCache>::get();
@@ -33,15 +39,6 @@ AXAuraObjWrapper* AXAuraObjCache::GetOrCreate(Widget* widget) {
 }
 
 AXAuraObjWrapper* AXAuraObjCache::GetOrCreate(aura::Window* window) {
-  if (!focus_client_) {
-    aura::Window* root_window = window->GetRootWindow();
-    if (root_window) {
-      focus_client_ = aura::client::GetFocusClient(root_window);
-      root_window->AddObserver(this);
-      if (focus_client_)
-        focus_client_->AddObserver(this);
-    }
-  }
   return CreateInternal<AXWindowObjWrapper>(window, window_to_id_map_);
 }
 
@@ -124,11 +121,17 @@ void AXAuraObjCache::OnFocusedViewChanged() {
     view->NotifyAccessibilityEvent(ui::AX_EVENT_FOCUS, true);
 }
 
+void AXAuraObjCache::FireEvent(AXAuraObjWrapper* aura_obj,
+                               ui::AXEvent event_type) {
+  if (delegate_)
+    delegate_->OnEvent(aura_obj, event_type);
+}
+
 AXAuraObjCache::AXAuraObjCache()
     : current_id_(1),
-      focus_client_(nullptr),
       is_destroying_(false),
-      delegate_(nullptr) {}
+      delegate_(nullptr),
+      root_window_(nullptr) {}
 
 AXAuraObjCache::~AXAuraObjCache() {
   is_destroying_ = true;
@@ -136,10 +139,11 @@ AXAuraObjCache::~AXAuraObjCache() {
 }
 
 View* AXAuraObjCache::GetFocusedView() {
-  if (!focus_client_)
+  aura::client::FocusClient* focus_client = GetFocusClient(root_window_);
+  if (!focus_client)
     return nullptr;
 
-  aura::Window* focused_window = focus_client_->GetFocusedWindow();
+  aura::Window* focused_window = focus_client->GetFocusedWindow();
   if (!focused_window)
     return nullptr;
 
@@ -177,8 +181,16 @@ void AXAuraObjCache::OnWindowFocused(aura::Window* gained_focus,
   OnFocusedViewChanged();
 }
 
-void AXAuraObjCache::OnWindowDestroying(aura::Window* window) {
-  focus_client_ = nullptr;
+void AXAuraObjCache::OnRootWindowObjCreated(aura::Window* window) {
+  root_window_ = window;
+  if (GetFocusClient(window))
+    GetFocusClient(window)->AddObserver(this);
+}
+
+void AXAuraObjCache::OnRootWindowObjDestroyed(aura::Window* window) {
+  if (GetFocusClient(window))
+    GetFocusClient(window)->RemoveObserver(this);
+  root_window_ = nullptr;
 }
 
 template <typename AuraViewWrapper, typename AuraView>

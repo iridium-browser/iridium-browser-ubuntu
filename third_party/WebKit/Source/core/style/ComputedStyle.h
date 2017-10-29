@@ -26,36 +26,25 @@
 #ifndef ComputedStyle_h
 #define ComputedStyle_h
 
+#include <memory>
 #include "core/CSSPropertyNames.h"
 #include "core/ComputedStyleBase.h"
 #include "core/CoreExport.h"
+#include "core/css/StyleAutoColor.h"
+#include "core/css/StyleColor.h"
 #include "core/style/BorderValue.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "core/style/CounterDirectives.h"
+#include "core/style/CursorList.h"
 #include "core/style/DataRef.h"
 #include "core/style/LineClampValue.h"
 #include "core/style/NinePieceImage.h"
+#include "core/style/QuotesData.h"
 #include "core/style/SVGComputedStyle.h"
-#include "core/style/StyleBackgroundData.h"
-#include "core/style/StyleBoxData.h"
 #include "core/style/StyleContentAlignmentData.h"
-#include "core/style/StyleDeprecatedFlexibleBoxData.h"
-#include "core/style/StyleDifference.h"
-#include "core/style/StyleFilterData.h"
-#include "core/style/StyleFlexibleBoxData.h"
-#include "core/style/StyleGridData.h"
-#include "core/style/StyleGridItemData.h"
-#include "core/style/StyleInheritedData.h"
-#include "core/style/StyleMultiColData.h"
-#include "core/style/StyleOffsetRotation.h"
-#include "core/style/StyleRareInheritedData.h"
-#include "core/style/StyleRareNonInheritedData.h"
+#include "core/style/StyleInheritedVariables.h"
 #include "core/style/StyleReflection.h"
 #include "core/style/StyleSelfAlignmentData.h"
-#include "core/style/StyleSurroundData.h"
-#include "core/style/StyleTransformData.h"
-#include "core/style/StyleVisualData.h"
-#include "core/style/StyleWillChangeData.h"
 #include "core/style/TransformOrigin.h"
 #include "platform/Length.h"
 #include "platform/LengthBox.h"
@@ -63,53 +52,21 @@
 #include "platform/LengthSize.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/ThemeTypes.h"
+#include "platform/fonts/Font.h"
 #include "platform/fonts/FontDescription.h"
 #include "platform/geometry/FloatRoundedRect.h"
 #include "platform/geometry/LayoutRectOutsets.h"
 #include "platform/graphics/Color.h"
+#include "platform/graphics/TouchAction.h"
 #include "platform/scroll/ScrollTypes.h"
 #include "platform/text/TextDirection.h"
-#include "platform/text/UnicodeBidi.h"
+#include "platform/text/WritingModeUtils.h"
 #include "platform/transforms/TransformOperations.h"
-#include "wtf/Forward.h"
-#include "wtf/LeakAnnotations.h"
-#include "wtf/RefCounted.h"
-#include "wtf/Vector.h"
-#include <memory>
-
-template <typename T, typename U>
-inline bool compareEqual(const T& t, const U& u) {
-  return t == static_cast<T>(u);
-}
-
-template <typename T>
-inline bool compareEqual(const T& a, const T& b) {
-  return a == b;
-}
-
-#define SET_VAR(group, variable, value)      \
-  if (!compareEqual(group->variable, value)) \
-  group.access()->variable = value
-
-#define SET_NESTED_VAR(group, base, variable, value) \
-  if (!compareEqual(group->base->variable, value))   \
-  group.access()->base.access()->variable = value
-
-#define SET_VAR_WITH_SETTER(group, getter, setter, value) \
-  if (!compareEqual(group->getter(), value))              \
-  group.access()->setter(value)
-
-#define SET_BORDERVALUE_COLOR(group, variable, value) \
-  if (!compareEqual(group->variable.color(), value))  \
-  group.access()->variable.setColor(value)
-
-#define SET_BORDER_WIDTH(group, variable, value) \
-  if (!group->variable.widthEquals(value))       \
-  group.access()->variable.setWidth(value)
-
-#define SET_NESTED_BORDER_WIDTH(group, base, variable, value) \
-  if (!group->base->variable.widthEquals(value))              \
-  group.access()->base.access()->variable.setWidth(value)
+#include "platform/wtf/Forward.h"
+#include "platform/wtf/LeakAnnotations.h"
+#include "platform/wtf/RefCounted.h"
+#include "platform/wtf/Vector.h"
+#include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
 
@@ -118,43 +75,84 @@ using std::max;
 class FilterOperations;
 
 class AppliedTextDecoration;
-class BorderData;
 struct BorderEdge;
 class CSSAnimationData;
 class CSSTransitionData;
 class CSSVariableData;
 class Font;
 class Hyphenation;
-class RotateTransformOperation;
-class ScaleTransformOperation;
 class ShadowList;
 class ShapeValue;
+class StyleDifference;
 class StyleImage;
-class StyleInheritedData;
 class StylePath;
 class StyleResolver;
 class TransformationMatrix;
-class TranslateTransformOperation;
 
 class ContentData;
 
 typedef Vector<RefPtr<ComputedStyle>, 4> PseudoStyleCache;
 
-// ComputedStyle stores the final style for an element and provides the
-// interface between the style engine and the rest of Blink.
+// ComputedStyle stores the computed value [1] for every CSS property on an
+// element and provides the interface between the style engine and the rest of
+// Blink. It acts as a container where the computed value of every CSS property
+// can be stored and retrieved:
 //
-// It contains all the resolved styles for an element, and is densely packed and
-// optimized for memory and performance. Enums and small fields are packed in
-// bit fields, while large fields are stored in pointers and shared where not
-// modified from their parent value (see the DataRef class).
+//   auto style = ComputedStyle::Create();
+//   style->SetDisplay(EDisplay::kNone); //'display' keyword property
+//   style->Display();
 //
-// Currently, ComputedStyle is hand-written and ComputedStyleBase is generated.
-// Over time, methods will be moved to ComputedStyleBase and the generator will
-// be expanded to handle more and more types of properties. Eventually, all
-// methods will be on ComputedStyleBase (with custom methods defined in a class
-// such as ComputedStyleBase.cpp) and ComputedStyle will be removed.
-class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
-                                  public RefCounted<ComputedStyle> {
+// In addition to storing the computed value of every CSS property,
+// ComputedStyle also contains various internal style information. Examples
+// include cached_pseudo_styles_ (for storing pseudo element styles), unique_
+// (for style sharing) and has_simple_underline_ (cached indicator flag of
+// text-decoration). These are stored on ComputedStyle for two reasons:
+//
+//  1) They share the same lifetime as ComputedStyle, so it is convenient to
+//  store them in the same object rather than a separate object that have to be
+//  passed around as well.
+//
+//  2) Many of these data members can be packed as bit fields, so we use less
+//  memory by packing them in this object with other bit fields.
+//
+// STORAGE:
+//
+// ComputedStyle is optimized for memory and performance. The data is not
+// actually stored directly in ComputedStyle, but rather in a generated parent
+// class ComputedStyleBase. This separation of concerns allows us to optimise
+// the memory layout without affecting users of ComputedStyle. ComputedStyle
+// inherits from ComputedStyleBase. For more about the memory layout, there is
+// documentation in ComputedStyleBase and make_computed_style_base.py.
+//
+// INTERFACE:
+//
+// For most CSS properties, ComputedStyle provides a consistent interface which
+// includes a getter, setter, initial method (the computed value when the
+// property is to 'initial'), and resetter (that resets the computed value to
+// its initial value). Exceptions include vertical-align, which has a separate
+// set of accessors for its length and its keyword components. Apart from
+// accessors, ComputedStyle also has a wealth of helper functions.
+//
+// Because ComputedStyleBase defines simple accessors to every CSS property,
+// ComputedStyle inherits these and so they are not redeclared in this file.
+// This means that the interface to ComputedStyle is split between this file and
+// ComputedStyleBase.h.
+//
+// [1] https://developer.mozilla.org/en-US/docs/Web/CSS/computed_value
+//
+// NOTE:
+//
+// Currently, some properties are stored in ComputedStyle and some in
+// ComputedStyleBase. Eventually, the storage of all properties (except SVG
+// ones) will be in ComputedStyleBase.
+//
+// Since this class is huge, do not mark all of it CORE_EXPORT.  Instead,
+// export only the methods you need below.
+class ComputedStyle : public ComputedStyleBase,
+                      public RefCounted<ComputedStyle> {
+  // Needed to allow access to private/protected getters of fields to allow diff
+  // generation
+  friend class ComputedStyleBase;
   // Used by Web Animations CSS. Sets the color styles.
   friend class AnimatedStyleBuilder;
   // Used by Web Animations CSS. Gets visited and unvisited colors separately.
@@ -184,198 +182,72 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   friend class StyleResolver;
 
  protected:
-  // non-inherited attributes
-  DataRef<StyleBoxData> m_box;
-  DataRef<StyleVisualData> m_visual;
-  DataRef<StyleBackgroundData> m_background;
-  DataRef<StyleSurroundData> m_surround;
-  DataRef<StyleRareNonInheritedData> m_rareNonInheritedData;
-
-  // inherited attributes
-  DataRef<StyleRareInheritedData> m_rareInheritedData;
-  DataRef<StyleInheritedData> m_styleInheritedData;
-
   // list of associated pseudo styles
-  std::unique_ptr<PseudoStyleCache> m_cachedPseudoStyles;
+  std::unique_ptr<PseudoStyleCache> cached_pseudo_styles_;
 
-  DataRef<SVGComputedStyle> m_svgStyle;
-
-  // !START SYNC!: Keep this in sync with the copy constructor in
-  // ComputedStyle.cpp.
-
-  // inherit
-  struct InheritedData {
-    bool operator==(const InheritedData& other) const {
-      // Generated properties are compared in ComputedStyleBase
-      return (m_hasSimpleUnderline == other.m_hasSimpleUnderline) &&
-             (m_cursorStyle == other.m_cursorStyle) &&
-             (m_insideLink == other.m_insideLink);
-    }
-
-    bool operator!=(const InheritedData& other) const {
-      return !(*this == other);
-    }
-
-    unsigned m_hasSimpleUnderline : 1;  // True if 'underline solid' is the only
-                                        // text decoration on this element.
-    unsigned m_cursorStyle : 6;     // ECursor
-
-    // non CSS2 inherited
-    unsigned m_insideLink : 2;     // EInsideLink
-  } m_inheritedData;
-
-  // don't inherit
-  struct NonInheritedData {
-    // Compare computed styles, differences in inherited bits or other flags
-    // should not cause an inequality.
-    bool operator==(const NonInheritedData& other) const {
-      // Generated properties are compared in ComputedStyleBase
-      return m_effectiveDisplay == other.m_effectiveDisplay &&
-             m_originalDisplay == other.m_originalDisplay &&
-             m_verticalAlign == other.m_verticalAlign;
-      // Differences in the following fields do not cause inequality:
-      // hasViewportUnits
-      // styleType
-      // pseudoBits
-      // explicitInheritance
-      // unique
-      // emptyState
-      // affectedByFocus
-      // affectedByHover
-      // affectedByActive
-      // affectedByDrag
-      // isLink
-      // isInherited flags
-    }
-
-    bool operator!=(const NonInheritedData& other) const {
-      return !(*this == other);
-    }
-
-    unsigned m_effectiveDisplay : 5;  // EDisplay
-    unsigned m_originalDisplay : 5;   // EDisplay
-    unsigned m_verticalAlign : 4;     // EVerticalAlign
-
-    // This is set if we used viewport units when resolving a length.
-    // It is mutable so we can pass around const ComputedStyles to resolve
-    // lengths.
-    mutable unsigned m_hasViewportUnits : 1;
-
-    // 32 bits
-
-    unsigned m_styleType : 6;  // PseudoId
-    unsigned m_pseudoBits : 8;
-    unsigned m_explicitInheritance : 1;  // Explicitly inherits a non-inherited
-                                         // property
-
-    unsigned m_emptyState : 1;
-
-    // 64 bits
-
-    unsigned m_isLink : 1;
-
-    mutable unsigned m_hasRemUnits : 1;
-
-    // If you add more style bits here, you will also need to update
-    // ComputedStyle::copyNonInheritedFromCached() 68 bits
-  } m_nonInheritedData;
-
-  // !END SYNC!
-
-  // Only call inside the constructor. Generated properties in the base class
-  // are not initialized in this method.
-  void initializeBitDefaults() {
-    m_inheritedData.m_hasSimpleUnderline = false;
-    m_inheritedData.m_cursorStyle = static_cast<unsigned>(initialCursor());
-    m_inheritedData.m_insideLink =
-        static_cast<unsigned>(EInsideLink::kNotInsideLink);
-
-    m_nonInheritedData.m_effectiveDisplay =
-        m_nonInheritedData.m_originalDisplay =
-            static_cast<unsigned>(initialDisplay());
-    m_nonInheritedData.m_verticalAlign =
-        static_cast<unsigned>(initialVerticalAlign());
-    m_nonInheritedData.m_styleType = PseudoIdNone;
-    m_nonInheritedData.m_pseudoBits = 0;
-    m_nonInheritedData.m_explicitInheritance = false;
-    m_nonInheritedData.m_emptyState = false;
-    m_nonInheritedData.m_hasViewportUnits = false;
-    m_nonInheritedData.m_isLink = false;
-    m_nonInheritedData.m_hasRemUnits = false;
-  }
+  DataRef<SVGComputedStyle> svg_style_;
 
  private:
-  // TODO(sashab): Move these to the bottom of ComputedStyle.
+  // TODO(sashab): Move these private members to the bottom of ComputedStyle.
   ALWAYS_INLINE ComputedStyle();
-
-  enum InitialStyleTag { InitialStyle };
-  ALWAYS_INLINE explicit ComputedStyle(InitialStyleTag);
   ALWAYS_INLINE ComputedStyle(const ComputedStyle&);
 
-  static PassRefPtr<ComputedStyle> createInitialStyle();
-  static inline ComputedStyle& mutableInitialStyle() {
-    LEAK_SANITIZER_DISABLED_SCOPE;
-    DEFINE_STATIC_REF(ComputedStyle, s_initialStyle,
-                      (ComputedStyle::createInitialStyle()));
-    return *s_initialStyle;
-  }
+  static RefPtr<ComputedStyle> CreateInitialStyle();
+  // TODO(shend): Remove this. Initial style should not be mutable.
+  CORE_EXPORT static ComputedStyle& MutableInitialStyle();
 
  public:
-  static PassRefPtr<ComputedStyle> create();
-  static PassRefPtr<ComputedStyle> createAnonymousStyleWithDisplay(
-      const ComputedStyle& parentStyle,
+  CORE_EXPORT static RefPtr<ComputedStyle> Create();
+  static RefPtr<ComputedStyle> CreateAnonymousStyleWithDisplay(
+      const ComputedStyle& parent_style,
       EDisplay);
-  static PassRefPtr<ComputedStyle> clone(const ComputedStyle&);
-  static const ComputedStyle& initialStyle() { return mutableInitialStyle(); }
-  static void invalidateInitialStyle();
+  CORE_EXPORT static RefPtr<ComputedStyle> Clone(const ComputedStyle&);
+  static const ComputedStyle& InitialStyle() { return MutableInitialStyle(); }
+  static void InvalidateInitialStyle();
 
   // Computes how the style change should be propagated down the tree.
-  static StyleRecalcChange stylePropagationDiff(const ComputedStyle* oldStyle,
-                                                const ComputedStyle* newStyle);
+  static StyleRecalcChange StylePropagationDiff(const ComputedStyle* old_style,
+                                                const ComputedStyle* new_style);
 
   // Copies the values of any independent inherited properties from the parent
   // that are not explicitly set in this style.
-  void propagateIndependentInheritedProperties(
-      const ComputedStyle& parentStyle);
+  void PropagateIndependentInheritedProperties(
+      const ComputedStyle& parent_style);
 
-  ContentPosition resolvedJustifyContentPosition(
-      const StyleContentAlignmentData& normalValueBehavior) const;
-  ContentDistributionType resolvedJustifyContentDistribution(
-      const StyleContentAlignmentData& normalValueBehavior) const;
-  ContentPosition resolvedAlignContentPosition(
-      const StyleContentAlignmentData& normalValueBehavior) const;
-  ContentDistributionType resolvedAlignContentDistribution(
-      const StyleContentAlignmentData& normalValueBehavior) const;
-  StyleSelfAlignmentData resolvedAlignItems(
-      ItemPosition normalValueBehaviour) const;
-  StyleSelfAlignmentData resolvedAlignSelf(
-      ItemPosition normalValueBehaviour,
-      const ComputedStyle* parentStyle = nullptr) const;
-  StyleSelfAlignmentData resolvedJustifyItems(
-      ItemPosition normalValueBehaviour) const;
-  StyleSelfAlignmentData resolvedJustifySelf(
-      ItemPosition normalValueBehaviour,
-      const ComputedStyle* parentStyle = nullptr) const;
+  ContentPosition ResolvedJustifyContentPosition(
+      const StyleContentAlignmentData& normal_value_behavior) const;
+  ContentDistributionType ResolvedJustifyContentDistribution(
+      const StyleContentAlignmentData& normal_value_behavior) const;
+  ContentPosition ResolvedAlignContentPosition(
+      const StyleContentAlignmentData& normal_value_behavior) const;
+  ContentDistributionType ResolvedAlignContentDistribution(
+      const StyleContentAlignmentData& normal_value_behavior) const;
+  StyleSelfAlignmentData ResolvedAlignItems(
+      ItemPosition normal_value_behaviour) const;
+  StyleSelfAlignmentData ResolvedAlignSelf(
+      ItemPosition normal_value_behaviour,
+      const ComputedStyle* parent_style = nullptr) const;
+  StyleSelfAlignmentData ResolvedJustifyItems(
+      ItemPosition normal_value_behaviour) const;
+  StyleSelfAlignmentData ResolvedJustifySelf(
+      ItemPosition normal_value_behaviour,
+      const ComputedStyle* parent_style = nullptr) const;
 
-  StyleDifference visualInvalidationDiff(const ComputedStyle&) const;
+  StyleDifference VisualInvalidationDiff(const ComputedStyle&) const;
 
-  void inheritFrom(const ComputedStyle& inheritParent,
-                   IsAtShadowBoundary = NotAtShadowBoundary);
-  void copyNonInheritedFromCached(const ComputedStyle&);
+  void InheritFrom(const ComputedStyle& inherit_parent,
+                   IsAtShadowBoundary = kNotAtShadowBoundary);
+  void CopyNonInheritedFromCached(const ComputedStyle&);
 
-  PseudoId styleType() const {
-    return static_cast<PseudoId>(m_nonInheritedData.m_styleType);
-  }
-  void setStyleType(PseudoId styleType) {
-    m_nonInheritedData.m_styleType = styleType;
-  }
+  PseudoId StyleType() const { return StyleTypeInternal(); }
+  void SetStyleType(PseudoId style_type) { SetStyleTypeInternal(style_type); }
 
-  ComputedStyle* getCachedPseudoStyle(PseudoId) const;
-  ComputedStyle* addCachedPseudoStyle(PassRefPtr<ComputedStyle>);
-  void removeCachedPseudoStyle(PseudoId);
+  ComputedStyle* GetCachedPseudoStyle(PseudoId) const;
+  ComputedStyle* AddCachedPseudoStyle(RefPtr<ComputedStyle>);
+  void RemoveCachedPseudoStyle(PseudoId);
 
-  const PseudoStyleCache* cachedPseudoStyles() const {
-    return m_cachedPseudoStyles.get();
+  const PseudoStyleCache* CachedPseudoStyles() const {
+    return cached_pseudo_styles_.get();
   }
 
   /**
@@ -408,2951 +280,1820 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
 
   // Non-Inherited properties.
 
-  // Content alignment properties.
-  static StyleContentAlignmentData initialContentAlignment() {
-    return StyleContentAlignmentData(ContentPositionNormal,
-                                     ContentDistributionDefault,
-                                     OverflowAlignmentDefault);
+  static StyleSelfAlignmentData InitialSelfAlignment() {
+    return StyleSelfAlignmentData(kItemPositionAuto, kOverflowAlignmentDefault);
   }
 
-  // align-content (aka -webkit-align-content)
-  const StyleContentAlignmentData& alignContent() const {
-    return m_rareNonInheritedData->m_alignContent;
-  }
-  void setAlignContent(const StyleContentAlignmentData& data) {
-    SET_VAR(m_rareNonInheritedData, m_alignContent, data);
+  static StyleContentAlignmentData InitialContentAlignment() {
+    return StyleContentAlignmentData(kContentPositionNormal,
+                                     kContentDistributionDefault,
+                                     kOverflowAlignmentDefault);
   }
 
-  // justify-content (aka -webkit-justify-content)
-  const StyleContentAlignmentData& justifyContent() const {
-    return m_rareNonInheritedData->m_justifyContent;
-  }
-  void setJustifyContent(const StyleContentAlignmentData& data) {
-    SET_VAR(m_rareNonInheritedData, m_justifyContent, data);
-  }
-
-  // Default-Alignment properties.
-  static StyleSelfAlignmentData initialDefaultAlignment() {
-    return StyleSelfAlignmentData(RuntimeEnabledFeatures::cssGridLayoutEnabled()
-                                      ? ItemPositionNormal
-                                      : ItemPositionStretch,
-                                  OverflowAlignmentDefault);
-  }
-
-  // align-items (aka -webkit-align-items)
-  const StyleSelfAlignmentData& alignItems() const {
-    return m_rareNonInheritedData->m_alignItems;
-  }
-  void setAlignItems(const StyleSelfAlignmentData& data) {
-    SET_VAR(m_rareNonInheritedData, m_alignItems, data);
-  }
-
-  // justify-items
-  const StyleSelfAlignmentData& justifyItems() const {
-    return m_rareNonInheritedData->m_justifyItems;
-  }
-  void setJustifyItems(const StyleSelfAlignmentData& data) {
-    SET_VAR(m_rareNonInheritedData, m_justifyItems, data);
-  }
-
-  // Self-Alignment properties.
-  static StyleSelfAlignmentData initialSelfAlignment() {
-    return StyleSelfAlignmentData(ItemPositionAuto, OverflowAlignmentDefault);
-  }
-
-  // align-self (aka -webkit-align-self)
-  const StyleSelfAlignmentData& alignSelf() const {
-    return m_rareNonInheritedData->m_alignSelf;
-  }
-  void setAlignSelf(const StyleSelfAlignmentData& data) {
-    SET_VAR(m_rareNonInheritedData, m_alignSelf, data);
-  }
-
-  // justify-self
-  const StyleSelfAlignmentData& justifySelf() const {
-    return m_rareNonInheritedData->m_justifySelf;
-  }
-  void setJustifySelf(const StyleSelfAlignmentData& data) {
-    SET_VAR(m_rareNonInheritedData, m_justifySelf, data);
+  static StyleSelfAlignmentData InitialDefaultAlignment() {
+    return StyleSelfAlignmentData(RuntimeEnabledFeatures::CSSGridLayoutEnabled()
+                                      ? kItemPositionNormal
+                                      : kItemPositionStretch,
+                                  kOverflowAlignmentDefault);
   }
 
   // Filter properties.
 
   // backdrop-filter
-  static const FilterOperations& initialBackdropFilter();
-  const FilterOperations& backdropFilter() const {
-    return m_rareNonInheritedData->m_backdropFilter->m_operations;
+  static const FilterOperations& InitialBackdropFilter();
+  const FilterOperations& BackdropFilter() const {
+    DCHECK(BackdropFilterInternal().Get());
+    return BackdropFilterInternal()->operations_;
   }
-  FilterOperations& mutableBackdropFilter() {
-    return m_rareNonInheritedData.access()
-        ->m_backdropFilter.access()
-        ->m_operations;
+  FilterOperations& MutableBackdropFilter() {
+    DCHECK(BackdropFilterInternal().Get());
+    return MutableBackdropFilterInternal()->operations_;
   }
-  bool hasBackdropFilter() const {
-    return !m_rareNonInheritedData->m_backdropFilter->m_operations.operations()
-                .isEmpty();
+  bool HasBackdropFilter() const {
+    DCHECK(BackdropFilterInternal().Get());
+    return !BackdropFilterInternal()->operations_.Operations().IsEmpty();
   }
-  void setBackdropFilter(const FilterOperations& ops) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_backdropFilter, m_operations, ops);
+  void SetBackdropFilter(const FilterOperations& ops) {
+    DCHECK(BackdropFilterInternal().Get());
+    if (BackdropFilterInternal()->operations_ != ops)
+      MutableBackdropFilterInternal()->operations_ = ops;
+  }
+  bool BackdropFilterDataEquivalent(const ComputedStyle& o) const {
+    return DataEquivalent(BackdropFilterInternal(), o.BackdropFilterInternal());
   }
 
   // filter (aka -webkit-filter)
-  static const FilterOperations& initialFilter();
-  FilterOperations& mutableFilter() {
-    return m_rareNonInheritedData.access()->m_filter.access()->m_operations;
+  static const FilterOperations& InitialFilter();
+  FilterOperations& MutableFilter() {
+    DCHECK(FilterInternal().Get());
+    return MutableFilterInternal()->operations_;
   }
-  const FilterOperations& filter() const {
-    return m_rareNonInheritedData->m_filter->m_operations;
+  const FilterOperations& Filter() const {
+    DCHECK(FilterInternal().Get());
+    return FilterInternal()->operations_;
   }
-  bool hasFilter() const {
-    return !m_rareNonInheritedData->m_filter->m_operations.operations()
-                .isEmpty();
+  bool HasFilter() const {
+    DCHECK(FilterInternal().Get());
+    return !FilterInternal()->operations_.Operations().IsEmpty();
   }
-  void setFilter(const FilterOperations& ops) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_filter, m_operations, ops);
+  void SetFilter(const FilterOperations& v) {
+    DCHECK(FilterInternal().Get());
+    if (FilterInternal()->operations_ != v)
+      MutableFilterInternal()->operations_ = v;
   }
-
-  // backface-visibility (aka -webkit-backface-visibility)
-  static EBackfaceVisibility initialBackfaceVisibility() {
-    return BackfaceVisibilityVisible;
-  }
-  EBackfaceVisibility backfaceVisibility() const {
-    return static_cast<EBackfaceVisibility>(
-        m_rareNonInheritedData->m_backfaceVisibility);
-  }
-  void setBackfaceVisibility(EBackfaceVisibility b) {
-    SET_VAR(m_rareNonInheritedData, m_backfaceVisibility, b);
+  bool FilterDataEquivalent(const ComputedStyle& o) const {
+    return DataEquivalent(FilterInternal(), o.FilterInternal());
   }
 
   // Background properties.
   // background-color
-  static Color initialBackgroundColor() { return Color::transparent; }
-  void setBackgroundColor(const StyleColor& v) {
-    SET_VAR(m_background, m_color, v);
-  }
+  static Color InitialBackgroundColor() { return Color::kTransparent; }
+
 
   // background-image
-  bool hasBackgroundImage() const {
-    return m_background->background().hasImage();
+  bool HasBackgroundImage() const { return BackgroundInternal().HasImage(); }
+  bool HasFixedBackgroundImage() const {
+    return BackgroundInternal().HasFixedImage();
   }
-  bool hasFixedBackgroundImage() const {
-    return m_background->background().hasFixedImage();
-  }
-  bool hasEntirelyFixedBackground() const;
+  bool HasEntirelyFixedBackground() const;
 
   // background-clip
-  EFillBox backgroundClip() const {
-    return static_cast<EFillBox>(m_background->background().clip());
+  EFillBox BackgroundClip() const {
+    return static_cast<EFillBox>(BackgroundInternal().Clip());
   }
 
   // Border properties.
-  // -webkit-border-image
-  static NinePieceImage initialNinePieceImage() { return NinePieceImage(); }
-  const NinePieceImage& borderImage() const {
-    return m_surround->border.image();
-  }
-  void setBorderImage(const NinePieceImage& b) {
-    SET_VAR(m_surround, border.m_image, b);
-  }
-
   // border-image-slice
-  const LengthBox& borderImageSlices() const {
-    return m_surround->border.image().imageSlices();
+  const LengthBox& BorderImageSlices() const {
+    return BorderImage().ImageSlices();
   }
-  void setBorderImageSlices(const LengthBox&);
+  void SetBorderImageSlices(const LengthBox&);
 
   // border-image-source
-  static StyleImage* initialBorderImageSource() { return 0; }
-  StyleImage* borderImageSource() const {
-    return m_surround->border.image().image();
-  }
-  void setBorderImageSource(StyleImage*);
+  static StyleImage* InitialBorderImageSource() { return 0; }
+  StyleImage* BorderImageSource() const { return BorderImage().GetImage(); }
+  void SetBorderImageSource(StyleImage*);
 
   // border-image-width
-  const BorderImageLengthBox& borderImageWidth() const {
-    return m_surround->border.image().borderSlices();
+  const BorderImageLengthBox& BorderImageWidth() const {
+    return BorderImage().BorderSlices();
   }
-  void setBorderImageWidth(const BorderImageLengthBox&);
+  void SetBorderImageWidth(const BorderImageLengthBox&);
 
   // border-image-outset
-  const BorderImageLengthBox& borderImageOutset() const {
-    return m_surround->border.image().outset();
+  const BorderImageLengthBox& BorderImageOutset() const {
+    return BorderImage().Outset();
   }
-  void setBorderImageOutset(const BorderImageLengthBox&);
+  void SetBorderImageOutset(const BorderImageLengthBox&);
 
   // Border width properties.
-  static float initialBorderWidth() { return 3; }
+  static float InitialBorderWidth() { return 3; }
 
+  // TODO(nainar): Move all fixed point logic to a separate class.
   // border-top-width
-  float borderTopWidth() const { return m_surround->border.borderTopWidth(); }
-  void setBorderTopWidth(float v) {
-    SET_BORDER_WIDTH(m_surround, border.m_top, v);
+  float BorderTopWidth() const {
+    if (BorderTopStyle() == EBorderStyle::kNone ||
+        BorderTopStyle() == EBorderStyle::kHidden)
+      return 0;
+    return BorderTopWidthInternal().ToFloat();
+  }
+  void SetBorderTopWidth(float v) { SetBorderTopWidthInternal(LayoutUnit(v)); }
+  bool BorderTopNonZero() const {
+    return BorderTopWidth() && (BorderTopStyle() != EBorderStyle::kNone);
   }
 
   // border-bottom-width
-  float borderBottomWidth() const {
-    return m_surround->border.borderBottomWidth();
+  float BorderBottomWidth() const {
+    if (BorderBottomStyle() == EBorderStyle::kNone ||
+        BorderBottomStyle() == EBorderStyle::kHidden)
+      return 0;
+    return BorderBottomWidthInternal().ToFloat();
   }
-  void setBorderBottomWidth(float v) {
-    SET_BORDER_WIDTH(m_surround, border.m_bottom, v);
+  void SetBorderBottomWidth(float v) {
+    SetBorderBottomWidthInternal(LayoutUnit(v));
+  }
+  bool BorderBottomNonZero() const {
+    return BorderBottomWidth() && (BorderBottomStyle() != EBorderStyle::kNone);
   }
 
   // border-left-width
-  float borderLeftWidth() const { return m_surround->border.borderLeftWidth(); }
-  void setBorderLeftWidth(float v) {
-    SET_BORDER_WIDTH(m_surround, border.m_left, v);
+  float BorderLeftWidth() const {
+    if (BorderLeftStyle() == EBorderStyle::kNone ||
+        BorderLeftStyle() == EBorderStyle::kHidden)
+      return 0;
+    return BorderLeftWidthInternal().ToFloat();
+  }
+  void SetBorderLeftWidth(float v) {
+    SetBorderLeftWidthInternal(LayoutUnit(v));
+  }
+  bool BorderLeftNonZero() const {
+    return BorderLeftWidth() && (BorderLeftStyle() != EBorderStyle::kNone);
   }
 
   // border-right-width
-  float borderRightWidth() const {
-    return m_surround->border.borderRightWidth();
+  float BorderRightWidth() const {
+    if (BorderRightStyle() == EBorderStyle::kNone ||
+        BorderRightStyle() == EBorderStyle::kHidden)
+      return 0;
+    return BorderRightWidthInternal().ToFloat();
   }
-  void setBorderRightWidth(float v) {
-    SET_BORDER_WIDTH(m_surround, border.m_right, v);
+  void SetBorderRightWidth(float v) {
+    SetBorderRightWidthInternal(LayoutUnit(v));
   }
-
-  // Border style properties.
-  static EBorderStyle initialBorderStyle() { return BorderStyleNone; }
-
-  // border-top-style
-  EBorderStyle borderTopStyle() const {
-    return m_surround->border.top().style();
-  }
-  void setBorderTopStyle(EBorderStyle v) {
-    SET_VAR(m_surround, border.m_top.m_style, v);
-  }
-
-  // border-right-style
-  EBorderStyle borderRightStyle() const {
-    return m_surround->border.right().style();
-  }
-  void setBorderRightStyle(EBorderStyle v) {
-    SET_VAR(m_surround, border.m_right.m_style, v);
-  }
-
-  // border-left-style
-  EBorderStyle borderLeftStyle() const {
-    return m_surround->border.left().style();
-  }
-  void setBorderLeftStyle(EBorderStyle v) {
-    SET_VAR(m_surround, border.m_left.m_style, v);
-  }
-
-  // border-bottom-style
-  EBorderStyle borderBottomStyle() const {
-    return m_surround->border.bottom().style();
-  }
-  void setBorderBottomStyle(EBorderStyle v) {
-    SET_VAR(m_surround, border.m_bottom.m_style, v);
+  bool BorderRightNonZero() const {
+    return BorderRightWidth() && (BorderRightStyle() != EBorderStyle::kNone);
   }
 
   // Border color properties.
   // border-left-color
-  void setBorderLeftColor(const StyleColor& v) {
-    SET_BORDERVALUE_COLOR(m_surround, border.m_left, v);
+  void SetBorderLeftColor(const StyleColor& color) {
+    if (BorderLeftColor() != color) {
+      SetBorderLeftColorInternal(color.Resolve(Color()));
+      SetBorderLeftColorIsCurrentColor(color.IsCurrentColor());
+    }
   }
 
   // border-right-color
-  void setBorderRightColor(const StyleColor& v) {
-    SET_BORDERVALUE_COLOR(m_surround, border.m_right, v);
+  void SetBorderRightColor(const StyleColor& color) {
+    if (BorderRightColor() != color) {
+      SetBorderRightColorInternal(color.Resolve(Color()));
+      SetBorderRightColorIsCurrentColor(color.IsCurrentColor());
+    }
   }
 
   // border-top-color
-  void setBorderTopColor(const StyleColor& v) {
-    SET_BORDERVALUE_COLOR(m_surround, border.m_top, v);
+  void SetBorderTopColor(const StyleColor& color) {
+    if (BorderTopColor() != color) {
+      SetBorderTopColorInternal(color.Resolve(Color()));
+      SetBorderTopColorIsCurrentColor(color.IsCurrentColor());
+    }
   }
 
   // border-bottom-color
-  void setBorderBottomColor(const StyleColor& v) {
-    SET_BORDERVALUE_COLOR(m_surround, border.m_bottom, v);
+  void SetBorderBottomColor(const StyleColor& color) {
+    if (BorderBottomColor() != color) {
+      SetBorderBottomColorInternal(color.Resolve(Color()));
+      SetBorderBottomColorIsCurrentColor(color.IsCurrentColor());
+    }
   }
-
-  // Border radius properties.
-  static LengthSize initialBorderRadius() {
-    return LengthSize(Length(0, Fixed), Length(0, Fixed));
-  }
-
-  // border-top-left-radius (aka -webkit-border-top-left-radius)
-  const LengthSize& borderTopLeftRadius() const {
-    return m_surround->border.topLeft();
-  }
-  void setBorderTopLeftRadius(const LengthSize& s) {
-    SET_VAR(m_surround, border.m_topLeft, s);
-  }
-
-  // border-top-right-radius (aka -webkit-border-top-right-radius)
-  const LengthSize& borderTopRightRadius() const {
-    return m_surround->border.topRight();
-  }
-  void setBorderTopRightRadius(const LengthSize& s) {
-    SET_VAR(m_surround, border.m_topRight, s);
-  }
-
-  // border-bottom-left-radius (aka -webkit-border-bottom-left-radius)
-  const LengthSize& borderBottomLeftRadius() const {
-    return m_surround->border.bottomLeft();
-  }
-  void setBorderBottomLeftRadius(const LengthSize& s) {
-    SET_VAR(m_surround, border.m_bottomLeft, s);
-  }
-
-  // border-bottom-right-radius (aka -webkit-border-bottom-right-radius)
-  const LengthSize& borderBottomRightRadius() const {
-    return m_surround->border.bottomRight();
-  }
-  void setBorderBottomRightRadius(const LengthSize& s) {
-    SET_VAR(m_surround, border.m_bottomRight, s);
-  }
-
-  // Offset properties.
-  static Length initialOffset() { return Length(); }
-
-  // left
-  const Length& left() const { return m_surround->offset.left(); }
-  void setLeft(const Length& v) { SET_VAR(m_surround, offset.m_left, v); }
-
-  // right
-  const Length& right() const { return m_surround->offset.right(); }
-  void setRight(const Length& v) { SET_VAR(m_surround, offset.m_right, v); }
-
-  // top
-  const Length& top() const { return m_surround->offset.top(); }
-  void setTop(const Length& v) { SET_VAR(m_surround, offset.m_top, v); }
-
-  // bottom
-  const Length& bottom() const { return m_surround->offset.bottom(); }
-  void setBottom(const Length& v) { SET_VAR(m_surround, offset.m_bottom, v); }
 
   // box-shadow (aka -webkit-box-shadow)
-  static ShadowList* initialBoxShadow() { return 0; }
-  ShadowList* boxShadow() const {
-    return m_rareNonInheritedData->m_boxShadow.get();
-  }
-  void setBoxShadow(PassRefPtr<ShadowList>);
-
-  // box-sizing (aka -webkit-box-sizing)
-  static EBoxSizing initialBoxSizing() { return EBoxSizing::kContentBox; }
-  EBoxSizing boxSizing() const { return m_box->boxSizing(); }
-  void setBoxSizing(EBoxSizing s) {
-    SET_VAR(m_box, m_boxSizing, static_cast<unsigned>(s));
+  bool BoxShadowDataEquivalent(const ComputedStyle& other) const {
+    return DataEquivalent(BoxShadow(), other.BoxShadow());
   }
 
   // clip
-  static LengthBox initialClip() { return LengthBox(); }
-  const LengthBox& clip() const { return m_visual->clip; }
-  void setClip(const LengthBox& box) {
-    SET_VAR(m_visual, hasAutoClip, false);
-    SET_VAR(m_visual, clip, box);
+  static LengthBox InitialClip() { return LengthBox(); }
+  void SetClip(const LengthBox& box) {
+    SetHasAutoClipInternal(false);
+    SetClipInternal(box);
   }
-  bool hasAutoClip() const { return m_visual->hasAutoClip; }
-  void setHasAutoClip() {
-    SET_VAR(m_visual, hasAutoClip, true);
-    SET_VAR(m_visual, clip, ComputedStyle::initialClip());
+  bool HasAutoClip() const { return HasAutoClipInternal(); }
+  void SetHasAutoClip() {
+    SetHasAutoClipInternal(true);
+    SetClipInternal(ComputedStyle::InitialClip());
   }
 
   // Column properties.
   // column-count (aka -webkit-column-count)
-  static unsigned short initialColumnCount() { return 1; }
-  unsigned short columnCount() const {
-    return m_rareNonInheritedData->m_multiCol->m_count;
+  static unsigned short InitialColumnCount() { return 1; }
+  void SetColumnCount(unsigned short c) {
+    SetColumnAutoCountInternal(false);
+    SetColumnCountInternal(c);
   }
-  void setColumnCount(unsigned short c) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_autoCount, false);
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_count, c);
-  }
-  bool hasAutoColumnCount() const {
-    return m_rareNonInheritedData->m_multiCol->m_autoCount;
-  }
-  void setHasAutoColumnCount() {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_autoCount, true);
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_count,
-                   initialColumnCount());
-  }
-
-  // column-fill
-  static ColumnFill initialColumnFill() { return ColumnFillBalance; }
-  ColumnFill getColumnFill() const {
-    return static_cast<ColumnFill>(m_rareNonInheritedData->m_multiCol->m_fill);
-  }
-  void setColumnFill(ColumnFill columnFill) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_fill, columnFill);
+  bool HasAutoColumnCount() const { return ColumnAutoCountInternal(); }
+  void SetHasAutoColumnCount() {
+    SetColumnAutoCountInternal(true);
+    SetColumnCountInternal(InitialColumnCount());
   }
 
   // column-gap (aka -webkit-column-gap)
-  float columnGap() const { return m_rareNonInheritedData->m_multiCol->m_gap; }
-  void setColumnGap(float f) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_normalGap, false);
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_gap, f);
+  void SetColumnGap(float f) {
+    SetColumnNormalGapInternal(false);
+    SetColumnGapInternal(f);
   }
-  bool hasNormalColumnGap() const {
-    return m_rareNonInheritedData->m_multiCol->m_normalGap;
-  }
-  void setHasNormalColumnGap() {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_normalGap, true);
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_gap, 0);
+  bool HasNormalColumnGap() const { return ColumnNormalGapInternal(); }
+  void SetHasNormalColumnGap() {
+    SetColumnNormalGapInternal(true);
+    SetColumnGapInternal(0);
   }
 
   // column-rule-color (aka -webkit-column-rule-color)
-  void setColumnRuleColor(const StyleColor& c) {
-    SET_BORDERVALUE_COLOR(m_rareNonInheritedData.access()->m_multiCol, m_rule,
-                          c);
-  }
-
-  // column-rule-style (aka -webkit-column-rule-style)
-  EBorderStyle columnRuleStyle() const {
-    return m_rareNonInheritedData->m_multiCol->m_rule.style();
-  }
-  void setColumnRuleStyle(EBorderStyle b) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_rule.m_style, b);
+  void SetColumnRuleColor(const StyleColor& c) {
+    if (ColumnRuleColor() != c) {
+      SetColumnRuleColorInternal(c.Resolve(Color()));
+      SetColumnRuleColorIsCurrentColor(c.IsCurrentColor());
+    }
   }
 
   // column-rule-width (aka -webkit-column-rule-width)
-  static unsigned short initialColumnRuleWidth() { return 3; }
-  unsigned short columnRuleWidth() const {
-    return m_rareNonInheritedData->m_multiCol->ruleWidth();
+  static unsigned short InitialColumnRuleWidth() { return 3; }
+  unsigned short ColumnRuleWidth() const {
+    if (ColumnRuleStyle() == EBorderStyle::kNone ||
+        ColumnRuleStyle() == EBorderStyle::kHidden)
+      return 0;
+    return ColumnRuleWidthInternal().ToFloat();
   }
-  void setColumnRuleWidth(unsigned short w) {
-    SET_NESTED_BORDER_WIDTH(m_rareNonInheritedData, m_multiCol, m_rule, w);
-  }
-
-  // column-span (aka -webkit-column-span)
-  static ColumnSpan initialColumnSpan() { return ColumnSpanNone; }
-  ColumnSpan getColumnSpan() const {
-    return static_cast<ColumnSpan>(
-        m_rareNonInheritedData->m_multiCol->m_columnSpan);
-  }
-  void setColumnSpan(ColumnSpan columnSpan) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_columnSpan,
-                   columnSpan);
+  void SetColumnRuleWidth(unsigned short w) {
+    SetColumnRuleWidthInternal(LayoutUnit(w));
   }
 
   // column-width (aka -webkit-column-width)
-  float columnWidth() const {
-    return m_rareNonInheritedData->m_multiCol->m_width;
+  void SetColumnWidth(float f) {
+    SetColumnAutoWidthInternal(false);
+    SetColumnWidthInternal(f);
   }
-  void setColumnWidth(float f) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_autoWidth, false);
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_width, f);
-  }
-  bool hasAutoColumnWidth() const {
-    return m_rareNonInheritedData->m_multiCol->m_autoWidth;
-  }
-  void setHasAutoColumnWidth() {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_autoWidth, true);
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol, m_width, 0);
+  bool HasAutoColumnWidth() const { return ColumnAutoWidthInternal(); }
+  void SetHasAutoColumnWidth() {
+    SetColumnAutoWidthInternal(true);
+    SetColumnWidthInternal(0);
   }
 
   // contain
-  static Containment initialContain() { return ContainsNone; }
-  Containment contain() const {
-    return static_cast<Containment>(m_rareNonInheritedData->m_contain);
-  }
-  void setContain(Containment contain) {
-    SET_VAR(m_rareNonInheritedData, m_contain, contain);
-  }
+  static Containment InitialContain() { return kContainsNone; }
 
   // content
-  ContentData* contentData() const {
-    return m_rareNonInheritedData->m_content.get();
-  }
-  void setContent(ContentData*);
-
-  // display
-  static EDisplay initialDisplay() { return EDisplay::Inline; }
-  EDisplay display() const {
-    return static_cast<EDisplay>(m_nonInheritedData.m_effectiveDisplay);
-  }
-  EDisplay originalDisplay() const {
-    return static_cast<EDisplay>(m_nonInheritedData.m_originalDisplay);
-  }
-  void setDisplay(EDisplay v) {
-    m_nonInheritedData.m_effectiveDisplay = static_cast<unsigned>(v);
-  }
-  void setOriginalDisplay(EDisplay v) {
-    m_nonInheritedData.m_originalDisplay = static_cast<unsigned>(v);
-  }
-
-  // Flex properties.
-  // flex-basis (aka -webkit-flex-basis)
-  static Length initialFlexBasis() { return Length(Auto); }
-  const Length& flexBasis() const {
-    return m_rareNonInheritedData->m_flexibleBox->m_flexBasis;
-  }
-  void setFlexBasis(const Length& length) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_flexibleBox, m_flexBasis, length);
-  }
-
-  // flex-direction (aka -webkit-flex-direction)
-  static EFlexDirection initialFlexDirection() { return FlowRow; }
-  EFlexDirection flexDirection() const {
-    return static_cast<EFlexDirection>(
-        m_rareNonInheritedData->m_flexibleBox->m_flexDirection);
-  }
-  void setFlexDirection(EFlexDirection direction) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_flexibleBox, m_flexDirection,
-                   direction);
-  }
-
-  // flex-grow (aka -webkit-flex-grow)
-  static float initialFlexGrow() { return 0; }
-  float flexGrow() const {
-    return m_rareNonInheritedData->m_flexibleBox->m_flexGrow;
-  }
-  void setFlexGrow(float f) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_flexibleBox, m_flexGrow, f);
-  }
-
-  // flex-shrink (aka -webkit-flex-shrink)
-  static float initialFlexShrink() { return 1; }
-  float flexShrink() const {
-    return m_rareNonInheritedData->m_flexibleBox->m_flexShrink;
-  }
-  void setFlexShrink(float f) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_flexibleBox, m_flexShrink, f);
-  }
-
-  // flex-wrap (aka -webkit-flex-wrap)
-  static EFlexWrap initialFlexWrap() { return FlexNoWrap; }
-  EFlexWrap flexWrap() const {
-    return static_cast<EFlexWrap>(
-        m_rareNonInheritedData->m_flexibleBox->m_flexWrap);
-  }
-  void setFlexWrap(EFlexWrap w) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_flexibleBox, m_flexWrap, w);
-  }
-
-  // -webkit-box-flex
-  static float initialBoxFlex() { return 0.0f; }
-  float boxFlex() const {
-    return m_rareNonInheritedData->m_deprecatedFlexibleBox->flex;
-  }
-  void setBoxFlex(float f) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_deprecatedFlexibleBox, flex, f);
-  }
-
-  // -webkit-box-flex-group
-  static unsigned initialBoxFlexGroup() { return 1; }
-  unsigned boxFlexGroup() const {
-    return m_rareNonInheritedData->m_deprecatedFlexibleBox->flexGroup;
-  }
-  void setBoxFlexGroup(unsigned fg) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_deprecatedFlexibleBox, flexGroup,
-                   fg);
-  }
-
-  // -webkit-box-align
-  // For valid values of box-align see
-  // http://www.w3.org/TR/2009/WD-css3-flexbox-20090723/#alignment
-  static EBoxAlignment initialBoxAlign() { return BSTRETCH; }
-  EBoxAlignment boxAlign() const {
-    return static_cast<EBoxAlignment>(
-        m_rareNonInheritedData->m_deprecatedFlexibleBox->align);
-  }
-  void setBoxAlign(EBoxAlignment a) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_deprecatedFlexibleBox, align, a);
-  }
-
-  // -webkit-box-decoration-break
-  static EBoxDecorationBreak initialBoxDecorationBreak() {
-    return BoxDecorationBreakSlice;
-  }
-  EBoxDecorationBreak boxDecorationBreak() const {
-    return m_box->boxDecorationBreak();
-  }
-  void setBoxDecorationBreak(EBoxDecorationBreak b) {
-    SET_VAR(m_box, m_boxDecorationBreak, b);
-  }
-
-  // -webkit-box-lines
-  static EBoxLines initialBoxLines() { return SINGLE; }
-  EBoxLines boxLines() const {
-    return static_cast<EBoxLines>(
-        m_rareNonInheritedData->m_deprecatedFlexibleBox->lines);
-  }
-  void setBoxLines(EBoxLines lines) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_deprecatedFlexibleBox, lines,
-                   lines);
-  }
+  ContentData* GetContentData() const { return ContentInternal().Get(); }
+  void SetContent(ContentData*);
 
   // -webkit-box-ordinal-group
-  static unsigned initialBoxOrdinalGroup() { return 1; }
-  unsigned boxOrdinalGroup() const {
-    return m_rareNonInheritedData->m_deprecatedFlexibleBox->ordinalGroup;
-  }
-  void setBoxOrdinalGroup(unsigned og) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_deprecatedFlexibleBox,
-                   ordinalGroup, og);
-  }
-
-  // -webkit-box-orient
-  static EBoxOrient initialBoxOrient() { return HORIZONTAL; }
-  EBoxOrient boxOrient() const {
-    return static_cast<EBoxOrient>(
-        m_rareNonInheritedData->m_deprecatedFlexibleBox->orient);
-  }
-  void setBoxOrient(EBoxOrient o) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_deprecatedFlexibleBox, orient, o);
-  }
-
-  // -webkit-box-pack
-  static EBoxPack initialBoxPack() { return BoxPackStart; }
-  EBoxPack boxPack() const {
-    return static_cast<EBoxPack>(
-        m_rareNonInheritedData->m_deprecatedFlexibleBox->pack);
-  }
-  void setBoxPack(EBoxPack p) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_deprecatedFlexibleBox, pack, p);
-  }
-
-  // -webkit-box-reflect
-  static StyleReflection* initialBoxReflect() { return 0; }
-  StyleReflection* boxReflect() const {
-    return m_rareNonInheritedData->m_boxReflect.get();
-  }
-  void setBoxReflect(PassRefPtr<StyleReflection> reflect) {
-    if (m_rareNonInheritedData->m_boxReflect != reflect)
-      m_rareNonInheritedData.access()->m_boxReflect = reflect;
+  static unsigned InitialBoxOrdinalGroup() { return 1; }
+  void SetBoxOrdinalGroup(unsigned og) {
+    SetBoxOrdinalGroupInternal(
+        std::min(std::numeric_limits<unsigned>::max() - 1, og));
   }
 
   // Grid properties.
-  static Vector<GridTrackSize> initialGridAutoRepeatTracks() {
-    return Vector<GridTrackSize>(); /* none */
-  }
-  static size_t initialGridAutoRepeatInsertionPoint() { return 0; }
-  static AutoRepeatType initialGridAutoRepeatType() { return NoAutoRepeat; }
-  static NamedGridLinesMap initialNamedGridColumnLines() {
-    return NamedGridLinesMap();
-  }
-  static NamedGridLinesMap initialNamedGridRowLines() {
-    return NamedGridLinesMap();
-  }
-  static OrderedNamedGridLines initialOrderedNamedGridColumnLines() {
-    return OrderedNamedGridLines();
-  }
-  static OrderedNamedGridLines initialOrderedNamedGridRowLines() {
-    return OrderedNamedGridLines();
-  }
-  static NamedGridAreaMap initialNamedGridArea() { return NamedGridAreaMap(); }
-  static size_t initialNamedGridAreaCount() { return 0; }
-
-  // grid-auto-columns
-  static Vector<GridTrackSize> initialGridAutoColumns();
-  const Vector<GridTrackSize>& gridAutoColumns() const {
-    return m_rareNonInheritedData->m_grid->m_gridAutoColumns;
-  }
-  void setGridAutoColumns(const Vector<GridTrackSize>& trackSizeList) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_gridAutoColumns,
-                   trackSizeList);
+  static size_t InitialGridAutoRepeatInsertionPoint() { return 0; }
+  static AutoRepeatType InitialGridAutoRepeatType() {
+    return AutoRepeatType::kNoAutoRepeat;
   }
 
   // grid-auto-flow
-  static GridAutoFlow initialGridAutoFlow() { return AutoFlowRow; }
-  void setGridAutoFlow(GridAutoFlow flow) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_gridAutoFlow, flow);
-  }
-
-  // grid-auto-rows
-  static Vector<GridTrackSize> initialGridAutoRows();
-  const Vector<GridTrackSize>& gridAutoRows() const {
-    return m_rareNonInheritedData->m_grid->m_gridAutoRows;
-  }
-  void setGridAutoRows(const Vector<GridTrackSize>& trackSizeList) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_gridAutoRows,
-                   trackSizeList);
-  }
-
-  // grid-column-gap
-  static Length initialGridColumnGap() { return Length(Fixed); }
-  const Length& gridColumnGap() const {
-    return m_rareNonInheritedData->m_grid->m_gridColumnGap;
-  }
-  void setGridColumnGap(const Length& v) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_gridColumnGap, v);
-  }
-
-  // grid-column-start
-  static GridPosition initialGridColumnStart() {
-    return GridPosition(); /* auto */
-  }
-  const GridPosition& gridColumnStart() const {
-    return m_rareNonInheritedData->m_gridItem->m_gridColumnStart;
-  }
-  void setGridColumnStart(const GridPosition& columnStartPosition) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_gridItem, m_gridColumnStart,
-                   columnStartPosition);
-  }
-
-  // grid-column-end
-  static GridPosition initialGridColumnEnd() {
-    return GridPosition(); /* auto */
-  }
-  const GridPosition& gridColumnEnd() const {
-    return m_rareNonInheritedData->m_gridItem->m_gridColumnEnd;
-  }
-  void setGridColumnEnd(const GridPosition& columnEndPosition) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_gridItem, m_gridColumnEnd,
-                   columnEndPosition);
-  }
-
-  // grid-row-gap
-  static Length initialGridRowGap() { return Length(Fixed); }
-  const Length& gridRowGap() const {
-    return m_rareNonInheritedData->m_grid->m_gridRowGap;
-  }
-  void setGridRowGap(const Length& v) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_gridRowGap, v);
-  }
-
-  // grid-row-start
-  static GridPosition initialGridRowStart() {
-    return GridPosition(); /* auto */
-  }
-  const GridPosition& gridRowStart() const {
-    return m_rareNonInheritedData->m_gridItem->m_gridRowStart;
-  }
-  void setGridRowStart(const GridPosition& rowStartPosition) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_gridItem, m_gridRowStart,
-                   rowStartPosition);
-  }
-
-  // grid-row-end
-  static GridPosition initialGridRowEnd() { return GridPosition(); /* auto */ }
-  const GridPosition& gridRowEnd() const {
-    return m_rareNonInheritedData->m_gridItem->m_gridRowEnd;
-  }
-  void setGridRowEnd(const GridPosition& rowEndPosition) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_gridItem, m_gridRowEnd,
-                   rowEndPosition);
-  }
-
-  // grid-template-columns
-  static Vector<GridTrackSize> initialGridTemplateColumns() {
-    return Vector<GridTrackSize>(); /* none */
-  }
-  const Vector<GridTrackSize>& gridTemplateColumns() const {
-    return m_rareNonInheritedData->m_grid->m_gridTemplateColumns;
-  }
-  void setGridTemplateColumns(const Vector<GridTrackSize>& lengths) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_gridTemplateColumns,
-                   lengths);
-  }
-
-  // grid-template-rows
-  static Vector<GridTrackSize> initialGridTemplateRows() {
-    return Vector<GridTrackSize>(); /* none */
-  }
-  const Vector<GridTrackSize>& gridTemplateRows() const {
-    return m_rareNonInheritedData->m_grid->m_gridTemplateRows;
-  }
-  void setGridTemplateRows(const Vector<GridTrackSize>& lengths) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_gridTemplateRows, lengths);
-  }
-
-  // Width/height properties.
-  static Length initialSize() { return Length(); }
-  static Length initialMaxSize() { return Length(MaxSizeNone); }
-  static Length initialMinSize() { return Length(); }
-
-  // width
-  const Length& width() const { return m_box->width(); }
-  void setWidth(const Length& v) { SET_VAR(m_box, m_width, v); }
-
-  // height
-  const Length& height() const { return m_box->height(); }
-  void setHeight(const Length& v) { SET_VAR(m_box, m_height, v); }
-
-  // max-width
-  const Length& maxWidth() const { return m_box->maxWidth(); }
-  void setMaxWidth(const Length& v) { SET_VAR(m_box, m_maxWidth, v); }
-
-  // max-height
-  const Length& maxHeight() const { return m_box->maxHeight(); }
-  void setMaxHeight(const Length& v) { SET_VAR(m_box, m_maxHeight, v); }
-
-  // min-width
-  const Length& minWidth() const { return m_box->minWidth(); }
-  void setMinWidth(const Length& v) { SET_VAR(m_box, m_minWidth, v); }
-
-  // min-height
-  const Length& minHeight() const { return m_box->minHeight(); }
-  void setMinHeight(const Length& v) { SET_VAR(m_box, m_minHeight, v); }
-
-  // image-orientation
-  static RespectImageOrientationEnum initialRespectImageOrientation() {
-    return DoNotRespectImageOrientation;
-  }
-  RespectImageOrientationEnum respectImageOrientation() const {
-    return static_cast<RespectImageOrientationEnum>(
-        m_rareInheritedData->m_respectImageOrientation);
-  }
-  void setRespectImageOrientation(RespectImageOrientationEnum v) {
-    SET_VAR(m_rareInheritedData, m_respectImageOrientation, v);
-  }
-
-  // image-rendering
-  static EImageRendering initialImageRendering() { return ImageRenderingAuto; }
-  EImageRendering imageRendering() const {
-    return static_cast<EImageRendering>(m_rareInheritedData->m_imageRendering);
-  }
-  void setImageRendering(EImageRendering v) {
-    SET_VAR(m_rareInheritedData, m_imageRendering, v);
-  }
-
-  // isolation
-  static EIsolation initialIsolation() { return IsolationAuto; }
-  EIsolation isolation() const {
-    return static_cast<EIsolation>(m_rareNonInheritedData->m_isolation);
-  }
-  void setIsolation(EIsolation v) {
-    m_rareNonInheritedData.access()->m_isolation = v;
-  }
-
-  // Margin properties.
-  static Length initialMargin() { return Length(Fixed); }
-
-  // margin-top
-  const Length& marginTop() const { return m_surround->margin.top(); }
-  void setMarginTop(const Length& v) { SET_VAR(m_surround, margin.m_top, v); }
-
-  // margin-bottom
-  const Length& marginBottom() const { return m_surround->margin.bottom(); }
-  void setMarginBottom(const Length& v) {
-    SET_VAR(m_surround, margin.m_bottom, v);
-  }
-
-  // margin-left
-  const Length& marginLeft() const { return m_surround->margin.left(); }
-  void setMarginLeft(const Length& v) { SET_VAR(m_surround, margin.m_left, v); }
-
-  // margin-right
-  const Length& marginRight() const { return m_surround->margin.right(); }
-  void setMarginRight(const Length& v) {
-    SET_VAR(m_surround, margin.m_right, v);
-  }
-
-  // -webkit-margin-before-collapse (aka -webkit-margin-top-collapse)
-  static EMarginCollapse initialMarginBeforeCollapse() {
-    return MarginCollapseCollapse;
-  }
-  EMarginCollapse marginAfterCollapse() const {
-    return static_cast<EMarginCollapse>(
-        m_rareNonInheritedData->marginAfterCollapse);
-  }
-  void setMarginBeforeCollapse(EMarginCollapse c) {
-    SET_VAR(m_rareNonInheritedData, marginBeforeCollapse, c);
-  }
-
-  // -webkit-margin-after-collapse (aka -webkit-margin-bottom-collapse)
-  static EMarginCollapse initialMarginAfterCollapse() {
-    return MarginCollapseCollapse;
-  }
-  EMarginCollapse marginBeforeCollapse() const {
-    return static_cast<EMarginCollapse>(
-        m_rareNonInheritedData->marginBeforeCollapse);
-  }
-  void setMarginAfterCollapse(EMarginCollapse c) {
-    SET_VAR(m_rareNonInheritedData, marginAfterCollapse, c);
-  }
-
-  // mix-blend-mode
-  static WebBlendMode initialBlendMode() { return WebBlendModeNormal; }
-  WebBlendMode blendMode() const {
-    return static_cast<WebBlendMode>(
-        m_rareNonInheritedData->m_effectiveBlendMode);
-  }
-  void setBlendMode(WebBlendMode v) {
-    m_rareNonInheritedData.access()->m_effectiveBlendMode = v;
-  }
-
-  // object-fit
-  static ObjectFit initialObjectFit() { return ObjectFitFill; }
-  ObjectFit getObjectFit() const {
-    return static_cast<ObjectFit>(m_rareNonInheritedData->m_objectFit);
-  }
-  void setObjectFit(ObjectFit f) {
-    SET_VAR(m_rareNonInheritedData, m_objectFit, f);
-  }
-
-  // object-position
-  static LengthPoint initialObjectPosition() {
-    return LengthPoint(Length(50.0, Percent), Length(50.0, Percent));
-  }
-  LengthPoint objectPosition() const {
-    return m_rareNonInheritedData->m_objectPosition;
-  }
-  void setObjectPosition(LengthPoint position) {
-    SET_VAR(m_rareNonInheritedData, m_objectPosition, position);
-  }
-
-  // offset-anchor
-  static LengthPoint initialOffsetAnchor() {
-    return LengthPoint(Length(Auto), Length(Auto));
-  }
-  const LengthPoint& offsetAnchor() const {
-    return m_rareNonInheritedData->m_transform->m_motion.m_anchor;
-  }
-  void setOffsetAnchor(const LengthPoint& offsetAnchor) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_transform, m_motion.m_anchor,
-                   offsetAnchor);
-  }
-
-  // offset-distance
-  static Length initialOffsetDistance() { return Length(0, Fixed); }
-  const Length& offsetDistance() const {
-    return m_rareNonInheritedData->m_transform->m_motion.m_distance;
-  }
-  void setOffsetDistance(const Length& offsetDistance) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_transform, m_motion.m_distance,
-                   offsetDistance);
-  }
-
-  // offset-path
-  static StylePath* initialOffsetPath() { return nullptr; }
-  StylePath* offsetPath() const {
-    return m_rareNonInheritedData->m_transform->m_motion.m_path.get();
-  }
-  void setOffsetPath(PassRefPtr<StylePath>);
-
-  // offset-position
-  static LengthPoint initialOffsetPosition() {
-    return LengthPoint(Length(Auto), Length(Auto));
-  }
-  const LengthPoint& offsetPosition() const {
-    return m_rareNonInheritedData->m_transform->m_motion.m_position;
-  }
-  void setOffsetPosition(const LengthPoint& offsetPosition) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_transform, m_motion.m_position,
-                   offsetPosition);
-  }
-
-  // offset-rotate
-  static StyleOffsetRotation initialOffsetRotate() {
-    return initialOffsetRotation();
-  }
-  const StyleOffsetRotation& offsetRotate() const { return offsetRotation(); }
-  void setOffsetRotate(const StyleOffsetRotation& offsetRotate) {
-    setOffsetRotation(offsetRotate);
-  }
-
-  // offset-rotation
-  static StyleOffsetRotation initialOffsetRotation() {
-    return StyleOffsetRotation(0, OffsetRotationAuto);
-  }
-  const StyleOffsetRotation& offsetRotation() const {
-    return m_rareNonInheritedData->m_transform->m_motion.m_rotation;
-  }
-  void setOffsetRotation(const StyleOffsetRotation& offsetRotation) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_transform, m_motion.m_rotation,
-                   offsetRotation);
-  }
+  static GridAutoFlow InitialGridAutoFlow() { return kAutoFlowRow; }
 
   // opacity (aka -webkit-opacity)
-  static float initialOpacity() { return 1.0f; }
-  float opacity() const { return m_rareNonInheritedData->opacity; }
-  void setOpacity(float f) {
+  static float InitialOpacity() { return 1.0f; }
+  void SetOpacity(float f) {
     float v = clampTo<float>(f, 0, 1);
-    SET_VAR(m_rareNonInheritedData, opacity, v);
+    SetOpacityInternal(v);
+  }
+
+  bool OpacityChangedStackingContext(const ComputedStyle& other) const {
+    // We only need do layout for opacity changes if adding or losing opacity
+    // could trigger a change
+    // in us being a stacking context.
+    if (IsStackingContext() == other.IsStackingContext() ||
+        HasOpacity() == other.HasOpacity()) {
+      // FIXME: We would like to use SimplifiedLayout here, but we can't quite
+      // do that yet.  We need to make sure SimplifiedLayout can operate
+      // correctly on LayoutInlines (we will need to add a
+      // selfNeedsSimplifiedLayout bit in order to not get confused and taint
+      // every line).  In addition we need to solve the floating object issue
+      // when layers come and go. Right now a full layout is necessary to keep
+      // floating object lists sane.
+      return true;
+    }
+    return false;
   }
 
   // order (aka -webkit-order)
-  static int initialOrder() { return 0; }
-  int order() const { return m_rareNonInheritedData->m_order; }
+  static int InitialOrder() { return 0; }
   // We restrict the smallest value to int min + 2 because we use int min and
   // int min + 1 as special values in a hash set.
-  void setOrder(int o) {
-    SET_VAR(m_rareNonInheritedData, m_order,
-            max(std::numeric_limits<int>::min() + 2, o));
+  void SetOrder(int o) {
+    SetOrderInternal(max(std::numeric_limits<int>::min() + 2, o));
   }
 
   // Outline properties.
-  // outline-color
-  void setOutlineColor(const StyleColor& v) {
-    SET_BORDERVALUE_COLOR(m_rareNonInheritedData, m_outline, v);
+
+  bool OutlineVisuallyEqual(const ComputedStyle& other) const {
+    if (OutlineStyle() == EBorderStyle::kNone &&
+        other.OutlineStyle() == EBorderStyle::kNone)
+      return true;
+    return OutlineWidthInternal() == other.OutlineWidthInternal() &&
+           OutlineColorIsCurrentColor() == other.OutlineColorIsCurrentColor() &&
+           OutlineColor() == other.OutlineColor() &&
+           OutlineStyle() == other.OutlineStyle() &&
+           OutlineOffsetInternal() == other.OutlineOffsetInternal() &&
+           OutlineStyleIsAuto() == other.OutlineStyleIsAuto();
   }
 
-  // outline-style
-  EBorderStyle outlineStyle() const {
-    return m_rareNonInheritedData->m_outline.style();
-  }
-  void setOutlineStyle(EBorderStyle v) {
-    SET_VAR(m_rareNonInheritedData, m_outline.m_style, v);
-  }
-  static OutlineIsAuto initialOutlineStyleIsAuto() { return OutlineIsAutoOff; }
-  OutlineIsAuto outlineStyleIsAuto() const {
-    return static_cast<OutlineIsAuto>(
-        m_rareNonInheritedData->m_outline.isAuto());
-  }
-  void setOutlineStyleIsAuto(OutlineIsAuto isAuto) {
-    SET_VAR(m_rareNonInheritedData, m_outline.m_isAuto, isAuto);
+  // outline-color
+  void SetOutlineColor(const StyleColor& v) {
+    if (OutlineColor() != v) {
+      SetOutlineColorInternal(v.Resolve(Color()));
+      SetOutlineColorIsCurrentColor(v.IsCurrentColor());
+    }
   }
 
   // outline-width
-  static unsigned short initialOutlineWidth() { return 3; }
-  unsigned short outlineWidth() const {
-    if (m_rareNonInheritedData->m_outline.style() == BorderStyleNone)
+  static unsigned short InitialOutlineWidth() { return 3; }
+  unsigned short OutlineWidth() const {
+    if (OutlineStyle() == EBorderStyle::kNone)
       return 0;
-    return m_rareNonInheritedData->m_outline.width();
+    // FIXME: Why is this stored as a float but converted to short?
+    return OutlineWidthInternal().ToFloat();
   }
-  void setOutlineWidth(unsigned short v) {
-    SET_BORDER_WIDTH(m_rareNonInheritedData, m_outline, v);
+  void SetOutlineWidth(unsigned short v) {
+    SetOutlineWidthInternal(LayoutUnit(v));
   }
 
   // outline-offset
-  static int initialOutlineOffset() { return 0; }
-  int outlineOffset() const {
-    if (m_rareNonInheritedData->m_outline.style() == BorderStyleNone)
+  static int InitialOutlineOffset() { return 0; }
+  int OutlineOffset() const {
+    if (OutlineStyle() == EBorderStyle::kNone)
       return 0;
-    return m_rareNonInheritedData->m_outline.offset();
-  }
-  void setOutlineOffset(int v) {
-    SET_VAR(m_rareNonInheritedData, m_outline.m_offset, v);
-  }
-
-  // Padding properties.
-  static Length initialPadding() { return Length(Fixed); }
-
-  // padding-bottom
-  const Length& paddingBottom() const { return m_surround->padding.bottom(); }
-  void setPaddingBottom(const Length& v) {
-    SET_VAR(m_surround, padding.m_bottom, v);
-  }
-
-  // padding-left
-  const Length& paddingLeft() const { return m_surround->padding.left(); }
-  void setPaddingLeft(const Length& v) {
-    SET_VAR(m_surround, padding.m_left, v);
-  }
-
-  // padding-right
-  const Length& paddingRight() const { return m_surround->padding.right(); }
-  void setPaddingRight(const Length& v) {
-    SET_VAR(m_surround, padding.m_right, v);
-  }
-
-  // padding-top
-  const Length& paddingTop() const { return m_surround->padding.top(); }
-  void setPaddingTop(const Length& v) { SET_VAR(m_surround, padding.m_top, v); }
-
-  // perspective (aka -webkit-perspective)
-  static float initialPerspective() { return 0; }
-  float perspective() const { return m_rareNonInheritedData->m_perspective; }
-  void setPerspective(float p) {
-    SET_VAR(m_rareNonInheritedData, m_perspective, p);
-  }
-
-  // perspective-origin (aka -webkit-perspective-origin)
-  static LengthPoint initialPerspectiveOrigin() {
-    return LengthPoint(Length(50.0, Percent), Length(50.0, Percent));
-  }
-  const LengthPoint& perspectiveOrigin() const {
-    return m_rareNonInheritedData->m_perspectiveOrigin;
-  }
-  void setPerspectiveOrigin(const LengthPoint& p) {
-    SET_VAR(m_rareNonInheritedData, m_perspectiveOrigin, p);
+    return OutlineOffsetInternal();
   }
 
   // -webkit-perspective-origin-x
-  static Length initialPerspectiveOriginX() { return Length(50.0, Percent); }
-  const Length& perspectiveOriginX() const { return perspectiveOrigin().x(); }
-  void setPerspectiveOriginX(const Length& v) {
-    setPerspectiveOrigin(LengthPoint(v, perspectiveOriginY()));
+  static Length InitialPerspectiveOriginX() { return Length(50.0, kPercent); }
+  const Length& PerspectiveOriginX() const { return PerspectiveOrigin().X(); }
+  void SetPerspectiveOriginX(const Length& v) {
+    SetPerspectiveOrigin(LengthPoint(v, PerspectiveOriginY()));
   }
 
   // -webkit-perspective-origin-y
-  static Length initialPerspectiveOriginY() { return Length(50.0, Percent); }
-  const Length& perspectiveOriginY() const { return perspectiveOrigin().y(); }
-  void setPerspectiveOriginY(const Length& v) {
-    setPerspectiveOrigin(LengthPoint(perspectiveOriginX(), v));
+  static Length InitialPerspectiveOriginY() { return Length(50.0, kPercent); }
+  const Length& PerspectiveOriginY() const { return PerspectiveOrigin().Y(); }
+  void SetPerspectiveOriginY(const Length& v) {
+    SetPerspectiveOrigin(LengthPoint(PerspectiveOriginX(), v));
   }
-
-  // resize
-  static EResize initialResize() { return RESIZE_NONE; }
-  EResize resize() const {
-    return static_cast<EResize>(m_rareNonInheritedData->m_resize);
-  }
-  void setResize(EResize r) { SET_VAR(m_rareNonInheritedData, m_resize, r); }
 
   // Transform properties.
   // transform (aka -webkit-transform)
-  static EmptyTransformOperations initialTransform() {
+  static EmptyTransformOperations InitialTransform() {
     return EmptyTransformOperations();
-  }
-  const TransformOperations& transform() const {
-    return m_rareNonInheritedData->m_transform->m_operations;
-  }
-  void setTransform(const TransformOperations& ops) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_transform, m_operations, ops);
-  }
-
-  // transform-origin (aka -webkit-transform-origin)
-  static TransformOrigin initialTransformOrigin() {
-    return TransformOrigin(Length(50.0, Percent), Length(50.0, Percent), 0);
-  }
-  const TransformOrigin& transformOrigin() const {
-    return m_rareNonInheritedData->m_transform->m_origin;
-  }
-  void setTransformOrigin(const TransformOrigin& o) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_transform, m_origin, o);
-  }
-
-  // transform-style (aka -webkit-transform-style)
-  static ETransformStyle3D initialTransformStyle3D() {
-    return TransformStyle3DFlat;
-  }
-  ETransformStyle3D transformStyle3D() const {
-    return static_cast<ETransformStyle3D>(
-        m_rareNonInheritedData->m_transformStyle3D);
-  }
-  void setTransformStyle3D(ETransformStyle3D b) {
-    SET_VAR(m_rareNonInheritedData, m_transformStyle3D, b);
   }
 
   // -webkit-transform-origin-x
-  static Length initialTransformOriginX() { return Length(50.0, Percent); }
-  const Length& transformOriginX() const { return transformOrigin().x(); }
-  void setTransformOriginX(const Length& v) {
-    setTransformOrigin(
-        TransformOrigin(v, transformOriginY(), transformOriginZ()));
+  static Length InitialTransformOriginX() { return Length(50.0, kPercent); }
+  const Length& TransformOriginX() const { return GetTransformOrigin().X(); }
+  void SetTransformOriginX(const Length& v) {
+    SetTransformOrigin(
+        TransformOrigin(v, TransformOriginY(), TransformOriginZ()));
   }
 
   // -webkit-transform-origin-y
-  static Length initialTransformOriginY() { return Length(50.0, Percent); }
-  const Length& transformOriginY() const { return transformOrigin().y(); }
-  void setTransformOriginY(const Length& v) {
-    setTransformOrigin(
-        TransformOrigin(transformOriginX(), v, transformOriginZ()));
+  static Length InitialTransformOriginY() { return Length(50.0, kPercent); }
+  const Length& TransformOriginY() const { return GetTransformOrigin().Y(); }
+  void SetTransformOriginY(const Length& v) {
+    SetTransformOrigin(
+        TransformOrigin(TransformOriginX(), v, TransformOriginZ()));
   }
 
   // -webkit-transform-origin-z
-  static float initialTransformOriginZ() { return 0; }
-  float transformOriginZ() const { return transformOrigin().z(); }
-  void setTransformOriginZ(float f) {
-    setTransformOrigin(
-        TransformOrigin(transformOriginX(), transformOriginY(), f));
-  }
-
-  // Independent transform properties.
-  // translate
-  static PassRefPtr<TranslateTransformOperation> initialTranslate() {
-    return nullptr;
-  }
-  TranslateTransformOperation* translate() const {
-    return m_rareNonInheritedData->m_transform->m_translate.get();
-  }
-  void setTranslate(PassRefPtr<TranslateTransformOperation> v) {
-    m_rareNonInheritedData.access()->m_transform.access()->m_translate = v;
-  }
-
-  // rotate
-  static PassRefPtr<RotateTransformOperation> initialRotate() {
-    return nullptr;
-  }
-  RotateTransformOperation* rotate() const {
-    return m_rareNonInheritedData->m_transform->m_rotate.get();
-  }
-  void setRotate(PassRefPtr<RotateTransformOperation> v) {
-    m_rareNonInheritedData.access()->m_transform.access()->m_rotate = v;
-  }
-
-  // scale
-  static PassRefPtr<ScaleTransformOperation> initialScale() { return nullptr; }
-  ScaleTransformOperation* scale() const {
-    return m_rareNonInheritedData->m_transform->m_scale.get();
-  }
-  void setScale(PassRefPtr<ScaleTransformOperation> v) {
-    m_rareNonInheritedData.access()->m_transform.access()->m_scale = v;
+  static float InitialTransformOriginZ() { return 0; }
+  float TransformOriginZ() const { return GetTransformOrigin().Z(); }
+  void SetTransformOriginZ(float f) {
+    SetTransformOrigin(
+        TransformOrigin(TransformOriginX(), TransformOriginY(), f));
   }
 
   // Scroll properties.
   // scroll-behavior
-  static ScrollBehavior initialScrollBehavior() { return ScrollBehaviorAuto; }
-  ScrollBehavior getScrollBehavior() const {
-    return static_cast<ScrollBehavior>(
-        m_rareNonInheritedData->m_scrollBehavior);
+  static ScrollBehavior InitialScrollBehavior() { return kScrollBehaviorAuto; }
+
+  // scroll-padding-block-start
+  const Length& ScrollPaddingBlockStart() const {
+    return IsHorizontalWritingMode() ? ScrollPaddingTop() : ScrollPaddingLeft();
   }
-  void setScrollBehavior(ScrollBehavior b) {
-    SET_VAR(m_rareNonInheritedData, m_scrollBehavior, b);
+  void SetScrollPaddingBlockStart(const Length& v) {
+    if (IsHorizontalWritingMode())
+      SetScrollPaddingTop(v);
+    else
+      SetScrollPaddingLeft(v);
   }
 
-  // scroll-snap-coordinate
-  static Vector<LengthPoint> initialScrollSnapCoordinate() {
-    return Vector<LengthPoint>();
+  // scroll-padding-block-end
+  const Length& ScrollPaddingBlockEnd() const {
+    return IsHorizontalWritingMode() ? ScrollPaddingBottom()
+                                     : ScrollPaddingRight();
   }
-  const Vector<LengthPoint>& scrollSnapCoordinate() const {
-    return m_rareNonInheritedData->m_scrollSnap->m_coordinates;
-  }
-  void setScrollSnapCoordinate(const Vector<LengthPoint>& b) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_scrollSnap, m_coordinates, b);
-  }
-
-  // scroll-snap-destination
-  static LengthPoint initialScrollSnapDestination() {
-    return LengthPoint(Length(0, Fixed), Length(0, Fixed));
-  }
-  const LengthPoint& scrollSnapDestination() const {
-    return m_rareNonInheritedData->m_scrollSnap->m_destination;
-  }
-  void setScrollSnapDestination(const LengthPoint& b) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_scrollSnap, m_destination, b);
+  void SetScrollPaddingBlockEnd(const Length& v) {
+    if (IsHorizontalWritingMode())
+      SetScrollPaddingBottom(v);
+    else
+      SetScrollPaddingRight(v);
   }
 
-  // scroll-snap-points-x
-  static ScrollSnapPoints initialScrollSnapPointsX() {
-    return ScrollSnapPoints();
+  // scroll-padding-inline-start
+  const Length& ScrollPaddingInlineStart() const {
+    return IsHorizontalWritingMode() ? ScrollPaddingLeft() : ScrollPaddingTop();
   }
-  const ScrollSnapPoints& scrollSnapPointsX() const {
-    return m_rareNonInheritedData->m_scrollSnap->m_xPoints;
-  }
-  void setScrollSnapPointsX(const ScrollSnapPoints& b) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_scrollSnap, m_xPoints, b);
-  }
-
-  // scroll-snap-points-y
-  static ScrollSnapPoints initialScrollSnapPointsY() {
-    return ScrollSnapPoints();
-  }
-  const ScrollSnapPoints& scrollSnapPointsY() const {
-    return m_rareNonInheritedData->m_scrollSnap->m_yPoints;
-  }
-  void setScrollSnapPointsY(const ScrollSnapPoints& b) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_scrollSnap, m_yPoints, b);
+  void SetScrollPaddingInlineStart(const Length& v) {
+    if (IsHorizontalWritingMode())
+      SetScrollPaddingLeft(v);
+    else
+      SetScrollPaddingTop(v);
   }
 
-  // scroll-snap-type
-  static ScrollSnapType initialScrollSnapType() { return ScrollSnapTypeNone; }
-  ScrollSnapType getScrollSnapType() const {
-    return static_cast<ScrollSnapType>(
-        m_rareNonInheritedData->m_scrollSnapType);
+  // scroll-padding-inline-end
+  const Length& ScrollPaddingInlineEnd() const {
+    return IsHorizontalWritingMode() ? ScrollPaddingRight()
+                                     : ScrollPaddingBottom();
   }
-  void setScrollSnapType(ScrollSnapType b) {
-    SET_VAR(m_rareNonInheritedData, m_scrollSnapType, b);
+  void SetScrollPaddingInlineEnd(const Length& v) {
+    if (IsHorizontalWritingMode())
+      SetScrollPaddingRight(v);
+    else
+      SetScrollPaddingBottom(v);
+  }
+
+  // scroll-snap-margin-block-start
+  const Length& ScrollSnapMarginBlockStart() const {
+    return IsHorizontalWritingMode() ? ScrollSnapMarginTop()
+                                     : ScrollSnapMarginLeft();
+  }
+  void SetScrollSnapMarginBlockStart(const Length& v) {
+    if (IsHorizontalWritingMode())
+      SetScrollSnapMarginTop(v);
+    else
+      SetScrollSnapMarginLeft(v);
+  }
+
+  // scroll-snap-margin-block-end
+  const Length& ScrollSnapMarginBlockEnd() const {
+    return IsHorizontalWritingMode() ? ScrollSnapMarginBottom()
+                                     : ScrollSnapMarginRight();
+  }
+  void SetScrollSnapMarginBlockEnd(const Length& v) {
+    if (IsHorizontalWritingMode())
+      SetScrollSnapMarginBottom(v);
+    else
+      SetScrollSnapMarginRight(v);
+  }
+
+  // scroll-snap-margin-inline-start
+  const Length& ScrollSnapMarginInlineStart() const {
+    return IsHorizontalWritingMode() ? ScrollSnapMarginLeft()
+                                     : ScrollSnapMarginTop();
+  }
+  void SetScrollSnapMarginInlineStart(const Length& v) {
+    if (IsHorizontalWritingMode())
+      SetScrollSnapMarginLeft(v);
+    else
+      SetScrollSnapMarginTop(v);
+  }
+
+  // scroll-snap-margin-inline-end
+  const Length& ScrollSnapMarginInlineEnd() const {
+    return IsHorizontalWritingMode() ? ScrollSnapMarginRight()
+                                     : ScrollSnapMarginBottom();
+  }
+  void SetScrollSnapMarginInlineEnd(const Length& v) {
+    if (IsHorizontalWritingMode())
+      SetScrollSnapMarginRight(v);
+    else
+      SetScrollSnapMarginBottom(v);
   }
 
   // shape-image-threshold (aka -webkit-shape-image-threshold)
-  static float initialShapeImageThreshold() { return 0; }
-  float shapeImageThreshold() const {
-    return m_rareNonInheritedData->m_shapeImageThreshold;
-  }
-  void setShapeImageThreshold(float shapeImageThreshold) {
-    float clampedShapeImageThreshold =
-        clampTo<float>(shapeImageThreshold, 0, 1);
-    SET_VAR(m_rareNonInheritedData, m_shapeImageThreshold,
-            clampedShapeImageThreshold);
-  }
-
-  // shape-margin (aka -webkit-shape-margin)
-  static Length initialShapeMargin() { return Length(0, Fixed); }
-  const Length& shapeMargin() const {
-    return m_rareNonInheritedData->m_shapeMargin;
-  }
-  void setShapeMargin(const Length& shapeMargin) {
-    SET_VAR(m_rareNonInheritedData, m_shapeMargin, shapeMargin);
+  static float InitialShapeImageThreshold() { return 0; }
+  void SetShapeImageThreshold(float shape_image_threshold) {
+    float clamped_shape_image_threshold =
+        clampTo<float>(shape_image_threshold, 0, 1);
+    SetShapeImageThresholdInternal(clamped_shape_image_threshold);
   }
 
   // shape-outside (aka -webkit-shape-outside)
-  static ShapeValue* initialShapeOutside() { return 0; }
-  ShapeValue* shapeOutside() const {
-    return m_rareNonInheritedData->m_shapeOutside.get();
-  }
-  void setShapeOutside(ShapeValue* value) {
-    if (m_rareNonInheritedData->m_shapeOutside == value)
-      return;
-    m_rareNonInheritedData.access()->m_shapeOutside = value;
-  }
-
-  // size
-  const FloatSize& pageSize() const {
-    return m_rareNonInheritedData->m_pageSize;
-  }
-  PageSizeType getPageSizeType() const {
-    return static_cast<PageSizeType>(m_rareNonInheritedData->m_pageSizeType);
-  }
-  void setPageSize(const FloatSize& s) {
-    SET_VAR(m_rareNonInheritedData, m_pageSize, s);
-  }
-  void setPageSizeType(PageSizeType t) {
-    SET_VAR(m_rareNonInheritedData, m_pageSizeType, t);
+  static ShapeValue* InitialShapeOutside() { return 0; }
+  ShapeValue* ShapeOutside() const { return ShapeOutsideInternal().Get(); }
+  bool ShapeOutsideDataEquivalent(const ComputedStyle& other) const {
+    return DataEquivalent(ShapeOutside(), other.ShapeOutside());
   }
 
   // Text decoration properties.
-  // text-decoration-line
-  static TextDecoration initialTextDecoration() { return TextDecorationNone; }
-  TextDecoration getTextDecoration() const {
-    return static_cast<TextDecoration>(m_visual->textDecoration);
-  }
-  void setTextDecoration(TextDecoration v) {
-    SET_VAR(m_visual, textDecoration, v);
-  }
-
-  // text-decoration-color
-  void setTextDecorationColor(const StyleColor& c) {
-    SET_VAR(m_rareNonInheritedData, m_textDecorationColor, c);
-  }
-
-  // text-decoration-style
-  static TextDecorationStyle initialTextDecorationStyle() {
-    return TextDecorationStyleSolid;
-  }
-  TextDecorationStyle getTextDecorationStyle() const {
-    return static_cast<TextDecorationStyle>(
-        m_rareNonInheritedData->m_textDecorationStyle);
-  }
-  void setTextDecorationStyle(TextDecorationStyle v) {
-    SET_VAR(m_rareNonInheritedData, m_textDecorationStyle, v);
-  }
-
-  // text-underline-position
-  static TextUnderlinePosition initialTextUnderlinePosition() {
-    return TextUnderlinePositionAuto;
-  }
-  TextUnderlinePosition getTextUnderlinePosition() const {
-    return static_cast<TextUnderlinePosition>(
-        m_rareInheritedData->m_textUnderlinePosition);
-  }
-  void setTextUnderlinePosition(TextUnderlinePosition v) {
-    SET_VAR(m_rareInheritedData, m_textUnderlinePosition, v);
-  }
-
   // text-decoration-skip
-  static TextDecorationSkip initialTextDecorationSkip() {
-    return TextDecorationSkipObjects;
-  }
-  TextDecorationSkip getTextDecorationSkip() const {
-    return static_cast<TextDecorationSkip>(
-        m_rareInheritedData->m_textDecorationSkip);
-  }
-  void setTextDecorationSkip(TextDecorationSkip v) {
-    SET_VAR(m_rareInheritedData, m_textDecorationSkip, v);
-  }
-
-  // text-overflow
-  static TextOverflow initialTextOverflow() { return TextOverflowClip; }
-  TextOverflow getTextOverflow() const {
-    return static_cast<TextOverflow>(m_rareNonInheritedData->textOverflow);
-  }
-  void setTextOverflow(TextOverflow overflow) {
-    SET_VAR(m_rareNonInheritedData, textOverflow, overflow);
+  static TextDecorationSkip InitialTextDecorationSkip() {
+    return TextDecorationSkip::kObjects;
   }
 
   // touch-action
-  static TouchAction initialTouchAction() { return TouchActionAuto; }
-  TouchAction getTouchAction() const {
-    return static_cast<TouchAction>(m_rareNonInheritedData->m_touchAction);
+  static TouchAction InitialTouchAction() {
+    return TouchAction::kTouchActionAuto;
   }
-  void setTouchAction(TouchAction t) {
-    SET_VAR(m_rareNonInheritedData, m_touchAction, t);
+  TouchAction GetEffectiveTouchAction() const {
+    return EffectiveTouchActionInternal();
+  }
+  void SetEffectiveTouchAction(TouchAction t) {
+    return SetEffectiveTouchActionInternal(t);
   }
 
   // vertical-align
-  static EVerticalAlign initialVerticalAlign() {
+  static EVerticalAlign InitialVerticalAlign() {
     return EVerticalAlign::kBaseline;
   }
-  EVerticalAlign verticalAlign() const {
-    return static_cast<EVerticalAlign>(m_nonInheritedData.m_verticalAlign);
+  EVerticalAlign VerticalAlign() const { return VerticalAlignInternal(); }
+  const Length& GetVerticalAlignLength() const {
+    return VerticalAlignLengthInternal();
   }
-  const Length& getVerticalAlignLength() const {
-    return m_box->verticalAlign();
-  }
-  void setVerticalAlign(EVerticalAlign v) {
-    m_nonInheritedData.m_verticalAlign = static_cast<unsigned>(v);
-  }
-  void setVerticalAlignLength(const Length& length) {
-    setVerticalAlign(EVerticalAlign::kLength);
-    SET_VAR(m_box, m_verticalAlign, length);
-  }
-
-  // will-change
-  const Vector<CSSPropertyID>& willChangeProperties() const {
-    return m_rareNonInheritedData->m_willChange->m_properties;
-  }
-  bool willChangeContents() const {
-    return m_rareNonInheritedData->m_willChange->m_contents;
-  }
-  bool willChangeScrollPosition() const {
-    return m_rareNonInheritedData->m_willChange->m_scrollPosition;
-  }
-  bool subtreeWillChangeContents() const {
-    return m_rareInheritedData->m_subtreeWillChangeContents;
-  }
-  void setWillChangeProperties(const Vector<CSSPropertyID>& properties) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_willChange, m_properties,
-                   properties);
-  }
-  void setWillChangeContents(bool b) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_willChange, m_contents, b);
-  }
-  void setWillChangeScrollPosition(bool b) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_willChange, m_scrollPosition, b);
-  }
-  void setSubtreeWillChangeContents(bool b) {
-    SET_VAR(m_rareInheritedData, m_subtreeWillChangeContents, b);
+  void SetVerticalAlign(EVerticalAlign v) { SetVerticalAlignInternal(v); }
+  void SetVerticalAlignLength(const Length& length) {
+    SetVerticalAlignInternal(EVerticalAlign::kLength);
+    SetVerticalAlignLengthInternal(length);
   }
 
   // z-index
-  int zIndex() const { return m_box->zIndex(); }
-  bool hasAutoZIndex() const { return m_box->hasAutoZIndex(); }
-  void setZIndex(int v) {
-    SET_VAR(m_box, m_hasAutoZIndex, false);
-    SET_VAR(m_box, m_zIndex, v);
+  bool HasAutoZIndex() const { return HasAutoZIndexInternal(); }
+  void SetZIndex(int v) {
+    SetHasAutoZIndexInternal(false);
+    SetZIndexInternal(v);
   }
-  void setHasAutoZIndex() {
-    SET_VAR(m_box, m_hasAutoZIndex, true);
-    SET_VAR(m_box, m_zIndex, 0);
+  void SetHasAutoZIndex() {
+    SetHasAutoZIndexInternal(true);
+    SetZIndexInternal(0);
   }
 
   // zoom
-  static float initialZoom() { return 1.0f; }
-  float zoom() const { return m_visual->m_zoom; }
-  float effectiveZoom() const { return m_rareInheritedData->m_effectiveZoom; }
-  bool setZoom(float);
-  bool setEffectiveZoom(float);
-
-  // -webkit-app-region
-  DraggableRegionMode getDraggableRegionMode() const {
-    return m_rareNonInheritedData->m_draggableRegionMode;
-  }
-  void setDraggableRegionMode(DraggableRegionMode v) {
-    SET_VAR(m_rareNonInheritedData, m_draggableRegionMode, v);
-  }
+  float EffectiveZoom() const { return EffectiveZoomInternal(); }
+  bool SetZoom(float);
+  bool SetEffectiveZoom(float);
 
   // -webkit-appearance
-  static ControlPart initialAppearance() { return NoControlPart; }
-  ControlPart appearance() const {
-    return static_cast<ControlPart>(m_rareNonInheritedData->m_appearance);
-  }
-  void setAppearance(ControlPart a) {
-    SET_VAR(m_rareNonInheritedData, m_appearance, a);
-  }
+  static ControlPart InitialAppearance() { return kNoControlPart; }
+
 
   // -webkit-clip-path
-  static ClipPathOperation* initialClipPath() { return 0; }
-  ClipPathOperation* clipPath() const {
-    return m_rareNonInheritedData->m_clipPath.get();
-  }
-  void setClipPath(PassRefPtr<ClipPathOperation> operation) {
-    if (m_rareNonInheritedData->m_clipPath != operation)
-      m_rareNonInheritedData.access()->m_clipPath = operation;
+  bool ClipPathDataEquivalent(const ComputedStyle& other) const {
+    return DataEquivalent(ClipPath(), other.ClipPath());
   }
 
   // Mask properties.
   // -webkit-mask-box-image-outset
-  const BorderImageLengthBox& maskBoxImageOutset() const {
-    return m_rareNonInheritedData->m_maskBoxImage.outset();
+  const BorderImageLengthBox& MaskBoxImageOutset() const {
+    return MaskBoxImageInternal().Outset();
   }
-  void setMaskBoxImageOutset(const BorderImageLengthBox& outset) {
-    m_rareNonInheritedData.access()->m_maskBoxImage.setOutset(outset);
+  void SetMaskBoxImageOutset(const BorderImageLengthBox& outset) {
+    MutableMaskBoxImageInternal().SetOutset(outset);
   }
 
   // -webkit-mask-box-image-slice
-  const LengthBox& maskBoxImageSlices() const {
-    return m_rareNonInheritedData->m_maskBoxImage.imageSlices();
+  const LengthBox& MaskBoxImageSlices() const {
+    return MaskBoxImageInternal().ImageSlices();
   }
-  void setMaskBoxImageSlices(const LengthBox& slices) {
-    m_rareNonInheritedData.access()->m_maskBoxImage.setImageSlices(slices);
+  void SetMaskBoxImageSlices(const LengthBox& slices) {
+    MutableMaskBoxImageInternal().SetImageSlices(slices);
   }
 
   // -webkit-mask-box-image-source
-  static StyleImage* initialMaskBoxImageSource() { return 0; }
-  StyleImage* maskBoxImageSource() const {
-    return m_rareNonInheritedData->m_maskBoxImage.image();
+  static StyleImage* InitialMaskBoxImageSource() { return 0; }
+  StyleImage* MaskBoxImageSource() const {
+    return MaskBoxImageInternal().GetImage();
   }
-  void setMaskBoxImageSource(StyleImage* v) {
-    m_rareNonInheritedData.access()->m_maskBoxImage.setImage(v);
+  void SetMaskBoxImageSource(StyleImage* v) {
+    MutableMaskBoxImageInternal().SetImage(v);
   }
 
   // -webkit-mask-box-image-width
-  const BorderImageLengthBox& maskBoxImageWidth() const {
-    return m_rareNonInheritedData->m_maskBoxImage.borderSlices();
+  const BorderImageLengthBox& MaskBoxImageWidth() const {
+    return MaskBoxImageInternal().BorderSlices();
   }
-  void setMaskBoxImageWidth(const BorderImageLengthBox& slices) {
-    m_rareNonInheritedData.access()->m_maskBoxImage.setBorderSlices(slices);
+  void SetMaskBoxImageWidth(const BorderImageLengthBox& slices) {
+    MutableMaskBoxImageInternal().SetBorderSlices(slices);
   }
 
   // Inherited properties.
 
-  // Border-spacing properties.
-  // -webkit-border-horizontal-spacing
-  static short initialHorizontalBorderSpacing() { return 0; }
-  short horizontalBorderSpacing() const;
-  void setHorizontalBorderSpacing(short);
-
-  // -webkit-border-vertical-spacing
-  static short initialVerticalBorderSpacing() { return 0; }
-  short verticalBorderSpacing() const;
-  void setVerticalBorderSpacing(short);
-
-  // cursor
-  static ECursor initialCursor() { return ECursor::kAuto; }
-  ECursor cursor() const {
-    return static_cast<ECursor>(m_inheritedData.m_cursorStyle);
-  }
-  void setCursor(ECursor c) {
-    m_inheritedData.m_cursorStyle = static_cast<unsigned>(c);
-  }
-
   // color
-  static Color initialColor() { return Color::black; }
-  void setColor(const Color&);
-
-  // hyphens
-  static Hyphens initialHyphens() { return HyphensManual; }
-  Hyphens getHyphens() const {
-    return static_cast<Hyphens>(m_rareInheritedData->hyphens);
-  }
-  void setHyphens(Hyphens h) { SET_VAR(m_rareInheritedData, hyphens, h); }
-
-  // -webkit-hyphenate-character
-  static const AtomicString& initialHyphenationString() { return nullAtom; }
-  const AtomicString& hyphenationString() const {
-    return m_rareInheritedData->hyphenationString;
-  }
-  void setHyphenationString(const AtomicString& h) {
-    SET_VAR(m_rareInheritedData, hyphenationString, h);
-  }
+  static Color InitialColor() { return Color::kBlack; }
+  void SetColor(const Color&);
 
   // line-height
-  static Length initialLineHeight() { return Length(-100.0, Percent); }
-  Length lineHeight() const;
-  void setLineHeight(const Length& specifiedLineHeight);
+  static Length InitialLineHeight() { return Length(-100.0, kPercent); }
+  Length LineHeight() const;
+  CORE_EXPORT void SetLineHeight(const Length& specified_line_height);
 
   // List style properties.
   // list-style-image
-  static StyleImage* initialListStyleImage() { return 0; }
-  StyleImage* listStyleImage() const;
-  void setListStyleImage(StyleImage*);
-
-  // orphans
-  static short initialOrphans() { return 2; }
-  short orphans() const { return m_rareInheritedData->orphans; }
-  void setOrphans(short o) { SET_VAR(m_rareInheritedData, orphans, o); }
-
-  // widows
-  static short initialWidows() { return 2; }
-  short widows() const { return m_rareInheritedData->widows; }
-  void setWidows(short w) { SET_VAR(m_rareInheritedData, widows, w); }
-
-  // overflow-wrap (aka word-wrap)
-  static EOverflowWrap initialOverflowWrap() { return NormalOverflowWrap; }
-  EOverflowWrap overflowWrap() const {
-    return static_cast<EOverflowWrap>(m_rareInheritedData->overflowWrap);
-  }
-  void setOverflowWrap(EOverflowWrap b) {
-    SET_VAR(m_rareInheritedData, overflowWrap, b);
-  }
+  static StyleImage* InitialListStyleImage() { return 0; }
+  StyleImage* ListStyleImage() const;
+  void SetListStyleImage(StyleImage*);
 
   // quotes
-  static QuotesData* initialQuotes() { return 0; }
-  QuotesData* quotes() const { return m_rareInheritedData->quotes.get(); }
-  void setQuotes(PassRefPtr<QuotesData>);
-
-  // snap-height
-  uint8_t snapHeightPosition() const {
-    return m_rareInheritedData->m_snapHeightPosition;
-  }
-  uint8_t snapHeightUnit() const {
-    return m_rareInheritedData->m_snapHeightUnit;
-  }
-  void setSnapHeightPosition(uint8_t position) {
-    SET_VAR(m_rareInheritedData, m_snapHeightPosition, position);
-  }
-  void setSnapHeightUnit(uint8_t unit) {
-    SET_VAR(m_rareInheritedData, m_snapHeightUnit, unit);
-  }
-
-  // speak
-  static ESpeak initialSpeak() { return SpeakNormal; }
-  ESpeak speak() const {
-    return static_cast<ESpeak>(m_rareInheritedData->speak);
-  }
-  void setSpeak(ESpeak s) { SET_VAR(m_rareInheritedData, speak, s); }
-
-  // tab-size
-  static TabSize initialTabSize() { return TabSize(8); }
-  TabSize getTabSize() const { return m_rareInheritedData->m_tabSize; }
-  void setTabSize(TabSize size) {
-    SET_VAR(m_rareInheritedData, m_tabSize, size);
-  }
-
-  // text-align-last
-  static TextAlignLast initialTextAlignLast() { return TextAlignLastAuto; }
-  TextAlignLast getTextAlignLast() const {
-    return static_cast<TextAlignLast>(m_rareInheritedData->m_textAlignLast);
-  }
-  void setTextAlignLast(TextAlignLast v) {
-    SET_VAR(m_rareInheritedData, m_textAlignLast, v);
-  }
-
-  // text-combine-upright (aka -webkit-text-combine, -epub-text-combine)
-  static TextCombine initialTextCombine() { return TextCombineNone; }
-  TextCombine getTextCombine() const {
-    return static_cast<TextCombine>(m_rareInheritedData->m_textCombine);
-  }
-  void setTextCombine(TextCombine v) {
-    SET_VAR(m_rareInheritedData, m_textCombine, v);
-  }
-
-  // text-indent
-  static Length initialTextIndent() { return Length(Fixed); }
-  static TextIndentLine initialTextIndentLine() { return TextIndentFirstLine; }
-  static TextIndentType initialTextIndentType() { return TextIndentNormal; }
-  const Length& textIndent() const { return m_rareInheritedData->indent; }
-  TextIndentLine getTextIndentLine() const {
-    return static_cast<TextIndentLine>(m_rareInheritedData->m_textIndentLine);
-  }
-  TextIndentType getTextIndentType() const {
-    return static_cast<TextIndentType>(m_rareInheritedData->m_textIndentType);
-  }
-  void setTextIndent(const Length& v) {
-    SET_VAR(m_rareInheritedData, indent, v);
-  }
-  void setTextIndentLine(TextIndentLine v) {
-    SET_VAR(m_rareInheritedData, m_textIndentLine, v);
-  }
-  void setTextIndentType(TextIndentType v) {
-    SET_VAR(m_rareInheritedData, m_textIndentType, v);
-  }
-
-  // text-justify
-  static TextJustify initialTextJustify() { return TextJustifyAuto; }
-  TextJustify getTextJustify() const {
-    return static_cast<TextJustify>(m_rareInheritedData->m_textJustify);
-  }
-  void setTextJustify(TextJustify v) {
-    SET_VAR(m_rareInheritedData, m_textJustify, v);
-  }
-
-  // text-orientation (aka -webkit-text-orientation, -epub-text-orientation)
-  static TextOrientation initialTextOrientation() {
-    return TextOrientationMixed;
-  }
-  TextOrientation getTextOrientation() const {
-    return static_cast<TextOrientation>(m_rareInheritedData->m_textOrientation);
-  }
-  bool setTextOrientation(TextOrientation);
+  bool QuotesDataEquivalent(const ComputedStyle&) const;
 
   // text-shadow
-  static ShadowList* initialTextShadow() { return 0; }
-  ShadowList* textShadow() const {
-    return m_rareInheritedData->textShadow.get();
-  }
-  void setTextShadow(PassRefPtr<ShadowList>);
-
-  // text-size-adjust (aka -webkit-text-size-adjust)
-  static TextSizeAdjust initialTextSizeAdjust() {
-    return TextSizeAdjust::adjustAuto();
-  }
-  TextSizeAdjust getTextSizeAdjust() const {
-    return m_rareInheritedData->m_textSizeAdjust;
-  }
-  void setTextSizeAdjust(TextSizeAdjust sizeAdjust) {
-    SET_VAR(m_rareInheritedData, m_textSizeAdjust, sizeAdjust);
-  }
-
-  // word-break inherited (aka -epub-word-break)
-  static EWordBreak initialWordBreak() { return NormalWordBreak; }
-  EWordBreak wordBreak() const {
-    return static_cast<EWordBreak>(m_rareInheritedData->wordBreak);
-  }
-  void setWordBreak(EWordBreak b) {
-    SET_VAR(m_rareInheritedData, wordBreak, b);
-  }
-
-  // -webkit-line-break
-  static LineBreak initialLineBreak() { return LineBreakAuto; }
-  LineBreak getLineBreak() const {
-    return static_cast<LineBreak>(m_rareInheritedData->lineBreak);
-  }
-  void setLineBreak(LineBreak b) { SET_VAR(m_rareInheritedData, lineBreak, b); }
+  bool TextShadowDataEquivalent(const ComputedStyle&) const;
 
   // Text emphasis properties.
-  static TextEmphasisFill initialTextEmphasisFill() {
-    return TextEmphasisFillFilled;
+  static TextEmphasisMark InitialTextEmphasisMark() {
+    return TextEmphasisMark::kNone;
   }
-  static TextEmphasisMark initialTextEmphasisMark() {
-    return TextEmphasisMarkNone;
+  TextEmphasisMark GetTextEmphasisMark() const;
+  void SetTextEmphasisMark(TextEmphasisMark mark) {
+    SetTextEmphasisMarkInternal(mark);
   }
-  static const AtomicString& initialTextEmphasisCustomMark() {
-    return nullAtom;
-  }
-  TextEmphasisFill getTextEmphasisFill() const {
-    return static_cast<TextEmphasisFill>(m_rareInheritedData->textEmphasisFill);
-  }
-  TextEmphasisMark getTextEmphasisMark() const;
-  const AtomicString& textEmphasisCustomMark() const {
-    return m_rareInheritedData->textEmphasisCustomMark;
-  }
-  const AtomicString& textEmphasisMarkString() const;
-  void setTextEmphasisFill(TextEmphasisFill fill) {
-    SET_VAR(m_rareInheritedData, textEmphasisFill, fill);
-  }
-  void setTextEmphasisMark(TextEmphasisMark mark) {
-    SET_VAR(m_rareInheritedData, textEmphasisMark, mark);
-  }
-  void setTextEmphasisCustomMark(const AtomicString& mark) {
-    SET_VAR(m_rareInheritedData, textEmphasisCustomMark, mark);
-  }
+  const AtomicString& TextEmphasisMarkString() const;
 
   // -webkit-text-emphasis-color (aka -epub-text-emphasis-color)
-  void setTextEmphasisColor(const StyleColor& c) {
-    SET_VAR_WITH_SETTER(m_rareInheritedData, textEmphasisColor,
-                        setTextEmphasisColor, c);
-  }
-
-  // -webkit-text-emphasis-position
-  static TextEmphasisPosition initialTextEmphasisPosition() {
-    return TextEmphasisPositionOver;
-  }
-  TextEmphasisPosition getTextEmphasisPosition() const {
-    return static_cast<TextEmphasisPosition>(
-        m_rareInheritedData->textEmphasisPosition);
-  }
-  void setTextEmphasisPosition(TextEmphasisPosition position) {
-    SET_VAR(m_rareInheritedData, textEmphasisPosition, position);
-  }
-
-  // -webkit-highlight
-  static const AtomicString& initialHighlight() { return nullAtom; }
-  const AtomicString& highlight() const {
-    return m_rareInheritedData->highlight;
-  }
-  void setHighlight(const AtomicString& h) {
-    SET_VAR(m_rareInheritedData, highlight, h);
+  void SetTextEmphasisColor(const StyleColor& color) {
+    SetTextEmphasisColorInternal(color.Resolve(Color()));
+    SetTextEmphasisColorIsCurrentColorInternal(color.IsCurrentColor());
   }
 
   // -webkit-line-clamp
-  static LineClampValue initialLineClamp() { return LineClampValue(); }
-  const LineClampValue& lineClamp() const {
-    return m_rareNonInheritedData->lineClamp;
-  }
-  void setLineClamp(LineClampValue c) {
-    SET_VAR(m_rareNonInheritedData, lineClamp, c);
-  }
-
-  // -webkit-ruby-position
-  static RubyPosition initialRubyPosition() { return RubyPositionBefore; }
-  RubyPosition getRubyPosition() const {
-    return static_cast<RubyPosition>(m_rareInheritedData->m_rubyPosition);
-  }
-  void setRubyPosition(RubyPosition position) {
-    SET_VAR(m_rareInheritedData, m_rubyPosition, position);
-  }
-
-  // -webkit-tap-highlight-color
-  static Color initialTapHighlightColor();
-  Color tapHighlightColor() const {
-    return m_rareInheritedData->tapHighlightColor;
-  }
-  void setTapHighlightColor(const Color& c) {
-    SET_VAR(m_rareInheritedData, tapHighlightColor, c);
-  }
+  static LineClampValue InitialLineClamp() { return LineClampValue(); }
+  const LineClampValue& LineClamp() const { return LineClampInternal(); }
+  void SetLineClamp(LineClampValue c) { SetLineClampInternal(c); }
 
   // -webkit-text-fill-color
-  void setTextFillColor(const StyleColor& c) {
-    SET_VAR_WITH_SETTER(m_rareInheritedData, textFillColor, setTextFillColor,
-                        c);
-  }
-
-  // -webkit-text-security
-  static ETextSecurity initialTextSecurity() { return TSNONE; }
-  ETextSecurity textSecurity() const {
-    return static_cast<ETextSecurity>(m_rareInheritedData->textSecurity);
-  }
-  void setTextSecurity(ETextSecurity aTextSecurity) {
-    SET_VAR(m_rareInheritedData, textSecurity, aTextSecurity);
+  void SetTextFillColor(const StyleColor& color) {
+    SetTextFillColorInternal(color.Resolve(Color()));
+    SetTextFillColorIsCurrentColorInternal(color.IsCurrentColor());
   }
 
   // -webkit-text-stroke-color
-  void setTextStrokeColor(const StyleColor& c) {
-    SET_VAR_WITH_SETTER(m_rareInheritedData, textStrokeColor,
-                        setTextStrokeColor, c);
-  }
-
-  // -webkit-text-stroke-width
-  static float initialTextStrokeWidth() { return 0; }
-  float textStrokeWidth() const { return m_rareInheritedData->textStrokeWidth; }
-  void setTextStrokeWidth(float w) {
-    SET_VAR(m_rareInheritedData, textStrokeWidth, w);
-  }
-
-  // -webkit-user-drag
-  static EUserDrag initialUserDrag() { return DRAG_AUTO; }
-  EUserDrag userDrag() const {
-    return static_cast<EUserDrag>(m_rareNonInheritedData->userDrag);
-  }
-  void setUserDrag(EUserDrag d) {
-    SET_VAR(m_rareNonInheritedData, userDrag, d);
-  }
-
-  // -webkit-user-modify
-  static EUserModify initialUserModify() { return READ_ONLY; }
-  EUserModify userModify() const {
-    return static_cast<EUserModify>(m_rareInheritedData->userModify);
-  }
-  void setUserModify(EUserModify u) {
-    SET_VAR(m_rareInheritedData, userModify, u);
-  }
-
-  // -webkit-user-select
-  static EUserSelect initialUserSelect() { return SELECT_TEXT; }
-  EUserSelect userSelect() const {
-    return static_cast<EUserSelect>(m_rareInheritedData->userSelect);
-  }
-  void setUserSelect(EUserSelect s) {
-    SET_VAR(m_rareInheritedData, userSelect, s);
+  void SetTextStrokeColor(const StyleColor& color) {
+    SetTextStrokeColorInternal(color.Resolve(Color()));
+    SetTextStrokeColorIsCurrentColorInternal(color.IsCurrentColor());
   }
 
   // caret-color
-  void setCaretColor(const StyleAutoColor& c) {
-    SET_VAR_WITH_SETTER(m_rareInheritedData, caretColor, setCaretColor, c);
+  void SetCaretColor(const StyleAutoColor& color) {
+    SetCaretColorInternal(color.Resolve(Color()));
+    SetCaretColorIsCurrentColorInternal(color.IsCurrentColor());
+    SetCaretColorIsAutoInternal(color.IsAutoColor());
   }
 
   // Font properties.
-  const Font& font() const;
-  void setFont(const Font&);
-  const FontDescription& getFontDescription() const;
-  bool setFontDescription(const FontDescription&);
-  bool hasIdenticalAscentDescentAndLineGap(const ComputedStyle& other) const;
+  CORE_EXPORT const Font& GetFont() const;
+  CORE_EXPORT void SetFont(const Font&);
+  CORE_EXPORT const FontDescription& GetFontDescription() const;
+  CORE_EXPORT bool SetFontDescription(const FontDescription&);
+  bool HasIdenticalAscentDescentAndLineGap(const ComputedStyle& other) const;
 
   // font-size
-  int fontSize() const;
-  float specifiedFontSize() const;
-  float computedFontSize() const;
+  int FontSize() const;
+  CORE_EXPORT float SpecifiedFontSize() const;
+  CORE_EXPORT float ComputedFontSize() const;
+  LayoutUnit ComputedFontSizeAsFixed() const;
 
   // font-size-adjust
-  float fontSizeAdjust() const;
-  bool hasFontSizeAdjust() const;
+  float FontSizeAdjust() const;
+  bool HasFontSizeAdjust() const;
 
   // font-weight
-  FontWeight fontWeight() const;
+  CORE_EXPORT FontWeight GetFontWeight() const;
 
   // font-stretch
-  FontStretch fontStretch() const;
+  FontStretch GetFontStretch() const;
 
   // -webkit-locale
-  const AtomicString& locale() const {
-    return LayoutLocale::localeString(getFontDescription().locale());
+  const AtomicString& Locale() const {
+    return LayoutLocale::LocaleString(GetFontDescription().Locale());
   }
+  AtomicString LocaleForLineBreakIterator() const;
 
   // FIXME: Remove letter-spacing/word-spacing and replace them with respective
   // FontBuilder calls.  letter-spacing
-  static float initialLetterWordSpacing() { return 0.0f; }
-  float letterSpacing() const;
-  void setLetterSpacing(float);
+  static float InitialLetterWordSpacing() { return 0.0f; }
+  float LetterSpacing() const;
+  void SetLetterSpacing(float);
 
   // word-spacing
-  float wordSpacing() const;
-  void setWordSpacing(float);
+  float WordSpacing() const;
+  void SetWordSpacing(float);
 
   // SVG properties.
-  const SVGComputedStyle& svgStyle() const { return *m_svgStyle.get(); }
-  SVGComputedStyle& accessSVGStyle() { return *m_svgStyle.access(); }
+  const SVGComputedStyle& SvgStyle() const { return *svg_style_.Get(); }
+  SVGComputedStyle& AccessSVGStyle() { return *svg_style_.Access(); }
 
   // baseline-shift
-  EBaselineShift baselineShift() const { return svgStyle().baselineShift(); }
-  const Length& baselineShiftValue() const {
-    return svgStyle().baselineShiftValue();
+  EBaselineShift BaselineShift() const { return SvgStyle().BaselineShift(); }
+  const Length& BaselineShiftValue() const {
+    return SvgStyle().BaselineShiftValue();
   }
-  void setBaselineShiftValue(const Length& value) {
-    SVGComputedStyle& svgStyle = accessSVGStyle();
-    svgStyle.setBaselineShift(BS_LENGTH);
-    svgStyle.setBaselineShiftValue(value);
+  void SetBaselineShiftValue(const Length& value) {
+    SVGComputedStyle& svg_style = AccessSVGStyle();
+    svg_style.SetBaselineShift(BS_LENGTH);
+    svg_style.SetBaselineShiftValue(value);
   }
 
   // cx
-  void setCx(const Length& cx) { accessSVGStyle().setCx(cx); }
+  void SetCx(const Length& cx) { AccessSVGStyle().SetCx(cx); }
 
   // cy
-  void setCy(const Length& cy) { accessSVGStyle().setCy(cy); }
+  void SetCy(const Length& cy) { AccessSVGStyle().SetCy(cy); }
 
   // d
-  void setD(PassRefPtr<StylePath> d) { accessSVGStyle().setD(std::move(d)); }
+  void SetD(RefPtr<StylePath> d) { AccessSVGStyle().SetD(std::move(d)); }
 
   // x
-  void setX(const Length& x) { accessSVGStyle().setX(x); }
+  void SetX(const Length& x) { AccessSVGStyle().SetX(x); }
 
   // y
-  void setY(const Length& y) { accessSVGStyle().setY(y); }
+  void SetY(const Length& y) { AccessSVGStyle().SetY(y); }
 
   // r
-  void setR(const Length& r) { accessSVGStyle().setR(r); }
+  void SetR(const Length& r) { AccessSVGStyle().SetR(r); }
 
   // rx
-  void setRx(const Length& rx) { accessSVGStyle().setRx(rx); }
+  void SetRx(const Length& rx) { AccessSVGStyle().SetRx(rx); }
 
   // ry
-  void setRy(const Length& ry) { accessSVGStyle().setRy(ry); }
+  void SetRy(const Length& ry) { AccessSVGStyle().SetRy(ry); }
 
   // fill-opacity
-  float fillOpacity() const { return svgStyle().fillOpacity(); }
-  void setFillOpacity(float f) { accessSVGStyle().setFillOpacity(f); }
+  float FillOpacity() const { return SvgStyle().FillOpacity(); }
+  void SetFillOpacity(float f) { AccessSVGStyle().SetFillOpacity(f); }
 
   // Fill utiltiy functions.
-  const SVGPaintType& fillPaintType() const {
-    return svgStyle().fillPaintType();
+  const SVGPaintType& FillPaintType() const {
+    return SvgStyle().FillPaintType();
   }
-  Color fillPaintColor() const { return svgStyle().fillPaintColor(); }
+  Color FillPaintColor() const { return SvgStyle().FillPaintColor(); }
 
   // stop-color
-  void setStopColor(const Color& c) { accessSVGStyle().setStopColor(c); }
+  void SetStopColor(const Color& c) { AccessSVGStyle().SetStopColor(c); }
 
   // flood-color
-  void setFloodColor(const Color& c) { accessSVGStyle().setFloodColor(c); }
+  void SetFloodColor(const Color& c) { AccessSVGStyle().SetFloodColor(c); }
 
   // lighting-color
-  void setLightingColor(const Color& c) {
-    accessSVGStyle().setLightingColor(c);
+  void SetLightingColor(const Color& c) {
+    AccessSVGStyle().SetLightingColor(c);
   }
 
   // flood-opacity
-  float floodOpacity() const { return svgStyle().floodOpacity(); }
-  void setFloodOpacity(float f) { accessSVGStyle().setFloodOpacity(f); }
+  float FloodOpacity() const { return SvgStyle().FloodOpacity(); }
+  void SetFloodOpacity(float f) { AccessSVGStyle().SetFloodOpacity(f); }
 
   // stop-opacity
-  float stopOpacity() const { return svgStyle().stopOpacity(); }
-  void setStopOpacity(float f) { accessSVGStyle().setStopOpacity(f); }
+  float StopOpacity() const { return SvgStyle().StopOpacity(); }
+  void SetStopOpacity(float f) { AccessSVGStyle().SetStopOpacity(f); }
 
   // stroke
-  const SVGPaintType& strokePaintType() const {
-    return svgStyle().strokePaintType();
+  const SVGPaintType& StrokePaintType() const {
+    return SvgStyle().StrokePaintType();
   }
-  Color strokePaintColor() const { return svgStyle().strokePaintColor(); }
+  Color StrokePaintColor() const { return SvgStyle().StrokePaintColor(); }
 
   // stroke-dasharray
-  SVGDashArray* strokeDashArray() const { return svgStyle().strokeDashArray(); }
-  void setStrokeDashArray(PassRefPtr<SVGDashArray> array) {
-    accessSVGStyle().setStrokeDashArray(std::move(array));
+  SVGDashArray* StrokeDashArray() const { return SvgStyle().StrokeDashArray(); }
+  void SetStrokeDashArray(RefPtr<SVGDashArray> array) {
+    AccessSVGStyle().SetStrokeDashArray(std::move(array));
   }
 
   // stroke-dashoffset
-  const Length& strokeDashOffset() const {
-    return svgStyle().strokeDashOffset();
+  const Length& StrokeDashOffset() const {
+    return SvgStyle().StrokeDashOffset();
   }
-  void setStrokeDashOffset(const Length& d) {
-    accessSVGStyle().setStrokeDashOffset(d);
+  void SetStrokeDashOffset(const Length& d) {
+    AccessSVGStyle().SetStrokeDashOffset(d);
   }
 
   // stroke-miterlimit
-  float strokeMiterLimit() const { return svgStyle().strokeMiterLimit(); }
-  void setStrokeMiterLimit(float f) { accessSVGStyle().setStrokeMiterLimit(f); }
+  float StrokeMiterLimit() const { return SvgStyle().StrokeMiterLimit(); }
+  void SetStrokeMiterLimit(float f) { AccessSVGStyle().SetStrokeMiterLimit(f); }
 
   // stroke-opacity
-  float strokeOpacity() const { return svgStyle().strokeOpacity(); }
-  void setStrokeOpacity(float f) { accessSVGStyle().setStrokeOpacity(f); }
+  float StrokeOpacity() const { return SvgStyle().StrokeOpacity(); }
+  void SetStrokeOpacity(float f) { AccessSVGStyle().SetStrokeOpacity(f); }
 
   // stroke-width
-  const UnzoomedLength& strokeWidth() const { return svgStyle().strokeWidth(); }
-  void setStrokeWidth(const UnzoomedLength& w) {
-    accessSVGStyle().setStrokeWidth(w);
+  const UnzoomedLength& StrokeWidth() const { return SvgStyle().StrokeWidth(); }
+  void SetStrokeWidth(const UnzoomedLength& w) {
+    AccessSVGStyle().SetStrokeWidth(w);
   }
 
   // Comparison operators
-  bool operator==(const ComputedStyle& other) const;
+  // TODO(shend): Replace callers of operator== wth a named method instead, e.g.
+  // inheritedEquals().
+  CORE_EXPORT bool operator==(const ComputedStyle& other) const;
   bool operator!=(const ComputedStyle& other) const {
     return !(*this == other);
   }
 
-  bool inheritedEqual(const ComputedStyle&) const;
-  bool nonInheritedEqual(const ComputedStyle&) const;
-  inline bool independentInheritedEqual(const ComputedStyle&) const;
-  inline bool nonIndependentInheritedEqual(const ComputedStyle&) const;
-  bool loadingCustomFontsEqual(const ComputedStyle&) const;
-  bool inheritedDataShared(const ComputedStyle&) const;
+  bool InheritedEqual(const ComputedStyle&) const;
+  bool NonInheritedEqual(const ComputedStyle&) const;
+  inline bool IndependentInheritedEqual(const ComputedStyle&) const;
+  inline bool NonIndependentInheritedEqual(const ComputedStyle&) const;
+  bool LoadingCustomFontsEqual(const ComputedStyle&) const;
+  bool InheritedDataShared(const ComputedStyle&) const;
 
-  bool hasChildDependentFlags() const {
-    return emptyState() || hasExplicitlyInheritedProperties();
+  bool HasChildDependentFlags() const {
+    return EmptyStateInternal() || HasExplicitlyInheritedProperties();
   }
-  void copyChildDependentFlagsFrom(const ComputedStyle&);
+  void CopyChildDependentFlagsFrom(const ComputedStyle&);
 
   // Counters.
-  const CounterDirectiveMap* counterDirectives() const;
-  CounterDirectiveMap& accessCounterDirectives();
-  const CounterDirectives getCounterDirectives(
+  const CounterDirectiveMap* GetCounterDirectives() const;
+  CounterDirectiveMap& AccessCounterDirectives();
+  const CounterDirectives GetCounterDirectives(
       const AtomicString& identifier) const;
-  void clearIncrementDirectives();
-  void clearResetDirectives();
+  bool CounterDirectivesEqual(const ComputedStyle& other) const {
+    // If the counter directives change, trigger a relayout to re-calculate
+    // counter values and rebuild the counter node tree.
+    return DataEquivalent(CounterDirectivesInternal().get(),
+                          other.CounterDirectivesInternal().get());
+  }
+  void ClearIncrementDirectives();
+  void ClearResetDirectives();
 
   // Variables.
-  static StyleInheritedVariables* initialInheritedVariables() {
+  static StyleInheritedVariables* InitialInheritedVariables() {
     return nullptr;
   }
-  static StyleNonInheritedVariables* initialNonInheritedVariables() {
+  static StyleNonInheritedVariables* InitialNonInheritedVariables() {
     return nullptr;
   }
 
-  StyleInheritedVariables* inheritedVariables() const;
-  StyleNonInheritedVariables* nonInheritedVariables() const;
+  StyleInheritedVariables* InheritedVariables() const;
+  StyleNonInheritedVariables* NonInheritedVariables() const;
 
-  void setUnresolvedInheritedVariable(const AtomicString&,
-                                      PassRefPtr<CSSVariableData>);
-  void setUnresolvedNonInheritedVariable(const AtomicString&,
-                                         PassRefPtr<CSSVariableData>);
+  void SetUnresolvedInheritedVariable(const AtomicString&,
+                                      RefPtr<CSSVariableData>);
+  void SetUnresolvedNonInheritedVariable(const AtomicString&,
+                                         RefPtr<CSSVariableData>);
 
-  void setResolvedUnregisteredVariable(const AtomicString&,
-                                       PassRefPtr<CSSVariableData>);
-  void setResolvedInheritedVariable(const AtomicString&,
-                                    PassRefPtr<CSSVariableData>,
+  void SetResolvedUnregisteredVariable(const AtomicString&,
+                                       RefPtr<CSSVariableData>);
+  void SetResolvedInheritedVariable(const AtomicString&,
+                                    RefPtr<CSSVariableData>,
                                     const CSSValue*);
-  void setResolvedNonInheritedVariable(const AtomicString&,
-                                       PassRefPtr<CSSVariableData>,
+  void SetResolvedNonInheritedVariable(const AtomicString&,
+                                       RefPtr<CSSVariableData>,
                                        const CSSValue*);
 
-  void removeVariable(const AtomicString&, bool isInheritedProperty);
+  void RemoveVariable(const AtomicString&, bool is_inherited_property);
 
   // Handles both inherited and non-inherited variables
-  CSSVariableData* getVariable(const AtomicString&) const;
+  CSSVariableData* GetVariable(const AtomicString&) const;
 
-  CSSVariableData* getVariable(const AtomicString&,
-                               bool isInheritedProperty) const;
+  CSSVariableData* GetVariable(const AtomicString&,
+                               bool is_inherited_property) const;
 
-  const CSSValue* getRegisteredVariable(const AtomicString&,
-                                        bool isInheritedProperty) const;
+  const CSSValue* GetRegisteredVariable(const AtomicString&,
+                                        bool is_inherited_property) const;
+
+  const CSSValue* GetRegisteredVariable(const AtomicString&) const;
 
   // Animations.
-  CSSAnimationData& accessAnimations();
-  const CSSAnimationData* animations() const {
-    return m_rareNonInheritedData->m_animations.get();
+  CSSAnimationData& AccessAnimations();
+  const CSSAnimationData* Animations() const {
+    return AnimationsInternal().get();
   }
 
   // Transitions.
-  const CSSTransitionData* transitions() const {
-    return m_rareNonInheritedData->m_transitions.get();
+  const CSSTransitionData* Transitions() const {
+    return TransitionsInternal().get();
   }
-  CSSTransitionData& accessTransitions();
+  CSSTransitionData& AccessTransitions();
 
   // Callback selectors.
-  const Vector<String>& callbackSelectors() const {
-    return m_rareNonInheritedData->m_callbackSelectors;
+  const Vector<String>& CallbackSelectors() const {
+    return CallbackSelectorsInternal();
   }
-  void addCallbackSelector(const String& selector);
+  void AddCallbackSelector(const String& selector);
 
   // Non-property flags.
-  bool hasViewportUnits() const {
-    return m_nonInheritedData.m_hasViewportUnits;
-  }
-  void setHasViewportUnits(bool hasViewportUnits = true) const {
-    m_nonInheritedData.m_hasViewportUnits = hasViewportUnits;
-  }
-
-  bool hasRemUnits() const { return m_nonInheritedData.m_hasRemUnits; }
-  void setHasRemUnits() const { m_nonInheritedData.m_hasRemUnits = true; }
-
-  bool emptyState() const { return m_nonInheritedData.m_emptyState; }
-  void setEmptyState(bool b) {
-    setUnique();
-    m_nonInheritedData.m_emptyState = b;
+  bool EmptyState() const { return EmptyStateInternal(); }
+  void SetEmptyState(bool b) {
+    SetUnique();
+    SetEmptyStateInternal(b);
   }
 
-  bool hasInlineTransform() const {
-    return m_rareNonInheritedData->m_hasInlineTransform;
+  float TextAutosizingMultiplier() const {
+    return TextAutosizingMultiplierInternal();
   }
-  void setHasInlineTransform(bool b) {
-    SET_VAR(m_rareNonInheritedData, m_hasInlineTransform, b);
-  }
-
-  bool hasCompositorProxy() const {
-    return m_rareNonInheritedData->m_hasCompositorProxy;
-  }
-  void setHasCompositorProxy(bool b) {
-    SET_VAR(m_rareNonInheritedData, m_hasCompositorProxy, b);
-  }
-
-  bool isLink() const { return m_nonInheritedData.m_isLink; }
-  void setIsLink() { m_nonInheritedData.m_isLink = true; }
-
-  EInsideLink insideLink() const {
-    return static_cast<EInsideLink>(m_inheritedData.m_insideLink);
-  }
-  void setInsideLink(EInsideLink insideLink) {
-    m_inheritedData.m_insideLink = static_cast<unsigned>(insideLink);
-  }
-
-  bool hasExplicitlyInheritedProperties() const {
-    return m_nonInheritedData.m_explicitInheritance;
-  }
-  void setHasExplicitlyInheritedProperties() {
-    m_nonInheritedData.m_explicitInheritance = true;
-  }
-
-  bool requiresAcceleratedCompositingForExternalReasons(bool b) {
-    return m_rareNonInheritedData
-        ->m_requiresAcceleratedCompositingForExternalReasons;
-  }
-  void setRequiresAcceleratedCompositingForExternalReasons(bool b) {
-    SET_VAR(m_rareNonInheritedData,
-            m_requiresAcceleratedCompositingForExternalReasons, b);
-  }
-
-  bool hasAuthorBackground() const {
-    return m_rareNonInheritedData->m_hasAuthorBackground;
-  };
-  void setHasAuthorBackground(bool authorBackground) {
-    SET_VAR(m_rareNonInheritedData, m_hasAuthorBackground, authorBackground);
-  }
-
-  bool hasAuthorBorder() const {
-    return m_rareNonInheritedData->m_hasAuthorBorder;
-  };
-  void setHasAuthorBorder(bool authorBorder) {
-    SET_VAR(m_rareNonInheritedData, m_hasAuthorBorder, authorBorder);
-  }
-
-  // A stacking context is painted atomically and defines a stacking order,
-  // whereas a containing stacking context defines in which order the stacking
-  // contexts below are painted.
-  // See CSS 2.1, Appendix E (https://www.w3.org/TR/CSS21/zindex.html) for more
-  // details.
-  bool isStackingContext() const {
-    return m_rareNonInheritedData->m_isStackingContext;
-  }
-  void setIsStackingContext(bool b) {
-    SET_VAR(m_rareNonInheritedData, m_isStackingContext, b);
-  }
-
-  float textAutosizingMultiplier() const {
-    return m_styleInheritedData->textAutosizingMultiplier;
-  }
-  void setTextAutosizingMultiplier(float);
-
-  bool selfOrAncestorHasDirAutoAttribute() const {
-    return m_rareInheritedData->m_selfOrAncestorHasDirAutoAttribute;
-  }
-  void setSelfOrAncestorHasDirAutoAttribute(bool v) {
-    SET_VAR(m_rareInheritedData, m_selfOrAncestorHasDirAutoAttribute, v);
-  }
-
-  // Animation flags.
-  bool hasCurrentOpacityAnimation() const {
-    return m_rareNonInheritedData->m_hasCurrentOpacityAnimation;
-  }
-  void setHasCurrentOpacityAnimation(bool b = true) {
-    SET_VAR(m_rareNonInheritedData, m_hasCurrentOpacityAnimation, b);
-  }
-
-  bool hasCurrentTransformAnimation() const {
-    return m_rareNonInheritedData->m_hasCurrentTransformAnimation;
-  }
-  void setHasCurrentTransformAnimation(bool b = true) {
-    SET_VAR(m_rareNonInheritedData, m_hasCurrentTransformAnimation, b);
-  }
-
-  bool hasCurrentFilterAnimation() const {
-    return m_rareNonInheritedData->m_hasCurrentFilterAnimation;
-  }
-  void setHasCurrentFilterAnimation(bool b = true) {
-    SET_VAR(m_rareNonInheritedData, m_hasCurrentFilterAnimation, b);
-  }
-
-  bool hasCurrentBackdropFilterAnimation() const {
-    return m_rareNonInheritedData->m_hasCurrentBackdropFilterAnimation;
-  }
-  void setHasCurrentBackdropFilterAnimation(bool b = true) {
-    SET_VAR(m_rareNonInheritedData, m_hasCurrentBackdropFilterAnimation, b);
-  }
-
-  bool isRunningOpacityAnimationOnCompositor() const {
-    return m_rareNonInheritedData->m_runningOpacityAnimationOnCompositor;
-  }
-  void setIsRunningOpacityAnimationOnCompositor(bool b = true) {
-    SET_VAR(m_rareNonInheritedData, m_runningOpacityAnimationOnCompositor, b);
-  }
-
-  bool isRunningTransformAnimationOnCompositor() const {
-    return m_rareNonInheritedData->m_runningTransformAnimationOnCompositor;
-  }
-  void setIsRunningTransformAnimationOnCompositor(bool b = true) {
-    SET_VAR(m_rareNonInheritedData, m_runningTransformAnimationOnCompositor, b);
-  }
-
-  bool isRunningFilterAnimationOnCompositor() const {
-    return m_rareNonInheritedData->m_runningFilterAnimationOnCompositor;
-  }
-  void setIsRunningFilterAnimationOnCompositor(bool b = true) {
-    SET_VAR(m_rareNonInheritedData, m_runningFilterAnimationOnCompositor, b);
-  }
-
-  bool isRunningBackdropFilterAnimationOnCompositor() const {
-    return m_rareNonInheritedData->m_runningBackdropFilterAnimationOnCompositor;
-  }
-  void setIsRunningBackdropFilterAnimationOnCompositor(bool b = true) {
-    SET_VAR(m_rareNonInheritedData,
-            m_runningBackdropFilterAnimationOnCompositor, b);
-  }
+  CORE_EXPORT void SetTextAutosizingMultiplier(float);
 
   // Column utility functions.
-  void clearMultiCol();
-  bool specifiesColumns() const {
-    return !hasAutoColumnCount() || !hasAutoColumnWidth();
+  void ClearMultiCol();
+  bool SpecifiesColumns() const {
+    return !HasAutoColumnCount() || !HasAutoColumnWidth();
   }
-  bool columnRuleIsTransparent() const {
-    return m_rareNonInheritedData->m_multiCol->m_rule.isTransparent();
+  bool ColumnRuleIsTransparent() const {
+    return !ColumnRuleColorIsCurrentColor() &&
+           !ColumnRuleColorInternal().Alpha();
   }
-  bool columnRuleEquivalent(const ComputedStyle* otherStyle) const;
-  void inheritColumnPropertiesFrom(const ComputedStyle& parent) {
-    m_rareNonInheritedData.access()->m_multiCol =
-        parent.m_rareNonInheritedData->m_multiCol;
+  bool ColumnRuleEquivalent(const ComputedStyle& other_style) const;
+  void InheritColumnPropertiesFrom(const ComputedStyle& parent) {
+    SetColumnGapInternal(parent.ColumnGap());
+    SetColumnWidthInternal(parent.ColumnWidth());
+    SetVisitedLinkColumnRuleColorInternal(
+        parent.VisitedLinkColumnRuleColorInternal());
+    SetColumnRuleColorInternal(parent.ColumnRuleColorInternal());
+    SetColumnCountInternal(parent.ColumnCount());
+    SetColumnRuleStyle(parent.ColumnRuleStyle());
+    SetColumnAutoCountInternal(parent.ColumnAutoCountInternal());
+    SetColumnAutoWidthInternal(parent.ColumnAutoWidthInternal());
+    SetColumnFill(parent.GetColumnFill());
+    SetColumnNormalGapInternal(parent.ColumnNormalGapInternal());
+    SetColumnRuleColorIsCurrentColor(parent.ColumnRuleColorIsCurrentColor());
+    SetColumnSpan(parent.GetColumnSpan());
   }
 
   // Flex utility functions.
-  bool isColumnFlexDirection() const {
-    return flexDirection() == FlowColumn ||
-           flexDirection() == FlowColumnReverse;
+  bool IsColumnFlexDirection() const {
+    return FlexDirection() == EFlexDirection::kColumn ||
+           FlexDirection() == EFlexDirection::kColumnReverse;
   }
-  bool isReverseFlexDirection() const {
-    return flexDirection() == FlowRowReverse ||
-           flexDirection() == FlowColumnReverse;
+  bool IsReverseFlexDirection() const {
+    return FlexDirection() == EFlexDirection::kRowReverse ||
+           FlexDirection() == EFlexDirection::kColumnReverse;
   }
-  bool hasBoxReflect() const { return boxReflect(); }
-  bool reflectionDataEquivalent(const ComputedStyle* otherStyle) const {
-    return m_rareNonInheritedData->reflectionDataEquivalent(
-        *otherStyle->m_rareNonInheritedData);
+  bool HasBoxReflect() const { return BoxReflect(); }
+  bool ReflectionDataEquivalent(const ComputedStyle& other) const {
+    return DataEquivalent(BoxReflect(), other.BoxReflect());
   }
 
   // Mask utility functions.
-  bool hasMask() const {
-    return m_rareNonInheritedData->m_mask.hasImage() ||
-           m_rareNonInheritedData->m_maskBoxImage.hasImage();
+  bool HasMask() const {
+    return MaskInternal().HasImage() || MaskBoxImageInternal().HasImage();
   }
-  StyleImage* maskImage() const {
-    return m_rareNonInheritedData->m_mask.image();
-  }
-  FillLayer& accessMaskLayers() {
-    return m_rareNonInheritedData.access()->m_mask;
-  }
-  const FillLayer& maskLayers() const { return m_rareNonInheritedData->m_mask; }
-  const NinePieceImage& maskBoxImage() const {
-    return m_rareNonInheritedData->m_maskBoxImage;
-  }
-  bool maskBoxImageSlicesFill() const {
-    return m_rareNonInheritedData->m_maskBoxImage.fill();
-  }
-  void adjustMaskLayers() {
-    if (maskLayers().next()) {
-      accessMaskLayers().cullEmptyLayers();
-      accessMaskLayers().fillUnsetProperties();
+  StyleImage* MaskImage() const { return MaskInternal().GetImage(); }
+  FillLayer& AccessMaskLayers() { return MutableMaskInternal(); }
+  const FillLayer& MaskLayers() const { return MaskInternal(); }
+  const NinePieceImage& MaskBoxImage() const { return MaskBoxImageInternal(); }
+  bool MaskBoxImageSlicesFill() const { return MaskBoxImageInternal().Fill(); }
+  void AdjustMaskLayers() {
+    if (MaskLayers().Next()) {
+      AccessMaskLayers().CullEmptyLayers();
+      AccessMaskLayers().FillUnsetProperties();
     }
   }
-  void setMaskBoxImage(const NinePieceImage& b) {
-    SET_VAR(m_rareNonInheritedData, m_maskBoxImage, b);
-  }
-  void setMaskBoxImageSlicesFill(bool fill) {
-    m_rareNonInheritedData.access()->m_maskBoxImage.setFill(fill);
+  void SetMaskBoxImage(const NinePieceImage& b) { SetMaskBoxImageInternal(b); }
+  void SetMaskBoxImageSlicesFill(bool fill) {
+    MutableMaskBoxImageInternal().SetFill(fill);
   }
 
   // Text-combine utility functions.
-  bool hasTextCombine() const { return getTextCombine() != TextCombineNone; }
+  bool HasTextCombine() const { return TextCombine() != ETextCombine::kNone; }
 
   // Grid utility functions.
-  const Vector<GridTrackSize>& gridAutoRepeatColumns() const {
-    return m_rareNonInheritedData->m_grid->m_gridAutoRepeatColumns;
+  GridAutoFlow GetGridAutoFlow() const { return GridAutoFlowInternal(); }
+  bool IsGridAutoFlowDirectionRow() const {
+    return (GridAutoFlowInternal() & kInternalAutoFlowDirectionRow) ==
+           kInternalAutoFlowDirectionRow;
   }
-  const Vector<GridTrackSize>& gridAutoRepeatRows() const {
-    return m_rareNonInheritedData->m_grid->m_gridAutoRepeatRows;
+  bool IsGridAutoFlowDirectionColumn() const {
+    return (GridAutoFlowInternal() & kInternalAutoFlowDirectionColumn) ==
+           kInternalAutoFlowDirectionColumn;
   }
-  size_t gridAutoRepeatColumnsInsertionPoint() const {
-    return m_rareNonInheritedData->m_grid->m_autoRepeatColumnsInsertionPoint;
+  bool IsGridAutoFlowAlgorithmSparse() const {
+    return (GridAutoFlowInternal() & kInternalAutoFlowAlgorithmSparse) ==
+           kInternalAutoFlowAlgorithmSparse;
   }
-  size_t gridAutoRepeatRowsInsertionPoint() const {
-    return m_rareNonInheritedData->m_grid->m_autoRepeatRowsInsertionPoint;
-  }
-  AutoRepeatType gridAutoRepeatColumnsType() const {
-    return m_rareNonInheritedData->m_grid->m_autoRepeatColumnsType;
-  }
-  AutoRepeatType gridAutoRepeatRowsType() const {
-    return m_rareNonInheritedData->m_grid->m_autoRepeatRowsType;
-  }
-  const NamedGridLinesMap& namedGridColumnLines() const {
-    return m_rareNonInheritedData->m_grid->m_namedGridColumnLines;
-  }
-  const NamedGridLinesMap& namedGridRowLines() const {
-    return m_rareNonInheritedData->m_grid->m_namedGridRowLines;
-  }
-  const OrderedNamedGridLines& orderedNamedGridColumnLines() const {
-    return m_rareNonInheritedData->m_grid->m_orderedNamedGridColumnLines;
-  }
-  const OrderedNamedGridLines& orderedNamedGridRowLines() const {
-    return m_rareNonInheritedData->m_grid->m_orderedNamedGridRowLines;
-  }
-  const NamedGridLinesMap& autoRepeatNamedGridColumnLines() const {
-    return m_rareNonInheritedData->m_grid->m_autoRepeatNamedGridColumnLines;
-  }
-  const NamedGridLinesMap& autoRepeatNamedGridRowLines() const {
-    return m_rareNonInheritedData->m_grid->m_autoRepeatNamedGridRowLines;
-  }
-  const OrderedNamedGridLines& autoRepeatOrderedNamedGridColumnLines() const {
-    return m_rareNonInheritedData->m_grid
-        ->m_autoRepeatOrderedNamedGridColumnLines;
-  }
-  const OrderedNamedGridLines& autoRepeatOrderedNamedGridRowLines() const {
-    return m_rareNonInheritedData->m_grid->m_autoRepeatOrderedNamedGridRowLines;
-  }
-  const NamedGridAreaMap& namedGridArea() const {
-    return m_rareNonInheritedData->m_grid->m_namedGridArea;
-  }
-  size_t namedGridAreaRowCount() const {
-    return m_rareNonInheritedData->m_grid->m_namedGridAreaRowCount;
-  }
-  size_t namedGridAreaColumnCount() const {
-    return m_rareNonInheritedData->m_grid->m_namedGridAreaColumnCount;
-  }
-  GridAutoFlow getGridAutoFlow() const {
-    return static_cast<GridAutoFlow>(
-        m_rareNonInheritedData->m_grid->m_gridAutoFlow);
-  }
-  bool isGridAutoFlowDirectionRow() const {
-    return (m_rareNonInheritedData->m_grid->m_gridAutoFlow &
-            InternalAutoFlowDirectionRow) == InternalAutoFlowDirectionRow;
-  }
-  bool isGridAutoFlowDirectionColumn() const {
-    return (m_rareNonInheritedData->m_grid->m_gridAutoFlow &
-            InternalAutoFlowDirectionColumn) == InternalAutoFlowDirectionColumn;
-  }
-  bool isGridAutoFlowAlgorithmSparse() const {
-    return (m_rareNonInheritedData->m_grid->m_gridAutoFlow &
-            InternalAutoFlowAlgorithmSparse) == InternalAutoFlowAlgorithmSparse;
-  }
-  bool isGridAutoFlowAlgorithmDense() const {
-    return (m_rareNonInheritedData->m_grid->m_gridAutoFlow &
-            InternalAutoFlowAlgorithmDense) == InternalAutoFlowAlgorithmDense;
-  }
-  void setGridAutoRepeatColumns(const Vector<GridTrackSize>& trackSizes) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_gridAutoRepeatColumns,
-                   trackSizes);
-  }
-  void setGridAutoRepeatRows(const Vector<GridTrackSize>& trackSizes) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_gridAutoRepeatRows,
-                   trackSizes);
-  }
-  void setGridAutoRepeatColumnsInsertionPoint(const size_t insertionPoint) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid,
-                   m_autoRepeatColumnsInsertionPoint, insertionPoint);
-  }
-  void setGridAutoRepeatRowsInsertionPoint(const size_t insertionPoint) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid,
-                   m_autoRepeatRowsInsertionPoint, insertionPoint);
-  }
-  void setGridAutoRepeatColumnsType(const AutoRepeatType autoRepeatType) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_autoRepeatColumnsType,
-                   autoRepeatType);
-  }
-  void setGridAutoRepeatRowsType(const AutoRepeatType autoRepeatType) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_autoRepeatRowsType,
-                   autoRepeatType);
-  }
-  void setNamedGridColumnLines(const NamedGridLinesMap& namedGridColumnLines) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_namedGridColumnLines,
-                   namedGridColumnLines);
-  }
-  void setNamedGridRowLines(const NamedGridLinesMap& namedGridRowLines) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_namedGridRowLines,
-                   namedGridRowLines);
-  }
-  void setOrderedNamedGridColumnLines(
-      const OrderedNamedGridLines& orderedNamedGridColumnLines) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid,
-                   m_orderedNamedGridColumnLines, orderedNamedGridColumnLines);
-  }
-  void setOrderedNamedGridRowLines(
-      const OrderedNamedGridLines& orderedNamedGridRowLines) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_orderedNamedGridRowLines,
-                   orderedNamedGridRowLines);
-  }
-  void setAutoRepeatNamedGridColumnLines(
-      const NamedGridLinesMap& namedGridColumnLines) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid,
-                   m_autoRepeatNamedGridColumnLines, namedGridColumnLines);
-  }
-  void setAutoRepeatNamedGridRowLines(
-      const NamedGridLinesMap& namedGridRowLines) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid,
-                   m_autoRepeatNamedGridRowLines, namedGridRowLines);
-  }
-  void setAutoRepeatOrderedNamedGridColumnLines(
-      const OrderedNamedGridLines& orderedNamedGridColumnLines) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid,
-                   m_autoRepeatOrderedNamedGridColumnLines,
-                   orderedNamedGridColumnLines);
-  }
-  void setAutoRepeatOrderedNamedGridRowLines(
-      const OrderedNamedGridLines& orderedNamedGridRowLines) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid,
-                   m_autoRepeatOrderedNamedGridRowLines,
-                   orderedNamedGridRowLines);
-  }
-  void setNamedGridArea(const NamedGridAreaMap& namedGridArea) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_namedGridArea,
-                   namedGridArea);
-  }
-  void setNamedGridAreaRowCount(size_t rowCount) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_namedGridAreaRowCount,
-                   rowCount);
-  }
-  void setNamedGridAreaColumnCount(size_t columnCount) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_grid, m_namedGridAreaColumnCount,
-                   columnCount);
+  bool IsGridAutoFlowAlgorithmDense() const {
+    return (GridAutoFlowInternal() & kInternalAutoFlowAlgorithmDense) ==
+           kInternalAutoFlowAlgorithmDense;
   }
 
   // align-content utility functions.
-  ContentPosition alignContentPosition() const {
-    return m_rareNonInheritedData->m_alignContent.position();
+  ContentPosition AlignContentPosition() const {
+    return AlignContent().GetPosition();
   }
-  ContentDistributionType alignContentDistribution() const {
-    return m_rareNonInheritedData->m_alignContent.distribution();
+  ContentDistributionType AlignContentDistribution() const {
+    return AlignContent().Distribution();
   }
-  OverflowAlignment alignContentOverflowAlignment() const {
-    return m_rareNonInheritedData->m_alignContent.overflow();
+  OverflowAlignment AlignContentOverflowAlignment() const {
+    return AlignContent().Overflow();
   }
-  void setAlignContentPosition(ContentPosition position) {
-    m_rareNonInheritedData.access()->m_alignContent.setPosition(position);
+  void SetAlignContentPosition(ContentPosition position) {
+    MutableAlignContentInternal().SetPosition(position);
   }
-  void setAlignContentDistribution(ContentDistributionType distribution) {
-    m_rareNonInheritedData.access()->m_alignContent.setDistribution(
-        distribution);
+  void SetAlignContentDistribution(ContentDistributionType distribution) {
+    MutableAlignContentInternal().SetDistribution(distribution);
   }
-  void setAlignContentOverflow(OverflowAlignment overflow) {
-    m_rareNonInheritedData.access()->m_alignContent.setOverflow(overflow);
+  void SetAlignContentOverflow(OverflowAlignment overflow) {
+    MutableAlignContentInternal().SetOverflow(overflow);
   }
 
   // justify-content utility functions.
-  ContentPosition justifyContentPosition() const {
-    return m_rareNonInheritedData->m_justifyContent.position();
+  ContentPosition JustifyContentPosition() const {
+    return JustifyContent().GetPosition();
   }
-  ContentDistributionType justifyContentDistribution() const {
-    return m_rareNonInheritedData->m_justifyContent.distribution();
+  ContentDistributionType JustifyContentDistribution() const {
+    return JustifyContent().Distribution();
   }
-  OverflowAlignment justifyContentOverflowAlignment() const {
-    return m_rareNonInheritedData->m_justifyContent.overflow();
+  OverflowAlignment JustifyContentOverflowAlignment() const {
+    return JustifyContent().Overflow();
   }
-  void setJustifyContentPosition(ContentPosition position) {
-    m_rareNonInheritedData.access()->m_justifyContent.setPosition(position);
+  void SetJustifyContentPosition(ContentPosition position) {
+    MutableJustifyContentInternal().SetPosition(position);
   }
-  void setJustifyContentDistribution(ContentDistributionType distribution) {
-    m_rareNonInheritedData.access()->m_justifyContent.setDistribution(
-        distribution);
+  void SetJustifyContentDistribution(ContentDistributionType distribution) {
+    MutableJustifyContentInternal().SetDistribution(distribution);
   }
-  void setJustifyContentOverflow(OverflowAlignment overflow) {
-    m_rareNonInheritedData.access()->m_justifyContent.setOverflow(overflow);
+  void SetJustifyContentOverflow(OverflowAlignment overflow) {
+    MutableJustifyContentInternal().SetOverflow(overflow);
   }
 
   // align-items utility functions.
-  ItemPosition alignItemsPosition() const {
-    return m_rareNonInheritedData->m_alignItems.position();
+  ItemPosition AlignItemsPosition() const { return AlignItems().GetPosition(); }
+  OverflowAlignment AlignItemsOverflowAlignment() const {
+    return AlignItems().Overflow();
   }
-  OverflowAlignment alignItemsOverflowAlignment() const {
-    return m_rareNonInheritedData->m_alignItems.overflow();
+  void SetAlignItemsPosition(ItemPosition position) {
+    MutableAlignItemsInternal().SetPosition(position);
   }
-  void setAlignItemsPosition(ItemPosition position) {
-    m_rareNonInheritedData.access()->m_alignItems.setPosition(position);
-  }
-  void setAlignItemsOverflow(OverflowAlignment overflow) {
-    m_rareNonInheritedData.access()->m_alignItems.setOverflow(overflow);
+  void SetAlignItemsOverflow(OverflowAlignment overflow) {
+    MutableAlignItemsInternal().SetOverflow(overflow);
   }
 
   // justify-items utility functions.
-  ItemPosition justifyItemsPosition() const {
-    return m_rareNonInheritedData->m_justifyItems.position();
+  ItemPosition JustifyItemsPosition() const {
+    return JustifyItems().GetPosition();
   }
-  OverflowAlignment justifyItemsOverflowAlignment() const {
-    return m_rareNonInheritedData->m_justifyItems.overflow();
+  OverflowAlignment JustifyItemsOverflowAlignment() const {
+    return JustifyItems().Overflow();
   }
-  ItemPositionType justifyItemsPositionType() const {
-    return m_rareNonInheritedData->m_justifyItems.positionType();
+  ItemPositionType JustifyItemsPositionType() const {
+    return JustifyItems().PositionType();
   }
-  void setJustifyItemsPosition(ItemPosition position) {
-    m_rareNonInheritedData.access()->m_justifyItems.setPosition(position);
+  void SetJustifyItemsPosition(ItemPosition position) {
+    MutableJustifyItemsInternal().SetPosition(position);
   }
-  void setJustifyItemsOverflow(OverflowAlignment overflow) {
-    m_rareNonInheritedData.access()->m_justifyItems.setOverflow(overflow);
+  void SetJustifyItemsOverflow(OverflowAlignment overflow) {
+    MutableJustifyItemsInternal().SetOverflow(overflow);
   }
-  void setJustifyItemsPositionType(ItemPositionType positionType) {
-    m_rareNonInheritedData.access()->m_justifyItems.setPositionType(
-        positionType);
+  void SetJustifyItemsPositionType(ItemPositionType position_type) {
+    MutableJustifyItemsInternal().SetPositionType(position_type);
   }
 
   // align-self utility functions.
-  ItemPosition alignSelfPosition() const {
-    return m_rareNonInheritedData->m_alignSelf.position();
+  ItemPosition AlignSelfPosition() const { return AlignSelf().GetPosition(); }
+  OverflowAlignment AlignSelfOverflowAlignment() const {
+    return AlignSelf().Overflow();
   }
-  OverflowAlignment alignSelfOverflowAlignment() const {
-    return m_rareNonInheritedData->m_alignSelf.overflow();
+  void SetAlignSelfPosition(ItemPosition position) {
+    MutableAlignSelfInternal().SetPosition(position);
   }
-  void setAlignSelfPosition(ItemPosition position) {
-    m_rareNonInheritedData.access()->m_alignSelf.setPosition(position);
-  }
-  void setAlignSelfOverflow(OverflowAlignment overflow) {
-    m_rareNonInheritedData.access()->m_alignSelf.setOverflow(overflow);
+  void SetAlignSelfOverflow(OverflowAlignment overflow) {
+    MutableAlignSelfInternal().SetOverflow(overflow);
   }
 
   // justify-self utility functions.
-  ItemPosition justifySelfPosition() const {
-    return m_rareNonInheritedData->m_justifySelf.position();
+  ItemPosition JustifySelfPosition() const {
+    return JustifySelf().GetPosition();
   }
-  OverflowAlignment justifySelfOverflowAlignment() const {
-    return m_rareNonInheritedData->m_justifySelf.overflow();
+  OverflowAlignment JustifySelfOverflowAlignment() const {
+    return JustifySelf().Overflow();
   }
-  void setJustifySelfPosition(ItemPosition position) {
-    m_rareNonInheritedData.access()->m_justifySelf.setPosition(position);
+  void SetJustifySelfPosition(ItemPosition position) {
+    MutableJustifySelfInternal().SetPosition(position);
   }
-  void setJustifySelfOverflow(OverflowAlignment overflow) {
-    m_rareNonInheritedData.access()->m_justifySelf.setOverflow(overflow);
+  void SetJustifySelfOverflow(OverflowAlignment overflow) {
+    MutableJustifySelfInternal().SetOverflow(overflow);
   }
 
   // Writing mode utility functions.
-  bool isHorizontalWritingMode() const {
-    return blink::isHorizontalWritingMode(getWritingMode());
+  bool IsHorizontalWritingMode() const {
+    return blink::IsHorizontalWritingMode(GetWritingMode());
   }
-  bool isFlippedLinesWritingMode() const {
-    return blink::isFlippedLinesWritingMode(getWritingMode());
+  bool IsFlippedLinesWritingMode() const {
+    return blink::IsFlippedLinesWritingMode(GetWritingMode());
   }
-  bool isFlippedBlocksWritingMode() const {
-    return blink::isFlippedBlocksWritingMode(getWritingMode());
+  bool IsFlippedBlocksWritingMode() const {
+    return blink::IsFlippedBlocksWritingMode(GetWritingMode());
   }
 
   // Will-change utility functions.
-  bool hasWillChangeCompositingHint() const;
-  bool hasWillChangeOpacityHint() const {
-    return willChangeProperties().contains(CSSPropertyOpacity);
+  bool HasWillChangeCompositingHint() const;
+  bool HasWillChangeOpacityHint() const {
+    return WillChangeProperties().Contains(CSSPropertyOpacity);
   }
-  bool hasWillChangeTransformHint() const;
+  bool HasWillChangeTransformHint() const;
 
   // Hyphen utility functions.
-  Hyphenation* getHyphenation() const;
-  const AtomicString& hyphenString() const;
+  Hyphenation* GetHyphenation() const;
+  const AtomicString& HyphenString() const;
+
+  // text-align utility functions.
+  using ComputedStyleBase::GetTextAlign;
+  ETextAlign GetTextAlign(bool is_last_line) const;
+
+  // text-indent utility functions.
+  bool ShouldUseTextIndent(bool is_first_line,
+                           bool is_after_forced_break) const;
 
   // Line-height utility functions.
-  const Length& specifiedLineHeight() const;
-  int computedLineHeight() const;
-  float computedLineHeightInFloat() const;
+  const Length& SpecifiedLineHeight() const;
+  int ComputedLineHeight() const;
+  LayoutUnit ComputedLineHeightAsFixed() const;
 
   // Width/height utility functions.
-  const Length& logicalWidth() const {
-    return isHorizontalWritingMode() ? width() : height();
+  const Length& LogicalWidth() const {
+    return IsHorizontalWritingMode() ? Width() : Height();
   }
-  const Length& logicalHeight() const {
-    return isHorizontalWritingMode() ? height() : width();
+  const Length& LogicalHeight() const {
+    return IsHorizontalWritingMode() ? Height() : Width();
   }
-  void setLogicalWidth(const Length& v) {
-    if (isHorizontalWritingMode()) {
-      SET_VAR(m_box, m_width, v);
+  void SetLogicalWidth(const Length& v) {
+    if (IsHorizontalWritingMode()) {
+      SetWidth(v);
     } else {
-      SET_VAR(m_box, m_height, v);
+      SetHeight(v);
     }
   }
 
-  void setLogicalHeight(const Length& v) {
-    if (isHorizontalWritingMode()) {
-      SET_VAR(m_box, m_height, v);
+  void SetLogicalHeight(const Length& v) {
+    if (IsHorizontalWritingMode()) {
+      SetHeight(v);
     } else {
-      SET_VAR(m_box, m_width, v);
+      SetWidth(v);
     }
   }
-  const Length& logicalMaxWidth() const {
-    return isHorizontalWritingMode() ? maxWidth() : maxHeight();
+  const Length& LogicalMaxWidth() const {
+    return IsHorizontalWritingMode() ? MaxWidth() : MaxHeight();
   }
-  const Length& logicalMaxHeight() const {
-    return isHorizontalWritingMode() ? maxHeight() : maxWidth();
+  const Length& LogicalMaxHeight() const {
+    return IsHorizontalWritingMode() ? MaxHeight() : MaxWidth();
   }
-  const Length& logicalMinWidth() const {
-    return isHorizontalWritingMode() ? minWidth() : minHeight();
+  const Length& LogicalMinWidth() const {
+    return IsHorizontalWritingMode() ? MinWidth() : MinHeight();
   }
-  const Length& logicalMinHeight() const {
-    return isHorizontalWritingMode() ? minHeight() : minWidth();
+  const Length& LogicalMinHeight() const {
+    return IsHorizontalWritingMode() ? MinHeight() : MinWidth();
   }
 
   // Margin utility functions.
-  bool hasMargin() const { return m_surround->margin.nonZero(); }
-  bool hasMarginBeforeQuirk() const { return marginBefore().quirk(); }
-  bool hasMarginAfterQuirk() const { return marginAfter().quirk(); }
-  const Length& marginBefore() const {
-    return m_surround->margin.before(getWritingMode());
+  bool HasMargin() const {
+    return !MarginLeft().IsZero() || !MarginRight().IsZero() ||
+           !MarginTop().IsZero() || !MarginBottom().IsZero();
   }
-  const Length& marginAfter() const {
-    return m_surround->margin.after(getWritingMode());
+  bool HasMarginBeforeQuirk() const { return MarginBefore().Quirk(); }
+  bool HasMarginAfterQuirk() const { return MarginAfter().Quirk(); }
+  const Length& MarginBefore() const { return MarginBeforeUsing(*this); }
+  const Length& MarginAfter() const { return MarginAfterUsing(*this); }
+  const Length& MarginStart() const { return MarginStartUsing(*this); }
+  const Length& MarginEnd() const { return MarginEndUsing(*this); }
+  const Length& MarginOver() const {
+    return PhysicalMarginToLogical(*this).Over();
   }
-  const Length& marginStart() const {
-    return m_surround->margin.start(getWritingMode(), direction());
+  const Length& MarginUnder() const {
+    return PhysicalMarginToLogical(*this).Under();
   }
-  const Length& marginEnd() const {
-    return m_surround->margin.end(getWritingMode(), direction());
+  const Length& MarginStartUsing(const ComputedStyle& other) const {
+    return PhysicalMarginToLogical(other).Start();
   }
-  const Length& marginOver() const {
-    return m_surround->margin.over(getWritingMode());
+  const Length& MarginEndUsing(const ComputedStyle& other) const {
+    return PhysicalMarginToLogical(other).End();
   }
-  const Length& marginUnder() const {
-    return m_surround->margin.under(getWritingMode());
+  const Length& MarginBeforeUsing(const ComputedStyle& other) const {
+    return PhysicalMarginToLogical(other).Before();
   }
-  const Length& marginStartUsing(const ComputedStyle* otherStyle) const {
-    return m_surround->margin.start(otherStyle->getWritingMode(),
-                                    otherStyle->direction());
+  const Length& MarginAfterUsing(const ComputedStyle& other) const {
+    return PhysicalMarginToLogical(other).After();
   }
-  const Length& marginEndUsing(const ComputedStyle* otherStyle) const {
-    return m_surround->margin.end(otherStyle->getWritingMode(),
-                                  otherStyle->direction());
+  void SetMarginStart(const Length&);
+  void SetMarginEnd(const Length&);
+  bool MarginEqual(const ComputedStyle& other) const {
+    return MarginTop() == other.MarginTop() &&
+           MarginLeft() == other.MarginLeft() &&
+           MarginRight() == other.MarginRight() &&
+           MarginBottom() == other.MarginBottom();
   }
-  const Length& marginBeforeUsing(const ComputedStyle* otherStyle) const {
-    return m_surround->margin.before(otherStyle->getWritingMode());
-  }
-  const Length& marginAfterUsing(const ComputedStyle* otherStyle) const {
-    return m_surround->margin.after(otherStyle->getWritingMode());
-  }
-  void setMarginStart(const Length&);
-  void setMarginEnd(const Length&);
 
   // Padding utility functions.
-  const LengthBox& paddingBox() const { return m_surround->padding; }
-  const Length& paddingBefore() const {
-    return m_surround->padding.before(getWritingMode());
+  const Length& PaddingBefore() const {
+    return PhysicalPaddingToLogical().Before();
   }
-  const Length& paddingAfter() const {
-    return m_surround->padding.after(getWritingMode());
+  const Length& PaddingAfter() const {
+    return PhysicalPaddingToLogical().After();
   }
-  const Length& paddingStart() const {
-    return m_surround->padding.start(getWritingMode(), direction());
+  const Length& PaddingStart() const {
+    return PhysicalPaddingToLogical().Start();
   }
-  const Length& paddingEnd() const {
-    return m_surround->padding.end(getWritingMode(), direction());
+  const Length& PaddingEnd() const { return PhysicalPaddingToLogical().End(); }
+  const Length& PaddingOver() const {
+    return PhysicalPaddingToLogical().Over();
   }
-  const Length& paddingOver() const {
-    return m_surround->padding.over(getWritingMode());
+  const Length& PaddingUnder() const {
+    return PhysicalPaddingToLogical().Under();
   }
-  const Length& paddingUnder() const {
-    return m_surround->padding.under(getWritingMode());
+  bool HasPadding() const {
+    return !PaddingLeft().IsZero() || !PaddingRight().IsZero() ||
+           !PaddingTop().IsZero() || !PaddingBottom().IsZero();
   }
-  bool hasPadding() const { return m_surround->padding.nonZero(); }
-  void resetPadding() { SET_VAR(m_surround, padding, LengthBox(Fixed)); }
-  void setPaddingBox(const LengthBox& b) { SET_VAR(m_surround, padding, b); }
+  void ResetPadding() {
+    SetPaddingTop(kFixed);
+    SetPaddingBottom(kFixed);
+    SetPaddingLeft(kFixed);
+    SetPaddingRight(kFixed);
+  }
+  void SetPadding(const LengthBox& b) {
+    SetPaddingTop(b.top_);
+    SetPaddingBottom(b.bottom_);
+    SetPaddingLeft(b.left_);
+    SetPaddingRight(b.right_);
+  }
+  bool PaddingEqual(const ComputedStyle& other) const {
+    return PaddingTop() == other.PaddingTop() &&
+           PaddingLeft() == other.PaddingLeft() &&
+           PaddingRight() == other.PaddingRight() &&
+           PaddingBottom() == other.PaddingBottom();
+  }
+  bool PaddingEqual(const LengthBox& other) const {
+    return PaddingTop() == other.Top() && PaddingLeft() == other.Left() &&
+           PaddingRight() == other.Right() && PaddingBottom() == other.Bottom();
+  }
 
   // Border utility functions
-  LayoutRectOutsets imageOutsets(const NinePieceImage&) const;
-  bool hasBorderImageOutsets() const {
-    return borderImage().hasImage() && borderImage().outset().nonZero();
+  LayoutRectOutsets ImageOutsets(const NinePieceImage&) const;
+  bool HasBorderImageOutsets() const {
+    return BorderImage().HasImage() && BorderImage().Outset().NonZero();
   }
-  LayoutRectOutsets borderImageOutsets() const {
-    return imageOutsets(borderImage());
+  LayoutRectOutsets BorderImageOutsets() const {
+    return ImageOutsets(BorderImage());
   }
-  bool borderImageSlicesFill() const {
-    return m_surround->border.image().fill();
+  bool BorderImageSlicesFill() const { return BorderImage().Fill(); }
+
+  void SetBorderImageSlicesFill(bool);
+  const BorderValue BorderLeft() const {
+    return BorderValue(BorderLeftStyle(), BorderLeftColor(),
+                       BorderLeftWidthInternal().ToFloat());
+  }
+  const BorderValue BorderRight() const {
+    return BorderValue(BorderRightStyle(), BorderRightColor(),
+                       BorderRightWidthInternal().ToFloat());
+  }
+  const BorderValue BorderTop() const {
+    return BorderValue(BorderTopStyle(), BorderTopColor(),
+                       BorderTopWidthInternal().ToFloat());
+  }
+  const BorderValue BorderBottom() const {
+    return BorderValue(BorderBottomStyle(), BorderBottomColor(),
+                       BorderBottomWidthInternal().ToFloat());
   }
 
-  void setBorderImageSlicesFill(bool);
-  const BorderData& border() const { return m_surround->border; }
-  const BorderValue& borderLeft() const { return m_surround->border.left(); }
-  const BorderValue& borderRight() const { return m_surround->border.right(); }
-  const BorderValue& borderTop() const { return m_surround->border.top(); }
-  const BorderValue& borderBottom() const {
-    return m_surround->border.bottom();
-  }
-  const BorderValue& borderBefore() const;
-  const BorderValue& borderAfter() const;
-  const BorderValue& borderStart() const;
-  const BorderValue& borderEnd() const;
-  float borderAfterWidth() const;
-  float borderBeforeWidth() const;
-  float borderEndWidth() const;
-  float borderStartWidth() const;
-  float borderOverWidth() const;
-  float borderUnderWidth() const;
-
-  bool hasBorderFill() const { return m_surround->border.hasBorderFill(); }
-  bool hasBorder() const { return m_surround->border.hasBorder(); }
-  bool hasBorderDecoration() const { return hasBorder() || hasBorderFill(); }
-  bool hasBorderRadius() const { return m_surround->border.hasBorderRadius(); }
-
-  void resetBorder() {
-    resetBorderImage();
-    resetBorderTop();
-    resetBorderRight();
-    resetBorderBottom();
-    resetBorderLeft();
-    resetBorderTopLeftRadius();
-    resetBorderTopRightRadius();
-    resetBorderBottomLeftRadius();
-    resetBorderBottomRightRadius();
-  }
-  void resetBorderTop() { SET_VAR(m_surround, border.m_top, BorderValue()); }
-  void resetBorderRight() {
-    SET_VAR(m_surround, border.m_right, BorderValue());
-  }
-  void resetBorderBottom() {
-    SET_VAR(m_surround, border.m_bottom, BorderValue());
-  }
-  void resetBorderLeft() { SET_VAR(m_surround, border.m_left, BorderValue()); }
-  void resetBorderImage() {
-    SET_VAR(m_surround, border.m_image, NinePieceImage());
-  }
-  void resetBorderTopLeftRadius() {
-    SET_VAR(m_surround, border.m_topLeft, initialBorderRadius());
-  }
-  void resetBorderTopRightRadius() {
-    SET_VAR(m_surround, border.m_topRight, initialBorderRadius());
-  }
-  void resetBorderBottomLeftRadius() {
-    SET_VAR(m_surround, border.m_bottomLeft, initialBorderRadius());
-  }
-  void resetBorderBottomRightRadius() {
-    SET_VAR(m_surround, border.m_bottomRight, initialBorderRadius());
+  bool BorderSizeEquals(const ComputedStyle& o) const {
+    return BorderLeftWidthInternal() == o.BorderLeftWidthInternal() &&
+           BorderTopWidthInternal() == o.BorderTopWidthInternal() &&
+           BorderRightWidthInternal() == o.BorderRightWidthInternal() &&
+           BorderBottomWidthInternal() == o.BorderBottomWidthInternal();
   }
 
-  void setBorderRadius(const LengthSize& s) {
-    setBorderTopLeftRadius(s);
-    setBorderTopRightRadius(s);
-    setBorderBottomLeftRadius(s);
-    setBorderBottomRightRadius(s);
+  BorderValue BorderBeforeUsing(const ComputedStyle& other) const {
+    return PhysicalBorderToLogical(other).Before();
   }
-  void setBorderRadius(const IntSize& s) {
-    setBorderRadius(
-        LengthSize(Length(s.width(), Fixed), Length(s.height(), Fixed)));
+  BorderValue BorderAfterUsing(const ComputedStyle& other) const {
+    return PhysicalBorderToLogical(other).After();
+  }
+  BorderValue BorderStartUsing(const ComputedStyle& other) const {
+    return PhysicalBorderToLogical(other).Start();
+  }
+  BorderValue BorderEndUsing(const ComputedStyle& other) const {
+    return PhysicalBorderToLogical(other).End();
   }
 
-  FloatRoundedRect getRoundedBorderFor(
-      const LayoutRect& borderRect,
-      bool includeLogicalLeftEdge = true,
-      bool includeLogicalRightEdge = true) const;
-  FloatRoundedRect getRoundedInnerBorderFor(
-      const LayoutRect& borderRect,
-      bool includeLogicalLeftEdge = true,
-      bool includeLogicalRightEdge = true) const;
-  FloatRoundedRect getRoundedInnerBorderFor(const LayoutRect& borderRect,
-                                            const LayoutRectOutsets& insets,
-                                            bool includeLogicalLeftEdge,
-                                            bool includeLogicalRightEdge) const;
+  BorderValue BorderBefore() const { return BorderBeforeUsing(*this); }
+  BorderValue BorderAfter() const { return BorderAfterUsing(*this); }
+  BorderValue BorderStart() const { return BorderStartUsing(*this); }
+  BorderValue BorderEnd() const { return BorderEndUsing(*this); }
+
+  float BorderAfterWidth() const {
+    return PhysicalBorderWidthToLogical().After();
+  }
+  float BorderBeforeWidth() const {
+    return PhysicalBorderWidthToLogical().Before();
+  }
+  float BorderEndWidth() const { return PhysicalBorderWidthToLogical().End(); }
+  float BorderStartWidth() const {
+    return PhysicalBorderWidthToLogical().Start();
+  }
+  float BorderOverWidth() const {
+    return PhysicalBorderWidthToLogical().Over();
+  }
+  float BorderUnderWidth() const {
+    return PhysicalBorderWidthToLogical().Under();
+  }
+
+  EBorderStyle BorderAfterStyle() const {
+    return PhysicalBorderStyleToLogical().After();
+  }
+  EBorderStyle BorderBeforeStyle() const {
+    return PhysicalBorderStyleToLogical().Before();
+  }
+  EBorderStyle BorderEndStyle() const {
+    return PhysicalBorderStyleToLogical().End();
+  }
+  EBorderStyle BorderStartStyle() const {
+    return PhysicalBorderStyleToLogical().Start();
+  }
+
+  bool HasBorderFill() const {
+    return BorderImage().HasImage() && BorderImage().Fill();
+  }
+  bool HasBorder() const {
+    return BorderLeftNonZero() || BorderRightNonZero() || BorderTopNonZero() ||
+           BorderBottomNonZero();
+  }
+  bool HasBorderDecoration() const { return HasBorder() || HasBorderFill(); }
+  bool HasBorderRadius() const {
+    if (!BorderTopLeftRadius().Width().IsZero())
+      return true;
+    if (!BorderTopRightRadius().Width().IsZero())
+      return true;
+    if (!BorderBottomLeftRadius().Width().IsZero())
+      return true;
+    if (!BorderBottomRightRadius().Width().IsZero())
+      return true;
+    return false;
+  }
+  bool HasBorderColorReferencingCurrentColor() const {
+    return (BorderLeftNonZero() && BorderLeftColor().IsCurrentColor()) ||
+           (BorderRightNonZero() && BorderRightColor().IsCurrentColor()) ||
+           (BorderTopNonZero() && BorderTopColor().IsCurrentColor()) ||
+           (BorderBottomNonZero() && BorderBottomColor().IsCurrentColor());
+  }
+
+  bool RadiiEqual(const ComputedStyle& o) const {
+    return BorderTopLeftRadius() == o.BorderTopLeftRadius() &&
+           BorderTopRightRadius() == o.BorderTopRightRadius() &&
+           BorderBottomLeftRadius() == o.BorderBottomLeftRadius() &&
+           BorderBottomRightRadius() == o.BorderBottomRightRadius();
+  }
+
+  bool BorderLeftEquals(const ComputedStyle& o) const {
+    return BorderLeftWidthInternal() == o.BorderLeftWidthInternal() &&
+           BorderLeftStyle() == o.BorderLeftStyle() &&
+           BorderLeftColor() == o.BorderLeftColor() &&
+           BorderLeftColorIsCurrentColor() == o.BorderLeftColorIsCurrentColor();
+  }
+  bool BorderLeftEquals(const BorderValue& o) const {
+    return BorderLeftWidthInternal().ToFloat() == o.Width() &&
+           BorderLeftStyle() == o.Style() &&
+           BorderLeftColor() == o.GetColor() &&
+           BorderLeftColorIsCurrentColor() == o.ColorIsCurrentColor();
+  }
+
+  bool BorderLeftVisuallyEqual(const ComputedStyle& o) const {
+    if (BorderLeftStyle() == EBorderStyle::kNone &&
+        o.BorderLeftStyle() == EBorderStyle::kNone)
+      return true;
+    if (BorderLeftStyle() == EBorderStyle::kHidden &&
+        o.BorderLeftStyle() == EBorderStyle::kHidden)
+      return true;
+    return BorderLeftEquals(o);
+  }
+
+  bool BorderRightEquals(const ComputedStyle& o) const {
+    return BorderRightWidthInternal() == o.BorderRightWidthInternal() &&
+           BorderRightStyle() == o.BorderRightStyle() &&
+           BorderRightColor() == o.BorderRightColor() &&
+           BorderRightColorIsCurrentColor() ==
+               o.BorderRightColorIsCurrentColor();
+  }
+  bool BorderRightEquals(const BorderValue& o) const {
+    return BorderRightWidthInternal().ToFloat() == o.Width() &&
+           BorderRightStyle() == o.Style() &&
+           BorderRightColor() == o.GetColor() &&
+           BorderRightColorIsCurrentColor() == o.ColorIsCurrentColor();
+  }
+
+  bool BorderRightVisuallyEqual(const ComputedStyle& o) const {
+    if (BorderRightStyle() == EBorderStyle::kNone &&
+        o.BorderRightStyle() == EBorderStyle::kNone)
+      return true;
+    if (BorderRightStyle() == EBorderStyle::kHidden &&
+        o.BorderRightStyle() == EBorderStyle::kHidden)
+      return true;
+    return BorderRightEquals(o);
+  }
+
+  bool BorderTopVisuallyEqual(const ComputedStyle& o) const {
+    if (BorderTopStyle() == EBorderStyle::kNone &&
+        o.BorderTopStyle() == EBorderStyle::kNone)
+      return true;
+    if (BorderTopStyle() == EBorderStyle::kHidden &&
+        o.BorderTopStyle() == EBorderStyle::kHidden)
+      return true;
+    return BorderTopEquals(o);
+  }
+
+  bool BorderTopEquals(const ComputedStyle& o) const {
+    return BorderTopWidthInternal() == o.BorderTopWidthInternal() &&
+           BorderTopStyle() == o.BorderTopStyle() &&
+           BorderTopColor() == o.BorderTopColor() &&
+           BorderTopColorIsCurrentColor() == o.BorderTopColorIsCurrentColor();
+  }
+  bool BorderTopEquals(const BorderValue& o) const {
+    return BorderTopWidthInternal().ToFloat() == o.Width() &&
+           BorderTopStyle() == o.Style() && BorderTopColor() == o.GetColor() &&
+           BorderTopColorIsCurrentColor() == o.ColorIsCurrentColor();
+  }
+
+  bool BorderBottomVisuallyEqual(const ComputedStyle& o) const {
+    if (BorderBottomStyle() == EBorderStyle::kNone &&
+        o.BorderBottomStyle() == EBorderStyle::kNone)
+      return true;
+    if (BorderBottomStyle() == EBorderStyle::kHidden &&
+        o.BorderBottomStyle() == EBorderStyle::kHidden)
+      return true;
+    return BorderBottomEquals(o);
+  }
+
+  bool BorderBottomEquals(const ComputedStyle& o) const {
+    return BorderBottomWidthInternal() == o.BorderBottomWidthInternal() &&
+           BorderBottomStyle() == o.BorderBottomStyle() &&
+           BorderBottomColor() == o.BorderBottomColor() &&
+           BorderBottomColorIsCurrentColor() ==
+               o.BorderBottomColorIsCurrentColor();
+  }
+  bool BorderBottomEquals(const BorderValue& o) const {
+    return BorderBottomWidthInternal().ToFloat() == o.Width() &&
+           BorderBottomStyle() == o.Style() &&
+           BorderBottomColor() == o.GetColor() &&
+           BorderBottomColorIsCurrentColor() == o.ColorIsCurrentColor();
+  }
+
+  bool BorderEquals(const ComputedStyle& o) const {
+    return BorderLeftEquals(o) && BorderRightEquals(o) && BorderTopEquals(o) &&
+           BorderBottomEquals(o) && BorderImage() == o.BorderImage();
+  }
+
+  bool BorderVisuallyEqual(const ComputedStyle& o) const {
+    return BorderLeftVisuallyEqual(o) && BorderRightVisuallyEqual(o) &&
+           BorderTopVisuallyEqual(o) && BorderBottomVisuallyEqual(o) &&
+           BorderImage() == o.BorderImage();
+  }
+
+  bool BorderVisualOverflowEqual(const ComputedStyle& o) const {
+    return BorderImage().Outset() == o.BorderImage().Outset();
+  }
+
+  void ResetBorder() {
+    ResetBorderImage();
+    ResetBorderTop();
+    ResetBorderRight();
+    ResetBorderBottom();
+    ResetBorderLeft();
+    ResetBorderTopLeftRadius();
+    ResetBorderTopRightRadius();
+    ResetBorderBottomLeftRadius();
+    ResetBorderBottomRightRadius();
+  }
+
+  void ResetBorderTop() {
+    SetBorderTopStyle(EBorderStyle::kNone);
+    SetBorderTopWidth(3);
+    SetBorderTopColorInternal(0);
+    SetBorderTopColorIsCurrentColor(true);
+  }
+  void ResetBorderRight() {
+    SetBorderRightStyle(EBorderStyle::kNone);
+    SetBorderRightWidth(3);
+    SetBorderRightColorInternal(0);
+    SetBorderRightColorIsCurrentColor(true);
+  }
+  void ResetBorderBottom() {
+    SetBorderBottomStyle(EBorderStyle::kNone);
+    SetBorderBottomWidth(3);
+    SetBorderBottomColorInternal(0);
+    SetBorderBottomColorIsCurrentColor(true);
+  }
+  void ResetBorderLeft() {
+    SetBorderLeftStyle(EBorderStyle::kNone);
+    SetBorderLeftWidth(3);
+    SetBorderLeftColorInternal(0);
+    SetBorderLeftColorIsCurrentColor(true);
+  }
+
+  void SetBorderRadius(const LengthSize& s) {
+    SetBorderTopLeftRadius(s);
+    SetBorderTopRightRadius(s);
+    SetBorderBottomLeftRadius(s);
+    SetBorderBottomRightRadius(s);
+  }
+  void SetBorderRadius(const IntSize& s) {
+    SetBorderRadius(
+        LengthSize(Length(s.Width(), kFixed), Length(s.Height(), kFixed)));
+  }
+
+  FloatRoundedRect GetRoundedBorderFor(
+      const LayoutRect& border_rect,
+      bool include_logical_left_edge = true,
+      bool include_logical_right_edge = true) const;
+  FloatRoundedRect GetRoundedInnerBorderFor(
+      const LayoutRect& border_rect,
+      bool include_logical_left_edge = true,
+      bool include_logical_right_edge = true) const;
+  FloatRoundedRect GetRoundedInnerBorderFor(
+      const LayoutRect& border_rect,
+      const LayoutRectOutsets& insets,
+      bool include_logical_left_edge,
+      bool include_logical_right_edge) const;
+
+  bool CanRenderBorderImage() const;
 
   // Float utility functions.
-  bool isFloating() const { return floating() != EFloat::kNone; }
+  bool IsFloating() const { return Floating() != EFloat::kNone; }
 
   // Mix-blend-mode utility functions.
-  bool hasBlendMode() const { return blendMode() != WebBlendModeNormal; }
+  bool HasBlendMode() const { return BlendMode() != WebBlendMode::kNormal; }
 
   // Motion utility functions.
-  bool hasOffset() const {
-    return (offsetPosition().x() != Length(Auto)) || offsetPath();
+  bool HasOffset() const {
+    return (OffsetPosition().X() != Length(kAuto)) || OffsetPath();
   }
 
   // Direction utility functions.
-  bool isLeftToRightDirection() const {
-    return direction() == TextDirection::kLtr;
+  bool IsLeftToRightDirection() const {
+    return Direction() == TextDirection::kLtr;
   }
 
   // Perspective utility functions.
-  bool hasPerspective() const {
-    return m_rareNonInheritedData->m_perspective > 0;
-  }
-
-  // Page size utility functions.
-  void resetPageSizeType() {
-    SET_VAR(m_rareNonInheritedData, m_pageSizeType, PAGE_SIZE_AUTO);
-  }
+  bool HasPerspective() const { return Perspective() > 0; }
 
   // Outline utility functions.
-  bool hasOutline() const {
-    return outlineWidth() > 0 && outlineStyle() > BorderStyleHidden;
+  bool HasOutline() const {
+    return OutlineWidth() > 0 && OutlineStyle() > EBorderStyle::kHidden;
   }
-  int outlineOutsetExtent() const;
-  float getOutlineStrokeWidthForFocusRing() const;
+  CORE_EXPORT int OutlineOutsetExtent() const;
+  CORE_EXPORT float GetOutlineStrokeWidthForFocusRing() const;
+  bool HasOutlineWithCurrentColor() const {
+    return HasOutline() && OutlineColor().IsCurrentColor();
+  }
 
   // Position utility functions.
-  bool hasOutOfFlowPosition() const {
-    return position() == EPosition::kAbsolute ||
-           position() == EPosition::kFixed;
+  bool HasOutOfFlowPosition() const {
+    return GetPosition() == EPosition::kAbsolute ||
+           GetPosition() == EPosition::kFixed;
   }
-  bool hasInFlowPosition() const {
-    return position() == EPosition::kRelative ||
-           position() == EPosition::kSticky;
+  bool HasInFlowPosition() const {
+    return GetPosition() == EPosition::kRelative ||
+           GetPosition() == EPosition::kSticky;
   }
-  bool hasViewportConstrainedPosition() const {
-    return position() == EPosition::kFixed || position() == EPosition::kSticky;
+  bool HasViewportConstrainedPosition() const {
+    return GetPosition() == EPosition::kFixed;
+  }
+  bool HasStickyConstrainedPosition() const {
+    return GetPosition() == EPosition::kSticky &&
+           (!Top().IsAuto() || !Left().IsAuto() || !Right().IsAuto() ||
+            !Bottom().IsAuto());
   }
 
   // Clip utility functions.
-  const Length& clipLeft() const { return m_visual->clip.left(); }
-  const Length& clipRight() const { return m_visual->clip.right(); }
-  const Length& clipTop() const { return m_visual->clip.top(); }
-  const Length& clipBottom() const { return m_visual->clip.bottom(); }
+  const Length& ClipLeft() const { return Clip().Left(); }
+  const Length& ClipRight() const { return Clip().Right(); }
+  const Length& ClipTop() const { return Clip().Top(); }
+  const Length& ClipBottom() const { return Clip().Bottom(); }
 
   // Offset utility functions.
   // Accessors for positioned object edges that take into account writing mode.
-  const Length& logicalLeft() const {
-    return m_surround->offset.logicalLeft(getWritingMode());
+  const Length& LogicalLeft() const {
+    return PhysicalBoundsToLogical().LineLeft();
   }
-  const Length& logicalRight() const {
-    return m_surround->offset.logicalRight(getWritingMode());
+  const Length& LogicalRight() const {
+    return PhysicalBoundsToLogical().LineRight();
   }
-  const Length& logicalTop() const {
-    return m_surround->offset.before(getWritingMode());
+  const Length& LogicalTop() const {
+    return PhysicalBoundsToLogical().Before();
   }
-  const Length& logicalBottom() const {
-    return m_surround->offset.after(getWritingMode());
+  const Length& LogicalBottom() const {
+    return PhysicalBoundsToLogical().After();
+  }
+  bool OffsetEqual(const ComputedStyle& other) const {
+    return Left() == other.Left() && Right() == other.Right() &&
+           Top() == other.Top() && Bottom() == other.Bottom();
   }
 
   // Whether or not a positioned element requires normal flow x/y to be computed
   // to determine its position.
-  bool hasAutoLeftAndRight() const {
-    return left().isAuto() && right().isAuto();
+  bool HasAutoLeftAndRight() const {
+    return Left().IsAuto() && Right().IsAuto();
   }
-  bool hasAutoTopAndBottom() const {
-    return top().isAuto() && bottom().isAuto();
+  bool HasAutoTopAndBottom() const {
+    return Top().IsAuto() && Bottom().IsAuto();
   }
-  bool hasStaticInlinePosition(bool horizontal) const {
-    return horizontal ? hasAutoLeftAndRight() : hasAutoTopAndBottom();
+  bool HasStaticInlinePosition(bool horizontal) const {
+    return horizontal ? HasAutoLeftAndRight() : HasAutoTopAndBottom();
   }
-  bool hasStaticBlockPosition(bool horizontal) const {
-    return horizontal ? hasAutoTopAndBottom() : hasAutoLeftAndRight();
+  bool HasStaticBlockPosition(bool horizontal) const {
+    return horizontal ? HasAutoTopAndBottom() : HasAutoLeftAndRight();
   }
 
   // Content utility functions.
-  bool contentDataEquivalent(const ComputedStyle* otherStyle) const {
-    return const_cast<ComputedStyle*>(this)
-        ->m_rareNonInheritedData->contentDataEquivalent(
-            *const_cast<ComputedStyle*>(otherStyle)->m_rareNonInheritedData);
+  bool ContentDataEquivalent(const ComputedStyle& other) const {
+    return DataEquivalent(GetContentData(), other.GetContentData());
   }
 
   // Contain utility functions.
-  bool containsPaint() const {
-    return m_rareNonInheritedData->m_contain & ContainsPaint;
-  }
-  bool containsStyle() const {
-    return m_rareNonInheritedData->m_contain & ContainsStyle;
-  }
-  bool containsLayout() const {
-    return m_rareNonInheritedData->m_contain & ContainsLayout;
-  }
-  bool containsSize() const {
-    return m_rareNonInheritedData->m_contain & ContainsSize;
-  }
+  bool ContainsPaint() const { return Contain() & kContainsPaint; }
+  bool ContainsStyle() const { return Contain() & kContainsStyle; }
+  bool ContainsLayout() const { return Contain() & kContainsLayout; }
+  bool ContainsSize() const { return Contain() & kContainsSize; }
 
   // Display utility functions.
-  bool isDisplayReplacedType() const {
-    return isDisplayReplacedType(display());
+  bool IsDisplayReplacedType() const {
+    return IsDisplayReplacedType(Display());
   }
-  bool isDisplayInlineType() const { return isDisplayInlineType(display()); }
-  bool isOriginalDisplayInlineType() const {
-    return isDisplayInlineType(originalDisplay());
+  bool IsDisplayInlineType() const { return IsDisplayInlineType(Display()); }
+  bool IsOriginalDisplayInlineType() const {
+    return IsDisplayInlineType(OriginalDisplay());
   }
-  bool isDisplayBlockContainer() const {
-    return isDisplayBlockContainer(display());
+  bool IsDisplayBlockContainer() const {
+    return IsDisplayBlockContainer(Display());
   }
-  bool isDisplayFlexibleOrGridBox() const {
-    return isDisplayFlexibleBox(display()) || isDisplayGridBox(display());
+  bool IsDisplayFlexibleOrGridBox() const {
+    return IsDisplayFlexibleBox(Display()) || IsDisplayGridBox(Display());
   }
-  bool isDisplayFlexibleBox() const { return isDisplayFlexibleBox(display()); }
+  bool IsDisplayFlexibleBox() const { return IsDisplayFlexibleBox(Display()); }
 
   // Isolation utility functions.
-  bool hasIsolation() const { return isolation() != IsolationAuto; }
+  bool HasIsolation() const { return Isolation() != EIsolation::kAuto; }
 
   // Content utility functions.
-  bool hasContent() const { return contentData(); }
+  bool HasContent() const { return GetContentData(); }
 
   // Cursor utility functions.
-  CursorList* cursors() const { return m_rareInheritedData->cursorData.get(); }
-  void addCursor(StyleImage*,
-                 bool hotSpotSpecified,
-                 const IntPoint& hotSpot = IntPoint());
-  void setCursorList(CursorList*);
-  void clearCursorList();
+  CursorList* Cursors() const { return CursorDataInternal().Get(); }
+  void AddCursor(StyleImage*,
+                 bool hot_spot_specified,
+                 const IntPoint& hot_spot = IntPoint());
+  void SetCursorList(CursorList*);
+  void ClearCursorList();
 
   // Text decoration utility functions.
-  void applyTextDecorations(const Color& parentTextDecorationColor,
-                            bool overrideExistingColors);
-  void clearAppliedTextDecorations();
-  void restoreParentTextDecorations(const ComputedStyle& parentStyle);
-  const Vector<AppliedTextDecoration>& appliedTextDecorations() const;
-  TextDecoration textDecorationsInEffect() const;
+  void ApplyTextDecorations(const Color& parent_text_decoration_color,
+                            bool override_existing_colors);
+  void ClearAppliedTextDecorations();
+  void RestoreParentTextDecorations(const ComputedStyle& parent_style);
+  const Vector<AppliedTextDecoration>& AppliedTextDecorations() const;
+  TextDecoration TextDecorationsInEffect() const;
 
   // Overflow utility functions.
 
-  EOverflow overflowInlineDirection() const {
-    return isHorizontalWritingMode() ? overflowX() : overflowY();
+  EOverflow OverflowInlineDirection() const {
+    return IsHorizontalWritingMode() ? OverflowX() : OverflowY();
   }
-  EOverflow overflowBlockDirection() const {
-    return isHorizontalWritingMode() ? overflowY() : overflowX();
+  EOverflow OverflowBlockDirection() const {
+    return IsHorizontalWritingMode() ? OverflowY() : OverflowX();
   }
 
   // It's sufficient to just check one direction, since it's illegal to have
   // visible on only one overflow value.
-  bool isOverflowVisible() const {
-    DCHECK(overflowX() != EOverflow::kVisible || overflowX() == overflowY());
-    return overflowX() == EOverflow::kVisible;
+  bool IsOverflowVisible() const {
+    DCHECK(OverflowX() != EOverflow::kVisible || OverflowX() == OverflowY());
+    return OverflowX() == EOverflow::kVisible;
   }
-  bool isOverflowPaged() const {
-    return overflowY() == EOverflow::kWebkitPagedX ||
-           overflowY() == EOverflow::kWebkitPagedY;
+  bool IsOverflowPaged() const {
+    return OverflowY() == EOverflow::kWebkitPagedX ||
+           OverflowY() == EOverflow::kWebkitPagedY;
+  }
+
+  bool IsDisplayTableRowOrColumnType() const {
+    return Display() == EDisplay::kTableRow ||
+           Display() == EDisplay::kTableRowGroup ||
+           Display() == EDisplay::kTableColumn ||
+           Display() == EDisplay::kTableColumnGroup;
+  }
+
+  bool HasAutoHorizontalScroll() const {
+    return OverflowX() == EOverflow::kAuto ||
+           OverflowX() == EOverflow::kOverlay;
+  }
+
+  bool HasAutoVerticalScroll() const {
+    return OverflowY() == EOverflow::kAuto ||
+           OverflowY() == EOverflow::kWebkitPagedY ||
+           OverflowY() == EOverflow::kOverlay;
+  }
+
+  bool ScrollsOverflowX() const {
+    return OverflowX() == EOverflow::kScroll || HasAutoHorizontalScroll();
+  }
+
+  bool ScrollsOverflowY() const {
+    return OverflowY() == EOverflow::kScroll || HasAutoVerticalScroll();
+  }
+
+  bool ScrollsOverflow() const {
+    return ScrollsOverflowX() || ScrollsOverflowY();
   }
 
   // Visibility utility functions.
-  bool visibleToHitTesting() const {
-    return visibility() == EVisibility::kVisible &&
-           pointerEvents() != EPointerEvents::kNone;
+  bool VisibleToHitTesting() const {
+    return Visibility() == EVisibility::kVisible &&
+           PointerEvents() != EPointerEvents::kNone;
   }
 
   // Animation utility functions.
-  bool shouldCompositeForCurrentAnimations() const {
-    return hasCurrentOpacityAnimation() || hasCurrentTransformAnimation() ||
-           hasCurrentFilterAnimation() || hasCurrentBackdropFilterAnimation();
+  bool ShouldCompositeForCurrentAnimations() const {
+    return HasCurrentOpacityAnimation() || HasCurrentTransformAnimation() ||
+           HasCurrentFilterAnimation() || HasCurrentBackdropFilterAnimation();
   }
-  bool isRunningAnimationOnCompositor() const {
-    return isRunningOpacityAnimationOnCompositor() ||
-           isRunningTransformAnimationOnCompositor() ||
-           isRunningFilterAnimationOnCompositor() ||
-           isRunningBackdropFilterAnimationOnCompositor();
+  bool IsRunningAnimationOnCompositor() const {
+    return IsRunningOpacityAnimationOnCompositor() ||
+           IsRunningTransformAnimationOnCompositor() ||
+           IsRunningFilterAnimationOnCompositor() ||
+           IsRunningBackdropFilterAnimationOnCompositor();
   }
 
   // Opacity utility functions.
-  bool hasOpacity() const { return opacity() < 1.0f; }
+  bool HasOpacity() const { return Opacity() < 1.0f; }
 
   // Table layout utility functions.
-  bool isFixedTableLayout() const {
-    return tableLayout() == ETableLayout::kFixed && !logicalWidth().isAuto();
+  bool IsFixedTableLayout() const {
+    return TableLayout() == ETableLayout::kFixed && !LogicalWidth().IsAuto();
   }
 
   // Filter/transform utility functions.
-  bool has3DTransform() const {
-    return m_rareNonInheritedData->m_transform->has3DTransform();
+  bool Has3DTransform() const {
+    return Transform().Has3DOperation() ||
+           (Translate() && Translate()->Z() != 0) ||
+           (Rotate() && (Rotate()->X() != 0 || Rotate()->Y() != 0)) ||
+           (Scale() && Scale()->Z() != 1);
   }
-  bool hasTransform() const {
-    return hasTransformOperations() || hasOffset() ||
-           hasCurrentTransformAnimation() || translate() || rotate() || scale();
+  bool HasTransform() const {
+    return HasTransformOperations() || HasOffset() ||
+           HasCurrentTransformAnimation() || Translate() || Rotate() || Scale();
   }
-  bool hasTransformOperations() const {
-    return !m_rareNonInheritedData->m_transform->m_operations.operations()
-                .isEmpty();
+  bool HasTransformOperations() const {
+    return !Transform().Operations().IsEmpty();
   }
-  ETransformStyle3D usedTransformStyle3D() const {
-    return hasGroupingProperty() ? TransformStyle3DFlat : transformStyle3D();
+  ETransformStyle3D UsedTransformStyle3D() const {
+    return HasGroupingProperty() ? ETransformStyle3D::kFlat
+                                 : TransformStyle3D();
   }
-  bool transformDataEquivalent(const ComputedStyle& otherStyle) const {
-    return m_rareNonInheritedData->m_transform ==
-           otherStyle.m_rareNonInheritedData->m_transform;
+  // Returns whether the transform operations for |otherStyle| differ from the
+  // operations for this style instance. Note that callers may want to also
+  // check hasTransform(), as it is possible for two styles to have matching
+  // transform operations but differ in other transform-impacting style
+  // respects.
+  bool TransformDataEquivalent(const ComputedStyle& other) const {
+    return !DiffTransformData(*this, other);
   }
-  bool preserves3D() const {
-    return usedTransformStyle3D() != TransformStyle3DFlat;
+  bool Preserves3D() const {
+    return UsedTransformStyle3D() != ETransformStyle3D::kFlat;
   }
-  enum ApplyTransformOrigin { IncludeTransformOrigin, ExcludeTransformOrigin };
-  enum ApplyMotionPath { IncludeMotionPath, ExcludeMotionPath };
-  enum ApplyIndependentTransformProperties {
-    IncludeIndependentTransformProperties,
-    ExcludeIndependentTransformProperties
+  enum ApplyTransformOrigin {
+    kIncludeTransformOrigin,
+    kExcludeTransformOrigin
   };
-  void applyTransform(TransformationMatrix&,
-                      const LayoutSize& borderBoxSize,
+  enum ApplyMotionPath { kIncludeMotionPath, kExcludeMotionPath };
+  enum ApplyIndependentTransformProperties {
+    kIncludeIndependentTransformProperties,
+    kExcludeIndependentTransformProperties
+  };
+  void ApplyTransform(TransformationMatrix&,
+                      const LayoutSize& border_box_data_size,
                       ApplyTransformOrigin,
                       ApplyMotionPath,
                       ApplyIndependentTransformProperties) const;
-  void applyTransform(TransformationMatrix&,
-                      const FloatRect& boundingBox,
+  void ApplyTransform(TransformationMatrix&,
+                      const FloatRect& bounding_box,
                       ApplyTransformOrigin,
                       ApplyMotionPath,
                       ApplyIndependentTransformProperties) const;
 
+  bool HasFilters() const;
+
   // Returns |true| if any property that renders using filter operations is
   // used (including, but not limited to, 'filter' and 'box-reflect').
-  bool hasFilterInducingProperty() const {
-    return hasFilter() || hasBoxReflect();
+  bool HasFilterInducingProperty() const {
+    return HasFilter() || HasBoxReflect();
   }
 
   // Returns |true| if opacity should be considered to have non-initial value
   // for the purpose of creating stacking contexts.
-  bool hasNonInitialOpacity() const {
-    return hasOpacity() || hasWillChangeOpacityHint() ||
-           hasCurrentOpacityAnimation();
+  bool HasNonInitialOpacity() const {
+    return HasOpacity() || HasWillChangeOpacityHint() ||
+           HasCurrentOpacityAnimation();
   }
 
   // Returns whether this style contains any grouping property as defined by
@@ -3361,9 +2102,9 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   // Note: We currently don't include every grouping property on the spec to
   // maintain backward compatibility.  [css-transforms]
   // https://drafts.csswg.org/css-transforms/#grouping-property-values
-  bool hasGroupingProperty() const {
-    return !isOverflowVisible() || hasFilterInducingProperty() ||
-           hasNonInitialOpacity();
+  bool HasGroupingProperty() const {
+    return !IsOverflowVisible() || HasFilterInducingProperty() ||
+           HasNonInitialOpacity();
   }
 
   // Return true if any transform related property (currently
@@ -3372,19 +2113,19 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   // will-change:transform should result in the same rendering behavior as
   // having a transform, including the creation of a containing block for fixed
   // position descendants.
-  bool hasTransformRelatedProperty() const {
-    return hasTransform() || preserves3D() || hasPerspective() ||
-           hasWillChangeTransformHint();
+  bool HasTransformRelatedProperty() const {
+    return HasTransform() || Preserves3D() || HasPerspective() ||
+           HasWillChangeTransformHint();
   }
 
   // Paint utility functions.
-  void addPaintImage(StyleImage*);
+  void AddPaintImage(StyleImage*);
 
   // FIXME: reflections should belong to this helper function but they are
   // currently handled through their self-painting layers. So the layout code
   // doesn't account for them.
-  bool hasVisualOverflowingEffect() const {
-    return boxShadow() || hasBorderImageOutsets() || hasOutline();
+  bool HasVisualOverflowingEffect() const {
+    return BoxShadow() || HasBorderImageOutsets() || HasOutline();
   }
 
   // Stacking contexts and positioned elements[1] are stacked (sorted in
@@ -3398,425 +2139,524 @@ class CORE_EXPORT ComputedStyle : public ComputedStyleBase,
   // 'z-index: 0'.  The difference of them from normal stacking contexts is that
   // they don't determine the stacking of the elements underneath them.  (Note:
   // There are also other elements treated as stacking context during painting,
-  // but not managed in stacks. See ObjectPainter::paintAllPhasesAtomically().)
-  void updateIsStackingContext(bool isDocumentElement, bool isInTopLayer);
-  bool isStacked() const {
-    return isStackingContext() || position() != EPosition::kStatic;
+  // but not managed in stacks. See ObjectPainter::PaintAllPhasesAtomically().)
+  CORE_EXPORT void UpdateIsStackingContext(bool is_document_element,
+                                           bool is_in_top_layer);
+  bool IsStacked() const {
+    return IsStackingContext() || GetPosition() != EPosition::kStatic;
   }
 
   // Pseudo-styles
-  bool hasAnyPublicPseudoStyles() const;
-  bool hasPseudoStyle(PseudoId) const;
-  void setHasPseudoStyle(PseudoId);
-  bool hasUniquePseudoStyle() const;
-  bool hasPseudoElementStyle() const;
+  bool HasAnyPublicPseudoStyles() const;
+  bool HasPseudoStyle(PseudoId) const;
+  void SetHasPseudoStyle(PseudoId);
+  bool HasUniquePseudoStyle() const;
+  bool HasPseudoElementStyle() const;
 
-  // Note: canContainAbsolutePositionObjects should return true if
-  // canContainFixedPositionObjects.  We currently never use this value
-  // directly, always OR'ing it with canContainFixedPositionObjects.
-  bool canContainAbsolutePositionObjects() const {
-    return position() != EPosition::kStatic;
+  // Note: CanContainAbsolutePositionObjects should return true if
+  // CanContainFixedPositionObjects.  We currently never use this value
+  // directly, always OR'ing it with CanContainFixedPositionObjects.
+  bool CanContainAbsolutePositionObjects() const {
+    return GetPosition() != EPosition::kStatic;
   }
-  bool canContainFixedPositionObjects() const {
-    return hasTransformRelatedProperty() || containsPaint();
+  bool CanContainFixedPositionObjects() const {
+    return HasTransformRelatedProperty() || ContainsPaint();
   }
 
   // Whitespace utility functions.
-  static bool autoWrap(EWhiteSpace ws) {
+  static bool AutoWrap(EWhiteSpace ws) {
     // Nowrap and pre don't automatically wrap.
     return ws != EWhiteSpace::kNowrap && ws != EWhiteSpace::kPre;
   }
 
-  bool autoWrap() const { return autoWrap(whiteSpace()); }
+  bool AutoWrap() const { return AutoWrap(WhiteSpace()); }
 
-  static bool preserveNewline(EWhiteSpace ws) {
+  static bool PreserveNewline(EWhiteSpace ws) {
     // Normal and nowrap do not preserve newlines.
     return ws != EWhiteSpace::kNormal && ws != EWhiteSpace::kNowrap;
   }
 
-  bool preserveNewline() const { return preserveNewline(whiteSpace()); }
+  bool PreserveNewline() const { return PreserveNewline(WhiteSpace()); }
 
-  static bool collapseWhiteSpace(EWhiteSpace ws) {
+  static bool BorderStyleIsVisible(EBorderStyle style) {
+    return style != EBorderStyle::kNone && style != EBorderStyle::kHidden;
+  }
+
+  static bool CollapseWhiteSpace(EWhiteSpace ws) {
     // Pre and prewrap do not collapse whitespace.
     return ws != EWhiteSpace::kPre && ws != EWhiteSpace::kPreWrap;
   }
 
-  bool collapseWhiteSpace() const { return collapseWhiteSpace(whiteSpace()); }
+  bool CollapseWhiteSpace() const { return CollapseWhiteSpace(WhiteSpace()); }
 
-  bool isCollapsibleWhiteSpace(UChar c) const {
+  bool IsCollapsibleWhiteSpace(UChar c) const {
     switch (c) {
       case ' ':
       case '\t':
-        return collapseWhiteSpace();
+        return CollapseWhiteSpace();
       case '\n':
-        return !preserveNewline();
+        return !PreserveNewline();
     }
     return false;
   }
-  bool breakOnlyAfterWhiteSpace() const {
-    return whiteSpace() == EWhiteSpace::kPreWrap ||
-           getLineBreak() == LineBreakAfterWhiteSpace;
+  bool BreakOnlyAfterWhiteSpace() const {
+    return WhiteSpace() == EWhiteSpace::kPreWrap ||
+           GetLineBreak() == LineBreak::kAfterWhiteSpace;
   }
 
-  bool breakWords() const {
-    return (wordBreak() == BreakWordBreak ||
-            overflowWrap() == BreakOverflowWrap) &&
-           whiteSpace() != EWhiteSpace::kPre &&
-           whiteSpace() != EWhiteSpace::kNowrap;
+  bool BreakWords() const {
+    return (WordBreak() == EWordBreak::kBreakWord ||
+            OverflowWrap() == EOverflowWrap::kBreakWord) &&
+           WhiteSpace() != EWhiteSpace::kPre &&
+           WhiteSpace() != EWhiteSpace::kNowrap;
   }
 
   // Text direction utility functions.
-  bool shouldPlaceBlockDirectionScrollbarOnLogicalLeft() const {
-    return !isLeftToRightDirection() && isHorizontalWritingMode();
+  bool ShouldPlaceBlockDirectionScrollbarOnLogicalLeft() const {
+    return !IsLeftToRightDirection() && IsHorizontalWritingMode();
   }
-  bool hasInlinePaginationAxis() const {
+  bool HasInlinePaginationAxis() const {
     // If the pagination axis is parallel with the writing mode inline axis,
     // columns may be laid out along the inline axis, just like for regular
     // multicol. Otherwise, we need to lay out along the block axis.
-    if (isOverflowPaged()) {
-      return (overflowY() == EOverflow::kWebkitPagedX) ==
-             isHorizontalWritingMode();
+    if (IsOverflowPaged()) {
+      return (OverflowY() == EOverflow::kWebkitPagedX) ==
+             IsHorizontalWritingMode();
     }
     return false;
   }
 
   // Border utility functions.
-  bool borderObscuresBackground() const;
-  void getBorderEdgeInfo(BorderEdge edges[],
-                         bool includeLogicalLeftEdge = true,
-                         bool includeLogicalRightEdge = true) const;
+  bool BorderObscuresBackground() const;
+  void GetBorderEdgeInfo(BorderEdge edges[],
+                         bool include_logical_left_edge = true,
+                         bool include_logical_right_edge = true) const;
 
-  bool hasBoxDecorations() const {
-    return hasBorderDecoration() || hasBorderRadius() || hasOutline() ||
-           hasAppearance() || boxShadow() || hasFilterInducingProperty() ||
-           hasBackdropFilter() || resize() != RESIZE_NONE;
+  bool HasBoxDecorations() const {
+    return HasBorderDecoration() || HasBorderRadius() || HasOutline() ||
+           HasAppearance() || BoxShadow() || HasFilterInducingProperty() ||
+           HasBackdropFilter() || Resize() != EResize::kNone;
   }
 
   // "Box decoration background" includes all box decorations and backgrounds
   // that are painted as the background of the object. It includes borders,
   // box-shadows, background-color and background-image, etc.
-  bool hasBoxDecorationBackground() const {
-    return hasBackground() || hasBorderDecoration() || hasAppearance() ||
-           boxShadow();
+  bool HasBoxDecorationBackground() const {
+    return HasBackground() || HasBorderDecoration() || HasAppearance() ||
+           BoxShadow();
   }
 
   // Background utility functions.
-  FillLayer& accessBackgroundLayers() {
-    return m_background.access()->m_background;
-  }
-  const FillLayer& backgroundLayers() const {
-    return m_background->background();
-  }
-  void adjustBackgroundLayers() {
-    if (backgroundLayers().next()) {
-      accessBackgroundLayers().cullEmptyLayers();
-      accessBackgroundLayers().fillUnsetProperties();
+  FillLayer& AccessBackgroundLayers() { return MutableBackgroundInternal(); }
+  const FillLayer& BackgroundLayers() const { return BackgroundInternal(); }
+  void AdjustBackgroundLayers() {
+    if (BackgroundLayers().Next()) {
+      AccessBackgroundLayers().CullEmptyLayers();
+      AccessBackgroundLayers().FillUnsetProperties();
     }
   }
-  bool hasBackgroundRelatedColorReferencingCurrentColor() const {
-    if (backgroundColor().isCurrentColor() ||
-        visitedLinkBackgroundColor().isCurrentColor())
+  bool HasBackgroundRelatedColorReferencingCurrentColor() const {
+    if (BackgroundColor().IsCurrentColor() ||
+        VisitedLinkBackgroundColor().IsCurrentColor())
       return true;
-    if (!boxShadow())
+    if (!BoxShadow())
       return false;
-    return shadowListHasCurrentColor(boxShadow());
+    return ShadowListHasCurrentColor(BoxShadow());
   }
-  bool hasBackground() const {
-    Color color = visitedDependentColor(CSSPropertyBackgroundColor);
-    if (color.alpha())
+  bool HasBackground() const {
+    Color color = VisitedDependentColor(CSSPropertyBackgroundColor);
+    if (color.Alpha())
       return true;
-    return hasBackgroundImage();
+    return HasBackgroundImage();
   }
 
   // Color utility functions.
   // TODO(sashab): Rename this to just getColor(), and add a comment explaining
   // how it works.
-  Color visitedDependentColor(int colorProperty) const;
+  CORE_EXPORT Color VisitedDependentColor(int color_property) const;
 
   // -webkit-appearance utility functions.
-  bool hasAppearance() const { return appearance() != NoControlPart; }
+  bool HasAppearance() const { return Appearance() != kNoControlPart; }
 
   // Other utility functions.
-  bool isStyleAvailable() const;
-  bool isSharable() const;
+  bool IsStyleAvailable() const;
+  bool IsSharable() const;
 
-  bool requireTransformOrigin(ApplyTransformOrigin applyOrigin,
+  bool RequireTransformOrigin(ApplyTransformOrigin apply_origin,
                               ApplyMotionPath) const;
 
+  InterpolationQuality GetInterpolationQuality() const;
+
  private:
-  void setVisitedLinkColor(const Color&);
-  void setVisitedLinkBackgroundColor(const StyleColor& v) {
-    SET_VAR(m_rareNonInheritedData, m_visitedLinkBackgroundColor, v);
+  void SetVisitedLinkBackgroundColor(const StyleColor& v) {
+    SetVisitedLinkBackgroundColorInternal(v);
   }
-  void setVisitedLinkBorderLeftColor(const StyleColor& v) {
-    SET_VAR(m_rareNonInheritedData, m_visitedLinkBorderLeftColor, v);
+  void SetVisitedLinkBorderLeftColor(const StyleColor& v) {
+    SetVisitedLinkBorderLeftColorInternal(v);
   }
-  void setVisitedLinkBorderRightColor(const StyleColor& v) {
-    SET_VAR(m_rareNonInheritedData, m_visitedLinkBorderRightColor, v);
+  void SetVisitedLinkBorderRightColor(const StyleColor& v) {
+    SetVisitedLinkBorderRightColorInternal(v);
   }
-  void setVisitedLinkBorderBottomColor(const StyleColor& v) {
-    SET_VAR(m_rareNonInheritedData, m_visitedLinkBorderBottomColor, v);
+  void SetVisitedLinkBorderBottomColor(const StyleColor& v) {
+    SetVisitedLinkBorderBottomColorInternal(v);
   }
-  void setVisitedLinkBorderTopColor(const StyleColor& v) {
-    SET_VAR(m_rareNonInheritedData, m_visitedLinkBorderTopColor, v);
+  void SetVisitedLinkBorderTopColor(const StyleColor& v) {
+    SetVisitedLinkBorderTopColorInternal(v);
   }
-  void setVisitedLinkOutlineColor(const StyleColor& v) {
-    SET_VAR(m_rareNonInheritedData, m_visitedLinkOutlineColor, v);
+  void SetVisitedLinkOutlineColor(const StyleColor& v) {
+    SetVisitedLinkOutlineColorInternal(v);
   }
-  void setVisitedLinkColumnRuleColor(const StyleColor& v) {
-    SET_NESTED_VAR(m_rareNonInheritedData, m_multiCol,
-                   m_visitedLinkColumnRuleColor, v);
+  void SetVisitedLinkColumnRuleColor(const StyleColor& v) {
+    SetVisitedLinkColumnRuleColorInternal(v);
   }
-  void setVisitedLinkTextDecorationColor(const StyleColor& v) {
-    SET_VAR(m_rareNonInheritedData, m_visitedLinkTextDecorationColor, v);
+  void SetVisitedLinkTextDecorationColor(const StyleColor& v) {
+    SetVisitedLinkTextDecorationColorInternal(v);
   }
-  void setVisitedLinkTextEmphasisColor(const StyleColor& v) {
-    SET_VAR_WITH_SETTER(m_rareInheritedData, visitedLinkTextEmphasisColor,
-                        setVisitedLinkTextEmphasisColor, v);
+  void SetVisitedLinkTextEmphasisColor(const StyleColor& color) {
+    SetVisitedLinkTextEmphasisColorInternal(color.Resolve(Color()));
+    SetVisitedLinkTextEmphasisColorIsCurrentColorInternal(
+        color.IsCurrentColor());
   }
-  void setVisitedLinkTextFillColor(const StyleColor& v) {
-    SET_VAR_WITH_SETTER(m_rareInheritedData, visitedLinkTextFillColor,
-                        setVisitedLinkTextFillColor, v);
+  void SetVisitedLinkTextFillColor(const StyleColor& color) {
+    SetVisitedLinkTextFillColorInternal(color.Resolve(Color()));
+    SetVisitedLinkTextFillColorIsCurrentColorInternal(color.IsCurrentColor());
   }
-  void setVisitedLinkTextStrokeColor(const StyleColor& v) {
-    SET_VAR_WITH_SETTER(m_rareInheritedData, visitedLinkTextStrokeColor,
-                        setVisitedLinkTextStrokeColor, v);
+  void SetVisitedLinkTextStrokeColor(const StyleColor& color) {
+    SetVisitedLinkTextStrokeColorInternal(color.Resolve(Color()));
+    SetVisitedLinkTextStrokeColorIsCurrentColorInternal(color.IsCurrentColor());
   }
-  void setVisitedLinkCaretColor(const StyleAutoColor& v) {
-    SET_VAR_WITH_SETTER(m_rareInheritedData, visitedLinkCaretColor,
-                        setVisitedLinkCaretColor, v);
-  }
-
-  static bool isDisplayBlockContainer(EDisplay display) {
-    return display == EDisplay::Block || display == EDisplay::ListItem ||
-           display == EDisplay::InlineBlock || display == EDisplay::FlowRoot ||
-           display == EDisplay::TableCell || display == EDisplay::TableCaption;
+  void SetVisitedLinkCaretColor(const StyleAutoColor& color) {
+    SetVisitedLinkCaretColorInternal(color.Resolve(Color()));
+    SetVisitedLinkCaretColorIsCurrentColorInternal(color.IsCurrentColor());
+    SetVisitedLinkCaretColorIsAutoInternal(color.IsAutoColor());
   }
 
-  static bool isDisplayFlexibleBox(EDisplay display) {
-    return display == EDisplay::Flex || display == EDisplay::InlineFlex;
+  static bool IsDisplayBlockContainer(EDisplay display) {
+    return display == EDisplay::kBlock || display == EDisplay::kListItem ||
+           display == EDisplay::kInlineBlock ||
+           display == EDisplay::kFlowRoot || display == EDisplay::kTableCell ||
+           display == EDisplay::kTableCaption;
   }
 
-  static bool isDisplayGridBox(EDisplay display) {
-    return display == EDisplay::Grid || display == EDisplay::InlineGrid;
+  static bool IsDisplayFlexibleBox(EDisplay display) {
+    return display == EDisplay::kFlex || display == EDisplay::kInlineFlex;
   }
 
-  static bool isDisplayReplacedType(EDisplay display) {
-    return display == EDisplay::InlineBlock ||
-           display == EDisplay::WebkitInlineBox ||
-           display == EDisplay::InlineFlex ||
-           display == EDisplay::InlineTable || display == EDisplay::InlineGrid;
+  static bool IsDisplayGridBox(EDisplay display) {
+    return display == EDisplay::kGrid || display == EDisplay::kInlineGrid;
   }
 
-  static bool isDisplayInlineType(EDisplay display) {
-    return display == EDisplay::Inline || isDisplayReplacedType(display);
+  static bool IsDisplayReplacedType(EDisplay display) {
+    return display == EDisplay::kInlineBlock ||
+           display == EDisplay::kWebkitInlineBox ||
+           display == EDisplay::kInlineFlex ||
+           display == EDisplay::kInlineTable ||
+           display == EDisplay::kInlineGrid;
   }
 
-  static bool isDisplayTableType(EDisplay display) {
-    return display == EDisplay::Table || display == EDisplay::InlineTable ||
-           display == EDisplay::TableRowGroup ||
-           display == EDisplay::TableHeaderGroup ||
-           display == EDisplay::TableFooterGroup ||
-           display == EDisplay::TableRow ||
-           display == EDisplay::TableColumnGroup ||
-           display == EDisplay::TableColumn || display == EDisplay::TableCell ||
-           display == EDisplay::TableCaption;
+  static bool IsDisplayInlineType(EDisplay display) {
+    return display == EDisplay::kInline || IsDisplayReplacedType(display);
+  }
+
+  static bool IsDisplayTableType(EDisplay display) {
+    return display == EDisplay::kTable || display == EDisplay::kInlineTable ||
+           display == EDisplay::kTableRowGroup ||
+           display == EDisplay::kTableHeaderGroup ||
+           display == EDisplay::kTableFooterGroup ||
+           display == EDisplay::kTableRow ||
+           display == EDisplay::kTableColumnGroup ||
+           display == EDisplay::kTableColumn ||
+           display == EDisplay::kTableCell ||
+           display == EDisplay::kTableCaption;
   }
 
   // Color accessors are all private to make sure callers use
-  // visitedDependentColor instead to access them.
-  StyleColor borderLeftColor() const {
-    return m_surround->border.left().color();
+  // VisitedDependentColor instead to access them.
+  StyleColor BorderLeftColor() const {
+    return BorderLeftColorIsCurrentColor()
+               ? StyleColor::CurrentColor()
+               : StyleColor(BorderLeftColorInternal());
   }
-  StyleColor borderRightColor() const {
-    return m_surround->border.right().color();
+  StyleColor BorderRightColor() const {
+    return BorderRightColorIsCurrentColor()
+               ? StyleColor::CurrentColor()
+               : StyleColor(BorderRightColorInternal());
   }
-  StyleColor borderTopColor() const { return m_surround->border.top().color(); }
-  StyleColor borderBottomColor() const {
-    return m_surround->border.bottom().color();
+  StyleColor BorderTopColor() const {
+    return BorderTopColorIsCurrentColor()
+               ? StyleColor::CurrentColor()
+               : StyleColor(BorderTopColorInternal());
   }
-  StyleColor backgroundColor() const { return m_background->color(); }
-  StyleAutoColor caretColor() const {
-    return m_rareInheritedData->caretColor();
-  }
-  Color color() const;
-  StyleColor columnRuleColor() const {
-    return m_rareNonInheritedData->m_multiCol->m_rule.color();
-  }
-  StyleColor outlineColor() const {
-    return m_rareNonInheritedData->m_outline.color();
-  }
-  StyleColor textEmphasisColor() const {
-    return m_rareInheritedData->textEmphasisColor();
-  }
-  StyleColor textFillColor() const {
-    return m_rareInheritedData->textFillColor();
-  }
-  StyleColor textStrokeColor() const {
-    return m_rareInheritedData->textStrokeColor();
-  }
-  StyleAutoColor visitedLinkCaretColor() const {
-    return m_rareInheritedData->visitedLinkCaretColor();
-  }
-  Color visitedLinkColor() const;
-  StyleColor visitedLinkBackgroundColor() const {
-    return m_rareNonInheritedData->m_visitedLinkBackgroundColor;
-  }
-  StyleColor visitedLinkBorderLeftColor() const {
-    return m_rareNonInheritedData->m_visitedLinkBorderLeftColor;
-  }
-  StyleColor visitedLinkBorderRightColor() const {
-    return m_rareNonInheritedData->m_visitedLinkBorderRightColor;
-  }
-  StyleColor visitedLinkBorderBottomColor() const {
-    return m_rareNonInheritedData->m_visitedLinkBorderBottomColor;
-  }
-  StyleColor visitedLinkBorderTopColor() const {
-    return m_rareNonInheritedData->m_visitedLinkBorderTopColor;
-  }
-  StyleColor visitedLinkOutlineColor() const {
-    return m_rareNonInheritedData->m_visitedLinkOutlineColor;
-  }
-  StyleColor visitedLinkColumnRuleColor() const {
-    return m_rareNonInheritedData->m_multiCol->m_visitedLinkColumnRuleColor;
-  }
-  StyleColor textDecorationColor() const {
-    return m_rareNonInheritedData->m_textDecorationColor;
-  }
-  StyleColor visitedLinkTextDecorationColor() const {
-    return m_rareNonInheritedData->m_visitedLinkTextDecorationColor;
-  }
-  StyleColor visitedLinkTextEmphasisColor() const {
-    return m_rareInheritedData->visitedLinkTextEmphasisColor();
-  }
-  StyleColor visitedLinkTextFillColor() const {
-    return m_rareInheritedData->visitedLinkTextFillColor();
-  }
-  StyleColor visitedLinkTextStrokeColor() const {
-    return m_rareInheritedData->visitedLinkTextStrokeColor();
+  StyleColor BorderBottomColor() const {
+    return BorderBottomColorIsCurrentColor()
+               ? StyleColor::CurrentColor()
+               : StyleColor(BorderBottomColorInternal());
   }
 
-  StyleColor decorationColorIncludingFallback(bool visitedLink) const;
-  Color colorIncludingFallback(int colorProperty, bool visitedLink) const;
+  StyleColor BackgroundColor() const { return BackgroundColorInternal(); }
+  StyleAutoColor CaretColor() const {
+    if (CaretColorIsCurrentColorInternal())
+      return StyleAutoColor::CurrentColor();
+    if (CaretColorIsAutoInternal())
+      return StyleAutoColor::AutoColor();
+    return StyleAutoColor(CaretColorInternal());
+  }
+  Color GetColor() const;
+  StyleColor ColumnRuleColor() const {
+    return ColumnRuleColorIsCurrentColor()
+               ? StyleColor::CurrentColor()
+               : StyleColor(ColumnRuleColorInternal());
+  }
+  StyleColor OutlineColor() const {
+    return OutlineColorIsCurrentColor() ? StyleColor::CurrentColor()
+                                        : StyleColor(OutlineColorInternal());
+  }
+  StyleColor TextEmphasisColor() const {
+    return TextEmphasisColorIsCurrentColorInternal()
+               ? StyleColor::CurrentColor()
+               : StyleColor(TextEmphasisColorInternal());
+  }
+  StyleColor TextFillColor() const {
+    return TextFillColorIsCurrentColorInternal()
+               ? StyleColor::CurrentColor()
+               : StyleColor(TextFillColorInternal());
+  }
+  StyleColor TextStrokeColor() const {
+    return TextStrokeColorIsCurrentColorInternal()
+               ? StyleColor::CurrentColor()
+               : StyleColor(TextStrokeColorInternal());
+  }
+  StyleAutoColor VisitedLinkCaretColor() const {
+    if (VisitedLinkCaretColorIsCurrentColorInternal())
+      return StyleAutoColor::CurrentColor();
+    if (VisitedLinkCaretColorIsAutoInternal())
+      return StyleAutoColor::AutoColor();
+    return StyleAutoColor(VisitedLinkCaretColorInternal());
+  }
+  StyleColor VisitedLinkBackgroundColor() const {
+    return VisitedLinkBackgroundColorInternal();
+  }
+  StyleColor VisitedLinkBorderLeftColor() const {
+    return VisitedLinkBorderLeftColorInternal();
+  }
+  bool VisitedLinkBorderLeftColorHasNotChanged(
+      const ComputedStyle& other) const {
+    return (VisitedLinkBorderLeftColor() ==
+                other.VisitedLinkBorderLeftColor() ||
+            !BorderLeftWidth());
+  }
+  StyleColor VisitedLinkBorderRightColor() const {
+    return VisitedLinkBorderRightColorInternal();
+  }
+  bool VisitedLinkBorderRightColorHasNotChanged(
+      const ComputedStyle& other) const {
+    return (VisitedLinkBorderRightColor() ==
+                other.VisitedLinkBorderRightColor() ||
+            !BorderRightWidth());
+  }
+  StyleColor VisitedLinkBorderBottomColor() const {
+    return VisitedLinkBorderBottomColorInternal();
+  }
+  bool VisitedLinkBorderBottomColorHasNotChanged(
+      const ComputedStyle& other) const {
+    return (VisitedLinkBorderBottomColor() ==
+                other.VisitedLinkBorderBottomColor() ||
+            !BorderBottomWidth());
+  }
+  StyleColor VisitedLinkBorderTopColor() const {
+    return VisitedLinkBorderTopColorInternal();
+  }
+  bool VisitedLinkBorderTopColorHasNotChanged(
+      const ComputedStyle& other) const {
+    return (VisitedLinkBorderTopColor() == other.VisitedLinkBorderTopColor() ||
+            !BorderTopWidth());
+  }
+  StyleColor VisitedLinkOutlineColor() const {
+    return VisitedLinkOutlineColorInternal();
+  }
+  bool VisitedLinkOutlineColorHasNotChanged(const ComputedStyle& other) const {
+    return (VisitedLinkOutlineColor() == other.VisitedLinkOutlineColor() ||
+            !OutlineWidth());
+  }
+  StyleColor VisitedLinkColumnRuleColor() const {
+    return VisitedLinkColumnRuleColorInternal();
+  }
+  StyleColor VisitedLinkTextDecorationColor() const {
+    return VisitedLinkTextDecorationColorInternal();
+  }
+  StyleColor VisitedLinkTextEmphasisColor() const {
+    return VisitedLinkTextEmphasisColorIsCurrentColorInternal()
+               ? StyleColor::CurrentColor()
+               : StyleColor(VisitedLinkTextEmphasisColorInternal());
+  }
+  StyleColor VisitedLinkTextFillColor() const {
+    return VisitedLinkTextFillColorIsCurrentColorInternal()
+               ? StyleColor::CurrentColor()
+               : StyleColor(VisitedLinkTextFillColorInternal());
+  }
+  StyleColor VisitedLinkTextStrokeColor() const {
+    return VisitedLinkTextStrokeColorIsCurrentColorInternal()
+               ? StyleColor::CurrentColor()
+               : StyleColor(VisitedLinkTextStrokeColorInternal());
+  }
 
-  Color stopColor() const { return svgStyle().stopColor(); }
-  Color floodColor() const { return svgStyle().floodColor(); }
-  Color lightingColor() const { return svgStyle().lightingColor(); }
+  StyleColor DecorationColorIncludingFallback(bool visited_link) const;
+  Color ColorIncludingFallback(int color_property, bool visited_link) const;
 
-  void addAppliedTextDecoration(const AppliedTextDecoration&);
-  void overrideTextDecorationColors(Color propagatedColor);
-  void applyMotionPathTransform(float originX,
-                                float originY,
-                                const FloatRect& boundingBox,
+  Color StopColor() const { return SvgStyle().StopColor(); }
+  Color FloodColor() const { return SvgStyle().FloodColor(); }
+  Color LightingColor() const { return SvgStyle().LightingColor(); }
+
+  void AddAppliedTextDecoration(const AppliedTextDecoration&);
+  void OverrideTextDecorationColors(Color propagated_color);
+  void ApplyMotionPathTransform(float origin_x,
+                                float origin_y,
+                                const FloatRect& bounding_box,
                                 TransformationMatrix&) const;
 
-  bool scrollAnchorDisablingPropertyChanged(const ComputedStyle& other,
+  bool ScrollAnchorDisablingPropertyChanged(const ComputedStyle& other,
                                             const StyleDifference&) const;
-  bool diffNeedsFullLayoutAndPaintInvalidation(
+  bool DiffNeedsFullLayoutAndPaintInvalidation(
       const ComputedStyle& other) const;
-  bool diffNeedsFullLayout(const ComputedStyle& other) const;
-  bool diffNeedsPaintInvalidationSubtree(const ComputedStyle& other) const;
-  bool diffNeedsPaintInvalidationObject(const ComputedStyle& other) const;
-  bool diffNeedsPaintInvalidationObjectForPaintImage(
-      const StyleImage*,
+  bool DiffNeedsFullLayout(const ComputedStyle& other) const;
+  bool DiffNeedsPaintInvalidationSubtree(const ComputedStyle& other) const;
+  bool DiffNeedsPaintInvalidationObject(const ComputedStyle& other) const;
+  bool DiffNeedsPaintInvalidationObjectForPaintImage(
+      const StyleImage&,
       const ComputedStyle& other) const;
-  bool diffNeedsPaintInvalidationSelection(const ComputedStyle& other) const;
-  void updatePropertySpecificDifferences(const ComputedStyle& other,
-                                         StyleDifference&) const;
+  bool DiffNeedsVisualRectUpdate(const ComputedStyle& other) const;
+  CORE_EXPORT void UpdatePropertySpecificDifferences(const ComputedStyle& other,
+                                                     StyleDifference&) const;
 
-  static bool shadowListHasCurrentColor(const ShadowList*);
+  static bool ShadowListHasCurrentColor(const ShadowList*);
 
-  StyleInheritedVariables& mutableInheritedVariables();
-  StyleNonInheritedVariables& mutableNonInheritedVariables();
+  StyleInheritedVariables& MutableInheritedVariables();
+  StyleNonInheritedVariables& MutableNonInheritedVariables();
+
+  PhysicalToLogical<const Length&> PhysicalMarginToLogical(
+      const ComputedStyle& other) const {
+    return PhysicalToLogical<const Length&>(
+        other.GetWritingMode(), other.Direction(), MarginTop(), MarginRight(),
+        MarginBottom(), MarginLeft());
+  }
+
+  PhysicalToLogical<const Length&> PhysicalPaddingToLogical() const {
+    return PhysicalToLogical<const Length&>(GetWritingMode(), Direction(),
+                                            PaddingTop(), PaddingRight(),
+                                            PaddingBottom(), PaddingLeft());
+  }
+
+  PhysicalToLogical<BorderValue> PhysicalBorderToLogical(
+      const ComputedStyle& other) const {
+    return PhysicalToLogical<BorderValue>(
+        other.GetWritingMode(), other.Direction(), BorderTop(), BorderRight(),
+        BorderBottom(), BorderLeft());
+  }
+
+  PhysicalToLogical<float> PhysicalBorderWidthToLogical() const {
+    return PhysicalToLogical<float>(GetWritingMode(), Direction(),
+                                    BorderTopWidth(), BorderRightWidth(),
+                                    BorderBottomWidth(), BorderLeftWidth());
+  }
+
+  PhysicalToLogical<EBorderStyle> PhysicalBorderStyleToLogical() const {
+    return PhysicalToLogical<EBorderStyle>(
+        GetWritingMode(), Direction(), BorderTopStyle(), BorderRightStyle(),
+        BorderBottomStyle(), BorderLeftStyle());
+  }
+
+  PhysicalToLogical<const Length&> PhysicalBoundsToLogical() const {
+    return PhysicalToLogical<const Length&>(GetWritingMode(), Direction(),
+                                            Top(), Right(), Bottom(), Left());
+  }
+
+  FRIEND_TEST_ALL_PREFIXES(
+      ComputedStyleTest,
+      UpdatePropertySpecificDifferencesRespectsTransformAnimation);
 };
 
 // FIXME: Reduce/remove the dependency on zoom adjusted int values.
 // The float or LayoutUnit versions of layout values should be used.
-int adjustForAbsoluteZoom(int value, float zoomFactor);
+int AdjustForAbsoluteZoom(int value, float zoom_factor);
 
-inline int adjustForAbsoluteZoom(int value, const ComputedStyle* style) {
-  float zoomFactor = style->effectiveZoom();
-  if (zoomFactor == 1)
+inline int AdjustForAbsoluteZoom(int value, const ComputedStyle& style) {
+  float zoom_factor = style.EffectiveZoom();
+  if (zoom_factor == 1)
     return value;
-  return adjustForAbsoluteZoom(value, zoomFactor);
+  return AdjustForAbsoluteZoom(value, zoom_factor);
 }
 
-inline float adjustFloatForAbsoluteZoom(float value,
+inline float AdjustFloatForAbsoluteZoom(float value,
                                         const ComputedStyle& style) {
-  return value / style.effectiveZoom();
+  return value / style.EffectiveZoom();
 }
 
-inline double adjustDoubleForAbsoluteZoom(double value,
+inline double AdjustDoubleForAbsoluteZoom(double value,
                                           const ComputedStyle& style) {
-  return value / style.effectiveZoom();
+  return value / style.EffectiveZoom();
 }
 
-inline LayoutUnit adjustLayoutUnitForAbsoluteZoom(LayoutUnit value,
+inline LayoutUnit AdjustLayoutUnitForAbsoluteZoom(LayoutUnit value,
                                                   const ComputedStyle& style) {
-  return LayoutUnit(value / style.effectiveZoom());
+  return LayoutUnit(value / style.EffectiveZoom());
 }
 
-inline float adjustScrollForAbsoluteZoom(float scrollOffset, float zoomFactor) {
-  return scrollOffset / zoomFactor;
+inline float AdjustScrollForAbsoluteZoom(float scroll_offset,
+                                         float zoom_factor) {
+  return scroll_offset / zoom_factor;
 }
 
-inline float adjustScrollForAbsoluteZoom(float scrollOffset,
+inline float AdjustScrollForAbsoluteZoom(float scroll_offset,
                                          const ComputedStyle& style) {
-  return adjustScrollForAbsoluteZoom(scrollOffset, style.effectiveZoom());
+  return AdjustScrollForAbsoluteZoom(scroll_offset, style.EffectiveZoom());
 }
 
-inline bool ComputedStyle::setZoom(float f) {
-  if (compareEqual(m_visual->m_zoom, f))
+inline bool ComputedStyle::SetZoom(float f) {
+  if (Zoom() == f)
     return false;
-  m_visual.access()->m_zoom = f;
-  setEffectiveZoom(effectiveZoom() * zoom());
+  SetZoomInternal(f);
+  SetEffectiveZoom(EffectiveZoom() * Zoom());
   return true;
 }
 
-inline bool ComputedStyle::setEffectiveZoom(float f) {
+inline bool ComputedStyle::SetEffectiveZoom(float f) {
   // Clamp the effective zoom value to a smaller (but hopeful still large
   // enough) range, to avoid overflow in derived computations.
-  float clampedEffectiveZoom = clampTo<float>(f, 1e-6, 1e6);
-  if (compareEqual(m_rareInheritedData->m_effectiveZoom, clampedEffectiveZoom))
+  float clamped_effective_zoom = clampTo<float>(f, 1e-6, 1e6);
+  if (EffectiveZoomInternal() == clamped_effective_zoom)
     return false;
-  m_rareInheritedData.access()->m_effectiveZoom = clampedEffectiveZoom;
+  SetEffectiveZoomInternal(clamped_effective_zoom);
   return true;
 }
 
-inline bool ComputedStyle::isSharable() const {
-  if (unique())
+inline bool ComputedStyle::IsSharable() const {
+  if (Unique())
     return false;
-  if (hasUniquePseudoStyle())
+  if (HasUniquePseudoStyle())
     return false;
   return true;
 }
 
-inline bool ComputedStyle::setTextOrientation(TextOrientation textOrientation) {
-  if (compareEqual(m_rareInheritedData->m_textOrientation, textOrientation))
-    return false;
-
-  m_rareInheritedData.access()->m_textOrientation = textOrientation;
-  return true;
+inline bool ComputedStyle::HasAnyPublicPseudoStyles() const {
+  return PseudoBitsInternal() != kPseudoIdNone;
 }
 
-inline bool ComputedStyle::hasAnyPublicPseudoStyles() const {
-  return PublicPseudoIdMask & m_nonInheritedData.m_pseudoBits;
+inline bool ComputedStyle::HasPseudoStyle(PseudoId pseudo) const {
+  DCHECK(pseudo >= kFirstPublicPseudoId);
+  DCHECK(pseudo < kFirstInternalPseudoId);
+  return (1 << (pseudo - kFirstPublicPseudoId)) & PseudoBitsInternal();
 }
 
-inline bool ComputedStyle::hasPseudoStyle(PseudoId pseudo) const {
-  ASSERT(pseudo > PseudoIdNone);
-  ASSERT(pseudo < FirstInternalPseudoId);
-  return (1 << (pseudo - 1)) & m_nonInheritedData.m_pseudoBits;
+inline void ComputedStyle::SetHasPseudoStyle(PseudoId pseudo) {
+  DCHECK(pseudo >= kFirstPublicPseudoId);
+  DCHECK(pseudo < kFirstInternalPseudoId);
+  // TODO: Fix up this code. It is hard to understand.
+  SetPseudoBitsInternal(static_cast<PseudoId>(
+      PseudoBitsInternal() | 1 << (pseudo - kFirstPublicPseudoId)));
 }
 
-inline void ComputedStyle::setHasPseudoStyle(PseudoId pseudo) {
-  ASSERT(pseudo > PseudoIdNone);
-  ASSERT(pseudo < FirstInternalPseudoId);
-  m_nonInheritedData.m_pseudoBits |= 1 << (pseudo - 1);
-}
-
-inline bool ComputedStyle::hasPseudoElementStyle() const {
-  return m_nonInheritedData.m_pseudoBits & ElementPseudoIdMask;
+inline bool ComputedStyle::HasPseudoElementStyle() const {
+  return PseudoBitsInternal() & kElementPseudoIdMask;
 }
 
 }  // namespace blink

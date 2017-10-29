@@ -17,6 +17,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -33,8 +34,6 @@
 #include "content/public/browser/indexed_db_info.h"
 #include "content/public/common/content_switches.h"
 #include "storage/browser/database/database_util.h"
-#include "storage/browser/quota/quota_manager_proxy.h"
-#include "storage/browser/quota/special_storage_policy.h"
 #include "storage/common/database/database_identifier.h"
 #include "ui/base/text/bytes_formatting.h"
 #include "url/origin.h"
@@ -63,7 +62,7 @@ namespace {
 void GetAllOriginsAndPaths(const base::FilePath& indexeddb_path,
                            std::vector<Origin>* origins,
                            std::vector<base::FilePath>* file_paths) {
-  // TODO(jsbell): DCHECK that this is running on an IndexedDB thread,
+  // TODO(jsbell): DCHECK that this is running on an IndexedDB sequence,
   // if a global handle to it is ever available.
   if (indexeddb_path.empty())
     return;
@@ -86,7 +85,7 @@ void GetAllOriginsAndPaths(const base::FilePath& indexeddb_path,
 void ClearSessionOnlyOrigins(
     const base::FilePath& indexeddb_path,
     scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy) {
-  // TODO(jsbell): DCHECK that this is running on an IndexedDB thread,
+  // TODO(jsbell): DCHECK that this is running on an IndexedDB sequence,
   // if a global handle to it is ever available.
   std::vector<Origin> origins;
   std::vector<base::FilePath> file_paths;
@@ -108,13 +107,15 @@ void ClearSessionOnlyOrigins(
 
 IndexedDBContextImpl::IndexedDBContextImpl(
     const base::FilePath& data_path,
-    storage::SpecialStoragePolicy* special_storage_policy,
-    storage::QuotaManagerProxy* quota_manager_proxy,
-    base::SequencedTaskRunner* task_runner)
+    scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy,
+    scoped_refptr<storage::QuotaManagerProxy> quota_manager_proxy)
     : force_keep_session_state_(false),
       special_storage_policy_(special_storage_policy),
       quota_manager_proxy_(quota_manager_proxy),
-      task_runner_(task_runner) {
+      task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::WithBaseSyncPrimitives(),
+           base::TaskPriority::USER_VISIBLE,
+           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})) {
   IDB_TRACE("init");
   if (!data_path.empty())
     data_path_ = data_path.Append(kIndexedDBDirectory);
@@ -122,7 +123,7 @@ IndexedDBContextImpl::IndexedDBContextImpl(
 }
 
 IndexedDBFactory* IndexedDBContextImpl::GetIDBFactory() {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   if (!factory_.get()) {
     // Prime our cache of origins with existing databases so we can
     // detect when dbs are newly created.
@@ -133,19 +134,19 @@ IndexedDBFactory* IndexedDBContextImpl::GetIDBFactory() {
 }
 
 std::vector<Origin> IndexedDBContextImpl::GetAllOrigins() {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   std::set<Origin>* origins_set = GetOriginSet();
   return std::vector<Origin>(origins_set->begin(), origins_set->end());
 }
 
 bool IndexedDBContextImpl::HasOrigin(const Origin& origin) {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   std::set<Origin>* set = GetOriginSet();
   return set->find(origin) != set->end();
 }
 
 std::vector<IndexedDBInfo> IndexedDBContextImpl::GetAllOriginsInfo() {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   std::vector<Origin> origins = GetAllOrigins();
   std::vector<IndexedDBInfo> result;
   for (const auto& origin : origins) {
@@ -162,7 +163,7 @@ static bool HostNameComparator(const Origin& i, const Origin& j) {
 }
 
 base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   std::vector<Origin> origins = GetAllOrigins();
 
   std::sort(origins.begin(), origins.end(), HostNameComparator);
@@ -179,7 +180,7 @@ base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
           base::MakeUnique<base::ListValue>());
       for (const base::FilePath& path : GetStoragePaths(origin))
         paths->AppendString(path.value());
-      info->Set("paths", paths.release());
+      info->Set("paths", std::move(paths));
     }
     info->SetDouble("connection_count", GetConnectionCount(origin));
 
@@ -260,14 +261,14 @@ base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
               scope->AppendString(it->second.name);
           }
 
-          transaction_info->Set("scope", scope.release());
+          transaction_info->Set("scope", std::move(scope));
           transaction_list->Append(std::move(transaction_info));
         }
-        db_info->Set("transactions", transaction_list.release());
+        db_info->Set("transactions", std::move(transaction_list));
 
         database_list->Append(std::move(db_info));
       }
-      info->Set("databases", database_list.release());
+      info->Set("databases", std::move(database_list));
     }
 
     list->Append(std::move(info));
@@ -276,7 +277,7 @@ base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
 }
 
 int IndexedDBContextImpl::GetOriginBlobFileCount(const Origin& origin) {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   int count = 0;
   base::FileEnumerator file_enumerator(GetBlobStorePath(origin), true,
                                        base::FileEnumerator::FILES);
@@ -293,7 +294,7 @@ int64_t IndexedDBContextImpl::GetOriginDiskUsage(const GURL& origin_url) {
 }
 
 int64_t IndexedDBContextImpl::GetOriginDiskUsage(const Origin& origin) {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   if (data_path_.empty() || !HasOrigin(origin))
     return 0;
   EnsureDiskUsageCacheInitialized(origin);
@@ -301,7 +302,7 @@ int64_t IndexedDBContextImpl::GetOriginDiskUsage(const Origin& origin) {
 }
 
 base::Time IndexedDBContextImpl::GetOriginLastModified(const Origin& origin) {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   if (data_path_.empty() || !HasOrigin(origin))
     return base::Time();
   base::FilePath idb_directory = GetLevelDBPath(origin);
@@ -317,7 +318,7 @@ void IndexedDBContextImpl::DeleteForOrigin(const GURL& origin_url) {
 }
 
 void IndexedDBContextImpl::DeleteForOrigin(const Origin& origin) {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   ForceClose(origin, FORCE_CLOSE_DELETE_ORIGIN);
   if (data_path_.empty() || !HasOrigin(origin))
     return;
@@ -351,7 +352,7 @@ void IndexedDBContextImpl::CopyOriginData(const GURL& origin_url,
 
 void IndexedDBContextImpl::CopyOriginData(const Origin& origin,
                                           IndexedDBContext* dest_context) {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   if (data_path_.empty() || !HasOrigin(origin))
     return;
 
@@ -382,7 +383,7 @@ void IndexedDBContextImpl::CopyOriginData(const Origin& origin,
 
 void IndexedDBContextImpl::ForceClose(const Origin origin,
                                       ForceCloseReason reason) {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   UMA_HISTOGRAM_ENUMERATION("WebCore.IndexedDB.Context.ForceCloseReason",
                             reason,
                             FORCE_CLOSE_REASON_MAX);
@@ -396,7 +397,7 @@ void IndexedDBContextImpl::ForceClose(const Origin origin,
 }
 
 size_t IndexedDBContextImpl::GetConnectionCount(const Origin& origin) {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   if (data_path_.empty() || !HasOrigin(origin))
     return 0;
 
@@ -426,14 +427,18 @@ base::FilePath IndexedDBContextImpl::GetFilePathForTesting(
 }
 
 void IndexedDBContextImpl::SetTaskRunnerForTesting(
-    base::SequencedTaskRunner* task_runner) {
-  DCHECK(!task_runner_.get());
-  task_runner_ = task_runner;
+    scoped_refptr<base::SequencedTaskRunner> task_runner) {
+  task_runner_ = std::move(task_runner);
+}
+
+void IndexedDBContextImpl::ResetCachesForTesting() {
+  origin_set_.reset();
+  origin_size_map_.clear();
 }
 
 void IndexedDBContextImpl::ConnectionOpened(const Origin& origin,
                                             IndexedDBConnection* connection) {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   quota_manager_proxy()->NotifyStorageAccessed(
       storage::QuotaClient::kIndexedDatabase, origin.GetURL(),
       storage::kStorageTypeTemporary);
@@ -447,7 +452,7 @@ void IndexedDBContextImpl::ConnectionOpened(const Origin& origin,
 
 void IndexedDBContextImpl::ConnectionClosed(const Origin& origin,
                                             IndexedDBConnection* connection) {
-  DCHECK(TaskRunner()->RunsTasksOnCurrentThread());
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   quota_manager_proxy()->NotifyStorageAccessed(
       storage::QuotaClient::kIndexedDatabase, origin.GetURL(),
       storage::kStorageTypeTemporary);
@@ -467,9 +472,9 @@ void IndexedDBContextImpl::DatabaseDeleted(const Origin& origin) {
 
 IndexedDBContextImpl::~IndexedDBContextImpl() {
   if (factory_.get()) {
-    TaskRunner()->PostTask(
-        FROM_HERE, base::Bind(&IndexedDBFactory::ContextDestroyed, factory_));
-    factory_ = NULL;
+    TaskRunner()->PostTask(FROM_HERE,
+                           base::BindOnce(&IndexedDBFactory::ContextDestroyed,
+                                          base::Passed(&factory_)));
   }
 
   if (data_path_.empty())
@@ -486,10 +491,9 @@ IndexedDBContextImpl::~IndexedDBContextImpl() {
   if (!has_session_only_databases)
     return;
 
-  TaskRunner()->PostTask(
-      FROM_HERE,
-      base::Bind(
-          &ClearSessionOnlyOrigins, data_path_, special_storage_policy_));
+  TaskRunner()->PostTask(FROM_HERE,
+                         base::BindOnce(&ClearSessionOnlyOrigins, data_path_,
+                                        special_storage_policy_));
 }
 
 // static
@@ -560,12 +564,8 @@ std::set<Origin>* IndexedDBContextImpl::GetOriginSet() {
   return origin_set_.get();
 }
 
-void IndexedDBContextImpl::ResetCaches() {
-  origin_set_.reset();
-  origin_size_map_.clear();
-}
-
 base::SequencedTaskRunner* IndexedDBContextImpl::TaskRunner() const {
+  DCHECK(task_runner_.get());
   return task_runner_.get();
 }
 

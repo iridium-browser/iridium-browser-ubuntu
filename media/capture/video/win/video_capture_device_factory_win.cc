@@ -6,16 +6,17 @@
 
 #include <mfapi.h>
 #include <mferror.h>
+#include <objbase.h>
 #include <stddef.h>
 
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_variant.h"
-#include "base/win/windows_version.h"
 #include "media/base/media_switches.h"
 #include "media/base/win/mf_initializer.h"
 #include "media/capture/video/win/video_capture_device_mf_win.h"
@@ -79,7 +80,8 @@ static bool LoadMediaFoundationDlls() {
 static bool PrepareVideoCaptureAttributesMediaFoundation(
     IMFAttributes** attributes,
     int count) {
-  InitializeMediaFoundation();
+  if (!InitializeMediaFoundation())
+    return false;
 
   if (FAILED(MFCreateAttributes(attributes, count)))
     return false;
@@ -93,22 +95,24 @@ static bool PrepareVideoCaptureAttributesMediaFoundation(
 static bool CreateVideoCaptureDeviceMediaFoundation(const char* sym_link,
                                                     IMFMediaSource** source) {
   ScopedComPtr<IMFAttributes> attributes;
-  if (!PrepareVideoCaptureAttributesMediaFoundation(attributes.Receive(), 2))
+  if (!PrepareVideoCaptureAttributesMediaFoundation(attributes.GetAddressOf(),
+                                                    2))
     return false;
 
   attributes->SetString(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
                         base::SysUTF8ToWide(sym_link).c_str());
 
-  return SUCCEEDED(MFCreateDeviceSource(attributes.get(), source));
+  return SUCCEEDED(MFCreateDeviceSource(attributes.Get(), source));
 }
 
 static bool EnumerateVideoDevicesMediaFoundation(IMFActivate*** devices,
                                                  UINT32* count) {
   ScopedComPtr<IMFAttributes> attributes;
-  if (!PrepareVideoCaptureAttributesMediaFoundation(attributes.Receive(), 1))
+  if (!PrepareVideoCaptureAttributesMediaFoundation(attributes.GetAddressOf(),
+                                                    1))
     return false;
 
-  return SUCCEEDED(MFEnumDeviceSources(attributes.get(), devices, count));
+  return SUCCEEDED(MFEnumDeviceSources(attributes.Get(), devices, count));
 }
 
 static bool IsDeviceBlackListed(const std::string& name) {
@@ -151,14 +155,14 @@ static void GetDeviceDescriptorsDirectShow(Descriptors* device_descriptors) {
   DVLOG(1) << __func__;
 
   ScopedComPtr<ICreateDevEnum> dev_enum;
-  HRESULT hr =
-      dev_enum.CreateInstance(CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC);
+  HRESULT hr = ::CoCreateInstance(CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC,
+                                  IID_PPV_ARGS(&dev_enum));
   if (FAILED(hr))
     return;
 
   ScopedComPtr<IEnumMoniker> enum_moniker;
   hr = dev_enum->CreateClassEnumerator(CLSID_VideoInputDeviceCategory,
-                                       enum_moniker.Receive(), 0);
+                                       enum_moniker.GetAddressOf(), 0);
   // CreateClassEnumerator returns S_FALSE on some Windows OS
   // when no camera exist. Therefore the FAILED macro can't be used.
   if (hr != S_OK)
@@ -166,10 +170,10 @@ static void GetDeviceDescriptorsDirectShow(Descriptors* device_descriptors) {
 
   // Enumerate all video capture devices.
   for (ScopedComPtr<IMoniker> moniker;
-       enum_moniker->Next(1, moniker.Receive(), NULL) == S_OK;
-       moniker.Release()) {
+       enum_moniker->Next(1, moniker.GetAddressOf(), NULL) == S_OK;
+       moniker.Reset()) {
     ScopedComPtr<IPropertyBag> prop_bag;
-    hr = moniker->BindToStorage(0, 0, IID_IPropertyBag, prop_bag.ReceiveVoid());
+    hr = moniker->BindToStorage(0, 0, IID_PPV_ARGS(&prop_bag));
     if (FAILED(hr))
       continue;
 
@@ -242,14 +246,14 @@ static void GetDeviceSupportedFormatsDirectShow(const Descriptor& descriptor,
   DVLOG(1) << "GetDeviceSupportedFormatsDirectShow for "
            << descriptor.display_name;
   ScopedComPtr<ICreateDevEnum> dev_enum;
-  HRESULT hr =
-      dev_enum.CreateInstance(CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC);
+  HRESULT hr = ::CoCreateInstance(CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC,
+                                  IID_PPV_ARGS(&dev_enum));
   if (FAILED(hr))
     return;
 
   ScopedComPtr<IEnumMoniker> enum_moniker;
   hr = dev_enum->CreateClassEnumerator(CLSID_VideoInputDeviceCategory,
-                                       enum_moniker.Receive(), 0);
+                                       enum_moniker.GetAddressOf(), 0);
   // CreateClassEnumerator returns S_FALSE on some Windows OS when no camera
   // exists. Therefore the FAILED macro can't be used.
   if (hr != S_OK)
@@ -260,23 +264,23 @@ static void GetDeviceSupportedFormatsDirectShow(const Descriptor& descriptor,
   // VFW devices are already skipped previously in GetDeviceNames() enumeration.
   base::win::ScopedComPtr<IBaseFilter> capture_filter;
   hr = VideoCaptureDeviceWin::GetDeviceFilter(descriptor.device_id,
-                                              capture_filter.Receive());
-  if (!capture_filter.get()) {
+                                              capture_filter.GetAddressOf());
+  if (!capture_filter.Get()) {
     DLOG(ERROR) << "Failed to create capture filter: "
                 << logging::SystemErrorCodeToString(hr);
     return;
   }
 
   base::win::ScopedComPtr<IPin> output_capture_pin(
-      VideoCaptureDeviceWin::GetPin(capture_filter.get(), PINDIR_OUTPUT,
+      VideoCaptureDeviceWin::GetPin(capture_filter.Get(), PINDIR_OUTPUT,
                                     PIN_CATEGORY_CAPTURE, GUID_NULL));
-  if (!output_capture_pin.get()) {
+  if (!output_capture_pin.Get()) {
     DLOG(ERROR) << "Failed to get capture output pin";
     return;
   }
 
   ScopedComPtr<IAMStreamConfig> stream_config;
-  hr = output_capture_pin.QueryInterface(stream_config.Receive());
+  hr = output_capture_pin.CopyTo(stream_config.GetAddressOf());
   if (FAILED(hr)) {
     DLOG(ERROR) << "Failed to get IAMStreamConfig interface from "
                    "capture device: " << logging::SystemErrorCodeToString(hr);
@@ -333,13 +337,13 @@ static void GetDeviceSupportedFormatsMediaFoundation(
            << descriptor.display_name;
   ScopedComPtr<IMFMediaSource> source;
   if (!CreateVideoCaptureDeviceMediaFoundation(descriptor.device_id.c_str(),
-                                               source.Receive())) {
+                                               source.GetAddressOf())) {
     return;
   }
 
   base::win::ScopedComPtr<IMFSourceReader> reader;
-  HRESULT hr =
-      MFCreateSourceReaderFromMediaSource(source.get(), NULL, reader.Receive());
+  HRESULT hr = MFCreateSourceReaderFromMediaSource(source.Get(), NULL,
+                                                   reader.GetAddressOf());
   if (FAILED(hr)) {
     DLOG(ERROR) << "MFCreateSourceReaderFromMediaSource failed: "
                 << logging::SystemErrorCodeToString(hr);
@@ -349,9 +353,9 @@ static void GetDeviceSupportedFormatsMediaFoundation(
   DWORD stream_index = 0;
   ScopedComPtr<IMFMediaType> type;
   while (SUCCEEDED(reader->GetNativeMediaType(kFirstVideoStream, stream_index,
-                                              type.Receive()))) {
+                                              type.GetAddressOf()))) {
     UINT32 width, height;
-    hr = MFGetAttributeSize(type.get(), MF_MT_FRAME_SIZE, &width, &height);
+    hr = MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &width, &height);
     if (FAILED(hr)) {
       DLOG(ERROR) << "MFGetAttributeSize failed: "
                   << logging::SystemErrorCodeToString(hr);
@@ -361,7 +365,7 @@ static void GetDeviceSupportedFormatsMediaFoundation(
     capture_format.frame_size.SetSize(width, height);
 
     UINT32 numerator, denominator;
-    hr = MFGetAttributeRatio(type.get(), MF_MT_FRAME_RATE, &numerator,
+    hr = MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &numerator,
                              &denominator);
     if (FAILED(hr)) {
       DLOG(ERROR) << "MFGetAttributeSize failed: "
@@ -379,7 +383,7 @@ static void GetDeviceSupportedFormatsMediaFoundation(
     }
     VideoCaptureDeviceMFWin::FormatFromGuid(type_guid,
                                             &capture_format.pixel_format);
-    type.Release();
+    type.Reset();
     ++stream_index;
     if (capture_format.pixel_format == PIXEL_FORMAT_UNKNOWN)
       continue;
@@ -397,19 +401,12 @@ static void GetDeviceSupportedFormatsMediaFoundation(
 // distributions such as Windows 7 N and Windows 7 KN.
 // static
 bool VideoCaptureDeviceFactoryWin::PlatformSupportsMediaFoundation() {
-  // Even though the DLLs might be available on Vista, we get crashes
-  // when running our tests on the build bots.
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return false;
-
   static bool g_dlls_available = LoadMediaFoundationDlls();
   return g_dlls_available;
 }
 
 VideoCaptureDeviceFactoryWin::VideoCaptureDeviceFactoryWin()
-    : use_media_foundation_(base::win::GetVersion() >=
-                                base::win::VERSION_WIN7 &&
-                            base::CommandLine::ForCurrentProcess()->HasSwitch(
+    : use_media_foundation_(base::CommandLine::ForCurrentProcess()->HasSwitch(
                                 switches::kForceMediaFoundationVideoCapture)) {}
 
 std::unique_ptr<VideoCaptureDevice> VideoCaptureDeviceFactoryWin::CreateDevice(
@@ -422,7 +419,7 @@ std::unique_ptr<VideoCaptureDevice> VideoCaptureDeviceFactoryWin::CreateDevice(
     DVLOG(1) << " MediaFoundation Device: " << device_descriptor.display_name;
     ScopedComPtr<IMFMediaSource> source;
     if (!CreateVideoCaptureDeviceMediaFoundation(
-            device_descriptor.device_id.c_str(), source.Receive())) {
+            device_descriptor.device_id.c_str(), source.GetAddressOf())) {
       return std::unique_ptr<VideoCaptureDevice>();
     }
     if (!static_cast<VideoCaptureDeviceMFWin*>(device.get())->Init(source))

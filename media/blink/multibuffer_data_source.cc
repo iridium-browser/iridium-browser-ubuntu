@@ -122,7 +122,6 @@ MultibufferDataSource::MultibufferDataSource(
       frame_(frame),
       stop_signal_received_(false),
       media_has_played_(false),
-      buffering_strategy_(BUFFERING_STRATEGY_NORMAL),
       single_origin_(true),
       cancel_on_defer_(false),
       preload_(AUTO),
@@ -246,13 +245,6 @@ void MultibufferDataSource::SetPreload(Preload preload) {
   DVLOG(1) << __func__ << "(" << preload << ")";
   DCHECK(render_task_runner_->BelongsToCurrentThread());
   preload_ = preload;
-  UpdateBufferSizes();
-}
-
-void MultibufferDataSource::SetBufferingStrategy(
-    BufferingStrategy buffering_strategy) {
-  DCHECK(render_task_runner_->BelongsToCurrentThread());
-  buffering_strategy_ = buffering_strategy;
   UpdateBufferSizes();
 }
 
@@ -411,7 +403,7 @@ void MultibufferDataSource::ReadTask() {
     bytes_read =
         static_cast<int>(std::min<int64_t>(available, read_op_->size()));
     bytes_read = reader_->TryRead(read_op_->data(), bytes_read);
-
+    url_data_->AddBytesRead(bytes_read);
     if (bytes_read == 0 && total_bytes_ == kPositionNotSpecified) {
       // We've reached the end of the file and we didn't know the total size
       // before. Update the total size so Read()s past the end of the file will
@@ -513,6 +505,8 @@ void MultibufferDataSource::StartCallback() {
   render_task_runner_->PostTask(
       FROM_HERE, base::Bind(base::ResetAndReturn(&init_cb_), success));
 
+  UpdateBufferSizes();
+
   // Even if data is cached, say that we're loading at this point for
   // compatibility.
   UpdateLoadingState_Locked(true);
@@ -580,18 +574,6 @@ void MultibufferDataSource::UpdateBufferSizes() {
   if (!reader_)
     return;
 
-  if (!assume_fully_buffered()) {
-    // If the playback has started and the strategy is aggressive, then try to
-    // load as much as possible, assuming that the file is cacheable. (If not,
-    // why bother?)
-    bool aggressive = (buffering_strategy_ == BUFFERING_STRATEGY_AGGRESSIVE);
-    if (media_has_played_ && aggressive && url_data_ &&
-        url_data_->range_supported() && url_data_->cacheable()) {
-      reader_->SetPreload(1LL << 40, 1LL << 40);  // 1 Tb
-      return;
-    }
-  }
-
   // Use a default bit rate if unknown and clamp to prevent overflow.
   int64_t bitrate = clamp<int64_t>(bitrate_, 0, kMaxBitrate);
   if (bitrate == 0)
@@ -630,6 +612,17 @@ void MultibufferDataSource::UpdateBufferSizes() {
       std::min((kTargetSecondsBufferedAhead + kTargetSecondsBufferedBehind) *
                    bytes_per_second,
                preload_high + pin_backward);
+
+  if (url_data_->FullyCached() ||
+      (url_data_->length() != kPositionNotSpecified &&
+       url_data_->length() < kDefaultPinSize)) {
+    // We just make pin_forwards/backwards big enough to encompass the
+    // whole file regardless of where we are, with some extra margins.
+    pin_forward = std::max(pin_forward, url_data_->length() * 2);
+    pin_backward = std::max(pin_backward, url_data_->length() * 2);
+    buffer_size = url_data_->length();
+  }
+
   reader_->SetMaxBuffer(buffer_size);
   reader_->SetPinRange(pin_backward, pin_forward);
 

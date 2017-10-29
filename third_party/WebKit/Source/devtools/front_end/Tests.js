@@ -260,7 +260,7 @@
    */
   TestSuite.prototype.testScriptsTabIsPopulatedOnInspectedPageRefresh = function() {
     var test = this;
-    var debuggerModel = SDK.DebuggerModel.fromTarget(SDK.targetManager.mainTarget());
+    var debuggerModel = SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
     debuggerModel.addEventListener(SDK.DebuggerModel.Events.GlobalObjectCleared, waitUntilScriptIsParsed);
 
     this.showPanel('elements').then(function() {
@@ -345,7 +345,7 @@
   // Tests that debugger works correctly if pause event occurs when DevTools
   // frontend is being loaded.
   TestSuite.prototype.testPauseWhenLoadingDevTools = function() {
-    var debuggerModel = SDK.DebuggerModel.fromTarget(SDK.targetManager.mainTarget());
+    var debuggerModel = SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
     if (debuggerModel.debuggerPausedDetails)
       return;
 
@@ -514,22 +514,23 @@
   TestSuite.prototype.testConsoleOnNavigateBack = function() {
 
     function filteredMessages() {
-      return SDK.multitargetConsoleModel.messages().filter(
-          a => a.source !== SDK.ConsoleMessage.MessageSource.Violation);
+      return ConsoleModel.consoleModel.messages().filter(
+          a => a.source !== ConsoleModel.ConsoleMessage.MessageSource.Violation);
     }
 
     if (filteredMessages().length === 1) {
       firstConsoleMessageReceived.call(this, null);
     } else {
-      SDK.multitargetConsoleModel.addEventListener(
-          SDK.ConsoleModel.Events.MessageAdded, firstConsoleMessageReceived, this);
+      ConsoleModel.consoleModel.addEventListener(
+          ConsoleModel.ConsoleModel.Events.MessageAdded, firstConsoleMessageReceived, this);
     }
 
+
     function firstConsoleMessageReceived(event) {
-      if (event && event.data.source === SDK.ConsoleMessage.MessageSource.Violation)
+      if (event && event.data.source === ConsoleModel.ConsoleMessage.MessageSource.Violation)
         return;
-      SDK.multitargetConsoleModel.removeEventListener(
-          SDK.ConsoleModel.Events.MessageAdded, firstConsoleMessageReceived, this);
+      ConsoleModel.consoleModel.removeEventListener(
+          ConsoleModel.ConsoleModel.Events.MessageAdded, firstConsoleMessageReceived, this);
       this.evaluateInConsole_('clickLink();', didClickLink.bind(this));
     }
 
@@ -576,8 +577,7 @@
     this._waitForTargets(2, callback.bind(this));
 
     function callback() {
-      var target = SDK.targetManager.targets(SDK.Target.Capability.JS)[0];
-      var debuggerModel = SDK.DebuggerModel.fromTarget(target);
+      var debuggerModel = SDK.targetManager.models(SDK.DebuggerModel)[0];
       if (debuggerModel.isPaused()) {
         this.releaseControl();
         return;
@@ -597,7 +597,7 @@
   };
 
   TestSuite.prototype.waitForDebuggerPaused = function() {
-    var debuggerModel = SDK.DebuggerModel.fromTarget(SDK.targetManager.mainTarget());
+    var debuggerModel = SDK.targetManager.mainTarget().model(SDK.DebuggerModel);
     if (debuggerModel.debuggerPausedDetails)
       return;
 
@@ -612,19 +612,16 @@
 
   // Regression test for crbug.com/370035.
   TestSuite.prototype.testDeviceMetricsOverrides = function() {
-    const dumpPageMetrics = function() {
+    function dumpPageMetrics() {
       return JSON.stringify(
           {width: window.innerWidth, height: window.innerHeight, deviceScaleFactor: window.devicePixelRatio});
-    };
+    }
 
     var test = this;
 
-    function testOverrides(params, metrics, callback) {
-      SDK.targetManager.mainTarget().emulationAgent().invoke_setDeviceMetricsOverride(params, getMetrics);
-
-      function getMetrics() {
-        test.evaluateInConsole_('(' + dumpPageMetrics.toString() + ')()', checkMetrics);
-      }
+    async function testOverrides(params, metrics, callback) {
+      await SDK.targetManager.mainTarget().emulationAgent().invoke_setDeviceMetricsOverride(params);
+      test.evaluateInConsole_('(' + dumpPageMetrics.toString() + ')()', checkMetrics);
 
       function checkMetrics(consoleResult) {
         test.assertEquals(
@@ -685,12 +682,13 @@
 
         messages.splice(index, 1);
         if (!messages.length) {
-          SDK.multitargetConsoleModel.removeEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
+          ConsoleModel.consoleModel.removeEventListener(
+              ConsoleModel.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
           next();
         }
       }
 
-      SDK.multitargetConsoleModel.addEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
+      ConsoleModel.consoleModel.addEventListener(ConsoleModel.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
       SDK.multitargetNetworkManager.setNetworkConditions(preset);
     }
 
@@ -699,21 +697,21 @@
 
     function step1() {
       testPreset(
-          NetworkConditions.NetworkConditionsSelector.presets[0],
+          MobileThrottling.networkPresets[2],
           ['offline event: online = false', 'connection change event: type = none; downlinkMax = 0'], step2);
     }
 
     function step2() {
       testPreset(
-          NetworkConditions.NetworkConditionsSelector.presets[2],
-          ['online event: online = true', 'connection change event: type = cellular; downlinkMax = 0.244140625'],
-          step3);
+          MobileThrottling.networkPresets[1],
+          ['online event: online = true', 'connection change event: type = cellular; downlinkMax = 0.390625'], step3);
     }
 
     function step3() {
       testPreset(
-          NetworkConditions.NetworkConditionsSelector.presets[8],
-          ['connection change event: type = wifi; downlinkMax = 30'], test.releaseControl.bind(test));
+          MobileThrottling.networkPresets[0],
+          ['connection change event: type = cellular; downlinkMax = 1.4400000000000002'],
+          test.releaseControl.bind(test));
     }
   };
 
@@ -808,9 +806,9 @@
     setTimeout(reset, 0);
 
     function createSettings() {
-      var localSetting = Common.settings.createSetting('local', undefined, true);
+      var localSetting = Common.settings.createLocalSetting('local', undefined);
       localSetting.set({s: 'local', n: 1});
-      var globalSetting = Common.settings.createSetting('global', undefined, false);
+      var globalSetting = Common.settings.createSetting('global', undefined);
       globalSetting.set({s: 'global', n: 2});
     }
 
@@ -822,11 +820,11 @@
     function gotPreferences(prefs) {
       Main.Main._instanceForTest._createSettings(prefs);
 
-      var localSetting = Common.settings.createSetting('local', undefined, true);
+      var localSetting = Common.settings.createLocalSetting('local', undefined);
       test.assertEquals('object', typeof localSetting.get());
       test.assertEquals('local', localSetting.get().s);
       test.assertEquals(1, localSetting.get().n);
-      var globalSetting = Common.settings.createSetting('global', undefined, false);
+      var globalSetting = Common.settings.createSetting('global', undefined);
       test.assertEquals('object', typeof globalSetting.get());
       test.assertEquals('global', globalSetting.get().s);
       test.assertEquals(2, globalSetting.get().n);
@@ -835,7 +833,7 @@
   };
 
   TestSuite.prototype.testWindowInitializedOnNavigateBack = function() {
-    var messages = SDK.multitargetConsoleModel.messages();
+    var messages = ConsoleModel.consoleModel.messages();
     this.assertEquals(1, messages.length);
     var text = messages[0].messageText;
     if (text.indexOf('Uncaught') !== -1)
@@ -849,28 +847,18 @@
 
     function onExecutionContexts() {
       var consoleView = Console.ConsoleView.instance();
-      var options = consoleView._consoleContextSelector._selectElement.options;
+      var selector = consoleView._consoleContextSelector;
       var values = [];
-      for (var i = 0; i < options.length; ++i)
-        values.push(options[i].value.trim());
+      for (var item of selector._items)
+        values.push(selector.titleFor(item));
       test.assertEquals('top', values[0]);
       test.assertEquals('Simple content script', values[1]);
       test.releaseControl();
     }
   };
 
-  TestSuite.prototype.testDevToolsSharedWorker = function() {
-    this.takeControl();
-    Bindings.TempFile.ensureTempStorageCleared().then(() => this.releaseControl());
-  };
-
-  TestSuite.prototype.testTempFile = function() {
-    this.takeControl();
-    Bindings.TempFile.create('test-file', 'test').then(() => this.releaseControl(), error => this.fail(String(error)));
-  };
-
   TestSuite.prototype.waitForTestResultsInConsole = function() {
-    var messages = SDK.multitargetConsoleModel.messages();
+    var messages = ConsoleModel.consoleModel.messages();
     for (var i = 0; i < messages.length; ++i) {
       var text = messages[i].messageText;
       if (text === 'PASS')
@@ -887,7 +875,7 @@
         this.fail(text);
     }
 
-    SDK.multitargetConsoleModel.addEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
+    ConsoleModel.consoleModel.addEventListener(ConsoleModel.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
     this.takeControl();
   };
 
@@ -931,12 +919,12 @@
         Array.prototype.slice.call(arguments, 1, -1).map(arg => JSON.stringify(arg)).join(',') + ',';
     this.evaluateInConsole_(
         `${functionName}(${argsString} function() { console.log('${doneMessage}'); });`, function() {});
-    SDK.multitargetConsoleModel.addEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage);
+    ConsoleModel.consoleModel.addEventListener(ConsoleModel.ConsoleModel.Events.MessageAdded, onConsoleMessage);
 
     function onConsoleMessage(event) {
       var text = event.data.messageText;
       if (text === doneMessage) {
-        SDK.multitargetConsoleModel.removeEventListener(SDK.ConsoleModel.Events.MessageAdded, onConsoleMessage);
+        ConsoleModel.consoleModel.removeEventListener(ConsoleModel.ConsoleModel.Events.MessageAdded, onConsoleMessage);
         callback();
       }
     }
@@ -1095,7 +1083,7 @@
   };
 
   TestSuite.prototype._waitForExecutionContexts = function(n, callback) {
-    var runtimeModel = SDK.targetManager.mainTarget().runtimeModel;
+    var runtimeModel = SDK.targetManager.mainTarget().model(SDK.RuntimeModel);
     checkForExecutionContexts.call(this);
 
     function checkForExecutionContexts() {

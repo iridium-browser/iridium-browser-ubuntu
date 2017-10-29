@@ -30,6 +30,7 @@
 #include "remoting/protocol/session_manager.h"
 #include "remoting/protocol/transport.h"
 #include "remoting/protocol/video_stub.h"
+#include "remoting/signaling/signaling_address.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
 
@@ -83,6 +84,13 @@ class MockConnectionToClientEventHandler
   MOCK_METHOD2(OnRouteChange,
                void(const std::string& channel_name,
                     const TransportRoute& route));
+
+  MOCK_METHOD2(OnIncomingDataChannelPtr,
+               void(const std::string& channel_name, MessagePipe* pipe));
+  void OnIncomingDataChannel(const std::string& channel_name,
+                             std::unique_ptr<MessagePipe> pipe) override {
+    OnIncomingDataChannelPtr(channel_name, pipe.get());
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockConnectionToClientEventHandler);
@@ -206,15 +214,15 @@ class MockSessionManager : public SessionManager {
   void set_protocol_config(
       std::unique_ptr<CandidateSessionConfig> config) override {}
   MOCK_METHOD2(ConnectPtr,
-               Session*(const std::string& host_jid,
+               Session*(const SignalingAddress& peer_address,
                         Authenticator* authenticator));
   MOCK_METHOD0(Close, void());
   MOCK_METHOD1(set_authenticator_factory_ptr,
                void(AuthenticatorFactory* factory));
   std::unique_ptr<Session> Connect(
-      const std::string& host_jid,
+      const SignalingAddress& peer_address,
       std::unique_ptr<Authenticator> authenticator) override {
-    return base::WrapUnique(ConnectPtr(host_jid, authenticator.get()));
+    return base::WrapUnique(ConnectPtr(peer_address, authenticator.get()));
   }
   void set_authenticator_factory(
       std::unique_ptr<AuthenticatorFactory> authenticator_factory) override {

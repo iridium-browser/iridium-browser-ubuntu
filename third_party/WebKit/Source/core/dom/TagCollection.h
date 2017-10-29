@@ -25,47 +25,66 @@
 #define TagCollection_h
 
 #include "core/html/HTMLCollection.h"
-#include "wtf/text/AtomicString.h"
+#include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
 
 // Collection that limits to a particular tag.
 class TagCollection : public HTMLCollection {
  public:
-  static TagCollection* create(ContainerNode& rootNode,
-                               const AtomicString& namespaceURI,
-                               const AtomicString& localName) {
-    DCHECK(namespaceURI != starAtom);
-    return new TagCollection(rootNode, TagCollectionType, namespaceURI,
-                             localName);
-  }
-
-  static TagCollection* create(ContainerNode& rootNode,
+  static TagCollection* Create(ContainerNode& root_node,
                                CollectionType type,
-                               const AtomicString& localName) {
-    DCHECK_EQ(type, TagCollectionType);
-    return new TagCollection(rootNode, TagCollectionType, starAtom, localName);
+                               const AtomicString& qualified_name) {
+    DCHECK_EQ(type, kTagCollectionType);
+    return new TagCollection(root_node, kTagCollectionType, qualified_name);
   }
 
   ~TagCollection() override;
 
-  bool elementMatches(const Element&) const;
+  bool ElementMatches(const Element&) const;
 
  protected:
-  TagCollection(ContainerNode& rootNode,
+  TagCollection(ContainerNode& root_node,
                 CollectionType,
-                const AtomicString& namespaceURI,
-                const AtomicString& localName);
+                const AtomicString& qualified_name);
 
-  AtomicString m_namespaceURI;
-  AtomicString m_localName;
+  AtomicString qualified_name_;
+};
+
+class TagCollectionNS : public HTMLCollection {
+ public:
+  static TagCollectionNS* Create(ContainerNode& root_node,
+                                 const AtomicString& namespace_uri,
+                                 const AtomicString& local_name) {
+    return new TagCollectionNS(root_node, kTagCollectionNSType, namespace_uri,
+                               local_name);
+  }
+
+  ~TagCollectionNS() override;
+
+  bool ElementMatches(const Element&) const;
+
+ private:
+  TagCollectionNS(ContainerNode& root_node,
+                  CollectionType,
+                  const AtomicString& namespace_uri,
+                  const AtomicString& local_name);
+
+  AtomicString namespace_uri_;
+  AtomicString local_name_;
 };
 
 DEFINE_TYPE_CASTS(TagCollection,
                   LiveNodeListBase,
                   collection,
-                  collection->type() == TagCollectionType,
-                  collection.type() == TagCollectionType);
+                  collection->GetType() == kTagCollectionType,
+                  collection.GetType() == kTagCollectionType);
+
+DEFINE_TYPE_CASTS(TagCollectionNS,
+                  LiveNodeListBase,
+                  collection,
+                  collection->GetType() == kTagCollectionNSType,
+                  collection.GetType() == kTagCollectionNSType);
 
 }  // namespace blink
 

@@ -22,8 +22,8 @@
 #include "ui/gfx/native_widget_types.h"
 
 namespace content {
+
 class ResourceDispatcherHostImpl;
-class SessionStorageNamespace;
 
 // Instantiated per RenderProcessHost to provide various optimizations on
 // behalf of a RenderWidgetHost.  This class bridges between the IO thread
@@ -56,17 +56,13 @@ class RenderWidgetHelper
   void ResumeDeferredNavigation(const GlobalRequestID& request_id);
 
   // IO THREAD ONLY -----------------------------------------------------------
-
-  void CreateNewWindow(mojom::CreateNewWindowParamsPtr params,
-                       bool no_javascript_access,
-                       int32_t* render_view_route_id,
-                       int32_t* main_frame_route_id,
-                       int32_t* main_frame_widget_route_id,
-                       SessionStorageNamespace* session_storage_namespace);
   void CreateNewWidget(int opener_id,
                        blink::WebPopupType popup_type,
+                       mojom::WidgetPtr,
                        int* route_id);
-  void CreateNewFullscreenWidget(int opener_id, int* route_id);
+  void CreateNewFullscreenWidget(int opener_id,
+                                 mojom::WidgetPtr,
+                                 int* route_id);
 
  private:
   friend class base::RefCountedThreadSafe<RenderWidgetHelper>;
@@ -75,21 +71,16 @@ class RenderWidgetHelper
 
   ~RenderWidgetHelper();
 
-  // Called on the UI thread to finish creating a window.
-  void OnCreateNewWindowOnUI(
-      mojom::CreateNewWindowParamsPtr params,
-      int32_t render_view_route_id,
-      int32_t main_frame_route_id,
-      int32_t main_frame_widget_route_id,
-      SessionStorageNamespace* session_storage_namespace);
-
   // Called on the UI thread to finish creating a widget.
   void OnCreateWidgetOnUI(int32_t opener_id,
                           int32_t route_id,
+                          mojom::WidgetPtrInfo widget,
                           blink::WebPopupType popup_type);
 
   // Called on the UI thread to create a fullscreen widget.
-  void OnCreateFullscreenWidgetOnUI(int32_t opener_id, int32_t route_id);
+  void OnCreateFullscreenWidgetOnUI(int32_t opener_id,
+                                    int32_t route_id,
+                                    mojom::WidgetPtrInfo widget);
 
   // Called on the IO thread to resume a paused navigation in the network
   // stack without transferring it to a new renderer process.

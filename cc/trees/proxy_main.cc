@@ -10,11 +10,10 @@
 #include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
-#include "base/trace_event/trace_event_synthetic_delay.h"
 #include "cc/base/completion_event.h"
-#include "cc/debug/benchmark_instrumentation.h"
-#include "cc/debug/devtools_instrumentation.h"
-#include "cc/output/compositor_frame_sink.h"
+#include "cc/base/devtools_instrumentation.h"
+#include "cc/benchmarks/benchmark_instrumentation.h"
+#include "cc/output/layer_tree_frame_sink.h"
 #include "cc/output/swap_promise.h"
 #include "cc/resources/ui_resource_manager.h"
 #include "cc/trees/blocking_task_runner.h"
@@ -36,6 +35,7 @@ ProxyMain::ProxyMain(LayerTreeHost* layer_tree_host,
       commit_waits_for_activation_(false),
       started_(false),
       defer_commits_(false),
+      frame_sink_bound_weak_factory_(this),
       weak_factory_(this) {
   TRACE_EVENT0("cc", "ProxyMain::ProxyMain");
   DCHECK(task_runner_provider_);
@@ -74,6 +74,12 @@ void ProxyMain::BeginMainFrameNotExpectedSoon() {
   layer_tree_host_->BeginMainFrameNotExpectedSoon();
 }
 
+void ProxyMain::BeginMainFrameNotExpectedUntil(base::TimeTicks time) {
+  TRACE_EVENT0("cc", "ProxyMain::BeginMainFrameNotExpectedUntil");
+  DCHECK(IsMainThread());
+  layer_tree_host_->BeginMainFrameNotExpectedUntil(time);
+}
+
 void ProxyMain::DidCommitAndDrawFrame() {
   DCHECK(IsMainThread());
   layer_tree_host_->DidCommitAndDrawFrame();
@@ -85,26 +91,26 @@ void ProxyMain::SetAnimationEvents(std::unique_ptr<MutatorEvents> events) {
   layer_tree_host_->SetAnimationEvents(std::move(events));
 }
 
-void ProxyMain::DidLoseCompositorFrameSink() {
-  TRACE_EVENT0("cc", "ProxyMain::DidLoseCompositorFrameSink");
+void ProxyMain::DidLoseLayerTreeFrameSink() {
+  TRACE_EVENT0("cc", "ProxyMain::DidLoseLayerTreeFrameSink");
   DCHECK(IsMainThread());
-  layer_tree_host_->DidLoseCompositorFrameSink();
+  layer_tree_host_->DidLoseLayerTreeFrameSink();
 }
 
-void ProxyMain::RequestNewCompositorFrameSink() {
-  TRACE_EVENT0("cc", "ProxyMain::RequestNewCompositorFrameSink");
+void ProxyMain::RequestNewLayerTreeFrameSink() {
+  TRACE_EVENT0("cc", "ProxyMain::RequestNewLayerTreeFrameSink");
   DCHECK(IsMainThread());
-  layer_tree_host_->RequestNewCompositorFrameSink();
+  layer_tree_host_->RequestNewLayerTreeFrameSink();
 }
 
-void ProxyMain::DidInitializeCompositorFrameSink(bool success) {
-  TRACE_EVENT0("cc", "ProxyMain::DidInitializeCompositorFrameSink");
+void ProxyMain::DidInitializeLayerTreeFrameSink(bool success) {
+  TRACE_EVENT0("cc", "ProxyMain::DidInitializeLayerTreeFrameSink");
   DCHECK(IsMainThread());
 
   if (!success)
-    layer_tree_host_->DidFailToInitializeCompositorFrameSink();
+    layer_tree_host_->DidFailToInitializeLayerTreeFrameSink();
   else
-    layer_tree_host_->DidInitializeCompositorFrameSink();
+    layer_tree_host_->DidInitializeLayerTreeFrameSink();
 }
 
 void ProxyMain::DidCompletePageScaleAnimation() {
@@ -120,20 +126,26 @@ void ProxyMain::BeginMainFrame(
 
   base::TimeTicks begin_main_frame_start_time = base::TimeTicks::Now();
 
-  TRACE_EVENT_SYNTHETIC_DELAY_BEGIN("cc.BeginMainFrame");
   DCHECK(IsMainThread());
   DCHECK_EQ(NO_PIPELINE_STAGE, current_pipeline_stage_);
+
+  // We need to issue image decode callbacks whether or not we will abort this
+  // commit, since the callbacks are only stored in |begin_main_frame_state|.
+  for (auto& callback :
+       begin_main_frame_state->completed_image_decode_callbacks) {
+    callback.Run();
+  }
 
   if (defer_commits_) {
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_DeferCommit",
                          TRACE_EVENT_SCOPE_THREAD);
     std::vector<std::unique_ptr<SwapPromise>> empty_swap_promises;
     ImplThreadTaskRunner()->PostTask(
-        FROM_HERE, base::Bind(&ProxyImpl::BeginMainFrameAbortedOnImpl,
-                              base::Unretained(proxy_impl_.get()),
-                              CommitEarlyOutReason::ABORTED_DEFERRED_COMMIT,
-                              begin_main_frame_start_time,
-                              base::Passed(&empty_swap_promises)));
+        FROM_HERE, base::BindOnce(&ProxyImpl::BeginMainFrameAbortedOnImpl,
+                                  base::Unretained(proxy_impl_.get()),
+                                  CommitEarlyOutReason::ABORTED_DEFERRED_COMMIT,
+                                  begin_main_frame_start_time,
+                                  base::Passed(&empty_swap_promises)));
     return;
   }
 
@@ -150,11 +162,11 @@ void ProxyMain::BeginMainFrame(
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_NotVisible", TRACE_EVENT_SCOPE_THREAD);
     std::vector<std::unique_ptr<SwapPromise>> empty_swap_promises;
     ImplThreadTaskRunner()->PostTask(
-        FROM_HERE, base::Bind(&ProxyImpl::BeginMainFrameAbortedOnImpl,
-                              base::Unretained(proxy_impl_.get()),
-                              CommitEarlyOutReason::ABORTED_NOT_VISIBLE,
-                              begin_main_frame_start_time,
-                              base::Passed(&empty_swap_promises)));
+        FROM_HERE, base::BindOnce(&ProxyImpl::BeginMainFrameAbortedOnImpl,
+                                  base::Unretained(proxy_impl_.get()),
+                                  CommitEarlyOutReason::ABORTED_NOT_VISIBLE,
+                                  begin_main_frame_start_time,
+                                  base::Passed(&empty_swap_promises)));
     return;
   }
 
@@ -180,31 +192,54 @@ void ProxyMain::BeginMainFrame(
     layer_tree_host_->GetUIResourceManager()->RecreateUIResources();
 
   layer_tree_host_->RequestMainFrameUpdate();
-  TRACE_EVENT_SYNTHETIC_DELAY_END("cc.BeginMainFrame");
 
-  bool can_cancel_this_commit = final_pipeline_stage_ < COMMIT_PIPELINE_STAGE &&
-                                !begin_main_frame_state->evicted_ui_resources;
+  // At this point the main frame may have deferred commits to avoid committing
+  // right now.
+  if (defer_commits_) {
+    TRACE_EVENT_INSTANT0("cc", "EarlyOut_DeferCommit_InsideBeginMainFrame",
+                         TRACE_EVENT_SCOPE_THREAD);
+    std::vector<std::unique_ptr<SwapPromise>> empty_swap_promises;
+    ImplThreadTaskRunner()->PostTask(
+        FROM_HERE, base::BindOnce(&ProxyImpl::BeginMainFrameAbortedOnImpl,
+                                  base::Unretained(proxy_impl_.get()),
+                                  CommitEarlyOutReason::ABORTED_DEFERRED_COMMIT,
+                                  begin_main_frame_start_time,
+                                  base::Passed(&empty_swap_promises)));
+    current_pipeline_stage_ = NO_PIPELINE_STAGE;
+    // We intentionally don't report CommitComplete() here since it was aborted
+    // prematurely and we're waiting to do another commit in the future.
+    layer_tree_host_->DidBeginMainFrame();
+    return;
+  }
+
+  // If UI resources were evicted on the impl thread, we need a commit.
+  if (begin_main_frame_state->evicted_ui_resources)
+    final_pipeline_stage_ = COMMIT_PIPELINE_STAGE;
 
   current_pipeline_stage_ = UPDATE_LAYERS_PIPELINE_STAGE;
   bool should_update_layers =
       final_pipeline_stage_ >= UPDATE_LAYERS_PIPELINE_STAGE;
   bool updated = should_update_layers && layer_tree_host_->UpdateLayers();
 
+  // If updating the layers resulted in a content update, we need a commit.
+  if (updated)
+    final_pipeline_stage_ = COMMIT_PIPELINE_STAGE;
+
   layer_tree_host_->WillCommit();
   devtools_instrumentation::ScopedCommitTrace commit_task(
       layer_tree_host_->GetId());
 
   current_pipeline_stage_ = COMMIT_PIPELINE_STAGE;
-  if (!updated && can_cancel_this_commit) {
+  if (final_pipeline_stage_ < COMMIT_PIPELINE_STAGE) {
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_NoUpdates", TRACE_EVENT_SCOPE_THREAD);
     std::vector<std::unique_ptr<SwapPromise>> swap_promises =
         layer_tree_host_->GetSwapPromiseManager()->TakeSwapPromises();
     ImplThreadTaskRunner()->PostTask(
-        FROM_HERE,
-        base::Bind(&ProxyImpl::BeginMainFrameAbortedOnImpl,
-                   base::Unretained(proxy_impl_.get()),
-                   CommitEarlyOutReason::FINISHED_NO_UPDATES,
-                   begin_main_frame_start_time, base::Passed(&swap_promises)));
+        FROM_HERE, base::BindOnce(&ProxyImpl::BeginMainFrameAbortedOnImpl,
+                                  base::Unretained(proxy_impl_.get()),
+                                  CommitEarlyOutReason::FINISHED_NO_UPDATES,
+                                  begin_main_frame_start_time,
+                                  base::Passed(&swap_promises)));
 
     // Although the commit is internally aborted, this is because it has been
     // detected to be a no-op.  From the perspective of an embedder, this commit
@@ -234,10 +269,11 @@ void ProxyMain::BeginMainFrame(
     commit_waits_for_activation_ = false;
     CompletionEvent completion;
     ImplThreadTaskRunner()->PostTask(
-        FROM_HERE, base::Bind(&ProxyImpl::NotifyReadyToCommitOnImpl,
-                              base::Unretained(proxy_impl_.get()), &completion,
-                              layer_tree_host_, begin_main_frame_start_time,
-                              hold_commit_for_activation));
+        FROM_HERE,
+        base::BindOnce(&ProxyImpl::NotifyReadyToCommitOnImpl,
+                       base::Unretained(proxy_impl_.get()), &completion,
+                       layer_tree_host_, begin_main_frame_start_time,
+                       hold_commit_for_activation));
     completion.Wait();
   }
 
@@ -257,19 +293,20 @@ bool ProxyMain::CommitToActiveTree() const {
   return false;
 }
 
-void ProxyMain::SetCompositorFrameSink(
-    CompositorFrameSink* compositor_frame_sink) {
+void ProxyMain::SetLayerTreeFrameSink(
+    LayerTreeFrameSink* layer_tree_frame_sink) {
   ImplThreadTaskRunner()->PostTask(
       FROM_HERE,
-      base::Bind(&ProxyImpl::InitializeCompositorFrameSinkOnImpl,
-                 base::Unretained(proxy_impl_.get()), compositor_frame_sink));
+      base::BindOnce(&ProxyImpl::InitializeLayerTreeFrameSinkOnImpl,
+                     base::Unretained(proxy_impl_.get()), layer_tree_frame_sink,
+                     frame_sink_bound_weak_factory_.GetWeakPtr()));
 }
 
 void ProxyMain::SetVisible(bool visible) {
   TRACE_EVENT1("cc", "ProxyMain::SetVisible", "visible", visible);
   ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyImpl::SetVisibleOnImpl,
-                            base::Unretained(proxy_impl_.get()), visible));
+      FROM_HERE, base::BindOnce(&ProxyImpl::SetVisibleOnImpl,
+                                base::Unretained(proxy_impl_.get()), visible));
 }
 
 void ProxyMain::SetNeedsAnimate() {
@@ -314,8 +351,9 @@ void ProxyMain::SetNeedsRedraw(const gfx::Rect& damage_rect) {
   TRACE_EVENT0("cc", "ProxyMain::SetNeedsRedraw");
   DCHECK(IsMainThread());
   ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyImpl::SetNeedsRedrawOnImpl,
-                            base::Unretained(proxy_impl_.get()), damage_rect));
+      FROM_HERE,
+      base::BindOnce(&ProxyImpl::SetNeedsRedrawOnImpl,
+                     base::Unretained(proxy_impl_.get()), damage_rect));
 }
 
 void ProxyMain::SetNextCommitWaitsForActivation() {
@@ -326,8 +364,8 @@ void ProxyMain::SetNextCommitWaitsForActivation() {
 void ProxyMain::NotifyInputThrottledUntilCommit() {
   DCHECK(IsMainThread());
   ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyImpl::SetInputThrottledUntilCommitOnImpl,
-                            base::Unretained(proxy_impl_.get()), true));
+      FROM_HERE, base::BindOnce(&ProxyImpl::SetInputThrottledUntilCommitOnImpl,
+                                base::Unretained(proxy_impl_.get()), true));
 }
 
 void ProxyMain::SetDeferCommits(bool defer_commits) {
@@ -343,8 +381,8 @@ void ProxyMain::SetDeferCommits(bool defer_commits) {
 
   ImplThreadTaskRunner()->PostTask(
       FROM_HERE,
-      base::Bind(&ProxyImpl::SetDeferCommitsOnImpl,
-                 base::Unretained(proxy_impl_.get()), defer_commits));
+      base::BindOnce(&ProxyImpl::SetDeferCommitsOnImpl,
+                     base::Unretained(proxy_impl_.get()), defer_commits));
 }
 
 bool ProxyMain::CommitRequested() const {
@@ -358,8 +396,8 @@ bool ProxyMain::CommitRequested() const {
 void ProxyMain::MainThreadHasStoppedFlinging() {
   DCHECK(IsMainThread());
   ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyImpl::MainThreadHasStoppedFlingingOnImpl,
-                            base::Unretained(proxy_impl_.get())));
+      FROM_HERE, base::BindOnce(&ProxyImpl::MainThreadHasStoppedFlingingOnImpl,
+                                base::Unretained(proxy_impl_.get())));
 }
 
 void ProxyMain::Start() {
@@ -370,8 +408,8 @@ void ProxyMain::Start() {
     DebugScopedSetMainThreadBlocked main_thread_blocked(task_runner_provider_);
     CompletionEvent completion;
     ImplThreadTaskRunner()->PostTask(
-        FROM_HERE, base::Bind(&ProxyMain::InitializeOnImplThread,
-                              base::Unretained(this), &completion));
+        FROM_HERE, base::BindOnce(&ProxyMain::InitializeOnImplThread,
+                                  base::Unretained(this), &completion));
     completion.Wait();
   }
 
@@ -392,16 +430,16 @@ void ProxyMain::Stop() {
     CompletionEvent completion;
     ImplThreadTaskRunner()->PostTask(
         FROM_HERE,
-        base::Bind(&ProxyImpl::FinishGLOnImpl,
-                   base::Unretained(proxy_impl_.get()), &completion));
+        base::BindOnce(&ProxyImpl::FinishGLOnImpl,
+                       base::Unretained(proxy_impl_.get()), &completion));
     completion.Wait();
   }
   {
     DebugScopedSetMainThreadBlocked main_thread_blocked(task_runner_provider_);
     CompletionEvent completion;
     ImplThreadTaskRunner()->PostTask(
-        FROM_HERE, base::Bind(&ProxyMain::DestroyProxyImplOnImplThread,
-                              base::Unretained(this), &completion));
+        FROM_HERE, base::BindOnce(&ProxyMain::DestroyProxyImplOnImplThread,
+                                  base::Unretained(this), &completion));
     completion.Wait();
   }
 
@@ -413,9 +451,9 @@ void ProxyMain::Stop() {
 void ProxyMain::SetMutator(std::unique_ptr<LayerTreeMutator> mutator) {
   TRACE_EVENT0("compositor-worker", "ThreadProxy::SetMutator");
   ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyImpl::InitializeMutatorOnImpl,
-                            base::Unretained(proxy_impl_.get()),
-                            base::Passed(std::move(mutator))));
+      FROM_HERE, base::BindOnce(&ProxyImpl::InitializeMutatorOnImpl,
+                                base::Unretained(proxy_impl_.get()),
+                                base::Passed(std::move(mutator))));
 }
 
 bool ProxyMain::SupportsImplScrolling() const {
@@ -429,21 +467,24 @@ bool ProxyMain::MainFrameWillHappenForTesting() {
     DebugScopedSetMainThreadBlocked main_thread_blocked(task_runner_provider_);
     CompletionEvent completion;
     ImplThreadTaskRunner()->PostTask(
-        FROM_HERE, base::Bind(&ProxyImpl::MainFrameWillHappenOnImplForTesting,
-                              base::Unretained(proxy_impl_.get()), &completion,
-                              &main_frame_will_happen));
+        FROM_HERE,
+        base::BindOnce(&ProxyImpl::MainFrameWillHappenOnImplForTesting,
+                       base::Unretained(proxy_impl_.get()), &completion,
+                       &main_frame_will_happen));
     completion.Wait();
   }
   return main_frame_will_happen;
 }
 
-void ProxyMain::ReleaseCompositorFrameSink() {
+void ProxyMain::ReleaseLayerTreeFrameSink() {
   DCHECK(IsMainThread());
+  frame_sink_bound_weak_factory_.InvalidateWeakPtrs();
   DebugScopedSetMainThreadBlocked main_thread_blocked(task_runner_provider_);
   CompletionEvent completion;
   ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyImpl::ReleaseCompositorFrameSinkOnImpl,
-                            base::Unretained(proxy_impl_.get()), &completion));
+      FROM_HERE,
+      base::BindOnce(&ProxyImpl::ReleaseLayerTreeFrameSinkOnImpl,
+                     base::Unretained(proxy_impl_.get()), &completion));
   completion.Wait();
 }
 
@@ -452,9 +493,17 @@ void ProxyMain::UpdateBrowserControlsState(BrowserControlsState constraints,
                                            bool animate) {
   DCHECK(IsMainThread());
   ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyImpl::UpdateBrowserControlsStateOnImpl,
-                            base::Unretained(proxy_impl_.get()), constraints,
-                            current, animate));
+      FROM_HERE, base::BindOnce(&ProxyImpl::UpdateBrowserControlsStateOnImpl,
+                                base::Unretained(proxy_impl_.get()),
+                                constraints, current, animate));
+}
+
+void ProxyMain::RequestBeginMainFrameNotExpected(bool new_state) {
+  DCHECK(IsMainThread());
+  ImplThreadTaskRunner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&ProxyImpl::RequestBeginMainFrameNotExpected,
+                     base::Unretained(proxy_impl_.get()), new_state));
 }
 
 bool ProxyMain::SendCommitRequestToImplThreadIfNeeded(
@@ -467,8 +516,8 @@ bool ProxyMain::SendCommitRequestToImplThreadIfNeeded(
   if (already_posted)
     return false;
   ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&ProxyImpl::SetNeedsCommitOnImpl,
-                            base::Unretained(proxy_impl_.get())));
+      FROM_HERE, base::BindOnce(&ProxyImpl::SetNeedsCommitOnImpl,
+                                base::Unretained(proxy_impl_.get())));
   return true;
 }
 

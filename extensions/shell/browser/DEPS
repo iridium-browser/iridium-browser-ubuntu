@@ -1,8 +1,10 @@
 include_rules = [
+  "+apps",
   "+chromeos",
   "+components/keyed_service",
   "+components/nacl/browser",
   "+components/nacl/common",
+  "+components/network_session_configurator/common",
   "+components/pref_registry",
   "+components/update_client",
   "+components/user_prefs",

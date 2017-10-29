@@ -52,14 +52,9 @@ platform_list_h_file = "$target_gen_dir/platform_list.h"
 platform_list_txt_file = "$target_gen_dir/platform_list.txt"
 constructor_list_cc_file = "$target_gen_dir/constructor_list.cc"
 
-config("vgem_map") {
-  if (use_vgem_map) {
-    defines = [ "USE_VGEM_MAP" ]
-  }
-}
-
 component("ozone_base") {
   sources = [
+    "ozone_base_export.h",
     "public/cursor_factory_ozone.cc",
     "public/cursor_factory_ozone.h",
     "public/gl_ozone.h",
@@ -67,10 +62,11 @@ component("ozone_base") {
     "public/gpu_platform_support_host.h",
     "public/input_controller.cc",
     "public/input_controller.h",
-    "public/native_pixmap.h",
     "public/overlay_candidates_ozone.cc",
     "public/overlay_candidates_ozone.h",
     "public/overlay_manager_ozone.h",
+    "public/overlay_surface_candidate.cc",
+    "public/overlay_surface_candidate.h",
     "public/ozone_switches.cc",
     "public/ozone_switches.h",
     "public/surface_factory_ozone.cc",
@@ -103,9 +99,9 @@ component("ozone_base") {
     # things that would otherwise create a cycle.
     "//ui/base",
     "//ui/events/ozone/*",
-    "//ui/ozone/gl",
-    "//ui/ozone/platform/*",
     "//ui/ozone/common/*",
+    "//ui/ozone/public/interfaces",
+    "//ui/ozone/platform/*",
   ]
 }
 
@@ -113,9 +109,13 @@ source_set("platform") {
   sources = [
     "common/stub_client_native_pixmap_factory.cc",
     "common/stub_client_native_pixmap_factory.h",
+    "ozone_export.h",
+    "platform_constructor_list.h",
+    "platform_object.h",
+    "platform_object_internal.h",
     "platform_selection.cc",
     "platform_selection.h",
-    "public/client_native_pixmap_factory.cc",
+    "public/client_native_pixmap_factory_ozone.cc",
     "public/ozone_gpu_test_helper.cc",
     "public/ozone_platform.cc",
     constructor_list_cc_file,
@@ -124,7 +124,7 @@ source_set("platform") {
   ]
 
   public = [
-    "public/client_native_pixmap_factory.h",
+    "public/client_native_pixmap_factory_ozone.h",
     "public/ozone_gpu_test_helper.h",
     "public/ozone_platform.h",
   ]
@@ -135,20 +135,19 @@ source_set("platform") {
     ":ozone_base",
     "//base",
     "//ipc",
+    "//services/service_manager/public/cpp",
     "//skia",
     "//ui/display/types",
     "//ui/events",
     "//ui/events/devices",
     "//ui/gfx",
     "//ui/gfx/geometry",
-    "//ui/ozone/gl",
     "//ui/platform_window",
   ]
 
   deps = [
     ":generate_constructor_list",
     ":generate_ozone_platform_list",
-    "//ui/ozone/public/interfaces",
   ]
 
   deps += ozone_platform_deps
@@ -165,6 +164,7 @@ component("ozone") {
   visibility = [ "*" ]
   public_deps = [
     ":platform",
+    "//ui/ozone/public/interfaces",
   ]
 }
 
@@ -203,8 +203,9 @@ action("generate_constructor_list") {
     "--namespace=ui",
     "--typename=OzonePlatform",
     "--typename=ClientNativePixmapFactory",
+    "--using=gfx::ClientNativePixmapFactory",
+    "--include=\"ui/gfx/client_native_pixmap_factory.h\"",
     "--include=\"ui/ozone/public/ozone_platform.h\"",
-    "--include=\"ui/ozone/public/client_native_pixmap_factory.h\"",
   ]
 
   deps = [
@@ -213,14 +214,14 @@ action("generate_constructor_list") {
 }
 
 test("ozone_unittests") {
-  sources = [
-    "run_all_unittests.cc",
-  ]
-
   deps = [
     "//base/test:test_support",
+    "//mojo/edk/test:run_all_unittests",
+    "//mojo/public/cpp/bindings",
     "//testing/gtest",
+    "//ui/gfx:test_support",
     "//ui/gfx/geometry",
+    "//ui/ozone/public/interfaces:struct_trait_unit_test",
   ]
 
   # Add tests of platform internals.

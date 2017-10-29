@@ -4,41 +4,26 @@
 
 #include "chrome/browser/chromeos/arc/accessibility/arc_accessibility_helper_bridge.h"
 
+#include <utility>
+
 #include "base/command_line.h"
+#include "base/memory/singleton.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#include "chrome/browser/chromeos/arc/accessibility/ax_tree_source_arc.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_list_prefs_factory.h"
 #include "chromeos/chromeos_switches.h"
 #include "components/arc/arc_bridge_service.h"
+#include "components/arc/arc_browser_context_keyed_service_factory_base.h"
+#include "components/arc/arc_service_manager.h"
 #include "components/exo/shell_surface.h"
 #include "components/exo/surface.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/views/view.h"
-#include "ui/views/widget/widget.h"
 
 namespace {
 
-// This class keeps focus on a |ShellSurface| without interfering with default
-// focus management in |ShellSurface|. For example, touch causes the
-// |ShellSurface| to lose focus to its ancestor containing View.
-class FocusStealer : public views::View {
- public:
-  explicit FocusStealer(int32_t id) : id_(id) {
-    SetFocusBehavior(views::View::FocusBehavior::ALWAYS);
-    set_owned_by_client();
-  }
-
-  // views::View overrides.
-  void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
-    node_data->AddIntAttribute(ui::AX_ATTR_CHILD_TREE_ID, id_);
-    node_data->role = ui::AX_ROLE_CLIENT;
-  }
-
- private:
-  int32_t id_;
-  DISALLOW_COPY_AND_ASSIGN(FocusStealer);
-};
+constexpr int32_t kNoTaskId = -1;
 
 exo::Surface* GetArcSurface(const aura::Window* window) {
   if (!window)
@@ -50,59 +35,160 @@ exo::Surface* GetArcSurface(const aura::Window* window) {
   return arc_surface;
 }
 
-void DispatchFocusChange(arc::mojom::AccessibilityNodeInfoData* node_data) {
+int32_t GetTaskId(aura::Window* window) {
+  const std::string* arc_app_id = exo::ShellSurface::GetApplicationId(window);
+  if (!arc_app_id)
+    return kNoTaskId;
+
+  int32_t task_id = kNoTaskId;
+  if (sscanf(arc_app_id->c_str(), "org.chromium.arc.%d", &task_id) != 1)
+    return kNoTaskId;
+
+  return task_id;
+}
+
+void DispatchFocusChange(arc::mojom::AccessibilityNodeInfoData* node_data,
+                         Profile* profile) {
   chromeos::AccessibilityManager* accessibility_manager =
       chromeos::AccessibilityManager::Get();
-  if (!accessibility_manager)
+  if (!accessibility_manager || accessibility_manager->profile() != profile)
     return;
 
-  exo::WMHelper* wmHelper = exo::WMHelper::GetInstance();
-  aura::Window* focused_window = wmHelper->GetFocusedWindow();
+  exo::WMHelper* wm_helper = exo::WMHelper::GetInstance();
+  if (!wm_helper)
+    return;
+
+  aura::Window* focused_window = wm_helper->GetFocusedWindow();
   if (!focused_window)
     return;
 
   aura::Window* toplevel_window = focused_window->GetToplevelWindow();
 
   gfx::Rect bounds_in_screen = gfx::ScaleToEnclosingRect(
-      node_data->boundsInScreen,
+      node_data->bounds_in_screen,
       1.0f / toplevel_window->layer()->device_scale_factor());
 
   accessibility_manager->OnViewFocusedInArc(bounds_in_screen);
+}
+
+arc::mojom::AccessibilityFilterType GetFilterTypeForProfile(Profile* profile) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kEnableChromeVoxArcSupport)) {
+    return arc::mojom::AccessibilityFilterType::ALL;
+  }
+
+  chromeos::AccessibilityManager* accessibility_manager =
+      chromeos::AccessibilityManager::Get();
+  if (!accessibility_manager)
+    return arc::mojom::AccessibilityFilterType::OFF;
+
+  // TODO(yawano): Support the case where primary user is in background.
+  if (accessibility_manager->profile() != profile)
+    return arc::mojom::AccessibilityFilterType::OFF;
+
+  if (accessibility_manager->IsSpokenFeedbackEnabled())
+    return arc::mojom::AccessibilityFilterType::WHITELISTED_PACKAGE_NAME;
+
+  if (accessibility_manager->IsFocusHighlightEnabled())
+    return arc::mojom::AccessibilityFilterType::FOCUS;
+
+  return arc::mojom::AccessibilityFilterType::OFF;
 }
 
 }  // namespace
 
 namespace arc {
 
-ArcAccessibilityHelperBridge::ArcAccessibilityHelperBridge(
-    ArcBridgeService* bridge_service)
-    : ArcService(bridge_service), binding_(this) {
-  arc_bridge_service()->accessibility_helper()->AddObserver(this);
+namespace {
+
+// Singleton factory for ArcAccessibilityHelperBridge.
+class ArcAccessibilityHelperBridgeFactory
+    : public internal::ArcBrowserContextKeyedServiceFactoryBase<
+          ArcAccessibilityHelperBridge,
+          ArcAccessibilityHelperBridgeFactory> {
+ public:
+  // Factory name used by ArcBrowserContextKeyedServiceFactoryBase.
+  static constexpr const char* kName = "ArcAccessibilityHelperBridgeFactory";
+
+  static ArcAccessibilityHelperBridgeFactory* GetInstance() {
+    return base::Singleton<ArcAccessibilityHelperBridgeFactory>::get();
+  }
+
+ private:
+  friend struct base::DefaultSingletonTraits<
+      ArcAccessibilityHelperBridgeFactory>;
+
+  ArcAccessibilityHelperBridgeFactory() {
+    // ArcAccessibilityHelperBridge needs to track task creation and
+    // destruction in the container, which are notified to ArcAppListPrefs
+    // via Mojo.
+    DependsOn(ArcAppListPrefsFactory::GetInstance());
+  }
+  ~ArcAccessibilityHelperBridgeFactory() override = default;
+};
+
+}  // namespace
+
+// static
+ArcAccessibilityHelperBridge*
+ArcAccessibilityHelperBridge::GetForBrowserContext(
+    content::BrowserContext* context) {
+  return ArcAccessibilityHelperBridgeFactory::GetForBrowserContext(context);
 }
 
-ArcAccessibilityHelperBridge::~ArcAccessibilityHelperBridge() {
-  arc_bridge_service()->accessibility_helper()->RemoveObserver(this);
+ArcAccessibilityHelperBridge::ArcAccessibilityHelperBridge(
+    content::BrowserContext* browser_context,
+    ArcBridgeService* arc_bridge_service)
+    : profile_(Profile::FromBrowserContext(browser_context)),
+      arc_bridge_service_(arc_bridge_service),
+      binding_(this),
+      current_task_id_(kNoTaskId) {
+  arc_bridge_service_->accessibility_helper()->AddObserver(this);
+
+  // Null on testing.
+  auto* app_list_prefs = ArcAppListPrefs::Get(profile_);
+  if (app_list_prefs)
+    app_list_prefs->AddObserver(this);
+}
+
+ArcAccessibilityHelperBridge::~ArcAccessibilityHelperBridge() = default;
+
+void ArcAccessibilityHelperBridge::Shutdown() {
+  // We do not unregister ourselves from WMHelper as an ActivationObserver
+  // because it is always null at this point during teardown.
+
+  // Null on testing.
+  auto* app_list_prefs = ArcAppListPrefs::Get(profile_);
+  if (app_list_prefs)
+    app_list_prefs->RemoveObserver(this);
+
+  // TODO(hidehiko): Currently, the lifetime of ArcBridgeService and
+  // BrowserContextKeyedService is not nested.
+  // If ArcServiceManager::Get() returns nullptr, it is already destructed,
+  // so do not touch it.
+  if (ArcServiceManager::Get())
+    arc_bridge_service_->accessibility_helper()->RemoveObserver(this);
 }
 
 void ArcAccessibilityHelperBridge::OnInstanceReady() {
   auto* instance = ARC_GET_INSTANCE_FOR_METHOD(
-      arc_bridge_service()->accessibility_helper(), Init);
+      arc_bridge_service_->accessibility_helper(), Init);
   DCHECK(instance);
-  instance->Init(binding_.CreateInterfacePtrAndBind());
 
-  chromeos::AccessibilityManager* accessibility_manager =
-      chromeos::AccessibilityManager::Get();
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kEnableChromeVoxArcSupport)) {
-    instance->SetFilter(arc::mojom::AccessibilityFilterType::ALL);
-    if (!tree_source_) {
-      tree_source_.reset(new AXTreeSourceArc(tree_id()));
-      focus_stealer_.reset(new FocusStealer(tree_source_->tree_id()));
-      exo::WMHelper::GetInstance()->AddActivationObserver(this);
-    }
-  } else if (accessibility_manager &&
-             accessibility_manager->IsFocusHighlightEnabled()) {
-    instance->SetFilter(arc::mojom::AccessibilityFilterType::FOCUS);
+  mojom::AccessibilityHelperHostPtr host_proxy;
+  binding_.Bind(mojo::MakeRequest(&host_proxy));
+  instance->Init(std::move(host_proxy));
+
+  arc::mojom::AccessibilityFilterType filter_type =
+      GetFilterTypeForProfile(profile_);
+  instance->SetFilter(filter_type);
+
+  if (filter_type == arc::mojom::AccessibilityFilterType::ALL ||
+      filter_type ==
+          arc::mojom::AccessibilityFilterType::WHITELISTED_PACKAGE_NAME) {
+    // TODO(yawano): Handle the case where filter_type has changed between
+    // OFF/FOCUS and ALL/WHITELISTED_PACKAGE_NAME after this initialization.
+    exo::WMHelper::GetInstance()->AddActivationObserver(this);
   }
 }
 
@@ -110,69 +196,138 @@ void ArcAccessibilityHelperBridge::OnAccessibilityEventDeprecated(
     mojom::AccessibilityEventType event_type,
     mojom::AccessibilityNodeInfoDataPtr event_source) {
   if (event_type == arc::mojom::AccessibilityEventType::VIEW_FOCUSED)
-    DispatchFocusChange(event_source.get());
+    DispatchFocusChange(event_source.get(), profile_);
 }
 
 void ArcAccessibilityHelperBridge::OnAccessibilityEvent(
     mojom::AccessibilityEventDataPtr event_data) {
-  if (tree_source_) {
-    tree_source_->NotifyAccessibilityEvent(event_data.get());
-    return;
-  }
+  // TODO(yawano): Handle AccessibilityFilterType::OFF.
+  arc::mojom::AccessibilityFilterType filter_type =
+      GetFilterTypeForProfile(profile_);
 
-  if (event_data->eventType != arc::mojom::AccessibilityEventType::VIEW_FOCUSED)
-    return;
+  if (filter_type == arc::mojom::AccessibilityFilterType::ALL ||
+      filter_type ==
+          arc::mojom::AccessibilityFilterType::WHITELISTED_PACKAGE_NAME) {
+    // Get the task id for this package which requires inspecting node data.
+    if (event_data->node_data.empty())
+      return;
 
-  CHECK_EQ(1U, event_data.get()->nodeData.size());
-  DispatchFocusChange(event_data.get()->nodeData[0].get());
-}
+    arc::mojom::AccessibilityNodeInfoData* node =
+        event_data->node_data[0].get();
+    if (!node->string_properties)
+      return;
 
-void ArcAccessibilityHelperBridge::OnWindowActivated(
-    aura::Window* gained_active,
-    aura::Window* lost_active) {
-  if (gained_active == lost_active || !tree_source_)
-    return;
+    auto package_it = node->string_properties->find(
+        arc::mojom::AccessibilityStringProperty::PACKAGE_NAME);
+    if (package_it == node->string_properties->end())
+      return;
 
-  exo::Surface* active_surface = GetArcSurface(gained_active);
-  exo::Surface* inactive_surface = GetArcSurface(lost_active);
+    auto task_ids_it = package_name_to_task_ids_.find(package_it->second);
+    if (task_ids_it == package_name_to_task_ids_.end())
+      return;
 
-  // Detach the accessibility tree from an inactive ShellSurface so that any
-  // client walking the desktop tree gets non-duplicated linearization.
-  if (inactive_surface) {
-    views::Widget* widget = views::Widget::GetWidgetForNativeView(lost_active);
-    if (widget && widget->GetContentsView()) {
-      views::View* view = widget->GetContentsView();
-      view->RemoveChildView(focus_stealer_.get());
-      view->NotifyAccessibilityEvent(ui::AX_EVENT_CHILDREN_CHANGED, false);
+    const auto& task_ids = task_ids_it->second;
+
+    // Reject updates to non-current task ids. We can do this currently
+    // because all events include the entire tree.
+    if (task_ids.count(current_task_id_) == 0)
+      return;
+
+    auto tree_it = package_name_to_tree_.find(package_it->second);
+    AXTreeSourceArc* tree_source;
+    if (tree_it == package_name_to_tree_.end()) {
+      package_name_to_tree_[package_it->second].reset(
+          new AXTreeSourceArc(this));
+      tree_source = package_name_to_tree_[package_it->second].get();
+    } else {
+      tree_source = tree_it->second.get();
     }
+    tree_source->NotifyAccessibilityEvent(event_data.get());
+    return;
   }
 
-  if (!active_surface)
+  if (event_data->event_type !=
+      arc::mojom::AccessibilityEventType::VIEW_FOCUSED)
     return;
 
-  views::Widget* widget = views::Widget::GetWidgetForNativeView(gained_active);
-  if (widget && widget->GetContentsView()) {
-    views::View* view = widget->GetContentsView();
-    if (!view->Contains(focus_stealer_.get()))
-      view->AddChildView(focus_stealer_.get());
-    focus_stealer_->RequestFocus();
-    view->NotifyAccessibilityEvent(ui::AX_EVENT_CHILDREN_CHANGED, false);
-  }
+  CHECK_EQ(1U, event_data.get()->node_data.size());
+  DispatchFocusChange(event_data.get()->node_data[0].get(), profile_);
 }
 
-void ArcAccessibilityHelperBridge::PerformAction(const ui::AXActionData& data) {
-  arc::mojom::AccessibilityActionType mojo_action;
+void ArcAccessibilityHelperBridge::OnAction(
+    const ui::AXActionData& data) const {
+  arc::mojom::AccessibilityActionDataPtr action_data =
+      arc::mojom::AccessibilityActionData::New();
+
+  action_data->node_id = data.target_node_id;
+
   switch (data.action) {
     case ui::AX_ACTION_DO_DEFAULT:
-      mojo_action = arc::mojom::AccessibilityActionType::CLICK;
+      action_data->action_type = arc::mojom::AccessibilityActionType::CLICK;
+      break;
+    case ui::AX_ACTION_CUSTOM_ACTION:
+      action_data->action_type =
+          arc::mojom::AccessibilityActionType::CUSTOM_ACTION;
+      action_data->custom_action_id = data.custom_action_id;
       break;
     default:
       return;
   }
 
   auto* instance = ARC_GET_INSTANCE_FOR_METHOD(
-      arc_bridge_service()->accessibility_helper(), PerformAction);
-  instance->PerformAction(data.target_node_id, mojo_action);
+      arc_bridge_service_->accessibility_helper(), PerformAction);
+  instance->PerformAction(std::move(action_data));
+}
+
+void ArcAccessibilityHelperBridge::OnWindowActivated(
+    aura::Window* gained_active,
+    aura::Window* lost_active) {
+  if (gained_active == lost_active)
+    return;
+
+  if (!GetArcSurface(gained_active))
+    return;
+
+  // Grab the tree source associated with this app.
+  int32_t task_id = GetTaskId(gained_active);
+  const std::pair<const std::string, std::set<int32_t>>* found_entry = nullptr;
+  for (const auto& task_ids_entry : package_name_to_task_ids_) {
+    if (task_ids_entry.second.count(task_id) != 0) {
+      found_entry = &task_ids_entry;
+      break;
+    }
+  }
+
+  if (!found_entry)
+    return;
+
+  auto it = package_name_to_tree_.find(found_entry->first);
+  if (it != package_name_to_tree_.end())
+    it->second->Focus(gained_active);
+}
+
+void ArcAccessibilityHelperBridge::OnTaskCreated(
+    int32_t task_id,
+    const std::string& package_name,
+    const std::string& activity,
+    const std::string& intent) {
+  package_name_to_task_ids_[package_name].insert(task_id);
+}
+
+void ArcAccessibilityHelperBridge::OnTaskDestroyed(int32_t task_id) {
+  for (auto& task_ids_entry : package_name_to_task_ids_) {
+    if (task_ids_entry.second.erase(task_id) > 0) {
+      if (task_ids_entry.second.empty()) {
+        package_name_to_tree_.erase(task_ids_entry.first);
+        package_name_to_task_ids_.erase(task_ids_entry.first);
+      }
+      break;
+    }
+  }
+}
+
+void ArcAccessibilityHelperBridge::OnTaskSetActive(int32_t task_id) {
+  current_task_id_ = task_id;
 }
 
 }  // namespace arc

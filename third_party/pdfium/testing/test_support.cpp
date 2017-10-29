@@ -7,12 +7,14 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <string>
-
+#include "core/fdrm/crypto/fx_crypt.h"
+#include "core/fxcrt/fx_memory.h"
+#include "core/fxcrt/fx_string.h"
 #include "testing/utils/path_service.h"
 
 #ifdef PDF_ENABLE_V8
 #include "v8/include/libplatform/libplatform.h"
+#include "v8/include/v8.h"
 #endif
 
 namespace {
@@ -102,6 +104,13 @@ std::unique_ptr<char, pdfium::FreeDeleter> GetFileContents(const char* filename,
   return buffer;
 }
 
+std::string GetPlatformString(FPDF_WIDESTRING wstr) {
+  return std::string(
+      CFX_WideString::FromUTF16LE(wstr, CFX_WideString::WStringLength(wstr))
+          .UTF8Encode()
+          .c_str());
+}
+
 std::wstring GetPlatformWString(FPDF_WIDESTRING wstr) {
   if (!wstr)
     return nullptr;
@@ -149,6 +158,24 @@ std::unique_ptr<unsigned short, pdfium::FreeDeleter> GetFPDFWideString(
   return result;
 }
 
+std::string CryptToBase16(const uint8_t* digest) {
+  static char const zEncode[] = "0123456789abcdef";
+  std::string ret;
+  ret.resize(32);
+  for (int i = 0, j = 0; i < 16; i++, j += 2) {
+    uint8_t a = digest[i];
+    ret[j] = zEncode[(a >> 4) & 0xf];
+    ret[j + 1] = zEncode[a & 0xf];
+  }
+  return ret;
+}
+
+std::string GenerateMD5Base16(const uint8_t* data, uint32_t size) {
+  uint8_t digest[16];
+  CRYPT_MD5Generate(data, size, digest);
+  return CryptToBase16(digest);
+}
+
 #ifdef PDF_ENABLE_V8
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
 bool InitializeV8ForPDFium(const std::string& exe_path,
@@ -190,23 +217,5 @@ int TestLoader::GetBlock(void* param,
     return 0;
 
   memcpy(pBuf, pLoader->m_pBuf + pos, size);
-  return 1;
-}
-
-TestSaver::TestSaver() {
-  FPDF_FILEWRITE::version = 1;
-  FPDF_FILEWRITE::WriteBlock = WriteBlockCallback;
-}
-
-void TestSaver::ClearString() {
-  m_String.clear();
-}
-
-// static
-int TestSaver::WriteBlockCallback(FPDF_FILEWRITE* pFileWrite,
-                                  const void* data,
-                                  unsigned long size) {
-  TestSaver* pThis = static_cast<TestSaver*>(pFileWrite);
-  pThis->m_String.append(static_cast<const char*>(data), size);
   return 1;
 }

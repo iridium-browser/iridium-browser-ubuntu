@@ -14,18 +14,19 @@
 #include "chrome/browser/chromeos/login/screens/gaia_view.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
+#include "chromeos/dbus/auth_policy_client.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "net/base/net_errors.h"
-#include "third_party/cros_system_api/dbus/service_constants.h"
 
 class AccountId;
 
 namespace authpolicy {
-class ActiveDirectoryAccountData;
+class ActiveDirectoryAccountInfo;
 }
 
 namespace chromeos {
 
+class AuthPolicyLoginHelper;
 class Key;
 class SigninScreenHandler;
 class SigninScreenHandlerDelegate;
@@ -109,6 +110,8 @@ class GaiaScreenHandler : public BaseScreenHandler,
                                       const std::string& old_password,
                                       const std::string& new_password);
 
+  void HandleCancelActiveDirectoryAuth();
+
   void HandleUsingSAMLAPI();
   void HandleScrapedPasswordCount(int password_count);
   void HandleScrapedPasswordVerificationFailed();
@@ -144,7 +147,7 @@ class GaiaScreenHandler : public BaseScreenHandler,
   void DoAdAuth(const std::string& username,
                 const Key& key,
                 authpolicy::ErrorType error,
-                const authpolicy::ActiveDirectoryAccountData& account_data);
+                const authpolicy::ActiveDirectoryAccountInfo& account_info);
 
   // Callback for writing password into pipe.
   void OnPasswordPipeReady(const std::string& username,
@@ -274,6 +277,10 @@ class GaiaScreenHandler : public BaseScreenHandler,
 
   // True if the authentication extension is still loading.
   bool auth_extension_being_loaded_ = false;
+
+  // Helper to call AuthPolicyClient and cancel calls if needed. Used to
+  // authenticate users against Active Directory server.
+  std::unique_ptr<AuthPolicyLoginHelper> authpolicy_login_helper_;
 
   base::WeakPtrFactory<GaiaScreenHandler> weak_factory_;
 

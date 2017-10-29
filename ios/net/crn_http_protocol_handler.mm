@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/mac/bind_objc_block.h"
+#include "base/mac/foundation_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
@@ -50,8 +51,11 @@ class HttpProtocolHandlerCore;
 
 namespace {
 
-// Size of the buffer used to read the net::URLRequest.
-const int kIOBufferSize = 4096;
+// Minimum size of the buffer used to read the net::URLRequest.
+const int kIOBufferMinSize = 64 * 1024;
+
+// Maximum size of the buffer used to read the net::URLRequest.
+const int kIOBufferMaxSize = 16 * kIOBufferMinSize;  // 1MB
 
 // Global instance of the HTTPProtocolHandlerDelegate.
 net::HTTPProtocolHandlerDelegate* g_protocol_handler_delegate = nullptr;
@@ -185,12 +189,15 @@ class HttpProtocolHandlerCore
   void SSLErrorCallback(bool carryOn);
   void HostStateCallback(bool carryOn);
   void StartReading();
+  void AllocateReadBuffer(int last_read_data_size);
 
   base::ThreadChecker thread_checker_;
 
   // The NSURLProtocol client.
   id<CRNNetworkClientProtocol> client_;
-  scoped_refptr<IOBuffer> buffer_;
+  std::unique_ptr<char, base::FreeDeleter> read_buffer_;
+  int read_buffer_size_;
+  scoped_refptr<WrappedIOBuffer> read_buffer_wrapper_;
   base::scoped_nsobject<NSMutableURLRequest> request_;
   // Stream delegate to read the HTTPBodyStream.
   base::scoped_nsobject<CRWHTTPStreamDelegate> stream_delegate_;
@@ -208,7 +215,8 @@ class HttpProtocolHandlerCore
 
 HttpProtocolHandlerCore::HttpProtocolHandlerCore(NSURLRequest* request)
     : client_(nil),
-      buffer_(new IOBuffer(kIOBufferSize)),
+      read_buffer_size_(kIOBufferMinSize),
+      read_buffer_wrapper_(nullptr),
       net_request_(nullptr) {
   // The request will be accessed from another thread. It is safer to make a
   // copy to avoid conflicts.
@@ -218,6 +226,8 @@ HttpProtocolHandlerCore::HttpProtocolHandlerCore(NSURLRequest* request)
   // shallowly copies the request, and just retains the non-threadsafe NSURL.
   thread_checker_.DetachFromThread();
   request_.reset([request mutableCopy]);
+  // Will allocate read buffer with size |kIOBufferMinSize|.
+  AllocateReadBuffer(0);
   [request_ setURL:[NSURL URLWithString:[[request URL] absoluteString]]];
 }
 
@@ -247,14 +257,20 @@ void HttpProtocolHandlerCore::HandleStreamEvent(NSStream* stream,
         tracker_->StartRequest(net_request_);
       break;
     case NSStreamEventHasBytesAvailable: {
-      NSUInteger length;
-      DCHECK([stream isKindOfClass:[NSInputStream class]]);
-      length = [(NSInputStream*)stream read:(unsigned char*)buffer_->data()
-                                  maxLength:kIOBufferSize];
-      if (length) {
-        std::vector<char> owned_data(buffer_->data(), buffer_->data() + length);
+      NSInteger length;
+      // TODO(crbug.com/738025): Dynamically change the size of the read buffer
+      // to improve the read (POST) performance, see AllocateReadBuffer(), &
+      // avoid unnecessary data copy.
+      length = [base::mac::ObjCCastStrict<NSInputStream>(stream)
+               read:reinterpret_cast<unsigned char*>(read_buffer_.get())
+          maxLength:read_buffer_size_];
+      if (length > 0) {
+        std::vector<char> owned_data(read_buffer_.get(),
+                                     read_buffer_.get() + length);
         post_data_readers_.push_back(
             base::MakeUnique<UploadOwnedBytesElementReader>(&owned_data));
+      } else if (length < 0) {  // Error
+        StopRequestWithError(stream.streamError.code, ERR_FAILED);
       }
       break;
     }
@@ -494,7 +510,8 @@ void HttpProtocolHandlerCore::StartReading() {
   // using it and the object is not re-entrant.
   [client_ didReceiveResponse:response];
 
-  int bytes_read = net_request_->Read(buffer_.get(), kIOBufferSize);
+  int bytes_read =
+      net_request_->Read(read_buffer_wrapper_.get(), read_buffer_size_);
   if (bytes_read == net::ERR_IO_PENDING)
     return;
 
@@ -514,46 +531,56 @@ void HttpProtocolHandlerCore::OnReadCompleted(URLRequest* request,
   if (net_request_ == nullptr)
     return;
 
-  base::scoped_nsobject<NSMutableData> data([[NSMutableData alloc] init]);
+  DCHECK_EQ(net_request_, request);
 
-  // Read all we can from the socket and put it into data.
-  // TODO(droger): It may be possible to avoid some of the copies (using
-  // WrappedIOBuffer for example).
-  NSUInteger data_length;
-  uint64_t total_byte_read = 0;
+  // Read data from the socket until no bytes left to read.
+  uint64_t total_bytes_read = 0;
   while (bytes_read > 0) {
-    total_byte_read += bytes_read;
-    data_length = [data length];  // Assumes that getting the length is fast.
-    [data increaseLengthBy:bytes_read];
-    memcpy(reinterpret_cast<char*>([data mutableBytes]) + data_length,
-           buffer_->data(), bytes_read);
-    bytes_read = request->Read(buffer_.get(), kIOBufferSize);
+    total_bytes_read += bytes_read;
+    // The NSData will take the ownership of |read_buffer_|.
+    NSData* data =
+        [NSData dataWithBytesNoCopy:read_buffer_.release() length:bytes_read];
+    // If the data is not encoded in UTF8, the NSString is nil.
+    DVLOG(3) << "To client:" << std::endl
+             << base::SysNSStringToUTF8([[NSString alloc]
+                    initWithData:data
+                        encoding:NSUTF8StringEncoding]);
+    // Pass the read data to the client.
+    [client_ didLoadData:data];
+
+    // Allocate a new buffer and continue reading from the socket.
+    AllocateReadBuffer(bytes_read);
+    bytes_read = request->Read(read_buffer_wrapper_.get(), read_buffer_size_);
   }
 
   if (tracker_)
-    tracker_->CaptureReceivedBytes(request, total_byte_read);
+    tracker_->CaptureReceivedBytes(request, total_bytes_read);
 
-  // Notify the client.
-  if (bytes_read == net::OK || bytes_read == net::ERR_IO_PENDING) {
-    if ([data length] > 0) {
-      // If the data is not encoded in UTF8, the NSString is nil.
-      DVLOG(3) << "To client:" << std::endl
-               << base::SysNSStringToUTF8([[NSString alloc]
-                      initWithData:data
-                          encoding:NSUTF8StringEncoding]);
-      [client_ didLoadData:data];
-    }
-    if (bytes_read == 0) {
-      DCHECK_EQ(net_request_, request);
-      // There is nothing more to read.
-      StopNetRequest();
-      [client_ didFinishLoading];
-    }
-  } else {
-    // Request failed (not canceled).
+  if (bytes_read == net::OK) {
+    // If there is nothing more to read.
+    StopNetRequest();
+    [client_ didFinishLoading];
+  } else if (bytes_read != net::ERR_IO_PENDING) {
+    // If there was an error (not canceled).
     int error = bytes_read;
     StopRequestWithError(IOSErrorCode(error), error);
   }
+}
+
+void HttpProtocolHandlerCore::AllocateReadBuffer(int last_read_data_size) {
+  if (last_read_data_size == read_buffer_size_) {
+    // If the whole buffer was filled with data then increase the buffer size
+    // for the next read but don't exceed |kIOBufferMaxSize|.
+    read_buffer_size_ = std::min(read_buffer_size_ * 2, kIOBufferMaxSize);
+  } else if (read_buffer_size_ / 2 >= last_read_data_size) {
+    // If only a half or less of the buffer was filled with data then reduce
+    // the buffer size for the next read but not make it smaller than
+    // |kIOBufferMinSize|.
+    read_buffer_size_ = std::max(read_buffer_size_ / 2, kIOBufferMinSize);
+  }
+  read_buffer_.reset(static_cast<char*>(malloc(read_buffer_size_)));
+  read_buffer_wrapper_ =
+      new WrappedIOBuffer(static_cast<const char*>(read_buffer_.get()));
 }
 
 HttpProtocolHandlerCore::~HttpProtocolHandlerCore() {
@@ -962,80 +989,6 @@ void HttpProtocolHandlerCore::StripPostSpecificHeaders(
 - (void)stopLoading {
   [self cancelRequest];
   _protocolProxy.reset();
-}
-
-@end
-
-#pragma mark -
-#pragma mark PauseableHttpProtocolHandler
-
-// The HttpProtocolHandler is called by the iOS system to handle the
-// NSURLRequest. This HttpProtocolHandler conforms to the observed semantics of
-// NSURLProtocol when used with NSURLSession on iOS 8 - i.e., |-startLoading|
-// means "start or resume request" and |-stopLoading| means "pause request".
-// Since there is no way to actually pause a request in the network stack, this
-// is implemented using a subclass of CRNHTTPProtocolHandlerProxy that knows how
-// to defer callbacks.
-//
-// Note that this class conforms to somewhat complex threading rules:
-// 1) |initWithRequest:cachedResponse:client:| and |dealloc| can be called on
-//    any thread.
-// 2) |startLoading| and |stopLoading| are always called on the client thread.
-// 3) |stopLoading| is called before |dealloc| is called.
-//
-// The main wrinkle is that |dealloc|, which may be called on any thread, needs
-// to clean up a running network request. To do this, |dealloc| needs to run
-// |cancelRequest|, which needs to be run on the client thread. Since it is
-// guaranteed that |startLoading| is called before |dealloc| is called, the
-// |startLoading| method stores a pointer to the client thread, then |dealloc|
-// asks that client thread to perform the |cancelRequest| selector via
-// |scheduleCancelRequest|.
-//
-// Some of the above logic is implemented in the parent class
-// (CRNHTTPProtocolHandler) because it is convenient.
-@implementation CRNPauseableHTTPProtocolHandler {
-  BOOL _started;
-  dispatch_queue_t _queue;
-}
-
-#pragma mark NSURLProtocol methods
-
-- (void)dealloc {
-  [self scheduleCancelRequest];
-}
-
-#pragma mark NSURLProtocol overrides.
-
-- (void)startLoading {
-  if (_started) {
-    [[self getProtocolHandlerProxy] resume];
-    return;
-  }
-
-  _started = YES;
-  [super startLoading];
-}
-
-- (void)stopLoading {
-  [[self getProtocolHandlerProxy] pause];
-}
-
-// This method has unusual concurrency properties. It can be called on any
-// thread, but it must be called from |-dealloc|, which guarantees that no other
-// method of this object is running concurrently (since |-dealloc| is only
-// called when the last reference to the object drops).
-//
-// This method takes a reference to _core to ensure that _core lives long enough
-// to have the request cleanly cancelled.
-- (void)scheduleCancelRequest {
-  DeferredCancellation* cancellation =
-      [[DeferredCancellation alloc] initWithCore:[self getCore]];
-  NSArray* modes = @[ [[NSRunLoop currentRunLoop] currentMode] ];
-  [cancellation performSelector:@selector(cancel)
-                       onThread:[self getClientThread]
-                     withObject:nil
-                  waitUntilDone:NO
-                          modes:modes];
 }
 
 @end

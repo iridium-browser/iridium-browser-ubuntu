@@ -15,10 +15,10 @@
 #include <algorithm>
 #include <utility>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/timeutils.h"
 #include "webrtc/modules/desktop_capture/desktop_geometry.h"
 #include "webrtc/modules/desktop_capture/differ_block.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/timeutils.h"
 
 namespace webrtc {
 
@@ -214,6 +214,7 @@ void DesktopCapturerDifferWrapper::OnCaptureResult(
   frame->set_capture_time_ms(frame->GetUnderlyingFrame()->capture_time_ms() +
                              (rtc::TimeNanos() - start_time_nanos) /
                                  rtc::kNumNanosecsPerMillisec);
+  frame->set_capturer_id(frame->GetUnderlyingFrame()->capturer_id());
   callback_->OnCaptureResult(result, std::move(frame));
 }
 

@@ -151,6 +151,9 @@ enum class ProvisioningResult : int {
   // Network connection is unavailable in ARC.
   NO_NETWORK_CONNECTION = 19,
 
+  // ARC is not enabled.
+  ARC_DISABLED = 20,
+
   // The size of this enum; keep last.
   SIZE,
 };
@@ -183,6 +186,7 @@ void UpdateProvisioningResultUMA(ProvisioningResult result, bool managed);
 void UpdateProvisioningTiming(const base::TimeDelta& elapsed_time,
                               bool success,
                               bool managed);
+void UpdatePlayStoreShowTime(const base::TimeDelta& elapsed_time, bool managed);
 void UpdateSilentAuthCodeUMA(OptInSilentAuthCode state);
 void UpdateAuthTiming(const char* histogram_name, base::TimeDelta elapsed_time);
 void UpdateAuthCheckinAttempts(int32_t num_attempts);

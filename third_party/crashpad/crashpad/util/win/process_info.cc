@@ -14,6 +14,7 @@
 
 #include "util/win/process_info.h"
 
+#include <stddef.h>
 #include <winternl.h>
 
 #include <algorithm>
@@ -27,6 +28,7 @@
 #include "base/process/memory.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
+#include "util/misc/from_pointer_cast.h"
 #include "util/numeric/safe_assignment.h"
 #include "util/win/get_function.h"
 #include "util/win/handle.h"
@@ -132,7 +134,7 @@ bool RegionIsAccessible(const MEMORY_BASIC_INFORMATION64& memory_info) {
 MEMORY_BASIC_INFORMATION64 MemoryBasicInformationToMemoryBasicInformation64(
     const MEMORY_BASIC_INFORMATION& mbi) {
   MEMORY_BASIC_INFORMATION64 mbi64 = {0};
-  mbi64.BaseAddress = reinterpret_cast<ULONGLONG>(mbi.BaseAddress);
+  mbi64.BaseAddress = FromPointerCast<ULONGLONG>(mbi.BaseAddress);
   mbi64.AllocationBase = reinterpret_cast<ULONGLONG>(mbi.AllocationBase);
   mbi64.AllocationProtect = mbi.AllocationProtect;
   mbi64.RegionSize = mbi.RegionSize;
@@ -156,6 +158,10 @@ std::unique_ptr<uint8_t[]> QueryObject(
   if (status == STATUS_INFO_LENGTH_MISMATCH) {
     DCHECK_GT(return_length, size);
     size = return_length;
+
+    // Free the old buffer before attempting to allocate a new one.
+    buffer.reset();
+
     buffer.reset(new uint8_t[size]);
     status = crashpad::NtQueryObject(
         handle, object_information_class, buffer.get(), size, &return_length);
@@ -166,6 +172,7 @@ std::unique_ptr<uint8_t[]> QueryObject(
     return nullptr;
   }
 
+  DCHECK_LE(return_length, size);
   DCHECK_GE(return_length, minimum_size);
   return buffer;
 }

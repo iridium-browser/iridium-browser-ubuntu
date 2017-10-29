@@ -14,7 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "content/browser/compositor/browser_compositor_output_surface.h"
-#include "ui/events/latency_info.h"
+#include "ui/latency/latency_info.h"
 
 namespace ui {
 class ContextProviderCommandBuffer;
@@ -29,7 +29,7 @@ class OffscreenBrowserCompositorOutputSurface
   OffscreenBrowserCompositorOutputSurface(
       scoped_refptr<ui::ContextProviderCommandBuffer> context,
       const UpdateVSyncParametersCallback& update_vsync_parameters_callback,
-      std::unique_ptr<display_compositor::CompositorOverlayCandidateValidator>
+      std::unique_ptr<viz::CompositorOverlayCandidateValidator>
           overlay_candidate_validator);
 
   ~OffscreenBrowserCompositorOutputSurface() override;
@@ -49,13 +49,14 @@ class OffscreenBrowserCompositorOutputSurface
   void SwapBuffers(cc::OutputSurfaceFrame frame) override;
   bool IsDisplayedAsOverlayPlane() const override;
   unsigned GetOverlayTextureId() const override;
+  gfx::BufferFormat GetOverlayBufferFormat() const override;
   bool SurfaceIsSuspendForRecycle() const override;
   uint32_t GetFramebufferCopyTextureFormat() override;
 
   // BrowserCompositorOutputSurface implementation.
   void OnReflectorChanged() override;
 #if defined(OS_MACOSX)
-  void SetSurfaceSuspendedForRecycle(bool suspended) override {};
+  void SetSurfaceSuspendedForRecycle(bool suspended) override {}
 #endif
 
   void OnSwapBuffersComplete(const std::vector<ui::LatencyInfo>& latency_info);

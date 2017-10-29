@@ -5,8 +5,8 @@
 #ifndef Presentation_h
 #define Presentation_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/heap/Heap.h"
 
@@ -27,7 +27,7 @@ class Presentation final : public GarbageCollected<Presentation>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static Presentation* create(LocalFrame*);
+  static Presentation* Create(LocalFrame*);
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -40,11 +40,11 @@ class Presentation final : public GarbageCollected<Presentation>,
   explicit Presentation(LocalFrame*);
 
   // Default PresentationRequest used by the embedder.
-  Member<PresentationRequest> m_defaultRequest;
+  Member<PresentationRequest> default_request_;
 
   // PresentationReceiver instance. It will always be nullptr if the Blink
   // instance is not running as a presentation receiver.
-  Member<PresentationReceiver> m_receiver;
+  Member<PresentationReceiver> receiver_;
 };
 
 }  // namespace blink

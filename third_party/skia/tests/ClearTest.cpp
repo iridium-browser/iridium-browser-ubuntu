@@ -10,19 +10,20 @@
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
 #include "GrRenderTargetContext.h"
-#include "GrGpu.h"
-#include "GrRenderTarget.h"
-#include "GrTexture.h"
-#include "GrTextureProvider.h"
 
 static bool check_rect(GrRenderTargetContext* rtc, const SkIRect& rect, uint32_t expectedValue,
                        uint32_t* actualValue, int* failX, int* failY) {
-    GrRenderTarget* rt = rtc->accessRenderTarget();
     int w = rect.width();
     int h = rect.height();
     std::unique_ptr<uint32_t[]> pixels(new uint32_t[w * h]);
     memset(pixels.get(), ~expectedValue, sizeof(uint32_t) * w * h);
-    rt->readPixels(rect.fLeft, rect.fTop, w, h, kRGBA_8888_GrPixelConfig, pixels.get());
+
+    SkImageInfo dstInfo = SkImageInfo::Make(w, h, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+
+    if (!rtc->readPixels(dstInfo, pixels.get(), 0, rect.fLeft, rect.fTop)) {
+        return false;
+    }
+
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             uint32_t pixel = pixels.get()[y * w + x];
@@ -37,27 +38,9 @@ static bool check_rect(GrRenderTargetContext* rtc, const SkIRect& rect, uint32_t
     return true;
 }
 
-// TODO: this test does this thorough purging of the rendertargets b.c. right now
-// the clear optimizations rely on the rendertarget's uniqueID. It can be
-// relaxed when we switch that over to using rendertargetcontext ids (although
-// we probably will want to have more clear values then too)
-static bool reset_rtc(sk_sp<GrRenderTargetContext>* rtc, GrContext* context, int w, int h) {
-#ifdef SK_DEBUG
-    GrGpuResource::UniqueID oldID = GrGpuResource::UniqueID::InvalidID();
-#endif
-
-    if (*rtc) {
-        SkDEBUGCODE(oldID = (*rtc)->accessRenderTarget()->uniqueID();)
-        rtc->reset(nullptr);
-    }
-    context->freeGpuResources();
-
-    *rtc = context->makeRenderTargetContext(SkBackingFit::kExact, w, h, kRGBA_8888_GrPixelConfig,
-                                            nullptr);
-
-    SkASSERT((*rtc)->accessRenderTarget()->uniqueID() != oldID);
-
-    return *rtc != nullptr;
+sk_sp<GrRenderTargetContext> newRTC(GrContext* context, int w, int h) {
+    return context->makeDeferredRenderTargetContext(SkBackingFit::kExact, w, h,
+                                                    kRGBA_8888_GrPixelConfig, nullptr);
 }
 
 DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ClearOp, reporter, ctxInfo) {
@@ -90,10 +73,9 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ClearOp, reporter, ctxInfo) {
     static const GrColor kColor1 = 0xABCDEF01;
     static const GrColor kColor2 = ~kColor1;
 
-    if (!reset_rtc(&rtContext, context, kW, kH)) {
-        ERRORF(reporter, "Could not create render target context.");
-        return;
-    }
+    rtContext = newRTC(context, kW, kH);
+    SkASSERT(rtContext);
+
     // Check a full clear
     rtContext->clear(&fullRect, kColor1, false);
     if (!check_rect(rtContext.get(), fullRect, kColor1, &actualValue, &failX, &failY)) {
@@ -101,10 +83,9 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ClearOp, reporter, ctxInfo) {
                failX, failY);
     }
 
-    if (!reset_rtc(&rtContext, context, kW, kH)) {
-        ERRORF(reporter, "Could not create render target context.");
-        return;
-    }
+    rtContext = newRTC(context, kW, kH);
+    SkASSERT(rtContext);
+
     // Check two full clears, same color
     rtContext->clear(&fullRect, kColor1, false);
     rtContext->clear(&fullRect, kColor1, false);
@@ -113,10 +94,9 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ClearOp, reporter, ctxInfo) {
                failX, failY);
     }
 
-    if (!reset_rtc(&rtContext, context, kW, kH)) {
-        ERRORF(reporter, "Could not create render target context.");
-        return;
-    }
+    rtContext = newRTC(context, kW, kH);
+    SkASSERT(rtContext);
+
     // Check two full clears, different colors
     rtContext->clear(&fullRect, kColor1, false);
     rtContext->clear(&fullRect, kColor2, false);
@@ -125,10 +105,9 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ClearOp, reporter, ctxInfo) {
                failX, failY);
     }
 
-    if (!reset_rtc(&rtContext, context, kW, kH)) {
-        ERRORF(reporter, "Could not create render target context.");
-        return;
-    }
+    rtContext = newRTC(context, kW, kH);
+    SkASSERT(rtContext);
+
     // Test a full clear followed by a same color inset clear
     rtContext->clear(&fullRect, kColor1, false);
     rtContext->clear(&mid1Rect, kColor1, false);
@@ -137,10 +116,9 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ClearOp, reporter, ctxInfo) {
                failX, failY);
     }
 
-    if (!reset_rtc(&rtContext, context, kW, kH)) {
-        ERRORF(reporter, "Could not create render target context.");
-        return;
-    }
+    rtContext = newRTC(context, kW, kH);
+    SkASSERT(rtContext);
+
     // Test a inset clear followed by same color full clear
     rtContext->clear(&mid1Rect, kColor1, false);
     rtContext->clear(&fullRect, kColor1, false);
@@ -149,10 +127,9 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ClearOp, reporter, ctxInfo) {
                failX, failY);
     }
 
-    if (!reset_rtc(&rtContext, context, kW, kH)) {
-        ERRORF(reporter, "Could not create render target context.");
-        return;
-    }
+    rtContext = newRTC(context, kW, kH);
+    SkASSERT(rtContext);
+
     // Test a full clear followed by a different color inset clear
     rtContext->clear(&fullRect, kColor1, false);
     rtContext->clear(&mid1Rect, kColor2, false);
@@ -168,10 +145,9 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ClearOp, reporter, ctxInfo) {
                failX, failY);
     }
 
-    if (!reset_rtc(&rtContext, context, kW, kH)) {
-        ERRORF(reporter, "Could not create render target context.");
-        return;
-    }
+    rtContext = newRTC(context, kW, kH);
+    SkASSERT(rtContext);
+
     // Test a inset clear followed by a different full clear
     rtContext->clear(&mid1Rect, kColor2, false);
     rtContext->clear(&fullRect, kColor1, false);
@@ -180,10 +156,9 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ClearOp, reporter, ctxInfo) {
                failX, failY);
     }
 
-    if (!reset_rtc(&rtContext, context, kW, kH)) {
-        ERRORF(reporter, "Could not create render target context.");
-        return;
-    }
+    rtContext = newRTC(context, kW, kH);
+    SkASSERT(rtContext);
+
     // Check three nested clears from largest to smallest where outermost and innermost are same
     // color.
     rtContext->clear(&fullRect, kColor1, false);
@@ -208,10 +183,9 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ClearOp, reporter, ctxInfo) {
                failX, failY);
     }
 
-    if (!reset_rtc(&rtContext, context, kW, kH)) {
-        ERRORF(reporter, "Could not create render target context.");
-        return;
-    }
+    rtContext = newRTC(context, kW, kH);
+    SkASSERT(rtContext);
+
     // Swap the order of the second two clears in the above test.
     rtContext->clear(&fullRect, kColor1, false);
     rtContext->clear(&mid2Rect, kColor1, false);

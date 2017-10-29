@@ -5,8 +5,9 @@
 #ifndef ASH_MUS_ACCELERATORS_ACCELERATOR_CONTROLLER_DELEGATE_MUS_H_
 #define ASH_MUS_ACCELERATORS_ACCELERATOR_CONTROLLER_DELEGATE_MUS_H_
 
-#include "ash/common/accelerators/accelerator_controller_delegate.h"
+#include "ash/accelerators/accelerator_controller_delegate.h"
 #include "base/macros.h"
+#include "services/ui/public/interfaces/display/test_display_controller.mojom.h"
 
 namespace ash {
 namespace mus {
@@ -26,13 +27,11 @@ class AcceleratorControllerDelegateMus : public AcceleratorControllerDelegate {
                         const ui::Accelerator& previous_accelerator) override;
   void PerformAction(AcceleratorAction action,
                      const ui::Accelerator& accelerator) override;
-  void ShowDeprecatedAcceleratorNotification(const char* const notification_id,
-                                             int message_id,
-                                             int old_shortcut_id,
-                                             int new_shortcut_id) override;
 
  private:
   WindowManager* window_manager_;
+
+  display::mojom::TestDisplayControllerPtr test_display_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(AcceleratorControllerDelegateMus);
 };

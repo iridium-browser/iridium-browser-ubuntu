@@ -8,19 +8,23 @@
 
 #include <utility>
 
-#include "core/fxcrt/fx_ext.h"
+#include "core/fxcrt/fx_extension.h"
 #include "fxjs/cfxjse_arguments.h"
 #include "fxjs/cfxjse_class.h"
 #include "fxjs/cfxjse_value.h"
 #include "third_party/base/ptr_util.h"
-#include "xfa/fxfa/app/xfa_ffnotify.h"
+#include "third_party/base/stl_util.h"
+#include "xfa/fxfa/app/cxfa_ffnotify.h"
 #include "xfa/fxfa/cxfa_eventparam.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
+#include "xfa/fxfa/parser/cxfa_localemgr.h"
+#include "xfa/fxfa/parser/cxfa_node.h"
 #include "xfa/fxfa/parser/cxfa_nodehelper.h"
+#include "xfa/fxfa/parser/cxfa_nodelist.h"
+#include "xfa/fxfa/parser/cxfa_object.h"
 #include "xfa/fxfa/parser/cxfa_resolveprocessor.h"
+#include "xfa/fxfa/parser/cxfa_thisproxy.h"
 #include "xfa/fxfa/parser/xfa_basic_data.h"
-#include "xfa/fxfa/parser/xfa_localemgr.h"
-#include "xfa/fxfa/parser/xfa_object.h"
 #include "xfa/fxfa/parser/xfa_resolvenode_rs.h"
 #include "xfa/fxfa/parser/xfa_utils.h"
 
@@ -68,7 +72,7 @@ const FXJSE_CLASS_DESCRIPTOR VariablesClassDescriptor = {
     CXFA_ScriptContext::NormalMethodCall,
 };
 
-const char kFormCalcRuntime[] = "foxit_xfa_formcalc_runtime";
+const char kFormCalcRuntime[] = "pfm_rt";
 
 CXFA_ThisProxy* ToThisProxy(CFXJSE_Value* pValue, CFXJSE_Class* pClass) {
   return static_cast<CXFA_ThisProxy*>(pValue->ToHostObject(pClass));
@@ -111,7 +115,10 @@ const XFA_METHODINFO* GetMethodByName(XFA_Element eElement,
 // static.
 CXFA_Object* CXFA_ScriptContext::ToObject(CFXJSE_Value* pValue,
                                           CFXJSE_Class* pClass) {
-  return static_cast<CXFA_Object*>(pValue->ToHostObject(pClass));
+  CFXJSE_HostObject* pHostObj = pValue->ToHostObject(pClass);
+  if (!pHostObj || pHostObj->type() != CFXJSE_HostObject::kXFA)
+    return nullptr;
+  return static_cast<CXFA_Object*>(pHostObj);
 }
 
 CXFA_ScriptContext::CXFA_ScriptContext(CXFA_Document* pDocument)
@@ -125,13 +132,8 @@ CXFA_ScriptContext::CXFA_ScriptContext(CXFA_Document* pDocument)
       m_eRunAtType(XFA_ATTRIBUTEENUM_Client) {}
 
 CXFA_ScriptContext::~CXFA_ScriptContext() {
-  for (const auto& pair : m_mapVariableToContext) {
-    CFXJSE_Context* pVariableContext = pair.second;
-    delete ToThisProxy(pVariableContext->GetGlobalObject().get(), nullptr);
-    delete pVariableContext;
-  }
-  m_mapVariableToContext.clear();
-  m_upObjectArray.RemoveAll();
+  for (const auto& pair : m_mapVariableToContext)
+    delete ToThisProxy(pair.second->GetGlobalObject().get(), nullptr);
 }
 
 void CXFA_ScriptContext::Initialize(v8::Isolate* pIsolate) {
@@ -146,18 +148,15 @@ bool CXFA_ScriptContext::RunScript(XFA_SCRIPTLANGTYPE eScriptType,
                                    CFXJSE_Value* hRetValue,
                                    CXFA_Object* pThisObject) {
   CFX_ByteString btScript;
-  XFA_SCRIPTLANGTYPE eSaveType = m_eScriptType;
+  CFX_AutoRestorer<XFA_SCRIPTLANGTYPE> typeRestorer(&m_eScriptType);
   m_eScriptType = eScriptType;
   if (eScriptType == XFA_SCRIPTLANGTYPE_Formcalc) {
     if (!m_FM2JSContext) {
-      m_FM2JSContext.reset(
-          new CXFA_FM2JSContext(m_pIsolate, m_JsContext.get(), m_pDocument));
+      m_FM2JSContext = pdfium::MakeUnique<CXFA_FM2JSContext>(
+          m_pIsolate, m_JsContext.get(), m_pDocument.Get());
     }
     CFX_WideTextBuf wsJavaScript;
-    CFX_WideString wsErrorInfo;
-    int32_t iFlags =
-        CXFA_FM2JSContext::Translate(wsScript, wsJavaScript, wsErrorInfo);
-    if (iFlags) {
+    if (!CXFA_FM2JSContext::Translate(wsScript, &wsJavaScript)) {
       hRetValue->SetUndefined();
       return false;
     }
@@ -165,14 +164,12 @@ bool CXFA_ScriptContext::RunScript(XFA_SCRIPTLANGTYPE eScriptType,
   } else {
     btScript = FX_UTF8Encode(wsScript);
   }
-  CXFA_Object* pOriginalObject = m_pThisObject;
+  CFX_AutoRestorer<CXFA_Object*> nodeRestorer(&m_pThisObject);
   m_pThisObject = pThisObject;
   CFXJSE_Value* pValue = pThisObject ? GetJSValueFromMap(pThisObject) : nullptr;
-  bool bRet = m_JsContext->ExecuteScript(btScript.c_str(), hRetValue, pValue);
-  m_pThisObject = pOriginalObject;
-  m_eScriptType = eSaveType;
-  return bRet;
+  return m_JsContext->ExecuteScript(btScript.c_str(), hRetValue, pValue);
 }
+
 void CXFA_ScriptContext::GlobalPropertySetter(CFXJSE_Value* pObject,
                                               const CFX_ByteStringC& szPropName,
                                               CFXJSE_Value* pValue) {
@@ -215,13 +212,13 @@ bool CXFA_ScriptContext::QueryNodeByFlag(CXFA_Node* refNode,
   if (ResolveObjects(refNode, propname, resolveRs, dwFlag) <= 0)
     return false;
   if (resolveRs.dwFlags == XFA_RESOVENODE_RSTYPE_Nodes) {
-    pValue->Assign(GetJSValueFromMap(resolveRs.nodes[0]));
+    pValue->Assign(GetJSValueFromMap(resolveRs.objects.front()));
     return true;
   }
   if (resolveRs.dwFlags == XFA_RESOVENODE_RSTYPE_Attribute) {
     const XFA_SCRIPTATTRIBUTEINFO* lpAttributeInfo = resolveRs.pScriptAttribute;
     if (lpAttributeInfo) {
-      (resolveRs.nodes[0]->*(lpAttributeInfo->lpfnCallback))(
+      (resolveRs.objects.front()->*(lpAttributeInfo->lpfnCallback))(
           pValue, bSetting, (XFA_ATTRIBUTE)lpAttributeInfo->eAttribute);
     }
   }
@@ -439,25 +436,28 @@ XFA_SCRIPTLANGTYPE CXFA_ScriptContext::GetType() {
   return m_eScriptType;
 }
 void CXFA_ScriptContext::DefineJsContext() {
-  m_JsContext.reset(CFXJSE_Context::Create(m_pIsolate, &GlobalClassDescriptor,
-                                           m_pDocument->GetRoot()));
+  m_JsContext = CFXJSE_Context::Create(m_pIsolate, &GlobalClassDescriptor,
+                                       m_pDocument->GetRoot());
   RemoveBuiltInObjs(m_JsContext.get());
   m_JsContext->EnableCompatibleMode();
 }
+
 CFXJSE_Context* CXFA_ScriptContext::CreateVariablesContext(
     CXFA_Node* pScriptNode,
     CXFA_Node* pSubform) {
   if (!pScriptNode || !pSubform)
     return nullptr;
 
-  CFXJSE_Context* pVariablesContext =
+  auto pNewContext =
       CFXJSE_Context::Create(m_pIsolate, &VariablesClassDescriptor,
                              new CXFA_ThisProxy(pSubform, pScriptNode));
-  RemoveBuiltInObjs(pVariablesContext);
-  pVariablesContext->EnableCompatibleMode();
-  m_mapVariableToContext[pScriptNode] = pVariablesContext;
-  return pVariablesContext;
+  RemoveBuiltInObjs(pNewContext.get());
+  pNewContext->EnableCompatibleMode();
+  CFXJSE_Context* pResult = pNewContext.get();
+  m_mapVariableToContext[pScriptNode] = std::move(pNewContext);
+  return pResult;
 }
+
 CXFA_Object* CXFA_ScriptContext::GetVariablesThis(CXFA_Object* pObject,
                                                   bool bScriptNode) {
   if (!pObject->IsVariablesThis())
@@ -491,16 +491,13 @@ bool CXFA_ScriptContext::RunVariablesScript(CXFA_Node* pScriptNode) {
     return false;
 
   CFX_ByteString btScript = FX_UTF8Encode(wsScript);
-  std::unique_ptr<CFXJSE_Value> hRetValue(new CFXJSE_Value(m_pIsolate));
+  auto hRetValue = pdfium::MakeUnique<CFXJSE_Value>(m_pIsolate);
   CXFA_Node* pThisObject = pParent->GetNodeItem(XFA_NODEITEM_Parent);
   CFXJSE_Context* pVariablesContext =
       CreateVariablesContext(pScriptNode, pThisObject);
-  CXFA_Object* pOriginalObject = m_pThisObject;
+  CFX_AutoRestorer<CXFA_Object*> nodeRestorer(&m_pThisObject);
   m_pThisObject = pThisObject;
-  bool bRet =
-      pVariablesContext->ExecuteScript(btScript.c_str(), hRetValue.get());
-  m_pThisObject = pOriginalObject;
-  return bRet;
+  return pVariablesContext->ExecuteScript(btScript.c_str(), hRetValue.get());
 }
 
 bool CXFA_ScriptContext::QueryVariableValue(CXFA_Node* pScriptNode,
@@ -519,15 +516,14 @@ bool CXFA_ScriptContext::QueryVariableValue(CXFA_Node* pScriptNode,
   if (it == m_mapVariableToContext.end() || !it->second)
     return false;
 
-  void* lpVariables = it->second;
-  bool bRes = false;
-  CFXJSE_Context* pVariableContext = static_cast<CFXJSE_Context*>(lpVariables);
+  CFXJSE_Context* pVariableContext = it->second.get();
   std::unique_ptr<CFXJSE_Value> pObject = pVariableContext->GetGlobalObject();
-  std::unique_ptr<CFXJSE_Value> hVariableValue(new CFXJSE_Value(m_pIsolate));
+  auto hVariableValue = pdfium::MakeUnique<CFXJSE_Value>(m_pIsolate);
   if (!bGetter) {
     pObject->SetObjectOwnProperty(szPropName, pValue);
-    bRes = true;
-  } else if (pObject->HasObjectOwnProperty(szPropName, false)) {
+    return true;
+  }
+  if (pObject->HasObjectOwnProperty(szPropName, false)) {
     pObject->GetObjectProperty(szPropName, hVariableValue.get());
     if (hVariableValue->IsFunction())
       pValue->SetFunctionBind(hVariableValue.get(), pObject.get());
@@ -535,19 +531,20 @@ bool CXFA_ScriptContext::QueryVariableValue(CXFA_Node* pScriptNode,
       pValue->Assign(hVariableValue.get());
     else
       hVariableValue.get()->Assign(pValue);
-    bRes = true;
+    return true;
   }
-  return bRes;
+  return false;
 }
 
 void CXFA_ScriptContext::DefineJsClass() {
-  m_pJsClass = CFXJSE_Class::Create(m_JsContext.get(), &NormalClassDescriptor);
+  m_pJsClass =
+      CFXJSE_Class::Create(m_JsContext.get(), &NormalClassDescriptor, false);
 }
 
 void CXFA_ScriptContext::RemoveBuiltInObjs(CFXJSE_Context* pContext) const {
   static const CFX_ByteStringC OBJ_NAME[2] = {"Number", "Date"};
   std::unique_ptr<CFXJSE_Value> pObject = pContext->GetGlobalObject();
-  std::unique_ptr<CFXJSE_Value> hProp(new CFXJSE_Value(m_pIsolate));
+  auto hProp = pdfium::MakeUnique<CFXJSE_Value>(m_pIsolate);
   for (int i = 0; i < 2; ++i) {
     if (pObject->GetObjectProperty(OBJ_NAME[i], hProp.get()))
       pObject->DeleteObjectProperty(OBJ_NAME[i]);
@@ -556,38 +553,41 @@ void CXFA_ScriptContext::RemoveBuiltInObjs(CFXJSE_Context* pContext) const {
 CFXJSE_Class* CXFA_ScriptContext::GetJseNormalClass() {
   return m_pJsClass;
 }
-int32_t CXFA_ScriptContext::ResolveObjects(CXFA_Object* refNode,
+
+int32_t CXFA_ScriptContext::ResolveObjects(CXFA_Object* refObject,
                                            const CFX_WideStringC& wsExpression,
                                            XFA_RESOLVENODE_RS& resolveNodeRS,
                                            uint32_t dwStyles,
                                            CXFA_Node* bindNode) {
-  if (wsExpression.IsEmpty()) {
+  if (wsExpression.IsEmpty())
     return 0;
-  }
+
   if (m_eScriptType != XFA_SCRIPTLANGTYPE_Formcalc ||
       (dwStyles & (XFA_RESOLVENODE_Parent | XFA_RESOLVENODE_Siblings))) {
-    m_upObjectArray.RemoveAll();
+    m_upObjectArray.clear();
   }
-  if (refNode && refNode->IsNode() &&
+  if (refObject && refObject->IsNode() &&
       (dwStyles & (XFA_RESOLVENODE_Parent | XFA_RESOLVENODE_Siblings))) {
-    m_upObjectArray.Add(refNode->AsNode());
+    m_upObjectArray.push_back(refObject->AsNode());
   }
+
   bool bNextCreate = false;
   if (dwStyles & XFA_RESOLVENODE_CreateNode) {
     m_ResolveProcessor->GetNodeHelper()->SetCreateNodeType(bindNode);
   }
   m_ResolveProcessor->GetNodeHelper()->m_pCreateParent = nullptr;
   m_ResolveProcessor->GetNodeHelper()->m_iCurAllStart = -1;
+
   CXFA_ResolveNodesData rndFind;
   int32_t nStart = 0;
   int32_t nLevel = 0;
   int32_t nRet = -1;
   rndFind.m_pSC = this;
-  CXFA_ObjArray findNodes;
-  findNodes.Add(refNode ? refNode : m_pDocument->GetRoot());
+  std::vector<CXFA_Object*> findObjects;
+  findObjects.push_back(refObject ? refObject : m_pDocument->GetRoot());
   int32_t nNodes = 0;
   while (true) {
-    nNodes = findNodes.GetSize();
+    nNodes = pdfium::CollectionSize<int32_t>(findObjects);
     int32_t i = 0;
     rndFind.m_dwStyles = dwStyles;
     m_ResolveProcessor->SetCurStart(nStart);
@@ -597,21 +597,22 @@ int32_t CXFA_ScriptContext::ResolveObjects(CXFA_Object* refNode,
         CXFA_Node* pDataNode = nullptr;
         nStart = m_ResolveProcessor->GetNodeHelper()->m_iCurAllStart;
         if (nStart != -1) {
-          pDataNode = m_pDocument->GetNotBindNode(findNodes);
+          pDataNode = m_pDocument->GetNotBindNode(findObjects);
           if (pDataNode) {
-            findNodes.RemoveAll();
-            findNodes.Add(pDataNode);
+            findObjects.clear();
+            findObjects.push_back(pDataNode);
             break;
           }
         } else {
-          pDataNode = findNodes[0]->AsNode();
-          findNodes.RemoveAll();
-          findNodes.Add(pDataNode);
+          pDataNode = findObjects.front()->AsNode();
+          findObjects.clear();
+          findObjects.push_back(pDataNode);
           break;
         }
         dwStyles |= XFA_RESOLVENODE_Bind;
-        findNodes.RemoveAll();
-        findNodes.Add(m_ResolveProcessor->GetNodeHelper()->m_pAllStartParent);
+        findObjects.clear();
+        findObjects.push_back(
+            m_ResolveProcessor->GetNodeHelper()->m_pAllStartParent);
         continue;
       } else {
         break;
@@ -628,7 +629,7 @@ int32_t CXFA_ScriptContext::ResolveObjects(CXFA_Object* refNode,
         break;
       }
     }
-    CXFA_ObjArray retNodes;
+    std::vector<CXFA_Object*> retObjects;
     while (i < nNodes) {
       bool bDataBind = false;
       if (((dwStyles & XFA_RESOLVENODE_Bind) ||
@@ -639,7 +640,7 @@ int32_t CXFA_ScriptContext::ResolveObjects(CXFA_Object* refNode,
         m_ResolveProcessor->SetIndexDataBind(rndBind.m_wsCondition, i, nNodes);
         bDataBind = true;
       }
-      rndFind.m_CurNode = findNodes[i++];
+      rndFind.m_CurObject = findObjects[i++];
       rndFind.m_nLevel = nLevel;
       rndFind.m_dwFlag = XFA_RESOVENODE_RSTYPE_Nodes;
       nRet = m_ResolveProcessor->Resolve(rndFind);
@@ -648,30 +649,29 @@ int32_t CXFA_ScriptContext::ResolveObjects(CXFA_Object* refNode,
       }
       if (rndFind.m_dwFlag == XFA_RESOVENODE_RSTYPE_Attribute &&
           rndFind.m_pScriptAttribute && nStart < wsExpression.GetLength()) {
-        std::unique_ptr<CFXJSE_Value> pValue(new CFXJSE_Value(m_pIsolate));
-        (rndFind.m_Nodes[0]->*(rndFind.m_pScriptAttribute->lpfnCallback))(
+        auto pValue = pdfium::MakeUnique<CFXJSE_Value>(m_pIsolate);
+        (rndFind.m_Objects.front()
+             ->*(rndFind.m_pScriptAttribute->lpfnCallback))(
             pValue.get(), false,
             (XFA_ATTRIBUTE)rndFind.m_pScriptAttribute->eAttribute);
-        rndFind.m_Nodes.SetAt(0, ToObject(pValue.get(), nullptr));
+        rndFind.m_Objects.front() = ToObject(pValue.get(), nullptr);
       }
-      int32_t iSize = m_upObjectArray.GetSize();
-      if (iSize) {
-        m_upObjectArray.RemoveAt(iSize - 1);
-      }
-      retNodes.Append(rndFind.m_Nodes);
-      rndFind.m_Nodes.RemoveAll();
-      if (bDataBind) {
+      if (!m_upObjectArray.empty())
+        m_upObjectArray.pop_back();
+      retObjects.insert(retObjects.end(), rndFind.m_Objects.begin(),
+                        rndFind.m_Objects.end());
+      rndFind.m_Objects.clear();
+      if (bDataBind)
         break;
-      }
     }
-    findNodes.RemoveAll();
-    nNodes = retNodes.GetSize();
+    findObjects.clear();
+    nNodes = pdfium::CollectionSize<int32_t>(retObjects);
     if (nNodes < 1) {
       if (dwStyles & XFA_RESOLVENODE_CreateNode) {
         bNextCreate = true;
         if (!m_ResolveProcessor->GetNodeHelper()->m_pCreateParent) {
           m_ResolveProcessor->GetNodeHelper()->m_pCreateParent =
-              ToNode(rndFind.m_CurNode);
+              ToNode(rndFind.m_CurObject);
           m_ResolveProcessor->GetNodeHelper()->m_iCreateCount = 1;
         }
         bool bCreate =
@@ -687,8 +687,9 @@ int32_t CXFA_ScriptContext::ResolveObjects(CXFA_Object* refNode,
         break;
       }
     }
-    findNodes.Copy(retNodes);
-    rndFind.m_Nodes.RemoveAll();
+    findObjects =
+        std::vector<CXFA_Object*>(retObjects.begin(), retObjects.end());
+    rndFind.m_Objects.clear();
     if (nLevel == 0) {
       dwStyles &= ~(XFA_RESOLVENODE_Parent | XFA_RESOLVENODE_Siblings);
     }
@@ -697,7 +698,8 @@ int32_t CXFA_ScriptContext::ResolveObjects(CXFA_Object* refNode,
   if (!bNextCreate) {
     resolveNodeRS.dwFlags = rndFind.m_dwFlag;
     if (nNodes > 0) {
-      resolveNodeRS.nodes.Append(findNodes);
+      resolveNodeRS.objects.insert(resolveNodeRS.objects.end(),
+                                   findObjects.begin(), findObjects.end());
     }
     if (rndFind.m_dwFlag == XFA_RESOVENODE_RSTYPE_Attribute) {
       resolveNodeRS.pScriptAttribute = rndFind.m_pScriptAttribute;
@@ -711,7 +713,7 @@ int32_t CXFA_ScriptContext::ResolveObjects(CXFA_Object* refNode,
     if (!bNextCreate && (dwStyles & XFA_RESOLVENODE_CreateNode)) {
       resolveNodeRS.dwFlags = XFA_RESOVENODE_RSTYPE_ExistNodes;
     }
-    return resolveNodeRS.nodes.GetSize();
+    return pdfium::CollectionSize<int32_t>(resolveNodeRS.objects);
   }
   return nNodes;
 }
@@ -730,7 +732,7 @@ CFXJSE_Value* CXFA_ScriptContext::GetJSValueFromMap(CXFA_Object* pObject) {
   if (iter != m_mapObjectToValue.end())
     return iter->second.get();
 
-  std::unique_ptr<CFXJSE_Value> jsValue(new CFXJSE_Value(m_pIsolate));
+  auto jsValue = pdfium::MakeUnique<CFXJSE_Value>(m_pIsolate);
   jsValue->SetObject(pObject, m_pJsClass);
   CFXJSE_Value* pValue = jsValue.get();
   m_mapObjectToValue.insert(std::make_pair(pObject, std::move(jsValue)));
@@ -752,18 +754,17 @@ void CXFA_ScriptContext::GetSomExpression(CXFA_Node* refNode,
   lpNodeHelper->GetNameExpression(refNode, wsExpression, true,
                                   XFA_LOGIC_Transparent);
 }
-void CXFA_ScriptContext::SetNodesOfRunScript(CXFA_NodeArray* pArray) {
+void CXFA_ScriptContext::SetNodesOfRunScript(std::vector<CXFA_Node*>* pArray) {
   m_pScriptNodeArray = pArray;
 }
-void CXFA_ScriptContext::AddNodesOfRunScript(const CXFA_NodeArray& nodes) {
-  if (!m_pScriptNodeArray)
-    return;
-  if (nodes.GetSize() > 0)
-    m_pScriptNodeArray->Copy(nodes);
+
+void CXFA_ScriptContext::AddNodesOfRunScript(
+    const std::vector<CXFA_Node*>& nodes) {
+  if (m_pScriptNodeArray && !nodes.empty())
+    *m_pScriptNodeArray = nodes;
 }
+
 void CXFA_ScriptContext::AddNodesOfRunScript(CXFA_Node* pNode) {
-  if (!m_pScriptNodeArray)
-    return;
-  if (m_pScriptNodeArray->Find(pNode) == -1)
-    m_pScriptNodeArray->Add(pNode);
+  if (m_pScriptNodeArray && !pdfium::ContainsValue(*m_pScriptNodeArray, pNode))
+    m_pScriptNodeArray->push_back(pNode);
 }

@@ -9,7 +9,7 @@
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
-#import "ios/third_party/material_roboto_font_loader_ios/src/src/MaterialRobotoFontLoader.h"
+#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -29,11 +29,13 @@ NSString* const kOpenShareMarker = @"SHARE_OPENING_ICON";
 // Background view constants.
 const CGFloat kTextImageSpacing = 10;
 const CGFloat kTextHorizontalMinimumMargin = 32;
-const CGFloat kTextMaximalWidth = 270;
+const CGFloat kTextMaximalWidth = 255;
 const CGFloat kImageWidth = 60;
 const CGFloat kImageHeight = 44;
 const CGFloat kFontSize = 16;
-const CGFloat kIconSize = 24;
+const CGFloat kIconHeight = 24;
+const CGFloat kToolbarMenuWidth = 18;
+const CGFloat kShareMenuWidth = 24;
 const CGFloat kLineHeight = 24;
 const CGFloat kPercentageFromTopForPosition = 0.4;
 
@@ -48,8 +50,8 @@ const CGFloat kPercentageFromTopForPosition = 0.4;
 - (void)attachIconNamed:(NSString*)iconName
                toString:(NSMutableAttributedString*)instructionString
               withCaret:(NSMutableAttributedString*)caret
-       spaceBeforeCaret:(BOOL)spaceBeforeCaret
                  offset:(CGFloat)iconOffset
+                  width:(CGFloat)icondWidth
         imageAttributes:(NSDictionary*)attributes;
 // Sets the constraints for this view, positionning the |imageView| in the X
 // center and at 40% of the top. The |label| is positionned below.
@@ -62,6 +64,8 @@ const CGFloat kPercentageFromTopForPosition = 0.4;
 
 @implementation ReadingListEmptyCollectionBackground
 
+#pragma mark - Public
+
 - (instancetype)init {
   self = [super initWithFrame:CGRectZero];
   if (self) {
@@ -72,7 +76,7 @@ const CGFloat kPercentageFromTopForPosition = 0.4;
         stringByAppendingString:l10n_util::GetNSString(
                                     IDS_IOS_SHARE_MENU_READING_LIST_ACTION)];
 
-    MDFRobotoFontLoader* fontLoader = [MDFRobotoFontLoader sharedInstance];
+    id<MDCTypographyFontLoading> fontLoader = [MDCTypography fontLoader];
 
     UIColor* textColor = [[MDCPalette greyPalette] tint700];
     UIFont* textFont = [fontLoader regularFontOfSize:kFontSize];
@@ -87,7 +91,7 @@ const CGFloat kPercentageFromTopForPosition = 0.4;
     };
 
     // Offset to vertically center the icons.
-    CGFloat iconOffset = (textFont.xHeight - kIconSize) / 2.0;
+    CGFloat iconOffset = (textFont.xHeight - kIconHeight) / 2.0;
 
     UIFont* instructionFont = [fontLoader boldFontOfSize:kFontSize];
     NSDictionary* instructionAttributes = @{
@@ -114,30 +118,30 @@ const CGFloat kPercentageFromTopForPosition = 0.4;
       // If the device has a compact display the share menu is accessed from the
       // toolbar menu. If it is expanded, the share menu is directly accessible.
       [self attachIconNamed:kToolbarMenuIcon
-                    toString:instructionString
-                   withCaret:caret
-            spaceBeforeCaret:NO
-                      offset:iconOffset
-             imageAttributes:textAttributes];
+                   toString:instructionString
+                  withCaret:caret
+                     offset:iconOffset
+                      width:kToolbarMenuWidth
+            imageAttributes:textAttributes];
 
       accessibilityInstructionString = [[accessibilityInstructionString
           stringByAppendingString:l10n_util::GetNSString(
                                       IDS_IOS_TOOLBAR_SETTINGS)]
           stringByAppendingString:@", "];
+
+      // Add a space before the share icon.
+      [instructionString
+          appendAttributedString:[[NSAttributedString alloc]
+                                     initWithString:@" "
+                                         attributes:instructionAttributes]];
     }
 
-    // Add a space before the share icon.
-    [instructionString
-        appendAttributedString:[[NSAttributedString alloc]
-                                   initWithString:@" "
-                                       attributes:instructionAttributes]];
-
     [self attachIconNamed:kShareMenuIcon
-                  toString:instructionString
-                 withCaret:caret
-          spaceBeforeCaret:YES
-                    offset:iconOffset
-           imageAttributes:textAttributes];
+                 toString:instructionString
+                withCaret:caret
+                   offset:iconOffset
+                    width:kShareMenuWidth
+          imageAttributes:textAttributes];
 
     accessibilityInstructionString = [[accessibilityInstructionString
         stringByAppendingString:l10n_util::GetNSString(
@@ -170,6 +174,8 @@ const CGFloat kPercentageFromTopForPosition = 0.4;
     label.numberOfLines = 0;
     label.textAlignment = NSTextAlignmentCenter;
     label.accessibilityLabel = accessibilityLabel;
+    label.accessibilityIdentifier =
+        [ReadingListEmptyCollectionBackground accessibilityIdentifier];
     [label setTranslatesAutoresizingMaskIntoConstraints:NO];
     [self addSubview:label];
 
@@ -183,11 +189,17 @@ const CGFloat kPercentageFromTopForPosition = 0.4;
   return self;
 }
 
++ (NSString*)accessibilityIdentifier {
+  return @"ReadingListBackgroundViewIdentifier";
+}
+
+#pragma mark - Private
+
 - (void)attachIconNamed:(NSString*)iconName
                toString:(NSMutableAttributedString*)instructionString
               withCaret:(NSMutableAttributedString*)caret
-       spaceBeforeCaret:(BOOL)spaceBeforeCaret
                  offset:(CGFloat)iconOffset
+                  width:(CGFloat)iconWidth
         imageAttributes:(NSDictionary*)attributes {
   // Add a zero width space to set the attributes for the image.
   [instructionString appendAttributedString:[[NSAttributedString alloc]
@@ -197,16 +209,14 @@ const CGFloat kPercentageFromTopForPosition = 0.4;
   NSTextAttachment* toolbarIcon = [[NSTextAttachment alloc] init];
   toolbarIcon.image = [[UIImage imageNamed:iconName]
       imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-  toolbarIcon.bounds = CGRectMake(0, iconOffset, kIconSize, kIconSize);
+  toolbarIcon.bounds = CGRectMake(0, iconOffset, iconWidth, kIconHeight);
   [instructionString
       appendAttributedString:[NSAttributedString
                                  attributedStringWithAttachment:toolbarIcon]];
 
-  if (spaceBeforeCaret) {
     [instructionString appendAttributedString:[[NSAttributedString alloc]
                                                   initWithString:@" "
                                                       attributes:attributes]];
-  }
 
   [instructionString appendAttributedString:caret];
 }

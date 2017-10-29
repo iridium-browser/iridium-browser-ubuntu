@@ -17,11 +17,10 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_shortcut_win.h"
 #include "base/win/scoped_com_initializer.h"
-#include "base/win/windows_version.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
-#include "chrome/installer/util/browser_distribution.h"
+#include "chrome/install_static/install_util.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
@@ -50,9 +49,7 @@ class ShellIntegrationWinMigrateShortcutTest : public testing::Test {
     // This doesn't need to actually have a base name of "chrome.exe".
     base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &chrome_exe_);
 
-    chrome_app_id_ =
-        ShellUtil::GetBrowserModelId(BrowserDistribution::GetDistribution(),
-                                     true);
+    chrome_app_id_ = ShellUtil::GetBrowserModelId(true);
 
     base::FilePath default_user_data_dir;
     chrome::GetDefaultUserDataDirectory(&default_user_data_dir);
@@ -259,9 +256,6 @@ class ShellIntegrationWinMigrateShortcutTest : public testing::Test {
 }  // namespace
 
 TEST_F(ShellIntegrationWinMigrateShortcutTest, ClearDualModeAndAdjustAppIds) {
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return;
-
   // 9 shortcuts should have their app id updated below and shortcut 11 should
   // be migrated away from dual_mode for a total of 10 shortcuts migrated.
   EXPECT_EQ(10,
@@ -294,8 +288,7 @@ TEST_F(ShellIntegrationWinMigrateShortcutTest, ClearDualModeAndAdjustAppIds) {
 }
 
 TEST(ShellIntegrationWinTest, GetAppModelIdForProfileTest) {
-  const base::string16 base_app_id(
-      BrowserDistribution::GetDistribution()->GetBaseAppId());
+  const base::string16 base_app_id(install_static::GetBaseAppId());
 
   // Empty profile path should get chrome::kBrowserAppID
   base::FilePath empty_path;

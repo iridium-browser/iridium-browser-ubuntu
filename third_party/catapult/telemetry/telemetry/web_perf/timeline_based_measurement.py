@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 import collections
 import logging
+import time
 from collections import defaultdict
 
 from tracing.metrics import metric_runner
@@ -14,13 +15,10 @@ from telemetry.value import trace
 from telemetry.value import common_value_helpers
 from telemetry.web_perf.metrics import timeline_based_metric
 from telemetry.web_perf.metrics import blob_timeline
-from telemetry.web_perf.metrics import jitter_timeline
 from telemetry.web_perf.metrics import webrtc_rendering_timeline
-from telemetry.web_perf.metrics import gpu_timeline
 from telemetry.web_perf.metrics import indexeddb_timeline
 from telemetry.web_perf.metrics import layout
 from telemetry.web_perf.metrics import smoothness
-from telemetry.web_perf.metrics import text_selection
 from telemetry.web_perf import smooth_gesture_util
 from telemetry.web_perf import story_test
 from telemetry.web_perf import timeline_interaction_record as tir_module
@@ -46,10 +44,7 @@ def _GetAllLegacyTimelineBasedMetrics():
   # This cannot be done until crbug.com/460208 is fixed.
   return (smoothness.SmoothnessMetric(),
           layout.LayoutMetric(),
-          gpu_timeline.GPUTimelineMetric(),
           blob_timeline.BlobTimelineMetric(),
-          jitter_timeline.JitterTimelineMetric(),
-          text_selection.TextSelectionMetric(),
           indexeddb_timeline.IndexedDBTimelineMetric(),
           webrtc_rendering_timeline.WebRtcRenderingTimelineMetric())
 
@@ -150,7 +145,7 @@ class Options(object):
   """A class to be used to configure TimelineBasedMeasurement.
 
   This is created and returned by
-  Benchmark.CreateTimelineBasedMeasurementOptions.
+  Benchmark.CreateCoreTimelineBasedMeasurementOptions.
 
   By default, all the timeline based metrics in telemetry/web_perf/metrics are
   used (see _GetAllLegacyTimelineBasedMetrics above).
@@ -309,10 +304,12 @@ class TimelineBasedMeasurement(story_test.StoryTest):
     finally:
       trace_result.CleanUpAllTraces()
 
-  def DidRunStory(self, platform):
+  def DidRunStory(self, platform, results):
     """Clean up after running the story."""
     if platform.tracing_controller.is_tracing_running:
-      platform.tracing_controller.StopTracing()
+      trace_result = platform.tracing_controller.StopTracing()
+      trace_value = trace.TraceValue(results.current_page, trace_result)
+      results.AddValue(trace_value)
 
   def _ComputeTimelineBasedMetrics(self, results, trace_value):
     metrics = self._tbm_options.GetTimelineBasedMetrics()
@@ -320,8 +317,12 @@ class TimelineBasedMeasurement(story_test.StoryTest):
       'trackDetailedModelStats': True
     }
 
+    start = time.time()
     mre_result = metric_runner.RunMetric(
-        trace_value.filename, metrics, extra_import_options)
+        trace_value.filename, metrics, extra_import_options,
+        report_progress=False)
+    logging.warning('Processing resulting traces took %.3f seconds' % (
+        time.time() - start))
     page = results.current_page
 
     failure_dicts = mre_result.failures
@@ -329,7 +330,8 @@ class TimelineBasedMeasurement(story_test.StoryTest):
       results.AddValue(
           common_value_helpers.TranslateMreFailure(d, page))
 
-    results.value_set.extend(mre_result.pairs.get('histograms', []))
+    results.histograms.ImportDicts(mre_result.pairs.get('histograms', []))
+    results.histograms.ResolveRelatedHistograms()
 
     for d in mre_result.pairs.get('scalars', []):
       results.AddValue(common_value_helpers.TranslateScalarValue(d, page))

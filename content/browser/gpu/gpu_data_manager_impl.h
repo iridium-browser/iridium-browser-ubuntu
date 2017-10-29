@@ -12,7 +12,6 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
@@ -22,6 +21,7 @@
 #include "base/values.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/three_d_api_types.h"
+#include "gpu/config/gpu_control_list.h"
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/config/gpu_info.h"
 
@@ -66,20 +66,19 @@ class CONTENT_EXPORT GpuDataManagerImpl
   static GpuDataManagerImpl* GetInstance();
 
   // GpuDataManager implementation.
-  void InitializeForTesting(const std::string& gpu_blacklist_json,
-                            const gpu::GPUInfo& gpu_info) override;
+  void BlacklistWebGLForTesting() override;
   bool IsFeatureBlacklisted(int feature) const override;
   bool IsFeatureEnabled(int feature) const override;
+  bool IsWebGLEnabled() const override;
   gpu::GPUInfo GetGPUInfo() const override;
-  void GetGpuProcessHandles(
-      const GetGpuProcessHandlesCallback& callback) const override;
   bool GpuAccessAllowed(std::string* reason) const override;
   void RequestCompleteGpuInfoIfNeeded() override;
   bool IsEssentialGpuInfoAvailable() const override;
   bool IsCompleteGpuInfoAvailable() const override;
-  void RequestVideoMemoryUsageStatsUpdate() const override;
+  void RequestVideoMemoryUsageStatsUpdate(
+      const base::Callback<void(const gpu::VideoMemoryUsageStats& stats)>&
+          callback) const override;
   bool ShouldUseSwiftShader() const override;
-  void RegisterSwiftShaderPath(const base::FilePath& path) override;
   // TODO(kbr): the threading model for the GpuDataManagerObservers is
   // not well defined, and it's impossible for callers to correctly
   // delete observers from anywhere except in one of the observer's
@@ -95,6 +94,7 @@ class CONTENT_EXPORT GpuDataManagerImpl
                     std::string* gl_renderer,
                     std::string* gl_version) override;
   void DisableHardwareAcceleration() override;
+  bool HardwareAccelerationEnabled() const override;
   bool CanUseGpuBrowserCompositor() const override;
   void GetDisabledExtensions(std::string* disabled_extensions) const override;
   void SetGpuInfo(const gpu::GPUInfo& gpu_info) override;
@@ -104,6 +104,9 @@ class CONTENT_EXPORT GpuDataManagerImpl
   // startup time in UI thread before the IO restriction is turned on.
   void Initialize();
 
+  void InitializeForTesting(const gpu::GpuControlListData& gpu_blacklist_data,
+                            const gpu::GPUInfo& gpu_info);
+
   // Only update if the current GPUInfo is not finalized.  If blacklist is
   // loaded, run through blacklist and update blacklisted features.
   void UpdateGpuInfo(const gpu::GPUInfo& gpu_info);
@@ -112,22 +115,18 @@ class CONTENT_EXPORT GpuDataManagerImpl
   // of GPU rasterization. In the future this will be used for more features.
   void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info);
 
-  void UpdateVideoMemoryUsageStats(
-      const gpu::VideoMemoryUsageStats& video_memory_usage_stats);
-
   // Insert disable-feature switches corresponding to preliminary gpu feature
   // flags into the renderer process command line.
   void AppendRendererCommandLine(base::CommandLine* command_line) const;
 
   // Insert switches into gpu process command line: kUseGL, etc.
-  // If the gpu_preferences isn't a nullptr, the gpu_preferences will be set
-  // for some GPU switches which have been replaced by GpuPreferences, and those
-  // switches will not be append to the command_line anymore.
-  void AppendGpuCommandLine(base::CommandLine* command_line,
-                            gpu::GpuPreferences* gpu_preferences) const;
+  void AppendGpuCommandLine(base::CommandLine* command_line) const;
 
   // Update WebPreferences for renderer based on blacklisting decisions.
   void UpdateRendererWebPrefs(WebPreferences* prefs) const;
+
+  // Update GpuPreferences based on blacklisting decisions.
+  void UpdateGpuPreferences(gpu::GpuPreferences* gpu_preferences) const;
 
   std::string GetBlacklistVersion() const;
   std::string GetDriverBugListVersion() const;
@@ -147,9 +146,8 @@ class CONTENT_EXPORT GpuDataManagerImpl
 
   void ProcessCrashed(base::TerminationStatus exit_code);
 
-  // Returns a new copy of the ListValue.  Caller is responsible to release
-  // the returned value.
-  base::ListValue* GetLogMessages() const;
+  // Returns a new copy of the ListValue.
+  std::unique_ptr<base::ListValue> GetLogMessages() const;
 
   // Called when switching gpu.
   void HandleGpuSwitch();

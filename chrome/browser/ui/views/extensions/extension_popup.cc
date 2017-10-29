@@ -47,7 +47,7 @@ ExtensionPopup* ExtensionPopup::Create(extensions::ExtensionViewHost* host,
                                        views::View* anchor_view,
                                        views::BubbleBorder::Arrow arrow,
                                        ShowAction show_action) {
-  auto popup = new ExtensionPopup(host, anchor_view, arrow, show_action);
+  auto* popup = new ExtensionPopup(host, anchor_view, arrow, show_action);
   views::BubbleDialogDelegateView::CreateBubble(popup);
   return popup;
 }
@@ -144,9 +144,9 @@ void ExtensionPopup::OnExtensionSizeChanged(ExtensionViewViews* view) {
   SizeToContents();
 }
 
-gfx::Size ExtensionPopup::GetPreferredSize() const {
+gfx::Size ExtensionPopup::CalculatePreferredSize() const {
   // Constrain the size to popup min/max.
-  gfx::Size sz = views::View::GetPreferredSize();
+  gfx::Size sz = views::View::CalculatePreferredSize();
   sz.set_width(std::max(kMinWidth, std::min(kMaxWidth, sz.width())));
   sz.set_height(std::max(kMinHeight, std::min(kMaxHeight, sz.height())));
   return sz;

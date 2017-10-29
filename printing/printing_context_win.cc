@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/memory/free_deleter.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "printing/backend/print_backend.h"
@@ -187,6 +188,15 @@ PrintingContext::Result PrintingContextWin::UpdatePrinterSettings(
     dev_mode->dmFields |= DM_ORIENTATION;
     dev_mode->dmOrientation = settings_.landscape() ? DMORIENT_LANDSCAPE :
                                                       DMORIENT_PORTRAIT;
+
+    if (settings_.dpi_horizontal() > 0) {
+      dev_mode->dmPrintQuality = settings_.dpi_horizontal();
+      dev_mode->dmFields |= DM_PRINTQUALITY;
+    }
+    if (settings_.dpi_vertical() > 0) {
+      dev_mode->dmYResolution = settings_.dpi_vertical();
+      dev_mode->dmFields |= DM_YRESOLUTION;
+    }
 
     const PrintSettings::RequestedMedia& requested_media =
         settings_.requested_media();

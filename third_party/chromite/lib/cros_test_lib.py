@@ -35,7 +35,6 @@ from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import gob_util
-from chromite.lib import graphite
 from chromite.lib import operation
 from chromite.lib import osutils
 from chromite.lib import parallel
@@ -52,10 +51,6 @@ site_config = config_lib.GetConfig()
 # of the cidb. This call ensures that they will not accidentally
 # do so through the normal cidb SetUp / GetConnectionForBuilder factory.
 cidb.CIDBConnectionFactory.SetupMockCidb()
-
-# Likewise for statsd and elastic search.
-graphite.ESMetadataFactory.SetupReadOnly()
-graphite.StatsFactory.SetupMock()
 
 
 Directory = collections.namedtuple('Directory', ['name', 'contents'])
@@ -1711,6 +1706,10 @@ class TestProgram(unittest.TestProgram):
                         help='Stop on first failure')
     parser.add_argument('tests', nargs='*',
                         help='specific test classes or methods to run')
+    parser.add_argument('-c', '--catch', default=False, action='store_true',
+                        help='Catch control-C and display results')
+    parser.add_argument('-b', '--buffer', default=False, action='store_true',
+                        help='Buffer stdout and stderr during test runs')
 
     # These are custom options we added.
     parser.add_argument('-l', '--list', default=False, action='store_true',
@@ -1759,6 +1758,12 @@ class TestProgram(unittest.TestProgram):
 
     if opts.failfast:
       self.failfast = True
+
+    if opts.catch:
+      self.catchbreak = True
+
+    if opts.buffer:
+      self.buffer = True
 
     # Then handle the chromite extensions.
     if opts.network:

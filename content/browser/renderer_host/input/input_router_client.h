@@ -5,6 +5,7 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_INPUT_INPUT_ROUTER_CLIENT_H_
 #define CONTENT_BROWSER_RENDERER_HOST_INPUT_INPUT_ROUTER_CLIENT_H_
 
+#include "cc/input/touch_action.h"
 #include "content/browser/renderer_host/event_with_latency_info.h"
 #include "content/common/content_export.h"
 #include "content/common/input/input_event_ack_source.h"
@@ -42,14 +43,13 @@ class CONTENT_EXPORT InputRouterClient {
   // Called when the renderer notifies that it has touch event handlers.
   virtual void OnHasTouchEventHandlers(bool has_handlers) = 0;
 
-  // Called when the router has finished flushing all events queued at the time
-  // of the call to Flush.  The call will typically be asynchronous with
-  // respect to the call to |Flush| on the InputRouter.
-  virtual void DidFlush() = 0;
-
   // Called when the router has received an overscroll notification from the
   // renderer.
   virtual void DidOverscroll(const ui::DidOverscrollParams& params) = 0;
+
+  // Called when the router has received a whitelisted touch action notification
+  // from the renderer.
+  virtual void OnSetWhiteListedTouchAction(cc::TouchAction touch_action) = 0;
 
   // Called when a renderer fling has terminated.
   virtual void DidStopFlinging() = 0;

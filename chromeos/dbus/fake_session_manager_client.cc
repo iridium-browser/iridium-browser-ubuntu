@@ -4,14 +4,52 @@
 
 #include "chromeos/dbus/fake_session_manager_client.h"
 
+#include "base/base64.h"
 #include "base/bind.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/path_service.h"
+#include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chromeos/chromeos_paths.h"
 #include "chromeos/dbus/cryptohome_client.h"
+#include "components/policy/proto/device_management_backend.pb.h"
+
+using RetrievePolicyResponseType =
+    chromeos::FakeSessionManagerClient::RetrievePolicyResponseType;
 
 namespace chromeos {
+
+namespace {
+
+// Store the owner key in a file on the disk, so that it can be loaded by
+// DeviceSettingsService and used e.g. for validating policy signatures in the
+// integration tests. This is done on behalf of the real session manager, that
+// would be managing the owner key file on Chrome OS.
+bool StoreOwnerKey(const std::string& public_key) {
+  base::FilePath owner_key_path;
+  if (!base::PathService::Get(FILE_OWNER_KEY, &owner_key_path)) {
+    LOG(ERROR) << "Failed to obtain the path to the owner key file";
+    return false;
+  }
+  if (!base::CreateDirectory(owner_key_path.DirName())) {
+    LOG(ERROR) << "Failed to create the directory for the owner key file";
+    return false;
+  }
+  if (base::WriteFile(owner_key_path, public_key.c_str(),
+                      public_key.length()) !=
+      base::checked_cast<int>(public_key.length())) {
+    LOG(ERROR) << "Failed to store the owner key file";
+    return false;
+  }
+  return true;
+}
+
+}  // namespace
 
 FakeSessionManagerClient::FakeSessionManagerClient()
     : start_device_wipe_call_count_(0),
@@ -46,12 +84,13 @@ bool FakeSessionManagerClient::IsScreenLocked() const {
 }
 
 void FakeSessionManagerClient::EmitLoginPromptVisible() {
+  for (auto& observer : observers_)
+    observer.EmitLoginPromptVisibleCalled();
 }
 
-void FakeSessionManagerClient::RestartJob(
-    int socket_fd,
-    const std::vector<std::string>& argv,
-    const VoidDBusMethodCallback& callback) {}
+void FakeSessionManagerClient::RestartJob(int socket_fd,
+                                          const std::vector<std::string>& argv,
+                                          VoidDBusMethodCallback callback) {}
 
 void FakeSessionManagerClient::StartSession(
     const cryptohome::Identification& cryptohome_id) {
@@ -74,6 +113,9 @@ void FakeSessionManagerClient::StartDeviceWipe() {
   start_device_wipe_call_count_++;
 }
 
+void FakeSessionManagerClient::StartTPMFirmwareUpdate(
+    const std::string& update_mode) {}
+
 void FakeSessionManagerClient::RequestLockScreen() {
   request_lock_screen_call_count_++;
 }
@@ -95,46 +137,82 @@ void FakeSessionManagerClient::RetrieveActiveSessions(
 void FakeSessionManagerClient::RetrieveDevicePolicy(
     const RetrievePolicyCallback& callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(callback, device_policy_));
+      FROM_HERE, base::Bind(callback, device_policy_,
+                            RetrievePolicyResponseType::SUCCESS));
 }
 
-std::string FakeSessionManagerClient::BlockingRetrieveDevicePolicy() {
-  return device_policy_;
+RetrievePolicyResponseType
+FakeSessionManagerClient::BlockingRetrieveDevicePolicy(
+    std::string* policy_out) {
+  *policy_out = device_policy_;
+  return RetrievePolicyResponseType::SUCCESS;
 }
 
 void FakeSessionManagerClient::RetrievePolicyForUser(
     const cryptohome::Identification& cryptohome_id,
     const RetrievePolicyCallback& callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(callback, user_policies_[cryptohome_id]));
+      FROM_HERE, base::Bind(callback, user_policies_[cryptohome_id],
+                            RetrievePolicyResponseType::SUCCESS));
 }
 
-std::string FakeSessionManagerClient::BlockingRetrievePolicyForUser(
-    const cryptohome::Identification& cryptohome_id) {
-  return user_policies_[cryptohome_id];
+RetrievePolicyResponseType
+FakeSessionManagerClient::BlockingRetrievePolicyForUser(
+    const cryptohome::Identification& cryptohome_id,
+    std::string* policy_out) {
+  *policy_out = user_policies_[cryptohome_id];
+  return RetrievePolicyResponseType::SUCCESS;
+}
+
+void FakeSessionManagerClient::RetrievePolicyForUserWithoutSession(
+    const cryptohome::Identification& cryptohome_id,
+    const RetrievePolicyCallback& callback) {
+  // This is currently not supported in FakeSessionManagerClient.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(callback, nullptr, RetrievePolicyResponseType::OTHER_ERROR));
 }
 
 void FakeSessionManagerClient::RetrieveDeviceLocalAccountPolicy(
     const std::string& account_id,
     const RetrievePolicyCallback& callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(callback, device_local_account_policy_[account_id]));
+      FROM_HERE, base::Bind(callback, device_local_account_policy_[account_id],
+                            RetrievePolicyResponseType::SUCCESS));
 }
 
-std::string FakeSessionManagerClient::BlockingRetrieveDeviceLocalAccountPolicy(
-    const std::string& account_id) {
-  return device_local_account_policy_[account_id];
+RetrievePolicyResponseType
+FakeSessionManagerClient::BlockingRetrieveDeviceLocalAccountPolicy(
+    const std::string& account_id,
+    std::string* policy_out) {
+  *policy_out = device_local_account_policy_[account_id];
+  return RetrievePolicyResponseType::SUCCESS;
 }
 
 void FakeSessionManagerClient::StoreDevicePolicy(
     const std::string& policy_blob,
     const StorePolicyCallback& callback) {
+  enterprise_management::PolicyFetchResponse policy;
+  if (!policy.ParseFromString(policy_blob)) {
+    LOG(ERROR) << "Unable to parse policy protobuf";
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback, false /* success */));
+    return;
+  }
+
+  bool owner_key_store_success = false;
+  if (policy.has_new_public_key())
+    owner_key_store_success = StoreOwnerKey(policy.new_public_key());
   device_policy_ = policy_blob;
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                base::Bind(callback, true));
+
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(callback, true /* success */));
+  if (policy.has_new_public_key()) {
+    for (auto& observer : observers_)
+      observer.OwnerKeySet(owner_key_store_success);
+  }
   for (auto& observer : observers_)
-    observer.PropertyChangeComplete(true);
+    observer.PropertyChangeComplete(true /* success */);
 }
 
 void FakeSessionManagerClient::StorePolicyForUser(
@@ -176,14 +254,21 @@ void FakeSessionManagerClient::CheckArcAvailability(
 }
 
 void FakeSessionManagerClient::StartArcInstance(
+    ArcStartupMode startup_mode,
     const cryptohome::Identification& cryptohome_id,
     bool disable_boot_completed_broadcast,
+    bool enable_vendor_privileged,
     const StartArcInstanceCallback& callback) {
+  StartArcInstanceResult result;
+  std::string container_instance_id;
+  if (arc_available_) {
+    result = StartArcInstanceResult::SUCCESS;
+    base::Base64Encode(base::RandBytesAsString(16), &container_instance_id);
+  } else {
+    result = StartArcInstanceResult::UNKNOWN_ERROR;
+  }
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(callback, arc_available_
-                               ? StartArcInstanceResult::SUCCESS
-                               : StartArcInstanceResult::UNKNOWN_ERROR));
+      FROM_HERE, base::Bind(callback, result, container_instance_id));
 }
 
 void FakeSessionManagerClient::StopArcInstance(const ArcCallback& callback) {

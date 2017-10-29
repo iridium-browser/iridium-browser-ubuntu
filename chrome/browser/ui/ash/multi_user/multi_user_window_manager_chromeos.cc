@@ -4,15 +4,15 @@
 
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_chromeos.h"
 
-#include "ash/common/media_controller.h"
-#include "ash/common/multi_profile_uma.h"
-#include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
+#include <set>
+#include <vector>
+
+#include "ash/media_controller.h"
+#include "ash/multi_profile_uma.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "ash/wm/window_state.h"
 #include "base/auto_reset.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
@@ -25,6 +25,7 @@
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/multi_user/user_switch_animator_chromeos.h"
 #include "chrome/browser/ui/ash/session_controller_client.h"
+#include "chrome/browser/ui/ash/session_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -89,9 +90,7 @@ void RecordUMAForTransferredWindowType(aura::Window* window) {
     }
     if (app_window) {
       if (app_window->window_type() ==
-          extensions::AppWindow::WINDOW_TYPE_PANEL ||
-          app_window->window_type() ==
-          extensions::AppWindow::WINDOW_TYPE_V1_PANEL) {
+          extensions::AppWindow::WINDOW_TYPE_PANEL) {
         window_type = ash::MultiProfileUMA::TELEPORT_WINDOW_PANEL;
       } else {
         window_type = ash::MultiProfileUMA::TELEPORT_WINDOW_V2_APP;
@@ -396,7 +395,7 @@ void MultiUserWindowManagerChromeOS::ActiveUserChanged(
       GetAdjustedAnimationTimeInMS(kUserFadeTimeMS)));
   // Call notifier here instead of observing ActiveUserChanged because
   // this must happen after MultiUserWindowManagerChromeOS is notified.
-  ash::WmShell::Get()->media_controller()->RequestCaptureState();
+  ash::Shell::Get()->media_controller()->RequestCaptureState();
 }
 
 void MultiUserWindowManagerChromeOS::OnWindowDestroyed(aura::Window* window) {
@@ -529,6 +528,25 @@ bool MultiUserWindowManagerChromeOS::ShowWindowForUserIntern(
 
   WindowToEntryMap::iterator it = window_to_entry_.find(window);
   it->second->set_show_for_user(account_id);
+
+  // Show avatar icon on the teleported window for separated mode.
+  if (GetMultiProfileMode() == MULTI_PROFILE_MODE_SEPARATED) {
+    // Tests could either not have a UserManager or the UserManager does not
+    // know the window owner.
+    const user_manager::User* const window_owner =
+        user_manager::UserManager::IsInitialized()
+            ? user_manager::UserManager::Get()->FindUser(owner)
+            : nullptr;
+
+    const bool teleported = !IsWindowOnDesktopOfUser(window, owner);
+    if (window_owner && teleported) {
+      window->SetProperty(
+          aura::client::kAvatarIconKey,
+          new gfx::ImageSkia(GetAvatarImageForUser(window_owner)));
+    } else {
+      window->ClearProperty(aura::client::kAvatarIconKey);
+    }
+  }
 
   // Show the window if the added user is the current one.
   if (account_id == current_account_id_) {
@@ -687,14 +705,12 @@ void MultiUserWindowManagerChromeOS::SetWindowVisible(
     aura::Window* window,
     bool visible,
     int animation_time_in_ms) {
-  // The MaximizeModeWindowManager will not handle invisible windows since they
+  // The TabletModeWindowManager will not handle invisible windows since they
   // are not user activatable. Since invisible windows are not being tracked,
   // we tell it to maximize / track this window now before it gets shown, to
   // reduce animation jank from multiple resizes.
-  if (visible) {
-    ash::WmShell::Get()->maximize_mode_controller()->AddWindow(
-        ash::WmWindow::Get(window));
-  }
+  if (visible)
+    ash::Shell::Get()->tablet_mode_controller()->AddWindow(window);
 
   AnimationSetter animation_setter(
       window,

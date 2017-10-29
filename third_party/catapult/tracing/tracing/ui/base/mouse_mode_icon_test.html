@@ -10,31 +10,31 @@ found in the LICENSE file.
 'use strict';
 
 tr.b.unittest.testSuite(function() {
-  var MOUSE_SELECTOR_MODE = tr.ui.b.MOUSE_SELECTOR_MODE;
+  const MOUSE_SELECTOR_MODE = tr.ui.b.MOUSE_SELECTOR_MODE;
 
   test('inactive', function() {
-    var icon = document.createElement('tr-ui-b-mouse-mode-icon');
+    const icon = document.createElement('tr-ui-b-mouse-mode-icon');
     icon.mode = MOUSE_SELECTOR_MODE.SELECTION;
-    assert.equal(icon.modeName, 'SELECTION');
+    assert.strictEqual(icon.modeName, 'SELECTION');
     icon.acceleratorKey = 'a';
     this.addHTMLOutput(icon);
   });
 
   test('active', function() {
-    var icon = document.createElement('tr-ui-b-mouse-mode-icon');
+    const icon = document.createElement('tr-ui-b-mouse-mode-icon');
     icon.mode = MOUSE_SELECTOR_MODE.SELECTION;
-    assert.equal(icon.modeName, 'SELECTION');
+    assert.strictEqual(icon.modeName, 'SELECTION');
     icon.active = true;
     this.addHTMLOutput(icon);
   });
 
   test('modeNameSetter', function() {
-    var icon = document.createElement('tr-ui-b-mouse-mode-icon');
+    const icon = document.createElement('tr-ui-b-mouse-mode-icon');
     Polymer.dom(icon).setAttribute('mode-name', 'SELECTION');
     this.addHTMLOutput(icon);
 
     return Promise.resolve().then(function() {
-      assert.equal(icon.mode, 1);
+      assert.strictEqual(icon.mode, 1);
     });
   });
 });

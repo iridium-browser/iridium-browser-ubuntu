@@ -95,6 +95,10 @@ class BrowserBackend(app_backend.AppBackend):
     raise NotImplementedError()
 
   @property
+  def supports_app_ui_interactions(self):
+    return False
+
+  @property
   def supports_system_info(self):
     return False
 
@@ -142,7 +146,7 @@ class BrowserBackend(app_backend.AppBackend):
   def supports_memory_dumping(self):
     return False
 
-  def DumpMemory(self, timeout=web_contents.DEFAULT_WEB_CONTENTS_TIMEOUT):
+  def DumpMemory(self, timeout=None):
     raise NotImplementedError()
 
   @property

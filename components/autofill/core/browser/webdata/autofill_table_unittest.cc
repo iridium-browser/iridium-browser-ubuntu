@@ -14,7 +14,6 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/guid.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -1029,6 +1028,24 @@ TEST_F(AutofillTableTest, CreditCard) {
   EXPECT_FALSE(db_creditcard);
 }
 
+TEST_F(AutofillTableTest, AddFullServerCreditCard) {
+  CreditCard credit_card;
+  credit_card.set_record_type(CreditCard::FULL_SERVER_CARD);
+  credit_card.set_server_id("server_id");
+  credit_card.set_origin("https://www.example.com/");
+  credit_card.SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Jack Torrance"));
+  credit_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1234567890123456"));
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("04"));
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2013"));
+
+  EXPECT_TRUE(table_->AddFullServerCreditCard(credit_card));
+
+  std::vector<std::unique_ptr<CreditCard>> outputs;
+  ASSERT_TRUE(table_->GetServerCreditCards(&outputs));
+  ASSERT_EQ(1U, outputs.size());
+  EXPECT_EQ(0, credit_card.Compare(*outputs[0]));
+}
+
 TEST_F(AutofillTableTest, UpdateAutofillProfile) {
   // Add a profile to the db.
   AutofillProfile profile;
@@ -1609,7 +1626,7 @@ TEST_F(AutofillTableTest, SetGetServerCards) {
   inputs[1].SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
   inputs[1].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("1997"));
   inputs[1].SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
-  inputs[1].SetTypeForMaskedCard(kVisaCard);
+  inputs[1].SetNetworkForMaskedCard(kVisaCard);
   inputs[1].SetServerStatus(CreditCard::EXPIRED);
 
   test::SetServerCreditCards(table_.get(), inputs);
@@ -1645,7 +1662,7 @@ TEST_F(AutofillTableTest, MaskUnmaskServerCards) {
   inputs[0].SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
   inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
   inputs[0].SetRawInfo(CREDIT_CARD_NUMBER, masked_number);
-  inputs[0].SetTypeForMaskedCard(kVisaCard);
+  inputs[0].SetNetworkForMaskedCard(kVisaCard);
   test::SetServerCreditCards(table_.get(), inputs);
 
   // Unmask the number. The full number should be available.
@@ -1681,7 +1698,7 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
   masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
   masked_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
-  masked_card.SetTypeForMaskedCard(kVisaCard);
+  masked_card.SetNetworkForMaskedCard(kVisaCard);
 
   std::vector<CreditCard> inputs;
   inputs.push_back(masked_card);
@@ -1718,7 +1735,7 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   random_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
   random_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("1997"));
   random_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("2222"));
-  random_card.SetTypeForMaskedCard(kVisaCard);
+  random_card.SetNetworkForMaskedCard(kVisaCard);
   inputs[0] = random_card;
   test::SetServerCreditCards(table_.get(), inputs);
 
@@ -1744,6 +1761,28 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   outputs.clear();
 }
 
+TEST_F(AutofillTableTest, ServerCardBankName) {
+  // Add a masked card.
+  CreditCard masked_card(CreditCard::MASKED_SERVER_CARD, "a123");
+  masked_card.SetRawInfo(CREDIT_CARD_NAME_FULL,
+                         ASCIIToUTF16("Paul F. Tompkins"));
+  masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
+  masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
+  masked_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
+  masked_card.SetNetworkForMaskedCard(kVisaCard);
+  masked_card.set_bank_name("Chase");
+
+  // Set server credit cards
+  std::vector<CreditCard> inputs = {masked_card};
+  test::SetServerCreditCards(table_.get(), inputs);
+
+  // Get server credit cards and check bank names equal
+  std::vector<std::unique_ptr<CreditCard>> outputs;
+  table_->GetServerCreditCards(&outputs);
+  ASSERT_EQ(1u, outputs.size());
+  EXPECT_EQ("Chase", outputs[0]->bank_name());
+}
+
 TEST_F(AutofillTableTest, SetServerCardUpdateUsageStatsAndBillingAddress) {
   // Add a masked card.
   CreditCard masked_card(CreditCard::MASKED_SERVER_CARD, "a123");
@@ -1753,7 +1792,7 @@ TEST_F(AutofillTableTest, SetServerCardUpdateUsageStatsAndBillingAddress) {
   masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
   masked_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
   masked_card.set_billing_address_id("1");
-  masked_card.SetTypeForMaskedCard(kVisaCard);
+  masked_card.SetNetworkForMaskedCard(kVisaCard);
 
   std::vector<CreditCard> inputs;
   inputs.push_back(masked_card);
@@ -1894,7 +1933,7 @@ TEST_F(AutofillTableTest, DeleteUnmaskedCard) {
   masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
   masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
   masked_card.SetRawInfo(CREDIT_CARD_NUMBER, masked_number);
-  masked_card.SetTypeForMaskedCard(kVisaCard);
+  masked_card.SetNetworkForMaskedCard(kVisaCard);
 
   std::vector<CreditCard> inputs;
   inputs.push_back(masked_card);
@@ -1955,60 +1994,111 @@ TEST_F(AutofillTableTest, DeleteUnmaskedCard) {
   outputs.clear();
 }
 
-TEST_F(AutofillTableTest, GetFormValuesForElementName_SubstringMatchEnabled) {
+const size_t kMaxCount = 2;
+struct GetFormValuesTestCase {
+  const char* const field_suggestion[kMaxCount];
+  const char* const field_contents;
+  size_t expected_suggestion_count;
+  const char* const expected_suggestion[kMaxCount];
+};
+
+class GetFormValuesTest : public testing::TestWithParam<GetFormValuesTestCase> {
+ public:
+  GetFormValuesTest() {}
+  ~GetFormValuesTest() override {}
+
+ protected:
+  void SetUp() override {
+    OSCryptMocker::SetUpWithSingleton();
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+    file_ = temp_dir_.GetPath().AppendASCII("TestWebDatabase");
+
+    table_.reset(new AutofillTable);
+    db_.reset(new WebDatabase);
+    db_->AddTable(table_.get());
+    ASSERT_EQ(sql::INIT_OK, db_->Init(file_));
+  }
+
+  void TearDown() override { OSCryptMocker::TearDown(); }
+
+  base::FilePath file_;
+  base::ScopedTempDir temp_dir_;
+  std::unique_ptr<AutofillTable> table_;
+  std::unique_ptr<WebDatabase> db_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(GetFormValuesTest);
+};
+
+TEST_P(GetFormValuesTest, GetFormValuesForElementName_SubstringMatchEnabled) {
   // Token matching is currently behind a flag.
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableSuggestionsWithSubstringMatch);
 
-  const size_t kMaxCount = 2;
-  const struct {
-    const char* const field_suggestion[kMaxCount];
-    const char* const field_contents;
-    size_t expected_suggestion_count;
-    const char* const expected_suggestion[kMaxCount];
-  } kTestCases[] = {
-      {{"user.test", "test_user"}, "TEST",   2, {"test_user", "user.test"}},
-      {{"user test", "test-user"}, "user",   2, {"user test", "test-user"}},
-      {{"user test", "test-rest"}, "user",   1, {"user test", nullptr}},
-      {{"user@test", "test_user"}, "user@t", 1, {"user@test", nullptr}},
-      {{"user.test", "test_user"}, "er.tes", 0, {nullptr,     nullptr}},
-      {{"user test", "test_user"}, "_ser",   0, {nullptr,     nullptr}},
-      {{"user.test", "test_user"}, "%ser",   0, {nullptr,     nullptr}},
-      {{"user.test", "test_user"},
-       "; DROP TABLE autofill;",
-       0,
-       {nullptr, nullptr}},
-  };
+  auto test_case = GetParam();
+  SCOPED_TRACE(testing::Message()
+               << "suggestion = " << test_case.field_suggestion[0]
+               << ", contents = " << test_case.field_contents);
 
-  for (const auto& test_case : kTestCases) {
-    SCOPED_TRACE(testing::Message()
-                 << "suggestion = " << test_case.field_suggestion[0]
-                 << ", contents = " << test_case.field_contents);
+  Time t1 = Time::Now();
 
-    Time t1 = Time::Now();
-
-    // Simulate the submission of a handful of entries in a field called "Name".
-    AutofillChangeList changes;
-    FormFieldData field;
-    for (size_t k = 0; k < kMaxCount; ++k) {
-      field.name = ASCIIToUTF16("Name");
-      field.value = ASCIIToUTF16(test_case.field_suggestion[k]);
-      table_->AddFormFieldValue(field, &changes);
-    }
-
-    std::vector<base::string16> v;
-    table_->GetFormValuesForElementName(
-        ASCIIToUTF16("Name"), ASCIIToUTF16(test_case.field_contents), &v, 6);
-
-    EXPECT_EQ(test_case.expected_suggestion_count, v.size());
-    for (size_t j = 0; j < test_case.expected_suggestion_count; ++j) {
-      EXPECT_EQ(ASCIIToUTF16(test_case.expected_suggestion[j]), v[j]);
-    }
-
-    changes.clear();
-    table_->RemoveFormElementsAddedBetween(t1, Time(), &changes);
+  // Simulate the submission of a handful of entries in a field called "Name".
+  AutofillChangeList changes;
+  FormFieldData field;
+  for (size_t k = 0; k < kMaxCount; ++k) {
+    field.name = ASCIIToUTF16("Name");
+    field.value = ASCIIToUTF16(test_case.field_suggestion[k]);
+    table_->AddFormFieldValue(field, &changes);
   }
+
+  std::vector<base::string16> v;
+  table_->GetFormValuesForElementName(
+      ASCIIToUTF16("Name"), ASCIIToUTF16(test_case.field_contents), &v, 6);
+
+  EXPECT_EQ(test_case.expected_suggestion_count, v.size());
+  for (size_t j = 0; j < test_case.expected_suggestion_count; ++j) {
+    EXPECT_EQ(ASCIIToUTF16(test_case.expected_suggestion[j]), v[j]);
+  }
+
+  changes.clear();
+  table_->RemoveFormElementsAddedBetween(t1, Time(), &changes);
 }
+
+INSTANTIATE_TEST_CASE_P(
+    AutofillTableTest,
+    GetFormValuesTest,
+    testing::Values(GetFormValuesTestCase{{"user.test", "test_user"},
+                                          "TEST",
+                                          2,
+                                          {"test_user", "user.test"}},
+                    GetFormValuesTestCase{{"user test", "test-user"},
+                                          "user",
+                                          2,
+                                          {"user test", "test-user"}},
+                    GetFormValuesTestCase{{"user test", "test-rest"},
+                                          "user",
+                                          1,
+                                          {"user test", nullptr}},
+                    GetFormValuesTestCase{{"user@test", "test_user"},
+                                          "user@t",
+                                          1,
+                                          {"user@test", nullptr}},
+                    GetFormValuesTestCase{{"user.test", "test_user"},
+                                          "er.tes",
+                                          0,
+                                          {nullptr, nullptr}},
+                    GetFormValuesTestCase{{"user test", "test_user"},
+                                          "_ser",
+                                          0,
+                                          {nullptr, nullptr}},
+                    GetFormValuesTestCase{{"user.test", "test_user"},
+                                          "%ser",
+                                          0,
+                                          {nullptr, nullptr}},
+                    GetFormValuesTestCase{{"user.test", "test_user"},
+                                          "; DROP TABLE autofill;",
+                                          0,
+                                          {nullptr, nullptr}}));
 
 TEST_F(AutofillTableTest, AutofillNoMetadata) {
   MetadataBatch metadata_batch;

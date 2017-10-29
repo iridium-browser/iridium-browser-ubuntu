@@ -140,7 +140,7 @@ Feature* FeatureProvider::GetParent(Feature* feature) const {
   if (feature->no_parent())
     return nullptr;
 
-  std::vector<std::string> split = base::SplitString(
+  std::vector<base::StringPiece> split = base::SplitStringPiece(
       feature->name(), ".", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (split.size() < 2)
     return nullptr;
@@ -164,7 +164,8 @@ std::vector<Feature*> FeatureProvider::GetChildren(
   result.reserve(std::distance(first_child, after_children));
   for (FeatureMap::const_iterator it = first_child; it != after_children;
        ++it) {
-    result.push_back(it->second.get());
+    if (!it->second->no_parent())
+      result.push_back(it->second.get());
   }
   return result;
 }

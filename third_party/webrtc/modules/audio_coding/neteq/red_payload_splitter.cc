@@ -13,10 +13,10 @@
 #include <assert.h>
 #include <vector>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/base/safe_conversions.h"
 #include "webrtc/modules/audio_coding/neteq/decoder_database.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/logging.h"
+#include "webrtc/rtc_base/safe_conversions.h"
 
 namespace webrtc {
 
@@ -110,7 +110,7 @@ bool RedPayloadSplitter::SplitRed(PacketList* packet_list) {
         new_packet.payload_type = new_header.payload_type;
         new_packet.sequence_number = red_packet.sequence_number;
         new_packet.priority.red_level =
-            rtc::checked_cast<int>((new_headers.size() - 1) - i);
+            rtc::dchecked_cast<int>((new_headers.size() - 1) - i);
         new_packet.payload.SetData(payload_ptr, payload_length);
         new_packets.push_front(std::move(new_packet));
         payload_ptr += payload_length;

@@ -52,9 +52,9 @@ Common.ContentProvider.prototype = {
    * @param {string} query
    * @param {boolean} caseSensitive
    * @param {boolean} isRegex
-   * @param {function(!Array.<!Common.ContentProvider.SearchMatch>)} callback
+   * @return {!Promise<!Array<!Common.ContentProvider.SearchMatch>>}
    */
-  searchInContent(query, caseSensitive, isRegex, callback) {}
+  searchInContent(query, caseSensitive, isRegex) {}
 };
 
 /**
@@ -81,7 +81,7 @@ Common.ContentProvider.SearchMatch = class {
 Common.ContentProvider.performSearchInContent = function(content, query, caseSensitive, isRegex) {
   var regex = createSearchRegex(query, caseSensitive, isRegex);
 
-  var text = new Common.Text(content);
+  var text = new TextUtils.Text(content);
   var result = [];
   for (var i = 0; i < text.lineCount(); ++i) {
     var lineContent = text.lineAt(i);

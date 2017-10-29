@@ -21,6 +21,7 @@ class UI_BASE_IME_EXPORT MockInputMethodManager : public InputMethodManager {
    public:
     State();
 
+    scoped_refptr<InputMethodManager::State> Clone() const override;
     void AddInputMethodExtension(
         const std::string& extension_id,
         const InputMethodDescriptors& descriptors,
@@ -45,11 +46,8 @@ class UI_BASE_IME_EXPORT MockInputMethodManager : public InputMethodManager {
     void SetInputMethodLoginDefault() override;
     void SetInputMethodLoginDefaultFromVPD(const std::string& locale,
                                            const std::string& layout) override;
-    bool CanCycleInputMethod() override;
     void SwitchToNextInputMethod() override;
     void SwitchToPreviousInputMethod() override;
-    bool CanSwitchInputMethod(const ui::Accelerator& accelerator) override;
-    void SwitchInputMethod(const ui::Accelerator& accelerator) override;
     InputMethodDescriptor GetCurrentInputMethod() const override;
     bool ReplaceEnabledInputMethods(
         const std::vector<std::string>& new_active_input_method_ids) override;
@@ -107,8 +105,12 @@ class UI_BASE_IME_EXPORT MockInputMethodManager : public InputMethodManager {
   void MaybeNotifyImeMenuActivationChanged() override;
   void OverrideKeyboardUrlRef(const std::string& keyset) override;
   bool IsEmojiHandwritingVoiceOnImeMenuEnabled() override;
+  void SetImeMenuFeatureEnabled(ImeMenuFeature feature, bool enabled) override;
+  bool GetImeMenuFeatureEnabled(ImeMenuFeature feature) const override;
 
  private:
+  uint32_t features_enabled_state_;
+
   DISALLOW_COPY_AND_ASSIGN(MockInputMethodManager);
 };
 

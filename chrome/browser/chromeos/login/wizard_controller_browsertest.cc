@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 
-#include "ash/common/accessibility_types.h"
+#include "ash/accessibility_types.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
@@ -16,6 +16,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/base/locale_util.h"
+#include "chrome/browser/chromeos/login/enrollment/auto_enrollment_controller.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_screen.h"
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_helper.h"
 #include "chrome/browser/chromeos/login/enrollment/mock_auto_enrollment_check_screen.h"
@@ -67,9 +68,11 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/pref_service_factory.h"
 #include "components/prefs/testing_pref_store.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_impl.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -181,17 +184,6 @@ void QuitLoopOnAutoEnrollmentProgress(
     loop->Quit();
 }
 
-void WaitForAutoEnrollmentState(policy::AutoEnrollmentState state) {
-  base::RunLoop loop;
-  AutoEnrollmentController* auto_enrollment_controller =
-      LoginDisplayHost::default_host()->GetAutoEnrollmentController();
-  std::unique_ptr<AutoEnrollmentController::ProgressCallbackList::Subscription>
-      progress_subscription(
-          auto_enrollment_controller->RegisterProgressCallback(
-              base::Bind(&QuitLoopOnAutoEnrollmentProgress, state, &loop)));
-  loop.Run();
-}
-
 }  // namespace
 
 using ::testing::_;
@@ -222,20 +214,22 @@ class MockOutShowHide : public T {
   std::unique_ptr<H> view_;
 };
 
-#define MOCK(mock_var, screen_name, mocked_class, view_class)     \
-  mock_var = new MockOutShowHide<mocked_class, view_class>(       \
-      WizardController::default_controller(), new view_class);    \
-  WizardController::default_controller()->screens_[screen_name] = \
-      make_linked_ptr(mock_var);                                  \
-  EXPECT_CALL(*mock_var, Show()).Times(0);                        \
+#define MOCK(mock_var, screen_name, mocked_class, view_class)  \
+  mock_var = new MockOutShowHide<mocked_class, view_class>(    \
+      WizardController::default_controller(), new view_class); \
+  WizardController::default_controller()                       \
+      ->screen_manager()                                       \
+      ->screens_[screen_name] = base::WrapUnique(mock_var);    \
+  EXPECT_CALL(*mock_var, Show()).Times(0);                     \
   EXPECT_CALL(*mock_var, Hide()).Times(0);
 
 #define MOCK_WITH_DELEGATE(mock_var, screen_name, mocked_class, view_class) \
   mock_var = new MockOutShowHide<mocked_class, view_class>(                 \
       WizardController::default_controller(),                               \
       WizardController::default_controller(), new view_class);              \
-  WizardController::default_controller()->screens_[screen_name] =           \
-      make_linked_ptr(mock_var);                                            \
+  WizardController::default_controller()                                    \
+      ->screen_manager()                                                    \
+      ->screens_[screen_name] = base::WrapUnique(mock_var);                 \
   EXPECT_CALL(*mock_var, Show()).Times(0);                                  \
   EXPECT_CALL(*mock_var, Hide()).Times(0);
 
@@ -281,10 +275,8 @@ class WizardControllerTest : public WizardInProcessBrowserTest {
       run_loop.Run();
   }
 
-  bool JSExecute(const std::string& expression) {
-    return content::ExecuteScript(
-        GetWebContents(),
-        "window.domAutomationController.send(!!(" + expression + "));");
+  bool JSExecute(const std::string& script) {
+    return content::ExecuteScript(GetWebContents(), script);
   }
 
   bool JSExecuteBooleanExpression(const std::string& expression) {
@@ -372,7 +364,8 @@ class WizardControllerTestURLFetcherFactory
       int id,
       const GURL& url,
       net::URLFetcher::RequestType request_type,
-      net::URLFetcherDelegate* d) override {
+      net::URLFetcherDelegate* d,
+      net::NetworkTrafficAnnotationTag traffic_annotation) override {
     if (base::StartsWith(
             url.spec(),
             SimpleGeolocationProvider::DefaultGeolocationProviderURL().spec(),
@@ -388,8 +381,8 @@ class WizardControllerTestURLFetcherFactory
           url, d, std::string(kTimezoneResponseBody), net::HTTP_OK,
           net::URLRequestStatus::SUCCESS));
     }
-    return net::TestURLFetcherFactory::CreateURLFetcher(
-        id, url, request_type, d);
+    return net::TestURLFetcherFactory::CreateURLFetcher(id, url, request_type,
+                                                        d, traffic_annotation);
   }
   ~WizardControllerTestURLFetcherFactory() override {}
 };
@@ -419,11 +412,13 @@ class WizardControllerFlowTest : public WizardControllerTest {
     NetworkHandler::Get()->network_state_handler()->SetCheckPortalList("");
 
     // Set up the mocks for all screens.
-    mock_network_screen_.reset(new MockNetworkScreen(
+    mock_network_screen_ = new MockNetworkScreen(
         WizardController::default_controller(),
-        WizardController::default_controller(), GetOobeUI()->GetNetworkView()));
+        WizardController::default_controller(), GetOobeUI()->GetNetworkView());
     WizardController::default_controller()
-        ->screens_[OobeScreen::SCREEN_OOBE_NETWORK] = mock_network_screen_;
+        ->screen_manager()
+        ->screens_[OobeScreen::SCREEN_OOBE_NETWORK]
+        .reset(mock_network_screen_);
     EXPECT_CALL(*mock_network_screen_, Show()).Times(0);
     EXPECT_CALL(*mock_network_screen_, Hide()).Times(0);
 
@@ -442,9 +437,10 @@ class WizardControllerFlowTest : public WizardControllerTest {
          OobeScreen::SCREEN_OOBE_ENABLE_DEBUGGING, MockEnableDebuggingScreen,
          MockEnableDebuggingScreenView);
     device_disabled_screen_view_.reset(new MockDeviceDisabledScreenView);
-    wizard_controller->screens_[OobeScreen::SCREEN_DEVICE_DISABLED] =
-        make_linked_ptr(new DeviceDisabledScreen(
-            wizard_controller, device_disabled_screen_view_.get()));
+    wizard_controller->screen_manager()
+        ->screens_[OobeScreen::SCREEN_DEVICE_DISABLED] =
+        base::MakeUnique<DeviceDisabledScreen>(
+            wizard_controller, device_disabled_screen_view_.get());
     EXPECT_CALL(*device_disabled_screen_view_, Show()).Times(0);
 
     // Switch to the initial screen.
@@ -454,7 +450,7 @@ class WizardControllerFlowTest : public WizardControllerTest {
   }
 
   void TearDownOnMainThread() override {
-    mock_network_screen_.reset();
+    mock_network_screen_ = nullptr;
     device_disabled_screen_view_.reset();
     WizardControllerTest::TearDownOnMainThread();
   }
@@ -512,7 +508,7 @@ class WizardControllerFlowTest : public WizardControllerTest {
   }
 
   void ResetAutoEnrollmentCheckScreen() {
-    WizardController::default_controller()->screens_.erase(
+    WizardController::default_controller()->screen_manager()->screens_.erase(
         OobeScreen::SCREEN_AUTO_ENROLLMENT_CHECK);
   }
 
@@ -567,7 +563,7 @@ class WizardControllerFlowTest : public WizardControllerTest {
                               ->GetCurrentTimezoneID()));
   }
 
-  linked_ptr<MockNetworkScreen> mock_network_screen_;
+  MockNetworkScreen* mock_network_screen_;  // Unowned ptr.
   MockOutShowHide<MockUpdateScreen, MockUpdateView>* mock_update_screen_;
   MockOutShowHide<MockEulaScreen, MockEulaView>* mock_eula_screen_;
   MockOutShowHide<MockEnrollmentScreen, MockEnrollmentScreenView>*
@@ -823,6 +819,18 @@ class WizardControllerDeviceStateTest : public WizardControllerFlowTest {
         system::kActivateDateKey, "2000-01");
   }
 
+  static void WaitForAutoEnrollmentState(policy::AutoEnrollmentState state) {
+    base::RunLoop loop;
+    std::unique_ptr<
+        AutoEnrollmentController::ProgressCallbackList::Subscription>
+        progress_subscription(
+            WizardController::default_controller()
+                ->GetAutoEnrollmentController()
+                ->RegisterProgressCallback(base::Bind(
+                    &QuitLoopOnAutoEnrollmentProgress, state, &loop)));
+    loop.Run();
+  }
+
   void SetUpCommandLine(base::CommandLine* command_line) override {
     WizardControllerFlowTest::SetUpCommandLine(command_line);
 
@@ -902,9 +910,10 @@ IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
 IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
                        ControlFlowNoForcedReEnrollmentOnFirstBoot) {
   fake_statistics_provider_.ClearMachineStatistic(system::kActivateDateKey);
-  EXPECT_NE(
-      policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT,
-      LoginDisplayHost::default_host()->GetAutoEnrollmentController()->state());
+  EXPECT_NE(policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT,
+            WizardController::default_controller()
+                ->GetAutoEnrollmentController()
+                ->state());
 
   CheckCurrentScreen(OobeScreen::SCREEN_OOBE_NETWORK);
   EXPECT_CALL(*mock_network_screen_, Hide()).Times(1);
@@ -927,9 +936,10 @@ IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
 
   CheckCurrentScreen(OobeScreen::SCREEN_AUTO_ENROLLMENT_CHECK);
   mock_auto_enrollment_check_screen_->RealShow();
-  EXPECT_EQ(
-      policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT,
-      LoginDisplayHost::default_host()->GetAutoEnrollmentController()->state());
+  EXPECT_EQ(policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT,
+            WizardController::default_controller()
+                ->GetAutoEnrollmentController()
+                ->state());
 }
 
 IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
@@ -1320,7 +1330,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerCellularFirstTest, CellularFirstFlow) {
   TestControlFlowMain();
 }
 
-// TODO(dzhioev): Add test emaulating device with wrong HWID.
+// TODO(dzhioev): Add test emulating device with wrong HWID.
 
 // TODO(nkostylev): Add test for WebUI accelerators http://crosbug.com/22571
 
@@ -1332,7 +1342,12 @@ IN_PROC_BROWSER_TEST_F(WizardControllerCellularFirstTest, CellularFirstFlow) {
 
 // TODO(khmel): Add tests for ARC OptIn flow.
 // http://crbug.com/651144
-static_assert(static_cast<int>(ScreenExitCode::EXIT_CODES_COUNT) == 25,
+
+// TODO(fukino): Add tests for encryption migration UI.
+// http://crbug.com/706017
+
+// TODO(updowndota): Add tests for Voice Interaction OptIn flow.
+static_assert(static_cast<int>(ScreenExitCode::EXIT_CODES_COUNT) == 31,
               "tests for new control flow are missing");
 
 }  // namespace chromeos

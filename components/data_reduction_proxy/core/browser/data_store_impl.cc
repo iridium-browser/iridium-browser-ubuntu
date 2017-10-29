@@ -117,18 +117,18 @@ DataStore::Status DataStoreImpl::OpenDB() {
   leveldb::Options options;
   options.create_if_missing = true;
   options.paranoid_checks = true;
-  options.reuse_logs = leveldb_env::kDefaultLogReuseOptionValue;
+  // Deletes to buckets not found are stored in the log. Use a new log so that
+  // these log entries are deleted.
+  options.reuse_logs = false;
   std::string db_name = profile_path_.Append(kDBName).AsUTF8Unsafe();
-  leveldb::DB* dbptr = nullptr;
+  db_.reset();
   Status status =
-      LevelDbToDRPStoreStatus(leveldb::DB::Open(options, db_name, &dbptr));
+      LevelDbToDRPStoreStatus(leveldb_env::OpenDB(options, db_name, &db_));
   UMA_HISTOGRAM_ENUMERATION("DataReductionProxy.LevelDBOpenStatus", status,
                             STATUS_MAX);
 
   if (status != OK)
     LOG(ERROR) << "Failed to open Data Reduction Proxy DB: " << status;
-
-  db_.reset(dbptr);
 
   if (db_) {
     leveldb::Range range;
@@ -137,21 +137,20 @@ DataStore::Status DataStoreImpl::OpenDB() {
     // lowest keys.
     range.start = "";
     range.limit = "z";  // Keys starting with 'z' will not be included.
-    dbptr->GetApproximateSizes(&range, 1, &size);
+    db_->GetApproximateSizes(&range, 1, &size);
     UMA_HISTOGRAM_MEMORY_KB("DataReductionProxy.LevelDBSize", size / 1024);
   }
 
   return status;
 }
 
-void DataStoreImpl::RecreateDB() {
+DataStore::Status DataStoreImpl::RecreateDB() {
   DCHECK(sequence_checker_.CalledOnValidSequence());
 
-  LOG(WARNING) << "Deleting corrupt Data Reduction Proxy LevelDB";
   db_.reset(nullptr);
   base::DeleteFile(profile_path_.Append(kDBName), true);
 
-  OpenDB();
+  return OpenDB();
 }
 
 }  // namespace data_reduction_proxy

@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "net/base/io_buffer.h"
@@ -31,6 +32,19 @@ const int kMaxSparseEntryBits = 12;
 
 // Sparse entry has maximum size of 4KB.
 const int kMaxSparseEntrySize = 1 << kMaxSparseEntryBits;
+
+// This enum is used for histograms, so only append to the end.
+enum WriteResult {
+  WRITE_RESULT_SUCCESS = 0,
+  WRITE_RESULT_INVALID_ARGUMENT = 1,
+  WRITE_RESULT_OVER_MAX_ENTRY_SIZE = 2,
+  WRITE_RESULT_EXCEEDED_CACHE_STORAGE_SIZE = 3,
+  WRITE_RESULT_MAX = 4,
+};
+
+void RecordWriteResult(WriteResult result) {
+  UMA_HISTOGRAM_ENUMERATION("MemCache.WriteResult", result, WRITE_RESULT_MAX);
+}
 
 // Convert global offset to child index.
 int ToChildIndex(int64_t offset) {
@@ -81,6 +95,8 @@ MemEntryImpl::MemEntryImpl(MemBackendImpl* backend,
                    nullptr,  // parent
                    net_log) {
   Open();
+  // Just creating the entry (without any data) could cause the storage to
+  // grow beyond capacity, but we allow such infractions.
   backend_->ModifyStorageSize(GetStorageSize());
 }
 
@@ -329,22 +345,35 @@ int MemEntryImpl::InternalWriteData(int index, int offset, IOBuffer* buf,
                                     int buf_len, bool truncate) {
   DCHECK(type() == PARENT_ENTRY || index == kSparseData);
 
-  if (index < 0 || index >= kNumStreams)
+  if (index < 0 || index >= kNumStreams) {
+    RecordWriteResult(WRITE_RESULT_INVALID_ARGUMENT);
     return net::ERR_INVALID_ARGUMENT;
+  }
 
-  if (offset < 0 || buf_len < 0)
+  if (offset < 0 || buf_len < 0) {
+    RecordWriteResult(WRITE_RESULT_INVALID_ARGUMENT);
     return net::ERR_INVALID_ARGUMENT;
+  }
 
   int max_file_size = backend_->MaxFileSize();
 
   // offset of buf_len could be negative numbers.
   if (offset > max_file_size || buf_len > max_file_size ||
       offset + buf_len > max_file_size) {
+    RecordWriteResult(WRITE_RESULT_OVER_MAX_ENTRY_SIZE);
     return net::ERR_FAILED;
   }
 
   int old_data_size = data_[index].size();
   if (truncate || old_data_size < offset + buf_len) {
+    int delta = offset + buf_len - old_data_size;
+    backend_->ModifyStorageSize(delta);
+    if (backend_->HasExceededStorageSize()) {
+      backend_->ModifyStorageSize(-delta);
+      RecordWriteResult(WRITE_RESULT_EXCEEDED_CACHE_STORAGE_SIZE);
+      return net::ERR_INSUFFICIENT_RESOURCES;
+    }
+
     data_[index].resize(offset + buf_len);
 
     // Zero fill any hole.
@@ -352,11 +381,10 @@ int MemEntryImpl::InternalWriteData(int index, int offset, IOBuffer* buf,
       std::fill(data_[index].begin() + old_data_size,
                 data_[index].begin() + offset, 0);
     }
-
-    backend_->ModifyStorageSize(data_[index].size() - old_data_size);
   }
 
   UpdateStateOnUse(ENTRY_WAS_MODIFIED);
+  RecordWriteResult(WRITE_RESULT_SUCCESS);
 
   if (!buf_len)
     return 0;

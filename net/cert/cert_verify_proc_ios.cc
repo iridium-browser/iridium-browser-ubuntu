@@ -14,6 +14,8 @@
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/test_root_certs.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util_ios.h"
+#include "net/cert/x509_util_ios_and_mac.h"
 #include "net/ssl/openssl_ssl_util.h"
 
 using base::ScopedCFTypeRef;
@@ -115,17 +117,22 @@ void GetCertChainInfo(CFArrayRef cert_chain, CertVerifyResult* verify_result) {
       verified_chain.push_back(chain_cert);
     }
 
-    std::string der_bytes;
-    if (!X509Certificate::GetDEREncoded(chain_cert, &der_bytes))
+    base::ScopedCFTypeRef<CFDataRef> der_data(
+        SecCertificateCopyData(chain_cert));
+    if (!der_data) {
+      verify_result->cert_status |= CERT_STATUS_INVALID;
       return;
+    }
 
     base::StringPiece spki_bytes;
-    if (!asn1::ExtractSPKIFromDERCert(der_bytes, &spki_bytes))
-      continue;
-
-    HashValue sha1(HASH_VALUE_SHA1);
-    CC_SHA1(spki_bytes.data(), spki_bytes.size(), sha1.data());
-    verify_result->public_key_hashes.push_back(sha1);
+    if (!asn1::ExtractSPKIFromDERCert(
+            base::StringPiece(
+                reinterpret_cast<const char*>(CFDataGetBytePtr(der_data)),
+                CFDataGetLength(der_data)),
+            &spki_bytes)) {
+      verify_result->cert_status |= CERT_STATUS_INVALID;
+      return;
+    }
 
     HashValue sha256(HASH_VALUE_SHA256);
     CC_SHA256(spki_bytes.data(), spki_bytes.size(), sha256.data());
@@ -139,11 +146,17 @@ void GetCertChainInfo(CFArrayRef cert_chain, CertVerifyResult* verify_result) {
   }
   if (!verified_cert) {
     NOTREACHED();
+    verify_result->cert_status |= CERT_STATUS_INVALID;
     return;
   }
 
-  verify_result->verified_cert =
-      X509Certificate::CreateFromHandle(verified_cert, verified_chain);
+  scoped_refptr<X509Certificate> verified_cert_with_chain =
+      x509_util::CreateX509CertificateFromSecCertificate(verified_cert,
+                                                         verified_chain);
+  if (verified_cert_with_chain)
+    verify_result->verified_cert = std::move(verified_cert_with_chain);
+  else
+    verify_result->cert_status |= CERT_STATUS_INVALID;
 }
 
 }  // namespace
@@ -239,7 +252,11 @@ int CertVerifyProcIOS::VerifyInternal(
     return NetErrorFromOSStatus(status);
 
   ScopedCFTypeRef<CFMutableArrayRef> cert_array(
-      cert->CreateOSCertChainForCert());
+      x509_util::CreateSecCertificateArrayForX509Certificate(cert));
+  if (!cert_array) {
+    verify_result->cert_status |= CERT_STATUS_INVALID;
+    return ERR_CERT_INVALID;
+  }
   ScopedCFTypeRef<SecTrustRef> trust_ref;
   SecTrustResultType trust_result = kSecTrustResultDeny;
   ScopedCFTypeRef<CFArrayRef> final_chain;

@@ -66,9 +66,9 @@ bool FontLoadingTestCase::BeforeSandboxInit() {
 }
 
 bool FontLoadingTestCase::SandboxedTest() {
-  base::SharedMemoryHandle shmem_handle;
-  if (!font_shmem_->ShareToProcess(base::kNullProcessHandle, &shmem_handle)) {
-    LOG(ERROR) << "SharedMemory::ShareToProcess failed";
+  base::SharedMemoryHandle shmem_handle = font_shmem_->handle().Duplicate();
+  if (!shmem_handle.IsValid()) {
+    LOG(ERROR) << "SharedMemory handle duplication failed";
     return false;
   }
 
@@ -113,14 +113,14 @@ TEST_F(MacSandboxTest, FontLoadingTest) {
 
   NSFont* srcFont = [NSFont fontWithName:@"Geeza Pro" size:16.0];
   FontDescriptor descriptor(srcFont);
-  FontLoader::Result result;
-  FontLoader::LoadFont(descriptor, &result);
-  EXPECT_GT(result.font_data_size, 0U);
-  EXPECT_GT(result.font_id, 0U);
+  std::unique_ptr<FontLoader::ResultInternal> result =
+      FontLoader::LoadFontForTesting(descriptor);
+  EXPECT_GT(result->font_data_size, 0U);
+  EXPECT_GT(result->font_id, 0U);
 
-  base::WriteFileDescriptor(fileno(temp_file),
-      static_cast<const char *>(result.font_data.memory()),
-      result.font_data_size);
+  base::WriteFileDescriptor(
+      fileno(temp_file), static_cast<const char*>(result->font_data.memory()),
+      result->font_data_size);
 
   ASSERT_TRUE(RunTestInSandbox(SANDBOX_TYPE_RENDERER,
                   "FontLoadingTestCase", temp_file_path.value().c_str()));

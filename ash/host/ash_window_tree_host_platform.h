@@ -25,7 +25,6 @@ class ASH_EXPORT AshWindowTreeHostPlatform
   AshWindowTreeHostPlatform();
 
   // AshWindowTreeHost:
-  void ToggleFullScreen() override;
   bool ConfineCursorToRootWindow() override;
   void UnConfineCursor() override;
   void SetRootWindowTransformer(
@@ -33,6 +32,13 @@ class ASH_EXPORT AshWindowTreeHostPlatform
   gfx::Insets GetHostInsets() const override;
   aura::WindowTreeHost* AsWindowTreeHost() override;
   void PrepareForShutdown() override;
+#if defined(USE_OZONE)
+  void SetCursorConfig(const display::Display& display,
+                       display::Display::Rotation rotation) override;
+  void ClearCursorConfig() override;
+#endif
+
+  // aura::WindowTreeHostPlatform:
   void SetRootTransform(const gfx::Transform& transform) override;
   gfx::Transform GetRootTransform() const override;
   gfx::Transform GetInverseRootTransform() const override;
@@ -41,10 +47,6 @@ class ASH_EXPORT AshWindowTreeHostPlatform
   void OnCursorVisibilityChangedNative(bool show) override;
   void SetBoundsInPixels(const gfx::Rect& bounds) override;
   void DispatchEvent(ui::Event* event) override;
-
-  // ui::internal::InputMethodDelegate:
-  ui::EventDispatchDetails DispatchKeyEventPostIME(
-      ui::KeyEvent* event) override;
 
  private:
   // Temporarily disable the tap-to-click feature. Used on CrOS.

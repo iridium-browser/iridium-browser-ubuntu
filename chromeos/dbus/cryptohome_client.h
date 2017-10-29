@@ -16,6 +16,7 @@
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/dbus_client.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace cryptohome {
 
@@ -26,6 +27,7 @@ class CheckKeyRequest;
 class FlushAndSignBootAttributesRequest;
 class GetBootAttributeRequest;
 class GetKeyDataRequest;
+class MigrateToDircryptoRequest;
 class MountRequest;
 class RemoveFirmwareManagementParametersRequest;
 class RemoveKeyRequest;
@@ -93,6 +95,12 @@ class CHROMEOS_EXPORT CryptohomeClient : public DBusClient {
            bool result,
            const cryptohome::BaseReply& reply)> ProtobufMethodCallback;
 
+  // A callback to handle DircryptoMigrationProgress signals.
+  typedef base::Callback<void(cryptohome::DircryptoMigrationStatus status,
+                              uint64_t current,
+                              uint64_t total)>
+      DircryptoMigrationProgessHandler;
+
   ~CryptohomeClient() override;
 
   // Factory function, creates a new instance and returns ownership.
@@ -118,6 +126,12 @@ class CHROMEOS_EXPORT CryptohomeClient : public DBusClient {
   // partition is running out of disk space.
   virtual void SetLowDiskSpaceHandler(const LowDiskSpaceHandler& handler) = 0;
 
+  // A callback to handle DircryptoMigrationProgress signals.  |handler| is
+  // called periodicaly during a migration is performed by cryptohomed, as well
+  // as to notify the completion of migration.
+  virtual void SetDircryptoMigrationProgressHandler(
+      const DircryptoMigrationProgessHandler& handler) = 0;
+
   // Runs the callback as soon as the service becomes available.
   virtual void WaitForServiceToBeAvailable(
       const WaitForServiceToBeAvailableCallback& callback) = 0;
@@ -126,8 +140,7 @@ class CHROMEOS_EXPORT CryptohomeClient : public DBusClient {
   virtual void IsMounted(const BoolDBusMethodCallback& callback) = 0;
 
   // Calls Unmount method and returns true when the call succeeds.
-  // This method blocks until the call returns.
-  virtual bool Unmount(bool* success) = 0;
+  virtual void Unmount(const BoolDBusMethodCallback& callback) = 0;
 
   // Calls AsyncCheckKey method.  |callback| is called after the method call
   // succeeds.
@@ -240,12 +253,10 @@ class CHROMEOS_EXPORT CryptohomeClient : public DBusClient {
 
   // Calls TpmCanAttemptOwnership method.
   // This method tells the service that it is OK to attempt ownership.
-  virtual void TpmCanAttemptOwnership(
-      const VoidDBusMethodCallback& callback) = 0;
+  virtual void TpmCanAttemptOwnership(VoidDBusMethodCallback callback) = 0;
 
   // Calls TpmClearStoredPasswordMethod.
-  virtual void TpmClearStoredPassword(
-      const VoidDBusMethodCallback& callback) = 0;
+  virtual void TpmClearStoredPassword(VoidDBusMethodCallback callback) = 0;
 
   // Calls TpmClearStoredPassword method and returns true when the call
   // succeeds.  This method blocks until the call returns.
@@ -479,6 +490,10 @@ class CHROMEOS_EXPORT CryptohomeClient : public DBusClient {
       const std::string& key_prefix,
       const BoolDBusMethodCallback& callback) = 0;
 
+  // Asynchronously gets the underlying TPM version information and passes it to
+  // the given callback as a string.
+  virtual void TpmGetVersion(const StringDBusMethodCallback& callback) = 0;
+
   // Asynchronously calls the GetKeyDataEx method. |callback| will be invoked
   // with the reply protobuf.
   // GetKeyDataEx returns information about the key specified in |request|. At
@@ -557,6 +572,19 @@ class CHROMEOS_EXPORT CryptohomeClient : public DBusClient {
       const cryptohome::FlushAndSignBootAttributesRequest& request,
       const ProtobufMethodCallback& callback) = 0;
 
+  // Asynchronously calls MigrateToDircrypto method. It tells cryptohomed to
+  // start migration, and is immediately called back by |callback|. The actual
+  // result response is done via DircryptoMigrationProgress callback with its
+  // status flag indicating the completion.
+  // MigrateToDircrypto attempts to migrate the home dir to the new "dircrypto"
+  // encryption.
+  // |request| contains additional parameters, such as specifying if a full
+  // migration or a minimal migration should be performed.
+  virtual void MigrateToDircrypto(
+      const cryptohome::Identification& cryptohome_id,
+      const cryptohome::MigrateToDircryptoRequest& request,
+      VoidDBusMethodCallback callback) = 0;
+
   // Asynchronously calls RemoveFirmwareManagementParameters method. |callback|
   // is called after method call, and with reply protobuf.
   virtual void RemoveFirmwareManagementParametersFromTpm(
@@ -570,6 +598,12 @@ class CHROMEOS_EXPORT CryptohomeClient : public DBusClient {
   virtual void SetFirmwareManagementParametersInTpm(
       const cryptohome::SetFirmwareManagementParametersRequest& request,
       const ProtobufMethodCallback& callback) = 0;
+
+  // Calls NeedsDircryptoMigration to find out whether the given user needs
+  // dircrypto migration.
+  virtual void NeedsDircryptoMigration(
+      const cryptohome::Identification& cryptohome_id,
+      const BoolDBusMethodCallback& callback) = 0;
 
  protected:
   // Create() should be used instead.

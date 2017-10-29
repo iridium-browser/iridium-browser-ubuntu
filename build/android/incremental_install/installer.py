@@ -128,8 +128,8 @@ def Install(device, apk, split_globs=None, native_libs=None, dex_files=None,
 
   # Push .so and .dex files to the device (if they have changed).
   def do_push_files():
+    push_native_timer.Start()
     if native_libs:
-      push_native_timer.Start()
       with build_utils.TempDir() as temp_dir:
         device_lib_dir = posixpath.join(device_incremental_dir, 'lib')
         for path in native_libs:
@@ -138,10 +138,10 @@ def Install(device, apk, split_globs=None, native_libs=None, dex_files=None,
           shutil.copy(path, os.path.join(temp_dir, os.path.basename(path)))
         device.PushChangedFiles([(temp_dir, device_lib_dir)],
                                 delete_device_stale=True)
-      push_native_timer.Stop(log=False)
+    push_native_timer.Stop(log=False)
 
+    push_dex_timer.Start()
     if dex_files:
-      push_dex_timer.Start()
       # Put all .dex files to be pushed into a temporary directory so that we
       # can use delete_device_stale=True.
       with build_utils.TempDir() as temp_dir:
@@ -155,7 +155,7 @@ def Install(device, apk, split_globs=None, native_libs=None, dex_files=None,
             shutil.copy(src_path, os.path.join(temp_dir, dest_name))
         device.PushChangedFiles([(temp_dir, device_dex_dir)],
                                 delete_device_stale=True)
-      push_dex_timer.Stop(log=False)
+    push_dex_timer.Stop(log=False)
 
   def check_selinux():
     # Marshmallow has no filesystem access whatsoever. It might be possible to
@@ -196,12 +196,13 @@ def Install(device, apk, split_globs=None, native_libs=None, dex_files=None,
     cmd = ('D="%s";'
            'mkdir -p $D &&'
            'echo -n >$D/install.lock 2>$D/firstrun.lock')
-    device.RunShellCommand(cmd % device_incremental_dir, check_return=True)
+    device.RunShellCommand(
+        cmd % device_incremental_dir, shell=True, check_return=True)
 
   # The firstrun.lock is released by the app itself.
   def release_installer_lock():
     device.RunShellCommand('echo > %s/install.lock' % device_incremental_dir,
-                           check_return=True)
+                           check_return=True, shell=True)
 
   # Concurrency here speeds things up quite a bit, but DeviceUtils hasn't
   # been designed for multi-threading. Enabling only because this is a

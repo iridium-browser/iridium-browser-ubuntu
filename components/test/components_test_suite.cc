@@ -17,6 +17,7 @@
 #include "base/test/test_suite.h"
 #include "build/build_config.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
+#include "mojo/edk/embedder/embedder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
@@ -32,11 +33,6 @@
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_android.h"
-#include "components/gcm_driver/instance_id/android/component_jni_registrar.h"
-#include "components/invalidation/impl/android/component_jni_registrar.h"
-#include "components/policy/core/browser/android/component_jni_registrar.h"
-#include "components/safe_json/android/component_jni_registrar.h"
-#include "components/signin/core/browser/android/component_jni_registrar.h"
 #include "content/public/test/test_utils.h"
 #include "net/android/net_jni_registrar.h"
 #include "ui/base/android/ui_base_jni_registrar.h"
@@ -52,6 +48,8 @@ class ComponentsTestSuite : public base::TestSuite {
  private:
   void Initialize() override {
     base::TestSuite::Initialize();
+
+    mojo::edk::Init();
 
     // Initialize the histograms subsystem, so that any histograms hit in tests
     // are correctly registered with the statistics recorder and can be queried
@@ -72,11 +70,6 @@ class ComponentsTestSuite : public base::TestSuite {
     JNIEnv* env = base::android::AttachCurrentThread();
     ASSERT_TRUE(content::RegisterJniForTesting(env));
     ASSERT_TRUE(gfx::android::RegisterJni(env));
-    ASSERT_TRUE(instance_id::android::RegisterInstanceIDJni(env));
-    ASSERT_TRUE(invalidation::android::RegisterInvalidationJni(env));
-    ASSERT_TRUE(policy::android::RegisterPolicy(env));
-    ASSERT_TRUE(safe_json::android::RegisterSafeJsonJni(env));
-    ASSERT_TRUE(signin::android::RegisterSigninJni(env));
     ASSERT_TRUE(net::android::RegisterJni(env));
     ASSERT_TRUE(ui::android::RegisterJni(env));
 #endif

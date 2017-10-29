@@ -11,6 +11,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
+#include "base/sequenced_task_runner.h"
 #include "base/time/default_tick_clock.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
@@ -151,8 +152,7 @@ void IOSChromeMainParts::PreMainMessageLoopRun() {
       kDummyExtensionScheme);
 
   // Ensure ClipboadRecentContentIOS is created.
-  ClipboardRecentContent::SetInstance(
-      CreateClipboardRecentContentIOS().release());
+  ClipboardRecentContent::SetInstance(CreateClipboardRecentContentIOS());
 
   // Ensure that the browser state is initialized.
   EnsureBrowserStateKeyedServiceFactoriesBuilt();
@@ -275,7 +275,7 @@ void IOSChromeMainParts::SetupFieldTrials() {
 
 void IOSChromeMainParts::SetupMetrics() {
   metrics::MetricsService* metrics = application_context_->GetMetricsService();
-  metrics->AddSyntheticTrialObserver(
+  metrics->synthetic_trial_registry()->AddSyntheticTrialObserver(
       variations::VariationsHttpHeaderProvider::GetInstance());
   // Now that field trials have been created, initializes metrics recording.
   metrics->InitializeMetricsRecordingState();

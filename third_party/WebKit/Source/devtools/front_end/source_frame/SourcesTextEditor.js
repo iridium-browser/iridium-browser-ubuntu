@@ -13,13 +13,13 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
       lineNumbers: true,
       lineWrapping: false,
       bracketMatchingSetting: Common.moduleSetting('textEditorBracketMatching'),
+      padBottom: true
     });
 
     this.codeMirror().addKeyMap({'Enter': 'smartNewlineAndIndent', 'Esc': 'sourcesDismiss'});
 
     this._delegate = delegate;
 
-    this.codeMirror().on('changes', this._fireTextChanged.bind(this));
     this.codeMirror().on('cursorActivity', this._cursorActivity.bind(this));
     this.codeMirror().on('gutterClick', this._gutterClick.bind(this));
     this.codeMirror().on('scroll', this._scroll.bind(this));
@@ -65,14 +65,14 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
     var indents = {};
     for (var lineNumber = 0; lineNumber < lines.length; ++lineNumber) {
       var text = lines[lineNumber];
-      if (text.length === 0 || !Common.TextUtils.isSpaceChar(text[0]))
+      if (text.length === 0 || !TextUtils.TextUtils.isSpaceChar(text[0]))
         continue;
       if (tabRegex.test(text)) {
         ++tabLines;
         continue;
       }
       var i = 0;
-      while (i < text.length && Common.TextUtils.isSpaceChar(text[i]))
+      while (i < text.length && TextUtils.TextUtils.isSpaceChar(text[i]))
         ++i;
       if (i % 2 !== 0)
         continue;
@@ -112,7 +112,7 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
 
   /**
    * @param {!RegExp} regex
-   * @param {?Common.TextRange} range
+   * @param {?TextUtils.TextRange} range
    */
   highlightSearchResults(regex, range) {
     /**
@@ -124,7 +124,7 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
         if (range.endColumn > TextEditor.CodeMirrorTextEditor.maxHighlightLength)
           this.setSelection(range);
         else
-          this.setSelection(Common.TextRange.createFromLocation(range.startLine, range.startColumn));
+          this.setSelection(TextUtils.TextRange.createFromLocation(range.startLine, range.startColumn));
       }
       this._tokenHighlighter.highlightSearchResults(regex, range);
     }
@@ -152,7 +152,7 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
   }
 
   /**
-   * @param {!Common.TextRange} range
+   * @param {!TextUtils.TextRange} range
    * @param {string} cssClass
    * @return {!Object}
    */
@@ -215,17 +215,43 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
     if (!this._executionLine)
       return;
 
-    this.codeMirror().addLineClass(this._executionLine, 'wrap', 'cm-execution-line');
+    this.showExecutionLineBackground();
+    this.codeMirror().addLineClass(this._executionLine, 'wrap', 'cm-execution-line-outline');
+    var token = this.tokenAtTextPosition(lineNumber, columnNumber);
+
+    if (token && !token.type && token.startColumn + 1 === token.endColumn) {
+      var tokenContent = this.codeMirror().getLine(lineNumber)[token.startColumn];
+      if (tokenContent === '.' || tokenContent === '(')
+        token = this.tokenAtTextPosition(lineNumber, token.endColumn + 1);
+    }
+
+    var endColumn;
+    if (token && token.type)
+      endColumn = token.endColumn;
+    else
+      endColumn = this.codeMirror().getLine(lineNumber).length;
+
     this._executionLineTailMarker = this.codeMirror().markText(
-        {line: lineNumber, ch: columnNumber}, {line: lineNumber, ch: this.codeMirror().getLine(lineNumber).length},
-        {className: 'cm-execution-line-tail'});
+        {line: lineNumber, ch: columnNumber}, {line: lineNumber, ch: endColumn}, {className: 'cm-execution-line-tail'});
+  }
+
+  showExecutionLineBackground() {
+    if (this._executionLine)
+      this.codeMirror().addLineClass(this._executionLine, 'wrap', 'cm-execution-line');
+  }
+
+  hideExecutionLineBackground() {
+    if (this._executionLine)
+      this.codeMirror().removeLineClass(this._executionLine, 'wrap', 'cm-execution-line');
   }
 
   clearExecutionLine() {
     this.clearPositionHighlight();
 
-    if (this._executionLine)
-      this.codeMirror().removeLineClass(this._executionLine, 'wrap', 'cm-execution-line');
+    if (this._executionLine) {
+      this.hideExecutionLineBackground();
+      this.codeMirror().removeLineClass(this._executionLine, 'wrap', 'cm-execution-line-outline');
+    }
     delete this._executionLine;
 
     if (this._executionLineTailMarker)
@@ -298,16 +324,13 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
 
   /**
    * @override
-   * @param {!Common.TextRange} range
+   * @param {!TextUtils.TextRange} range
    * @param {string} text
    * @param {string=} origin
-   * @return {!Common.TextRange}
+   * @return {!TextUtils.TextRange}
    */
   editRange(range, text, origin) {
     var newRange = super.editRange(range, text, origin);
-    this.dispatchEventToListeners(
-        SourceFrame.SourcesTextEditor.Events.TextChanged, {oldRange: range, newRange: newRange});
-
     if (Common.moduleSetting('textEditorAutoDetectIndent').get())
       this._onUpdateEditorIndentation();
 
@@ -328,7 +351,7 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
     if (Common.moduleSetting('textEditorAutoDetectIndent').get())
       indent = SourceFrame.SourcesTextEditor._guessIndentationLevel(lines);
 
-    if (indent === Common.TextUtils.Indent.TabCharacter) {
+    if (indent === TextUtils.TextUtils.Indent.TabCharacter) {
       this.codeMirror().setOption('indentWithTabs', true);
       this.codeMirror().setOption('indentUnit', 4);
     } else {
@@ -361,7 +384,7 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
       if (!position)
         continue;
       var line = this.line(position.lineNumber);
-      if (line.length === position.columnNumber && Common.TextUtils.lineIndent(line).length === line.length) {
+      if (line.length === position.columnNumber && TextUtils.TextUtils.lineIndent(line).length === line.length) {
         this.codeMirror().replaceRange(
             '', new CodeMirror.Pos(position.lineNumber, 0),
             new CodeMirror.Pos(position.lineNumber, position.columnNumber));
@@ -376,31 +399,6 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
     }
   }
 
-  /**
-   * @param {!CodeMirror} codeMirror
-   * @param {!Array.<!CodeMirror.ChangeObject>} changes
-   */
-  _fireTextChanged(codeMirror, changes) {
-    if (!changes.length || this._muteTextChangedEvent)
-      return;
-    var edits = [];
-    var currentEdit;
-
-    for (var changeIndex = 0; changeIndex < changes.length; ++changeIndex) {
-      var changeObject = changes[changeIndex];
-      var edit = TextEditor.CodeMirrorUtils.changeObjectToEditOperation(changeObject);
-      if (currentEdit && edit.oldRange.equal(currentEdit.newRange)) {
-        currentEdit.newRange = edit.newRange;
-      } else {
-        currentEdit = edit;
-        edits.push(currentEdit);
-      }
-    }
-
-    for (var i = 0; i < edits.length; ++i)
-      this.dispatchEventToListeners(SourceFrame.SourcesTextEditor.Events.TextChanged, edits[i]);
-  }
-
   _cursorActivity() {
     if (!this._isSearchActive())
       this.codeMirror().operation(this._tokenHighlighter.highlightSelectedTokens.bind(this._tokenHighlighter));
@@ -412,8 +410,8 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
   }
 
   /**
-   * @param {?Common.TextRange} from
-   * @param {?Common.TextRange} to
+   * @param {?TextUtils.TextRange} from
+   * @param {?TextUtils.TextRange} to
    */
   _reportJump(from, to) {
     if (from && to && from.equal(to))
@@ -464,11 +462,9 @@ SourceFrame.SourcesTextEditor = class extends TextEditor.CodeMirrorTextEditor {
    * @param {string} text
    */
   setText(text) {
-    this._muteTextChangedEvent = true;
     this._setEditorIndentation(
         text.split('\n').slice(0, SourceFrame.SourcesTextEditor.LinesToScanForIndentationGuessing));
     super.setText(text);
-    delete this._muteTextChangedEvent;
   }
 
   _updateWhitespace() {
@@ -581,7 +577,6 @@ SourceFrame.SourcesTextEditor.GutterClickEventData;
 /** @enum {symbol} */
 SourceFrame.SourcesTextEditor.Events = {
   GutterClick: Symbol('GutterClick'),
-  TextChanged: Symbol('TextChanged'),
   SelectionChanged: Symbol('SelectionChanged'),
   ScrollChanged: Symbol('ScrollChanged'),
   EditorFocused: Symbol('EditorFocused'),
@@ -622,7 +617,7 @@ CodeMirror.commands.smartNewlineAndIndent = function(codeMirror) {
       var selection = selections[i];
       var cur = CodeMirror.cmpPos(selection.head, selection.anchor) < 0 ? selection.head : selection.anchor;
       var line = codeMirror.getLine(cur.line);
-      var indent = Common.TextUtils.lineIndent(line);
+      var indent = TextUtils.TextUtils.lineIndent(line);
       replacements.push('\n' + indent.substring(0, Math.min(cur.ch, indent.length)));
     }
     codeMirror.replaceSelections(replacements);
@@ -653,7 +648,7 @@ SourceFrame.SourcesTextEditor._BlockIndentController = {
       var selection = selections[i];
       var start = CodeMirror.cmpPos(selection.head, selection.anchor) < 0 ? selection.head : selection.anchor;
       var line = codeMirror.getLine(start.line);
-      var indent = Common.TextUtils.lineIndent(line);
+      var indent = TextUtils.TextUtils.lineIndent(line);
       var indentToInsert = '\n' + indent + codeMirror._codeMirrorTextEditor.indent();
       var isCollapsedBlock = false;
       if (selection.head.ch === 0)
@@ -697,7 +692,7 @@ SourceFrame.SourcesTextEditor._BlockIndentController = {
     for (var i = 0; i < selections.length; ++i) {
       var selection = selections[i];
       var line = codeMirror.getLine(selection.head.line);
-      if (line !== Common.TextUtils.lineIndent(line))
+      if (line !== TextUtils.TextUtils.lineIndent(line))
         return CodeMirror.Pass;
       replacements.push('}');
     }
@@ -712,7 +707,7 @@ SourceFrame.SourcesTextEditor._BlockIndentController = {
         return;
       updatedSelections.push({head: selection.head, anchor: new CodeMirror.Pos(selection.head.line, 0)});
       var line = codeMirror.getLine(matchingBracket.to.line);
-      var indent = Common.TextUtils.lineIndent(line);
+      var indent = TextUtils.TextUtils.lineIndent(line);
       replacements.push(indent + '}');
     }
     codeMirror.setSelections(updatedSelections);
@@ -736,7 +731,7 @@ SourceFrame.SourcesTextEditor.TokenHighlighter = class {
 
   /**
    * @param {!RegExp} regex
-   * @param {?Common.TextRange} range
+   * @param {?TextUtils.TextRange} range
    */
   highlightSearchResults(regex, range) {
     var oldRegex = this._highlightRegex;
@@ -805,9 +800,9 @@ SourceFrame.SourcesTextEditor.TokenHighlighter = class {
    */
   _isWord(selectedText, lineNumber, startColumn, endColumn) {
     var line = this._codeMirror.getLine(lineNumber);
-    var leftBound = startColumn === 0 || !Common.TextUtils.isWordChar(line.charAt(startColumn - 1));
-    var rightBound = endColumn === line.length || !Common.TextUtils.isWordChar(line.charAt(endColumn));
-    return leftBound && rightBound && Common.TextUtils.isWord(selectedText);
+    var leftBound = startColumn === 0 || !TextUtils.TextUtils.isWordChar(line.charAt(startColumn - 1));
+    var rightBound = endColumn === line.length || !TextUtils.TextUtils.isWordChar(line.charAt(endColumn));
+    return leftBound && rightBound && TextUtils.TextUtils.isWord(selectedText);
   }
 
   _removeHighlight() {
@@ -856,12 +851,12 @@ SourceFrame.SourcesTextEditor.TokenHighlighter = class {
    */
   _tokenHighlighter(token, selectionStart, stream) {
     var tokenFirstChar = token.charAt(0);
-    if (stream.match(token) && (stream.eol() || !Common.TextUtils.isWordChar(stream.peek())))
+    if (stream.match(token) && (stream.eol() || !TextUtils.TextUtils.isWordChar(stream.peek())))
       return stream.column() === selectionStart.ch ? 'token-highlight column-with-selection' : 'token-highlight';
     var eatenChar;
     do
       eatenChar = stream.next();
-    while (eatenChar && (Common.TextUtils.isWordChar(eatenChar) || stream.peek() !== tokenFirstChar));
+    while (eatenChar && (TextUtils.TextUtils.isWordChar(eatenChar) || stream.peek() !== tokenFirstChar));
   }
 
   /**

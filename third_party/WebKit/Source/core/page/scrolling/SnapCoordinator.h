@@ -8,13 +8,13 @@
 #include "core/CoreExport.h"
 #include "core/css/CSSPrimitiveValueMappings.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Vector.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 
-class ContainerNode;
 class LayoutBox;
-struct LengthPoint;
+struct ScrollSnapType;
+struct ScrollSnapAlign;
 
 // Snap Coordinator keeps track of snap containers and all of their associated
 // snap areas. It also contains the logic to generate the list of valid snap
@@ -34,26 +34,23 @@ class CORE_EXPORT SnapCoordinator final
   WTF_MAKE_NONCOPYABLE(SnapCoordinator);
 
  public:
-  static SnapCoordinator* create();
+  static SnapCoordinator* Create();
   ~SnapCoordinator();
   DEFINE_INLINE_TRACE() {}
 
-  void snapContainerDidChange(LayoutBox&, ScrollSnapType);
-  void snapAreaDidChange(LayoutBox&,
-                         const Vector<LengthPoint>& snapCoordinates);
+  void SnapContainerDidChange(LayoutBox&, ScrollSnapType);
+  void SnapAreaDidChange(LayoutBox&, ScrollSnapAlign);
 
 #ifndef NDEBUG
-  void showSnapAreaMap();
-  void showSnapAreasFor(const LayoutBox*);
+  void ShowSnapAreaMap();
+  void ShowSnapAreasFor(const LayoutBox*);
 #endif
 
  private:
   friend class SnapCoordinatorTest;
   explicit SnapCoordinator();
 
-  Vector<double> snapOffsets(const ContainerNode&, ScrollbarOrientation);
-
-  HashSet<const LayoutBox*> m_snapContainers;
+  HashSet<const LayoutBox*> snap_containers_;
 };
 
 }  // namespace blink

@@ -18,6 +18,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -70,7 +71,8 @@ class FilesListRequestRunnerTest : public testing::Test {
 
     request_sender_.reset(
         new RequestSender(new DummyAuthService, request_context_getter_.get(),
-                          message_loop_.task_runner(), kTestUserAgent));
+                          message_loop_.task_runner(), kTestUserAgent,
+                          TRAFFIC_ANNOTATION_FOR_TESTS));
 
     test_server_.RegisterRequestHandler(
         base::Bind(&FilesListRequestRunnerTest::OnFilesListRequest,
@@ -137,7 +139,7 @@ class FilesListRequestRunnerTest : public testing::Test {
 TEST_F(FilesListRequestRunnerTest, Success_NoBackoff) {
   SetFakeServerResponse(net::HTTP_OK, kSuccessResource);
   runner_->CreateAndStartWithSizeBackoff(
-      kMaxResults, kQuery, kFields,
+      kMaxResults, FilesListCorpora::DEFAULT, std::string(), kQuery, kFields,
       base::Bind(&FilesListRequestRunnerTest::OnCompleted,
                  base::Unretained(this)));
 
@@ -159,7 +161,7 @@ TEST_F(FilesListRequestRunnerTest, Success_Backoff) {
   SetFakeServerResponse(net::HTTP_INTERNAL_SERVER_ERROR,
                         kResponseTooLargeErrorResource);
   runner_->CreateAndStartWithSizeBackoff(
-      kMaxResults, kQuery, kFields,
+      kMaxResults, FilesListCorpora::DEFAULT, std::string(), kQuery, kFields,
       base::Bind(&FilesListRequestRunnerTest::OnCompleted,
                  base::Unretained(this)));
   {
@@ -197,7 +199,7 @@ TEST_F(FilesListRequestRunnerTest, Failure_TooManyBackoffs) {
   SetFakeServerResponse(net::HTTP_INTERNAL_SERVER_ERROR,
                         kResponseTooLargeErrorResource);
   runner_->CreateAndStartWithSizeBackoff(
-      kMaxResults, kQuery, kFields,
+      kMaxResults, FilesListCorpora::DEFAULT, std::string(), kQuery, kFields,
       base::Bind(&FilesListRequestRunnerTest::OnCompleted,
                  base::Unretained(this)));
   {
@@ -253,7 +255,7 @@ TEST_F(FilesListRequestRunnerTest, Failure_AnotherError) {
   SetFakeServerResponse(net::HTTP_INTERNAL_SERVER_ERROR,
                         kQuotaExceededErrorResource);
   runner_->CreateAndStartWithSizeBackoff(
-      kMaxResults, kQuery, kFields,
+      kMaxResults, FilesListCorpora::DEFAULT, std::string(), kQuery, kFields,
       base::Bind(&FilesListRequestRunnerTest::OnCompleted,
                  base::Unretained(this)));
 

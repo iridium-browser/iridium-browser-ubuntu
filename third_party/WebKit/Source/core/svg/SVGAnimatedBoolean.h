@@ -31,9 +31,9 @@
 #ifndef SVGAnimatedBoolean_h
 #define SVGAnimatedBoolean_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/svg/SVGBoolean.h"
 #include "core/svg/properties/SVGAnimatedProperty.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -42,21 +42,22 @@ class SVGAnimatedBoolean final : public SVGAnimatedProperty<SVGBoolean>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGAnimatedBoolean* create(SVGElement* contextElement,
-                                    const QualifiedName& attributeName) {
-    return new SVGAnimatedBoolean(contextElement, attributeName);
+  static SVGAnimatedBoolean* Create(SVGElement* context_element,
+                                    const QualifiedName& attribute_name) {
+    return new SVGAnimatedBoolean(context_element, attribute_name);
   }
 
   DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
-    visitor->traceWrappers(contextElement());
+    SVGAnimatedProperty<SVGBoolean>::TraceWrappers(visitor);
+    ScriptWrappable::TraceWrappers(visitor);
   }
 
  protected:
-  SVGAnimatedBoolean(SVGElement* contextElement,
-                     const QualifiedName& attributeName)
-      : SVGAnimatedProperty<SVGBoolean>(contextElement,
-                                        attributeName,
-                                        SVGBoolean::create()) {}
+  SVGAnimatedBoolean(SVGElement* context_element,
+                     const QualifiedName& attribute_name)
+      : SVGAnimatedProperty<SVGBoolean>(context_element,
+                                        attribute_name,
+                                        SVGBoolean::Create()) {}
 };
 
 }  // namespace blink

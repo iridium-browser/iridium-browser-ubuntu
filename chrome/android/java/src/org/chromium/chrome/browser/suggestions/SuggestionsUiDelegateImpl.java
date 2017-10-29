@@ -6,12 +6,8 @@ package org.chromium.chrome.browser.suggestions;
 
 import android.support.annotation.Nullable;
 
+import org.chromium.base.DiscardableReferencePool;
 import org.chromium.chrome.browser.NativePageHost;
-import org.chromium.chrome.browser.favicon.FaviconHelper;
-import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
-import org.chromium.chrome.browser.favicon.FaviconHelper.IconAvailabilityCallback;
-import org.chromium.chrome.browser.favicon.LargeIconBridge;
-import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
 import org.chromium.chrome.browser.ntp.snippets.SuggestionsSource;
 import org.chromium.chrome.browser.profiles.Profile;
 
@@ -24,52 +20,28 @@ import java.util.List;
 public class SuggestionsUiDelegateImpl implements SuggestionsUiDelegate {
     private final List<DestructionObserver> mDestructionObservers = new ArrayList<>();
     private final SuggestionsSource mSuggestionsSource;
-    private final SuggestionsMetricsReporter mSuggestionsMetricsReporter;
+    private final SuggestionsRanker mSuggestionsRanker;
+    private final SuggestionsEventReporter mSuggestionsEventReporter;
     private final SuggestionsNavigationDelegate mSuggestionsNavigationDelegate;
-
-    private final Profile mProfile;
-
     private final NativePageHost mHost;
+    private final ImageFetcher mImageFetcher;
 
-    private FaviconHelper mFaviconHelper;
-    private LargeIconBridge mLargeIconBridge;
+    private final DiscardableReferencePool mReferencePool;
 
     private boolean mIsDestroyed;
 
     public SuggestionsUiDelegateImpl(SuggestionsSource suggestionsSource,
-            SuggestionsMetricsReporter metricsReporter,
-            SuggestionsNavigationDelegate navigationDelegate, Profile profile,
-            NativePageHost host) {
+            SuggestionsEventReporter eventReporter,
+            SuggestionsNavigationDelegate navigationDelegate, Profile profile, NativePageHost host,
+            DiscardableReferencePool referencePool) {
         mSuggestionsSource = suggestionsSource;
-        mSuggestionsMetricsReporter = metricsReporter;
+        mSuggestionsRanker = new SuggestionsRanker();
+        mSuggestionsEventReporter = eventReporter;
         mSuggestionsNavigationDelegate = navigationDelegate;
+        mImageFetcher = new ImageFetcher(suggestionsSource, profile, host);
 
-        mProfile = profile;
         mHost = host;
-    }
-
-    @Override
-    public void getLocalFaviconImageForURL(
-            String url, int size, FaviconImageCallback faviconCallback) {
-        if (mIsDestroyed) return;
-        getFaviconHelper().getLocalFaviconImageForURL(mProfile, url, size, faviconCallback);
-    }
-
-    @Override
-    public void getLargeIconForUrl(String url, int size, LargeIconCallback callback) {
-        if (mIsDestroyed) return;
-        getLargeIconBridge().getLargeIconForUrl(url, size, callback);
-    }
-
-    @Override
-    public void ensureIconIsAvailable(String pageUrl, String iconUrl, boolean isLargeIcon,
-            boolean isTemporary, IconAvailabilityCallback callback) {
-        if (mIsDestroyed) return;
-        if (mHost.getActiveTab() != null) {
-            getFaviconHelper().ensureIconIsAvailable(mProfile,
-                    mHost.getActiveTab().getWebContents(), pageUrl, iconUrl, isLargeIcon,
-                    isTemporary, callback);
-        }
+        mReferencePool = referencePool;
     }
 
     @Override
@@ -77,16 +49,31 @@ public class SuggestionsUiDelegateImpl implements SuggestionsUiDelegate {
         return mSuggestionsSource;
     }
 
+    @Override
+    public SuggestionsRanker getSuggestionsRanker() {
+        return mSuggestionsRanker;
+    }
+
     @Nullable
     @Override
-    public SuggestionsMetricsReporter getMetricsReporter() {
-        return mSuggestionsMetricsReporter;
+    public SuggestionsEventReporter getEventReporter() {
+        return mSuggestionsEventReporter;
     }
 
     @Nullable
     @Override
     public SuggestionsNavigationDelegate getNavigationDelegate() {
         return mSuggestionsNavigationDelegate;
+    }
+
+    @Override
+    public ImageFetcher getImageFetcher() {
+        return mImageFetcher;
+    }
+
+    @Override
+    public DiscardableReferencePool getReferencePool() {
+        return mReferencePool;
     }
 
     @Override
@@ -103,36 +90,15 @@ public class SuggestionsUiDelegateImpl implements SuggestionsUiDelegate {
     public void onDestroy() {
         assert !mIsDestroyed;
 
+        mImageFetcher.onDestroy();
+
         for (DestructionObserver observer : mDestructionObservers) observer.onDestroy();
 
-        if (mFaviconHelper != null) {
-            mFaviconHelper.destroy();
-            mFaviconHelper = null;
-        }
-        if (mLargeIconBridge != null) {
-            mLargeIconBridge.destroy();
-            mLargeIconBridge = null;
-        }
+        // SuggestionsSource is not registered with the rest of the destruction observers but
+        // instead explicitly destroyed last so that the other destruction observers can use it
+        // while they are called.
+        mSuggestionsSource.destroy();
+
         mIsDestroyed = true;
-    }
-
-    /**
-     * Utility method to lazily create the {@link FaviconHelper}, and avoid unnecessary native
-     * calls in tests.
-     */
-    private FaviconHelper getFaviconHelper() {
-        assert !mIsDestroyed;
-        if (mFaviconHelper == null) mFaviconHelper = new FaviconHelper();
-        return mFaviconHelper;
-    }
-
-    /**
-     * Utility method to lazily create the {@link LargeIconBridge}, and avoid unnecessary native
-     * calls in tests.
-     */
-    private LargeIconBridge getLargeIconBridge() {
-        assert !mIsDestroyed;
-        if (mLargeIconBridge == null) mLargeIconBridge = new LargeIconBridge(mProfile);
-        return mLargeIconBridge;
     }
 }

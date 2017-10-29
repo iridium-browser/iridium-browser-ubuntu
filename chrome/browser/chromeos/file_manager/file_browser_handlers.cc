@@ -16,13 +16,13 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/open_with_browser.h"
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/extensions/api/file_browser_handlers/file_browser_handler.h"
@@ -219,7 +219,6 @@ FileBrowserHandlerExecutor::SetupFileAccessPermissions(
     scoped_refptr<storage::FileSystemContext> file_system_context_handler,
     const scoped_refptr<const Extension>& handler_extension,
     const std::vector<FileSystemURL>& file_urls) {
-  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   DCHECK(handler_extension.get());
 
   storage::ExternalFileSystemBackend* backend =
@@ -291,12 +290,9 @@ void FileBrowserHandlerExecutor::Execute(
   scoped_refptr<storage::FileSystemContext> file_system_context(
       util::GetFileSystemContextForExtensionId(profile_, extension_->id()));
 
-  BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(&SetupFileAccessPermissions,
-                 file_system_context,
-                 extension_,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
+      base::Bind(&SetupFileAccessPermissions, file_system_context, extension_,
                  file_urls),
       base::Bind(&FileBrowserHandlerExecutor::ExecuteAfterSetupFileAccess,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -392,9 +388,7 @@ void FileBrowserHandlerExecutor::SetupPermissionsAndDispatchEvent(
   auto details = base::MakeUnique<base::DictionaryValue>();
   // Get file definitions. These will be replaced with Entry instances by
   // dispatchEvent() method from event_binding.js.
-  base::ListValue* file_entries = new base::ListValue();
-  details->Set("entries", file_entries);
-  event_args->Append(std::move(details));
+  auto file_entries = base::MakeUnique<base::ListValue>();
 
   for (EntryDefinitionList::const_iterator iter =
            entry_definition_list->begin();
@@ -409,10 +403,11 @@ void FileBrowserHandlerExecutor::SetupPermissionsAndDispatchEvent(
     file_entries->Append(std::move(file_def));
   }
 
-  std::unique_ptr<extensions::Event> event(new extensions::Event(
+  details->Set("entries", std::move(file_entries));
+  event_args->Append(std::move(details));
+  auto event = base::MakeUnique<extensions::Event>(
       extensions::events::FILE_BROWSER_HANDLER_ON_EXECUTE,
-      "fileBrowserHandler.onExecute", std::move(event_args)));
-  event->restrict_to_browser_context = profile_;
+      "fileBrowserHandler.onExecute", std::move(event_args), profile_);
   router->DispatchEventToExtension(extension_->id(), std::move(event));
 
   ExecuteDoneOnUIThread(true);

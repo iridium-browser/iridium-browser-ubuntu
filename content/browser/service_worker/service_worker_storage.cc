@@ -693,6 +693,41 @@ void ServiceWorkerStorage::GetUserData(int64_t registration_id,
                             weak_factory_.GetWeakPtr(), callback)));
 }
 
+void ServiceWorkerStorage::GetUserDataByKeyPrefix(
+    int64_t registration_id,
+    const std::string& key_prefix,
+    const GetUserDataCallback& callback) {
+  if (!LazyInitialize(base::Bind(&ServiceWorkerStorage::GetUserDataByKeyPrefix,
+                                 weak_factory_.GetWeakPtr(), registration_id,
+                                 key_prefix, callback))) {
+    if (state_ != INITIALIZING) {
+      RunSoon(FROM_HERE, base::Bind(callback, std::vector<std::string>(),
+                                    SERVICE_WORKER_ERROR_ABORT));
+    }
+    return;
+  }
+  DCHECK_EQ(INITIALIZED, state_);
+
+  if (registration_id == kInvalidServiceWorkerRegistrationId) {
+    RunSoon(FROM_HERE, base::Bind(callback, std::vector<std::string>(),
+                                  SERVICE_WORKER_ERROR_FAILED));
+    return;
+  }
+  if (key_prefix.empty()) {
+    RunSoon(FROM_HERE, base::Bind(callback, std::vector<std::string>(),
+                                  SERVICE_WORKER_ERROR_FAILED));
+    return;
+  }
+
+  database_task_manager_->GetTaskRunner()->PostTask(
+      FROM_HERE,
+      base::Bind(&ServiceWorkerStorage::GetUserDataByKeyPrefixInDB,
+                 database_.get(), base::ThreadTaskRunnerHandle::Get(),
+                 registration_id, key_prefix,
+                 base::Bind(&ServiceWorkerStorage::DidGetUserData,
+                            weak_factory_.GetWeakPtr(), callback)));
+}
+
 void ServiceWorkerStorage::ClearUserData(int64_t registration_id,
                                          const std::vector<std::string>& keys,
                                          const StatusCallback& callback) {
@@ -763,6 +798,39 @@ void ServiceWorkerStorage::GetUserDataForAllRegistrations(
           base::Bind(&ServiceWorkerStorage::DidGetUserDataForAllRegistrations,
                      weak_factory_.GetWeakPtr(),
                      callback)));
+}
+
+void ServiceWorkerStorage::GetUserDataForAllRegistrationsByKeyPrefix(
+    const std::string& key_prefix,
+    const ServiceWorkerStorage::GetUserDataForAllRegistrationsCallback&
+        callback) {
+  if (!LazyInitialize(base::Bind(
+          &ServiceWorkerStorage::GetUserDataForAllRegistrationsByKeyPrefix,
+          weak_factory_.GetWeakPtr(), key_prefix, callback))) {
+    if (state_ != INITIALIZING) {
+      RunSoon(
+          FROM_HERE,
+          base::Bind(callback, std::vector<std::pair<int64_t, std::string>>(),
+                     SERVICE_WORKER_ERROR_ABORT));
+    }
+    return;
+  }
+  DCHECK_EQ(INITIALIZED, state_);
+
+  if (key_prefix.empty()) {
+    RunSoon(FROM_HERE,
+            base::Bind(callback, std::vector<std::pair<int64_t, std::string>>(),
+                       SERVICE_WORKER_ERROR_FAILED));
+    return;
+  }
+
+  database_task_manager_->GetTaskRunner()->PostTask(
+      FROM_HERE,
+      base::Bind(
+          &ServiceWorkerStorage::GetUserDataForAllRegistrationsByKeyPrefixInDB,
+          database_.get(), base::ThreadTaskRunnerHandle::Get(), key_prefix,
+          base::Bind(&ServiceWorkerStorage::DidGetUserDataForAllRegistrations,
+                     weak_factory_.GetWeakPtr(), callback)));
 }
 
 bool ServiceWorkerStorage::OriginHasForeignFetchRegistrations(
@@ -1302,7 +1370,8 @@ ServiceWorkerStorage::GetOrCreateRegistration(
     return registration;
 
   registration = new ServiceWorkerRegistration(
-      data.scope, data.registration_id, context_);
+      ServiceWorkerRegistrationOptions(data.scope), data.registration_id,
+      context_);
   registration->set_resources_total_size_bytes(data.resources_total_size_bytes);
   registration->set_last_update_check(data.last_update_check);
   if (pending_deletions_.find(data.registration_id) !=
@@ -1771,6 +1840,19 @@ void ServiceWorkerStorage::GetUserDataInDB(
                                  base::Bind(callback, values, status));
 }
 
+void ServiceWorkerStorage::GetUserDataByKeyPrefixInDB(
+    ServiceWorkerDatabase* database,
+    scoped_refptr<base::SequencedTaskRunner> original_task_runner,
+    int64_t registration_id,
+    const std::string& key_prefix,
+    const GetUserDataInDBCallback& callback) {
+  std::vector<std::string> values;
+  ServiceWorkerDatabase::Status status =
+      database->ReadUserDataByKeyPrefix(registration_id, key_prefix, &values);
+  original_task_runner->PostTask(FROM_HERE,
+                                 base::Bind(callback, values, status));
+}
+
 void ServiceWorkerStorage::GetUserDataForAllRegistrationsInDB(
     ServiceWorkerDatabase* database,
     scoped_refptr<base::SequencedTaskRunner> original_task_runner,
@@ -1779,6 +1861,19 @@ void ServiceWorkerStorage::GetUserDataForAllRegistrationsInDB(
   std::vector<std::pair<int64_t, std::string>> user_data;
   ServiceWorkerDatabase::Status status =
       database->ReadUserDataForAllRegistrations(key, &user_data);
+  original_task_runner->PostTask(FROM_HERE,
+                                 base::Bind(callback, user_data, status));
+}
+
+void ServiceWorkerStorage::GetUserDataForAllRegistrationsByKeyPrefixInDB(
+    ServiceWorkerDatabase* database,
+    scoped_refptr<base::SequencedTaskRunner> original_task_runner,
+    const std::string& key_prefix,
+    const GetUserDataForAllRegistrationsInDBCallback& callback) {
+  std::vector<std::pair<int64_t, std::string>> user_data;
+  ServiceWorkerDatabase::Status status =
+      database->ReadUserDataForAllRegistrationsByKeyPrefix(key_prefix,
+                                                           &user_data);
   original_task_runner->PostTask(FROM_HERE,
                                  base::Bind(callback, user_data, status));
 }

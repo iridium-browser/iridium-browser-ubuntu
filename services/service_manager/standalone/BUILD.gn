@@ -10,28 +10,22 @@ source_set("standalone") {
   sources = [
     "context.cc",
     "context.h",
-    "tracer.cc",
-    "tracer.h",
   ]
 
   deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
-    "//components/tracing:startup_tracing",
     "//mojo/common:common_base",
     "//mojo/edk/system",
     "//services/catalog:lib",
     "//services/service_manager",
     "//services/service_manager/public/cpp",
-    "//services/service_manager/public/cpp/standalone_service",
     "//services/service_manager/runner/common",
     "//services/service_manager/runner/host:lib",
-    "//services/tracing/public/cpp",
-    "//services/tracing/public/interfaces",
     "//url",
   ]
 
-  data_deps = [
-    "//services/tracing",
-  ]
+  if (!is_ios) {
+    deps += [ "//services/service_manager/public/cpp/standalone_service" ]
+  }
 }

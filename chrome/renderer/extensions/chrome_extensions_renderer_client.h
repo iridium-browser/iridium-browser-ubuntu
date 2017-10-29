@@ -46,6 +46,10 @@ class ChromeExtensionsRendererClient
   // extensions::ExtensionsRendererClient implementation.
   bool IsIncognitoProcess() const override;
   int GetLowestIsolatedWorldId() const override;
+  extensions::Dispatcher* GetDispatcher() override;
+  void OnExtensionLoaded(const extensions::Extension& extension) override;
+  void OnExtensionUnloaded(
+      const extensions::ExtensionId& extension_id) override;
 
   // See ChromeContentRendererClient methods with the same names.
   void RenderThreadStarted();
@@ -74,6 +78,7 @@ class ChromeExtensionsRendererClient
 
   void RunScriptsAtDocumentStart(content::RenderFrame* render_frame);
   void RunScriptsAtDocumentEnd(content::RenderFrame* render_frame);
+  void RunScriptsAtDocumentIdle(content::RenderFrame* render_frame);
 
   extensions::Dispatcher* extension_dispatcher() {
     return extension_dispatcher_.get();

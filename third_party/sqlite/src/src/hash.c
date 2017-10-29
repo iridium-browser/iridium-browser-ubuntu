@@ -55,8 +55,12 @@ void sqlite3HashClear(Hash *pH){
 static unsigned int strHash(const char *z){
   unsigned int h = 0;
   unsigned char c;
-  while( (c = (unsigned char)*z++)!=0 ){
-    h = (h<<3) ^ h ^ sqlite3UpperToLower[c];
+  while( (c = (unsigned char)*z++)!=0 ){     /*OPTIMIZATION-IF-TRUE*/
+    /* Knuth multiplicative hashing.  (Sorting & Searching, p. 510).
+    ** 0x9e3779b1 is 2654435761 which is the closest prime number to
+    ** (2**32)*golden_ratio, where golden_ratio = (sqrt(5) - 1)/2. */
+    h += sqlite3UpperToLower[c];
+    h *= 0x9e3779b1;
   }
   return h;
 }
@@ -112,7 +116,7 @@ static int rehash(Hash *pH, unsigned int new_size){
 
   /* The inability to allocates space for a larger hash table is
   ** a performance hit but it is not a fatal error.  So mark the
-  ** allocation as a benign. Use sqlite3Malloc()/memset(0) instead of 
+  ** allocation as a benign. Use sqlite3Malloc()/memset(0) instead of
   ** sqlite3MallocZero() to make the allocation, as sqlite3MallocZero()
   ** only zeroes the requested number of bytes whereas this module will
   ** use the actual amount of space allocated for the hash table (which
@@ -136,8 +140,9 @@ static int rehash(Hash *pH, unsigned int new_size){
 }
 
 /* This function (for internal use only) locates an element in an
-** hash table that matches the given key.  The hash for this key is
-** also computed and returned in the *pH parameter.
+** hash table that matches the given key.  If no element is found,
+** a pointer to a static null element with HashElem.data==0 is returned.
+** If pH is not NULL, then the hash for this key is written to *pH.
 */
 static HashElem *findElementWithHash(
   const Hash *pH,     /* The pH to be searched */
@@ -147,8 +152,9 @@ static HashElem *findElementWithHash(
   HashElem *elem;                /* Used to loop thru the element list */
   int count;                     /* Number of elements left to test */
   unsigned int h;                /* The computed hash */
+  static HashElem nullElement = { 0, 0, 0, 0 };
 
-  if( pH->ht ){
+  if( pH->ht ){   /*OPTIMIZATION-IF-TRUE*/
     struct _ht *pEntry;
     h = strHash(pKey) % pH->htsize;
     pEntry = &pH->ht[h];
@@ -159,15 +165,15 @@ static HashElem *findElementWithHash(
     elem = pH->first;
     count = pH->count;
   }
-  *pHash = h;
+  if( pHash ) *pHash = h;
   while( count-- ){
     assert( elem!=0 );
-    if( sqlite3StrICmp(elem->pKey,pKey)==0 ){ 
+    if( sqlite3StrICmp(elem->pKey,pKey)==0 ){
       return elem;
     }
     elem = elem->next;
   }
-  return 0;
+  return &nullElement;
 }
 
 /* Remove a single entry from the hash table given a pointer to that
@@ -180,7 +186,7 @@ static void removeElementGivenHash(
 ){
   struct _ht *pEntry;
   if( elem->prev ){
-    elem->prev->next = elem->next; 
+    elem->prev->next = elem->next;
   }else{
     pH->first = elem->next;
   }
@@ -209,13 +215,9 @@ static void removeElementGivenHash(
 ** found, or NULL if there is no match.
 */
 void *sqlite3HashFind(const Hash *pH, const char *pKey){
-  HashElem *elem;    /* The element that matches key */
-  unsigned int h;    /* A hash on key */
-
   assert( pH!=0 );
   assert( pKey!=0 );
-  elem = findElementWithHash(pH, pKey, &h);
-  return elem ? elem->data : 0;
+  return findElementWithHash(pH, pKey, 0)->data;
 }
 
 /* Insert an element into the hash table pH.  The key is pKey
@@ -240,7 +242,7 @@ void *sqlite3HashInsert(Hash *pH, const char *pKey, void *data){
   assert( pH!=0 );
   assert( pKey!=0 );
   elem = findElementWithHash(pH,pKey,&h);
-  if( elem ){
+  if( elem->data ){
     void *old_data = elem->data;
     if( data==0 ){
       removeElementGivenHash(pH,elem,h);

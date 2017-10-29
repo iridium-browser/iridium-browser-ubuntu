@@ -13,6 +13,7 @@
 #import "ios/web/public/web_state/ui/crw_web_delegate.h"
 #include "ios/web/public/web_state/url_verification_constants.h"
 #import "ios/web/web_state/ui/crw_touch_tracking_recognizer.h"
+#import "ios/web/web_state/ui/crw_web_view_navigation_proxy.h"
 
 namespace web {
 
@@ -74,6 +75,10 @@ class WebStateImpl;
 // The web view proxy associated with this controller.
 @property(nonatomic, readonly) id<CRWWebViewProxy> webViewProxy;
 
+// The web view navigation proxy associated with this controller.
+@property(nonatomic, readonly) id<CRWWebViewNavigationProxy>
+    webViewNavigationProxy;
+
 // The view that generates print data when printing. It is nil if printing
 // is not supported.
 @property(nonatomic, readonly) UIView* viewForPrinting;
@@ -95,9 +100,9 @@ class WebStateImpl;
 // Returns whether the top of the content is visible.
 @property(nonatomic, readonly) BOOL atTop;
 
-// YES if JavaScript dialogs, HTTP authentication dialogs and window.open
-// calls should be suppressed. Default is NO. When dialog is suppressed
-// |CRWWebDelegate webControllerDidSuppressDialog:| will be called.
+// YES if JavaScript dialogs and window open requests should be suppressed.
+// Default is NO. When dialog is suppressed
+// |WebStateObserver::DidSuppressDialog| will be called.
 @property(nonatomic, assign) BOOL shouldSuppressDialogs;
 
 // Designated initializer. Initializes web controller with |webState|. The
@@ -152,15 +157,17 @@ class WebStateImpl;
 // to generate an overlay placeholder view.
 - (BOOL)canUseViewForGeneratingOverlayPlaceholderView;
 
-// Start loading the URL specified in |originalParams|, with the specified
+// Start loading the URL specified in |params|, with the specified
 // settings.  Always resets the openedByScript property to NO.
+// NOTE: |params.transition_type| should never be PAGE_TRANSITION_RELOAD except
+// for transient items, if one needs to reload, call |-reload| explicitly.
 - (void)loadWithParams:(const web::NavigationManager::WebLoadParams&)params;
 
 // Loads the URL indicated by current session state.
 - (void)loadCurrentURL;
 
 // Loads HTML in the page and presents it as if it was originating from an
-// application specific URL.
+// application specific URL. |HTML| must not be empty.
 - (void)loadHTML:(NSString*)HTML forAppSpecificURL:(const GURL&)URL;
 
 // Loads HTML in the page and presents it as if it was originating from the
@@ -188,11 +195,11 @@ class WebStateImpl;
 // Dismisses the soft keyboard.
 - (void)dismissKeyboard;
 
-// Requires that the next load rebuild the UIWebView. This is expensive, and
-// should be used only in the case where something has changed that UIWebView
+// Requires that the next load rebuild the web view. This is expensive, and
+// should be used only in the case where something has changed that the web view
 // only checks on creation, such that the whole object needs to be rebuilt.
-// TODO(stuartmorgan): Merge this and reinitializeWebViewAndReload:. They are
-// currently subtly different in terms of implementation, but are for
+// TODO(crbug.com/736102): Merge this and reinitializeWebViewAndReload:. They
+// are currently subtly different in terms of implementation, but are for
 // fundamentally the same purpose.
 - (void)requirePageReconstruction;
 
@@ -259,11 +266,6 @@ class WebStateImpl;
 
 - (CRWJSInjectionReceiver*)jsInjectionReceiver;
 
-// Load the correct HTML page for |error| in a native controller, retrieved
-// from the native provider. Call |loadNativeViewWithSuccess:NO| to load the
-// native controller.
-- (void)loadErrorInNativeView:(NSError*)error;
-
 // Returns the native controller (if any) current mananging the content.
 - (id<CRWNativeContent>)nativeController;
 @end
@@ -272,9 +274,6 @@ class WebStateImpl;
 
 @interface CRWWebController (UsedOnlyForTesting)  // Testing or internal API.
 
-// YES if a user interaction has been registered at any time since the page has
-// loaded.
-@property(nonatomic, readwrite) BOOL userInteractionRegistered;
 // Returns whether the user is interacting with the page.
 @property(nonatomic, readonly) BOOL userIsInteracting;
 
@@ -282,26 +281,12 @@ class WebStateImpl;
 // |webViewContentView|.
 - (void)injectWebViewContentView:(CRWWebViewContentView*)webViewContentView;
 - (void)resetInjectedWebViewContentView;
+
 // Returns the number of observers registered for this CRWWebController.
 - (NSUInteger)observerCount;
-- (void)setURLOnStartLoading:(const GURL&)url;
-- (void)simulateLoadRequestWithURL:(const GURL&)URL;
-
-// Returns the header height.
-- (CGFloat)headerHeight;
 
 // Loads the HTML into the page at the given URL.
 - (void)loadHTML:(NSString*)HTML forURL:(const GURL&)URL;
-
-// Caches request POST data in the given session entry.  Exposed for testing.
-- (void)cachePOSTDataForRequest:(NSURLRequest*)request
-                 inSessionEntry:(CRWSessionEntry*)currentSessionEntry;
-
-// Acts on a single message from the JS object, parsed from JSON into a
-// DictionaryValue. Returns NO if the format for the message was invalid.
-- (BOOL)respondToMessage:(base::DictionaryValue*)crwMessage
-       userIsInteracting:(BOOL)userIsInteracting
-               originURL:(const GURL&)originURL;
 
 @end
 

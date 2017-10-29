@@ -9,6 +9,10 @@
 #include "base/optional.h"
 #include "components/doodle/doodle_types.h"
 
+namespace base {
+class TimeDelta;
+}
+
 namespace doodle {
 
 // Interface for fetching the current doodle from the network.
@@ -19,9 +23,11 @@ namespace doodle {
 class DoodleFetcher {
  public:
   // Callback that is invoked when the fetching is done.
-  // |doodle_config| will only contain a value if |state| is AVAILABLE.
+  // |time_to_live| will only be meaningful, and |doodle_config| will only
+  // contain a value, if |state| is AVAILABLE.
   using FinishedCallback = base::OnceCallback<void(
       DoodleState state,
+      base::TimeDelta time_to_live,
       const base::Optional<DoodleConfig>& doodle_config)>;
 
   virtual ~DoodleFetcher() = default;
@@ -31,6 +37,10 @@ class DoodleFetcher {
   // If a fetch is already running, the callback will be queued and invoked with
   // the result from the next completed request.
   virtual void FetchDoodle(FinishedCallback callback) = 0;
+
+  // Returns whether a fetch is currently in progress, i.e. whether any callback
+  // passed to FetchDoodle hasn't been called yet.
+  virtual bool IsFetchInProgress() const = 0;
 };
 
 }  // namespace doodle

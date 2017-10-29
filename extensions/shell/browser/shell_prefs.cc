@@ -4,6 +4,7 @@
 
 #include "extensions/shell/browser/shell_prefs.h"
 
+#include "base/sequenced_task_runner.h"
 #include "build/build_config.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/json_pref_store.h"
@@ -14,6 +15,7 @@
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/api/audio/audio_api.h"
 #include "extensions/browser/extension_prefs.h"
 
 #if defined(OS_CHROMEOS)
@@ -80,6 +82,7 @@ std::unique_ptr<PrefService> CreateUserPrefService(
   // Prefs should be registered before the PrefService is created.
   PrefRegistrySyncable* pref_registry = new PrefRegistrySyncable;
   ExtensionPrefs::RegisterProfilePrefs(pref_registry);
+  AudioAPI::RegisterUserPrefs(pref_registry);
 
   std::unique_ptr<PrefService> pref_service = factory.Create(pref_registry);
   user_prefs::UserPrefs::Set(browser_context, pref_service.get());

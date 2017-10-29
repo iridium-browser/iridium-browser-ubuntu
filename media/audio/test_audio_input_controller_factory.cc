@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 #include "media/audio/test_audio_input_controller_factory.h"
+
+#include <utility>
+
 #include "media/audio/audio_io.h"
 
 namespace media {
@@ -20,8 +23,7 @@ TestAudioInputController::TestAudioInputController(
                            sync_writer,
                            user_input_monitor,
                            audio_parameters,
-                           type,
-                           audio_manager->GetTaskRunner()),
+                           type),
       audio_parameters_(audio_parameters),
       factory_(factory),
       event_handler_(event_handler),
@@ -37,8 +39,8 @@ void TestAudioInputController::Record() {
     factory_->delegate_->TestAudioControllerOpened(this);
 }
 
-void TestAudioInputController::Close(const base::Closure& closed_task) {
-  GetTaskRunnerForTesting()->PostTask(FROM_HERE, closed_task);
+void TestAudioInputController::Close(base::OnceClosure closed_task) {
+  GetTaskRunnerForTesting()->PostTask(FROM_HERE, std::move(closed_task));
   if (factory_->delegate_)
     factory_->delegate_->TestAudioControllerClosed(this);
 }

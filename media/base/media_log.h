@@ -14,16 +14,16 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ref_counted.h"
 #include "media/base/buffering_state.h"
 #include "media/base/media_export.h"
 #include "media/base/media_log_event.h"
 #include "media/base/pipeline_impl.h"
 #include "media/base/pipeline_status.h"
+#include "url/gurl.h"
 
 namespace media {
 
-class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
+class MEDIA_EXPORT MediaLog {
  public:
   enum MediaLogLevel {
     MEDIALOG_ERROR,
@@ -35,19 +35,34 @@ class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
   static std::string MediaLogLevelToString(MediaLogLevel level);
   static MediaLogEvent::Type MediaLogLevelToEventType(MediaLogLevel level);
   static std::string EventTypeToString(MediaLogEvent::Type type);
+
+  // Returns a string version of the status, unique to each PipelineStatus, and
+  // not including any ':'. This makes it suitable for usage in
+  // MediaError.message as the UA-specific-error-code.
   static std::string PipelineStatusToString(PipelineStatus status);
+
   static std::string BufferingStateToString(BufferingState state);
 
   static std::string MediaEventToLogString(const MediaLogEvent& event);
 
+  // Returns a string usable as part of a MediaError.message, for only
+  // PIPELINE_ERROR or MEDIA_ERROR_LOG_ENTRY events, with any newlines replaced
+  // with whitespace in the latter kind of events.
+  static std::string MediaEventToMessageString(const MediaLogEvent& event);
+
   MediaLog();
+  virtual ~MediaLog();
 
   // Add an event to this log. Overriden by inheritors to actually do something
   // with it.
   virtual void AddEvent(std::unique_ptr<MediaLogEvent> event);
 
-  // Retrieve an error message, if any.
-  virtual std::string GetLastErrorMessage();
+  // Returns a string usable as the contents of a MediaError.message.
+  // This method returns an incomplete message if it is called before the
+  // pertinent events for the error have been added to the log.
+  // Note: The base class definition only produces empty messages. See
+  // RenderMediaLog for where this method is meaningful.
+  virtual std::string GetErrorMessage();
 
   // Records the domain and registry of the current frame security origin to a
   // Rappor privacy-preserving metric. See:
@@ -59,6 +74,8 @@ class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
   std::unique_ptr<MediaLogEvent> CreateBooleanEvent(MediaLogEvent::Type type,
                                                     const std::string& property,
                                                     bool value);
+  std::unique_ptr<MediaLogEvent> CreateCreatedEvent(
+      const std::string& origin_url);
   std::unique_ptr<MediaLogEvent> CreateStringEvent(MediaLogEvent::Type type,
                                                    const std::string& property,
                                                    const std::string& value);
@@ -66,17 +83,12 @@ class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
                                                  const std::string& property,
                                                  base::TimeDelta value);
   std::unique_ptr<MediaLogEvent> CreateLoadEvent(const std::string& url);
-  std::unique_ptr<MediaLogEvent> CreateSeekEvent(float seconds);
+  std::unique_ptr<MediaLogEvent> CreateSeekEvent(double seconds);
   std::unique_ptr<MediaLogEvent> CreatePipelineStateChangedEvent(
       PipelineImpl::State state);
   std::unique_ptr<MediaLogEvent> CreatePipelineErrorEvent(PipelineStatus error);
   std::unique_ptr<MediaLogEvent> CreateVideoSizeSetEvent(size_t width,
                                                          size_t height);
-  std::unique_ptr<MediaLogEvent> CreateBufferedExtentsChangedEvent(
-      int64_t start,
-      int64_t current,
-      int64_t end);
-
   std::unique_ptr<MediaLogEvent> CreateBufferingStateChangedEvent(
       const std::string& property,
       BufferingState state);
@@ -89,27 +101,9 @@ class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
   void SetDoubleProperty(const std::string& key, double value);
   void SetBooleanProperty(const std::string& key, bool value);
 
-  // Histogram names used for reporting; also double as MediaLog key names.
-  static const char kWatchTimeAudioAll[];
-  static const char kWatchTimeAudioMse[];
-  static const char kWatchTimeAudioEme[];
-  static const char kWatchTimeAudioSrc[];
-  static const char kWatchTimeAudioBattery[];
-  static const char kWatchTimeAudioAc[];
-  static const char kWatchTimeAudioVideoAll[];
-  static const char kWatchTimeAudioVideoMse[];
-  static const char kWatchTimeAudioVideoEme[];
-  static const char kWatchTimeAudioVideoSrc[];
-  static const char kWatchTimeAudioVideoBattery[];
-  static const char kWatchTimeAudioVideoAc[];
-
-  // Markers which signify the watch time should be finalized immediately.
-  static const char kWatchTimeFinalize[];
-  static const char kWatchTimeFinalizePower[];
-
- protected:
-  friend class base::RefCountedThreadSafe<MediaLog>;
-  virtual ~MediaLog();
+  // Getter for |id_|. Used by MojoMediaLogService to construct MediaLogEvents
+  // to log into this MediaLog.
+  int32_t id() const { return id_; }
 
  private:
   // A unique (to this process) id for this MediaLog.
@@ -121,15 +115,14 @@ class MEDIA_EXPORT MediaLog : public base::RefCountedThreadSafe<MediaLog> {
 // Helper class to make it easier to use MediaLog like DVLOG().
 class MEDIA_EXPORT LogHelper {
  public:
-  LogHelper(MediaLog::MediaLogLevel level,
-            const scoped_refptr<MediaLog>& media_log);
+  LogHelper(MediaLog::MediaLogLevel level, MediaLog* media_log);
   ~LogHelper();
 
   std::ostream& stream() { return stream_; }
 
  private:
-  MediaLog::MediaLogLevel level_;
-  const scoped_refptr<MediaLog> media_log_;
+  const MediaLog::MediaLogLevel level_;
+  MediaLog* const media_log_;
   std::stringstream stream_;
 };
 

@@ -123,14 +123,9 @@ void EnableHighDPISupport() {
   // does not have EnableChildWindowDpiMessage, necessary for correct non-client
   // area scaling across monitors.
   bool allowed_platform = base::win::GetVersion() >= base::win::VERSION_WIN10;
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
-  bool per_monitor_dpi_switch =
-      !command_line->HasSwitch(switches::kDisablePerMonitorDpi);
   PROCESS_DPI_AWARENESS process_dpi_awareness =
-      allowed_platform && per_monitor_dpi_switch
-          ? PROCESS_PER_MONITOR_DPI_AWARE
-          : PROCESS_SYSTEM_DPI_AWARE;
+      allowed_platform ? PROCESS_PER_MONITOR_DPI_AWARE
+                       : PROCESS_SYSTEM_DPI_AWARE;
   if (!SetProcessDpiAwarenessWrapper(process_dpi_awareness)) {
     SetProcessDPIAwareWrapper();
   }
@@ -218,11 +213,6 @@ int RunFallbackCrashHandler(const base::CommandLine& cmd_line) {
 
 }  // namespace
 
-#if defined(SYZYASAN)
-// This is in chrome_elf.
-extern "C" void BlockUntilHandlerStartedImpl();
-#endif  // SYZYASAN
-
 #if !defined(WIN_CONSOLE_APP)
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE prev, wchar_t*, int) {
 #else
@@ -250,7 +240,7 @@ int main() {
   if (process_type == crash_reporter::switches::kCrashpadHandler) {
     crash_reporter::SetupFallbackCrashHandling(*command_line);
     return crash_reporter::RunAsCrashpadHandler(
-        *base::CommandLine::ForCurrentProcess());
+        *base::CommandLine::ForCurrentProcess(), switches::kProcessType);
   } else if (process_type == crash_reporter::switches::kFallbackCrashHandler) {
     return RunFallbackCrashHandler(*command_line);
   }
@@ -259,14 +249,6 @@ int main() {
 
   // Signal Chrome Elf that Chrome has begun to start.
   SignalChromeElf();
-
-#if defined(SYZYASAN)
-  if (process_type.empty()) {
-    // This is a temporary workaround for a race during startup with the
-    // syzyasan_rtl.dll. See https://crbug.com/675710.
-    BlockUntilHandlerStartedImpl();
-  }
-#endif  // SYZYASAN
 
   // The exit manager is in charge of calling the dtors of singletons.
   base::AtExitManager exit_manager;

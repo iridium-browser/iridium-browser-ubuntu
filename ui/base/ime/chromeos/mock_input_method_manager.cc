@@ -8,7 +8,13 @@
 
 namespace chromeos {
 namespace input_method {
+
 MockInputMethodManager::State::State() {}
+
+scoped_refptr<InputMethodManager::State> MockInputMethodManager::State::Clone()
+    const {
+  return nullptr;
+}
 
 void MockInputMethodManager::State::AddInputMethodExtension(
     const std::string& extension_id,
@@ -65,21 +71,9 @@ void MockInputMethodManager::State::SetInputMethodLoginDefaultFromVPD(
     const std::string& locale,
     const std::string& layout) {}
 
-bool MockInputMethodManager::State::CanCycleInputMethod() {
-  return true;
-}
-
 void MockInputMethodManager::State::SwitchToNextInputMethod() {}
 
 void MockInputMethodManager::State::SwitchToPreviousInputMethod() {}
-
-bool MockInputMethodManager::State::CanSwitchInputMethod(
-    const ui::Accelerator& accelerator) {
-  return true;
-}
-
-void MockInputMethodManager::State::SwitchInputMethod(
-    const ui::Accelerator& accelerator) {}
 
 InputMethodDescriptor MockInputMethodManager::State::GetCurrentInputMethod()
     const {
@@ -105,7 +99,8 @@ MockInputMethodManager::State::GetAllowedInputMethods() {
 
 MockInputMethodManager::State::~State() {}
 
-MockInputMethodManager::MockInputMethodManager() {}
+MockInputMethodManager::MockInputMethodManager()
+    : features_enabled_state_(InputMethodManager::FEATURE_ALL) {}
 
 MockInputMethodManager::~MockInputMethodManager() {}
 
@@ -194,6 +189,19 @@ void MockInputMethodManager::OverrideKeyboardUrlRef(const std::string& keyset) {
 
 bool MockInputMethodManager::IsEmojiHandwritingVoiceOnImeMenuEnabled() {
   return true;
+}
+
+void MockInputMethodManager::SetImeMenuFeatureEnabled(ImeMenuFeature feature,
+                                                      bool enabled) {
+  if (enabled)
+    features_enabled_state_ |= feature;
+  else
+    features_enabled_state_ &= ~feature;
+}
+
+bool MockInputMethodManager::GetImeMenuFeatureEnabled(
+    ImeMenuFeature feature) const {
+  return features_enabled_state_ & feature;
 }
 
 }  // namespace input_method

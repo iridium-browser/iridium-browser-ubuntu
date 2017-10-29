@@ -9,6 +9,7 @@
 #include "xfa/fde/cfde_txtedtengine.h"
 #include "xfa/fde/cfde_txtedtpage.h"
 #include "xfa/fgas/font/cfgas_gefont.h"
+#include "xfa/fgas/layout/cfx_txtbreak.h"
 
 CFDE_TxtEdtTextSet::CFDE_TxtEdtTextSet(CFDE_TxtEdtPage* pPage)
     : m_pPage(pPage) {}
@@ -25,7 +26,7 @@ CFX_RectF CFDE_TxtEdtTextSet::GetRect(const FDE_TEXTEDITPIECE& pPiece) {
 
 int32_t CFDE_TxtEdtTextSet::GetString(FDE_TEXTEDITPIECE* pPiece,
                                       CFX_WideString& wsText) {
-  FX_WCHAR* pBuffer = wsText.GetBuffer(pPiece->nCount);
+  wchar_t* pBuffer = wsText.GetBuffer(pPiece->nCount);
   for (int32_t i = 0; i < pPiece->nCount; i++)
     pBuffer[i] = m_pPage->GetChar(pPiece, i);
 
@@ -37,7 +38,7 @@ CFX_RetainPtr<CFGAS_GEFont> CFDE_TxtEdtTextSet::GetFont() {
   return m_pPage->GetEngine()->GetEditParams()->pFont;
 }
 
-FX_FLOAT CFDE_TxtEdtTextSet::GetFontSize() {
+float CFDE_TxtEdtTextSet::GetFontSize() {
   return m_pPage->GetEngine()->GetEditParams()->fFontSize;
 }
 
@@ -59,13 +60,12 @@ int32_t CFDE_TxtEdtTextSet::GetDisplayPos(const FDE_TEXTEDITPIECE& piece,
   CFX_TxtBreak* pBreak = pEngine->GetTextBreak();
   uint32_t dwLayoutStyle = pBreak->GetLayoutStyles();
   FX_TXTRUN tr;
-  tr.pAccess = m_pPage;
+  tr.pAccess = m_pPage.Get();
   tr.pIdentity = &piece;
   tr.iLength = nLength;
   tr.pFont = pTextParams->pFont;
   tr.fFontSize = pTextParams->fFontSize;
   tr.dwStyles = dwLayoutStyle;
-  tr.iCharRotation = pTextParams->nCharRotation;
   tr.dwCharStyles = piece.dwCharStyles;
   tr.pRect = &piece.rtPiece;
   tr.wLineBreakChar = pTextParams->wLineBreakChar;
@@ -78,17 +78,16 @@ std::vector<CFX_RectF> CFDE_TxtEdtTextSet::GetCharRects(
   if (!pPiece || pPiece->nCount < 1)
     return std::vector<CFX_RectF>();
 
-  auto pEngine = static_cast<CFDE_TxtEdtEngine*>(m_pPage->GetEngine());
+  auto* pEngine = static_cast<CFDE_TxtEdtEngine*>(m_pPage->GetEngine());
   const FDE_TXTEDTPARAMS* pTextParams = pEngine->GetEditParams();
   uint32_t dwLayoutStyle = pEngine->GetTextBreak()->GetLayoutStyles();
   FX_TXTRUN tr;
-  tr.pAccess = m_pPage;
+  tr.pAccess = m_pPage.Get();
   tr.pIdentity = pPiece;
   tr.iLength = pPiece->nCount;
   tr.pFont = pTextParams->pFont;
   tr.fFontSize = pTextParams->fFontSize;
   tr.dwStyles = dwLayoutStyle;
-  tr.iCharRotation = pTextParams->nCharRotation;
   tr.dwCharStyles = pPiece->dwCharStyles;
   tr.pRect = &pPiece->rtPiece;
   tr.wLineBreakChar = pTextParams->wLineBreakChar;

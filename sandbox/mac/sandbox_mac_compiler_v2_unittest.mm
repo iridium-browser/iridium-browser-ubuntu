@@ -35,7 +35,7 @@ MULTIPROCESS_TEST_MAIN(V2ProfileProcess) {
   // print the profile out for debugging purposes.
   std::string profile =
       "(version 1)\n"
-      "(deny default)\n"
+      "(deny default (with no-log))\n"
       "(define allowed-dir \"ALLOWED_READ_DIR\")\n"
       "(define temp-file \"ALLOWED_TEMP_FILE\")\n"
       "(define is-pre-10_10 \"IS_PRE_10_10\")\n"
@@ -126,11 +126,11 @@ MULTIPROCESS_TEST_MAIN(V2ProfileProcess) {
 }
 
 TEST_F(SandboxMacCompilerV2Test, V2ProfileTest) {
-  base::Process process = SpawnChild("V2ProfileProcess");
-  ASSERT_TRUE(process.IsValid());
+  base::SpawnChildResult spawn_child = SpawnChild("V2ProfileProcess");
+  ASSERT_TRUE(spawn_child.process.IsValid());
   int exit_code = 42;
-  EXPECT_TRUE(process.WaitForExitWithTimeout(TestTimeouts::action_max_timeout(),
-                                             &exit_code));
+  EXPECT_TRUE(spawn_child.process.WaitForExitWithTimeout(
+      TestTimeouts::action_max_timeout(), &exit_code));
   EXPECT_EQ(exit_code, 0);
 }
 

@@ -37,6 +37,8 @@ namespace offline_pages {
 // * In M56 original_url was added.
 // * In M57 expiration_time was dropped. Existing expired pages would be
 //   removed when metadata consistency check happens.
+// * In M58-M60 there were no changes.
+// * In M61 request_origin was added.
 //
 // Here is a procedure to update the schema for this store:
 // * Decide how to detect that the store is on a particular version, which
@@ -76,9 +78,8 @@ class OfflinePageMetadataStoreSQL : public OfflinePageMetadataStore {
   void SetStateForTesting(StoreState state, bool reset_db);
 
  private:
-  // Used to conclude opening/resetting DB connection.
-  void OnOpenConnectionDone(const InitializeCallback& callback, bool success);
-  void OnResetDone(const ResetCallback& callback, bool success);
+  // Used as callback to set state from open / initial read operations.
+  void SetState(StoreState state);
 
   // Checks whether a valid DB connection is present and store state is LOADED.
   bool CheckDb() const;

@@ -4,78 +4,137 @@
 
 #include "core/style/ComputedStyle.h"
 
+#include "build/build_config.h"
 #include "core/style/ClipPathOperation.h"
 #include "core/style/ShapeValue.h"
+#include "core/style/StyleDifference.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
 TEST(ComputedStyleTest, ShapeOutsideBoxEqual) {
-  ShapeValue* shape1 = ShapeValue::createBoxShapeValue(ContentBox);
-  ShapeValue* shape2 = ShapeValue::createBoxShapeValue(ContentBox);
-  RefPtr<ComputedStyle> style1 = ComputedStyle::create();
-  RefPtr<ComputedStyle> style2 = ComputedStyle::create();
-  style1->setShapeOutside(shape1);
-  style2->setShapeOutside(shape2);
+  ShapeValue* shape1 = ShapeValue::CreateBoxShapeValue(kContentBox);
+  ShapeValue* shape2 = ShapeValue::CreateBoxShapeValue(kContentBox);
+  RefPtr<ComputedStyle> style1 = ComputedStyle::Create();
+  RefPtr<ComputedStyle> style2 = ComputedStyle::Create();
+  style1->SetShapeOutside(shape1);
+  style2->SetShapeOutside(shape2);
   ASSERT_EQ(*style1, *style2);
 }
 
 TEST(ComputedStyleTest, ShapeOutsideCircleEqual) {
-  RefPtr<BasicShapeCircle> circle1 = BasicShapeCircle::create();
-  RefPtr<BasicShapeCircle> circle2 = BasicShapeCircle::create();
-  ShapeValue* shape1 = ShapeValue::createShapeValue(circle1, ContentBox);
-  ShapeValue* shape2 = ShapeValue::createShapeValue(circle2, ContentBox);
-  RefPtr<ComputedStyle> style1 = ComputedStyle::create();
-  RefPtr<ComputedStyle> style2 = ComputedStyle::create();
-  style1->setShapeOutside(shape1);
-  style2->setShapeOutside(shape2);
+  RefPtr<BasicShapeCircle> circle1 = BasicShapeCircle::Create();
+  RefPtr<BasicShapeCircle> circle2 = BasicShapeCircle::Create();
+  ShapeValue* shape1 = ShapeValue::CreateShapeValue(circle1, kContentBox);
+  ShapeValue* shape2 = ShapeValue::CreateShapeValue(circle2, kContentBox);
+  RefPtr<ComputedStyle> style1 = ComputedStyle::Create();
+  RefPtr<ComputedStyle> style2 = ComputedStyle::Create();
+  style1->SetShapeOutside(shape1);
+  style2->SetShapeOutside(shape2);
   ASSERT_EQ(*style1, *style2);
 }
 
 TEST(ComputedStyleTest, ClipPathEqual) {
-  RefPtr<BasicShapeCircle> shape = BasicShapeCircle::create();
-  RefPtr<ShapeClipPathOperation> path1 = ShapeClipPathOperation::create(shape);
-  RefPtr<ShapeClipPathOperation> path2 = ShapeClipPathOperation::create(shape);
-  RefPtr<ComputedStyle> style1 = ComputedStyle::create();
-  RefPtr<ComputedStyle> style2 = ComputedStyle::create();
-  style1->setClipPath(path1);
-  style2->setClipPath(path2);
+  RefPtr<BasicShapeCircle> shape = BasicShapeCircle::Create();
+  RefPtr<ShapeClipPathOperation> path1 = ShapeClipPathOperation::Create(shape);
+  RefPtr<ShapeClipPathOperation> path2 = ShapeClipPathOperation::Create(shape);
+  RefPtr<ComputedStyle> style1 = ComputedStyle::Create();
+  RefPtr<ComputedStyle> style2 = ComputedStyle::Create();
+  style1->SetClipPath(path1);
+  style2->SetClipPath(path2);
   ASSERT_EQ(*style1, *style2);
 }
 
 TEST(ComputedStyleTest, FocusRingWidth) {
-  RefPtr<ComputedStyle> style = ComputedStyle::create();
-  style->setEffectiveZoom(3.5);
-#if OS(MACOSX)
-  style->setOutlineStyle(BorderStyleSolid);
-  ASSERT_EQ(3, style->getOutlineStrokeWidthForFocusRing());
+  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  style->SetEffectiveZoom(3.5);
+#if defined(OS_MACOSX)
+  style->SetOutlineStyle(EBorderStyle::kSolid);
+  ASSERT_EQ(3, style->GetOutlineStrokeWidthForFocusRing());
 #else
-  ASSERT_EQ(3.5, style->getOutlineStrokeWidthForFocusRing());
-  style->setEffectiveZoom(0.5);
-  ASSERT_EQ(1, style->getOutlineStrokeWidthForFocusRing());
+  ASSERT_EQ(3.5, style->GetOutlineStrokeWidthForFocusRing());
+  style->SetEffectiveZoom(0.5);
+  ASSERT_EQ(1, style->GetOutlineStrokeWidthForFocusRing());
 #endif
 }
 
 TEST(ComputedStyleTest, FocusRingOutset) {
-  RefPtr<ComputedStyle> style = ComputedStyle::create();
-  style->setOutlineStyle(BorderStyleSolid);
-  style->setOutlineStyleIsAuto(OutlineIsAutoOn);
-  style->setEffectiveZoom(4.75);
-#if OS(MACOSX)
-  ASSERT_EQ(4, style->outlineOutsetExtent());
+  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  style->SetOutlineStyle(EBorderStyle::kSolid);
+  style->SetOutlineStyleIsAuto(kOutlineIsAutoOn);
+  style->SetEffectiveZoom(4.75);
+#if defined(OS_MACOSX)
+  ASSERT_EQ(4, style->OutlineOutsetExtent());
 #else
-  ASSERT_EQ(3, style->outlineOutsetExtent());
+  ASSERT_EQ(3, style->OutlineOutsetExtent());
 #endif
 }
 
 TEST(ComputedStyleTest, Preserve3dForceStackingContext) {
-  RefPtr<ComputedStyle> style = ComputedStyle::create();
-  style->setTransformStyle3D(TransformStyle3DPreserve3D);
-  style->setOverflowX(EOverflow::kHidden);
-  style->setOverflowY(EOverflow::kHidden);
-  style->updateIsStackingContext(false, false);
-  EXPECT_EQ(TransformStyle3DFlat, style->usedTransformStyle3D());
-  EXPECT_TRUE(style->isStackingContext());
+  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  style->SetTransformStyle3D(ETransformStyle3D::kPreserve3d);
+  style->SetOverflowX(EOverflow::kHidden);
+  style->SetOverflowY(EOverflow::kHidden);
+  style->UpdateIsStackingContext(false, false);
+  EXPECT_EQ(ETransformStyle3D::kFlat, style->UsedTransformStyle3D());
+  EXPECT_TRUE(style->IsStackingContext());
+}
+
+TEST(ComputedStyleTest, FirstPublicPseudoStyle) {
+  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  style->SetHasPseudoStyle(kPseudoIdFirstLine);
+  EXPECT_TRUE(style->HasPseudoStyle(kPseudoIdFirstLine));
+  EXPECT_TRUE(style->HasAnyPublicPseudoStyles());
+}
+
+TEST(ComputedStyleTest, LastPublicPseudoStyle) {
+  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  style->SetHasPseudoStyle(kPseudoIdScrollbar);
+  EXPECT_TRUE(style->HasPseudoStyle(kPseudoIdScrollbar));
+  EXPECT_TRUE(style->HasAnyPublicPseudoStyles());
+}
+
+TEST(ComputedStyleTest,
+     UpdatePropertySpecificDifferencesRespectsTransformAnimation) {
+  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  RefPtr<ComputedStyle> other = ComputedStyle::Clone(*style);
+  other->SetHasCurrentTransformAnimation(true);
+  StyleDifference diff;
+  style->UpdatePropertySpecificDifferences(*other, diff);
+  EXPECT_TRUE(diff.TransformChanged());
+}
+
+TEST(ComputedStyleTest, HasOutlineWithCurrentColor) {
+  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  EXPECT_FALSE(style->HasOutline());
+  EXPECT_FALSE(style->HasOutlineWithCurrentColor());
+  style->SetOutlineColor(StyleColor::CurrentColor());
+  EXPECT_FALSE(style->HasOutlineWithCurrentColor());
+  style->SetOutlineWidth(5);
+  EXPECT_FALSE(style->HasOutlineWithCurrentColor());
+  style->SetOutlineStyle(EBorderStyle::kSolid);
+  EXPECT_TRUE(style->HasOutlineWithCurrentColor());
+}
+
+TEST(ComputedStyleTest, HasBorderColorReferencingCurrentColor) {
+  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  EXPECT_FALSE(style->HasBorderColorReferencingCurrentColor());
+  style->SetBorderBottomColor(StyleColor::CurrentColor());
+  EXPECT_FALSE(style->HasBorderColorReferencingCurrentColor());
+  style->SetBorderBottomWidth(5);
+  EXPECT_FALSE(style->HasBorderColorReferencingCurrentColor());
+  style->SetBorderBottomStyle(EBorderStyle::kSolid);
+  EXPECT_TRUE(style->HasBorderColorReferencingCurrentColor());
+}
+
+TEST(ComputedStyleTest, BorderWidth) {
+  RefPtr<ComputedStyle> style = ComputedStyle::Create();
+  style->SetBorderBottomWidth(5);
+  EXPECT_EQ(style->BorderBottomWidth(), 0);
+  EXPECT_EQ(style->BorderBottom().Width(), 5);
+  style->SetBorderBottomStyle(EBorderStyle::kSolid);
+  EXPECT_EQ(style->BorderBottomWidth(), 5);
+  EXPECT_EQ(style->BorderBottom().Width(), 5);
 }
 
 }  // namespace blink

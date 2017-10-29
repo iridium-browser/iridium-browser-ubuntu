@@ -24,11 +24,12 @@
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/common/media/media_devices.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/test/test_content_browser_client.h"
+#include "media/audio/audio_system_impl.h"
 #include "media/audio/mock_audio_manager.h"
+#include "media/audio/test_audio_thread.h"
 #include "media/base/media_switches.h"
 #include "media/capture/video_capture_types.h"
 #include "mojo/public/cpp/bindings/binding.h"
@@ -114,11 +115,13 @@ class VideoCaptureTest : public testing::Test,
  public:
   VideoCaptureTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        audio_manager_(
-            new media::MockAudioManager(base::ThreadTaskRunnerHandle::Get())),
+        audio_manager_(new media::MockAudioManager(
+            base::MakeUnique<media::TestAudioThread>())),
+        audio_system_(media::AudioSystemImpl::Create(audio_manager_.get())),
         task_runner_(base::ThreadTaskRunnerHandle::Get()),
         opened_session_id_(kInvalidMediaCaptureSessionId),
         observer_binding_(this) {}
+  ~VideoCaptureTest() override { audio_manager_->Shutdown(); }
 
   void SetUp() override {
     SetBrowserClientForTesting(&browser_client_);
@@ -127,10 +130,12 @@ class VideoCaptureTest : public testing::Test,
         switches::kUseFakeDeviceForMediaStream);
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kUseFakeUIForMediaStream);
-    media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
+    media_stream_manager_ =
+        base::MakeUnique<MediaStreamManager>(audio_system_.get());
 
     // Create a Host and connect it to a simulated IPC channel.
-    host_.reset(new VideoCaptureHost(media_stream_manager_.get()));
+    host_.reset(new VideoCaptureHost(0 /* render_process_id */,
+                                     media_stream_manager_.get()));
 
     OpenSession();
   }
@@ -162,10 +167,9 @@ class VideoCaptureTest : public testing::Test,
       devices_to_enumerate[MEDIA_DEVICE_TYPE_VIDEO_INPUT] = true;
       media_stream_manager_->media_devices_manager()->EnumerateDevices(
           devices_to_enumerate,
-          base::Bind(
-              &VideoInputDevicesEnumerated, run_loop.QuitClosure(),
-              browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
-              security_origin, &video_devices));
+          base::Bind(&VideoInputDevicesEnumerated, run_loop.QuitClosure(),
+                     browser_context_.GetMediaDeviceIDSalt(), security_origin,
+                     &video_devices));
       run_loop.Run();
     }
     ASSERT_FALSE(video_devices.empty());
@@ -176,9 +180,9 @@ class VideoCaptureTest : public testing::Test,
       StreamDeviceInfo opened_device;
       media_stream_manager_->OpenDevice(
           &stream_requester_, render_process_id, render_frame_id,
-          browser_context_.GetResourceContext()->GetMediaDeviceIDSalt(),
-          page_request_id, video_devices[0].device_id,
-          MEDIA_DEVICE_VIDEO_CAPTURE, security_origin);
+          browser_context_.GetMediaDeviceIDSalt(), page_request_id,
+          video_devices[0].device_id, MEDIA_DEVICE_VIDEO_CAPTURE,
+          security_origin);
       EXPECT_CALL(stream_requester_,
                   DeviceOpened(render_frame_id, page_request_id, _, _))
           .Times(1)
@@ -229,8 +233,9 @@ class VideoCaptureTest : public testing::Test,
         .Times(AnyNumber())
         .WillRepeatedly(ExitMessageLoop(task_runner_, run_loop.QuitClosure()));
 
-    host_->Start(kDeviceId, opened_session_id_, params,
-                 observer_binding_.CreateInterfacePtrAndBind());
+    mojom::VideoCaptureObserverPtr observer;
+    observer_binding_.Bind(mojo::MakeRequest(&observer));
+    host_->Start(kDeviceId, opened_session_id_, params, std::move(observer));
 
     run_loop.Run();
   }
@@ -249,8 +254,9 @@ class VideoCaptureTest : public testing::Test,
     // capture is stopped immediately.
     EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STARTED))
         .Times(AtMost(1));
-    host_->Start(kDeviceId, opened_session_id_, params,
-                 observer_binding_.CreateInterfacePtrAndBind());
+    mojom::VideoCaptureObserverPtr observer;
+    observer_binding_.Bind(mojo::MakeRequest(&observer));
+    host_->Start(kDeviceId, opened_session_id_, params, std::move(observer));
 
     EXPECT_CALL(*this, OnStateChanged(mojom::VideoCaptureState::STOPPED));
     host_->Stop(kDeviceId);
@@ -308,9 +314,8 @@ class VideoCaptureTest : public testing::Test,
   StrictMock<MockMediaStreamRequester> stream_requester_;
   std::unique_ptr<MediaStreamManager> media_stream_manager_;
   const content::TestBrowserThreadBundle thread_bundle_;
-  // |audio_manager_| needs to outlive |thread_bundle_| because it uses the
-  // underlying message loop.
-  media::ScopedAudioManagerPtr audio_manager_;
+  std::unique_ptr<media::AudioManager> audio_manager_;
+  std::unique_ptr<media::AudioSystem> audio_system_;
   content::TestBrowserContext browser_context_;
   content::TestContentBrowserClient browser_client_;
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;

@@ -192,7 +192,7 @@ class SearchProviderTest : public testing::Test,
   // If we're waiting for the provider to finish, this exits the message loop.
   void OnProviderUpdate(bool updated_matches) override;
 
-  // Runs a nested message loop until provider_ is done. The message loop is
+  // Runs a nested run loop until provider_ is done. The message loop is
   // exited by way of OnProviderUpdate.
   void RunTillProviderDone();
 
@@ -330,8 +330,9 @@ void SearchProviderTest::RunTest(TestData* cases,
   ACMatches matches;
   for (int i = 0; i < num_cases; ++i) {
     AutocompleteInput input(cases[i].input, base::string16::npos, std::string(),
-                            GURL(), metrics::OmniboxEventProto::INVALID_SPEC,
-                            false, prefer_keyword, true, true, false,
+                            GURL(), base::string16(),
+                            metrics::OmniboxEventProto::INVALID_SPEC, false,
+                            prefer_keyword, true, true, false,
                             ChromeAutocompleteSchemeClassifier(&profile_));
     provider_->Start(input, false);
     matches = provider_->matches();
@@ -374,11 +375,11 @@ void SearchProviderTest::QueryForInput(const base::string16& text,
                                        bool prevent_inline_autocomplete,
                                        bool prefer_keyword) {
   // Start a query.
-  AutocompleteInput input(text, base::string16::npos, std::string(), GURL(),
-                          metrics::OmniboxEventProto::INVALID_SPEC,
-                          prevent_inline_autocomplete, prefer_keyword, true,
-                          true, false,
-                          ChromeAutocompleteSchemeClassifier(&profile_));
+  AutocompleteInput input(
+      text, base::string16::npos, std::string(), GURL(), base::string16(),
+      metrics::OmniboxEventProto::INVALID_SPEC, prevent_inline_autocomplete,
+      prefer_keyword, true, true, false,
+      ChromeAutocompleteSchemeClassifier(&profile_));
   provider_->Start(input, false);
 
   // RunUntilIdle so that the task scheduled by SearchProvider to create the
@@ -1008,8 +1009,8 @@ TEST_F(SearchProviderTest, KeywordOrderingAndDescriptions) {
       nullptr, AutocompleteProvider::TYPE_SEARCH);
   controller.Start(AutocompleteInput(
       ASCIIToUTF16("k t"), base::string16::npos, std::string(), GURL(),
-      metrics::OmniboxEventProto::INVALID_SPEC, false, false, true, true, false,
-      ChromeAutocompleteSchemeClassifier(&profile_)));
+      base::string16(), metrics::OmniboxEventProto::INVALID_SPEC, false, false,
+      true, true, false, ChromeAutocompleteSchemeClassifier(&profile_)));
   const AutocompleteResult& result = controller.result();
 
   // There should be three matches, one for the keyword history, one for
@@ -2507,6 +2508,77 @@ TEST_F(SearchProviderTest, FieldTrialTriggeredParsing) {
     EXPECT_EQ(0, providers_info[0].field_trial_triggered_in_session_size());
   }
 }
+// A basic test that verifies the specific type identifier parsing logic.
+TEST_F(SearchProviderTest, SpecificTypeIdentifierParsing) {
+  struct Match {
+    std::string contents;
+    int subtype_identifier;
+  };
+
+  struct {
+    const std::string input_text;
+    const std::string provider_response_json;
+    // The order of the expected matches is not important.
+    const Match expected_matches[2];
+  } cases[] = {
+      // Check that the specific type is set to 0 when these values are not
+      // provide in the response.
+      {"a",
+       "[\"a\",[\"ab\",\"http://b.com\"],[],[], "
+       "{\"google:suggesttype\":[\"QUERY\", \"NAVIGATION\"]}]",
+       {{"ab", 0}, {"b.com", 0}}},
+
+      // Check that the specific type works for zero-suggest suggestions.
+      {"c",
+       "[\"c\",[\"cd\",\"http://d.com\"],[],[], "
+       "{\"google:suggesttype\":[\"QUERY\", \"NAVIGATION\"],"
+       "\"google:subtypeid\":[1, 3]}]",
+       {{"cd", 1}, {"d.com", 3}}},
+
+      // Check that the specific type is set to zero when the number of
+      // suggestions is smaller than the number of id's provided.
+      {"foo",
+       "[\"foo\",[\"foo bar\", \"foo baz\"],[],[], "
+       "{\"google:suggesttype\":[\"QUERY\", \"QUERY\"],"
+       "\"google:subtypeid\":[1, 2, 3]}]",
+       {{"foo bar", 0}, {"foo baz", 0}}},
+
+      // Check that the specific type is set to zero when the number of
+      // suggestions is larger than the number of id's provided.
+      {"bar",
+       "[\"bar\",[\"bar foo\", \"bar foz\"],[],[], "
+       "{\"google:suggesttype\":[\"QUERY\", \"QUERY\"],"
+       "\"google:subtypeid\":[1]}]",
+       {{"bar foo", 0}, {"bar foz", 0}}},
+
+      // Check that ids stick to their suggestions when these are reordered
+      // based on suggetion relevance values.
+      {"e",
+       "[\"e\",[\"ef\",\"http://e.com\"],[],[], "
+       "{\"google:suggesttype\":[\"QUERY\", \"NAVIGATION\"],"
+       "\"google:suggestrelevance\":[9300, 9800],"
+       "\"google:subtypeid\":[2, 4]}]",
+       {{"ef", 2}, {"e.com", 4}}}};
+
+  for (size_t i = 0; i < arraysize(cases); ++i) {
+    QueryForInputAndWaitForFetcherResponses(
+        ASCIIToUTF16(cases[i].input_text), false,
+        cases[i].provider_response_json, std::string());
+
+    // Check for the match and field trial triggered bits.
+    const ACMatches& matches = provider_->matches();
+    ASSERT_FALSE(matches.empty());
+    for (size_t j = 0; j < arraysize(cases[i].expected_matches); ++j) {
+      if (cases[i].expected_matches[j].contents == kNotApplicable)
+        continue;
+      AutocompleteMatch match;
+      EXPECT_TRUE(FindMatchWithContents(
+          ASCIIToUTF16(cases[i].expected_matches[j].contents), &match));
+      EXPECT_EQ(cases[i].expected_matches[j].subtype_identifier,
+                match.subtype_identifier);
+    }
+  }
+}
 
 // Verifies inline autocompletion of navigational results.
 TEST_F(SearchProviderTest, NavigationInline) {
@@ -2667,7 +2739,7 @@ TEST_F(SearchProviderTest, NavigationInline) {
     QueryForInput(ASCIIToUTF16(cases[i].input), false, false);
     SearchSuggestionParser::NavigationResult result(
         ChromeAutocompleteSchemeClassifier(&profile_), GURL(cases[i].url),
-        AutocompleteMatchType::NAVSUGGEST, base::string16(), std::string(),
+        AutocompleteMatchType::NAVSUGGEST, 0, base::string16(), std::string(),
         false, 0, false, ASCIIToUTF16(cases[i].input));
     result.set_received_after_last_keystroke(false);
     AutocompleteMatch match(provider_->NavigationToMatch(result));
@@ -2681,7 +2753,7 @@ TEST_F(SearchProviderTest, NavigationInline) {
     QueryForInput(ASCIIToUTF16(cases[i].input), true, false);
     SearchSuggestionParser::NavigationResult result_prevent_inline(
         ChromeAutocompleteSchemeClassifier(&profile_), GURL(cases[i].url),
-        AutocompleteMatchType::NAVSUGGEST, base::string16(), std::string(),
+        AutocompleteMatchType::NAVSUGGEST, 0, base::string16(), std::string(),
         false, 0, false, ASCIIToUTF16(cases[i].input));
     result_prevent_inline.set_received_after_last_keystroke(false);
     AutocompleteMatch match_prevent_inline(
@@ -2701,8 +2773,8 @@ TEST_F(SearchProviderTest, NavigationInlineSchemeSubstring) {
   const base::string16 url(ASCIIToUTF16("http://a.com"));
   SearchSuggestionParser::NavigationResult result(
       ChromeAutocompleteSchemeClassifier(&profile_), GURL(url),
-      AutocompleteMatchType::NAVSUGGEST,
-      base::string16(), std::string(), false, 0, false, input);
+      AutocompleteMatchType::NAVSUGGEST, 0, base::string16(), std::string(),
+      false, 0, false, input);
   result.set_received_after_last_keystroke(false);
 
   // Check the offset and strings when inline autocompletion is allowed.
@@ -2725,9 +2797,9 @@ TEST_F(SearchProviderTest, NavigationInlineSchemeSubstring) {
 TEST_F(SearchProviderTest, NavigationInlineDomainClassify) {
   QueryForInput(ASCIIToUTF16("w"), false, false);
   SearchSuggestionParser::NavigationResult result(
-      ChromeAutocompleteSchemeClassifier(&profile_),
-      GURL("http://www.wow.com"), AutocompleteMatchType::NAVSUGGEST,
-      base::string16(), std::string(), false, 0, false, ASCIIToUTF16("w"));
+      ChromeAutocompleteSchemeClassifier(&profile_), GURL("http://www.wow.com"),
+      AutocompleteMatchType::NAVSUGGEST, 0, base::string16(), std::string(),
+      false, 0, false, ASCIIToUTF16("w"));
   result.set_received_after_last_keystroke(false);
   AutocompleteMatch match(provider_->NavigationToMatch(result));
   EXPECT_EQ(ASCIIToUTF16("ow.com"), match.inline_autocompletion);
@@ -2857,71 +2929,70 @@ TEST_F(SearchProviderTest, PrefetchMetadataParsing) {
     const std::string keyword_provider_response_json;
     const Match matches[5];
   } cases[] = {
-    // Default provider response does not have prefetch details. Ensure that the
-    // suggestions are not marked as prefetch query.
-    { "a",
-      false,
-      "[\"a\",[\"b\", \"c\"],[],[],{\"google:suggestrelevance\":[1, 2]}]",
-      std::string(),
-      { { "a", false, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, false },
-        { "c", false, AutocompleteMatchType::SEARCH_SUGGEST, false },
-        { "b", false, AutocompleteMatchType::SEARCH_SUGGEST, false },
-        kEmptyMatch,
-        kEmptyMatch
+      // Default provider response does not have prefetch details. Ensure that
+      // the suggestions are not marked as prefetch query.
+      {
+          "a",
+          false,
+          "[\"a\",[\"b\", \"c\"],[],[],{\"google:suggestrelevance\":[1, 2]}]",
+          std::string(),
+          {{"a", false, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, false},
+           {"c", false, AutocompleteMatchType::SEARCH_SUGGEST, false},
+           {"b", false, AutocompleteMatchType::SEARCH_SUGGEST, false},
+           kEmptyMatch,
+           kEmptyMatch},
       },
-    },
-    // Ensure that default provider suggest response prefetch details are
-    // parsed and recorded in AutocompleteMatch.
-    { "ab",
-      false,
-      "[\"ab\",[\"abc\", \"http://b.com\", \"http://c.com\"],[],[],"
+      // Ensure that default provider suggest response prefetch details are
+      // parsed and recorded in AutocompleteMatch.
+      {
+          "ab",
+          false,
+          "[\"ab\",[\"abc\", \"http://b.com\", \"http://c.com\"],[],[],"
           "{\"google:clientdata\":{\"phi\": 0},"
           "\"google:suggesttype\":[\"QUERY\", \"NAVIGATION\", \"NAVIGATION\"],"
           "\"google:suggestrelevance\":[999, 12, 1]}]",
-      std::string(),
-      { { "ab",    false, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, false },
-        { "abc",   true,  AutocompleteMatchType::SEARCH_SUGGEST, false },
-        { "b.com", false, AutocompleteMatchType::NAVSUGGEST, false },
-        { "c.com", false, AutocompleteMatchType::NAVSUGGEST, false },
-        kEmptyMatch
+          std::string(),
+          {{"ab", false, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, false},
+           {"abc", true, AutocompleteMatchType::SEARCH_SUGGEST, false},
+           {"b.com", false, AutocompleteMatchType::NAVSUGGEST, false},
+           {"c.com", false, AutocompleteMatchType::NAVSUGGEST, false},
+           kEmptyMatch},
       },
-    },
-    // Default provider suggest response has prefetch details.
-    // SEARCH_WHAT_YOU_TYPE suggestion outranks SEARCH_SUGGEST suggestion for
-    // the same query string. Ensure that the prefetch details from
-    // SEARCH_SUGGEST match are set onto SEARCH_WHAT_YOU_TYPE match.
-    { "ab",
-      false,
-      "[\"ab\",[\"ab\", \"http://ab.com\"],[],[],"
+      // Default provider suggest response has prefetch details.
+      // SEARCH_WHAT_YOU_TYPE suggestion outranks SEARCH_SUGGEST suggestion for
+      // the same query string. Ensure that the prefetch details from
+      // SEARCH_SUGGEST match are set onto SEARCH_WHAT_YOU_TYPE match.
+      {
+          "ab",
+          false,
+          "[\"ab\",[\"ab\", \"http://ab.com\"],[],[],"
           "{\"google:clientdata\":{\"phi\": 0},"
           "\"google:suggesttype\":[\"QUERY\", \"NAVIGATION\"],"
           "\"google:suggestrelevance\":[99, 98]}]",
-      std::string(),
-      { {"ab", true, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, false },
-        {"ab.com", false, AutocompleteMatchType::NAVSUGGEST, false },
-        kEmptyMatch,
-        kEmptyMatch,
-        kEmptyMatch
+          std::string(),
+          {{"ab", true, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, false},
+           {"ab.com", false, AutocompleteMatchType::NAVSUGGEST, false},
+           kEmptyMatch,
+           kEmptyMatch,
+           kEmptyMatch},
       },
-    },
-    // Default provider response has prefetch details. We prefer keyword
-    // provider results. Ensure that prefetch bit for a suggestion from the
-    // default search provider does not get copied onto a higher-scoring match
-    // for the same query string from the keyword provider.
-    { "k a",
-      true,
-      "[\"k a\",[\"a\", \"ab\"],[],[], {\"google:clientdata\":{\"phi\": 0},"
+      // Default provider response has prefetch details. We prefer keyword
+      // provider results. Ensure that prefetch bit for a suggestion from the
+      // default search provider does not get copied onto a higher-scoring match
+      // for the same query string from the keyword provider.
+      {
+          "k a",
+          true,
+          "[\"k a\",[\"a\", \"ab\"],[],[], {\"google:clientdata\":{\"phi\": 0},"
           "\"google:suggesttype\":[\"QUERY\", \"QUERY\"],"
           "\"google:suggestrelevance\":[9, 12]}]",
-      "[\"a\",[\"b\", \"c\"],[],[],{\"google:suggestrelevance\":[1, 2]}]",
-      { { "a", false, AutocompleteMatchType::SEARCH_OTHER_ENGINE, true},
-        { "k a", false, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, false },
-        { "ab", false, AutocompleteMatchType::SEARCH_SUGGEST, false },
-        { "c", false, AutocompleteMatchType::SEARCH_SUGGEST, true },
-        { "b", false, AutocompleteMatchType::SEARCH_SUGGEST, true }
-      },
-    }
-  };
+          "[\"a\",[\"b\", \"c\"],[],[],{\"google:suggestrelevance\":[1, 2]}]",
+          {{"a", false, AutocompleteMatchType::SEARCH_OTHER_ENGINE, true},
+           {"k a", false, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, false},
+           {"ab", false, AutocompleteMatchType::SEARCH_SUGGEST, false},
+           {"c", false, AutocompleteMatchType::SEARCH_SUGGEST, true},
+           {"b", false, AutocompleteMatchType::SEARCH_SUGGEST, true}},
+      }};
 
   for (size_t i = 0; i < arraysize(cases); ++i) {
     QueryForInputAndWaitForFetcherResponses(
@@ -3180,7 +3251,7 @@ TEST_F(SearchProviderTest, CanSendURL) {
   // Not in field trial.
   ResetFieldTrialList();
   CreateFieldTrial(OmniboxFieldTrial::kZeroSuggestRule, false);
-  EXPECT_FALSE(SearchProvider::CanSendURL(
+  EXPECT_TRUE(SearchProvider::CanSendURL(
       GURL("http://www.google.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), &client));
@@ -3207,6 +3278,19 @@ TEST_F(SearchProviderTest, CanSendURL) {
       metrics::OmniboxEventProto::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS,
       SearchTermsData(), &client));
 
+  // Invalid page classification.
+  EXPECT_FALSE(SearchProvider::CanSendURL(
+      GURL("http://www.google.com/search"),
+      GURL("https://www.google.com/complete/search"), &google_template_url,
+      metrics::OmniboxEventProto::NTP, SearchTermsData(), &client));
+
+  // Invalid page classification.
+  EXPECT_FALSE(SearchProvider::CanSendURL(
+      GURL("http://www.google.com/search"),
+      GURL("https://www.google.com/complete/search"), &google_template_url,
+      metrics::OmniboxEventProto::OBSOLETE_INSTANT_NTP, SearchTermsData(),
+      &client));
+
   // HTTPS page URL on same domain as provider.
   EXPECT_TRUE(SearchProvider::CanSendURL(
       GURL("https://www.google.com/search"),
@@ -3221,18 +3305,18 @@ TEST_F(SearchProviderTest, CanSendURL) {
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), &client));
 
   // Non-HTTP page URL on different domain.
-  EXPECT_FALSE(SearchProvider::CanSendURL(
+  EXPECT_TRUE(SearchProvider::CanSendURL(
       GURL("https://www.notgoogle.com/search"),
       GURL("https://www.google.com/complete/search"), &google_template_url,
       metrics::OmniboxEventProto::OTHER, SearchTermsData(), &client));
 
   // Non-HTTP page URL on different domain, yet with feature flag to allow
-  // this turned on.
+  // this turned off.
   {
     base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndEnableFeature(
+    feature_list.InitAndDisableFeature(
         omnibox::kSearchProviderContextAllowHttpsUrls);
-    EXPECT_TRUE(SearchProvider::CanSendURL(
+    EXPECT_FALSE(SearchProvider::CanSendURL(
         GURL("https://www.notgoogle.com/search"),
         GURL("https://www.google.com/complete/search"), &google_template_url,
         metrics::OmniboxEventProto::OTHER, SearchTermsData(), &client));
@@ -3474,7 +3558,7 @@ TEST_F(SearchProviderTest, AnswersCache) {
   // Inject a scored result, which will trigger answer retrieval.
   base::string16 query = base::ASCIIToUTF16("weather los angeles");
   SearchSuggestionParser::SuggestResult suggest_result(
-      query, AutocompleteMatchType::SEARCH_HISTORY, query, base::string16(),
+      query, AutocompleteMatchType::SEARCH_HISTORY, 0, query, base::string16(),
       base::string16(), base::string16(), base::string16(), nullptr,
       std::string(), std::string(), false, 1200, false, false, query);
   QueryForInput(ASCIIToUTF16("weather l"), false, false);
@@ -3531,8 +3615,8 @@ TEST_F(SearchProviderTest, RemoveExtraAnswers) {
 TEST_F(SearchProviderTest, DoesNotProvideOnFocus) {
   AutocompleteInput input(
       base::ASCIIToUTF16("f"), base::string16::npos, std::string(), GURL(),
-      metrics::OmniboxEventProto::INVALID_SPEC, false, true, true, true, true,
-      ChromeAutocompleteSchemeClassifier(&profile_));
+      base::string16(), metrics::OmniboxEventProto::INVALID_SPEC, false, true,
+      true, true, true, ChromeAutocompleteSchemeClassifier(&profile_));
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->matches().empty());
 }
@@ -3540,36 +3624,42 @@ TEST_F(SearchProviderTest, DoesNotProvideOnFocus) {
 TEST_F(SearchProviderTest, SendsWarmUpRequestOnFocus) {
   AutocompleteInput input(
       base::ASCIIToUTF16("f"), base::string16::npos, std::string(), GURL(),
-      metrics::OmniboxEventProto::INVALID_SPEC, false, true, true, true, true,
-      ChromeAutocompleteSchemeClassifier(&profile_));
+      base::string16(), metrics::OmniboxEventProto::INVALID_SPEC, false, true,
+      true, true, true, ChromeAutocompleteSchemeClassifier(&profile_));
 
-  // First, verify that without the warm-up feature enabled, the provider
-  // immediately terminates with no matches.
-  provider_->Start(input, false);
-  // RunUntilIdle so that SearchProvider has a chance to create the URLFetchers
-  // (if it wants to, which it shouldn't in this case).
-  base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(provider_->done());
-  EXPECT_TRUE(provider_->matches().empty());
+  {
+    // First, verify that without the warm-up feature enabled, the provider
+    // immediately terminates with no matches.
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndDisableFeature(omnibox::kSearchProviderWarmUpOnFocus);
+    provider_->Start(input, false);
+    // RunUntilIdle so that SearchProvider has a chance to create the
+    // URLFetchers (if it wants to, which it shouldn't in this case).
+    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(provider_->done());
+    EXPECT_TRUE(provider_->matches().empty());
+  }
 
-  // Then, check the behavior with the warm-up feature enabled.
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(omnibox::kSearchProviderWarmUpOnFocus);
-  provider_->Start(input, false);
-  // RunUntilIdle so that SearchProvider create the URLFetcher.
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(provider_->done());
-  EXPECT_TRUE(provider_->matches().empty());
-  // Make sure the default provider's suggest service was queried.
-  net::TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
-      SearchProvider::kDefaultProviderURLFetcherID);
-  EXPECT_TRUE(fetcher);
-  // Even if the fetcher returns results, we should still have no suggestions
-  // (though the provider should now be done).
-  fetcher->set_response_code(200);
-  fetcher->SetResponseString(R"(["",["a", "b"],[],[],{}])");
-  fetcher->delegate()->OnURLFetchComplete(fetcher);
-  RunTillProviderDone();
-  EXPECT_TRUE(provider_->done());
-  EXPECT_TRUE(provider_->matches().empty());
+  {
+    // Then, check the behavior with the warm-up feature enabled.
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndEnableFeature(omnibox::kSearchProviderWarmUpOnFocus);
+    provider_->Start(input, false);
+    // RunUntilIdle so that SearchProvider create the URLFetcher.
+    base::RunLoop().RunUntilIdle();
+    EXPECT_FALSE(provider_->done());
+    EXPECT_TRUE(provider_->matches().empty());
+    // Make sure the default provider's suggest service was queried.
+    net::TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
+        SearchProvider::kDefaultProviderURLFetcherID);
+    EXPECT_TRUE(fetcher);
+    // Even if the fetcher returns results, we should still have no suggestions
+    // (though the provider should now be done).
+    fetcher->set_response_code(200);
+    fetcher->SetResponseString(R"(["",["a", "b"],[],[],{}])");
+    fetcher->delegate()->OnURLFetchComplete(fetcher);
+    RunTillProviderDone();
+    EXPECT_TRUE(provider_->done());
+    EXPECT_TRUE(provider_->matches().empty());
+  }
 }

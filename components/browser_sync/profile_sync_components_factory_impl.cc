@@ -9,6 +9,7 @@
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_wallet_data_type_controller.h"
 #include "components/autofill/core/browser/webdata/autocomplete_sync_bridge.h"
@@ -26,7 +27,7 @@
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/sync/browser/password_data_type_controller.h"
 #include "components/prefs/pref_service.h"
-#include "components/reading_list/core/reading_list_switches.h"
+#include "components/reading_list/features/reading_list_switches.h"
 #include "components/sync/base/report_unrecoverable_error.h"
 #include "components/sync/device_info/device_info_data_type_controller.h"
 #include "components/sync/device_info/local_device_info_provider_impl.h"
@@ -49,6 +50,7 @@
 #include "google_apis/gaia/oauth2_token_service_request.h"
 #include "net/url_request/url_request_context_getter.h"
 
+using base::FeatureList;
 using bookmarks::BookmarkModel;
 using sync_bookmarks::BookmarkChangeProcessor;
 using sync_bookmarks::BookmarkDataTypeController;
@@ -139,7 +141,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
       base::Bind(&syncer::ReportUnrecoverableError, channel_);
 
   // TODO(stanisc): can DEVICE_INFO be one of disabled datatypes?
-  if (base::FeatureList::IsEnabled(switches::kSyncUSSDeviceInfo)) {
+  if (FeatureList::IsEnabled(switches::kSyncUSSDeviceInfo)) {
     // Use an error callback that always uploads a stacktrace if it can to help
     // get USS as stable as possible.
     sync_service->RegisterDataTypeController(
@@ -152,48 +154,51 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
             sync_service->GetLocalDeviceInfoProvider()));
   }
 
-  // Autocomplete sync is enabled by default.  Register unless explicitly
-  // disabled.
-  if (!disabled_types.Has(syncer::AUTOFILL)) {
-    if (base::FeatureList::IsEnabled(switches::kSyncUSSAutocomplete)) {
+  // These features are enabled only if there's a DB thread to post tasks to.
+  if (db_thread_) {
+    // Autocomplete sync is enabled by default.  Register unless explicitly
+    // disabled.
+    if (!disabled_types.Has(syncer::AUTOFILL)) {
+      if (FeatureList::IsEnabled(switches::kSyncUSSAutocomplete)) {
+        sync_service->RegisterDataTypeController(
+            base::MakeUnique<autofill::WebDataModelTypeController>(
+                syncer::AUTOFILL, sync_client_, db_thread_, web_data_service_,
+                base::Bind(
+                    &autofill::AutocompleteSyncBridge::FromWebDataService)));
+      } else {
+        sync_service->RegisterDataTypeController(
+            base::MakeUnique<AutofillDataTypeController>(
+                db_thread_, error_callback, sync_client_, web_data_service_));
+      }
+    }
+
+    // Autofill sync is enabled by default.  Register unless explicitly
+    // disabled.
+    if (!disabled_types.Has(syncer::AUTOFILL_PROFILE)) {
       sync_service->RegisterDataTypeController(
-          base::MakeUnique<autofill::WebDataModelTypeController>(
-              syncer::AUTOFILL, sync_client_, db_thread_, web_data_service_,
-              base::Bind(
-                  &autofill::AutocompleteSyncBridge::FromWebDataService)));
-    } else {
-      sync_service->RegisterDataTypeController(
-          base::MakeUnique<AutofillDataTypeController>(
+          base::MakeUnique<AutofillProfileDataTypeController>(
               db_thread_, error_callback, sync_client_, web_data_service_));
     }
-  }
 
-  // Autofill sync is enabled by default.  Register unless explicitly
-  // disabled.
-  if (!disabled_types.Has(syncer::AUTOFILL_PROFILE)) {
-    sync_service->RegisterDataTypeController(
-        base::MakeUnique<AutofillProfileDataTypeController>(
-            db_thread_, error_callback, sync_client_, web_data_service_));
-  }
+    // Wallet data sync is enabled by default, but behind a syncer experiment
+    // enforced by the datatype controller. Register unless explicitly disabled.
+    bool wallet_disabled = disabled_types.Has(syncer::AUTOFILL_WALLET_DATA);
+    if (!wallet_disabled) {
+      sync_service->RegisterDataTypeController(
+          base::MakeUnique<AutofillWalletDataTypeController>(
+              syncer::AUTOFILL_WALLET_DATA, db_thread_, error_callback,
+              sync_client_, web_data_service_));
+    }
 
-  // Wallet data sync is enabled by default, but behind a syncer experiment
-  // enforced by the datatype controller. Register unless explicitly disabled.
-  bool wallet_disabled = disabled_types.Has(syncer::AUTOFILL_WALLET_DATA);
-  if (!wallet_disabled) {
-    sync_service->RegisterDataTypeController(
-        base::MakeUnique<AutofillWalletDataTypeController>(
-            syncer::AUTOFILL_WALLET_DATA, db_thread_, error_callback,
-            sync_client_, web_data_service_));
-  }
-
-  // Wallet metadata sync depends on Wallet data sync. Register if Wallet data
-  // is syncing and metadata sync is not explicitly disabled.
-  if (!wallet_disabled &&
-      !disabled_types.Has(syncer::AUTOFILL_WALLET_METADATA)) {
-    sync_service->RegisterDataTypeController(
-        base::MakeUnique<AutofillWalletDataTypeController>(
-            syncer::AUTOFILL_WALLET_METADATA, db_thread_, error_callback,
-            sync_client_, web_data_service_));
+    // Wallet metadata sync depends on Wallet data sync. Register if Wallet data
+    // is syncing and metadata sync is not explicitly disabled.
+    if (!wallet_disabled &&
+        !disabled_types.Has(syncer::AUTOFILL_WALLET_METADATA)) {
+      sync_service->RegisterDataTypeController(
+          base::MakeUnique<AutofillWalletDataTypeController>(
+              syncer::AUTOFILL_WALLET_METADATA, db_thread_, error_callback,
+              sync_client_, web_data_service_));
+    }
   }
 
   // Bookmark sync is enabled by default.  Register unless explicitly
@@ -204,50 +209,54 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
                                                      sync_client_));
   }
 
-  const bool history_disabled =
-      sync_client_->GetPrefService()->GetBoolean(history_disabled_pref_);
-  // TypedUrl sync is enabled by default.  Register unless explicitly disabled,
-  // or if saving history is disabled.
-  if (!disabled_types.Has(syncer::TYPED_URLS) && !history_disabled) {
-    sync_service->RegisterDataTypeController(
-        base::MakeUnique<TypedUrlDataTypeController>(
-            error_callback, sync_client_, history_disabled_pref_));
-  }
+  // These features are enabled only if history is not disabled.
+  if (!sync_client_->GetPrefService()->GetBoolean(history_disabled_pref_)) {
+    // TypedUrl sync is enabled by default.  Register unless explicitly
+    // disabled.
+    if (!disabled_types.Has(syncer::TYPED_URLS)) {
+      if (base::FeatureList::IsEnabled(switches::kSyncUSSTypedURL)) {
+        // TODO(gangwu): Register controller here once typed url controller
+        // implemented.
+      } else {
+        sync_service->RegisterDataTypeController(
+            base::MakeUnique<TypedUrlDataTypeController>(
+                error_callback, sync_client_, history_disabled_pref_));
+      }
+    }
 
-  // Delete directive sync is enabled by default.  Register unless full history
-  // sync is disabled.
-  if (!disabled_types.Has(syncer::HISTORY_DELETE_DIRECTIVES) &&
-      !history_disabled) {
-    sync_service->RegisterDataTypeController(
-        base::MakeUnique<HistoryDeleteDirectivesDataTypeController>(
-            error_callback, sync_client_));
-  }
+    // Delete directive sync is enabled by default.
+    if (!disabled_types.Has(syncer::HISTORY_DELETE_DIRECTIVES)) {
+      sync_service->RegisterDataTypeController(
+          base::MakeUnique<HistoryDeleteDirectivesDataTypeController>(
+              error_callback, sync_client_));
+    }
 
-  // Session sync is enabled by default.  Register unless explicitly disabled.
-  // This is also disabled if the browser history is disabled, because the
-  // tab sync data is added to the web history on the server.
-  if (!disabled_types.Has(syncer::PROXY_TABS) && !history_disabled) {
-    sync_service->RegisterDataTypeController(
-        base::MakeUnique<ProxyDataTypeController>(syncer::PROXY_TABS));
-    sync_service->RegisterDataTypeController(
-        base::MakeUnique<SessionDataTypeController>(
-            error_callback, sync_client_,
-            sync_service->GetLocalDeviceInfoProvider(),
-            history_disabled_pref_));
-  }
+    // Session sync is enabled by default.  This is disabled if history is
+    // disabled because the tab sync data is added to the web history on the
+    // server.
+    if (!disabled_types.Has(syncer::PROXY_TABS)) {
+      sync_service->RegisterDataTypeController(
+          base::MakeUnique<ProxyDataTypeController>(syncer::PROXY_TABS));
+      sync_service->RegisterDataTypeController(
+          base::MakeUnique<SessionDataTypeController>(
+              error_callback, sync_client_,
+              sync_service->GetLocalDeviceInfoProvider(),
+              history_disabled_pref_));
+    }
 
-  // Favicon sync is enabled by default. Register unless explicitly disabled.
-  if (!disabled_types.Has(syncer::FAVICON_IMAGES) &&
-      !disabled_types.Has(syncer::FAVICON_TRACKING) && !history_disabled) {
-    // crbug/384552. We disable error uploading for this data types for now.
-    sync_service->RegisterDataTypeController(
-        base::MakeUnique<AsyncDirectoryTypeController>(
-            syncer::FAVICON_IMAGES, base::Closure(), sync_client_,
-            syncer::GROUP_UI, ui_thread_));
-    sync_service->RegisterDataTypeController(
-        base::MakeUnique<AsyncDirectoryTypeController>(
-            syncer::FAVICON_TRACKING, base::Closure(), sync_client_,
-            syncer::GROUP_UI, ui_thread_));
+    // Favicon sync is enabled by default. Register unless explicitly disabled.
+    if (!disabled_types.Has(syncer::FAVICON_IMAGES) &&
+        !disabled_types.Has(syncer::FAVICON_TRACKING)) {
+      // crbug/384552. We disable error uploading for this data types for now.
+      sync_service->RegisterDataTypeController(
+          base::MakeUnique<AsyncDirectoryTypeController>(
+              syncer::FAVICON_IMAGES, base::Closure(), sync_client_,
+              syncer::GROUP_UI, ui_thread_));
+      sync_service->RegisterDataTypeController(
+          base::MakeUnique<AsyncDirectoryTypeController>(
+              syncer::FAVICON_TRACKING, base::Closure(), sync_client_,
+              syncer::GROUP_UI, ui_thread_));
+    }
   }
 
   // Password sync is enabled by default.  Register unless explicitly
@@ -302,6 +311,13 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
     sync_service->RegisterDataTypeController(
         base::MakeUnique<ModelTypeController>(syncer::READING_LIST,
                                               sync_client_, ui_thread_));
+  }
+
+  if (!disabled_types.Has(syncer::USER_EVENTS) &&
+      FeatureList::IsEnabled(switches::kSyncUserEvents)) {
+    sync_service->RegisterDataTypeController(
+        base::MakeUnique<ModelTypeController>(syncer::USER_EVENTS, sync_client_,
+                                              ui_thread_));
   }
 }
 

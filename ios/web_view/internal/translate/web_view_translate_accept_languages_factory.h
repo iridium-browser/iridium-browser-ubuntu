@@ -6,6 +6,7 @@
 #define IOS_WEB_VIEW_INTERNAL_TRANSLATE_WEB_VIEW_TRANSLATE_ACCEPT_LANGUAGES_FACTORY_H_
 
 #include <memory>
+
 #include "base/macros.h"
 #include "components/keyed_service/ios/browser_state_keyed_service_factory.h"
 
@@ -40,6 +41,8 @@ class WebViewTranslateAcceptLanguagesFactory
 
   // BrowserStateKeyedServiceFactory implementation.
   std::unique_ptr<KeyedService> BuildServiceInstanceFor(
+      web::BrowserState* context) const override;
+  web::BrowserState* GetBrowserStateToUse(
       web::BrowserState* context) const override;
 
   DISALLOW_COPY_AND_ASSIGN(WebViewTranslateAcceptLanguagesFactory);

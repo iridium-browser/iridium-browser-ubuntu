@@ -29,11 +29,11 @@
 // https://html.spec.whatwg.org/#the-workernavigator-object
 
 [
-    Exposed=Worker,
+    Exposed=Worker
 ] interface WorkerNavigator {
 };
 
-WorkerNavigator implements NavigatorCPU;
+WorkerNavigator implements NavigatorConcurrentHardware;
 WorkerNavigator implements NavigatorID;
 // TODO(foolip): WorkerNavigator implements NavigatorLanguage;
 WorkerNavigator implements NavigatorOnLine;

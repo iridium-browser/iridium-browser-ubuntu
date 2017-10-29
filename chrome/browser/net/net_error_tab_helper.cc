@@ -25,12 +25,10 @@
 #include "net/base/net_errors.h"
 #include "url/gurl.h"
 
-#if defined(OS_ANDROID)
-#include "base/guid.h"
-#include "chrome/browser/android/offline_pages/request_coordinator_factory.h"
-#include "components/offline_pages/core/background/request_coordinator.h"
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+#include "chrome/browser/offline_pages/offline_page_utils.h"
 #include "components/offline_pages/core/client_namespace_constants.h"
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -54,10 +52,8 @@ void OnDnsProbeFinishedOnIOThread(
     DnsProbeStatus result) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(callback, result));
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::BindOnce(callback, result));
 }
 
 // Can only access g_browser_process->io_thread() from the browser thread,
@@ -130,9 +126,9 @@ void NetErrorTabHelper::DidFinishNavigation(
              !navigation_handle->IsErrorPage()) {
     dns_error_active_ = false;
     dns_error_page_committed_ = false;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
     is_showing_download_button_in_error_page_ = false;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
   }
 }
 
@@ -141,7 +137,7 @@ bool NetErrorTabHelper::OnMessageReceived(
     content::RenderFrameHost* render_frame_host) {
   if (render_frame_host != web_contents()->GetMainFrame())
     return false;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(NetErrorTabHelper, message)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_DownloadPageLater,
@@ -154,7 +150,7 @@ bool NetErrorTabHelper::OnMessageReceived(
   return handled;
 #else
   return false;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 }
 
 NetErrorTabHelper::NetErrorTabHelper(WebContents* contents)
@@ -163,9 +159,9 @@ NetErrorTabHelper::NetErrorTabHelper(WebContents* contents)
       is_error_page_(false),
       dns_error_active_(false),
       dns_error_page_committed_(false),
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
       is_showing_download_button_in_error_page_(false),
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
       dns_probe_status_(error_page::DNS_PROBE_POSSIBLE),
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -195,12 +191,11 @@ void NetErrorTabHelper::StartDnsProbe() {
   DVLOG(1) << "Starting DNS probe.";
 
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&StartDnsProbeOnIOThread,
-                 base::Bind(&NetErrorTabHelper::OnDnsProbeFinished,
-                            weak_factory_.GetWeakPtr()),
-                 g_browser_process->io_thread()));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&StartDnsProbeOnIOThread,
+                     base::Bind(&NetErrorTabHelper::OnDnsProbeFinished,
+                                weak_factory_.GetWeakPtr()),
+                     g_browser_process->io_thread()));
 }
 
 void NetErrorTabHelper::OnDnsProbeFinished(DnsProbeStatus result) {
@@ -217,7 +212,7 @@ void NetErrorTabHelper::OnDnsProbeFinished(DnsProbeStatus result) {
     SendInfo();
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
 void NetErrorTabHelper::OnDownloadPageLater() {
   // Makes sure that this is coming from an error page.
   content::NavigationEntry* entry =
@@ -237,7 +232,7 @@ void NetErrorTabHelper::OnSetIsShowingDownloadButtonInErrorPage(
     bool is_showing_download_button) {
   is_showing_download_button_in_error_page_ = is_showing_download_button;
 }
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 
 void NetErrorTabHelper::InitializePref(WebContents* contents) {
   DCHECK(contents);
@@ -290,18 +285,12 @@ void NetErrorTabHelper::RunNetworkDiagnosticsHelper(
   ShowNetworkDiagnosticsDialog(web_contents(), sanitized_url);
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
 void NetErrorTabHelper::DownloadPageLaterHelper(const GURL& page_url) {
-  offline_pages::RequestCoordinator* request_coordinator =
-      offline_pages::RequestCoordinatorFactory::GetForBrowserContext(
-          web_contents()->GetBrowserContext());
-  DCHECK(request_coordinator) << "No RequestCoordinator for SavePageLater";
-  offline_pages::RequestCoordinator::SavePageLaterParams params;
-  params.url = page_url;
-  params.client_id = offline_pages::ClientId(offline_pages::kAsyncNamespace,
-                                             base::GenerateGUID());
-  request_coordinator->SavePageLater(params);
+  offline_pages::OfflinePageUtils::ScheduleDownload(
+      web_contents(), offline_pages::kAsyncNamespace, page_url,
+      offline_pages::OfflinePageUtils::DownloadUIActionFlags::PROMPT_DUPLICATE);
 }
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 
 }  // namespace chrome_browser_net

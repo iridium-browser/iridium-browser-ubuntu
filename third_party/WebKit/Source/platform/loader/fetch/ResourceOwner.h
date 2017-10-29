@@ -41,45 +41,41 @@ class GC_PLUGIN_IGNORE("https://crbug.com/652966") ResourceOwner;
 
 template <class R, class C = typename R::ClientType>
 class ResourceOwner : public C {
-  USING_PRE_FINALIZER(ResourceOwner, clearResource);
+  USING_PRE_FINALIZER(ResourceOwner, ClearResource);
 
  public:
   using ResourceType = R;
   ~ResourceOwner() override {}
-  ResourceType* resource() const { return m_resource; }
+  ResourceType* GetResource() const { return resource_; }
 
   DEFINE_INLINE_TRACE() {
-    visitor->trace(m_resource);
-    C::trace(visitor);
+    visitor->Trace(resource_);
+    C::Trace(visitor);
   }
 
  protected:
   ResourceOwner() {}
 
-  void setResource(
-      ResourceType*,
-      Resource::PreloadReferencePolicy = Resource::MarkAsReferenced);
-  void clearResource() { setResource(nullptr); }
+  void SetResource(ResourceType*);
+  void ClearResource() { SetResource(nullptr); }
 
  private:
-  Member<ResourceType> m_resource;
+  Member<ResourceType> resource_;
 };
 
 template <class R, class C>
-inline void ResourceOwner<R, C>::setResource(
-    R* newResource,
-    Resource::PreloadReferencePolicy preloadReferencePolicy) {
-  if (newResource == m_resource)
+inline void ResourceOwner<R, C>::SetResource(R* new_resource) {
+  if (new_resource == resource_)
     return;
 
   // Some ResourceClient implementations reenter this so
   // we need to prevent double removal.
-  if (ResourceType* oldResource = m_resource.release())
-    oldResource->removeClient(this);
+  if (ResourceType* old_resource = resource_.Release())
+    old_resource->RemoveClient(this);
 
-  if (newResource) {
-    m_resource = newResource;
-    m_resource->addClient(this, preloadReferencePolicy);
+  if (new_resource) {
+    resource_ = new_resource;
+    resource_->AddClient(this);
   }
 }
 

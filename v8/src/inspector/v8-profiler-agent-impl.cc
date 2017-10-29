@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "src/base/atomicops.h"
+#include "src/flags.h"  // TODO(jgruber): Remove include and DEPS entry.
 #include "src/inspector/protocol/Protocol.h"
 #include "src/inspector/string-util.h"
 #include "src/inspector/v8-debugger.h"
@@ -23,6 +24,7 @@ static const char samplingInterval[] = "samplingInterval";
 static const char userInitiatedProfiling[] = "userInitiatedProfiling";
 static const char profilerEnabled[] = "profilerEnabled";
 static const char preciseCoverageStarted[] = "preciseCoverageStarted";
+static const char preciseCoverageCallCount[] = "preciseCoverageCallCount";
 }
 
 namespace {
@@ -239,7 +241,9 @@ void V8ProfilerAgentImpl::restore() {
   }
   if (m_state->booleanProperty(ProfilerAgentState::preciseCoverageStarted,
                                false)) {
-    startPreciseCoverage();
+    bool callCount = m_state->booleanProperty(
+        ProfilerAgentState::preciseCoverageCallCount, false);
+    startPreciseCoverage(Maybe<bool>(callCount));
   }
 }
 
@@ -270,30 +274,52 @@ Response V8ProfilerAgentImpl::stop(
   return Response::OK();
 }
 
-Response V8ProfilerAgentImpl::startPreciseCoverage() {
+Response V8ProfilerAgentImpl::startPreciseCoverage(Maybe<bool> callCount) {
   if (!m_enabled) return Response::Error("Profiler is not enabled");
+  bool callCountValue = callCount.fromMaybe(false);
   m_state->setBoolean(ProfilerAgentState::preciseCoverageStarted, true);
-  v8::debug::Coverage::TogglePrecise(m_isolate, true);
+  m_state->setBoolean(ProfilerAgentState::preciseCoverageCallCount,
+                      callCountValue);
+  // BlockCount is a superset of PreciseCount. It includes block-granularity
+  // coverage data if it exists (at the time of writing, that's the case for
+  // each function recompiled after the BlockCount mode has been set); and
+  // function-granularity coverage data otherwise.
+  // TODO(jgruber): Implement block binary coverage.
+  v8::debug::Coverage::Mode count_mode =
+      v8::internal::FLAG_block_coverage ? v8::debug::Coverage::kBlockCount
+                                        : v8::debug::Coverage::kPreciseCount;
+  v8::debug::Coverage::Mode binary_mode =
+      v8::internal::FLAG_block_coverage ? v8::debug::Coverage::kBlockBinary
+                                        : v8::debug::Coverage::kPreciseBinary;
+  v8::debug::Coverage::SelectMode(m_isolate,
+                                  callCountValue ? count_mode : binary_mode);
   return Response::OK();
 }
 
 Response V8ProfilerAgentImpl::stopPreciseCoverage() {
   if (!m_enabled) return Response::Error("Profiler is not enabled");
   m_state->setBoolean(ProfilerAgentState::preciseCoverageStarted, false);
-  v8::debug::Coverage::TogglePrecise(m_isolate, false);
+  m_state->setBoolean(ProfilerAgentState::preciseCoverageCallCount, false);
+  v8::debug::Coverage::SelectMode(m_isolate, v8::debug::Coverage::kBestEffort);
   return Response::OK();
 }
 
 namespace {
-Response takeCoverage(
-    v8::Isolate* isolate, bool reset_count,
+std::unique_ptr<protocol::Profiler::CoverageRange> createCoverageRange(
+    int start, int end, int count) {
+  return protocol::Profiler::CoverageRange::create()
+      .setStartOffset(start)
+      .setEndOffset(end)
+      .setCount(count)
+      .build();
+}
+
+Response coverageToProtocol(
+    v8::Isolate* isolate, const v8::debug::Coverage& coverage,
     std::unique_ptr<protocol::Array<protocol::Profiler::ScriptCoverage>>*
         out_result) {
   std::unique_ptr<protocol::Array<protocol::Profiler::ScriptCoverage>> result =
       protocol::Array<protocol::Profiler::ScriptCoverage>::create();
-  v8::HandleScope handle_scope(isolate);
-  v8::debug::Coverage coverage =
-      v8::debug::Coverage::Collect(isolate, reset_count);
   for (size_t i = 0; i < coverage.ScriptCount(); i++) {
     v8::debug::Coverage::ScriptData script_data = coverage.GetScriptData(i);
     v8::Local<v8::debug::Script> script = script_data.GetScript();
@@ -305,21 +331,27 @@ Response takeCoverage(
           script_data.GetFunctionData(j);
       std::unique_ptr<protocol::Array<protocol::Profiler::CoverageRange>>
           ranges = protocol::Array<protocol::Profiler::CoverageRange>::create();
-      // At this point we only have per-function coverage data, so there is
-      // only one range per function.
-      ranges->addItem(
-          protocol::Profiler::CoverageRange::create()
-              .setStartLineNumber(function_data.Start().GetLineNumber())
-              .setStartColumnNumber(function_data.Start().GetColumnNumber())
-              .setEndLineNumber(function_data.End().GetLineNumber())
-              .setEndColumnNumber(function_data.End().GetColumnNumber())
-              .setCount(function_data.Count())
-              .build());
+
+      // Add function range.
+      ranges->addItem(createCoverageRange(function_data.StartOffset(),
+                                          function_data.EndOffset(),
+                                          function_data.Count()));
+
+      // Process inner blocks.
+      for (size_t k = 0; k < function_data.BlockCount(); k++) {
+        v8::debug::Coverage::BlockData block_data =
+            function_data.GetBlockData(k);
+        ranges->addItem(createCoverageRange(block_data.StartOffset(),
+                                            block_data.EndOffset(),
+                                            block_data.Count()));
+      }
+
       functions->addItem(
           protocol::Profiler::FunctionCoverage::create()
               .setFunctionName(toProtocolString(
                   function_data.Name().FromMaybe(v8::Local<v8::String>())))
               .setRanges(std::move(ranges))
+              .setIsBlockCoverage(function_data.HasBlockCoverage())
               .build());
     }
     String16 url;
@@ -345,18 +377,23 @@ Response V8ProfilerAgentImpl::takePreciseCoverage(
                                 false)) {
     return Response::Error("Precise coverage has not been started.");
   }
-  return takeCoverage(m_isolate, true, out_result);
+  v8::HandleScope handle_scope(m_isolate);
+  v8::debug::Coverage coverage = v8::debug::Coverage::CollectPrecise(m_isolate);
+  return coverageToProtocol(m_isolate, coverage, out_result);
 }
 
 Response V8ProfilerAgentImpl::getBestEffortCoverage(
     std::unique_ptr<protocol::Array<protocol::Profiler::ScriptCoverage>>*
         out_result) {
-  return takeCoverage(m_isolate, false, out_result);
+  v8::HandleScope handle_scope(m_isolate);
+  v8::debug::Coverage coverage =
+      v8::debug::Coverage::CollectBestEffort(m_isolate);
+  return coverageToProtocol(m_isolate, coverage, out_result);
 }
 
 String16 V8ProfilerAgentImpl::nextProfileId() {
   return String16::fromInteger(
-      v8::base::NoBarrier_AtomicIncrement(&s_lastProfileId, 1));
+      v8::base::Relaxed_AtomicIncrement(&s_lastProfileId, 1));
 }
 
 void V8ProfilerAgentImpl::startProfiling(const String16& title) {

@@ -22,7 +22,6 @@
 #include "vk/GrVkDefines.h"
 
 class GrPipeline;
-class GrNonInstancedMesh;
 
 class GrVkBufferImpl;
 class GrVkPipeline;
@@ -43,6 +42,8 @@ public:
                          GrContext* context);
 
     ~GrVkGpu() override;
+
+    void disconnect(DisconnectType) override;
 
     const GrVkInterface* vkInterface() const { return fBackendContext->fInterface.get(); }
     const GrVkCaps& vkCaps() const { return *fVkCaps; }
@@ -79,8 +80,6 @@ public:
     void onQueryMultisampleSpecs(GrRenderTarget* rt, const GrStencilSettings&,
                                  int* effectiveSampleCnt, SamplePattern*) override;
 
-    bool initDescForDstCopy(const GrRenderTarget* src, GrSurfaceDesc* desc) const override;
-
     void xferBarrier(GrRenderTarget*, GrXferBarrierType) override {}
 
     GrBackendObject createTestingOnlyBackendTexture(void* pixels, int w, int h,
@@ -98,8 +97,6 @@ public:
     GrGpuCommandBuffer* createCommandBuffer(
             const GrGpuCommandBuffer::LoadAndStoreInfo& colorInfo,
             const GrGpuCommandBuffer::LoadAndStoreInfo& stencilInfo) override;
-
-    void drawDebugWireRect(GrRenderTarget*, const SkIRect&, GrColor) override {}
 
     void addMemoryBarrier(VkPipelineStageFlags srcStageMask,
                           VkPipelineStageFlags dstStageMask,
@@ -122,23 +119,25 @@ public:
         this->internalResolveRenderTarget(target, true);
     }
 
-    void submitSecondaryCommandBuffer(GrVkSecondaryCommandBuffer*,
+    void submitSecondaryCommandBuffer(const SkTArray<GrVkSecondaryCommandBuffer*>&,
                                       const GrVkRenderPass*,
                                       const VkClearValue*,
                                       GrVkRenderTarget*,
                                       const SkIRect& bounds);
 
-    void finishOpList() override;
+    void finishFlush() override;
 
     GrFence SK_WARN_UNUSED_RESULT insertFence() override;
     bool waitFence(GrFence, uint64_t timeout) override;
     void deleteFence(GrFence) const override;
 
-    sk_sp<GrSemaphore> SK_WARN_UNUSED_RESULT makeSemaphore() override;
-    void insertSemaphore(sk_sp<GrSemaphore> semaphore) override;
+    sk_sp<GrSemaphore> SK_WARN_UNUSED_RESULT makeSemaphore(bool isOwned) override;
+    sk_sp<GrSemaphore> wrapBackendSemaphore(const GrBackendSemaphore& semaphore,
+                                            GrWrapOwnership ownership) override;
+    void insertSemaphore(sk_sp<GrSemaphore> semaphore, bool flush) override;
     void waitSemaphore(sk_sp<GrSemaphore> semaphore) override;
 
-    void flush() override;
+    sk_sp<GrSemaphore> prepareTextureForCrossContextUsage(GrTexture*) override;
 
     void generateMipmap(GrVkTexture* tex);
 
@@ -156,6 +155,7 @@ public:
         kVertexBuffer_Heap,
         kIndexBuffer_Heap,
         kUniformBuffer_Heap,
+        kTexelBuffer_Heap,
         kCopyReadBuffer_Heap,
         kCopyWriteBuffer_Heap,
 
@@ -171,19 +171,24 @@ private:
 
     void onResetContext(uint32_t resetBits) override {}
 
-    GrTexture* onCreateTexture(const GrSurfaceDesc& desc, SkBudgeted budgeted,
-                               const SkTArray<GrMipLevel>&) override;
+    void destroyResources();
 
-    GrTexture* onCreateCompressedTexture(const GrSurfaceDesc& desc, SkBudgeted,
-                                         const SkTArray<GrMipLevel>&) override { return NULL; }
+    sk_sp<GrTexture> onCreateTexture(const GrSurfaceDesc& desc, SkBudgeted budgeted,
+                                     const GrMipLevel texels[], int mipLevelCount) override;
 
-    sk_sp<GrTexture> onWrapBackendTexture(const GrBackendTextureDesc&, GrWrapOwnership) override;
-
-    sk_sp<GrRenderTarget> onWrapBackendRenderTarget(const GrBackendRenderTargetDesc&,
+    sk_sp<GrTexture> onWrapBackendTexture(const GrBackendTexture&,
+                                          GrSurfaceOrigin,
+                                          GrWrapOwnership) override;
+    sk_sp<GrTexture> onWrapRenderableBackendTexture(const GrBackendTexture&,
+                                                    GrSurfaceOrigin,
+                                                    int sampleCnt,
                                                     GrWrapOwnership) override;
-    sk_sp<GrRenderTarget> onWrapBackendTextureAsRenderTarget(const GrBackendTextureDesc&) override {
-        return nullptr;
-    }
+    sk_sp<GrRenderTarget> onWrapBackendRenderTarget(const GrBackendRenderTarget&,
+                                                    GrSurfaceOrigin) override;
+
+    sk_sp<GrRenderTarget> onWrapBackendTextureAsRenderTarget(const GrBackendTexture&,
+                                                             GrSurfaceOrigin,
+                                                             int sampleCnt) override;
 
     GrBuffer* onCreateBuffer(size_t size, GrBufferType type, GrAccessPattern,
                              const void* data) override;
@@ -198,21 +203,20 @@ private:
 
     bool onWritePixels(GrSurface* surface,
                        int left, int top, int width, int height,
-                       GrPixelConfig config, const SkTArray<GrMipLevel>&) override;
+                       GrPixelConfig config, const GrMipLevel texels[], int mipLevelCount) override;
 
-    bool onTransferPixels(GrSurface*,
+    bool onTransferPixels(GrTexture*,
                           int left, int top, int width, int height,
                           GrPixelConfig config, GrBuffer* transferBuffer,
-                          size_t offset, size_t rowBytes) override { return false; }
+                          size_t offset, size_t rowBytes) override;
 
     // Ends and submits the current command buffer to the queue and then creates a new command
     // buffer and begins it. If sync is set to kForce_SyncQueue, the function will wait for all
-    // work in the queue to finish before returning. If the signalSemaphore is not VK_NULL_HANDLE,
-    // we will signal the semaphore at the end of this command buffer. If this GrVkGpu object has
-    // any semaphores in fSemaphoresToWaitOn, we will add those wait semaphores to this command
-    // buffer when submitting.
-    void submitCommandBuffer(SyncQueue sync,
-                             const GrVkSemaphore::Resource* signalSemaphore = nullptr);
+    // work in the queue to finish before returning. If this GrVkGpu object has any semaphores in
+    // fSemaphoreToSignal, we will add those signal semaphores to the submission of this command
+    // buffer. If this GrVkGpu object has any semaphores in fSemaphoresToWaitOn, we will add those
+    // wait semaphores to the submission of this command buffer.
+    void submitCommandBuffer(SyncQueue sync);
 
     void internalResolveRenderTarget(GrRenderTarget* target, bool requiresSubmit);
 
@@ -244,9 +248,9 @@ private:
     bool uploadTexDataOptimal(GrVkTexture* tex,
                               int left, int top, int width, int height,
                               GrPixelConfig dataConfig,
-                              const SkTArray<GrMipLevel>&);
+                              const GrMipLevel texels[], int mipLevelCount);
 
-    void resolveImage(GrVkRenderTarget* dst,
+    void resolveImage(GrSurface* dst,
                       GrVkRenderTarget* src,
                       const SkIRect& srcRect,
                       const SkIPoint& dstPoint);
@@ -266,6 +270,7 @@ private:
     GrVkPrimaryCommandBuffer*                    fCurrentCmdBuffer;
 
     SkSTArray<1, const GrVkSemaphore::Resource*> fSemaphoresToWaitOn;
+    SkSTArray<1, const GrVkSemaphore::Resource*> fSemaphoresToSignal;
 
     VkPhysicalDeviceMemoryProperties             fPhysDevMemProps;
 
@@ -281,6 +286,10 @@ private:
     // compiler used for compiling sksl into spirv. We only want to create the compiler once since
     // there is significant overhead to the first compile of any compiler.
     SkSL::Compiler* fCompiler;
+
+    // We need a bool to track whether or not we've already disconnected all the gpu resources from
+    // vulkan context.
+    bool fDisconnected;
 
     typedef GrGpu INHERITED;
 };

@@ -11,13 +11,13 @@
 #include "android_webview/browser/compositor_id.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "cc/surfaces/compositor_frame_sink_support_client.h"
-#include "cc/surfaces/frame_sink_id.h"
-#include "cc/surfaces/surface_id.h"
+#include "components/viz/common/surfaces/frame_sink_id.h"
+#include "components/viz/common/surfaces/surface_id.h"
+#include "components/viz/service/frame_sinks/compositor_frame_sink_support_client.h"
 
 struct AwDrawGLInfo;
 
-namespace cc {
+namespace viz {
 class CompositorFrameSinkSupport;
 class LocalSurfaceIdAllocator;
 }
@@ -28,7 +28,7 @@ class ChildFrame;
 class RenderThreadManager;
 class SurfacesInstance;
 
-class HardwareRenderer : public cc::CompositorFrameSinkSupportClient {
+class HardwareRenderer : public viz::CompositorFrameSinkSupportClient {
  public:
   // Two rules:
   // 1) Never wait on |new_frame| on the UI thread, or in kModeSync. Otherwise
@@ -49,17 +49,21 @@ class HardwareRenderer : public cc::CompositorFrameSinkSupportClient {
   void CommitFrame();
 
  private:
-  // cc::CompositorFrameSinkSupportClient implementation.
-  void DidReceiveCompositorFrameAck() override;
+  // viz::CompositorFrameSinkSupportClient implementation.
+  void DidReceiveCompositorFrameAck(
+      const std::vector<cc::ReturnedResource>& resources) override;
   void OnBeginFrame(const cc::BeginFrameArgs& args) override;
-  void ReclaimResources(const cc::ReturnedResourceArray& resources) override;
-  void WillDrawSurface(const cc::LocalSurfaceId& local_surface_id,
+  void ReclaimResources(
+      const std::vector<cc::ReturnedResource>& resources) override;
+  void WillDrawSurface(const viz::LocalSurfaceId& local_surface_id,
                        const gfx::Rect& damage_rect) override;
+  void OnBeginFramePausedChanged(bool paused) override;
 
   void ReturnChildFrame(std::unique_ptr<ChildFrame> child_frame);
-  void ReturnResourcesToCompositor(const cc::ReturnedResourceArray& resources,
-                                   const CompositorID& compositor_id,
-                                   uint32_t compositor_frame_sink_id);
+  void ReturnResourcesToCompositor(
+      const std::vector<cc::ReturnedResource>& resources,
+      const CompositorID& compositor_id,
+      uint32_t layer_tree_frame_sink_id);
 
   void AllocateSurface();
   void DestroySurface();
@@ -72,7 +76,8 @@ class HardwareRenderer : public cc::CompositorFrameSinkSupportClient {
   EGLContext last_egl_context_;
 
   // Information about last delegated frame.
-  gfx::Size frame_size_;
+  gfx::Size surface_size_;
+  float device_scale_factor_ = 0;
 
   // Infromation from UI on last commit.
   gfx::Vector2d scroll_offset_;
@@ -85,17 +90,17 @@ class HardwareRenderer : public cc::CompositorFrameSinkSupportClient {
   std::unique_ptr<ChildFrame> child_frame_;
 
   const scoped_refptr<SurfacesInstance> surfaces_;
-  cc::FrameSinkId frame_sink_id_;
-  const std::unique_ptr<cc::LocalSurfaceIdAllocator>
+  viz::FrameSinkId frame_sink_id_;
+  const std::unique_ptr<viz::LocalSurfaceIdAllocator>
       local_surface_id_allocator_;
-  std::unique_ptr<cc::CompositorFrameSinkSupport> support_;
-  cc::LocalSurfaceId child_id_;
+  std::unique_ptr<viz::CompositorFrameSinkSupport> support_;
+  viz::LocalSurfaceId child_id_;
   CompositorID compositor_id_;
   // HardwareRenderer guarantees resources are returned in the order of
-  // compositor_frame_sink_id, and resources for old output surfaces are
+  // layer_tree_frame_sink_id, and resources for old output surfaces are
   // dropped.
-  uint32_t last_committed_compositor_frame_sink_id_;
-  uint32_t last_submitted_compositor_frame_sink_id_;
+  uint32_t last_committed_layer_tree_frame_sink_id_;
+  uint32_t last_submitted_layer_tree_frame_sink_id_;
 
   DISALLOW_COPY_AND_ASSIGN(HardwareRenderer);
 };

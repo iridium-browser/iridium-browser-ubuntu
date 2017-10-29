@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 (function() {
-  'use strict';
+'use strict';
 
 /**
  * 'site-data-details-subpage' Display cookie contents.
@@ -14,12 +14,6 @@ Polymer({
   behaviors: [settings.RouteObserverBehavior, WebUIListenerBehavior],
 
   properties: {
-    /**
-     * The browser proxy used to retrieve and change cookies.
-     * @type {settings.SiteSettingsPrefsBrowserProxy}
-     */
-    browserProxy: Object,
-
     /**
      * The cookie entries for the given site.
      * @type {!Array<!CookieDetails>}
@@ -40,13 +34,19 @@ Polymer({
     siteId_: String,
   },
 
+  /**
+   * The browser proxy used to retrieve and change cookies.
+   * @private {?settings.SiteSettingsPrefsBrowserProxy}
+   */
+  browserProxy_: null,
+
   /** @override */
   ready: function() {
-    this.browserProxy =
+    this.browserProxy_ =
         settings.SiteSettingsPrefsBrowserProxyImpl.getInstance();
 
-    this.addWebUIListener('onTreeItemRemoved',
-                          this.getCookieDetails_.bind(this));
+    this.addWebUIListener(
+        'onTreeItemRemoved', this.getCookieDetails_.bind(this));
   },
 
   /**
@@ -55,7 +55,8 @@ Polymer({
    * @protected
    */
   currentRouteChanged: function(route) {
-    if (settings.getCurrentRoute() != settings.Route.SITE_SETTINGS_DATA_DETAILS)
+    if (settings.getCurrentRoute() !=
+        settings.routes.SITE_SETTINGS_DATA_DETAILS)
       return;
     var site = settings.getQueryParameters().get('site');
     if (!site || site == this.site_)
@@ -69,9 +70,10 @@ Polymer({
   getCookieDetails_: function() {
     if (!this.site_)
       return;
-    this.browserProxy.getCookieDetails(this.site_).then(
-        this.onCookiesLoaded_.bind(this),
-        this.onCookiesLoadFailed_.bind(this));
+    this.browserProxy_.getCookieDetails(this.site_)
+        .then(
+            this.onCookiesLoaded_.bind(this),
+            this.onCookiesLoadFailed_.bind(this));
   },
 
   /**
@@ -90,7 +92,9 @@ Polymer({
     this.siteId_ = cookies.id;
     this.entries_ = cookies.children;
     // Set up flag for expanding cookie details.
-    this.entries_.forEach(function(e) { e.expanded_ = false; });
+    this.entries_.forEach(function(e) {
+      e.expanded_ = false;
+    });
   },
 
   /**
@@ -124,15 +128,15 @@ Polymer({
    * @private
    */
   onRemove_: function(event) {
-    this.browserProxy.removeCookie(
-        /** @type {!CookieDetails} */(event.currentTarget.dataset).idPath);
+    this.browserProxy_.removeCookie(
+        /** @type {!CookieDetails} */ (event.currentTarget.dataset).idPath);
   },
 
   /**
    * A handler for when the user opts to remove all cookies.
    */
   removeAll: function() {
-    this.browserProxy.removeCookie(this.siteId_);
+    this.browserProxy_.removeCookie(this.siteId_);
   },
 });
 

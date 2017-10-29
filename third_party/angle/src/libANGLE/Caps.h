@@ -251,6 +251,10 @@ struct Extensions
     // GL_EXT_frag_depth
     bool fragDepth;
 
+    // ANGLE_multiview
+    bool multiview;
+    GLuint maxViews;
+
     // GL_ANGLE_texture_usage
     bool textureUsage;
 
@@ -330,6 +334,12 @@ struct Extensions
     // GL_EXT_sRGB_write_control
     bool sRGBWriteControl;
 
+    // GL_CHROMIUM_color_buffer_float_rgb
+    bool colorBufferFloatRGB;
+
+    // GL_CHROMIUM_color_buffer_float_rgba
+    bool colorBufferFloatRGBA;
+
     // ES3 Extension support
 
     // GL_EXT_color_buffer_float
@@ -354,6 +364,12 @@ struct Extensions
 
     // GL_ANGLE_client_arrays
     bool clientArrays;
+
+    // GL_ANGLE_robust_resource_initialization
+    bool robustResourceInitialization;
+
+    // GL_ANGLE_program_cache_control
+    bool programCacheControl;
 };
 
 struct ExtensionInfo
@@ -440,7 +456,7 @@ struct Caps
     GLuint64 maxServerWaitTimeout;
 
     // ES 3.1 (April 29, 2015) Table 20.41: Implementation dependent values (cont.)
-    GLuint maxVertexAttribRelativeOffset;
+    GLint maxVertexAttribRelativeOffset;
     GLuint maxVertexAttribBindings;
     GLint maxVertexAttribStride;
     GLuint maxElementsIndices;
@@ -641,6 +657,9 @@ struct DisplayExtensions
     // EGL_CHROMIUM_create_context_bind_generates_resource
     bool createContextBindGeneratesResource;
 
+    // EGL_CHROMIUM_get_sync_values
+    bool getSyncValues;
+
     // EGL_EXT_swap_buffers_with_damage
     bool swapBuffersWithDamage;
 
@@ -655,6 +674,9 @@ struct DisplayExtensions
 
     // EGL_ANGLE_create_context_client_arrays
     bool createContextClientArrays;
+
+    // EGL_ANGLE_program_cache_control
+    bool programCacheControl;
 };
 
 struct DeviceExtensions
@@ -713,6 +735,9 @@ struct ClientExtensions
 
     // EGL_KHR_client_get_all_proc_addresses
     bool clientGetAllProcAddresses;
+
+    // EGL_ANGLE_display_robust_resource_initialization
+    bool displayRobustResourceInitialization;
 };
 
 }  // namespace egl

@@ -17,8 +17,7 @@
 #include "cc/quads/draw_quad.h"
 #include "cc/quads/render_pass.h"
 #include "cc/test/animation_test_common.h"
-#include "cc/test/fake_compositor_frame_sink.h"
-#include "cc/test/layer_tree_settings_for_testing.h"
+#include "cc/test/fake_layer_tree_frame_sink.h"
 #include "cc/test/mock_occlusion_tracker.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -31,6 +30,18 @@ namespace cc {
 
 // Align with expected and actual output.
 const char* LayerTestCommon::quad_string = "    Quad: ";
+
+RenderSurfaceImpl* GetRenderSurface(LayerImpl* layer_impl) {
+  EffectTree& effect_tree =
+      layer_impl->layer_tree_impl()->property_trees()->effect_tree;
+
+  if (RenderSurfaceImpl* surface =
+          effect_tree.GetRenderSurface(layer_impl->effect_tree_index()))
+    return surface;
+
+  return effect_tree.GetRenderSurface(
+      effect_tree.Node(layer_impl->effect_tree_index())->target_id);
+}
 
 static bool CanRectFBeSafelyRoundedToRect(const gfx::RectF& r) {
   // Ensure that range of float values is not beyond integer range.
@@ -118,20 +129,19 @@ void LayerTestCommon::VerifyQuadsAreOccluded(const QuadList& quads,
 }
 
 LayerTestCommon::LayerImplTest::LayerImplTest()
-    : LayerImplTest(LayerTreeSettingsForTesting()) {}
+    : LayerImplTest(LayerTreeSettings()) {}
 
 LayerTestCommon::LayerImplTest::LayerImplTest(
-    std::unique_ptr<CompositorFrameSink> compositor_frame_sink)
-    : LayerImplTest(LayerTreeSettingsForTesting(),
-                    std::move(compositor_frame_sink)) {}
+    std::unique_ptr<LayerTreeFrameSink> layer_tree_frame_sink)
+    : LayerImplTest(LayerTreeSettings(), std::move(layer_tree_frame_sink)) {}
 
 LayerTestCommon::LayerImplTest::LayerImplTest(const LayerTreeSettings& settings)
-    : LayerImplTest(settings, FakeCompositorFrameSink::Create3d()) {}
+    : LayerImplTest(settings, FakeLayerTreeFrameSink::Create3d()) {}
 
 LayerTestCommon::LayerImplTest::LayerImplTest(
     const LayerTreeSettings& settings,
-    std::unique_ptr<CompositorFrameSink> compositor_frame_sink)
-    : compositor_frame_sink_(std::move(compositor_frame_sink)),
+    std::unique_ptr<LayerTreeFrameSink> layer_tree_frame_sink)
+    : layer_tree_frame_sink_(std::move(layer_tree_frame_sink)),
       animation_host_(AnimationHost::CreateForTesting(ThreadInstance::MAIN)),
       host_(FakeLayerTreeHost::Create(&client_,
                                       &task_graph_runner_,
@@ -144,7 +154,7 @@ LayerTestCommon::LayerImplTest::LayerImplTest(
   host_->host_impl()->active_tree()->SetRootLayerForTesting(std::move(root));
   host_->host_impl()->SetVisible(true);
   EXPECT_TRUE(
-      host_->host_impl()->InitializeRenderer(compositor_frame_sink_.get()));
+      host_->host_impl()->InitializeRenderer(layer_tree_frame_sink_.get()));
 
   const int timeline_id = AnimationIdProvider::NextTimelineId();
   timeline_ = AnimationTimeline::Create(timeline_id);
@@ -158,14 +168,14 @@ LayerTestCommon::LayerImplTest::LayerImplTest(
 LayerTestCommon::LayerImplTest::~LayerImplTest() {
   animation_host_->RemoveAnimationTimeline(timeline_);
   timeline_ = nullptr;
-  host_->host_impl()->ReleaseCompositorFrameSink();
+  host_->host_impl()->ReleaseLayerTreeFrameSink();
 }
 
 void LayerTestCommon::LayerImplTest::CalcDrawProps(
     const gfx::Size& viewport_size) {
-  LayerImplList layer_list;
+  RenderSurfaceList render_surface_list;
   LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
-      root_layer_for_testing(), viewport_size, &layer_list);
+      root_layer_for_testing(), viewport_size, &render_surface_list);
   LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
 }
 
@@ -215,14 +225,19 @@ void LayerTestCommon::LayerImplTest::AppendSurfaceQuadsWithOcclusion(
   surface_impl->set_occlusion_in_content_space(
       Occlusion(gfx::Transform(), SimpleEnclosedRegion(occluded),
                 SimpleEnclosedRegion()));
-  surface_impl->AppendQuads(render_pass_.get(), &data);
+  surface_impl->AppendQuads(resource_provider()->default_resource_type() ==
+                                    ResourceProvider::RESOURCE_TYPE_BITMAP
+                                ? DRAW_MODE_SOFTWARE
+                                : DRAW_MODE_HARDWARE,
+                            render_pass_.get(), &data);
 }
 
 void EmptyCopyOutputCallback(std::unique_ptr<CopyOutputResult> result) {}
 
 void LayerTestCommon::LayerImplTest::RequestCopyOfOutput() {
   root_layer_for_testing()->test_properties()->copy_requests.push_back(
-      CopyOutputRequest::CreateRequest(base::Bind(&EmptyCopyOutputCallback)));
+      CopyOutputRequest::CreateRequest(
+          base::BindOnce(&EmptyCopyOutputCallback)));
 }
 
 }  // namespace cc

@@ -10,11 +10,11 @@
 
 #include "base/callback_helpers.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "content/renderer/pepper/ppb_buffer_impl.h"
-#include "media/base/audio_buffer.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/cdm_key_information.h"
@@ -36,6 +36,7 @@
 #include "ppapi/thunk/ppb_buffer_api.h"
 #include "ui/gfx/geometry/rect.h"
 
+using media::CdmMessageType;
 using media::CdmPromise;
 using media::CdmSessionType;
 using media::ContentDecryptionModule;
@@ -348,18 +349,18 @@ media::CdmKeyInformation::KeyStatus PpCdmKeyStatusToCdmKeyInformationKeyStatus(
   }
 }
 
-ContentDecryptionModule::MessageType PpCdmMessageTypeToMediaMessageType(
+CdmMessageType PpCdmMessageTypeToMediaMessageType(
     PP_CdmMessageType message_type) {
   switch (message_type) {
     case PP_CDMMESSAGETYPE_LICENSE_REQUEST:
-      return ContentDecryptionModule::LICENSE_REQUEST;
+      return CdmMessageType::LICENSE_REQUEST;
     case PP_CDMMESSAGETYPE_LICENSE_RENEWAL:
-      return ContentDecryptionModule::LICENSE_RENEWAL;
+      return CdmMessageType::LICENSE_RENEWAL;
     case PP_CDMMESSAGETYPE_LICENSE_RELEASE:
-      return ContentDecryptionModule::LICENSE_RELEASE;
+      return CdmMessageType::LICENSE_RELEASE;
     default:
       NOTREACHED();
-      return ContentDecryptionModule::LICENSE_REQUEST;
+      return CdmMessageType::LICENSE_REQUEST;
   }
 }
 
@@ -384,6 +385,7 @@ ContentDecryptorDelegate::ContentDecryptorDelegate(
       audio_samples_per_second_(0),
       audio_channel_count_(0),
       audio_channel_layout_(media::CHANNEL_LAYOUT_NONE),
+      pool_(new media::AudioBufferMemoryPool()),
       weak_ptr_factory_(this) {
   weak_this_ = weak_ptr_factory_.GetWeakPtr();
 }
@@ -808,7 +810,7 @@ void ContentDecryptorDelegate::OnSessionKeysChange(
   keys_info.reserve(key_count);
   for (uint32_t i = 0; i < key_count; ++i) {
     const auto& info = key_information[i];
-    keys_info.push_back(new media::CdmKeyInformation(
+    keys_info.push_back(base::MakeUnique<media::CdmKeyInformation>(
         info.key_id, info.key_id_size,
         PpCdmKeyStatusToCdmKeyInformationKeyStatus(info.key_status),
         info.system_code));
@@ -1238,13 +1240,9 @@ bool ContentDecryptorDelegate::DeserializeAudioFrames(
 
     const int frame_count = frame_size / audio_bytes_per_frame;
     scoped_refptr<media::AudioBuffer> frame = media::AudioBuffer::CopyFrom(
-        sample_format,
-        audio_channel_layout_,
-        audio_channel_count_,
-        audio_samples_per_second_,
-        frame_count,
-        &channel_ptrs[0],
-        base::TimeDelta::FromMicroseconds(timestamp));
+        sample_format, audio_channel_layout_, audio_channel_count_,
+        audio_samples_per_second_, frame_count, &channel_ptrs[0],
+        base::TimeDelta::FromMicroseconds(timestamp), pool_);
     frames->push_back(frame);
 
     cur += frame_size;

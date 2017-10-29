@@ -8,11 +8,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/printing/cloud_print/gcd_api_flow_impl.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/gaia/fake_oauth2_token_service.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "net/base/host_port_pair.h"
@@ -40,15 +39,15 @@ class MockDelegate : public CloudPrintApiFlowRequest {
  public:
   MOCK_METHOD1(OnGCDApiFlowError, void(GCDApiFlow::Status));
   MOCK_METHOD1(OnGCDApiFlowComplete, void(const base::DictionaryValue&));
-
   MOCK_METHOD0(GetURL, GURL());
+  MOCK_METHOD0(GetNetworkTrafficAnnotationType,
+               GCDApiFlow::Request::NetworkTrafficAnnotation());
 };
 
 class GCDApiFlowTest : public testing::Test {
  public:
   GCDApiFlowTest()
-      : ui_thread_(content::BrowserThread::UI, &loop_),
-        request_context_(new net::TestURLRequestContextGetter(
+      : request_context_(new net::TestURLRequestContextGetter(
             base::ThreadTaskRunnerHandle::Get())),
         account_id_(kAccountId) {}
 
@@ -59,19 +58,18 @@ class GCDApiFlowTest : public testing::Test {
     token_service_.GetFakeOAuth2TokenServiceDelegate()->set_request_context(
         request_context_.get());
     token_service_.AddAccount(account_id_);
-    ui_thread_.Stop();  // HACK: Fake being on the UI thread
 
-    std::unique_ptr<MockDelegate> delegate(new MockDelegate);
+    std::unique_ptr<MockDelegate> delegate = base::MakeUnique<MockDelegate>();
     mock_delegate_ = delegate.get();
     EXPECT_CALL(*mock_delegate_, GetURL())
         .WillRepeatedly(Return(
             GURL("https://www.google.com/cloudprint/confirm?token=SomeToken")));
-    gcd_flow_.reset(new GCDApiFlowImpl(
-        request_context_.get(), &token_service_, account_id_));
+    gcd_flow_ = base::MakeUnique<GCDApiFlowImpl>(request_context_.get(),
+                                                 &token_service_, account_id_);
     gcd_flow_->Start(std::move(delegate));
   }
-  base::MessageLoopForUI loop_;
-  content::TestBrowserThread ui_thread_;
+
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   scoped_refptr<net::TestURLRequestContextGetter> request_context_;
   net::TestURLFetcherFactory fetcher_factory_;
   FakeOAuth2TokenService token_service_;

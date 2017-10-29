@@ -27,22 +27,22 @@
 
 /*
 ** Page paths:
-** 
-**   The value of the 'path' column describes the path taken from the 
-**   root-node of the b-tree structure to each page. The value of the 
+**
+**   The value of the 'path' column describes the path taken from the
+**   root-node of the b-tree structure to each page. The value of the
 **   root-node path is '/'.
 **
 **   The value of the path for the left-most child page of the root of
 **   a b-tree is '/000/'. (Btrees store content ordered from left to right
 **   so the pages to the left have smaller keys than the pages to the right.)
 **   The next to left-most child of the root page is
-**   '/001', and so on, each sibling page identified by a 3-digit hex 
+**   '/001', and so on, each sibling page identified by a 3-digit hex
 **   value. The children of the 451st left-most sibling have paths such
 **   as '/1c2/000/, '/1c2/001/' etc.
 **
-**   Overflow pages are specified by appending a '+' character and a 
+**   Overflow pages are specified by appending a '+' character and a
 **   six-digit hexadecimal value to the path to the cell they are linked
-**   from. For example, the three overflow pages in a chain linked from 
+**   from. For example, the three overflow pages in a chain linked from
 **   the left-most cell of the 450th child of the root page are identified
 **   by the paths:
 **
@@ -58,10 +58,10 @@
 */
 #define VTAB_SCHEMA                                                         \
   "CREATE TABLE xx( "                                                       \
-  "  name       STRING,           /* Name of table or index */"             \
-  "  path       INTEGER,          /* Path to page from root */"             \
+  "  name       TEXT,             /* Name of table or index */"             \
+  "  path       TEXT,             /* Path to page from root */"             \
   "  pageno     INTEGER,          /* Page number */"                        \
-  "  pagetype   STRING,           /* 'internal', 'leaf' or 'overflow' */"   \
+  "  pagetype   TEXT,             /* 'internal', 'leaf' or 'overflow' */"   \
   "  ncell      INTEGER,          /* Cells on page (0 for overflow) */"     \
   "  payload    INTEGER,          /* Bytes of payload on this page */"      \
   "  unused     INTEGER,          /* Bytes of unused space on this page */" \
@@ -149,7 +149,9 @@ static int statConnect(
   int iDb;
 
   if( argc>=4 ){
-    iDb = sqlite3FindDbName(db, argv[3]);
+    Token nm;
+    sqlite3TokenInit(&nm, (char*)argv[3]);
+    iDb = sqlite3FindDb(db, &nm);
     if( iDb<0 ){
       *pzErr = sqlite3_mprintf("no such database: %s", argv[3]);
       return SQLITE_ERROR;
@@ -160,7 +162,7 @@ static int statConnect(
   rc = sqlite3_declare_vtab(db, VTAB_SCHEMA);
   if( rc==SQLITE_OK ){
     pTab = (StatTable *)sqlite3_malloc64(sizeof(StatTable));
-    if( pTab==0 ) rc = SQLITE_NOMEM;
+    if( pTab==0 ) rc = SQLITE_NOMEM_BKPT;
   }
 
   assert( rc==SQLITE_OK || pTab==0 );
@@ -211,8 +213,8 @@ static int statBestIndex(sqlite3_vtab *tab, sqlite3_index_info *pIdxInfo){
   }
 
 
-  /* Records are always returned in ascending order of (name, path). 
-  ** If this will satisfy the client, set the orderByConsumed flag so that 
+  /* Records are always returned in ascending order of (name, path).
+  ** If this will satisfy the client, set the orderByConsumed flag so that
   ** SQLite does not do an external sort.
   */
   if( ( pIdxInfo->nOrderBy==1
@@ -241,7 +243,7 @@ static int statOpen(sqlite3_vtab *pVTab, sqlite3_vtab_cursor **ppCursor){
 
   pCsr = (StatCursor *)sqlite3_malloc64(sizeof(StatCursor));
   if( pCsr==0 ){
-    return SQLITE_NOMEM;
+    return SQLITE_NOMEM_BKPT;
   }else{
     memset(pCsr, 0, sizeof(StatCursor));
     pCsr->base.pVtab = pVTab;
@@ -297,7 +299,7 @@ static void getLocalPayload(
   int nLocal;
   int nMinLocal;
   int nMaxLocal;
- 
+
   if( flags==0x0D ){              /* Table leaf node */
     nMinLocal = (nUsable - 12) * 32 / 255 - 23;
     nMaxLocal = nUsable - 35;
@@ -347,7 +349,7 @@ static int statDecodePage(Btree *pBt, StatPage *p){
     nUsable = szPage - sqlite3BtreeGetReserveNoMutex(pBt);
     sqlite3BtreeLeave(pBt);
     p->aCell = sqlite3_malloc64((p->nCell+1) * sizeof(StatCell));
-    if( p->aCell==0 ) return SQLITE_NOMEM;
+    if( p->aCell==0 ) return SQLITE_NOMEM_BKPT;
     memset(p->aCell, 0, (p->nCell+1) * sizeof(StatCell));
 
     for(i=0; i<p->nCell; i++){
@@ -380,7 +382,7 @@ static int statDecodePage(Btree *pBt, StatPage *p){
           pCell->nLastOvfl = (nPayload-nLocal) - (nOvfl-1) * (nUsable-4);
           pCell->nOvfl = nOvfl;
           pCell->aOvfl = sqlite3_malloc64(sizeof(u32)*nOvfl);
-          if( pCell->aOvfl==0 ) return SQLITE_NOMEM;
+          if( pCell->aOvfl==0 ) return SQLITE_NOMEM_BKPT;
           pCell->aOvfl[0] = sqlite3Get4byte(&aData[iOff+nLocal]);
           for(j=1; j<nOvfl; j++){
             int rc;
@@ -390,7 +392,7 @@ static int statDecodePage(Btree *pBt, StatPage *p){
             if( rc!=SQLITE_OK ){
               assert( pPg==0 );
               return rc;
-            } 
+            }
             pCell->aOvfl[j] = sqlite3Get4byte(sqlite3PagerGetData(pPg));
             sqlite3PagerUnref(pPg);
           }
@@ -459,7 +461,7 @@ statNextRestart:
       pCsr->aPage[0].iCell = 0;
       pCsr->aPage[0].zPath = z = sqlite3_mprintf("/");
       pCsr->iPage = 0;
-      if( z==0 ) rc = SQLITE_NOMEM;
+      if( z==0 ) rc = SQLITE_NOMEM_BKPT;
     }else{
       pCsr->isEof = 1;
       return sqlite3_reset(pCsr->pStmt);
@@ -474,7 +476,7 @@ statNextRestart:
       if( pCell->iOvfl<pCell->nOvfl ){
         int nUsable;
         sqlite3BtreeEnter(pBt);
-        nUsable = sqlite3BtreeGetPageSize(pBt) - 
+        nUsable = sqlite3BtreeGetPageSize(pBt) -
                         sqlite3BtreeGetReserveNoMutex(pBt);
         sqlite3BtreeLeave(pBt);
         pCsr->zName = (char *)sqlite3_column_text(pCsr->pStmt, 0);
@@ -494,7 +496,7 @@ statNextRestart:
         }
         pCell->iOvfl++;
         statSizeAndOffset(pCsr);
-        return z==0 ? SQLITE_NOMEM : SQLITE_OK;
+        return z==0 ? SQLITE_NOMEM_BKPT : SQLITE_OK;
       }
       if( p->iRightChildPg ) break;
       p->iCell++;
@@ -518,7 +520,7 @@ statNextRestart:
     p[1].iCell = 0;
     p[1].zPath = z = sqlite3_mprintf("%s%.3x/", p->zPath, p->iCell);
     p->iCell++;
-    if( z==0 ) rc = SQLITE_NOMEM;
+    if( z==0 ) rc = SQLITE_NOMEM_BKPT;
   }
 
 
@@ -552,7 +554,7 @@ statNextRestart:
       pCsr->nUnused = p->nUnused;
       pCsr->nMxPayload = p->nMxPayload;
       pCsr->zPath = z = sqlite3_mprintf("%s", p->zPath);
-      if( z==0 ) rc = SQLITE_NOMEM;
+      if( z==0 ) rc = SQLITE_NOMEM_BKPT;
       nPayload = 0;
       for(i=0; i<p->nCell; i++){
         nPayload += p->aCell[i].nLocal;
@@ -570,7 +572,7 @@ static int statEof(sqlite3_vtab_cursor *pCursor){
 }
 
 static int statFilter(
-  sqlite3_vtab_cursor *pCursor, 
+  sqlite3_vtab_cursor *pCursor,
   int idxNum, const char *idxStr,
   int argc, sqlite3_value **argv
 ){
@@ -586,7 +588,7 @@ static int statFilter(
     if( pCsr->iDb<0 ){
       sqlite3_free(pCursor->pVtab->zErrMsg);
       pCursor->pVtab->zErrMsg = sqlite3_mprintf("no such schema: %s", zDbase);
-      return pCursor->pVtab->zErrMsg ? SQLITE_ERROR : SQLITE_NOMEM;
+      return pCursor->pVtab->zErrMsg ? SQLITE_ERROR : SQLITE_NOMEM_BKPT;
     }
   }else{
     pCsr->iDb = pTab->iDb;
@@ -600,9 +602,9 @@ static int statFilter(
       "  UNION ALL  "
       "SELECT name, rootpage, type"
       "  FROM \"%w\".%s WHERE rootpage!=0"
-      "  ORDER BY name", pTab->db->aDb[pCsr->iDb].zName, zMaster);
+      "  ORDER BY name", pTab->db->aDb[pCsr->iDb].zDbSName, zMaster);
   if( zSql==0 ){
-    return SQLITE_NOMEM;
+    return SQLITE_NOMEM_BKPT;
   }else{
     rc = sqlite3_prepare_v2(pTab->db, zSql, -1, &pCsr->pStmt, 0);
     sqlite3_free(zSql);
@@ -615,8 +617,8 @@ static int statFilter(
 }
 
 static int statColumn(
-  sqlite3_vtab_cursor *pCursor, 
-  sqlite3_context *ctx, 
+  sqlite3_vtab_cursor *pCursor,
+  sqlite3_context *ctx,
   int i
 ){
   StatCursor *pCsr = (StatCursor *)pCursor;
@@ -654,7 +656,7 @@ static int statColumn(
     default: {          /* schema */
       sqlite3 *db = sqlite3_context_db_handle(ctx);
       int iDb = pCsr->iDb;
-      sqlite3_result_text(ctx, db->aDb[iDb].zName, -1, SQLITE_STATIC);
+      sqlite3_result_text(ctx, db->aDb[iDb].zDbSName, -1, SQLITE_STATIC);
       break;
     }
   }
@@ -692,6 +694,9 @@ int sqlite3DbstatRegister(sqlite3 *db){
     0,                            /* xRollback */
     0,                            /* xFindMethod */
     0,                            /* xRename */
+    0,                            /* xSavepoint */
+    0,                            /* xRelease */
+    0,                            /* xRollbackTo */
   };
   return sqlite3_create_module(db, "dbstat", &dbstat_module, 0);
 }

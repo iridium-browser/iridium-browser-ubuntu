@@ -23,33 +23,35 @@ class CORE_EXPORT ThreadedWorkletObjectProxy : public ThreadedObjectProxyBase {
   WTF_MAKE_NONCOPYABLE(ThreadedWorkletObjectProxy);
 
  public:
-  static std::unique_ptr<ThreadedWorkletObjectProxy> create(
-      const WeakPtr<ThreadedWorkletMessagingProxy>&,
+  static std::unique_ptr<ThreadedWorkletObjectProxy> Create(
+      ThreadedWorkletMessagingProxy*,
       ParentFrameTaskRunners*);
   ~ThreadedWorkletObjectProxy() override;
 
-  void evaluateScript(const String& source,
-                      const KURL& scriptURL,
+  void EvaluateScript(const String& source,
+                      const KURL& script_url,
                       WorkerThread*);
 
   // ThreadedObjectProxyBase overrides.
-  void reportException(const String& errorMessage,
+  void ReportException(const String& error_message,
                        std::unique_ptr<SourceLocation>,
-                       int exceptionId) final {}
-  void didEvaluateWorkerScript(bool success) final {}
-  void willDestroyWorkerGlobalScope() final {}
+                       int exception_id) final {}
+  void DidEvaluateWorkerScript(bool success) final {}
+  void WillDestroyWorkerGlobalScope() final {}
 
  protected:
-  ThreadedWorkletObjectProxy(const WeakPtr<ThreadedWorkletMessagingProxy>&,
+  ThreadedWorkletObjectProxy(ThreadedWorkletMessagingProxy*,
                              ParentFrameTaskRunners*);
 
-  WeakPtr<ThreadedMessagingProxyBase> messagingProxyWeakPtr() final;
+  CrossThreadWeakPersistent<ThreadedMessagingProxyBase> MessagingProxyWeakPtr()
+      final;
 
  private:
   // No guarantees about the lifetimes of tasks posted by this proxy wrt the
   // ThreadedWorkletMessagingProxy so a weak pointer must be used when posting
   // the tasks.
-  WeakPtr<ThreadedWorkletMessagingProxy> m_messagingProxyWeakPtr;
+  CrossThreadWeakPersistent<ThreadedWorkletMessagingProxy>
+      messaging_proxy_weak_ptr_;
 };
 
 }  // namespace blink

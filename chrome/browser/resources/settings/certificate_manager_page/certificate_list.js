@@ -13,11 +13,23 @@ Polymer({
     /** @type {!Array<!Certificate>} */
     certificates: {
       type: Array,
-      value: function() { return []; },
+      value: function() {
+        return [];
+      },
     },
 
     /** @type {!CertificateType} */
     certificateType: String,
+
+    // <if expr="chromeos">
+    /** @private */
+    isGuest_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('isGuest');
+      }
+    },
+    // </if>
   },
 
   behaviors: [I18nBehavior],
@@ -52,22 +64,23 @@ Polymer({
     return this.certificateType != CertificateType.OTHER;
   },
 
-// <if expr="chromeos">
+  // <if expr="chromeos">
   /**
    * @return {boolean}
    * @private
    */
   canImportAndBind_: function() {
-    return this.certificateType == CertificateType.PERSONAL;
+    return !this.isGuest_ && this.certificateType == CertificateType.PERSONAL;
   },
-// </if>
+  // </if>
 
   /**
    * Handles a rejected Promise returned from |browserProxy_|.
+   * @param {!HTMLElement} anchor
    * @param {*} error Expects {!CertificatesError|!CertificatesImportError}.
    * @private
    */
-  onRejected_: function(error) {
+  onRejected_: function(anchor, error) {
     if (error === null) {
       // Nothing to do here. Null indicates that the user clicked "cancel" on
       // a native file chooser dialog.
@@ -76,58 +89,66 @@ Polymer({
 
     // Otherwise propagate the error to the parents, such that a dialog
     // displaying the error will be shown.
-    this.fire('certificates-error', error);
+    this.fire('certificates-error', {error: error, anchor: anchor});
   },
 
 
   /**
    * @param {?NewCertificateSubNode} subnode
+   * @param {!HTMLElement} anchor
    * @private
    */
-  dispatchImportActionEvent_: function(subnode) {
+  dispatchImportActionEvent_: function(subnode, anchor) {
     this.fire(
         settings.CertificateActionEvent,
         /** @type {!CertificateActionEventDetail} */ ({
           action: CertificateAction.IMPORT,
           subnode: subnode,
           certificateType: this.certificateType,
+          anchor: anchor,
         }));
   },
 
-  /** @private */
-  onImportTap_: function() {
-    this.handleImport_(false);
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onImportTap_: function(e) {
+    this.handleImport_(
+        false, /** @type {!HTMLElement} */ (Polymer.dom(e).localTarget));
   },
 
-// <if expr="chromeos">
-  /** @private */
-  onImportAndBindTap_: function() {
-    this.handleImport_(true);
+  // <if expr="chromeos">
+  /**
+   * @private
+   * @param {!Event} e
+   */
+  onImportAndBindTap_: function(e) {
+    this.handleImport_(
+        true, /** @type {!HTMLElement} */ (Polymer.dom(e).localTarget));
   },
-// </if>
+  // </if>
 
   /**
    * @param {boolean} useHardwareBacked
+   * @param {!HTMLElement} anchor
    * @private
    */
-  handleImport_: function(useHardwareBacked) {
+  handleImport_: function(useHardwareBacked, anchor) {
     var browserProxy = settings.CertificatesBrowserProxyImpl.getInstance();
     if (this.certificateType == CertificateType.PERSONAL) {
-      browserProxy.importPersonalCertificate(useHardwareBacked).then(
-          function(showPasswordPrompt) {
+      browserProxy.importPersonalCertificate(useHardwareBacked)
+          .then(function(showPasswordPrompt) {
             if (showPasswordPrompt)
-              this.dispatchImportActionEvent_(null);
-          }.bind(this),
-          this.onRejected_.bind(this));
+              this.dispatchImportActionEvent_(null, anchor);
+          }.bind(this), this.onRejected_.bind(this, anchor));
     } else if (this.certificateType == CertificateType.CA) {
-      browserProxy.importCaCertificate().then(
-          function(certificateName) {
-            this.dispatchImportActionEvent_({name: certificateName});
-          }.bind(this),
-          this.onRejected_.bind(this));
+      browserProxy.importCaCertificate().then(function(certificateName) {
+        this.dispatchImportActionEvent_({name: certificateName}, anchor);
+      }.bind(this), this.onRejected_.bind(this, anchor));
     } else if (this.certificateType == CertificateType.SERVER) {
       browserProxy.importServerCertificate().catch(
-          this.onRejected_.bind(this));
+          this.onRejected_.bind(this, anchor));
     } else {
       assertNotReached();
     }

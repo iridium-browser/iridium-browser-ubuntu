@@ -24,7 +24,6 @@ struct InputHandlerScrollResult;
 }
 
 namespace blink {
-class WebInputEvent;
 class WebMouseWheelEvent;
 }
 
@@ -41,8 +40,9 @@ struct DidOverscrollParams;
 namespace content {
 
 class InputHandlerWrapper;
-class SynchronousInputHandlerProxyClient;
 class InputHandlerManagerClient;
+class MainThreadEventQueue;
+class SynchronousInputHandlerProxyClient;
 
 // InputHandlerManager class manages InputHandlerProxy instances for
 // the WebViews in this renderer.
@@ -60,25 +60,25 @@ class CONTENT_EXPORT InputHandlerManager {
   virtual ~InputHandlerManager();
 
   // Callable from the main thread only.
-  void AddInputHandler(int routing_id,
-                       const base::WeakPtr<cc::InputHandler>& input_handler,
-                       const base::WeakPtr<RenderWidget>& render_widget,
-                       bool enable_smooth_scrolling);
+  void AddInputHandler(
+      int routing_id,
+      const base::WeakPtr<cc::InputHandler>& input_handler,
+      const scoped_refptr<MainThreadEventQueue>& input_event_queue,
+      const base::WeakPtr<RenderWidget>& render_widget,
+      bool enable_smooth_scrolling);
 
-  void RegisterRoutingID(int routing_id);
   void UnregisterRoutingID(int routing_id);
+
+  void RegisterAssociatedRenderFrameRoutingID(int render_frame_routing_id,
+                                              int render_view_routing_id);
+  void RegisterAssociatedRenderFrameRoutingIDOnCompositorThread(
+      int render_frame_routing_id,
+      int render_view_routing_id);
 
   void ObserveGestureEventAndResultOnMainThread(
       int routing_id,
       const blink::WebGestureEvent& gesture_event,
       const cc::InputHandlerScrollResult& scroll_result);
-
-  void NotifyInputEventHandledOnMainThread(int routing_id,
-                                           blink::WebInputEvent::Type,
-                                           blink::WebInputEventResult,
-                                           InputEventAckState);
-  void ProcessRafAlignedInputOnMainThread(int routing_id,
-                                          base::TimeTicks frame_time);
 
   // Callback only from the compositor's thread.
   void RemoveInputHandler(int routing_id);
@@ -94,6 +94,9 @@ class CONTENT_EXPORT InputHandlerManager {
                                 const ui::LatencyInfo& latency_info,
                                 const InputEventAckStateCallback& callback);
 
+  virtual void QueueClosureForMainThreadEventQueue(
+      int routing_id,
+      const base::Closure& closure);
   // Called from the compositor's thread.
   void DidOverscroll(int routing_id, const ui::DidOverscrollParams& params);
 
@@ -104,13 +107,13 @@ class CONTENT_EXPORT InputHandlerManager {
   void DidAnimateForInput();
 
   // Called from the compositor's thread.
-  void NeedsMainFrame(int routing_id);
-
-  // Called from the compositor's thread.
   void DispatchNonBlockingEventToMainThread(
       int routing_id,
       ui::WebScopedInputEvent event,
       const ui::LatencyInfo& latency_info);
+
+  // Called from the compositor's thread.
+  void SetWhiteListedTouchAction(int routing_id, cc::TouchAction touch_action);
 
  private:
   // Called from the compositor's thread.
@@ -118,10 +121,10 @@ class CONTENT_EXPORT InputHandlerManager {
       int routing_id,
       const scoped_refptr<base::SingleThreadTaskRunner>& main_task_runner,
       const base::WeakPtr<cc::InputHandler>& input_handler,
+      const scoped_refptr<MainThreadEventQueue>& input_event_queue,
       const base::WeakPtr<RenderWidget>& render_widget,
       bool enable_smooth_scrolling);
 
-  void RegisterRoutingIDOnCompositorThread(int routing_id);
   void UnregisterRoutingIDOnCompositorThread(int routing_id);
 
   void ObserveWheelEventAndResultOnCompositorThread(

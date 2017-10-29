@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -112,6 +113,10 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
     configure_displays_ = configure_displays;
   }
 
+  void set_internal_display_has_accelerometer(bool has_accelerometer) {
+    internal_display_has_accelerometer_ = has_accelerometer;
+  }
+
   // Returns the display id of the first display in the outupt list.
   int64_t first_display_id() const { return first_display_id_; }
 
@@ -138,8 +143,11 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
   // locaion of the displays relative to their parents.
   void SetLayoutForCurrentDisplays(std::unique_ptr<DisplayLayout> layout);
 
-  // Returns display for given |id|;
-  const Display& GetDisplayForId(int64_t id) const;
+  // Returns display for given |display_id|.
+  const Display& GetDisplayForId(int64_t display_id) const;
+
+  // Checks the validity of given |display_id|.
+  bool IsDisplayIdValid(int64_t display_id) const;
 
   // Finds the display that contains |point| in screeen coordinates.  Returns
   // invalid display if there is no display that can satisfy the condition.
@@ -205,10 +213,17 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
   scoped_refptr<ManagedDisplayMode> GetActiveModeForDisplayId(
       int64_t display_id) const;
 
-  // Returns the display's selected mode. This returns false and doesn't set
-  // |mode_out| if the display mode is in default.
+  // Returns the display's selected mode.
   scoped_refptr<ManagedDisplayMode> GetSelectedModeForDisplayId(
       int64_t display_id) const;
+
+  // Sets the selected mode of |display_id| to |display_mode| if it's a
+  // supported mode. This doesn't trigger reconfiguration or observers
+  // notifications. This is suitable to be used from within an observer
+  // notification to prevent reentrance to UpdateDisplaysWith().
+  void SetSelectedModeForDisplayId(
+      int64_t display_id,
+      const scoped_refptr<ManagedDisplayMode>& display_mode);
 
   // Tells if the virtual resolution feature is enabled.
   bool IsDisplayUIScalingEnabled() const;
@@ -362,6 +377,18 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
  private:
   friend class test::DisplayManagerTestApi;
 
+  // See description above |notify_depth_| for details.
+  class BeginEndNotifier {
+   public:
+    explicit BeginEndNotifier(DisplayManager* display_manager);
+    ~BeginEndNotifier();
+
+   private:
+    DisplayManager* display_manager_;
+
+    DISALLOW_COPY_AND_ASSIGN(BeginEndNotifier);
+  };
+
   bool software_mirroring_enabled() const {
     return multi_display_mode_ == MIRRORING;
   }
@@ -468,6 +495,9 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
   int64_t mirroring_display_id_ = kInvalidDisplayId;
   Displays software_mirroring_display_list_;
 
+  // Cached mirror mode for metrics changed notification.
+  bool mirror_mode_for_metrics_ = false;
+
   // User preference for rotation lock of the internal display.
   bool registered_internal_display_rotation_lock_ = false;
 
@@ -476,7 +506,16 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
 
   bool unified_desktop_enabled_ = false;
 
+  bool internal_display_has_accelerometer_ = false;
+
+  base::Closure created_mirror_window_;
+
   base::ObserverList<DisplayObserver> observers_;
+
+  // This is incremented whenever a BeginEndNotifier is created and decremented
+  // when destroyed. BeginEndNotifier uses this to track when it should call
+  // OnWillProcessDisplayChanges() and OnDidProcessDisplayChanges().
+  int notify_depth_ = 0;
 
   base::WeakPtrFactory<DisplayManager> weak_ptr_factory_;
 

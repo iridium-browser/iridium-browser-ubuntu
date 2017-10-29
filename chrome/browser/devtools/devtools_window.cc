@@ -5,15 +5,19 @@
 #include "chrome/browser/devtools/devtools_window.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/data_use_measurement/data_use_web_contents_observer.h"
+#include "chrome/browser/devtools/devtools_eye_dropper.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -39,6 +43,7 @@
 #include "components/zoom/zoom_controller.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
+#include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -46,7 +51,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
@@ -122,9 +126,9 @@ class DevToolsToolboxDelegate
   content::WebContents* OpenURLFromTab(
       content::WebContents* source,
       const content::OpenURLParams& params) override;
-  bool PreHandleKeyboardEvent(content::WebContents* source,
-                              const content::NativeWebKeyboardEvent& event,
-                              bool* is_keyboard_shortcut) override;
+  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      content::WebContents* source,
+      const content::NativeWebKeyboardEvent& event) override;
   void HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) override;
@@ -157,20 +161,20 @@ content::WebContents* DevToolsToolboxDelegate::OpenURLFromTab(
   return source;
 }
 
-bool DevToolsToolboxDelegate::PreHandleKeyboardEvent(
+content::KeyboardEventProcessingResult
+DevToolsToolboxDelegate::PreHandleKeyboardEvent(
     content::WebContents* source,
-    const content::NativeWebKeyboardEvent& event,
-    bool* is_keyboard_shortcut) {
+    const content::NativeWebKeyboardEvent& event) {
   BrowserWindow* window = GetInspectedBrowserWindow();
   if (window)
-    return window->PreHandleKeyboardEvent(event, is_keyboard_shortcut);
-  return false;
+    return window->PreHandleKeyboardEvent(event);
+  return content::KeyboardEventProcessingResult::NOT_HANDLED;
 }
 
 void DevToolsToolboxDelegate::HandleKeyboardEvent(
     content::WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
-  if (event.windowsKeyCode == 0x08) {
+  if (event.windows_key_code == 0x08) {
     // Do not navigate back in history on Windows (http://crbug.com/74156).
     return;
   }
@@ -254,7 +258,7 @@ void DevToolsEventForwarder::SetWhitelistedShortcuts(
   base::ListValue::iterator it = shortcut_list->begin();
   for (; it != shortcut_list->end(); ++it) {
     base::DictionaryValue* dictionary;
-    if (!(*it)->GetAsDictionary(&dictionary))
+    if (!it->GetAsDictionary(&dictionary))
       continue;
     int key_code = 0;
     dictionary->GetInteger("keyCode", &key_code);
@@ -274,12 +278,12 @@ void DevToolsEventForwarder::SetWhitelistedShortcuts(
 bool DevToolsEventForwarder::ForwardEvent(
     const content::NativeWebKeyboardEvent& event) {
   std::string event_type;
-  switch (event.type()) {
-    case WebInputEvent::KeyDown:
-    case WebInputEvent::RawKeyDown:
+  switch (event.GetType()) {
+    case WebInputEvent::kKeyDown:
+    case WebInputEvent::kRawKeyDown:
       event_type = kKeyDownEventName;
       break;
-    case WebInputEvent::KeyUp:
+    case WebInputEvent::kKeyUp:
       event_type = kKeyUpEventName;
       break;
     default:
@@ -287,10 +291,10 @@ bool DevToolsEventForwarder::ForwardEvent(
   }
 
   int key_code = ui::LocatedToNonLocatedKeyboardCode(
-      static_cast<ui::KeyboardCode>(event.windowsKeyCode));
-  int modifiers =
-      event.modifiers() & (WebInputEvent::ShiftKey | WebInputEvent::ControlKey |
-                           WebInputEvent::AltKey | WebInputEvent::MetaKey);
+      static_cast<ui::KeyboardCode>(event.windows_key_code));
+  int modifiers = event.GetModifiers() &
+                  (WebInputEvent::kShiftKey | WebInputEvent::kControlKey |
+                   WebInputEvent::kAltKey | WebInputEvent::kMetaKey);
   int key = CombineKeyCodeAndModifiers(key_code, modifiers);
   if (whitelisted_keys_.find(key) == whitelisted_keys_.end())
     return false;
@@ -298,9 +302,9 @@ bool DevToolsEventForwarder::ForwardEvent(
   base::DictionaryValue event_data;
   event_data.SetString("type", event_type);
   event_data.SetString("key", ui::KeycodeConverter::DomKeyToKeyString(
-                                  static_cast<ui::DomKey>(event.domKey)));
+                                  static_cast<ui::DomKey>(event.dom_key)));
   event_data.SetString("code", ui::KeycodeConverter::DomCodeToCodeString(
-                                   static_cast<ui::DomCode>(event.domCode)));
+                                   static_cast<ui::DomCode>(event.dom_code)));
   event_data.SetInteger("keyCode", key_code);
   event_data.SetInteger("modifiers", modifiers);
   devtools_window_->bindings_->CallClientFunction(
@@ -466,9 +470,9 @@ void DevToolsWindow::OpenDevToolsWindowForWorker(
 // static
 DevToolsWindow* DevToolsWindow::CreateDevToolsWindowForWorker(
     Profile* profile) {
-  content::RecordAction(base::UserMetricsAction("DevTools_InspectWorker"));
-  return Create(profile, GURL(), NULL, true, false, false, std::string(),
-                false, "", "");
+  base::RecordAction(base::UserMetricsAction("DevTools_InspectWorker"));
+  return Create(profile, nullptr, kFrontendWorker, std::string(), false, "",
+                "");
 }
 
 // static
@@ -489,13 +493,19 @@ void DevToolsWindow::OpenDevToolsWindow(
     return;
 
   std::string type = agent_host->GetType();
+
   bool is_worker = type == DevToolsAgentHost::kTypeServiceWorker ||
                    type == DevToolsAgentHost::kTypeSharedWorker;
 
   if (!agent_host->GetFrontendURL().empty()) {
-    bool is_v8_only = type == "node";
+    FrontendType frontend_type = kFrontendRemote;
+    if (is_worker) {
+      frontend_type = kFrontendWorker;
+    } else if (type == "node") {
+      frontend_type = kFrontendV8;
+    }
     DevToolsWindow::OpenExternalFrontend(profile, agent_host->GetFrontendURL(),
-                                         agent_host, is_worker, is_v8_only);
+                                         agent_host, frontend_type);
     return;
   }
 
@@ -527,8 +537,8 @@ void DevToolsWindow::OpenDevToolsWindowForFrame(
     const scoped_refptr<content::DevToolsAgentHost>& agent_host) {
   DevToolsWindow* window = FindDevToolsWindow(agent_host.get());
   if (!window) {
-    window = DevToolsWindow::Create(profile, GURL(), nullptr, false, false,
-                                    false, std::string(), false, std::string(),
+    window = DevToolsWindow::Create(profile, nullptr, kFrontendDefault,
+                                    std::string(), false, std::string(),
                                     std::string());
     if (!window)
       return;
@@ -558,11 +568,10 @@ void DevToolsWindow::OpenExternalFrontend(
     Profile* profile,
     const std::string& frontend_url,
     const scoped_refptr<content::DevToolsAgentHost>& agent_host,
-    bool is_worker,
-    bool is_v8_only) {
+    FrontendType frontend_type) {
   DevToolsWindow* window = FindDevToolsWindow(agent_host.get());
   if (!window) {
-    window = Create(profile, GURL(), nullptr, is_worker, is_v8_only, false,
+    window = Create(profile, nullptr, frontend_type,
                     DevToolsUI::GetProxyURL(frontend_url).spec(), false,
                     std::string(), std::string());
     if (!window)
@@ -576,9 +585,16 @@ void DevToolsWindow::OpenExternalFrontend(
 
 // static
 void DevToolsWindow::OpenNodeFrontendWindow(Profile* profile) {
-  DevToolsWindow* window = Create(profile, GURL(), nullptr, false, true, true,
-                                  std::string(), false, std::string(),
-                                  std::string());
+  for (DevToolsWindow* window : g_instances.Get()) {
+    if (window->frontend_type_ == kFrontendNode) {
+      window->ActivateWindow();
+      return;
+    }
+  }
+
+  DevToolsWindow* window =
+      Create(profile, nullptr, kFrontendNode, std::string(), false,
+             std::string(), std::string());
   if (!window)
     return;
   window->bindings_->AttachTo(DevToolsAgentHost::CreateForDiscovery());
@@ -598,8 +614,7 @@ void DevToolsWindow::ToggleDevToolsWindow(
   if (!window) {
     Profile* profile = Profile::FromBrowserContext(
         inspected_web_contents->GetBrowserContext());
-    content::RecordAction(
-        base::UserMetricsAction("DevTools_InspectRenderer"));
+    base::RecordAction(base::UserMetricsAction("DevTools_InspectRenderer"));
     std::string panel = "";
     switch (action.type()) {
       case DevToolsToggleAction::kInspect:
@@ -615,8 +630,8 @@ void DevToolsWindow::ToggleDevToolsWindow(
       case DevToolsToggleAction::kNoOp:
         break;
     }
-    window = Create(profile, GURL(), inspected_web_contents, false, false,
-                    false, std::string(), true, settings, panel);
+    window = Create(profile, inspected_web_contents, kFrontendDefault,
+                    std::string(), true, settings, panel);
     if (!window)
       return;
     window->bindings_->AttachTo(agent.get());
@@ -639,19 +654,15 @@ void DevToolsWindow::InspectElement(
     content::RenderFrameHost* inspected_frame_host,
     int x,
     int y) {
+  WebContents* web_contents =
+      WebContents::FromRenderFrameHost(inspected_frame_host);
   scoped_refptr<DevToolsAgentHost> agent(
-      DevToolsAgentHost::GetOrCreateFor(inspected_frame_host));
+      DevToolsAgentHost::GetOrCreateFor(web_contents));
   bool should_measure_time = FindDevToolsWindow(agent.get()) == NULL;
   base::TimeTicks start_time = base::TimeTicks::Now();
   // TODO(loislo): we should initiate DevTools window opening from within
   // renderer. Otherwise, we still can hit a race condition here.
-  if (agent->GetType() == content::DevToolsAgentHost::kTypePage) {
-    OpenDevToolsWindow(agent->GetWebContents(),
-                       DevToolsToggleAction::ShowElementsPanel());
-  } else {
-    OpenDevToolsWindowForFrame(Profile::FromBrowserContext(
-                                   agent->GetBrowserContext()), agent);
-  }
+  OpenDevToolsWindow(web_contents, DevToolsToggleAction::ShowElementsPanel());
   DevToolsWindow* window = FindDevToolsWindow(agent.get());
   if (window) {
     agent->InspectElement(window->bindings_, x, y);
@@ -802,12 +813,14 @@ void DevToolsWindow::OnPageCloseCanceled(WebContents* contents) {
   DevToolsWindow::OnPageCloseCanceled(window->main_web_contents_);
 }
 
-DevToolsWindow::DevToolsWindow(Profile* profile,
+DevToolsWindow::DevToolsWindow(FrontendType frontend_type,
+                               Profile* profile,
                                WebContents* main_web_contents,
                                DevToolsUIBindings* bindings,
                                WebContents* inspected_web_contents,
                                bool can_dock)
-    : profile_(profile),
+    : frontend_type_(frontend_type),
+      profile_(profile),
       main_web_contents_(main_web_contents),
       toolbox_web_contents_(nullptr),
       bindings_(bindings),
@@ -867,12 +880,9 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
 // static
 DevToolsWindow* DevToolsWindow::Create(
     Profile* profile,
-    const GURL& frontend_url,
     content::WebContents* inspected_web_contents,
-    bool shared_worker_frontend,
-    bool v8_only_frontend,
-    bool node_frontend,
-    const std::string& remote_frontend,
+    FrontendType frontend_type,
+    const std::string& frontend_url,
     bool can_dock,
     const std::string& settings,
     const std::string& panel) {
@@ -882,7 +892,7 @@ DevToolsWindow* DevToolsWindow::Create(
 
   if (inspected_web_contents) {
     // Check for a place to dock.
-    Browser* browser = NULL;
+    Browser* browser = nullptr;
     int tab;
     if (!FindInspectedBrowserAndTabIndex(inspected_web_contents,
                                          &browser, &tab) ||
@@ -892,8 +902,8 @@ DevToolsWindow* DevToolsWindow::Create(
   }
 
   // Create WebContents with devtools.
-  GURL url(GetDevToolsURL(profile, frontend_url, shared_worker_frontend,
-      v8_only_frontend, node_frontend, remote_frontend, can_dock, panel));
+  GURL url(
+      GetDevToolsURL(profile, frontend_type, frontend_url, can_dock, panel));
   std::unique_ptr<WebContents> main_web_contents(
       WebContents::Create(WebContents::CreateParams(profile)));
   main_web_contents->GetController().LoadURL(
@@ -905,42 +915,40 @@ DevToolsWindow* DevToolsWindow::Create(
     return nullptr;
   if (!settings.empty())
     SetPreferencesFromJson(profile, settings);
-  return new DevToolsWindow(profile, main_web_contents.release(), bindings,
-                            inspected_web_contents, can_dock);
+  return new DevToolsWindow(frontend_type, profile, main_web_contents.release(),
+                            bindings, inspected_web_contents, can_dock);
 }
 
 // static
 GURL DevToolsWindow::GetDevToolsURL(Profile* profile,
-                                    const GURL& base_url,
-                                    bool shared_worker_frontend,
-                                    bool v8_only_frontend,
-                                    bool node_frontend,
-                                    const std::string& remote_frontend,
+                                    FrontendType frontend_type,
+                                    const std::string& frontend_url,
                                     bool can_dock,
                                     const std::string& panel) {
-  // Compatibility errors are encoded with data urls, pass them
-  // through with no decoration.
-  if (base_url.SchemeIs("data"))
-    return base_url;
-
-  std::string frontend_url(
-      !remote_frontend.empty() ?
-          remote_frontend :
-          base_url.is_empty() ? chrome::kChromeUIDevToolsURL : base_url.spec());
-  std::string url_string(
-      frontend_url +
-      ((frontend_url.find("?") == std::string::npos) ? "?" : "&"));
-  if (shared_worker_frontend)
-    url_string += "&isSharedWorker=true";
-  if (v8_only_frontend)
-    url_string += "&v8only=true";
-  if (node_frontend)
-    url_string += "&nodeFrontend=true";
-  if (remote_frontend.size()) {
-    url_string += "&remoteFrontend=true";
-  } else {
-    url_string += "&remoteBase=" + DevToolsUI::GetRemoteBaseURL().spec();
+  std::string url(!frontend_url.empty() ? frontend_url
+                                        : chrome::kChromeUIDevToolsURL);
+  std::string url_string(url +
+                         ((url.find("?") == std::string::npos) ? "?" : "&"));
+  switch (frontend_type) {
+    case kFrontendRemote:
+      url_string += "&remoteFrontend=true";
+      break;
+    case kFrontendWorker:
+      url_string += "&isSharedWorker=true";
+      break;
+    case kFrontendNode:
+      url_string += "&nodeFrontend=true";
+    // Fall through
+    case kFrontendV8:
+      url_string += "&v8only=true";
+      break;
+    case kFrontendDefault:
+    default:
+      break;
   }
+
+  if (frontend_url.empty())
+    url_string += "&remoteBase=" + DevToolsUI::GetRemoteBaseURL().spec();
   if (can_dock)
     url_string += "&can_dock=true";
   if (panel.size())
@@ -1100,22 +1108,20 @@ void DevToolsWindow::BeforeUnloadFired(WebContents* tab,
   }
 }
 
-bool DevToolsWindow::PreHandleKeyboardEvent(
+content::KeyboardEventProcessingResult DevToolsWindow::PreHandleKeyboardEvent(
     WebContents* source,
-    const content::NativeWebKeyboardEvent& event,
-    bool* is_keyboard_shortcut) {
+    const content::NativeWebKeyboardEvent& event) {
   BrowserWindow* inspected_window = GetInspectedBrowserWindow();
   if (inspected_window) {
-    return inspected_window->PreHandleKeyboardEvent(event,
-                                                    is_keyboard_shortcut);
+    return inspected_window->PreHandleKeyboardEvent(event);
   }
-  return false;
+  return content::KeyboardEventProcessingResult::NOT_HANDLED;
 }
 
 void DevToolsWindow::HandleKeyboardEvent(
     WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
-  if (event.windowsKeyCode == 0x08) {
+  if (event.windows_key_code == 0x08) {
     // Do not navigate back in history on Windows (http://crbug.com/74156).
     return;
   }
@@ -1145,9 +1151,7 @@ bool DevToolsWindow::PreHandleGestureEvent(
     WebContents* source,
     const blink::WebGestureEvent& event) {
   // Disable pinch zooming.
-  return event.type() == blink::WebGestureEvent::GesturePinchBegin ||
-         event.type() == blink::WebGestureEvent::GesturePinchUpdate ||
-         event.type() == blink::WebGestureEvent::GesturePinchEnd;
+  return blink::WebInputEvent::IsPinchGestureEventType(event.GetType());
 }
 
 void DevToolsWindow::ShowCertificateViewerInDevTools(
@@ -1245,6 +1249,29 @@ void DevToolsWindow::SetWhitelistedShortcuts(
   event_forwarder_->SetWhitelistedShortcuts(message);
 }
 
+void DevToolsWindow::SetEyeDropperActive(bool active) {
+  WebContents* web_contents = GetInspectedWebContents();
+  if (!web_contents)
+    return;
+  if (active) {
+    eye_dropper_.reset(new DevToolsEyeDropper(
+        web_contents, base::Bind(&DevToolsWindow::ColorPickedInEyeDropper,
+                                 base::Unretained(this))));
+  } else {
+    eye_dropper_.reset();
+  }
+}
+
+void DevToolsWindow::ColorPickedInEyeDropper(int r, int g, int b, int a) {
+  base::DictionaryValue color;
+  color.SetInteger("r", r);
+  color.SetInteger("g", g);
+  color.SetInteger("b", b);
+  color.SetInteger("a", a);
+  bindings_->CallClientFunction("DevToolsAPI.eyeDropperPickedColor", &color,
+                                nullptr, nullptr);
+}
+
 void DevToolsWindow::InspectedContentsClosing() {
   if (!close_on_detach_)
     return;
@@ -1309,14 +1336,14 @@ void DevToolsWindow::CreateDevToolsBrowser() {
   if (!prefs->GetDictionary(prefs::kAppWindowPlacement)->HasKey(kDevToolsApp)) {
     DictionaryPrefUpdate update(prefs, prefs::kAppWindowPlacement);
     base::DictionaryValue* wp_prefs = update.Get();
-    base::DictionaryValue* dev_tools_defaults = new base::DictionaryValue;
-    wp_prefs->Set(kDevToolsApp, dev_tools_defaults);
+    auto dev_tools_defaults = base::MakeUnique<base::DictionaryValue>();
     dev_tools_defaults->SetInteger("left", 100);
     dev_tools_defaults->SetInteger("top", 100);
     dev_tools_defaults->SetInteger("right", 740);
     dev_tools_defaults->SetInteger("bottom", 740);
     dev_tools_defaults->SetBoolean("maximized", false);
     dev_tools_defaults->SetBoolean("always_on_top", false);
+    wp_prefs->Set(kDevToolsApp, std::move(dev_tools_defaults));
   }
 
   browser_ = new Browser(Browser::CreateParams::CreateForDevTools(profile_));
@@ -1352,7 +1379,7 @@ void DevToolsWindow::DoAction(const DevToolsToggleAction& action) {
       const DevToolsToggleAction::RevealParams* params =
           action.params();
       CHECK(params);
-      base::StringValue url_value(params->url);
+      base::Value url_value(params->url);
       base::Value line_value(static_cast<int>(params->line_number));
       base::Value column_value(static_cast<int>(params->column_number));
       bindings_->CallClientFunction("DevToolsAPI.revealSourceLine",

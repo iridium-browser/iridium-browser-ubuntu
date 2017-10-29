@@ -36,14 +36,15 @@ class BluetoothRemoteGattCharacteristicTest : public BluetoothTest {
     device_->CreateGattConnection(GetGattConnectionCallback(Call::EXPECTED),
                                   GetConnectErrorCallback(Call::NOT_EXPECTED));
     SimulateGattConnection(device_);
-    std::vector<std::string> services;
-    std::string uuid("00000000-0000-1000-8000-00805f9b34fb");
-    services.push_back(uuid);
-    SimulateGattServicesDiscovered(device_, services);
+    base::RunLoop().RunUntilIdle();
+
+    SimulateGattServicesDiscovered(
+        device_, std::vector<std::string>({kTestUUIDGenericAccess}));
+    base::RunLoop().RunUntilIdle();
     ASSERT_EQ(1u, device_->GetGattServices().size());
     service_ = device_->GetGattServices()[0];
-    SimulateGattCharacteristic(service_, uuid, properties);
-    SimulateGattCharacteristic(service_, uuid, properties);
+    SimulateGattCharacteristic(service_, kTestUUIDDeviceName, properties);
+    SimulateGattCharacteristic(service_, kTestUUIDDeviceName, properties);
     ASSERT_EQ(2u, service_->GetCharacteristics().size());
     characteristic1_ = service_->GetCharacteristics()[0];
     characteristic2_ = service_->GetCharacteristics()[1];
@@ -112,6 +113,7 @@ class BluetoothRemoteGattCharacteristicTest : public BluetoothTest {
 
     EXPECT_EQ(0, callback_count_);
     SimulateGattNotifySessionStarted(characteristic1_);
+    base::RunLoop().RunUntilIdle();
     ExpectedChangeNotifyValueAttempts(1);
     EXPECT_EQ(1, callback_count_);
     EXPECT_EQ(0, error_callback_count_);
@@ -139,6 +141,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, GetIdentifier) {
     return;
   }
   InitWithFakeAdapter();
+
   StartLowEnergyDiscoverySession();
   // 2 devices to verify unique IDs across them.
   BluetoothDevice* device1 = SimulateLowEnergyDevice(3);
@@ -149,26 +152,28 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, GetIdentifier) {
                                 GetConnectErrorCallback(Call::NOT_EXPECTED));
   SimulateGattConnection(device1);
   SimulateGattConnection(device2);
+  base::RunLoop().RunUntilIdle();
 
   // 3 services (all with same UUID).
   //   1 on the first device (to test characteristic instances across devices).
   //   2 on the second device (to test same device, multiple service instances).
-  std::vector<std::string> services;
-  std::string uuid = "00000000-0000-1000-8000-00805f9b34fb";
-  services.push_back(uuid);
-  SimulateGattServicesDiscovered(device1, services);
-  services.push_back(uuid);
-  SimulateGattServicesDiscovered(device2, services);
+  SimulateGattServicesDiscovered(
+      device1, std::vector<std::string>({kTestUUIDGenericAccess}));
+  base::RunLoop().RunUntilIdle();
+  SimulateGattServicesDiscovered(
+      device2, std::vector<std::string>(
+                   {kTestUUIDGenericAccess, kTestUUIDGenericAccess}));
+  base::RunLoop().RunUntilIdle();
   BluetoothRemoteGattService* service1 = device1->GetGattServices()[0];
   BluetoothRemoteGattService* service2 = device2->GetGattServices()[0];
   BluetoothRemoteGattService* service3 = device2->GetGattServices()[1];
   // 6 characteristics (same UUID), 2 on each service.
-  SimulateGattCharacteristic(service1, uuid, /* properties */ 0);
-  SimulateGattCharacteristic(service1, uuid, /* properties */ 0);
-  SimulateGattCharacteristic(service2, uuid, /* properties */ 0);
-  SimulateGattCharacteristic(service2, uuid, /* properties */ 0);
-  SimulateGattCharacteristic(service3, uuid, /* properties */ 0);
-  SimulateGattCharacteristic(service3, uuid, /* properties */ 0);
+  SimulateGattCharacteristic(service1, kTestUUIDDeviceName, /* properties */ 0);
+  SimulateGattCharacteristic(service1, kTestUUIDDeviceName, /* properties */ 0);
+  SimulateGattCharacteristic(service2, kTestUUIDDeviceName, /* properties */ 0);
+  SimulateGattCharacteristic(service2, kTestUUIDDeviceName, /* properties */ 0);
+  SimulateGattCharacteristic(service3, kTestUUIDDeviceName, /* properties */ 0);
+  SimulateGattCharacteristic(service3, kTestUUIDDeviceName, /* properties */ 0);
   BluetoothRemoteGattCharacteristic* char1 = service1->GetCharacteristics()[0];
   BluetoothRemoteGattCharacteristic* char2 = service1->GetCharacteristics()[1];
   BluetoothRemoteGattCharacteristic* char3 = service2->GetCharacteristics()[0];
@@ -211,19 +216,18 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, GetUUID) {
   device->CreateGattConnection(GetGattConnectionCallback(Call::EXPECTED),
                                GetConnectErrorCallback(Call::NOT_EXPECTED));
   SimulateGattConnection(device);
-  std::vector<std::string> services;
-  services.push_back("00000000-0000-1000-8000-00805f9b34fb");
-  SimulateGattServicesDiscovered(device, services);
+  base::RunLoop().RunUntilIdle();
+  SimulateGattServicesDiscovered(
+      device, std::vector<std::string>({kTestUUIDGenericAccess}));
+  base::RunLoop().RunUntilIdle();
   BluetoothRemoteGattService* service = device->GetGattServices()[0];
 
   // Create 3 characteristics. Two of them are duplicates.
-  std::string uuid_str1("11111111-0000-1000-8000-00805f9b34fb");
-  std::string uuid_str2("22222222-0000-1000-8000-00805f9b34fb");
-  BluetoothUUID uuid1(uuid_str1);
-  BluetoothUUID uuid2(uuid_str2);
-  SimulateGattCharacteristic(service, uuid_str1, /* properties */ 0);
-  SimulateGattCharacteristic(service, uuid_str2, /* properties */ 0);
-  SimulateGattCharacteristic(service, uuid_str2, /* properties */ 0);
+  BluetoothUUID uuid1(kTestUUIDDeviceName);
+  BluetoothUUID uuid2(kTestUUIDAppearance);
+  SimulateGattCharacteristic(service, kTestUUIDDeviceName, /* properties */ 0);
+  SimulateGattCharacteristic(service, kTestUUIDAppearance, /* properties */ 0);
+  SimulateGattCharacteristic(service, kTestUUIDAppearance, /* properties */ 0);
   BluetoothRemoteGattCharacteristic* char1 = service->GetCharacteristics()[0];
   BluetoothRemoteGattCharacteristic* char2 = service->GetCharacteristics()[1];
   BluetoothRemoteGattCharacteristic* char3 = service->GetCharacteristics()[2];
@@ -253,15 +257,15 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, GetProperties) {
   device->CreateGattConnection(GetGattConnectionCallback(Call::EXPECTED),
                                GetConnectErrorCallback(Call::NOT_EXPECTED));
   SimulateGattConnection(device);
-  std::vector<std::string> services;
-  std::string uuid("00000000-0000-1000-8000-00805f9b34fb");
-  services.push_back(uuid);
-  SimulateGattServicesDiscovered(device, services);
+  base::RunLoop().RunUntilIdle();
+  SimulateGattServicesDiscovered(
+      device, std::vector<std::string>({kTestUUIDGenericAccess}));
+  base::RunLoop().RunUntilIdle();
   BluetoothRemoteGattService* service = device->GetGattServices()[0];
 
   // Create two characteristics with different properties:
-  SimulateGattCharacteristic(service, uuid, /* properties */ 0);
-  SimulateGattCharacteristic(service, uuid, /* properties */ 7);
+  SimulateGattCharacteristic(service, kTestUUIDDeviceName, /* properties */ 0);
+  SimulateGattCharacteristic(service, kTestUUIDDeviceName, /* properties */ 7);
 
   // Read the properties. Because ordering is unknown swap as necessary.
   int properties1 = service->GetCharacteristics()[0]->GetProperties();
@@ -302,9 +306,11 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, ReadRemoteCharacteristic_Empty) {
       GetGattErrorCallback(Call::NOT_EXPECTED));
   std::vector<uint8_t> empty_vector;
   SimulateGattCharacteristicRead(characteristic1_, empty_vector);
+  base::RunLoop().RunUntilIdle();
 
   // Duplicate read reported from OS shouldn't cause a problem:
   SimulateGattCharacteristicRead(characteristic1_, empty_vector);
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(1, gatt_read_characteristic_attempts_);
   EXPECT_EQ(empty_vector, last_read_value_);
@@ -327,10 +333,12 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, WriteRemoteCharacteristic_Empty) {
       empty_vector, GetCallback(Call::EXPECTED),
       GetGattErrorCallback(Call::NOT_EXPECTED));
   SimulateGattCharacteristicWrite(characteristic1_);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, gatt_write_characteristic_attempts_);
 
   // Duplicate write reported from OS shouldn't cause a problem:
   SimulateGattCharacteristicWrite(characteristic1_);
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(empty_vector, last_write_value_);
 }
@@ -359,6 +367,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   std::vector<uint8_t> empty_vector;
   SimulateGattCharacteristicRead(/* use remembered characteristic */ nullptr,
                                  empty_vector);
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE("Did not crash!");
 }
 #endif  // defined(OS_ANDROID) || defined(OS_WIN)
@@ -389,6 +398,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
 
   ASSERT_EQ(1u, adapter_->GetDevices().size());
   SimulateGattDisconnection(adapter_->GetDevices()[0]);
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_FAILED,
             last_gatt_error_code_);
@@ -399,6 +409,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   std::vector<uint8_t> empty_vector;
   SimulateGattCharacteristicRead(nullptr /* use remembered characteristic */,
                                  empty_vector);
+  base::RunLoop().RunUntilIdle();
 #endif
 }
 #endif  // defined(OS_ANDROID) || defined(OS_MACOSX)
@@ -425,6 +436,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   DeleteDevice(device_);  // TODO(576906) delete only the characteristic.
 
   SimulateGattCharacteristicWrite(/* use remembered characteristic */ nullptr);
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE("Did not crash!");
 }
 #endif  // defined(OS_ANDROID) || defined(OS_WIN)
@@ -456,6 +468,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
 
   ASSERT_EQ(1u, adapter_->GetDevices().size());
   SimulateGattDisconnection(adapter_->GetDevices()[0]);
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_FAILED,
             last_gatt_error_code_);
@@ -464,6 +477,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
 // we don't do this in macOS.
 #if !defined(OS_MACOSX)
   SimulateGattCharacteristicWrite(/* use remembered characteristic */ nullptr);
+  base::RunLoop().RunUntilIdle();
 #endif  // !defined(OS_MACOSX)
 }
 #endif  // defined(OS_ANDROID) || defined(OS_MACOSX)
@@ -484,10 +498,12 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, ReadRemoteCharacteristic) {
 
   std::vector<uint8_t> test_vector = {0, 1, 2, 3, 4, 0xf, 0xf0, 0xff};
   SimulateGattCharacteristicRead(characteristic1_, test_vector);
+  base::RunLoop().RunUntilIdle();
 
   // Duplicate read reported from OS shouldn't cause a problem:
   std::vector<uint8_t> empty_vector;
   SimulateGattCharacteristicRead(characteristic1_, empty_vector);
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(1, gatt_read_characteristic_attempts_);
   EXPECT_EQ(test_vector, last_read_value_);
@@ -502,14 +518,14 @@ static void test_callback(
     BluetoothRemoteGattCharacteristic::ValueCallback callback,
     const TestBluetoothAdapterObserver& callback_observer,
     const std::vector<uint8_t>& value) {
-  EXPECT_EQ(1, callback_observer.gatt_characteristic_value_changed_count());
+  EXPECT_EQ(0, callback_observer.gatt_characteristic_value_changed_count());
   callback.Run(value);
 }
 
-// Tests that ReadRemoteCharacteristic results in a
+// Tests that ReadRemoteCharacteristic doesn't result in a
 // GattCharacteristicValueChanged call.
 TEST_F(BluetoothRemoteGattCharacteristicTest,
-       ReadRemoteCharacteristic_GattCharacteristicValueChanged) {
+       ReadRemoteCharacteristic_GattCharacteristicValueChangedNotCalled) {
   if (!PlatformSupportsLowEnergy()) {
     LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
     return;
@@ -526,13 +542,19 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
 
   std::vector<uint8_t> test_vector = {0, 1, 2, 3, 4, 0xf, 0xf0, 0xff};
   SimulateGattCharacteristicRead(characteristic1_, test_vector);
+  base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(1, observer.gatt_characteristic_value_changed_count());
-  EXPECT_EQ(characteristic1_->GetIdentifier(),
-            observer.last_gatt_characteristic_id());
-  EXPECT_EQ(characteristic1_->GetUUID(),
-            observer.last_gatt_characteristic_uuid());
-  EXPECT_EQ(test_vector, observer.last_changed_characteristic_value());
+  EXPECT_EQ(0, observer.gatt_characteristic_value_changed_count());
+// TODO(https://crbug.com/699694): Remove this #if once the bug on Windows is
+// fixed.
+#if defined(OS_WIN)
+  EXPECT_FALSE(observer.last_gatt_characteristic_id().empty());
+  EXPECT_TRUE(observer.last_gatt_characteristic_uuid().IsValid());
+#else
+  EXPECT_TRUE(observer.last_gatt_characteristic_id().empty());
+  EXPECT_FALSE(observer.last_gatt_characteristic_uuid().IsValid());
+#endif  // defined(OS_WIN)
+  EXPECT_TRUE(observer.last_changed_characteristic_value().empty());
 }
 #endif  // defined(OS_ANDROID) || defined(OS_MACOSX) || defined(OS_WIN)
 
@@ -555,6 +577,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, WriteRemoteCharacteristic) {
       GetGattErrorCallback(Call::NOT_EXPECTED));
 
   SimulateGattCharacteristicWrite(characteristic1_);
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(1, gatt_write_characteristic_attempts_);
 #if !defined(OS_WIN)
@@ -582,6 +605,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, ReadRemoteCharacteristic_Twice) {
   uint8_t values[] = {0, 1, 2, 3, 4, 0xf, 0xf0, 0xff};
   std::vector<uint8_t> test_vector(values, values + arraysize(values));
   SimulateGattCharacteristicRead(characteristic1_, test_vector);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, gatt_read_characteristic_attempts_);
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -595,6 +619,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, ReadRemoteCharacteristic_Twice) {
       GetGattErrorCallback(Call::NOT_EXPECTED));
   std::vector<uint8_t> empty_vector;
   SimulateGattCharacteristicRead(characteristic1_, empty_vector);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, gatt_read_characteristic_attempts_);
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -620,6 +645,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, WriteRemoteCharacteristic_Twice) {
       GetGattErrorCallback(Call::NOT_EXPECTED));
 
   SimulateGattCharacteristicWrite(characteristic1_);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, gatt_write_characteristic_attempts_);
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -633,6 +659,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, WriteRemoteCharacteristic_Twice) {
       GetGattErrorCallback(Call::NOT_EXPECTED));
 
   SimulateGattCharacteristicWrite(characteristic1_);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, gatt_write_characteristic_attempts_);
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -663,11 +690,13 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   std::vector<uint8_t> test_vector1;
   test_vector1.push_back(111);
   SimulateGattCharacteristicRead(characteristic1_, test_vector1);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(test_vector1, last_read_value_);
 
   std::vector<uint8_t> test_vector2;
   test_vector2.push_back(222);
   SimulateGattCharacteristicRead(characteristic2_, test_vector2);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(test_vector2, last_read_value_);
 
   EXPECT_EQ(2, gatt_read_characteristic_attempts_);
@@ -711,11 +740,13 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   EXPECT_EQ(0, error_callback_count_);
 
   SimulateGattCharacteristicWrite(characteristic1_);
+  base::RunLoop().RunUntilIdle();
 #if !(defined(OS_ANDROID) || defined(OS_MACOSX))
   EXPECT_EQ(test_vector1, last_write_value_);
 #endif
 
   SimulateGattCharacteristicWrite(characteristic2_);
+  base::RunLoop().RunUntilIdle();
 #if !(defined(OS_ANDROID) || defined(OS_MACOSX))
   EXPECT_EQ(test_vector2, last_write_value_);
 #endif
@@ -747,6 +778,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, ReadError) {
       characteristic1_, BluetoothRemoteGattService::GATT_ERROR_INVALID_LENGTH);
   SimulateGattCharacteristicReadError(
       characteristic1_, BluetoothRemoteGattService::GATT_ERROR_FAILED);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_INVALID_LENGTH,
             last_gatt_error_code_);
   EXPECT_EQ(0, observer.gatt_characteristic_value_changed_count());
@@ -771,6 +803,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, WriteError) {
       characteristic1_, BluetoothRemoteGattService::GATT_ERROR_INVALID_LENGTH);
   SimulateGattCharacteristicWriteError(
       characteristic1_, BluetoothRemoteGattService::GATT_ERROR_FAILED);
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_INVALID_LENGTH,
             last_gatt_error_code_);
@@ -803,6 +836,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, ReadSynchronousError) {
   EXPECT_EQ(1, gatt_read_characteristic_attempts_);
   std::vector<uint8_t> empty_vector;
   SimulateGattCharacteristicRead(characteristic1_, empty_vector);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
 }
@@ -833,6 +867,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, WriteSynchronousError) {
       GetGattErrorCallback(Call::NOT_EXPECTED));
   EXPECT_EQ(1, gatt_write_characteristic_attempts_);
   SimulateGattCharacteristicWrite(characteristic1_);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
 }
@@ -867,6 +902,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   ResetEventCounts();
   std::vector<uint8_t> empty_vector;
   SimulateGattCharacteristicRead(characteristic1_, empty_vector);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
 }
@@ -901,6 +937,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   // Initial write should still succeed:
   ResetEventCounts();
   SimulateGattCharacteristicWrite(characteristic1_);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
 }
@@ -936,6 +973,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   // Initial write should still succeed:
   ResetEventCounts();
   SimulateGattCharacteristicWrite(characteristic1_);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
 }
@@ -970,8 +1008,102 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   // Initial read should still succeed:
   ResetEventCounts();
   SimulateGattCharacteristicRead(characteristic1_, empty_vector);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
+}
+#endif  // defined(OS_ANDROID) || defined(OS_MACOSX) || defined(OS_WIN)
+
+#if defined(OS_ANDROID) || defined(OS_MACOSX)
+// TODO(crbug.com/713991): Enable on windows once it better matches
+// how other platforms set global variables.
+// Tests that a notification arriving during a pending read doesn't
+// cause a crash.
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       Notification_During_ReadRemoteCharacteristic) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(StartNotifyBoilerplate(
+      BluetoothRemoteGattCharacteristic::PROPERTY_NOTIFY |
+          BluetoothRemoteGattCharacteristic::PROPERTY_READ,
+      NotifyValueState::NOTIFY));
+
+  TestBluetoothAdapterObserver observer(adapter_);
+
+  characteristic1_->ReadRemoteCharacteristic(
+      GetReadValueCallback(Call::EXPECTED),
+      GetGattErrorCallback(Call::NOT_EXPECTED));
+
+  std::vector<uint8_t> notification_value = {111};
+  SimulateGattCharacteristicChanged(characteristic1_, notification_value);
+  base::RunLoop().RunUntilIdle();
+
+#if defined(OS_MACOSX)
+  // Because macOS uses the same event for notifications and read value
+  // responses, we can't know what the event was for. Because there is a pending
+  // read request we assume is a read request on macOS.
+  EXPECT_EQ(notification_value, last_read_value_);
+  EXPECT_EQ(notification_value, characteristic1_->GetValue());
+  EXPECT_EQ(0, observer.gatt_characteristic_value_changed_count());
+#else   // !defined(OS_MACOSX)
+  EXPECT_EQ(std::vector<uint8_t>(), last_read_value_);
+  EXPECT_EQ(notification_value, characteristic1_->GetValue());
+  EXPECT_EQ(1, observer.gatt_characteristic_value_changed_count());
+#endif  // defined(OS_MACOSX)
+
+  observer.Reset();
+  std::vector<uint8_t> read_value = {222};
+  SimulateGattCharacteristicRead(characteristic1_, read_value);
+  base::RunLoop().RunUntilIdle();
+#if defined(OS_MACOSX)
+  // There are no pending read requests anymore so we assume the event
+  // was a notification.
+  EXPECT_EQ(notification_value, last_read_value_);
+  EXPECT_EQ(read_value, characteristic1_->GetValue());
+  EXPECT_EQ(1, observer.gatt_characteristic_value_changed_count());
+#else   // !defined(OS_MACOSX)
+  EXPECT_EQ(read_value, last_read_value_);
+  EXPECT_EQ(read_value, characteristic1_->GetValue());
+  EXPECT_EQ(0, observer.gatt_characteristic_value_changed_count());
+#endif  // defined(OS_MACOSX)
+}
+#endif  // defined(OS_ANDROID) || defined(OS_MACOSX)
+
+#if defined(OS_ANDROID) || defined(OS_MACOSX) || defined(OS_WIN)
+// Tests that a notification arriving during a pending write doesn't
+// cause a crash.
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       Notification_During_WriteRemoteCharacteristic) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(StartNotifyBoilerplate(
+      BluetoothRemoteGattCharacteristic::PROPERTY_NOTIFY |
+          BluetoothRemoteGattCharacteristic::PROPERTY_WRITE,
+      NotifyValueState::NOTIFY));
+
+  TestBluetoothAdapterObserver observer(adapter_);
+
+  std::vector<uint8_t> write_value = {111};
+  characteristic1_->WriteRemoteCharacteristic(
+      write_value, GetCallback(Call::EXPECTED),
+      GetGattErrorCallback(Call::NOT_EXPECTED));
+
+  std::vector<uint8_t> notification_value = {222};
+  SimulateGattCharacteristicChanged(characteristic1_, notification_value);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(notification_value, characteristic1_->GetValue());
+  EXPECT_EQ(1, observer.gatt_characteristic_value_changed_count());
+
+  observer.Reset();
+  SimulateGattCharacteristicWrite(characteristic1_);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(write_value, last_write_value_);
 }
 #endif  // defined(OS_ANDROID) || defined(OS_MACOSX) || defined(OS_WIN)
 
@@ -1231,6 +1363,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, StartNotifySession_AfterDeleted) {
   DeleteDevice(device_);  // TODO(576906) delete only the characteristic.
 
   SimulateGattNotifySessionStarted(/* use remembered characteristic */ nullptr);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(0, callback_count_);
   EXPECT_EQ(1, error_callback_count_);
   ASSERT_EQ(0u, notify_sessions_.size());
@@ -1263,6 +1396,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   EXPECT_EQ(0, callback_count_);
 
   SimulateGattNotifySessionStarted(characteristic1_);
+  base::RunLoop().RunUntilIdle();
   ASSERT_EQ(1u, notify_sessions_.size());
 
   std::string characteristic_identifier = characteristic1_->GetIdentifier();
@@ -1307,6 +1441,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
           false /* error_in_reentrant */));
   EXPECT_EQ(0, callback_count_);
   SimulateGattNotifySessionStarted(characteristic1_);
+  base::RunLoop().RunUntilIdle();
   ExpectedChangeNotifyValueAttempts(1);
   ExpectedNotifyValue(NotifyValueState::NOTIFY);
 
@@ -1325,46 +1460,6 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   }
 }
 #endif  // defined(OS_MACOSX) || defined(OS_WIN)
-
-#if defined(OS_WIN)
-// Tests StartNotifySession reentrant in start notify session error callback
-// and the reentrant start notify session success.
-TEST_F(BluetoothRemoteGattCharacteristicTest,
-       StartNotifySession_Reentrant_Error_Success) {
-  ASSERT_NO_FATAL_FAILURE(
-      FakeCharacteristicBoilerplate(/* properties: NOTIFY */ 0x10));
-  SimulateGattDescriptor(
-      characteristic1_,
-      BluetoothGattDescriptor::ClientCharacteristicConfigurationUuid().value());
-  ASSERT_EQ(1u, characteristic1_->GetDescriptors().size());
-
-  SimulateGattNotifySessionStartError(
-      characteristic1_, BluetoothRemoteGattService::GATT_ERROR_UNKNOWN);
-
-  characteristic1_->StartNotifySession(
-      GetReentrantStartNotifySessionSuccessCallback(Call::NOT_EXPECTED,
-                                                    characteristic1_),
-      GetReentrantStartNotifySessionErrorCallback(
-          Call::EXPECTED, characteristic1_, false /* error_in_reentrant */));
-  EXPECT_EQ(0, callback_count_);
-  SimulateGattNotifySessionStarted(characteristic1_);
-  ExpectedChangeNotifyValueAttempts(0);
-  EXPECT_EQ(1, error_callback_count_);
-
-  // Simulate reentrant StartNotifySession request from
-  // BluetoothTestBase::ReentrantStartNotifySessionErrorCallback.
-  SimulateGattNotifySessionStarted(characteristic1_);
-  ExpectedChangeNotifyValueAttempts(1);
-  ExpectedNotifyValue(NotifyValueState::NOTIFY);
-  EXPECT_EQ(1, callback_count_);
-  EXPECT_EQ(1, error_callback_count_);
-  ASSERT_EQ(1u, notify_sessions_.size());
-  ASSERT_TRUE(notify_sessions_[0]);
-  EXPECT_EQ(characteristic1_->GetIdentifier(),
-            notify_sessions_[0]->GetCharacteristicIdentifier());
-  EXPECT_TRUE(notify_sessions_[0]->IsActive());
-}
-#endif  // defined(OS_WIN)
 
 #if defined(OS_WIN)
 // Tests StartNotifySession reentrant in start notify session error callback
@@ -1388,11 +1483,13 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
           Call::EXPECTED, characteristic1_, true /* error_in_reentrant */));
   EXPECT_EQ(0, callback_count_);
   SimulateGattNotifySessionStarted(characteristic1_);
+  base::RunLoop().RunUntilIdle();
   ExpectedChangeNotifyValueAttempts(0);
 
   // Simulate reentrant StartNotifySession request from
   // BluetoothTestBase::ReentrantStartNotifySessionErrorCallback.
   SimulateGattNotifySessionStarted(characteristic1_);
+  base::RunLoop().RunUntilIdle();
   ExpectedChangeNotifyValueAttempts(0);
   EXPECT_EQ(0, callback_count_);
   EXPECT_EQ(2, error_callback_count_);
@@ -2075,14 +2172,46 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, GattCharacteristicValueChanged) {
   test_vector2.push_back(222);
 
   SimulateGattCharacteristicChanged(characteristic1_, test_vector1);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, observer.gatt_characteristic_value_changed_count());
   EXPECT_EQ(test_vector1, characteristic1_->GetValue());
 
   SimulateGattCharacteristicChanged(characteristic1_, test_vector2);
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(2, observer.gatt_characteristic_value_changed_count());
   EXPECT_EQ(test_vector2, characteristic1_->GetValue());
 }
 #endif  // defined(OS_ANDROID) || defined(OS_MACOSX) || defined(OS_WIN)
+
+#if defined(OS_ANDROID)
+// Tests that Characteristic value changes arriving consecutively result in
+// two notifications with correct values.
+// macOS: Does not apply. All events arrive on the UI Thread.
+// TODO(crbug.com/694102): Enable this test on Windows.
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       TwoGattCharacteristicValueChanges) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(StartNotifyBoilerplate(
+      /* properties: NOTIFY */ 0x10, NotifyValueState::NOTIFY));
+
+  TestBluetoothAdapterObserver observer(adapter_);
+
+  std::vector<uint8_t> test_vector1({111});
+  std::vector<uint8_t> test_vector2({222});
+
+  SimulateGattCharacteristicChanged(characteristic1_, test_vector1);
+  SimulateGattCharacteristicChanged(characteristic1_, test_vector2);
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(2, observer.gatt_characteristic_value_changed_count());
+  EXPECT_EQ(test_vector2, characteristic1_->GetValue());
+  EXPECT_EQ(std::vector<std::vector<uint8_t>>({test_vector1, test_vector2}),
+            observer.previous_characteristic_value_changed_values());
+}
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_ANDROID) || defined(OS_WIN)
 // Tests Characteristic Value changing after a Notify Session and objects being
@@ -2101,6 +2230,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   std::vector<uint8_t> empty_vector;
   SimulateGattCharacteristicChanged(/* use remembered characteristic */ nullptr,
                                     empty_vector);
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE("Did not crash!");
   EXPECT_EQ(0, observer.gatt_characteristic_value_changed_count());
 }
@@ -2120,10 +2250,10 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate());
 
   // Add several Descriptors:
-  BluetoothUUID uuid1("11111111-0000-1000-8000-00805f9b34fb");
-  BluetoothUUID uuid2("22222222-0000-1000-8000-00805f9b34fb");
-  BluetoothUUID uuid3("33333333-0000-1000-8000-00805f9b34fb");
-  BluetoothUUID uuid4("44444444-0000-1000-8000-00805f9b34fb");
+  BluetoothUUID uuid1(kTestUUIDCharacteristicUserDescription);
+  BluetoothUUID uuid2(kTestUUIDClientCharacteristicConfiguration);
+  BluetoothUUID uuid3(kTestUUIDServerCharacteristicConfiguration);
+  BluetoothUUID uuid4(kTestUUIDCharacteristicPresentationFormat);
   SimulateGattDescriptor(characteristic1_, uuid1.canonical_value());
   SimulateGattDescriptor(characteristic1_, uuid2.canonical_value());
   SimulateGattDescriptor(characteristic2_, uuid3.canonical_value());
@@ -2165,9 +2295,9 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, GetDescriptorsByUUID) {
   ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate());
 
   // Add several Descriptors:
-  BluetoothUUID id1("11111111-0000-1000-8000-00805f9b34fb");
-  BluetoothUUID id2("22222222-0000-1000-8000-00805f9b34fb");
-  BluetoothUUID id3("33333333-0000-1000-8000-00805f9b34fb");
+  BluetoothUUID id1(kTestUUIDCharacteristicUserDescription);
+  BluetoothUUID id2(kTestUUIDClientCharacteristicConfiguration);
+  BluetoothUUID id3(kTestUUIDServerCharacteristicConfiguration);
   SimulateGattDescriptor(characteristic1_, id1.canonical_value());
   SimulateGattDescriptor(characteristic1_, id2.canonical_value());
   SimulateGattDescriptor(characteristic2_, id3.canonical_value());
@@ -2190,4 +2320,321 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, GetDescriptorsByUUID) {
 }
 #endif  // defined(OS_ANDROID) || defined(OS_WIN)
 
+#if defined(OS_ANDROID)
+// Tests that read requests after a device disconnects but before the disconnect
+// task has a chance to run result in an error.
+// macOS: Does not apply. All events arrive on the UI Thread.
+// TODO(crbug.com/694102): Enable this test on Windows.
+TEST_F(BluetoothRemoteGattCharacteristicTest, ReadDuringDisconnect) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
+      BluetoothRemoteGattCharacteristic::PROPERTY_READ));
+
+  SimulateGattDisconnection(device_);
+  // Do not yet call RunUntilIdle() to process the disconnect task.
+  characteristic1_->ReadRemoteCharacteristic(
+      GetReadValueCallback(Call::NOT_EXPECTED),
+      GetGattErrorCallback(Call::EXPECTED));
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_FAILED,
+            last_gatt_error_code_);
+}
+#endif  // defined(OS_ANDROID)
+
+#if defined(OS_ANDROID)
+// Tests that write requests after a device disconnects but before the
+// disconnect task runs result in an error.
+// macOS: Does not apply. All events arrive on the UI Thread.
+// TODO(crbug.com/694102): Enable this test on Windows.
+TEST_F(BluetoothRemoteGattCharacteristicTest, WriteDuringDisconnect) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
+      BluetoothRemoteGattCharacteristic::PROPERTY_WRITE));
+
+  SimulateGattDisconnection(device_);
+  // Do not yet call RunUntilIdle() to process the disconnect task.
+  characteristic1_->WriteRemoteCharacteristic(
+      std::vector<uint8_t>(), GetCallback(Call::NOT_EXPECTED),
+      GetGattErrorCallback(Call::EXPECTED));
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_FAILED,
+            last_gatt_error_code_);
+}
+#endif  // defined(OS_ANDROID)
+
+#if defined(OS_MACOSX)
+// Tests that writing without response during a disconnect results in an error.
+// Only applies to macOS whose events arrive all on the UI thread. See other
+// *DuringDisconnect tests for Android and Windows whose events arrive on a
+// different thread.
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       WriteWithoutResponseDuringDisconnect) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
+      BluetoothRemoteGattCharacteristic::PROPERTY_WRITE_WITHOUT_RESPONSE));
+
+  characteristic1_->WriteRemoteCharacteristic(
+      std::vector<uint8_t>(), GetCallback(Call::NOT_EXPECTED),
+      GetGattErrorCallback(Call::EXPECTED));
+  SimulateGattDisconnection(device_);
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_FAILED,
+            last_gatt_error_code_);
+}
+#endif  // defined(OS_MACOSX)
+
+#if defined(OS_MACOSX)
+// Tests that disconnecting right after a write without response results in an
+// error.
+// TODO(crbug.com/726534): Enable on other platforms depending on the resolution
+// of crbug.com/726534.
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       DisconnectCalledDuringWriteWithoutResponse) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
+      BluetoothRemoteGattCharacteristic::PROPERTY_WRITE_WITHOUT_RESPONSE));
+
+  characteristic1_->WriteRemoteCharacteristic(
+      std::vector<uint8_t>(), GetCallback(Call::NOT_EXPECTED),
+      GetGattErrorCallback(Call::EXPECTED));
+  gatt_connections_[0]->Disconnect();
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_FAILED,
+            last_gatt_error_code_);
+
+  SimulateGattDisconnection(device_);
+  base::RunLoop().RunUntilIdle();
+}
+#endif  // defined(OS_MACOSX)
+
+#if defined(OS_MACOSX)
+// Tests that disconnecting right before a write without response results in an
+// error.
+// TODO(crbug.com/726534): Enable on other platforms depending on the resolution
+// of crbug.com/726534.
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       DisconnectCalledBeforeWriteWithoutResponse) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
+      BluetoothRemoteGattCharacteristic::PROPERTY_WRITE_WITHOUT_RESPONSE));
+
+  gatt_connections_[0]->Disconnect();
+  characteristic1_->WriteRemoteCharacteristic(
+      std::vector<uint8_t>(), GetCallback(Call::NOT_EXPECTED),
+      GetGattErrorCallback(Call::EXPECTED));
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_FAILED,
+            last_gatt_error_code_);
+
+  SimulateGattDisconnection(device_);
+  base::RunLoop().RunUntilIdle();
+}
+#endif  // defined(OS_MACOSX)
+
+#if defined(OS_ANDROID)
+// Tests that start notifications requests after a device disconnects but before
+// the disconnect task runs result in an error.
+// macOS: Does not apply. All events arrive on the UI Thread.
+// TODO(crbug.com/694102): Enable this test on Windows.
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       StartNotifySessionDuringDisconnect) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
+      BluetoothRemoteGattCharacteristic::PROPERTY_NOTIFY));
+  SimulateGattDescriptor(
+      characteristic1_,
+      BluetoothRemoteGattDescriptor::ClientCharacteristicConfigurationUuid()
+          .canonical_value());
+
+  SimulateGattDisconnection(device_);
+  // Don't run the disconnect task.
+  characteristic1_->StartNotifySession(GetNotifyCallback(Call::NOT_EXPECTED),
+                                       GetGattErrorCallback(Call::EXPECTED));
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_FAILED,
+            last_gatt_error_code_);
+}
+#endif  // defined(OS_ANDROID)
+
+#if defined(OS_ANDROID)
+// Tests that stop notifications requests after a device disconnects but before
+// the disconnect task runs do not result in a crash.
+// macOS: Does not apply. All events arrive on the UI Thread.
+// TODO(crbug.com/694102): Enable this test on Windows.
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       StopNotifySessionDuringDisconnect) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(StartNotifyBoilerplate(
+      /* properties: NOTIFY */ 0x10, NotifyValueState::NOTIFY));
+
+  SimulateGattDisconnection(device_);
+  // Don't run the disconnect task.
+  notify_sessions_[0]->Stop(GetStopNotifyCallback(Call::EXPECTED));
+  base::RunLoop().RunUntilIdle();
+}
+#endif  // defined(OS_ANDROID)
+
+#if defined(OS_ANDROID)
+// Tests that deleting notify sessions after a device disconnects but before the
+// disconnect task runs do not result in a crash.
+// macOS: Does not apply. All events arrive on the UI Thread.
+// TODO(crbug.com/694102): Enable this test on Windows.
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       DeleteNotifySessionDuringDisconnect) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(StartNotifyBoilerplate(
+      /* properties: NOTIFY */ 0x10, NotifyValueState::NOTIFY));
+
+  SimulateGattDisconnection(device_);
+  // Don't run the disconnect task.
+  notify_sessions_.clear();
+  base::RunLoop().RunUntilIdle();
+}
+#endif  // defined(OS_ANDROID)
+
+#if defined(OS_MACOSX)
+// Tests to receive a services changed notification from macOS, while
+// discovering descriptors. This test simulate having 2 descriptor scan at the
+// same time. Only once both descriptor scanning is done, the gatt device is
+// ready.
+// Android: This test doesn't apply to Android because there is no services
+// changed event that could arrive during a discovery procedure.
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       SimulateDeviceModificationWhileDiscoveringDescriptors) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  InitWithFakeAdapter();
+  StartLowEnergyDiscoverySession();
+  BluetoothDevice* device = SimulateLowEnergyDevice(3);
+  device->CreateGattConnection(GetGattConnectionCallback(Call::EXPECTED),
+                               GetConnectErrorCallback(Call::NOT_EXPECTED));
+
+  TestBluetoothAdapterObserver observer(adapter_);
+
+  // Starts first discovery process.
+  SimulateGattConnection(device);
+  EXPECT_EQ(1, observer.device_changed_count());
+  AddServicesToDeviceMac(device, {kTestUUIDHeartRate});
+  SimulateDidDiscoverServicesMac(device);
+  EXPECT_EQ(1u, device->GetGattServices().size());
+  BluetoothRemoteGattService* service = device->GetGattServices()[0];
+  std::string characteristic_uuid = "11111111-0000-1000-8000-00805f9b34fb";
+  AddCharacteristicToServiceMac(service, characteristic_uuid,
+                                /* properties */ 0);
+  SimulateDidDiscoverCharacteristicsMac(service);
+  EXPECT_EQ(1u, service->GetCharacteristics().size());
+  BluetoothRemoteGattCharacteristic* characteristic =
+      service->GetCharacteristics()[0];
+  std::string descriptor_uuid = "22222222-0000-1000-8000-00805f9b34fb";
+  AddDescriptorToCharacteristicMac(characteristic, descriptor_uuid);
+  // Now waiting for descriptor discovery.
+
+  // Starts second discovery process.
+  SimulateGattServicesChanged(device);
+  EXPECT_EQ(2, observer.device_changed_count());
+  SimulateDidDiscoverServicesMac(device);
+  SimulateDidDiscoverCharacteristicsMac(service);
+  // Now waiting for a second descriptor discovery.
+
+  // Finish discovery process.
+  // First system call to -[id<CBPeripheralDelegate>
+  // peripheral:didDiscoverDescriptorsForCharacteristic:error:]
+  SimulateDidDiscoverDescriptorsMac(characteristic);
+  EXPECT_EQ(0, observer.gatt_service_changed_count());
+  EXPECT_EQ(1u, service->GetCharacteristics().size());
+  EXPECT_EQ(1u, characteristic->GetDescriptors().size());
+  EXPECT_EQ(2, observer.device_changed_count());
+
+  // Second system call to -[id<CBPeripheralDelegate>
+  // peripheral:didDiscoverDescriptorsForCharacteristic:error:]
+  // Finish second discovery process.
+  observer.Reset();
+  SimulateDidDiscoverDescriptorsMac(characteristic);
+  EXPECT_EQ(1, observer.gatt_service_changed_count());
+  EXPECT_EQ(1, observer.device_changed_count());
+}
+#endif  // defined(OS_MACOSX)
+
+#if defined(OS_MACOSX)
+// Simulates to receive an extra discovery descriptor notifications from  macOS.
+// Those notifications should be ignored.
+// Android: This test doesn't apply to Android because there is no services
+// changed event that could arrive during a discovery procedure.
+TEST_F(BluetoothRemoteGattCharacteristicTest, ExtraDidDiscoverDescriptorsCall) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  InitWithFakeAdapter();
+  StartLowEnergyDiscoverySession();
+  BluetoothDevice* device = SimulateLowEnergyDevice(3);
+  device->CreateGattConnection(GetGattConnectionCallback(Call::EXPECTED),
+                               GetConnectErrorCallback(Call::NOT_EXPECTED));
+
+  TestBluetoothAdapterObserver observer(adapter_);
+
+  // Starts first discovery process.
+  SimulateGattConnection(device);
+  AddServicesToDeviceMac(device, {kTestUUIDHeartRate});
+  SimulateDidDiscoverServicesMac(device);
+  EXPECT_EQ(1u, device->GetGattServices().size());
+  BluetoothRemoteGattService* service = device->GetGattServices()[0];
+  std::string characteristic_uuid = "11111111-0000-1000-8000-00805f9b34fb";
+  AddCharacteristicToServiceMac(service, characteristic_uuid,
+                                /* properties */ 0);
+  SimulateDidDiscoverCharacteristicsMac(service);
+  EXPECT_EQ(1u, service->GetCharacteristics().size());
+  BluetoothRemoteGattCharacteristic* characteristic =
+      service->GetCharacteristics()[0];
+  std::string descriptor_uuid = "22222222-0000-1000-8000-00805f9b34fb";
+  AddDescriptorToCharacteristicMac(characteristic, descriptor_uuid);
+  SimulateDidDiscoverDescriptorsMac(characteristic);
+  EXPECT_EQ(1, observer.gatt_service_changed_count());
+  EXPECT_EQ(1u, service->GetCharacteristics().size());
+  EXPECT_EQ(1u, characteristic->GetDescriptors().size());
+
+  observer.Reset();
+  SimulateDidDiscoverDescriptorsMac(characteristic);  // Extra system call.
+  SimulateGattServicesChanged(device);
+  SimulateDidDiscoverDescriptorsMac(characteristic);  // Extra system call.
+  SimulateDidDiscoverServicesMac(device);
+  SimulateDidDiscoverDescriptorsMac(characteristic);  // Extra system call.
+  SimulateDidDiscoverCharacteristicsMac(service);
+  SimulateDidDiscoverDescriptorsMac(characteristic);
+  SimulateDidDiscoverDescriptorsMac(characteristic);  // Extra system call.
+  EXPECT_EQ(2, observer.device_changed_count());
+}
+#endif  // defined(OS_MACOSX)
 }  // namespace device

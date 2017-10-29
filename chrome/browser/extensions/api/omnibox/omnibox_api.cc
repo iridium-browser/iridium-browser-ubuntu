@@ -12,6 +12,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -74,10 +75,11 @@ bool SetOmniboxDefaultSuggestion(
   std::unique_ptr<base::DictionaryValue> dict = suggestion.ToValue();
   // Add the content field so that the dictionary can be used to populate an
   // omnibox::SuggestResult.
-  dict->SetWithoutPathExpansion(kSuggestionContent, new base::StringValue(""));
-  prefs->UpdateExtensionPref(extension_id,
-                             kOmniboxDefaultSuggestion,
-                             dict.release());
+  dict->SetWithoutPathExpansion(
+      kSuggestionContent,
+      base::MakeUnique<base::Value>(base::Value::Type::STRING));
+  prefs->UpdateExtensionPref(extension_id, kOmniboxDefaultSuggestion,
+                             std::move(dict));
 
   return true;
 }
@@ -94,10 +96,9 @@ std::string GetTemplateURLStringForExtension(const std::string& extension_id) {
 // static
 void ExtensionOmniboxEventRouter::OnInputStarted(
     Profile* profile, const std::string& extension_id) {
-  std::unique_ptr<Event> event = base::MakeUnique<Event>(
+  auto event = base::MakeUnique<Event>(
       events::OMNIBOX_ON_INPUT_STARTED, omnibox::OnInputStarted::kEventName,
-      base::MakeUnique<base::ListValue>());
-  event->restrict_to_browser_context = profile;
+      base::MakeUnique<base::ListValue>(), profile);
   EventRouter::Get(profile)
       ->DispatchEventToExtension(extension_id, std::move(event));
 }
@@ -112,13 +113,12 @@ bool ExtensionOmniboxEventRouter::OnInputChanged(
     return false;
 
   std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->Set(0, new base::StringValue(input));
-  args->Set(1, new base::Value(suggest_id));
+  args->Set(0, base::MakeUnique<base::Value>(input));
+  args->Set(1, base::MakeUnique<base::Value>(suggest_id));
 
-  std::unique_ptr<Event> event = base::MakeUnique<Event>(
-      events::OMNIBOX_ON_INPUT_CHANGED, omnibox::OnInputChanged::kEventName,
-      std::move(args));
-  event->restrict_to_browser_context = profile;
+  auto event = base::MakeUnique<Event>(events::OMNIBOX_ON_INPUT_CHANGED,
+                                       omnibox::OnInputChanged::kEventName,
+                                       std::move(args), profile);
   event_router->DispatchEventToExtension(extension_id, std::move(event));
   return true;
 }
@@ -140,18 +140,17 @@ void ExtensionOmniboxEventRouter::OnInputEntered(
       active_tab_permission_granter()->GrantIfRequested(extension);
 
   std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->Set(0, new base::StringValue(input));
+  args->Set(0, base::MakeUnique<base::Value>(input));
   if (disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB)
-    args->Set(1, new base::StringValue(kForegroundTabDisposition));
+    args->Set(1, base::MakeUnique<base::Value>(kForegroundTabDisposition));
   else if (disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB)
-    args->Set(1, new base::StringValue(kBackgroundTabDisposition));
+    args->Set(1, base::MakeUnique<base::Value>(kBackgroundTabDisposition));
   else
-    args->Set(1, new base::StringValue(kCurrentTabDisposition));
+    args->Set(1, base::MakeUnique<base::Value>(kCurrentTabDisposition));
 
-  std::unique_ptr<Event> event = base::MakeUnique<Event>(
-      events::OMNIBOX_ON_INPUT_ENTERED, omnibox::OnInputEntered::kEventName,
-      std::move(args));
-  event->restrict_to_browser_context = profile;
+  auto event = base::MakeUnique<Event>(events::OMNIBOX_ON_INPUT_ENTERED,
+                                       omnibox::OnInputEntered::kEventName,
+                                       std::move(args), profile);
   EventRouter::Get(profile)
       ->DispatchEventToExtension(extension_id, std::move(event));
 
@@ -164,10 +163,9 @@ void ExtensionOmniboxEventRouter::OnInputEntered(
 // static
 void ExtensionOmniboxEventRouter::OnInputCancelled(
     Profile* profile, const std::string& extension_id) {
-  std::unique_ptr<Event> event = base::MakeUnique<Event>(
+  auto event = base::MakeUnique<Event>(
       events::OMNIBOX_ON_INPUT_CANCELLED, omnibox::OnInputCancelled::kEventName,
-      base::MakeUnique<base::ListValue>());
-  event->restrict_to_browser_context = profile;
+      base::MakeUnique<base::ListValue>(), profile);
   EventRouter::Get(profile)
       ->DispatchEventToExtension(extension_id, std::move(event));
 }
@@ -194,8 +192,9 @@ void OmniboxAPI::Shutdown() {
 OmniboxAPI::~OmniboxAPI() {
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<OmniboxAPI> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<OmniboxAPI>>::DestructorAtExit g_factory =
+    LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<OmniboxAPI>* OmniboxAPI::GetFactoryInstance() {
@@ -230,7 +229,7 @@ void OmniboxAPI::OnExtensionLoaded(content::BrowserContext* browser_context,
 
 void OmniboxAPI::OnExtensionUnloaded(content::BrowserContext* browser_context,
                                      const Extension* extension,
-                                     UnloadedExtensionInfo::Reason reason) {
+                                     UnloadedExtensionReason reason) {
   if (!OmniboxInfo::GetKeyword(extension).empty() && url_service_) {
     if (url_service_->loaded()) {
       url_service_->RemoveExtensionControlledTURL(

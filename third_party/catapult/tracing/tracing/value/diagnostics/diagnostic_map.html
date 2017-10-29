@@ -10,36 +10,25 @@ found in the LICENSE file.
   DiagnosticMap.fromDict() always have access to all subclasses in the
   Diagnostic registry.
 -->
-
-<link rel="import" href="/tracing/value/diagnostics/breakdown.html">
-<link rel="import" href="/tracing/value/diagnostics/buildbot_info.html">
-<link rel="import" href="/tracing/value/diagnostics/collected_generic.html">
-<link rel="import" href="/tracing/value/diagnostics/collected_related_event_set.html">
-<link rel="import" href="/tracing/value/diagnostics/device_info.html">
-<link rel="import" href="/tracing/value/diagnostics/diagnostic_ref.html">
-<link rel="import" href="/tracing/value/diagnostics/generic.html">
-<link rel="import" href="/tracing/value/diagnostics/grouping_path.html">
-<link rel="import" href="/tracing/value/diagnostics/merged_buildbot_info.html">
-<link rel="import" href="/tracing/value/diagnostics/merged_device_info.html">
-<link rel="import" href="/tracing/value/diagnostics/merged_revision_info.html">
-<link rel="import" href="/tracing/value/diagnostics/merged_telemetry_info.html">
-<link rel="import" href="/tracing/value/diagnostics/related_event_set.html">
-<link rel="import" href="/tracing/value/diagnostics/related_histogram_breakdown.html">
-<link rel="import" href="/tracing/value/diagnostics/related_histogram_map.html">
-<link rel="import" href="/tracing/value/diagnostics/related_histogram_set.html">
-<link rel="import" href="/tracing/value/diagnostics/revision_info.html">
-<link rel="import" href="/tracing/value/diagnostics/scalar.html">
-<link rel="import" href="/tracing/value/diagnostics/telemetry_info.html">
-<link rel="import" href="/tracing/value/diagnostics/unmergeable_diagnostic_set.html">
+<link rel="import" href="/tracing/value/diagnostics/all_diagnostics.html">
+<link rel="import" href="/tracing/value/diagnostics/reserved_names.html">
 
 <script>
 'use strict';
 
 tr.exportTo('tr.v.d', function() {
-  const MERGED_FROM_DIAGNOSTIC_KEY = 'merged from';
-  const MERGED_TO_DIAGNOSTIC_KEY = 'merged to';
-
   class DiagnosticMap extends Map {
+    /**
+     * @param {boolean=} opt_allowReservedNames defaults to true
+     */
+    constructor(opt_allowReservedNames) {
+      super();
+      if (opt_allowReservedNames === undefined) {
+        opt_allowReservedNames = true;
+      }
+      this.allowReservedNames_ = opt_allowReservedNames;
+    }
+
     /**
      * Add a new Diagnostic to this map.
      *
@@ -48,15 +37,33 @@ tr.exportTo('tr.v.d', function() {
      */
     set(name, diagnostic) {
       if (typeof(name) !== 'string') {
-        throw new Error('name must be string, not ' + name);
+        throw new Error(`name must be string, not ${name}`);
       }
 
       if (!(diagnostic instanceof tr.v.d.Diagnostic) &&
           !(diagnostic instanceof tr.v.d.DiagnosticRef)) {
-        throw new Error('Must be instanceof Diagnostic: ' + diagnostic);
+        throw new Error(`Must be instanceof Diagnostic: ${diagnostic}`);
+      }
+
+      // TODO(#3507): Reserved names should never be UnmergeableDiagnosticSet.
+      if (!this.allowReservedNames_ &&
+          tr.v.d.RESERVED_NAMES_SET.has(name) &&
+          !(diagnostic instanceof tr.v.d.UnmergeableDiagnosticSet) &&
+          !(diagnostic instanceof tr.v.d.DiagnosticRef)) {
+        const type = tr.v.d.RESERVED_NAMES_TO_TYPES.get(name);
+        if (type && !(diagnostic instanceof type)) {
+          throw new Error(
+              `Diagnostics named "${name}" must be ${type.name}, ` +
+              `not ${diagnostic.constructor.name}`);
+        }
       }
 
       Map.prototype.set.call(this, name, diagnostic);
+    }
+
+    delete(name) {
+      if (name === undefined) throw new Error('missing name');
+      Map.prototype.delete.call(this, name);
     }
 
     /**
@@ -65,7 +72,7 @@ tr.exportTo('tr.v.d', function() {
      * @param {Object} dict
      */
     addDicts(dict) {
-      for (var [name, diagnosticDict] of Object.entries(dict)) {
+      for (const [name, diagnosticDict] of Object.entries(dict)) {
         if (typeof diagnosticDict === 'string') {
           this.set(name, new tr.v.d.DiagnosticRef(diagnosticDict));
         } else {
@@ -75,13 +82,13 @@ tr.exportTo('tr.v.d', function() {
     }
 
     resolveSharedDiagnostics(histograms, opt_required) {
-      for (let [name, diagnostic] of this) {
-        if (!(diagnostic instanceof tr.v.d.DiagnosticRef)) {
+      for (const [name, value] of this) {
+        if (!(value instanceof tr.v.d.DiagnosticRef)) {
           continue;
         }
 
-        let guid = diagnostic.guid;
-        diagnostic = histograms.lookupDiagnostic(guid);
+        const guid = value.guid;
+        const diagnostic = histograms.lookupDiagnostic(guid);
         if (diagnostic instanceof tr.v.d.Diagnostic) {
           this.set(name, diagnostic);
         } else if (opt_required) {
@@ -91,35 +98,36 @@ tr.exportTo('tr.v.d', function() {
     }
 
     asDict() {
-      let dict = {};
-      for (let [name, diagnostic] of this) {
+      const dict = {};
+      for (const [name, diagnostic] of this) {
         dict[name] = diagnostic.asDictOrReference();
       }
       return dict;
     }
 
     static fromDict(d) {
-      let diagnostics = new DiagnosticMap();
+      const diagnostics = new DiagnosticMap();
       diagnostics.addDicts(d);
       return diagnostics;
     }
 
     static fromObject(obj) {
-      let diagnostics = new DiagnosticMap();
-      for (let [name, diagnostic] of Object.entries(obj))
+      const diagnostics = new DiagnosticMap();
+      for (const [name, diagnostic] of Object.entries(obj)) {
         diagnostics.set(name, diagnostic);
+      }
       return diagnostics;
     }
 
     addDiagnostics(other) {
-      for (let [name, otherDiagnostic] of other) {
-        if (name === MERGED_FROM_DIAGNOSTIC_KEY ||
-            name === MERGED_TO_DIAGNOSTIC_KEY ||
-            name === tr.v.d.GroupingPath) {
+      for (const [name, otherDiagnostic] of other) {
+        if (name === tr.v.d.RESERVED_NAMES.MERGED_FROM ||
+            name === tr.v.d.RESERVED_NAMES.MERGED_TO ||
+            name === tr.v.d.RESERVED_NAMES.GROUPING_PATH) {
           continue;
         }
 
-        let myDiagnostic = this.get(name);
+        const myDiagnostic = this.get(name);
 
         if (myDiagnostic !== undefined &&
             myDiagnostic.canAddDiagnostic(otherDiagnostic)) {
@@ -143,7 +151,7 @@ tr.exportTo('tr.v.d', function() {
         // another way of cloning that is specifically targeted at supporting
         // merging: clone().
 
-        let clone = otherDiagnostic.clone();
+        const clone = otherDiagnostic.clone();
 
         if (myDiagnostic === undefined) {
           this.set(name, clone);
@@ -166,7 +174,7 @@ tr.exportTo('tr.v.d', function() {
      * @param {!tr.v.Histogram} parentHist
      */
     mergeRelationships(parentHist) {
-      for (let [name, diagnostic] of this) {
+      for (const [name, diagnostic] of this) {
         if (!(diagnostic instanceof tr.v.d.RelatedHistogramSet) &&
             !(diagnostic instanceof tr.v.d.RelatedHistogramMap) &&
             !(diagnostic instanceof tr.v.d.RelatedHistogramBreakdown) &&
@@ -174,8 +182,8 @@ tr.exportTo('tr.v.d', function() {
           continue;
         }
 
-        for (let otherHist of this.get(MERGED_FROM_DIAGNOSTIC_KEY)) {
-          let otherDiagnostic = otherHist.diagnostics.get(name);
+        for (const otherHist of this.get(tr.v.d.RESERVED_NAMES.MERGED_FROM)) {
+          const otherDiagnostic = otherHist.diagnostics.get(name);
           if (!(otherDiagnostic instanceof tr.v.d.RelatedHistogramSet) &&
               !(otherDiagnostic instanceof tr.v.d.RelatedHistogramMap) &&
               !(otherDiagnostic instanceof tr.v.d.RelatedHistogramBreakdown) &&
@@ -190,8 +198,6 @@ tr.exportTo('tr.v.d', function() {
 
   return {
     DiagnosticMap,
-    MERGED_FROM_DIAGNOSTIC_KEY,
-    MERGED_TO_DIAGNOSTIC_KEY,
   };
 });
 </script>

@@ -12,12 +12,12 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/native_app_window.h"
-#include "extensions/shell/browser/input_method_event_handler.h"
 #include "extensions/shell/browser/shell_app_delegate.h"
 #include "extensions/shell/browser/shell_app_window_client.h"
 #include "extensions/shell/browser/shell_screen.h"
@@ -32,7 +32,7 @@
 #include "ui/base/ime/input_method.h"
 #include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/display/screen.h"
-#include "ui/events/event_processor.h"
+#include "ui/events/event_sink.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/wm/core/base_focus_rules.h"
@@ -97,7 +97,7 @@ class FillLayout : public aura::LayoutManager {
 };
 
 // A class that bridges the gap between CursorManager and Aura. It borrows
-// heavily from AshNativeCursorManager.
+// heavily from NativeCursorManagerAsh.
 class ShellNativeCursorManager : public wm::NativeCursorManager {
  public:
   explicit ShellNativeCursorManager(aura::WindowTreeHost* host)
@@ -128,16 +128,16 @@ class ShellNativeCursorManager : public wm::NativeCursorManager {
     if (visible) {
       SetCursor(delegate->GetCursor(), delegate);
     } else {
-      gfx::NativeCursor invisible_cursor(ui::kCursorNone);
+      gfx::NativeCursor invisible_cursor(ui::CursorType::kNone);
       image_cursors_->SetPlatformCursor(&invisible_cursor);
       ApplyCursor(invisible_cursor);
     }
   }
 
-  void SetCursorSet(ui::CursorSetType cursor_set,
-                    wm::NativeCursorManagerDelegate* delegate) override {
-    image_cursors_->SetCursorSet(cursor_set);
-    delegate->CommitCursorSet(cursor_set);
+  void SetCursorSize(ui::CursorSize cursor_size,
+                     wm::NativeCursorManagerDelegate* delegate) override {
+    image_cursors_->SetCursorSize(cursor_size);
+    delegate->CommitCursorSize(cursor_size);
     if (delegate->IsCursorVisible())
       SetCursor(delegate->GetCursor(), delegate);
   }
@@ -240,7 +240,6 @@ void ShellDesktopControllerAura::CloseAppWindows() {
 }
 
 aura::Window* ShellDesktopControllerAura::GetDefaultParent(
-    aura::Window* context,
     aura::Window* window,
     const gfx::Rect& bounds) {
   return host_->window();
@@ -275,19 +274,7 @@ void ShellDesktopControllerAura::OnHostCloseRequested(
 
 ui::EventDispatchDetails ShellDesktopControllerAura::DispatchKeyEventPostIME(
     ui::KeyEvent* key_event) {
-  // The input method has processed this event, so prevent the handler from
-  // dispatching it again.
-  input_method_event_handler_->set_post_ime(true);
-
-  // Send the event on to the host.
-  ui::EventDispatchDetails details =
-      host_->event_processor()->OnEventFromSource(key_event);
-
-  // Clear the handler's PostIME flag for the next event.
-  if (!details.dispatcher_destroyed)
-    input_method_event_handler_->set_post_ime(false);
-
-  return details;
+  return host_->DispatchKeyEventPostIME(key_event);
 }
 
 void ShellDesktopControllerAura::InitWindowManager() {
@@ -295,7 +282,7 @@ void ShellDesktopControllerAura::InitWindowManager() {
       new wm::FocusController(new AppsFocusRules());
   aura::client::SetFocusClient(host_->window(), focus_controller);
   host_->window()->AddPreTargetHandler(focus_controller);
-  aura::client::SetActivationClient(host_->window(), focus_controller);
+  wm::SetActivationClient(host_->window(), focus_controller);
   focus_client_.reset(focus_controller);
 
   capture_client_.reset(
@@ -309,7 +296,7 @@ void ShellDesktopControllerAura::InitWindowManager() {
           new ShellNativeCursorManager(host_.get()))));
   cursor_manager_->SetDisplay(
       display::Screen::GetScreen()->GetPrimaryDisplay());
-  cursor_manager_->SetCursor(ui::kCursorPointer);
+  cursor_manager_->SetCursor(ui::CursorType::kPointer);
   aura::client::SetCursorClient(host_->window(), cursor_manager_.get());
 
   user_activity_detector_.reset(new ui::UserActivityDetector);
@@ -346,8 +333,6 @@ void ShellDesktopControllerAura::CreateRootWindow() {
   // Trigger creation of an input method and become its delegate.
   ui::InputMethod* input_method = host_->GetInputMethod();
   input_method->SetDelegate(this);
-  input_method_event_handler_.reset(new InputMethodEventHandler(input_method));
-  host_->window()->AddPreTargetHandler(input_method_event_handler_.get());
 
   InitWindowManager();
 
@@ -363,11 +348,8 @@ void ShellDesktopControllerAura::DestroyRootWindow() {
       static_cast<wm::FocusController*>(focus_client_.get());
   if (focus_controller) {
     host_->window()->RemovePreTargetHandler(focus_controller);
-    aura::client::SetActivationClient(host_->window(), NULL);
+    wm::SetActivationClient(host_->window(), NULL);
   }
-
-  host_->window()->RemovePreTargetHandler(input_method_event_handler_.get());
-  input_method_event_handler_.reset();
 
   host_->window()->RemovePreTargetHandler(root_window_event_filter_.get());
   root_window_event_filter_.reset();

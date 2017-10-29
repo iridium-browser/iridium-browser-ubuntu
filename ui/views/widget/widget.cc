@@ -28,7 +28,6 @@
 #include "ui/views/event_monitor.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/focus/focus_manager_factory.h"
-#include "ui/views/focus/view_storage.h"
 #include "ui/views/focus/widget_focus_manager.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/native_widget_private.h"
@@ -426,7 +425,6 @@ void Widget::ViewHierarchyChanged(
     FocusManager* focus_manager = GetFocusManager();
     if (focus_manager)
       focus_manager->ViewRemoved(details.child);
-    ViewStorage::GetInstance()->ViewRemoved(details.child);
     native_widget_->ViewRemoved(details.child);
   }
 }
@@ -581,26 +579,26 @@ void Widget::Close() {
     return;
   }
 
-  bool can_close = true;
-  if (non_client_view_)
-    can_close = non_client_view_->CanClose();
-  if (can_close) {
-    SaveWindowPlacement();
+  if (non_client_view_ && !non_client_view_->CanClose())
+    return;
 
-    // During tear-down the top-level focus manager becomes unavailable to
-    // GTK tabbed panes and their children, so normal deregistration via
-    // |FormManager::ViewRemoved()| calls are fouled.  We clear focus here
-    // to avoid these redundant steps and to avoid accessing deleted views
-    // that may have been in focus.
-    if (is_top_level() && focus_manager_.get())
-      focus_manager_->SetFocusedView(NULL);
+  // The actions below can cause this function to be called again, so mark
+  // |this| as closed early. See crbug.com/714334
+  widget_closed_ = true;
+  SaveWindowPlacement();
 
-    for (WidgetObserver& observer : observers_)
-      observer.OnWidgetClosing(this);
+  // During tear-down the top-level focus manager becomes unavailable to
+  // GTK tabbed panes and their children, so normal deregistration via
+  // |FocusManager::ViewRemoved()| calls are fouled.  We clear focus here
+  // to avoid these redundant steps and to avoid accessing deleted views
+  // that may have been in focus.
+  if (is_top_level() && focus_manager_.get())
+    focus_manager_->SetFocusedView(nullptr);
 
-    native_widget_->Close();
-    widget_closed_ = true;
-  }
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetClosing(this);
+
+  native_widget_->Close();
 }
 
 void Widget::CloseNow() {
@@ -1071,7 +1069,7 @@ void Widget::OnNativeWidgetVisibilityChanged(bool visible) {
 
 void Widget::OnNativeWidgetCreated(bool desktop_widget) {
   if (is_top_level())
-    focus_manager_.reset(FocusManagerFactory::Create(this, desktop_widget));
+    focus_manager_ = FocusManagerFactory::Create(this, desktop_widget);
 
   native_widget_->InitModalType(widget_delegate_->GetModalType());
 
@@ -1150,7 +1148,7 @@ void Widget::OnNativeWidgetPaint(const ui::PaintContext& context) {
   // SetInitialBounds call.
   if (!native_widget_initialized_)
     return;
-  GetRootView()->Paint(context);
+  GetRootView()->PaintFromPaintRoot(context);
 }
 
 int Widget::GetNonClientComponent(const gfx::Point& point) {
@@ -1165,7 +1163,7 @@ int Widget::GetNonClientComponent(const gfx::Point& point) {
 }
 
 void Widget::OnKeyEvent(ui::KeyEvent* event) {
-  SendEventToProcessor(event);
+  SendEventToSink(event);
   if (!event->handled() && GetFocusManager() &&
       !GetFocusManager()->OnKeyEvent(*event)) {
     event->StopPropagation();
@@ -1174,7 +1172,7 @@ void Widget::OnKeyEvent(ui::KeyEvent* event) {
 
 // TODO(tdanderson): We should not be calling the OnMouse*() functions on
 //                   RootView from anywhere in Widget. Use
-//                   SendEventToProcessor() instead. See crbug.com/348087.
+//                   SendEventToSink() instead. See crbug.com/348087.
 void Widget::OnMouseEvent(ui::MouseEvent* event) {
   View* root_view = GetRootView();
   switch (event->type()) {
@@ -1275,7 +1273,7 @@ void Widget::OnMouseCaptureLost() {
 
 void Widget::OnScrollEvent(ui::ScrollEvent* event) {
   ui::ScrollEvent event_copy(*event);
-  SendEventToProcessor(&event_copy);
+  SendEventToSink(&event_copy);
 
   // Convert unhandled ui::ET_SCROLL events into ui::ET_MOUSEWHEEL events.
   if (!event_copy.handled() && event_copy.type() == ui::ET_SCROLL) {
@@ -1288,7 +1286,7 @@ void Widget::OnGestureEvent(ui::GestureEvent* event) {
   // We explicitly do not capture here. Not capturing enables multiple widgets
   // to get tap events at the same time. Views (such as tab dragging) may
   // explicitly capture.
-  SendEventToProcessor(event);
+  SendEventToSink(event);
 }
 
 bool Widget::ExecuteCommand(int command_id) {
@@ -1387,7 +1385,7 @@ bool Widget::ShouldDescendIntoChildForEventHandling(
 
 ////////////////////////////////////////////////////////////////////////////////
 // Widget, ui::EventSource implementation:
-ui::EventProcessor* Widget::GetEventProcessor() {
+ui::EventSink* Widget::GetEventSink() {
   return root_view_.get();
 }
 

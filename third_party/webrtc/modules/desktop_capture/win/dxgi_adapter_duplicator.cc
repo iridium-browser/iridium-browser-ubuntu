@@ -15,8 +15,8 @@
 
 #include <algorithm>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/logging.h"
 
 namespace webrtc {
 
@@ -25,15 +25,10 @@ using Microsoft::WRL::ComPtr;
 namespace {
 
 bool IsValidRect(const RECT& rect) {
-  return rect.left >= 0 && rect.top >= 0 && rect.right > rect.left &&
-         rect.bottom > rect.top;
+  return rect.right > rect.left && rect.bottom > rect.top;
 }
 
 }  // namespace
-
-DxgiAdapterDuplicator::Context::Context() = default;
-DxgiAdapterDuplicator::Context::Context(const Context& other) = default;
-DxgiAdapterDuplicator::Context::~Context() = default;
 
 DxgiAdapterDuplicator::DxgiAdapterDuplicator(const D3dDevice& device)
     : device_(device) {}
@@ -57,12 +52,19 @@ bool DxgiAdapterDuplicator::DoInitialize() {
       break;
     }
 
+    if (error.Error() == DXGI_ERROR_NOT_CURRENTLY_AVAILABLE) {
+      LOG(LS_WARNING) << "IDXGIAdapter::EnumOutputs returns "
+                         "NOT_CURRENTLY_AVAILABLE. This may happen when "
+                         "running in session 0.";
+      break;
+    }
+
     if (error.Error() != S_OK || !output) {
       LOG(LS_WARNING) << "IDXGIAdapter::EnumOutputs returns an unexpected "
                          "result "
                       << error.ErrorMessage() << " with error code"
                       << error.Error();
-      return false;
+      continue;
     }
 
     DXGI_OUTPUT_DESC desc;
@@ -75,30 +77,30 @@ bool DxgiAdapterDuplicator::DoInitialize() {
           LOG(LS_WARNING) << "Failed to convert IDXGIOutput to IDXGIOutput1, "
                              "this usually means the system does not support "
                              "DirectX 11";
-          return false;
+          continue;
         }
-        duplicators_.emplace_back(device_, output1, desc);
-        if (!duplicators_.back().Initialize()) {
-          return false;
+        DxgiOutputDuplicator duplicator(device_, output1, desc);
+        if (!duplicator.Initialize()) {
+          LOG(LS_WARNING) << "Failed to initialize DxgiOutputDuplicator on "
+                             "output "
+                          << i;
+          continue;
         }
-        if (desktop_rect_.is_empty()) {
-          desktop_rect_ = duplicators_.back().desktop_rect();
-        } else {
-          const DesktopRect& left = desktop_rect_;
-          const DesktopRect& right = duplicators_.back().desktop_rect();
-          desktop_rect_ =
-              DesktopRect::MakeLTRB(std::min(left.left(), right.left()),
-                                    std::min(left.top(), right.top()),
-                                    std::max(left.right(), right.right()),
-                                    std::max(left.bottom(), right.bottom()));
-        }
+
+        duplicators_.push_back(std::move(duplicator));
+        desktop_rect_.UnionWith(duplicators_.back().desktop_rect());
       }
     } else {
       LOG(LS_WARNING) << "Failed to get output description of device " << i
                       << ", ignore.";
     }
   }
-  return true;
+
+  if (duplicators_.empty()) {
+    LOG(LS_WARNING) << "Cannot initialize any DxgiOutputDuplicator instance.";
+  }
+
+  return !duplicators_.empty();
 }
 
 void DxgiAdapterDuplicator::Setup(Context* context) {
@@ -144,6 +146,11 @@ DesktopRect DxgiAdapterDuplicator::ScreenRect(int id) const {
   return duplicators_[id].desktop_rect();
 }
 
+const std::string& DxgiAdapterDuplicator::GetDeviceName(int id) const {
+  RTC_DCHECK(id >= 0 && id < static_cast<int>(duplicators_.size()));
+  return duplicators_[id].device_name();
+}
+
 int DxgiAdapterDuplicator::screen_count() const {
   return static_cast<int>(duplicators_.size());
 }
@@ -155,6 +162,14 @@ int64_t DxgiAdapterDuplicator::GetNumFramesCaptured() const {
   }
 
   return min;
+}
+
+void DxgiAdapterDuplicator::TranslateRect(const DesktopVector& position) {
+  desktop_rect_.Translate(position);
+  RTC_DCHECK(desktop_rect_.left() >= 0 && desktop_rect_.top() >= 0);
+  for (auto& duplicator : duplicators_) {
+    duplicator.TranslateRect(position);
+  }
 }
 
 }  // namespace webrtc

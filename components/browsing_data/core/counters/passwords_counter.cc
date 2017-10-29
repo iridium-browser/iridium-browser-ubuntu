@@ -5,19 +5,36 @@
 #include "components/browsing_data/core/counters/passwords_counter.h"
 
 #include "components/browsing_data/core/pref_names.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/password_store.h"
+#include "components/sync/driver/sync_service.h"
+
+namespace {
+
+bool IsPasswordSyncEnabled(const syncer::SyncService* sync_service) {
+  if (!sync_service)
+    return false;
+  return password_manager_util::GetPasswordSyncState(sync_service) !=
+         password_manager::PasswordSyncState::NOT_SYNCING_PASSWORDS;
+}
+
+}  // namespace
 
 namespace browsing_data {
 
 PasswordsCounter::PasswordsCounter(
-    scoped_refptr<password_manager::PasswordStore> store) : store_(store) {}
+    scoped_refptr<password_manager::PasswordStore> store,
+    syncer::SyncService* sync_service)
+    : store_(store), sync_tracker_(this, sync_service) {
+  DCHECK(store_);
+}
 
 PasswordsCounter::~PasswordsCounter() {
   store_->RemoveObserver(this);
 }
 
 void PasswordsCounter::OnInitialized() {
-  DCHECK(store_);
+  sync_tracker_.OnInitialized(base::Bind(&IsPasswordSyncEnabled));
   store_->AddObserver(this);
 }
 
@@ -37,11 +54,13 @@ void PasswordsCounter::Count() {
 void PasswordsCounter::OnGetPasswordStoreResults(
     std::vector<std::unique_ptr<autofill::PasswordForm>> results) {
   base::Time start = GetPeriodStart();
-  ReportResult(std::count_if(
+  int num_passwords = std::count_if(
       results.begin(), results.end(),
       [start](const std::unique_ptr<autofill::PasswordForm>& form) {
         return form->date_created >= start;
-      }));
+      });
+  ReportResult(base::MakeUnique<SyncResult>(this, num_passwords,
+                                            sync_tracker_.IsSyncActive()));
 }
 
 void PasswordsCounter::OnLoginsChanged(

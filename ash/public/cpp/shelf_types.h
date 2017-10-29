@@ -6,6 +6,7 @@
 #define ASH_PUBLIC_CPP_SHELF_TYPES_H_
 
 #include <cstdint>
+#include <string>
 
 #include "ash/public/cpp/ash_public_export.h"
 
@@ -57,6 +58,9 @@ enum ShelfBackgroundType {
 
   // The background when a window is maximized.
   SHELF_BACKGROUND_MAXIMIZED,
+
+  // The background when fullscreen app list is visible.
+  SHELF_BACKGROUND_APP_LIST,
 };
 
 // Source of the launch or activation request, for tracking.
@@ -89,29 +93,27 @@ enum ShelfAction {
   SHELF_ACTION_APP_LIST_SHOWN,
 };
 
-typedef int ShelfID;
-const int kInvalidShelfID = 0;
-
 // The type of a shelf item.
 enum ShelfItemType {
   // Represents a running app panel.
   TYPE_APP_PANEL,
 
-  // Represents a pinned shortcut to an app.
-  TYPE_APP_SHORTCUT,
+  // Represents a pinned shortcut to an app, the app may be running or not.
+  TYPE_PINNED_APP,
 
   // Toggles visiblity of the app list.
   TYPE_APP_LIST,
 
-  // The browser shortcut button.
+  // The browser shortcut button, the browser may be running or not.
   TYPE_BROWSER_SHORTCUT,
 
-  // Represents an app: Extension "V1" (legacy packaged and hosted) apps,
-  //                    Extension "V2" (platform) apps,
-  //                    ARC (App Runtime for Chrome - Android Play Store) apps.
+  // Represents an unpinned running app window. Supports these app types:
+  // - Extension "V1" (legacy packaged and hosted) apps,
+  // - Extension "V2" (platform) apps,
+  // - ARC (App Runtime for Chrome - Android Play Store) apps.
   TYPE_APP,
 
-  // Represents a dialog.
+  // Represents an open dialog.
   TYPE_DIALOG,
 
   // Default value.
@@ -132,6 +134,41 @@ enum ShelfItemStatus {
   // A shelf item that needs user's attention.
   STATUS_ATTENTION,
 };
+
+// A unique shelf item id composed of an |app_id| and a |launch_id|.
+// |app_id| is the non-empty application id associated with a set of windows.
+// |launch_id| is passed on app launch, to support multiple shelf items per app.
+// As an example, a remote desktop client may want each remote application to
+// have its own icon.
+struct ASH_PUBLIC_EXPORT ShelfID {
+  explicit ShelfID(const std::string& app_id = std::string(),
+                   const std::string& launch_id = std::string());
+  ~ShelfID();
+
+  ShelfID(const ShelfID& other);
+  ShelfID(ShelfID&& other);
+  ShelfID& operator=(const ShelfID& other);
+  bool operator==(const ShelfID& other) const;
+  bool operator!=(const ShelfID& other) const;
+  bool operator<(const ShelfID& other) const;
+
+  // Returns true if both the application id and launch id are empty.
+  // This is often used to determine if the id is invalid.
+  bool IsNull() const;
+
+  // Functions to [de]serialize ids as a string for window property usage, etc.
+  // Serialization appends ids with a delimeter that must not be used in ids.
+  // Deserialization returns an empty/null/default id for a null string input.
+  std::string Serialize() const;
+  static ShelfID Deserialize(const std::string* string);
+
+  // The application id associated with a set of windows.
+  std::string app_id;
+  // An id passed on app launch, to support multiple shelf items per app.
+  std::string launch_id;
+};
+
+ASH_PUBLIC_EXPORT std::ostream& operator<<(std::ostream& o, const ShelfID& id);
 
 }  // namespace ash
 

@@ -5,7 +5,6 @@
 #include "chrome/browser/android/banners/app_banner_manager_android.h"
 
 #include <memory>
-#include <utility>
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
@@ -18,13 +17,12 @@
 #include "chrome/browser/android/webapk/webapk_web_manifest_checker.h"
 #include "chrome/browser/banners/app_banner_metrics.h"
 #include "chrome/browser/banners/app_banner_settings_helper.h"
-#include "chrome/browser/manifest/manifest_icon_downloader.h"
-#include "chrome/browser/manifest/manifest_icon_selector.h"
+#include "content/public/browser/manifest_icon_downloader.h"
+#include "content/public/browser/manifest_icon_selector.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "jni/AppBannerManager_jni.h"
 #include "net/base/url_util.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertJavaStringToUTF16;
@@ -39,23 +37,30 @@ namespace {
 std::unique_ptr<ShortcutInfo> CreateShortcutInfo(
     const GURL& manifest_url,
     const content::Manifest& manifest,
-    const GURL& icon_url) {
+    const GURL& primary_icon_url,
+    const GURL& badge_icon_url,
+    bool is_webapk) {
   auto shortcut_info = base::MakeUnique<ShortcutInfo>(GURL());
   if (!manifest.IsEmpty()) {
     shortcut_info->UpdateFromManifest(manifest);
     shortcut_info->manifest_url = manifest_url;
-    shortcut_info->best_primary_icon_url = icon_url;
-    shortcut_info->UpdateSource(ShortcutInfo::SOURCE_APP_BANNER);
+    shortcut_info->best_primary_icon_url = primary_icon_url;
+    shortcut_info->best_badge_icon_url = badge_icon_url;
+    if (is_webapk)
+      shortcut_info->UpdateSource(ShortcutInfo::SOURCE_APP_BANNER_WEBAPK);
+    else
+      shortcut_info->UpdateSource(ShortcutInfo::SOURCE_APP_BANNER);
   }
 
   shortcut_info->ideal_splash_image_size_in_px =
       ShortcutHelper::GetIdealSplashImageSizeInPx();
   shortcut_info->minimum_splash_image_size_in_px =
       ShortcutHelper::GetMinimumSplashImageSizeInPx();
-  shortcut_info->splash_image_url = ManifestIconSelector::FindBestMatchingIcon(
-      manifest.icons, shortcut_info->ideal_splash_image_size_in_px,
-      shortcut_info->minimum_splash_image_size_in_px,
-      content::Manifest::Icon::IconPurpose::ANY);
+  shortcut_info->splash_image_url =
+      content::ManifestIconSelector::FindBestMatchingIcon(
+          manifest.icons, shortcut_info->ideal_splash_image_size_in_px,
+          shortcut_info->minimum_splash_image_size_in_px,
+          content::Manifest::Icon::IconPurpose::ANY);
 
   return shortcut_info;
 }
@@ -82,10 +87,21 @@ AppBannerManagerAndroid::GetJavaBannerManager() const {
   return java_banner_manager_;
 }
 
-bool AppBannerManagerAndroid::IsActiveForTesting(
+bool AppBannerManagerAndroid::IsRunningForTesting(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
-  return is_active();
+  return IsRunning();
+}
+
+void AppBannerManagerAndroid::RecordMenuOpen(JNIEnv* env,
+                                             const JavaParamRef<jobject>& obj) {
+  manager()->RecordMenuOpenHistogram();
+}
+
+void AppBannerManagerAndroid::RecordMenuItemAddToHomescreen(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  manager()->RecordMenuItemAddToHomescreenHistogram();
 }
 
 bool AppBannerManagerAndroid::OnAppDetailsRetrieved(
@@ -96,14 +112,14 @@ bool AppBannerManagerAndroid::OnAppDetailsRetrieved(
     const JavaParamRef<jstring>& japp_package,
     const JavaParamRef<jstring>& jicon_url) {
   native_app_data_.Reset(japp_data);
-  app_title_ = ConvertJavaStringToUTF16(env, japp_title);
+  native_app_title_ = ConvertJavaStringToUTF16(env, japp_title);
   native_app_package_ = ConvertJavaStringToUTF8(env, japp_package);
   primary_icon_url_ = GURL(ConvertJavaStringToUTF8(env, jicon_url));
 
   if (!CheckIfShouldShowBanner())
     return false;
 
-  return ManifestIconDownloader::Download(
+  return content::ManifestIconDownloader::Download(
       web_contents(), primary_icon_url_, GetIdealPrimaryIconSizeInPx(),
       GetMinimumPrimaryIconSizeInPx(),
       base::Bind(&AppBannerManager::OnAppIconFetched, GetWeakPtr()));
@@ -199,7 +215,7 @@ void AppBannerManagerAndroid::OnDidPerformInstallableCheck(
     DCHECK(!data.badge_icon_url.is_empty());
 
     badge_icon_url_ = data.badge_icon_url;
-    badge_icon_.reset(new SkBitmap(*data.badge_icon));
+    badge_icon_ = *data.badge_icon;
   }
 
   AppBannerManager::OnDidPerformInstallableCheck(data);
@@ -209,12 +225,10 @@ void AppBannerManagerAndroid::OnAppIconFetched(const SkBitmap& bitmap) {
   if (bitmap.drawsNothing()) {
     ReportStatus(web_contents(), NO_ICON_AVAILABLE);
     Stop();
+    return;
   }
 
-  if (!is_active())
-    return;
-
-  primary_icon_.reset(new SkBitmap(bitmap));
+  primary_icon_ = bitmap;
   SendBannerPromptRequest();
 }
 
@@ -224,16 +238,16 @@ void AppBannerManagerAndroid::ResetCurrentPageData() {
   native_app_package_ = "";
 }
 
-void AppBannerManagerAndroid::ShowBanner() {
+void AppBannerManagerAndroid::ShowBannerUi() {
   content::WebContents* contents = web_contents();
   DCHECK(contents);
 
   if (native_app_data_.is_null()) {
-    // TODO(zpeng): Add badge to WebAPK installation flow.
     if (AppBannerInfoBarDelegateAndroid::Create(
-            contents, GetWeakPtr(), app_title_,
-            CreateShortcutInfo(manifest_url_, manifest_, primary_icon_url_),
-            std::move(primary_icon_), event_request_id(),
+            contents, GetWeakPtr(),
+            CreateShortcutInfo(manifest_url_, manifest_, primary_icon_url_,
+                               badge_icon_url_, can_install_webapk_),
+            primary_icon_, badge_icon_, can_install_webapk_,
             webapk::INSTALL_SOURCE_BANNER)) {
       RecordDidShowBanner("AppBanner.WebApp.Shown");
       TrackDisplayEvent(DISPLAY_EVENT_WEB_APP_BANNER_CREATED);
@@ -243,8 +257,8 @@ void AppBannerManagerAndroid::ShowBanner() {
     }
   } else {
     if (AppBannerInfoBarDelegateAndroid::Create(
-            contents, app_title_, native_app_data_, std::move(primary_icon_),
-            native_app_package_, referrer_, event_request_id())) {
+            contents, native_app_title_, native_app_data_, primary_icon_,
+            native_app_package_, referrer_)) {
       RecordDidShowBanner("AppBanner.NativeApp.Shown");
       TrackDisplayEvent(DISPLAY_EVENT_NATIVE_APP_BANNER_CREATED);
       ReportStatus(contents, SHOWING_NATIVE_APP_BANNER);
@@ -315,11 +329,6 @@ std::string AppBannerManagerAndroid::ExtractQueryValueForName(
       return it.GetValue();
   }
   return std::string();
-}
-
-// static
-bool AppBannerManagerAndroid::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 // static

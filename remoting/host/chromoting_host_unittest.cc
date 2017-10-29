@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/audio_capturer.h"
@@ -69,10 +70,10 @@ class ChromotingHostTest : public testing::Test {
     host_.reset(new ChromotingHost(
         desktop_environment_factory_.get(), base::WrapUnique(session_manager_),
         protocol::TransportContext::ForTests(protocol::TransportRole::SERVER),
-        task_runner_,    // Audio
+        task_runner_,  // Audio
         task_runner_,
         DesktopEnvironmentOptions::CreateDefault()));  // Video encode
-    host_->AddStatusObserver(&host_status_observer_);
+    host_->status_monitor()->AddStatusObserver(&host_status_observer_);
 
     xmpp_login_ = "host@domain";
     session1_ = new MockSession();

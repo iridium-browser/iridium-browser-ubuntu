@@ -7,11 +7,13 @@
 
 
 import argparse
+import hashlib
 import imp
 import json
 import os
 import pprint
 import re
+import struct
 import sys
 
 # Disable lint check for finding modules:
@@ -39,6 +41,7 @@ from mojom.error import Error
 import mojom.fileutil as fileutil
 from mojom.generate import translate
 from mojom.generate import template_expander
+from mojom.generate.generator import AddComputedData
 from mojom.parse.parser import Parse
 
 
@@ -100,6 +103,38 @@ def FindImportFile(rel_dir, file_name, search_rel_dirs):
                       rel_dir.source_root)
 
 
+def ScrambleMethodOrdinals(interfaces, salt):
+  already_generated = set()
+  for interface in interfaces:
+    i = 0
+    already_generated.clear()
+    for method in interface.methods:
+      while True:
+        i = i + 1
+        if i == 1000000:
+          raise Exception("Could not generate %d method ordinals for %s" %
+              (len(interface.methods), interface.name))
+        # Generate a scrambled method.ordinal value. The algorithm doesn't have
+        # to be very strong, cryptographically. It just needs to be non-trivial
+        # to guess the results without the secret salt, in order to make it
+        # harder for a compromised process to send fake Mojo messages.
+        sha256 = hashlib.sha256(salt)
+        sha256.update(interface.name)
+        sha256.update(str(i))
+        # Take the first 4 bytes as a little-endian uint32.
+        ordinal = struct.unpack('<L', sha256.digest()[:4])[0]
+        # Trim to 31 bits, so it always fits into a Java (signed) int.
+        ordinal = ordinal & 0x7fffffff
+        if ordinal in already_generated:
+          continue
+        already_generated.add(ordinal)
+        method.ordinal = ordinal
+        method.ordinal_comment = (
+            'The %s value is based on sha256(salt + "%s%d").' %
+            (ordinal, interface.name, i))
+        break
+
+
 class MojomProcessor(object):
   """Parses mojom files and creates ASTs for them.
 
@@ -140,7 +175,7 @@ class MojomProcessor(object):
       return self._processed_files[rel_filename.path]
     tree = self._parsed_files[rel_filename.path]
 
-    dirname, name = os.path.split(rel_filename.path)
+    dirname = os.path.dirname(rel_filename.path)
 
     # Process all our imports first and collect the module object for each.
     # We use these to generate proper type info.
@@ -152,24 +187,28 @@ class MojomProcessor(object):
       imports[parsed_imp.import_filename] = self._GenerateModule(
           args, remaining_args, generator_modules, rel_import_file)
 
-    module = translate.OrderedModule(tree, name, imports)
-
-    # Set the path as relative to the source root.
-    module.path = rel_filename.relative_path()
-
+    # Set the module path as relative to the source root.
     # Normalize to unix-style path here to keep the generators simpler.
-    module.path = module.path.replace('\\', '/')
+    module_path = rel_filename.relative_path().replace('\\', '/')
+
+    module = translate.OrderedModule(tree, module_path, imports)
+
+    if args.scrambled_message_id_salt:
+      ScrambleMethodOrdinals(module.interfaces, args.scrambled_message_id_salt)
 
     if self._should_generate(rel_filename.path):
+      AddComputedData(module)
       for language, generator_module in generator_modules.iteritems():
         generator = generator_module.Generator(
             module, args.output_dir, typemap=self._typemap.get(language, {}),
             variant=args.variant, bytecode_path=args.bytecode_path,
             for_blink=args.for_blink,
             use_once_callback=args.use_once_callback,
+            js_bindings_mode=args.js_bindings_mode,
             export_attribute=args.export_attribute,
             export_header=args.export_header,
-            generate_non_variant_code=args.generate_non_variant_code)
+            generate_non_variant_code=args.generate_non_variant_code,
+            support_lazy_serialization=args.support_lazy_serialization)
         filtered_args = []
         if hasattr(generator_module, 'GENERATOR_PREFIX'):
           prefix = '--' + generator_module.GENERATOR_PREFIX + '_'
@@ -236,6 +275,12 @@ def _Generate(args, remaining_args):
   processor.LoadTypemaps(set(args.typemaps))
   for filename in args.filename:
     processor.ProcessFile(args, remaining_args, generator_modules, filename)
+  if args.depfile:
+    assert args.depfile_target
+    with open(args.depfile, 'w') as f:
+      f.write('%s: %s' % (
+          args.depfile_target,
+          ' '.join(processor._parsed_files.keys())))
 
   return 0
 
@@ -281,7 +326,7 @@ def main():
   generate_parser.add_argument("--variant", dest="variant", default=None,
                                help="output a named variant of the bindings")
   generate_parser.add_argument(
-      "--bytecode_path", type=str, required=True, help=(
+      "--bytecode_path", required=True, help=(
           "the path from which to load template bytecode; to generate template "
           "bytecode, run %s precompile BYTECODE_PATH" % os.path.basename(
               sys.argv[0])))
@@ -292,16 +337,36 @@ def main():
       "--use_once_callback", action="store_true",
       help="Use base::OnceCallback instead of base::RepeatingCallback.")
   generate_parser.add_argument(
-      "--export_attribute", type=str, default="",
+      "--js_bindings_mode", choices=["new", "both", "old"], default="new",
+      help="This option only affects the JavaScript bindings. The value could "
+      "be: \"new\" - generate only the new-style JS bindings, which use the "
+      "new module loading approach and the core api exposed by Web IDL; "
+      "\"both\" - generate both the old- and new-style bindings; \"old\" - "
+      "generate only the old-style bindings.")
+  generate_parser.add_argument(
+      "--export_attribute", default="",
       help="Optional attribute to specify on class declaration to export it "
       "for the component build.")
   generate_parser.add_argument(
-      "--export_header", type=str, default="",
+      "--export_header", default="",
       help="Optional header to include in the generated headers to support the "
       "component build.")
   generate_parser.add_argument(
       "--generate_non_variant_code", action="store_true",
       help="Generate code that is shared by different variants.")
+  generate_parser.add_argument(
+      "--depfile",
+      help="A file into which the list of input files will be written.")
+  generate_parser.add_argument(
+      "--depfile_target",
+      help="The target name to use in the depfile.")
+  generate_parser.add_argument(
+      "--scrambled_message_id_salt",
+      help="If non-empty, the salt for generating scrambled message IDs.")
+  generate_parser.add_argument(
+      "--support_lazy_serialization",
+      help="If set, generated bindings will serialize lazily when possible.",
+      action="store_true")
   generate_parser.set_defaults(func=_Generate)
 
   precompile_parser = subparsers.add_parser("precompile",

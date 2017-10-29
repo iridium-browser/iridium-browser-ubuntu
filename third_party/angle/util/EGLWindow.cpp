@@ -12,6 +12,9 @@
 #include "OSWindow.h"
 #include "common/debug.h"
 
+// TODO(jmadill): Clean this up at some point.
+#define EGL_PLATFORM_ANGLE_PLATFORM_METHODS_ANGLEX 0x9999
+
 EGLPlatformParameters::EGLPlatformParameters()
     : renderer(EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE),
       majorVersion(EGL_DONT_CARE),
@@ -100,6 +103,8 @@ EGLWindow::EGLWindow(EGLint glesMajorVersion,
       mContext(EGL_NO_CONTEXT),
       mClientMajorVersion(glesMajorVersion),
       mClientMinorVersion(glesMinorVersion),
+      mEGLMajorVersion(0),
+      mEGLMinorVersion(0),
       mPlatform(platform),
       mRedBits(-1),
       mGreenBits(-1),
@@ -114,7 +119,12 @@ EGLWindow::EGLWindow(EGLint glesMajorVersion,
       mWebGLCompatibility(false),
       mBindGeneratesResource(true),
       mClientArraysEnabled(true),
-      mSwapInterval(-1)
+      mRobustResourceInit(),
+      mSwapInterval(-1),
+      mSamples(-1),
+      mDebugLayersEnabled(),
+      mContextProgramCacheEnabled(),
+      mPlatformMethods(nullptr)
 {
 }
 
@@ -150,13 +160,14 @@ EGLContext EGLWindow::getContext() const
 
 bool EGLWindow::initializeGL(OSWindow *osWindow)
 {
-    PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
-    if (!eglGetPlatformDisplayEXT)
-    {
+    if (!initializeDisplayAndSurface(osWindow))
         return false;
-    }
+    return initializeContext();
+}
 
-    std::vector<EGLint> displayAttributes;
+bool EGLWindow::initializeDisplayAndSurface(OSWindow *osWindow)
+{
+    std::vector<EGLAttrib> displayAttributes;
     displayAttributes.push_back(EGL_PLATFORM_ANGLE_TYPE_ANGLE);
     displayAttributes.push_back(mPlatform.renderer);
     displayAttributes.push_back(EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE);
@@ -184,72 +195,52 @@ bool EGLWindow::initializeGL(OSWindow *osWindow)
         displayAttributes.push_back(mPlatform.presentPath);
     }
 
-    // Set vulkan validation layer settings if requested.
-    if (mVulkanLayersEnabled.valid())
+    // Set debug layer settings if requested.
+    if (mDebugLayersEnabled.valid())
     {
-        displayAttributes.push_back(EGL_PLATFORM_ANGLE_ENABLE_VALIDATION_LAYER_ANGLE);
-        displayAttributes.push_back(mVulkanLayersEnabled.value() ? EGL_TRUE : EGL_FALSE);
+        displayAttributes.push_back(EGL_PLATFORM_ANGLE_DEBUG_LAYERS_ENABLED_ANGLE);
+        displayAttributes.push_back(mDebugLayersEnabled.value() ? EGL_TRUE : EGL_FALSE);
     }
 
-    displayAttributes.push_back(EGL_NONE);
-
-    mDisplay = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
-                                        reinterpret_cast<void *>(osWindow->getNativeDisplay()),
-                                        &displayAttributes[0]);
-    if (mDisplay == EGL_NO_DISPLAY)
+    if (mPlatformMethods)
     {
-        destroyGL();
-        return false;
+        static_assert(sizeof(EGLAttrib) == sizeof(mPlatformMethods), "Unexpected pointer size");
+        displayAttributes.push_back(EGL_PLATFORM_ANGLE_PLATFORM_METHODS_ANGLEX);
+        displayAttributes.push_back(reinterpret_cast<EGLAttrib>(mPlatformMethods));
     }
 
-    EGLint majorVersion, minorVersion;
-    if (eglInitialize(mDisplay, &majorVersion, &minorVersion) == EGL_FALSE)
-    {
-        destroyGL();
-        return false;
-    }
-
-    const char *displayExtensions = eglQueryString(mDisplay, EGL_EXTENSIONS);
-
-    // EGL_KHR_create_context is required to request a non-ES2 context.
-    bool hasKHRCreateContext = strstr(displayExtensions, "EGL_KHR_create_context") != nullptr;
-    if (majorVersion != 2 && minorVersion != 0 && !hasKHRCreateContext)
-    {
-        destroyGL();
-        return false;
-    }
-
-    bool hasWebGLCompatibility =
-        strstr(displayExtensions, "EGL_ANGLE_create_context_webgl_compatibility") != nullptr;
-    if (mWebGLCompatibility && !hasWebGLCompatibility)
-    {
-        destroyGL();
-        return false;
-    }
-
-    bool hasBindGeneratesResource =
-        strstr(displayExtensions, "EGL_CHROMIUM_create_context_bind_generates_resource") != nullptr;
-    if (!mBindGeneratesResource && !hasBindGeneratesResource)
-    {
-        destroyGL();
-        return false;
-    }
-
-    bool hasClientArraysExtension =
-        strstr(displayExtensions, "EGL_ANGLE_create_context_client_arrays") != nullptr;
-    if (!mClientArraysEnabled && !hasClientArraysExtension)
+    if (mRobustResourceInit.valid() &&
+        !ClientExtensionEnabled("EGL_ANGLE_display_robust_resource_initialization"))
     {
         // Non-default state requested without the extension present
         destroyGL();
         return false;
     }
 
-    eglBindAPI(EGL_OPENGL_ES_API);
-    if (eglGetError() != EGL_SUCCESS)
+    if (mRobustResourceInit.valid())
+    {
+        displayAttributes.push_back(EGL_DISPLAY_ROBUST_RESOURCE_INITIALIZATION_ANGLE);
+        displayAttributes.push_back(mRobustResourceInit.value() ? EGL_TRUE : EGL_FALSE);
+    }
+
+    displayAttributes.push_back(EGL_NONE);
+
+    mDisplay = eglGetPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE,
+                                     reinterpret_cast<void *>(osWindow->getNativeDisplay()),
+                                     &displayAttributes[0]);
+    if (mDisplay == EGL_NO_DISPLAY)
     {
         destroyGL();
         return false;
     }
+
+    if (eglInitialize(mDisplay, &mEGLMajorVersion, &mEGLMinorVersion) == EGL_FALSE)
+    {
+        destroyGL();
+        return false;
+    }
+
+    const char *displayExtensions = eglQueryString(mDisplay, EGL_EXTENSIONS);
 
     std::vector<EGLint> configAttributes = {
         EGL_RED_SIZE,       (mRedBits >= 0) ? mRedBits : EGL_DONT_CARE,
@@ -259,6 +250,7 @@ bool EGLWindow::initializeGL(OSWindow *osWindow)
         EGL_DEPTH_SIZE,     (mDepthBits >= 0) ? mDepthBits : EGL_DONT_CARE,
         EGL_STENCIL_SIZE,   (mStencilBits >= 0) ? mStencilBits : EGL_DONT_CARE,
         EGL_SAMPLE_BUFFERS, mMultisample ? 1 : 0,
+        EGL_SAMPLES,        (mSamples >= 0) ? mSamples : EGL_DONT_CARE,
     };
 
     // Add dynamic attributes
@@ -289,6 +281,7 @@ bool EGLWindow::initializeGL(OSWindow *osWindow)
     eglGetConfigAttrib(mDisplay, mConfig, EGL_ALPHA_SIZE, &mAlphaBits);
     eglGetConfigAttrib(mDisplay, mConfig, EGL_DEPTH_SIZE, &mDepthBits);
     eglGetConfigAttrib(mDisplay, mConfig, EGL_STENCIL_SIZE, &mStencilBits);
+    eglGetConfigAttrib(mDisplay, mConfig, EGL_SAMPLES, &mSamples);
 
     std::vector<EGLint> surfaceAttributes;
     if (strstr(displayExtensions, "EGL_NV_post_sub_buffer") != nullptr)
@@ -306,6 +299,61 @@ bool EGLWindow::initializeGL(OSWindow *osWindow)
         return false;
     }
     ASSERT(mSurface != EGL_NO_SURFACE);
+    return true;
+}
+
+bool EGLWindow::initializeContext()
+{
+    const char *displayExtensions = eglQueryString(mDisplay, EGL_EXTENSIONS);
+
+    // EGL_KHR_create_context is required to request a ES3+ context.
+    bool hasKHRCreateContext = strstr(displayExtensions, "EGL_KHR_create_context") != nullptr;
+    if (mClientMajorVersion > 2 && !(mEGLMajorVersion > 1 || mEGLMinorVersion >= 5) &&
+        !hasKHRCreateContext)
+    {
+        destroyGL();
+        return false;
+    }
+
+    bool hasWebGLCompatibility =
+        strstr(displayExtensions, "EGL_ANGLE_create_context_webgl_compatibility") != nullptr;
+    if (mWebGLCompatibility && !hasWebGLCompatibility)
+    {
+        destroyGL();
+        return false;
+    }
+
+    bool hasBindGeneratesResource =
+        strstr(displayExtensions, "EGL_CHROMIUM_create_context_bind_generates_resource") != nullptr;
+    if (!mBindGeneratesResource && !hasBindGeneratesResource)
+    {
+        destroyGL();
+        return false;
+    }
+
+    bool hasClientArraysExtension =
+        strstr(displayExtensions, "EGL_ANGLE_create_context_client_arrays") != nullptr;
+    if (!mClientArraysEnabled && !hasClientArraysExtension)
+    {
+        // Non-default state requested without the extension present
+        destroyGL();
+        return false;
+    }
+
+    bool hasProgramCacheControlExtension =
+        strstr(displayExtensions, "EGL_ANGLE_program_cache_control ") != nullptr;
+    if (mContextProgramCacheEnabled.valid() && !hasProgramCacheControlExtension)
+    {
+        destroyGL();
+        return false;
+    }
+
+    eglBindAPI(EGL_OPENGL_ES_API);
+    if (eglGetError() != EGL_SUCCESS)
+    {
+        destroyGL();
+        return false;
+    }
 
     std::vector<EGLint> contextAttributes;
     if (hasKHRCreateContext)
@@ -342,6 +390,12 @@ bool EGLWindow::initializeGL(OSWindow *osWindow)
         {
             contextAttributes.push_back(EGL_CONTEXT_CLIENT_ARRAYS_ENABLED_ANGLE);
             contextAttributes.push_back(mClientArraysEnabled ? EGL_TRUE : EGL_FALSE);
+        }
+
+        if (mContextProgramCacheEnabled.valid())
+        {
+            contextAttributes.push_back(EGL_CONTEXT_PROGRAM_BINARY_CACHE_ENABLED_ANGLE);
+            contextAttributes.push_back(mContextProgramCacheEnabled.value() ? EGL_TRUE : EGL_FALSE);
         }
     }
     contextAttributes.push_back(EGL_NONE);
@@ -435,4 +489,22 @@ EGLBoolean EGLWindow::FindEGLConfig(EGLDisplay dpy, const EGLint *attrib_list, E
     }
 
     return EGL_FALSE;
+}
+
+void EGLWindow::makeCurrent()
+{
+    eglMakeCurrent(mDisplay, mSurface, mSurface, mContext);
+}
+
+// static
+bool EGLWindow::ClientExtensionEnabled(const std::string &extName)
+{
+    return CheckExtensionExists(eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS), extName);
+}
+
+bool CheckExtensionExists(const char *allExtensions, const std::string &extName)
+{
+    const std::string paddedExtensions = std::string(" ") + allExtensions + std::string(" ");
+    return paddedExtensions.find(std::string(" ") + extName + std::string(" ")) !=
+           std::string::npos;
 }

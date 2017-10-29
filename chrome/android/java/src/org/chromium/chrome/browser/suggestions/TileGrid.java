@@ -13,6 +13,7 @@ import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ntp.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.cards.ItemViewType;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder;
+import org.chromium.chrome.browser.ntp.cards.NodeVisitor;
 import org.chromium.chrome.browser.ntp.cards.OptionalLeaf;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 
@@ -55,13 +56,18 @@ public class TileGrid extends OptionalLeaf implements TileGroup.Observer {
     @Override
     protected void onBindViewHolder(NewTabPageViewHolder holder) {
         assert holder instanceof ViewHolder;
-        ((ViewHolder) holder).onBindViewHolder(mTileGroup);
+        ((ViewHolder) holder).updateTiles(mTileGroup);
+    }
+
+    @Override
+    protected void visitOptionalItem(NodeVisitor visitor) {
+        visitor.visitTileGrid();
     }
 
     @Override
     public void onTileDataChanged() {
-        setVisible(mTileGroup.getTiles().length != 0);
-        if (isVisible()) notifyItemChanged(0);
+        setVisibilityInternal(mTileGroup.getTiles().length != 0);
+        if (isVisible()) notifyItemChanged(0, new ViewHolder.UpdateTilesCallback(mTileGroup));
     }
 
     @Override
@@ -79,18 +85,12 @@ public class TileGrid extends OptionalLeaf implements TileGroup.Observer {
         if (isVisible()) notifyItemChanged(0, new ViewHolder.UpdateOfflineBadgeCallback(tile));
     }
 
-    @Override
-    public void onLoadTaskAdded() {}
-
-    @Override
-    public void onLoadTaskCompleted() {}
-
     public TileGroup getTileGroup() {
         return mTileGroup;
     }
 
     private static int getMaxTileRows() {
-        int defaultValue = 1;
+        int defaultValue = 2;
         return ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
                 ChromeFeatureList.CHROME_HOME, PARAM_CHROME_HOME_MAX_TILE_ROWS, defaultValue);
     }
@@ -115,9 +115,8 @@ public class TileGrid extends OptionalLeaf implements TileGroup.Observer {
             mLayout.setMaxColumns(MAX_TILE_COLUMNS);
         }
 
-        public void onBindViewHolder(TileGroup tileGroup) {
-            tileGroup.renderTileViews(mLayout, /* trackLoadTasks = */ false,
-                    /* condensed = */ false);
+        public void updateTiles(TileGroup tileGroup) {
+            tileGroup.renderTileViews(mLayout, /* condensed = */ false);
         }
 
         public void updateIconView(Tile tile) {
@@ -126,6 +125,23 @@ public class TileGrid extends OptionalLeaf implements TileGroup.Observer {
 
         public void updateOfflineBadge(Tile tile) {
             mLayout.updateOfflineBadge(tile);
+        }
+
+        /**
+         * Callback to update all the tiles in the view holder.
+         */
+        public static class UpdateTilesCallback extends PartialBindCallback {
+            private final TileGroup mTileGroup;
+
+            public UpdateTilesCallback(TileGroup tileGroup) {
+                mTileGroup = tileGroup;
+            }
+
+            @Override
+            public void onResult(NewTabPageViewHolder holder) {
+                assert holder instanceof ViewHolder;
+                ((ViewHolder) holder).updateTiles(mTileGroup);
+            }
         }
 
         /**

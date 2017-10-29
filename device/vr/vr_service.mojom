@@ -5,6 +5,9 @@
 module device.mojom;
 
 import "mojo/common/time.mojom";
+import "gpu/ipc/common/mailbox_holder.mojom";
+import "gpu/ipc/common/sync_token.mojom";
+import "ui/gfx/geometry/mojo/geometry.mojom";
 
 // A field of view, given by 4 degrees describing the view from a center point.
 struct VRFieldOfView {
@@ -17,7 +20,6 @@ struct VRFieldOfView {
 // A display's position, orientation, velocity, and acceleration state at the
 // given timestamp.
 struct VRPose {
-  double timestamp;
   array<float, 4>? orientation;
   array<float, 3>? position;
   array<float, 3>? angularVelocity;
@@ -27,7 +29,6 @@ struct VRPose {
 };
 
 struct VRDisplayCapabilities {
-  bool hasOrientation;
   bool hasPosition;
   bool hasExternalDisplay;
   bool canPresent;
@@ -56,13 +57,6 @@ struct VRDisplayInfo {
   VREyeParameters rightEye;
 };
 
-struct VRLayerBounds {
-  float left;
-  float top;
-  float width;
-  float height;
-};
-
 enum VRDisplayEventReason {
   NONE = 0,
   NAVIGATION = 1,
@@ -73,37 +67,44 @@ enum VRDisplayEventReason {
 // TODO(shaobo.yan@intel.com) : Add comments to describe these interfaces about
 // how to use and where they live.
 interface VRService {
-  // TODO(shaobo.yan@intel.com) : Use a factory function which took a
-  // VRServiceClient so we would never have a half-initialized VRService.
-  SetClient(VRServiceClient client) => (uint32 numberOfConnectedDevices);
+  // TODO(shaobo.yan@intel.com, crbug/701027): Use a factory function which
+  // takes a VRServiceClient so we will never have a half-initialized VRService.
+  SetClient(VRServiceClient client) => (uint32 number_of_connected_devices);
   // Inform the service that the page is listening for vrdisplayactivate events.
   SetListeningForActivate(bool listening);
 };
 
 interface VRServiceClient {
   OnDisplayConnected(VRDisplay display, VRDisplayClient& request,
-                     VRDisplayInfo displayInfo);
+                     VRDisplayInfo display_info);
 };
 
+interface VRSubmitFrameClient {
+  OnSubmitFrameTransferred();
+  OnSubmitFrameRendered();
+};
+
+// Represents a physical VR device that can be used to present WebVR content, or get orientation
+// data (VRPose) when not presenting (aka magic window).
 interface VRDisplay {
-  ResetPose();
-
-  RequestPresent(bool secureOrigin) => (bool success);
+  RequestPresent(bool secure_origin, VRSubmitFrameClient client,
+                 VRPresentationProvider& request) => (bool success);
   ExitPresent();
-  SubmitFrame(VRPose? pose);
-  UpdateLayerBounds(int16 frameId, VRLayerBounds leftBounds,
-                    VRLayerBounds rightBounds);
-  GetVRVSyncProvider(VRVSyncProvider& request);
+  GetNextMagicWindowPose() => (VRPose? pose);
 };
 
-interface VRVSyncProvider {
-  enum Status { SUCCESS, RETRY };
+// Provides the necessary functionality for a presenting WebVR page to draw frames for a VrDisplay.
+interface VRPresentationProvider {
+  enum VSyncStatus { SUCCESS, CLOSING };
 
   // The frameId maps a VSync to a frame arriving from the compositor. IDs will
   // be reused after the frame arrives from the compositor. Negative IDs imply
   // no mapping.
-  GetVSync() => (VRPose? pose, mojo.common.mojom.TimeDelta time, int16 frameId,
-                 Status status);
+  GetVSync() => (VRPose? pose, mojo.common.mojom.TimeDelta time, int16 frame_id,
+                 VSyncStatus status);
+  SubmitFrame(int16 frame_id, gpu.mojom.MailboxHolder mailbox_holder);
+  UpdateLayerBounds(int16 frame_id, gfx.mojom.RectF left_bounds,
+                    gfx.mojom.RectF right_bounds, gfx.mojom.Size source_size);
 };
 
 interface VRDisplayClient {
@@ -111,6 +112,6 @@ interface VRDisplayClient {
   OnExitPresent();
   OnBlur();
   OnFocus();
-  OnActivate(VRDisplayEventReason reason);
+  OnActivate(VRDisplayEventReason reason) => (bool will_not_present);
   OnDeactivate(VRDisplayEventReason reason);
 };

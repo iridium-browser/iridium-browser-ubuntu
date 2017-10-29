@@ -7,8 +7,8 @@
 #include "base/command_line.h"
 #include "chrome/browser/permissions/permission_request_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/permission_bubble/mock_permission_prompt_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/website_settings/mock_permission_prompt_factory.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
@@ -21,8 +21,6 @@ PermissionsBrowserTest::PermissionsBrowserTest(const std::string& test_url)
 PermissionsBrowserTest::~PermissionsBrowserTest() {}
 
 void PermissionsBrowserTest::SetUpOnMainThread() {
-  InProcessBrowserTest::SetUpOnMainThread();
-
   PermissionRequestManager* manager = PermissionRequestManager::FromWebContents(
       browser()->tab_strip_model()->GetActiveWebContents());
   prompt_factory_.reset(new MockPermissionPromptFactory(manager));
@@ -36,8 +34,6 @@ void PermissionsBrowserTest::SetUpOnMainThread() {
 
 void PermissionsBrowserTest::TearDownOnMainThread() {
   prompt_factory_.reset();
-
-  InProcessBrowserTest::TearDownOnMainThread();
 }
 
 bool PermissionsBrowserTest::RunScriptReturnBool(const std::string& script) {
@@ -52,35 +48,35 @@ content::WebContents* PermissionsBrowserTest::GetWebContents() {
 }
 
 void PermissionsBrowserTest::CommonFailsBeforeRequesting() {
-  EXPECT_EQ(0, prompt_factory()->total_request_count());
+  EXPECT_EQ(0, prompt_factory()->TotalRequestCount());
   // Dismiss any prompts if they are shown when using the feature.
   prompt_factory()->set_response_type(PermissionRequestManager::DISMISS);
   EXPECT_FALSE(FeatureUsageSucceeds());
 }
 
 void PermissionsBrowserTest::CommonFailsIfDismissed() {
-  EXPECT_EQ(0, prompt_factory()->total_request_count());
+  EXPECT_EQ(0, prompt_factory()->TotalRequestCount());
   prompt_factory()->set_response_type(PermissionRequestManager::DISMISS);
   TriggerPrompt();
 
   EXPECT_FALSE(FeatureUsageSucceeds());
-  EXPECT_EQ(1, prompt_factory()->total_request_count());
+  EXPECT_EQ(1, prompt_factory()->TotalRequestCount());
 }
 
 void PermissionsBrowserTest::CommonFailsIfBlocked() {
-  EXPECT_EQ(0, prompt_factory()->total_request_count());
+  EXPECT_EQ(0, prompt_factory()->TotalRequestCount());
   prompt_factory()->set_response_type(PermissionRequestManager::DENY_ALL);
   TriggerPrompt();
 
   EXPECT_FALSE(FeatureUsageSucceeds());
-  EXPECT_EQ(1, prompt_factory()->total_request_count());
+  EXPECT_EQ(1, prompt_factory()->TotalRequestCount());
 }
 
 void PermissionsBrowserTest::CommonSucceedsIfAllowed() {
-  EXPECT_EQ(0, prompt_factory()->total_request_count());
+  EXPECT_EQ(0, prompt_factory()->TotalRequestCount());
   prompt_factory()->set_response_type(PermissionRequestManager::ACCEPT_ALL);
   TriggerPrompt();
 
   EXPECT_TRUE(FeatureUsageSucceeds());
-  EXPECT_EQ(1, prompt_factory()->total_request_count());
+  EXPECT_EQ(1, prompt_factory()->TotalRequestCount());
 }

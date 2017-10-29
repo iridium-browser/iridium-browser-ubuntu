@@ -27,6 +27,7 @@ class ListSelectionModel;
 }
 namespace views {
 class View;
+class ViewTracker;
 }
 class Browser;
 class Tab;
@@ -183,7 +184,7 @@ class TabDragController : public views::WidgetObserver,
   // Indicates what should happen after invoking DragBrowserToNewTabStrip().
   enum DragBrowserResultType {
     // The caller should return immediately. This return value is used if a
-    // nested message loop was created or we're in a nested message loop and
+    // nested run loop was created or we're in a nested run loop and
     // need to exit it.
     DRAG_BROWSER_RESULT_STOP,
 
@@ -303,7 +304,7 @@ class TabDragController : public views::WidgetObserver,
   // runs a nested move loop.
   void DetachIntoNewBrowserAndRunMoveLoop(const gfx::Point& point_in_screen);
 
-  // Runs a nested message loop that handles moving the current
+  // Runs a nested run loop that handles moving the current
   // Browser. |drag_offset| is the offset from the window origin and is used in
   // calculating the location of the window offset from the cursor while
   // dragging.
@@ -493,10 +494,10 @@ class TabDragController : public views::WidgetObserver,
   // This is used to calculate |window_create_point_|.
   gfx::Point first_source_tab_point_;
 
-  // Storage ID in ViewStorage where the last view that had focus in the window
-  // containing |source_tab_| is saved. This is saved so that focus can be
-  // restored properly when a drag begins and ends within this same window.
-  const int old_focused_view_id_;
+  // Used to track the view that had focus in the window containing
+  // |source_tab_|. This is saved so that focus can be restored properly when
+  // a drag begins and ends within this same window.
+  std::unique_ptr<views::ViewTracker> old_focused_view_tracker_;
 
   // The horizontal position of the mouse cursor in screen coordinates at the
   // time of the last re-order event.

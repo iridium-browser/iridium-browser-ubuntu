@@ -141,7 +141,7 @@ DisconnectWindowGtk::DisconnectWindowGtk()
 }
 
 DisconnectWindowGtk::~DisconnectWindowGtk() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (disconnect_window_) {
     gtk_widget_destroy(disconnect_window_);
@@ -151,7 +151,7 @@ DisconnectWindowGtk::~DisconnectWindowGtk() {
 
 void DisconnectWindowGtk::Start(
     const base::WeakPtr<ClientSessionControl>& client_session_control) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!client_session_control_.get());
   DCHECK(client_session_control.get());
   DCHECK(!disconnect_window_);
@@ -202,8 +202,10 @@ void DisconnectWindowGtk::Start(
   // The alignment sets narrow margins at the top and bottom, compared with
   // left and right.  The left margin is made larger to accommodate the
   // window movement gripper.
+  G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
   GtkWidget* align = gtk_alignment_new(0, 0, 1, 1);
   gtk_alignment_set_padding(GTK_ALIGNMENT(align), 8, 8, 24, 12);
+  G_GNUC_END_IGNORE_DEPRECATIONS;
   gtk_container_add(GTK_CONTAINER(window), align);
 
 #if GTK_MAJOR_VERSION == 2
@@ -252,7 +254,7 @@ void DisconnectWindowGtk::Start(
 }
 
 void DisconnectWindowGtk::OnClicked(GtkButton* button) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (client_session_control_.get())
     client_session_control_->DisconnectSession(protocol::OK);
@@ -260,7 +262,7 @@ void DisconnectWindowGtk::OnClicked(GtkButton* button) {
 
 gboolean DisconnectWindowGtk::OnDelete(GtkWidget* window,
                                        GdkEvent* event) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (client_session_control_.get())
     client_session_control_->DisconnectSession(protocol::OK);
@@ -269,7 +271,7 @@ gboolean DisconnectWindowGtk::OnDelete(GtkWidget* window,
 
 gboolean DisconnectWindowGtk::OnConfigure(GtkWidget* widget,
                                           GdkEventConfigure* event) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Only generate bitmaps if the size has actually changed.
   if (event->width == current_width_ && event->height == current_height_)
@@ -325,7 +327,7 @@ gboolean DisconnectWindowGtk::OnDraw(GtkWidget* widget, cairo_t* cr) {
 #if GTK_MAJOR_VERSION == 2
   NOTREACHED();
 #endif
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   DrawBackground(cr, current_width_, current_height_);
   return FALSE;
@@ -333,7 +335,7 @@ gboolean DisconnectWindowGtk::OnDraw(GtkWidget* widget, cairo_t* cr) {
 
 gboolean DisconnectWindowGtk::OnButtonPress(GtkWidget* widget,
                                             GdkEventButton* event) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   gtk_window_begin_move_drag(GTK_WINDOW(disconnect_window_),
                              event->button,

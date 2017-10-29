@@ -10,18 +10,17 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
+#include "chrome/browser/media/router/receiver_presentation_service_delegate_impl.h"  // nogncheck
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
+#include "content/public/browser/keyboard_event_processing_result.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/web_preferences.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/process_manager.h"
-
-#if defined(ENABLE_MEDIA_ROUTER)
-#include "chrome/browser/media/router/receiver_presentation_service_delegate_impl.h"  // nogncheck
-#endif
 
 using content::WebContents;
 
@@ -31,7 +30,7 @@ namespace {
 
 // Upper limit on the number of simultaneous off-screen tabs per extension
 // instance.
-const int kMaxOffscreenTabsPerExtension = 3;
+const int kMaxOffscreenTabsPerExtension = 4;
 
 // Time intervals used by the logic that detects when the capture of an
 // offscreen tab has stopped, to automatically tear it down and free resources.
@@ -84,13 +83,42 @@ void OffscreenTabsOwner::DestroyTab(OffscreenTab* tab) {
   }
 }
 
+// Navigation policy for presentations, where top-level navigations are not
+// allowed.
+class OffscreenTab::PresentationNavigationPolicy
+    : public OffscreenTab::NavigationPolicy {
+ public:
+  PresentationNavigationPolicy() : first_navigation_started_(false) {}
+  ~PresentationNavigationPolicy() = default;
+
+ private:
+  // OffscreenTab::NavigationPolicy overrides
+  bool DidStartNavigation(content::NavigationHandle* navigation_handle) final {
+    // We only care about top-level navigations that are cross-document.
+    if (!navigation_handle->IsInMainFrame() ||
+        navigation_handle->IsSameDocument()) {
+      return true;
+    }
+
+    // The initial navigation had already begun.
+    if (first_navigation_started_)
+      return false;
+
+    first_navigation_started_ = true;
+    return true;
+  }
+
+  bool first_navigation_started_;
+};
+
 OffscreenTab::OffscreenTab(OffscreenTabsOwner* owner)
     : owner_(owner),
       profile_(Profile::FromBrowserContext(
                    owner->extension_web_contents()->GetBrowserContext())
-               ->CreateOffTheRecordProfile()),
+                   ->CreateOffTheRecordProfile()),
       capture_poll_timer_(false, false),
-      content_capture_was_detected_(false) {
+      content_capture_was_detected_(false),
+      navigation_policy_(new NavigationPolicy) {
   DCHECK(profile_);
 }
 
@@ -121,13 +149,16 @@ void OffscreenTab::Start(const GURL& start_url,
   // automatically unmuted, but will be captured into the MediaStream.
   offscreen_tab_web_contents_->SetAudioMuted(true);
 
-#if defined(ENABLE_MEDIA_ROUTER)
   if (!optional_presentation_id.empty()) {
-    DVLOG(1) << " Register with ReceiverPresentationServiceDelegateImpl, "
-             << "[presentation_id]: " << optional_presentation_id;
-    // Create a ReceiverPSDImpl associated with the offscreen tab's WebContents.
-    // The new instance will set up the necessary infrastructure to allow
-    // controlling peers the ability to connect to the offscreen tab.
+    // This offscreen tab is a presentation created through the Presentation
+    // API. https://www.w3.org/TR/presentation-api/
+    //
+    // Create a ReceiverPresentationServiceDelegateImpl associated with the
+    // offscreen tab's WebContents.  The new instance will set up the necessary
+    // infrastructure to allow controlling pages the ability to connect to the
+    // offscreen tab.
+    DVLOG(1) << "Register with ReceiverPresentationServiceDelegateImpl, "
+             << "presentation_id=" << optional_presentation_id;
     media_router::ReceiverPresentationServiceDelegateImpl::CreateForWebContents(
         offscreen_tab_web_contents_.get(), optional_presentation_id);
 
@@ -137,8 +168,12 @@ void OffscreenTab::Start(const GURL& start_url,
       web_prefs.presentation_receiver = true;
       render_view_host->UpdateWebkitPreferences(web_prefs);
     }
+
+    // Presentations are not allowed to perform top-level navigations after
+    // initial load.  This is enforced through sandboxing flags, but we also
+    // enforce it here.
+    navigation_policy_.reset(new PresentationNavigationPolicy);
   }
-#endif  // defined(ENABLE_MEDIA_ROUTER)
 
   // Navigate to the initial URL.
   content::NavigationController::LoadURLParams load_params(start_url_);
@@ -150,11 +185,15 @@ void OffscreenTab::Start(const GURL& start_url,
   DieIfContentCaptureEnded();
 }
 
+void OffscreenTab::Close() {
+  if (offscreen_tab_web_contents_)
+    offscreen_tab_web_contents_->ClosePage();
+}
+
 void OffscreenTab::CloseContents(WebContents* source) {
   DCHECK_EQ(offscreen_tab_web_contents_.get(), source);
   // Javascript in the page called window.close().
-  DVLOG(1) << "OffscreenTab will die at renderer's request for start_url="
-           << start_url_.spec();
+  DVLOG(1) << "OffscreenTab for start_url=" << start_url_.spec() << " will die";
   owner_->DestroyTab(this);
   // |this| is no longer valid.
 }
@@ -163,6 +202,7 @@ bool OffscreenTab::ShouldSuppressDialogs(WebContents* source) {
   DCHECK_EQ(offscreen_tab_web_contents_.get(), source);
   // Suppress all because there is no possible direct user interaction with
   // dialogs.
+  // TODO(crbug.com/734191): This does not suppress window.print().
   return true;
 }
 
@@ -194,15 +234,13 @@ bool OffscreenTab::HandleContextMenu(const content::ContextMenuParams& params) {
   return true;
 }
 
-bool OffscreenTab::PreHandleKeyboardEvent(
+content::KeyboardEventProcessingResult OffscreenTab::PreHandleKeyboardEvent(
     WebContents* source,
-    const content::NativeWebKeyboardEvent& event,
-    bool* is_keyboard_shortcut) {
+    const content::NativeWebKeyboardEvent& event) {
   DCHECK_EQ(offscreen_tab_web_contents_.get(), source);
   // Intercept and silence all keyboard events before they can be sent to the
   // renderer.
-  *is_keyboard_shortcut = false;
-  return true;
+  return content::KeyboardEventProcessingResult::HANDLED;
 }
 
 bool OffscreenTab::PreHandleGestureEvent(WebContents* source,
@@ -225,6 +263,7 @@ bool OffscreenTab::CanDragEnter(
 
 bool OffscreenTab::ShouldCreateWebContents(
     content::WebContents* web_contents,
+    content::RenderFrameHost* opener,
     content::SiteInstance* source_site_instance,
     int32_t route_id,
     int32_t main_frame_route_id,
@@ -281,8 +320,8 @@ bool OffscreenTab::IsFullscreenForTabOrPending(
 blink::WebDisplayMode OffscreenTab::GetDisplayMode(
     const WebContents* contents) const {
   DCHECK_EQ(offscreen_tab_web_contents_.get(), contents);
-  return in_fullscreen_mode() ?
-      blink::WebDisplayModeFullscreen : blink::WebDisplayModeBrowser;
+  return in_fullscreen_mode() ? blink::kWebDisplayModeFullscreen
+                              : blink::kWebDisplayModeBrowser;
 }
 
 void OffscreenTab::RequestMediaAccessPermission(
@@ -349,6 +388,25 @@ void OffscreenTab::DidShowFullscreenWidget() {
       offscreen_tab_web_contents_->GetFullscreenRenderWidgetHostView();
   if (current_fs_view)
     current_fs_view->SetSize(offscreen_tab_web_contents_->GetPreferredSize());
+}
+
+void OffscreenTab::DidStartNavigation(
+    content::NavigationHandle* navigation_handle) {
+  DCHECK(offscreen_tab_web_contents_.get());
+  if (!navigation_policy_->DidStartNavigation(navigation_handle)) {
+    DVLOG(2) << "Closing because NavigationPolicy disallowed "
+             << "StartNavigation to " << navigation_handle->GetURL().spec();
+    Close();
+  }
+}
+
+// Default navigation policy.
+OffscreenTab::NavigationPolicy::NavigationPolicy() = default;
+OffscreenTab::NavigationPolicy::~NavigationPolicy() = default;
+
+bool OffscreenTab::NavigationPolicy::DidStartNavigation(
+    content::NavigationHandle* navigation_handle) {
+  return true;
 }
 
 void OffscreenTab::DieIfContentCaptureEnded() {

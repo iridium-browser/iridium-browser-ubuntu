@@ -118,9 +118,13 @@ TEST_CONFIG = """\
       'fake_gyp_builder': 'gyp_debug',
       'fake_gn_args_bot': '//build/args/bots/fake_master/fake_gn_args_bot.gn',
       'fake_multi_phase': { 'phase_1': 'gn_phase_1', 'phase_2': 'gn_phase_2'},
+      'fake_args_file': 'args_file_goma',
+      'fake_args_file_twice': 'args_file_twice',
     },
   },
   'configs': {
+    'args_file_goma': ['args_file', 'goma'],
+    'args_file_twice': ['args_file', 'args_file'],
     'gyp_rel_bot': ['gyp', 'rel', 'goma'],
     'gn_debug_goma': ['gn', 'debug', 'goma'],
     'gyp_debug': ['gyp', 'debug', 'fake_feature1'],
@@ -142,6 +146,9 @@ TEST_CONFIG = """\
     'goma': {
       'gn_args': 'use_goma=true',
       'gyp_defines': 'goma=1',
+    },
+    'args_file': {
+      'args_file': '//build/args/fake.gn',
     },
     'phase_1': {
       'gn_args': 'phase=1',
@@ -335,6 +342,19 @@ class UnitTest(unittest.TestCase):
         mbw.files['/fake_src/out/Debug/args.gn'],
         'import("//build/args/bots/fake_master/fake_gn_args_bot.gn")\n')
 
+  def test_gn_gen_args_file_mixins(self):
+    mbw = self.fake_mbw()
+    self.check(['gen', '-m', 'fake_master', '-b', 'fake_args_file',
+                '//out/Debug'], mbw=mbw, ret=0)
+
+    self.assertEqual(
+        mbw.files['/fake_src/out/Debug/args.gn'],
+        ('import("//build/args/fake.gn")\n'
+         'use_goma = true\n'))
+
+    mbw = self.fake_mbw()
+    self.check(['gen', '-m', 'fake_master', '-b', 'fake_args_file_twice',
+                '//out/Debug'], mbw=mbw, ret=1)
 
   def test_gn_gen_fails(self):
     mbw = self.fake_mbw()
@@ -515,29 +535,6 @@ class UnitTest(unittest.TestCase):
     mbw = self.check(['lookup', '-m', 'fake_master', '-b', 'fake_multi_phase',
                       '--phase', 'phase_2'], ret=0)
     self.assertIn('phase = 2', mbw.out)
-
-  def test_validate(self):
-    mbw = self.fake_mbw()
-    self.check(['validate'], mbw=mbw, ret=0)
-
-  def test_bad_validate(self):
-    mbw = self.fake_mbw()
-    mbw.files[mbw.default_config] = TEST_BAD_CONFIG
-    self.check(['validate'], mbw=mbw, ret=1)
-
-  def test_gyp_env_hacks(self):
-    mbw = self.fake_mbw()
-    mbw.files[mbw.default_config] = GYP_HACKS_CONFIG
-    self.check(['lookup', '-c', 'fake_config'], mbw=mbw,
-               ret=0,
-               out=("GYP_DEFINES='foo=bar baz=1'\n"
-                    "GYP_LINK_CONCURRENCY=1\n"
-                    "LLVM_FORCE_HEAD_REVISION=1\n"
-                    "python build/gyp_chromium -G output_dir=_path_\n"))
-
-
-if __name__ == '__main__':
-  unittest.main()
 
   def test_validate(self):
     mbw = self.fake_mbw()

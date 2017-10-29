@@ -6,10 +6,12 @@
 #define GranularityStrategy_h
 
 #include "core/editing/SelectionStrategy.h"
-#include "core/editing/VisibleSelection.h"
-#include "wtf/Allocator.h"
+#include "core/editing/SelectionTemplate.h"
+#include "platform/wtf/Allocator.h"
 
 namespace blink {
+
+enum class TextGranularity;
 
 class GranularityStrategy {
   USING_FAST_MALLOC(GranularityStrategy);
@@ -21,7 +23,7 @@ class GranularityStrategy {
 
   // Calculates and returns the new selection based on the updated extent
   // location in absolute coordinates.
-  virtual VisibleSelection updateExtent(const IntPoint&, LocalFrame*) = 0;
+  virtual SelectionInDOMTree UpdateExtent(const IntPoint&, LocalFrame*) = 0;
 
  protected:
   GranularityStrategy();
@@ -36,7 +38,7 @@ class CharacterGranularityStrategy final : public GranularityStrategy {
   // GranularityStrategy:
   SelectionStrategy GetType() const final;
   void Clear() final;
-  VisibleSelection updateExtent(const IntPoint&, LocalFrame*) final;
+  SelectionInDOMTree UpdateExtent(const IntPoint&, LocalFrame*) final;
 };
 
 // "Expand by word, shrink by character" selection strategy.
@@ -84,7 +86,7 @@ class DirectionGranularityStrategy final : public GranularityStrategy {
   // GranularityStrategy:
   SelectionStrategy GetType() const final;
   void Clear() final;
-  VisibleSelection updateExtent(const IntPoint&, LocalFrame*) final;
+  SelectionInDOMTree UpdateExtent(const IntPoint&, LocalFrame*) final;
 
  private:
   enum class StrategyState {
@@ -94,28 +96,28 @@ class DirectionGranularityStrategy final : public GranularityStrategy {
     // state unless the update shrinks the selection without changing
     // relative base/extent order, in which case the strategy goes into the
     // Shrinking state.
-    Cleared,
+    kCleared,
     // Last time the selection was changed by updateExtent - it was expanded
     // or the relative base/extent order was changed.
-    Expanding,
+    kExpanding,
     // Last time the selection was changed by updateExtent - it was shrunk
     // (without changing relative base/extent order).
-    Shrinking
+    kShrinking
   };
 
-  StrategyState m_state;
+  StrategyState state_;
 
   // Current selection granularity being used.
-  TextGranularity m_granularity;
+  TextGranularity granularity_;
 
   // Horizontal offset in pixels in absolute coordinates applied to the extent
   // point.
-  int m_offset;
+  int offset_;
 
   // This defines location of the offset-adjusted extent point (from the
   // latest updateExtent call) relative to the location of extent's
   // VisiblePosition. It is used to detect sub-position extent movement.
-  IntSize m_diffExtentPointFromExtentPosition;
+  IntSize diff_extent_point_from_extent_position_;
 };
 
 }  // namespace blink

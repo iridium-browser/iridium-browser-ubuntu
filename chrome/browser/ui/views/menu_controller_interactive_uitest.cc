@@ -55,70 +55,17 @@ class MenuControllerMnemonicTest : public MenuTestBase {
 typedef MenuControllerMnemonicTest<ui::VKEY_DIVIDE,1>
     MenuControllerMnemonicTestMnemonicMatch;
 
-#if defined(USE_OZONE)
-// ozone bringup - http://crbug.com/401304
-#define MAYBE_MnemonicMatch DISABLED_MnemonicMatch
-#else
-// If this flakes, disable and log details in http://crbug.com/523255.
-#define MAYBE_MnemonicMatch MnemonicMatch
-#endif
-
-VIEW_TEST(MenuControllerMnemonicTestMnemonicMatch, MAYBE_MnemonicMatch);
+VIEW_TEST(MenuControllerMnemonicTestMnemonicMatch, MnemonicMatch);
 
 // Pressing a key which matches the first letter of the menu item's title
 // should execute the command for that menu item.
 typedef MenuControllerMnemonicTest<ui::VKEY_T,2>
     MenuControllerMnemonicTestTitleMatch;
 
-#if defined(USE_OZONE)
-// ozone bringup - http://crbug.com/401304
-#define MAYBE_TitleMatch DISABLED_TitleMatch
-#else
-// If this flakes, disable and log details in http://crbug.com/523255.
-#define MAYBE_TitleMatch TitleMatch
-#endif
-
-VIEW_TEST(MenuControllerMnemonicTestTitleMatch, MAYBE_TitleMatch);
+VIEW_TEST(MenuControllerMnemonicTestTitleMatch, TitleMatch);
 
 // Pressing an arbitrary key should not execute any commands.
 typedef MenuControllerMnemonicTest<ui::VKEY_A,0>
     MenuControllerMnemonicTestNoMatch;
 
-#if defined(USE_OZONE)
-// ozone bringup - http://crbug.com/401304
-#define MAYBE_NoMatch DISABLED_NoMatch
-#else
-// If this flakes, disable and log details in http://crbug.com/523255.
-#define MAYBE_NoMatch NoMatch
-#endif
-
-VIEW_TEST(MenuControllerMnemonicTestNoMatch, MAYBE_NoMatch);
-
-class MenuRunnerCancelTest : public MenuTestBase {
- public:
-  MenuRunnerCancelTest() {}
-
-  // MenuTestBase overrides:
-  void BuildMenu(views::MenuItemView* menu) override {
-    menu->AppendMenuItemWithLabel(1, base::ASCIIToUTF16("One&/"));
-    menu->AppendMenuItemWithLabel(2, base::ASCIIToUTF16("Two"));
-  }
-
-  void DoTestWithMenuOpen() override {
-    ASSERT_EQ(true, menu_runner()->IsRunning());
-    menu_runner()->Cancel();
-    // On calling Cancel, the nested message loop spun by the menu, should be
-    // marked for termination. However, since we are still in the last
-    // iteration of the nested message loop, MenuRunner::IsRunning(), should
-    // return true.
-    ASSERT_EQ(true, menu_runner()->IsRunning());
-    Done();
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MenuRunnerCancelTest);
-};
-
-// Test that MenuRunner::IsRunning() returns true, immediately after calling
-// MenuRunner::Cancel() for a syncronous menu.
-VIEW_TEST(MenuRunnerCancelTest, IsRunningAfterCancel);
+VIEW_TEST(MenuControllerMnemonicTestNoMatch, NoMatch);

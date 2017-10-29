@@ -32,7 +32,7 @@ void OnFetchComplete(const BrowsingDataCookieHelper::FetchCallback& callback,
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!callback.is_null());
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(callback, cookies));
+                          base::BindOnce(callback, cookies));
 }
 
 }  // namespace
@@ -51,8 +51,8 @@ void BrowsingDataCookieHelper::StartFetching(const FetchCallback& callback) {
   DCHECK(!callback.is_null());
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&BrowsingDataCookieHelper::FetchCookiesOnIOThread, this,
-                 callback));
+      base::BindOnce(&BrowsingDataCookieHelper::FetchCookiesOnIOThread, this,
+                     callback));
 }
 
 void BrowsingDataCookieHelper::DeleteCookie(
@@ -60,16 +60,17 @@ void BrowsingDataCookieHelper::DeleteCookie(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&BrowsingDataCookieHelper::DeleteCookieOnIOThread,
-                 this, cookie));
+      base::BindOnce(&BrowsingDataCookieHelper::DeleteCookieOnIOThread, this,
+                     cookie));
 }
 
 void BrowsingDataCookieHelper::FetchCookiesOnIOThread(
     const FetchCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!callback.is_null());
-  request_context_getter_->GetURLRequestContext()->cookie_store()->
-      GetAllCookiesAsync(base::Bind(&OnFetchComplete, callback));
+  request_context_getter_->GetURLRequestContext()
+      ->cookie_store()
+      ->GetAllCookiesAsync(base::BindOnce(&OnFetchComplete, callback));
 }
 
 void BrowsingDataCookieHelper::DeleteCookieOnIOThread(
@@ -128,9 +129,8 @@ size_t CannedBrowsingDataCookieHelper::GetCookieCount() const {
   return count;
 }
 
-
 void CannedBrowsingDataCookieHelper::StartFetching(
-    const net::CookieStore::GetCookieListCallback& callback) {
+    const FetchCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   net::CookieList cookie_list;
   for (const auto& pair : origin_cookie_set_map_) {

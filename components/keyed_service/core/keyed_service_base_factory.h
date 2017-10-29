@@ -7,7 +7,7 @@
 
 #include <set>
 
-#include "base/threading/non_thread_safe.h"
+#include "base/sequence_checker.h"
 #include "components/keyed_service/core/dependency_node.h"
 #include "components/keyed_service/core/keyed_service_export.h"
 
@@ -29,8 +29,7 @@ class PrefRegistrySyncable;
 // This object describes general dependency management between factories while
 // direct subclasses react to lifecycle events and implement memory management.
 class KEYED_SERVICE_EXPORT KeyedServiceBaseFactory
-    : public base::NonThreadSafe,
-      NON_EXPORTED_BASE(public DependencyNode) {
+    : NON_EXPORTED_BASE(public DependencyNode) {
  public:
 #ifndef NDEBUG
   // Returns our name. We don't keep track of this in release mode.
@@ -54,18 +53,16 @@ class KEYED_SERVICE_EXPORT KeyedServiceBaseFactory
   // created by factories.
   void DependsOn(KeyedServiceBaseFactory* rhs);
 
-#ifndef NDEBUG
-  // Debugging assertion that will NOTREACHED() is |context| is considered
-  // stale. Should be used by subclasses when accessing |context|.
+  // Runtime assertion to check if |context| is considered stale. Should be used
+  // by subclasses when accessing |context|.
   void AssertContextWasntDestroyed(base::SupportsUserData* context) const;
 
   // Marks |context| as live (i.e., not stale). This method can be called as a
   // safeguard against |AssertContextWasntDestroyed()| checks going off due to
-  // |context| aliasing am instance from a prior test (i.e., 0xWhatever might
-  // be created, be destroyed, and then a new object might be created at
+  // |context| aliasing an instance from a prior construction (i.e., 0xWhatever
+  // might be created, be destroyed, and then a new object might be created at
   // 0xWhatever).
-  void MarkContextLiveForTesting(base::SupportsUserData* context);
-#endif
+  void MarkContextLive(base::SupportsUserData* context);
 
   // Calls RegisterProfilePrefs() after doing house keeping required to work
   // alongside RegisterUserPrefsOnContextForTest().
@@ -113,6 +110,8 @@ class KEYED_SERVICE_EXPORT KeyedServiceBaseFactory
 
   // Mark context has having preferences registered.
   void MarkPreferencesSetOn(base::SupportsUserData* context);
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
  private:
   friend class DependencyManager;

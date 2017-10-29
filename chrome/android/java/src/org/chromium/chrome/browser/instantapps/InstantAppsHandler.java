@@ -23,8 +23,8 @@ import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationDelegateImpl;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.IntentUtils;
-import org.chromium.content_public.browser.WebContents;
 
 import java.util.concurrent.TimeUnit;
 
@@ -280,19 +280,17 @@ public class InstantAppsHandler {
      * App banner.
      * @return Whether an Instant App intent was started.
      */
-    public boolean handleNavigation(Context context, String url, Uri referrer,
-            WebContents webContents) {
-        if (InstantAppsSettings.isInstantAppDefault(webContents, url)) {
+    public boolean handleNavigation(Context context, String url, Uri referrer, Tab tab) {
+        if (InstantAppsSettings.isInstantAppDefault(tab.getWebContents(), url)) {
             return launchInstantAppForNavigation(context, url, referrer);
         }
-        return startCheckForInstantApps(context, url, referrer, webContents);
+        return startCheckForInstantApps(context, url, referrer, tab);
     }
 
     /**
      * Checks if an Instant App banner should be shown for the page we are loading.
      */
-    protected boolean startCheckForInstantApps(Context context, String url, Uri referrer,
-            WebContents webContents) {
+    protected boolean startCheckForInstantApps(Context context, String url, Uri referrer, Tab tab) {
         return false;
     }
 
@@ -356,6 +354,19 @@ public class InstantAppsHandler {
      */
     public Intent getInstantAppIntentForUrl(String url) {
         return null;
+    }
+
+    /**
+     * Returns whether or not the instant app is available.
+     *
+     * @param url The URL where the instant app is located.
+     * @param checkHoldback Check if the app would be available if the user weren't in the holdback
+     * group.
+     * @return Whether or not the instant app specified by the entry in the page's manifest is
+     * either available, or would be available if the user wasn't in the holdback group.
+     */
+    public boolean isInstantAppAvailable(String url, boolean checkHoldback) {
+        return false;
     }
 
     /**

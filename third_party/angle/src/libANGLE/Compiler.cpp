@@ -76,19 +76,24 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const ContextState &state)
     mResources.FragmentPrecisionHigh = 1;
     mResources.EXT_frag_depth        = extensions.fragDepth;
 
+    // OVR_multiview state
+    mResources.OVR_multiview = extensions.multiview;
+    mResources.MaxViewsOVR   = extensions.maxViews;
+
     // GLSL ES 3.0 constants
     mResources.MaxVertexOutputVectors  = caps.maxVertexOutputComponents / 4;
     mResources.MaxFragmentInputVectors = caps.maxFragmentInputComponents / 4;
     mResources.MinProgramTexelOffset   = caps.minProgramTexelOffset;
     mResources.MaxProgramTexelOffset   = caps.maxProgramTexelOffset;
 
-    // GLSL ES 3.1 compute shader constants
+    // GLSL ES 3.1 constants
     mResources.MaxImageUnits                    = caps.maxImageUnits;
     mResources.MaxVertexImageUniforms           = caps.maxVertexImageUniforms;
     mResources.MaxFragmentImageUniforms         = caps.maxFragmentImageUniforms;
     mResources.MaxComputeImageUniforms          = caps.maxComputeImageUniforms;
     mResources.MaxCombinedImageUniforms         = caps.maxCombinedImageUniforms;
     mResources.MaxCombinedShaderOutputResources = caps.maxCombinedShaderOutputResources;
+    mResources.MaxUniformLocations              = caps.maxUniformLocations;
 
     for (size_t index = 0u; index < 3u; ++index)
     {
@@ -111,6 +116,11 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const ContextState &state)
     mResources.MaxCombinedAtomicCounterBuffers = caps.maxCombinedAtomicCounterBuffers;
     mResources.MaxAtomicCounterBufferSize      = caps.maxAtomicCounterBufferSize;
 
+    mResources.MaxUniformBufferBindings = caps.maxUniformBufferBindings;
+
+    // Needed by point size clamping workaround
+    mResources.MaxPointSize = caps.maxAliasedPointSize;
+
     if (state.getClientMajorVersion() == 2 && !extensions.drawBuffers)
     {
         mResources.MaxDrawBuffers = 1;
@@ -118,12 +128,6 @@ Compiler::Compiler(rx::GLImplFactory *implFactory, const ContextState &state)
 }
 
 Compiler::~Compiler()
-{
-    release();
-    SafeDelete(mImplementation);
-}
-
-Error Compiler::release()
 {
     if (mFragmentCompiler)
     {
@@ -158,8 +162,6 @@ Error Compiler::release()
     }
 
     mImplementation->release();
-
-    return gl::NoError();
 }
 
 ShHandle Compiler::getCompilerHandle(GLenum type)
@@ -195,6 +197,11 @@ ShHandle Compiler::getCompilerHandle(GLenum type)
     }
 
     return *compiler;
+}
+
+const std::string &Compiler::getBuiltinResourcesString(GLenum type)
+{
+    return sh::GetBuiltInResourcesString(getCompilerHandle(type));
 }
 
 }  // namespace gl

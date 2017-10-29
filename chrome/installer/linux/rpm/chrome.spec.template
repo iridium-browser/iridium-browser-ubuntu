@@ -89,6 +89,7 @@ rm -rf "$RPM_BUILD_ROOT"
 /etc/cron.daily/@@PACKAGE@@
 %ghost %attr(755,root,root) /usr/bin/google-chrome
 /usr/bin/@@USR_BIN_SYMLINK_NAME@@
+/usr/share/appdata/@@PACKAGE@@.appdata.xml
 /usr/share/applications/@@PACKAGE@@.desktop
 /usr/share/gnome-control-center/default-apps/@@PACKAGE@@.xml
 %docdir /usr/share/man/man1
@@ -130,17 +131,20 @@ fi
 if [ "$repo_add_once" = "true" ]; then
   determine_rpm_package_manager
 
-  case $PACKAGEMANAGER in
-  "yum")
-    install_yum
-    ;;
-  "urpmi")
-    install_urpmi
-    ;;
-  "yast")
-    install_yast
-    ;;
-  esac
+  for PACKAGEMANAGER in ${PACKAGEMANAGERS[*]}
+  do
+    case $PACKAGEMANAGER in
+    "yum")
+      install_yum
+      ;;
+    "urpmi")
+      install_urpmi
+      ;;
+    "yast")
+      install_yast
+      ;;
+    esac
+  done
 fi
 
 # Some package managers have locks that prevent everything from being
@@ -208,17 +212,20 @@ fi
 #
 #determine_rpm_package_manager
 #
-#case $PACKAGEMANAGER in
-#"yum")
-#  remove_yum
-#  ;;
-#"urpmi")
-#  remove_urpmi
-#  ;;
-#"yast")
-#  remove_yast
-#  ;;
-#esac
+#for PACKAGEMANAGER in ${PACKAGEMANAGERS[*]}
+#do
+#  case $PACKAGEMANAGER in
+#  "yum")
+#    remove_yum
+#    ;;
+#  "urpmi")
+#    remove_urpmi
+#    ;;
+#  "yast")
+#    remove_yast
+#    ;;
+#  esac
+#done
 
 exit 0
 

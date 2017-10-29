@@ -2,9 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <string>
 
 #include "base/message_loop/message_loop.h"
+#include "gpu/config/gpu_feature_type.h"
+#include "gpu/ipc/common/gpu_feature_info.mojom.h"
+#include "gpu/ipc/common/gpu_feature_info_struct_traits.h"
 #include "gpu/ipc/common/traits_test_service.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,64 +23,62 @@ class StructTraitsTest : public testing::Test, public mojom::TraitsTestService {
 
  protected:
   mojom::TraitsTestServicePtr GetTraitsTestProxy() {
-    return traits_test_bindings_.CreateInterfacePtrAndBind(this);
+    mojom::TraitsTestServicePtr proxy;
+    traits_test_bindings_.AddBinding(this, mojo::MakeRequest(&proxy));
+    return proxy;
   }
 
  private:
   // TraitsTestService:
   void EchoDxDiagNode(const DxDiagNode& d,
-                      const EchoDxDiagNodeCallback& callback) override {
-    callback.Run(d);
+                      EchoDxDiagNodeCallback callback) override {
+    std::move(callback).Run(d);
   }
 
   void EchoGpuDevice(const GPUInfo::GPUDevice& g,
-                     const EchoGpuDeviceCallback& callback) override {
-    callback.Run(g);
+                     EchoGpuDeviceCallback callback) override {
+    std::move(callback).Run(g);
   }
 
-  void EchoGpuInfo(const GPUInfo& g,
-                   const EchoGpuInfoCallback& callback) override {
-    callback.Run(g);
+  void EchoGpuInfo(const GPUInfo& g, EchoGpuInfoCallback callback) override {
+    std::move(callback).Run(g);
   }
 
-  void EchoMailbox(const Mailbox& m,
-                   const EchoMailboxCallback& callback) override {
-    callback.Run(m);
+  void EchoMailbox(const Mailbox& m, EchoMailboxCallback callback) override {
+    std::move(callback).Run(m);
   }
 
   void EchoMailboxHolder(const MailboxHolder& r,
-                         const EchoMailboxHolderCallback& callback) override {
-    callback.Run(r);
+                         EchoMailboxHolderCallback callback) override {
+    std::move(callback).Run(r);
   }
 
   void EchoSyncToken(const SyncToken& s,
-                     const EchoSyncTokenCallback& callback) override {
-    callback.Run(s);
+                     EchoSyncTokenCallback callback) override {
+    std::move(callback).Run(s);
   }
 
   void EchoVideoDecodeAcceleratorSupportedProfile(
       const VideoDecodeAcceleratorSupportedProfile& v,
-      const EchoVideoDecodeAcceleratorSupportedProfileCallback& callback)
-      override {
-    callback.Run(v);
+      EchoVideoDecodeAcceleratorSupportedProfileCallback callback) override {
+    std::move(callback).Run(v);
   }
 
   void EchoVideoDecodeAcceleratorCapabilities(
       const VideoDecodeAcceleratorCapabilities& v,
-      const EchoVideoDecodeAcceleratorCapabilitiesCallback& callback) override {
-    callback.Run(v);
+      EchoVideoDecodeAcceleratorCapabilitiesCallback callback) override {
+    std::move(callback).Run(v);
   }
 
   void EchoVideoEncodeAcceleratorSupportedProfile(
       const VideoEncodeAcceleratorSupportedProfile& v,
-      const EchoVideoEncodeAcceleratorSupportedProfileCallback& callback)
-      override {
-    callback.Run(v);
+      EchoVideoEncodeAcceleratorSupportedProfileCallback callback) override {
+    std::move(callback).Run(v);
   }
 
   void EchoGpuPreferences(const GpuPreferences& prefs,
-                          const EchoGpuPreferencesCallback& callback) override {
-    callback.Run(prefs);
+                          EchoGpuPreferencesCallback callback) override {
+    std::move(callback).Run(prefs);
   }
 
   base::MessageLoop loop_;
@@ -151,6 +153,7 @@ TEST_F(StructTraitsTest, GpuInfo) {
   const int process_crash_count = 0xdead;
   const bool in_process_gpu = true;
   const bool passthrough_cmd_decoder = true;
+  const bool supports_overlays = true;
   const gpu::CollectInfoResult basic_info_state =
       gpu::CollectInfoResult::kCollectInfoSuccess;
   const gpu::CollectInfoResult context_info_state =
@@ -198,6 +201,7 @@ TEST_F(StructTraitsTest, GpuInfo) {
   input.process_crash_count = process_crash_count;
   input.in_process_gpu = in_process_gpu;
   input.passthrough_cmd_decoder = passthrough_cmd_decoder;
+  input.supports_overlays = supports_overlays;
   input.basic_info_state = basic_info_state;
   input.context_info_state = context_info_state;
 #if defined(OS_WIN)
@@ -258,6 +262,7 @@ TEST_F(StructTraitsTest, GpuInfo) {
   EXPECT_EQ(process_crash_count, output.process_crash_count);
   EXPECT_EQ(in_process_gpu, output.in_process_gpu);
   EXPECT_EQ(passthrough_cmd_decoder, output.passthrough_cmd_decoder);
+  EXPECT_EQ(supports_overlays, output.supports_overlays);
   EXPECT_EQ(basic_info_state, output.basic_info_state);
   EXPECT_EQ(context_info_state, output.context_info_state);
 #if defined(OS_WIN)
@@ -423,6 +428,7 @@ TEST_F(StructTraitsTest, GpuPreferences) {
   prefs.single_process = true;
   prefs.in_process_gpu = true;
   prefs.ui_prioritize_in_gpu_process = true;
+  prefs.enable_gpu_scheduler = true;
 #if defined(OS_WIN)
   const GpuPreferences::VpxDecodeVendors vendor =
       GpuPreferences::VPX_VENDOR_AMD;
@@ -436,10 +442,28 @@ TEST_F(StructTraitsTest, GpuPreferences) {
   EXPECT_TRUE(echo.single_process);
   EXPECT_TRUE(echo.in_process_gpu);
   EXPECT_TRUE(echo.ui_prioritize_in_gpu_process);
+  EXPECT_TRUE(echo.enable_gpu_scheduler);
   EXPECT_TRUE(echo.enable_gpu_driver_debug_logging);
 #if defined(OS_WIN)
   EXPECT_EQ(vendor, echo.enable_accelerated_vpx_decode);
 #endif
+}
+
+TEST_F(StructTraitsTest, GpuFeatureInfo) {
+  GpuFeatureInfo input;
+  input.status_values[GPU_FEATURE_TYPE_FLASH3D] =
+      gpu::kGpuFeatureStatusBlacklisted;
+  input.status_values[GPU_FEATURE_TYPE_PANEL_FITTING] =
+      gpu::kGpuFeatureStatusUndefined;
+  input.status_values[GPU_FEATURE_TYPE_GPU_RASTERIZATION] =
+      gpu::kGpuFeatureStatusDisabled;
+
+  GpuFeatureInfo output;
+  ASSERT_TRUE(mojom::GpuFeatureInfo::Deserialize(
+      mojom::GpuFeatureInfo::Serialize(&input), &output));
+  EXPECT_TRUE(std::equal(input.status_values,
+                         input.status_values + NUMBER_OF_GPU_FEATURE_TYPES,
+                         output.status_values));
 }
 
 }  // namespace gpu

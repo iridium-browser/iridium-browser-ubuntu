@@ -4,11 +4,11 @@
 
 #include "ui/gfx/gpu_memory_buffer.h"
 
+#include "ui/gfx/generic_shared_memory_id.h"
+
 namespace gfx {
 
-GpuMemoryBufferHandle::GpuMemoryBufferHandle()
-    : type(EMPTY_BUFFER), id(0), handle(base::SharedMemory::NULLHandle()) {
-}
+GpuMemoryBufferHandle::GpuMemoryBufferHandle() : type(EMPTY_BUFFER), id(0) {}
 
 GpuMemoryBufferHandle::GpuMemoryBufferHandle(
     const GpuMemoryBufferHandle& other) = default;
@@ -27,16 +27,17 @@ GpuMemoryBufferHandle CloneHandleForIPC(
     case gfx::SHARED_MEMORY_BUFFER: {
       gfx::GpuMemoryBufferHandle handle;
       handle.type = gfx::SHARED_MEMORY_BUFFER;
+      handle.id = source_handle.id;
       handle.handle = base::SharedMemory::DuplicateHandle(source_handle.handle);
       handle.offset = source_handle.offset;
       handle.stride = source_handle.stride;
       return handle;
     }
-    case gfx::OZONE_NATIVE_PIXMAP: {
+    case gfx::NATIVE_PIXMAP: {
       gfx::GpuMemoryBufferHandle handle;
-      handle.type = gfx::OZONE_NATIVE_PIXMAP;
+      handle.type = gfx::NATIVE_PIXMAP;
       handle.id = source_handle.id;
-#if defined(USE_OZONE)
+#if defined(OS_LINUX)
       handle.native_pixmap_handle =
           gfx::CloneHandleForIPC(source_handle.native_pixmap_handle);
 #endif
@@ -46,6 +47,12 @@ GpuMemoryBufferHandle CloneHandleForIPC(
       return source_handle;
   }
   return gfx::GpuMemoryBufferHandle();
+}
+
+base::trace_event::MemoryAllocatorDumpGuid GpuMemoryBuffer::GetGUIDForTracing(
+    uint64_t tracing_process_id) const {
+  return gfx::GetGenericSharedGpuMemoryGUIDForTracing(tracing_process_id,
+                                                      GetId());
 }
 
 }  // namespace gfx

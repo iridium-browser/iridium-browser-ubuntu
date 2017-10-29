@@ -11,9 +11,9 @@
 namespace blink {
 
 class CullRect;
-class FrameView;
 class GraphicsContext;
 class IntRect;
+class LocalFrameView;
 class Scrollbar;
 
 class FramePainter {
@@ -21,20 +21,21 @@ class FramePainter {
   WTF_MAKE_NONCOPYABLE(FramePainter);
 
  public:
-  explicit FramePainter(const FrameView& frameView) : m_frameView(&frameView) {}
+  explicit FramePainter(const LocalFrameView& frame_view)
+      : frame_view_(&frame_view) {}
 
-  void paint(GraphicsContext&, const GlobalPaintFlags, const CullRect&);
-  void paintScrollbars(GraphicsContext&, const IntRect&);
-  void paintContents(GraphicsContext&, const GlobalPaintFlags, const IntRect&);
-  void paintScrollCorner(GraphicsContext&, const IntRect& cornerRect);
+  void Paint(GraphicsContext&, const GlobalPaintFlags, const CullRect&);
+  void PaintScrollbars(GraphicsContext&, const IntRect&);
+  void PaintContents(GraphicsContext&, const GlobalPaintFlags, const IntRect&);
+  void PaintScrollCorner(GraphicsContext&, const IntRect& corner_rect);
 
  private:
-  void paintScrollbar(GraphicsContext&, Scrollbar&, const IntRect&);
+  void PaintScrollbar(GraphicsContext&, Scrollbar&, const IntRect&);
 
-  const FrameView& frameView();
+  const LocalFrameView& GetFrameView();
 
-  Member<const FrameView> m_frameView;
-  static bool s_inPaintContents;
+  Member<const LocalFrameView> frame_view_;
+  static bool in_paint_contents_;
 };
 
 }  // namespace blink

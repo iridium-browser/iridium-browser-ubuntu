@@ -49,13 +49,9 @@ const extensions::Extension* GetExtension(Profile* profile,
 
 AppListControllerDelegate::~AppListControllerDelegate() {}
 
-bool AppListControllerDelegate::ForceNativeDesktop() const {
-  return false;
-}
-
 void AppListControllerDelegate::ViewClosing() {}
 
-gfx::Rect AppListControllerDelegate::GetAppListBounds() {
+gfx::Rect AppListControllerDelegate::GetAppInfoDialogBounds() {
   return gfx::Rect();
 }
 
@@ -106,10 +102,7 @@ void AppListControllerDelegate::DoShowAppInfoFlow(
   // Since the AppListControllerDelegate is a leaky singleton, passing its raw
   // pointer around is OK.
   ShowAppInfoInAppList(
-      GetAppListWindow(),
-      GetAppListBounds(),
-      profile,
-      extension,
+      GetAppListWindow(), GetAppInfoDialogBounds(), profile, extension,
       base::Bind(&AppListControllerDelegate::OnCloseChildDialog,
                  base::Unretained(this)));
 }

@@ -21,12 +21,6 @@ public:
         reset();
     }
 
-    ~SkOpContour() {
-        if (fNext) {
-            fNext->~SkOpContour();
-        }
-    }
-
     bool operator<(const SkOpContour& rh) const {
         return fBounds.fTop == rh.fBounds.fTop
             ? fBounds.fLeft < rh.fBounds.fLeft
@@ -51,8 +45,8 @@ public:
     }
 
     SkOpSegment& appendSegment() {
-        SkOpSegment* result = fCount++
-            ? SkOpTAllocator<SkOpSegment>::Allocate(this->globalState()->allocator()) : &fHead;
+        SkOpSegment* result = fCount++ ? this->globalState()->allocator()->make<SkOpSegment>()
+                                       : &fHead;
         result->setPrev(fTail);
         if (fTail) {
             fTail->setNext(result);
@@ -249,12 +243,15 @@ public:
         return true;
     }
 
-    void moveNearby() {
+    bool moveNearby() {
         SkASSERT(fCount > 0);
         SkOpSegment* segment = &fHead;
         do {
-            segment->moveNearby();
+            if (!segment->moveNearby()) {
+                return false;
+            }
         } while ((segment = segment->next()));
+        return true;
     }
 
     SkOpContour* next() {
@@ -277,7 +274,7 @@ public:
         SkDEBUGCODE(fDebugIndent -= 2);
     }
 
-    void rayCheck(const SkOpRayHit& base, SkOpRayDir dir, SkOpRayHit** hits, SkChunkAlloc* );
+    void rayCheck(const SkOpRayHit& base, SkOpRayDir dir, SkOpRayHit** hits, SkArenaAlloc*);
 
     void reset() {
         fTail = nullptr;
@@ -394,7 +391,7 @@ protected:
 class SkOpContourHead : public SkOpContour {
 public:
     SkOpContour* appendContour() {
-        SkOpContour* contour = SkOpTAllocator<SkOpContour>::New(this->globalState()->allocator());
+        SkOpContour* contour = this->globalState()->allocator()->make<SkOpContour>();
         contour->setNext(nullptr);
         SkOpContour* prev = this;
         SkOpContour* next;

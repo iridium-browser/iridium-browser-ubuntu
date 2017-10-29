@@ -11,10 +11,11 @@
 #ifndef WEBRTC_COMMON_AUDIO_INCLUDE_AUDIO_UTIL_H_
 #define WEBRTC_COMMON_AUDIO_INCLUDE_AUDIO_UTIL_H_
 
+#include <algorithm>
 #include <limits>
 #include <cstring>
 
-#include "webrtc/base/checks.h"
+#include "webrtc/rtc_base/checks.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {

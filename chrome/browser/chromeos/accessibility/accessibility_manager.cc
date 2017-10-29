@@ -10,15 +10,13 @@
 #include <memory>
 #include <utility>
 
+#include "ash/ash_constants.h"
 #include "ash/autoclick/autoclick_controller.h"
 #include "ash/autoclick/mus/public/interfaces/autoclick.mojom.h"
-#include "ash/common/ash_constants.h"
-#include "ash/common/shelf/shelf_layout_manager.h"
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
 #include "ash/high_contrast/high_contrast_controller.h"
 #include "ash/root_window_controller.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/sticky_keys/sticky_keys_controller.h"
 #include "base/callback.h"
@@ -29,6 +27,7 @@
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
@@ -44,6 +43,7 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/ui/accessibility_focus_ring_controller.h"
 #include "chrome/browser/extensions/api/braille_display_private/stub_braille_controller.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -58,6 +58,9 @@
 #include "chrome/grit/browser_resources.h"
 #include "chromeos/audio/audio_a11y_controller.h"
 #include "chromeos/audio/chromeos_sounds.h"
+#include "chromeos/chromeos_switches.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/power_manager_client.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
@@ -80,10 +83,12 @@
 #include "media/audio/sounds/sounds_manager.h"
 #include "media/base/media_switches.h"
 #include "services/service_manager/public/cpp/connector.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_util.h"
+#include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 
 using content::BrowserThread;
@@ -113,7 +118,7 @@ BrailleController* GetBrailleController() {
   // Don't use the real braille controller for tests to avoid automatically
   // starting ChromeVox which confuses some tests.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kTestType))
+  if (command_line->HasSwitch(::switches::kTestType))
     return StubBrailleController::GetInstance();
   return BrailleController::GetInstance();
 }
@@ -170,7 +175,6 @@ AccessibilityStatusEventDetails::AccessibilityStatusEventDetails(
       notify(notify) {}
 
 ///////////////////////////////////////////////////////////////////////////////
-//
 // AccessibilityManager::PrefHandler
 
 AccessibilityManager::PrefHandler::PrefHandler(const char* pref_path)
@@ -233,6 +237,7 @@ AccessibilityManager* AccessibilityManager::Get() {
 AccessibilityManager::AccessibilityManager()
     : profile_(NULL),
       large_cursor_pref_handler_(prefs::kAccessibilityLargeCursorEnabled),
+      sticky_keys_pref_handler_(prefs::kAccessibilityStickyKeysEnabled),
       spoken_feedback_pref_handler_(prefs::kAccessibilitySpokenFeedbackEnabled),
       high_contrast_pref_handler_(prefs::kAccessibilityHighContrastEnabled),
       autoclick_pref_handler_(prefs::kAccessibilityAutoclickEnabled),
@@ -244,6 +249,7 @@ AccessibilityManager::AccessibilityManager()
       cursor_highlight_pref_handler_(
           prefs::kAccessibilityCursorHighlightEnabled),
       focus_highlight_pref_handler_(prefs::kAccessibilityFocusHighlightEnabled),
+      tap_dragging_pref_handler_(prefs::kTapDraggingEnabled),
       select_to_speak_pref_handler_(prefs::kAccessibilitySelectToSpeakEnabled),
       switch_access_pref_handler_(prefs::kAccessibilitySwitchAccessEnabled),
       large_cursor_enabled_(false),
@@ -258,6 +264,7 @@ AccessibilityManager::AccessibilityManager()
       caret_highlight_enabled_(false),
       cursor_highlight_enabled_(false),
       focus_highlight_enabled_(false),
+      tap_dragging_enabled_(false),
       select_to_speak_enabled_(false),
       switch_access_enabled_(false),
       spoken_feedback_notification_(ash::A11Y_NOTIFICATION_NONE),
@@ -270,6 +277,9 @@ AccessibilityManager::AccessibilityManager()
       weak_ptr_factory_(this) {
   notification_registrar_.Add(this,
                               chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
+                              content::NotificationService::AllSources());
+  notification_registrar_.Add(this,
+                              chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
                               content::NotificationService::AllSources());
   notification_registrar_.Add(this,
                               chrome::NOTIFICATION_SESSION_STARTED,
@@ -353,7 +363,11 @@ bool AccessibilityManager::ShouldShowAccessibilityMenu() {
         pref_service->GetBoolean(prefs::kShouldAlwaysShowAccessibilityMenu) ||
         pref_service->GetBoolean(prefs::kAccessibilityScreenMagnifierEnabled) ||
         pref_service->GetBoolean(prefs::kAccessibilityVirtualKeyboardEnabled) ||
-        pref_service->GetBoolean(prefs::kAccessibilityMonoAudioEnabled))
+        pref_service->GetBoolean(prefs::kAccessibilityMonoAudioEnabled) ||
+        pref_service->GetBoolean(prefs::kAccessibilityCaretHighlightEnabled) ||
+        pref_service->GetBoolean(prefs::kAccessibilityCursorHighlightEnabled) ||
+        pref_service->GetBoolean(prefs::kAccessibilityFocusHighlightEnabled) ||
+        pref_service->GetBoolean(prefs::kTapDraggingEnabled))
       return true;
   }
   return false;
@@ -388,9 +402,15 @@ void AccessibilityManager::UpdateLargeCursorFromPref() {
   const bool enabled =
       profile_->GetPrefs()->GetBoolean(prefs::kAccessibilityLargeCursorEnabled);
 
+  // Clear cursor size if large cursor is disabled.
+  if (enabled != large_cursor_enabled_ && !enabled) {
+    profile_->GetPrefs()->ClearPref(prefs::kAccessibilityLargeCursorDipSize);
+  }
+
   const int large_cursor_size_in_dip =
       profile_->GetPrefs()->GetInteger(prefs::kAccessibilityLargeCursorDipSize);
 
+  // Do nothing if nothing has changed.
   if (large_cursor_enabled_ == enabled &&
       large_cursor_size_in_dip_ == large_cursor_size_in_dip) {
     return;
@@ -404,10 +424,10 @@ void AccessibilityManager::UpdateLargeCursorFromPref() {
 
   NotifyAccessibilityStatusChanged(details);
 
-  ash::Shell::GetInstance()->cursor_manager()->SetCursorSet(
-      enabled ? ui::CURSOR_SET_LARGE : ui::CURSOR_SET_NORMAL);
-  ash::Shell::GetInstance()->SetLargeCursorSizeInDip(large_cursor_size_in_dip);
-  ash::Shell::GetInstance()->SetCursorCompositingEnabled(
+  ash::Shell::Get()->cursor_manager()->SetCursorSize(
+      enabled ? ui::CursorSize::kLarge : ui::CursorSize::kNormal);
+  ash::Shell::Get()->SetLargeCursorSizeInDip(large_cursor_size_in_dip);
+  ash::Shell::Get()->SetCursorCompositingEnabled(
       ShouldEnableCursorCompositing());
 }
 
@@ -418,7 +438,7 @@ bool AccessibilityManager::IsIncognitoAllowed() {
              IncognitoModePrefs::DISABLED;
 }
 
-bool AccessibilityManager::IsLargeCursorEnabled() {
+bool AccessibilityManager::IsLargeCursorEnabled() const {
   return large_cursor_enabled_;
 }
 
@@ -430,7 +450,7 @@ void AccessibilityManager::EnableStickyKeys(bool enabled) {
   pref_service->CommitPendingWrite();
 }
 
-bool AccessibilityManager::IsStickyKeysEnabled() {
+bool AccessibilityManager::IsStickyKeysEnabled() const {
   return sticky_keys_enabled_;
 }
 
@@ -445,7 +465,11 @@ void AccessibilityManager::UpdateStickyKeysFromPref() {
     return;
 
   sticky_keys_enabled_ = enabled;
-  ash::Shell::GetInstance()->sticky_keys_controller()->Enable(enabled);
+
+  AccessibilityStatusEventDetails details(ACCESSIBILITY_TOGGLE_STICKY_KEYS,
+                                          enabled, ash::A11Y_NOTIFICATION_NONE);
+  NotifyAccessibilityStatusChanged(details);
+  ash::Shell::Get()->sticky_keys_controller()->Enable(enabled);
 }
 
 void AccessibilityManager::EnableSpokenFeedback(
@@ -453,9 +477,6 @@ void AccessibilityManager::EnableSpokenFeedback(
     ash::AccessibilityNotificationVisibility notify) {
   if (!profile_)
     return;
-  ash::WmShell::Get()->RecordUserMetricsAction(
-      enabled ? ash::UMA_STATUS_AREA_ENABLE_SPOKEN_FEEDBACK
-              : ash::UMA_STATUS_AREA_DISABLE_SPOKEN_FEEDBACK);
 
   spoken_feedback_notification_ = notify;
 
@@ -504,7 +525,7 @@ void AccessibilityManager::UpdateSpokenFeedbackFromPref() {
   UpdateFocusHighlightFromPref();
 }
 
-bool AccessibilityManager::IsSpokenFeedbackEnabled() {
+bool AccessibilityManager::IsSpokenFeedbackEnabled() const {
   return spoken_feedback_enabled_;
 }
 
@@ -540,8 +561,8 @@ void AccessibilityManager::UpdateHighContrastFromPref() {
 
   NotifyAccessibilityStatusChanged(details);
 
-  ash::Shell::GetInstance()->high_contrast_controller()->SetEnabled(enabled);
-  ash::Shell::GetInstance()->SetCursorCompositingEnabled(
+  ash::Shell::Get()->high_contrast_controller()->SetEnabled(enabled);
+  ash::Shell::Get()->SetCursorCompositingEnabled(
       ShouldEnableCursorCompositing());
 }
 
@@ -574,6 +595,38 @@ bool AccessibilityManager::PlayEarcon(int sound_key, PlaySoundOption option) {
     return false;
   }
   return media::SoundsManager::Get()->Play(sound_key);
+}
+
+void AccessibilityManager::OnTwoFingerTouchStart() {
+  if (!profile())
+    return;
+
+  extensions::EventRouter* event_router =
+      extensions::EventRouter::Get(profile());
+  CHECK(event_router);
+
+  auto event_args = base::MakeUnique<base::ListValue>();
+  auto event = base::MakeUnique<extensions::Event>(
+      extensions::events::ACCESSIBILITY_PRIVATE_ON_TWO_FINGER_TOUCH_START,
+      extensions::api::accessibility_private::OnTwoFingerTouchStart::kEventName,
+      std::move(event_args));
+  event_router->BroadcastEvent(std::move(event));
+}
+
+void AccessibilityManager::OnTwoFingerTouchStop() {
+  if (!profile())
+    return;
+
+  extensions::EventRouter* event_router =
+      extensions::EventRouter::Get(profile());
+  CHECK(event_router);
+
+  auto event_args = base::MakeUnique<base::ListValue>();
+  auto event = base::MakeUnique<extensions::Event>(
+      extensions::events::ACCESSIBILITY_PRIVATE_ON_TWO_FINGER_TOUCH_STOP,
+      extensions::api::accessibility_private::OnTwoFingerTouchStop::kEventName,
+      std::move(event_args));
+  event_router->BroadcastEvent(std::move(event));
 }
 
 bool AccessibilityManager::ShouldToggleSpokenFeedbackViaTouch() {
@@ -629,12 +682,11 @@ void AccessibilityManager::HandleAccessibilityGesture(ui::AXGesture gesture) {
 
 void AccessibilityManager::SetTouchAccessibilityAnchorPoint(
     const gfx::Point& anchor_point) {
-  ash::RootWindowController* root_window_controller =
-      ash::RootWindowController::ForTargetRootWindow();
-  root_window_controller->SetTouchAccessibilityAnchorPoint(anchor_point);
+  for (auto* rwc : ash::RootWindowController::root_window_controllers())
+    rwc->SetTouchAccessibilityAnchorPoint(anchor_point);
 }
 
-bool AccessibilityManager::IsHighContrastEnabled() {
+bool AccessibilityManager::IsHighContrastEnabled() const {
   return high_contrast_enabled_;
 }
 
@@ -647,7 +699,7 @@ void AccessibilityManager::EnableAutoclick(bool enabled) {
   pref_service->CommitPendingWrite();
 }
 
-bool AccessibilityManager::IsAutoclickEnabled() {
+bool AccessibilityManager::IsAutoclickEnabled() const {
   return autoclick_enabled_;
 }
 
@@ -671,7 +723,7 @@ void AccessibilityManager::UpdateAutoclickFromPref() {
     return;
   }
 
-  ash::Shell::GetInstance()->autoclick_controller()->SetEnabled(enabled);
+  ash::Shell::Get()->autoclick_controller()->SetEnabled(enabled);
 }
 
 void AccessibilityManager::SetAutoclickDelay(int delay_ms) {
@@ -709,7 +761,7 @@ void AccessibilityManager::UpdateAutoclickDelayFromPref() {
     return;
   }
 
-  ash::Shell::GetInstance()->autoclick_controller()->SetAutoclickDelay(
+  ash::Shell::Get()->autoclick_controller()->SetAutoclickDelay(
       autoclick_delay_ms_);
 }
 
@@ -723,7 +775,7 @@ void AccessibilityManager::EnableVirtualKeyboard(bool enabled) {
   pref_service->CommitPendingWrite();
 }
 
-bool AccessibilityManager::IsVirtualKeyboardEnabled() {
+bool AccessibilityManager::IsVirtualKeyboardEnabled() const {
   return virtual_keyboard_enabled_;
 }
 
@@ -748,9 +800,9 @@ void AccessibilityManager::UpdateVirtualKeyboardFromPref() {
     // might still be enabled and a forced reset is required to pick up the
     // layout change.
     if (keyboard::IsKeyboardEnabled())
-      ash::Shell::GetInstance()->CreateKeyboard();
+      ash::Shell::Get()->CreateKeyboard();
     else
-      ash::Shell::GetInstance()->DeactivateKeyboard();
+      ash::Shell::Get()->DestroyKeyboard();
   } else {
     // TODO(mash): Support on-screen keyboard. See http://crbug.com/646565
     NOTIMPLEMENTED();
@@ -771,7 +823,7 @@ void AccessibilityManager::EnableMonoAudio(bool enabled) {
   pref_service->CommitPendingWrite();
 }
 
-bool AccessibilityManager::IsMonoAudioEnabled() {
+bool AccessibilityManager::IsMonoAudioEnabled() const {
   return mono_audio_enabled_;
 }
 
@@ -790,7 +842,7 @@ void AccessibilityManager::UpdateMonoAudioFromPref() {
                                           enabled, ash::A11Y_NOTIFICATION_NONE);
   NotifyAccessibilityStatusChanged(details);
 
-  ash::Shell::GetInstance()->audio_a11y_controller()->SetOutputMono(enabled);
+  ash::Shell::Get()->audio_a11y_controller()->SetOutputMono(enabled);
 }
 
 void AccessibilityManager::SetCaretHighlightEnabled(bool enabled) {
@@ -817,6 +869,9 @@ void AccessibilityManager::UpdateCaretHighlightFromPref() {
     return;
   caret_highlight_enabled_ = enabled;
 
+  AccessibilityStatusEventDetails details(ACCESSIBILITY_TOGGLE_CARET_HIGHLIGHT,
+                                          enabled, ash::A11Y_NOTIFICATION_NONE);
+  NotifyAccessibilityStatusChanged(details);
   UpdateAccessibilityHighlightingFromPrefs();
 }
 
@@ -845,6 +900,9 @@ void AccessibilityManager::UpdateCursorHighlightFromPref() {
     return;
   cursor_highlight_enabled_ = enabled;
 
+  AccessibilityStatusEventDetails details(ACCESSIBILITY_TOGGLE_CURSOR_HIGHLIGHT,
+                                          enabled, ash::A11Y_NOTIFICATION_NONE);
+  NotifyAccessibilityStatusChanged(details);
   UpdateAccessibilityHighlightingFromPrefs();
 }
 
@@ -878,7 +936,42 @@ void AccessibilityManager::UpdateFocusHighlightFromPref() {
     return;
   focus_highlight_enabled_ = enabled;
 
+  AccessibilityStatusEventDetails details(ACCESSIBILITY_TOGGLE_FOCUS_HIGHLIGHT,
+                                          enabled, ash::A11Y_NOTIFICATION_NONE);
+  NotifyAccessibilityStatusChanged(details);
   UpdateAccessibilityHighlightingFromPrefs();
+}
+
+void AccessibilityManager::EnableTapDragging(bool enabled) {
+  if (!profile_)
+    return;
+
+  PrefService* pref_service = profile_->GetPrefs();
+  pref_service->SetBoolean(prefs::kTapDraggingEnabled, enabled);
+  pref_service->CommitPendingWrite();
+}
+
+bool AccessibilityManager::IsTapDraggingEnabled() const {
+  return tap_dragging_enabled_;
+}
+
+void AccessibilityManager::UpdateTapDraggingFromPref() {
+  if (!profile_)
+    return;
+
+  const bool enabled =
+      profile_->GetPrefs()->GetBoolean(prefs::kTapDraggingEnabled);
+
+  if (tap_dragging_enabled_ == enabled)
+    return;
+  tap_dragging_enabled_ = enabled;
+
+  AccessibilityStatusEventDetails details(ACCESSIBILITY_TOGGLE_TAP_DRAGGING,
+                                          enabled, ash::A11Y_NOTIFICATION_NONE);
+  NotifyAccessibilityStatusChanged(details);
+
+  system::TouchpadSettings touchpad_settings;
+  touchpad_settings.SetTapDragging(enabled);
 }
 
 void AccessibilityManager::SetSelectToSpeakEnabled(bool enabled) {
@@ -934,6 +1027,18 @@ void AccessibilityManager::UpdateSwitchAccessFromPref() {
 
   const bool enabled = profile_->GetPrefs()->GetBoolean(
       prefs::kAccessibilitySwitchAccessEnabled);
+
+  // The Switch Access setting is behind a flag. Don't enable the feature
+  // even if the preference is enabled, if the flag isn't also set.
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (!command_line->HasSwitch(
+          chromeos::switches::kEnableExperimentalAccessibilityFeatures)) {
+    if (enabled) {
+      LOG(WARNING) << "Switch access enabled but experimental accessibility "
+                   << "features flag is not set.";
+    }
+    return;
+  }
 
   if (switch_access_enabled_ == enabled)
     return;
@@ -994,20 +1099,20 @@ void AccessibilityManager::UpdateBrailleImeState() {
   if (!profile_)
     return;
   PrefService* pref_service = profile_->GetPrefs();
-  std::vector<std::string> preload_engines =
-      base::SplitString(pref_service->GetString(prefs::kLanguagePreloadEngines),
-                        ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-  std::vector<std::string>::iterator it =
-      std::find(preload_engines.begin(),
-                preload_engines.end(),
-                extension_misc::kBrailleImeEngineId);
+  std::string preload_engines_str =
+      pref_service->GetString(prefs::kLanguagePreloadEngines);
+  std::vector<base::StringPiece> preload_engines = base::SplitStringPiece(
+      preload_engines_str, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+  std::vector<base::StringPiece>::iterator it =
+      std::find(preload_engines.begin(), preload_engines.end(),
+                extension_ime_util::kBrailleImeEngineId);
   bool is_enabled = (it != preload_engines.end());
   bool should_be_enabled =
       (spoken_feedback_enabled_ && braille_display_connected_);
   if (is_enabled == should_be_enabled)
     return;
   if (should_be_enabled)
-    preload_engines.push_back(extension_misc::kBrailleImeEngineId);
+    preload_engines.push_back(extension_ime_util::kBrailleImeEngineId);
   else
     preload_engines.erase(it);
   pref_service->SetString(prefs::kLanguagePreloadEngines,
@@ -1023,14 +1128,14 @@ void AccessibilityManager::InputMethodChanged(
   // Sticky keys is implemented only in ash.
   // TODO(dpolukhin): support Athena, crbug.com/408733.
   if (!ash_util::IsRunningInMash()) {
-    ash::Shell::GetInstance()->sticky_keys_controller()->SetModifiersEnabled(
+    ash::Shell::Get()->sticky_keys_controller()->SetModifiersEnabled(
         manager->IsISOLevel5ShiftUsedByCurrentInputMethod(),
         manager->IsAltGrUsedByCurrentInputMethod());
   }
   const chromeos::input_method::InputMethodDescriptor descriptor =
       manager->GetActiveIMEState()->GetCurrentInputMethod();
   braille_ime_current_ =
-      (descriptor.id() == extension_misc::kBrailleImeEngineId);
+      (descriptor.id() == extension_ime_util::kBrailleImeEngineId);
 }
 
 void AccessibilityManager::OnSessionStateChanged() {
@@ -1048,6 +1153,13 @@ void AccessibilityManager::OnSessionStateChanged() {
 }
 
 void AccessibilityManager::SetProfile(Profile* profile) {
+  // Do nothing if this is called for the current profile. This can happen. For
+  // example, ChromeSessionManager fires both
+  // NOTIFICATION_LOGIN_USER_PROFILE_PREPARED and NOTIFICATION_SESSION_STARTED,
+  // and we are observing both events.
+  if (profile_ == profile)
+    return;
+
   pref_change_registrar_.reset();
   local_state_pref_change_registrar_.reset();
 
@@ -1104,6 +1216,10 @@ void AccessibilityManager::SetProfile(Profile* profile) {
         base::Bind(&AccessibilityManager::UpdateFocusHighlightFromPref,
                    base::Unretained(this)));
     pref_change_registrar_->Add(
+        prefs::kTapDraggingEnabled,
+        base::Bind(&AccessibilityManager::UpdateTapDraggingFromPref,
+                   base::Unretained(this)));
+    pref_change_registrar_->Add(
         prefs::kAccessibilitySelectToSpeakEnabled,
         base::Bind(&AccessibilityManager::UpdateSelectToSpeakFromPref,
                    base::Unretained(this)));
@@ -1133,6 +1249,7 @@ void AccessibilityManager::SetProfile(Profile* profile) {
   large_cursor_pref_handler_.HandleProfileChanged(profile_, profile);
   spoken_feedback_pref_handler_.HandleProfileChanged(profile_, profile);
   high_contrast_pref_handler_.HandleProfileChanged(profile_, profile);
+  sticky_keys_pref_handler_.HandleProfileChanged(profile_, profile);
   autoclick_pref_handler_.HandleProfileChanged(profile_, profile);
   autoclick_delay_pref_handler_.HandleProfileChanged(profile_, profile);
   virtual_keyboard_pref_handler_.HandleProfileChanged(profile_, profile);
@@ -1140,6 +1257,7 @@ void AccessibilityManager::SetProfile(Profile* profile) {
   caret_highlight_pref_handler_.HandleProfileChanged(profile_, profile);
   cursor_highlight_pref_handler_.HandleProfileChanged(profile_, profile);
   focus_highlight_pref_handler_.HandleProfileChanged(profile_, profile);
+  tap_dragging_pref_handler_.HandleProfileChanged(profile_, profile);
   select_to_speak_pref_handler_.HandleProfileChanged(profile_, profile);
   switch_access_pref_handler_.HandleProfileChanged(profile_, profile);
 
@@ -1161,6 +1279,7 @@ void AccessibilityManager::SetProfile(Profile* profile) {
   UpdateCaretHighlightFromPref();
   UpdateCursorHighlightFromPref();
   UpdateFocusHighlightFromPref();
+  UpdateTapDraggingFromPref();
   UpdateSelectToSpeakFromPref();
   UpdateSwitchAccessFromPref();
 
@@ -1172,12 +1291,12 @@ void AccessibilityManager::SetProfile(Profile* profile) {
 
 void AccessibilityManager::ActiveUserChanged(
     const user_manager::User* active_user) {
-  SetProfile(ProfileManager::GetActiveUserProfile());
+  if (active_user && active_user->is_profile_created())
+    SetProfile(ProfileManager::GetActiveUserProfile());
 }
 
-void AccessibilityManager::OnFullscreenStateChanged(
-    bool is_fullscreen,
-    ash::WmWindow* root_window) {
+void AccessibilityManager::OnFullscreenStateChanged(bool is_fullscreen,
+                                                    aura::Window* root_window) {
   if (chromevox_panel_)
     chromevox_panel_->UpdateWidgetBounds();
 }
@@ -1232,9 +1351,17 @@ void AccessibilityManager::UpdateChromeOSAccessibilityHistograms() {
   }
   if (profile_) {
     const PrefService* const prefs = profile_->GetPrefs();
-    UMA_HISTOGRAM_BOOLEAN(
-        "Accessibility.CrosLargeCursor",
-        prefs->GetBoolean(prefs::kAccessibilityLargeCursorEnabled));
+
+    bool large_cursor_enabled =
+        prefs->GetBoolean(prefs::kAccessibilityLargeCursorEnabled);
+    UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosLargeCursor",
+                          large_cursor_enabled);
+    if (large_cursor_enabled) {
+      UMA_HISTOGRAM_COUNTS_100(
+          "Accessibility.CrosLargeCursorSize",
+          prefs->GetInteger(prefs::kAccessibilityLargeCursorDipSize));
+    }
+
     UMA_HISTOGRAM_BOOLEAN(
         "Accessibility.CrosAlwaysShowA11yMenu",
         prefs->GetBoolean(prefs::kShouldAlwaysShowAccessibilityMenu));
@@ -1278,6 +1405,12 @@ void AccessibilityManager::Observe(
         SetProfile(profile);
       break;
     }
+    case chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED:
+      // Update |profile_| when login user profile is prepared.
+      // NOTIFICATION_SESSION_STARTED is not fired from UserSessionManager, but
+      // profile may be changed by UserSessionManager in OOBE flow.
+      SetProfile(ProfileManager::GetActiveUserProfile());
+      break;
     case chrome::NOTIFICATION_SESSION_STARTED:
       // Update |profile_| when entering a session.
       SetProfile(ProfileManager::GetActiveUserProfile());
@@ -1318,7 +1451,7 @@ void AccessibilityManager::OnBrailleKeyEvent(const KeyEvent& event) {
       !braille_ime_current_) {
     input_method::InputMethodManager::Get()
         ->GetActiveIMEState()
-        ->ChangeInputMethod(extension_misc::kBrailleImeEngineId,
+        ->ChangeInputMethod(extension_ime_util::kBrailleImeEngineId,
                             false /* show_message */);
   }
 }
@@ -1326,7 +1459,7 @@ void AccessibilityManager::OnBrailleKeyEvent(const KeyEvent& event) {
 void AccessibilityManager::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension,
-    extensions::UnloadedExtensionInfo::Reason reason) {
+    extensions::UnloadedExtensionReason reason) {
   if (extension->id() == keyboard_listener_extension_id_) {
     keyboard_listener_extension_id_ = std::string();
     keyboard_listener_capture_ = false;
@@ -1362,9 +1495,9 @@ void AccessibilityManager::PostLoadChromeVox() {
   }
 
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableDefaultMediaSession)) {
+          ::switches::kEnableAudioFocus)) {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableDefaultMediaSession);
+        ::switches::kEnableAudioFocus);
   }
 }
 
@@ -1380,6 +1513,11 @@ void AccessibilityManager::PostUnloadChromeVox() {
     chromevox_panel_->Close();
     chromevox_panel_ = nullptr;
   }
+
+  // In case the user darkened the screen, undarken it now.
+  chromeos::DBusThreadManager::Get()
+      ->GetPowerManagerClient()
+      ->SetBacklightsForcedOff(false);
 }
 
 void AccessibilityManager::PostSwitchChromeVoxProfile() {
@@ -1398,18 +1536,9 @@ void AccessibilityManager::ReloadChromeVoxPanel() {
 }
 
 void AccessibilityManager::OnChromeVoxPanelClosing() {
-  aura::Window* root_window = chromevox_panel_->GetRootWindow();
-  chromevox_panel_widget_observer_.reset(nullptr);
+  chromevox_panel_->ResetPanelHeight();
+  chromevox_panel_widget_observer_.reset();
   chromevox_panel_ = nullptr;
-
-  ash::WmShelf* shelf =
-      ash::WmShelf::ForWindow(ash::WmWindow::Get(root_window));
-  if (!shelf->IsShelfInitialized())
-    return;
-
-  ash::ShelfLayoutManager* shelf_layout_manager = shelf->shelf_layout_manager();
-  if (shelf_layout_manager)
-    shelf_layout_manager->SetChromeVoxPanelHeight(0);
 }
 
 void AccessibilityManager::OnChromeVoxPanelDestroying() {
@@ -1426,6 +1555,11 @@ void AccessibilityManager::SetKeyboardListenerExtensionId(
       extensions::ExtensionRegistry::Get(context);
   if (!extension_registry_observer_.IsObserving(registry) && !id.empty())
     extension_registry_observer_.Add(registry);
+}
+
+void AccessibilityManager::SetSwitchAccessKeys(const std::set<int>& key_codes) {
+  if (switch_access_enabled_)
+    switch_access_event_handler_->SetKeysToCapture(key_codes);
 }
 
 }  // namespace chromeos

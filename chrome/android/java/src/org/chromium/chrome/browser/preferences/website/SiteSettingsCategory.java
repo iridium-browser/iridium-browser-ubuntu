@@ -23,6 +23,7 @@ import android.text.style.ForegroundColorSpan;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.ui.text.SpanApplier;
@@ -34,6 +35,7 @@ import org.chromium.ui.text.SpanApplier.SpanInfo;
 public class SiteSettingsCategory {
     // Valid values for passing to fromString() in this class.
     public static final String CATEGORY_ALL_SITES = "all_sites";
+    public static final String CATEGORY_ADS = "ads";
     public static final String CATEGORY_AUTOPLAY = "autoplay";
     public static final String CATEGORY_BACKGROUND_SYNC = "background_sync";
     public static final String CATEGORY_CAMERA = "camera";
@@ -81,6 +83,10 @@ public class SiteSettingsCategory {
         assert !category.isEmpty();
         if (CATEGORY_ALL_SITES.equals(category)) {
             return new SiteSettingsCategory(CATEGORY_ALL_SITES, "", -1);
+        }
+        if (CATEGORY_ADS.equals(category) && adsCategoryEnabled()) {
+            return new SiteSettingsCategory(
+                    CATEGORY_ADS, "", ContentSettingsType.CONTENT_SETTINGS_TYPE_ADS);
         }
         if (CATEGORY_AUTOPLAY.equals(category)) {
             return new SiteSettingsCategory(CATEGORY_AUTOPLAY, "",
@@ -142,6 +148,9 @@ public class SiteSettingsCategory {
      * fromString().
      */
     public static SiteSettingsCategory fromContentSettingsType(int contentSettingsType) {
+        if (contentSettingsType == ContentSettingsType.CONTENT_SETTINGS_TYPE_ADS) {
+            return fromString(CATEGORY_ADS);
+        }
         if (contentSettingsType == ContentSettingsType.CONTENT_SETTINGS_TYPE_AUTOPLAY) {
             return fromString(CATEGORY_AUTOPLAY);
         }
@@ -192,6 +201,13 @@ public class SiteSettingsCategory {
      */
     public boolean showAllSites() {
         return CATEGORY_ALL_SITES.equals(mCategory);
+    }
+
+    /**
+     * Returns whether this category is the Ads category.
+     */
+    public boolean showAdsSites() {
+        return mContentSettingsType == ContentSettingsType.CONTENT_SETTINGS_TYPE_ADS;
     }
 
     /**
@@ -279,6 +295,13 @@ public class SiteSettingsCategory {
      */
     public boolean showUsbDevices() {
         return mContentSettingsType == ContentSettingsType.CONTENT_SETTINGS_TYPE_USB_CHOOSER_DATA;
+    }
+
+    /**
+     * Returns whether the Ads category is enabled via an experiment flag.
+     */
+    public static boolean adsCategoryEnabled() {
+        return ChromeFeatureList.isEnabled("SubresourceFilterExperimentalUI");
     }
 
     /**

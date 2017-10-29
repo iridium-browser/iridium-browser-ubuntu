@@ -54,6 +54,8 @@ class CHROMEOS_EXPORT FakeDebugDaemonClient : public DebugDaemonClient {
   void GetScrubbedLogs(const GetLogsCallback& callback) override;
   void GetScrubbedBigLogs(const GetLogsCallback& callback) override;
   void GetAllLogs(const GetLogsCallback& callback) override;
+  void GetLog(const std::string& log_name,
+              const GetLogCallback& callback) override;
   void GetUserLogFiles(const GetLogsCallback& callback) override;
   void TestICMP(const std::string& ip_address,
                 const TestICMPCallback& callback) override;
@@ -72,12 +74,6 @@ class CHROMEOS_EXPORT FakeDebugDaemonClient : public DebugDaemonClient {
       const WaitForServiceToBeAvailableCallback& callback) override;
   void SetOomScoreAdj(const std::map<pid_t, int32_t>& pid_to_oom_score_adj,
                       const SetOomScoreAdjCallback& callback) override;
-  void CupsAddPrinter(const std::string& name,
-                      const std::string& uri,
-                      const std::string& ppd_path,
-                      bool ipp_everywhere,
-                      const LegacyCupsAddPrinterCallback& callback,
-                      const base::Closure& error_callback) override;
   void CupsAddManuallyConfiguredPrinter(
       const std::string& name,
       const std::string& uri,

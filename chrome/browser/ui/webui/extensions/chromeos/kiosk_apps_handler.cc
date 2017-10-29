@@ -273,7 +273,7 @@ void KioskAppsHandler::SendKioskAppSettings() {
     PopulateAppDict(app_data, app_info.get());
     apps_list->Append(std::move(app_info));
   }
-  settings.SetWithoutPathExpansion("apps", apps_list.release());
+  settings.SetWithoutPathExpansion("apps", std::move(apps_list));
 
   web_ui()->CallJavascriptFunctionUnsafe(
       "extensions.KioskAppsOverlay.setSettings", settings);
@@ -369,7 +369,7 @@ void KioskAppsHandler::UpdateApp(const std::string& app_id) {
 }
 
 void KioskAppsHandler::ShowError(const std::string& app_id) {
-  base::StringValue app_id_value(app_id);
+  base::Value app_id_value(app_id);
   web_ui()->CallJavascriptFunctionUnsafe(
       "extensions.KioskAppsOverlay.showError", app_id_value);
 

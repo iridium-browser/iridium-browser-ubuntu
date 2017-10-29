@@ -42,33 +42,31 @@ class DefaultActivationClient::Deleter : public aura::WindowObserver {
 
 DefaultActivationClient::DefaultActivationClient(aura::Window* root_window)
     : last_active_(nullptr) {
-  aura::client::SetActivationClient(root_window, this);
+  SetActivationClient(root_window, this);
   new Deleter(this, root_window);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DefaultActivationClient, client::ActivationClient implementation:
+// DefaultActivationClient, ActivationClient implementation:
 
-void DefaultActivationClient::AddObserver(
-    aura::client::ActivationChangeObserver* observer) {
+void DefaultActivationClient::AddObserver(ActivationChangeObserver* observer) {
   observers_.AddObserver(observer);
 }
 
 void DefaultActivationClient::RemoveObserver(
-    aura::client::ActivationChangeObserver* observer) {
+    ActivationChangeObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
 void DefaultActivationClient::ActivateWindow(aura::Window* window) {
-  ActivateWindowImpl(aura::client::ActivationChangeObserver::ActivationReason::
-                         ACTIVATION_CLIENT,
-                     window);
+  ActivateWindowImpl(
+      ActivationChangeObserver::ActivationReason::ACTIVATION_CLIENT, window);
 }
 
 void DefaultActivationClient::ActivateWindowImpl(
-    aura::client::ActivationChangeObserver::ActivationReason reason,
+    ActivationChangeObserver::ActivationReason reason,
     aura::Window* window) {
-  aura::Window* last_active = GetActiveWindow();
+  aura::Window* last_active = ActivationClient::GetActiveWindow();
   if (last_active == window)
     return;
 
@@ -81,30 +79,28 @@ void DefaultActivationClient::ActivateWindowImpl(
   for (auto& observer : observers_)
     observer.OnWindowActivated(reason, window, last_active);
 
-  aura::client::ActivationChangeObserver* observer =
-      aura::client::GetActivationChangeObserver(last_active);
+  ActivationChangeObserver* observer = GetActivationChangeObserver(last_active);
   if (observer) {
     observer->OnWindowActivated(reason, window, last_active);
   }
-  observer = aura::client::GetActivationChangeObserver(window);
+  observer = GetActivationChangeObserver(window);
   if (observer) {
     observer->OnWindowActivated(reason, window, last_active);
   }
 }
 
 void DefaultActivationClient::DeactivateWindow(aura::Window* window) {
-  aura::client::ActivationChangeObserver* observer =
-      aura::client::GetActivationChangeObserver(window);
+  ActivationChangeObserver* observer = GetActivationChangeObserver(window);
   if (observer) {
-    observer->OnWindowActivated(aura::client::ActivationChangeObserver::
-                                    ActivationReason::ACTIVATION_CLIENT,
-                                nullptr, window);
+    observer->OnWindowActivated(
+        ActivationChangeObserver::ActivationReason::ACTIVATION_CLIENT, nullptr,
+        window);
   }
   if (last_active_)
     ActivateWindow(last_active_);
 }
 
-aura::Window* DefaultActivationClient::GetActiveWindow() {
+const aura::Window* DefaultActivationClient::GetActiveWindow() const {
   if (active_windows_.empty())
     return nullptr;
   return active_windows_.back();
@@ -132,11 +128,11 @@ void DefaultActivationClient::OnWindowDestroyed(aura::Window* window) {
 
   if (window == GetActiveWindow()) {
     active_windows_.pop_back();
-    aura::Window* next_active = GetActiveWindow();
-    if (next_active && aura::client::GetActivationChangeObserver(next_active)) {
-      aura::client::GetActivationChangeObserver(next_active)
-          ->OnWindowActivated(aura::client::ActivationChangeObserver::
-                                  ActivationReason::WINDOW_DISPOSITION_CHANGED,
+    aura::Window* next_active = ActivationClient::GetActiveWindow();
+    if (next_active && GetActivationChangeObserver(next_active)) {
+      GetActivationChangeObserver(next_active)
+          ->OnWindowActivated(ActivationChangeObserver::ActivationReason::
+                                  WINDOW_DISPOSITION_CHANGED,
                               next_active, nullptr);
     }
     return;

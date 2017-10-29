@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/single_thread_task_runner.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/time/tick_clock.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -40,13 +41,10 @@ void WaitUntilRestarted(base::WaitableEvent* about_to_wait_event,
 void SignalImmediately(base::WaitableEvent* event) {
   event->Signal();
 }
-}
+}  // namespace
 
 class MockClient : public AVDACodecAllocatorClient {
  public:
-  MOCK_METHOD1(OnSurfaceAvailable, void(bool success));
-  MOCK_METHOD0(OnSurfaceDestroyed, void());
-
   // Gmock doesn't let us mock methods taking move-only types.
   MOCK_METHOD1(OnCodecConfiguredMock, void(MediaCodecBridge* media_codec));
   void OnCodecConfigured(
@@ -99,7 +97,6 @@ class AVDACodecAllocatorTest : public testing::Test {
   }
 
  protected:
-
   // Start / stop the threads for |avda| on the right thread.
   bool StartThread(AVDACodecAllocatorClient* avda) {
     return PostAndWait(FROM_HERE, base::Bind(
@@ -136,10 +133,12 @@ class AVDACodecAllocatorTest : public testing::Test {
             allocator_, task_type));
   }
 
-  base::Optional<TaskType> TaskTypeForAllocation() {
-    return PostAndWait(FROM_HERE,
-                       base::Bind(&AVDACodecAllocator::TaskTypeForAllocation,
-                                  base::Unretained(allocator_)));
+  base::Optional<TaskType> TaskTypeForAllocation(
+      bool software_codec_forbidden) {
+    return PostAndWait(
+        FROM_HERE,
+        base::Bind(&AVDACodecAllocator::TaskTypeForAllocation,
+                   base::Unretained(allocator_), software_codec_forbidden));
   }
 
   scoped_refptr<base::SingleThreadTaskRunner> TaskRunnerFor(
@@ -204,7 +203,7 @@ TEST_F(AVDACodecAllocatorTest, ThreadsStopAfterAllClientsStop) {
 
 TEST_F(AVDACodecAllocatorTest, TestHangThread) {
   StartThread(avda1_);
-  ASSERT_EQ(AUTO_CODEC, TaskTypeForAllocation().value());
+  ASSERT_EQ(AUTO_CODEC, TaskTypeForAllocation(false));
 
   // Hang the AUTO_CODEC thread.
   base::WaitableEvent about_to_wait_event(
@@ -221,7 +220,7 @@ TEST_F(AVDACodecAllocatorTest, TestHangThread) {
 
   // Verify that we've failed over after a long time has passed.
   tick_clock_.Advance(base::TimeDelta::FromSeconds(1));
-  ASSERT_EQ(SW_CODEC, TaskTypeForAllocation().value());
+  ASSERT_EQ(SW_CODEC, TaskTypeForAllocation(false));
 
   // Un-hang the thread and wait for it to let another task run.  This will
   // notify |allocator_| that the thread is no longer hung.
@@ -235,74 +234,7 @@ TEST_F(AVDACodecAllocatorTest, TestHangThread) {
   done_waiting_event.Wait();
 
   // Verify that we've un-failed over.
-  ASSERT_EQ(AUTO_CODEC, TaskTypeForAllocation().value());
-}
-
-TEST_F(AVDACodecAllocatorTest, AllocatingASurfaceTextureAlwaysSucceeds) {
-  ASSERT_TRUE(
-      allocator2_->AllocateSurface(avda1_, SurfaceManager::kNoSurfaceID));
-  ASSERT_TRUE(
-      allocator2_->AllocateSurface(avda2_, SurfaceManager::kNoSurfaceID));
-}
-
-TEST_F(AVDACodecAllocatorTest, AllocatingAnOwnedSurfaceFails) {
-  ASSERT_TRUE(allocator2_->AllocateSurface(avda1_, 1));
-  ASSERT_FALSE(allocator2_->AllocateSurface(avda2_, 1));
-}
-
-TEST_F(AVDACodecAllocatorTest, LaterWaitersReplaceEarlierWaiters) {
-  allocator2_->AllocateSurface(avda1_, 1);
-  allocator2_->AllocateSurface(avda2_, 1);
-  EXPECT_CALL(*avda2_, OnSurfaceAvailable(false));
-  allocator2_->AllocateSurface(avda3_, 1);
-}
-
-TEST_F(AVDACodecAllocatorTest, WaitersBecomeOwnersWhenSurfacesAreReleased) {
-  allocator2_->AllocateSurface(avda1_, 1);
-  allocator2_->AllocateSurface(avda2_, 1);
-  EXPECT_CALL(*avda2_, OnSurfaceAvailable(true));
-  allocator2_->DeallocateSurface(avda1_, 1);
-  // The surface should still be owned.
-  ASSERT_FALSE(allocator2_->AllocateSurface(avda1_, 1));
-}
-
-TEST_F(AVDACodecAllocatorTest, DeallocatingUnownedSurfacesIsSafe) {
-  allocator2_->DeallocateSurface(avda1_, 1);
-  allocator2_->DeallocateSurface(avda1_, SurfaceManager::kNoSurfaceID);
-}
-
-TEST_F(AVDACodecAllocatorTest, WaitersAreRemovedIfTheyDeallocate) {
-  allocator2_->AllocateSurface(avda1_, 1);
-  allocator2_->AllocateSurface(avda2_, 1);
-  allocator2_->DeallocateSurface(avda2_, 1);
-  // avda2_ should should not receive a notification.
-  EXPECT_CALL(*avda2_, OnSurfaceAvailable(_)).Times(0);
-  allocator2_->DeallocateSurface(avda1_, 1);
-}
-
-TEST_F(AVDACodecAllocatorTest, OwnersAreNotifiedOnDestruction) {
-  allocator2_->AllocateSurface(avda1_, 1);
-  // Not notified for a surface it doesn't own.
-  EXPECT_CALL(*avda1_, OnSurfaceDestroyed()).Times(0);
-  allocator2_->OnSurfaceDestroyed(123);
-  // But notified for a surface it does own.
-  EXPECT_CALL(*avda1_, OnSurfaceDestroyed());
-  allocator2_->OnSurfaceDestroyed(1);
-}
-
-TEST_F(AVDACodecAllocatorTest, WaitersAreNotifiedOnDestruction) {
-  allocator2_->AllocateSurface(avda1_, 1);
-  allocator2_->AllocateSurface(avda2_, 1);
-  EXPECT_CALL(*avda2_, OnSurfaceAvailable(false));
-  allocator2_->OnSurfaceDestroyed(1);
-}
-
-TEST_F(AVDACodecAllocatorTest, DeallocatingIsSafeDuringSurfaceDestroyed) {
-  allocator2_->AllocateSurface(avda1_, 1);
-  EXPECT_CALL(*avda1_, OnSurfaceDestroyed()).WillOnce(Invoke([=]() {
-    allocator2_->DeallocateSurface(avda1_, 1);
-  }));
-  allocator2_->OnSurfaceDestroyed(1);
+  ASSERT_EQ(AUTO_CODEC, TaskTypeForAllocation(false));
 }
 
 }  // namespace media

@@ -4,8 +4,10 @@
 
 #include "ui/aura/window_tree_host.h"
 
+#include "base/command_line.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
+#include "cc/base/switches.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/env.h"
@@ -16,6 +18,7 @@
 #include "ui/aura/window_tree_host_observer.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/input_method_factory.h"
+#include "ui/base/layout.h"
 #include "ui/base/view_prop.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
@@ -34,17 +37,12 @@ namespace aura {
 const char kWindowTreeHostForAcceleratedWidget[] =
     "__AURA_WINDOW_TREE_HOST_ACCELERATED_WIDGET__";
 
-float GetDeviceScaleFactorFromDisplay(Window* window) {
-  display::Display display =
-      display::Screen::GetScreen()->GetDisplayNearestWindow(window);
-  DCHECK(display.is_valid());
-  return display.device_scale_factor();
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // WindowTreeHost, public:
 
 WindowTreeHost::~WindowTreeHost() {
+  if (display::Screen::GetScreen())
+    display::Screen::GetScreen()->RemoveObserver(this);
   DCHECK(!compositor_) << "compositor must be destroyed before root window";
   if (owned_input_method_) {
     delete input_method_;
@@ -73,8 +71,8 @@ void WindowTreeHost::RemoveObserver(WindowTreeHostObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-ui::EventProcessor* WindowTreeHost::event_processor() {
-  return dispatcher();
+ui::EventSink* WindowTreeHost::event_sink() {
+  return dispatcher_.get();
 }
 
 gfx::Transform WindowTreeHost::GetRootTransform() const {
@@ -157,7 +155,8 @@ void WindowTreeHost::OnCursorVisibilityChanged(bool show) {
   // will trigger its own mouse enter.
   if (!show) {
     ui::EventDispatchDetails details = dispatcher()->DispatchMouseExitAtPoint(
-        nullptr, dispatcher()->GetLastMouseLocationInRoot());
+        nullptr, dispatcher()->GetLastMouseLocationInRoot(),
+        ui::EF_CURSOR_HIDE);
     if (details.dispatcher_destroyed)
       return;
   }
@@ -196,7 +195,15 @@ void WindowTreeHost::SetSharedInputMethod(ui::InputMethod* input_method) {
 
 ui::EventDispatchDetails WindowTreeHost::DispatchKeyEventPostIME(
     ui::KeyEvent* event) {
-  return SendEventToProcessor(event);
+  // If dispatch to IME is already disabled we shouldn't reach here.
+  DCHECK(!dispatcher_->should_skip_ime());
+  dispatcher_->set_skip_ime(true);
+  // We should bypass event rewriters here as they've been tried before.
+  ui::EventDispatchDetails dispatch_details =
+      event_sink()->OnEventFromSource(event);
+  if (!dispatch_details.dispatcher_destroyed)
+    dispatcher_->set_skip_ime(false);
+  return dispatch_details;
 }
 
 void WindowTreeHost::Show() {
@@ -218,13 +225,16 @@ void WindowTreeHost::Hide() {
 ////////////////////////////////////////////////////////////////////////////////
 // WindowTreeHost, protected:
 
-WindowTreeHost::WindowTreeHost() : WindowTreeHost(nullptr) {}
+WindowTreeHost::WindowTreeHost() : WindowTreeHost(nullptr) {
+}
 
 WindowTreeHost::WindowTreeHost(std::unique_ptr<WindowPort> window_port)
     : window_(new Window(nullptr, std::move(window_port))),
-      last_cursor_(ui::kCursorNull),
+      last_cursor_(ui::CursorType::kNull),
       input_method_(nullptr),
-      owned_input_method_(false) {}
+      owned_input_method_(false) {
+  display::Screen::GetScreen()->AddObserver(this);
+}
 
 void WindowTreeHost::DestroyCompositor() {
   compositor_.reset();
@@ -245,33 +255,37 @@ void WindowTreeHost::DestroyDispatcher() {
   //window()->RemoveOrDestroyChildren();
 }
 
-void WindowTreeHost::CreateCompositor(const cc::FrameSinkId& frame_sink_id) {
+void WindowTreeHost::CreateCompositor(const viz::FrameSinkId& frame_sink_id) {
   DCHECK(Env::GetInstance());
   ui::ContextFactory* context_factory = Env::GetInstance()->context_factory();
   DCHECK(context_factory);
   ui::ContextFactoryPrivate* context_factory_private =
       Env::GetInstance()->context_factory_private();
+  bool enable_surface_synchronization =
+      aura::Env::GetInstance()->mode() == aura::Env::Mode::MUS ||
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          cc::switches::kEnableSurfaceSynchronization);
   compositor_.reset(new ui::Compositor(
-      frame_sink_id.is_valid() ? frame_sink_id
-                               : context_factory_private->AllocateFrameSinkId(),
+      (!context_factory_private || frame_sink_id.is_valid())
+          ? frame_sink_id
+          : context_factory_private->AllocateFrameSinkId(),
       context_factory, context_factory_private,
-      base::ThreadTaskRunnerHandle::Get()));
+      base::ThreadTaskRunnerHandle::Get(), enable_surface_synchronization));
   if (!dispatcher()) {
     window()->Init(ui::LAYER_NOT_DRAWN);
     window()->set_host(this);
     window()->SetName("RootWindow");
-    window()->SetEventTargeter(
-        std::unique_ptr<ui::EventTargeter>(new WindowTargeter()));
     dispatcher_.reset(new WindowEventDispatcher(this));
   }
 }
 
 void WindowTreeHost::InitCompositor() {
-  compositor_->SetScaleAndSize(GetDeviceScaleFactorFromDisplay(window()),
+  display::Display display =
+      display::Screen::GetScreen()->GetDisplayNearestWindow(window());
+  compositor_->SetScaleAndSize(display.device_scale_factor(),
                                GetBoundsInPixels().size());
   compositor_->SetRootLayer(window()->layer());
-  compositor_->SetDisplayColorSpace(
-      GetICCProfileForCurrentDisplay().GetColorSpace());
+  compositor_->SetDisplayColorSpace(display.color_space());
 }
 
 void WindowTreeHost::OnAcceleratedWidgetAvailable() {
@@ -296,7 +310,7 @@ void WindowTreeHost::OnHostResizedInPixels(
                         output_surface_padding_in_pixels_.height());
   // The compositor should have the same size as the native root window host.
   // Get the latest scale from display because it might have been changed.
-  compositor_->SetScaleAndSize(GetDeviceScaleFactorFromDisplay(window()),
+  compositor_->SetScaleAndSize(ui::GetScaleFactorForNativeView(window()),
                                adjusted_size);
 
   gfx::Size layer_size = GetBoundsInPixels().size();
@@ -327,14 +341,23 @@ void WindowTreeHost::OnHostLostWindowCapture() {
     capture_window->ReleaseCapture();
 }
 
-gfx::ICCProfile WindowTreeHost::GetICCProfileForCurrentDisplay() {
-  // TODO(hubbe): Get the color space from the *current* monitor and
-  // update it when window is moved or color space configuration changes.
-  return gfx::ICCProfile::FromBestMonitor();
+ui::EventSink* WindowTreeHost::GetEventSink() {
+  return dispatcher_.get();
 }
 
-ui::EventProcessor* WindowTreeHost::GetEventProcessor() {
-  return event_processor();
+void WindowTreeHost::OnDisplayAdded(const display::Display& new_display) {}
+
+void WindowTreeHost::OnDisplayRemoved(const display::Display& old_display) {}
+
+void WindowTreeHost::OnDisplayMetricsChanged(const display::Display& display,
+                                             uint32_t metrics) {
+  if (metrics & DisplayObserver::DISPLAY_METRIC_COLOR_SPACE) {
+    display::Screen* screen = display::Screen::GetScreen();
+    if (compositor_ &&
+        display.id() != screen->GetDisplayNearestView(window()).id()) {
+      compositor_->SetDisplayColorSpace(display.color_space());
+    }
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

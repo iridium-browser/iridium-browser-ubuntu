@@ -21,9 +21,10 @@
 #ifndef StyleSheet_h
 #define StyleSheet_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "core/CoreExport.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -51,10 +52,10 @@ class CORE_EXPORT StyleSheet : public GarbageCollectedFinalized<StyleSheet>,
   virtual String type() const = 0;
 
   virtual CSSRule* ownerRule() const { return 0; }
-  virtual void clearOwnerNode() = 0;
-  virtual KURL baseURL() const = 0;
-  virtual bool isLoading() const = 0;
-  virtual bool isCSSStyleSheet() const { return false; }
+  virtual void ClearOwnerNode() = 0;
+  virtual KURL BaseURL() const = 0;
+  virtual bool IsLoading() const = 0;
+  virtual bool IsCSSStyleSheet() const { return false; }
 
   DEFINE_INLINE_VIRTUAL_TRACE() {}
 };

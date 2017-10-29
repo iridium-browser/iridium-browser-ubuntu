@@ -7,6 +7,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_PROXY_PROXY_API_HELPERS_H_
 #define CHROME_BROWSER_EXTENSIONS_API_PROXY_PROXY_API_HELPERS_H_
 
+#include <memory>
 #include <string>
 
 #include "components/proxy_config/proxy_prefs.h"
@@ -78,7 +79,7 @@ bool GetBypassListFromExtensionPref(const base::DictionaryValue* proxy_config,
 // Creates and returns a ProxyConfig dictionary (as defined in the extension
 // API) from the given parameters. Ownership is passed to the caller.
 // Depending on the value of |mode_enum|, several of the strings may be empty.
-base::DictionaryValue* CreateProxyConfigDict(
+std::unique_ptr<base::DictionaryValue> CreateProxyConfigDict(
     ProxyPrefs::ProxyMode mode_enum,
     bool pac_mandatory,
     const std::string& pac_url,
@@ -111,25 +112,26 @@ bool JoinUrlList(const base::ListValue* list,
 
 // Creates and returns a ProxyRules dictionary as defined in the extension API
 // with the values of a ProxyConfigDictionary configured for fixed proxy
-// servers. Returns NULL in case of failures. Ownership is passed to the caller.
-base::DictionaryValue* CreateProxyRulesDict(
+// servers. Returns NULL in case of failures.
+std::unique_ptr<base::DictionaryValue> CreateProxyRulesDict(
     const ProxyConfigDictionary& proxy_config);
 
 // Creates and returns a ProxyServer dictionary as defined in the extension API
-// with values from a net::ProxyServer object. Never returns NULL. Ownership is
-// passed to the caller.
-base::DictionaryValue* CreateProxyServerDict(const net::ProxyServer& proxy);
+// with values from a net::ProxyServer object. Never returns NULL.
+std::unique_ptr<base::DictionaryValue> CreateProxyServerDict(
+    const net::ProxyServer& proxy);
 
 // Creates and returns a PacScript dictionary as defined in the extension API
 // with the values of a ProxyconfigDictionary configured for pac scripts.
-// Returns NULL in case of failures. Ownership is passed to the caller.
-base::DictionaryValue* CreatePacScriptDict(
+// Returns NULL in case of failures.
+std::unique_ptr<base::DictionaryValue> CreatePacScriptDict(
     const ProxyConfigDictionary& proxy_config);
 
 // Tokenizes the |in| at delimiters |delims| and returns a new ListValue with
-// StringValues created from the tokens. Ownership is passed to the caller.
-base::ListValue* TokenizeToStringList(const std::string& in,
-                                      const std::string& delims);
+// StringValues created from the tokens.
+std::unique_ptr<base::ListValue> TokenizeToStringList(
+    const std::string& in,
+    const std::string& delims);
 
 }  // namespace proxy_api_helpers
 }  // namespace extensions

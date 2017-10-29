@@ -12,6 +12,10 @@ if (is_android) {
   import("//build/config/sanitizers/sanitizers.gni")
 }
 
+if (is_fuchsia) {
+  import("//build/config/fuchsia/rules.gni")
+}
+
 # Define a test as an executable (or apk on Android) with the "testonly" flag
 # set.
 # Variable:
@@ -59,7 +63,7 @@ template("test") {
         # the default shared_library configs rather than executable configs.
         configs -= [
           "//build/config:shared_library_config",
-          "//build/config/android:hide_all_but_jni_onload",
+          "//build/config/android:hide_all_but_jni",
         ]
         configs += [ "//build/config:executable_config" ]
 
@@ -190,31 +194,58 @@ template("test") {
       }
     }
 
-    group(target_name) {
-      testonly = true
-      if (_incremental_apk_only) {
-        deps = [
-          ":${target_name}_incremental",
-        ]
-      } else {
-        deps = [
+    test_runner_script(target_name) {
+      forward_variables_from(invoker,
+                             _wrapper_script_vars + [
+                                   "data",
+                                   "data_deps",
+                                   "deps",
+                                   "public_deps",
+                                 ])
+
+      if (_use_raw_android_executable) {
+        executable_dist_dir = "$root_out_dir/$_dist_target"
+        deps += [
+          ":$_dist_target",
           ":$_test_runner_target",
         ]
-        if (_use_raw_android_executable) {
-          deps += [ ":$_dist_target" ]
+      } else {
+        apk_target = ":$_apk_target"
+        deps += [ ":$_apk_target" ]
+        if (_incremental_apk_only) {
+          deps += [ ":${target_name}_incremental" ]
         } else {
-          deps += [ ":$_apk_target" ]
+          deps += [ ":$_test_runner_target" ]
         }
       }
+      generated_script = "$root_build_dir/$_output_name"
+      incremental_install = _incremental_apk_only
+      test_name = _output_name
+      test_suite = _output_name
+      test_type = "gtest"
+    }
+  } else if (is_fuchsia) {
+    _output_name = invoker.target_name
+    _test_runner_target = "${_output_name}__test_runner_script"
+
+    test_runner_script(_test_runner_target) {
+      forward_variables_from(invoker,
+                             [
+                               "data",
+                               "data_deps",
+                               "deps",
+                               "public_deps",
+                             ])
+      test_name = _output_name
     }
 
-    # TODO(GYP_GONE): Delete this after we've converted everything to GN.
-    # The _run targets exist only for compatibility w/ GYP.
-    group("${target_name}_apk_run") {
+    executable(target_name) {
       testonly = true
-      deps = [
-        ":${invoker.target_name}",
-      ]
+      forward_variables_from(invoker, "*")
+      if (!defined(data_deps)) {
+        data_deps = []
+      }
+      data_deps += [ ":$_test_runner_target" ]
     }
   } else if (is_ios) {
     import("//build/config/ios/ios_sdk.gni")
@@ -261,7 +292,7 @@ template("test") {
       deps += [
         # All shared libraries must have the sanitizer deps to properly link in
         # asan mode (this target will be empty in other cases).
-        "//build/config/sanitizers:deps",
+        "//build/config:exe_and_shlib_deps",
       ]
       if (!defined(bundle_deps)) {
         bundle_deps = []
@@ -277,29 +308,11 @@ template("test") {
       deps += [
         # All shared libraries must have the sanitizer deps to properly link in
         # asan mode (this target will be empty in other cases).
-        "//build/config/sanitizers:deps",
+        "//build/config:exe_and_shlib_deps",
 
         # Give tests the default manifest on Windows (a no-op elsewhere).
         "//build/win:default_exe_manifest",
       ]
-    }
-
-    # TODO(GYP_GONE): Delete this after we've converted everything to GN.
-    # The _run targets exist only for compatibility with GYP.
-    group("${target_name}_run") {
-      testonly = true
-      deps = [
-        ":${invoker.target_name}",
-      ]
-    }
-
-    if (defined(invoker.output_name) && target_name != invoker.output_name) {
-      group("${invoker.output_name}_run") {
-        testonly = true
-        deps = [
-          ":${invoker.target_name}",
-        ]
-      }
     }
   }
 }
@@ -308,6 +321,8 @@ template("test") {
 set_defaults("test") {
   if (is_android) {
     configs = default_shared_library_configs
+    configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
+    configs += [ "//build/config/android:hide_all_but_jni" ]
   } else {
     configs = default_executable_configs
   }

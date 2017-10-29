@@ -4,16 +4,20 @@
 
 #include "media/filters/android/media_codec_audio_decoder.h"
 
+#include <cmath>
+
 #include "base/android/build_info.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "media/base/android/media_codec_bridge_impl.h"
-#include "media/base/audio_buffer.h"
+#include "media/base/android/media_codec_util.h"
 #include "media/base/audio_timestamp_helper.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/timestamp_constants.h"
+#include "media/formats/ac3/ac3_util.h"
 
 namespace media {
 
@@ -21,11 +25,14 @@ MediaCodecAudioDecoder::MediaCodecAudioDecoder(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : task_runner_(task_runner),
       state_(STATE_UNINITIALIZED),
+      is_passthrough_(false),
+      sample_format_(kSampleFormatS16),
       channel_count_(0),
       channel_layout_(CHANNEL_LAYOUT_NONE),
       sample_rate_(0),
       media_drm_bridge_cdm_context_(nullptr),
       cdm_registration_id_(0),
+      pool_(new AudioBufferMemoryPool()),
       weak_factory_(this) {
   DVLOG(1) << __func__;
 }
@@ -65,6 +72,13 @@ void MediaCodecAudioDecoder::Initialize(const AudioDecoderConfig& config,
   ClearInputQueue(DecodeStatus::ABORTED);
 
   InitCB bound_init_cb = BindToCurrentLoop(init_cb);
+  is_passthrough_ = MediaCodecUtil::IsPassthroughAudioFormat(config.codec());
+  sample_format_ = kSampleFormatS16;
+
+  if (config.codec() == kCodecAC3)
+    sample_format_ = kSampleFormatAc3;
+  else if (config.codec() == kCodecEAC3)
+    sample_format_ = kSampleFormatEac3;
 
   if (state_ == STATE_ERROR) {
     DVLOG(1) << "Decoder is in error state.";
@@ -75,9 +89,9 @@ void MediaCodecAudioDecoder::Initialize(const AudioDecoderConfig& config,
   // We can support only the codecs that MediaCodecBridge can decode.
   // TODO(xhwang): Get this list from MediaCodecBridge or just rely on
   // attempting to create one to determine whether the codec is supported.
-  const bool is_codec_supported = config.codec() == kCodecVorbis ||
-                                  config.codec() == kCodecAAC ||
-                                  config.codec() == kCodecOpus;
+  const bool is_codec_supported =
+      config.codec() == kCodecVorbis || config.codec() == kCodecAAC ||
+      config.codec() == kCodecOpus || is_passthrough_;
   if (!is_codec_supported) {
     DVLOG(1) << "Unsuported codec " << GetCodecName(config.codec());
     bound_init_cb.Run(false);
@@ -126,7 +140,8 @@ bool MediaCodecAudioDecoder::CreateMediaCodecLoop() {
 
   codec_loop_.reset(
       new MediaCodecLoop(base::android::BuildInfo::GetInstance()->sdk_int(),
-                         this, std::move(audio_codec_bridge)));
+                         this, std::move(audio_codec_bridge),
+                         scoped_refptr<base::SingleThreadTaskRunner>()));
 
   return true;
 }
@@ -230,7 +245,7 @@ void MediaCodecAudioDecoder::OnKeyAdded() {
 void MediaCodecAudioDecoder::OnMediaCryptoReady(
     const InitCB& init_cb,
     MediaDrmBridgeCdmContext::JavaObjectPtr media_crypto,
-    bool /*needs_protected_surface*/) {
+    bool /*requires_secure_video_codec*/) {
   DVLOG(1) << __func__;
 
   DCHECK(state_ == STATE_WAITING_FOR_MEDIA_CRYPTO);
@@ -358,14 +373,46 @@ bool MediaCodecAudioDecoder::OnDecodedFrame(
   // of channels which can be different from |config_| value.
   DCHECK_GT(channel_count_, 0);
 
-  // Android MediaCodec can only output 16bit PCM audio.
-  const int bytes_per_frame = sizeof(uint16_t) * channel_count_;
-  const size_t frame_count = out.size / bytes_per_frame;
+  size_t frame_count = 1;
+  scoped_refptr<AudioBuffer> audio_buffer;
 
-  // Create AudioOutput buffer based on current parameters.
-  scoped_refptr<AudioBuffer> audio_buffer =
-      AudioBuffer::CreateBuffer(kSampleFormatS16, channel_layout_,
-                                channel_count_, sample_rate_, frame_count);
+  if (is_passthrough_) {
+    audio_buffer = AudioBuffer::CreateBitstreamBuffer(
+        sample_format_, channel_layout_, channel_count_, sample_rate_,
+        frame_count, out.size, pool_);
+
+    MediaCodecStatus status = media_codec->CopyFromOutputBuffer(
+        out.index, out.offset, audio_buffer->channel_data()[0], out.size);
+
+    if (status != MEDIA_CODEC_OK) {
+      media_codec->ReleaseOutputBuffer(out.index, false);
+      return false;
+    }
+
+    if (config_.codec() == kCodecAC3) {
+      frame_count = Ac3Util::ParseTotalAc3SampleCount(
+          audio_buffer->channel_data()[0], out.size);
+    } else if (config_.codec() == kCodecEAC3) {
+      frame_count = Ac3Util::ParseTotalEac3SampleCount(
+          audio_buffer->channel_data()[0], out.size);
+    } else {
+      NOTREACHED() << "Unsupported passthrough format.";
+    }
+
+    // Create AudioOutput buffer based on current parameters.
+    audio_buffer = AudioBuffer::CreateBitstreamBuffer(
+        sample_format_, channel_layout_, channel_count_, sample_rate_,
+        frame_count, out.size, pool_);
+  } else {
+    // Android MediaCodec can only output 16bit PCM audio.
+    const int bytes_per_frame = sizeof(uint16_t) * channel_count_;
+    frame_count = out.size / bytes_per_frame;
+
+    // Create AudioOutput buffer based on current parameters.
+    audio_buffer = AudioBuffer::CreateBuffer(sample_format_, channel_layout_,
+                                             channel_count_, sample_rate_,
+                                             frame_count, pool_);
+  }
 
   // Copy data into AudioBuffer.
   CHECK_LE(out.size, audio_buffer->data_size());

@@ -10,19 +10,19 @@
 #include "SkCanvas.h"
 #include "SkGradientShader.h"
 #include "SkPatchUtils.h"
-#include "SkPerlinNoiseShader2/SkPerlinNoiseShader2.h"
+#include "SkPerlinNoiseShader.h"
 
 static void draw_control_points(SkCanvas* canvas, const SkPoint cubics[12]) {
     //draw control points
     SkPaint paint;
     SkPoint bottom[SkPatchUtils::kNumPtsCubic];
-    SkPatchUtils::getBottomCubic(cubics, bottom);
+    SkPatchUtils::GetBottomCubic(cubics, bottom);
     SkPoint top[SkPatchUtils::kNumPtsCubic];
-    SkPatchUtils::getTopCubic(cubics, top);
+    SkPatchUtils::GetTopCubic(cubics, top);
     SkPoint left[SkPatchUtils::kNumPtsCubic];
-    SkPatchUtils::getLeftCubic(cubics, left);
+    SkPatchUtils::GetLeftCubic(cubics, left);
     SkPoint right[SkPatchUtils::kNumPtsCubic];
-    SkPatchUtils::getRightCubic(cubics, right);
+    SkPatchUtils::GetRightCubic(cubics, right);
 
     paint.setColor(SK_ColorBLACK);
     paint.setStrokeWidth(0.5f);
@@ -149,7 +149,7 @@ protected:
         ;
         
         SkScalar scaleFreq = 2.0;
-        fShader1 = SkPerlinNoiseShader2::MakeImprovedNoise(fXFreq/scaleFreq, fYFreq/scaleFreq, 4,
+        fShader1 = SkPerlinNoiseShader::MakeImprovedNoise(fXFreq/scaleFreq, fYFreq/scaleFreq, 4,
                                                              fSeed);
         fShaderCompose = SkShader::MakeComposeShader(fShader0, fShader1, SkBlendMode::kSrcOver);
 

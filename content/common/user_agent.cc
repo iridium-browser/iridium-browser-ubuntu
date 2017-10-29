@@ -78,11 +78,7 @@ std::string BuildOSCpuInfo() {
 #endif
 
 #if defined(OS_ANDROID)
-  std::string android_version_str;
-  base::StringAppendF(
-      &android_version_str, "%d.%d", os_major_version, os_minor_version);
-  if (os_bugfix_version != 0)
-    base::StringAppendF(&android_version_str, ".%d", os_bugfix_version);
+  std::string android_version_str = base::SysInfo::OperatingSystemVersion();
 
   std::string android_info_str;
 
@@ -192,7 +188,7 @@ std::string BuildUserAgentFromOSAndProduct(const std::string& os_info,
       WEBKIT_VERSION_MAJOR,
       WEBKIT_VERSION_MINOR);
   if (strncmp(product.c_str(), "Chrome/", 7) != 0)
-	base::StringAppendF(&user_agent, " Chrome/58.0.3029.81");
+	base::StringAppendF(&user_agent, " Chrome/61.0.3163.100");
   return user_agent;
 }
 

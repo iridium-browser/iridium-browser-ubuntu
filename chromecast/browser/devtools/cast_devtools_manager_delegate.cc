@@ -33,15 +33,14 @@ CastDevToolsManagerDelegate::~CastDevToolsManagerDelegate() {
   g_devtools_manager_delegate = nullptr;
 }
 
-bool CastDevToolsManagerDelegate::DiscoverTargets(
-    const content::DevToolsAgentHost::DiscoveryCallback& callback) {
+content::DevToolsAgentHost::List
+CastDevToolsManagerDelegate::RemoteDebuggingTargets() {
   content::DevToolsAgentHost::List enabled_hosts;
   for (auto* web_contents : enabled_webcontents_) {
     enabled_hosts.push_back(
         content::DevToolsAgentHost::GetOrCreateFor(web_contents));
   }
-  callback.Run(enabled_hosts);
-  return true;
+  return enabled_hosts;
 }
 
 void CastDevToolsManagerDelegate::EnableWebContentsForDebugging(
@@ -53,6 +52,10 @@ void CastDevToolsManagerDelegate::EnableWebContentsForDebugging(
 void CastDevToolsManagerDelegate::DisableWebContentsForDebugging(
     content::WebContents* web_contents) {
   enabled_webcontents_.erase(web_contents);
+}
+
+bool CastDevToolsManagerDelegate::HasEnabledWebContents() const {
+  return !enabled_webcontents_.empty();
 }
 
 std::string CastDevToolsManagerDelegate::GetDiscoveryPageHTML() {

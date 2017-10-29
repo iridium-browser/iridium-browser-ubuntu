@@ -67,10 +67,9 @@ class Service : public KeyedService,
   // extensions::ExtensionRegistryObserver override.
   void OnExtensionLoaded(content::BrowserContext* browser_context,
                          const extensions::Extension* extension) override;
-  void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const extensions::Extension* extension,
+                           extensions::UnloadedExtensionReason reason) override;
 
  private:
   // Cache listener extension ids and set them to
@@ -79,9 +78,10 @@ class Service : public KeyedService,
 
   Profile* const profile_;
   extensions::ExtensionRegistry* extension_registry_;
-  app_list::LauncherSearchProvider* provider_;
-  int query_id_;
-  bool is_query_running_;
+  app_list::LauncherSearchProvider* provider_ = nullptr;
+  int query_id_ = 0;
+  bool is_query_running_ = false;
+  std::string query_;
   std::unique_ptr<std::set<extensions::ExtensionId>>
       cached_listener_extension_ids_;
 

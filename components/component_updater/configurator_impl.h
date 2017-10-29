@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_COMPONENT_UPDATER_CONFIGURATOR_IMPL_H_
 #define COMPONENTS_COMPONENT_UPDATER_CONFIGURATOR_IMPL_H_
 
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
@@ -37,9 +39,6 @@ class ConfiguratorImpl {
 
   // Delay in seconds to every subsequent update check. 0 means don't check.
   int NextCheckDelay() const;
-
-  // Delay in seconds from each task step. Used to smooth out CPU/IO usage.
-  int StepDelay() const;
 
   // Minimum delta time in seconds before an on-demand check is allowed for the
   // same component.
@@ -87,6 +86,9 @@ class ConfiguratorImpl {
 
   // True if signing of update checks is enabled.
   bool EnabledCupSigning() const;
+
+  // Returns the key hash corresponding to a CRX trusted by ActionRun.
+  std::vector<uint8_t> GetRunActionKeyHash() const;
 
  private:
   net::URLRequestContextGetter* url_request_getter_;

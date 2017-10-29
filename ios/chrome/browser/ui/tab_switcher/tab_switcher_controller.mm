@@ -5,8 +5,6 @@
 #import "ios/chrome/browser/ui/tab_switcher/tab_switcher_controller.h"
 
 #include "base/ios/block_types.h"
-#include "base/ios/weak_nsobject.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
@@ -24,8 +22,11 @@
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_model.h"
 #import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
+#include "ios/chrome/browser/ui/commands/application_commands.h"
+#include "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
 #include "ios/chrome/browser/ui/commands/ios_command_ids.h"
+#import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/ui/keyboard/UIKeyCommand+Chrome.h"
 #include "ios/chrome/browser/ui/ntp/recent_tabs/synced_sessions.h"
 #import "ios/chrome/browser/ui/ntp/recent_tabs/views/signed_in_sync_off_view.h"
@@ -47,12 +48,16 @@
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
+#import "ios/shared/chrome/browser/ui/commands/command_dispatcher.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/referrer.h"
-#import "ios/web/web_state/ui/crw_web_controller.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -92,25 +97,27 @@ enum class SnapshotViewOption {
   // weak.
   TabModel* _onLoadActiveModel;
   // The view this controller manages.
-  base::scoped_nsobject<TabSwitcherView> _tabSwitcherView;
+  TabSwitcherView* _tabSwitcherView;
   // The list of panels controllers for distant sessions.
-  base::scoped_nsobject<NSMutableArray> _controllersOfDistantSessions;
+  NSMutableArray* _controllersOfDistantSessions;
   // The panel controllers for the local sessions.
-  base::scoped_nsobject<TabSwitcherPanelController> _onTheRecordSession;
-  base::scoped_nsobject<TabSwitcherPanelController> _offTheRecordSession;
+  TabSwitcherPanelController* _onTheRecordSession;
+  TabSwitcherPanelController* _offTheRecordSession;
   // The model storing the state of what is shown by the tab switcher.
-  base::scoped_nsobject<TabSwitcherModel> _tabSwitcherModel;
+  TabSwitcherModel* _tabSwitcherModel;
   // Stores the current sign-in panel type.
   TabSwitcherSignInPanelsType _signInPanelType;
   // Cache for the panel's cells.
-  base::scoped_nsobject<TabSwitcherCache> _cache;
+  TabSwitcherCache* _cache;
   // Stores the background color of the window when the tab switcher was
   // presented.
-  base::scoped_nsobject<UIColor> _initialWindowBackgroundColor;
+  UIColor* _initialWindowBackgroundColor;
   // Indicate whether a previous promo panel header cell should be removed or
   // added.
   BOOL _shouldRemovePromoPanelHeaderCell;
   BOOL _shouldAddPromoPanelHeaderCell;
+  // Handles command dispatching.
+  CommandDispatcher* _dispatcher;
 }
 
 // Updates the window background color to the tab switcher's background color.
@@ -186,35 +193,49 @@ enum class SnapshotViewOption {
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState
                         mainTabModel:(TabModel*)mainTabModel
                          otrTabModel:(TabModel*)otrTabModel
-                      activeTabModel:(TabModel*)activeTabModel {
+                      activeTabModel:(TabModel*)activeTabModel
+          applicationCommandEndpoint:(id<ApplicationCommands>)endpoint {
   DCHECK(mainTabModel);
   DCHECK(otrTabModel);
   DCHECK(activeTabModel == otrTabModel || activeTabModel == mainTabModel);
   self = [super initWithNibName:nil bundle:nil];
   if (self) {
     _browserState = browserState;
+
+    _dispatcher = [[CommandDispatcher alloc] init];
+    [_dispatcher startDispatchingToTarget:self
+                              forProtocol:@protocol(BrowserCommands)];
+    [_dispatcher startDispatchingToTarget:endpoint
+                              forProtocol:@protocol(ApplicationCommands)];
+    // self.dispatcher shouldn't be used in this init method, so duplicate the
+    // typecast to pass dispatcher into child objects.
+    id<ApplicationCommands, BrowserCommands> passableDispatcher =
+        static_cast<id<ApplicationCommands, BrowserCommands>>(_dispatcher);
+
     _onLoadActiveModel = activeTabModel;
-    _cache.reset([[TabSwitcherCache alloc] init]);
+    _cache = [[TabSwitcherCache alloc] init];
     [_cache setMainTabModel:mainTabModel otrTabModel:otrTabModel];
-    _tabSwitcherModel.reset([[TabSwitcherModel alloc]
-        initWithBrowserState:browserState
-                    delegate:self
-                mainTabModel:mainTabModel
-                 otrTabModel:otrTabModel
-                   withCache:_cache]);
-    _controllersOfDistantSessions.reset([[NSMutableArray alloc] init]);
+    _tabSwitcherModel =
+        [[TabSwitcherModel alloc] initWithBrowserState:browserState
+                                              delegate:self
+                                          mainTabModel:mainTabModel
+                                           otrTabModel:otrTabModel
+                                             withCache:_cache];
+    _controllersOfDistantSessions = [[NSMutableArray alloc] init];
     [self loadTabSwitcherView];
-    _onTheRecordSession.reset([[TabSwitcherPanelController alloc]
+    _onTheRecordSession = [[TabSwitcherPanelController alloc]
                 initWithModel:_tabSwitcherModel
         forLocalSessionOfType:TabSwitcherSessionType::REGULAR_SESSION
                     withCache:_cache
-                 browserState:_browserState]);
+                 browserState:_browserState
+                   dispatcher:passableDispatcher];
     [_onTheRecordSession setDelegate:self];
-    _offTheRecordSession.reset([[TabSwitcherPanelController alloc]
+    _offTheRecordSession = [[TabSwitcherPanelController alloc]
                 initWithModel:_tabSwitcherModel
         forLocalSessionOfType:TabSwitcherSessionType::OFF_THE_RECORD_SESSION
                     withCache:_cache
-                 browserState:_browserState]);
+                 browserState:_browserState
+                   dispatcher:passableDispatcher];
     [_offTheRecordSession setDelegate:self];
     [_tabSwitcherView addPanelView:[_offTheRecordSession view]
                            atIndex:kLocalTabsOffTheRecordPanelIndex];
@@ -244,8 +265,8 @@ enum class SnapshotViewOption {
 
 - (void)loadTabSwitcherView {
   DCHECK(![_tabSwitcherView superview]);
-  _tabSwitcherView.reset(
-      [[TabSwitcherView alloc] initWithFrame:[self tabSwitcherInitialFrame]]);
+  _tabSwitcherView =
+      [[TabSwitcherView alloc] initWithFrame:[self tabSwitcherInitialFrame]];
   [_tabSwitcherView setAutoresizingMask:UIViewAutoresizingFlexibleWidth |
                                         UIViewAutoresizingFlexibleHeight];
   [_tabSwitcherView setDelegate:self];
@@ -264,7 +285,7 @@ enum class SnapshotViewOption {
 #pragma mark - UIResponder
 
 - (NSArray*)keyCommands {
-  base::WeakNSObject<TabSwitcherController> weakSelf(self);
+  __weak TabSwitcherController* weakSelf = self;
   return @[
     [UIKeyCommand
         cr_keyCommandWithInput:@"t"
@@ -272,8 +293,7 @@ enum class SnapshotViewOption {
                          title:l10n_util::GetNSStringWithFixup(
                                    IDS_IOS_TOOLS_MENU_NEW_TAB)
                         action:^{
-                          base::scoped_nsobject<TabSwitcherController>
-                              strongSelf([weakSelf retain]);
+                          TabSwitcherController* strongSelf = weakSelf;
                           if (!strongSelf)
                             return;
                           if ([strongSelf currentPanelIndex] ==
@@ -307,8 +327,7 @@ enum class SnapshotViewOption {
                  modifierFlags:UIKeyModifierCommand
                          title:nil
                         action:^{
-                          base::scoped_nsobject<TabSwitcherController>
-                              strongSelf([weakSelf retain]);
+                          TabSwitcherController* strongSelf = weakSelf;
                           if (!strongSelf)
                             return;
                           if ([strongSelf currentPanelIndex] ==
@@ -341,10 +360,6 @@ enum class SnapshotViewOption {
 }
 
 - (void)showWithSelectedTabAnimation {
-  // Stores the current tab's scroll position. Helps determine whether the
-  // current tab snapshot should be updated or not.
-  [_onLoadActiveModel.currentTab recordStateInHistory];
-
   [self updateWindowBackgroundColor];
   [self performTabSwitcherTransition:TransitionType::TRANSITION_PRESENT
                            withModel:_onLoadActiveModel
@@ -379,29 +394,32 @@ enum class SnapshotViewOption {
   return _delegate;
 }
 
+- (id<ApplicationCommands, BrowserCommands>)dispatcher {
+  return static_cast<id<ApplicationCommands, BrowserCommands>>(_dispatcher);
+}
+
+#pragma mark - BrowserCommands
+
+- (void)openNewTab:(OpenNewTabCommand*)command {
+  // Ensure that the right mode is showing.
+  NSInteger panelIndex = command.incognito ? kLocalTabsOffTheRecordPanelIndex
+                                           : kLocalTabsOnTheRecordPanelIndex;
+  [_tabSwitcherView selectPanelAtIndex:panelIndex];
+
+  const TabSwitcherSessionType panelSessionType =
+      (command.incognito) ? TabSwitcherSessionType::OFF_THE_RECORD_SESSION
+                          : TabSwitcherSessionType::REGULAR_SESSION;
+
+  TabModel* model = [self tabModelForSessionType:panelSessionType];
+  [self dismissWithNewTabAnimation:GURL(kChromeUINewTabURL)
+                           atIndex:NSNotFound
+                        transition:ui::PAGE_TRANSITION_TYPED
+                          tabModel:model];
+}
+
 - (IBAction)chromeExecuteCommand:(id)sender {
   int command = [sender tag];
-
   switch (command) {
-    case IDC_NEW_INCOGNITO_TAB:  // fallthrough
-    case IDC_NEW_TAB: {
-      // Ensure that the right mode is showing.
-      NSInteger panelIndex = (command == IDC_NEW_TAB)
-                                 ? kLocalTabsOnTheRecordPanelIndex
-                                 : kLocalTabsOffTheRecordPanelIndex;
-      [_tabSwitcherView selectPanelAtIndex:panelIndex];
-
-      const TabSwitcherSessionType panelSessionType =
-          (command == IDC_NEW_TAB)
-              ? TabSwitcherSessionType::REGULAR_SESSION
-              : TabSwitcherSessionType::OFF_THE_RECORD_SESSION;
-
-      TabModel* model = [self tabModelForSessionType:panelSessionType];
-      [self dismissWithNewTabAnimation:GURL(kChromeUINewTabURL)
-                               atIndex:NSNotFound
-                            transition:ui::PAGE_TRANSITION_TYPED
-                              tabModel:model];
-    } break;
     case IDC_TOGGLE_TAB_SWITCHER:
       [self tabSwitcherDismissWithCurrentSelectedModel];
       break;
@@ -415,14 +433,13 @@ enum class SnapshotViewOption {
 
 - (void)updateWindowBackgroundColor {
   DCHECK(!_initialWindowBackgroundColor);
-  _initialWindowBackgroundColor.reset(
-      [self.view.window.backgroundColor retain]);
+  _initialWindowBackgroundColor = self.view.window.backgroundColor;
   self.view.window.backgroundColor = [[MDCPalette greyPalette] tint900];
 }
 
 - (void)restoreWindowBackgroundColor {
   self.view.window.backgroundColor = _initialWindowBackgroundColor;
-  _initialWindowBackgroundColor.reset();
+  _initialWindowBackgroundColor = nil;
 }
 
 - (UIView*)snapshotViewForView:(UIView*)inputView
@@ -443,7 +460,7 @@ enum class SnapshotViewOption {
     [inputView.layer renderInContext:UIGraphicsGetCurrentContext()];
     UIImage* screenshot = UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
-    UIView* view = [[[UIView alloc] initWithFrame:CGRectZero] autorelease];
+    UIView* view = [[UIView alloc] initWithFrame:CGRectZero];
     [view layer].contents = static_cast<id>(screenshot.CGImage);
     return view;
   } else {
@@ -452,14 +469,13 @@ enum class SnapshotViewOption {
     UIColor* backgroundColor = [tabModel isOffTheRecord]
                                    ? [[MDCPalette greyPalette] tint700]
                                    : [[MDCPalette greyPalette] tint100];
-    UIView* placeholdView =
-        [[[UIView alloc] initWithFrame:CGRectZero] autorelease];
+    UIView* placeholdView = [[UIView alloc] initWithFrame:CGRectZero];
     placeholdView.backgroundColor = backgroundColor;
     return placeholdView;
   }
 }
 
-- (TabSwitcherTransitionContextContent*)transitionContextContextForTabModel:
+- (TabSwitcherTransitionContextContent*)transitionContextContentForTabModel:
     (TabModel*)tabModel {
   if ([tabModel isOffTheRecord])
     return self.transitionContext.incognitoContent;
@@ -469,8 +485,8 @@ enum class SnapshotViewOption {
 
 - (UIImage*)updateScreenshotForCellIfNeeded:(TabSwitcherLocalSessionCell*)cell
                                    tabModel:(TabModel*)tabModel {
-  if (cell.screenshot)
-    return cell.screenshot;
+  if (cell.snapshot)
+    return cell.snapshot;
   UIColor* backgroundColor = [tabModel isOffTheRecord]
                                  ? [[MDCPalette greyPalette] tint700]
                                  : [UIColor whiteColor];
@@ -500,7 +516,7 @@ enum class SnapshotViewOption {
   [[self view] setUserInteractionEnabled:NO];
 
   TabSwitcherTransitionContextContent* transitionContextContent =
-      [self transitionContextContextForTabModel:tabModel];
+      [self transitionContextContentForTabModel:tabModel];
   DCHECK(transitionContextContent);
 
   ToolbarController* toolbarController =
@@ -562,25 +578,26 @@ enum class SnapshotViewOption {
   CGRect finalToolbarScreenshotFrame =
       CGRectMake(0, 0, selectedCellFrame.size.width, cellTopBarHeight);
 
-  base::scoped_nsobject<UIImageView> tabScreenshotImageView(
-      [[UIImageView alloc] initWithFrame:CGRectZero]);
+  UIImageView* tabScreenshotImageView =
+      [[UIImageView alloc] initWithFrame:CGRectZero];
 
-  base::WeakNSObject<UIImageView> weakTabScreenshotImageView(
-      tabScreenshotImageView.get());
+  __weak UIImageView* weakTabScreenshotImageView = tabScreenshotImageView;
 
-  if (self.transitionContext.initialTabModel != tabModel ||
-      transitionContextContent.initialSelectedTabIndex != selectedTabIndex) {
-    tabScreenshotImageView.get().image =
+  if ([self initialTabModelAndTabIDMatchesTabModel:tabModel
+                                             tabID:selectedTab.tabId]) {
+    tabScreenshotImageView.image = self.transitionContext.tabSnapshotImage;
+  } else {
+    // If transitioning to a different tab than the one animated in
+    // from, a new snapshot should be generated instead of using the transition
+    // context
+    tabScreenshotImageView.image =
         [self updateScreenshotForCellIfNeeded:selectedCell tabModel:tabModel];
     [selectedTab retrieveSnapshot:^(UIImage* snapshot) {
       [weakTabScreenshotImageView setImage:snapshot];
     }];
-  } else {
-    tabScreenshotImageView.get().image =
-        self.transitionContext.tabSnapshotImage;
   }
 
-  const CGSize tabScreenshotImageSize = tabScreenshotImageView.get().image.size;
+  const CGSize tabScreenshotImageSize = tabScreenshotImageView.image.size;
 
   CGRect initialTabScreenshotFrame = CGRectZero;
   const CGSize toolbarSize = toolbarController.view.bounds.size;
@@ -638,14 +655,13 @@ enum class SnapshotViewOption {
   tabStripPlaceholderView.frame = tabStripInitialFrame;
 
   // Create and setup placeholder view and subviews.
-  base::scoped_nsobject<UIView> placeholderView(
-      [[UIView alloc] initWithFrame:initialTabFrame]);
+  UIView* placeholderView = [[UIView alloc] initWithFrame:initialTabFrame];
   [placeholderView setClipsToBounds:YES];
   [placeholderView setUserInteractionEnabled:NO];
 
-  tabScreenshotImageView.get().frame = initialTabScreenshotFrame;
-  tabScreenshotImageView.get().contentMode = UIViewContentModeScaleToFill;
-  tabScreenshotImageView.get().autoresizingMask = UIViewAutoresizingNone;
+  tabScreenshotImageView.frame = initialTabScreenshotFrame;
+  tabScreenshotImageView.contentMode = UIViewContentModeScaleToFill;
+  tabScreenshotImageView.autoresizingMask = UIViewAutoresizingNone;
   [placeholderView addSubview:tabScreenshotImageView];
 
   // Try using a snapshot view for dismissal animation because it's faster and
@@ -669,8 +685,8 @@ enum class SnapshotViewOption {
   toolbarScreenshotImageView.frame = initialToolbarScreenshotFrame;
   [placeholderView addSubview:toolbarScreenshotImageView];
 
-  base::scoped_nsobject<UIImageView> toolbarShadowImageView(
-      [[UIImageView alloc] initWithFrame:shadowInitialFrame]);
+  UIImageView* toolbarShadowImageView =
+      [[UIImageView alloc] initWithFrame:shadowInitialFrame];
   [toolbarShadowImageView setAutoresizingMask:UIViewAutoresizingNone];
   [toolbarShadowImageView setImage:NativeImage(IDR_IOS_TOOLBAR_SHADOW)];
   [placeholderView addSubview:toolbarShadowImageView];
@@ -681,17 +697,21 @@ enum class SnapshotViewOption {
   toolbarScreenshotImageView.alpha =
       (transitionType == TransitionType::TRANSITION_DISMISS) ? 0 : 1.0;
 
-  base::WeakNSObject<TabSwitcherController> weakSelf(self);
-  void (^completionBlock)(BOOL) = ^(BOOL) {
-    base::scoped_nsobject<TabSwitcherController> strongSelf([weakSelf retain]);
+  __weak TabSwitcherController* weakSelf = self;
+  void (^completionBlock)(BOOL) = ^(BOOL finished) {
+    TabSwitcherController* strongSelf = weakSelf;
 
     [tabStripPlaceholderView removeFromSuperview];
     [toolbarScreenshotImageView removeFromSuperview];
     [selectedCell setHidden:NO];
     [placeholderView removeFromSuperview];
 
-    if (transitionType == TransitionType::TRANSITION_DISMISS)
+    if (transitionType == TransitionType::TRANSITION_DISMISS) {
       [strongSelf restoreWindowBackgroundColor];
+      if (finished) {
+        [strongSelf setTransitionContext:nil];
+      }
+    }
     [[[strongSelf delegate] tabSwitcherTransitionToolbarOwner]
         reparentToolbarController];
     [[strongSelf view] setUserInteractionEnabled:YES];
@@ -702,11 +722,11 @@ enum class SnapshotViewOption {
     toolbarScreenshotImageView.alpha =
         transitionType == TransitionType::TRANSITION_DISMISS ? 1.0 : 0;
     tabStripPlaceholderView.frame = tabStripFinalFrame;
-    toolbarShadowImageView.get().frame = shadowFinalFrame;
-    placeholderView.get().frame = finalTabFrame;
+    toolbarShadowImageView.frame = shadowFinalFrame;
+    placeholderView.frame = finalTabFrame;
     toolbarScreenshotImageView.frame = finalToolbarScreenshotFrame;
     finalToolbarScreenshotImageView.frame = finalToolbarScreenshotFrame;
-    tabScreenshotImageView.get().frame = finalTabScreenshotFrame;
+    tabScreenshotImageView.frame = finalTabScreenshotFrame;
   };
 
   [UIView animateWithDuration:animated ? kTransitionAnimationDuration : 0
@@ -714,6 +734,14 @@ enum class SnapshotViewOption {
                       options:UIViewAnimationCurveEaseInOut
                    animations:animationBlock
                    completion:completionBlock];
+}
+
+- (BOOL)initialTabModelAndTabIDMatchesTabModel:(nonnull TabModel*)tabModel
+                                         tabID:(nonnull NSString*)tabID {
+  TabModel* initialTabModel = self.transitionContext.initialTabModel;
+  NSString* initialTabID =
+      [self transitionContextContentForTabModel:initialTabModel].initialTabID;
+  return initialTabModel == tabModel && [initialTabID isEqualToString:tabID];
 }
 
 - (void)updateLocalPanelsCells {
@@ -782,9 +810,9 @@ enum class SnapshotViewOption {
   DCHECK(tabModel == [_tabSwitcherModel mainTabModel] ||
          tabModel == [_tabSwitcherModel otrTabModel]);
   if (tabModel == [_tabSwitcherModel mainTabModel])
-    return _onTheRecordSession.get();
+    return _onTheRecordSession;
   if (tabModel == [_tabSwitcherModel otrTabModel])
-    return _offTheRecordSession.get();
+    return _offTheRecordSession;
   return nil;
 }
 
@@ -828,56 +856,25 @@ enum class SnapshotViewOption {
                            atIndex:(NSUInteger)position
                         transition:(ui::PageTransition)transition
                           tabModel:(TabModel*)tabModel {
-  web::NavigationManager::WebLoadParams params(URL);
-  params.referrer = web::Referrer();
-  params.transition_type = transition;
+  NSUInteger tabIndex = position;
+  if (position > tabModel.count)
+    tabIndex = tabModel.count;
 
-  DCHECK(tabModel.browserState);
+  web::NavigationManager::WebLoadParams loadParams(URL);
+  loadParams.transition_type = transition;
 
-  base::scoped_nsobject<Tab> tab([[Tab alloc]
-      initWithBrowserState:tabModel.browserState
-                    opener:nil
-               openedByDOM:NO
-                     model:tabModel]);
-  [tab webController].webUsageEnabled = tabModel.webUsageEnabled;
+  Tab* tab = [tabModel insertTabWithLoadParams:loadParams
+                                        opener:nil
+                                   openedByDOM:NO
+                                       atIndex:tabIndex
+                                  inBackground:NO];
 
-  ProceduralBlock dismissWithNewTab = ^{
-    NSUInteger tabIndex = position;
-    if (position > tabModel.count)
-      tabIndex = tabModel.count;
-    [tabModel insertTab:tab atIndex:tabIndex];
-
-    if (tabModel.tabUsageRecorder)
-      tabModel.tabUsageRecorder->TabCreatedForSelection(tab);
-
-    [[tab webController] loadWithParams:params];
-
-    if (tabModel.webUsageEnabled) {
-      [tab setWebUsageEnabled:tabModel.webUsageEnabled];
-      [[tab webController] triggerPendingLoad];
-    }
-
-    NSDictionary* userInfo = @{
-      kTabModelTabKey : tab,
-      kTabModelOpenInBackgroundKey : @(NO),
-    };
-
-    [[NSNotificationCenter defaultCenter]
-        postNotificationName:kTabModelNewTabWillOpenNotification
-                      object:self
-                    userInfo:userInfo];
-
-    [tabModel setCurrentTab:tab];
-
-    [self
-        tabSwitcherDismissWithModel:tabModel
+  [self tabSwitcherDismissWithModel:tabModel
                            animated:YES
                      withCompletion:^{
                        [self.delegate tabSwitcherDismissTransitionDidEnd:self];
                      }];
-  };
 
-  dismissWithNewTab();
   return tab;
 }
 
@@ -947,7 +944,7 @@ enum class SnapshotViewOption {
   if (entry->type != sessions::TabRestoreService::TAB)
     return;
 
-  [self chromeExecuteCommand:[GenericChromeCommand commandWithTag:IDC_NEW_TAB]];
+  [self.dispatcher openNewTab:[OpenNewTabCommand command]];
   TabRestoreServiceDelegateImplIOS* const delegate =
       TabRestoreServiceDelegateImplIOSFactory::GetForBrowserState(
           _browserState);
@@ -973,15 +970,15 @@ enum class SnapshotViewOption {
   for (NSNumber* objCIndex in insertedIndexes) {
     int index = [objCIndex intValue];
     std::string tag = [_tabSwitcherModel tagOfDistantSessionAtIndex:index];
-    base::scoped_nsobject<TabSwitcherPanelController> panelController(
+    TabSwitcherPanelController* panelController =
         [[TabSwitcherPanelController alloc] initWithModel:_tabSwitcherModel
                                  forDistantSessionWithTag:tag
-                                             browserState:_browserState]);
+                                             browserState:_browserState
+                                               dispatcher:self.dispatcher];
     [panelController setDelegate:self];
     [_tabSwitcherView addPanelView:[panelController view]
                            atIndex:index + offset];
-    [_controllersOfDistantSessions insertObject:panelController.get()
-                                        atIndex:index];
+    [_controllersOfDistantSessions insertObject:panelController atIndex:index];
   }
 
   // Update the header view.
@@ -990,8 +987,7 @@ enum class SnapshotViewOption {
 }
 
 - (void)distantSessionMayNeedUpdate:(std::string const&)tag {
-  for (TabSwitcherPanelController* panel in _controllersOfDistantSessions
-           .get()) {
+  for (TabSwitcherPanelController* panel in _controllersOfDistantSessions) {
     DCHECK([panel isKindOfClass:[TabSwitcherPanelController class]]);
     if ([panel sessionTag] == tag) {
       [panel updateCollectionViewIfNeeded];
@@ -1030,9 +1026,9 @@ enum class SnapshotViewOption {
   _signInPanelType = panelType;
   if (panelType != TabSwitcherSignInPanelsType::NO_PANEL) {
     TabSwitcherPanelOverlayView* panelView =
-        [[[TabSwitcherPanelOverlayView alloc] initWithFrame:CGRectZero
-                                               browserState:_browserState]
-            autorelease];
+        [[TabSwitcherPanelOverlayView alloc] initWithFrame:CGRectZero
+                                              browserState:_browserState
+                                                dispatcher:self.dispatcher];
     [panelView setOverlayType:PanelOverlayTypeFromSignInPanelsType(panelType)];
     [_tabSwitcherView addPanelView:panelView atIndex:kSignInPromoPanelIndex];
   }
@@ -1099,7 +1095,7 @@ enum class SnapshotViewOption {
           sync_sessions::SyncedSession::TYPE_UNSET;
       NSString* cellTitle = nil;
 
-      if (index < _controllersOfDistantSessions.get().count) {
+      if (index < _controllersOfDistantSessions.count) {
         TabSwitcherPanelController* panel =
             [_controllersOfDistantSessions objectAtIndex:index];
         const synced_sessions::DistantSession* distantSession =
@@ -1120,8 +1116,7 @@ enum class SnapshotViewOption {
           break;
       }
       TabSwitcherSessionCellData* sessionData =
-          [[[TabSwitcherSessionCellData alloc] initWithSessionCellType:cellType]
-              autorelease];
+          [[TabSwitcherSessionCellData alloc] initWithSessionCellType:cellType];
       sessionData.title = cellTitle;
       return sessionData;
     }
@@ -1137,10 +1132,8 @@ enum class SnapshotViewOption {
 - (void)openNewTabInPanelAtIndex:(NSInteger)panelIndex {
   CHECK(panelIndex >= 0);
   DCHECK([self isPanelIndexForLocalSession:panelIndex]);
-  const NSInteger tag = (panelIndex == kLocalTabsOnTheRecordPanelIndex)
-                            ? IDC_NEW_TAB
-                            : IDC_NEW_INCOGNITO_TAB;
-  if (tag == IDC_NEW_INCOGNITO_TAB) {
+  BOOL incognito = !(panelIndex == kLocalTabsOnTheRecordPanelIndex);
+  if (incognito) {
     base::RecordAction(
         base::UserMetricsAction("MobileTabSwitcherCreateIncognitoTab"));
   } else {
@@ -1148,9 +1141,8 @@ enum class SnapshotViewOption {
         base::UserMetricsAction("MobileTabSwitcherCreateNonIncognitoTab"));
   }
   // Create and execute command to create the tab.
-  base::scoped_nsobject<GenericChromeCommand> command(
-      [[GenericChromeCommand alloc] initWithTag:tag]);
-  [self chromeExecuteCommand:command];
+  [self.dispatcher
+      openNewTab:[OpenNewTabCommand commandWithIncognito:incognito]];
 }
 
 - (ios_internal::NewTabButtonStyle)buttonStyleForPanelAtIndex:
@@ -1227,7 +1219,13 @@ enum class SnapshotViewOption {
   DCHECK(tab);
   const TabSwitcherSessionType panelSessionType =
       tabSwitcherPanelController.sessionType;
-  [tab close];
+  TabModel* tabModel =
+      panelSessionType == TabSwitcherSessionType::OFF_THE_RECORD_SESSION
+          ? [_tabSwitcherModel otrTabModel]
+          : [_tabSwitcherModel mainTabModel];
+  DCHECK_NE(NSNotFound, static_cast<NSInteger>([tabModel indexOfTab:tab]));
+  [tabModel closeTab:tab];
+
   if (panelSessionType == TabSwitcherSessionType::OFF_THE_RECORD_SESSION) {
     base::RecordAction(
         base::UserMetricsAction("MobileTabSwitcherCloseIncognitoTab"));

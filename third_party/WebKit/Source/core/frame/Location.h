@@ -30,18 +30,18 @@
 #define Location_h
 
 #include "bindings/core/v8/ScriptValue.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "core/dom/DOMStringList.h"
 #include "core/frame/DOMWindow.h"
-#include "wtf/text/WTFString.h"
+#include "platform/bindings/ScriptWrappable.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
 class Document;
-class LocalDOMWindow;
 class ExceptionState;
 class KURL;
+class LocalDOMWindow;
 
 // This class corresponds to the Location interface. Location is the only
 // interface besides Window that is accessible cross-origin and must handle
@@ -53,62 +53,60 @@ class CORE_EXPORT Location final : public GarbageCollected<Location>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static Location* create(DOMWindow* domWindow) {
-    return new Location(domWindow);
+  static Location* Create(DOMWindow* dom_window) {
+    return new Location(dom_window);
   }
 
-  DOMWindow* domWindow() const { return m_domWindow.get(); }
-  // TODO(dcheng): Deprecated and will be removed. Do not use in new code!
-  Frame* frame() const { return m_domWindow->frame(); }
+  DOMWindow* DomWindow() const { return dom_window_.Get(); }
 
-  void setHref(LocalDOMWindow* currentWindow,
-               LocalDOMWindow* enteredWindow,
+  void setHref(LocalDOMWindow* current_window,
+               LocalDOMWindow* entered_window,
                const String&,
                ExceptionState&);
   String href() const;
 
-  void assign(LocalDOMWindow* currentWindow,
-              LocalDOMWindow* enteredWindow,
+  void assign(LocalDOMWindow* current_window,
+              LocalDOMWindow* entered_window,
               const String&,
               ExceptionState&);
-  void replace(LocalDOMWindow* currentWindow,
-               LocalDOMWindow* enteredWindow,
+  void replace(LocalDOMWindow* current_window,
+               LocalDOMWindow* entered_window,
                const String&,
                ExceptionState&);
-  void reload(LocalDOMWindow* currentWindow);
+  void reload(LocalDOMWindow* current_window);
 
-  void setProtocol(LocalDOMWindow* currentWindow,
-                   LocalDOMWindow* enteredWindow,
+  void setProtocol(LocalDOMWindow* current_window,
+                   LocalDOMWindow* entered_window,
                    const String&,
                    ExceptionState&);
   String protocol() const;
-  void setHost(LocalDOMWindow* currentWindow,
-               LocalDOMWindow* enteredWindow,
+  void setHost(LocalDOMWindow* current_window,
+               LocalDOMWindow* entered_window,
                const String&,
                ExceptionState&);
   String host() const;
-  void setHostname(LocalDOMWindow* currentWindow,
-                   LocalDOMWindow* enteredWindow,
+  void setHostname(LocalDOMWindow* current_window,
+                   LocalDOMWindow* entered_window,
                    const String&,
                    ExceptionState&);
   String hostname() const;
-  void setPort(LocalDOMWindow* currentWindow,
-               LocalDOMWindow* enteredWindow,
+  void setPort(LocalDOMWindow* current_window,
+               LocalDOMWindow* entered_window,
                const String&,
                ExceptionState&);
   String port() const;
-  void setPathname(LocalDOMWindow* currentWindow,
-                   LocalDOMWindow* enteredWindow,
+  void setPathname(LocalDOMWindow* current_window,
+                   LocalDOMWindow* entered_window,
                    const String&,
                    ExceptionState&);
   String pathname() const;
-  void setSearch(LocalDOMWindow* currentWindow,
-                 LocalDOMWindow* enteredWindow,
+  void setSearch(LocalDOMWindow* current_window,
+                 LocalDOMWindow* entered_window,
                  const String&,
                  ExceptionState&);
   String search() const;
-  void setHash(LocalDOMWindow* currentWindow,
-               LocalDOMWindow* enteredWindow,
+  void setHash(LocalDOMWindow* current_window,
+               LocalDOMWindow* entered_window,
                const String&,
                ExceptionState&);
   String hash() const;
@@ -120,7 +118,7 @@ class CORE_EXPORT Location final : public GarbageCollected<Location>,
   // Object prototype would.  The valueOf function is only added to make sure
   // that it cannot be overwritten on location objects, since that would provide
   // a hook to change the string conversion behavior of location objects.
-  ScriptValue valueOf(const ScriptValue& thisObject) { return thisObject; }
+  ScriptValue valueOf(const ScriptValue& this_object) { return this_object; }
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -129,21 +127,21 @@ class CORE_EXPORT Location final : public GarbageCollected<Location>,
 
   // Note: it is only valid to call this if this is a Location object for a
   // LocalDOMWindow.
-  Document* document() const;
+  Document* GetDocument() const;
 
   // Returns true if the associated Window is the active Window in the frame.
-  bool isAttached() const;
+  bool IsAttached() const;
 
-  enum class SetLocationPolicy { Normal, ReplaceThisFrame };
-  void setLocation(const String&,
-                   LocalDOMWindow* currentWindow,
-                   LocalDOMWindow* enteredWindow,
+  enum class SetLocationPolicy { kNormal, kReplaceThisFrame };
+  void SetLocation(const String&,
+                   LocalDOMWindow* current_window,
+                   LocalDOMWindow* entered_window,
                    ExceptionState* = nullptr,
-                   SetLocationPolicy = SetLocationPolicy::Normal);
+                   SetLocationPolicy = SetLocationPolicy::kNormal);
 
-  const KURL& url() const;
+  const KURL& Url() const;
 
-  const Member<DOMWindow> m_domWindow;
+  const Member<DOMWindow> dom_window_;
 };
 
 }  // namespace blink

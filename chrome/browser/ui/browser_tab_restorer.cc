@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/supports_user_data.h"
 #include "chrome/browser/profiles/profile.h"
@@ -14,7 +16,6 @@
 #include "chrome/browser/ui/browser_live_tab_context.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/sessions/core/tab_restore_service_observer.h"
-#include "content/public/browser/user_metrics.h"
 
 namespace chrome {
 namespace {
@@ -76,7 +77,8 @@ BrowserTabRestorer::BrowserTabRestorer(Browser* browser)
   DCHECK(!tab_restore_service_->IsLoaded());
   tab_restore_service_->AddObserver(this);
   BrowserList::GetInstance()->AddObserver(this);
-  browser_->profile()->SetUserData(kBrowserTabRestorerKey, this);
+  browser_->profile()->SetUserData(kBrowserTabRestorerKey,
+                                   base::WrapUnique(this));
   tab_restore_service_->LoadTabsFromLastSession();
 }
 
@@ -101,7 +103,7 @@ void BrowserTabRestorer::OnBrowserRemoved(Browser* browser) {
 }  // namespace
 
 void RestoreTab(Browser* browser) {
-  content::RecordAction(base::UserMetricsAction("RestoreTab"));
+  base::RecordAction(base::UserMetricsAction("RestoreTab"));
   sessions::TabRestoreService* service =
       TabRestoreServiceFactory::GetForProfile(browser->profile());
   if (!service)

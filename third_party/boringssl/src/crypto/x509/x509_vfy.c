@@ -146,12 +146,6 @@ static int null_callback(int ok, X509_STORE_CTX *e)
     return ok;
 }
 
-#if 0
-static int x509_subject_cmp(X509 **a, X509 **b)
-{
-    return X509_subject_name_cmp(*a, *b);
-}
-#endif
 /* Return 1 is a certificate is self signed */
 static int cert_self_signed(X509 *x)
 {
@@ -2101,7 +2095,7 @@ X509_CRL *X509_CRL_diff(X509_CRL *base, X509_CRL *newer,
 
 int X509_STORE_CTX_get_ex_new_index(long argl, void *argp,
                                     CRYPTO_EX_unused * unused,
-                                    CRYPTO_EX_dup *dup_func,
+                                    CRYPTO_EX_dup *dup_unused,
                                     CRYPTO_EX_free *free_func)
 {
     /*
@@ -2110,7 +2104,7 @@ int X509_STORE_CTX_get_ex_new_index(long argl, void *argp,
      */
     int index;
     if (!CRYPTO_get_ex_new_index(&g_ex_data_class, &index, argl, argp,
-                                 dup_func, free_func)) {
+                                 free_func)) {
         return -1;
     }
     return index;

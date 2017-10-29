@@ -9,8 +9,10 @@
 #include <string>
 
 namespace extensions {
+class APIBindingsSystem;
 class Dispatcher;
 class Extension;
+class ExtensionBindingsSystem;
 class ModuleSystem;
 class ResourceBundleSourceMap;
 class ScriptContext;
@@ -29,6 +31,7 @@ class DispatcherDelegate {
   // Includes additional native handlers in a ScriptContext's ModuleSystem.
   virtual void RegisterNativeHandlers(Dispatcher* dispatcher,
                                       ModuleSystem* module_system,
+                                      ExtensionBindingsSystem* bindings_system,
                                       ScriptContext* context) {}
 
   // Includes additional source resources into the resource map.
@@ -41,6 +44,12 @@ class DispatcherDelegate {
   // the Dispatcher.
   virtual void OnActiveExtensionsUpdated(
       const std::set<std::string>& extension_ids) {}
+
+  // Allows the delegate to add any additional custom bindings or types to the
+  // native bindings system. This will only be called if --native-crx-bindings
+  // is enabled.
+  virtual void InitializeBindingsSystem(Dispatcher* dispatcher,
+                                        APIBindingsSystem* bindings_system) {}
 };
 
 }  // namespace extensions

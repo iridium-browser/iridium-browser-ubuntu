@@ -24,32 +24,36 @@
 #ifndef HTMLFrameElement_h
 #define HTMLFrameElement_h
 
+#include "core/CoreExport.h"
 #include "core/html/HTMLFrameElementBase.h"
 
 namespace blink {
 
-class HTMLFrameElement final : public HTMLFrameElementBase {
+class CORE_EXPORT HTMLFrameElement final : public HTMLFrameElementBase {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   DECLARE_NODE_FACTORY(HTMLFrameElement);
 
-  bool hasFrameBorder() const { return m_frameBorder; }
+  bool HasFrameBorder() const { return frame_border_; }
 
-  bool noResize() const;
+  bool NoResize() const;
+
+  Vector<WebParsedFeaturePolicyDeclaration> ConstructContainerPolicy()
+      const override;
 
  private:
   explicit HTMLFrameElement(Document&);
 
-  void attachLayoutTree(const AttachContext& = AttachContext()) override;
+  void AttachLayoutTree(AttachContext&) override;
 
-  bool layoutObjectIsNeeded(const ComputedStyle&) override;
-  LayoutObject* createLayoutObject(const ComputedStyle&) override;
+  bool LayoutObjectIsNeeded(const ComputedStyle&) override;
+  LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
 
-  void parseAttribute(const AttributeModificationParams&) override;
+  void ParseAttribute(const AttributeModificationParams&) override;
 
-  bool m_frameBorder;
-  bool m_frameBorderSet;
+  bool frame_border_;
+  bool frame_border_set_;
 };
 
 }  // namespace blink

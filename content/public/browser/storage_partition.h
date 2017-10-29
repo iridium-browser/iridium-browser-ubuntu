@@ -44,12 +44,15 @@ class AppCacheService;
 class BrowserContext;
 class CacheStorageContext;
 class DOMStorageContext;
-class HostZoomLevelContext;
-class HostZoomMap;
 class IndexedDBContext;
 class PlatformNotificationContext;
 class ServiceWorkerContext;
+
+#if !defined(OS_ANDROID)
+class HostZoomLevelContext;
+class HostZoomMap;
 class ZoomLevelDelegate;
+#endif  // !defined(OS_ANDROID)
 
 // Defines what persistent state a child process can access.
 //
@@ -70,9 +73,11 @@ class CONTENT_EXPORT StoragePartition {
   virtual IndexedDBContext* GetIndexedDBContext() = 0;
   virtual ServiceWorkerContext* GetServiceWorkerContext() = 0;
   virtual CacheStorageContext* GetCacheStorageContext() = 0;
+#if !defined(OS_ANDROID)
   virtual HostZoomMap* GetHostZoomMap() = 0;
   virtual HostZoomLevelContext* GetHostZoomLevelContext() = 0;
   virtual ZoomLevelDelegate* GetZoomLevelDelegate() = 0;
+#endif  // !defined(OS_ANDROID)
   virtual PlatformNotificationContext* GetPlatformNotificationContext() = 0;
 
   enum : uint32_t {
@@ -160,6 +165,16 @@ class CONTENT_EXPORT StoragePartition {
                          const base::Time begin,
                          const base::Time end,
                          const base::Closure& callback) = 0;
+
+  // Clears the HTTP and media caches associated with this StoragePartition's
+  // request contexts. If |begin| and |end| are not null, only entries with
+  // timestamps inbetween are deleted. If |url_matcher| is not null, only
+  // entries with matching URLs are deleted.
+  virtual void ClearHttpAndMediaCaches(
+      const base::Time begin,
+      const base::Time end,
+      const base::Callback<bool(const GURL&)>& url_matcher,
+      const base::Closure& callback) = 0;
 
   // Write any unwritten data to disk.
   // Note: this method does not sync the data - it only ensures that any

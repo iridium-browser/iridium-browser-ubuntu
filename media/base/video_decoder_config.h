@@ -16,8 +16,8 @@
 #include "media/base/hdr_metadata.h"
 #include "media/base/media_export.h"
 #include "media/base/video_codecs.h"
+#include "media/base/video_color_space.h"
 #include "media/base/video_types.h"
-#include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -89,14 +89,14 @@ class MEDIA_EXPORT VideoDecoderConfig {
   // Deprecated. TODO(wolenetz): Remove. See https://crbug.com/665539.
   // Width and height of video frame immediately post-decode. Not all pixels
   // in this region are valid.
-  gfx::Size coded_size() const { return coded_size_; }
+  const gfx::Size& coded_size() const { return coded_size_; }
 
   // Region of |coded_size_| that is visible.
-  gfx::Rect visible_rect() const { return visible_rect_; }
+  const gfx::Rect& visible_rect() const { return visible_rect_; }
 
   // Final visible width and height of a video frame with aspect ratio taken
   // into account.
-  gfx::Size natural_size() const { return natural_size_; }
+  const gfx::Size& natural_size() const { return natural_size_; }
 
   // Optional byte data required to initialize video decoders, such as H.264
   // AVCC data.
@@ -113,16 +113,14 @@ class MEDIA_EXPORT VideoDecoderConfig {
     return encryption_scheme_;
   }
 
-  void set_color_space_info(const gfx::ColorSpace& color_space_info);
-  gfx::ColorSpace color_space_info() const;
+  void set_color_space_info(const VideoColorSpace& color_space_info);
+  const VideoColorSpace& color_space_info() const;
 
   void set_hdr_metadata(const HDRMetadata& hdr_metadata);
-  base::Optional<HDRMetadata> hdr_metadata() const;
+  const base::Optional<HDRMetadata>& hdr_metadata() const;
 
   // Sets the config to be encrypted or not encrypted manually. This can be
-  // useful for decryptors that decrypts an encrypted stream to a clear stream,
-  // or for decoder selectors that wants to select decrypting decoders instead
-  // of clear decoders.
+  // useful for decryptors that decrypts an encrypted stream to a clear stream.
   void SetIsEncrypted(bool is_encrypted);
 
  private:
@@ -144,7 +142,7 @@ class MEDIA_EXPORT VideoDecoderConfig {
 
   EncryptionScheme encryption_scheme_;
 
-  gfx::ColorSpace color_space_info_;
+  VideoColorSpace color_space_info_;
   base::Optional<HDRMetadata> hdr_metadata_;
 
   // Not using DISALLOW_COPY_AND_ASSIGN here intentionally to allow the compiler

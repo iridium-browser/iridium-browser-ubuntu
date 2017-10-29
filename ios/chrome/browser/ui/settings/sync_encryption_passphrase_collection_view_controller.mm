@@ -8,8 +8,7 @@
 
 #include "base/i18n/time_formatting.h"
 #include "base/mac/foundation_util.h"
-#import "base/mac/objc_property_releaser.h"
-#import "base/mac/scoped_nsobject.h"
+
 #include "base/strings/sys_string_conversions.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/google/core/browser/google_util.h"
@@ -40,10 +39,13 @@
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/public/provider/chrome/browser/signin/chrome_identity.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
-#import "ios/third_party/material_roboto_font_loader_ios/src/src/MaterialRobotoFontLoader.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using namespace ios_internal::sync_encryption_passphrase;
 
@@ -60,13 +62,11 @@ const CGFloat kSpinnerButtonPadding = 18;
   ios::ChromeBrowserState* browserState_;
   // Whether the decryption progress is currently being shown.
   BOOL isDecryptionProgressShown_;
-  base::scoped_nsobject<NSString> savedTitle_;
-  base::scoped_nsobject<UIBarButtonItem> savedLeftButton_;
+  NSString* savedTitle_;
+  UIBarButtonItem* savedLeftButton_;
   std::unique_ptr<SyncObserverBridge> syncObserver_;
   std::unique_ptr<OAuth2TokenServiceObserverBridge> tokenServiceObserver_;
-  base::scoped_nsobject<UITextField> passphrase_;
-  base::mac::ObjCPropertyReleaser
-      propertyReleaser_SyncEncryptionPassphraseCollectionViewController_;
+  UITextField* passphrase_;
 }
 
 // Sets up the navigation bar's right button. The button will be enabled iff
@@ -106,7 +106,9 @@ const CGFloat kSpinnerButtonPadding = 18;
 
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
   DCHECK(browserState);
-  self = [super initWithStyle:CollectionViewControllerStyleAppBar];
+  UICollectionViewLayout* layout = [[MDCCollectionViewFlowLayout alloc] init];
+  self =
+      [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
   if (self) {
     self.title = l10n_util::GetNSString(IDS_IOS_SYNC_ENTER_PASSPHRASE_TITLE);
     self.shouldHideDoneButton = YES;
@@ -136,14 +138,10 @@ const CGFloat kSpinnerButtonPadding = 18;
           l10n_util::GetNSString(IDS_SYNC_ENTER_GOOGLE_PASSPHRASE_BODY);
     }
     self.processingMessage = l10n_util::GetNSString(IDS_SYNC_LOGIN_SETTING_UP);
-    footerMessage_ =
-        [l10n_util::GetNSString(IDS_IOS_SYNC_PASSPHRASE_RECOVER) retain];
+    footerMessage_ = l10n_util::GetNSString(IDS_IOS_SYNC_PASSPHRASE_RECOVER);
 
     tokenServiceObserver_.reset(new OAuth2TokenServiceObserverBridge(
         OAuth2TokenServiceFactory::GetForBrowserState(browserState_), self));
-
-    propertyReleaser_SyncEncryptionPassphraseCollectionViewController_.Init(
-        self, [SyncEncryptionPassphraseCollectionViewController class]);
 
     [self loadModel];
   }
@@ -180,7 +178,7 @@ const CGFloat kSpinnerButtonPadding = 18;
 - (void)didReceiveMemoryWarning {
   [super didReceiveMemoryWarning];
   if (![self isViewLoaded]) {
-    passphrase_.reset();
+    passphrase_ = nil;
   }
 }
 
@@ -226,7 +224,7 @@ const CGFloat kSpinnerButtonPadding = 18;
 
 - (CollectionViewItem*)passphraseMessageItem {
   CardMultilineItem* item =
-      [[[CardMultilineItem alloc] initWithType:ItemTypeMessage] autorelease];
+      [[CardMultilineItem alloc] initWithType:ItemTypeMessage];
   item.text = headerMessage_;
   return item;
 }
@@ -235,7 +233,7 @@ const CGFloat kSpinnerButtonPadding = 18;
   if (passphrase_) {
     [self unregisterTextField:passphrase_];
   }
-  passphrase_.reset([[UITextField alloc] init]);
+  passphrase_ = [[UITextField alloc] init];
   [passphrase_ setFont:[MDCTypography body1Font]];
   [passphrase_ setSecureTextEntry:YES];
   [passphrase_ setBackgroundColor:[UIColor clearColor]];
@@ -245,22 +243,22 @@ const CGFloat kSpinnerButtonPadding = 18;
       setPlaceholder:l10n_util::GetNSString(IDS_SYNC_PASSPHRASE_LABEL)];
   [self registerTextField:passphrase_];
 
-  BYOTextFieldItem* item = [[[BYOTextFieldItem alloc]
-      initWithType:ItemTypeEnterPassphrase] autorelease];
+  BYOTextFieldItem* item =
+      [[BYOTextFieldItem alloc] initWithType:ItemTypeEnterPassphrase];
   item.textField = passphrase_;
   return item;
 }
 
 - (CollectionViewItem*)passphraseErrorItemWithMessage:(NSString*)errorMessage {
   PassphraseErrorItem* item =
-      [[[PassphraseErrorItem alloc] initWithType:ItemTypeError] autorelease];
+      [[PassphraseErrorItem alloc] initWithType:ItemTypeError];
   item.text = errorMessage;
   return item;
 }
 
 - (CollectionViewItem*)footerItem {
-  CollectionViewFooterItem* footerItem = [[[CollectionViewFooterItem alloc]
-      initWithType:ItemTypeFooter] autorelease];
+  CollectionViewFooterItem* footerItem =
+      [[CollectionViewFooterItem alloc] initWithType:ItemTypeFooter];
   footerItem.text = self.footerMessage;
   footerItem.linkURL = google_util::AppendGoogleLocaleParam(
       GURL(kSyncGoogleDashboardURL),
@@ -323,7 +321,7 @@ const CGFloat kSpinnerButtonPadding = 18;
     CardMultilineCell* messageCell =
         base::mac::ObjCCastStrict<CardMultilineCell>(cell);
     messageCell.textLabel.font =
-        [[MDFRobotoFontLoader sharedInstance] mediumFontOfSize:14];
+        [[MDCTypography fontLoader] mediumFontOfSize:14];
   }
   return cell;
 }
@@ -390,11 +388,11 @@ const CGFloat kSpinnerButtonPadding = 18;
 - (void)setRightNavBarItem {
   UIBarButtonItem* submitButtonItem = self.navigationItem.rightBarButtonItem;
   if (!submitButtonItem) {
-    submitButtonItem = [[[UIBarButtonItem alloc]
+    submitButtonItem = [[UIBarButtonItem alloc]
         initWithTitle:l10n_util::GetNSString(IDS_IOS_SYNC_DECRYPT_BUTTON)
                 style:UIBarButtonItemStylePlain
                target:self
-               action:@selector(signInPressed)] autorelease];
+               action:@selector(signInPressed)];
   }
   submitButtonItem.enabled = [self areAllFieldsFilled];
 
@@ -423,9 +421,9 @@ const CGFloat kSpinnerButtonPadding = 18;
   // Custom title view with spinner.
   DCHECK(!savedTitle_);
   DCHECK(!savedLeftButton_);
-  savedLeftButton_.reset([self.navigationItem.leftBarButtonItem retain]);
+  savedLeftButton_ = self.navigationItem.leftBarButtonItem;
   self.navigationItem.leftBarButtonItem = [self spinnerButton];
-  savedTitle_.reset([self.title copy]);
+  savedTitle_ = [self.title copy];
   self.title = processingMessage_;
 }
 
@@ -434,8 +432,10 @@ const CGFloat kSpinnerButtonPadding = 18;
     return;
   isDecryptionProgressShown_ = NO;
 
-  self.navigationItem.leftBarButtonItem = savedLeftButton_.autorelease();
-  self.title = savedTitle_.autorelease();
+  self.navigationItem.leftBarButtonItem = savedLeftButton_;
+  savedLeftButton_ = nil;
+  self.title = savedTitle_;
+  savedTitle_ = nil;
   [self setRightNavBarItem];
 }
 
@@ -466,12 +466,10 @@ const CGFloat kSpinnerButtonPadding = 18;
 - (UIBarButtonItem*)spinnerButton {
   CGRect customViewFrame = CGRectMake(0, 0, kSpinnerButtonCustomViewSize,
                                       kSpinnerButtonCustomViewSize);
-  base::scoped_nsobject<UIView> customView(
-      [[UIView alloc] initWithFrame:customViewFrame]);
+  UIView* customView = [[UIView alloc] initWithFrame:customViewFrame];
 
-  base::scoped_nsobject<UIActivityIndicatorView> spinner(
-      [[UIActivityIndicatorView alloc]
-          initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray]);
+  UIActivityIndicatorView* spinner = [[UIActivityIndicatorView alloc]
+      initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
 
   CGRect spinnerFrame = [spinner bounds];
   spinnerFrame.origin.x = kSpinnerButtonPadding;
@@ -479,13 +477,13 @@ const CGFloat kSpinnerButtonPadding = 18;
   [spinner setFrame:spinnerFrame];
   [customView addSubview:spinner];
 
-  base::scoped_nsobject<UIBarButtonItem> leftBarButtonItem(
-      [[UIBarButtonItem alloc] initWithCustomView:customView]);
+  UIBarButtonItem* leftBarButtonItem =
+      [[UIBarButtonItem alloc] initWithCustomView:customView];
 
   [spinner setHidesWhenStopped:NO];
   [spinner startAnimating];
 
-  return leftBarButtonItem.autorelease();
+  return leftBarButtonItem;
 }
 
 - (void)stopObserving {

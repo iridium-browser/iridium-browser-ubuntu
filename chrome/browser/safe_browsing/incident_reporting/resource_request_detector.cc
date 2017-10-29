@@ -10,7 +10,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_receiver.h"
 #include "chrome/browser/safe_browsing/incident_reporting/resource_request_incident.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -73,8 +73,8 @@ class ResourceRequestDetectorClient
       , callback_(callback) {
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
-        base::Bind(&ResourceRequestDetectorClient::StartCheck, this,
-                   resource_url));
+        base::BindOnce(&ResourceRequestDetectorClient::StartCheck, this,
+                       resource_url));
   }
 
  private:
@@ -107,7 +107,7 @@ class ResourceRequestDetectorClient
       incident_data->set_digest(threat_hash);
       content::BrowserThread::PostTask(
           content::BrowserThread::UI, FROM_HERE,
-          base::Bind(callback_, base::Passed(&incident_data)));
+          base::BindOnce(callback_, base::Passed(&incident_data)));
     }
     Release();  // Balanced in StartCheck.
   }

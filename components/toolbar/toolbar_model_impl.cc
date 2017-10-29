@@ -11,6 +11,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/security_state/core/security_state.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/toolbar/features.h"
 #include "components/toolbar/toolbar_model_delegate.h"
 #include "components/url_formatter/elide_url.h"
 #include "components/url_formatter/url_formatter.h"
@@ -21,8 +22,9 @@
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/vector_icon_types.h"
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if (!defined(OS_ANDROID) || BUILDFLAG(ENABLE_VR)) && !defined(OS_IOS)
 #include "components/toolbar/vector_icons.h"  // nogncheck
+#include "components/vector_icons/vector_icons.h"  // nogncheck
 #endif
 
 ToolbarModelImpl::ToolbarModelImpl(ToolbarModelDelegate* delegate,
@@ -72,10 +74,13 @@ security_state::SecurityLevel ToolbarModelImpl::GetSecurityLevel(
 }
 
 const gfx::VectorIcon& ToolbarModelImpl::GetVectorIcon() const {
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if (!defined(OS_ANDROID) || BUILDFLAG(ENABLE_VR)) && !defined(OS_IOS)
   auto* const icon_override = delegate_->GetVectorIconOverride();
   if (icon_override)
     return *icon_override;
+
+  if (IsOfflinePage())
+    return toolbar::kOfflinePinIcon;
 
   switch (GetSecurityLevel(false)) {
     case security_state::NONE:
@@ -88,7 +93,7 @@ const gfx::VectorIcon& ToolbarModelImpl::GetVectorIcon() const {
       // Surface Dubious as Neutral.
       return toolbar::kHttpIcon;
     case security_state::SECURE_WITH_POLICY_INSTALLED_CERT:
-      return toolbar::kBusinessIcon;
+      return vector_icons::kBusinessIcon;
     case security_state::DANGEROUS:
       return toolbar::kHttpsInvalidIcon;
   }
@@ -119,6 +124,9 @@ base::string16 ToolbarModelImpl::GetEVCertName() const {
 }
 
 base::string16 ToolbarModelImpl::GetSecureVerboseText() const {
+  if (IsOfflinePage())
+    return l10n_util::GetStringUTF16(IDS_OFFLINE_VERBOSE_STATE);
+
   switch (GetSecurityLevel(false)) {
     case security_state::HTTP_SHOW_WARNING:
       return l10n_util::GetStringUTF16(IDS_NOT_SECURE_VERBOSE_STATE);
@@ -135,4 +143,8 @@ base::string16 ToolbarModelImpl::GetSecureVerboseText() const {
 
 bool ToolbarModelImpl::ShouldDisplayURL() const {
   return delegate_->ShouldDisplayURL();
+}
+
+bool ToolbarModelImpl::IsOfflinePage() const {
+  return delegate_->IsOfflinePage();
 }

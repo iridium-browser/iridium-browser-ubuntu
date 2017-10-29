@@ -187,6 +187,9 @@ class BASE_EXPORT HistogramBase {
 
   // Snapshot the current complete set of sample data.
   // Override with atomic/locked snapshot if needed.
+  // NOTE: this data can overflow for long-running sessions. It should be
+  // handled with care and this method is recommended to be used only
+  // in about:histograms and test code.
   virtual std::unique_ptr<HistogramSamples> SnapshotSamples() const = 0;
 
   // Calculate the change (delta) in histogram counts since the previous call
@@ -206,6 +209,9 @@ class BASE_EXPORT HistogramBase {
   // The following methods provide graphical histogram displays.
   virtual void WriteHTMLGraph(std::string* output) const = 0;
   virtual void WriteAscii(std::string* output) const = 0;
+
+  // TODO(bcwhite): Remove this after crbug/736675.
+  virtual void ValidateHistogramContents() const {}
 
   // Produce a JSON representation of the histogram. This is implemented with
   // the help of GetParameters and GetCountAndBucketData; overwrite them to

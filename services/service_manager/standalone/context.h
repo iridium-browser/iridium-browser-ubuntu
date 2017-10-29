@@ -11,17 +11,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "services/service_manager/runner/host/service_process_launcher.h"
-#include "services/service_manager/standalone/tracer.h"
-#include "services/tracing/public/cpp/provider.h"
+#include "services/service_manager/runner/host/service_process_launcher_delegate.h"
 
 namespace base {
 class SequencedWorkerPool;
 class Value;
-}
-
-namespace catalog {
-class Catalog;
 }
 
 namespace service_manager {
@@ -33,7 +27,7 @@ constexpr size_t kThreadPoolMaxThreads = 3;
 // The "global" context for the service manager's main process.
 class Context {
  public:
-  Context(ServiceProcessLauncher::Delegate* launcher_delegate,
+  Context(ServiceProcessLauncherDelegate* launcher_delegate,
           std::unique_ptr<base::Value> catalog_content);
   ~Context();
 
@@ -48,9 +42,6 @@ class Context {
 
   scoped_refptr<base::SequencedWorkerPool> blocking_pool_;
 
-  Tracer tracer_;
-  tracing::Provider provider_;
-  std::unique_ptr<catalog::Catalog> catalog_;
   std::unique_ptr<ServiceManager> service_manager_;
   base::Time main_entry_time_;
 

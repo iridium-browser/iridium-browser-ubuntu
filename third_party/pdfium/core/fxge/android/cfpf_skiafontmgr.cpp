@@ -13,7 +13,8 @@
 
 #include <algorithm>
 
-#include "core/fxcrt/fx_ext.h"
+#include "core/fxcrt/fx_codepage.h"
+#include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_memory.h"
 #include "core/fxcrt/fx_system.h"
 #include "core/fxge/android/cfpf_skiafont.h"
@@ -87,12 +88,12 @@ uint32_t FPF_SkiaGetSubstFont(uint32_t dwHash,
   return 0;
 }
 
-uint32_t FPF_GetHashCode_StringA(const FX_CHAR* pStr, int32_t iLength) {
+uint32_t FPF_GetHashCode_StringA(const char* pStr, int32_t iLength) {
   if (!pStr)
     return 0;
   if (iLength < 0)
     iLength = FXSYS_strlen(pStr);
-  const FX_CHAR* pStrEnd = pStr + iLength;
+  const char* pStrEnd = pStr + iLength;
   uint32_t uHashCode = 0;
   while (pStr < pStrEnd)
     uHashCode = 31 * uHashCode + FXSYS_tolower(*pStr++);
@@ -123,35 +124,35 @@ enum FPF_SKIACHARSET {
 
 uint32_t FPF_SkiaGetCharset(uint8_t uCharset) {
   switch (uCharset) {
-    case FXFONT_ANSI_CHARSET:
+    case FX_CHARSET_ANSI:
       return FPF_SKIACHARSET_Ansi;
-    case FXFONT_DEFAULT_CHARSET:
+    case FX_CHARSET_Default:
       return FPF_SKIACHARSET_Default;
-    case FXFONT_SYMBOL_CHARSET:
+    case FX_CHARSET_Symbol:
       return FPF_SKIACHARSET_Symbol;
-    case FXFONT_SHIFTJIS_CHARSET:
+    case FX_CHARSET_ShiftJIS:
       return FPF_SKIACHARSET_ShiftJIS;
-    case FXFONT_HANGUL_CHARSET:
+    case FX_CHARSET_Hangul:
       return FPF_SKIACHARSET_Korean;
-    case FXFONT_GB2312_CHARSET:
+    case FX_CHARSET_ChineseSimplified:
       return FPF_SKIACHARSET_GB2312;
-    case FXFONT_CHINESEBIG5_CHARSET:
+    case FX_CHARSET_ChineseTraditional:
       return FPF_SKIACHARSET_BIG5;
-    case FXFONT_GREEK_CHARSET:
+    case FX_CHARSET_MSWin_Greek:
       return FPF_SKIACHARSET_Greek;
-    case FXFONT_TURKISH_CHARSET:
+    case FX_CHARSET_MSWin_Turkish:
       return FPF_SKIACHARSET_Turkish;
-    case FXFONT_HEBREW_CHARSET:
+    case FX_CHARSET_MSWin_Hebrew:
       return FPF_SKIACHARSET_Hebrew;
-    case FXFONT_ARABIC_CHARSET:
+    case FX_CHARSET_MSWin_Arabic:
       return FPF_SKIACHARSET_Arabic;
-    case FXFONT_BALTIC_CHARSET:
+    case FX_CHARSET_MSWin_Baltic:
       return FPF_SKIACHARSET_Baltic;
-    case FXFONT_RUSSIAN_CHARSET:
+    case FX_CHARSET_MSWin_Cyrillic:
       return FPF_SKIACHARSET_Cyrillic;
-    case FXFONT_THAI_CHARSET:
+    case FX_CHARSET_Thai:
       return FPF_SKIACHARSET_Thai;
-    case FXFONT_EASTEUROPE_CHARSET:
+    case FX_CHARSET_MSWin_EasternEuropean:
       return FPF_SKIACHARSET_EeasternEuropean;
   }
   return FPF_SKIACHARSET_Default;
@@ -160,9 +161,9 @@ uint32_t FPF_SkiaGetCharset(uint8_t uCharset) {
 uint32_t FPF_SKIANormalizeFontName(const CFX_ByteStringC& bsfamily) {
   uint32_t dwHash = 0;
   int32_t iLength = bsfamily.GetLength();
-  const FX_CHAR* pBuffer = bsfamily.c_str();
+  const char* pBuffer = bsfamily.unterminated_c_str();
   for (int32_t i = 0; i < iLength; i++) {
-    FX_CHAR ch = pBuffer[i];
+    char ch = pBuffer[i];
     if (ch == ' ' || ch == '-' || ch == ',')
       continue;
     dwHash = 31 * dwHash + FXSYS_tolower(ch);
@@ -185,10 +186,9 @@ uint32_t FPF_SKIAGetFamilyHash(const CFX_ByteStringC& bsFamily,
 }
 
 bool FPF_SkiaIsCJK(uint8_t uCharset) {
-  return (uCharset == FXFONT_GB2312_CHARSET) ||
-         (uCharset == FXFONT_CHINESEBIG5_CHARSET) ||
-         (uCharset == FXFONT_HANGUL_CHARSET) ||
-         (uCharset == FXFONT_SHIFTJIS_CHARSET);
+  return (uCharset == FX_CHARSET_ChineseSimplified) ||
+         (uCharset == FX_CHARSET_ChineseTraditional) ||
+         (uCharset == FX_CHARSET_Hangul) || (uCharset == FX_CHARSET_ShiftJIS);
 }
 
 bool FPF_SkiaMaybeSymbol(const CFX_ByteStringC& bsFacename) {
@@ -295,11 +295,12 @@ CFPF_SkiaFont* CFPF_SkiaFontMgr::CreateFont(const CFX_ByteStringC& bsFamilyname,
   uint32_t dwSubstSans = FPF_SkiaGetSubstFont(dwFaceName, g_SkiaSansFontMap,
                                               FX_ArraySize(g_SkiaSansFontMap));
   bool bMaybeSymbol = FPF_SkiaMaybeSymbol(bsFamilyname);
-  if (uCharset != FXFONT_ARABIC_CHARSET && FPF_SkiaMaybeArabic(bsFamilyname)) {
-    uCharset = FXFONT_ARABIC_CHARSET;
-  } else if (uCharset == FXFONT_ANSI_CHARSET &&
+  if (uCharset != FX_CHARSET_MSWin_Arabic &&
+      FPF_SkiaMaybeArabic(bsFamilyname)) {
+    uCharset = FX_CHARSET_MSWin_Arabic;
+  } else if (uCharset == FX_CHARSET_ANSI &&
              (dwMatch & FPF_MATCHFONT_REPLACEANSI)) {
-    uCharset = FXFONT_DEFAULT_CHARSET;
+    uCharset = FX_CHARSET_Default;
   }
   int32_t nExpectVal = FPF_SKIAMATCHWEIGHT_NAME1 + FPF_SKIAMATCHWEIGHT_1 * 3 +
                        FPF_SKIAMATCHWEIGHT_2 * 2;
@@ -331,7 +332,7 @@ CFPF_SkiaFont* CFPF_SkiaFontMgr::CreateFont(const CFX_ByteStringC& bsFamilyname,
       nFind += FPF_SKIAMATCHWEIGHT_NAME2;
       bMatchedName = true;
     }
-    if (uCharset == FXFONT_DEFAULT_CHARSET || bMaybeSymbol) {
+    if (uCharset == FX_CHARSET_Default || bMaybeSymbol) {
       if (nFind > nMax && bMatchedName) {
         nMax = nFind;
         pBestFontDes = *it;
@@ -371,7 +372,7 @@ FXFT_Face CFPF_SkiaFontMgr::GetFontFace(
   if (iFaceIndex < 0)
     return nullptr;
   FXFT_StreamRec streamRec;
-  FXSYS_memset(&streamRec, 0, sizeof(FXFT_StreamRec));
+  memset(&streamRec, 0, sizeof(FXFT_StreamRec));
   streamRec.size = pFileRead->GetSize();
   streamRec.descriptor.pointer = static_cast<void*>(pFileRead.Get());
   streamRec.read = FPF_SkiaStream_Read;
@@ -394,7 +395,7 @@ FXFT_Face CFPF_SkiaFontMgr::GetFontFace(const CFX_ByteStringC& bsFile,
     return nullptr;
   FXFT_Open_Args args;
   args.flags = FT_OPEN_PATHNAME;
-  args.pathname = const_cast<FT_String*>(bsFile.c_str());
+  args.pathname = const_cast<FT_String*>(bsFile.unterminated_c_str());
   FXFT_Face face;
   if (FXFT_Open_Face(m_FTLibrary, &args, iFaceIndex, &face))
     return nullptr;

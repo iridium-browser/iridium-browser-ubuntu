@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "base/callback_forward.h"
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/leveldb_proto/proto_database.h"
@@ -17,7 +18,6 @@
 
 namespace base {
 class Clock;
-class SequencedTaskRunner;
 class Time;
 }
 
@@ -43,26 +43,23 @@ class BudgetDatabase {
       base::Callback<void(blink::mojom::BudgetServiceErrorType error_type,
                           bool success)>;
 
-  // The database_dir specifies the location of the budget information on
-  // disk. The task_runner is used by the ProtoDatabase to handle all blocking
-  // calls and disk access.
-  BudgetDatabase(Profile* profile,
-                 const base::FilePath& database_dir,
-                 const scoped_refptr<base::SequencedTaskRunner>& task_runner);
+  // The database_dir specifies the location of the budget information on disk.
+  BudgetDatabase(Profile* profile, const base::FilePath& database_dir);
   ~BudgetDatabase();
 
   // Get the full budget expectation for the origin. This will return a
   // sequence of time points and the expected budget at those times.
-  void GetBudgetDetails(const url::Origin& origin,
-                        const GetBudgetCallback& callback);
+  void GetBudgetDetails(const url::Origin& origin, GetBudgetCallback callback);
 
   // Spend a particular amount of budget for an origin. The callback indicates
   // whether there was an error and if the origin had enough budget.
   void SpendBudget(const url::Origin& origin,
                    double amount,
-                   const SpendBudgetCallback& callback);
+                   SpendBudgetCallback callback);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(BudgetDatabaseTest,
+                           DefaultSiteEngagementInIncognitoProfile);
   friend class BudgetDatabaseTest;
 
   // Used to allow tests to change time for testing.
@@ -98,9 +95,9 @@ class BudgetDatabase {
   };
 
   // Callback for writing budget values to the database.
-  using StoreBudgetCallback = base::Callback<void(bool success)>;
+  using StoreBudgetCallback = base::OnceCallback<void(bool success)>;
 
-  using CacheCallback = base::Callback<void(bool success)>;
+  using CacheCallback = base::OnceCallback<void(bool success)>;
 
   void OnDatabaseInit(bool success);
 
@@ -109,27 +106,27 @@ class BudgetDatabase {
   double GetBudget(const url::Origin& origin) const;
 
   void AddToCache(const url::Origin& origin,
-                  const CacheCallback& callback,
+                  CacheCallback callback,
                   bool success,
                   std::unique_ptr<budget_service::Budget> budget);
 
   void GetBudgetAfterSync(const url::Origin& origin,
-                          const GetBudgetCallback& callback,
+                          GetBudgetCallback callback,
                           bool success);
 
   void SpendBudgetAfterSync(const url::Origin& origin,
                             double amount,
-                            const SpendBudgetCallback& callback,
+                            SpendBudgetCallback callback,
                             bool success);
 
-  void SpendBudgetAfterWrite(const SpendBudgetCallback& callback, bool success);
+  void SpendBudgetAfterWrite(SpendBudgetCallback callback, bool success);
 
   void WriteCachedValuesToDatabase(const url::Origin& origin,
-                                   const StoreBudgetCallback& callback);
+                                   StoreBudgetCallback callback);
 
-  void SyncCache(const url::Origin& origin, const CacheCallback& callback);
+  void SyncCache(const url::Origin& origin, CacheCallback callback);
   void SyncLoadedCache(const url::Origin& origin,
-                       const CacheCallback& callback,
+                       CacheCallback callback,
                        bool success);
 
   // Add budget based on engagement with an origin. The method queries for the
@@ -139,6 +136,10 @@ class BudgetDatabase {
   void AddEngagementBudget(const url::Origin& origin);
 
   bool CleanupExpiredBudget(const url::Origin& origin);
+
+  // Gets the current Site Engagement Score for |origin|. Will return a fixed
+  // score of zero when |profile_| is off the record.
+  double GetSiteEngagementScoreForOrigin(const url::Origin& origin) const;
 
   Profile* profile_;
 

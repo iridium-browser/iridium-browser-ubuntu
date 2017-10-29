@@ -26,8 +26,8 @@ class Timer;
 
 namespace content {
 
+class DevToolsAgentHostImpl;
 class DevToolsIOContext;
-class DevToolsSession;
 
 namespace protocol {
 
@@ -40,7 +40,7 @@ class TracingHandler : public DevToolsDomainHandler,
                  DevToolsIOContext* io_context);
   ~TracingHandler() override;
 
-  static TracingHandler* FromSession(DevToolsSession* session);
+  static std::vector<TracingHandler*> ForAgentHost(DevToolsAgentHostImpl* host);
 
   void Wire(UberDispatcher* dispatcher) override;
   Response Disable() override;
@@ -70,8 +70,8 @@ class TracingHandler : public DevToolsDomainHandler,
   void OnCategoriesReceived(std::unique_ptr<GetCategoriesCallback> callback,
                             const std::set<std::string>& category_set);
   void OnMemoryDumpFinished(std::unique_ptr<RequestMemoryDumpCallback> callback,
-                            uint64_t dump_guid,
-                            bool success);
+                            bool success,
+                            uint64_t dump_id);
 
   void SetupTimer(double usage_reporting_interval);
   void StopTracing(

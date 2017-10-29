@@ -23,8 +23,18 @@
 
 namespace media {
 
-// Static POD class for generating unique identifiers for each VideoFrame.
-static base::StaticAtomicSequenceNumber g_unique_id_generator;
+namespace {
+
+// Helper to privide gfx::Rect::Intersect() as an expression.
+gfx::Rect Intersection(gfx::Rect a, const gfx::Rect& b) {
+  a.Intersect(b);
+  return a;
+}
+
+}  // namespace
+
+// Static constexpr class for generating unique identifiers for each VideoFrame.
+static base::AtomicSequenceNumber g_unique_id_generator;
 
 static bool IsPowerOfTwo(size_t x) {
   return x != 0 && (x & (x - 1)) == 0;
@@ -231,7 +241,7 @@ scoped_refptr<VideoFrame> VideoFrame::WrapExternalData(
     base::TimeDelta timestamp) {
   return WrapExternalStorage(format, STORAGE_UNOWNED_MEMORY, coded_size,
                              visible_rect, natural_size, data, data_size,
-                             timestamp, base::SharedMemory::NULLHandle(), 0);
+                             timestamp, base::SharedMemoryHandle(), 0);
 }
 
 // static
@@ -441,7 +451,7 @@ scoped_refptr<VideoFrame> VideoFrame::WrapVideoFrame(
   if (frame->storage_type() == STORAGE_DMABUFS) {
     std::vector<int> original_fds;
     for (size_t i = 0; i < kMaxPlanes; ++i)
-      original_fds.push_back(frame->dmabuf_fd(i));
+      original_fds.push_back(frame->DmabufFd(i));
     if (!wrapping_frame->DuplicateFileDescriptors(original_fds)) {
       LOG(DFATAL) << __func__ << " Couldn't duplicate fds.";
       return nullptr;
@@ -712,18 +722,18 @@ VideoFrame::mailbox_holder(size_t texture_index) const {
 
 base::SharedMemoryHandle VideoFrame::shared_memory_handle() const {
   DCHECK_EQ(storage_type_, STORAGE_SHMEM);
-  DCHECK(shared_memory_handle_ != base::SharedMemory::NULLHandle());
+  DCHECK(shared_memory_handle_.IsValid());
   return shared_memory_handle_;
 }
 
 size_t VideoFrame::shared_memory_offset() const {
   DCHECK_EQ(storage_type_, STORAGE_SHMEM);
-  DCHECK(shared_memory_handle_ != base::SharedMemory::NULLHandle());
+  DCHECK(shared_memory_handle_.IsValid());
   return shared_memory_offset_;
 }
 
 #if defined(OS_LINUX)
-int VideoFrame::dmabuf_fd(size_t plane) const {
+int VideoFrame::DmabufFd(size_t plane) const {
   DCHECK_EQ(storage_type_, STORAGE_DMABUFS);
   DCHECK(IsValidPlane(plane, format_));
   return dmabuf_fds_[plane].get();
@@ -763,7 +773,7 @@ void VideoFrame::AddSharedMemoryHandle(base::SharedMemoryHandle handle) {
 }
 
 #if defined(OS_MACOSX)
-CVPixelBufferRef VideoFrame::cv_pixel_buffer() const {
+CVPixelBufferRef VideoFrame::CvPixelBuffer() const {
   return cv_pixel_buffer_.get();
 }
 #endif
@@ -775,9 +785,9 @@ void VideoFrame::SetReleaseMailboxCB(
   mailbox_holders_release_cb_ = release_mailbox_cb;
 }
 
-void VideoFrame::AddDestructionObserver(const base::Closure& callback) {
+void VideoFrame::AddDestructionObserver(base::OnceClosure callback) {
   DCHECK(!callback.is_null());
-  done_callbacks_.push_back(callback);
+  done_callbacks_.push_back(std::move(callback));
 }
 
 void VideoFrame::UpdateReleaseSyncToken(SyncTokenClient* client) {
@@ -800,6 +810,53 @@ std::string VideoFrame::AsHumanReadableString() {
                       natural_size_)
     << " timestamp:" << timestamp_.InMicroseconds();
   return s.str();
+}
+
+int VideoFrame::BitsPerChannel(VideoPixelFormat format) {
+  int bits_per_channel = 0;
+  switch (format) {
+    case media::PIXEL_FORMAT_UNKNOWN:
+      NOTREACHED();
+    // Fall through!
+    case media::PIXEL_FORMAT_I420:
+    case media::PIXEL_FORMAT_YV12:
+    case media::PIXEL_FORMAT_YV16:
+    case media::PIXEL_FORMAT_YV12A:
+    case media::PIXEL_FORMAT_YV24:
+    case media::PIXEL_FORMAT_NV12:
+    case media::PIXEL_FORMAT_NV21:
+    case media::PIXEL_FORMAT_UYVY:
+    case media::PIXEL_FORMAT_YUY2:
+    case media::PIXEL_FORMAT_ARGB:
+    case media::PIXEL_FORMAT_XRGB:
+    case media::PIXEL_FORMAT_RGB24:
+    case media::PIXEL_FORMAT_RGB32:
+    case media::PIXEL_FORMAT_MJPEG:
+    case media::PIXEL_FORMAT_MT21:
+    case media::PIXEL_FORMAT_Y8:
+    case media::PIXEL_FORMAT_I422:
+      bits_per_channel = 8;
+      break;
+    case media::PIXEL_FORMAT_YUV420P9:
+    case media::PIXEL_FORMAT_YUV422P9:
+    case media::PIXEL_FORMAT_YUV444P9:
+      bits_per_channel = 9;
+      break;
+    case media::PIXEL_FORMAT_YUV420P10:
+    case media::PIXEL_FORMAT_YUV422P10:
+    case media::PIXEL_FORMAT_YUV444P10:
+      bits_per_channel = 10;
+      break;
+    case media::PIXEL_FORMAT_YUV420P12:
+    case media::PIXEL_FORMAT_YUV422P12:
+    case media::PIXEL_FORMAT_YUV444P12:
+      bits_per_channel = 12;
+      break;
+    case media::PIXEL_FORMAT_Y16:
+      bits_per_channel = 16;
+      break;
+  }
+  return bits_per_channel;
 }
 
 // static
@@ -876,14 +933,16 @@ VideoFrame::VideoFrame(VideoPixelFormat format,
     : format_(format),
       storage_type_(storage_type),
       coded_size_(coded_size),
-      visible_rect_(visible_rect),
+      visible_rect_(Intersection(visible_rect, gfx::Rect(coded_size))),
       natural_size_(natural_size),
-      shared_memory_handle_(base::SharedMemory::NULLHandle()),
       shared_memory_offset_(0),
       timestamp_(timestamp),
       unique_id_(g_unique_id_generator.GetNext()) {
   DCHECK(IsValidConfig(format_, storage_type, coded_size_, visible_rect_,
                        natural_size_));
+  DCHECK(visible_rect_ == visible_rect)
+      << "visible_rect " << visible_rect.ToString() << " exceeds coded_size "
+      << coded_size.ToString();
   memset(&mailbox_holders_, 0, sizeof(mailbox_holders_));
   memset(&strides_, 0, sizeof(strides_));
   memset(&data_, 0, sizeof(data_));

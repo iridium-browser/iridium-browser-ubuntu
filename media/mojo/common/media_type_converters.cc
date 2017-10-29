@@ -17,9 +17,6 @@
 #include "media/base/decrypt_config.h"
 #include "media/base/encryption_scheme.h"
 #include "media/base/subsample_entry.h"
-#include "media/base/video_decoder_config.h"
-#include "media/base/video_frame.h"
-#include "media/mojo/common/mojo_shared_buffer_video_frame.h"
 #include "mojo/public/cpp/system/buffer.h"
 
 namespace mojo {
@@ -36,44 +33,6 @@ struct TypeConverter<media::EncryptionScheme::Pattern,
   static media::EncryptionScheme::Pattern Convert(
       const media::mojom::PatternPtr& input);
 };
-
-// static
-media::mojom::PatternPtr
-TypeConverter<media::mojom::PatternPtr, media::EncryptionScheme::Pattern>::
-    Convert(const media::EncryptionScheme::Pattern& input) {
-  media::mojom::PatternPtr mojo_pattern(media::mojom::Pattern::New());
-  mojo_pattern->encrypt_blocks = input.encrypt_blocks();
-  mojo_pattern->skip_blocks = input.skip_blocks();
-  return mojo_pattern;
-}
-
-// static
-media::EncryptionScheme::Pattern TypeConverter<
-    media::EncryptionScheme::Pattern,
-    media::mojom::PatternPtr>::Convert(const media::mojom::PatternPtr& input) {
-  return media::EncryptionScheme::Pattern(input->encrypt_blocks,
-                                          input->skip_blocks);
-}
-
-// static
-media::mojom::EncryptionSchemePtr TypeConverter<
-    media::mojom::EncryptionSchemePtr,
-    media::EncryptionScheme>::Convert(const media::EncryptionScheme& input) {
-  media::mojom::EncryptionSchemePtr mojo_encryption_scheme(
-      media::mojom::EncryptionScheme::New());
-  mojo_encryption_scheme->mode = input.mode();
-  mojo_encryption_scheme->pattern =
-      media::mojom::Pattern::From(input.pattern());
-  return mojo_encryption_scheme;
-}
-
-// static
-media::EncryptionScheme
-TypeConverter<media::EncryptionScheme, media::mojom::EncryptionSchemePtr>::
-    Convert(const media::mojom::EncryptionSchemePtr& input) {
-  return media::EncryptionScheme(
-      input->mode, input->pattern.To<media::EncryptionScheme::Pattern>());
-}
 
 // static
 media::mojom::DecryptConfigPtr
@@ -118,7 +77,6 @@ TypeConverter<media::mojom::DecoderBufferPtr,
   mojo_buffer->data_size = base::checked_cast<uint32_t>(input->data_size());
   mojo_buffer->front_discard = input->discard_padding().first;
   mojo_buffer->back_discard = input->discard_padding().second;
-  mojo_buffer->splice_timestamp = input->splice_timestamp();
 
   // Note: The side data is always small, so this copy is okay.
   if (input->side_data()) {
@@ -165,7 +123,6 @@ TypeConverter<scoped_refptr<media::DecoderBuffer>,
   media::DecoderBuffer::DiscardPadding discard_padding(input->front_discard,
                                                        input->back_discard);
   buffer->set_discard_padding(discard_padding);
-  buffer->set_splice_timestamp(input->splice_timestamp);
 
   // TODO(dalecurtis): We intentionally do not deserialize the data section of
   // the DecoderBuffer here; this must instead be done by clients via their
@@ -187,8 +144,7 @@ TypeConverter<media::mojom::AudioDecoderConfigPtr, media::AudioDecoderConfig>::
   config->extra_data = input.extra_data();
   config->seek_preroll = input.seek_preroll();
   config->codec_delay = input.codec_delay();
-  config->encryption_scheme =
-      media::mojom::EncryptionScheme::From(input.encryption_scheme());
+  config->encryption_scheme = input.encryption_scheme();
   return config;
 }
 
@@ -199,39 +155,8 @@ TypeConverter<media::AudioDecoderConfig, media::mojom::AudioDecoderConfigPtr>::
   media::AudioDecoderConfig config;
   config.Initialize(input->codec, input->sample_format, input->channel_layout,
                     input->samples_per_second, input->extra_data,
-                    input->encryption_scheme.To<media::EncryptionScheme>(),
-                    input->seek_preroll, input->codec_delay);
-  return config;
-}
-
-// static
-media::mojom::VideoDecoderConfigPtr
-TypeConverter<media::mojom::VideoDecoderConfigPtr, media::VideoDecoderConfig>::
-    Convert(const media::VideoDecoderConfig& input) {
-  media::mojom::VideoDecoderConfigPtr config(
-      media::mojom::VideoDecoderConfig::New());
-  config->codec = input.codec();
-  config->profile = input.profile();
-  config->format = input.format();
-  config->color_space = input.color_space();
-  config->coded_size = input.coded_size();
-  config->visible_rect = input.visible_rect();
-  config->natural_size = input.natural_size();
-  config->extra_data = input.extra_data();
-  config->encryption_scheme =
-      media::mojom::EncryptionScheme::From(input.encryption_scheme());
-  return config;
-}
-
-// static
-media::VideoDecoderConfig
-TypeConverter<media::VideoDecoderConfig, media::mojom::VideoDecoderConfigPtr>::
-    Convert(const media::mojom::VideoDecoderConfigPtr& input) {
-  media::VideoDecoderConfig config;
-  config.Initialize(input->codec, input->profile, input->format,
-                    input->color_space, input->coded_size, input->visible_rect,
-                    input->natural_size, input->extra_data,
-                    input->encryption_scheme.To<media::EncryptionScheme>());
+                    input->encryption_scheme, input->seek_preroll,
+                    input->codec_delay);
   return config;
 }
 
@@ -307,6 +232,23 @@ TypeConverter<scoped_refptr<media::AudioBuffer>, media::mojom::AudioBufferPtr>::
   if (input->end_of_stream)
     return media::AudioBuffer::CreateEOSBuffer();
 
+  if (input->frame_count <= 0 ||
+      static_cast<size_t>(input->sample_format) > media::kSampleFormatMax ||
+      static_cast<size_t>(input->channel_layout) > media::CHANNEL_LAYOUT_MAX ||
+      ChannelLayoutToChannelCount(input->channel_layout) !=
+          input->channel_count) {
+    LOG(ERROR) << "Receive an invalid audio buffer, replace it with EOS.";
+    return media::AudioBuffer::CreateEOSBuffer();
+  }
+
+  if (IsBitstream(input->sample_format)) {
+    uint8_t* data = input->data.data();
+    return media::AudioBuffer::CopyBitstreamFrom(
+        input->sample_format, input->channel_layout, input->channel_count,
+        input->sample_rate, input->frame_count, &data, input->data.size(),
+        input->timestamp);
+  }
+
   // Setup channel pointers.  AudioBuffer::CopyFrom() will only use the first
   // one in the case of interleaved data.
   std::vector<const uint8_t*> channel_ptrs(input->channel_count, nullptr);
@@ -319,71 +261,6 @@ TypeConverter<scoped_refptr<media::AudioBuffer>, media::mojom::AudioBufferPtr>::
       input->sample_format, input->channel_layout, input->channel_count,
       input->sample_rate, input->frame_count, &channel_ptrs[0],
       input->timestamp);
-}
-
-// static
-media::mojom::VideoFramePtr
-TypeConverter<media::mojom::VideoFramePtr, scoped_refptr<media::VideoFrame>>::
-    Convert(const scoped_refptr<media::VideoFrame>& input) {
-  media::mojom::VideoFramePtr frame(media::mojom::VideoFrame::New());
-  frame->end_of_stream =
-      input->metadata()->IsTrue(media::VideoFrameMetadata::END_OF_STREAM);
-  if (frame->end_of_stream)
-    return frame;
-
-  // Handle non EOS frame. It must be a MojoSharedBufferVideoFrame.
-  // TODO(jrummell): Support other types of VideoFrame.
-  CHECK_EQ(media::VideoFrame::STORAGE_MOJO_SHARED_BUFFER,
-           input->storage_type());
-  media::MojoSharedBufferVideoFrame* input_frame =
-      static_cast<media::MojoSharedBufferVideoFrame*>(input.get());
-  mojo::ScopedSharedBufferHandle duplicated_handle =
-      input_frame->Handle().Clone();
-  CHECK(duplicated_handle.is_valid());
-
-  frame->format = input->format();
-  frame->coded_size = input->coded_size();
-  frame->visible_rect = input->visible_rect();
-  frame->natural_size = input->natural_size();
-  frame->timestamp = input->timestamp();
-
-  media::mojom::SharedBufferVideoFrameDataPtr data =
-      media::mojom::SharedBufferVideoFrameData::New();
-  data->frame_data = std::move(duplicated_handle);
-  data->frame_data_size = input_frame->MappedSize();
-  data->y_stride = input_frame->stride(media::VideoFrame::kYPlane);
-  data->u_stride = input_frame->stride(media::VideoFrame::kUPlane);
-  data->v_stride = input_frame->stride(media::VideoFrame::kVPlane);
-  data->y_offset = input_frame->PlaneOffset(media::VideoFrame::kYPlane);
-  data->u_offset = input_frame->PlaneOffset(media::VideoFrame::kUPlane);
-  data->v_offset = input_frame->PlaneOffset(media::VideoFrame::kVPlane);
-
-  frame->data = media::mojom::VideoFrameData::New();
-  frame->data->set_shared_buffer_data(std::move(data));
-  return frame;
-}
-
-// static
-scoped_refptr<media::VideoFrame>
-TypeConverter<scoped_refptr<media::VideoFrame>, media::mojom::VideoFramePtr>::
-    Convert(const media::mojom::VideoFramePtr& input) {
-  if (input->end_of_stream)
-    return media::VideoFrame::CreateEOSFrame();
-
-  // Handle non EOS frame. It must be a MojoSharedBufferVideoFrame.
-  // TODO(jrummell): Support other types of VideoFrame.
-  DCHECK(input->data->is_shared_buffer_data());
-  const media::mojom::SharedBufferVideoFrameDataPtr& data =
-      input->data->get_shared_buffer_data();
-
-  return media::MojoSharedBufferVideoFrame::Create(
-      input->format, input->coded_size, input->visible_rect,
-      input->natural_size, std::move(data->frame_data),
-      base::saturated_cast<size_t>(data->frame_data_size),
-      base::saturated_cast<size_t>(data->y_offset),
-      base::saturated_cast<size_t>(data->u_offset),
-      base::saturated_cast<size_t>(data->v_offset), data->y_stride,
-      data->u_stride, data->v_stride, input->timestamp);
 }
 
 }  // namespace mojo

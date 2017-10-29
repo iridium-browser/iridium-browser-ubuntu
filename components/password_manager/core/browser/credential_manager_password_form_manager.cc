@@ -37,12 +37,12 @@ CredentialManagerPasswordFormManager::CredentialManagerPasswordFormManager(
                           form_fetcher.get()),
       delegate_(delegate),
       saved_form_(std::move(saved_form)),
-      form_fetcher_(std::move(form_fetcher)),
       weak_factory_(this) {
   DCHECK(saved_form_);
   // This condition is only false on iOS.
-  if (form_fetcher_)
-    form_fetcher_->Fetch();
+  if (form_fetcher)
+    form_fetcher->Fetch();
+  GrabFetcher(std::move(form_fetcher));
 }
 
 CredentialManagerPasswordFormManager::~CredentialManagerPasswordFormManager() {
@@ -66,6 +66,11 @@ void CredentialManagerPasswordFormManager::ProcessMatches(
       FROM_HERE,
       base::Bind(&CredentialManagerPasswordFormManager::NotifyDelegate,
                  weak_factory_.GetWeakPtr()));
+}
+
+metrics_util::CredentialSourceType
+CredentialManagerPasswordFormManager::GetCredentialSource() {
+  return metrics_util::CredentialSourceType::kCredentialManagementAPI;
 }
 
 void CredentialManagerPasswordFormManager::NotifyDelegate() {

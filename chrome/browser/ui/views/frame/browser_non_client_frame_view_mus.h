@@ -38,6 +38,7 @@ class BrowserNonClientFrameViewMus : public BrowserNonClientFrameView,
   void UpdateThrobber(bool running) override;
   views::View* GetProfileSwitcherView() const override;
   void UpdateClientArea() override;
+  void UpdateMinimumSize() override;
 
   // views::NonClientFrameView:
   gfx::Rect GetBoundsForClientView() const override;
@@ -97,6 +98,9 @@ class BrowserNonClientFrameViewMus : public BrowserNonClientFrameView,
   // Draws the line under the header for windows without a toolbar and not using
   // the packaged app header style.
   void PaintContentEdge(gfx::Canvas* canvas);
+
+  // Returns the height for the header (non-client frame area).
+  int GetHeaderHeight() const;
 
   // TODO(sky): Figure out how to support WebAppLeftHeaderView.
 

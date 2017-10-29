@@ -38,8 +38,8 @@ class MockAutofillPopupViewDelegate : public AutofillPopupViewDelegate {
   MOCK_CONST_METHOD0(IsRTL, bool());
   MOCK_METHOD0(GetSuggestions, const std::vector<autofill::Suggestion>());
 #if !defined(OS_ANDROID)
-  MOCK_METHOD1(GetElidedValueWidthForRow, int(size_t));
-  MOCK_METHOD1(GetElidedLabelWidthForRow, int(size_t));
+  MOCK_METHOD1(GetElidedValueWidthForRow, int(int));
+  MOCK_METHOD1(GetElidedLabelWidthForRow, int(int));
 #endif
 };
 
@@ -143,8 +143,10 @@ IN_PROC_BROWSER_TEST_F(AutofillPopupBaseViewTest, CorrectBoundsTest) {
 
   ShowView();
 
-  gfx::Point display_point =
-      static_cast<views::View*>(view_)->GetBoundsInScreen().origin();
+  gfx::Point display_point = static_cast<views::View*>(view_)
+                                 ->GetWidget()
+                                 ->GetClientAreaBoundsInScreen()
+                                 .origin();
   gfx::Point expected_point = bounds.origin();
   EXPECT_EQ(expected_point, display_point);
 }

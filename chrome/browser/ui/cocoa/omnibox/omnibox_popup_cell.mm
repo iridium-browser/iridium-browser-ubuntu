@@ -9,10 +9,12 @@
 #include <algorithm>
 #include <cmath>
 
+#include "base/feature_list.h"
 #include "base/i18n/rtl.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/objc_property_releaser.h"
 #include "base/mac/scoped_nsobject.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -21,6 +23,7 @@
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/omnibox_popup_model.h"
 #include "components/omnibox/browser/suggestion_answer.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -31,14 +34,23 @@
 
 namespace {
 
-// How far to offset text.
-const CGFloat kVerticalTextPadding = 3.0;
+// Extra padding beyond the vertical text padding.
+constexpr CGFloat kMaterialExtraVerticalImagePadding = 2.0;
 
-const CGFloat kMaterialVerticalImagePadding = 5.0;
+constexpr CGFloat kMaterialTextStartOffset = 27.0;
 
-const CGFloat kMaterialTextStartOffset = 27.0;
+constexpr CGFloat kMaterialImageXOffset = 6.0;
 
-const CGFloat kMaterialImageXOffset = 6.0;
+constexpr CGFloat kDefaultVerticalMargin = 3.0;
+
+constexpr CGFloat kDefaultTextHeight = 19;
+
+// Returns the margin that should appear at the top and bottom of the result.
+CGFloat GetVerticalMargin() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      omnibox::kUIExperimentVerticalMargin,
+      OmniboxFieldTrial::kUIVerticalMarginParam, kDefaultVerticalMargin);
+}
 
 // Flips the given |rect| in context of the given |frame|.
 NSRect FlipIfRTL(NSRect rect, NSRect frame) {
@@ -148,13 +160,13 @@ NSAttributedString* CreateAnswerStringHelper(const base::string16& text,
       break;
     case SuggestionAnswer::ANSWER_TEXT_MEDIUM:
       answer_style = @{
-        NSForegroundColorAttributeName : ContentTextColor(is_dark_theme),
+        NSForegroundColorAttributeName : DimTextColor(is_dark_theme),
         NSFontAttributeName : FieldFont()
       };
       break;
     case SuggestionAnswer::ANSWER_TEXT_LARGE:
       answer_style = @{
-        NSForegroundColorAttributeName : ContentTextColor(is_dark_theme),
+        NSForegroundColorAttributeName : DimTextColor(is_dark_theme),
         NSFontAttributeName : LargeFont()
       };
       break;
@@ -412,11 +424,21 @@ NSAttributedString* CreateClassifiedAttributedString(
           match.contents, ContentTextColor(isDarkTheme), match.contents_class,
           isDarkTheme) retain];
       if (!match.description.empty()) {
+        // Swap the contents and description of non-search suggestions in
+        // vertical layouts.
+        BOOL swapMatchText = base::FeatureList::IsEnabled(
+                                 omnibox::kUIExperimentVerticalLayout) &&
+                             !AutocompleteMatch::IsSearchType(match.type);
+
         description_ = [CreateClassifiedAttributedString(
-            match.description, DimTextColor(isDarkTheme),
+            match.description,
+            swapMatchText ? ContentTextColor(isDarkTheme)
+                          : DimTextColor(isDarkTheme),
             match.description_class, isDarkTheme) retain];
+
+        if (swapMatchText)
+          std::swap(contents_, description_);
       }
-      maxLines_ = 1;
     }
     propertyReleaser_OmniboxPopupCellData_.Init(self,
                                                 [OmniboxPopupCellData class]);
@@ -454,12 +476,15 @@ NSAttributedString* CreateClassifiedAttributedString(
 }
 
 - (void)drawMatchWithFrame:(NSRect)cellFrame inView:(NSView*)controlView {
+  bool isVerticalLayout =
+      base::FeatureList::IsEnabled(omnibox::kUIExperimentVerticalLayout);
+
   OmniboxPopupCellData* cellData =
       base::mac::ObjCCastStrict<OmniboxPopupCellData>([self objectValue]);
   OmniboxPopupMatrix* tableView =
       base::mac::ObjCCastStrict<OmniboxPopupMatrix>(controlView);
-  CGFloat remainingWidth = [OmniboxPopupCell getContentAreaWidth:cellFrame] -
-                           [tableView contentLeftPadding];
+  CGFloat remainingWidth =
+      [OmniboxPopupCell getTextContentAreaWidth:[tableView contentMaxWidth]];
   CGFloat contentsWidth = [cellData getMatchContentsWidth];
   CGFloat separatorWidth = [[tableView separator] size].width;
   CGFloat descriptionWidth =
@@ -467,11 +492,11 @@ NSAttributedString* CreateClassifiedAttributedString(
   int contentsMaxWidth, descriptionMaxWidth;
   OmniboxPopupModel::ComputeMatchMaxWidths(
       ceilf(contentsWidth), ceilf(separatorWidth), ceilf(descriptionWidth),
-      ceilf(remainingWidth),
-      [cellData isAnswer],
-      !AutocompleteMatch::IsSearchType([cellData matchType]),
-      &contentsMaxWidth,
+      ceilf(remainingWidth), [cellData isAnswer] || isVerticalLayout,
+      !AutocompleteMatch::IsSearchType([cellData matchType]), &contentsMaxWidth,
       &descriptionMaxWidth);
+
+  CGFloat halfLineHeight = (kDefaultTextHeight + kDefaultVerticalMargin) / 2;
 
   NSWindow* parentWindow = [[controlView window] parentWindow];
   BOOL isDarkTheme = [parentWindow hasDarkTheme];
@@ -480,7 +505,10 @@ NSAttributedString* CreateClassifiedAttributedString(
       isDarkTheme ? [cellData incognitoImage] : [cellData image];
   imageRect.size = [theImage size];
   imageRect.origin.x += kMaterialImageXOffset + [tableView contentLeftPadding];
-  imageRect.origin.y += kMaterialVerticalImagePadding;
+  imageRect.origin.y +=
+      GetVerticalMargin() + kMaterialExtraVerticalImagePadding;
+  if (isVerticalLayout)
+    imageRect.origin.y += halfLineHeight;
   [theImage drawInRect:FlipIfRTL(imageRect, cellFrame)
               fromRect:NSZeroRect
              operation:NSCompositeSourceOver
@@ -488,11 +516,15 @@ NSAttributedString* CreateClassifiedAttributedString(
         respectFlipped:YES
                  hints:nil];
 
-  NSPoint origin =
-      NSMakePoint(kMaterialTextStartOffset + [tableView contentLeftPadding],
-                  kVerticalTextPadding);
+  CGFloat left = kMaterialTextStartOffset + [tableView contentLeftPadding];
+  NSPoint origin = NSMakePoint(left, GetVerticalMargin());
+
+  // For matches lacking description in vertical layout, center vertically.
+  if (isVerticalLayout && descriptionMaxWidth == 0)
+    origin.y += halfLineHeight;
+
   if ([cellData matchType] == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
-    // Infinite suggestions are rendered with a prefix (usually ellipsis), which
+    // Tail suggestions are rendered with a prefix (usually ellipsis), which
     // appear vertically stacked.
     origin.x += [self drawMatchPrefixWithFrame:cellFrame
                                      tableView:tableView
@@ -507,9 +539,9 @@ NSAttributedString* CreateClassifiedAttributedString(
 
   if (descriptionMaxWidth > 0) {
     if ([cellData isAnswer]) {
-      origin =
-          NSMakePoint(kMaterialTextStartOffset + [tableView contentLeftPadding],
-                      kContentLineHeight - kVerticalTextPadding);
+      origin = NSMakePoint(
+          left, [OmniboxPopupCell getContentTextHeightForDoubleLine:NO] -
+                    GetVerticalMargin());
       CGFloat imageSize = [tableView answerLineHeight];
       NSRect imageRect =
           NSMakeRect(NSMinX(cellFrame) + origin.x, NSMinY(cellFrame) + origin.y,
@@ -521,24 +553,29 @@ NSAttributedString* CreateClassifiedAttributedString(
                           respectFlipped:YES
                                    hints:nil];
       if ([cellData answerImage]) {
-        origin.x += imageSize + kMaterialVerticalImagePadding;
+        origin.x += imageSize + kMaterialImageXOffset;
 
         // Have to nudge the baseline down 1pt in Material Design for the text
         // that follows, so that it's the same as the bottom of the image.
         origin.y += 1;
       }
     } else {
-      origin.x += [self drawMatchPart:[tableView separator]
-                            withFrame:cellFrame
-                               origin:origin
-                         withMaxWidth:separatorWidth
-                         forDarkTheme:isDarkTheme];
+      if (isVerticalLayout) {
+        origin.x = left;
+        origin.y += halfLineHeight * 2;
+      } else {
+        origin.x += [self drawMatchPart:[tableView separator]
+                              withFrame:cellFrame
+                                 origin:origin
+                           withMaxWidth:separatorWidth
+                           forDarkTheme:isDarkTheme];
+      }
     }
-    origin.x += [self drawMatchPart:[cellData description]
-                          withFrame:cellFrame
-                             origin:origin
-                       withMaxWidth:descriptionMaxWidth
-                       forDarkTheme:isDarkTheme];
+    [self drawMatchPart:[cellData description]
+              withFrame:cellFrame
+                 origin:origin
+           withMaxWidth:descriptionMaxWidth
+           forDarkTheme:isDarkTheme];
   }
 }
 
@@ -549,8 +586,8 @@ NSAttributedString* CreateClassifiedAttributedString(
   OmniboxPopupCellData* cellData =
       base::mac::ObjCCastStrict<OmniboxPopupCellData>([self objectValue]);
   CGFloat offset = 0.0f;
-  CGFloat remainingWidth = [OmniboxPopupCell getContentAreaWidth:cellFrame] -
-                           [tableView contentLeftPadding];
+  CGFloat remainingWidth =
+      [OmniboxPopupCell getTextContentAreaWidth:[tableView contentMaxWidth]];
   CGFloat prefixWidth = [[cellData prefix] size].width;
 
   CGFloat prefixOffset = 0.0f;
@@ -569,7 +606,7 @@ NSAttributedString* CreateClassifiedAttributedString(
     // Ideally the offset should be |contentsOffset_|. If the max total width
     // (|prefixWidth| + |maxMatchContentsWidth|) from offset will exceed the
     // |remainingWidth|, then we shift the offset to the left , so that all
-    // postfix suggestions are visible.
+    // tail suggestions are visible.
     // We have to render the prefix, so offset has to be at least |prefixWidth|.
     offset =
         std::max(prefixWidth,
@@ -599,6 +636,8 @@ NSAttributedString* CreateClassifiedAttributedString(
       cellFrame, NSOffsetRect(cellFrame, origin.x, origin.y));
   renderRect.size.width =
       std::min(NSWidth(renderRect), static_cast<CGFloat>(maxWidth));
+  renderRect.size.height =
+      std::min(NSHeight(renderRect), [attributedString size].height);
   if (!NSIsEmptyRect(renderRect)) {
     [attributedString drawWithRect:FlipIfRTL(renderRect, cellFrame)
                            options:NSStringDrawingUsesLineFragmentOrigin |
@@ -609,7 +648,7 @@ NSAttributedString* CreateClassifiedAttributedString(
 
 + (CGFloat)computeContentsOffset:(const AutocompleteMatch&)match {
   const base::string16& inputText = base::UTF8ToUTF16(
-      match.GetAdditionalInfo(kACMatchPropertyInputText));
+      match.GetAdditionalInfo(kACMatchPropertySuggestionText));
   int contentsStartIndex = 0;
   base::StringToInt(
       match.GetAdditionalInfo(kACMatchPropertyContentsStartIndex),
@@ -681,8 +720,15 @@ NSAttributedString* CreateClassifiedAttributedString(
   return CreateAttributedString(raw_separator, DimTextColor(isDarkTheme));
 }
 
-+ (CGFloat)getContentAreaWidth:(NSRect)cellFrame {
-  return NSWidth(cellFrame) - kMaterialTextStartOffset;
++ (CGFloat)getTextContentAreaWidth:(CGFloat)cellContentMaxWidth {
+  return cellContentMaxWidth - kMaterialTextStartOffset;
+}
+
++ (CGFloat)getContentTextHeightForDoubleLine:(BOOL)isDoubleLine {
+  CGFloat height = kDefaultTextHeight + 2 * GetVerticalMargin();
+  if (isDoubleLine)
+    height += kDefaultTextHeight + kDefaultVerticalMargin;
+  return height;
 }
 
 @end

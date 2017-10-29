@@ -31,10 +31,7 @@ class AppListTestViewDelegate : public AppListViewDelegate {
 
   int dismiss_count() { return dismiss_count_; }
   int open_search_result_count() { return open_search_result_count_; }
-  void SetUsers(const Users& users) {
-    users_ = users;
-  }
-  std::map<size_t, int> open_search_result_counts() {
+  std::map<size_t, int>& open_search_result_counts() {
     return open_search_result_counts_;
   }
 
@@ -50,13 +47,13 @@ class AppListTestViewDelegate : public AppListViewDelegate {
   // value to 0.
   int GetStopSpeechRecognitionCountAndReset();
 
+  // Sets whether the search engine is Google or not.
+  void SetSearchEngineIsGoogle(bool is_google);
+
   // AppListViewDelegate overrides:
-  bool ForceNativeDesktop() const override;
-  void SetProfileByPath(const base::FilePath& profile_path) override;
   AppListModel* GetModel() override;
   SpeechUIModel* GetSpeechUI() override;
   void StartSearch() override {}
-  void StopSearch() override {}
   void OpenSearchResult(SearchResult* result,
                         bool auto_launch,
                         int event_flags) override;
@@ -68,20 +65,18 @@ class AppListTestViewDelegate : public AppListViewDelegate {
   void ViewInitialized() override {}
   void Dismiss() override;
   void ViewClosing() override {}
-  void OpenHelp() override {}
-  void OpenFeedback() override {}
   void StartSpeechRecognition() override {}
   void StopSpeechRecognition() override;
-  void ShowForProfileByPath(const base::FilePath& profile_path) override {}
-#if defined(TOOLKIT_VIEWS)
   views::View* CreateStartPageWebView(const gfx::Size& size) override;
   std::vector<views::View*> CreateCustomPageWebViews(
       const gfx::Size& size) override;
   void CustomLauncherPageAnimationChanged(double progress) override {}
   void CustomLauncherPagePopSubpage() override {}
-#endif
   bool IsSpeechRecognitionEnabled() override;
-  const Users& GetUsers() const override;
+  void GetWallpaperProminentColors(std::vector<SkColor>* colors) override {}
+  void AddObserver(app_list::AppListViewDelegateObserver* observer) override {}
+  void RemoveObserver(
+      app_list::AppListViewDelegateObserver* observer) override {}
 
   // Do a bulk replacement of the items in the model.
   void ReplaceTestModel(int item_count);
@@ -95,9 +90,9 @@ class AppListTestViewDelegate : public AppListViewDelegate {
   int open_search_result_count_;
   int next_profile_app_count_;
   std::map<size_t, int> open_search_result_counts_;
-  Users users_;
   std::unique_ptr<AppListTestModel> model_;
   SpeechUIModel speech_ui_;
+  std::vector<SkColor> wallpaper_prominent_colors_;
   base::TimeDelta auto_launch_timeout_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListTestViewDelegate);

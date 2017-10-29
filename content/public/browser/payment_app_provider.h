@@ -5,11 +5,15 @@
 #ifndef CONTENT_PUBLIC_BROWSER_PAYMENT_APP_PROVIDER_H_
 #define CONTENT_PUBLIC_BROWSER_PAYMENT_APP_PROVIDER_H_
 
+#include <stdint.h>
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/stored_payment_app.h"
+#include "third_party/WebKit/public/platform/modules/payments/payment_app.mojom.h"
 
 namespace content {
 
@@ -19,26 +23,28 @@ class BrowserContext;
 // Chrome layer. This class is a singleton, the instance of which can be
 // retrieved using the static GetInstance() method.
 // All methods must be called on the UI thread.
+//
+// Design Doc:
+//   https://docs.google.com/document/d/1rWsvKQAwIboN2ZDuYYAkfce8GF27twi4UHTt0hcbyxQ/edit?usp=sharing
 class CONTENT_EXPORT PaymentAppProvider {
  public:
   // This static function is actually implemented in PaymentAppProviderImpl.cc.
   // Please see: content/browser/payments/payment_app_provider_impl.cc
   static PaymentAppProvider* GetInstance();
 
-  // The ManifestWithID is a pair of the service worker registration id and
-  // the payment app manifest data associated with it.
-  using ManifestWithID =
-      std::pair<int64_t, payments::mojom::PaymentAppManifestPtr>;
-  using Manifests = std::vector<ManifestWithID>;
-  using GetAllManifestsCallback = base::Callback<void(Manifests)>;
+  using PaymentApps = std::map<GURL, std::unique_ptr<StoredPaymentApp>>;
+  using GetAllPaymentAppsCallback = base::OnceCallback<void(PaymentApps)>;
+  using InvokePaymentAppCallback =
+      base::Callback<void(payments::mojom::PaymentHandlerResponsePtr)>;
 
   // Should be accessed only on the UI thread.
-  virtual void GetAllManifests(BrowserContext* browser_context,
-                               const GetAllManifestsCallback& callback) = 0;
+  virtual void GetAllPaymentApps(BrowserContext* browser_context,
+                                 GetAllPaymentAppsCallback callback) = 0;
   virtual void InvokePaymentApp(
       BrowserContext* browser_context,
       int64_t registration_id,
-      payments::mojom::PaymentAppRequestPtr app_request) = 0;
+      payments::mojom::PaymentRequestEventDataPtr event_data,
+      const InvokePaymentAppCallback& callback) = 0;
 
  protected:
   virtual ~PaymentAppProvider() {}

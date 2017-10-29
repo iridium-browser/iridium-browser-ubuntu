@@ -15,6 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -386,7 +387,7 @@ class SupervisedUserServiceExtensionTestBase
     service->Init();
     site_list_observer_.Init(service->GetWhitelistService());
 
-    SupervisedUserURLFilter* url_filter = service->GetURLFilterForUIThread();
+    SupervisedUserURLFilter* url_filter = service->GetURLFilter();
     url_filter->SetBlockingTaskRunnerForTesting(
         base::ThreadTaskRunnerHandle::Get());
     url_filter_observer_.Init(url_filter);
@@ -404,7 +405,8 @@ class SupervisedUserServiceExtensionTestBase
   scoped_refptr<extensions::Extension> MakeThemeExtension() {
     std::unique_ptr<base::DictionaryValue> source(new base::DictionaryValue());
     source->SetString(extensions::manifest_keys::kName, "Theme");
-    source->Set(extensions::manifest_keys::kTheme, new base::DictionaryValue());
+    source->Set(extensions::manifest_keys::kTheme,
+                base::MakeUnique<base::DictionaryValue>());
     source->SetString(extensions::manifest_keys::kVersion, "1.0");
     extensions::ExtensionBuilder builder;
     scoped_refptr<extensions::Extension> extension =
@@ -587,8 +589,7 @@ TEST_F(SupervisedUserServiceExtensionTest,
 TEST_F(SupervisedUserServiceExtensionTest, NoContentPacks) {
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile_.get());
-  SupervisedUserURLFilter* url_filter =
-      supervised_user_service->GetURLFilterForUIThread();
+  SupervisedUserURLFilter* url_filter = supervised_user_service->GetURLFilter();
 
   // ASSERT_EQ instead of ASSERT_TRUE([...].empty()) so that the error
   // message contains the size in case of failure.
@@ -602,8 +603,7 @@ TEST_F(SupervisedUserServiceExtensionTest, NoContentPacks) {
 TEST_F(SupervisedUserServiceExtensionTest, InstallContentPacks) {
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile_.get());
-  SupervisedUserURLFilter* url_filter =
-      supervised_user_service->GetURLFilterForUIThread();
+  SupervisedUserURLFilter* url_filter = supervised_user_service->GetURLFilter();
 
   const std::string id1 = "ID 1";
   const base::string16 title1 = base::ASCIIToUTF16("Title 1");

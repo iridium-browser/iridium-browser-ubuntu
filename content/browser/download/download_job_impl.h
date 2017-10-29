@@ -8,7 +8,6 @@
 #include "base/macros.h"
 #include "content/browser/download/download_item_impl.h"
 #include "content/browser/download/download_job.h"
-#include "content/browser/download/download_request_handle.h"
 #include "content/common/content_export.h"
 
 namespace content {
@@ -17,20 +16,16 @@ class CONTENT_EXPORT DownloadJobImpl : public DownloadJob {
  public:
   DownloadJobImpl(
       DownloadItemImpl* download_item,
-      std::unique_ptr<DownloadRequestHandleInterface> request_handle);
+      std::unique_ptr<DownloadRequestHandleInterface> request_handle,
+      bool is_parallizable);
   ~DownloadJobImpl() override;
 
   // DownloadJob implementation.
-  void Start() override;
-  void Cancel(bool user_cancel) override;
-  void Pause() override;
-  void Resume(bool resume_request) override;
-  WebContents* GetWebContents() const override;
+  bool IsParallelizable() const override;
 
  private:
-  // Used to perform operations on network request.
-  // Can be null on interrupted download.
-  std::unique_ptr<DownloadRequestHandleInterface> request_handle_;
+  // Whether the download can be parallized.
+  bool is_parallizable_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadJobImpl);
 };

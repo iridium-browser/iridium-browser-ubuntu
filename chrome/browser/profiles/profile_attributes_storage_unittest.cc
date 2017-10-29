@@ -12,11 +12,16 @@
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/signin/signin_util.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using ::testing::Mock;
+using ::testing::_;
 
 namespace {
 // The ProfileMetadataEntry accessors aren't just plain old accessors to local
@@ -128,8 +133,15 @@ class ProfileAttributesStorageTest : public testing::Test {
   }
 
  private:
-  TestingProfileManager testing_profile_manager_;
   content::TestBrowserThreadBundle thread_bundle_;
+  TestingProfileManager testing_profile_manager_;
+};
+
+class ProfileAttributesTestObserver
+    : public ProfileAttributesStorage::Observer {
+ public:
+  MOCK_METHOD1(OnProfileSigninRequiredChanged,
+               void(const base::FilePath& profile_path));
 };
 
 TEST_F(ProfileAttributesStorageTest, ProfileNotFound) {
@@ -255,11 +267,6 @@ TEST_F(ProfileAttributesStorageTest, EntryAccessors) {
   TEST_BOOL_ACCESSORS(ProfileAttributesEntry, entry, IsUsingDefaultName);
   TEST_BOOL_ACCESSORS(ProfileAttributesEntry, entry, IsUsingDefaultAvatar);
   TEST_BOOL_ACCESSORS(ProfileAttributesEntry, entry, IsAuthError);
-
-  TEST_STAT_ACCESSORS(ProfileAttributesEntry, entry, StatsBrowsingHistory);
-  TEST_STAT_ACCESSORS(ProfileAttributesEntry, entry, StatsBookmarks);
-  TEST_STAT_ACCESSORS(ProfileAttributesEntry, entry, StatsPasswords);
-  TEST_STAT_ACCESSORS(ProfileAttributesEntry, entry, StatsSettings);
 }
 
 TEST_F(ProfileAttributesStorageTest, AuthInfo) {
@@ -435,4 +442,31 @@ TEST_F(ProfileAttributesStorageTest, ChooseAvatarIconIndexForNewProfile) {
     ASSERT_GT(total_icon_count,
               storage()->ChooseAvatarIconIndexForNewProfile());
   }
+}
+
+TEST_F(ProfileAttributesStorageTest, ProfileForceSigninLock) {
+  signin_util::SetForceSigninForTesting(true);
+  ProfileAttributesTestObserver observer;
+  ProfileAttributesEntry* entry;
+
+  AddTestingProfile();
+  ASSERT_TRUE(storage()->GetProfileAttributesWithPath(
+      GetProfilePath("testing_profile_path0"), &entry));
+  storage()->AddObserver(&observer);
+  ASSERT_FALSE(entry->IsSigninRequired());
+
+  EXPECT_CALL(observer, OnProfileSigninRequiredChanged(_)).Times(0);
+  entry->LockForceSigninProfile(false);
+  ASSERT_FALSE(entry->IsSigninRequired());
+  Mock::VerifyAndClear(&observer);
+
+  EXPECT_CALL(observer, OnProfileSigninRequiredChanged(_)).Times(1);
+  entry->LockForceSigninProfile(true);
+  ASSERT_TRUE(entry->IsSigninRequired());
+  Mock::VerifyAndClear(&observer);
+
+  EXPECT_CALL(observer, OnProfileSigninRequiredChanged(_)).Times(1);
+  entry->SetIsSigninRequired(false);
+  ASSERT_FALSE(entry->IsSigninRequired());
+  Mock::VerifyAndClear(&observer);
 }

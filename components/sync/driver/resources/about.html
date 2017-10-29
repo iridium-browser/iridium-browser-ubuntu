@@ -28,7 +28,9 @@
   </div>
 
   <div id="traffic-event-container-wrapper" jsskip="true">
-    <h2>Sync Protocol Log</h2>
+    <h2 style="display:inline-block">Sync Protocol Log</h2>
+    <input type="checkbox" id="capture-specifics"></input>
+    <label for="capture-specifics">Capture Specifics</label>
     <div id="traffic-event-container">
       <div class="traffic-event-entry"
            jsselect="events"
@@ -45,10 +47,12 @@
     <h2>Type Info</h2>
     <table id="typeInfo">
       <tr jsselect="type_status" jsvalues="class:$this.status">
-        <td jscontent="name" width=50%></td>
-        <td jscontent="value" width=30%></td>
+        <td jscontent="name" width=30%></td>
         <td jscontent="num_entries" width=10%></td>
         <td jscontent="num_live" width=10%></td>
+        <td jscontent="message" width=30%></td>
+        <td jscontent="state" width=10%></td>
+        <td jscontent="group_type" width=10%></td>
       </tr>
     </table>
   </div>

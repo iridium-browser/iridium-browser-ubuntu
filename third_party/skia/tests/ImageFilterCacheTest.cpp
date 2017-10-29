@@ -37,7 +37,7 @@ static void test_find_existing(skiatest::Reporter* reporter,
     SkImageFilterCacheKey key2(0, SkMatrix::I(), clip, subset->uniqueID(), subset->subset());
 
     SkIPoint offset = SkIPoint::Make(3, 4);
-    cache->set(key1, image.get(), offset);
+    cache->set(key1, image.get(), offset, nullptr);
 
     SkIPoint foundOffset;
 
@@ -66,7 +66,7 @@ static void test_dont_find_if_diff_key(skiatest::Reporter* reporter,
     SkImageFilterCacheKey key4(0, SkMatrix::I(), clip1, subset->uniqueID(), subset->subset());
 
     SkIPoint offset = SkIPoint::Make(3, 4);
-    cache->set(key0, image.get(), offset);
+    cache->set(key0, image.get(), offset, nullptr);
 
     SkIPoint foundOffset;
     REPORTER_ASSERT(reporter, !cache->get(key1, &foundOffset));
@@ -86,20 +86,20 @@ static void test_internal_purge(skiatest::Reporter* reporter, const sk_sp<SkSpec
     SkImageFilterCacheKey key2(1, SkMatrix::I(), clip, image->uniqueID(), image->subset());
 
     SkIPoint offset = SkIPoint::Make(3, 4);
-    cache->set(key1, image.get(), offset);
+    cache->set(key1, image.get(), offset, nullptr);
 
     SkIPoint foundOffset;
 
     REPORTER_ASSERT(reporter, cache->get(key1, &foundOffset));
 
     // This should knock the first one out of the cache
-    cache->set(key2, image.get(), offset);
+    cache->set(key2, image.get(), offset, nullptr);
 
     REPORTER_ASSERT(reporter, cache->get(key2, &foundOffset));
     REPORTER_ASSERT(reporter, !cache->get(key1, &foundOffset));
 }
 
-// Exercise the purgeByKeys and purge methods
+// Exercise the purgeByKey and purge methods
 static void test_explicit_purging(skiatest::Reporter* reporter,
                                   const sk_sp<SkSpecialImage>& image,
                                   const sk_sp<SkSpecialImage>& subset) {
@@ -111,8 +111,8 @@ static void test_explicit_purging(skiatest::Reporter* reporter,
     SkImageFilterCacheKey key2(1, SkMatrix::I(), clip, subset->uniqueID(), image->subset());
 
     SkIPoint offset = SkIPoint::Make(3, 4);
-    cache->set(key1, image.get(), offset);
-    cache->set(key2, image.get(), offset);
+    cache->set(key1, image.get(), offset, nullptr);
+    cache->set(key2, image.get(), offset, nullptr);
     SkDEBUGCODE(REPORTER_ASSERT(reporter, 2 == cache->count());)
 
     SkIPoint foundOffset;
@@ -179,8 +179,14 @@ DEF_TEST(ImageFilterCache_ImageBackedRaster, reporter) {
 
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
+#include "GrContextPriv.h"
+#include "GrResourceProvider.h"
+#include "GrSurfaceProxyPriv.h"
+#include "GrTest.h"
+#include "GrTexture.h"
+#include "GrTextureProxy.h"
 
-static GrTexture* create_texture(GrContext* context) {
+static sk_sp<GrTextureProxy> create_proxy(GrResourceProvider* resourceProvider) {
     SkBitmap srcBM = create_bm();
 
     GrSurfaceDesc desc;
@@ -189,44 +195,35 @@ static GrTexture* create_texture(GrContext* context) {
     desc.fWidth  = kFullSize;
     desc.fHeight = kFullSize;
 
-    return context->textureProvider()->createTexture(desc, SkBudgeted::kNo, srcBM.getPixels(), 0);
+    return GrSurfaceProxy::MakeDeferred(resourceProvider,
+                                        desc, SkBudgeted::kYes,
+                                        srcBM.getPixels(),
+                                        srcBM.rowBytes());
 }
-
-static sk_sp<GrTextureProxy> create_proxy(GrContext* context) {
-    SkBitmap srcBM = create_bm();
-
-    GrSurfaceDesc desc;
-    desc.fConfig = kRGBA_8888_GrPixelConfig;
-    desc.fFlags  = kNone_GrSurfaceFlags;
-    desc.fWidth  = kFullSize;
-    desc.fHeight = kFullSize;
-
-    sk_sp<GrSurfaceProxy> proxy = GrSurfaceProxy::MakeDeferred(*context->caps(),
-                                                               context->textureProvider(),
-                                                               desc, SkBudgeted::kYes,
-                                                               srcBM.getPixels(),
-                                                               srcBM.rowBytes());
-    return sk_ref_sp(proxy->asTextureProxy());
-}
-
 
 DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ImageFilterCache_ImageBackedGPU, reporter, ctxInfo) {
-    sk_sp<GrTexture> srcTexture(create_texture(ctxInfo.grContext()));
-    if (!srcTexture) {
+    GrContext* context = ctxInfo.grContext();
+
+    sk_sp<GrTextureProxy> srcProxy(create_proxy(context->resourceProvider()));
+    if (!srcProxy) {
         return;
     }
 
-    GrBackendTextureDesc backendDesc;
-    backendDesc.fFlags = kNone_GrBackendTextureFlag;
-    backendDesc.fOrigin = kTopLeft_GrSurfaceOrigin;
-    backendDesc.fConfig = kRGBA_8888_GrPixelConfig;
-    backendDesc.fWidth = kFullSize;
-    backendDesc.fHeight = kFullSize;
-    backendDesc.fSampleCnt = 0;
-    backendDesc.fTextureHandle = srcTexture->getTextureHandle();
-    sk_sp<SkImage> srcImage(SkImage::MakeFromTexture(ctxInfo.grContext(),
-                                                     backendDesc,
-                                                     kPremul_SkAlphaType));
+    if (!srcProxy->instantiate(context->resourceProvider())) {
+        return;
+    }
+    GrTexture* tex = srcProxy->priv().peekTexture();
+
+    GrBackendTexture backendTex = GrTest::CreateBackendTexture(context->contextPriv().getBackend(),
+                                                               kFullSize,
+                                                               kFullSize,
+                                                               kRGBA_8888_GrPixelConfig,
+                                                               tex->getTextureHandle());
+    GrSurfaceOrigin texOrigin = kTopLeft_GrSurfaceOrigin;
+    sk_sp<SkImage> srcImage(SkImage::MakeFromTexture(context,
+                                                     backendTex,
+                                                     texOrigin,
+                                                     kPremul_SkAlphaType, nullptr));
     if (!srcImage) {
         return;
     }
@@ -235,18 +232,18 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ImageFilterCache_ImageBackedGPU, reporter, ct
     GrBackendObject readBackHandle = srcImage->getTextureHandle(false, &readBackOrigin);
     // TODO: Make it so we can check this (see skbug.com/5019)
 #if 0
-    if (readBackHandle != backendDesc.fTextureHandle) {
+    if (readBackHandle != tex->getTextureHandle()) {
         ERRORF(reporter, "backend mismatch %d %d\n",
-                       (int)readBackHandle, (int)backendDesc.fTextureHandle);
+                       (int)readBackHandle, (int)tex->getTextureHandle());
     }
-    REPORTER_ASSERT(reporter, readBackHandle == backendDesc.fTextureHandle);
+    REPORTER_ASSERT(reporter, readBackHandle == tex->getTextureHandle());
 #else
     REPORTER_ASSERT(reporter, SkToBool(readBackHandle));
 #endif
-    if (readBackOrigin != backendDesc.fOrigin) {
-        ERRORF(reporter, "origin mismatch %d %d\n", readBackOrigin, backendDesc.fOrigin);
+    if (readBackOrigin != texOrigin) {
+        ERRORF(reporter, "origin mismatch %d %d\n", readBackOrigin, texOrigin);
     }
-    REPORTER_ASSERT(reporter, readBackOrigin == backendDesc.fOrigin);
+    REPORTER_ASSERT(reporter, readBackOrigin == texOrigin);
 
     test_image_backed(reporter, srcImage);
 }
@@ -254,7 +251,7 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ImageFilterCache_ImageBackedGPU, reporter, ct
 DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ImageFilterCache_GPUBacked, reporter, ctxInfo) {
     GrContext* context = ctxInfo.grContext();
 
-    sk_sp<GrTextureProxy> srcProxy(create_proxy(context));
+    sk_sp<GrTextureProxy> srcProxy(create_proxy(context->resourceProvider()));
     if (!srcProxy) {
         return;
     }

@@ -20,7 +20,7 @@ class CompositorFrameMetadata;
 
 namespace content {
 
-class DevToolsSession;
+class DevToolsAgentHostImpl;
 class RenderFrameHostImpl;
 
 namespace protocol {
@@ -32,7 +32,7 @@ class InputHandler : public DevToolsDomainHandler,
   InputHandler();
   ~InputHandler() override;
 
-  static InputHandler* FromSession(DevToolsSession* session);
+  static std::vector<InputHandler*> ForAgentHost(DevToolsAgentHostImpl* host);
 
   void Wire(UberDispatcher* dispatcher) override;
   void SetRenderFrameHost(RenderFrameHostImpl* host) override;
@@ -57,8 +57,8 @@ class InputHandler : public DevToolsDomainHandler,
 
   void DispatchMouseEvent(
       const std::string& type,
-      int x,
-      int y,
+      double x,
+      double y,
       Maybe<int> modifiers,
       Maybe<double> timestamp,
       Maybe<std::string> button,
@@ -75,21 +75,23 @@ class InputHandler : public DevToolsDomainHandler,
                                       Maybe<int> modifiers,
                                       Maybe<int> click_count) override;
 
+  Response SetIgnoreInputEvents(bool ignore) override;
+
   void SynthesizePinchGesture(
-      int x,
-      int y,
+      double x,
+      double y,
       double scale_factor,
       Maybe<int> relative_speed,
       Maybe<std::string> gesture_source_type,
       std::unique_ptr<SynthesizePinchGestureCallback> callback) override;
 
   void SynthesizeScrollGesture(
-      int x,
-      int y,
-      Maybe<int> x_distance,
-      Maybe<int> y_distance,
-      Maybe<int> x_overscroll,
-      Maybe<int> y_overscroll,
+      double x,
+      double y,
+      Maybe<double> x_distance,
+      Maybe<double> y_distance,
+      Maybe<double> x_overscroll,
+      Maybe<double> y_overscroll,
       Maybe<bool> prevent_fling,
       Maybe<int> speed,
       Maybe<std::string> gesture_source_type,
@@ -99,8 +101,8 @@ class InputHandler : public DevToolsDomainHandler,
       std::unique_ptr<SynthesizeScrollGestureCallback> callback) override;
 
   void SynthesizeTapGesture(
-      int x,
-      int y,
+      double x,
+      double y,
       Maybe<int> duration,
       Maybe<int> tap_count,
       Maybe<std::string> gesture_source_type,
@@ -129,6 +131,7 @@ class InputHandler : public DevToolsDomainHandler,
       SyntheticGesture::Result result);
 
   void ClearPendingKeyAndMouseCallbacks();
+  bool PointIsWithinContents(gfx::PointF point) const;
 
   RenderFrameHostImpl* host_;
   // Callbacks for calls to Input.dispatchKey/MouseEvent that have been sent to
@@ -140,6 +143,7 @@ class InputHandler : public DevToolsDomainHandler,
   float page_scale_factor_;
   gfx::SizeF scrollable_viewport_size_;
   int last_id_;
+  bool ignore_input_events_ = false;
   base::WeakPtrFactory<InputHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(InputHandler);

@@ -24,15 +24,16 @@
 #include "content/child/test_request_peer.h"
 #include "content/common/appcache_interfaces.h"
 #include "content/common/resource_messages.h"
-#include "content/common/resource_request.h"
-#include "content/common/resource_request_completion_status.h"
-#include "content/common/service_worker/service_worker_types.h"
 #include "content/public/child/fixed_received_data.h"
 #include "content/public/child/request_peer.h"
 #include "content/public/child/resource_dispatcher_delegate.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/request_context_frame_type.h"
+#include "content/public/common/resource_request.h"
+#include "content/public/common/resource_request_body.h"
+#include "content/public/common/resource_request_completion_status.h"
 #include "content/public/common/resource_response.h"
+#include "content/public/common/service_worker_modes.h"
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_response_headers.h"
@@ -167,9 +168,9 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
     shared_memory_map_[request_id] = base::WrapUnique(shared_memory);
     EXPECT_TRUE(shared_memory->CreateAndMapAnonymous(buffer_size));
 
-    base::SharedMemoryHandle duplicate_handle;
-    EXPECT_TRUE(shared_memory->ShareToProcess(base::GetCurrentProcessHandle(),
-                                              &duplicate_handle));
+    base::SharedMemoryHandle duplicate_handle =
+        shared_memory->handle().Duplicate();
+    EXPECT_TRUE(duplicate_handle.IsValid());
     EXPECT_TRUE(dispatcher_->OnMessageReceived(ResourceMsg_SetDataBuffer(
         request_id, duplicate_handle, shared_memory->requested_size(), 0)));
   }
@@ -181,13 +182,6 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
 
     EXPECT_TRUE(dispatcher_->OnMessageReceived(ResourceMsg_DataReceived(
         request_id, 0, data.length(), data.length())));
-  }
-
-  void NotifyInlinedDataChunkReceived(int request_id,
-                                      const std::vector<char>& data) {
-    auto size = data.size();
-    EXPECT_TRUE(dispatcher_->OnMessageReceived(
-        ResourceMsg_InlinedDataChunkReceived(request_id, data, size)));
   }
 
   void NotifyDataDownloaded(int request_id,
@@ -214,7 +208,7 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
     request->method = "GET";
     request->url = GURL(kTestPageUrl);
     request->first_party_for_cookies = GURL(kTestPageUrl);
-    request->referrer_policy = blink::WebReferrerPolicyDefault;
+    request->referrer_policy = blink::kWebReferrerPolicyDefault;
     request->resource_type = RESOURCE_TYPE_SUB_RESOURCE;
     request->priority = net::LOW;
     request->fetch_request_mode = FETCH_REQUEST_MODE_NO_CORS;
@@ -230,13 +224,15 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
   ResourceDispatcher* dispatcher() { return dispatcher_.get(); }
 
   int StartAsync(std::unique_ptr<ResourceRequest> request,
-                 ResourceRequestBodyImpl* request_body,
+                 ResourceRequestBody* request_body,
                  TestRequestPeer::Context* peer_context) {
     std::unique_ptr<TestRequestPeer> peer(
         new TestRequestPeer(dispatcher(), peer_context));
     int request_id = dispatcher()->StartAsync(
         std::move(request), 0, nullptr, url::Origin(), std::move(peer),
-        blink::WebURLRequest::LoadingIPCType::ChromeIPC, nullptr);
+        blink::WebURLRequest::LoadingIPCType::kChromeIPC, nullptr,
+        std::vector<std::unique_ptr<URLLoaderThrottle>>(),
+        mojo::ScopedDataPipeConsumerHandle());
     peer_context->request_id = request_id;
     return request_id;
   }
@@ -275,34 +271,6 @@ TEST_F(ResourceDispatcherTest, RoundTrip) {
 
   NotifyDataReceived(id, kTestPageContents + kFirstReceiveSize);
   ConsumeDataReceived_ACK(id);
-  EXPECT_EQ(0u, queued_messages());
-
-  NotifyRequestComplete(id, strlen(kTestPageContents));
-  EXPECT_EQ(kTestPageContents, peer_context.data);
-  EXPECT_TRUE(peer_context.complete);
-  EXPECT_EQ(0u, queued_messages());
-}
-
-// A simple request with an inline data response.
-TEST_F(ResourceDispatcherTest, ResponseWithInlinedData) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(
-      features::kOptimizeLoadingIPCForSmallResources);
-
-  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
-  TestRequestPeer::Context peer_context;
-  StartAsync(std::move(request), NULL, &peer_context);
-
-  int id = ConsumeRequestResource();
-  EXPECT_EQ(0u, queued_messages());
-
-  NotifyReceivedResponse(id);
-  EXPECT_EQ(0u, queued_messages());
-  EXPECT_TRUE(peer_context.received_response);
-
-  std::vector<char> data(kTestPageContents,
-                         kTestPageContents + strlen(kTestPageContents));
-  NotifyInlinedDataChunkReceived(id, data);
   EXPECT_EQ(0u, queued_messages());
 
   NotifyRequestComplete(id, strlen(kTestPageContents));
@@ -452,15 +420,17 @@ class TestResourceDispatcherDelegate : public ResourceDispatcherDelegate {
                             bool stale_copy_in_cache,
                             const base::TimeTicks& completion_time,
                             int64_t total_transfer_size,
-                            int64_t encoded_body_size) override {
+                            int64_t encoded_body_size,
+                            int64_t decoded_body_size) override {
       original_peer_->OnReceivedResponse(response_info_);
       if (!data_.empty()) {
         original_peer_->OnReceivedData(
             base::MakeUnique<FixedReceivedData>(data_.data(), data_.size()));
       }
-      original_peer_->OnCompletedRequest(
-          error_code, was_ignored_by_handler, stale_copy_in_cache,
-          completion_time, total_transfer_size, encoded_body_size);
+      original_peer_->OnCompletedRequest(error_code, was_ignored_by_handler,
+                                         stale_copy_in_cache, completion_time,
+                                         total_transfer_size, encoded_body_size,
+                                         decoded_body_size);
     }
 
    private:

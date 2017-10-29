@@ -12,11 +12,11 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/time/time.h"
-#include "cc/base/cc_export.h"
-#include "cc/debug/debug_rect_history.h"
+#include "cc/cc_export.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/resources/memory_history.h"
 #include "cc/resources/scoped_resource.h"
+#include "cc/trees/debug_rect_history.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
 class SkCanvas;
@@ -44,7 +44,8 @@ class CC_EXPORT HeadsUpDisplayLayerImpl : public LayerImpl {
   void AppendQuads(RenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override;
   void UpdateHudTexture(DrawMode draw_mode,
-                        ResourceProvider* resource_provider);
+                        ResourceProvider* resource_provider,
+                        viz::ContextProvider* context_provider);
 
   void ReleaseResources() override;
 

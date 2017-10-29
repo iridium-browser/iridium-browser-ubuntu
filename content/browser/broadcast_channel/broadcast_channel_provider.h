@@ -19,8 +19,7 @@ class BroadcastChannelProvider
   public blink::mojom::BroadcastChannelProvider {
  public:
   BroadcastChannelProvider();
-  void Connect(
-      mojo::InterfaceRequest<blink::mojom::BroadcastChannelProvider> request);
+  void Connect(blink::mojom::BroadcastChannelProviderRequest request);
 
   void ConnectToChannel(
       const url::Origin& origin,

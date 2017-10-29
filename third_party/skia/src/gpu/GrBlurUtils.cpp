@@ -14,11 +14,9 @@
 #include "GrRenderTargetContextPriv.h"
 #include "effects/GrSimpleTextureEffect.h"
 #include "GrStyle.h"
-#include "GrTexture.h"
 #include "GrTextureProxy.h"
-#include "GrTextureProvider.h"
 #include "SkDraw.h"
-#include "SkGrPriv.h"
+#include "SkGr.h"
 #include "SkMaskFilter.h"
 #include "SkPaint.h"
 #include "SkTLazy.h"
@@ -30,8 +28,7 @@ static bool clip_bounds_quick_reject(const SkIRect& clipBounds, const SkIRect& r
 // Draw a mask using the supplied paint. Since the coverage/geometry
 // is already burnt into the mask this boils down to a rect draw.
 // Return true if the mask was successfully drawn.
-static bool draw_mask(GrContext* context,
-                      GrRenderTargetContext* renderTargetContext,
+static bool draw_mask(GrRenderTargetContext* renderTargetContext,
                       const GrClip& clip,
                       const SkMatrix& viewMatrix,
                       const SkIRect& maskRect,
@@ -45,7 +42,7 @@ static bool draw_mask(GrContext* context,
     SkMatrix matrix = SkMatrix::MakeTrans(-SkIntToScalar(maskRect.fLeft),
                                           -SkIntToScalar(maskRect.fTop));
     matrix.preConcat(viewMatrix);
-    paint.addCoverageFragmentProcessor(GrSimpleTextureEffect::Make(context, std::move(mask),
+    paint.addCoverageFragmentProcessor(GrSimpleTextureEffect::Make(std::move(mask),
                                                                    nullptr, matrix));
 
     renderTargetContext->fillRectWithLocalMatrix(clip, std::move(paint), GrAA::kNo, SkMatrix::I(),
@@ -100,7 +97,7 @@ static bool sw_draw_with_mask_filter(GrContext* context,
         return false;
     }
 
-    return draw_mask(context, renderTargetContext, clipData, viewMatrix,
+    return draw_mask(renderTargetContext, clipData, viewMatrix,
                      dstM.fBounds, std::move(paint), sContext->asTextureProxyRef());
 }
 
@@ -207,7 +204,7 @@ static void draw_path_with_mask_filter(GrContext* context,
             return;
         }
 
-        if (maskFilter->directFilterMaskGPU(context->textureProvider(),
+        if (maskFilter->directFilterMaskGPU(context,
                                             renderTargetContext,
                                             std::move(paint),
                                             clip,
@@ -231,7 +228,7 @@ static void draw_path_with_mask_filter(GrContext* context,
                                                                        viewMatrix,
                                                                        finalIRect);
             if (filtered) {
-                if (draw_mask(context, renderTargetContext, clip, viewMatrix,
+                if (draw_mask(renderTargetContext, clip, viewMatrix,
                               finalIRect, std::move(paint), std::move(filtered))) {
                     // This path is completely drawn
                     return;
@@ -300,7 +297,7 @@ void GrBlurUtils::drawPathWithMaskFilter(GrContext* context,
     }
     GrAA aa = GrBoolToAA(paint.isAntiAlias());
     SkMaskFilter* mf = paint.getMaskFilter();
-    if (mf && !mf->asFragmentProcessor(nullptr, nullptr, viewMatrix)) {
+    if (mf && !mf->asFragmentProcessor(nullptr)) {
         // The MaskFilter wasn't already handled in SkPaintToGrPaint
         draw_path_with_mask_filter(context, renderTargetContext, clip, std::move(grPaint), aa,
                                    viewMatrix, mf, style, path, pathIsMutable);

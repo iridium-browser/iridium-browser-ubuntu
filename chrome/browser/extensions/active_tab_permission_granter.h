@@ -32,10 +32,23 @@ class ActiveTabPermissionGranter
     : public content::WebContentsObserver,
       public extensions::ExtensionRegistryObserver {
  public:
+  // Platform specific delegate.
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+    // Platform specific check whether the activeTab permission is allowed.
+    virtual bool ShouldGrantActiveTab(
+        const Extension* extension, content::WebContents* web_contents) = 0;
+  };
+
   ActiveTabPermissionGranter(content::WebContents* web_contents,
                              int tab_id,
                              Profile* profile);
   ~ActiveTabPermissionGranter() override;
+
+  // Platform specific delegate should be set during startup. |delegate| is a
+  // singleton instance and is leaked.
+  static Delegate* SetPlatformDelegate(Delegate* delegate);
 
   // If |extension| has the activeTab or tabCapture permission, grants
   // tab-specific permissions to it until the next page navigation or refresh.
@@ -53,7 +66,7 @@ class ActiveTabPermissionGranter
   // extensions::ExtensionRegistryObserver implementation.
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
-                           UnloadedExtensionInfo::Reason reason) override;
+                           UnloadedExtensionReason reason) override;
 
   // Clears any tab-specific permissions for all extensions on |tab_id_| and
   // notifies renderers.

@@ -21,6 +21,7 @@
 #include "cc/quads/tile_draw_quad.h"
 #include "cc/quads/yuv_video_draw_quad.h"
 #include "ui/gfx/geometry/mojo/geometry_struct_traits.h"
+#include "ui/gfx/ipc/color/gfx_param_traits.h"
 
 namespace mojo {
 
@@ -233,7 +234,7 @@ struct EnumTraits<cc::mojom::SurfaceDrawQuadType, cc::SurfaceDrawQuadType> {
 };
 template <>
 struct StructTraits<cc::mojom::SurfaceQuadStateDataView, cc::DrawQuad> {
-  static const cc::SurfaceId& surface(const cc::DrawQuad& input) {
+  static const viz::SurfaceId& surface(const cc::DrawQuad& input) {
     const cc::SurfaceDrawQuad* quad = cc::SurfaceDrawQuad::MaterialCast(&input);
     return quad->surface_id;
   }
@@ -413,6 +414,16 @@ struct StructTraits<cc::mojom::YUVVideoQuadStateDataView, cc::DrawQuad> {
     const cc::YUVVideoDrawQuad* quad =
         cc::YUVVideoDrawQuad::MaterialCast(&input);
     return quad->bits_per_channel;
+  }
+  static gfx::ColorSpace video_color_space(const cc::DrawQuad& input) {
+    const cc::YUVVideoDrawQuad* quad =
+        cc::YUVVideoDrawQuad::MaterialCast(&input);
+    return quad->video_color_space;
+  }
+  static bool require_overlay(const cc::DrawQuad& input) {
+    const cc::YUVVideoDrawQuad* quad =
+        cc::YUVVideoDrawQuad::MaterialCast(&input);
+    return quad->require_overlay;
   }
 
   static bool Read(cc::mojom::YUVVideoQuadStateDataView data,

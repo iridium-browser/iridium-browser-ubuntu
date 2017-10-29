@@ -5,30 +5,52 @@
 #include "platform/scheduler/child/worker_scheduler_impl.h"
 
 #include "base/bind.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
-#include "public/platform/scheduler/base/task_queue.h"
+#include "platform/Histogram.h"
+#include "platform/scheduler/base/task_queue.h"
+#include "platform/scheduler/base/time_converter.h"
 #include "platform/scheduler/child/scheduler_tqm_delegate.h"
+#include "platform/scheduler/child/worker_scheduler_helper.h"
+#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 namespace scheduler {
 
+namespace {
+// Workers could be short-lived, set a shorter interval than
+// the renderer thread.
+constexpr base::TimeDelta kWorkerThreadLoadTrackerReportingInterval =
+    base::TimeDelta::FromSeconds(1);
+
+void ReportWorkerTaskLoad(base::TimeTicks time, double load) {
+  int load_percentage = static_cast<int>(load * 100);
+  DCHECK_LE(load_percentage, 100);
+  // TODO(kinuko): Maybe we also want to separately log when the associated
+  // tab is in foreground and when not.
+  UMA_HISTOGRAM_PERCENTAGE("WorkerScheduler.WorkerThreadLoad", load_percentage);
+}
+
+}  // namespace
+
 WorkerSchedulerImpl::WorkerSchedulerImpl(
     scoped_refptr<SchedulerTqmDelegate> main_task_runner)
-    : helper_(main_task_runner,
-              "worker.scheduler",
-              TRACE_DISABLED_BY_DEFAULT("worker.scheduler"),
-              TRACE_DISABLED_BY_DEFAULT("worker.scheduler.debug")),
-      idle_helper_(&helper_,
+    : WorkerScheduler(WTF::MakeUnique<WorkerSchedulerHelper>(main_task_runner)),
+      idle_helper_(helper_.get(),
                    this,
-                   "worker.scheduler",
-                   TRACE_DISABLED_BY_DEFAULT("worker.scheduler"),
                    "WorkerSchedulerIdlePeriod",
-                   base::TimeDelta::FromMilliseconds(300)),
-      idle_canceled_delayed_task_sweeper_("worker.scheduler",
-                                          &helper_,
-                                          idle_helper_.IdleTaskRunner()) {
+                   base::TimeDelta::FromMilliseconds(300),
+                   helper_->NewTaskQueue(TaskQueue::Spec("worker_idle_tq"))),
+      idle_canceled_delayed_task_sweeper_(helper_.get(),
+                                          idle_helper_.IdleTaskRunner()),
+      load_tracker_(helper_->scheduler_tqm_delegate()->NowTicks(),
+                    base::Bind(&ReportWorkerTaskLoad),
+                    kWorkerThreadLoadTrackerReportingInterval) {
   initialized_ = false;
+  thread_start_time_ = helper_->scheduler_tqm_delegate()->NowTicks();
+  load_tracker_.Resume(thread_start_time_);
+  helper_->AddTaskTimeObserver(this);
   TRACE_EVENT_OBJECT_CREATED_WITH_ID(
       TRACE_DISABLED_BY_DEFAULT("worker.scheduler"), "WorkerScheduler", this);
 }
@@ -36,6 +58,7 @@ WorkerSchedulerImpl::WorkerSchedulerImpl(
 WorkerSchedulerImpl::~WorkerSchedulerImpl() {
   TRACE_EVENT_OBJECT_DELETED_WITH_ID(
       TRACE_DISABLED_BY_DEFAULT("worker.scheduler"), "WorkerScheduler", this);
+  helper_->RemoveTaskTimeObserver(this);
 }
 
 void WorkerSchedulerImpl::Init() {
@@ -43,9 +66,15 @@ void WorkerSchedulerImpl::Init() {
   idle_helper_.EnableLongIdlePeriod();
 }
 
-scoped_refptr<TaskQueue> WorkerSchedulerImpl::DefaultTaskRunner() {
+scoped_refptr<base::SingleThreadTaskRunner>
+WorkerSchedulerImpl::DefaultTaskRunner() {
   DCHECK(initialized_);
-  return helper_.DefaultTaskRunner();
+  return helper_->DefaultWorkerTaskQueue();
+}
+
+scoped_refptr<WorkerTaskQueue> WorkerSchedulerImpl::DefaultTaskQueue() {
+  DCHECK(initialized_);
+  return helper_->DefaultWorkerTaskQueue();
 }
 
 scoped_refptr<SingleThreadIdleTaskRunner>
@@ -67,22 +96,32 @@ bool WorkerSchedulerImpl::ShouldYieldForHighPriorityWork() {
 void WorkerSchedulerImpl::AddTaskObserver(
     base::MessageLoop::TaskObserver* task_observer) {
   DCHECK(initialized_);
-  helper_.AddTaskObserver(task_observer);
+  helper_->AddTaskObserver(task_observer);
 }
 
 void WorkerSchedulerImpl::RemoveTaskObserver(
     base::MessageLoop::TaskObserver* task_observer) {
   DCHECK(initialized_);
-  helper_.RemoveTaskObserver(task_observer);
+  helper_->RemoveTaskObserver(task_observer);
 }
 
 void WorkerSchedulerImpl::Shutdown() {
   DCHECK(initialized_);
-  helper_.Shutdown();
+  load_tracker_.RecordIdle(helper_->scheduler_tqm_delegate()->NowTicks());
+  base::TimeTicks end_time = helper_->scheduler_tqm_delegate()->NowTicks();
+  base::TimeDelta delta = end_time - thread_start_time_;
+
+  // The lifetime could be radically different for different workers,
+  // some workers could be short-lived (but last at least 1 sec in
+  // Service Workers case) or could be around as long as the tab is open.
+  UMA_HISTOGRAM_CUSTOM_TIMES(
+      "WorkerThread.Runtime", delta, base::TimeDelta::FromSeconds(1),
+      base::TimeDelta::FromDays(1), 50 /* bucket count */);
+  helper_->Shutdown();
 }
 
 SchedulerHelper* WorkerSchedulerImpl::GetSchedulerHelperForTesting() {
-  return &helper_;
+  return helper_.get();
 }
 
 bool WorkerSchedulerImpl::CanEnterLongIdlePeriod(base::TimeTicks,
@@ -93,6 +132,23 @@ bool WorkerSchedulerImpl::CanEnterLongIdlePeriod(base::TimeTicks,
 base::TimeTicks WorkerSchedulerImpl::CurrentIdleTaskDeadlineForTesting() const {
   return idle_helper_.CurrentIdleTaskDeadline();
 }
+
+void WorkerSchedulerImpl::WillProcessTask(double start_time) {}
+
+void WorkerSchedulerImpl::DidProcessTask(double start_time, double end_time) {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(CustomCountHistogram, task_time_counter,
+                                  ("WorkerThread.Task.Time", 0, 10000000, 50));
+  task_time_counter.Count((end_time - start_time) *
+                          base::Time::kMicrosecondsPerSecond);
+
+  base::TimeTicks start_time_ticks =
+      MonotonicTimeInSecondsToTimeTicks(start_time);
+  base::TimeTicks end_time_ticks = MonotonicTimeInSecondsToTimeTicks(end_time);
+
+  load_tracker_.RecordTaskTime(start_time_ticks, end_time_ticks);
+}
+
+void WorkerSchedulerImpl::OnBeginNestedRunLoop() {}
 
 }  // namespace scheduler
 }  // namespace blink

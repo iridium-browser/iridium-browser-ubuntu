@@ -22,86 +22,18 @@
 #include "media/base/limits.h"
 #include "media/base/video_frame.h"
 #include "media/gpu/gpu_video_accelerator_util.h"
+#include "media/gpu/gpu_video_encode_accelerator_factory.h"
 #include "media/gpu/ipc/common/media_messages.h"
 #include "media/media_features.h"
 
-#if defined(OS_CHROMEOS)
-#if defined(USE_V4L2_CODEC)
-#include "media/gpu/v4l2_video_encode_accelerator.h"
-#endif
-#if defined(ARCH_CPU_X86_FAMILY)
-#include "media/gpu/vaapi_video_encode_accelerator.h"
-#endif
-#elif defined(OS_ANDROID) && BUILDFLAG(ENABLE_WEBRTC)
-#include "media/gpu/android_video_encode_accelerator.h"
-#elif defined(OS_MACOSX)
-#include "media/gpu/vt_video_encode_accelerator_mac.h"
-#elif defined(OS_WIN)
-#include "base/feature_list.h"
-#include "media/base/media_switches.h"
-#include "media/gpu/media_foundation_video_encode_accelerator_win.h"
-#endif
 
 namespace media {
 
 namespace {
 
-bool MakeDecoderContextCurrent(
-    const base::WeakPtr<gpu::GpuCommandBufferStub> stub) {
-  if (!stub) {
-    DLOG(ERROR) << "Stub is gone; won't MakeCurrent().";
-    return false;
-  }
-
-  if (!stub->decoder()->MakeCurrent()) {
-    DLOG(ERROR) << "Failed to MakeCurrent()";
-    return false;
-  }
-
-  return true;
-}
-
 void DropSharedMemory(std::unique_ptr<base::SharedMemory> shm) {
   // Just let |shm| fall out of scope.
 }
-
-#if defined(OS_CHROMEOS) && defined(USE_V4L2_CODEC)
-std::unique_ptr<VideoEncodeAccelerator> CreateV4L2VEA() {
-  scoped_refptr<V4L2Device> device = V4L2Device::Create();
-  if (!device)
-    return nullptr;
-  return base::WrapUnique<VideoEncodeAccelerator>(
-      new V4L2VideoEncodeAccelerator(device));
-}
-#endif
-
-#if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
-std::unique_ptr<VideoEncodeAccelerator> CreateVaapiVEA() {
-  return base::WrapUnique<VideoEncodeAccelerator>(
-      new VaapiVideoEncodeAccelerator());
-}
-#endif
-
-#if defined(OS_ANDROID) && BUILDFLAG(ENABLE_WEBRTC)
-std::unique_ptr<VideoEncodeAccelerator> CreateAndroidVEA() {
-  return base::WrapUnique<VideoEncodeAccelerator>(
-      new AndroidVideoEncodeAccelerator());
-}
-#endif
-
-#if defined(OS_MACOSX)
-std::unique_ptr<VideoEncodeAccelerator> CreateVTVEA() {
-  return base::WrapUnique<VideoEncodeAccelerator>(
-      new VTVideoEncodeAccelerator());
-}
-#endif
-
-#if defined(OS_WIN)
-std::unique_ptr<VideoEncodeAccelerator> CreateMediaFoundationVEA() {
-  return base::WrapUnique<media::VideoEncodeAccelerator>(
-      new MediaFoundationVideoEncodeAccelerator());
-}
-#endif
 
 }  // anonymous namespace
 
@@ -173,22 +105,17 @@ GpuVideoEncodeAccelerator::GpuVideoEncodeAccelerator(
       encode_task_runner_(main_task_runner_),
       weak_this_factory_for_encoder_worker_(this),
       weak_this_factory_(this) {
+  weak_this_for_encoder_worker_ =
+      weak_this_factory_for_encoder_worker_.GetWeakPtr();
+  weak_this_ = weak_this_factory_.GetWeakPtr();
   stub_->AddDestructionObserver(this);
-  make_context_current_ =
-      base::Bind(&MakeDecoderContextCurrent, stub_->AsWeakPtr());
 }
 
 GpuVideoEncodeAccelerator::~GpuVideoEncodeAccelerator() {
   // This class can only be self-deleted from OnWillDestroyStub(), which means
   // the VEA has already been destroyed in there.
   DCHECK(!encoder_);
-  if (encoder_worker_thread_.IsRunning()) {
-    encoder_worker_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&GpuVideoEncodeAccelerator::DestroyOnEncoderWorker,
-                   weak_this_factory_for_encoder_worker_.GetWeakPtr()));
-    encoder_worker_thread_.Stop();
-  }
+  DCHECK(!encoder_worker_thread_.IsRunning());
 }
 
 bool GpuVideoEncodeAccelerator::Initialize(VideoPixelFormat input_format,
@@ -203,7 +130,7 @@ bool GpuVideoEncodeAccelerator::Initialize(VideoPixelFormat input_format,
            << ", initial_bitrate=" << initial_bitrate;
   DCHECK(!encoder_);
 
-  if (!stub_->channel()->AddRoute(host_route_id_, stub_->stream_id(), this)) {
+  if (!stub_->channel()->AddRoute(host_route_id_, stub_->sequence_id(), this)) {
     DLOG(ERROR) << __func__ << " failed to add route";
     return false;
   }
@@ -219,35 +146,31 @@ bool GpuVideoEncodeAccelerator::Initialize(VideoPixelFormat input_format,
   const gpu::GpuPreferences& gpu_preferences =
       stub_->channel()->gpu_channel_manager()->gpu_preferences();
 
-  // Try all possible encoders and use the first successful encoder.
-  for (const auto& factory_function : GetVEAFactoryFunctions(gpu_preferences)) {
-    encoder_ = factory_function.Run();
-    if (encoder_ &&
-        encoder_->Initialize(input_format, input_visible_size, output_profile,
-                             initial_bitrate, this)) {
-      input_format_ = input_format;
-      input_visible_size_ = input_visible_size;
-      // Attempt to set up performing encoding tasks on IO thread, if supported
-      // by the VEA.
-      if (encoder_->TryToSetupEncodeOnSeparateThread(
-              weak_this_factory_.GetWeakPtr(), io_task_runner_)) {
-        filter_ = new MessageFilter(this, host_route_id_);
-        stub_->channel()->AddFilter(filter_.get());
-        encode_task_runner_ = io_task_runner_;
-      }
-
-      if (!encoder_worker_thread_.Start()) {
-        DLOG(ERROR) << "Failed spawning encoder worker thread.";
-        return false;
-      }
-      encoder_worker_task_runner_ = encoder_worker_thread_.task_runner();
-
-      return true;
-    }
+  encoder_ = GpuVideoEncodeAcceleratorFactory::CreateVEA(
+      input_format, input_visible_size, output_profile, initial_bitrate, this,
+      gpu_preferences);
+  if (!encoder_) {
+    DLOG(ERROR) << __func__ << " Could not create VEA";
+    return false;
   }
-  encoder_.reset();
-  DLOG(ERROR) << __func__ << " VEA initialization failed";
-  return false;
+
+  if (!encoder_worker_thread_.Start()) {
+    encoder_.reset();
+    DLOG(ERROR) << "Failed spawning encoder worker thread.";
+    return false;
+  }
+
+  input_format_ = input_format;
+  input_visible_size_ = input_visible_size;
+  // Attempt to set up performing encoding tasks on IO thread, if supported
+  // by the VEA.
+  if (encoder_->TryToSetupEncodeOnSeparateThread(weak_this_, io_task_runner_)) {
+    filter_ = new MessageFilter(this, host_route_id_);
+    stub_->channel()->AddFilter(filter_.get());
+    encode_task_runner_ = io_task_runner_;
+  }
+  encoder_worker_task_runner_ = encoder_worker_thread_.task_runner();
+  return true;
 }
 
 bool GpuVideoEncodeAccelerator::OnMessageReceived(const IPC::Message& message) {
@@ -325,6 +248,16 @@ void GpuVideoEncodeAccelerator::OnWillDestroyStub() {
     filter_removed_.Wait();
   }
 
+  // We should stop |encoder_worker_thread_| before releasing |encoder_|, see
+  // crbug.com/715759.
+  if (encoder_worker_thread_.IsRunning()) {
+    encoder_worker_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&GpuVideoEncodeAccelerator::DestroyOnEncoderWorker,
+                   weak_this_for_encoder_worker_));
+    encoder_worker_thread_.Stop();
+  }
+
   stub_->channel()->RemoveRoute(host_route_id_);
   stub_->RemoveDestructionObserver(this);
   encoder_.reset();
@@ -335,44 +268,8 @@ void GpuVideoEncodeAccelerator::OnWillDestroyStub() {
 gpu::VideoEncodeAcceleratorSupportedProfiles
 GpuVideoEncodeAccelerator::GetSupportedProfiles(
     const gpu::GpuPreferences& gpu_preferences) {
-  VideoEncodeAccelerator::SupportedProfiles profiles;
-
-  for (const auto& factory_function : GetVEAFactoryFunctions(gpu_preferences)) {
-    std::unique_ptr<VideoEncodeAccelerator> encoder = factory_function.Run();
-    if (!encoder)
-      continue;
-    VideoEncodeAccelerator::SupportedProfiles vea_profiles =
-        encoder->GetSupportedProfiles();
-    GpuVideoAcceleratorUtil::InsertUniqueEncodeProfiles(vea_profiles,
-                                                        &profiles);
-  }
-  return GpuVideoAcceleratorUtil::ConvertMediaToGpuEncodeProfiles(profiles);
-}
-
-// static
-std::vector<GpuVideoEncodeAccelerator::VEAFactoryFunction>
-GpuVideoEncodeAccelerator::GetVEAFactoryFunctions(
-    const gpu::GpuPreferences& gpu_preferences) {
-  std::vector<VEAFactoryFunction> vea_factory_functions;
-#if defined(OS_CHROMEOS) && defined(USE_V4L2_CODEC)
-  vea_factory_functions.push_back(base::Bind(&CreateV4L2VEA));
-#endif
-#if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
-  if (!gpu_preferences.disable_vaapi_accelerated_video_encode)
-    vea_factory_functions.push_back(base::Bind(&CreateVaapiVEA));
-#endif
-#if defined(OS_ANDROID) && BUILDFLAG(ENABLE_WEBRTC)
-  if (!gpu_preferences.disable_web_rtc_hw_encoding)
-    vea_factory_functions.push_back(base::Bind(&CreateAndroidVEA));
-#endif
-#if defined(OS_MACOSX)
-  vea_factory_functions.push_back(base::Bind(&CreateVTVEA));
-#endif
-#if defined(OS_WIN)
-  if (base::FeatureList::IsEnabled(kMediaFoundationH264Encoding))
-    vea_factory_functions.push_back(base::Bind(&CreateMediaFoundationVEA));
-#endif
-  return vea_factory_functions;
+  return GpuVideoAcceleratorUtil::ConvertMediaToGpuEncodeProfiles(
+      GpuVideoEncodeAcceleratorFactory::GetSupportedProfiles(gpu_preferences));
 }
 
 void GpuVideoEncodeAccelerator::OnFilterRemoved() {
@@ -404,7 +301,7 @@ void GpuVideoEncodeAccelerator::OnEncode(
   encoder_worker_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&GpuVideoEncodeAccelerator::CreateEncodeFrameOnEncoderWorker,
-                 weak_this_factory_for_encoder_worker_.GetWeakPtr(), params));
+                 weak_this_for_encoder_worker_, params));
 }
 
 void GpuVideoEncodeAccelerator::OnUseOutputBitstreamBuffer(
@@ -465,18 +362,18 @@ void GpuVideoEncodeAccelerator::CreateEncodeFrameOnEncoderWorker(
   if (!map_offset.IsValid() || !map_size.IsValid()) {
     DLOG(ERROR) << __func__ << "  invalid map_offset or map_size";
     encode_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&GpuVideoEncodeAccelerator::NotifyError,
-                              weak_this_factory_.GetWeakPtr(),
-                              VideoEncodeAccelerator::kPlatformFailureError));
+        FROM_HERE,
+        base::Bind(&GpuVideoEncodeAccelerator::NotifyError, weak_this_,
+                   VideoEncodeAccelerator::kPlatformFailureError));
     return;
   }
 
   if (!shm->MapAt(map_offset.ValueOrDie(), map_size.ValueOrDie())) {
     DLOG(ERROR) << __func__ << " could not map frame_id=" << params.frame_id;
     encode_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&GpuVideoEncodeAccelerator::NotifyError,
-                              weak_this_factory_.GetWeakPtr(),
-                              VideoEncodeAccelerator::kPlatformFailureError));
+        FROM_HERE,
+        base::Bind(&GpuVideoEncodeAccelerator::NotifyError, weak_this_,
+                   VideoEncodeAccelerator::kPlatformFailureError));
     return;
   }
 
@@ -489,9 +386,9 @@ void GpuVideoEncodeAccelerator::CreateEncodeFrameOnEncoderWorker(
   if (!frame) {
     DLOG(ERROR) << __func__ << " could not create a frame";
     encode_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&GpuVideoEncodeAccelerator::NotifyError,
-                              weak_this_factory_.GetWeakPtr(),
-                              VideoEncodeAccelerator::kPlatformFailureError));
+        FROM_HERE,
+        base::Bind(&GpuVideoEncodeAccelerator::NotifyError, weak_this_,
+                   VideoEncodeAccelerator::kPlatformFailureError));
     return;
   }
 
@@ -500,9 +397,9 @@ void GpuVideoEncodeAccelerator::CreateEncodeFrameOnEncoderWorker(
   frame->AddDestructionObserver(
       base::Bind(&DropSharedMemory, base::Passed(&shm)));
   encode_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&GpuVideoEncodeAccelerator::OnEncodeFrameCreated,
-                            weak_this_factory_.GetWeakPtr(), params.frame_id,
-                            params.force_keyframe, frame));
+      FROM_HERE,
+      base::Bind(&GpuVideoEncodeAccelerator::OnEncodeFrameCreated, weak_this_,
+                 params.frame_id, params.force_keyframe, frame));
 }
 
 void GpuVideoEncodeAccelerator::DestroyOnEncoderWorker() {
@@ -516,6 +413,9 @@ void GpuVideoEncodeAccelerator::OnEncodeFrameCreated(
     const scoped_refptr<media::VideoFrame>& frame) {
   DVLOG(3) << __func__;
   DCHECK(CheckIfCalledOnCorrectThread());
+
+  if (filter_removed_.IsSignaled())
+    return;
 
   if (!frame) {
     DLOG(ERROR) << __func__ << " could not create a frame";

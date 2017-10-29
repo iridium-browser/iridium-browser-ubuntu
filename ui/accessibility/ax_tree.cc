@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "ui/accessibility/ax_node.h"
+#include "ui/gfx/transform.h"
 
 namespace ui {
 
@@ -22,6 +23,63 @@ std::string TreeToStringHelper(AXNode* node, int indent) {
   for (int i = 0; i < node->child_count(); ++i)
     result += TreeToStringHelper(node->ChildAtIndex(i), indent + 1);
   return result;
+}
+
+template <typename K, typename V>
+bool KeyValuePairsKeysMatch(std::vector<std::pair<K, V>> pairs1,
+                            std::vector<std::pair<K, V>> pairs2) {
+  if (pairs1.size() != pairs2.size())
+    return false;
+  for (size_t i = 0; i < pairs1.size(); ++i) {
+    if (pairs1[i].first != pairs2[i].first)
+      return false;
+  }
+  return true;
+}
+
+template <typename K, typename V>
+std::map<K, V> MapFromKeyValuePairs(std::vector<std::pair<K, V>> pairs) {
+  std::map<K, V> result;
+  for (size_t i = 0; i < pairs.size(); ++i)
+    result[pairs[i].first] = pairs[i].second;
+  return result;
+}
+
+// Given two vectors of <K, V> key, value pairs representing an "old" vs "new"
+// state, or "before" vs "after", calls a callback function for each key that
+// changed value.
+template <typename K, typename V, typename F>
+void CallIfAttributeValuesChanged(const std::vector<std::pair<K, V>>& pairs1,
+                                  const std::vector<std::pair<K, V>>& pairs2,
+                                  const V& empty_value,
+                                  F callback) {
+  // Fast path - if they both have the same keys in the same order.
+  if (KeyValuePairsKeysMatch(pairs1, pairs2)) {
+    for (size_t i = 0; i < pairs1.size(); ++i) {
+      if (pairs1[i].second != pairs2[i].second)
+        callback(pairs1[i].first, pairs1[i].second, pairs2[i].second);
+    }
+    return;
+  }
+
+  // Slower path - they don't have the same keys in the same order, so
+  // check all keys against each other, using maps to prevent this from
+  // becoming O(n^2) as the size grows.
+  auto map1 = MapFromKeyValuePairs(pairs1);
+  auto map2 = MapFromKeyValuePairs(pairs2);
+  for (size_t i = 0; i < pairs1.size(); ++i) {
+    const auto& new_iter = map2.find(pairs1[i].first);
+    if (pairs1[i].second != empty_value && new_iter == map2.end())
+      callback(pairs1[i].first, pairs1[i].second, empty_value);
+  }
+
+  for (size_t i = 0; i < pairs2.size(); ++i) {
+    const auto& iter = map1.find(pairs2[i].first);
+    if (iter == map1.end())
+      callback(pairs2[i].first, empty_value, pairs2[i].second);
+    else if (iter->second != pairs2[i].second)
+      callback(pairs2[i].first, iter->second, pairs2[i].second);
+  }
 }
 
 }  // namespace
@@ -97,10 +155,68 @@ AXNode* AXTree::GetFromId(int32_t id) const {
   return iter != id_map_.end() ? iter->second : NULL;
 }
 
-void AXTree::UpdateData(const AXTreeData& data) {
-  data_ = data;
+void AXTree::UpdateData(const AXTreeData& new_data) {
+  if (data_ == new_data)
+    return;
+
+  AXTreeData old_data = data_;
+  data_ = new_data;
   if (delegate_)
-    delegate_->OnTreeDataChanged(this);
+    delegate_->OnTreeDataChanged(this, old_data, new_data);
+}
+
+gfx::RectF AXTree::RelativeToTreeBounds(const AXNode* node,
+                                        gfx::RectF bounds) const {
+  // If |bounds| is uninitialized, which is not the same as empty,
+  // start with the node bounds.
+  if (bounds.width() == 0 && bounds.height() == 0) {
+    bounds = node->data().location;
+
+    // If the node bounds is empty (either width or height is zero),
+    // try to compute good bounds from the children.
+    if (bounds.IsEmpty()) {
+      for (size_t i = 0; i < node->children().size(); i++) {
+        ui::AXNode* child = node->children()[i];
+        bounds.Union(GetTreeBounds(child));
+      }
+      if (bounds.width() > 0 && bounds.height() > 0)
+        return bounds;
+    }
+  } else {
+    bounds.Offset(node->data().location.x(), node->data().location.y());
+  }
+
+  while (node != nullptr) {
+    if (node->data().transform)
+      node->data().transform->TransformRect(&bounds);
+    auto* container = GetFromId(node->data().offset_container_id);
+    if (!container) {
+      if (node == root())
+        container = node->parent();
+      else
+        container = root();
+    }
+    if (!container || container == node)
+      break;
+
+    gfx::RectF container_bounds = container->data().location;
+    bounds.Offset(container_bounds.x(), container_bounds.y());
+
+    int scroll_x = 0;
+    int scroll_y = 0;
+    if (container->data().GetIntAttribute(ui::AX_ATTR_SCROLL_X, &scroll_x) &&
+        container->data().GetIntAttribute(ui::AX_ATTR_SCROLL_Y, &scroll_y)) {
+      bounds.Offset(-scroll_x, -scroll_y);
+    }
+
+    node = container;
+  }
+
+  return bounds;
+}
+
+gfx::RectF AXTree::GetTreeBounds(const AXNode* node) const {
+  return RelativeToTreeBounds(node, gfx::RectF());
 }
 
 bool AXTree::Unserialize(const AXTreeUpdate& update) {
@@ -163,6 +279,9 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
     changes.reserve(update.nodes.size());
     for (size_t i = 0; i < update.nodes.size(); ++i) {
       AXNode* node = GetFromId(update.nodes[i].id);
+      if (!node)
+        continue;
+
       bool is_new_node = new_nodes.find(node) != new_nodes.end();
       bool is_reparented_node =
           is_new_node && update_state.HasRemovedNode(node);
@@ -228,9 +347,8 @@ bool AXTree::UpdateNode(const AXNodeData& src,
   AXNode* node = GetFromId(src.id);
   if (node) {
     update_state->pending_nodes.erase(node);
-    if (delegate_ &&
-        update_state->new_nodes.find(node) == update_state->new_nodes.end())
-      delegate_->OnNodeDataWillChange(this, node->data(), src);
+    if (update_state->new_nodes.find(node) == update_state->new_nodes.end())
+      CallNodeChangeCallbacks(node, src);
     node->SetData(src);
   } else {
     if (!is_new_root) {
@@ -289,6 +407,79 @@ bool AXTree::UpdateNode(const AXNodeData& src,
   }
 
   return success;
+}
+
+void AXTree::CallNodeChangeCallbacks(AXNode* node, const AXNodeData& new_data) {
+  if (!delegate_)
+    return;
+
+  const AXNodeData& old_data = node->data();
+  delegate_->OnNodeDataWillChange(this, old_data, new_data);
+
+  if (old_data.role != new_data.role)
+    delegate_->OnRoleChanged(this, node, old_data.role, new_data.role);
+
+  if (old_data.state != new_data.state) {
+    for (int i = AX_STATE_NONE + 1; i <= AX_STATE_LAST; ++i) {
+      AXState state = static_cast<AXState>(i);
+      if (old_data.HasState(state) != new_data.HasState(state))
+        delegate_->OnStateChanged(this, node, state, new_data.HasState(state));
+    }
+  }
+
+  auto string_callback = [this, node](AXStringAttribute attr,
+                                      const std::string& old_string,
+                                      const std::string& new_string) {
+    delegate_->OnStringAttributeChanged(this, node, attr, old_string,
+                                        new_string);
+  };
+  CallIfAttributeValuesChanged(old_data.string_attributes,
+                               new_data.string_attributes, std::string(),
+                               string_callback);
+
+  auto bool_callback = [this, node](AXBoolAttribute attr, const bool& old_bool,
+                                    const bool& new_bool) {
+    delegate_->OnBoolAttributeChanged(this, node, attr, new_bool);
+  };
+  CallIfAttributeValuesChanged(old_data.bool_attributes,
+                               new_data.bool_attributes, false, bool_callback);
+
+  auto float_callback = [this, node](AXFloatAttribute attr,
+                                     const float& old_float,
+                                     const float& new_float) {
+    delegate_->OnFloatAttributeChanged(this, node, attr, old_float, new_float);
+  };
+  CallIfAttributeValuesChanged(old_data.float_attributes,
+                               new_data.float_attributes, 0.0f, float_callback);
+
+  auto int_callback = [this, node](AXIntAttribute attr, const int& old_int,
+                                   const int& new_int) {
+    delegate_->OnIntAttributeChanged(this, node, attr, old_int, new_int);
+  };
+  CallIfAttributeValuesChanged(old_data.int_attributes, new_data.int_attributes,
+                               0, int_callback);
+
+  auto intlist_callback = [this, node](
+                              AXIntListAttribute attr,
+                              const std::vector<int32_t>& old_intlist,
+                              const std::vector<int32_t>& new_intlist) {
+    delegate_->OnIntListAttributeChanged(this, node, attr, old_intlist,
+                                         new_intlist);
+  };
+  CallIfAttributeValuesChanged(old_data.intlist_attributes,
+                               new_data.intlist_attributes,
+                               std::vector<int32_t>(), intlist_callback);
+
+  auto stringlist_callback =
+      [this, node](AXStringListAttribute attr,
+                   const std::vector<std::string>& old_stringlist,
+                   const std::vector<std::string>& new_stringlist) {
+        delegate_->OnStringListAttributeChanged(this, node, attr,
+                                                old_stringlist, new_stringlist);
+      };
+  CallIfAttributeValuesChanged(old_data.stringlist_attributes,
+                               new_data.stringlist_attributes,
+                               std::vector<std::string>(), stringlist_callback);
 }
 
 void AXTree::DestroySubtree(AXNode* node,

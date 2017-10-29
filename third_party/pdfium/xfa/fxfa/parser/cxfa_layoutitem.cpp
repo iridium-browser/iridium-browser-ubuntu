@@ -6,10 +6,11 @@
 
 #include "xfa/fxfa/parser/cxfa_layoutitem.h"
 
-#include "xfa/fxfa/app/xfa_ffnotify.h"
+#include "xfa/fxfa/app/cxfa_ffnotify.h"
 #include "xfa/fxfa/parser/cxfa_containerlayoutitem.h"
 #include "xfa/fxfa/parser/cxfa_contentlayoutitem.h"
 #include "xfa/fxfa/parser/cxfa_measurement.h"
+#include "xfa/fxfa/parser/cxfa_node.h"
 
 void XFA_ReleaseLayoutItem(CXFA_LayoutItem* pLayoutItem) {
   CXFA_LayoutItem* pNode = pLayoutItem->m_pFirstChild;
@@ -19,12 +20,10 @@ void XFA_ReleaseLayoutItem(CXFA_LayoutItem* pLayoutItem) {
   while (pNode) {
     CXFA_LayoutItem* pNext = pNode->m_pNextSibling;
     pNode->m_pParent = nullptr;
-    pNotify->OnLayoutItemRemoving(pDocLayout,
-                                  static_cast<CXFA_LayoutItem*>(pNode));
+    pNotify->OnLayoutItemRemoving(pDocLayout, pNode);
     XFA_ReleaseLayoutItem(pNode);
     pNode = pNext;
   }
-
   pNotify->OnLayoutItemRemoving(pDocLayout, pLayoutItem);
   if (pLayoutItem->m_pFormNode->GetElementType() == XFA_Element::PageArea) {
     pNotify->OnPageEvent(static_cast<CXFA_ContainerLayoutItem*>(pLayoutItem),
@@ -64,7 +63,7 @@ CXFA_ContainerLayoutItem* CXFA_LayoutItem::GetPage() const {
 CFX_RectF CXFA_LayoutItem::GetRect(bool bRelative) const {
   ASSERT(m_bIsContentLayoutItem);
 
-  auto pThis = static_cast<const CXFA_ContentLayoutItem*>(this);
+  auto* pThis = static_cast<const CXFA_ContentLayoutItem*>(this);
   CFX_PointF sPos = pThis->m_sPos;
   CFX_SizeF sSize = pThis->m_sSize;
   if (bRelative)

@@ -9,17 +9,17 @@
 #import "ios/chrome/browser/ui/browser_view_controller_dependency_factory.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
+#import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
-#import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
-#import "ios/web/public/test/http_server.h"
-#import "ios/web/public/test/http_server_util.h"
-#include "ios/web/public/test/response_providers/error_page_response_provider.h"
-#include "ios/web/public/test/response_providers/response_provider.h"
+#include "ios/web/public/test/http_server/error_page_response_provider.h"
+#import "ios/web/public/test/http_server/http_server.h"
+#include "ios/web/public/test/http_server/http_server_util.h"
+#include "ios/web/public/test/http_server/response_provider.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -60,6 +60,12 @@ id<GREYMatcher> PrintButton() {
 // Test that when trying to print a page redirected to an unprintable page, a
 // snackbar explaining that the page cannot be printed is displayed.
 - (void)testActivityServiceControllerPrintAfterRedirectionToUnprintablePage {
+// TODO(crbug.com/694662): This test relies on external URL because of the bug.
+// Re-enable this test on device once the bug is fixed.
+#if !TARGET_IPHONE_SIMULATOR
+  EARL_GREY_TEST_DISABLED(@"Test disabled on device.");
+#endif
+
   std::map<GURL, std::string> responses;
   const GURL regularPageURL = web::test::HttpServer::MakeUrl("http://choux");
   responses[regularPageURL] = "fleur";
@@ -73,11 +79,7 @@ id<GREYMatcher> PrintButton() {
 
   // Open an error page.
   [ChromeEarlGrey loadURL:ErrorPageResponseProvider::GetDnsFailureUrl()];
-  NSString* const kError =
-      l10n_util::GetNSString(IDS_ERRORPAGES_HEADING_NOT_AVAILABLE);
-  [[EarlGrey
-      selectElementWithMatcher:chrome_test_util::StaticHtmlViewContainingText(
-                                   kError)] assertWithMatcher:grey_notNil()];
+  [ChromeEarlGrey waitForErrorPage];
 
   // Execute the Print action.
   [[EarlGrey selectElementWithMatcher:PrintButton()] performAction:grey_tap()];

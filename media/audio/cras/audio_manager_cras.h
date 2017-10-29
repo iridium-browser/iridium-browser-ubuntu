@@ -7,7 +7,9 @@
 
 #include <cras_types.h>
 
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
@@ -18,10 +20,9 @@ namespace media {
 
 class MEDIA_EXPORT AudioManagerCras : public AudioManagerBase {
  public:
-  AudioManagerCras(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
-      AudioLogFactory* audio_log_factory);
+  AudioManagerCras(std::unique_ptr<AudioThread> audio_thread,
+                   AudioLogFactory* audio_log_factory);
+  ~AudioManagerCras() override;
 
   // AudioManager implementation.
   bool HasAudioOutputDevices() override;
@@ -31,6 +32,9 @@ class MEDIA_EXPORT AudioManagerCras : public AudioManagerBase {
   void GetAudioOutputDeviceNames(AudioDeviceNames* device_names) override;
   AudioParameters GetInputStreamParameters(
       const std::string& device_id) override;
+  std::string GetAssociatedOutputDeviceID(
+      const std::string& input_device_id) override;
+  std::string GetDefaultOutputDeviceID() override;
   const char* GetName() override;
 
   // AudioManagerBase implementation.
@@ -57,8 +61,6 @@ class MEDIA_EXPORT AudioManagerCras : public AudioManagerBase {
   bool IsDefault(const std::string& device_id, bool is_input);
 
  protected:
-  ~AudioManagerCras() override;
-
   AudioParameters GetPreferredOutputStreamParameters(
       const std::string& output_device_id,
       const AudioParameters& input_params) override;
@@ -71,6 +73,9 @@ class MEDIA_EXPORT AudioManagerCras : public AudioManagerBase {
   // Called by MakeLinearInputStream and MakeLowLatencyInputStream.
   AudioInputStream* MakeInputStream(const AudioParameters& params,
                                     const std::string& device_id);
+
+  // Get minimum output buffer size for this board.
+  int GetMinimumOutputBufferSizePerBoard();
 
   void GetAudioDeviceNamesImpl(bool is_input, AudioDeviceNames* device_names);
 

@@ -12,6 +12,8 @@ const uint16_t kDefaultSSLVersionMin = SSL_PROTOCOL_VERSION_TLS1;
 
 const uint16_t kDefaultSSLVersionMax = SSL_PROTOCOL_VERSION_TLS1_2;
 
+const TLS13Variant kDefaultTLS13Variant = kTLS13VariantDraft;
+
 SSLConfig::CertAndStatus::CertAndStatus() = default;
 SSLConfig::CertAndStatus::CertAndStatus(scoped_refptr<X509Certificate> cert_arg,
                                         CertStatus status)
@@ -27,7 +29,8 @@ SSLConfig::SSLConfig()
       common_name_fallback_local_anchors_enabled(true),
       version_min(kDefaultSSLVersionMin),
       version_max(kDefaultSSLVersionMax),
-      deprecated_cipher_suites_enabled(false),
+      tls13_variant(kDefaultTLS13Variant),
+      version_interference_probe(false),
       channel_id_enabled(true),
       false_start_enabled(true),
       signed_cert_timestamps_enabled(true),

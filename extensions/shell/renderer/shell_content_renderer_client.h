@@ -17,8 +17,6 @@ class WebURL;
 
 namespace extensions {
 
-class Dispatcher;
-class DispatcherDelegate;
 class ExtensionsClient;
 class ExtensionsGuestViewContainerDispatcher;
 class ShellExtensionsRendererClient;
@@ -34,16 +32,17 @@ class ShellContentRendererClient : public content::ContentRendererClient {
   void RenderFrameCreated(content::RenderFrame* render_frame) override;
   void RenderViewCreated(content::RenderView* render_view) override;
   bool OverrideCreatePlugin(content::RenderFrame* render_frame,
-                            blink::WebLocalFrame* frame,
                             const blink::WebPluginParams& params,
                             blink::WebPlugin** plugin) override;
   blink::WebPlugin* CreatePluginReplacement(
       content::RenderFrame* render_frame,
       const base::FilePath& plugin_path) override;
-  bool WillSendRequest(blink::WebLocalFrame* frame,
-                       ui::PageTransition transition_type,
-                       const blink::WebURL& url,
-                       GURL* new_url) override;
+  bool WillSendRequest(
+      blink::WebLocalFrame* frame,
+      ui::PageTransition transition_type,
+      const blink::WebURL& url,
+      std::vector<std::unique_ptr<content::URLLoaderThrottle>>* throttles,
+      GURL* new_url) override;
   bool IsExternalPepperPlugin(const std::string& module_name) override;
   bool ShouldGatherSiteIsolationStats() const override;
   content::BrowserPluginDelegate* CreateBrowserPluginDelegate(
@@ -61,8 +60,6 @@ class ShellContentRendererClient : public content::ContentRendererClient {
  private:
   std::unique_ptr<ExtensionsClient> extensions_client_;
   std::unique_ptr<ShellExtensionsRendererClient> extensions_renderer_client_;
-  std::unique_ptr<DispatcherDelegate> extension_dispatcher_delegate_;
-  std::unique_ptr<Dispatcher> extension_dispatcher_;
   std::unique_ptr<ExtensionsGuestViewContainerDispatcher>
       guest_view_container_dispatcher_;
 

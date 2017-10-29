@@ -5,6 +5,7 @@
 #import "ui/views/controls/menu/menu_runner_impl_cocoa.h"
 
 #include "base/mac/sdk_forward_declarations.h"
+#import "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/events/base_event_utils.h"
@@ -79,6 +80,36 @@ base::scoped_nsobject<NSView> CreateMenuAnchorView(
   return anchor_view;
 }
 
+// Returns an appropriate event (with a location) suitable for showing a context
+// menu. Uses [NSApp currentEvent] if it's a non-nil mouse click event,
+// otherwise creates an autoreleased dummy event located at |anchor|.
+NSEvent* EventForPositioningContextMenu(const gfx::Rect& anchor,
+                                        NSWindow* window) {
+  NSEvent* event = [NSApp currentEvent];
+  switch ([event type]) {
+    case NSLeftMouseDown:
+    case NSLeftMouseUp:
+    case NSRightMouseDown:
+    case NSRightMouseUp:
+    case NSOtherMouseDown:
+    case NSOtherMouseUp:
+      return event;
+    default:
+      break;
+  }
+  NSPoint location_in_window = ui::ConvertPointFromScreenToWindow(
+      window, gfx::ScreenPointToNSPoint(anchor.CenterPoint()));
+  return [NSEvent mouseEventWithType:NSRightMouseDown
+                            location:location_in_window
+                       modifierFlags:0
+                           timestamp:0
+                        windowNumber:[window windowNumber]
+                             context:nil
+                         eventNumber:0
+                          clickCount:1
+                            pressure:0];
+}
+
 }  // namespace
 
 // static
@@ -103,6 +134,7 @@ MenuRunnerImplCocoa::MenuRunnerImplCocoa(
       on_menu_closed_callback_(on_menu_closed_callback) {
   menu_controller_.reset(
       [[MenuController alloc] initWithModel:menu useWithPopUpButtonCell:NO]);
+  [menu_controller_ setPostItemSelectedAsTask:YES];
 }
 
 bool MenuRunnerImplCocoa::IsRunning() const {
@@ -121,25 +153,26 @@ void MenuRunnerImplCocoa::Release() {
   }
 }
 
-MenuRunner::RunResult MenuRunnerImplCocoa::RunMenuAt(Widget* parent,
-                                                     MenuButton* button,
-                                                     const gfx::Rect& bounds,
-                                                     MenuAnchorPosition anchor,
-                                                     int32_t run_types) {
+void MenuRunnerImplCocoa::RunMenuAt(Widget* parent,
+                                    MenuButton* button,
+                                    const gfx::Rect& bounds,
+                                    MenuAnchorPosition anchor,
+                                    int32_t run_types) {
   DCHECK(run_types & kNativeRunTypes);
   DCHECK(!IsRunning());
   DCHECK(parent);
   closing_event_time_ = base::TimeTicks();
   running_ = true;
 
+  NSWindow* window = parent->GetNativeWindow();
   if (run_types & MenuRunner::CONTEXT_MENU) {
     [NSMenu popUpContextMenu:[menu_controller_ menu]
-                   withEvent:[NSApp currentEvent]
+                   withEvent:EventForPositioningContextMenu(bounds, window)
                      forView:parent->GetNativeView()];
   } else if (run_types & MenuRunner::COMBOBOX) {
     NSMenuItem* checked_item = FirstCheckedItem(menu_controller_);
     base::scoped_nsobject<NSView> anchor_view(
-        CreateMenuAnchorView(parent->GetNativeWindow(), bounds, checked_item));
+        CreateMenuAnchorView(window, bounds, checked_item));
     NSMenu* menu = [menu_controller_ menu];
     [menu setMinimumWidth:bounds.width() + kNativeCheckmarkWidth];
     [menu popUpMenuPositioningItem:checked_item
@@ -155,15 +188,13 @@ MenuRunner::RunResult MenuRunnerImplCocoa::RunMenuAt(Widget* parent,
 
   if (delete_after_run_) {
     delete this;
-    return MenuRunner::MENU_DELETED;
+    return;
   }
 
   // Don't invoke the callback if Release() was called, since that usually means
   // the owning instance is being destroyed.
   if (!on_menu_closed_callback_.is_null())
     on_menu_closed_callback_.Run();
-
-  return MenuRunner::NORMAL_EXIT;
 }
 
 void MenuRunnerImplCocoa::Cancel() {

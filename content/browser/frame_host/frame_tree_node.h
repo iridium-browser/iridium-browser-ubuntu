@@ -11,13 +11,13 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/browser/frame_host/frame_tree_node_blame_context.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/frame_host/render_frame_host_manager.h"
 #include "content/common/content_export.h"
-#include "content/common/content_security_policy/content_security_policy.h"
 #include "content/common/frame_owner_properties.h"
 #include "content/common/frame_replication_state.h"
 #include "third_party/WebKit/public/platform/WebInsecureRequestPolicy.h"
@@ -147,6 +147,20 @@ class CONTENT_EXPORT FrameTreeNode {
     return has_committed_real_load_;
   }
 
+  // Returns whether the frame's owner element in the parent document is
+  // collapsed, that is, removed from the layout as if it did not exist, as per
+  // request by the embedder (of the content/ layer).
+  bool is_collapsed() const { return is_collapsed_; }
+
+  // Sets whether to collapse the frame's owner element in the parent document,
+  // that is, to remove it from the layout as if it did not exist, as per
+  // request by the embedder (of the content/ layer). Cannot be called for main
+  // frames.
+  //
+  // This only has an effect for <iframe> owner elements, and is a no-op when
+  // called on sub-frames hosted in <frame>, <object>, and <embed> elements.
+  void SetCollapsed(bool collapsed);
+
   // Returns the origin of the last committed page in this frame.
   // WARNING: To get the last committed origin for a particular
   // RenderFrameHost, use RenderFrameHost::GetLastCommittedOrigin() instead,
@@ -169,16 +183,14 @@ class CONTENT_EXPORT FrameTreeNode {
   // Clear any feature policy header associated with the frame.
   void ResetFeaturePolicyHeader();
 
-  // Add CSP header to replication state, notify proxies about the update and
-  // enforce it on the browser.
-  void AddContentSecurityPolicy(
-      const ContentSecurityPolicyHeader& header,
-      const std::vector<ContentSecurityPolicy>& policies);
+  // Add CSP headers to replication state, notify proxies about the update.
+  void AddContentSecurityPolicies(
+      const std::vector<ContentSecurityPolicyHeader>& headers);
 
   // Discards previous CSP headers and notifies proxies about the update.
   // Typically invoked after committing navigation to a new document (since the
   // new document comes with a fresh set of CSP http headers).
-  void ResetContentSecurityPolicy();
+  void ResetCspHeaders();
 
   // Sets the current insecure request policy, and notifies proxies about the
   // update.
@@ -203,15 +215,39 @@ class CONTENT_EXPORT FrameTreeNode {
     return pending_sandbox_flags_;
   }
 
+  const ParsedFeaturePolicyHeader& pending_container_policy() const {
+    return pending_container_policy_;
+  }
+
   // Update this frame's sandbox flags.  This is used when a parent frame
   // updates sandbox flags in the <iframe> element for this frame.  These flags
   // won't take effect until next navigation.  If this frame's parent is itself
   // sandboxed, the parent's sandbox flags are combined with |sandbox_flags|.
   void SetPendingSandboxFlags(blink::WebSandboxFlags sandbox_flags);
 
-  // Set any pending sandbox flags as active, and return true if the sandbox
-  // flags were changed.
-  bool CommitPendingSandboxFlags();
+  // Returns the currently active container policy for this frame, which is set
+  // by the iframe allowfullscreen, allowpaymentrequest, and allow attributes,
+  // along with the origin of the iframe's src attribute (which may be different
+  // from the URL of the document currently loaded into the frame). This does
+  // not include policy changes that have been made by updating the containing
+  // iframe element attributes since the frame was last navigated.
+  const ParsedFeaturePolicyHeader& effective_container_policy() const {
+    return replication_state_.container_policy;
+  }
+
+  // Update this frame's container policy. This is used when a parent frame
+  // updates feature-policy attributes in the <iframe> element for this frame.
+  // These attributes include allow, allowfullscreen, allowpaymentrequest, and
+  // src. Updates to the container policy will not take effect until next
+  // navigation.
+  // This method must only be called on a subframe; changing the container
+  // policy on the main frame is not allowed.
+  void SetPendingContainerPolicy(
+      const ParsedFeaturePolicyHeader& container_policy);
+
+  // Set any pending sandbox flags and container policy as active, and return
+  // true if either was changed.
+  bool CommitPendingFramePolicy();
 
   const FrameOwnerProperties& frame_owner_properties() {
     return frame_owner_properties_;
@@ -265,7 +301,10 @@ class CONTENT_EXPORT FrameTreeNode {
   // Resets the current navigation request. If |keep_state| is true, any state
   // created by the NavigationRequest (e.g. speculative RenderFrameHost,
   // loading state) will not be reset by the function.
-  void ResetNavigationRequest(bool keep_state);
+  // If |keep_state| is false and the request is renderer-initiated and
+  // |inform_renderer| is true, an IPC will be sent to the renderer process to
+  // inform it that the navigation it requested was cancelled.
+  void ResetNavigationRequest(bool keep_state, bool inform_renderer);
 
   // Returns true if this node is in a state where the loading progress is being
   // tracked.
@@ -314,6 +353,11 @@ class CONTENT_EXPORT FrameTreeNode {
   void OnSetHasReceivedUserGesture();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(SitePerProcessFeaturePolicyBrowserTest,
+                           ContainerPolicyDynamic);
+  FRIEND_TEST_ALL_PREFIXES(SitePerProcessFeaturePolicyBrowserTest,
+                           ContainerPolicySandboxDynamic);
+
   class OpenerDestroyedObserver;
 
   FrameTreeNode* GetSibling(int relative_offset) const;
@@ -368,6 +412,9 @@ class CONTENT_EXPORT FrameTreeNode {
   // about:blank page.
   bool has_committed_real_load_;
 
+  // Whether the frame's owner element in the parent document is collapsed.
+  bool is_collapsed_;
+
   // Track information that needs to be replicated to processes that have
   // proxies for this frame.
   FrameReplicationState replication_state_;
@@ -378,6 +425,12 @@ class CONTENT_EXPORT FrameTreeNode {
   // replication_state_.sandbox_flags when they take effect on the next frame
   // navigation.
   blink::WebSandboxFlags pending_sandbox_flags_;
+
+  // Tracks the computed container policy for this frame. When the iframe
+  // allowfullscreen, allowpaymentrequest, allow or src attributes are changed,
+  // the updated policy for the frame is stored here, and transferred into
+  // replication_state_.container_policy on the next frame navigation.
+  ParsedFeaturePolicyHeader pending_container_policy_;
 
   // Tracks the scrolling and margin properties for this frame.  These
   // properties affect the child renderer but are stored on its parent's
@@ -404,9 +457,6 @@ class CONTENT_EXPORT FrameTreeNode {
   // browser process activities to this node (when possible).  It is unrelated
   // to the core logic of FrameTreeNode.
   FrameTreeNodeBlameContext blame_context_;
-
-  // A set of Content-Security-Policies to enforce on the browser-side.
-  std::vector<ContentSecurityPolicy> csp_policies_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameTreeNode);
 };

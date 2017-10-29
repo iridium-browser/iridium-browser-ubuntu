@@ -20,8 +20,12 @@
 #ifdef SK_VULKAN
 #include "vk/VkTestContext.h"
 #endif
+#ifdef SK_METAL
+#include "mtl/MtlTestContext.h"
+#endif
 #include "gl/null/NullGLTestContext.h"
 #include "gl/GrGLGpu.h"
+#include "mock/MockTestContext.h"
 #include "GrCaps.h"
 
 #if defined(SK_BUILD_FOR_WIN32) && defined(SK_ENABLE_DISCRETE_GPU)
@@ -95,13 +99,9 @@ void GrContextFactory::releaseResourcesAndAbandonContexts() {
     }
 }
 
-#if defined(SK_BUILD_FOR_UNIX) || defined(SK_BUILD_FOR_WIN) || defined(SK_BUILD_FOR_MAC)
-const GrContextFactory::ContextType GrContextFactory::kNativeGL_ContextType =
-    GrContextFactory::kGL_ContextType;
-#else
-const GrContextFactory::ContextType GrContextFactory::kNativeGL_ContextType =
-    GrContextFactory::kGLES_ContextType;
-#endif
+GrContext* GrContextFactory::get(ContextType type, ContextOverrides overrides) {
+    return this->getContextInfo(type, overrides).grContext();
+}
 
 ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOverrides overrides,
                                                      GrContext* shareContext, uint32_t shareIndex) {
@@ -116,7 +116,7 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
             context.fShareIndex == shareIndex &&
             !context.fAbandoned) {
             context.fTestContext->makeCurrent();
-            return ContextInfo(context.fBackend, context.fTestContext, context.fGrContext);
+            return ContextInfo(context.fType, context.fTestContext, context.fGrContext);
         }
     }
 
@@ -170,9 +170,11 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
                                                  glShareContext).release();
                     break;
 #endif
+#ifndef SK_NO_COMMAND_BUFFER
                 case kCommandBuffer_ContextType:
                     glCtx = CommandBufferGLTestContext::Create(glShareContext);
                     break;
+#endif
 #if SK_MESA
                 case kMESA_ContextType:
                     glCtx = CreateMesaGLTestContext(glShareContext);
@@ -197,16 +199,14 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
             break;
         }
 #ifdef SK_VULKAN
-        case kVulkan_GrBackend:
-            if (masterContext) {
-                // Shared contexts not supported yet
-                return ContextInfo();
-            }
+        case kVulkan_GrBackend: {
+            VkTestContext* vkSharedContext = masterContext
+                    ? static_cast<VkTestContext*>(masterContext->fTestContext) : nullptr;
             SkASSERT(kVulkan_ContextType == type);
             if (ContextOverrides::kRequireNVPRSupport & overrides) {
                 return ContextInfo();
             }
-            testCtx.reset(CreatePlatformVkTestContext());
+            testCtx.reset(CreatePlatformVkTestContext(vkSharedContext));
             if (!testCtx) {
                 return ContextInfo();
             }
@@ -222,7 +222,31 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
             }
             backendContext = testCtx->backendContext();
             break;
+        }
 #endif
+#ifdef SK_METAL
+        case kMetal_GrBackend: {
+            SkASSERT(!masterContext);
+            testCtx.reset(CreatePlatformMtlTestContext(nullptr));
+            if (!testCtx) {
+                return ContextInfo();
+            }
+            break;
+        }
+#endif
+        case kMock_GrBackend: {
+            TestContext* sharedContext = masterContext ? masterContext->fTestContext : nullptr;
+            SkASSERT(kMock_ContextType == type);
+            if (ContextOverrides::kRequireNVPRSupport & overrides) {
+                return ContextInfo();
+            }
+            testCtx.reset(CreateMockTestContext(sharedContext));
+            if (!testCtx) {
+                return ContextInfo();
+            }
+            backendContext = testCtx->backendContext();
+            break;
+        }
         default:
             return ContextInfo();
     }
@@ -238,7 +262,13 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
     if (ContextOverrides::kAllowSRGBWithoutDecodeControl & overrides) {
         grOptions.fRequireDecodeDisableForSRGB = false;
     }
-    sk_sp<GrContext> grCtx(GrContext::Create(backend, backendContext, grOptions));
+    if (ContextOverrides::kAvoidStencilBuffers & overrides) {
+        grOptions.fAvoidStencilBuffers = true;
+    }
+    sk_sp<GrContext> grCtx = testCtx->makeGrContext(grOptions);
+    if (!grCtx.get() && kMetal_GrBackend != backend) {
+        grCtx.reset(GrContext::Create(backend, backendContext, grOptions));
+    }
     if (!grCtx.get()) {
         return ContextInfo();
     }
@@ -267,7 +297,7 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
     context.fAbandoned = false;
     context.fShareContext = shareContext;
     context.fShareIndex = shareIndex;
-    return ContextInfo(context.fBackend, context.fTestContext, context.fGrContext);
+    return ContextInfo(context.fType, context.fTestContext, context.fGrContext);
 }
 
 ContextInfo GrContextFactory::getContextInfo(ContextType type, ContextOverrides overrides) {

@@ -10,7 +10,7 @@
 #include <memory>
 #include <vector>
 
-#include "xfa/fgas/localization/fgas_datetime.h"
+#include "core/fxcrt/cfx_datetime.h"
 #include "xfa/fwl/cfwl_event.h"
 #include "xfa/fwl/cfwl_widget.h"
 #include "xfa/fwl/cfwl_widgetproperties.h"
@@ -33,9 +33,9 @@ class CFWL_MonthCalendar : public CFWL_Widget {
   FWL_Type GetClassID() const override;
   CFX_RectF GetAutosizedWidgetRect() override;
   void Update() override;
-  void DrawWidget(CFX_Graphics* pGraphics, const CFX_Matrix* pMatrix) override;
+  void DrawWidget(CXFA_Graphics* pGraphics, const CFX_Matrix* pMatrix) override;
   void OnProcessMessage(CFWL_Message* pMessage) override;
-  void OnDrawWidget(CFX_Graphics* pGraphics,
+  void OnDrawWidget(CXFA_Graphics* pGraphics,
                     const CFX_Matrix* pMatrix) override;
 
   void SetSelect(int32_t iYear, int32_t iMonth, int32_t iDay);
@@ -90,40 +90,40 @@ class CFWL_MonthCalendar : public CFWL_Widget {
     CFX_WideString wsDay;
   };
 
-  void DrawBackground(CFX_Graphics* pGraphics,
+  void DrawBackground(CXFA_Graphics* pGraphics,
                       IFWL_ThemeProvider* pTheme,
                       const CFX_Matrix* pMatrix);
-  void DrawHeadBK(CFX_Graphics* pGraphics,
+  void DrawHeadBK(CXFA_Graphics* pGraphics,
                   IFWL_ThemeProvider* pTheme,
                   const CFX_Matrix* pMatrix);
-  void DrawLButton(CFX_Graphics* pGraphics,
+  void DrawLButton(CXFA_Graphics* pGraphics,
                    IFWL_ThemeProvider* pTheme,
                    const CFX_Matrix* pMatrix);
-  void DrawRButton(CFX_Graphics* pGraphics,
+  void DrawRButton(CXFA_Graphics* pGraphics,
                    IFWL_ThemeProvider* pTheme,
                    const CFX_Matrix* pMatrix);
-  void DrawCaption(CFX_Graphics* pGraphics,
+  void DrawCaption(CXFA_Graphics* pGraphics,
                    IFWL_ThemeProvider* pTheme,
                    const CFX_Matrix* pMatrix);
-  void DrawSeperator(CFX_Graphics* pGraphics,
+  void DrawSeperator(CXFA_Graphics* pGraphics,
                      IFWL_ThemeProvider* pTheme,
                      const CFX_Matrix* pMatrix);
-  void DrawDatesInBK(CFX_Graphics* pGraphics,
+  void DrawDatesInBK(CXFA_Graphics* pGraphics,
                      IFWL_ThemeProvider* pTheme,
                      const CFX_Matrix* pMatrix);
-  void DrawWeek(CFX_Graphics* pGraphics,
+  void DrawWeek(CXFA_Graphics* pGraphics,
                 IFWL_ThemeProvider* pTheme,
                 const CFX_Matrix* pMatrix);
-  void DrawToday(CFX_Graphics* pGraphics,
+  void DrawToday(CXFA_Graphics* pGraphics,
                  IFWL_ThemeProvider* pTheme,
                  const CFX_Matrix* pMatrix);
-  void DrawDatesIn(CFX_Graphics* pGraphics,
+  void DrawDatesIn(CXFA_Graphics* pGraphics,
                    IFWL_ThemeProvider* pTheme,
                    const CFX_Matrix* pMatrix);
-  void DrawDatesOut(CFX_Graphics* pGraphics,
+  void DrawDatesOut(CXFA_Graphics* pGraphics,
                     IFWL_ThemeProvider* pTheme,
                     const CFX_Matrix* pMatrix);
-  void DrawDatesInCircle(CFX_Graphics* pGraphics,
+  void DrawDatesInCircle(CXFA_Graphics* pGraphics,
                          IFWL_ThemeProvider* pTheme,
                          const CFX_Matrix* pMatrix);
   CFX_SizeF CalcSize();
@@ -165,7 +165,6 @@ class CFWL_MonthCalendar : public CFWL_Widget {
   CFX_RectF m_rtWeekNumSep;
   CFX_WideString m_wsHead;
   CFX_WideString m_wsToday;
-  std::unique_ptr<CFX_DateTime> m_pDateTime;
   std::vector<std::unique_ptr<DATEINFO>> m_arrDates;
   int32_t m_iCurYear;
   int32_t m_iCurMonth;

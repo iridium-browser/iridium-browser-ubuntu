@@ -13,10 +13,9 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/nacl/common/nacl_process_type.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
@@ -94,8 +93,11 @@ ProcessMemoryInformation::ProcessMemoryInformation()
     : pid(0),
       num_processes(0),
       process_type(content::PROCESS_TYPE_UNKNOWN),
-      renderer_type(RENDERER_UNKNOWN) {
-}
+      num_open_fds(-1),
+      open_fds_soft_limit(-1),
+      renderer_type(RENDERER_UNKNOWN),
+      phys_footprint(0),
+      private_memory_footprint(0) {}
 
 ProcessMemoryInformation::ProcessMemoryInformation(
     const ProcessMemoryInformation& other) = default;
@@ -145,7 +147,7 @@ void MemoryDetails::StartFetch() {
   // However, plugin process information is only available from the IO thread.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&MemoryDetails::CollectChildInfoOnIOThread, this));
+      base::BindOnce(&MemoryDetails::CollectChildInfoOnIOThread, this));
 }
 
 MemoryDetails::~MemoryDetails() {}
@@ -181,6 +183,10 @@ std::string MemoryDetails::ToLogString() {
     log += StringPrintf(", %d MB swapped",
                         static_cast<int>(iter1->working_set.swapped) / 1024);
 #endif
+    if (iter1->num_open_fds != -1 || iter1->open_fds_soft_limit != -1) {
+      log += StringPrintf(", %d FDs open of %d", iter1->num_open_fds,
+                          iter1->open_fds_soft_limit);
+    }
     log += "\n";
   }
   return log;
@@ -207,11 +213,12 @@ void MemoryDetails::CollectChildInfoOnIOThread() {
     child_info.push_back(info);
   }
 
-  // Now go do expensive memory lookups on the blocking pool.
-  BrowserThread::GetBlockingPool()->PostWorkerTaskWithShutdownBehavior(
+  // Now go do expensive memory lookups in a thread pool.
+  base::PostTaskWithTraits(
       FROM_HERE,
-      base::Bind(&MemoryDetails::CollectProcessData, this, child_info),
-      base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+      base::BindOnce(&MemoryDetails::CollectProcessData, this, child_info));
 }
 
 void MemoryDetails::CollectChildInfoOnUIThread() {
@@ -223,8 +230,9 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
   std::unique_ptr<content::RenderWidgetHostIterator> widget_it(
       RenderWidgetHost::GetRenderWidgetHosts());
   while (content::RenderWidgetHost* widget = widget_it->GetNextHost()) {
-    // Ignore processes that don't have a connection, such as crashed tabs.
-    if (!widget->GetProcess()->HasConnection())
+    // Ignore processes that don't have a connection, such as crashed tabs,
+    // or processes that are still launching.
+    if (!widget->GetProcess()->IsReady())
       continue;
     base::ProcessId pid = base::GetProcId(widget->GetProcess()->GetHandle());
     widgets_by_pid[pid].push_back(widget);

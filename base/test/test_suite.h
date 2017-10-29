@@ -13,7 +13,9 @@
 #include <string>
 
 #include "base/at_exit.h"
+#include "base/logging.h"
 #include "base/macros.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/trace_to_file.h"
 #include "build/build_config.h"
 
@@ -22,6 +24,8 @@ class TestInfo;
 }
 
 namespace base {
+
+class XmlUnitTestResultPrinter;
 
 // Instantiates TestSuite, runs it and returns exit code.
 int RunUnitTestsUsingBaseTestSuite(int argc, char **argv);
@@ -54,7 +58,10 @@ class TestSuite {
   // By default fatal log messages (e.g. from DCHECKs) result in error dialogs
   // which gum up buildbots. Use a minimalistic assert handler which just
   // terminates the process.
-  static void UnitTestAssertHandler(const std::string& str);
+  void UnitTestAssertHandler(const char* file,
+                             int line,
+                             const base::StringPiece summary,
+                             const base::StringPiece stack_trace);
 
   // Disable crash dialogs so that it doesn't gum up the buildbot
   virtual void SuppressErrorDialogs();
@@ -82,7 +89,11 @@ class TestSuite {
 
   bool initialized_command_line_;
 
-  bool created_feature_list_;
+  test::ScopedFeatureList scoped_feature_list_;
+
+  XmlUnitTestResultPrinter* printer_ = nullptr;
+
+  std::unique_ptr<logging::ScopedLogAssertHandler> assert_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(TestSuite);
 };

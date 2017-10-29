@@ -26,8 +26,11 @@ void EnvInputStateController::UpdateStateForMouseEvent(
       break;
   }
 
+  // If a synthesized event is created from a native event (e.g. EnterNotify
+  // XEvents), then we should take the location as we would for a
+  // non-synthesized event.
   if (event.type() != ui::ET_MOUSE_CAPTURE_CHANGED &&
-      !(event.flags() & ui::EF_IS_SYNTHESIZED)) {
+      (!(event.flags() & ui::EF_IS_SYNTHESIZED) || event.HasNativeEvent())) {
     SetLastMouseLocation(window, event.root_location());
   }
 }
@@ -63,6 +66,11 @@ void EnvInputStateController::UpdateStateForTouchEvent(
 void EnvInputStateController::SetLastMouseLocation(
     const Window* root_window,
     const gfx::Point& location_in_root) const {
+  // If |root_window| is null, we are only using the event to update event
+  // states, so we shouldn't update mouse location.
+  if (!root_window && Env::GetInstance()->mode() == aura::Env::Mode::MUS)
+    return;
+
   client::ScreenPositionClient* client =
       client::GetScreenPositionClient(root_window);
   if (client) {

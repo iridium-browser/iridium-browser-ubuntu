@@ -46,8 +46,8 @@ void BluetoothLowEnergyDiscoveryManagerMac::TryStartDiscovery() {
     return;
   }
 
-  if ([central_manager_ state] != CBCentralManagerStatePoweredOn) {
-    VLOG(1) << "TryStartDiscovery != CBCentralManagerStatePoweredOn";
+  if ([central_manager_ state] != CBManagerStatePoweredOn) {
+    VLOG(1) << "TryStartDiscovery != CBManagerStatePoweredOn";
     return;
   }
 
@@ -93,7 +93,6 @@ void BluetoothLowEnergyDiscoveryManagerMac::DiscoveredPeripheral(
     CBPeripheral* peripheral,
     NSDictionary* advertisementData,
     int rssi) {
-  VLOG(3) << "DiscoveredPeripheral";
   observer_->LowEnergyDeviceUpdated(peripheral, advertisementData, rssi);
 }
 

@@ -6,10 +6,9 @@
 
 #include <memory>
 
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace net {
@@ -244,8 +243,10 @@ bool DecodeHexString(const char* in,
 
 }  // namespace
 
+class ChannelIDTest : public QuicTest {};
+
 // A known answer test for ChannelIDVerifier.
-TEST(ChannelIDTest, VerifyKnownAnswerTest) {
+TEST_F(ChannelIDTest, VerifyKnownAnswerTest) {
   char msg[1024];
   size_t msg_len;
   char key[64];
@@ -274,14 +275,15 @@ TEST(ChannelIDTest, VerifyKnownAnswerTest) {
     EXPECT_EQ(sizeof(signature) / 2, r_len);
     EXPECT_EQ(sizeof(signature) / 2, s_len);
 
-    EXPECT_EQ(test_vector[i].result,
-              ChannelIDVerifier::VerifyRaw(
-                  StringPiece(key, sizeof(key)), StringPiece(msg, msg_len),
-                  StringPiece(signature, sizeof(signature)), false));
+    EXPECT_EQ(
+        test_vector[i].result,
+        ChannelIDVerifier::VerifyRaw(
+            QuicStringPiece(key, sizeof(key)), QuicStringPiece(msg, msg_len),
+            QuicStringPiece(signature, sizeof(signature)), false));
   }
 }
 
-TEST(ChannelIDTest, SignAndVerify) {
+TEST_F(ChannelIDTest, SignAndVerify) {
   std::unique_ptr<ChannelIDSource> source(
       crypto_test_utils::ChannelIDSourceForTesting());
 

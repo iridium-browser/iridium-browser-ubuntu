@@ -327,6 +327,16 @@ static SkGammas::Type parse_gamma(SkGammas::Data* outData, SkColorSpaceTransferF
                 return set_gamma_value(outData, value);
             }
 
+            // This optimization is especially important for A2B profiles, where we do
+            // not resize tables or interpolate lookups.
+            if (2 == count) {
+                if (0 == read_big_endian_u16((const uint8_t*) &table[0]) &&
+                        65535 == read_big_endian_u16((const uint8_t*) &table[1])) {
+                    outData->fNamed = kLinear_SkGammaNamed;
+                    return SkGammas::Type::kNamed_Type;
+                }
+            }
+
             // Check for frequently occurring sRGB curves.
             // We do this by sampling a few values and see if they match our expectation.
             // A more robust solution would be to compare each value in this curve against
@@ -595,8 +605,8 @@ static bool load_color_lut(sk_sp<SkColorLookUpTable>* colorLUT, uint32_t inputCh
 
     uint32_t numEntries = SkColorLookUpTable::kOutputChannels;
     for (uint32_t i = 0; i < inputChannels; i++) {
-        if (0 == gridPoints[i]) {
-            SkColorSpacePrintf("Each input channel must have at least one grid point.");
+        if (1 >= gridPoints[i]) {
+            SkColorSpacePrintf("Each input channel must have at least two grid points.");
             return false;
         }
 
@@ -1185,7 +1195,11 @@ static inline int icf_channels(SkColorSpace_Base::ICCTypeFlag iccType) {
 static bool load_a2b0(std::vector<SkColorSpace_A2B::Element>* elements, const uint8_t* src,
                       size_t len, SkColorSpace_A2B::PCS pcs,
                       SkColorSpace_Base::ICCTypeFlag iccType) {
+    if (len < 4) {
+        return false;
+    }
     const uint32_t type = read_big_endian_u32(src);
+
     switch (type) {
         case kTAG_AtoBType:
             if (len < 32) {
@@ -1410,11 +1424,10 @@ static sk_sp<SkColorSpace> make_xyz(const ICCProfileHeader& header, ICCTag* tags
     if (kNonStandard_SkGammaNamed == gammaNamed) {
         return sk_sp<SkColorSpace>(new SkColorSpace_XYZ(gammaNamed,
                                                         std::move(gammas),
-                                                        mat, std::move(profileData),
-                                                        0 /* flags */));
+                                                        mat, std::move(profileData)));
     }
 
-    return SkColorSpace_Base::MakeRGB(gammaNamed, mat, 0 /* flags */);
+    return SkColorSpace_Base::MakeRGB(gammaNamed, mat);
 }
 
 static sk_sp<SkColorSpace> make_gray(const ICCProfileHeader& header, ICCTag* tags, int tagCount,
@@ -1439,7 +1452,7 @@ static sk_sp<SkColorSpace> make_gray(const ICCProfileHeader& header, ICCTag* tag
     toXYZD50.setFloat(1, 1, kWhitePointD50[1]);
     toXYZD50.setFloat(2, 2, kWhitePointD50[2]);
     if (SkGammas::Type::kNamed_Type == type) {
-        return SkColorSpace_Base::MakeRGB(data.fNamed, toXYZD50, 0 /* flags */);
+        return SkColorSpace_Base::MakeRGB(data.fNamed, toXYZD50);
     }
 
     size_t allocSize = sizeof(SkGammas);
@@ -1456,8 +1469,7 @@ static sk_sp<SkColorSpace> make_gray(const ICCProfileHeader& header, ICCTag* tag
 
     return sk_sp<SkColorSpace>(new SkColorSpace_XYZ(kNonStandard_SkGammaNamed,
                                                     std::move(gammas),
-                                                    toXYZD50, std::move(profileData),
-                                                    0 /* flags */));
+                                                    toXYZD50, std::move(profileData)));
 }
 
 static sk_sp<SkColorSpace> make_a2b(SkColorSpace_Base::ICCTypeFlag iccType,

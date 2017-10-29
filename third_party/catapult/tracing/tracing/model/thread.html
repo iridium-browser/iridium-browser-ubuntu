@@ -6,7 +6,7 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/base/guid.html">
-<link rel="import" href="/tracing/base/range.html">
+<link rel="import" href="/tracing/base/math/range.html">
 <link rel="import" href="/tracing/model/async_slice_group.html">
 <link rel="import" href="/tracing/model/event_container.html">
 <link rel="import" href="/tracing/model/slice_group.html">
@@ -19,11 +19,11 @@ found in the LICENSE file.
  * @fileoverview Provides the Thread class.
  */
 tr.exportTo('tr.model', function() {
-  var AsyncSlice = tr.model.AsyncSlice;
-  var AsyncSliceGroup = tr.model.AsyncSliceGroup;
-  var SliceGroup = tr.model.SliceGroup;
-  var ThreadSlice = tr.model.ThreadSlice;
-  var ThreadTimeSlice = tr.model.ThreadTimeSlice;
+  const AsyncSlice = tr.model.AsyncSlice;
+  const AsyncSliceGroup = tr.model.AsyncSliceGroup;
+  const SliceGroup = tr.model.SliceGroup;
+  const ThreadSlice = tr.model.ThreadSlice;
+  const ThreadTimeSlice = tr.model.ThreadTimeSlice;
 
   /**
    * A Thread stores all the trace events collected for a particular
@@ -38,8 +38,9 @@ tr.exportTo('tr.model', function() {
    * @extends {tr.model.EventContainer}
    */
   function Thread(parent, tid) {
-    if (!parent)
+    if (!parent) {
       throw new Error('Parent must be provided.');
+    }
 
     tr.model.EventContainer.call(this);
     this.parent = parent;
@@ -47,8 +48,6 @@ tr.exportTo('tr.model', function() {
     this.tid = tid;
     this.name = undefined;
     this.samples_ = undefined; // Set during createSubSlices
-
-    var that = this;
 
     this.sliceGroup = new SliceGroup(this, ThreadSlice, 'slices');
     this.timeSlices = undefined;
@@ -68,28 +67,33 @@ tr.exportTo('tr.model', function() {
       return this.parent.stableId + '.' + this.tid;
     },
 
-    compareTo: function(that) {
+    compareTo(that) {
       return Thread.compare(this, that);
     },
 
-    childEventContainers: function* () {
-      if (this.sliceGroup.length)
+    * childEventContainers() {
+      if (this.sliceGroup.length) {
         yield this.sliceGroup;
-      if (this.kernelSliceGroup.length)
+      }
+      if (this.kernelSliceGroup.length) {
         yield this.kernelSliceGroup;
-      if (this.asyncSliceGroup.length)
+      }
+      if (this.asyncSliceGroup.length) {
         yield this.asyncSliceGroup;
+      }
     },
 
-    childEvents: function* () {
-      if (this.timeSlices)
+    * childEvents() {
+      if (this.timeSlices) {
         yield* this.timeSlices;
+      }
     },
 
-    iterateAllPersistableObjects: function(cb) {
+    iterateAllPersistableObjects(cb) {
       cb(this);
-      if (this.sliceGroup.length)
+      if (this.sliceGroup.length) {
         cb(this.sliceGroup);
+      }
       this.asyncSliceGroup.viewSubGroups.forEach(cb);
     },
 
@@ -97,12 +101,12 @@ tr.exportTo('tr.model', function() {
      * Shifts all the timestamps inside this thread forward by the amount
      * specified.
      */
-    shiftTimestampsForward: function(amount) {
+    shiftTimestampsForward(amount) {
       this.sliceGroup.shiftTimestampsForward(amount);
 
       if (this.timeSlices) {
-        for (var i = 0; i < this.timeSlices.length; i++) {
-          var slice = this.timeSlices[i];
+        for (let i = 0; i < this.timeSlices.length; i++) {
+          const slice = this.timeSlices[i];
           slice.start += amount;
         }
       }
@@ -116,18 +120,12 @@ tr.exportTo('tr.model', function() {
      * that it should be pruned from the model.
      */
     get isEmpty() {
-      if (this.sliceGroup.length)
-        return false;
-      if (this.sliceGroup.openSliceCount)
-        return false;
-      if (this.timeSlices && this.timeSlices.length)
-        return false;
-      if (this.kernelSliceGroup.length)
-        return false;
-      if (this.asyncSliceGroup.length)
-        return false;
-      if (this.samples_.length)
-        return false;
+      if (this.sliceGroup.length) return false;
+      if (this.sliceGroup.openSliceCount) return false;
+      if (this.timeSlices && this.timeSlices.length) return false;
+      if (this.kernelSliceGroup.length) return false;
+      if (this.asyncSliceGroup.length) return false;
+      if (this.samples_.length) return false;
       return true;
     },
 
@@ -135,7 +133,7 @@ tr.exportTo('tr.model', function() {
      * Updates the bounds based on the
      * current objects associated with the thread.
      */
-    updateBounds: function() {
+    updateBounds() {
       this.bounds.reset();
 
       this.sliceGroup.updateBounds();
@@ -160,27 +158,31 @@ tr.exportTo('tr.model', function() {
       }
     },
 
-    addCategoriesToDict: function(categoriesDict) {
-      for (var i = 0; i < this.sliceGroup.length; i++)
+    addCategoriesToDict(categoriesDict) {
+      for (let i = 0; i < this.sliceGroup.length; i++) {
         categoriesDict[this.sliceGroup.slices[i].category] = true;
-      for (var i = 0; i < this.kernelSliceGroup.length; i++)
+      }
+      for (let i = 0; i < this.kernelSliceGroup.length; i++) {
         categoriesDict[this.kernelSliceGroup.slices[i].category] = true;
-      for (var i = 0; i < this.asyncSliceGroup.length; i++)
+      }
+      for (let i = 0; i < this.asyncSliceGroup.length; i++) {
         categoriesDict[this.asyncSliceGroup.slices[i].category] = true;
+      }
       if (this.samples_) {
-        for (var i = 0; i < this.samples_.length; i++)
+        for (let i = 0; i < this.samples_.length; i++) {
           categoriesDict[this.samples_[i].category] = true;
+        }
       }
     },
 
-    autoCloseOpenSlices: function() {
+    autoCloseOpenSlices() {
       this.sliceGroup.autoCloseOpenSlices();
       this.kernelSliceGroup.autoCloseOpenSlices();
     },
 
-    mergeKernelWithUserland: function() {
+    mergeKernelWithUserland() {
       if (this.kernelSliceGroup.length > 0) {
-        var newSlices = SliceGroup.merge(
+        const newSlices = SliceGroup.merge(
             this.sliceGroup, this.kernelSliceGroup);
         this.sliceGroup.slices = newSlices.slices;
         this.kernelSliceGroup = new SliceGroup(this);
@@ -188,11 +190,10 @@ tr.exportTo('tr.model', function() {
       }
     },
 
-    createSubSlices: function() {
+    createSubSlices() {
       this.sliceGroup.createSubSlices();
-      this.samples_ = this.parent.model.samples.filter(function(sample) {
-        return sample.thread === this;
-      }, this);
+      this.samples_ = this.parent.model.samples.filter(sample =>
+          sample.thread === this);
     },
 
     /**
@@ -210,29 +211,26 @@ tr.exportTo('tr.model', function() {
           (this.name ? ', name: ' + this.name : '');
     },
 
-    getSettingsKey: function() {
-      if (!this.name)
-        return undefined;
-      var parentKey = this.parent.getSettingsKey();
-      if (!parentKey)
-        return undefined;
+    getSettingsKey() {
+      if (!this.name) return undefined;
+      const parentKey = this.parent.getSettingsKey();
+      if (!parentKey) return undefined;
       return parentKey + '.' + this.name;
     },
 
-    getProcess: function() {
+    getProcess() {
       return this.parent;
     },
 
     /*
      * Returns the index of the slice in the timeSlices array, or undefined.
      */
-    indexOfTimeSlice: function(timeSlice) {
-      var i = tr.b.findLowIndexInSortedArray(
+    indexOfTimeSlice(timeSlice) {
+      const i = tr.b.math.findLowIndexInSortedArray(
           this.timeSlices,
           function(slice) { return slice.start; },
           timeSlice.start);
-      if (this.timeSlices[i] !== timeSlice)
-        return undefined;
+      if (this.timeSlices[i] !== timeSlice) return undefined;
       return i;
     },
 
@@ -243,30 +241,30 @@ tr.exportTo('tr.model', function() {
      * Additionally, stats.total contains the total time
      * spent running on all CPUs.
      */
-    getCpuStatsForRange: function(range) {
-      var stats = {};
+    getCpuStatsForRange(range) {
+      const stats = {};
       stats.total = 0;
 
-      if (!this.timeSlices)
-        return stats;
+      if (!this.timeSlices) return stats;
 
       function addStatsForSlice(threadTimeSlice) {
-        var freqRange = tr.b.Range.fromExplicitRange(threadTimeSlice.start,
-            threadTimeSlice.end);
-        var intersection = freqRange.findIntersection(range);
+        const freqRange = tr.b.math.Range.fromExplicitRange(
+            threadTimeSlice.start, threadTimeSlice.end);
+        const intersection = freqRange.findIntersection(range);
 
         if (threadTimeSlice.schedulingState ===
             tr.model.SCHEDULING_STATE.RUNNING) {
-          var cpu = threadTimeSlice.cpuOnWhichThreadWasRunning;
-          if (!(cpu.cpuNumber in stats))
+          const cpu = threadTimeSlice.cpuOnWhichThreadWasRunning;
+          if (!(cpu.cpuNumber in stats)) {
             stats[cpu.cpuNumber] = 0;
+          }
 
           stats[cpu.cpuNumber] += intersection.duration;
           stats.total += intersection.duration;
         }
       }
 
-      tr.b.iterateOverIntersectingIntervals(this.timeSlices,
+      tr.b.math.iterateOverIntersectingIntervals(this.timeSlices,
           function(x) { return x.start; },
           function(x) { return x.end; },
           range.min,
@@ -275,22 +273,21 @@ tr.exportTo('tr.model', function() {
       return stats;
     },
 
-    getSchedulingStatsForRange: function(start, end) {
-      var stats = {};
+    getSchedulingStatsForRange(start, end) {
+      const stats = {};
 
       if (!this.timeSlices) return stats;
 
       function addStatsForSlice(threadTimeSlice) {
-        var overlapStart = Math.max(threadTimeSlice.start, start);
-        var overlapEnd = Math.min(threadTimeSlice.end, end);
-        var schedulingState = threadTimeSlice.schedulingState;
+        const overlapStart = Math.max(threadTimeSlice.start, start);
+        const overlapEnd = Math.min(threadTimeSlice.end, end);
+        const schedulingState = threadTimeSlice.schedulingState;
 
-        if (!(schedulingState in stats))
-          stats[schedulingState] = 0;
+        if (!(schedulingState in stats)) stats[schedulingState] = 0;
         stats[schedulingState] += overlapEnd - overlapStart;
       }
 
-      tr.b.iterateOverIntersectingIntervals(this.timeSlices,
+      tr.b.math.iterateOverIntersectingIntervals(this.timeSlices,
           function(x) { return x.start; },
           function(x) { return x.end; },
           start,
@@ -301,6 +298,26 @@ tr.exportTo('tr.model', function() {
 
     get samples() {
       return this.samples_;
+    },
+
+    /**
+     * Returns substring of this.name from beginning to the first numeric
+     * character or the character '/'.
+     *
+     * Example:
+     * ThreadName12      -> ThreadName
+     * ThreadName/34123  -> ThreadName
+     * ThreadName1/34123 -> ThreadName
+     */
+    get type() {
+      const re = /^[^0-9|\/]+/;
+      const matches = re.exec(this.name);
+      if (matches && matches[0]) return matches[0];
+
+      // If a thread is named 42GPU, let's not try to find its type.
+      // We should fix the thread name.
+      throw new Error('Could not determine thread type for thread name ' +
+          this.name);
     }
   };
 
@@ -309,19 +326,22 @@ tr.exportTo('tr.model', function() {
    * then by names, then by tid.
    */
   Thread.compare = function(x, y) {
-    var tmp = x.parent.compareTo(y.parent);
-    if (tmp)
-      return tmp;
+    let tmp = x.parent.compareTo(y.parent);
+    if (tmp) return tmp;
 
     tmp = x.sortIndex - y.sortIndex;
-    if (tmp)
-      return tmp;
+    if (tmp) return tmp;
 
-    tmp = tr.b.comparePossiblyUndefinedValues(
-        x.name, y.name,
-        function(x, y) { return x.localeCompare(y); });
-    if (tmp)
-      return tmp;
+    if (x.name !== undefined) {
+      if (y.name !== undefined) {
+        tmp = x.name.localeCompare(y.name);
+      } else {
+        tmp = -1;
+      }
+    } else if (y.name !== undefined) {
+      tmp = 1;
+    }
+    if (tmp) return tmp;
 
     return x.tid - y.tid;
   };

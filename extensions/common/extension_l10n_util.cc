@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <set>
 #include <string>
 #include <vector>
@@ -15,6 +14,8 @@
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -92,7 +93,7 @@ bool LocalizeManifestListValue(const std::string& key,
     std::string result;
     if (list->GetString(i, &result)) {
       if (messages.ReplaceMessages(&result, error))
-        list->Set(i, new base::StringValue(result));
+        list->Set(i, base::MakeUnique<base::Value>(result));
       else
         ret = false;
     }
@@ -443,7 +444,7 @@ bool ShouldSkipValidation(const base::FilePath& locales_path,
   if (subdir.empty())
     return true;  // Non-ASCII.
 
-  if (std::find(subdir.begin(), subdir.end(), '.') != subdir.end())
+  if (base::ContainsValue(subdir, '.'))
     return true;
 
   if (all_locales.find(subdir) == all_locales.end())

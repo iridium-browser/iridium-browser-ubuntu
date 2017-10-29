@@ -8,8 +8,8 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -82,7 +82,9 @@ class MockHostResolverProc : public net::HostResolverProc {
 class StaleHostResolverTest : public testing::Test {
  protected:
   StaleHostResolverTest()
-      : mock_proc_(new MockHostResolverProc()),
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::IO),
+        mock_proc_(new MockHostResolverProc()),
         resolver_(nullptr),
         resolve_pending_(false),
         resolve_complete_(false) {}
@@ -162,7 +164,9 @@ class StaleHostResolverTest : public testing::Test {
   }
 
   void OnNetworkChange() {
+    // Real network changes on Android will send both notifications.
     net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
+    net::NetworkChangeNotifier::NotifyObserversOfDNSChangeForTests();
     base::RunLoop().RunUntilIdle();  // Wait for notification.
   }
 
@@ -255,7 +259,8 @@ class StaleHostResolverTest : public testing::Test {
 
  private:
   // Needed for HostResolver to run HostResolverProc callbacks.
-  base::MessageLoopForIO message_loop_for_io_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
+
   scoped_refptr<MockHostResolverProc> mock_proc_;
 
   net::HostResolver* resolver_;
@@ -449,6 +454,8 @@ TEST_F(StaleHostResolverTest, CreatedByContext) {
       true,
       // Enable SDCH.
       false,
+      // Enable Brotli.
+      false,
       // Type of http cache.
       URLRequestContextConfig::HttpCacheType::DISK,
       // Max size of http cache in bytes.
@@ -466,14 +473,6 @@ TEST_F(StaleHostResolverTest, CreatedByContext) {
       "\"delay_ms\":0,"
       "\"max_expired_time_ms\":0,"
       "\"max_stale_uses\":0}}",
-      // Data reduction proxy key.
-      "",
-      // Data reduction proxy.
-      "",
-      // Fallback data reduction proxy.
-      "",
-      // Data reduction proxy secure proxy check URL.
-      "",
       // MockCertVerifier to use for testing purposes.
       std::unique_ptr<net::CertVerifier>(),
       // Enable network quality estimator.

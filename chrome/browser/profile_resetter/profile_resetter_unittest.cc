@@ -239,19 +239,17 @@ class ConfigParserTest : public testing::Test {
 
   MOCK_METHOD0(Callback, void(void));
 
-  base::MessageLoopForIO loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread io_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   URLFetcherRequestListener request_listener_;
   net::FakeURLFetcherFactory factory_;
 };
 
 ConfigParserTest::ConfigParserTest()
-    : ui_thread_(content::BrowserThread::UI, &loop_),
-      io_thread_(content::BrowserThread::IO, &loop_),
-      factory_(NULL, base::Bind(&ConfigParserTest::CreateFakeURLFetcher,
-                                base::Unretained(this))) {
-}
+    : test_browser_thread_bundle_(
+          content::TestBrowserThreadBundle::IO_MAINLOOP),
+      factory_(NULL,
+               base::Bind(&ConfigParserTest::CreateFakeURLFetcher,
+                          base::Unretained(this))) {}
 
 ConfigParserTest::~ConfigParserTest() {}
 
@@ -389,7 +387,7 @@ scoped_refptr<Extension> CreateExtension(const base::string16& name,
   switch (type) {
     case extensions::Manifest::TYPE_THEME:
       manifest.Set(extensions::manifest_keys::kTheme,
-                   new base::DictionaryValue);
+                   base::MakeUnique<base::DictionaryValue>());
       break;
     case extensions::Manifest::TYPE_HOSTED_APP:
       manifest.SetString(extensions::manifest_keys::kLaunchWebURL,
@@ -438,7 +436,7 @@ TEST_F(ProfileResetterTest, ResetDefaultSearchEngineNonOrganic) {
 
   TemplateURLService* model =
       TemplateURLServiceFactory::GetForProfile(profile());
-  TemplateURL* default_engine = model->GetDefaultSearchProvider();
+  const TemplateURL* default_engine = model->GetDefaultSearchProvider();
   ASSERT_NE(static_cast<TemplateURL*>(NULL), default_engine);
   EXPECT_EQ(base::ASCIIToUTF16("first"), default_engine->short_name());
   EXPECT_EQ(base::ASCIIToUTF16("firstkey"), default_engine->keyword());
@@ -560,8 +558,8 @@ TEST_F(ProfileResetterTest, ResetExtensionsByDisabling) {
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
   scoped_refptr<Extension> theme = CreateExtension(
-      base::ASCIIToUTF16("example1"), temp_dir.GetPath(),
-      Manifest::INVALID_LOCATION, extensions::Manifest::TYPE_THEME, false);
+      base::ASCIIToUTF16("example1"), temp_dir.GetPath(), Manifest::UNPACKED,
+      extensions::Manifest::TYPE_THEME, false);
   service_->FinishInstallationForTest(theme.get());
   // Let ThemeService finish creating the theme pack.
   base::RunLoop().RunUntilIdle();
@@ -572,10 +570,8 @@ TEST_F(ProfileResetterTest, ResetExtensionsByDisabling) {
 
   scoped_refptr<Extension> ext2 = CreateExtension(
       base::ASCIIToUTF16("example2"),
-      base::FilePath(FILE_PATH_LITERAL("//nonexistent")),
-      Manifest::INVALID_LOCATION,
-      extensions::Manifest::TYPE_EXTENSION,
-      false);
+      base::FilePath(FILE_PATH_LITERAL("//nonexistent")), Manifest::UNPACKED,
+      extensions::Manifest::TYPE_EXTENSION, false);
   service_->AddExtension(ext2.get());
   // Component extensions and policy-managed extensions shouldn't be disabled.
   scoped_refptr<Extension> ext3 = CreateExtension(
@@ -622,18 +618,14 @@ TEST_F(ProfileResetterTest, ResetExtensionsByDisabling) {
 TEST_F(ProfileResetterTest, ResetExtensionsByDisablingNonOrganic) {
   scoped_refptr<Extension> ext2 = CreateExtension(
       base::ASCIIToUTF16("example2"),
-      base::FilePath(FILE_PATH_LITERAL("//nonexistent")),
-      Manifest::INVALID_LOCATION,
-      extensions::Manifest::TYPE_EXTENSION,
-      false);
+      base::FilePath(FILE_PATH_LITERAL("//nonexistent")), Manifest::UNPACKED,
+      extensions::Manifest::TYPE_EXTENSION, false);
   service_->AddExtension(ext2.get());
   // Components and external policy extensions shouldn't be deleted.
   scoped_refptr<Extension> ext3 = CreateExtension(
       base::ASCIIToUTF16("example3"),
-      base::FilePath(FILE_PATH_LITERAL("//nonexistent2")),
-      Manifest::INVALID_LOCATION,
-      extensions::Manifest::TYPE_EXTENSION,
-      false);
+      base::FilePath(FILE_PATH_LITERAL("//nonexistent2")), Manifest::UNPACKED,
+      extensions::Manifest::TYPE_EXTENSION, false);
   service_->AddExtension(ext3.get());
   EXPECT_EQ(2u, registry()->enabled_extensions().size());
 
@@ -653,8 +645,8 @@ TEST_F(ProfileResetterTest, ResetExtensionsAndDefaultApps) {
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
   scoped_refptr<Extension> ext1 = CreateExtension(
-      base::ASCIIToUTF16("example1"), temp_dir.GetPath(),
-      Manifest::INVALID_LOCATION, extensions::Manifest::TYPE_THEME, false);
+      base::ASCIIToUTF16("example1"), temp_dir.GetPath(), Manifest::UNPACKED,
+      extensions::Manifest::TYPE_THEME, false);
   service_->FinishInstallationForTest(ext1.get());
   // Let ThemeService finish creating the theme pack.
   base::RunLoop().RunUntilIdle();
@@ -663,20 +655,16 @@ TEST_F(ProfileResetterTest, ResetExtensionsAndDefaultApps) {
       ThemeServiceFactory::GetForProfile(profile());
   EXPECT_FALSE(theme_service->UsingDefaultTheme());
 
-  scoped_refptr<Extension> ext2 =
-      CreateExtension(base::ASCIIToUTF16("example2"),
-                      base::FilePath(FILE_PATH_LITERAL("//nonexistent2")),
-                      Manifest::INVALID_LOCATION,
-                      extensions::Manifest::TYPE_EXTENSION,
-                      false);
+  scoped_refptr<Extension> ext2 = CreateExtension(
+      base::ASCIIToUTF16("example2"),
+      base::FilePath(FILE_PATH_LITERAL("//nonexistent2")), Manifest::UNPACKED,
+      extensions::Manifest::TYPE_EXTENSION, false);
   service_->AddExtension(ext2.get());
 
-  scoped_refptr<Extension> ext3 =
-      CreateExtension(base::ASCIIToUTF16("example2"),
-                      base::FilePath(FILE_PATH_LITERAL("//nonexistent3")),
-                      Manifest::INVALID_LOCATION,
-                      extensions::Manifest::TYPE_HOSTED_APP,
-                      true);
+  scoped_refptr<Extension> ext3 = CreateExtension(
+      base::ASCIIToUTF16("example2"),
+      base::FilePath(FILE_PATH_LITERAL("//nonexistent3")), Manifest::UNPACKED,
+      extensions::Manifest::TYPE_HOSTED_APP, true);
   service_->AddExtension(ext3.get());
   EXPECT_EQ(3u, registry()->enabled_extensions().size());
 
@@ -835,7 +823,7 @@ TEST_F(ConfigParserTest, ParseConfig) {
   for (base::ListValue::iterator i = startup_list->begin();
        i != startup_list->end(); ++i) {
     std::string url;
-    EXPECT_TRUE((*i)->GetAsString(&url));
+    EXPECT_TRUE(i->GetAsString(&url));
     startup_pages.push_back(url);
   }
   ASSERT_EQ(2u, startup_pages.size());
@@ -849,10 +837,8 @@ TEST_F(ProfileResetterTest, CheckSnapshots) {
 
   scoped_refptr<Extension> ext = CreateExtension(
       base::ASCIIToUTF16("example"),
-      base::FilePath(FILE_PATH_LITERAL("//nonexistent")),
-      Manifest::INVALID_LOCATION,
-      extensions::Manifest::TYPE_EXTENSION,
-      false);
+      base::FilePath(FILE_PATH_LITERAL("//nonexistent")), Manifest::UNPACKED,
+      extensions::Manifest::TYPE_EXTENSION, false);
   ASSERT_TRUE(ext.get());
   service_->AddExtension(ext.get());
 
@@ -878,8 +864,8 @@ TEST_F(ProfileResetterTest, CheckSnapshots) {
 
   ResettableSettingsSnapshot nonorganic_snap(profile());
   nonorganic_snap.RequestShortcuts(base::Closure());
-  // Let it enumerate shortcuts on the FILE thread.
-  base::RunLoop().RunUntilIdle();
+  // Let it enumerate shortcuts on a blockable task runner.
+  content::RunAllBlockingPoolTasksUntilIdle();
   int diff_fields = ResettableSettingsSnapshot::ALL_FIELDS;
   if (!ShortcutHandler::IsSupported())
     diff_fields &= ~ResettableSettingsSnapshot::SHORTCUTS;
@@ -906,8 +892,8 @@ TEST_F(ProfileResetterTest, CheckSnapshots) {
 
   ResettableSettingsSnapshot organic_snap(profile());
   organic_snap.RequestShortcuts(base::Closure());
-  // Let it enumerate shortcuts on the FILE thread.
-  base::RunLoop().RunUntilIdle();
+  // Let it enumerate shortcuts on a blockable task runner.
+  content::RunAllBlockingPoolTasksUntilIdle();
   EXPECT_EQ(diff_fields, nonorganic_snap.FindDifferentFields(organic_snap));
   nonorganic_snap.Subtract(organic_snap);
   const GURL urls[] = {GURL("http://foo.de"), GURL("http://goo.gl")};
@@ -938,10 +924,8 @@ TEST_F(ProfileResetterTest, FeedbackSerializationAsProtoTest) {
 
   scoped_refptr<Extension> ext = CreateExtension(
       base::ASCIIToUTF16("example"),
-      base::FilePath(FILE_PATH_LITERAL("//nonexistent")),
-      Manifest::INVALID_LOCATION,
-      extensions::Manifest::TYPE_EXTENSION,
-      false);
+      base::FilePath(FILE_PATH_LITERAL("//nonexistent")), Manifest::UNPACKED,
+      extensions::Manifest::TYPE_EXTENSION, false);
   ASSERT_TRUE(ext.get());
   service_->AddExtension(ext.get());
 
@@ -952,8 +936,8 @@ TEST_F(ProfileResetterTest, FeedbackSerializationAsProtoTest) {
 
   ResettableSettingsSnapshot nonorganic_snap(profile());
   nonorganic_snap.RequestShortcuts(base::Closure());
-  // Let it enumerate shortcuts on the FILE thread.
-  base::RunLoop().RunUntilIdle();
+  // Let it enumerate shortcuts on a blockable task runner.
+  content::RunAllBlockingPoolTasksUntilIdle();
 
   static_assert(ResettableSettingsSnapshot::ALL_FIELDS == 31,
                 "this test needs to be expanded");
@@ -1002,10 +986,8 @@ struct FeedbackCapture {
 TEST_F(ProfileResetterTest, GetReadableFeedback) {
   scoped_refptr<Extension> ext = CreateExtension(
       base::WideToUTF16(L"Tiësto"),
-      base::FilePath(FILE_PATH_LITERAL("//nonexistent")),
-      Manifest::INVALID_LOCATION,
-      extensions::Manifest::TYPE_EXTENSION,
-      false);
+      base::FilePath(FILE_PATH_LITERAL("//nonexistent")), Manifest::UNPACKED,
+      extensions::Manifest::TYPE_EXTENSION, false);
   ASSERT_TRUE(ext.get());
   service_->AddExtension(ext.get());
 
@@ -1033,8 +1015,9 @@ TEST_F(ProfileResetterTest, GetReadableFeedback) {
                                        base::Unretained(&capture),
                                        profile(),
                                        base::ConstRef(snapshot)));
-  // Let it enumerate shortcuts on the FILE thread.
-  base::RunLoop().RunUntilIdle();
+  // Let it enumerate shortcuts on a blockable task runner.
+  content::RunAllBlockingPoolTasksUntilIdle();
+  EXPECT_TRUE(snapshot.shortcuts_determined());
   ::testing::Mock::VerifyAndClearExpectations(&capture);
   // The homepage and the startup page are in punycode. They are unreadable.
   // Trying to find the extension name.

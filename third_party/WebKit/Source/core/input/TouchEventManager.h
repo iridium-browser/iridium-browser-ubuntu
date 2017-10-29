@@ -7,16 +7,20 @@
 
 #include "core/CoreExport.h"
 #include "core/events/PointerEventFactory.h"
+#include "core/input/EventHandlingUtil.h"
+#include "platform/graphics/TouchAction.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/HashMap.h"
+#include "platform/wtf/Vector.h"
+#include "public/platform/WebCoalescedInputEvent.h"
 #include "public/platform/WebInputEventResult.h"
-#include "public/platform/WebTouchPoint.h"
-#include "wtf/Allocator.h"
-#include "wtf/HashMap.h"
+#include "public/platform/WebPointerEvent.h"
+#include "public/platform/WebTouchEvent.h"
 
 namespace blink {
 
 class LocalFrame;
 class Document;
-class WebTouchEvent;
 
 // This class takes care of dispatching all touch events and
 // maintaining related states.
@@ -25,85 +29,90 @@ class CORE_EXPORT TouchEventManager
   WTF_MAKE_NONCOPYABLE(TouchEventManager);
 
  public:
-  class TouchInfo {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-
-   public:
-    DEFINE_INLINE_TRACE() {
-      visitor->trace(touchNode);
-      visitor->trace(targetFrame);
-    }
-
-    WebTouchPoint point;
-    Member<Node> touchNode;
-    Member<LocalFrame> targetFrame;
-    FloatPoint contentPoint;
-    FloatSize adjustedRadius;
-    bool knownTarget;
-    String region;
-  };
 
   explicit TouchEventManager(LocalFrame&);
   DECLARE_TRACE();
 
-  // Does the hit-testing again if the original hit test result was not inside
-  // capturing frame for touch events. Returns true if touch events could be
-  // dispatched and otherwise returns false.
-  bool reHitTestTouchPointsIfNeeded(const WebTouchEvent&,
-                                    HeapVector<TouchInfo>&);
+  void HandleTouchPoint(const WebPointerEvent&,
+                        const Vector<WebPointerEvent>&,
+                        const EventHandlingUtil::PointerEventTarget&);
 
-  // The TouchInfo array is reference just to prevent the copy. However, it
-  // cannot be const as this function might change some of the properties in
-  // TouchInfo objects.
-  WebInputEventResult handleTouchEvent(const WebTouchEvent&,
-                                       HeapVector<TouchInfo>&);
+  WebInputEventResult FlushEvents();
 
   // Resets the internal state of this object.
-  void clear();
+  void Clear();
 
   // Returns whether there is any touch on the screen.
-  bool isAnyTouchActive() const;
+  bool IsAnyTouchActive() const;
 
  private:
-  void updateTargetAndRegionMapsForTouchStarts(HeapVector<TouchInfo>&);
-  void setAllPropertiesOfTouchInfos(HeapVector<TouchInfo>&);
+  // Class represending one touch point event with its coalesced events and
+  // related attributes.
+  class TouchPointAttributes
+      : public GarbageCollectedFinalized<TouchPointAttributes> {
+   public:
+    DEFINE_INLINE_TRACE() { visitor->Trace(target_); }
 
-  WebInputEventResult dispatchTouchEvents(const WebTouchEvent&,
-                                          const HeapVector<TouchInfo>&,
-                                          bool allTouchesReleased);
+    TouchPointAttributes() {}
+    explicit TouchPointAttributes(WebPointerEvent event)
+        : event_(event), stale_(false) {}
+
+    // Last state of the touch point.
+    WebPointerEvent event_;
+    // The list of coalesced events of the touch point represented by this class
+    // if there is any. Note that at the end of each frame this list gets
+    // cleared and the touch point |stale_| flag will be true for the next frame
+    // unless more new events arrives for this touch point.
+    Vector<WebPointerEvent> coalesced_events_;
+    Member<Node> target_;  // The target of each active touch point.
+    String region_;        //  // The region of each active touch point.
+    bool stale_;
+  };
+
+  WebCoalescedInputEvent GenerateWebCoalescedInputEvent();
+  Touch* CreateDomTouch(const TouchPointAttributes*, bool* known_target);
+  void AllTouchesReleasedCleanup();
+
+  // Keeps track of attributes of the touch point in the
+  // |touch_points_attributes_| map and does the hit-testing if the original hit
+  // test result was not inside capturing frame |touch_sequence_document_| for
+  // touch events.
+  void UpdateTouchAttributeMapsForPointerDown(
+      const WebPointerEvent&,
+      const EventHandlingUtil::PointerEventTarget&);
+
+  // This is triggered either by VSync signal to send one touch event per frame
+  // accumulating all move events or by discrete events pointerdown/up/cancel.
+  WebInputEventResult DispatchTouchEventFromAccumulatdTouchPoints();
 
   // NOTE: If adding a new field to this class please ensure that it is
   // cleared in |TouchEventManager::clear()|.
 
-  const Member<LocalFrame> m_frame;
+  const Member<LocalFrame> frame_;
 
-  // The target of each active touch point indexed by the touch ID.
-  using TouchTargetMap =
-      HeapHashMap<unsigned,
-                  Member<Node>,
-                  DefaultHash<unsigned>::Hash,
-                  WTF::UnsignedWithZeroKeyHashTraits<unsigned>>;
-  TouchTargetMap m_targetForTouchID;
-  using TouchRegionMap = HashMap<unsigned,
-                                 String,
-                                 DefaultHash<unsigned>::Hash,
-                                 WTF::UnsignedWithZeroKeyHashTraits<unsigned>>;
-  TouchRegionMap m_regionForTouchID;
+  // The attributes of each active touch point indexed by the touch ID.
+  using TouchAttributeMap =
+      HeapHashMap<int,
+                  Member<TouchPointAttributes>,
+                  WTF::IntHash<int>,
+                  WTF::UnsignedWithZeroKeyHashTraits<int>>;
+  TouchAttributeMap touch_attribute_map_;
 
   // If set, the document of the active touch sequence. Unset if no touch
   // sequence active.
-  Member<Document> m_touchSequenceDocument;
+  Member<Document> touch_sequence_document_;
 
-  bool m_touchPressed;
-  bool m_suppressingTouchmovesWithinSlop;
+  bool suppressing_touchmoves_within_slop_;
+
+  // This is used to created a consistent sequence of coalesced events compared
+  // to the last frame.
+  WebTouchEvent last_coalesced_touch_event_;
 
   // The current touch action, computed on each touch start and is
   // a union of all touches. Reset when all touches are released.
-  TouchAction m_currentTouchAction;
+  TouchAction current_touch_action_;
 };
 
 }  // namespace blink
-
-WTF_ALLOW_INIT_WITH_MEM_FUNCTIONS(blink::TouchEventManager::TouchInfo);
 
 #endif  // TouchEventManager_h

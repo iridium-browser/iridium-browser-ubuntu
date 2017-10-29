@@ -16,23 +16,33 @@ class CryptoKey;
 class MODULES_EXPORT V8ScriptValueDeserializerForModules final
     : public V8ScriptValueDeserializer {
  public:
-  explicit V8ScriptValueDeserializerForModules(
-      RefPtr<ScriptState> scriptState,
-      RefPtr<SerializedScriptValue> serializedScriptValue)
-      : V8ScriptValueDeserializer(scriptState, serializedScriptValue) {}
+  // TODO(jbroman): This should just be:
+  // using V8ScriptValueDeserializer::V8ScriptValueDeserializer;
+  // Unfortunately, MSVC 2015 emits C2248, claiming that it cannot access its
+  // own private members. Until it's gone, we write the constructors by hand.
+  V8ScriptValueDeserializerForModules(RefPtr<ScriptState> script_state,
+                                      UnpackedSerializedScriptValue* unpacked,
+                                      const Options& options = Options())
+      : V8ScriptValueDeserializer(std::move(script_state), unpacked, options) {}
+  V8ScriptValueDeserializerForModules(RefPtr<ScriptState> script_state,
+                                      RefPtr<SerializedScriptValue> value,
+                                      const Options& options = Options())
+      : V8ScriptValueDeserializer(std::move(script_state),
+                                  std::move(value),
+                                  options) {}
 
  protected:
-  ScriptWrappable* readDOMObject(SerializationTag) override;
+  ScriptWrappable* ReadDOMObject(SerializationTag) override;
 
  private:
-  bool readOneByte(uint8_t* byte) {
+  bool ReadOneByte(uint8_t* byte) {
     const void* data;
-    if (!readRawBytes(1, &data))
+    if (!ReadRawBytes(1, &data))
       return false;
     *byte = *reinterpret_cast<const uint8_t*>(data);
     return true;
   }
-  CryptoKey* readCryptoKey();
+  CryptoKey* ReadCryptoKey();
 };
 
 }  // namespace blink

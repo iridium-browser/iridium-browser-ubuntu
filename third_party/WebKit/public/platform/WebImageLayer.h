@@ -29,7 +29,12 @@
 #include "WebCommon.h"
 #include "WebLayer.h"
 
-class SkImage;
+#if INSIDE_BLINK
+#include "platform/graphics/paint/PaintImage.h"
+#else
+#include "cc/paint/paint_image.h"
+using PaintImage = cc::PaintImage;
+#endif
 
 namespace blink {
 
@@ -37,9 +42,9 @@ class WebImageLayer {
  public:
   virtual ~WebImageLayer() {}
 
-  virtual WebLayer* layer() = 0;
-  virtual void setImage(const SkImage*) = 0;
-  virtual void setNearestNeighbor(bool) = 0;
+  virtual WebLayer* Layer() = 0;
+  virtual void SetImage(PaintImage) = 0;
+  virtual void SetNearestNeighbor(bool) = 0;
 };
 
 }  // namespace blink

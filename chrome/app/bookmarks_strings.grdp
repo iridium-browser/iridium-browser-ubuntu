@@ -70,7 +70,25 @@
       Open all bookmarks in &amp;new window
     </message>
     <message name="IDS_BOOKMARK_BAR_OPEN_ALL_INCOGNITO" desc="Menu description for opening all urls in a bookmark folder in an incognito window">
-      Open all bookmarks in &amp;incognito window
+        Open all bookmarks in &amp;incognito window
+    </message>
+    <message name="IDS_BOOKMARK_BAR_OPEN_ALL_COUNT" desc="Menu title for opening all urls in a bookmark folder">
+        {COUNT, plural,
+          =0 {&amp;Open all}
+          =1 {&amp;Open bookmark}
+          other {&amp;Open all (#)}}
+    </message>
+    <message name="IDS_BOOKMARK_BAR_OPEN_ALL_COUNT_NEW_WINDOW" desc="Menu title for opening all urls in a bookmark folder in a new window">
+        {COUNT, plural,
+          =0 {Open all in &amp;new window}
+          =1 {Open in &amp;new window}
+          other {Open all (#) in &amp;new window}}
+    </message>
+    <message name="IDS_BOOKMARK_BAR_OPEN_ALL_COUNT_INCOGNITO" desc="Menu description for opening all urls in a bookmark folder in an incognito window">
+        {COUNT, plural,
+          =0 {Open all in &amp;incognito window}
+          =1 {Open in &amp;incognito window}
+          other {Open all (#) in &amp;incognito window}}
     </message>
     <message name="IDS_BOOKMARK_BAR_OPEN_IN_NEW_TAB" desc="Menu description for loading bookmark in a new tab">
       &amp;Open in new tab
@@ -104,13 +122,31 @@
   </if>
   <if expr="use_titlecase">
     <message name="IDS_BOOKMARK_BAR_OPEN_ALL" desc="In Title Case: Menu title for opening all urls in a bookmark folder">
-      &amp;Open All Bookmarks
+        &amp;Open All Bookmarks
     </message>
     <message name="IDS_BOOKMARK_BAR_OPEN_ALL_NEW_WINDOW" desc="In Title Case: Menu title for opening all urls in a bookmark folder in a new window">
-      Open All Bookmarks in &amp;New Window
+        Open All Bookmarks in &amp;New Window
     </message>
     <message name="IDS_BOOKMARK_BAR_OPEN_ALL_INCOGNITO" desc="In Title Case: Menu description for opening all urls in a bookmark folder in an incognito window">
-      Open All Bookmarks in &amp;Incognito Window
+        Open All Bookmarks in &amp;Incognito Window
+    </message>
+    <message name="IDS_BOOKMARK_BAR_OPEN_ALL_COUNT" desc="In Title Case: Menu title for opening all urls in a bookmark folder">
+        {COUNT, plural,
+          =0 {&amp;Open All}
+          =1 {&amp;Open Bookmark}
+          other {&amp;Open All (#)}}
+    </message>
+    <message name="IDS_BOOKMARK_BAR_OPEN_ALL_COUNT_NEW_WINDOW" desc="In Title Case: Menu title for opening all urls in a bookmark folder in a new window">
+        {COUNT, plural,
+          =0 {Open All in &amp;New Window}
+          =1 {Open in &amp;New Window}
+          other {Open All (#) in &amp;New Window}}
+    </message>
+    <message name="IDS_BOOKMARK_BAR_OPEN_ALL_COUNT_INCOGNITO" desc="In Title Case: Menu description for opening all urls in a bookmark folder in an incognito window">
+        {COUNT, plural,
+          =0 {Open All in &amp;Incognito Window}
+          =1 {Open in &amp;Incognito Window}
+          other {Open All (#) in &amp;Incognito Window}}
     </message>
     <message name="IDS_BOOKMARK_BAR_OPEN_IN_NEW_TAB" desc="In Title Case: Menu description for loading bookmark in a new tab">
       &amp;Open in New Tab
@@ -164,16 +200,16 @@
   <message name="IDS_BOOKMARK_AX_BUBBLE_PAGE_BOOKMARK" desc="Title of the bubble when re-clicking on a bookmark, read by spoken feedback">
     Edit bookmark
   </message>
-  <message name="IDS_BOOKMARK_BUBBLE_TITLE_TEXT" desc="Text preceding the title of the page that was bookmarked">
+  <message name="IDS_BOOKMARK_BUBBLE_NAME_LABEL" desc="Text preceding the title of the page that was bookmarked">
     Name:
   </message>
-  <message name="IDS_BOOKMARK_AX_BUBBLE_TITLE_TEXT" desc="Text preceding the title of the page that was bookmarked, read by spoken feedback">
+  <message name="IDS_BOOKMARK_AX_BUBBLE_NAME_LABEL" desc="Text preceding the title of the page that was bookmarked, read by spoken feedback">
     Bookmark name
   </message>
-  <message name="IDS_BOOKMARK_BUBBLE_FOLDER_TEXT" desc="Text preceding the folder selector">
+  <message name="IDS_BOOKMARK_BUBBLE_FOLDER_LABEL" desc="Text preceding the folder selector">
     Folder:
   </message>
-  <message name="IDS_BOOKMARK_AX_BUBBLE_FOLDER_TEXT" desc="Text preceding the folder selector">
+  <message name="IDS_BOOKMARK_AX_BUBBLE_FOLDER_LABEL" desc="Text preceding the folder selector">
     Bookmark folder
   </message>
   <message name="IDS_BOOKMARK_BUBBLE_OPTIONS" desc="Title of the button the user can click to edit details of the bookmark">
@@ -196,6 +232,23 @@
     To get your bookmarks on all your devices, <ph name="SIGN_IN_LINK">$1<ex>sign in</ex></ph>.
   </message>
   <!-- End of Bookmarks Sync Promo strings. -->
+
+  <!-- Begin of Desktop to iOS Promo strings. -->
+  <if expr="is_win">
+    <message name="IDS_BOOKMARK_BUBBLE_DESKTOP_TO_IOS_PROMO_TITLE" desc="Title for Chrome iOS promotion appearing in the bookmark bubble after a bookmark is saved.">
+      Sync this bookmark to your iPhone
+    </message>
+    <message name="IDS_BOOKMARK_BUBBLE_DESKTOP_TO_IOS_PROMO_TITLE_V2" desc="Title for Chrome iOS promotion appearing in the bookmark bubble after a bookmark is saved.">
+      Get this bookmark on your iPhone
+    </message>
+    <message name="IDS_BOOKMARK_BUBBLE_DESKTOP_TO_IOS_PROMO_TITLE_V3" desc="Title for Chrome iOS promotion appearing in the bookmark bubble after a bookmark is saved.">
+      Share this bookmark with your iPhone
+    </message>
+    <message name="IDS_BOOKMARK_FOOTNOTE_DESKTOP_TO_IOS_PROMO_MESSAGE" desc="Text of the Chrome iOS promotion displayed at the bottom of the bookmark bubble.">
+      To get your bookmarks on your mobile device, <ph name="GET_IOS_APP_LINK">$1<ex>get the application on your iPhone</ex></ph>.
+    </message>
+  </if>
+  <!-- End of Desktop to iOS Promo strings. -->
 
   <!-- Begin of Bookmark Editor strings. -->
   <message name="IDS_BOOKMARK_EDITOR_NAME_LABEL" desc="Label shown before the title/name of the URL.">
@@ -321,11 +374,17 @@
   <!-- End of Bookmarks Manager strings. -->
 
   <!-- Begin of material design Bookmarks Manager strings. -->
+  <message name="IDS_MD_BOOKMARK_MANAGER_ADD_BOOKMARK_TITLE" desc="Title of the dialog in the bookmark manager that creates a new bookmark.">
+    Add bookmark
+  </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_ADD_FOLDER_TITLE" desc="Title of the dialog in the bookmark manager that creates a new bookmark folder.">
+    Add folder
+  </message>
   <message name="IDS_MD_BOOKMARK_MANAGER_CLEAR_SEARCH" desc="Title of the button in the bookmark manager that stops a search.">
     Clear search
   </message>
-  <message name="IDS_MD_BOOKMARK_MANAGER_EMPTY_LIST" desc="Text on the bookmarks list that indicates that a folder has no bookmarks.">
-    This folder is empty
+  <message name="IDS_MD_BOOKMARK_MANAGER_EMPTY_LIST" desc="The message shown when the user has no bookmarks added. 'Star' refers to the icon in the omnibox for adding to bookmarks.">
+    To bookmark pages, click the star in the address bar
   </message>
   <message name="IDS_MD_BOOKMARK_MANAGER_FOLDER_RENAME_TITLE" desc="Title of the bookmark editor window when editing folders.">
     Rename Folder
@@ -335,9 +394,6 @@
   </message>
   <message name="IDS_MD_BOOKMARK_MANAGER_MENU_ADD_FOLDER" desc="Title of the bookmark toolbar dropdown menu item that adds a new folder.">
     Add new folder
-  </message>
-  <message name="IDS_MD_BOOKMARK_MANAGER_MENU_BULK_EDIT" desc="Title of the bookmark toolbar dropdown menu item that enters bulk edit mode.">
-    Bulk edit
   </message>
   <message name="IDS_MD_BOOKMARK_MANAGER_MENU_COPY_URL" desc="Title of the bookmark dropdown menu item that copies the url of the bookmark.">
     Copy URL
@@ -354,11 +410,48 @@
   <message name="IDS_MD_BOOKMARK_MANAGER_MENU_SORT" desc="Title of the bookmark toolbar dropdown menu item that sorts bookmarks by title.">
     Sort by title
   </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_MORE_ACTIONS" desc="Tooltip of the button in the bookmark manager which shows an action menu for a bookmark, with actions like 'Edit' or 'Delete'">
+    More actions...
+  </message>
   <message name="IDS_MD_BOOKMARK_MANAGER_NO_SEARCH_RESULTS" desc="Text on the bookmarks list that indicates that no bookmarks or folders match the search.">
     No search results found
   </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_OPEN_DIALOG_TITLE" desc="Title of the dialog confirming whether a large number of bookmarks should be opened.">
+    Open selected items
+  </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_OPEN_DIALOG_CONFIRM" desc="Label for the button to confirm opening a large number of bookmarks.">
+    Open
+  </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_ITEMS_SELECTED" desc="Label displayed in bookmark manager toolbar telling the user how many items they have selected.">
+    <ph name="NUMBER_OF_ITEMS_SELECTED">$1</ph> selected
+  </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_SEARCH_RESULTS" desc="Message announced by screenreaders when search results are found.">
+    Search results for '<ph name="SEARCH_STRING">$1<ex>reading</ex></ph>'
+  </message>
   <message name="IDS_MD_BOOKMARK_MANAGER_TITLE" desc="Title of the bookmark manager window.">
     Bookmarks
+  </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_TOAST_FOLDER_SORTED" desc="Label displayed in toast popup message when a folder's children are sorted.">
+    Folder sorted
+  </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_TOAST_ITEM_DELETED" desc="Label displayed in toast popup message when a single item is deleted.">
+    '<ph name="DELETED_ITEM_NAME">$1<ex>Bookmark X</ex></ph>' has been deleted
+  </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_TOAST_ITEMS_DELETED" desc="Label displayed in toast popup message when two or more items are deleted.">
+    {COUNT, plural,
+      =1 {1 bookmark deleted}
+      other {# bookmarks deleted}}
+  </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_TOAST_URL_COPIED" desc="Label displayed in toast popup message when a URL is copied.">
+    URL copied
+  </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_TOAST_ITEM_COPIED" desc="Label displayed in toast popup message when a single item is copied.">
+    '<ph name="COPIED_ITEM_NAME">$1<ex>Bookmark X</ex></ph>' copied
+  </message>
+  <message name="IDS_MD_BOOKMARK_MANAGER_TOAST_ITEMS_COPIED" desc="Label displayed in a toast popup message when two or more bookmark items are copied">
+    {COUNT, plural,
+      =1 {1 item copied}
+      other {# items copied}}
   </message>
   <!-- End of material design Bookmarks Manager strings. -->
 

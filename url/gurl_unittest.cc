@@ -584,6 +584,7 @@ TEST(GURLTest, HostNoBrackets) {
     GURL url(cases[i].input);
     EXPECT_EQ(cases[i].expected_host, url.host());
     EXPECT_EQ(cases[i].expected_plainhost, url.HostNoBrackets());
+    EXPECT_EQ(cases[i].expected_plainhost, url.HostNoBracketsPiece());
   }
 }
 
@@ -645,10 +646,26 @@ TEST(GURLTest, Newlines) {
   // Constructor.
   GURL url_1(" \t ht\ntp://\twww.goo\rgle.com/as\ndf \n ");
   EXPECT_EQ("http://www.google.com/asdf", url_1.spec());
+  EXPECT_FALSE(
+      url_1.parsed_for_possibly_invalid_spec().potentially_dangling_markup);
 
   // Relative path resolver.
   GURL url_2 = url_1.Resolve(" \n /fo\to\r ");
   EXPECT_EQ("http://www.google.com/foo", url_2.spec());
+  EXPECT_FALSE(
+      url_2.parsed_for_possibly_invalid_spec().potentially_dangling_markup);
+
+  // Constructor.
+  GURL url_3(" \t ht\ntp://\twww.goo\rgle.com/as\ndf< \n ");
+  EXPECT_EQ("http://www.google.com/asdf%3C", url_3.spec());
+  EXPECT_TRUE(
+      url_3.parsed_for_possibly_invalid_spec().potentially_dangling_markup);
+
+  // Relative path resolver.
+  GURL url_4 = url_1.Resolve(" \n /fo\to<\r ");
+  EXPECT_EQ("http://www.google.com/foo%3C", url_4.spec());
+  EXPECT_TRUE(
+      url_4.parsed_for_possibly_invalid_spec().potentially_dangling_markup);
 
   // Note that newlines are NOT stripped from ReplaceComponents.
 }

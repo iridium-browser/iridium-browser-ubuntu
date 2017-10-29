@@ -6,6 +6,7 @@
 #define COMPONENTS_PASSWORD_MANAGER_CONTENT_BROWSER_CONTENT_PASSWORD_MANAGER_DRIVER_H_
 
 #include <map>
+#include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
@@ -20,7 +21,6 @@
 #include "components/password_manager/core/browser/password_manager_driver.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "third_party/WebKit/public/platform/modules/sensitive_input_visibility/sensitive_input_visibility_service.mojom.h"
 
 namespace autofill {
 struct PasswordForm;
@@ -38,8 +38,7 @@ enum class BadMessageReason;
 // The lifetime is managed by the ContentPasswordManagerDriverFactory.
 class ContentPasswordManagerDriver
     : public PasswordManagerDriver,
-      public autofill::mojom::PasswordManagerDriver,
-      public blink::mojom::SensitiveInputVisibilityService {
+      public autofill::mojom::PasswordManagerDriver {
  public:
   ContentPasswordManagerDriver(content::RenderFrameHost* render_frame_host,
                                PasswordManagerClient* client,
@@ -51,8 +50,6 @@ class ContentPasswordManagerDriver
       content::RenderFrameHost* render_frame_host);
 
   void BindRequest(autofill::mojom::PasswordManagerDriverRequest request);
-  void BindSensitiveInputVisibilityServiceRequest(
-      blink::mojom::SensitiveInputVisibilityServiceRequest request);
 
   // PasswordManagerDriver implementation.
   void FillPasswordForm(
@@ -78,6 +75,7 @@ class ContentPasswordManagerDriver
   void SendLoggingAvailability() override;
   void AllowToRunFormClassifier() override;
   autofill::AutofillDriver* GetAutofillDriver() override;
+  bool IsMainFrame() const override;
 
   PasswordGenerationManager* GetPasswordGenerationManager() override;
   PasswordManager* GetPasswordManager() override;
@@ -106,17 +104,16 @@ class ContentPasswordManagerDriver
   void ShowNotSecureWarning(base::i18n::TextDirection text_direction,
                             const gfx::RectF& bounds) override;
   void RecordSavePasswordProgress(const std::string& log) override;
+  void UserModifiedPasswordField() override;
   void SaveGenerationFieldDetectedByClassifier(
       const autofill::PasswordForm& password_form,
       const base::string16& generation_field) override;
+  void CheckSafeBrowsingReputation(const GURL& form_action,
+                                   const GURL& frame_url) override;
 
   void OnPasswordFormsParsedNoRenderCheck(
       const std::vector<autofill::PasswordForm>& forms);
   void OnFocusedPasswordFormFound(const autofill::PasswordForm& password_form);
-
-  // blink::mojom::SensitiveInputVisibility:
-  void PasswordFieldVisibleInInsecureContext() override;
-  void AllPasswordFieldsInInsecureContextInvisible() override;
 
  private:
   bool CheckChildProcessSecurityPolicy(const GURL& url,
@@ -143,14 +140,17 @@ class ContentPasswordManagerDriver
   // it to each other over IPC. The counter below is used to generate new IDs.
   int next_free_key_;
 
+  // It should be filled in the constructor, since later the frame might be
+  // detached and it would be impossible to check whether the frame is a main
+  // frame.
+  const bool is_main_frame_;
+
   autofill::mojom::PasswordAutofillAgentPtr password_autofill_agent_;
 
   autofill::mojom::PasswordGenerationAgentPtr password_gen_agent_;
 
   mojo::Binding<autofill::mojom::PasswordManagerDriver>
       password_manager_binding_;
-  mojo::BindingSet<blink::mojom::SensitiveInputVisibilityService>
-      sensitive_input_visibility_bindings_;
 
   base::WeakPtrFactory<ContentPasswordManagerDriver> weak_factory_;
 

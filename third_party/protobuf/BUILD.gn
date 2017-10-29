@@ -136,6 +136,26 @@ if (is_win) {
   ]
 }
 
+# Do not allow libprotobuf_lite to be dynamically linked on Linux.  Later
+# versions of Ubuntu like Xenial and Yakkety link in the system
+# libprotobuf_lite by the following dependency chain: chrome -> gtk ->
+# libmirclient -> libmirprotobuf -> libprotobuf-lite.  Trying to load
+# the system libprotobuf-lite after already having loaded the libprotobuf_lite
+# component will result in an immediate crash. (crbug.com/700120)
+if (is_component_build && is_desktop_linux) {
+  shared_library("mirclient") {
+    inputs = [
+      "mirclient.map",
+    ]
+    sources = [
+      "mirclient.cc",
+    ]
+    ldflags = [ "-Wl,--version-script=" +
+                rebase_path("//third_party/protobuf/mirclient.map") ]
+    output_extension = "so.9"
+  }
+}
+
 component("protobuf_lite") {
   sources = protobuf_lite_sources
 
@@ -160,10 +180,14 @@ component("protobuf_lite") {
   ]
 
   deps = [
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
   ]
 
   cflags = protobuf_lite_cflags
+
+  if (is_component_build && is_desktop_linux) {
+    deps += [ ":mirclient" ]
+  }
 
   # Required for component builds. See http://crbug.com/172800.
   if (is_component_build) {
@@ -177,10 +201,18 @@ component("protobuf_lite") {
 # into that category. Do not use in Chrome code.
 static_library("protobuf_full") {
   # Prevent people from depending on this outside our file.
-  visibility = [ ":*" ]
+  visibility = [
+    ":*",
 
-  sources = protobuf_lite_sources
-  sources += [
+    # requires descriptors & reflection; testonly.
+    "//third_party/libprotobuf-mutator:*",
+
+    # The traffic_annotation tool is not part of Chrome itself, and needs to
+    # parse human-readable protobufs.
+    "//tools/traffic_annotation/*",
+  ]
+
+  sources = protobuf_lite_sources + [
     "src/google/protobuf/any.cc",
     "src/google/protobuf/any.h",
     "src/google/protobuf/any.pb.cc",
@@ -309,7 +341,7 @@ static_library("protobuf_full") {
   ]
 
   deps = [
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
   ]
 
   configs -= [ "//build/config/compiler:chromium_code" ]

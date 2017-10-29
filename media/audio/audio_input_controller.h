@@ -13,11 +13,15 @@
 
 #include "base/files/file.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
+#include "base/single_thread_task_runner.h"
+#include "base/timer/timer.h"
 #include "media/audio/audio_debug_file_writer.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager_base.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_parameters.h"
+#include "media/base/media_switches.h"
 
 // An AudioInputController controls an AudioInputStream and records data
 // from this input stream. The two main methods are Record() and Close() and
@@ -100,11 +104,17 @@ class MEDIA_EXPORT AudioInputController
   // following methods are all called on the audio thread.
   class MEDIA_EXPORT EventHandler {
    public:
-    virtual void OnCreated(AudioInputController* controller) = 0;
+    // The initial "muted" state of the underlying stream is sent along with the
+    // OnCreated callback, to avoid the stream being treated as unmuted until an
+    // OnMuted callback has had time to be processed.
+    virtual void OnCreated(AudioInputController* controller,
+                           bool initially_muted) = 0;
     virtual void OnError(AudioInputController* controller,
                          ErrorCode error_code) = 0;
     virtual void OnLog(AudioInputController* controller,
                        const std::string& message) = 0;
+    // Called whenever the muted state of the underlying stream changes.
+    virtual void OnMuted(AudioInputController* controller, bool is_muted) = 0;
 
    protected:
     virtual ~EventHandler() {}
@@ -161,7 +171,6 @@ class MEDIA_EXPORT AudioInputController
   // The audio device will be created on the audio thread, and when that is
   // done, the event handler will receive an OnCreated() call from that same
   // thread. |user_input_monitor| is used for typing detection and can be NULL.
-  // |file_task_runner| is used for debug recordings.
   // TODO(grunell): Move handling of debug recording to AudioManager.
   static scoped_refptr<AudioInputController> Create(
       AudioManager* audio_manager,
@@ -171,14 +180,13 @@ class MEDIA_EXPORT AudioInputController
       const AudioParameters& params,
       const std::string& device_id,
       // External synchronous writer for audio controller.
-      bool agc_is_enabled,
-      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner);
+      bool agc_is_enabled);
 
   // Factory method for creating an AudioInputController with an existing
   // |stream|. The stream will be opened on the audio thread, and when that is
   // done, the event  handler will receive an OnCreated() call from that same
   // thread. |user_input_monitor| is used for typing detection and can be NULL.
-  // |file_task_runner| and |params| are used for debug recordings.
+  // |params| is used for debug recordings.
   static scoped_refptr<AudioInputController> CreateForStream(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       EventHandler* event_handler,
@@ -186,7 +194,6 @@ class MEDIA_EXPORT AudioInputController
       // External synchronous writer for audio controller.
       SyncWriter* sync_writer,
       UserInputMonitor* user_input_monitor,
-      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
       const AudioParameters& params);
 
   // Starts recording using the created audio input stream.
@@ -201,7 +208,7 @@ class MEDIA_EXPORT AudioInputController
   // It is safe to call this method more than once. Calls after the first one
   // will have no effect.
   // This method trampolines to the audio thread.
-  virtual void Close(const base::Closure& closed_task);
+  virtual void Close(base::OnceClosure closed_task);
 
   // Sets the capture volume of the input stream. The value 0.0 corresponds
   // to muted and 1.0 to maximum volume.
@@ -256,14 +263,12 @@ class MEDIA_EXPORT AudioInputController
   };
 #endif
 
-  AudioInputController(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      EventHandler* handler,
-      SyncWriter* sync_writer,
-      UserInputMonitor* user_input_monitor,
-      const AudioParameters& params,
-      StreamType type,
-      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner);
+  AudioInputController(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+                       EventHandler* handler,
+                       SyncWriter* sync_writer,
+                       UserInputMonitor* user_input_monitor,
+                       const AudioParameters& params,
+                       StreamType type);
   virtual ~AudioInputController();
 
   const scoped_refptr<base::SingleThreadTaskRunner>& GetTaskRunnerForTesting()
@@ -301,13 +306,12 @@ class MEDIA_EXPORT AudioInputController
   // Logs whether an error was encountered suring the stream.
   void LogCallbackError();
 
+#if BUILDFLAG(ENABLE_WEBRTC)
   // Enable and disable debug recording of audio input. Called on the audio
   // thread.
   void DoEnableDebugRecording(const base::FilePath& file_name);
   void DoDisableDebugRecording();
-
-  // Called on the audio thread.
-  void WriteInputDataForDebugging(std::unique_ptr<AudioBus> data);
+#endif
 
   // Called by the stream with log messages.
   void LogMessage(const std::string& message);
@@ -326,6 +330,8 @@ class MEDIA_EXPORT AudioInputController
                        double volume,
                        float* average_power_dbfs,
                        int* mic_volume_percent);
+
+  void CheckMutedState();
 
   static StreamType ParamsToStreamType(const AudioParameters& params);
 
@@ -371,8 +377,13 @@ class MEDIA_EXPORT AudioInputController
   // Time when the stream started recording.
   base::TimeTicks stream_create_time_;
 
+  bool is_muted_ = false;
+  base::RepeatingTimer check_muted_state_timer_;
+
+#if BUILDFLAG(ENABLE_WEBRTC)
   // Used for audio debug recordings. Accessed on audio thread.
-  const std::unique_ptr<AudioDebugFileWriter> debug_writer_;
+  AudioDebugRecordingHelper debug_recording_helper_;
+#endif
 
   class AudioCallback;
   // Holds a pointer to the callback object that receives audio data from

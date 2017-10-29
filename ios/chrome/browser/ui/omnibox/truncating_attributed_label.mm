@@ -6,8 +6,11 @@
 
 #include <algorithm>
 
-#include "base/mac/objc_property_releaser.h"
 #include "base/mac/scoped_cftyperef.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 @interface OmniboxPopupTruncatingLabel ()
 - (void)setup;
@@ -16,12 +19,11 @@
 
 @implementation OmniboxPopupTruncatingLabel {
   // Gradient used to create fade effect. Changes based on view.frame size.
-  base::scoped_nsobject<UIImage> gradient_;
-
-  base::mac::ObjCPropertyReleaser propertyReleaser_OmniboxPopupTruncatingLabel_;
+  UIImage* gradient_;
 }
 
 @synthesize truncateMode = truncateMode_;
+@synthesize displayAsURL = displayAsURL_;
 
 - (void)setup {
   self.backgroundColor = [UIColor clearColor];
@@ -31,8 +33,6 @@
 - (id)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
   if (self) {
-    propertyReleaser_OmniboxPopupTruncatingLabel_.Init(
-        self, [OmniboxPopupTruncatingLabel class]);
     self.lineBreakMode = NSLineBreakByClipping;
     [self setup];
   }
@@ -49,9 +49,9 @@
 
   // Cache the fade gradient when the frame changes.
   if (!CGRectIsEmpty(frame) &&
-      (!gradient_.get() || !CGSizeEqualToSize([gradient_ size], frame.size))) {
+      (!gradient_ || !CGSizeEqualToSize([gradient_ size], frame.size))) {
     CGRect rect = CGRectMake(0, 0, frame.size.width, frame.size.height);
-    gradient_.reset([[self getLinearGradient:rect] retain]);
+    gradient_ = [self getLinearGradient:rect];
   }
 }
 
@@ -66,11 +66,15 @@
   // Add the specified line break and alignment attributes to attributedText and
   // draw the result.
   NSMutableAttributedString* attributedString =
-      [[self.attributedText mutableCopy] autorelease];
+      [self.attributedText mutableCopy];
   NSMutableParagraphStyle* textStyle =
-      [[[NSParagraphStyle defaultParagraphStyle] mutableCopy] autorelease];
+      [[NSParagraphStyle defaultParagraphStyle] mutableCopy];
   textStyle.lineBreakMode = self.lineBreakMode;
   textStyle.alignment = self.textAlignment;
+  // URLs have their text direction set to to LTR (avoids RTL characters
+  // making the URL render from right to left, as per RFC 3987 Section 4.1).
+  if (self.displayAsURL)
+    textStyle.baseWritingDirection = NSWritingDirectionLeftToRight;
   [attributedString addAttribute:NSParagraphStyleAttributeName
                            value:textStyle
                            range:NSMakeRange(0, [self.text length])];
@@ -91,7 +95,7 @@
   }
 
   if (textAlignment != self.textAlignment)
-    gradient_.reset();
+    gradient_ = nil;
 
   [super setTextAlignment:textAlignment];
 }

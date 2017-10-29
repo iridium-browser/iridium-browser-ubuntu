@@ -4,9 +4,11 @@
 
 // Multiply-included message file, so no include guard.
 
+#include <stdint.h>
 #include <string>
 #include <vector>
 
+#include "components/safe_browsing/common/safebrowsing_types.h"
 #include "ipc/ipc_message_macros.h"
 #include "url/gurl.h"
 #include "url/ipc/url_param_traits.h"
@@ -16,7 +18,7 @@
 // A node is essentially a frame.
 IPC_STRUCT_BEGIN(SafeBrowsingHostMsg_ThreatDOMDetails_Node)
   // A unique ID for this node, unique to the current Render Frame.
-  IPC_STRUCT_MEMBER(int, node_id)
+  IPC_STRUCT_MEMBER(int32_t, node_id)
 
   // URL of this resource. Can be empty.
   IPC_STRUCT_MEMBER(GURL, url)
@@ -29,13 +31,21 @@ IPC_STRUCT_BEGIN(SafeBrowsingHostMsg_ThreatDOMDetails_Node)
   IPC_STRUCT_MEMBER(GURL, parent)
 
   // The unique ID of the parent node. Can be 0 if this is the top node.
-  IPC_STRUCT_MEMBER(int, parent_node_id)
+  IPC_STRUCT_MEMBER(int32_t, parent_node_id)
 
   // children of this node. Can be emtpy.
   IPC_STRUCT_MEMBER(std::vector<GURL>, children)
 
   // The unique IDs of the child nodes. Can be empty if there are no children.
-  IPC_STRUCT_MEMBER(std::vector<int>, child_node_ids)
+  IPC_STRUCT_MEMBER(std::vector<int32_t>, child_node_ids)
+
+  // The node's attributes, as a collection of name-value pairs.
+  IPC_STRUCT_MEMBER(std::vector<safe_browsing::AttributeNameValue>, attributes)
+
+  // If this node represents a frame or iframe, then this field is set to the
+  // routing ID of the local or remote frame in this renderer process that is
+  // responsible for rendering the contents of this frame (to handle OOPIFs).
+  IPC_STRUCT_MEMBER(int32_t, child_frame_routing_id)
 IPC_STRUCT_END()
 
 // SafeBrowsing client-side detection messages sent from the renderer to the

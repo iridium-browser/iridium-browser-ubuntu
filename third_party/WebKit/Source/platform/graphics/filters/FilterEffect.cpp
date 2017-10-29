@@ -30,137 +30,150 @@
 namespace blink {
 
 FilterEffect::FilterEffect(Filter* filter)
-    : m_filter(filter),
-      m_clipsToBounds(true),
-      m_originTainted(false),
-      m_operatingColorSpace(ColorSpaceLinearRGB) {
-  ASSERT(m_filter);
+    : filter_(filter),
+      clips_to_bounds_(true),
+      origin_tainted_(false),
+      operating_interpolation_space_(kInterpolationSpaceLinear) {
+  DCHECK(filter_);
 }
 
 FilterEffect::~FilterEffect() {}
 
 DEFINE_TRACE(FilterEffect) {
-  visitor->trace(m_inputEffects);
-  visitor->trace(m_filter);
+  visitor->Trace(input_effects_);
+  visitor->Trace(filter_);
 }
 
-FloatRect FilterEffect::absoluteBounds() const {
-  FloatRect computedBounds = getFilter()->filterRegion();
-  if (!filterPrimitiveSubregion().isEmpty())
-    computedBounds.intersect(filterPrimitiveSubregion());
-  return getFilter()->mapLocalRectToAbsoluteRect(computedBounds);
+FloatRect FilterEffect::AbsoluteBounds() const {
+  FloatRect computed_bounds = GetFilter()->FilterRegion();
+  if (!FilterPrimitiveSubregion().IsEmpty())
+    computed_bounds.Intersect(FilterPrimitiveSubregion());
+  return GetFilter()->MapLocalRectToAbsoluteRect(computed_bounds);
 }
 
-FloatRect FilterEffect::mapInputs(const FloatRect& rect) const {
-  if (!m_inputEffects.size()) {
-    if (clipsToBounds())
-      return absoluteBounds();
+FloatRect FilterEffect::MapInputs(const FloatRect& rect) const {
+  if (!input_effects_.size()) {
+    if (ClipsToBounds())
+      return AbsoluteBounds();
     return rect;
   }
-  FloatRect inputUnion;
-  for (const auto& effect : m_inputEffects)
-    inputUnion.unite(effect->mapRect(rect));
-  return inputUnion;
+  FloatRect input_union;
+  for (const auto& effect : input_effects_)
+    input_union.Unite(effect->MapRect(rect));
+  return input_union;
 }
 
-FloatRect FilterEffect::mapEffect(const FloatRect& rect) const {
+FloatRect FilterEffect::MapEffect(const FloatRect& rect) const {
   return rect;
 }
 
-FloatRect FilterEffect::applyBounds(const FloatRect& rect) const {
+FloatRect FilterEffect::ApplyBounds(const FloatRect& rect) const {
   // Filters in SVG clip to primitive subregion, while CSS doesn't.
-  if (!clipsToBounds())
+  if (!ClipsToBounds())
     return rect;
-  FloatRect bounds = absoluteBounds();
-  if (affectsTransparentPixels())
+  FloatRect bounds = AbsoluteBounds();
+  if (AffectsTransparentPixels())
     return bounds;
-  return intersection(rect, bounds);
+  return Intersection(rect, bounds);
 }
 
-FloatRect FilterEffect::mapRect(const FloatRect& rect) const {
-  FloatRect result = mapInputs(rect);
-  result = mapEffect(result);
-  return applyBounds(result);
+FloatRect FilterEffect::MapRect(const FloatRect& rect) const {
+  FloatRect result = MapInputs(rect);
+  result = MapEffect(result);
+  return ApplyBounds(result);
 }
 
-FilterEffect* FilterEffect::inputEffect(unsigned number) const {
-  SECURITY_DCHECK(number < m_inputEffects.size());
-  return m_inputEffects.at(number).get();
+FilterEffect* FilterEffect::InputEffect(unsigned number) const {
+  SECURITY_DCHECK(number < input_effects_.size());
+  return input_effects_.at(number).Get();
 }
 
-void FilterEffect::clearResult() {
+void FilterEffect::DisposeImageFilters() {
   for (int i = 0; i < 4; i++)
-    m_imageFilters[i] = nullptr;
+    image_filters_[i] = nullptr;
 }
 
-Color FilterEffect::adaptColorToOperatingColorSpace(const Color& deviceColor) {
+void FilterEffect::DisposeImageFiltersRecursive() {
+  if (!HasImageFilter())
+    return;
+  DisposeImageFilters();
+  for (auto& effect : input_effects_)
+    effect->DisposeImageFiltersRecursive();
+}
+
+Color FilterEffect::AdaptColorToOperatingInterpolationSpace(
+    const Color& device_color) {
   // |deviceColor| is assumed to be DeviceRGB.
-  return ColorSpaceUtilities::convertColor(deviceColor, operatingColorSpace());
+  return InterpolationSpaceUtilities::ConvertColor(
+      device_color, OperatingInterpolationSpace());
 }
 
-TextStream& FilterEffect::externalRepresentation(TextStream& ts, int) const {
+TextStream& FilterEffect::ExternalRepresentation(TextStream& ts, int) const {
   // FIXME: We should dump the subRegions of the filter primitives here later.
   // This isn't possible at the moment, because we need more detailed
   // information from the target object.
   return ts;
 }
 
-sk_sp<SkImageFilter> FilterEffect::createImageFilter() {
+sk_sp<SkImageFilter> FilterEffect::CreateImageFilter() {
   return nullptr;
 }
 
-sk_sp<SkImageFilter> FilterEffect::createImageFilterWithoutValidation() {
-  return createImageFilter();
+sk_sp<SkImageFilter> FilterEffect::CreateImageFilterWithoutValidation() {
+  return CreateImageFilter();
 }
 
-bool FilterEffect::inputsTaintOrigin() const {
-  for (const Member<FilterEffect>& effect : m_inputEffects) {
-    if (effect->originTainted())
+bool FilterEffect::InputsTaintOrigin() const {
+  for (const Member<FilterEffect>& effect : input_effects_) {
+    if (effect->OriginTainted())
       return true;
   }
   return false;
 }
 
-sk_sp<SkImageFilter> FilterEffect::createTransparentBlack() const {
-  SkImageFilter::CropRect rect = getCropRect();
-  sk_sp<SkColorFilter> colorFilter =
+sk_sp<SkImageFilter> FilterEffect::CreateTransparentBlack() const {
+  SkImageFilter::CropRect rect = GetCropRect();
+  sk_sp<SkColorFilter> color_filter =
       SkColorFilter::MakeModeFilter(0, SkBlendMode::kClear);
-  return SkColorFilterImageFilter::Make(std::move(colorFilter), nullptr, &rect);
+  return SkColorFilterImageFilter::Make(std::move(color_filter), nullptr,
+                                        &rect);
 }
 
-SkImageFilter::CropRect FilterEffect::getCropRect() const {
-  if (!filterPrimitiveSubregion().isEmpty()) {
+SkImageFilter::CropRect FilterEffect::GetCropRect() const {
+  if (!FilterPrimitiveSubregion().IsEmpty()) {
     FloatRect rect =
-        getFilter()->mapLocalRectToAbsoluteRect(filterPrimitiveSubregion());
+        GetFilter()->MapLocalRectToAbsoluteRect(FilterPrimitiveSubregion());
     return SkImageFilter::CropRect(rect);
   } else {
     return SkImageFilter::CropRect(SkRect::MakeEmpty(), 0);
   }
 }
 
-static int getImageFilterIndex(ColorSpace colorSpace,
-                               bool requiresPMColorValidation) {
+static int GetImageFilterIndex(InterpolationSpace interpolation_space,
+                               bool requires_pm_color_validation) {
   // Map the (colorspace, bool) tuple to an integer index as follows:
   // 0 == linear colorspace, no PM validation
   // 1 == device colorspace, no PM validation
   // 2 == linear colorspace, PM validation
   // 3 == device colorspace, PM validation
-  return (colorSpace == ColorSpaceLinearRGB ? 0x1 : 0x0) |
-         (requiresPMColorValidation ? 0x2 : 0x0);
+  return (interpolation_space == kInterpolationSpaceLinear ? 0x1 : 0x0) |
+         (requires_pm_color_validation ? 0x2 : 0x0);
 }
 
-SkImageFilter* FilterEffect::getImageFilter(
-    ColorSpace colorSpace,
-    bool requiresPMColorValidation) const {
-  int index = getImageFilterIndex(colorSpace, requiresPMColorValidation);
-  return m_imageFilters[index].get();
+SkImageFilter* FilterEffect::GetImageFilter(
+    InterpolationSpace interpolation_space,
+    bool requires_pm_color_validation) const {
+  int index =
+      GetImageFilterIndex(interpolation_space, requires_pm_color_validation);
+  return image_filters_[index].get();
 }
 
-void FilterEffect::setImageFilter(ColorSpace colorSpace,
-                                  bool requiresPMColorValidation,
-                                  sk_sp<SkImageFilter> imageFilter) {
-  int index = getImageFilterIndex(colorSpace, requiresPMColorValidation);
-  m_imageFilters[index] = std::move(imageFilter);
+void FilterEffect::SetImageFilter(InterpolationSpace interpolation_space,
+                                  bool requires_pm_color_validation,
+                                  sk_sp<SkImageFilter> image_filter) {
+  int index =
+      GetImageFilterIndex(interpolation_space, requires_pm_color_validation);
+  image_filters_[index] = std::move(image_filter);
 }
 
 }  // namespace blink

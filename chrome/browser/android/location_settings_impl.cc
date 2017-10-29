@@ -17,11 +17,21 @@ LocationSettingsImpl::LocationSettingsImpl() {}
 
 LocationSettingsImpl::~LocationSettingsImpl() {}
 
-bool LocationSettingsImpl::CanSitesRequestLocationPermission(
+bool LocationSettingsImpl::HasAndroidLocationPermission() {
+  JNIEnv* env = AttachCurrentThread();
+  return Java_LocationSettings_hasAndroidLocationPermission(env);
+}
+
+bool LocationSettingsImpl::CanPromptForAndroidLocationPermission(
     content::WebContents* web_contents) {
   JNIEnv* env = AttachCurrentThread();
-  return Java_LocationSettings_canSitesRequestLocationPermission(
+  return Java_LocationSettings_canPromptForAndroidLocationPermission(
       env, web_contents->GetJavaWebContents());
+}
+
+bool LocationSettingsImpl::IsSystemLocationSettingEnabled() {
+  JNIEnv* env = AttachCurrentThread();
+  return Java_LocationSettings_isSystemLocationSettingEnabled(env);
 }
 
 bool LocationSettingsImpl::CanPromptToEnableSystemLocationSetting() {
@@ -56,8 +66,4 @@ static void OnLocationSettingsDialogOutcome(
   // Destroy the callback whose ownership was transferred in
   // PromptToEnableSystemLocationSetting.
   delete callback;
-}
-
-bool LocationSettingsImpl::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }

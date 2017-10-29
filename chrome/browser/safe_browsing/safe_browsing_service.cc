@@ -18,7 +18,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
@@ -36,28 +35,20 @@
 #include "chrome/common/safe_browsing/file_type_policies.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/browser/safe_browsing_url_request_context_getter.h"
 #include "components/safe_browsing/common/safebrowsing_constants.h"
 #include "components/safe_browsing/common/safebrowsing_switches.h"
-#include "components/safe_browsing/password_protection/password_protection_service.h"
+#include "components/safe_browsing/triggers/trigger_manager.h"
 #include "components/safe_browsing_db/database_manager.h"
 #include "components/safe_browsing_db/v4_feature_list.h"
 #include "components/safe_browsing_db/v4_get_hash_protocol_manager.h"
 #include "components/safe_browsing_db/v4_local_database_manager.h"
-#include "components/user_prefs/tracked/tracked_preference_validation_delegate.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/resource_request_info.h"
 #include "google_apis/google_api_keys.h"
-#include "net/cookies/cookie_store.h"
-#include "net/extras/sqlite/cookie_crypto_delegate.h"
-#include "net/extras/sqlite/sqlite_channel_id_store.h"
-#include "net/http/http_network_layer.h"
-#include "net/http/http_transaction_factory.h"
-#include "net/ssl/channel_id_service.h"
-#include "net/ssl/default_channel_id_store.h"
-#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/preferences/public/interfaces/tracked_preference_validation_delegate.mojom.h"
 
 #if defined(OS_WIN)
 #include "chrome/installer/util/browser_distribution.h"
@@ -79,176 +70,12 @@
 #include "chrome/browser/safe_browsing/incident_reporting/resource_request_detector.h"
 #include "chrome/browser/safe_browsing/incident_reporting/variations_seed_signature_analyzer.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
+#include "components/safe_browsing/password_protection/password_protection_service.h"
 #endif
 
 using content::BrowserThread;
 
 namespace safe_browsing {
-
-namespace {
-
-// Filename suffix for the cookie database.
-const base::FilePath::CharType kCookiesFile[] = FILE_PATH_LITERAL(" Cookies");
-const base::FilePath::CharType kChannelIDFile[] =
-    FILE_PATH_LITERAL(" Channel IDs");
-
-// The default URL prefix where browser fetches chunk updates, hashes,
-// and reports safe browsing hits and malware details.
-const char kSbDefaultURLPrefix[] =
-    "https://safebrowsing.google.com/safebrowsing";
-
-// The backup URL prefix used when there are issues establishing a connection
-// with the server at the primary URL.
-const char kSbBackupConnectErrorURLPrefix[] =
-    "https://alt1-safebrowsing.google.com/safebrowsing";
-
-// The backup URL prefix used when there are HTTP-specific issues with the
-// server at the primary URL.
-const char kSbBackupHttpErrorURLPrefix[] =
-    "https://alt2-safebrowsing.google.com/safebrowsing";
-
-// The backup URL prefix used when there are local network specific issues.
-const char kSbBackupNetworkErrorURLPrefix[] =
-    "https://alt3-safebrowsing.google.com/safebrowsing";
-
-base::FilePath CookieFilePath() {
-  return base::FilePath(
-      SafeBrowsingService::GetBaseFilename().value() + kCookiesFile);
-}
-
-base::FilePath ChannelIDFilePath() {
-  return base::FilePath(SafeBrowsingService::GetBaseFilename().value() +
-                        kChannelIDFile);
-}
-
-}  // namespace
-
-class SafeBrowsingURLRequestContextGetter
-    : public net::URLRequestContextGetter {
- public:
-  explicit SafeBrowsingURLRequestContextGetter(
-      scoped_refptr<net::URLRequestContextGetter> system_context_getter);
-
-  // Implementation for net::UrlRequestContextGetter.
-  net::URLRequestContext* GetURLRequestContext() override;
-  scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
-      const override;
-
-  // Shuts down any pending requests using the getter, and sets |shut_down_| to
-  // true.
-  void ServiceShuttingDown();
-
-  // Disables QUIC. This should not be necessary anymore when
-  // http://crbug.com/678653 is implemented.
-  void DisableQuicOnIOThread();
-
- protected:
-  ~SafeBrowsingURLRequestContextGetter() override;
-
- private:
-  bool shut_down_;
-
-  scoped_refptr<net::URLRequestContextGetter> system_context_getter_;
-
-  std::unique_ptr<net::CookieStore> safe_browsing_cookie_store_;
-
-  std::unique_ptr<net::URLRequestContext> safe_browsing_request_context_;
-
-  scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
-
-  std::unique_ptr<net::ChannelIDService> channel_id_service_;
-  std::unique_ptr<net::HttpNetworkSession> http_network_session_;
-  std::unique_ptr<net::HttpTransactionFactory> http_transaction_factory_;
-};
-
-SafeBrowsingURLRequestContextGetter::SafeBrowsingURLRequestContextGetter(
-    scoped_refptr<net::URLRequestContextGetter> system_context_getter)
-    : shut_down_(false),
-      system_context_getter_(system_context_getter),
-      network_task_runner_(
-          BrowserThread::GetTaskRunnerForThread(BrowserThread::IO)) {}
-
-net::URLRequestContext*
-SafeBrowsingURLRequestContextGetter::GetURLRequestContext() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  // Check if the service has been shut down.
-  if (shut_down_)
-    return nullptr;
-
-  if (!safe_browsing_request_context_) {
-    safe_browsing_request_context_.reset(new net::URLRequestContext());
-    // May be NULL in unit tests.
-    if (system_context_getter_) {
-      safe_browsing_request_context_->CopyFrom(
-          system_context_getter_->GetURLRequestContext());
-    }
-    safe_browsing_cookie_store_ =
-        content::CreateCookieStore(content::CookieStoreConfig(
-            CookieFilePath(),
-            content::CookieStoreConfig::EPHEMERAL_SESSION_COOKIES, nullptr,
-            nullptr));
-
-    safe_browsing_request_context_->set_cookie_store(
-        safe_browsing_cookie_store_.get());
-
-    // Set up the ChannelIDService
-    scoped_refptr<net::SQLiteChannelIDStore> channel_id_db =
-        new net::SQLiteChannelIDStore(
-            ChannelIDFilePath(),
-            BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
-                base::SequencedWorkerPool::GetSequenceToken()));
-    channel_id_service_.reset(new net::ChannelIDService(
-        new net::DefaultChannelIDStore(channel_id_db.get())));
-    safe_browsing_request_context_->set_channel_id_service(
-        channel_id_service_.get());
-    safe_browsing_cookie_store_->SetChannelIDServiceID(
-        channel_id_service_->GetUniqueID());
-
-    // Rebuild the HttpNetworkSession and the HttpTransactionFactory to use the
-    // new ChannelIDService.
-    if (safe_browsing_request_context_->http_transaction_factory() &&
-        safe_browsing_request_context_->http_transaction_factory()
-            ->GetSession()) {
-      net::HttpNetworkSession::Params safe_browsing_params =
-          safe_browsing_request_context_->http_transaction_factory()
-              ->GetSession()
-              ->params();
-      safe_browsing_params.channel_id_service = channel_id_service_.get();
-      http_network_session_.reset(
-          new net::HttpNetworkSession(safe_browsing_params));
-      http_transaction_factory_.reset(
-          new net::HttpNetworkLayer(http_network_session_.get()));
-      safe_browsing_request_context_->set_http_transaction_factory(
-          http_transaction_factory_.get());
-    }
-    safe_browsing_request_context_->set_name("safe_browsing");
-  }
-
-  return safe_browsing_request_context_.get();
-}
-
-scoped_refptr<base::SingleThreadTaskRunner>
-SafeBrowsingURLRequestContextGetter::GetNetworkTaskRunner() const {
-  return network_task_runner_;
-}
-
-void SafeBrowsingURLRequestContextGetter::ServiceShuttingDown() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  shut_down_ = true;
-  URLRequestContextGetter::NotifyContextShuttingDown();
-  safe_browsing_request_context_.reset();
-}
-
-void SafeBrowsingURLRequestContextGetter::DisableQuicOnIOThread() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  if (http_network_session_)
-    http_network_session_->DisableQuic();
-}
-
-SafeBrowsingURLRequestContextGetter::~SafeBrowsingURLRequestContextGetter() {}
 
 // static
 SafeBrowsingServiceFactory* SafeBrowsingService::factory_ = NULL;
@@ -262,7 +89,7 @@ class SafeBrowsingServiceFactoryImpl : public SafeBrowsingServiceFactory {
   }
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<SafeBrowsingServiceFactoryImpl>;
+  friend struct base::LazyInstanceTraitsBase<SafeBrowsingServiceFactoryImpl>;
 
   SafeBrowsingServiceFactoryImpl() { }
 
@@ -274,7 +101,8 @@ static base::LazyInstance<SafeBrowsingServiceFactoryImpl>::Leaky
 
 // static
 base::FilePath SafeBrowsingService::GetCookieFilePathForTesting() {
-  return CookieFilePath();
+  return base::FilePath(SafeBrowsingService::GetBaseFilename().value() +
+                        safe_browsing::kCookiesFile);
 }
 
 // static
@@ -315,8 +143,12 @@ void SafeBrowsingService::Initialize() {
   // This guarantees we'll log UMA metrics about its state.
   FileTypePolicies::GetInstance();
 
+  base::FilePath user_data_dir;
+  bool result = PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  DCHECK(result);
+
   url_request_context_getter_ = new SafeBrowsingURLRequestContextGetter(
-      g_browser_process->system_request_context());
+      g_browser_process->system_request_context(), user_data_dir);
 
   ui_manager_ = CreateUIManager();
 
@@ -324,40 +156,19 @@ void SafeBrowsingService::Initialize() {
     database_manager_ = CreateDatabaseManager();
   }
 
-  if (base::FeatureList::IsEnabled(
-    SafeBrowsingNavigationObserverManager::kDownloadAttribution)) {
-    navigation_observer_manager_ = new SafeBrowsingNavigationObserverManager();
-  }
-
-  // TODO(jialiul): When PasswordProtectionService does more than reporting UMA,
-  // we need to add finch trial to gate its functionality.
-  password_protection_service_ =
-      base::MakeUnique<PasswordProtectionService>(database_manager());
+  navigation_observer_manager_ = new SafeBrowsingNavigationObserverManager();
 
   services_delegate_->Initialize(v4_enabled_);
   services_delegate_->InitializeCsdService(url_request_context_getter_.get());
 
-  // Track the safe browsing preference of existing profiles.
-  // The SafeBrowsingService will be started if any existing profile has the
-  // preference enabled. It will also listen for updates to the preferences.
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  if (profile_manager) {
-    std::vector<Profile*> profiles = profile_manager->GetLoadedProfiles();
-    // TODO(felt): I believe this for-loop is dead code. Confirm this and
-    // remove in a future CL. See https://codereview.chromium.org/1341533002/
-    DCHECK_EQ(0u, profiles.size());
-    for (size_t i = 0; i < profiles.size(); ++i) {
-      if (profiles[i]->IsOffTheRecord())
-        continue;
-      AddPrefService(profiles[i]->GetPrefs());
-    }
-  }
+  // Needs to happen after |ui_manager_| is created.
+  CreateTriggerManager();
 
   // Track profile creation and destruction.
-  prefs_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CREATED,
-                       content::NotificationService::AllSources());
-  prefs_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                       content::NotificationService::AllSources());
+  profiles_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CREATED,
+                          content::NotificationService::AllSources());
+  profiles_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
+                          content::NotificationService::AllSources());
 
   // Register all the delayed analysis to the incident reporting service.
   RegisterAllDelayedAnalysis();
@@ -367,12 +178,12 @@ void SafeBrowsingService::ShutDown() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   shutdown_callback_list_.Notify();
 
+  // Remove Profile creation/destruction observers.
+  profiles_registrar_.RemoveAll();
+
   // Delete the PrefChangeRegistrars, whose dtors also unregister |this| as an
   // observer of the preferences.
   prefs_map_.clear();
-
-  // Remove Profile creation/destruction observers.
-  prefs_registrar_.RemoveAll();
 
   Stop(true);
 
@@ -384,8 +195,8 @@ void SafeBrowsingService::ShutDown() {
   // new requests from using it as well.
   BrowserThread::PostNonNestableTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&SafeBrowsingURLRequestContextGetter::ServiceShuttingDown,
-                 url_request_context_getter_));
+      base::BindOnce(&SafeBrowsingURLRequestContextGetter::ServiceShuttingDown,
+                     url_request_context_getter_));
 
   // Release the URLRequestContextGetter after passing it to the IOThread.  It
   // has to be released now rather than in the destructor because it can only
@@ -453,11 +264,17 @@ SafeBrowsingService::v4_local_database_manager() const {
   return services_delegate_->v4_local_database_manager();
 }
 
-PasswordProtectionService* SafeBrowsingService::password_protection_service() {
-  return password_protection_service_.get();
+TriggerManager* SafeBrowsingService::trigger_manager() const {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  return trigger_manager_.get();
 }
 
-std::unique_ptr<TrackedPreferenceValidationDelegate>
+PasswordProtectionService* SafeBrowsingService::GetPasswordProtectionService(
+    Profile* profile) const {
+  return services_delegate_->GetPasswordProtectionService(profile);
+}
+
+std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
 SafeBrowsingService::CreatePreferenceValidationDelegate(
     Profile* profile) const {
   return services_delegate_->CreatePreferenceValidationDelegate(profile);
@@ -482,7 +299,7 @@ void SafeBrowsingService::OnResourceRequest(const net::URLRequest* request) {
   ResourceRequestInfo info = ResourceRequestDetector::GetRequestInfo(request);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&SafeBrowsingService::ProcessResourceRequest, this, info));
+      base::BindOnce(&SafeBrowsingService::ProcessResourceRequest, this, info));
 #endif
 }
 
@@ -641,14 +458,14 @@ void SafeBrowsingService::Start() {
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&SafeBrowsingService::StartOnIOThread, this,
-                 base::RetainedRef(url_request_context_getter_)));
+      base::BindOnce(&SafeBrowsingService::StartOnIOThread, this,
+                     base::RetainedRef(url_request_context_getter_)));
 }
 
 void SafeBrowsingService::Stop(bool shutdown) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&SafeBrowsingService::StopOnIOThread, this, shutdown));
+      base::BindOnce(&SafeBrowsingService::StopOnIOThread, this, shutdown));
 }
 
 void SafeBrowsingService::Observe(int type,
@@ -658,6 +475,7 @@ void SafeBrowsingService::Observe(int type,
     case chrome::NOTIFICATION_PROFILE_CREATED: {
       DCHECK_CURRENTLY_ON(BrowserThread::UI);
       Profile* profile = content::Source<Profile>(source).ptr();
+      services_delegate_->CreatePasswordProtectionService(profile);
       if (!profile->IsOffTheRecord())
         AddPrefService(profile->GetPrefs());
       break;
@@ -665,6 +483,7 @@ void SafeBrowsingService::Observe(int type,
     case chrome::NOTIFICATION_PROFILE_DESTROYED: {
       DCHECK_CURRENTLY_ON(BrowserThread::UI);
       Profile* profile = content::Source<Profile>(source).ptr();
+      services_delegate_->RemovePasswordProtectionService(profile);
       if (!profile->IsOffTheRecord())
         RemovePrefService(profile->GetPrefs());
       break;
@@ -758,8 +577,8 @@ void SafeBrowsingService::SendSerializedDownloadReport(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&SafeBrowsingService::OnSendSerializedDownloadReport, this,
-                 report));
+      base::BindOnce(&SafeBrowsingService::OnSendSerializedDownloadReport, this,
+                     report));
 }
 
 void SafeBrowsingService::OnSendSerializedDownloadReport(
@@ -775,4 +594,8 @@ void SafeBrowsingService::ProcessResourceRequest(
   services_delegate_->ProcessResourceRequest(&request);
 }
 
+void SafeBrowsingService::CreateTriggerManager() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  trigger_manager_ = base::MakeUnique<TriggerManager>(ui_manager_.get());
+}
 }  // namespace safe_browsing

@@ -10,8 +10,9 @@
 
 #include "webrtc/voice_engine/test/auto_test/fakes/loudest_filter.h"
 
-#include "webrtc/base/checks.h"
+#include "webrtc/rtc_base/checks.h"
 
+namespace webrtc {
 namespace voetest {
 
 void LoudestFilter::RemoveTimeoutStreams(int64_t time_ms) {
@@ -78,4 +79,4 @@ bool LoudestFilter::ForwardThisPacket(const webrtc::RTPHeader& rtp_header) {
 }
 
 }  // namespace voetest
-
+}  // namespace webrtc

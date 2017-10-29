@@ -24,7 +24,9 @@ bool CreateAnonymousSharedMemory(const SharedMemoryCreateOptions& options,
 
 // Takes the outputs of CreateAnonymousSharedMemory and maps them properly to
 // |mapped_file| or |readonly_mapped_file|, depending on which one is populated.
-bool PrepareMapFile(ScopedFILE fp, ScopedFD readonly_fd, int* mapped_file,
+bool PrepareMapFile(ScopedFILE fp,
+                    ScopedFD readonly_fd,
+                    int* mapped_file,
                     int* readonly_mapped_file);
 #endif
 

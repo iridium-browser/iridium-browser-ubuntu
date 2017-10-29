@@ -14,7 +14,6 @@ namespace base {
 class DictionaryValue;
 class ListValue;
 class Value;
-using StringValue = Value;
 
 // All the functions below expect that the value for the given key in
 // the given dictionary equals the given expected value.
@@ -39,9 +38,7 @@ void ExpectDictStringValue(const std::string& expected_value,
                            const DictionaryValue& value,
                            const std::string& key);
 
-// Takes ownership of |actual|.
-void ExpectStringValue(const std::string& expected_str,
-                       StringValue* actual);
+void ExpectStringValue(const std::string& expected_str, const Value& actual);
 
 namespace test {
 

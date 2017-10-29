@@ -200,8 +200,7 @@ class ExistingUserControllerTest : public policy::DevicePolicyCrosBrowserTest {
   void RegisterUser(const std::string& user_id) {
     ListPrefUpdate users_pref(g_browser_process->local_state(),
                               "LoggedInUsers");
-    users_pref->AppendIfNotPresent(
-        base::MakeUnique<base::StringValue>(user_id));
+    users_pref->AppendIfNotPresent(base::MakeUnique<base::Value>(user_id));
   }
 
   // ExistingUserController private member accessors.
@@ -267,7 +266,7 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerTest, DISABLED_ExistingUserLogin) {
   profile_prepared_observer.Wait();
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ClearNotifications));
+      FROM_HERE, base::BindOnce(&ClearNotifications));
   content::RunAllPendingInMessageLoop();
 }
 
@@ -441,7 +440,7 @@ class ExistingUserControllerPublicSessionTest
       controller->current_screen()->Hide();
 
     if (LoginDisplayHost::default_host())
-      LoginDisplayHost::default_host()->Finalize();
+      LoginDisplayHost::default_host()->Finalize(base::OnceClosure());
     base::RunLoop().RunUntilIdle();
   }
 
@@ -669,8 +668,6 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerPublicSessionTest,
   user_context.SetKey(Key(kPassword));
   user_context.SetUserIDHash(user_context.GetAccountId().GetUserEmail());
   ExpectSuccessfulLogin(user_context);
-  EXPECT_CALL(*mock_login_display_host_, OnCompleteLogin())
-      .Times(1);
 
   existing_user_controller()->OnSigninScreenReady();
   SetAutoLoginPolicy(kPublicSessionUserEmail, kAutoLoginLongDelay);
@@ -785,6 +782,11 @@ class ExistingUserControllerActiveDirectoryTest
     ExistingUserControllerTest::SetUpInProcessBrowserTestFixture();
   }
 
+  void TearDownOnMainThread() override {
+    base::RunLoop().RunUntilIdle();
+    ExistingUserControllerTest::TearDownOnMainThread();
+  }
+
  protected:
   void ExpectLoginFailure() {
     EXPECT_CALL(*mock_login_display_, SetUIEnabled(false)).Times(2);
@@ -794,10 +796,10 @@ class ExistingUserControllerActiveDirectoryTest
         .Times(1);
     EXPECT_CALL(*mock_login_display_, SetUIEnabled(true)).Times(1);
   }
+
   void ExpectLoginSuccess() {
     EXPECT_CALL(*mock_login_display_, SetUIEnabled(false)).Times(2);
     EXPECT_CALL(*mock_login_display_, SetUIEnabled(true)).Times(1);
-    EXPECT_CALL(*mock_login_display_host_, OnCompleteLogin()).Times(1);
   }
 };
 
@@ -818,27 +820,34 @@ IN_PROC_BROWSER_TEST_F(ExistingUserControllerActiveDirectoryTest,
 
   profile_prepared_observer.Wait();
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ClearNotifications));
+      FROM_HERE, base::BindOnce(&ClearNotifications));
   content::RunAllPendingInMessageLoop();
 }
 
-// Tests that Active Directory offline login fails on the Active Directory
+// Tests that Active Directory offline login succeeds on the Active Directory
 // managed device.
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerActiveDirectoryTest,
-                       ActiveDirectoryOfflineLogin_Failure) {
-  ExpectLoginFailure();
+                       ActiveDirectoryOfflineLogin_Success) {
+  ExpectLoginSuccess();
   UserContext user_context(ad_account_id_);
   user_context.SetKey(Key(kPassword));
   user_context.SetUserIDHash(ad_account_id_.GetUserEmail());
   user_context.SetUserType(user_manager::UserType::USER_TYPE_ACTIVE_DIRECTORY);
+  content::WindowedNotificationObserver profile_prepared_observer(
+      chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
+      content::NotificationService::AllSources());
   existing_user_controller()->Login(user_context, SigninSpecifics());
+
+  profile_prepared_observer.Wait();
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&ClearNotifications));
+  content::RunAllPendingInMessageLoop();
 }
 
 // Tests that Gaia login fails on the Active Directory managed device.
 IN_PROC_BROWSER_TEST_F(ExistingUserControllerActiveDirectoryTest,
                        GAIAAccountLogin_Failure) {
   ExpectLoginFailure();
-  EXPECT_CALL(*mock_login_display_host_, OnCompleteLogin()).Times(1);
   UserContext user_context(gaia_account_id_);
   user_context.SetKey(Key(kPassword));
   user_context.SetUserIDHash(gaia_account_id_.GetUserEmail());

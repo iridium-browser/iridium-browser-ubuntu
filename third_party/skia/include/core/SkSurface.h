@@ -14,16 +14,17 @@
 
 class SkCanvas;
 class SkPaint;
+class GrBackendRenderTarget;
+class GrBackendSemaphore;
 class GrContext;
 class GrRenderTarget;
 
 /**
- *  SkSurface represents the backend/results of drawing to a canvas. For raster
- *  drawing, the surface will be pixels, but (for example) when drawing into
- *  a PDF or Picture canvas, the surface stores the recorded commands.
+ *  SkSurface is responsible for managing the pixels that a canvas draws into. The pixels can be
+ *  allocated either in CPU memory (a Raster surface) or on the GPU (a RenderTarget surface).
  *
- *  To draw into a canvas, first create the appropriate type of Surface, and
- *  then request the canvas from the surface.
+ *  SkSurface takes care of allocating a SkCanvas that will draw into the surface. Call
+ *  surface->getCanvas() to use that canvas (but don't delete it, it is owned by the surface).
  *
  *  SkSurface always has non-zero dimensions. If there is a request for a new surface, and either
  *  of the requested dimensions are zero, then NULL will be returned.
@@ -80,12 +81,13 @@ public:
     }
 
     /**
-     *  Used to wrap a pre-existing backend 3D API texture as a SkSurface. The kRenderTarget flag
-     *  must be set on GrBackendTextureDesc for this to succeed. Skia will not assume ownership
-     *  of the texture and the client must ensure the texture is valid for the lifetime of the
-     *  SkSurface.
+     *  Used to wrap a pre-existing backend 3D API texture as a SkSurface. Skia will not assume
+     *  ownership of the texture and the client must ensure the texture is valid for the lifetime
+     *  of the SkSurface. If sampleCnt > 0, then we will create an intermediate mssa surface which
+     *  we will use for rendering. We then resolve into the passed in texture.
      */
-    static sk_sp<SkSurface> MakeFromBackendTexture(GrContext*, const GrBackendTextureDesc&,
+    static sk_sp<SkSurface> MakeFromBackendTexture(GrContext*, const GrBackendTexture&,
+                                                   GrSurfaceOrigin origin, int sampleCnt,
                                                    sk_sp<SkColorSpace>, const SkSurfaceProps*);
 
     /**
@@ -98,6 +100,12 @@ public:
                                                         sk_sp<SkColorSpace>,
                                                         const SkSurfaceProps*);
 
+    static sk_sp<SkSurface> MakeFromBackendRenderTarget(GrContext*,
+                                                        const GrBackendRenderTarget&,
+                                                        GrSurfaceOrigin origin,
+                                                        sk_sp<SkColorSpace>,
+                                                        const SkSurfaceProps*);
+
     /**
      *  Used to wrap a pre-existing 3D API texture as a SkSurface. Skia will treat the texture as
      *  a rendering target only, but unlike NewFromBackendRenderTarget, Skia will manage and own
@@ -106,27 +114,21 @@ public:
      *  of the texture and the client must ensure the texture is valid for the lifetime of the
      *  SkSurface.
      */
-    static sk_sp<SkSurface> MakeFromBackendTextureAsRenderTarget(
-        GrContext*, const GrBackendTextureDesc&, sk_sp<SkColorSpace>, const SkSurfaceProps*);
+    static sk_sp<SkSurface> MakeFromBackendTextureAsRenderTarget(GrContext*,
+                                                                 const GrBackendTexture&,
+                                                                 GrSurfaceOrigin origin,
+                                                                 int sampleCnt,
+                                                                 sk_sp<SkColorSpace>,
+                                                                 const SkSurfaceProps*);
 
     /**
-     * Legacy versions of the above factories, without color space support. These create "legacy"
-     * surfaces that operate without gamma correction or color management.
+     * Legacy version of the above factory, without color space support. This creates a "legacy"
+     * surface that operate without gamma correction or color management.
      */
-    static sk_sp<SkSurface> MakeFromBackendTexture(GrContext* ctx, const GrBackendTextureDesc& desc,
-                                                   const SkSurfaceProps* props) {
-        return MakeFromBackendTexture(ctx, desc, nullptr, props);
-    }
-
     static sk_sp<SkSurface> MakeFromBackendRenderTarget(GrContext* ctx,
                                                         const GrBackendRenderTargetDesc& desc,
                                                         const SkSurfaceProps* props) {
         return MakeFromBackendRenderTarget(ctx, desc, nullptr, props);
-    }
-
-    static sk_sp<SkSurface> MakeFromBackendTextureAsRenderTarget(
-            GrContext* ctx, const GrBackendTextureDesc& desc, const SkSurfaceProps* props) {
-        return MakeFromBackendTextureAsRenderTarget(ctx, desc, nullptr, props);
     }
 
 
@@ -151,6 +153,12 @@ public:
         }
         return MakeRenderTarget(gr, b, info, 0, kBottomLeft_GrSurfaceOrigin, nullptr);
     }
+
+    /**
+     *  Returns a surface that stores no pixels. It can be drawn to via its canvas, but that
+     *  canvas does not draw anything. Calling makeImageSnapshot() will return nullptr.
+     */
+    static sk_sp<SkSurface> MakeNull(int width, int height);
 
     int width() const { return fWidth; }
     int height() const { return fHeight; }
@@ -250,11 +258,10 @@ public:
     /**
      *  Returns an image of the current state of the surface pixels up to this
      *  point. Subsequent changes to the surface (by drawing into its canvas)
-     *  will not be reflected in this image. If a copy must be made the Budgeted
-     *  parameter controls whether it counts against the resource budget
-     *  (currently for the gpu backend only).
+     *  will not be reflected in this image. For the GPU-backend, the budgeting
+     *  decision for the snapped image will match that of the surface.
      */
-    sk_sp<SkImage> makeImageSnapshot(SkBudgeted = SkBudgeted::kYes);
+    sk_sp<SkImage> makeImageSnapshot();
 
     /**
      *  Though the caller could get a snapshot image explicitly, and draw that,
@@ -301,8 +308,39 @@ public:
 
     /**
      * Issue any pending surface IO to the current backend 3D API and resolve any surface MSAA.
+     *
+     * The flush calls below are the new preferred way to flush calls to a surface, and this call
+     * will eventually be removed.
      */
     void prepareForExternalIO();
+
+    /**
+     * Issue any pending surface IO to the current backend 3D API
+     */
+    void flush();
+
+    /**
+     * Issue any pending surface IO to the current backend 3D API. After issuing all commands, we
+     * will issue numSemaphore semaphores for the gpu to signal. We will then fill in the array
+     * signalSemaphores with the info on the semaphores we submitted. The client is reposonsible for
+     * allocating enough space in signalSemaphores to handle numSemaphores of GrBackendSemaphores.
+     * The client will also take ownership of the returned underlying backend semaphores.
+     *
+     * If this call returns false, the GPU backend will not have created or added any semaphores to
+     * signal. Thus the array of semaphores will remain uninitialized. However, we will still flush
+     * any pending surface IO.
+     */
+    bool flushAndSignalSemaphores(int numSemaphores, GrBackendSemaphore* signalSemaphores);
+
+    /**
+     * Inserts a list of GPU semaphores that the current backend 3D API must wait on before
+     * executing any more commands on the GPU for this surface. Skia will take ownership of the
+     * underlying semaphores and delete them once they have been signaled and waited on.
+     *
+     * If this call returns false, then the GPU backend will not wait on any passed in semaphores,
+     * and the client will still own the semaphores.
+     */
+    bool wait(int numSemaphores, const GrBackendSemaphore* waitSemaphores);
 
 protected:
     SkSurface(int width, int height, const SkSurfaceProps*);

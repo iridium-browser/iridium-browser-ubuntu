@@ -24,6 +24,7 @@
 #include "google_apis/gaia/gaia_constants.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_status.h"
@@ -40,9 +41,9 @@ const char kSyncDataTypeId[] = "X-Sync-Data-Type-Id";
 namespace syncer {
 
 // Encapsulates all the state associated with a single upload.
-class AttachmentUploaderImpl::UploadState : public net::URLFetcherDelegate,
-                                            public OAuth2TokenService::Consumer,
-                                            public base::NonThreadSafe {
+class AttachmentUploaderImpl::UploadState
+    : public net::URLFetcherDelegate,
+      public OAuth2TokenService::Consumer {
  public:
   // Construct an UploadState.
   //
@@ -116,6 +117,8 @@ class AttachmentUploaderImpl::UploadState : public net::URLFetcherDelegate,
   std::unique_ptr<OAuth2TokenServiceRequest> access_token_request_;
   ModelType model_type_;
 
+  SEQUENCE_CHECKER(sequence_checker_);
+
   DISALLOW_COPY_AND_ASSIGN(UploadState);
 };
 
@@ -155,25 +158,25 @@ AttachmentUploaderImpl::UploadState::UploadState(
 AttachmentUploaderImpl::UploadState::~UploadState() {}
 
 bool AttachmentUploaderImpl::UploadState::IsStopped() const {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return is_stopped_;
 }
 
 void AttachmentUploaderImpl::UploadState::AddUserCallback(
     const UploadCallback& user_callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!is_stopped_);
   user_callbacks_.push_back(user_callback);
 }
 
 const Attachment& AttachmentUploaderImpl::UploadState::GetAttachment() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return attachment_;
 }
 
 void AttachmentUploaderImpl::UploadState::OnURLFetchComplete(
     const net::URLFetcher* source) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (is_stopped_) {
     return;
   }
@@ -206,7 +209,7 @@ void AttachmentUploaderImpl::UploadState::OnGetTokenSuccess(
     const OAuth2TokenService::Request* request,
     const std::string& access_token,
     const base::Time& expiration_time) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (is_stopped_) {
     return;
   }
@@ -214,7 +217,35 @@ void AttachmentUploaderImpl::UploadState::OnGetTokenSuccess(
   DCHECK_EQ(access_token_request_.get(), request);
   access_token_request_.reset();
   access_token_ = access_token;
-  fetcher_ = net::URLFetcher::Create(upload_url_, net::URLFetcher::POST, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("sync_attachment_uploader", R"(
+        semantics {
+          sender: "Chrome Sync"
+          description:
+            "Chrome Sync synchronizes profile data between Chromium clients "
+            "and Google for a given user account."
+          trigger:
+            "User makes a change to syncable profile data after enabling sync "
+            "on the device."
+          data:
+            "The device and user identifiers, along with any profile data that "
+            "is changing."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "Users can disable Chrome Sync by going into the profile settings "
+            "and choosing to Sign Out."
+          chrome_policy {
+            SyncDisabled {
+              policy_options {mode: MANDATORY}
+              SyncDisabled: true
+            }
+          }
+        })");
+  fetcher_ = net::URLFetcher::Create(upload_url_, net::URLFetcher::POST, this,
+                                     traffic_annotation);
   ConfigureURLFetcherCommon(fetcher_.get(), access_token_, raw_store_birthday_,
                             model_type_, url_request_context_getter_.get());
   data_use_measurement::DataUseUserData::AttachToFetcher(
@@ -237,7 +268,7 @@ void AttachmentUploaderImpl::UploadState::OnGetTokenSuccess(
 void AttachmentUploaderImpl::UploadState::OnGetTokenFailure(
     const OAuth2TokenService::Request* request,
     const GoogleServiceAuthError& error) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (is_stopped_) {
     return;
   }
@@ -290,7 +321,7 @@ AttachmentUploaderImpl::AttachmentUploaderImpl(
       raw_store_birthday_(store_birthday),
       model_type_(model_type),
       weak_ptr_factory_(this) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!account_id.empty());
   DCHECK(!scopes.empty());
   DCHECK(token_service_provider_.get());
@@ -298,12 +329,12 @@ AttachmentUploaderImpl::AttachmentUploaderImpl(
 }
 
 AttachmentUploaderImpl::~AttachmentUploaderImpl() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
 void AttachmentUploaderImpl::UploadAttachment(const Attachment& attachment,
                                               const UploadCallback& callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   const AttachmentId attachment_id = attachment.GetId();
   const std::string unique_id = attachment_id.GetProto().unique_id();
   DCHECK(!unique_id.empty());

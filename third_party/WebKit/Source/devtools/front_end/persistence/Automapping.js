@@ -1,7 +1,9 @@
 // Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 /**
+ * @implements {Persistence.MappingSystem}
  * @unrestricted
  */
 Persistence.Automapping = class {
@@ -34,6 +36,8 @@ Persistence.Automapping = class {
       this._workspace.addEventListener(
           Workspace.Workspace.Events.UISourceCodeRemoved,
           event => this._onUISourceCodeRemoved(/** @type {!Workspace.UISourceCode} */ (event.data))),
+      this._workspace.addEventListener(
+          Workspace.Workspace.Events.UISourceCodeRenamed, this._onUISourceCodeRenamed, this),
       this._workspace.addEventListener(
           Workspace.Workspace.Events.ProjectAdded,
           event => this._onProjectAdded(/** @type {!Workspace.Project} */ (event.data)), this),
@@ -132,6 +136,26 @@ Persistence.Automapping = class {
   }
 
   /**
+   * @param {!Common.Event} event
+   */
+  _onUISourceCodeRenamed(event) {
+    var uiSourceCode = /** @type {!Workspace.UISourceCode} */ (event.data.uiSourceCode);
+    var oldURL = /** @type {string} */ (event.data.oldURL);
+    if (uiSourceCode.project().type() !== Workspace.projectTypes.FileSystem)
+      return;
+
+    this._filesIndex.removePath(oldURL);
+    this._fileSystemUISourceCodes.delete(oldURL);
+    var binding = uiSourceCode[Persistence.Automapping._binding];
+    if (binding)
+      this._unbindNetwork(binding.network);
+
+    this._filesIndex.addPath(uiSourceCode.url());
+    this._fileSystemUISourceCodes.set(uiSourceCode.url(), uiSourceCode);
+    this._scheduleSweep();
+  }
+
+  /**
    * @param {!Workspace.UISourceCode} networkSourceCode
    */
   _bindNetwork(networkSourceCode) {
@@ -149,7 +173,7 @@ Persistence.Automapping = class {
       if (networkSourceCode[Persistence.Automapping._processingPromise] !== createBindingPromise)
         return;
       networkSourceCode[Persistence.Automapping._processingPromise] = null;
-      if (!binding) {
+      if (!binding || this._disposed) {
         this._onBindingFailedForTest();
         return;
       }
@@ -276,6 +300,18 @@ Persistence.Automapping = class {
       var contentMatches = !networkMetadata.contentSize || fileMetadata.contentSize === networkMetadata.contentSize;
       return timeMatches && contentMatches;
     });
+  }
+
+  /**
+   * @override
+   */
+  dispose() {
+    if (this._disposed)
+      return;
+    this._disposed = true;
+    Common.EventTarget.removeEventListeners(this._eventListeners);
+    for (var binding of this._bindings.valuesArray())
+      this._unbindNetwork(binding.network);
   }
 };
 

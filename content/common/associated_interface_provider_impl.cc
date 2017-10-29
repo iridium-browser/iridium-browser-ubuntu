@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include "content/common/associated_interface_provider_impl.h"
+#include "base/callback.h"
+#include "base/run_loop.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 
 namespace content {
@@ -13,7 +15,7 @@ class AssociatedInterfaceProviderImpl::LocalProvider
   explicit LocalProvider(mojom::AssociatedInterfaceProviderAssociatedPtr* proxy)
       : associated_interface_provider_binding_(this) {
     associated_interface_provider_binding_.Bind(
-        mojo::MakeRequestForTesting(proxy));
+        mojo::MakeIsolatedRequest(proxy));
   }
 
   ~LocalProvider() override {}
@@ -57,9 +59,8 @@ AssociatedInterfaceProviderImpl::~AssociatedInterfaceProviderImpl() {}
 void AssociatedInterfaceProviderImpl::GetInterface(
     const std::string& name,
     mojo::ScopedInterfaceEndpointHandle handle) {
-  mojom::AssociatedInterfaceAssociatedRequest request;
-  request.Bind(std::move(handle));
-  return proxy_->GetAssociatedInterface(name, std::move(request));
+  proxy_->GetAssociatedInterface(
+      name, mojom::AssociatedInterfaceAssociatedRequest(std::move(handle)));
 }
 
 void AssociatedInterfaceProviderImpl::OverrideBinderForTesting(

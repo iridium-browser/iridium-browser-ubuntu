@@ -14,6 +14,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "components/viz/common/surfaces/local_surface_id_allocator.h"
 #include "services/ui/common/types.h"
 #include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "services/ui/public/interfaces/window_tree_host.mojom.h"
@@ -27,6 +28,11 @@
 #include "services/ui/ws/user_id_tracker_observer.h"
 #include "services/ui/ws/window_manager_window_tree_factory_set_observer.h"
 #include "ui/display/display.h"
+#include "ui/events/event_sink.h"
+
+namespace display {
+struct ViewportMetrics;
+}
 
 namespace ui {
 namespace ws {
@@ -34,7 +40,6 @@ namespace ws {
 class DisplayBinding;
 class DisplayManager;
 class FocusController;
-struct PlatformDisplayInitParams;
 class WindowManagerDisplayRoot;
 class WindowServer;
 class WindowTree;
@@ -45,8 +50,7 @@ class DisplayTestApi;
 
 // Displays manages the state associated with a single display. Display has a
 // single root window whose children are the roots for a per-user
-// WindowManager. Display is configured in two distinct
-// ways:
+// WindowManager. Display is configured in two distinct ways:
 // . with a DisplayBinding. In this mode there is only ever one WindowManager
 //   for the display, which comes from the client that created the
 //   Display.
@@ -57,25 +61,31 @@ class Display : public PlatformDisplayDelegate,
                 public FocusControllerObserver,
                 public FocusControllerDelegate,
                 public UserIdTrackerObserver,
-                public WindowManagerWindowTreeFactorySetObserver {
+                public WindowManagerWindowTreeFactorySetObserver,
+                public EventSink {
  public:
   explicit Display(WindowServer* window_server);
   ~Display() override;
 
   // Initializes the display root ServerWindow and PlatformDisplay. Adds this to
   // DisplayManager as a pending display, until accelerated widget is available.
-  void Init(const PlatformDisplayInitParams& init_params,
+  void Init(const display::ViewportMetrics& metrics,
             std::unique_ptr<DisplayBinding> binding);
 
+  // Returns the ID for this display. In internal mode this is the
+  // display::Display ID. In external mode this hasn't been defined yet.
   int64_t GetId() const;
+
+  // Sets the display::Display corresponding to this ws::Display.
+  void SetDisplay(const display::Display& display);
+
+  // PlatformDisplayDelegate:
+  const display::Display& GetDisplay() override;
 
   DisplayManager* display_manager();
   const DisplayManager* display_manager() const;
 
   PlatformDisplay* platform_display() { return platform_display_.get(); }
-
-  // Returns a display::Display corresponding to this ws::Display.
-  display::Display ToDisplay() const;
 
   // Returns the size of the display in physical pixels.
   gfx::Size GetSize() const;
@@ -134,7 +144,15 @@ class Display : public PlatformDisplayDelegate,
   // Called just before |tree| is destroyed.
   void OnWillDestroyTree(WindowTree* tree);
 
-  void UpdateNativeCursor(mojom::Cursor cursor_id);
+  // Removes |display_root| from internal maps. This called prior to
+  // |display_root| being destroyed.
+  void RemoveWindowManagerDisplayRoot(WindowManagerDisplayRoot* display_root);
+
+  // Sets the native cursor to |cursor|.
+  void SetNativeCursor(const ui::CursorData& curosor);
+
+  // Sets the native cursor size to |cursor_size|.
+  void SetNativeCursorSize(ui::CursorSize cursor_size);
 
   // mojom::WindowTreeHost:
   void SetSize(const gfx::Size& size) override;
@@ -142,6 +160,8 @@ class Display : public PlatformDisplayDelegate,
 
   // Updates the size of display root ServerWindow and WM root ServerWindow(s).
   void OnViewportMetricsChanged(const display::ViewportMetrics& metrics);
+
+  void SetBoundsInPixels(const gfx::Rect& bounds_in_pixels);
 
   // Returns the root window of the active user.
   ServerWindow* GetActiveRootWindow();
@@ -151,6 +171,8 @@ class Display : public PlatformDisplayDelegate,
 
   using WindowManagerDisplayRootMap =
       std::map<UserId, WindowManagerDisplayRoot*>;
+
+  class CursorState;
 
   // Inits the necessary state once the display is ready.
   void InitWindowManagerDisplayRoots();
@@ -166,13 +188,15 @@ class Display : public PlatformDisplayDelegate,
   // pixels.
   void CreateRootWindow(const gfx::Size& size);
 
+  // Applyes the cursor scale and rotation to the PlatformDisplay.
+  void UpdateCursorConfig();
+
   // PlatformDisplayDelegate:
-  display::Display GetDisplay() override;
   ServerWindow* GetRootWindow() override;
+  EventSink* GetEventSink() override;
   void OnAcceleratedWidgetAvailable() override;
-  bool IsInHighContrastMode() override;
-  void OnEvent(const ui::Event& event) override;
   void OnNativeCaptureLost() override;
+  OzonePlatform* GetOzonePlatform() override;
 
   // FocusControllerDelegate:
   bool CanHaveActiveChildren(ServerWindow* window) const override;
@@ -191,16 +215,22 @@ class Display : public PlatformDisplayDelegate,
   void OnWindowManagerWindowTreeFactoryReady(
       WindowManagerWindowTreeFactory* factory) override;
 
+  // EventSink:
+  EventDispatchDetails OnEventFromSource(Event* event) override;
+
   std::unique_ptr<DisplayBinding> binding_;
   WindowServer* const window_server_;
   std::unique_ptr<ServerWindow> root_;
   std::unique_ptr<PlatformDisplay> platform_display_;
   std::unique_ptr<FocusController> focus_controller_;
 
-  // The last cursor set. Used to track whether we need to change the cursor.
-  mojom::Cursor last_cursor_;
+  // In internal window mode this contains information about the display. In
+  // external window mode this will be invalid.
+  display::Display display_;
 
   ServerWindowTracker activation_parents_;
+
+  viz::LocalSurfaceIdAllocator allocator_;
 
   WindowManagerDisplayRootMap window_manager_display_root_map_;
 

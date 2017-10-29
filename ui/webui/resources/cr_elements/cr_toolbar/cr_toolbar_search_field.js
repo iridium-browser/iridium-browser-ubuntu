@@ -81,11 +81,23 @@ Polymer({
   },
 
   /**
+   * @param {boolean} narrow
+   * @return {string}
+   * @private
+   */
+  computeIconAriaHidden_: function(narrow) {
+    return Boolean(!narrow).toString();
+  },
+
+  /**
    * @return {boolean}
    * @private
    */
   computeIsSpinnerShown_: function() {
-    return this.spinnerActive && this.showingSearch;
+    var showSpinner = this.spinnerActive && this.showingSearch;
+    if (showSpinner)
+      this.$.spinnerTemplate.if = true;
+    return showSpinner;
   },
 
   /** @private */

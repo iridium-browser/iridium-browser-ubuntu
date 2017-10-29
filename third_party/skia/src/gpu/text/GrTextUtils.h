@@ -19,10 +19,12 @@ class GrAtlasGlyphCache;
 class GrAtlasTextBlob;
 class GrAtlasTextStrike;
 class GrClip;
+class GrColorSpaceXform;
 class GrContext;
 class GrPaint;
 class GrRenderTargetContext;
 class GrShaderCaps;
+class SkColorSpace;
 class SkDrawFilter;
 class SkGlyph;
 class SkMatrix;
@@ -45,12 +47,19 @@ public:
      */
     class Paint {
     public:
-        explicit Paint(const SkPaint* paint) : fPaint(paint) { this->initFilteredColor(); }
+        explicit Paint(const SkPaint* paint,
+                       SkColorSpace* dstColorSpace,
+                       GrColorSpaceXform* colorXformFromSRGB)
+                : fPaint(paint)
+                , fDstColorSpace(dstColorSpace)
+                , fColorXformFromSRGB(colorXformFromSRGB) {
+            this->initFilteredColor();
+        }
 
         // These expose the paint's color run through its color filter (if any). This is only valid
         // when drawing grayscale/lcd glyph masks and not when drawing color glyphs.
-        SkColor filteredSkColor() const { return fFilteredSkColor; }
-        GrColor filteredPremulGrColor() const { return fFilteredGrColor; }
+        GrColor filteredPremulColor() const { return fFilteredPremulColor; }
+        SkColor luminanceColor() const { return fPaint->computeLuminanceColor(); }
 
         const SkPaint& skPaint() const { return *fPaint; }
         operator const SkPaint&() const { return this->skPaint(); }
@@ -58,21 +67,20 @@ public:
         bool toGrPaint(GrMaskFormat, GrRenderTargetContext*, const SkMatrix& viewMatrix,
                        GrPaint*) const;
 
+        // Just for RunPaint's constructor
+        SkColorSpace* dstColorSpace() const { return fDstColorSpace; }
+        GrColorSpaceXform* colorXformFromSRGB() const { return fColorXformFromSRGB; }
+
     protected:
-        void initFilteredColor() {
-            fFilteredSkColor = fPaint->getColor();
-            if (fPaint->getColorFilter()) {
-                fFilteredSkColor = fPaint->getColorFilter()->filterColor(fFilteredSkColor);
-            }
-            fFilteredGrColor = SkColorToPremulGrColor(fFilteredSkColor);
-        }
+        void initFilteredColor();
         Paint() = default;
         const SkPaint* fPaint;
+        SkColorSpace* fDstColorSpace;
+        GrColorSpaceXform* fColorXformFromSRGB;
         // This is the paint's color run through its color filter, if present. This color should
         // be used except when rendering bitmap text, in which case the bitmap must be filtered in
         // the fragment shader.
-        SkColor fFilteredSkColor;
-        SkColor fFilteredGrColor;
+        GrColor fFilteredPremulColor;
     };
 
     /**
@@ -86,8 +94,9 @@ public:
                 : fOriginalPaint(paint), fFilter(filter), fProps(props) {
             // Initially we represent the original paint.
             fPaint = &fOriginalPaint->skPaint();
-            fFilteredSkColor = fOriginalPaint->filteredSkColor();
-            fFilteredGrColor = fOriginalPaint->filteredPremulGrColor();
+            fDstColorSpace = fOriginalPaint->dstColorSpace();
+            fColorXformFromSRGB = fOriginalPaint->colorXformFromSRGB();
+            fFilteredPremulColor = fOriginalPaint->filteredPremulColor();
         }
 
         bool modifyForRun(const SkTextBlobRunIterator&);

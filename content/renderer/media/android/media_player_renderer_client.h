@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
 #include "content/common/content_export.h"
 #include "media/base/android/stream_texture_wrapper.h"
 #include "media/base/media_resource.h"
@@ -62,6 +63,8 @@ class CONTENT_EXPORT MediaPlayerRendererClient : public media::Renderer,
   void OnStatisticsUpdate(const media::PipelineStatistics& stats) override;
   void OnBufferingStateChange(media::BufferingState state) override;
   void OnWaitingForDecryptionKey() override;
+  void OnAudioConfigChange(const media::AudioDecoderConfig& config) override;
+  void OnVideoConfigChange(const media::VideoDecoderConfig& config) override;
   void OnVideoNaturalSizeChange(const gfx::Size& size) override;
   void OnVideoOpacityChange(bool opaque) override;
   void OnDurationChange(base::TimeDelta duration) override;

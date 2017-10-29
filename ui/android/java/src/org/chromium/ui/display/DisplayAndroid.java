@@ -46,11 +46,12 @@ public class DisplayAndroid {
 
     private final int mDisplayId;
     private Point mSize;
-    private Point mPhysicalSize;
     private float mDipScale;
     private int mBitsPerPixel;
     private int mBitsPerComponent;
     private int mRotation;
+    protected boolean mIsDisplayWideColorGamut;
+    protected boolean mIsDisplayServerWideColorGamut;
 
     protected static DisplayAndroidManager getManager() {
         return DisplayAndroidManager.getInstance();
@@ -95,20 +96,6 @@ public class DisplayAndroid {
      */
     public int getDisplayWidth() {
         return mSize.x;
-    }
-
-    /**
-     * @return Real physical display height in physical pixels. Or 0 if not supported.
-     */
-    public int getPhysicalDisplayHeight() {
-        return mPhysicalSize.y;
-    }
-
-    /**
-     * @return Real physical display width in physical pixels. Or 0 if not supported.
-     */
-    public int getPhysicalDisplayWidth() {
-        return mPhysicalSize.x;
     }
 
     /**
@@ -161,6 +148,13 @@ public class DisplayAndroid {
     }
 
     /**
+     * @return Whether or not it is possible to use wide color gamut rendering with this display.
+     */
+    public boolean getIsWideColorGamut() {
+        return mIsDisplayWideColorGamut && mIsDisplayServerWideColorGamut;
+    }
+
+    /**
      * Add observer. Note repeat observers will be called only one.
      * Observers are held only weakly by Display.
      */
@@ -195,7 +189,6 @@ public class DisplayAndroid {
         mDisplayId = displayId;
         mObservers = new WeakHashMap<>();
         mSize = new Point();
-        mPhysicalSize = new Point();
     }
 
     private DisplayAndroidObserver[] getObservers() {
@@ -203,31 +196,43 @@ public class DisplayAndroid {
         return mObservers.keySet().toArray(EMPTY_OBSERVER_ARRAY);
     }
 
+    public void updateIsDisplayServerWideColorGamut(Boolean isDisplayServerWideColorGamut) {
+        update(null, null, null, null, null, null, isDisplayServerWideColorGamut);
+    }
+
     /**
      * Update the display to the provided parameters. Null values leave the parameter unchanged.
      */
-    protected void update(Point size, Point physicalSize, Float dipScale, Integer bitsPerPixel,
-            Integer bitsPerComponent, Integer rotation) {
+    protected void update(Point size, Float dipScale, Integer bitsPerPixel,
+            Integer bitsPerComponent, Integer rotation, Boolean isDisplayWideColorGamut,
+            Boolean isDisplayServerWideColorGamut) {
         boolean sizeChanged = size != null && !mSize.equals(size);
-        boolean physicalSizeChanged = physicalSize != null && !mPhysicalSize.equals(physicalSize);
         // Intentional comparison of floats: we assume that if scales differ, they differ
         // significantly.
         boolean dipScaleChanged = dipScale != null && mDipScale != dipScale;
         boolean bitsPerPixelChanged = bitsPerPixel != null && mBitsPerPixel != bitsPerPixel;
-        boolean bitsPerComponentChanged = bitsPerComponent != null
-                && mBitsPerComponent != bitsPerComponent;
+        boolean bitsPerComponentChanged =
+                bitsPerComponent != null && mBitsPerComponent != bitsPerComponent;
         boolean rotationChanged = rotation != null && mRotation != rotation;
+        boolean isDisplayWideColorGamutChanged = isDisplayWideColorGamut != null
+                && mIsDisplayWideColorGamut != isDisplayWideColorGamut;
+        boolean isDisplayServerWideColorGamutChanged = isDisplayServerWideColorGamut != null
+                && mIsDisplayServerWideColorGamut != isDisplayServerWideColorGamut;
 
-        boolean changed = sizeChanged || physicalSizeChanged || dipScaleChanged
-                || bitsPerPixelChanged || bitsPerComponentChanged || rotationChanged;
+        boolean changed = sizeChanged || dipScaleChanged || bitsPerPixelChanged
+                || bitsPerComponentChanged || rotationChanged || isDisplayWideColorGamutChanged
+                || isDisplayServerWideColorGamutChanged;
         if (!changed) return;
 
         if (sizeChanged) mSize = size;
-        if (physicalSizeChanged) mPhysicalSize = physicalSize;
         if (dipScaleChanged) mDipScale = dipScale;
         if (bitsPerPixelChanged) mBitsPerPixel = bitsPerPixel;
         if (bitsPerComponentChanged) mBitsPerComponent = bitsPerComponent;
         if (rotationChanged) mRotation = rotation;
+        if (isDisplayWideColorGamutChanged) mIsDisplayWideColorGamut = isDisplayWideColorGamut;
+        if (isDisplayServerWideColorGamutChanged) {
+            mIsDisplayServerWideColorGamut = isDisplayServerWideColorGamut;
+        }
 
         getManager().updateDisplayOnNativeSide(this);
         if (rotationChanged) {

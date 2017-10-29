@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/metrics/user_metrics.h"
 #include "build/build_config.h"
 #include "content/browser/browser_plugin/browser_plugin_embedder.h"
 #include "content/browser/browser_plugin/browser_plugin_guest.h"
@@ -15,7 +16,6 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/drag_messages.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/drop_data.h"
@@ -212,12 +212,6 @@ void WebContentsViewGuest::UpdateDragCursor(WebDragOperation operation) {
       embedder_render_view_host->GetDelegate()->GetDelegateView();
   if (view)
     view->UpdateDragCursor(operation);
-}
-
-void WebContentsViewGuest::GotFocus() {
-}
-
-void WebContentsViewGuest::TakeFocus(bool reverse) {
 }
 
 void WebContentsViewGuest::ShowContextMenu(RenderFrameHost* render_frame_host,

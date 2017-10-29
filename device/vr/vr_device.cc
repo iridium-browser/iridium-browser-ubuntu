@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "device/vr/vr_device.h"
+
 #include "device/vr/vr_device_provider.h"
 #include "device/vr/vr_display_impl.h"
 
@@ -19,20 +20,16 @@ VRDevice::VRDevice()
 
 VRDevice::~VRDevice() {}
 
-void VRDevice::RequestPresent(const base::Callback<void(bool)>& callback) {
-  callback.Run(true);
-}
-
-void VRDevice::SetSecureOrigin(bool secure_origin) {}
-
 void VRDevice::AddDisplay(VRDisplayImpl* display) {
   displays_.insert(display);
+  OnDisplayAdded(display);
 }
 
 void VRDevice::RemoveDisplay(VRDisplayImpl* display) {
   if (CheckPresentingDisplay(display))
     ExitPresent();
   displays_.erase(display);
+  OnDisplayRemoved(display);
 }
 
 bool VRDevice::IsAccessAllowed(VRDisplayImpl* display) {
@@ -46,14 +43,14 @@ bool VRDevice::CheckPresentingDisplay(VRDisplayImpl* display) {
 void VRDevice::OnChanged() {
   base::Callback<void(mojom::VRDisplayInfoPtr)> callback = base::Bind(
       &VRDevice::OnVRDisplayInfoCreated, weak_ptr_factory_.GetWeakPtr());
-  GetVRDevice(callback);
+  CreateVRDisplayInfo(callback);
 }
 
 void VRDevice::OnVRDisplayInfoCreated(mojom::VRDisplayInfoPtr vr_device_info) {
   if (vr_device_info.is_null())
     return;
-  for (auto* display : displays_)
-    display->client()->OnChanged(vr_device_info.Clone());
+  for (VRDisplayImpl* display : displays_)
+    display->OnChanged(vr_device_info.Clone());
 }
 
 void VRDevice::OnExitPresent() {
@@ -61,28 +58,18 @@ void VRDevice::OnExitPresent() {
     return;
   auto it = displays_.find(presenting_display_);
   CHECK(it != displays_.end());
-  (*it)->client()->OnExitPresent();
+  (*it)->OnExitPresent();
   SetPresentingDisplay(nullptr);
 }
 
 void VRDevice::OnBlur() {
-  for (auto* display : displays_)
-    display->client()->OnBlur();
+  for (VRDisplayImpl* display : displays_)
+    display->OnBlur();
 }
 
 void VRDevice::OnFocus() {
-  for (auto* display : displays_)
-    display->client()->OnFocus();
-}
-
-void VRDevice::OnActivate(mojom::VRDisplayEventReason reason) {
-  for (auto* display : displays_)
-    display->client()->OnActivate(reason);
-}
-
-void VRDevice::OnDeactivate(mojom::VRDisplayEventReason reason) {
-  for (auto* display : displays_)
-    display->client()->OnDeactivate(reason);
+  for (VRDisplayImpl* display : displays_)
+    display->OnFocus();
 }
 
 void VRDevice::SetPresentingDisplay(VRDisplayImpl* display) {

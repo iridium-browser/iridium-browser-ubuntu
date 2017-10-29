@@ -10,18 +10,10 @@
 
 #include "core/fpdfapi/page/cpdf_pageobjectholder.h"
 #include "core/fpdfapi/page/cpdf_streamcontentparser.h"
-#include "core/fpdfapi/page/pageint.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fxge/cfx_graphstatedata.h"
-
-namespace {
-
-FX_FLOAT ClipFloat(FX_FLOAT f) {
-  return std::max(0.0f, std::min(1.0f, f));
-}
-
-}  // namespace
+#include "third_party/base/stl_util.h"
 
 CPDF_AllStates::CPDF_AllStates()
     : m_TextLeading(0), m_TextRise(0), m_TextHorzScale(1.0f) {}
@@ -40,9 +32,7 @@ void CPDF_AllStates::Copy(const CPDF_AllStates& src) {
   m_TextHorzScale = src.m_TextHorzScale;
 }
 
-void CPDF_AllStates::SetLineDash(CPDF_Array* pArray,
-                                 FX_FLOAT phase,
-                                 FX_FLOAT scale) {
+void CPDF_AllStates::SetLineDash(CPDF_Array* pArray, float phase, float scale) {
   m_GraphState.SetLineDash(pArray, phase, scale);
 }
 
@@ -119,10 +109,12 @@ void CPDF_AllStates::ProcessExtGS(CPDF_Dictionary* pGS,
         }
         break;
       case FXBSTR_ID('C', 'A', 0, 0):
-        m_GeneralState.SetStrokeAlpha(ClipFloat(pObject->GetNumber()));
+        m_GeneralState.SetStrokeAlpha(
+            pdfium::clamp(pObject->GetNumber(), 0.0f, 1.0f));
         break;
       case FXBSTR_ID('c', 'a', 0, 0):
-        m_GeneralState.SetFillAlpha(ClipFloat(pObject->GetNumber()));
+        m_GeneralState.SetFillAlpha(
+            pdfium::clamp(pObject->GetNumber(), 0.0f, 1.0f));
         break;
       case FXBSTR_ID('O', 'P', 0, 0):
         m_GeneralState.SetStrokeOP(!!pObject->GetInteger());

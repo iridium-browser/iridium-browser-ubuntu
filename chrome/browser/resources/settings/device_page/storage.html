@@ -1,5 +1,8 @@
-<link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/html/polymer.html">
+
+<link rel="import" href="chrome://resources/cr_elements/icons.html">
+<link rel="import" href="chrome://resources/html/assert.html">
+<link rel="import" href="chrome://resources/html/cr/ui/focus_without_ink.html">
 <link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
@@ -213,9 +216,8 @@
           </div>
         </div>
         <button id="deleteButton" is="paper-icon-button-light"
-            aria-label="$i18n{storageItemDriveCache}"
+            class="icon-delete-gray" aria-label="$i18n{storageItemDriveCache}"
             aria-describedby="driveSizeCache">
-          <iron-icon icon="cr:delete"></iron-icon>
         </button>
       </div>
     </template>
@@ -257,7 +259,8 @@
       </div>
     </template>
 
-    <settings-drive-cache-dialog id="storageDriveCache">
+    <settings-drive-cache-dialog id="storageDriveCache"
+        on-close="onCloseDriveCacheDialog_">
     </settings-drive-cache-dialog>
   </template>
   <script src="storage.js"></script>

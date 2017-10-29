@@ -20,13 +20,12 @@ class UrlTestImpl : public mojom::UrlTest {
   }
 
   // UrlTest:
-  void BounceUrl(const GURL& in, const BounceUrlCallback& callback) override {
-    callback.Run(in);
+  void BounceUrl(const GURL& in, BounceUrlCallback callback) override {
+    std::move(callback).Run(in);
   }
 
-  void BounceOrigin(const Origin& in,
-                    const BounceOriginCallback& callback) override {
-    callback.Run(in);
+  void BounceOrigin(const Origin& in, BounceOriginCallback callback) override {
+    std::move(callback).Run(in);
   }
 
  private:
@@ -76,15 +75,21 @@ TEST(MojoGURLStructTraitsTest, Basic) {
 
   // Test basic Origin serialization.
   Origin non_unique = Origin::UnsafelyCreateOriginWithoutNormalization(
-    "http", "www.google.com", 80);
+      "http", "www.google.com", 80, "");
   Origin output;
   EXPECT_TRUE(proxy->BounceOrigin(non_unique, &output));
   EXPECT_EQ(non_unique, output);
-  EXPECT_FALSE(non_unique.unique());
+  EXPECT_FALSE(output.unique());
 
   Origin unique;
   EXPECT_TRUE(proxy->BounceOrigin(unique, &output));
   EXPECT_TRUE(output.unique());
+
+  Origin with_sub_origin = Origin::CreateFromNormalizedTupleWithSuborigin(
+      "http", "www.google.com", 80, "suborigin");
+  EXPECT_TRUE(proxy->BounceOrigin(with_sub_origin, &output));
+  EXPECT_EQ(with_sub_origin, output);
+  EXPECT_FALSE(output.unique());
 }
 
 }  // namespace url

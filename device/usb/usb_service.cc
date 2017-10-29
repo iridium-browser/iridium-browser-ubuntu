@@ -8,11 +8,13 @@
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/device_event_log/device_event_log.h"
 #include "device/base/features.h"
 #include "device/usb/usb_device.h"
+#include "device/usb/usb_device_handle.h"
 
 #if defined(OS_ANDROID)
 #include "device/usb/usb_service_android.h"
@@ -41,31 +43,35 @@ void UsbService::Observer::OnDeviceRemovedCleanup(
 
 void UsbService::Observer::WillDestroyUsbService() {}
 
+// Declare storage for this constexpr.
+constexpr base::TaskTraits UsbService::kBlockingTaskTraits;
+
 // static
-std::unique_ptr<UsbService> UsbService::Create(
-    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner) {
+std::unique_ptr<UsbService> UsbService::Create() {
 #if defined(OS_ANDROID)
-  return base::WrapUnique(new UsbServiceAndroid(blocking_task_runner));
+  return base::WrapUnique(new UsbServiceAndroid());
 #elif defined(USE_UDEV)
-  return base::WrapUnique(new UsbServiceLinux(blocking_task_runner));
+  return base::WrapUnique(new UsbServiceLinux());
 #elif defined(OS_WIN)
   if (base::FeatureList::IsEnabled(kNewUsbBackend))
-    return base::WrapUnique(new UsbServiceWin(blocking_task_runner));
+    return base::WrapUnique(new UsbServiceWin());
   else
-    return base::WrapUnique(new UsbServiceImpl(blocking_task_runner));
+    return base::WrapUnique(new UsbServiceImpl());
 #elif defined(OS_MACOSX)
-  return base::WrapUnique(new UsbServiceImpl(blocking_task_runner));
+  return base::WrapUnique(new UsbServiceImpl());
 #else
   return nullptr;
 #endif
 }
 
+// static
+scoped_refptr<base::SequencedTaskRunner>
+UsbService::CreateBlockingTaskRunner() {
+  return base::CreateSequencedTaskRunnerWithTraits(kBlockingTaskTraits);
+}
+
 UsbService::~UsbService() {
-#if DCHECK_IS_ON()
-  DCHECK(did_shutdown_);
-#endif
-  for (const auto& map_entry : devices_)
-    map_entry.second->OnDisconnect();
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   for (auto& observer : observer_list_)
     observer.WillDestroyUsbService();
 }
@@ -78,18 +84,11 @@ UsbService::UsbService(
 }
 
 scoped_refptr<UsbDevice> UsbService::GetDevice(const std::string& guid) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   auto it = devices_.find(guid);
   if (it == devices_.end())
     return nullptr;
   return it->second;
-}
-
-void UsbService::Shutdown() {
-#if DCHECK_IS_ON()
-  DCHECK(!did_shutdown_);
-  did_shutdown_ = true;
-#endif
 }
 
 void UsbService::GetDevices(const GetDevicesCallback& callback) {
@@ -104,17 +103,17 @@ void UsbService::GetDevices(const GetDevicesCallback& callback) {
 }
 
 void UsbService::AddObserver(Observer* observer) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   observer_list_.AddObserver(observer);
 }
 
 void UsbService::RemoveObserver(Observer* observer) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   observer_list_.RemoveObserver(observer);
 }
 
 void UsbService::AddDeviceForTesting(scoped_refptr<UsbDevice> device) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!ContainsKey(devices_, device->guid()));
   devices_[device->guid()] = device;
   testing_devices_.insert(device->guid());
@@ -122,7 +121,7 @@ void UsbService::AddDeviceForTesting(scoped_refptr<UsbDevice> device) {
 }
 
 void UsbService::RemoveDeviceForTesting(const std::string& device_guid) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // Allow only devices added with AddDeviceForTesting to be removed with this
   // method.
   auto testing_devices_it = testing_devices_.find(device_guid);
@@ -148,14 +147,14 @@ void UsbService::GetTestDevices(
 }
 
 void UsbService::NotifyDeviceAdded(scoped_refptr<UsbDevice> device) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   for (auto& observer : observer_list_)
     observer.OnDeviceAdded(device);
 }
 
 void UsbService::NotifyDeviceRemoved(scoped_refptr<UsbDevice> device) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   for (auto& observer : observer_list_)
     observer.OnDeviceRemoved(device);

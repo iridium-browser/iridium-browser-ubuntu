@@ -30,9 +30,9 @@ WriteTransactionInfo::WriteTransactionInfo(const WriteTransactionInfo& other) =
 
 WriteTransactionInfo::~WriteTransactionInfo() {}
 
-base::DictionaryValue* WriteTransactionInfo::ToValue(
+std::unique_ptr<base::DictionaryValue> WriteTransactionInfo::ToValue(
     size_t max_mutations_size) const {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  auto dict = base::MakeUnique<base::DictionaryValue>();
   dict->SetString("id", base::Int64ToString(id));
   dict->SetString("location", location_string);
   dict->SetString("writer", WriterTagToString(writer));
@@ -41,7 +41,7 @@ base::DictionaryValue* WriteTransactionInfo::ToValue(
   if (mutations_size <= max_mutations_size) {
     mutations_value = EntryKernelMutationMapToValue(mutations.Get());
   } else {
-    mutations_value = base::MakeUnique<base::StringValue>(
+    mutations_value = base::MakeUnique<base::Value>(
         base::SizeTToString(mutations_size) + " mutations");
   }
   dict->Set("mutations", std::move(mutations_value));

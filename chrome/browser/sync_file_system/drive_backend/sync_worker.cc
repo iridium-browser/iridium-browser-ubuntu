@@ -72,10 +72,9 @@ void SyncWorker::Initialize(std::unique_ptr<SyncEngineContext> context) {
 
   context_ = std::move(context);
 
-  task_manager_.reset(new SyncTaskManager(
-      weak_ptr_factory_.GetWeakPtr(), 0 /* maximum_background_task */,
-      context_->GetWorkerTaskRunner(),
-      context_->GetWorkerPool()));
+  task_manager_.reset(new SyncTaskManager(weak_ptr_factory_.GetWeakPtr(),
+                                          0 /* maximum_background_task */,
+                                          context_->GetWorkerTaskRunner()));
   task_manager_->Initialize(SYNC_STATUS_OK);
 
   PostInitializeTask();
@@ -290,9 +289,8 @@ void SyncWorker::RecordTaskLog(std::unique_ptr<TaskLogger::TaskLog> task_log) {
 
   context_->GetUITaskRunner()->PostTask(
       FROM_HERE,
-      base::Bind(&TaskLogger::RecordLog,
-                 context_->GetTaskLogger(),
-                 base::Passed(&task_log)));
+      base::BindOnce(&TaskLogger::RecordLog, context_->GetTaskLogger(),
+                     base::Passed(&task_log)));
 }
 
 void SyncWorker::ActivateService(RemoteServiceState service_state,
@@ -408,13 +406,10 @@ void SyncWorker::UpdateRegisteredApps() {
 
   context_->GetUITaskRunner()->PostTask(
       FROM_HERE,
-      base::Bind(&SyncWorker::QueryAppStatusOnUIThread,
-                 extension_service_,
-                 base::Owned(app_ids.release()),
-                 app_status,
-                 RelayCallbackToTaskRunner(
-                     context_->GetWorkerTaskRunner(),
-                     FROM_HERE, callback)));
+      base::BindOnce(&SyncWorker::QueryAppStatusOnUIThread, extension_service_,
+                     base::Owned(app_ids.release()), app_status,
+                     RelayCallbackToTaskRunner(context_->GetWorkerTaskRunner(),
+                                               FROM_HERE, callback)));
 }
 
 void SyncWorker::QueryAppStatusOnUIThread(

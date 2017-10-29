@@ -6,12 +6,28 @@
  * @fileoverview Behavior common to Site Settings classes.
  */
 
+
+/**
+ * The source information on site exceptions doesn't exactly match the
+ * controlledBy values.
+ * TODO(dschuyler): Can they be unified (and this dictionary removed)?
+ * @type {!Object}
+ */
+var kControlledByLookup = {
+  'extension': chrome.settingsPrivate.ControlledBy.EXTENSION,
+  'HostedApp': chrome.settingsPrivate.ControlledBy.EXTENSION,
+  'platform_app': chrome.settingsPrivate.ControlledBy.EXTENSION,
+  'policy': chrome.settingsPrivate.ControlledBy.USER_POLICY,
+};
+
+
 /** @polymerBehavior */
 var SiteSettingsBehaviorImpl = {
   properties: {
     /**
      * The string ID of the category this element is displaying data for.
      * See site_settings/constants.js for possible values.
+     * @type {!settings.ContentSettingsTypes}
      */
     category: String,
 
@@ -23,13 +39,15 @@ var SiteSettingsBehaviorImpl = {
     browserProxy: Object,
   },
 
+  /** @override */
   created: function() {
     this.browserProxy =
         settings.SiteSettingsPrefsBrowserProxyImpl.getInstance();
   },
 
+  /** @override */
   ready: function() {
-    this.PermissionValues = settings.PermissionValues;
+    this.ContentSetting = settings.ContentSetting;
   },
 
   /**
@@ -38,7 +56,8 @@ var SiteSettingsBehaviorImpl = {
    * @return {string} The URL with a scheme, or an empty string.
    */
   ensureUrlHasScheme: function(url) {
-    if (url.length == 0) return url;
+    if (url.length == 0)
+      return url;
     return url.includes('://') ? url : 'http://' + url;
   },
 
@@ -53,8 +72,7 @@ var SiteSettingsBehaviorImpl = {
         urlWithScheme.endsWith(':443')) {
       return url.slice(0, -4);
     }
-    if (urlWithScheme.startsWith('http://') &&
-        urlWithScheme.endsWith(':80')) {
+    if (urlWithScheme.startsWith('http://') && urlWithScheme.endsWith(':80')) {
       return url.slice(0, -3);
     }
     return url;
@@ -77,33 +95,6 @@ var SiteSettingsBehaviorImpl = {
   },
 
   /**
-   * Looks up the human-friendly embedder string to show in the UI.
-   * @param {string} embeddingOrigin The embedding origin to show.
-   * @param {string} category The category requesting it.
-   * @return {string} The string to show.
-   */
-  getEmbedderString: function(embeddingOrigin, category) {
-    if (embeddingOrigin == '') {
-      if (category != settings.ContentSettingsTypes.GEOLOCATION)
-        return '';
-      return loadTimeData.getStringF('embeddedOnHost', '*');
-    }
-    return loadTimeData.getStringF(
-        'embeddedOnHost', this.sanitizePort(embeddingOrigin));
-  },
-
-  /**
-   * Returns true if this exception is controlled by, for example, a policy or
-   * set by an extension.
-   * @param {string} source The source controlling the extension
-   * @return {boolean} Whether it is being controlled.
-   * @protected
-   */
-  isExceptionControlled_: function(source) {
-    return source != undefined && source != 'preference';
-  },
-
-  /**
    * Returns the icon to use for a given site.
    * @param {string} site The url of the site to fetch the icon for.
    * @return {string} The background-image style with the favicon.
@@ -121,7 +112,7 @@ var SiteSettingsBehaviorImpl = {
    * @private
    */
   computeIsSettingEnabled: function(setting) {
-    return setting != settings.PermissionValues.BLOCK;
+    return setting != settings.ContentSetting.BLOCK;
   },
 
   /**
@@ -146,27 +137,33 @@ var SiteSettingsBehaviorImpl = {
   /**
    * Convert an exception (received from the C++ handler) to a full
    * SiteException.
-   * @param {!Object} exception The raw site exception from C++.
-   * @return {SiteException} The expanded (full) SiteException.
+   * @param {!RawSiteException} exception The raw site exception from C++.
+   * @return {!SiteException} The expanded (full) SiteException.
    * @private
    */
   expandSiteException: function(exception) {
     var origin = exception.origin;
     var embeddingOrigin = exception.embeddingOrigin;
-    var embeddingDisplayName = '';
-    if (origin != embeddingOrigin) {
-      embeddingDisplayName =
-          this.getEmbedderString(embeddingOrigin, this.category);
+
+    var enforcement = /** @type {?chrome.settingsPrivate.Enforcement} */ (null);
+    if (exception.source == 'extension' || exception.source == 'HostedApp' ||
+        exception.source == 'platform_app' || exception.source == 'policy') {
+      enforcement = chrome.settingsPrivate.Enforcement.ENFORCED;
     }
 
+    var controlledBy = /** @type {!chrome.settingsPrivate.ControlledBy} */ (
+        kControlledByLookup[exception.source] ||
+        chrome.settingsPrivate.ControlledBy.PRIMARY_USER);
+
     return {
+      category: this.category,
       origin: origin,
       displayName: exception.displayName,
       embeddingOrigin: embeddingOrigin,
-      embeddingDisplayName: embeddingDisplayName,
       incognito: exception.incognito,
       setting: exception.setting,
-      source: exception.source,
+      enforcement: enforcement,
+      controlledBy: controlledBy,
     };
   },
 

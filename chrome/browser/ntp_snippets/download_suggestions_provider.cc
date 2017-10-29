@@ -45,7 +45,7 @@ using offline_pages::OfflinePageModelQueryBuilder;
 namespace {
 
 const int kDefaultMaxSuggestionsCount = 5;
-const int kDefaultMaxDownloadAgeHours = 6 * 7 * 24;  // 6 weeks
+const int kDefaultMaxDownloadAgeHours = 24;
 const char kAssetDownloadsPrefix = 'D';
 const char kOfflinePageDownloadsPrefix = 'O';
 
@@ -217,8 +217,7 @@ CategoryInfo DownloadSuggestionsProvider::GetCategoryInfo(Category category) {
   return CategoryInfo(
       l10n_util::GetStringUTF16(IDS_NTP_DOWNLOAD_SUGGESTIONS_SECTION_HEADER),
       ntp_snippets::ContentSuggestionsCardLayout::FULL_CARD,
-      /*has_fetch_action=*/false,
-      /*has_view_all_action=*/true,
+      ntp_snippets::ContentSuggestionsAdditionalAction::VIEW_ALL,
       /*show_if_empty=*/false,
       l10n_util::GetStringUTF16(IDS_NTP_DOWNLOADS_SUGGESTIONS_SECTION_EMPTY));
 }
@@ -243,7 +242,7 @@ void DownloadSuggestionsProvider::FetchSuggestionImage(
   // TODO(vitaliii): Provide site's favicon for assets downloads or file type.
   // See crbug.com/631447.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(callback, gfx::Image()));
+      FROM_HERE, base::BindOnce(callback, gfx::Image()));
 }
 
 void DownloadSuggestionsProvider::Fetch(
@@ -253,7 +252,7 @@ void DownloadSuggestionsProvider::Fetch(
   LOG(DFATAL) << "DownloadSuggestionsProvider has no |Fetch| functionality!";
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           callback,
           ntp_snippets::Status(
               ntp_snippets::StatusCode::PERMANENT_ERROR,
@@ -384,12 +383,11 @@ void DownloadSuggestionsProvider::OfflinePageAdded(
 }
 
 void DownloadSuggestionsProvider::OfflinePageDeleted(
-    int64_t offline_id,
-    const offline_pages::ClientId& client_id) {
+    const offline_pages::OfflinePageModel::DeletedPageInfo& page_info) {
   DCHECK(offline_page_model_);
   if (IsClientIdForOfflinePageDownload(
-          offline_page_model_->GetPolicyController(), client_id)) {
-    InvalidateSuggestion(GetOfflinePagePerCategoryID(offline_id));
+          offline_page_model_->GetPolicyController(), page_info.client_id)) {
+    InvalidateSuggestion(GetOfflinePagePerCategoryID(page_info.offline_id));
   }
 }
 
@@ -514,13 +512,11 @@ void DownloadSuggestionsProvider::FetchAssetsDownloads() {
   for (DownloadItem* item : all_downloads) {
     std::string within_category_id =
         GetAssetDownloadPerCategoryID(item->GetId());
-    // TODO(vitaliii): Provide proper last access time here once it is collected
-    // for asset downloads.
     if (old_dismissed_ids.count(within_category_id)) {
       retained_dismissed_ids.insert(within_category_id);
     } else if (IsAssetDownloadCompleted(*item) &&
                !IsDownloadOutdated(GetAssetDownloadPublishedTime(*item),
-                                   base::Time())) {
+                                   item->GetLastAccessTime())) {
       cached_asset_downloads_.push_back(item);
       // We may already observe this item and, therefore, we remove the
       // observer first.
@@ -617,6 +613,7 @@ ContentSuggestion DownloadSuggestionsProvider::ConvertDownloadItem(
   suggestion.set_publisher_name(
       base::UTF8ToUTF16(download_item.GetURL().host()));
   auto extra = base::MakeUnique<ntp_snippets::DownloadSuggestionExtra>();
+  extra->download_guid = download_item.GetGuid();
   extra->target_file_path = download_item.GetTargetFilePath();
   extra->mime_type = download_item.GetMimeType();
   extra->is_download_asset = true;

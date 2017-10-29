@@ -14,6 +14,8 @@ source_set("constants") {
     "constants_mac.cc",
     "constants_mac.h",
   ]
+
+  deps = [ "//remoting/host:remoting_version" ]
 }
 
 # remoting_me2me_host-InfoPlist.strings
@@ -67,12 +69,13 @@ target("mac_app_bundle", "remoting_me2me_host") {
     "MACOSX_DEPLOYMENT_TARGET=10.7",
   ]
 
-  if (is_chrome_branded && is_official_build) {
-    defines = [ "REMOTING_ENABLE_BREAKPAD" ]
-  }
+  # TODO(joedow): Re-enable or replace with Crashpad: crbug.com/637884.
+  # if (is_chrome_branded && is_official_build) {
+  #   defines = [ "REMOTING_ENABLE_BREAKPAD" ]
+  # }
 
   deps = [
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
     "//remoting/base:breakpad",
     "//remoting/host:main",
     "//remoting/host:remoting_me2me_host_static",
@@ -183,6 +186,7 @@ target("mac_app_bundle", "remoting_native_messaging_host") {
 
   deps = [
     "//base",
+    "//net",
     "//remoting/base:breakpad",
     "//remoting/host",
     "//remoting/host:remoting_infoplist_strings",

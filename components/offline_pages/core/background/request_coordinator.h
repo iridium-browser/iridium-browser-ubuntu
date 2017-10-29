@@ -62,11 +62,18 @@ class RequestCoordinator : public KeyedService,
     DISABLED_FOR_OFFLINER,
   };
 
+  enum class RequestCoordinatorState {
+    IDLE,
+    PICKING,
+    OFFLINING,
+  };
+
   // Describes the parameters to control how to save a page when system
   // conditions allow.
   struct SavePageLaterParams {
     SavePageLaterParams();
     SavePageLaterParams(const SavePageLaterParams& other);
+    ~SavePageLaterParams();
 
     // The last committed URL of the page to save.
     GURL url;
@@ -82,6 +89,9 @@ class RequestCoordinator : public KeyedService,
 
     // The original URL of the page to save. Empty if no redirect occurs.
     GURL original_url;
+
+    // The origin of the request, if any.
+    std::string request_origin;
   };
 
   // Callback specifying which request IDs were actually removed.
@@ -91,6 +101,9 @@ class RequestCoordinator : public KeyedService,
   // Callback that receives the response for GetAllRequests.
   typedef base::Callback<void(std::vector<std::unique_ptr<SavePageRequest>>)>
       GetRequestsCallback;
+
+  // Callback for stopping the background offlining.
+  typedef base::Callback<void(int64_t request_id)> CancelCallback;
 
   RequestCoordinator(std::unique_ptr<OfflinerPolicy> policy,
                      std::unique_ptr<Offliner> offliner,
@@ -106,7 +119,7 @@ class RequestCoordinator : public KeyedService,
   int64_t SavePageLater(const SavePageLaterParams& save_page_later_params);
 
   // Remove a list of requests by |request_id|.  This removes requests from the
-  // request queue, and cancels an in-progress prerender.
+  // request queue, and cancels an in-progress offliner.
   void RemoveRequests(const std::vector<int64_t>& request_ids,
                       const RemoveRequestsCallback& callback);
 
@@ -204,11 +217,8 @@ class RequestCoordinator : public KeyedService,
     return last_offlining_status_;
   }
 
-  bool is_busy() { return is_busy_; }
-
-  // Returns whether processing is starting (before it is decided to actually
-  // process a request (is_busy()) at this time or not.
-  bool is_starting() { return is_starting_; }
+  // Return the state of the request coordinator.
+  RequestCoordinatorState state() { return state_; }
 
   // Tracks whether the last offlining attempt got canceled.  This is reset by
   // the next call to start processing.
@@ -281,9 +291,9 @@ class RequestCoordinator : public KeyedService,
   // Handle updating of request status after cancel is called. Will call
   // HandleCancelRecordResultCallback for UMA handling
   void HandleCancelUpdateStatusCallback(
-      const Offliner::CancelCallback& next_callback,
+      const CancelCallback& next_callback,
       Offliner::RequestStatus stop_status,
-      int64_t offline_id);
+      const SavePageRequest& canceled_request);
   void UpdateStatusForCancel(Offliner::RequestStatus stop_status);
   void ResetActiveRequestCallback(int64_t offline_id);
   void StartSchedulerCallback(int64_t offline_id);
@@ -332,9 +342,9 @@ class RequestCoordinator : public KeyedService,
 
   void HandleWatchdogTimeout();
 
-  // Cancels an in progress pre-rendering, and updates state appropriately.
-  void StopPrerendering(const Offliner::CancelCallback& callback,
-                        Offliner::RequestStatus stop_status);
+  // Cancels an in progress offlining, and updates state appropriately.
+  void StopOfflining(const CancelCallback& callback,
+                     Offliner::RequestStatus stop_status);
 
   // Marks attempt on the request and sends it to offliner in continuation.
   void SendRequestToOffliner(const SavePageRequest& request);
@@ -393,6 +403,10 @@ class RequestCoordinator : public KeyedService,
                        const std::string& name_space,
                        std::unique_ptr<UpdateRequestsResult> result);
 
+  // Reports offliner status through UMA and event logger.
+  void RecordOfflinerResult(const SavePageRequest& request,
+                            Offliner::RequestStatus status);
+
   void SetDeviceConditionsForTest(const DeviceConditions& current_conditions) {
     use_test_device_conditions_ = true;
     current_conditions_.reset(new DeviceConditions(current_conditions));
@@ -406,13 +420,8 @@ class RequestCoordinator : public KeyedService,
   // Cached value of whether low end device. Overwritable for testing.
   bool is_low_end_device_;
 
-  // The offliner can only handle one request at a time - if the offliner is
-  // busy, prevent other requests.  This flag marks whether the offliner is in
-  // use.
-  bool is_busy_;
-  // There is more than one path to start processing so this flag is used
-  // to avoid race conditions before is_busy_ is established.
-  bool is_starting_;
+  // Current state of the request coordinator.
+  RequestCoordinatorState state_;
   // Identifies the type of current processing window or if processing stopped.
   ProcessingWindowState processing_state_;
   // True if we should use the test device conditions instead of actual
@@ -438,8 +447,9 @@ class RequestCoordinator : public KeyedService,
   // Unowned pointer to the Network Quality Estimator.
   net::NetworkQualityEstimator::NetworkQualityProvider*
       network_quality_estimator_;
-  // Holds copy of the active request, if any.
-  std::unique_ptr<SavePageRequest> active_request_;
+  net::EffectiveConnectionType network_quality_at_request_start_;
+  // Holds an ID of the currently active request.
+  int64_t active_request_id_;
   // Status of the most recent offlining.
   Offliner::RequestStatus last_offlining_status_;
   // A set of request_ids that we are holding off until the download manager is
@@ -461,6 +471,15 @@ class RequestCoordinator : public KeyedService,
   base::OneShotTimer watchdog_timer_;
   // Used for potential immediate processing when we get network connection.
   std::unique_ptr<ConnectionNotifier> connection_notifier_;
+  // Used to track prioritized requests.
+  // The requests can only be added by RC when they are resumed and there are
+  // two places where deletion from the |prioritized_requests_| would happen:
+  //   1. When request is paused RC will remove it.
+  //   2. When a task is not available to be picked by PickRequestTask (because
+  //   it was completed or cancelled), the task will remove it.
+  // Currently it's used as LIFO.
+  // TODO(romax): see if LIFO is a good idea or change to FIFO. crbug.com/705106
+  std::deque<int64_t> prioritized_requests_;
   // Allows us to pass a weak pointer to callbacks.
   base::WeakPtrFactory<RequestCoordinator> weak_ptr_factory_;
 

@@ -6,23 +6,27 @@ package org.chromium.webapk.shell_apk;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.SharedPreferences;
+import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.util.Log;
 
 import org.chromium.webapk.lib.common.WebApkConstants;
 import org.chromium.webapk.lib.common.WebApkMetaDataKeys;
 
-import java.net.URISyntaxException;
+import java.io.File;
+import java.util.List;
 
 /**
  * WebAPK's main Activity.
  */
 public class MainActivity extends Activity {
+    private static final String LAST_RESORT_HOST_BROWSER = "com.android.chrome";
+    private static final String LAST_RESORT_HOST_BROWSER_APPLICATION_NAME = "Google Chrome";
     private static final String TAG = "cr_MainActivity";
 
     /**
@@ -31,8 +35,9 @@ public class MainActivity extends Activity {
     private static final String HOST_BROWSER_LAUNCHER_CLASS_NAME =
             "org.chromium.webapk.lib.runtime_library.HostBrowserLauncher";
 
-    // Action for launching {@link WebappLauncherActivity}. Must stay in sync with
-    // {@link WebappLauncherActivity#ACTION_START_WEBAPP}.
+    // Action for launching {@link WebappLauncherActivity}.
+    // TODO(hanxi): crbug.com/737556. Replaces this string with the new WebAPK launch action after
+    // it is propagated to all the Chrome's channels.
     public static final String ACTION_START_WEBAPK =
             "com.google.android.apps.chrome.webapps.WebappManager.ACTION_START_WEBAPP";
 
@@ -47,130 +52,212 @@ public class MainActivity extends Activity {
     private static final String KEY_APP_ICON_ID = "app_icon_id";
 
     /**
+     * The URL to launch the WebAPK. Used in the case of deep-links (intents from other apps) that
+     * fall into the WebAPK scope.
+     */
+    private String mOverrideUrl;
+
+    /** The "start_url" baked in the AndroidManifest.xml. */
+    private String mStartUrl;
+
+    /**
      * Creates install Intent.
      * @param packageName Package to install.
      * @return The intent.
      */
-    public static Intent createInstallIntent(String packageName) {
+    private static Intent createInstallIntent(String packageName) {
         String marketUrl = "market://details?id=" + packageName;
-        return new Intent(Intent.ACTION_VIEW, Uri.parse(marketUrl));
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(marketUrl));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return intent;
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        launch();
-        finish();
-    }
 
-    /**
-     * Launches WebAPK.
-     */
-    private void launch() {
-        String startUrl = getStartUrl();
-        if (startUrl == null) {
+        Bundle metadata = WebApkUtils.readMetaData(this);
+        if (metadata == null) {
+            finish();
             return;
         }
-        if (launchHostBrowserInWebApkMode(startUrl)) {
-            return;
-        }
-        if (launchBrowser(startUrl)) {
-            return;
-        }
-        installBrowser();
-    }
 
-    /**
-     * Launches host browser in WebAPK mode.
-     * @return True if successful.
-     */
-    private boolean launchHostBrowserInWebApkMode(String startUrl) {
-        Log.v(TAG, "Url of the WebAPK: " + startUrl);
+        mOverrideUrl = getOverrideUrl();
+        mStartUrl = (mOverrideUrl != null) ? mOverrideUrl
+                                           : metadata.getString(WebApkMetaDataKeys.START_URL);
+        if (mStartUrl == null) {
+            finish();
+            return;
+        }
+
+        Log.v(TAG, "Url of the WebAPK: " + mStartUrl);
         String packageName = getPackageName();
         Log.v(TAG, "Package name of the WebAPK:" + packageName);
 
+        String runtimeHostInPreferences = WebApkUtils.getHostBrowserFromSharedPreference(this);
         String runtimeHost = WebApkUtils.getHostBrowserPackageName(this);
-        int source = getIntent().getIntExtra(WebApkConstants.EXTRA_SOURCE, 0);
-        Intent intent = new Intent();
-        intent.setAction(ACTION_START_WEBAPK);
-        intent.setPackage(runtimeHost);
-        intent.putExtra(WebApkConstants.EXTRA_URL, startUrl)
-                .putExtra(WebApkConstants.EXTRA_SOURCE, source)
-                .putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, packageName);
+        if (!TextUtils.isEmpty(runtimeHostInPreferences)
+                && !runtimeHostInPreferences.equals(runtimeHost)) {
+            deleteSharedPref(this);
+            deleteInternalStorage();
+        }
 
-        try {
-            startActivity(intent);
-            return true;
-        } catch (ActivityNotFoundException e) {
-            Log.w(TAG, "Unable to launch browser in WebAPK mode.");
-            e.printStackTrace();
-            return false;
+        if (!TextUtils.isEmpty(runtimeHost)) {
+            launchInHostBrowser(runtimeHost);
+            finish();
+            return;
+        }
+
+        List<ResolveInfo> infos = WebApkUtils.getInstalledBrowserResolveInfos(getPackageManager());
+        if (hasBrowserSupportingWebApks(infos)) {
+            showChooseHostBrowserDialog(infos);
+        } else {
+            showInstallHostBrowserDialog(metadata);
         }
     }
 
-    /**
-     * Launches browser (not necessarily the host browser).
-     * @param startUrl URL to navigate browser to.
-     * @return True if successful.
-     */
-    private boolean launchBrowser(String startUrl) {
-        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(startUrl));
-        intent.addCategory(Intent.CATEGORY_BROWSABLE);
+    /** Deletes the SharedPreferences. */
+    private void deleteSharedPref(Context context) {
+        SharedPreferences sharedPref =
+                context.getSharedPreferences(WebApkConstants.PREF_PACKAGE, Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = sharedPref.edit();
+        editor.clear();
+        editor.apply();
+    }
 
-        // The WebAPK can handle {@link startUrl}. Set a selector to prevent the WebAPK from
-        // launching itself.
-        try {
-            Intent selectorIntent = Intent.parseUri("https://", Intent.URI_INTENT_SCHEME);
-            intent.setSelector(selectorIntent);
-        } catch (URISyntaxException e) {
-            return false;
+    /** Deletes the internal storage. */
+    private void deleteInternalStorage() {
+        deletePath(getCacheDir());
+        deletePath(getFilesDir());
+        deletePath(getDir(HostBrowserClassLoader.DEX_DIR_NAME, Context.MODE_PRIVATE));
+    }
+
+    private void deletePath(File file) {
+        if (file == null) return;
+
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deletePath(child);
+                }
+            }
         }
 
-        // Add extras in case that the URL is launched in Chrome.
-        int source =
-                getIntent().getIntExtra(WebApkConstants.EXTRA_SOURCE, Intent.URI_INTENT_SCHEME);
-        intent.putExtra(REUSE_URL_MATCHING_TAB_ELSE_NEW_TAB, true)
-              .putExtra(WebApkConstants.EXTRA_SOURCE, source);
+        if (!file.delete()) {
+            Log.e(TAG, "Failed to delete : " + file.getAbsolutePath());
+        }
+    }
+
+    private void launchInHostBrowser(String runtimeHost) {
+        boolean forceNavigation = false;
+        int source = getIntent().getIntExtra(WebApkConstants.EXTRA_SOURCE, 0);
+        if (mOverrideUrl != null) {
+            if (source == WebApkConstants.SHORTCUT_SOURCE_UNKNOWN) {
+                source = WebApkConstants.SHORTCUT_SOURCE_EXTERNAL_INTENT;
+            }
+            forceNavigation = getIntent().getBooleanExtra(
+                    WebApkConstants.EXTRA_WEBAPK_FORCE_NAVIGATION, true);
+        }
+
+        // The override URL is non null when the WebAPK is launched from a deep link. The WebAPK
+        // should navigate to the URL in the deep link even if the WebAPK is already open.
+        Intent intent = new Intent();
+        intent.setAction(ACTION_START_WEBAPK);
+        intent.setPackage(runtimeHost);
+        intent.putExtra(WebApkConstants.EXTRA_URL, mStartUrl)
+                .putExtra(WebApkConstants.EXTRA_SOURCE, source)
+                .putExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME, getPackageName())
+                .putExtra(WebApkConstants.EXTRA_WEBAPK_FORCE_NAVIGATION, forceNavigation);
 
         try {
             startActivity(intent);
         } catch (ActivityNotFoundException e) {
-            return false;
+            Log.w(TAG, "Unable to launch browser in WebAPK mode.");
+            e.printStackTrace();
         }
-        return true;
     }
 
     /**
      * Launches the Play Store with the host browser's page.
      */
-    private void installBrowser() {
-        String hostBrowserPackageName = WebApkUtils.getHostBrowserPackageName(this);
-        if (hostBrowserPackageName == null) {
-            return;
-        }
-
+    private void installBrowser(String hostBrowserPackageName) {
         try {
             startActivity(createInstallIntent(hostBrowserPackageName));
         } catch (ActivityNotFoundException e) {
         }
     }
 
-    /**
-     * Returns the URL that the browser should navigate to.
-     */
-    private String getStartUrl() {
+    /** Retrieves URL from the intent's data. Returns null if a URL could not be retrieved. */
+    private String getOverrideUrl() {
         String overrideUrl = getIntent().getDataString();
-        if (overrideUrl != null && overrideUrl.startsWith("https:")) {
+        if (overrideUrl != null
+                && (overrideUrl.startsWith("https:") || overrideUrl.startsWith("http:"))) {
             return overrideUrl;
         }
+        return null;
+    }
 
-        ApplicationInfo appInfo;
-        try {
-            appInfo = getPackageManager().getApplicationInfo(
-                    getPackageName(), PackageManager.GET_META_DATA);
-        } catch (NameNotFoundException e) {
-            return null;
+    /** Returns whether there is any installed browser supporting WebAPKs. */
+    private static boolean hasBrowserSupportingWebApks(List<ResolveInfo> resolveInfos) {
+        List<String> browsersSupportingWebApk = WebApkUtils.getBrowsersSupportingWebApk();
+        for (ResolveInfo info : resolveInfos) {
+            if (browsersSupportingWebApk.contains(info.activityInfo.packageName)) {
+                return true;
+            }
         }
-        return appInfo.metaData.getString(WebApkMetaDataKeys.START_URL);
+        return false;
+    }
+
+    /** Shows a dialog to choose the host browser. */
+    private void showChooseHostBrowserDialog(List<ResolveInfo> infos) {
+        ChooseHostBrowserDialog.DialogListener listener =
+                new ChooseHostBrowserDialog.DialogListener() {
+                    @Override
+                    public void onHostBrowserSelected(String selectedHostBrowser) {
+                        launchInHostBrowser(selectedHostBrowser);
+                        WebApkUtils.writeHostBrowserToSharedPref(
+                                MainActivity.this, selectedHostBrowser);
+                        finish();
+                    }
+                    @Override
+                    public void onQuit() {
+                        finish();
+                    }
+                };
+        ChooseHostBrowserDialog.show(this, listener, infos, getString(R.string.name));
+    }
+
+    /** Shows a dialog to install the host browser. */
+    private void showInstallHostBrowserDialog(Bundle metadata) {
+        String lastResortHostBrowserPackageName =
+                metadata.getString(WebApkMetaDataKeys.RUNTIME_HOST);
+        String lastResortHostBrowserApplicationName =
+                metadata.getString(WebApkMetaDataKeys.RUNTIME_HOST_APPLICATION_NAME);
+
+        if (TextUtils.isEmpty(lastResortHostBrowserPackageName)) {
+            // WebAPKs without runtime host specified in the AndroidManifest.xml always install
+            // Google Chrome as the default host browser.
+            lastResortHostBrowserPackageName = LAST_RESORT_HOST_BROWSER;
+            lastResortHostBrowserApplicationName = LAST_RESORT_HOST_BROWSER_APPLICATION_NAME;
+        }
+
+        InstallHostBrowserDialog.DialogListener listener =
+                new InstallHostBrowserDialog.DialogListener() {
+                    @Override
+                    public void onConfirmInstall(String packageName) {
+                        installBrowser(packageName);
+                        WebApkUtils.writeHostBrowserToSharedPref(MainActivity.this, packageName);
+                        finish();
+                    }
+                    @Override
+                    public void onConfirmQuit() {
+                        finish();
+                    }
+                };
+
+        InstallHostBrowserDialog.show(this, listener, getString(R.string.name),
+                lastResortHostBrowserPackageName, lastResortHostBrowserApplicationName,
+                R.drawable.last_resort_runtime_host_logo);
     }
 }

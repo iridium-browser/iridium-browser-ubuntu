@@ -24,6 +24,7 @@
     {
       'target_name': 'background',
       'dependencies': [
+        '../../../externs/background/compiled_resources2.gyp:file_browser_background_full',
         '../../../externs/compiled_resources2.gyp:volume_manager',
         '../../common/js/compiled_resources2.gyp:metrics',
         '../../common/js/compiled_resources2.gyp:util',
@@ -124,16 +125,26 @@
         '../../../externs/compiled_resources2.gyp:file_operation_progress_event',
         '../../common/js/compiled_resources2.gyp:async_util',
         '../../common/js/compiled_resources2.gyp:util',
+        'metadata_proxy',
+      ],
+      'includes': ['../../../compile_js2.gypi'],
+    },
+    {
+      'target_name': 'metadata_proxy',
+      'dependencies': [
+        '../../common/js/compiled_resources2.gyp:lru_cache',
       ],
       'includes': ['../../../compile_js2.gypi'],
     },
     {
       'target_name': 'import_history',
       'dependencies': [
+        '../../../externs/background/compiled_resources2.gyp:import_history',
         '../../common/js/compiled_resources2.gyp:importer_common',
         '../../common/js/compiled_resources2.gyp:metrics',
         '../../common/js/compiled_resources2.gyp:metrics_events',
         '../../common/js/compiled_resources2.gyp:util',
+        'metadata_proxy',
       ],
       'includes': ['../../../compile_js2.gypi'],
     },
@@ -160,6 +171,7 @@
     {
       'target_name': 'media_import_handler',
       'dependencies': [
+        '../../../externs/background/compiled_resources2.gyp:import_runner',
         '../../common/js/compiled_resources2.gyp:importer_common',
         '../../common/js/compiled_resources2.gyp:metrics',
         'import_history',
@@ -173,6 +185,7 @@
       'target_name': 'media_scanner',
       'dependencies': [
         '../../../externs/compiled_resources2.gyp:platform',
+        '../../../externs/background/compiled_resources2.gyp:media_scanner',
         '../../common/js/compiled_resources2.gyp:importer_common',
         '<(EXTERNS_GYP):file_manager_private',
         'file_operation_util',
@@ -202,10 +215,10 @@
     {
       'target_name': 'progress_center',
       'dependencies': [
-        '../../../externs/compiled_resources2.gyp:progress_center_panel',
         '../../common/js/compiled_resources2.gyp:async_util',
         '../../common/js/compiled_resources2.gyp:progress_center_common',
         '../../common/js/compiled_resources2.gyp:util',
+        '../../foreground/js/ui/compiled_resources2.gyp:progress_center_panel',
         '<(EXTERNS_GYP):chrome_extensions',
       ],
       'includes': ['../../../compile_js2.gypi'],
@@ -240,6 +253,7 @@
         '../../../externs/compiled_resources2.gyp:platform',
         '../../../externs/compiled_resources2.gyp:volume_info',
         '../../common/js/compiled_resources2.gyp:volume_manager_common',
+        '<(EXTERNS_GYP):command_line_private',
       ],
       'includes': ['../../../compile_js2.gypi'],
     },

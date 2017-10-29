@@ -8,6 +8,7 @@
 #include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/extensions/extension_view_host_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/extensions/extension_dialog_observer.h"
 #include "chrome/browser/ui/views/extensions/extension_view_views.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -52,6 +53,7 @@ ExtensionDialog::ExtensionDialog(extensions::ExtensionViewHost* host,
   registrar_.Add(this,
                  extensions::NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
                  content::Source<BrowserContext>(host->browser_context()));
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::EXTENSION);
 }
 
 ExtensionDialog::~ExtensionDialog() {
@@ -87,8 +89,7 @@ ExtensionDialog* ExtensionDialog::Show(
 
   // Show a white background while the extension loads.  This is prettier than
   // flashing a black unfilled window frame.
-  view->set_background(
-      views::Background::CreateSolidBackground(0xFF, 0xFF, 0xFF));
+  view->SetBackground(views::CreateSolidBackground(SK_ColorWHITE));
   view->SetVisible(true);
 
   // Ensure the DOM JavaScript can respond immediately to keyboard shortcuts.
@@ -207,7 +208,7 @@ void ExtensionDialog::Observe(int type,
     case extensions::NOTIFICATION_EXTENSION_HOST_DID_STOP_FIRST_LOAD:
       // Avoid potential overdraw by removing the temporary background after
       // the extension finishes loading.
-      GetExtensionView(host_.get())->set_background(NULL);
+      GetExtensionView(host_.get())->SetBackground(nullptr);
       // The render view is created during the LoadURL(), so we should
       // set the focus to the view if nobody else takes the focus.
       if (content::Details<extensions::ExtensionHost>(host()) == details)

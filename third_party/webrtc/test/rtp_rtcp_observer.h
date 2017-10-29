@@ -14,9 +14,9 @@
 #include <memory>
 #include <vector>
 
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/event.h"
 #include "webrtc/modules/rtp_rtcp/include/rtp_header_parser.h"
+#include "webrtc/rtc_base/criticalsection.h"
+#include "webrtc/rtc_base/event.h"
 #include "webrtc/system_wrappers/include/field_trial.h"
 #include "webrtc/test/constants.h"
 #include "webrtc/test/direct_transport.h"
@@ -67,6 +67,7 @@ class RtpRtcpObserver {
   }
 
  protected:
+  RtpRtcpObserver() : RtpRtcpObserver(0) {}
   explicit RtpRtcpObserver(int event_timeout_ms)
       : observation_complete_(false, false),
         parser_(RtpHeaderParser::Create()),
@@ -93,8 +94,9 @@ class PacketTransport : public test::DirectTransport {
   PacketTransport(Call* send_call,
                   RtpRtcpObserver* observer,
                   TransportType transport_type,
+                  const std::map<uint8_t, MediaType>& payload_type_map,
                   const FakeNetworkPipe::Config& configuration)
-      : test::DirectTransport(configuration, send_call),
+      : test::DirectTransport(configuration, send_call, payload_type_map),
         observer_(observer),
         transport_type_(transport_type) {}
 

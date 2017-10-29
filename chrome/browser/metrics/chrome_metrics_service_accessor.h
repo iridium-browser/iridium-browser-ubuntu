@@ -6,18 +6,19 @@
 #define CHROME_BROWSER_METRICS_CHROME_METRICS_SERVICE_ACCESSOR_H_
 
 #include <stdint.h>
-#include <string>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/strings/string_piece.h"
 #include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "components/metrics/metrics_service_accessor.h"
 
 class BrowserProcessImpl;
-class Profile;
 class ChromeMetricsServiceClient;
 class ChromePasswordManagerClient;
+class NavigationMetricsRecorder;
+class Profile;
 
 namespace {
 class CrashesDOMHandler;
@@ -50,21 +51,17 @@ namespace options {
 class BrowserOptionsHandler;
 }
 
-namespace precache {
-void RegisterPrecacheSyntheticFieldTrial(base::Time);
-}
-
 namespace prerender {
 bool IsOmniboxEnabled(Profile* profile);
 }
 
 namespace safe_browsing {
+class ChromeCleanerControllerDelegate;
 class DownloadUrlSBClient;
 class IncidentReportingService;
 class ReporterRunner;
 class SafeBrowsingService;
 class SafeBrowsingUIManager;
-class SRTFetcher;
 class SRTGlobalError;
 }
 
@@ -99,6 +96,8 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   friend class BrowserProcessImpl;
   friend void chrome::AttemptRestart();
   friend class chrome::android::ExternalDataUseObserverBridge;
+  // For ChromeWinClang.
+  friend class ChromeBrowserMainExtraPartsMetrics;
   // For StackSamplingConfiguration.
   friend class ChromeBrowserMainParts;
   friend class ChromeMetricsServicesManagerClient;
@@ -113,22 +112,22 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
       bool,
       const OnMetricsReportingCallbackType&);
   friend class options::BrowserOptionsHandler;
-  friend void precache::RegisterPrecacheSyntheticFieldTrial(base::Time);
   friend bool prerender::IsOmniboxEnabled(Profile* profile);
   friend class settings::MetricsReportingHandler;
   friend class speech::ChromeSpeechRecognitionManagerDelegate;
   friend class system_logs::ChromeInternalLogSource;
   friend class UmaSessionStats;
+  friend class safe_browsing::ChromeCleanerControllerDelegate;
   friend class safe_browsing::DownloadUrlSBClient;
   friend class safe_browsing::IncidentReportingService;
   friend class safe_browsing::ReporterRunner;
-  friend class safe_browsing::SRTFetcher;
   friend class safe_browsing::SRTGlobalError;
   friend class safe_browsing::SafeBrowsingService;
   friend class safe_browsing::SafeBrowsingUIManager;
   friend void SyzyASANRegisterExperiment(const char*, const char*);
   friend class ChromeMetricsServiceClient;
   friend class ChromePasswordManagerClient;
+  friend class NavigationMetricsRecorder;
 
   FRIEND_TEST_ALL_PREFIXES(ChromeMetricsServiceAccessorTest,
                            MetricsReportingEnabled);
@@ -141,14 +140,14 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   // Calls metrics::MetricsServiceAccessor::RegisterSyntheticFieldTrial() with
   // g_browser_process->metrics_service(). See that function's declaration for
   // details.
-  static bool RegisterSyntheticFieldTrial(const std::string& trial_name,
-                                          const std::string& group_name);
+  static bool RegisterSyntheticFieldTrial(base::StringPiece trial_name,
+                                          base::StringPiece group_name);
 
   // Calls MetricsServiceAccessor::RegisterSyntheticMultiGroupFieldTrial() with
   // g_browser_process->metrics_service(). See that function's declaration for
   // details.
   static bool RegisterSyntheticMultiGroupFieldTrial(
-      const std::string& trial_name,
+      base::StringPiece trial_name,
       const std::vector<uint32_t>& group_name_hashes);
 
   // Calls
@@ -157,7 +156,7 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   // for details.
   static bool RegisterSyntheticFieldTrialWithNameHash(
       uint32_t trial_name_hash,
-      const std::string& group_name);
+      base::StringPiece group_name);
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ChromeMetricsServiceAccessor);
 };

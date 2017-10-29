@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright (c) 2017 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,10 @@ class QUIC_EXPORT_PRIVATE QuartcStreamInterface {
   // Return true if the FIN has been sent. Used by the outgoing streams to
   // determine if all the data has been sent
   virtual bool fin_sent() = 0;
+
+  virtual int stream_error() = 0;
+
+  virtual int connection_error() = 0;
 
   struct WriteParameters {
     WriteParameters() : fin(false) {}
@@ -63,7 +67,7 @@ class QUIC_EXPORT_PRIVATE QuartcStreamInterface {
     // endpoint.
     // TODO(zhihuang) Creates a map from the integer error_code to WebRTC native
     // error code.
-    virtual void OnClose(QuartcStreamInterface* stream, int error_code) = 0;
+    virtual void OnClose(QuartcStreamInterface* stream) = 0;
 
     // Called when buffered_amount() decreases.
     virtual void OnBufferedAmountDecrease(QuartcStreamInterface* stream) = 0;

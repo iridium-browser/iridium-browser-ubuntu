@@ -3,10 +3,14 @@
 // found in the LICENSE file.
 
 #include "ash/test/ash_test_base.h"
+#include "ash/test/ash_test_helper.h"
+#include "ash/test/ash_test_views_delegate.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/extensions/test_extension_environment.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_dialog_views.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_footer_panel.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/test/base/testing_profile.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/widget/widget.h"
@@ -18,14 +22,16 @@ const char kTestExtensionId[] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 }  // namespace
 
-class AppInfoDialogAshTest : public ash::test::AshTestBase {
+class AppInfoDialogAshTest : public ash::AshTestBase {
  public:
   AppInfoDialogAshTest()
       : extension_environment_(base::MessageLoopForUI::current()) {}
 
   // Overridden from testing::Test:
   void SetUp() override {
-    ash::test::AshTestBase::SetUp();
+    ash::AshTestBase::SetUp();
+    ash_test_helper()->test_views_delegate()->set_layout_provider(
+        base::MakeUnique<ChromeLayoutProvider>());
     widget_ = views::DialogDelegate::CreateDialogWidget(
         new views::DialogDelegateView(), CurrentContext(), NULL);
     dialog_ = new AppInfoDialog(
@@ -37,7 +43,7 @@ class AppInfoDialogAshTest : public ash::test::AshTestBase {
 
   void TearDown() override {
     widget_->CloseNow();
-    ash::test::AshTestBase::TearDown();
+    ash::AshTestBase::TearDown();
   }
 
  protected:

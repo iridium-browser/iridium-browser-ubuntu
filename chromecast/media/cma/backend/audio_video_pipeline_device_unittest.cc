@@ -16,12 +16,11 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_scheduler.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -35,6 +34,8 @@
 #include "chromecast/public/media/decoder_config.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
 #include "chromecast/public/media/media_pipeline_device_params.h"
+#include "chromecast/public/volume_control.h"
+#include "media/audio/audio_device_description.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/audio_timestamp_helper.h"
 #include "media/base/decoder_buffer.h"
@@ -188,12 +189,18 @@ class AudioVideoPipelineDeviceTest : public testing::Test {
   void SetUp() override {
     CastMediaShlib::Initialize(
         base::CommandLine::ForCurrentProcess()->argv());
+    if (VolumeControl::Initialize) {
+      VolumeControl::Initialize(base::CommandLine::ForCurrentProcess()->argv());
+    }
   }
 
   void TearDown() override {
     // Pipeline must be destroyed before finalizing media shlib.
     backend_.reset();
     effects_backends_.clear();
+    if (VolumeControl::Finalize) {
+      VolumeControl::Finalize();
+    }
     CastMediaShlib::Finalize();
   }
 
@@ -233,7 +240,7 @@ class AudioVideoPipelineDeviceTest : public testing::Test {
 
   void OnPauseCompleted();
 
-  base::test::ScopedTaskScheduler task_scheduler_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   MediaPipelineDeviceParams::MediaSyncType sync_type_;
   MediaPipelineDeviceParams::AudioStreamType audio_type_;
   std::unique_ptr<TaskRunnerImpl> task_runner_;
@@ -616,7 +623,9 @@ AudioVideoPipelineDeviceTest::~AudioVideoPipelineDeviceTest() {}
 void AudioVideoPipelineDeviceTest::Initialize() {
   // Create the media device.
   task_runner_.reset(new TaskRunnerImpl());
-  MediaPipelineDeviceParams params(sync_type_, audio_type_, task_runner_.get());
+  MediaPipelineDeviceParams params(
+      sync_type_, audio_type_, task_runner_.get(), AudioContentType::kMedia,
+      ::media::AudioDeviceDescription::kDefaultDeviceId);
   backend_.reset(CastMediaShlib::CreateMediaPipelineBackend(params));
   CHECK(backend_);
 }
@@ -638,8 +647,9 @@ void AudioVideoPipelineDeviceTest::AddEffectsStreams() {
   for (int i = 0; i < kNumEffectsStreams; ++i) {
     MediaPipelineDeviceParams params(
         MediaPipelineDeviceParams::kModeIgnorePts,
-        MediaPipelineDeviceParams::kAudioStreamSoundEffects,
-        task_runner_.get());
+        MediaPipelineDeviceParams::kAudioStreamSoundEffects, task_runner_.get(),
+        AudioContentType::kMedia,
+        ::media::AudioDeviceDescription::kDefaultDeviceId);
     MediaPipelineBackend* effects_backend =
         CastMediaShlib::CreateMediaPipelineBackend(params);
     CHECK(effects_backend);
@@ -718,7 +728,8 @@ void AudioVideoPipelineDeviceTest::Start() {
 
   backend_->Start(kStartPts);
   int64_t current_pts = backend()->GetCurrentPts();
-  EXPECT_TRUE(kStartPts || current_pts == std::numeric_limits<int64_t>::min());
+  EXPECT_TRUE(current_pts == kStartPts ||
+              current_pts == std::numeric_limits<int64_t>::min());
   last_pts_ = current_pts;
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -767,7 +778,7 @@ void AudioVideoPipelineDeviceTest::OnEndOfStream() {
 
 void AudioVideoPipelineDeviceTest::MonitorLoop() {
   // Backend is stopped, no need to monitor the loop any more.
-  if (stopped_)
+  if (stopped_ || !backend_)
     return;
 
   // Run checks while playing (once).
@@ -1050,13 +1061,20 @@ TEST_F(AudioVideoPipelineDeviceTest, VideoImmediateEos) {
   Initialize();
   MediaPipelineBackend::VideoDecoder* video_decoder =
       backend()->CreateVideoDecoder();
-
-  std::unique_ptr<BufferFeeder> feeder(new BufferFeeder(
+  std::unique_ptr<BufferFeeder> video_feeder(new BufferFeeder(
       base::Bind(&AudioVideoPipelineDeviceTest::EndImmediateEosTest,
                  base::Unretained(this))));
-  feeder->Initialize(backend(), video_decoder, BufferList());
-  feeder->SetVideoConfig(DefaultVideoConfig());
-  SetVideoFeeder(std::move(feeder));
+  video_feeder->Initialize(backend(), video_decoder, BufferList());
+  video_feeder->SetVideoConfig(DefaultVideoConfig());
+  SetVideoFeeder(std::move(video_feeder));
+
+  MediaPipelineBackend::AudioDecoder* audio_decoder =
+      backend()->CreateAudioDecoder();
+  std::unique_ptr<BufferFeeder> audio_feeder(
+      new BufferFeeder(base::Bind(&IgnoreEos)));
+  audio_feeder->Initialize(backend(), audio_decoder, BufferList());
+  audio_feeder->SetAudioConfig(DefaultAudioConfig());
+  SetAudioFeeder(std::move(audio_feeder));
 
   StartImmediateEosTest();
   base::RunLoop().RunUntilIdle();

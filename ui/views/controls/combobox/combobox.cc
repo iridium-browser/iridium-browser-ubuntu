@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/default_style.h"
 #include "ui/base/ime/input_method.h"
@@ -95,6 +96,12 @@ bool UseMd() {
   return ui::MaterialDesignController::IsSecondaryUiMaterial();
 }
 
+SkColor GetTextColorForEnableState(bool enabled, ui::NativeTheme* theme) {
+  return style::GetColor(style::CONTEXT_TEXTFIELD,
+                         enabled ? style::STYLE_PRIMARY : style::STYLE_DISABLED,
+                         theme);
+}
+
 gfx::Rect PositionArrowWithinContainer(const gfx::Rect& container_bounds,
                                        const gfx::Size& arrow_size,
                                        Combobox::Style style) {
@@ -123,16 +130,18 @@ class TransparentButton : public CustomButton {
     set_notify_action(PlatformStyle::kMenuNotifyActivationAction);
 
     if (UseMd()) {
-      SetInkDropMode(PlatformStyle::kUseRipples ? InkDropMode::ON
-                                                : InkDropMode::OFF);
+      SetInkDropMode(InkDropMode::ON);
       set_has_ink_drop_action_on_click(true);
     }
   }
   ~TransparentButton() override {}
 
   bool OnMousePressed(const ui::MouseEvent& mouse_event) override {
-    if (!UseMd())
-      parent()->RequestFocus();
+#if !defined(OS_MACOSX)
+    // On Mac, comboboxes do not take focus on mouse click, but on other
+    // platforms they do.
+    parent()->RequestFocus();
+#endif
     return CustomButton::OnMousePressed(mouse_event);
   }
 
@@ -449,7 +458,8 @@ Combobox::Combobox(ui::ComboboxModel* model, Style style)
     SetPaintToLayer();
     layer()->SetFillsBoundsOpaquely(false);
   } else {
-    arrow_image_ = PlatformStyle::CreateComboboxArrow(enabled(), style);
+    arrow_image_ = *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+        IDR_MENU_DROPARROW);
   }
 }
 
@@ -547,18 +557,12 @@ void Combobox::Layout() {
   arrow_button_->SetBounds(arrow_button_x, 0, arrow_button_width, height());
 }
 
-void Combobox::OnEnabledChanged() {
-  View::OnEnabledChanged();
-  if (!UseMd())
-    arrow_image_ = PlatformStyle::CreateComboboxArrow(enabled(), style_);
-}
-
 void Combobox::OnNativeThemeChanged(const ui::NativeTheme* theme) {
   if (!UseMd())
     return;
 
-  set_background(
-      Background::CreateBackgroundPainter(Painter::CreateSolidRoundRectPainter(
+  SetBackground(
+      CreateBackgroundFromPainter(Painter::CreateSolidRoundRectPainter(
           theme->GetSystemColor(
               ui::NativeTheme::kColorId_TextfieldDefaultBackground),
           FocusableBorder::kCornerRadiusDp)));
@@ -587,7 +591,7 @@ base::string16 Combobox::GetTextForRow(int row) {
 ////////////////////////////////////////////////////////////////////////////////
 // Combobox, View overrides:
 
-gfx::Size Combobox::GetPreferredSize() const {
+gfx::Size Combobox::CalculatePreferredSize() const {
   // The preferred size will drive the local bounds which in turn is used to set
   // the minimum width for the dropdown list.
   gfx::Insets insets = GetInsets();
@@ -754,15 +758,33 @@ void Combobox::OnBlur() {
 }
 
 void Combobox::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  node_data->role = ui::AX_ROLE_COMBO_BOX;
+  // AX_ROLE_COMBO_BOX is for UI elements with a dropdown and an editable text
+  // field, which views::Combobox does not have. Use AX_ROLE_POP_UP_BUTTON to
+  // match an HTML <select> element.
+  node_data->role = ui::AX_ROLE_POP_UP_BUTTON;
+
   node_data->SetName(accessible_name_);
   node_data->SetValue(model_->GetItemAt(selected_index_));
   if (enabled()) {
-    node_data->AddIntAttribute(ui::AX_ATTR_ACTION,
-                               ui::AX_SUPPORTED_ACTION_OPEN);
+    node_data->AddIntAttribute(ui::AX_ATTR_DEFAULT_ACTION_VERB,
+                               ui::AX_DEFAULT_ACTION_VERB_OPEN);
   }
   node_data->AddIntAttribute(ui::AX_ATTR_POS_IN_SET, selected_index_);
   node_data->AddIntAttribute(ui::AX_ATTR_SET_SIZE, model_->GetItemCount());
+}
+
+bool Combobox::HandleAccessibleAction(const ui::AXActionData& action_data) {
+  // The action handling in View would generate a mouse event and send it to
+  // |this|. However, mouse events for Combobox are handled by |arrow_button_|,
+  // which is hidden from the a11y tree (so can't expose actions). Rather than
+  // forwarding AX_ACTION_DO_DEFAULT to View and then forwarding the mouse event
+  // it generates to |arrow_button_| to have it forward back to |this| (as its
+  // ButtonListener), just handle the action explicitly here and bypass View.
+  if (enabled() && action_data.action == ui::AX_ACTION_DO_DEFAULT) {
+    ShowDropDownMenu(ui::MENU_SOURCE_KEYBOARD);
+    return true;
+  }
+  return View::HandleAccessibleAction(action_data);
 }
 
 void Combobox::ButtonPressed(Button* sender, const ui::Event& event) {
@@ -814,12 +836,7 @@ void Combobox::PaintText(gfx::Canvas* canvas) {
   int x = insets.left();
   int y = insets.top();
   int text_height = height() - insets.height();
-  SkColor text_color = GetNativeTheme()->GetSystemColor(
-      UseMd() ? (enabled() ? ui::NativeTheme::kColorId_TextfieldDefaultColor
-                           : ui::NativeTheme::kColorId_TextfieldReadOnlyColor)
-              : (enabled() ? ui::NativeTheme::kColorId_LabelEnabledColor
-                           : ui::NativeTheme::kColorId_LabelDisabledColor));
-
+  SkColor text_color = GetTextColorForEnableState(enabled(), GetNativeTheme());
   DCHECK_GE(selected_index_, 0);
   DCHECK_LT(selected_index_, model()->GetItemCount());
   if (selected_index_ < 0 || selected_index_ > model()->GetItemCount())
@@ -862,8 +879,7 @@ void Combobox::PaintText(gfx::Canvas* canvas) {
     path.rLineTo(height, -height);
     path.close();
     cc::PaintFlags flags;
-    SkColor arrow_color = GetNativeTheme()->GetSystemColor(
-        ui::NativeTheme::kColorId_ButtonEnabledColor);
+    SkColor arrow_color = GetTextColorForEnableState(true, GetNativeTheme());
     if (!enabled())
       arrow_color = SkColorSetA(arrow_color, gfx::kDisabledControlAlpha);
     flags.setColor(arrow_color);
@@ -954,10 +970,10 @@ void Combobox::ShowDropDownMenu(ui::MenuSourceType source_type) {
   // Allow |menu_runner_| to be set by the testing API, but if this method is
   // ever invoked recursively, ensure the old menu is closed.
   if (!menu_runner_ || menu_runner_->IsRunning()) {
-    menu_runner_.reset(new MenuRunner(
-        menu_model_.get(), MenuRunner::COMBOBOX | MenuRunner::ASYNC,
-        base::Bind(&Combobox::OnMenuClosed, base::Unretained(this),
-                   original_state)));
+    menu_runner_.reset(
+        new MenuRunner(menu_model_.get(), MenuRunner::COMBOBOX,
+                       base::Bind(&Combobox::OnMenuClosed,
+                                  base::Unretained(this), original_state)));
   }
   menu_runner_->RunMenuAt(GetWidget(), nullptr, bounds, anchor_position,
                           source_type);
@@ -1010,9 +1026,9 @@ PrefixSelector* Combobox::GetPrefixSelector() {
 }
 
 int Combobox::GetArrowContainerWidth() const {
-  const int kMdPaddingWidth = 8;
-  int arrow_pad = UseMd() ? kMdPaddingWidth
-                          : PlatformStyle::kComboboxNormalArrowPadding;
+  constexpr int kMdPaddingWidth = 8;
+  constexpr int kNormalPaddingWidth = 7;
+  int arrow_pad = UseMd() ? kMdPaddingWidth : kNormalPaddingWidth;
   int padding = style_ == STYLE_NORMAL
                     ? arrow_pad * 2
                     : kActionLeftPadding + kActionRightPadding;

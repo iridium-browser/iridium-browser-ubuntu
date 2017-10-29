@@ -34,6 +34,7 @@
 #include "util/win/get_function.h"
 #include "util/win/handle.h"
 #include "util/win/registration_protocol_win.h"
+#include "util/win/safe_terminate_process.h"
 #include "util/win/xp_compat.h"
 
 namespace crashpad {
@@ -396,7 +397,8 @@ bool ExceptionHandlerServer::ServiceClientConnection(
     const internal::PipeServiceContext& service_context) {
   ClientToServerMessage message;
 
-  if (!LoggingReadFile(service_context.pipe(), &message, sizeof(message)))
+  if (!LoggingReadFileExactly(
+          service_context.pipe(), &message, sizeof(message)))
     return false;
 
   switch (message.type) {
@@ -545,7 +547,7 @@ void __stdcall ExceptionHandlerServer::OnCrashDumpEvent(void* ctx, BOOLEAN) {
       client->crash_exception_information_address(),
       client->debug_critical_section_address());
 
-  TerminateProcess(client->process(), exit_code);
+  SafeTerminateProcess(client->process(), exit_code);
 }
 
 // static

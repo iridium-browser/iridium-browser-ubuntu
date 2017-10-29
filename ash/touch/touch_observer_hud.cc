@@ -22,7 +22,7 @@ TouchObserverHUD::TouchObserverHUD(aura::Window* initial_root)
       root_window_(initial_root),
       widget_(NULL) {
   const display::Display& display =
-      Shell::GetInstance()->display_manager()->GetDisplayForId(display_id_);
+      Shell::Get()->display_manager()->GetDisplayForId(display_id_);
 
   views::View* content = new views::View;
 
@@ -47,14 +47,14 @@ TouchObserverHUD::TouchObserverHUD(aura::Window* initial_root)
 
   // Observe changes in display size and mode to update touch HUD.
   display::Screen::GetScreen()->AddObserver(this);
-  Shell::GetInstance()->display_configurator()->AddObserver(this);
-  Shell::GetInstance()->window_tree_host_manager()->AddObserver(this);
+  Shell::Get()->display_configurator()->AddObserver(this);
+  Shell::Get()->window_tree_host_manager()->AddObserver(this);
   root_window_->AddPreTargetHandler(this);
 }
 
 TouchObserverHUD::~TouchObserverHUD() {
-  Shell::GetInstance()->window_tree_host_manager()->RemoveObserver(this);
-  Shell::GetInstance()->display_configurator()->RemoveObserver(this);
+  Shell::Get()->window_tree_host_manager()->RemoveObserver(this);
+  Shell::Get()->display_configurator()->RemoveObserver(this);
   display::Screen::GetScreen()->RemoveObserver(this);
 
   widget_->RemoveObserver(this);
@@ -65,7 +65,8 @@ void TouchObserverHUD::Clear() {}
 void TouchObserverHUD::Remove() {
   root_window_->RemovePreTargetHandler(this);
 
-  RootWindowController* controller = GetRootWindowController(root_window_);
+  RootWindowController* controller =
+      RootWindowController::ForWindow(root_window_);
   UnsetHudForRootWindowController(controller);
 
   widget_->CloseNow();
@@ -111,7 +112,8 @@ void TouchObserverHUD::OnDisplayConfigurationChanging() {
 
   root_window_->RemovePreTargetHandler(this);
 
-  RootWindowController* controller = GetRootWindowController(root_window_);
+  RootWindowController* controller =
+      RootWindowController::ForWindow(root_window_);
   UnsetHudForRootWindowController(controller);
 
   views::Widget::ReparentNativeView(
@@ -126,15 +128,14 @@ void TouchObserverHUD::OnDisplayConfigurationChanged() {
   if (root_window_)
     return;
 
-  root_window_ = Shell::GetInstance()
-                     ->window_tree_host_manager()
-                     ->GetRootWindowForDisplayId(display_id_);
+  root_window_ = Shell::GetRootWindowForDisplayId(display_id_);
 
   views::Widget::ReparentNativeView(
       widget_->GetNativeView(),
       Shell::GetContainer(root_window_, kShellWindowId_OverlayContainer));
 
-  RootWindowController* controller = GetRootWindowController(root_window_);
+  RootWindowController* controller =
+      RootWindowController::ForWindow(root_window_);
   SetHudForRootWindowController(controller);
 
   root_window_->AddPreTargetHandler(this);

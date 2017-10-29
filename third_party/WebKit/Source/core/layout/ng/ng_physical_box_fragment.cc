@@ -4,7 +4,9 @@
 
 #include "core/layout/ng/ng_physical_box_fragment.h"
 
-#include "core/layout/ng/ng_floating_object.h"
+#include "core/layout/ng/ng_layout_result.h"
+#include "core/layout/ng/ng_positioned_float.h"
+#include "core/layout/ng/ng_unpositioned_float.h"
 
 namespace blink {
 
@@ -13,19 +15,35 @@ NGPhysicalBoxFragment::NGPhysicalBoxFragment(
     NGPhysicalSize size,
     NGPhysicalSize overflow,
     Vector<RefPtr<NGPhysicalFragment>>& children,
-    Vector<Persistent<NGFloatingObject>>& positioned_floats,
-    const WTF::Optional<NGLogicalOffset>& bfc_offset,
-    const NGMarginStrut& end_margin_strut,
+    Vector<NGBaseline>& baselines,
+    unsigned border_edges,  // NGBorderEdges::Physical
     RefPtr<NGBreakToken> break_token)
     : NGPhysicalFragment(layout_object,
                          size,
-                         overflow,
                          kFragmentBox,
                          std::move(break_token)),
-      positioned_floats_(positioned_floats),
-      bfc_offset_(bfc_offset),
-      end_margin_strut_(end_margin_strut) {
+      overflow_(overflow) {
   children_.swap(children);
+  baselines_.swap(baselines);
+  border_edge_ = border_edges;
+}
+
+const NGBaseline* NGPhysicalBoxFragment::Baseline(
+    const NGBaselineRequest& request) const {
+  for (const auto& baseline : baselines_) {
+    if (baseline.request == request)
+      return &baseline;
+  }
+  return nullptr;
+}
+
+RefPtr<NGPhysicalFragment> NGPhysicalBoxFragment::CloneWithoutOffset() const {
+  Vector<RefPtr<NGPhysicalFragment>> children_copy(children_);
+  Vector<NGBaseline> baselines_copy(baselines_);
+  RefPtr<NGPhysicalFragment> physical_fragment = AdoptRef(
+      new NGPhysicalBoxFragment(layout_object_, size_, overflow_, children_copy,
+                                baselines_copy, border_edge_, break_token_));
+  return physical_fragment;
 }
 
 }  // namespace blink

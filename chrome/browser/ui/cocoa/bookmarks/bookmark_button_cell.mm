@@ -5,13 +5,14 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button_cell.h"
 
 #include "base/logging.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_constants.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_context_menu_cocoa_controller.h"
+#include "chrome/browser/ui/cocoa/l10n_util.h"
 #include "chrome/grit/generated_resources.h"
 #import "components/bookmarks/browser/bookmark_model.h"
-#include "content/public/browser/user_metrics.h"
 #import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/material_design/material_design_controller.h"
@@ -23,20 +24,25 @@ using bookmarks::BookmarkNode;
 
 namespace {
 
-// Padding on the right side of the arrow icon.
-const int kHierarchyButtonRightPadding = 4;
+// Padding on the trailing side of the arrow icon.
+const int kHierarchyButtonTrailingPadding = 4;
 
-// Padding on the left side of the arrow icon.
-const int kHierarchyButtonLeftPadding = 11;
+// Padding on the leading side of the arrow icon.
+const int kHierarchyButtonLeadingPadding = 11;
 
 const int kIconTextSpacer = 4;
-const int kTextRightPadding = 4;
-const int kIconLeftPadding = 4;
+const int kTrailingPadding = 4;
+const int kIconLeadingPadding = 4;
 
 const int kDefaultFontSize = 12;
 
+// Kerning value for the title text.
+const CGFloat kKernAmount = 0.2;
+
 };  // namespace
 
+// TODO(lgrey): Bake setting the chevron image into this
+// class instead of setting it externally.
 @interface OffTheSideButtonCell : BookmarkButtonCell
 
 - (NSString*)accessibilityTitle;
@@ -63,7 +69,7 @@ const int kDefaultFontSize = 12;
 
 @end
 
-@interface BookmarkButtonCell(Private)
+@interface BookmarkButtonCell (Private)
 // Returns YES if the cell is the offTheSide button cell.
 - (BOOL)isOffTheSideButtonCell;
 - (void)configureBookmarkButtonCell;
@@ -75,7 +81,6 @@ const int kDefaultFontSize = 12;
 // Returns the dictionary of attributes to associate with the button title.
 - (NSDictionary*)titleTextAttributes;
 @end
-
 
 @implementation BookmarkButtonCell
 
@@ -106,6 +111,28 @@ const int kDefaultFontSize = 12;
   return buttonCell;
 }
 
++ (id)offTheSideButtonCell {
+  return [[[OffTheSideButtonCell alloc] init] autorelease];
+}
+
++ (CGFloat)cellWidthForNode:(const bookmarks::BookmarkNode*)node
+                      image:(NSImage*)image {
+  NSString* title =
+      [self cleanTitle:base::SysUTF16ToNSString(node->GetTitle())];
+  CGFloat width = kIconLeadingPadding + [image size].width;
+  if ([title length] > 0) {
+    CGSize titleSize = [title sizeWithAttributes:@{
+      NSParagraphStyleAttributeName : [self paragraphStyleForBookmarkBarCell],
+      NSKernAttributeName : @(kKernAmount),
+      NSFontAttributeName : [self fontForBookmarkBarCell],
+    }];
+    width += kIconTextSpacer + std::ceil(titleSize.width) + kTrailingPadding;
+  } else {
+    width += kTrailingPadding;
+  }
+  return width;
+}
+
 - (id)initForNode:(const BookmarkNode*)node
              text:(NSString*)text
             image:(NSImage*)image
@@ -114,7 +141,7 @@ const int kDefaultFontSize = 12;
     menuController_ = menuController;
     [self configureBookmarkButtonCell];
     [self setTextColor:[NSColor blackColor]];
-    [self setBookmarkNode:node];
+    [self setBookmarkNode:node image:image];
     // When opening a bookmark folder, the default behavior is that the
     // favicon is greyed when menu item is hovered with the mouse cursor.
     // When using NSNoCellMask, the favicon won't be greyed when menu item
@@ -124,15 +151,6 @@ const int kDefaultFontSize = 12;
     // It makes the behavior of the bookmark folder consistent with hovering
     // on the bookmark bar.
     [self setHighlightsBy:NSNoCellMask];
-
-    if (node) {
-      NSString* title = base::SysUTF16ToNSString(node->GetTitle());
-      [self setBookmarkCellText:title image:image];
-    } else {
-      [self setEmpty:YES];
-      [self setBookmarkCellText:l10n_util::GetNSString(IDS_MENU_EMPTY_SUBMENU)
-                          image:nil];
-    }
   }
 
   return self;
@@ -178,8 +196,8 @@ const int kDefaultFontSize = 12;
   [self setButtonType:NSMomentaryPushInButton];
   [self setShowsBorderOnlyWhileMouseInside:YES];
   [self setControlSize:NSSmallControlSize];
-  [self setAlignment:NSLeftTextAlignment];
-  [self setFont:[NSFont systemFontOfSize:kDefaultFontSize]];
+  [self setAlignment:NSNaturalTextAlignment];
+  [self setFont:[[self class] fontForBookmarkBarCell]];
   [self setBordered:NO];
   [self setBezeled:NO];
   [self setWraps:NO];
@@ -214,18 +232,14 @@ const int kDefaultFontSize = 12;
 
 - (void)setBookmarkCellText:(NSString*)title
                       image:(NSImage*)image {
-  title = [title stringByReplacingOccurrencesOfString:@"\n"
-                                           withString:@" "];
-  title = [title stringByReplacingOccurrencesOfString:@"\r"
-                                           withString:@" "];
-
-  if ([title length]) {
-    [self setImagePosition:NSImageLeft];
+  title = [[self class] cleanTitle:title];
+  if ([title length] && ![self isOffTheSideButtonCell]) {
+    [self setImagePosition:cocoa_l10n_util::LeadingCellImagePosition()];
     [self setTitle:title];
   } else if ([self isFolderButtonCell]) {
     // Left-align icons for bookmarks within folders, regardless of whether
     // there is a title.
-    [self setImagePosition:NSImageLeft];
+    [self setImagePosition:cocoa_l10n_util::LeadingCellImagePosition()];
   } else {
     // For bookmarks without a title that aren't visible directly in the
     // bookmarks bar, squeeze things tighter by displaying only the image.
@@ -239,7 +253,20 @@ const int kDefaultFontSize = 12;
 }
 
 - (void)setBookmarkNode:(const BookmarkNode*)node {
+  [self setBookmarkNode:node image:nil];
+}
+
+- (void)setBookmarkNode:(const BookmarkNode*)node image:(NSImage*)image {
   [self setRepresentedObject:[NSValue valueWithPointer:node]];
+  if (node) {
+    [self setEmpty:NO];
+    NSString* title = base::SysUTF16ToNSString(node->GetTitle());
+    [self setBookmarkCellText:title image:image];
+  } else {
+    [self setEmpty:YES];
+    [self setBookmarkCellText:l10n_util::GetNSString(IDS_MENU_EMPTY_SUBMENU)
+                        image:nil];
+  }
 }
 
 - (const BookmarkNode*)bookmarkNode {
@@ -254,9 +281,9 @@ const int kDefaultFontSize = 12;
 
   if (node && node->parent() &&
       node->parent()->type() == BookmarkNode::FOLDER) {
-    content::RecordAction(UserMetricsAction("BookmarkBarFolder_CtxMenu"));
+    base::RecordAction(UserMetricsAction("BookmarkBarFolder_CtxMenu"));
   } else {
-    content::RecordAction(UserMetricsAction("BookmarkBar_CtxMenu"));
+    base::RecordAction(UserMetricsAction("BookmarkBar_CtxMenu"));
   }
   return [menuController_ menuForBookmarkNode:node];
 }
@@ -303,16 +330,16 @@ const int kDefaultFontSize = 12;
   drawFolderArrow_ = draw;
   if (draw && !arrowImage_) {
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    arrowImage_.reset(
-        [rb.GetNativeImageNamed(IDR_MENU_HIERARCHY_ARROW).ToNSImage() retain]);
+    NSImage* image =
+        rb.GetNativeImageNamed(IDR_MENU_HIERARCHY_ARROW).ToNSImage();
+    if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout())
+      image = cocoa_l10n_util::FlippedImage(image);
+    arrowImage_.reset([image retain]);
   }
 }
 
 - (NSDictionary*)titleTextAttributes {
-  base::scoped_nsobject<NSMutableParagraphStyle> style(
-      [NSMutableParagraphStyle new]);
-  [style setAlignment:NSNaturalTextAlignment];
-  [style setLineBreakMode:NSLineBreakByTruncatingTail];
+  NSParagraphStyle* style = [[self class] paragraphStyleForBookmarkBarCell];
   NSColor* textColor = textColor_.get();
   if (!textColor) {
     textColor = [NSColor blackColor];
@@ -322,14 +349,14 @@ const int kDefaultFontSize = 12;
   }
   NSFont* theFont = [self font];
   if (!theFont) {
-    theFont = [NSFont systemFontOfSize:kDefaultFontSize];
+    theFont = [[self class] fontForBookmarkBarCell];
   }
 
   return @{
-     NSFontAttributeName : theFont,
-     NSForegroundColorAttributeName : textColor,
-     NSParagraphStyleAttributeName : style.get(),
-     NSKernAttributeName : [NSNumber numberWithFloat:0.2]
+    NSFontAttributeName : theFont,
+    NSForegroundColorAttributeName : textColor,
+    NSParagraphStyleAttributeName : style,
+    NSKernAttributeName : @(kKernAmount),
   };
 }
 
@@ -343,38 +370,51 @@ const int kDefaultFontSize = 12;
   NSSize cellSize = NSZeroSize;
   // Return the space needed to display the image and title, with a little
   // distance between them.
-  cellSize = NSMakeSize(kIconLeftPadding + [[self image] size].width,
+  cellSize = NSMakeSize(kIconLeadingPadding + [[self image] size].width,
                         bookmarks::kBookmarkButtonHeight);
   NSString* title = [self visibleTitle];
   if ([title length] > 0) {
     CGFloat textWidth =
         [title sizeWithAttributes:[self titleTextAttributes]].width;
-    cellSize.width +=
-        kIconTextSpacer + std::ceil(textWidth) + kTextRightPadding;
+    cellSize.width += kIconTextSpacer + std::ceil(textWidth) + kTrailingPadding;
   } else {
-    // Make buttons without visible titles 20pts wide (18 plus padding).
-    cellSize.width += kIconLeftPadding;
+    cellSize.width += kIconLeadingPadding;
   }
 
   if (drawFolderArrow_) {
     cellSize.width += [arrowImage_ size].width +
-                      kHierarchyButtonLeftPadding +
-                      kHierarchyButtonRightPadding;
+                      kHierarchyButtonLeadingPadding +
+                      kHierarchyButtonTrailingPadding;
   }
   return cellSize;
 }
 
 - (NSRect)imageRectForBounds:(NSRect)theRect {
   NSRect imageRect = [super imageRectForBounds:theRect];
-  // Add a little space between the image and the button's left edge, but only
-  // if there's a visible title.
+  const CGFloat inset = [self insetInView:[self controlView]];
   imageRect.origin.y -= 1;
-  imageRect.origin.x = kIconLeftPadding;
+  imageRect.origin.x =
+      cocoa_l10n_util::ShouldDoExperimentalRTLLayout()
+          ? NSMaxX(theRect) - kIconLeadingPadding - NSWidth(imageRect) + inset
+          : kIconLeadingPadding;
   return imageRect;
 }
 
-- (CGFloat)textStartXOffset {
-  return kIconLeftPadding + [[self image] size].width + kIconTextSpacer;
+- (NSRect)titleRectForBounds:(NSRect)theRect {
+  NSRect textRect = [super titleRectForBounds:theRect];
+  NSRect imageRect = [self imageRectForBounds:theRect];
+  if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout()) {
+    textRect.origin.x = kTrailingPadding;
+    if (drawFolderArrow_) {
+      textRect.origin.x +=
+          [arrowImage_ size].width + kHierarchyButtonTrailingPadding;
+    }
+    textRect.size.width =
+        NSMinX(imageRect) - textRect.origin.x - kIconTextSpacer;
+  } else {
+    textRect.origin.x = NSMaxX(imageRect) + kIconTextSpacer;
+  }
+  return textRect;
 }
 
 - (void)drawFocusRingMaskWithFrame:(NSRect)cellFrame
@@ -406,8 +446,10 @@ const int kDefaultFontSize = 12;
     NSRect imageRect = NSZeroRect;
     imageRect.size = [arrowImage_ size];
     const CGFloat kArrowOffset = 1.0;  // Required for proper centering.
-    CGFloat dX =
-        NSWidth(cellFrame) - NSWidth(imageRect) - kHierarchyButtonRightPadding;
+    CGFloat dX = cocoa_l10n_util::ShouldDoExperimentalRTLLayout()
+                     ? kHierarchyButtonTrailingPadding
+                     : NSWidth(cellFrame) - NSWidth(imageRect) -
+                           kHierarchyButtonTrailingPadding;
     CGFloat dY = (NSHeight(cellFrame) / 2.0) - (NSHeight(imageRect) / 2.0) +
         kArrowOffset;
     NSRect drawRect = NSOffsetRect(imageRect, dX, dY);
@@ -435,5 +477,37 @@ const int kDefaultFontSize = 12;
   return 0.0;
 }
 
++ (NSFont*)fontForBookmarkBarCell {
+  return [NSFont systemFontOfSize:kDefaultFontSize];
+}
+
++ (NSParagraphStyle*)paragraphStyleForBookmarkBarCell {
+  NSMutableParagraphStyle* style = [[NSMutableParagraphStyle alloc] init];
+  [style setAlignment:NSNaturalTextAlignment];
+  [style setLineBreakMode:NSLineBreakByTruncatingTail];
+  return [style autorelease];
+}
+
+// Returns |title| with newlines and line feeds replaced with
+// spaces.
++ (NSString*)cleanTitle:(NSString*)title {
+  title = [title stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
+  title = [title stringByReplacingOccurrencesOfString:@"\r" withString:@" "];
+  return title;
+}
+
+- (id)accessibilityAttributeValue:(NSString*)attribute {
+  // The buttons on the bookmark bar are like popup buttons, in that they make a
+  // new menu appear, so they ascribe to that role. All other items in the
+  // bookmark menus end up being "buttons". This logic detects bookmark bar
+  // buttons as those which have a corresponding folder but are not actually
+  // folder buttons, which are used inside the bookmark menus.
+  // TODO(lgrey): move menus over to using the MenuItem role
+  if ([attribute isEqual:NSAccessibilityRoleAttribute] && [self bookmarkNode] &&
+      [self bookmarkNode]->is_folder() && ![self isFolderButtonCell]) {
+    return NSAccessibilityPopUpButtonRole;
+  }
+  return [super accessibilityAttributeValue:attribute];
+}
 
 @end

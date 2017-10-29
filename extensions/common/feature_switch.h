@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/optional.h"
 
 namespace base {
 class CommandLine;
@@ -35,12 +36,12 @@ class FeatureSwitch {
   static FeatureSwitch* prompt_for_external_extensions();
   static FeatureSwitch* error_console();
   static FeatureSwitch* enable_override_bookmarks_ui();
-  static FeatureSwitch* extension_action_redesign();
   static FeatureSwitch* scripts_require_action();
   static FeatureSwitch* embedded_extension_options();
   static FeatureSwitch* trace_app_source();
   static FeatureSwitch* load_media_router_component_extension();
   static FeatureSwitch* native_crx_bindings();
+  static FeatureSwitch* yield_between_content_script_runs();
 
   enum DefaultValue {
     DEFAULT_ENABLED,
@@ -88,12 +89,14 @@ class FeatureSwitch {
  private:
   std::string GetLegacyEnableFlag() const;
   std::string GetLegacyDisableFlag() const;
+  bool ComputeValue() const;
 
   const base::CommandLine* command_line_;
   const char* switch_name_;
   const char* field_trial_name_;
   bool default_value_;
   OverrideValue override_value_;
+  mutable base::Optional<bool> cached_value_;
 
   DISALLOW_COPY_AND_ASSIGN(FeatureSwitch);
 };

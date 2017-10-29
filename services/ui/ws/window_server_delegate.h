@@ -23,6 +23,7 @@ class WindowTree;
 namespace ws {
 
 class Display;
+class ThreadedImageCursorsFactory;
 class WindowServer;
 class WindowTree;
 class WindowTreeBinding;
@@ -52,6 +53,14 @@ class WindowServerDelegate {
       ws::WindowTree* tree,
       mojom::WindowTreeRequest* tree_request,
       mojom::WindowTreeClientPtr* client);
+
+  // Called prior to a new WindowTree being created for a
+  // WindowManagerWindowTreeFactory. |automatically_create_display_roots|
+  // mirrors that of CreateWindowTree(). See it for details.
+  virtual void OnWillCreateTreeForWindowManager(
+      bool automatically_create_display_roots) = 0;
+
+  virtual ThreadedImageCursorsFactory* GetThreadedImageCursorsFactory() = 0;
 
  protected:
   virtual ~WindowServerDelegate() {}

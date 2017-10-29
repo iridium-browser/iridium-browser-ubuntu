@@ -19,6 +19,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_with_source.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
@@ -115,11 +116,12 @@ SdchDictionaryFetcher::SdchDictionaryFetcher(URLRequestContext* context)
       in_loop_(false),
       fetch_queue_(new UniqueFetchQueue()),
       context_(context) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(context);
 }
 
 SdchDictionaryFetcher::~SdchDictionaryFetcher() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 }
 
 bool SdchDictionaryFetcher::Schedule(
@@ -135,7 +137,7 @@ bool SdchDictionaryFetcher::ScheduleReload(
 }
 
 void SdchDictionaryFetcher::Cancel() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   ResetRequest();
   next_state_ = STATE_NONE;
@@ -156,7 +158,7 @@ void SdchDictionaryFetcher::OnReceivedRedirect(
 
 void SdchDictionaryFetcher::OnResponseStarted(URLRequest* request,
                                               int net_error) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_EQ(request, current_request_.get());
   DCHECK_EQ(next_state_, STATE_SEND_REQUEST_PENDING);
   DCHECK(!in_loop_);
@@ -167,12 +169,10 @@ void SdchDictionaryFetcher::OnResponseStarted(URLRequest* request,
   // HTTP, it is presumed to be fresh.
   HttpResponseHeaders* response_headers = request->response_headers();
   if (net_error == OK && response_headers) {
-    ValidationType validation_type = response_headers->RequiresValidation(
+    bool requires_validation = response_headers->RequiresValidation(
         request->response_info().request_time,
         request->response_info().response_time, base::Time::Now());
-    // TODO(rdsmith): Maybe handle VALIDATION_ASYNCHRONOUS by queueing
-    // a non-reload request for the dictionary.
-    if (validation_type != VALIDATION_NONE)
+    if (requires_validation)
       net_error = ERR_FAILED;
   }
 
@@ -181,7 +181,7 @@ void SdchDictionaryFetcher::OnResponseStarted(URLRequest* request,
 
 void SdchDictionaryFetcher::OnReadCompleted(URLRequest* request,
                                             int bytes_read) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_EQ(request, current_request_.get());
   DCHECK_EQ(next_state_, STATE_READ_BODY_COMPLETE);
   DCHECK(!in_loop_);
@@ -194,7 +194,7 @@ bool SdchDictionaryFetcher::ScheduleInternal(
     const GURL& dictionary_url,
     bool reload,
     const OnDictionaryFetchedCallback& callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // If Push() fails, |dictionary_url| has already been fetched or scheduled to
   // be fetched.
@@ -265,7 +265,7 @@ int SdchDictionaryFetcher::DoLoop(int rv) {
 }
 
 int SdchDictionaryFetcher::DoSendRequest(int rv) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // |rv| is ignored, as the result from the previous request doesn't
   // affect the next request.
@@ -280,7 +280,38 @@ int SdchDictionaryFetcher::DoSendRequest(int rv) {
   FetchInfo info;
   bool success = fetch_queue_->Pop(&info);
   DCHECK(success);
-  current_request_ = context_->CreateRequest(info.url, IDLE, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("sdch_dictionary_fetch", R"(
+        semantics {
+          sender: "SDCH"
+          description:
+            "The Chrome Network Stack can use less bandwidth and reduces "
+            "request latency if a dictionary shared between client and server "
+            "is used to compress content on the server before sending, and "
+            "decompress content on the client after reception. This request is "
+            "fetching such a dictionary; it is dispatched when the response to "
+            "a previous URL request indicated that there was a dictionary that "
+            "the client did not currently have in memory, and could be used "
+            "for compression."
+          trigger:
+            "A response to a previous URL request indicated that this URL "
+            "contained a dictionary that could be used to compress other URL "
+            "responses."
+          data:
+            "The URL of the dictionary, as specified in a previous response "
+            "from a server."
+          destination: WEBSITE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "This feature is disabled in Chrome and can only be enabled in non-"
+            "Chromium embedders."
+          policy_exception_justification:
+            "Not implemented, not part of Chrome."
+        })");
+  current_request_ =
+      context_->CreateRequest(info.url, IDLE, this, traffic_annotation);
   int load_flags = LOAD_DO_NOT_SEND_COOKIES | LOAD_DO_NOT_SAVE_COOKIES;
   if (info.cache_only)
     load_flags |= LOAD_ONLY_FROM_CACHE | LOAD_SKIP_CACHE_VALIDATION;
@@ -306,7 +337,7 @@ int SdchDictionaryFetcher::DoReceivedRedirect(int rv) {
 }
 
 int SdchDictionaryFetcher::DoSendRequestPending(int rv) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // If there's been an error, abort the current request.
   if (rv != OK) {
@@ -320,7 +351,7 @@ int SdchDictionaryFetcher::DoSendRequestPending(int rv) {
 }
 
 int SdchDictionaryFetcher::DoReadBody(int rv) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // If there's been an error, abort the current request.
   if (rv != OK) {
@@ -338,7 +369,7 @@ int SdchDictionaryFetcher::DoReadBody(int rv) {
 }
 
 int SdchDictionaryFetcher::DoReadBodyComplete(int rv) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // An error; abort the current request.
   if (rv < 0) {
@@ -362,7 +393,7 @@ int SdchDictionaryFetcher::DoReadBodyComplete(int rv) {
 }
 
 int SdchDictionaryFetcher::DoCompleteRequest(int rv) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // If the dictionary was successfully fetched, add it to the manager.
   if (rv == OK) {

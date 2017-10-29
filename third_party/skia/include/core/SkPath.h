@@ -9,13 +9,9 @@
 #define SkPath_DEFINED
 
 #include "SkMatrix.h"
-#include "SkPathRef.h"
-#include "SkRefCnt.h"
+#include "../private/SkPathRef.h"
 
-class SkReader32;
-class SkWriter32;
 class SkAutoPathBoundsUpdate;
-class SkString;
 class SkRRect;
 class SkWStream;
 
@@ -23,6 +19,8 @@ class SkWStream;
 
     The SkPath class encapsulates compound (multiple contour) geometric paths
     consisting of straight line segments, quadratic curves, and cubic curves.
+
+    SkPath is not thread safe unless you've first called SkPath::updateBoundsCache().
 */
 class SK_API SkPath {
 public:
@@ -34,11 +32,12 @@ public:
     };
 
     SkPath();
-    SkPath(const SkPath&);
+    SkPath(const SkPath& path);
     ~SkPath();
 
-    SkPath& operator=(const SkPath&);
-    friend  SK_API bool operator==(const SkPath&, const SkPath&);
+    SkPath& operator=(const SkPath& path);
+    // mac chromium dbg requires SK_API to make operator== visible
+    friend SK_API bool operator==(const SkPath& a, const SkPath& b);
     friend bool operator!=(const SkPath& a, const SkPath& b) {
         return !(a == b);
     }
@@ -148,7 +147,7 @@ public:
      *  changed (e.g. lineTo(), addRect(), etc.) then the cached value will be
      *  reset to kUnknown_Convexity.
      */
-    void setConvexity(Convexity);
+    void setConvexity(Convexity convexity);
 
     /**
      *  Returns true if the path is flagged as being convex. This is not a
@@ -519,17 +518,17 @@ public:
         current point on this contour. If there is no previous point, then a
         moveTo(0,0) is inserted automatically.
 
-        @param dx1   The amount to add to the x-coordinate of the last point on
+        @param x1   The amount to add to the x-coordinate of the last point on
                 this contour, to specify the 1st control point of a cubic curve
-        @param dy1   The amount to add to the y-coordinate of the last point on
+        @param y1   The amount to add to the y-coordinate of the last point on
                 this contour, to specify the 1st control point of a cubic curve
-        @param dx2   The amount to add to the x-coordinate of the last point on
+        @param x2   The amount to add to the x-coordinate of the last point on
                 this contour, to specify the 2nd control point of a cubic curve
-        @param dy2   The amount to add to the y-coordinate of the last point on
+        @param y2   The amount to add to the y-coordinate of the last point on
                 this contour, to specify the 2nd control point of a cubic curve
-        @param dx3   The amount to add to the x-coordinate of the last point on
+        @param x3   The amount to add to the x-coordinate of the last point on
                      this contour, to specify the end point of a cubic curve
-        @param dy3   The amount to add to the y-coordinate of the last point on
+        @param y3   The amount to add to the y-coordinate of the last point on
                      this contour, to specify the end point of a cubic curve
     */
     void rCubicTo(SkScalar x1, SkScalar y1, SkScalar x2, SkScalar y2,
@@ -1082,7 +1081,7 @@ public:
      */
     bool contains(SkScalar x, SkScalar y) const;
 
-    void dump(SkWStream* , bool forceClose, bool dumpAsHex) const;
+    void dump(SkWStream* stream, bool forceClose, bool dumpAsHex) const;
     void dump() const;
     void dumpHex() const;
 
@@ -1178,9 +1177,8 @@ private:
     bool isRectContour(bool allowPartial, int* currVerb, const SkPoint** pts,
                        bool* isClosed, Direction* direction) const;
 
-    // called by stroker to see if all points are equal and worthy of a cap
-    // equivalent to a short-circuit version of getBounds().isEmpty() 
-    bool isZeroLength() const;
+    // called by stroker to see if all points (in the last contour) are equal and worthy of a cap
+    bool isZeroLengthSincePoint(int startPtIndex) const;
 
     /** Returns if the path can return a bound at no cost (true) or will have to
         perform some computation (false).

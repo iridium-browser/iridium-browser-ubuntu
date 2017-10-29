@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/ui/accessibility_focus_ring_layer.h"
 
-#include "ash/display/window_tree_host_manager.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -104,9 +103,8 @@ void AccessibilityFocusRingLayer::Set(const AccessibilityFocusRing& ring) {
 
   display::Display display =
       display::Screen::GetScreen()->GetDisplayMatching(bounds);
-  aura::Window* root_window = ash::Shell::GetInstance()
-                                  ->window_tree_host_manager()
-                                  ->GetRootWindowForDisplayId(display.id());
+  aura::Window* root_window =
+      ash::Shell::GetRootWindowForDisplayId(display.id());
   CreateOrUpdateLayer(root_window, "AccessibilityFocusRing", bounds);
 }
 
@@ -119,13 +117,17 @@ void AccessibilityFocusRingLayer::OnPaintLayer(
   flags.setStyle(cc::PaintFlags::kStroke_Style);
   flags.setStrokeWidth(2);
 
+  SkColor base_color =
+      has_custom_color()
+          ? custom_color()
+          : SkColorSetARGBMacro(255, kFocusRingColorRed, kFocusRingColorGreen,
+                                kFocusRingColorBlue);
+
   SkPath path;
   gfx::Vector2d offset = layer()->bounds().OffsetFromOrigin();
   const int w = kGradientWidth;
   for (int i = 0; i < w; ++i) {
-    flags.setColor(SkColorSetARGBMacro(255 * (w - i) * (w - i) / (w * w),
-                                       kFocusRingColorRed, kFocusRingColorGreen,
-                                       kFocusRingColorBlue));
+    flags.setColor(SkColorSetA(base_color, 255 * (w - i) * (w - i) / (w * w)));
     path = MakePath(ring_, i, offset);
     recorder.canvas()->DrawPath(path, flags);
   }

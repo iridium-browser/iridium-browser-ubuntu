@@ -8,9 +8,11 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
+#include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/window_parenting_client.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
@@ -102,6 +104,21 @@ TEST_F(DesktopNativeWidgetAuraTest, NativeViewInitiallyHidden) {
   EXPECT_FALSE(widget.GetNativeView()->IsVisible());
 }
 
+// Verifies that the native view isn't activated if Widget requires that.
+TEST_F(DesktopNativeWidgetAuraTest, NativeViewNoActivate) {
+  // Widget of TYPE_POPUP can't be activated.
+  Widget widget;
+  Widget::InitParams init_params = CreateParams(Widget::InitParams::TYPE_POPUP);
+  init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  DesktopNativeWidgetAura* widget_aura = new DesktopNativeWidgetAura(&widget);
+  init_params.native_widget = widget_aura;
+  widget.Init(init_params);
+
+  EXPECT_FALSE(widget.CanActivate());
+  EXPECT_EQ(nullptr, aura::client::GetFocusClient(widget_aura->content_window())
+                         ->GetFocusedWindow());
+}
+
 // Verifies that if the DesktopWindowTreeHost is already shown, the native view
 // still reports not visible as we haven't shown the content window.
 TEST_F(DesktopNativeWidgetAuraTest, WidgetNotVisibleOnlyWindowTreeHostShown) {
@@ -178,12 +195,14 @@ TEST_F(DesktopNativeWidgetAuraTest, GlobalCursorState) {
 
   // Verify that setting the cursor using one cursor client
   // will set it for all root windows.
-  EXPECT_EQ(ui::kCursorNone, cursor_client_a->GetCursor().native_type());
-  EXPECT_EQ(ui::kCursorNone, cursor_client_b->GetCursor().native_type());
+  EXPECT_EQ(ui::CursorType::kNone, cursor_client_a->GetCursor().native_type());
+  EXPECT_EQ(ui::CursorType::kNone, cursor_client_b->GetCursor().native_type());
 
-  cursor_client_b->SetCursor(ui::kCursorPointer);
-  EXPECT_EQ(ui::kCursorPointer, cursor_client_a->GetCursor().native_type());
-  EXPECT_EQ(ui::kCursorPointer, cursor_client_b->GetCursor().native_type());
+  cursor_client_b->SetCursor(ui::CursorType::kPointer);
+  EXPECT_EQ(ui::CursorType::kPointer,
+            cursor_client_a->GetCursor().native_type());
+  EXPECT_EQ(ui::CursorType::kPointer,
+            cursor_client_b->GetCursor().native_type());
 
   // Verify that hiding the cursor using one cursor client will
   // hide it for all root windows. Note that hiding the cursor
@@ -255,7 +274,7 @@ TEST_F(DesktopNativeWidgetAuraTest, WidgetCanBeDestroyedFromNestedLoop) {
   // |RunWithDispatcher()| below.
   base::RunLoop run_loop;
   base::Closure quit_runloop = run_loop.QuitClosure();
-  message_loop()->task_runner()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&QuitNestedLoopAndCloseWidget, base::Passed(&widget),
                  base::Unretained(&quit_runloop)));
@@ -296,13 +315,13 @@ class DesktopAuraTopLevelWindowTest : public aura::WindowObserver {
     widget_.Init(init_params);
 
     owned_window_ = new aura::Window(&child_window_delegate_);
-    owned_window_->SetType(ui::wm::WINDOW_TYPE_NORMAL);
+    owned_window_->SetType(aura::client::WINDOW_TYPE_NORMAL);
     owned_window_->SetName("TestTopLevelWindow");
     if (fullscreen) {
       owned_window_->SetProperty(aura::client::kShowStateKey,
                                  ui::SHOW_STATE_FULLSCREEN);
     } else {
-      owned_window_->SetType(ui::wm::WINDOW_TYPE_MENU);
+      owned_window_->SetType(aura::client::WINDOW_TYPE_MENU);
     }
     owned_window_->Init(ui::LAYER_TEXTURED);
     aura::client::ParentWindowWithContext(
@@ -380,7 +399,7 @@ class DesktopAuraWidgetTest : public WidgetTest {
 
   void SetUp() override {
     ViewsTestBase::SetUp();
-    views_delegate()->set_use_desktop_native_widgets(true);
+    test_views_delegate()->set_use_desktop_native_widgets(true);
   }
 
  private:
@@ -459,7 +478,7 @@ TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupRepositionTest) {
 
 // The following code verifies we can correctly destroy a Widget from a mouse
 // enter/exit. We could test move/drag/enter/exit but in general we don't run
-// nested message loops from such events, nor has the code ever really dealt
+// nested run loops from such events, nor has the code ever really dealt
 // with this situation.
 
 // Generates two moves (first generates enter, second real move), a press, drag
@@ -469,18 +488,18 @@ void GenerateMouseEvents(Widget* widget, ui::EventType last_event_type) {
   ui::MouseEvent move_event(ui::ET_MOUSE_MOVED, screen_bounds.CenterPoint(),
                             screen_bounds.CenterPoint(), ui::EventTimeForNow(),
                             0, 0);
-  ui::EventProcessor* dispatcher = WidgetTest::GetEventProcessor(widget);
-  ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move_event);
+  ui::EventSink* sink = WidgetTest::GetEventSink(widget);
+  ui::EventDispatchDetails details = sink->OnEventFromSource(&move_event);
   if (last_event_type == ui::ET_MOUSE_ENTERED || details.dispatcher_destroyed)
     return;
-  details = dispatcher->OnEventFromSource(&move_event);
+  details = sink->OnEventFromSource(&move_event);
   if (last_event_type == ui::ET_MOUSE_MOVED || details.dispatcher_destroyed)
     return;
 
   ui::MouseEvent press_event(ui::ET_MOUSE_PRESSED, screen_bounds.CenterPoint(),
                              screen_bounds.CenterPoint(), ui::EventTimeForNow(),
                              0, 0);
-  details = dispatcher->OnEventFromSource(&press_event);
+  details = sink->OnEventFromSource(&press_event);
   if (last_event_type == ui::ET_MOUSE_PRESSED || details.dispatcher_destroyed)
     return;
 
@@ -488,13 +507,13 @@ void GenerateMouseEvents(Widget* widget, ui::EventType last_event_type) {
   end_point.Offset(1, 1);
   ui::MouseEvent drag_event(ui::ET_MOUSE_DRAGGED, end_point, end_point,
                             ui::EventTimeForNow(), 0, 0);
-  details = dispatcher->OnEventFromSource(&drag_event);
+  details = sink->OnEventFromSource(&drag_event);
   if (last_event_type == ui::ET_MOUSE_DRAGGED || details.dispatcher_destroyed)
     return;
 
   ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED, end_point, end_point,
                                ui::EventTimeForNow(), 0, 0);
-  details = dispatcher->OnEventFromSource(&release_event);
+  details = sink->OnEventFromSource(&release_event);
   if (details.dispatcher_destroyed)
     return;
 }
@@ -569,7 +588,7 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
                            cursor_location_main, ui::EventTimeForNow(),
                            ui::EF_NONE, ui::EF_NONE);
   ui::EventDispatchDetails details =
-      GetEventProcessor(&top_level_widget)->OnEventFromSource(&move_main);
+      GetEventSink(&top_level_widget)->OnEventFromSource(&move_main);
   ASSERT_FALSE(details.dispatcher_destroyed);
 
   EXPECT_EQ(1, widget_view->GetEventCount(ui::ET_MOUSE_ENTERED));
@@ -594,8 +613,8 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
   ui::MouseEvent mouse_down_dialog(
       ui::ET_MOUSE_PRESSED, cursor_location_dialog, cursor_location_dialog,
       ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
-  details = GetEventProcessor(&top_level_widget)->OnEventFromSource(
-      &mouse_down_dialog);
+  details =
+      GetEventSink(&top_level_widget)->OnEventFromSource(&mouse_down_dialog);
   ASSERT_FALSE(details.dispatcher_destroyed);
   EXPECT_EQ(1, dialog_widget_view->GetEventCount(ui::ET_MOUSE_PRESSED));
 
@@ -605,8 +624,8 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
   ui::MouseEvent mouse_down_main(ui::ET_MOUSE_MOVED, cursor_location_main2,
                                  cursor_location_main2, ui::EventTimeForNow(),
                                  ui::EF_NONE, ui::EF_NONE);
-  details = GetEventProcessor(&top_level_widget)->OnEventFromSource(
-      &mouse_down_main);
+  details =
+      GetEventSink(&top_level_widget)->OnEventFromSource(&mouse_down_main);
   ASSERT_FALSE(details.dispatcher_destroyed);
   EXPECT_EQ(0, widget_view->GetEventCount(ui::ET_MOUSE_MOVED));
 

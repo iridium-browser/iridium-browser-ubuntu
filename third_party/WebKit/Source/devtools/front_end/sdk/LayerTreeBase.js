@@ -115,9 +115,9 @@ SDK.Layer.prototype = {
   gpuMemoryUsage() {},
 
   /**
-   * @param {function(!Array.<string>)} callback
+   * @return {!Promise<!Array<string>>}
    */
-  requestCompositingReasons(callback) {},
+  requestCompositingReasons() {},
 
   /**
    * @return {boolean}
@@ -146,7 +146,7 @@ SDK.LayerTreeBase = class {
    */
   constructor(target) {
     this._target = target;
-    this._domModel = target ? SDK.DOMModel.fromTarget(target) : null;
+    this._domModel = target ? target.model(SDK.DOMModel) : null;
     this._layersById = {};
     this._root = null;
     this._contentRoot = null;
@@ -215,27 +215,18 @@ SDK.LayerTreeBase = class {
 
   /**
    * @param {!Set<number>} requestedNodeIds
-   * @param {function()} callback
+   * @return {!Promise}
    */
-  resolveBackendNodeIds(requestedNodeIds, callback) {
-    if (!requestedNodeIds.size || !this._domModel) {
-      callback();
+  async resolveBackendNodeIds(requestedNodeIds) {
+    if (!requestedNodeIds.size || !this._domModel)
       return;
-    }
-    if (this._domModel)
-      this._domModel.pushNodesByBackendIdsToFrontend(requestedNodeIds, populateBackendNodeMap.bind(this));
 
-    /**
-     * @this {SDK.LayerTreeBase}
-     * @param {?Map<number, ?SDK.DOMNode>} nodesMap
-     */
-    function populateBackendNodeMap(nodesMap) {
-      if (nodesMap) {
-        for (var nodeId of nodesMap.keysArray())
-          this._backendNodeIdToNode.set(nodeId, nodesMap.get(nodeId) || null);
-      }
-      callback();
-    }
+    var nodesMap = await this._domModel.pushNodesByBackendIdsToFrontend(requestedNodeIds);
+
+    if (!nodesMap)
+      return;
+    for (var nodeId of nodesMap.keysArray())
+      this._backendNodeIdToNode.set(nodeId, nodesMap.get(nodeId) || null);
   }
 
   /**

@@ -9,13 +9,15 @@
 #include "TestUtils.h"
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
-#include "GrContextPriv.h"
 #include "GrContextFactory.h"
+#include "GrContextPriv.h"
+#include "GrRenderTargetContext.h"
 #include "GrShaderCaps.h"
-#include "GrSurfaceContext.h"
+#include "GrTest.h"
+#include "GrTextureContext.h"
+#include "gl/GLTestContext.h"
 #include "gl/GrGLGpu.h"
 #include "gl/GrGLUtil.h"
-#include "gl/GLTestContext.h"
 
 using sk_gpu_test::GLTestContext;
 
@@ -127,16 +129,19 @@ DEF_GPUTEST_FOR_GL_RENDERING_CONTEXTS(EGLImageTest, reporter, ctxInfo) {
     glCtx0->makeCurrent();
     externalTexture.fTarget = GR_GL_TEXTURE_EXTERNAL;
     externalTexture.fID = glCtx0->eglImageToExternalTexture(image);
+    if (0 == externalTexture.fID) {
+        ERRORF(reporter, "Error converting EGL Image back to texture");
+        cleanup(glCtx0, externalTexture.fID, glCtx1.get(), context1, backendTexture1, image);
+        return;
+    }
 
     // Wrap this texture ID in a GrTexture
-    GrBackendTextureDesc externalDesc;
-    externalDesc.fConfig = kRGBA_8888_GrPixelConfig;
-    externalDesc.fWidth = kSize;
-    externalDesc.fHeight = kSize;
-    externalDesc.fTextureHandle = reinterpret_cast<GrBackendObject>(&externalTexture);
+    GrBackendTexture backendTex(kSize, kSize, kRGBA_8888_GrPixelConfig, externalTexture);
 
-    sk_sp<GrSurfaceContext> surfaceContext = context0->contextPriv().makeBackendSurfaceContext(
-                                                                           externalDesc, nullptr);
+    // TODO: If I make this TopLeft origin to match resolve_origin calls for kDefault, this test
+    // fails on the Nexus5. Why?
+    sk_sp<GrTextureContext> surfaceContext = context0->contextPriv().makeBackendTextureContext(
+            backendTex, kBottomLeft_GrSurfaceOrigin, nullptr);
 
     if (!surfaceContext) {
         ERRORF(reporter, "Error wrapping external texture in GrSurfaceContext.");
@@ -146,33 +151,18 @@ DEF_GPUTEST_FOR_GL_RENDERING_CONTEXTS(EGLImageTest, reporter, ctxInfo) {
 
     // Should not be able to wrap as a RT
     {
-        externalDesc.fFlags = kRenderTarget_GrBackendTextureFlag;
-
-        sk_sp<GrSurfaceContext> temp = context0->contextPriv().makeBackendSurfaceContext(
-                                                                           externalDesc, nullptr);
+        sk_sp<GrRenderTargetContext> temp =
+                context0->contextPriv().makeBackendTextureRenderTargetContext(
+                        backendTex, kBottomLeft_GrSurfaceOrigin, 0, nullptr);
         if (temp) {
             ERRORF(reporter, "Should not be able to wrap an EXTERNAL texture as a RT.");
         }
-        externalDesc.fFlags = kNone_GrBackendTextureFlag;
     }
 
-    // Should not be able to wrap with a sample count
-    {
-        externalDesc.fSampleCnt = 4;
-        sk_sp<GrSurfaceContext> temp = context0->contextPriv().makeBackendSurfaceContext(
-                                                                           externalDesc, nullptr);
-        if (temp) {
-            ERRORF(reporter, "Should not be able to wrap an EXTERNAL texture with MSAA.");
-        }
-        externalDesc.fSampleCnt = 0;
-    }
-
-    test_read_pixels(reporter, context0, surfaceContext.get(), pixels.get(),
-                     "EGLImageTest-read");
+    test_read_pixels(reporter, surfaceContext.get(), pixels.get(), "EGLImageTest-read");
 
     // We should not be able to write to a EXTERNAL texture
-    test_write_pixels(reporter, context0, surfaceContext.get(), false,
-                      "EGLImageTest-write");
+    test_write_pixels(reporter, surfaceContext.get(), false, "EGLImageTest-write");
 
     // Only test RT-config
     // TODO: why do we always need to draw to copy from an external texture?

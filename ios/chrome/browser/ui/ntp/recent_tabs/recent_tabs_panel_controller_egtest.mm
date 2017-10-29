@@ -9,7 +9,7 @@
 #import <string>
 
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_menu_view_controller.h"
+#include "ios/chrome/browser/ui/tools_menu/tools_menu_constants.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/tab_test_util.h"
@@ -17,8 +17,8 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/web/public/test/http_server.h"
-#include "ios/web/public/test/http_server_util.h"
+#import "ios/web/public/test/http_server/http_server.h"
+#include "ios/web/public/test/http_server/http_server_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -107,10 +107,7 @@ id<GREYMatcher> RecentlyClosedLabelMatcher() {
 
   // Open the test page in a new tab.
   [ChromeEarlGrey loadURL:testPageURL];
-  id<GREYMatcher> webViewMatcher =
-      chrome_test_util::WebViewContainingText("hello");
-  [[EarlGrey selectElementWithMatcher:webViewMatcher]
-      assertWithMatcher:grey_notNil()];
+  [ChromeEarlGrey waitForWebViewContainingText:"hello"];
 
   // Open the Recent Tabs panel, check that the test page is not
   // present.

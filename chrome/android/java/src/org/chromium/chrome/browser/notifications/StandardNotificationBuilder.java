@@ -8,16 +8,14 @@ import android.app.Notification;
 import android.content.Context;
 import android.os.Build;
 
-import org.chromium.chrome.browser.AppHooks;
-
 /**
  * Builds a notification using the standard Notification.BigTextStyle layout.
  */
 public class StandardNotificationBuilder extends NotificationBuilderBase {
     private final Context mContext;
 
-    public StandardNotificationBuilder(Context context) {
-        super(context.getResources());
+    public StandardNotificationBuilder(Context context, String channelId) {
+        super(context.getResources(), channelId);
         mContext = context;
     }
 
@@ -26,12 +24,9 @@ public class StandardNotificationBuilder extends NotificationBuilderBase {
         // Note: this is not a NotificationCompat builder so be mindful of the
         // API level of methods you call on the builder.
         // TODO(crbug.com/697104) We should probably use a Compat builder.
-        ChromeNotificationBuilder builder = AppHooks.get().createChromeNotificationBuilder(
-                false /* preferCompat */, NotificationConstants.CATEGORY_ID_SITES,
-                mContext.getString(org.chromium.chrome.R.string.notification_category_sites),
-                NotificationConstants.CATEGORY_GROUP_ID_GENERAL,
-                mContext.getString(
-                        org.chromium.chrome.R.string.notification_category_group_general));
+        ChromeNotificationBuilder builder =
+                NotificationBuilderFactory.createChromeNotificationBuilder(
+                        false /* preferCompat */, mChannelId);
 
         builder.setContentTitle(mTitle);
         builder.setContentText(mBody);
@@ -40,8 +35,7 @@ public class StandardNotificationBuilder extends NotificationBuilderBase {
         if (mImage != null) {
             Notification.BigPictureStyle style =
                     new Notification.BigPictureStyle().bigPicture(mImage);
-            if (Build.VERSION.CODENAME.equals("N")
-                    || Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 // Android N doesn't show content text when expanded, so duplicate body text as a
                 // summary for the big picture.
                 style.setSummaryText(mBody);
@@ -61,8 +55,9 @@ public class StandardNotificationBuilder extends NotificationBuilderBase {
         if (mSettingsAction != null) {
             addActionToBuilder(builder, mSettingsAction);
         }
+        builder.setPriority(mPriority);
         builder.setDefaults(mDefaults);
-        builder.setVibrate(mVibratePattern);
+        if (mVibratePattern != null) builder.setVibrate(mVibratePattern);
         builder.setWhen(mTimestamp);
         builder.setOnlyAlertOnce(!mRenotify);
         setGroupOnBuilder(builder, mOrigin);

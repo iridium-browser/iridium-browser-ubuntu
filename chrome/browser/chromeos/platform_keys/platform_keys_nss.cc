@@ -37,7 +37,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "crypto/nss_key_util.h"
 #include "crypto/scoped_nss_types.h"
-#include "net/base/crypto_module.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_database.h"
 #include "net/cert/nss_cert_database.h"
@@ -244,7 +243,6 @@ class SelectCertificatesState : public NSSOperationState {
   const bool use_system_key_slot_;
   scoped_refptr<net::SSLCertRequestInfo> cert_request_info_;
   std::unique_ptr<net::ClientCertStore> cert_store_;
-  std::unique_ptr<net::CertificateList> certs_;
 
  private:
   // Must be called on origin thread, therefore use CallBack().
@@ -443,11 +441,9 @@ void GenerateRSAKeyWithDB(std::unique_ptr<GenerateRSAKeyState> state,
   // Only the slot and not the NSSCertDatabase is required. Ignore |cert_db|.
   // This task interacts with the TPM, hence MayBlock().
   base::PostTaskWithTraits(
-      FROM_HERE, base::TaskTraits()
-                     .MayBlock()
-                     .WithPriority(base::TaskPriority::BACKGROUND)
-                     .WithShutdownBehavior(
-                         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&GenerateRSAKeyOnWorkerThread, base::Passed(&state)));
 }
 
@@ -539,11 +535,9 @@ void SignRSAWithDB(std::unique_ptr<SignRSAState> state,
   // Only the slot and not the NSSCertDatabase is required. Ignore |cert_db|.
   // This task interacts with the TPM, hence MayBlock().
   base::PostTaskWithTraits(
-      FROM_HERE, base::TaskTraits()
-                     .MayBlock()
-                     .WithPriority(base::TaskPriority::BACKGROUND)
-                     .WithShutdownBehavior(
-                         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&SignRSAOnWorkerThread, base::Passed(&state)));
 }
 
@@ -551,10 +545,18 @@ void SignRSAWithDB(std::unique_ptr<SignRSAState> state,
 // of net::CertificateList and calls back. Used by
 // SelectCertificatesOnIOThread().
 void DidSelectCertificatesOnIOThread(
-    std::unique_ptr<SelectCertificatesState> state) {
+    std::unique_ptr<SelectCertificatesState> state,
+    net::ClientCertIdentityList identities) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  state->CallBack(FROM_HERE, std::move(state->certs_),
-                  std::string() /* no error */);
+  // Convert the ClientCertIdentityList to a CertificateList since returning
+  // ClientCertIdentities would require changing the platformKeys extension
+  // api. This assumes that the necessary keys can be found later with
+  // crypto::FindNSSKeyFromPublicKeyInfo.
+  std::unique_ptr<net::CertificateList> certs =
+      base::MakeUnique<net::CertificateList>();
+  for (const std::unique_ptr<net::ClientCertIdentity>& identity : identities)
+    certs->push_back(identity->certificate());
+  state->CallBack(FROM_HERE, std::move(certs), std::string() /* no error */);
 }
 
 // Continues selecting certificates on the IO thread. Used by
@@ -568,11 +570,9 @@ void SelectCertificatesOnIOThread(
                                                  state->username_hash_),
       ClientCertStoreChromeOS::PasswordDelegateFactory()));
 
-  state->certs_.reset(new net::CertificateList);
-
   SelectCertificatesState* state_ptr = state.get();
   state_ptr->cert_store_->GetClientCerts(
-      *state_ptr->cert_request_info_, state_ptr->certs_.get(),
+      *state_ptr->cert_request_info_,
       base::Bind(&DidSelectCertificatesOnIOThread, base::Passed(&state)));
 }
 
@@ -609,11 +609,9 @@ void DidGetCertificates(std::unique_ptr<GetCertificatesState> state,
   state->certs_ = std::move(all_certs);
   // This task interacts with the TPM, hence MayBlock().
   base::PostTaskWithTraits(
-      FROM_HERE, base::TaskTraits()
-                     .MayBlock()
-                     .WithPriority(base::TaskPriority::BACKGROUND)
-                     .WithShutdownBehavior(
-                         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&FilterCertificatesOnWorkerThread, base::Passed(&state)));
 }
 

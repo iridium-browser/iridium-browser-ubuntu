@@ -25,7 +25,8 @@ class DeviceMonitorTest(unittest.TestCase):
 
   def setUp(self):
     self.device = mock.Mock(spec=device_utils.DeviceUtils,
-        serial='device_cereal', build_id='abc123', build_product='clownfish')
+        serial='device_cereal', build_id='abc123', build_product='clownfish',
+        GetIMEI=lambda: '123456789')
     self.file_contents = {
         '/proc/meminfo': """
                          MemTotal:        1234567 kB
@@ -43,8 +44,15 @@ class DeviceMonitorTest(unittest.TestCase):
         'ps': ['headers', 'p1', 'p2', 'p3', 'p4', 'p5'],
         'grep': ['/sys/class/thermal/thermal_zone0/type'],
     }
-    self.device.RunShellCommand = mock.MagicMock(
-        side_effect=lambda cmd, **kwargs: self.cmd_outputs[cmd.split()[0]])
+
+    def mock_run_shell(cmd, **_kwargs):
+      args = cmd.split() if isinstance(cmd, basestring) else cmd
+      try:
+        return self.cmd_outputs[args[0]]
+      except KeyError:
+        raise device_errors.AdbShellCommandFailedError(cmd, None, None)
+
+    self.device.RunShellCommand = mock.MagicMock(side_effect=mock_run_shell)
 
     self.battery = mock.Mock()
     self.battery.GetBatteryInfo = mock.MagicMock(
@@ -69,6 +77,7 @@ class DeviceMonitorTest(unittest.TestCase):
            'build.id': 'abc123',
            'product.device': 'clownfish',
          },
+         'imei': '123456789',
          'state': 'available',
       }
     }
@@ -104,14 +113,7 @@ class DeviceMonitorTest(unittest.TestCase):
   def test_getStatsNoPs(self, get_devices, get_battery):
     get_devices.return_value = [self.device]
     get_battery.return_value = self.battery
-    def _throw_on_ps(cmd):
-      if cmd == 'ps':
-        raise device_errors.AdbShellCommandFailedError(cmd, None, None)
-      else:
-        return []
-    self.device.RunShellCommand = mock.MagicMock(
-        side_effect=lambda cmd, **kwargs:
-            _throw_on_ps(cmd) + self.cmd_outputs[cmd.split()[0]])
+    del self.cmd_outputs['ps']  # Throw exception on run shell ps command.
 
     # Should be same status dict but without process stats.
     expected_status_no_ps = self.expected_status.copy()
@@ -125,14 +127,7 @@ class DeviceMonitorTest(unittest.TestCase):
   def test_getStatsNoSensors(self, get_devices, get_battery):
     get_devices.return_value = [self.device]
     get_battery.return_value = self.battery
-    def _throw_on_grep(cmd):
-      if cmd.startswith('grep'):
-        raise device_errors.AdbShellCommandFailedError(cmd, None, None)
-      else:
-        return []
-    self.device.RunShellCommand = mock.MagicMock(
-        side_effect=lambda cmd, **kwargs:
-            _throw_on_grep(cmd) + self.cmd_outputs[cmd.split()[0]])
+    del self.cmd_outputs['grep']  # Throw exception on run shell grep command.
 
     # Should be same status dict but without temp stats.
     expected_status_no_temp = self.expected_status.copy()
@@ -173,4 +168,3 @@ class DeviceMonitorTest(unittest.TestCase):
 
 if __name__ == '__main__':
   sys.exit(unittest.main())
-

@@ -15,7 +15,7 @@
 #include "base/stl_util.h"
 #include "base/threading/thread.h"
 #include "base/timer/timer.h"
-#include "device/sensors/public/cpp/device_light_hardware_buffer.h"
+#include "build/build_config.h"
 #include "device/sensors/public/cpp/device_motion_hardware_buffer.h"
 #include "device/sensors/public/cpp/device_orientation_hardware_buffer.h"
 
@@ -30,8 +30,6 @@ size_t GetConsumerSharedMemoryBufferSize(ConsumerType consumer_type) {
     case CONSUMER_TYPE_ORIENTATION:
     case CONSUMER_TYPE_ORIENTATION_ABSOLUTE:
       return sizeof(DeviceOrientationHardwareBuffer);
-    case CONSUMER_TYPE_LIGHT:
-      return sizeof(DeviceLightHardwareBuffer);
     default:
       NOTREACHED();
   }
@@ -112,9 +110,10 @@ DataFetcherSharedMemoryBase::DataFetcherSharedMemoryBase()
 DataFetcherSharedMemoryBase::~DataFetcherSharedMemoryBase() {
   DCHECK_EQ(0u, started_consumers_);
 
-  // make sure polling thread stops asap.
-  if (polling_thread_)
-    polling_thread_->Stop();
+  // By this point the polling thread should have already been stopped (it's not
+  // safe for it to be running in this class's destructor as tasks are posted to
+  // it that call virtual methods of this class).
+  DCHECK(!polling_thread_ || !polling_thread_->IsRunning());
 }
 
 bool DataFetcherSharedMemoryBase::StartFetchingDeviceData(
@@ -173,7 +172,13 @@ void DataFetcherSharedMemoryBase::Shutdown() {
   StopFetchingDeviceData(CONSUMER_TYPE_MOTION);
   StopFetchingDeviceData(CONSUMER_TYPE_ORIENTATION);
   StopFetchingDeviceData(CONSUMER_TYPE_ORIENTATION_ABSOLUTE);
-  StopFetchingDeviceData(CONSUMER_TYPE_LIGHT);
+
+  // Ensure that the polling thread stops before entering the destructor of the
+  // subclass, as the stopping of the polling thread causes tasks to execute
+  // that call virtual methods of this class, which can cause crashes if they
+  // execute while (or after) the subclass is being torn down.
+  if (polling_thread_)
+    polling_thread_->Stop();
 }
 
 mojo::ScopedSharedBufferHandle
@@ -188,6 +193,10 @@ bool DataFetcherSharedMemoryBase::InitAndStartPollingThreadIfNecessary() {
     return true;
 
   polling_thread_.reset(new PollingThread("Device Sensor poller", this));
+
+#if defined(OS_WIN)
+  polling_thread_->init_com_with_mta(true);
+#endif
 
   if (!polling_thread_->Start()) {
     LOG(ERROR) << "Failed to start sensor data polling thread";

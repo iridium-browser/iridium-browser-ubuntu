@@ -6,7 +6,7 @@
 #define NavigatorLanguage_h
 
 #include "core/CoreExport.h"
-#include "wtf/text/AtomicString.h"
+#include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
 
@@ -16,11 +16,11 @@ class CORE_EXPORT NavigatorLanguage {
 
   AtomicString language();
   virtual Vector<String> languages() = 0;
-  bool hasLanguagesChanged();
-  void setLanguagesChanged();
+  bool hasLanguagesChanged() const;
+  void SetLanguagesChanged();
 
- private:
-  bool m_languagesChanged;
+ protected:
+  bool languages_changed_ = true;
 };
 
 }  // namespace blink

@@ -5,270 +5,240 @@
 #include "core/paint/PrePaintTreeWalk.h"
 
 #include "core/dom/DocumentLifecycle.h"
-#include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameView.h"
+#include "core/layout/LayoutEmbeddedContent.h"
 #include "core/layout/LayoutMultiColumnSpannerPlaceholder.h"
-#include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutView.h"
 #include "core/paint/PaintLayer.h"
+#include "platform/graphics/paint/GeometryMapper.h"
 
 namespace blink {
 
 struct PrePaintTreeWalkContext {
   PrePaintTreeWalkContext()
-      : paintInvalidatorContext(treeBuilderContext),
-        ancestorOverflowPaintLayer(nullptr),
-        ancestorTransformedOrRootPaintLayer(nullptr) {}
-  PrePaintTreeWalkContext(const PrePaintTreeWalkContext& parentContext)
-      : treeBuilderContext(parentContext.treeBuilderContext),
-        paintInvalidatorContext(treeBuilderContext,
-                                parentContext.paintInvalidatorContext),
-        ancestorOverflowPaintLayer(parentContext.ancestorOverflowPaintLayer),
-        ancestorTransformedOrRootPaintLayer(
-            parentContext.ancestorTransformedOrRootPaintLayer) {}
+      : tree_builder_context(
+            WTF::WrapUnique(new PaintPropertyTreeBuilderContext)),
+        paint_invalidator_context(WTF::WrapUnique(new PaintInvalidatorContext)),
+        ancestor_overflow_paint_layer(nullptr) {}
 
-  PaintPropertyTreeBuilderContext treeBuilderContext;
-  PaintInvalidatorContext paintInvalidatorContext;
+  PrePaintTreeWalkContext(const PrePaintTreeWalkContext& parent_context,
+                          bool needs_tree_builder_context)
+      : tree_builder_context(
+            WTF::WrapUnique(needs_tree_builder_context || DCHECK_IS_ON()
+                                ? new PaintPropertyTreeBuilderContext(
+                                      *parent_context.tree_builder_context)
+                                : nullptr)),
+        paint_invalidator_context(WTF::WrapUnique(new PaintInvalidatorContext(
+            *parent_context.paint_invalidator_context))),
+        ancestor_overflow_paint_layer(
+            parent_context.ancestor_overflow_paint_layer) {
+#if DCHECK_IS_ON()
+    if (needs_tree_builder_context)
+      DCHECK(parent_context.tree_builder_context->is_actually_needed);
+    tree_builder_context->is_actually_needed = needs_tree_builder_context;
+#endif
+  }
+
+  // PaintPropertyTreeBuilderContext is large and can lead to stack overflows
+  // when recursion is deep so this context object is allocated on the heap.
+  // See: https://crbug.com/698653.
+  std::unique_ptr<PaintPropertyTreeBuilderContext> tree_builder_context;
+
+  std::unique_ptr<PaintInvalidatorContext> paint_invalidator_context;
 
   // The ancestor in the PaintLayer tree which has overflow clip, or
   // is the root layer. Note that it is tree ancestor, not containing
   // block or stacking ancestor.
-  PaintLayer* ancestorOverflowPaintLayer;
-  PaintLayer* ancestorTransformedOrRootPaintLayer;
+  PaintLayer* ancestor_overflow_paint_layer;
 };
 
-void PrePaintTreeWalk::walk(FrameView& rootFrame) {
-  DCHECK(rootFrame.frame().document()->lifecycle().state() ==
-         DocumentLifecycle::InPrePaint);
+void PrePaintTreeWalk::Walk(LocalFrameView& root_frame) {
+  DCHECK(root_frame.GetFrame().GetDocument()->Lifecycle().GetState() ==
+         DocumentLifecycle::kInPrePaint);
 
-  PrePaintTreeWalkContext initialContext;
-  initialContext.treeBuilderContext =
-      m_propertyTreeBuilder.setupInitialContext();
-  initialContext.ancestorTransformedOrRootPaintLayer =
-      rootFrame.layoutView()->layer();
+  PrePaintTreeWalkContext initial_context;
 
-  walk(rootFrame, initialContext);
-  m_paintInvalidator.processPendingDelayedPaintInvalidations();
+  // GeometryMapper depends on paint properties.
+  if (NeedsTreeBuilderContextUpdate(root_frame, initial_context))
+    GeometryMapper::ClearCache();
+
+  Walk(root_frame, initial_context);
+  paint_invalidator_.ProcessPendingDelayedPaintInvalidations();
 }
 
-void PrePaintTreeWalk::walk(FrameView& frameView,
-                            const PrePaintTreeWalkContext& parentContext) {
-  if (frameView.shouldThrottleRendering()) {
+void PrePaintTreeWalk::Walk(LocalFrameView& frame_view,
+                            const PrePaintTreeWalkContext& parent_context) {
+  if (frame_view.ShouldThrottleRendering()) {
     // Skip the throttled frame. Will update it when it becomes unthrottled.
     return;
   }
 
-  PrePaintTreeWalkContext context(parentContext);
+  bool needs_tree_builder_context_update =
+      this->NeedsTreeBuilderContextUpdate(frame_view, parent_context);
+  PrePaintTreeWalkContext context(parent_context,
+                                  needs_tree_builder_context_update);
   // ancestorOverflowLayer does not cross frame boundaries.
-  context.ancestorOverflowPaintLayer = nullptr;
-  m_propertyTreeBuilder.updateProperties(frameView, context.treeBuilderContext);
-  m_paintInvalidator.invalidatePaintIfNeeded(frameView,
-                                             context.paintInvalidatorContext);
+  context.ancestor_overflow_paint_layer = nullptr;
+  if (context.tree_builder_context) {
+    property_tree_builder_.UpdateProperties(frame_view,
+                                            *context.tree_builder_context);
+  }
+  paint_invalidator_.InvalidatePaint(frame_view,
+                                     context.tree_builder_context.get(),
+                                     *context.paint_invalidator_context);
 
-  if (LayoutView* view = frameView.layoutView()) {
-    walk(*view, context);
+  if (LayoutView* view = frame_view.GetLayoutView()) {
+    Walk(*view, context);
 #if DCHECK_IS_ON()
-    view->assertSubtreeClearedPaintInvalidationFlags();
+    view->AssertSubtreeClearedPaintInvalidationFlags();
 #endif
   }
-  frameView.clearNeedsPaintPropertyUpdate();
+  frame_view.ClearNeedsPaintPropertyUpdate();
 }
 
-static void updateAuxiliaryObjectProperties(const LayoutObject& object,
+static void UpdateAuxiliaryObjectProperties(const LayoutObject& object,
                                             PrePaintTreeWalkContext& context) {
-  if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled())
+  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
     return;
 
-  if (!object.hasLayer())
+  if (!object.HasLayer())
     return;
 
-  PaintLayer* paintLayer = object.enclosingLayer();
-  paintLayer->updateAncestorOverflowLayer(context.ancestorOverflowPaintLayer);
+  PaintLayer* paint_layer = object.EnclosingLayer();
+  paint_layer->UpdateAncestorOverflowLayer(
+      context.ancestor_overflow_paint_layer);
 
-  if (object.styleRef().position() == EPosition::kSticky) {
-    paintLayer->layoutObject().updateStickyPositionConstraints();
+  if (object.StyleRef().HasStickyConstrainedPosition()) {
+    paint_layer->GetLayoutObject().UpdateStickyPositionConstraints();
 
     // Sticky position constraints and ancestor overflow scroller affect the
     // sticky layer position, so we need to update it again here.
     // TODO(flackr): This should be refactored in the future to be clearer (i.e.
     // update layer position and ancestor inputs updates in the same walk).
-    paintLayer->updateLayerPosition();
+    paint_layer->UpdateLayerPosition();
   }
-
-  if (paintLayer->isRootLayer() || object.hasOverflowClip())
-    context.ancestorOverflowPaintLayer = paintLayer;
+  if (paint_layer->IsRootLayer() || object.HasOverflowClip())
+    context.ancestor_overflow_paint_layer = paint_layer;
 }
 
-// Returns whether |a| is an ancestor of or equal to |b|.
-static bool isAncestorOfOrEqualTo(const ClipPaintPropertyNode* a,
-                                  const ClipPaintPropertyNode* b) {
-  while (b && b != a) {
-    b = b->parent();
-  }
-  return b == a;
-}
-
-FloatClipRect PrePaintTreeWalk::clipRectForContext(
-    const PaintPropertyTreeBuilderContext::ContainingBlockContext& context,
-    const EffectPaintPropertyNode* effect,
-    const PropertyTreeState& ancestorState,
-    const LayoutPoint& ancestorPaintOffset,
-    bool& hasClip) {
-  // Only return a non-infinite clip if clips differ, or the "ancestor" state is
-  // actually an ancestor clip. This ensures no accuracy issues due to
-  // transforms applied to infinite rects.
-  if (isAncestorOfOrEqualTo(context.clip, ancestorState.clip()))
-    return FloatClipRect();
-
-  hasClip = true;
-
-  PropertyTreeState localState(context.transform, context.clip, effect);
-
-  FloatClipRect rect(
-      m_geometryMapper.sourceToDestinationClipRect(localState, ancestorState));
-
-  rect.moveBy(-FloatPoint(ancestorPaintOffset));
-  return rect;
-}
-
-void PrePaintTreeWalk::invalidatePaintLayerOptimizationsIfNeeded(
+void PrePaintTreeWalk::InvalidatePaintLayerOptimizationsIfNeeded(
     const LayoutObject& object,
     PrePaintTreeWalkContext& context) {
-  if (!object.hasLayer())
+  if (!object.HasLayer())
     return;
 
-  PaintLayer& paintLayer = *toLayoutBoxModelObject(object).layer();
-  if (object.styleRef().hasTransform() ||
-      &object == context.paintInvalidatorContext.paintInvalidationContainer) {
-    context.ancestorTransformedOrRootPaintLayer = &paintLayer;
-  }
+  PaintLayer& paint_layer = *ToLayoutBoxModelObject(object).Layer();
 
-  const ObjectPaintProperties& ancestorPaintProperties =
-      *context.ancestorTransformedOrRootPaintLayer->layoutObject()
-           .paintProperties();
-  PropertyTreeState ancestorState =
-      *ancestorPaintProperties.localBorderBoxProperties();
-  const EffectPaintPropertyNode* effect =
-      context.treeBuilderContext.currentEffect;
+  // Ignore clips across paint invalidation container or transform
+  // boundaries.
+  if (object ==
+          context.paint_invalidator_context->paint_invalidation_container ||
+      object.StyleRef().HasTransform())
+    context.tree_builder_context->clip_changed = false;
 
-#ifdef CHECK_CLIP_RECTS
-  ShouldRespectOverflowClipType respectOverflowClip = RespectOverflowClip;
-#endif
-  if (context.ancestorTransformedOrRootPaintLayer->compositingState() ==
-          PaintsIntoOwnBacking &&
-      ancestorPaintProperties.overflowClip()) {
-    ancestorState.setClip(ancestorPaintProperties.overflowClip());
-#ifdef CHECK_CLIP_RECTS
-    respectOverflowClip = IgnoreOverflowClip;
-#endif
-  }
+  if (!paint_layer.SupportsSubsequenceCaching() ||
+      !context.tree_builder_context->clip_changed)
+    return;
 
-#ifdef CHECK_CLIP_RECTS
-  ClipRects& oldClipRects =
-      paintLayer.clipper(PaintLayer::DoNotUseGeometryMapper)
-          .paintingClipRects(&ancestorTransformedOrRootPaintLayer,
-                             respectOverflowClip, LayoutSize());
-#endif
-
-  bool hasClip = false;
-  RefPtr<ClipRects> clipRects = ClipRects::create();
-  const LayoutPoint& ancestorPaintOffset =
-      context.ancestorTransformedOrRootPaintLayer->layoutObject().paintOffset();
-  clipRects->setOverflowClipRect(
-      clipRectForContext(context.treeBuilderContext.current, effect,
-                         ancestorState, ancestorPaintOffset, hasClip));
-#ifdef CHECK_CLIP_RECTS
-  CHECK(!hasClip ||
-        clipRects->overflowClipRect() == oldClipRects.overflowClipRect())
-      << "rect= " << clipRects->overflowClipRect().toString();
-#endif
-
-  clipRects->setFixedClipRect(
-      clipRectForContext(context.treeBuilderContext.fixedPosition, effect,
-                         ancestorState, ancestorPaintOffset, hasClip));
-#ifdef CHECK_CLIP_RECTS
-  CHECK(hasClip || clipRects->fixedClipRect() == oldClipRects.fixedClipRect())
-      << " fixed=" << clipRects->fixedClipRect().toString();
-#endif
-
-  clipRects->setPosClipRect(
-      clipRectForContext(context.treeBuilderContext.absolutePosition, effect,
-                         ancestorState, ancestorPaintOffset, hasClip));
-#ifdef CHECK_CLIP_RECTS
-  CHECK(!hasClip || clipRects->posClipRect() == oldClipRects.posClipRect())
-      << " abs=" << clipRects->posClipRect().toString();
-#endif
-
-  ClipRects* previousClipRects = paintLayer.previousPaintingClipRects();
-
-  if (!previousClipRects || *clipRects != *previousClipRects) {
-    paintLayer.setNeedsRepaint();
-    paintLayer.setPreviousPaintPhaseDescendantOutlinesEmpty(false);
-    paintLayer.setPreviousPaintPhaseFloatEmpty(false);
-    paintLayer.setPreviousPaintPhaseDescendantBlockBackgroundsEmpty(false);
-    // All subsequences which are contained below this paintLayer must also
-    // be checked.
-    context.paintInvalidatorContext.forcedSubtreeInvalidationFlags |=
-        PaintInvalidatorContext::ForcedSubtreeInvalidationRectUpdate;
-  }
-
-  paintLayer.setPreviousPaintingClipRects(*clipRects);
+  paint_layer.SetNeedsRepaint();
+  paint_layer.SetPreviousPaintPhaseDescendantOutlinesEmpty(false);
+  paint_layer.SetPreviousPaintPhaseFloatEmpty(false);
+  paint_layer.SetPreviousPaintPhaseDescendantBlockBackgroundsEmpty(false);
+  context.paint_invalidator_context->subtree_flags |=
+      PaintInvalidatorContext::kSubtreeVisualRectUpdate;
 }
 
-void PrePaintTreeWalk::walk(const LayoutObject& object,
-                            const PrePaintTreeWalkContext& parentContext) {
-  // Early out from the treewalk if possible.
-  if (!object.needsPaintPropertyUpdate() &&
-      !object.descendantNeedsPaintPropertyUpdate() &&
-      !parentContext.treeBuilderContext.forceSubtreeUpdate &&
-      !parentContext.paintInvalidatorContext.forcedSubtreeInvalidationFlags &&
-      !object
-           .shouldCheckForPaintInvalidationRegardlessOfPaintInvalidationState())
+bool PrePaintTreeWalk::NeedsTreeBuilderContextUpdate(
+    const LocalFrameView& frame_view,
+    const PrePaintTreeWalkContext& context) {
+  return frame_view.NeedsPaintPropertyUpdate() ||
+         (frame_view.GetLayoutView() &&
+          NeedsTreeBuilderContextUpdate(*frame_view.GetLayoutView(), context));
+}
+
+bool PrePaintTreeWalk::NeedsTreeBuilderContextUpdate(
+    const LayoutObject& object,
+    const PrePaintTreeWalkContext& parent_context) {
+  return object.NeedsPaintPropertyUpdate() ||
+         object.DescendantNeedsPaintPropertyUpdate() ||
+         (parent_context.tree_builder_context &&
+          parent_context.tree_builder_context->force_subtree_update) ||
+         // If the object needs visual rect update, we should update tree
+         // builder context which is needed by visual rect update.
+         parent_context.paint_invalidator_context->NeedsVisualRectUpdate(
+             object);
+}
+
+void PrePaintTreeWalk::ClearPreviousClipRectsForTesting(
+    const LayoutObject& object) {
+  object.GetMutableForPainting().FirstFragment()->ClearPreviousClipRects();
+}
+
+void PrePaintTreeWalk::Walk(const LayoutObject& object,
+                            const PrePaintTreeWalkContext& parent_context) {
+  // Early out from the tree walk if possible.
+  bool needs_tree_builder_context_update =
+      this->NeedsTreeBuilderContextUpdate(object, parent_context);
+  if (!needs_tree_builder_context_update &&
+      !object.ShouldCheckForPaintInvalidation())
     return;
 
-  // PrePaintTreeWalkContext is large and can lead to stack overflows when
-  // recursion is deep so this context object is allocated on the heap.
-  // See: https://crbug.com/698653.
-  std::unique_ptr<PrePaintTreeWalkContext> context =
-      WTF::wrapUnique(new PrePaintTreeWalkContext(parentContext));
+  PrePaintTreeWalkContext context(parent_context,
+                                  needs_tree_builder_context_update);
 
   // This must happen before updatePropertiesForSelf, because the latter reads
   // some of the state computed here.
-  updateAuxiliaryObjectProperties(object, *context);
+  UpdateAuxiliaryObjectProperties(object, context);
 
-  m_propertyTreeBuilder.updatePropertiesForSelf(object,
-                                                context->treeBuilderContext);
-  m_paintInvalidator.invalidatePaintIfNeeded(object,
-                                             context->paintInvalidatorContext);
-  m_propertyTreeBuilder.updatePropertiesForChildren(
-      object, context->treeBuilderContext);
+  if (context.tree_builder_context) {
+    property_tree_builder_.UpdatePropertiesForSelf(
+        object, *context.tree_builder_context);
 
-  invalidatePaintLayerOptimizationsIfNeeded(object, *context);
-
-  for (const LayoutObject* child = object.slowFirstChild(); child;
-       child = child->nextSibling()) {
-    if (child->isLayoutMultiColumnSpannerPlaceholder()) {
-      child->getMutableForPainting().clearPaintFlags();
-      continue;
+    if (context.tree_builder_context->clip_changed) {
+      context.paint_invalidator_context->subtree_flags |=
+          PaintInvalidatorContext::kSubtreeVisualRectUpdate;
     }
-    walk(*child, *context);
   }
 
-  if (object.isLayoutPart()) {
-    const LayoutPart& layoutPart = toLayoutPart(object);
-    FrameViewBase* frameViewBase = layoutPart.widget();
-    if (frameViewBase && frameViewBase->isFrameView()) {
-      context->treeBuilderContext.current.paintOffset +=
-          layoutPart.replacedContentRect().location() -
-          frameViewBase->frameRect().location();
-      context->treeBuilderContext.current.paintOffset =
-          roundedIntPoint(context->treeBuilderContext.current.paintOffset);
-      walk(*toFrameView(frameViewBase), *context);
+  paint_invalidator_.InvalidatePaint(object, context.tree_builder_context.get(),
+                                     *context.paint_invalidator_context);
+
+  if (context.tree_builder_context) {
+    property_tree_builder_.UpdatePropertiesForChildren(
+        object, *context.tree_builder_context);
+
+    InvalidatePaintLayerOptimizationsIfNeeded(object, context);
+  }
+
+  for (const LayoutObject* child = object.SlowFirstChild(); child;
+       child = child->NextSibling()) {
+    if (child->IsLayoutMultiColumnSpannerPlaceholder()) {
+      child->GetMutableForPainting().ClearPaintFlags();
+      continue;
+    }
+    Walk(*child, context);
+  }
+
+  if (object.IsLayoutEmbeddedContent()) {
+    const LayoutEmbeddedContent& layout_embedded_content =
+        ToLayoutEmbeddedContent(object);
+    LocalFrameView* frame_view = layout_embedded_content.ChildFrameView();
+    if (frame_view) {
+      if (context.tree_builder_context) {
+        context.tree_builder_context->fragments[0].current.paint_offset +=
+            layout_embedded_content.ReplacedContentRect().Location() -
+            frame_view->FrameRect().Location();
+        context.tree_builder_context->fragments[0].current.paint_offset =
+            RoundedIntPoint(context.tree_builder_context->fragments[0]
+                                .current.paint_offset);
+      }
+      Walk(*frame_view, context);
     }
     // TODO(pdr): Investigate RemoteFrameView (crbug.com/579281).
   }
 
-  object.getMutableForPainting().clearPaintFlags();
+  object.GetMutableForPainting().ClearPaintFlags();
 }
 
 }  // namespace blink

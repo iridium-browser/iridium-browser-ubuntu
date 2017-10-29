@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/views/accessibility/native_view_accessibility.h"
-
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -11,9 +9,11 @@
 #include "ui/views/accessibility/ax_aura_obj_cache.h"
 #include "ui/views/accessibility/ax_aura_obj_wrapper.h"
 #include "ui/views/accessibility/ax_widget_obj_wrapper.h"
+#include "ui/views/accessibility/native_view_accessibility_base.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/test/views_test_base.h"
+#include "ui/views/widget/widget.h"
 
 namespace views {
 namespace test {
@@ -37,9 +37,8 @@ class NativeViewAccessibilityTest : public ViewsTestBase {
   void SetUp() override {
     ViewsTestBase::SetUp();
 
-    widget_ = new views::Widget;
-    views::Widget::InitParams params =
-        CreateParams(views::Widget::InitParams::TYPE_WINDOW);
+    widget_ = new Widget;
+    Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
     params.bounds = gfx::Rect(0, 0, 200, 200);
     widget_->Init(params);
 
@@ -58,84 +57,119 @@ class NativeViewAccessibilityTest : public ViewsTestBase {
   void TearDown() override {
     if (!widget_->IsClosed())
       widget_->Close();
-    button_accessibility_->Destroy();
-    button_accessibility_ = NULL;
-    label_accessibility_->Destroy();
-    label_accessibility_ = NULL;
     ViewsTestBase::TearDown();
   }
 
+  NativeViewAccessibilityBase* button_accessibility() {
+    return static_cast<NativeViewAccessibilityBase*>(
+        button_accessibility_.get());
+  }
+
+  NativeViewAccessibilityBase* label_accessibility() {
+    return static_cast<NativeViewAccessibilityBase*>(
+        label_accessibility_.get());
+  }
+
+  bool SetFocused(NativeViewAccessibilityBase* view_accessibility,
+                  bool focused) {
+    ui::AXActionData data;
+    data.action = focused ? ui::AX_ACTION_FOCUS : ui::AX_ACTION_BLUR;
+    return view_accessibility->AccessibilityPerformAction(data);
+  }
+
  protected:
-  views::Widget* widget_;
+  Widget* widget_;
   TestButton* button_;
-  NativeViewAccessibility* button_accessibility_;
+  std::unique_ptr<NativeViewAccessibility> button_accessibility_;
   Label* label_;
-  NativeViewAccessibility* label_accessibility_;
+  std::unique_ptr<NativeViewAccessibility> label_accessibility_;
+
+  DISALLOW_COPY_AND_ASSIGN(NativeViewAccessibilityTest);
 };
 
 TEST_F(NativeViewAccessibilityTest, RoleShouldMatch) {
-  EXPECT_EQ(ui::AX_ROLE_BUTTON, button_accessibility_->GetData().role);
-  EXPECT_EQ(ui::AX_ROLE_STATIC_TEXT, label_accessibility_->GetData().role);
+  EXPECT_EQ(ui::AX_ROLE_BUTTON, button_accessibility()->GetData().role);
+  // Since the label is a subview of |button_|, and the button is keyboard
+  // focusable, the label is assumed to form part of the button and not have a
+  // role of its own.
+  EXPECT_EQ(ui::AX_ROLE_IGNORED, label_accessibility()->GetData().role);
+  // This will happen for all potentially keyboard-focusable Views with
+  // non-keyboard-focusable children, so if we make the button unfocusable, the
+  // label will be allowed to have its own role again.
+  button_->SetFocusBehavior(View::FocusBehavior::NEVER);
+  EXPECT_EQ(ui::AX_ROLE_STATIC_TEXT, label_accessibility()->GetData().role);
 }
 
 TEST_F(NativeViewAccessibilityTest, BoundsShouldMatch) {
-  gfx::Rect bounds = gfx::ToEnclosingRect(
-      button_accessibility_->GetData().location);
-  bounds.Offset(button_accessibility_->GetGlobalCoordinateOffset());
+  gfx::Rect bounds =
+      gfx::ToEnclosingRect(button_accessibility()->GetData().location);
+  gfx::Rect screen_bounds = button_accessibility()->GetScreenBoundsRect();
+
   EXPECT_EQ(button_->GetBoundsInScreen(), bounds);
+  EXPECT_EQ(screen_bounds, bounds);
 }
 
 TEST_F(NativeViewAccessibilityTest, LabelIsChildOfButton) {
-  EXPECT_EQ(1, button_accessibility_->GetChildCount());
-  EXPECT_EQ(label_->GetNativeViewAccessible(),
-            button_accessibility_->ChildAtIndex(0));
+  // |button_| is focusable, so |label_| (as its child) should be ignored.
+  EXPECT_EQ(View::FocusBehavior::ACCESSIBLE_ONLY, button_->focus_behavior());
+  EXPECT_EQ(1, button_accessibility()->GetChildCount());
   EXPECT_EQ(button_->GetNativeViewAccessible(),
-            label_accessibility_->GetParent());
+            label_accessibility()->GetParent());
+  EXPECT_EQ(ui::AX_ROLE_IGNORED, label_accessibility()->GetData().role);
+
+  // If |button_| is no longer focusable, |label_| should show up again.
+  button_->SetFocusBehavior(View::FocusBehavior::NEVER);
+  EXPECT_EQ(1, button_accessibility()->GetChildCount());
+  EXPECT_EQ(label_->GetNativeViewAccessible(),
+            button_accessibility()->ChildAtIndex(0));
+  EXPECT_EQ(button_->GetNativeViewAccessible(),
+            label_accessibility()->GetParent());
+  EXPECT_NE(ui::AX_ROLE_IGNORED, label_accessibility()->GetData().role);
 }
 
 // Verify Views with invisible ancestors have AX_STATE_INVISIBLE.
 TEST_F(NativeViewAccessibilityTest, InvisibleViews) {
   EXPECT_TRUE(widget_->IsVisible());
   EXPECT_FALSE(
-      button_accessibility_->GetData().HasStateFlag(ui::AX_STATE_INVISIBLE));
+      button_accessibility()->GetData().HasState(ui::AX_STATE_INVISIBLE));
   EXPECT_FALSE(
-      label_accessibility_->GetData().HasStateFlag(ui::AX_STATE_INVISIBLE));
+      label_accessibility()->GetData().HasState(ui::AX_STATE_INVISIBLE));
   button_->SetVisible(false);
   EXPECT_TRUE(
-      button_accessibility_->GetData().HasStateFlag(ui::AX_STATE_INVISIBLE));
+      button_accessibility()->GetData().HasState(ui::AX_STATE_INVISIBLE));
   EXPECT_TRUE(
-      label_accessibility_->GetData().HasStateFlag(ui::AX_STATE_INVISIBLE));
+      label_accessibility()->GetData().HasState(ui::AX_STATE_INVISIBLE));
 }
 
 TEST_F(NativeViewAccessibilityTest, WritableFocus) {
   // Make |button_| focusable, and focus/unfocus it via NativeViewAccessibility.
   button_->SetFocusBehavior(View::FocusBehavior::ALWAYS);
   EXPECT_EQ(nullptr, button_->GetFocusManager()->GetFocusedView());
-  EXPECT_EQ(nullptr, button_accessibility_->GetFocus());
-  EXPECT_TRUE(button_accessibility_->SetFocused(true));
+  EXPECT_EQ(nullptr, button_accessibility()->GetFocus());
+  EXPECT_TRUE(SetFocused(button_accessibility(), true));
   EXPECT_EQ(button_, button_->GetFocusManager()->GetFocusedView());
   EXPECT_EQ(button_->GetNativeViewAccessible(),
-            button_accessibility_->GetFocus());
-  EXPECT_TRUE(button_accessibility_->SetFocused(false));
+            button_accessibility()->GetFocus());
+  EXPECT_TRUE(SetFocused(button_accessibility(), false));
   EXPECT_EQ(nullptr, button_->GetFocusManager()->GetFocusedView());
-  EXPECT_EQ(nullptr, button_accessibility_->GetFocus());
+  EXPECT_EQ(nullptr, button_accessibility()->GetFocus());
 
   // If not focusable at all, SetFocused() should return false.
   button_->SetEnabled(false);
-  EXPECT_FALSE(button_accessibility_->SetFocused(true));
+  EXPECT_FALSE(SetFocused(button_accessibility(), true));
 }
 
 // Subclass of NativeViewAccessibility that destroys itself when its
 // parent widget is destroyed, for the purposes of making sure this
 // doesn't lead to a crash.
-class TestNativeViewAccessibility : public NativeViewAccessibility {
+class TestNativeViewAccessibility : public NativeViewAccessibilityBase {
  public:
   explicit TestNativeViewAccessibility(View* view)
-      : NativeViewAccessibility(view) {}
+      : NativeViewAccessibilityBase(view) {}
 
   void OnWidgetDestroying(Widget* widget) override {
     bool is_destroying_parent_widget = (parent_widget_ == widget);
-    NativeViewAccessibility::OnWidgetDestroying(widget);
+    NativeViewAccessibilityBase::OnWidgetDestroying(widget);
     if (is_destroying_parent_widget)
       delete this;
   }
@@ -144,7 +178,7 @@ class TestNativeViewAccessibility : public NativeViewAccessibility {
 TEST_F(NativeViewAccessibilityTest, CrashOnWidgetDestroyed) {
   std::unique_ptr<Widget> parent_widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
-  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.bounds = gfx::Rect(50, 50, 650, 650);
   parent_widget->Init(params);
 
@@ -175,8 +209,7 @@ class AxTestViewsDelegate : public TestViewsDelegate {
   AxTestViewsDelegate() {}
   ~AxTestViewsDelegate() override {}
 
-  void NotifyAccessibilityEvent(views::View* view,
-                                ui::AXEvent event_type) override {
+  void NotifyAccessibilityEvent(View* view, ui::AXEvent event_type) override {
     AXAuraObjCache* ax = AXAuraObjCache::GetInstance();
     std::vector<AXAuraObjWrapper*> out_children;
     AXAuraObjWrapper* ax_obj = ax->GetOrCreate(view->GetWidget());
@@ -195,7 +228,7 @@ class AXViewTest : public ViewsTestBase {
     std::unique_ptr<TestViewsDelegate> views_delegate(
         new AxTestViewsDelegate());
     set_views_delegate(std::move(views_delegate));
-    views::ViewsTestBase::SetUp();
+    ViewsTestBase::SetUp();
   }
 };
 
@@ -204,7 +237,7 @@ class AXViewTest : public ViewsTestBase {
 TEST_F(AXViewTest, LayoutCalledInvalidateRootView) {
   std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
-  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   widget->Init(params);
   widget->Show();
 

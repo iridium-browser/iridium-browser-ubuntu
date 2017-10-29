@@ -17,7 +17,6 @@
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "third_party/boringssl/src/include/openssl/err.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
-#include "third_party/boringssl/src/include/openssl/x509.h"
 
 namespace net {
 
@@ -61,8 +60,13 @@ int OpenSSLNetErrorLib() {
 int MapOpenSSLErrorSSL(uint32_t error_code) {
   DCHECK_EQ(ERR_LIB_SSL, ERR_GET_LIB(error_code));
 
+#if DCHECK_IS_ON()
+  char buf[ERR_ERROR_STRING_BUF_LEN];
+  ERR_error_string_n(error_code, buf, sizeof(buf));
   DVLOG(1) << "OpenSSL SSL error, reason: " << ERR_GET_REASON(error_code)
-           << ", name: " << ERR_error_string(error_code, NULL);
+           << ", name: " << buf;
+#endif
+
   switch (ERR_GET_REASON(error_code)) {
     case SSL_R_READ_TIMEOUT_EXPIRED:
       return ERR_TIMED_OUT;
@@ -96,9 +100,7 @@ int MapOpenSSLErrorSSL(uint32_t error_code) {
       return ERR_SSL_UNRECOGNIZED_NAME_ALERT;
     case SSL_R_BAD_DH_P_LENGTH:
       return ERR_SSL_WEAK_SERVER_EPHEMERAL_DH_KEY;
-    case SSL_R_CERTIFICATE_VERIFY_FAILED:
-      // The only way that the certificate verify callback can fail is if
-      // the leaf certificate changed during a renegotiation.
+    case SSL_R_SERVER_CERT_CHANGED:
       return ERR_SSL_SERVER_CERT_CHANGED;
     // SSL_R_SSLV3_ALERT_HANDSHAKE_FAILURE may be returned from the server after
     // receiving ClientHello if there's no common supported cipher. Map that
@@ -171,26 +173,26 @@ int MapOpenSSLErrorWithDetails(int err,
       return ERR_FAILED;
     case SSL_ERROR_SSL:
       // Walk down the error stack to find an SSL or net error.
-      uint32_t error_code;
-      const char* file;
-      int line;
-      do {
-        error_code = ERR_get_error_line(&file, &line);
-        if (ERR_GET_LIB(error_code) == ERR_LIB_SSL) {
-          out_error_info->error_code = error_code;
-          out_error_info->file = file;
-          out_error_info->line = line;
-          return MapOpenSSLErrorSSL(error_code);
-        } else if (ERR_GET_LIB(error_code) == OpenSSLNetErrorLib()) {
-          out_error_info->error_code = error_code;
-          out_error_info->file = file;
-          out_error_info->line = line;
+      while (true) {
+        OpenSSLErrorInfo error_info;
+        error_info.error_code =
+            ERR_get_error_line(&error_info.file, &error_info.line);
+        if (error_info.error_code == 0) {
+          // Map errors to ERR_SSL_PROTOCOL_ERROR by default, reporting the most
+          // recent error in |*out_error_info|.
+          return ERR_SSL_PROTOCOL_ERROR;
+        }
+
+        *out_error_info = error_info;
+        if (ERR_GET_LIB(error_info.error_code) == ERR_LIB_SSL) {
+          return MapOpenSSLErrorSSL(error_info.error_code);
+        }
+        if (ERR_GET_LIB(error_info.error_code) == OpenSSLNetErrorLib()) {
           // Net error codes are negative but encoded in OpenSSL as positive
           // numbers.
-          return -ERR_GET_REASON(error_code);
+          return -ERR_GET_REASON(error_info.error_code);
         }
-      } while (error_code != 0);
-      return ERR_FAILED;
+      }
     default:
       // TODO(joth): Implement full mapping.
       LOG(WARNING) << "Unknown OpenSSL error " << err;
@@ -220,31 +222,6 @@ int GetNetSSLVersion(SSL* ssl) {
       NOTREACHED();
       return SSL_CONNECTION_VERSION_UNKNOWN;
   }
-}
-
-bssl::UniquePtr<X509> OSCertHandleToOpenSSL(
-    X509Certificate::OSCertHandle os_handle) {
-#if defined(USE_OPENSSL_CERTS)
-  return bssl::UniquePtr<X509>(X509Certificate::DupOSCertHandle(os_handle));
-#else   // !defined(USE_OPENSSL_CERTS)
-  std::string der_encoded;
-  if (!X509Certificate::GetDEREncoded(os_handle, &der_encoded))
-    return bssl::UniquePtr<X509>();
-  const uint8_t* bytes = reinterpret_cast<const uint8_t*>(der_encoded.data());
-  return bssl::UniquePtr<X509>(d2i_X509(NULL, &bytes, der_encoded.size()));
-#endif  // defined(USE_OPENSSL_CERTS)
-}
-
-bssl::UniquePtr<STACK_OF(X509)> OSCertHandlesToOpenSSL(
-    const X509Certificate::OSCertHandles& os_handles) {
-  bssl::UniquePtr<STACK_OF(X509)> stack(sk_X509_new_null());
-  for (size_t i = 0; i < os_handles.size(); i++) {
-    bssl::UniquePtr<X509> x509 = OSCertHandleToOpenSSL(os_handles[i]);
-    if (!x509)
-      return nullptr;
-    sk_X509_push(stack.get(), x509.release());
-  }
-  return stack;
 }
 
 }  // namespace net

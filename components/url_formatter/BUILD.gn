@@ -8,16 +8,15 @@ if (is_android) {
 
 static_library("url_formatter") {
   sources = [
-    "android/component_jni_registrar.cc",
-    "android/component_jni_registrar.h",
     "elide_url.cc",
     "elide_url.h",
+    "idn_spoof_checker.cc",
+    "idn_spoof_checker.h",
     "url_fixer.cc",
     "url_fixer.h",
     "url_formatter.cc",
     "url_formatter.h",
     "url_formatter_android.cc",
-    "url_formatter_android.h",
   ]
 
   # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -26,6 +25,7 @@ static_library("url_formatter") {
   deps = [
     "//base",
     "//base:i18n",
+    "//components/url_formatter/top_domains",
     "//net",
     "//third_party/icu",
     "//url",
@@ -49,6 +49,7 @@ source_set("unit_tests") {
   deps = [
     ":url_formatter",
     "//base",
+    "//components/url_formatter/top_domains",
     "//net",
     "//testing/gtest",
     "//ui/gfx",

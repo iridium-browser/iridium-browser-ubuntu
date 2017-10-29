@@ -15,6 +15,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/md5.h"
+#include "base/memory/aligned_memory.h"
 #include "base/memory/shared_memory.h"
 #include "base/synchronization/lock.h"
 #include "build/build_config.h"
@@ -63,8 +64,10 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
     STORAGE_OWNED_MEMORY = 3,  // VideoFrame has allocated its own data buffer.
     STORAGE_SHMEM = 4,         // Pixels are backed by Shared Memory.
 #if defined(OS_LINUX)
-    // TODO(mcasas): Consider turning this type into STORAGE_NATIVE or another
-    // meaningful name and handle it appropriately in all cases.
+    // TODO(mcasas): Consider turning this type into STORAGE_NATIVE
+    // based on the idea of using this same enum value for both DMA
+    // buffers on Linux and CVPixelBuffers on Mac (which currently use
+    // STORAGE_UNOWNED_MEMORY) and handle it appropriately in all cases.
     STORAGE_DMABUFS = 5,  // Each plane is stored into a DmaBuf.
 #endif
     STORAGE_MOJO_SHARED_BUFFER = 6,
@@ -339,8 +342,7 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
 #if defined(OS_LINUX)
   // Returns backing DmaBuf file descriptor for given |plane|, if present, or
   // -1 if not.
-  // TODO(mcasas): Rename to DmabufFd() to comply with Style Guide.
-  int dmabuf_fd(size_t plane) const;
+  int DmabufFd(size_t plane) const;
 
   // Duplicates internally the |fds_in|, overwriting the current ones. Returns
   // false if something goes wrong, and leaves all internal fds closed.
@@ -351,8 +353,7 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
 
 #if defined(OS_MACOSX)
   // Returns the backing CVPixelBuffer, if present.
-  // TODO(mcasas): Rename to CvPixelBuffer() to comply with Style Guide.
-  CVPixelBufferRef cv_pixel_buffer() const;
+  CVPixelBufferRef CvPixelBuffer() const;
 #endif
 
   // Sets the mailbox release callback.
@@ -370,7 +371,7 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   // VideoFrame is permitted while the callback executes (including
   // VideoFrameMetadata), clients should not assume the data pointers are
   // valid.
-  void AddDestructionObserver(const base::Closure& callback);
+  void AddDestructionObserver(base::OnceClosure callback);
 
   // Returns a dictionary of optional metadata.  This contains information
   // associated with the frame that downstream clients might use for frame-level
@@ -401,6 +402,9 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   // Unique identifier for this video frame; generated at construction time and
   // guaranteed to be unique within a single process.
   int unique_id() const { return unique_id_; }
+
+  // Returns the number of bits per channel for given |format|.
+  int BitsPerChannel(VideoPixelFormat format);
 
  protected:
   friend class base::RefCountedThreadSafe<VideoFrame>;
@@ -538,7 +542,7 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   base::ScopedCFTypeRef<CVPixelBufferRef> cv_pixel_buffer_;
 #endif
 
-  std::vector<base::Closure> done_callbacks_;
+  std::vector<base::OnceClosure> done_callbacks_;
 
   base::TimeDelta timestamp_;
 

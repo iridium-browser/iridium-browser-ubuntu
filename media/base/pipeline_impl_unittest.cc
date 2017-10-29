@@ -28,11 +28,13 @@
 #include "media/base/text_renderer.h"
 #include "media/base/text_track_config.h"
 #include "media/base/time_delta_interpolator.h"
+#include "testing/gmock_mutant.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/size.h"
 
 using ::testing::_;
 using ::testing::AnyNumber;
+using ::testing::CreateFunctor;
 using ::testing::DeleteArg;
 using ::testing::DoAll;
 // TODO(scherkus): Remove InSequence after refactoring Pipeline.
@@ -96,8 +98,7 @@ class PipelineImplTest : public ::testing::Test {
   };
 
   PipelineImplTest()
-      : pipeline_(
-            new PipelineImpl(message_loop_.task_runner(), new MediaLog())),
+      : pipeline_(new PipelineImpl(message_loop_.task_runner(), &media_log_)),
         demuxer_(new StrictMock<MockDemuxer>()),
         demuxer_host_(nullptr),
         scoped_renderer_(new StrictMock<MockRenderer>()),
@@ -322,6 +323,7 @@ class PipelineImplTest : public ::testing::Test {
   StrictMock<CallbackHelper> callbacks_;
   base::SimpleTestTickClock test_tick_clock_;
   base::MessageLoop message_loop_;
+  MediaLog media_log_;
   std::unique_ptr<PipelineImpl> pipeline_;
 
   std::unique_ptr<StrictMock<MockDemuxer>> demuxer_;
@@ -734,8 +736,7 @@ TEST_F(PipelineImplTest, NoMessageDuringTearDownFromError) {
   // Trigger additional requests on the pipeline during tear down from error.
   base::Callback<void(PipelineStatus)> cb =
       base::Bind(&TestNoCallsAfterError, pipeline_.get(), &message_loop_);
-  ON_CALL(callbacks_, OnError(_))
-      .WillByDefault(Invoke(&cb, &base::Callback<void(PipelineStatus)>::Run));
+  ON_CALL(callbacks_, OnError(_)).WillByDefault(Invoke(CreateFunctor(cb)));
 
   base::TimeDelta seek_time = base::TimeDelta::FromSeconds(5);
 

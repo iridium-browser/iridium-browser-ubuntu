@@ -8,12 +8,27 @@
 
 #include <memory>
 
+#include "core/fxcrt/fx_codepage.h"
 #include "core/fxge/cfx_fontmapper.h"
 #include "core/fxge/cfx_gemodule.h"
 #include "core/fxge/fx_font.h"
 #include "core/fxge/ifx_systemfontinfo.h"
 #include "fpdfsdk/fsdk_define.h"
-#include "fpdfsdk/pdfwindow/PWL_FontMap.h"
+#include "fpdfsdk/pdfwindow/cpwl_font_map.h"
+#include "third_party/base/ptr_util.h"
+
+static_assert(FXFONT_ANSI_CHARSET == FX_CHARSET_ANSI, "Charset must match");
+static_assert(FXFONT_DEFAULT_CHARSET == FX_CHARSET_Default,
+              "Charset must match");
+static_assert(FXFONT_SYMBOL_CHARSET == FX_CHARSET_Symbol, "Charset must match");
+static_assert(FXFONT_SHIFTJIS_CHARSET == FX_CHARSET_ShiftJIS,
+              "Charset must match");
+static_assert(FXFONT_HANGEUL_CHARSET == FX_CHARSET_Hangul,
+              "Charset must match");
+static_assert(FXFONT_GB2312_CHARSET == FX_CHARSET_ChineseSimplified,
+              "Charset must match");
+static_assert(FXFONT_CHINESEBIG5_CHARSET == FX_CHARSET_ChineseTraditional,
+              "Charset must match");
 
 class CFX_ExternalFontInfo final : public IFX_SystemFontInfo {
  public:
@@ -35,7 +50,7 @@ class CFX_ExternalFontInfo final : public IFX_SystemFontInfo {
                 bool bItalic,
                 int charset,
                 int pitch_family,
-                const FX_CHAR* family,
+                const char* family,
                 int& iExact) override {
     if (!m_pInfo->MapFont)
       return nullptr;
@@ -43,7 +58,7 @@ class CFX_ExternalFontInfo final : public IFX_SystemFontInfo {
                             family, &iExact);
   }
 
-  void* GetFont(const FX_CHAR* family) override {
+  void* GetFont(const char* family) override {
     if (!m_pInfo->GetFont)
       return nullptr;
     return m_pInfo->GetFont(m_pInfo, family);
@@ -58,7 +73,7 @@ class CFX_ExternalFontInfo final : public IFX_SystemFontInfo {
     return m_pInfo->GetFontData(m_pInfo, hFont, table, buffer, size);
   }
 
-  bool GetFaceName(void* hFont, CFX_ByteString& name) override {
+  bool GetFaceName(void* hFont, CFX_ByteString* name) override {
     if (!m_pInfo->GetFaceName)
       return false;
     uint32_t size = m_pInfo->GetFaceName(m_pInfo, hFont, nullptr, 0);
@@ -66,16 +81,16 @@ class CFX_ExternalFontInfo final : public IFX_SystemFontInfo {
       return false;
     char* buffer = FX_Alloc(char, size);
     size = m_pInfo->GetFaceName(m_pInfo, hFont, buffer, size);
-    name = CFX_ByteString(buffer, size);
+    *name = CFX_ByteString(buffer, size);
     FX_Free(buffer);
     return true;
   }
 
-  bool GetFontCharset(void* hFont, int& charset) override {
+  bool GetFontCharset(void* hFont, int* charset) override {
     if (!m_pInfo->GetFontCharset)
       return false;
 
-    charset = m_pInfo->GetFontCharset(m_pInfo, hFont);
+    *charset = m_pInfo->GetFontCharset(m_pInfo, hFont);
     return true;
   }
 
@@ -91,7 +106,7 @@ class CFX_ExternalFontInfo final : public IFX_SystemFontInfo {
 DLLEXPORT void STDCALL FPDF_AddInstalledFont(void* mapper,
                                              const char* name,
                                              int charset) {
-  CFX_FontMapper* pMapper = reinterpret_cast<CFX_FontMapper*>(mapper);
+  CFX_FontMapper* pMapper = static_cast<CFX_FontMapper*>(mapper);
   pMapper->AddInstalledFont(name, charset);
 }
 
@@ -100,8 +115,7 @@ DLLEXPORT void STDCALL FPDF_SetSystemFontInfo(FPDF_SYSFONTINFO* pFontInfoExt) {
     return;
 
   CFX_GEModule::Get()->GetFontMgr()->SetSystemFontInfo(
-      std::unique_ptr<IFX_SystemFontInfo>(
-          new CFX_ExternalFontInfo(pFontInfoExt)));
+      pdfium::MakeUnique<CFX_ExternalFontInfo>(pFontInfoExt));
 }
 
 DLLEXPORT const FPDF_CharsetFontMap* STDCALL FPDF_GetDefaultTTFMap() {
@@ -109,13 +123,12 @@ DLLEXPORT const FPDF_CharsetFontMap* STDCALL FPDF_GetDefaultTTFMap() {
 }
 
 struct FPDF_SYSFONTINFO_DEFAULT : public FPDF_SYSFONTINFO {
-  IFX_SystemFontInfo* m_pFontInfo;
+  CFX_UnownedPtr<IFX_SystemFontInfo> m_pFontInfo;
 };
 
 static void DefaultRelease(struct _FPDF_SYSFONTINFO* pThis) {
   auto* pDefault = static_cast<FPDF_SYSFONTINFO_DEFAULT*>(pThis);
-  // TODO(thestig): Should this be set to nullptr too?
-  delete pDefault->m_pFontInfo;
+  delete pDefault->m_pFontInfo.Release();
 }
 
 static void DefaultEnumFonts(struct _FPDF_SYSFONTINFO* pThis, void* pMapper) {
@@ -155,18 +168,20 @@ static unsigned long DefaultGetFaceName(struct _FPDF_SYSFONTINFO* pThis,
                                         unsigned long buf_size) {
   CFX_ByteString name;
   auto* pDefault = static_cast<FPDF_SYSFONTINFO_DEFAULT*>(pThis);
-  if (!pDefault->m_pFontInfo->GetFaceName(hFont, name))
+  if (!pDefault->m_pFontInfo->GetFaceName(hFont, &name))
     return 0;
   if (name.GetLength() >= (long)buf_size)
     return name.GetLength() + 1;
-  FXSYS_strcpy(buffer, name.c_str());
+
+  strncpy(buffer, name.c_str(),
+          (name.GetLength() + 1) * sizeof(CFX_ByteString::CharType));
   return name.GetLength() + 1;
 }
 
 static int DefaultGetFontCharset(struct _FPDF_SYSFONTINFO* pThis, void* hFont) {
   int charset;
   auto* pDefault = static_cast<FPDF_SYSFONTINFO_DEFAULT*>(pThis);
-  if (!pDefault->m_pFontInfo->GetFontCharset(hFont, charset))
+  if (!pDefault->m_pFontInfo->GetFontCharset(hFont, &charset))
     return 0;
   return charset;
 }
@@ -197,7 +212,7 @@ DLLEXPORT FPDF_SYSFONTINFO* STDCALL FPDF_GetDefaultSystemFontInfo() {
   return pFontInfoExt;
 }
 
-DLLEXPORT void FPDF_FreeDefaultSystemFontInfo(
-    FPDF_SYSFONTINFO* pDefaultFontInfo) {
+DLLEXPORT void STDCALL
+FPDF_FreeDefaultSystemFontInfo(FPDF_SYSFONTINFO* pDefaultFontInfo) {
   FX_Free(static_cast<FPDF_SYSFONTINFO_DEFAULT*>(pDefaultFontInfo));
 }

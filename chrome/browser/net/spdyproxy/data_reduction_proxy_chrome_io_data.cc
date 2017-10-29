@@ -9,9 +9,11 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
-#include "chrome/browser/net/spdyproxy/chrome_data_use_group_provider.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/previews/previews_infobar_delegate.h"
+#include "chrome/browser/previews/previews_service.h"
+#include "chrome/browser/previews/previews_service_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/pref_names.h"
@@ -21,13 +23,15 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/prefs/pref_service.h"
+#include "components/previews/core/previews_experiments.h"
+#include "components/previews/core/previews_ui_service.h"
 #include "components/version_info/version_info.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
-
-#if defined(OS_ANDROID)
-#include "base/android/build_info.h"
-#endif
+#include "url/gurl.h"
 
 namespace content {
 class BrowserContext;
@@ -37,14 +41,34 @@ using data_reduction_proxy::DataReductionProxyParams;
 
 namespace {
 
+// Adds the preview navigation to the black list.
+void AddPreviewNavigationToBlackListCallback(
+    content::BrowserContext* browser_context,
+    const GURL& url,
+    previews::PreviewsType type,
+    bool opt_out) {
+  PreviewsService* previews_service = PreviewsServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context));
+  if (previews_service && previews_service->previews_ui_service()) {
+    previews_service->previews_ui_service()->AddPreviewNavigation(url, type,
+                                                                  opt_out);
+  }
+}
+
 // If this is the first Lo-Fi response for a page load, a
 // PreviewsInfoBarDelegate is created, which handles showing Lo-Fi UI.
 void OnLoFiResponseReceivedOnUI(content::WebContents* web_contents) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   PreviewsInfoBarDelegate::Create(
-      web_contents, PreviewsInfoBarDelegate::LOFI,
-      true /* is_data_saver_user */,
-      PreviewsInfoBarDelegate::OnDismissPreviewsInfobarCallback());
+      web_contents, previews::PreviewsType::LOFI,
+      base::Time() /* previews_freshness */, true /* is_data_saver_user */,
+      false /* is_reload */,
+      base::Bind(&AddPreviewNavigationToBlackListCallback,
+                 web_contents->GetBrowserContext(),
+                 web_contents->GetController()
+                     .GetLastCommittedEntry()
+                     ->GetRedirectChain()[0],
+                 previews::PreviewsType::LOFI));
 }
 
 } // namespace
@@ -58,25 +82,13 @@ CreateDataReductionProxyChromeIOData(
   DCHECK(net_log);
   DCHECK(prefs);
 
-  int flags = 0;
-  if (data_reduction_proxy::params::IsIncludedInPromoFieldTrial())
-    flags |= DataReductionProxyParams::kPromoAllowed;
-  if (data_reduction_proxy::params::IsIncludedInHoldbackFieldTrial())
-    flags |= DataReductionProxyParams::kHoldback;
-#if defined(OS_ANDROID)
-  if (data_reduction_proxy::params::IsIncludedInAndroidOnePromoFieldTrial(
-          base::android::BuildInfo::GetInstance()->android_build_fp())) {
-    flags |= DataReductionProxyParams::kPromoAllowed;
-  }
-#endif
-
   bool enabled =
       prefs->GetBoolean(prefs::kDataSaverEnabled) ||
       data_reduction_proxy::params::ShouldForceEnableDataReductionProxy();
   std::unique_ptr<data_reduction_proxy::DataReductionProxyIOData>
       data_reduction_proxy_io_data(
           new data_reduction_proxy::DataReductionProxyIOData(
-              DataReductionProxyChromeSettings::GetClient(), flags, net_log,
+              DataReductionProxyChromeSettings::GetClient(), net_log,
               io_task_runner, ui_task_runner, enabled, GetUserAgent(),
               version_info::GetChannelString(chrome::GetChannel())));
 
@@ -87,8 +99,6 @@ CreateDataReductionProxyChromeIOData(
   data_reduction_proxy_io_data->set_lofi_ui_service(
       base::MakeUnique<data_reduction_proxy::ContentLoFiUIService>(
           ui_task_runner, base::Bind(&OnLoFiResponseReceivedOnUI)));
-  data_reduction_proxy_io_data->set_data_usage_source_provider(
-      base::MakeUnique<ChromeDataUseGroupProvider>());
 
   return data_reduction_proxy_io_data;
 }

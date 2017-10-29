@@ -7,7 +7,8 @@ define("mojo/public/js/connector", [
   "mojo/public/js/codec",
   "mojo/public/js/core",
   "mojo/public/js/support",
-], function(buffer, codec, core, support) {
+  "mojo/public/js/validator",
+], function(buffer, codec, core, support, validator) {
 
   function Connector(handle) {
     if (!core.isHandle(handle))
@@ -18,23 +19,33 @@ define("mojo/public/js/connector", [
     this.incomingReceiver_ = null;
     this.readWatcher_ = null;
     this.errorHandler_ = null;
+    this.paused_ = false;
 
-    if (handle) {
-      this.readWatcher_ = support.watch(handle,
-                                        core.HANDLE_SIGNAL_READABLE,
-                                        this.readMore_.bind(this));
-    }
+    this.waitToReadMore();
   }
 
   Connector.prototype.close = function() {
-    if (this.readWatcher_) {
-      support.cancelWatch(this.readWatcher_);
-      this.readWatcher_ = null;
-    }
+    this.cancelWait();
     if (this.handle_ != null) {
       core.close(this.handle_);
       this.handle_ = null;
     }
+  };
+
+  Connector.prototype.pauseIncomingMethodCallProcessing = function() {
+    if (this.paused_) {
+      return;
+    }
+    this.paused_= true;
+    this.cancelWait();
+  };
+
+  Connector.prototype.resumeIncomingMethodCallProcessing = function() {
+    if (!this.paused_) {
+      return;
+    }
+    this.paused_= false;
+    this.waitToReadMore();
   };
 
   Connector.prototype.accept = function(message) {
@@ -78,18 +89,17 @@ define("mojo/public/js/connector", [
     this.errorHandler_ = handler;
   };
 
-  Connector.prototype.encounteredError = function() {
-    return this.error_;
-  };
-
   Connector.prototype.waitForNextMessageForTesting = function() {
-    var wait = core.wait(this.handle_, core.HANDLE_SIGNAL_READABLE,
-                         core.DEADLINE_INDEFINITE);
+    var wait = core.wait(this.handle_, core.HANDLE_SIGNAL_READABLE);
     this.readMore_(wait.result);
   };
 
   Connector.prototype.readMore_ = function(result) {
     for (;;) {
+      if (this.paused_) {
+        return;
+      }
+
       var read = core.readMessage(this.handle_,
                                   core.READ_MESSAGE_FLAG_NONE);
       if (this.handle_ == null) // The connector has been closed.
@@ -97,15 +107,71 @@ define("mojo/public/js/connector", [
       if (read.result == core.RESULT_SHOULD_WAIT)
         return;
       if (read.result != core.RESULT_OK) {
-        this.error_ = true;
-        if (this.errorHandler_)
-          this.errorHandler_.onError(read.result);
+        this.handleError(read.result !== core.RESULT_FAILED_PRECONDITION,
+            false);
         return;
       }
       var messageBuffer = new buffer.Buffer(read.buffer);
       var message = new codec.Message(messageBuffer, read.handles);
-      if (this.incomingReceiver_)
-        this.incomingReceiver_.accept(message);
+      var receiverResult = this.incomingReceiver_ &&
+          this.incomingReceiver_.accept(message);
+
+      // Handle invalid incoming message.
+      if (!validator.isTestingMode() && !receiverResult) {
+        // TODO(yzshen): Consider notifying the embedder.
+        this.handleError(true, false);
+      }
+    }
+  };
+
+  Connector.prototype.cancelWait = function() {
+    if (this.readWatcher_) {
+      support.cancelWatch(this.readWatcher_);
+      this.readWatcher_ = null;
+    }
+  };
+
+  Connector.prototype.waitToReadMore = function() {
+    if (this.handle_) {
+      this.readWatcher_ = support.watch(this.handle_,
+                                        core.HANDLE_SIGNAL_READABLE,
+                                        this.readMore_.bind(this));
+    }
+  };
+
+  Connector.prototype.handleError = function(forcePipeReset,
+                                             forceAsyncHandler) {
+    if (this.error_ || this.handle_ === null) {
+      return;
+    }
+
+    if (this.paused_) {
+      // Enforce calling the error handler asynchronously if the user has
+      // paused receiving messages. We need to wait until the user starts
+      // receiving messages again.
+      forceAsyncHandler = true;
+    }
+
+    if (!forcePipeReset && forceAsyncHandler) {
+      forcePipeReset = true;
+    }
+
+    this.cancelWait();
+    if (forcePipeReset) {
+      core.close(this.handle_);
+      var dummyPipe = core.createMessagePipe();
+      this.handle_ = dummyPipe.handle0;
+    }
+
+    if (forceAsyncHandler) {
+      if (!this.paused_) {
+        this.waitToReadMore();
+      }
+    } else {
+      this.error_ = true;
+      if (this.errorHandler_) {
+        this.errorHandler_.onError();
+      }
     }
   };
 

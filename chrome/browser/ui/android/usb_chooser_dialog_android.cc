@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
@@ -14,20 +15,22 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
+#include "chrome/browser/usb/usb_blocklist.h"
 #include "chrome/browser/usb/usb_chooser_context.h"
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/browser/usb/web_usb_histograms.h"
+#include "chrome/browser/vr/vr_tab_helper.h"
 #include "chrome/common/url_constants.h"
 #include "components/security_state/core/security_state.h"
 #include "components/url_formatter/elide_url.h"
-#include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "device/base/device_client.h"
 #include "device/usb/mojo/type_converters.h"
+#include "device/usb/public/cpp/filter_utils.h"
 #include "device/usb/usb_device.h"
-#include "device/usb/usb_device_filter.h"
 #include "device/usb/webusb_descriptors.h"
+#include "device/vr/features/features.h"
 #include "jni/UsbChooserDialog_jni.h"
 #include "ui/android/window_android.h"
 #include "url/gurl.h"
@@ -38,25 +41,34 @@ namespace {
 
 void OnDevicePermissionRequestComplete(
     scoped_refptr<UsbDevice> device,
-    const device::usb::ChooserService::GetPermissionCallback& callback,
+    const device::mojom::UsbChooserService::GetPermissionCallback& callback,
     bool granted) {
-  device::usb::DeviceInfoPtr device_info;
+  device::mojom::UsbDeviceInfoPtr device_info;
   if (granted)
-    device_info = device::usb::DeviceInfo::From(*device);
+    device_info = device::mojom::UsbDeviceInfo::From(*device);
   callback.Run(std::move(device_info));
 }
 
 }  // namespace
 
 UsbChooserDialogAndroid::UsbChooserDialogAndroid(
-    const std::vector<device::UsbDeviceFilter>& filters,
+    std::vector<device::mojom::UsbDeviceFilterPtr> filters,
     content::RenderFrameHost* render_frame_host,
-    const device::usb::ChooserService::GetPermissionCallback& callback)
+    const device::mojom::UsbChooserService::GetPermissionCallback& callback)
     : render_frame_host_(render_frame_host),
       callback_(callback),
       usb_service_observer_(this),
-      filters_(filters),
+      filters_(std::move(filters)),
       weak_factory_(this) {
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderFrameHost(render_frame_host_);
+  if (vr::VrTabHelper::IsInVr(web_contents)) {
+    DCHECK(!callback_.is_null());
+    callback_.Run(nullptr);
+    callback_.Reset();  // Reset |callback_| so that it is only run once.
+    return;
+  }
+
   device::UsbService* usb_service =
       device::DeviceClient::Get()->GetUsbService();
   if (!usb_service)
@@ -66,12 +78,8 @@ UsbChooserDialogAndroid::UsbChooserDialogAndroid(
     usb_service_observer_.Add(usb_service);
 
   // Create (and show) the UsbChooser dialog.
-  content::WebContents* web_contents =
-      content::WebContents::FromRenderFrameHost(render_frame_host_);
   base::android::ScopedJavaLocalRef<jobject> window_android =
-      content::ContentViewCore::FromWebContents(web_contents)
-          ->GetWindowAndroid()
-          ->GetJavaObject();
+      web_contents->GetNativeView()->GetWindowAndroid()->GetJavaObject();
   JNIEnv* env = base::android::AttachCurrentThread();
   base::android::ScopedJavaLocalRef<jstring> origin_string =
       base::android::ConvertUTF16ToJavaString(
@@ -225,22 +233,11 @@ void UsbChooserDialogAndroid::OpenUrl(const std::string& url) {
 
 bool UsbChooserDialogAndroid::DisplayDevice(
     scoped_refptr<UsbDevice> device) const {
-  if (!device::UsbDeviceFilter::MatchesAny(device, filters_))
+  if (!UsbDeviceFilterMatchesAny(filters_, *device))
     return false;
 
-  // On Android it is not possible to read the WebUSB descriptors until Chrome
-  // has been granted permission to open it. Instead we must list all devices
-  // and perform the allowed origins check after the device has been selected.
-  if (!device->permission_granted())
-    return true;
+  if (UsbBlocklist::Get().IsExcluded(device))
+    return false;
 
-  return device::FindInWebUsbAllowedOrigins(
-      device->webusb_allowed_origins(),
-      render_frame_host_->GetLastCommittedURL().GetOrigin(), base::nullopt,
-      base::nullopt);
-}
-
-// static
-bool UsbChooserDialogAndroid::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
+  return true;
 }

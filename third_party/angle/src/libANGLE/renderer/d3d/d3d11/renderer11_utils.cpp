@@ -83,7 +83,7 @@ gl::TextureCaps GenerateTextureFormatCaps(gl::Version maxClientVersion,
     DXGISupportHelper support(device, renderer11DeviceCaps.featureLevel);
     const d3d11::Format &formatInfo = d3d11::Format::Get(internalFormat, renderer11DeviceCaps);
 
-    const gl::InternalFormat &internalFormatInfo = gl::GetInternalFormatInfo(internalFormat);
+    const gl::InternalFormat &internalFormatInfo = gl::GetSizedInternalFormatInfo(internalFormat);
 
     UINT texSupportMask = D3D11_FORMAT_SUPPORT_TEXTURE2D;
     if (internalFormatInfo.depthBits == 0 && internalFormatInfo.stencilBits == 0)
@@ -1142,17 +1142,17 @@ void GenerateCaps(ID3D11Device *device, ID3D11DeviceContext *deviceContext, cons
     GLuint maxSamples = 0;
     D3D_FEATURE_LEVEL featureLevel = renderer11DeviceCaps.featureLevel;
     const gl::FormatSet &allFormats = gl::GetAllSizedInternalFormats();
-    for (gl::FormatSet::const_iterator internalFormat = allFormats.begin(); internalFormat != allFormats.end(); ++internalFormat)
+    for (GLenum internalFormat : allFormats)
     {
         gl::TextureCaps textureCaps = GenerateTextureFormatCaps(
-            GetMaximumClientVersion(featureLevel), *internalFormat, device, renderer11DeviceCaps);
-        textureCapsMap->insert(*internalFormat, textureCaps);
+            GetMaximumClientVersion(featureLevel), internalFormat, device, renderer11DeviceCaps);
+        textureCapsMap->insert(internalFormat, textureCaps);
 
         maxSamples = std::max(maxSamples, textureCaps.getMaxSamples());
 
-        if (gl::GetInternalFormatInfo(*internalFormat).compressed)
+        if (gl::GetSizedInternalFormatInfo(internalFormat).compressed)
         {
-            caps->compressedTextureFormats.push_back(*internalFormat);
+            caps->compressedTextureFormats.push_back(internalFormat);
         }
     }
 
@@ -1224,8 +1224,14 @@ void GenerateCaps(ID3D11Device *device, ID3D11DeviceContext *deviceContext, cons
         static_cast<GLuint>(GetMaximumVertexOutputVectors(featureLevel)) * 4;
     caps->maxVertexTextureImageUnits =
         static_cast<GLuint>(GetMaximumVertexTextureUnits(featureLevel));
-    // Vertex Attrib Bindings not supported.
+
+    // Vertex Attribute Bindings are emulated on D3D11.
     caps->maxVertexAttribBindings = caps->maxVertexAttributes;
+    // Experimental testing confirmed there is no explicit limit on maximum buffer offset in D3D11.
+    caps->maxVertexAttribRelativeOffset = std::numeric_limits<GLint>::max();
+    // Experimental testing confirmed 2048 is the maximum stride that D3D11 can support on all
+    // platforms.
+    caps->maxVertexAttribStride = 2048;
 
     // Fragment shader limits
     caps->maxFragmentUniformComponents =
@@ -1256,6 +1262,9 @@ void GenerateCaps(ID3D11Device *device, ID3D11DeviceContext *deviceContext, cons
     caps->maxUniformBufferBindings = caps->maxVertexUniformBlocks + caps->maxFragmentUniformBlocks;
     caps->maxUniformBlockSize = GetMaximumConstantBufferSize(featureLevel);
 
+    // TODO(oetuaho): Get a more accurate limit. For now using the minimum requirement for GLES 3.1.
+    caps->maxUniformLocations = 1024;
+
     // With DirectX 11.1, constant buffer offset and size must be a multiple of 16 constants of 16 bytes each.
     // https://msdn.microsoft.com/en-us/library/windows/desktop/hh404649%28v=vs.85%29.aspx
     // With DirectX 11.0, we emulate UBO offsets using copies of ranges of the UBO however
@@ -1285,6 +1294,7 @@ void GenerateCaps(ID3D11Device *device, ID3D11DeviceContext *deviceContext, cons
 
     // Multisample limits
     caps->maxSamples = maxSamples;
+    caps->maxColorTextureSamples = maxSamples;
 
     // GL extension support
     extensions->setTextureExtensionSupport(*textureCapsMap);
@@ -1690,6 +1700,13 @@ D3D11_QUERY ConvertQueryType(GLenum queryType)
     }
 }
 
+// Get the D3D11 write mask covering all color channels of a given format
+UINT8 GetColorMask(const gl::InternalFormat &format)
+{
+    return ConvertColorMask(format.redBits > 0, format.greenBits > 0, format.blueBits > 0,
+                            format.alphaBits > 0);
+}
+
 }  // namespace gl_d3d11
 
 namespace d3d11
@@ -1777,7 +1794,10 @@ void MakeValidSize(bool isImage, DXGI_FORMAT format, GLsizei *requestWidth, GLsi
             upsampleCount++;
         }
     }
-    *levelOffset = upsampleCount;
+    if (levelOffset)
+    {
+        *levelOffset = upsampleCount;
+    }
 }
 
 void GenerateInitialTextureData(GLint internalFormat,
@@ -1790,7 +1810,7 @@ void GenerateInitialTextureData(GLint internalFormat,
                                 std::vector<std::vector<BYTE>> *outData)
 {
     const d3d11::Format &d3dFormatInfo = d3d11::Format::Get(internalFormat, renderer11DeviceCaps);
-    ASSERT(d3dFormatInfo.dataInitializerFunction != NULL);
+    ASSERT(d3dFormatInfo.dataInitializerFunction != nullptr);
 
     const d3d11::DXGIFormatSize &dxgiFormatInfo =
         d3d11::GetDXGIFormatSizeInfo(d3dFormatInfo.texFormat);
@@ -1840,6 +1860,36 @@ void SetPositionLayerTexCoord3DVertex(PositionLayerTexCoord3DVertex* vertex, flo
     vertex->s = s;
 }
 
+BlendStateKey::BlendStateKey()
+{
+    memset(this, 0, sizeof(BlendStateKey));
+}
+
+bool operator==(const BlendStateKey &a, const BlendStateKey &b)
+{
+    return memcmp(&a, &b, sizeof(BlendStateKey)) == 0;
+}
+
+bool operator!=(const BlendStateKey &a, const BlendStateKey &b)
+{
+    return !(a == b);
+}
+
+RasterizerStateKey::RasterizerStateKey()
+{
+    memset(this, 0, sizeof(RasterizerStateKey));
+}
+
+bool operator==(const RasterizerStateKey &a, const RasterizerStateKey &b)
+{
+    return memcmp(&a, &b, sizeof(RasterizerStateKey)) == 0;
+}
+
+bool operator!=(const RasterizerStateKey &a, const RasterizerStateKey &b)
+{
+    return !(a == b);
+}
+
 HRESULT SetDebugName(ID3D11DeviceChild *resource, const char *name)
 {
 #if defined(_DEBUG)
@@ -1878,33 +1928,9 @@ HRESULT SetDebugName(ID3D11DeviceChild *resource, const char *name)
 #endif
 }
 
-LazyInputLayout::LazyInputLayout(const D3D11_INPUT_ELEMENT_DESC *inputDesc,
-                                 size_t inputDescLen,
-                                 const BYTE *byteCode,
-                                 size_t byteCodeLen,
-                                 const char *debugName)
-    : mInputDesc(inputDescLen),
-      mByteCodeLen(byteCodeLen),
-      mByteCode(byteCode),
-      mDebugName(debugName)
+gl::Error LazyInputLayout::resolve(Renderer11 *renderer)
 {
-    memcpy(&mInputDesc[0], inputDesc, sizeof(D3D11_INPUT_ELEMENT_DESC) * inputDescLen);
-}
-
-ID3D11InputLayout *LazyInputLayout::resolve(ID3D11Device *device)
-{
-    checkAssociatedDevice(device);
-
-    if (mResource == nullptr)
-    {
-        HRESULT result =
-            device->CreateInputLayout(&mInputDesc[0], static_cast<UINT>(mInputDesc.size()),
-                                      mByteCode, mByteCodeLen, &mResource);
-        ASSERT(SUCCEEDED(result));
-        d3d11::SetDebugName(mResource, mDebugName);
-    }
-
-    return mResource;
+    return resolveImpl(renderer, mInputDesc, &mByteCode, mDebugName);
 }
 
 LazyBlendState::LazyBlendState(const D3D11_BLEND_DESC &desc, const char *debugName)
@@ -1912,18 +1938,9 @@ LazyBlendState::LazyBlendState(const D3D11_BLEND_DESC &desc, const char *debugNa
 {
 }
 
-ID3D11BlendState *LazyBlendState::resolve(ID3D11Device *device)
+gl::Error LazyBlendState::resolve(Renderer11 *renderer)
 {
-    checkAssociatedDevice(device);
-
-    if (mResource == nullptr)
-    {
-        HRESULT result = device->CreateBlendState(&mDesc, &mResource);
-        ASSERT(SUCCEEDED(result));
-        d3d11::SetDebugName(mResource, mDebugName);
-    }
-
-    return mResource;
+    return resolveImpl(renderer, mDesc, nullptr, mDebugName);
 }
 
 angle::WorkaroundsD3D GenerateWorkarounds(const Renderer11DeviceCaps &deviceCaps,
@@ -1973,8 +1990,12 @@ angle::WorkaroundsD3D GenerateWorkarounds(const Renderer11DeviceCaps &deviceCaps
                 d3d11_gl::GetIntelDriverVersion(deviceCaps.driverVersion) <
                 IntelDriverVersion(4542);
         }
-        workarounds.rewriteUnaryMinusOperator =
-            IsBroadwell(adapterDesc.DeviceId) || IsHaswell(adapterDesc.DeviceId);
+        else if (IsBroadwell(adapterDesc.DeviceId) || IsHaswell(adapterDesc.DeviceId))
+        {
+            workarounds.rewriteUnaryMinusOperator =
+                d3d11_gl::GetIntelDriverVersion(deviceCaps.driverVersion) <
+                IntelDriverVersion(4624);
+        }
     }
 
     // TODO(jmadill): Disable when we have a fixed driver version.
@@ -2008,196 +2029,80 @@ void InitConstantBufferDesc(D3D11_BUFFER_DESC *constantBufferDescription, size_t
 
 }  // namespace d3d11
 
-TextureHelper11::TextureHelper11()
-    : mTextureType(GL_NONE),
-      mFormat(DXGI_FORMAT_UNKNOWN),
-      mFormatSet(nullptr),
-      mSampleCount(0),
-      mTexture2D(nullptr),
-      mTexture3D(nullptr)
+// TextureHelper11 implementation.
+TextureHelper11::TextureHelper11() : mFormatSet(nullptr), mSampleCount(0)
 {
 }
 
-TextureHelper11::TextureHelper11(TextureHelper11 &&toCopy)
-    : mTextureType(toCopy.mTextureType),
-      mExtents(toCopy.mExtents),
-      mFormat(toCopy.mFormat),
-      mFormatSet(toCopy.mFormatSet),
-      mSampleCount(toCopy.mSampleCount),
-      mTexture2D(toCopy.mTexture2D),
-      mTexture3D(toCopy.mTexture3D)
+TextureHelper11::TextureHelper11(TextureHelper11 &&toCopy) : TextureHelper11()
 {
-    toCopy.reset();
+    *this = std::move(toCopy);
 }
 
-// static
-TextureHelper11 TextureHelper11::MakeAndReference(ID3D11Resource *genericResource,
-                                                  const d3d11::Format &formatSet)
+TextureHelper11::TextureHelper11(const TextureHelper11 &other)
+    : mFormatSet(other.mFormatSet), mExtents(other.mExtents), mSampleCount(other.mSampleCount)
 {
-    TextureHelper11 newHelper;
-    newHelper.mFormatSet   = &formatSet;
-    newHelper.mTexture2D   = d3d11::DynamicCastComObject<ID3D11Texture2D>(genericResource);
-    newHelper.mTexture3D   = d3d11::DynamicCastComObject<ID3D11Texture3D>(genericResource);
-    newHelper.mTextureType = newHelper.mTexture2D ? GL_TEXTURE_2D : GL_TEXTURE_3D;
-    newHelper.initDesc();
-    return newHelper;
-}
-
-// static
-TextureHelper11 TextureHelper11::MakeAndPossess2D(ID3D11Texture2D *texToOwn,
-                                                  const d3d11::Format &formatSet)
-{
-    TextureHelper11 newHelper;
-    newHelper.mFormatSet   = &formatSet;
-    newHelper.mTexture2D   = texToOwn;
-    newHelper.mTextureType = GL_TEXTURE_2D;
-    newHelper.initDesc();
-    return newHelper;
-}
-
-// static
-TextureHelper11 TextureHelper11::MakeAndPossess3D(ID3D11Texture3D *texToOwn,
-                                                  const d3d11::Format &formatSet)
-{
-    TextureHelper11 newHelper;
-    newHelper.mFormatSet   = &formatSet;
-    newHelper.mTexture3D   = texToOwn;
-    newHelper.mTextureType = GL_TEXTURE_3D;
-    newHelper.initDesc();
-    return newHelper;
-}
-
-void TextureHelper11::initDesc()
-{
-    if (mTextureType == GL_TEXTURE_2D)
-    {
-        ASSERT(!mTexture3D);
-        D3D11_TEXTURE2D_DESC desc2D;
-        mTexture2D->GetDesc(&desc2D);
-
-        mExtents.width  = static_cast<int>(desc2D.Width);
-        mExtents.height = static_cast<int>(desc2D.Height);
-        mExtents.depth  = 1;
-        mFormat         = desc2D.Format;
-        mSampleCount    = desc2D.SampleDesc.Count;
-    }
-    else
-    {
-        ASSERT(mTexture3D && mTextureType == GL_TEXTURE_3D);
-        D3D11_TEXTURE3D_DESC desc3D;
-        mTexture3D->GetDesc(&desc3D);
-
-        mExtents.width  = static_cast<int>(desc3D.Width);
-        mExtents.height = static_cast<int>(desc3D.Height);
-        mExtents.depth  = static_cast<int>(desc3D.Depth);
-        mFormat         = desc3D.Format;
-        mSampleCount    = 1;
-    }
-    ASSERT(mFormatSet && mFormat == mFormatSet->texFormat);
+    mData = other.mData;
 }
 
 TextureHelper11::~TextureHelper11()
 {
-    SafeRelease(mTexture2D);
-    SafeRelease(mTexture3D);
 }
 
-ID3D11Resource *TextureHelper11::getResource() const
+void TextureHelper11::getDesc(D3D11_TEXTURE2D_DESC *desc) const
 {
-    return mTexture2D ? static_cast<ID3D11Resource *>(mTexture2D)
-                      : static_cast<ID3D11Resource *>(mTexture3D);
+    static_cast<ID3D11Texture2D *>(mData->object)->GetDesc(desc);
 }
 
-TextureHelper11 &TextureHelper11::operator=(TextureHelper11 &&texture)
+void TextureHelper11::getDesc(D3D11_TEXTURE3D_DESC *desc) const
 {
-    SafeRelease(mTexture2D);
-    SafeRelease(mTexture3D);
+    static_cast<ID3D11Texture3D *>(mData->object)->GetDesc(desc);
+}
 
-    mTextureType = texture.mTextureType;
-    mExtents     = texture.mExtents;
-    mFormat      = texture.mFormat;
-    mFormatSet   = texture.mFormatSet;
-    mSampleCount = texture.mSampleCount;
-    mTexture2D   = texture.mTexture2D;
-    mTexture3D   = texture.mTexture3D;
-    texture.reset();
+void TextureHelper11::initDesc(const D3D11_TEXTURE2D_DESC &desc2D)
+{
+    mData->resourceType = ResourceType::Texture2D;
+    mExtents.width      = static_cast<int>(desc2D.Width);
+    mExtents.height     = static_cast<int>(desc2D.Height);
+    mExtents.depth      = 1;
+    mSampleCount        = desc2D.SampleDesc.Count;
+}
+
+void TextureHelper11::initDesc(const D3D11_TEXTURE3D_DESC &desc3D)
+{
+    mData->resourceType = ResourceType::Texture3D;
+    mExtents.width      = static_cast<int>(desc3D.Width);
+    mExtents.height     = static_cast<int>(desc3D.Height);
+    mExtents.depth      = static_cast<int>(desc3D.Depth);
+    mSampleCount        = 1;
+}
+
+TextureHelper11 &TextureHelper11::operator=(TextureHelper11 &&other)
+{
+    std::swap(mData, other.mData);
+    std::swap(mExtents, other.mExtents);
+    std::swap(mFormatSet, other.mFormatSet);
+    std::swap(mSampleCount, other.mSampleCount);
     return *this;
 }
 
-void TextureHelper11::reset()
+TextureHelper11 &TextureHelper11::operator=(const TextureHelper11 &other)
 {
-    mTextureType = GL_NONE;
-    mExtents     = gl::Extents();
-    mFormat      = DXGI_FORMAT_UNKNOWN;
-    mFormatSet   = nullptr;
-    mSampleCount = 0;
-    mTexture2D   = nullptr;
-    mTexture3D   = nullptr;
+    mData        = other.mData;
+    mExtents     = other.mExtents;
+    mFormatSet   = other.mFormatSet;
+    mSampleCount = other.mSampleCount;
+    return *this;
 }
 
-bool TextureHelper11::valid() const
+bool TextureHelper11::operator==(const TextureHelper11 &other) const
 {
-    return (mTextureType != GL_NONE);
+    return mData->object == other.mData->object;
 }
 
-gl::ErrorOrResult<TextureHelper11> CreateStagingTexture(GLenum textureType,
-                                                        const d3d11::Format &formatSet,
-                                                        const gl::Extents &size,
-                                                        StagingAccess readAndWriteAccess,
-                                                        ID3D11Device *device)
+bool TextureHelper11::operator!=(const TextureHelper11 &other) const
 {
-    if (textureType == GL_TEXTURE_2D)
-    {
-        D3D11_TEXTURE2D_DESC stagingDesc;
-        stagingDesc.Width              = size.width;
-        stagingDesc.Height             = size.height;
-        stagingDesc.MipLevels          = 1;
-        stagingDesc.ArraySize          = 1;
-        stagingDesc.Format             = formatSet.texFormat;
-        stagingDesc.SampleDesc.Count   = 1;
-        stagingDesc.SampleDesc.Quality = 0;
-        stagingDesc.Usage              = D3D11_USAGE_STAGING;
-        stagingDesc.BindFlags          = 0;
-        stagingDesc.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
-        stagingDesc.MiscFlags          = 0;
-
-        if (readAndWriteAccess == StagingAccess::READ_WRITE)
-        {
-            stagingDesc.CPUAccessFlags |= D3D11_CPU_ACCESS_WRITE;
-        }
-
-        ID3D11Texture2D *stagingTex = nullptr;
-        HRESULT result = device->CreateTexture2D(&stagingDesc, nullptr, &stagingTex);
-        if (FAILED(result))
-        {
-            return gl::Error(GL_OUT_OF_MEMORY, "CreateStagingTextureFor failed, HRESULT: 0x%X.",
-                             result);
-        }
-
-        return TextureHelper11::MakeAndPossess2D(stagingTex, formatSet);
-    }
-    ASSERT(textureType == GL_TEXTURE_3D);
-
-    D3D11_TEXTURE3D_DESC stagingDesc;
-    stagingDesc.Width          = size.width;
-    stagingDesc.Height         = size.height;
-    stagingDesc.Depth          = 1;
-    stagingDesc.MipLevels      = 1;
-    stagingDesc.Format         = formatSet.texFormat;
-    stagingDesc.Usage          = D3D11_USAGE_STAGING;
-    stagingDesc.BindFlags      = 0;
-    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    stagingDesc.MiscFlags      = 0;
-
-    ID3D11Texture3D *stagingTex = nullptr;
-    HRESULT result = device->CreateTexture3D(&stagingDesc, nullptr, &stagingTex);
-    if (FAILED(result))
-    {
-        return gl::Error(GL_OUT_OF_MEMORY, "CreateStagingTextureFor failed, HRESULT: 0x%X.",
-                         result);
-    }
-
-    return TextureHelper11::MakeAndPossess3D(stagingTex, formatSet);
+    return mData->object != other.mData->object;
 }
 
 bool UsePresentPathFast(const Renderer11 *renderer,

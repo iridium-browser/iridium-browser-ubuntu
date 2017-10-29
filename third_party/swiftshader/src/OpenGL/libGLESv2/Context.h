@@ -37,7 +37,6 @@
 namespace egl
 {
 class Display;
-class Surface;
 class Config;
 }
 
@@ -77,7 +76,7 @@ enum
 	MAX_VERTEX_ATTRIBS = sw::MAX_VERTEX_INPUTS,
 	MAX_UNIFORM_VECTORS = 256,   // Device limit
 	MAX_VERTEX_UNIFORM_VECTORS = sw::VERTEX_UNIFORM_VECTORS - 3,   // Reserve space for gl_DepthRange
-	MAX_VARYING_VECTORS = 10,
+	MAX_VARYING_VECTORS = MIN(sw::MAX_FRAGMENT_INPUTS, sw::MAX_VERTEX_OUTPUTS),
 	MAX_TEXTURE_IMAGE_UNITS = sw::TEXTURE_IMAGE_UNITS,
 	MAX_VERTEX_TEXTURE_IMAGE_UNITS = sw::VERTEX_TEXTURE_IMAGE_UNITS,
 	MAX_COMBINED_TEXTURE_IMAGE_UNITS = MAX_TEXTURE_IMAGE_UNITS + MAX_VERTEX_TEXTURE_IMAGE_UNITS,
@@ -156,6 +155,8 @@ const GLenum compressedTextureFormats[] =
 	GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR,
 #endif
 };
+
+const GLenum GL_TEXTURE_FILTERING_HINT_CHROMIUM = 0x8AF0;
 
 const GLint NUM_COMPRESSED_TEXTURE_FORMATS = sizeof(compressedTextureFormats) / sizeof(compressedTextureFormats[0]);
 
@@ -377,6 +378,7 @@ struct State
 
 	GLenum generateMipmapHint;
 	GLenum fragmentShaderDerivativeHint;
+	GLenum textureFilteringHint;
 
 	GLint viewportX;
 	GLint viewportY;
@@ -426,13 +428,14 @@ struct State
 	GLint packSkipImages;
 };
 
-class Context : public egl::Context
+class [[clang::lto_visibility_public]] Context : public egl::Context
 {
 public:
-	Context(egl::Display *display, const Context *shareContext, EGLint clientVersion);
+	Context(egl::Display *display, const Context *shareContext, EGLint clientVersion, const egl::Config *config);
 
-	virtual void makeCurrent(egl::Surface *surface);
-	virtual EGLint getClientVersion() const;
+	void makeCurrent(gl::Surface *surface) override;
+	EGLint getClientVersion() const override;
+	EGLint getConfigID() const override;
 
 	void markAllStateDirty();
 
@@ -489,6 +492,7 @@ public:
 
 	void setGenerateMipmapHint(GLenum hint);
 	void setFragmentShaderDerivativeHint(GLenum hint);
+	void setTextureFilteringHint(GLenum hint);
 
 	void setViewportParams(GLint x, GLint y, GLsizei width, GLsizei height);
 
@@ -664,6 +668,9 @@ public:
 
 	bool hasZeroDivisor() const;
 
+	void drawArrays(GLenum mode, GLint first, GLsizei count, GLsizei instanceCount = 1);
+	void drawElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices, GLsizei instanceCount = 1);
+	void blit(sw::Surface *source, const sw::SliceRect &sRect, sw::Surface *dest, const sw::SliceRect &dRect) override;
 	void readPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei *bufSize, void* pixels);
 	void clear(GLbitfield mask);
 	void clearColorBuffer(GLint drawbuffer, const GLint *value);
@@ -671,9 +678,7 @@ public:
 	void clearColorBuffer(GLint drawbuffer, const GLfloat *value);
 	void clearDepthBuffer(const GLfloat value);
 	void clearStencilBuffer(const GLint value);
-	void drawArrays(GLenum mode, GLint first, GLsizei count, GLsizei instanceCount = 1);
-	void drawElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices, GLsizei instanceCount = 1);
-	void finish();
+	void finish() override;
 	void flush();
 
 	void recordInvalidEnum();
@@ -690,17 +695,17 @@ public:
 	                     GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
 	                     GLbitfield mask, bool filter, bool allowPartialDepthStencilBlit);
 
-	virtual void bindTexImage(egl::Surface *surface);
-	virtual EGLenum validateSharedImage(EGLenum target, GLuint name, GLuint textureLevel);
-	virtual egl::Image *createSharedImage(EGLenum target, GLuint name, GLuint textureLevel);
+	void bindTexImage(gl::Surface *surface) override;
+	EGLenum validateSharedImage(EGLenum target, GLuint name, GLuint textureLevel) override;
+	egl::Image *createSharedImage(EGLenum target, GLuint name, GLuint textureLevel) override;
 	egl::Image *getSharedImage(GLeglImageOES image);
 
 	Device *getDevice();
 
-	const GLubyte* getExtensions(GLuint index, GLuint* numExt = nullptr) const;
+	const GLubyte *getExtensions(GLuint index, GLuint *numExt = nullptr) const;
 
 private:
-	virtual ~Context();
+	~Context() override;
 
 	void applyScissor(int width, int height);
 	bool applyRenderTarget();
@@ -725,6 +730,7 @@ private:
 	Query *createQuery(GLuint handle, GLenum type);
 
 	const EGLint clientVersion;
+	const egl::Config *const config;
 
 	State mState;
 

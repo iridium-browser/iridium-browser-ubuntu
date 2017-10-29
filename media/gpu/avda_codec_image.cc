@@ -8,7 +8,6 @@
 
 #include <memory>
 
-#include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "media/base/android/media_codec_bridge_impl.h"
 #include "media/gpu/avda_shared_state.h"
@@ -20,12 +19,10 @@ namespace media {
 
 AVDACodecImage::AVDACodecImage(
     const scoped_refptr<AVDASharedState>& shared_state,
-    MediaCodecBridge* codec,
-    const base::WeakPtr<gpu::gles2::GLES2Decoder>& decoder)
+    MediaCodecBridge* codec)
     : shared_state_(shared_state),
       codec_buffer_index_(kInvalidCodecBufferIndex),
       media_codec_(codec),
-      decoder_(decoder),
       has_surface_texture_(false),
       texture_(0) {}
 
@@ -91,6 +88,12 @@ bool AVDACodecImage::ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
     return false;
   }
 
+  // Move the overlay if needed.
+  if (shared_state_->overlay() && most_recent_bounds_ != bounds_rect) {
+    most_recent_bounds_ = bounds_rect;
+    shared_state_->overlay()->ScheduleLayout(bounds_rect);
+  }
+
   UpdateSurface(UpdateMode::RENDER_TO_FRONT_BUFFER);
   return true;
 }
@@ -145,6 +148,7 @@ bool AVDACodecImage::SetSharedState(
   if (shared_state == shared_state_)
     return false;
   shared_state_ = shared_state;
+  most_recent_bounds_ = gfx::Rect();
   return true;
 }
 
@@ -226,6 +230,17 @@ void AVDACodecImage::GetTextureMatrix(float matrix[16]) {
     UpdateSurface(UpdateMode::RENDER_TO_FRONT_BUFFER);
   shared_state_->GetTransformMatrix(matrix);
   YInvertMatrix(matrix);
+}
+
+void AVDACodecImage::NotifyPromotionHint(bool promotion_hint,
+                                         int display_x,
+                                         int display_y) {
+  // TODO(liberato): this should just be given to us.
+  PromotionHintAggregator::Hint hint;
+  hint.x = display_x;
+  hint.y = display_y;
+  hint.is_promotable = promotion_hint;
+  shared_state_->GetPromotionHintCB().Run(hint);
 }
 
 bool AVDACodecImage::IsCodecBufferOutstanding() const {

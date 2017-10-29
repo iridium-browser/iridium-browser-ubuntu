@@ -91,7 +91,7 @@ class VIEWS_EXPORT Combobox : public View,
   bool invalid() const { return invalid_; }
 
   // Overridden from View:
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
   const char* GetClassName() const override;
   bool SkipDefaultKeyEventProcessing(const ui::KeyEvent& e) override;
   bool OnKeyPressed(const ui::KeyEvent& e) override;
@@ -100,8 +100,8 @@ class VIEWS_EXPORT Combobox : public View,
   void OnFocus() override;
   void OnBlur() override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  bool HandleAccessibleAction(const ui::AXActionData& action_data) override;
   void Layout() override;
-  void OnEnabledChanged() override;
   void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
 
   // Overridden from PrefixDelegate:

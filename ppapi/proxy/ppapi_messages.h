@@ -391,6 +391,11 @@ IPC_STRUCT_TRAITS_BEGIN(ppapi::Preferences)
   IPC_STRUCT_TRAITS_MEMBER(is_accelerated_video_decode_enabled)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(ppapi::TouchPointWithTilt)
+  IPC_STRUCT_TRAITS_MEMBER(touch)
+  IPC_STRUCT_TRAITS_MEMBER(tilt)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(ppapi::InputEventData)
   IPC_STRUCT_TRAITS_MEMBER(is_filtered)
   IPC_STRUCT_TRAITS_MEMBER(event_type)
@@ -474,7 +479,6 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(ppapi::PpapiNaClPluginArgs)
   IPC_STRUCT_TRAITS_MEMBER(off_the_record)
   IPC_STRUCT_TRAITS_MEMBER(permissions)
-  IPC_STRUCT_TRAITS_MEMBER(keepalive_throttle_interval_milliseconds)
   IPC_STRUCT_TRAITS_MEMBER(switch_names)
   IPC_STRUCT_TRAITS_MEMBER(switch_values)
 IPC_STRUCT_TRAITS_END()
@@ -963,10 +967,7 @@ IPC_SYNC_MESSAGE_CONTROL2_1(PpapiMsg_PnaclTranslatorLink,
                             /* success status result */
                             bool)
 
-// Reports to the browser that a plugin has been active.
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_Keepalive)
 
-// -----------------------------------------------------------------------------
 // These are from the plugin to the renderer.
 
 // Reply to PpapiMsg_CreateChannel. The handle will be NULL if the channel
@@ -1067,8 +1068,9 @@ IPC_SYNC_MESSAGE_ROUTED3_2(PpapiHostMsg_PPBGraphics3D_WaitForTokenInRange,
                            int32_t /* end */,
                            gpu::CommandBuffer::State /* state */,
                            bool /* success */)
-IPC_SYNC_MESSAGE_ROUTED3_2(PpapiHostMsg_PPBGraphics3D_WaitForGetOffsetInRange,
+IPC_SYNC_MESSAGE_ROUTED4_2(PpapiHostMsg_PPBGraphics3D_WaitForGetOffsetInRange,
                            ppapi::HostResource /* context */,
+                           uint32_t /* set_get_buffer_count */,
                            int32_t /* start */,
                            int32_t /* end */,
                            gpu::CommandBuffer::State /* state */,
@@ -1839,6 +1841,9 @@ IPC_MESSAGE_CONTROL3(PpapiHostMsg_PlatformVerification_ChallengePlatformReply,
                      std::vector<uint8_t> /* signed_data */,
                      std::vector<uint8_t> /* signed_data_signature */,
                      std::string /* platform_key_certificate */)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_PlatformVerification_GetStorageId)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_PlatformVerification_GetStorageIdReply,
+                     std::string /* storage_id */)
 
 // Printing.
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_Printing_Create)
@@ -2250,6 +2255,18 @@ IPC_MESSAGE_CONTROL0(PpapiPluginMsg_AudioInput_OpenReply)
 IPC_MESSAGE_CONTROL1(PpapiHostMsg_AudioInput_StartOrStop, bool /* capture */)
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_AudioInput_Close)
 
+// Audio output.
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_AudioOutput_Create)
+IPC_MESSAGE_CONTROL3(PpapiHostMsg_AudioOutput_Open,
+                     std::string /* device_id */,
+                     PP_AudioSampleRate /* sample_rate */,
+                     uint32_t /* sample_frame_count */)
+// Reply to an Open call. This supplies a socket handle and a shared memory
+// handle. Both handles are passed in the ReplyParams struct.
+IPC_MESSAGE_CONTROL0(PpapiPluginMsg_AudioOutput_OpenReply)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_AudioOutput_StartOrStop, bool /* playback */)
+IPC_MESSAGE_CONTROL0(PpapiHostMsg_AudioOutput_Close)
+
 // BrowserFont -----------------------------------------------------------------
 
 IPC_MESSAGE_CONTROL0(PpapiHostMsg_BrowserFontSingleton_Create)
@@ -2532,8 +2549,5 @@ IPC_MESSAGE_CONTROL1(PpapiPluginMsg_VideoCapture_OnError,
                      uint32_t /* error */)
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_VideoCapture_OnBufferReady,
                      uint32_t /* buffer */)
-
-// Sent by the PPAPI process to indicate that a field trial has been activated.
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_FieldTrialActivated, std::string /* name */)
 
 #endif  // !defined(OS_NACL) && !defined(NACL_WIN64)

@@ -5,6 +5,7 @@
  * found in the LICENSE file.
  */
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkColorPriv.h"
 #include "SkShader.h"
 #include "SkCanvas.h"
@@ -13,18 +14,9 @@
 namespace skiagm {
 
 static SkBitmap make_bitmap() {
-    const SkPMColor c[] = { SkPackARGB32(0x80, 0x80, 0, 0) };
-    SkColorTable* ctable = new SkColorTable(c, SK_ARRAY_COUNT(c));
-
     SkBitmap bm;
-    bm.allocPixels(SkImageInfo::Make(1, 1, kIndex_8_SkColorType,
-                                     kPremul_SkAlphaType),
-                   nullptr, ctable);
-    ctable->unref();
-
-    bm.lockPixels();
-    *bm.getAddr8(0, 0) = 0;
-    bm.unlockPixels();
+    bm.allocN32Pixels(1, 1);
+    *bm.getAddr32(0, 0) = SkPackARGB32(0x80, 0x80, 0, 0);
     return bm;
 }
 

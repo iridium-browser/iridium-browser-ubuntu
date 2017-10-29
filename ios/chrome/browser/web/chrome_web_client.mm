@@ -5,14 +5,16 @@
 #include "ios/chrome/browser/web/chrome_web_client.h"
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/ios/ios_util.h"
 #include "base/mac/bundle_locations.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/dom_distiller/core/url_constants.h"
+#include "components/payments/core/features.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/task_scheduler_util/browser/initialization.h"
 #include "components/version_info/version_info.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_about_rewriter.h"
@@ -34,6 +36,10 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 // Returns an autoreleased string containing the JavaScript loaded from a
 // bundled resource file with the given name (excluding extension).
@@ -53,14 +59,15 @@ NSString* GetPageScript(NSString* script_file_name) {
   DCHECK(content);
   return content;
 }
-}
+}  // namespace
 
 ChromeWebClient::ChromeWebClient() {}
 
 ChromeWebClient::~ChromeWebClient() {}
 
-web::WebMainParts* ChromeWebClient::CreateWebMainParts() {
-  return new IOSChromeMainParts(*base::CommandLine::ForCurrentProcess());
+std::unique_ptr<web::WebMainParts> ChromeWebClient::CreateWebMainParts() {
+  return base::MakeUnique<IOSChromeMainParts>(
+      *base::CommandLine::ForCurrentProcess());
 }
 
 void ChromeWebClient::PreWebViewCreation() const {
@@ -77,10 +84,9 @@ void ChromeWebClient::PreWebViewCreation() const {
   }
 }
 
-void ChromeWebClient::AddAdditionalSchemes(
-    std::vector<url::SchemeWithType>* additional_standard_schemes) const {
-  url::SchemeWithType scheme = {kChromeUIScheme, url::SCHEME_WITHOUT_PORT};
-  additional_standard_schemes->push_back(scheme);
+void ChromeWebClient::AddAdditionalSchemes(Schemes* schemes) const {
+  schemes->standard_schemes.push_back(kChromeUIScheme);
+  schemes->secure_schemes.push_back(kChromeUIScheme);
 }
 
 std::string ChromeWebClient::GetAcceptLangs(web::BrowserState* state) const {
@@ -155,8 +161,17 @@ void ChromeWebClient::PostBrowserURLRewriterCreation(
   rewriter->AddURLRewriter(&WillHandleWebBrowserAboutURL);
 }
 
-NSString* ChromeWebClient::GetEarlyPageScript() const {
-  return GetPageScript(@"print");
+NSString* ChromeWebClient::GetEarlyPageScript(
+    web::BrowserState* browser_state) const {
+  NSString* chrome_page_script = GetPageScript(@"chrome_bundle");
+
+  if (!base::FeatureList::IsEnabled(payments::features::kWebPayments))
+    return chrome_page_script;
+
+  NSString* kScriptTemplate = @"%@; %@";
+  return [NSString stringWithFormat:kScriptTemplate,
+                                    GetPageScript(@"payment_request"),
+                                    chrome_page_script];
 }
 
 void ChromeWebClient::AllowCertificateError(
@@ -170,19 +185,6 @@ void ChromeWebClient::AllowCertificateError(
                                      overridable, callback);
 }
 
-void ChromeWebClient::GetTaskSchedulerInitializationParams(
-    std::vector<base::SchedulerWorkerPoolParams>* params_vector,
-    base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
-        index_to_traits_callback) {
-  DCHECK(params_vector);
-  DCHECK(index_to_traits_callback);
-  // If this call fails, web will fall back to the default params.
-  *params_vector =
-      task_scheduler_util::GetBrowserWorkerPoolParamsFromVariations();
-  *index_to_traits_callback =
-      base::Bind(&task_scheduler_util::BrowserWorkerPoolIndexForTraits);
-}
-
-void ChromeWebClient::PerformExperimentalTaskSchedulerRedirections() {
-  task_scheduler_util::MaybePerformBrowserTaskSchedulerRedirection();
+bool ChromeWebClient::IsSlimNavigationManagerEnabled() const {
+  return experimental_flags::IsSlimNavigationManagerEnabled();
 }

@@ -42,7 +42,7 @@ assert len(_PRECQ_STATUS_TO_ACTION) == len(_PRECQ_ACTION_TO_STATUS), \
 
 CL_ACTION_COLUMNS = ['id', 'build_id', 'action', 'reason',
                      'build_config', 'change_number', 'patch_number',
-                     'change_source', 'timestamp', 'buildbucket_id']
+                     'change_source', 'timestamp', 'buildbucket_id', 'status']
 
 _CLActionTuple = collections.namedtuple('_CLActionTuple', CL_ACTION_COLUMNS)
 
@@ -113,11 +113,6 @@ class CLAction(_CLActionTuple):
   """An action or history log entry for a particular CL."""
 
   @classmethod
-  def GetCLAction(cls, **kwargs):
-    kwargs.setdefault('buildbucket_id', None)
-    return CLAction(**kwargs)
-
-  @classmethod
   def FromGerritPatchAndAction(cls, change, action, reason=None,
                                timestamp=None, buildbucket_id=None):
     """Creates a CLAction instance from a change and action.
@@ -132,7 +127,7 @@ class CLAction(_CLActionTuple):
     return CLAction(None, None, action, reason, None,
                     int(change.gerrit_number), int(change.patch_number),
                     BoolToChangeSource(change.internal), timestamp,
-                    buildbucket_id)
+                    buildbucket_id, None)
 
   @classmethod
   def FromMetadataEntry(cls, entry):
@@ -148,8 +143,7 @@ class CLAction(_CLActionTuple):
                     int(change_dict['gerrit_number']),
                     int(change_dict['patch_number']),
                     BoolToChangeSource(change_dict['internal']),
-                    entry[2],
-                    None)
+                    entry[2], None, None)
 
   def AsMetadataEntry(self):
     """Get a tuple representation, suitable for metadata.json."""
@@ -327,21 +321,29 @@ def GetOldPreCQBuildActions(change, action_history,
 
   actions_for_old_patches = ActionsForOldPatches(change, action_history)
   cancelled_builds = GetCancelledPreCQBuilds(action_history)
+  cancelled_buildbucket_ids = set([x.buildbucket_id for x in cancelled_builds])
 
   old_pre_cq_build_actions = [
       a for a in actions_for_old_patches
       if (a.action == constants.CL_ACTION_TRYBOT_LAUNCHING and
           a.buildbucket_id is not None and
-          a.buildbucket_id not in cancelled_builds and
+          a.buildbucket_id not in cancelled_buildbucket_ids and
           a.timestamp is not None and
           a.timestamp > min_timestamp)]
 
   return old_pre_cq_build_actions
 
 def GetCancelledPreCQBuilds(action_history):
-  """Get buildbucket_id set of cancelled pre-cq builds."""
-  return set([a.buildbucket_id
-              for a in action_history
+  """Get cancelled pre-cq builds.
+
+  Args:
+    action_history: List of clactions.CLAction instances.
+
+  Returns:
+    A set of clactions.CLAction instances with action
+    constants.CL_ACTION_TRYBOT_CANCELLED.
+  """
+  return set([a for a in action_history
               if a.buildbucket_id is not None and
               a.action == constants.CL_ACTION_TRYBOT_CANCELLED])
 
@@ -743,6 +745,14 @@ def GetCQRunTime(change, action_history):
       iter_utils.IntersectIntervals([ready_intervals, testing_intervals]))
 
 
+def GetCQAttemptsCount(change, action_history):
+  """Gets the number of times a CL was picked up by CQ."""
+  actions = ActionsForPatch(change, action_history)
+  return sum(1 for a in actions
+             if (a.build_config == constants.CQ_MASTER and
+                 a.action == constants.CL_ACTION_PICKED_UP))
+
+
 def _CLsForPatches(patches):
   """Get GerritChangeTuples corresponding to the give GerritPatchTuples."""
   return set(p.GetChangeTuple() for p in patches)
@@ -873,7 +883,7 @@ class CLActionHistory(object):
     per_change_final_submit_time = {}
     per_change_first_action_time = {}
     for change in cls_or_patches:
-      actions = self._GetCLOrPatchActions(change)
+      actions = self.GetCLOrPatchActions(change)
       submit_actions = [x for x in actions
                         if x.action == constants.CL_ACTION_SUBMITTED]
       first_action = actions[0]
@@ -1027,12 +1037,12 @@ class CLActionHistory(object):
           candidates[patch].append(action)
     return dict(candidates)
 
-  def _GetCLOrPatchActions(self, cl_or_patch):
+  def GetCLOrPatchActions(self, cl_or_patch):
     """Get cl/patch specific actions."""
     if isinstance(cl_or_patch, GerritChangeTuple):
-      return self._per_cl_actions[cl_or_patch]
+      return self._per_cl_actions.get(cl_or_patch, [])
     else:
-      return self._per_patch_actions[cl_or_patch]
+      return self._per_patch_actions.get(cl_or_patch, [])
 
 
 def RecordSubmissionMetrics(action_history, submitted_change_strategies):
@@ -1053,6 +1063,8 @@ def RecordSubmissionMetrics(action_history, submitted_change_strategies):
       constants.MON_CL_WAIT_TIME)
   cq_run_time_metric = metrics.SecondsDistribution(
       constants.MON_CL_CQRUN_TIME)
+  cq_tries_metric = metrics.CumulativeSmallIntegerDistribution(
+      constants.MON_CL_CQ_TRIES)
 
   # These 3 false rejection metrics are different in subtle but important ways.
 
@@ -1086,6 +1098,7 @@ def RecordSubmissionMetrics(action_history, submitted_change_strategies):
     precq_time = GetPreCQTime(change, action_history)
     wait_time = GetCQWaitTime(change, action_history)
     run_time = GetCQRunTime(change, action_history)
+    pickups = GetCQAttemptsCount(change, action_history)
 
     fields = {'submission_strategy': strategy}
 
@@ -1093,6 +1106,7 @@ def RecordSubmissionMetrics(action_history, submitted_change_strategies):
     precq_time_metric.add(precq_time, fields=fields)
     wait_time_metric.add(wait_time, fields=fields)
     cq_run_time_metric.add(run_time, fields=fields)
+    cq_tries_metric.add(pickups, fields=fields)
 
     rejection_types = (
         (constants.PRE_CQ, precq_false_rejections),

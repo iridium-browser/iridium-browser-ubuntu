@@ -6,6 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/task_scheduler/post_task.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
@@ -38,7 +39,6 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/webplugininfo.h"
 #include "ipc/ipc_message.h"
@@ -56,8 +56,7 @@ namespace {
 
 TabRendererData::NetworkState TabContentsNetworkState(
     WebContents* contents) {
-  if (!contents)
-    return TabRendererData::NETWORK_STATE_NONE;
+  DCHECK(contents);
 
   if (!contents->IsLoadingToDifferentDocument()) {
     content::NavigationEntry* entry =
@@ -125,14 +124,9 @@ class BrowserTabStripController::TabContextMenuContents
   }
 
   void RunMenuAt(const gfx::Point& point, ui::MenuSourceType source_type) {
-    if (menu_runner_->RunMenuAt(tab_->GetWidget(),
-                                NULL,
-                                gfx::Rect(point, gfx::Size()),
-                                views::MENU_ANCHOR_TOPLEFT,
-                                source_type) ==
-        views::MenuRunner::MENU_DELETED) {
-      return;
-    }
+    menu_runner_->RunMenuAt(tab_->GetWidget(), NULL,
+                            gfx::Rect(point, gfx::Size()),
+                            views::MENU_ANCHOR_TOPLEFT, source_type);
   }
 
   // Overridden from ui::SimpleMenuModel::Delegate:
@@ -318,16 +312,8 @@ void BrowserTabStripController::ShowContextMenuForTab(
 }
 
 void BrowserTabStripController::UpdateLoadingAnimations() {
-  // Don't use the model count here as it's possible for this to be invoked
-  // before we've applied an update from the model (Browser::TabInsertedAt may
-  // be processed before us and invokes this).
-  for (int i = 0, tab_count = tabstrip_->tab_count(); i < tab_count; ++i) {
-    if (model_->ContainsIndex(i)) {
-      Tab* tab = tabstrip_->tab_at(i);
-      WebContents* contents = model_->GetWebContentsAt(i);
-      tab->UpdateLoadingAnimation(TabContentsNetworkState(contents));
-    }
-  }
+  for (int i = 0, tab_count = tabstrip_->tab_count(); i < tab_count; ++i)
+    tabstrip_->tab_at(i)->StepLoadingAnimation();
 }
 
 int BrowserTabStripController::HasAvailableDragActions() const {
@@ -353,10 +339,10 @@ void BrowserTabStripController::PerformDrop(bool drop_before,
   params.tabstrip_index = index;
 
   if (drop_before) {
-    content::RecordAction(UserMetricsAction("Tab_DropURLBetweenTabs"));
+    base::RecordAction(UserMetricsAction("Tab_DropURLBetweenTabs"));
     params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   } else {
-    content::RecordAction(UserMetricsAction("Tab_DropURLOnTab"));
+    base::RecordAction(UserMetricsAction("Tab_DropURLOnTab"));
     params.disposition = WindowOpenDisposition::CURRENT_TAB;
     params.source_contents = model_->GetWebContentsAt(index);
   }
@@ -419,8 +405,7 @@ void BrowserTabStripController::OnStoppedDraggingTabs() {
 
 void BrowserTabStripController::CheckFileSupported(const GURL& url) {
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::USER_VISIBLE),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
       base::Bind(&FindURLMimeType, url),
       base::Bind(&BrowserTabStripController::OnFindURLMimeTypeCompleted,
                  weak_ptr_factory_.GetWeakPtr(), url));
@@ -514,7 +499,6 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
   data->network_state = TabContentsNetworkState(contents);
   data->title = contents->GetTitle();
   data->url = contents->GetURL();
-  data->loading = contents->IsLoading();
   data->crashed_status = contents->GetCrashedStatus();
   data->incognito = contents->GetBrowserContext()->IsOffTheRecord();
   data->pinned = model_->IsTabPinned(model_index);

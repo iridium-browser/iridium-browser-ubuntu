@@ -6,14 +6,13 @@ import logging
 import os
 import sys
 
-from telemetry.core import exceptions
+from telemetry.core import platform as platform_module
 from telemetry.core import util
 from telemetry import decorators
 from telemetry.internal.browser import browser_finder
 from telemetry.internal.browser import browser_finder_exceptions
 from telemetry.internal.browser import browser_info as browser_info_module
 from telemetry.internal.platform.profiler import profiler_finder
-from telemetry.internal.util import exception_formatter
 from telemetry.internal.util import file_handle
 from telemetry.page import cache_temperature
 from telemetry.page import traffic_setting
@@ -88,8 +87,17 @@ class SharedPageState(story.SharedState):
       self.platform.network_controller.Close()
     self.platform.network_controller.InitializeIfNeeded(
         use_live_traffic=use_live_traffic)
+    use_wpr_go = False
+    if wpr_mode == wpr_modes.WPR_RECORD:
+      use_wpr_go = self._finder_options.use_wpr_go
+    elif self._finder_options.use_wpr_go:
+      raise ValueError('Cannot set --use-wpr-go for non recording mode')
+    elif wpr_mode == wpr_modes.WPR_REPLAY:
+      use_wpr_go = (story_set.wpr_archive_info and
+                    story_set.wpr_archive_info.is_using_wpr_go_archives)
     self.platform.network_controller.Open(wpr_mode,
-                                          browser_options.extra_wpr_args)
+                                          browser_options.extra_wpr_args,
+                                          use_wpr_go=use_wpr_go)
     self.platform.Initialize()
 
   @property
@@ -142,6 +150,7 @@ class SharedPageState(story.SharedState):
   def DidRunStory(self, results):
     if self._finder_options.profiler:
       self._StopProfiling(results)
+    self._AllowInteractionForStage('after-run-story')
     # We might hang while trying to close the connection, and need to guarantee
     # the page will get cleaned up to avoid future tests failing in weird ways.
     try:
@@ -164,8 +173,14 @@ class SharedPageState(story.SharedState):
   def platform(self):
     return self._possible_browser.platform
 
+  def _AllowInteractionForStage(self, stage):
+    if self._finder_options.pause == stage:
+      raw_input('Pausing for interaction at %s... Press Enter to continue.' %
+                stage)
+
   def _StartBrowser(self, page):
     assert self._browser is None
+    self._AllowInteractionForStage('before-start-browser')
     self._possible_browser.SetCredentialsPath(page.credentials_path)
 
     self._test.WillStartBrowser(self.platform)
@@ -177,6 +192,7 @@ class SharedPageState(story.SharedState):
     if self._first_browser:
       self._first_browser = False
       self.browser.credentials.WarnIfMissingCredentials(page)
+    self._AllowInteractionForStage('after-start-browser')
 
   def WillRunStory(self, page):
     if not self.platform.tracing_controller.is_tracing_running:
@@ -217,10 +233,9 @@ class SharedPageState(story.SharedState):
       if len(self.browser.tabs) == 0:
         self.browser.tabs.New()
 
-      # Ensure only one tab is open, unless the test is a multi-tab test.
-      if not self._test.is_multi_tab_test:
-        while len(self.browser.tabs) > 1:
-          self.browser.tabs[-1].Close()
+      # Ensure only one tab is open.
+      while len(self.browser.tabs) > 1:
+        self.browser.tabs[-1].Close()
 
       # Must wait for tab to commit otherwise it can commit after the next
       # navigation has begun and RenderFrameHostManager::DidNavigateMainFrame()
@@ -244,6 +259,7 @@ class SharedPageState(story.SharedState):
           download_bandwidth_kbps=s.download_bandwidth_kbps,
           upload_bandwidth_kbps=s.upload_bandwidth_kbps)
 
+    self._AllowInteractionForStage('before-run-story')
     # Start profiling if needed.
     if self._finder_options.profiler:
       self._StartProfiling(self._current_page)
@@ -294,18 +310,10 @@ class SharedPageState(story.SharedState):
     return self._test
 
   def RunStory(self, results):
-    try:
-      self._PreparePage()
-      self._current_page.Run(self)
-      self._test.ValidateAndMeasurePage(
-          self._current_page, self._current_tab, results)
-    except exceptions.Error:
-      if self._test.is_multi_tab_test:
-        # Avoid trying to recover from an unknown multi-tab state.
-        exception_formatter.PrintFormattedException(
-            msg='Telemetry Error during multi tab test:')
-        raise legacy_page_test.MultiTabTestAppCrashError
-      raise
+    self._PreparePage()
+    self._current_page.Run(self)
+    self._test.ValidateAndMeasurePage(
+        self._current_page, self._current_tab, results)
 
   def TearDownState(self):
     self._StopBrowser()
@@ -339,7 +347,10 @@ class SharedMobilePageState(SharedPageState):
 
 
 class SharedDesktopPageState(SharedPageState):
-  _device_type = 'desktop'
+  if platform_module.GetHostPlatform().GetOSName() == 'chromeos':
+    _device_type = 'chromeos'
+  else:
+    _device_type = 'desktop'
 
 
 class SharedTabletPageState(SharedPageState):

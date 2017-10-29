@@ -32,7 +32,7 @@
 #define InspectorFrontendClient_h
 
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -43,17 +43,14 @@ class InspectorFrontendClient {
  public:
   virtual ~InspectorFrontendClient() {}
 
-  virtual void sendMessageToEmbedder(const String&) = 0;
+  virtual void SendMessageToEmbedder(const String&) = 0;
 
-  virtual bool isUnderTest() = 0;
+  virtual bool IsUnderTest() = 0;
 
-  virtual void showContextMenu(LocalFrame* targetFrame,
+  virtual void ShowContextMenu(LocalFrame* target_frame,
                                float x,
                                float y,
                                ContextMenuProvider*) = 0;
-
-  virtual void setInjectedScriptForOrigin(const String& origin,
-                                          const String& source) = 0;
 };
 
 }  // namespace blink

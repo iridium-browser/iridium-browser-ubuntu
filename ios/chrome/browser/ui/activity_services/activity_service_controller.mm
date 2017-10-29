@@ -8,7 +8,6 @@
 
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
-#include "components/reading_list/core/reading_list_switches.h"
 #import "ios/chrome/browser/ui/activity_services/activity_type_util.h"
 #import "ios/chrome/browser/ui/activity_services/appex_constants.h"
 #import "ios/chrome/browser/ui/activity_services/chrome_activity_item_source.h"
@@ -41,7 +40,8 @@
 - (NSArray*)activityItemsForData:(ShareToData*)data;
 // Returns an array of UIActivity objects that can handle the given |data|.
 - (NSArray*)applicationActivitiesForData:(ShareToData*)data
-                              controller:(UIViewController*)controller;
+                              controller:(UIViewController*)controller
+                              dispatcher:(id<BrowserCommands>)dispatcher;
 // Processes |extensionItems| returned from App Extension invocation returning
 // the |activityType|. Calls shareDelegate_ with the processed returned items
 // and |result| of activity. Returns whether caller should reset UI.
@@ -92,6 +92,7 @@
 - (void)shareWithData:(ShareToData*)data
            controller:(UIViewController*)controller
          browserState:(ios::ChromeBrowserState*)browserState
+           dispatcher:(id<BrowserCommands>)dispatcher
       shareToDelegate:(id<ShareToDelegate>)delegate
              fromRect:(CGRect)fromRect
                inView:(UIView*)inView {
@@ -110,22 +111,18 @@
   activityViewController_ = [[UIActivityViewController alloc]
       initWithActivityItems:[self activityItemsForData:data]
       applicationActivities:[self applicationActivitiesForData:data
-                                                    controller:controller]];
+                                                    controller:controller
+                                                    dispatcher:dispatcher]];
 
   // Reading List and Print activities refer to iOS' version of these.
   // Chrome-specific implementations of these two activities are provided below
-  // in applicationActivitiesForData:controller:
+  // in applicationActivitiesForData:controller:dispatcher:
   NSArray* excludedActivityTypes = @[
     UIActivityTypeAddToReadingList, UIActivityTypePrint,
     UIActivityTypeSaveToCameraRoll
   ];
   [activityViewController_ setExcludedActivityTypes:excludedActivityTypes];
-  // Although |completionWithItemsHandler:...| is not present in the iOS
-  // documentation, it is mentioned in the WWDC presentations (specifically
-  // 217_creating_extensions_for_ios_and_os_x_part_2.pdf) and available in
-  // header file UIKit.framework/UIActivityViewController.h as @property.
-  DCHECK([activityViewController_
-      respondsToSelector:@selector(setCompletionWithItemsHandler:)]);
+
   __weak ActivityServiceController* weakSelf = self;
   [activityViewController_ setCompletionWithItemsHandler:^(
                                NSString* activityType, BOOL completed,
@@ -165,7 +162,8 @@
     ShareTo::ShareResult shareResult = completed
                                            ? ShareTo::ShareResult::SHARE_SUCCESS
                                            : ShareTo::ShareResult::SHARE_CANCEL;
-    if (activity_type_util::IsPasswordAppExActivity(activityType)) {
+    if (activity_type_util::TypeFromString(activityType) ==
+        activity_type_util::APPEX_PASSWORD_MANAGEMENT) {
       // A compatible Password Management App Extension was invoked.
       shouldResetUI = [self processItemsReturnedFromActivity:activityType
                                                       status:shareResult
@@ -174,14 +172,14 @@
       activity_type_util::ActivityType type =
           activity_type_util::TypeFromString(activityType);
       activity_type_util::RecordMetricForActivity(type);
-      NSString* successMessage =
-          activity_type_util::SuccessMessageForActivity(type);
+      NSString* completionMessage =
+          activity_type_util::CompletionMessageForActivity(type);
       [shareToDelegate_ shareDidComplete:shareResult
-                          successMessage:successMessage];
+                       completionMessage:completionMessage];
     }
   } else {
     [shareToDelegate_ shareDidComplete:ShareTo::ShareResult::SHARE_CANCEL
-                        successMessage:nil];
+                     completionMessage:nil];
   }
   if (shouldResetUI)
     [self resetUserInterface];
@@ -216,19 +214,19 @@
 }
 
 - (NSArray*)applicationActivitiesForData:(ShareToData*)data
-                              controller:(UIViewController*)controller {
+                              controller:(UIViewController*)controller
+                              dispatcher:(id<BrowserCommands>)dispatcher {
   NSMutableArray* applicationActivities = [NSMutableArray array];
   if (data.isPagePrintable) {
     PrintActivity* printActivity = [[PrintActivity alloc] init];
-    [printActivity setResponder:controller];
+    printActivity.dispatcher = dispatcher;
     [applicationActivities addObject:printActivity];
   }
-  if (reading_list::switches::IsReadingListEnabled() &&
-      data.url.SchemeIsHTTPOrHTTPS()) {
+  if (data.url.SchemeIsHTTPOrHTTPS()) {
     ReadingListActivity* readingListActivity =
         [[ReadingListActivity alloc] initWithURL:data.url
                                            title:data.title
-                                       responder:controller];
+                                      dispatcher:dispatcher];
     [applicationActivities addObject:readingListActivity];
   }
   return applicationActivities;
@@ -260,7 +258,7 @@
     [shareToDelegate_ passwordAppExDidFinish:ShareTo::ShareResult::SHARE_ERROR
                                     username:nil
                                     password:nil
-                              successMessage:nil];
+                           completionMessage:nil];
     return YES;
   }
 
@@ -280,15 +278,23 @@
       activity_type_util::ActivityType type =
           activity_type_util::TypeFromString(activityType);
       activity_type_util::RecordMetricForActivity(type);
-      message = activity_type_util::SuccessMessageForActivity(type);
+      message = activity_type_util::CompletionMessageForActivity(type);
     }
-    [shareToDelegate_ passwordAppExDidFinish:activityResult
-                                    username:username
-                                    password:password
-                              successMessage:message];
-    // Controller state can be reset only after delegate has processed the
-    // item returned from the App Extension.
-    [self resetUserInterface];
+    // Password autofill uses JavaScript injection which must be executed on
+    // the main thread, however,
+    // loadItemForTypeIdentifier:options:completionHandler: documentation states
+    // that completion block "may  be executed on a background thread", so the
+    // code to do password filling must be re-dispatched back to main thread.
+    // Completion block intentionally retains |self|.
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [shareToDelegate_ passwordAppExDidFinish:activityResult
+                                      username:username
+                                      password:password
+                             completionMessage:message];
+      // Controller state can be reset only after delegate has
+      // processed the item returned from the App Extension.
+      [self resetUserInterface];
+    });
   };
   [itemProvider loadItemForTypeIdentifier:(NSString*)kUTTypePropertyList
                                   options:nil

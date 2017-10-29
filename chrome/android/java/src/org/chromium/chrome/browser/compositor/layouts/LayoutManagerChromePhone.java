@@ -8,15 +8,17 @@ import android.content.Context;
 import android.view.ViewGroup;
 
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.ScrollDirection;
 import org.chromium.chrome.browser.compositor.layouts.phone.SimpleAnimationLayout;
 import org.chromium.chrome.browser.compositor.overlays.SceneOverlay;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManagementDelegate;
-import org.chromium.chrome.browser.dom_distiller.ReaderModeManagerDelegate;
+import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
 
 /**
@@ -25,22 +27,19 @@ import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
  */
 public class LayoutManagerChromePhone extends LayoutManagerChrome {
     // Layouts
-    private final Layout mSimpleAnimationLayout;
+    private final SimpleAnimationLayout mSimpleAnimationLayout;
 
     /**
      * Creates an instance of a {@link LayoutManagerChromePhone}.
      * @param host            A {@link LayoutManagerHost} instance.
-     * @param overviewLayoutFactoryDelegate A {@link OverviewLayoutFactoryDelegate} instance.
      */
-    public LayoutManagerChromePhone(
-            LayoutManagerHost host, OverviewLayoutFactoryDelegate overviewLayoutFactoryDelegate) {
-        super(host, overviewLayoutFactoryDelegate);
+    public LayoutManagerChromePhone(LayoutManagerHost host) {
+        super(host, true);
         Context context = host.getContext();
         LayoutRenderHost renderHost = host.getLayoutRenderHost();
 
         // Build Layouts
-        mSimpleAnimationLayout =
-                new SimpleAnimationLayout(context, this, renderHost, mBlackHoleEventFilter);
+        mSimpleAnimationLayout = new SimpleAnimationLayout(context, this, renderHost);
 
         // Set up layout parameters
         mStaticLayout.setLayoutHandlesTabLifecycles(false);
@@ -48,16 +47,20 @@ public class LayoutManagerChromePhone extends LayoutManagerChrome {
     }
 
     @Override
+    protected ToolbarSwipeHandler createToolbarSwipeHandler(LayoutProvider provider) {
+        return new PhoneToolbarSwipeHandler(provider);
+    }
+
+    @Override
     public void init(TabModelSelector selector, TabCreatorManager creator,
             TabContentManager content, ViewGroup androidContentContainer,
             ContextualSearchManagementDelegate contextualSearchDelegate,
-            ReaderModeManagerDelegate readerModeDelegate,
             DynamicResourceLoader dynamicResourceLoader) {
         // Initialize Layouts
         mSimpleAnimationLayout.setTabModelSelector(selector, content);
 
         super.init(selector, creator, content, androidContentContainer, contextualSearchDelegate,
-                readerModeDelegate, dynamicResourceLoader);
+                dynamicResourceLoader);
     }
 
     @Override
@@ -100,7 +103,8 @@ public class LayoutManagerChromePhone extends LayoutManagerChrome {
     @Override
     protected void tabClosed(int id, int nextId, boolean incognito, boolean tabRemoved) {
         boolean showOverview = nextId == Tab.INVALID_TAB_ID;
-        Layout overviewLayout = useAccessibilityLayout() ? mOverviewListLayout : mOverviewLayout;
+        Layout overviewLayout = DeviceClassManager.enableAccessibilityLayout() ? mOverviewListLayout
+                                                                               : mOverviewLayout;
         if (getActiveLayout() != overviewLayout && showOverview) {
             // Since there will be no 'next' tab to display, switch to
             // overview mode when the animation is finished.
@@ -123,12 +127,14 @@ public class LayoutManagerChromePhone extends LayoutManagerChrome {
             // smoothly.
             getActiveLayout().onTabCreating(sourceId);
         } else if (animationsEnabled()) {
-            if (getActiveLayout() != null && getActiveLayout().isHiding()) {
-                setNextLayout(mSimpleAnimationLayout);
-                // The method Layout#doneHiding() will automatically show the next layout.
-                getActiveLayout().doneHiding();
-            } else {
-                startShowing(mSimpleAnimationLayout, false);
+            if (!FeatureUtilities.isChromeHomeEnabled() || !overviewVisible()) {
+                if (getActiveLayout() != null && getActiveLayout().isHiding()) {
+                    setNextLayout(mSimpleAnimationLayout);
+                    // The method Layout#doneHiding() will automatically show the next layout.
+                    getActiveLayout().doneHiding();
+                } else {
+                    startShowing(mSimpleAnimationLayout, false);
+                }
             }
             getActiveLayout().onTabCreating(sourceId);
         }
@@ -149,5 +155,20 @@ public class LayoutManagerChromePhone extends LayoutManagerChrome {
     public void releaseTabLayout(int id) {
         mTitleCache.remove(id);
         super.releaseTabLayout(id);
+    }
+
+    private class PhoneToolbarSwipeHandler extends ToolbarSwipeHandler {
+        public PhoneToolbarSwipeHandler(LayoutProvider provider) {
+            super(provider);
+        }
+
+        @Override
+        public boolean isSwipeEnabled(ScrollDirection direction) {
+            if (direction == ScrollDirection.DOWN && FeatureUtilities.isChromeHomeEnabled()) {
+                return false;
+            }
+
+            return super.isSwipeEnabled(direction);
+        }
     }
 }

@@ -16,7 +16,6 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "ui/base/ui_base_export.h"
-#include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/gfx/x/x11_types.h"
 
 namespace ui {
@@ -38,7 +37,7 @@ class UI_BASE_EXPORT SelectionRequestor {
   ~SelectionRequestor();
 
   // Does the work of requesting |target| from |selection|, spinning up the
-  // nested message loop, and reading the resulting data back. The result is
+  // nested run loop, and reading the resulting data back. The result is
   // stored in |out_data|.
   // |out_data_items| is the length of |out_data| in |out_type| items.
   bool PerformBlockingConvertSelection(
@@ -98,7 +97,7 @@ class UI_BASE_EXPORT SelectionRequestor {
     // The time when the request should be aborted.
     base::TimeTicks timeout;
 
-    // Called to terminate the nested message loop.
+    // Called to terminate the nested run loop.
     base::Closure quit_closure;
 
     // True if the request is complete.
@@ -149,8 +148,6 @@ class UI_BASE_EXPORT SelectionRequestor {
 
   // Used to abort requests if the selection owner takes too long to respond.
   base::RepeatingTimer abort_timer_;
-
-  X11AtomCache atom_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(SelectionRequestor);
 };

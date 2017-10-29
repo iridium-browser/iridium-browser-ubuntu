@@ -8,11 +8,11 @@
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
 #include "base/task_scheduler/post_task.h"
-#include "chrome/browser/chromeos/arc/arc_support_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/common/chrome_paths.h"
+#include "components/arc/arc_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_system.h"
 
@@ -129,8 +129,7 @@ ArcDefaultAppList::ArcDefaultAppList(Delegate* delegate,
 
   // Once ready OnAppsReady is called.
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&ReadAppsFromFileThread),
       base::Bind(&ArcDefaultAppList::OnAppsReady,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -147,9 +146,9 @@ void ArcDefaultAppList::OnAppsReady(std::unique_ptr<AppInfoMap> apps) {
   // not be available in tests.
   ExtensionService* service =
       extensions::ExtensionSystem::Get(context_)->extension_service();
-  const extensions::Extension* arc_host = service ?
-      service->GetInstalledExtension(ArcSupportHost::kHostAppId) : nullptr;
-  if (arc_host) {
+  const extensions::Extension* arc_host =
+      service ? service->GetInstalledExtension(arc::kPlayStoreAppId) : nullptr;
+  if (arc_host && arc::IsPlayStoreAvailable()) {
     std::unique_ptr<ArcDefaultAppList::AppInfo> play_store_app(
         new ArcDefaultAppList::AppInfo(arc_host->name(),
                                        arc::kPlayStorePackage,

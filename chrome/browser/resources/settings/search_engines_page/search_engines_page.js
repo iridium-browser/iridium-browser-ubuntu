@@ -9,25 +9,40 @@
 Polymer({
   is: 'settings-search-engines-page',
 
-  behaviors: [WebUIListenerBehavior],
+  behaviors: [settings.GlobalScrollTargetBehavior, WebUIListenerBehavior],
 
   properties: {
     /** @type {!Array<!SearchEngine>} */
     defaultEngines: {
       type: Array,
-      value: function() { return []; }
+      value: function() {
+        return [];
+      }
     },
 
     /** @type {!Array<!SearchEngine>} */
     otherEngines: {
       type: Array,
-      value: function() { return []; }
+      value: function() {
+        return [];
+      }
     },
 
     /** @type {!Array<!SearchEngine>} */
     extensions: {
       type: Array,
-      value: function() { return []; }
+      value: function() {
+        return [];
+      }
+    },
+
+    /**
+     * Needed by GlobalScrollTargetBehavior.
+     * @override
+     */
+    subpageRoute: {
+      type: Object,
+      value: settings.routes.SEARCH_ENGINES,
     },
 
     /** @private {boolean} */
@@ -37,7 +52,10 @@ Polymer({
     showExtensionsList_: {
       type: Boolean,
       computed: 'computeShowExtensionsList_(extensions)',
-    }
+    },
+
+    /** @private {HTMLElement} */
+    omniboxExtensionlastFocused_: Object,
   },
 
   // Since the iron-list for extensions is enclosed in a dom-if, observe both
@@ -46,10 +64,16 @@ Polymer({
 
   /** @override */
   ready: function() {
-    settings.SearchEnginesBrowserProxyImpl.getInstance().
-        getSearchEnginesList().then(this.enginesChanged_.bind(this));
+    settings.SearchEnginesBrowserProxyImpl.getInstance()
+        .getSearchEnginesList()
+        .then(this.enginesChanged_.bind(this));
     this.addWebUIListener(
         'search-engines-changed', this.enginesChanged_.bind(this));
+
+    // Sets offset in iron-list that uses the page as a scrollTarget.
+    Polymer.RenderStatus.afterNextRender(this, function() {
+      this.$.otherEngines.scrollOffset = this.$.otherEngines.offsetTop;
+    });
   },
 
   /** @private */
@@ -64,7 +88,13 @@ Polymer({
    */
   enginesChanged_: function(searchEnginesInfo) {
     this.defaultEngines = searchEnginesInfo['defaults'];
-    this.otherEngines = searchEnginesInfo['others'];
+
+    // Sort |otherEngines| in alphabetical order.
+    this.otherEngines = searchEnginesInfo['others'].sort(function(a, b) {
+      return a.name.toLocaleLowerCase().localeCompare(
+          b.name.toLocaleLowerCase());
+    });
+
     this.extensions = searchEnginesInfo['extensions'];
   },
 
@@ -82,6 +112,7 @@ Polymer({
       // previous dialog's contents are cleared.
       dialog.addEventListener('close', function() {
         this.showAddSearchEngineDialog_ = false;
+        cr.ui.focusWithoutInk(assert(this.$.addSearchEngine));
       }.bind(this));
     }.bind(this));
   },

@@ -13,7 +13,7 @@ found in the LICENSE file.
 
 tr.b.unittest.testSuite(function() {
   test('emptyListOfScalarValues', function() {
-    let charts = {
+    const charts = {
       charts: {
         mean_frame_time: {
           'http://games.yahoo.com': {
@@ -38,22 +38,22 @@ tr.b.unittest.testSuite(function() {
         }
       }
     };
-    let histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.v.ChartJsonConverter.convertChartJson(charts, histograms);
     assert.lengthOf(histograms, 1);
-    let hist = [...histograms][0];
+    const hist = [...histograms][0];
     assert.strictEqual('mean_frame_time', hist.name);
     assert.strictEqual('',
-        tr.v.HistogramSet.GROUPINGS.LEGACY_TIR_LABEL.callback(hist));
+        tr.v.HistogramGrouping.LEGACY_TIR_LABEL.callback(hist));
     assert.strictEqual('http://games.yahoo.com',
-        tr.v.HistogramSet.GROUPINGS.STORY_NAME.callback(hist));
+        tr.v.HistogramGrouping.STORY_NAME.callback(hist));
     assert.strictEqual(0, hist.numValues);
     assert.strictEqual(tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
         hist.unit);
   });
 
   test('convertWithoutTIRLabel', function() {
-    let charts = {
+    const charts = {
       charts: {
         mean_frame_time: {
           'http://games.yahoo.com': {
@@ -85,15 +85,15 @@ tr.b.unittest.testSuite(function() {
         }
       }
     };
-    let histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.v.ChartJsonConverter.convertChartJson(charts, histograms);
     assert.lengthOf(histograms, 1);
-    let hist = [...histograms][0];
+    const hist = [...histograms][0];
     assert.strictEqual('mean_frame_time', hist.name);
     assert.strictEqual('',
-        tr.v.HistogramSet.GROUPINGS.LEGACY_TIR_LABEL.callback(hist));
+        tr.v.HistogramGrouping.LEGACY_TIR_LABEL.callback(hist));
     assert.strictEqual('http://games.yahoo.com',
-        tr.v.HistogramSet.GROUPINGS.STORY_NAME.callback(hist));
+        tr.v.HistogramGrouping.STORY_NAME.callback(hist));
     assert.strictEqual(42, hist.average);
     assert.strictEqual(1, hist.numValues);
     assert.strictEqual(tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
@@ -101,7 +101,7 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('convertWithTIRLabel', function() {
-    let charts = {
+    const charts = {
       charts: {
         'TIR-A@@value-name': {
           'story-name': {
@@ -124,15 +124,15 @@ tr.b.unittest.testSuite(function() {
         },
       },
     };
-    let histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.v.ChartJsonConverter.convertChartJson(charts, histograms);
     assert.lengthOf(histograms, 1);
-    let hist = [...histograms][0];
+    const hist = [...histograms][0];
     assert.strictEqual('value-name', hist.name);
     assert.strictEqual('TIR-A',
-        tr.v.HistogramSet.GROUPINGS.LEGACY_TIR_LABEL.callback(hist));
+        tr.v.HistogramGrouping.LEGACY_TIR_LABEL.callback(hist));
     assert.strictEqual('story-name',
-        tr.v.HistogramSet.GROUPINGS.STORY_NAME.callback(hist));
+        tr.v.HistogramGrouping.STORY_NAME.callback(hist));
     assert.strictEqual(42, hist.average);
     assert.strictEqual(1, hist.numValues);
     assert.strictEqual(tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
@@ -140,7 +140,7 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('convertHistogram', function() {
-    let charts = {
+    const charts = {
       charts: {
         MPArch_RWH_TabSwitchPaintDuration: {
           summary: {
@@ -164,18 +164,19 @@ tr.b.unittest.testSuite(function() {
         }
       }
     };
-    let histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
     tr.v.ChartJsonConverter.convertChartJson(charts, histograms);
     assert.lengthOf(histograms, 1);
-    let hist = [...histograms][0];
+    const hist = [...histograms][0];
     assert.strictEqual('MPArch_RWH_TabSwitchPaintDuration', hist.name);
     assert.strictEqual('',
-        tr.v.HistogramSet.GROUPINGS.LEGACY_TIR_LABEL.callback(hist));
+        tr.v.HistogramGrouping.LEGACY_TIR_LABEL.callback(hist));
     assert.strictEqual('',
-        tr.v.HistogramSet.GROUPINGS.STORY_NAME.callback(hist));
+        tr.v.HistogramGrouping.STORY_NAME.callback(hist));
     assert.strictEqual(20, hist.average);
     assert.strictEqual(4, hist.numValues);
-    assert.strictEqual(tr.b.Unit.byName.timeDurationInMs, hist.unit);
+    assert.strictEqual(tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+        hist.unit);
   });
 });
 </script>

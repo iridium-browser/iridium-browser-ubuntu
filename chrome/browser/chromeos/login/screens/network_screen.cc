@@ -8,6 +8,7 @@
 
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/chromeos/login/screens/network_view.h"
 #include "chrome/browser/chromeos/login/ui/input_events_blocker.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
 #include "chrome/common/pref_names.h"
@@ -155,9 +155,9 @@ void NetworkScreen::GetConnectedWifiNetwork(std::string* out_onc_spec) {
 void NetworkScreen::CreateAndConnectNetworkFromOnc(
     const std::string& onc_spec,
     const base::Closure& success_callback,
-    const base::Closure& failed_callback) {
+    const network_handler::ErrorCallback& error_callback) {
   network_state_helper_->CreateAndConnectNetworkFromOnc(
-      onc_spec, success_callback, failed_callback);
+      onc_spec, success_callback, error_callback);
 }
 
 void NetworkScreen::AddObserver(Observer* observer) {
@@ -268,8 +268,7 @@ void NetworkScreen::SetInputMethod(const std::string& input_method) {
           ->GetActiveIMEState()
           ->GetActiveInputMethodIds();
   if (input_method.empty() ||
-      std::find(input_methods.begin(), input_methods.end(), input_method) ==
-          input_methods.end()) {
+      !base::ContainsValue(input_methods, input_method)) {
     LOG(WARNING) << "The input method is empty or ineligible!";
     return;
   }
@@ -360,9 +359,10 @@ void NetworkScreen::StopWaitingForConnection(const base::string16& network_id) {
     view_->ShowConnectingStatus(false, network_id_);
 
   GetContextEditor().SetBoolean(kContextKeyContinueButtonEnabled, is_connected);
+
+  // Automatically continue if we are using Hands-Off Enrollment.
   if (is_connected && continue_attempts_ == 0 &&
-      policy::DeviceCloudPolicyManagerChromeOS::GetZeroTouchEnrollmentMode() ==
-          policy::ZeroTouchEnrollmentMode::HANDS_OFF) {
+      WizardController::UsingHandsOffEnrollment()) {
     OnContinueButtonPressed();
   }
 }

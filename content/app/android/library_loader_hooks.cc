@@ -4,7 +4,6 @@
 
 #include "content/app/android/library_loader_hooks.h"
 
-#include "base/android/base_jni_registrar.h"
 #include "base/android/command_line_android.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
@@ -26,7 +25,6 @@
 #include "content/public/common/result_codes.h"
 #include "device/bluetooth/android/bluetooth_jni_registrar.h"
 #include "device/gamepad/android/gamepad_jni_registrar.h"
-#include "device/generic_sensor/android/sensors_jni_registrar.h"
 #include "device/geolocation/android/geolocation_jni_registrar.h"
 #include "device/sensors/android/device_sensor_jni_registrar.h"
 #include "device/usb/android/usb_jni_registrar.h"
@@ -34,6 +32,7 @@
 #include "media/capture/content/android/screen_capture_jni_registrar.h"
 #include "media/capture/video/android/capture_jni_registrar.h"
 #include "media/midi/midi_jni_registrar.h"
+#include "mojo/android/system/mojo_jni_registrar.h"
 #include "net/android/net_jni_registrar.h"
 #include "ui/android/ui_android_jni_registrar.h"
 #include "ui/base/android/ui_base_jni_registrar.h"
@@ -47,9 +46,6 @@ bool EnsureJniRegistered(JNIEnv* env) {
   static bool g_jni_init_done = false;
 
   if (!g_jni_init_done) {
-    if (!base::android::RegisterJni(env))
-      return false;
-
     if (!gfx::android::RegisterJni(env))
       return false;
 
@@ -89,9 +85,6 @@ bool EnsureJniRegistered(JNIEnv* env) {
     if (!device::android::RegisterGeolocationJni(env))
       return false;
 
-    if (!device::android::RegisterSensorsJni(env))
-      return false;
-
     if (!device::android::RegisterUsbJni(env))
       return false;
 
@@ -105,6 +98,9 @@ bool EnsureJniRegistered(JNIEnv* env) {
       return false;
 
     if (!midi::RegisterJni(env))
+      return false;
+
+    if (!mojo::android::RegisterSystemJni(env))
       return false;
 
     if (!ui::RegisterUIAndroidJni(env))

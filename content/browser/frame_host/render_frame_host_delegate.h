@@ -20,10 +20,16 @@
 #include "content/public/common/media_stream_request.h"
 #include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
 #include "net/http/http_response_headers.h"
+#include "services/device/public/interfaces/wake_lock.mojom.h"
 #include "ui/base/window_open_disposition.h"
 
 #if defined(OS_WIN)
 #include "ui/gfx/native_widget_types.h"
+#endif
+
+#if defined(OS_ANDROID)
+#include "base/android/scoped_java_ref.h"
+#include "services/device/public/interfaces/nfc.mojom.h"
 #endif
 
 class GURL;
@@ -33,8 +39,7 @@ class Message;
 }
 
 namespace device {
-class GeolocationServiceContext;
-class WakeLockServiceContext;
+class GeolocationContext;
 }
 
 namespace gfx {
@@ -172,7 +177,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   // Called when accessibility events or location changes are received
   // from a render frame, when the accessibility mode has the
-  // ACCESSIBILITY_MODE_FLAG_WEB_CONTENTS flag set.
+  // AccessibilityMode::kWebContents flag set.
   virtual void AccessibilityEventReceived(
       const std::vector<AXEventNotificationDetails>& details) {}
   virtual void AccessibilityLocationChangesReceived(
@@ -184,11 +189,16 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
       RenderFrameHost* render_frame_host,
       int browser_plugin_instance_id);
 
-  // Gets the GeolocationServiceContext associated with this delegate.
-  virtual device::GeolocationServiceContext* GetGeolocationServiceContext();
+  // Gets the GeolocationContext associated with this delegate.
+  virtual device::GeolocationContext* GetGeolocationContext();
 
-  // Gets the WakeLockServiceContext associated with this delegate.
-  virtual device::WakeLockServiceContext* GetWakeLockServiceContext();
+  // Gets the WakeLock that serves wake lock requests from the renderer.
+  virtual device::mojom::WakeLock* GetRendererWakeLock();
+
+#if defined(OS_ANDROID)
+  // Gets an NFC implementation within the context of this delegate.
+  virtual void GetNFC(device::mojom::NFCRequest request);
+#endif
 
   // Notification that the frame wants to go into fullscreen mode.
   // |origin| represents the origin of the frame that requests fullscreen.
@@ -224,6 +234,18 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // possibly changing focus in distinct but related inner/outer WebContents.
   virtual void SetFocusedFrame(FrameTreeNode* node, SiteInstance* source) {}
 
+  // Searches the WebContents for a focused frame, potentially in an inner
+  // WebContents. If this WebContents has no focused frame, returns |nullptr|.
+  // If there is no inner WebContents at the focused tree node, returns its
+  // RenderFrameHost. If there is an inner WebContents, search it for focused
+  // frames and inner contents. If an inner WebContents does not have a focused
+  // frame, return its main frame, since the attachment frame in its outer
+  // WebContents is not live.
+  virtual RenderFrameHost* GetFocusedFrameIncludingInnerWebContents();
+
+  // Called by when |source_rfh| advances focus to a RenderFrameProxyHost.
+  virtual void OnAdvanceFocus(RenderFrameHostImpl* source_rfh) {}
+
   // Creates a WebUI object for a frame navigating to |url|. If no WebUI
   // applies, returns null.
   virtual std::unique_ptr<WebUIImpl> CreateWebUIForRenderFrameHost(
@@ -239,11 +261,14 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   // The page is trying to open a new page (e.g. a popup window). The window
   // should be created associated with the given |main_frame_widget_route_id| in
-  // the process of |source_site_instance|, but it should not be shown yet. That
-  // should happen in response to ShowCreatedWindow.
-  // |params.window_container_type| describes the type of RenderViewHost
-  // container that is requested -- in particular, the window.open call may have
-  // specified 'background' and 'persistent' in the feature string.
+  // the process of |opener|, but it should not be shown yet. That should happen
+  // in response to ShowCreatedWindow. |params.window_container_type| describes
+  // the type of RenderViewHost container that is requested -- in particular,
+  // the window.open call may have specified 'background' and 'persistent' in
+  // the feature string.
+  //
+  // The passed |opener| is the RenderFrameHost initiating the window creation.
+  // It will never be null, even if the opener is suppressed via |params|.
   //
   // The passed |params.frame_name| parameter is the name parameter that was
   // passed to window.open(), and will be empty if none was passed.
@@ -253,10 +278,9 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   //
   // The caller is expected to handle cleanup if this operation fails or is
   // suppressed, by looking for the existence of a RenderFrameHost in
-  // source_site_instance's process with |main_frame_route_id| after this method
-  // returns.
+  // |opener|'s process with |main_frame_route_id| after this method returns.
   virtual void CreateNewWindow(
-      SiteInstance* source_site_instance,
+      RenderFrameHost* opener,
       int32_t render_view_route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
@@ -289,6 +313,15 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
                                                  bool allowed_per_prefs,
                                                  const url::Origin& origin,
                                                  const GURL& resource_url);
+
+#if defined(OS_ANDROID)
+  virtual base::android::ScopedJavaLocalRef<jobject>
+  GetJavaRenderFrameHostDelegate();
+#endif
+
+  // Whether the delegate is being destroyed, in which case the RenderFrameHost
+  // should not be asked to create a RenderFrame.
+  virtual bool IsBeingDestroyed() const;
 
  protected:
   virtual ~RenderFrameHostDelegate() {}

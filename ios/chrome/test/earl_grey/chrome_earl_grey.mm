@@ -7,15 +7,27 @@
 #import <Foundation/Foundation.h>
 #import <WebKit/WebKit.h>
 
+#include "base/format_macros.h"
+#include "base/mac/foundation_util.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
+#import "base/test/ios/wait_util.h"
+#include "components/strings/grit/components_strings.h"
+#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
+#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
+#import "ios/chrome/browser/ui/static_content/static_html_view_controller.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
 #import "ios/chrome/test/app/history_test_util.h"
 #include "ios/chrome/test/app/navigation_test_util.h"
+#import "ios/chrome/test/app/static_html_view_test_util.h"
+#import "ios/chrome/test/app/tab_test_util.h"
 #import "ios/testing/wait_util.h"
 #import "ios/web/public/test/earl_grey/js_test_util.h"
+#import "ios/web/public/test/web_view_content_test_util.h"
 #import "ios/web/public/test/web_view_interaction_test_util.h"
 #import "ios/web/public/web_state/js/crw_js_injection_receiver.h"
 #import "ios/web/public/web_state/web_state.h"
+#include "ui/base/l10n/l10n_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -66,17 +78,59 @@ id ExecuteJavaScript(NSString* javascript,
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
 }
 
+#pragma mark - Cookie Utilities
+
++ (NSDictionary*)cookies {
+  NSString* const kGetCookiesScript =
+      @"document.cookie ? document.cookie.split(/;\\s*/) : [];";
+
+  // TODO(crbug.com/690057): Remove __unsafe_unretained once all callers of
+  // |ExecuteJavaScript| are converted to ARC.
+  NSError* __unsafe_unretained error = nil;
+  id result = chrome_test_util::ExecuteJavaScript(kGetCookiesScript, &error);
+
+  GREYAssertTrue(result && !error, @"Failed to get cookies.");
+
+  NSArray* nameValuePairs = base::mac::ObjCCastStrict<NSArray>(result);
+  NSMutableDictionary* cookies = [NSMutableDictionary dictionary];
+  for (NSString* nameValuePair in nameValuePairs) {
+    NSArray* cookieNameValue = [nameValuePair componentsSeparatedByString:@"="];
+    GREYAssertEqual(2U, cookieNameValue.count, @"Cookie has invalid format.");
+
+    NSString* cookieName = cookieNameValue[0];
+    NSString* cookieValue = cookieNameValue[1];
+    cookies[cookieName] = cookieValue;
+  }
+
+  return cookies;
+}
+
 #pragma mark - Navigation Utilities
 
-+ (void)loadURL:(GURL)URL {
++ (void)loadURL:(const GURL&)URL {
   chrome_test_util::LoadUrl(URL);
-  // Make sure that the page started loading.
-  GREYAssert(chrome_test_util::IsLoading(), @"Page did not start loading.");
   [ChromeEarlGrey waitForPageToFinishLoading];
 
   web::WebState* webState = chrome_test_util::GetCurrentWebState();
   if (webState->ContentIsHTML())
     web::WaitUntilWindowIdInjected(webState);
+}
+
++ (void)reload {
+  [chrome_test_util::BrowserCommandDispatcherForMainBVC() reload];
+  [ChromeEarlGrey waitForPageToFinishLoading];
+}
+
++ (void)goBack {
+  [chrome_test_util::BrowserCommandDispatcherForMainBVC() goBack];
+
+  [ChromeEarlGrey waitForPageToFinishLoading];
+}
+
++ (void)goForward {
+  [chrome_test_util::BrowserCommandDispatcherForMainBVC() goForward];
+
+  [ChromeEarlGrey waitForPageToFinishLoading];
 }
 
 + (void)waitForPageToFinishLoading {
@@ -97,4 +151,80 @@ id ExecuteJavaScript(NSString* javascript,
                  elementID);
 }
 
++ (void)waitForErrorPage {
+  NSString* const kErrorPageText =
+      l10n_util::GetNSString(IDS_ERRORPAGES_HEADING_NOT_AVAILABLE);
+  [self waitForStaticHTMLViewContainingText:kErrorPageText];
+}
+
++ (void)waitForStaticHTMLViewContainingText:(NSString*)text {
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:@"Wait for static HTML text."
+                  block:^BOOL {
+                    return chrome_test_util::StaticHtmlViewContainingText(
+                        chrome_test_util::GetCurrentWebState(),
+                        base::SysNSStringToUTF8(text));
+                  }];
+  GREYAssert([condition waitWithTimeout:testing::kWaitForUIElementTimeout],
+             @"Failed to find static html view containing %@", text);
+}
+
++ (void)waitForStaticHTMLViewNotContainingText:(NSString*)text {
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:@"Wait for absence of static HTML text."
+                  block:^BOOL {
+                    return !chrome_test_util::StaticHtmlViewContainingText(
+                        chrome_test_util::GetCurrentWebState(),
+                        base::SysNSStringToUTF8(text));
+                  }];
+  GREYAssert([condition waitWithTimeout:testing::kWaitForUIElementTimeout],
+             @"Failed, there was a static html view containing %@", text);
+}
+
++ (void)waitForWebViewContainingText:(std::string)text {
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:@"Wait for web view containing text"
+                  block:^BOOL {
+                    return web::test::IsWebViewContainingText(
+                        chrome_test_util::GetCurrentWebState(), text);
+                  }];
+  GREYAssert([condition waitWithTimeout:testing::kWaitForUIElementTimeout],
+             @"Failed waiting for web view containing %s", text.c_str());
+}
+
++ (void)waitForWebViewNotContainingText:(std::string)text {
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:@"Wait for web view not containing text"
+                  block:^BOOL {
+                    return !web::test::IsWebViewContainingText(
+                        chrome_test_util::GetCurrentWebState(), text);
+                  }];
+  GREYAssert([condition waitWithTimeout:testing::kWaitForUIElementTimeout],
+             @"Failed waiting for web view not containing %s", text.c_str());
+}
+
++ (void)waitForMainTabCount:(NSUInteger)count {
+  // Allow the UI to become idle, in case any tabs are being opened or closed.
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:@"Wait for main tab count"
+                  block:^BOOL {
+                    return chrome_test_util::GetMainTabCount() == count;
+                  }];
+  GREYAssert([condition waitWithTimeout:testing::kWaitForUIElementTimeout],
+             @"Failed waiting for main tab count to become %" PRIuNS, count);
+}
+
++ (void)waitForIncognitoTabCount:(NSUInteger)count {
+  // Allow the UI to become idle, in case any tabs are being opened or closed.
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:@"Wait for incognito tab count"
+                  block:^BOOL {
+                    return chrome_test_util::GetIncognitoTabCount() == count;
+                  }];
+  GREYAssert([condition waitWithTimeout:testing::kWaitForUIElementTimeout],
+             @"Failed waiting for incognito tab count to become %" PRIuNS,
+             count);
+}
 @end

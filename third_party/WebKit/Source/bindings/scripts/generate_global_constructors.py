@@ -30,7 +30,7 @@ from utilities import get_file_contents
 from utilities import get_interface_exposed_arguments
 from utilities import get_interface_extended_attributes_from_idl
 from utilities import idl_filename_to_interface_name
-from utilities import is_callback_interface_from_idl
+from utilities import is_non_legacy_callback_interface_from_idl
 from utilities import read_file_to_list
 from utilities import read_pickle_file
 from utilities import should_generate_impl_file_from_idl
@@ -79,11 +79,9 @@ def record_global_constructors(idl_filename):
 
     # An interface property is produced for every non-callback interface
     # that does not have [NoInterfaceObject].
-    # Callback interfaces with constants also have interface properties,
-    # but there are none of these in Blink.
     # http://heycam.github.io/webidl/#es-interfaces
     if ((not should_generate_impl_file_from_idl(idl_file_contents)) or
-        is_callback_interface_from_idl(idl_file_contents) or
+        is_non_legacy_callback_interface_from_idl(idl_file_contents) or
         'NoInterfaceObject' in extended_attributes):
         return
 
@@ -107,9 +105,9 @@ def record_global_constructors(idl_filename):
 
 def generate_global_constructors_list(interface_name, extended_attributes):
     extended_attributes_list = [
-            name + '=' + extended_attributes[name]
-            for name in 'RuntimeEnabled', 'OriginTrialEnabled'
-            if name in extended_attributes]
+        name + '=' + extended_attributes[name]
+        for name in 'RuntimeEnabled', 'OriginTrialEnabled', 'ContextEnabled'
+        if name in extended_attributes]
     if extended_attributes_list:
         extended_string = '[%s] ' % ', '.join(extended_attributes_list)
     else:

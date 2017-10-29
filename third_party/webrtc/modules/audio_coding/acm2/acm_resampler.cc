@@ -14,7 +14,7 @@
 #include <string.h>
 
 #include "webrtc/common_audio/resampler/include/resampler.h"
-#include "webrtc/system_wrappers/include/logging.h"
+#include "webrtc/rtc_base/logging.h"
 
 namespace webrtc {
 namespace acm2 {

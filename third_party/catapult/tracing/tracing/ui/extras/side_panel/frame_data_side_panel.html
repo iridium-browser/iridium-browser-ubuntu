@@ -45,15 +45,15 @@ found in the LICENSE file.
 <script>
 'use strict';
 tr.exportTo('tr.ui.e.s', function() {
-  var BlameContextSnapshot = tr.e.chrome.BlameContextSnapshot;
-  var FrameTreeNodeSnapshot = tr.e.chrome.FrameTreeNodeSnapshot;
-  var RenderFrameSnapshot = tr.e.chrome.RenderFrameSnapshot;
-  var TopLevelSnapshot = tr.e.chrome.TopLevelSnapshot;
+  const BlameContextSnapshot = tr.e.chrome.BlameContextSnapshot;
+  const FrameTreeNodeSnapshot = tr.e.chrome.FrameTreeNodeSnapshot;
+  const RenderFrameSnapshot = tr.e.chrome.RenderFrameSnapshot;
+  const TopLevelSnapshot = tr.e.chrome.TopLevelSnapshot;
 
-  var BlameContextInstance = tr.e.chrome.BlameContextInstance;
-  var FrameTreeNodeInstance = tr.e.chrome.FrameTreeNodeInstance;
-  var RenderFrameInstance = tr.e.chrome.RenderFrameInstance;
-  var TopLevelInstance = tr.e.chrome.TopLevelInstance;
+  const BlameContextInstance = tr.e.chrome.BlameContextInstance;
+  const FrameTreeNodeInstance = tr.e.chrome.FrameTreeNodeInstance;
+  const RenderFrameInstance = tr.e.chrome.RenderFrameInstance;
+  const TopLevelInstance = tr.e.chrome.TopLevelInstance;
 
   /**
    * @constructor
@@ -70,8 +70,7 @@ tr.exportTo('tr.ui.e.s', function() {
     this.time = 0;
     this.eventsOfInterest = new tr.model.EventSet();
 
-    if (context === undefined)
-      return;
+    if (context === undefined) return;
 
     this.type = context.objectInstance.blameContextType;
     this.contexts.push(context);
@@ -81,8 +80,9 @@ tr.exportTo('tr.ui.e.s', function() {
         this.renderer = context.renderFrame.objectInstance.parent.pid;
       }
     } else if (context instanceof RenderFrameSnapshot) {
-      if (context.frameTreeNode)
+      if (context.frameTreeNode) {
         this.contexts.push(context.frameTreeNode);
+      }
       this.renderer = context.objectInstance.parent.pid;
     } else if (context instanceof TopLevelSnapshot) {
       this.renderer = context.objectInstance.parent.pid;
@@ -97,7 +97,7 @@ tr.exportTo('tr.ui.e.s', function() {
     this.url = context.url;
   }
 
-  var groupFunctions = {
+  const groupFunctions = {
     none: rows => rows,
 
     // Group the rows according to the frame tree structure.
@@ -111,39 +111,43 @@ tr.exportTo('tr.ui.e.s', function() {
     // +- Frame Tree |   2  |  c
     //  +- Frame     |   1  |  c
     //  +- Subframe  |   1  |  d
-    tree: function(rows, rowMap) {
+    tree(rows, rowMap) {
       // Finds the parent of a specific row. When there is conflict between the
       // browser's dump of the frame tree and the renderers', use the browser's.
-      var getParentRow = function(row) {
-        var pivot;
+      const getParentRow = function(row) {
+        let pivot;
         row.contexts.forEach(function(context) {
-          if (context instanceof tr.e.chrome.FrameTreeNodeSnapshot)
+          if (context instanceof tr.e.chrome.FrameTreeNodeSnapshot) {
             pivot = context;
+          }
         });
-        if (pivot && pivot.parentContext)
+        if (pivot && pivot.parentContext) {
           return rowMap[pivot.parentContext.guid];
+        }
         return undefined;
       };
 
-      var rootRows = [];
+      const rootRows = [];
       rows.forEach(function(row) {
-        var parentRow = getParentRow(row);
+        const parentRow = getParentRow(row);
         if (parentRow === undefined) {
           rootRows.push(row);
           return;
         }
-        if (parentRow.subRows === undefined)
+        if (parentRow.subRows === undefined) {
           parentRow.subRows = [];
+        }
         parentRow.subRows.push(row);
       });
 
-      var aggregateAllDescendants = function(row) {
+      const aggregateAllDescendants = function(row) {
         if (!row.subRows) {
-          if (getParentRow(row))
+          if (getParentRow(row)) {
             row.type = 'Subframe';
+          }
           return row;
         }
-        var result = new Row();
+        const result = new Row();
         result.type = 'Frame Tree';
         result.renderer = row.renderer;
         result.url = row.url;
@@ -168,9 +172,9 @@ tr.exportTo('tr.ui.e.s', function() {
     is: 'tr-ui-e-s-frame-data-side-panel',
     behaviors: [tr.ui.behaviors.SidePanel],
 
-    ready: function() {
+    ready() {
       this.model_ = undefined;
-      this.rangeOfInterest_ = new tr.b.Range();
+      this.rangeOfInterest_ = new tr.b.math.Range();
 
       this.$.table.showHeader = true;
       this.$.table.selectionMode = tr.ui.b.TableFormat.SelectionMode.ROW;
@@ -185,13 +189,13 @@ tr.exportTo('tr.ui.e.s', function() {
       }.bind(this));
     },
 
-    selectEventSet_: function(eventSet) {
-      var event = new tr.model.RequestSelectionChangeEvent();
+    selectEventSet_(eventSet) {
+      const event = new tr.model.RequestSelectionChangeEvent();
       event.selection = eventSet;
       this.dispatchEvent(event);
     },
 
-    createFrameDataTableColumns_: function() {
+    createFrameDataTableColumns_() {
       return [
         {
           title: 'Renderer',
@@ -223,21 +227,21 @@ tr.exportTo('tr.ui.e.s', function() {
       ];
     },
 
-    createFrameDataTableRows_: function() {
-      if (!this.model_)
-        return [];
+    createFrameDataTableRows_() {
+      if (!this.model_) return [];
 
       // Gather contexts into skeletons of rows.
-      var rows = [];
-      var rowMap = {};
-      for (var proc of Object.values(this.model_.processes)) {
+      const rows = [];
+      const rowMap = {};
+      for (const proc of Object.values(this.model_.processes)) {
         proc.objects.iterObjectInstances(function(objectInstance) {
-          if (!(objectInstance instanceof BlameContextInstance))
+          if (!(objectInstance instanceof BlameContextInstance)) {
             return;
+          }
           objectInstance.snapshots.forEach(function(snapshot) {
-            if (rowMap[snapshot.guid])
-              return;
-            var row = new Row(snapshot);
+            if (rowMap[snapshot.guid]) return;
+
+            const row = new Row(snapshot);
             row.contexts.forEach(context => rowMap[context.guid] = row);
             rows.push(row);
           }, this);
@@ -248,13 +252,14 @@ tr.exportTo('tr.ui.e.s', function() {
       // TODO(xiaochengh): We should implement a getter
       // BlameContextSnapshot.attributedEvents, instead of process the model in
       // a UI component.
-      for (var proc of Object.values(this.model_.processes)) {
-        for (var thread of Object.values(proc.threads)) {
+      for (const proc of Object.values(this.model_.processes)) {
+        for (const thread of Object.values(proc.threads)) {
           thread.sliceGroup.iterSlicesInTimeRange(function(topLevelSlice) {
             topLevelSlice.contexts.forEach(function(context) {
-              if (!context.snapshot.guid || !rowMap[context.snapshot.guid])
+              if (!context.snapshot.guid || !rowMap[context.snapshot.guid]) {
                 return;
-              var row = rowMap[context.snapshot.guid];
+              }
+              const row = rowMap[context.snapshot.guid];
               row.eventsOfInterest.push(topLevelSlice);
               row.time += topLevelSlice.selfTime || 0;
             });
@@ -263,18 +268,18 @@ tr.exportTo('tr.ui.e.s', function() {
       }
 
       // Apply grouping to rows.
-      var select = this.$.select;
-      var groupOption = select.options[select.selectedIndex].value;
-      var groupFunction = groupFunctions[groupOption];
+      const select = this.$.select;
+      const groupOption = select.options[select.selectedIndex].value;
+      const groupFunction = groupFunctions[groupOption];
       return groupFunction(rows, rowMap);
     },
 
-    updateContents_: function() {
+    updateContents_() {
       this.$.table.tableRows = this.createFrameDataTableRows_();
       this.$.table.rebuild();
     },
 
-    supportsModel: function(m) {
+    supportsModel(m) {
       if (!m) {
         return {
           supported: false,
@@ -282,22 +287,25 @@ tr.exportTo('tr.ui.e.s', function() {
         };
       }
 
-      var ans = {supported: false};
-      for (var proc of Object.values(m.processes)) {
+      const ans = {supported: false};
+      for (const proc of Object.values(m.processes)) {
         proc.objects.iterObjectInstances(function(instance) {
-          if (instance instanceof BlameContextInstance)
+          if (instance instanceof BlameContextInstance) {
             ans.supported = true;
+          }
         });
       }
 
-      if (!ans.supported)
+      if (!ans.supported) {
         ans.reason = 'No frame data available';
+      }
       return ans;
     },
 
     get currentRangeOfInterest() {
-      if (this.rangeOfInterest_.isEmpty)
+      if (this.rangeOfInterest_.isEmpty) {
         return this.model_.bounds;
+      }
       return this.rangeOfInterest_;
     },
 

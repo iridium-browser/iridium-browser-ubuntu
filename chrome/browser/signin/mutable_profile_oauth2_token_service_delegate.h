@@ -5,9 +5,11 @@
 #ifndef CHROME_BROWSER_SIGNIN_MUTABLE_PROFILE_OAUTH2_TOKEN_SERVICE_DELEGATE_H_
 #define CHROME_BROWSER_SIGNIN_MUTABLE_PROFILE_OAUTH2_TOKEN_SERVICE_DELEGATE_H_
 
+#include <memory>
+#include <vector>
+
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/threading/thread_checker.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
@@ -100,8 +102,13 @@ class MutableProfileOAuth2TokenServiceDelegate
                            PersistenceDBUpgrade);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
                            FetchPersistentError);
+  FRIEND_TEST_ALL_PREFIXES(
+      MutableProfileOAuth2TokenServiceDelegateTest,
+      PersistenceLoadCredentialsEmptyPrimaryAccountId_DiceEnabled);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
                            PersistenceLoadCredentials);
+  FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
+                           RevokeOnUpdate);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
                            GetAccounts);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
@@ -155,7 +162,7 @@ class MutableProfileOAuth2TokenServiceDelegate
   // The state of the load credentials operation.
   LoadCredentialsState load_credentials_state_;
 
-  ScopedVector<RevokeServerRefreshToken> server_revokes_;
+  std::vector<std::unique_ptr<RevokeServerRefreshToken>> server_revokes_;
 
   // Used to verify that certain methods are called only on the thread on which
   // this instance was created.

@@ -9,7 +9,7 @@
 
 #include <vector>
 
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/tiles/picture_layer_tiling_set.h"
 #include "cc/tiles/prioritized_tile.h"
 
@@ -67,12 +67,14 @@ namespace cc {
 // with low priority on one tree, but high combined priority.
 class CC_EXPORT TilingSetEvictionQueue {
  public:
-  explicit TilingSetEvictionQueue(PictureLayerTilingSet* tiling_set);
+  explicit TilingSetEvictionQueue(PictureLayerTilingSet* tiling_set,
+                                  bool is_drawing_layer);
   ~TilingSetEvictionQueue();
 
   const PrioritizedTile& Top() const;
   void Pop();
   bool IsEmpty() const;
+  bool is_drawing_layer() const { return is_drawing_layer_; }
 
  private:
   enum Phase {
@@ -198,6 +200,7 @@ class CC_EXPORT TilingSetEvictionQueue {
   SkewportTilingIterator skewport_iterator_;
   PendingVisibleTilingIterator pending_visible_iterator_;
   VisibleTilingIterator visible_iterator_;
+  bool is_drawing_layer_;
 };
 
 }  // namespace cc

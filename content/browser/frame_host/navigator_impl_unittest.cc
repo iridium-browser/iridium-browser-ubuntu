@@ -252,14 +252,22 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_FALSE(node->navigation_request());
 
   // Commit the navigation.
-  main_test_rfh()->SendNavigate(0, true, kUrl2);
+  if (AreAllSitesIsolatedForTesting()) {
+    GetSpeculativeRenderFrameHost(node)->SendNavigate(0, true, kUrl2);
+  } else {
+    main_test_rfh()->SendNavigate(0, true, kUrl2);
+  }
   EXPECT_TRUE(main_test_rfh()->is_active());
   EXPECT_EQ(kUrl2, contents()->GetLastCommittedURL());
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
   EXPECT_FALSE(node->render_manager()->pending_frame_host());
 
-  // The SiteInstance did not change.
-  EXPECT_EQ(site_instance_id_1, main_test_rfh()->GetSiteInstance()->GetId());
+  // The SiteInstance did not change unless site-per-process is enabled.
+  if (AreAllSitesIsolatedForTesting()) {
+    EXPECT_NE(site_instance_id_1, main_test_rfh()->GetSiteInstance()->GetId());
+  } else {
+    EXPECT_EQ(site_instance_id_1, main_test_rfh()->GetSiteInstance()->GetId());
+  }
 }
 
 // PlzNavigate: Test that a beforeUnload denial cancels the navigation.
@@ -654,64 +662,6 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   // Confirm that the commit corresponds to the new request.
   ASSERT_TRUE(main_test_rfh());
   EXPECT_EQ(kUrl2, contents()->GetLastCommittedURL());
-}
-
-// PlzNavigate: Test that a renderer-initiated user-initiated navigation is NOT
-// canceled if a renderer-initiated non-user-initiated request is issued in the
-// meantime.
-TEST_F(NavigatorTestWithBrowserSideNavigation,
-       RendererNonUserInitiatedNavigationDoesntCancelRendererUserInitiated) {
-  const GURL kUrl0("http://www.wikipedia.org/");
-  const GURL kUrl1("http://www.chromium.org/");
-  const GURL kUrl2("http://www.google.com/");
-
-  // Initialization.
-  contents()->NavigateAndCommit(kUrl0);
-  FrameTreeNode* node = main_test_rfh()->frame_tree_node();
-
-  // Start a renderer-initiated user-initiated navigation to the 1st URL.
-  process()->sink().ClearMessages();
-  main_test_rfh()->SendRendererInitiatedNavigationRequest(kUrl1, true);
-  NavigationRequest* request1 = node->navigation_request();
-  ASSERT_TRUE(request1);
-  EXPECT_EQ(kUrl1, request1->common_params().url);
-  EXPECT_FALSE(request1->browser_initiated());
-  EXPECT_TRUE(request1->begin_params().has_user_gesture);
-  if (AreAllSitesIsolatedForTesting()) {
-    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
-  } else {
-    EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
-  }
-
-  // Now receive a renderer-initiated non-user-initiated request. Nothing should
-  // change.
-  main_test_rfh()->SendRendererInitiatedNavigationRequest(kUrl2, false);
-  NavigationRequest* request2 = node->navigation_request();
-  ASSERT_TRUE(request2);
-  EXPECT_EQ(request1, request2);
-  EXPECT_EQ(kUrl1, request2->common_params().url);
-  EXPECT_FALSE(request2->browser_initiated());
-  EXPECT_TRUE(request2->begin_params().has_user_gesture);
-  if (AreAllSitesIsolatedForTesting()) {
-    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
-  } else {
-    EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
-  }
-
-  // Have the RenderFrameHost commit the navigation.
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
-  GetLoaderForNavigationRequest(request2)->CallOnResponseStarted(
-      response, MakeEmptyStream(), nullptr);
-  if (AreAllSitesIsolatedForTesting()) {
-    EXPECT_TRUE(
-        DidRenderFrameHostRequestCommit(GetSpeculativeRenderFrameHost(node)));
-  } else {
-    EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
-  }
-
-  // Commit the navigation.
-  main_test_rfh()->SendNavigate(0, true, kUrl1);
-  EXPECT_EQ(kUrl1, contents()->GetLastCommittedURL());
 }
 
 // PlzNavigate: Test that a browser-initiated navigation is NOT canceled if a
@@ -1140,16 +1090,17 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 }
 
 namespace {
-void SetWithinPage(const GURL& url,
-                   FrameHostMsg_DidCommitProvisionalLoad_Params* params) {
-  params->was_within_same_page = true;
+void SetWithinSameDocument(
+    const GURL& url,
+    FrameHostMsg_DidCommitProvisionalLoad_Params* params) {
+  params->was_within_same_document = true;
   params->url = url;
   params->origin = url::Origin(url);
 }
 }
 
 // A renderer process might try and claim that a cross site navigation was
-// within the same page by setting was_within_same_page = true for
+// within the same document by setting was_within_same_document = true for
 // FrameHostMsg_DidCommitProvisionalLoad. Such case should be detected on the
 // browser side and the renderer process should be killed.
 TEST_F(NavigatorTestWithBrowserSideNavigation, CrossSiteClaimWithinPage) {
@@ -1166,7 +1117,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, CrossSiteClaimWithinPage) {
   // Claim that the navigation was within same page.
   int bad_msg_count = process()->bad_msg_count();
   GetSpeculativeRenderFrameHost(node)->SendNavigateWithModificationCallback(
-      entry_id, true, kUrl2, base::Bind(SetWithinPage, kUrl1));
+      entry_id, true, kUrl2, base::Bind(SetWithinSameDocument, kUrl1));
   EXPECT_EQ(process()->bad_msg_count(), bad_msg_count + 1);
 }
 
@@ -1238,6 +1189,70 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_FALSE(node->navigation_request());
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
   EXPECT_EQ(speculative_rfh, main_test_rfh());
+}
+
+// Feature Policy: Test that the feature policy is reset when navigating pages
+// within a site.
+TEST_F(NavigatorTestWithBrowserSideNavigation,
+       FeaturePolicySameSiteNavigation) {
+  const GURL kUrl1("http://www.chromium.org/");
+  const GURL kUrl2("http://www.chromium.org/Home");
+
+  contents()->NavigateAndCommit(kUrl1);
+
+  // Check the feature policy before navigation.
+  FeaturePolicy* original_feature_policy = main_test_rfh()->feature_policy();
+  ASSERT_TRUE(original_feature_policy);
+
+  // Navigate to the new URL.
+  contents()->NavigateAndCommit(kUrl2);
+
+  // Check the feature policy after navigation.
+  FeaturePolicy* final_feature_policy = main_test_rfh()->feature_policy();
+  ASSERT_TRUE(final_feature_policy);
+  ASSERT_NE(original_feature_policy, final_feature_policy);
+}
+
+// Feature Policy: Test that the feature policy is not reset when navigating
+// within a page.
+TEST_F(NavigatorTestWithBrowserSideNavigation,
+       FeaturePolicyFragmentNavigation) {
+  const GURL kUrl1("http://www.chromium.org/");
+  const GURL kUrl2("http://www.chromium.org/#Home");
+
+  contents()->NavigateAndCommit(kUrl1);
+
+  // Check the feature policy before navigation.
+  FeaturePolicy* original_feature_policy = main_test_rfh()->feature_policy();
+  ASSERT_TRUE(original_feature_policy);
+
+  // Navigate to the new URL.
+  contents()->NavigateAndCommit(kUrl2);
+
+  // Check the feature policy after navigation.
+  FeaturePolicy* final_feature_policy = main_test_rfh()->feature_policy();
+  ASSERT_EQ(original_feature_policy, final_feature_policy);
+}
+
+// Feature Policy: Test that the feature policy is set correctly when inserting
+// a new child frame.
+TEST_F(NavigatorTestWithBrowserSideNavigation, FeaturePolicyNewChild) {
+  const GURL kUrl1("http://www.chromium.org/");
+  const GURL kUrl2("http://www.chromium.org/Home");
+
+  contents()->NavigateAndCommit(kUrl1);
+
+  TestRenderFrameHost* subframe_rfh =
+      contents()->GetMainFrame()->AppendChild("child");
+  // Simulate the navigation triggered by inserting a child frame into a page.
+  FrameHostMsg_DidCommitProvisionalLoad_Params params;
+  InitNavigateParams(&params, 1, false, kUrl2,
+                     ui::PAGE_TRANSITION_AUTO_SUBFRAME);
+  subframe_rfh->SendNavigateWithParams(&params);
+
+  FeaturePolicy* subframe_feature_policy = subframe_rfh->feature_policy();
+  ASSERT_TRUE(subframe_feature_policy);
+  ASSERT_FALSE(subframe_feature_policy->origin_.unique());
 }
 
 }  // namespace content

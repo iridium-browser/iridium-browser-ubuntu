@@ -13,7 +13,7 @@
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "ui/views/accessibility/native_view_accessibility.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/views/controls/webview/webview_export.h"
 #include "ui/views/view.h"
 
@@ -87,10 +87,6 @@ class WEBVIEW_EXPORT WebView : public View,
     allow_accelerators_ = allow_accelerators;
   }
 
-  // Sets the preferred size. If empty, View's implementation of
-  // GetPreferredSize() is used.
-  void SetPreferredSize(const gfx::Size& preferred_size);
-
   // Overridden from View:
   const char* GetClassName() const override;
 
@@ -115,7 +111,6 @@ class WEBVIEW_EXPORT WebView : public View,
   void AboutToRequestFocusFromTabTraversal(bool reverse) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
-  gfx::Size GetPreferredSize() const override;
 
   // Overridden from content::RenderProcessHostObserver:
   void RenderProcessExited(content::RenderProcessHost* host,
@@ -143,7 +138,8 @@ class WEBVIEW_EXPORT WebView : public View,
   void OnChannelConnected(int32_t peer_id) override {}
   void OnChannelError() override {}
   void OnBadMessageReceived(const IPC::Message& message) override {}
-  void OnWebContentsFocused() override;
+  void OnWebContentsFocused(
+      content::RenderWidgetHost* render_widget_host) override;
 
  private:
   friend class WebViewUnitTest;
@@ -174,7 +170,6 @@ class WEBVIEW_EXPORT WebView : public View,
   bool is_embedding_fullscreen_widget_;
   content::BrowserContext* browser_context_;
   bool allow_accelerators_;
-  gfx::Size preferred_size_;
 
   DISALLOW_COPY_AND_ASSIGN(WebView);
 };

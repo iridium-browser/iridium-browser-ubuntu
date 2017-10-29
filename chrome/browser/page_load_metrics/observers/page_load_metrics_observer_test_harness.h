@@ -9,8 +9,12 @@
 #include "base/test/histogram_tester.h"
 #include "chrome/browser/page_load_metrics/metrics_web_contents_observer.h"
 #include "chrome/browser/page_load_metrics/page_load_tracker.h"
+#include "chrome/common/page_load_metrics/test/page_load_metrics_test_util.h"
+#include "chrome/common/page_load_metrics/test/weak_mock_timer.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
+#include "components/ukm/test_ukm_recorder.h"
+#include "content/public/browser/global_request_id.h"
 #include "content/public/test/web_contents_tester.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "ui/base/page_transition_types.h"
@@ -21,14 +25,14 @@ namespace page_load_metrics {
 // an observer, override RegisterObservers and call tracker->AddObserver. This
 // will attach the observer to all main frame navigations.
 class PageLoadMetricsObserverTestHarness
-    : public ChromeRenderViewHostTestHarness {
+    : public ChromeRenderViewHostTestHarness,
+      public test::WeakMockTimerProvider {
  public:
+  // Sample URL for resource loads.
+  static const char kResourceUrl[];
+
   PageLoadMetricsObserverTestHarness();
   ~PageLoadMetricsObserverTestHarness() override;
-
-  // Helper that fills in any timing fields that MWCO requires but that are
-  // currently missing.
-  static void PopulateRequiredTimingFields(PageLoadTiming* inout_timing);
 
   void SetUp() override;
 
@@ -52,23 +56,44 @@ class PageLoadMetricsObserverTestHarness
   // Call this to simulate sending a PageLoadTiming IPC from the render process
   // to the browser process. These will update the timing information for the
   // most recently committed navigation.
-  void SimulateTimingUpdate(const PageLoadTiming& timing);
-  void SimulateTimingAndMetadataUpdate(const PageLoadTiming& timing,
-                                       const PageLoadMetadata& metadata);
+  void SimulateTimingUpdate(const mojom::PageLoadTiming& timing);
+  void SimulateTimingAndMetadataUpdate(const mojom::PageLoadTiming& timing,
+                                       const mojom::PageLoadMetadata& metadata);
 
-  // Simulates a loaded resource.
-  void SimulateLoadedResource(const ExtraRequestInfo& info);
+  // Simulates a loaded resource. Main frame resources must specify a
+  // GlobalRequestID, using the SimulateLoadedResource() method that takes a
+  // |request_id| parameter.
+  void SimulateLoadedResource(const ExtraRequestCompleteInfo& info) {
+    SimulateLoadedResource(info, content::GlobalRequestID());
+  }
+
+  // Simulates a loaded resource, with the given GlobalRequestID.
+  void SimulateLoadedResource(const ExtraRequestCompleteInfo& info,
+                              const content::GlobalRequestID& request_id);
 
   // Simulates a user input.
   void SimulateInputEvent(const blink::WebInputEvent& event);
 
+  // Simulates the app being backgrounded.
+  void SimulateAppEnterBackground();
+
+  // Simulate playing a media element.
+  void SimulateMediaPlayed();
+
   const base::HistogramTester& histogram_tester() const;
+
+  MetricsWebContentsObserver* observer() const;
 
   // Gets the PageLoadExtraInfo for the committed_load_ in observer_.
   const PageLoadExtraInfo GetPageLoadExtraInfoForCommittedLoad();
 
+  const ukm::TestAutoSetUkmRecorder& test_ukm_recorder() const {
+    return test_ukm_recorder_;
+  }
+
  private:
   base::HistogramTester histogram_tester_;
+  ukm::TestAutoSetUkmRecorder test_ukm_recorder_;
   MetricsWebContentsObserver* observer_;
 
   DISALLOW_COPY_AND_ASSIGN(PageLoadMetricsObserverTestHarness);

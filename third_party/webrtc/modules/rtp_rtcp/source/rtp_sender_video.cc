@@ -17,9 +17,6 @@
 #include <vector>
 #include <utility>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/base/trace_event.h"
 #include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "webrtc/modules/rtp_rtcp/source/byte_io.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_format_video_generic.h"
@@ -27,6 +24,10 @@
 #include "webrtc/modules/rtp_rtcp/source/rtp_format_vp9.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_packet_to_send.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/logging.h"
+#include "webrtc/rtc_base/ptr_util.h"
+#include "webrtc/rtc_base/trace_event.h"
 
 namespace webrtc {
 
@@ -300,6 +301,7 @@ bool RTPSenderVideo::SendVideo(RtpVideoCodecTypes video_type,
   rtp_header->SetPayloadType(payload_type);
   rtp_header->SetTimestamp(rtp_timestamp);
   rtp_header->set_capture_time_ms(capture_time_ms);
+  auto last_packet = rtc::MakeUnique<RtpPacketToSend>(*rtp_header);
 
   size_t fec_packet_overhead;
   bool red_enabled;
@@ -322,8 +324,18 @@ bool RTPSenderVideo::SendVideo(RtpVideoCodecTypes video_type,
       VideoRotation current_rotation = video_header->rotation;
       if (frame_type == kVideoFrameKey || current_rotation != last_rotation_ ||
           current_rotation != kVideoRotation_0)
-        rtp_header->SetExtension<VideoOrientation>(current_rotation);
+        last_packet->SetExtension<VideoOrientation>(current_rotation);
       last_rotation_ = current_rotation;
+      // Report content type only for key frames.
+      if (frame_type == kVideoFrameKey &&
+          video_header->content_type != VideoContentType::UNSPECIFIED) {
+        last_packet->SetExtension<VideoContentTypeExtension>(
+            video_header->content_type);
+      }
+      if (video_header->video_timing.is_timing_frame) {
+        last_packet->SetExtension<VideoTimingExtension>(
+            video_header->video_timing);
+      }
     }
 
     // FEC settings.
@@ -344,10 +356,14 @@ bool RTPSenderVideo::SendVideo(RtpVideoCodecTypes video_type,
                            (rtp_sender_->RtxStatus() ? kRtxHeaderSize : 0);
   RTC_DCHECK_LE(packet_capacity, rtp_header->capacity());
   RTC_DCHECK_GT(packet_capacity, rtp_header->headers_size());
+  RTC_DCHECK_GT(packet_capacity, last_packet->headers_size());
   size_t max_data_payload_length = packet_capacity - rtp_header->headers_size();
+  RTC_DCHECK_GE(last_packet->headers_size(), rtp_header->headers_size());
+  size_t last_packet_reduction_len =
+      last_packet->headers_size() - rtp_header->headers_size();
 
   std::unique_ptr<RtpPacketizer> packetizer(RtpPacketizer::Create(
-      video_type, max_data_payload_length,
+      video_type, max_data_payload_length, last_packet_reduction_len,
       video_header ? &(video_header->codecHeader) : nullptr, frame_type));
   // Media packet storage.
   StorageType storage = packetizer->GetStorageType(retransmission_settings);
@@ -357,23 +373,38 @@ bool RTPSenderVideo::SendVideo(RtpVideoCodecTypes video_type,
   // issue is fixed.
   const RTPFragmentationHeader* frag =
       (video_type == kRtpVideoVp8) ? nullptr : fragmentation;
-  packetizer->SetPayloadData(payload_data, payload_size, frag);
+  size_t num_packets =
+      packetizer->SetPayloadData(payload_data, payload_size, frag);
+
+  if (num_packets == 0)
+    return false;
 
   bool first_frame = first_frame_sent_();
-  bool first = true;
-  bool last = false;
-  while (!last) {
-    std::unique_ptr<RtpPacketToSend> packet(new RtpPacketToSend(*rtp_header));
-
-    if (!packetizer->NextPacket(packet.get(), &last))
+  for (size_t i = 0; i < num_packets; ++i) {
+    bool last = (i + 1) == num_packets;
+    auto packet = last ? std::move(last_packet)
+                       : rtc::MakeUnique<RtpPacketToSend>(*rtp_header);
+    if (!packetizer->NextPacket(packet.get()))
       return false;
-    RTC_DCHECK_LE(packet->payload_size(), max_data_payload_length);
-
+    RTC_DCHECK_LE(packet->payload_size(),
+                  last ? max_data_payload_length - last_packet_reduction_len
+                       : max_data_payload_length);
     if (!rtp_sender_->AssignSequenceNumber(packet.get()))
       return false;
 
-    const bool protect_packet =
-        (packetizer->GetProtectionType() == kProtectedPacket);
+    bool protect_packet = (packetizer->GetProtectionType() == kProtectedPacket);
+    // Put packetization finish timestamp into extension.
+    if (packet->HasExtension<VideoTimingExtension>()) {
+      packet->set_packetization_finish_time_ms(clock_->TimeInMilliseconds());
+      // TODO(ilnik): Due to webrtc:7859, packets with timing extensions are not
+      // protected by FEC. It reduces FEC efficiency a bit. When FEC is moved
+      // below the pacer, it can be re-enabled for these packets.
+      // NOTE: Any RTP stream processor in the network, modifying 'network'
+      // timestamps in the timing frames extension have to be an end-point for
+      // FEC, otherwise recovered by FEC packets will be corrupted.
+      protect_packet = false;
+    }
+
     if (flexfec_enabled()) {
       // TODO(brandtr): Remove the FlexFEC code path when FlexfecSender
       // is wired up to PacedSender instead.
@@ -386,7 +417,7 @@ bool RTPSenderVideo::SendVideo(RtpVideoCodecTypes video_type,
     }
 
     if (first_frame) {
-      if (first) {
+      if (i == 0) {
         LOG(LS_INFO)
             << "Sent first RTP packet of the first video frame (pre-pacer)";
       }
@@ -395,7 +426,6 @@ bool RTPSenderVideo::SendVideo(RtpVideoCodecTypes video_type,
             << "Sent last RTP packet of the first video frame (pre-pacer)";
       }
     }
-    first = false;
   }
 
   TRACE_EVENT_ASYNC_END1("webrtc", "Video", capture_time_ms, "timestamp",

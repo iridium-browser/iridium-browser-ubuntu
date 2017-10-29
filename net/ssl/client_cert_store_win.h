@@ -28,8 +28,7 @@ class NET_EXPORT ClientCertStoreWin : public ClientCertStore {
   // will use that. Otherwise it will use the current user's "MY" cert store
   // instead.
   void GetClientCerts(const SSLCertRequestInfo& cert_request_info,
-                      CertificateList* selected_certs,
-                      const base::Closure& callback) override;
+                      const ClientCertListCallback& callback) override;
 
  private:
   using ScopedHCERTSTORE = crypto::ScopedCAPIHandle<
@@ -40,13 +39,17 @@ class NET_EXPORT ClientCertStoreWin : public ClientCertStore {
 
   friend class ClientCertStoreWinTestDelegate;
 
+  // Opens the "MY" cert store and uses it to lookup the client certs.
+  static ClientCertIdentityList GetClientCertsWithMyCertStore(
+      const SSLCertRequestInfo& request);
+
   // A hook for testing. Filters |input_certs| using the logic being used to
   // filter the system store when GetClientCerts() is called.
   // Implemented by creating a temporary in-memory store and filtering it
   // using the common logic.
   bool SelectClientCertsForTesting(const CertificateList& input_certs,
                                    const SSLCertRequestInfo& cert_request_info,
-                                   CertificateList* selected_certs);
+                                   ClientCertIdentityList* selected_identities);
 
   ScopedHCERTSTORE cert_store_;
 

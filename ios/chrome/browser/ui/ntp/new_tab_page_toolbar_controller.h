@@ -7,7 +7,11 @@
 
 #import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
 
+@protocol ApplicationCommands;
+@protocol BrowserCommands;
+@protocol GoogleLandingDataSource;
 @protocol OmniboxFocuser;
+@protocol UrlLoader;
 @protocol WebToolbarDelegate;
 
 // New tab page specific toolbar. The background view is hidden and the
@@ -18,8 +22,24 @@
 
 // Designated initializer. The underlying ToolbarController is initialized with
 // ToolbarControllerStyleLightMode.
-- (instancetype)initWithToolbarDelegate:(id<WebToolbarDelegate>)delegate
-                                focuser:(id<OmniboxFocuser>)focuser;
+- (instancetype)initWithDispatcher:(id<ApplicationCommands,
+                                       BrowserCommands,
+                                       OmniboxFocuser,
+                                       UrlLoader,
+                                       WebToolbarDelegate>)dispatcher;
+
+@property(nonatomic, readonly, weak) id<ApplicationCommands,
+                                        BrowserCommands,
+                                        OmniboxFocuser,
+                                        UrlLoader,
+                                        WebToolbarDelegate>
+    dispatcher;
+
+// |YES| if the toolbar can show the forward arrow.
+- (void)setCanGoForward:(BOOL)canGoForward;
+
+// |YES| if the toolbar can show the back arrow.
+- (void)setCanGoBack:(BOOL)canGoBack;
 
 @end
 

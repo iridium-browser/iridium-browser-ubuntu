@@ -24,19 +24,19 @@
 #ifndef DataTransfer_h
 #define DataTransfer_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include <memory>
 #include "core/CoreExport.h"
+#include "core/clipboard/DataObject.h"
 #include "core/clipboard/DataTransferAccessPolicy.h"
 #include "core/loader/resource/ImageResourceContent.h"
 #include "core/page/DragActions.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/geometry/IntPoint.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
-#include <memory>
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
-class DataObject;
 class DataTransferItemList;
 class DragImage;
 class Element;
@@ -44,6 +44,8 @@ class FileList;
 class FrameSelection;
 class LocalFrame;
 class Node;
+class PaintRecordBuilder;
+class PropertyTreeState;
 
 // Used for drag and drop and copy/paste.
 // Drag and Drop:
@@ -52,80 +54,95 @@ class Node;
 // http://dev.w3.org/2006/webapi/clipops/clipops.html
 class CORE_EXPORT DataTransfer final
     : public GarbageCollectedFinalized<DataTransfer>,
-      public ScriptWrappable {
+      public ScriptWrappable,
+      public DataObject::Observer {
+  USING_GARBAGE_COLLECTED_MIXIN(DataTransfer);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   // Whether this transfer is serving a drag-drop, copy-paste, spellcheck,
   // auto-correct or similar request.
   enum DataTransferType {
-    CopyAndPaste,
-    DragAndDrop,
-    InsertReplacementText,
+    kCopyAndPaste,
+    kDragAndDrop,
+    kInsertReplacementText,
   };
 
-  static DataTransfer* create(DataTransferType,
+  static DataTransfer* Create();
+  static DataTransfer* Create(DataTransferType,
                               DataTransferAccessPolicy,
                               DataObject*);
   ~DataTransfer();
 
-  bool isForCopyAndPaste() const { return m_transferType == CopyAndPaste; }
-  bool isForDragAndDrop() const { return m_transferType == DragAndDrop; }
+  bool IsForCopyAndPaste() const { return transfer_type_ == kCopyAndPaste; }
+  bool IsForDragAndDrop() const { return transfer_type_ == kDragAndDrop; }
 
   String dropEffect() const {
-    return dropEffectIsUninitialized() ? "none" : m_dropEffect;
+    return DropEffectIsUninitialized() ? "none" : drop_effect_;
   }
   void setDropEffect(const String&);
-  bool dropEffectIsUninitialized() const {
-    return m_dropEffect == "uninitialized";
+  bool DropEffectIsUninitialized() const {
+    return drop_effect_ == "uninitialized";
   }
-  String effectAllowed() const { return m_effectAllowed; }
+  String effectAllowed() const { return effect_allowed_; }
   void setEffectAllowed(const String&);
 
   void clearData(const String& type = String());
   String getData(const String& type) const;
   void setData(const String& type, const String& data);
 
-  // extensions beyond IE's API
-  Vector<String> types() const;
+  // Used by the bindings code to determine whether to call types() again.
+  bool hasDataStoreItemListChanged() const;
+
+  Vector<String> types();
   FileList* files() const;
 
-  IntPoint dragLocation() const { return m_dragLoc; }
+  IntPoint DragLocation() const { return drag_loc_; }
   void setDragImage(Element*, int x, int y);
-  void clearDragImage();
-  void setDragImageResource(ImageResourceContent*, const IntPoint&);
-  void setDragImageElement(Node*, const IntPoint&);
+  void ClearDragImage();
+  void SetDragImageResource(ImageResourceContent*, const IntPoint&);
+  void SetDragImageElement(Node*, const IntPoint&);
 
-  std::unique_ptr<DragImage> createDragImage(IntPoint& dragLocation,
+  std::unique_ptr<DragImage> CreateDragImage(IntPoint& drag_location,
                                              LocalFrame*) const;
-  void declareAndWriteDragImage(Element*,
-                                const KURL& linkURL,
-                                const KURL& imageURL,
+  void DeclareAndWriteDragImage(Element*,
+                                const KURL& link_url,
+                                const KURL& image_url,
                                 const String& title);
-  void writeURL(Node*, const KURL&, const String&);
-  void writeSelection(const FrameSelection&);
+  void WriteURL(Node*, const KURL&, const String&);
+  void WriteSelection(const FrameSelection&);
 
-  void setAccessPolicy(DataTransferAccessPolicy);
-  bool canReadTypes() const;
-  bool canReadData() const;
-  bool canWriteData() const;
+  void SetAccessPolicy(DataTransferAccessPolicy);
+  bool CanReadTypes() const;
+  bool CanReadData() const;
+  bool CanWriteData() const;
   // Note that the spec doesn't actually allow drag image modification outside
   // the dragstart event. This capability is maintained for backwards
   // compatiblity for ports that have supported this in the past. On many ports,
   // attempting to set a drag image outside the dragstart operation is a no-op
   // anyway.
-  bool canSetDragImage() const;
+  bool CanSetDragImage() const;
 
-  DragOperation sourceOperation() const;
-  DragOperation destinationOperation() const;
-  void setSourceOperation(DragOperation);
-  void setDestinationOperation(DragOperation);
+  DragOperation SourceOperation() const;
+  DragOperation DestinationOperation() const;
+  void SetSourceOperation(DragOperation);
+  void SetDestinationOperation(DragOperation);
 
-  bool hasDropZoneType(const String&);
+  bool HasDropZoneType(const String&);
 
   DataTransferItemList* items();
 
-  DataObject* dataObject() const;
+  DataObject* GetDataObject() const;
+
+  static FloatRect DeviceSpaceBounds(const FloatRect, const LocalFrame&);
+  static std::unique_ptr<DragImage> CreateDragImageForFrame(
+      const LocalFrame&,
+      float,
+      RespectImageOrientationEnum,
+      const FloatRect&,
+      PaintRecordBuilder&,
+      const PropertyTreeState&);
+  static std::unique_ptr<DragImage> NodeImage(const LocalFrame&, Node&);
 
   DECLARE_TRACE();
 
@@ -134,25 +151,30 @@ class CORE_EXPORT DataTransfer final
 
   void setDragImage(ImageResourceContent*, Node*, const IntPoint&);
 
-  bool hasFileOfType(const String&) const;
-  bool hasStringOfType(const String&) const;
+  bool HasFileOfType(const String&) const;
+  bool HasStringOfType(const String&) const;
+
+  // DataObject::Observer override.
+  void OnItemListChanged() override;
 
   // Instead of using this member directly, prefer to use the can*() methods
   // above.
-  DataTransferAccessPolicy m_policy;
-  String m_dropEffect;
-  String m_effectAllowed;
-  DataTransferType m_transferType;
-  Member<DataObject> m_dataObject;
+  DataTransferAccessPolicy policy_;
+  String drop_effect_;
+  String effect_allowed_;
+  DataTransferType transfer_type_;
+  Member<DataObject> data_object_;
 
-  IntPoint m_dragLoc;
-  Member<ImageResourceContent> m_dragImage;
-  Member<Node> m_dragImageElement;
+  bool data_store_item_list_changed_;
+
+  IntPoint drag_loc_;
+  Member<ImageResourceContent> drag_image_;
+  Member<Node> drag_image_element_;
 };
 
-DragOperation convertDropZoneOperationToDragOperation(
-    const String& dragOperation);
-String convertDragOperationToDropZoneOperation(DragOperation);
+DragOperation ConvertDropZoneOperationToDragOperation(
+    const String& drag_operation);
+String ConvertDragOperationToDropZoneOperation(DragOperation);
 
 }  // namespace blink
 

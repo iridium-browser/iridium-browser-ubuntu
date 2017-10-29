@@ -30,12 +30,15 @@
 
 #include "platform/fonts/VDMXParser.h"
 
-#include "wtf/Allocator.h"
-#include "wtf/ByteOrder.h"
-#include "wtf/Noncopyable.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/ByteOrder.h"
+#include "platform/wtf/Noncopyable.h"
 
 #include <stdlib.h>
 #include <string.h>
+
+namespace blink {
+namespace {
 
 // Buffer helper class
 //
@@ -48,45 +51,47 @@ class Buffer {
 
  public:
   Buffer(const uint8_t* buffer, size_t length)
-      : m_buffer(buffer), m_length(length), m_offset(0) {}
+      : buffer_(buffer), length_(length), offset_(0) {}
 
   bool skip(size_t numBytes) {
-    if (m_offset + numBytes > m_length)
+    if (offset_ + numBytes > length_)
       return false;
-    m_offset += numBytes;
+    offset_ += numBytes;
     return true;
   }
 
-  bool readU8(uint8_t* value) {
-    if (m_offset + sizeof(uint8_t) > m_length)
+  bool ReadU8(uint8_t* value) {
+    if (offset_ + sizeof(uint8_t) > length_)
       return false;
-    *value = m_buffer[m_offset];
-    m_offset += sizeof(uint8_t);
+    *value = buffer_[offset_];
+    offset_ += sizeof(uint8_t);
     return true;
   }
 
-  bool readU16(uint16_t* value) {
-    if (m_offset + sizeof(uint16_t) > m_length)
+  bool ReadU16(uint16_t* value) {
+    if (offset_ + sizeof(uint16_t) > length_)
       return false;
-    memcpy(value, m_buffer + m_offset, sizeof(uint16_t));
+    memcpy(value, buffer_ + offset_, sizeof(uint16_t));
     *value = ntohs(*value);
-    m_offset += sizeof(uint16_t);
+    offset_ += sizeof(uint16_t);
     return true;
   }
 
-  bool readS16(int16_t* value) {
-    return readU16(reinterpret_cast<uint16_t*>(value));
+  bool ReadS16(int16_t* value) {
+    return ReadU16(reinterpret_cast<uint16_t*>(value));
   }
 
-  size_t offset() const { return m_offset; }
+  size_t Offset() const { return offset_; }
 
-  void setOffset(size_t newoffset) { m_offset = newoffset; }
+  void SetOffset(size_t newoffset) { offset_ = newoffset; }
 
  private:
-  const uint8_t* const m_buffer;
-  const size_t m_length;
-  size_t m_offset;
+  const uint8_t* const buffer_;
+  const size_t length_;
+  size_t offset_;
 };
+
+}  // namespace
 
 // VDMX parsing code.
 //
@@ -95,8 +100,6 @@ class Buffer {
 // needed in order to match font metrics on Windows.
 //
 // Freetype does not parse these tables so we do so here.
-
-namespace blink {
 
 // Parse a TrueType VDMX table.
 //   yMax: (output) the ascender value from the table
@@ -109,17 +112,17 @@ namespace blink {
 // untouched. size_t must be 32-bits to avoid overflow.
 //
 // See http://www.microsoft.com/opentype/otspec/vdmx.htm
-bool parseVDMX(int* yMax,
-               int* yMin,
+bool ParseVDMX(int* y_max,
+               int* y_min,
                const uint8_t* vdmx,
-               size_t vdmxLength,
-               unsigned targetPixelSize) {
-  Buffer buf(vdmx, vdmxLength);
+               size_t vdmx_length,
+               unsigned target_pixel_size) {
+  Buffer buf(vdmx, vdmx_length);
 
   // We ignore the version. Future tables should be backwards compatible with
   // this layout.
-  uint16_t numRatios;
-  if (!buf.skip(4) || !buf.readU16(&numRatios))
+  uint16_t num_ratios;
+  if (!buf.skip(4) || !buf.ReadU16(&num_ratios))
     return false;
 
   // Now we have two tables. Firstly we have @numRatios Ratio records, then a
@@ -127,60 +130,60 @@ bool parseVDMX(int* yMax,
   // of this second table.
   //
   // Range 6 <= x <= 262146
-  unsigned long offsetTableOffset =
-      buf.offset() + 4 /* sizeof struct ratio */ * numRatios;
+  unsigned long offset_table_offset =
+      buf.Offset() + 4 /* sizeof struct ratio */ * num_ratios;
 
-  unsigned desiredRatio = 0xffffffff;
+  unsigned desired_ratio = 0xffffffff;
   // We read 4 bytes per record, so the offset range is
   //   6 <= x <= 524286
-  for (unsigned i = 0; i < numRatios; ++i) {
-    uint8_t xRatio, yRatio1, yRatio2;
+  for (unsigned i = 0; i < num_ratios; ++i) {
+    uint8_t x_ratio, y_ratio1, y_ratio2;
 
-    if (!buf.skip(1) || !buf.readU8(&xRatio) || !buf.readU8(&yRatio1) ||
-        !buf.readU8(&yRatio2))
+    if (!buf.skip(1) || !buf.ReadU8(&x_ratio) || !buf.ReadU8(&y_ratio1) ||
+        !buf.ReadU8(&y_ratio2))
       return false;
 
     // This either covers 1:1, or this is the default entry (0, 0, 0)
-    if ((xRatio == 1 && yRatio1 <= 1 && yRatio2 >= 1) ||
-        (xRatio == 0 && yRatio1 == 0 && yRatio2 == 0)) {
-      desiredRatio = i;
+    if ((x_ratio == 1 && y_ratio1 <= 1 && y_ratio2 >= 1) ||
+        (x_ratio == 0 && y_ratio1 == 0 && y_ratio2 == 0)) {
+      desired_ratio = i;
       break;
     }
   }
 
-  if (desiredRatio == 0xffffffff)  // no ratio found
+  if (desired_ratio == 0xffffffff)  // no ratio found
     return false;
 
   // Range 10 <= x <= 393216
-  buf.setOffset(offsetTableOffset + sizeof(uint16_t) * desiredRatio);
+  buf.SetOffset(offset_table_offset + sizeof(uint16_t) * desired_ratio);
 
   // Now we read from the offset table to get the offset of another array
-  uint16_t groupOffset;
-  if (!buf.readU16(&groupOffset))
+  uint16_t group_offset;
+  if (!buf.ReadU16(&group_offset))
     return false;
   // Range 0 <= x <= 65535
-  buf.setOffset(groupOffset);
+  buf.SetOffset(group_offset);
 
-  uint16_t numRecords;
-  if (!buf.readU16(&numRecords) || !buf.skip(sizeof(uint16_t)))
+  uint16_t num_records;
+  if (!buf.ReadU16(&num_records) || !buf.skip(sizeof(uint16_t)))
     return false;
 
   // We read 6 bytes per record, so the offset range is
   //   4 <= x <= 458749
-  for (unsigned i = 0; i < numRecords; ++i) {
-    uint16_t pixelSize;
-    if (!buf.readU16(&pixelSize))
+  for (unsigned i = 0; i < num_records; ++i) {
+    uint16_t pixel_size;
+    if (!buf.ReadU16(&pixel_size))
       return false;
     // the entries are sorted, so we can abort early if need be
-    if (pixelSize > targetPixelSize)
+    if (pixel_size > target_pixel_size)
       return false;
 
-    if (pixelSize == targetPixelSize) {
-      int16_t tempYMax, tempYMin;
-      if (!buf.readS16(&tempYMax) || !buf.readS16(&tempYMin))
+    if (pixel_size == target_pixel_size) {
+      int16_t temp_y_max, temp_y_min;
+      if (!buf.ReadS16(&temp_y_max) || !buf.ReadS16(&temp_y_min))
         return false;
-      *yMin = tempYMin;
-      *yMax = tempYMax;
+      *y_min = temp_y_min;
+      *y_max = temp_y_max;
       return true;
     }
     if (!buf.skip(2 * sizeof(int16_t)))

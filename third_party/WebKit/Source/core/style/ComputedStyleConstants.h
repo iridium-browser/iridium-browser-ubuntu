@@ -33,6 +33,11 @@
 
 namespace blink {
 
+template <typename Enum>
+inline bool EnumHasFlags(Enum v, Enum mask) {
+  return static_cast<unsigned>(v) & static_cast<unsigned>(mask);
+}
+
 // Some enums are automatically generated in ComputedStyleBaseConstants
 
 // TODO(sashab): Change these enums to enum classes with an unsigned underlying
@@ -42,18 +47,17 @@ namespace blink {
 
 // Sides used when drawing borders and outlines. The values should run clockwise
 // from top.
-enum BoxSide { BSTop, BSRight, BSBottom, BSLeft };
+enum BoxSide { kBSTop, kBSRight, kBSBottom, kBSLeft };
 
 // See core/dom/stylerecalc.md for an explanation on what each state means
 enum StyleRecalcChange {
-  NoChange,
-  NoInherit,
-  UpdatePseudoElements,
-  IndependentInherit,
-  Inherit,
-  Force,
-  Reattach,
-  ReattachNoLayoutObject
+  kNoChange,
+  kNoInherit,
+  kUpdatePseudoElements,
+  kIndependentInherit,
+  kInherit,
+  kForce,
+  kReattach
 };
 
 // Static pseudo styles. Dynamic ones are produced on the fly.
@@ -61,79 +65,33 @@ enum PseudoId {
   // The order must be NOP ID, public IDs, and then internal IDs.
   // If you add or remove a public ID, you must update _pseudoBits in
   // ComputedStyle.
-  PseudoIdNone,
-  PseudoIdFirstLine,
-  PseudoIdFirstLetter,
-  PseudoIdBefore,
-  PseudoIdAfter,
-  PseudoIdBackdrop,
-  PseudoIdSelection,
-  PseudoIdFirstLineInherited,
-  PseudoIdScrollbar,
+  kPseudoIdNone,
+  kPseudoIdFirstLine,
+  kPseudoIdFirstLetter,
+  kPseudoIdBefore,
+  kPseudoIdAfter,
+  kPseudoIdBackdrop,
+  kPseudoIdSelection,
+  kPseudoIdFirstLineInherited,
+  kPseudoIdScrollbar,
   // Internal IDs follow:
-  PseudoIdScrollbarThumb,
-  PseudoIdScrollbarButton,
-  PseudoIdScrollbarTrack,
-  PseudoIdScrollbarTrackPiece,
-  PseudoIdScrollbarCorner,
-  PseudoIdResizer,
-  PseudoIdInputListButton,
+  kPseudoIdScrollbarThumb,
+  kPseudoIdScrollbarButton,
+  kPseudoIdScrollbarTrack,
+  kPseudoIdScrollbarTrackPiece,
+  kPseudoIdScrollbarCorner,
+  kPseudoIdResizer,
+  kPseudoIdInputListButton,
   // Special values follow:
-  AfterLastInternalPseudoId,
-  FirstPublicPseudoId = PseudoIdFirstLine,
-  FirstInternalPseudoId = PseudoIdScrollbarThumb,
-  PublicPseudoIdMask =
-      ((1 << FirstInternalPseudoId) - 1) & ~((1 << FirstPublicPseudoId) - 1),
-  ElementPseudoIdMask = (1 << (PseudoIdBefore - 1)) |
-                        (1 << (PseudoIdAfter - 1)) |
-                        (1 << (PseudoIdBackdrop - 1))
+  kAfterLastInternalPseudoId,
+  kFirstPublicPseudoId = kPseudoIdFirstLine,
+  kFirstInternalPseudoId = kPseudoIdScrollbarThumb,
+  kElementPseudoIdMask = (1 << (kPseudoIdBefore - kFirstPublicPseudoId)) |
+                         (1 << (kPseudoIdAfter - kFirstPublicPseudoId)) |
+                         (1 << (kPseudoIdBackdrop - kFirstPublicPseudoId))
 };
 
-enum ColumnFill { ColumnFillBalance, ColumnFillAuto };
-
-enum ColumnSpan { ColumnSpanNone = 0, ColumnSpanAll };
-
-// These have been defined in the order of their precedence for
-// border-collapsing. Do not change this order! This order also must match the
-// order in CSSValueKeywords.in.
-enum EBorderStyle {
-  BorderStyleNone,
-  BorderStyleHidden,
-  BorderStyleInset,
-  BorderStyleGroove,
-  BorderStyleOutset,
-  BorderStyleRidge,
-  BorderStyleDotted,
-  BorderStyleDashed,
-  BorderStyleSolid,
-  BorderStyleDouble
-};
-
-enum EBorderPrecedence {
-  BorderPrecedenceOff,
-  BorderPrecedenceTable,
-  BorderPrecedenceColumnGroup,
-  BorderPrecedenceColumn,
-  BorderPrecedenceRowGroup,
-  BorderPrecedenceRow,
-  BorderPrecedenceCell
-};
-
-enum OutlineIsAuto { OutlineIsAutoOff = 0, OutlineIsAutoOn };
-
-enum EMarginCollapse {
-  MarginCollapseCollapse,
-  MarginCollapseSeparate,
-  MarginCollapseDiscard
-};
-
-// Box decoration attributes. Not inherited.
-
-enum EBoxDecorationBreak { BoxDecorationBreakSlice, BoxDecorationBreakClone };
-
-// Box attributes. Not inherited.
-
-enum class EBoxSizing : unsigned { kContentBox, kBorderBox };
+enum OutlineIsAuto { kOutlineIsAutoOff = 0, kOutlineIsAutoOn };
 
 // Random visual rendering model attributes. Not inherited.
 
@@ -150,128 +108,54 @@ enum class EVerticalAlign : unsigned {
   kLength
 };
 
-enum TextCombine { TextCombineNone, TextCombineAll };
-
 enum EFillAttachment {
-  ScrollBackgroundAttachment,
-  LocalBackgroundAttachment,
-  FixedBackgroundAttachment
+  kScrollBackgroundAttachment,
+  kLocalBackgroundAttachment,
+  kFixedBackgroundAttachment
 };
 
-enum EFillBox { BorderFillBox, PaddingFillBox, ContentFillBox, TextFillBox };
+enum EFillBox {
+  kBorderFillBox,
+  kPaddingFillBox,
+  kContentFillBox,
+  kTextFillBox
+};
 
-inline EFillBox enclosingFillBox(EFillBox boxA, EFillBox boxB) {
-  if (boxA == BorderFillBox || boxB == BorderFillBox)
-    return BorderFillBox;
-  if (boxA == PaddingFillBox || boxB == PaddingFillBox)
-    return PaddingFillBox;
-  if (boxA == ContentFillBox || boxB == ContentFillBox)
-    return ContentFillBox;
-  return TextFillBox;
+inline EFillBox EnclosingFillBox(EFillBox box_a, EFillBox box_b) {
+  if (box_a == kBorderFillBox || box_b == kBorderFillBox)
+    return kBorderFillBox;
+  if (box_a == kPaddingFillBox || box_b == kPaddingFillBox)
+    return kPaddingFillBox;
+  if (box_a == kContentFillBox || box_b == kContentFillBox)
+    return kContentFillBox;
+  return kTextFillBox;
 }
 
-enum EFillRepeat { RepeatFill, NoRepeatFill, RoundFill, SpaceFill };
+enum EFillRepeat { kRepeatFill, kNoRepeatFill, kRoundFill, kSpaceFill };
 
-enum EFillLayerType { BackgroundFillLayer, MaskFillLayer };
+enum EFillLayerType { kBackgroundFillLayer, kMaskFillLayer };
 
 // CSS3 Background Values
-enum EFillSizeType { Contain, Cover, SizeLength, SizeNone };
+enum EFillSizeType { kContain, kCover, kSizeLength, kSizeNone };
 
 // CSS3 Background Position
-enum BackgroundEdgeOrigin { TopEdge, RightEdge, BottomEdge, LeftEdge };
+enum BackgroundEdgeOrigin { kTopEdge, kRightEdge, kBottomEdge, kLeftEdge };
 
 // CSS Mask Source Types
-enum EMaskSourceType { MaskAlpha, MaskLuminance };
-
-// Deprecated Flexible Box Properties
-
-enum EBoxPack { BoxPackStart, BoxPackCenter, BoxPackEnd, BoxPackJustify };
-enum EBoxAlignment { BSTRETCH, BSTART, BCENTER, BEND, BBASELINE };
-enum EBoxOrient { HORIZONTAL, VERTICAL };
-enum EBoxLines { SINGLE, MULTIPLE };
-
-// CSS3 Flexbox Properties
-
-enum EFlexDirection { FlowRow, FlowRowReverse, FlowColumn, FlowColumnReverse };
-enum EFlexWrap { FlexNoWrap, FlexWrap, FlexWrapReverse };
-
-enum ETextSecurity { TSNONE, TSDISC, TSCIRCLE, TSSQUARE };
-
-// CSS3 User Modify Properties
-
-enum EUserModify { READ_ONLY, READ_WRITE, READ_WRITE_PLAINTEXT_ONLY };
-
-// CSS3 User Drag Values
-
-enum EUserDrag { DRAG_AUTO, DRAG_NONE, DRAG_ELEMENT };
-
-// CSS3 User Select Values
-
-enum EUserSelect { SELECT_NONE, SELECT_TEXT, SELECT_ALL };
+enum EMaskSourceType { kMaskAlpha, kMaskLuminance };
 
 // CSS3 Image Values
-enum ObjectFit {
-  ObjectFitFill,
-  ObjectFitContain,
-  ObjectFitCover,
-  ObjectFitNone,
-  ObjectFitScaleDown
-};
-
-// Word Break Values. Matches WinIE and CSS3
-
-enum EWordBreak {
-  NormalWordBreak,
-  BreakAllWordBreak,
-  KeepAllWordBreak,
-  BreakWordBreak
-};
-
-enum EOverflowWrap { NormalOverflowWrap, BreakOverflowWrap };
-
-enum LineBreak {
-  LineBreakAuto,
-  LineBreakLoose,
-  LineBreakNormal,
-  LineBreakStrict,
-  LineBreakAfterWhiteSpace
-};
-
-enum EResize { RESIZE_NONE, RESIZE_BOTH, RESIZE_HORIZONTAL, RESIZE_VERTICAL };
-
 enum QuoteType { OPEN_QUOTE, CLOSE_QUOTE, NO_OPEN_QUOTE, NO_CLOSE_QUOTE };
 
-enum EAnimPlayState { AnimPlayStatePlaying, AnimPlayStatePaused };
+enum EAnimPlayState { kAnimPlayStatePlaying, kAnimPlayStatePaused };
 
-static const size_t TextDecorationBits = 4;
-enum TextDecoration {
-  TextDecorationNone = 0x0,
-  TextDecorationUnderline = 0x1,
-  TextDecorationOverline = 0x2,
-  TextDecorationLineThrough = 0x4,
-  TextDecorationBlink = 0x8
-};
-inline TextDecoration operator|(TextDecoration a, TextDecoration b) {
-  return TextDecoration(int(a) | int(b));
+static const size_t kTextDecorationSkipBits = 3;
+enum class TextDecorationSkip { kNone = 0x0, kObjects = 0x1, kInk = 0x2 };
+inline TextDecorationSkip operator&(TextDecorationSkip a,
+                                    TextDecorationSkip b) {
+  return TextDecorationSkip(static_cast<unsigned>(a) &
+                            static_cast<unsigned>(b));
 }
-inline TextDecoration& operator|=(TextDecoration& a, TextDecoration b) {
-  return a = a | b;
-}
-
-enum TextDecorationStyle {
-  TextDecorationStyleSolid,
-  TextDecorationStyleDouble,
-  TextDecorationStyleDotted,
-  TextDecorationStyleDashed,
-  TextDecorationStyleWavy
-};
-
-static const size_t TextDecorationSkipBits = 3;
-enum TextDecorationSkip {
-  TextDecorationSkipNone = 0x0,
-  TextDecorationSkipObjects = 0x1,
-  TextDecorationSkipInk = 0x2
-};
 inline TextDecorationSkip operator|(TextDecorationSkip a,
                                     TextDecorationSkip b) {
   return TextDecorationSkip(static_cast<unsigned>(a) |
@@ -282,218 +166,51 @@ inline TextDecorationSkip& operator|=(TextDecorationSkip& a,
   return a = a | b;
 }
 
-enum TextAlignLast {
-  TextAlignLastAuto,
-  TextAlignLastStart,
-  TextAlignLastEnd,
-  TextAlignLastLeft,
-  TextAlignLastRight,
-  TextAlignLastCenter,
-  TextAlignLastJustify
-};
+enum OffsetRotationType { kOffsetRotationAuto, kOffsetRotationFixed };
 
-enum TextUnderlinePosition {
-  // FIXME: Implement support for 'under left' and 'under right' values.
-  TextUnderlinePositionAuto,
-  TextUnderlinePositionUnder
-};
-
-enum class ECursor : unsigned {
+enum class TextEmphasisMark {
+  kNone,
   kAuto,
-  kCrosshair,
-  kDefault,
-  kPointer,
-  kMove,
-  kVerticalText,
-  kCell,
-  kContextMenu,
-  kAlias,
-  kProgress,
-  kNoDrop,
-  kNotAllowed,
-  kZoomIn,
-  kZoomOut,
-  kEResize,
-  kNeResize,
-  kNwResize,
-  kNResize,
-  kSeResize,
-  kSwResize,
-  kSResize,
-  kWResize,
-  kEwResize,
-  kNsResize,
-  kNeswResize,
-  kNwseResize,
-  kColResize,
-  kRowResize,
-  kText,
-  kWait,
-  kHelp,
-  kAllScroll,
-  kWebkitGrab,
-  kWebkitGrabbing,
-  kCopy,
-  kNone
+  kDot,
+  kCircle,
+  kDoubleCircle,
+  kTriangle,
+  kSesame,
+  kCustom
 };
 
-enum class EDisplay : unsigned {
-  Inline,
-  Block,
-  ListItem,
-  InlineBlock,
-  Table,
-  InlineTable,
-  TableRowGroup,
-  TableHeaderGroup,
-  TableFooterGroup,
-  TableRow,
-  TableColumnGroup,
-  TableColumn,
-  TableCell,
-  TableCaption,
-  WebkitBox,
-  WebkitInlineBox,
-  Flex,
-  InlineFlex,
-  Grid,
-  InlineGrid,
-  Contents,
-  FlowRoot,
-  None
-};
-
-enum class EInsideLink : unsigned {
-  kNotInsideLink,
-  kInsideUnvisitedLink,
-  kInsideVisitedLink
-};
-
-enum ETransformStyle3D { TransformStyle3DFlat, TransformStyle3DPreserve3D };
-
-enum OffsetRotationType { OffsetRotationAuto, OffsetRotationFixed };
-
-enum EBackfaceVisibility {
-  BackfaceVisibilityVisible,
-  BackfaceVisibilityHidden
-};
-
-enum ELineClampType { LineClampLineCount, LineClampPercentage };
-
-enum Hyphens { HyphensNone, HyphensManual, HyphensAuto };
-
-enum ESpeak {
-  SpeakNone,
-  SpeakNormal,
-  SpeakSpellOut,
-  SpeakDigits,
-  SpeakLiteralPunctuation,
-  SpeakNoPunctuation
-};
-
-enum TextEmphasisFill { TextEmphasisFillFilled, TextEmphasisFillOpen };
-
-enum TextEmphasisMark {
-  TextEmphasisMarkNone,
-  TextEmphasisMarkAuto,
-  TextEmphasisMarkDot,
-  TextEmphasisMarkCircle,
-  TextEmphasisMarkDoubleCircle,
-  TextEmphasisMarkTriangle,
-  TextEmphasisMarkSesame,
-  TextEmphasisMarkCustom
-};
-
-enum TextEmphasisPosition {
-  TextEmphasisPositionOver,
-  TextEmphasisPositionUnder
-};
-
-enum TextOrientation {
-  TextOrientationMixed,
-  TextOrientationUpright,
-  TextOrientationSideways
-};
-
-enum TextOverflow { TextOverflowClip = 0, TextOverflowEllipsis };
-
-enum EImageRendering {
-  ImageRenderingAuto,
-  ImageRenderingOptimizeSpeed,
-  ImageRenderingOptimizeQuality,
-  ImageRenderingOptimizeContrast,
-  ImageRenderingPixelated
-};
-
-enum RubyPosition { RubyPositionBefore, RubyPositionAfter };
-
-static const size_t GridAutoFlowBits = 4;
+static const size_t kGridAutoFlowBits = 4;
 enum InternalGridAutoFlowAlgorithm {
-  InternalAutoFlowAlgorithmSparse = 0x1,
-  InternalAutoFlowAlgorithmDense = 0x2
+  kInternalAutoFlowAlgorithmSparse = 0x1,
+  kInternalAutoFlowAlgorithmDense = 0x2
 };
 
 enum InternalGridAutoFlowDirection {
-  InternalAutoFlowDirectionRow = 0x4,
-  InternalAutoFlowDirectionColumn = 0x8
+  kInternalAutoFlowDirectionRow = 0x4,
+  kInternalAutoFlowDirectionColumn = 0x8
 };
 
 enum GridAutoFlow {
-  AutoFlowRow = InternalAutoFlowAlgorithmSparse | InternalAutoFlowDirectionRow,
-  AutoFlowColumn =
-      InternalAutoFlowAlgorithmSparse | InternalAutoFlowDirectionColumn,
-  AutoFlowRowDense =
-      InternalAutoFlowAlgorithmDense | InternalAutoFlowDirectionRow,
-  AutoFlowColumnDense =
-      InternalAutoFlowAlgorithmDense | InternalAutoFlowDirectionColumn
+  kAutoFlowRow =
+      kInternalAutoFlowAlgorithmSparse | kInternalAutoFlowDirectionRow,
+  kAutoFlowColumn =
+      kInternalAutoFlowAlgorithmSparse | kInternalAutoFlowDirectionColumn,
+  kAutoFlowRowDense =
+      kInternalAutoFlowAlgorithmDense | kInternalAutoFlowDirectionRow,
+  kAutoFlowColumnDense =
+      kInternalAutoFlowAlgorithmDense | kInternalAutoFlowDirectionColumn
 };
 
-enum DraggableRegionMode {
-  DraggableRegionNone,
-  DraggableRegionDrag,
-  DraggableRegionNoDrag
-};
-
-static const size_t TouchActionBits = 6;
-enum TouchAction {
-  TouchActionNone = 0x0,
-  TouchActionPanLeft = 0x1,
-  TouchActionPanRight = 0x2,
-  TouchActionPanX = TouchActionPanLeft | TouchActionPanRight,
-  TouchActionPanUp = 0x4,
-  TouchActionPanDown = 0x8,
-  TouchActionPanY = TouchActionPanUp | TouchActionPanDown,
-  TouchActionPan = TouchActionPanX | TouchActionPanY,
-  TouchActionPinchZoom = 0x10,
-  TouchActionManipulation = TouchActionPan | TouchActionPinchZoom,
-  TouchActionDoubleTapZoom = 0x20,
-  TouchActionAuto = TouchActionManipulation | TouchActionDoubleTapZoom
-};
-inline TouchAction operator|(TouchAction a, TouchAction b) {
-  return static_cast<TouchAction>(int(a) | int(b));
-}
-inline TouchAction& operator|=(TouchAction& a, TouchAction b) {
-  return a = a | b;
-}
-inline TouchAction operator&(TouchAction a, TouchAction b) {
-  return static_cast<TouchAction>(int(a) & int(b));
-}
-inline TouchAction& operator&=(TouchAction& a, TouchAction b) {
-  return a = a & b;
-}
-
-enum EIsolation { IsolationAuto, IsolationIsolate };
-
-static const size_t ContainmentBits = 4;
+static const size_t kContainmentBits = 4;
 enum Containment {
-  ContainsNone = 0x0,
-  ContainsLayout = 0x1,
-  ContainsStyle = 0x2,
-  ContainsPaint = 0x4,
-  ContainsSize = 0x8,
-  ContainsStrict =
-      ContainsLayout | ContainsStyle | ContainsPaint | ContainsSize,
-  ContainsContent = ContainsLayout | ContainsStyle | ContainsPaint,
+  kContainsNone = 0x0,
+  kContainsLayout = 0x1,
+  kContainsStyle = 0x2,
+  kContainsPaint = 0x4,
+  kContainsSize = 0x8,
+  kContainsStrict =
+      kContainsLayout | kContainsStyle | kContainsPaint | kContainsSize,
+  kContainsContent = kContainsLayout | kContainsStyle | kContainsPaint,
 };
 inline Containment operator|(Containment a, Containment b) {
   return Containment(int(a) | int(b));
@@ -503,74 +220,79 @@ inline Containment& operator|=(Containment& a, Containment b) {
 }
 
 enum ItemPosition {
-  ItemPositionAuto,  // It will mean 'normal' after running the StyleAdjuster to
-                     // avoid resolving the initial values.
-  ItemPositionNormal,
-  ItemPositionStretch,
-  ItemPositionBaseline,
-  ItemPositionLastBaseline,
-  ItemPositionCenter,
-  ItemPositionStart,
-  ItemPositionEnd,
-  ItemPositionSelfStart,
-  ItemPositionSelfEnd,
-  ItemPositionFlexStart,
-  ItemPositionFlexEnd,
-  ItemPositionLeft,
-  ItemPositionRight
+  kItemPositionAuto,
+  kItemPositionNormal,
+  kItemPositionStretch,
+  kItemPositionBaseline,
+  kItemPositionLastBaseline,
+  kItemPositionCenter,
+  kItemPositionStart,
+  kItemPositionEnd,
+  kItemPositionSelfStart,
+  kItemPositionSelfEnd,
+  kItemPositionFlexStart,
+  kItemPositionFlexEnd,
+  kItemPositionLeft,
+  kItemPositionRight
 };
 
 enum OverflowAlignment {
-  OverflowAlignmentDefault,
-  OverflowAlignmentUnsafe,
-  OverflowAlignmentSafe
+  kOverflowAlignmentDefault,
+  kOverflowAlignmentUnsafe,
+  kOverflowAlignmentSafe
 };
 
-enum ItemPositionType { NonLegacyPosition, LegacyPosition };
+enum ItemPositionType { kNonLegacyPosition, kLegacyPosition };
 
 enum ContentPosition {
-  ContentPositionNormal,
-  ContentPositionBaseline,
-  ContentPositionLastBaseline,
-  ContentPositionCenter,
-  ContentPositionStart,
-  ContentPositionEnd,
-  ContentPositionFlexStart,
-  ContentPositionFlexEnd,
-  ContentPositionLeft,
-  ContentPositionRight
+  kContentPositionNormal,
+  kContentPositionBaseline,
+  kContentPositionLastBaseline,
+  kContentPositionCenter,
+  kContentPositionStart,
+  kContentPositionEnd,
+  kContentPositionFlexStart,
+  kContentPositionFlexEnd,
+  kContentPositionLeft,
+  kContentPositionRight
 };
 
 enum ContentDistributionType {
-  ContentDistributionDefault,
-  ContentDistributionSpaceBetween,
-  ContentDistributionSpaceAround,
-  ContentDistributionSpaceEvenly,
-  ContentDistributionStretch
+  kContentDistributionDefault,
+  kContentDistributionSpaceBetween,
+  kContentDistributionSpaceAround,
+  kContentDistributionSpaceEvenly,
+  kContentDistributionStretch
 };
 
 // Reasonable maximum to prevent insane font sizes from causing crashes on some
 // platforms (such as Windows).
-static const float maximumAllowedFontSize = 10000.0f;
-
-enum TextIndentLine { TextIndentFirstLine, TextIndentEachLine };
-enum TextIndentType { TextIndentNormal, TextIndentHanging };
+static const float kMaximumAllowedFontSize = 10000.0f;
 
 enum CSSBoxType {
-  BoxMissing = 0,
-  MarginBox,
-  BorderBox,
-  PaddingBox,
-  ContentBox
+  kBoxMissing = 0,
+  kMarginBox,
+  kBorderBox,
+  kPaddingBox,
+  kContentBox
 };
 
-enum ScrollSnapType {
-  ScrollSnapTypeNone,
-  ScrollSnapTypeMandatory,
-  ScrollSnapTypeProximity
+enum SnapAxis {
+  kSnapAxisBoth,
+  kSnapAxisX,
+  kSnapAxisY,
+  kSnapAxisBlock,
+  kSnapAxisInline,
 };
 
-enum AutoRepeatType { NoAutoRepeat, AutoFill, AutoFit };
+enum SnapStrictness { kSnapStrictnessProximity, kSnapStrictnessMandatory };
+
+enum SnapAlignment {
+  kSnapAlignmentNone,
+  kSnapAlignmentStart,
+  kSnapAlignmentEnd,
+  kSnapAlignmentCenter
+};
 
 }  // namespace blink
 

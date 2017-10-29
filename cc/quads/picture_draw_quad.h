@@ -8,9 +8,9 @@
 #include <memory>
 
 #include "base/memory/ref_counted.h"
-#include "cc/base/cc_export.h"
-#include "cc/playback/raster_source.h"
+#include "cc/cc_export.h"
 #include "cc/quads/content_draw_quad_base.h"
+#include "cc/raster/raster_source.h"
 #include "cc/resources/resource_provider.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -32,7 +32,7 @@ class CC_EXPORT PictureDrawQuad : public ContentDrawQuadBase {
               const gfx::RectF& tex_coord_rect,
               const gfx::Size& texture_size,
               bool nearest_neighbor,
-              ResourceFormat texture_format,
+              viz::ResourceFormat texture_format,
               const gfx::Rect& content_rect,
               float contents_scale,
               scoped_refptr<RasterSource> raster_source);
@@ -45,7 +45,7 @@ class CC_EXPORT PictureDrawQuad : public ContentDrawQuadBase {
               const gfx::RectF& tex_coord_rect,
               const gfx::Size& texture_size,
               bool nearest_neighbor,
-              ResourceFormat texture_format,
+              viz::ResourceFormat texture_format,
               const gfx::Rect& content_rect,
               float contents_scale,
               scoped_refptr<RasterSource> raster_source);
@@ -53,7 +53,7 @@ class CC_EXPORT PictureDrawQuad : public ContentDrawQuadBase {
   gfx::Rect content_rect;
   float contents_scale;
   scoped_refptr<RasterSource> raster_source;
-  ResourceFormat texture_format;
+  viz::ResourceFormat texture_format;
 
   static const PictureDrawQuad* MaterialCast(const DrawQuad* quad);
 

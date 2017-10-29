@@ -35,9 +35,9 @@ class TestingCursorManager : public wm::NativeCursorManager {
     delegate->CommitMouseEventsEnabled(enabled);
   }
 
-  void SetCursorSet(ui::CursorSetType cursor_set,
-                    wm::NativeCursorManagerDelegate* delegate) override {
-    delegate->CommitCursorSet(cursor_set);
+  void SetCursorSize(ui::CursorSize cursor_size,
+                     wm::NativeCursorManagerDelegate* delegate) override {
+    delegate->CommitCursorSize(cursor_size);
   }
 };
 
@@ -54,15 +54,15 @@ class CursorManagerTest : public aura::test::AuraTestBase {
 };
 
 TEST_F(CursorManagerTest, ShowHideCursor) {
-  cursor_manager_.SetCursor(ui::kCursorCopy);
-  EXPECT_EQ(ui::kCursorCopy, cursor_manager_.GetCursor().native_type());
+  cursor_manager_.SetCursor(ui::CursorType::kCopy);
+  EXPECT_EQ(ui::CursorType::kCopy, cursor_manager_.GetCursor().native_type());
 
   cursor_manager_.ShowCursor();
   EXPECT_TRUE(cursor_manager_.IsCursorVisible());
   cursor_manager_.HideCursor();
   EXPECT_FALSE(cursor_manager_.IsCursorVisible());
   // The current cursor does not change even when the cursor is not shown.
-  EXPECT_EQ(ui::kCursorCopy, cursor_manager_.GetCursor().native_type());
+  EXPECT_EQ(ui::CursorType::kCopy, cursor_manager_.GetCursor().native_type());
 
   // Check if cursor visibility is locked.
   cursor_manager_.LockCursor();
@@ -105,15 +105,15 @@ TEST_F(CursorManagerTest, ShowHideCursor) {
 // Verifies that LockCursor/UnlockCursor work correctly with
 // EnableMouseEvents and DisableMouseEvents
 TEST_F(CursorManagerTest, EnableDisableMouseEvents) {
-  cursor_manager_.SetCursor(ui::kCursorCopy);
-  EXPECT_EQ(ui::kCursorCopy, cursor_manager_.GetCursor().native_type());
+  cursor_manager_.SetCursor(ui::CursorType::kCopy);
+  EXPECT_EQ(ui::CursorType::kCopy, cursor_manager_.GetCursor().native_type());
 
   cursor_manager_.EnableMouseEvents();
   EXPECT_TRUE(cursor_manager_.IsMouseEventsEnabled());
   cursor_manager_.DisableMouseEvents();
   EXPECT_FALSE(cursor_manager_.IsMouseEventsEnabled());
   // The current cursor does not change even when the cursor is not shown.
-  EXPECT_EQ(ui::kCursorCopy, cursor_manager_.GetCursor().native_type());
+  EXPECT_EQ(ui::CursorType::kCopy, cursor_manager_.GetCursor().native_type());
 
   // Check if cursor enable state is locked.
   cursor_manager_.LockCursor();
@@ -153,24 +153,24 @@ TEST_F(CursorManagerTest, EnableDisableMouseEvents) {
   EXPECT_FALSE(cursor_manager_.IsMouseEventsEnabled());
 }
 
-TEST_F(CursorManagerTest, SetCursorSet) {
+TEST_F(CursorManagerTest, SetCursorSize) {
   wm::TestingCursorClientObserver observer;
   cursor_manager_.AddObserver(&observer);
 
-  EXPECT_EQ(ui::CURSOR_SET_NORMAL, cursor_manager_.GetCursorSet());
-  EXPECT_EQ(ui::CURSOR_SET_NORMAL, observer.cursor_set());
+  EXPECT_EQ(ui::CursorSize::kNormal, cursor_manager_.GetCursorSize());
+  EXPECT_EQ(ui::CursorSize::kNormal, observer.cursor_size());
 
-  cursor_manager_.SetCursorSet(ui::CURSOR_SET_NORMAL);
-  EXPECT_EQ(ui::CURSOR_SET_NORMAL, cursor_manager_.GetCursorSet());
-  EXPECT_EQ(ui::CURSOR_SET_NORMAL, observer.cursor_set());
+  cursor_manager_.SetCursorSize(ui::CursorSize::kNormal);
+  EXPECT_EQ(ui::CursorSize::kNormal, cursor_manager_.GetCursorSize());
+  EXPECT_EQ(ui::CursorSize::kNormal, observer.cursor_size());
 
-  cursor_manager_.SetCursorSet(ui::CURSOR_SET_LARGE);
-  EXPECT_EQ(ui::CURSOR_SET_LARGE, cursor_manager_.GetCursorSet());
-  EXPECT_EQ(ui::CURSOR_SET_LARGE, observer.cursor_set());
+  cursor_manager_.SetCursorSize(ui::CursorSize::kLarge);
+  EXPECT_EQ(ui::CursorSize::kLarge, cursor_manager_.GetCursorSize());
+  EXPECT_EQ(ui::CursorSize::kLarge, observer.cursor_size());
 
-  cursor_manager_.SetCursorSet(ui::CURSOR_SET_NORMAL);
-  EXPECT_EQ(ui::CURSOR_SET_NORMAL, cursor_manager_.GetCursorSet());
-  EXPECT_EQ(ui::CURSOR_SET_NORMAL, observer.cursor_set());
+  cursor_manager_.SetCursorSize(ui::CursorSize::kNormal);
+  EXPECT_EQ(ui::CursorSize::kNormal, cursor_manager_.GetCursorSize());
+  EXPECT_EQ(ui::CursorSize::kNormal, observer.cursor_size());
 }
 
 TEST_F(CursorManagerTest, IsMouseEventsEnabled) {
@@ -273,8 +273,8 @@ TEST_F(CursorManagerTest, TestCursorClientObserver) {
   EXPECT_FALSE(observer_b.did_visibility_change());
   EXPECT_FALSE(observer_a.is_cursor_visible());
   EXPECT_FALSE(observer_b.is_cursor_visible());
-  EXPECT_FALSE(observer_a.did_cursor_set_change());
-  EXPECT_FALSE(observer_b.did_cursor_set_change());
+  EXPECT_FALSE(observer_a.did_cursor_size_change());
+  EXPECT_FALSE(observer_b.did_cursor_size_change());
 
   // Hide the cursor using HideCursor().
   cursor_manager_.HideCursor();
@@ -284,11 +284,11 @@ TEST_F(CursorManagerTest, TestCursorClientObserver) {
   EXPECT_FALSE(observer_b.is_cursor_visible());
 
   // Set the cursor set.
-  cursor_manager_.SetCursorSet(ui::CURSOR_SET_LARGE);
-  EXPECT_TRUE(observer_a.did_cursor_set_change());
-  EXPECT_EQ(ui::CURSOR_SET_LARGE, observer_a.cursor_set());
-  EXPECT_TRUE(observer_b.did_cursor_set_change());
-  EXPECT_EQ(ui::CURSOR_SET_LARGE, observer_b.cursor_set());
+  cursor_manager_.SetCursorSize(ui::CursorSize::kLarge);
+  EXPECT_TRUE(observer_a.did_cursor_size_change());
+  EXPECT_EQ(ui::CursorSize::kLarge, observer_a.cursor_size());
+  EXPECT_TRUE(observer_b.did_cursor_size_change());
+  EXPECT_EQ(ui::CursorSize::kLarge, observer_b.cursor_size());
 
   // Show the cursor using ShowCursor().
   observer_a.reset();
@@ -312,10 +312,10 @@ TEST_F(CursorManagerTest, TestCursorClientObserver) {
   EXPECT_FALSE(observer_a.is_cursor_visible());
 
   // Set back the cursor set to normal.
-  cursor_manager_.SetCursorSet(ui::CURSOR_SET_NORMAL);
-  EXPECT_TRUE(observer_a.did_cursor_set_change());
-  EXPECT_EQ(ui::CURSOR_SET_NORMAL, observer_a.cursor_set());
-  EXPECT_FALSE(observer_b.did_cursor_set_change());
+  cursor_manager_.SetCursorSize(ui::CursorSize::kNormal);
+  EXPECT_TRUE(observer_a.did_cursor_size_change());
+  EXPECT_EQ(ui::CursorSize::kNormal, observer_a.cursor_size());
+  EXPECT_FALSE(observer_b.did_cursor_size_change());
 
   // Show the cursor using ShowCursor().
   observer_a.reset();

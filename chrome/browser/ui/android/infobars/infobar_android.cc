@@ -55,6 +55,11 @@ bool InfoBarAndroid::HasSetJavaInfoBar() const {
   return !java_info_bar_.is_null();
 }
 
+int InfoBarAndroid::GetInfoBarIdentifier(JNIEnv* env,
+                                         const JavaParamRef<jobject>& obj) {
+  return delegate()->GetIdentifier();
+}
+
 void InfoBarAndroid::OnButtonClicked(JNIEnv* env,
                                      const JavaParamRef<jobject>& obj,
                                      jint action) {
@@ -78,11 +83,4 @@ void InfoBarAndroid::CloseJavaInfoBar() {
 
 int InfoBarAndroid::GetEnumeratedIconId() {
   return ResourceMapper::MapFromChromiumId(delegate()->GetIconId());
-}
-
-
-// Native JNI methods ---------------------------------------------------------
-
-bool RegisterNativeInfoBar(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }

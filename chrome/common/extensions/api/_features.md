@@ -24,7 +24,7 @@ will have an install warning.
 * [\_manifest\_features](https://chromium.googlesource.com/chromium/src/+/master/chrome/common/extensions/api/_manifest_features.json):
 Specifies the requirements for manifest entry availability. If an extension
 doesn't satisfy the requirements, the extension will fail to load with an error.
-* [\_behavior\_features](https://chromium.googlesource.com/chromium/src/+/master/chrome/common/extensions/api/_behavior_features.json):
+* [\_behavior\_features](https://chromium.googlesource.com/chromium/src/+/master/extensions/common/api/_behavior_features.json):
 Specifies the requirements for miscellaneous extension behaviors. This should
 typically not be used.
 
@@ -206,7 +206,12 @@ features can specify contexts.
 
 Accepted values are a list of strings from `blessed_extension`,
 `blessed_web_page`, `content_script`, `extension_service_worker`,
-`web_page`, `webui`, and `unblessed_extension`.
+`lock_screen_extension`, `web_page`, `webui`, and `unblessed_extension`.
+
+The `lock_screen_extension` context is used instead of `blessed_extension`
+context for extensions on the Chrome OS lock screen. Other extensions related
+contexts (`blessed_web_page`, `content_script`, `extension_service_worker`,
+`unblessed_extension`) are not expected to be present on the lock screen.
 
 ### default\_parent
 

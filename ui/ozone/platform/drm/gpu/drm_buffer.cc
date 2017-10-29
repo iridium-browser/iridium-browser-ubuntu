@@ -19,8 +19,6 @@ uint32_t GetFourCCCodeForSkColorType(SkColorType type) {
     case kUnknown_SkColorType:
     case kAlpha_8_SkColorType:
       return 0;
-    case kIndex_8_SkColorType:
-      return DRM_FORMAT_C8;
     case kRGB_565_SkColorType:
       return DRM_FORMAT_RGB565;
     case kARGB_4444_SkColorType:
@@ -97,6 +95,18 @@ uint32_t DrmBuffer::GetFramebufferId() const {
 
 uint32_t DrmBuffer::GetFramebufferPixelFormat() const {
   return fb_pixel_format_;
+}
+
+uint32_t DrmBuffer::GetOpaqueFramebufferId() const {
+  return framebuffer_;
+}
+
+uint32_t DrmBuffer::GetOpaqueFramebufferPixelFormat() const {
+  return fb_pixel_format_;
+}
+
+uint64_t DrmBuffer::GetFormatModifier() const {
+  return DRM_FORMAT_MOD_NONE;
 }
 
 uint32_t DrmBuffer::GetHandle() const {

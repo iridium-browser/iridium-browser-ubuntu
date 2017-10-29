@@ -34,11 +34,9 @@ Browser* GetDesktopBrowser(content::WebUI* web_ui);
 
 // Sets the height of the WebUI modal dialog after its initialization. This is
 // needed to better accomodate different locales' text heights.
-void SetInitializedModalHeight(content::WebUI* web_ui,
+void SetInitializedModalHeight(Browser* browser,
+                               content::WebUI* web_ui,
                                const base::ListValue* args);
-
-// Return true if force signin is enabled by group policy.
-bool IsForceSigninEnabled();
 
 }  // namespace signin
 

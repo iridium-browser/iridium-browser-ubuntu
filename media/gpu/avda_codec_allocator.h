@@ -12,6 +12,7 @@
 #include "base/android/build_info.h"
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/message_loop/message_loop.h"
 #include "base/optional.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/sys_info.h"
@@ -19,11 +20,13 @@
 #include "base/threading/thread_checker.h"
 #include "base/time/tick_clock.h"
 #include "base/trace_event/trace_event.h"
+#include "media/base/android/android_overlay.h"
 #include "media/base/android/media_codec_bridge_impl.h"
 #include "media/base/android/media_drm_bridge_cdm_context.h"
 #include "media/base/media.h"
 #include "media/base/surface_manager.h"
 #include "media/base/video_codecs.h"
+#include "media/gpu/avda_surface_bundle.h"
 #include "media/gpu/media_gpu_export.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/android/scoped_java_surface.h"
@@ -50,27 +53,20 @@ class CodecConfig : public base::RefCountedThreadSafe<CodecConfig> {
   VideoCodec codec = kUnknownVideoCodec;
 
   // The surface that MediaCodec is configured to output to.
-  gl::ScopedJavaSurface surface;
-  int surface_id = SurfaceManager::kNoSurfaceID;
-
-  // The SurfaceTexture attached to |surface|, or nullptr if |surface| is
-  // SurfaceView backed.
-  scoped_refptr<gl::SurfaceTexture> surface_texture;
+  scoped_refptr<AVDASurfaceBundle> surface_bundle;
 
   // The MediaCrypto that MediaCodec is configured with for an encrypted stream.
   MediaDrmBridgeCdmContext::JavaObjectPtr media_crypto;
 
-  // Whether the encryption scheme requires us to use a protected surface.
-  bool needs_protected_surface = false;
+  // Whether MediaCrypto requires a secure codec.
+  bool requires_secure_codec = false;
 
   // The initial coded size. The actual size might change at any time, so this
   // is only a hint.
   gfx::Size initial_expected_coded_size;
 
-  // The type of allocation to use for. We use this to select the right thread
-  // for construction / destruction, and to decide if we should restrict the
-  // codec to be software only.
-  TaskType task_type;
+  // Whether creating a software decoder backed MediaCodec is forbidden.
+  bool software_codec_forbidden = false;
 
   // Codec specific data (SPS and PPS for H264).
   std::vector<uint8_t> csd0;
@@ -84,7 +80,7 @@ class CodecConfig : public base::RefCountedThreadSafe<CodecConfig> {
   DISALLOW_COPY_AND_ASSIGN(CodecConfig);
 };
 
-class AVDACodecAllocatorClient {
+class AVDASurfaceAllocatorClient {
  public:
   // Called when the requested SurfaceView becomes available after a call to
   // AllocateSurface()
@@ -96,6 +92,12 @@ class AVDACodecAllocatorClient {
   // need to call DeallocateSurface();
   virtual void OnSurfaceDestroyed() = 0;
 
+ protected:
+  ~AVDASurfaceAllocatorClient() {}
+};
+
+class AVDACodecAllocatorClient {
+ public:
   // Called on the main thread when a new MediaCodec is configured.
   // |media_codec| will be null if configuration failed.
   virtual void OnCodecConfigured(
@@ -111,31 +113,15 @@ class AVDACodecAllocatorClient {
 // on them to allow software fallback if the HW path is hung up.
 class MEDIA_GPU_EXPORT AVDACodecAllocator {
  public:
-  static AVDACodecAllocator* Instance();
-
-  // Called synchronously when the given surface is being destroyed on the
-  // browser UI thread.
-  void OnSurfaceDestroyed(int surface_id);
+  static AVDACodecAllocator* GetInstance();
 
   // Make sure the construction threads are started for |client|. Returns true
   // on success.
-  bool StartThread(AVDACodecAllocatorClient* client);
-
-  void StopThread(AVDACodecAllocatorClient* client);
-
-  // Returns true if the caller now owns the surface, or false if someone else
-  // owns the surface. |client| will be notified when the surface is available
-  // via OnSurfaceAvailable().
-  bool AllocateSurface(AVDACodecAllocatorClient* client, int surface_id);
-
-  // Relinquish ownership of the surface or stop waiting for it to be available.
-  // The caller must guarantee that when calling this the surface is either no
-  // longer attached to a MediaCodec, or the MediaCodec it was attached to is
-  // was released with ReleaseMediaCodec().
-  void DeallocateSurface(AVDACodecAllocatorClient* client, int surface_id);
+  virtual bool StartThread(AVDACodecAllocatorClient* client);
+  virtual void StopThread(AVDACodecAllocatorClient* client);
 
   // Create and configure a MediaCodec synchronously.
-  std::unique_ptr<MediaCodecBridge> CreateMediaCodecSync(
+  virtual std::unique_ptr<MediaCodecBridge> CreateMediaCodecSync(
       scoped_refptr<CodecConfig> codec_config);
 
   // Create and configure a MediaCodec asynchronously. The result is delivered
@@ -144,31 +130,28 @@ class MEDIA_GPU_EXPORT AVDACodecAllocator {
       base::WeakPtr<AVDACodecAllocatorClient> client,
       scoped_refptr<CodecConfig> codec_config);
 
-  // Asynchronously release |media_codec| with the attached surface.
+  // Asynchronously release |media_codec| with the attached surface.  We will
+  // drop our reference to |surface_bundle| on the main thread after the codec
+  // is deallocated, since the codec isn't using it anymore.  We will not take
+  // other action on it (e.g., calling ReleaseSurfaceTexture if it has one),
+  // since some other codec might be going to use it.  We just want to be sure
+  // that it outlives |media_codec|.
   // TODO(watk): Bundle the MediaCodec and surface together so you can't get
   // this pairing wrong.
-  void ReleaseMediaCodec(std::unique_ptr<MediaCodecBridge> media_codec,
-                         TaskType task_type,
-                         int surface_id);
-
-  // Returns a hint about whether the construction thread has hung for
-  // |task_type|.  Note that if a thread isn't started, then we'll just return
-  // "not hung", since it'll run on the current thread anyway.  The hang
-  // detector will see no pending jobs in that case, so it's automatic.
-  bool IsThreadLikelyHung(TaskType task_type);
+  virtual void ReleaseMediaCodec(
+      std::unique_ptr<MediaCodecBridge> media_codec,
+      scoped_refptr<AVDASurfaceBundle> surface_bundle);
 
   // Return true if and only if there is any AVDA registered.
   bool IsAnyRegisteredAVDA();
 
-  // Return the task type to use for a new codec allocation, or nullopt if
-  // both threads are hung.
-  base::Optional<TaskType> TaskTypeForAllocation();
-
-  // Return the task runner for tasks of type |type|.
-  scoped_refptr<base::SingleThreadTaskRunner> TaskRunnerFor(TaskType task_type);
-
   // Return a reference to the thread for unit tests.
   base::Thread& GetThreadForTesting(TaskType task_type);
+
+  // Wait for a bounded amount of time for |overlay| to be freed, if it's
+  // in use pending release of a codec.  Returns true on success, or false if
+  // the wait times out.
+  bool WaitForPendingRelease(AndroidOverlay* overlay);
 
  protected:
   // |tick_clock| and |stop_event| are for tests only.
@@ -176,12 +159,20 @@ class MEDIA_GPU_EXPORT AVDACodecAllocator {
                      base::WaitableEvent* stop_event = nullptr);
   virtual ~AVDACodecAllocator();
 
+  // Forward |media_codec|, which is configured to output to |surface_bundle|,
+  // to |client| if |client| is still around.  Otherwise, release the codec and
+  // then drop our ref to |surface_bundle|.
+  void ForwardOrDropCodec(base::WeakPtr<AVDACodecAllocatorClient> client,
+                          TaskType task_type,
+                          scoped_refptr<AVDASurfaceBundle> surface_bundle,
+                          std::unique_ptr<MediaCodecBridge> media_codec);
+
  private:
   friend class AVDACodecAllocatorTest;
 
   struct OwnerRecord {
-    AVDACodecAllocatorClient* owner = nullptr;
-    AVDACodecAllocatorClient* waiter = nullptr;
+    AVDASurfaceAllocatorClient* owner = nullptr;
+    AVDASurfaceAllocatorClient* waiter = nullptr;
   };
 
   class HangDetector : public base::MessageLoop::TaskObserver {
@@ -210,7 +201,16 @@ class MEDIA_GPU_EXPORT AVDACodecAllocator {
     HangDetector hang_detector;
   };
 
-  void OnMediaCodecAndSurfaceReleased(int surface_id);
+  // Return the task type to use for a new codec allocation, or nullopt if
+  // both threads are hung.
+  base::Optional<TaskType> TaskTypeForAllocation(bool software_codec_forbidden);
+
+  // Return the task runner for tasks of type |type|.
+  scoped_refptr<base::SingleThreadTaskRunner> TaskRunnerFor(TaskType task_type);
+
+  // Called on the gpu main thread when a codec is freed on a codec thread.
+  // |surface_bundle| is the surface bundle that the codec was using.
+  void OnMediaCodecReleased(scoped_refptr<AVDASurfaceBundle> surface_bundle);
 
   // Stop the thread indicated by |index|. This signals stop_event_for_testing_
   // after both threads are stopped.
@@ -219,12 +219,11 @@ class MEDIA_GPU_EXPORT AVDACodecAllocator {
   // All registered AVDAs.
   std::set<AVDACodecAllocatorClient*> clients_;
 
-  // Indexed by surface id.
-  std::map<int32_t, OwnerRecord> surface_owners_;
-
-  // Waitable events for ongoing release tasks indexed by surface id so we can
+  // Waitable events for ongoing release tasks indexed by overlay so we can
   // wait on the codec release if the surface attached to it is being destroyed.
-  std::map<int32_t, base::WaitableEvent> pending_codec_releases_;
+  // This really is needed only for ContentVideoViewOverlay, since it requires
+  // synchronous releases with respect to the main thread.
+  std::map<AndroidOverlay*, base::WaitableEvent> pending_codec_releases_;
 
   // Threads for each of TaskType.  They are started / stopped as avda instances
   // show and and request them.  The vector indicies must match TaskType.
@@ -233,6 +232,10 @@ class MEDIA_GPU_EXPORT AVDACodecAllocator {
   base::ThreadChecker thread_checker_;
 
   base::WaitableEvent* stop_event_for_testing_;
+
+  // Saves the TaskType used to create a given codec so it can later be released
+  // on the same thread.
+  std::map<MediaCodecBridge*, TaskType> codec_task_types_;
 
   // For canceling pending StopThreadTask()s.
   base::WeakPtrFactory<AVDACodecAllocator> weak_this_factory_;

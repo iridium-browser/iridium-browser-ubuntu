@@ -8,14 +8,14 @@ assert(use_ozone)
 
 source_set("common") {
   sources = [
-    "display_mode_proxy.cc",
-    "display_mode_proxy.h",
     "display_snapshot_proxy.cc",
     "display_snapshot_proxy.h",
     "egl_util.cc",
     "egl_util.h",
     "gl_ozone_egl.cc",
     "gl_ozone_egl.h",
+    "gl_ozone_osmesa.cc",
+    "gl_ozone_osmesa.h",
     "gpu/ozone_gpu_message_generator.cc",
     "gpu/ozone_gpu_message_generator.h",
     "gpu/ozone_gpu_message_params.cc",
@@ -31,6 +31,7 @@ source_set("common") {
 
   deps = [
     "//ui/gl",
+    "//ui/gl:gl_features",
   ]
 
   visibility = [ "//ui/ozone/platform/*" ]

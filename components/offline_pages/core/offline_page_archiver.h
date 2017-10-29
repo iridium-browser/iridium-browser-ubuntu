@@ -39,12 +39,6 @@ namespace offline_pages {
 // archiver whether to respond with ERROR_CONTENT_UNAVAILBLE, wait longer to
 // actually snapshot a complete page, or snapshot whatever is available at that
 // point in time (what the user sees).
-//
-// TODO(fgorski): Add ability to delete archive.
-// TODO(fgorski): Add ability to check that archive exists.
-// TODO(fgorski): Add ability to refresh an existing archive in one step.
-// TODO(fgorski): Add ability to identify all of the archives in the directory,
-// to enable to model to reconcile the archives.
 class OfflinePageArchiver {
  public:
   // Results of the archive creation.
@@ -56,14 +50,20 @@ class OfflinePageArchiver {
     ERROR_ARCHIVE_CREATION_FAILED,  // Creation of archive failed.
     ERROR_SECURITY_CERTIFICATE,     // Page was loaded on secure connection, but
                                     // there was a security error.
+    ERROR_ERROR_PAGE,               // We detected an error page.
+    ERROR_INTERSTITIAL_PAGE,        // We detected an interstitial page.
   };
 
   // Describes the parameters to control how to create an archive.
   struct CreateArchiveParams {
-    CreateArchiveParams() : remove_popup_overlay(false) {}
+    CreateArchiveParams()
+        : remove_popup_overlay(false), use_page_problem_detectors(false) {}
 
     // Whether to remove popup overlay that obstructs viewing normal content.
     bool remove_popup_overlay;
+
+    // Run page problem detectors while generating MTHML if true.
+    bool use_page_problem_detectors;
   };
 
   typedef base::Callback<void(OfflinePageArchiver* /* archiver */,

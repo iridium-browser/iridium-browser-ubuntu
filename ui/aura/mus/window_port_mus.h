@@ -12,9 +12,9 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "cc/surfaces/surface_info.h"
-#include "services/ui/public/cpp/window_compositor_frame_sink.h"
-#include "services/ui/public/interfaces/cursor.mojom.h"
+#include "components/viz/client/client_layer_tree_frame_sink.h"
+#include "components/viz/common/surfaces/surface_info.h"
+#include "services/ui/public/interfaces/cursor/cursor.mojom.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
 #include "services/ui/public/interfaces/window_tree_constants.mojom.h"
 #include "ui/aura/aura_export.h"
@@ -23,6 +23,14 @@
 #include "ui/aura/window_port.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/platform_window/mojo/text_input_state.mojom.h"
+
+namespace gfx {
+class Insets;
+}
+
+namespace viz {
+class ClientLayerTreeFrameSink;
+}
 
 namespace aura {
 
@@ -50,14 +58,30 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
   Window* window() { return window_; }
   const Window* window() const { return window_; }
 
+  ClientSurfaceEmbedder* client_surface_embedder() const {
+    return client_surface_embedder_.get();
+  }
+
+  const viz::SurfaceInfo& PrimarySurfaceInfoForTesting() const {
+    return primary_surface_info_;
+  }
+
   void SetTextInputState(mojo::TextInputStatePtr state);
   void SetImeVisibility(bool visible, mojo::TextInputStatePtr state);
 
-  ui::mojom::Cursor predefined_cursor() const { return predefined_cursor_; }
-  void SetPredefinedCursor(ui::mojom::Cursor cursor_id);
+  const ui::CursorData& cursor() const { return cursor_; }
+  void SetCursor(const ui::CursorData& cursor);
 
   // Sets the EventTargetingPolicy, default is TARGET_AND_DESCENDANTS.
   void SetEventTargetingPolicy(ui::mojom::EventTargetingPolicy policy);
+
+  // Sets whether this window can accept drops, defaults to false.
+  void SetCanAcceptDrops(bool can_accept_drops);
+
+  // See description in mojom for details on this. Has no effect if not running
+  // in the window manager.
+  void SetExtendedHitRegionForChildren(const gfx::Insets& mouse_insets,
+                                       const gfx::Insets& touch_insets);
 
   // Embeds a new client in this Window. See WindowTreeClient::Embed() for
   // details on arguments.
@@ -65,13 +89,9 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
              uint32_t flags,
              const ui::mojom::WindowTree::EmbedCallback& callback);
 
-  std::unique_ptr<ui::WindowCompositorFrameSink> RequestCompositorFrameSink(
-      scoped_refptr<cc::ContextProvider> context_provider,
+  std::unique_ptr<viz::ClientLayerTreeFrameSink> RequestLayerTreeFrameSink(
+      scoped_refptr<viz::ContextProvider> context_provider,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager);
-
-  void AttachCompositorFrameSink(
-      std::unique_ptr<ui::WindowCompositorFrameSinkBinding>
-          compositor_frame_sink_binding);
 
  private:
   friend class WindowPortMusTestApi;
@@ -118,6 +138,7 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
     REMOVE,
     REMOVE_TRANSIENT,
     REORDER,
+    TRANSFORM,
     // This is used when a REORDER *may* occur as the result of a transient
     // child being added or removed. As there is no guarantee the move will
     // actually happen (the window may be in place already) this change is not
@@ -137,6 +158,8 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
     bool visible;
     // Applies to PROPERTY.
     std::string property_name;
+    // Applies to TRANSFORM.
+    gfx::Transform transform;
   };
 
   // Used to identify a change the server.
@@ -200,19 +223,26 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
   void ReorderFromServer(WindowMus* child,
                          WindowMus* relative,
                          ui::mojom::OrderDirection) override;
-  void SetBoundsFromServer(const gfx::Rect& bounds) override;
+  void SetBoundsFromServer(
+      const gfx::Rect& bounds,
+      const base::Optional<viz::LocalSurfaceId>& local_surface_id) override;
+  void SetTransformFromServer(const gfx::Transform& transform) override;
   void SetVisibleFromServer(bool visible) override;
   void SetOpacityFromServer(float opacity) override;
-  void SetPredefinedCursorFromServer(ui::mojom::Cursor cursor) override;
+  void SetCursorFromServer(const ui::CursorData& cursor) override;
   void SetPropertyFromServer(
       const std::string& property_name,
       const std::vector<uint8_t>* property_data) override;
-  void SetSurfaceInfoFromServer(const cc::SurfaceInfo& surface_info) override;
+  void SetFrameSinkIdFromServer(const viz::FrameSinkId& frame_sink_id) override;
+  const viz::LocalSurfaceId& GetOrAllocateLocalSurfaceId(
+      const gfx::Size& surface_size_in_pixels) override;
+  void SetFallbackSurfaceInfo(const viz::SurfaceInfo& surface_info) override;
   void DestroyFromServer() override;
   void AddTransientChildFromServer(WindowMus* child) override;
   void RemoveTransientChildFromServer(WindowMus* child) override;
   ChangeSource OnTransientChildAdded(WindowMus* child) override;
   ChangeSource OnTransientChildRemoved(WindowMus* child) override;
+  const viz::LocalSurfaceId& GetLocalSurfaceId() override;
   std::unique_ptr<WindowMusChangeData> PrepareForServerBoundsChange(
       const gfx::Rect& bounds) override;
   std::unique_ptr<WindowMusChangeData> PrepareForServerVisibilityChange(
@@ -221,6 +251,7 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
   void PrepareForTransientRestack(WindowMus* window) override;
   void OnTransientRestackDone(WindowMus* window) override;
   void NotifyEmbeddedAppDisconnected() override;
+  bool HasLocalLayerTreeFrameSink() override;
 
   // WindowPort:
   void OnPreInit(Window* window) override;
@@ -231,24 +262,46 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
   void OnVisibilityChanged(bool visible) override;
   void OnDidChangeBounds(const gfx::Rect& old_bounds,
                          const gfx::Rect& new_bounds) override;
+  void OnDidChangeTransform(const gfx::Transform& old_transform,
+                            const gfx::Transform& new_transform) override;
   std::unique_ptr<ui::PropertyData> OnWillChangeProperty(
       const void* key) override;
   void OnPropertyChanged(const void* key,
+                         int64_t old_value,
                          std::unique_ptr<ui::PropertyData> data) override;
+  std::unique_ptr<cc::LayerTreeFrameSink> CreateLayerTreeFrameSink() override;
+  viz::SurfaceId GetSurfaceId() const override;
+  void OnWindowAddedToRootWindow() override {}
+  void OnWillRemoveWindowFromRootWindow() override {}
+
+  void UpdatePrimarySurfaceInfo();
+  void UpdateClientSurfaceEmbedder();
 
   WindowTreeClient* window_tree_client_;
 
   Window* window_ = nullptr;
 
   // Used when this window is embedding a client.
-  std::unique_ptr<ClientSurfaceEmbedder> client_surface_embedder;
+  std::unique_ptr<ClientSurfaceEmbedder> client_surface_embedder_;
 
   ServerChangeIdType next_server_change_id_ = 0;
   ServerChanges server_changes_;
 
-  cc::SurfaceInfo surface_info_;
+  viz::FrameSinkId frame_sink_id_;
 
-  ui::mojom::Cursor predefined_cursor_ = ui::mojom::Cursor::CURSOR_NULL;
+  viz::SurfaceInfo primary_surface_info_;
+  viz::SurfaceInfo fallback_surface_info_;
+
+  viz::LocalSurfaceId local_surface_id_;
+  viz::LocalSurfaceIdAllocator local_surface_id_allocator_;
+  gfx::Size last_surface_size_in_pixels_;
+
+  ui::CursorData cursor_;
+
+  // When a frame sink is created
+  // for a local aura::Window, we need keep a weak ptr of it, so we can update
+  // the local surface id when necessary.
+  base::WeakPtr<viz::ClientLayerTreeFrameSink> local_layer_tree_frame_sink_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowPortMus);
 };

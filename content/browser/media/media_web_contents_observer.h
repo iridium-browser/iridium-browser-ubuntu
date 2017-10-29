@@ -15,18 +15,19 @@
 #include "content/browser/media/session/media_session_controllers_manager.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "services/device/public/interfaces/wake_lock.mojom.h"
 
 #if defined(OS_ANDROID)
 #include "ui/android/view_android.h"
 #endif  // OS_ANDROID
 
-namespace device {
-class PowerSaveBlocker;
-}  // namespace device
-
 namespace media {
 enum class MediaContentType;
 }  // namespace media
+
+namespace gfx {
+class Size;
+}  // namespace size
 
 namespace content {
 
@@ -63,12 +64,12 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
   // fullscreening video element to the same place.
   void RequestPersistentVideo(bool value);
 
-  bool has_audio_power_save_blocker_for_testing() const {
-    return !!audio_power_save_blocker_;
+  bool has_audio_wake_lock_for_testing() const {
+    return has_audio_wake_lock_for_testing_;
   }
 
-  bool has_video_power_save_blocker_for_testing() const {
-    return !!video_power_save_blocker_;
+  bool has_video_wake_lock_for_testing() const {
+    return has_video_wake_lock_for_testing_;
   }
 
  protected:
@@ -87,21 +88,28 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
                       bool has_audio,
                       bool is_remote,
                       media::MediaContentType media_content_type);
-  void OnMediaEffectivelyFullscreenChange(RenderFrameHost* render_frame_host,
-                                          int delegate_id,
-                                          bool is_fullscreen);
+  void OnMediaEffectivelyFullscreenChanged(RenderFrameHost* render_frame_host,
+                                           int delegate_id,
+                                           bool is_fullscreen);
+  void OnMediaSizeChanged(RenderFrameHost* render_frame_host,
+                          int delegate_id,
+                          const gfx::Size& size);
+  void OnMediaMutedStatusChanged(RenderFrameHost* render_frame_host,
+                                 int delegate_id,
+                                 bool muted);
 
-  // Clear |render_frame_host|'s tracking entry for its power save blockers.
-  void ClearPowerSaveBlockers(RenderFrameHost* render_frame_host);
+  // Clear |render_frame_host|'s tracking entry for its WakeLocks.
+  void ClearWakeLocks(RenderFrameHost* render_frame_host);
 
-  // Creates an audio or video power save blocker respectively.
-  void CreateAudioPowerSaveBlocker();
-  void CreateVideoPowerSaveBlocker();
+  device::mojom::WakeLock* GetAudioWakeLock();
+  device::mojom::WakeLock* GetVideoWakeLock();
 
-  // Releases the audio power save blockers if |active_audio_players_| is empty.
-  // Likewise, releases the video power save blockers if |active_video_players_|
-  // is empty.
-  void MaybeReleasePowerSaveBlockers();
+  void LockAudio();
+  void LockVideo();
+
+  void CancelAudioLock();
+  void CancelVideoLock();
+  void MaybeCancelVideoLock();
 
   // Helper methods for adding or removing player entries in |player_map|.
   using PlayerSet = std::set<int>;
@@ -117,12 +125,17 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
                                    ActiveMediaPlayerMap* player_map,
                                    std::set<MediaPlayerId>* removed_players);
 
-  // Tracking variables and associated power save blockers for media playback.
+  // Convenience method that casts web_contents() to a WebContentsImpl*.
+  WebContentsImpl* web_contents_impl() const;
+
+  // Tracking variables and associated wake locks for media playback.
   ActiveMediaPlayerMap active_audio_players_;
   ActiveMediaPlayerMap active_video_players_;
-  std::unique_ptr<device::PowerSaveBlocker> audio_power_save_blocker_;
-  std::unique_ptr<device::PowerSaveBlocker> video_power_save_blocker_;
+  device::mojom::WakeLockPtr audio_wake_lock_;
+  device::mojom::WakeLockPtr video_wake_lock_;
   base::Optional<MediaPlayerId> fullscreen_player_;
+  bool has_audio_wake_lock_for_testing_;
+  bool has_video_wake_lock_for_testing_;
 
   MediaSessionControllersManager session_controllers_manager_;
 

@@ -22,6 +22,7 @@
 #include "gin/interceptor.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebAssociatedURLLoader.h"
 #include "third_party/WebKit/public/web/WebAssociatedURLLoaderOptions.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -98,8 +99,9 @@ gin::WrapperInfo ScriptableObject::kWrapperInfo = { gin::kEmbedderNativeGin };
 // Maps from content::RenderFrame to the set of MimeHandlerViewContainers within
 // it.
 base::LazyInstance<
-    std::map<content::RenderFrame*, std::set<MimeHandlerViewContainer*>>>
-    g_mime_handler_view_container_map = LAZY_INSTANCE_INITIALIZER;
+    std::map<content::RenderFrame*, std::set<MimeHandlerViewContainer*>>>::
+    DestructorAtExit g_mime_handler_view_container_map =
+        LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -114,14 +116,14 @@ MimeHandlerViewContainer::MimeHandlerViewContainer(
       guest_loaded_(false),
       weak_factory_(this) {
   DCHECK(!mime_type_.empty());
-  is_embedded_ = !render_frame->GetWebFrame()->document().isPluginDocument();
+  is_embedded_ = !render_frame->GetWebFrame()->GetDocument().IsPluginDocument();
   g_mime_handler_view_container_map.Get()[render_frame].insert(this);
 }
 
 MimeHandlerViewContainer::~MimeHandlerViewContainer() {
   if (loader_) {
     DCHECK(is_embedded_);
-    loader_->cancel();
+    loader_->Cancel();
   }
 
   if (render_frame()) {
@@ -146,19 +148,18 @@ void MimeHandlerViewContainer::OnReady() {
   if (!render_frame() || !is_embedded_)
     return;
 
-  blink::WebFrame* frame = render_frame()->GetWebFrame();
-  blink::WebAssociatedURLLoaderOptions options;
-  // The embedded plugin is allowed to be cross-origin and we should always
-  // send credentials/cookies with the request.
-  options.crossOriginRequestPolicy =
-      blink::WebAssociatedURLLoaderOptions::CrossOriginRequestPolicyAllow;
-  options.allowCredentials = true;
-  DCHECK(!loader_);
-  loader_.reset(frame->createAssociatedURLLoader(options));
+  blink::WebLocalFrame* frame = render_frame()->GetWebFrame();
 
+  blink::WebAssociatedURLLoaderOptions options;
+  DCHECK(!loader_);
+  loader_.reset(frame->CreateAssociatedURLLoader(options));
+
+  // The embedded plugin is allowed to be cross-origin and we should always
+  // send credentials/cookies with the request. So, use the default mode
+  // "no-cors" and credentials mode "include".
   blink::WebURLRequest request(original_url_);
-  request.setRequestContext(blink::WebURLRequest::RequestContextObject);
-  loader_->loadAsynchronously(request, this);
+  request.SetRequestContext(blink::WebURLRequest::kRequestContextObject);
+  loader_->LoadAsynchronously(request, this);
 }
 
 bool MimeHandlerViewContainer::OnMessage(const IPC::Message& message) {
@@ -206,12 +207,12 @@ v8::Local<v8::Object> MimeHandlerViewContainer::V8ScriptableObject(
   return v8::Local<v8::Object>::New(isolate, scriptable_object_);
 }
 
-void MimeHandlerViewContainer::didReceiveData(const char* data,
+void MimeHandlerViewContainer::DidReceiveData(const char* data,
                                               int data_length) {
   view_id_ += std::string(data, data_length);
 }
 
-void MimeHandlerViewContainer::didFinishLoading(double /* unused */) {
+void MimeHandlerViewContainer::DidFinishLoading(double /* unused */) {
   DCHECK(is_embedded_);
   CreateMimeHandlerViewGuest();
 }
@@ -228,24 +229,14 @@ void MimeHandlerViewContainer::PostMessage(v8::Isolate* isolate,
   if (!guest_proxy_render_view)
     return;
   blink::WebFrame* guest_proxy_frame =
-      guest_proxy_render_view->GetWebView()->mainFrame();
+      guest_proxy_render_view->GetWebView()->MainFrame();
   if (!guest_proxy_frame)
     return;
 
   v8::Context::Scope context_scope(
-      render_frame()->GetWebFrame()->mainWorldScriptContext());
+      render_frame()->GetWebFrame()->MainWorldScriptContext());
 
-  // TODO(lazyboy,nasko): The WebLocalFrame branch is not used when running
-  // on top of out-of-process iframes. Remove it once the code is converted.
-  v8::Local<v8::Object> guest_proxy_window;
-  if (guest_proxy_frame->isWebLocalFrame()) {
-    guest_proxy_window =
-        guest_proxy_frame->mainWorldScriptContext()->Global();
-  } else {
-    guest_proxy_window = guest_proxy_frame->toWebRemoteFrame()
-                             ->deprecatedMainWorldScriptContext()
-                             ->Global();
-  }
+  v8::Local<v8::Object> guest_proxy_window = guest_proxy_frame->GlobalProxy();
   gin::Dictionary window_object(isolate, guest_proxy_window);
   v8::Local<v8::Function> post_message;
   if (!window_object.Get(std::string(kPostMessageName), &post_message))
@@ -256,26 +247,22 @@ void MimeHandlerViewContainer::PostMessage(v8::Isolate* isolate,
       // Post the message to any domain inside the browser plugin. The embedder
       // should already know what is embedded.
       gin::StringToV8(isolate, "*")};
-  render_frame()->GetWebFrame()->callFunctionEvenIfScriptDisabled(
-      post_message.As<v8::Function>(),
-      guest_proxy_window,
-      arraysize(args),
+  render_frame()->GetWebFrame()->CallFunctionEvenIfScriptDisabled(
+      post_message.As<v8::Function>(), guest_proxy_window, arraysize(args),
       args);
 }
 
 void MimeHandlerViewContainer::PostMessageFromValue(
     const base::Value& message) {
-  blink::WebFrame* frame = render_frame()->GetWebFrame();
+  blink::WebLocalFrame* frame = render_frame()->GetWebFrame();
   if (!frame)
     return;
 
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::HandleScope handle_scope(isolate);
-  v8::Context::Scope context_scope(frame->mainWorldScriptContext());
-  std::unique_ptr<content::V8ValueConverter> converter(
-      content::V8ValueConverter::create());
-  PostMessage(isolate,
-              converter->ToV8Value(&message, frame->mainWorldScriptContext()));
+  v8::Context::Scope context_scope(frame->MainWorldScriptContext());
+  PostMessage(isolate, content::V8ValueConverter::Create()->ToV8Value(
+                           &message, frame->MainWorldScriptContext()));
 }
 
 void MimeHandlerViewContainer::OnCreateMimeHandlerViewGuestACK(
@@ -306,13 +293,13 @@ void MimeHandlerViewContainer::OnMimeHandlerViewGuestOnLoadCompleted(
     return;
 
   // Now that the guest has loaded, flush any unsent messages.
-  blink::WebFrame* frame = render_frame()->GetWebFrame();
+  blink::WebLocalFrame* frame = render_frame()->GetWebFrame();
   if (!frame)
     return;
 
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::HandleScope handle_scope(isolate);
-  v8::Context::Scope context_scope(frame->mainWorldScriptContext());
+  v8::Context::Scope context_scope(frame->MainWorldScriptContext());
   for (const auto& pending_message : pending_messages_)
     PostMessage(isolate, v8::Local<v8::Value>::New(isolate, pending_message));
 

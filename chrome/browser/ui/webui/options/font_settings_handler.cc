@@ -23,7 +23,7 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/webui/options/font_settings_utils.h"
+#include "chrome/browser/ui/webui/settings_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_service.h"
@@ -116,7 +116,9 @@ void FontSettingsHandler::InitializePage() {
 void FontSettingsHandler::RegisterMessages() {
   // Perform validation for saved fonts.
   PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
-  FontSettingsUtilities::ValidateSavedFonts(pref_service);
+#if defined(OS_MACOSX)
+  settings_utils::ValidateSavedFonts(pref_service);
+#endif
 
   // Register for preferences that we need to observe manually.
   standard_font_.Init(prefs::kWebKitStandardFontFamily,
@@ -167,7 +169,7 @@ void FontSettingsHandler::OnExtensionLoaded(
 void FontSettingsHandler::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension,
-    extensions::UnloadedExtensionInfo::Reason reason) {
+    extensions::UnloadedExtensionReason reason) {
   NotifyAdvancedFontSettingsAvailability();
 }
 
@@ -192,46 +194,46 @@ void FontSettingsHandler::FontsListHasLoaded(
   }
 
   base::ListValue selected_values;
-  selected_values.AppendString(FontSettingsUtilities::MaybeGetLocalizedFontName(
-      standard_font_.GetValue()));
   selected_values.AppendString(
-      FontSettingsUtilities::MaybeGetLocalizedFontName(serif_font_.GetValue()));
-  selected_values.AppendString(FontSettingsUtilities::MaybeGetLocalizedFontName(
-      sans_serif_font_.GetValue()));
+      settings_utils::MaybeGetLocalizedFontName(standard_font_.GetValue()));
   selected_values.AppendString(
-      FontSettingsUtilities::MaybeGetLocalizedFontName(fixed_font_.GetValue()));
+      settings_utils::MaybeGetLocalizedFontName(serif_font_.GetValue()));
+  selected_values.AppendString(
+      settings_utils::MaybeGetLocalizedFontName(sans_serif_font_.GetValue()));
+  selected_values.AppendString(
+      settings_utils::MaybeGetLocalizedFontName(fixed_font_.GetValue()));
 
   web_ui()->CallJavascriptFunctionUnsafe(
       "FontSettings.setFontsData", *list.get(), selected_values);
 }
 
 void FontSettingsHandler::SetUpStandardFontSample() {
-  base::StringValue font_value(
-      FontSettingsUtilities::ResolveFontList(standard_font_.GetValue()));
+  base::Value font_value(
+      settings_utils::ResolveFontList(standard_font_.GetValue()));
   base::Value size_value(default_font_size_.GetValue());
   web_ui()->CallJavascriptFunctionUnsafe("FontSettings.setUpStandardFontSample",
                                          font_value, size_value);
 }
 
 void FontSettingsHandler::SetUpSerifFontSample() {
-  base::StringValue font_value(
-      FontSettingsUtilities::ResolveFontList(serif_font_.GetValue()));
+  base::Value font_value(
+      settings_utils::ResolveFontList(serif_font_.GetValue()));
   base::Value size_value(default_font_size_.GetValue());
   web_ui()->CallJavascriptFunctionUnsafe("FontSettings.setUpSerifFontSample",
                                          font_value, size_value);
 }
 
 void FontSettingsHandler::SetUpSansSerifFontSample() {
-  base::StringValue font_value(
-      FontSettingsUtilities::ResolveFontList(sans_serif_font_.GetValue()));
+  base::Value font_value(
+      settings_utils::ResolveFontList(sans_serif_font_.GetValue()));
   base::Value size_value(default_font_size_.GetValue());
   web_ui()->CallJavascriptFunctionUnsafe(
       "FontSettings.setUpSansSerifFontSample", font_value, size_value);
 }
 
 void FontSettingsHandler::SetUpFixedFontSample() {
-  base::StringValue font_value(
-      FontSettingsUtilities::ResolveFontList(fixed_font_.GetValue()));
+  base::Value font_value(
+      settings_utils::ResolveFontList(fixed_font_.GetValue()));
   base::Value size_value(default_fixed_font_size_.GetValue());
   web_ui()->CallJavascriptFunctionUnsafe("FontSettings.setUpFixedFontSample",
                                          font_value, size_value);

@@ -20,6 +20,7 @@
 #include "components/drive/job_queue.h"
 #include "components/drive/service/drive_service_interface.h"
 #include "net/base/network_change_notifier.h"
+#include "services/device/public/interfaces/wake_lock_provider.mojom.h"
 
 class PrefService;
 
@@ -66,7 +67,9 @@ class JobScheduler
   JobScheduler(PrefService* pref_service,
                EventLogger* logger,
                DriveServiceInterface* drive_service,
-               base::SequencedTaskRunner* blocking_task_runner);
+               base::SequencedTaskRunner* blocking_task_runner,
+               device::mojom::WakeLockProviderPtr wake_lock_provider);
+
   ~JobScheduler() override;
 
   // JobListInterface overrides.
@@ -83,6 +86,10 @@ class JobScheduler
   // Adds a GetAboutResource operation to the queue.
   // |callback| must not be null.
   void GetAboutResource(const google_apis::AboutResourceCallback& callback);
+
+  // Adds a GetAllTeamDriveList operation to the queue.
+  // |callback| must not be null.
+  void GetAllTeamDriveList(const google_apis::TeamDriveListCallback& callback);
 
   // Adds a GetAllFileList operation to the queue.
   // |callback| must not be null.
@@ -107,6 +114,12 @@ class JobScheduler
   // |callback| must not be null.
   void GetRemainingChangeList(const GURL& next_link,
                               const google_apis::ChangeListCallback& callback);
+
+  // Adds GetRemainingTeamDriveList operation to the queue.
+  // |callback| must not be null.
+  void GetRemainingTeamDriveList(
+      const std::string& page_token,
+      const google_apis::TeamDriveListCallback& callback);
 
   // Adds GetRemainingFileList operation to the queue.
   // |callback| must not be null.
@@ -268,6 +281,13 @@ class JobScheduler
 
   // Retries the job if needed and returns false. Otherwise returns true.
   bool OnJobDone(JobID job_id, google_apis::DriveApiErrorCode error);
+
+  // Callback for job finishing with a FileListCallback.
+  void OnGetTeamDriveListJobDone(
+      JobID job_id,
+      const google_apis::TeamDriveListCallback& callback,
+      google_apis::DriveApiErrorCode error,
+      std::unique_ptr<google_apis::TeamDriveList> team_drive_list);
 
   // Callback for job finishing with a FileListCallback.
   void OnGetFileListJobDone(JobID job_id,

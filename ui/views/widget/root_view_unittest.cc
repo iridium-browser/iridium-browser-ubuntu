@@ -549,7 +549,7 @@ class RootViewTestDialogDelegate : public DialogDelegateView {
   int layout_count() const { return layout_count_; }
 
   // DialogDelegateView:
-  gfx::Size GetPreferredSize() const override { return preferred_size_; }
+  gfx::Size CalculatePreferredSize() const override { return preferred_size_; }
   void Layout() override {
     EXPECT_EQ(size(), preferred_size_);
     ++layout_count_;
@@ -577,7 +577,7 @@ TEST_F(RootViewTest, SingleLayoutDuringInit) {
   widget->CloseNow();
 
   // Also test Aura desktop Widget codepaths.
-  views_delegate()->set_use_desktop_native_widgets(true);
+  test_views_delegate()->set_use_desktop_native_widgets(true);
   delegate = new RootViewTestDialogDelegate();
   widget = DialogDelegate::CreateDialogWidget(delegate, GetContext(), nullptr);
   EXPECT_EQ(1, delegate->layout_count());

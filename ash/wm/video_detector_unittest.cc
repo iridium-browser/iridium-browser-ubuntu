@@ -7,23 +7,22 @@
 #include <deque>
 #include <memory>
 
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm/wm_event.h"
+#include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/window_state.h"
+#include "ash/wm/wm_event.h"
 #include "base/compiler_specific.h"
 #include "base/time/time.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/client/window_types.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/wm/public/window_types.h"
 
 namespace ash {
-namespace test {
 
 // Implementation that just records video state changes.
 class TestObserver : public VideoDetector::Observer {
@@ -70,7 +69,7 @@ class VideoDetectorTest : public AshTestBase {
   void SetUp() override {
     AshTestBase::SetUp();
     observer_.reset(new TestObserver);
-    detector_ = Shell::GetInstance()->video_detector();
+    detector_ = Shell::Get()->video_detector();
     detector_->AddObserver(observer_.get());
 
     now_ = base::TimeTicks::Now();
@@ -198,7 +197,7 @@ TEST_F(VideoDetectorTest, DontReportWhenWindowHidden) {
 TEST_F(VideoDetectorTest, DontReportDuringShutdown) {
   std::unique_ptr<aura::Window> window =
       CreateTestWindow(gfx::Rect(0, 0, 1024, 768));
-  Shell::GetInstance()->OnAppTerminating();
+  Shell::Get()->session_controller()->NotifyChromeTerminating();
   SendUpdates(window.get(), kMinRect, kMinFps + 5, 2 * kMinDuration);
   EXPECT_TRUE(observer_->empty());
 }
@@ -294,5 +293,4 @@ TEST_F(VideoDetectorTest, ReportFullscreen) {
   EXPECT_TRUE(observer_->empty());
 }
 
-}  // namespace test
 }  // namespace ash

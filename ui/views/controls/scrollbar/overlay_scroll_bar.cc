@@ -9,6 +9,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
+#include "ui/native_theme/overlay_scrollbar_constants_aura.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 
@@ -16,13 +17,15 @@ namespace views {
 namespace {
 
 // Total thickness of the thumb (matches visuals when hovered).
-const int kThumbThickness = 11;
+constexpr int kThumbThickness =
+    ui::kOverlayScrollbarThumbWidthPressed + ui::kOverlayScrollbarStrokeWidth;
 // When hovered, the thumb takes up the full width. Otherwise, it's a bit
 // slimmer.
-const int kThumbHoverOffset = 4;
-const int kThumbStroke = 1;
-const float kThumbHoverAlpha = 0.5f;
-const float kThumbDefaultAlpha = 0.3f;
+constexpr int kThumbHoverOffset = 4;
+// The layout size of the thumb stroke, in DIP.
+constexpr int kThumbStroke = ui::kOverlayScrollbarStrokeWidth;
+// The visual size of the thumb stroke, in px.
+constexpr int kThumbStrokeVisualSize = ui::kOverlayScrollbarStrokeWidth;
 
 }  // namespace
 
@@ -35,6 +38,7 @@ OverlayScrollBar::Thumb::Thumb(OverlayScrollBar* scroll_bar)
 OverlayScrollBar::Thumb::~Thumb() {}
 
 void OverlayScrollBar::Thumb::Init() {
+  EnableCanvasFlippingForRTLUI(true);
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
   // Animate all changes to the layer except the first one.
@@ -42,7 +46,7 @@ void OverlayScrollBar::Thumb::Init() {
   layer()->SetAnimator(ui::LayerAnimator::CreateImplicitAnimator());
 }
 
-gfx::Size OverlayScrollBar::Thumb::GetPreferredSize() const {
+gfx::Size OverlayScrollBar::Thumb::CalculatePreferredSize() const {
   // The visual size of the thumb is kThumbThickness, but it slides back and
   // forth by kThumbHoverOffset. To make event targetting work well, expand the
   // width of the thumb such that it's always taking up the full width of the
@@ -65,11 +69,20 @@ void OverlayScrollBar::Thumb::OnPaint(gfx::Canvas* canvas) {
 
   cc::PaintFlags stroke_flags;
   stroke_flags.setStyle(cc::PaintFlags::kStroke_Style);
-  stroke_flags.setColor(SK_ColorWHITE);
-  stroke_flags.setStrokeWidth(kThumbStroke);
+  stroke_flags.setColor(
+      SkColorSetA(SK_ColorWHITE, (ui::kOverlayScrollbarStrokeNormalAlpha /
+                                  ui::kOverlayScrollbarThumbNormalAlpha) *
+                                     SK_AlphaOPAQUE));
+  stroke_flags.setStrokeWidth(kThumbStrokeVisualSize);
   stroke_flags.setStrokeCap(cc::PaintFlags::kSquare_Cap);
+
+  // The stroke is a single pixel, so we must deal with the unscaled canvas.
+  const float dsf = canvas->UndoDeviceScaleFactor();
   gfx::RectF stroke_bounds(fill_bounds);
-  stroke_bounds.Inset(gfx::InsetsF(kThumbStroke / 2.f));
+  stroke_bounds.Scale(dsf);
+  // The stroke should be aligned to the pixel center that is nearest the fill,
+  // so outset by a half pixel.
+  stroke_bounds.Inset(gfx::InsetsF(-kThumbStrokeVisualSize / 2.0f));
   // The stroke doesn't apply to the far edge of the thumb.
   SkPath path;
   path.moveTo(gfx::PointFToSkPoint(stroke_bounds.top_right()));
@@ -95,17 +108,18 @@ void OverlayScrollBar::Thumb::OnBoundsChanged(
 void OverlayScrollBar::Thumb::OnStateChanged() {
   if (GetState() == CustomButton::STATE_NORMAL) {
     gfx::Transform translation;
+    const int direction = base::i18n::IsRTL() ? -1 : 1;
     translation.Translate(
-        gfx::Vector2d(IsHorizontal() ? 0 : kThumbHoverOffset,
-                      IsHorizontal() ? kThumbHoverOffset: 0));
+        gfx::Vector2d(IsHorizontal() ? 0 : direction * kThumbHoverOffset,
+                      IsHorizontal() ? kThumbHoverOffset : 0));
     layer()->SetTransform(translation);
-    layer()->SetOpacity(kThumbDefaultAlpha);
+    layer()->SetOpacity(ui::kOverlayScrollbarThumbNormalAlpha);
 
     if (GetWidget())
       scroll_bar_->StartHideCountdown();
   } else {
     layer()->SetTransform(gfx::Transform());
-    layer()->SetOpacity(kThumbHoverAlpha);
+    layer()->SetOpacity(ui::kOverlayScrollbarThumbHoverAlpha);
   }
 }
 
@@ -166,7 +180,7 @@ void OverlayScrollBar::Show() {
 
 void OverlayScrollBar::Hide() {
   ui::ScopedLayerAnimationSettings settings(layer()->GetAnimator());
-  settings.SetTransitionDuration(base::TimeDelta::FromMilliseconds(200));
+  settings.SetTransitionDuration(ui::kOverlayScrollbarFadeDuration);
   layer()->SetOpacity(0.0f);
 }
 
@@ -174,7 +188,7 @@ void OverlayScrollBar::StartHideCountdown() {
   if (IsMouseHovered())
     return;
   hide_timer_.Start(
-      FROM_HERE, base::TimeDelta::FromSeconds(1),
+      FROM_HERE, ui::kOverlayScrollbarFadeDelay,
       base::Bind(&OverlayScrollBar::Hide, base::Unretained(this)));
 }
 

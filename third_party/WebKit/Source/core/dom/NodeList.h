@@ -24,8 +24,8 @@
 #ifndef NodeList_h
 #define NodeList_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -43,10 +43,10 @@ class CORE_EXPORT NodeList : public GarbageCollectedFinalized<NodeList>,
   virtual Node* item(unsigned index) const = 0;
 
   // Other methods (not part of DOM)
-  virtual bool isEmptyNodeList() const { return false; }
-  virtual bool isChildNodeList() const { return false; }
+  virtual bool IsEmptyNodeList() const { return false; }
+  virtual bool IsChildNodeList() const { return false; }
 
-  virtual Node* virtualOwnerNode() const { return 0; }
+  virtual Node* VirtualOwnerNode() const { return 0; }
 
   DEFINE_INLINE_VIRTUAL_TRACE() {}
 

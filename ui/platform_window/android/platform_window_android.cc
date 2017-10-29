@@ -7,7 +7,6 @@
 #include <android/input.h>
 #include <android/native_window_jni.h>
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "jni/PlatformWindowAndroid_jni.h"
 #include "ui/events/event.h"
@@ -126,9 +125,11 @@ bool PlatformWindowAndroid::TouchEvent(JNIEnv* env,
   if (event_type == ui::ET_UNKNOWN)
     return false;
   ui::TouchEvent touch(
-      event_type, gfx::Point(), ui::EF_NONE, pointer_id,
+      event_type, gfx::Point(),
       base::TimeTicks() + base::TimeDelta::FromMilliseconds(time_ms),
-      touch_major, touch_minor, orientation, pressure);
+      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, pointer_id,
+                         touch_major, touch_minor, pressure),
+      ui::EF_NONE, orientation);
   touch.set_location_f(gfx::PointF(x, y));
   touch.set_root_location_f(gfx::PointF(x, y));
   delegate_->DispatchEvent(&touch);
@@ -165,9 +166,9 @@ void PlatformWindowAndroid::Show() {
   JNIEnv* env = base::android::AttachCurrentThread();
   java_platform_window_android_ = JavaObjectWeakGlobalRef(
       env, Java_PlatformWindowAndroid_createForActivity(
-               env, base::android::GetApplicationContext(),
-               reinterpret_cast<jlong>(this),
-               reinterpret_cast<jlong>(&platform_ime_controller_)).obj());
+               env, reinterpret_cast<jlong>(this),
+               reinterpret_cast<jlong>(&platform_ime_controller_))
+               .obj());
 }
 
 void PlatformWindowAndroid::Hide() {
@@ -177,6 +178,8 @@ void PlatformWindowAndroid::Hide() {
 void PlatformWindowAndroid::Close() {
   delegate_->OnCloseRequest();
 }
+
+void PlatformWindowAndroid::PrepareForShutdown() {}
 
 void PlatformWindowAndroid::SetBounds(const gfx::Rect& bounds) {
   NOTIMPLEMENTED();

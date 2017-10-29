@@ -57,19 +57,18 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
   // process.
   //
   // Never returns MemoryDumpManager::kInvalidTracingProcessId.
-  // Returns only ChildProcessHost::kBrowserTracingProcessId in single-process
-  // mode.
+  // Returns only memory_instrumentation::mojom::kServiceTracingProcessId in
+  // single-process mode.
   static uint64_t ChildProcessUniqueIdToTracingProcessId(int child_process_id);
 
   // ChildProcessHost implementation
   bool Send(IPC::Message* message) override;
   void ForceShutdown() override;
-  std::string CreateChannelMojo(
-      mojo::edk::PendingProcessConnection* connection) override;
   void CreateChannelMojo() override;
   bool IsChannelOpening() override;
   void AddFilter(IPC::MessageFilter* filter) override;
-  service_manager::InterfaceProvider* GetRemoteInterfaces() override;
+  void BindInterface(const std::string& interface_name,
+                     mojo::ScopedMessagePipeHandle interface_pipe) override;
 
  private:
   friend class ChildProcessHost;
@@ -93,7 +92,6 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
   base::Process peer_process_;
   bool opening_channel_;  // True while we're waiting the channel to be opened.
   std::unique_ptr<IPC::Channel> channel_;
-  std::string channel_id_;
 
   // Holds all the IPC message filters.  Since this object lives on the IO
   // thread, we don't have a IPC::ChannelProxy and so we manage filters

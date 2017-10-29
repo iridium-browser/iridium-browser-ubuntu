@@ -12,7 +12,9 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/bubble/bubble_border.h"
+#include "ui/views/bubble/bubble_dialog_delegate.h"
 #include "ui/views/controls/button/label_button.h"
+#include "ui/views/test/test_layout_provider.h"
 #include "ui/views/test/test_views.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/widget/widget.h"
@@ -135,6 +137,19 @@ TEST_F(BubbleFrameViewTest, GetBoundsForClientView) {
   EXPECT_EQ(insets.top() + margin_y, frame.GetBoundsForClientView().y());
 }
 
+TEST_F(BubbleFrameViewTest, RemoveFootnoteView) {
+  TestBubbleFrameView frame(this);
+  EXPECT_EQ(nullptr, frame.footnote_container_);
+  View* footnote_dummy_view = new StaticSizedView(gfx::Size(200, 200));
+  frame.SetFootnoteView(footnote_dummy_view);
+  EXPECT_EQ(footnote_dummy_view->parent(), frame.footnote_container_);
+  View* container_view = footnote_dummy_view->parent();
+  delete footnote_dummy_view;
+  footnote_dummy_view = nullptr;
+  EXPECT_FALSE(container_view->visible());
+  EXPECT_EQ(nullptr, frame.footnote_container_);
+}
+
 TEST_F(BubbleFrameViewTest, GetBoundsForClientViewWithClose) {
   TestBubbleFrameView frame(this);
   // TestBubbleFrameView::GetWidget() is responsible for creating the widget and
@@ -145,12 +160,12 @@ TEST_F(BubbleFrameViewTest, GetBoundsForClientViewWithClose) {
   EXPECT_EQ(kArrow, frame.bubble_border()->arrow());
   EXPECT_EQ(kColor, frame.bubble_border()->background_color());
 
-  int margin_x = frame.content_margins().left();
-  int margin_y = frame.content_margins().top() +
-                 frame.GetCloseButtonForTest()->height();
-  gfx::Insets insets = frame.bubble_border()->GetInsets();
-  EXPECT_EQ(insets.left() + margin_x, frame.GetBoundsForClientView().x());
-  EXPECT_EQ(insets.top() + margin_y, frame.GetBoundsForClientView().y());
+  gfx::Insets frame_insets = frame.GetInsets();
+  gfx::Insets border_insets = frame.bubble_border()->GetInsets();
+  EXPECT_EQ(border_insets.left() + frame_insets.left(),
+            frame.GetBoundsForClientView().x());
+  EXPECT_EQ(border_insets.top() + frame_insets.top(),
+            frame.GetBoundsForClientView().y());
 }
 
 // Tests that the arrow is mirrored as needed to better fit the screen.
@@ -486,6 +501,187 @@ TEST_F(BubbleFrameViewTest, GetMaximumSize) {
                           kPreferredClientHeight + kExpectedAdditionalHeight);
   EXPECT_EQ(expected_size, maximum_rect.size());
 #endif
+}
+
+namespace {
+
+class TestBubbleDialogDelegateView : public BubbleDialogDelegateView {
+ public:
+  TestBubbleDialogDelegateView()
+      : BubbleDialogDelegateView(nullptr, BubbleBorder::NONE) {
+    set_shadow(BubbleBorder::NO_ASSETS);
+    SetAnchorRect(gfx::Rect());
+  }
+  ~TestBubbleDialogDelegateView() override {}
+
+  void ChangeTitle(const base::string16& title) {
+    title_ = title;
+    // Note UpdateWindowTitle() always does a layout, which will be invalid if
+    // the Widget needs to change size. But also SizeToContents() _only_ does a
+    // layout if the size is actually changing.
+    GetWidget()->UpdateWindowTitle();
+    SizeToContents();
+  }
+
+  void set_override_snap(bool value) { override_snap_ = value; }
+
+  // BubbleDialogDelegateView:
+  using BubbleDialogDelegateView::SetAnchorView;
+  using BubbleDialogDelegateView::SizeToContents;
+  base::string16 GetWindowTitle() const override { return title_; }
+  bool ShouldShowWindowTitle() const override { return !title_.empty(); }
+
+  void DeleteDelegate() override {
+    // This delegate is owned by the test case itself, so it should not delete
+    // itself here.
+  }
+  int GetDialogButtons() const override { return ui::DIALOG_BUTTON_OK; }
+  bool ShouldSnapFrameWidth() const override {
+    return override_snap_.value_or(
+        BubbleDialogDelegateView::ShouldSnapFrameWidth());
+  }
+  gfx::Size GetMinimumSize() const override { return gfx::Size(); }
+  gfx::Size CalculatePreferredSize() const override {
+    return gfx::Size(200, 200);
+  }
+
+ private:
+  base::string16 title_;
+  base::Optional<bool> override_snap_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestBubbleDialogDelegateView);
+};
+
+class TestAnchor {
+ public:
+  explicit TestAnchor(Widget::InitParams params) {
+    params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+    widget_.Init(params);
+    widget_.Show();
+  }
+
+  Widget& widget() { return widget_; }
+
+ private:
+  Widget widget_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestAnchor);
+};
+
+}  // namespace
+
+// This test ensures that if the installed LayoutProvider snaps dialog widths,
+// BubbleFrameView correctly sizes itself to that width.
+TEST_F(BubbleFrameViewTest, WidthSnaps) {
+  test::TestLayoutProvider provider;
+  TestBubbleDialogDelegateView delegate;
+  TestAnchor anchor(CreateParams(Widget::InitParams::TYPE_WINDOW));
+
+  delegate.SetAnchorView(anchor.widget().GetContentsView());
+  delegate.set_margins(gfx::Insets());
+
+  Widget* w0 = BubbleDialogDelegateView::CreateBubble(&delegate);
+  w0->Show();
+  EXPECT_EQ(delegate.GetPreferredSize().width(),
+            w0->GetWindowBoundsInScreen().width());
+  w0->CloseNow();
+
+  constexpr int kTestWidth = 300;
+  provider.SetSnappedDialogWidth(kTestWidth);
+
+  // The Widget's snapped width should exactly match the width returned by the
+  // LayoutProvider.
+  Widget* w1 = BubbleDialogDelegateView::CreateBubble(&delegate);
+  w1->Show();
+  EXPECT_EQ(kTestWidth, w1->GetWindowBoundsInScreen().width());
+  w1->CloseNow();
+
+  // If the DialogDelegate asks not to snap, it should not snap.
+  delegate.set_override_snap(false);
+  Widget* w2 = BubbleDialogDelegateView::CreateBubble(&delegate);
+  w2->Show();
+  EXPECT_EQ(delegate.GetPreferredSize().width(),
+            w2->GetWindowBoundsInScreen().width());
+  w2->CloseNow();
+}
+
+// Tests edge cases when the frame's title view starts to wrap text. This is to
+// ensure that the calculations BubbleFrameView does to determine the Widget
+// size for a given client view are consistent with the eventual size that the
+// client view takes after Layout().
+TEST_F(BubbleFrameViewTest, LayoutEdgeCases) {
+  test::TestLayoutProvider provider;
+  TestBubbleDialogDelegateView delegate;
+  TestAnchor anchor(CreateParams(Widget::InitParams::TYPE_WINDOW));
+  delegate.SetAnchorView(anchor.widget().GetContentsView());
+
+  Widget* bubble = BubbleDialogDelegateView::CreateBubble(&delegate);
+  bubble->Show();
+
+  // Even though the bubble has default margins, the dialog view should have
+  // been given its preferred size.
+  EXPECT_FALSE(delegate.margins().IsEmpty());
+  EXPECT_EQ(delegate.size(), delegate.GetPreferredSize());
+
+  // Starting with a short title.
+  base::string16 title(1, 'i');
+  delegate.ChangeTitle(title);
+  const int min_bubble_height = bubble->GetWindowBoundsInScreen().height();
+  EXPECT_LT(delegate.GetPreferredSize().height(), min_bubble_height);
+
+  // Grow the title incrementally until word wrap is required. There should
+  // never be a point where the BubbleFrameView over- or under-estimates the
+  // size required for the title. If it did, it would cause SizeToContents() to
+  // Widget size requiring the subsequent Layout() to fill the remaining client
+  // area with something other than |delegate|'s preferred size.
+  while (bubble->GetWindowBoundsInScreen().height() == min_bubble_height) {
+    title += ' ';
+    title += 'i';
+    delegate.ChangeTitle(title);
+    EXPECT_EQ(delegate.GetPreferredSize(), delegate.size()) << title;
+  }
+
+  // Sanity check that something interesting happened. The bubble should have
+  // grown by "a line" for the wrapped title, and the title should have reached
+  // a length that would have likely caused word wrap. A typical result would be
+  // a +17-20 change in height and title length of 53 characters.
+  const int two_line_height = bubble->GetWindowBoundsInScreen().height();
+  EXPECT_LT(12, two_line_height - min_bubble_height);
+  EXPECT_GT(25, two_line_height - min_bubble_height);
+  EXPECT_LT(30u, title.size());
+  EXPECT_GT(80u, title.size());
+
+  // Now add dialog snapping.
+  provider.SetSnappedDialogWidth(300);
+  delegate.SizeToContents();
+
+  // Height should go back to |min_bubble_height| since the window is wider:
+  // word wrapping should no longer happen.
+  EXPECT_EQ(min_bubble_height, bubble->GetWindowBoundsInScreen().height());
+  EXPECT_EQ(300, bubble->GetWindowBoundsInScreen().width());
+
+  // Now we are allowed to diverge from the client view width, but not height.
+  EXPECT_EQ(delegate.GetPreferredSize().height(), delegate.height());
+  EXPECT_LT(delegate.GetPreferredSize().width(), delegate.width());
+  EXPECT_GT(300, delegate.width());  // Greater, since there are margins.
+
+  const gfx::Size snapped_size = delegate.size();
+  const size_t old_title_size = title.size();
+
+  // Grow the title again with width snapping until word wrapping occurs.
+  while (bubble->GetWindowBoundsInScreen().height() == min_bubble_height) {
+    title += ' ';
+    title += 'i';
+    delegate.ChangeTitle(title);
+    EXPECT_EQ(snapped_size, delegate.size()) << title;
+  }
+  // Change to the height should have been the same as before. Title should
+  // have grown about 50%.
+  EXPECT_EQ(two_line_height, bubble->GetWindowBoundsInScreen().height());
+  EXPECT_LT(15u, title.size() - old_title_size);
+  EXPECT_GT(40u, title.size() - old_title_size);
+
+  // When |anchor| goes out of scope it should take |bubble| with it.
 }
 
 }  // namespace views

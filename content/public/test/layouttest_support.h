@@ -18,8 +18,6 @@
 class GURL;
 
 namespace blink {
-class WebDeviceMotionData;
-class WebDeviceOrientationData;
 class WebInputEvent;
 class WebLocalFrame;
 struct WebSize;
@@ -29,8 +27,13 @@ class WebWidget;
 class WebURLResponse;
 }
 
+namespace device {
+class MotionData;
+class OrientationData;
+}
+
 namespace gfx {
-class ICCProfile;
+class ColorSpace;
 }
 
 namespace test_runner {
@@ -104,13 +107,13 @@ void SetMockGamepadProvider(std::unique_ptr<RendererGamepadProvider> provider);
 // a listener through BlinkPlatformImpl::setDeviceLightListener().
 void SetMockDeviceLightData(const double data);
 
-// Sets WebDeviceMotionData that should be used when registering
+// Sets MotionData that should be used when registering
 // a listener through BlinkPlatformImpl::setDeviceMotionListener().
-void SetMockDeviceMotionData(const blink::WebDeviceMotionData& data);
+void SetMockDeviceMotionData(const device::MotionData& data);
 
-// Sets WebDeviceOrientationData that should be used when registering
+// Sets OrientationData that should be used when registering
 // a listener through BlinkPlatformImpl::setDeviceOrientationListener().
-void SetMockDeviceOrientationData(const blink::WebDeviceOrientationData& data);
+void SetMockDeviceOrientationData(const device::OrientationData& data);
 
 // Returns the length of the local session history of a render view.
 int GetLocalSessionHistoryLength(RenderView* render_view);
@@ -141,13 +144,13 @@ std::unique_ptr<blink::WebInputEvent> TransformScreenToWidgetCoordinates(
     test_runner::WebWidgetTestProxyBase* web_widget_test_proxy_base,
     const blink::WebInputEvent& event);
 
-// Get the ICC profile for a given name string. This is not in the ICCProfile
+// Get the color space for a given name string. This is not in the ColorSpace
 // class to avoid bloating the shipping build.
-gfx::ICCProfile GetTestingICCProfile(const std::string& name);
+gfx::ColorSpace GetTestingColorSpace(const std::string& name);
 
-// Set the device color profile associated with the profile |name|.
-void SetDeviceColorProfile(
-    RenderView* render_view, const gfx::ICCProfile& icc_profile);
+// Set the device color space.
+void SetDeviceColorSpace(RenderView* render_view,
+                         const gfx::ColorSpace& color_space);
 
 // Sets the scan duration to 0.
 void SetTestBluetoothScanDuration();

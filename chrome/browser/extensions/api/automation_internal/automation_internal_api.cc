@@ -44,6 +44,7 @@
 
 #if defined(USE_AURA)
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
+#include "ui/aura/env.h"
 #endif
 
 namespace extensions {
@@ -176,9 +177,10 @@ class AutomationWebContentsObserver
       params.id = event.id;
       params.event_type = event.event_type;
       params.update = event.update;
-      params.location_offset =
-          web_contents()->GetContainerBounds().OffsetFromOrigin();
       params.event_from = event.event_from;
+#if defined(USE_AURA)
+      params.mouse_location = aura::Env::GetInstance()->last_mouse_location();
+#endif
 
       AutomationEventRouter* router = AutomationEventRouter::GetInstance();
       router->DispatchAccessibilityEvent(params);
@@ -349,6 +351,19 @@ AutomationInternalPerformActionFunction::ConvertToAXActionData(
                                       get_image_data_params.max_height);
       break;
     }
+    case api::automation_internal::ACTION_TYPE_HITTEST: {
+      api::automation_internal::HitTestParams hit_test_params;
+      EXTENSION_FUNCTION_VALIDATE(
+          api::automation_internal::HitTestParams::Populate(
+              params->opt_args.additional_properties, &hit_test_params));
+      action->action = ui::AX_ACTION_HIT_TEST;
+      action->target_point = gfx::Point(hit_test_params.x, hit_test_params.y);
+      action->hit_test_event_to_fire =
+          ui::ParseAXEvent(hit_test_params.event_to_fire);
+      if (action->hit_test_event_to_fire == ui::AX_EVENT_NONE)
+        return RespondNow(NoArguments());
+      break;
+    }
     case api::automation_internal::ACTION_TYPE_MAKEVISIBLE:
       action->action = ui::AX_ACTION_SCROLL_TO_MAKE_VISIBLE;
       break;
@@ -376,6 +391,17 @@ AutomationInternalPerformActionFunction::ConvertToAXActionData(
         ACTION_TYPE_SETSEQUENTIALFOCUSNAVIGATIONSTARTINGPOINT: {
       action->action =
           ui::AX_ACTION_SET_SEQUENTIAL_FOCUS_NAVIGATION_STARTING_POINT;
+      break;
+    }
+    case api::automation_internal::ACTION_TYPE_CUSTOMACTION: {
+      api::automation_internal::PerformCustomActionParams
+          perform_custom_action_params;
+      EXTENSION_FUNCTION_VALIDATE(
+          api::automation_internal::PerformCustomActionParams::Populate(
+              params->opt_args.additional_properties,
+              &perform_custom_action_params));
+      action->action = ui::AX_ACTION_CUSTOM_ACTION;
+      action->custom_action_id = perform_custom_action_params.custom_action_id;
       break;
     }
     default:

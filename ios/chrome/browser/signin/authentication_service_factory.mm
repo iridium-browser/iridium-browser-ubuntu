@@ -16,6 +16,10 @@
 #include "ios/chrome/browser/signin/signin_manager_factory.h"
 #include "ios/chrome/browser/sync/sync_setup_service_factory.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 // static
 AuthenticationService* AuthenticationServiceFactory::GetForBrowserState(
     ios::ChromeBrowserState* browser_state) {
@@ -58,6 +62,7 @@ AuthenticationServiceFactory::BuildServiceInstanceFor(
       OAuth2TokenServiceFactory::GetForBrowserState(browser_state),
       SyncSetupServiceFactory::GetForBrowserState(browser_state)));
   service->Initialize();
+  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
   return std::move(service);
 }
 

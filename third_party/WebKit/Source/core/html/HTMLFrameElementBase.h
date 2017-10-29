@@ -26,60 +26,67 @@
 
 #include "core/CoreExport.h"
 #include "core/html/HTMLFrameOwnerElement.h"
+#include "public/platform/WebFocusType.h"
 
 namespace blink {
 
 class CORE_EXPORT HTMLFrameElementBase : public HTMLFrameOwnerElement {
  public:
-  bool canContainRangeEndPoint() const final { return false; }
+  bool CanContainRangeEndPoint() const final { return false; }
 
   // FrameOwner overrides:
-  ScrollbarMode scrollingMode() const final { return m_scrollingMode; }
-  int marginWidth() const final { return m_marginWidth; }
-  int marginHeight() const final { return m_marginHeight; }
+  ScrollbarMode ScrollingMode() const final { return scrolling_mode_; }
+  int MarginWidth() const final { return margin_width_; }
+  int MarginHeight() const final { return margin_height_; }
 
  protected:
+  friend class HTMLFrameElementTest;
+  friend class HTMLIFrameElementTest;
+
   HTMLFrameElementBase(const QualifiedName&, Document&);
 
-  void parseAttribute(const AttributeModificationParams&) override;
-  InsertionNotificationRequest insertedInto(ContainerNode*) override;
-  void didNotifySubtreeInsertionsToDocument() final;
-  void attachLayoutTree(const AttachContext& = AttachContext()) override;
+  void ParseAttribute(const AttributeModificationParams&) override;
 
-  // FIXME: Remove this method once we have input routing in the browser
-  // process. See http://crbug.com/339659.
-  void defaultEventHandler(Event*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
+  void DidNotifySubtreeInsertionsToDocument() final;
+  void AttachLayoutTree(AttachContext&) override;
 
-  void setScrollingMode(ScrollbarMode);
-  void setMarginWidth(int);
-  void setMarginHeight(int);
+  void SetScrollingMode(ScrollbarMode);
+  void SetMarginWidth(int);
+  void SetMarginHeight(int);
 
-  void frameOwnerPropertiesChanged();
+  // Return the origin which is to be used for feature policy container
+  // policies, when the "allow" attribute is used. When that attribute is used,
+  // the feature policy which is constructed should only allow a given feature
+  // on the origin which is specified by the frame's "src" attribute.
+  // It also takes into account details such as the frame's sandbox status, and
+  // whether the frame should inherit its parent's origin.
+  RefPtr<SecurityOrigin> GetOriginForFeaturePolicy() const override;
 
  private:
-  bool supportsFocus() const final;
-  void setFocused(bool) final;
+  bool SupportsFocus() const final;
+  void SetFocused(bool, WebFocusType) final;
 
-  bool isURLAttribute(const Attribute&) const final;
-  bool hasLegalLinkAttribute(const QualifiedName&) const final;
-  bool isHTMLContentAttribute(const Attribute&) const final;
+  bool IsURLAttribute(const Attribute&) const final;
+  bool HasLegalLinkAttribute(const QualifiedName&) const final;
+  bool IsHTMLContentAttribute(const Attribute&) const final;
 
-  bool areAuthorShadowsAllowed() const final { return false; }
+  bool AreAuthorShadowsAllowed() const final { return false; }
 
-  void setLocation(const String&);
-  void setNameAndOpenURL();
-  bool isURLAllowed() const;
-  void openURL(bool replaceCurrentItem = true);
+  void SetLocation(const String&);
+  void SetNameAndOpenURL();
+  bool IsURLAllowed() const;
+  void OpenURL(bool replace_current_item = true);
 
-  ScrollbarMode m_scrollingMode;
-  int m_marginWidth;
-  int m_marginHeight;
+  ScrollbarMode scrolling_mode_;
+  int margin_width_;
+  int margin_height_;
 
-  AtomicString m_URL;
-  AtomicString m_frameName;
+  AtomicString url_;
+  AtomicString frame_name_;
 };
 
-inline bool isHTMLFrameElementBase(const HTMLElement& element) {
+inline bool IsHTMLFrameElementBase(const HTMLElement& element) {
   return isHTMLFrameElement(element) || isHTMLIFrameElement(element);
 }
 

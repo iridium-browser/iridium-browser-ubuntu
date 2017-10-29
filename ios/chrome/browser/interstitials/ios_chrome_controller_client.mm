@@ -11,6 +11,7 @@
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/web/public/interstitials/web_interstitial.h"
 #import "ios/web/public/navigation_manager.h"
+#include "ios/web/public/reload_type.h"
 #include "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -44,6 +45,10 @@ void IOSChromeControllerClient::GoBack() {
   web_interstitial_->DontProceed();
 }
 
+bool IOSChromeControllerClient::CanGoBack() {
+  return web_state_->GetNavigationManager()->CanGoBack();
+}
+
 void IOSChromeControllerClient::GoBackAfterNavigationCommitted() {
   NOTREACHED();
 }
@@ -54,12 +59,19 @@ void IOSChromeControllerClient::Proceed() {
 }
 
 void IOSChromeControllerClient::Reload() {
-  web_state_->GetNavigationManager()->Reload(true);
+  web_state_->GetNavigationManager()->Reload(web::ReloadType::NORMAL,
+                                             true /*check_for_repost*/);
 }
 
 void IOSChromeControllerClient::OpenUrlInCurrentTab(const GURL& url) {
   web_state_->OpenURL(web::WebState::OpenURLParams(
       url, web::Referrer(), WindowOpenDisposition::CURRENT_TAB,
+      ui::PAGE_TRANSITION_LINK, false));
+}
+
+void IOSChromeControllerClient::OpenUrlInNewForegroundTab(const GURL& url) {
+  web_state_->OpenURL(web::WebState::OpenURLParams(
+      url, web::Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui::PAGE_TRANSITION_LINK, false));
 }
 

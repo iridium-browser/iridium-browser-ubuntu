@@ -8,6 +8,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/browser_process.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/javascript_dialogs/javascript_dialog_tab_helper.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
@@ -30,8 +32,6 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/login/auth/user_context.h"
-#include "components/app_modal/javascript_app_modal_dialog.h"
-#include "components/app_modal/native_app_modal_dialog.h"
 #include "components/browser_sync/browser_sync_switches.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/account_id/account_id.h"
@@ -54,8 +54,6 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
-using app_modal::AppModalDialog;
-using app_modal::JavaScriptAppModalDialog;
 using net::test_server::BasicHttpResponse;
 using net::test_server::HttpRequest;
 using net::test_server::HttpResponse;
@@ -153,7 +151,7 @@ class BrowserThreadBlocker {
             base::WaitableEvent::InitialState::NOT_SIGNALED)) {
     content::BrowserThread::PostTask(
         identifier, FROM_HERE,
-        base::Bind(&BlockThreadOnThread, base::Owned(unblock_event_)));
+        base::BindOnce(&BlockThreadOnThread, base::Owned(unblock_event_)));
   }
   ~BrowserThreadBlocker() { unblock_event_->Signal(); }
 
@@ -234,7 +232,7 @@ class OAuth2Test : public OobeBaseTest {
     // Wait for the session merge to finish.
     WaitForMergeSessionCompletion(OAuth2LoginManager::SESSION_RESTORE_DONE);
 
-    // Check for existance of refresh token.
+    // Check for existence of refresh token.
     ProfileOAuth2TokenService* token_service =
           ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
     EXPECT_TRUE(token_service->RefreshTokenIsAvailable(account_id));
@@ -410,8 +408,7 @@ class CookieReader : public base::RefCountedThreadSafe<CookieReader> {
     context_ = profile->GetRequestContext();
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
-        base::Bind(&CookieReader::ReadCookiesOnIOThread,
-                   this));
+        base::BindOnce(&CookieReader::ReadCookiesOnIOThread, this));
     runner_ = new content::MessageLoopRunner;
     runner_->Run();
   }
@@ -436,15 +433,14 @@ class CookieReader : public base::RefCountedThreadSafe<CookieReader> {
 
   void ReadCookiesOnIOThread() {
     context_->GetURLRequestContext()->cookie_store()->GetAllCookiesAsync(
-        base::Bind(&CookieReader::OnGetAllCookiesOnUIThread, this));
+        base::BindOnce(&CookieReader::OnGetAllCookiesOnUIThread, this));
   }
 
   void OnGetAllCookiesOnUIThread(const net::CookieList& cookies) {
     cookie_list_ = cookies;
     content::BrowserThread::PostTask(
         content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&CookieReader::OnCookiesReadyOnUIThread,
-                   this));
+        base::BindOnce(&CookieReader::OnCookiesReadyOnUIThread, this));
   }
 
   void OnCookiesReadyOnUIThread() {
@@ -461,7 +457,7 @@ class CookieReader : public base::RefCountedThreadSafe<CookieReader> {
 // PRE_MergeSession is testing merge session for a new profile.
 IN_PROC_BROWSER_TEST_F(OAuth2Test, PRE_PRE_PRE_MergeSession) {
   StartNewUserSession(true);
-  // Check for existance of refresh token.
+  // Check for existence of refresh token.
   std::string account_id = PickAccountId(profile(), kTestGaiaId, kTestEmail);
   ProfileOAuth2TokenService* token_service =
         ProfileOAuth2TokenServiceFactory::GetForProfile(
@@ -542,9 +538,15 @@ IN_PROC_BROWSER_TEST_F(OAuth2Test, PRE_OverlappingContinueSessionRestore) {
   StartNewUserSession(true);
 }
 
+#if defined(OS_CHROMEOS)
+#define MAYBE_OverlappingContinueSessionRestore \
+  DISABLED_OverlappingContinueSessionRestore
+#else
+#define MAYBE_OverlappingContinueSessionRestore \
+  OverlappingContinueSessionRestore
+#endif
 // Tests that ContinueSessionRestore could be called multiple times.
-// TODO(xiyuan): Re-enable when the test is no longer flaky crbug.com/496325
-IN_PROC_BROWSER_TEST_F(OAuth2Test, DISABLED_OverlappingContinueSessionRestore) {
+IN_PROC_BROWSER_TEST_F(OAuth2Test, MAYBE_OverlappingContinueSessionRestore) {
   SetupGaiaServerForUnexpiredAccount();
   SimulateNetworkOnline();
 
@@ -589,6 +591,37 @@ IN_PROC_BROWSER_TEST_F(OAuth2Test, DISABLED_OverlappingContinueSessionRestore) {
   EXPECT_TRUE(token_service->RefreshTokenIsAvailable(account_id));
 }
 
+// Tests that user session is terminated if merge session fails for an online
+// sign-in. This is necessary to prevent policy exploit.
+// See http://crbug.com/677312
+IN_PROC_BROWSER_TEST_F(OAuth2Test, TerminateOnBadMergeSessionAfterOnlineAuth) {
+  SimulateNetworkOnline();
+  WaitForGaiaPageLoad();
+
+  content::WindowedNotificationObserver termination_waiter(
+      chrome::NOTIFICATION_APP_TERMINATING,
+      content::NotificationService::AllSources());
+
+  // Configure FakeGaia so that online auth succeeds but merge session fails.
+  FakeGaia::MergeSessionParams params;
+  params.auth_sid_cookie = kTestAuthSIDCookie;
+  params.auth_lsid_cookie = kTestAuthLSIDCookie;
+  params.auth_code = kTestAuthCode;
+  params.refresh_token = kTestRefreshToken;
+  params.access_token = kTestAuthLoginAccessToken;
+  fake_gaia_->SetMergeSessionParams(params);
+
+  // Simulate an online sign-in.
+  GetLoginDisplay()->ShowSigninScreenForCreds(kTestEmail, kTestAccountPassword);
+
+  // User session should be terminated.
+  termination_waiter.Wait();
+
+  // Merge session should fail. Check after |termination_waiter| to ensure
+  // user profile is initialized and there is an OAuth2LoginManage.
+  WaitForMergeSessionCompletion(OAuth2LoginManager::SESSION_RESTORE_FAILED);
+}
+
 const char kGooglePageContent[] =
     "<html><title>Hello!</title><script>alert('hello');</script>"
     "<body>Hello Google!</body></html>";
@@ -619,8 +652,8 @@ class FakeGoogle {
       start_event_.Signal();
       content::BrowserThread::PostTask(
           content::BrowserThread::UI, FROM_HERE,
-          base::Bind(&FakeGoogle::QuitRunnerOnUIThread,
-                     base::Unretained(this)));
+          base::BindOnce(&FakeGoogle::QuitRunnerOnUIThread,
+                         base::Unretained(this)));
 
       http_response->set_code(net::HTTP_OK);
       http_response->set_content_type("text/html");
@@ -693,8 +726,8 @@ class DelayedFakeGaia : public FakeGaia {
     start_event_.Signal();
     content::BrowserThread::PostTask(
         content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&DelayedFakeGaia::QuitRunnerOnUIThread,
-                   base::Unretained(this)));
+        base::BindOnce(&DelayedFakeGaia::QuitRunnerOnUIThread,
+                       base::Unretained(this)));
     blocking_event_.Wait();
     FakeGaia::HandleMergeSession(request, http_response);
   }
@@ -802,11 +835,18 @@ IN_PROC_BROWSER_TEST_F(MergeSessionTest, PageThrottle) {
   StartNewUserSession(false);
 
   // Try to open a page from google.com.
-  Browser* browser =
-      FindOrCreateVisibleBrowser(profile());
+  Browser* browser = FindOrCreateVisibleBrowser(profile());
   ui_test_utils::NavigateToURLWithDisposition(
       browser, fake_google_page_url_, WindowOpenDisposition::CURRENT_TAB,
       ui_test_utils::BROWSER_TEST_NONE);
+
+  // JavaScript dialog wait setup.
+  content::WebContents* tab =
+      browser->tab_strip_model()->GetActiveWebContents();
+  JavaScriptDialogTabHelper* js_helper =
+      JavaScriptDialogTabHelper::FromWebContents(tab);
+  base::RunLoop dialog_wait;
+  js_helper->SetDialogShownCallbackForTesting(dialog_wait.QuitClosure());
 
   // Wait until we get send merge session request.
   WaitForMergeSessionToStart();
@@ -830,11 +870,8 @@ IN_PROC_BROWSER_TEST_F(MergeSessionTest, PageThrottle) {
 
   // Check that real page is no longer blocked by the throttle and that the
   // real page pops up JS dialog.
-  AppModalDialog* dialog = ui_test_utils::WaitForAppModalDialog();
-  ASSERT_TRUE(dialog->IsJavaScriptModalDialog());
-  JavaScriptAppModalDialog* js_dialog =
-      static_cast<JavaScriptAppModalDialog*>(dialog);
-  js_dialog->native_dialog()->AcceptAppModalDialog();
+  dialog_wait.Run();
+  js_helper->HandleJavaScriptDialog(tab, true, nullptr);
 
   ui_test_utils::GetCurrentTabTitle(browser, &title);
   DVLOG(1) << "Loaded page at the end : " << title;

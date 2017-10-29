@@ -17,7 +17,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/attestation/attestation_ca_client.h"
 #include "chrome/browser/chromeos/policy/active_directory_policy_manager.h"
@@ -70,13 +70,12 @@ namespace {
 // Install attributes for tests.
 chromeos::InstallAttributes* g_testing_install_attributes = nullptr;
 
-// Helper that returns a new SequencedTaskRunner backed by the blocking pool.
-// Each SequencedTaskRunner returned is independent from the others.
+// Helper that returns a new BACKGROUND SequencedTaskRunner. Each
+// SequencedTaskRunner returned is independent from the others.
 scoped_refptr<base::SequencedTaskRunner> GetBackgroundTaskRunner() {
-  base::SequencedWorkerPool* pool = BrowserThread::GetBlockingPool();
-  CHECK(pool);
-  return pool->GetSequencedTaskRunnerWithShutdownBehavior(
-      pool->GetSequenceToken(), base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+  return base::CreateSequencedTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 }
 
 }  // namespace
@@ -88,12 +87,14 @@ BrowserPolicyConnectorChromeOS::BrowserPolicyConnectorChromeOS()
     g_testing_install_attributes = nullptr;
   }
 
-  // SystemSaltGetter or DBusThreadManager may be uninitialized on unit tests.
+  // SystemSaltGetter, DBusThreadManager or DeviceSettingsService may be
+  // uninitialized on unit tests.
 
   // TODO(satorux): Remove SystemSaltGetter::IsInitialized() when it's ready
   // (removing it now breaks tests). crbug.com/141016.
   if (chromeos::SystemSaltGetter::IsInitialized() &&
-      chromeos::DBusThreadManager::IsInitialized()) {
+      chromeos::DBusThreadManager::IsInitialized() &&
+      chromeos::DeviceSettingsService::IsInitialized()) {
     // Don't initialize install attributes if g_testing_install_attributes have
     // been injected.
     if (!install_attributes_) {
@@ -238,8 +239,19 @@ bool BrowserPolicyConnectorChromeOS::IsActiveDirectoryManaged() const {
   return install_attributes_ && install_attributes_->IsActiveDirectoryManaged();
 }
 
-std::string BrowserPolicyConnectorChromeOS::GetEnterpriseDomain() const {
+std::string BrowserPolicyConnectorChromeOS::GetEnterpriseEnrollmentDomain()
+    const {
   return install_attributes_ ? install_attributes_->GetDomain() : std::string();
+}
+
+std::string BrowserPolicyConnectorChromeOS::GetEnterpriseDisplayDomain() const {
+  if (device_cloud_policy_manager_) {
+    const enterprise_management::PolicyData* policy =
+        device_cloud_policy_manager_->device_store()->policy();
+    if (policy && policy->has_display_domain())
+      return policy->display_domain();
+  }
+  return GetEnterpriseEnrollmentDomain();
 }
 
 std::string BrowserPolicyConnectorChromeOS::GetRealm() const {

@@ -14,7 +14,6 @@
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner_util.h"
-#include "base/threading/worker_pool.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
@@ -29,6 +28,7 @@
 #include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
+#include "chrome/browser/ui/webui/chromeos/network_element_localized_strings_provider.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
@@ -55,7 +55,7 @@ namespace chromeos {
 // NetworkScreenHandler, public: -----------------------------------------------
 
 NetworkScreenHandler::NetworkScreenHandler(CoreOobeView* core_oobe_view)
-    : core_oobe_view_(core_oobe_view) {
+    : BaseScreenHandler(kScreenId), core_oobe_view_(core_oobe_view) {
   set_call_js_prefix(kJsScreenPath);
   DCHECK(core_oobe_view_);
 }
@@ -97,7 +97,7 @@ void NetworkScreenHandler::Show() {
   network_screen_params.SetBoolean("isDeveloperMode",
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kSystemDevMode));
-  ShowScreenWithData(OobeScreen::SCREEN_OOBE_NETWORK, &network_screen_params);
+  ShowScreenWithData(kScreenId, &network_screen_params);
   core_oobe_view_->InitDemoModeDetection();
 }
 
@@ -191,6 +191,7 @@ void NetworkScreenHandler::DeclareLocalizedValues(
 
   builder->Add("timezoneDropdownTitle", IDS_TIMEZONE_DROPDOWN_TITLE);
   builder->Add("timezoneButtonText", IDS_TIMEZONE_BUTTON_TEXT);
+  network_element::AddLocalizedValuesToBuilder(builder);
 }
 
 void NetworkScreenHandler::GetAdditionalParameters(
@@ -246,11 +247,10 @@ void NetworkScreenHandler::GetAdditionalParameters(
   const bool enable_layouts =
       !user_manager::UserManager::Get()->IsUserLoggedIn() && !is_slave;
 
-  dict->Set("languageList", language_list.release());
-  dict->Set(
-      "inputMethodsList",
-      GetAndActivateLoginKeyboardLayouts(
-          application_locale, selected_input_method, enable_layouts).release());
+  dict->Set("languageList", std::move(language_list));
+  dict->Set("inputMethodsList",
+            GetAndActivateLoginKeyboardLayouts(
+                application_locale, selected_input_method, enable_layouts));
   dict->Set("timezoneList", GetTimezoneList());
 }
 
@@ -268,7 +268,7 @@ void NetworkScreenHandler::Initialize() {
 // NetworkScreenHandler, private: ----------------------------------------------
 
 // static
-base::ListValue* NetworkScreenHandler::GetTimezoneList() {
+std::unique_ptr<base::ListValue> NetworkScreenHandler::GetTimezoneList() {
   std::string current_timezone_id;
   CrosSettings::Get()->GetString(kSystemTimezone, &current_timezone_id);
 
@@ -292,7 +292,7 @@ base::ListValue* NetworkScreenHandler::GetTimezoneList() {
     timezone_list->Append(std::move(timezone_option));
   }
 
-  return timezone_list.release();
+  return timezone_list;
 }
 
 }  // namespace chromeos

@@ -29,18 +29,23 @@
 #ifndef ResourceLoader_h
 #define ResourceLoader_h
 
+#include <memory>
+#include "base/gtest_prod_util.h"
 #include "platform/PlatformExport.h"
+#include "platform/heap/Handle.h"
+#include "platform/heap/SelfKeepAlive.h"
+#include "platform/loader/fetch/CrossOriginAccessControl.h"
+#include "platform/loader/fetch/Resource.h"
+#include "platform/loader/fetch/ResourceLoadScheduler.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
-#include "platform/network/ResourceRequest.h"
+#include "platform/loader/fetch/ResourceRequest.h"
+#include "platform/wtf/Forward.h"
 #include "public/platform/WebURLLoader.h"
 #include "public/platform/WebURLLoaderClient.h"
-#include "wtf/Forward.h"
-#include <memory>
 
 namespace blink {
 
 class FetchContext;
-class Resource;
 class ResourceError;
 class ResourceFetcher;
 
@@ -50,31 +55,36 @@ class ResourceFetcher;
 // implemented in this class basically.
 class PLATFORM_EXPORT ResourceLoader final
     : public GarbageCollectedFinalized<ResourceLoader>,
+      public ResourceLoadSchedulerClient,
       protected WebURLLoaderClient {
-  USING_PRE_FINALIZER(ResourceLoader, dispose);
+  USING_GARBAGE_COLLECTED_MIXIN(ResourceLoader);
+  USING_PRE_FINALIZER(ResourceLoader, Dispose);
 
  public:
-  static ResourceLoader* create(ResourceFetcher*, Resource*);
+  static ResourceLoader* Create(ResourceFetcher*,
+                                ResourceLoadScheduler*,
+                                Resource*);
   ~ResourceLoader() override;
-  DECLARE_TRACE();
+  DECLARE_VIRTUAL_TRACE();
 
-  void start(const ResourceRequest&);
+  void Start();
 
-  void cancel();
+  void Cancel();
 
-  void setDefersLoading(bool);
+  void SetDefersLoading(bool);
 
-  void didChangePriority(ResourceLoadPriority, int intraPriorityValue);
+  void DidChangePriority(ResourceLoadPriority, int intra_priority_value);
 
   // Called before start() to activate cache-aware loading if enabled in
   // |m_resource->options()| and applicable.
-  void activateCacheAwareLoadingIfNeeded(const ResourceRequest&);
+  void ActivateCacheAwareLoadingIfNeeded(const ResourceRequest&);
 
-  bool isCacheAwareLoadingActivated() const {
-    return m_isCacheAwareLoadingActivated;
+  bool IsCacheAwareLoadingActivated() const {
+    return is_cache_aware_loading_activated_;
   }
 
-  ResourceFetcher* fetcher() { return m_fetcher; }
+  ResourceFetcher* Fetcher() { return fetcher_; }
+  bool GetKeepalive() const;
 
   // WebURLLoaderClient
   //
@@ -88,49 +98,72 @@ class PLATFORM_EXPORT ResourceLoader final
   // A failed load is indicated by 1 didFail(), which can occur at any time
   // before didFinishLoading(), including synchronous inside one of the other
   // callbacks via ResourceLoader::cancel()
-  bool willFollowRedirect(WebURLRequest&,
-                          const WebURLResponse& redirectResponse) override;
-  void didSendData(unsigned long long bytesSent,
-                   unsigned long long totalBytesToBeSent) override;
-  void didReceiveResponse(const WebURLResponse&) override;
-  void didReceiveResponse(const WebURLResponse&,
+  bool WillFollowRedirect(WebURLRequest&,
+                          const WebURLResponse& redirect_response) override;
+  void DidSendData(unsigned long long bytes_sent,
+                   unsigned long long total_bytes_to_be_sent) override;
+  void DidReceiveResponse(const WebURLResponse&) override;
+  void DidReceiveResponse(const WebURLResponse&,
                           std::unique_ptr<WebDataConsumerHandle>) override;
-  void didReceiveCachedMetadata(const char* data, int length) override;
-  void didReceiveData(const char*, int) override;
-  void didReceiveTransferSizeUpdate(int transferSizeDiff) override;
-  void didDownloadData(int, int) override;
-  void didFinishLoading(double finishTime,
-                        int64_t encodedDataLength,
-                        int64_t encodedBodyLength) override;
-  void didFail(const WebURLError&,
-               int64_t encodedDataLength,
-               int64_t encodedBodyLength) override;
-  void handleError(const ResourceError&);
+  void DidReceiveCachedMetadata(const char* data, int length) override;
+  void DidReceiveData(const char*, int) override;
+  void DidReceiveTransferSizeUpdate(int transfer_size_diff) override;
+  void DidDownloadData(int, int) override;
+  void DidFinishLoading(double finish_time,
+                        int64_t encoded_data_length,
+                        int64_t encoded_body_length,
+                        int64_t decoded_body_length) override;
+  void DidFail(const WebURLError&,
+               int64_t encoded_data_length,
+               int64_t encoded_body_length,
+               int64_t decoded_body_length) override;
+  void HandleError(const ResourceError&);
 
-  void didFinishLoadingFirstPartInMultipart();
+  void DidFinishLoadingFirstPartInMultipart();
+
+  // ResourceLoadSchedulerClient.
+  void Run() override;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(ResourceLoaderTest, DetermineCORSStatus);
+
+  friend class SubresourceIntegrityTest;
+
   // Assumes ResourceFetcher and Resource are non-null.
-  ResourceLoader(ResourceFetcher*, Resource*);
+  ResourceLoader(ResourceFetcher*, ResourceLoadScheduler*, Resource*);
+
+  void StartWith(const ResourceRequest&);
+
+  void Release(ResourceLoadScheduler::ReleaseOption);
 
   // This method is currently only used for service worker fallback request and
   // cache-aware loading, other users should be careful not to break
   // ResourceLoader state.
-  void restart(const ResourceRequest&);
+  void Restart(const ResourceRequest&);
 
-  FetchContext& context() const;
-  ResourceRequestBlockedReason canAccessResponse(Resource*,
-                                                 const ResourceResponse&) const;
+  FetchContext& Context() const;
+  ResourceRequestBlockedReason CanAccessResponse(Resource*,
+                                                 const ResourceResponse&,
+                                                 const String&) const;
 
-  void cancelForRedirectAccessCheckError(const KURL&,
+  CORSStatus DetermineCORSStatus(const ResourceResponse&, StringBuilder&) const;
+
+  void CancelForRedirectAccessCheckError(const KURL&,
                                          ResourceRequestBlockedReason);
-  void requestSynchronously(const ResourceRequest&);
-  void dispose();
+  void RequestSynchronously(const ResourceRequest&);
+  void Dispose();
 
-  std::unique_ptr<WebURLLoader> m_loader;
-  Member<ResourceFetcher> m_fetcher;
-  Member<Resource> m_resource;
-  bool m_isCacheAwareLoadingActivated;
+  std::unique_ptr<WebURLLoader> loader_;
+  ResourceLoadScheduler::ClientId scheduler_client_id_;
+  Member<ResourceFetcher> fetcher_;
+  Member<ResourceLoadScheduler> scheduler_;
+  Member<Resource> resource_;
+
+  // Set when the request's "keepalive" is specified (e.g., for SendBeacon).
+  // https://fetch.spec.whatwg.org/#request-keepalive-flag
+  SelfKeepAlive<ResourceLoader> keepalive_;
+
+  bool is_cache_aware_loading_activated_;
 };
 
 }  // namespace blink

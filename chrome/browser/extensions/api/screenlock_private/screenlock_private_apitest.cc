@@ -18,7 +18,6 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/proximity_auth/screenlock_bridge.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/api/test/test_api.h"
 #include "extensions/browser/notification_types.h"
@@ -48,10 +47,6 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
     command_line->AppendSwitchASCII(
         extensions::switches::kWhitelistedExtensionID, kTestExtensionId);
 
-#if !defined(OS_CHROMEOS)
-    // New profile management needs to be on for non-ChromeOS lock.
-    ::switches::EnableNewProfileManagementForTesting(command_line);
-#endif
   }
 
   void SetUpOnMainThread() override {
@@ -63,19 +58,18 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
         GetProfileAttributesWithPath(profile()->GetPath(), &entry));
     entry->SetAuthInfo(
         kTestGaiaId, base::UTF8ToUTF16(test_account_id_.GetUserEmail()));
-    ExtensionApiTest::SetUpOnMainThread();
-  }
-
- protected:
-  // ExtensionApiTest override:
-  void RunTestOnMainThreadLoop() override {
     registrar_.Add(this,
                    extensions::NOTIFICATION_EXTENSION_TEST_MESSAGE,
                    content::NotificationService::AllSources());
-    ExtensionApiTest::RunTestOnMainThreadLoop();
+    ExtensionApiTest::SetUpOnMainThread();
+  }
+
+  void TearDownOnMainThread() override {
+    ExtensionApiTest::TearDownOnMainThread();
     registrar_.RemoveAll();
   }
 
+ protected:
   // content::NotificationObserver override:
   void Observe(int type,
                const content::NotificationSource& source,
@@ -84,8 +78,7 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
         content::Details<std::pair<std::string, bool*>>(details).ptr()->first;
     if (message == kAttemptClickAuthMessage) {
       proximity_auth::ScreenlockBridge::Get()->lock_handler()->SetAuthType(
-          test_account_id_,
-          proximity_auth::ScreenlockBridge::LockHandler::USER_CLICK,
+          test_account_id_, proximity_auth::mojom::AuthType::USER_CLICK,
           base::string16());
       EasyUnlockService::Get(profile())->AttemptAuth(test_account_id_);
     }

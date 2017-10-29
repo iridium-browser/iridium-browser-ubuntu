@@ -6,12 +6,9 @@ mission of improving the web. We believe that leveraging and contributing to a
 shared test suite is one of the most important tools in achieving
 interoperability between browsers. The [web-platform-tests
 repository](https://github.com/w3c/web-platform-tests) is the primary shared
-test suite where all browser engines are collaborating. There's also a
-[csswg-test repository](https://github.com/w3c/csswg-test) for CSS tests, but
-that will [soon be merged into
-web-platform-tests](https://github.com/w3c/csswg-test/issues/1102).
+test suite where all browser engines are collaborating.
 
-Chromium has 2-way import/export process with the upstream web-platform-tests
+Chromium has a 2-way import/export process with the upstream web-platform-tests
 repository, where tests are imported into
 [LayoutTests/external/wpt](../../third_party/WebKit/LayoutTests/external/wpt)
 and any changes to the imported tests are also exported to web-platform-tests.
@@ -23,13 +20,13 @@ web-platform-tests, including tips for writing and reviewing tests.
 
 ## Importing tests
 
-Chromium has mirrors
-([web-platform-tests](https://chromium.googlesource.com/external/w3c/web-platform-tests/),
-[csswg-test](https://chromium.googlesource.com/external/w3c/csswg-test/)) of the
+Chromium has a mirror
+([web-platform-tests](https://chromium.googlesource.com/external/w3c/web-platform-tests/)
+of the
 GitHub repos, and periodically imports a subset of the tests so that they are
 run as part of the regular Blink layout test testing process.
 
-The goal of this process are to be able to run web-platform-tests unmodified
+The goals of this process are to be able to run web-platform-tests unmodified
 locally just as easily as we can run the Blink tests, and ensure that we are
 tracking tip-of-tree in the web-platform-tests repository as closely as
 possible, and running as many of the tests as possible.
@@ -37,17 +34,67 @@ possible, and running as many of the tests as possible.
 ### Automatic import process
 
 There is an automatic process for updating the Chromium copy of
-web-platform-tests. The import is done by the builder [w3c-test-autoroller
-builder](https://build.chromium.org/p/chromium.infra.cron/builders/w3c-test-autoroller).
+web-platform-tests. The import is done by the builder [wpt-importer
+builder](https://build.chromium.org/p/chromium.infra.cron/builders/wpt-importer).
 
 The easiest way to check the status of recent imports is to look at:
 
--   Recent logs on Buildbot for [w3c-test-autoroller
-    builder](https://build.chromium.org/p/chromium.infra.cron/builders/w3c-test-autoroller)
+-   Recent logs on Buildbot for [wpt-importer
+    builder](https://build.chromium.org/p/chromium.infra.cron/builders/wpt-importer)
 -   Recent CLs created by
-    [blink-w3c-test-autoroller@chromium.org](https://codereview.chromium.org/search?owner=blink-w3c-test-autoroller%40chromium.org).
+    [blink-w3c-test-autoroller@chromium.org](https://chromium-review.googlesource.com/q/owner:blink-w3c-test-autoroller%40chromium.org).
 
 Automatic imports are intended to run at least once every 24 hours.
+
+### Failures caused by automatic imports.
+
+If there are new test failures that start after an auto-import,
+there are several possible causes, including:
+
+ 1. New baselines for flaky tests were added (http://crbug.com/701234).
+ 2. Modified tests should have new results for non-Release builds but they weren't added (http://crbug.com/725160).
+ 3. New baselines were added for tests with non-deterministic test results (http://crbug.com/705125).
+
+Because these tests are imported from the Web Platform tests, it is better
+to have them in the repository (and marked failing) than not, so prefer to
+[add test expectations](layout_test_expectations.md) rather than reverting.
+However, if a huge number of tests are failing, please revert the CL so we
+can fix it manually.
+
+### Automatic export process
+
+If you upload a CL with any changes in
+[third_party/WebKit/LayoutTests/external/wpt](../../third_party/WebKit/LayoutTests/external/wpt),
+once you add reviewers the exporter will create a provisional pull request with
+those changes in the [upstream WPT GitHub repository](https://github.com/w3c/web-platform-tests/).
+
+Once you're ready to land your CL, please check the Travis CI status on the
+upstream PR (link at the bottom of the page). If it's green, go ahead and land your CL
+and the exporter will automatically remove the "do not merge yet" label and merge the PR.
+
+If Travis CI is red on the upstream PR, please try to resolve the failures before
+merging. If you run into Travis CI issues, or if you have a CL with WPT changes that
+the exporter did not pick up, please reach out to ecosystem-infra@chromium.org.
+
+Additional things to note:
+
+-   CLs that change over 1000 files will not be exported.
+-   All PRs use the
+    [`chromium-export`](https://github.com/w3c/web-platform-tests/pulls?utf8=%E2%9C%93&q=is%3Apr%20label%3Achromium-export) label.
+-   All PRs for CLs that haven't yet been landed in Chromium also use the
+    [`do not merge yet`](https://github.com/w3c/web-platform-tests/pulls?q=is%3Apr+is%3Aopen+label%3A%22do+not+merge+yet%22) label.
+-   The exporter cannot create upstream PRs for in-flight CLs with binary files (e.g. webm files).
+    An export PR will still be made after the CL lands.
+
+For maintainers:
+
+-   The exporter runs continuously under the
+    [chromium.infra.cron master](https://build.chromium.org/p/chromium.infra.cron/builders/wpt-exporter).
+-   The source lives in
+    [third_party/WebKit/Tools/Scripts/wpt-exporter](../../third_party/WebKit/Tools/Scripts/wpt-exporter).
+-   If the exporter starts misbehaving
+    (for example, creating the same PR over and over again)
+    put it in "dry run" mode by landing [this CL](https://crrev.com/c/462381/).
 
 ### Skipped tests
 
@@ -58,8 +105,8 @@ which has a list of directories to skip while importing.
 In addition to the directories and tests explicitly skipped there, tests may
 also be skipped for a couple other reasons, e.g. if the file path is too long
 for Windows. To check what files are skipped in import, check the recent logs
-for [w3c-test-autoroller
-builder](https://build.chromium.org/p/chromium.infra.cron/builders/w3c-test-autoroller).
+for [wpt-importer
+builder](https://build.chromium.org/p/chromium.infra.cron/builders/wpt-importer).
 
 ### Manual import
 
@@ -120,8 +167,15 @@ APIs cannot yet be written as part of web-platform-tests.
 
 An alternative is to write manual tests that are automated with scripts from
 [wpt_automation](../../third_party/WebKit/LayoutTests/external/wpt_automation).
+Injection of JS in manual tests is determined by `loadAutomationScript` in
+[testharnessreport.js](../../third_party/WebKit/LayoutTests/resources/testharnessreport.js).
+
 Such tests still require case-by-case automation to run for other browser
 engines, but are more valuable than purely manual tests.
+
+Manual tests that have no automation are still imported, but skipped in
+[NeverFixTests](../../third_party/WebKit/LayoutTests/NeverFixTests); see
+[issue 738489](https://crbug.com/738489).
 
 *** note
 TODO(foolip): Figure out and document a more scalable test automation solution.

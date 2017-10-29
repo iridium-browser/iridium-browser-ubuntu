@@ -12,6 +12,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/time/time.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
@@ -28,7 +29,7 @@
 #include "components/sync/model/sync_error_factory_mock.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/protocol/theme_specifics.pb.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
@@ -60,19 +61,16 @@ const base::FilePath::CharType kExtensionFilePath[] = FILE_PATH_LITERAL("/oo");
 
 class FakeThemeService : public ThemeService {
  public:
-  FakeThemeService() :
-    using_system_theme_(false),
-    using_default_theme_(false),
-    distinct_from_default_theme_(false),
-    theme_extension_(NULL),
-    is_dirty_(false) {}
+  FakeThemeService() {}
 
   // ThemeService implementation
-  void SetTheme(const extensions::Extension* extension) override {
+  void DoSetTheme(const extensions::Extension* extension,
+                  bool suppress_infobar) override {
     is_dirty_ = true;
     theme_extension_ = extension;
     using_system_theme_ = false;
     using_default_theme_ = false;
+    might_show_infobar_ = !suppress_infobar;
   }
 
   void UseDefaultTheme() override {
@@ -112,20 +110,19 @@ class FakeThemeService : public ThemeService {
     return theme_extension_.get();
   }
 
-  bool is_dirty() const {
-    return is_dirty_;
-  }
+  bool is_dirty() const { return is_dirty_; }
 
-  void MarkClean() {
-    is_dirty_ = false;
-  }
+  void MarkClean() { is_dirty_ = false; }
+
+  bool might_show_infobar() const { return might_show_infobar_; }
 
  private:
-  bool using_system_theme_;
-  bool using_default_theme_;
-  bool distinct_from_default_theme_;
+  bool using_system_theme_ = false;
+  bool using_default_theme_ = false;
+  bool distinct_from_default_theme_ = false;
   scoped_refptr<const extensions::Extension> theme_extension_;
-  bool is_dirty_;
+  bool is_dirty_ = false;
+  bool might_show_infobar_ = false;
 };
 
 std::unique_ptr<KeyedService> BuildMockThemeService(
@@ -140,7 +137,8 @@ scoped_refptr<extensions::Extension> MakeThemeExtension(
     const string& update_url) {
   base::DictionaryValue source;
   source.SetString(extensions::manifest_keys::kName, name);
-  source.Set(extensions::manifest_keys::kTheme, new base::DictionaryValue());
+  source.Set(extensions::manifest_keys::kTheme,
+             base::MakeUnique<base::DictionaryValue>());
   source.SetString(extensions::manifest_keys::kUpdateURL, update_url);
   source.SetString(extensions::manifest_keys::kVersion, "0.0.0.0");
   string error;
@@ -157,10 +155,7 @@ scoped_refptr<extensions::Extension> MakeThemeExtension(
 
 class ThemeSyncableServiceTest : public testing::Test {
  protected:
-  ThemeSyncableServiceTest()
-      : ui_thread_(content::BrowserThread::UI, &loop_),
-        file_thread_(content::BrowserThread::FILE, &loop_),
-        fake_theme_service_(NULL) {}
+  ThemeSyncableServiceTest() : fake_theme_service_(NULL) {}
 
   ~ThemeSyncableServiceTest() override {}
 
@@ -233,9 +228,7 @@ class ThemeSyncableServiceTest : public testing::Test {
   }
 
   // Needed for setting up extension service.
-  base::MessageLoop loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread file_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
 
 #if defined OS_CHROMEOS
   chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
@@ -476,6 +469,9 @@ TEST_F(ThemeSyncableServiceTest, ProcessSyncThemeChange) {
   error = theme_sync_service_->ProcessSyncChanges(FROM_HERE, change_list);
   EXPECT_FALSE(error.IsSet()) << error.message();
   EXPECT_EQ(fake_theme_service_->theme_extension(), theme_extension_.get());
+  // Don't show an infobar for theme installation. Regression test for
+  // crbug.com/731688
+  EXPECT_FALSE(fake_theme_service_->might_show_infobar());
 }
 
 TEST_F(ThemeSyncableServiceTest, OnThemeChangeByUser) {

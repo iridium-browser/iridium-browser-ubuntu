@@ -25,29 +25,9 @@ using ::base::SharedMemory;
 
 namespace gpu {
 
-TransferBufferManagerInterface::~TransferBufferManagerInterface() {
-}
-
 TransferBufferManager::TransferBufferManager(
     gles2::MemoryTracker* memory_tracker)
-    : shared_memory_bytes_allocated_(0), memory_tracker_(memory_tracker) {}
-
-TransferBufferManager::~TransferBufferManager() {
-  while (!registered_buffers_.empty()) {
-    BufferMap::iterator it = registered_buffers_.begin();
-    if (it->second->backing()->is_shared()) {
-      DCHECK(shared_memory_bytes_allocated_ >= it->second->size());
-      shared_memory_bytes_allocated_ -= it->second->size();
-    }
-    registered_buffers_.erase(it);
-  }
-  DCHECK(!shared_memory_bytes_allocated_);
-
-  base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
-      this);
-}
-
-bool TransferBufferManager::Initialize() {
+    : shared_memory_bytes_allocated_(0), memory_tracker_(memory_tracker) {
   // When created from InProcessCommandBuffer, we won't have a |memory_tracker_|
   // so don't register a dump provider.
   if (memory_tracker_) {
@@ -55,7 +35,19 @@ bool TransferBufferManager::Initialize() {
         this, "gpu::TransferBufferManager",
         base::ThreadTaskRunnerHandle::Get());
   }
-  return true;
+}
+
+TransferBufferManager::~TransferBufferManager() {
+  while (!registered_buffers_.empty()) {
+    BufferMap::iterator it = registered_buffers_.begin();
+    DCHECK(shared_memory_bytes_allocated_ >= it->second->size());
+    shared_memory_bytes_allocated_ -= it->second->size();
+    registered_buffers_.erase(it);
+  }
+  DCHECK(!shared_memory_bytes_allocated_);
+
+  base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
+      this);
 }
 
 bool TransferBufferManager::RegisterTransferBuffer(
@@ -79,8 +71,8 @@ bool TransferBufferManager::RegisterTransferBuffer(
   DCHECK(!(reinterpret_cast<uintptr_t>(buffer->memory()) &
            (kCommandBufferEntrySize - 1)));
 
-  if (buffer->backing()->is_shared())
-    shared_memory_bytes_allocated_ += buffer->size();
+  shared_memory_bytes_allocated_ += buffer->size();
+
   registered_buffers_[id] = buffer;
 
   return true;
@@ -93,10 +85,9 @@ void TransferBufferManager::DestroyTransferBuffer(int32_t id) {
     return;
   }
 
-  if (it->second->backing()->is_shared()) {
-    DCHECK(shared_memory_bytes_allocated_ >= it->second->size());
-    shared_memory_bytes_allocated_ -= it->second->size();
-  }
+  DCHECK(shared_memory_bytes_allocated_ >= it->second->size());
+  shared_memory_bytes_allocated_ -= it->second->size();
+
   registered_buffers_.erase(it);
 }
 
@@ -138,9 +129,15 @@ bool TransferBufferManager::OnMemoryDump(
     MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_name);
     dump->AddScalar(MemoryAllocatorDump::kNameSize,
                     MemoryAllocatorDump::kUnitsBytes, buffer->size());
-    if (buffer->backing()->is_shared()) {
-      auto guid = GetBufferGUIDForTracing(memory_tracker_->ClientTracingId(),
-                                          buffer_id);
+
+    auto guid =
+        GetBufferGUIDForTracing(memory_tracker_->ClientTracingId(), buffer_id);
+    auto shared_memory_guid =
+        buffer->backing()->shared_memory_handle().GetGUID();
+    if (!shared_memory_guid.is_empty()) {
+      pmd->CreateSharedMemoryOwnershipEdge(
+          dump->guid(), guid, shared_memory_guid, 0 /* importance */);
+    } else {
       pmd->CreateSharedGlobalAllocatorDump(guid);
       pmd->AddOwnershipEdge(dump->guid(), guid);
     }

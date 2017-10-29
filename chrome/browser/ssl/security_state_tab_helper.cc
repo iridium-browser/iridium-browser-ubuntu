@@ -9,14 +9,13 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/policy/policy_cert_service.h"
-#include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "components/prefs/pref_service.h"
 #include "components/security_state/content/content_utils.h"
 #include "components/ssl_config/ssl_config_prefs.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -29,6 +28,11 @@
 #include "third_party/boringssl/src/include/openssl/ssl.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/policy/policy_cert_service.h"
+#include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
+#endif  // defined(OS_CHROMEOS)
+
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(SecurityStateTabHelper);
 
 using safe_browsing::SafeBrowsingUIManager;
@@ -36,7 +40,14 @@ using safe_browsing::SafeBrowsingUIManager;
 SecurityStateTabHelper::SecurityStateTabHelper(
     content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      logged_http_warning_on_current_navigation_(false) {}
+      logged_http_warning_on_current_navigation_(false),
+      is_incognito_(false) {
+  content::BrowserContext* context = web_contents->GetBrowserContext();
+  if (context->IsOffTheRecord() &&
+      !Profile::FromBrowserContext(context)->IsGuestSession()) {
+    is_incognito_ = true;
+  }
+}
 
 SecurityStateTabHelper::~SecurityStateTabHelper() {}
 
@@ -90,7 +101,8 @@ void SecurityStateTabHelper::VisibleSecurityStateChanged() {
 void SecurityStateTabHelper::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
   if (time_of_http_warning_on_current_navigation_.is_null() ||
-      !navigation_handle->IsInMainFrame() || navigation_handle->IsSamePage()) {
+      !navigation_handle->IsInMainFrame() ||
+      navigation_handle->IsSameDocument()) {
     return;
   }
   // Record how quickly a user leaves a site after encountering an
@@ -109,10 +121,24 @@ void SecurityStateTabHelper::DidStartNavigation(
 
 void SecurityStateTabHelper::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (navigation_handle->IsInMainFrame() && !navigation_handle->IsSamePage()) {
-    // Only reset the console message flag for main-frame navigations,
-    // and not for same-page navigations like reference fragments and pushState.
-    logged_http_warning_on_current_navigation_ = false;
+  // Ignore subframe navigations, same-document navigations, and navigations
+  // that did not commit (e.g. HTTP/204 or file downloads).
+  if (!navigation_handle->IsInMainFrame() ||
+      navigation_handle->IsSameDocument() ||
+      !navigation_handle->HasCommitted()) {
+    return;
+  }
+
+  logged_http_warning_on_current_navigation_ = false;
+
+  security_state::SecurityInfo security_info;
+  GetSecurityInfo(&security_info);
+  if (security_info.incognito_downgraded_security_level) {
+    web_contents()->GetMainFrame()->AddMessageToConsole(
+        content::CONSOLE_MESSAGE_LEVEL_WARNING,
+        "This page was loaded non-securely in an incognito mode browser. A "
+        "warning has been added to the URL bar. For more information, see "
+        "https://goo.gl/y8SRRv.");
   }
 }
 
@@ -158,21 +184,23 @@ SecurityStateTabHelper::GetMaliciousContentStatus() const {
       case safe_browsing::SB_THREAT_TYPE_SAFE:
         break;
       case safe_browsing::SB_THREAT_TYPE_URL_PHISHING:
-      case safe_browsing::SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL:
+      case safe_browsing::SB_THREAT_TYPE_URL_CLIENT_SIDE_PHISHING:
+      case safe_browsing::SB_THREAT_TYPE_URL_PASSWORD_PROTECTION_PHISHING:
         return security_state::MALICIOUS_CONTENT_STATUS_SOCIAL_ENGINEERING;
         break;
       case safe_browsing::SB_THREAT_TYPE_URL_MALWARE:
-      case safe_browsing::SB_THREAT_TYPE_CLIENT_SIDE_MALWARE_URL:
+      case safe_browsing::SB_THREAT_TYPE_URL_CLIENT_SIDE_MALWARE:
         return security_state::MALICIOUS_CONTENT_STATUS_MALWARE;
         break;
       case safe_browsing::SB_THREAT_TYPE_URL_UNWANTED:
         return security_state::MALICIOUS_CONTENT_STATUS_UNWANTED_SOFTWARE;
         break;
-      case safe_browsing::SB_THREAT_TYPE_BINARY_MALWARE_URL:
+      case safe_browsing::SB_THREAT_TYPE_URL_BINARY_MALWARE:
       case safe_browsing::SB_THREAT_TYPE_EXTENSION:
       case safe_browsing::SB_THREAT_TYPE_BLACKLISTED_RESOURCE:
       case safe_browsing::SB_THREAT_TYPE_API_ABUSE:
       case safe_browsing::SB_THREAT_TYPE_SUBRESOURCE_FILTER:
+      case safe_browsing::SB_THREAT_TYPE_CSD_WHITELIST:
         // These threat types are not currently associated with
         // interstitials, and thus resources with these threat types are
         // not ever whitelisted or pending whitelisting.
@@ -190,6 +218,8 @@ SecurityStateTabHelper::GetVisibleSecurityState() const {
   // Malware status might already be known even if connection security
   // information is still being initialized, thus no need to check for that.
   state->malicious_content_status = GetMaliciousContentStatus();
+
+  state->is_incognito = is_incognito_;
 
   return state;
 }

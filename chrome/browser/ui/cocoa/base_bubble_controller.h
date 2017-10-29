@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef CHROME_BROWSER_UI_COCOA_BASE_BUBBLE_CONTROLLER_H_
+#define CHROME_BROWSER_UI_COCOA_BASE_BUBBLE_CONTROLLER_H_
+
 #import <Cocoa/Cocoa.h>
 
 #include <memory>
@@ -56,6 +59,8 @@ class TabStripModelObserverBridge;
 @property(nonatomic, assign) NSPoint anchorPoint;
 @property(nonatomic, readonly) InfoBubbleView* bubble;
 @property(nonatomic, assign) BOOL shouldOpenAsKeyWindow;
+// Controls whether, when opening, the bubble should become the active window.
+@property(nonatomic, assign) BOOL shouldActivateOnOpen;
 // Controls if the bubble auto-closes if the user clicks outside the bubble.
 @property(nonatomic, assign) BOOL shouldCloseOnResignKey;
 // A reference for bubbles that are managed by the BubbleManager.
@@ -109,3 +114,5 @@ class TabStripModelObserverBridge;
 // |-showWindow:| is overriden and does not call super. Noop on OSes <10.7.
 - (void)registerKeyStateEventTap;
 @end
+
+#endif  // CHROME_BROWSER_UI_COCOA_BASE_BUBBLE_CONTROLLER_H_

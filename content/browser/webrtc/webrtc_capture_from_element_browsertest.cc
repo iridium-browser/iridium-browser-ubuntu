@@ -4,16 +4,19 @@
 
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
+#include "build/build_config.h"
 #include "content/browser/webrtc/webrtc_content_browsertest_base.h"
 #include "content/public/common/content_switches.h"
+#include "media/base/media_switches.h"
 #include "media/base/test_data_util.h"
+#include "media/mojo/features.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/build_info.h"
 #include "base/sys_info.h"
 #endif
 
-#if defined(ENABLE_MOJO_RENDERER)
+#if BUILDFLAG(ENABLE_MOJO_RENDERER)
 // Remote mojo renderer does not send audio/video frames back to the renderer
 // process and hence does not support capture: https://crbug.com/641559.
 #define MAYBE_CaptureFromMediaElement DISABLED_CaptureFromMediaElement
@@ -62,7 +65,7 @@ class WebRtcCaptureFromElementBrowserTest
 
     // Allow <video>/<audio>.play() when not initiated by user gesture.
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kDisableGestureRequirementForMediaPlayback);
+        switches::kIgnoreAutoplayRestrictionsForTests);
     // Allow experimental canvas features.
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableExperimentalCanvasFeatures);
@@ -95,14 +98,19 @@ IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
-                       VerifyCanvasCaptureWebGLFrames) {
+                       DISABLED_VerifyCanvasCaptureWebGLFrames) {
   MakeTypicalCall("testCanvasCapture(drawWebGL);", kCanvasCaptureTestHtmlFile);
 }
 
-// This test causes GL related issues on Win and Mac: https://crbug.com/695452.
-IN_PROC_BROWSER_TEST_F(
-    WebRtcCaptureFromElementBrowserTest,
-    DISABLED_VerifyCanvasCaptureOffscreenCanvasCommitFrames) {
+#if defined(OS_LINUX)
+#define MAYBE_VerifyCanvasCaptureOffscreenCanvasCommitFrames \
+  DISABLED_VerifyCanvasCaptureOffscreenCanvasCommitFrames
+#else
+#define MAYBE_VerifyCanvasCaptureOffscreenCanvasCommitFrames \
+  VerifyCanvasCaptureOffscreenCanvasCommitFrames
+#endif
+IN_PROC_BROWSER_TEST_F(WebRtcCaptureFromElementBrowserTest,
+                       MAYBE_VerifyCanvasCaptureOffscreenCanvasCommitFrames) {
   MakeTypicalCall("testCanvasCapture(drawOffscreenCanvasCommit);",
                   kCanvasCaptureTestHtmlFile);
 }

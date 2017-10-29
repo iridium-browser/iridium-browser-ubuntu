@@ -58,6 +58,8 @@ static_library("content_shell_lib") {
     "app/shell_main_delegate_mac.mm",
     "browser/layout_test/blink_test_controller.cc",
     "browser/layout_test/blink_test_controller.h",
+    "browser/layout_test/devtools_protocol_test_bindings.cc",
+    "browser/layout_test/devtools_protocol_test_bindings.h",
     "browser/layout_test/layout_test_bluetooth_adapter_provider.cc",
     "browser/layout_test/layout_test_bluetooth_adapter_provider.h",
     "browser/layout_test/layout_test_bluetooth_chooser_factory.cc",
@@ -72,8 +74,8 @@ static_library("content_shell_lib") {
     "browser/layout_test/layout_test_browser_main_parts.h",
     "browser/layout_test/layout_test_content_browser_client.cc",
     "browser/layout_test/layout_test_content_browser_client.h",
-    "browser/layout_test/layout_test_devtools_frontend.cc",
-    "browser/layout_test/layout_test_devtools_frontend.h",
+    "browser/layout_test/layout_test_devtools_bindings.cc",
+    "browser/layout_test/layout_test_devtools_bindings.h",
     "browser/layout_test/layout_test_download_manager_delegate.cc",
     "browser/layout_test/layout_test_download_manager_delegate.h",
     "browser/layout_test/layout_test_first_device_bluetooth_chooser.cc",
@@ -112,6 +114,8 @@ static_library("content_shell_lib") {
     "browser/shell_browser_main_parts_mac.mm",
     "browser/shell_content_browser_client.cc",
     "browser/shell_content_browser_client.h",
+    "browser/shell_devtools_bindings.cc",
+    "browser/shell_devtools_bindings.h",
     "browser/shell_devtools_frontend.cc",
     "browser/shell_devtools_frontend.h",
     "browser/shell_devtools_manager_delegate.cc",
@@ -156,6 +160,8 @@ static_library("content_shell_lib") {
     "common/layout_test/layout_test_switches.cc",
     "common/layout_test/layout_test_switches.h",
     "common/leak_detection_result.h",
+    "common/power_monitor_test_impl.cc",
+    "common/power_monitor_test_impl.h",
     "common/shell_content_client.cc",
     "common/shell_content_client.h",
     "common/shell_messages.cc",
@@ -164,12 +170,12 @@ static_library("content_shell_lib") {
     "common/shell_origin_trial_policy.h",
     "common/shell_switches.cc",
     "common/shell_switches.h",
+    "gpu/shell_content_gpu_client.cc",
+    "gpu/shell_content_gpu_client.h",
     "renderer/layout_test/blink_test_helpers.cc",
     "renderer/layout_test/blink_test_helpers.h",
     "renderer/layout_test/blink_test_runner.cc",
     "renderer/layout_test/blink_test_runner.h",
-    "renderer/layout_test/interface_registry_js_wrapper.cc",
-    "renderer/layout_test/interface_registry_js_wrapper.h",
     "renderer/layout_test/layout_test_content_renderer_client.cc",
     "renderer/layout_test/layout_test_content_renderer_client.h",
     "renderer/layout_test/layout_test_render_frame_observer.cc",
@@ -198,19 +204,18 @@ static_library("content_shell_lib") {
     "//build/config/compiler:no_size_t_to_int_warning",
   ]
 
-  if (enable_mojo_media) {
-    configs += [ "//media/mojo/services:mojo_media_config" ]
-  }
-
   defines = [ "CONTENT_SHELL_VERSION=\"$content_shell_version\"" ]
 
   public_deps = [
     # This exposes all public content APIs.
     "//content/public/app:both",
     "//content/public/browser",
+    "//content/public/child",
     "//content/public/common",
+    "//content/public/gpu",
     "//content/public/renderer",
     "//content/public/utility",
+    "//ipc",
   ]
   deps = [
     ":mojo_bindings",
@@ -220,8 +225,8 @@ static_library("content_shell_lib") {
     "//base/third_party/dynamic_annotations",
     "//cc",
     "//components/cdm/renderer",
-    "//components/crash/content/app:app_breakpad_mac_win_to_be_deleted",
     "//components/keyed_service/content",
+    "//components/network_session_configurator/common",
     "//components/plugins/renderer",
     "//components/url_formatter",
     "//components/web_cache/renderer",
@@ -229,22 +234,27 @@ static_library("content_shell_lib") {
     "//content/app/resources",
     "//content/app/strings",
     "//content/gpu",
+    "//content/public/common",
     "//content/public/common:service_names",
     "//content/shell/test_runner:test_runner",
     "//content/test:content_test_mojo_bindings",
     "//content/test:layouttest_support",
+    "//content/test:mojo_layouttest_bindings",
     "//content/test:test_support",
     "//device/bluetooth",
+    "//device/bluetooth:fake_bluetooth",
     "//device/bluetooth:mocks",
     "//device/geolocation",
+    "//device/sensors/public/cpp:full",
     "//gin",
     "//gpu",
-    "//ipc",
     "//media",
     "//media/capture",
+    "//media/mojo:features",
     "//mojo/edk/js",
     "//net",
     "//net:net_resources",
+    "//net:test_support",
     "//ppapi/features",
     "//sandbox",
     "//services/service_manager/public/cpp",
@@ -272,6 +282,11 @@ static_library("content_shell_lib") {
     "//v8",
   ]
 
+  if (!is_fuchsia) {
+    deps +=
+        [ "//components/crash/content/app:app_breakpad_mac_win_to_be_deleted" ]
+  }
+
   # Annoyingly, this target and layouttest_support have circular includes.
   allow_circular_includes_from = [ "//content/test:layouttest_support" ]
 
@@ -285,7 +300,10 @@ static_library("content_shell_lib") {
     ]
   }
   if (mojo_media_host == "browser") {
-    deps += [ "//media/mojo/services" ]
+    deps += [
+      "//media/mojo/interfaces:constants",
+      "//media/mojo/services",
+    ]
   }
 
   if (is_win) {
@@ -297,7 +315,7 @@ static_library("content_shell_lib") {
 
   if (is_linux) {
     deps += [
-      "//build/linux:fontconfig",
+      "//third_party/fontconfig",
       "//ui/gfx:test_support",
     ]
   }
@@ -319,7 +337,7 @@ static_library("content_shell_lib") {
     ]
   }
 
-  if (is_posix && !is_mac) {
+  if (is_posix && !is_mac && !is_fuchsia) {
     deps += [
       "//components/crash/content/app",
       "//components/crash/content/browser",
@@ -328,7 +346,6 @@ static_library("content_shell_lib") {
 
   if (use_aura) {
     deps += [
-      "//services/navigation",
       "//ui/aura",
       "//ui/aura:test_support",
       "//ui/events",
@@ -369,7 +386,7 @@ static_library("content_shell_lib") {
   }
 
   if (is_linux) {
-    deps += [ "//third_party/freetype-android:freetype" ]
+    deps += [ "//third_party/freetype" ]
   }
 
   if (!enable_plugins) {
@@ -384,7 +401,6 @@ grit("content_shell_resources_grit") {
   # External code should depend on ":resources" instead.
   visibility = [ ":*" ]
   source = "shell_resources.grd"
-  use_qualified_include = true
   outputs = [
     "grit/shell_resources.h",
     "shell_resources.pak",
@@ -450,9 +466,11 @@ repack("pak") {
     sources +=
         [ "$root_gen_dir/ui/views/resources/views_resources_100_percent.pak" ]
   }
-
-  sources += [ "$root_gen_dir/content/browser/devtools/devtools_resources.pak" ]
-  deps += [ "//content/browser/devtools:resources" ]
+  if (!is_android) {
+    sources +=
+        [ "$root_gen_dir/content/browser/devtools/devtools_resources.pak" ]
+    deps += [ "//content/browser/devtools:resources" ]
+  }
   output = "$root_out_dir/content_shell.pak"
 }
 
@@ -482,7 +500,7 @@ if (is_android) {
     deps = [
       ":content_shell_framework_bundle_data",
       ":content_shell_resources_bundle_data",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
 
       # TODO(rsesek): Remove this after GYP is gone, since it only needs to
       # be here per the comment in blink_test_platform_support_mac.mm about
@@ -497,6 +515,9 @@ if (is_android) {
       "@executable_path/../",
     ]
     info_plist_target = ":content_shell_plist"
+    data_deps = [
+      ":content_shell_lib",
+    ]
   }
 } else {
   executable("content_shell") {
@@ -515,7 +536,7 @@ if (is_android) {
     deps = [
       ":content_shell_lib",
       ":pak",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
       "//build/win:default_exe_manifest",
     ]
 
@@ -554,7 +575,7 @@ if (is_win) {
 
     deps = [
       "//base",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
       "//build/win:default_exe_manifest",
       "//components/crash/content/tools:crash_service",
     ]
@@ -588,7 +609,6 @@ if (is_mac) {
     sources = [
       "$root_out_dir/content_shell.pak",
       "resources/missingImage.png",
-      "resources/textAreaResizeCorner.png",
     ]
 
     public_deps = [
@@ -721,7 +741,7 @@ if (is_mac) {
     ]
     deps = [
       ":content_shell_framework+link",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
     ]
     ldflags = [
       # The helper is in Content Shell.app/Contents/Frameworks/Content Shell Helper.app/Contents/MacOS/
@@ -762,6 +782,7 @@ mojom("mojo_bindings") {
   sources = [
     "common/layout_test.mojom",
     "common/layout_test/layout_test_bluetooth_fake_adapter_setter.mojom",
+    "common/power_monitor_test.mojom",
   ]
   public_deps = [
     "//mojo/common:common_custom_types",
@@ -789,7 +810,10 @@ group("content_shell_crash_test") {
     ]
   }
   if (is_win) {
-    data_deps += [ ":content_shell_crash_service" ]
+    data_deps += [
+      ":content_shell_crash_service",
+      "//build/win:copy_cdb_to_output",
+    ]
   }
   if (is_posix && !is_android) {
     data_deps += [

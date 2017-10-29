@@ -112,13 +112,12 @@ Directory::Kernel::Kernel(
 Directory::Kernel::~Kernel() {}
 
 Directory::Directory(
-    DirectoryBackingStore* store,
+    std::unique_ptr<DirectoryBackingStore> store,
     const WeakHandle<UnrecoverableErrorHandler>& unrecoverable_error_handler,
     const base::Closure& report_unrecoverable_error_function,
     NigoriHandler* nigori_handler,
     Cryptographer* cryptographer)
-    : kernel_(nullptr),
-      store_(store),
+    : store_(std::move(store)),
       unrecoverable_error_handler_(unrecoverable_error_handler),
       report_unrecoverable_error_function_(report_unrecoverable_error_function),
       unrecoverable_error_set_(false),
@@ -199,7 +198,8 @@ DirOpenResult Directory::OpenImpl(
     return result;
 
   DCHECK(!kernel_);
-  kernel_ = new Kernel(name, info, delegate, transaction_observer);
+  kernel_ =
+      base::MakeUnique<Kernel>(name, info, delegate, transaction_observer);
   kernel_->metahandles_to_purge.swap(metahandles_to_purge);
   delete_journal_ = base::MakeUnique<DeleteJournal>(std::move(delete_journals));
   InitializeIndices(&tmp_handles_map);
@@ -224,10 +224,7 @@ DeleteJournal* Directory::delete_journal() {
 
 void Directory::Close() {
   store_.reset();
-  if (kernel_) {
-    delete kernel_;
-    kernel_ = nullptr;
-  }
+  kernel_.reset();
 }
 
 void Directory::OnUnrecoverableError(const BaseTransaction* trans,
@@ -354,47 +351,50 @@ int Directory::GetPositionIndex(BaseTransaction* trans,
   return std::distance(siblings->begin(), it);
 }
 
-bool Directory::InsertEntry(BaseWriteTransaction* trans, EntryKernel* entry) {
+bool Directory::InsertEntry(BaseWriteTransaction* trans,
+                            std::unique_ptr<EntryKernel> entry) {
   ScopedKernelLock lock(this);
-  return InsertEntry(lock, trans, entry);
+  return InsertEntry(lock, trans, std::move(entry));
 }
 
 bool Directory::InsertEntry(const ScopedKernelLock& lock,
                             BaseWriteTransaction* trans,
-                            EntryKernel* entry) {
+                            std::unique_ptr<EntryKernel> entry) {
   if (!SyncAssert(nullptr != entry, FROM_HERE, "Entry is null", trans))
     return false;
+  EntryKernel* entry_ptr = entry.get();
 
   static const char error[] = "Entry already in memory index.";
 
   if (!SyncAssert(kernel_->metahandles_map
-                      .insert(std::make_pair(entry->ref(META_HANDLE),
-                                             base::WrapUnique(entry)))
+                      .insert(std::make_pair(entry_ptr->ref(META_HANDLE),
+                                             std::move(entry)))
                       .second,
                   FROM_HERE, error, trans)) {
     return false;
   }
   if (!SyncAssert(
-          kernel_->ids_map.insert(std::make_pair(entry->ref(ID).value(), entry))
+          kernel_->ids_map
+              .insert(std::make_pair(entry_ptr->ref(ID).value(), entry_ptr))
               .second,
           FROM_HERE, error, trans)) {
     return false;
   }
-  if (ParentChildIndex::ShouldInclude(entry)) {
-    if (!SyncAssert(kernel_->parent_child_index.Insert(entry), FROM_HERE, error,
-                    trans)) {
+  if (ParentChildIndex::ShouldInclude(entry_ptr)) {
+    if (!SyncAssert(kernel_->parent_child_index.Insert(entry_ptr), FROM_HERE,
+                    error, trans)) {
       return false;
     }
   }
-  AddToAttachmentIndex(lock, entry->ref(META_HANDLE),
-                       entry->ref(ATTACHMENT_METADATA));
+  AddToAttachmentIndex(lock, entry_ptr->ref(META_HANDLE),
+                       entry_ptr->ref(ATTACHMENT_METADATA));
 
   // Should NEVER be created with a client tag or server tag.
-  if (!SyncAssert(entry->ref(UNIQUE_SERVER_TAG).empty(), FROM_HERE,
+  if (!SyncAssert(entry_ptr->ref(UNIQUE_SERVER_TAG).empty(), FROM_HERE,
                   "Server tag should be empty", trans)) {
     return false;
   }
-  if (!SyncAssert(entry->ref(UNIQUE_CLIENT_TAG).empty(), FROM_HERE,
+  if (!SyncAssert(entry_ptr->ref(UNIQUE_CLIENT_TAG).empty(), FROM_HERE,
                   "Client tag should be empty", trans))
     return false;
 
@@ -617,17 +617,14 @@ bool Directory::VacuumAfterSaveChanges(const SaveChangesSnapshot& snapshot) {
        ++i) {
     MetahandlesMap::iterator found =
         kernel_->metahandles_map.find((*i)->ref(META_HANDLE));
-    EntryKernel* entry =
-        (found == kernel_->metahandles_map.end() ? nullptr
-                                                 : found->second.get());
-    if (entry && SafeToPurgeFromMemory(&trans, entry)) {
+    if (found != kernel_->metahandles_map.end() &&
+        SafeToPurgeFromMemory(&trans, found->second.get())) {
       // We now drop deleted metahandles that are up to date on both the client
       // and the server.
-      std::unique_ptr<EntryKernel> unique_entry = std::move(found->second);
+      std::unique_ptr<EntryKernel> entry = std::move(found->second);
 
       size_t num_erased = 0;
-      num_erased = kernel_->metahandles_map.erase(entry->ref(META_HANDLE));
-      DCHECK_EQ(1u, num_erased);
+      kernel_->metahandles_map.erase(found);
       num_erased = kernel_->ids_map.erase(entry->ref(ID).value());
       DCHECK_EQ(1u, num_erased);
       if (!entry->ref(UNIQUE_SERVER_TAG).empty()) {
@@ -640,8 +637,8 @@ bool Directory::VacuumAfterSaveChanges(const SaveChangesSnapshot& snapshot) {
             kernel_->client_tags_map.erase(entry->ref(UNIQUE_CLIENT_TAG));
         DCHECK_EQ(1u, num_erased);
       }
-      if (!SyncAssert(!kernel_->parent_child_index.Contains(entry), FROM_HERE,
-                      "Deleted entry still present", (&trans)))
+      if (!SyncAssert(!kernel_->parent_child_index.Contains(entry.get()),
+                      FROM_HERE, "Deleted entry still present", (&trans)))
         return false;
       RemoveFromAttachmentIndex(lock, entry->ref(META_HANDLE),
                                 entry->ref(ATTACHMENT_METADATA));
@@ -710,16 +707,17 @@ void Directory::UnapplyEntry(EntryKernel* entry) {
 
 void Directory::DeleteEntry(const ScopedKernelLock& lock,
                             bool save_to_journal,
-                            EntryKernel* entry,
+                            EntryKernel* entry_ptr,
                             OwnedEntryKernelSet* entries_to_journal) {
-  int64_t handle = entry->ref(META_HANDLE);
-  ModelType server_type =
-      GetModelTypeFromSpecifics(entry->ref(SERVER_SPECIFICS));
+  int64_t handle = entry_ptr->ref(META_HANDLE);
 
   kernel_->metahandles_to_purge.insert(handle);
 
-  std::unique_ptr<EntryKernel> entry_ptr =
+  std::unique_ptr<EntryKernel> entry =
       std::move(kernel_->metahandles_map[handle]);
+
+  ModelType server_type =
+      GetModelTypeFromSpecifics(entry->ref(SERVER_SPECIFICS));
 
   size_t num_erased = 0;
   num_erased = kernel_->metahandles_map.erase(handle);
@@ -730,8 +728,8 @@ void Directory::DeleteEntry(const ScopedKernelLock& lock,
   DCHECK_EQ(entry->ref(IS_UNSYNCED), num_erased > 0);
   num_erased = kernel_->unapplied_update_metahandles[server_type].erase(handle);
   DCHECK_EQ(entry->ref(IS_UNAPPLIED_UPDATE), num_erased > 0);
-  if (kernel_->parent_child_index.Contains(entry))
-    kernel_->parent_child_index.Remove(entry);
+  if (kernel_->parent_child_index.Contains(entry.get()))
+    kernel_->parent_child_index.Remove(entry.get());
 
   if (!entry->ref(UNIQUE_CLIENT_TAG).empty()) {
     num_erased = kernel_->client_tags_map.erase(entry->ref(UNIQUE_CLIENT_TAG));
@@ -744,7 +742,7 @@ void Directory::DeleteEntry(const ScopedKernelLock& lock,
   RemoveFromAttachmentIndex(lock, handle, entry->ref(ATTACHMENT_METADATA));
 
   if (save_to_journal) {
-    entries_to_journal->insert(std::move(entry_ptr));
+    entries_to_journal->insert(std::move(entry));
   }
 }
 
@@ -989,6 +987,42 @@ void Directory::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd) {
   }
 }
 
+// Iterates over entries of |map|, sums memory usage estimate of entries whose
+// entry type is |model_type|. Passing owning container will also include memory
+// estimate of EntryKernel.
+template <typename Container>
+size_t EstimateFiteredMapMemoryUsage(const Container& map,
+                                     ModelType model_type) {
+  using base::trace_event::EstimateMemoryUsage;
+  size_t memory_usage = 0;
+  for (const auto& kv : map) {
+    const ModelType entry_type =
+        GetModelTypeFromSpecifics(kv.second->ref(SPECIFICS));
+    if (entry_type == model_type) {
+      memory_usage += EstimateMemoryUsage(kv);
+    }
+  }
+  return memory_usage;
+}
+
+size_t Directory::EstimateMemoryUsageByType(ModelType model_type) {
+  using base::trace_event::EstimateMemoryUsage;
+  ReadTransaction trans(FROM_HERE, this);
+  ScopedKernelLock lock(this);
+
+  size_t memory_usage = 0;
+  memory_usage +=
+      EstimateFiteredMapMemoryUsage(kernel_->metahandles_map, model_type);
+  memory_usage += EstimateFiteredMapMemoryUsage(kernel_->ids_map, model_type);
+  memory_usage +=
+      EstimateFiteredMapMemoryUsage(kernel_->server_tags_map, model_type);
+  memory_usage +=
+      EstimateFiteredMapMemoryUsage(kernel_->client_tags_map, model_type);
+  memory_usage += EstimateMemoryUsage(
+      kernel_->persisted_info.download_progress[model_type]);
+  return memory_usage;
+}
+
 void Directory::SetDownloadProgress(
     ModelType model_type,
     const sync_pb::DataTypeProgressMarker& new_progress) {
@@ -1176,13 +1210,12 @@ void Directory::GetMetaHandlesOfType(const ScopedKernelLock& lock,
                                      ModelType type,
                                      std::vector<int64_t>* result) {
   result->clear();
-  for (MetahandlesMap::iterator it = kernel_->metahandles_map.begin();
-       it != kernel_->metahandles_map.end(); ++it) {
-    EntryKernel* entry = it->second.get();
+  for (const auto& handle_and_kernel : kernel_->metahandles_map) {
+    EntryKernel* entry = handle_and_kernel.second.get();
     const ModelType entry_type =
         GetModelTypeFromSpecifics(entry->ref(SPECIFICS));
     if (entry_type == type)
-      result->push_back(it->first);
+      result->push_back(handle_and_kernel.first);
   }
 }
 
@@ -1560,9 +1593,9 @@ void Directory::AppendChildHandles(const ScopedKernelLock& lock,
   if (!children)
     return;
 
-  for (OrderedChildSet::const_iterator i = children->begin();
-       i != children->end(); ++i) {
-    result->push_back((*i)->ref(META_HANDLE));
+  result->reserve(result->size() + children->size());
+  for (const EntryKernel* entry : *children) {
+    result->push_back(entry->ref(META_HANDLE));
   }
 }
 
@@ -1631,11 +1664,11 @@ void Directory::OnCatastrophicError() {
 }
 
 Directory::Kernel* Directory::kernel() {
-  return kernel_;
+  return kernel_.get();
 }
 
 const Directory::Kernel* Directory::kernel() const {
-  return kernel_;
+  return kernel_.get();
 }
 
 }  // namespace syncable

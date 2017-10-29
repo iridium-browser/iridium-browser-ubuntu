@@ -149,11 +149,15 @@ Components.Linkifier = class {
    * @return {?Element}
    */
   maybeLinkifyScriptLocation(target, scriptId, sourceURL, lineNumber, columnNumber, classes) {
-    var fallbackAnchor =
-        sourceURL ? Components.Linkifier.linkifyURL(sourceURL, undefined, classes, lineNumber, columnNumber) : null;
+    var fallbackAnchor = null;
+    if (sourceURL) {
+      fallbackAnchor = Components.Linkifier.linkifyURL(
+          sourceURL,
+          {className: classes, lineNumber: lineNumber, columnNumber: columnNumber, maxLength: this._maxLength});
+    }
     if (!target || target.isDisposed())
       return fallbackAnchor;
-    var debuggerModel = SDK.DebuggerModel.fromTarget(target);
+    var debuggerModel = target.model(SDK.DebuggerModel);
     if (!debuggerModel)
       return fallbackAnchor;
 
@@ -186,8 +190,11 @@ Components.Linkifier = class {
    * @return {!Element}
    */
   linkifyScriptLocation(target, scriptId, sourceURL, lineNumber, columnNumber, classes) {
-    return this.maybeLinkifyScriptLocation(target, scriptId, sourceURL, lineNumber, columnNumber, classes) ||
-        Components.Linkifier.linkifyURL(sourceURL, undefined, classes, lineNumber, columnNumber);
+    var scriptLink = this.maybeLinkifyScriptLocation(target, scriptId, sourceURL, lineNumber, columnNumber, classes);
+    return scriptLink ||
+        Components.Linkifier.linkifyURL(
+            sourceURL,
+            {className: classes, lineNumber: lineNumber, columnNumber: columnNumber, maxLength: this._maxLength});
   }
 
   /**
@@ -223,12 +230,16 @@ Components.Linkifier = class {
     console.assert(stackTrace.callFrames && stackTrace.callFrames.length);
 
     var topFrame = stackTrace.callFrames[0];
-    var fallbackAnchor =
-        Components.Linkifier.linkifyURL(topFrame.url, undefined, classes, topFrame.lineNumber, topFrame.columnNumber);
+    var fallbackAnchor = Components.Linkifier.linkifyURL(topFrame.url, {
+      className: classes,
+      lineNumber: topFrame.lineNumber,
+      columnNumber: topFrame.columnNumber,
+      maxLength: this._maxLength
+    });
     if (target.isDisposed())
       return fallbackAnchor;
 
-    var debuggerModel = SDK.DebuggerModel.fromTarget(target);
+    var debuggerModel = target.model(SDK.DebuggerModel);
     var rawLocations = debuggerModel.createRawLocationsByStackTrace(stackTrace);
     if (rawLocations.length === 0)
       return fallbackAnchor;
@@ -264,20 +275,6 @@ Components.Linkifier = class {
     return anchor;
   }
 
-  /**
-   * @param {!SDK.Target} target
-   * @param {!Element} anchor
-   */
-  disposeAnchor(target, anchor) {
-    Components.Linkifier._unbindUILocation(anchor);
-    var info = Components.Linkifier._linkInfo(anchor);
-    info.fallback = null;
-    if (info.liveLocation) {
-      info.liveLocation.dispose();
-      info.liveLocation = null;
-    }
-  }
-
   reset() {
     for (var target of this._anchorsByTarget.keysArray()) {
       this.targetRemoved(target);
@@ -303,13 +300,8 @@ Components.Linkifier = class {
       return;
 
     Components.Linkifier._bindUILocation(anchor, uiLocation);
-    var text = uiLocation.linkText();
-    var info = Components.Linkifier._linkInfo(anchor);
-    info.originalLinkText = text;
-    text = text.replace(/([a-f0-9]{7})[a-f0-9]{13}[a-f0-9]*/g, '$1\u2026');
-    if (this._maxLength)
-      text = text.trimMiddle(this._maxLength);
-    anchor.textContent = text;
+    var text = uiLocation.linkText(true /* skipTrim */);
+    Components.Linkifier._setTrimmedText(anchor, text, this._maxLength);
 
     var titleText = uiLocation.uiSourceCode.url();
     if (typeof uiLocation.lineNumber === 'number')
@@ -340,14 +332,17 @@ Components.Linkifier = class {
 
   /**
    * @param {string} url
-   * @param {string=} text
-   * @param {string=} className
-   * @param {number=} lineNumber
-   * @param {number=} columnNumber
-   * @param {boolean=} preventClick
+   * @param  {!Components.LinkifyURLOptions=} options
    * @return {!Element}
    */
-  static linkifyURL(url, text, className, lineNumber, columnNumber, preventClick) {
+  static linkifyURL(url, options) {
+    options = options || {};
+    var text = options.text;
+    var className = options.className || '';
+    var lineNumber = options.lineNumber;
+    var columnNumber = options.columnNumber;
+    var preventClick = options.preventClick;
+    var maxLength = options.maxLength || UI.MaxLengthForDisplayedURLs;
     if (!url || url.trim().toLowerCase().startsWith('javascript:')) {
       var element = createElementWithClass('span', className);
       element.textContent = text || url || Common.UIString('(unknown)');
@@ -358,8 +353,7 @@ Components.Linkifier = class {
     if (typeof lineNumber === 'number' && !text)
       linkText += ':' + (lineNumber + 1);
     var title = linkText !== url ? url : '';
-    var link = Components.Linkifier._createLink(
-        linkText, className || '', UI.MaxLengthForDisplayedURLs, title, url, preventClick);
+    var link = Components.Linkifier._createLink(linkText, className, maxLength, title, url, preventClick);
     var info = Components.Linkifier._linkInfo(link);
     if (typeof lineNumber === 'number')
       info.lineNumber = lineNumber;
@@ -396,9 +390,7 @@ Components.Linkifier = class {
       link.title = title;
     if (href)
       link.href = href;
-    link.textContent = text;
-    if (maxLength)
-      link.textContent = link.textContent.trimMiddle(maxLength);
+    Components.Linkifier._setTrimmedText(link, text, maxLength);
     link[Components.Linkifier._infoSymbol] = {
       icon: null,
       enableDecorator: false,
@@ -408,8 +400,7 @@ Components.Linkifier = class {
       lineNumber: null,
       columnNumber: null,
       revealable: null,
-      fallback: null,
-      originalLinkText: text
+      fallback: null
     };
     if (!preventClick)
       link.addEventListener('click', Components.Linkifier._handleClick, false);
@@ -419,12 +410,70 @@ Components.Linkifier = class {
   }
 
   /**
-   * @param {?Element} link
-   * @return {?string}
+   * @param {!Element} link
+   * @param {string} text
+   * @param {number=} maxLength
    */
-  static originalLinkText(link) {
-    var info = this._linkInfo(link);
-    return info ? info.originalLinkText : null;
+  static _setTrimmedText(link, text, maxLength) {
+    link.removeChildren();
+    if (maxLength && text.length > maxLength) {
+      var middleSplit = splitMiddle(text, maxLength);
+      appendTextWithoutHashes(middleSplit[0]);
+      appendHiddenText(middleSplit[1]);
+      appendTextWithoutHashes(middleSplit[2]);
+    } else {
+      appendTextWithoutHashes(text);
+    }
+
+    /**
+     * @param {string} string
+     */
+    function appendHiddenText(string) {
+      var ellipsisNode = link.createChild('span', 'devtools-link-ellipsis').createTextChild('\u2026');
+      ellipsisNode[Components.Linkifier._untruncatedNodeTextSymbol] = string;
+    }
+
+    /**
+     * @param {string} string
+     */
+    function appendTextWithoutHashes(string) {
+      var hashSplit = TextUtils.TextUtils.splitStringByRegexes(string, [/[a-f0-9]{20,}/g]);
+      for (var match of hashSplit) {
+        if (match.regexIndex === -1) {
+          link.createTextChild(match.value);
+        } else {
+          link.createTextChild(match.value.substring(0, 7));
+          appendHiddenText(match.value.substring(7));
+        }
+      }
+    }
+
+    /**
+     * @param {string} string
+     * @param {number} maxLength
+     * @return {!Array<string>}
+     */
+    function splitMiddle(string, maxLength) {
+      var leftIndex = Math.floor(maxLength / 2);
+      var rightIndex = string.length - Math.ceil(maxLength / 2) + 1;
+
+      // Do not truncate between characters that use multiple code points (emojis).
+      if (string.codePointAt(rightIndex - 1) >= 0x10000) {
+        rightIndex++;
+        leftIndex++;
+      }
+      if (leftIndex > 0 && string.codePointAt(leftIndex - 1) >= 0x10000)
+        leftIndex--;
+      return [string.substring(0, leftIndex), string.substring(leftIndex, rightIndex), string.substring(rightIndex)];
+    }
+  }
+
+  /**
+   * @param {!Node} node
+   * @return {string}
+   */
+  static untruncatedNodeText(node) {
+    return node[Components.Linkifier._untruncatedNodeTextSymbol] || node.textContent;
   }
 
   /**
@@ -441,7 +490,7 @@ Components.Linkifier = class {
   static _handleClick(event) {
     var link = /** @type {!Element} */ (event.currentTarget);
     event.consume(true);
-    if (link.preventFollow || UI.isBeingEdited(/** @type {!Node} */ (event.target)))
+    if (UI.isBeingEdited(/** @type {!Node} */ (event.target)))
       return;
     var actions = Components.Linkifier._linkActions(link);
     if (actions.length)
@@ -497,35 +546,27 @@ Components.Linkifier = class {
       uiLocation = uiSourceCode ? uiSourceCode.uiLocation(info.lineNumber || 0, info.columnNumber || 0) : null;
     }
     var resource = url ? Bindings.resourceForURL(url) : null;
-    var request = url ? SDK.NetworkLog.requestForURL(url) : null;
+    var request = url ? NetworkLog.networkLog.requestForURL(url) : null;
     var contentProvider = uiLocation ? uiLocation.uiSourceCode : resource;
 
     if (info.revealable)
       result.push({title: Common.UIString('Reveal'), handler: () => Common.Revealer.reveal(info.revealable)});
-    if (uiLocation) {
-      result.push({
-        title: Common.UIString.capitalize('Open in Sources ^panel'),
-        handler: () => Common.Revealer.reveal(uiLocation)
-      });
-    }
+    if (uiLocation)
+      result.push({title: Common.UIString('Open in Sources panel'), handler: () => Common.Revealer.reveal(uiLocation)});
+
     if (resource) {
-      result.push({
-        title: Common.UIString.capitalize('Open in Application ^panel'),
-        handler: () => Common.Revealer.reveal(resource)
-      });
+      result.push(
+          {title: Common.UIString('Open in Application panel'), handler: () => Common.Revealer.reveal(resource)});
     }
-    if (request) {
-      result.push({
-        title: Common.UIString.capitalize('Open in Network ^panel'),
-        handler: () => Common.Revealer.reveal(request)
-      });
-    }
+    if (request)
+      result.push({title: Common.UIString('Open in Network panel'), handler: () => Common.Revealer.reveal(request)});
+
     if (contentProvider) {
       var lineNumber = uiLocation ? uiLocation.lineNumber : info.lineNumber || 0;
       for (var title of Components.Linkifier._linkHandlers.keys()) {
         var handler = Components.Linkifier._linkHandlers.get(title);
         var action = {
-          title: Common.UIString.capitalize('Open using %s', title),
+          title: Common.UIString('Open using %s', title),
           handler: handler.bind(null, contentProvider, lineNumber)
         };
         if (title === Components.Linkifier._linkHandlerSetting().get())
@@ -549,6 +590,7 @@ Components.Linkifier._decorator = null;
 
 Components.Linkifier._sourceCodeAnchors = Symbol('Linkifier.anchors');
 Components.Linkifier._infoSymbol = Symbol('Linkifier.info');
+Components.Linkifier._untruncatedNodeTextSymbol = Symbol('Linkifier.untruncatedNodeText');
 
 /**
  * @typedef {{
@@ -560,11 +602,22 @@ Components.Linkifier._infoSymbol = Symbol('Linkifier.info');
  *     lineNumber: ?number,
  *     columnNumber: ?number,
  *     revealable: ?Object,
- *     fallback: ?Element,
- *     originalLinkText: string
+ *     fallback: ?Element
  * }}
  */
 Components._LinkInfo;
+
+/**
+ * @typedef {{
+ *     text: (string|undefined),
+ *     className: (string|undefined),
+ *     lineNumber: (number|undefined),
+ *     columnNumber: (number|undefined),
+ *     preventClick: (boolean|undefined),
+ *     maxLength: (number|undefined)
+ * }}
+ */
+Components.LinkifyURLOptions;
 
 /**
  * The maximum length before strings are considered too long for finding URLs.
@@ -597,65 +650,6 @@ Components.LinkDecorator.prototype = {
 
 Components.LinkDecorator.Events = {
   LinkIconChanged: Symbol('LinkIconChanged')
-};
-
-/**
- * @param {string} string
- * @param {function(string,string,number=,number=):!Node} linkifier
- * @return {!DocumentFragment}
- */
-Components.linkifyStringAsFragmentWithCustomLinkifier = function(string, linkifier) {
-  var container = createDocumentFragment();
-  var linkStringRegEx =
-      /(?:[a-zA-Z][a-zA-Z0-9+.-]{2,}:\/\/|data:|www\.)[\w$\-_+*'=\|\/\\(){}[\]^%@&#~,:;.!?]{2,}[\w$\-_+*=\|\/\\({^%@&#~]/;
-  var pathLineRegex = /(?:\/[\w\.-]*)+\:[\d]+/;
-
-  while (string && string.length < Components.Linkifier.MaxLengthToIgnoreLinkifier) {
-    var linkString = linkStringRegEx.exec(string) || pathLineRegex.exec(string);
-    if (!linkString)
-      break;
-
-    linkString = linkString[0];
-    var linkIndex = string.indexOf(linkString);
-    var nonLink = string.substring(0, linkIndex);
-    container.appendChild(createTextNode(nonLink));
-
-    var title = linkString;
-    var realURL = (linkString.startsWith('www.') ? 'http://' + linkString : linkString);
-    var splitResult = Common.ParsedURL.splitLineAndColumn(realURL);
-    var linkNode;
-    if (splitResult)
-      linkNode = linkifier(title, splitResult.url, splitResult.lineNumber, splitResult.columnNumber);
-    else
-      linkNode = linkifier(title, realURL);
-
-    container.appendChild(linkNode);
-    string = string.substring(linkIndex + linkString.length, string.length);
-  }
-
-  if (string)
-    container.appendChild(createTextNode(string));
-
-  return container;
-};
-
-/**
- * @param {string} string
- * @return {!DocumentFragment}
- */
-Components.linkifyStringAsFragment = function(string) {
-  /**
-   * @param {string} title
-   * @param {string} url
-   * @param {number=} lineNumber
-   * @param {number=} columnNumber
-   * @return {!Node}
-   */
-  function linkifier(title, url, lineNumber, columnNumber) {
-    return Components.Linkifier.linkifyURL(url, title, undefined, lineNumber, columnNumber);
-  }
-
-  return Components.linkifyStringAsFragmentWithCustomLinkifier(string, linkifier);
 };
 
 /**
@@ -741,8 +735,7 @@ Components.Linkifier.ContentProviderContextMenuProvider = class {
         UI.openLinkExternallyLabel(), () => InspectorFrontendHost.openInNewTab(contentProvider.contentURL()));
     for (var title of Components.Linkifier._linkHandlers.keys()) {
       var handler = Components.Linkifier._linkHandlers.get(title);
-      contextMenu.appendItem(
-          Common.UIString.capitalize('Open using %s', title), handler.bind(null, contentProvider, 0));
+      contextMenu.appendItem(Common.UIString('Open using %s', title), handler.bind(null, contentProvider, 0));
     }
     if (contentProvider instanceof SDK.NetworkRequest)
       return;
@@ -783,7 +776,7 @@ Components.Linkifier.ContentProviderContextMenuProvider = class {
     if (contentProvider instanceof Workspace.UISourceCode) {
       var uiSourceCode = /** @type {!Workspace.UISourceCode} */ (contentProvider);
       if (!uiSourceCode.project().canSetFileContent())
-        contextMenu.appendItem(Common.UIString.capitalize('Save ^as...'), save.bind(null, true));
+        contextMenu.appendItem(Common.UIString('Save as...'), save.bind(null, true));
     }
   }
 };

@@ -20,6 +20,7 @@ struct TPublicType;
 class TType;
 class TSymbol;
 class TIntermSymbol;
+class TSymbolTable;
 
 class TField : angle::NonCopyable
 {
@@ -62,7 +63,10 @@ class TFieldListCollection : angle::NonCopyable
         if (mObjectSize == 0)
             mObjectSize = calculateObjectSize();
         return mObjectSize;
-    };
+    }
+
+    // How many locations the field list consumes as a uniform.
+    int getLocationCount() const;
 
   protected:
     TFieldListCollection(const TString *name, TFieldList *fields)
@@ -84,7 +88,7 @@ class TStructure : public TFieldListCollection
 {
   public:
     POOL_ALLOCATOR_NEW_DELETE();
-    TStructure(const TString *name, TFieldList *fields);
+    TStructure(TSymbolTable *symbolTable, const TString *name, TFieldList *fields);
 
     int deepestNesting() const
     {
@@ -95,7 +99,6 @@ class TStructure : public TFieldListCollection
     bool containsArrays() const;
     bool containsType(TBasicType t) const;
     bool containsSamplers() const;
-    bool containsImages() const;
 
     void createSamplerSymbols(const TString &structName,
                               const TString &structAPIName,
@@ -104,8 +107,6 @@ class TStructure : public TFieldListCollection
                               TMap<TIntermSymbol *, TString> *outputSymbolsToAPINames) const;
 
     bool equals(const TStructure &other) const;
-
-    void setUniqueId(int uniqueId) { mUniqueId = uniqueId; }
 
     int uniqueId() const
     {
@@ -138,7 +139,7 @@ class TStructure : public TFieldListCollection
     int calculateDeepestNesting() const;
 
     mutable int mDeepestNesting;
-    int mUniqueId;
+    const int mUniqueId;
     bool mAtGlobalScope;
 };
 
@@ -155,16 +156,18 @@ class TInterfaceBlock : public TFieldListCollection
           mInstanceName(instanceName),
           mArraySize(arraySize),
           mBlockStorage(layoutQualifier.blockStorage),
-          mMatrixPacking(layoutQualifier.matrixPacking)
+          mMatrixPacking(layoutQualifier.matrixPacking),
+          mBinding(layoutQualifier.binding)
     {
     }
 
     const TString &instanceName() const { return *mInstanceName; }
-    bool hasInstanceName() const { return mInstanceName != NULL; }
+    bool hasInstanceName() const { return mInstanceName != nullptr; }
     bool isArray() const { return mArraySize > 0; }
     int arraySize() const { return mArraySize; }
     TLayoutBlockStorage blockStorage() const { return mBlockStorage; }
     TLayoutMatrixPacking matrixPacking() const { return mMatrixPacking; }
+    int blockBinding() const { return mBinding; }
     const TString &mangledName() const
     {
         if (mMangledName.empty())
@@ -177,6 +180,7 @@ class TInterfaceBlock : public TFieldListCollection
     int mArraySize;                // 0 if not an array
     TLayoutBlockStorage mBlockStorage;
     TLayoutMatrixPacking mMatrixPacking;
+    int mBinding;
 };
 
 //
@@ -237,9 +241,9 @@ class TType
     {
     }
     explicit TType(const TPublicType &p);
-    explicit TType(TStructure *userDef, TPrecision p = EbpUndefined)
+    explicit TType(TStructure *userDef)
         : type(EbtStruct),
-          precision(p),
+          precision(EbpUndefined),
           qualifier(EvqTemporary),
           invariant(false),
           memoryQualifier(TMemoryQualifier::create()),
@@ -316,6 +320,7 @@ class TType
     {
         if (primarySize != ps)
         {
+            ASSERT(ps <= 4);
             primarySize = ps;
             invalidateMangledName();
         }
@@ -324,6 +329,7 @@ class TType
     {
         if (secondarySize != ss)
         {
+            ASSERT(ss <= 4);
             secondarySize = ss;
             invalidateMangledName();
         }
@@ -331,6 +337,9 @@ class TType
 
     // Full size of single instance of type
     size_t getObjectSize() const;
+
+    // Get how many locations this type consumes as a uniform.
+    int getLocationCount() const;
 
     bool isMatrix() const { return primarySize > 1 && secondarySize > 1; }
     bool isNonSquareMatrix() const { return isMatrix() && primarySize != secondarySize; }
@@ -368,9 +377,11 @@ class TType
     bool isInterfaceBlock() const { return type == EbtInterfaceBlock; }
 
     bool isVector() const { return primarySize > 1 && secondarySize == 1; }
-    bool isScalar() const { return primarySize == 1 && secondarySize == 1 && !structure; }
+    bool isScalar() const { return primarySize == 1 && secondarySize == 1 && !structure && !array; }
     bool isScalarFloat() const { return isScalar() && type == EbtFloat; }
     bool isScalarInt() const { return isScalar() && (type == EbtInt || type == EbtUInt); }
+
+    bool canBeConstructed() const;
 
     TStructure *getStruct() const { return structure; }
     void setStruct(TStructure *s)
@@ -462,11 +473,6 @@ class TType
         return structure ? structure->containsSamplers() : false;
     }
 
-    bool isStructureContainingImages() const
-    {
-        return structure ? structure->containsImages() : false;
-    }
-
     void createSamplerSymbols(const TString &structName,
                               const TString &structAPIName,
                               const unsigned int arrayOfStructsSize,
@@ -512,20 +518,31 @@ struct TTypeSpecifierNonArray
     TBasicType type;
     unsigned char primarySize;    // size of vector or cols of matrix
     unsigned char secondarySize;  // rows of matrix
-    TType *userDef;
+    TStructure *userDef;
     TSourceLoc line;
 
     // true if the type was defined by a struct specifier rather than a reference to a type name.
     bool isStructSpecifier;
 
-    void initialize(TBasicType bt, const TSourceLoc &ln)
+    void initialize(TBasicType aType, const TSourceLoc &aLine)
     {
-        type              = bt;
+        ASSERT(aType != EbtStruct);
+        type              = aType;
         primarySize       = 1;
         secondarySize     = 1;
         userDef           = nullptr;
-        line              = ln;
+        line              = aLine;
         isStructSpecifier = false;
+    }
+
+    void initializeStruct(TStructure *aUserDef, bool aIsStructSpecifier, const TSourceLoc &aLine)
+    {
+        type              = EbtStruct;
+        primarySize       = 1;
+        secondarySize     = 1;
+        userDef           = aUserDef;
+        line              = aLine;
+        isStructSpecifier = aIsStructSpecifier;
     }
 
     void setAggregate(unsigned char size) { primarySize = size; }
@@ -594,7 +611,7 @@ struct TPublicType
     unsigned char getPrimarySize() const { return typeSpecifierNonArray.primarySize; }
     unsigned char getSecondarySize() const { return typeSpecifierNonArray.secondarySize; }
 
-    const TType *getUserDef() const { return typeSpecifierNonArray.userDef; }
+    TStructure *getUserDef() const { return typeSpecifierNonArray.userDef; }
     const TSourceLoc &getLine() const { return typeSpecifierNonArray.line; }
 
     bool isStructSpecifier() const { return typeSpecifierNonArray.isStructSpecifier; }
@@ -606,7 +623,7 @@ struct TPublicType
             return false;
         }
 
-        return typeSpecifierNonArray.userDef->isStructureContainingArrays();
+        return typeSpecifierNonArray.userDef->containsArrays();
     }
 
     bool isStructureContainingType(TBasicType t) const
@@ -616,7 +633,7 @@ struct TPublicType
             return false;
         }
 
-        return typeSpecifierNonArray.userDef->isStructureContainingType(t);
+        return typeSpecifierNonArray.userDef->containsType(t);
     }
 
     bool isUnsizedArray() const { return array && arraySize == 0; }

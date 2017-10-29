@@ -9,81 +9,132 @@ import re
 import subprocess
 import sys
 
-#clang = ['clang++']
-clang = ['ccache', 'clang-3.9', '-x', 'c++']
+clang         = 'clang-4.0'
+objdump       = 'gobjdump'
+ccache        = 'ccache'
+stages        = 'src/jumper/SkJumper_stages.cpp'
+stages_lowp   = 'src/jumper/SkJumper_stages_lowp.cpp'
+generated     = 'src/jumper/SkJumper_generated.S'
+generated_win = 'src/jumper/SkJumper_generated_win.S'
 
-ndk = '/Users/mtklein/brew/opt/android-ndk/'
-objdump = 'gobjdump'
+clang         = sys.argv[1] if len(sys.argv) > 1 else clang
+objdump       = sys.argv[2] if len(sys.argv) > 2 else objdump
+ccache        = sys.argv[3] if len(sys.argv) > 3 else ccache
+stages        = sys.argv[4] if len(sys.argv) > 4 else stages
+stages_lowp   = sys.argv[5] if len(sys.argv) > 5 else stages_lowp
+generated     = sys.argv[6] if len(sys.argv) > 6 else generated
+generated_win = sys.argv[7] if len(sys.argv) > 7 else generated_win
 
-#ndk = '/home/mtklein/ndk/'
-#objdump = '/home/mtklein/binutils-2.27/binutils/objdump'
+clang = [ccache, clang, '-x', 'c++']
 
-cflags = '-std=c++11 -Os -fomit-frame-pointer -DJUMPER'.split()
 
-sse2 = '-mno-red-zone -msse2 -mno-sse3 -mno-ssse3 -mno-sse4.1'.split()
+cflags = ['-std=c++11', '-Os', '-DJUMPER',
+          '-momit-leaf-frame-pointer', '-ffp-contract=fast',
+          '-fno-exceptions', '-fno-rtti', '-fno-unwind-tables']
+
+x86 = [ '-m32' ]
+win = ['-DWIN', '-mno-red-zone']
+sse2 = ['-msse2', '-mno-sse3', '-mno-ssse3', '-mno-sse4.1']
 subprocess.check_call(clang + cflags + sse2 +
-                      ['-c', 'src/jumper/SkJumper_stages.cpp'] +
+                      ['-c', stages] +
                       ['-o', 'sse2.o'])
-subprocess.check_call(clang + cflags + sse2 + ['-DWIN'] +
-                      ['-c', 'src/jumper/SkJumper_stages.cpp'] +
+subprocess.check_call(clang + cflags + sse2 + win +
+                      ['-c', stages] +
                       ['-o', 'win_sse2.o'])
+subprocess.check_call(clang + cflags + sse2 + x86 +
+                      ['-c', stages] +
+                      ['-o', 'x86_sse2.o'])
+subprocess.check_call(clang + cflags + sse2 + win + x86 +
+                      ['-c', stages] +
+                      ['-o', 'win_x86_sse2.o'])
 
-sse41 = '-mno-red-zone -msse4.1'.split()
+ssse3 = ['-mssse3', '-mno-sse4.1']
+subprocess.check_call(clang + cflags + ssse3 +
+                      ['-c', stages_lowp] +
+                      ['-o', 'lowp_ssse3.o'])
+subprocess.check_call(clang + cflags + ssse3 + win +
+                      ['-c', stages_lowp] +
+                      ['-o', 'win_lowp_ssse3.o'])
+
+sse41 = ['-msse4.1']
 subprocess.check_call(clang + cflags + sse41 +
-                      ['-c', 'src/jumper/SkJumper_stages.cpp'] +
+                      ['-c', stages] +
                       ['-o', 'sse41.o'])
-subprocess.check_call(clang + cflags + sse41 + ['-DWIN'] +
-                      ['-c', 'src/jumper/SkJumper_stages.cpp'] +
+subprocess.check_call(clang + cflags + sse41 + win +
+                      ['-c', stages] +
                       ['-o', 'win_sse41.o'])
 
-avx = '-mno-red-zone -mavx'.split()
+avx = ['-mavx']
 subprocess.check_call(clang + cflags + avx +
-                      ['-c', 'src/jumper/SkJumper_stages.cpp'] +
+                      ['-c', stages] +
                       ['-o', 'avx.o'])
-subprocess.check_call(clang + cflags + avx + ['-DWIN'] +
-                      ['-c', 'src/jumper/SkJumper_stages.cpp'] +
+subprocess.check_call(clang + cflags + avx + win +
+                      ['-c', stages] +
                       ['-o', 'win_avx.o'])
 
-hsw = '-mno-red-zone -mavx2 -mfma -mf16c'.split()
+hsw = ['-mavx2', '-mfma', '-mf16c']
 subprocess.check_call(clang + cflags + hsw +
-                      ['-c', 'src/jumper/SkJumper_stages.cpp'] +
+                      ['-c', stages] +
                       ['-o', 'hsw.o'])
-subprocess.check_call(clang + cflags + hsw + ['-DWIN'] +
-                      ['-c', 'src/jumper/SkJumper_stages.cpp'] +
+subprocess.check_call(clang + cflags + hsw + win +
+                      ['-c', stages] +
                       ['-o', 'win_hsw.o'])
+subprocess.check_call(clang + cflags + hsw +
+                      ['-c', stages_lowp] +
+                      ['-o', 'lowp_hsw.o'])
+subprocess.check_call(clang + cflags + hsw + win +
+                      ['-c', stages_lowp] +
+                      ['-o', 'win_lowp_hsw.o'])
 
-aarch64 = [
-    '--target=aarch64-linux-android',
-    '--sysroot=' + ndk + 'platforms/android-21/arch-arm64',
-]
+aarch64 = [ '--target=aarch64' ]
 subprocess.check_call(clang + cflags + aarch64 +
-                      ['-c', 'src/jumper/SkJumper_stages.cpp'] +
+                      ['-c', stages] +
                       ['-o', 'aarch64.o'])
 
 vfp4 = [
-    '--target=armv7a-linux-android',
-    '--sysroot=' + ndk + 'platforms/android-18/arch-arm',
+    '--target=armv7a-linux-gnueabihf',
     '-mfpu=neon-vfpv4',
-    '-mfloat-abi=hard',
 ]
 subprocess.check_call(clang + cflags + vfp4 +
-                      ['-c', 'src/jumper/SkJumper_stages.cpp'] +
+                      ['-c', stages] +
                       ['-o', 'vfp4.o'])
 
 def parse_object_file(dot_o, directive, target=None):
-  globl, label, comment = '.globl', ':', '// '
+  globl, hidden, label, comment, align = \
+      '.globl', 'HIDDEN', ':', '// ', 'BALIGN'
   if 'win' in dot_o:
-    globl, label, comment = 'PUBLIC', ' LABEL PROC', '; '
+    globl, hidden, label, comment, align = \
+        'PUBLIC', '', ' LABEL PROC', '; ', 'ALIGN '
 
-  dehex = lambda h: '0x'+h
-  if directive != '.long':
-    dehex = lambda h: str(int(h, 16))
-
-  cmd = [ objdump, '-d', '--insn-width=9', dot_o]
+  cmd = [objdump]
   if target:
     cmd += ['--target', target]
 
-  for line in subprocess.check_output(cmd).split('\n'):
+  # Look for sections we know we can't handle.
+  section_headers = subprocess.check_output(cmd + ['-h', dot_o])
+  for snippet in ['.rodata']:
+    if snippet in section_headers:
+      print >>sys.stderr, 'Found %s in section.' % snippet
+      assert snippet not in section_headers
+
+  if directive == '.long':
+    disassemble = ['-d', dot_o]
+    dehex = lambda h: '0x'+h
+  else:
+    # x86-64... as long as we're using %rip-relative addressing,
+    # literal sections should be fine to just dump in with .text.
+    disassemble = ['-d',               # DO NOT USE -D.
+                   '-z',               # Print zero bytes instead of ...
+                   '--insn-width=11',
+                   '-j', '.text',
+                   '-j', '.literal4',
+                   '-j', '.literal16',
+                   '-j', '.const',
+                   dot_o]
+    dehex = lambda h: str(int(h,16))
+
+  # Ok.  Let's disassemble.
+  for line in subprocess.check_output(cmd + disassemble).split('\n'):
     line = line.strip()
 
     if not line or line.startswith(dot_o) or line.startswith('Disassembly'):
@@ -93,17 +144,25 @@ def parse_object_file(dot_o, directive, target=None):
     m = re.match('''[0-9a-f]+ <_?(.*)>:''', line)
     if m:
       print
-      print globl + ' _' + m.group(1)
-      print '_' + m.group(1) + label
+      sym = m.group(1)
+      if sym.startswith('.literal'):  # .literal4, .literal16, etc
+        print sym.replace('.literal', align)
+      elif sym.startswith('.const'):  # 32-byte constants
+        print align + '32'
+      elif not sym.startswith('sk_'):
+        print >>sys.stderr, "build_stages.py can't handle '%s' (yet?)." % sym
+        assert sym.startswith('sk_')
+      else:  # a stage function
+        if hidden:
+          print hidden + ' _' + sym
+        print globl + ' _' + sym
+        if 'win' not in dot_o:
+          print 'FUNCTION(_' + sym + ')'
+        print '_' + sym + label
       continue
 
-    # ip-relative addressing usually means we're loading a constant,
-    # which we don't support.
-    if '%rip' in line:
-      print >>sys.stderr, line
-      assert '%rip' not in line
-
     columns = line.split('\t')
+   #print >>sys.stderr, columns
     code = columns[1]
     if len(columns) >= 4:
       inst = columns[2]
@@ -116,9 +175,9 @@ def parse_object_file(dot_o, directive, target=None):
 
     hexed = ','.join(dehex(x) for x in code.split(' '))
     print '  ' + directive + '  ' + hexed + ' '*(36-len(hexed)) + \
-          comment + inst  + (' '*(14-len(inst)) + args if args else '')
+          comment + inst + (' '*(14-len(inst)) + args if args else '')
 
-sys.stdout = open('src/jumper/SkJumper_generated.S', 'w')
+sys.stdout = open(generated, 'w')
 
 print '''# Copyright 2017 Google Inc.
 #
@@ -128,25 +187,51 @@ print '''# Copyright 2017 Google Inc.
 # This file is generated semi-automatically with this command:
 #   $ src/jumper/build_stages.py
 '''
-print '.text'
+print '#if defined(__MACH__)'
+print '    #define HIDDEN .private_extern'
+print '    #define FUNCTION(name)'
+print '    #define BALIGN4  .align 2'
+print '    #define BALIGN16 .align 4'
+print '    #define BALIGN32 .align 5'
+print '#else'
+print '    .section .note.GNU-stack,"",%progbits'
+print '    #define HIDDEN .hidden'
+print '    #define FUNCTION(name) .type name,%function'
+print '    #define BALIGN4  .balign 4'
+print '    #define BALIGN16 .balign 16'
+print '    #define BALIGN32 .balign 32'
+print '#endif'
 
+print '.text'
 print '#if defined(__aarch64__)'
-print '.balign 4'
+print 'BALIGN4'
 parse_object_file('aarch64.o', '.long')
 
 print '#elif defined(__arm__)'
-print '.balign 4'
+print 'BALIGN4'
 parse_object_file('vfp4.o', '.long', target='elf32-littlearm')
 
 print '#elif defined(__x86_64__)'
+print 'BALIGN32'
 parse_object_file('hsw.o',   '.byte')
+print 'BALIGN32'
 parse_object_file('avx.o',   '.byte')
+print 'BALIGN32'
 parse_object_file('sse41.o', '.byte')
+print 'BALIGN32'
 parse_object_file('sse2.o',  '.byte')
+print 'BALIGN32'
+parse_object_file('lowp_hsw.o',  '.byte')
+print 'BALIGN32'
+parse_object_file('lowp_ssse3.o',  '.byte')
+
+print '#elif defined(__i386__)'
+print 'BALIGN32'
+parse_object_file('x86_sse2.o', '.byte')
+
 print '#endif'
 
-sys.stdout = open('src/jumper/SkJumper_generated_win.S', 'w')
-
+sys.stdout = open(generated_win, 'w')
 print '''; Copyright 2017 Google Inc.
 ;
 ; Use of this source code is governed by a BSD-style license that can be
@@ -155,9 +240,26 @@ print '''; Copyright 2017 Google Inc.
 ; This file is generated semi-automatically with this command:
 ;   $ src/jumper/build_stages.py
 '''
-print '_text SEGMENT'
+print 'IFDEF RAX'
+print "_text32 SEGMENT ALIGN(32) 'CODE'"
+print 'ALIGN 32'
 parse_object_file('win_hsw.o',   'DB')
+print 'ALIGN 32'
 parse_object_file('win_avx.o',   'DB')
+print 'ALIGN 32'
 parse_object_file('win_sse41.o', 'DB')
+print 'ALIGN 32'
 parse_object_file('win_sse2.o',  'DB')
+print 'ALIGN 32'
+parse_object_file('win_lowp_hsw.o',  'DB')
+print 'ALIGN 32'
+parse_object_file('win_lowp_ssse3.o',  'DB')
+
+print 'ELSE'
+print '.MODEL FLAT,C'
+print "_text32 SEGMENT ALIGN(32) 'CODE'"
+print 'ALIGN 32'
+parse_object_file('win_x86_sse2.o', 'DB')
+
+print 'ENDIF'
 print 'END'

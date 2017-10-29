@@ -7,7 +7,7 @@
 #include "core/fpdfapi/cmaps/cmap_int.h"
 
 #include "core/fpdfapi/cpdf_modulemgr.h"
-#include "core/fpdfapi/font/font_int.h"
+#include "core/fpdfapi/font/cpdf_fontglobals.h"
 #include "core/fpdfapi/page/cpdf_pagemodule.h"
 
 extern "C" {
@@ -61,7 +61,7 @@ void FPDFAPI_FindEmbeddedCMap(const CFX_ByteString& bsName,
   CPDF_FontGlobals* pFontGlobals =
       CPDF_ModuleMgr::Get()->GetPageModule()->GetFontGlobals();
   const FXCMAP_CMap* pCMaps =
-      pFontGlobals->m_EmbeddedCharsets[charset].m_pMapList;
+      pFontGlobals->m_EmbeddedCharsets[charset].m_pMapList.Get();
   for (uint32_t i = 0; i < pFontGlobals->m_EmbeddedCharsets[charset].m_Count;
        i++) {
     if (bsName == pCMaps[i].m_Name) {
@@ -76,15 +76,15 @@ uint16_t FPDFAPI_CIDFromCharCode(const FXCMAP_CMap* pMap, uint32_t charcode) {
     while (1) {
       if (pMap->m_DWordMapType == FXCMAP_CMap::Range) {
         uint16_t* found = static_cast<uint16_t*>(
-            FXSYS_bsearch(&charcode, pMap->m_pDWordMap, pMap->m_DWordCount, 8,
-                          compareDWordRange));
+            bsearch(&charcode, pMap->m_pDWordMap, pMap->m_DWordCount, 8,
+                    compareDWordRange));
         if (found)
           return found[3] + (uint16_t)charcode - found[1];
 
       } else if (pMap->m_DWordMapType == FXCMAP_CMap::Single) {
         uint16_t* found = static_cast<uint16_t*>(
-            FXSYS_bsearch(&charcode, pMap->m_pDWordMap, pMap->m_DWordCount, 6,
-                          compareDWordSingle));
+            bsearch(&charcode, pMap->m_pDWordMap, pMap->m_DWordCount, 6,
+                    compareDWordSingle));
         if (found)
           return found[2];
       }
@@ -101,13 +101,13 @@ uint16_t FPDFAPI_CIDFromCharCode(const FXCMAP_CMap* pMap, uint32_t charcode) {
     if (!pMap->m_pWordMap)
       return 0;
     if (pMap->m_WordMapType == FXCMAP_CMap::Single) {
-      uint16_t* found = static_cast<uint16_t*>(FXSYS_bsearch(
-          &code, pMap->m_pWordMap, pMap->m_WordCount, 4, compareWord));
+      uint16_t* found = static_cast<uint16_t*>(
+          bsearch(&code, pMap->m_pWordMap, pMap->m_WordCount, 4, compareWord));
       if (found)
         return found[1];
 
     } else if (pMap->m_WordMapType == FXCMAP_CMap::Range) {
-      uint16_t* found = static_cast<uint16_t*>(FXSYS_bsearch(
+      uint16_t* found = static_cast<uint16_t*>(bsearch(
           &code, pMap->m_pWordMap, pMap->m_WordCount, 6, compareWordRange));
       if (found)
         return found[2] + code - found[0];

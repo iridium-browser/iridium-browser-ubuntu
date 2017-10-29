@@ -6,6 +6,7 @@ package org.chromium.content.browser.input;
 
 import android.content.Context;
 import android.content.res.TypedArray;
+import android.graphics.Rect;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -68,19 +69,15 @@ public class LegacyPastePopupMenu implements OnClickListener, PastePopupMenu {
     }
 
     @Override
-    public void show(int x, int y) {
+    public void show(Rect selectionRect) {
+        hide();
         updateContent();
-        positionAt(x, y);
+        positionAt(selectionRect.left, selectionRect.bottom);
     }
 
     @Override
     public void hide() {
         mContainer.dismiss();
-    }
-
-    @Override
-    public boolean isShowing() {
-        return mContainer.isShowing();
     }
 
     @Override
@@ -90,7 +87,7 @@ public class LegacyPastePopupMenu implements OnClickListener, PastePopupMenu {
     }
 
     private void positionAt(int x, int y) {
-        if (mRawPositionX == x && mRawPositionY == y && isShowing()) return;
+        if (mRawPositionX == x && mRawPositionY == y) return;
         mRawPositionX = x;
         mRawPositionY = y;
 
@@ -130,11 +127,7 @@ public class LegacyPastePopupMenu implements OnClickListener, PastePopupMenu {
         positionX += coords[0];
         positionY += coords[1];
 
-        if (!isShowing()) {
-            mContainer.showAtLocation(mParent, Gravity.NO_GRAVITY, positionX, positionY);
-        } else {
-            mContainer.update(positionX, positionY, -1, -1);
-        }
+        mContainer.showAtLocation(mParent, Gravity.NO_GRAVITY, positionX, positionY);
     }
 
     private void updateContent() {

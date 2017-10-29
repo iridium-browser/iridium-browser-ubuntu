@@ -21,7 +21,7 @@ const char kJsScreenPath[] = "login.UpdateScreen";
 
 namespace chromeos {
 
-UpdateScreenHandler::UpdateScreenHandler() {
+UpdateScreenHandler::UpdateScreenHandler() : BaseScreenHandler(kScreenId) {
   set_call_js_prefix(kJsScreenPath);
 }
 
@@ -34,6 +34,7 @@ void UpdateScreenHandler::DeclareLocalizedValues(
     ::login::LocalizedValuesBuilder* builder) {
   builder->Add("checkingForUpdatesMsg", IDS_CHECKING_FOR_UPDATE_MSG);
   builder->Add("installingUpdateDesc", IDS_UPDATE_MSG);
+  builder->Add("updateCompeletedMsg", IDS_UPDATE_COMPLETED);
   builder->Add("updateScreenTitle", IDS_UPDATE_SCREEN_TITLE);
   builder->Add("updateScreenAccessibleTitle",
                IDS_UPDATE_SCREEN_ACCESSIBLE_TITLE);
@@ -70,7 +71,7 @@ void UpdateScreenHandler::Show() {
     show_on_init_ = true;
     return;
   }
-  ShowScreen(OobeScreen::SCREEN_OOBE_UPDATE);
+  ShowScreen(kScreenId);
 }
 
 void UpdateScreenHandler::Hide() {

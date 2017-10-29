@@ -32,7 +32,7 @@ Polymer({
   is: 'tr-ui-a-single-frame-sub-view',
   behaviors: [tr.ui.analysis.AnalysisSubView],
 
-  ready: function() {
+  ready() {
     this.currentSelection_ = undefined;
   },
 
@@ -46,8 +46,7 @@ Polymer({
   },
 
   get relatedEventsToHighlight() {
-    if (!this.currentSelection_)
-      return undefined;
+    if (!this.currentSelection_) return undefined;
     return tr.b.getOnlyElement(this.currentSelection_).associatedEvents;
   }
 });

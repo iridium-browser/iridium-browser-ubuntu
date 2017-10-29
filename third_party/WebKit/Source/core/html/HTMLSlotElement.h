@@ -44,76 +44,129 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
  public:
   DECLARE_NODE_FACTORY(HTMLSlotElement);
 
-  const HeapVector<Member<Node>>& assignedNodes();
-  const HeapVector<Member<Node>>& getDistributedNodes();
-  const HeapVector<Member<Node>> getDistributedNodesForBinding();
+  const HeapVector<Member<Node>>& AssignedNodes();
+  const HeapVector<Member<Node>>& GetDistributedNodes();
   const HeapVector<Member<Node>> assignedNodesForBinding(
       const AssignedNodesOptions&);
 
-  Node* firstDistributedNode() const {
-    DCHECK(supportsDistribution());
-    return m_distributedNodes.isEmpty() ? nullptr
-                                        : m_distributedNodes.front().get();
+  Node* FirstDistributedNode() const {
+    DCHECK(SupportsDistribution());
+    return distributed_nodes_.IsEmpty() ? nullptr
+                                        : distributed_nodes_.front().Get();
   }
-  Node* lastDistributedNode() const {
-    DCHECK(supportsDistribution());
-    return m_distributedNodes.isEmpty() ? nullptr
-                                        : m_distributedNodes.back().get();
+  Node* LastDistributedNode() const {
+    DCHECK(SupportsDistribution());
+    return distributed_nodes_.IsEmpty() ? nullptr
+                                        : distributed_nodes_.back().Get();
   }
 
-  Node* distributedNodeNextTo(const Node&) const;
-  Node* distributedNodePreviousTo(const Node&) const;
+  Node* DistributedNodeNextTo(const Node&) const;
+  Node* DistributedNodePreviousTo(const Node&) const;
 
-  void appendAssignedNode(Node&);
+  void AppendAssignedNode(Node&);
 
-  void resolveDistributedNodes();
-  void appendDistributedNode(Node&);
-  void appendDistributedNodesFrom(const HTMLSlotElement& other);
+  void ResolveDistributedNodes();
+  void AppendDistributedNode(Node&);
+  void AppendDistributedNodesFrom(const HTMLSlotElement& other);
 
-  void updateDistributedNodesWithFallback();
+  void UpdateDistributedNodesWithFallback();
 
-  void lazyReattachDistributedNodesIfNeeded();
+  void LazyReattachDistributedNodesIfNeeded();
 
-  void attachLayoutTree(const AttachContext& = AttachContext()) final;
-  void detachLayoutTree(const AttachContext& = AttachContext()) final;
+  void AttachLayoutTree(AttachContext&) final;
+  void DetachLayoutTree(const AttachContext& = AttachContext()) final;
+  void RebuildDistributedChildrenLayoutTrees(WhitespaceAttacher&);
 
-  void attributeChanged(const AttributeModificationParams&) final;
+  void AttributeChanged(const AttributeModificationParams&) final;
 
   int tabIndex() const override;
-  AtomicString name() const;
+  AtomicString GetName() const;
 
   // This method can be slow because this has to traverse the children of a
   // shadow host.  This method should be used only when m_assignedNodes is
   // dirty.  e.g. To detect a slotchange event in DOM mutations.
-  bool hasAssignedNodesSlow() const;
-  bool findHostChildWithSameSlotName() const;
+  bool HasAssignedNodesSlow() const;
+  bool FindHostChildWithSameSlotName() const;
 
-  void clearDistribution();
-  void saveAndClearDistribution();
+  void ClearDistribution();
+  void SaveAndClearDistribution();
 
-  bool supportsDistribution() const { return isInV1ShadowTree(); }
-  void didSlotChange(SlotChangeType);
-  void dispatchSlotChangeEvent();
-  void clearSlotChangeEventEnqueued() { m_slotchangeEventEnqueued = false; }
+  bool SupportsDistribution() const { return IsInV1ShadowTree(); }
 
-  static AtomicString normalizeSlotName(const AtomicString&);
+  void CheckFallbackAfterInsertedIntoShadowTree();
+  void CheckFallbackAfterRemovedFromShadowTree();
+
+  void DidSlotChange(SlotChangeType);
+  void DidSlotChangeAfterRemovedFromShadowTree();
+  void DidSlotChangeAfterRenaming();
+  void DispatchSlotChangeEvent();
+  void ClearSlotChangeEventEnqueued() { slotchange_event_enqueued_ = false; }
+
+  static AtomicString NormalizeSlotName(const AtomicString&);
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
   HTMLSlotElement(Document&);
 
-  InsertionNotificationRequest insertedInto(ContainerNode*) final;
-  void removedFrom(ContainerNode*) final;
-  void willRecalcStyle(StyleRecalcChange) final;
+  InsertionNotificationRequest InsertedInto(ContainerNode*) final;
+  void RemovedFrom(ContainerNode*) final;
+  void WillRecalcStyle(StyleRecalcChange) final;
 
-  void enqueueSlotChangeEvent();
+  void EnqueueSlotChangeEvent();
 
-  HeapVector<Member<Node>> m_assignedNodes;
-  HeapVector<Member<Node>> m_distributedNodes;
-  HeapVector<Member<Node>> m_oldDistributedNodes;
-  HeapHashMap<Member<const Node>, size_t> m_distributedIndices;
-  bool m_slotchangeEventEnqueued = false;
+  bool HasSlotableChild() const;
+
+  void LazyReattachDistributedNodesNaive();
+
+  static void LazyReattachDistributedNodesByDynamicProgramming(
+      const HeapVector<Member<Node>>&,
+      const HeapVector<Member<Node>>&);
+
+  HeapVector<Member<Node>> assigned_nodes_;
+  HeapVector<Member<Node>> distributed_nodes_;
+  HeapVector<Member<Node>> old_distributed_nodes_;
+  HeapHashMap<Member<const Node>, size_t> distributed_indices_;
+  bool slotchange_event_enqueued_ = false;
+
+  // TODO(hayato): Move this to more appropriate directory (e.g. platform/wtf)
+  // if there are more than one usages.
+  template <typename Container, typename LCSTable, typename BacktrackTable>
+  static void FillLongestCommonSubsequenceDynamicProgrammingTable(
+      const Container& seq1,
+      const Container& seq2,
+      LCSTable& lcs_table,
+      BacktrackTable& backtrack_table) {
+    const size_t rows = seq1.size();
+    const size_t columns = seq2.size();
+
+    DCHECK_GT(lcs_table.size(), rows);
+    DCHECK_GT(lcs_table[0].size(), columns);
+    DCHECK_GT(backtrack_table.size(), rows);
+    DCHECK_GT(backtrack_table[0].size(), columns);
+
+    for (size_t r = 0; r <= rows; ++r)
+      lcs_table[r][0] = 0;
+    for (size_t c = 0; c <= columns; ++c)
+      lcs_table[0][c] = 0;
+
+    for (size_t r = 1; r <= rows; ++r) {
+      for (size_t c = 1; c <= columns; ++c) {
+        if (seq1[r - 1] == seq2[c - 1]) {
+          lcs_table[r][c] = lcs_table[r - 1][c - 1] + 1;
+          backtrack_table[r][c] = std::make_pair(r - 1, c - 1);
+        } else if (lcs_table[r - 1][c] > lcs_table[r][c - 1]) {
+          lcs_table[r][c] = lcs_table[r - 1][c];
+          backtrack_table[r][c] = std::make_pair(r - 1, c);
+        } else {
+          lcs_table[r][c] = lcs_table[r][c - 1];
+          backtrack_table[r][c] = std::make_pair(r, c - 1);
+        }
+      }
+    }
+  }
+
+  friend class HTMLSlotElementTest;
 };
 
 }  // namespace blink

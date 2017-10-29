@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var binding = require('binding').Binding.create('chromeWebViewInternal');
+var binding = apiBridge ||
+              require('binding').Binding.create('chromeWebViewInternal');
 var contextMenusHandlers = require('contextMenusHandlers');
 
 binding.registerCustomHook(function(bindingsAPI) {
@@ -10,21 +11,18 @@ binding.registerCustomHook(function(bindingsAPI) {
 
   var handlers = contextMenusHandlers.create(true /* isWebview */);
 
-  apiFunctions.setHandleRequest('contextMenusCreate',
-      handlers.requestHandlers.create);
+  apiFunctions.setHandleRequest(
+      'contextMenusCreate', handlers.requestHandlers.create);
 
-  apiFunctions.setCustomCallback('contextMenusCreate',
-      handlers.callbacks.create);
+  apiFunctions.setHandleRequest(
+      'contextMenusUpdate', handlers.requestHandlers.update);
 
-  apiFunctions.setCustomCallback('contextMenusUpdate',
-      handlers.callbacks.update);
+  apiFunctions.setHandleRequest(
+      'contextMenusRemove', handlers.requestHandlers.remove);
 
-  apiFunctions.setCustomCallback('contextMenusRemove',
-      handlers.callbacks.remove);
-
-  apiFunctions.setCustomCallback('contextMenusRemoveAll',
-      handlers.callbacks.removeAll);
-
+  apiFunctions.setHandleRequest(
+      'contextMenusRemoveAll', handlers.requestHandlers.removeAll);
 });
 
-exports.$set('ChromeWebView', binding.generate());
+if (!apiBridge)
+  exports.$set('ChromeWebView', binding.generate());

@@ -6,42 +6,29 @@
 
 #include "ash/test/ash_test_views_delegate.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/test/sequenced_worker_pool_owner.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/test/scoped_task_environment.h"
 
 namespace ash {
-namespace test {
 namespace {
 
 class AshTestEnvironmentDefault : public AshTestEnvironment {
  public:
-  AshTestEnvironmentDefault() {}
+  AshTestEnvironmentDefault()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
 
   ~AshTestEnvironmentDefault() override {
-    base::RunLoop().RunUntilIdle();
-    blocking_pool_owner_.reset();
     base::RunLoop().RunUntilIdle();
   }
 
   // AshTestEnvironment:
-  base::SequencedWorkerPool* GetBlockingPool() override {
-    if (!blocking_pool_owner_) {
-      const size_t kMaxNumberThreads = 3u;  // Matches that of content.
-      const char kThreadNamePrefix[] = "AshBlocking";
-      blocking_pool_owner_ = base::MakeUnique<base::SequencedWorkerPoolOwner>(
-          kMaxNumberThreads, kThreadNamePrefix);
-    }
-    return blocking_pool_owner_->pool().get();
-  }
   std::unique_ptr<AshTestViewsDelegate> CreateViewsDelegate() override {
     return base::MakeUnique<AshTestViewsDelegate>();
   }
 
  private:
-  base::MessageLoopForUI message_loop_;
-  std::unique_ptr<base::SequencedWorkerPoolOwner> blocking_pool_owner_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
   DISALLOW_COPY_AND_ASSIGN(AshTestEnvironmentDefault);
 };
@@ -58,5 +45,4 @@ std::string AshTestEnvironment::Get100PercentResourceFileName() {
   return "ash_test_resources_100_percent.pak";
 }
 
-}  // namespace test
 }  // namespace ash

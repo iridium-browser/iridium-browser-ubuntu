@@ -16,6 +16,15 @@
 
 #define VK_CALL(GPU, X) GR_VK_CALL(GPU->vkInterface(), X)
 
+// This method parallels GrTextureProxy::highestFilterMode
+static inline GrSamplerParams::FilterMode highest_filter_mode(GrPixelConfig config) {
+    if (GrPixelConfigIsSint(config)) {
+        // We only ever want to nearest-neighbor sample signed int textures.
+        return GrSamplerParams::kNone_FilterMode;
+    }
+    return GrSamplerParams::kMipMap_FilterMode;
+}
+
 // Because this class is virtually derived from GrSurface we must explicitly call its constructor.
 GrVkTexture::GrVkTexture(GrVkGpu* gpu,
                          SkBudgeted budgeted,
@@ -24,8 +33,8 @@ GrVkTexture::GrVkTexture(GrVkGpu* gpu,
                          const GrVkImageView* view)
     : GrSurface(gpu, desc)
     , GrVkImage(info, GrVkImage::kNot_Wrapped)
-    , INHERITED(gpu, desc, kTexture2DSampler_GrSLType, GrSamplerParams::kMipMap_FilterMode,
-                desc.fIsMipMapped)
+    , INHERITED(gpu, desc, kTexture2DSampler_GrSLType, highest_filter_mode(desc.fConfig),
+                info.fLevelCount > 1)
     , fTextureView(view)
     , fLinearTextureView(nullptr) {
     this->registerWithCache(budgeted);
@@ -39,8 +48,8 @@ GrVkTexture::GrVkTexture(GrVkGpu* gpu,
                          GrVkImage::Wrapped wrapped)
     : GrSurface(gpu, desc)
     , GrVkImage(info, wrapped)
-    , INHERITED(gpu, desc, kTexture2DSampler_GrSLType, GrSamplerParams::kMipMap_FilterMode,
-                desc.fIsMipMapped)
+    , INHERITED(gpu, desc, kTexture2DSampler_GrSLType, highest_filter_mode(desc.fConfig),
+                info.fLevelCount > 1)
     , fTextureView(view)
     , fLinearTextureView(nullptr) {
     this->registerWithCacheWrapped();
@@ -54,15 +63,15 @@ GrVkTexture::GrVkTexture(GrVkGpu* gpu,
                          GrVkImage::Wrapped wrapped)
     : GrSurface(gpu, desc)
     , GrVkImage(info, wrapped)
-    , INHERITED(gpu, desc, kTexture2DSampler_GrSLType, GrSamplerParams::kMipMap_FilterMode,
-                desc.fIsMipMapped)
+    , INHERITED(gpu, desc, kTexture2DSampler_GrSLType, highest_filter_mode(desc.fConfig),
+                info.fLevelCount > 1)
     , fTextureView(view)
     , fLinearTextureView(nullptr) {
 }
 
-GrVkTexture* GrVkTexture::CreateNewTexture(GrVkGpu* gpu, SkBudgeted budgeted,
-                                           const GrSurfaceDesc& desc,
-                                           const GrVkImage::ImageDesc& imageDesc) {
+sk_sp<GrVkTexture> GrVkTexture::CreateNewTexture(GrVkGpu* gpu, SkBudgeted budgeted,
+                                                 const GrSurfaceDesc& desc,
+                                                 const GrVkImage::ImageDesc& imageDesc) {
     SkASSERT(imageDesc.fUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT);
 
     GrVkImageInfo info;
@@ -78,7 +87,7 @@ GrVkTexture* GrVkTexture::CreateNewTexture(GrVkGpu* gpu, SkBudgeted budgeted,
         return nullptr;
     }
 
-    return new GrVkTexture(gpu, budgeted, desc, info, imageView);
+    return sk_sp<GrVkTexture>(new GrVkTexture(gpu, budgeted, desc, info, imageView));
 }
 
 sk_sp<GrVkTexture> GrVkTexture::MakeWrappedTexture(GrVkGpu* gpu,
@@ -96,9 +105,8 @@ sk_sp<GrVkTexture> GrVkTexture::MakeWrappedTexture(GrVkGpu* gpu,
         return nullptr;
     }
 
-    GrVkImage::Wrapped wrapped = kBorrow_GrWrapOwnership == ownership ? GrVkImage::kBorrowed_Wrapped
-                                                                      : GrVkImage::kAdopted_Wrapped;
-
+    GrVkImage::Wrapped wrapped = kBorrow_GrWrapOwnership == ownership
+            ? GrVkImage::kBorrowed_Wrapped : GrVkImage::kAdopted_Wrapped;
     return sk_sp<GrVkTexture>(new GrVkTexture(gpu, kWrapped, desc, *info, imageView, wrapped));
 }
 
@@ -144,12 +152,6 @@ GrBackendObject GrVkTexture::getTextureHandle() const {
     return (GrBackendObject)&fInfo;
 }
 
-std::unique_ptr<GrExternalTextureData> GrVkTexture::detachBackendTexture() {
-    // Not supported on Vulkan yet
-    // TODO: Add thread-safe memory pools, and implement this.
-    return nullptr;
-}
-
 GrVkGpu* GrVkTexture::getVkGpu() const {
     SkASSERT(!this->wasDestroyed());
     return static_cast<GrVkGpu*>(this->getGpu());
@@ -184,7 +186,7 @@ bool GrVkTexture::reallocForMipmap(GrVkGpu* gpu, uint32_t mipLevels) {
         return false;
     }
 
-    bool renderTarget = SkToBool(fDesc.fFlags & kRenderTarget_GrSurfaceFlag);
+    bool renderTarget = SkToBool(this->asRenderTarget());
 
     VkImageUsageFlags usageFlags = VK_IMAGE_USAGE_SAMPLED_BIT;
     if (renderTarget) {
@@ -195,8 +197,8 @@ bool GrVkTexture::reallocForMipmap(GrVkGpu* gpu, uint32_t mipLevels) {
     GrVkImage::ImageDesc imageDesc;
     imageDesc.fImageType = VK_IMAGE_TYPE_2D;
     imageDesc.fFormat = fInfo.fFormat;
-    imageDesc.fWidth = fDesc.fWidth;
-    imageDesc.fHeight = fDesc.fHeight;
+    imageDesc.fWidth = this->width();
+    imageDesc.fHeight = this->height();
     imageDesc.fLevels = mipLevels;
     imageDesc.fSamples = 1;
     imageDesc.fImageTiling = VK_IMAGE_TILING_OPTIMAL;

@@ -4,6 +4,8 @@
 
 #include "content/public/browser/content_browser_client.h"
 
+#include <utility>
+
 #include "base/files/file_path.h"
 #include "base/guid.h"
 #include "base/logging.h"
@@ -13,11 +15,15 @@
 #include "content/public/browser/navigation_ui_data.h"
 #include "content/public/browser/vpn_service_proxy.h"
 #include "content/public/common/sandbox_type.h"
+#include "content/public/common/url_loader_throttle.h"
+#include "media/audio/audio_manager.h"
 #include "media/base/cdm_factory.h"
 #include "media/media_features.h"
+#include "net/ssl/client_cert_identity.h"
 #include "storage/browser/quota/quota_manager.h"
 #include "ui/gfx/image/image_skia.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace content {
 
@@ -29,8 +35,8 @@ BrowserMainParts* ContentBrowserClient::CreateBrowserMainParts(
 void ContentBrowserClient::PostAfterStartupTask(
     const tracked_objects::Location& from_here,
     const scoped_refptr<base::TaskRunner>& task_runner,
-    const base::Closure& task) {
-  task_runner->PostTask(from_here, task);
+    base::OnceClosure task) {
+  task_runner->PostTask(from_here, std::move(task));
 }
 
 bool ContentBrowserClient::IsBrowserStartupComplete() {
@@ -114,7 +120,7 @@ bool ContentBrowserClient::ShouldSwapBrowsingInstancesForNavigation(
   return false;
 }
 
-media::ScopedAudioManagerPtr ContentBrowserClient::CreateAudioManager(
+std::unique_ptr<media::AudioManager> ContentBrowserClient::CreateAudioManager(
     media::AudioLogFactory* audio_log_factory) {
   return nullptr;
 }
@@ -134,6 +140,11 @@ bool ContentBrowserClient::ShouldAssignSiteForURL(const GURL& url) {
   return true;
 }
 
+std::vector<url::Origin>
+ContentBrowserClient::GetOriginsRequiringDedicatedProcess() {
+  return std::vector<url::Origin>();
+}
+
 std::string ContentBrowserClient::GetApplicationLocale() {
   return "en-US";
 }
@@ -145,6 +156,10 @@ std::string ContentBrowserClient::GetAcceptLangs(BrowserContext* context) {
 const gfx::ImageSkia* ContentBrowserClient::GetDefaultFavicon() {
   static gfx::ImageSkia* empty = new gfx::ImageSkia();
   return empty;
+}
+
+base::FilePath ContentBrowserClient::GetLoggingFileName() {
+  return base::FilePath();
 }
 
 bool ContentBrowserClient::AllowAppCache(const GURL& manifest_url,
@@ -184,10 +199,6 @@ bool ContentBrowserClient::AllowSetCookie(const GURL& url,
   return true;
 }
 
-bool ContentBrowserClient::AllowSaveLocalState(ResourceContext* context) {
-  return true;
-}
-
 void ContentBrowserClient::AllowWorkerFileSystem(
     const GURL& url,
     ResourceContext* context,
@@ -203,14 +214,6 @@ bool ContentBrowserClient::AllowWorkerIndexedDB(
     const std::vector<std::pair<int, int> >& render_frames) {
   return true;
 }
-
-#if BUILDFLAG(ENABLE_WEBRTC)
-bool ContentBrowserClient::AllowWebRTCIdentityCache(const GURL& url,
-                                                    const GURL& first_party_url,
-                                                    ResourceContext* context) {
-  return true;
-}
-#endif  // BUILDFLAG(ENABLE_WEBRTC)
 
 ContentBrowserClient::AllowWebBluetoothResult
 ContentBrowserClient::AllowWebBluetooth(
@@ -231,14 +234,28 @@ QuotaPermissionContext* ContentBrowserClient::CreateQuotaPermissionContext() {
 void ContentBrowserClient::GetQuotaSettings(
     BrowserContext* context,
     StoragePartition* partition,
-    const storage::OptionalQuotaSettingsCallback& callback) {
+    storage::OptionalQuotaSettingsCallback callback) {
   // By default, no quota is provided, embedders should override.
-  callback.Run(storage::GetNoQuotaSettings());
+  std::move(callback).Run(storage::GetNoQuotaSettings());
+}
+
+void ContentBrowserClient::AllowCertificateError(
+    WebContents* web_contents,
+    int cert_error,
+    const net::SSLInfo& ssl_info,
+    const GURL& request_url,
+    ResourceType resource_type,
+    bool overridable,
+    bool strict_enforcement,
+    bool expired_previous_decision,
+    const base::Callback<void(CertificateRequestResultType)>& callback) {
+  callback.Run(CERTIFICATE_REQUEST_RESULT_TYPE_DENY);
 }
 
 void ContentBrowserClient::SelectClientCertificate(
     WebContents* web_contents,
     net::SSLCertRequestInfo* cert_request_info,
+    net::ClientCertIdentityList client_certs,
     std::unique_ptr<ClientCertificateDelegate> delegate) {}
 
 net::URLRequestContext* ContentBrowserClient::OverrideRequestContextForURL(
@@ -282,8 +299,7 @@ ContentBrowserClient::GetPlatformNotificationService() {
 }
 
 bool ContentBrowserClient::CanCreateWindow(
-    int opener_render_process_id,
-    int opener_render_frame_id,
+    RenderFrameHost* opener,
     const GURL& opener_url,
     const GURL& opener_top_level_frame_url,
     const GURL& source_origin,
@@ -295,7 +311,6 @@ bool ContentBrowserClient::CanCreateWindow(
     const blink::mojom::WindowFeatures& features,
     bool user_gesture,
     bool opener_suppressed,
-    ResourceContext* context,
     bool* no_javascript_access) {
   *no_javascript_access = false;
   return true;
@@ -381,6 +396,13 @@ std::string ContentBrowserClient::GetServiceUserIdForBrowserContext(
   return base::GenerateGUID();
 }
 
+bool ContentBrowserClient::BindAssociatedInterfaceRequestFromFrame(
+    RenderFrameHost* render_frame_host,
+    const std::string& interface_name,
+    mojo::ScopedInterfaceEndpointHandle* handle) {
+  return false;
+}
+
 ControllerPresentationServiceDelegate*
 ContentBrowserClient::GetControllerPresentationServiceDelegate(
     WebContents* web_contents) {
@@ -398,6 +420,10 @@ void ContentBrowserClient::OpenURL(
     const content::OpenURLParams& params,
     const base::Callback<void(content::WebContents*)>& callback) {
   callback.Run(nullptr);
+}
+
+std::string ContentBrowserClient::GetMetricSuffixForURL(const GURL& url) {
+  return std::string();
 }
 
 std::vector<std::unique_ptr<NavigationThrottle>>
@@ -446,12 +472,15 @@ ContentBrowserClient::GetMemoryCoordinatorDelegate() {
   return nullptr;
 }
 
-bool ContentBrowserClient::ShouldRedirectDOMStorageTaskRunner() {
-  return false;
+std::unique_ptr<base::TaskScheduler::InitParams>
+ContentBrowserClient::GetTaskSchedulerInitParams() {
+  return nullptr;
 }
 
-bool ContentBrowserClient::RedirectNonUINonIOBrowserThreadsToTaskScheduler() {
-  return false;
+std::vector<std::unique_ptr<URLLoaderThrottle>>
+ContentBrowserClient::CreateURLLoaderThrottles(
+    const base::Callback<WebContents*()>& wc_getter) {
+  return std::vector<std::unique_ptr<URLLoaderThrottle>>();
 }
 
 }  // namespace content

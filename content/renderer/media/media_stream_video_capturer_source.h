@@ -5,6 +5,8 @@
 #ifndef CONTENT_RENDERER_MEDIA_MEDIA_STREAM_VIDEO_CAPTURER_SOURCE_H_
 #define CONTENT_RENDERER_MEDIA_MEDIA_STREAM_VIDEO_CAPTURER_SOURCE_H_
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -30,37 +32,32 @@ class CONTENT_EXPORT MediaStreamVideoCapturerSource
   MediaStreamVideoCapturerSource(
       const SourceStoppedCallback& stop_callback,
       std::unique_ptr<media::VideoCapturerSource> source);
-  MediaStreamVideoCapturerSource(const SourceStoppedCallback& stop_callback,
-                                 const StreamDeviceInfo& device_info,
-                                 RenderFrame* render_frame);
+  MediaStreamVideoCapturerSource(
+      const SourceStoppedCallback& stop_callback,
+      const StreamDeviceInfo& device_info,
+      const media::VideoCaptureParams& capture_params,
+      RenderFrame* render_frame);
   ~MediaStreamVideoCapturerSource() override;
 
  private:
   friend class CanvasCaptureHandlerTest;
   friend class MediaStreamVideoCapturerSourceTest;
+  friend class MediaStreamVideoCapturerSourceOldConstraintsTest;
 
   // MediaStreamVideoSource overrides.
   void RequestRefreshFrame() override;
   void OnHasConsumers(bool has_consumers) override;
   void OnCapturingLinkSecured(bool is_secure) override;
-  void GetCurrentSupportedFormats(
-      int max_requested_width,
-      int max_requested_height,
-      double max_requested_frame_rate,
-      const VideoCaptureDeviceFormatsCB& callback) override;
   void StartSourceImpl(
-      const media::VideoCaptureFormat& format,
-      const blink::WebMediaConstraints& constraints,
       const VideoCaptureDeliverFrameCB& frame_callback) override;
   void StopSourceImpl() override;
+  base::Optional<media::VideoCaptureFormat> GetCurrentFormat() const override;
 
   // RenderFrameObserver implementation.
   void OnDestruct() final {}
 
   // Method to bind as RunningCallback in VideoCapturerSource::StartCapture().
   void OnRunStateChanged(bool is_running);
-
-  const char* GetPowerLineFrequencyForTesting() const;
 
   // The source that provides video frames.
   const std::unique_ptr<media::VideoCapturerSource> source_;
@@ -69,6 +66,8 @@ class CONTENT_EXPORT MediaStreamVideoCapturerSource
   // StartSourceImpl() when starting the capture, and is reset after starting
   // is completed.
   bool is_capture_starting_ = false;
+
+  media::VideoCaptureParams capture_params_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamVideoCapturerSource);
 };

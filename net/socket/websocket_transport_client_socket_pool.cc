@@ -342,10 +342,8 @@ int WebSocketTransportClientSocketPool::RequestSocket(
   if (ReachedMaxSocketsLimit() &&
       respect_limits == ClientSocketPool::RespectLimits::ENABLED) {
     request_net_log.AddEvent(NetLogEventType::SOCKET_POOL_STALLED_MAX_SOCKETS);
-    // TODO(ricea): Use emplace_back when C++11 becomes allowed.
-    StalledRequest request(
-        casted_params, priority, handle, callback, request_net_log);
-    stalled_request_queue_.push_back(request);
+    stalled_request_queue_.emplace_back(casted_params, priority, handle,
+                                        callback, request_net_log);
     StalledRequestQueue::iterator iterator = stalled_request_queue_.end();
     --iterator;
     DCHECK_EQ(handle, iterator->handle);
@@ -460,6 +458,11 @@ void WebSocketTransportClientSocketPool::FlushWithError(int error) {
 }
 
 void WebSocketTransportClientSocketPool::CloseIdleSockets() {
+  // We have no idle sockets.
+}
+
+void WebSocketTransportClientSocketPool::CloseIdleSocketsInGroup(
+    const std::string& group_name) {
   // We have no idle sockets.
 }
 

@@ -32,7 +32,8 @@ ShortLivedUserContext::ShortLivedUserContext(
 
   task_runner->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&ShortLivedUserContext::Reset, weak_ptr_factory_.GetWeakPtr()),
+      base::BindOnce(&ShortLivedUserContext::Reset,
+                     weak_ptr_factory_.GetWeakPtr()),
       base::TimeDelta::FromMinutes(kUserContextTimeToLiveMinutes));
 }
 
@@ -48,7 +49,7 @@ void ShortLivedUserContext::Reset() {
   }
 }
 
-void ShortLivedUserContext::OnAppDeactivated(Profile* profile,
+void ShortLivedUserContext::OnAppDeactivated(content::BrowserContext* context,
                                              const std::string& app_id) {
   if (app_id == extension_misc::kEasyUnlockAppId)
     Reset();

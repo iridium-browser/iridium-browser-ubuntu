@@ -48,6 +48,7 @@ Audits.AuditsPanel = class extends UI.PanelWithSidebar {
     this._auditResultsTreeElement.selectable = false;
     this._auditResultsTreeElement.listItemElement.classList.add('audits-sidebar-results');
     this._auditResultsTreeElement.expand();
+    this._auditResultsTreeElement.setCollapsible(false);
     this._sidebarTree.appendChild(this._auditResultsTreeElement);
 
     this._constructCategories();
@@ -164,7 +165,7 @@ Audits.AuditsPanel = class extends UI.PanelWithSidebar {
   wasShown() {
     super.wasShown();
     if (!this._visibleView)
-      this._auditsItemTreeElement.select();
+      this._auditsItemTreeElement.select(true);
   }
 
   /**
@@ -377,7 +378,7 @@ Audits.AuditRuleResult = class {
    * @return {!Element}
    */
   static linkifyDisplayName(url) {
-    return Components.Linkifier.linkifyURL(url, Bindings.displayNameForURL(url));
+    return Components.Linkifier.linkifyURL(url, {text: Bindings.displayNameForURL(url)});
   }
 
   /**

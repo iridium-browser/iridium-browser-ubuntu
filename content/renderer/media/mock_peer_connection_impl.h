@@ -46,6 +46,8 @@ class MockPeerConnectionImpl : public webrtc::PeerConnectionInterface {
   }
   rtc::scoped_refptr<webrtc::DtmfSenderInterface>
       CreateDtmfSender(webrtc::AudioTrackInterface* track) override;
+  std::vector<rtc::scoped_refptr<webrtc::RtpReceiverInterface>> GetReceivers()
+      const override;
   rtc::scoped_refptr<webrtc::DataChannelInterface>
       CreateDataChannel(const std::string& label,
                         const webrtc::DataChannelInit* config) override;
@@ -106,6 +108,10 @@ class MockPeerConnectionImpl : public webrtc::PeerConnectionInterface {
                         webrtc::RTCError* error) override;
   bool AddIceCandidate(const webrtc::IceCandidateInterface* candidate) override;
   void RegisterUMAObserver(webrtc::UMAObserver* observer) override;
+
+  webrtc::RTCError SetBitrate(
+      const webrtc::PeerConnectionInterface::BitrateParameters& bitrate)
+      override;
 
   void AddRemoteStream(webrtc::MediaStreamInterface* stream);
 

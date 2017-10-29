@@ -22,7 +22,6 @@ source_set("hang_util") {
   ]
   deps = [
     "//base",
-    "//components/memory_pressure",
   ]
   libs = [ "pdh.lib" ]  # Used by system_load_estimator.h.
   ldflags = [ "/DELAYLOAD:pdh.dll" ]  # Only used on report capture.
@@ -60,11 +59,12 @@ shared_library("chrome_watcher") {
     ":client",
     "//base",
     "//base:base_static",
-    "//build/config/sanitizers:deps",
-    "//chrome/common:metrics_constants_util_win",
+    "//build/config:exe_and_shlib_deps",
+    "//chrome/common:non_code_constants",
     "//chrome/install_static:secondary_module",
     "//chrome_elf",
     "//components/browser_watcher",
+    "//content/public/common:static_switches",
   ]
   ldflags = [ "/DEF:" + rebase_path("chrome_watcher.def", root_build_dir) ]
   configs -= [ "//build/config/win:console" ]

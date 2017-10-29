@@ -18,6 +18,10 @@ const char kDataReductionProxyConfigURL[] = "data-reduction-proxy-config-url";
 // Proxy field trials.
 const char kDataReductionProxyExperiment[] = "data-reduction-proxy-experiment";
 
+// The Chrome-Proxy "exp" directive value used by data reduction proxy to
+// receive an alternative back end implementation.
+const char kDataReductionProxyServerAlternative[] = "alternative";
+
 // The origin of the data reduction proxy fallback.
 const char kDataReductionProxyFallback[] = "spdy-proxy-auth-fallback";
 
@@ -55,20 +59,12 @@ const char kDataReductionProxySecureProxyCheckURL[] =
 const char kDataReductionProxyServerExperimentsDisabled[] =
     "data-reduction-proxy-server-experiments-disabled";
 
-// Sets a URL to fetch to warm up the data reduction proxy on startup and
-// network changes.
-const char kDataReductionProxyWarmupURL[] = "data-reduction-proxy-warmup-url";
-
 // Enable the data reduction proxy.
 const char kEnableDataReductionProxy[] = "enable-spdy-proxy-auth";
 
 // Enable the data reduction proxy bypass warning.
 const char kEnableDataReductionProxyBypassWarning[] =
     "enable-data-reduction-proxy-bypass-warning";
-
-// Enables the origin of the carrier test data reduction proxy.
-const char kEnableDataReductionProxyCarrierTest[] =
-    "enable-data-reduction-proxy-carrier-test";
 
 // Enables lite page from the data reduction proxy. This means a lite page
 // should be requested instead of placeholders whenever Lo-Fi mode is on. Lo-fi
@@ -79,10 +75,6 @@ const char kEnableDataReductionProxyLitePage[] =
 // Enables sending a pageload metrics pingback after every page load.
 const char kEnableDataReductionProxyForcePingback[] =
     "enable-data-reduction-proxy-force-pingback";
-
-// If set, enables use of QUIC with non core data reduction proxies.
-const char kDataReductionProxyEnableQuicOnNonCoreProxies[] =
-    "data-reduction-proxy-enable-quic-on-non-core-proxies";
 
 // Enables a 1 MB savings promo for the data reduction proxy.
 const char kEnableDataReductionProxySavingsPromo[] =

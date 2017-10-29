@@ -22,13 +22,13 @@ tr.exportTo('tr.ui.b', function() {
   /**
    * @constructor
    */
-  var ListView = tr.ui.b.define(
+  const ListView = tr.ui.b.define(
       'x-list-view', tr.ui.b.ContainerThatDecoratesItsChildren);
 
   ListView.prototype = {
     __proto__: tr.ui.b.ContainerThatDecoratesItsChildren.prototype,
 
-    decorate: function() {
+    decorate() {
       tr.ui.b.ContainerThatDecoratesItsChildren.prototype.decorate.call(this);
 
       Polymer.dom(this).classList.add('x-list-view');
@@ -40,35 +40,35 @@ tr.exportTo('tr.ui.b', function() {
       this.selectionChanged_ = false;
     },
 
-    decorateChild_: function(item) {
+    decorateChild_(item) {
       Polymer.dom(item).classList.add('list-item');
       item.addEventListener('click', this.onItemClicked_, true);
 
-      var listView = this;
       Object.defineProperty(
           item,
           'selected', {
             configurable: true,
-            set: function(value) {
-              var oldSelection = listView.selectedElement;
-              if (oldSelection && oldSelection !== this && value)
-                Polymer.dom(listView.selectedElement).removeAttribute(
-                    'selected');
-              if (value)
-                Polymer.dom(this).setAttribute('selected', 'selected');
-              else
-                Polymer.dom(this).removeAttribute('selected');
-              var newSelection = listView.selectedElement;
-              if (newSelection !== oldSelection)
-                tr.b.dispatchSimpleEvent(listView, 'selection-changed', false);
+            get: () => item.hasAttribute('selected'),
+            set: value => {
+              // |this| is the ListView.
+              const oldSelection = this.selectedElement;
+              if (oldSelection && oldSelection !== item && value) {
+                Polymer.dom(this.selectedElement).removeAttribute('selected');
+              }
+              if (value) {
+                Polymer.dom(item).setAttribute('selected', 'selected');
+              } else {
+                Polymer.dom(item).removeAttribute('selected');
+              }
+              const newSelection = this.selectedElement;
+              if (newSelection !== oldSelection) {
+                tr.b.dispatchSimpleEvent(this, 'selection-changed', false);
+              }
             },
-            get: function() {
-              return this.hasAttribute('selected');
-            }
           });
     },
 
-    undecorateChild_: function(item) {
+    undecorateChild_(item) {
       this.selectionChanged_ |= item.selected;
 
       Polymer.dom(item).classList.remove('list-item');
@@ -76,65 +76,70 @@ tr.exportTo('tr.ui.b', function() {
       delete item.selected;
     },
 
-    beginDecorating_: function() {
+    beginDecorating_() {
       this.selectionChanged_ = false;
     },
 
-    doneDecoratingForNow_: function() {
-      if (this.selectionChanged_)
+    doneDecoratingForNow_() {
+      if (this.selectionChanged_) {
         tr.b.dispatchSimpleEvent(this, 'selection-changed', false);
+      }
     },
 
     get selectedElement() {
-      var el = Polymer.dom(this).querySelector('.list-item[selected]');
-      if (!el)
-        return undefined;
+      const el = Polymer.dom(this).querySelector('.list-item[selected]');
+      if (!el) return undefined;
       return el;
     },
 
     set selectedElement(el) {
       if (!el) {
-        if (this.selectedElement)
+        if (this.selectedElement) {
           this.selectedElement.selected = false;
+        }
         return;
       }
 
-      if (el.parentElement !== this)
+      if (el.parentElement !== this) {
         throw new Error(
             'Can only select elements that are children of this list view');
+      }
       el.selected = true;
     },
 
-    getElementByIndex: function(index) {
+    getElementByIndex(index) {
       return Polymer.dom(this)
           .querySelector('.list-item:nth-child(' + index + ')');
     },
 
-    clear: function() {
-      var changed = this.selectedElement !== undefined;
+    clear() {
+      const changed = this.selectedElement !== undefined;
       tr.ui.b.ContainerThatDecoratesItsChildren.prototype.clear.call(this);
-      if (changed)
+      if (changed) {
         tr.b.dispatchSimpleEvent(this, 'selection-changed', false);
+      }
     },
 
-    onItemClicked_: function(e) {
-      var currentSelectedElement = this.selectedElement;
-      if (currentSelectedElement)
+    onItemClicked_(e) {
+      const currentSelectedElement = this.selectedElement;
+      if (currentSelectedElement) {
         Polymer.dom(currentSelectedElement).removeAttribute('selected');
-      var element = e.target;
-      while (element.parentElement !== this)
+      }
+      let element = e.target;
+      while (element.parentElement !== this) {
         element = element.parentElement;
-      if (element !== currentSelectedElement)
+      }
+      if (element !== currentSelectedElement) {
         Polymer.dom(element).setAttribute('selected', 'selected');
+      }
       tr.b.dispatchSimpleEvent(this, 'selection-changed', false);
     },
 
-    onKeyDown_: function(e) {
-      if (this.selectedElement === undefined)
-        return;
+    onKeyDown_(e) {
+      if (this.selectedElement === undefined) return;
 
       if (e.keyCode === 38) { // Up arrow.
-        var prev = Polymer.dom(this.selectedElement).previousSibling;
+        const prev = Polymer.dom(this.selectedElement).previousSibling;
         if (prev) {
           prev.selected = true;
           tr.ui.b.scrollIntoViewIfNeeded(prev);
@@ -142,7 +147,7 @@ tr.exportTo('tr.ui.b', function() {
           return true;
         }
       } else if (e.keyCode === 40) { // Down arrow.
-        var next = Polymer.dom(this.selectedElement).nextSibling;
+        const next = Polymer.dom(this.selectedElement).nextSibling;
         if (next) {
           next.selected = true;
           tr.ui.b.scrollIntoViewIfNeeded(next);
@@ -152,8 +157,8 @@ tr.exportTo('tr.ui.b', function() {
       }
     },
 
-    addItem: function(textContent) {
-      var item = document.createElement('div');
+    addItem(textContent) {
+      const item = document.createElement('div');
       Polymer.dom(item).textContent = textContent;
       Polymer.dom(this).appendChild(item);
       return item;

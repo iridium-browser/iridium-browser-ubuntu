@@ -6,6 +6,8 @@
 #define THIRD_PARTY_WEBKIT_PUBLIC_PLATFORM_SCHEDULER_TEST_FAKE_RENDERER_SCHEDULER_H_
 
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "public/platform/scheduler/renderer/renderer_scheduler.h"
 
 namespace blink {
@@ -18,35 +20,31 @@ class FakeRendererScheduler : public RendererScheduler {
 
   // RendererScheduler implementation.
   std::unique_ptr<WebThread> CreateMainThread() override;
-  scoped_refptr<TaskQueue> DefaultTaskRunner() override;
-  scoped_refptr<TaskQueue> CompositorTaskRunner() override;
-  scoped_refptr<TaskQueue> LoadingTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> LoadingTaskRunner() override;
   scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner() override;
-  scoped_refptr<TaskQueue> TimerTaskRunner() override;
-  scoped_refptr<TaskQueue> NewLoadingTaskRunner(
-      TaskQueue::QueueType queue_type) override;
-  scoped_refptr<TaskQueue> NewTimerTaskRunner(
-      TaskQueue::QueueType queue_type) override;
-  scoped_refptr<TaskQueue> NewUnthrottledTaskRunner(
-      TaskQueue::QueueType queue_type) override;
+  scoped_refptr<base::SingleThreadTaskRunner> TimerTaskRunner() override;
   std::unique_ptr<RenderWidgetSchedulingState> NewRenderWidgetSchedulingState()
       override;
   void WillBeginFrame(const cc::BeginFrameArgs& args) override;
   void BeginFrameNotExpectedSoon() override;
+  void BeginMainFrameNotExpectedUntil(base::TimeTicks time) override;
   void DidCommitFrameToCompositor() override;
   void DidHandleInputEventOnCompositorThread(
       const WebInputEvent& web_input_event,
       InputEventState event_state) override;
   void DidHandleInputEventOnMainThread(const WebInputEvent& web_input_event,
                                        WebInputEventResult result) override;
+  base::TimeDelta MostRecentExpectedQueueingTime() override;
   void DidAnimateForInputOnCompositorThread() override;
-  void OnRendererBackgrounded() override;
-  void OnRendererForegrounded() override;
+  void SetRendererHidden(bool hidden) override;
+  void SetRendererBackgrounded(bool backgrounded) override;
   void SuspendRenderer() override;
   void ResumeRenderer() override;
-  void AddPendingNavigation(WebScheduler::NavigatingFrameType type) override;
-  void RemovePendingNavigation(WebScheduler::NavigatingFrameType type) override;
-  void OnNavigationStarted() override;
+  void AddPendingNavigation(NavigatingFrameType type) override;
+  void RemovePendingNavigation(NavigatingFrameType type) override;
+  void OnNavigate() override;
   bool IsHighPriorityWorkAnticipated() override;
   bool CanExceedIdleDeadlineIfRequired() const override;
   bool ShouldYieldForHighPriorityWork() override;
@@ -56,6 +54,8 @@ class FakeRendererScheduler : public RendererScheduler {
   void Shutdown() override;
   void SuspendTimerQueue() override;
   void ResumeTimerQueue() override;
+  void VirtualTimePaused() override;
+  void VirtualTimeResumed() override;
   void SetTimerQueueSuspensionWhenBackgroundedEnabled(bool enabled) override;
   void SetTopLevelBlameContext(
       base::trace_event::BlameContext* blame_context) override;

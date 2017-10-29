@@ -7,16 +7,18 @@
 #include "core/css/parser/CSSParserContext.h"
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIFlexBasis::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
   // FIXME: Support intrinsic dimensions too.
-  if (range.peek().id() == CSSValueAuto)
-    return CSSPropertyParserHelpers::consumeIdent(range);
-  return CSSPropertyParserHelpers::consumeLengthOrPercent(
-      range, context->mode(), ValueRangeNonNegative);
+  if (range.Peek().Id() == CSSValueAuto)
+    return CSSPropertyParserHelpers::ConsumeIdent(range);
+  return CSSPropertyParserHelpers::ConsumeLengthOrPercent(
+      range, context.Mode(), kValueRangeNonNegative);
 }
 
 }  // namespace blink

@@ -7,9 +7,11 @@
 
 #include "GrGpuCommandBuffer.h"
 
+#include "GrContext.h"
 #include "GrCaps.h"
 #include "GrFixedClip.h"
 #include "GrGpu.h"
+#include "GrMesh.h"
 #include "GrPrimitiveProcessor.h"
 #include "GrRenderTarget.h"
 #include "SkRect.h"
@@ -36,15 +38,30 @@ void GrGpuCommandBuffer::clearStencilClip(GrRenderTarget* rt, const GrFixedClip&
 
 bool GrGpuCommandBuffer::draw(const GrPipeline& pipeline,
                               const GrPrimitiveProcessor& primProc,
-                              const GrMesh* mesh,
+                              const GrMesh meshes[],
+                              const GrPipeline::DynamicState dynamicStates[],
                               int meshCount,
                               const SkRect& bounds) {
+#ifdef SK_DEBUG
+    SkASSERT(!primProc.hasInstanceAttribs() || this->gpu()->caps()->instanceAttribSupport());
+    for (int i = 0; i < meshCount; ++i) {
+        SkASSERT(!GrPrimTypeRequiresGeometryShaderSupport(meshes[i].primitiveType()) ||
+                 this->gpu()->caps()->shaderCaps()->geometryShaderSupport());
+        SkASSERT(primProc.hasVertexAttribs() == meshes[i].hasVertexData());
+        SkASSERT(primProc.hasInstanceAttribs() == meshes[i].isInstanced());
+    }
+#endif
+
+    if (pipeline.isBad() || !primProc.instantiate(this->gpu()->getContext()->resourceProvider())) {
+        return false;
+    }
+
     SkASSERT(pipeline.isInitialized());
     if (primProc.numAttribs() > this->gpu()->caps()->maxVertexAttributes()) {
         this->gpu()->stats()->incNumFailedDraws();
         return false;
     }
-    this->onDraw(pipeline, primProc, mesh, meshCount, bounds);
+    this->onDraw(pipeline, primProc, meshes, dynamicStates, meshCount, bounds);
     return true;
 }
 

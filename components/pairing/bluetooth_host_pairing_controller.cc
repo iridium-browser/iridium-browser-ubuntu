@@ -4,12 +4,15 @@
 
 #include "components/pairing/bluetooth_host_pairing_controller.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/hash.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/single_thread_task_runner.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task_runner.h"
 #include "base/task_runner_util.h"
 #include "chromeos/system/devicetype.h"
 #include "components/pairing/bluetooth_pairing_constants.h"
@@ -22,21 +25,6 @@ namespace pairing_chromeos {
 
 namespace {
 const int kReceiveSize = 16384;
-
-std::string GetChromeOSDeviceType() {
-  switch (chromeos::GetDeviceType()) {
-    case chromeos::DeviceType::kChromebox:
-      return std::string(kDeviceNamePrefix) + "box";
-    case chromeos::DeviceType::kChromebase:
-      return std::string(kDeviceNamePrefix) + "base";
-    case chromeos::DeviceType::kChromebit:
-      return std::string(kDeviceNamePrefix) + "bit";
-    case chromeos::DeviceType::kChromebook:
-      return std::string(kDeviceNamePrefix) + "book";
-    default:
-      return std::string(kDeviceNamePrefix) + "device";
-  }
-}
 
 pairing_api::HostStatusParameters::Connectivity PairingApiConnectivityStatus(
     HostPairingController::Connectivity connectivity_status) {
@@ -101,14 +89,9 @@ std::vector<BluetoothHostPairingController::InputDeviceInfo> GetDevices() {
 }  // namespace
 
 BluetoothHostPairingController::BluetoothHostPairingController(
-    const scoped_refptr<base::SingleThreadTaskRunner>& file_task_runner)
-    : current_stage_(STAGE_NONE),
-      connectivity_status_(CONNECTIVITY_UNTESTED),
-      update_status_(UPDATE_STATUS_UNKNOWN),
-      enrollment_status_(ENROLLMENT_STATUS_UNKNOWN),
-      proto_decoder_(new ProtoDecoder(this)),
-      file_task_runner_(file_task_runner),
-      ptr_factory_(this) {}
+    scoped_refptr<base::TaskRunner> input_service_task_runner)
+    : proto_decoder_(base::MakeUnique<ProtoDecoder>(this)),
+      input_service_task_runner_(std::move(input_service_task_runner)) {}
 
 BluetoothHostPairingController::~BluetoothHostPairingController() {
   Reset();
@@ -165,62 +148,60 @@ void BluetoothHostPairingController::SendHostStatus() {
                  ptr_factory_.GetWeakPtr()));
 }
 
+void BluetoothHostPairingController::SendErrorCodeAndMessage() {
+  if (error_code_ ==
+      static_cast<int>(HostPairingController::ErrorCode::ERROR_NONE)) {
+    return;
+  }
+
+  pairing_api::Error error_status;
+  error_status.set_api_version(kPairingAPIVersion);
+  error_status.mutable_parameters()->set_code(error_code_);
+  error_status.mutable_parameters()->set_description(error_message_);
+
+  int size = 0;
+  scoped_refptr<net::IOBuffer> io_buffer(
+      ProtoDecoder::SendError(error_status, &size));
+
+  controller_socket_->Send(
+      io_buffer, size,
+      base::Bind(&BluetoothHostPairingController::OnSendComplete,
+                 ptr_factory_.GetWeakPtr()),
+      base::Bind(&BluetoothHostPairingController::OnSendError,
+                 ptr_factory_.GetWeakPtr()));
+}
+
 void BluetoothHostPairingController::Reset() {
-  if (controller_socket_.get()) {
-    controller_socket_->Close();
-    controller_socket_ = nullptr;
-  }
-
-  if (service_socket_.get()) {
-    service_socket_->Close();
-    service_socket_ = nullptr;
-  }
-
   if (adapter_.get()) {
-    if (adapter_->IsDiscoverable()) {
-      adapter_->SetDiscoverable(false, base::Bind(&base::DoNothing),
-                                base::Bind(&base::DoNothing));
+    device::BluetoothDevice* device =
+        adapter_->GetDevice(controller_device_address_);
+    if (device && device->IsPaired()) {
+      device->Forget(base::Bind(&BluetoothHostPairingController::OnForget,
+                                ptr_factory_.GetWeakPtr()),
+                     base::Bind(&BluetoothHostPairingController::OnForget,
+                                ptr_factory_.GetWeakPtr()));
+      return;
     }
-
-    base::PostTaskAndReplyWithResult(
-        file_task_runner_.get(), FROM_HERE, base::Bind(&GetDevices),
-        base::Bind(&BluetoothHostPairingController::PowerOffAdapterIfApplicable,
-                   ptr_factory_.GetWeakPtr()));
   }
-  ChangeStage(STAGE_NONE);
+  OnForget();
 }
 
 void BluetoothHostPairingController::OnGetAdapter(
     scoped_refptr<device::BluetoothAdapter> adapter) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(!adapter_.get());
   adapter_ = adapter;
 
   if (adapter_->IsPresent()) {
-    SetName();
+    SetPowered();
   } else {
     // Set the name once the adapter is present.
     adapter_->AddObserver(this);
   }
 }
 
-void BluetoothHostPairingController::SetName() {
-  // Hash the bluetooth address and take the lower 2 bytes to create a human
-  // readable device name.
-  const uint32_t device_id = base::Hash(adapter_->GetAddress()) & 0xFFFF;
-  device_name_ =
-      base::StringPrintf("%s_%04X", GetChromeOSDeviceType().c_str(), device_id);
-
-  adapter_->SetName(
-      device_name_,
-      base::Bind(&BluetoothHostPairingController::OnSetName,
-                 ptr_factory_.GetWeakPtr()),
-      base::Bind(&BluetoothHostPairingController::OnSetError,
-                 ptr_factory_.GetWeakPtr()));
-}
-
-void BluetoothHostPairingController::OnSetName() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+void BluetoothHostPairingController::SetPowered() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (adapter_->IsPowered()) {
     was_powered_ = true;
     OnSetPowered();
@@ -235,7 +216,7 @@ void BluetoothHostPairingController::OnSetName() {
 }
 
 void BluetoothHostPairingController::OnSetPowered() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   adapter_->AddPairingDelegate(
       this, device::BluetoothAdapter::PAIRING_DELEGATE_PRIORITY_HIGH);
 
@@ -252,7 +233,7 @@ void BluetoothHostPairingController::OnSetPowered() {
 
 void BluetoothHostPairingController::OnCreateService(
     scoped_refptr<device::BluetoothSocket> socket) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   service_socket_ = socket;
 
   service_socket_->Accept(
@@ -272,16 +253,16 @@ void BluetoothHostPairingController::OnCreateService(
 void BluetoothHostPairingController::OnAccept(
     const device::BluetoothDevice* device,
     scoped_refptr<device::BluetoothSocket> socket) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  controller_device_address_ = device->GetAddress();
+
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   adapter_->SetDiscoverable(
       false,
       base::Bind(&BluetoothHostPairingController::OnSetDiscoverable,
                  ptr_factory_.GetWeakPtr(), false),
       base::Bind(&BluetoothHostPairingController::OnSetError,
                  ptr_factory_.GetWeakPtr()));
-
   controller_socket_ = socket;
-  service_socket_ = nullptr;
 
   SendHostStatus();
 
@@ -294,7 +275,7 @@ void BluetoothHostPairingController::OnAccept(
 }
 
 void BluetoothHostPairingController::OnSetDiscoverable(bool change_stage) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (change_stage) {
     DCHECK_EQ(current_stage_, STAGE_NONE);
     ChangeStage(STAGE_WAITING_FOR_CONTROLLER);
@@ -305,7 +286,7 @@ void BluetoothHostPairingController::OnSendComplete(int bytes_sent) {}
 
 void BluetoothHostPairingController::OnReceiveComplete(
     int bytes, scoped_refptr<net::IOBuffer> io_buffer) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   proto_decoder_->DecodeIOBuffer(bytes, io_buffer);
 
   if (controller_socket_.get()) {
@@ -371,6 +352,36 @@ void BluetoothHostPairingController::ResetAdapter() {
     delegate_->OnAdapterReset();
 }
 
+void BluetoothHostPairingController::OnForget() {
+  if (controller_socket_.get()) {
+    controller_socket_->Close();
+    controller_socket_ = nullptr;
+  }
+
+  if (service_socket_.get()) {
+    service_socket_->Close();
+    service_socket_ = nullptr;
+  }
+
+  if (adapter_.get()) {
+    if (adapter_->IsDiscoverable()) {
+      adapter_->SetDiscoverable(false, base::Bind(&base::DoNothing),
+                                base::Bind(&base::DoNothing));
+    }
+
+    base::PostTaskAndReplyWithResult(
+        input_service_task_runner_.get(), FROM_HERE, base::Bind(&GetDevices),
+        base::Bind(&BluetoothHostPairingController::PowerOffAdapterIfApplicable,
+                   ptr_factory_.GetWeakPtr()));
+  }
+  ChangeStage(STAGE_NONE);
+}
+
+void BluetoothHostPairingController::SetControllerDeviceAddressForTesting(
+    const std::string& address) {
+  controller_device_address_ = address;
+}
+
 void BluetoothHostPairingController::OnReceiveError(
     device::BluetoothSocket::ErrorReason reason,
     const std::string& error_message) {
@@ -396,7 +407,7 @@ void BluetoothHostPairingController::OnConfigureHostMessage(
 
 void BluetoothHostPairingController::OnPairDevicesMessage(
     const pairing_api::PairDevices& message) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   enrollment_domain_ = message.parameters().enrolling_domain();
   ChangeStage(STAGE_ENROLLING);
   for (Observer& observer : observers_)
@@ -405,7 +416,7 @@ void BluetoothHostPairingController::OnPairDevicesMessage(
 
 void BluetoothHostPairingController::OnCompleteSetupMessage(
     const pairing_api::CompleteSetup& message) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (current_stage_ != STAGE_ENROLLMENT_SUCCESS) {
     ChangeStage(STAGE_ENROLLMENT_ERROR);
   } else {
@@ -420,9 +431,16 @@ void BluetoothHostPairingController::OnErrorMessage(
   NOTREACHED();
 }
 
+void BluetoothHostPairingController::OnRebootMessage(
+    const pairing_api::Reboot& message) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  for (Observer& observer : observers_)
+    observer.RebootHostRequested();
+}
+
 void BluetoothHostPairingController::OnAddNetworkMessage(
     const pairing_api::AddNetwork& message) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   for (Observer& observer : observers_)
     observer.AddNetworkRequested(message.parameters().onc_spec());
 }
@@ -433,7 +451,7 @@ void BluetoothHostPairingController::AdapterPresentChanged(
   DCHECK_EQ(adapter, adapter_.get());
   if (present) {
     adapter_->RemoveObserver(this);
-    SetName();
+    SetPowered();
   }
 }
 
@@ -451,9 +469,9 @@ HostPairingController::Stage BluetoothHostPairingController::GetCurrentStage() {
 
 void BluetoothHostPairingController::StartPairing() {
   DCHECK_EQ(current_stage_, STAGE_NONE);
-  bool bluetooth_available =
-      device::BluetoothAdapterFactory::IsBluetoothAdapterAvailable();
-  if (!bluetooth_available) {
+  const bool bluetooth_supported =
+      device::BluetoothAdapterFactory::IsBluetoothSupported();
+  if (!bluetooth_supported) {
     ChangeStage(STAGE_INITIALIZATION_ERROR);
     return;
   }
@@ -464,7 +482,7 @@ void BluetoothHostPairingController::StartPairing() {
 }
 
 std::string BluetoothHostPairingController::GetDeviceName() {
-  return device_name_;
+  return adapter_.get() ? adapter_->GetName() : std::string();
 }
 
 std::string BluetoothHostPairingController::GetConfirmationCode() {
@@ -479,9 +497,12 @@ std::string BluetoothHostPairingController::GetEnrollmentDomain() {
 void BluetoothHostPairingController::OnNetworkConnectivityChanged(
     Connectivity connectivity_status) {
   connectivity_status_ = connectivity_status;
-  if (connectivity_status == CONNECTIVITY_NONE)
+  if (connectivity_status == CONNECTIVITY_NONE) {
     ChangeStage(STAGE_SETUP_NETWORK_ERROR);
-  SendHostStatus();
+    SendErrorCodeAndMessage();
+  } else {
+    SendHostStatus();
+  }
 }
 
 void BluetoothHostPairingController::OnUpdateStatusChanged(
@@ -495,20 +516,28 @@ void BluetoothHostPairingController::OnUpdateStatusChanged(
 void BluetoothHostPairingController::OnEnrollmentStatusChanged(
     EnrollmentStatus enrollment_status) {
   DCHECK_EQ(current_stage_, STAGE_ENROLLING);
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   enrollment_status_ = enrollment_status;
   if (enrollment_status == ENROLLMENT_STATUS_SUCCESS) {
     ChangeStage(STAGE_ENROLLMENT_SUCCESS);
+    SendHostStatus();
   } else if (enrollment_status == ENROLLMENT_STATUS_FAILURE) {
     ChangeStage(STAGE_ENROLLMENT_ERROR);
+    SendErrorCodeAndMessage();
   }
-  SendHostStatus();
 }
 
 void BluetoothHostPairingController::SetPermanentId(
     const std::string& permanent_id) {
   permanent_id_ = permanent_id;
+}
+
+void BluetoothHostPairingController::SetErrorCodeAndMessage(
+    int error_code,
+    const std::string& error_message) {
+  error_code_ = error_code;
+  error_message_ = error_message;
 }
 
 void BluetoothHostPairingController::RequestPinCode(

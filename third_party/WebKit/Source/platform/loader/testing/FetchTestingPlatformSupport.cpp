@@ -5,8 +5,8 @@
 #include "platform/loader/testing/FetchTestingPlatformSupport.h"
 
 #include <memory>
+#include "platform/loader/fetch/ResourceError.h"
 #include "platform/loader/testing/MockFetchContext.h"
-#include "platform/network/ResourceError.h"
 #include "platform/testing/weburl_loader_mock_factory_impl.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebURL.h"
@@ -16,37 +16,32 @@
 namespace blink {
 
 FetchTestingPlatformSupport::FetchTestingPlatformSupport()
-    : m_urlLoaderMockFactory(new WebURLLoaderMockFactoryImpl(this)) {}
+    : url_loader_mock_factory_(new WebURLLoaderMockFactoryImpl(this)) {}
 
 FetchTestingPlatformSupport::~FetchTestingPlatformSupport() {
   // Shutdowns WebURLLoaderMockFactory gracefully, serving all pending requests
   // first, then flushing all registered URLs.
-  m_urlLoaderMockFactory->serveAsynchronousRequests();
-  m_urlLoaderMockFactory->unregisterAllURLsAndClearMemoryCache();
+  url_loader_mock_factory_->ServeAsynchronousRequests();
+  url_loader_mock_factory_->UnregisterAllURLsAndClearMemoryCache();
 }
 
-MockFetchContext* FetchTestingPlatformSupport::context() {
-  if (!m_context) {
-    m_context = MockFetchContext::create(
-        MockFetchContext::kShouldLoadNewResource,
-        currentThread()->scheduler()->loadingTaskRunner());
+MockFetchContext* FetchTestingPlatformSupport::Context() {
+  if (!context_) {
+    context_ =
+        MockFetchContext::Create(MockFetchContext::kShouldLoadNewResource);
   }
-  return m_context;
-}
-
-WebURLError FetchTestingPlatformSupport::cancelledError(
-    const WebURL& url) const {
-  return ResourceError(errorDomainBlinkInternal, -1, url.string(),
-                       "cancelledError for testing");
+  return context_;
 }
 
 WebURLLoaderMockFactory*
-FetchTestingPlatformSupport::getURLLoaderMockFactory() {
-  return m_urlLoaderMockFactory.get();
+FetchTestingPlatformSupport::GetURLLoaderMockFactory() {
+  return url_loader_mock_factory_.get();
 }
 
-WebURLLoader* FetchTestingPlatformSupport::createURLLoader() {
-  return m_urlLoaderMockFactory->createURLLoader(nullptr);
+std::unique_ptr<WebURLLoader> FetchTestingPlatformSupport::CreateURLLoader(
+    const blink::WebURLRequest& request,
+    base::SingleThreadTaskRunner* task_runner) {
+  return url_loader_mock_factory_->CreateURLLoader(nullptr);
 }
 
 }  // namespace blink

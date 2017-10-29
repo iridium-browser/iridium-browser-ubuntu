@@ -41,6 +41,10 @@ class BluetoothTestMac;
 - (void)addServices:(NSArray*)services;
 - (void)didDiscoverServicesWithError:(NSError*)error;
 - (void)removeService:(CBService*)uuid;
+- (void)mockDidDiscoverServices;
+- (void)mockDidDiscoverCharacteristicsForService:(CBService*)service;
+- (void)mockDidDiscoverDescriptorsForCharacteristic:
+    (CBCharacteristic*)characteristic;
 - (void)mockDidDiscoverEvents;
 - (void)didModifyServices:(NSArray*)invalidatedServices;
 - (void)didDiscoverDescriptorsWithCharacteristic:

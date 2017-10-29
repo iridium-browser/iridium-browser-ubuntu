@@ -10,8 +10,10 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -106,7 +108,6 @@ class AutofillTest : public InProcessBrowserTest {
     test::DisableSystemServices(browser()->profile()->GetPrefs());
 
     ASSERT_TRUE(embedded_test_server()->Start());
-    InProcessBrowserTest::SetUpOnMainThread();
   }
 
   void TearDownOnMainThread() override {
@@ -192,7 +193,7 @@ class AutofillTest : public InProcessBrowserTest {
       // triggered by user gestures are ignored.
       content::SimulateMouseClick(
           browser()->tab_strip_model()->GetActiveWebContents(), 0,
-          blink::WebMouseEvent::Button::Left);
+          blink::WebMouseEvent::Button::kLeft);
     }
     // We may not always be expecting changes in Personal data.
     if (observer.get())
@@ -357,10 +358,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, FillProfileCrazyCharacters) {
   SetProfiles(&profiles);
   ASSERT_EQ(profiles.size(), personal_data_manager()->GetProfiles().size());
   for (size_t i = 0; i < profiles.size(); ++i) {
-    EXPECT_TRUE(std::find(profiles.begin(),
-                          profiles.end(),
-                          *personal_data_manager()->GetProfiles()[i]) !=
-                profiles.end());
+    EXPECT_TRUE(base::ContainsValue(
+        profiles, *personal_data_manager()->GetProfiles()[i]));
   }
 
   std::vector<CreditCard> cards;
@@ -412,10 +411,8 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, FillProfileCrazyCharacters) {
   SetCards(&cards);
   ASSERT_EQ(cards.size(), personal_data_manager()->GetCreditCards().size());
   for (size_t i = 0; i < cards.size(); ++i) {
-    EXPECT_TRUE(std::find(cards.begin(),
-                          cards.end(),
-                          *personal_data_manager()->GetCreditCards()[i]) !=
-                cards.end());
+    EXPECT_TRUE(base::ContainsValue(
+        cards, *personal_data_manager()->GetCreditCards()[i]));
   }
 }
 

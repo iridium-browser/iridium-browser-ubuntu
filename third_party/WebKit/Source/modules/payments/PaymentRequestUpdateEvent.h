@@ -6,49 +6,55 @@
 #define PaymentRequestUpdateEvent_h
 
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/events/Event.h"
 #include "modules/ModulesExport.h"
 #include "modules/payments/PaymentRequestUpdateEventInit.h"
+#include "modules/payments/PaymentUpdater.h"
 #include "platform/Timer.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
 class ExceptionState;
 class ExecutionContext;
-class PaymentUpdater;
 class ScriptState;
 
-class MODULES_EXPORT PaymentRequestUpdateEvent final : public Event {
+class MODULES_EXPORT PaymentRequestUpdateEvent final : public Event,
+                                                       public PaymentUpdater {
   DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(PaymentRequestUpdateEvent)
 
  public:
   ~PaymentRequestUpdateEvent() override;
 
-  static PaymentRequestUpdateEvent* create(
+  static PaymentRequestUpdateEvent* Create(
       ExecutionContext*,
       const AtomicString& type,
       const PaymentRequestUpdateEventInit& = PaymentRequestUpdateEventInit());
 
-  void setPaymentDetailsUpdater(PaymentUpdater*);
+  void SetPaymentDetailsUpdater(PaymentUpdater*);
 
   void updateWith(ScriptState*, ScriptPromise, ExceptionState&);
 
+  // PaymentUpdater:
+  void OnUpdatePaymentDetails(const ScriptValue& details_script_value) override;
+  void OnUpdatePaymentDetailsFailure(const String& error) override;
+
   DECLARE_VIRTUAL_TRACE();
 
-  void onUpdateEventTimeoutForTesting();
+  void OnUpdateEventTimeoutForTesting();
 
  private:
   PaymentRequestUpdateEvent(ExecutionContext*,
                             const AtomicString& type,
                             const PaymentRequestUpdateEventInit&);
 
-  void onUpdateEventTimeout(TimerBase*);
+  void OnUpdateEventTimeout(TimerBase*);
 
-  Member<PaymentUpdater> m_updater;
-  bool m_waitForUpdate;
-  TaskRunnerTimer<PaymentRequestUpdateEvent> m_abortTimer;
+  Member<PaymentUpdater> updater_;
+  bool wait_for_update_;
+  TaskRunnerTimer<PaymentRequestUpdateEvent> abort_timer_;
 };
 
 }  // namespace blink

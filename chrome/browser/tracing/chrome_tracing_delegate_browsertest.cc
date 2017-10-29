@@ -4,7 +4,6 @@
 
 #include <utility>
 
-#include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "build/build_config.h"
@@ -17,7 +16,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "components/variations/variations_switches.h"
+#include "components/variations/variations_params_manager.h"
 #include "content/public/browser/background_tracing_config.h"
 #include "content/public/browser/background_tracing_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -151,8 +150,16 @@ IN_PROC_BROWSER_TEST_F(ChromeTracingDelegateBrowserTest,
       base::Closure(), content::BackgroundTracingManager::NO_DATA_FILTERING));
 }
 
+// Flaky on Linux. See https://crbug.com/723933.
+#if defined(OS_LINUX)
+#define MAYBE_BackgroundTracingThrottleTimeElapsed \
+  DISABLED_BackgroundTracingThrottleTimeElapsed
+#else
+#define MAYBE_BackgroundTracingThrottleTimeElapsed \
+  BackgroundTracingThrottleTimeElapsed
+#endif
 IN_PROC_BROWSER_TEST_F(ChromeTracingDelegateBrowserTest,
-                       BackgroundTracingThrottleTimeElapsed) {
+                       MAYBE_BackgroundTracingThrottleTimeElapsed) {
   base::RunLoop wait_for_upload;
 
   EXPECT_TRUE(StartPreemptiveScenario(
@@ -243,11 +250,9 @@ class ChromeTracingDelegateBrowserTestOnStartup
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        switches::kForceFieldTrials, "BackgroundTracing/TestGroup/");
-    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        variations::switches::kForceFieldTrialParams,
-        "BackgroundTracing.TestGroup:config/default_config_for_testing");
+    variations::testing::VariationParamsManager::AppendVariationParams(
+        "BackgroundTracing", "TestGroup",
+        {{"config", "default_config_for_testing"}}, command_line);
 
     tracing::SetConfigTextFilterForTesting(&FieldTrialConfigTextFilter);
   }

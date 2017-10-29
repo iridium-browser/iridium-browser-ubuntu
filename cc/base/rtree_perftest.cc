@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "cc/base/lap_timer.h"
 #include "cc/base/rtree.h"
-#include "cc/debug/lap_timer.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/perf/perf_test.h"
@@ -14,6 +14,14 @@ namespace {
 static const int kTimeLimitMillis = 2000;
 static const int kWarmupRuns = 5;
 static const int kTimeCheckInterval = 10;
+
+template <typename Container>
+size_t Accumulate(const Container& container) {
+  size_t result = 0;
+  for (size_t index : container)
+    result += index;
+  return result;
+}
 
 class RTreePerfTest : public testing::Test {
  public:
@@ -26,7 +34,7 @@ class RTreePerfTest : public testing::Test {
     std::vector<gfx::Rect> rects = BuildRects(rect_count);
     timer_.Reset();
     do {
-      RTree rtree;
+      RTree<size_t> rtree;
       rtree.Build(rects);
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
@@ -45,13 +53,12 @@ class RTreePerfTest : public testing::Test {
     size_t query_index = 0;
 
     std::vector<gfx::Rect> rects = BuildRects(rect_count);
-    RTree rtree;
+    RTree<size_t> rtree;
     rtree.Build(rects);
 
     timer_.Reset();
     do {
-      std::vector<size_t> results;
-      rtree.Search(queries[query_index], &results);
+      Accumulate(rtree.Search(queries[query_index]));
       query_index = (query_index + 1) % queries.size();
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());

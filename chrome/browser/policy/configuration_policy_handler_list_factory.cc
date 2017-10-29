@@ -33,6 +33,7 @@
 #include "components/certificate_transparency/pref_names.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/metrics/metrics_pref_names.h"
+#include "components/network_time/network_time_pref_names.h"
 #include "components/ntp_snippets/pref_names.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/policy/core/browser/autofill_policy_handler.h"
@@ -47,13 +48,14 @@
 #include "components/policy/core/common/schema.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_value_map.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/search_engines/default_search_policy_handler.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/spellcheck/spellcheck_build_features.h"
 #include "components/ssl_config/ssl_config_prefs.h"
 #include "components/sync/base/pref_names.h"
 #include "components/sync/driver/sync_policy_handler.h"
-#include "components/translate/core/common/translate_pref_names.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "components/variations/pref_names.h"
 #include "extensions/features/features.h"
 #include "media/media_features.h"
@@ -64,7 +66,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "ash/common/accessibility_types.h"
+#include "ash/accessibility_types.h"
 #include "chrome/browser/chromeos/platform_keys/key_permissions_policy_handler.h"
 #include "chrome/browser/chromeos/policy/configuration_policy_handler_chromeos.h"
 #include "chrome/browser/policy/default_geolocation_policy_handler.h"
@@ -77,6 +79,7 @@
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/download/download_dir_policy_handler.h"
+#include "chrome/browser/policy/local_sync_policy_handler.h"
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -136,6 +139,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kSafeBrowsingEnabled,
     prefs::kSafeBrowsingEnabled,
     base::Value::Type::BOOLEAN },
+  { key::kSafeBrowsingForTrustedSourcesEnabled,
+    prefs::kSafeBrowsingForTrustedSourcesEnabled,
+    base::Value::Type::BOOLEAN },
+  { key::kDownloadRestrictions,
+    prefs::kDownloadRestrictions,
+    base::Value::Type::INTEGER },
   { key::kForceGoogleSafeSearch,
     prefs::kForceGoogleSafeSearch,
     base::Value::Type::BOOLEAN },
@@ -319,6 +328,8 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kAllowFileSelectionDialogs,
     prefs::kAllowFileSelectionDialogs,
     base::Value::Type::BOOLEAN },
+
+  // First run import.
   { key::kImportBookmarks,
     prefs::kImportBookmarks,
     base::Value::Type::BOOLEAN },
@@ -337,6 +348,25 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kImportAutofillFormData,
     prefs::kImportAutofillFormData,
     base::Value::Type::BOOLEAN },
+
+  // Import data dialog: controlled by same policies as first run import, but
+  // uses different prefs.
+  { key::kImportBookmarks,
+    prefs::kImportDialogBookmarks,
+    base::Value::Type::BOOLEAN },
+  { key::kImportHistory,
+    prefs::kImportDialogHistory,
+    base::Value::Type::BOOLEAN },
+  { key::kImportSearchEngine,
+    prefs::kImportDialogSearchEngine,
+    base::Value::Type::BOOLEAN },
+  { key::kImportSavedPasswords,
+    prefs::kImportDialogSavedPasswords,
+    base::Value::Type::BOOLEAN },
+  { key::kImportAutofillFormData,
+    prefs::kImportDialogAutofillFormData,
+    base::Value::Type::BOOLEAN },
+
   { key::kMaxConnectionsPerProxy,
     prefs::kMaxConnectionsPerProxy,
     base::Value::Type::INTEGER },
@@ -410,7 +440,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kNTPContentSuggestionsEnabled,
     ntp_snippets::prefs::kEnableSnippets,
     base::Value::Type::BOOLEAN },
-#if defined(ENABLE_MEDIA_ROUTER)
   { key::kEnableMediaRouter,
     prefs::kEnableMediaRouter,
     base::Value::Type::BOOLEAN },
@@ -419,7 +448,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kShowCastIconInToolbar,
     base::Value::Type::BOOLEAN },
 #endif  // !defined(OS_ANDROID)
-#endif  // defined(ENABLE_MEDIA_ROUTER)
 #if BUILDFLAG(ENABLE_WEBRTC)
   { key::kWebRtcUdpPortRange,
     prefs::kWebRTCUDPPortRange,
@@ -530,6 +558,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kEasyUnlockAllowed,
     prefs::kEasyUnlockAllowed,
     base::Value::Type::BOOLEAN },
+  { key::kInstantTetheringAllowed,
+    prefs::kInstantTetheringAllowed,
+    base::Value::Type::BOOLEAN },
   { key::kCaptivePortalAuthenticationIgnoresProxy,
     prefs::kCaptivePortalAuthenticationIgnoresProxy,
     base::Value::Type::BOOLEAN },
@@ -554,6 +585,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kNativePrinters,
     prefs::kRecommendedNativePrinters,
     base::Value::Type::LIST },
+  { key::kEcryptfsMigrationStrategy,
+    prefs::kEcryptfsMigrationStrategy,
+    base::Value::Type::INTEGER },
 #endif  // defined(OS_CHROMEOS)
 
 // Metrics reporting is controlled by a platform specific policy for ChromeOS
@@ -588,6 +622,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::Type::BOOLEAN },
   { key::kBrowserAddPersonEnabled,
     prefs::kBrowserAddPersonEnabled,
+    base::Value::Type::BOOLEAN },
+  { key::kPrintPreviewUseSystemDefaultPrinter,
+    prefs::kPrintPreviewUseSystemDefaultPrinter,
     base::Value::Type::BOOLEAN },
 #endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 
@@ -646,9 +683,10 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kRoamingProfileSupportEnabled,
     syncer::prefs::kEnableLocalSyncBackend,
     base::Value::Type::BOOLEAN },
-  { key::kRoamingProfileLocation,
-    syncer::prefs::kLocalSyncBackendDir,
-    base::Value::Type::STRING },
+
+  { key::kBrowserNetworkTimeQueriesEnabled,
+    network_time::prefs::kNetworkTimeQueriesEnabled,
+    base::Value::Type::BOOLEAN },
 };
 // clang-format on
 
@@ -737,8 +775,9 @@ class BrowsingHistoryPolicyHandler : public TypeCheckingPolicyHandler {
         !deleting_history_allowed) {
       prefs->SetBoolean(
           browsing_data::prefs::kDeleteBrowsingHistory, false);
-      prefs->SetBoolean(
-          browsing_data::prefs::kDeleteDownloadHistory, false);
+      prefs->SetBoolean(browsing_data::prefs::kDeleteBrowsingHistoryBasic,
+                        false);
+      prefs->SetBoolean(browsing_data::prefs::kDeleteDownloadHistory, false);
     }
   }
 };
@@ -863,6 +902,9 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
   handlers->AddHandler(
       base::MakeUnique<extensions::ExtensionInstallForcelistPolicyHandler>());
   handlers->AddHandler(
+      base::MakeUnique<
+          extensions::ExtensionInstallLoginScreenAppListPolicyHandler>());
+  handlers->AddHandler(
       base::MakeUnique<extensions::ExtensionURLPatternListPolicyHandler>(
           key::kExtensionInstallSources,
           extensions::pref_names::kAllowedInstallSites));
@@ -891,6 +933,7 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
 
 #if !defined(OS_ANDROID)
   handlers->AddHandler(base::WrapUnique(new DownloadDirPolicyHandler));
+  handlers->AddHandler(base::MakeUnique<LocalSyncPolicyHandler>());
 
   handlers->AddHandler(base::MakeUnique<SimpleSchemaValidatingPolicyHandler>(
       key::kRegisteredProtocolHandlers,
@@ -1008,6 +1051,9 @@ std::unique_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
   handlers->AddHandler(
       base::MakeUnique<chromeos::KeyPermissionsPolicyHandler>(chrome_schema));
   handlers->AddHandler(base::WrapUnique(new DefaultGeolocationPolicyHandler()));
+  handlers->AddHandler(base::MakeUnique<extensions::ExtensionListPolicyHandler>(
+      key::kNoteTakingAppsLockScreenWhitelist,
+      prefs::kNoteTakingAppsLockScreenWhitelist, false /*allow_wildcards*/));
 #endif  // defined(OS_CHROMEOS)
 
 #if BUILDFLAG(ENABLE_PLUGINS)

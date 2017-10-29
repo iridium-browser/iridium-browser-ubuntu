@@ -342,6 +342,7 @@ class StartBisectTest(testing_common.TestCase):
         ],
         {
             'page_cycler.morejs': {
+                'benchmark_duration': {},
                 'times': {
                     'page_load_time': {},
                     'page_load_time_ref': {},
@@ -445,6 +446,13 @@ class StartBisectTest(testing_common.TestCase):
 
     response = self.testapp.post('/start_try_job', {
         'test_path': 'ChromiumPerf/android-nexus7/octane/Total/Score',
+        'step': 'prefill-info',
+    })
+    info = json.loads(response.body)
+    self.assertEqual(info['story_filter'], '')
+
+    response = self.testapp.post('/start_try_job', {
+        'test_path': 'ChromiumPerf/win7/page_cycler.morejs/benchmark_duration',
         'step': 'prefill-info',
     })
     info = json.loads(response.body)
@@ -758,6 +766,11 @@ class StartBisectTest(testing_common.TestCase):
                     'issue_url': issue_url}),
         response.body)
 
+    try_jobs = try_job.TryJob.query().fetch(use_cache=False)
+    self.assertEqual(1, len(try_jobs))
+    self.assertEqual(issue_url, try_jobs[0].results_data['issue_url'])
+    self.assertEqual('33001', try_jobs[0].results_data['issue_id'])
+
   @mock.patch(
       'google.appengine.api.urlfetch.fetch',
       mock.MagicMock(side_effect=_MockFetch))
@@ -916,6 +929,14 @@ class StartBisectTest(testing_common.TestCase):
          'page_cycler.morejs'),
         bisect_bot='android_nexus7_perf_bisect',
         suite='page_cycler.morejs')
+
+  def testGetConfig_ResourceSizestests(self):
+    self._TestGetConfigCommand(
+        ('src/build/android/resource_sizes.py '
+         '--chromium-output-directory {CHROMIUM_OUTPUT_DIR} '
+         '--chartjson {CHROMIUM_OUTPUT_DIR}/apks/MonochromePublic.apk'),
+        bisect_bot='linux_perf_bisect',
+        suite='resource_sizes (MonochromePublic.apk)')
 
   def testGetConfig_CCPerftests(self):
     self._TestGetConfigCommand(

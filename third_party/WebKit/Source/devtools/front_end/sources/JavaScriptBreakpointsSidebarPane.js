@@ -8,7 +8,7 @@
 Sources.JavaScriptBreakpointsSidebarPane = class extends UI.ThrottledWidget {
   constructor() {
     super(true);
-    this.registerRequiredCSS('components/breakpointsList.css');
+    this.registerRequiredCSS('sources/javaScriptBreakpointsSidebarPane.css');
 
     this._breakpointManager = Bindings.breakpointManager;
     this._breakpointManager.addEventListener(Bindings.BreakpointManager.Events.BreakpointAdded, this.update, this);
@@ -31,7 +31,7 @@ Sources.JavaScriptBreakpointsSidebarPane = class extends UI.ThrottledWidget {
       this._listElement = null;
       this.contentElement.removeChildren();
       var emptyElement = this.contentElement.createChild('div', 'gray-info-message');
-      emptyElement.textContent = Common.UIString('No Breakpoints');
+      emptyElement.textContent = Common.UIString('No breakpoints');
       this.contentElement.appendChild(emptyElement);
       this._didUpdateForTest();
       return Promise.resolve();
@@ -66,7 +66,7 @@ Sources.JavaScriptBreakpointsSidebarPane = class extends UI.ThrottledWidget {
         entry = this._listElement.createChild('div', 'breakpoint-entry');
         entry.addEventListener('contextmenu', this._breakpointContextMenu.bind(this), true);
         entry.addEventListener('click', this._revealLocation.bind(this), false);
-        var checkboxLabel = UI.createCheckboxLabel('');
+        var checkboxLabel = UI.CheckboxLabel.create('');
         checkboxLabel.addEventListener('click', this._breakpointCheckboxClicked.bind(this), false);
         entry.appendChild(checkboxLabel);
         entry[Sources.JavaScriptBreakpointsSidebarPane._checkboxLabelSymbol] = checkboxLabel;
@@ -124,7 +124,7 @@ Sources.JavaScriptBreakpointsSidebarPane = class extends UI.ThrottledWidget {
      */
     function fillSnippetElement(snippetElement, content) {
       var lineNumber = uiLocation.lineNumber;
-      var text = new Common.Text(content || '');
+      var text = new TextUtils.Text(content || '');
       if (lineNumber < text.lineCount()) {
         var lineText = text.lineAt(lineNumber);
         var maxSnippetLength = 200;

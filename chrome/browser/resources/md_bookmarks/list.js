@@ -5,18 +5,131 @@
 Polymer({
   is: 'bookmarks-list',
 
+  behaviors: [
+    bookmarks.StoreClient,
+  ],
+
   properties: {
-    /** @type {BookmarkTreeNode} */
-    menuItem_: Object,
+    /**
+     * A list of item ids wrapped in an Object. This is necessary because
+     * iron-list is unable to distinguish focusing index 6 from focusing id '6'
+     * so the item we supply to iron-list needs to be non-index-like.
+     * @private {Array<{id: string}>}
+     */
+    displayedList_: {
+      type: Array,
+      value: function() {
+        // Use an empty list during initialization so that the databinding to
+        // hide #bookmarksCard takes effect.
+        return [];
+      },
+    },
 
-    /** @type {Array<BookmarkTreeNode>} */
-    displayedList: Array,
+    /** @private {Array<string>} */
+    displayedIds_: {
+      type: Array,
+      observer: 'onDisplayedIdsChanged_',
+    },
 
-    searchTerm: String,
+    /** @private */
+    searchTerm_: {
+      type: String,
+      observer: 'onDisplayedListSourceChange_',
+    },
+
+    /** @private */
+    selectedFolder_: {
+      type: String,
+      observer: 'onDisplayedListSourceChange_',
+    },
   },
 
   listeners: {
+    'click': 'deselectItems_',
     'open-item-menu': 'onOpenItemMenu_',
+  },
+
+  attached: function() {
+    var list = /** @type {IronListElement} */ (this.$.bookmarksCard);
+    list.scrollTarget = this;
+
+    this.watch('displayedIds_', function(state) {
+      return bookmarks.util.getDisplayedList(state);
+    });
+    this.watch('searchTerm_', function(state) {
+      return state.search.term;
+    });
+    this.watch('selectedFolder_', function(state) {
+      return state.selectedFolder;
+    });
+    this.updateFromStore();
+
+    this.$.bookmarksCard.addEventListener(
+        'keydown', this.onItemKeydown_.bind(this), true);
+  },
+
+  /** @return {HTMLElement} */
+  getDropTarget: function() {
+    return this.$.message;
+  },
+
+  /**
+   * Updates `displayedList_` using splices to be equivalent to `newValue`. This
+   * allows the iron-list to delete sublists of items which preserves scroll and
+   * focus on incremental update.
+   * @param {Array<string>} newValue
+   * @param {Array<string>} oldValue
+   */
+  onDisplayedIdsChanged_: function(newValue, oldValue) {
+    if (!oldValue) {
+      this.displayedList_ = this.displayedIds_.map(function(id) {
+        return {id: id};
+      });
+    } else {
+      var splices = Polymer.ArraySplice.calculateSplices(
+          /** @type {!Array<string>} */ (newValue),
+          /** @type {!Array<string>} */ (oldValue));
+      splices.forEach(function(splice) {
+        // TODO(calamity): Could use notifySplices to improve performance here.
+        var additions =
+            newValue.slice(splice.index, splice.index + splice.addedCount)
+                .map(function(id) {
+                  return {id: id};
+                });
+        this.splice.apply(this, [
+          'displayedList_', splice.index, splice.removed.length
+        ].concat(additions));
+      }.bind(this));
+    }
+  },
+
+  /** @private */
+  onDisplayedListSourceChange_: function() {
+    this.scrollTop = 0;
+  },
+
+  /** @private */
+  emptyListMessage_: function() {
+    var emptyListMessage = this.searchTerm_ ? 'noSearchResults' : 'emptyList';
+    return loadTimeData.getString(emptyListMessage);
+  },
+
+  /** @private */
+  isEmptyList_: function() {
+    return this.displayedList_.length == 0;
+  },
+
+  /** @private */
+  deselectItems_: function() {
+    this.dispatch(bookmarks.actions.deselectItems());
+  },
+
+  /**
+   * @param{HTMLElement} el
+   * @private
+   */
+  getIndexForItemElement_: function(el) {
+    return this.$.bookmarksCard.modelForElement(el).index;
   },
 
   /**
@@ -24,83 +137,87 @@ Polymer({
    * @private
    */
   onOpenItemMenu_: function(e) {
-    this.menuItem_ = e.detail.item;
-    var menu = /** @type {!CrActionMenuElement} */ (
-        this.$.dropdown);
-    menu.showAt(/** @type {!Element} */ (e.detail.target));
+    var index = this.displayedIds_.indexOf(
+        /** @type {BookmarksItemElement} */ (e.path[0]).itemId);
+    var list = this.$.bookmarksCard;
+    // If the item is not visible, scroll to it before rendering the menu.
+    if (index < list.firstVisibleIndex || index > list.lastVisibleIndex)
+      list.scrollToIndex(index);
   },
 
-  /** @private */
-  onEditTap_: function() {
-    this.closeDropdownMenu_();
-    this.$.editBookmark.showModal();
-  },
-
-  /** @private */
-  onCopyURLTap_: function() {
-    var idList = [this.menuItem_.id];
-    chrome.bookmarkManagerPrivate.copy(idList, function() {
-      // TODO(jiaxi): Add toast later.
-    });
-    this.closeDropdownMenu_();
-  },
-
-  /** @private */
-  onDeleteTap_: function() {
-    if (this.menuItem_.url) {
-      chrome.bookmarks.remove(this.menuItem_.id, function() {
-        // TODO(jiaxi): Add toast later.
-      }.bind(this));
+  /**
+   * @param {KeyboardEvent} e
+   * @private
+   */
+  onItemKeydown_: function(e) {
+    var handled = true;
+    var list = this.$.bookmarksCard;
+    var focusMoved = false;
+    var focusedIndex =
+        this.getIndexForItemElement_(/** @type {HTMLElement} */ (e.target));
+    var oldFocusedIndex = focusedIndex;
+    var cursorModifier = cr.isMac ? e.metaKey : e.ctrlKey;
+    if (e.key == 'ArrowUp') {
+      focusedIndex--;
+      focusMoved = true;
+    } else if (e.key == 'ArrowDown') {
+      focusedIndex++;
+      focusMoved = true;
+      e.preventDefault();
+    } else if (e.key == 'Home') {
+      focusedIndex = 0;
+      focusMoved = true;
+    } else if (e.key == 'End') {
+      focusedIndex = list.items.length - 1;
+      focusMoved = true;
+    } else if (e.key == ' ' && cursorModifier) {
+      this.dispatch(bookmarks.actions.selectItem(
+          this.displayedIds_[focusedIndex], this.getState(), {
+            clear: false,
+            range: false,
+            toggle: true,
+          }));
     } else {
-      chrome.bookmarks.removeTree(this.menuItem_.id, function() {
-        // TODO(jiaxi): Add toast later.
-      }.bind(this));
+      handled = false;
     }
-    this.closeDropdownMenu_();
-  },
 
-  /** @private */
-  onSaveEditTap_: function() {
-    var edit = {'title': this.menuItem_.title};
-    if (this.menuItem_.url)
-      edit['url'] = this.menuItem_.url;
+    if (focusMoved) {
+      focusedIndex = Math.min(list.items.length - 1, Math.max(0, focusedIndex));
+      list.focusItem(focusedIndex);
 
-    chrome.bookmarks.update(this.menuItem_.id, edit);
-    this.$.editBookmark.close();
-  },
+      if (cursorModifier && !e.shiftKey) {
+        this.dispatch(
+            bookmarks.actions.updateAnchor(this.displayedIds_[focusedIndex]));
+      } else {
+        // If shift-selecting with no anchor, use the old focus index.
+        if (e.shiftKey && this.getState().selection.anchor == null) {
+          this.dispatch(bookmarks.actions.updateAnchor(
+              this.displayedIds_[oldFocusedIndex]));
+        }
 
-  /** @private */
-  onCancelEditTap_: function() {
-    this.$.editBookmark.cancel();
-  },
+        // If the focus moved from something other than a Ctrl + move event,
+        // update the selection.
+        var config = {
+          clear: !cursorModifier,
+          range: e.shiftKey,
+          toggle: false,
+        };
 
-  /** @private */
-  closeDropdownMenu_: function() {
-    var menu = /** @type {!CrActionMenuElement} */ (
-        this.$.dropdown);
-    menu.close();
-  },
+        this.dispatch(bookmarks.actions.selectItem(
+            this.displayedIds_[focusedIndex], this.getState(), config));
+      }
+    }
 
-  /** @private */
-  getEditActionLabel_: function() {
-    var label = this.menuItem_.url ? 'menuEdit' : 'menuRename';
-    return loadTimeData.getString(label);
-  },
+    // Prevent the iron-list from changing focus on enter.
+    if (e.path[0] instanceof HTMLButtonElement && e.key == 'Enter')
+      handled = true;
 
-  /** @private */
-  getEditorTitle_: function() {
-    var title = this.menuItem_.url ? 'editBookmarkTitle' : 'renameFolderTitle';
-    return loadTimeData.getString(title);
-  },
+    if (!handled) {
+      handled = bookmarks.CommandManager.getInstance().handleKeyEvent(
+          e, this.getState().selection.items);
+    }
 
-  /** @private */
-  emptyListMessage_: function() {
-    var emptyListMessage = this.searchTerm ? 'noSearchResults' : 'emptyList';
-    return loadTimeData.getString(emptyListMessage);
-  },
-
-  /** @private */
-  isEmptyList_: function() {
-    return this.displayedList.length == 0;
+    if (handled)
+      e.stopPropagation();
   },
 });

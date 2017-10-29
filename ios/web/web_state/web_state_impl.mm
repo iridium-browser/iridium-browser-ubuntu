@@ -7,15 +7,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #import "ios/web/interstitials/web_interstitial_impl.h"
 #import "ios/web/navigation/crw_session_controller.h"
-#import "ios/web/navigation/crw_session_entry.h"
+#import "ios/web/navigation/legacy_navigation_manager_impl.h"
 #import "ios/web/navigation/navigation_item_impl.h"
 #import "ios/web/navigation/session_storage_builder.h"
+#import "ios/web/navigation/wk_based_navigation_manager_impl.h"
 #include "ios/web/public/browser_state.h"
 #import "ios/web/public/crw_session_storage.h"
 #import "ios/web/public/java_script_dialog_presenter.h"
@@ -23,73 +26,77 @@
 #include "ios/web/public/url_util.h"
 #import "ios/web/public/web_client.h"
 #import "ios/web/public/web_state/context_menu_params.h"
-#include "ios/web/public/web_state/credential.h"
 #import "ios/web/public/web_state/ui/crw_content_view.h"
 #import "ios/web/public/web_state/web_state_delegate.h"
+#include "ios/web/public/web_state/web_state_interface_provider.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 #import "ios/web/public/web_state/web_state_policy_decider.h"
 #include "ios/web/public/web_thread.h"
 #include "ios/web/public/webui/web_ui_ios_controller.h"
 #include "ios/web/web_state/global_web_state_event_tracker.h"
-#include "ios/web/web_state/navigation_context_impl.h"
+#import "ios/web/web_state/navigation_context_impl.h"
+#import "ios/web/web_state/session_certificate_policy_cache_impl.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/ui/crw_web_controller_container_view.h"
-#include "ios/web/web_state/web_state_facade_delegate.h"
+#import "ios/web/web_state/ui/crw_web_view_navigation_proxy.h"
 #include "ios/web/webui/web_ui_ios_controller_factory_registry.h"
 #include "ios/web/webui/web_ui_ios_impl.h"
 #include "net/http/http_response_headers.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "ui/gfx/image/image.h"
 
 namespace web {
 
 /* static */
 std::unique_ptr<WebState> WebState::Create(const CreateParams& params) {
-  std::unique_ptr<WebStateImpl> web_state(
-      new WebStateImpl(params.browser_state));
+  std::unique_ptr<WebStateImpl> web_state(new WebStateImpl(params));
 
   // Initialize the new session.
-  BOOL opened_by_dom = NO;
-  web_state->GetNavigationManagerImpl().InitializeSession(opened_by_dom);
+  web_state->GetNavigationManagerImpl().InitializeSession();
 
-  // This std::move is required to compile with the version of clang shipping
-  // with Xcode 8.0+. Evalute whether the issue is fixed once a new version of
-  // Xcode is released.
+  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
   return std::move(web_state);
 }
 
 /* static */
-std::unique_ptr<WebState> WebState::Create(const CreateParams& params,
-                                           CRWSessionStorage* session_storage) {
+std::unique_ptr<WebState> WebState::CreateWithStorageSession(
+    const CreateParams& params,
+    CRWSessionStorage* session_storage) {
+  DCHECK(session_storage);
   std::unique_ptr<WebStateImpl> web_state(
-      new WebStateImpl(params.browser_state, session_storage));
+      new WebStateImpl(params, session_storage));
 
-  // This std::move is required to compile with the version of clang shipping
-  // with Xcode 8.0+. Evalute whether the issue is fixed once a new version of
-  // Xcode is released.
+  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
   return std::move(web_state);
 }
 
-WebStateImpl::WebStateImpl(BrowserState* browser_state)
-    : WebStateImpl(browser_state, nullptr) {}
+WebStateImpl::WebStateImpl(const CreateParams& params)
+    : WebStateImpl(params, nullptr) {}
 
-WebStateImpl::WebStateImpl(BrowserState* browser_state,
+WebStateImpl::WebStateImpl(const CreateParams& params,
                            CRWSessionStorage* session_storage)
     : delegate_(nullptr),
       is_loading_(false),
       is_being_destroyed_(false),
-      facade_delegate_(nullptr),
       web_controller_(nil),
       interstitial_(nullptr),
+      created_with_opener_(params.created_with_opener),
       weak_factory_(this) {
   // Create or deserialize the NavigationManager.
+  if (web::GetWebClient()->IsSlimNavigationManagerEnabled()) {
+    navigation_manager_ = base::MakeUnique<WKBasedNavigationManagerImpl>();
+  } else {
+    navigation_manager_ = base::MakeUnique<LegacyNavigationManagerImpl>();
+  }
+
   if (session_storage) {
     SessionStorageBuilder session_storage_builder;
     session_storage_builder.ExtractSessionState(this, session_storage);
   } else {
-    navigation_manager_.reset(new NavigationManagerImpl());
+    certificate_policy_cache_ =
+        base::MakeUnique<SessionCertificatePolicyCacheImpl>();
   }
   navigation_manager_->SetDelegate(this);
-  navigation_manager_->SetBrowserState(browser_state);
+  navigation_manager_->SetBrowserState(params.browser_state);
   // Send creation event and create the web controller.
   GlobalWebStateEventTracker::GetInstance()->OnWebStateCreated(this);
   web_controller_.reset([[CRWWebController alloc] initWithWebState:this]);
@@ -102,10 +109,6 @@ WebStateImpl::~WebStateImpl() {
   // WebUI depends on web state so it must be destroyed first in case any WebUI
   // implementations depends on accessing web state during destruction.
   ClearWebUI();
-
-  // The facade layer (owned by the delegate) should be destroyed before the web
-  // layer.
-  DCHECK(!facade_delegate_);
 
   for (auto& observer : observers_)
     observer.WebStateDestroyed();
@@ -173,39 +176,20 @@ void WebStateImpl::SetWebController(CRWWebController* web_controller) {
   web_controller_.reset([web_controller retain]);
 }
 
-WebStateFacadeDelegate* WebStateImpl::GetFacadeDelegate() const {
-  return facade_delegate_;
-}
-
-void WebStateImpl::SetFacadeDelegate(WebStateFacadeDelegate* facade_delegate) {
-  facade_delegate_ = facade_delegate;
-}
-
-void WebStateImpl::OnNavigationCommitted(const GURL& url) {
-  UpdateHttpResponseHeaders(url);
-  std::unique_ptr<NavigationContext> context =
-      NavigationContextImpl::CreateNavigationContext(this, url);
-  for (auto& observer : observers_)
-    observer.DidFinishNavigation(context.get());
-}
-
-void WebStateImpl::OnSamePageNavigation(const GURL& url) {
-  std::unique_ptr<NavigationContext> context =
-      NavigationContextImpl::CreateSamePageNavigationContext(this, url);
-  for (auto& observer : observers_)
-    observer.DidFinishNavigation(context.get());
-}
-
-void WebStateImpl::OnErrorPageNavigation(const GURL& url) {
-  std::unique_ptr<NavigationContext> context =
-      NavigationContextImpl::CreateErrorPageNavigationContext(this, url);
-  for (auto& observer : observers_)
-    observer.DidFinishNavigation(context.get());
-}
-
 void WebStateImpl::OnTitleChanged() {
   for (auto& observer : observers_)
     observer.TitleWasSet();
+}
+
+void WebStateImpl::OnVisibleSecurityStateChange() {
+  for (auto& observer : observers_)
+    observer.DidChangeVisibleSecurityState();
+}
+
+void WebStateImpl::OnDialogSuppressed() {
+  DCHECK(ShouldSuppressDialogs());
+  for (auto& observer : observers_)
+    observer.DidSuppressDialog();
 }
 
 void WebStateImpl::OnRenderProcessGone() {
@@ -234,8 +218,6 @@ void WebStateImpl::SetIsLoading(bool is_loading) {
     return;
 
   is_loading_ = is_loading;
-  if (facade_delegate_)
-    facade_delegate_->OnLoadingStateChanged();
 
   if (is_loading) {
     for (auto& observer : observers_)
@@ -259,9 +241,6 @@ bool WebStateImpl::IsBeingDestroyed() const {
 }
 
 void WebStateImpl::OnPageLoaded(const GURL& url, bool load_success) {
-  if (facade_delegate_)
-    facade_delegate_->OnPageLoaded();
-
   PageLoadCompletionStatus load_completion_status =
       load_success ? PageLoadCompletionStatus::SUCCESS
                    : PageLoadCompletionStatus::FAILURE;
@@ -286,47 +265,6 @@ void WebStateImpl::OnFaviconUrlUpdated(
     observer.FaviconUrlUpdated(candidates);
 }
 
-void WebStateImpl::OnCredentialsRequested(
-    int request_id,
-    const GURL& source_url,
-    bool unmediated,
-    const std::vector<std::string>& federations,
-    bool user_interaction) {
-  for (auto& observer : observers_) {
-    observer.CredentialsRequested(request_id, source_url, unmediated,
-                                  federations, user_interaction);
-  }
-}
-
-void WebStateImpl::OnSignedIn(int request_id,
-                              const GURL& source_url,
-                              const web::Credential& credential) {
-  for (auto& observer : observers_)
-    observer.SignedIn(request_id, source_url, credential);
-}
-
-void WebStateImpl::OnSignedIn(int request_id, const GURL& source_url) {
-  for (auto& observer : observers_)
-    observer.SignedIn(request_id, source_url);
-}
-
-void WebStateImpl::OnSignedOut(int request_id, const GURL& source_url) {
-  for (auto& observer : observers_)
-    observer.SignedOut(request_id, source_url);
-}
-
-void WebStateImpl::OnSignInFailed(int request_id,
-                                  const GURL& source_url,
-                                  const web::Credential& credential) {
-  for (auto& observer : observers_)
-    observer.SignInFailed(request_id, source_url, credential);
-}
-
-void WebStateImpl::OnSignInFailed(int request_id, const GURL& source_url) {
-  for (auto& observer : observers_)
-    observer.SignInFailed(request_id, source_url);
-}
-
 void WebStateImpl::OnDocumentSubmitted(const std::string& form_name,
                                        bool user_initiated) {
   for (auto& observer : observers_)
@@ -339,6 +277,16 @@ NavigationManagerImpl& WebStateImpl::GetNavigationManagerImpl() {
 
 const NavigationManagerImpl& WebStateImpl::GetNavigationManagerImpl() const {
   return *navigation_manager_;
+}
+
+const SessionCertificatePolicyCacheImpl&
+WebStateImpl::GetSessionCertificatePolicyCacheImpl() const {
+  return *certificate_policy_cache_;
+}
+
+SessionCertificatePolicyCacheImpl&
+WebStateImpl::GetSessionCertificatePolicyCacheImpl() {
+  return *certificate_policy_cache_;
 }
 
 void WebStateImpl::CreateWebUI(const GURL& url) {
@@ -506,6 +454,22 @@ void WebStateImpl::RunJavaScriptDialog(
                                  message_text, default_prompt_text, callback);
 }
 
+WebState* WebStateImpl::CreateNewWebState(const GURL& url,
+                                          const GURL& opener_url,
+                                          bool initiated_by_user) {
+  if (delegate_) {
+    return delegate_->CreateNewWebState(this, url, opener_url,
+                                        initiated_by_user);
+  }
+  return nullptr;
+}
+
+void WebStateImpl::CloseWebState() {
+  if (delegate_) {
+    delegate_->CloseWebState(this);
+  }
+}
+
 void WebStateImpl::OnAuthRequired(
     NSURLProtectionSpace* protection_space,
     NSURLCredential* proposed_credential,
@@ -564,12 +528,12 @@ bool WebStateImpl::ShouldAllowResponse(NSURLResponse* response) {
 
 #pragma mark - RequestTracker management
 
-service_manager::InterfaceRegistry* WebStateImpl::GetMojoInterfaceRegistry() {
-  if (!mojo_interface_registry_) {
-    mojo_interface_registry_ =
-        base::MakeUnique<service_manager::InterfaceRegistry>(std::string());
+WebStateInterfaceProvider* WebStateImpl::GetWebStateInterfaceProvider() {
+  if (!web_state_interface_provider_) {
+    web_state_interface_provider_ =
+        base::MakeUnique<WebStateInterfaceProvider>();
   }
-  return mojo_interface_registry_.get();
+  return web_state_interface_provider_.get();
 }
 
 base::WeakPtr<WebState> WebStateImpl::AsWeakPtr() {
@@ -621,7 +585,18 @@ NavigationManager* WebStateImpl::GetNavigationManager() {
   return &GetNavigationManagerImpl();
 }
 
+const SessionCertificatePolicyCache*
+WebStateImpl::GetSessionCertificatePolicyCache() const {
+  return &GetSessionCertificatePolicyCacheImpl();
+}
+
+SessionCertificatePolicyCache*
+WebStateImpl::GetSessionCertificatePolicyCache() {
+  return &GetSessionCertificatePolicyCacheImpl();
+}
+
 CRWSessionStorage* WebStateImpl::BuildSessionStorage() {
+  [web_controller_ recordStateInHistory];
   SessionStorageBuilder session_storage_builder;
   return session_storage_builder.BuildStorage(this);
 }
@@ -702,9 +677,35 @@ id<CRWWebViewProxy> WebStateImpl::GetWebViewProxy() const {
   return [web_controller_ webViewProxy];
 }
 
-void WebStateImpl::OnProvisionalNavigationStarted(const GURL& url) {
+bool WebStateImpl::HasOpener() const {
+  return created_with_opener_;
+}
+
+void WebStateImpl::TakeSnapshot(const SnapshotCallback& callback,
+                                CGSize target_size) const {
+  UIView* view = [web_controller_ view];
+  UIImage* snapshot = nil;
+  if (view && !CGRectIsEmpty(view.bounds)) {
+    CGFloat scaled_height =
+        view.bounds.size.height * target_size.width / view.bounds.size.width;
+    CGRect scaled_rect = CGRectMake(0, 0, target_size.width, scaled_height);
+    UIGraphicsBeginImageContextWithOptions(target_size, YES, 0);
+    [view drawViewHierarchyInRect:scaled_rect afterScreenUpdates:NO];
+    snapshot = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+  }
+  base::SequencedTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(callback, gfx::Image(snapshot)));
+}
+
+void WebStateImpl::OnNavigationStarted(web::NavigationContext* context) {
   for (auto& observer : observers_)
-    observer.ProvisionalNavigationStarted(url);
+    observer.DidStartNavigation(context);
+}
+
+void WebStateImpl::OnNavigationFinished(web::NavigationContext* context) {
+  for (auto& observer : observers_)
+    observer.DidFinishNavigation(context);
 }
 
 #pragma mark - NavigationManagerDelegate implementation
@@ -716,6 +717,10 @@ void WebStateImpl::GoToIndex(int index) {
 void WebStateImpl::LoadURLWithParams(
     const NavigationManager::WebLoadParams& params) {
   [web_controller_ loadWithParams:params];
+}
+
+void WebStateImpl::Reload() {
+  [web_controller_ reload];
 }
 
 void WebStateImpl::OnNavigationItemsPruned(size_t pruned_item_count) {
@@ -736,6 +741,10 @@ void WebStateImpl::OnNavigationItemCommitted(
 
 WebState* WebStateImpl::GetWebState() {
   return this;
+}
+
+id<CRWWebViewNavigationProxy> WebStateImpl::GetWebViewNavigationProxy() const {
+  return [web_controller_ webViewNavigationProxy];
 }
 
 }  // namespace web

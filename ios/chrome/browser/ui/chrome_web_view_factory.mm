@@ -4,9 +4,10 @@
 
 #import "ios/chrome/browser/ui/chrome_web_view_factory.h"
 
+#include <stdint.h>
+
 #include "base/base64.h"
 #include "base/logging.h"
-#include "base/mac/scoped_nsobject.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/web/net/request_group_util.h"
 #include "ios/web/net/request_tracker_impl.h"
@@ -14,6 +15,10 @@
 #include "net/cookies/cookie_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 NSString* const kExternalUserAgent = @"UIWebViewForExternalContent";
 
@@ -49,7 +54,7 @@ ios::ChromeBrowserState* g_external_browser_state = nullptr;
 scoped_refptr<web::RequestTrackerImpl> g_request_tracker;
 
 // Empty callback used by ClearCookiesOnIOThread below.
-void DoNothing(int n) {}
+void DoNothing(uint32_t n) {}
 
 // Clears the cookies.
 void ClearCookiesOnIOThread(net::URLRequestContextGetter* context_getter,

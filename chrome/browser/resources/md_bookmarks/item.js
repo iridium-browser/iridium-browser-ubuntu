@@ -5,68 +5,158 @@
 Polymer({
   is: 'bookmarks-item',
 
+  behaviors: [
+    bookmarks.StoreClient,
+  ],
+
   properties: {
-    /** @type {BookmarkTreeNode} */
-    item: {
+    itemId: {
+      type: String,
+      observer: 'onItemIdChanged_',
+    },
+
+    ironListTabIndex: String,
+
+    /** @private {BookmarkNode} */
+    item_: {
       type: Object,
       observer: 'onItemChanged_',
     },
 
-    isFolder_: Boolean,
-
-    isSelectedItem: {
+    /** @private */
+    isSelectedItem_: {
       type: Boolean,
       reflectToAttribute: true,
     },
+
+    /** @private */
+    isFolder_: Boolean,
+  },
+
+  hostAttributes: {
+    'role': 'listitem',
   },
 
   observers: [
-    'updateFavicon_(item.url)',
+    'updateFavicon_(item_.url)',
   ],
 
   listeners: {
     'click': 'onClick_',
     'dblclick': 'onDblClick_',
+    'contextmenu': 'onContextMenu_',
+  },
+
+  /** @override */
+  attached: function() {
+    this.watch('item_', function(store) {
+      return store.nodes[this.itemId];
+    }.bind(this));
+    this.watch('isSelectedItem_', function(store) {
+      return !!store.selection.items.has(this.itemId);
+    }.bind(this));
+
+    this.updateFromStore();
+  },
+
+  /** @return {BookmarksItemElement} */
+  getDropTarget: function() {
+    return this;
   },
 
   /**
    * @param {Event} e
    * @private
    */
-  onMenuButtonOpenClick_: function(e) {
-    e.stopPropagation();
+  onContextMenu_: function(e) {
+    e.preventDefault();
+    this.focus();
+    if (!this.isSelectedItem_)
+      this.selectThisItem_();
+
     this.fire('open-item-menu', {
-      target: e.target,
-      item: this.item,
+      x: e.clientX,
+      y: e.clientY,
+      source: MenuSource.LIST,
     });
+  },
+
+  /**
+   * @param {Event} e
+   * @private
+   */
+  onMenuButtonClick_: function(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    this.selectThisItem_();
+    this.fire('open-item-menu', {
+      targetElement: e.target,
+      source: MenuSource.LIST,
+    });
+  },
+
+  /**
+   * @param {Event} e
+   * @private
+   */
+  onMenuButtonDblClick_: function(e) {
+    e.stopPropagation();
+  },
+
+  /** @private */
+  selectThisItem_: function() {
+    this.dispatch(bookmarks.actions.selectItem(this.itemId, this.getState(), {
+      clear: true,
+      range: false,
+      toggle: false,
+    }));
+  },
+
+  /** @private */
+  onItemIdChanged_: function() {
+    // TODO(tsergeant): Add a histogram to measure whether this assertion fails
+    // for real users.
+    assert(this.getState().nodes[this.itemId]);
+    this.updateFromStore();
   },
 
   /** @private */
   onItemChanged_: function() {
-    this.isFolder_ = !(this.item.url);
+    this.isFolder_ = !this.item_.url;
+    this.setAttribute('aria-label', this.item_.title);
   },
 
   /**
-   * @param {Event} e
+   * @param {MouseEvent} e
    * @private
    */
   onClick_: function(e) {
-    this.fire('select-item', {
-      item: this.item,
-      range: e.shiftKey,
-      add: e.ctrlKey,
-    });
+    // Ignore double clicks so that Ctrl double-clicking an item won't deselect
+    // the item before opening.
+    if (e.detail != 2) {
+      var addKey = cr.isMac ? e.metaKey : e.ctrlKey;
+      this.dispatch(bookmarks.actions.selectItem(this.itemId, this.getState(), {
+        clear: !addKey,
+        range: e.shiftKey,
+        toggle: addKey && !e.shiftKey,
+      }));
+    }
+    e.stopPropagation();
+    e.preventDefault();
   },
 
   /**
-   * @param {Event} e
+   * @param {MouseEvent} e
    * @private
    */
   onDblClick_: function(e) {
-    if (!this.item.url)
-      this.fire('selected-folder-changed', this.item.id);
-    else
-      chrome.tabs.create({url: this.item.url});
+    if (!this.isSelectedItem_)
+      this.selectThisItem_();
+
+    var commandManager = bookmarks.CommandManager.getInstance();
+    var itemSet = this.getState().selection.items;
+    if (commandManager.canExecute(Command.OPEN, itemSet))
+      commandManager.handle(Command.OPEN, itemSet);
   },
 
   /**
@@ -74,6 +164,7 @@ Polymer({
    * @private
    */
   updateFavicon_: function(url) {
-    this.$.icon.style.backgroundImage = cr.icon.getFavicon(url);
+    this.$.icon.className = url ? 'website-icon' : 'folder-icon';
+    this.$.icon.style.backgroundImage = url ? cr.icon.getFavicon(url) : null;
   },
 });

@@ -11,14 +11,15 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -61,7 +62,6 @@
 #endif  // defined(OS_CHROMEOS)
 
 using base::ASCIIToUTF16;
-using content::BrowserThread;
 
 namespace {
 
@@ -85,10 +85,11 @@ class UnittestProfileManager : public ::ProfileManagerWithoutInit {
 
   Profile* CreateProfileAsyncHelper(const base::FilePath& path,
                                     Delegate* delegate) override {
-    // This is safe while all file operations are done on the FILE thread.
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        base::Bind(base::IgnoreResult(&base::CreateDirectory), path));
+    // ThreadTaskRunnerHandle::Get() is TestingProfile's "async" IOTaskRunner
+    // (ref. TestingProfile::GetIOTaskRunner()).
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::BindOnce(base::IgnoreResult(&base::CreateDirectory), path));
 
     return new TestingProfile(path, this);
   }
@@ -288,6 +289,56 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
   VLOG(1) << temp_dir_.GetPath()
                  .Append(profile_manager->GetInitialProfileDir())
                  .value();
+}
+
+// Test Get[ActiveUser|PrimaryUser|LastUsed]Profile does not load user profile.
+TEST_F(ProfileManagerTest, UserProfileLoading) {
+  using chromeos::ProfileHelper;
+
+  Profile* const signin_profile = ProfileHelper::GetSigninProfile();
+
+  // Get[Active|Primary|LastUsed]Profile return the sign-in profile before login
+  // happens. IsSameProfile() is used to properly test against TestProfile whose
+  // OTR version uses a different temp path.
+  EXPECT_TRUE(
+      ProfileManager::GetActiveUserProfile()->IsSameProfile(signin_profile));
+  EXPECT_TRUE(
+      ProfileManager::GetPrimaryUserProfile()->IsSameProfile(signin_profile));
+  EXPECT_TRUE(
+      ProfileManager::GetLastUsedProfile()->IsSameProfile(signin_profile));
+
+  // User signs in but user profile loading has not started.
+  const std::string user_id = "test-user@example.com";
+  const std::string user_id_hash =
+      ProfileHelper::Get()->GetUserIdHashByUserIdForTesting(user_id);
+  user_manager::UserManager::Get()->UserLoggedIn(
+      AccountId::FromUserEmail(user_id), user_id_hash, false);
+
+  // Sign-in profile should be returned at this stage. Otherwise, login code
+  // ends up in an invalid state. Strange things as in http://crbug.com/728683
+  // and http://crbug.com/718734 happens.
+  EXPECT_TRUE(
+      ProfileManager::GetActiveUserProfile()->IsSameProfile(signin_profile));
+  EXPECT_TRUE(
+      ProfileManager::GetPrimaryUserProfile()->IsSameProfile(signin_profile));
+
+  // GetLastUsedProfile() after login but before a user profile is loaded is
+  // fatal.
+  EXPECT_DEATH_IF_SUPPORTED(ProfileManager::GetLastUsedProfile(), ".*");
+
+  // Simulate UserSessionManager loads the profile.
+  Profile* const user_profile =
+      g_browser_process->profile_manager()->GetProfile(
+          ProfileHelper::Get()->GetProfilePathByUserIdHash(user_id_hash));
+  ASSERT_FALSE(user_profile->IsSameProfile(signin_profile));
+
+  // User profile is returned thereafter.
+  EXPECT_TRUE(
+      ProfileManager::GetActiveUserProfile()->IsSameProfile(user_profile));
+  EXPECT_TRUE(
+      ProfileManager::GetPrimaryUserProfile()->IsSameProfile(user_profile));
+  EXPECT_TRUE(
+      ProfileManager::GetLastUsedProfile()->IsSameProfile(user_profile));
 }
 
 #endif
@@ -566,7 +617,7 @@ TEST_F(ProfileManagerTest, AutoloadProfilesWithBackgroundApps) {
   ProfileAttributesStorage& storage =
       profile_manager->GetProfileAttributesStorage();
   local_state_.Get()->SetUserPref(prefs::kBackgroundModeEnabled,
-                                  new base::Value(true));
+                                  base::MakeUnique<base::Value>(true));
 
   // Setting a pref which is not applicable to a system (i.e., Android in this
   // case) does not necessarily create it. Don't bother continuing with the
@@ -601,7 +652,7 @@ TEST_F(ProfileManagerTest, DoNotAutoloadProfilesIfBackgroundModeOff) {
   ProfileAttributesStorage& storage =
       profile_manager->GetProfileAttributesStorage();
   local_state_.Get()->SetUserPref(prefs::kBackgroundModeEnabled,
-                                  new base::Value(false));
+                                  base::MakeUnique<base::Value>(false));
 
   EXPECT_EQ(0u, storage.GetNumberOfProfiles());
 
@@ -677,7 +728,7 @@ TEST_F(ProfileManagerTest, GetLastUsedProfileAllowedByPolicy) {
   ASSERT_TRUE(profile_manager);
 
 #if defined(OS_CHROMEOS)
-  // On CrOS, profile returned by GetLastUsedProfile is a singin profile that
+  // On CrOS, profile returned by GetLastUsedProfile is a sign-in profile that
   // is forced to be incognito. That's why we need to create at least one user
   // to get a regular profile.
   RegisterUser("test-user@example.com");

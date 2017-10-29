@@ -339,6 +339,13 @@ Host.InspectorFrontendHostStub = class {
   }
 
   /**
+   * @override
+   * @param {boolean} active
+   */
+  setEyeDropperActive(active) {
+  }
+
+  /**
    * @param {!Array<string>} certChain
    * @override
    */
@@ -368,11 +375,9 @@ Host.InspectorFrontendHostStub = class {
 
   /**
    * @override
-   * @param {boolean} discoverUsbDevices
-   * @param {boolean} portForwardingEnabled
-   * @param {!Adb.PortForwardingConfig} portForwardingConfig
+   * @param {!Adb.Config} config
    */
-  setDevicesDiscoveryConfig(discoverUsbDevices, portForwardingEnabled, portForwardingConfig) {
+  setDevicesDiscoveryConfig(config) {
   }
 
   /**
@@ -521,7 +526,6 @@ window.InspectorFrontendHost = InspectorFrontendHost;
   // so the host instance should not initialized there.
   initializeInspectorFrontendHost();
   window.InspectorFrontendAPI = new Host.InspectorFrontendAPIImpl();
-  Common.setLocalizationPlatform(InspectorFrontendHost.platform());
 })();
 
 /**

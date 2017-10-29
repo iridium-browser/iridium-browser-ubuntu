@@ -7,13 +7,13 @@
 from __future__ import print_function
 
 import os
-import time
 
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib import remote_access
+from chromite.lib import retry_util
 
 
 class VMError(Exception):
@@ -28,7 +28,6 @@ class VM(object):
   """Class for managing a VM."""
 
   SSH_PORT = 9222
-
 
   def __init__(self, image_path=None, qemu_path=None, enable_kvm=True,
                display=True, ssh_port=SSH_PORT, dry_run=False):
@@ -67,6 +66,9 @@ class VM(object):
     self.kvm_pipe_in = '%s.in' % self.kvm_monitor  # to KVM
     self.kvm_pipe_out = '%s.out' % self.kvm_monitor  # from KVM
     self.kvm_serial = '%s.serial' % self.kvm_monitor
+
+    self.remote = remote_access.RemoteDevice(remote_access.LOCALHOST,
+                                             port=ssh_port)
 
     # TODO(achuith): support nographics, snapshot, mem_path, usb_passthrough,
     # moblab, etc.
@@ -201,31 +203,55 @@ class VM(object):
 
     self._CleanupFiles(recreate=False)
 
-  def WaitForBoot(self, timeout=180, poll_interval=1):
+  def _WaitForProcs(self):
+    """Wait for expected processes to launch."""
+    class _TooFewPidsException(Exception):
+      """Exception for _GetRunningPids to throw."""
+
+    def _GetRunningPids(exe, numpids):
+      pids = self.remote.GetRunningPids(exe, full_path=False)
+      logging.info('%s pids: %s', exe, repr(pids))
+      if len(pids) < numpids:
+        raise _TooFewPidsException()
+
+    def _WaitForProc(exe, numpids):
+      try:
+        retry_util.RetryException(
+            exception=_TooFewPidsException,
+            max_retry=20,
+            functor=lambda: _GetRunningPids(exe, numpids),
+            sleep=2)
+      except _TooFewPidsException:
+        raise VMError('_WaitForProcs failed: timed out while waiting for '
+                      '%d %s processes to start.' % (numpids, exe))
+
+    # We could also wait for session_manager, nacl_helper, etc, but chrome is
+    # the long pole. We expect the parent, 2 zygotes, gpu-process, renderer.
+    # This could potentially break with Mustash.
+    _WaitForProc('chrome', 5)
+
+  def WaitForBoot(self):
     """Wait for the VM to boot up.
 
-    If there is no VM running, start one.
-
-    Args:
-      timeout: maxiumum time to wait before raising an exception.
-      poll_interval: interval between checks.
+    Wait for ssh connection to become active, and wait for all expected chrome
+    processes to be launched.
     """
     if not os.path.exists(self.vm_dir):
       self.Start()
 
-    start_time = time.time()
-    error = 'timed out after %d sec' % timeout
-    while time.time() - start_time < timeout:
-      result = self.RemoteCommand(cmd=['echo'])
-      if result.returncode == 255:
-        time.sleep(poll_interval)
-        continue
-      elif result.returncode == 0:
-        return
-      else:
-        error = self.error
-        break
-    raise VMError('WaitForBoot failed: %s.' % error)
+    try:
+      result = retry_util.RetryException(
+          exception=remote_access.SSHConnectionError,
+          max_retry=10,
+          functor=lambda: self.RemoteCommand(cmd=['echo']),
+          sleep=5)
+    except remote_access.SSHConnectionError:
+      raise VMError('WaitForBoot timed out trying to connect to VM.')
+
+    if result.returncode != 0:
+      raise VMError('WaitForBoot failed: %s.' % result.error)
+
+    self._WaitForProcs()
 
   def RemoteCommand(self, cmd):
     """Run a remote command in the VM.
@@ -236,18 +262,11 @@ class VM(object):
     if not isinstance(cmd, list):
       raise VMError('cmd must be a list.')
 
-    args = ['ssh', '-o', 'UserKnownHostsFile=/dev/null',
-            '-o', 'StrictHostKeyChecking=no',
-            '-i', remote_access.TEST_PRIVATE_KEY,
-            '-p', str(self.ssh_port), 'root@localhost']
-    args.extend(cmd)
-
     if not self.dry_run:
-      return cros_build_lib.RunCommand(args, redirect_stdout=True,
-                                       combine_stdout_stderr=True,
-                                       log_output=True,
-                                       error_code_ok=True)
-
+      return self.remote.RunCommand(cmd, debug_level=logging.INFO,
+                                    combine_stdout_stderr=True,
+                                    log_output=True,
+                                    error_code_ok=True)
 
 def ParseCommandLine(argv):
   """Parse the command line.

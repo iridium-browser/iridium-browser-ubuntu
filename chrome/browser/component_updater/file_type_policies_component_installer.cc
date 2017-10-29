@@ -86,10 +86,8 @@ void FileTypePoliciesComponentInstallerTraits::ComponentReady(
           << install_dir.value();
 
   base::PostTaskWithTraits(
-      FROM_HERE,
-      base::TaskTraits().MayBlock().WithPriority(
-          base::TaskPriority::BACKGROUND),
-      base::Bind(&LoadFileTypesFromDisk, GetInstalledPath(install_dir)));
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::BindOnce(&LoadFileTypesFromDisk, GetInstalledPath(install_dir)));
 }
 
 // Called during startup and installation before ComponentReady().

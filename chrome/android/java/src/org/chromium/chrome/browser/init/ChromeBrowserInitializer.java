@@ -25,6 +25,7 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
 import org.chromium.base.ResourceExtractor;
+import org.chromium.base.SysUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.annotations.RemovableInRelease;
@@ -36,13 +37,13 @@ import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.ChromeStrictMode;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.FileProviderHelper;
-import org.chromium.chrome.browser.crash.MinidumpDirectoryObserver;
-import org.chromium.chrome.browser.device.DeviceClassManager;
+import org.chromium.chrome.browser.crash.LogcatExtractionRunnable;
 import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.services.GoogleServicesManager;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModelImpl;
 import org.chromium.chrome.browser.webapps.ActivityAssigner;
 import org.chromium.chrome.browser.webapps.ChromeWebApkHost;
+import org.chromium.components.crash.browser.CrashDumpManager;
 import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content.browser.DeviceUtils;
@@ -51,6 +52,7 @@ import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.policy.CombinedPolicyProvider;
 import org.chromium.ui.base.DeviceFormFactor;
 
+import java.io.File;
 import java.util.LinkedList;
 import java.util.Locale;
 
@@ -70,8 +72,6 @@ public class ChromeBrowserInitializer {
     private boolean mPreInflationStartupComplete;
     private boolean mPostInflationStartupComplete;
     private boolean mNativeInitializationComplete;
-
-    private MinidumpDirectoryObserver mMinidumpDirectoryObserver;
 
     // Public to allow use in ChromeBackupAgent
     public static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "chrome";
@@ -113,14 +113,38 @@ public class ChromeBrowserInitializer {
     }
 
     /**
+     * @return whether native initialization is complete.
+     */
+    public boolean hasNativeInitializationCompleted() {
+        return mNativeInitializationComplete;
+    }
+
+    /**
      * Initializes the Chrome browser process synchronously.
      *
      * @throws ProcessInitException if there is a problem with the native library.
      */
     public void handleSynchronousStartup() throws ProcessInitException {
-        assert ThreadUtils.runningOnUiThread() : "Tried to start the browser on the wrong thread";
+        handleSynchronousStartupInternal(false);
+    }
 
-        BrowserParts parts = new EmptyBrowserParts();
+    /**
+     * Initializes the Chrome browser process synchronously with GPU process warmup.
+     */
+    public void handleSynchronousStartupWithGpuWarmUp() throws ProcessInitException {
+        handleSynchronousStartupInternal(true);
+    }
+
+    private void handleSynchronousStartupInternal(final boolean startGpuProcess)
+            throws ProcessInitException {
+        ThreadUtils.checkUiThread();
+
+        BrowserParts parts = new EmptyBrowserParts() {
+            @Override
+            public boolean shouldStartGpuProcess() {
+                return startGpuProcess;
+            }
+        };
         handlePreNativeStartup(parts);
         handlePostNativeStartup(false, parts);
     }
@@ -132,7 +156,7 @@ public class ChromeBrowserInitializer {
      *              initialization tasks.
      */
     public void handlePreNativeStartup(final BrowserParts parts) {
-        assert ThreadUtils.runningOnUiThread() : "Tried to start the browser on the wrong thread";
+        ThreadUtils.checkUiThread();
 
         ProcessInitializationHandler.getInstance().initializePreNative();
         preInflationStartup();
@@ -153,7 +177,7 @@ public class ChromeBrowserInitializer {
         // Domain reliability uses significant enough memory that we should disable it on low memory
         // devices for now.
         // TODO(zbowling): remove this after domain reliability is refactored. (crbug.com/495342)
-        if (DeviceClassManager.disableDomainReliability()) {
+        if (SysUtils.isLowEndDevice()) {
             CommandLine.getInstance().appendSwitch(ChromeSwitches.DISABLE_DOMAIN_RELIABILITY);
         }
     }
@@ -163,7 +187,7 @@ public class ChromeBrowserInitializer {
      * Running in an AsyncTask as pre-loading itself may cause I/O.
      */
     private void warmUpSharedPrefs() {
-        if (Build.VERSION.CODENAME.equals("N") || Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             new AsyncTask<Void, Void, Void>() {
                 @Override
                 protected Void doInBackground(Void... params) {
@@ -368,7 +392,7 @@ public class ChromeBrowserInitializer {
         ThreadUtils.assertOnUiThread();
         TraceEvent.begin("NetworkChangeNotifier.init");
         // Enable auto-detection of network connectivity state changes.
-        NetworkChangeNotifier.init(context);
+        NetworkChangeNotifier.init();
         NetworkChangeNotifier.setAutoDetectConnectivityState(true);
         TraceEvent.end("NetworkChangeNotifier.init");
     }
@@ -389,19 +413,15 @@ public class ChromeBrowserInitializer {
         mNativeInitializationComplete = true;
         ContentUriUtils.setFileProviderUtil(new FileProviderHelper());
 
-        // Start the file observer to watch the minidump directory.
-        new AsyncTask<Void, Void, MinidumpDirectoryObserver>() {
+        // When a minidump is detected, extract and append a logcat to it, then upload it to the
+        // crash server. Note that the logcat extraction might fail. This is ok; in that case, the
+        // minidump will be found and uploaded upon the next browser launch.
+        CrashDumpManager.registerUploadCallback(new CrashDumpManager.UploadMinidumpCallback() {
             @Override
-            protected MinidumpDirectoryObserver doInBackground(Void... params) {
-                return new MinidumpDirectoryObserver();
+            public void tryToUploadMinidump(File minidump) {
+                AsyncTask.THREAD_POOL_EXECUTOR.execute(new LogcatExtractionRunnable(minidump));
             }
-
-            @Override
-            protected void onPostExecute(MinidumpDirectoryObserver minidumpDirectoryObserver) {
-                mMinidumpDirectoryObserver = minidumpDirectoryObserver;
-                mMinidumpDirectoryObserver.startWatching();
-            }
-        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        });
     }
 
     private void waitForDebuggerIfNeeded() {

@@ -4,16 +4,18 @@
 
 #include "ash/display/screen_ash.h"
 
-#include "ash/common/shelf/shelf_widget.h"
-#include "ash/common/wm/root_window_finder.h"
-#include "ash/common/wm_window.h"
+#include "ash/ash_switches.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/root_window_controller.h"
 #include "ash/root_window_settings.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
+#include "ash/wm/root_window_finder.h"
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
+#include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/display/display.h"
 #include "ui/display/display_finder.h"
@@ -30,7 +32,7 @@ namespace {
 display::Screen* screen_for_shutdown = nullptr;
 
 display::DisplayManager* GetDisplayManager() {
-  return Shell::GetInstance()->display_manager();
+  return Shell::Get()->display_manager();
 }
 
 class ScreenForShutdown : public display::Screen {
@@ -90,13 +92,12 @@ gfx::Point ScreenAsh::GetCursorScreenPoint() {
 }
 
 bool ScreenAsh::IsWindowUnderCursor(gfx::NativeWindow window) {
-  return GetWindowAtScreenPoint(
-             display::Screen::GetScreen()->GetCursorScreenPoint()) == window;
+  return window->Contains(GetWindowAtScreenPoint(
+      display::Screen::GetScreen()->GetCursorScreenPoint()));
 }
 
 gfx::NativeWindow ScreenAsh::GetWindowAtScreenPoint(const gfx::Point& point) {
-  aura::Window* root_window =
-      WmWindow::GetAuraWindow(wm::GetRootWindowAt(point));
+  aura::Window* root_window = wm::GetRootWindowAt(point);
   aura::client::ScreenPositionClient* position_client =
       aura::client::GetScreenPositionClient(root_window);
 
@@ -104,7 +105,7 @@ gfx::NativeWindow ScreenAsh::GetWindowAtScreenPoint(const gfx::Point& point) {
   if (position_client)
     position_client->ConvertPointFromScreen(root_window, &local_point);
 
-  return root_window->GetTopWindowContainingPoint(local_point);
+  return root_window->GetEventHandlerForPoint(local_point);
 }
 
 int ScreenAsh::GetNumDisplays() const {
@@ -185,7 +186,13 @@ display::DisplayManager* ScreenAsh::CreateDisplayManager() {
   // use ash's screen.
   if (!current || current == screen_for_shutdown)
     display::Screen::SetScreenInstance(screen.get());
-  return new display::DisplayManager(std::move(screen));
+  display::DisplayManager* manager =
+      new display::DisplayManager(std::move(screen));
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshEnableTouchView)) {
+    manager->set_internal_display_has_accelerometer(true);
+  }
+  return manager;
 }
 
 // static

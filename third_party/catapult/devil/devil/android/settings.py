@@ -138,54 +138,45 @@ class ContentSettings(dict):
     raise ValueError('Unsupported type %s' % type(value))
 
   def iteritems(self):
-    # Example row:
-    # 'Row: 0 _id=13, name=logging_id2, value=-1fccbaa546705b05'
     for row in self._device.RunShellCommand(
-        'content query --uri content://%s' % self._table, as_root=True):
-      fields = row.split(', ')
-      key = None
-      value = None
-      for field in fields:
-        k, _, v = field.partition('=')
-        if k == 'name':
-          key = v
-        elif k == 'value':
-          value = v
+        ['content', 'query', '--uri', 'content://%s' % self._table],
+        check_return=True, as_root=True):
+      key, value = _ParseContentRow(row)
       if not key:
         continue
-      if not value:
-        value = ''
       yield key, value
 
   def __getitem__(self, key):
-    return self._device.RunShellCommand(
-        'content query --uri content://%s --where "name=\'%s\'" '
-        '--projection value' % (self._table, key), as_root=True).strip()
+    query_row = self._device.RunShellCommand(
+        ['content', 'query', '--uri', 'content://%s' % self._table,
+         '--where', "name='%s'" % key],
+        check_return=True, as_root=True, single_line=True)
+    parsed_key, parsed_value = _ParseContentRow(query_row)
+    if parsed_key is None:
+      raise KeyError('key=%s not found' % key)
+    if parsed_key != key:
+      raise KeyError('Expected key=%s, but got key=%s' % (key, parsed_key))
+    return parsed_value
 
   def __setitem__(self, key, value):
     if key in self:
       self._device.RunShellCommand(
-          'content update --uri content://%s '
-          '--bind value:%s:%s --where "name=\'%s\'"' % (
-              self._table,
-              self._GetTypeBinding(value), value, key),
-          as_root=True)
+          ['content', 'update', '--uri', 'content://%s' % self._table,
+           '--bind', 'value:%s:%s' % (self._GetTypeBinding(value), value),
+           '--where', "name='%s'" % key],
+          check_return=True, as_root=True)
     else:
       self._device.RunShellCommand(
-          'content insert --uri content://%s '
-          '--bind name:%s:%s --bind value:%s:%s' % (
-              self._table,
-              self._GetTypeBinding(key), key,
-              self._GetTypeBinding(value), value),
-          as_root=True)
+          ['content', 'insert', '--uri', 'content://%s' % self._table,
+           '--bind', 'name:%s:%s' % (self._GetTypeBinding(key), key),
+           '--bind', 'value:%s:%s' % (self._GetTypeBinding(value), value)],
+          check_return=True, as_root=True)
 
   def __delitem__(self, key):
     self._device.RunShellCommand(
-        'content delete --uri content://%s '
-        '--bind name:%s:%s' % (
-            self._table,
-            self._GetTypeBinding(key), key),
-        as_root=True)
+        ['content', 'delete', '--uri', 'content://%s' % self._table,
+         '--bind', 'name:%s:%s' % (self._GetTypeBinding(key), key)],
+        check_return=True, as_root=True)
 
 
 def ConfigureContentSettings(device, desired_settings):
@@ -270,8 +261,23 @@ commit transaction;""" % {
       'columns': ', '.join(columns),
       'values': ', '.join(["'%s'" % value for value in values])
     }
-    output_msg = device.RunShellCommand('sqlite3 %s "%s"' % (db, cmd),
-                                        as_root=True)
+    output_msg = device.RunShellCommand(
+        ['sqlite3', db, cmd], check_return=True, as_root=True)
     if output_msg:
       logger.info(' '.join(output_msg))
 
+
+def _ParseContentRow(row):
+  """Parse key, value entries from a row string."""
+  # Example row:
+  # 'Row: 0 _id=13, name=logging_id2, value=-1fccbaa546705b05'
+  fields = row.split(', ')
+  key = None
+  value = ''
+  for field in fields:
+    k, _, v = field.partition('=')
+    if k == 'name':
+      key = v
+    elif k == 'value':
+      value = v
+  return key, value

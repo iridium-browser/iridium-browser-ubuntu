@@ -14,7 +14,6 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
-#include "content/public/common/renderer_preferences.h"
 #include "ipc/ipc_message.h"
 #include "net/base/net_errors.h"
 #include "ui/display/display.h"
@@ -50,12 +49,6 @@ std::unique_ptr<content::WebContents> CreateWebContents(
   content::WebContents* web_contents =
       content::WebContents::Create(create_params);
 
-#if defined(OS_ANDROID)
-  content::RendererPreferences* prefs = web_contents->GetMutableRendererPrefs();
-  prefs->use_video_overlay_for_embedded_encrypted_video = true;
-  web_contents->GetRenderViewHost()->SyncRendererPrefs();
-#endif
-
   return base::WrapUnique(web_contents);
 }
 
@@ -69,8 +62,8 @@ CastWebView::CastWebView(Delegate* delegate,
       browser_context_(browser_context),
       site_instance_(std::move(site_instance)),
       transparent_(transparent),
-      window_(shell::CastContentWindow::Create(delegate)),
       web_contents_(CreateWebContents(browser_context_, site_instance_)),
+      window_(shell::CastContentWindow::Create(delegate)),
       did_start_navigation_(false),
       weak_factory_(this) {
   DCHECK(delegate_);
@@ -113,6 +106,7 @@ void CastWebView::DelayedCloseContents() {
   // We want to delete the surface before we start the next app because
   // the next app could be an external one whose Start() function would
   // destroy the primary gfx plane.
+  window_.reset();  // Window destructor requires live web_contents on Android.
   web_contents_.reset();
   delegate_->OnPageStopped(net::OK);
 }

@@ -236,12 +236,6 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "mojo_js_integration_tests"
-      },
-      {
-        "swarming": {
-          "can_use_on_swarming_builders": true
-        },
         "test": "mojo_js_unittests"
       },
       {
@@ -278,7 +272,7 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "service_unittests"
+        "test": "services_unittests"
       },
       {
         "swarming": {
@@ -338,9 +332,6 @@
       {
         "isolate_name": "telemetry_gpu_unittests",
         "name": "telemetry_gpu_unittests",
-        "override_compile_targets": [
-          "telemetry_gpu_unittests_run"
-        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         }
@@ -351,9 +342,6 @@
         ],
         "isolate_name": "telemetry_perf_unittests",
         "name": "telemetry_perf_unittests",
-        "override_compile_targets": [
-          "telemetry_perf_unittests_run"
-        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "hard_timeout": 960,
@@ -366,9 +354,6 @@
         ],
         "isolate_name": "telemetry_unittests",
         "name": "telemetry_unittests",
-        "override_compile_targets": [
-          "telemetry_unittests_run"
-        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "shards": 4
@@ -628,7 +613,7 @@
         "swarming": {
           "can_use_on_swarming_builders": true
         },
-        "test": "service_unittests"
+        "test": "services_unittests"
       },
       {
         "swarming": {
@@ -667,9 +652,6 @@
       {
         "isolate_name": "telemetry_gpu_unittests",
         "name": "telemetry_gpu_unittests",
-        "override_compile_targets": [
-          "telemetry_gpu_unittests_run"
-        ],
         "swarming": {
           "can_use_on_swarming_builders": true
         }
@@ -680,9 +662,6 @@
         ],
         "isolate_name": "telemetry_unittests",
         "name": "telemetry_unittests",
-        "override_compile_targets": [
-          "telemetry_unittests_run"
-        ],
         "swarming": {
           "can_use_on_swarming_builders": true,
           "shards": 4

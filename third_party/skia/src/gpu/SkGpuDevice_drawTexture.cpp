@@ -13,7 +13,7 @@
 #include "GrStyle.h"
 #include "GrTextureAdjuster.h"
 #include "SkDraw.h"
-#include "SkGrPriv.h"
+#include "SkGr.h"
 #include "SkMaskFilter.h"
 #include "effects/GrBicubicEffect.h"
 #include "effects/GrSimpleTextureEffect.h"
@@ -42,12 +42,12 @@ static bool has_aligned_samples(const SkRect& srcRect, const SkRect& transformed
 static bool may_color_bleed(const SkRect& srcRect,
                             const SkRect& transformedRect,
                             const SkMatrix& m,
-                            bool isMSAA) {
+                            GrFSAAType fsaaType) {
     // Only gets called if has_aligned_samples returned false.
     // So we can assume that sampling is axis aligned but not texel aligned.
     SkASSERT(!has_aligned_samples(srcRect, transformedRect));
     SkRect innerSrcRect(srcRect), innerTransformedRect, outerTransformedRect(transformedRect);
-    if (isMSAA) {
+    if (GrFSAAType::kUnifiedMSAA == fsaaType) {
         innerSrcRect.inset(SK_Scalar1, SK_Scalar1);
     } else {
         innerSrcRect.inset(SK_ScalarHalf, SK_ScalarHalf);
@@ -71,14 +71,14 @@ static bool may_color_bleed(const SkRect& srcRect,
 static bool can_ignore_bilerp_constraint(const GrTextureProducer& producer,
                                          const SkRect& srcRect,
                                          const SkMatrix& srcRectToDeviceSpace,
-                                         bool isMSAA) {
+                                         GrFSAAType fsaaType) {
     if (srcRectToDeviceSpace.rectStaysRect()) {
         // sampling is axis-aligned
         SkRect transformedRect;
         srcRectToDeviceSpace.mapRect(&transformedRect, srcRect);
 
         if (has_aligned_samples(srcRect, transformedRect) ||
-            !may_color_bleed(srcRect, transformedRect, srcRectToDeviceSpace, isMSAA)) {
+            !may_color_bleed(srcRect, transformedRect, srcRectToDeviceSpace, fsaaType)) {
             return true;
         }
     }
@@ -186,7 +186,7 @@ void SkGpuDevice::drawTextureProducerImpl(GrTextureProducer* producer,
         SkMatrix combinedMatrix;
         combinedMatrix.setConcat(viewMatrix, srcToDstMatrix);
         if (can_ignore_bilerp_constraint(*producer, clippedSrcRect, combinedMatrix,
-                                         fRenderTargetContext->isUnifiedMultisampled())) {
+                                         fRenderTargetContext->fsaaType())) {
             constraintMode = GrTextureAdjuster::kNo_FilterConstraint;
         }
     }
@@ -246,7 +246,7 @@ void SkGpuDevice::drawTextureProducerImpl(GrTextureProducer* producer,
     SkPath rectPath;
     rectPath.addRect(clippedDstRect);
     rectPath.setIsVolatile(true);
-    GrBlurUtils::drawPathWithMaskFilter(this->context(), fRenderTargetContext.get(), fClip,
+    GrBlurUtils::drawPathWithMaskFilter(this->context(), fRenderTargetContext.get(), this->clip(),
                                         rectPath, std::move(grPaint), aa, viewMatrix, mf,
                                         GrStyle::SimpleFill(), true);
 }

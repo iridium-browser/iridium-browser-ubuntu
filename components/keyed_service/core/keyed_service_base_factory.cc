@@ -53,6 +53,7 @@ KeyedServiceBaseFactory::KeyedServiceBaseFactory(const char* service_name,
 }
 
 KeyedServiceBaseFactory::~KeyedServiceBaseFactory() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   dependency_manager_->RemoveComponent(this);
 }
 
@@ -79,19 +80,18 @@ KeyedServiceBaseFactory::GetAssociatedPrefRegistry(
   return registry;
 }
 
-#ifndef NDEBUG
 void KeyedServiceBaseFactory::AssertContextWasntDestroyed(
     base::SupportsUserData* context) const {
-  DCHECK(CalledOnValidThread());
+  // TODO(crbug.com/701326): We should DCHECK(CalledOnValidThread()) here, but
+  // currently some code doesn't do service getting on the main thread.
+  // This needs to be fixed and DCHECK should be restored here.
   dependency_manager_->AssertContextWasntDestroyed(context);
 }
 
-void KeyedServiceBaseFactory::MarkContextLiveForTesting(
-    base::SupportsUserData* context) {
-  DCHECK(CalledOnValidThread());
-  dependency_manager_->MarkContextLiveForTesting(context);
+void KeyedServiceBaseFactory::MarkContextLive(base::SupportsUserData* context) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  dependency_manager_->MarkContextLive(context);
 }
-#endif
 
 bool KeyedServiceBaseFactory::ServiceIsCreatedWithContext() const {
   return false;
@@ -105,7 +105,7 @@ void KeyedServiceBaseFactory::ContextDestroyed(
     base::SupportsUserData* context) {
   // While object destruction can be customized in ways where the object is
   // only dereferenced, this still must run on the UI thread.
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   registered_preferences_.erase(context);
 }
 

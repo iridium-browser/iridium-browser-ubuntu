@@ -4,6 +4,7 @@
 
 #include "core/paint/FilterPainter.h"
 
+#include <memory>
 #include "core/paint/FilterEffectBuilder.h"
 #include "core/paint/LayerClipRecorder.h"
 #include "core/paint/PaintLayer.h"
@@ -12,84 +13,82 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/filters/FilterEffect.h"
-#include "platform/graphics/filters/SkiaImageFilterBuilder.h"
 #include "platform/graphics/paint/FilterDisplayItem.h"
 #include "platform/graphics/paint/PaintController.h"
-#include "wtf/PtrUtil.h"
-#include <memory>
+#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
+sk_sp<SkImageFilter> FilterPainter::GetImageFilter(PaintLayer& layer) {
+  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
+    return nullptr;
+
+  if (!layer.PaintsWithFilters())
+    return nullptr;
+
+  FilterEffect* last_effect = layer.LastFilterEffect();
+  if (!last_effect)
+    return nullptr;
+
+  return SkiaImageFilterBuilder::Build(last_effect, kInterpolationSpaceSRGB);
+}
+
 FilterPainter::FilterPainter(PaintLayer& layer,
                              GraphicsContext& context,
-                             const LayoutPoint& offsetFromRoot,
-                             const ClipRect& clipRect,
-                             PaintLayerPaintingInfo& paintingInfo,
-                             PaintLayerFlags paintFlags)
-    : m_filterInProgress(false),
-      m_context(context),
-      m_layoutObject(layer.layoutObject()) {
-  if (!layer.paintsWithFilters())
+                             const LayoutPoint& offset_from_root,
+                             const ClipRect& clip_rect,
+                             PaintLayerPaintingInfo& painting_info,
+                             PaintLayerFlags paint_flags)
+    : filter_in_progress_(false),
+      context_(context),
+      layout_object_(layer.GetLayoutObject()) {
+  sk_sp<SkImageFilter> image_filter = GetImageFilter(layer);
+  if (!image_filter)
     return;
 
-  FilterEffect* lastEffect = layer.lastFilterEffect();
-  if (!lastEffect)
-    return;
-
-  sk_sp<SkImageFilter> imageFilter =
-      SkiaImageFilterBuilder::build(lastEffect, ColorSpaceDeviceRGB);
-  if (!imageFilter)
-    return;
-
-  // We'll handle clipping to the dirty rect before filter rasterization.
-  // Filter processing will automatically expand the clip rect and the offscreen
-  // to accommodate any filter outsets.
-  // FIXME: It is incorrect to just clip to the damageRect here once multiple
-  // fragments are involved.
-
-  // Subsequent code should not clip to the dirty rect, since we've already
-  // done it above, and doing it later will defeat the outsets.
-  paintingInfo.clipToDirtyRect = false;
-
-  if (clipRect.rect() != paintingInfo.paintDirtyRect || clipRect.hasRadius()) {
-    m_clipRecorder = WTF::wrapUnique(new LayerClipRecorder(
-        context, layer.layoutObject(), DisplayItem::kClipLayerFilter, clipRect,
-        paintingInfo.rootLayer, LayoutPoint(), paintFlags));
+  if (clip_rect.Rect() != painting_info.paint_dirty_rect ||
+      clip_rect.HasRadius()) {
+    // Apply clips outside the filter. See discussion about these clips
+    // in PaintLayerPainter regarding "clipping in the presence of filters".
+    clip_recorder_ = WTF::WrapUnique(new LayerClipRecorder(
+        context, layer, DisplayItem::kClipLayerFilter, clip_rect,
+        painting_info.root_layer, LayoutPoint(), paint_flags,
+        layer.GetLayoutObject()));
   }
 
-  if (!context.getPaintController().displayItemConstructionIsDisabled()) {
-    CompositorFilterOperations compositorFilterOperations =
-        layer.createCompositorFilterOperationsForFilter(
-            m_layoutObject.styleRef());
+  if (!context.GetPaintController().DisplayItemConstructionIsDisabled()) {
+    CompositorFilterOperations compositor_filter_operations =
+        layer.CreateCompositorFilterOperationsForFilter(
+            layout_object_.StyleRef());
     // FIXME: It's possible to have empty CompositorFilterOperations here even
     // though the SkImageFilter produced above is non-null, since the
     // layer's FilterEffectBuilder can have a stale representation of
     // the layer's filter. See crbug.com/502026.
-    if (compositorFilterOperations.isEmpty())
+    if (compositor_filter_operations.IsEmpty())
       return;
-    LayoutRect visualBounds(
-        layer.physicalBoundingBoxIncludingStackingChildren(offsetFromRoot));
-    if (layer.enclosingPaginationLayer()) {
+    LayoutRect visual_bounds(
+        layer.PhysicalBoundingBoxIncludingStackingChildren(offset_from_root));
+    if (layer.EnclosingPaginationLayer()) {
       // Filters are set up before pagination, so we need to make the bounding
       // box visual on our own.
-      visualBounds.moveBy(-offsetFromRoot);
-      layer.convertFromFlowThreadToVisualBoundingBoxInAncestor(
-          paintingInfo.rootLayer, visualBounds);
+      visual_bounds.MoveBy(-offset_from_root);
+      layer.ConvertFromFlowThreadToVisualBoundingBoxInAncestor(
+          painting_info.root_layer, visual_bounds);
     }
-    FloatPoint origin(offsetFromRoot);
-    context.getPaintController().createAndAppend<BeginFilterDisplayItem>(
-        m_layoutObject, std::move(imageFilter), FloatRect(visualBounds), origin,
-        std::move(compositorFilterOperations));
+    FloatPoint origin(offset_from_root);
+    context.GetPaintController().CreateAndAppend<BeginFilterDisplayItem>(
+        layout_object_, std::move(image_filter), FloatRect(visual_bounds),
+        origin, std::move(compositor_filter_operations));
   }
 
-  m_filterInProgress = true;
+  filter_in_progress_ = true;
 }
 
 FilterPainter::~FilterPainter() {
-  if (!m_filterInProgress)
+  if (!filter_in_progress_)
     return;
 
-  m_context.getPaintController().endItem<EndFilterDisplayItem>(m_layoutObject);
+  context_.GetPaintController().EndItem<EndFilterDisplayItem>(layout_object_);
 }
 
 }  // namespace blink

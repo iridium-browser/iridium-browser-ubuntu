@@ -10,7 +10,6 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/containers/hash_tables.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
@@ -39,6 +38,7 @@ class SharkConnectionListener;
 
 namespace chromeos {
 
+class AutoEnrollmentController;
 class ErrorScreen;
 struct Geoposition;
 class LoginDisplayHost;
@@ -51,7 +51,6 @@ struct TimeZoneResponseData;
 // Class that manages control flow between wizard screens. Wizard controller
 // interacts with screen controllers to move the user between screens.
 class WizardController : public BaseScreenDelegate,
-                         public ScreenManager,
                          public EulaScreen::Delegate,
                          public ControllerPairingScreen::Delegate,
                          public HostPairingScreen::Delegate,
@@ -85,6 +84,10 @@ class WizardController : public BaseScreenDelegate,
   // Terms of Service, user image selection).
   static void SkipPostLoginScreensForTesting();
 
+  // Returns true if OOBE is operating under the
+  // Zero-Touch Hands-Off Enrollment Flow.
+  static bool UsingHandsOffEnrollment();
+
   // Shows the first screen defined by |first_screen| or by default if the
   // parameter is empty.
   void Init(OobeScreen first_screen);
@@ -113,12 +116,18 @@ class WizardController : public BaseScreenDelegate,
   // Returns true if the current wizard instance has reached the login screen.
   bool login_screen_started() const { return login_screen_started_; }
 
-  // ScreenManager implementation.
-  BaseScreen* GetScreen(OobeScreen screen) override;
-  BaseScreen* CreateScreen(OobeScreen screen) override;
+  // Returns a given screen. Creates it lazily.
+  BaseScreen* GetScreen(OobeScreen screen);
+
+  // Returns the current ScreenManager instance.
+  ScreenManager* screen_manager() { return screen_manager_.get(); }
 
   // Volume percent at which spoken feedback is still audible.
   static const int kMinAudibleOutputVolumePercent;
+
+  // Allocate a given BaseScreen for the given |Screen|. Used by
+  // |screen_manager_|.
+  BaseScreen* CreateScreen(OobeScreen screen);
 
  private:
   // Show specific screen.
@@ -141,6 +150,9 @@ class WizardController : public BaseScreenDelegate,
   void ShowControllerPairingScreen();
   void ShowHostPairingScreen();
   void ShowDeviceDisabledScreen();
+  void ShowEncryptionMigrationScreen();
+  void ShowVoiceInteractionValuePropScreen();
+  void ShowWaitForContainerReadyScreen();
 
   // Shows images login screen.
   void ShowLoginScreen(const LoginScreenContext& context);
@@ -165,9 +177,14 @@ class WizardController : public BaseScreenDelegate,
   void OnWrongHWIDWarningSkipped();
   void OnTermsOfServiceDeclined();
   void OnTermsOfServiceAccepted();
-  void OnArcTermsOfServiceFinished();
+  void OnArcTermsOfServiceSkipped();
+  void OnArcTermsOfServiceAccepted();
+  void OnVoiceInteractionValuePropSkipped();
+  void OnVoiceInteractionValuePropAccepted();
   void OnControllerPairingFinished();
   void OnAutoEnrollmentCheckCompleted();
+  void OnWaitForContainerReadyFinished();
+  void OnOobeFlowFinished();
 
   // Callback invoked once it has been determined whether the device is disabled
   // or not.
@@ -217,6 +234,7 @@ class WizardController : public BaseScreenDelegate,
                               bool send_reports,
                               const std::string& keyboard_layout) override;
   void AddNetworkRequested(const std::string& onc_spec) override;
+  void RebootHostRequested() override;
 
   // Override from NetworkScreen::Delegate:
   void OnEnableDebuggingScreenRequested() override;
@@ -235,8 +253,8 @@ class WizardController : public BaseScreenDelegate,
   // ShowCurrentScreen directly forces screen to be shown immediately.
   void SetCurrentScreenSmooth(BaseScreen* screen, bool use_smoothing);
 
-  // Changes status area visibility.
-  void SetStatusAreaVisible(bool visible);
+  // Update the status area visibility for |screen|.
+  void UpdateStatusAreaVisibilityForScreen(OobeScreen screen);
 
   // Changes whether to show the Material Design OOBE or not.
   void SetShowMdOobe(bool show);
@@ -280,6 +298,15 @@ class WizardController : public BaseScreenDelegate,
   // detected or not.
   bool IsRemoraPairingOobe() const;
 
+  // Returns true if arc terms of service should be shown.
+  bool ShouldShowArcTerms() const;
+
+  // Returns true if voice interaction value prop should be shown.
+  bool ShouldShowVoiceInteractionValueProp() const;
+
+  // Start voice interaction setup wizard in container
+  void StartVoiceInteractionSetupWizard();
+
   // Starts listening for an incoming shark controller connection, if we are
   // running remora OOBE.
   void MaybeStartListeningForSharkConnection();
@@ -291,7 +318,9 @@ class WizardController : public BaseScreenDelegate,
 
   // Callback functions for AddNetworkRequested().
   void OnSetHostNetworkSuccessful();
-  void OnSetHostNetworkFailed();
+  void OnSetHostNetworkFailed(
+      const std::string& error_name,
+      std::unique_ptr<base::DictionaryValue> error_data);
 
   // Start the enrollment screen using the config from
   // |prescribed_enrollment_config_|. If |force_interactive| is true,
@@ -299,6 +328,13 @@ class WizardController : public BaseScreenDelegate,
   // Gaia credentials. If it is false, the screen may return after trying
   // attestation-based enrollment if appropriate.
   void StartEnrollmentScreen(bool force_interactive);
+
+  // Returns auto enrollment controller (lazily initializes one if it doesn't
+  // exist already).
+  AutoEnrollmentController* GetAutoEnrollmentController();
+
+  std::unique_ptr<AutoEnrollmentController> auto_enrollment_controller_;
+  std::unique_ptr<ScreenManager> screen_manager_;
 
   // Whether to skip any screens that may normally be shown after login
   // (registration, Terms of Service, user image selection).
@@ -363,6 +399,8 @@ class WizardController : public BaseScreenDelegate,
 
   bool login_screen_started_ = false;
 
+  bool is_in_session_oobe_ = false;
+
   // Indicates that once image selection screen finishes we should return to
   // a previous screen instead of proceeding with usual flow.
   bool user_image_screen_return_to_previous_hack_ = false;
@@ -372,10 +410,13 @@ class WizardController : public BaseScreenDelegate,
 
   FRIEND_TEST_ALL_PREFIXES(EnrollmentScreenTest, TestCancel);
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, Accelerators);
+  FRIEND_TEST_ALL_PREFIXES(WizardControllerDeviceStateTest,
+                           ControlFlowNoForcedReEnrollmentOnFirstBoot);
+  friend class WizardControllerBrokenLocalStateTest;
+  friend class WizardControllerDeviceStateTest;
   friend class WizardControllerFlowTest;
   friend class WizardControllerOobeResumeTest;
   friend class WizardInProcessBrowserTest;
-  friend class WizardControllerBrokenLocalStateTest;
 
   std::unique_ptr<AccessibilityStatusSubscription> accessibility_subscription_;
 
@@ -390,7 +431,7 @@ class WizardController : public BaseScreenDelegate,
   std::unique_ptr<pairing_chromeos::HostPairingController> remora_controller_;
 
   // Maps screen names to last time of their shows.
-  base::hash_map<std::string, base::Time> screen_show_times_;
+  std::map<std::string, base::Time> screen_show_times_;
 
   // Tests check result of timezone resolve.
   bool timezone_resolved_ = false;

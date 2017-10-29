@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/metrics/histogram_macros.h"
+#include "ui/app_list/app_list_features.h"
 #include "ui/app_list/search_box_model_observer.h"
 
 namespace app_list {
@@ -27,14 +28,15 @@ SearchBoxModel::SpeechButtonProperty::SpeechButtonProperty(
 SearchBoxModel::SpeechButtonProperty::~SpeechButtonProperty() {
 }
 
-SearchBoxModel::SearchBoxModel() {
-}
+SearchBoxModel::SearchBoxModel() {}
 
 SearchBoxModel::~SearchBoxModel() {
 }
 
 void SearchBoxModel::SetSpeechRecognitionButton(
     std::unique_ptr<SearchBoxModel::SpeechButtonProperty> speech_button) {
+  if (features::IsFullscreenAppListEnabled())
+    return;
   speech_button_ = std::move(speech_button);
   for (auto& observer : observers_)
     observer.SpeechRecognitionButtonPropChanged();
@@ -67,8 +69,8 @@ void SearchBoxModel::SetSelectionModel(const gfx::SelectionModel& sel) {
     observer.SelectionModelChanged();
 }
 
-void SearchBoxModel::SetText(const base::string16& text) {
-  if (text_ == text)
+void SearchBoxModel::Update(const base::string16& text, bool is_voice_query) {
+  if (text_ == text && is_voice_query_ == is_voice_query)
     return;
 
   // Log that a new search has been commenced whenever the text box text
@@ -77,8 +79,9 @@ void SearchBoxModel::SetText(const base::string16& text) {
     UMA_HISTOGRAM_ENUMERATION("Apps.AppListSearchCommenced", 1, 2);
   }
   text_ = text;
+  is_voice_query_ = is_voice_query;
   for (auto& observer : observers_)
-    observer.TextChanged();
+    observer.Update();
 }
 
 void SearchBoxModel::AddObserver(SearchBoxModelObserver* observer) {

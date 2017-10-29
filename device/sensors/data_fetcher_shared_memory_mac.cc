@@ -9,29 +9,11 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
-#include "device/sensors/ambient_light_mac.h"
-#include "device/sensors/public/cpp/device_util_mac.h"
 #include "third_party/sudden_motion_sensor/sudden_motion_sensor_mac.h"
 
 namespace device {
 
 const double kMeanGravity = 9.80665;
-
-void FetchLight(AmbientLightSensor* sensor, DeviceLightHardwareBuffer* buffer) {
-  DCHECK(sensor);
-  DCHECK(buffer);
-  // Macbook pro has 2 lux values, left and right, we take the average.
-  // The raw sensor values are converted to lux using LMUvalueToLux(raw_value)
-  // similar to how it is done in Firefox.
-  uint64_t lux_value[2];
-  if (!sensor->ReadSensorValue(lux_value))
-    return;
-  uint64_t mean = (lux_value[0] + lux_value[1]) / 2;
-  double lux = LMUvalueToLux(mean);
-  buffer->seqlock.WriteBegin();
-  buffer->data.value = lux;
-  buffer->seqlock.WriteEnd();
-}
 
 void FetchMotion(SuddenMotionSensor* sensor,
                  DeviceMotionHardwareBuffer* buffer) {
@@ -43,13 +25,13 @@ void FetchMotion(SuddenMotionSensor* sensor,
     return;
 
   buffer->seqlock.WriteBegin();
-  buffer->data.accelerationIncludingGravityX = axis_value[0] * kMeanGravity;
-  buffer->data.hasAccelerationIncludingGravityX = true;
-  buffer->data.accelerationIncludingGravityY = axis_value[1] * kMeanGravity;
-  buffer->data.hasAccelerationIncludingGravityY = true;
-  buffer->data.accelerationIncludingGravityZ = axis_value[2] * kMeanGravity;
-  buffer->data.hasAccelerationIncludingGravityZ = true;
-  buffer->data.allAvailableSensorsAreActive = true;
+  buffer->data.acceleration_including_gravity_x = axis_value[0] * kMeanGravity;
+  buffer->data.has_acceleration_including_gravity_x = true;
+  buffer->data.acceleration_including_gravity_y = axis_value[1] * kMeanGravity;
+  buffer->data.has_acceleration_including_gravity_y = true;
+  buffer->data.acceleration_including_gravity_z = axis_value[2] * kMeanGravity;
+  buffer->data.has_acceleration_including_gravity_z = true;
+  buffer->data.all_available_sensors_are_active = true;
   buffer->seqlock.WriteEnd();
 }
 
@@ -103,10 +85,10 @@ void FetchOrientation(SuddenMotionSensor* sensor,
 
   buffer->seqlock.WriteBegin();
   buffer->data.beta = beta;
-  buffer->data.hasBeta = true;
+  buffer->data.has_beta = true;
   buffer->data.gamma = gamma;
-  buffer->data.hasGamma = true;
-  buffer->data.allAvailableSensorsAreActive = true;
+  buffer->data.has_gamma = true;
+  buffer->data.all_available_sensors_are_active = true;
   buffer->seqlock.WriteEnd();
 }
 
@@ -117,15 +99,12 @@ DataFetcherSharedMemory::~DataFetcherSharedMemory() {}
 void DataFetcherSharedMemory::Fetch(unsigned consumer_bitmask) {
   DCHECK(GetPollingMessageLoop()->task_runner()->BelongsToCurrentThread());
   DCHECK(consumer_bitmask & CONSUMER_TYPE_ORIENTATION ||
-         consumer_bitmask & CONSUMER_TYPE_MOTION ||
-         consumer_bitmask & CONSUMER_TYPE_LIGHT);
+         consumer_bitmask & CONSUMER_TYPE_MOTION);
 
   if (consumer_bitmask & CONSUMER_TYPE_ORIENTATION)
     FetchOrientation(sudden_motion_sensor_.get(), orientation_buffer_);
   if (consumer_bitmask & CONSUMER_TYPE_MOTION)
     FetchMotion(sudden_motion_sensor_.get(), motion_buffer_);
-  if (consumer_bitmask & CONSUMER_TYPE_LIGHT)
-    FetchLight(ambient_light_sensor_.get(), light_buffer_);
 }
 
 DataFetcherSharedMemory::FetcherType DataFetcherSharedMemory::GetType() const {
@@ -149,7 +128,7 @@ bool DataFetcherSharedMemory::Start(ConsumerType consumer_type, void* buffer) {
       if (!sudden_motion_sensor_available) {
         // No motion sensor available, fire an all-null event.
         motion_buffer_->seqlock.WriteBegin();
-        motion_buffer_->data.allAvailableSensorsAreActive = true;
+        motion_buffer_->data.all_available_sensors_are_active = true;
         motion_buffer_->seqlock.WriteEnd();
       }
       return sudden_motion_sensor_available;
@@ -172,7 +151,7 @@ bool DataFetcherSharedMemory::Start(ConsumerType consumer_type, void* buffer) {
       } else {
         // No motion sensor available, fire an all-null event.
         orientation_buffer_->seqlock.WriteBegin();
-        orientation_buffer_->data.allAvailableSensorsAreActive = true;
+        orientation_buffer_->data.all_available_sensors_are_active = true;
         orientation_buffer_->seqlock.WriteEnd();
       }
       return sudden_motion_sensor_available;
@@ -184,23 +163,10 @@ bool DataFetcherSharedMemory::Start(ConsumerType consumer_type, void* buffer) {
       // implementation fire an all-null event to signal this to blink.
       orientation_absolute_buffer_->seqlock.WriteBegin();
       orientation_absolute_buffer_->data.absolute = true;
-      orientation_absolute_buffer_->data.allAvailableSensorsAreActive = true;
+      orientation_absolute_buffer_->data.all_available_sensors_are_active =
+          true;
       orientation_absolute_buffer_->seqlock.WriteEnd();
       return false;
-    }
-    case CONSUMER_TYPE_LIGHT: {
-      if (!ambient_light_sensor_)
-        ambient_light_sensor_ = AmbientLightSensor::Create();
-      bool ambient_light_sensor_available =
-          ambient_light_sensor_.get() != nullptr;
-
-      light_buffer_ = static_cast<DeviceLightHardwareBuffer*>(buffer);
-      if (!ambient_light_sensor_available) {
-        light_buffer_->seqlock.WriteBegin();
-        light_buffer_->data.value = std::numeric_limits<double>::infinity();
-        light_buffer_->seqlock.WriteEnd();
-      }
-      return ambient_light_sensor_available;
     }
     default:
       NOTREACHED();
@@ -215,7 +181,7 @@ bool DataFetcherSharedMemory::Stop(ConsumerType consumer_type) {
     case CONSUMER_TYPE_MOTION:
       if (motion_buffer_) {
         motion_buffer_->seqlock.WriteBegin();
-        motion_buffer_->data.allAvailableSensorsAreActive = false;
+        motion_buffer_->data.all_available_sensors_are_active = false;
         motion_buffer_->seqlock.WriteEnd();
         motion_buffer_ = nullptr;
       }
@@ -223,7 +189,7 @@ bool DataFetcherSharedMemory::Stop(ConsumerType consumer_type) {
     case CONSUMER_TYPE_ORIENTATION:
       if (orientation_buffer_) {
         orientation_buffer_->seqlock.WriteBegin();
-        orientation_buffer_->data.allAvailableSensorsAreActive = false;
+        orientation_buffer_->data.all_available_sensors_are_active = false;
         orientation_buffer_->seqlock.WriteEnd();
         orientation_buffer_ = nullptr;
       }
@@ -231,17 +197,10 @@ bool DataFetcherSharedMemory::Stop(ConsumerType consumer_type) {
     case CONSUMER_TYPE_ORIENTATION_ABSOLUTE:
       if (orientation_absolute_buffer_) {
         orientation_absolute_buffer_->seqlock.WriteBegin();
-        orientation_absolute_buffer_->data.allAvailableSensorsAreActive = false;
+        orientation_absolute_buffer_->data.all_available_sensors_are_active =
+            false;
         orientation_absolute_buffer_->seqlock.WriteEnd();
         orientation_absolute_buffer_ = nullptr;
-      }
-      return true;
-    case CONSUMER_TYPE_LIGHT:
-      if (light_buffer_) {
-        light_buffer_->seqlock.WriteBegin();
-        light_buffer_->data.value = -1;
-        light_buffer_->seqlock.WriteEnd();
-        light_buffer_ = nullptr;
       }
       return true;
     default:

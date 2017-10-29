@@ -6,10 +6,11 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
+#include "content/public/common/service_names.mojom.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/renderer/renderer_blink_platform_impl.h"
 #include "ipc/ipc_sync_message_filter.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "third_party/WebKit/public/platform/WebGamepadListener.h"
 #include "third_party/WebKit/public/platform/WebPlatformEventListener.h"
 
@@ -21,9 +22,11 @@ GamepadSharedMemoryReader::GamepadSharedMemoryReader(RenderThread* thread)
       ever_interacted_with_(false),
       binding_(this) {
   if (thread) {
-    thread->GetRemoteInterfaces()->GetInterface(
-        mojo::MakeRequest(&gamepad_monitor_));
-    gamepad_monitor_->SetObserver(binding_.CreateInterfacePtrAndBind());
+    thread->GetConnector()->BindInterface(mojom::kBrowserServiceName,
+                                          mojo::MakeRequest(&gamepad_monitor_));
+    device::mojom::GamepadObserverPtr observer;
+    binding_.Bind(mojo::MakeRequest(&observer));
+    gamepad_monitor_->SetObserver(std::move(observer));
   }
 }
 
@@ -59,7 +62,7 @@ void GamepadSharedMemoryReader::Start(
       static_cast<GamepadHardwareBuffer*>(memory);
 }
 
-void GamepadSharedMemoryReader::SampleGamepads(blink::WebGamepads& gamepads) {
+void GamepadSharedMemoryReader::SampleGamepads(device::Gamepads& gamepads) {
   // Blink should have started observing at that point.
   CHECK(is_observing());
 
@@ -69,7 +72,7 @@ void GamepadSharedMemoryReader::SampleGamepads(blink::WebGamepads& gamepads) {
   //
   // This logic is duplicated in Pepper as well. If you change it, that also
   // needs to be in sync. See ppapi/proxy/gamepad_resource.cc.
-  blink::WebGamepads read_into;
+  device::Gamepads read_into;
   TRACE_EVENT0("GAMEPAD", "SampleGamepads");
 
   if (!renderer_shared_buffer_handle_.is_valid())
@@ -106,7 +109,7 @@ void GamepadSharedMemoryReader::SampleGamepads(blink::WebGamepads& gamepads) {
     // gamepads to prevent fingerprinting. The actual data is not cleared.
     // WebKit will only copy out data into the JS buffers for connected
     // gamepads so this is sufficient.
-    for (unsigned i = 0; i < blink::WebGamepads::itemsLengthCap; i++)
+    for (unsigned i = 0; i < device::Gamepads::kItemsLengthCap; i++)
       gamepads.items[i].connected = false;
   }
 }
@@ -117,19 +120,19 @@ GamepadSharedMemoryReader::~GamepadSharedMemoryReader() {
 
 void GamepadSharedMemoryReader::GamepadConnected(
     int index,
-    const blink::WebGamepad& gamepad) {
+    const device::Gamepad& gamepad) {
   // The browser already checks if the user actually interacted with a device.
   ever_interacted_with_ = true;
 
   if (listener())
-    listener()->didConnectGamepad(index, gamepad);
+    listener()->DidConnectGamepad(index, gamepad);
 }
 
 void GamepadSharedMemoryReader::GamepadDisconnected(
     int index,
-    const blink::WebGamepad& gamepad) {
+    const device::Gamepad& gamepad) {
   if (listener())
-    listener()->didDisconnectGamepad(index, gamepad);
+    listener()->DidDisconnectGamepad(index, gamepad);
 }
 
 } // namespace content

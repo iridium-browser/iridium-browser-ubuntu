@@ -167,7 +167,7 @@ class EventSender {
 
   void MouseScrollBy(gin::Arguments* args, MouseScrollType scroll_type);
   void MouseMoveTo(gin::Arguments* args);
-  void MouseLeave();
+  void MouseLeave(blink::WebPointerProperties::PointerType, int pointerId);
   void ScheduleAsynchronousClick(int button_number, int modifiers);
   void ScheduleAsynchronousKeyDown(const std::string& code_str,
                                    int modifiers,
@@ -295,7 +295,7 @@ class EventSender {
     int modifiers_;
 
     PointerState()
-        : pressed_button_(blink::WebMouseEvent::Button::NoButton),
+        : pressed_button_(blink::WebMouseEvent::Button::kNoButton),
           current_buttons_(0),
           last_pos_(blink::WebPoint(0, 0)),
           modifiers_(0) {}

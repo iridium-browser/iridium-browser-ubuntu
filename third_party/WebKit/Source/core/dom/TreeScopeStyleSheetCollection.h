@@ -31,8 +31,8 @@
 #define TreeScopeStyleSheetCollection_h
 
 #include "core/CoreExport.h"
-#include "core/dom/DocumentOrderedList.h"
 #include "core/dom/StyleSheetCollection.h"
+#include "core/dom/TreeOrderedList.h"
 #include "core/dom/TreeScope.h"
 
 namespace blink {
@@ -42,30 +42,32 @@ class Node;
 
 class CORE_EXPORT TreeScopeStyleSheetCollection : public StyleSheetCollection {
  public:
-  void addStyleSheetCandidateNode(Node&);
-  void removeStyleSheetCandidateNode(Node& node) {
-    m_styleSheetCandidateNodes.remove(&node);
+  void AddStyleSheetCandidateNode(Node&);
+  void RemoveStyleSheetCandidateNode(Node& node) {
+    style_sheet_candidate_nodes_.Remove(&node);
   }
-  bool hasStyleSheetCandidateNodes() const {
-    return !m_styleSheetCandidateNodes.isEmpty();
+  bool HasStyleSheetCandidateNodes() const {
+    return !style_sheet_candidate_nodes_.IsEmpty();
   }
+  bool HasStyleSheets() const;
 
-  bool mediaQueryAffectingValueChanged();
+  bool MediaQueryAffectingValueChanged();
 
-  virtual bool isShadowTreeStyleSheetCollection() const { return false; }
+  virtual bool IsShadowTreeStyleSheetCollection() const { return false; }
+  void UpdateStyleSheetList();
 
   DECLARE_VIRTUAL_TRACE();
 
  protected:
   explicit TreeScopeStyleSheetCollection(TreeScope&);
 
-  Document& document() const { return treeScope().document(); }
-  TreeScope& treeScope() const { return *m_treeScope; }
+  Document& GetDocument() const { return GetTreeScope().GetDocument(); }
+  TreeScope& GetTreeScope() const { return *tree_scope_; }
 
-  void applyActiveStyleSheetChanges(StyleSheetCollection&);
+  void ApplyActiveStyleSheetChanges(StyleSheetCollection&);
 
-  Member<TreeScope> m_treeScope;
-  DocumentOrderedList m_styleSheetCandidateNodes;
+  Member<TreeScope> tree_scope_;
+  TreeOrderedList style_sheet_candidate_nodes_;
 
  private:
   friend class TreeScopeStyleSheetCollectionTest;

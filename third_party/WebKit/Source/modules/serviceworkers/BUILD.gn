@@ -12,6 +12,8 @@ blink_modules_sources("serviceworkers") {
     "ExtendableMessageEvent.h",
     "FetchEvent.cpp",
     "FetchEvent.h",
+    "FetchRespondWithObserver.cpp",
+    "FetchRespondWithObserver.h",
     "ForeignFetchEvent.cpp",
     "ForeignFetchEvent.h",
     "ForeignFetchRespondWithObserver.cpp",
@@ -42,6 +44,10 @@ blink_modules_sources("serviceworkers") {
     "ServiceWorkerGlobalScope.h",
     "ServiceWorkerGlobalScopeClient.cpp",
     "ServiceWorkerGlobalScopeClient.h",
+    "ServiceWorkerGlobalScopeProxy.cpp",
+    "ServiceWorkerGlobalScopeProxy.h",
+    "ServiceWorkerInstalledScriptsManager.cpp",
+    "ServiceWorkerInstalledScriptsManager.h",
     "ServiceWorkerLinkResource.cpp",
     "ServiceWorkerLinkResource.h",
     "ServiceWorkerRegistration.cpp",
@@ -55,5 +61,6 @@ blink_modules_sources("serviceworkers") {
     "ServiceWorkerWindowClientCallback.cpp",
     "ServiceWorkerWindowClientCallback.h",
     "WaitUntilObserver.cpp",
+    "WaitUntilObserver.h",
   ]
 }

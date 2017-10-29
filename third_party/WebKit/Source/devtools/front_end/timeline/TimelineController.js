@@ -18,14 +18,21 @@ Timeline.TimelineController = class {
     this._performanceModel = performanceModel;
     this._client = client;
 
-    this._tracingModelBackingStorage = new Bindings.TempFileBackingStorage('tracing');
-    this._tracingModel = new SDK.TracingModel(this._tracingModelBackingStorage);
+    var backingStorage = new Bindings.TempFileBackingStorage();
+    this._tracingModel = new SDK.TracingModel(backingStorage);
 
     this._performanceModel.setMainTarget(tracingManager.target());
 
     /** @type {!Array<!Timeline.ExtensionTracingSession>} */
     this._extensionSessions = [];
     SDK.targetManager.observeModels(SDK.CPUProfilerModel, this);
+  }
+
+  /**
+   * @return {!SDK.Target}
+   */
+  mainTarget() {
+    return this._tracingManager.target();
   }
 
   /**
@@ -49,6 +56,9 @@ Timeline.TimelineController = class {
       TimelineModel.TimelineModel.Category.Console, TimelineModel.TimelineModel.Category.UserTiming
     ];
     categoriesArray.push(TimelineModel.TimelineModel.Category.LatencyInfo);
+
+    if (Runtime.experiments.isEnabled('timelineFlowEvents'))
+      categoriesArray.push('devtools.timeline.async');
 
     if (Runtime.experiments.isEnabled('timelineV8RuntimeCallStats') && options.enableJSSampling)
       categoriesArray.push(disabledByDefault('v8.runtime_stats_sampling'));
@@ -190,7 +200,7 @@ Timeline.TimelineController = class {
   _finalizeTrace() {
     this._injectCpuProfileEvents();
     this._tracingModel.tracingComplete();
-    this._client.loadingComplete(this._tracingModel, this._tracingModelBackingStorage);
+    this._client.loadingComplete(this._tracingModel);
   }
 
   /**

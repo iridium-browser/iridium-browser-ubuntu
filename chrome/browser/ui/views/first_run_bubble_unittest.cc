@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/macros.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/views/first_run_bubble.h"
+
+#include "base/macros.h"
+#include "base/message_loop/message_loop.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
@@ -13,47 +16,14 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/events/event.h"
-#include "ui/events/event_processor.h"
+#include "ui/events/event_sink.h"
 #include "ui/events/event_utils.h"
 #include "ui/views/test/views_test_base.h"
+#include "ui/views/test/widget_test.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
-// Provides functionality to observe the widget passed in the constructor for
-// the widget closing event.
-class WidgetClosingObserver : public views::WidgetObserver {
- public:
-  explicit WidgetClosingObserver(views::Widget* widget)
-      : widget_(widget),
-        widget_destroyed_(false) {
-    widget_->AddObserver(this);
-  }
-
-  ~WidgetClosingObserver() override {
-    if (widget_)
-      widget_->RemoveObserver(this);
-  }
-
-  void OnWidgetClosing(views::Widget* widget) override {
-    DCHECK(widget == widget_);
-    widget_->RemoveObserver(this);
-    widget_destroyed_ = true;
-    widget_ = nullptr;
-  }
-
-  bool widget_destroyed() const {
-    return widget_destroyed_;
-  }
-
- private:
-  views::Widget* widget_;
-  bool widget_destroyed_;
-
-  DISALLOW_COPY_AND_ASSIGN(WidgetClosingObserver);
-};
-
-class FirstRunBubbleTest : public views::ViewsTestBase,
-                           views::WidgetObserver {
+class FirstRunBubbleTest : public views::ViewsTestBase {
  public:
   FirstRunBubbleTest();
   ~FirstRunBubbleTest() override;
@@ -82,6 +52,9 @@ FirstRunBubbleTest::~FirstRunBubbleTest() {}
 
 void FirstRunBubbleTest::SetUp() {
   ViewsTestBase::SetUp();
+  // Set the ChromeLayoutProvider as the default layout provider.
+  test_views_delegate()->set_layout_provider(
+      ChromeLayoutProvider::CreateLayoutProvider());
   TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
       profile(), &TemplateURLServiceFactory::BuildInstanceFor);
   TemplateURLService* turl_model =
@@ -94,27 +67,26 @@ void FirstRunBubbleTest::CreateAndCloseBubbleOnEventTest(ui::Event* event) {
   views::Widget::InitParams params =
       CreateParams(views::Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  std::unique_ptr<views::Widget> anchor_widget(new views::Widget);
-  anchor_widget->Init(params);
-  anchor_widget->SetBounds(gfx::Rect(10, 10, 500, 500));
-  anchor_widget->Show();
+  views::Widget anchor_widget;
+  anchor_widget.Init(params);
+  anchor_widget.SetBounds(gfx::Rect(10, 10, 500, 500));
+  anchor_widget.Show();
 
   FirstRunBubble* delegate =
-      FirstRunBubble::ShowBubble(NULL, anchor_widget->GetContentsView());
-  EXPECT_TRUE(delegate != NULL);
+      FirstRunBubble::ShowBubble(nullptr, anchor_widget.GetContentsView());
+  EXPECT_TRUE(delegate);
 
-  anchor_widget->GetFocusManager()->SetFocusedView(
-      anchor_widget->GetContentsView());
+  anchor_widget.GetContentsView()->RequestFocus();
 
-  std::unique_ptr<WidgetClosingObserver> widget_observer(
-      new WidgetClosingObserver(delegate->GetWidget()));
+  views::test::WidgetClosingObserver widget_observer(delegate->GetWidget());
 
-  ui::EventDispatchDetails details =
-      anchor_widget->GetNativeWindow()->GetHost()->event_processor()->
-          OnEventFromSource(event);
+  ui::EventDispatchDetails details = anchor_widget.GetNativeWindow()
+                                         ->GetHost()
+                                         ->event_sink()
+                                         ->OnEventFromSource(event);
   EXPECT_FALSE(details.dispatcher_destroyed);
 
-  EXPECT_TRUE(widget_observer->widget_destroyed());
+  EXPECT_TRUE(widget_observer.widget_closed());
 }
 
 TEST_F(FirstRunBubbleTest, CreateAndClose) {
@@ -122,13 +94,13 @@ TEST_F(FirstRunBubbleTest, CreateAndClose) {
   views::Widget::InitParams params =
       CreateParams(views::Widget::InitParams::TYPE_WINDOW);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  std::unique_ptr<views::Widget> anchor_widget(new views::Widget);
-  anchor_widget->Init(params);
-  anchor_widget->Show();
+  views::Widget anchor_widget;
+  anchor_widget.Init(params);
+  anchor_widget.Show();
 
   FirstRunBubble* delegate =
-      FirstRunBubble::ShowBubble(NULL, anchor_widget->GetContentsView());
-  EXPECT_TRUE(delegate != NULL);
+      FirstRunBubble::ShowBubble(nullptr, anchor_widget.GetContentsView());
+  EXPECT_TRUE(delegate);
   delegate->GetWidget()->CloseNow();
 }
 
@@ -149,7 +121,8 @@ TEST_F(FirstRunBubbleTest, CloseBubbleOnMouseDownEvent) {
 
 TEST_F(FirstRunBubbleTest, CloseBubbleOnTouchDownEvent) {
   ui::TouchEvent touch_down(
-      ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), 0, ui::EventTimeForNow());
+      ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), ui::EventTimeForNow(),
+      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 0));
   CreateAndCloseBubbleOnEventTest(&touch_down);
 }
 

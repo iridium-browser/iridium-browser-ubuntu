@@ -4,16 +4,17 @@
 
 #include "modules/time_zone_monitor/TimeZoneMonitorClient.h"
 
-#include "bindings/core/v8/V8Binding.h"
-#include "bindings/core/v8/V8PerIsolateData.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/workers/WorkerBackingThread.h"
 #include "core/workers/WorkerOrWorkletGlobalScope.h"
 #include "core/workers/WorkerThread.h"
 #include "platform/CrossThreadFunctional.h"
-#include "platform/ServiceConnector.h"
+#include "platform/bindings/V8PerIsolateData.h"
 #include "public/platform/Platform.h"
 #include "services/device/public/interfaces/constants.mojom-blink.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "v8/include/v8.h"
 
@@ -27,9 +28,9 @@ void NotifyTimezoneChangeToV8(v8::Isolate* isolate) {
   v8::Date::DateTimeConfigurationChangeNotification(isolate);
 }
 
-void NotifyTimezoneChangeOnWorkerThread(WorkerThread* workerThread) {
-  DCHECK(workerThread->isCurrentThread());
-  NotifyTimezoneChangeToV8(toIsolate(workerThread->globalScope()));
+void NotifyTimezoneChangeOnWorkerThread(WorkerThread* worker_thread) {
+  DCHECK(worker_thread->IsCurrentThread());
+  NotifyTimezoneChangeToV8(ToIsolate(worker_thread->GlobalScope()));
 }
 
 }  // namespace
@@ -39,41 +40,45 @@ void TimeZoneMonitorClient::Init() {
   DEFINE_STATIC_LOCAL(TimeZoneMonitorClient, instance, ());
 
   device::mojom::blink::TimeZoneMonitorPtr monitor;
-  ServiceConnector::instance().connectToInterface(
+  Platform::Current()->GetConnector()->BindInterface(
       device::mojom::blink::kServiceName, mojo::MakeRequest(&monitor));
-  monitor->AddClient(instance.m_binding.CreateInterfacePtrAndBind());
+  device::mojom::blink::TimeZoneMonitorClientPtr client;
+  instance.binding_.Bind(mojo::MakeRequest(&client));
+  monitor->AddClient(std::move(client));
 }
 
-TimeZoneMonitorClient::TimeZoneMonitorClient() : m_binding(this) {
-  DCHECK(isMainThread());
+TimeZoneMonitorClient::TimeZoneMonitorClient() : binding_(this) {
+  DCHECK(IsMainThread());
 }
 
 TimeZoneMonitorClient::~TimeZoneMonitorClient() {}
 
-void TimeZoneMonitorClient::OnTimeZoneChange(const String& timeZoneInfo) {
-  DCHECK(isMainThread());
+void TimeZoneMonitorClient::OnTimeZoneChange(const String& time_zone_info) {
+  DCHECK(IsMainThread());
 
-  if (!timeZoneInfo.isEmpty()) {
+  if (!time_zone_info.IsEmpty()) {
+    DCHECK(time_zone_info.ContainsOnlyASCII());
     icu::TimeZone* zone = icu::TimeZone::createTimeZone(
-        icu::UnicodeString::fromUTF8(timeZoneInfo.utf8().data()));
+        icu::UnicodeString(time_zone_info.Ascii().data(), -1, US_INV));
     icu::TimeZone::adoptDefault(zone);
-    VLOG(1) << "ICU default timezone is set to " << timeZoneInfo;
+    VLOG(1) << "ICU default timezone is set to " << time_zone_info;
   }
 
-  NotifyTimezoneChangeToV8(V8PerIsolateData::mainThreadIsolate());
+  NotifyTimezoneChangeToV8(V8PerIsolateData::MainThreadIsolate());
 
-  HashSet<WorkerThread*>& threads = WorkerThread::workerThreads();
+  HashSet<WorkerThread*>& threads = WorkerThread::WorkerThreads();
   HashSet<WorkerBackingThread*> posted;
   for (WorkerThread* thread : threads) {
     // Ensure every WorkerBackingThread(holding one platform thread) only get
     // the task posted once, because one WorkerBackingThread could be shared
     // among multiple WorkerThreads.
-    if (posted.contains(&thread->workerBackingThread()))
+    if (posted.Contains(&thread->GetWorkerBackingThread()))
       continue;
-    thread->postTask(BLINK_FROM_HERE,
-                     crossThreadBind(&NotifyTimezoneChangeOnWorkerThread,
-                                     WTF::crossThreadUnretained(thread)));
-    posted.insert(&thread->workerBackingThread());
+    TaskRunnerHelper::Get(TaskType::kUnspecedTimer, thread)
+        ->PostTask(BLINK_FROM_HERE,
+                   CrossThreadBind(&NotifyTimezoneChangeOnWorkerThread,
+                                   WTF::CrossThreadUnretained(thread)));
+    posted.insert(&thread->GetWorkerBackingThread());
   }
 }
 

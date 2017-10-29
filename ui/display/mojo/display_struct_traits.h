@@ -7,6 +7,7 @@
 
 #include "ui/display/display.h"
 #include "ui/display/mojo/display.mojom.h"
+#include "ui/gfx/geometry/mojo/geometry_struct_traits.h"
 
 namespace mojo {
 
@@ -27,11 +28,24 @@ struct EnumTraits<display::mojom::TouchSupport,
 };
 
 template <>
+struct EnumTraits<display::mojom::AccelerometerSupport,
+                  display::Display::AccelerometerSupport> {
+  static display::mojom::AccelerometerSupport ToMojom(
+      display::Display::AccelerometerSupport type);
+  static bool FromMojom(display::mojom::AccelerometerSupport type,
+                        display::Display::AccelerometerSupport* output);
+};
+
+template <>
 struct StructTraits<display::mojom::DisplayDataView, display::Display> {
   static int64_t id(const display::Display& display) { return display.id(); }
 
   static const gfx::Rect& bounds(const display::Display& display) {
     return display.bounds();
+  }
+
+  static gfx::Size size_in_pixels(const display::Display& display) {
+    return display.GetSizeInPixel();
   }
 
   static const gfx::Rect& work_area(const display::Display& display) {
@@ -51,8 +65,25 @@ struct StructTraits<display::mojom::DisplayDataView, display::Display> {
     return display.touch_support();
   }
 
+  static display::Display::AccelerometerSupport accelerometer_support(
+      const display::Display& display) {
+    return display.accelerometer_support();
+  }
+
   static const gfx::Size& maximum_cursor_size(const display::Display& display) {
     return display.maximum_cursor_size();
+  }
+
+  static int32_t color_depth(const display::Display& display) {
+    return display.color_depth();
+  }
+
+  static int32_t depth_per_component(const display::Display& display) {
+    return display.depth_per_component();
+  }
+
+  static bool is_monochrome(const display::Display& display) {
+    return display.is_monochrome();
   }
 
   static bool Read(display::mojom::DisplayDataView data, display::Display* out);

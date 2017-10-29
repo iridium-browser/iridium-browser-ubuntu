@@ -11,7 +11,8 @@
 #include <string>
 
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
+#include "cc/output/begin_frame_args.h"
 #include "cc/scheduler/commit_earlyout_reason.h"
 #include "cc/scheduler/draw_result.h"
 #include "cc/scheduler/scheduler_settings.h"
@@ -47,16 +48,17 @@ class CC_EXPORT SchedulerStateMachine {
  public:
   // settings must be valid for the lifetime of this class.
   explicit SchedulerStateMachine(const SchedulerSettings& settings);
+  ~SchedulerStateMachine();
 
-  enum CompositorFrameSinkState {
-    COMPOSITOR_FRAME_SINK_NONE,
-    COMPOSITOR_FRAME_SINK_ACTIVE,
-    COMPOSITOR_FRAME_SINK_CREATING,
-    COMPOSITOR_FRAME_SINK_WAITING_FOR_FIRST_COMMIT,
-    COMPOSITOR_FRAME_SINK_WAITING_FOR_FIRST_ACTIVATION,
+  enum LayerTreeFrameSinkState {
+    LAYER_TREE_FRAME_SINK_NONE,
+    LAYER_TREE_FRAME_SINK_ACTIVE,
+    LAYER_TREE_FRAME_SINK_CREATING,
+    LAYER_TREE_FRAME_SINK_WAITING_FOR_FIRST_COMMIT,
+    LAYER_TREE_FRAME_SINK_WAITING_FOR_FIRST_ACTIVATION,
   };
-  static const char* CompositorFrameSinkStateToString(
-      CompositorFrameSinkState state);
+  static const char* LayerTreeFrameSinkStateToString(
+      LayerTreeFrameSinkState state);
 
   // Note: BeginImplFrameState does not cycle through these states in a fixed
   // order on all platforms. It's up to the scheduler to set these correctly.
@@ -72,7 +74,7 @@ class CC_EXPORT SchedulerStateMachine {
     BEGIN_IMPL_FRAME_DEADLINE_MODE_IMMEDIATE,
     BEGIN_IMPL_FRAME_DEADLINE_MODE_REGULAR,
     BEGIN_IMPL_FRAME_DEADLINE_MODE_LATE,
-    BEGIN_IMPL_FRAME_DEADLINE_MODE_BLOCKED_ON_READY_TO_DRAW,
+    BEGIN_IMPL_FRAME_DEADLINE_MODE_BLOCKED,
   };
   static const char* BeginImplFrameDeadlineModeToString(
       BeginImplFrameDeadlineMode mode);
@@ -120,9 +122,10 @@ class CC_EXPORT SchedulerStateMachine {
     ACTION_DRAW_IF_POSSIBLE,
     ACTION_DRAW_FORCED,
     ACTION_DRAW_ABORT,
-    ACTION_BEGIN_COMPOSITOR_FRAME_SINK_CREATION,
+    ACTION_BEGIN_LAYER_TREE_FRAME_SINK_CREATION,
     ACTION_PREPARE_TILES,
-    ACTION_INVALIDATE_COMPOSITOR_FRAME_SINK,
+    ACTION_INVALIDATE_LAYER_TREE_FRAME_SINK,
+    ACTION_NOTIFY_BEGIN_MAIN_FRAME_NOT_SENT,
   };
   static const char* ActionToString(Action action);
 
@@ -131,12 +134,13 @@ class CC_EXPORT SchedulerStateMachine {
 
   Action NextAction() const;
   void WillSendBeginMainFrame();
+  void WillNotifyBeginMainFrameNotSent();
   void WillCommit(bool commit_had_no_updates);
   void WillActivate();
   void WillDraw();
-  void WillBeginCompositorFrameSinkCreation();
+  void WillBeginLayerTreeFrameSinkCreation();
   void WillPrepareTiles();
-  void WillInvalidateCompositorFrameSink();
+  void WillInvalidateLayerTreeFrameSink();
   void WillPerformImplSideInvalidation();
 
   void DidDraw(DrawResult draw_result);
@@ -146,12 +150,6 @@ class CC_EXPORT SchedulerStateMachine {
   // Indicates whether the impl thread needs a BeginImplFrame callback in order
   // to make progress.
   bool BeginFrameNeeded() const;
-
-  // Indicates that the Scheduler has received a BeginFrame that did not require
-  // a BeginImplFrame, because the Scheduler stopped observing BeginFrames.
-  // Updates the sequence and freshness numbers for the dropped BeginFrame.
-  void OnBeginFrameDroppedNotObserving(uint32_t source_id,
-                                       uint64_t sequence_number);
 
   // Indicates that the system has entered and left a BeginImplFrame callback.
   // The scheduler will not draw more than once in a given BeginImplFrame
@@ -201,7 +199,7 @@ class CC_EXPORT SchedulerStateMachine {
   // submitting anything when there is not damage, for example.
   void DidSubmitCompositorFrame();
 
-  // Notification from the CompositorFrameSink that a submitted frame has been
+  // Notification from the LayerTreeFrameSink that a submitted frame has been
   // consumed and it is ready for the next one.
   void DidReceiveCompositorFrameAck();
 
@@ -224,6 +222,11 @@ class CC_EXPORT SchedulerStateMachine {
   // the impl thread to main.
   void SetNeedsBeginMainFrame();
   bool needs_begin_main_frame() const { return needs_begin_main_frame_; }
+
+  void SetMainThreadWantsBeginMainFrameNotExpectedMessages(bool new_state);
+  bool wants_begin_main_frame_not_expected_messages() const {
+    return wants_begin_main_frame_not_expected_;
+  }
 
   // Requests a single impl frame (after the current frame if there is one
   // active).
@@ -266,9 +269,9 @@ class CC_EXPORT SchedulerStateMachine {
   }
 
   void DidPrepareTiles();
-  void DidLoseCompositorFrameSink();
-  void DidCreateAndInitializeCompositorFrameSink();
-  bool HasInitializedCompositorFrameSink() const;
+  void DidLoseLayerTreeFrameSink();
+  void DidCreateAndInitializeLayerTreeFrameSink();
+  bool HasInitializedLayerTreeFrameSink() const;
 
   // True if we need to abort draws to make forward progress.
   bool PendingDrawsShouldBeAborted() const;
@@ -289,11 +292,6 @@ class CC_EXPORT SchedulerStateMachine {
     return previous_pending_tree_was_impl_side_;
   }
 
-  uint32_t begin_frame_source_id() const { return begin_frame_source_id_; }
-  uint64_t last_begin_frame_sequence_number_compositor_frame_was_fresh() const {
-    return last_begin_frame_sequence_number_compositor_frame_was_fresh_;
-  }
-
  protected:
   bool BeginFrameRequiredForAction() const;
   bool BeginFrameNeededForVideo() const;
@@ -303,95 +301,86 @@ class CC_EXPORT SchedulerStateMachine {
   bool CouldCreatePendingTree() const;
 
   bool ShouldTriggerBeginImplFrameDeadlineImmediately() const;
+  bool ShouldBlockDeadlineIndefinitely() const;
 
   // True if we need to force activations to make forward progress.
   // TODO(sunnyps): Rename this to ShouldAbortCurrentFrame or similar.
   bool PendingActivationsShouldBeForced() const;
 
-  bool ShouldBeginCompositorFrameSinkCreation() const;
+  bool ShouldBeginLayerTreeFrameSinkCreation() const;
   bool ShouldDraw() const;
   bool ShouldActivatePendingTree() const;
   bool ShouldSendBeginMainFrame() const;
   bool ShouldCommit() const;
   bool ShouldPrepareTiles() const;
-  bool ShouldInvalidateCompositorFrameSink() const;
+  bool ShouldInvalidateLayerTreeFrameSink() const;
+  bool ShouldNotifyBeginMainFrameNotSent() const;
 
   void WillDrawInternal();
   void WillPerformImplSideInvalidationInternal();
   void DidDrawInternal(DrawResult draw_result);
 
-  void UpdateBeginFrameSequenceNumbersForBeginFrame(uint32_t source_id,
-                                                    uint64_t sequence_number);
-  void UpdateBeginFrameSequenceNumbersForBeginFrameDeadline();
-
   const SchedulerSettings settings_;
 
-  CompositorFrameSinkState compositor_frame_sink_state_;
-  BeginImplFrameState begin_impl_frame_state_;
-  BeginMainFrameState begin_main_frame_state_;
-  ForcedRedrawOnTimeoutState forced_redraw_state_;
-
-  // These fields are used to track the freshness of pending updates in the
-  // commit/activate/draw pipeline. The Scheduler uses the CompositorFrame's
-  // freshness to fill the |latest_confirmed_sequence_number| field in
-  // BeginFrameAcks.
-  uint32_t begin_frame_source_id_;
-  uint64_t begin_frame_sequence_number_;
-  uint64_t last_begin_frame_sequence_number_begin_main_frame_sent_;
-  uint64_t last_begin_frame_sequence_number_pending_tree_was_fresh_;
-  uint64_t last_begin_frame_sequence_number_active_tree_was_fresh_;
-  uint64_t last_begin_frame_sequence_number_compositor_frame_was_fresh_;
+  LayerTreeFrameSinkState layer_tree_frame_sink_state_ =
+      LAYER_TREE_FRAME_SINK_NONE;
+  BeginImplFrameState begin_impl_frame_state_ = BEGIN_IMPL_FRAME_STATE_IDLE;
+  BeginMainFrameState begin_main_frame_state_ = BEGIN_MAIN_FRAME_STATE_IDLE;
+  ForcedRedrawOnTimeoutState forced_redraw_state_ = FORCED_REDRAW_STATE_IDLE;
 
   // These are used for tracing only.
-  int commit_count_;
-  int current_frame_number_;
-  int last_frame_number_submit_performed_;
-  int last_frame_number_draw_performed_;
-  int last_frame_number_begin_main_frame_sent_;
-  int last_frame_number_invalidate_compositor_frame_sink_performed_;
+  int commit_count_ = 0;
+  int current_frame_number_ = 0;
+  int last_frame_number_submit_performed_ = -1;
+  int last_frame_number_draw_performed_ = -1;
+  int last_frame_number_begin_main_frame_sent_ = -1;
+  int last_frame_number_invalidate_layer_tree_frame_sink_performed_ = -1;
 
   // These are used to ensure that an action only happens once per frame,
   // deadline, etc.
-  bool draw_funnel_;
-  bool send_begin_main_frame_funnel_;
-  bool invalidate_compositor_frame_sink_funnel_;
-  bool impl_side_invalidation_funnel_;
-  // prepare_tiles_funnel_ is "filled" each time PrepareTiles is called
-  // and "drained" on each BeginImplFrame. If the funnel gets too full,
-  // we start throttling ACTION_PREPARE_TILES such that we average one
-  // PrepareTiles per BeginImplFrame.
-  int prepare_tiles_funnel_;
+  bool did_draw_ = false;
+  bool did_send_begin_main_frame_for_current_frame_ = true;
+  // Initialized to true to prevent begin main frame before begin frames have
+  // started. Reset to true when we stop asking for begin frames.
+  bool did_notify_begin_main_frame_not_sent_ = true;
+  bool did_commit_during_frame_ = false;
+  bool did_invalidate_layer_tree_frame_sink_ = false;
+  bool did_perform_impl_side_invalidation_ = false;
+  bool did_prepare_tiles_ = false;
 
-  int consecutive_checkerboard_animations_;
-  int pending_submit_frames_;
-  int submit_frames_with_current_compositor_frame_sink_;
-  bool needs_redraw_;
-  bool needs_prepare_tiles_;
-  bool needs_begin_main_frame_;
-  bool needs_one_begin_impl_frame_;
-  bool visible_;
-  bool begin_frame_source_paused_;
-  bool resourceless_draw_;
-  bool can_draw_;
-  bool has_pending_tree_;
-  bool pending_tree_is_ready_for_activation_;
-  bool active_tree_needs_first_draw_;
-  bool did_create_and_initialize_first_compositor_frame_sink_;
-  TreePriority tree_priority_;
-  ScrollHandlerState scroll_handler_state_;
-  bool critical_begin_main_frame_to_activate_is_fast_;
-  bool main_thread_missed_last_deadline_;
-  bool skip_next_begin_main_frame_to_reduce_latency_;
-  bool defer_commits_;
-  bool video_needs_begin_frames_;
-  bool last_commit_had_no_updates_;
-  bool wait_for_ready_to_draw_;
-  bool did_draw_in_last_frame_;
-  bool did_submit_in_last_frame_;
-  bool needs_impl_side_invalidation_;
+  int consecutive_checkerboard_animations_ = 0;
+  int pending_submit_frames_ = 0;
+  int submit_frames_with_current_layer_tree_frame_sink_ = 0;
+  bool needs_redraw_ = false;
+  bool needs_prepare_tiles_ = false;
+  bool needs_begin_main_frame_ = false;
+  bool needs_one_begin_impl_frame_ = false;
+  bool visible_ = false;
+  bool begin_frame_source_paused_ = false;
+  bool resourceless_draw_ = false;
+  bool can_draw_ = false;
+  bool has_pending_tree_ = false;
+  bool pending_tree_is_ready_for_activation_ = false;
+  bool active_tree_needs_first_draw_ = false;
+  bool did_create_and_initialize_first_layer_tree_frame_sink_ = false;
+  TreePriority tree_priority_ = NEW_CONTENT_TAKES_PRIORITY;
+  ScrollHandlerState scroll_handler_state_ =
+      ScrollHandlerState::SCROLL_DOES_NOT_AFFECT_SCROLL_HANDLER;
+  bool critical_begin_main_frame_to_activate_is_fast_ = true;
+  bool main_thread_missed_last_deadline_ = false;
+  bool skip_next_begin_main_frame_to_reduce_latency_ = false;
+  bool defer_commits_ = false;
+  bool video_needs_begin_frames_ = false;
+  bool last_commit_had_no_updates_ = false;
+  bool active_tree_is_ready_to_draw_ = true;
+  bool did_draw_in_last_frame_ = false;
+  bool did_submit_in_last_frame_ = false;
+  bool needs_impl_side_invalidation_ = false;
 
-  bool previous_pending_tree_was_impl_side_;
-  bool current_pending_tree_is_impl_side_;
+  bool previous_pending_tree_was_impl_side_ = false;
+  bool current_pending_tree_is_impl_side_ = false;
+
+  bool wants_begin_main_frame_not_expected_ = false;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SchedulerStateMachine);

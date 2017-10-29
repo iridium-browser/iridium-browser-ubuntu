@@ -22,6 +22,10 @@
 
 #include "opustab.h"
 
+const uint8_t ff_opus_default_coupled_streams[] = { 0, 1, 1, 2, 2, 2, 2, 3 };
+
+const uint8_t ff_celt_band_end[] = { 13, 17, 17, 19, 21 };
+
 const uint16_t ff_silk_model_stereo_s1[] = {
     256,   7,   9,  10,  11,  12,  22,  46,  54,  55,  56,  59,  82, 174, 197, 200,
     201, 202, 210, 234, 244, 245, 246, 247, 249, 256
@@ -926,11 +930,12 @@ const uint8_t ff_celt_bit_deinterleave[] = {
     0xC0, 0xC3, 0xCC, 0xCF, 0xF0, 0xF3, 0xFC, 0xFF
 };
 
-const uint8_t ff_celt_hadamard_ordery[] = {
+const uint8_t ff_celt_hadamard_order[] = {
     1,   0,
     3,   0,  2,  1,
     7,   0,  4,  3,  6,  1,  5,  2,
-    15,  0,  8,  7, 12,  3, 11,  4, 14,  1,  9,  6, 13,  2, 10,  5
+    15,  0,  8,  7, 12,  3, 11,  4, 14,  1,  9,  6, 13,  2, 10,  5,
+    0,   1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15
 };
 
 const uint16_t ff_celt_qn_exp2[] = {

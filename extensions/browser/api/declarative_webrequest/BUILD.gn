@@ -2,6 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//extensions/features/features.gni")
+
+assert(enable_extensions,
+       "Cannot depend on extensions because enable_extensions=false.")
+
 source_set("declarative_webrequest") {
   sources = [
     "request_stage.cc",
@@ -22,5 +27,9 @@ source_set("declarative_webrequest") {
     "//content/public/browser",
     "//extensions/common/api",
     "//third_party/re2",
+  ]
+
+  public_deps = [
+    "//extensions/browser:browser_sources",
   ]
 }

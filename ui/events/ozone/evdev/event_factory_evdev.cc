@@ -8,9 +8,9 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/threading/worker_pool.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/events/devices/device_data_manager.h"
@@ -24,6 +24,7 @@
 #include "ui/events/ozone/evdev/input_device_factory_evdev_proxy.h"
 #include "ui/events/ozone/evdev/input_injector_evdev.h"
 #include "ui/events/ozone/evdev/touch_evdev_types.h"
+#include "ui/events/ozone/gamepad/gamepad_provider_ozone.h"
 
 namespace ui {
 
@@ -84,6 +85,12 @@ class ProxyDeviceEventDispatcher : public DeviceEventDispatcherEvdev {
                               event_factory_evdev_, params));
   }
 
+  void DispatchGamepadEvent(const GamepadEvent& event) override {
+    ui_thread_runner_->PostTask(
+        FROM_HERE, base::Bind(&EventFactoryEvdev::DispatchGamepadEvent,
+                              event_factory_evdev_, event));
+  }
+
   void DispatchKeyboardDevicesUpdated(
       const std::vector<InputDevice>& devices) override {
     ui_thread_runner_->PostTask(
@@ -123,6 +130,13 @@ class ProxyDeviceEventDispatcher : public DeviceEventDispatcherEvdev {
                               event_factory_evdev_, stylus_state));
   }
 
+  void DispatchGamepadDevicesUpdated(
+      const std::vector<InputDevice>& devices) override {
+    ui_thread_runner_->PostTask(
+        FROM_HERE, base::Bind(&EventFactoryEvdev::DispatchGamepadDevicesUpdated,
+                              event_factory_evdev_, devices));
+  }
+
  private:
   scoped_refptr<base::SingleThreadTaskRunner> ui_thread_runner_;
   base::WeakPtr<EventFactoryEvdev> event_factory_evdev_;
@@ -160,6 +174,7 @@ EventFactoryEvdev::EventFactoryEvdev(CursorDelegateEvdev* cursor,
                                      DeviceManager* device_manager,
                                      KeyboardLayoutEngine* keyboard_layout)
     : device_manager_(device_manager),
+      gamepad_provider_(GamepadProviderOzone::GetInstance()),
       keyboard_(&modifiers_,
                 keyboard_layout,
                 base::Bind(&EventFactoryEvdev::DispatchUiEvent,
@@ -218,11 +233,10 @@ void EventFactoryEvdev::DispatchMouseMoveEvent(
   MouseEvent event(ui::ET_MOUSE_MOVED, gfx::Point(), gfx::Point(),
                    params.timestamp,
                    modifiers_.GetModifierFlags() | params.flags,
-                   /* changed_button_flags */ 0);
+                   /* changed_button_flags */ 0, details);
   event.set_location_f(location);
   event.set_root_location_f(location);
   event.set_source_device_id(params.device_id);
-  event.set_pointer_details(details);
   DispatchUiEvent(&event);
 }
 
@@ -279,11 +293,10 @@ void EventFactoryEvdev::DispatchMouseButtonEvent(
   MouseEvent event(params.down ? ui::ET_MOUSE_PRESSED : ui::ET_MOUSE_RELEASED,
                    gfx::Point(), gfx::Point(), params.timestamp,
                    modifiers_.GetModifierFlags() | flag | params.flags,
-                   /* changed_button_flags */ flag);
+                   /* changed_button_flags */ flag, details);
   event.set_location_f(location);
   event.set_root_location_f(location);
   event.set_source_device_id(params.device_id);
-  event.set_pointer_details(details);
   DispatchUiEvent(&event);
 }
 
@@ -336,19 +349,21 @@ void EventFactoryEvdev::DispatchTouchEvent(const TouchEventParams& params) {
   int touch_id = touch_id_generator_.GetGeneratedID(
       params.device_id * kNumTouchEvdevSlots + params.slot);
   details.id = touch_id;
-  TouchEvent touch_event(
-      params.type, gfx::Point(), modifiers_.GetModifierFlags(), touch_id,
-      params.timestamp, /* radius_x */ 0.f, /* radius_y */ 0.f,
-      /* angle */ 0.f, /* force */ 0.f);
+  TouchEvent touch_event(params.type, gfx::Point(), params.timestamp, details,
+                         modifiers_.GetModifierFlags() | params.flags,
+                         /* angle */ 0.f);
   touch_event.set_location_f(location);
   touch_event.set_root_location_f(location);
   touch_event.set_source_device_id(params.device_id);
-  touch_event.set_pointer_details(details);
   DispatchUiEvent(&touch_event);
 
   if (params.type == ET_TOUCH_RELEASED || params.type == ET_TOUCH_CANCELLED) {
     touch_id_generator_.ReleaseGeneratedID(touch_event.pointer_details().id);
   }
+}
+
+void EventFactoryEvdev::DispatchGamepadEvent(const GamepadEvent& event) {
+  gamepad_provider_->DispatchGamepadEvent(event);
 }
 
 void EventFactoryEvdev::DispatchUiEvent(Event* event) {
@@ -402,6 +417,12 @@ void EventFactoryEvdev::DispatchStylusStateChanged(StylusState stylus_state) {
   DeviceHotplugEventObserver* observer = DeviceDataManager::GetInstance();
   observer->OnStylusStateChanged(stylus_state);
 };
+
+void EventFactoryEvdev::DispatchGamepadDevicesUpdated(
+    const std::vector<InputDevice>& devices) {
+  TRACE_EVENT0("evdev", "EventFactoryEvdev::DispatchGamepadDevicesUpdated");
+  gamepad_provider_->DispatchGamepadDevicesUpdated(devices);
+}
 
 void EventFactoryEvdev::OnDeviceEvent(const DeviceEvent& event) {
   if (event.device_type() != DeviceEvent::INPUT)

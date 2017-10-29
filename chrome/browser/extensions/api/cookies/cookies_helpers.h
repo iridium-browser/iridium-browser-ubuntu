@@ -10,6 +10,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_COOKIES_COOKIES_HELPERS_H_
 #define CHROME_BROWSER_EXTENSIONS_API_COOKIES_COOKIES_HELPERS_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -50,16 +51,16 @@ api::cookies::Cookie CreateCookie(const net::CanonicalCookie& cookie,
                                   const std::string& store_id);
 
 // Constructs a new CookieStore object as defined by the cookies API.
-api::cookies::CookieStore CreateCookieStore(Profile* profile,
-                                            base::ListValue* tab_ids);
+api::cookies::CookieStore CreateCookieStore(
+    Profile* profile,
+    std::unique_ptr<base::ListValue> tab_ids);
 
 // Retrieves all cookies from the given cookie store corresponding to the given
 // URL. If the URL is empty, all cookies in the cookie store are retrieved.
 // This can only be called on the IO thread.
-void GetCookieListFromStore(
-    net::CookieStore* cookie_store,
-    const GURL& url,
-    const net::CookieMonster::GetCookieListCallback& callback);
+void GetCookieListFromStore(net::CookieStore* cookie_store,
+                            const GURL& url,
+                            net::CookieMonster::GetCookieListCallback callback);
 
 // Constructs a URL from a cookie's information for use in checking
 // a cookie against the extension's host permissions. The Secure

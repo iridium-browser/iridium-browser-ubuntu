@@ -1,5 +1,7 @@
-{% from 'macros.tmpl' import license %}
+{% from 'templates/macros.tmpl' import license, source_files_for_generated_file %}
 {{license()}}
+
+{{source_files_for_generated_file(template_file, input_files)}}
 
 #include "core/css/CSSPropertyMetadata.h"
 
@@ -9,16 +11,19 @@
 namespace blink {
 {% for flag, function_name in switches %}
 
-bool CSSPropertyMetadata::{{function_name}}(CSSPropertyID property) {
-  switch (property) {
+bool CSSPropertyMetadata::{{function_name}}(CSSPropertyID unresolvedProperty) {
+  switch (unresolvedProperty) {
     case CSSPropertyInvalid:
       NOTREACHED();
       return false;
-    {% for property_id, property in properties.items() if property[flag] %}
-    case {{property_id}}:
+    {% for property in properties_including_aliases if property[flag] %}
+    case {{property.property_id}}:
     {% endfor %}
-    {% if function_name == "isInheritedProperty" %}
+    {% if function_name in ("IsInheritedProperty", "IsProperty") %}
     case CSSPropertyVariable:
+    {% endif %}
+    {% if function_name == "IsProperty" %}
+    case CSSPropertyApplyAtRule:
     {% endif %}
       return true;
     default:
@@ -27,10 +32,10 @@ bool CSSPropertyMetadata::{{function_name}}(CSSPropertyID property) {
 }
 {% endfor %}
 
-char CSSPropertyMetadata::repetitionSeparator(CSSPropertyID property) {
-  switch (property) {
-  {% for property_id, property in properties.items() if property.separator %}
-  case {{property_id}}:
+char CSSPropertyMetadata::RepetitionSeparator(CSSPropertyID unresolvedProperty) {
+  switch (unresolvedProperty) {
+  {% for property in properties_including_aliases if property.separator %}
+  case {{property.property_id}}:
     return '{{property.separator}}';
   {% endfor %}
   default:
@@ -38,41 +43,41 @@ char CSSPropertyMetadata::repetitionSeparator(CSSPropertyID property) {
   }
 }
 
-bool CSSPropertyMetadata::propertyIsRepeated(CSSPropertyID property) {
-  return repetitionSeparator(property) != 0;
+bool CSSPropertyMetadata::PropertyIsRepeated(CSSPropertyID unresolvedProperty) {
+  return RepetitionSeparator(unresolvedProperty) != 0;
 }
 
-bool CSSPropertyMetadata::isEnabledProperty(CSSPropertyID unresolvedProperty) {
+bool CSSPropertyMetadata::IsEnabledProperty(CSSPropertyID unresolvedProperty) {
   CSSPropertyID property = resolveCSSPropertyID(unresolvedProperty);
-  static std::bitset<numCSSProperties>* enabledProperties = nullptr;
-  if (!enabledProperties) {
-    enabledProperties = new std::bitset<numCSSProperties>();
-    enabledProperties->set(); // All bits sets to 1.
-    {% for property_id, property in properties.items() if property.runtime_flag %}
-    if (!RuntimeEnabledFeatures::{{property.runtime_flag|lower_first}}Enabled())
-      enabledProperties->reset({{property_id}} - {{first_enum_value}});
+  static std::bitset<numCSSProperties>* enabledProperties = []() {
+    std::bitset<numCSSProperties>* props = new std::bitset<numCSSProperties>();
+    props->set(); // All bits sets to 1.
+    {% for property in properties_including_aliases if property.runtime_flag %}
+    if (!RuntimeEnabledFeatures::{{property.runtime_flag}}Enabled())
+      props->reset({{property.property_id}} - {{first_enum_value}});
     {% endfor %}
-    {% for property_id, property in properties.items() if property.is_internal %}
-    enabledProperties->reset({{property_id}} - {{first_enum_value}});
+    {% for property in properties_including_aliases if property.is_internal %}
+    props->reset({{property.property_id}} - {{first_enum_value}});
     {% endfor %}
-  }
+    return props;
+  }();
 
   if (unresolvedProperty >= {{first_enum_value}})
     return enabledProperties->test(property - {{first_enum_value}});
 
   if (unresolvedProperty == CSSPropertyVariable)
     return true;
-  ASSERT(unresolvedProperty == CSSPropertyApplyAtRule);
-  return RuntimeEnabledFeatures::cssApplyAtRulesEnabled();
+  DCHECK_EQ(unresolvedProperty, CSSPropertyApplyAtRule);
+  return RuntimeEnabledFeatures::CSSApplyAtRulesEnabled();
 }
 
-void CSSPropertyMetadata::filterEnabledCSSPropertiesIntoVector(
+void CSSPropertyMetadata::FilterEnabledCSSPropertiesIntoVector(
     const CSSPropertyID* properties,
     size_t propertyCount,
     Vector<CSSPropertyID>& outVector) {
   for (unsigned i = 0; i < propertyCount; i++) {
     CSSPropertyID property = properties[i];
-    if (isEnabledProperty(property))
+    if (IsEnabledProperty(property))
       outVector.push_back(property);
   }
 }

@@ -44,25 +44,93 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeFooBiz,
 };
 
-class CollectionViewControllerTest : public BlockCleanupTest {};
+typedef void (^ReconfigureBlock)(CollectionViewController*, NSArray*);
+
+class CollectionViewControllerTest : public BlockCleanupTest {
+ public:
+  void TestReconfigureBlock(ReconfigureBlock block) {
+    // Setup.
+    CollectionViewController* controller = [[CollectionViewController alloc]
+        initWithLayout:[[MDCCollectionViewFlowLayout alloc] init]
+                 style:CollectionViewControllerStyleDefault];
+    [controller loadModel];
+
+    CollectionViewModel* model = [controller collectionViewModel];
+    [model addSectionWithIdentifier:SectionIdentifierFoo];
+
+    MockCollectionViewItem* firstReconfiguredItem =
+        [[MockCollectionViewItem alloc] initWithType:ItemTypeFooBar];
+    [model addItem:firstReconfiguredItem
+        toSectionWithIdentifier:SectionIdentifierFoo];
+
+    MockCollectionViewItem* secondReconfiguredItem =
+        [[MockCollectionViewItem alloc] initWithType:ItemTypeFooBiz];
+    [model addItem:secondReconfiguredItem
+        toSectionWithIdentifier:SectionIdentifierFoo];
+
+    MockCollectionViewItem* firstNonReconfiguredItem =
+        [[MockCollectionViewItem alloc] initWithType:ItemTypeFooBiz];
+    [model addItem:firstNonReconfiguredItem
+        toSectionWithIdentifier:SectionIdentifierFoo];
+
+    MockCollectionViewItem* thirdReconfiguredItem =
+        [[MockCollectionViewItem alloc] initWithType:ItemTypeFooBiz];
+    [model addItem:thirdReconfiguredItem
+        toSectionWithIdentifier:SectionIdentifierFoo];
+
+    MockCollectionViewItem* secondNonReconfiguredItem =
+        [[MockCollectionViewItem alloc] initWithType:ItemTypeFooBiz];
+    [model addItem:secondNonReconfiguredItem
+        toSectionWithIdentifier:SectionIdentifierFoo];
+
+    // The collection view is not visible on screen, so it has not created any
+    // of its cells.  Swizzle |cellsForItemAtIndexPath:| and inject an
+    // implementation for testing that always returns a non-nil cell.
+    MDCCollectionViewCell* dummyCell = [[MDCCollectionViewCell alloc] init];
+    {
+      ScopedBlockSwizzler swizzler([UICollectionView class],
+                                   @selector(cellForItemAtIndexPath:),
+                                   ^(id self) {
+                                     return dummyCell;
+                                   });
+
+      NSArray* itemsToReconfigure = @[
+        firstReconfiguredItem, secondReconfiguredItem, thirdReconfiguredItem
+      ];
+      // Action.
+      block(controller, itemsToReconfigure);
+    }
+
+    // Tests.
+    EXPECT_TRUE([firstReconfiguredItem configureCellCalled]);
+    EXPECT_TRUE([secondReconfiguredItem configureCellCalled]);
+    EXPECT_TRUE([thirdReconfiguredItem configureCellCalled]);
+
+    EXPECT_FALSE([firstNonReconfiguredItem configureCellCalled]);
+    EXPECT_FALSE([secondNonReconfiguredItem configureCellCalled]);
+  }
+};
 
 }  // namespace
 
 TEST_F(CollectionViewControllerTest, InitDefaultStyle) {
   CollectionViewController* controller = [[CollectionViewController alloc]
-      initWithStyle:CollectionViewControllerStyleDefault];
+      initWithLayout:[[MDCCollectionViewFlowLayout alloc] init]
+               style:CollectionViewControllerStyleDefault];
   EXPECT_EQ(nil, controller.appBar);
 }
 
 TEST_F(CollectionViewControllerTest, InitAppBarStyle) {
   CollectionViewController* controller = [[CollectionViewController alloc]
-      initWithStyle:CollectionViewControllerStyleAppBar];
+      initWithLayout:[[MDCCollectionViewFlowLayout alloc] init]
+               style:CollectionViewControllerStyleAppBar];
   EXPECT_NE(nil, controller.appBar);
 }
 
 TEST_F(CollectionViewControllerTest, CellForItemAtIndexPath) {
   CollectionViewController* controller = [[CollectionViewController alloc]
-      initWithStyle:CollectionViewControllerStyleDefault];
+      initWithLayout:[[MDCCollectionViewFlowLayout alloc] init]
+               style:CollectionViewControllerStyleDefault];
   [controller loadModel];
 
   [[controller collectionViewModel]
@@ -79,60 +147,26 @@ TEST_F(CollectionViewControllerTest, CellForItemAtIndexPath) {
 }
 
 TEST_F(CollectionViewControllerTest, ReconfigureCells) {
-  CollectionViewController* controller = [[CollectionViewController alloc]
-      initWithStyle:CollectionViewControllerStyleDefault];
-  [controller loadModel];
+  TestReconfigureBlock(
+      ^void(CollectionViewController* controller, NSArray* itemsToReconfigure) {
+        [controller reconfigureCellsForItems:itemsToReconfigure];
+      });
+}
 
-  CollectionViewModel* model = [controller collectionViewModel];
-  [model addSectionWithIdentifier:SectionIdentifierFoo];
+TEST_F(CollectionViewControllerTest, ReconfigureCellsWithIndexPath) {
+  TestReconfigureBlock(
+      ^void(CollectionViewController* controller, NSArray* itemsToReconfigure) {
+        // More setup.
+        NSMutableArray* indexPaths = [NSMutableArray array];
+        for (CollectionViewItem* item : itemsToReconfigure) {
+          NSIndexPath* indexPath =
+              [controller.collectionViewModel indexPathForItem:item];
+          if (indexPath) {
+            [indexPaths addObject:indexPath];
+          }
+        }
 
-  MockCollectionViewItem* firstReconfiguredItem =
-      [[MockCollectionViewItem alloc] initWithType:ItemTypeFooBar];
-  [model addItem:firstReconfiguredItem
-      toSectionWithIdentifier:SectionIdentifierFoo];
-
-  MockCollectionViewItem* secondReconfiguredItem =
-      [[MockCollectionViewItem alloc] initWithType:ItemTypeFooBiz];
-  [model addItem:secondReconfiguredItem
-      toSectionWithIdentifier:SectionIdentifierFoo];
-
-  MockCollectionViewItem* firstNonReconfiguredItem =
-      [[MockCollectionViewItem alloc] initWithType:ItemTypeFooBiz];
-  [model addItem:firstNonReconfiguredItem
-      toSectionWithIdentifier:SectionIdentifierFoo];
-
-  MockCollectionViewItem* thirdReconfiguredItem =
-      [[MockCollectionViewItem alloc] initWithType:ItemTypeFooBiz];
-  [model addItem:thirdReconfiguredItem
-      toSectionWithIdentifier:SectionIdentifierFoo];
-
-  MockCollectionViewItem* secondNonReconfiguredItem =
-      [[MockCollectionViewItem alloc] initWithType:ItemTypeFooBiz];
-  [model addItem:secondNonReconfiguredItem
-      toSectionWithIdentifier:SectionIdentifierFoo];
-
-  // The collection view is not visible on screen, so it has not created any of
-  // its cells.  Swizzle |cellsForItemAtIndexPath:| and inject an implementation
-  // for testing that always returns a non-nil cell.
-  MDCCollectionViewCell* dummyCell = [[MDCCollectionViewCell alloc] init];
-  {
-    ScopedBlockSwizzler swizzler([UICollectionView class],
-                                 @selector(cellForItemAtIndexPath:),
-                                 ^(id self) {
-                                   return dummyCell;
-                                 });
-
-    NSArray* itemsToReconfigure = @[
-      firstReconfiguredItem, secondReconfiguredItem, thirdReconfiguredItem
-    ];
-    [controller reconfigureCellsForItems:itemsToReconfigure
-                 inSectionWithIdentifier:SectionIdentifierFoo];
-  }
-
-  EXPECT_TRUE([firstReconfiguredItem configureCellCalled]);
-  EXPECT_TRUE([secondReconfiguredItem configureCellCalled]);
-  EXPECT_TRUE([thirdReconfiguredItem configureCellCalled]);
-
-  EXPECT_FALSE([firstNonReconfiguredItem configureCellCalled]);
-  EXPECT_FALSE([secondNonReconfiguredItem configureCellCalled]);
+        // Action.
+        [controller reconfigureCellsAtIndexPaths:indexPaths];
+      });
 }

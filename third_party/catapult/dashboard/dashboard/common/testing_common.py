@@ -51,6 +51,7 @@ class TestCase(unittest.TestCase):
     self.testbed.init_mail_stub()
     self.mail_stub = self.testbed.get_stub(testbed.MAIL_SERVICE_NAME)
     self.testbed.init_memcache_stub()
+    ndb.get_context().clear_cache()
     self.testbed.init_taskqueue_stub(root_path=_QUEUE_YAML_DIR)
     self.testbed.init_user_stub()
     self.testbed.init_urlfetch_stub()
@@ -71,8 +72,8 @@ class TestCase(unittest.TestCase):
 
   def ExecuteTaskQueueTasks(self, handler_name, task_queue_name):
     """Executes all of the tasks on the queue until there are none left."""
+    tasks = self.GetTaskQueueTasks(task_queue_name)
     task_queue = self.testbed.get_stub(testbed.TASKQUEUE_SERVICE_NAME)
-    tasks = task_queue.GetTasks(task_queue_name)
     task_queue.FlushQueue(task_queue_name)
     for task in tasks:
       self.testapp.post(
@@ -86,6 +87,10 @@ class TestCase(unittest.TestCase):
     for task in tasks:
       deferred.run(base64.b64decode(task['body']))
       self.ExecuteDeferredTasks(task_queue_name)
+
+  def GetTaskQueueTasks(self, task_queue_name):
+    task_queue = self.testbed.get_stub(testbed.TASKQUEUE_SERVICE_NAME)
+    return task_queue.GetTasks(task_queue_name)
 
   def SetCurrentUser(self, email, user_id='123456', is_admin=False):
     """Sets the user in the environment in the current testbed."""

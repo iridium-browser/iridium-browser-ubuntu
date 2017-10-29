@@ -134,7 +134,7 @@ Profiler.HeapSnapshotSortableDataGrid = class extends DataGrid.DataGrid {
     }
 
     if (node instanceof Profiler.HeapSnapshotRetainingObjectNode)
-      contextMenu.appendItem(Common.UIString.capitalize('Reveal in Summary ^view'), revealInSummaryView.bind(this));
+      contextMenu.appendItem(Common.UIString('Reveal in Summary view'), revealInSummaryView.bind(this));
   }
 
   resetSortingCache() {
@@ -164,11 +164,6 @@ Profiler.HeapSnapshotSortableDataGrid = class extends DataGrid.DataGrid {
     this._clearCurrentHighlight();
     this._highlightedNode = node;
     UI.runCSSAnimationOnce(this._highlightedNode.element(), 'highlighted-row');
-  }
-
-  nodeWasDetached(node) {
-    if (this._highlightedNode === node)
-      this._clearCurrentHighlight();
   }
 
   _clearCurrentHighlight() {
@@ -394,7 +389,6 @@ Profiler.HeapSnapshotViewportDataGrid = class extends Profiler.HeapSnapshotSorta
       var hasChildren = child.hasChildren();
       child.removeChildren();
       child.setHasChildren(hasChildren);
-      child.revealed = true;
       parentNode.appendChild(child);
       position += child.nodeSelfHeight();
       position += this._addVisibleNodes(child, topBound - position, bottomBound - position);
@@ -419,8 +413,6 @@ Profiler.HeapSnapshotViewportDataGrid = class extends Profiler.HeapSnapshotSorta
    * @return {number}
    */
   _nodeHeight(node) {
-    if (!node.revealed)
-      return 0;
     var result = node.nodeSelfHeight();
     if (!node.expanded)
       return result;
@@ -431,8 +423,8 @@ Profiler.HeapSnapshotViewportDataGrid = class extends Profiler.HeapSnapshotSorta
   }
 
   /**
-   * @param {!Array.<!Profiler.HeapSnapshotGridNode>} pathToReveal
-   * @return {!Promise.<!Profiler.HeapSnapshotGridNode>}
+   * @param {!Array<!Profiler.HeapSnapshotGridNode>} pathToReveal
+   * @return {!Promise<!Profiler.HeapSnapshotGridNode>}
    */
   revealTreeNode(pathToReveal) {
     var height = this._calculateOffset(pathToReveal);
@@ -444,16 +436,10 @@ Profiler.HeapSnapshotViewportDataGrid = class extends Profiler.HeapSnapshotSorta
 
     var scrollGap = 40;
     this.scrollContainer.scrollTop = Math.max(0, height - scrollGap);
-    return new Promise(this._scrollTo.bind(this, node));
-  }
-
-  /**
-   * @param {!Profiler.HeapSnapshotGridNode} node
-   * @param {function(!Profiler.HeapSnapshotGridNode)} fulfill
-   */
-  _scrollTo(node, fulfill) {
-    console.assert(!this._scrollToResolveCallback);
-    this._scrollToResolveCallback = fulfill.bind(null, node);
+    return new Promise(resolve => {
+      console.assert(!this._scrollToResolveCallback);
+      this._scrollToResolveCallback = resolve.bind(null, node);
+    });
   }
 
   /**
@@ -546,6 +532,9 @@ Profiler.HeapSnapshotViewportDataGrid = class extends Profiler.HeapSnapshotSorta
     this.updateVisibleNodes(false);
   }
 
+  /**
+   * @param {!Event} event
+   */
   _onScroll(event) {
     this.updateVisibleNodes(false);
 
@@ -711,39 +700,22 @@ Profiler.HeapSnapshotConstructorsDataGrid = class extends Profiler.HeapSnapshotV
    * @param {!Protocol.HeapProfiler.HeapSnapshotObjectId} id
    * @return {!Promise<?Profiler.HeapSnapshotGridNode>}
    */
-  revealObjectByHeapSnapshotId(id) {
+  async revealObjectByHeapSnapshotId(id) {
     if (!this.snapshot) {
       this._objectIdToSelect = id;
-      return Promise.resolve(/** @type {?Profiler.HeapSnapshotGridNode} */ (null));
-    }
-
-    /**
-     * @param {!Array<!Profiler.HeapSnapshotGridNode>} nodes
-     * @return {?Promise<!Profiler.HeapSnapshotGridNode>}
-     * @this {Profiler.HeapSnapshotConstructorsDataGrid}
-     */
-    function didPopulateNode(nodes) {
-      return nodes.length ? this.revealTreeNode(nodes) : null;
-    }
-
-    /**
-     * @param {?string} className
-     * @return {?Promise<?Profiler.HeapSnapshotGridNode>}
-     * @this {Profiler.HeapSnapshotConstructorsDataGrid}
-     */
-    function didGetClassName(className) {
-      if (!className)
-        return null;
-      var constructorNodes = this.topLevelNodes();
-      for (var i = 0; i < constructorNodes.length; i++) {
-        var parent = constructorNodes[i];
-        if (parent._name === className)
-          return parent.populateNodeBySnapshotObjectId(parseInt(id, 10)).then(didPopulateNode.bind(this));
-      }
-      // There are no visible top level nodes with such className.
       return null;
     }
-    return this.snapshot.nodeClassName(parseInt(id, 10)).then(didGetClassName.bind(this));
+
+    var className = await this.snapshot.nodeClassName(parseInt(id, 10));
+    if (!className)
+      return null;
+
+    var parent = this.topLevelNodes().find(classNode => classNode._name === className);
+    if (!parent)
+      return null;
+
+    var nodes = await parent.populateNodeBySnapshotObjectId(parseInt(id, 10));
+    return nodes.length ? this.revealTreeNode(nodes) : null;
   }
 
   clear() {
@@ -786,13 +758,13 @@ Profiler.HeapSnapshotConstructorsDataGrid = class extends Profiler.HeapSnapshotV
 
   /**
    * @param {!HeapSnapshotModel.NodeFilter} nodeFilter
-   * @param {!Object.<string, !HeapSnapshotModel.Aggregate>} aggregates
+   * @param {!Object<string, !HeapSnapshotModel.Aggregate>} aggregates
    */
   _aggregatesReceived(nodeFilter, aggregates) {
     this._filterInProgress = null;
     if (this._nextRequestedFilter) {
-      this.snapshot.aggregatesWithFilter(
-          this._nextRequestedFilter, this._aggregatesReceived.bind(this, this._nextRequestedFilter));
+      this.snapshot.aggregatesWithFilter(this._nextRequestedFilter)
+          .then(this._aggregatesReceived.bind(this, this._nextRequestedFilter));
       this._filterInProgress = this._nextRequestedFilter;
       this._nextRequestedFilter = null;
     }
@@ -808,10 +780,10 @@ Profiler.HeapSnapshotConstructorsDataGrid = class extends Profiler.HeapSnapshotV
   }
 
   /**
-   * @param {!HeapSnapshotModel.NodeFilter=} nodeFilter
+   * @param {!HeapSnapshotModel.NodeFilter=} maybeNodeFilter
    */
-  _populateChildren(nodeFilter) {
-    nodeFilter = nodeFilter || new HeapSnapshotModel.NodeFilter();
+  async _populateChildren(maybeNodeFilter) {
+    var nodeFilter = maybeNodeFilter || new HeapSnapshotModel.NodeFilter();
 
     if (this._filterInProgress) {
       this._nextRequestedFilter = this._filterInProgress.equals(nodeFilter) ? null : nodeFilter;
@@ -820,7 +792,10 @@ Profiler.HeapSnapshotConstructorsDataGrid = class extends Profiler.HeapSnapshotV
     if (this._lastFilter && this._lastFilter.equals(nodeFilter))
       return;
     this._filterInProgress = nodeFilter;
-    this.snapshot.aggregatesWithFilter(nodeFilter, this._aggregatesReceived.bind(this, nodeFilter));
+
+    var aggregates = await this.snapshot.aggregatesWithFilter(nodeFilter);
+
+    this._aggregatesReceived(nodeFilter, aggregates);
   }
 
   filterSelectIndexChanged(profiles, profileIndex) {
@@ -900,29 +875,18 @@ Profiler.HeapSnapshotDiffDataGrid = class extends Profiler.HeapSnapshotViewportD
     this._populateChildren();
   }
 
-  _populateChildren() {
-    /**
-     * @this {Profiler.HeapSnapshotDiffDataGrid}
-     */
-    function aggregatesForDiffReceived(aggregatesForDiff) {
-      this.snapshot.calculateSnapshotDiff(
-          this.baseSnapshot.uid, aggregatesForDiff, didCalculateSnapshotDiff.bind(this));
-
-      /**
-       * @this {Profiler.HeapSnapshotDiffDataGrid}
-       */
-      function didCalculateSnapshotDiff(diffByClassName) {
-        for (var className in diffByClassName) {
-          var diff = diffByClassName[className];
-          this.appendNode(this.rootNode(), new Profiler.HeapSnapshotDiffNode(this, className, diff));
-        }
-        this.sortingChanged();
-      }
-    }
+  async _populateChildren() {
     // Two snapshots live in different workers isolated from each other. That is why
     // we first need to collect information about the nodes in the first snapshot and
     // then pass it to the second snapshot to calclulate the diff.
-    this.baseSnapshot.aggregatesForDiff(aggregatesForDiffReceived.bind(this));
+    var aggregatesForDiff = await this.baseSnapshot.aggregatesForDiff();
+    var diffByClassName = await this.snapshot.calculateSnapshotDiff(this.baseSnapshot.uid, aggregatesForDiff);
+
+    for (var className in diffByClassName) {
+      var diff = diffByClassName[className];
+      this.appendNode(this.rootNode(), new Profiler.HeapSnapshotDiffNode(this, className, diff));
+    }
+    this.sortingChanged();
   }
 };
 
@@ -931,10 +895,10 @@ Profiler.HeapSnapshotDiffDataGrid = class extends Profiler.HeapSnapshotViewportD
  */
 Profiler.AllocationDataGrid = class extends Profiler.HeapSnapshotViewportDataGrid {
   /**
-   * @param {?SDK.Target} target
+   * @param {?SDK.HeapProfilerModel} heapProfilerModel
    * @param {!Profiler.ProfileType.DataDisplayDelegate} dataDisplayDelegate
    */
-  constructor(target, dataDisplayDelegate) {
+  constructor(heapProfilerModel, dataDisplayDelegate) {
     var columns = /** @type {!Array<!DataGrid.DataGrid.ColumnDescriptor>} */ ([
       {id: 'liveCount', title: Common.UIString('Live Count'), width: '75px', sortable: true, fixedWidth: true},
       {id: 'count', title: Common.UIString('Count'), width: '65px', sortable: true, fixedWidth: true},
@@ -950,41 +914,36 @@ Profiler.AllocationDataGrid = class extends Profiler.HeapSnapshotViewportDataGri
       {id: 'name', title: Common.UIString('Function'), disclosure: true, sortable: true},
     ]);
     super(dataDisplayDelegate, columns);
-    this._target = target;
+    this._heapProfilerModel = heapProfilerModel;
     this._linkifier = new Components.Linkifier();
   }
 
   /**
-   * @return {?SDK.Target}
+   * @return {?SDK.HeapProfilerModel}
    */
-  target() {
-    return this._target;
+  heapProfilerModel() {
+    return this._heapProfilerModel;
   }
 
   dispose() {
     this._linkifier.reset();
   }
 
-  setDataSource(snapshot) {
+  /**
+   * @param {!Profiler.HeapSnapshotProxy} snapshot
+   */
+  async setDataSource(snapshot) {
     this.snapshot = snapshot;
-    this.snapshot.allocationTracesTops(didReceiveAllocationTracesTops.bind(this));
-
-    /**
-     * @param {!Array.<!HeapSnapshotModel.SerializedAllocationNode>} tops
-     * @this {Profiler.AllocationDataGrid}
-     */
-    function didReceiveAllocationTracesTops(tops) {
-      this._topNodes = tops;
-      this._populateChildren();
-    }
+    this._topNodes = await this.snapshot.allocationTracesTops();
+    this._populateChildren();
   }
 
   _populateChildren() {
     this.removeTopLevelNodes();
     var root = this.rootNode();
     var tops = this._topNodes;
-    for (var i = 0; i < tops.length; i++)
-      this.appendNode(root, new Profiler.AllocationGridNode(this, tops[i]));
+    for (var top of tops)
+      this.appendNode(root, new Profiler.AllocationGridNode(this, top));
     this.updateVisibleNodes(true);
   }
 

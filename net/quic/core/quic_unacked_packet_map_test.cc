@@ -4,8 +4,10 @@
 
 #include "net/quic/core/quic_unacked_packet_map.h"
 
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/quic_test_utils.h"
-#include "testing/gtest/include/gtest/gtest.h"
+
+using testing::_;
 
 namespace net {
 namespace test {
@@ -14,11 +16,21 @@ namespace {
 // Default packet length.
 const uint32_t kDefaultLength = 1000;
 
-class QuicUnackedPacketMapTest : public ::testing::Test {
+class MockStreamNotifier : public StreamNotifierInterface {
+ public:
+  MOCK_METHOD2(OnStreamFrameAcked,
+               void(const QuicStreamFrame&, QuicTime::Delta));
+  MOCK_METHOD1(OnStreamFrameRetransmitted, void(const QuicStreamFrame&));
+  MOCK_METHOD1(OnStreamFrameDiscarded, void(const QuicStreamFrame&));
+};
+
+class QuicUnackedPacketMapTest : public QuicTest {
  protected:
   QuicUnackedPacketMapTest()
       : unacked_packets_(),
-        now_(QuicTime::Zero() + QuicTime::Delta::FromMilliseconds(1000)) {}
+        now_(QuicTime::Zero() + QuicTime::Delta::FromMilliseconds(1000)) {
+    unacked_packets_.SetStreamNotifier(&notifier_);
+  }
 
   ~QuicUnackedPacketMapTest() override {}
 
@@ -30,9 +42,8 @@ class QuicUnackedPacketMapTest : public ::testing::Test {
   SerializedPacket CreateRetransmittablePacketForStream(
       QuicPacketNumber packet_number,
       QuicStreamId stream_id) {
-    SerializedPacket packet(kDefaultPathId, packet_number,
-                            PACKET_1BYTE_PACKET_NUMBER, nullptr, kDefaultLength,
-                            false, false);
+    SerializedPacket packet(packet_number, PACKET_1BYTE_PACKET_NUMBER, nullptr,
+                            kDefaultLength, false, false);
     QuicStreamFrame* frame = new QuicStreamFrame();
     frame->stream_id = stream_id;
     packet.retransmittable_frames.push_back(QuicFrame(frame));
@@ -41,9 +52,8 @@ class QuicUnackedPacketMapTest : public ::testing::Test {
 
   SerializedPacket CreateNonRetransmittablePacket(
       QuicPacketNumber packet_number) {
-    return SerializedPacket(kDefaultPathId, packet_number,
-                            PACKET_1BYTE_PACKET_NUMBER, nullptr, kDefaultLength,
-                            false, false);
+    return SerializedPacket(packet_number, PACKET_1BYTE_PACKET_NUMBER, nullptr,
+                            kDefaultLength, false, false);
   }
 
   void VerifyInFlightPackets(QuicPacketNumber* packets, size_t num_packets) {
@@ -105,6 +115,7 @@ class QuicUnackedPacketMapTest : public ::testing::Test {
   }
   QuicUnackedPacketMap unacked_packets_;
   QuicTime now_;
+  MockStreamNotifier notifier_;
 };
 
 TEST_F(QuicUnackedPacketMapTest, RttOnly) {
@@ -160,6 +171,7 @@ TEST_F(QuicUnackedPacketMapTest, StopRetransmission) {
   QuicPacketNumber retransmittable[] = {1};
   VerifyRetransmittablePackets(retransmittable, arraysize(retransmittable));
 
+  EXPECT_CALL(notifier_, OnStreamFrameDiscarded(_)).Times(1);
   unacked_packets_.CancelRetransmissionsForStream(stream_id);
   VerifyUnackedPackets(unacked, arraysize(unacked));
   VerifyInFlightPackets(unacked, arraysize(unacked));
@@ -178,6 +190,7 @@ TEST_F(QuicUnackedPacketMapTest, StopRetransmissionOnOtherStream) {
   VerifyRetransmittablePackets(retransmittable, arraysize(retransmittable));
 
   // Stop retransmissions on another stream and verify the packet is unchanged.
+  EXPECT_CALL(notifier_, OnStreamFrameDiscarded(_)).Times(0);
   unacked_packets_.CancelRetransmissionsForStream(stream_id + 2);
   VerifyUnackedPackets(unacked, arraysize(unacked));
   VerifyInFlightPackets(unacked, arraysize(unacked));
@@ -197,6 +210,7 @@ TEST_F(QuicUnackedPacketMapTest, StopRetransmissionAfterRetransmission) {
   QuicPacketNumber retransmittable[] = {2};
   VerifyRetransmittablePackets(retransmittable, arraysize(retransmittable));
 
+  EXPECT_CALL(notifier_, OnStreamFrameDiscarded(_)).Times(1);
   unacked_packets_.CancelRetransmissionsForStream(stream_id);
   VerifyUnackedPackets(unacked, arraysize(unacked));
   VerifyInFlightPackets(unacked, arraysize(unacked));

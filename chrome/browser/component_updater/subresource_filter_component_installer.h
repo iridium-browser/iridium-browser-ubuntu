@@ -9,8 +9,12 @@
 #include <string>
 #include <vector>
 
-#include "base/files/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "components/component_updater/default_component_installer.h"
+
+namespace base {
+class FilePath;
+}  // namespace base
 
 namespace component_updater {
 
@@ -20,8 +24,6 @@ class ComponentUpdateService;
 class SubresourceFilterComponentInstallerTraits
     : public ComponentInstallerTraits {
  public:
-  static const base::FilePath::CharType kRulesetDataFileName[];
-  static const base::FilePath::CharType kLicenseFileName[];
   static const char kManifestRulesetFormatKey[];
   static const int kCurrentRulesetFormat;
 
@@ -30,6 +32,8 @@ class SubresourceFilterComponentInstallerTraits
 
  private:
   friend class SubresourceFilterComponentInstallerTest;
+  FRIEND_TEST_ALL_PREFIXES(SubresourceFilterComponentInstallerTest,
+                           InstallerTag);
 
   static std::string GetInstallerTag();
 

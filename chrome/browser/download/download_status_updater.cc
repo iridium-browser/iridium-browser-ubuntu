@@ -39,7 +39,7 @@ class WasInProgressData : public base::SupportsUserData::Data {
   }
 
   explicit WasInProgressData(content::DownloadItem* item) {
-    item->SetUserData(kKey, this);
+    item->SetUserData(kKey, base::WrapUnique(this));
   }
 
  private:
@@ -92,7 +92,7 @@ bool DownloadStatusUpdater::GetProgress(float* progress,
 
 void DownloadStatusUpdater::AddManager(content::DownloadManager* manager) {
   notifiers_.push_back(
-      base::MakeUnique<AllDownloadItemNotifier>(manager, this));
+      base::MakeUnique<download::AllDownloadItemNotifier>(manager, this));
   content::DownloadManager::DownloadVector items;
   manager->GetAllDownloads(&items);
   for (auto* item : items)

@@ -27,16 +27,20 @@ Polymer({
         // If these values get changed then those strings need to be changed as
         // well.
         return [
-          {value: 600,
-           name: loadTimeData.getString('delayBeforeClickExtremelyShort')},
-          {value: 800,
-           name: loadTimeData.getString('delayBeforeClickVeryShort')},
-          {value: 1000,
-           name: loadTimeData.getString('delayBeforeClickShort')},
-          {value: 2000,
-           name: loadTimeData.getString('delayBeforeClickLong')},
-          {value: 4000,
-           name: loadTimeData.getString('delayBeforeClickVeryLong')},
+          {
+            value: 600,
+            name: loadTimeData.getString('delayBeforeClickExtremelyShort')
+          },
+          {
+            value: 800,
+            name: loadTimeData.getString('delayBeforeClickVeryShort')
+          },
+          {value: 1000, name: loadTimeData.getString('delayBeforeClickShort')},
+          {value: 2000, name: loadTimeData.getString('delayBeforeClickLong')},
+          {
+            value: 4000,
+            name: loadTimeData.getString('delayBeforeClickVeryLong')
+          },
         ];
       },
     },
@@ -52,15 +56,12 @@ Polymer({
       },
     },
 
-    /**
-     * Whether adjustable large cursor is enabled or not.
-     * @private {boolean}
-     */
-    enableAdjustableLargeCursor_: {
+    /** @private */
+    isGuest_: {
       type: Boolean,
       value: function() {
-        return loadTimeData.getBoolean('enableAdjustableLargeCursor');
-      },
+        return loadTimeData.getBoolean('isGuest');
+      }
     },
   },
 
@@ -70,36 +71,40 @@ Polymer({
   },
 
   /** @private */
+  onSelectToSpeakSettingsTap_: function() {
+    chrome.send('showSelectToSpeakSettings');
+  },
+
+  /** @private */
+  onSwitchAccessSettingsTap_: function() {
+    chrome.send('showSwitchAccessSettings');
+  },
+
+  /** @private */
   onDisplayTap_: function() {
     settings.navigateTo(
-        settings.Route.DISPLAY,
+        settings.routes.DISPLAY,
         /* dynamicParams */ null, /* removeSearch */ true);
   },
 
   /** @private */
   onAppearanceTap_: function() {
     settings.navigateTo(
-        settings.Route.APPEARANCE,
+        settings.routes.APPEARANCE,
         /* dynamicParams */ null, /* removeSearch */ true);
   },
 
   /** @private */
   onKeyboardTap_: function() {
     settings.navigateTo(
-        settings.Route.KEYBOARD,
+        settings.routes.KEYBOARD,
         /* dynamicParams */ null, /* removeSearch */ true);
   },
 
   /** @private */
   onMouseTap_: function() {
     settings.navigateTo(
-        settings.Route.POINTERS,
+        settings.routes.POINTERS,
         /* dynamicParams */ null, /* removeSearch */ true);
-  },
-
-  /** @private */
-  onMoreFeaturesTap_: function() {
-    window.open(
-        'https://chrome.google.com/webstore/category/collection/accessibility');
   },
 });

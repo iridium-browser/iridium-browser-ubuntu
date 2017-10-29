@@ -84,11 +84,15 @@ void DriverGL::InitializeStaticBindings() {
   fn.glCompressedCopyTextureCHROMIUMFn = 0;
   fn.glCompressedTexImage2DFn = reinterpret_cast<glCompressedTexImage2DProc>(
       GetGLProcAddress("glCompressedTexImage2D"));
+  fn.glCompressedTexImage2DRobustANGLEFn = 0;
   fn.glCompressedTexImage3DFn = 0;
+  fn.glCompressedTexImage3DRobustANGLEFn = 0;
   fn.glCompressedTexSubImage2DFn =
       reinterpret_cast<glCompressedTexSubImage2DProc>(
           GetGLProcAddress("glCompressedTexSubImage2D"));
+  fn.glCompressedTexSubImage2DRobustANGLEFn = 0;
   fn.glCompressedTexSubImage3DFn = 0;
+  fn.glCompressedTexSubImage3DRobustANGLEFn = 0;
   fn.glCopyBufferSubDataFn = 0;
   fn.glCopySubTextureCHROMIUMFn = 0;
   fn.glCopyTexImage2DFn = reinterpret_cast<glCopyTexImage2DProc>(
@@ -386,6 +390,7 @@ void DriverGL::InitializeStaticBindings() {
   fn.glRenderbufferStorageMultisampleANGLEFn = 0;
   fn.glRenderbufferStorageMultisampleEXTFn = 0;
   fn.glRenderbufferStorageMultisampleIMGFn = 0;
+  fn.glRequestExtensionANGLEFn = 0;
   fn.glResumeTransformFeedbackFn = 0;
   fn.glSampleCoverageFn = reinterpret_cast<glSampleCoverageProc>(
       GetGLProcAddress("glSampleCoverage"));
@@ -550,6 +555,8 @@ void DriverGL::InitializeDynamicBindings(
       extensions.find("GL_ANGLE_framebuffer_multisample ") != std::string::npos;
   ext.b_GL_ANGLE_instanced_arrays =
       extensions.find("GL_ANGLE_instanced_arrays ") != std::string::npos;
+  ext.b_GL_ANGLE_request_extension =
+      extensions.find("GL_ANGLE_request_extension ") != std::string::npos;
   ext.b_GL_ANGLE_robust_client_memory =
       extensions.find("GL_ANGLE_robust_client_memory ") != std::string::npos;
   ext.b_GL_ANGLE_translated_shader_source =
@@ -866,15 +873,39 @@ void DriverGL::InitializeDynamicBindings(
             GetGLProcAddress("glCompressedCopyTextureCHROMIUM"));
   }
 
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glCompressedTexImage2DRobustANGLEFn =
+        reinterpret_cast<glCompressedTexImage2DRobustANGLEProc>(
+            GetGLProcAddress("glCompressedTexImage2DRobustANGLE"));
+  }
+
   if (!ver->is_es || ver->IsAtLeastGLES(3u, 0u)) {
     fn.glCompressedTexImage3DFn = reinterpret_cast<glCompressedTexImage3DProc>(
         GetGLProcAddress("glCompressedTexImage3D"));
+  }
+
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glCompressedTexImage3DRobustANGLEFn =
+        reinterpret_cast<glCompressedTexImage3DRobustANGLEProc>(
+            GetGLProcAddress("glCompressedTexImage3DRobustANGLE"));
+  }
+
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glCompressedTexSubImage2DRobustANGLEFn =
+        reinterpret_cast<glCompressedTexSubImage2DRobustANGLEProc>(
+            GetGLProcAddress("glCompressedTexSubImage2DRobustANGLE"));
   }
 
   if (!ver->is_es || ver->IsAtLeastGLES(3u, 0u)) {
     fn.glCompressedTexSubImage3DFn =
         reinterpret_cast<glCompressedTexSubImage3DProc>(
             GetGLProcAddress("glCompressedTexSubImage3D"));
+  }
+
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glCompressedTexSubImage3DRobustANGLEFn =
+        reinterpret_cast<glCompressedTexSubImage3DRobustANGLEProc>(
+            GetGLProcAddress("glCompressedTexSubImage3DRobustANGLE"));
   }
 
   if (ver->IsAtLeastGLES(3u, 0u) || ver->IsAtLeastGL(3u, 1u)) {
@@ -2108,6 +2139,12 @@ void DriverGL::InitializeDynamicBindings(
             GetGLProcAddress("glRenderbufferStorageMultisampleIMG"));
   }
 
+  if (ext.b_GL_ANGLE_request_extension) {
+    fn.glRequestExtensionANGLEFn =
+        reinterpret_cast<glRequestExtensionANGLEProc>(
+            GetGLProcAddress("glRequestExtensionANGLE"));
+  }
+
   if (ver->IsAtLeastGLES(3u, 0u) || ver->IsAtLeastGL(4u, 0u) ||
       ext.b_GL_ARB_transform_feedback2) {
     fn.glResumeTransformFeedbackFn =
@@ -2719,6 +2756,20 @@ void GLApiBase::glCompressedTexImage2DFn(GLenum target,
                                        height, border, imageSize, data);
 }
 
+void GLApiBase::glCompressedTexImage2DRobustANGLEFn(GLenum target,
+                                                    GLint level,
+                                                    GLenum internalformat,
+                                                    GLsizei width,
+                                                    GLsizei height,
+                                                    GLint border,
+                                                    GLsizei imageSize,
+                                                    GLsizei dataSize,
+                                                    const void* data) {
+  driver_->fn.glCompressedTexImage2DRobustANGLEFn(target, level, internalformat,
+                                                  width, height, border,
+                                                  imageSize, dataSize, data);
+}
+
 void GLApiBase::glCompressedTexImage3DFn(GLenum target,
                                          GLint level,
                                          GLenum internalformat,
@@ -2732,6 +2783,21 @@ void GLApiBase::glCompressedTexImage3DFn(GLenum target,
                                        height, depth, border, imageSize, data);
 }
 
+void GLApiBase::glCompressedTexImage3DRobustANGLEFn(GLenum target,
+                                                    GLint level,
+                                                    GLenum internalformat,
+                                                    GLsizei width,
+                                                    GLsizei height,
+                                                    GLsizei depth,
+                                                    GLint border,
+                                                    GLsizei imageSize,
+                                                    GLsizei dataSize,
+                                                    const void* data) {
+  driver_->fn.glCompressedTexImage3DRobustANGLEFn(target, level, internalformat,
+                                                  width, height, depth, border,
+                                                  imageSize, dataSize, data);
+}
+
 void GLApiBase::glCompressedTexSubImage2DFn(GLenum target,
                                             GLint level,
                                             GLint xoffset,
@@ -2743,6 +2809,21 @@ void GLApiBase::glCompressedTexSubImage2DFn(GLenum target,
                                             const void* data) {
   driver_->fn.glCompressedTexSubImage2DFn(
       target, level, xoffset, yoffset, width, height, format, imageSize, data);
+}
+
+void GLApiBase::glCompressedTexSubImage2DRobustANGLEFn(GLenum target,
+                                                       GLint level,
+                                                       GLint xoffset,
+                                                       GLint yoffset,
+                                                       GLsizei width,
+                                                       GLsizei height,
+                                                       GLenum format,
+                                                       GLsizei imageSize,
+                                                       GLsizei dataSize,
+                                                       const void* data) {
+  driver_->fn.glCompressedTexSubImage2DRobustANGLEFn(
+      target, level, xoffset, yoffset, width, height, format, imageSize,
+      dataSize, data);
 }
 
 void GLApiBase::glCompressedTexSubImage3DFn(GLenum target,
@@ -2761,6 +2842,23 @@ void GLApiBase::glCompressedTexSubImage3DFn(GLenum target,
                                           imageSize, data);
 }
 
+void GLApiBase::glCompressedTexSubImage3DRobustANGLEFn(GLenum target,
+                                                       GLint level,
+                                                       GLint xoffset,
+                                                       GLint yoffset,
+                                                       GLint zoffset,
+                                                       GLsizei width,
+                                                       GLsizei height,
+                                                       GLsizei depth,
+                                                       GLenum format,
+                                                       GLsizei imageSize,
+                                                       GLsizei dataSize,
+                                                       const void* data) {
+  driver_->fn.glCompressedTexSubImage3DRobustANGLEFn(
+      target, level, xoffset, yoffset, zoffset, width, height, depth, format,
+      imageSize, dataSize, data);
+}
+
 void GLApiBase::glCopyBufferSubDataFn(GLenum readTarget,
                                       GLenum writeTarget,
                                       GLintptr readOffset,
@@ -2771,7 +2869,10 @@ void GLApiBase::glCopyBufferSubDataFn(GLenum readTarget,
 }
 
 void GLApiBase::glCopySubTextureCHROMIUMFn(GLuint sourceId,
+                                           GLint sourceLevel,
+                                           GLenum destTarget,
                                            GLuint destId,
+                                           GLint destLevel,
                                            GLint xoffset,
                                            GLint yoffset,
                                            GLint x,
@@ -2782,8 +2883,9 @@ void GLApiBase::glCopySubTextureCHROMIUMFn(GLuint sourceId,
                                            GLboolean unpackPremultiplyAlpha,
                                            GLboolean unpackUnmultiplyAlpha) {
   driver_->fn.glCopySubTextureCHROMIUMFn(
-      sourceId, destId, xoffset, yoffset, x, y, width, height, unpackFlipY,
-      unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
+      sourceId, sourceLevel, destTarget, destId, destLevel, xoffset, yoffset, x,
+      y, width, height, unpackFlipY, unpackPremultiplyAlpha,
+      unpackUnmultiplyAlpha);
 }
 
 void GLApiBase::glCopyTexImage2DFn(GLenum target,
@@ -2824,15 +2926,18 @@ void GLApiBase::glCopyTexSubImage3DFn(GLenum target,
 }
 
 void GLApiBase::glCopyTextureCHROMIUMFn(GLuint sourceId,
+                                        GLint sourceLevel,
+                                        GLenum destTarget,
                                         GLuint destId,
+                                        GLint destLevel,
                                         GLint internalFormat,
                                         GLenum destType,
                                         GLboolean unpackFlipY,
                                         GLboolean unpackPremultiplyAlpha,
                                         GLboolean unpackUnmultiplyAlpha) {
   driver_->fn.glCopyTextureCHROMIUMFn(
-      sourceId, destId, internalFormat, destType, unpackFlipY,
-      unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
+      sourceId, sourceLevel, destTarget, destId, destLevel, internalFormat,
+      destType, unpackFlipY, unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
 }
 
 void GLApiBase::glCoverageModulationNVFn(GLenum components) {
@@ -4231,9 +4336,11 @@ void GLApiBase::glReadnPixelsRobustANGLEFn(GLint x,
                                            GLenum type,
                                            GLsizei bufSize,
                                            GLsizei* length,
+                                           GLsizei* columns,
+                                           GLsizei* rows,
                                            void* data) {
   driver_->fn.glReadnPixelsRobustANGLEFn(x, y, width, height, format, type,
-                                         bufSize, length, data);
+                                         bufSize, length, columns, rows, data);
 }
 
 void GLApiBase::glReadPixelsFn(GLint x,
@@ -4254,9 +4361,11 @@ void GLApiBase::glReadPixelsRobustANGLEFn(GLint x,
                                           GLenum type,
                                           GLsizei bufSize,
                                           GLsizei* length,
+                                          GLsizei* columns,
+                                          GLsizei* rows,
                                           void* pixels) {
   driver_->fn.glReadPixelsRobustANGLEFn(x, y, width, height, format, type,
-                                        bufSize, length, pixels);
+                                        bufSize, length, columns, rows, pixels);
 }
 
 void GLApiBase::glReleaseShaderCompilerFn(void) {
@@ -4304,6 +4413,10 @@ void GLApiBase::glRenderbufferStorageMultisampleIMGFn(GLenum target,
                                                       GLsizei height) {
   driver_->fn.glRenderbufferStorageMultisampleIMGFn(
       target, samples, internalformat, width, height);
+}
+
+void GLApiBase::glRequestExtensionANGLEFn(const char* name) {
+  driver_->fn.glRequestExtensionANGLEFn(name);
 }
 
 void GLApiBase::glResumeTransformFeedbackFn(void) {
@@ -5334,6 +5447,22 @@ void TraceGLApi::glCompressedTexImage2DFn(GLenum target,
                                     height, border, imageSize, data);
 }
 
+void TraceGLApi::glCompressedTexImage2DRobustANGLEFn(GLenum target,
+                                                     GLint level,
+                                                     GLenum internalformat,
+                                                     GLsizei width,
+                                                     GLsizei height,
+                                                     GLint border,
+                                                     GLsizei imageSize,
+                                                     GLsizei dataSize,
+                                                     const void* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glCompressedTexImage2DRobustANGLE")
+  gl_api_->glCompressedTexImage2DRobustANGLEFn(target, level, internalformat,
+                                               width, height, border, imageSize,
+                                               dataSize, data);
+}
+
 void TraceGLApi::glCompressedTexImage3DFn(GLenum target,
                                           GLint level,
                                           GLenum internalformat,
@@ -5348,6 +5477,23 @@ void TraceGLApi::glCompressedTexImage3DFn(GLenum target,
                                     height, depth, border, imageSize, data);
 }
 
+void TraceGLApi::glCompressedTexImage3DRobustANGLEFn(GLenum target,
+                                                     GLint level,
+                                                     GLenum internalformat,
+                                                     GLsizei width,
+                                                     GLsizei height,
+                                                     GLsizei depth,
+                                                     GLint border,
+                                                     GLsizei imageSize,
+                                                     GLsizei dataSize,
+                                                     const void* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glCompressedTexImage3DRobustANGLE")
+  gl_api_->glCompressedTexImage3DRobustANGLEFn(target, level, internalformat,
+                                               width, height, depth, border,
+                                               imageSize, dataSize, data);
+}
+
 void TraceGLApi::glCompressedTexSubImage2DFn(GLenum target,
                                              GLint level,
                                              GLint xoffset,
@@ -5360,6 +5506,23 @@ void TraceGLApi::glCompressedTexSubImage2DFn(GLenum target,
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glCompressedTexSubImage2D")
   gl_api_->glCompressedTexSubImage2DFn(target, level, xoffset, yoffset, width,
                                        height, format, imageSize, data);
+}
+
+void TraceGLApi::glCompressedTexSubImage2DRobustANGLEFn(GLenum target,
+                                                        GLint level,
+                                                        GLint xoffset,
+                                                        GLint yoffset,
+                                                        GLsizei width,
+                                                        GLsizei height,
+                                                        GLenum format,
+                                                        GLsizei imageSize,
+                                                        GLsizei dataSize,
+                                                        const void* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glCompressedTexSubImage2DRobustANGLE")
+  gl_api_->glCompressedTexSubImage2DRobustANGLEFn(
+      target, level, xoffset, yoffset, width, height, format, imageSize,
+      dataSize, data);
 }
 
 void TraceGLApi::glCompressedTexSubImage3DFn(GLenum target,
@@ -5379,6 +5542,25 @@ void TraceGLApi::glCompressedTexSubImage3DFn(GLenum target,
                                        data);
 }
 
+void TraceGLApi::glCompressedTexSubImage3DRobustANGLEFn(GLenum target,
+                                                        GLint level,
+                                                        GLint xoffset,
+                                                        GLint yoffset,
+                                                        GLint zoffset,
+                                                        GLsizei width,
+                                                        GLsizei height,
+                                                        GLsizei depth,
+                                                        GLenum format,
+                                                        GLsizei imageSize,
+                                                        GLsizei dataSize,
+                                                        const void* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glCompressedTexSubImage3DRobustANGLE")
+  gl_api_->glCompressedTexSubImage3DRobustANGLEFn(
+      target, level, xoffset, yoffset, zoffset, width, height, depth, format,
+      imageSize, dataSize, data);
+}
+
 void TraceGLApi::glCopyBufferSubDataFn(GLenum readTarget,
                                        GLenum writeTarget,
                                        GLintptr readOffset,
@@ -5390,7 +5572,10 @@ void TraceGLApi::glCopyBufferSubDataFn(GLenum readTarget,
 }
 
 void TraceGLApi::glCopySubTextureCHROMIUMFn(GLuint sourceId,
+                                            GLint sourceLevel,
+                                            GLenum destTarget,
                                             GLuint destId,
+                                            GLint destLevel,
                                             GLint xoffset,
                                             GLint yoffset,
                                             GLint x,
@@ -5402,8 +5587,9 @@ void TraceGLApi::glCopySubTextureCHROMIUMFn(GLuint sourceId,
                                             GLboolean unpackUnmultiplyAlpha) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glCopySubTextureCHROMIUM")
   gl_api_->glCopySubTextureCHROMIUMFn(
-      sourceId, destId, xoffset, yoffset, x, y, width, height, unpackFlipY,
-      unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
+      sourceId, sourceLevel, destTarget, destId, destLevel, xoffset, yoffset, x,
+      y, width, height, unpackFlipY, unpackPremultiplyAlpha,
+      unpackUnmultiplyAlpha);
 }
 
 void TraceGLApi::glCopyTexImage2DFn(GLenum target,
@@ -5447,16 +5633,19 @@ void TraceGLApi::glCopyTexSubImage3DFn(GLenum target,
 }
 
 void TraceGLApi::glCopyTextureCHROMIUMFn(GLuint sourceId,
+                                         GLint sourceLevel,
+                                         GLenum destTarget,
                                          GLuint destId,
+                                         GLint destLevel,
                                          GLint internalFormat,
                                          GLenum destType,
                                          GLboolean unpackFlipY,
                                          GLboolean unpackPremultiplyAlpha,
                                          GLboolean unpackUnmultiplyAlpha) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glCopyTextureCHROMIUM")
-  gl_api_->glCopyTextureCHROMIUMFn(sourceId, destId, internalFormat, destType,
-                                   unpackFlipY, unpackPremultiplyAlpha,
-                                   unpackUnmultiplyAlpha);
+  gl_api_->glCopyTextureCHROMIUMFn(
+      sourceId, sourceLevel, destTarget, destId, destLevel, internalFormat,
+      destType, unpackFlipY, unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
 }
 
 void TraceGLApi::glCoverageModulationNVFn(GLenum components) {
@@ -7119,10 +7308,12 @@ void TraceGLApi::glReadnPixelsRobustANGLEFn(GLint x,
                                             GLenum type,
                                             GLsizei bufSize,
                                             GLsizei* length,
+                                            GLsizei* columns,
+                                            GLsizei* rows,
                                             void* data) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glReadnPixelsRobustANGLE")
   gl_api_->glReadnPixelsRobustANGLEFn(x, y, width, height, format, type,
-                                      bufSize, length, data);
+                                      bufSize, length, columns, rows, data);
 }
 
 void TraceGLApi::glReadPixelsFn(GLint x,
@@ -7144,10 +7335,12 @@ void TraceGLApi::glReadPixelsRobustANGLEFn(GLint x,
                                            GLenum type,
                                            GLsizei bufSize,
                                            GLsizei* length,
+                                           GLsizei* columns,
+                                           GLsizei* rows,
                                            void* pixels) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glReadPixelsRobustANGLE")
   gl_api_->glReadPixelsRobustANGLEFn(x, y, width, height, format, type, bufSize,
-                                     length, pixels);
+                                     length, columns, rows, pixels);
 }
 
 void TraceGLApi::glReleaseShaderCompilerFn(void) {
@@ -7205,6 +7398,11 @@ void TraceGLApi::glRenderbufferStorageMultisampleIMGFn(GLenum target,
       "gpu", "TraceGLAPI::glRenderbufferStorageMultisampleIMG")
   gl_api_->glRenderbufferStorageMultisampleIMGFn(target, samples,
                                                  internalformat, width, height);
+}
+
+void TraceGLApi::glRequestExtensionANGLEFn(const char* name) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glRequestExtensionANGLE")
+  gl_api_->glRequestExtensionANGLEFn(name);
 }
 
 void TraceGLApi::glResumeTransformFeedbackFn(void) {
@@ -8439,6 +8637,26 @@ void DebugGLApi::glCompressedTexImage2DFn(GLenum target,
                                     height, border, imageSize, data);
 }
 
+void DebugGLApi::glCompressedTexImage2DRobustANGLEFn(GLenum target,
+                                                     GLint level,
+                                                     GLenum internalformat,
+                                                     GLsizei width,
+                                                     GLsizei height,
+                                                     GLint border,
+                                                     GLsizei imageSize,
+                                                     GLsizei dataSize,
+                                                     const void* data) {
+  GL_SERVICE_LOG("glCompressedTexImage2DRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << GLEnums::GetStringEnum(internalformat) << ", "
+                 << width << ", " << height << ", " << border << ", "
+                 << imageSize << ", " << dataSize << ", "
+                 << static_cast<const void*>(data) << ")");
+  gl_api_->glCompressedTexImage2DRobustANGLEFn(target, level, internalformat,
+                                               width, height, border, imageSize,
+                                               dataSize, data);
+}
+
 void DebugGLApi::glCompressedTexImage3DFn(GLenum target,
                                           GLint level,
                                           GLenum internalformat,
@@ -8458,6 +8676,27 @@ void DebugGLApi::glCompressedTexImage3DFn(GLenum target,
                                     height, depth, border, imageSize, data);
 }
 
+void DebugGLApi::glCompressedTexImage3DRobustANGLEFn(GLenum target,
+                                                     GLint level,
+                                                     GLenum internalformat,
+                                                     GLsizei width,
+                                                     GLsizei height,
+                                                     GLsizei depth,
+                                                     GLint border,
+                                                     GLsizei imageSize,
+                                                     GLsizei dataSize,
+                                                     const void* data) {
+  GL_SERVICE_LOG("glCompressedTexImage3DRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << GLEnums::GetStringEnum(internalformat) << ", "
+                 << width << ", " << height << ", " << depth << ", " << border
+                 << ", " << imageSize << ", " << dataSize << ", "
+                 << static_cast<const void*>(data) << ")");
+  gl_api_->glCompressedTexImage3DRobustANGLEFn(target, level, internalformat,
+                                               width, height, depth, border,
+                                               imageSize, dataSize, data);
+}
+
 void DebugGLApi::glCompressedTexSubImage2DFn(GLenum target,
                                              GLint level,
                                              GLint xoffset,
@@ -8474,6 +8713,27 @@ void DebugGLApi::glCompressedTexSubImage2DFn(GLenum target,
                  << imageSize << ", " << static_cast<const void*>(data) << ")");
   gl_api_->glCompressedTexSubImage2DFn(target, level, xoffset, yoffset, width,
                                        height, format, imageSize, data);
+}
+
+void DebugGLApi::glCompressedTexSubImage2DRobustANGLEFn(GLenum target,
+                                                        GLint level,
+                                                        GLint xoffset,
+                                                        GLint yoffset,
+                                                        GLsizei width,
+                                                        GLsizei height,
+                                                        GLenum format,
+                                                        GLsizei imageSize,
+                                                        GLsizei dataSize,
+                                                        const void* data) {
+  GL_SERVICE_LOG("glCompressedTexSubImage2DRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << xoffset << ", " << yoffset << ", " << width << ", "
+                 << height << ", " << GLEnums::GetStringEnum(format) << ", "
+                 << imageSize << ", " << dataSize << ", "
+                 << static_cast<const void*>(data) << ")");
+  gl_api_->glCompressedTexSubImage2DRobustANGLEFn(
+      target, level, xoffset, yoffset, width, height, format, imageSize,
+      dataSize, data);
 }
 
 void DebugGLApi::glCompressedTexSubImage3DFn(GLenum target,
@@ -8498,6 +8758,29 @@ void DebugGLApi::glCompressedTexSubImage3DFn(GLenum target,
                                        data);
 }
 
+void DebugGLApi::glCompressedTexSubImage3DRobustANGLEFn(GLenum target,
+                                                        GLint level,
+                                                        GLint xoffset,
+                                                        GLint yoffset,
+                                                        GLint zoffset,
+                                                        GLsizei width,
+                                                        GLsizei height,
+                                                        GLsizei depth,
+                                                        GLenum format,
+                                                        GLsizei imageSize,
+                                                        GLsizei dataSize,
+                                                        const void* data) {
+  GL_SERVICE_LOG("glCompressedTexSubImage3DRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << xoffset << ", " << yoffset << ", " << zoffset
+                 << ", " << width << ", " << height << ", " << depth << ", "
+                 << GLEnums::GetStringEnum(format) << ", " << imageSize << ", "
+                 << dataSize << ", " << static_cast<const void*>(data) << ")");
+  gl_api_->glCompressedTexSubImage3DRobustANGLEFn(
+      target, level, xoffset, yoffset, zoffset, width, height, depth, format,
+      imageSize, dataSize, data);
+}
+
 void DebugGLApi::glCopyBufferSubDataFn(GLenum readTarget,
                                        GLenum writeTarget,
                                        GLintptr readOffset,
@@ -8512,7 +8795,10 @@ void DebugGLApi::glCopyBufferSubDataFn(GLenum readTarget,
 }
 
 void DebugGLApi::glCopySubTextureCHROMIUMFn(GLuint sourceId,
+                                            GLint sourceLevel,
+                                            GLenum destTarget,
                                             GLuint destId,
+                                            GLint destLevel,
                                             GLint xoffset,
                                             GLint yoffset,
                                             GLint x,
@@ -8523,15 +8809,17 @@ void DebugGLApi::glCopySubTextureCHROMIUMFn(GLuint sourceId,
                                             GLboolean unpackPremultiplyAlpha,
                                             GLboolean unpackUnmultiplyAlpha) {
   GL_SERVICE_LOG("glCopySubTextureCHROMIUM"
-                 << "(" << sourceId << ", " << destId << ", " << xoffset << ", "
-                 << yoffset << ", " << x << ", " << y << ", " << width << ", "
-                 << height << ", " << GLEnums::GetStringBool(unpackFlipY)
-                 << ", " << GLEnums::GetStringBool(unpackPremultiplyAlpha)
-                 << ", " << GLEnums::GetStringBool(unpackUnmultiplyAlpha)
-                 << ")");
+                 << "(" << sourceId << ", " << sourceLevel << ", "
+                 << GLEnums::GetStringEnum(destTarget) << ", " << destId << ", "
+                 << destLevel << ", " << xoffset << ", " << yoffset << ", " << x
+                 << ", " << y << ", " << width << ", " << height << ", "
+                 << GLEnums::GetStringBool(unpackFlipY) << ", "
+                 << GLEnums::GetStringBool(unpackPremultiplyAlpha) << ", "
+                 << GLEnums::GetStringBool(unpackUnmultiplyAlpha) << ")");
   gl_api_->glCopySubTextureCHROMIUMFn(
-      sourceId, destId, xoffset, yoffset, x, y, width, height, unpackFlipY,
-      unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
+      sourceId, sourceLevel, destTarget, destId, destLevel, xoffset, yoffset, x,
+      y, width, height, unpackFlipY, unpackPremultiplyAlpha,
+      unpackUnmultiplyAlpha);
 }
 
 void DebugGLApi::glCopyTexImage2DFn(GLenum target,
@@ -8586,21 +8874,26 @@ void DebugGLApi::glCopyTexSubImage3DFn(GLenum target,
 }
 
 void DebugGLApi::glCopyTextureCHROMIUMFn(GLuint sourceId,
+                                         GLint sourceLevel,
+                                         GLenum destTarget,
                                          GLuint destId,
+                                         GLint destLevel,
                                          GLint internalFormat,
                                          GLenum destType,
                                          GLboolean unpackFlipY,
                                          GLboolean unpackPremultiplyAlpha,
                                          GLboolean unpackUnmultiplyAlpha) {
   GL_SERVICE_LOG("glCopyTextureCHROMIUM"
-                 << "(" << sourceId << ", " << destId << ", " << internalFormat
-                 << ", " << GLEnums::GetStringEnum(destType) << ", "
+                 << "(" << sourceId << ", " << sourceLevel << ", "
+                 << GLEnums::GetStringEnum(destTarget) << ", " << destId << ", "
+                 << destLevel << ", " << internalFormat << ", "
+                 << GLEnums::GetStringEnum(destType) << ", "
                  << GLEnums::GetStringBool(unpackFlipY) << ", "
                  << GLEnums::GetStringBool(unpackPremultiplyAlpha) << ", "
                  << GLEnums::GetStringBool(unpackUnmultiplyAlpha) << ")");
-  gl_api_->glCopyTextureCHROMIUMFn(sourceId, destId, internalFormat, destType,
-                                   unpackFlipY, unpackPremultiplyAlpha,
-                                   unpackUnmultiplyAlpha);
+  gl_api_->glCopyTextureCHROMIUMFn(
+      sourceId, sourceLevel, destTarget, destId, destLevel, internalFormat,
+      destType, unpackFlipY, unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
 }
 
 void DebugGLApi::glCoverageModulationNVFn(GLenum components) {
@@ -10817,15 +11110,19 @@ void DebugGLApi::glReadnPixelsRobustANGLEFn(GLint x,
                                             GLenum type,
                                             GLsizei bufSize,
                                             GLsizei* length,
+                                            GLsizei* columns,
+                                            GLsizei* rows,
                                             void* data) {
   GL_SERVICE_LOG("glReadnPixelsRobustANGLE"
                  << "(" << x << ", " << y << ", " << width << ", " << height
                  << ", " << GLEnums::GetStringEnum(format) << ", "
                  << GLEnums::GetStringEnum(type) << ", " << bufSize << ", "
                  << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(columns) << ", "
+                 << static_cast<const void*>(rows) << ", "
                  << static_cast<const void*>(data) << ")");
   gl_api_->glReadnPixelsRobustANGLEFn(x, y, width, height, format, type,
-                                      bufSize, length, data);
+                                      bufSize, length, columns, rows, data);
 }
 
 void DebugGLApi::glReadPixelsFn(GLint x,
@@ -10851,15 +11148,19 @@ void DebugGLApi::glReadPixelsRobustANGLEFn(GLint x,
                                            GLenum type,
                                            GLsizei bufSize,
                                            GLsizei* length,
+                                           GLsizei* columns,
+                                           GLsizei* rows,
                                            void* pixels) {
   GL_SERVICE_LOG("glReadPixelsRobustANGLE"
                  << "(" << x << ", " << y << ", " << width << ", " << height
                  << ", " << GLEnums::GetStringEnum(format) << ", "
                  << GLEnums::GetStringEnum(type) << ", " << bufSize << ", "
                  << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(columns) << ", "
+                 << static_cast<const void*>(rows) << ", "
                  << static_cast<const void*>(pixels) << ")");
   gl_api_->glReadPixelsRobustANGLEFn(x, y, width, height, format, type, bufSize,
-                                     length, pixels);
+                                     length, columns, rows, pixels);
 }
 
 void DebugGLApi::glReleaseShaderCompilerFn(void) {
@@ -10930,6 +11231,12 @@ void DebugGLApi::glRenderbufferStorageMultisampleIMGFn(GLenum target,
                  << width << ", " << height << ")");
   gl_api_->glRenderbufferStorageMultisampleIMGFn(target, samples,
                                                  internalformat, width, height);
+}
+
+void DebugGLApi::glRequestExtensionANGLEFn(const char* name) {
+  GL_SERVICE_LOG("glRequestExtensionANGLE"
+                 << "(" << name << ")");
+  gl_api_->glRequestExtensionANGLEFn(name);
 }
 
 void DebugGLApi::glResumeTransformFeedbackFn(void) {
@@ -12384,6 +12691,21 @@ void NoContextGLApi::glCompressedTexImage2DFn(GLenum target,
       << "Trying to call glCompressedTexImage2D() without current GL context";
 }
 
+void NoContextGLApi::glCompressedTexImage2DRobustANGLEFn(GLenum target,
+                                                         GLint level,
+                                                         GLenum internalformat,
+                                                         GLsizei width,
+                                                         GLsizei height,
+                                                         GLint border,
+                                                         GLsizei imageSize,
+                                                         GLsizei dataSize,
+                                                         const void* data) {
+  NOTREACHED() << "Trying to call glCompressedTexImage2DRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glCompressedTexImage2DRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glCompressedTexImage3DFn(GLenum target,
                                               GLint level,
                                               GLenum internalformat,
@@ -12399,6 +12721,22 @@ void NoContextGLApi::glCompressedTexImage3DFn(GLenum target,
       << "Trying to call glCompressedTexImage3D() without current GL context";
 }
 
+void NoContextGLApi::glCompressedTexImage3DRobustANGLEFn(GLenum target,
+                                                         GLint level,
+                                                         GLenum internalformat,
+                                                         GLsizei width,
+                                                         GLsizei height,
+                                                         GLsizei depth,
+                                                         GLint border,
+                                                         GLsizei imageSize,
+                                                         GLsizei dataSize,
+                                                         const void* data) {
+  NOTREACHED() << "Trying to call glCompressedTexImage3DRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glCompressedTexImage3DRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glCompressedTexSubImage2DFn(GLenum target,
                                                  GLint level,
                                                  GLint xoffset,
@@ -12412,6 +12750,22 @@ void NoContextGLApi::glCompressedTexSubImage2DFn(GLenum target,
                   "GL context";
   LOG(ERROR) << "Trying to call glCompressedTexSubImage2D() without current GL "
                 "context";
+}
+
+void NoContextGLApi::glCompressedTexSubImage2DRobustANGLEFn(GLenum target,
+                                                            GLint level,
+                                                            GLint xoffset,
+                                                            GLint yoffset,
+                                                            GLsizei width,
+                                                            GLsizei height,
+                                                            GLenum format,
+                                                            GLsizei imageSize,
+                                                            GLsizei dataSize,
+                                                            const void* data) {
+  NOTREACHED() << "Trying to call glCompressedTexSubImage2DRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glCompressedTexSubImage2DRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glCompressedTexSubImage3DFn(GLenum target,
@@ -12431,6 +12785,24 @@ void NoContextGLApi::glCompressedTexSubImage3DFn(GLenum target,
                 "context";
 }
 
+void NoContextGLApi::glCompressedTexSubImage3DRobustANGLEFn(GLenum target,
+                                                            GLint level,
+                                                            GLint xoffset,
+                                                            GLint yoffset,
+                                                            GLint zoffset,
+                                                            GLsizei width,
+                                                            GLsizei height,
+                                                            GLsizei depth,
+                                                            GLenum format,
+                                                            GLsizei imageSize,
+                                                            GLsizei dataSize,
+                                                            const void* data) {
+  NOTREACHED() << "Trying to call glCompressedTexSubImage3DRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glCompressedTexSubImage3DRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glCopyBufferSubDataFn(GLenum readTarget,
                                            GLenum writeTarget,
                                            GLintptr readOffset,
@@ -12444,7 +12816,10 @@ void NoContextGLApi::glCopyBufferSubDataFn(GLenum readTarget,
 
 void NoContextGLApi::glCopySubTextureCHROMIUMFn(
     GLuint sourceId,
+    GLint sourceLevel,
+    GLenum destTarget,
     GLuint destId,
+    GLint destLevel,
     GLint xoffset,
     GLint yoffset,
     GLint x,
@@ -12503,7 +12878,10 @@ void NoContextGLApi::glCopyTexSubImage3DFn(GLenum target,
 }
 
 void NoContextGLApi::glCopyTextureCHROMIUMFn(GLuint sourceId,
+                                             GLint sourceLevel,
+                                             GLenum destTarget,
                                              GLuint destId,
+                                             GLint destLevel,
                                              GLint internalFormat,
                                              GLenum destType,
                                              GLboolean unpackFlipY,
@@ -14420,6 +14798,8 @@ void NoContextGLApi::glReadnPixelsRobustANGLEFn(GLint x,
                                                 GLenum type,
                                                 GLsizei bufSize,
                                                 GLsizei* length,
+                                                GLsizei* columns,
+                                                GLsizei* rows,
                                                 void* data) {
   NOTREACHED()
       << "Trying to call glReadnPixelsRobustANGLE() without current GL context";
@@ -14446,6 +14826,8 @@ void NoContextGLApi::glReadPixelsRobustANGLEFn(GLint x,
                                                GLenum type,
                                                GLsizei bufSize,
                                                GLsizei* length,
+                                               GLsizei* columns,
+                                               GLsizei* rows,
                                                void* pixels) {
   NOTREACHED()
       << "Trying to call glReadPixelsRobustANGLE() without current GL context";
@@ -14515,6 +14897,13 @@ void NoContextGLApi::glRenderbufferStorageMultisampleIMGFn(
                   "without current GL context";
   LOG(ERROR) << "Trying to call glRenderbufferStorageMultisampleIMG() without "
                 "current GL context";
+}
+
+void NoContextGLApi::glRequestExtensionANGLEFn(const char* name) {
+  NOTREACHED()
+      << "Trying to call glRequestExtensionANGLE() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glRequestExtensionANGLE() without current GL context";
 }
 
 void NoContextGLApi::glResumeTransformFeedbackFn(void) {

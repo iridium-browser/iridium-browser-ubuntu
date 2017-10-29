@@ -17,20 +17,22 @@
 #include "fpdfsdk/cpdfsdk_formfillenvironment.h"
 #include "fpdfsdk/cpdfsdk_pageview.h"
 #include "fpdfsdk/cpdfsdk_widgethandler.h"
+#include "third_party/base/ptr_util.h"
 
 #ifdef PDF_ENABLE_XFA
 #include "fpdfsdk/cpdfsdk_xfawidgethandler.h"
 #include "fpdfsdk/fpdfxfa/cpdfxfa_page.h"
-#include "xfa/fxfa/xfa_ffpageview.h"
-#include "xfa/fxfa/xfa_ffwidget.h"
+#include "xfa/fxfa/cxfa_ffpageview.h"
+#include "xfa/fxfa/cxfa_ffwidget.h"
 #endif  // PDF_ENABLE_XFA
 
 CPDFSDK_AnnotHandlerMgr::CPDFSDK_AnnotHandlerMgr(
     CPDFSDK_FormFillEnvironment* pFormFillEnv)
-    : m_pBAAnnotHandler(new CPDFSDK_BAAnnotHandler()),
-      m_pWidgetHandler(new CPDFSDK_WidgetHandler(pFormFillEnv)),
+    : m_pBAAnnotHandler(pdfium::MakeUnique<CPDFSDK_BAAnnotHandler>()),
+      m_pWidgetHandler(pdfium::MakeUnique<CPDFSDK_WidgetHandler>(pFormFillEnv)),
 #ifdef PDF_ENABLE_XFA
-      m_pXFAWidgetHandler(new CPDFSDK_XFAWidgetHandler(pFormFillEnv)),
+      m_pXFAWidgetHandler(
+          pdfium::MakeUnique<CPDFSDK_XFAWidgetHandler>(pFormFillEnv)),
 #endif  // PDF_ENABLE_XFA
       m_pFormFillEnv(pFormFillEnv) {
   m_pWidgetHandler->SetFormFiller(m_pFormFillEnv->GetInteractiveFormFiller());
@@ -72,6 +74,11 @@ void CPDFSDK_AnnotHandlerMgr::Annot_OnCreate(CPDFSDK_Annot* pAnnot) {
 void CPDFSDK_AnnotHandlerMgr::Annot_OnLoad(CPDFSDK_Annot* pAnnot) {
   ASSERT(pAnnot);
   GetAnnotHandler(pAnnot)->OnLoad(pAnnot);
+}
+
+CFX_WideString CPDFSDK_AnnotHandlerMgr::Annot_GetSelectedText(
+    CPDFSDK_Annot* pAnnot) {
+  return GetAnnotHandler(pAnnot)->GetSelectedText(pAnnot);
 }
 
 IPDFSDK_AnnotHandler* CPDFSDK_AnnotHandlerMgr::GetAnnotHandler(

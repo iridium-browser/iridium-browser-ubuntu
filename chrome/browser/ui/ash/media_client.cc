@@ -136,7 +136,7 @@ MediaClient::MediaClient() : binding_(this), weak_ptr_factory_(this) {
 
   // Register this object as the client interface implementation.
   ash::mojom::MediaClientAssociatedPtrInfo ptr_info;
-  binding_.Bind(&ptr_info);
+  binding_.Bind(mojo::MakeRequest(&ptr_info));
   media_controller_->SetClient(std::move(ptr_info));
 }
 
@@ -187,8 +187,8 @@ void MediaClient::OnRequestUpdate(int render_process_id,
   // The PostTask is necessary because the state of MediaStreamCaptureIndicator
   // gets updated after this.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&MediaClient::RequestCaptureState,
-                            weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&MediaClient::RequestCaptureState,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
 MediaCaptureState MediaClient::GetMediaCaptureStateByIndex(int user_index) {

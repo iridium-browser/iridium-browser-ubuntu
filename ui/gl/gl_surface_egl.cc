@@ -15,6 +15,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
@@ -29,7 +30,7 @@
 #include "ui/gl/gl_image.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_stub.h"
-#include "ui/gl/gl_switches.h"
+#include "ui/gl/gl_utils.h"
 #include "ui/gl/scoped_make_current.h"
 #include "ui/gl/sync_control_vsync_provider.h"
 
@@ -52,6 +53,13 @@ extern "C" {
 #if !defined(EGL_OPENGL_ES3_BIT)
 #define EGL_OPENGL_ES3_BIT 0x00000040
 #endif
+
+// Not present egl/eglext.h yet.
+
+#ifndef EGL_EXT_gl_colorspace_display_p3
+#define EGL_EXT_gl_colorspace_display_p3 1
+#define EGL_GL_COLORSPACE_DISPLAY_P3_EXT 0x3363
+#endif /* EGL_EXT_gl_colorspace_display_p3 */
 
 // From ANGLE's egl/eglext.h.
 
@@ -108,19 +116,16 @@ extern "C" {
 #define EGL_FLEXIBLE_SURFACE_COMPATIBILITY_SUPPORTED_ANGLE 0x33A6
 #endif /* EGL_ANGLE_flexible_surface_compatibility */
 
+#ifndef EGL_ANGLE_display_robust_resource_initialization
+#define EGL_ANGLE_display_robust_resource_initialization 1
+#define EGL_DISPLAY_ROBUST_RESOURCE_INITIALIZATION_ANGLE 0x3453
+#endif /* EGL_ANGLE_display_robust_resource_initialization */
+
 using ui::GetLastEGLErrorString;
 
 namespace gl {
 
 bool GLSurfaceEGL::initialized_ = false;
-
-#if defined(OS_WIN)
-unsigned int NativeViewGLSurfaceEGL::current_swap_generation_ = 0;
-unsigned int NativeViewGLSurfaceEGL::swaps_this_generation_ = 0;
-unsigned int NativeViewGLSurfaceEGL::last_multiswap_generation_ = 0;
-
-const unsigned int MULTISWAP_FRAME_VSYNC_THRESHOLD = 60;
-#endif
 
 namespace {
 
@@ -135,6 +140,9 @@ bool g_egl_sync_control_supported = false;
 bool g_egl_window_fixed_size_supported = false;
 bool g_egl_surfaceless_context_supported = false;
 bool g_egl_surface_orientation_supported = false;
+bool g_egl_context_priority_supported = false;
+bool g_egl_khr_colorspace = false;
+bool g_egl_ext_colorspace_display_p3 = false;
 bool g_use_direct_composition = false;
 
 class EGLSyncControlVSyncProvider : public SyncControlVSyncProvider {
@@ -145,6 +153,11 @@ class EGLSyncControlVSyncProvider : public SyncControlVSyncProvider {
   }
 
   ~EGLSyncControlVSyncProvider() override {}
+
+  static bool IsSupported() {
+    return SyncControlVSyncProvider::IsSupported() &&
+           g_egl_sync_control_supported;
+  }
 
  protected:
   bool GetSyncValues(int64_t* system_time,
@@ -174,7 +187,8 @@ class EGLSyncControlVSyncProvider : public SyncControlVSyncProvider {
 
 EGLDisplay GetPlatformANGLEDisplay(EGLNativeDisplayType native_display,
                                    EGLenum platform_type,
-                                   bool warpDevice) {
+                                   bool warpDevice,
+                                   bool robustResourceInit) {
   std::vector<EGLint> display_attribs;
 
   display_attribs.push_back(EGL_PLATFORM_ANGLE_TYPE_ANGLE);
@@ -183,6 +197,11 @@ EGLDisplay GetPlatformANGLEDisplay(EGLNativeDisplayType native_display,
   if (warpDevice) {
     display_attribs.push_back(EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE);
     display_attribs.push_back(EGL_PLATFORM_ANGLE_DEVICE_TYPE_WARP_ANGLE);
+  }
+
+  if (robustResourceInit) {
+    display_attribs.push_back(EGL_DISPLAY_ROBUST_RESOURCE_INITIALIZATION_ANGLE);
+    display_attribs.push_back(EGL_TRUE);
   }
 
 #if defined(USE_X11) && !defined(OS_CHROMEOS)
@@ -205,26 +224,32 @@ EGLDisplay GetPlatformANGLEDisplay(EGLNativeDisplayType native_display,
 }
 
 EGLDisplay GetDisplayFromType(DisplayType display_type,
-                              EGLNativeDisplayType native_display) {
+                              EGLNativeDisplayType native_display,
+                              bool robustResourceInit) {
   switch (display_type) {
     case DEFAULT:
     case SWIFT_SHADER:
       return eglGetDisplay(native_display);
     case ANGLE_D3D9:
       return GetPlatformANGLEDisplay(native_display,
-                                     EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE, false);
+                                     EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE, false,
+                                     robustResourceInit);
     case ANGLE_D3D11:
-      return GetPlatformANGLEDisplay(
-          native_display, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE, false);
+      return GetPlatformANGLEDisplay(native_display,
+                                     EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE, false,
+                                     robustResourceInit);
     case ANGLE_OPENGL:
-      return GetPlatformANGLEDisplay(
-          native_display, EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE, false);
+      return GetPlatformANGLEDisplay(native_display,
+                                     EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE,
+                                     false, robustResourceInit);
     case ANGLE_OPENGLES:
-      return GetPlatformANGLEDisplay(
-          native_display, EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE, false);
+      return GetPlatformANGLEDisplay(native_display,
+                                     EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE,
+                                     false, robustResourceInit);
     case ANGLE_NULL:
       return GetPlatformANGLEDisplay(native_display,
-                                     EGL_PLATFORM_ANGLE_TYPE_NULL_ANGLE, false);
+                                     EGL_PLATFORM_ANGLE_TYPE_NULL_ANGLE, false,
+                                     robustResourceInit);
     default:
       NOTREACHED();
       return EGL_NO_DISPLAY;
@@ -271,7 +296,7 @@ bool ValidateEglConfig(EGLDisplay display,
   return true;
 }
 
-EGLConfig ChooseConfig(GLSurfaceFormat format) {
+EGLConfig ChooseConfig(GLSurfaceFormat format, bool surfaceless) {
   // Choose an EGL configuration.
   // On X this is only used for PBuffer surfaces.
 
@@ -299,9 +324,8 @@ EGLConfig ChooseConfig(GLSurfaceFormat format) {
   }
 #endif
 
-  EGLint surface_type = (format.IsSurfaceless()
-                            ? EGL_DONT_CARE
-                            : EGL_WINDOW_BIT | EGL_PBUFFER_BIT);
+  EGLint surface_type =
+      (surfaceless ? EGL_DONT_CARE : EGL_WINDOW_BIT | EGL_PBUFFER_BIT);
 
   for (auto renderable_type : renderable_types) {
     EGLint config_attribs_8888[] = {EGL_BUFFER_SIZE,
@@ -495,7 +519,7 @@ EGLDisplay GLSurfaceEGL::GetDisplay() {
 
 EGLConfig GLSurfaceEGL::GetConfig() {
   if (!config_) {
-    config_ = ChooseConfig(format_);
+    config_ = ChooseConfig(format_, IsSurfaceless());
   }
   return config_;
 }
@@ -528,6 +552,20 @@ bool GLSurfaceEGL::InitializeOneOff(EGLNativeDisplayType native_display) {
       HasEGLExtension("EGL_ANGLE_window_fixed_size");
   g_egl_surface_orientation_supported =
       HasEGLExtension("EGL_ANGLE_surface_orientation");
+  g_egl_khr_colorspace = HasEGLExtension("EGL_KHR_gl_colorspace");
+  g_egl_ext_colorspace_display_p3 =
+      HasEGLExtension("EGL_EXT_gl_colorspace_display_p3");
+  // According to https://source.android.com/compatibility/android-cdd.html the
+  // EGL_IMG_context_priority extension is mandatory for Virtual Reality High
+  // Performance support, but due to a bug in Android Nougat the extension
+  // isn't being reported even when it's present. As a fallback, check if other
+  // related extensions that were added for VR support are present, and assume
+  // that this implies context priority is also supported. See also:
+  // https://github.com/googlevr/gvr-android-sdk/issues/330
+  g_egl_context_priority_supported =
+      HasEGLExtension("EGL_IMG_context_priority") ||
+      (HasEGLExtension("EGL_ANDROID_front_buffer_auto_refresh") &&
+       HasEGLExtension("EGL_ANDROID_create_native_client_buffer"));
 
   // Need EGL_ANGLE_flexible_surface_compatibility to allow surfaces with and
   // without alpha to be bound to the same context.
@@ -630,6 +668,11 @@ bool GLSurfaceEGL::IsEGLSurfacelessContextSupported() {
 }
 
 // static
+bool GLSurfaceEGL::IsEGLContextPrioritySupported() {
+  return g_egl_context_priority_supported;
+}
+
+// static
 bool GLSurfaceEGL::IsDirectCompositionSupported() {
   return g_use_direct_composition;
 }
@@ -666,6 +709,14 @@ EGLDisplay GLSurfaceEGL::InitializeDisplay(
         ExtensionsContain(client_extensions, "EGL_ANGLE_platform_angle_null");
   }
 
+  bool supports_robust_resource_init =
+      client_extensions &&
+      ExtensionsContain(client_extensions,
+                        "EGL_ANGLE_display_robust_resource_initialization");
+  bool use_robust_resource_init =
+      supports_robust_resource_init &&
+      UsePassthroughCommandDecoder(base::CommandLine::ForCurrentProcess());
+
   std::vector<DisplayType> init_displays;
   GetEGLInitDisplays(supports_angle_d3d, supports_angle_opengl,
                      supports_angle_null,
@@ -673,8 +724,8 @@ EGLDisplay GLSurfaceEGL::InitializeDisplay(
 
   for (size_t disp_index = 0; disp_index < init_displays.size(); ++disp_index) {
     DisplayType display_type = init_displays[disp_index];
-    EGLDisplay display =
-        GetDisplayFromType(display_type, g_native_display);
+    EGLDisplay display = GetDisplayFromType(display_type, g_native_display,
+                                            use_robust_resource_init);
     if (display == EGL_NO_DISPLAY) {
       LOG(ERROR) << "EGL display query failed with error "
                  << GetLastEGLErrorString();
@@ -704,23 +755,23 @@ EGLDisplay GLSurfaceEGL::InitializeDisplay(
   return g_display;
 }
 
-NativeViewGLSurfaceEGL::NativeViewGLSurfaceEGL(EGLNativeWindowType window)
+NativeViewGLSurfaceEGL::NativeViewGLSurfaceEGL(
+    EGLNativeWindowType window,
+    std::unique_ptr<gfx::VSyncProvider> vsync_provider)
     : window_(window),
       size_(1, 1),
-      enable_fixed_size_angle_(false),
+      enable_fixed_size_angle_(true),
       surface_(NULL),
       supports_post_sub_buffer_(false),
       supports_swap_buffer_with_damage_(false),
       flips_vertically_(false),
-      swap_interval_(1) {
+      vsync_provider_external_(std::move(vsync_provider)) {
 #if defined(OS_ANDROID)
   if (window)
     ANativeWindow_acquire(window);
 #endif
 
 #if defined(OS_WIN)
-  vsync_override_ = false;
-  swap_generation_ = 0;
   RECT windowRect;
   if (GetClientRect(window_, &windowRect))
     size_ = gfx::Rect(windowRect).size();
@@ -728,13 +779,8 @@ NativeViewGLSurfaceEGL::NativeViewGLSurfaceEGL(EGLNativeWindowType window)
 }
 
 bool NativeViewGLSurfaceEGL::Initialize(GLSurfaceFormat format) {
-  format_ = format;
-  return Initialize(nullptr);
-}
-
-bool NativeViewGLSurfaceEGL::Initialize(
-    std::unique_ptr<gfx::VSyncProvider> sync_provider) {
   DCHECK(!surface_);
+  format_ = format;
 
   if (!GetDisplay()) {
     LOG(ERROR) << "Trying to create surface with invalid display.";
@@ -784,6 +830,34 @@ bool NativeViewGLSurfaceEGL::Initialize(
     egl_window_attributes.push_back(EGL_TRUE);
   }
 
+  switch (format_.GetColorSpace()) {
+    case GLSurfaceFormat::COLOR_SPACE_UNSPECIFIED:
+      break;
+    case GLSurfaceFormat::COLOR_SPACE_SRGB:
+      // Note that COLORSPACE_LINEAR refers to the sRGB color space, but
+      // without opting into sRGB blending. It is equivalent to
+      // COLORSPACE_SRGB with Disable(FRAMEBUFFER_SRGB).
+      if (g_egl_khr_colorspace) {
+        egl_window_attributes.push_back(EGL_GL_COLORSPACE_KHR);
+        egl_window_attributes.push_back(EGL_GL_COLORSPACE_LINEAR_KHR);
+      }
+      break;
+    case GLSurfaceFormat::COLOR_SPACE_DISPLAY_P3:
+      // Note that it is not the case that
+      //   COLORSPACE_SRGB is to COLORSPACE_LINEAR_KHR
+      // as
+      //   COLORSPACE_DISPLAY_P3 is to COLORSPACE_DISPLAY_P3_LINEAR
+      // COLORSPACE_DISPLAY_P3 is equivalent to COLORSPACE_LINEAR, except with
+      // with the P3 gamut instead of the the sRGB gamut.
+      // COLORSPACE_DISPLAY_P3_LINEAR has a linear transfer function, and is
+      // intended for use with 16-bit formats.
+      if (g_egl_khr_colorspace && g_egl_ext_colorspace_display_p3) {
+        egl_window_attributes.push_back(EGL_GL_COLORSPACE_KHR);
+        egl_window_attributes.push_back(EGL_GL_COLORSPACE_DISPLAY_P3_EXT);
+      }
+      break;
+  }
+
   egl_window_attributes.push_back(EGL_NONE);
   // Create a surface for the native window.
   surface_ = eglCreateWindowSurface(
@@ -806,10 +880,10 @@ bool NativeViewGLSurfaceEGL::Initialize(
   supports_swap_buffer_with_damage_ =
       g_driver_egl.ext.b_EGL_KHR_swap_buffers_with_damage;
 
-  if (sync_provider)
-    vsync_provider_ = std::move(sync_provider);
-  else if (g_egl_sync_control_supported)
-    vsync_provider_.reset(new EGLSyncControlVSyncProvider(surface_));
+  if (!vsync_provider_external_ && EGLSyncControlVSyncProvider::IsSupported()) {
+    vsync_provider_internal_ =
+        base::MakeUnique<EGLSyncControlVSyncProvider>(surface_);
+  }
   return true;
 }
 
@@ -818,6 +892,8 @@ bool NativeViewGLSurfaceEGL::InitializeNativeWindow() {
 }
 
 void NativeViewGLSurfaceEGL::Destroy() {
+  vsync_provider_internal_ = nullptr;
+
   if (surface_) {
     if (!eglDestroySurface(GetDisplay(), surface_)) {
       LOG(ERROR) << "eglDestroySurface failed with error "
@@ -831,51 +907,10 @@ bool NativeViewGLSurfaceEGL::IsOffscreen() {
   return false;
 }
 
-void NativeViewGLSurfaceEGL::UpdateSwapInterval() {
-#if defined(OS_WIN)
-  if (!g_use_direct_composition && (swap_interval_ != 0)) {
-    // This code is a simple way of enforcing that we only vsync if one surface
-    // is swapping per frame. This provides single window cases a stable refresh
-    // while allowing multi-window cases to not slow down due to multiple syncs
-    // on a single thread. A better way to fix this problem would be to have
-    // each surface present on its own thread. This is unnecessary with
-    // DirectComposition because that doesn't block swaps, but instead blocks
-    // the first draw into a surface during the next frame.
-
-    if (current_swap_generation_ == swap_generation_) {
-      if (swaps_this_generation_ > 1)
-        last_multiswap_generation_ = current_swap_generation_;
-      swaps_this_generation_ = 0;
-      current_swap_generation_++;
-    }
-
-    swap_generation_ = current_swap_generation_;
-
-    if (swaps_this_generation_ != 0 ||
-        (current_swap_generation_ - last_multiswap_generation_ <
-            MULTISWAP_FRAME_VSYNC_THRESHOLD)) {
-      // Override vsync settings and switch it off
-      if (!vsync_override_) {
-        eglSwapInterval(GetDisplay(), 0);
-        vsync_override_ = true;
-      }
-    } else if (vsync_override_) {
-      // Only one window swapping, so let the normal vsync setting take over
-      eglSwapInterval(GetDisplay(), swap_interval_);
-      vsync_override_ = false;
-    }
-
-    swaps_this_generation_++;
-  }
-#endif
-}
-
 gfx::SwapResult NativeViewGLSurfaceEGL::SwapBuffers() {
   TRACE_EVENT2("gpu", "NativeViewGLSurfaceEGL:RealSwapBuffers",
       "width", GetSize().width(),
       "height", GetSize().height());
-
-  UpdateSwapInterval();
 
   if (!CommitAndClearPendingOverlays()) {
     DVLOG(1) << "Failed to commit pending overlay planes.";
@@ -960,7 +995,6 @@ bool NativeViewGLSurfaceEGL::BuffersFlipped() const {
 gfx::SwapResult NativeViewGLSurfaceEGL::SwapBuffersWithDamage(
     const std::vector<int>& rects) {
   DCHECK(supports_swap_buffer_with_damage_);
-  UpdateSwapInterval();
   if (!CommitAndClearPendingOverlays()) {
     DVLOG(1) << "Failed to commit pending overlay planes.";
     return gfx::SwapResult::SWAP_FAILED;
@@ -981,7 +1015,6 @@ gfx::SwapResult NativeViewGLSurfaceEGL::PostSubBuffer(int x,
                                                       int width,
                                                       int height) {
   DCHECK(supports_post_sub_buffer_);
-  UpdateSwapInterval();
   if (!CommitAndClearPendingOverlays()) {
     DVLOG(1) << "Failed to commit pending overlay planes.";
     return gfx::SwapResult::SWAP_FAILED;
@@ -1018,7 +1051,8 @@ gfx::SwapResult NativeViewGLSurfaceEGL::CommitOverlayPlanes() {
 }
 
 gfx::VSyncProvider* NativeViewGLSurfaceEGL::GetVSyncProvider() {
-  return vsync_provider_.get();
+  return vsync_provider_external_ ? vsync_provider_external_.get()
+                                  : vsync_provider_internal_.get();
 }
 
 bool NativeViewGLSurfaceEGL::ScheduleOverlayPlane(
@@ -1035,10 +1069,6 @@ bool NativeViewGLSurfaceEGL::ScheduleOverlayPlane(
       GLSurfaceOverlay(z_order, transform, image, bounds_rect, crop_rect));
   return true;
 #endif
-}
-
-void NativeViewGLSurfaceEGL::OnSetSwapInterval(int interval) {
-  swap_interval_ = interval;
 }
 
 NativeViewGLSurfaceEGL::~NativeViewGLSurfaceEGL() {
@@ -1077,7 +1107,7 @@ bool PbufferGLSurfaceEGL::Initialize(GLSurfaceFormat format) {
   // to use a compatible config. We expect the client to request RGB565
   // onscreen surface also for this to work (with the exception of
   // fullscreen video).
-  if (base::SysInfo::IsLowEndDevice())
+  if (base::SysInfo::AmountOfPhysicalMemoryMB() <= 512)
     format.SetRGB565();
 #endif
 
@@ -1201,14 +1231,9 @@ PbufferGLSurfaceEGL::~PbufferGLSurfaceEGL() {
   Destroy();
 }
 
-SurfacelessEGL::SurfacelessEGL(const gfx::Size& size)
-    : size_(size) {
-  format_ = GLSurfaceFormat();
-  format_.SetIsSurfaceless();
-}
+SurfacelessEGL::SurfacelessEGL(const gfx::Size& size) : size_(size) {}
 
 bool SurfacelessEGL::Initialize(GLSurfaceFormat format) {
-  format.SetIsSurfaceless();
   format_ = format;
   return true;
 }

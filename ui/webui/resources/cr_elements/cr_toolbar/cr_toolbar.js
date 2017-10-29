@@ -35,10 +35,15 @@ Polymer({
       value: false,
     },
 
-    closeMenuPromo: String,
+    // True when the toolbar is displaying in narrow mode.
+    narrow: {
+      type: Boolean,
+      reflectToAttribute: true,
+      readonly: true,
+      notify: true,
+    },
 
-    /** @private */
-    narrow_: {type: Boolean, reflectToAttribute: true},
+    closeMenuPromo: String,
 
     /** @private */
     showingSearch_: {
@@ -75,8 +80,10 @@ Polymer({
                 {
                   opacity: [0, .9],
                 },
-                /** @type {!KeyframeEffectOptions} */ (
-                    {duration: 500, fill: 'forwards'}));
+                /** @type {!KeyframeEffectOptions} */ ({
+                  duration: 500,
+                  fill: 'forwards'
+                }));
         this.fire('cr-toolbar-menu-promo-shown');
       }
     }.bind(this));

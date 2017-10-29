@@ -20,6 +20,7 @@
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "extensions/browser/extension_function.h"
+#include "extensions/common/extension.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 class Profile;
@@ -117,7 +118,7 @@ class EPKPChallengeKeyBase {
       default_attestation_flow_;
   ChallengeKeyCallback callback_;
   Profile* profile_;
-  std::string extension_id_;
+  scoped_refptr<const Extension> extension_;
 
  private:
   // Holds the context of a PrepareKey() operation.
@@ -163,6 +164,7 @@ class EPKPChallengeKeyBase {
 class EPKPChallengeMachineKey : public EPKPChallengeKeyBase {
  public:
   static const char kGetCertificateFailedError[];
+  static const char kKeyRegistrationFailedError[];
   static const char kNonEnterpriseDeviceError[];
 
   EPKPChallengeMachineKey();
@@ -177,27 +179,37 @@ class EPKPChallengeMachineKey : public EPKPChallengeKeyBase {
   // context.
   void Run(scoped_refptr<UIThreadExtensionFunction> caller,
            const ChallengeKeyCallback& callback,
-           const std::string& encoded_challenge);
+           const std::string& encoded_challenge,
+           bool register_key);
 
   // Like |Run| but expects a Base64 |encoded_challenge|.
   void DecodeAndRun(scoped_refptr<UIThreadExtensionFunction> caller,
                     const ChallengeKeyCallback& callback,
-                    const std::string& encoded_challenge);
+                    const std::string& encoded_challenge,
+                    bool register_key);
 
  private:
   static const char kKeyName[];
 
   void GetDeviceAttestationEnabledCallback(const std::string& challenge,
+                                           bool register_key,
                                            bool enabled);
   void PrepareKeyCallback(const std::string& challenge,
+                          bool register_key,
                           PrepareKeyResult result);
-  void SignChallengeCallback(bool success, const std::string& response);
+  void SignChallengeCallback(bool register_key,
+                             bool success,
+                             const std::string& response);
+  void RegisterKeyCallback(const std::string& response,
+                           bool success,
+                           cryptohome::MountError return_code);
 };
 
 class EPKPChallengeUserKey : public EPKPChallengeKeyBase {
  public:
   static const char kGetCertificateFailedError[];
   static const char kKeyRegistrationFailedError[];
+  static const char kUserKeyNotAvailable[];
   static const char kUserPolicyDisabledError[];
 
   EPKPChallengeUserKey();

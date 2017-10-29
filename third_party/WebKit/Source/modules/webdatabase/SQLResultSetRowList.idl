@@ -26,8 +26,9 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://www.w3.org/TR/webdatabase/#sqlresultsetrowlist
 [
-    NoInterfaceObject,
+    NoInterfaceObject
 ] interface SQLResultSetRowList {
     readonly attribute unsigned long length;
     [RaisesException, CallWith=ScriptState] getter any item(unsigned long index);

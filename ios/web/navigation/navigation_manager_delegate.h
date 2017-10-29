@@ -9,6 +9,8 @@
 
 #import "ios/web/public/navigation_manager.h"
 
+@protocol CRWWebViewNavigationProxy;
+
 namespace web {
 
 struct LoadCommittedDetails;
@@ -27,6 +29,9 @@ class NavigationManagerDelegate {
   // Instructs the delegate to load the URL.
   virtual void LoadURLWithParams(const NavigationManager::WebLoadParams&) = 0;
 
+  // Instructs the delegate to reload.
+  virtual void Reload() = 0;
+
   // Informs the delegate that committed navigation items have been pruned.
   virtual void OnNavigationItemsPruned(size_t pruned_item_count) = 0;
 
@@ -39,6 +44,10 @@ class NavigationManagerDelegate {
 
   // Returns the WebState associated with this delegate.
   virtual WebState* GetWebState() = 0;
+
+  // Returns a CRWWebViewNavigationProxy protocol that can be used to access
+  // navigation related functions on the main WKWebView.
+  virtual id<CRWWebViewNavigationProxy> GetWebViewNavigationProxy() const = 0;
 };
 
 }  // namespace web

@@ -2,16 +2,20 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/buildflag_header.gni")
 import("//build/config/ui.gni")
-import("//ui/vector_icons/vector_icons.gni")
+import("//device/vr/features/features.gni")
+import("//components/vector_icons/vector_icons.gni")
+
+buildflag_header("build_features") {
+  header = "features.h"
+  flags = [ "ENABLE_VR=$enable_vr" ]
+}
 
 aggregate_vector_icons("toolbar_vector_icons") {
   icon_directory = "vector_icons"
 
   icons = [
-    # TODO(estade): this is the same as ui/gfx/vector_icons/business.icon. Use
-    # that one instead once it's been updated from VectorIconId to VectorIcon.
-    "business.icon",
     "http.1x.icon",
     "http.icon",
     "https_invalid.1x.icon",
@@ -20,6 +24,7 @@ aggregate_vector_icons("toolbar_vector_icons") {
     "https_valid.icon",
     "https_valid_in_chip.1x.icon",
     "https_valid_in_chip.icon",
+    "offline_pin.icon",
     "product.1x.icon",
     "product.icon",
     "star_active.icon",
@@ -27,31 +32,45 @@ aggregate_vector_icons("toolbar_vector_icons") {
   ]
 }
 
+static_library("vector_icons") {
+  sources = get_target_outputs(":toolbar_vector_icons")
+  deps = [
+    ":toolbar_vector_icons",
+    "//components/vector_icons",
+    "//skia",
+    "//ui/gfx",
+  ]
+}
+
 static_library("toolbar") {
   sources = [
+    "features.h",
     "toolbar_model.h",
     "toolbar_model_delegate.h",
     "toolbar_model_impl.cc",
     "toolbar_model_impl.h",
   ]
 
-  deps = [
+  public_deps = [
     "//base",
+    "//components/security_state/core",
+    "//url",
+  ]
+
+  deps = [
+    ":build_features",
     "//components/google/core/browser",
     "//components/prefs",
     "//components/resources",
-    "//components/security_state/core",
     "//components/strings",
     "//components/url_formatter",
     "//net",
     "//ui/base",
     "//ui/gfx",
-    "//url",
   ]
 
-  if (!is_android && !is_ios) {
-    sources += get_target_outputs(":toolbar_vector_icons")
-    deps += [ ":toolbar_vector_icons" ]
+  if ((!is_android || enable_vr) && !is_ios) {
+    deps += [ ":vector_icons" ]
   }
 }
 
@@ -63,9 +82,12 @@ static_library("test_support") {
     "test_toolbar_model.h",
   ]
 
-  deps = [
+  public_deps = [
     ":toolbar",
     "//base",
+  ]
+
+  deps = [
     "//components/resources",
     "//ui/gfx",
   ]

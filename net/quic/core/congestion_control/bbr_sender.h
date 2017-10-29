@@ -36,8 +36,6 @@ typedef uint64_t QuicRoundTripCount;
 // pacing is disabled.
 //
 // TODO(vasilvv): implement traffic policer (long-term sampling) mode.
-//
-// TODO(vasilvv): implement packet conservation.
 class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
  public:
   enum Mode {
@@ -102,10 +100,11 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
   bool InRecovery() const override;
 
   void SetFromConfig(const QuicConfig& config,
-                     Perspective perspective) override {}
+                     Perspective perspective) override;
+
   void ResumeConnectionState(
       const CachedNetworkParameters& cached_network_params,
-      bool max_bandwidth_resumption) override {}
+      bool max_bandwidth_resumption) override;
   void SetNumEmulatedConnections(int num_connections) override {}
   void OnCongestionEvent(bool rtt_updated,
                          QuicByteCount prior_in_flight,
@@ -120,7 +119,7 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
   void OnRetransmissionTimeout(bool packets_retransmitted) override {}
   void OnConnectionMigration() override {}
   QuicTime::Delta TimeUntilSend(QuicTime now,
-                                QuicByteCount bytes_in_flight) const override;
+                                QuicByteCount bytes_in_flight) override;
   QuicBandwidth PacingRate(QuicByteCount bytes_in_flight) const override;
   QuicBandwidth BandwidthEstimate() const override;
   QuicByteCount GetCongestionWindow() const override;
@@ -130,6 +129,9 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
   void OnApplicationLimited(QuicByteCount bytes_in_flight) override;
   // End implementation of SendAlgorithmInterface.
 
+  // Gets the number of RTTs BBR remains in STARTUP phase.
+  QuicRoundTripCount num_startup_rtts() const { return num_startup_rtts_; }
+
   DebugState ExportDebugState() const;
 
  private:
@@ -138,6 +140,18 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
                          QuicRoundTripCount,
                          QuicRoundTripCount>
       MaxBandwidthFilter;
+
+  typedef WindowedFilter<QuicTime::Delta,
+                         MaxFilter<QuicTime::Delta>,
+                         QuicRoundTripCount,
+                         QuicRoundTripCount>
+      MaxAckDelayFilter;
+
+  typedef WindowedFilter<QuicByteCount,
+                         MaxFilter<QuicByteCount>,
+                         QuicRoundTripCount,
+                         QuicRoundTripCount>
+      MaxAckHeightFilter;
 
   // Returns the current estimate of the RTT of the connection.  Outside of the
   // edge cases, this is minimum RTT.
@@ -182,13 +196,18 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
                            bool has_losses,
                            bool is_round_start);
 
+  // Updates the ack aggregation max filter in bytes.
+  void UpdateAckAggregationBytes(QuicTime ack_time,
+                                 QuicByteCount newly_acked_bytes);
+
   // Determines the appropriate pacing rate for the connection.
   void CalculatePacingRate();
   // Determines the appropriate congestion window for the connection.
   void CalculateCongestionWindow(QuicByteCount bytes_acked);
   // Determines the approriate window that constrains the in-flight during
   // recovery.
-  void CalculateRecoveryWindow(QuicByteCount bytes_acked);
+  void CalculateRecoveryWindow(QuicByteCount bytes_acked,
+                               QuicByteCount bytes_lost);
 
   const RttStats* rtt_stats_;
   const QuicUnackedPacketMap* unacked_packets_;
@@ -212,6 +231,17 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
   // The filter that tracks the maximum bandwidth over the multiple recent
   // round-trips.
   MaxBandwidthFilter max_bandwidth_;
+
+  // Tracks the maximum number of bytes acked faster than the sending rate.
+  MaxAckHeightFilter max_ack_height_;
+
+  // The time this aggregation started and the number of bytes acked during it.
+  QuicTime aggregation_epoch_start_time_;
+  QuicByteCount aggregation_epoch_bytes_;
+
+  // The number of bytes acknowledged since the last time bytes in flight
+  // dropped below the target window.
+  QuicByteCount bytes_acked_since_queue_drained_;
 
   // Minimum RTT estimate.  Automatically expires within 10 seconds (and
   // triggers PROBE_RTT mode) if no new value is sampled during that period.
@@ -242,6 +272,8 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
   // The coefficient by which mean RTT variance is added to the congestion
   // window.  Latched from quic_bbr_rtt_variation_weight flag.
   const float rtt_variance_weight_;
+  // The number of RTTs to stay in STARTUP mode.  Defaults to 3.
+  QuicRoundTripCount num_startup_rtts_;
 
   // Number of round-trips in PROBE_BW mode, used for determining the current
   // pacing gain cycle.
@@ -277,6 +309,9 @@ class QUIC_EXPORT_PRIVATE BbrSender : public SendAlgorithmInterface {
   QuicPacketNumber end_recovery_at_;
   // A window used to limit the number of bytes in flight during loss recovery.
   QuicByteCount recovery_window_;
+
+  // When true, recovery is rate based rather than congestion window based.
+  bool rate_based_recovery_;
 
   DISALLOW_COPY_AND_ASSIGN(BbrSender);
 };

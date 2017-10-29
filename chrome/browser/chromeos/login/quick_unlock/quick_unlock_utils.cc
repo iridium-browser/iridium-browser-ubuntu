@@ -18,7 +18,12 @@ namespace chromeos {
 namespace quick_unlock {
 
 namespace {
+// Quick unlock is enabled regardless of flags.
 bool enable_for_testing_ = false;
+// If testing is enabled, PIN will use prefs as backend. Otherwise, it will use
+// cryptohome.
+PinStorageType testing_pin_storage_type_ = PinStorageType::kPrefs;
+
 // Options for the quick unlock whitelist.
 const char kQuickUnlockWhitelistOptionAll[] = "all";
 const char kQuickUnlockWhitelistOptionPin[] = "PIN";
@@ -46,7 +51,7 @@ void RegisterProfilePrefs(PrefRegistrySimple* registry) {
   base::ListValue quick_unlock_whitelist_default;
   quick_unlock_whitelist_default.AppendString(kQuickUnlockWhitelistOptionPin);
   registry->RegisterListPref(prefs::kQuickUnlockModeWhitelist,
-                             quick_unlock_whitelist_default.DeepCopy());
+                             quick_unlock_whitelist_default.CreateDeepCopy());
   registry->RegisterIntegerPref(
       prefs::kQuickUnlockTimeout,
       static_cast<int>(PasswordConfirmationFrequency::DAY));
@@ -68,8 +73,8 @@ bool IsPinEnabled(PrefService* pref_service) {
   // Check if policy allows PIN.
   const base::ListValue* quick_unlock_whitelist =
       pref_service->GetList(prefs::kQuickUnlockModeWhitelist);
-  base::StringValue all_value(kQuickUnlockWhitelistOptionAll);
-  base::StringValue pin_value(kQuickUnlockWhitelistOptionPin);
+  base::Value all_value(kQuickUnlockWhitelistOptionAll);
+  base::Value pin_value(kQuickUnlockWhitelistOptionPin);
   if (quick_unlock_whitelist->Find(all_value) ==
           quick_unlock_whitelist->end() &&
       quick_unlock_whitelist->Find(pin_value) ==
@@ -87,6 +92,15 @@ bool IsPinEnabled(PrefService* pref_service) {
   return base::FeatureList::IsEnabled(features::kQuickUnlockPin);
 }
 
+PinStorageType GetPinStorageType() {
+  if (enable_for_testing_)
+    return testing_pin_storage_type_;
+
+  if (base::FeatureList::IsEnabled(features::kQuickUnlockPinSignin))
+    return PinStorageType::kCryptohome;
+  return PinStorageType::kPrefs;
+}
+
 bool IsFingerprintEnabled() {
   if (enable_for_testing_)
     return true;
@@ -95,8 +109,9 @@ bool IsFingerprintEnabled() {
   return base::FeatureList::IsEnabled(features::kQuickUnlockFingerprint);
 }
 
-void EnableForTesting() {
+void EnableForTesting(PinStorageType pin_storage_type) {
   enable_for_testing_ = true;
+  testing_pin_storage_type_ = pin_storage_type;
 }
 
 }  // namespace quick_unlock

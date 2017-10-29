@@ -12,8 +12,8 @@
 #include <tuple>
 #include <unordered_map>
 
-#include "SkStream.h"
 #include "SkSLCodeGenerator.h"
+#include "SkSLStringStream.h"
 #include "ir/SkSLBinaryExpression.h"
 #include "ir/SkSLBoolLiteral.h"
 #include "ir/SkSLConstructor.h"
@@ -33,6 +33,7 @@
 #include "ir/SkSLPostfixExpression.h"
 #include "ir/SkSLProgramElement.h"
 #include "ir/SkSLReturnStatement.h"
+#include "ir/SkSLSetting.h"
 #include "ir/SkSLStatement.h"
 #include "ir/SkSLSwitchStatement.h"
 #include "ir/SkSLSwizzle.h"
@@ -69,26 +70,31 @@ public:
         kTernary_Precedence        = 15,
         kAssignment_Precedence     = 16,
         kSequence_Precedence       = 17,
-        kTopLevel_Precedence       = 18
+        kTopLevel_Precedence       = kSequence_Precedence
     };
 
     GLSLCodeGenerator(const Context* context, const Program* program, ErrorReporter* errors,
-                      SkWStream* out)
+                      OutputStream* out)
     : INHERITED(program, errors, out)
+    , fLineEnding("\n")
     , fContext(*context) {}
 
-    virtual bool generateCode() override;
+    bool generateCode() override;
 
-private:
+protected:
     void write(const char* s);
 
     void writeLine();
 
     void writeLine(const char* s);
 
-    void write(const SkString& s);
+    void write(const String& s);
 
-    void writeLine(const SkString& s);
+    void writeLine(const String& s);
+
+    virtual void writeHeader();
+
+    virtual void writePrecisionModifier();
 
     void writeType(const Type& type);
 
@@ -97,10 +103,10 @@ private:
     void writeInterfaceBlock(const InterfaceBlock& intf);
 
     void writeFunctionStart(const FunctionDeclaration& f);
-    
+
     void writeFunctionDeclaration(const FunctionDeclaration& f);
 
-    void writeFunction(const FunctionDefinition& f);
+    virtual void writeFunction(const FunctionDefinition& f);
 
     void writeLayout(const Layout& layout);
 
@@ -108,11 +114,13 @@ private:
 
     void writeGlobalVars(const VarDeclaration& vs);
 
+    virtual void writeVarInitializer(const Variable& var, const Expression& value);
+
     void writeVarDeclarations(const VarDeclarations& decl, bool global);
 
     void writeFragCoord();
 
-    void writeVariableReference(const VariableReference& ref);
+    virtual void writeVariableReference(const VariableReference& ref);
 
     void writeExpression(const Expression& expr, Precedence parentPrecedence);
 
@@ -120,7 +128,7 @@ private:
 
     void writeMinAbsHack(Expression& absExpr, Expression& otherExpr);
 
-    void writeFunctionCall(const FunctionCall& c);
+    virtual void writeFunctionCall(const FunctionCall& c);
 
     void writeConstructor(const Constructor& c);
 
@@ -128,11 +136,13 @@ private:
 
     void writeSwizzle(const Swizzle& swizzle);
 
-    void writeBinaryExpression(const BinaryExpression& b, Precedence parentPrecedence);
+    static Precedence GetBinaryPrecedence(Token::Kind op);
+
+    virtual void writeBinaryExpression(const BinaryExpression& b, Precedence parentPrecedence);
 
     void writeTernaryExpression(const TernaryExpression& t, Precedence parentPrecedence);
 
-    void writeIndexExpression(const IndexExpression& expr);
+    virtual void writeIndexExpression(const IndexExpression& expr);
 
     void writePrefixExpression(const PrefixExpression& p, Precedence parentPrecedence);
 
@@ -144,11 +154,15 @@ private:
 
     void writeFloatLiteral(const FloatLiteral& f);
 
+    virtual void writeSetting(const Setting& s);
+
     void writeStatement(const Statement& s);
+
+    void writeStatements(const std::vector<std::unique_ptr<Statement>>& statements);
 
     void writeBlock(const Block& b);
 
-    void writeIfStatement(const IfStatement& stmt);
+    virtual void writeIfStatement(const IfStatement& stmt);
 
     void writeForStatement(const ForStatement& f);
 
@@ -156,13 +170,16 @@ private:
 
     void writeDoStatement(const DoStatement& d);
 
-    void writeSwitchStatement(const SwitchStatement& s);
+    virtual void writeSwitchStatement(const SwitchStatement& s);
 
     void writeReturnStatement(const ReturnStatement& r);
 
+    virtual void writeProgramElement(const ProgramElement& e);
+
+    const char* fLineEnding;
     const Context& fContext;
-    SkDynamicMemoryWStream fHeader;
-    SkString fFunctionHeader;
+    StringStream fHeader;
+    String fFunctionHeader;
     Program::Kind fProgramKind;
     int fVarCount = 0;
     int fIndentation = 0;

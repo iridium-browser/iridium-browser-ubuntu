@@ -13,10 +13,12 @@
 #include "base/callback.h"
 #include "base/json/json_writer.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "net/base/net_errors.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -50,9 +52,10 @@ std::string BuildResponse(bool is_porn) {
       new base::DictionaryValue);
   if (is_porn)
     classification_dict->SetBoolean("pornography", is_porn);
-  base::ListValue* classifications_list = new base::ListValue;
+  auto classifications_list = base::MakeUnique<base::ListValue>();
   classifications_list->Append(std::move(classification_dict));
-  dict.SetWithoutPathExpansion("classifications", classifications_list);
+  dict.SetWithoutPathExpansion("classifications",
+                               std::move(classifications_list));
   std::string result;
   base::JSONWriter::Write(dict, &result);
   return result;
@@ -66,7 +69,9 @@ class SafeSearchURLCheckerTest : public testing::Test {
       : next_url_(0),
         request_context_(new net::TestURLRequestContextGetter(
             base::ThreadTaskRunnerHandle::Get())),
-        checker_(request_context_.get(), kCacheSize) {}
+        checker_(request_context_.get(),
+                 TRAFFIC_ANNOTATION_FOR_TESTS,
+                 kCacheSize) {}
 
   MOCK_METHOD3(OnCheckDone,
                void(const GURL& url,

@@ -143,6 +143,13 @@ void FakeDebugDaemonClient::GetUserLogFiles(const GetLogsCallback& callback) {
       FROM_HERE, base::Bind(callback, true, user_logs));
 }
 
+void FakeDebugDaemonClient::GetLog(const std::string& log_name,
+                                   const GetLogCallback& callback) {
+  std::string result = log_name + ": response from GetLog";
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(callback, true, result));
+}
+
 void FakeDebugDaemonClient::TestICMP(const std::string& ip_address,
                                      const TestICMPCallback& callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -216,18 +223,6 @@ void FakeDebugDaemonClient::SetServiceIsAvailable(bool is_available) {
   callbacks.swap(pending_wait_for_service_to_be_available_callbacks_);
   for (size_t i = 0; i < callbacks.size(); ++i)
     callbacks[i].Run(is_available);
-}
-
-void FakeDebugDaemonClient::CupsAddPrinter(
-    const std::string& name,
-    const std::string& uri,
-    const std::string& ppd_path,
-    bool ipp_everywhere,
-    const DebugDaemonClient::LegacyCupsAddPrinterCallback& callback,
-    const base::Closure& error_callback) {
-  printers_.insert(name);
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                base::Bind(callback, true));
 }
 
 void FakeDebugDaemonClient::CupsAddManuallyConfiguredPrinter(

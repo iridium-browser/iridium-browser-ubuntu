@@ -16,11 +16,10 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
-#include "base/rand_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/task_runner_util.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -34,15 +33,14 @@
 #include "chrome/browser/profiles/profile_downloader.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/grit/theme_resources.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/user_manager/user_image/user_image.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/browser/browser_thread.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace chromeos {
@@ -326,8 +324,7 @@ void UserImageManagerImpl::Job::LoadImage(base::FilePath image_path,
   image_url_ = image_url;
   image_path_ = image_path;
 
-  if (image_index_ >= 0 &&
-      image_index_ < default_user_image::kDefaultImagesCount) {
+  if (default_user_image::IsValidIndex(image_index_)) {
     // Load one of the default images. This happens synchronously.
     std::unique_ptr<user_manager::UserImage> user_image(
         new user_manager::UserImage(
@@ -357,8 +354,7 @@ void UserImageManagerImpl::Job::SetToDefaultImage(int default_image_index) {
   DCHECK(!run_);
   run_ = true;
 
-  DCHECK_LE(0, default_image_index);
-  DCHECK_GT(default_user_image::kDefaultImagesCount, default_image_index);
+  DCHECK(default_user_image::IsValidIndex(default_image_index));
 
   image_index_ = default_image_index;
   std::unique_ptr<user_manager::UserImage> user_image(
@@ -447,7 +443,7 @@ void UserImageManagerImpl::Job::UpdateUser(
     user->SetStubImage(
         base::MakeUnique<user_manager::UserImage>(
             *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-                IDR_PROFILE_PICTURE_LOADING)),
+                IDR_LOGIN_DEFAULT_USER)),
         image_index_, false);
   }
   user->SetImageURL(image_url_);
@@ -544,13 +540,15 @@ void UserImageManagerImpl::Job::UpdateLocalState() {
     return;
 
   std::unique_ptr<base::DictionaryValue> entry(new base::DictionaryValue);
-  entry->Set(kImagePathNodeName, new base::StringValue(image_path_.value()));
-  entry->Set(kImageIndexNodeName, new base::Value(image_index_));
+  entry->Set(kImagePathNodeName,
+             base::MakeUnique<base::Value>(image_path_.value()));
+  entry->Set(kImageIndexNodeName, base::MakeUnique<base::Value>(image_index_));
   if (!image_url_.is_empty())
-    entry->Set(kImageURLNodeName, new base::StringValue(image_url_.spec()));
+    entry->Set(kImageURLNodeName,
+               base::MakeUnique<base::Value>(image_url_.spec()));
   DictionaryPrefUpdate update(g_browser_process->local_state(),
                               kUserImageProperties);
-  update->SetWithoutPathExpansion(user_id(), entry.release());
+  update->SetWithoutPathExpansion(user_id(), std::move(entry));
 
   parent_->user_manager_->NotifyLocalStateChanged();
 }
@@ -568,12 +566,9 @@ UserImageManagerImpl::UserImageManagerImpl(
       profile_image_requested_(false),
       has_managed_image_(false),
       weak_factory_(this) {
-  base::SequencedWorkerPool* blocking_pool =
-      content::BrowserThread::GetBlockingPool();
-  background_task_runner_ =
-      blocking_pool->GetSequencedTaskRunnerWithShutdownBehavior(
-          blocking_pool->GetSequenceToken(),
-          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
+  background_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
 }
 
 UserImageManagerImpl::~UserImageManagerImpl() {}
@@ -602,8 +597,7 @@ void UserImageManagerImpl::LoadUserImage() {
 
   int image_index = user_manager::User::USER_IMAGE_INVALID;
   image_properties->GetInteger(kImageIndexNodeName, &image_index);
-  if (image_index >= 0 &&
-      image_index < default_user_image::kDefaultImagesCount) {
+  if (default_user_image::IsValidIndex(image_index)) {
     user->SetImage(base::MakeUnique<user_manager::UserImage>(
                        default_user_image::GetDefaultImage(image_index)),
                    image_index);
@@ -625,7 +619,7 @@ void UserImageManagerImpl::LoadUserImage() {
   user->SetImageURL(image_url);
   user->SetStubImage(base::MakeUnique<user_manager::UserImage>(
                          *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-                             IDR_PROFILE_PICTURE_LOADING)),
+                             IDR_LOGIN_DEFAULT_USER)),
                      image_index, true);
   DCHECK(!image_path.empty() ||
          image_index == user_manager::User::USER_IMAGE_PROFILE);
@@ -646,9 +640,9 @@ void UserImageManagerImpl::UserLoggedIn(bool user_is_new,
     if (!user_is_local)
       SetInitialUserImage();
   } else {
-    UMA_HISTOGRAM_ENUMERATION("UserImage.LoggedIn",
-                              ImageIndexToHistogramIndex(user->image_index()),
-                              default_user_image::kHistogramImagesCount);
+    UMA_HISTOGRAM_EXACT_LINEAR("UserImage.LoggedIn",
+                               ImageIndexToHistogramIndex(user->image_index()),
+                               default_user_image::kHistogramImagesCount);
   }
 
   // Reset the downloaded profile image as a new user logged in.
@@ -921,9 +915,7 @@ bool UserImageManagerImpl::IsUserImageManaged() const {
 
 void UserImageManagerImpl::SetInitialUserImage() {
   // Choose a random default image.
-  SaveUserDefaultImageIndex(
-      base::RandInt(default_user_image::kFirstDefaultImageIndex,
-                    default_user_image::kDefaultImagesCount - 1));
+  SaveUserDefaultImageIndex(default_user_image::GetRandomDefaultImageIndex());
 }
 
 void UserImageManagerImpl::TryToInitDownloadedProfileImage() {
@@ -978,10 +970,8 @@ void UserImageManagerImpl::DeleteUserImageAndLocalStateEntry(
   image_properties->GetString(kImagePathNodeName, &image_path);
   if (!image_path.empty()) {
     background_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(base::IgnoreResult(&base::DeleteFile),
-                   base::FilePath(image_path),
-                   false));
+        FROM_HERE, base::BindOnce(base::IgnoreResult(&base::DeleteFile),
+                                  base::FilePath(image_path), false));
   }
   update->RemoveWithoutPathExpansion(user_id(), nullptr);
 }

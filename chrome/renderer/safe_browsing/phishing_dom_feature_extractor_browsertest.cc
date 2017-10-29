@@ -5,6 +5,7 @@
 #include "chrome/renderer/safe_browsing/phishing_dom_feature_extractor.h"
 
 #include <memory>
+#include <unordered_map>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -24,12 +25,12 @@
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/WebKit/public/platform/URLConversion.h"
+#include "third_party/WebKit/public/platform/WebRuntimeFeatures.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
-#include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
-#include "ui/native_theme/native_theme_switches.h"
+#include "ui/native_theme/native_theme_features.h"
 
 using ::testing::DoAll;
 using ::testing::Invoke;
@@ -50,7 +51,7 @@ class TestPhishingDOMFeatureExtractor : public PhishingDOMFeatureExtractor {
   void SetDocumentDomain(std::string domain) { base_domain_ = domain; }
 
   void SetURLToFrameDomainCheckingMap(
-      const base::hash_map<std::string, std::string>& checking_map) {
+      const std::unordered_map<std::string, std::string>& checking_map) {
     url_to_frame_domain_map_ = checking_map;
   }
 
@@ -100,12 +101,12 @@ class TestPhishingDOMFeatureExtractor : public PhishingDOMFeatureExtractor {
       full_url = parsed_url;
     } else if (!base_domain_.empty()) {
       // This is a partial URL and only one frame in testing html.
-      full_url = GURL("http://" + base_domain_).Resolve(partial_url.utf8());
+      full_url = GURL("http://" + base_domain_).Resolve(partial_url.Utf8());
     } else {
-      auto it = url_to_frame_domain_map_.find(partial_url.utf8());
+      auto it = url_to_frame_domain_map_.find(partial_url.Utf8());
       if (it != url_to_frame_domain_map_.end()) {
         const std::string frame_domain = it->second;
-        full_url = GURL("http://" + it->second).Resolve(partial_url.utf8());
+        full_url = GURL("http://" + it->second).Resolve(partial_url.Utf8());
         url_to_frame_domain_map_[full_url.spec()] = it->second;
       } else {
         NOTREACHED() << "Testing input setup is incorrect. "
@@ -122,7 +123,7 @@ class TestPhishingDOMFeatureExtractor : public PhishingDOMFeatureExtractor {
   // If html contains multiple frame/iframe, we track domain of each frame by
   // using this map, where keys are the urls mentioned in the html content,
   // values are the domains of the corresponding frames.
-  base::hash_map<std::string, std::string> url_to_frame_domain_map_;
+  std::unordered_map<std::string, std::string> url_to_frame_domain_map_;
 };
 
 class TestChromeContentRendererClient : public ChromeContentRendererClient {
@@ -154,12 +155,13 @@ class PhishingDOMFeatureExtractorTest : public ChromeRenderViewTest {
   void ExtractFeaturesAcrossFrames(
       const std::string& html_content,
       FeatureMap* features,
-      const base::hash_map<std::string, std::string>& url_frame_domain_map) {
+      const std::unordered_map<std::string, std::string>&
+          url_frame_domain_map) {
     extractor_->SetURLToFrameDomainCheckingMap(url_frame_domain_map);
     LoadHTML(html_content.c_str());
 
     extractor_->ExtractFeatures(
-        GetMainFrame()->document(), features,
+        GetMainFrame()->GetDocument(), features,
         base::Bind(&PhishingDOMFeatureExtractorTest::AnotherExtractionDone,
                    weak_factory_.GetWeakPtr()));
     message_loop_->Run();
@@ -172,7 +174,7 @@ class PhishingDOMFeatureExtractorTest : public ChromeRenderViewTest {
     LoadHTML(html_content.c_str());
 
     extractor_->ExtractFeatures(
-        GetMainFrame()->document(), features,
+        GetMainFrame()->GetDocument(), features,
         base::Bind(&PhishingDOMFeatureExtractorTest::AnotherExtractionDone,
                    weak_factory_.GetWeakPtr()));
     message_loop_->Run();
@@ -182,14 +184,15 @@ class PhishingDOMFeatureExtractorTest : public ChromeRenderViewTest {
   // the iframe "frame1" from the document.
   void ScheduleRemoveIframe() {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&PhishingDOMFeatureExtractorTest::RemoveIframe,
-                              weak_factory_.GetWeakPtr()));
+        FROM_HERE,
+        base::BindOnce(&PhishingDOMFeatureExtractorTest::RemoveIframe,
+                       weak_factory_.GetWeakPtr()));
   }
 
  protected:
   void SetUp() override {
     ChromeRenderViewTest::SetUp();
-    WebRuntimeFeatures::enableOverlayScrollbars(
+    WebRuntimeFeatures::EnableOverlayScrollbars(
         ui::IsOverlayScrollbarEnabled());
     extractor_.reset(new TestPhishingDOMFeatureExtractor(&clock_));
   }
@@ -212,9 +215,9 @@ class PhishingDOMFeatureExtractorTest : public ChromeRenderViewTest {
 
   // Does the actual work of removing the iframe "frame1" from the document.
   void RemoveIframe() {
-    blink::WebFrame* main_frame = GetMainFrame();
+    blink::WebLocalFrame* main_frame = GetMainFrame();
     ASSERT_TRUE(main_frame);
-    main_frame->executeScript(blink::WebString(
+    main_frame->ExecuteScript(blink::WebString(
         "document.body.removeChild(document.getElementById('frame1'));"));
   }
 
@@ -375,7 +378,7 @@ TEST_F(PhishingDOMFeatureExtractorTest, SubFrames) {
   EXPECT_CALL(clock_, Now()).WillRepeatedly(Return(base::TimeTicks::Now()));
 
   const char urlprefix[] = "data:text/html;charset=utf-8,";
-  base::hash_map<std::string, std::string> url_iframe_map;
+  std::unordered_map<std::string, std::string> url_iframe_map;
   std::string iframe1_nested_html(
       "<html><body><input type=password>"
       "<a href=\"https://host3.com/submit\">link</a>"

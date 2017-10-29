@@ -8,8 +8,8 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/DisplayItem.h"
 #include "platform/graphics/paint/PaintController.h"
-#include "wtf/Allocator.h"
-#include "wtf/Noncopyable.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
@@ -26,23 +26,33 @@ class PaintController;
 // responsible for checking that none of the DisplayItemClients that contribute
 // to the subsequence have been invalidated.
 //
-class PLATFORM_EXPORT SubsequenceRecorder final {
+class SubsequenceRecorder final {
   DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
   WTF_MAKE_NONCOPYABLE(SubsequenceRecorder);
 
  public:
-  static bool useCachedSubsequenceIfPossible(GraphicsContext& context,
+  static bool UseCachedSubsequenceIfPossible(GraphicsContext& context,
                                              const DisplayItemClient& client) {
-    return context.getPaintController().useCachedSubsequenceIfPossible(client);
+    return context.GetPaintController().UseCachedSubsequenceIfPossible(client);
   }
 
-  SubsequenceRecorder(GraphicsContext&, const DisplayItemClient&);
-  ~SubsequenceRecorder();
+  SubsequenceRecorder(GraphicsContext& context, const DisplayItemClient& client)
+      : paint_controller_(context.GetPaintController()),
+        client_(client),
+        start_(0) {
+    if (!paint_controller_.DisplayItemConstructionIsDisabled())
+      start_ = paint_controller_.BeginSubsequence();
+  }
+
+  ~SubsequenceRecorder() {
+    if (!paint_controller_.DisplayItemConstructionIsDisabled())
+      paint_controller_.EndSubsequence(client_, start_);
+  }
 
  private:
-  PaintController& m_paintController;
-  const DisplayItemClient& m_client;
-  size_t m_beginSubsequenceIndex;
+  PaintController& paint_controller_;
+  const DisplayItemClient& client_;
+  size_t start_;
 };
 
 }  // namespace blink

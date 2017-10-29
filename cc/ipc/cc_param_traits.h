@@ -7,10 +7,10 @@
 #ifndef CC_IPC_CC_PARAM_TRAITS_H_
 #define CC_IPC_CC_PARAM_TRAITS_H_
 
+#include "cc/base/filter_operation.h"
 #include "cc/ipc/cc_ipc_export.h"
 #include "cc/ipc/cc_param_traits_macros.h"
 #include "cc/output/compositor_frame.h"
-#include "cc/output/filter_operation.h"
 #include "cc/quads/draw_quad.h"
 #include "cc/quads/stream_video_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
@@ -67,8 +67,8 @@ struct CC_IPC_EXPORT ParamTraits<cc::RenderPass> {
 };
 
 template <>
-struct CC_IPC_EXPORT ParamTraits<cc::FrameSinkId> {
-  typedef cc::FrameSinkId param_type;
+struct CC_IPC_EXPORT ParamTraits<viz::FrameSinkId> {
+  typedef viz::FrameSinkId param_type;
   static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
@@ -78,8 +78,8 @@ struct CC_IPC_EXPORT ParamTraits<cc::FrameSinkId> {
 };
 
 template <>
-struct CC_IPC_EXPORT ParamTraits<cc::LocalSurfaceId> {
-  typedef cc::LocalSurfaceId param_type;
+struct CC_IPC_EXPORT ParamTraits<viz::LocalSurfaceId> {
+  typedef viz::LocalSurfaceId param_type;
   static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
@@ -89,8 +89,8 @@ struct CC_IPC_EXPORT ParamTraits<cc::LocalSurfaceId> {
 };
 
 template <>
-struct CC_IPC_EXPORT ParamTraits<cc::SurfaceId> {
-  typedef cc::SurfaceId param_type;
+struct CC_IPC_EXPORT ParamTraits<viz::SurfaceId> {
+  typedef viz::SurfaceId param_type;
   static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
@@ -100,8 +100,8 @@ struct CC_IPC_EXPORT ParamTraits<cc::SurfaceId> {
 };
 
 template <>
-struct CC_IPC_EXPORT ParamTraits<cc::SurfaceInfo> {
-  typedef cc::SurfaceInfo param_type;
+struct CC_IPC_EXPORT ParamTraits<viz::SurfaceInfo> {
+  typedef viz::SurfaceInfo param_type;
   static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
@@ -134,6 +134,17 @@ struct CC_IPC_EXPORT ParamTraits<cc::DrawQuad::Resources> {
 template <>
 struct CC_IPC_EXPORT ParamTraits<cc::YUVVideoDrawQuad> {
   typedef cc::YUVVideoDrawQuad param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
+  static void Write(base::Pickle* m, const param_type& p);
+  static bool Read(const base::Pickle* m,
+                   base::PickleIterator* iter,
+                   param_type* p);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct CC_IPC_EXPORT ParamTraits<cc::BeginFrameAck> {
+  typedef cc::BeginFrameAck param_type;
   static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,

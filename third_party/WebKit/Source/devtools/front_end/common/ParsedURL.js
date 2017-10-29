@@ -37,6 +37,7 @@ Common.ParsedURL = class {
     this.isValid = false;
     this.url = url;
     this.scheme = '';
+    this.user = '';
     this.host = '';
     this.port = '';
     this.path = '';
@@ -48,12 +49,13 @@ Common.ParsedURL = class {
     var match = url.match(Common.ParsedURL._urlRegex());
     if (match) {
       this.isValid = true;
-      this.scheme = match[1].toLowerCase();
-      this.host = match[2];
-      this.port = match[3];
-      this.path = match[4] || '/';
-      this.queryParams = match[5] || '';
-      this.fragment = match[6];
+      this.scheme = match[2].toLowerCase();
+      this.user = match[3];
+      this.host = match[4];
+      this.port = match[5];
+      this.path = match[6] || '/';
+      this.queryParams = match[7] || '';
+      this.fragment = match[8];
     } else {
       if (this.url.startsWith('data:')) {
         this.scheme = 'data';
@@ -97,13 +99,16 @@ Common.ParsedURL = class {
     if (Common.ParsedURL._urlRegexInstance)
       return Common.ParsedURL._urlRegexInstance;
     // RegExp groups:
-    // 1 - scheme (using the RFC3986 grammar)
-    // 2 - hostname
-    // 3 - ?port
-    // 4 - ?path
-    // 5 - ?query
-    // 6 - ?fragment
+    // 1 - scheme, hostname, ?port
+    // 2 - scheme (using the RFC3986 grammar)
+    // 3 - ?user:password
+    // 4 - hostname
+    // 5 - ?port
+    // 6 - ?path
+    // 7 - ?query
+    // 8 - ?fragment
     var schemeRegex = /([A-Za-z][A-Za-z0-9+.-]*):\/\//;
+    var userRegex = /(?:([A-Za-z0-9\-._~%!$&'()*+,;=:]*)@)?/;
     var hostRegex = /([^\s\/:]*)/;
     var portRegex = /(?::([\d]+))?/;
     var pathRegex = /(\/[^#?]*)?/;
@@ -111,8 +116,8 @@ Common.ParsedURL = class {
     var fragmentRegex = /(?:#(.*))?/;
 
     Common.ParsedURL._urlRegexInstance = new RegExp(
-        '^' + schemeRegex.source + hostRegex.source + portRegex.source + pathRegex.source + queryRegex.source +
-        fragmentRegex.source + '$');
+        '^(' + schemeRegex.source + userRegex.source + hostRegex.source + portRegex.source + ')' + pathRegex.source +
+        queryRegex.source + fragmentRegex.source + '$');
     return Common.ParsedURL._urlRegexInstance;
   }
 
@@ -210,8 +215,17 @@ Common.ParsedURL = class {
    * @return {!{url: string, lineNumber: (number|undefined), columnNumber: (number|undefined)}}
    */
   static splitLineAndColumn(string) {
+    // Only look for line and column numbers in the path to avoid matching port numbers.
+    var beforePathMatch = string.match(Common.ParsedURL._urlRegex());
+    var beforePath = '';
+    var pathAndAfter = string;
+    if (beforePathMatch) {
+      beforePath = beforePathMatch[1];
+      pathAndAfter = string.substring(beforePathMatch[1].length);
+    }
+
     var lineColumnRegEx = /(?::(\d+))?(?::(\d+))?$/;
-    var lineColumnMatch = lineColumnRegEx.exec(string);
+    var lineColumnMatch = lineColumnRegEx.exec(pathAndAfter);
     var lineNumber;
     var columnNumber;
     console.assert(lineColumnMatch);
@@ -227,7 +241,7 @@ Common.ParsedURL = class {
     }
 
     return {
-      url: string.substring(0, string.length - lineColumnMatch[0].length),
+      url: beforePath + pathAndAfter.substring(0, pathAndAfter.length - lineColumnMatch[0].length),
       lineNumber: lineNumber,
       columnNumber: columnNumber
     };

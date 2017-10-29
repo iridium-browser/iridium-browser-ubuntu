@@ -75,20 +75,18 @@ void SignedInDevicesChangeObserver::OnDeviceInfoChange() {
 
   std::unique_ptr<base::ListValue> result =
       api::signed_in_devices::OnDeviceInfoChange::Create(args);
-  std::unique_ptr<Event> event(
-      new Event(events::SIGNED_IN_DEVICES_ON_DEVICE_INFO_CHANGE,
-                api::signed_in_devices::OnDeviceInfoChange::kEventName,
-                std::move(result)));
-
-  event->restrict_to_browser_context = profile_;
+  auto event = base::MakeUnique<Event>(
+      events::SIGNED_IN_DEVICES_ON_DEVICE_INFO_CHANGE,
+      api::signed_in_devices::OnDeviceInfoChange::kEventName, std::move(result),
+      profile_);
 
   EventRouter::Get(profile_)
       ->DispatchEventToExtension(extension_id_, std::move(event));
 }
 
 static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<SignedInDevicesManager> > g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+    BrowserContextKeyedAPIFactory<SignedInDevicesManager>>::DestructorAtExit
+    g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<SignedInDevicesManager>*
@@ -114,7 +112,9 @@ SignedInDevicesManager::SignedInDevicesManager(content::BrowserContext* context)
   extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
 }
 
-SignedInDevicesManager::~SignedInDevicesManager() {
+SignedInDevicesManager::~SignedInDevicesManager() = default;
+
+void SignedInDevicesManager::Shutdown() {
   if (profile_) {
     EventRouter* router = EventRouter::Get(profile_);
     if (router)
@@ -156,7 +156,7 @@ void SignedInDevicesManager::RemoveChangeObserverForExtension(
 void SignedInDevicesManager::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   RemoveChangeObserverForExtension(extension->id());
 }
 

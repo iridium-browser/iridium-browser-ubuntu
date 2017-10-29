@@ -14,6 +14,7 @@
 #include "ui/gfx/vsync_provider.h"
 #include "ui/ozone/common/egl_util.h"
 #include "ui/ozone/common/gl_ozone_egl.h"
+#include "ui/ozone/common/gl_ozone_osmesa.h"
 #include "ui/ozone/platform/wayland/gl_surface_wayland.h"
 #include "ui/ozone/platform/wayland/wayland_connection.h"
 #include "ui/ozone/platform/wayland/wayland_object.h"
@@ -67,7 +68,7 @@ sk_sp<SkSurface> WaylandCanvasSurface::GetSurface() {
     return nullptr;
 
   wl::Object<wl_shm_pool> pool(wl_shm_create_pool(
-      connection_->shm(), shared_memory->handle().fd, length));
+      connection_->shm(), shared_memory->handle().GetHandle(), length));
   if (!pool)
     return nullptr;
   wl::Object<wl_buffer> buffer(
@@ -128,7 +129,8 @@ namespace {
 
 class GLOzoneEGLWayland : public GLOzoneEGL {
  public:
-  GLOzoneEGLWayland(WaylandConnection* connection) : connection_(connection) {}
+  explicit GLOzoneEGLWayland(WaylandConnection* connection)
+      : connection_(connection) {}
   ~GLOzoneEGLWayland() override {}
 
   scoped_refptr<gl::GLSurface> CreateViewGLSurface(
@@ -139,7 +141,7 @@ class GLOzoneEGLWayland : public GLOzoneEGL {
 
  protected:
   intptr_t GetNativeDisplay() override;
-  bool LoadGLES2Bindings() override;
+  bool LoadGLES2Bindings(gl::GLImplementation impl) override;
 
  private:
   WaylandConnection* connection_;
@@ -174,17 +176,20 @@ intptr_t GLOzoneEGLWayland::GetNativeDisplay() {
   return reinterpret_cast<intptr_t>(connection_->display());
 }
 
-bool GLOzoneEGLWayland::LoadGLES2Bindings() {
+bool GLOzoneEGLWayland::LoadGLES2Bindings(gl::GLImplementation impl) {
+  // TODO: It may not be necessary to set this environment variable when using
+  // swiftshader.
   setenv("EGL_PLATFORM", "wayland", 0);
-  return LoadDefaultEGLGLES2Bindings();
+  return LoadDefaultEGLGLES2Bindings(impl);
 }
 
 }  // namespace
 
 WaylandSurfaceFactory::WaylandSurfaceFactory(WaylandConnection* connection)
-    : connection_(connection) {
+    : connection_(connection),
+      osmesa_implementation_(base::MakeUnique<GLOzoneOSMesa>()) {
   if (connection_)
-    egl_implementation_.reset(new GLOzoneEGLWayland(connection_));
+    egl_implementation_ = base::MakeUnique<GLOzoneEGLWayland>(connection_);
 }
 
 WaylandSurfaceFactory::~WaylandSurfaceFactory() {}
@@ -201,7 +206,11 @@ WaylandSurfaceFactory::CreateCanvasForWidget(gfx::AcceleratedWidget widget) {
 std::vector<gl::GLImplementation>
 WaylandSurfaceFactory::GetAllowedGLImplementations() {
   std::vector<gl::GLImplementation> impls;
-  impls.push_back(gl::kGLImplementationEGLGLES2);
+  if (egl_implementation_) {
+    impls.push_back(gl::kGLImplementationEGLGLES2);
+    impls.push_back(gl::kGLImplementationSwiftShaderGL);
+  }
+  impls.push_back(gl::kGLImplementationOSMesaGL);
   return impls;
 }
 
@@ -210,12 +219,14 @@ GLOzone* WaylandSurfaceFactory::GetGLOzone(
   switch (implementation) {
     case gl::kGLImplementationEGLGLES2:
       return egl_implementation_.get();
+    case gl::kGLImplementationOSMesaGL:
+      return osmesa_implementation_.get();
     default:
       return nullptr;
   }
 }
 
-scoped_refptr<NativePixmap> WaylandSurfaceFactory::CreateNativePixmap(
+scoped_refptr<gfx::NativePixmap> WaylandSurfaceFactory::CreateNativePixmap(
     gfx::AcceleratedWidget widget,
     gfx::Size size,
     gfx::BufferFormat format,
@@ -224,7 +235,8 @@ scoped_refptr<NativePixmap> WaylandSurfaceFactory::CreateNativePixmap(
   return nullptr;
 }
 
-scoped_refptr<NativePixmap> WaylandSurfaceFactory::CreateNativePixmapFromHandle(
+scoped_refptr<gfx::NativePixmap>
+WaylandSurfaceFactory::CreateNativePixmapFromHandle(
     gfx::AcceleratedWidget widget,
     gfx::Size size,
     gfx::BufferFormat format,

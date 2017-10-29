@@ -46,11 +46,6 @@ const char kTime[] = ".Time";
 const uint32_t kFileMagic = 0x600D71FE;
 const uint32_t kFileVersion = 9;
 
-std::string GetUmaSuffixForStore(const base::FilePath& file_path) {
-  return base::StringPrintf(
-      ".%" PRIsFP, file_path.BaseName().RemoveExtension().value().c_str());
-}
-
 void RecordTimeWithAndWithoutSuffix(const std::string& metric,
                                     base::TimeDelta time,
                                     const base::FilePath& file_path) {
@@ -178,10 +173,10 @@ std::ostream& operator<<(std::ostream& os, const V4Store& store) {
   return os;
 }
 
-V4Store* V4StoreFactory::CreateV4Store(
+std::unique_ptr<V4Store> V4StoreFactory::CreateV4Store(
     const scoped_refptr<base::SequencedTaskRunner>& task_runner,
     const base::FilePath& store_path) {
-  V4Store* new_store = new V4Store(task_runner, store_path, 0);
+  auto new_store = base::MakeUnique<V4Store>(task_runner, store_path);
   new_store->Initialize();
   return new_store;
 }
@@ -208,7 +203,7 @@ V4Store::V4Store(const scoped_refptr<base::SequencedTaskRunner>& task_runner,
       task_runner_(task_runner) {}
 
 V4Store::~V4Store() {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
 }
 
 std::string V4Store::DebugString() const {
@@ -533,7 +528,7 @@ ApplyUpdateResult V4Store::MergeUpdate(const HashPrefixMap& old_prefixes_map,
                                        const HashPrefixMap& additions_map,
                                        const RepeatedField<int32>* raw_removals,
                                        const std::string& expected_checksum) {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
   DCHECK(hash_prefix_map_.empty());
 
   bool calculate_checksum = !expected_checksum.empty();
@@ -665,7 +660,7 @@ ApplyUpdateResult V4Store::MergeUpdate(const HashPrefixMap& old_prefixes_map,
 }
 
 StoreReadResult V4Store::ReadFromDisk() {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
   V4StoreFileFormat file_format;
   int64_t file_size;
@@ -801,7 +796,7 @@ bool V4Store::HashPrefixMatches(const HashPrefix& hash_prefix,
 }
 
 bool V4Store::VerifyChecksum() {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
   if (expected_checksum_.empty()) {
     // Nothing to check here folks!

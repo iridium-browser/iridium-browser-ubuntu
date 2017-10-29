@@ -63,13 +63,13 @@ def create_event_whitelist(name):
             or name == 'TouchEvent')
 
 
-# All events on the following whitelist are matched case-sensitively
+# All events on the following whitelist are matched case-insensitively
 # in createEvent and are measured using UseCounter.
 #
 # TODO(foolip): All events on this list should either be added to the spec and
 # moved to the above whitelist (causing them to be matched case-insensitively)
 # or be deprecated/removed. https://crbug.com/569690
-def create_event_legacy_whitelist(name):
+def create_event_measure_whitelist(name):
     return (name == 'AnimationEvent'
             or name == 'BeforeUnloadEvent'
             or name == 'CloseEvent'
@@ -86,15 +86,12 @@ def create_event_legacy_whitelist(name):
             or name == 'MutationEvents'
             or name == 'PageTransitionEvent'
             or name == 'PopStateEvent'
-            or name == 'ProgressEvent'
             or name == 'StorageEvent'
             or name == 'SVGEvents'
             or name == 'TextEvent'
             or name == 'TrackEvent'
             or name == 'TransitionEvent'
             or name == 'WebGLContextEvent'
-            or name == 'WebKitAnimationEvent'
-            or name == 'WebKitTransitionEvent'
             or name == 'WheelEvent')
 
 
@@ -104,8 +101,8 @@ def measure_name(name):
 
 class EventFactoryWriter(json5_generator.Writer):
     default_parameters = {
-        'ImplementedAs': None,
-        'RuntimeEnabled': None,
+        'ImplementedAs': {},
+        'RuntimeEnabled': {},
     }
     default_metadata = {
         'export': '',
@@ -117,7 +114,7 @@ class EventFactoryWriter(json5_generator.Writer):
         'lower_first': name_utilities.lower_first,
         'script_name': name_utilities.script_name,
         'create_event_whitelist': create_event_whitelist,
-        'create_event_legacy_whitelist': create_event_legacy_whitelist,
+        'create_event_measure_whitelist': create_event_measure_whitelist,
         'measure_name': measure_name,
     }
 
@@ -166,6 +163,7 @@ class EventFactoryWriter(json5_generator.Writer):
         if self.suffix:
             base_header_for_suffix = '\n#include "core/%(namespace)sHeaders.h"\n' % {'namespace': self.namespace}
         return HEADER_TEMPLATE % {
+            'input_files': self._input_files,
             'license': license.license_for_generated_cpp(),
             'namespace': self.namespace,
             'suffix': self.suffix,
@@ -173,9 +171,10 @@ class EventFactoryWriter(json5_generator.Writer):
             'includes': '\n'.join(self._headers_header_includes(self.json5_file.name_dictionaries)),
         }
 
-    @template_expander.use_jinja('EventFactory.cpp.tmpl', filters=filters)
+    @template_expander.use_jinja('templates/EventFactory.cpp.tmpl', filters=filters)
     def generate_implementation(self):
         return {
+            'input_files': self._input_files,
             'namespace': self.namespace,
             'suffix': self.suffix,
             'events': self.json5_file.name_dictionaries,

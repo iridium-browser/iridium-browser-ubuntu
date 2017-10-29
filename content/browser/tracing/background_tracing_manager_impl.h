@@ -5,7 +5,10 @@
 #ifndef CONTENT_BROWSER_TRACING_BACKGROUND_TRACING_MANAGER_IMPL_H_
 #define CONTENT_BROWSER_TRACING_BACKGROUND_TRACING_MANAGER_IMPL_H_
 
+#include <map>
 #include <memory>
+#include <set>
+#include <string>
 
 #include "base/lazy_instance.h"
 #include "base/macros.h"
@@ -19,11 +22,35 @@
 namespace content {
 
 class BackgroundTracingRule;
+class TraceMessageFilter;
 class TracingDelegate;
 
 class BackgroundTracingManagerImpl : public BackgroundTracingManager {
  public:
-  static CONTENT_EXPORT BackgroundTracingManagerImpl* GetInstance();
+  // Enabled state observers get a callback when the state of background tracing
+  // changes.
+  class CONTENT_EXPORT EnabledStateObserver {
+   public:
+    // Called when the activation of a background tracing scenario is
+    // successful.
+    virtual void OnScenarioActivated(
+        const BackgroundTracingConfigImpl* config) = 0;
+
+    // Called after tracing is enabled on all processes because the rule was
+    // triggered.
+    virtual void OnTracingEnabled(
+        BackgroundTracingConfigImpl::CategoryPreset preset) = 0;
+
+    virtual ~EnabledStateObserver() = default;
+  };
+
+  class TraceMessageFilterObserver {
+   public:
+    virtual void OnTraceMessageFilterAdded(TraceMessageFilter* filter) = 0;
+    virtual void OnTraceMessageFilterRemoved(TraceMessageFilter* filter) = 0;
+  };
+
+  CONTENT_EXPORT static BackgroundTracingManagerImpl* GetInstance();
 
   bool SetActiveScenario(std::unique_ptr<BackgroundTracingConfig>,
                          const ReceiveCallback&,
@@ -40,10 +67,21 @@ class BackgroundTracingManagerImpl : public BackgroundTracingManager {
   void AbortScenario();
   bool HasActiveScenario() override;
 
+  void OnStartTracingDone(BackgroundTracingConfigImpl::CategoryPreset preset);
+
+  // Add/remove EnabledStateObserver.
+  CONTENT_EXPORT void AddEnabledStateObserver(EnabledStateObserver* observer);
+  CONTENT_EXPORT void RemoveEnabledStateObserver(
+      EnabledStateObserver* observer);
+
+  // Add/remove TraceMessageFilter{Observer}.
+  void AddTraceMessageFilter(TraceMessageFilter* trace_message_filter);
+  void RemoveTraceMessageFilter(TraceMessageFilter* trace_message_filter);
+  void AddTraceMessageFilterObserver(TraceMessageFilterObserver* observer);
+  void RemoveTraceMessageFilterObserver(TraceMessageFilterObserver* observer);
+
   // For tests
   void InvalidateTriggerHandlesForTesting() override;
-  void SetTracingEnabledCallbackForTesting(
-      const base::Closure& callback) override;
   CONTENT_EXPORT void SetRuleTriggeredCallbackForTesting(
       const base::Closure& callback);
   void FireTimerForTesting() override;
@@ -103,11 +141,18 @@ class BackgroundTracingManagerImpl : public BackgroundTracingManager {
 
   TriggerHandle triggered_named_event_handle_;
 
+  // There is no need to use base::ObserverList to store observers because we
+  // only access |background_tracing_observers_| and
+  // |trace_message_filter_observers_| from the UI thread.
+  std::set<EnabledStateObserver*> background_tracing_observers_;
+  std::set<scoped_refptr<TraceMessageFilter>> trace_message_filters_;
+  std::set<TraceMessageFilterObserver*> trace_message_filter_observers_;
+
   IdleCallback idle_callback_;
   base::Closure tracing_enabled_callback_for_testing_;
   base::Closure rule_triggered_callback_for_testing_;
 
-  friend struct base::DefaultLazyInstanceTraits<BackgroundTracingManagerImpl>;
+  friend struct base::LazyInstanceTraitsBase<BackgroundTracingManagerImpl>;
 
   DISALLOW_COPY_AND_ASSIGN(BackgroundTracingManagerImpl);
 };

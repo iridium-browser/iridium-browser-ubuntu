@@ -14,7 +14,6 @@ namespace cc {
 TransformNode::TransformNode()
     : id(TransformTree::kInvalidNodeId),
       parent_id(TransformTree::kInvalidNodeId),
-      owning_layer_id(Layer::INVALID_ID),
       sticky_position_constraint_id(-1),
       source_node_id(TransformTree::kInvalidNodeId),
       sorting_context_id(0),
@@ -43,9 +42,9 @@ TransformNode::TransformNode(const TransformNode&) = default;
 
 bool TransformNode::operator==(const TransformNode& other) const {
   return id == other.id && parent_id == other.parent_id &&
-         owning_layer_id == other.owning_layer_id &&
-         pre_local == other.pre_local && local == other.local &&
-         post_local == other.post_local && to_parent == other.to_parent &&
+         element_id == other.element_id && pre_local == other.pre_local &&
+         local == other.local && post_local == other.post_local &&
+         to_parent == other.to_parent &&
          source_node_id == other.source_node_id &&
          sorting_context_id == other.sorting_context_id &&
          needs_local_transform_update == other.needs_local_transform_update &&
@@ -104,13 +103,10 @@ void TransformNode::update_post_local_transform(
 void TransformNode::AsValueInto(base::trace_event::TracedValue* value) const {
   value->SetInteger("id", id);
   value->SetInteger("parent_id", parent_id);
-  value->SetInteger("owning_layer_id", owning_layer_id);
+  value->SetInteger("element_id", element_id.id_);
   MathUtil::AddToTracedValue("pre_local", pre_local, value);
   MathUtil::AddToTracedValue("local", local, value);
   MathUtil::AddToTracedValue("post_local", post_local, value);
-  // TODO(sunxd): make frameviewer work without target_id
-  value->SetInteger("target_id", 0);
-  value->SetInteger("content_target_id", 0);
   value->SetInteger("source_node_id", source_node_id);
   value->SetInteger("sorting_context_id", sorting_context_id);
   MathUtil::AddToTracedValue("scroll_offset", scroll_offset, value);
@@ -118,7 +114,7 @@ void TransformNode::AsValueInto(base::trace_event::TracedValue* value) const {
 }
 
 TransformCachedNodeData::TransformCachedNodeData()
-    : target_id(-1), content_target_id(-1), is_showing_backface(false) {}
+    : is_showing_backface(false) {}
 
 TransformCachedNodeData::TransformCachedNodeData(
     const TransformCachedNodeData& other) = default;
@@ -128,8 +124,6 @@ TransformCachedNodeData::~TransformCachedNodeData() {}
 bool TransformCachedNodeData::operator==(
     const TransformCachedNodeData& other) const {
   return from_screen == other.from_screen && to_screen == other.to_screen &&
-         target_id == other.target_id &&
-         content_target_id == other.content_target_id &&
          is_showing_backface == other.is_showing_backface;
 }
 

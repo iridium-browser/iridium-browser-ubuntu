@@ -15,6 +15,7 @@
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/trace_event/trace_event.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/accelerated_widget_mac/availability_macros.h"
 #include "ui/base/cocoa/animation_utils.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/geometry/dip_util.h"
@@ -55,7 +56,7 @@ namespace {
 // This will enqueue |io_surface| to be drawn by |av_layer|. This will
 // retain |cv_pixel_buffer| until it is no longer being displayed.
 bool AVSampleBufferDisplayLayerEnqueueCVPixelBuffer(
-    AVSampleBufferDisplayLayer* av_layer,
+    AVSampleBufferDisplayLayer109* av_layer,
     CVPixelBufferRef cv_pixel_buffer) {
   OSStatus os_status = noErr;
 
@@ -113,7 +114,7 @@ bool AVSampleBufferDisplayLayerEnqueueCVPixelBuffer(
 // |io_surface| in a CVPixelBuffer. This will increase the in-use count
 // of and retain |io_surface| until it is no longer being displayed.
 bool AVSampleBufferDisplayLayerEnqueueIOSurface(
-    AVSampleBufferDisplayLayer* av_layer,
+    AVSampleBufferDisplayLayer109* av_layer,
     IOSurfaceRef io_surface) {
   CVReturn cv_return = kCVReturnSuccess;
 
@@ -217,10 +218,8 @@ CARendererLayerTree::CARendererLayerTree(
 CARendererLayerTree::~CARendererLayerTree() {}
 
 bool CARendererLayerTree::ScheduleCALayer(const CARendererLayerParams& params) {
-  // Excessive logging to debug white screens (crbug.com/583805).
-  // TODO(ccameron): change this back to a DLOG.
   if (has_committed_) {
-    LOG(ERROR) << "ScheduleCALayer called after CommitScheduledCALayers.";
+    DLOG(ERROR) << "ScheduleCALayer called after CommitScheduledCALayers.";
     return false;
   }
   return root_layer_.AddContentLayer(this, params);
@@ -247,7 +246,7 @@ void CARendererLayerTree::CommitScheduledCALayers(
 }
 
 bool CARendererLayerTree::CommitFullscreenLowPowerLayer(
-    AVSampleBufferDisplayLayer* fullscreen_low_power_layer) {
+    AVSampleBufferDisplayLayer109* fullscreen_low_power_layer) {
   DCHECK(has_committed_);
   const ContentLayer* video_layer = nullptr;
   gfx::RectF video_layer_frame_dip;
@@ -299,6 +298,32 @@ bool CARendererLayerTree::CommitFullscreenLowPowerLayer(
 
 id CARendererLayerTree::ContentsForSolidColorForTesting(SkColor color) {
   return SolidColorContents::Get(color)->GetContents();
+}
+
+IOSurfaceRef CARendererLayerTree::GetContentIOSurface() const {
+  size_t clip_count = root_layer_.clip_and_sorting_layers.size();
+  if (clip_count != 1) {
+    DLOG(ERROR) << "Can only return contents IOSurface when there is 1 "
+                << "ClipAndSortingLayer, there are " << clip_count << ".";
+    return nullptr;
+  }
+  const ClipAndSortingLayer& clip_and_sorting =
+      root_layer_.clip_and_sorting_layers[0];
+  size_t transform_count = clip_and_sorting.transform_layers.size();
+  if (transform_count != 1) {
+    DLOG(ERROR) << "Can only return contents IOSurface when there is 1 "
+                << "TransformLayer, there are " << transform_count << ".";
+    return nullptr;
+  }
+  const TransformLayer& transform = clip_and_sorting.transform_layers[0];
+  size_t content_count = transform.content_layers.size();
+  if (content_count != 1) {
+    DLOG(ERROR) << "Can only return contents IOSurface when there is 1 "
+                << "ContentLayer, there are " << transform_count << ".";
+    return nullptr;
+  }
+  const ContentLayer& content = transform.content_layers[0];
+  return content.io_surface.get();
 }
 
 CARendererLayerTree::RootLayer::RootLayer() {}
@@ -459,9 +484,7 @@ bool CARendererLayerTree::RootLayer::AddContentLayer(
         current_layer.sorting_context_id == params.sorting_context_id &&
         (current_layer.is_clipped != params.is_clipped ||
          current_layer.clip_rect != params.clip_rect)) {
-      // Excessive logging to debug white screens (crbug.com/583805).
-      // TODO(ccameron): change this back to a DLOG.
-      LOG(ERROR) << "CALayer changed clip inside non-zero sorting context.";
+      DLOG(ERROR) << "CALayer changed clip inside non-zero sorting context.";
       return false;
     }
     if (!is_singleton_sorting_context &&
@@ -527,10 +550,8 @@ void CARendererLayerTree::RootLayer::CommitToCA(CALayer* superlayer,
     [superlayer addSublayer:ca_layer];
     [superlayer setBorderWidth:0];
   }
-  // Excessive logging to debug white screens (crbug.com/583805).
-  // TODO(ccameron): change this back to a DCHECK.
   if ([ca_layer superlayer] != superlayer) {
-    LOG(ERROR) << "CARendererLayerTree root layer not attached to tree.";
+    DLOG(ERROR) << "CARendererLayerTree root layer not attached to tree.";
   }
 
   for (size_t i = 0; i < clip_and_sorting_layers.size(); ++i) {
@@ -559,10 +580,8 @@ void CARendererLayerTree::ClipAndSortingLayer::CommitToCA(
     [ca_layer setAnchorPoint:CGPointZero];
     [superlayer addSublayer:ca_layer];
   }
-  // Excessive logging to debug white screens (crbug.com/583805).
-  // TODO(ccameron): change this back to a DCHECK.
   if ([ca_layer superlayer] != superlayer) {
-    LOG(ERROR) << "CARendererLayerTree root layer not attached to tree.";
+    DLOG(ERROR) << "CARendererLayerTree root layer not attached to tree.";
   }
 
   if (update_is_clipped)
@@ -654,7 +673,7 @@ void CARendererLayerTree::ContentLayer::CommitToCA(CALayer* superlayer,
     update_ca_filter = old_layer->ca_filter != ca_filter;
   } else {
     if (use_av_layer) {
-      av_layer.reset([[AVSampleBufferDisplayLayer alloc] init]);
+      av_layer.reset([[AVSampleBufferDisplayLayer109 alloc] init]);
       ca_layer.reset([av_layer retain]);
       [av_layer setVideoGravity:AVLayerVideoGravityResize];
     } else {

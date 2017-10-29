@@ -5,12 +5,16 @@
 #ifndef COMPONENTS_CRYPTAUTH_DEVICE_TO_DEVICE_AUTHENTICATOR_H_
 #define COMPONENTS_CRYPTAUTH_DEVICE_TO_DEVICE_AUTHENTICATOR_H_
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/cryptauth/authenticator.h"
 #include "components/cryptauth/connection.h"
 #include "components/cryptauth/connection_observer.h"
+#include "components/cryptauth/device_to_device_initiator_helper.h"
+#include "components/cryptauth/session_keys.h"
 
 namespace base {
 class Timer;
@@ -110,7 +114,7 @@ class DeviceToDeviceAuthenticator : public Authenticator,
 
   // Callback for validating the received [Remote Auth].
   void OnResponderAuthValidated(bool validated,
-                                const std::string& session_symmetric_key);
+                                const SessionKeys& session_keys);
 
   // Callback when [Initiator Auth] is created.
   void OnInitiatorAuthCreated(const std::string& message);
@@ -150,6 +154,9 @@ class DeviceToDeviceAuthenticator : public Authenticator,
   // Handles SecureMessage crypto operations.
   std::unique_ptr<SecureMessageDelegate> secure_message_delegate_;
 
+  // Performs authentication handshake.
+  std::unique_ptr<DeviceToDeviceInitiatorHelper> helper_;
+
   // The current state in the authentication flow.
   State state_;
 
@@ -168,8 +175,8 @@ class DeviceToDeviceAuthenticator : public Authenticator,
   // The private key generated for the session.
   std::string local_session_private_key_;
 
-  // The derived symmetric key for the session.
-  std::string session_symmetric_key_;
+  // The derived symmetric keys for the session.
+  SessionKeys session_keys_;
 
   base::WeakPtrFactory<DeviceToDeviceAuthenticator> weak_ptr_factory_;
 

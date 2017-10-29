@@ -52,10 +52,10 @@ class CredentialsItemView : public AccountAvatarFetcherDelegate,
 
  private:
   // views::View:
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
   int GetHeightForWidth(int w) const override;
   void Layout() override;
-  void OnPaint(gfx::Canvas* canvas) override;
+  void OnPaintBackground(gfx::Canvas* canvas) override;
 
   const autofill::PasswordForm* form_;
 

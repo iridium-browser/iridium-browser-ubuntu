@@ -31,7 +31,7 @@
 #ifndef WebFormElement_h
 #define WebFormElement_h
 
-#include "../platform/WebVector.h"
+#include "public/platform/WebVector.h"
 #include "WebElement.h"
 
 namespace blink {
@@ -41,26 +41,25 @@ class WebFormControlElement;
 
 // A container for passing around a reference to a form element. Provides some
 // information about the form.
-class WebFormElement final : public WebElement {
+class BLINK_EXPORT WebFormElement final : public WebElement {
  public:
-  ~WebFormElement() { reset(); }
+  ~WebFormElement() { Reset(); }
 
   WebFormElement() : WebElement() {}
   WebFormElement(const WebFormElement& element) : WebElement(element) {}
 
   WebFormElement& operator=(const WebFormElement& element) {
-    WebElement::assign(element);
+    WebElement::Assign(element);
     return *this;
   }
-  void assign(const WebFormElement& element) { WebElement::assign(element); }
+  void Assign(const WebFormElement& element) { WebElement::Assign(element); }
 
-  BLINK_EXPORT bool autoComplete() const;
-  BLINK_EXPORT WebString action() const;
-  BLINK_EXPORT WebString name() const;
-  BLINK_EXPORT WebString method() const;
+  bool AutoComplete() const;
+  WebString Action() const;
+  WebString GetName() const;
+  WebString Method() const;
 
-  BLINK_EXPORT void getFormControlElements(
-      WebVector<WebFormControlElement>&) const;
+  void GetFormControlElements(WebVector<WebFormControlElement>&) const;
 
 #if BLINK_IMPLEMENTATION
   WebFormElement(HTMLFormElement*);

@@ -5,6 +5,9 @@
 #ifndef CHROME_RENDERER_EXTENSIONS_AUTOMATION_INTERNAL_CUSTOM_BINDINGS_H_
 #define CHROME_RENDERER_EXTENSIONS_AUTOMATION_INTERNAL_CUSTOM_BINDINGS_H_
 
+#include <map>
+#include <vector>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "chrome/common/extensions/api/automation.h"
@@ -20,6 +23,7 @@ namespace extensions {
 
 class AutomationInternalCustomBindings;
 class AutomationMessageFilter;
+class ExtensionBindingsSystem;
 
 struct TreeCache {
   TreeCache();
@@ -29,7 +33,6 @@ struct TreeCache {
   int tree_id;
   int parent_node_id_from_parent_tree;
 
-  gfx::Vector2d location_offset;
   ui::AXTree tree;
   AutomationInternalCustomBindings* owner;
 };
@@ -44,7 +47,8 @@ struct TreeChangeObserver {
 class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
                                          public ui::AXTreeDelegate {
  public:
-  explicit AutomationInternalCustomBindings(ScriptContext* context);
+  AutomationInternalCustomBindings(ScriptContext* context,
+                                   ExtensionBindingsSystem* bindings_system);
 
   ~AutomationInternalCustomBindings() override;
 
@@ -57,6 +61,8 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   ScriptContext* context() const {
     return ObjectBackedNativeHandler::context();
   }
+
+  float GetDeviceScaleFactor() const;
 
  private:
   // ObjectBackedNativeHandler overrides:
@@ -156,7 +162,9 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   void OnNodeDataWillChange(ui::AXTree* tree,
                             const ui::AXNodeData& old_node_data,
                             const ui::AXNodeData& new_node_data) override;
-  void OnTreeDataChanged(ui::AXTree* tree) override;
+  void OnTreeDataChanged(ui::AXTree* tree,
+                         const ui::AXTreeData& old_tree_data,
+                         const ui::AXTreeData& new_tree_data) override;
   void OnNodeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
   void OnSubtreeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
   void OnNodeWillBeReparented(ui::AXTree* tree, ui::AXNode* node) override;
@@ -173,8 +181,8 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   void SendChildTreeIDEvent(ui::AXTree* tree, ui::AXNode* node);
   void SendNodesRemovedEvent(ui::AXTree* tree, const std::vector<int>& ids);
 
-  base::hash_map<int, TreeCache*> tree_id_to_tree_cache_map_;
-  base::hash_map<ui::AXTree*, TreeCache*> axtree_to_tree_cache_map_;
+  std::map<int, TreeCache*> tree_id_to_tree_cache_map_;
+  std::map<ui::AXTree*, TreeCache*> axtree_to_tree_cache_map_;
   scoped_refptr<AutomationMessageFilter> message_filter_;
   bool is_active_profile_;
   std::vector<TreeChangeObserver> tree_change_observers_;
@@ -182,6 +190,8 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   int tree_change_observer_overall_filter_;
   std::vector<int> deleted_node_ids_;
   std::vector<int> text_changed_node_ids_;
+  ExtensionBindingsSystem* bindings_system_;
+  bool should_ignore_context_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomationInternalCustomBindings);
 };

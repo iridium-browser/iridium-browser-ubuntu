@@ -9,9 +9,11 @@
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/common/appcache_info.h"
 #include "content/public/common/browser_side_navigation_policy.h"
+#include "content/public/common/service_worker_modes.h"
 #include "content/public/common/url_constants.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
+#include "url/url_util.h"
 
 namespace content {
 
@@ -19,12 +21,38 @@ namespace content {
 bool ShouldMakeNetworkRequestForURL(const GURL& url) {
   CHECK(IsBrowserSideNavigationEnabled());
 
-  // Javascript URLs, about:blank, srcdoc should not send a request
-  // to the network stack.
-  return !url.IsAboutBlank() && !url.SchemeIs(url::kJavaScriptScheme) &&
-         !url.is_empty() && !url.SchemeIs(url::kContentIDScheme) &&
-         url != content::kAboutSrcDocURL;
+  // Javascript URLs, srcdoc, schemes that don't load data should not send a
+  // request to the network stack.
+  if (url.SchemeIs(url::kJavaScriptScheme) || url.is_empty() ||
+      url == content::kAboutSrcDocURL) {
+    return false;
+  }
+
+  for (const auto& scheme : url::GetEmptyDocumentSchemes()) {
+    if (url.SchemeIs(scheme))
+      return false;
+  }
+
+  // For you information, even though a "data:" url doesn't generate actual
+  // network requests, it is handled by the network stack and so must return
+  // true. The reason is that a few "data:" urls can't be handled locally. For
+  // instance:
+  // - the ones that result in downloads.
+  // - the ones that are invalid. An error page must be served instead.
+  // - the ones that have an unsupported MIME type.
+  // - the ones that target the top-level frame on Android.
+
+  return true;
 }
+
+SourceLocation::SourceLocation() : line_number(0), column_number(0) {}
+
+SourceLocation::SourceLocation(const std::string& url,
+                               unsigned int line_number,
+                               unsigned int column_number)
+    : url(url), line_number(line_number), column_number(column_number) {}
+
+SourceLocation::~SourceLocation() {}
 
 CommonNavigationParams::CommonNavigationParams()
     : transition(ui::PAGE_TRANSITION_LINK),
@@ -34,7 +62,8 @@ CommonNavigationParams::CommonNavigationParams()
       report_type(FrameMsg_UILoadMetricsReportType::NO_REPORT),
       previews_state(PREVIEWS_UNSPECIFIED),
       navigation_start(base::TimeTicks::Now()),
-      method("GET") {}
+      method("GET"),
+      should_check_main_world_csp(CSPDisposition::CHECK) {}
 
 CommonNavigationParams::CommonNavigationParams(
     const GURL& url,
@@ -50,7 +79,9 @@ CommonNavigationParams::CommonNavigationParams(
     PreviewsState previews_state,
     const base::TimeTicks& navigation_start,
     std::string method,
-    const scoped_refptr<ResourceRequestBodyImpl>& post_data)
+    const scoped_refptr<ResourceRequestBody>& post_data,
+    base::Optional<SourceLocation> source_location,
+    CSPDisposition should_check_main_world_csp)
     : url(url),
       referrer(referrer),
       transition(transition),
@@ -64,7 +95,9 @@ CommonNavigationParams::CommonNavigationParams(
       previews_state(previews_state),
       navigation_start(navigation_start),
       method(method),
-      post_data(post_data) {
+      post_data(post_data),
+      source_location(source_location),
+      should_check_main_world_csp(should_check_main_world_csp) {
   // |method != "POST"| should imply absence of |post_data|.
   if (method != "POST" && post_data) {
     NOTREACHED();
@@ -83,8 +116,8 @@ BeginNavigationParams::BeginNavigationParams()
       has_user_gesture(false),
       skip_service_worker(false),
       request_context_type(REQUEST_CONTEXT_TYPE_LOCATION),
-      mixed_content_context_type(blink::WebMixedContentContextType::Blockable) {
-}
+      mixed_content_context_type(blink::WebMixedContentContextType::kBlockable),
+      is_form_submission(false) {}
 
 BeginNavigationParams::BeginNavigationParams(
     std::string headers,
@@ -93,6 +126,7 @@ BeginNavigationParams::BeginNavigationParams(
     bool skip_service_worker,
     RequestContextType request_context_type,
     blink::WebMixedContentContextType mixed_content_context_type,
+    bool is_form_submission,
     const base::Optional<url::Origin>& initiator_origin)
     : headers(headers),
       load_flags(load_flags),
@@ -100,6 +134,7 @@ BeginNavigationParams::BeginNavigationParams(
       skip_service_worker(skip_service_worker),
       request_context_type(request_context_type),
       mixed_content_context_type(mixed_content_context_type),
+      is_form_submission(is_form_submission),
       initiator_origin(initiator_origin) {}
 
 BeginNavigationParams::BeginNavigationParams(

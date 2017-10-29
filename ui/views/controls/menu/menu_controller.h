@@ -33,10 +33,10 @@ namespace views {
 class MenuButton;
 class MenuHostRootView;
 class MenuItemView;
-class MenuMessageLoop;
 class MouseEvent;
 class SubmenuView;
 class View;
+class ViewTracker;
 
 #if defined(USE_AURA)
 class MenuPreTargetHandler;
@@ -83,14 +83,13 @@ class VIEWS_EXPORT MenuController
   // Runs the menu at the specified location. If the menu was configured to
   // block, the selected item is returned. If the menu does not block this
   // returns NULL immediately.
-  MenuItemView* Run(Widget* parent,
-                    MenuButton* button,
-                    MenuItemView* root,
-                    const gfx::Rect& bounds,
-                    MenuAnchorPosition position,
-                    bool context_menu,
-                    bool is_nested_drag,
-                    int* event_flags);
+  void Run(Widget* parent,
+           MenuButton* button,
+           MenuItemView* root,
+           const gfx::Rect& bounds,
+           MenuAnchorPosition position,
+           bool context_menu,
+           bool is_nested_drag);
 
   // Whether or not Run blocks.
   bool IsBlockingRun() const { return blocking_run_; }
@@ -122,11 +121,6 @@ class VIEWS_EXPORT MenuController
   // delegate will be notified. It will be removed upon the exiting of the
   // nested menu. Ownership is not taken.
   void AddNestedDelegate(internal::MenuControllerDelegate* delegate);
-
-  // Sets whether the subsequent call to Run is asynchronous. When nesting calls
-  // to Run, if a new MenuControllerDelegate has been nested, the previous
-  // asynchronous state will be reapplied once nesting has ended.
-  void SetAsyncRun(bool is_async);
 
   // Returns the current exit type. This returns a value other than EXIT_NONE if
   // the menu is being canceled.
@@ -315,7 +309,7 @@ class VIEWS_EXPORT MenuController
   // Key processing.
   void OnKeyDown(ui::KeyboardCode key_code);
 
-  // Creates a MenuController. If |blocking| is true a nested message loop is
+  // Creates a MenuController. If |blocking| is true a nested run loop is
   // started in |Run|.
   MenuController(bool blocking,
                  internal::MenuControllerDelegate* delegate);
@@ -531,25 +525,16 @@ class VIEWS_EXPORT MenuController
   // it to null.
   void SendMouseCaptureLostToActiveView();
 
-  // Sets/gets the active mouse view. See UpdateActiveMouseView() for details.
-  void SetActiveMouseView(View* view);
-  View* GetActiveMouseView();
-
   // Sets exit type. Calling this can terminate the active nested message-loop.
   void SetExitType(ExitType type);
 
-  // Terminates the current nested message-loop, if there is any. Returns |true|
-  // if any message loop is terminated.
-  bool TerminateNestedMessageLoopIfNecessary();
-
-  // Performs the teardown of menus launched with |async_run_|. This will
-  // notifiy the |delegate_|. If |exit_type_| is EXIT_ALL all nested
-  // asynchronous runs will be exited.
-  void ExitAsyncRun();
+  // Performs the teardown of menus. This will notifiy the |delegate_|. If
+  // |exit_type_| is EXIT_ALL all nested runs will be exited.
+  void ExitMenu();
 
   // Performs the teardown of the menu launched by Run(). The selected item is
   // returned.
-  MenuItemView* ExitMenuRun();
+  MenuItemView* ExitTopMostMenu();
 
   // Handles the mouse location event on the submenu |source|.
   void HandleMouseLocation(SubmenuView* source,
@@ -604,10 +589,9 @@ class VIEWS_EXPORT MenuController
   std::list<NestedState> menu_stack_;
 
   // When Run is invoked during an active Run, it may be called from a separate
-  // MenuControllerDelegate. If not empty is means we are nested, and the
+  // MenuControllerDelegate. If not empty it means we are nested, and the
   // stacked delegates should be notified instead of |delegate_|.
-  typedef std::pair<internal::MenuControllerDelegate*, bool> NestedDelegate;
-  std::list<NestedDelegate> delegate_stack_;
+  std::list<internal::MenuControllerDelegate*> delegate_stack_;
 
   // As the mouse moves around submenus are not opened immediately. Instead
   // they open after this timer fires.
@@ -657,18 +641,14 @@ class VIEWS_EXPORT MenuController
   // The lock to keep the menu button pressed while a menu is visible.
   std::unique_ptr<MenuButton::PressedLock> pressed_lock_;
 
-  // ViewStorage id used to store the view mouse drag events are forwarded to.
-  // See UpdateActiveMouseView() for details.
-  const int active_mouse_view_id_;
+  // ViewTracker used to store the View mouse drag events are forwarded to. See
+  // UpdateActiveMouseView() for details.
+  std::unique_ptr<ViewTracker> active_mouse_view_tracker_;
 
   // Current hot tracked child button if any.
   CustomButton* hot_button_;
 
   internal::MenuControllerDelegate* delegate_;
-
-  // How deep we are in nested message loops. This should be at most 2 (when
-  // showing a context menu from a menu).
-  int message_loop_depth_;
 
   // The timestamp of the event which closed the menu - or 0 otherwise.
   base::TimeTicks closing_event_time_;
@@ -679,10 +659,6 @@ class VIEWS_EXPORT MenuController
   // If a mouse press triggered this menu, this will have its location (in
   // screen coordinates). Otherwise this will be (0, 0).
   gfx::Point menu_start_mouse_press_loc_;
-
-  // Controls behaviour differences between an asynchronous run, and other types
-  // of run (blocking, drag and drop).
-  bool async_run_;
 
   // Controls behavior differences between a combobox and other types of menu
   // (like a context menu).
@@ -699,8 +675,6 @@ class VIEWS_EXPORT MenuController
 
   // A mask of the EventFlags for the mouse buttons currently pressed.
   int current_mouse_pressed_state_;
-
-  std::unique_ptr<MenuMessageLoop> message_loop_;
 
 #if defined(USE_AURA)
   std::unique_ptr<MenuPreTargetHandler> menu_pre_target_handler_;

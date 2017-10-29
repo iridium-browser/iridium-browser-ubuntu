@@ -41,6 +41,7 @@ class TabContentManager;
 }
 
 namespace content {
+class DevToolsAgentHost;
 class WebContents;
 }
 
@@ -116,8 +117,6 @@ class TabAndroid : public CoreTabHelperDelegate,
 
   bool HasPrerenderedUrl(GURL gurl);
 
-  void ShowOfflinePages();
-
   // Overridden from CoreTabHelperDelegate:
   void SwapTabContents(content::WebContents* old_contents,
                        content::WebContents* new_contents,
@@ -136,6 +135,11 @@ class TabAndroid : public CoreTabHelperDelegate,
                         bool icon_url_changed,
                         const gfx::Image& image) override;
 
+  // Returns true if this tab is currently presented in the context of custom
+  // tabs. Tabs can be moved between different activities so the returned value
+  // might change over the lifetime of the tab.
+  bool IsCurrentlyACustomTab();
+
   // Methods called from Java via JNI -----------------------------------------
 
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
@@ -143,6 +147,7 @@ class TabAndroid : public CoreTabHelperDelegate,
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
       jboolean incognito,
+      jboolean is_background_tab,
       const base::android::JavaParamRef<jobject>& jweb_contents,
       const base::android::JavaParamRef<jobject>& jweb_contents_delegate,
       const base::android::JavaParamRef<jobject>& jcontext_menu_populator);
@@ -154,6 +159,12 @@ class TabAndroid : public CoreTabHelperDelegate,
   void DestroyWebContents(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj,
                           jboolean delete_native);
+  void OnPhysicalBackingSizeChanged(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& jweb_contents,
+      jint width,
+      jint height);
   base::android::ScopedJavaLocalRef<jobject> GetProfileAndroid(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
@@ -175,10 +186,13 @@ class TabAndroid : public CoreTabHelperDelegate,
       const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jstring>& jurl,
       const base::android::JavaParamRef<jstring>& jtitle);
-  bool Print(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  bool Print(JNIEnv* env,
+             const base::android::JavaParamRef<jobject>& obj,
+             jint render_process_id,
+             jint render_frame_id);
 
   // Sets the tab as content to be printed through JNI.
-  void SetPendingPrint();
+  void SetPendingPrint(int render_process_id, int render_frame_id);
 
   // Called to get default favicon of current tab, return null if no
   // favicon is avaliable for current tab.
@@ -206,16 +220,6 @@ class TabAndroid : public CoreTabHelperDelegate,
                       const base::android::JavaParamRef<jobject>& obj,
                       jboolean only_editable);
 
-  jboolean HasOfflineCopy(JNIEnv* env,
-                          const base::android::JavaParamRef<jobject>& obj);
-
-  jboolean IsOfflinePage(JNIEnv* env,
-                         const base::android::JavaParamRef<jobject>& obj);
-
-  base::android::ScopedJavaLocalRef<jobject> GetOfflinePage(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
-
   void SetInterceptNavigationDelegate(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
@@ -226,6 +230,10 @@ class TabAndroid : public CoreTabHelperDelegate,
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jobject>& jtab_content_manager);
+
+  void ClearThumbnailPlaceholder(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
 
   bool HasPrerenderedUrl(JNIEnv* env,
                          const base::android::JavaParamRef<jobject>& obj,
@@ -247,8 +255,12 @@ class TabAndroid : public CoreTabHelperDelegate,
 
   bool ShouldEnableEmbeddedMediaExperience() const;
 
-  // Register the Tab's native methods through JNI.
-  static bool RegisterTabAndroid(JNIEnv* env);
+  scoped_refptr<content::DevToolsAgentHost> GetDevToolsAgentHost();
+
+  void SetDevToolsAgentHost(scoped_refptr<content::DevToolsAgentHost> host);
+
+  void AttachDetachedTab(JNIEnv* env,
+                         const base::android::JavaParamRef<jobject>& obj);
 
  private:
   prerender::PrerenderManager* GetPrerenderManager() const;
@@ -269,7 +281,7 @@ class TabAndroid : public CoreTabHelperDelegate,
   std::unique_ptr<content::WebContents> web_contents_;
   std::unique_ptr<android::TabWebContentsDelegateAndroid>
       web_contents_delegate_;
-
+  scoped_refptr<content::DevToolsAgentHost> devtools_host_;
   std::unique_ptr<browser_sync::SyncedTabDelegateAndroid> synced_tab_delegate_;
 
   std::string webapp_manifest_scope_;

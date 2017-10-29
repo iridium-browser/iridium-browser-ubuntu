@@ -26,12 +26,12 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// http://www.w3.org/TR/webdatabase/#sqltransaction
-
+// https://www.w3.org/TR/webdatabase/#objectarray
 typedef sequence<any> ObjectArray;
 
+// https://www.w3.org/TR/webdatabase/#sqltransaction
 [
-    NoInterfaceObject,
+    NoInterfaceObject
 ] interface SQLTransaction {
     // The spec defines |arguments| to be an "optional ObjectArray" though it defines the
     // behavior when null is being passed.

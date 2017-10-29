@@ -11,8 +11,10 @@ import android.support.annotation.Nullable;
 
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.VisibleForTesting;
 
 import java.lang.reflect.Constructor;
+import java.util.Set;
 
 /**
  * A BackgroundTaskScheduler which is used to schedule jobs that run in the background.
@@ -59,7 +61,9 @@ public class BackgroundTaskScheduler {
 
     private final BackgroundTaskSchedulerDelegate mSchedulerDelegate;
 
-    BackgroundTaskScheduler(BackgroundTaskSchedulerDelegate schedulerDelegate) {
+    /** Public constructor that allows null delegate, for testing only */
+    @VisibleForTesting
+    public BackgroundTaskScheduler(BackgroundTaskSchedulerDelegate schedulerDelegate) {
         assert schedulerDelegate != null;
         mSchedulerDelegate = schedulerDelegate;
     }
@@ -75,7 +79,12 @@ public class BackgroundTaskScheduler {
      */
     public boolean schedule(Context context, TaskInfo taskInfo) {
         ThreadUtils.assertOnUiThread();
-        return mSchedulerDelegate.schedule(context, taskInfo);
+        boolean success = mSchedulerDelegate.schedule(context, taskInfo);
+        BackgroundTaskSchedulerUma.getInstance().reportTaskScheduled(taskInfo.getTaskId(), success);
+        if (success) {
+            BackgroundTaskSchedulerPrefs.addScheduledTask(taskInfo);
+        }
+        return success;
     }
 
     /**
@@ -86,6 +95,66 @@ public class BackgroundTaskScheduler {
      */
     public void cancel(Context context, int taskId) {
         ThreadUtils.assertOnUiThread();
+        BackgroundTaskSchedulerUma.getInstance().reportTaskCanceled(taskId);
+        BackgroundTaskSchedulerPrefs.removeScheduledTask(taskId);
         mSchedulerDelegate.cancel(context, taskId);
+    }
+
+    /**
+     * Checks whether OS was upgraded and triggers rescheduling if it is necessary.
+     * Rescheduling is necessary if type of background task scheduler delegate is different for a
+     * new version of the OS.
+     *
+     * @param context the current context.
+     */
+    public void checkForOSUpgrade(Context context) {
+        int oldSdkInt = BackgroundTaskSchedulerPrefs.getLastSdkVersion();
+        int newSdkInt = Build.VERSION.SDK_INT;
+
+        if (oldSdkInt != newSdkInt) {
+            // Save the current SDK version to preferences.
+            BackgroundTaskSchedulerPrefs.setLastSdkVersion(newSdkInt);
+        }
+
+        // No OS upgrade detected or OS upgrade does not change delegate.
+        if (oldSdkInt == newSdkInt || !osUpgradeChangesDelegateType(oldSdkInt, newSdkInt)) {
+            BackgroundTaskSchedulerUma.getInstance().flushStats();
+            return;
+        }
+
+        BackgroundTaskSchedulerUma.getInstance().removeCachedStats();
+
+        // Explicitly create and invoke old delegate type to cancel all scheduled tasks.
+        // All preference entries are kept until reschedule call, which removes then then.
+        BackgroundTaskSchedulerDelegate oldDelegate =
+                BackgroundTaskSchedulerFactory.getSchedulerDelegateForSdk(oldSdkInt);
+        Set<Integer> scheduledTaskIds = BackgroundTaskSchedulerPrefs.getScheduledTaskIds();
+        for (int taskId : scheduledTaskIds) {
+            oldDelegate.cancel(context, taskId);
+        }
+
+        reschedule(context);
+    }
+
+    /**
+     * Reschedules all the tasks currently scheduler through BackgroundTaskSheduler.
+     * @param context the current context.
+     */
+    public void reschedule(Context context) {
+        Set<String> scheduledTasksClassNames = BackgroundTaskSchedulerPrefs.getScheduledTasks();
+        BackgroundTaskSchedulerPrefs.removeAllTasks();
+        for (String className : scheduledTasksClassNames) {
+            BackgroundTask task = getBackgroundTaskFromClassName(className);
+            if (task == null) {
+                Log.w(TAG, "Cannot reschedule task for: " + className);
+                continue;
+            }
+
+            task.reschedule(context);
+        }
+    }
+
+    private boolean osUpgradeChangesDelegateType(int oldSdkInt, int newSdkInt) {
+        return oldSdkInt < Build.VERSION_CODES.M && newSdkInt >= Build.VERSION_CODES.M;
     }
 }

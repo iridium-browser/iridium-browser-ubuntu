@@ -30,6 +30,7 @@ public:
 
     using UniformHandle      = GrGLSLUniformHandler::UniformHandle;
     using SamplerHandle      = GrGLSLUniformHandler::SamplerHandle;
+    using TexelBufferHandle  = GrGLSLUniformHandler::TexelBufferHandle;
     using ImageStorageHandle = GrGLSLUniformHandler::ImageStorageHandle;
 
 private:
@@ -70,12 +71,12 @@ private:
 public:
     using TransformedCoordVars = BuilderInputProvider<GrShaderVar, GrFragmentProcessor,
                                                       &GrFragmentProcessor::numCoordTransforms>;
-    using TextureSamplers = BuilderInputProvider<SamplerHandle, GrProcessor,
-                                                 &GrProcessor::numTextureSamplers>;
-    using BufferSamplers = BuilderInputProvider<SamplerHandle, GrProcessor,
-                                                &GrProcessor::numBuffers>;
-    using ImageStorages = BuilderInputProvider<ImageStorageHandle, GrProcessor,
-                                               &GrProcessor::numImageStorages>;
+    using TextureSamplers = BuilderInputProvider<SamplerHandle, GrResourceIOProcessor,
+                                                 &GrResourceIOProcessor::numTextureSamplers>;
+    using TexelBuffers = BuilderInputProvider<TexelBufferHandle, GrResourceIOProcessor,
+                                                &GrResourceIOProcessor::numBuffers>;
+    using ImageStorages = BuilderInputProvider<ImageStorageHandle, GrResourceIOProcessor,
+                                               &GrResourceIOProcessor::numImageStorages>;
 
     /** Called when the program stage should insert its code into the shaders. The code in each
         shader will be in its own block ({}) and so locally scoped names will not collide across
@@ -104,9 +105,6 @@ public:
         @param imageStorages     Contains one entry for each ImageStorageAccess of the GrProcessor.
                                  These can be passed to the builder to emit image loads and stores
                                  in the generated code.
-        @param gpImplementsDistanceVector
-                                 Does the GrGeometryProcessor implement the feature where it
-                                 provides a vector to the nearest edge of the shape being rendered.
      */
     struct EmitArgs {
         EmitArgs(GrGLSLFPFragmentBuilder* fragBuilder,
@@ -117,20 +115,18 @@ public:
                  const char* inputColor,
                  const TransformedCoordVars& transformedCoordVars,
                  const TextureSamplers& textureSamplers,
-                 const BufferSamplers& bufferSamplers,
-                 const ImageStorages& imageStorages,
-                 bool gpImplementsDistanceVector)
-            : fFragBuilder(fragBuilder)
-            , fUniformHandler(uniformHandler)
-            , fShaderCaps(caps)
-            , fFp(fp)
-            , fOutputColor(outputColor)
-            , fInputColor(inputColor)
-            , fTransformedCoords(transformedCoordVars)
-            , fTexSamplers(textureSamplers)
-            , fBufferSamplers(bufferSamplers)
-            , fImageStorages(imageStorages)
-            , fGpImplementsDistanceVector(gpImplementsDistanceVector) {}
+                 const TexelBuffers& texelBuffers,
+                 const ImageStorages& imageStorages)
+                : fFragBuilder(fragBuilder)
+                , fUniformHandler(uniformHandler)
+                , fShaderCaps(caps)
+                , fFp(fp)
+                , fOutputColor(outputColor)
+                , fInputColor(inputColor)
+                , fTransformedCoords(transformedCoordVars)
+                , fTexSamplers(textureSamplers)
+                , fTexelBuffers(texelBuffers)
+                , fImageStorages(imageStorages) {}
         GrGLSLFPFragmentBuilder* fFragBuilder;
         GrGLSLUniformHandler* fUniformHandler;
         const GrShaderCaps* fShaderCaps;
@@ -139,9 +135,8 @@ public:
         const char* fInputColor;
         const TransformedCoordVars& fTransformedCoords;
         const TextureSamplers& fTexSamplers;
-        const BufferSamplers& fBufferSamplers;
+        const TexelBuffers& fTexelBuffers;
         const ImageStorages& fImageStorages;
-        bool fGpImplementsDistanceVector;
     };
 
     virtual void emitCode(EmitArgs&) = 0;
@@ -156,6 +151,10 @@ public:
         return fChildProcessors[index];
     }
 
+    inline void emitChild(int childIndex, SkString* outputColor, EmitArgs& parentArgs) {
+        this->emitChild(childIndex, "vec4(1.0)", outputColor, parentArgs);
+    }
+
     /** Will emit the code of a child proc in its own scope. Pass in the parent's EmitArgs and
      *  emitChild will automatically extract the coords and samplers of that child and pass them
      *  on to the child's emitCode(). Also, any uniforms or functions emitted by the child will
@@ -166,6 +165,10 @@ public:
      */
     void emitChild(int childIndex, const char* inputColor, SkString* outputColor,
                    EmitArgs& parentArgs);
+
+    inline void emitChild(int childIndex, EmitArgs& args) {
+        this->emitChild(childIndex, "vec4(1.0)", args);
+    }
 
     /** Variation that uses the parent's output color variable to hold the child's output.*/
     void emitChild(int childIndex, const char* inputColor, EmitArgs& parentArgs);
@@ -194,8 +197,7 @@ protected:
     uniform variables required by the shaders created in emitCode(). The GrFragmentProcessor
     parameter is guaranteed to be of the same type that created this GrGLSLFragmentProcessor and
     to have an identical processor key as the one that created this GrGLSLFragmentProcessor.  */
-    // TODO update this to pass in GrFragmentProcessor
-    virtual void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) {}
+    virtual void onSetData(const GrGLSLProgramDataManager&, const GrFragmentProcessor&) {}
 
 private:
     void internalEmitChild(int, const char*, const char*, EmitArgs&);

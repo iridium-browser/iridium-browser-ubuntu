@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkColor.h"
 #include "SkGradientShader.h"
 #include "SkMatrixConvolutionImageFilter.h"
@@ -45,7 +46,7 @@ protected:
         paint.setShader(SkGradientShader::MakeLinear(
             pts, fColors, pos, 2, SkShader::kClamp_TileMode));
         const char* str = "e";
-        canvas.drawText(str, strlen(str), SkIntToScalar(-10), SkIntToScalar(80), paint);
+        canvas.drawString(str, SkIntToScalar(-10), SkIntToScalar(80), paint);
 
         // ... tag the data as sRGB, so color-aware devices do gamut adjustment, etc...
         fBitmap.setInfo(SkImageInfo::MakeS32(80, 80, kPremul_SkAlphaType));

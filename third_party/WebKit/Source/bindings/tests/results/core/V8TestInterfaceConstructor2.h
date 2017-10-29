@@ -13,13 +13,14 @@
 #define V8TestInterfaceConstructor2_h
 
 #include "bindings/core/v8/GeneratedCodeHelper.h"
-#include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/core/v8/ToV8.h"
-#include "bindings/core/v8/V8Binding.h"
-#include "bindings/core/v8/V8DOMWrapper.h"
-#include "bindings/core/v8/WrapperTypeInfo.h"
+#include "bindings/core/v8/NativeValueTraits.h"
+#include "bindings/core/v8/ToV8ForCore.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/tests/idls/core/TestInterfaceConstructor2.h"
 #include "core/CoreExport.h"
+#include "platform/bindings/ScriptWrappable.h"
+#include "platform/bindings/V8DOMWrapper.h"
+#include "platform/bindings/WrapperTypeInfo.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -31,20 +32,30 @@ class V8TestInterfaceConstructor2 {
   static v8::Local<v8::Object> findInstanceInPrototypeChain(v8::Local<v8::Value>, v8::Isolate*);
   CORE_EXPORT static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*, const DOMWrapperWorld&);
   static TestInterfaceConstructor2* toImpl(v8::Local<v8::Object> object) {
-    return toScriptWrappable(object)->toImpl<TestInterfaceConstructor2>();
+    return ToScriptWrappable(object)->ToImpl<TestInterfaceConstructor2>();
   }
   CORE_EXPORT static TestInterfaceConstructor2* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
   CORE_EXPORT static const WrapperTypeInfo wrapperTypeInfo;
-  static void trace(Visitor* visitor, ScriptWrappable* scriptWrappable) {
-    visitor->trace(scriptWrappable->toImpl<TestInterfaceConstructor2>());
+  static void Trace(Visitor* visitor, ScriptWrappable* scriptWrappable) {
+    visitor->Trace(scriptWrappable->ToImpl<TestInterfaceConstructor2>());
   }
-  static void traceWrappers(WrapperVisitor* visitor, ScriptWrappable* scriptWrappable) {
-    visitor->traceWrappers(scriptWrappable->toImpl<TestInterfaceConstructor2>());
+  static void TraceWrappers(WrapperVisitor* visitor, ScriptWrappable* scriptWrappable) {
+    visitor->TraceWrappersWithManualWriteBarrier(scriptWrappable->ToImpl<TestInterfaceConstructor2>());
   }
-  static void constructorCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + 0;
+  static const int internalFieldCount = kV8DefaultWrapperInternalFieldCount + 0;
 
   // Callback functions
+  CORE_EXPORT static void constructorCallback(const v8::FunctionCallbackInfo<v8::Value>&);
+
+  static void InstallRuntimeEnabledFeaturesOnTemplate(
+      v8::Isolate*,
+      const DOMWrapperWorld&,
+      v8::Local<v8::FunctionTemplate> interface_template);
+};
+
+template <>
+struct NativeValueTraits<TestInterfaceConstructor2> : public NativeValueTraitsBase<TestInterfaceConstructor2> {
+  CORE_EXPORT static TestInterfaceConstructor2* NativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 template <>

@@ -19,6 +19,7 @@
 #include "components/content_settings/core/browser/content_settings_origin_identifier_value_map.h"
 #include "components/content_settings/core/browser/content_settings_rule.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
+#include "components/content_settings/core/common/content_settings_utils.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -27,7 +28,6 @@ using content_settings::Rule;
 using content_settings::RuleIterator;
 using content_settings::OriginIdentifierValueMap;
 using content_settings::ResourceIdentifier;
-using content_settings::ValueToContentSetting;
 
 namespace extensions {
 
@@ -109,8 +109,9 @@ void ContentSettingsStore::SetExtensionContentSetting(
     if (setting == CONTENT_SETTING_DEFAULT) {
       map->DeleteValue(primary_pattern, secondary_pattern, type, identifier);
     } else {
+      // Do not set a timestamp for extension settings.
       map->SetValue(primary_pattern, secondary_pattern, type, identifier,
-                    new base::Value(setting));
+                    base::Time(), new base::Value(setting));
     }
   }
 
@@ -245,7 +246,7 @@ void ContentSettingsStore::ClearContentSettingsForExtension(
   }
 }
 
-base::ListValue* ContentSettingsStore::GetSettingsForExtension(
+std::unique_ptr<base::ListValue> ContentSettingsStore::GetSettingsForExtension(
     const std::string& extension_id,
     ExtensionPrefsScope scope) const {
   base::AutoLock lock(lock_);
@@ -253,7 +254,7 @@ base::ListValue* ContentSettingsStore::GetSettingsForExtension(
   if (!map)
     return nullptr;
 
-  base::ListValue* settings = new base::ListValue();
+  auto settings = base::MakeUnique<base::ListValue>();
   for (const auto& it : *map) {
     const auto& key = it.first;
     std::unique_ptr<RuleIterator> rule_iterator(
@@ -275,7 +276,8 @@ base::ListValue* ContentSettingsStore::GetSettingsForExtension(
           helpers::ContentSettingsTypeToString(key.content_type));
       setting_dict->SetString(keys::kResourceIdentifierKey,
                               key.resource_identifier);
-      ContentSetting content_setting = ValueToContentSetting(rule.value.get());
+      ContentSetting content_setting =
+          content_settings::ValueToContentSetting(rule.value.get());
       DCHECK_NE(CONTENT_SETTING_DEFAULT, content_setting);
 
       std::string setting_string =
@@ -294,8 +296,8 @@ void ContentSettingsStore::SetExtensionContentSettingFromList(
     const base::ListValue* list,
     ExtensionPrefsScope scope) {
   for (const auto& value : *list) {
-    base::DictionaryValue* dict;
-    if (!value->GetAsDictionary(&dict)) {
+    const base::DictionaryValue* dict = nullptr;
+    if (!value.GetAsDictionary(&dict)) {
       NOTREACHED();
       continue;
     }

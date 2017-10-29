@@ -9,6 +9,8 @@
 
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "services/service_manager/public/cpp/bind_source_info.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "ui/ozone/ozone_export.h"
 
 namespace display {
@@ -25,7 +27,6 @@ class MessageFilter;
 
 namespace service_manager {
 class Connector;
-class InterfaceRegistry;
 }
 
 namespace ui {
@@ -89,13 +90,13 @@ class OZONE_EXPORT OzonePlatform {
   // InitalizeForUI.
   static void InitializeForUI(const InitParams& args);
 
-  // Initializes the subsystems/resources necessary for rendering (i.e. GPU).
-  // TODO(rjkroege): Remove deprecated entry point (http://crbug.com/620934)
-  static void InitializeForGPU();
-
   // Initializes the subsystems for rendering but with additional properties
   // provided by |args| as with InitalizeForUI.
   static void InitializeForGPU(const InitParams& args);
+
+  // Deletes the instance. Does nothing if OzonePlatform has not yet been
+  // initialized.
+  static void Shutdown();
 
   static OzonePlatform* GetInstance();
 
@@ -122,18 +123,17 @@ class OZONE_EXPORT OzonePlatform {
   // Ozone platform implementations may also choose to expose mojo interfaces to
   // internal functionality. Embedders wishing to take advantage of ozone mojo
   // implementations must invoke AddInterfaces with a valid
-  // service_manager::InterfaceRegistry* pointer to export all Mojo interfaces
+  // service_manager::BinderRegistry* pointer to export all Mojo interfaces
   // defined within Ozone.
   //
   // A default do-nothing implementation is provided to permit platform
   // implementations to opt out of implementing any Mojo interfaces.
-  virtual void AddInterfaces(service_manager::InterfaceRegistry* registry);
+  virtual void AddInterfaces(service_manager::BinderRegistryWithArgs<
+                             const service_manager::BindSourceInfo&>* registry);
 
  private:
-  virtual void InitializeUI() = 0;
-  virtual void InitializeGPU() = 0;
-  virtual void InitializeUI(const InitParams& args);
-  virtual void InitializeGPU(const InitParams& args);
+  virtual void InitializeUI(const InitParams& params) = 0;
+  virtual void InitializeGPU(const InitParams& params) = 0;
 
   static OzonePlatform* instance_;
 

@@ -48,9 +48,9 @@ void FullscreenControllerTest::LostMouseLock() {
 
 bool FullscreenControllerTest::SendEscapeToFullscreenController() {
   content::NativeWebKeyboardEvent event(
-      blink::WebInputEvent::KeyDown, blink::WebInputEvent::NoModifiers,
-      blink::WebInputEvent::TimeStampForTesting);
-  event.windowsKeyCode = ui::VKEY_ESCAPE;
+      blink::WebInputEvent::kKeyDown, blink::WebInputEvent::kNoModifiers,
+      blink::WebInputEvent::kTimeStampForTesting);
+  event.windows_key_code = ui::VKEY_ESCAPE;
   return GetExclusiveAccessManager()->HandleUserKeyPress(event);
 }
 
@@ -87,4 +87,11 @@ void FullscreenControllerTest::Reload() {
 
 void FullscreenControllerTest::SetPrivilegedFullscreen(bool is_privileged) {
   GetFullscreenController()->SetPrivilegedFullscreenForTesting(is_privileged);
+}
+
+void FullscreenControllerTest::EnterActiveTabFullscreen() {
+  WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
+  FullscreenNotificationObserver fullscreen_observer;
+  browser()->EnterFullscreenModeForTab(tab, GURL());
+  fullscreen_observer.Wait();
 }

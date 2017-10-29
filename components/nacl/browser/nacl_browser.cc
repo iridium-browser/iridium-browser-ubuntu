@@ -16,6 +16,7 @@
 #include "base/pickle.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -279,11 +280,11 @@ void NaClBrowser::EnsureIrtAvailable() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   if (IsOk() && irt_state_ == NaClResourceUninitialized) {
     irt_state_ = NaClResourceRequested;
-    // TODO(ncbray) use blocking pool.
+    auto task_runner = base::CreateTaskRunnerWithTraits(
+        {base::MayBlock(), base::TaskPriority::BACKGROUND,
+         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
     std::unique_ptr<base::FileProxy> file_proxy(
-        new base::FileProxy(content::BrowserThread::GetTaskRunnerForThread(
-                                content::BrowserThread::FILE)
-                                .get()));
+        new base::FileProxy(task_runner.get()));
     base::FileProxy* proxy = file_proxy.get();
     if (!proxy->CreateOrOpen(
             irt_filepath_, base::File::FLAG_OPEN | base::File::FLAG_READ,
@@ -375,13 +376,11 @@ void NaClBrowser::EnsureValidationCacheAvailable() {
       // We can get away not giving this a sequence ID because this is the first
       // task and further file access will not occur until after we get a
       // response.
-      if (!content::BrowserThread::PostBlockingPoolTaskAndReply(
-              FROM_HERE,
-              base::Bind(ReadCache, validation_cache_file_path_, data),
-              base::Bind(&NaClBrowser::OnValidationCacheLoaded,
-                         base::Unretained(this), base::Owned(data)))) {
-        RunWithoutValidationCache();
-      }
+      base::PostTaskWithTraitsAndReply(
+          FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+          base::Bind(ReadCache, validation_cache_file_path_, data),
+          base::Bind(&NaClBrowser::OnValidationCacheLoaded,
+                     base::Unretained(this), base::Owned(data)));
     } else {
       RunWithoutValidationCache();
     }

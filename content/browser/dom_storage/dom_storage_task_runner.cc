@@ -24,31 +24,32 @@ DOMStorageWorkerPoolTaskRunner::DOMStorageWorkerPoolTaskRunner(
 
 DOMStorageWorkerPoolTaskRunner::~DOMStorageWorkerPoolTaskRunner() = default;
 
-bool DOMStorageWorkerPoolTaskRunner::RunsTasksOnCurrentThread() const {
-  // It is valid for an implementation to always return true.
-  return true;
+bool DOMStorageWorkerPoolTaskRunner::RunsTasksInCurrentSequence() const {
+  return primary_sequence_->RunsTasksInCurrentSequence() ||
+         commit_sequence_->RunsTasksInCurrentSequence();
 }
 
 bool DOMStorageWorkerPoolTaskRunner::PostDelayedTask(
     const tracked_objects::Location& from_here,
-    const base::Closure& task,
+    base::OnceClosure task,
     base::TimeDelta delay) {
-  return primary_sequence_->PostDelayedTask(from_here, task, delay);
+  return primary_sequence_->PostDelayedTask(from_here, std::move(task), delay);
 }
 
 bool DOMStorageWorkerPoolTaskRunner::PostShutdownBlockingTask(
     const tracked_objects::Location& from_here,
     SequenceID sequence_id,
-    const base::Closure& task) {
-  return GetSequencedTaskRunner(sequence_id)->PostTask(from_here, task);
+    base::OnceClosure task) {
+  return GetSequencedTaskRunner(sequence_id)
+      ->PostTask(from_here, std::move(task));
 }
 
 void DOMStorageWorkerPoolTaskRunner::AssertIsRunningOnPrimarySequence() const {
-  DCHECK(primary_sequence_->RunsTasksOnCurrentThread());
+  DCHECK(primary_sequence_->RunsTasksInCurrentSequence());
 }
 
 void DOMStorageWorkerPoolTaskRunner::AssertIsRunningOnCommitSequence() const {
-  DCHECK(commit_sequence_->RunsTasksOnCurrentThread());
+  DCHECK(commit_sequence_->RunsTasksInCurrentSequence());
 }
 
 scoped_refptr<base::SequencedTaskRunner>
@@ -67,30 +68,30 @@ MockDOMStorageTaskRunner::MockDOMStorageTaskRunner(
 
 MockDOMStorageTaskRunner::~MockDOMStorageTaskRunner() = default;
 
-bool MockDOMStorageTaskRunner::RunsTasksOnCurrentThread() const {
-  return task_runner_->RunsTasksOnCurrentThread();
+bool MockDOMStorageTaskRunner::RunsTasksInCurrentSequence() const {
+  return task_runner_->RunsTasksInCurrentSequence();
 }
 
 bool MockDOMStorageTaskRunner::PostDelayedTask(
     const tracked_objects::Location& from_here,
-    const base::Closure& task,
+    base::OnceClosure task,
     base::TimeDelta delay) {
-  return task_runner_->PostTask(from_here, task);
+  return task_runner_->PostTask(from_here, std::move(task));
 }
 
 bool MockDOMStorageTaskRunner::PostShutdownBlockingTask(
     const tracked_objects::Location& from_here,
     SequenceID sequence_id,
-    const base::Closure& task) {
-  return task_runner_->PostTask(from_here, task);
+    base::OnceClosure task) {
+  return task_runner_->PostTask(from_here, std::move(task));
 }
 
 void MockDOMStorageTaskRunner::AssertIsRunningOnPrimarySequence() const {
-  DCHECK(RunsTasksOnCurrentThread());
+  DCHECK(RunsTasksInCurrentSequence());
 }
 
 void MockDOMStorageTaskRunner::AssertIsRunningOnCommitSequence() const {
-  DCHECK(RunsTasksOnCurrentThread());
+  DCHECK(RunsTasksInCurrentSequence());
 }
 
 scoped_refptr<base::SequencedTaskRunner>

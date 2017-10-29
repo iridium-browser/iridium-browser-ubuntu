@@ -16,6 +16,7 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -63,7 +64,6 @@
 #include "chrome/browser/ui/views/download/download_in_progress_dialog_view.h"
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
 #include "chrome/browser/ui/views/exclusive_access_bubble_views.h"
-#include "chrome/browser/ui/views/extensions/bookmark_app_confirmation_view.h"
 #include "chrome/browser/ui/views/extensions/extension_keybinding_registry_views.h"
 #include "chrome/browser/ui/views/find_bar_host.h"
 #include "chrome/browser/ui/views/frame/browser_view_layout.h"
@@ -72,6 +72,7 @@
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/frame/top_container_view.h"
 #include "chrome/browser/ui/views/frame/web_contents_close_handler.h"
+#include "chrome/browser/ui/views/fullscreen_control/fullscreen_control_host.h"
 #include "chrome/browser/ui/views/ime/ime_warning_bubble_view.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -80,6 +81,7 @@
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
 #include "chrome/browser/ui/views/new_back_shortcut_bubble.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
+#include "chrome/browser/ui/views/page_info/page_info_bubble_view.h"
 #include "chrome/browser/ui/views/profiles/profile_indicator_icon.h"
 #include "chrome/browser/ui/views/status_bubble_views.h"
 #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
@@ -91,19 +93,16 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/browser/ui/views/translate/translate_bubble_view.h"
 #include "chrome/browser/ui/views/update_recommended_message_box.h"
-#include "chrome/browser/ui/views/website_settings/website_settings_popup_view.h"
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/command.h"
 #include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/locale_settings.h"
 #include "chrome/grit/theme_resources.h"
-#include "components/app_modal/app_modal_dialog.h"
 #include "components/app_modal/app_modal_dialog_queue.h"
+#include "components/app_modal/javascript_app_modal_dialog.h"
 #include "components/app_modal/native_app_modal_dialog.h"
 #include "components/omnibox/browser/omnibox_popup_model.h"
 #include "components/omnibox/browser/omnibox_popup_view.h"
@@ -113,11 +112,11 @@
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/language_state.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -134,12 +133,10 @@
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/native_theme/native_theme_dark_aura.h"
-#include "ui/strings/grit/ui_strings.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/focus/external_focus_tracker.h"
-#include "ui/views/focus/view_storage.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/native_widget.h"
 #include "ui/views/widget/root_view.h"
@@ -151,6 +148,7 @@
 #endif  // defined(OS_CHROMEOS)
 
 #if !defined(OS_CHROMEOS)
+#include "chrome/browser/ui/signin_view_controller.h"
 #include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
 #endif  // !defined(OS_CHROMEOS)
 
@@ -199,10 +197,6 @@ void PaintDetachedBookmarkBar(gfx::Canvas* canvas,
   // Paint background for detached state; if animating, this is fade in/out.
   const ui::ThemeProvider* tp = view->GetThemeProvider();
   gfx::Rect fill_rect = view->GetLocalBounds();
-  // We have to not color the top 1dp, because that should be painted by the
-  // toolbar. We will, however, paint the 1px separator at the bottom of the
-  // first dp. See crbug.com/610359
-  fill_rect.Inset(0, 1, 0, 0);
 
   // In detached mode, the bar is meant to overlap with |contents_container_|.
   // The detached background color may be partially transparent, but the layer
@@ -214,18 +208,10 @@ void PaintDetachedBookmarkBar(gfx::Canvas* canvas,
       fill_rect,
       tp->GetColor(ThemeProperties::COLOR_DETACHED_BOOKMARK_BAR_BACKGROUND));
 
-  // Draw the separators above and below bookmark bar;
-  // if animating, these are fading in/out.
-  SkColor separator_color =
-      tp->GetColor(ThemeProperties::COLOR_DETACHED_BOOKMARK_BAR_SEPARATOR);
-
-  // For the bottom separator, increase the luminance. Either double it or halve
-  // the distance to 1.0, whichever is less of a difference.
-  color_utils::HSL hsl;
-  color_utils::SkColorToHSL(separator_color, &hsl);
-  hsl.l = std::min((hsl.l + 1) / 2, hsl.l * 2);
+  // Draw the separator below the detached bookmark bar.
   BrowserView::Paint1pxHorizontalLine(
-      canvas, color_utils::HSLToSkColor(hsl, SK_AlphaOPAQUE),
+      canvas,
+      tp->GetColor(ThemeProperties::COLOR_DETACHED_BOOKMARK_BAR_SEPARATOR),
       view->GetLocalBounds(), true);
 }
 
@@ -400,25 +386,7 @@ void BookmarkBarViewBackground::Paint(gfx::Canvas* canvas,
 // static
 const char BrowserView::kViewClassName[] = "BrowserView";
 
-BrowserView::BrowserView()
-    : views::ClientView(nullptr, nullptr),
-      last_focused_view_storage_id_(
-          views::ViewStorage::GetInstance()->CreateStorageID()),
-      frame_(nullptr),
-      top_container_(nullptr),
-      tabstrip_(nullptr),
-      toolbar_(nullptr),
-      find_bar_host_view_(nullptr),
-      infobar_container_(nullptr),
-      contents_web_view_(nullptr),
-      devtools_web_view_(nullptr),
-      contents_container_(nullptr),
-      initialized_(false),
-      handling_theme_changed_(false),
-      in_process_fullscreen_(false),
-      force_location_bar_focus_(false),
-      activate_modal_dialog_factory_(this) {
-}
+BrowserView::BrowserView() : views::ClientView(nullptr, nullptr) {}
 
 BrowserView::~BrowserView() {
   // All the tabs should have been destroyed already. If we were closed by the
@@ -462,9 +430,6 @@ BrowserView::~BrowserView() {
   // OffTheRecordProfile's PrefService which gets deleted by ~Browser.
   RemoveAllChildViews(true);
   toolbar_ = nullptr;
-
-  // Explicitly set browser_ to null.
-  browser_.reset();
 }
 
 void BrowserView::Init(Browser* browser) {
@@ -1160,6 +1125,8 @@ bool BrowserView::IsBookmarkBarVisible() const {
     return false;
   if (!bookmark_bar_view_.get())
     return false;
+  if (!bookmark_bar_view_->parent())
+    return false;
   if (bookmark_bar_view_->GetPreferredSize().height() == 0)
     return false;
   // New tab page needs visible bookmarks even when top-views are hidden.
@@ -1189,6 +1156,10 @@ bool BrowserView::IsToolbarVisible() const {
          toolbar_;
 }
 
+bool BrowserView::IsToolbarShowing() const {
+  return IsToolbarVisible();
+}
+
 void BrowserView::ShowUpdateChromeDialog() {
   UpdateRecommendedMessageBox::Show(GetNativeWindow());
 }
@@ -1196,13 +1167,6 @@ void BrowserView::ShowUpdateChromeDialog() {
 void BrowserView::ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {
   toolbar_->ShowBookmarkBubble(url, already_bookmarked,
                                bookmark_bar_view_.get());
-}
-
-void BrowserView::ShowBookmarkAppBubble(
-    const WebApplicationInfo& web_app_info,
-    const ShowBookmarkAppBubbleCallback& callback) {
-  BookmarkAppConfirmationView::CreateAndShow(GetNativeWindow(), web_app_info,
-                                             callback);
 }
 
 autofill::SaveCardBubbleView* BrowserView::ShowSaveCreditCardBubble(
@@ -1284,13 +1248,14 @@ void BrowserView::UserChangedTheme() {
   frame_->FrameTypeChanged();
 }
 
-void BrowserView::ShowWebsiteSettings(
+void BrowserView::ShowPageInfo(
     Profile* profile,
     content::WebContents* web_contents,
     const GURL& virtual_url,
     const security_state::SecurityInfo& security_info) {
-  WebsiteSettingsPopupView::ShowPopup(
-      GetLocationBarView()->GetSecurityBubbleAnchorView(), gfx::Rect(), profile,
+  PageInfoBubbleView::ShowBubble(
+      GetLocationBarView()->GetSecurityBubbleAnchorView(),
+      GetLocationBarView()->location_icon_view(), gfx::Rect(), profile,
       web_contents, virtual_url, security_info);
 }
 
@@ -1306,20 +1271,18 @@ void BrowserView::ShowAppMenu() {
   toolbar_->app_menu_button()->Activate(nullptr);
 }
 
-bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                         bool* is_keyboard_shortcut) {
-  *is_keyboard_shortcut = false;
-
-  if ((event.type() != blink::WebInputEvent::RawKeyDown) &&
-      (event.type() != blink::WebInputEvent::KeyUp)) {
-    return false;
+content::KeyboardEventProcessingResult BrowserView::PreHandleKeyboardEvent(
+    const NativeWebKeyboardEvent& event) {
+  if ((event.GetType() != blink::WebInputEvent::kRawKeyDown) &&
+      (event.GetType() != blink::WebInputEvent::kKeyUp)) {
+    return content::KeyboardEventProcessingResult::NOT_HANDLED;
   }
 
   views::FocusManager* focus_manager = GetFocusManager();
   DCHECK(focus_manager);
 
   if (focus_manager->shortcut_handling_suspended())
-    return false;
+    return content::KeyboardEventProcessingResult::NOT_HANDLED;
 
   ui::Accelerator accelerator =
       ui::GetAcceleratorFromNativeWebKeyboardEvent(event);
@@ -1337,22 +1300,30 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
 
   if (browser_->is_app()) {
     // Let all keys fall through to a v1 app's web content, even accelerators.
-    // We don't have to flip |is_keyboard_shortcut| here. If we do that, the app
+    // We don't use NOT_HANDLED_IS_SHORTCUT here. If we do that, the app
     // might not be able to see a subsequent Char event. See OnHandleInputEvent
     // in content/renderer/render_widget.cc for details.
-    return false;
+    return content::KeyboardEventProcessingResult::NOT_HANDLED;
   }
 
 #if defined(OS_CHROMEOS)
   if (ash_util::IsAcceleratorDeprecated(accelerator)) {
-    if (event.type() == blink::WebInputEvent::RawKeyDown)
-      *is_keyboard_shortcut = true;
-    return false;
+    return (event.GetType() == blink::WebInputEvent::kRawKeyDown)
+               ? content::KeyboardEventProcessingResult::NOT_HANDLED_IS_SHORTCUT
+               : content::KeyboardEventProcessingResult::NOT_HANDLED;
   }
 #endif  // defined(OS_CHROMEOS)
 
   if (frame_->PreHandleKeyboardEvent(event))
-    return true;
+    return content::KeyboardEventProcessingResult::HANDLED;
+
+#if defined(OS_CHROMEOS)
+  if (event.os_event && event.os_event->IsKeyEvent() &&
+      ash_util::WillAshProcessAcceleratorForEvent(
+          *event.os_event->AsKeyEvent())) {
+    return content::KeyboardEventProcessingResult::HANDLED_DONT_UPDATE_EVENT;
+  }
+#endif
 
   chrome::BrowserCommandController* controller = browser_->command_controller();
 
@@ -1374,20 +1345,25 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
   // Executing the command may cause |this| object to be destroyed.
   if (controller->IsReservedCommandOrKey(id, event)) {
     UpdateAcceleratorMetrics(accelerator, id);
-    return chrome::ExecuteCommand(browser_.get(), id);
+    return chrome::ExecuteCommand(browser_.get(), id)
+               ? content::KeyboardEventProcessingResult::HANDLED
+               : content::KeyboardEventProcessingResult::NOT_HANDLED;
   }
 
   if (id != -1) {
     // |accelerator| is a non-reserved browser shortcut (e.g. Ctrl+f).
-    if (event.type() == blink::WebInputEvent::RawKeyDown)
-      *is_keyboard_shortcut = true;
-  } else if (processed) {
-    // |accelerator| is a non-browser shortcut (e.g. F4-F10 on Ash). Report
-    // that we handled it.
-    return true;
+    return (event.GetType() == blink::WebInputEvent::kRawKeyDown)
+               ? content::KeyboardEventProcessingResult::NOT_HANDLED_IS_SHORTCUT
+               : content::KeyboardEventProcessingResult::NOT_HANDLED;
   }
 
-  return false;
+  if (processed) {
+    // |accelerator| is a non-browser shortcut (e.g. F4-F10 on Ash). Report
+    // that we handled it.
+    return content::KeyboardEventProcessingResult::HANDLED;
+  }
+
+  return content::KeyboardEventProcessingResult::NOT_HANDLED;
 }
 
 void BrowserView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
@@ -1580,8 +1556,8 @@ bool BrowserView::CanActivate() const {
   // that doesn't have the modal dialog the windows keep trying to get the focus
   // from each other on Windows. http://crbug.com/141650.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&BrowserView::ActivateAppModalDialog,
-                            activate_modal_dialog_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&BrowserView::ActivateAppModalDialog,
+                                activate_modal_dialog_factory_.GetWeakPtr()));
 #endif
   return false;
 }
@@ -1670,6 +1646,19 @@ void BrowserView::NativeThemeUpdated(const ui::NativeTheme* theme) {
   if (!handling_theme_changed_)
     UserChangedTheme();
   chrome::MaybeShowInvertBubbleView(this);
+}
+
+FullscreenControlHost* BrowserView::GetFullscreenControlHost() {
+  if (!fullscreen_control_host_) {
+    // This is a do-nothing view that controls the z-order of the fullscreen
+    // control host. See DropdownBarHost::SetHostViewNative() for more details.
+    auto fullscreen_exit_host_view = base::MakeUnique<views::View>();
+    fullscreen_control_host_ = base::MakeUnique<FullscreenControlHost>(
+        this, fullscreen_exit_host_view.get());
+    AddChildView(fullscreen_exit_host_view.release());
+  }
+
+  return fullscreen_control_host_.get();
 }
 
 views::View* BrowserView::GetInitiallyFocusedView() {
@@ -1840,6 +1829,8 @@ void BrowserView::OnWidgetActivationChanged(views::Widget* widget,
              extension_keybinding_registry_.get()) {
     registry->set_registry_for_active_window(nullptr);
   }
+
+  immersive_mode_controller()->OnWidgetActivationChanged(widget, active);
 }
 
 void BrowserView::OnWindowBeginUserBoundsChange() {
@@ -1961,6 +1952,7 @@ void BrowserView::Layout() {
   // TODO(jamescook): Why was this in the middle of layout code?
   toolbar_->location_bar()->omnibox_view()->SetFocusBehavior(
       IsToolbarVisible() ? FocusBehavior::ALWAYS : FocusBehavior::NEVER);
+  frame()->GetFrameView()->UpdateMinimumSize();
 }
 
 void BrowserView::OnGestureEvent(ui::GestureEvent* event) {
@@ -1977,9 +1969,41 @@ void BrowserView::OnGestureEvent(ui::GestureEvent* event) {
 
 void BrowserView::ViewHierarchyChanged(
     const ViewHierarchyChangedDetails& details) {
-  if (!initialized_ && details.is_add && details.child == this && GetWidget()) {
+  if (details.child != this)
+    return;
+
+  // On removal, this class may not have a widget anymore, so go to the parent.
+  auto* widget = details.is_add ? GetWidget() : details.parent->GetWidget();
+  if (!widget)
+    return;
+
+  bool init = !initialized_ && details.is_add;
+  if (init) {
     InitViews();
     initialized_ = true;
+  }
+
+#if defined(USE_AURA)
+  if (init) {
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableExperimentalFullscreenExitUI)) {
+      widget->GetNativeView()->AddPreTargetHandler(GetFullscreenControlHost());
+    }
+  } else if (fullscreen_control_host_) {
+    auto* native_view = widget->GetNativeView();
+    if (native_view)
+      native_view->RemovePreTargetHandler(fullscreen_control_host_.get());
+  }
+#endif
+}
+
+void BrowserView::PaintChildren(const ui::PaintContext& context) {
+  views::ClientView::PaintChildren(context);
+  // Don't reset the instance before it had a chance to get compositor callback.
+  if (!histogram_helper_) {
+    histogram_helper_ = BrowserWindowHistogramHelper::
+        MaybeRecordValueAndCreateInstanceOnBrowserPaint(
+            GetWidget()->GetCompositor());
   }
 }
 
@@ -2064,10 +2088,9 @@ void BrowserView::InitViews() {
                                        browser_->profile());
 
 #if defined(USE_AURA)
-  // Stow a pointer to the browser's original profile onto the window handle so
+  // Stow a pointer to the browser's profile onto the window handle so
   // that windows will be styled with the appropriate NativeTheme.
-  SetThemeProfileForWindow(GetNativeWindow(),
-                           browser_->profile()->GetOriginalProfile());
+  SetThemeProfileForWindow(GetNativeWindow(), browser_->profile());
 #endif
 
   LoadAccelerators();
@@ -2084,7 +2107,7 @@ void BrowserView::InitViews() {
   devtools_web_view_->SetVisible(false);
 
   contents_container_ = new views::View();
-  contents_container_->set_background(views::Background::CreateSolidBackground(
+  contents_container_->SetBackground(views::CreateSolidBackground(
       GetThemeProvider()->GetColor(ThemeProperties::COLOR_CONTROL_BACKGROUND)));
   contents_container_->AddChildView(devtools_web_view_);
   contents_container_->AddChildView(contents_web_view_);
@@ -2147,6 +2170,7 @@ void BrowserView::InitViews() {
   GetLocationBar()->GetOmniboxView()->model()->popup_model()->AddObserver(this);
 
   frame_->OnBrowserViewInitViewsComplete();
+  frame_->GetFrameView()->UpdateMinimumSize();
 }
 
 void BrowserView::LoadingAnimationCallback() {
@@ -2170,8 +2194,9 @@ void BrowserView::LoadingAnimationCallback() {
 
 void BrowserView::OnLoadCompleted() {
 #if defined(OS_WIN)
-  DCHECK(!jumplist_.get());
-  jumplist_ = JumpListFactory::GetForProfile(browser_->profile());
+  // Ensure that this browser's Profile has a JumpList so that the JumpList is
+  // kept up to date.
+  JumpListFactory::GetForProfile(browser_->profile());
 #endif
 }
 
@@ -2185,15 +2210,16 @@ ContentsLayoutManager* BrowserView::GetContentsLayoutManager() const {
 }
 
 bool BrowserView::MaybeShowBookmarkBar(WebContents* contents) {
-  bool show_bookmark_bar = contents &&
-      browser_->SupportsWindowFeature(Browser::FEATURE_BOOKMARKBAR);
+  const bool show_bookmark_bar =
+      contents && browser_->SupportsWindowFeature(Browser::FEATURE_BOOKMARKBAR);
   if (!show_bookmark_bar && !bookmark_bar_view_.get())
     return false;
   if (!bookmark_bar_view_.get()) {
     bookmark_bar_view_.reset(new BookmarkBarView(browser_.get(), this));
     bookmark_bar_view_->set_owned_by_client();
-    bookmark_bar_view_->set_background(
-        new BookmarkBarViewBackground(this, bookmark_bar_view_.get()));
+    bookmark_bar_view_->SetBackground(
+        base::MakeUnique<BookmarkBarViewBackground>(this,
+                                                    bookmark_bar_view_.get()));
     bookmark_bar_view_->SetBookmarkBarState(
         browser_->bookmark_bar_state(),
         BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
@@ -2334,28 +2360,29 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
   //   * Hiding the window until it's in the final position
   //   * Ignoring all intervening Layout() calls, which resize the webpage and
   //     thus are slow and look ugly (enforced via |in_process_fullscreen_|).
-  LocationBarView* location_bar = GetLocationBarView();
-
-  if (!fullscreen) {
-    // Hide the fullscreen bubble as soon as possible, since the mode toggle can
-    // take enough time for the user to notice.
-    exclusive_access_bubble_.reset();
-  }
-
   if (fullscreen) {
     // Move focus out of the location bar if necessary.
     views::FocusManager* focus_manager = GetFocusManager();
     DCHECK(focus_manager);
     // Look for focus in the location bar itself or any child view.
-    if (location_bar->Contains(focus_manager->GetFocusedView()))
+    if (GetLocationBarView()->Contains(focus_manager->GetFocusedView()))
       focus_manager->ClearFocus();
+  } else {
+    // Hide the fullscreen bubble as soon as possible, since the mode toggle can
+    // take enough time for the user to notice.
+    exclusive_access_bubble_.reset();
+    if (fullscreen_control_host_)
+      fullscreen_control_host_->Hide(false);
   }
 
   // Toggle fullscreen mode.
   frame_->SetFullscreen(fullscreen);
 
   // Enable immersive before the browser refreshes its list of enabled commands.
-  if (ShouldUseImmersiveFullscreenForUrl(url))
+  const bool should_stay_in_immersive =
+      !fullscreen &&
+      immersive_mode_controller_->ShouldStayImmersiveAfterExitingFullscreen();
+  if (ShouldUseImmersiveFullscreenForUrl(url) && !should_stay_in_immersive)
     immersive_mode_controller_->SetEnabled(fullscreen);
 
   browser_->WindowFullscreenStateWillChange();
@@ -2451,7 +2478,7 @@ void BrowserView::UpdateAcceleratorMetrics(const ui::Accelerator& accelerator,
                                            int command_id) {
   const ui::KeyboardCode key_code = accelerator.key_code();
   if (command_id == IDC_HELP_PAGE_VIA_KEYBOARD && key_code == ui::VKEY_F1)
-    content::RecordAction(UserMetricsAction("ShowHelpTabViaF1"));
+    base::RecordAction(UserMetricsAction("ShowHelpTabViaF1"));
 
   if (command_id == IDC_BOOKMARK_PAGE)
     UMA_HISTOGRAM_ENUMERATION("Bookmarks.EntryPoint",
@@ -2464,34 +2491,34 @@ void BrowserView::UpdateAcceleratorMetrics(const ui::Accelerator& accelerator,
   switch (command_id) {
     case IDC_BACK:
       if (key_code == ui::VKEY_BROWSER_BACK)
-        content::RecordAction(UserMetricsAction("Accel_Back_F1"));
+        base::RecordAction(UserMetricsAction("Accel_Back_F1"));
       else if (key_code == ui::VKEY_LEFT)
-        content::RecordAction(UserMetricsAction("Accel_Back_Left"));
+        base::RecordAction(UserMetricsAction("Accel_Back_Left"));
       break;
     case IDC_FORWARD:
       if (key_code == ui::VKEY_BROWSER_FORWARD)
-        content::RecordAction(UserMetricsAction("Accel_Forward_F2"));
+        base::RecordAction(UserMetricsAction("Accel_Forward_F2"));
       else if (key_code == ui::VKEY_RIGHT)
-        content::RecordAction(UserMetricsAction("Accel_Forward_Right"));
+        base::RecordAction(UserMetricsAction("Accel_Forward_Right"));
       break;
     case IDC_RELOAD:
     case IDC_RELOAD_BYPASSING_CACHE:
       if (key_code == ui::VKEY_R)
-        content::RecordAction(UserMetricsAction("Accel_Reload_R"));
+        base::RecordAction(UserMetricsAction("Accel_Reload_R"));
       else if (key_code == ui::VKEY_BROWSER_REFRESH)
-        content::RecordAction(UserMetricsAction("Accel_Reload_F3"));
+        base::RecordAction(UserMetricsAction("Accel_Reload_F3"));
       break;
     case IDC_FOCUS_LOCATION:
       if (key_code == ui::VKEY_D)
-        content::RecordAction(UserMetricsAction("Accel_FocusLocation_D"));
+        base::RecordAction(UserMetricsAction("Accel_FocusLocation_D"));
       else if (key_code == ui::VKEY_L)
-        content::RecordAction(UserMetricsAction("Accel_FocusLocation_L"));
+        base::RecordAction(UserMetricsAction("Accel_FocusLocation_L"));
       break;
     case IDC_FOCUS_SEARCH:
       if (key_code == ui::VKEY_E)
-        content::RecordAction(UserMetricsAction("Accel_FocusSearch_E"));
+        base::RecordAction(UserMetricsAction("Accel_FocusSearch_E"));
       else if (key_code == ui::VKEY_K)
-        content::RecordAction(UserMetricsAction("Accel_FocusSearch_K"));
+        base::RecordAction(UserMetricsAction("Accel_FocusSearch_K"));
       break;
     default:
       // Do nothing.
@@ -2511,14 +2538,13 @@ void BrowserView::ShowAvatarBubbleFromAvatarButton(
     return;
 
   profiles::BubbleViewMode bubble_view_mode;
-  profiles::TutorialMode tutorial_mode;
-  profiles::BubbleViewModeFromAvatarBubbleMode(mode, &bubble_view_mode,
-                                               &tutorial_mode);
+  profiles::BubbleViewModeFromAvatarBubbleMode(mode, &bubble_view_mode);
   if (SigninViewController::ShouldShowModalSigninForMode(bubble_view_mode)) {
-    browser_->ShowModalSigninWindow(bubble_view_mode, access_point);
+    browser_->signin_view_controller()->ShowModalSignin(
+        bubble_view_mode, browser_.get(), access_point);
   } else {
-    ProfileChooserView::ShowBubble(bubble_view_mode, tutorial_mode,
-                                   manage_accounts_params, access_point,
+    ProfileChooserView::ShowBubble(bubble_view_mode, manage_accounts_params,
+                                   access_point,
                                    frame_->GetNewAvatarMenuButton(), browser(),
                                    focus_first_profile_button);
     ProfileMetrics::LogProfileOpenMethod(ProfileMetrics::ICON_AVATAR_BUBBLE);
@@ -2535,8 +2561,7 @@ int BrowserView::GetRenderViewHeightInsetWithDetachedBookmarkBar() {
   }
   // Don't use bookmark_bar_view_->height() which won't be the final height if
   // the bookmark bar is animating.
-  return chrome::kNTPBookmarkBarHeight -
-         views::NonClientFrameView::kClientEdgeThickness;
+  return chrome::kNTPBookmarkBarHeight;
 }
 
 void BrowserView::ExecuteExtensionCommand(
@@ -2581,7 +2606,7 @@ bool BrowserView::DoCutCopyPasteForWebContents(
 
 void BrowserView::ActivateAppModalDialog() const {
   // If another browser is app modal, flash and activate the modal browser.
-  app_modal::AppModalDialog* active_dialog =
+  app_modal::JavaScriptAppModalDialog* active_dialog =
       app_modal::AppModalDialogQueue::GetInstance()->active_dialog();
   if (!active_dialog)
     return;
@@ -2669,6 +2694,11 @@ bool BrowserView::IsImmersiveModeEnabled() {
 
 gfx::Rect BrowserView::GetTopContainerBoundsInScreen() {
   return top_container_->GetBoundsInScreen();
+}
+
+void BrowserView::DestroyAnyExclusiveAccessBubble() {
+  exclusive_access_bubble_.reset();
+  new_back_shortcut_bubble_.reset();
 }
 
 extensions::ActiveTabPermissionGranter*

@@ -23,6 +23,7 @@
       'sources': [
         'mac/AvailabilityMacros.h',
         'mac/kern/exc_resource.h',
+        'mac/mach/i386/thread_state.h',
         'mac/mach/mach.h',
         'mac/mach-o/getsect.cc',
         'mac/mach-o/getsect.h',
@@ -80,6 +81,16 @@
           'direct_dependent_settings': {
             'include_dirs': [
               'non_win',
+            ],
+          },
+        }],
+        ['OS=="android"', {
+          'include_dirs': [
+            'android',
+          ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              'android',
             ],
           },
         }],

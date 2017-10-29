@@ -20,7 +20,7 @@
 #include "base/observer_list.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "chrome/browser/safe_browsing/services_delegate.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/safe_browsing_db/util.h"
 #include "components/safe_browsing_db/v4_feature_list.h"
 #include "content/public/browser/browser_thread.h"
@@ -34,7 +34,6 @@
 class PrefChangeRegistrar;
 class PrefService;
 class Profile;
-class TrackedPreferenceValidationDelegate;
 
 namespace content {
 class DownloadManager;
@@ -43,6 +42,12 @@ class DownloadManager;
 namespace net {
 class URLRequest;
 class URLRequestContextGetter;
+}
+
+namespace prefs {
+namespace mojom {
+class TrackedPreferenceValidationDelegate;
+}
 }
 
 namespace safe_browsing {
@@ -59,6 +64,7 @@ class SafeBrowsingProtocolManagerDelegate;
 class SafeBrowsingServiceFactory;
 class SafeBrowsingUIManager;
 class SafeBrowsingURLRequestContextGetter;
+class TriggerManager;
 struct V4ProtocolConfig;
 
 // Construction needs to happen on the main thread.
@@ -158,12 +164,16 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
   const scoped_refptr<SafeBrowsingDatabaseManager>& v4_local_database_manager()
       const;
 
-  PasswordProtectionService* password_protection_service();
+  TriggerManager* trigger_manager() const;
+
+  // Gets PasswordProtectionService by profile.
+  PasswordProtectionService* GetPasswordProtectionService(
+      Profile* profile) const;
 
   // Returns a preference validation delegate that adds incidents to the
   // incident reporting service for validation failures. Returns NULL if the
   // service is not applicable for the given profile.
-  std::unique_ptr<TrackedPreferenceValidationDelegate>
+  std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
   CreatePreferenceValidationDelegate(Profile* profile) const;
 
   // Registers |callback| to be run after some delay following process launch.
@@ -222,8 +232,11 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
   friend class base::DeleteHelper<SafeBrowsingService>;
+  friend class SafeBrowsingBlockingPageTest;
+  friend class SafeBrowsingBlockingQuietPageTest;
   friend class SafeBrowsingServerTest;
   friend class SafeBrowsingServiceTest;
+  friend class SafeBrowsingUIManagerTest;
   friend class SafeBrowsingURLRequestContextGetter;
   friend class TestSafeBrowsingService;
   friend class TestSafeBrowsingServiceFactory;
@@ -268,6 +281,8 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
 
   // Process the observed resource requests on the UI thread.
   void ProcessResourceRequest(const ResourceRequestInfo& request);
+
+  void CreateTriggerManager();
 
   // The factory used to instantiate a SafeBrowsingService object.
   // Useful for tests, so they can provide their own implementation of
@@ -315,7 +330,7 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
   std::map<PrefService*, std::unique_ptr<PrefChangeRegistrar>> prefs_map_;
 
   // Used to track creation and destruction of profiles on the UI thread.
-  content::NotificationRegistrar prefs_registrar_;
+  content::NotificationRegistrar profiles_registrar_;
 
   // Callbacks when SafeBrowsing state might have changed.
   // Should only be accessed on the UI thread.
@@ -333,13 +348,12 @@ class SafeBrowsingService : public base::RefCountedThreadSafe<
   // both UI and IO thread.
   scoped_refptr<SafeBrowsingDatabaseManager> database_manager_;
 
-  // The navigation observer manager handles download attribution.
+  // The navigation observer manager handles attribution of safe browsing
+  // events.
   scoped_refptr<SafeBrowsingNavigationObserverManager>
-  navigation_observer_manager_;
+      navigation_observer_manager_;
 
-  // The password protection service detects and handles password related
-  // incidents.
-  std::unique_ptr<PasswordProtectionService> password_protection_service_;
+  std::unique_ptr<TriggerManager> trigger_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingService);
 };

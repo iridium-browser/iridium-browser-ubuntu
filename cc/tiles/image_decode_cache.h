@@ -6,8 +6,9 @@
 #define CC_TILES_IMAGE_DECODE_CACHE_H_
 
 #include "base/memory/ref_counted.h"
-#include "cc/playback/decoded_draw_image.h"
-#include "cc/playback/draw_image.h"
+#include "cc/base/devtools_instrumentation.h"
+#include "cc/paint/draw_image.h"
+#include "cc/tiles/decoded_draw_image.h"
 #include "cc/tiles/tile_priority.h"
 
 namespace cc {
@@ -34,21 +35,42 @@ class TileTask;
 //    thread.
 class CC_EXPORT ImageDecodeCache {
  public:
+  enum class TaskType { kInRaster, kOutOfRaster };
+
   // This information should be used strictly in tracing, UMA, and any other
   // reporting systems.
   struct TracingInfo {
     TracingInfo(uint64_t prepare_tiles_id,
-                TilePriority::PriorityBin requesting_tile_bin)
+                TilePriority::PriorityBin requesting_tile_bin,
+                TaskType task_type)
         : prepare_tiles_id(prepare_tiles_id),
-          requesting_tile_bin(requesting_tile_bin) {}
-    TracingInfo() : TracingInfo(0, TilePriority::NOW) {}
+          requesting_tile_bin(requesting_tile_bin),
+          task_type(task_type) {}
+    TracingInfo() = default;
 
     // ID for the current prepare tiles call.
-    const uint64_t prepare_tiles_id;
+    const uint64_t prepare_tiles_id = 0;
 
     // The bin of the tile that caused this image to be requested.
-    const TilePriority::PriorityBin requesting_tile_bin;
+    const TilePriority::PriorityBin requesting_tile_bin = TilePriority::NOW;
+
+    // Whether the decode is requested as a part of tile rasterization.
+    const TaskType task_type = TaskType::kInRaster;
   };
+
+  static devtools_instrumentation::ScopedImageDecodeTask::TaskType
+  ToScopedTaskType(TaskType task_type) {
+    using ScopedTaskType =
+        devtools_instrumentation::ScopedImageDecodeTask::TaskType;
+    switch (task_type) {
+      case TaskType::kInRaster:
+        return ScopedTaskType::kInRaster;
+      case TaskType::kOutOfRaster:
+        return ScopedTaskType::kOutOfRaster;
+    }
+    NOTREACHED();
+    return ScopedTaskType::kInRaster;
+  }
 
   virtual ~ImageDecodeCache() {}
 
@@ -93,6 +115,24 @@ class CC_EXPORT ImageDecodeCache {
   // retaining cached resources longer than needed.
   virtual void SetShouldAggressivelyFreeResources(
       bool aggressively_free_resources) = 0;
+
+  // Clears all elements from the cache.
+  virtual void ClearCache() = 0;
+
+  // Returns the maximum amount of memory we would be able to lock. This ignores
+  // any temporary states, such as throttled, and return the maximum possible
+  // memory. It is used as an esimate of whether an image can fit into the
+  // locked budget before creating a task.
+  virtual size_t GetMaximumMemoryLimitBytes() const = 0;
+
+  // Indicate to the cache that the image is no longer going
+  // to be used. This means it can be deleted altogether. If the
+  // image is locked, then the cache can do its best to clean it
+  // up later.
+  virtual void NotifyImageUnused(uint32_t skimage_id) = 0;
+
+ protected:
+  void RecordImageMipLevelUMA(int mip_level);
 };
 
 }  // namespace cc

@@ -12,7 +12,9 @@
 // The a11y ID of the tools menu table view (used by integration tests).
 extern NSString* const kToolsMenuTableViewId;
 
-@class ToolsMenuContext;
+@protocol ApplicationCommands;
+@protocol BrowserCommands;
+@class ToolsMenuConfiguration;
 
 // The view controller for the tools menu within the top toolbar.
 // The menu is composed of two main view: a top view with icons and a bottom
@@ -21,9 +23,11 @@ extern NSString* const kToolsMenuTableViewId;
 
 @property(nonatomic, assign) BOOL isCurrentPageBookmarked;
 
-// Initializes the popup with the given |context|, a set of information used to
-// determine the appearance of the menu and the entries displayed.
-- (instancetype)initWithContext:(ToolsMenuContext*)context;
+// Initializes the popup with the given |configuration|, a set of information
+// used to determine the appearance of the menu and the entries displayed.
+- (instancetype)initWithConfiguration:(ToolsMenuConfiguration*)configuration
+                           dispatcher:(id<ApplicationCommands, BrowserCommands>)
+                                          dispatcher;
 
 // Called when the current tab loading state changes.
 - (void)setIsTabLoading:(BOOL)isTabLoading;
@@ -40,9 +44,6 @@ extern NSString* const kToolsMenuTableViewId;
 
 // Informs tools popup menu whether the switch to reader mode is possible.
 - (void)setCanUseReaderMode:(BOOL)enabled;
-
-// Informs tools popup menu whether "Request Desktop Site" can be enabled.
-- (void)setCanUseDesktopUserAgent:(BOOL)value;
 
 @end
 

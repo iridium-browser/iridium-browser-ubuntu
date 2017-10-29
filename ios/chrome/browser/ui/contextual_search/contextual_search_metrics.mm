@@ -7,8 +7,11 @@
 #include <map>
 
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/user_metrics.h"
 #include "base/time/time.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using ContextualSearch::PanelState;
 using ContextualSearch::StateChangeReason;

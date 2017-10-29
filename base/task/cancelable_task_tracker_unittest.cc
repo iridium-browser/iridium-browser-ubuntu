@@ -166,7 +166,7 @@ TEST_F(CancelableTaskTrackerTest, CancelReplyDifferentThread) {
   ASSERT_TRUE(worker_thread.Start());
 
   CancelableTaskTracker::TaskId task_id = task_tracker_.PostTaskAndReply(
-      worker_thread.task_runner().get(), FROM_HERE, Bind(&DoNothing),
+      worker_thread.task_runner().get(), FROM_HERE, BindOnce(&DoNothing),
       MakeExpectedNotRunClosure(FROM_HERE));
   EXPECT_NE(CancelableTaskTracker::kBadTaskId, task_id);
 
@@ -194,14 +194,14 @@ TEST_F(CancelableTaskTrackerTest, NewTrackedTaskIdDifferentThread) {
   Thread other_thread("other thread");
   ASSERT_TRUE(other_thread.Start());
   other_thread.task_runner()->PostTask(
-      FROM_HERE, Bind(&ExpectIsCanceled, is_canceled, false));
+      FROM_HERE, BindOnce(&ExpectIsCanceled, is_canceled, false));
   other_thread.Stop();
 
   task_tracker_.TryCancel(task_id);
 
   ASSERT_TRUE(other_thread.Start());
   other_thread.task_runner()->PostTask(
-      FROM_HERE, Bind(&ExpectIsCanceled, is_canceled, true));
+      FROM_HERE, BindOnce(&ExpectIsCanceled, is_canceled, true));
   other_thread.Stop();
 }
 
@@ -355,8 +355,7 @@ void MaybeRunDeadlyTaskTrackerMemberFunction(
 void PostDoNothingTask(CancelableTaskTracker* task_tracker) {
   ignore_result(task_tracker->PostTask(
       scoped_refptr<TestSimpleTaskRunner>(new TestSimpleTaskRunner()).get(),
-      FROM_HERE,
-      Bind(&DoNothing)));
+      FROM_HERE, BindOnce(&DoNothing)));
 }
 
 TEST_F(CancelableTaskTrackerDeathTest, PostFromDifferentThread) {
@@ -364,8 +363,9 @@ TEST_F(CancelableTaskTrackerDeathTest, PostFromDifferentThread) {
   ASSERT_TRUE(bad_thread.Start());
 
   bad_thread.task_runner()->PostTask(
-      FROM_HERE, Bind(&MaybeRunDeadlyTaskTrackerMemberFunction,
-                      Unretained(&task_tracker_), Bind(&PostDoNothingTask)));
+      FROM_HERE,
+      BindOnce(&MaybeRunDeadlyTaskTrackerMemberFunction,
+               Unretained(&task_tracker_), Bind(&PostDoNothingTask)));
 }
 
 void TryCancel(CancelableTaskTracker::TaskId task_id,
@@ -381,12 +381,13 @@ TEST_F(CancelableTaskTrackerDeathTest, CancelOnDifferentThread) {
   ASSERT_TRUE(bad_thread.Start());
 
   CancelableTaskTracker::TaskId task_id = task_tracker_.PostTask(
-      test_task_runner.get(), FROM_HERE, Bind(&DoNothing));
+      test_task_runner.get(), FROM_HERE, BindOnce(&DoNothing));
   EXPECT_NE(CancelableTaskTracker::kBadTaskId, task_id);
 
   bad_thread.task_runner()->PostTask(
-      FROM_HERE, Bind(&MaybeRunDeadlyTaskTrackerMemberFunction,
-                      Unretained(&task_tracker_), Bind(&TryCancel, task_id)));
+      FROM_HERE,
+      BindOnce(&MaybeRunDeadlyTaskTrackerMemberFunction,
+               Unretained(&task_tracker_), Bind(&TryCancel, task_id)));
 
   test_task_runner->RunUntilIdle();
 }
@@ -399,13 +400,13 @@ TEST_F(CancelableTaskTrackerDeathTest, CancelAllOnDifferentThread) {
   ASSERT_TRUE(bad_thread.Start());
 
   CancelableTaskTracker::TaskId task_id = task_tracker_.PostTask(
-      test_task_runner.get(), FROM_HERE, Bind(&DoNothing));
+      test_task_runner.get(), FROM_HERE, BindOnce(&DoNothing));
   EXPECT_NE(CancelableTaskTracker::kBadTaskId, task_id);
 
   bad_thread.task_runner()->PostTask(
-      FROM_HERE,
-      Bind(&MaybeRunDeadlyTaskTrackerMemberFunction, Unretained(&task_tracker_),
-           Bind(&CancelableTaskTracker::TryCancelAll)));
+      FROM_HERE, BindOnce(&MaybeRunDeadlyTaskTrackerMemberFunction,
+                          Unretained(&task_tracker_),
+                          Bind(&CancelableTaskTracker::TryCancelAll)));
 
   test_task_runner->RunUntilIdle();
 }

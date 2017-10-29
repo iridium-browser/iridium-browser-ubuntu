@@ -8,9 +8,9 @@
 #include <string>
 #include <vector>
 
-#include "ash/common/wallpaper/wallpaper_controller.h"
-#include "ash/common/wallpaper/wallpaper_controller_observer.h"
-#include "ash/common/wm_shell.h"
+#include "ash/shell.h"
+#include "ash/wallpaper/wallpaper_controller.h"
+#include "ash/wallpaper/wallpaper_controller_observer.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
@@ -51,6 +51,7 @@
 #include "components/policy/proto/cloud_policy.pb.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "components/user_manager/user_names.h"
 #include "content/public/test/browser_test_utils.h"
 #include "crypto/rsa_private_key.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -102,7 +103,6 @@ SkColor ComputeAverageColor(const SkBitmap& bitmap) {
     return SkColorSetARGB(0, 0, 0, 0);
   }
   uint64_t a = 0, r = 0, g = 0, b = 0;
-  bitmap.lockPixels();
   for (int x = 0; x < bitmap.width(); ++x) {
     for (int y = 0; y < bitmap.height(); ++y) {
       const SkColor color = bitmap.getColor(x, y);
@@ -112,7 +112,6 @@ SkColor ComputeAverageColor(const SkBitmap& bitmap) {
       b += SkColorGetB(color);
     }
   }
-  bitmap.unlockPixels();
   uint64_t pixel_number = bitmap.width() * bitmap.height();
   return SkColorSetARGB((a + pixel_number / 2) / pixel_number,
                         (r + pixel_number / 2) / pixel_number,
@@ -123,7 +122,7 @@ SkColor ComputeAverageColor(const SkBitmap& bitmap) {
 // Obtain wallpaper image and return its average ARGB color.
 SkColor GetAverageWallpaperColor() {
   const gfx::ImageSkia image =
-      ash::WmShell::Get()->wallpaper_controller()->GetWallpaper();
+      ash::Shell::Get()->wallpaper_controller()->GetWallpaper();
 
   const gfx::ImageSkiaRep& representation = image.GetRepresentation(1.);
   if (representation.is_null()) {
@@ -194,7 +193,7 @@ class WallpaperManagerPolicyTest : public LoginManagerTest,
     // Set up fake install attributes.
     std::unique_ptr<chromeos::StubInstallAttributes> attributes =
         base::MakeUnique<chromeos::StubInstallAttributes>();
-    attributes->SetEnterprise("fake-domain", "fake-id");
+    attributes->SetCloudManaged("fake-domain", "fake-id");
     policy::BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
         attributes.release());
 
@@ -219,7 +218,7 @@ class WallpaperManagerPolicyTest : public LoginManagerTest,
 
   void SetUpOnMainThread() override {
     LoginManagerTest::SetUpOnMainThread();
-    ash::WmShell::Get()->wallpaper_controller()->AddObserver(this);
+    ash::Shell::Get()->wallpaper_controller()->AddObserver(this);
 
     // Set up policy signing.
     user_policy_builders_[0] = GetUserPolicyBuilder(testUsers_[0]);
@@ -227,7 +226,7 @@ class WallpaperManagerPolicyTest : public LoginManagerTest,
   }
 
   void TearDownOnMainThread() override {
-    ash::WmShell::Get()->wallpaper_controller()->RemoveObserver(this);
+    ash::Shell::Get()->wallpaper_controller()->RemoveObserver(this);
     LoginManagerTest::TearDownOnMainThread();
   }
 
@@ -289,6 +288,27 @@ class WallpaperManagerPolicyTest : public LoginManagerTest,
               store->validation_status());
   }
 
+  // Inject |filename| as the device wallpaper policy. Set empty |filename| to
+  // clear policy.
+  void InjectDevicePolicy(const std::string& filename) {
+    if (!filename.empty()) {
+      device_policy_.payload()
+          .mutable_device_wallpaper_image()
+          ->set_device_wallpaper_image(ConstructPolicy(filename));
+    } else {
+      device_policy_.payload().Clear();
+    }
+    device_policy_.Build();
+    fake_session_manager_client_->set_device_policy(device_policy_.GetBlob());
+    fake_session_manager_client_->OnPropertyChangeComplete(true /* success */);
+  }
+
+  bool ShouldSetDeviceWallpaper(const AccountId& account_id) {
+    std::string url, hash;
+    return WallpaperManager::Get()->ShouldSetDeviceWallpaper(account_id, &url,
+                                                             &hash);
+  }
+
   // Obtain WallpaperInfo for |user_number| from WallpaperManager.
   void GetUserWallpaperInfo(int user_number,
                             wallpaper::WallpaperInfo* wallpaper_info) {
@@ -338,14 +358,14 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerPolicyTest, SetResetClear) {
   InjectPolicy(0, kRedImageFileName);
   RunUntilWallpaperChangeCount(2);
   GetUserWallpaperInfo(0, &info);
-  ASSERT_EQ(user_manager::User::POLICY, info.type);
+  ASSERT_EQ(wallpaper::POLICY, info.type);
   ASSERT_EQ(kRedImageColor, GetAverageWallpaperColor());
 
   // First user: Set wallpaper policy to green image and verify average color.
   InjectPolicy(0, kGreenImageFileName);
   RunUntilWallpaperChangeCount(3);
   GetUserWallpaperInfo(0, &info);
-  ASSERT_EQ(user_manager::User::POLICY, info.type);
+  ASSERT_EQ(wallpaper::POLICY, info.type);
   ASSERT_EQ(kGreenImageColor, GetAverageWallpaperColor());
 
   // First user: Clear wallpaper policy and verify that the default wallpaper is
@@ -353,7 +373,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerPolicyTest, SetResetClear) {
   InjectPolicy(0, "");
   RunUntilWallpaperChangeCount(4);
   GetUserWallpaperInfo(0, &info);
-  ASSERT_EQ(user_manager::User::DEFAULT, info.type);
+  ASSERT_EQ(wallpaper::DEFAULT, info.type);
   ASSERT_EQ(original_wallpaper_color, GetAverageWallpaperColor());
 
   // Check wallpaper change count to ensure that setting the second user's
@@ -441,6 +461,43 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerPolicyTest, PersistOverLogout) {
   // Wait until wallpaper has been loaded.
   RunUntilWallpaperChangeCount(1);
   ASSERT_EQ(kRedImageColor, GetAverageWallpaperColor());
+}
+
+IN_PROC_BROWSER_TEST_F(WallpaperManagerPolicyTest, PRE_DevicePolicyTest) {
+  SetSystemSalt();
+  RegisterUser(testUsers_[0].GetUserEmail());
+  StartupUtils::MarkOobeCompleted();
+}
+
+// Test that if device policy wallpaper and user policy wallpaper are both
+// specified, the device policy wallpaper is used in the login screen and the
+// user policy wallpaper is used inside of a user session.
+IN_PROC_BROWSER_TEST_F(WallpaperManagerPolicyTest, DevicePolicyTest) {
+  SetSystemSalt();
+
+  // Wait until default wallpaper has been loaded in the login screen.
+  RunUntilWallpaperChangeCount(1);
+
+  // Set the device wallpaper policy. Test that the device policy controlled
+  // wallpaper shows up in the login screen.
+  InjectDevicePolicy(kRedImageFileName);
+  RunUntilWallpaperChangeCount(2);
+  EXPECT_TRUE(ShouldSetDeviceWallpaper(user_manager::SignInAccountId()));
+  EXPECT_EQ(kRedImageColor, GetAverageWallpaperColor());
+
+  // Log in a test user and set the user wallpaper policy. The user policy
+  // controlled wallpaper shows up in the user session.
+  LoginUser(testUsers_[0].GetUserEmail());
+  InjectPolicy(0, kGreenImageFileName);
+  RunUntilWallpaperChangeCount(3);
+  EXPECT_EQ(kGreenImageColor, GetAverageWallpaperColor());
+
+  // Set the device wallpaper policy inside the user session. That that the
+  // user wallpaper doesn't change.
+  InjectDevicePolicy(kBlueImageFileName);
+  EXPECT_FALSE(ShouldSetDeviceWallpaper(
+      user_manager::UserManager::Get()->GetActiveUser()->GetAccountId()));
+  EXPECT_EQ(kGreenImageColor, GetAverageWallpaperColor());
 }
 
 }  // namespace chromeos

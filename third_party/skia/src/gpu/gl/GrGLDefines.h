@@ -416,6 +416,11 @@
 #define GR_GL_LINE_WIDTH_GRANULARITY         0x0B23
 #define GR_GL_LINE_WIDTH_RANGE               0x0B22
 
+/* PolygonMode */
+#define GR_GL_POINT                          0x1B00
+#define GR_GL_LINE                           0x1B01
+#define GR_GL_FILL                           0x1B02
+
 /* Unsized formats */
 #define GR_GL_STENCIL_INDEX                  0x1901
 #define GR_GL_DEPTH_COMPONENT                0x1902
@@ -1056,6 +1061,12 @@
 #define GR_GL_WAIT_FAILED                                   0x911D
 #define GR_GL_SYNC_FLUSH_COMMANDS_BIT                       0x00000001
 #define GR_GL_TIMEOUT_IGNORED                               0xFFFFFFFFFFFFFFFFull
+
+/* GL_EXT_geometry_shader */
+#define GR_GL_LINES_ADJACENCY                               0x000A
+
+/* GL_ARB_internalformat_query */
+#define GR_GL_NUM_SAMPLE_COUNTS                             0x9380
 
 /* EGL Defines */
 #define GR_EGL_NO_DISPLAY                                   ((GrEGLDisplay)0)

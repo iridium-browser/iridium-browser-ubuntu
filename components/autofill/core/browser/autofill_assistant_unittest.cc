@@ -5,6 +5,7 @@
 #include "components/autofill/core/browser/autofill_assistant.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/callback.h"
 #include "base/feature_list.h"
@@ -103,7 +104,7 @@ class AutofillAssistantTest : public testing::Test {
   std::unique_ptr<FormStructure> CreateValidCreditCardForm() {
     std::unique_ptr<FormStructure> form_structure;
     form_structure.reset(new FormStructure(CreateValidCreditCardFormData()));
-    form_structure->DetermineHeuristicTypes();
+    form_structure->DetermineHeuristicTypes(nullptr /* ukm_service */);
     return form_structure;
   }
 
@@ -152,7 +153,7 @@ TEST_F(AutofillAssistantTest, CanShowCreditCardAssist_FeatureOn_Secure) {
   // Can be shown if the context is secure.
   FormData form = CreateValidCreditCardFormData();
   std::unique_ptr<FormStructure> form_structure(new FormStructure(form));
-  form_structure->DetermineHeuristicTypes();
+  form_structure->DetermineHeuristicTypes(nullptr /* ukm_service */);
 
   std::vector<std::unique_ptr<FormStructure>> form_structures;
   form_structures.push_back(std::move(form_structure));
@@ -169,7 +170,7 @@ TEST_F(AutofillAssistantTest, CanShowCreditCardAssist_FeatureOn_NotSecure) {
   form.origin = GURL("http://myform.com");
   form.action = GURL("http://myform.com/submit");
   std::unique_ptr<FormStructure> form_structure(new FormStructure(form));
-  form_structure->DetermineHeuristicTypes();
+  form_structure->DetermineHeuristicTypes(nullptr /* ukm_service */);
 
   std::vector<std::unique_ptr<FormStructure>> form_structures;
   form_structures.push_back(std::move(form_structure));
@@ -184,7 +185,7 @@ TEST_F(AutofillAssistantTest, CanShowCreditCardAssist_FeatureOn_Javascript) {
   FormData form = CreateValidCreditCardFormData();
   form.action = GURL("javascript:alert('hello');");
   std::unique_ptr<FormStructure> form_structure(new FormStructure(form));
-  form_structure->DetermineHeuristicTypes();
+  form_structure->DetermineHeuristicTypes(nullptr /* ukm_service */);
 
   std::vector<std::unique_ptr<FormStructure>> form_structures;
   form_structures.push_back(std::move(form_structure));
@@ -199,7 +200,7 @@ TEST_F(AutofillAssistantTest, CanShowCreditCardAssist_FeatureOn_WeirdJs) {
   FormData form = CreateValidCreditCardFormData();
   form.action = GURL("javascript:myFunc");
   std::unique_ptr<FormStructure> form_structure(new FormStructure(form));
-  form_structure->DetermineHeuristicTypes();
+  form_structure->DetermineHeuristicTypes(nullptr /* ukm_service */);
 
   std::vector<std::unique_ptr<FormStructure>> form_structures;
   form_structures.push_back(std::move(form_structure));
@@ -213,7 +214,7 @@ TEST_F(AutofillAssistantTest, CanShowCreditCardAssist_FeatureOn_EmptyAction) {
   FormData form = CreateValidCreditCardFormData();
   form.action = GURL();
   std::unique_ptr<FormStructure> form_structure(new FormStructure(form));
-  form_structure->DetermineHeuristicTypes();
+  form_structure->DetermineHeuristicTypes(nullptr /* ukm_service */);
 
   std::vector<std::unique_ptr<FormStructure>> form_structures;
   form_structures.push_back(std::move(form_structure));
@@ -231,7 +232,8 @@ TEST_F(AutofillAssistantTest, ShowAssistForCreditCard_ValidCard_CancelCvc) {
 
   // Create a valid card for the assist.
   CreditCard card;
-  test::SetCreditCardInfo(&card, "John Doe", "4111111111111111", "05", "2999");
+  test::SetCreditCardInfo(&card, "John Doe", "4111111111111111", "05", "2999",
+                          "1");
 
   // FillCreditCardForm should not be called if the user cancelled the CVC.
   EXPECT_CALL(autofill_manager_, FillCreditCardForm(_, _, _, _, _)).Times(0);
@@ -253,7 +255,8 @@ TEST_F(AutofillAssistantTest, ShowAssistForCreditCard_ValidCard_SubmitCvc) {
 
   // Create a valid card for the assist.
   CreditCard card;
-  test::SetCreditCardInfo(&card, "John Doe", "4111111111111111", "05", "2999");
+  test::SetCreditCardInfo(&card, "John Doe", "4111111111111111", "05", "2999",
+                          "1");
 
   // FillCreditCardForm ends up being called after user has accepted the
   // prompt.

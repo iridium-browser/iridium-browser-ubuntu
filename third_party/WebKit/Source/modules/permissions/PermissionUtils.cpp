@@ -7,45 +7,48 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/LocalFrame.h"
-#include "public/platform/InterfaceProvider.h"
-#include "public/platform/Platform.h"
+#include "core/workers/WorkerGlobalScope.h"
+#include "core/workers/WorkerThread.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace blink {
 
-using mojom::blink::PermissionDescriptor;
+// There are two PermissionDescriptor, one in Mojo bindings and one
+// in v8 bindings so we'll rename one here.
+using MojoPermissionDescriptor = mojom::blink::PermissionDescriptor;
 using mojom::blink::PermissionDescriptorPtr;
 using mojom::blink::PermissionName;
 
-bool connectToPermissionService(
-    ExecutionContext* executionContext,
+bool ConnectToPermissionService(
+    ExecutionContext* execution_context,
     mojom::blink::PermissionServiceRequest request) {
-  InterfaceProvider* interfaceProvider = nullptr;
-  if (executionContext->isDocument()) {
-    Document* document = toDocument(executionContext);
-    if (document->frame())
-      interfaceProvider = document->frame()->interfaceProvider();
-  } else {
-    interfaceProvider = Platform::current()->interfaceProvider();
+  if (execution_context->IsWorkerGlobalScope()) {
+    WorkerThread* thread = ToWorkerGlobalScope(execution_context)->GetThread();
+    thread->GetInterfaceProvider().GetInterface(std::move(request));
+    return true;
   }
 
-  if (interfaceProvider)
-    interfaceProvider->getInterface(std::move(request));
-  return interfaceProvider;
+  LocalFrame* frame = ToDocument(execution_context)->GetFrame();
+  if (!frame)
+    return false;
+
+  frame->GetInterfaceProvider().GetInterface(std::move(request));
+  return true;
 }
 
-PermissionDescriptorPtr createPermissionDescriptor(PermissionName name) {
-  auto descriptor = PermissionDescriptor::New();
+PermissionDescriptorPtr CreatePermissionDescriptor(PermissionName name) {
+  auto descriptor = MojoPermissionDescriptor::New();
   descriptor->name = name;
   return descriptor;
 }
 
-PermissionDescriptorPtr createMidiPermissionDescriptor(bool sysex) {
+PermissionDescriptorPtr CreateMidiPermissionDescriptor(bool sysex) {
   auto descriptor =
-      createPermissionDescriptor(mojom::blink::PermissionName::MIDI);
-  auto midiExtension = mojom::blink::MidiPermissionDescriptor::New();
-  midiExtension->sysex = sysex;
+      CreatePermissionDescriptor(mojom::blink::PermissionName::MIDI);
+  auto midi_extension = mojom::blink::MidiPermissionDescriptor::New();
+  midi_extension->sysex = sysex;
   descriptor->extension = mojom::blink::PermissionDescriptorExtension::New();
-  descriptor->extension->set_midi(std::move(midiExtension));
+  descriptor->extension->set_midi(std::move(midi_extension));
   return descriptor;
 }
 

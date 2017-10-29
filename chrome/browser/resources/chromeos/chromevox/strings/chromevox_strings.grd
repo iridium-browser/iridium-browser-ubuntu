@@ -441,11 +441,15 @@
       <message desc="An options page section header for options about the ChromeVox virtual display. This section lets users change the rows, columns, and display style of the virtual braille display." name="IDS_CHROMEVOX_OPTIONS_VIRTUAL_BRAILLE_DISPLAY">
         Virtual Braille Display
       </message>
-      <message desc="The label for a numberic input field where the user can choose the number of rows in a grid." name="IDS_CHROMEVOX_OPTIONS_VIRTUAL_BRAILLE_DISPLAY_ROWS">
-        Rows:
+      <message desc="An explanatory paragraph as part of the ChromeVox options page. Explains that the section on virtual braille display allows the user to control a simulation of a refreshable braille display (a physical hardware device) in the panel at the top of the screen." name="IDS_CHROMEVOX_OPTIONS_VIRTUAL_BRAILLE_DISPLAY_DETAILS">
+        Simulates the output of a refreshable braille display
+        in the ChromeVox panel at the top of the screen.
       </message>
-      <message desc="The label for a numberic input field where the user can choose the number of columns in a grid." name="IDS_CHROMEVOX_OPTIONS_VIRTUAL_BRAILLE_DISPLAY_COLUMNS">
-        Columns:
+      <message desc="The label for a numberic input field where the user can choose the number of lines of text in a grid." name="IDS_CHROMEVOX_OPTIONS_VIRTUAL_BRAILLE_DISPLAY_ROWS">
+        Lines:
+      </message>
+      <message desc="The label for a numberic input field where the user can choose the number of cells in each line of a grid." name="IDS_CHROMEVOX_OPTIONS_VIRTUAL_BRAILLE_DISPLAY_COLUMNS">
+        Cells in each line:
       </message>
       <message desc="A description that tells the user that the current display style of the virtual display interleaves braille and regular text, one on top of the other." name="IDS_CHROMEVOX_OPTIONS_CURRENT_DISPLAY_STYLE_INTERLEAVE">
         Current display style is interleave.
@@ -496,7 +500,7 @@
         Voices
       </message>
       <message desc="Labels the voice selection list box." name="IDS_CHROMEVOX_OPTIONS_VOICES_DESCRIPTION">
-        Change the current voice by selecting an option from the list below.
+        Select current voice:
       </message>
       <message desc="An options page section header for options about the ChromeVox braille support. This section allows the user to customize varous aspects of the braille output and input support." name="IDS_CHROMEVOX_OPTIONS_BRAILLE">
         Braille
@@ -508,7 +512,7 @@
         Switch to 6 dot braille
       </message>
       <message desc="Labels the braille table selection list box.  A braille table describes how text gets converted from a unicode encoding into a pattern of dots. This varies based on locale and contraction. See http://en.wikipedia.org/wiki/Braille for a more in-depth discussion." name="IDS_CHROMEVOX_OPTIONS_BRAILLE_DESCRIPTION_6">
-        Change the current 6 dot braille table by selecting an option from the list below.
+        Select a 6-dot braille table:
       </message>
       <message desc="How to present the name of a braille table to the user. For example, a locale could be 'English (United States)' and a grade could be '2'. Together they would be 'English (UnitedStates), Grade 2'. A braille table describes how text gets converted from Unicode text into a pattern of braille dots. This varies based on locale and contraction. See http://en.wikipedia.org/wiki/Braille for a more in-depth discussion." name="IDS_CHROMEVOX_BRAILLE_TABLE_NAME_WITH_GRADE">
         <ph name="locale">$1</ph>, Grade <ph name="grade">$2</ph>
@@ -520,7 +524,7 @@
         <ph name="locale">$1</ph> (<ph name="variant">$2</ph>), Grade <ph name="grade">$3</ph>
       </message>
       <message desc="Labels the braille table selection list box.  A braille table describes how text gets converted from a unicode encoding into a pattern of dots. This varies based on locale and contraction. See http://en.wikipedia.org/wiki/Braille for a more in-depth discussion." name="IDS_CHROMEVOX_OPTIONS_BRAILLE_DESCRIPTION_8">
-        Change the current 8 dot braille table by selecting an option from the list below.
+        Select an 8-dot braille table:
       </message>
       <message desc="Labels the checkbox that enables wrapping of words if a whole line doesn't fit on a braille display. When this option is enabled, an effort is made to keep the characters of words together on the display. Otherwise, as many characters as possible are put on each braille display line, possible splitting words between lines." name="IDS_CHROMEVOX_OPTIONS_BRAILLE_WORD_WRAP">
         Enable word wrap
@@ -1377,13 +1381,13 @@
       <message desc="Shown on a braille display as a suffix to text fields and combo boxes when suggestions on how to complete the field are shown in a list and the currently selected value is shown as text after the caret in the input field. When translating, try to find a contracted form of the translation for 'autocomplete inline and list' according to local conventions. If reasonable, use all lowercase and avoid punctuation to keep the number of characters as low as possible." name="IDS_CHROMEVOX_ARIA_AUTOCOMPLETE_BOTH_BRL">
         autoinl+lst
       </message>
-      <message desc="Describes an element with the ARIA attribute aria-checked=true." name="IDS_CHROMEVOX_ARIA_CHECKED_TRUE">
+      <message desc="Describes an element that is checked." name="IDS_CHROMEVOX_CHECKED_TRUE">
         Checked
       </message>
-      <message desc="Describes an element with the ARIA attribute aria-checked=false." name="IDS_CHROMEVOX_ARIA_CHECKED_FALSE">
+      <message desc="Describes an element that is unchecked." name="IDS_CHROMEVOX_CHECKED_FALSE">
         Not checked
       </message>
-      <message desc="Describes an element with the ARIA attribute aria-checked=mixed." name="IDS_CHROMEVOX_ARIA_CHECKED_MIXED">
+      <message desc="Describes an element where the checked state is mixed or indeterminate." name="IDS_CHROMEVOX_CHECKED_MIXED">
         Partially checked
       </message>
       <message desc="Describes an element with the ARIA attribute aria-disabled=true." name="IDS_CHROMEVOX_ARIA_DISABLED_TRUE">
@@ -1629,8 +1633,8 @@
       <message desc="Describes an &lt;input&gt; element with type=email." name="IDS_CHROMEVOX_INPUT_TYPE_EMAIL">
         Edit text, email entry
       </message>
-      <message desc="Shown on a braille display for a text field that accept an email address as input. When translating, keep the @ sign and try to find an abbreviation for 'edit field'. If reasonable, use all lowercase and avoid punctuation to keep the number of characters as low as possible." name="IDS_CHROMEVOX_INPUT_TYPE_EMAIL_BRL">
-        @ed
+      <message desc="Shown on a braille display for a text field that accept an email address as input. When translating, keep the @ sign and try to find an abbreviation for 'edit field 8 dot' according to local conventions; 8 dot refers to the braille table chosen by the user that includes 8 dots in a braille cell appropriate for writing computer symbols. If reasonable, use all lowercase and avoid punctuation to keep the number of characters as low as possible." name="IDS_CHROMEVOX_INPUT_TYPE_EMAIL_BRL">
+        @ed 8dot
       </message>
       <message desc="Describes an &lt;input&gt; element with type=file." name="IDS_CHROMEVOX_INPUT_TYPE_FILE">
         File selection
@@ -1677,8 +1681,8 @@
       <message desc="Describes an &lt;input&gt; element with type=url." name="IDS_CHROMEVOX_INPUT_TYPE_URL">
         Edit text, URL entry
       </message>
-      <message desc="Shown on a braille display to describe a text field for entering a URL. When translating, try to find a contracted form of the translation for 'url edit field' according to local conventions. If reasonable, use all lowercase and avoid punctuation to keep the number of characters as low as possible." name="IDS_CHROMEVOX_INPUT_TYPE_URL_BRL">
-        urled
+      <message desc="Shown on a braille display to describe a text field for entering a URL. When translating, try to find a contracted form of the translation for 'url edit field 8 dot' according to local conventions; 8 dot refers to the braille table chosen by the user that includes 8 dots in a braille cell appropriate for writing computer symbols. If reasonable, use all lowercase and avoid punctuation to keep the number of characters as low as possible." name="IDS_CHROMEVOX_INPUT_TYPE_URL_BRL">
+        urled 8dot
       </message>
       <message desc="Describes an &lt;input&gt; element with type=week." name="IDS_CHROMEVOX_INPUT_TYPE_WEEK">
         Week of the year control
@@ -1695,7 +1699,7 @@
       <message desc="In an editable text box, describes a blank line." name="IDS_CHROMEVOX_TEXT_BOX_BLANK">
         Blank
       </message>
-      <message desc="In an editable text box, describes a line with only whitespace." name="IDS_CHROMEVOX_TEXT_BOX_WHITESPACE">
+      <message desc="In an editable text box, describes a line with only whitespace." name="IDS_CHROMEVOX_TEXT_BOX_WHITESPACE" meaning="UI element">
         Space
       </message>
       <message desc="Further describes a list-like element with a number of items. e.g. This will be combined with other messages to produce: List with 3 items." name="IDS_CHROMEVOX_LIST_WITH_ITEMS_NOT_PLURALIZED">
@@ -2511,6 +2515,9 @@
       <message desc="Title displayed in the panel for the ChromeVox menu." name="IDS_CHROMEVOX_PANEL_MENU_CHROMEVOX">
         ChromeVox
       </message>
+      <message desc="Title displayed in the panel for the actions menu." name="IDS_CHROMEVOX_PANEL_MENU_ACTIONS">
+        Actions
+      </message>
       <message desc="Title displayed in the panel when there are no menu items." name="IDS_CHROMEVOX_PANEL_MENU_ITEM_NONE">
         No items.
       </message>
@@ -2707,6 +2714,75 @@ If you're done with the tutorial, use ChromeVox to navigate to the Close button 
       </message>
       <message desc="Describes an audio clip that gets played for a specific event or control type. Use the default string as a guide to what the audio clip represents or conveys." name="IDS_CHROMEVOX_WRAP_EARCON_DESCRIPTION">
         Wrap from beginning to end or end to beginning inside of a page, dialog, or other container
+      </message>
+      <message desc="Describes a command to turn off the visual display for accessibility without impacting usage of the machine." name="IDS_CHROMEVOX_DARKEN_SCREEN">
+        Darken screen
+      </message>
+      <message desc="Describes a command to turn the visual display on for accessibility undoing any previous request to turn off the visual display." name="IDS_CHROMEVOX_UNDARKEN_SCREEN">
+        Undarken screen
+      </message>
+      <message desc="Describes a command that turns text to speech feedback off." name="IDS_CHROMEVOX_SPEECH_OFF">
+        Speech off
+      </message>
+      <message desc="Describes a command that turns text to speech feedback on." name="IDS_CHROMEVOX_SPEECH_ON">
+        Speech on
+      </message>
+      <message desc="Description of a command that toggles text to speech feedback on or off." name="IDS_CHROMEVOX_SPEECH_ON_OFF_DESCRIPTION">
+        Toggle speech on or off
+      </message>
+      <message desc="Description of a command that toggles between 6 and 8 dot braille." name="IDS_CHROMEVOX_TOGGLE_BRAILLE_TABLE">
+        Toggle between 6 and 8 dot braille
+      </message>
+      <message desc="Spoken when a user navigates to the beginning of a misspelled word." name="IDS_CHROMEVOX_MISSPELLING_START">
+        Misspelling start
+      </message>
+      <message desc="Spoken when a user navigates to the end of a misspelled word." name="IDS_CHROMEVOX_MISSPELLING_END">
+        Misspelling end
+      </message>
+      <message desc="Spoken when a user navigates to the beginning of a grammar error." name="IDS_CHROMEVOX_GRAMMAR_START">
+        Grammar error start
+      </message>
+      <message desc="Spoken when a user navigates to the end of a grammar error." name="IDS_CHROMEVOX_GRAMMAR_END">
+        Grammar error end
+      </message>
+      <message desc="Spoken when a user navigates to the beginning of a text match from a find in page." name="IDS_CHROMEVOX_TEXT_MATCH_START">
+        Text match start
+      </message>
+      <message desc="Spoken when a user navigates to the end of a text match from a find in page." name="IDS_CHROMEVOX_TEXT_MATCH_END">
+        Text match end
+      </message>
+      <message desc="Spoken when a user navigates to the beginning of bolded text." name="IDS_CHROMEVOX_BOLD_START">
+        Bold start
+      </message>
+      <message desc="Spoken when a user navigates to the end of bolded text." name="IDS_CHROMEVOX_BOLD_END">
+        Bold end
+      </message>
+      <message desc="Spoken when a user navigates to the beginning of italic text." name="IDS_CHROMEVOX_ITALIC_START">
+        Italic start
+      </message>
+      <message desc="Spoken when a user navigates to the end of italic text." name="IDS_CHROMEVOX_ITALIC_END">
+        Italic end
+      </message>
+      <message desc="Spoken when a user navigates to the beginning of underline text." name="IDS_CHROMEVOX_UNDERLINE_START">
+        Underline start
+      </message>
+      <message desc="Spoken when a user navigates to the end of underline text." name="IDS_CHROMEVOX_UNDERLINE_END">
+        Underline end
+      </message>
+      <message desc="Spoken when a user navigates to the beginning of strike through text." name="IDS_CHROMEVOX_LINE_THROUGH_START">
+        Strike through start
+      </message>
+      <message desc="Spoken when a user navigates to the end of strike through text." name="IDS_CHROMEVOX_LINE_THROUGH_END">
+        Strike through end
+      </message>
+      <message desc="Spoken when a user navigates to the beginning of a link's text." name="IDS_CHROMEVOX_LINK_START">
+        Link start
+      </message>
+      <message desc="Spoken when a user navigates to the end of a link's text." name="IDS_CHROMEVOX_LINK_END">
+        Link end
+      </message>
+      <message desc="Shown to a user when they press a braille keyboard command that requires on screen keyboard to be enabled." name="IDS_CHROMEVOX_ENABLE_VIRTUAL_KEYBOARD">
+        Please enable the on screen keyboard under status tray, accessibility to use extended braille commands.
       </message>
     </messages>
   </release>

@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/extension_gcm_app_handler.h"
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -20,7 +21,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/sequenced_task_runner.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -97,9 +99,8 @@ class Waiter {
   // Runs until IO loop becomes idle.
   void PumpIOLoop() {
     content::BrowserThread::PostTask(
-        content::BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&Waiter::OnIOLoopPump, base::Unretained(this)));
+        content::BrowserThread::IO, FROM_HERE,
+        base::BindOnce(&Waiter::OnIOLoopPump, base::Unretained(this)));
 
     WaitUntilCompleted();
   }
@@ -115,18 +116,16 @@ class Waiter {
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
     content::BrowserThread::PostTask(
-        content::BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&Waiter::OnIOLoopPumpCompleted, base::Unretained(this)));
+        content::BrowserThread::IO, FROM_HERE,
+        base::BindOnce(&Waiter::OnIOLoopPumpCompleted, base::Unretained(this)));
   }
 
   void OnIOLoopPumpCompleted() {
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
     content::BrowserThread::PostTask(
-        content::BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&Waiter::PumpIOLoopCompleted, base::Unretained(this)));
+        content::BrowserThread::UI, FROM_HERE,
+        base::BindOnce(&Waiter::PumpIOLoopCompleted, base::Unretained(this)));
   }
 
   std::unique_ptr<base::RunLoop> run_loop_;
@@ -204,12 +203,9 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     scoped_refptr<base::SequencedTaskRunner> io_thread =
         content::BrowserThread::GetTaskRunnerForThread(
             content::BrowserThread::IO);
-    base::SequencedWorkerPool* worker_pool =
-        content::BrowserThread::GetBlockingPool();
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner(
-        worker_pool->GetSequencedTaskRunnerWithShutdownBehavior(
-            worker_pool->GetSequenceToken(),
-            base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+        base::CreateSequencedTaskRunnerWithTraits(
+            {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
     return base::MakeUnique<gcm::GCMProfileService>(
         profile->GetPrefs(), profile->GetPath(), profile->GetRequestContext(),
         chrome::GetChannel(),
@@ -264,7 +260,6 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     extension_system->CreateExtensionService(
         base::CommandLine::ForCurrentProcess(), extensions_install_dir, false);
     extension_service_ = extension_system->Get(profile())->extension_service();
-    extension_service_->set_extensions_enabled(true);
 
     // Create GCMProfileService that talks with fake GCMClient.
     gcm::GCMProfileServiceFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -280,6 +275,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
 #endif
 
     waiter_.PumpUILoop();
+    gcm_app_handler_->Shutdown();
   }
 
   // Returns a barebones test extension.
@@ -287,9 +283,9 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     base::DictionaryValue manifest;
     manifest.SetString(manifest_keys::kVersion, "1.0.0.0");
     manifest.SetString(manifest_keys::kName, kTestExtensionName);
-    base::ListValue* permission_list = new base::ListValue;
+    auto permission_list = base::MakeUnique<base::ListValue>();
     permission_list->AppendString("gcm");
-    manifest.Set(manifest_keys::kPermissions, permission_list);
+    manifest.Set(manifest_keys::kPermissions, std::move(permission_list));
 
     std::string error;
     scoped_refptr<Extension> extension = Extension::Create(

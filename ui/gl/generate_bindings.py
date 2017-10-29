@@ -238,11 +238,25 @@ GL_FUNCTIONS = [
       'GLenum target, GLint level, GLenum internalformat, GLsizei width, '
       'GLsizei height, GLint border, GLsizei imageSize, const void* data', },
 { 'return_type': 'void',
+  'versions': [{'name': 'glCompressedTexImage2DRobustANGLE',
+                'extensions': ['GL_ANGLE_robust_client_memory']}],
+  'arguments':
+      'GLenum target, GLint level, GLenum internalformat, GLsizei width, '
+      'GLsizei height, GLint border, GLsizei imageSize, GLsizei dataSize, '
+      'const void* data', },
+{ 'return_type': 'void',
   'versions': [{ 'name': 'glCompressedTexImage3D' }],
   'arguments':
       'GLenum target, GLint level, GLenum internalformat, GLsizei width, '
       'GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, '
       'const void* data', },
+{ 'return_type': 'void',
+  'versions': [{'name': 'glCompressedTexImage3DRobustANGLE',
+                'extensions': ['GL_ANGLE_robust_client_memory']}],
+  'arguments':
+      'GLenum target, GLint level, GLenum internalformat, GLsizei width, '
+      'GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, '
+      'GLsizei dataSize, const void* data', },
 { 'return_type': 'void',
   'names': ['glCompressedTexSubImage2D'],
   'arguments':
@@ -250,11 +264,26 @@ GL_FUNCTIONS = [
       'GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, '
       'const void* data', },
 { 'return_type': 'void',
+  'versions': [{'name': 'glCompressedTexSubImage2DRobustANGLE',
+                'extensions': ['GL_ANGLE_robust_client_memory']}],
+  'arguments':
+      'GLenum target, GLint level, GLint xoffset, GLint yoffset, '
+      'GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, '
+      'GLsizei dataSize, const void* data', },
+{ 'return_type': 'void',
   'versions': [{ 'name': 'glCompressedTexSubImage3D' }],
   'arguments':
       'GLenum target, GLint level, GLint xoffset, GLint yoffset, '
       'GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, '
       'GLenum format, GLsizei imageSize, const void* data', },
+{ 'return_type': 'void',
+  'versions': [{'name': 'glCompressedTexSubImage3DRobustANGLE',
+                'extensions': ['GL_ANGLE_robust_client_memory']}],
+  'arguments':
+      'GLenum target, GLint level, GLint xoffset, GLint yoffset, '
+      'GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, '
+      'GLenum format, GLsizei imageSize, GLsizei dataSize, '
+      'const void* data', },
 { 'return_type': 'void',
   'versions': [{ 'name': 'glCopyBufferSubData' }],
   'arguments':
@@ -264,10 +293,10 @@ GL_FUNCTIONS = [
   'versions': [{ 'name': 'glCopySubTextureCHROMIUM',
                  'extensions': ['GL_CHROMIUM_copy_texture'], }],
   'arguments':
-      'GLuint sourceId, GLuint destId, GLint xoffset, GLint yoffset, '
-      'GLint x, GLint y, GLsizei width, GLsizei height, '
-      'GLboolean unpackFlipY, GLboolean unpackPremultiplyAlpha, '
-      'GLboolean unpackUnmultiplyAlpha', },
+      'GLuint sourceId, GLint sourceLevel, GLenum destTarget, GLuint destId, '
+      'GLint destLevel, GLint xoffset, GLint yoffset, GLint x, GLint y, '
+      'GLsizei width, GLsizei height, GLboolean unpackFlipY, '
+      'GLboolean unpackPremultiplyAlpha, GLboolean unpackUnmultiplyAlpha', },
 { 'return_type': 'void',
   'names': ['glCopyTexImage2D'],
   'arguments':
@@ -287,9 +316,10 @@ GL_FUNCTIONS = [
   'versions': [{ 'name': 'glCopyTextureCHROMIUM',
                  'extensions': ['GL_CHROMIUM_copy_texture'], }],
   'arguments':
-      'GLuint sourceId, GLuint destId, GLint internalFormat, '
-      'GLenum destType, GLboolean unpackFlipY, '
-      'GLboolean unpackPremultiplyAlpha, GLboolean unpackUnmultiplyAlpha', },
+      'GLuint sourceId, GLint sourceLevel, GLenum destTarget, GLuint destId, '
+      'GLint destLevel, GLint internalFormat, GLenum destType, '
+      'GLboolean unpackFlipY, GLboolean unpackPremultiplyAlpha, '
+      'GLboolean unpackUnmultiplyAlpha', },
 { 'return_type': 'void',
   'names': ['glCoverageModulationNV'],
   'arguments': 'GLenum components'},
@@ -1294,7 +1324,8 @@ GL_FUNCTIONS = [
                 'extensions': ['GL_ANGLE_robust_client_memory']}],
   'arguments':
       'GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, '
-      'GLenum type, GLsizei bufSize, GLsizei* length, void* data', },
+      'GLenum type, GLsizei bufSize, GLsizei* length, GLsizei* columns, '
+      'GLsizei* rows, void* data', },
 { 'return_type': 'void',
   'names': ['glReadPixels'],
   'arguments':
@@ -1305,7 +1336,8 @@ GL_FUNCTIONS = [
                 'extensions': ['GL_ANGLE_robust_client_memory']}],
   'arguments':
       'GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, '
-      'GLenum type, GLsizei bufSize, GLsizei* length, void* pixels', },
+      'GLenum type, GLsizei bufSize, GLsizei* length, GLsizei* columns, '
+      'GLsizei* rows, void* pixels', },
 { 'return_type': 'void',
   'names': ['glReleaseShaderCompiler'],
   'arguments': 'void', },
@@ -1329,6 +1361,10 @@ GL_FUNCTIONS = [
   'names': ['glRenderbufferStorageMultisampleIMG'],
   'arguments': 'GLenum target, GLsizei samples, GLenum internalformat, '
                'GLsizei width, GLsizei height', },
+{ 'return_type': 'void',
+  'versions': [{ 'name': 'glRequestExtensionANGLE',
+                 'extensions': ['GL_ANGLE_request_extension'] }],
+  'arguments': 'const char* name', },
 { 'return_type': 'void',
   'versions': [{ 'name': 'glResumeTransformFeedback',
                  'extensions': ['GL_ARB_transform_feedback2'] }],
@@ -1946,6 +1982,24 @@ EGL_FUNCTIONS = [
   'names': ['eglPostSubBufferNV'],
   'arguments': 'EGLDisplay dpy, EGLSurface surface, '
     'EGLint x, EGLint y, EGLint width, EGLint height', },
+{ 'return_type': 'EGLint',
+  'versions': [{ 'name': 'eglProgramCacheGetAttribANGLE',
+                 'extensions': ['EGL_ANGLE_program_cache_control'] }],
+  'arguments': 'EGLDisplay dpy, EGLenum attrib', },
+{ 'return_type': 'void',
+  'versions': [{ 'name': 'eglProgramCachePopulateANGLE',
+                 'extensions': ['EGL_ANGLE_program_cache_control'] }],
+  'arguments': 'EGLDisplay dpy, const void* key, '
+    'EGLint keysize, const void* binary, EGLint binarysize', },
+{ 'return_type': 'void',
+  'versions': [{ 'name': 'eglProgramCacheQueryANGLE',
+                 'extensions': ['EGL_ANGLE_program_cache_control'] }],
+  'arguments': 'EGLDisplay dpy, EGLint index, '
+    'void* key, EGLint* keysize, void* binary, EGLint* binarysize', },
+{ 'return_type': 'EGLint',
+  'versions': [{ 'name': 'eglProgramCacheResizeANGLE',
+                 'extensions': ['EGL_ANGLE_program_cache_control'] }],
+  'arguments': 'EGLDisplay dpy, EGLint limit, EGLenum mode', },
 { 'return_type': 'EGLenum',
   'names': ['eglQueryAPI'],
   'arguments': 'void', },
@@ -2965,6 +3019,9 @@ void MakeFunctionUnique(const char *func_name) {
   file.write('\n')
   file.write('}  // namespace gl\n')
 
+def SamePrefix(a, b):
+  return a[:a.rfind("_")] == b[:b.rfind("_")]
+
 def GenerateEnumUtils(out_file, input_filenames):
   enum_re = re.compile(r'\#define\s+(GL_[a-zA-Z0-9_]+)\s+([0-9A-Fa-fx]+)')
   dict = {}
@@ -2979,9 +3036,11 @@ def GenerateEnumUtils(out_file, input_filenames):
           if not value in dict:
             dict[value] = name
           # check our own _CHROMIUM macro conflicts with khronos GL headers.
-          elif dict[value] != name and (name.endswith('_CHROMIUM') or
-              dict[value].endswith('_CHROMIUM')):
-            raise RunTimeError("code collision: %s and %s have the same code %s"
+          # we allow for name duplication if they have the same prefix.
+          elif dict[value] != name and ((name.endswith('_CHROMIUM') or
+              dict[value].endswith('_CHROMIUM')) and
+              not SamePrefix(name, dict[value])):
+            raise RuntimeError("code collision: %s and %s have the same code %s"
                                %  (dict[value], name, value))
 
   out_file.write(LICENSE_AND_HEADER)

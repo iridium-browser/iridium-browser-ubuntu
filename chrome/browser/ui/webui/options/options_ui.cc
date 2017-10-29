@@ -54,9 +54,7 @@
 #include "chrome/common/features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/locale_settings.h"
 #include "chrome/grit/options_resources.h"
-#include "chrome/grit/theme_resources.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "components/strings/grit/components_strings.h"
@@ -85,6 +83,7 @@
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/system/pointer_device_observer.h"
+#include "chrome/browser/ui/webui/chromeos/user_image_source.h"
 #include "chrome/browser/ui/webui/options/chromeos/accounts_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/bluetooth_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/change_picture_options_handler.h"
@@ -101,7 +100,6 @@
 #include "chrome/browser/ui/webui/options/chromeos/proxy_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/stats_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/storage_manager_handler.h"
-#include "chrome/browser/ui/webui/options/chromeos/user_image_source.h"
 #endif
 
 #if defined(USE_NSS_CERTS)
@@ -139,12 +137,28 @@ constexpr char kLockScreenHTMLPath[] = "people_page/lock_screen.html";
 constexpr char kLockScreenJSPath[] = "people_page/lock_screen.js";
 constexpr char kSetupPinHTMLPath[] = "people_page/setup_pin_dialog.html";
 constexpr char kSetupPinJSPath[] = "people_page/setup_pin_dialog.js";
+constexpr char kEasyUnlockBrowserProxyHTMLPath[] =
+    "people_page/easy_unlock_browser_proxy.html";
+constexpr char kEasyUnlockBrowserProxyJSPath[] =
+    "people_page/easy_unlock_browser_proxy.js";
+constexpr char kEasyUnlockTurnOffDialogHTMLPath[] =
+    "people_page/easy_unlock_turn_off_dialog.html";
+constexpr char kEasyUnlockTurnOffDialogJSPath[] =
+    "people_page/easy_unlock_turn_off_dialog.js";
 constexpr char kFingerprintListHTMLPath[] = "people_page/fingerprint_list.html";
 constexpr char kFingerprintListJSPath[] = "people_page/fingerprint_list.js";
 constexpr char kSetupFingerprintHTMLPath[] =
     "people_page/setup_fingerprint_dialog.html";
 constexpr char kSetupFingerprintJSPath[] =
     "people_page/setup_fingerprint_dialog.js";
+constexpr char kFingerprintBrowserProxyHTMLPath[] =
+    "people_page/fingerprint_browser_proxy.html";
+constexpr char kFingerprintBrowserProxyJSPath[] =
+    "people_page/fingerprint_browser_proxy.js";
+constexpr char kFingerprintProgressArcHTMLPath[] =
+    "people_page/fingerprint_progress_arc.html";
+constexpr char kFingerprintProgressArcJSPath[] =
+    "people_page/fingerprint_progress_arc.js";
 constexpr char kSettingsRouteHTMLPath[] = "route.html";
 constexpr char kSettingsRouteJSPath[] = "route.js";
 constexpr char kSettingsSharedCSSHTMLPath[] = "settings_shared_css.html";
@@ -165,6 +179,9 @@ constexpr char kSettingsPrefsBehaviorHTMLPath[] = "prefs/prefs_behavior.html";
 constexpr char kSettingsPrefsBehaviorJSPath[] = "prefs/prefs_behavior.js";
 constexpr char kSettingsPrefsTypesHTMLPath[] = "prefs/prefs_types.html";
 constexpr char kSettingsPrefsTypesJSPath[] = "prefs/prefs_types.js";
+constexpr char kSettingsPrefsHTMLPath[] = "prefs/prefs.html";
+constexpr char kSettingsPrefsJSPath[] = "prefs/prefs.js";
+constexpr char kSettingsI18nHTMLPath[] = "i18n_setup.html";
 constexpr char kOptionsPolymerHTMLPath[] = "options_polymer.html";
 #endif
 
@@ -189,6 +206,7 @@ class OptionsUIHTMLSource : public content::URLDataSource {
       const std::string& path,
       const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const content::URLDataSource::GotDataCallback& callback) override;
+  bool AllowCaching() const override;
   std::string GetMimeType(const std::string&) const override;
   bool ShouldDenyXFrameOptions() const override;
 
@@ -212,7 +230,11 @@ OptionsUIHTMLSource::OptionsUIHTMLSource(
 }
 
 std::string OptionsUIHTMLSource::GetSource() const {
-  return chrome::kChromeUISettingsFrameHost;
+  // TODO(stevenjb): Remove this file. Because everything in this directory
+  // depends on this, we will remove the entire directory at once after
+  // the old CrOS oobe/login UI dependencies are removed. crbug.com/748164.
+  NOTREACHED();
+  return "settings-frame";
 }
 
 void OptionsUIHTMLSource::StartDataRequest(
@@ -259,6 +281,12 @@ void OptionsUIHTMLSource::StartDataRequest(
   callback.Run(response_bytes.get());
 }
 
+bool OptionsUIHTMLSource::AllowCaching() const {
+  // Should not be cached to reflect dynamically-generated contents that depends
+  // on the current locale.
+  return false;
+}
+
 std::string OptionsUIHTMLSource::GetMimeType(const std::string& path) const {
   if (base::EndsWith(path, ".js", base::CompareCase::INSENSITIVE_ASCII))
     return "application/javascript";
@@ -293,6 +321,14 @@ void OptionsUIHTMLSource::CreateDataSourceMap() {
       IDR_OPTIONS_LOCK_STATE_BEHAVIOR_JS;
   path_to_idr_map_[kLockScreenHTMLPath] = IDR_OPTIONS_LOCK_SCREEN_HTML;
   path_to_idr_map_[kLockScreenJSPath] = IDR_OPTIONS_LOCK_SCREEN_JS;
+  path_to_idr_map_[kEasyUnlockBrowserProxyHTMLPath] =
+      IDR_OPTIONS_EASY_UNLOCK_BROWSER_PROXY_HTML;
+  path_to_idr_map_[kEasyUnlockBrowserProxyJSPath] =
+      IDR_OPTIONS_EASY_UNLOCK_BROWSER_PROXY_JS;
+  path_to_idr_map_[kEasyUnlockTurnOffDialogHTMLPath] =
+      IDR_OPTIONS_EASY_UNLOCK_TURN_OFF_DIALOG_HTML;
+  path_to_idr_map_[kEasyUnlockTurnOffDialogJSPath] =
+      IDR_OPTIONS_EASY_UNLOCK_TURN_OFF_DIALOG_JS;
   path_to_idr_map_[kSetupPinHTMLPath] = IDR_OPTIONS_SETUP_PIN_DIALOG_HTML;
   path_to_idr_map_[kSetupPinJSPath] = IDR_OPTIONS_SETUP_PIN_DIALOG_JS;
   path_to_idr_map_[kFingerprintListHTMLPath] =
@@ -325,6 +361,17 @@ void OptionsUIHTMLSource::CreateDataSourceMap() {
   path_to_idr_map_[kSettingsPrefsTypesHTMLPath] = IDR_SETTINGS_PREFS_TYPES_HTML;
   path_to_idr_map_[kSettingsPrefsTypesJSPath] = IDR_SETTINGS_PREFS_TYPES_JS;
   path_to_idr_map_[kOptionsPolymerHTMLPath] = IDR_OPTIONS_POLYMER_ELEMENTS_HTML;
+  path_to_idr_map_[kSettingsPrefsHTMLPath] = IDR_SETTINGS_PREFS_HTML;
+  path_to_idr_map_[kSettingsPrefsJSPath] = IDR_SETTINGS_PREFS_JS;
+  path_to_idr_map_[kSettingsI18nHTMLPath] = IDR_OPTIONS_I18N_SETUP_HTML;
+  path_to_idr_map_[kFingerprintBrowserProxyHTMLPath] =
+      IDR_OPTIONS_FINGERPRINT_BROWSER_PROXY_HTML;
+  path_to_idr_map_[kFingerprintBrowserProxyJSPath] =
+      IDR_OPTIONS_FINGERPRINT_BROWSER_PROXY_JS;
+  path_to_idr_map_[kFingerprintProgressArcHTMLPath] =
+      IDR_OPTIONS_FINGERPRINT_PROGRESS_ARC_HTML;
+  path_to_idr_map_[kFingerprintProgressArcJSPath] =
+      IDR_OPTIONS_FINGERPRINT_PROGRESS_ARC_JS;
 #endif
 }
 
@@ -495,8 +542,8 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
 
 #if defined(OS_CHROMEOS)
   // Set up the chrome://userimage/ source.
-  chromeos::options::UserImageSource* user_image_source =
-      new chromeos::options::UserImageSource();
+  chromeos::UserImageSource* user_image_source =
+      new chromeos::UserImageSource();
   content::URLDataSource::Add(profile, user_image_source);
 
   pointer_device_observer_.reset(
@@ -542,14 +589,13 @@ void OptionsUI::ProcessAutocompleteSuggestions(
 
 void OptionsUI::ReadyToCommitNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (navigation_handle->IsSamePage())
+  if (navigation_handle->IsSameDocument())
     return;
 
   load_start_time_ = base::Time::Now();
   if (navigation_handle->GetRenderFrameHost()->GetRenderViewHost() ==
           web_ui()->GetWebContents()->GetRenderViewHost() &&
-      navigation_handle->GetURL().host_piece() ==
-          chrome::kChromeUISettingsFrameHost) {
+      navigation_handle->GetURL().host_piece() == "settings-frame") {
     for (size_t i = 0; i < handlers_.size(); ++i)
       handlers_[i]->PageLoadStarted();
   }

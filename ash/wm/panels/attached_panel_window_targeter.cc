@@ -4,10 +4,9 @@
 
 #include "ash/wm/panels/attached_panel_window_targeter.h"
 
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/wm/panels/panel_layout_manager.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shell.h"
+#include "ash/wm/panels/panel_layout_manager.h"
 #include "ui/aura/window.h"
 
 namespace ash {
@@ -23,25 +22,25 @@ AttachedPanelWindowTargeter::AttachedPanelWindowTargeter(
       panel_container_(container),
       panel_layout_manager_(panel_layout_manager),
       default_touch_extend_(default_touch_extend) {
-  WmShell::Get()->AddShellObserver(this);
+  Shell::Get()->AddShellObserver(this);
 }
 
 AttachedPanelWindowTargeter::~AttachedPanelWindowTargeter() {
-  WmShell::Get()->RemoveShellObserver(this);
+  Shell::Get()->RemoveShellObserver(this);
 }
 
 void AttachedPanelWindowTargeter::OnShelfCreatedForRootWindow(
-    WmWindow* root_window) {
-  UpdateTouchExtend(WmWindow::GetAuraWindow(root_window));
+    aura::Window* root_window) {
+  UpdateTouchExtend(root_window);
 }
 
 void AttachedPanelWindowTargeter::OnShelfAlignmentChanged(
-    WmWindow* root_window) {
+    aura::Window* root_window) {
   // Don't update the touch insets if the shelf has not yet been created.
   if (!panel_layout_manager_->shelf())
     return;
 
-  UpdateTouchExtend(WmWindow::GetAuraWindow(root_window));
+  UpdateTouchExtend(root_window);
 }
 
 void AttachedPanelWindowTargeter::UpdateTouchExtend(aura::Window* root_window) {
@@ -51,22 +50,28 @@ void AttachedPanelWindowTargeter::UpdateTouchExtend(aura::Window* root_window) {
     return;
 
   DCHECK(panel_layout_manager_->shelf());
-  gfx::Insets touch(default_touch_extend_);
-  switch (panel_layout_manager_->shelf()->GetAlignment()) {
+  SetInsets(mouse_extend(), GetTouchExtendForShelfAlignment());
+}
+
+gfx::Insets AttachedPanelWindowTargeter::GetTouchExtendForShelfAlignment()
+    const {
+  switch (panel_layout_manager_->shelf()->alignment()) {
     case SHELF_ALIGNMENT_BOTTOM:
     case SHELF_ALIGNMENT_BOTTOM_LOCKED:
-      set_touch_extend(
-          gfx::Insets(touch.top(), touch.left(), 0, touch.right()));
-      break;
+      return gfx::Insets(default_touch_extend_.top(),
+                         default_touch_extend_.left(), 0,
+                         default_touch_extend_.right());
     case SHELF_ALIGNMENT_LEFT:
-      set_touch_extend(
-          gfx::Insets(touch.top(), 0, touch.bottom(), touch.right()));
-      break;
+      return gfx::Insets(default_touch_extend_.top(), 0,
+                         default_touch_extend_.bottom(),
+                         default_touch_extend_.right());
     case SHELF_ALIGNMENT_RIGHT:
-      set_touch_extend(
-          gfx::Insets(touch.top(), touch.left(), touch.bottom(), 0));
-      break;
+      return gfx::Insets(default_touch_extend_.top(),
+                         default_touch_extend_.left(),
+                         default_touch_extend_.bottom(), 0);
   }
+  NOTREACHED();
+  return gfx::Insets();
 }
 
 }  // namespace ash

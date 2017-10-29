@@ -5,9 +5,9 @@
 #ifndef V8PagePopupControllerBinding_h
 #define V8PagePopupControllerBinding_h
 
-#include "bindings/core/v8/WrapperTypeInfo.h"
+#include "platform/bindings/WrapperTypeInfo.h"
+#include "platform/wtf/Allocator.h"
 #include "v8/include/v8.h"
-#include "wtf/Allocator.h"
 
 namespace blink {
 
@@ -20,8 +20,8 @@ class V8PagePopupControllerBinding {
 
  public:
   // Installs 'pagePopupController' attribute into 'window' object.
-  static void installPagePopupController(v8::Local<v8::Context>,
-                                         v8::Local<v8::Object> windowWrapper);
+  static void InstallPagePopupController(v8::Local<v8::Context>,
+                                         v8::Local<v8::Object> window_wrapper);
 };
 
 }  // namespace blink

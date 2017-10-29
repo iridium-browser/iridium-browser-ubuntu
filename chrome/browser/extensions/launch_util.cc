@@ -35,7 +35,7 @@ namespace launch_util {
 // static
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterIntegerPref(pref_names::kBookmarkAppCreationLaunchType,
-                                LAUNCH_TYPE_REGULAR);
+                                LAUNCH_TYPE_WINDOW);
 }
 
 }  // namespace launch_util
@@ -83,7 +83,7 @@ void SetLaunchType(content::BrowserContext* context,
 
   ExtensionPrefs::Get(context)->UpdateExtensionPref(
       extension_id, kPrefLaunchType,
-      new base::Value(static_cast<int>(launch_type)));
+      base::MakeUnique<base::Value>(static_cast<int>(launch_type)));
 
   // Sync the launch type.
   const Extension* extension =

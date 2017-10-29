@@ -20,11 +20,11 @@ CompositorExternalBeginFrameSource::CompositorExternalBeginFrameSource(
       routing_id_(routing_id) {
   DCHECK(begin_frame_source_filter_);
   DCHECK(message_sender_);
-  DetachFromThread();
+  DETACH_FROM_THREAD(thread_checker_);
 }
 
 CompositorExternalBeginFrameSource::~CompositorExternalBeginFrameSource() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (begin_frame_source_proxy_) {
     begin_frame_source_proxy_->ClearBeginFrameSource();
     begin_frame_source_filter_->RemoveHandlerOnCompositorThread(
@@ -35,7 +35,7 @@ CompositorExternalBeginFrameSource::~CompositorExternalBeginFrameSource() {
 
 void CompositorExternalBeginFrameSource::AddObserver(
     cc::BeginFrameObserver* obs) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (!begin_frame_source_proxy_) {
     begin_frame_source_proxy_ =
@@ -55,6 +55,11 @@ void CompositorExternalBeginFrameSource::RemoveObserver(
   external_begin_frame_source_.RemoveObserver(obs);
 }
 
+void CompositorExternalBeginFrameSource::DidFinishFrame(
+    cc::BeginFrameObserver* obs) {
+  external_begin_frame_source_.DidFinishFrame(obs);
+}
+
 bool CompositorExternalBeginFrameSource::IsThrottled() const {
   return true;
 }
@@ -64,14 +69,9 @@ void CompositorExternalBeginFrameSource::OnNeedsBeginFrames(
   Send(new ViewHostMsg_SetNeedsBeginFrames(routing_id_, needs_begin_frames));
 }
 
-void CompositorExternalBeginFrameSource::OnDidFinishFrame(
-    const cc::BeginFrameAck& ack) {
-  // TODO(eseckler): Pass on the ack to the view host.
-}
-
 void CompositorExternalBeginFrameSource::OnMessageReceived(
     const IPC::Message& message) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(begin_frame_source_proxy_);
   IPC_BEGIN_MESSAGE_MAP(CompositorExternalBeginFrameSource, message)
     IPC_MESSAGE_HANDLER(ViewMsg_SetBeginFramePaused,

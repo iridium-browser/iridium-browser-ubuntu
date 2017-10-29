@@ -11,6 +11,8 @@
 
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/color_palette.h"
@@ -234,8 +236,6 @@ SkColor HSLShift(SkColor color, const HSL& shift) {
 void BuildLumaHistogram(const SkBitmap& bitmap, int histogram[256]) {
   DCHECK_EQ(kN32_SkColorType, bitmap.colorType());
 
-  SkAutoLockPixels bitmap_lock(bitmap);
-
   int pixel_width = bitmap.width();
   int pixel_height = bitmap.height();
   for (int y = 0; y < pixel_height; ++y) {
@@ -345,6 +345,19 @@ SkColor DeriveDefaultIconColor(SkColor text_color) {
   // For a light color, just reduce opacity.
   return SkColorSetA(text_color,
                      static_cast<int>(0.8f * SkColorGetA(text_color)));
+}
+
+std::string SkColorToRgbaString(SkColor color) {
+  // We convert the alpha using DoubleToString because StringPrintf will use
+  // locale specific formatters (e.g., use , instead of . in German).
+  return base::StringPrintf(
+      "rgba(%s,%s)", SkColorToRgbString(color).c_str(),
+      base::DoubleToString(SkColorGetA(color) / 255.0).c_str());
+}
+
+std::string SkColorToRgbString(SkColor color) {
+  return base::StringPrintf("%d,%d,%d", SkColorGetR(color), SkColorGetG(color),
+                            SkColorGetB(color));
 }
 
 }  // namespace color_utils

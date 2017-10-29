@@ -6,12 +6,13 @@
 */
 
 #include "SkHighContrastFilter.h"
-
+#include "SkPM4f.h"
 #include "SkArenaAlloc.h"
 #include "SkRasterPipeline.h"
 #include "SkReadBuffer.h"
 #include "SkString.h"
 #include "SkWriteBuffer.h"
+#include "../jumper/SkJumper.h"
 
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
@@ -20,133 +21,6 @@
 #endif
 
 using InvertStyle = SkHighContrastConfig::InvertStyle;
-
-namespace {
-
-SkScalar Hue2RGB(SkScalar p, SkScalar q, SkScalar t) {
-    if (t < 0) {
-        t += 1;
-    } else if (t > 1) {
-        t -= 1;
-    }
-
-    if (t < 1/6.f) {
-        return p + (q - p) * 6 * t;
-    }
-
-    if (t < 1/2.f) {
-        return q;
-    }
-
-    if (t < 2/3.f) {
-        return p + (q - p) * (2/3.f - t) * 6;
-    }
-
-    return p;
-}
-
-uint8_t SkScalarToUint8Clamp(SkScalar f) {
-    if (f <= 0) {
-        return 0;
-    } else if (f >= 1) {
-        return 255;
-    }
-    return static_cast<unsigned char>(255 * f);
-}
-
-SkScalar IncreaseContrast(SkScalar f, SkScalar contrast) {
-    SkScalar m = (1 + contrast) / (1 - contrast);
-    SkScalar b = (-0.5f * m + 0.5f);
-    return m * f + b;
-}
-
-static SkPMColor ApplyHighContrastFilter(const SkHighContrastConfig& config,
-                                         SkPMColor pmColor) {
-    SkColor color = SkUnPreMultiply::PMColorToColor(pmColor);
-    SkScalar rf = SkColorGetR(color) / 255.f;
-    SkScalar gf = SkColorGetG(color) / 255.f;
-    SkScalar bf = SkColorGetB(color) / 255.f;
-
-    // Apply a gamma of 2.0 so that the rest of the calculations
-    // happen roughly in linear space.
-    rf *= rf;
-    gf *= gf;
-    bf *= bf;
-
-    // Convert to grayscale using luminance coefficients.
-    if (config.fGrayscale) {
-        SkScalar lum =
-            rf * SK_LUM_COEFF_R + gf * SK_LUM_COEFF_G + bf * SK_LUM_COEFF_B;
-        rf = lum;
-        gf = lum;
-        bf = lum;
-    }
-
-    // Now invert.
-    if (config.fInvertStyle == InvertStyle::kInvertBrightness) {
-        rf = 1 - rf;
-        gf = 1 - gf;
-        bf = 1 - bf;
-    } else if (config.fInvertStyle == InvertStyle::kInvertLightness) {
-        // Convert to HSL
-        SkScalar max = SkTMax(SkTMax(rf, gf), bf);
-        SkScalar min = SkTMin(SkTMin(rf, gf), bf);
-        SkScalar l = (max + min) / 2;
-        SkScalar h, s;
-
-        if (max == min) {
-            h = 0;
-            s = 0;
-        } else {
-            SkScalar d = max - min;
-            s = l > 0.5f ? d / (2 - max - min) : d / (max + min);
-            if (max == rf) {
-                h = (gf - bf) / d + (gf < bf ? 6 : 0);
-            } else if (max == gf) {
-                h = (bf - rf) / d + 2;
-            } else {
-                h = (rf - gf) / d + 4;
-            }
-            h /= 6;
-        }
-
-        // Invert lightness.
-        l = 1 - l;
-
-        // Now convert back to RGB.
-        if (s == 0) {
-            // Grayscale
-            rf = l;
-            gf = l;
-            bf = l;
-        } else {
-            SkScalar q = l < 0.5f ? l * (1 + s) : l + s - l * s;
-            SkScalar p = 2 * l - q;
-            rf = Hue2RGB(p, q, h + 1/3.f);
-            gf = Hue2RGB(p, q, h);
-            bf = Hue2RGB(p, q, h - 1/3.f);
-        }
-    }
-
-    // Increase contrast.
-    if (config.fContrast != 0.0f) {
-        rf = IncreaseContrast(rf, config.fContrast);
-        gf = IncreaseContrast(gf, config.fContrast);
-        bf = IncreaseContrast(bf, config.fContrast);
-    }
-
-    // Convert back from linear to a color space with a gamma of ~2.0.
-    rf = SkScalarSqrt(rf);
-    gf = SkScalarSqrt(gf);
-    bf = SkScalarSqrt(bf);
-
-    return SkPremultiplyARGBInline(SkColorGetA(color),
-                                   SkScalarToUint8Clamp(rf),
-                                   SkScalarToUint8Clamp(gf),
-                                   SkScalarToUint8Clamp(bf));
-}
-
-}  // namespace
 
 class SkHighContrast_Filter : public SkColorFilter {
 public:
@@ -158,15 +32,13 @@ public:
                                         1.0f - FLT_EPSILON);
     }
 
-    virtual ~SkHighContrast_Filter() { }
+    ~SkHighContrast_Filter() override {}
 
 #if SK_SUPPORT_GPU
     sk_sp<GrFragmentProcessor> asFragmentProcessor(GrContext*, SkColorSpace*) const override;
  #endif
 
-    void filterSpan(const SkPMColor src[], int count, SkPMColor dst[]) const
-          override;
-    bool onAppendStages(SkRasterPipeline* p,
+    void onAppendStages(SkRasterPipeline* p,
                         SkColorSpace* dst,
                         SkArenaAlloc* scratch,
                         bool shaderIsOpaque) const override;
@@ -186,25 +58,31 @@ private:
     typedef SkColorFilter INHERITED;
 };
 
-void SkHighContrast_Filter::filterSpan(const SkPMColor src[], int count,
-                                       SkPMColor dst[]) const {
-    for (int i = 0; i < count; ++i)
-        dst[i] = ApplyHighContrastFilter(fConfig, src[i]);
-}
-
-bool SkHighContrast_Filter::onAppendStages(SkRasterPipeline* p,
-                                           SkColorSpace* dst,
-                                           SkArenaAlloc* scratch,
+void SkHighContrast_Filter::onAppendStages(SkRasterPipeline* p,
+                                           SkColorSpace* dstCS,
+                                           SkArenaAlloc* alloc,
                                            bool shaderIsOpaque) const {
     if (!shaderIsOpaque) {
         p->append(SkRasterPipeline::unpremul);
+    }
+
+    if (!dstCS) {
+        // In legacy draws this effect approximately linearizes by squaring.
+        // When non-legacy, we're already (better) linearized.
+        auto square = alloc->make<SkJumper_ParametricTransferFunction>();
+        square->G = 2.0f; square->A = 1.0f;
+        square->B = square->C = square->D = square->E = square->F = 0;
+
+        p->append(SkRasterPipeline::parametric_r, square);
+        p->append(SkRasterPipeline::parametric_g, square);
+        p->append(SkRasterPipeline::parametric_b, square);
     }
 
     if (fConfig.fGrayscale) {
         float r = SK_LUM_COEFF_R;
         float g = SK_LUM_COEFF_G;
         float b = SK_LUM_COEFF_B;
-        float* matrix = scratch->makeArray<float>(12);
+        float* matrix = alloc->makeArray<float>(12);
         matrix[0] = matrix[1] = matrix[2] = r;
         matrix[3] = matrix[4] = matrix[5] = g;
         matrix[6] = matrix[7] = matrix[8] = b;
@@ -212,13 +90,13 @@ bool SkHighContrast_Filter::onAppendStages(SkRasterPipeline* p,
     }
 
     if (fConfig.fInvertStyle == InvertStyle::kInvertBrightness) {
-        float* matrix = scratch->makeArray<float>(12);
+        float* matrix = alloc->makeArray<float>(12);
         matrix[0] = matrix[4] = matrix[8] = -1;
         matrix[9] = matrix[10] = matrix[11] = 1;
         p->append(SkRasterPipeline::matrix_3x4, matrix);
     } else if (fConfig.fInvertStyle == InvertStyle::kInvertLightness) {
         p->append(SkRasterPipeline::rgb_to_hsl);
-        float* matrix = scratch->makeArray<float>(12);
+        float* matrix = alloc->makeArray<float>(12);
         matrix[0] = matrix[4] = matrix[11] = 1;
         matrix[8] = -1;
         p->append(SkRasterPipeline::matrix_3x4, matrix);
@@ -226,7 +104,7 @@ bool SkHighContrast_Filter::onAppendStages(SkRasterPipeline* p,
     }
 
     if (fConfig.fContrast != 0.0) {
-        float* matrix = scratch->makeArray<float>(12);
+        float* matrix = alloc->makeArray<float>(12);
         float c = fConfig.fContrast;
         float m = (1 + c) / (1 - c);
         float b = (-0.5f * m + 0.5f);
@@ -238,11 +116,20 @@ bool SkHighContrast_Filter::onAppendStages(SkRasterPipeline* p,
     p->append(SkRasterPipeline::clamp_0);
     p->append(SkRasterPipeline::clamp_1);
 
+    if (!dstCS) {
+        // See the previous if(!dstCS) { ... }
+        auto sqrt = alloc->make<SkJumper_ParametricTransferFunction>();
+        sqrt->G = 0.5f; sqrt->A = 1.0f;
+        sqrt->B = sqrt->C = sqrt->D = sqrt->E = sqrt->F = 0;
+
+        p->append(SkRasterPipeline::parametric_r, sqrt);
+        p->append(SkRasterPipeline::parametric_g, sqrt);
+        p->append(SkRasterPipeline::parametric_b, sqrt);
+    }
+
     if (!shaderIsOpaque) {
         p->append(SkRasterPipeline::premul);
     }
-
-    return true;
 }
 
 void SkHighContrast_Filter::flatten(SkWriteBuffer& buffer) const {
@@ -318,7 +205,7 @@ public:
     GLHighContrastFilterEffect(const SkHighContrastConfig& config);
 
 protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
+    void onSetData(const GrGLSLProgramDataManager&, const GrFragmentProcessor&) override;
     void emitCode(EmitArgs& args) override;
 
 private:
@@ -337,7 +224,8 @@ void HighContrastFilterEffect::onGetGLSLProcessorKey(const GrShaderCaps& caps,
     GLHighContrastFilterEffect::GenKey(*this, caps, b);
 }
 
-void GLHighContrastFilterEffect::onSetData(const GrGLSLProgramDataManager& pdm, const GrProcessor& proc) {
+void GLHighContrastFilterEffect::onSetData(const GrGLSLProgramDataManager& pdm,
+                                           const GrFragmentProcessor& proc) {
     const HighContrastFilterEffect& hcfe = proc.cast<HighContrastFilterEffect>();
     pdm.set1f(fContrastUni, hcfe.config().fContrast);
 }

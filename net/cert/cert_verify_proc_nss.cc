@@ -29,6 +29,7 @@
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/crl_set.h"
 #include "net/cert/ev_root_ca_metadata.h"
+#include "net/cert/known_roots_nss.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util_nss.h"
 
@@ -195,20 +196,13 @@ void GetCertChainInfo(CERTCertList* cert_list,
 
   if (root_cert)
     verified_chain.push_back(root_cert);
-  verify_result->verified_cert =
+
+  scoped_refptr<X509Certificate> verified_cert_with_chain =
       X509Certificate::CreateFromHandle(verified_cert, verified_chain);
-}
-
-// IsKnownRoot returns true if the given certificate is one that we believe
-// is a standard (as opposed to user-installed) root.
-bool IsKnownRoot(CERTCertificate* root) {
-  if (!root || !root->slot)
-    return false;
-
-  // This magic name is taken from
-  // http://bonsai.mozilla.org/cvsblame.cgi?file=mozilla/security/nss/lib/ckfw/builtins/constants.c&rev=1.13&mark=86,89#79
-  return 0 == strcmp(PK11_GetSlotName(root->slot),
-                     "NSS Builtin Objects");
+  if (verified_cert_with_chain)
+    verify_result->verified_cert = std::move(verified_cert_with_chain);
+  else
+    verify_result->cert_status |= CERT_STATUS_INVALID;
 }
 
 // Returns true if the given certificate is one of the additional trust anchors.
@@ -621,14 +615,6 @@ SECOidTag GetFirstCertPolicy(CERTCertificate* cert_handle) {
   return SECOID_AddEntry(&od);
 }
 
-HashValue CertPublicKeyHashSHA1(CERTCertificate* cert) {
-  HashValue hash(HASH_VALUE_SHA1);
-  SECStatus rv = HASH_HashBuf(HASH_AlgSHA1, hash.data(),
-                              cert->derPublicKey.data, cert->derPublicKey.len);
-  DCHECK_EQ(SECSuccess, rv);
-  return hash;
-}
-
 HashValue CertPublicKeyHashSHA256(CERTCertificate* cert) {
   HashValue hash(HASH_VALUE_SHA256);
   SECStatus rv = HASH_HashBuf(HASH_AlgSHA256, hash.data(),
@@ -643,11 +629,9 @@ void AppendPublicKeyHashes(CERTCertList* cert_list,
   for (CERTCertListNode* node = CERT_LIST_HEAD(cert_list);
        !CERT_LIST_END(node, cert_list);
        node = CERT_LIST_NEXT(node)) {
-    hashes->push_back(CertPublicKeyHashSHA1(node->cert));
     hashes->push_back(CertPublicKeyHashSHA256(node->cert));
   }
   if (root_cert) {
-    hashes->push_back(CertPublicKeyHashSHA1(root_cert));
     hashes->push_back(CertPublicKeyHashSHA256(root_cert));
   }
 }

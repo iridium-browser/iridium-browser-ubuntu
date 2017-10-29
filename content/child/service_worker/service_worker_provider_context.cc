@@ -46,9 +46,9 @@ class ServiceWorkerProviderContext::ControlleeDelegate
 
   void AssociateRegistration(
       std::unique_ptr<ServiceWorkerRegistrationHandleReference> registration,
-      std::unique_ptr<ServiceWorkerHandleReference> installing,
-      std::unique_ptr<ServiceWorkerHandleReference> waiting,
-      std::unique_ptr<ServiceWorkerHandleReference> active) override {
+      std::unique_ptr<ServiceWorkerHandleReference> /* installing */,
+      std::unique_ptr<ServiceWorkerHandleReference> /* waiting */,
+      std::unique_ptr<ServiceWorkerHandleReference> /* active */) override {
     DCHECK(!registration_);
     registration_ = std::move(registration);
   }
@@ -69,8 +69,8 @@ class ServiceWorkerProviderContext::ControlleeDelegate
   bool HasAssociatedRegistration() override { return !!registration_; }
 
   void GetAssociatedRegistration(
-      ServiceWorkerRegistrationObjectInfo* info,
-      ServiceWorkerVersionAttributes* attrs) override {
+      ServiceWorkerRegistrationObjectInfo* /* info */,
+      ServiceWorkerVersionAttributes* /* attrs */) override {
     NOTREACHED();
   }
 
@@ -111,7 +111,7 @@ class ServiceWorkerProviderContext::ControllerDelegate
   }
 
   void SetController(
-      std::unique_ptr<ServiceWorkerHandleReference> controller) override {
+      std::unique_ptr<ServiceWorkerHandleReference> /* controller */) override {
     NOTREACHED();
   }
 
@@ -147,10 +147,12 @@ class ServiceWorkerProviderContext::ControllerDelegate
 ServiceWorkerProviderContext::ServiceWorkerProviderContext(
     int provider_id,
     ServiceWorkerProviderType provider_type,
+    mojom::ServiceWorkerProviderAssociatedRequest request,
     ThreadSafeSender* thread_safe_sender)
     : provider_id_(provider_id),
       main_thread_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      thread_safe_sender_(thread_safe_sender) {
+      thread_safe_sender_(thread_safe_sender),
+      binding_(this, std::move(request)) {
   if (provider_type == SERVICE_WORKER_PROVIDER_FOR_CONTROLLER)
     delegate_.reset(new ControllerDelegate);
   else
@@ -175,21 +177,21 @@ void ServiceWorkerProviderContext::OnAssociateRegistration(
     std::unique_ptr<ServiceWorkerHandleReference> installing,
     std::unique_ptr<ServiceWorkerHandleReference> waiting,
     std::unique_ptr<ServiceWorkerHandleReference> active) {
-  DCHECK(main_thread_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(main_thread_task_runner_->RunsTasksInCurrentSequence());
   delegate_->AssociateRegistration(std::move(registration),
                                    std::move(installing), std::move(waiting),
                                    std::move(active));
 }
 
 void ServiceWorkerProviderContext::OnDisassociateRegistration() {
-  DCHECK(main_thread_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(main_thread_task_runner_->RunsTasksInCurrentSequence());
   delegate_->DisassociateRegistration();
 }
 
 void ServiceWorkerProviderContext::OnSetControllerServiceWorker(
     std::unique_ptr<ServiceWorkerHandleReference> controller,
     const std::set<uint32_t>& used_features) {
-  DCHECK(main_thread_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(main_thread_task_runner_->RunsTasksInCurrentSequence());
   delegate_->SetController(std::move(controller));
   used_features_ = used_features;
 }
@@ -197,7 +199,7 @@ void ServiceWorkerProviderContext::OnSetControllerServiceWorker(
 void ServiceWorkerProviderContext::GetAssociatedRegistration(
     ServiceWorkerRegistrationObjectInfo* info,
     ServiceWorkerVersionAttributes* attrs) {
-  DCHECK(!main_thread_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(!main_thread_task_runner_->RunsTasksInCurrentSequence());
   delegate_->GetAssociatedRegistration(info, attrs);
 }
 
@@ -206,12 +208,19 @@ bool ServiceWorkerProviderContext::HasAssociatedRegistration() {
 }
 
 ServiceWorkerHandleReference* ServiceWorkerProviderContext::controller() {
-  DCHECK(main_thread_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(main_thread_task_runner_->RunsTasksInCurrentSequence());
   return delegate_->controller();
 }
 
+void ServiceWorkerProviderContext::CountFeature(uint32_t feature) {
+  // ServiceWorkerProviderContext keeps track of features in order to propagate
+  // it to WebServiceWorkerProviderClient, which actually records the
+  // UseCounter.
+  used_features_.insert(feature);
+}
+
 void ServiceWorkerProviderContext::DestructOnMainThread() const {
-  if (!main_thread_task_runner_->RunsTasksOnCurrentThread() &&
+  if (!main_thread_task_runner_->RunsTasksInCurrentSequence() &&
       main_thread_task_runner_->DeleteSoon(FROM_HERE, this)) {
     return;
   }

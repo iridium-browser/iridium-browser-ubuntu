@@ -53,14 +53,16 @@ class FakeGCMClient : public GCMClient {
   void Start(StartMode start_mode) override;
   void Stop() override;
   void Register(const linked_ptr<RegistrationInfo>& registration_info) override;
+  bool ValidateRegistration(
+      const linked_ptr<RegistrationInfo>& registration_info,
+      const std::string& registration_id) override;
   void Unregister(
       const linked_ptr<RegistrationInfo>& registration_info) override;
   void Send(const std::string& app_id,
             const std::string& receiver_id,
             const OutgoingMessage& message) override;
   void RecordDecryptionFailure(const std::string& app_id,
-                               GCMEncryptionProvider::DecryptionResult result)
-      override;
+                               GCMDecryptionResult result) override;
   void SetRecording(bool recording) override;
   void ClearActivityLogs() override;
   GCMStatistics GetStatistics() const override;

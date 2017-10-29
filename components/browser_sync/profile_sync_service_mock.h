@@ -76,9 +76,13 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_CONST_METHOD0(IsSyncActive, bool());
   MOCK_CONST_METHOD0(IsEngineInitialized, bool());
   MOCK_CONST_METHOD0(IsSyncRequested, bool());
+  MOCK_CONST_METHOD0(IsSyncConfirmationNeeded, bool());
   MOCK_CONST_METHOD0(waiting_for_auth, bool());
   MOCK_METHOD1(OnActionableError, void(const syncer::SyncProtocolError&));
   MOCK_CONST_METHOD1(IsDataTypeControllerRunning, bool(syncer::ModelType));
+
+  MOCK_METHOD0(GetOpenTabsUIDelegateMock, sync_sessions::OpenTabsUIDelegate*());
+  sync_sessions::OpenTabsUIDelegate* GetOpenTabsUIDelegate() override;
 
   // DataTypeManagerObserver mocks.
   MOCK_METHOD1(OnConfigureDone,

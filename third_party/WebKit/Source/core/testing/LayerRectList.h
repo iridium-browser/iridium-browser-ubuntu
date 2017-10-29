@@ -31,14 +31,14 @@
 #ifndef LayerRectList_h
 #define LayerRectList_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Vector.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/Vector.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
-class ClientRect;
+class DOMRectReadOnly;
 class LayerRect;
 class Node;
 
@@ -47,24 +47,24 @@ class LayerRectList final : public GarbageCollected<LayerRectList>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static LayerRectList* create() { return new LayerRectList; }
+  static LayerRectList* Create() { return new LayerRectList; }
 
   unsigned length() const;
   LayerRect* item(unsigned index);
-  void append(Node* layerAssociatedNode,
-              const String& layerName,
-              int layerOffsetX,
-              int layerOffsetY,
-              ClientRect* layerRelativeRect);
+  void Append(Node* layer_associated_node,
+              const String& layer_name,
+              int layer_offset_x,
+              int layer_offset_y,
+              DOMRectReadOnly* layer_relative_rect);
 
   DECLARE_TRACE();
 
  private:
   LayerRectList();
 
-  HeapVector<Member<LayerRect>> m_list;
+  HeapVector<Member<LayerRect>> list_;
 };
 
 }  // namespace blink
 
-#endif  // ClientRectList_h
+#endif  // LayerRectList_h

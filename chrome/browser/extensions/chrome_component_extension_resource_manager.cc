@@ -16,6 +16,7 @@
 #if defined(OS_CHROMEOS)
 #include "components/chrome_apps/chrome_apps_resource_util.h"
 #include "ui/file_manager/file_manager_resource_util.h"
+#include "ui/file_manager/grit/file_manager_resources.h"
 #endif
 
 #if defined(USE_AURA)

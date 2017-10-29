@@ -181,6 +181,7 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
     #             \- ArchiveStandaloneArtifact
     #          \- ArchiveZipFiles
     #          \- ArchiveHWQual
+    #          \- ArchiveLicenseFile
     #       \- PushImage (blocks on BuildAndArchiveAllImages)
     #    \- ArchiveManifest
     #    \- ArchiveStrippedPackages
@@ -266,6 +267,14 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
                                           image_dir)
         self._release_upload_queue.put([filename])
 
+    def ArchiveLicenseFile():
+      """Archive licensing file."""
+      filename = 'license_credits.html'
+      filepath = os.path.join(image_dir, filename)
+      if os.path.isfile(filepath):
+        shutil.copy(filepath, archive_path)
+        self._release_upload_queue.put([filename])
+
     def ArchiveFirmwareImages():
       """Archive firmware images built from source if available."""
       archive = commands.BuildFirmwareArchive(buildroot, board, archive_path)
@@ -297,6 +306,7 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
       if config['images']:
         steps = [
             BuildAndArchiveFactoryImages,
+            ArchiveLicenseFile,
             ArchiveHWQual,
             ArchiveStandaloneArtifacts,
             ArchiveZipFiles,
@@ -407,8 +417,18 @@ class DebugSymbolsStage(generic_stages.BoardSpecificBuilderStage,
     buildroot = self._build_root
     board = self._current_board
 
-    # Create breakpad symbols.
+    # Generate breakpad symbols of Chrome OS binaries.
     commands.GenerateBreakpadSymbols(buildroot, board, self._run.debug)
+
+    # Generate breakpad symbols of Android binaries if we have a symbol archive.
+    # This archive is created by AndroidDebugSymbolsStage in Android PFQ.
+    # This must be done after GenerateBreakpadSymbols because it clobbers the
+    # output directory.
+    symbols_file = os.path.join(self.archive_path,
+                                constants.ANDROID_SYMBOLS_FILE)
+    if os.path.exists(symbols_file):
+      commands.GenerateAndroidBreakpadSymbols(buildroot, board, symbols_file)
+
     self.board_runattrs.SetParallel('breakpad_symbols_generated', True)
 
     # Upload them.

@@ -6,21 +6,18 @@
 
 #include <stddef.h>
 
-#include <string>
-
 #include "base/logging.h"
-#include "net/http2/decoder/frame_parts.h"
-#include "net/http2/decoder/frame_parts_collector.h"
 #include "net/http2/decoder/http2_frame_decoder_listener.h"
 #include "net/http2/decoder/payload_decoders/payload_decoder_base_test_util.h"
 #include "net/http2/http2_constants.h"
 #include "net/http2/http2_structures_test_util.h"
+#include "net/http2/platform/api/http2_string.h"
+#include "net/http2/test_tools/frame_parts.h"
+#include "net/http2/test_tools/frame_parts_collector.h"
 #include "net/http2/tools/http2_frame_builder.h"
 #include "net/http2/tools/http2_random.h"
 #include "net/http2/tools/random_decoder_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using std::string;
 
 namespace net {
 namespace test {
@@ -34,7 +31,7 @@ class HeadersPayloadDecoderPeer {
   // Returns the mask of flags that affect the decoding of the payload (i.e.
   // flags that that indicate the presence of certain fields or padding).
   static constexpr uint8_t FlagsAffectingPayloadDecoding() {
-    return Http2FrameFlag::FLAG_PADDED | Http2FrameFlag::FLAG_PRIORITY;
+    return Http2FrameFlag::PADDED | Http2FrameFlag::PRIORITY;
   }
 
   static void Randomize(HeadersPayloadDecoder* p, RandomBase* rng) {
@@ -121,11 +118,11 @@ TEST_P(HeadersPayloadDecoderTest, VariousHpackPayloadSizes) {
       ASSERT_EQ(IsPadded() ? 1u : 0u, frame_builder_.size());
       uint8_t flags = RandFlags();
       if (has_priority) {
-        flags |= Http2FrameFlag::FLAG_PRIORITY;
+        flags |= Http2FrameFlag::PRIORITY;
         frame_builder_.Append(priority);
       }
 
-      string hpack_payload = Random().RandString(hpack_size);
+      Http2String hpack_payload = Random().RandString(hpack_size);
       frame_builder_.Append(hpack_payload);
 
       MaybeAppendTrailingPadding();
@@ -154,8 +151,7 @@ TEST_P(HeadersPayloadDecoderTest, Truncated) {
   fb.Append(Http2PriorityFields(RandStreamId(), 1 + Random().Rand8(),
                                 Random().OneIn(2)));
   EXPECT_TRUE(VerifyDetectsMultipleFrameSizeErrors(
-      Http2FrameFlag::FLAG_PRIORITY, fb.buffer(), approve_size,
-      total_pad_length_));
+      Http2FrameFlag::PRIORITY, fb.buffer(), approve_size, total_pad_length_));
 }
 
 // Confirm we get an error if the PADDED flag is set but the payload is not

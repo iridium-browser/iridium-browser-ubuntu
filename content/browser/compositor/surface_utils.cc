@@ -6,11 +6,14 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/memory/ref_counted.h"
+#include "base/sequenced_task_runner.h"
 #include "build/build_config.h"
 #include "cc/output/copy_output_result.h"
 #include "cc/resources/single_release_callback.h"
-#include "components/display_compositor/gl_helper.h"
+#include "components/viz/common/gl_helper.h"
+#include "components/viz/host/host_frame_sink_manager.h"
+#include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
+#include "content/browser/browser_main_loop.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
@@ -32,13 +35,10 @@ void CopyFromCompositingSurfaceFinished(
     const content::ReadbackRequestCallback& callback,
     std::unique_ptr<cc::SingleReleaseCallback> release_callback,
     std::unique_ptr<SkBitmap> bitmap,
-    std::unique_ptr<SkAutoLockPixels> bitmap_pixels_lock,
     bool result) {
-  bitmap_pixels_lock.reset();
-
   gpu::SyncToken sync_token;
   if (result) {
-    display_compositor::GLHelper* gl_helper =
+    viz::GLHelper* gl_helper =
         content::ImageTransportFactory::GetInstance()->GetGLHelper();
     if (gl_helper)
       gl_helper->GenerateSyncToken(&sync_token);
@@ -83,15 +83,13 @@ void PrepareTextureCopyOutputResult(
 
   content::ImageTransportFactory* factory =
       content::ImageTransportFactory::GetInstance();
-  display_compositor::GLHelper* gl_helper = factory->GetGLHelper();
+  viz::GLHelper* gl_helper = factory->GetGLHelper();
   if (!gl_helper)
     return;
 
-  std::unique_ptr<SkAutoLockPixels> bitmap_pixels_lock(
-      new SkAutoLockPixels(*bitmap));
   uint8_t* pixels = static_cast<uint8_t*>(bitmap->getPixels());
 
-  cc::TextureMailbox texture_mailbox;
+  viz::TextureMailbox texture_mailbox;
   std::unique_ptr<cc::SingleReleaseCallback> release_callback;
   result->TakeTexture(&texture_mailbox, &release_callback);
   DCHECK(texture_mailbox.IsTexture());
@@ -102,9 +100,8 @@ void PrepareTextureCopyOutputResult(
       texture_mailbox.mailbox(), texture_mailbox.sync_token(), result->size(),
       gfx::Rect(result->size()), dst_size_in_pixel, pixels, color_type,
       base::Bind(&CopyFromCompositingSurfaceFinished, callback,
-                 base::Passed(&release_callback), base::Passed(&bitmap),
-                 base::Passed(&bitmap_pixels_lock)),
-      display_compositor::GLHelper::SCALER_QUALITY_GOOD);
+                 base::Passed(&release_callback), base::Passed(&bitmap)),
+      viz::GLHelper::SCALER_QUALITY_GOOD);
 #endif
 }
 
@@ -158,7 +155,7 @@ void PrepareBitmapCopyOutputResult(
 
 namespace content {
 
-cc::FrameSinkId AllocateFrameSinkId() {
+viz::FrameSinkId AllocateFrameSinkId() {
 #if defined(OS_ANDROID)
   return CompositorImpl::AllocateFrameSinkId();
 #else
@@ -167,14 +164,25 @@ cc::FrameSinkId AllocateFrameSinkId() {
 #endif
 }
 
-cc::SurfaceManager* GetSurfaceManager() {
+viz::FrameSinkManagerImpl* GetFrameSinkManager() {
 #if defined(OS_ANDROID)
-  return CompositorImpl::GetSurfaceManager();
+  return CompositorImpl::GetFrameSinkManager();
 #else
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-  if (factory == NULL)
+  if (!factory)
     return nullptr;
-  return factory->GetContextFactoryPrivate()->GetSurfaceManager();
+  return factory->GetContextFactoryPrivate()->GetFrameSinkManager();
+#endif
+}
+
+viz::HostFrameSinkManager* GetHostFrameSinkManager() {
+#if defined(OS_ANDROID)
+  return CompositorImpl::GetHostFrameSinkManager();
+#else
+  ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
+  if (!factory)
+    return nullptr;
+  return factory->GetContextFactoryPrivate()->GetHostFrameSinkManager();
 #endif
 }
 
@@ -206,5 +214,39 @@ void CopyFromCompositingSurfaceHasResult(
   PrepareBitmapCopyOutputResult(output_size_in_pixel, color_type, callback,
                                 std::move(result));
 }
+
+namespace surface_utils {
+
+void ConnectWithInProcessFrameSinkManager(
+    viz::HostFrameSinkManager* host,
+    viz::FrameSinkManagerImpl* manager,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  // A mojo pointer to |host| which is the FrameSinkManagerImpl's client.
+  cc::mojom::FrameSinkManagerClientPtr host_mojo;
+  // A mojo pointer to |manager|.
+  cc::mojom::FrameSinkManagerPtr manager_mojo;
+
+  // A request to bind to each of the above interfaces.
+  cc::mojom::FrameSinkManagerClientRequest host_mojo_request =
+      mojo::MakeRequest(&host_mojo);
+  cc::mojom::FrameSinkManagerRequest manager_mojo_request =
+      mojo::MakeRequest(&manager_mojo);
+
+  // Sets |manager_mojo| which is given to the |host|.
+  manager->BindAndSetClient(std::move(manager_mojo_request), task_runner,
+                            std::move(host_mojo));
+  // Sets |host_mojo| which was given to the |manager|.
+  host->BindAndSetManager(std::move(host_mojo_request), task_runner,
+                          std::move(manager_mojo));
+}
+
+void ConnectWithLocalFrameSinkManager(
+    viz::HostFrameSinkManager* host_frame_sink_manager,
+    viz::FrameSinkManagerImpl* frame_sink_manager_impl) {
+  host_frame_sink_manager->SetLocalManager(frame_sink_manager_impl);
+  frame_sink_manager_impl->SetLocalClient(host_frame_sink_manager);
+}
+
+}  // namespace surface_utils
 
 }  // namespace content

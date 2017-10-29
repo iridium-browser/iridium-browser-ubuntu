@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/payments/validating_textfield.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
@@ -12,10 +13,11 @@
 #include "chrome/browser/ui/views/payments/validation_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/test/views_test_base.h"
 
 namespace payments {
 
-class ValidatingTextfieldTest : public testing::Test {
+class ValidatingTextfieldTest : public views::ViewsTestBase {
  public:
   ValidatingTextfieldTest() {}
   ~ValidatingTextfieldTest() override {}
@@ -27,11 +29,25 @@ class ValidatingTextfieldTest : public testing::Test {
     ~TestValidationDelegate() override {}
 
     // ValidationDelegate:
-    bool ValidateTextfield(views::Textfield* textfield) override {
+    bool TextfieldValueChanged(views::Textfield* textfield,
+                               bool was_blurred) override {
+      base::string16 unused;
+      return !was_blurred || IsValidTextfield(textfield, &unused);
+    }
+    bool ComboboxValueChanged(views::Combobox* combobox) override {
+      base::string16 unused;
+      return IsValidCombobox(combobox, &unused);
+    }
+    bool IsValidTextfield(views::Textfield* textfield,
+                          base::string16* error_message) override {
       // We really don't like textfields with more than 5 characters in them.
       return textfield->text().size() <= 5u;
     }
-    bool ValidateCombobox(views::Combobox* combobox) override { return true; }
+    bool IsValidCombobox(views::Combobox* combobox,
+                         base::string16* error_message) override {
+      return true;
+    }
+    void ComboboxModelChanged(views::Combobox* combobox) override {}
 
    private:
     DISALLOW_COPY_AND_ASSIGN(TestValidationDelegate);

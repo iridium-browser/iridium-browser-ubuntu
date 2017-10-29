@@ -6,7 +6,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "cc/test/fake_compositor_frame_sink.h"
+#include "cc/test/fake_layer_tree_frame_sink.h"
 #include "cc/test/fake_raster_source.h"
 #include "cc/trees/layer_tree_impl.h"
 
@@ -23,7 +23,7 @@ TestLayerTreeHostBase::TestLayerTreeHostBase()
 TestLayerTreeHostBase::~TestLayerTreeHostBase() = default;
 
 void TestLayerTreeHostBase::SetUp() {
-  compositor_frame_sink_ = CreateCompositorFrameSink();
+  layer_tree_frame_sink_ = CreateLayerTreeFrameSink();
   task_graph_runner_ = CreateTaskGraphRunner();
   host_impl_ = CreateHostImpl(CreateSettings(), &task_runner_provider_,
                               task_graph_runner_.get());
@@ -33,13 +33,12 @@ void TestLayerTreeHostBase::SetUp() {
 
 LayerTreeSettings TestLayerTreeHostBase::CreateSettings() {
   LayerTreeSettings settings;
-  settings.verify_clip_tree_calculations = true;
   return settings;
 }
 
-std::unique_ptr<CompositorFrameSink>
-TestLayerTreeHostBase::CreateCompositorFrameSink() {
-  return FakeCompositorFrameSink::Create3d();
+std::unique_ptr<LayerTreeFrameSink>
+TestLayerTreeHostBase::CreateLayerTreeFrameSink() {
+  return FakeLayerTreeFrameSink::Create3d();
 }
 
 std::unique_ptr<FakeLayerTreeHostImpl> TestLayerTreeHostBase::CreateHostImpl(
@@ -57,15 +56,15 @@ TestLayerTreeHostBase::CreateTaskGraphRunner() {
 
 void TestLayerTreeHostBase::InitializeRenderer() {
   host_impl_->SetVisible(true);
-  host_impl_->InitializeRenderer(compositor_frame_sink_.get());
+  host_impl_->InitializeRenderer(layer_tree_frame_sink_.get());
 }
 
-void TestLayerTreeHostBase::ResetCompositorFrameSink(
-    std::unique_ptr<CompositorFrameSink> compositor_frame_sink) {
-  host_impl()->DidLoseCompositorFrameSink();
+void TestLayerTreeHostBase::ResetLayerTreeFrameSink(
+    std::unique_ptr<LayerTreeFrameSink> layer_tree_frame_sink) {
+  host_impl()->DidLoseLayerTreeFrameSink();
   host_impl()->SetVisible(true);
-  host_impl()->InitializeRenderer(compositor_frame_sink.get());
-  compositor_frame_sink_ = std::move(compositor_frame_sink);
+  host_impl()->InitializeRenderer(layer_tree_frame_sink.get());
+  layer_tree_frame_sink_ = std::move(layer_tree_frame_sink);
 }
 
 std::unique_ptr<FakeLayerTreeHostImpl> TestLayerTreeHostBase::TakeHostImpl() {
@@ -116,7 +115,7 @@ void TestLayerTreeHostBase::SetupPendingTree(
     if (!tile_size.IsEmpty())
       pending_layer->set_fixed_tile_size(tile_size);
     pending_layer->SetDrawsContent(true);
-    pending_layer->SetScrollClipLayer(new_pending_root->id());
+    pending_layer->SetScrollable(gfx::Size(1, 1));
     pending_root = new_pending_root.get();
     pending_tree->SetRootLayerForTesting(std::move(new_pending_root));
   } else {
@@ -133,17 +132,16 @@ void TestLayerTreeHostBase::SetupPendingTree(
   pending_layer->SetRasterSourceOnPending(raster_source, invalidation);
 
   pending_root->test_properties()->AddChild(std::move(pending_layer));
-  pending_tree->SetViewportLayersFromIds(
-      Layer::INVALID_ID, pending_tree->root_layer_for_testing()->id(),
-      Layer::INVALID_ID, Layer::INVALID_ID);
+  LayerTreeImpl::ViewportLayerIds viewport_ids;
+  viewport_ids.page_scale = pending_tree->root_layer_for_testing()->id();
+  pending_tree->SetViewportLayersFromIds(viewport_ids);
 
   pending_layer_ = static_cast<FakePictureLayerImpl*>(
       host_impl()->pending_tree()->LayerById(id_));
 
   // Add tilings/tiles for the layer.
-  bool update_lcd_text = false;
   RebuildPropertyTreesOnPendingTree();
-  host_impl()->pending_tree()->UpdateDrawProperties(update_lcd_text);
+  host_impl()->pending_tree()->UpdateDrawProperties();
 }
 
 void TestLayerTreeHostBase::ActivateTree() {
@@ -156,8 +154,19 @@ void TestLayerTreeHostBase::ActivateTree() {
   active_layer_ = static_cast<FakePictureLayerImpl*>(
       host_impl()->active_tree()->LayerById(id_));
 
-  bool update_lcd_text = false;
-  host_impl()->active_tree()->UpdateDrawProperties(update_lcd_text);
+  host_impl()->active_tree()->UpdateDrawProperties();
+}
+
+void TestLayerTreeHostBase::PerformImplSideInvalidation() {
+  DCHECK(host_impl()->active_tree());
+  DCHECK(!host_impl()->pending_tree());
+  DCHECK(host_impl()->recycle_tree());
+
+  host_impl()->CreatePendingTree();
+  host_impl()->sync_tree()->InvalidateRegionForImages(
+      host_impl()->tile_manager()->TakeImagesToInvalidateOnSyncTree());
+  pending_layer_ = old_pending_layer_;
+  old_pending_layer_ = nullptr;
 }
 
 void TestLayerTreeHostBase::RebuildPropertyTreesOnPendingTree() {

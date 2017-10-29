@@ -14,6 +14,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
+#include "chromeos/network/tether_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -29,7 +30,7 @@ class NetworkStateTest : public testing::Test {
  protected:
   bool SetProperty(const std::string& key, std::unique_ptr<base::Value> value) {
     const bool result = network_state_.PropertyChanged(key, *value);
-    properties_.SetWithoutPathExpansion(key, value.release());
+    properties_.SetWithoutPathExpansion(key, std::move(value));
     return result;
   }
 
@@ -207,6 +208,85 @@ TEST_F(NetworkStateTest, VPNThirdPartyProvider) {
   EXPECT_EQ(network_state_.vpn_provider_type(), shill::kProviderThirdPartyVpn);
   EXPECT_EQ(network_state_.third_party_vpn_provider_extension_id(),
             "third-party-vpn-provider-extension-id");
+}
+
+TEST_F(NetworkStateTest, Visible) {
+  EXPECT_FALSE(network_state_.visible());
+
+  network_state_.set_visible(true);
+  EXPECT_TRUE(network_state_.visible());
+
+  network_state_.set_visible(false);
+  EXPECT_FALSE(network_state_.visible());
+}
+
+TEST_F(NetworkStateTest, ConnectionState) {
+  network_state_.set_visible(true);
+
+  network_state_.set_connection_state(shill::kStateConfiguration);
+  EXPECT_EQ(network_state_.connection_state(), shill::kStateConfiguration);
+  EXPECT_TRUE(network_state_.IsConnectingState());
+  EXPECT_FALSE(network_state_.IsReconnecting());
+
+  network_state_.set_connection_state(shill::kStateOnline);
+  EXPECT_EQ(network_state_.connection_state(), shill::kStateOnline);
+  EXPECT_TRUE(network_state_.IsConnectedState());
+  EXPECT_FALSE(network_state_.IsReconnecting());
+
+  network_state_.set_connection_state(shill::kStateConfiguration);
+  EXPECT_EQ(network_state_.connection_state(), shill::kStateConfiguration);
+  EXPECT_TRUE(network_state_.IsConnectingState());
+  EXPECT_TRUE(network_state_.IsReconnecting());
+}
+
+TEST_F(NetworkStateTest, ConnectionStateNotVisible) {
+  network_state_.set_visible(false);
+
+  network_state_.set_connection_state(shill::kStateConfiguration);
+  EXPECT_EQ(network_state_.connection_state(), shill::kStateDisconnect);
+  EXPECT_FALSE(network_state_.IsConnectingState());
+  EXPECT_FALSE(network_state_.IsReconnecting());
+
+  network_state_.set_connection_state(shill::kStateOnline);
+  EXPECT_EQ(network_state_.connection_state(), shill::kStateDisconnect);
+  EXPECT_FALSE(network_state_.IsConnectedState());
+  EXPECT_FALSE(network_state_.IsReconnecting());
+
+  network_state_.set_connection_state(shill::kStateConfiguration);
+  EXPECT_EQ(network_state_.connection_state(), shill::kStateDisconnect);
+  EXPECT_FALSE(network_state_.IsConnectingState());
+  EXPECT_FALSE(network_state_.IsReconnecting());
+}
+
+TEST_F(NetworkStateTest, TetherProperties) {
+  network_state_.set_type(kTypeTether);
+  network_state_.set_carrier("Project Fi");
+  network_state_.set_battery_percentage(85);
+  network_state_.set_tether_has_connected_to_host(true);
+  network_state_.set_signal_strength(75);
+
+  base::DictionaryValue dictionary;
+  network_state_.GetStateProperties(&dictionary);
+
+  int signal_strength;
+  EXPECT_TRUE(dictionary.GetIntegerWithoutPathExpansion(kTetherSignalStrength,
+                                                        &signal_strength));
+  EXPECT_EQ(75, signal_strength);
+
+  int battery_percentage;
+  EXPECT_TRUE(dictionary.GetIntegerWithoutPathExpansion(
+      kTetherBatteryPercentage, &battery_percentage));
+  EXPECT_EQ(85, battery_percentage);
+
+  bool tether_has_connected_to_host;
+  EXPECT_TRUE(dictionary.GetBooleanWithoutPathExpansion(
+      kTetherHasConnectedToHost, &tether_has_connected_to_host));
+  EXPECT_TRUE(tether_has_connected_to_host);
+
+  std::string carrier;
+  EXPECT_TRUE(
+      dictionary.GetStringWithoutPathExpansion(kTetherCarrier, &carrier));
+  EXPECT_EQ("Project Fi", carrier);
 }
 
 }  // namespace chromeos

@@ -5,7 +5,7 @@
 #import "ios/chrome/browser/ui/settings/time_range_selector_collection_view_controller.h"
 
 #include "base/files/file_path.h"
-#include "base/message_loop/message_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/browsing_data/core/pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -16,6 +16,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/gtest_support.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 @interface TimeRangeSelectorCollectionViewController (ExposedForTesting)
 - (void)updatePrefValue:(int)prefValue;
@@ -28,22 +32,25 @@ const NSInteger kNumberOfItems = 5;
 class TimeRangeSelectorCollectionViewControllerTest
     : public CollectionViewControllerTest {
  protected:
+  TimeRangeSelectorCollectionViewControllerTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+
   void SetUp() override {
     CollectionViewControllerTest::SetUp();
     pref_service_ = CreateLocalState();
-    delegate_.reset([[OCMockObject
+    delegate_ = [OCMockObject
         mockForProtocol:@protocol(
-                            TimeRangeSelectorCollectionViewControllerDelegate)]
-        retain]);
+                            TimeRangeSelectorCollectionViewControllerDelegate)];
     CreateController();
   }
 
-  CollectionViewController* NewController() override NS_RETURNS_RETAINED {
-    time_range_selector_controller_.reset(
+  CollectionViewController* InstantiateController() override {
+    time_range_selector_controller_ =
         [[TimeRangeSelectorCollectionViewController alloc]
             initWithPrefs:pref_service_.get()
-                 delegate:delegate_.get()]);
-    return [time_range_selector_controller_ retain];
+                 delegate:delegate_];
+    return time_range_selector_controller_;
   }
 
   std::unique_ptr<PrefService> CreateLocalState() {
@@ -61,11 +68,10 @@ class TimeRangeSelectorCollectionViewControllerTest
     EXPECT_EQ(accessory_type, cell.accessoryType);
   }
 
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<PrefService> pref_service_;
-  base::scoped_nsobject<id> delegate_;
-  base::scoped_nsobject<TimeRangeSelectorCollectionViewController>
-      time_range_selector_controller_;
+  id delegate_;
+  TimeRangeSelectorCollectionViewController* time_range_selector_controller_;
 };
 
 TEST_F(TimeRangeSelectorCollectionViewControllerTest, TestModel) {
@@ -114,12 +120,12 @@ TEST_F(TimeRangeSelectorCollectionViewControllerTest, TestUpdateCheckedState) {
 TEST_F(TimeRangeSelectorCollectionViewControllerTest, TestUpdatePrefValue) {
   CheckController();
   UICollectionView* collectionView =
-      time_range_selector_controller_.get().collectionView;
+      time_range_selector_controller_.collectionView;
   for (NSInteger checkedItem = 0; checkedItem < kNumberOfItems; ++checkedItem) {
     NSIndexPath* indexPath =
         [NSIndexPath indexPathForItem:checkedItem inSection:0];
-    [[delegate_.get() expect]
-        timeRangeSelectorViewController:time_range_selector_controller_.get()
+    [[delegate_ expect]
+        timeRangeSelectorViewController:time_range_selector_controller_
                     didSelectTimePeriod:static_cast<browsing_data::TimePeriod>(
                                             checkedItem)];
     [time_range_selector_controller_ collectionView:collectionView

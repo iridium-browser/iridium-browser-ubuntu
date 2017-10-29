@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 [
-    Exposed=(Window, ServiceWorker),
-    RuntimeEnabled=BackgroundSync,
+    Exposed=(Window,Worker),
+    RuntimeEnabled=BackgroundSync
 ] partial interface ServiceWorkerRegistration {
     [MeasureAs=BackgroundSync] readonly attribute SyncManager sync;
 };

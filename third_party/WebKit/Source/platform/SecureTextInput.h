@@ -31,19 +31,20 @@
 #ifndef SecureTextInput_h
 #define SecureTextInput_h
 
+#include "build/build_config.h"
 #include "platform/PlatformExport.h"
-#include "wtf/build_config.h"
+#include "platform/wtf/build_config.h"
 
 namespace blink {
 
-#if OS(MACOSX)
+#if defined(OS_MACOSX)
 // Once enableSecureTextInput is called, secure text input mode is set until
 // disableSecureTextInput has been called.
-PLATFORM_EXPORT void enableSecureTextInput();
-PLATFORM_EXPORT void disableSecureTextInput();
+PLATFORM_EXPORT void EnableSecureTextInput();
+PLATFORM_EXPORT void DisableSecureTextInput();
 #else
-inline void enableSecureTextInput() {}
-inline void disableSecureTextInput() {}
+inline void EnableSecureTextInput() {}
+inline void DisableSecureTextInput() {}
 #endif
 
 }  // namespace blink

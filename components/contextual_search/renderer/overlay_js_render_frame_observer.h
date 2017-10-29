@@ -42,7 +42,7 @@ class OverlayJsRenderFrameObserver : public content::RenderFrameObserver {
   // Creates the OverlayPageNotifierService connecting the browser to this
   // observer.
   void CreateOverlayPageNotifierService(
-      mojo::InterfaceRequest<mojom::OverlayPageNotifierService> request);
+      mojom::OverlayPageNotifierServiceRequest request);
   // Destroys the OverlayPageNotifierService.
   void DestroyOverlayPageNotifierService();
 

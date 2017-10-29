@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <sstream>
 #include <utility>
 
 #include "core/fpdfapi/font/cpdf_font.h"
@@ -21,13 +22,15 @@
 #include "core/fpdfdoc/cpvt_section.h"
 #include "core/fpdfdoc/cpvt_word.h"
 #include "core/fpdfdoc/ipvt_fontmap.h"
+#include "core/fxcrt/fx_codepage.h"
 #include "core/fxge/cfx_graphstatedata.h"
 #include "core/fxge/cfx_pathdata.h"
 #include "core/fxge/cfx_renderdevice.h"
 #include "fpdfsdk/cfx_systemhandler.h"
 #include "fpdfsdk/fxedit/fx_edit.h"
-#include "fpdfsdk/pdfwindow/PWL_Edit.h"
-#include "fpdfsdk/pdfwindow/PWL_EditCtrl.h"
+#include "fpdfsdk/pdfwindow/cpwl_edit.h"
+#include "fpdfsdk/pdfwindow/cpwl_edit_ctrl.h"
+#include "fpdfsdk/pdfwindow/cpwl_scroll_bar.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
 
@@ -35,31 +38,10 @@ namespace {
 
 const int kEditUndoMaxItems = 10000;
 
-CFX_ByteString GetWordRenderString(const CFX_ByteString& strWords) {
-  if (strWords.GetLength() > 0)
-    return PDF_EncodeString(strWords) + " Tj\n";
-  return CFX_ByteString();
-}
-
-CFX_ByteString GetFontSetString(IPVT_FontMap* pFontMap,
-                                int32_t nFontIndex,
-                                FX_FLOAT fFontSize) {
-  if (!pFontMap)
-    return CFX_ByteString();
-
-  CFX_ByteString sFontAlias = pFontMap->GetPDFFontAlias(nFontIndex);
-  if (sFontAlias.GetLength() <= 0 || fFontSize <= 0)
-    return CFX_ByteString();
-
-  CFX_ByteTextBuf sRet;
-  sRet << "/" << sFontAlias << " " << fFontSize << " Tf\n";
-  return sRet.MakeString();
-}
-
 void DrawTextString(CFX_RenderDevice* pDevice,
                     const CFX_PointF& pt,
                     CPDF_Font* pFont,
-                    FX_FLOAT fFontSize,
+                    float fFontSize,
                     CFX_Matrix* pUser2Device,
                     const CFX_ByteString& str,
                     FX_ARGB crTextFill,
@@ -73,14 +55,14 @@ void DrawTextString(CFX_RenderDevice* pDevice,
 
       CPDF_RenderOptions ro;
       ro.m_Flags = RENDER_CLEARTYPE;
-      ro.m_ColorMode = RENDER_COLOR_NORMAL;
+      ro.m_ColorMode = CPDF_RenderOptions::kNormal;
 
       CPDF_TextRenderer::DrawTextString(pDevice, pos.x, pos.y, pFont, fFontSize,
                                         &mt, str, crTextFill, nullptr, &ro);
     } else {
       CPDF_RenderOptions ro;
       ro.m_Flags = RENDER_CLEARTYPE;
-      ro.m_ColorMode = RENDER_COLOR_NORMAL;
+      ro.m_ColorMode = CPDF_RenderOptions::kNormal;
 
       CPDF_TextRenderer::DrawTextString(pDevice, pos.x, pos.y, pFont, fFontSize,
                                         pUser2Device, str, crTextFill, nullptr,
@@ -125,16 +107,6 @@ bool CFX_Edit_Iterator::GetLine(CPVT_Line& line) const {
   return false;
 }
 
-bool CFX_Edit_Iterator::GetSection(CPVT_Section& section) const {
-  ASSERT(m_pEdit);
-
-  if (m_pVTIterator->GetSection(section)) {
-    section.rcSection = m_pEdit->VTToEdit(section.rcSection);
-    return true;
-  }
-  return false;
-}
-
 void CFX_Edit_Iterator::SetAt(int32_t nWordIndex) {
   m_pVTIterator->SetAt(nWordIndex);
 }
@@ -154,7 +126,7 @@ CFX_Edit_Provider::CFX_Edit_Provider(IPVT_FontMap* pFontMap)
 
 CFX_Edit_Provider::~CFX_Edit_Provider() {}
 
-IPVT_FontMap* CFX_Edit_Provider::GetFontMap() {
+IPVT_FontMap* CFX_Edit_Provider::GetFontMap() const {
   return m_pFontMap;
 }
 
@@ -230,10 +202,6 @@ void CFX_Edit_Refresh::NoAnalyse() {
   }
 }
 
-void CFX_Edit_Refresh::AddRefresh(const CFX_FloatRect& rect) {
-  m_RefreshRects.Add(rect);
-}
-
 const CFX_Edit_RectArray* CFX_Edit_Refresh::GetRefreshRects() const {
   return &m_RefreshRects;
 }
@@ -245,8 +213,6 @@ void CFX_Edit_Refresh::EndRefresh() {
 CFX_Edit_Undo::CFX_Edit_Undo(int32_t nBufsize)
     : m_nCurUndoPos(0),
       m_nBufSize(nBufsize),
-      m_bModified(false),
-      m_bVirgin(true),
       m_bWorking(false) {}
 
 CFX_Edit_Undo::~CFX_Edit_Undo() {
@@ -262,7 +228,6 @@ void CFX_Edit_Undo::Undo() {
   if (m_nCurUndoPos > 0) {
     m_UndoItemStack[m_nCurUndoPos - 1]->Undo();
     m_nCurUndoPos--;
-    m_bModified = (m_nCurUndoPos != 0);
   }
   m_bWorking = false;
 }
@@ -276,7 +241,6 @@ void CFX_Edit_Undo::Redo() {
   if (m_nCurUndoPos < m_UndoItemStack.size()) {
     m_UndoItemStack[m_nCurUndoPos]->Redo();
     m_nCurUndoPos++;
-    m_bModified = true;
   }
   m_bWorking = false;
 }
@@ -288,18 +252,11 @@ void CFX_Edit_Undo::AddItem(std::unique_ptr<IFX_Edit_UndoItem> pItem) {
   if (m_nCurUndoPos < m_UndoItemStack.size())
     RemoveTails();
 
-  if (m_UndoItemStack.size() >= m_nBufSize) {
+  if (m_UndoItemStack.size() >= m_nBufSize)
     RemoveHeads();
-    m_bVirgin = false;
-  }
 
   m_UndoItemStack.push_back(std::move(pItem));
   m_nCurUndoPos = m_UndoItemStack.size();
-  m_bModified = true;
-}
-
-bool CFX_Edit_Undo::IsModified() const {
-  return m_bVirgin ? m_bModified : true;
 }
 
 void CFX_Edit_Undo::RemoveHeads() {
@@ -335,42 +292,6 @@ void CFX_Edit_UndoItem::SetLast(bool bLast) {
 
 bool CFX_Edit_UndoItem::IsLast() {
   return m_bLast;
-}
-
-CFX_Edit_GroupUndoItem::CFX_Edit_GroupUndoItem(const CFX_WideString& sTitle)
-    : m_sTitle(sTitle) {}
-
-CFX_Edit_GroupUndoItem::~CFX_Edit_GroupUndoItem() {}
-
-void CFX_Edit_GroupUndoItem::AddUndoItem(
-    std::unique_ptr<CFX_Edit_UndoItem> pUndoItem) {
-  pUndoItem->SetFirst(false);
-  pUndoItem->SetLast(false);
-  if (m_sTitle.IsEmpty())
-    m_sTitle = pUndoItem->GetUndoTitle();
-
-  m_Items.push_back(std::move(pUndoItem));
-}
-
-void CFX_Edit_GroupUndoItem::UpdateItems() {
-  if (!m_Items.empty()) {
-    m_Items.front()->SetFirst(true);
-    m_Items.back()->SetLast(true);
-  }
-}
-
-void CFX_Edit_GroupUndoItem::Undo() {
-  for (auto iter = m_Items.rbegin(); iter != m_Items.rend(); ++iter)
-    (*iter)->Undo();
-}
-
-void CFX_Edit_GroupUndoItem::Redo() {
-  for (auto iter = m_Items.begin(); iter != m_Items.end(); ++iter)
-    (*iter)->Redo();
-}
-
-CFX_WideString CFX_Edit_GroupUndoItem::GetUndoTitle() const {
-  return m_sTitle;
 }
 
 CFXEU_InsertWord::CFXEU_InsertWord(CFX_Edit* pEdit,
@@ -459,23 +380,24 @@ CFXEU_Backspace::CFXEU_Backspace(CFX_Edit* pEdit,
 CFXEU_Backspace::~CFXEU_Backspace() {}
 
 void CFXEU_Backspace::Redo() {
-  if (m_pEdit) {
-    m_pEdit->SelectNone();
-    m_pEdit->SetCaret(m_wpOld);
-    m_pEdit->Backspace(false, true);
-  }
+  if (!m_pEdit)
+    return;
+
+  m_pEdit->SelectNone();
+  m_pEdit->SetCaret(m_wpOld);
+  m_pEdit->Backspace(false, true);
 }
 
 void CFXEU_Backspace::Undo() {
-  if (m_pEdit) {
-    m_pEdit->SelectNone();
-    m_pEdit->SetCaret(m_wpNew);
-    if (m_wpNew.SecCmp(m_wpOld) != 0) {
-      m_pEdit->InsertReturn(&m_SecProps, &m_WordProps, false, true);
-    } else {
-      m_pEdit->InsertWord(m_Word, m_nCharset, &m_WordProps, false, true);
-    }
-  }
+  if (!m_pEdit)
+    return;
+
+  m_pEdit->SelectNone();
+  m_pEdit->SetCaret(m_wpNew);
+  if (m_wpNew.nSecIndex != m_wpOld.nSecIndex)
+    m_pEdit->InsertReturn(&m_SecProps, &m_WordProps, false, true);
+  else
+    m_pEdit->InsertWord(m_Word, m_nCharset, &m_WordProps, false, true);
 }
 
 CFXEU_Delete::CFXEU_Delete(CFX_Edit* pEdit,
@@ -536,7 +458,7 @@ void CFXEU_Clear::Undo() {
   if (m_pEdit) {
     m_pEdit->SelectNone();
     m_pEdit->SetCaret(m_wrSel.BeginPos);
-    m_pEdit->InsertText(m_swText, FXFONT_DEFAULT_CHARSET, false, true);
+    m_pEdit->InsertText(m_swText, FX_CHARSET_Default, false, true);
     m_pEdit->SetSel(m_wrSel.BeginPos, m_wrSel.EndPos);
   }
 }
@@ -571,149 +493,6 @@ void CFXEU_InsertText::Undo() {
 }
 
 // static
-CFX_ByteString CFX_Edit::GetEditAppearanceStream(CFX_Edit* pEdit,
-                                                 const CFX_PointF& ptOffset,
-                                                 const CPVT_WordRange* pRange,
-                                                 bool bContinuous,
-                                                 uint16_t SubWord) {
-  CFX_Edit_Iterator* pIterator = pEdit->GetIterator();
-  if (pRange)
-    pIterator->SetAt(pRange->BeginPos);
-  else
-    pIterator->SetAt(0);
-
-  CFX_ByteTextBuf sEditStream;
-  CFX_ByteTextBuf sWords;
-  int32_t nCurFontIndex = -1;
-  CFX_PointF ptOld;
-  CFX_PointF ptNew;
-  CPVT_WordPlace oldplace;
-
-  while (pIterator->NextWord()) {
-    CPVT_WordPlace place = pIterator->GetAt();
-    if (pRange && place.WordCmp(pRange->EndPos) > 0)
-      break;
-
-    if (bContinuous) {
-      if (place.LineCmp(oldplace) != 0) {
-        if (sWords.GetSize() > 0) {
-          sEditStream << GetWordRenderString(sWords.MakeString());
-          sWords.Clear();
-        }
-
-        CPVT_Word word;
-        if (pIterator->GetWord(word)) {
-          ptNew = CFX_PointF(word.ptWord.x + ptOffset.x,
-                             word.ptWord.y + ptOffset.y);
-        } else {
-          CPVT_Line line;
-          pIterator->GetLine(line);
-          ptNew = CFX_PointF(line.ptLine.x + ptOffset.x,
-                             line.ptLine.y + ptOffset.y);
-        }
-
-        if (ptNew.x != ptOld.x || ptNew.y != ptOld.y) {
-          sEditStream << ptNew.x - ptOld.x << " " << ptNew.y - ptOld.y
-                      << " Td\n";
-
-          ptOld = ptNew;
-        }
-      }
-
-      CPVT_Word word;
-      if (pIterator->GetWord(word)) {
-        if (word.nFontIndex != nCurFontIndex) {
-          if (sWords.GetSize() > 0) {
-            sEditStream << GetWordRenderString(sWords.MakeString());
-            sWords.Clear();
-          }
-          sEditStream << GetFontSetString(pEdit->GetFontMap(), word.nFontIndex,
-                                          word.fFontSize);
-          nCurFontIndex = word.nFontIndex;
-        }
-
-        sWords << GetPDFWordString(pEdit->GetFontMap(), nCurFontIndex,
-                                   word.Word, SubWord);
-      }
-
-      oldplace = place;
-    } else {
-      CPVT_Word word;
-      if (pIterator->GetWord(word)) {
-        ptNew =
-            CFX_PointF(word.ptWord.x + ptOffset.x, word.ptWord.y + ptOffset.y);
-
-        if (ptNew.x != ptOld.x || ptNew.y != ptOld.y) {
-          sEditStream << ptNew.x - ptOld.x << " " << ptNew.y - ptOld.y
-                      << " Td\n";
-          ptOld = ptNew;
-        }
-
-        if (word.nFontIndex != nCurFontIndex) {
-          sEditStream << GetFontSetString(pEdit->GetFontMap(), word.nFontIndex,
-                                          word.fFontSize);
-          nCurFontIndex = word.nFontIndex;
-        }
-
-        sEditStream << GetWordRenderString(GetPDFWordString(
-            pEdit->GetFontMap(), nCurFontIndex, word.Word, SubWord));
-      }
-    }
-  }
-
-  if (sWords.GetSize() > 0) {
-    sEditStream << GetWordRenderString(sWords.MakeString());
-    sWords.Clear();
-  }
-
-  CFX_ByteTextBuf sAppStream;
-  if (sEditStream.GetSize() > 0) {
-    int32_t nHorzScale = pEdit->GetHorzScale();
-    if (nHorzScale != 100) {
-      sAppStream << nHorzScale << " Tz\n";
-    }
-
-    FX_FLOAT fCharSpace = pEdit->GetCharSpace();
-    if (!IsFloatZero(fCharSpace)) {
-      sAppStream << fCharSpace << " Tc\n";
-    }
-
-    sAppStream << sEditStream;
-  }
-
-  return sAppStream.MakeString();
-}
-
-// static
-CFX_ByteString CFX_Edit::GetSelectAppearanceStream(
-    CFX_Edit* pEdit,
-    const CFX_PointF& ptOffset,
-    const CPVT_WordRange* pRange) {
-  if (!pRange || !pRange->IsExist())
-    return CFX_ByteString();
-
-  CFX_Edit_Iterator* pIterator = pEdit->GetIterator();
-  pIterator->SetAt(pRange->BeginPos);
-
-  CFX_ByteTextBuf sRet;
-  while (pIterator->NextWord()) {
-    CPVT_WordPlace place = pIterator->GetAt();
-    if (place.WordCmp(pRange->EndPos) > 0)
-      break;
-
-    CPVT_Word word;
-    CPVT_Line line;
-    if (pIterator->GetWord(word) && pIterator->GetLine(line)) {
-      sRet << word.ptWord.x + ptOffset.x << " "
-           << line.ptLine.y + line.fLineDescent << " " << word.fWidth << " "
-           << line.fLineAscent - line.fLineDescent << " re\nf\n";
-    }
-  }
-
-  return sRet.MakeString();
-}
-
-// static
 void CFX_Edit::DrawEdit(CFX_RenderDevice* pDevice,
                         CFX_Matrix* pUser2Device,
                         CFX_Edit* pEdit,
@@ -726,7 +505,7 @@ void CFX_Edit::DrawEdit(CFX_RenderDevice* pDevice,
   const bool bContinuous =
       pEdit->GetCharArray() == 0 && pEdit->GetCharSpace() <= 0.0f;
   uint16_t SubWord = pEdit->GetPasswordChar();
-  FX_FLOAT fFontSize = pEdit->GetFontSize();
+  float fFontSize = pEdit->GetFontSize();
   CPVT_WordRange wrSelect = pEdit->GetSelectWordRange();
   int32_t nHorzScale = pEdit->GetHorzScale();
 
@@ -737,10 +516,10 @@ void CFX_Edit::DrawEdit(CFX_RenderDevice* pDevice,
   const FX_COLORREF crWhite = ArgbEncode(255, 255, 255, 255);
   const FX_COLORREF crSelBK = ArgbEncode(255, 0, 51, 113);
 
-  CFX_ByteTextBuf sTextBuf;
+  std::ostringstream sTextBuf;
   int32_t nFontIndex = -1;
   CFX_PointF ptBT;
-  pDevice->SaveState();
+  CFX_RenderDevice::StateRestorer restorer(pDevice);
   if (!rcClip.IsEmpty()) {
     CFX_FloatRect rcTemp = rcClip;
     pUser2Device->TransformRect(rcTemp);
@@ -757,12 +536,11 @@ void CFX_Edit::DrawEdit(CFX_RenderDevice* pDevice,
     CPVT_WordPlace oldplace;
     while (pIterator->NextWord()) {
       CPVT_WordPlace place = pIterator->GetAt();
-      if (pRange && place.WordCmp(pRange->EndPos) > 0)
+      if (pRange && place > pRange->EndPos)
         break;
 
-      if (wrSelect.IsExist()) {
-        bSelect = place.WordCmp(wrSelect.BeginPos) > 0 &&
-                  place.WordCmp(wrSelect.EndPos) <= 0;
+      if (!wrSelect.IsEmpty()) {
+        bSelect = place > wrSelect.BeginPos && place <= wrSelect.EndPos;
         crCurFill = bSelect ? crWhite : crTextFill;
       }
       if (pSystemHandler && pSystemHandler->IsSelectionImplemented()) {
@@ -795,13 +573,13 @@ void CFX_Edit::DrawEdit(CFX_RenderDevice* pDevice,
         if (bContinuous) {
           if (place.LineCmp(oldplace) != 0 || word.nFontIndex != nFontIndex ||
               crOldFill != crCurFill) {
-            if (sTextBuf.GetLength() > 0) {
+            if (sTextBuf.tellp() > 0) {
               DrawTextString(
                   pDevice, CFX_PointF(ptBT.x + ptOffset.x, ptBT.y + ptOffset.y),
                   pFontMap->GetPDFFont(nFontIndex), fFontSize, pUser2Device,
-                  sTextBuf.MakeString(), crOldFill, nHorzScale);
+                  CFX_ByteString(sTextBuf), crOldFill, nHorzScale);
 
-              sTextBuf.Clear();
+              sTextBuf.str("");
             }
             nFontIndex = word.nFontIndex;
             ptBT = word.ptWord;
@@ -809,8 +587,7 @@ void CFX_Edit::DrawEdit(CFX_RenderDevice* pDevice,
           }
 
           sTextBuf << GetPDFWordString(pFontMap, word.nFontIndex, word.Word,
-                                       SubWord)
-                          .AsStringC();
+                                       SubWord);
         } else {
           DrawTextString(
               pDevice, CFX_PointF(word.ptWord.x + ptOffset.x,
@@ -823,15 +600,13 @@ void CFX_Edit::DrawEdit(CFX_RenderDevice* pDevice,
       }
     }
 
-    if (sTextBuf.GetLength() > 0) {
+    if (sTextBuf.tellp() > 0) {
       DrawTextString(pDevice,
                      CFX_PointF(ptBT.x + ptOffset.x, ptBT.y + ptOffset.y),
                      pFontMap->GetPDFFont(nFontIndex), fFontSize, pUser2Device,
-                     sTextBuf.MakeString(), crOldFill, nHorzScale);
+                     CFX_ByteString(sTextBuf), crOldFill, nHorzScale);
     }
   }
-
-  pDevice->RestoreState(false);
 }
 
 CFX_Edit::CFX_Edit()
@@ -849,12 +624,9 @@ CFX_Edit::CFX_Edit()
       m_bEnableRefresh(true),
       m_rcOldContent(0.0f, 0.0f, 0.0f, 0.0f),
       m_bEnableUndo(true),
-      m_bOprNotify(false),
-      m_pGroupUndoItem(nullptr) {}
+      m_bOprNotify(false) {}
 
-CFX_Edit::~CFX_Edit() {
-  ASSERT(!m_pGroupUndoItem);
-}
+CFX_Edit::~CFX_Edit() {}
 
 void CFX_Edit::Initialize() {
   m_pVT->Initialize();
@@ -921,7 +693,7 @@ void CFX_Edit::SetCharArray(int32_t nCharArray) {
   Paint();
 }
 
-void CFX_Edit::SetCharSpace(FX_FLOAT fCharSpace) {
+void CFX_Edit::SetCharSpace(float fCharSpace) {
   m_pVT->SetCharSpace(fCharSpace);
   Paint();
 }
@@ -944,7 +716,7 @@ void CFX_Edit::SetAutoFontSize(bool bAuto, bool bPaint) {
     Paint();
 }
 
-void CFX_Edit::SetFontSize(FX_FLOAT fFontSize) {
+void CFX_Edit::SetFontSize(float fFontSize) {
   m_pVT->SetFontSize(fFontSize);
   Paint();
 }
@@ -980,42 +752,36 @@ void CFX_Edit::SetSel(int32_t nStartChar, int32_t nEndChar) {
 }
 
 void CFX_Edit::SetSel(const CPVT_WordPlace& begin, const CPVT_WordPlace& end) {
-  if (m_pVT->IsValid()) {
-    SelectNone();
+  if (!m_pVT->IsValid())
+    return;
 
-    m_SelState.Set(begin, end);
-
-    SetCaret(m_SelState.EndPos);
-
-    if (m_SelState.IsExist()) {
-      ScrollToCaret();
-      Refresh();
-      SetCaretInfo();
-    } else {
-      ScrollToCaret();
-      SetCaretInfo();
-    }
-  }
+  SelectNone();
+  m_SelState.Set(begin, end);
+  SetCaret(m_SelState.EndPos);
+  ScrollToCaret();
+  if (!m_SelState.IsEmpty())
+    Refresh();
+  SetCaretInfo();
 }
 
 void CFX_Edit::GetSel(int32_t& nStartChar, int32_t& nEndChar) const {
   nStartChar = -1;
   nEndChar = -1;
+  if (!m_pVT->IsValid())
+    return;
 
-  if (m_pVT->IsValid()) {
-    if (m_SelState.IsExist()) {
-      if (m_SelState.BeginPos.WordCmp(m_SelState.EndPos) < 0) {
-        nStartChar = m_pVT->WordPlaceToWordIndex(m_SelState.BeginPos);
-        nEndChar = m_pVT->WordPlaceToWordIndex(m_SelState.EndPos);
-      } else {
-        nStartChar = m_pVT->WordPlaceToWordIndex(m_SelState.EndPos);
-        nEndChar = m_pVT->WordPlaceToWordIndex(m_SelState.BeginPos);
-      }
-    } else {
-      nStartChar = m_pVT->WordPlaceToWordIndex(m_wpCaret);
-      nEndChar = m_pVT->WordPlaceToWordIndex(m_wpCaret);
-    }
+  if (m_SelState.IsEmpty()) {
+    nStartChar = m_pVT->WordPlaceToWordIndex(m_wpCaret);
+    nEndChar = m_pVT->WordPlaceToWordIndex(m_wpCaret);
+    return;
   }
+  if (m_SelState.BeginPos < m_SelState.EndPos) {
+    nStartChar = m_pVT->WordPlaceToWordIndex(m_SelState.BeginPos);
+    nEndChar = m_pVT->WordPlaceToWordIndex(m_SelState.EndPos);
+    return;
+  }
+  nStartChar = m_pVT->WordPlaceToWordIndex(m_SelState.EndPos);
+  nEndChar = m_pVT->WordPlaceToWordIndex(m_SelState.BeginPos);
 }
 
 int32_t CFX_Edit::GetCaret() const {
@@ -1031,7 +797,6 @@ CPVT_WordPlace CFX_Edit::GetCaretWordPlace() const {
 
 CFX_WideString CFX_Edit::GetText() const {
   CFX_WideString swRet;
-
   if (!m_pVT->IsValid())
     return swRet;
 
@@ -1042,22 +807,17 @@ CFX_WideString CFX_Edit::GetText() const {
   CPVT_WordPlace oldplace = pIterator->GetAt();
   while (pIterator->NextWord()) {
     CPVT_WordPlace place = pIterator->GetAt();
-
     if (pIterator->GetWord(wordinfo))
       swRet += wordinfo.Word;
-
-    if (oldplace.SecCmp(place) != 0)
+    if (oldplace.nSecIndex != place.nSecIndex)
       swRet += L"\r\n";
-
     oldplace = place;
   }
-
   return swRet;
 }
 
 CFX_WideString CFX_Edit::GetRangeText(const CPVT_WordRange& range) const {
   CFX_WideString swRet;
-
   if (!m_pVT->IsValid())
     return swRet;
 
@@ -1071,27 +831,19 @@ CFX_WideString CFX_Edit::GetRangeText(const CPVT_WordRange& range) const {
   CPVT_WordPlace oldplace = wrTemp.BeginPos;
   while (pIterator->NextWord()) {
     CPVT_WordPlace place = pIterator->GetAt();
-    if (place.WordCmp(wrTemp.EndPos) > 0)
+    if (place > wrTemp.EndPos)
       break;
-
     if (pIterator->GetWord(wordinfo))
       swRet += wordinfo.Word;
-
-    if (oldplace.SecCmp(place) != 0)
+    if (oldplace.nSecIndex != place.nSecIndex)
       swRet += L"\r\n";
-
     oldplace = place;
   }
-
   return swRet;
 }
 
 CFX_WideString CFX_Edit::GetSelText() const {
   return GetRangeText(m_SelState.ConvertToWordRange());
-}
-
-int32_t CFX_Edit::GetTotalWords() const {
-  return m_pVT->GetTotalWords();
 }
 
 int32_t CFX_Edit::GetTotalLines() const {
@@ -1111,7 +863,7 @@ CPVT_WordRange CFX_Edit::GetSelectWordRange() const {
 
 void CFX_Edit::SetText(const CFX_WideString& sText) {
   Empty();
-  DoInsertText(CPVT_WordPlace(0, 0, -1), sText, FXFONT_DEFAULT_CHARSET);
+  DoInsertText(CPVT_WordPlace(0, 0, -1), sText, FX_CHARSET_Default);
   Paint();
 }
 
@@ -1139,7 +891,7 @@ bool CFX_Edit::InsertText(const CFX_WideString& sText, int32_t charset) {
   return InsertText(sText, charset, true, true);
 }
 
-FX_FLOAT CFX_Edit::GetFontSize() const {
+float CFX_Edit::GetFontSize() const {
   return m_pVT->GetFontSize();
 }
 
@@ -1159,7 +911,7 @@ int32_t CFX_Edit::GetHorzScale() const {
   return m_pVT->GetHorzScale();
 }
 
-FX_FLOAT CFX_Edit::GetCharSpace() const {
+float CFX_Edit::GetCharSpace() const {
   return m_pVT->GetCharSpace();
 }
 
@@ -1231,45 +983,38 @@ void CFX_Edit::SetContentChanged() {
     CFX_FloatRect rcContent = m_pVT->GetContentRect();
     if (rcContent.Width() != m_rcOldContent.Width() ||
         rcContent.Height() != m_rcOldContent.Height()) {
-      if (!m_bNotifyFlag) {
-        m_bNotifyFlag = true;
-        m_pNotify->IOnContentChange(rcContent);
-        m_bNotifyFlag = false;
-      }
       m_rcOldContent = rcContent;
     }
   }
 }
 
 void CFX_Edit::SelectAll() {
-  if (m_pVT->IsValid()) {
-    m_SelState = CFX_Edit_Select(GetWholeWordRange());
-    SetCaret(m_SelState.EndPos);
-
-    ScrollToCaret();
-    Refresh();
-    SetCaretInfo();
-  }
+  if (!m_pVT->IsValid())
+    return;
+  m_SelState = CFX_Edit_Select(GetWholeWordRange());
+  SetCaret(m_SelState.EndPos);
+  ScrollToCaret();
+  Refresh();
+  SetCaretInfo();
 }
 
 void CFX_Edit::SelectNone() {
-  if (m_pVT->IsValid()) {
-    if (m_SelState.IsExist()) {
-      m_SelState.Default();
-      Refresh();
-    }
-  }
+  if (!m_pVT->IsValid() || m_SelState.IsEmpty())
+    return;
+
+  m_SelState.Reset();
+  Refresh();
 }
 
 bool CFX_Edit::IsSelected() const {
-  return m_SelState.IsExist();
+  return !m_SelState.IsEmpty();
 }
 
 CFX_PointF CFX_Edit::VTToEdit(const CFX_PointF& point) const {
   CFX_FloatRect rcContent = m_pVT->GetContentRect();
   CFX_FloatRect rcPlate = m_pVT->GetPlateRect();
 
-  FX_FLOAT fPadding = 0.0f;
+  float fPadding = 0.0f;
 
   switch (m_nAlignment) {
     case 0:
@@ -1291,7 +1036,7 @@ CFX_PointF CFX_Edit::EditToVT(const CFX_PointF& point) const {
   CFX_FloatRect rcContent = m_pVT->GetContentRect();
   CFX_FloatRect rcPlate = m_pVT->GetPlateRect();
 
-  FX_FLOAT fPadding = 0.0f;
+  float fPadding = 0.0f;
 
   switch (m_nAlignment) {
     case 0:
@@ -1318,21 +1063,27 @@ CFX_FloatRect CFX_Edit::VTToEdit(const CFX_FloatRect& rect) const {
 }
 
 void CFX_Edit::SetScrollInfo() {
-  if (m_pNotify) {
-    CFX_FloatRect rcPlate = m_pVT->GetPlateRect();
-    CFX_FloatRect rcContent = m_pVT->GetContentRect();
+  if (!m_pNotify)
+    return;
 
-    if (!m_bNotifyFlag) {
-      m_bNotifyFlag = true;
-      m_pNotify->IOnSetScrollInfoY(rcPlate.bottom, rcPlate.top,
-                                   rcContent.bottom, rcContent.top,
-                                   rcPlate.Height() / 3, rcPlate.Height());
-      m_bNotifyFlag = false;
-    }
-  }
+  CFX_FloatRect rcPlate = m_pVT->GetPlateRect();
+  CFX_FloatRect rcContent = m_pVT->GetContentRect();
+  if (m_bNotifyFlag)
+    return;
+
+  CFX_AutoRestorer<bool> restorer(&m_bNotifyFlag);
+  m_bNotifyFlag = true;
+
+  PWL_SCROLL_INFO Info;
+  Info.fPlateWidth = rcPlate.top - rcPlate.bottom;
+  Info.fContentMin = rcContent.bottom;
+  Info.fContentMax = rcContent.top;
+  Info.fSmallStep = rcPlate.Height() / 3;
+  Info.fBigStep = rcPlate.Height();
+  m_pNotify->SetScrollInfo(Info);
 }
 
-void CFX_Edit::SetScrollPosX(FX_FLOAT fx) {
+void CFX_Edit::SetScrollPosX(float fx) {
   if (!m_bEnableScroll)
     return;
 
@@ -1344,7 +1095,7 @@ void CFX_Edit::SetScrollPosX(FX_FLOAT fx) {
   }
 }
 
-void CFX_Edit::SetScrollPosY(FX_FLOAT fy) {
+void CFX_Edit::SetScrollPosY(float fy) {
   if (!m_bEnableScroll)
     return;
 
@@ -1355,9 +1106,9 @@ void CFX_Edit::SetScrollPosY(FX_FLOAT fy) {
 
       if (m_pNotify) {
         if (!m_bNotifyFlag) {
+          CFX_AutoRestorer<bool> restorer(&m_bNotifyFlag);
           m_bNotifyFlag = true;
-          m_pNotify->IOnSetScrollPosY(fy);
-          m_bNotifyFlag = false;
+          m_pNotify->SetScrollPosition(fy);
         }
       }
     }
@@ -1465,12 +1216,12 @@ void CFX_Edit::Refresh() {
 
     if (m_pNotify) {
       if (!m_bNotifyFlag) {
+        CFX_AutoRestorer<bool> restorer(&m_bNotifyFlag);
         m_bNotifyFlag = true;
         if (const CFX_Edit_RectArray* pRects = m_Refresh.GetRefreshRects()) {
           for (int32_t i = 0, sz = pRects->GetSize(); i < sz; i++)
-            m_pNotify->IOnInvalidateRect(pRects->GetAt(i));
+            m_pNotify->InvalidateRect(pRects->GetAt(i));
         }
-        m_bNotifyFlag = false;
       }
     }
 
@@ -1520,12 +1271,11 @@ void CFX_Edit::RefreshWordRange(const CPVT_WordRange& wr) {
 
   while (pIterator->NextWord()) {
     place = pIterator->GetAt();
-    if (place.WordCmp(wrTemp.EndPos) > 0)
+    if (place > wrTemp.EndPos)
       break;
 
     pIterator->GetWord(wordinfo);
     pIterator->GetLine(lineinfo);
-
     if (place.LineCmp(wrTemp.BeginPos) == 0 ||
         place.LineCmp(wrTemp.EndPos) == 0) {
       CFX_FloatRect rcWord(wordinfo.ptWord.x,
@@ -1535,10 +1285,10 @@ void CFX_Edit::RefreshWordRange(const CPVT_WordRange& wr) {
 
       if (m_pNotify) {
         if (!m_bNotifyFlag) {
+          CFX_AutoRestorer<bool> restorer(&m_bNotifyFlag);
           m_bNotifyFlag = true;
           CFX_FloatRect rcRefresh = VTToEdit(rcWord);
-          m_pNotify->IOnInvalidateRect(&rcRefresh);
-          m_bNotifyFlag = false;
+          m_pNotify->InvalidateRect(&rcRefresh);
         }
       }
     } else {
@@ -1549,10 +1299,10 @@ void CFX_Edit::RefreshWordRange(const CPVT_WordRange& wr) {
 
       if (m_pNotify) {
         if (!m_bNotifyFlag) {
+          CFX_AutoRestorer<bool> restorer(&m_bNotifyFlag);
           m_bNotifyFlag = true;
           CFX_FloatRect rcRefresh = VTToEdit(rcLine);
-          m_pNotify->IOnInvalidateRect(&rcRefresh);
-          m_bNotifyFlag = false;
+          m_pNotify->InvalidateRect(&rcRefresh);
         }
       }
 
@@ -1588,265 +1338,243 @@ void CFX_Edit::SetCaretInfo() {
         ptFoot.y = line.ptLine.y + line.fLineDescent;
       }
 
+      CFX_AutoRestorer<bool> restorer(&m_bNotifyFlag);
       m_bNotifyFlag = true;
-      m_pNotify->IOnSetCaret(!m_SelState.IsExist(), VTToEdit(ptHead),
-                             VTToEdit(ptFoot), m_wpCaret);
-      m_bNotifyFlag = false;
+      m_pNotify->SetCaret(m_SelState.IsEmpty(), VTToEdit(ptHead),
+                          VTToEdit(ptFoot));
     }
   }
 }
 
-void CFX_Edit::SetCaret(int32_t nPos) {
-  if (m_pVT->IsValid()) {
-    SelectNone();
-    SetCaret(m_pVT->WordIndexToWordPlace(nPos));
-    m_SelState.Set(m_wpCaret, m_wpCaret);
-
-    ScrollToCaret();
-    SetCaretOrigin();
-    SetCaretInfo();
-  }
-}
-
 void CFX_Edit::OnMouseDown(const CFX_PointF& point, bool bShift, bool bCtrl) {
-  if (m_pVT->IsValid()) {
-    SelectNone();
-    SetCaret(m_pVT->SearchWordPlace(EditToVT(point)));
-    m_SelState.Set(m_wpCaret, m_wpCaret);
+  if (!m_pVT->IsValid())
+    return;
 
-    ScrollToCaret();
-    SetCaretOrigin();
-    SetCaretInfo();
-  }
+  SelectNone();
+  SetCaret(m_pVT->SearchWordPlace(EditToVT(point)));
+  m_SelState.Set(m_wpCaret, m_wpCaret);
+  ScrollToCaret();
+  SetCaretOrigin();
+  SetCaretInfo();
 }
 
 void CFX_Edit::OnMouseMove(const CFX_PointF& point, bool bShift, bool bCtrl) {
-  if (m_pVT->IsValid()) {
-    SetCaret(m_pVT->SearchWordPlace(EditToVT(point)));
+  if (!m_pVT->IsValid())
+    return;
 
-    if (m_wpCaret != m_wpOldCaret) {
+  SetCaret(m_pVT->SearchWordPlace(EditToVT(point)));
+  if (m_wpCaret == m_wpOldCaret)
+    return;
+
+  m_SelState.SetEndPos(m_wpCaret);
+  ScrollToCaret();
+  Refresh();
+  SetCaretOrigin();
+  SetCaretInfo();
+}
+
+void CFX_Edit::OnVK_UP(bool bShift, bool bCtrl) {
+  if (!m_pVT->IsValid())
+    return;
+
+  SetCaret(m_pVT->GetUpWordPlace(m_wpCaret, m_ptCaret));
+  if (bShift) {
+    if (m_SelState.IsEmpty())
+      m_SelState.Set(m_wpOldCaret, m_wpCaret);
+    else
       m_SelState.SetEndPos(m_wpCaret);
 
+    if (m_wpOldCaret != m_wpCaret) {
       ScrollToCaret();
       Refresh();
+      SetCaretInfo();
+    }
+  } else {
+    SelectNone();
+    ScrollToCaret();
+    SetCaretInfo();
+  }
+}
+
+void CFX_Edit::OnVK_DOWN(bool bShift, bool bCtrl) {
+  if (!m_pVT->IsValid())
+    return;
+
+  SetCaret(m_pVT->GetDownWordPlace(m_wpCaret, m_ptCaret));
+  if (bShift) {
+    if (m_SelState.IsEmpty())
+      m_SelState.Set(m_wpOldCaret, m_wpCaret);
+    else
+      m_SelState.SetEndPos(m_wpCaret);
+
+    if (m_wpOldCaret != m_wpCaret) {
+      ScrollToCaret();
+      Refresh();
+      SetCaretInfo();
+    }
+  } else {
+    SelectNone();
+    ScrollToCaret();
+    SetCaretInfo();
+  }
+}
+
+void CFX_Edit::OnVK_LEFT(bool bShift, bool bCtrl) {
+  if (!m_pVT->IsValid())
+    return;
+
+  if (bShift) {
+    if (m_wpCaret == m_pVT->GetLineBeginPlace(m_wpCaret) &&
+        m_wpCaret != m_pVT->GetSectionBeginPlace(m_wpCaret)) {
+      SetCaret(m_pVT->GetPrevWordPlace(m_wpCaret));
+    }
+    SetCaret(m_pVT->GetPrevWordPlace(m_wpCaret));
+    if (m_SelState.IsEmpty())
+      m_SelState.Set(m_wpOldCaret, m_wpCaret);
+    else
+      m_SelState.SetEndPos(m_wpCaret);
+
+    if (m_wpOldCaret != m_wpCaret) {
+      ScrollToCaret();
+      Refresh();
+      SetCaretInfo();
+    }
+  } else {
+    if (!m_SelState.IsEmpty()) {
+      if (m_SelState.BeginPos < m_SelState.EndPos)
+        SetCaret(m_SelState.BeginPos);
+      else
+        SetCaret(m_SelState.EndPos);
+
+      SelectNone();
+      ScrollToCaret();
+      SetCaretInfo();
+    } else {
+      if (m_wpCaret == m_pVT->GetLineBeginPlace(m_wpCaret) &&
+          m_wpCaret != m_pVT->GetSectionBeginPlace(m_wpCaret)) {
+        SetCaret(m_pVT->GetPrevWordPlace(m_wpCaret));
+      }
+      SetCaret(m_pVT->GetPrevWordPlace(m_wpCaret));
+      ScrollToCaret();
       SetCaretOrigin();
       SetCaretInfo();
     }
   }
 }
 
-void CFX_Edit::OnVK_UP(bool bShift, bool bCtrl) {
-  if (m_pVT->IsValid()) {
-    SetCaret(m_pVT->GetUpWordPlace(m_wpCaret, m_ptCaret));
-
-    if (bShift) {
-      if (m_SelState.IsExist())
-        m_SelState.SetEndPos(m_wpCaret);
-      else
-        m_SelState.Set(m_wpOldCaret, m_wpCaret);
-
-      if (m_wpOldCaret != m_wpCaret) {
-        ScrollToCaret();
-        Refresh();
-        SetCaretInfo();
-      }
-    } else {
-      SelectNone();
-
-      ScrollToCaret();
-      SetCaretInfo();
-    }
-  }
-}
-
-void CFX_Edit::OnVK_DOWN(bool bShift, bool bCtrl) {
-  if (m_pVT->IsValid()) {
-    SetCaret(m_pVT->GetDownWordPlace(m_wpCaret, m_ptCaret));
-
-    if (bShift) {
-      if (m_SelState.IsExist())
-        m_SelState.SetEndPos(m_wpCaret);
-      else
-        m_SelState.Set(m_wpOldCaret, m_wpCaret);
-
-      if (m_wpOldCaret != m_wpCaret) {
-        ScrollToCaret();
-        Refresh();
-        SetCaretInfo();
-      }
-    } else {
-      SelectNone();
-
-      ScrollToCaret();
-      SetCaretInfo();
-    }
-  }
-}
-
-void CFX_Edit::OnVK_LEFT(bool bShift, bool bCtrl) {
-  if (m_pVT->IsValid()) {
-    if (bShift) {
-      if (m_wpCaret == m_pVT->GetLineBeginPlace(m_wpCaret) &&
-          m_wpCaret != m_pVT->GetSectionBeginPlace(m_wpCaret))
-        SetCaret(m_pVT->GetPrevWordPlace(m_wpCaret));
-
-      SetCaret(m_pVT->GetPrevWordPlace(m_wpCaret));
-
-      if (m_SelState.IsExist())
-        m_SelState.SetEndPos(m_wpCaret);
-      else
-        m_SelState.Set(m_wpOldCaret, m_wpCaret);
-
-      if (m_wpOldCaret != m_wpCaret) {
-        ScrollToCaret();
-        Refresh();
-        SetCaretInfo();
-      }
-    } else {
-      if (m_SelState.IsExist()) {
-        if (m_SelState.BeginPos.WordCmp(m_SelState.EndPos) < 0)
-          SetCaret(m_SelState.BeginPos);
-        else
-          SetCaret(m_SelState.EndPos);
-
-        SelectNone();
-        ScrollToCaret();
-        SetCaretInfo();
-      } else {
-        if (m_wpCaret == m_pVT->GetLineBeginPlace(m_wpCaret) &&
-            m_wpCaret != m_pVT->GetSectionBeginPlace(m_wpCaret))
-          SetCaret(m_pVT->GetPrevWordPlace(m_wpCaret));
-
-        SetCaret(m_pVT->GetPrevWordPlace(m_wpCaret));
-
-        ScrollToCaret();
-        SetCaretOrigin();
-        SetCaretInfo();
-      }
-    }
-  }
-}
-
 void CFX_Edit::OnVK_RIGHT(bool bShift, bool bCtrl) {
-  if (m_pVT->IsValid()) {
-    if (bShift) {
+  if (!m_pVT->IsValid())
+    return;
+
+  if (bShift) {
+    SetCaret(m_pVT->GetNextWordPlace(m_wpCaret));
+    if (m_wpCaret == m_pVT->GetLineEndPlace(m_wpCaret) &&
+        m_wpCaret != m_pVT->GetSectionEndPlace(m_wpCaret))
       SetCaret(m_pVT->GetNextWordPlace(m_wpCaret));
 
-      if (m_wpCaret == m_pVT->GetLineEndPlace(m_wpCaret) &&
-          m_wpCaret != m_pVT->GetSectionEndPlace(m_wpCaret))
-        SetCaret(m_pVT->GetNextWordPlace(m_wpCaret));
+    if (m_SelState.IsEmpty())
+      m_SelState.Set(m_wpOldCaret, m_wpCaret);
+    else
+      m_SelState.SetEndPos(m_wpCaret);
 
-      if (m_SelState.IsExist())
-        m_SelState.SetEndPos(m_wpCaret);
+    if (m_wpOldCaret != m_wpCaret) {
+      ScrollToCaret();
+      Refresh();
+      SetCaretInfo();
+    }
+  } else {
+    if (!m_SelState.IsEmpty()) {
+      if (m_SelState.BeginPos > m_SelState.EndPos)
+        SetCaret(m_SelState.BeginPos);
       else
-        m_SelState.Set(m_wpOldCaret, m_wpCaret);
+        SetCaret(m_SelState.EndPos);
 
-      if (m_wpOldCaret != m_wpCaret) {
-        ScrollToCaret();
-        Refresh();
-        SetCaretInfo();
-      }
+      SelectNone();
+      ScrollToCaret();
+      SetCaretInfo();
     } else {
-      if (m_SelState.IsExist()) {
-        if (m_SelState.BeginPos.WordCmp(m_SelState.EndPos) > 0)
-          SetCaret(m_SelState.BeginPos);
-        else
-          SetCaret(m_SelState.EndPos);
-
-        SelectNone();
-        ScrollToCaret();
-        SetCaretInfo();
-      } else {
+      SetCaret(m_pVT->GetNextWordPlace(m_wpCaret));
+      if (m_wpCaret == m_pVT->GetLineEndPlace(m_wpCaret) &&
+          m_wpCaret != m_pVT->GetSectionEndPlace(m_wpCaret)) {
         SetCaret(m_pVT->GetNextWordPlace(m_wpCaret));
-
-        if (m_wpCaret == m_pVT->GetLineEndPlace(m_wpCaret) &&
-            m_wpCaret != m_pVT->GetSectionEndPlace(m_wpCaret))
-          SetCaret(m_pVT->GetNextWordPlace(m_wpCaret));
-
-        ScrollToCaret();
-        SetCaretOrigin();
-        SetCaretInfo();
       }
+      ScrollToCaret();
+      SetCaretOrigin();
+      SetCaretInfo();
     }
   }
 }
 
 void CFX_Edit::OnVK_HOME(bool bShift, bool bCtrl) {
-  if (m_pVT->IsValid()) {
-    if (bShift) {
+  if (!m_pVT->IsValid())
+    return;
+
+  if (bShift) {
+    if (bCtrl)
+      SetCaret(m_pVT->GetBeginWordPlace());
+    else
+      SetCaret(m_pVT->GetLineBeginPlace(m_wpCaret));
+
+    if (m_SelState.IsEmpty())
+      m_SelState.Set(m_wpOldCaret, m_wpCaret);
+    else
+      m_SelState.SetEndPos(m_wpCaret);
+
+    ScrollToCaret();
+    Refresh();
+    SetCaretInfo();
+  } else {
+    if (!m_SelState.IsEmpty()) {
+      SetCaret(std::min(m_SelState.BeginPos, m_SelState.EndPos));
+      SelectNone();
+      ScrollToCaret();
+      SetCaretInfo();
+    } else {
       if (bCtrl)
         SetCaret(m_pVT->GetBeginWordPlace());
       else
         SetCaret(m_pVT->GetLineBeginPlace(m_wpCaret));
 
-      if (m_SelState.IsExist())
-        m_SelState.SetEndPos(m_wpCaret);
-      else
-        m_SelState.Set(m_wpOldCaret, m_wpCaret);
-
       ScrollToCaret();
-      Refresh();
+      SetCaretOrigin();
       SetCaretInfo();
-    } else {
-      if (m_SelState.IsExist()) {
-        if (m_SelState.BeginPos.WordCmp(m_SelState.EndPos) < 0)
-          SetCaret(m_SelState.BeginPos);
-        else
-          SetCaret(m_SelState.EndPos);
-
-        SelectNone();
-        ScrollToCaret();
-        SetCaretInfo();
-      } else {
-        if (bCtrl)
-          SetCaret(m_pVT->GetBeginWordPlace());
-        else
-          SetCaret(m_pVT->GetLineBeginPlace(m_wpCaret));
-
-        ScrollToCaret();
-        SetCaretOrigin();
-        SetCaretInfo();
-      }
     }
   }
 }
 
 void CFX_Edit::OnVK_END(bool bShift, bool bCtrl) {
-  if (m_pVT->IsValid()) {
-    if (bShift) {
+  if (!m_pVT->IsValid())
+    return;
+
+  if (bShift) {
+    if (bCtrl)
+      SetCaret(m_pVT->GetEndWordPlace());
+    else
+      SetCaret(m_pVT->GetLineEndPlace(m_wpCaret));
+
+    if (m_SelState.IsEmpty())
+      m_SelState.Set(m_wpOldCaret, m_wpCaret);
+    else
+      m_SelState.SetEndPos(m_wpCaret);
+
+    ScrollToCaret();
+    Refresh();
+    SetCaretInfo();
+  } else {
+    if (!m_SelState.IsEmpty()) {
+      SetCaret(std::max(m_SelState.BeginPos, m_SelState.EndPos));
+      SelectNone();
+      ScrollToCaret();
+      SetCaretInfo();
+    } else {
       if (bCtrl)
         SetCaret(m_pVT->GetEndWordPlace());
       else
         SetCaret(m_pVT->GetLineEndPlace(m_wpCaret));
 
-      if (m_SelState.IsExist())
-        m_SelState.SetEndPos(m_wpCaret);
-      else
-        m_SelState.Set(m_wpOldCaret, m_wpCaret);
-
       ScrollToCaret();
-      Refresh();
+      SetCaretOrigin();
       SetCaretInfo();
-    } else {
-      if (m_SelState.IsExist()) {
-        if (m_SelState.BeginPos.WordCmp(m_SelState.EndPos) > 0)
-          SetCaret(m_SelState.BeginPos);
-        else
-          SetCaret(m_SelState.EndPos);
-
-        SelectNone();
-        ScrollToCaret();
-        SetCaretInfo();
-      } else {
-        if (bCtrl)
-          SetCaret(m_pVT->GetEndWordPlace());
-        else
-          SetCaret(m_pVT->GetLineEndPlace(m_wpCaret));
-
-        ScrollToCaret();
-        SetCaretOrigin();
-        SetCaretInfo();
-      }
     }
   }
 }
@@ -1928,7 +1656,7 @@ bool CFX_Edit::Backspace(bool bAddUndo, bool bPaint) {
     return false;
 
   if (bAddUndo && m_bEnableUndo) {
-    if (m_wpCaret.SecCmp(m_wpOldCaret) != 0) {
+    if (m_wpCaret.nSecIndex != m_wpOldCaret.nSecIndex) {
       AddEditUndoItem(pdfium::MakeUnique<CFXEU_Backspace>(
           this, m_wpOldCaret, m_wpCaret, word.Word, word.nCharset,
           section.SecProps, section.WordProps));
@@ -2003,7 +1731,7 @@ bool CFX_Edit::Empty() {
 }
 
 bool CFX_Edit::Clear(bool bAddUndo, bool bPaint) {
-  if (!m_pVT->IsValid() || !m_SelState.IsExist())
+  if (!m_pVT->IsValid() || m_SelState.IsEmpty())
     return false;
 
   CPVT_WordRange range = m_SelState.ConvertToWordRange();
@@ -2100,13 +1828,6 @@ void CFX_Edit::SetCaretOrigin() {
     m_ptCaret.x = line.ptLine.x;
     m_ptCaret.y = line.ptLine.y;
   }
-}
-
-int32_t CFX_Edit::WordPlaceToWordIndex(const CPVT_WordPlace& place) const {
-  if (m_pVT->IsValid())
-    return m_pVT->WordPlaceToWordIndex(place);
-
-  return -1;
 }
 
 CPVT_WordPlace CFX_Edit::WordIndexToWordPlace(int32_t index) const {
@@ -2210,10 +1931,7 @@ int32_t CFX_Edit::GetCharSetFromUnicode(uint16_t word, int32_t nOldCharset) {
 
 void CFX_Edit::AddEditUndoItem(
     std::unique_ptr<CFX_Edit_UndoItem> pEditUndoItem) {
-  if (m_pGroupUndoItem)
-    m_pGroupUndoItem->AddUndoItem(std::move(pEditUndoItem));
-  else
-    m_Undo.AddItem(std::move(pEditUndoItem));
+  m_Undo.AddItem(std::move(pEditUndoItem));
 }
 
 CFX_Edit_LineRectArray::CFX_Edit_LineRectArray() {}
@@ -2242,11 +1960,6 @@ CFX_Edit_LineRect* CFX_Edit_LineRectArray::GetAt(int32_t nIndex) const {
 
 CFX_Edit_Select::CFX_Edit_Select() {}
 
-CFX_Edit_Select::CFX_Edit_Select(const CPVT_WordPlace& begin,
-                                 const CPVT_WordPlace& end) {
-  Set(begin, end);
-}
-
 CFX_Edit_Select::CFX_Edit_Select(const CPVT_WordRange& range) {
   Set(range.BeginPos, range.EndPos);
 }
@@ -2255,9 +1968,9 @@ CPVT_WordRange CFX_Edit_Select::ConvertToWordRange() const {
   return CPVT_WordRange(BeginPos, EndPos);
 }
 
-void CFX_Edit_Select::Default() {
-  BeginPos.Default();
-  EndPos.Default();
+void CFX_Edit_Select::Reset() {
+  BeginPos.Reset();
+  EndPos.Reset();
 }
 
 void CFX_Edit_Select::Set(const CPVT_WordPlace& begin,
@@ -2266,16 +1979,12 @@ void CFX_Edit_Select::Set(const CPVT_WordPlace& begin,
   EndPos = end;
 }
 
-void CFX_Edit_Select::SetBeginPos(const CPVT_WordPlace& begin) {
-  BeginPos = begin;
-}
-
 void CFX_Edit_Select::SetEndPos(const CPVT_WordPlace& end) {
   EndPos = end;
 }
 
-bool CFX_Edit_Select::IsExist() const {
-  return BeginPos != EndPos;
+bool CFX_Edit_Select::IsEmpty() const {
+  return BeginPos == EndPos;
 }
 
 CFX_Edit_RectArray::CFX_Edit_RectArray() {}

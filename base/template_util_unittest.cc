@@ -30,39 +30,6 @@ static_assert(!is_non_const_reference<const int&>::value,
               "IsNonConstReference");
 static_assert(is_non_const_reference<int&>::value, "IsNonConstReference");
 
-class AssignParent {};
-class AssignChild : AssignParent {};
-
-// is_assignable<Type1, Type2>
-static_assert(!is_assignable<int, int>::value, "IsAssignable");  // 1 = 1;
-static_assert(!is_assignable<int, double>::value, "IsAssignable");
-static_assert(is_assignable<int&, int>::value, "IsAssignable");
-static_assert(is_assignable<int&, double>::value, "IsAssignable");
-static_assert(is_assignable<int&, int&>::value, "IsAssignable");
-static_assert(is_assignable<int&, int const&>::value, "IsAssignable");
-static_assert(!is_assignable<int const&, int>::value, "IsAssignable");
-static_assert(!is_assignable<AssignParent&, AssignChild>::value,
-              "IsAssignable");
-static_assert(!is_assignable<AssignChild&, AssignParent>::value,
-              "IsAssignable");
-
-struct AssignCopy {};
-struct AssignNoCopy {
-  AssignNoCopy& operator=(AssignNoCopy&&) { return *this; }
-  AssignNoCopy& operator=(const AssignNoCopy&) = delete;
-};
-struct AssignNoMove {
-  AssignNoMove& operator=(AssignNoMove&&) = delete;
-  AssignNoMove& operator=(const AssignNoMove&) = delete;
-};
-
-static_assert(is_copy_assignable<AssignCopy>::value, "IsCopyAssignable");
-static_assert(!is_copy_assignable<AssignNoCopy>::value, "IsCopyAssignable");
-
-static_assert(is_move_assignable<AssignCopy>::value, "IsMoveAssignable");
-static_assert(is_move_assignable<AssignNoCopy>::value, "IsMoveAssignable");
-static_assert(!is_move_assignable<AssignNoMove>::value, "IsMoveAssignable");
-
 // A few standard types that definitely support printing.
 static_assert(internal::SupportsOstreamOperator<int>::value,
               "ints should be printable");
@@ -102,28 +69,26 @@ static_assert(
     internal::SupportsOstreamOperator<const StructWithOperator&>::value,
     "struct with operator<< should be printable by const ref");
 
-// underlying type of enums
-static_assert(std::is_integral<underlying_type<SimpleEnum>::type>::value,
-              "simple enum must have some integral type");
-static_assert(
-    std::is_same<underlying_type<EnumWithExplicitType>::type, uint64_t>::value,
-    "explicit type must be detected");
-static_assert(std::is_same<underlying_type<ScopedEnum>::type, int>::value,
-              "scoped enum defaults to int");
+// base::is_trivially_copyable
+class TrivialCopy {
+ public:
+  TrivialCopy(int d) : data_(d) {}
 
-struct TriviallyDestructible {
-  int field;
+ protected:
+  int data_;
 };
 
-class NonTriviallyDestructible {
-  ~NonTriviallyDestructible() {}
+class TrivialCopyButWithDestructor : public TrivialCopy {
+ public:
+  TrivialCopyButWithDestructor(int d) : TrivialCopy(d) {}
+  ~TrivialCopyButWithDestructor() { data_ = 0; }
 };
 
-static_assert(is_trivially_destructible<int>::value, "IsTriviallyDestructible");
-static_assert(is_trivially_destructible<TriviallyDestructible>::value,
-              "IsTriviallyDestructible");
-static_assert(!is_trivially_destructible<NonTriviallyDestructible>::value,
-              "IsTriviallyDestructible");
+static_assert(base::is_trivially_copyable<TrivialCopy>::value,
+              "TrivialCopy should be detected as trivially copyable");
+static_assert(!base::is_trivially_copyable<TrivialCopyButWithDestructor>::value,
+              "TrivialCopyButWithDestructor should not be detected as "
+              "trivially copyable");
 
 }  // namespace
 }  // namespace base

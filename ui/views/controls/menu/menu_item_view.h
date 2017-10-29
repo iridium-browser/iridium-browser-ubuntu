@@ -222,6 +222,9 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Returns the view containing child menu items.
   virtual SubmenuView* GetSubmenu() const;
 
+  // Returns true if this menu item has a submenu and it is showing
+  virtual bool SubmenuIsShowing() const;
+
   // Returns the parent menu item.
   MenuItemView* GetParentMenuItem() { return parent_menu_item_; }
   const MenuItemView* GetParentMenuItem() const { return parent_menu_item_; }
@@ -270,7 +273,7 @@ class VIEWS_EXPORT MenuItemView : public View {
   void OnPaint(gfx::Canvas* canvas) override;
 
   // Returns the preferred size of this item.
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
 
   // Gets the preferred height for the given |width|. This is only different
   // from GetPreferredSize().width() if the item has a child view with flexible

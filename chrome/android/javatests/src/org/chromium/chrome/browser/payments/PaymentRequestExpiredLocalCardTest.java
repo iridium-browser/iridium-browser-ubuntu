@@ -7,12 +7,22 @@ package org.chromium.chrome.browser.payments;
 import android.content.DialogInterface;
 import android.support.test.filters.MediumTest;
 
-import org.chromium.base.test.util.DisabledTest;
+import org.junit.Assert;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
+import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
+import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.Calendar;
 import java.util.concurrent.ExecutionException;
@@ -21,10 +31,15 @@ import java.util.concurrent.TimeoutException;
 /**
  * A payment integration test for a user that pays with an expired local credit card.
  */
-public class PaymentRequestExpiredLocalCardTest extends PaymentRequestTestBase {
-    public PaymentRequestExpiredLocalCardTest() {
-        super("payment_request_free_shipping_test.html");
-    }
+@RunWith(ChromeJUnit4ClassRunner.class)
+@CommandLineFlags.Add({
+        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
+})
+public class PaymentRequestExpiredLocalCardTest implements MainActivityStartCallback {
+    @Rule
+    public PaymentRequestTestRule mRule =
+            new PaymentRequestTestRule("payment_request_free_shipping_test.html", this);
 
     AutofillTestHelper mHelper;
     String mCreditCardId;
@@ -39,8 +54,8 @@ public class PaymentRequestExpiredLocalCardTest extends PaymentRequestTestBase {
                 "US", "555-555-5555", "", "en-US"));
         // Create an expired credit card
         mCreditCardId = mHelper.setCreditCard(new CreditCard("", "https://example.com", true, true,
-                "Jon Doe", "4111111111111111", "1111", "1", "2016", "visa", R.drawable.pr_visa,
-                billingAddressId, "" /* serverId */));
+                "Jon Doe", "4111111111111111", "1111", "1", "2016", "visa", R.drawable.visa_card,
+                CardType.UNKNOWN, billingAddressId, "" /* serverId */));
     }
 
     /**
@@ -48,18 +63,19 @@ public class PaymentRequestExpiredLocalCardTest extends PaymentRequestTestBase {
      * credit card is expired. Also tests that the user can pay once they have entered a new valid
      * expiration date and that merchant receives the updated data.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testPayWithExpiredCard_ValidExpiration()
             throws InterruptedException, ExecutionException, TimeoutException {
-        triggerUIAndWait(mReadyToPay);
-        clickAndWait(R.id.button_primary, mReadyForUnmaskInput);
-        setTextInExpiredCardUnmaskDialogAndWait(
+        mRule.triggerUIAndWait(mRule.getReadyToPay());
+        mRule.clickAndWait(R.id.button_primary, mRule.getReadyForUnmaskInput());
+        mRule.setTextInExpiredCardUnmaskDialogAndWait(
                 new int[] {R.id.expiration_month, R.id.expiration_year, R.id.card_unmask_input},
-                new String[] {"11", "26", "123"}, mReadyToUnmask);
-        clickCardUnmaskButtonAndWait(DialogInterface.BUTTON_POSITIVE, mDismissed);
-        expectResultContains(new String[] {"Jon Doe", "4111111111111111", "11", "2026", "visa",
-                "123", "Google", "340 Main St", "CA", "Los Angeles", "90291", "US", "en",
+                new String[] {"11", "26", "123"}, mRule.getReadyToUnmask());
+        mRule.clickCardUnmaskButtonAndWait(DialogInterface.BUTTON_POSITIVE, mRule.getDismissed());
+        mRule.expectResultContains(new String[] {"Jon Doe", "4111111111111111", "11", "2026",
+                "visa", "123", "Google", "340 Main St", "CA", "Los Angeles", "90291", "US", "en",
                 "freeShippingOption"});
     }
 
@@ -67,26 +83,28 @@ public class PaymentRequestExpiredLocalCardTest extends PaymentRequestTestBase {
      * Tests that the new expiration date entered in the unmasking prompt for an expired card
      * overwrites that card's old expiration date.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testPayWithExpiredCard_NewExpirationSaved()
             throws InterruptedException, ExecutionException, TimeoutException {
-        triggerUIAndWait(mReadyToPay);
-        clickAndWait(R.id.button_primary, mReadyForUnmaskInput);
-        setTextInExpiredCardUnmaskDialogAndWait(
+        mRule.triggerUIAndWait(mRule.getReadyToPay());
+        mRule.clickAndWait(R.id.button_primary, mRule.getReadyForUnmaskInput());
+        mRule.setTextInExpiredCardUnmaskDialogAndWait(
                 new int[] {R.id.expiration_month, R.id.expiration_year, R.id.card_unmask_input},
-                new String[] {"11", "26", "123"}, mReadyToUnmask);
-        clickCardUnmaskButtonAndWait(DialogInterface.BUTTON_POSITIVE, mDismissed);
+                new String[] {"11", "26", "123"}, mRule.getReadyToUnmask());
+        mRule.clickCardUnmaskButtonAndWait(DialogInterface.BUTTON_POSITIVE, mRule.getDismissed());
 
         // Make sure the new expiration date was saved.
         CreditCard storedCard = mHelper.getCreditCard(mCreditCardId);
-        assertEquals("11", storedCard.getMonth());
-        assertEquals("2026", storedCard.getYear());
+        Assert.assertEquals("11", storedCard.getMonth());
+        Assert.assertEquals("2026", storedCard.getYear());
     }
 
     /**
      * Tests that it is not possible to add an expired card in a payment request.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testCannotAddExpiredCard()
@@ -96,55 +114,56 @@ public class PaymentRequestExpiredLocalCardTest extends PaymentRequestTestBase {
         Calendar now = Calendar.getInstance();
         if (now.get(Calendar.MONTH) == 0) return;
 
-        triggerUIAndWait(mReadyToPay);
+        mRule.triggerUIAndWait(mRule.getReadyToPay());
 
         // Try to add an expired card.
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickInPaymentMethodAndWait(R.id.payments_add_option_button, mReadyToEdit);
+        mRule.clickInPaymentMethodAndWait(R.id.payments_section, mRule.getReadyForInput());
+        mRule.clickInPaymentMethodAndWait(R.id.payments_add_option_button, mRule.getReadyToEdit());
         // Set the expiration date to past month of the current year.
-        setSpinnerSelectionsInCardEditorAndWait(
-                new int[] {now.get(Calendar.MONTH) - 1, 0, 0}, mBillingAddressChangeProcessed);
-        setTextInCardEditorAndWait(new String[] {"4111111111111111", "Jon Doe"}, mEditorTextUpdate);
-        clickInCardEditorAndWait(R.id.payments_edit_done_button, mEditorValidationError);
+        mRule.setSpinnerSelectionsInCardEditorAndWait(new int[] {now.get(Calendar.MONTH) - 1, 0, 0},
+                mRule.getBillingAddressChangeProcessed());
+        mRule.setTextInCardEditorAndWait(
+                new String[] {"4111111111111111", "Jon Doe"}, mRule.getEditorTextUpdate());
+        mRule.clickInCardEditorAndWait(
+                R.id.payments_edit_done_button, mRule.getEditorValidationError());
 
         // Set the expiration date to the current month of the current year.
-        setSpinnerSelectionsInCardEditorAndWait(new int[] {now.get(Calendar.MONTH), 0, 0},
-                mExpirationMonthChange);
+        mRule.setSpinnerSelectionsInCardEditorAndWait(
+                new int[] {now.get(Calendar.MONTH), 0, 0}, mRule.getExpirationMonthChange());
 
-        clickInCardEditorAndWait(R.id.payments_edit_done_button, mReadyToPay);
+        mRule.clickInCardEditorAndWait(R.id.payments_edit_done_button, mRule.getReadyToPay());
     }
 
     /**
      * Tests the different card unmask error messages for an expired card.
      */
-    // @MediumTest
-    // @Feature({"Payments"})
-    // See: crbug.com/687438.
-    @DisabledTest
+    @MediumTest
+    @Feature({"Payments"})
+    @Test
     public void testPromptErrorMessages()
             throws InterruptedException, ExecutionException, TimeoutException {
         // Click pay to get to the card unmask prompt.
-        triggerUIAndWait(mReadyToPay);
-        clickAndWait(R.id.button_primary, mReadyForUnmaskInput);
+        mRule.triggerUIAndWait(mRule.getReadyToPay());
+        mRule.clickAndWait(R.id.button_primary, mRule.getReadyForUnmaskInput());
 
         // Set valid arguments.
-        setTextInExpiredCardUnmaskDialogAndWait(
+        mRule.setTextInExpiredCardUnmaskDialogAndWait(
                 new int[] {R.id.expiration_month, R.id.expiration_year, R.id.card_unmask_input},
-                new String[] {"10", "26", "123"}, mUnmaskValidationDone);
-        assertTrue(getUnmaskPromptErrorMessage().equals(""));
+                new String[] {"10", "26", "123"}, mRule.getUnmaskValidationDone());
+        Assert.assertTrue(mRule.getUnmaskPromptErrorMessage().equals(""));
 
         // Set an invalid expiration month.
-        setTextInExpiredCardUnmaskDialogAndWait(
+        mRule.setTextInExpiredCardUnmaskDialogAndWait(
                 new int[] {R.id.expiration_month, R.id.expiration_year, R.id.card_unmask_input},
-                new String[] {"99", "25", "123"}, mUnmaskValidationDone);
-        assertTrue(getUnmaskPromptErrorMessage().equals(
+                new String[] {"99", "25", "123"}, mRule.getUnmaskValidationDone());
+        Assert.assertTrue(mRule.getUnmaskPromptErrorMessage().equals(
                 "Check your expiration month and try again"));
 
         // Set an invalid expiration year.
-        setTextInExpiredCardUnmaskDialogAndWait(
+        mRule.setTextInExpiredCardUnmaskDialogAndWait(
                 new int[] {R.id.expiration_month, R.id.expiration_year, R.id.card_unmask_input},
-                new String[] {"10", "14", "123"}, mUnmaskValidationDone);
-        assertTrue(getUnmaskPromptErrorMessage().equals(
+                new String[] {"10", "14", "123"}, mRule.getUnmaskValidationDone());
+        Assert.assertTrue(mRule.getUnmaskPromptErrorMessage().equals(
                 "Check your expiration year and try again"));
 
         // If the current date is in January skip this test. It is not possible to select an expired
@@ -154,18 +173,39 @@ public class PaymentRequestExpiredLocalCardTest extends PaymentRequestTestBase {
             String twoDigitsYear = Integer.toString(now.get(Calendar.YEAR)).substring(2);
 
             // Set an invalid expiration year.
-            setTextInExpiredCardUnmaskDialogAndWait(
+            mRule.setTextInExpiredCardUnmaskDialogAndWait(
                     new int[] {R.id.expiration_month, R.id.expiration_year, R.id.card_unmask_input},
-                    new String[] {Integer.toString(now.get(Calendar.MONTH) - 1), twoDigitsYear,
-                            "123"}, mUnmaskValidationDone);
-            assertTrue(getUnmaskPromptErrorMessage().equals(
+                    new String[] {
+                            Integer.toString(now.get(Calendar.MONTH) - 1), twoDigitsYear, "123"},
+                    mRule.getUnmaskValidationDone());
+            Assert.assertTrue(mRule.getUnmaskPromptErrorMessage().equals(
                     "Check your expiration date and try again"));
         }
 
         // Set valid arguments again.
-        setTextInExpiredCardUnmaskDialogAndWait(
+        mRule.setTextInExpiredCardUnmaskDialogAndWait(
                 new int[] {R.id.expiration_month, R.id.expiration_year, R.id.card_unmask_input},
-                new String[] {"10", "26", "123"}, mUnmaskValidationDone);
-        assertTrue(getUnmaskPromptErrorMessage().equals(""));
+                new String[] {"10", "26", "123"}, mRule.getUnmaskValidationDone());
+        Assert.assertTrue(mRule.getUnmaskPromptErrorMessage().equals(""));
+    }
+
+    /**
+     * Tests that hitting "submit" on the software keyboard in the CVC number field will submit the
+     * CVC unmask dialog.
+     */
+    @MediumTest
+    @Feature({"Payments"})
+    @Test
+    public void testSoftwareKeyboardSubmitInCvcNumberField()
+            throws InterruptedException, ExecutionException, TimeoutException {
+        mRule.triggerUIAndWait(mRule.getReadyToPay());
+        mRule.clickAndWait(R.id.button_primary, mRule.getReadyForUnmaskInput());
+
+        // Set valid arguments.
+        mRule.setTextInExpiredCardUnmaskDialogAndWait(
+                new int[] {R.id.expiration_month, R.id.expiration_year, R.id.card_unmask_input},
+                new String[] {"10", "26", "123"}, mRule.getReadyToUnmask());
+
+        mRule.hitSoftwareKeyboardSubmitButtonAndWait(R.id.card_unmask_input, mRule.getDismissed());
     }
 }

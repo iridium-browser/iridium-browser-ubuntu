@@ -17,7 +17,7 @@ Linux, Macintosh and Windows
 
 The Viewer can be built using the regular GN build process, e.g.
 
-    gn gen out/Release --args='is_debug=false'
+    bin/gn gen out/Release --args='is_debug=false'
     ninja -C out/Release viewer
 
 Android
@@ -26,9 +26,12 @@ The Viewer APK must be built by gradle which can be invoked on the command line 
 
     ./platform_tools/android/bin/android_build_app -C <out_dir> viewer
 
-*   **out_dir** is the ninja out directory that you want to use to build the app
+*   **out_dir** is the ninja out directory for android (e.g., `out/arm64`) that you want to use to
+build the app
 
 Upon completion of the script the APK can be found at <out_dir>/viewer.apk
+
+To load SKPs in the Android viewer place them in /data/local/tmp/skps.
 
 iOS
 ---

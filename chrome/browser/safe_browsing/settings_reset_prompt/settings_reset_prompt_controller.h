@@ -13,6 +13,7 @@
 #include "base/time/time.h"
 #include "ui/gfx/range/range.h"
 
+class BrandcodedDefaultSettings;
 class Browser;
 
 namespace safe_browsing {
@@ -28,8 +29,9 @@ class SettingsResetPromptController {
  public:
   // A controller should be created only if |model->ShouldPromptforReset()|
   // is true.
-  explicit SettingsResetPromptController(
-      std::unique_ptr<SettingsResetPromptModel> model);
+  SettingsResetPromptController(
+      std::unique_ptr<SettingsResetPromptModel> model,
+      std::unique_ptr<BrandcodedDefaultSettings> default_settings);
 
   static void ShowSettingsResetPrompt(
       Browser* browser,
@@ -48,9 +50,13 @@ class SettingsResetPromptController {
   // |Accept()| will be called by the dialog when the user clicks the main
   // button, after which the dialog will be closed.
   void Accept();
-  // |Cancel()| will be called by the dialog when the user clicks the dismiss
-  // button on the top right, after which the dialog will be closed.
+  // |Cancel()| will be called by the dialog when the user clicks the cancel
+  // button, after which the dialog will be closed.
   void Cancel();
+  // |Close()| will be called by the dialog when the user dismisses the dialog,
+  // for example by clicking the x in the top right corner or by pressing the
+  // Escape key.
+  void Close();
 
  private:
   ~SettingsResetPromptController();
@@ -61,6 +67,7 @@ class SettingsResetPromptController {
   void OnInteractionDone();
 
   std::unique_ptr<SettingsResetPromptModel> model_;
+  std::unique_ptr<BrandcodedDefaultSettings> default_settings_;
   base::string16 main_text_;
   gfx::Range main_text_url_range_;
 
@@ -75,6 +82,23 @@ class SettingsResetPromptController {
 // the dialog after a delay as determined by the |kSettingsResetPrompt|
 // feature parameters.
 void MaybeShowSettingsResetPromptWithDelay();
+
+// Delegate for MaybeShowSettingsResetPromptWithDelay() that can be overriden
+// by tests that only want to check if the flow for the settings reset prompt
+// will be initiated.
+class SettingsResetPromptDelegate {
+ public:
+  SettingsResetPromptDelegate();
+  virtual ~SettingsResetPromptDelegate();
+
+  virtual void ShowSettingsResetPromptWithDelay() const = 0;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(SettingsResetPromptDelegate);
+};
+
+// Sets the global SettingsResetPromptDelegate, usually for testing.
+void SetSettingsResetPromptDelegate(SettingsResetPromptDelegate* delegate);
 
 }  // namespace safe_browsing
 

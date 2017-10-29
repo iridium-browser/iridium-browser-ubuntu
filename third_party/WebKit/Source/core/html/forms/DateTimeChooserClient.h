@@ -31,25 +31,26 @@
 #ifndef DateTimeChooserClient_h
 #define DateTimeChooserClient_h
 
+#include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
 class Element;
 
-class DateTimeChooserClient : public GarbageCollectedMixin {
+class CORE_EXPORT DateTimeChooserClient : public GarbageCollectedMixin {
  public:
   virtual ~DateTimeChooserClient();
   DEFINE_INLINE_VIRTUAL_TRACE() {}
 
-  virtual Element& ownerElement() const = 0;
+  virtual Element& OwnerElement() const = 0;
   // Called when user picked a value.
-  virtual void didChooseValue(const String&) = 0;
+  virtual void DidChooseValue(const String&) = 0;
   // Called when user picked a value.
-  virtual void didChooseValue(double) = 0;
+  virtual void DidChooseValue(double) = 0;
   // Called when chooser has ended.
-  virtual void didEndChooser() = 0;
+  virtual void DidEndChooser() = 0;
 };
 
 }  // namespace blink

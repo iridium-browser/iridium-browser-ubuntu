@@ -4,71 +4,23 @@
 
 #include "chrome/browser/ui/views/passwords/auto_signin_first_run_dialog_view.h"
 
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/passwords/password_dialog_controller.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/harmony/chrome_typography.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
-#include "ui/views/controls/button/md_text_button.h"
+#include "ui/views/border.h"
 #include "ui/views/controls/styled_label.h"
-#include "ui/views/layout/grid_layout.h"
-#include "ui/views/layout/layout_constants.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
-
-namespace {
-// An identifier for views::ColumnSet.
-enum ColumnSetType {
-  // | | (FILL, FILL) | |
-  SINGLE_VIEW_COLUMN_SET,
-
-  // | | (TRAILING, CENTER) | | (TRAILING, CENTER) | |
-  // Used for buttons at the bottom of the bubble which should nest at the
-  // bottom-right corner.
-  DOUBLE_BUTTON_COLUMN_SET,
-};
-
-// Construct an appropriate ColumnSet for the given |type|, and add it
-// to |layout|.
-void BuildColumnSet(views::GridLayout* layout, ColumnSetType type) {
-  views::ColumnSet* column_set = layout->AddColumnSet(type);
-  column_set->AddPaddingColumn(0, views::kButtonHEdgeMarginNew);
-  switch (type) {
-    case SINGLE_VIEW_COLUMN_SET:
-      column_set->AddColumn(views::GridLayout::FILL,
-                            views::GridLayout::FILL,
-                            1,
-                            views::GridLayout::USE_PREF,
-                            0,
-                            0);
-      break;
-    case DOUBLE_BUTTON_COLUMN_SET:
-      column_set->AddColumn(views::GridLayout::TRAILING,
-                            views::GridLayout::CENTER,
-                            1,
-                            views::GridLayout::USE_PREF,
-                            0,
-                            0);
-      column_set->AddPaddingColumn(0, views::kRelatedButtonHSpacing);
-      column_set->AddColumn(views::GridLayout::TRAILING,
-                            views::GridLayout::CENTER,
-                            0,
-                            views::GridLayout::USE_PREF,
-                            0,
-                            0);
-      break;
-  }
-  column_set->AddPaddingColumn(0, views::kButtonHEdgeMarginNew);
-}
-
-}  // namespace
 
 AutoSigninFirstRunDialogView::AutoSigninFirstRunDialogView(
     PasswordDialogController* controller,
     content::WebContents* web_contents)
-    : ok_button_(nullptr),
-      turn_off_button_(nullptr),
-      controller_(controller),
-      web_contents_(web_contents) {
+    : controller_(controller), web_contents_(web_contents), text_(nullptr) {
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::AUTO_SIGNIN_FIRST_RUN);
 }
 
 AutoSigninFirstRunDialogView::~AutoSigninFirstRunDialogView() {
@@ -92,17 +44,8 @@ base::string16 AutoSigninFirstRunDialogView::GetWindowTitle() const {
   return controller_->GetAutoSigninPromoTitle();
 }
 
-bool AutoSigninFirstRunDialogView::ShouldShowWindowTitle() const {
-  // The framework trims the title instead of resizing the dialog.
-  return false;
-}
-
 bool AutoSigninFirstRunDialogView::ShouldShowCloseButton() const {
   return false;
-}
-
-views::View* AutoSigninFirstRunDialogView::GetInitiallyFocusedView() {
-  return ok_button_;
 }
 
 void AutoSigninFirstRunDialogView::WindowClosing() {
@@ -110,24 +53,34 @@ void AutoSigninFirstRunDialogView::WindowClosing() {
     controller_->OnCloseDialog();
 }
 
-int AutoSigninFirstRunDialogView::GetDialogButtons() const {
-  // None because ESC is equivalent to Cancel. It shouldn't turn off the auto
-  // signin.
-  return ui::DIALOG_BUTTON_NONE;
+void AutoSigninFirstRunDialogView::OnNativeThemeChanged(
+    const ui::NativeTheme* theme) {
+  views::StyledLabel::RangeStyleInfo default_style;
+  default_style.color =
+      views::style::GetColor(CONTEXT_BODY_TEXT_LARGE, STYLE_SECONDARY, theme);
+  text_->SetDefaultStyle(default_style);
 }
 
-gfx::Size AutoSigninFirstRunDialogView::GetPreferredSize() const {
-  return gfx::Size(kDesiredWidth, GetHeightForWidth(kDesiredWidth));
+bool AutoSigninFirstRunDialogView::Cancel() {
+  controller_->OnAutoSigninTurnOff();
+  return true;
 }
 
-void AutoSigninFirstRunDialogView::ButtonPressed(views::Button* sender,
-                                                 const ui::Event& event) {
-  if (sender == ok_button_)
-    controller_->OnAutoSigninOK();
-  else if (sender == turn_off_button_)
-    controller_->OnAutoSigninTurnOff();
-  else
-    NOTREACHED();
+bool AutoSigninFirstRunDialogView::Accept() {
+  controller_->OnAutoSigninOK();
+  return true;
+}
+
+bool AutoSigninFirstRunDialogView::Close() {
+  // Do nothing rather than running Cancel(), which would turn off auto-signin.
+  return true;
+}
+
+base::string16 AutoSigninFirstRunDialogView::GetDialogButtonLabel(
+    ui::DialogButton button) const {
+  return l10n_util::GetStringUTF16(button == ui::DIALOG_BUTTON_OK
+                                       ? IDS_AUTO_SIGNIN_FIRST_RUN_OK
+                                       : IDS_AUTO_SIGNIN_FIRST_RUN_TURN_OFF);
 }
 
 void AutoSigninFirstRunDialogView::StyledLabelLinkClicked(
@@ -138,49 +91,22 @@ void AutoSigninFirstRunDialogView::StyledLabelLinkClicked(
 }
 
 void AutoSigninFirstRunDialogView::InitWindow() {
-  views::GridLayout* layout = new views::GridLayout(this);
-  SetLayoutManager(layout);
-  BuildColumnSet(layout, SINGLE_VIEW_COLUMN_SET);
+  SetBorder(
+      views::CreateEmptyBorder(ChromeLayoutProvider::Get()->GetInsetsMetric(
+          views::INSETS_DIALOG_CONTENTS)));
+  SetLayoutManager(new views::FillLayout());
 
-  // Title.
-  views::Label* title_label = new views::Label(GetWindowTitle());
-  title_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  title_label->SetFontList(ui::ResourceBundle::GetSharedInstance().GetFontList(
-      ui::ResourceBundle::MediumFont));
-  layout->StartRowWithPadding(0, SINGLE_VIEW_COLUMN_SET, 0, kTitleTopInset);
-  layout->AddView(title_label);
-
-  // Content.
   std::pair<base::string16, gfx::Range> text_content =
       controller_->GetAutoSigninText();
-  views::StyledLabel* content_label =
-      new views::StyledLabel(text_content.first, this);
-  content_label->SetBaseFontList(
-      ui::ResourceBundle::GetSharedInstance().GetFontList(
-          ui::ResourceBundle::SmallFont));
-  views::StyledLabel::RangeStyleInfo default_style;
-  default_style.color = kAutoSigninTextColor;
-  content_label->SetDefaultStyle(default_style);
+  text_ = new views::StyledLabel(text_content.first, this);
+  text_->SetBaseFontList(
+      views::style::GetFont(CONTEXT_BODY_TEXT_LARGE, STYLE_SECONDARY));
+  OnNativeThemeChanged(GetNativeTheme());
   if (!text_content.second.is_empty()) {
-    content_label->AddStyleRange(
-        text_content.second,
-        views::StyledLabel::RangeStyleInfo::CreateForLink());
+    text_->AddStyleRange(text_content.second,
+                         views::StyledLabel::RangeStyleInfo::CreateForLink());
   }
-  layout->StartRowWithPadding(0, SINGLE_VIEW_COLUMN_SET, 0,
-                              2 * views::kRelatedControlVerticalSpacing);
-  layout->AddView(content_label);
-
-  // Buttons.
-  BuildColumnSet(layout, DOUBLE_BUTTON_COLUMN_SET);
-  layout->StartRowWithPadding(0, DOUBLE_BUTTON_COLUMN_SET, 0,
-                              3 * views::kRelatedControlVerticalSpacing);
-  ok_button_ = views::MdTextButton::CreateSecondaryUiButton(
-      this, l10n_util::GetStringUTF16(IDS_AUTO_SIGNIN_FIRST_RUN_OK));
-  turn_off_button_ = views::MdTextButton::CreateSecondaryUiButton(
-      this, l10n_util::GetStringUTF16(IDS_AUTO_SIGNIN_FIRST_RUN_TURN_OFF));
-  layout->AddView(ok_button_);
-  layout->AddView(turn_off_button_);
-  layout->AddPaddingRow(0, views::kButtonVEdgeMarginNew);
+  AddChildView(text_);
 }
 
 AutoSigninFirstRunPrompt* CreateAutoSigninPromptView(

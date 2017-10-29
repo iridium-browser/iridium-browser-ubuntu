@@ -4,15 +4,19 @@
 
 #include "components/previews/core/previews_io_data.h"
 
+#include <algorithm>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram.h"
 #include "base/sequenced_task_runner.h"
+#include "base/strings/stringprintf.h"
 #include "base/time/default_clock.h"
 #include "components/previews/core/previews_black_list.h"
+#include "components/previews/core/previews_experiments.h"
 #include "components/previews/core/previews_opt_out_store.h"
 #include "components/previews/core/previews_ui_service.h"
 #include "net/base/load_flags.h"
@@ -27,15 +31,30 @@ namespace {
 
 void LogPreviewsEligibilityReason(PreviewsEligibilityReason status,
                                   PreviewsType type) {
+  int32_t max_limit = static_cast<int32_t>(PreviewsEligibilityReason::LAST);
+  base::LinearHistogram::FactoryGet(
+      base::StringPrintf("Previews.EligibilityReason.%s",
+                         GetStringNameForType(type).c_str()),
+      1, max_limit, max_limit + 1,
+      base::HistogramBase::kUmaTargetedHistogramFlag)
+      ->Add(static_cast<int>(status));
+}
+
+bool AllowedOnReload(PreviewsType type) {
   switch (type) {
+    // These types return new content on refresh.
+    case PreviewsType::LITE_PAGE:
+    case PreviewsType::LOFI:
+      return true;
+    // Loading these types will always be stale when refreshed.
     case PreviewsType::OFFLINE:
-      UMA_HISTOGRAM_ENUMERATION(
-          "Previews.EligibilityReason.Offline", static_cast<int>(status),
-          static_cast<int>(PreviewsEligibilityReason::LAST));
+      return false;
+    case PreviewsType::NONE:
+    case PreviewsType::LAST:
       break;
-    default:
-      NOTREACHED();
   }
+  NOTREACHED();
+  return false;
 }
 
 }  // namespace
@@ -51,8 +70,10 @@ PreviewsIOData::~PreviewsIOData() {}
 
 void PreviewsIOData::Initialize(
     base::WeakPtr<PreviewsUIService> previews_ui_service,
-    std::unique_ptr<PreviewsOptOutStore> previews_opt_out_store) {
+    std::unique_ptr<PreviewsOptOutStore> previews_opt_out_store,
+    const PreviewsIsEnabledCallback& is_enabled_callback) {
   DCHECK(ui_task_runner_->BelongsToCurrentThread());
+  is_enabled_callback_ = is_enabled_callback;
   previews_ui_service_ = previews_ui_service;
 
   // Set up the IO thread portion of |this|.
@@ -88,21 +109,33 @@ void PreviewsIOData::ClearBlackList(base::Time begin_time,
 
 bool PreviewsIOData::ShouldAllowPreview(const net::URLRequest& request,
                                         PreviewsType type) const {
-  if (!IsPreviewsTypeEnabled(type))
-    return false;
-  // The blacklist will disallow certain hosts for periods of time based on
-  // user's opting out of the preview
-  if (!previews_black_list_) {
+  return ShouldAllowPreviewAtECT(
+      request, type, params::DefaultEffectiveConnectionTypeThreshold(),
+      std::vector<std::string>());
+}
+
+bool PreviewsIOData::ShouldAllowPreviewAtECT(
+    const net::URLRequest& request,
+    PreviewsType type,
+    net::EffectiveConnectionType effective_connection_type_threshold,
+    const std::vector<std::string>& host_blacklist_from_server) const {
+  if (is_enabled_callback_.is_null() || !previews_black_list_) {
     LogPreviewsEligibilityReason(
         PreviewsEligibilityReason::BLACKLIST_UNAVAILABLE, type);
     return false;
   }
+  if (!is_enabled_callback_.Run(type))
+    return false;
+
+  // The blacklist will disallow certain hosts for periods of time based on
+  // user's opting out of the preview.
   PreviewsEligibilityReason status =
       previews_black_list_->IsLoadedAndAllowed(request.url(), type);
   if (status != PreviewsEligibilityReason::ALLOWED) {
     LogPreviewsEligibilityReason(status, type);
     return false;
   }
+
   net::NetworkQualityEstimator* network_quality_estimator =
       request.context()->network_quality_estimator();
   if (!network_quality_estimator ||
@@ -112,21 +145,31 @@ bool PreviewsIOData::ShouldAllowPreview(const net::URLRequest& request,
         PreviewsEligibilityReason::NETWORK_QUALITY_UNAVAILABLE, type);
     return false;
   }
+
   if (network_quality_estimator->GetEffectiveConnectionType() >
-      params::EffectiveConnectionTypeThreshold()) {
+      effective_connection_type_threshold) {
     LogPreviewsEligibilityReason(PreviewsEligibilityReason::NETWORK_NOT_SLOW,
                                  type);
     return false;
   }
   // LOAD_VALIDATE_CACHE or LOAD_BYPASS_CACHE mean the user reloaded the page.
   // If this is a query for offline previews, reloads should be disallowed.
-  if (type == PreviewsType::OFFLINE &&
+  if (!AllowedOnReload(type) &&
       request.load_flags() &
           (net::LOAD_VALIDATE_CACHE | net::LOAD_BYPASS_CACHE)) {
-    LogPreviewsEligibilityReason(
-        PreviewsEligibilityReason::RELOAD_DISALLOWED_FOR_OFFLINE, type);
+    LogPreviewsEligibilityReason(PreviewsEligibilityReason::RELOAD_DISALLOWED,
+                                 type);
     return false;
   }
+
+  if (std::find(host_blacklist_from_server.begin(),
+                host_blacklist_from_server.end(), request.url().host_piece()) !=
+      host_blacklist_from_server.end()) {
+    LogPreviewsEligibilityReason(
+        PreviewsEligibilityReason::HOST_BLACKLISTED_BY_SERVER, type);
+    return false;
+  }
+
   LogPreviewsEligibilityReason(PreviewsEligibilityReason::ALLOWED, type);
   return true;
 }

@@ -12,9 +12,10 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromeos/system/devicemode.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/ui/display/output_protection.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/display/manager/chromeos/default_touch_transform_setter.h"
 #include "ui/display/manager/chromeos/display_change_observer.h"
 #include "ui/display/manager/chromeos/touch_transform_controller.h"
 #include "ui/display/manager/display_layout_store.h"
@@ -32,26 +33,6 @@ namespace {
 
 // Needed for DisplayConfigurator::ForceInitialConfigure.
 const SkColor kChromeOsBootColor = SkColorSetRGB(0xfe, 0xfe, 0xfe);
-
-// Recursively swaps the displays in a DisplayLayout to change the primary
-// display but keep the same relative display layout.
-// TODO(kylechar): This is copied from WindowTreeHostManager. The concept of
-// getting the same relative display layout with a different primary display id
-// should become a function on DisplayLayout itself to avoid reimplementing it
-// here.
-void SwapRecursive(const std::map<int64_t, DisplayPlacement*>& id_to_placement,
-                   int64_t current_primary_id,
-                   int64_t display_id) {
-  if (display_id == current_primary_id)
-    return;
-
-  DCHECK(id_to_placement.count(display_id));
-  DisplayPlacement* placement = id_to_placement.at(display_id);
-  DCHECK(placement);
-  SwapRecursive(id_to_placement, current_primary_id,
-                placement->parent_display_id);
-  placement->Swap();
-}
 
 }  // namespace
 
@@ -108,21 +89,8 @@ void ScreenManagerOzoneInternal::SetPrimaryDisplayId(int64_t display_id) {
   // when the primary id is set after new displays are connected.
   // Only update the layout if it is requested to swap primary display.
   if (layout.primary_id != new_primary_display.id()) {
-    std::unique_ptr<DisplayLayout> swapped_layout(layout.Copy());
-
-    std::map<int64_t, DisplayPlacement*> id_to_placement;
-    for (auto& placement : swapped_layout->placement_list)
-      id_to_placement[placement.display_id] = &placement;
-    SwapRecursive(id_to_placement, primary_display_id_,
-                  new_primary_display.id());
-
-    std::sort(swapped_layout->placement_list.begin(),
-              swapped_layout->placement_list.end(),
-              [](const DisplayPlacement& d1, const DisplayPlacement& d2) {
-                return d1.display_id < d2.display_id;
-              });
-
-    swapped_layout->primary_id = new_primary_display.id();
+    std::unique_ptr<display::DisplayLayout> swapped_layout = layout.Copy();
+    swapped_layout->SwapPrimaryDisplay(new_primary_display.id());
     DisplayIdList list = display_manager_->GetCurrentDisplayIdList();
     display_manager_->layout_store()->RegisterLayoutForDisplayIdList(
         list, std::move(swapped_layout));
@@ -143,10 +111,17 @@ void ScreenManagerOzoneInternal::SetPrimaryDisplayId(int64_t display_id) {
 }
 
 void ScreenManagerOzoneInternal::AddInterfaces(
-    service_manager::InterfaceRegistry* registry) {
-  registry->AddInterface<mojom::DisplayController>(this);
-  registry->AddInterface<mojom::OutputProtection>(this);
-  registry->AddInterface<mojom::TestDisplayController>(this);
+    service_manager::BinderRegistryWithArgs<
+        const service_manager::BindSourceInfo&>* registry) {
+  registry->AddInterface<mojom::DisplayController>(
+      base::Bind(&ScreenManagerOzoneInternal::BindDisplayControllerRequest,
+                 base::Unretained(this)));
+  registry->AddInterface<mojom::OutputProtection>(
+      base::Bind(&ScreenManagerOzoneInternal::BindOutputProtectionRequest,
+                 base::Unretained(this)));
+  registry->AddInterface<mojom::TestDisplayController>(
+      base::Bind(&ScreenManagerOzoneInternal::BindTestDisplayControllerRequest,
+                 base::Unretained(this)));
 }
 
 void ScreenManagerOzoneInternal::Init(ScreenManagerDelegate* delegate) {
@@ -191,7 +166,8 @@ void ScreenManagerOzoneInternal::Init(ScreenManagerDelegate* delegate) {
   display_configurator_.ForceInitialConfigure(kChromeOsBootColor);
 
   touch_transform_controller_ = base::MakeUnique<TouchTransformController>(
-      &display_configurator_, display_manager_.get());
+      &display_configurator_, display_manager_.get(),
+      base::MakeUnique<display::DefaultTouchTransformSetter>());
 }
 
 void ScreenManagerOzoneInternal::RequestCloseDisplay(int64_t display_id) {
@@ -201,6 +177,10 @@ void ScreenManagerOzoneInternal::RequestCloseDisplay(int64_t display_id) {
   // Tell the NDD to remove the display. ScreenManager will get an update
   // that the display configuration has changed and the display will be gone.
   fake_display_controller_->RemoveDisplay(display_id);
+}
+
+display::ScreenBase* ScreenManagerOzoneInternal::GetScreen() {
+  return screen_;
 }
 
 void ScreenManagerOzoneInternal::ToggleAddRemoveDisplay() {
@@ -219,31 +199,6 @@ void ScreenManagerOzoneInternal::ToggleAddRemoveDisplay() {
     DisplayIdList displays = display_manager_->GetCurrentDisplayIdList();
     fake_display_controller_->RemoveDisplay(displays.back());
   }
-}
-
-void ScreenManagerOzoneInternal::ToggleDisplayResolution() {
-  if (primary_display_id_ == kInvalidDisplayId)
-    return;
-
-  // Internal displays don't have alternate resolutions.
-  if (Display::HasInternalDisplay() &&
-      primary_display_id_ == Display::InternalDisplayId())
-    return;
-
-  DVLOG(1) << "ToggleDisplayResolution";
-
-  const ManagedDisplayInfo& info =
-      display_manager_->GetDisplayInfo(primary_display_id_);
-  scoped_refptr<ManagedDisplayMode> mode =
-      GetDisplayModeForNextResolution(info, true);
-
-  // Loop back to first mode from last.
-  if (mode->size() == info.bounds_in_native().size())
-    mode = info.display_modes()[0];
-
-  // Set mode only if it's different from current.
-  if (mode->size() != info.bounds_in_native().size())
-    display_manager_->SetDisplayMode(primary_display_id_, mode);
 }
 
 void ScreenManagerOzoneInternal::IncreaseInternalDisplayZoom() {
@@ -308,7 +263,7 @@ void ScreenManagerOzoneInternal::OnDisplayAdded(const Display& display) {
   DVLOG(1) << "OnDisplayAdded: " << display.ToString() << "\n  "
            << metrics.ToString();
   screen_->display_list().AddDisplay(display, DisplayList::Type::NOT_PRIMARY);
-  delegate_->OnDisplayAdded(display.id(), metrics);
+  delegate_->OnDisplayAdded(display, metrics);
 }
 
 void ScreenManagerOzoneInternal::OnDisplayRemoved(const Display& display) {
@@ -327,7 +282,7 @@ void ScreenManagerOzoneInternal::OnDisplayMetricsChanged(
   DVLOG(1) << "OnDisplayModified: " << display.ToString() << "\n  "
            << metrics.ToString();
   screen_->display_list().UpdateDisplay(display);
-  delegate_->OnDisplayModified(display.id(), metrics);
+  delegate_->OnDisplayModified(display, metrics);
 }
 
 ViewportMetrics ScreenManagerOzoneInternal::GetViewportMetricsForDisplay(
@@ -336,11 +291,9 @@ ViewportMetrics ScreenManagerOzoneInternal::GetViewportMetricsForDisplay(
       display_manager_->GetDisplayInfo(display.id());
 
   ViewportMetrics metrics;
-  metrics.bounds = display.bounds();
-  metrics.work_area = display.work_area();
-  metrics.pixel_size = managed_info.bounds_in_native().size();
-  metrics.rotation = display.rotation();
-  metrics.touch_support = display.touch_support();
+  // TODO(kylechar): The origin of |metrics.bounds_in_pixels| should be updated
+  // so that PlatformWindows appear next to one another for multiple displays.
+  metrics.bounds_in_pixels = managed_info.bounds_in_native();
   metrics.device_scale_factor = display.device_scale_factor();
   metrics.ui_scale_factor = managed_info.configured_ui_scale();
 
@@ -385,23 +338,23 @@ DisplayConfigurator* ScreenManagerOzoneInternal::display_configurator() {
   return &display_configurator_;
 }
 
-void ScreenManagerOzoneInternal::Create(
-    const service_manager::Identity& remote_identity,
-    mojom::DisplayControllerRequest request) {
+void ScreenManagerOzoneInternal::BindDisplayControllerRequest(
+    mojom::DisplayControllerRequest request,
+    const service_manager::BindSourceInfo& source_info) {
   controller_bindings_.AddBinding(this, std::move(request));
 }
 
-void ScreenManagerOzoneInternal::Create(
-    const service_manager::Identity& remote_identity,
-    mojom::OutputProtectionRequest request) {
+void ScreenManagerOzoneInternal::BindOutputProtectionRequest(
+    mojom::OutputProtectionRequest request,
+    const service_manager::BindSourceInfo& source_info) {
   mojo::MakeStrongBinding(
       base::MakeUnique<OutputProtection>(display_configurator()),
       std::move(request));
 }
 
-void ScreenManagerOzoneInternal::Create(
-    const service_manager::Identity& remote_identity,
-    mojom::TestDisplayControllerRequest request) {
+void ScreenManagerOzoneInternal::BindTestDisplayControllerRequest(
+    mojom::TestDisplayControllerRequest request,
+    const service_manager::BindSourceInfo& source_info) {
   test_bindings_.AddBinding(this, std::move(request));
 }
 

@@ -13,9 +13,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -23,9 +23,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/chromeos_switches.h"
@@ -282,7 +280,7 @@ class DownloadNotificationTestBase : public InProcessBrowserTest {
 
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
-        base::Bind(&net::URLRequestSlowDownloadJob::AddUrlHandler));
+        base::BindOnce(&net::URLRequestSlowDownloadJob::AddUrlHandler));
 
     GetMessageCenter()->DisableTimersForTest();
 
@@ -331,7 +329,7 @@ class DownloadNotificationTest : public DownloadNotificationTestBase {
     test_delegate.reset(new TestChromeDownloadManagerDelegate(profile));
     test_delegate->GetDownloadIdReceiverCallback().Run(
         content::DownloadItem::kInvalidId + 1);
-    DownloadServiceFactory::GetForBrowserContext(profile)
+    DownloadCoreServiceFactory::GetForBrowserContext(profile)
         ->SetDownloadManagerDelegateForTesting(std::move(test_delegate));
 
     DownloadNotificationTestBase::SetUpOnMainThread();
@@ -339,7 +337,7 @@ class DownloadNotificationTest : public DownloadNotificationTestBase {
 
   TestChromeDownloadManagerDelegate* GetDownloadManagerDelegate() const {
     return static_cast<TestChromeDownloadManagerDelegate*>(
-        DownloadServiceFactory::GetForBrowserContext(browser()->profile())
+        DownloadCoreServiceFactory::GetForBrowserContext(browser()->profile())
             ->GetDownloadManagerDelegate());
   }
 
@@ -352,7 +350,7 @@ class DownloadNotificationTest : public DownloadNotificationTestBase {
     std::unique_ptr<TestChromeDownloadManagerDelegate> incognito_test_delegate;
     incognito_test_delegate.reset(
         new TestChromeDownloadManagerDelegate(incognito_profile));
-    DownloadServiceFactory::GetForBrowserContext(incognito_profile)
+    DownloadCoreServiceFactory::GetForBrowserContext(incognito_profile)
         ->SetDownloadManagerDelegateForTesting(
             std::move(incognito_test_delegate));
   }
@@ -361,8 +359,8 @@ class DownloadNotificationTest : public DownloadNotificationTestBase {
       const {
     Profile* incognito_profile = incognito_browser()->profile();
     return static_cast<TestChromeDownloadManagerDelegate*>(
-        DownloadServiceFactory::GetForBrowserContext(incognito_profile)->
-        GetDownloadManagerDelegate());
+        DownloadCoreServiceFactory::GetForBrowserContext(incognito_profile)
+            ->GetDownloadManagerDelegate());
   }
 
   void CreateDownload() {
@@ -1178,7 +1176,7 @@ class MultiProfileDownloadNotificationTest
   }
 
   Profile* GetProfileByIndex(int index) {
-    return chromeos::ProfileHelper::GetProfileByUserIdHash(
+    return chromeos::ProfileHelper::GetProfileByUserIdHashForTest(
         kTestAccounts[index].hash);
   }
 
@@ -1192,8 +1190,8 @@ class MultiProfileDownloadNotificationTest
         AccountId::FromUserEmailGaiaId(info.email, info.gaia_id),
         base::UTF8ToUTF16(info.display_name));
     SigninManagerFactory::GetForProfile(
-        chromeos::ProfileHelper::GetProfileByUserIdHash(info.hash))
-            ->SetAuthenticatedAccountInfo(info.gaia_id, info.email);
+        chromeos::ProfileHelper::GetProfileByUserIdHashForTest(info.hash))
+        ->SetAuthenticatedAccountInfo(info.gaia_id, info.email);
   }
 };
 

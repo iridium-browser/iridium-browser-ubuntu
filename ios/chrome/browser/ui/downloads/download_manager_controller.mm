@@ -9,13 +9,11 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/ios/weak_nsobject.h"
 #include "base/location.h"
 #include "base/mac/bind_objc_block.h"
-#include "base/mac/objc_property_releaser.h"
-#include "base/mac/scoped_nsobject.h"
+#include "base/task_scheduler/post_task.h"
+
 #include "base/memory/ref_counted.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
@@ -23,21 +21,18 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/installation_notifier.h"
-#include "ios/chrome/browser/native_app_launcher/ios_appstore_ids.h"
-#import "ios/chrome/browser/storekit_launcher.h"
+#import "ios/chrome/browser/store_kit/store_kit_tab_helper.h"
 #import "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
 #import "ios/chrome/browser/ui/network_activity_indicator_manager.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
-#import "ios/public/provider/chrome/browser/native_app_launcher/native_app_metadata.h"
-#import "ios/public/provider/chrome/browser/native_app_launcher/native_app_whitelist_manager.h"
 #import "ios/third_party/material_components_ios/src/components/ActivityIndicator/src/MaterialActivityIndicator.h"
 #import "ios/third_party/material_components_ios/src/components/Buttons/src/MaterialButtons.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
-#import "ios/third_party/material_roboto_font_loader_ios/src/src/MaterialRobotoFontLoader.h"
+#include "ios/web/public/browser_state.h"
+#include "ios/web/public/web_state/web_state.h"
 #include "ios/web/public/web_thread.h"
 #include "net/base/filename_util.h"
 #include "net/http/http_response_headers.h"
@@ -48,6 +43,10 @@
 #include "net/url_request/url_request_status.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #import "ui/gfx/ios/uikit_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using base::UserMetricsAction;
 using net::HttpResponseHeaders;
@@ -155,6 +154,10 @@ using net::URLRequestStatus;
 - (void)setProgressBarHeightWithAnimation:(BOOL)animated
                   withCompletionAnimation:(BOOL)completionAnimation;
 
+// Sets title from |messageId| on |button| label for both Normal and Highlighted
+// states. Material design uses all caps for button labels.
+- (void)setTitle:(int)messageId forButton:(UIButton*)button;
+
 // Makes the file icon "pop" and fades the image in the fold icon to the
 // completed fold icon. This will also call -showGoogleDriveButton if the user
 // doesn't have Google Drive installed on their device.
@@ -203,6 +206,8 @@ using net::URLRequestStatus;
 
 namespace {
 
+NSString* kGoogleDriveAppStoreId = @"507874739";
+NSString* kGoogleDriveURL = @"googledrive://";
 NSString* kGoogleDriveBundleId = @"com.google.Drive";
 
 // Key of the UMA Download.IOSDownloadFileResult histogram.
@@ -229,6 +234,9 @@ enum DownloadedFileAction {
 // Key of the UMA Download.IOSDownloadedFileStatusCode histogram.
 const char kUMADownloadedFileStatusCode[] =
     "Download.IOSDownloadedFileStatusCode";
+
+// Key of the UMA.Download.IOSDownloadedFileNetError histogram.
+const char kUMADownloadFileNetError[] = "Download.IOSDownloadedFileNetError";
 
 int g_download_manager_id = 0;
 
@@ -330,7 +338,7 @@ class DownloadHeadDelegate : public URLFetcherDelegate {
   };
 
  private:
-  DownloadManagerController* owner_;  // weak.
+  __weak DownloadManagerController* owner_;
   DISALLOW_COPY_AND_ASSIGN(DownloadHeadDelegate);
 };
 
@@ -351,7 +359,7 @@ class DownloadContentDelegate : public URLFetcherDelegate {
   };
 
  private:
-  DownloadManagerController* owner_;  // weak.
+  __weak DownloadManagerController* owner_;
   DISALLOW_COPY_AND_ASSIGN(DownloadContentDelegate);
 };
 
@@ -362,7 +370,7 @@ class DownloadContentDelegate : public URLFetcherDelegate {
 
   // Coordinator for displaying the alert informing the user that no application
   // on the device can open the file.
-  base::scoped_nsobject<AlertCoordinator> _alertCoordinator;
+  AlertCoordinator* _alertCoordinator;
 
   // The size of the file to be downloaded, as determined by the Content-Length
   // header field in the initial HEAD request. This is set to |kNoFileSizeGiven|
@@ -375,117 +383,112 @@ class DownloadContentDelegate : public URLFetcherDelegate {
   BOOL _isFileTypeLabelCentered;
   BOOL _isDisplayingError;
   BOOL _didSuccessfullyFinishHeadFetch;
-  scoped_refptr<URLRequestContextGetter> _requestContextGetter;
+  // WebState provides access to the *TabHelper objects.
+  web::WebState* _webState;
   std::unique_ptr<URLFetcher> _fetcher;
   std::unique_ptr<DownloadHeadDelegate> _headFetcherDelegate;
   std::unique_ptr<DownloadContentDelegate> _contentFetcherDelegate;
-  base::WeakNSProtocol<id<StoreKitLauncher>> _storeKitLauncher;
   base::FilePath _downloadFilePath;
-  base::scoped_nsobject<MDCActivityIndicator> _activityIndicator;
+  MDCActivityIndicator* _activityIndicator;
   // Set to YES when a download begins and is used to determine if the
   // DownloadFileResult histogram needs to be recorded on -dealloc.
   BOOL _recordDownloadResultHistogram;
   // Set to YES when a file is downloaded and is used to determine if the
   // DownloadedFileAction histogram needs to be recorded on -dealloc.
   BOOL _recordFileActionHistogram;
-  base::mac::ObjCPropertyReleaser _propertyReleaser_DownloadManagerController;
 }
 
 // The container that holds the |documentIcon|, the |progressBar|, the
 // |foldIcon|, the |fileTypeLabel|, and the |timeLeftLabel|.
-@property(nonatomic, retain) IBOutlet UIView* documentContainer;
+@property(nonatomic, strong) IBOutlet UIView* documentContainer;
 
 // The progress bar that displays download progress.
-@property(nonatomic, retain) IBOutlet UIView* progressBar;
+@property(nonatomic, strong) IBOutlet UIView* progressBar;
 
 // The image of the document.
-@property(nonatomic, retain) IBOutlet UIImageView* documentIcon;
+@property(nonatomic, strong) IBOutlet UIImageView* documentIcon;
 
 // The image of the document fold.
-@property(nonatomic, retain) IBOutlet UIImageView* foldIcon;
+@property(nonatomic, strong) IBOutlet UIImageView* foldIcon;
 
 // The error image displayed inside the document.
-@property(nonatomic, retain) IBOutlet UIImageView* errorIcon;
+@property(nonatomic, strong) IBOutlet UIImageView* errorIcon;
 
 // The label that displays the file type of the file to be downloaded.
-@property(nonatomic, retain) IBOutlet UILabel* fileTypeLabel;
+@property(nonatomic, strong) IBOutlet UILabel* fileTypeLabel;
 
 // The label that displays the estimate of how much time is still needed to
 // finish the file download.
-@property(nonatomic, retain) IBOutlet UILabel* timeLeftLabel;
+@property(nonatomic, strong) IBOutlet UILabel* timeLeftLabel;
 
 // The label that displays the name of the file to be downloaded, as it will
 // be saved on the user's device.
-@property(nonatomic, retain) IBOutlet UILabel* fileNameLabel;
+@property(nonatomic, strong) IBOutlet UILabel* fileNameLabel;
 
 // The label that displays the size of the file to be downloaded or the error
 // message.
-@property(nonatomic, retain) IBOutlet UILabel* errorOrSizeLabel;
+@property(nonatomic, strong) IBOutlet UILabel* errorOrSizeLabel;
 
 // The label that displays error messages when errors occur.
-@property(nonatomic, retain) IBOutlet UILabel* errorLabel;
+@property(nonatomic, strong) IBOutlet UILabel* errorLabel;
 
 // The container that holds the |downloadButton|, |cancelButton|,
 // |openInButton|, and |googleDriveButton|.
-@property(nonatomic, retain) IBOutlet UIView* actionBar;
+@property(nonatomic, strong) IBOutlet UIView* actionBar;
 
 // View that appears at the top of the action bar and acts as a border.
-@property(nonatomic, retain) IBOutlet UIView* actionBarBorder;
+@property(nonatomic, strong) IBOutlet UIView* actionBarBorder;
 
 // The button which starts the file download.
-@property(nonatomic, retain) IBOutlet MDCButton* downloadButton;
+@property(nonatomic, strong) IBOutlet MDCButton* downloadButton;
 
 // The button which switches with the |downloadButton| during a download.
 // Pressing it cancels the download.
-@property(nonatomic, retain) IBOutlet MDCButton* cancelButton;
+@property(nonatomic, strong) IBOutlet MDCButton* cancelButton;
 
 // The button that switches with the |cancelButton| when a file download
 // completes. Pressing it opens the UIDocumentInteractionController, letting
 // the user select another app in which to open the downloaded file.
-@property(nonatomic, retain) IBOutlet MDCButton* openInButton;
+@property(nonatomic, strong) IBOutlet MDCButton* openInButton;
 
 // The button that opens a view controller to allow the user to install
 // Google Drive.
-@property(nonatomic, retain) IBOutlet MDCButton* googleDriveButton;
+@property(nonatomic, strong) IBOutlet MDCButton* googleDriveButton;
 
 // The controller that displays the list of other apps that the downloaded file
 // can be opened in.
-@property(nonatomic, retain)
+@property(nonatomic, strong)
     UIDocumentInteractionController* docInteractionController;
 
 // Contains all the constraints that should be applied only in portrait mode.
-@property(nonatomic, retain) NSArray* portraitConstraintsArray;
+@property(nonatomic, strong) NSArray* portraitConstraintsArray;
 
 // Contains all the constraints that should be applied only in landscape mode.
-@property(nonatomic, retain) NSArray* landscapeConstraintsArray;
+@property(nonatomic, strong) NSArray* landscapeConstraintsArray;
 
 // Contains all the constraints that should be applied only in portrait mode
 // when there is only one button showing in the action bar (i.e. the Google
 // Drive button is NOT showing).
-@property(nonatomic, retain)
+@property(nonatomic, strong)
     NSArray* portraitActionBarOneButtonConstraintsArray;
 
 // Contains all the constraints that should be applied only in portrait mode
 // when there are two buttons showing in the action bar (i.e. the Google Drive
 // button IS showing).
-@property(nonatomic, retain)
+@property(nonatomic, strong)
     NSArray* portraitActionBarTwoButtonConstraintsArray;
 
 // Constraint that positions the file type label vertically in the center of the
 // document with an additional offset.
-@property(nonatomic, retain) NSLayoutConstraint* fileTypeLabelCentered;
+@property(nonatomic, strong) NSLayoutConstraint* fileTypeLabelCentered;
 
 // Records the time the download started, to display an estimate of how much
 // time is required to finish the download.
-@property(nonatomic, retain) NSDate* downloadStartedTime;
+@property(nonatomic, strong) NSDate* downloadStartedTime;
 
 // Records the fraction (from 0.0 to 1.0) of the file that has been
 // downloaded.
 @property(nonatomic) double fractionDownloaded;
-
-// Used to get a URL scheme that Drive responds to, to register with the
-// InstallationNotifier.
-@property(nonatomic, retain) id<NativeAppMetadata> googleDriveMetadata;
 
 @end
 
@@ -517,22 +520,18 @@ class DownloadContentDelegate : public URLFetcherDelegate {
 @synthesize fileTypeLabelCentered = _fileTypeLabelCentered;
 @synthesize downloadStartedTime = _downloadStartedTime;
 @synthesize fractionDownloaded = _fractionDownloaded;
-@synthesize googleDriveMetadata = _googleDriveMetadata;
 
-- (id)initWithURL:(const GURL&)url
-    requestContextGetter:(URLRequestContextGetter*)requestContextGetter
-        storeKitLauncher:(id<StoreKitLauncher>)storeLauncher {
+- (instancetype)initWithWebState:(web::WebState*)webState
+                     downloadURL:(const GURL&)url {
   self = [super initWithNibName:@"DownloadManagerController" url:url];
   if (self) {
     _downloadManagerId = g_download_manager_id++;
-    _propertyReleaser_DownloadManagerController.Init(
-        self, [DownloadManagerController class]);
 
-    _requestContextGetter = requestContextGetter;
+    DCHECK(webState);
+    _webState = webState;
     _headFetcherDelegate.reset(new DownloadHeadDelegate(self));
     _contentFetcherDelegate.reset(new DownloadContentDelegate(self));
     _downloadFilePath = base::FilePath();
-    _storeKitLauncher.reset(storeLauncher);
 
     [_documentContainer
         setBackgroundColor:UIColorFromRGB(kUndownloadedDocumentColor)];
@@ -541,28 +540,11 @@ class DownloadContentDelegate : public URLFetcherDelegate {
     _isDisplayingError = NO;
     _didSuccessfullyFinishHeadFetch = NO;
 
-    NSString* downloadText =
-        l10n_util::GetNSString(IDS_IOS_DOWNLOAD_MANAGER_DOWNLOAD);
-    NSString* capsDownloadText =
-        [downloadText uppercaseStringWithLocale:[NSLocale currentLocale]];
-    [_downloadButton setTitle:capsDownloadText forState:UIControlStateNormal];
-
-    NSString* cancelText = l10n_util::GetNSString(IDS_CANCEL);
-    NSString* capsCancelText =
-        [cancelText uppercaseStringWithLocale:[NSLocale currentLocale]];
-    [_cancelButton setTitle:capsCancelText forState:UIControlStateNormal];
-
-    NSString* openInText = l10n_util::GetNSString(IDS_IOS_OPEN_IN);
-    NSString* capsOpenInText =
-        [openInText uppercaseStringWithLocale:[NSLocale currentLocale]];
-    [_openInButton setTitle:capsOpenInText forState:UIControlStateNormal];
-
-    NSString* googleDriveText =
-        l10n_util::GetNSString(IDS_IOS_DOWNLOAD_MANAGER_INSTALL_GOOGLE_DRIVE);
-    NSString* capsGoogleDriveText =
-        [googleDriveText uppercaseStringWithLocale:[NSLocale currentLocale]];
-    [_googleDriveButton setTitle:capsGoogleDriveText
-                        forState:UIControlStateNormal];
+    [self setTitle:IDS_IOS_DOWNLOAD_MANAGER_DOWNLOAD forButton:_downloadButton];
+    [self setTitle:IDS_CANCEL forButton:_cancelButton];
+    [self setTitle:IDS_IOS_OPEN_IN forButton:_openInButton];
+    [self setTitle:IDS_IOS_DOWNLOAD_MANAGER_INSTALL_GOOGLE_DRIVE
+         forButton:_googleDriveButton];
 
     [_documentContainer setIsAccessibilityElement:YES];
     self.fractionDownloaded = 0;
@@ -617,9 +599,11 @@ class DownloadContentDelegate : public URLFetcherDelegate {
     // will be cleaned up during dealloc, but a local copy will be retained by
     // the block and won't be deleted until the block completes.
     base::FilePath downloadPathCopy = _downloadFilePath;
-    web::WebThread::PostBlockingPoolTask(FROM_HERE, base::BindBlock(^{
-                                           DeleteFile(downloadPathCopy, false);
-                                         }));
+    base::PostTaskWithTraits(FROM_HERE,
+                             {base::MayBlock(), base::TaskPriority::BACKGROUND},
+                             base::BindBlockArc(^{
+                               DeleteFile(downloadPathCopy, false);
+                             }));
   }
   if (_recordDownloadResultHistogram) {
     UMA_HISTOGRAM_ENUMERATION(kUMADownloadFileResult, DOWNLOAD_OTHER,
@@ -629,7 +613,6 @@ class DownloadContentDelegate : public URLFetcherDelegate {
     UMA_HISTOGRAM_ENUMERATION(kUMADownloadedFileAction, NO_ACTION,
                               DOWNLOADED_FILE_ACTION_COUNT);
   }
-  [super dealloc];
 }
 
 #pragma mark - Layout constraints
@@ -868,7 +851,7 @@ class DownloadContentDelegate : public URLFetcherDelegate {
     [_timeLeftLabel setFont:[MDCTypography captionFont]];
     [_fileNameLabel setFont:[MDCTypography body1Font]];
     [_errorOrSizeLabel
-        setFont:[[MDFRobotoFontLoader sharedInstance] regularFontOfSize:10]];
+        setFont:[[MDCTypography fontLoader] regularFontOfSize:10]];
   }
 }
 
@@ -955,7 +938,8 @@ class DownloadContentDelegate : public URLFetcherDelegate {
 - (void)startHeadFetch {
   _fetcher = URLFetcher::Create([self url], URLFetcher::HEAD,
                                 _headFetcherDelegate.get());
-  _fetcher->SetRequestContext(_requestContextGetter.get());
+  _fetcher->SetRequestContext(
+      _webState->GetBrowserState()->GetRequestContext());
   [[NetworkActivityIndicatorManager sharedInstance]
       startNetworkTaskForGroup:[self getNetworkActivityKey]];
   _fetcher->Start();
@@ -1028,16 +1012,16 @@ class DownloadContentDelegate : public URLFetcherDelegate {
 }
 
 - (void)initializeActivityIndicator {
-  _activityIndicator.reset([[MDCActivityIndicator alloc]
+  _activityIndicator = [[MDCActivityIndicator alloc]
       initWithFrame:CGRectMake(0, 0, kActivityIndicatorWidth,
-                               kActivityIndicatorWidth)]);
+                               kActivityIndicatorWidth)];
   [_activityIndicator setRadius:AlignValueToPixel(kActivityIndicatorWidth / 2)];
   [_activityIndicator setStrokeWidth:4];
   [_activityIndicator
       setCycleColors:@[ [[MDCPalette cr_bluePalette] tint500] ]];
   [_activityIndicator setTranslatesAutoresizingMaskIntoConstraints:NO];
   [_documentContainer addSubview:_activityIndicator];
-  _activityIndicator.get().center = _documentContainer.center;
+  _activityIndicator.center = _documentContainer.center;
   [NSLayoutConstraint activateConstraints:@[
     [[_activityIndicator centerYAnchor]
         constraintEqualToAnchor:_documentContainer.centerYAnchor],
@@ -1062,18 +1046,16 @@ class DownloadContentDelegate : public URLFetcherDelegate {
   NSString* message =
       l10n_util::GetNSString(IDS_IOS_DOWNLOAD_MANAGER_NO_APP_MESSAGE);
 
-  _alertCoordinator.reset([[AlertCoordinator alloc]
-      initWithBaseViewController:topViewController
-                           title:title
-                         message:message]);
+  _alertCoordinator =
+      [[AlertCoordinator alloc] initWithBaseViewController:topViewController
+                                                     title:title
+                                                   message:message];
 
-  // |googleDriveMetadata| contains the information necessary to either launch
-  // |the Google Drive app or navigate to its StoreKit page.  If the metadata is
-  // |not present, do not show the upload button at all.
-  if (self.googleDriveMetadata) {
+  StoreKitTabHelper* tabHelper = StoreKitTabHelper::FromWebState(_webState);
+  if (tabHelper) {
     NSString* googleDriveButtonTitle =
         l10n_util::GetNSString(IDS_IOS_DOWNLOAD_MANAGER_UPLOAD_TO_GOOGLE_DRIVE);
-    base::WeakNSObject<DownloadManagerController> weakSelf(self);
+    __weak DownloadManagerController* weakSelf = self;
     [_alertCoordinator addItemWithTitle:googleDriveButtonTitle
                                  action:^{
                                    [weakSelf openGoogleDriveInAppStore];
@@ -1123,14 +1105,10 @@ class DownloadContentDelegate : public URLFetcherDelegate {
   [_documentContainer setAccessibilityLabel:errorText];
 
   // Prepare the "RETRY DOWNLOAD" button text for the fading in animation.
-  NSString* retryDownloadText =
-      l10n_util::GetNSString(IDS_IOS_DOWNLOAD_MANAGER_RETRY_DOWNLOAD);
-  NSString* retryDownloadTextCaps =
-      [retryDownloadText uppercaseStringWithLocale:[NSLocale currentLocale]];
+  [self setTitle:IDS_IOS_DOWNLOAD_MANAGER_RETRY_DOWNLOAD
+       forButton:_downloadButton];
   _downloadButton.alpha = 0.0;
   _downloadButton.hidden = NO;
-  [_downloadButton setTitle:retryDownloadTextCaps
-                   forState:UIControlStateNormal];
 
   [UIView
       animateWithDuration:kErrorAnimationDuration
@@ -1186,11 +1164,6 @@ class DownloadContentDelegate : public URLFetcherDelegate {
   fileSizeTextAnimation.duration = kErrorAnimationDuration;
 
   // Prepare to change the download button back to its original text.
-  NSString* downloadText =
-      l10n_util::GetNSString(IDS_IOS_DOWNLOAD_MANAGER_DOWNLOAD);
-  NSString* downloadTextCaps =
-      [downloadText uppercaseStringWithLocale:[NSLocale currentLocale]];
-
   [_errorOrSizeLabel.layer addAnimation:fileSizeTextAnimation
                                  forKey:@"hideError"];
   [_errorOrSizeLabel setText:fileSizeText];
@@ -1211,8 +1184,8 @@ class DownloadContentDelegate : public URLFetcherDelegate {
         _errorIcon.alpha = 1.0;
         _downloadButton.hidden = YES;
         _downloadButton.alpha = 1.0;
-        [_downloadButton setTitle:downloadTextCaps
-                         forState:UIControlStateNormal];
+        [self setTitle:IDS_IOS_DOWNLOAD_MANAGER_DOWNLOAD
+             forButton:_downloadButton];
         _isDisplayingError = NO;
         [self finishDownloadButtonTapped];
       }];
@@ -1236,16 +1209,16 @@ class DownloadContentDelegate : public URLFetcherDelegate {
     [self displayError];
     return;
   }
-  base::WeakNSObject<DownloadManagerController> weakSelf(self);
+  __weak DownloadManagerController* weakSelf = self;
   base::PostTaskAndReplyWithResult(
       web::WebThread::GetBlockingPool()
           ->GetTaskRunnerWithShutdownBehavior(
               base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)
           .get(),
-      FROM_HERE, base::BindBlock(^{
+      FROM_HERE, base::BindBlockArc(^{
         return CreateDirectory(downloadsDirectoryPath);
       }),
-      base::BindBlock(^(bool directoryCreated) {
+      base::BindBlockArc(^(bool directoryCreated) {
         [weakSelf finishStartingContentDownload:directoryCreated];
       }));
 }
@@ -1266,12 +1239,14 @@ class DownloadContentDelegate : public URLFetcherDelegate {
 
   _fetcher = URLFetcher::Create([self url], URLFetcher::GET,
                                 _contentFetcherDelegate.get());
-  _fetcher->SetRequestContext(_requestContextGetter.get());
+  _fetcher->SetRequestContext(
+      _webState->GetBrowserState()->GetRequestContext());
   base::SequencedWorkerPool::SequenceToken sequenceToken =
       web::WebThread::GetBlockingPool()->GetSequenceToken();
   _fetcher->SaveResponseToFileAtPath(
       _downloadFilePath,
-      web::WebThread::GetBlockingPool()->GetSequencedTaskRunner(sequenceToken));
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND}));
   [[NetworkActivityIndicatorManager sharedInstance]
       startNetworkTaskForGroup:[self getNetworkActivityKey]];
   _fetcher->Start();
@@ -1296,9 +1271,9 @@ class DownloadContentDelegate : public URLFetcherDelegate {
       CGRectGetMaxY(documentIconFrame) - newProgressFrame.size.height;
   if (animated &&
       newProgressFrame.size.height - oldProgressFrame.size.height > 1) {
-    base::WeakNSObject<UIView> weakProgressBar(_progressBar);
+    __weak UIView* weakProgressBar = _progressBar;
     if (completionAnimation) {
-      base::WeakNSObject<DownloadManagerController> weakSelf(self);
+      __weak DownloadManagerController* weakSelf = self;
       [UIView animateWithDuration:kProgressBarAnimationDuration
           animations:^{
             [weakProgressBar setFrame:newProgressFrame];
@@ -1320,28 +1295,17 @@ class DownloadContentDelegate : public URLFetcherDelegate {
   }
 }
 
+- (void)setTitle:(int)messageId forButton:(UIButton*)button {
+  NSString* title = l10n_util::GetNSString(messageId);
+  NSString* capsTitle =
+      [title uppercaseStringWithLocale:[NSLocale currentLocale]];
+  [button setTitle:capsTitle forState:UIControlStateNormal];
+  [button setTitle:capsTitle forState:UIControlStateHighlighted];
+}
+
 - (void)runDownloadCompleteAnimation {
   [_documentContainer
       setBackgroundColor:UIColorFromRGB(kDownloadedDocumentColor)];
-
-  // If Google Drive is not installed and the metadata is present that knows how
-  // to install it, display the "Install Google Drive" button.
-  NSString* driveAppId = base::SysUTF8ToNSString(kIOSAppStoreGoogleDrive);
-  NSArray* matchingApps =
-      [ios::GetChromeBrowserProvider()->GetNativeAppWhitelistManager()
-          filteredAppsUsingBlock:^BOOL(const id<NativeAppMetadata> app,
-                                       BOOL* stop) {
-            if ([[app appId] isEqualToString:driveAppId]) {
-              *stop = YES;
-              return YES;
-            }
-            return NO;
-          }];
-  BOOL showGoogleDriveButton = NO;
-  if (matchingApps.count == 1U) {
-    self.googleDriveMetadata = matchingApps[0];
-    showGoogleDriveButton = ![self.googleDriveMetadata isInstalled];
-  }
 
   CAKeyframeAnimation* animation =
       [CAKeyframeAnimation animationWithKeyPath:@"transform"];
@@ -1358,7 +1322,11 @@ class DownloadContentDelegate : public URLFetcherDelegate {
   [_documentContainer.layer addAnimation:animation
                                   forKey:kDocumentPopAnimationKey];
 
-  base::WeakNSObject<UIImageView> weakFoldIcon(_foldIcon);
+  // Displays the "Install Google Drive" button if it is not installed.
+  NSURL* googleDriveURL = [NSURL URLWithString:kGoogleDriveURL];
+  BOOL showGoogleDriveButton =
+      ![[UIApplication sharedApplication] canOpenURL:googleDriveURL];
+  __weak UIImageView* weakFoldIcon = _foldIcon;
   [UIView transitionWithView:_foldIcon
       duration:kDownloadCompleteAnimationDuration
       options:UIViewAnimationOptionTransitionCrossDissolve
@@ -1475,6 +1443,9 @@ class DownloadContentDelegate : public URLFetcherDelegate {
   if (!_fetcher->GetStatus().is_success() ||
       _fetcher->GetResponseCode() != 200) {
     [self displayError];
+    // Log the Net Error code.
+    UMA_HISTOGRAM_SPARSE_SLOWLY(kUMADownloadFileNetError,
+                                -_fetcher->GetStatus().error());
     return;
   }
 
@@ -1485,7 +1456,7 @@ class DownloadContentDelegate : public URLFetcherDelegate {
 
   if (_totalFileSize == kNoFileSizeGiven) {
     [_activityIndicator stopAnimating];
-    _activityIndicator.reset();
+    _activityIndicator = nil;
 
     // Display the file size.
     NSError* error = nil;
@@ -1577,12 +1548,15 @@ class DownloadContentDelegate : public URLFetcherDelegate {
 }
 
 - (void)openGoogleDriveInAppStore {
-  [[InstallationNotifier sharedInstance]
-      registerForInstallationNotifications:self
-                              withSelector:@selector(hideGoogleDriveButton)
-                                 forScheme:[_googleDriveMetadata anyScheme]];
-
-  [_storeKitLauncher openAppStore:[_googleDriveMetadata appId]];
+  StoreKitTabHelper* helper = StoreKitTabHelper::FromWebState(_webState);
+  if (helper) {
+    NSString* scheme = [[NSURL URLWithString:kGoogleDriveURL] scheme];
+    [[InstallationNotifier sharedInstance]
+        registerForInstallationNotifications:self
+                                withSelector:@selector(hideGoogleDriveButton)
+                                   forScheme:scheme];
+    helper->OpenAppStore(kGoogleDriveAppStoreId);
+  }
 }
 
 - (NSString*)getNetworkActivityKey {
@@ -1601,8 +1575,9 @@ class DownloadContentDelegate : public URLFetcherDelegate {
 }
 
 + (void)clearDownloadsDirectory {
-  web::WebThread::PostBlockingPoolTask(
-      FROM_HERE, base::BindBlock(^{
+  base::PostTaskWithTraits(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::BindBlockArc(^{
         base::FilePath downloadsDirectory;
         if (![DownloadManagerController
                 fetchDownloadsDirectoryFilePath:&downloadsDirectory]) {

@@ -84,7 +84,7 @@ cr.define('print_preview', function() {
      * @private
      */
     this.listItems_ = [];
-  };
+  }
 
   /**
    * Enumeration of event types dispatched by the destination list.
@@ -145,10 +145,10 @@ cr.define('print_preview', function() {
       numItems = Math.min(numItems, this.destinations_.length);
       var headerHeight =
           this.getChildElement('.destination-list > header').offsetHeight;
-      return headerHeight + (numItems > 0 ?
-          numItems * DestinationList.HEIGHT_OF_ITEM_ :
-          // To account for "No destinations found" message.
-          DestinationList.HEIGHT_OF_ITEM_);
+      return headerHeight +
+          (numItems > 0 ? numItems * DestinationList.HEIGHT_OF_ITEM_ :
+                          // To account for "No destinations found" message.
+               DestinationList.HEIGHT_OF_ITEM_);
     },
 
     /**
@@ -181,8 +181,8 @@ cr.define('print_preview', function() {
 
     /** @override */
     createDom: function() {
-      this.setElementInternal(this.cloneTemplateInternal(
-          'destination-list-template'));
+      this.setElementInternal(
+          this.cloneTemplateInternal('destination-list-template'));
       this.getChildElement('.title').textContent = this.title_;
       if (this.actionLinkLabel_) {
         var actionLinkEl = this.getChildElement('.action-link');
@@ -195,12 +195,10 @@ cr.define('print_preview', function() {
     enterDocument: function() {
       print_preview.Component.prototype.enterDocument.call(this);
       this.tracker.add(
-          this.getChildElement('.action-link'),
-          'click',
+          this.getChildElement('.action-link'), 'click',
           this.onActionLinkClick_.bind(this));
       this.tracker.add(
-          this.getChildElement('.show-all-button'),
-          'click',
+          this.getChildElement('.show-all-button'), 'click',
           this.setIsShowAll.bind(this, true));
     },
 
@@ -222,6 +220,18 @@ cr.define('print_preview', function() {
     updateSearchQuery: function(query) {
       this.query_ = query;
       this.renderDestinations_();
+    },
+
+    /**
+     * @param {string} destinationId The ID of the destination.
+     * @return {?print_preview.DestinationListItem} The found destination list
+     *     item or null if not found.
+     */
+    getDestinationItem: function(destinationId) {
+      return this.listItems_.find(function(listItem) {
+        return listItem.destination.id == destinationId;
+      }) ||
+          null;
     },
 
     /**
@@ -251,7 +261,7 @@ cr.define('print_preview', function() {
         this.renderDestinationsList_(this.destinations_);
       } else {
         var filteredDests = this.destinations_.filter(function(destination) {
-          return destination.matches(this.query_);
+          return destination.matches(assert(this.query_));
         }, this);
         this.renderDestinationsList_(filteredDests);
       }
@@ -265,8 +275,9 @@ cr.define('print_preview', function() {
      */
     renderDestinationsList_: function(destinations) {
       // Update item counters, footers and other misc controls.
-      setIsVisible(this.getChildElement('.no-destinations-message'),
-                   destinations.length == 0);
+      setIsVisible(
+          this.getChildElement('.no-destinations-message'),
+          destinations.length == 0);
       setIsVisible(this.getChildElement('.destination-list > footer'), false);
       var numItems = destinations.length;
       if (destinations.length > this.shortListSize_ && !this.isShowAll_) {
@@ -295,15 +306,20 @@ cr.define('print_preview', function() {
       });
       // Update the existing items, add the new ones (preserve the focused one).
       var listEl = this.getChildElement('.destination-list > ul');
-      var focusedEl = listEl.querySelector(':focus');
+      // We need to use activeElement instead of :focus selector, which doesn't
+      // work in an inactive page. See crbug.com/723579.
+      var focusedEl = listEl.contains(document.activeElement) ?
+          document.activeElement :
+          null;
       for (var i = 0; i < numItems; i++) {
-        var listItem = visibleListItems[destinations[i].id];
+        var destination = assert(destinations[i]);
+        var listItem = visibleListItems[destination.id];
         if (listItem) {
           // Destination ID is the same, but it can be registered to a different
           // user account, hence passing it to the item update.
-          this.updateListItem_(listEl, listItem, focusedEl, destinations[i]);
+          this.updateListItem_(listEl, listItem, focusedEl, destination);
         } else {
-          this.renderListItem_(listEl, destinations[i]);
+          this.renderListItem_(listEl, destination);
         }
       }
     },
@@ -320,7 +336,8 @@ cr.define('print_preview', function() {
 
       var itemEl = listItem.getElement();
       // Preserve focused inner element, if there's one.
-      var focusedInnerEl = focusedEl ? itemEl.querySelector(':focus') : null;
+      var focusedInnerEl =
+          focusedEl && itemEl.contains(focusedEl) ? focusedEl : null;
       if (focusedEl)
         itemEl.classList.add('moving');
       // Move it to the end of the list.
@@ -342,7 +359,7 @@ cr.define('print_preview', function() {
       var listItem = new print_preview.DestinationListItem(
           this.eventTarget_, destination, this.query_);
       this.addChild(listItem);
-      listItem.render(listEl);
+      listItem.render(assert(listEl));
       this.listItems_.push(listItem);
     },
 
@@ -352,13 +369,11 @@ cr.define('print_preview', function() {
      * @private
      */
     onActionLinkClick_: function() {
-      cr.dispatchSimpleEvent(this,
-                             DestinationList.EventType.ACTION_LINK_ACTIVATED);
+      cr.dispatchSimpleEvent(
+          this, DestinationList.EventType.ACTION_LINK_ACTIVATED);
     }
   };
 
   // Export
-  return {
-    DestinationList: DestinationList
-  };
+  return {DestinationList: DestinationList};
 });

@@ -94,6 +94,10 @@ PermissionRequestType PermissionUtil::GetRequestType(ContentSettingsType type) {
       return PermissionRequestType::PERMISSION_PROTECTED_MEDIA_IDENTIFIER;
     case CONTENT_SETTINGS_TYPE_PLUGINS:
       return PermissionRequestType::PERMISSION_FLASH;
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
+      return PermissionRequestType::PERMISSION_MEDIASTREAM_MIC;
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
+      return PermissionRequestType::PERMISSION_MEDIASTREAM_CAMERA;
     default:
       NOTREACHED();
       return PermissionRequestType::UNKNOWN;
@@ -137,9 +141,39 @@ bool PermissionUtil::GetPermissionType(ContentSettingsType type,
   return true;
 }
 
-bool PermissionUtil::ShouldShowPersistenceToggle() {
-  return base::FeatureList::IsEnabled(
-      features::kDisplayPersistenceToggleInPermissionPrompts);
+ContentSettingsType PermissionUtil::GetContentSettingsStorageType(
+    ContentSettingsType type) {
+  if (type == CONTENT_SETTINGS_TYPE_PUSH_MESSAGING)
+    return CONTENT_SETTINGS_TYPE_NOTIFICATIONS;
+  return type;
+}
+
+bool PermissionUtil::IsPermission(ContentSettingsType type) {
+  switch (type) {
+    case CONTENT_SETTINGS_TYPE_GEOLOCATION:
+    case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
+    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
+    case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
+    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
+    case CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC:
+    case CONTENT_SETTINGS_TYPE_PLUGINS:
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+    case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
+#endif
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool PermissionUtil::ShouldShowPersistenceToggle(ContentSettingsType type) {
+  return (type == CONTENT_SETTINGS_TYPE_GEOLOCATION ||
+          type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC ||
+          type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA) &&
+         base::FeatureList::IsEnabled(
+             features::kDisplayPersistenceToggleInPermissionPrompts);
 }
 
 PermissionUtil::ScopedRevocationReporter::ScopedRevocationReporter(

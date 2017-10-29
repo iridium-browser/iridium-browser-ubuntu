@@ -27,7 +27,7 @@
 #define SkiaImageFilterBuilder_h
 
 #include "platform/PlatformExport.h"
-#include "platform/graphics/ColorSpace.h"
+#include "platform/graphics/InterpolationSpace.h"
 #include "platform/graphics/paint/PaintRecord.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
@@ -37,24 +37,29 @@ namespace blink {
 
 class BoxReflection;
 class FilterEffect;
+class FloatRect;
 
 namespace SkiaImageFilterBuilder {
 
-PLATFORM_EXPORT sk_sp<SkImageFilter>
-build(FilterEffect*, ColorSpace, bool requiresPMColorValidation = true);
+PLATFORM_EXPORT sk_sp<SkImageFilter> Build(
+    FilterEffect*,
+    InterpolationSpace,
+    bool requires_pm_color_validation = true);
 
-PLATFORM_EXPORT sk_sp<SkImageFilter> transformColorSpace(
+PLATFORM_EXPORT sk_sp<SkImageFilter> TransformInterpolationSpace(
     sk_sp<SkImageFilter> input,
-    ColorSpace srcColorSpace,
-    ColorSpace dstColorSpace);
+    InterpolationSpace src_interpolation_space,
+    InterpolationSpace dst_interpolation_space);
 
-PLATFORM_EXPORT void populateSourceGraphicImageFilters(
-    FilterEffect* sourceGraphic,
+PLATFORM_EXPORT void PopulateSourceGraphicImageFilters(
+    FilterEffect* source_graphic,
     sk_sp<SkImageFilter> input,
-    ColorSpace inputColorSpace);
-PLATFORM_EXPORT void buildSourceGraphic(FilterEffect*, sk_sp<PaintRecord>);
+    InterpolationSpace input_interpolation_space);
+PLATFORM_EXPORT void BuildSourceGraphic(FilterEffect*,
+                                        sk_sp<PaintRecord>,
+                                        const FloatRect& record_bounds);
 
-PLATFORM_EXPORT sk_sp<SkImageFilter> buildBoxReflectFilter(
+PLATFORM_EXPORT sk_sp<SkImageFilter> BuildBoxReflectFilter(
     const BoxReflection&,
     sk_sp<SkImageFilter> input);
 

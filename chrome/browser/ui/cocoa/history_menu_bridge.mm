@@ -11,6 +11,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_HISTORY_MENU
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -18,7 +19,6 @@
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #import "chrome/browser/ui/cocoa/history_menu_cocoa_controller.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
 #include "components/grit/components_scaled_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -104,6 +104,7 @@ HistoryMenuBridge::HistoryMenuBridge(Profile* profile)
   NSMenuItem* item = [HistoryMenu() itemWithTag:IDC_SHOW_HISTORY];
   [item setImage:rb.GetNativeImageNamed(IDR_HISTORY_FAVICON).ToNSImage()];
 
+  [HistoryMenu() setDelegate:controller_];
 }
 
 // Note that all requests sent to either the history service or the favicon
@@ -238,6 +239,15 @@ HistoryMenuBridge::HistoryItem* HistoryMenuBridge::HistoryItemForMenuItem(
   return NULL;
 }
 
+void HistoryMenuBridge::SetIsMenuOpen(bool flag) {
+  is_menu_open_ = flag;
+  if (!is_menu_open_ && need_recreate_) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(&HistoryMenuBridge::CreateMenu, base::Unretained(this)));
+  }
+}
+
 history::HistoryService* HistoryMenuBridge::service() {
   return history_service_;
 }
@@ -322,7 +332,8 @@ void HistoryMenuBridge::Init() {
 
 void HistoryMenuBridge::CreateMenu() {
   // If we're currently running CreateMenu(), wait until it finishes.
-  if (create_in_progress_)
+  // If the menu is currently open, wait until it closes.
+  if (create_in_progress_ || is_menu_open_)
     return;
   create_in_progress_ = true;
   need_recreate_ = false;

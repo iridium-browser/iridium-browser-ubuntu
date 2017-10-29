@@ -32,7 +32,7 @@ class AwRenderFrameExt : public content::RenderFrameObserver {
 
   // RenderFrameObserver:
   void DidCommitProvisionalLoad(bool is_new_navigation,
-                                bool is_same_page_navigation) override;
+                                bool is_same_document_navigation) override;
 
   bool OnMessageReceived(const IPC::Message& message) override;
   void FocusedNodeChanged(const blink::WebNode& node) override;
@@ -60,7 +60,7 @@ class AwRenderFrameExt : public content::RenderFrameObserver {
   DISALLOW_COPY_AND_ASSIGN(AwRenderFrameExt);
 };
 
-}
+}  // namespace android_webview
 
 #endif  // ANDROID_WEBVIEW_RENDERER_AW_RENDER_FRAME_EXT_H_
 

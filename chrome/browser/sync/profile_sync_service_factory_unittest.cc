@@ -20,10 +20,20 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/app_list/app_list_switches.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/arc/arc_util.h"
+#endif
+
 using browser_sync::ProfileSyncService;
 using syncer::DataTypeController;
 
 class ProfileSyncServiceFactoryTest : public testing::Test {
+ public:
+  void SetUp() override {
+    // Some services will only be created if there is a WebDataService.
+    profile_->CreateWebDataService();
+  }
+
  protected:
   ProfileSyncServiceFactoryTest() : profile_(new TestingProfile()) {}
 
@@ -51,7 +61,8 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
 #endif  // !OS_ANDROID
 
 #if defined(OS_CHROMEOS)
-    datatypes.push_back(syncer::ARC_PACKAGE);
+    if (arc::IsArcAllowedForProfile(profile()))
+      datatypes.push_back(syncer::ARC_PACKAGE);
     datatypes.push_back(syncer::PRINTERS);
 #endif  // OS_CHROMEOS
 
@@ -73,6 +84,7 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
     datatypes.push_back(syncer::SUPERVISED_USER_SETTINGS);
     datatypes.push_back(syncer::SUPERVISED_USER_WHITELISTS);
     datatypes.push_back(syncer::TYPED_URLS);
+    datatypes.push_back(syncer::USER_EVENTS);
 
     return datatypes;
   }
@@ -107,7 +119,7 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
 
  private:
   content::TestBrowserThreadBundle thread_bundle_;
-  std::unique_ptr<Profile> profile_;
+  std::unique_ptr<TestingProfile> profile_;
 };
 
 // Verify that the disable sync flag disables creation of the sync service.

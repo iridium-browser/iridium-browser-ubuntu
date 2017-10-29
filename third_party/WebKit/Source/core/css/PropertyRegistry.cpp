@@ -6,23 +6,15 @@
 
 namespace blink {
 
-void PropertyRegistry::registerProperty(
-    const AtomicString& name,
-    const CSSSyntaxDescriptor& syntax,
-    bool inherits,
-    const CSSValue* initial,
-    PassRefPtr<CSSVariableData> initialVariableData,
-    CSSInterpolationTypes cssInterpolationTypes) {
-  DCHECK(!registration(name));
-  m_registrations.set(
-      name, new PropertyRegistration(syntax, inherits, initial,
-                                     std::move(initialVariableData),
-                                     std::move(cssInterpolationTypes)));
+void PropertyRegistry::RegisterProperty(const AtomicString& name,
+                                        PropertyRegistration& registration) {
+  DCHECK(!Registration(name));
+  registrations_.Set(name, &registration);
 }
 
-const PropertyRegistration* PropertyRegistry::registration(
+const PropertyRegistration* PropertyRegistry::Registration(
     const AtomicString& name) const {
-  return m_registrations.at(name);
+  return registrations_.at(name);
 }
 
 }  // namespace blink

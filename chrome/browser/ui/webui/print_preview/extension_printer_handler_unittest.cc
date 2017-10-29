@@ -27,6 +27,7 @@
 #include "chrome/browser/printing/pwg_raster_converter.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/version_info/version_info.h"
+#include "content/public/test/test_utils.h"
 #include "device/base/mock_device_client.h"
 #include "device/usb/mock_usb_device.h"
 #include "device/usb/mock_usb_service.h"
@@ -202,12 +203,9 @@ void RecordPrinterList(size_t* call_count,
 // Used as a callback to StartGetCapability in tests.
 // Increases |*call_count| and records values returned by StartGetCapability.
 void RecordCapability(size_t* call_count,
-                      std::string* destination_id_out,
                       std::unique_ptr<base::DictionaryValue>* capability_out,
-                      const std::string& destination_id,
                       const base::DictionaryValue& capability) {
   ++(*call_count);
-  *destination_id_out = destination_id;
   capability_out->reset(capability.DeepCopy());
 }
 
@@ -608,12 +606,10 @@ TEST_F(ExtensionPrinterHandlerTest, GetUsbPrinters) {
 
 TEST_F(ExtensionPrinterHandlerTest, GetCapability) {
   size_t call_count = 0;
-  std::string destination_id;
   std::unique_ptr<base::DictionaryValue> capability;
 
   extension_printer_handler_->StartGetCapability(
-      kPrinterId,
-      base::Bind(&RecordCapability, &call_count, &destination_id, &capability));
+      kPrinterId, base::Bind(&RecordCapability, &call_count, &capability));
 
   EXPECT_EQ(0u, call_count);
 
@@ -630,7 +626,6 @@ TEST_F(ExtensionPrinterHandlerTest, GetCapability) {
   fake_api->TriggerNextGetCapabilityCallback(*original_capability);
 
   EXPECT_EQ(1u, call_count);
-  EXPECT_EQ(kPrinterId, destination_id);
   ASSERT_TRUE(capability.get());
   EXPECT_TRUE(capability->Equals(original_capability.get()))
       << *capability << ", expected: " << *original_capability;
@@ -638,12 +633,10 @@ TEST_F(ExtensionPrinterHandlerTest, GetCapability) {
 
 TEST_F(ExtensionPrinterHandlerTest, GetCapability_Reset) {
   size_t call_count = 0;
-  std::string destination_id;
   std::unique_ptr<base::DictionaryValue> capability;
 
   extension_printer_handler_->StartGetCapability(
-      kPrinterId,
-      base::Bind(&RecordCapability, &call_count, &destination_id, &capability));
+      kPrinterId, base::Bind(&RecordCapability, &call_count, &capability));
 
   EXPECT_EQ(0u, call_count);
 
@@ -787,7 +780,7 @@ TEST_F(ExtensionPrinterHandlerTest, Print_Pwg) {
 
   EXPECT_EQ(0u, call_count);
 
-  base::RunLoop().RunUntilIdle();
+  content::RunAllBlockingPoolTasksUntilIdle();
 
   FakePrinterProviderAPI* fake_api = GetPrinterProviderAPI();
   ASSERT_TRUE(fake_api);
@@ -841,7 +834,7 @@ TEST_F(ExtensionPrinterHandlerTest, Print_Pwg_NonDefaultSettings) {
 
   EXPECT_EQ(0u, call_count);
 
-  base::RunLoop().RunUntilIdle();
+  content::RunAllBlockingPoolTasksUntilIdle();
 
   FakePrinterProviderAPI* fake_api = GetPrinterProviderAPI();
   ASSERT_TRUE(fake_api);
@@ -895,7 +888,7 @@ TEST_F(ExtensionPrinterHandlerTest, Print_Pwg_Reset) {
 
   EXPECT_EQ(0u, call_count);
 
-  base::RunLoop().RunUntilIdle();
+  content::RunAllBlockingPoolTasksUntilIdle();
 
   FakePrinterProviderAPI* fake_api = GetPrinterProviderAPI();
   ASSERT_TRUE(fake_api);

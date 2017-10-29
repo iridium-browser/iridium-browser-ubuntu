@@ -4,7 +4,7 @@
 
 #include "ash/shelf/shelf_bezel_event_handler.h"
 
-#include "ash/common/shelf/wm_shelf.h"
+#include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
@@ -16,13 +16,13 @@
 
 namespace ash {
 
-ShelfBezelEventHandler::ShelfBezelEventHandler(WmShelf* shelf)
+ShelfBezelEventHandler::ShelfBezelEventHandler(Shelf* shelf)
     : shelf_(shelf), in_touch_drag_(false) {
-  Shell::GetInstance()->AddPreTargetHandler(this);
+  Shell::Get()->AddPreTargetHandler(this);
 }
 
 ShelfBezelEventHandler::~ShelfBezelEventHandler() {
-  Shell::GetInstance()->RemovePreTargetHandler(this);
+  Shell::Get()->RemovePreTargetHandler(this);
 }
 
 void ShelfBezelEventHandler::OnGestureEvent(ui::GestureEvent* event) {
@@ -54,7 +54,7 @@ void ShelfBezelEventHandler::OnGestureEvent(ui::GestureEvent* event) {
 
 bool ShelfBezelEventHandler::IsShelfOnBezel(const gfx::Rect& screen,
                                             const gfx::Point& point) const {
-  switch (shelf_->GetAlignment()) {
+  switch (shelf_->alignment()) {
     case SHELF_ALIGNMENT_BOTTOM:
     case SHELF_ALIGNMENT_BOTTOM_LOCKED:
       return point.y() >= screen.bottom();

@@ -2,24 +2,28 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import glob
-import logging
 import os
 import re
 import sys
 
 from gpu_tests import gpu_integration_test
 from gpu_tests import cloud_storage_integration_test_base
+from gpu_tests import path_util
 from gpu_tests import pixel_expectations
 from gpu_tests import pixel_test_pages
+from gpu_tests import color_profile_manager
 
 from py_utils import cloud_storage
 from telemetry.util import image_util
 
+gpu_relative_path = "content/test/data/gpu/"
+gpu_data_dir = os.path.join(path_util.GetChromiumSrcDir(), gpu_relative_path)
 
-test_data_dir = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), '..', '..', 'data', 'gpu'))
+default_reference_image_dir = os.path.join(gpu_data_dir, 'gpu_reference')
 
-default_reference_image_dir = os.path.join(test_data_dir, 'gpu_reference')
+test_data_dirs = [gpu_data_dir,
+                  os.path.join(
+                      path_util.GetChromiumSrcDir(), 'media/test/data')]
 
 test_harness_script = r"""
   var domAutomationController = {};
@@ -45,18 +49,6 @@ test_harness_script = r"""
 
 class PixelIntegrationTest(
     cloud_storage_integration_test_base.CloudStorageIntegrationTestBase):
-
-  # We store a deep copy of the original browser finder options in
-  # order to be able to restart the browser multiple times, with a
-  # different set of command line arguments each time.
-  _original_finder_options = None
-
-  # We keep track of the set of command line arguments used to launch
-  # the browser most recently in order to figure out whether we need
-  # to relaunch it, if a new pixel test requires a different set of
-  # arguments.
-  _last_launched_browser_args = set()
-
   @classmethod
   def Name(cls):
     """The name by which this test is invoked on the command line."""
@@ -64,37 +56,27 @@ class PixelIntegrationTest(
 
   @classmethod
   def SetUpProcess(cls):
-    super(cls, PixelIntegrationTest).SetUpProcess()
-    cls._original_finder_options = cls._finder_options.Copy()
-    cls.CustomizeBrowserArgs([])
+    color_profile_manager.ForceUntilExitSRGB()
+    super(PixelIntegrationTest, cls).SetUpProcess()
+    cls.CustomizeBrowserArgs(cls._AddDefaultArgs([]))
     cls.StartBrowser()
-    cls.SetStaticServerDirs([test_data_dir])
+    cls.SetStaticServerDirs(test_data_dirs)
 
-  @classmethod
-  def CustomizeBrowserArgs(cls, browser_args):
+  @staticmethod
+  def _AddDefaultArgs(browser_args):
     if not browser_args:
       browser_args = []
-    cls._finder_options = cls._original_finder_options.Copy()
-    browser_options = cls._finder_options.browser_options
-    # All tests receive these options. They aren't recorded in the
-    # _last_launched_browser_args.
-    browser_options.AppendExtraBrowserArgs(['--enable-gpu-benchmarking',
-                                            '--test-type=gpu'])
-    # Append the new arguments.
-    browser_options.AppendExtraBrowserArgs(browser_args)
-    cls._last_launched_browser_args = set(browser_args)
-    cls.SetBrowserOptions(cls._finder_options)
+    # All tests receive the following options.
+    return [
+      '--force-color-profile=srgb',
+      '--enable-features=ColorCorrectRendering',
+      '--enable-gpu-benchmarking',
+      '--test-type=gpu'] + browser_args
 
   @classmethod
-  def RestartBrowserIfNecessaryWithArgs(cls, browser_args):
-    if not browser_args:
-      browser_args = []
-    if set(browser_args) != cls._last_launched_browser_args:
-      logging.warning('Restarting browser with arguments: ' + str(browser_args))
-      cls.StopBrowser()
-      cls.ResetGpuInfo()
-      cls.CustomizeBrowserArgs(browser_args)
-      cls.StartBrowser()
+  def StopBrowser(cls):
+    super(PixelIntegrationTest, cls).StopBrowser()
+    cls.ResetGpuInfo()
 
   @classmethod
   def AddCommandlineArgs(cls, parser):
@@ -118,15 +100,18 @@ class PixelIntegrationTest(
     pages += pixel_test_pages.ExperimentalCanvasFeaturesPages(name)
     if sys.platform.startswith('darwin'):
       pages += pixel_test_pages.MacSpecificPages(name)
+    if sys.platform.startswith('win'):
+      pages += pixel_test_pages.DirectCompositionPages(name)
     for p in pages:
-      yield(p.name, p.url, (p))
+      yield(p.name, gpu_relative_path + p.url, (p))
 
   def RunActualGpuTest(self, test_path, *args):
     page = args[0]
     # Some pixel tests require non-standard browser arguments. Need to
     # check before running each page that it can run in the current
     # browser instance.
-    self.RestartBrowserIfNecessaryWithArgs(page.browser_args)
+    self.RestartBrowserIfNecessaryWithArgs(self._AddDefaultArgs(
+      page.browser_args))
     url = self.UrlOfStaticFilePath(test_path)
     # This property actually comes off the class, not 'self'.
     tab = self.tab
@@ -143,8 +128,9 @@ class PixelIntegrationTest(
     dpr = tab.EvaluateJavaScript('window.devicePixelRatio')
     if page.test_rect:
       screenshot = image_util.Crop(
-          screenshot, page.test_rect[0] * dpr, page.test_rect[1] * dpr,
-          page.test_rect[2] * dpr, page.test_rect[3] * dpr)
+          screenshot, int(page.test_rect[0] * dpr),
+          int(page.test_rect[1] * dpr), int(page.test_rect[2] * dpr),
+          int(page.test_rect[3] * dpr))
     if page.expected_colors:
       # Use expected colors instead of ref images for validation.
       self._ValidateScreenshotSamples(

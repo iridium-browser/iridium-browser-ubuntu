@@ -5,12 +5,13 @@
 #ifndef MediaCapabilities_h
 #define MediaCapabilities_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Visitor.h"
 
 namespace blink {
 
-class MediaConfiguration;
+class MediaDecodingConfiguration;
+class MediaEncodingConfiguration;
 class ScriptPromise;
 class ScriptState;
 
@@ -22,7 +23,8 @@ class MediaCapabilities final
  public:
   MediaCapabilities();
 
-  ScriptPromise query(ScriptState*, const MediaConfiguration&);
+  ScriptPromise decodingInfo(ScriptState*, const MediaDecodingConfiguration&);
+  ScriptPromise encodingInfo(ScriptState*, const MediaEncodingConfiguration&);
 
   DECLARE_VIRTUAL_TRACE();
 };

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/signin/sync_confirmation_handler.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/test/user_action_tester.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
@@ -34,7 +35,8 @@ const double kDefaultDialogHeight = 350.0;
 
 class TestingSyncConfirmationHandler : public SyncConfirmationHandler {
  public:
-  explicit TestingSyncConfirmationHandler(content::WebUI* web_ui) {
+  TestingSyncConfirmationHandler(Browser* browser, content::WebUI* web_ui)
+      : SyncConfirmationHandler(browser) {
     set_web_ui(web_ui);
   }
 
@@ -43,26 +45,68 @@ class TestingSyncConfirmationHandler : public SyncConfirmationHandler {
   using SyncConfirmationHandler::HandleInitializedWithSize;
   using SyncConfirmationHandler::HandleGoToSettings;
   using SyncConfirmationHandler::SetUserImageURL;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestingSyncConfirmationHandler);
+};
+
+class TestingOneClickSigninSyncStarter : public OneClickSigninSyncStarter {
+ public:
+  TestingOneClickSigninSyncStarter(Profile* profile,
+                                   Browser* browser,
+                                   const std::string& gaia_id,
+                                   const std::string& email,
+                                   const std::string& password,
+                                   const std::string& refresh_token,
+                                   ProfileMode profile_mode,
+                                   StartSyncMode start_mode,
+                                   content::WebContents* web_contents,
+                                   ConfirmationRequired display_confirmation,
+                                   const GURL& current_url,
+                                   const GURL& continue_url,
+                                   Callback callback)
+      : OneClickSigninSyncStarter(profile,
+                                  browser,
+                                  gaia_id,
+                                  email,
+                                  password,
+                                  refresh_token,
+                                  profile_mode,
+                                  start_mode,
+                                  web_contents,
+                                  display_confirmation,
+                                  current_url,
+                                  continue_url,
+                                  callback) {}
+
+ protected:
+  void ShowSyncSetupSettingsSubpage() override {
+    // Intentionally don't open a tab to settings.
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestingOneClickSigninSyncStarter);
 };
 
 class SyncConfirmationHandlerTest : public BrowserWithTestWindowTest {
  public:
-  SyncConfirmationHandlerTest() : did_user_explicitly_interact(false),
-                                  web_ui_(new content::TestWebUI) {}
+  SyncConfirmationHandlerTest()
+      : did_user_explicitly_interact(false), web_ui_(new content::TestWebUI) {}
   void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
     chrome::NewTab(browser());
     web_ui()->set_web_contents(
         browser()->tab_strip_model()->GetActiveWebContents());
 
-    auto handler = base::MakeUnique<TestingSyncConfirmationHandler>(web_ui());
+    auto handler =
+        base::MakeUnique<TestingSyncConfirmationHandler>(browser(), web_ui());
     handler_ = handler.get();
-    sync_confirmation_ui_.reset(
-        new SyncConfirmationUI(web_ui(), std::move(handler)));
+    sync_confirmation_ui_.reset(new SyncConfirmationUI(web_ui()));
+    web_ui()->AddMessageHandler(std::move(handler));
 
     // This dialog assumes the signin flow was completed, which kicks off the
     // SigninManager.
-    new OneClickSigninSyncStarter(
+    new TestingOneClickSigninSyncStarter(
         profile(), browser(), "gaia", "foo@example.com", "password",
         "refresh_token", OneClickSigninSyncStarter::CURRENT_PROFILE,
         OneClickSigninSyncStarter::SYNC_WITH_DEFAULT_SETTINGS, nullptr,
@@ -122,14 +166,16 @@ class SyncConfirmationHandlerTest : public BrowserWithTestWindowTest {
     return builder.Build().release();
   }
 
-protected:
- bool did_user_explicitly_interact;
+ protected:
+  bool did_user_explicitly_interact;
 
-private:
- std::unique_ptr<content::TestWebUI> web_ui_;
- std::unique_ptr<SyncConfirmationUI> sync_confirmation_ui_;
- TestingSyncConfirmationHandler* handler_;  // Not owned.
- base::UserActionTester user_action_tester_;
+ private:
+  std::unique_ptr<content::TestWebUI> web_ui_;
+  std::unique_ptr<SyncConfirmationUI> sync_confirmation_ui_;
+  TestingSyncConfirmationHandler* handler_;  // Not owned.
+  base::UserActionTester user_action_tester_;
+
+  DISALLOW_COPY_AND_ASSIGN(SyncConfirmationHandlerTest);
 };
 
 TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReady) {
@@ -144,7 +190,7 @@ TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReady) {
       "http://picture.example.com/picture.jpg");
 
   base::ListValue args;
-  args.Set(0, new base::Value(kDefaultDialogHeight));
+  args.Set(0, base::MakeUnique<base::Value>(kDefaultDialogHeight));
   handler()->HandleInitializedWithSize(&args);
   EXPECT_EQ(2U, web_ui()->call_data().size());
 
@@ -164,16 +210,15 @@ TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReady) {
   std::string original_picture_url =
       AccountTrackerServiceFactory::GetForProfile(profile())->
           GetAccountInfo("gaia").picture_url;
-  GURL picture_url_with_size;
-  EXPECT_TRUE(profiles::GetImageURLWithThumbnailSize(GURL(original_picture_url),
-                                                     kExpectedProfileImageSize,
-                                                     &picture_url_with_size));
+  GURL picture_url_with_size = profiles::GetImageURLWithOptions(
+      GURL(original_picture_url), kExpectedProfileImageSize,
+      false /* no_silhouette */);
   EXPECT_EQ(picture_url_with_size.spec(), passed_picture_url);
 }
 
 TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReadyLater) {
   base::ListValue args;
-  args.Set(0, new base::Value(kDefaultDialogHeight));
+  args.Set(0, base::MakeUnique<base::Value>(kDefaultDialogHeight));
   handler()->HandleInitializedWithSize(&args);
   EXPECT_EQ(2U, web_ui()->call_data().size());
 
@@ -215,17 +260,16 @@ TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReadyLater) {
   std::string original_picture_url =
       AccountTrackerServiceFactory::GetForProfile(profile())->
           GetAccountInfo("gaia").picture_url;
-  GURL picture_url_with_size;
-  EXPECT_TRUE(profiles::GetImageURLWithThumbnailSize(GURL(original_picture_url),
-                                                     kExpectedProfileImageSize,
-                                                     &picture_url_with_size));
+  GURL picture_url_with_size = profiles::GetImageURLWithOptions(
+      GURL(original_picture_url), kExpectedProfileImageSize,
+      false /* no_silhouette */);
   EXPECT_EQ(picture_url_with_size.spec(), passed_picture_url);
 }
 
 TEST_F(SyncConfirmationHandlerTest,
        TestSetImageIgnoredIfSecondaryAccountUpdated) {
   base::ListValue args;
-  args.Set(0, new base::Value(kDefaultDialogHeight));
+  args.Set(0, base::MakeUnique<base::Value>(kDefaultDialogHeight));
   handler()->HandleInitializedWithSize(&args);
   EXPECT_EQ(2U, web_ui()->call_data().size());
 
@@ -285,4 +329,22 @@ TEST_F(SyncConfirmationHandlerTest, TestHandleConfirm) {
       "Signin_Signin_WithDefaultSyncSettings"));
   EXPECT_EQ(0, user_action_tester()->GetActionCount(
       "Signin_Signin_WithAdvancedSyncSettings"));
+}
+
+TEST_F(SyncConfirmationHandlerTest, TestHandleConfirmWithAdvancedSyncSettings) {
+  EXPECT_FALSE(sync()->IsFirstSetupComplete());
+  EXPECT_TRUE(sync()->IsFirstSetupInProgress());
+
+  handler()->HandleGoToSettings(nullptr);
+  did_user_explicitly_interact = true;
+
+  EXPECT_FALSE(sync()->IsFirstSetupInProgress());
+  EXPECT_FALSE(sync()->IsFirstSetupComplete());
+  EXPECT_TRUE(
+      SigninManagerFactory::GetForProfile(profile())->IsAuthenticated());
+  EXPECT_EQ(0, user_action_tester()->GetActionCount("Signin_Undo_Signin"));
+  EXPECT_EQ(0, user_action_tester()->GetActionCount(
+                   "Signin_Signin_WithDefaultSyncSettings"));
+  EXPECT_EQ(1, user_action_tester()->GetActionCount(
+                   "Signin_Signin_WithAdvancedSyncSettings"));
 }

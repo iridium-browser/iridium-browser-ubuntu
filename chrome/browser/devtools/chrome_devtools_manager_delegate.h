@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
@@ -24,13 +25,13 @@ class ChromeDevToolsManagerDelegate :
  public:
   static char kTypeApp[];
   static char kTypeBackgroundPage[];
-  static char kTypeWebView[];
 
   ChromeDevToolsManagerDelegate();
   ~ChromeDevToolsManagerDelegate() override;
 
  private:
   class HostData;
+  friend class DevToolsManagerDelegateTest;
   using RemoteLocations = std::set<net::HostPortPair>;
 
   // content::DevToolsManagerDelegate implementation.
@@ -38,8 +39,8 @@ class ChromeDevToolsManagerDelegate :
   base::DictionaryValue* HandleCommand(
       content::DevToolsAgentHost* agent_host,
       base::DictionaryValue* command_dict) override;
-  std::string GetTargetType(content::RenderFrameHost* host) override;
-  std::string GetTargetTitle(content::RenderFrameHost* host) override;
+  std::string GetTargetType(content::WebContents* web_contents) override;
+  std::string GetTargetTitle(content::WebContents* web_contents) override;
   scoped_refptr<content::DevToolsAgentHost> CreateNewTarget(
       const GURL& url) override;
   std::string GetDiscoveryPageHTML() override;
@@ -58,6 +59,20 @@ class ChromeDevToolsManagerDelegate :
   std::unique_ptr<base::DictionaryValue> SetRemoteLocations(
       content::DevToolsAgentHost* agent_host,
       int command_id,
+      base::DictionaryValue* params);
+
+  std::unique_ptr<base::DictionaryValue> HandleBrowserCommand(
+      int id,
+      std::string method,
+      base::DictionaryValue* params);
+  static std::unique_ptr<base::DictionaryValue> GetWindowForTarget(
+      int id,
+      base::DictionaryValue* params);
+  static std::unique_ptr<base::DictionaryValue> GetWindowBounds(
+      int id,
+      base::DictionaryValue* params);
+  static std::unique_ptr<base::DictionaryValue> SetWindowBounds(
+      int id,
       base::DictionaryValue* params);
 
   std::unique_ptr<DevToolsNetworkProtocolHandler> network_protocol_handler_;

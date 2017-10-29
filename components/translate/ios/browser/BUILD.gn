@@ -24,6 +24,7 @@ source_set("browser") {
   deps = [
     ":injected_js",
     "//base",
+    "//components/language/core/browser",
     "//components/prefs",
     "//components/translate/core/browser",
     "//components/translate/core/common",
@@ -43,6 +44,7 @@ js_compile_checked("injected_js") {
 }
 
 source_set("unit_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "js_translate_manager_unittest.mm",
@@ -56,8 +58,9 @@ source_set("unit_tests") {
     "//base",
     "//components/prefs:test_support",
     "//components/resources",
-    "//components/translate/core/common",
-    "//ios/web:test_support",
+    "//components/translate/core/browser",
+    "//ios/web/public/test",
+    "//ios/web/public/test/fakes",
     "//testing/gtest",
     "//third_party/ocmock",
     "//ui/base",

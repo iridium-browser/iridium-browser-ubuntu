@@ -11,12 +11,14 @@
 #include "build/build_config.h"
 #include "media/base/media.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/WebThread.h"
 #include "third_party/WebKit/public/platform/scheduler/renderer/renderer_scheduler.h"
 #include "third_party/WebKit/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_android.h"
+#include "media/base/android/media_codec_util.h"
 #include "media/base/android/media_jni_registrar.h"
 #endif
 
@@ -36,8 +38,8 @@ class TestBlinkPlatformSupport : public blink::Platform {
         main_thread_(renderer_scheduler_->CreateMainThread()) {}
   ~TestBlinkPlatformSupport() override;
 
-  blink::WebThread* currentThread() override {
-    EXPECT_TRUE(main_thread_->isCurrentThread());
+  blink::WebThread* CurrentThread() override {
+    EXPECT_TRUE(main_thread_->IsCurrentThread());
     return main_thread_.get();
   }
 
@@ -75,6 +77,9 @@ void BlinkMediaTestSuite::Initialize() {
 
 #if defined(OS_ANDROID)
   media::RegisterJni(base::android::AttachCurrentThread());
+
+  if (media::MediaCodecUtil::IsMediaCodecAvailable())
+    media::EnablePlatformDecoderSupport();
 #endif
 
   // Run this here instead of main() to ensure an AtExitManager is already
@@ -96,7 +101,7 @@ void BlinkMediaTestSuite::Initialize() {
   std::unique_ptr<base::MessageLoop> message_loop;
   if (!base::MessageLoop::current())
     message_loop.reset(new base::MessageLoop());
-  blink::initialize(blink_platform_support_.get());
+  blink::Initialize(blink_platform_support_.get());
 }
 
 int main(int argc, char** argv) {

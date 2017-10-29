@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "core/fxge/cfx_fxgedevice.h"
+#include "core/fxge/skia/fx_skia_device.h"
+#include "core/fxge/cfx_defaultrenderdevice.h"
 #include "core/fxge/cfx_graphstatedata.h"
 #include "core/fxge/cfx_pathdata.h"
 #include "core/fxge/cfx_renderdevice.h"
-#include "core/fxge/skia/fx_skia_device.h"
 #include "fpdfsdk/fsdk_define.h"
 #include "public/fpdfview.h"
-#include "testing/fx_string_testhelpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 
@@ -41,7 +40,7 @@ void CommonTest(CFX_SkiaDeviceDriver* driver, const State& state) {
   charPos[0].m_FontCharWidth = 4;
 
   CFX_Font font;
-  FX_FLOAT fontSize = 1;
+  float fontSize = 1;
   CFX_PathData clipPath, clipPath2;
   clipPath.AppendRect(0, 0, 3, 1);
   clipPath2.AppendRect(0, 0, 2, 1);
@@ -124,8 +123,8 @@ void Harness(void (*Test)(CFX_SkiaDeviceDriver*, const State&),
   if (!bitmap)
     return;
   FPDFBitmap_FillRect(bitmap, 0, 0, w, h, 0x00000000);
-  CFX_FxgeDevice geDevice;
-  CFX_DIBitmap* pBitmap = CFXBitmapFromFPDFBitmap(bitmap);
+  CFX_DefaultRenderDevice geDevice;
+  CFX_RetainPtr<CFX_DIBitmap> pBitmap(CFXBitmapFromFPDFBitmap(bitmap));
   geDevice.Attach(pBitmap, false, nullptr, false);
   CFX_SkiaDeviceDriver* driver =
       static_cast<CFX_SkiaDeviceDriver*>(geDevice.GetDeviceDriver());

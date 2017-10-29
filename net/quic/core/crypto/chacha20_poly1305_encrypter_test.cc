@@ -8,10 +8,10 @@
 
 #include "net/quic/core/crypto/chacha20_poly1305_decrypter.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace {
@@ -70,9 +70,9 @@ namespace test {
 // EncryptWithNonce wraps the |Encrypt| method of |encrypter| to allow passing
 // in an nonce and also to allocate the buffer needed for the ciphertext.
 QuicData* EncryptWithNonce(ChaCha20Poly1305Encrypter* encrypter,
-                           StringPiece nonce,
-                           StringPiece associated_data,
-                           StringPiece plaintext) {
+                           QuicStringPiece nonce,
+                           QuicStringPiece associated_data,
+                           QuicStringPiece plaintext) {
   size_t ciphertext_size = encrypter->GetCiphertextSize(plaintext.length());
   std::unique_ptr<char[]> ciphertext(new char[ciphertext_size]);
 
@@ -84,7 +84,9 @@ QuicData* EncryptWithNonce(ChaCha20Poly1305Encrypter* encrypter,
   return new QuicData(ciphertext.release(), ciphertext_size, true);
 }
 
-TEST(ChaCha20Poly1305EncrypterTest, EncryptThenDecrypt) {
+class ChaCha20Poly1305EncrypterTest : public QuicTest {};
+
+TEST_F(ChaCha20Poly1305EncrypterTest, EncryptThenDecrypt) {
   ChaCha20Poly1305Encrypter encrypter;
   ChaCha20Poly1305Decrypter decrypter;
 
@@ -102,14 +104,14 @@ TEST(ChaCha20Poly1305EncrypterTest, EncryptThenDecrypt) {
   ASSERT_TRUE(encrypter.EncryptPacket(QuicVersionMax(), packet_number,
                                       associated_data, plaintext, encrypted,
                                       &len, arraysize(encrypted)));
-  StringPiece ciphertext(encrypted, len);
+  QuicStringPiece ciphertext(encrypted, len);
   char decrypted[1024];
   ASSERT_TRUE(decrypter.DecryptPacket(QuicVersionMax(), packet_number,
                                       associated_data, ciphertext, decrypted,
                                       &len, arraysize(decrypted)));
 }
 
-TEST(ChaCha20Poly1305EncrypterTest, Encrypt) {
+TEST_F(ChaCha20Poly1305EncrypterTest, Encrypt) {
   for (size_t i = 0; test_vectors[i].key != nullptr; i++) {
     // Decode the test vector.
     string key = QuicTextUtils::HexDecode(test_vectors[i].key);
@@ -125,7 +127,8 @@ TEST(ChaCha20Poly1305EncrypterTest, Encrypt) {
         &encrypter, fixed + iv,
         // This deliberately tests that the encrypter can handle an AAD that
         // is set to nullptr, as opposed to a zero-length, non-nullptr pointer.
-        StringPiece(aad.length() ? aad.data() : nullptr, aad.length()), pt));
+        QuicStringPiece(aad.length() ? aad.data() : nullptr, aad.length()),
+        pt));
     ASSERT_TRUE(encrypted.get());
     EXPECT_EQ(12u, ct.size() - pt.size());
     EXPECT_EQ(12u, encrypted->length() - pt.size());
@@ -136,14 +139,14 @@ TEST(ChaCha20Poly1305EncrypterTest, Encrypt) {
   }
 }
 
-TEST(ChaCha20Poly1305EncrypterTest, GetMaxPlaintextSize) {
+TEST_F(ChaCha20Poly1305EncrypterTest, GetMaxPlaintextSize) {
   ChaCha20Poly1305Encrypter encrypter;
   EXPECT_EQ(1000u, encrypter.GetMaxPlaintextSize(1012));
   EXPECT_EQ(100u, encrypter.GetMaxPlaintextSize(112));
   EXPECT_EQ(10u, encrypter.GetMaxPlaintextSize(22));
 }
 
-TEST(ChaCha20Poly1305EncrypterTest, GetCiphertextSize) {
+TEST_F(ChaCha20Poly1305EncrypterTest, GetCiphertextSize) {
   ChaCha20Poly1305Encrypter encrypter;
   EXPECT_EQ(1012u, encrypter.GetCiphertextSize(1000));
   EXPECT_EQ(112u, encrypter.GetCiphertextSize(100));

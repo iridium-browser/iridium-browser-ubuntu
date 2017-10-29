@@ -12,13 +12,13 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/single_thread_task_runner.h"
+#include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/synchronization/waitable_event.h"
 #include "mojo/public/cpp/bindings/interface_endpoint_client.h"
 #include "mojo/public/cpp/bindings/interface_endpoint_controller.h"
 #include "mojo/public/cpp/bindings/lib/may_auto_lock.h"
-#include "mojo/public/cpp/bindings/sync_handle_watcher.h"
+#include "mojo/public/cpp/bindings/sync_event_watcher.h"
 
 namespace mojo {
 namespace internal {
@@ -28,7 +28,7 @@ namespace internal {
 // No one other than the router's |endpoints_| and |tasks_| should hold refs to
 // this object.
 class MultiplexRouter::InterfaceEndpoint
-    : public base::RefCounted<InterfaceEndpoint>,
+    : public base::RefCountedThreadSafe<InterfaceEndpoint>,
       public InterfaceEndpointController {
  public:
   InterfaceEndpoint(MultiplexRouter* router, InterfaceId id)
@@ -37,11 +37,10 @@ class MultiplexRouter::InterfaceEndpoint
         closed_(false),
         peer_closed_(false),
         handle_created_(false),
-        client_(nullptr),
-        event_signalled_(false) {}
+        client_(nullptr) {}
 
   // ---------------------------------------------------------------------------
-  // The following public methods are safe to call from any threads without
+  // The following public methods are safe to call from any sequence without
   // locking.
 
   InterfaceId id() const { return id_; }
@@ -76,29 +75,27 @@ class MultiplexRouter::InterfaceEndpoint
     disconnect_reason_ = disconnect_reason;
   }
 
-  base::SingleThreadTaskRunner* task_runner() const {
-    return task_runner_.get();
-  }
+  base::SequencedTaskRunner* task_runner() const { return task_runner_.get(); }
 
   InterfaceEndpointClient* client() const { return client_; }
 
   void AttachClient(InterfaceEndpointClient* client,
-                    scoped_refptr<base::SingleThreadTaskRunner> runner) {
+                    scoped_refptr<base::SequencedTaskRunner> runner) {
     router_->AssertLockAcquired();
     DCHECK(!client_);
     DCHECK(!closed_);
-    DCHECK(runner->BelongsToCurrentThread());
+    DCHECK(runner->RunsTasksInCurrentSequence());
 
     task_runner_ = std::move(runner);
     client_ = client;
   }
 
-  // This method must be called on the same thread as the corresponding
+  // This method must be called on the same sequence as the corresponding
   // AttachClient() call.
   void DetachClient() {
     router_->AssertLockAcquired();
     DCHECK(client_);
-    DCHECK(task_runner_->BelongsToCurrentThread());
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
     DCHECK(!closed_);
 
     task_runner_ = nullptr;
@@ -108,62 +105,49 @@ class MultiplexRouter::InterfaceEndpoint
 
   void SignalSyncMessageEvent() {
     router_->AssertLockAcquired();
-    if (event_signalled_)
+    if (sync_message_event_signaled_)
       return;
-
-    event_signalled_ = true;
-    if (!sync_message_event_sender_.is_valid())
-      return;
-
-    MojoResult result =
-        WriteMessageRaw(sync_message_event_sender_.get(), nullptr, 0, nullptr,
-                        0, MOJO_WRITE_MESSAGE_FLAG_NONE);
-    DCHECK_EQ(MOJO_RESULT_OK, result);
+    sync_message_event_signaled_ = true;
+    if (sync_message_event_)
+      sync_message_event_->Signal();
   }
 
   void ResetSyncMessageSignal() {
     router_->AssertLockAcquired();
-
-    if (!event_signalled_)
+    if (!sync_message_event_signaled_)
       return;
-
-    event_signalled_ = false;
-    if (!sync_message_event_receiver_.is_valid())
-      return;
-
-    MojoResult result =
-        ReadMessageRaw(sync_message_event_receiver_.get(), nullptr, nullptr,
-                       nullptr, nullptr, MOJO_READ_MESSAGE_FLAG_MAY_DISCARD);
-    DCHECK_EQ(MOJO_RESULT_OK, result);
+    sync_message_event_signaled_ = false;
+    if (sync_message_event_)
+      sync_message_event_->Reset();
   }
 
   // ---------------------------------------------------------------------------
   // The following public methods (i.e., InterfaceEndpointController
-  // implementation) are called by the client on the same thread as the
+  // implementation) are called by the client on the same sequence as the
   // AttachClient() call. They are called outside of the router's lock.
 
   bool SendMessage(Message* message) override {
-    DCHECK(task_runner_->BelongsToCurrentThread());
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
     message->set_interface_id(id_);
     return router_->connector_.Accept(message);
   }
 
   void AllowWokenUpBySyncWatchOnSameThread() override {
-    DCHECK(task_runner_->BelongsToCurrentThread());
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
     EnsureSyncWatcherExists();
     sync_watcher_->AllowWokenUpBySyncWatchOnSameThread();
   }
 
   bool SyncWatch(const bool* should_stop) override {
-    DCHECK(task_runner_->BelongsToCurrentThread());
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
     EnsureSyncWatcherExists();
     return sync_watcher_->SyncWatch(should_stop);
   }
 
  private:
-  friend class base::RefCounted<InterfaceEndpoint>;
+  friend class base::RefCountedThreadSafe<InterfaceEndpoint>;
 
   ~InterfaceEndpoint() override {
     router_->AssertLockAcquired();
@@ -174,13 +158,9 @@ class MultiplexRouter::InterfaceEndpoint
     DCHECK(!sync_watcher_);
   }
 
-  void OnHandleReady(MojoResult result) {
-    DCHECK(task_runner_->BelongsToCurrentThread());
+  void OnSyncEventSignaled() {
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
     scoped_refptr<MultiplexRouter> router_protector(router_);
-
-    // Because we never close |sync_message_event_{sender,receiver}_| before
-    // destruction or set a deadline, |result| should always be MOJO_RESULT_OK.
-    DCHECK_EQ(MOJO_RESULT_OK, result);
 
     MayAutoLock locker(&router_->lock_);
     scoped_refptr<InterfaceEndpoint> self_protector(this);
@@ -201,35 +181,28 @@ class MultiplexRouter::InterfaceEndpoint
   }
 
   void EnsureSyncWatcherExists() {
-    DCHECK(task_runner_->BelongsToCurrentThread());
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
     if (sync_watcher_)
       return;
 
     {
       MayAutoLock locker(&router_->lock_);
-
-      if (!sync_message_event_sender_.is_valid()) {
-        MojoResult result =
-            CreateMessagePipe(nullptr, &sync_message_event_sender_,
-                              &sync_message_event_receiver_);
-        DCHECK_EQ(MOJO_RESULT_OK, result);
-
-        if (event_signalled_) {
-          // Reset the flag so that SignalSyncMessageEvent() will actually
-          // signal using the newly-created message pipe.
-          event_signalled_ = false;
-          SignalSyncMessageEvent();
-        }
+      if (!sync_message_event_) {
+        sync_message_event_.emplace(
+            base::WaitableEvent::ResetPolicy::MANUAL,
+            base::WaitableEvent::InitialState::NOT_SIGNALED);
+        if (sync_message_event_signaled_)
+          sync_message_event_->Signal();
       }
     }
-
-    sync_watcher_.reset(new SyncHandleWatcher(
-        sync_message_event_receiver_.get(), MOJO_HANDLE_SIGNAL_READABLE,
-        base::Bind(&InterfaceEndpoint::OnHandleReady, base::Unretained(this))));
+    sync_watcher_.reset(
+        new SyncEventWatcher(&sync_message_event_.value(),
+                             base::Bind(&InterfaceEndpoint::OnSyncEventSignaled,
+                                        base::Unretained(this))));
   }
 
   // ---------------------------------------------------------------------------
-  // The following members are safe to access from any threads.
+  // The following members are safe to access from any sequence.
 
   MultiplexRouter* const router_;
   const InterfaceId id_;
@@ -249,24 +222,22 @@ class MultiplexRouter::InterfaceEndpoint
   base::Optional<DisconnectReason> disconnect_reason_;
 
   // The task runner on which |client_|'s methods can be called.
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
   // Not owned. It is null if no client is attached to this endpoint.
   InterfaceEndpointClient* client_;
 
-  // A message pipe used as an event to signal that sync messages are available.
-  // The message pipe handles are initialized under the router's lock and remain
-  // unchanged afterwards. They may be accessed outside of the router's lock
-  // later.
-  ScopedMessagePipeHandle sync_message_event_sender_;
-  ScopedMessagePipeHandle sync_message_event_receiver_;
-  bool event_signalled_;
+  // An event used to signal that sync messages are available. The event is
+  // initialized under the router's lock and remains unchanged afterwards. It
+  // may be accessed outside of the router's lock later.
+  base::Optional<base::WaitableEvent> sync_message_event_;
+  bool sync_message_event_signaled_ = false;
 
   // ---------------------------------------------------------------------------
   // The following members are only valid while a client is attached. They are
-  // used exclusively on the client's thread. They may be accessed outside of
+  // used exclusively on the client's sequence. They may be accessed outside of
   // the router's lock.
 
-  std::unique_ptr<SyncHandleWatcher> sync_watcher_;
+  std::unique_ptr<SyncEventWatcher> sync_watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(InterfaceEndpoint);
 };
@@ -348,7 +319,7 @@ MultiplexRouter::MultiplexRouter(
     ScopedMessagePipeHandle message_pipe,
     Config config,
     bool set_interface_id_namesapce_bit,
-    scoped_refptr<base::SingleThreadTaskRunner> runner)
+    scoped_refptr<base::SequencedTaskRunner> runner)
     : set_interface_id_namespace_bit_(set_interface_id_namesapce_bit),
       task_runner_(runner),
       header_validator_(nullptr),
@@ -364,7 +335,7 @@ MultiplexRouter::MultiplexRouter(
       encountered_error_(false),
       paused_(false),
       testing_mode_(false) {
-  DCHECK(task_runner_->BelongsToCurrentThread());
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
   if (config == MULTI_INTERFACE)
     lock_.emplace();
@@ -374,13 +345,12 @@ MultiplexRouter::MultiplexRouter(
     // Always participate in sync handle watching in multi-interface mode,
     // because even if it doesn't expect sync requests during sync handle
     // watching, it may still need to dispatch messages to associated endpoints
-    // on a different thread.
+    // on a different sequence.
     connector_.AllowWokenUpBySyncWatchOnSameThread();
   }
   connector_.set_incoming_receiver(&filters_);
-  connector_.set_connection_error_handler(
-      base::Bind(&MultiplexRouter::OnPipeConnectionError,
-                 base::Unretained(this)));
+  connector_.set_connection_error_handler(base::Bind(
+      &MultiplexRouter::OnPipeConnectionError, base::Unretained(this)));
 
   std::unique_ptr<MessageHeaderValidator> header_validator =
       base::MakeUnique<MessageHeaderValidator>();
@@ -415,9 +385,9 @@ MultiplexRouter::~MultiplexRouter() {
 }
 
 void MultiplexRouter::SetMasterInterfaceName(const char* name) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  header_validator_->SetDescription(
-      std::string(name) + " [master] MessageHeaderValidator");
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  header_validator_->SetDescription(std::string(name) +
+                                    " [master] MessageHeaderValidator");
   control_message_handler_.SetDescription(
       std::string(name) + " [master] PipeControlMessageHandler");
   connector_.SetWatcherHeapProfilerTag(name);
@@ -513,7 +483,7 @@ void MultiplexRouter::CloseEndpointHandle(
 InterfaceEndpointController* MultiplexRouter::AttachEndpointClient(
     const ScopedInterfaceEndpointHandle& handle,
     InterfaceEndpointClient* client,
-    scoped_refptr<base::SingleThreadTaskRunner> runner) {
+    scoped_refptr<base::SequencedTaskRunner> runner) {
   const InterfaceId id = handle.id();
 
   DCHECK(IsValidInterfaceId(id));
@@ -534,19 +504,23 @@ InterfaceEndpointController* MultiplexRouter::AttachEndpointClient(
 
 void MultiplexRouter::DetachEndpointClient(
     const ScopedInterfaceEndpointHandle& handle) {
+  // TODO(crbug.com/741047): Remove this check.
+  CheckObjectIsValid();
+
   const InterfaceId id = handle.id();
 
   DCHECK(IsValidInterfaceId(id));
 
   MayAutoLock locker(&lock_);
-  DCHECK(base::ContainsKey(endpoints_, id));
+  // TODO(crbug.com/741047): change this to DCEHCK.
+  CHECK(base::ContainsKey(endpoints_, id));
 
   InterfaceEndpoint* endpoint = endpoints_[id].get();
   endpoint->DetachClient();
 }
 
 void MultiplexRouter::RaiseError() {
-  if (task_runner_->BelongsToCurrentThread()) {
+  if (task_runner_->RunsTasksInCurrentSequence()) {
     connector_.RaiseError();
   } else {
     task_runner_->PostTask(FROM_HERE,
@@ -554,8 +528,13 @@ void MultiplexRouter::RaiseError() {
   }
 }
 
+bool MultiplexRouter::PrefersSerializedMessages() {
+  MayAutoLock locker(&lock_);
+  return connector_.PrefersSerializedMessages();
+}
+
 void MultiplexRouter::CloseMessagePipe() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   connector_.CloseMessagePipe();
   // CloseMessagePipe() above won't trigger connection error handler.
   // Explicitly call OnPipeConnectionError() so that associated endpoints will
@@ -564,7 +543,7 @@ void MultiplexRouter::CloseMessagePipe() {
 }
 
 void MultiplexRouter::PauseIncomingMethodCallProcessing() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   connector_.PauseIncomingMethodCallProcessing();
 
   MayAutoLock locker(&lock_);
@@ -575,7 +554,7 @@ void MultiplexRouter::PauseIncomingMethodCallProcessing() {
 }
 
 void MultiplexRouter::ResumeIncomingMethodCallProcessing() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   connector_.ResumeIncomingMethodCallProcessing();
 
   MayAutoLock locker(&lock_);
@@ -594,7 +573,7 @@ void MultiplexRouter::ResumeIncomingMethodCallProcessing() {
 }
 
 bool MultiplexRouter::HasAssociatedEndpoints() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   MayAutoLock locker(&lock_);
 
   if (endpoints_.size() > 1)
@@ -606,7 +585,7 @@ bool MultiplexRouter::HasAssociatedEndpoints() const {
 }
 
 void MultiplexRouter::EnableTestingMode() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   MayAutoLock locker(&lock_);
 
   testing_mode_ = true;
@@ -614,9 +593,10 @@ void MultiplexRouter::EnableTestingMode() {
 }
 
 bool MultiplexRouter::Accept(Message* message) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (!message->DeserializeAssociatedEndpointHandles(this))
+  if (message->is_serialized() &&
+      !message->DeserializeAssociatedEndpointHandles(this))
     return false;
 
   scoped_refptr<MultiplexRouter> protector(this);
@@ -688,7 +668,10 @@ bool MultiplexRouter::OnPeerAssociatedEndpointClosed(
 }
 
 void MultiplexRouter::OnPipeConnectionError() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // TODO(crbug.com/741047): Remove this check.
+  CheckObjectIsValid();
 
   scoped_refptr<MultiplexRouter> protector(this);
   MayAutoLock locker(&lock_);
@@ -715,7 +698,7 @@ void MultiplexRouter::OnPipeConnectionError() {
 
 void MultiplexRouter::ProcessTasks(
     ClientCallBehavior client_call_behavior,
-    base::SingleThreadTaskRunner* current_task_runner) {
+    base::SequencedTaskRunner* current_task_runner) {
   AssertLockAcquired();
 
   if (posted_to_process_tasks_)
@@ -797,8 +780,9 @@ bool MultiplexRouter::ProcessFirstSyncMessageForEndpoint(InterfaceId id) {
 bool MultiplexRouter::ProcessNotifyErrorTask(
     Task* task,
     ClientCallBehavior client_call_behavior,
-    base::SingleThreadTaskRunner* current_task_runner) {
-  DCHECK(!current_task_runner || current_task_runner->BelongsToCurrentThread());
+    base::SequencedTaskRunner* current_task_runner) {
+  DCHECK(!current_task_runner ||
+         current_task_runner->RunsTasksInCurrentSequence());
   DCHECK(!paused_);
 
   AssertLockAcquired();
@@ -812,7 +796,7 @@ bool MultiplexRouter::ProcessNotifyErrorTask(
     return false;
   }
 
-  DCHECK(endpoint->task_runner()->BelongsToCurrentThread());
+  DCHECK(endpoint->task_runner()->RunsTasksInCurrentSequence());
 
   InterfaceEndpointClient* client = endpoint->client();
   base::Optional<DisconnectReason> disconnect_reason(
@@ -823,7 +807,7 @@ bool MultiplexRouter::ProcessNotifyErrorTask(
     // object within NotifyError(). Holding the lock will lead to deadlock.
     //
     // It is safe to call into |client| without the lock. Because |client| is
-    // always accessed on the same thread, including DetachEndpointClient().
+    // always accessed on the same sequence, including DetachEndpointClient().
     MayAutoUnlock unlocker(&lock_);
     client->NotifyError(disconnect_reason);
   }
@@ -833,8 +817,9 @@ bool MultiplexRouter::ProcessNotifyErrorTask(
 bool MultiplexRouter::ProcessIncomingMessage(
     Message* message,
     ClientCallBehavior client_call_behavior,
-    base::SingleThreadTaskRunner* current_task_runner) {
-  DCHECK(!current_task_runner || current_task_runner->BelongsToCurrentThread());
+    base::SequencedTaskRunner* current_task_runner) {
+  DCHECK(!current_task_runner ||
+         current_task_runner->RunsTasksInCurrentSequence());
   DCHECK(!paused_);
   DCHECK(message);
   AssertLockAcquired();
@@ -875,7 +860,7 @@ bool MultiplexRouter::ProcessIncomingMessage(
   bool can_direct_call;
   if (message->has_flag(Message::kFlagIsSync)) {
     can_direct_call = client_call_behavior != NO_DIRECT_CLIENT_CALLS &&
-                      endpoint->task_runner()->BelongsToCurrentThread();
+                      endpoint->task_runner()->RunsTasksInCurrentSequence();
   } else {
     can_direct_call = client_call_behavior == ALLOW_DIRECT_CLIENT_CALLS &&
                       endpoint->task_runner() == current_task_runner;
@@ -886,7 +871,7 @@ bool MultiplexRouter::ProcessIncomingMessage(
     return false;
   }
 
-  DCHECK(endpoint->task_runner()->BelongsToCurrentThread());
+  DCHECK(endpoint->task_runner()->RunsTasksInCurrentSequence());
 
   InterfaceEndpointClient* client = endpoint->client();
   bool result = false;
@@ -896,7 +881,7 @@ bool MultiplexRouter::ProcessIncomingMessage(
     // deadlock.
     //
     // It is safe to call into |client| without the lock. Because |client| is
-    // always accessed on the same thread, including DetachEndpointClient().
+    // always accessed on the same sequence, including DetachEndpointClient().
     MayAutoUnlock unlocker(&lock_);
     result = client->HandleIncomingMessage(message);
   }
@@ -907,7 +892,7 @@ bool MultiplexRouter::ProcessIncomingMessage(
 }
 
 void MultiplexRouter::MaybePostToProcessTasks(
-    base::SingleThreadTaskRunner* task_runner) {
+    base::SequencedTaskRunner* task_runner) {
   AssertLockAcquired();
   if (posted_to_process_tasks_)
     return;
@@ -923,7 +908,7 @@ void MultiplexRouter::LockAndCallProcessTasks() {
   // always called using base::Bind(), which holds a ref.
   MayAutoLock locker(&lock_);
   posted_to_process_tasks_ = false;
-  scoped_refptr<base::SingleThreadTaskRunner> runner(
+  scoped_refptr<base::SequencedTaskRunner> runner(
       std::move(posted_to_task_runner_));
   ProcessTasks(ALLOW_DIRECT_CLIENT_CALLS, runner.get());
 }

@@ -74,17 +74,25 @@ Polymer({
      * Dictionary defining page visibility.
      * @type {!GuestModePageVisibility}
      */
-    pageVisibility: {
-      type: Object,
-      value: function() { return {}; },
-    },
+    pageVisibility: Object,
 
     showAndroidApps: Boolean,
+
+    showMultidevice: Boolean,
+
+    havePlayStoreApp: Boolean,
   },
 
   /** @override */
   attached: function() {
     this.listen(this, 'freeze-scroll', 'onFreezeScroll_');
+    this.listen(this, 'lazy-loaded', 'onLazyLoaded_');
+  },
+
+  /** @private */
+  onLazyLoaded_: function() {
+    Polymer.dom.flush();
+    this.updateOverscrollForPage_();
   },
 
   /** @override */
@@ -122,8 +130,8 @@ Polymer({
     var visibleBottom = scroller.scrollTop + scroller.clientHeight;
     var overscrollBottom = overscroll.offsetTop + overscroll.scrollHeight;
     // How much of the overscroll is visible (may be negative).
-    var visibleOverscroll = overscroll.scrollHeight -
-                            (overscrollBottom - visibleBottom);
+    var visibleOverscroll =
+        overscroll.scrollHeight - (overscrollBottom - visibleBottom);
     this.overscroll_ =
         Math.max(opt_minHeight || 0, Math.ceil(visibleOverscroll));
   },
@@ -169,7 +177,7 @@ Polymer({
    * @private
    */
   updatePagesShown_: function() {
-    var inAbout = settings.Route.ABOUT.contains(settings.getCurrentRoute());
+    var inAbout = settings.routes.ABOUT.contains(settings.getCurrentRoute());
     this.showPages_ = {about: inAbout, settings: !inAbout};
 
     // Calculate and set the overflow padding.
@@ -189,7 +197,7 @@ Polymer({
    * @private
    */
   updateOverscrollForPage_: function() {
-    if (this.showPages_.about) {
+    if (this.showPages_.about || this.inSearchMode_) {
       // Set overscroll directly to remove any existing overscroll that
       // setOverscroll_ would otherwise preserve.
       this.overscroll_ = 0;
@@ -229,13 +237,14 @@ Polymer({
    * @return {(?SettingsAboutPageElement|?SettingsBasicPageElement)}
    */
   getPage_: function(route) {
-    if (settings.Route.ABOUT.contains(route)) {
-      return /** @type {?SettingsAboutPageElement} */(
+    if (settings.routes.ABOUT.contains(route)) {
+      return /** @type {?SettingsAboutPageElement} */ (
           this.$$('settings-about-page'));
     }
-    if (settings.Route.BASIC.contains(route) ||
-        settings.Route.ADVANCED.contains(route)) {
-      return /** @type {?SettingsBasicPageElement} */(
+    if (settings.routes.BASIC.contains(route) ||
+        (settings.routes.ADVANCED &&
+         settings.routes.ADVANCED.contains(route))) {
+      return /** @type {?SettingsBasicPageElement} */ (
           this.$$('settings-basic-page'));
     }
     assertNotReached();
@@ -253,20 +262,29 @@ Polymer({
     return new Promise(function(resolve, reject) {
       setTimeout(function() {
         var whenSearchDone =
-            assert(this.getPage_(settings.Route.BASIC)).searchContents(query);
-        whenSearchDone.then(function(request) {
+            assert(this.getPage_(settings.routes.BASIC)).searchContents(query);
+        whenSearchDone.then(function(result) {
           resolve();
-          if (!request.finished) {
+          if (result.canceled) {
             // Nothing to do here. A previous search request was canceled
-            // because a new search request was issued before the first one
-            // completed.
+            // because a new search request was issued with a different query
+            // before the previous completed.
             return;
           }
 
           this.toolbarSpinnerActive = false;
-          this.inSearchMode_ = !request.isSame('');
+          this.inSearchMode_ = !result.wasClearSearch;
           this.showNoResultsFound_ =
-              this.inSearchMode_ && !request.didFindMatches();
+              this.inSearchMode_ && !result.didFindMatches;
+
+          if (this.inSearchMode_) {
+            Polymer.IronA11yAnnouncer.requestAvailability();
+            this.fire('iron-announce', {
+              text: this.showNoResultsFound_ ?
+                  loadTimeData.getString('searchNoResults') :
+                  loadTimeData.getStringF('searchResults', query)
+            });
+          }
         }.bind(this));
       }.bind(this), 0);
     }.bind(this));

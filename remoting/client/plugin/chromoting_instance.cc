@@ -40,9 +40,9 @@
 #include "remoting/base/constants.h"
 #include "remoting/base/util.h"
 #include "remoting/client/chromoting_client.h"
-#include "remoting/client/normalizing_input_filter_cros.h"
-#include "remoting/client/normalizing_input_filter_mac.h"
-#include "remoting/client/normalizing_input_filter_win.h"
+#include "remoting/client/input/normalizing_input_filter_cros.h"
+#include "remoting/client/input/normalizing_input_filter_mac.h"
+#include "remoting/client/input/normalizing_input_filter_win.h"
 #include "remoting/client/plugin/pepper_audio_player.h"
 #include "remoting/client/plugin/pepper_main_thread_task_runner.h"
 #include "remoting/client/plugin/pepper_mouse_locker.h"
@@ -56,8 +56,8 @@
 #include "remoting/protocol/host_stub.h"
 #include "remoting/protocol/transport_context.h"
 #include "remoting/signaling/delegating_signal_strategy.h"
-#include "third_party/webrtc/base/helpers.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_region.h"
+#include "third_party/webrtc/rtc_base/helpers.h"
 #include "url/gurl.h"
 
 namespace remoting {
@@ -139,9 +139,9 @@ std::string ConnectionErrorToString(protocol::ErrorCode error) {
     case protocol::SIGNALING_TIMEOUT:
     case protocol::UNKNOWN_ERROR:
       return "NETWORK_FAILURE";
+    default:
+      return "UNKNOWN";
   }
-  DLOG(FATAL) << "Unknown error code" << error;
-  return std::string();
 }
 
 PP_Instance g_logging_instance = 0;
@@ -360,7 +360,7 @@ void ChromotingInstance::OnVideoFrameDirtyRegion(
   }
 
   std::unique_ptr<base::DictionaryValue> data(new base::DictionaryValue());
-  data->Set("rects", rects_value.release());
+  data->Set("rects", std::move(rects_value));
   PostLegacyJsonMessage("onDebugRegion", std::move(data));
 }
 
@@ -675,7 +675,7 @@ void ChromotingInstance::HandleConnect(const base::DictionaryValue& data) {
 
   // Setup the signal strategy.
   signal_strategy_.reset(new DelegatingSignalStrategy(
-      local_jid, plugin_task_runner_,
+      SignalingAddress(local_jid), plugin_task_runner_,
       base::Bind(&ChromotingInstance::SendOutgoingIq,
                  weak_factory_.GetWeakPtr())));
 
@@ -732,7 +732,7 @@ void ChromotingInstance::HandleOnIncomingIq(const base::DictionaryValue& data) {
   // Just ignore the message if it's received before Connect() is called. It's
   // likely to be a leftover from a previous session, so it's safe to ignore it.
   if (signal_strategy_)
-    signal_strategy_->OnIncomingMessage(iq);
+    signal_strategy_->GetIncomingMessageCallback().Run(iq);
 }
 
 void ChromotingInstance::HandleReleaseAllKeys(
@@ -1002,7 +1002,7 @@ void ChromotingInstance::PostLegacyJsonMessage(
     std::unique_ptr<base::DictionaryValue> data) {
   base::DictionaryValue message;
   message.SetString("method", method);
-  message.Set("data", data.release());
+  message.Set("data", std::move(data));
 
   std::string message_json;
   base::JSONWriter::Write(message, &message_json);

@@ -16,7 +16,9 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -55,8 +57,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/user_metrics.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -152,7 +154,7 @@ void BackgroundModeManager::BackgroundModeData::BuildProfileMenu(
       DCHECK_LT(command_id, IDC_MinimumLabelValue);
       command_id_handler_vector_->push_back(
           base::Bind(&BackgroundModeManager::LaunchBackgroundApplication,
-                     profile_, application.get()));
+                     profile_, base::RetainedRef(application)));
       menu->AddItem(command_id, base::UTF8ToUTF16(name));
       if (icon)
         menu->SetIcon(menu->GetItemCount() - 1, gfx::Image(*icon));
@@ -285,6 +287,7 @@ BackgroundModeManager::BackgroundModeManager(
       in_background_mode_(false),
       keep_alive_for_test_(false),
       background_mode_suspended_(false),
+      task_runner_(CreateTaskRunner()),
       weak_factory_(this) {
   // We should never start up if there is no browser process or if we are
   // currently quitting.
@@ -642,7 +645,6 @@ void BackgroundModeManager::ExecuteCommand(int command_id, int event_flags) {
         chrome::ShowAboutChrome(bmd->GetBrowserWindow());
       } else {
         UserManager::Show(base::FilePath(),
-                          profiles::USER_MANAGER_NO_TUTORIAL,
                           profiles::USER_MANAGER_SELECT_PROFILE_ABOUT_CHROME);
       }
       break;
@@ -652,13 +654,12 @@ void BackgroundModeManager::ExecuteCommand(int command_id, int event_flags) {
         chrome::OpenTaskManager(bmd->GetBrowserWindow());
       } else {
         UserManager::Show(base::FilePath(),
-                          profiles::USER_MANAGER_NO_TUTORIAL,
                           profiles::USER_MANAGER_SELECT_PROFILE_TASK_MANAGER);
       }
       break;
     case IDC_EXIT:
       RecordMenuItemClick(MENU_ITEM_EXIT);
-      content::RecordAction(UserMetricsAction("Exit"));
+      base::RecordAction(UserMetricsAction("Exit"));
       chrome::CloseAllBrowsers();
       break;
     case IDC_STATUS_TRAY_KEEP_CHROME_RUNNING_IN_BACKGROUND: {
@@ -681,7 +682,6 @@ void BackgroundModeManager::ExecuteCommand(int command_id, int event_flags) {
         bmd->ExecuteCommand(command_id, event_flags);
       } else {
         UserManager::Show(base::FilePath(),
-                          profiles::USER_MANAGER_NO_TUTORIAL,
                           profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
       }
       break;
@@ -704,8 +704,8 @@ void BackgroundModeManager::ReleaseStartupKeepAlive() {
     // alive by the browser process until after the callback is called.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(&BackgroundModeManager::ReleaseStartupKeepAliveCallback,
-                   base::Unretained(this)));
+        base::BindOnce(&BackgroundModeManager::ReleaseStartupKeepAliveCallback,
+                       base::Unretained(this)));
   }
 }
 
@@ -715,6 +715,8 @@ void BackgroundModeManager::StartBackgroundMode() {
   // or if background mode is disabled.
   if (in_background_mode_)
     return;
+
+  startup_metric_utils::SetBackgroundModeEnabled();
 
   // Mark ourselves as running in background mode.
   in_background_mode_ = true;
@@ -975,11 +977,10 @@ void BackgroundModeManager::UpdateStatusTrayIconContextMenu() {
       // We should only display the profile in the status icon if it has at
       // least one background app.
       if (bmd->GetBackgroundClientCount() > 0) {
-        StatusIconMenuModel* submenu = new StatusIconMenuModel(bmd);
         // The submenu constructor caller owns the lifetime of the submenu.
         // The containing menu does not handle the lifetime.
-        submenus.push_back(submenu);
-        bmd->BuildProfileMenu(submenu, menu.get());
+        submenus.push_back(base::MakeUnique<StatusIconMenuModel>(bmd));
+        bmd->BuildProfileMenu(submenus.back().get(), menu.get());
         profiles_using_background_mode++;
       }
     }

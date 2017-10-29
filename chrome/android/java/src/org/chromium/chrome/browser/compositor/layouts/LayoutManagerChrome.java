@@ -13,16 +13,13 @@ import org.chromium.chrome.browser.compositor.TitleCache;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
 import org.chromium.chrome.browser.compositor.layouts.components.VirtualView;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.BlackHoleEventFilter;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeEventFilter.ScrollDirection;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeHandler;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilter;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.GestureEventFilter;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.ScrollDirection;
+import org.chromium.chrome.browser.compositor.layouts.phone.StackLayout;
 import org.chromium.chrome.browser.compositor.overlays.SceneOverlay;
 import org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutHelperManager;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManagementDelegate;
 import org.chromium.chrome.browser.device.DeviceClassManager;
-import org.chromium.chrome.browser.dom_distiller.ReaderModeManagerDelegate;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
@@ -37,6 +34,7 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector.CloseAllTabsDelegat
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
+import org.chromium.chrome.browser.util.AccessibilityUtil;
 import org.chromium.chrome.browser.widget.OverviewListLayout;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
@@ -56,11 +54,6 @@ public class LayoutManagerChrome
     protected ToolbarSwipeLayout mToolbarSwipeLayout;
     /** A {@link Layout} that should be used when the user is in the tab switcher. */
     protected Layout mOverviewLayout;
-
-    // Event Filters
-    /** A {@link EventFilter} that consumes all touch events. */
-    protected EventFilter mBlackHoleEventFilter;
-    private final GestureEventFilter mGestureEventFilter;
 
     // Event Filter Handlers
     private final EdgeSwipeHandler mToolbarSwipeHandler;
@@ -152,26 +145,10 @@ public class LayoutManagerChrome
     }
 
     /**
-     * Delegate of a factory to create an overview layout.
-     */
-    public interface OverviewLayoutFactoryDelegate {
-        /**
-         * @param context     The current Android's context.
-         * @param updateHost  The {@link LayoutUpdateHost} view for this layout.
-         * @param renderHost  The {@link LayoutRenderHost} view for this layout.
-         * @param eventFilter The {@link EventFilter} that is needed for this view.
-         */
-        Layout createOverviewLayout(Context context, LayoutUpdateHost updateHost,
-                LayoutRenderHost renderHost, EventFilter eventFilter);
-    }
-
-    /**
      * Creates the {@link LayoutManagerChrome} instance.
      * @param host              A {@link LayoutManagerHost} instance.
-     * @param overviewLayoutFactoryDelegate A {@link OverviewLayoutFactoryDelegate} instance.
      */
-    public LayoutManagerChrome(
-            LayoutManagerHost host, OverviewLayoutFactoryDelegate overviewLayoutFactoryDelegate) {
+    public LayoutManagerChrome(LayoutManagerHost host, boolean createOverviewLayout) {
         super(host);
         Context context = host.getContext();
         LayoutRenderHost renderHost = host.getLayoutRenderHost();
@@ -179,20 +156,13 @@ public class LayoutManagerChrome
         mOverviewModeObservers = new ObserverList<OverviewModeObserver>();
 
         // Build Event Filter Handlers
-        mToolbarSwipeHandler = new ToolbarSwipeHandler(this);
-
-        // Build Event Filters
-        mBlackHoleEventFilter = new BlackHoleEventFilter(context, this);
-        mGestureEventFilter = new GestureEventFilter(context, this, mGestureHandler);
+        mToolbarSwipeHandler = createToolbarSwipeHandler(this);
 
         // Build Layouts
-        mOverviewListLayout =
-                new OverviewListLayout(context, this, renderHost, mBlackHoleEventFilter);
-        mToolbarSwipeLayout =
-                new ToolbarSwipeLayout(context, this, renderHost, mBlackHoleEventFilter);
-        if (overviewLayoutFactoryDelegate != null) {
-            mOverviewLayout = overviewLayoutFactoryDelegate.createOverviewLayout(
-                    context, this, renderHost, mGestureEventFilter);
+        mOverviewListLayout = new OverviewListLayout(context, this, renderHost);
+        mToolbarSwipeLayout = new ToolbarSwipeLayout(context, this, renderHost);
+        if (createOverviewLayout) {
+            mOverviewLayout = new StackLayout(context, this, renderHost);
         }
     }
 
@@ -225,7 +195,6 @@ public class LayoutManagerChrome
     public void init(TabModelSelector selector, TabCreatorManager creator,
             TabContentManager content, ViewGroup androidContentContainer,
             ContextualSearchManagementDelegate contextualSearchDelegate,
-            ReaderModeManagerDelegate readerModeDelegate,
             DynamicResourceLoader dynamicResourceLoader) {
         // TODO: TitleCache should be a part of the ResourceManager.
         mTitleCache = mHost.getTitleCache();
@@ -236,7 +205,7 @@ public class LayoutManagerChrome
         if (mOverviewLayout != null) mOverviewLayout.setTabModelSelector(selector, content);
 
         super.init(selector, creator, content, androidContentContainer, contextualSearchDelegate,
-                readerModeDelegate, dynamicResourceLoader);
+                dynamicResourceLoader);
 
         mTabModelSelectorObserver = new EmptyTabModelSelectorObserver() {
             @Override
@@ -332,7 +301,9 @@ public class LayoutManagerChrome
      */
     @VisibleForTesting
     public void simulateClick(float x, float y) {
-        if (getActiveLayout() != null) getActiveLayout().click(time(), x, y);
+        if (getActiveLayout() instanceof StackLayout) {
+            ((StackLayout) getActiveLayout()).simulateClick(x, y);
+        }
     }
 
     /**
@@ -344,10 +315,8 @@ public class LayoutManagerChrome
      */
     @VisibleForTesting
     public void simulateDrag(float x, float y, float dX, float dY) {
-        if (getActiveLayout() != null) {
-            getActiveLayout().onDown(0, x, y);
-            getActiveLayout().drag(0, x, y, dX, dY);
-            getActiveLayout().onUpOrCancel(time());
+        if (getActiveLayout() instanceof StackLayout) {
+            ((StackLayout) getActiveLayout()).simulateDrag(x, y, dX, dY);
         }
     }
 
@@ -575,20 +544,12 @@ public class LayoutManagerChrome
     }
 
     /**
-     * @return Whether or not to use the accessibility layout.
-     */
-    protected boolean useAccessibilityLayout() {
-        return DeviceClassManager.isAccessibilityModeEnabled(mHost.getContext())
-                || DeviceClassManager.enableAccessibilityLayout();
-    }
-
-    /**
      * Show the overview {@link Layout}.  This is generally a {@link Layout} that visibly represents
      * all of the {@link Tab}s opened by the user.
      * @param animate Whether or not to animate the transition to overview mode.
      */
     public void showOverview(boolean animate) {
-        boolean useAccessibility = useAccessibilityLayout();
+        boolean useAccessibility = DeviceClassManager.enableAccessibilityLayout();
 
         boolean accessibilityIsVisible =
                 useAccessibility && getActiveLayout() == mOverviewListLayout;
@@ -685,11 +646,12 @@ public class LayoutManagerChrome
                 return false;
             }
 
-            boolean isAccessibility =
-                    DeviceClassManager.isAccessibilityModeEnabled(mHost.getContext());
-            return direction == ScrollDirection.LEFT || direction == ScrollDirection.RIGHT
-                    || (direction == ScrollDirection.DOWN && mOverviewLayout != null
-                               && !isAccessibility);
+            if (direction == ScrollDirection.DOWN) {
+                boolean isAccessibility = AccessibilityUtil.isAccessibilityEnabled();
+                return mOverviewLayout != null && !isAccessibility;
+            }
+
+            return direction == ScrollDirection.LEFT || direction == ScrollDirection.RIGHT;
         }
     }
 

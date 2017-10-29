@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "base/memory/free_deleter.h"
+#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -187,7 +188,8 @@ bool PrintBackendWin::EnumeratePrinters(PrinterList* printer_list) {
                nullptr, 0, &bytes_needed, &count_returned);
   if (!bytes_needed)
     return false;
-  std::unique_ptr<BYTE[]> printer_info_buffer(new BYTE[bytes_needed]);
+
+  auto printer_info_buffer = base::MakeUnique<BYTE[]>(bytes_needed);
   if (!EnumPrinters(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, nullptr,
                     kLevel, printer_info_buffer.get(), bytes_needed,
                     &bytes_needed, &count_returned)) {
@@ -307,32 +309,34 @@ bool PrintBackendWin::GetPrinterSemanticCapsAndDefaults(
 bool PrintBackendWin::GetPrinterCapsAndDefaults(
     const std::string& printer_name,
     PrinterCapsAndDefaults* printer_info) {
-  ScopedXPSInitializer xps_initializer;
-  if (!xps_initializer.initialized()) {
-    // TODO(sanjeevr): Handle legacy proxy case (with no prntvpt.dll)
-    return false;
-  }
-  if (!IsValidPrinter(printer_name)) {
-    return false;
-  }
   DCHECK(printer_info);
-  HPTPROVIDER provider = NULL;
+
+  ScopedXPSInitializer xps_initializer;
+  CHECK(xps_initializer.initialized());
+
+  if (!IsValidPrinter(printer_name))
+    return false;
+
+  HPTPROVIDER provider = nullptr;
   std::wstring printer_name_wide = base::UTF8ToWide(printer_name);
   HRESULT hr = XPSModule::OpenProvider(printer_name_wide, 1, &provider);
-  if (provider) {
+  if (!provider)
+    return true;
+
+  {
     base::win::ScopedComPtr<IStream> print_capabilities_stream;
-    hr = CreateStreamOnHGlobal(NULL, TRUE,
-                               print_capabilities_stream.Receive());
+    hr = CreateStreamOnHGlobal(nullptr, TRUE,
+                               print_capabilities_stream.GetAddressOf());
     DCHECK(SUCCEEDED(hr));
-    if (print_capabilities_stream.get()) {
+    if (print_capabilities_stream.Get()) {
       base::win::ScopedBstr error;
       hr = XPSModule::GetPrintCapabilities(
-          provider, NULL, print_capabilities_stream.get(), error.Receive());
+          provider, nullptr, print_capabilities_stream.Get(), error.Receive());
       DCHECK(SUCCEEDED(hr));
       if (FAILED(hr)) {
         return false;
       }
-      hr = StreamOnHGlobalToString(print_capabilities_stream.get(),
+      hr = StreamOnHGlobalToString(print_capabilities_stream.Get(),
                                    &printer_info->printer_capabilities);
       DCHECK(SUCCEEDED(hr));
       printer_info->caps_mime_type = "text/xml";
@@ -340,21 +344,21 @@ bool PrintBackendWin::GetPrinterCapsAndDefaults(
     ScopedPrinterHandle printer_handle;
     if (printer_handle.OpenPrinter(printer_name_wide.c_str())) {
       std::unique_ptr<DEVMODE, base::FreeDeleter> devmode_out(
-          CreateDevMode(printer_handle.Get(), NULL));
+          CreateDevMode(printer_handle.Get(), nullptr));
       if (!devmode_out)
         return false;
       base::win::ScopedComPtr<IStream> printer_defaults_stream;
-      hr = CreateStreamOnHGlobal(NULL, TRUE,
-                                 printer_defaults_stream.Receive());
+      hr = CreateStreamOnHGlobal(nullptr, TRUE,
+                                 printer_defaults_stream.GetAddressOf());
       DCHECK(SUCCEEDED(hr));
-      if (printer_defaults_stream.get()) {
+      if (printer_defaults_stream.Get()) {
         DWORD dm_size = devmode_out->dmSize + devmode_out->dmDriverExtra;
         hr = XPSModule::ConvertDevModeToPrintTicket(
             provider, dm_size, devmode_out.get(), kPTJobScope,
-            printer_defaults_stream.get());
+            printer_defaults_stream.Get());
         DCHECK(SUCCEEDED(hr));
         if (SUCCEEDED(hr)) {
-          hr = StreamOnHGlobalToString(printer_defaults_stream.get(),
+          hr = StreamOnHGlobalToString(printer_defaults_stream.Get(),
                                        &printer_info->printer_defaults);
           DCHECK(SUCCEEDED(hr));
           printer_info->defaults_mime_type = "text/xml";

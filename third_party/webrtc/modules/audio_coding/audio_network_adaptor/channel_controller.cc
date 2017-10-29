@@ -11,7 +11,7 @@
 #include <algorithm>
 
 #include "webrtc/modules/audio_coding/audio_network_adaptor/channel_controller.h"
-#include "webrtc/base/checks.h"
+#include "webrtc/rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -41,8 +41,7 @@ void ChannelController::UpdateNetworkMetrics(
     uplink_bandwidth_bps_ = network_metrics.uplink_bandwidth_bps;
 }
 
-void ChannelController::MakeDecision(
-    AudioNetworkAdaptor::EncoderRuntimeConfig* config) {
+void ChannelController::MakeDecision(AudioEncoderRuntimeConfig* config) {
   // Decision on |num_channels| should not have been made.
   RTC_DCHECK(!config->num_channels);
 

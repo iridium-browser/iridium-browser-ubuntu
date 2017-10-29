@@ -10,23 +10,25 @@ namespace blink {
 // This enum is used in UMA histograms, so don't change the order or remove
 // entries.
 enum WebServiceWorkerResponseError {
-  WebServiceWorkerResponseErrorUnknown,
-  WebServiceWorkerResponseErrorPromiseRejected,
-  WebServiceWorkerResponseErrorDefaultPrevented,
-  WebServiceWorkerResponseErrorNoV8Instance,
-  WebServiceWorkerResponseErrorResponseTypeError,
-  WebServiceWorkerResponseErrorResponseTypeOpaque,
-  WebServiceWorkerResponseErrorResponseTypeNotBasicOrDefault,
-  WebServiceWorkerResponseErrorBodyUsed,
-  WebServiceWorkerResponseErrorResponseTypeOpaqueForClientRequest,
-  WebServiceWorkerResponseErrorResponseTypeOpaqueRedirect,
-  WebServiceWorkerResponseErrorBodyLocked,
-  WebServiceWorkerResponseErrorNoForeignFetchResponse,
-  WebServiceWorkerResponseErrorForeignFetchHeadersWithoutOrigin,
-  WebServiceWorkerResponseErrorForeignFetchMismatchedOrigin,
-  WebServiceWorkerResponseErrorRedirectedResponseForNotFollowRequest,
-  WebServiceWorkerResponseErrorLast =
-      WebServiceWorkerResponseErrorRedirectedResponseForNotFollowRequest,
+  kWebServiceWorkerResponseErrorUnknown = 0,
+  kWebServiceWorkerResponseErrorPromiseRejected = 1,
+  kWebServiceWorkerResponseErrorDefaultPrevented = 2,
+  kWebServiceWorkerResponseErrorNoV8Instance = 3,
+  kWebServiceWorkerResponseErrorResponseTypeError = 4,
+  kWebServiceWorkerResponseErrorResponseTypeOpaque = 5,
+  kWebServiceWorkerResponseErrorResponseTypeNotBasicOrDefault = 6,
+  kWebServiceWorkerResponseErrorBodyUsed = 7,
+  kWebServiceWorkerResponseErrorResponseTypeOpaqueForClientRequest = 8,
+  kWebServiceWorkerResponseErrorResponseTypeOpaqueRedirect = 9,
+  kWebServiceWorkerResponseErrorBodyLocked = 10,
+  kWebServiceWorkerResponseErrorNoForeignFetchResponse = 11,
+  kWebServiceWorkerResponseErrorForeignFetchHeadersWithoutOrigin = 12,
+  kWebServiceWorkerResponseErrorForeignFetchMismatchedOrigin = 13,
+  kWebServiceWorkerResponseErrorRedirectedResponseForNotFollowRequest = 14,
+  kWebServiceWorkerResponseErrorDataPipeCreationFailed = 15,
+  // Add a new type here, and update the following line and enums.xml.
+  kWebServiceWorkerResponseErrorLast =
+      kWebServiceWorkerResponseErrorDataPipeCreationFailed,
 };
 
 }  // namespace blink

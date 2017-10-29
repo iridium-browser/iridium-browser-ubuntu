@@ -23,7 +23,9 @@
 
 enum SelectionMode { "select", "start", "end", "preserve" };
 
-interface HTMLInputElement : HTMLElement {
+[
+    ActiveScriptWrappable
+] interface HTMLInputElement : HTMLElement {
     [CEReactions, Reflect] attribute DOMString accept;
     [CEReactions, Reflect] attribute DOMString alt;
     [CEReactions, Reflect] attribute DOMString autocomplete;
@@ -102,8 +104,9 @@ interface HTMLInputElement : HTMLElement {
     [Measure] attribute DOMString autocapitalize;
 
     // HTML Media Capture
-    // http://www.w3.org/TR/html-media-capture/
-    [RuntimeEnabled=MediaCapture, Reflect] attribute boolean capture;
+    // https://w3c.github.io/html-media-capture/#the-capture-attribute
+    // Using DOMString as enum cannot be reflected. https://github.com/w3c/html-media-capture/issues/12
+    [Measure, RuntimeEnabled=MediaCapture, Reflect] attribute DOMString capture;
 
     // Non-standard APIs
     [Reflect, MeasureAs=PrefixedDirectoryAttribute] attribute boolean webkitdirectory;

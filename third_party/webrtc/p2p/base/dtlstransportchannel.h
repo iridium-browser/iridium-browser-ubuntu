@@ -15,13 +15,13 @@
 #include <string>
 #include <vector>
 
-#include "webrtc/base/buffer.h"
-#include "webrtc/base/bufferqueue.h"
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/sslstreamadapter.h"
-#include "webrtc/base/stream.h"
 #include "webrtc/p2p/base/dtlstransportinternal.h"
 #include "webrtc/p2p/base/icetransportinternal.h"
+#include "webrtc/rtc_base/buffer.h"
+#include "webrtc/rtc_base/bufferqueue.h"
+#include "webrtc/rtc_base/constructormagic.h"
+#include "webrtc/rtc_base/sslstreamadapter.h"
+#include "webrtc/rtc_base/stream.h"
 
 namespace rtc {
 class PacketTransportInternal;
@@ -86,10 +86,17 @@ class StreamInterfaceChannel : public rtc::StreamInterface {
 //     into packet writes on ice_transport_.
 class DtlsTransport : public DtlsTransportInternal {
  public:
-  // The parameters here is:
-  // ice_transport -- the ice transport we are wrapping
-  explicit DtlsTransport(IceTransportInternal* ice_transport);
+  // |ice_transport| is the ICE transport this DTLS transport is wrapping.
+  //
+  // |crypto_options| are the options used for the DTLS handshake. This affects
+  // whether GCM crypto suites are negotiated.
+  explicit DtlsTransport(IceTransportInternal* ice_transport,
+                         const rtc::CryptoOptions& crypto_options);
   ~DtlsTransport() override;
+
+  const rtc::CryptoOptions& crypto_options() const override {
+    return crypto_options_;
+  }
 
   DtlsTransportState dtls_state() const override { return dtls_state_; }
 
@@ -121,11 +128,6 @@ class DtlsTransport : public DtlsTransportInternal {
   }
 
   virtual bool SetSslMaxProtocolVersion(rtc::SSLProtocolVersion version);
-
-  // Set up the ciphers to use for DTLS-SRTP. If this method is not called
-  // before DTLS starts, or |ciphers| is empty, SRTP keys won't be negotiated.
-  // This method should be called before SetupDtls.
-  bool SetSrtpCryptoSuites(const std::vector<int>& ciphers) override;
 
   // Find out which DTLS-SRTP cipher was negotiated
   bool GetSrtpCryptoSuite(int* cipher) override;
@@ -174,14 +176,6 @@ class DtlsTransport : public DtlsTransportInternal {
     return ice_transport_->SetOption(opt, value);
   }
 
-  bool SetSrtpCiphers(const std::vector<std::string>& ciphers) override {
-    std::vector<int> crypto_suites;
-    for (const auto cipher : ciphers) {
-      crypto_suites.push_back(rtc::SrtpCryptoSuiteFromName(cipher));
-    }
-    return SetSrtpCryptoSuites(crypto_suites);
-  }
-
   std::string ToString() const {
     const char RECEIVING_ABBREV[2] = {'_', 'R'};
     const char WRITABLE_ABBREV[2] = {'_', 'W'};
@@ -228,6 +222,7 @@ class DtlsTransport : public DtlsTransportInternal {
   rtc::scoped_refptr<rtc::RTCCertificate> local_certificate_;
   rtc::SSLRole ssl_role_;
   rtc::SSLProtocolVersion ssl_max_version_;
+  rtc::CryptoOptions crypto_options_;
   rtc::Buffer remote_fingerprint_value_;
   std::string remote_fingerprint_algorithm_;
 

@@ -26,13 +26,13 @@ struct Header : public base::Pickle::Header {
 }
 
 // static
-std::unique_ptr<base::BinaryValue> GinJavaBridgeValue::CreateUndefinedValue() {
+std::unique_ptr<base::Value> GinJavaBridgeValue::CreateUndefinedValue() {
   GinJavaBridgeValue gin_value(TYPE_UNDEFINED);
   return gin_value.SerializeToBinaryValue();
 }
 
 // static
-std::unique_ptr<base::BinaryValue> GinJavaBridgeValue::CreateNonFiniteValue(
+std::unique_ptr<base::Value> GinJavaBridgeValue::CreateNonFiniteValue(
     float in_value) {
   GinJavaBridgeValue gin_value(TYPE_NONFINITE);
   gin_value.pickle_.WriteFloat(in_value);
@@ -40,13 +40,13 @@ std::unique_ptr<base::BinaryValue> GinJavaBridgeValue::CreateNonFiniteValue(
 }
 
 // static
-std::unique_ptr<base::BinaryValue> GinJavaBridgeValue::CreateNonFiniteValue(
+std::unique_ptr<base::Value> GinJavaBridgeValue::CreateNonFiniteValue(
     double in_value) {
   return CreateNonFiniteValue(static_cast<float>(in_value));
 }
 
 // static
-std::unique_ptr<base::BinaryValue> GinJavaBridgeValue::CreateObjectIDValue(
+std::unique_ptr<base::Value> GinJavaBridgeValue::CreateObjectIDValue(
     int32_t in_value) {
   GinJavaBridgeValue gin_value(TYPE_OBJECT_ID);
   gin_value.pickle_.WriteInt(in_value);
@@ -57,9 +57,9 @@ std::unique_ptr<base::BinaryValue> GinJavaBridgeValue::CreateObjectIDValue(
 bool GinJavaBridgeValue::ContainsGinJavaBridgeValue(const base::Value* value) {
   if (!value->IsType(base::Value::Type::BINARY))
     return false;
-  if (value->GetSize() < sizeof(Header))
+  if (value->GetBlob().size() < sizeof(Header))
     return false;
-  base::Pickle pickle(value->GetBuffer(), value->GetSize());
+  base::Pickle pickle(value->GetBlob().data(), value->GetBlob().size());
   // Broken binary value: payload or header size is wrong
   if (!pickle.data() || pickle.size() - pickle.payload_size() != sizeof(Header))
     return false;
@@ -111,14 +111,13 @@ GinJavaBridgeValue::GinJavaBridgeValue(Type type) :
   header->type = type;
 }
 
-GinJavaBridgeValue::GinJavaBridgeValue(const base::BinaryValue* value)
-    : pickle_(value->GetBuffer(), value->GetSize()) {
+GinJavaBridgeValue::GinJavaBridgeValue(const base::Value* value)
+    : pickle_(value->GetBlob().data(), value->GetBlob().size()) {
   DCHECK(ContainsGinJavaBridgeValue(value));
 }
 
-std::unique_ptr<base::BinaryValue>
-GinJavaBridgeValue::SerializeToBinaryValue() {
-  return base::BinaryValue::CreateWithCopiedBuffer(
+std::unique_ptr<base::Value> GinJavaBridgeValue::SerializeToBinaryValue() {
+  return base::Value::CreateWithCopiedBuffer(
       reinterpret_cast<const char*>(pickle_.data()), pickle_.size());
 }
 

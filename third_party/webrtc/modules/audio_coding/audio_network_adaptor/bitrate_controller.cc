@@ -12,7 +12,7 @@
 
 #include <algorithm>
 
-#include "webrtc/base/checks.h"
+#include "webrtc/rtc_base/checks.h"
 #include "webrtc/system_wrappers/include/field_trial.h"
 
 namespace webrtc {
@@ -43,8 +43,7 @@ void BitrateController::UpdateNetworkMetrics(
     overhead_bytes_per_packet_ = network_metrics.overhead_bytes_per_packet;
 }
 
-void BitrateController::MakeDecision(
-    AudioNetworkAdaptor::EncoderRuntimeConfig* config) {
+void BitrateController::MakeDecision(AudioEncoderRuntimeConfig* config) {
   // Decision on |bitrate_bps| should not have been made.
   RTC_DCHECK(!config->bitrate_bps);
   if (target_audio_bitrate_bps_ && overhead_bytes_per_packet_) {

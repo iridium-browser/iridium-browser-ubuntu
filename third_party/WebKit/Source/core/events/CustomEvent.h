@@ -29,10 +29,10 @@
 #include "core/CoreExport.h"
 #include "core/events/CustomEventInit.h"
 #include "core/events/Event.h"
+#include "platform/bindings/DOMWrapperWorld.h"
+#include "platform/bindings/TraceWrapperV8Reference.h"
 
 namespace blink {
-
-class SerializedScriptValue;
 
 class CORE_EXPORT CustomEvent final : public Event {
   DEFINE_WRAPPERTYPEINFO();
@@ -40,36 +40,36 @@ class CORE_EXPORT CustomEvent final : public Event {
  public:
   ~CustomEvent() override;
 
-  static CustomEvent* create() { return new CustomEvent; }
+  static CustomEvent* Create() { return new CustomEvent; }
 
-  static CustomEvent* create(const AtomicString& type,
+  static CustomEvent* Create(ScriptState* script_state,
+                             const AtomicString& type,
                              const CustomEventInit& initializer) {
-    return new CustomEvent(type, initializer);
+    return new CustomEvent(script_state, type, initializer);
   }
 
-  void initCustomEvent(const AtomicString& type,
-                       bool canBubble,
+  void initCustomEvent(ScriptState*,
+                       const AtomicString& type,
+                       bool can_bubble,
                        bool cancelable,
                        const ScriptValue& detail);
-  void initCustomEvent(const AtomicString& type,
-                       bool canBubble,
-                       bool cancelable,
-                       PassRefPtr<SerializedScriptValue>);
 
-  const AtomicString& interfaceName() const override;
+  const AtomicString& InterfaceName() const override;
 
-  SerializedScriptValue* serializedDetail() { return m_serializedDetail.get(); }
-  void setSerializedDetail(PassRefPtr<SerializedScriptValue> serializedDetail) {
-    m_serializedDetail = serializedDetail;
-  }
+  ScriptValue detail(ScriptState*) const;
 
   DECLARE_VIRTUAL_TRACE();
 
+  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+
  private:
   CustomEvent();
-  CustomEvent(const AtomicString& type, const CustomEventInit& initializer);
+  CustomEvent(ScriptState*,
+              const AtomicString& type,
+              const CustomEventInit& initializer);
 
-  RefPtr<SerializedScriptValue> m_serializedDetail;
+  RefPtr<DOMWrapperWorld> world_;
+  TraceWrapperV8Reference<v8::Value> detail_;
 };
 
 }  // namespace blink

@@ -4,21 +4,16 @@
 
 #include "ash/metrics/user_metrics_recorder.h"
 
-#include "ash/common/metrics/pointer_metrics_recorder.h"
-#include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shelf/shelf_delegate.h"
-#include "ash/common/shelf/shelf_item_types.h"
-#include "ash/common/shelf/shelf_model.h"
-#include "ash/common/shelf/shelf_view.h"
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/system/tray/system_tray_delegate.h"
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
 #include "ash/metrics/desktop_task_switch_metric_recorder.h"
+#include "ash/metrics/pointer_metrics_recorder.h"
+#include "ash/public/cpp/shelf_item.h"
+#include "ash/public/cpp/shelf_model.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/session/session_controller.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_view.h"
 #include "ash/shell.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/window_state.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
@@ -37,7 +32,6 @@ enum ActiveWindowStateType {
   ACTIVE_WINDOW_STATE_TYPE_MAXIMIZED,
   ACTIVE_WINDOW_STATE_TYPE_FULLSCREEN,
   ACTIVE_WINDOW_STATE_TYPE_SNAPPED,
-  ACTIVE_WINDOW_STATE_TYPE_DOCKED,
   ACTIVE_WINDOW_STATE_TYPE_PINNED,
   ACTIVE_WINDOW_STATE_TYPE_TRUSTED_PINNED,
   ACTIVE_WINDOW_STATE_TYPE_COUNT,
@@ -58,10 +52,6 @@ ActiveWindowStateType GetActiveWindowState() {
       case wm::WINDOW_STATE_TYPE_LEFT_SNAPPED:
       case wm::WINDOW_STATE_TYPE_RIGHT_SNAPPED:
         active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_SNAPPED;
-        break;
-      case wm::WINDOW_STATE_TYPE_DOCKED:
-      case wm::WINDOW_STATE_TYPE_DOCKED_MINIMIZED:
-        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_DOCKED;
         break;
       case wm::WINDOW_STATE_TYPE_PINNED:
         active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_PINNED;
@@ -85,34 +75,21 @@ ActiveWindowStateType GetActiveWindowState() {
 
 // Returns true if kiosk mode is active.
 bool IsKioskModeActive() {
-  return WmShell::Get()->system_tray_delegate()->GetUserLoginStatus() ==
+  return Shell::Get()->session_controller()->login_status() ==
          LoginStatus::KIOSK_APP;
 }
 
 // Returns true if ARC kiosk mode is active.
 bool IsArcKioskModeActive() {
-  return WmShell::Get()->system_tray_delegate()->GetUserLoginStatus() ==
+  return Shell::Get()->session_controller()->login_status() ==
          LoginStatus::ARC_KIOSK_APP;
 }
 
 // Returns true if there is an active user and their session isn't currently
 // locked.
 bool IsUserActive() {
-  switch (WmShell::Get()->system_tray_delegate()->GetUserLoginStatus()) {
-    case LoginStatus::NOT_LOGGED_IN:
-    case LoginStatus::LOCKED:
-      return false;
-    case LoginStatus::USER:
-    case LoginStatus::OWNER:
-    case LoginStatus::GUEST:
-    case LoginStatus::PUBLIC:
-    case LoginStatus::SUPERVISED:
-    case LoginStatus::KIOSK_APP:
-    case LoginStatus::ARC_KIOSK_APP:
-      return true;
-  }
-  NOTREACHED();
-  return false;
+  SessionController* session = Shell::Get()->session_controller();
+  return session->IsActiveUserSessionStarted() && !session->IsScreenLocked();
 }
 
 // Array of window container ids that contain visible windows to be counted for
@@ -120,8 +97,10 @@ bool IsUserActive() {
 // container to the lowest to allow the |GetNumVisibleWindows| method to short
 // circuit when processing a maximized or fullscreen window.
 int kVisibleWindowContainerIds[] = {
-    kShellWindowId_PanelContainer, kShellWindowId_DockedContainer,
-    kShellWindowId_AlwaysOnTopContainer, kShellWindowId_DefaultContainer};
+    kShellWindowId_PanelContainer,
+    kShellWindowId_AlwaysOnTopContainer,
+    kShellWindowId_DefaultContainer
+};
 
 // Returns an approximate count of how many windows are currently visible in the
 // primary root window.
@@ -134,7 +113,7 @@ int GetNumVisibleWindowsInPrimaryDisplay() {
       break;
 
     const aura::Window::Windows& children =
-        Shell::GetContainer(Shell::GetInstance()->GetPrimaryRootWindow(),
+        Shell::GetContainer(Shell::Get()->GetPrimaryRootWindow(),
                             current_container_id)
             ->children();
     // Reverse iterate over the child windows so that they are processed in
@@ -149,11 +128,9 @@ int GetNumVisibleWindowsInPrimaryDisplay() {
       if (!child_window->IsVisible() || child_window_state->IsMinimized())
         continue;
 
-      // Only count activatable windows for 2 reasons:
-      //  1. Ensures that a browser window and its transient, modal child will
-      //     only count as 1 visible window.
-      //  2. Prevents counting some windows in the
-      //     kShellWindowId_DockedContainer that were not opened by the user.
+      // Only count activatable windows for 1 reason:
+      //  - Ensures that a browser window and its transient, modal child will
+      //    only count as 1 visible window.
       if (child_window_state->CanActivate())
         ++visible_window_count;
 
@@ -174,24 +151,13 @@ int GetNumVisibleWindowsInPrimaryDisplay() {
 
 // Records the number of items in the shelf as an UMA statistic.
 void RecordShelfItemCounts() {
-  ShelfDelegate* shelf_delegate = WmShell::Get()->shelf_delegate();
-  DCHECK(shelf_delegate);
-
   int pinned_item_count = 0;
   int unpinned_item_count = 0;
-
-  for (const ShelfItem& shelf_item : WmShell::Get()->shelf_model()->items()) {
-    if (shelf_item.type != TYPE_APP_LIST) {
-      // Internal ash apps do not have an app id and thus will always be counted
-      // as unpinned.
-      if (shelf_delegate->HasShelfIDToAppIDMapping(shelf_item.id) &&
-          shelf_delegate->IsAppPinned(
-              shelf_delegate->GetAppIDForShelfID(shelf_item.id))) {
-        ++pinned_item_count;
-      } else {
-        ++unpinned_item_count;
-      }
-    }
+  for (const ShelfItem& item : Shell::Get()->shelf_model()->items()) {
+    if (item.type == TYPE_PINNED_APP || item.type == TYPE_BROWSER_SHORTCUT)
+      ++pinned_item_count;
+    else if (item.type != TYPE_APP_LIST)
+      ++unpinned_item_count;
   }
 
   UMA_HISTOGRAM_COUNTS_100("Ash.Shelf.NumberOfItems",
@@ -250,9 +216,6 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
       break;
     case UMA_ACCEL_SHUT_DOWN_POWER_BUTTON:
       RecordAction(UserMetricsAction("Accel_ShutDown_PowerButton"));
-      break;
-    case UMA_CLOSE_THROUGH_CONTEXT_MENU:
-      RecordAction(UserMetricsAction("CloseFromContextMenu"));
       break;
     case UMA_DESKTOP_SWITCH_TASK:
       RecordAction(UserMetricsAction("Desktop_SwitchTask"));
@@ -365,7 +328,7 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case UMA_STATUS_AREA_CHANGED_VOLUME_POPUP:
       RecordAction(UserMetricsAction("StatusArea_Volume_ChangedPopup"));
       break;
-    case UMA_STATUS_AREA_DETAILED_ACCESSABILITY:
+    case UMA_STATUS_AREA_DETAILED_ACCESSIBILITY:
       RecordAction(UserMetricsAction("StatusArea_Accessability_DetailedView"));
       break;
     case UMA_STATUS_AREA_DETAILED_AUDIO_VIEW:
@@ -395,24 +358,6 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case UMA_STATUS_AREA_DETAILED_VPN_VIEW:
       RecordAction(UserMetricsAction("StatusArea_VPN_Detailed"));
       break;
-    case UMA_STATUS_AREA_DISABLE_AUTO_CLICK:
-      RecordAction(UserMetricsAction("StatusArea_AutoClickDisabled"));
-      break;
-    case UMA_STATUS_AREA_DISABLE_HIGH_CONTRAST:
-      RecordAction(UserMetricsAction("StatusArea_HighContrastDisabled"));
-      break;
-    case UMA_STATUS_AREA_DISABLE_LARGE_CURSOR:
-      RecordAction(UserMetricsAction("StatusArea_LargeCursorDisabled"));
-      break;
-    case UMA_STATUS_AREA_DISABLE_MAGNIFIER:
-      RecordAction(UserMetricsAction("StatusArea_MagnifierDisabled"));
-      break;
-    case UMA_STATUS_AREA_DISABLE_SPOKEN_FEEDBACK:
-      RecordAction(UserMetricsAction("StatusArea_SpokenFeedbackDisabled"));
-      break;
-    case UMA_STATUS_AREA_DISABLE_VIRTUAL_KEYBOARD:
-      RecordAction(UserMetricsAction("StatusArea_VirtualKeyboardDisabled"));
-      break;
     case UMA_STATUS_AREA_DISPLAY_DEFAULT_SELECTED:
       RecordAction(UserMetricsAction("StatusArea_Display_Default_Selected"));
       break;
@@ -441,32 +386,8 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case UMA_STATUS_AREA_DRIVE_SETTINGS:
       RecordAction(UserMetricsAction("StatusArea_Drive_Settings"));
       break;
-    case UMA_STATUS_AREA_ENABLE_AUTO_CLICK:
-      RecordAction(UserMetricsAction("StatusArea_AutoClickEnabled"));
-      break;
-    case UMA_STATUS_AREA_ENABLE_HIGH_CONTRAST:
-      RecordAction(UserMetricsAction("StatusArea_HighContrastEnabled"));
-      break;
-    case UMA_STATUS_AREA_ENABLE_LARGE_CURSOR:
-      RecordAction(UserMetricsAction("StatusArea_LargeCursorEnabled"));
-      break;
-    case UMA_STATUS_AREA_ENABLE_MAGNIFIER:
-      RecordAction(UserMetricsAction("StatusArea_MagnifierEnabled"));
-      break;
-    case UMA_STATUS_AREA_ENABLE_SPOKEN_FEEDBACK:
-      RecordAction(UserMetricsAction("StatusArea_SpokenFeedbackEnabled"));
-      break;
-    case UMA_STATUS_AREA_ENABLE_VIRTUAL_KEYBOARD:
-      RecordAction(UserMetricsAction("StatusArea_VirtualKeyboardEnabled"));
-      break;
     case UMA_STATUS_AREA_ENABLE_WIFI:
       RecordAction(UserMetricsAction("StatusArea_Network_WifiEnabled"));
-      break;
-    case UMA_STATUS_AREA_IME_SHOW_DETAILED:
-      RecordAction(UserMetricsAction("StatusArea_IME_Detailed"));
-      break;
-    case UMA_STATUS_AREA_IME_SWITCH_MODE:
-      RecordAction(UserMetricsAction("StatusArea_IME_SwitchMode"));
       break;
     case UMA_STATUS_AREA_MENU_OPENED:
       RecordAction(UserMetricsAction("StatusArea_MenuOpened"));
@@ -516,6 +437,12 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case UMA_STATUS_AREA_VPN_SETTINGS_OPENED:
       RecordAction(UserMetricsAction("StatusArea_VPN_Settings"));
       break;
+    case UMA_TABLET_WINDOW_CLOSE_THROUGH_CAPTION_BUTTON:
+      RecordAction(UserMetricsAction("Tablet_WindowCloseFromCaptionButton"));
+      break;
+    case UMA_TABLET_WINDOW_CLOSE_THROUGH_OVERVIEW_CLOSE_BUTTON:
+      RecordAction(UserMetricsAction("Tablet_WindowCloseFromOverviewButton"));
+      break;
     case UMA_TOGGLE_MAXIMIZE_CAPTION_CLICK:
       RecordAction(UserMetricsAction("Caption_ClickTogglesMaximize"));
       break;
@@ -537,6 +464,9 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
       break;
     case UMA_TRAY_LOCK_SCREEN:
       RecordAction(UserMetricsAction("Tray_LockScreen"));
+      break;
+    case UMA_TRAY_NIGHT_LIGHT:
+      RecordAction(UserMetricsAction("Tray_NightLight"));
       break;
     case UMA_TRAY_OVERVIEW:
       RecordAction(UserMetricsAction("Tray_Overview"));
@@ -596,7 +526,7 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
 
 void UserMetricsRecorder::OnShellInitialized() {
   // Lazy creation of the DesktopTaskSwitchMetricRecorder because it accesses
-  // Shell::GetInstance() which is not available when |this| is instantiated.
+  // Shell::Get() which is not available when |this| is instantiated.
   if (!desktop_task_switch_metric_recorder_) {
     desktop_task_switch_metric_recorder_.reset(
         new DesktopTaskSwitchMetricRecorder());
@@ -614,7 +544,7 @@ void UserMetricsRecorder::OnShellShuttingDown() {
 }
 
 void UserMetricsRecorder::RecordPeriodicMetrics() {
-  WmShelf* shelf = WmShelf::ForWindow(WmShell::Get()->GetPrimaryRootWindow());
+  Shelf* shelf = Shelf::ForWindow(Shell::GetPrimaryRootWindow());
   // TODO(bruthig): Investigating whether the check for |manager| is necessary
   // and add tests if it is.
   if (shelf) {

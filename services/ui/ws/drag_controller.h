@@ -10,7 +10,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "services/ui/common/types.h"
-#include "services/ui/public/interfaces/cursor.mojom.h"
+#include "services/ui/public/interfaces/cursor/cursor.mojom.h"
 #include "services/ui/ws/ids.h"
 #include "services/ui/ws/server_window_observer.h"
 
@@ -53,7 +53,7 @@ class DragController : public ServerWindowObserver {
       DropEffectBitmask drag_operations);
   ~DragController() override;
 
-  ui::mojom::Cursor current_cursor() const { return current_cursor_; }
+  const ui::CursorData& current_cursor() const { return current_cursor_; }
 
   // Cancels the current drag, ie, due to the user pressing Escape.
   void Cancel();
@@ -89,9 +89,9 @@ class DragController : public ServerWindowObserver {
   // bitmask of the current valid drag operations.
   void SetWindowDropOperations(ServerWindow* window, DropEffectBitmask bitmask);
 
-  // Returns the ui::mojom::Cursor for the window |bitmask|, adjusted for types
-  // that the drag source allows.
-  ui::mojom::Cursor CursorForEffectBitmask(DropEffectBitmask bitmask);
+  // Returns the cursor for the window |bitmask|, adjusted for types that the
+  // drag source allows.
+  ui::CursorData CursorForEffectBitmask(DropEffectBitmask bitmask);
 
   // Ensure that |window| has an entry in |window_state_| and that we're an
   // observer.
@@ -111,6 +111,8 @@ class DragController : public ServerWindowObserver {
   // ServerWindowObserver:
   void OnWindowDestroying(ServerWindow* window) override;
 
+  static std::string ToString(OperationType type);
+
   // Our owner.
   DragSource* source_;
 
@@ -124,7 +126,7 @@ class DragController : public ServerWindowObserver {
   const int32_t drag_pointer_id_;
 
   // The current mouse cursor during the drag.
-  ui::mojom::Cursor current_cursor_;
+  ui::CursorData current_cursor_;
 
   // Sending OnDragOver() to our |source_| destroys us; there is a period where
   // we have to continue to exist, but not process any more pointer events.

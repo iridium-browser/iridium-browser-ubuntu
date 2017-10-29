@@ -6,6 +6,7 @@
 
 from __future__ import print_function
 
+import collections
 import contextlib
 import datetime
 import difflib
@@ -18,7 +19,6 @@ import signal
 import socket
 import StringIO
 import sys
-import time
 import __builtin__
 
 from chromite.lib import constants
@@ -29,7 +29,6 @@ from chromite.lib import cros_test_lib
 from chromite.lib import git
 from chromite.lib import osutils
 from chromite.lib import partial_mock
-from chromite.lib import retry_util
 from chromite.lib import signals as cros_signals
 
 
@@ -45,6 +44,22 @@ class RunCommandErrorStrTest(cros_test_lib.TestCase):
                                        error_code_ok=True)
     rce = cros_build_lib.RunCommandError('\x81', result)
     str(rce)
+
+
+class TruncateStringTest(cros_test_lib.TestCase):
+  """Test the TruncateStringToLine function."""
+
+  def testTruncate(self):
+    self.assertEqual(cros_build_lib.TruncateStringToLine('1234567', 5),
+                     '12...')
+
+  def testNoTruncate(self):
+    self.assertEqual(cros_build_lib.TruncateStringToLine('1234567', 7),
+                     '1234567')
+
+  def testNoTruncateMultiline(self):
+    self.assertEqual(cros_build_lib.TruncateStringToLine('1234567\nasdf', 7),
+                     '1234567')
 
 
 class CmdToStrTest(cros_test_lib.TestCase):
@@ -127,7 +142,7 @@ class RunCommandMock(partial_mock.PartialCmdMock):
 
   def RunCommand(self, cmd, *args, **kwargs):
     result = self._results['RunCommand'].LookupResult(
-        (cmd,), hook_args=(cmd,) + args, hook_kwargs=kwargs)
+        (cmd,), kwargs=kwargs, hook_args=(cmd,) + args, hook_kwargs=kwargs)
 
     popen_mock = PopenMock()
     popen_mock.AddCmdResult(partial_mock.Ignore(), result.returncode,
@@ -144,6 +159,14 @@ class RunCommandTestCase(cros_test_lib.MockTestCase):
     self.rc.SetDefaultCmdResult()
     self.assertCommandCalled = self.rc.assertCommandCalled
     self.assertCommandContains = self.rc.assertCommandContains
+
+    # These ENV variables affect RunCommand behavior, hide them.
+    self._old_envs = {e: os.environ.pop(e) for e in constants.ENV_PASSTHRU
+                      if e in os.environ}
+
+  def tearDown(self):
+    # Restore hidden ENVs.
+    os.environ.update(self._old_envs)
 
 
 class RunCommandTempDirTestCase(RunCommandTestCase,
@@ -236,6 +259,10 @@ class TestRunCommand(cros_test_lib.MockTestCase):
   """Tests of RunCommand functionality."""
 
   def setUp(self):
+    # These ENV variables affect RunCommand behavior, hide them.
+    self._old_envs = {e: os.environ.pop(e) for e in constants.ENV_PASSTHRU
+                      if e in os.environ}
+
     # Get the original value for SIGINT so our signal() mock can return the
     # correct thing.
     self._old_sigint = signal.getsignal(signal.SIGINT)
@@ -252,6 +279,10 @@ class TestRunCommand(cros_test_lib.MockTestCase):
     self.signal_mock = self.PatchObject(signal, 'signal')
     self.getsignal_mock = self.PatchObject(signal, 'getsignal')
     self.PatchObject(cros_signals, 'SignalModuleUsable', return_value=True)
+
+  def tearDown(self):
+    # Restore hidden ENVs.
+    os.environ.update(self._old_envs)
 
   @contextlib.contextmanager
   def _MockChecker(self, cmd, **kwargs):
@@ -691,162 +722,6 @@ class TestRunCommandOutput(cros_test_lib.TempDirTestCase,
       cros_build_lib.RunCommand(['cat', '/'], redirect_stderr=True)
     self.assertIsNotNone(cm.exception.result.error)
     self.assertNotEqual('', cm.exception.result.error)
-
-
-class TestRetries(cros_test_lib.MockTempDirTestCase):
-  """Tests of GenericRetry and relatives."""
-
-  def testGenericRetry(self):
-    """Test basic semantics of retry and success recording."""
-    source = iter(xrange(5)).next
-
-    def f():
-      val = source()
-      if val < 4:
-        raise ValueError()
-      return val
-
-    s = []
-    def sf(attempt):
-      s.append(attempt)
-
-    handler = lambda ex: isinstance(ex, ValueError)
-
-    self.assertRaises(ValueError, retry_util.GenericRetry, handler, 3, f,
-                      success_functor=sf)
-    self.assertEqual(s, [])
-
-    self.assertEqual(4, retry_util.GenericRetry(handler, 1, f,
-                                                success_functor=sf))
-    self.assertEqual(s, [1])
-
-    self.assertRaises(StopIteration, retry_util.GenericRetry, handler, 3, f,
-                      success_functor=sf)
-    self.assertEqual(s, [1])
-
-  def testRaisedException(self):
-    """Test which exception gets raised by repeated failure."""
-
-    def getTestFunction():
-      """Get function that fails once with ValueError, Then AssertionError."""
-      source = itertools.count()
-      def f():
-        if source.next() == 0:
-          raise ValueError()
-        else:
-          raise AssertionError()
-      return f
-
-    handler = lambda ex: True
-
-    with self.assertRaises(ValueError):
-      retry_util.GenericRetry(handler, 3, getTestFunction())
-
-    with self.assertRaises(AssertionError):
-      retry_util.GenericRetry(handler, 3, getTestFunction(),
-                              raise_first_exception_on_failure=False)
-
-  def testSuccessFunctorException(self):
-    """Exceptions in |success_functor| should not be retried."""
-    def sf(_):
-      assert False
-
-    with self.assertRaises(AssertionError):
-      retry_util.GenericRetry(lambda: True, 1, lambda: None, success_functor=sf)
-
-  def testRetryExceptionBadArgs(self):
-    """Verify we reject non-classes or tuples of classes"""
-    self.assertRaises(TypeError, retry_util.RetryException, '', 3, map)
-    self.assertRaises(TypeError, retry_util.RetryException, 123, 3, map)
-    self.assertRaises(TypeError, retry_util.RetryException, None, 3, map)
-    self.assertRaises(TypeError, retry_util.RetryException, [None], 3, map)
-
-  def testRetryException(self):
-    """Verify we retry only when certain exceptions get thrown"""
-    source, source2 = iter(xrange(6)).next, iter(xrange(6)).next
-    def f():
-      val = source2()
-      self.assertEqual(val, source())
-      if val < 2:
-        raise OSError()
-      if val < 5:
-        raise ValueError()
-      return val
-    self.assertRaises(OSError, retry_util.RetryException,
-                      (OSError, ValueError), 2, f)
-    self.assertRaises(ValueError, retry_util.RetryException,
-                      (OSError, ValueError), 1, f)
-    self.assertEqual(5, retry_util.RetryException(ValueError, 1, f))
-    self.assertRaises(StopIteration, retry_util.RetryException,
-                      ValueError, 3, f)
-
-  def testRetryWithBackoff(self):
-    sleep_history = []
-    def mock_sleep(x):
-      sleep_history.append(x)
-    self.PatchObject(time, 'sleep', new=mock_sleep)
-    def always_fails():
-      raise ValueError()
-    handler = lambda x: True
-    with self.assertRaises(ValueError):
-      retry_util.GenericRetry(handler, 5, always_fails, sleep=1,
-                              backoff_factor=2)
-
-    self.assertEqual(sleep_history, [1, 2, 4, 8, 16])
-
-  def testBasicRetry(self):
-    # pylint: disable=E1101
-    path = os.path.join(self.tempdir, 'script')
-    paths = {
-        'stop': os.path.join(self.tempdir, 'stop'),
-        'store': os.path.join(self.tempdir, 'store'),
-    }
-    osutils.WriteFile(
-        path,
-        "import sys\n"
-        "val = int(open(%(store)r).read())\n"
-        "stop_val = int(open(%(stop)r).read())\n"
-        "open(%(store)r, 'w').write(str(val + 1))\n"
-        "print val\n"
-        "sys.exit(0 if val == stop_val else 1)\n" % paths)
-
-    os.chmod(path, 0o755)
-
-    def _setup_counters(start, stop):
-      sleep_mock.reset_mock()
-      osutils.WriteFile(paths['store'], str(start))
-      osutils.WriteFile(paths['stop'], str(stop))
-
-    def _check_counters(sleep, sleep_cnt):
-      calls = [mock.call(sleep * (x + 1)) for x in range(sleep_cnt)]
-      sleep_mock.assert_has_calls(calls)
-
-    sleep_mock = self.PatchObject(time, 'sleep')
-
-    _setup_counters(0, 0)
-    command = ['python2', path]
-    kwargs = {'redirect_stdout': True, 'print_cmd': False}
-    self.assertEqual(cros_build_lib.RunCommand(command, **kwargs).output, '0\n')
-    _check_counters(0, 0)
-
-    func = retry_util.RunCommandWithRetries
-
-    _setup_counters(2, 2)
-    self.assertEqual(func(0, command, sleep=0, **kwargs).output, '2\n')
-    _check_counters(0, 0)
-
-    _setup_counters(0, 2)
-    self.assertEqual(func(2, command, sleep=1, **kwargs).output, '2\n')
-    _check_counters(1, 2)
-
-    _setup_counters(0, 1)
-    self.assertEqual(func(1, command, sleep=2, **kwargs).output, '1\n')
-    _check_counters(2, 1)
-
-    _setup_counters(0, 3)
-    self.assertRaises(cros_build_lib.RunCommandError,
-                      func, 2, command, sleep=3, **kwargs)
-    _check_counters(3, 2)
 
 
 class TestTimedSection(cros_test_lib.TestCase):
@@ -1348,6 +1223,72 @@ class TestGroupByKey(cros_test_lib.TestCase):
         2:    [{'a': 2, 'b': 2}]}
     self.assertEqual(cros_build_lib.GroupByKey(input_iter, 'a'),
                      expected_result)
+
+
+class GroupNamedtuplesByKeyTests(cros_test_lib.TestCase):
+  """Tests for GroupNamedtuplesByKey"""
+
+  def testGroupNamedtuplesByKeyWithEmptyInputIter(self):
+    """Test GroupNamedtuplesByKey with empty input_iter."""
+    self.assertEqual({}, cros_build_lib.GroupByKey([], ''))
+
+  def testGroupNamedtuplesByKey(self):
+    """Test GroupNamedtuplesByKey."""
+    TestTuple = collections.namedtuple('TestTuple', ('key1', 'key2'))
+    r1 = TestTuple('t1', 'val1')
+    r2 = TestTuple('t2', 'val2')
+    r3 = TestTuple('t2', 'val2')
+    r4 = TestTuple('t3', 'val3')
+    r5 = TestTuple('t3', 'val3')
+    r6 = TestTuple('t3', 'val3')
+    input_iter = [r1, r2, r3, r4, r5, r6]
+
+    expected_result = {
+        't1': [r1],
+        't2': [r2, r3],
+        't3': [r4, r5, r6]}
+    self.assertDictEqual(
+        cros_build_lib.GroupNamedtuplesByKey(input_iter, 'key1'),
+        expected_result)
+
+    expected_result = {
+        'val1': [r1],
+        'val2': [r2, r3],
+        'val3': [r4, r5, r6]}
+    self.assertDictEqual(
+        cros_build_lib.GroupNamedtuplesByKey(input_iter, 'key2'),
+        expected_result)
+
+    expected_result = {
+        None: [r1, r2, r3, r4, r5, r6]}
+    self.assertDictEqual(
+        cros_build_lib.GroupNamedtuplesByKey(input_iter, 'test'),
+        expected_result)
+
+
+class InvertDictionayTests(cros_test_lib.TestCase):
+  """Tests for InvertDictionary."""
+
+  def testInvertDictionary(self):
+    """Test InvertDictionary."""
+    changes = ['change_1', 'change_2', 'change_3', 'change_4']
+    slaves = ['slave_1', 'slave_2', 'slave_3', 'slave_4']
+    slave_changes_dict = {
+        slaves[0]: set(changes[0:1]),
+        slaves[1]: set(changes[0:2]),
+        slaves[2]: set(changes[2:4]),
+        slaves[3]: set()
+    }
+    change_slaves_dict = cros_build_lib.InvertDictionary(
+        slave_changes_dict)
+
+    expected_dict = {
+        changes[0]: set(slaves[0:2]),
+        changes[1]: set([slaves[1]]),
+        changes[2]: set([slaves[2]]),
+        changes[3]: set([slaves[2]])
+    }
+    self.assertDictEqual(change_slaves_dict, expected_dict)
 
 
 class Test_iflatten_instance(cros_test_lib.TestCase):

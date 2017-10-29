@@ -8,7 +8,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/time/time.h"
-#include "public/platform/WebCommon.h"
+#include "platform/PlatformExport.h"
 
 namespace blink {
 namespace scheduler {
@@ -18,25 +18,27 @@ namespace scheduler {
 // In order to avoid bias it reports load level at regular intervals.
 // Every |reporting_interval_| time units, it reports the average thread load
 // level computed using a sliding window of width |reporting_interval_|.
-class BLINK_PLATFORM_EXPORT ThreadLoadTracker {
+class PLATFORM_EXPORT ThreadLoadTracker {
  public:
   // Callback is called with (current_time, load_level) parameters.
   using Callback = base::Callback<void(base::TimeTicks, double)>;
 
   ThreadLoadTracker(base::TimeTicks now,
                     const Callback& callback,
-                    base::TimeDelta reporting_interval,
-                    base::TimeDelta waiting_period);
+                    base::TimeDelta reporting_interval);
   ~ThreadLoadTracker();
 
   void Pause(base::TimeTicks now);
   void Resume(base::TimeTicks now);
 
+  // Note: this does not change |thread_state_|.
+  void Reset(base::TimeTicks now);
+
   void RecordTaskTime(base::TimeTicks start_time, base::TimeTicks end_time);
 
   void RecordIdle(base::TimeTicks now);
 
-  // TODO(altimin): Count wakeups.
+  // TODO(altimin): Count wake-ups.
 
  private:
   enum class ThreadState { ACTIVE, PAUSED };
@@ -52,15 +54,10 @@ class BLINK_PLATFORM_EXPORT ThreadLoadTracker {
   // |time_| is the last timestamp LoadTracker knows about.
   base::TimeTicks time_;
   base::TimeTicks next_reporting_time_;
-  // Total period for which this LoadTracker was active. Needed to discard
-  // first |waiting_period_| time.
-  base::TimeDelta total_active_time_;
 
   ThreadState thread_state_;
   base::TimeTicks last_state_change_time_;
 
-  // Start reporting values after |waiting_period_|.
-  base::TimeDelta waiting_period_;
   base::TimeDelta reporting_interval_;
 
   // Recorded run time in window

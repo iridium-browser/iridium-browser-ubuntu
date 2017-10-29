@@ -22,10 +22,6 @@ const char
     DevToolsNetworkTransaction::kDevToolsEmulateNetworkConditionsClientId[] =
         "X-DevTools-Emulate-Network-Conditions-Client-Id";
 
-// Keep in sync with X_DevTools_Request_Id defined in HTTPNames.json5.
-const char DevToolsNetworkTransaction::kDevToolsRequestId[] =
-    "X-DevTools-Request-Id";
-
 DevToolsNetworkTransaction::DevToolsNetworkTransaction(
     DevToolsNetworkController* controller,
     std::unique_ptr<net::HttpTransaction> network_transaction)
@@ -60,8 +56,11 @@ int DevToolsNetworkTransaction::Throttle(
   if (start) {
     throttled_byte_count_ += network_transaction_->GetTotalReceivedBytes();
     net::LoadTimingInfo load_timing_info;
-    if (GetLoadTimingInfo(&load_timing_info))
+    if (GetLoadTimingInfo(&load_timing_info)) {
       send_end = load_timing_info.send_end;
+      if (!load_timing_info.push_start.is_null())
+        start = false;
+    }
     if (send_end.is_null())
       send_end = base::TimeTicks::Now();
   }
@@ -124,7 +123,6 @@ int DevToolsNetworkTransaction::Start(const net::HttpRequestInfo* request,
         kDevToolsEmulateNetworkConditionsClientId, &client_id);
     custom_request_->extra_headers.RemoveHeader(
         kDevToolsEmulateNetworkConditionsClientId);
-    custom_request_->extra_headers.RemoveHeader(kDevToolsRequestId);
 
     if (request_->upload_data_stream) {
       custom_upload_data_stream_.reset(
@@ -170,18 +168,18 @@ int DevToolsNetworkTransaction::RestartIgnoringLastError(
 }
 
 int DevToolsNetworkTransaction::RestartWithCertificate(
-    net::X509Certificate* client_cert,
-    net::SSLPrivateKey* client_private_key,
+    scoped_refptr<net::X509Certificate> client_cert,
+    scoped_refptr<net::SSLPrivateKey> client_private_key,
     const net::CompletionCallback& callback) {
   if (CheckFailed())
     return net::ERR_INTERNET_DISCONNECTED;
   if (!interceptor_) {
     return network_transaction_->RestartWithCertificate(
-        client_cert, client_private_key, callback);
+        std::move(client_cert), std::move(client_private_key), callback);
   }
 
   int result = network_transaction_->RestartWithCertificate(
-      client_cert, client_private_key,
+      std::move(client_cert), std::move(client_private_key),
       base::Bind(&DevToolsNetworkTransaction::IOCallback,
                  base::Unretained(this), callback, true));
   return Throttle(callback, true, result);

@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
+#include "base/stl_util.h"
 #include "base/test/gtest_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/platform_util.h"
@@ -29,20 +30,21 @@ namespace {
 enum class DialogAction {
   INTERACTIVE,  // Run interactively.
   CLOSE_NOW,    // Call Widget::CloseNow().
+  CLOSE,        // Call Widget::Close().
 };
 
 // Helper to break out of the nested run loop that runs a test dialog.
 class WidgetCloser : public views::WidgetObserver {
  public:
   WidgetCloser(views::Widget* widget, DialogAction action)
-      : widget_(widget), weak_ptr_factory_(this) {
+      : action_(action), widget_(widget), weak_ptr_factory_(this) {
     widget->AddObserver(this);
     if (action == DialogAction::INTERACTIVE)
       return;
 
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&WidgetCloser::CloseNow, weak_ptr_factory_.GetWeakPtr()));
+        FROM_HERE, base::BindOnce(&WidgetCloser::CloseAction,
+                                  weak_ptr_factory_.GetWeakPtr()));
   }
 
   // WidgetObserver:
@@ -53,11 +55,24 @@ class WidgetCloser : public views::WidgetObserver {
   }
 
  private:
-  void CloseNow() {
-    if (widget_)
-      widget_->CloseNow();
+  void CloseAction() {
+    if (!widget_)
+      return;
+
+    switch (action_) {
+      case DialogAction::CLOSE_NOW:
+        widget_->CloseNow();
+        break;
+      case DialogAction::CLOSE:
+        widget_->Close();
+        break;
+      case DialogAction::INTERACTIVE:
+        NOTREACHED();
+        break;
+    }
   }
 
+  const DialogAction action_;
   views::Widget* widget_;
 
   base::WeakPtrFactory<WidgetCloser> weak_ptr_factory_;
@@ -111,15 +126,32 @@ void TestBrowserDialog::RunDialog() {
   auto added = base::STLSetDifference<std::vector<views::Widget*>>(
       widgets_after, widgets_before);
 
+  if (added.size() > 1) {
+    // Some tests create a standalone window to anchor a dialog. In those cases,
+    // ignore added Widgets that are not dialogs.
+    base::EraseIf(added, [](views::Widget* widget) {
+      return !widget->widget_delegate()->AsDialogDelegate();
+    });
+  }
+
   // This can fail if no dialog was shown, if the dialog shown wasn't a toolkit-
   // views dialog, or if more than one child dialog was shown.
   ASSERT_EQ(1u, added.size());
 
-  const DialogAction action = base::CommandLine::ForCurrentProcess()->HasSwitch(
-                                  internal::kInteractiveSwitch)
-                                  ? DialogAction::INTERACTIVE
-                                  : DialogAction::CLOSE_NOW;
+  DialogAction action = DialogAction::CLOSE_NOW;
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          internal::kInteractiveSwitch)) {
+    action = DialogAction::INTERACTIVE;
+  } else if (AlwaysCloseAsynchronously()) {
+    // TODO(tapted): Iterate over close methods when non-interactive for greater
+    // test coverage.
+    action = DialogAction::CLOSE;
+  }
 
   WidgetCloser closer(added[0], action);
   ::test::RunTestInteractively();
+}
+
+bool TestBrowserDialog::AlwaysCloseAsynchronously() {
+  return false;
 }

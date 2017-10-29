@@ -13,6 +13,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -30,13 +31,25 @@
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_features.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ppapi/shared_impl/ppapi_switches.h"
 
 namespace {
+
+const std::string kInstallAndWaitForActivatedPage =
+    "<script>"
+    "navigator.serviceWorker.register('./sw.js', {scope: './scope/'})"
+    "  .then(function(reg) {"
+    "      reg.addEventListener('updatefound', function() {"
+    "          var worker = reg.installing;"
+    "          worker.addEventListener('statechange', function() {"
+    "              if (worker.state == 'activated')"
+    "                document.title = 'READY';"
+    "            });"
+    "        });"
+    "    });"
+    "</script>";
 
 class ChromeServiceWorkerTest : public InProcessBrowserTest {
  protected:
@@ -50,9 +63,31 @@ class ChromeServiceWorkerTest : public InProcessBrowserTest {
 
   void WriteFile(const base::FilePath::StringType& filename,
                  base::StringPiece contents) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     EXPECT_EQ(base::checked_cast<int>(contents.size()),
               base::WriteFile(service_worker_dir_.GetPath().Append(filename),
                               contents.data(), contents.size()));
+  }
+
+  void NavigateToPageAndWaitForReadyTitle(const std::string path) {
+    const base::string16 expected_title1 = base::ASCIIToUTF16("READY");
+    content::TitleWatcher title_watcher1(
+        browser()->tab_strip_model()->GetActiveWebContents(), expected_title1);
+    ui_test_utils::NavigateToURL(browser(),
+                                 embedded_test_server()->GetURL(path));
+    EXPECT_EQ(expected_title1, title_watcher1.WaitAndGetTitle());
+  }
+
+  void InitializeServer() {
+    embedded_test_server()->ServeFilesFromDirectory(
+        service_worker_dir_.GetPath());
+    ASSERT_TRUE(embedded_test_server()->Start());
+  }
+
+  content::ServiceWorkerContext* GetServiceWorkerContext() {
+    return content::BrowserContext::GetDefaultStoragePartition(
+               browser()->profile())
+        ->GetServiceWorkerContext();
   }
 
   base::ScopedTempDir service_worker_dir_;
@@ -61,9 +96,10 @@ class ChromeServiceWorkerTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(ChromeServiceWorkerTest);
 };
 
-static void ExpectResultAndRun(bool expected,
+template <typename T>
+static void ExpectResultAndRun(T expected,
                                const base::Closure& continuation,
-                               bool actual) {
+                               T actual) {
   EXPECT_EQ(expected, actual);
   continuation.Run();
 }
@@ -77,15 +113,11 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
       service_worker_dir_.GetPath());
   ASSERT_TRUE(embedded_test_server()->Start());
 
-  content::ServiceWorkerContext* sw_context =
-      content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
-          ->GetServiceWorkerContext();
-
   base::RunLoop run_loop;
-  sw_context->RegisterServiceWorker(
+  GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/"),
       embedded_test_server()->GetURL("/service_worker.js"),
-      base::Bind(&ExpectResultAndRun, true, run_loop.QuitClosure()));
+      base::Bind(&ExpectResultAndRun<bool>, true, run_loop.QuitClosure()));
   run_loop.Run();
 
   // Leave the Service Worker registered, and make sure that the browser can
@@ -101,21 +133,15 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
   WriteFile(FILE_PATH_LITERAL("service_worker.js.mock-http-headers"),
             "HTTP/1.1 200 OK\nContent-Type: text/javascript");
   WriteFile(FILE_PATH_LITERAL("test.html"), "");
-
-  embedded_test_server()->ServeFilesFromDirectory(
-      service_worker_dir_.GetPath());
-  ASSERT_TRUE(embedded_test_server()->Start());
+  InitializeServer();
 
   Browser* incognito = CreateIncognitoBrowser();
-  content::ServiceWorkerContext* sw_context =
-      content::BrowserContext::GetDefaultStoragePartition(incognito->profile())
-          ->GetServiceWorkerContext();
 
   base::RunLoop run_loop;
-  sw_context->RegisterServiceWorker(
+  GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/"),
       embedded_test_server()->GetURL("/service_worker.js"),
-      base::Bind(&ExpectResultAndRun, true, run_loop.QuitClosure()));
+      base::Bind(&ExpectResultAndRun<bool>, true, run_loop.QuitClosure()));
   run_loop.Run();
 
   ui_test_utils::NavigateToURL(incognito,
@@ -132,24 +158,17 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
                        FailRegisterServiceWorkerWhenJSDisabled) {
   WriteFile(FILE_PATH_LITERAL("service_worker.js"), "");
-
-  embedded_test_server()->ServeFilesFromDirectory(
-      service_worker_dir_.GetPath());
-  ASSERT_TRUE(embedded_test_server()->Start());
+  InitializeServer();
 
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
       ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_JAVASCRIPT,
                                  CONTENT_SETTING_BLOCK);
 
-  content::ServiceWorkerContext* sw_context =
-      content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
-          ->GetServiceWorkerContext();
-
   base::RunLoop run_loop;
-  sw_context->RegisterServiceWorker(
+  GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/"),
       embedded_test_server()->GetURL("/service_worker.js"),
-      base::Bind(&ExpectResultAndRun, false, run_loop.QuitClosure()));
+      base::Bind(&ExpectResultAndRun<bool>, false, run_loop.QuitClosure()));
   run_loop.Run();
 }
 
@@ -162,37 +181,12 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
       "                             {headers: {'Content-Type': 'text/html'}}));"
       "};");
   WriteFile(FILE_PATH_LITERAL("scope/done.html"), "<title>Done</title>");
-  WriteFile(
-      FILE_PATH_LITERAL("test.html"),
-      "<script>"
-      "navigator.serviceWorker.register('./sw.js', {scope: './scope/'})"
-      "  .then(function(reg) {"
-      "      reg.addEventListener('updatefound', function() {"
-      "          var worker = reg.installing;"
-      "          worker.addEventListener('statechange', function() {"
-      "              if (worker.state == 'activated')"
-      "                document.title = 'READY';"
-      "            });"
-      "        });"
-      "    });"
-      "</script>");
-  embedded_test_server()->ServeFilesFromDirectory(
-      service_worker_dir_.GetPath());
-  ASSERT_TRUE(embedded_test_server()->Start());
+  WriteFile(FILE_PATH_LITERAL("test.html"), kInstallAndWaitForActivatedPage);
+  InitializeServer();
+  NavigateToPageAndWaitForReadyTitle("/test.html");
 
-  const base::string16 expected_title1 = base::ASCIIToUTF16("READY");
-  content::TitleWatcher title_watcher1(
-      browser()->tab_strip_model()->GetActiveWebContents(), expected_title1);
-  ui_test_utils::NavigateToURL(browser(),
-                               embedded_test_server()->GetURL("/test.html"));
-  EXPECT_EQ(expected_title1, title_watcher1.WaitAndGetTitle());
-
-  content::ServiceWorkerContext* sw_context =
-      content::BrowserContext::GetDefaultStoragePartition(browser()->profile())
-          ->GetServiceWorkerContext();
-  sw_context->StopAllServiceWorkersForOrigin(
+  GetServiceWorkerContext()->StopAllServiceWorkersForOrigin(
       embedded_test_server()->base_url());
-
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
       ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_JAVASCRIPT,
                                  CONTENT_SETTING_BLOCK);
@@ -280,7 +274,6 @@ class ChromeServiceWorkerFetchTest : public ChromeServiceWorkerTest {
               "  issuedRequests.forEach(function(data) {"
               "      str += data + '\\n';"
               "    });"
-              "  window.domAutomationController.setAutomationId(0);"
               "  window.domAutomationController.send(str);"
               "}"
               "navigator.serviceWorker.addEventListener("
@@ -393,7 +386,7 @@ class ChromeServiceWorkerManifestFetchTest
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerManifestFetchTest, SameOrigin) {
   // <link rel="manifest" href="manifest.json">
-  EXPECT_EQ(RequestString(GetURL("/manifest.json"), "cors", "same-origin"),
+  EXPECT_EQ(RequestString(GetURL("/manifest.json"), "cors", "omit"),
             ExecuteManifestFetchTest("manifest.json", ""));
 }
 
@@ -407,8 +400,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerManifestFetchTest,
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerManifestFetchTest, OtherOrigin) {
   // <link rel="manifest" href="https://www.example.com/manifest.json">
   EXPECT_EQ(
-      RequestString("https://www.example.com/manifest.json", "cors",
-                    "same-origin"),
+      RequestString("https://www.example.com/manifest.json", "cors", "omit"),
       ExecuteManifestFetchTest("https://www.example.com/manifest.json", ""));
 }
 
@@ -422,6 +414,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerManifestFetchTest,
                                "use-credentials"));
 }
 
+#if !defined(DISABLE_NACL)
 class ChromeServiceWorkerFetchPPAPITest : public ChromeServiceWorkerFetchTest {
  protected:
   ChromeServiceWorkerFetchPPAPITest() {}
@@ -437,12 +430,12 @@ class ChromeServiceWorkerFetchPPAPITest : public ChromeServiceWorkerFetchTest {
     test_page_url_ = GetURL("/pnacl_url_loader.html");
   }
 
-  std::string GetRequestStringForPNACL() const {
-    return RequestString(test_page_url_, "navigate", "include") +
+  std::string GetRequestStringForPNACL(const std::string& fragment) const {
+    return RequestString(test_page_url_ + fragment, "navigate", "include") +
            RequestString(GetURL("/pnacl_url_loader.nmf"), "same-origin",
-                         "include") +
+                         "same-origin") +
            RequestString(GetURL("/pnacl_url_loader_newlib_pnacl.pexe"),
-                         "same-origin", "include");
+                         "same-origin", "same-origin");
   }
 
   std::string ExecutePNACLUrlLoaderTest(const std::string& mode) {
@@ -466,7 +459,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPITest, SameOrigin) {
   // In pnacl_url_loader.cc:
   //   request.SetMethod("GET");
   //   request.SetURL("/echo");
-  EXPECT_EQ(GetRequestStringForPNACL() +
+  EXPECT_EQ(GetRequestStringForPNACL("#Same") +
                 RequestString(GetURL("/echo"), "same-origin", "include"),
             ExecutePNACLUrlLoaderTest("Same"));
 }
@@ -476,8 +469,8 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPITest, SameOriginCORS) {
   //   request.SetMethod("GET");
   //   request.SetURL("/echo");
   //   request.SetAllowCrossOriginRequests(true);
-  EXPECT_EQ(GetRequestStringForPNACL() +
-                RequestString(GetURL("/echo"), "cors", "same-origin"),
+  EXPECT_EQ(GetRequestStringForPNACL("#SameCORS") +
+                RequestString(GetURL("/echo"), "cors", "omit"),
             ExecutePNACLUrlLoaderTest("SameCORS"));
 }
 
@@ -487,7 +480,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPITest,
   //   request.SetMethod("GET");
   //   request.SetURL("/echo");
   //   request.SetAllowCredentials(true);
-  EXPECT_EQ(GetRequestStringForPNACL() +
+  EXPECT_EQ(GetRequestStringForPNACL("#SameCredentials") +
                 RequestString(GetURL("/echo"), "same-origin", "include"),
             ExecutePNACLUrlLoaderTest("SameCredentials"));
 }
@@ -499,7 +492,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPITest,
   //   request.SetURL("/echo");
   //   request.SetAllowCrossOriginRequests(true);
   //   request.SetAllowCredentials(true);
-  EXPECT_EQ(GetRequestStringForPNACL() +
+  EXPECT_EQ(GetRequestStringForPNACL("#SameCORSCredentials") +
                 RequestString(GetURL("/echo"), "cors", "include"),
             ExecutePNACLUrlLoaderTest("SameCORSCredentials"));
 }
@@ -509,7 +502,8 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPITest, OtherOrigin) {
   //   request.SetMethod("GET");
   //   request.SetURL("https://www.example.com/echo");
   // This request fails because AllowCrossOriginRequests is not set.
-  EXPECT_EQ(GetRequestStringForPNACL(), ExecutePNACLUrlLoaderTest("Other"));
+  EXPECT_EQ(GetRequestStringForPNACL("#Other"),
+            ExecutePNACLUrlLoaderTest("Other"));
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPITest, OtherOriginCORS) {
@@ -517,10 +511,9 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPITest, OtherOriginCORS) {
   //   request.SetMethod("GET");
   //   request.SetURL("https://www.example.com/echo");
   //   request.SetAllowCrossOriginRequests(true);
-  EXPECT_EQ(
-      GetRequestStringForPNACL() +
-          RequestString("https://www.example.com/echo", "cors", "same-origin"),
-      ExecutePNACLUrlLoaderTest("OtherCORS"));
+  EXPECT_EQ(GetRequestStringForPNACL("#OtherCORS") +
+                RequestString("https://www.example.com/echo", "cors", "omit"),
+            ExecutePNACLUrlLoaderTest("OtherCORS"));
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPITest,
@@ -530,7 +523,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPITest,
   //   request.SetURL("https://www.example.com/echo");
   //   request.SetAllowCredentials(true);
   // This request fails because AllowCrossOriginRequests is not set.
-  EXPECT_EQ(GetRequestStringForPNACL(),
+  EXPECT_EQ(GetRequestStringForPNACL("#OtherCredentials"),
             ExecutePNACLUrlLoaderTest("OtherCredentials"));
 }
 
@@ -542,7 +535,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPITest,
   //   request.SetAllowCrossOriginRequests(true);
   //   request.SetAllowCredentials(true);
   EXPECT_EQ(
-      GetRequestStringForPNACL() +
+      GetRequestStringForPNACL("#OtherCORSCredentials") +
           RequestString("https://www.example.com/echo", "cors", "include"),
       ExecutePNACLUrlLoaderTest("OtherCORSCredentials"));
 }
@@ -566,150 +559,149 @@ class ChromeServiceWorkerFetchPPAPIPrivateTest
 };
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPIPrivateTest, SameOrigin) {
-  EXPECT_EQ(GetRequestStringForPNACL(), ExecutePNACLUrlLoaderTest("Same"));
+  EXPECT_EQ(GetRequestStringForPNACL("#Same"),
+            ExecutePNACLUrlLoaderTest("Same"));
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPIPrivateTest,
                        SameOriginCORS) {
-  EXPECT_EQ(GetRequestStringForPNACL(), ExecutePNACLUrlLoaderTest("SameCORS"));
+  EXPECT_EQ(GetRequestStringForPNACL("#SameCORS"),
+            ExecutePNACLUrlLoaderTest("SameCORS"));
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPIPrivateTest,
                        SameOriginCredentials) {
-  EXPECT_EQ(GetRequestStringForPNACL(),
+  EXPECT_EQ(GetRequestStringForPNACL("#SameCredentials"),
             ExecutePNACLUrlLoaderTest("SameCredentials"));
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPIPrivateTest,
                        SameOriginCORSCredentials) {
-  EXPECT_EQ(GetRequestStringForPNACL(),
+  EXPECT_EQ(GetRequestStringForPNACL("#SameCORSCredentials"),
             ExecutePNACLUrlLoaderTest("SameCORSCredentials"));
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPIPrivateTest, OtherOrigin) {
-  EXPECT_EQ(GetRequestStringForPNACL(), ExecutePNACLUrlLoaderTest("Other"));
+  EXPECT_EQ(GetRequestStringForPNACL("#Other"),
+            ExecutePNACLUrlLoaderTest("Other"));
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPIPrivateTest,
                        OtherOriginCORS) {
-  EXPECT_EQ(GetRequestStringForPNACL(), ExecutePNACLUrlLoaderTest("OtherCORS"));
+  EXPECT_EQ(GetRequestStringForPNACL("#OtherCORS"),
+            ExecutePNACLUrlLoaderTest("OtherCORS"));
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPIPrivateTest,
                        OtherOriginCredentials) {
-  EXPECT_EQ(GetRequestStringForPNACL(),
+  EXPECT_EQ(GetRequestStringForPNACL("#OtherCredentials"),
             ExecutePNACLUrlLoaderTest("OtherCredentials"));
 }
 
 IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerFetchPPAPIPrivateTest,
                        OtherOriginCORSCredentials) {
-  EXPECT_EQ(GetRequestStringForPNACL(),
+  EXPECT_EQ(GetRequestStringForPNACL("#OtherCORSCredentials"),
             ExecutePNACLUrlLoaderTest("OtherCORSCredentials"));
 }
+#endif  // !defined(DISABLE_NACL)
 
-class ServiceWorkerSpeculativeLaunchTest : public ChromeServiceWorkerTest {
+class ChromeServiceWorkerNavigationHintTest : public ChromeServiceWorkerTest {
  protected:
-  static const std::string kNavigationHintLinkMouseDownMetricName;
-
-  ServiceWorkerSpeculativeLaunchTest() {}
-  ~ServiceWorkerSpeculativeLaunchTest() override {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(
-        switches::kEnableFeatures,
-        features::kSpeculativeLaunchServiceWorker.name);
-  }
-
-  void WriteTestHtmlFile() {
-    WriteFile(
-        FILE_PATH_LITERAL("test.html"),
-        "<script>"
-        "navigator.serviceWorker.register('./sw.js', {scope: './scope.html'})"
-        "  .then(function(reg) {"
-        "      reg.addEventListener('updatefound', function() {"
-        "          var worker = reg.installing;"
-        "          worker.addEventListener('statechange', function() {"
-        "              if (worker.state == 'activated')"
-        "                document.title = 'READY';"
-        "            });"
-        "        });"
-        "    });"
-        "</script>"
-        "<body style='margin:0; padding:0;'>"
-        "<a href='./scope.html' "
-        "style='position:fixed; width:1px; height:1px;'></a>"
-        "</body>");
-  }
-
-  void RunNavigationHintTest() {
-    embedded_test_server()->ServeFilesFromDirectory(
-        service_worker_dir_.GetPath());
-    ASSERT_TRUE(embedded_test_server()->Start());
-
-    content::ServiceWorkerContext* sw_context =
-        content::BrowserContext::GetDefaultStoragePartition(
-            browser()->profile())
-            ->GetServiceWorkerContext();
-
-    const base::string16 expected_title1 = base::ASCIIToUTF16("READY");
-    content::TitleWatcher title_watcher1(
-        browser()->tab_strip_model()->GetActiveWebContents(), expected_title1);
-    ui_test_utils::NavigateToURL(browser(),
-                                 embedded_test_server()->GetURL("/test.html"));
-    EXPECT_EQ(expected_title1, title_watcher1.WaitAndGetTitle());
-
-    histogram_tester_.ExpectBucketCount("ServiceWorker.StartNewWorker.Status",
-                                        0 /* SERVICE_WORKER_OK */, 1);
-
-    sw_context->StopAllServiceWorkersForOrigin(
-        embedded_test_server()->base_url());
-
-    const base::string16 expected_title2 = base::ASCIIToUTF16("Done");
-    content::TitleWatcher title_watcher2(
-        browser()->tab_strip_model()->GetActiveWebContents(), expected_title2);
-
-    histogram_tester_.ExpectTotalCount(kNavigationHintLinkMouseDownMetricName,
-                                       0);
-    content::SimulateMouseClickAt(
-        browser()->tab_strip_model()->GetActiveWebContents(), 0,
-        blink::WebMouseEvent::Button::Left, gfx::Point(0, 0));
-    EXPECT_EQ(expected_title2, title_watcher2.WaitAndGetTitle());
+  void RunNavigationHintTest(
+      const char* scope,
+      content::StartServiceWorkerForNavigationHintResult expected_result,
+      bool expected_started) {
+    base::RunLoop run_loop;
+    GetServiceWorkerContext()->StartServiceWorkerForNavigationHint(
+        embedded_test_server()->GetURL(scope),
+        base::Bind(&ExpectResultAndRun<
+                       content::StartServiceWorkerForNavigationHintResult>,
+                   expected_result, run_loop.QuitClosure()));
+    run_loop.Run();
+    if (expected_started) {
+      histogram_tester_.ExpectBucketCount(
+          "ServiceWorker.StartWorker.Purpose",
+          27 /* ServiceWorkerMetrics::EventType::NAVIGATION_HINT  */, 1);
+      histogram_tester_.ExpectBucketCount(
+          "ServiceWorker.StartWorker.StatusByPurpose_NAVIGATION_HINT",
+          0 /* SERVICE_WORKER_OK  */, 1);
+    } else {
+      histogram_tester_.ExpectTotalCount("ServiceWorker.StartWorker.Purpose",
+                                         0);
+      histogram_tester_.ExpectTotalCount(
+          "ServiceWorker.StartWorker.StatusByPurpose_NAVIGATION_HINT", 0);
+    }
+    histogram_tester_.ExpectBucketCount(
+        "ServiceWorker.StartForNavigationHint.Result",
+        static_cast<int>(expected_result), 1);
   }
 
   base::HistogramTester histogram_tester_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerSpeculativeLaunchTest);
 };
 
-// static
-const std::string
-    ServiceWorkerSpeculativeLaunchTest::kNavigationHintLinkMouseDownMetricName =
-        "ServiceWorker.StartWorker.StatusByPurpose_"
-        "NAVIGATION_HINT_LINK_MOUSE_DOWN";
-
-IN_PROC_BROWSER_TEST_F(ServiceWorkerSpeculativeLaunchTest, MouseDown) {
-  WriteFile(
-      FILE_PATH_LITERAL("sw.js"),
-      "self.onfetch = function(e) {"
-      "  e.respondWith(new Response('<title>Done</title>',"
-      "                             {headers: {'Content-Type': 'text/html'}}));"
-      "};");
-  WriteTestHtmlFile();
-  RunNavigationHintTest();
-  // The service worker must be started by a navigation hint.
-  histogram_tester_.ExpectBucketCount(kNavigationHintLinkMouseDownMetricName,
-                                      0 /* SERVICE_WORKER_OK */, 1);
+IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerNavigationHintTest, Started) {
+  WriteFile(FILE_PATH_LITERAL("sw.js"), "self.onfetch = function(e) {};");
+  WriteFile(FILE_PATH_LITERAL("test.html"), kInstallAndWaitForActivatedPage);
+  InitializeServer();
+  NavigateToPageAndWaitForReadyTitle("/test.html");
+  GetServiceWorkerContext()->StopAllServiceWorkersForOrigin(
+      embedded_test_server()->base_url());
+  RunNavigationHintTest(
+      "/scope/", content::StartServiceWorkerForNavigationHintResult::STARTED,
+      true);
 }
 
-IN_PROC_BROWSER_TEST_F(ServiceWorkerSpeculativeLaunchTest,
-                       NoFetchEventHandler) {
-  WriteFile(FILE_PATH_LITERAL("sw.js"), "// no fetch event handler.");
-  WriteFile(FILE_PATH_LITERAL("scope.html"), "<title>Done</title>");
-  WriteTestHtmlFile();
-  RunNavigationHintTest();
-  // The service worker must NOT be started by a navigation hint.
-  histogram_tester_.ExpectTotalCount(kNavigationHintLinkMouseDownMetricName, 0);
+IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerNavigationHintTest, AlreadyRunning) {
+  WriteFile(FILE_PATH_LITERAL("sw.js"), "self.onfetch = function(e) {};");
+  WriteFile(FILE_PATH_LITERAL("test.html"), kInstallAndWaitForActivatedPage);
+  InitializeServer();
+  NavigateToPageAndWaitForReadyTitle("/test.html");
+  RunNavigationHintTest(
+      "/scope/",
+      content::StartServiceWorkerForNavigationHintResult::ALREADY_RUNNING,
+      false);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerNavigationHintTest,
+                       NoServiceWorkerRegistration) {
+  InitializeServer();
+  RunNavigationHintTest("/scope/",
+                        content::StartServiceWorkerForNavigationHintResult::
+                            NO_SERVICE_WORKER_REGISTRATION,
+                        false);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerNavigationHintTest,
+                       NoActiveServiceWorkerVersion) {
+  WriteFile(FILE_PATH_LITERAL("sw.js"),
+            "self.oninstall = function(e) {\n"
+            "    e.waitUntil(new Promise(r => { /* never resolve */ }));\n"
+            "  };\n"
+            "self.onfetch = function(e) {};");
+  InitializeServer();
+  base::RunLoop run_loop;
+  GetServiceWorkerContext()->RegisterServiceWorker(
+      embedded_test_server()->GetURL("/scope/"),
+      embedded_test_server()->GetURL("/sw.js"),
+      base::Bind(&ExpectResultAndRun<bool>, true, run_loop.QuitClosure()));
+  run_loop.Run();
+  RunNavigationHintTest("/scope/",
+                        content::StartServiceWorkerForNavigationHintResult::
+                            NO_ACTIVE_SERVICE_WORKER_VERSION,
+                        false);
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerNavigationHintTest, NoFetchHandler) {
+  WriteFile(FILE_PATH_LITERAL("sw.js"), "/* empty */");
+  WriteFile(FILE_PATH_LITERAL("test.html"), kInstallAndWaitForActivatedPage);
+  InitializeServer();
+  NavigateToPageAndWaitForReadyTitle("/test.html");
+  GetServiceWorkerContext()->StopAllServiceWorkersForOrigin(
+      embedded_test_server()->base_url());
+  RunNavigationHintTest(
+      "/scope/",
+      content::StartServiceWorkerForNavigationHintResult::NO_FETCH_HANDLER,
+      false);
 }
 
 }  // namespace

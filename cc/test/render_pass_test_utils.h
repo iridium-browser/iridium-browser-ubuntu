@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 
-#include "cc/output/filter_operations.h"
+#include "cc/base/filter_operations.h"
 #include "cc/quads/render_pass.h"
 #include "cc/resources/resource_provider.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -58,7 +58,7 @@ void AddRenderPassQuad(RenderPass* to_pass,
 
 void AddOneOfEveryQuadType(RenderPass* to_pass,
                            ResourceProvider* resource_provider,
-                           int child_pass_id,
+                           RenderPassId child_pass_id,
                            gpu::SyncToken* sync_token_for_mailbox_texture);
 
 }  // namespace cc

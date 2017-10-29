@@ -7,6 +7,8 @@
 
 #include "core/workers/InProcessWorkerBase.h"
 
+#include "core/workers/WorkerClients.h"
+
 namespace blink {
 
 class ExceptionState;
@@ -18,16 +20,19 @@ class CORE_EXPORT Worker final : public InProcessWorkerBase {
   USING_GARBAGE_COLLECTED_MIXIN(Worker);
 
  public:
-  static Worker* create(ExecutionContext*, const String& url, ExceptionState&);
+  static Worker* Create(ExecutionContext*, const String& url, ExceptionState&);
   ~Worker() override;
 
  protected:
   explicit Worker(ExecutionContext*);
 
-  InProcessWorkerMessagingProxy* createInProcessWorkerMessagingProxy(
+  InProcessWorkerMessagingProxy* CreateInProcessWorkerMessagingProxy(
       ExecutionContext*) override;
-  const AtomicString& interfaceName() const override;
+  const AtomicString& InterfaceName() const override;
 };
+
+extern template class CORE_EXTERN_TEMPLATE_EXPORT
+    WorkerClientsInitializer<Worker>;
 
 }  // namespace blink
 

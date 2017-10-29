@@ -31,9 +31,9 @@
 #ifndef SVGAnimatedPreserveAspectRatio_h
 #define SVGAnimatedPreserveAspectRatio_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/svg/SVGPreserveAspectRatioTearOff.h"
 #include "core/svg/properties/SVGAnimatedProperty.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -43,23 +43,24 @@ class SVGAnimatedPreserveAspectRatio
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGAnimatedPreserveAspectRatio* create(
-      SVGElement* contextElement,
-      const QualifiedName& attributeName) {
-    return new SVGAnimatedPreserveAspectRatio(contextElement, attributeName);
+  static SVGAnimatedPreserveAspectRatio* Create(
+      SVGElement* context_element,
+      const QualifiedName& attribute_name) {
+    return new SVGAnimatedPreserveAspectRatio(context_element, attribute_name);
   }
 
   DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
-    visitor->traceWrappers(contextElement());
+    SVGAnimatedProperty<SVGPreserveAspectRatio>::TraceWrappers(visitor);
+    ScriptWrappable::TraceWrappers(visitor);
   }
 
  protected:
-  SVGAnimatedPreserveAspectRatio(SVGElement* contextElement,
-                                 const QualifiedName& attributeName)
+  SVGAnimatedPreserveAspectRatio(SVGElement* context_element,
+                                 const QualifiedName& attribute_name)
       : SVGAnimatedProperty<SVGPreserveAspectRatio>(
-            contextElement,
-            attributeName,
-            SVGPreserveAspectRatio::create()) {}
+            context_element,
+            attribute_name,
+            SVGPreserveAspectRatio::Create()) {}
 };
 
 }  // namespace blink

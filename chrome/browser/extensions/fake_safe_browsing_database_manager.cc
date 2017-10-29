@@ -16,6 +16,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "components/safe_browsing_db/util.h"
+#include "components/safe_browsing_db/v4_protocol_manager_util.h"
 
 namespace extensions {
 
@@ -106,8 +107,8 @@ bool FakeSafeBrowsingDatabaseManager::CheckExtensionIDs(
   std::unique_ptr<SafeBrowsingCheck> safe_browsing_check(
       new SafeBrowsingCheck(std::vector<GURL>(), extension_id_hashes, client,
                             safe_browsing::EXTENSIONBLACKLIST,
-                            std::vector<safe_browsing::SBThreatType>(
-                                1, safe_browsing::SB_THREAT_TYPE_EXTENSION)));
+                            safe_browsing::CreateSBThreatTypeSet(
+                                {safe_browsing::SB_THREAT_TYPE_EXTENSION})));
 
   for (size_t i = 0; i < extension_ids_vector.size(); ++i) {
     const std::string& extension_id = extension_ids_vector[i];
@@ -118,8 +119,8 @@ bool FakeSafeBrowsingDatabaseManager::CheckExtensionIDs(
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&FakeSafeBrowsingDatabaseManager::OnSafeBrowsingResult, this,
-                 base::Passed(&safe_browsing_check)));
+      base::BindOnce(&FakeSafeBrowsingDatabaseManager::OnSafeBrowsingResult,
+                     this, base::Passed(&safe_browsing_check)));
   return false;
 }
 

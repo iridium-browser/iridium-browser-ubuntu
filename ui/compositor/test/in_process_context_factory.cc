@@ -11,17 +11,20 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread.h"
-#include "cc/output/context_provider.h"
+#include "cc/base/switches.h"
 #include "cc/output/output_surface_client.h"
 #include "cc/output/output_surface_frame.h"
 #include "cc/output/texture_mailbox_deleter.h"
 #include "cc/scheduler/begin_frame_source.h"
 #include "cc/scheduler/delay_based_time_source.h"
-#include "cc/surfaces/direct_compositor_frame_sink.h"
-#include "cc/surfaces/display.h"
-#include "cc/surfaces/display_scheduler.h"
-#include "cc/surfaces/local_surface_id_allocator.h"
 #include "cc/test/pixel_test_output_surface.h"
+#include "components/viz/common/gpu/context_provider.h"
+#include "components/viz/common/surfaces/local_surface_id_allocator.h"
+#include "components/viz/host/host_frame_sink_manager.h"
+#include "components/viz/service/display/display.h"
+#include "components/viz/service/display/display_scheduler.h"
+#include "components/viz/service/frame_sinks/direct_layer_tree_frame_sink.h"
+#include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
@@ -29,6 +32,8 @@
 #include "ui/compositor/layer.h"
 #include "ui/compositor/reflector.h"
 #include "ui/compositor/test/in_process_context_provider.h"
+#include "ui/display/display_switches.h"
+#include "ui/gfx/switches.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/test/gl_surface_test_support.h"
 
@@ -109,6 +114,9 @@ class DirectOutputSurface : public cc::OutputSurface {
   }
   bool IsDisplayedAsOverlayPlane() const override { return false; }
   unsigned GetOverlayTextureId() const override { return 0; }
+  gfx::BufferFormat GetOverlayBufferFormat() const override {
+    return gfx::BufferFormat::RGBX_8888;
+  }
   bool SurfaceIsSuspendForRecycle() const override { return false; }
   bool HasExternalStencilTest() const override { return false; }
   void ApplyExternalStencil() override {}
@@ -127,20 +135,39 @@ class DirectOutputSurface : public cc::OutputSurface {
 struct InProcessContextFactory::PerCompositorData {
   gpu::SurfaceHandle surface_handle = gpu::kNullSurfaceHandle;
   std::unique_ptr<cc::BeginFrameSource> begin_frame_source;
-  std::unique_ptr<cc::Display> display;
+  std::unique_ptr<viz::Display> display;
 };
 
 InProcessContextFactory::InProcessContextFactory(
-    bool context_factory_for_test,
-    cc::SurfaceManager* surface_manager)
+    viz::HostFrameSinkManager* host_frame_sink_manager,
+    viz::FrameSinkManagerImpl* frame_sink_manager)
     : frame_sink_id_allocator_(kDefaultClientId),
       use_test_surface_(true),
-      context_factory_for_test_(context_factory_for_test),
-      surface_manager_(surface_manager) {
-  DCHECK(surface_manager);
+      host_frame_sink_manager_(host_frame_sink_manager),
+      frame_sink_manager_(frame_sink_manager) {
+  DCHECK(host_frame_sink_manager);
   DCHECK_NE(gl::GetGLImplementation(), gl::kGLImplementationNone)
       << "If running tests, ensure that main() is calling "
       << "gl::GLSurfaceTestSupport::InitializeOneOff()";
+
+#if defined(OS_WIN)
+  renderer_settings_.finish_rendering_on_resize = true;
+#elif defined(OS_MACOSX)
+  renderer_settings_.release_overlay_resources_after_gpu_query = true;
+#endif
+  // Populate buffer_to_texture_target_map for all buffer usage/formats.
+  for (int usage_idx = 0; usage_idx <= static_cast<int>(gfx::BufferUsage::LAST);
+       ++usage_idx) {
+    gfx::BufferUsage usage = static_cast<gfx::BufferUsage>(usage_idx);
+    for (int format_idx = 0;
+         format_idx <= static_cast<int>(gfx::BufferFormat::LAST);
+         ++format_idx) {
+      gfx::BufferFormat format = static_cast<gfx::BufferFormat>(format_idx);
+      renderer_settings_.resource_settings
+          .buffer_to_texture_target_map[std::make_pair(usage, format)] =
+          GL_TEXTURE_2D;
+    }
+  }
 }
 
 InProcessContextFactory::~InProcessContextFactory() {
@@ -152,7 +179,11 @@ void InProcessContextFactory::SendOnLostResources() {
     observer.OnLostResources();
 }
 
-void InProcessContextFactory::CreateCompositorFrameSink(
+void InProcessContextFactory::SetUseFastRefreshRateForTests() {
+  refresh_rate_ = 200.0;
+}
+
+void InProcessContextFactory::CreateLayerTreeFrameSink(
     base::WeakPtr<Compositor> compositor) {
   // Try to reuse existing shared worker context provider.
   bool shared_worker_context_provider_lost = false;
@@ -207,26 +238,29 @@ void InProcessContextFactory::CreateCompositorFrameSink(
       new cc::DelayBasedBeginFrameSource(
           base::MakeUnique<cc::DelayBasedTimeSource>(
               compositor->task_runner().get())));
-  std::unique_ptr<cc::DisplayScheduler> scheduler(new cc::DisplayScheduler(
-      compositor->task_runner().get(),
-      display_output_surface->capabilities().max_frames_pending));
+  auto scheduler = base::MakeUnique<viz::DisplayScheduler>(
+      begin_frame_source.get(), compositor->task_runner().get(),
+      display_output_surface->capabilities().max_frames_pending);
 
-  data->display = base::MakeUnique<cc::Display>(
-      &shared_bitmap_manager_, &gpu_memory_buffer_manager_,
-      compositor->GetRendererSettings(), compositor->frame_sink_id(),
-      begin_frame_source.get(), std::move(display_output_surface),
-      std::move(scheduler), base::MakeUnique<cc::TextureMailboxDeleter>(
-                                compositor->task_runner().get()));
+  data->display = base::MakeUnique<viz::Display>(
+      &shared_bitmap_manager_, &gpu_memory_buffer_manager_, renderer_settings_,
+      compositor->frame_sink_id(), std::move(display_output_surface),
+      std::move(scheduler),
+      base::MakeUnique<cc::TextureMailboxDeleter>(
+          compositor->task_runner().get()));
+  GetFrameSinkManager()->RegisterBeginFrameSource(begin_frame_source.get(),
+                                                  compositor->frame_sink_id());
   // Note that we are careful not to destroy a prior |data->begin_frame_source|
   // until we have reset |data->display|.
   data->begin_frame_source = std::move(begin_frame_source);
 
   auto* display = per_compositor_data_[compositor.get()]->display.get();
-  auto compositor_frame_sink = base::MakeUnique<cc::DirectCompositorFrameSink>(
-      compositor->frame_sink_id(), surface_manager_, display, context_provider,
+  auto layer_tree_frame_sink = base::MakeUnique<viz::DirectLayerTreeFrameSink>(
+      compositor->frame_sink_id(), GetHostFrameSinkManager(),
+      GetFrameSinkManager(), display, context_provider,
       shared_worker_context_provider_, &gpu_memory_buffer_manager_,
       &shared_bitmap_manager_);
-  compositor->SetCompositorFrameSink(std::move(compositor_frame_sink));
+  compositor->SetLayerTreeFrameSink(std::move(layer_tree_frame_sink));
 
   data->display->Resize(compositor->size());
 }
@@ -240,7 +274,7 @@ std::unique_ptr<Reflector> InProcessContextFactory::CreateReflector(
 void InProcessContextFactory::RemoveReflector(Reflector* reflector) {
 }
 
-scoped_refptr<cc::ContextProvider>
+scoped_refptr<viz::ContextProvider>
 InProcessContextFactory::SharedMainThreadContextProvider() {
   if (shared_main_thread_contexts_ &&
       shared_main_thread_contexts_->ContextGL()->GetGraphicsResetStatusKHR() ==
@@ -261,6 +295,8 @@ void InProcessContextFactory::RemoveCompositor(Compositor* compositor) {
   if (it == per_compositor_data_.end())
     return;
   PerCompositorData* data = it->second.get();
+  GetFrameSinkManager()->UnregisterBeginFrameSource(
+      data->begin_frame_source.get());
   DCHECK(data);
 #if !defined(GPU_SURFACE_HANDLE_IS_ACCELERATED_WINDOW)
   if (data->surface_handle)
@@ -269,14 +305,8 @@ void InProcessContextFactory::RemoveCompositor(Compositor* compositor) {
   per_compositor_data_.erase(it);
 }
 
-bool InProcessContextFactory::DoesCreateTestContexts() {
-  return context_factory_for_test_;
-}
-
-uint32_t InProcessContextFactory::GetImageTextureTarget(
-    gfx::BufferFormat format,
-    gfx::BufferUsage usage) {
-  return GL_TEXTURE_2D;
+double InProcessContextFactory::GetRefreshRate() const {
+  return refresh_rate_;
 }
 
 gpu::GpuMemoryBufferManager*
@@ -288,12 +318,12 @@ cc::TaskGraphRunner* InProcessContextFactory::GetTaskGraphRunner() {
   return &task_graph_runner_;
 }
 
-cc::FrameSinkId InProcessContextFactory::AllocateFrameSinkId() {
+viz::FrameSinkId InProcessContextFactory::AllocateFrameSinkId() {
   return frame_sink_id_allocator_.NextFrameSinkId();
 }
 
-cc::SurfaceManager* InProcessContextFactory::GetSurfaceManager() {
-  return surface_manager_;
+viz::HostFrameSinkManager* InProcessContextFactory::GetHostFrameSinkManager() {
+  return host_frame_sink_manager_;
 }
 
 void InProcessContextFactory::SetDisplayVisible(ui::Compositor* compositor,
@@ -310,12 +340,21 @@ void InProcessContextFactory::ResizeDisplay(ui::Compositor* compositor,
   per_compositor_data_[compositor]->display->Resize(size);
 }
 
+const viz::ResourceSettings& InProcessContextFactory::GetResourceSettings()
+    const {
+  return renderer_settings_.resource_settings;
+}
+
 void InProcessContextFactory::AddObserver(ContextFactoryObserver* observer) {
   observer_list_.AddObserver(observer);
 }
 
 void InProcessContextFactory::RemoveObserver(ContextFactoryObserver* observer) {
   observer_list_.RemoveObserver(observer);
+}
+
+viz::FrameSinkManagerImpl* InProcessContextFactory::GetFrameSinkManager() {
+  return frame_sink_manager_;
 }
 
 InProcessContextFactory::PerCompositorData*
@@ -332,7 +371,18 @@ InProcessContextFactory::CreatePerCompositorData(ui::Compositor* compositor) {
     data->surface_handle = widget;
 #else
     gpu::GpuSurfaceTracker* tracker = gpu::GpuSurfaceTracker::Get();
-    data->surface_handle = tracker->AddSurfaceForNativeWidget(widget);
+    data->surface_handle = tracker->AddSurfaceForNativeWidget(
+        gpu::GpuSurfaceTracker::SurfaceRecord(
+            widget
+#if defined(OS_ANDROID)
+            // We have to provide a surface too, but we don't have one.  For
+            // now, we don't proide it, since nobody should ask anyway.
+            // If we ever provide a valid surface here, then GpuSurfaceTracker
+            // can be more strict about enforcing it.
+            ,
+            nullptr
+#endif
+            ));
 #endif
   }
 

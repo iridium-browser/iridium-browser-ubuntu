@@ -50,8 +50,7 @@ DataArrayType StructSerializeImpl(UserType* input) {
     DCHECK(IsAligned(result_buffer));
   }
 
-  Buffer buffer;
-  buffer.Initialize(result_buffer, size);
+  Buffer buffer(result_buffer, size);
   typename MojomTypeTraits<MojomType>::Data* data = nullptr;
   Serialize<MojomType>(*input, &buffer, &data, &context);
 
@@ -64,7 +63,10 @@ DataArrayType StructSerializeImpl(UserType* input) {
 }
 
 template <typename MojomType, typename DataArrayType, typename UserType>
-bool StructDeserializeImpl(const DataArrayType& input, UserType* output) {
+bool StructDeserializeImpl(const DataArrayType& input,
+                           UserType* output,
+                           bool (*validate_func)(const void*,
+                                                 ValidationContext*)) {
   static_assert(BelongsTo<MojomType, MojomTypeCategory::STRUCT>::value,
                 "Unexpected type.");
   using DataType = typename MojomTypeTraits<MojomType>::Data;
@@ -86,7 +88,7 @@ bool StructDeserializeImpl(const DataArrayType& input, UserType* output) {
 
   ValidationContext validation_context(input_buffer, input.size(), 0, 0);
   bool result = false;
-  if (DataType::Validate(input_buffer, &validation_context)) {
+  if (validate_func(input_buffer, &validation_context)) {
     auto data = reinterpret_cast<DataType*>(input_buffer);
     SerializationContext context;
     result = Deserialize<MojomType>(data, output, &context);

@@ -46,7 +46,7 @@ UI.InspectorView = class extends UI.VBox {
 
     // Create drawer tabbed pane.
     this._drawerTabbedLocation =
-        UI.viewManager.createTabbedLocation(this._showDrawer.bind(this, false), 'drawer-view', true);
+        UI.viewManager.createTabbedLocation(this._showDrawer.bind(this, false), 'drawer-view', true, true);
     this._drawerTabbedLocation.enableMoreTabsButton();
     this._drawerTabbedPane = this._drawerTabbedLocation.tabbedPane();
     this._drawerTabbedPane.setMinimumSize(0, 27);
@@ -111,7 +111,11 @@ UI.InspectorView = class extends UI.VBox {
    * @return {?UI.ViewLocation}
    */
   resolveLocation(locationName) {
-    return this._drawerTabbedLocation;
+    if (locationName === 'drawer-view')
+      return this._drawerTabbedLocation;
+    if (locationName === 'panel')
+      return this._tabbedLocation;
+    return null;
   }
 
   createToolbars() {

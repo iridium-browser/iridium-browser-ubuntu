@@ -34,10 +34,6 @@ int ChromeUpdateClientConfig::NextCheckDelay() const {
   return impl_.NextCheckDelay();
 }
 
-int ChromeUpdateClientConfig::StepDelay() const {
-  return impl_.StepDelay();
-}
-
 int ChromeUpdateClientConfig::OnDemandDelay() const {
   return impl_.OnDemandDelay();
 }
@@ -120,6 +116,10 @@ PrefService* ChromeUpdateClientConfig::GetPrefService() const {
 
 bool ChromeUpdateClientConfig::IsPerUserInstall() const {
   return component_updater::IsPerUserInstall();
+}
+
+std::vector<uint8_t> ChromeUpdateClientConfig::GetRunActionKeyHash() const {
+  return impl_.GetRunActionKeyHash();
 }
 
 ChromeUpdateClientConfig::~ChromeUpdateClientConfig() {}

@@ -26,6 +26,8 @@ source_set("display") {
       sources += [
         "output_protection.cc",
         "output_protection.h",
+        "screen_manager_forwarding.cc",
+        "screen_manager_forwarding.h",
         "screen_manager_ozone_internal.cc",
         "screen_manager_ozone_internal.h",
       ]
@@ -35,6 +37,7 @@ source_set("display") {
         "//services/ui/public/interfaces/display",
         "//skia",
         "//ui/display/manager",
+        "//ui/display/mojo:interfaces",
         "//ui/ozone",
       ]
     } else {
@@ -52,9 +55,10 @@ source_set("display") {
 }
 
 if (use_ozone && is_chromeos) {
-  test("display_service_unittests") {
+  source_set("tests") {
+    testonly = true
+
     sources = [
-      "run_all_unittests.cc",
       "screen_manager_ozone_internal_unittests.cc",
     ]
 

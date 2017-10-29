@@ -7,13 +7,11 @@
  */
 Profiler.ProfileHeader = class extends Common.Object {
   /**
-   * @param {?SDK.Target} target
    * @param {!Profiler.ProfileType} profileType
    * @param {string} title
    */
-  constructor(target, profileType, title) {
+  constructor(profileType, title) {
     super();
-    this._target = target;
     this._profileType = profileType;
     this.title = title;
     this.uid = profileType.incrementProfileUid();
@@ -21,10 +19,11 @@ Profiler.ProfileHeader = class extends Common.Object {
   }
 
   /**
-   * @return {?SDK.Target}
+   * @param {string} title
    */
-  target() {
-    return this._target;
+  setTitle(title) {
+    this.title = title;
+    this.dispatchEventToListeners(Profiler.ProfileHeader.Events.ProfileTitleChanged, this);
   }
 
   /**
@@ -49,7 +48,7 @@ Profiler.ProfileHeader = class extends Common.Object {
    * @return {!Profiler.ProfileSidebarTreeElement}
    */
   createSidebarTreeElement(dataDisplayDelegate) {
-    throw new Error('Needs implemented.');
+    throw new Error('Not implemented.');
   }
 
   /**
@@ -76,14 +75,14 @@ Profiler.ProfileHeader = class extends Common.Object {
   }
 
   saveToFile() {
-    throw new Error('Needs implemented');
+    throw new Error('Not implemented');
   }
 
   /**
    * @param {!File} file
    */
   loadFromFile(file) {
-    throw new Error('Needs implemented');
+    throw new Error('Not implemented');
   }
 
   /**
@@ -117,5 +116,6 @@ Profiler.ProfileHeader.StatusUpdate = class {
 /** @enum {symbol} */
 Profiler.ProfileHeader.Events = {
   UpdateStatus: Symbol('UpdateStatus'),
-  ProfileReceived: Symbol('ProfileReceived')
+  ProfileReceived: Symbol('ProfileReceived'),
+  ProfileTitleChanged: Symbol('ProfileTitleChanged')
 };

@@ -15,6 +15,7 @@
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/process/process_info.h"
@@ -30,6 +31,7 @@
 #include "crypto/secure_hash.h"
 #include "crypto/sha2.h"
 #include "crypto/signature_verifier.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -125,10 +127,10 @@ bool ValidateExpireDateFormat(const std::string& input) {
 void SetExtensionIdSet(base::DictionaryValue* dictionary,
                        const char* key,
                        const ExtensionIdSet& ids) {
-  base::ListValue* id_list = new base::ListValue();
+  auto id_list = base::MakeUnique<base::ListValue>();
   for (ExtensionIdSet::const_iterator i = ids.begin(); i != ids.end(); ++i)
     id_list->AppendString(*i);
-  dictionary->Set(key, id_list);
+  dictionary->Set(key, std::move(id_list));
 }
 
 // Tries to fetch a list of strings from |dictionay| for |key|, and inserts
@@ -145,7 +147,7 @@ bool GetExtensionIdSet(const base::DictionaryValue& dictionary,
        i != id_list->end();
        ++i) {
     std::string id;
-    if (!(*i)->GetAsString(&id)) {
+    if (!i->GetAsString(&id)) {
       return false;
     }
     ids->insert(id);
@@ -306,11 +308,11 @@ namespace {
 
 static int g_request_count = 0;
 
-base::LazyInstance<base::TimeTicks> g_last_request_time =
+base::LazyInstance<base::TimeTicks>::DestructorAtExit g_last_request_time =
     LAZY_INSTANCE_INITIALIZER;
 
-base::LazyInstance<base::ThreadChecker> g_single_thread_checker =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::ThreadChecker>::DestructorAtExit
+    g_single_thread_checker = LAZY_INSTANCE_INITIALIZER;
 
 void LogRequestStartHistograms() {
   // Make sure we only ever call this from one thread, so that we don't have to
@@ -373,8 +375,38 @@ void InstallSigner::GetSignature(const SignatureCallback& callback) {
                                      base::Unretained(this));
 
   delegate_.reset(new FetcherDelegate(closure));
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("extension_install_signer", R"(
+        semantics {
+          sender: "Extension Install Signer"
+          description: "Fetches the signatures for installed extensions."
+          trigger:
+            "Chrome detects an extension that requires installation "
+            "verification."
+          data:
+            "The ids of the extensions that need to be verified, as well as a "
+            "non-revertable salted hash of the user's machine id provided by "
+            "RLZ library, which varies between different installs. This id is "
+            "only used to verify the validity of the response."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store: "user"
+          setting:
+            "This feature cannot be disabled, but it is only activated if "
+            "extensions are installed."
+          chrome_policy {
+            ExtensionInstallBlacklist {
+              policy_options {mode: MANDATORY}
+              ExtensionInstallBlacklist: {
+                entries: '*'
+              }
+            }
+          }
+        })");
   url_fetcher_ = net::URLFetcher::Create(GetBackendUrl(), net::URLFetcher::POST,
-                                         delegate_.get());
+                                         delegate_.get(), traffic_annotation);
   url_fetcher_->SetRequestContext(context_getter_);
 
   // The request protocol is JSON of the form:
@@ -390,7 +422,7 @@ void InstallSigner::GetSignature(const SignatureCallback& callback) {
   for (ExtensionIdSet::const_iterator i = ids_.begin(); i != ids_.end(); ++i) {
     id_list->AppendString(*i);
   }
-  dictionary.Set(kIdsKey, id_list.release());
+  dictionary.Set(kIdsKey, std::move(id_list));
   std::string json;
   base::JSONWriter::Write(dictionary, &json);
   if (json.empty()) {

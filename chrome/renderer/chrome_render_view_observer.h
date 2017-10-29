@@ -43,15 +43,11 @@ class ChromeRenderViewObserver : public content::RenderViewObserver {
 #if !defined(OS_ANDROID)
   void OnWebUIJavaScript(const base::string16& javascript);
 #endif
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  void OnSetVisuallyDeemphasized(bool deemphasized);
-#endif
 #if defined(OS_ANDROID)
   void OnUpdateBrowserControlsState(content::BrowserControlsState constraints,
                                     content::BrowserControlsState current,
                                     bool animate);
 #endif
-  void OnGetWebApplicationInfo();
   void OnSetWindowFeatures(const blink::mojom::WindowFeatures& window_features);
 
   // Determines if a host is in the strict security host set.
@@ -62,9 +58,6 @@ class ChromeRenderViewObserver : public content::RenderViewObserver {
 
   // Owned by ChromeContentRendererClient and outlive us.
   web_cache::WebCacheImpl* web_cache_impl_;
-
-  // true if webview is overlayed with grey color.
-  bool webview_visually_deemphasized_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeRenderViewObserver);
 };

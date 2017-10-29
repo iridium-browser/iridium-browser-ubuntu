@@ -11,49 +11,52 @@
 
 #include "base/callback.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/weak_ptr.h"
 #include "mojo/public/cpp/system/message_pipe.h"
-#include "services/service_manager/public/cpp/interface_factory.h"
-#include "services/service_manager/public/cpp/lib/callback_binder.h"
-#include "services/service_manager/public/cpp/lib/interface_factory_binder.h"
+#include "services/service_manager/public/cpp/export.h"
+#include "services/service_manager/public/cpp/interface_binder.h"
 
 namespace service_manager {
 
-class Identity;
-class InterfaceBinder;
-
-class BinderRegistry {
+template <typename... BinderArgs>
+class BinderRegistryWithArgs {
  public:
-  using Binder = base::Callback<void(const std::string&,
-                                mojo::ScopedMessagePipeHandle)>;
+  using Binder = base::Callback<
+      void(const std::string&, mojo::ScopedMessagePipeHandle, BinderArgs...)>;
 
-  BinderRegistry();
-  ~BinderRegistry();
+  BinderRegistryWithArgs() : weak_factory_(this) {}
+  ~BinderRegistryWithArgs() = default;
 
-  // Provide a factory to be called when a request to bind |Interface| is
-  // received by this registry.
-  template <typename Interface>
-  void AddInterface(InterfaceFactory<Interface>* factory) {
-    SetInterfaceBinder(
-        Interface::Name_,
-        base::MakeUnique<internal::InterfaceFactoryBinder<Interface>>(factory));
-  }
-
-  // Provide a callback to be run when a request to bind |Interface| is received
-  // by this registry.
+  // Adds an interface inferring the interface name via the templated
+  // parameter Interface::Name_
+  // Usage example: //services/service_manager/README.md#OnBindInterface
   template <typename Interface>
   void AddInterface(
-      const base::Callback<void(mojo::InterfaceRequest<Interface>)>& callback,
-      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner =
-          nullptr) {
+      const base::Callback<void(mojo::InterfaceRequest<Interface>,
+                                BinderArgs...)>& callback,
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner = nullptr) {
     SetInterfaceBinder(
         Interface::Name_,
-        base::MakeUnique<internal::CallbackBinder<Interface>>(callback,
-                                                              task_runner));
+        base::MakeUnique<CallbackBinder<Interface, BinderArgs...>>(
+            callback, task_runner));
   }
   void AddInterface(
       const std::string& interface_name,
-      const base::Callback<void(mojo::ScopedMessagePipeHandle)>& callback,
-      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner = nullptr);
+      const base::Callback<void(mojo::ScopedMessagePipeHandle, BinderArgs...)>&
+          callback,
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner = nullptr) {
+    SetInterfaceBinder(interface_name,
+                       base::MakeUnique<GenericCallbackBinder<BinderArgs...>>(
+                           callback, task_runner));
+  }
+  void AddInterface(
+      const std::string& interface_name,
+      const Binder& callback,
+      const scoped_refptr<base::SequencedTaskRunner>& task_runner = nullptr) {
+    SetInterfaceBinder(interface_name,
+                       base::MakeUnique<GenericCallbackBinder<BinderArgs...>>(
+                           callback, task_runner));
+  }
 
   // Removes the specified interface from the registry. This has no effect on
   // bindings already completed.
@@ -61,30 +64,70 @@ class BinderRegistry {
   void RemoveInterface() {
     RemoveInterface(Interface::Name_);
   }
-  void RemoveInterface(const std::string& interface_name);
+  void RemoveInterface(const std::string& interface_name) {
+    auto it = binders_.find(interface_name);
+    if (it != binders_.end())
+      binders_.erase(it);
+  }
 
   // Returns true if an InterfaceBinder is registered for |interface_name|.
-  bool CanBindInterface(const std::string& interface_name) const;
+  bool CanBindInterface(const std::string& interface_name) const {
+    auto it = binders_.find(interface_name);
+    return it != binders_.end();
+  }
 
   // Completes binding the request for |interface_name| on |interface_pipe|, by
   // invoking the corresponding InterfaceBinder.
-  void BindInterface(const Identity& remote_identity,
-                     const std::string& interface_name,
-                     mojo::ScopedMessagePipeHandle interface_pipe);
+  void BindInterface(const std::string& interface_name,
+                     mojo::ScopedMessagePipeHandle interface_pipe,
+                     BinderArgs... args) {
+    auto it = binders_.find(interface_name);
+    if (it != binders_.end()) {
+      it->second->BindInterface(interface_name, std::move(interface_pipe),
+                                args...);
+    } else {
+      LOG(ERROR) << "Failed to locate a binder for interface: "
+                 << interface_name;
+    }
+  }
+
+  // Attempts to bind a request for |interface_name| on |interface_pipe|.
+  // If the request can be bound, |interface_pipe| is taken and this function
+  // returns true. If the request cannot be bound, |interface_pipe| is
+  // unmodified and this function returns false.
+  bool TryBindInterface(const std::string& interface_name,
+                        mojo::ScopedMessagePipeHandle* interface_pipe,
+                        BinderArgs... args) {
+    bool can_bind = CanBindInterface(interface_name);
+    if (can_bind)
+      BindInterface(interface_name, std::move(*interface_pipe), args...);
+    return can_bind;
+  }
+
+  base::WeakPtr<BinderRegistryWithArgs> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
 
  private:
   using InterfaceNameToBinderMap =
-      std::map<std::string, std::unique_ptr<InterfaceBinder>>;
+      std::map<std::string, std::unique_ptr<InterfaceBinder<BinderArgs...>>>;
 
   // Adds |binder| to the internal map.
-  void SetInterfaceBinder(const std::string& interface_name,
-                          std::unique_ptr<InterfaceBinder> binder);
+  void SetInterfaceBinder(
+      const std::string& interface_name,
+      std::unique_ptr<InterfaceBinder<BinderArgs...>> binder) {
+    RemoveInterface(interface_name);
+    binders_[interface_name] = std::move(binder);
+  }
 
   InterfaceNameToBinderMap binders_;
 
-  DISALLOW_COPY_AND_ASSIGN(BinderRegistry);
+  base::WeakPtrFactory<BinderRegistryWithArgs> weak_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(BinderRegistryWithArgs);
 };
 
+using BinderRegistry = BinderRegistryWithArgs<>;
 
 }  // namespace service_manager
 

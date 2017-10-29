@@ -8,6 +8,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
+@protocol BrowserCommands;
 @class ShareToData;
 
 namespace ShareTo {
@@ -32,21 +33,21 @@ enum ShareResult {
 
 // This protocol provides callbacks for sharing events.
 @protocol ShareToDelegate<NSObject>
-// Callback triggered on completion of sharing. |successMessage| gives the
-// message to be displayed on successful completion. If |successMessage| is nil,
-// no message is displayed.
+// Callback triggered on completion of sharing. |completionMessage| gives the
+// message to be displayed on completion. If |completionMessage| is nil, no
+// message is displayed.
 - (void)shareDidComplete:(ShareTo::ShareResult)shareStatus
-          successMessage:(NSString*)message;
+       completionMessage:(NSString*)message;
 
 // Callback triggered if user invoked a Password Management App Extension.
 // If |shareStatus| is a successful status, delegate implementing this method
 // should find a login form on the current page and autofills it with the
-// |username| and |password|. |successMessage|, if non-nil, is the message to
-// be displayed on successful completion.
+// |username| and |password|. |completionMessage|, if non-nil, is the message to
+// be displayed on completion.
 - (void)passwordAppExDidFinish:(ShareTo::ShareResult)shareStatus
                       username:(NSString*)username
                       password:(NSString*)password
-                successMessage:(NSString*)message;
+             completionMessage:(NSString*)message;
 @end
 
 namespace ios {
@@ -71,6 +72,7 @@ class ChromeBrowserState;
 - (void)shareWithData:(ShareToData*)data
            controller:(UIViewController*)controller
          browserState:(ios::ChromeBrowserState*)browserState
+           dispatcher:(id<BrowserCommands>)dispatcher
       shareToDelegate:(id<ShareToDelegate>)delegate
              fromRect:(CGRect)rect
                inView:(UIView*)inView;

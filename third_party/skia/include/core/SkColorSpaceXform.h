@@ -32,15 +32,17 @@ public:
         kRGB_U16_BE_ColorFormat,   // Src only
         kRGBA_U16_BE_ColorFormat,  // Src only
 
-        kRGBA_F16_ColorFormat,     // Dst only
-        kRGBA_F32_ColorFormat,     // Dst only
+        kRGBA_F16_ColorFormat,
+        kRGBA_F32_ColorFormat,
+
+        kBGR_565_ColorFormat,      // Dst only, kOpaque only
     };
 
     /**
      *  Apply the color conversion to a |src| buffer, storing the output in the |dst| buffer.
      *
-     *  F16 and F32 are only supported as dst color formats, and only when the dst color space
-     *  is linear.  This function will return false in unsupported cases.
+     *  F16 and F32 are only supported when the color space is linear. This function will return
+     *  false in unsupported cases.
      *
      *  @param dst            Stored in the format described by |dstColorFormat|
      *  @param src            Stored in the format described by |srcColorFormat|
@@ -57,6 +59,15 @@ public:
                SkAlphaType alphaType) const;
 
     virtual ~SkColorSpaceXform() {}
+
+    enum AlphaOp {
+        kPreserve_AlphaOp,      // just transfer src-alpha to dst-alpha
+        kPremul_AlphaOp,        // like kPreserve, but multiplies RGB by it
+        kSrcIsOpaque_AlphaOp,   // src alphas are all 1, this is a perf hint
+    };
+    static bool Apply(SkColorSpace* dstCS, ColorFormat dstFormat, void* dst,
+                      SkColorSpace* srcCS, ColorFormat srcFormat, const void* src,
+                      int count, AlphaOp);
 
 protected:
     SkColorSpaceXform() {}

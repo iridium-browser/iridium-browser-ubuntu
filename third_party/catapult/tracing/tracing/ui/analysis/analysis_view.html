@@ -72,35 +72,38 @@ using custom elements specialized for different event types.
 <script>
 'use strict';
 (function() {
-  var EventRegistry = tr.model.EventRegistry;
+  const EventRegistry = tr.model.EventRegistry;
 
   /** Returns the label that goes next to the list of tabs. */
   function getTabStripLabel(numEvents) {
-    if (numEvents === 0)
+    if (numEvents === 0) {
       return 'Nothing selected. Tap stuff.';
-    else if (numEvents === 1)
+    } else if (numEvents === 1) {
       return '1 item selected.';
+    }
     return numEvents + ' items selected.';
   }
 
   function createSubView(subViewTypeInfo, selection) {
-    var tagName;
-    if (selection.length === 1)
+    let tagName;
+    if (selection.length === 1) {
       tagName = subViewTypeInfo.singleTagName;
-    else
+    } else {
       tagName = subViewTypeInfo.multiTagName;
+    }
 
     if (tagName === undefined) {
       throw new Error('No view registered for ' +
                       subViewTypeInfo.eventConstructor.name);
     }
-    var subView = document.createElement(tagName);
+    const subView = document.createElement(tagName);
 
-    var title;
-    if (selection.length === 1)
+    let title;
+    if (selection.length === 1) {
       title = subViewTypeInfo.singleTitle;
-    else
+    } else {
       title = subViewTypeInfo.multiTitle;
+    }
     title += ' (' + selection.length + ')';
     subView.tabLabel = title;
 
@@ -111,7 +114,7 @@ using custom elements specialized for different event types.
   Polymer({
     is: 'tr-ui-a-analysis-view',
 
-    ready: function() {
+    ready() {
       this.brushingStateController_ = undefined;
       this.lastSelection_ = undefined;
       this.tabView_ = document.createElement('tr-ui-b-tab-view');
@@ -158,20 +161,21 @@ using custom elements specialized for different event types.
       return this.brushingStateController_.selection;
     },
 
-    onSelectionChanged_: function(e) {
-      if (this.lastSelection_ && this.selection.equals(this.lastSelection_))
+    onSelectionChanged_(e) {
+      if (this.lastSelection_ && this.selection.equals(this.lastSelection_)) {
         return;
+      }
       this.lastSelection_ = this.selection;
 
       this.tallMode = false;
 
       this.tabView_.label = getTabStripLabel(this.selection.length);
-      var eventsByBaseTypeName =
+      const eventsByBaseTypeName =
           this.selection.getEventsOrganizedByBaseType(true);
 
-      var ASV = tr.ui.analysis.AnalysisSubView;
-      var eventsByTagName = ASV.getEventsOrganizedByTypeInfo(this.selection);
-      var newSubViews = [];
+      const ASV = tr.ui.analysis.AnalysisSubView;
+      const eventsByTagName = ASV.getEventsOrganizedByTypeInfo(this.selection);
+      const newSubViews = [];
       eventsByTagName.forEach(function(events, typeInfo) {
         newSubViews.push(createSubView(typeInfo, events));
       });
@@ -179,8 +183,8 @@ using custom elements specialized for different event types.
       this.tabView_.resetSubViews(newSubViews);
     },
 
-    onSelectedSubViewChanged_: function() {
-      var selectedSubView = this.tabView_.selectedSubView;
+    onSelectedSubViewChanged_() {
+      const selectedSubView = this.tabView_.selectedSubView;
 
       if (!selectedSubView) {
         this.tallMode = false;
@@ -193,9 +197,10 @@ using custom elements specialized for different event types.
     },
 
     /** Changes the highlighted related events if possible. */
-    maybeChangeRelatedEvents_: function(events) {
-      if (this.brushingStateController)
+    maybeChangeRelatedEvents_(events) {
+      if (this.brushingStateController) {
         this.brushingStateController.changeAnalysisViewRelatedEvents(events);
+      }
     }
   });
 })();

@@ -25,6 +25,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/content_switches.h"
 #include "net/http/http_status_code.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 using base::StringPrintf;
@@ -244,7 +245,7 @@ NetworkPortalDetectorImpl::NetworkPortalDetectorImpl(
 
 NetworkPortalDetectorImpl::~NetworkPortalDetectorImpl() {
   NET_LOG(EVENT) << "NetworkPortalDetectorImpl::~NetworkPortalDetectorImpl()";
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   attempt_task_.Cancel();
   attempt_timeout_.Cancel();
@@ -259,13 +260,13 @@ NetworkPortalDetectorImpl::~NetworkPortalDetectorImpl() {
 }
 
 void NetworkPortalDetectorImpl::AddObserver(Observer* observer) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (observer && !observers_.HasObserver(observer))
     observers_.AddObserver(observer);
 }
 
 void NetworkPortalDetectorImpl::AddAndFireObserver(Observer* observer) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!observer)
     return;
   AddObserver(observer);
@@ -277,7 +278,7 @@ void NetworkPortalDetectorImpl::AddAndFireObserver(Observer* observer) {
 }
 
 void NetworkPortalDetectorImpl::RemoveObserver(Observer* observer) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (observer)
     observers_.RemoveObserver(observer);
 }
@@ -285,7 +286,7 @@ void NetworkPortalDetectorImpl::RemoveObserver(Observer* observer) {
 bool NetworkPortalDetectorImpl::IsEnabled() { return enabled_; }
 
 void NetworkPortalDetectorImpl::Enable(bool start_detection) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (enabled_)
     return;
 
@@ -303,7 +304,7 @@ void NetworkPortalDetectorImpl::Enable(bool start_detection) {
 
 NetworkPortalDetectorImpl::CaptivePortalState
 NetworkPortalDetectorImpl::GetCaptivePortalState(const std::string& guid) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CaptivePortalStateMap::const_iterator it = portal_state_map_.find(guid);
   if (it == portal_state_map_.end())
     return CaptivePortalState();
@@ -333,7 +334,7 @@ void NetworkPortalDetectorImpl::OnLockScreenRequest() {
 
 void NetworkPortalDetectorImpl::DefaultNetworkChanged(
     const NetworkState* default_network) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (!default_network) {
     NET_LOG(EVENT) << "Default network changed: None";
@@ -446,7 +447,8 @@ void NetworkPortalDetectorImpl::StartAttempt() {
   captive_portal_detector_->DetectCaptivePortal(
       portal_test_url_,
       base::Bind(&NetworkPortalDetectorImpl::OnAttemptCompleted,
-                 weak_factory_.GetWeakPtr()));
+                 weak_factory_.GetWeakPtr()),
+      NO_TRAFFIC_ANNOTATION_YET);
   attempt_timeout_.Reset(
       base::Bind(&NetworkPortalDetectorImpl::OnAttemptTimeout,
                  weak_factory_.GetWeakPtr()));
@@ -457,7 +459,7 @@ void NetworkPortalDetectorImpl::StartAttempt() {
 }
 
 void NetworkPortalDetectorImpl::OnAttemptTimeout() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(is_checking_for_portal());
 
   NET_LOG(ERROR) << "Portal detection timeout: "
@@ -472,7 +474,7 @@ void NetworkPortalDetectorImpl::OnAttemptTimeout() {
 
 void NetworkPortalDetectorImpl::OnAttemptCompleted(
     const CaptivePortalDetector::Results& results) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(is_checking_for_portal());
 
   captive_portal::CaptivePortalResult result = results.result;
@@ -496,7 +498,18 @@ void NetworkPortalDetectorImpl::OnAttemptCompleted(
     attempt_completed_report_.Report();
   }
 
-  state_ = STATE_IDLE;
+  // If Chrome portal detection successfully returns portal state, mark the
+  // state so that Chrome won't schedule detection actively by self.
+  // The exception is when portal side session expires, shill doesn't report
+  // network connection state changed from online to portal. Thus we enable
+  // Chrome's detection by still marking |state_| to STATE_IDLE.
+  if (result == captive_portal::RESULT_BEHIND_CAPTIVE_PORTAL &&
+      response_code == 200 &&
+      (!network || network->connection_state() != shill::kStateOnline)) {
+    state_ = STATE_BEHIND_PORTAL_IDLE;
+  } else {
+    state_ = STATE_IDLE;
+  }
   attempt_timeout_.Cancel();
 
   CaptivePortalState state;
@@ -551,15 +564,8 @@ void NetworkPortalDetectorImpl::OnAttemptCompleted(
   }
 
   // Observers (via OnDetectionCompleted) may already schedule new attempt.
-  if (!is_idle())
-    return;
-
-  // If behind a captive portal and the response code was 200 (OK), do not
-  // schedule a new attempt.
-  if (state.status == CAPTIVE_PORTAL_STATUS_PORTAL && response_code == 200)
-    return;
-
-  ScheduleAttempt(results.retry_after_delta);
+  if (is_idle())
+    ScheduleAttempt(results.retry_after_delta);
 }
 
 void NetworkPortalDetectorImpl::Observe(

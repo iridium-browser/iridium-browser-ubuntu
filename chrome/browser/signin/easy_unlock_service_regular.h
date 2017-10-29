@@ -16,7 +16,6 @@
 #include "components/cryptauth/cryptauth_device_manager.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/proximity_auth/screenlock_bridge.h"
-#include "google_apis/gaia/oauth2_token_service.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/easy_unlock/short_lived_user_context.h"
@@ -31,15 +30,17 @@ namespace cryptauth {
 class CryptAuthClient;
 class CryptAuthDeviceManager;
 class CryptAuthEnrollmentManager;
-class CryptAuthGCMManager;
+class LocalDeviceDataProvider;
 class RemoteDeviceLoader;
 class ToggleEasyUnlockResponse;
 }
 
 namespace proximity_auth {
-class ProximityAuthPrefManager;
+class PromotionManager;
+class ProximityAuthProfilePrefManager;
 }
 
+class EasyUnlockNotificationController;
 class Profile;
 
 // EasyUnlockService instance that should be used for regular, non-signin
@@ -47,23 +48,16 @@ class Profile;
 class EasyUnlockServiceRegular
     : public EasyUnlockService,
       public proximity_auth::ScreenlockBridge::Observer,
-      public cryptauth::CryptAuthDeviceManager::Observer,
-      public OAuth2TokenService::Observer {
+      public cryptauth::CryptAuthDeviceManager::Observer {
  public:
   explicit EasyUnlockServiceRegular(Profile* profile);
+
+  // Constructor for tests.
+  EasyUnlockServiceRegular(Profile* profile,
+                           std::unique_ptr<EasyUnlockNotificationController>
+                               notification_controller);
+
   ~EasyUnlockServiceRegular() override;
-
-  // Returns the CryptAuthEnrollmentManager, which manages the profile's
-  // CryptAuth enrollment.
-  cryptauth::CryptAuthEnrollmentManager* GetCryptAuthEnrollmentManager();
-
-  // Returns the CryptAuthEnrollmentManager, which manages the profile's
-  // synced devices from CryptAuth.
-  cryptauth::CryptAuthDeviceManager* GetCryptAuthDeviceManager();
-
-  // Returns the ProximityAuthPrefManager, which manages the profile's
-  // prefs for proximity_auth classes.
-  proximity_auth::ProximityAuthPrefManager* GetProximityAuthPrefManager();
 
  private:
   // Loads the RemoteDevice instances that will be supplied to
@@ -74,7 +68,16 @@ class EasyUnlockServiceRegular
   void OnRemoteDevicesLoaded(
       const std::vector<cryptauth::RemoteDevice>& remote_devices);
 
+  // True if we should promote EasyUnlock.
+  bool ShouldPromote();
+
+  // Starts the promotion manager to periodically display an EasyUnlock
+  // promotion.
+  void StartPromotionManager();
+
   // EasyUnlockService implementation:
+  proximity_auth::ProximityAuthPrefManager* GetProximityAuthPrefManager()
+      override;
   EasyUnlockService::Type GetType() const override;
   AccountId GetAccountId() const override;
   void LaunchSetup() override;
@@ -97,13 +100,16 @@ class EasyUnlockServiceRegular
   void InitializeInternal() override;
   void ShutdownInternal() override;
   bool IsAllowedInternal() const override;
+  bool IsEnabled() const override;
+  bool IsChromeOSLoginEnabled() const override;
   void OnWillFinalizeUnlock(bool success) override;
   void OnSuspendDoneInternal() override;
-
-  // OAuth2TokenService::Observer:
-  void OnRefreshTokenAvailable(const std::string& account_id) override;
+#if defined(OS_CHROMEOS)
+  void HandleUserReauth(const chromeos::UserContext& user_context) override;
+#endif
 
   // CryptAuthDeviceManager::Observer:
+  void OnSyncStarted() override;
   void OnSyncFinished(
       cryptauth::CryptAuthDeviceManager::SyncResult sync_result,
       cryptauth::CryptAuthDeviceManager::DeviceChangeResult
@@ -117,9 +123,6 @@ class EasyUnlockServiceRegular
       override;
   void OnFocusedUserChanged(const AccountId& account_id) override;
 
-  // Callback when the controlling pref changes.
-  void OnPrefsChanged();
-
   // Sets the new turn-off flow status.
   void SetTurnOffFlowStatus(TurnOffFlowStatus status);
 
@@ -131,16 +134,13 @@ class EasyUnlockServiceRegular
 #if defined(OS_CHROMEOS)
   // Called with the user's credentials (e.g. username and password) after the
   // user reauthenticates to begin setup.
-  void OnUserContextFromReauth(const chromeos::UserContext& user_context);
+  void OpenSetupAppAfterReauth(const chromeos::UserContext& user_context);
 
   // Called after a cryptohome RemoveKey or RefreshKey operation to set the
   // proper hardlock state if the operation is successful.
   void SetHardlockAfterKeyOperation(
       EasyUnlockScreenlockStateHandler::HardlockState state_on_success,
       bool success);
-
-  // Initializes the managers that communicate with CryptAuth.
-  void InitializeCryptAuth();
 
   std::unique_ptr<chromeos::ShortLivedUserContext> short_lived_user_context_;
 #endif
@@ -149,11 +149,17 @@ class EasyUnlockServiceRegular
   // can be accessed on the sign-in screen.
   void SyncProfilePrefsToLocalState();
 
-  // Returns the base GcmDeviceInfo proto containing the device's platform and
-  // version information.
-  cryptauth::GcmDeviceInfo GetGcmDeviceInfo();
+  // Returns the CryptAuthEnrollmentManager, which manages the profile's
+  // CryptAuth enrollment.
+  cryptauth::CryptAuthEnrollmentManager* GetCryptAuthEnrollmentManager();
 
-  PrefChangeRegistrar registrar_;
+  // Returns the CryptAuthEnrollmentManager, which manages the profile's
+  // synced devices from CryptAuth.
+  cryptauth::CryptAuthDeviceManager* GetCryptAuthDeviceManager();
+
+  // Refreshes the ChromeOS cryptohome keys if the user has reauthed recently.
+  // Otherwise, hardlock the device.
+  void RefreshCryptohomeKeysIfPossible();
 
   TurnOffFlowStatus turn_off_flow_status_;
   std::unique_ptr<cryptauth::CryptAuthClient> cryptauth_client_;
@@ -171,24 +177,40 @@ class EasyUnlockServiceRegular
   // locked but the computer does not go to sleep.
   base::TimeTicks lock_screen_last_shown_timestamp_;
 
-  // Managers responsible for handling syncing and communications with
-  // CryptAuth.
-  std::unique_ptr<cryptauth::CryptAuthGCMManager> gcm_manager_;
-  std::unique_ptr<cryptauth::CryptAuthEnrollmentManager>
-      enrollment_manager_;
-  std::unique_ptr<cryptauth::CryptAuthDeviceManager> device_manager_;
-
   // Manager responsible for handling the prefs used by proximity_auth classes.
-  std::unique_ptr<proximity_auth::ProximityAuthPrefManager> pref_manager_;
+  std::unique_ptr<proximity_auth::ProximityAuthProfilePrefManager>
+      pref_manager_;
 
   // Loads the RemoteDevice instances from CryptAuth and local data.
   std::unique_ptr<cryptauth::RemoteDeviceLoader> remote_device_loader_;
+
+  // Provides local device information from CryptAuth.
+  std::unique_ptr<cryptauth::LocalDeviceDataProvider>
+      local_device_data_provider_;
+
+  // Manager responsible for display EasyUnlock promotions to the user.
+  std::unique_ptr<proximity_auth::PromotionManager> promotion_manager_;
 
   // If a new RemoteDevice was synced while the screen is locked, we defer
   // loading the RemoteDevice until the screen is unlocked. For security,
   // this deferment prevents the lock screen from being changed by a network
   // event.
   bool deferring_device_load_;
+
+  // Responsible for showing all the notifications used for EasyUnlock.
+  std::unique_ptr<EasyUnlockNotificationController> notification_controller_;
+
+  // Stores the unlock keys for EasyUnlock before the current device sync, so we
+  // can compare it to the unlock keys after syncing.
+  std::vector<cryptauth::ExternalDeviceInfo> unlock_keys_before_sync_;
+
+  // True if the pairing changed notification was shown, so that the next time
+  // the Chromebook is unlocked, we can show the subsequent 'pairing applied'
+  // notification.
+  bool shown_pairing_changed_notification_;
+
+  // Listens to pref changes.
+  PrefChangeRegistrar registrar_;
 
   base::WeakPtrFactory<EasyUnlockServiceRegular> weak_ptr_factory_;
 

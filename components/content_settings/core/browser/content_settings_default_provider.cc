@@ -11,12 +11,15 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "components/content_settings/core/browser/content_settings_info.h"
+#include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/content_settings_rule.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/website_settings_info.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
+#include "components/content_settings/core/common/content_settings_utils.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_registry.h"
@@ -186,6 +189,10 @@ DefaultProvider::DefaultProvider(PrefService* prefs, bool incognito)
       IntToContentSetting(prefs_->GetInteger(
           GetPrefName(CONTENT_SETTINGS_TYPE_AUTOPLAY))),
       CONTENT_SETTING_NUM_SETTINGS);
+  UMA_HISTOGRAM_ENUMERATION("ContentSettings.DefaultSubresourceFilterSetting",
+                            IntToContentSetting(prefs_->GetInteger(
+                                GetPrefName(CONTENT_SETTINGS_TYPE_ADS))),
+                            CONTENT_SETTING_NUM_SETTINGS);
 #endif
   pref_change_registrar_.Init(prefs_);
   PrefChangeRegistrar::NamedChangeCallback callback = base::Bind(
@@ -296,6 +303,10 @@ bool DefaultProvider::IsValueEmptyOrDefault(ContentSettingsType content_type,
 
 void DefaultProvider::ChangeSetting(ContentSettingsType content_type,
                                     base::Value* value) {
+  const ContentSettingsInfo* info =
+      ContentSettingsRegistry::GetInstance()->Get(content_type);
+  DCHECK(!info || !value ||
+         info->IsDefaultSettingValid(ValueToContentSetting(value)));
   default_settings_[content_type] =
       value ? base::WrapUnique(value->DeepCopy())
             : ContentSettingToValue(GetDefaultValue(content_type));
@@ -363,6 +374,8 @@ std::unique_ptr<base::Value> DefaultProvider::ReadFromPref(
 }
 
 void DefaultProvider::DiscardObsoletePreferences() {
+  if (is_incognito_)
+    return;
   // These prefs were never stored on iOS/Android so they don't need to be
   // deleted.
 #if !defined(OS_IOS)

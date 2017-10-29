@@ -9,7 +9,6 @@
 
 #include "base/format_macros.h"
 #include "base/i18n/rtl.h"
-#include "base/ios/weak_nsobject.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -26,16 +25,13 @@
 #import "ui/gfx/ios/uikit_util.h"
 #include "url/gurl.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 
 const char kChromeInfobarURL[] = "chromeinternal://infobar/";
-
-// UX configuration constants for the shadow/rounded corners on the icon.
-const CGFloat kBaseSizeForEffects = 57.0;
-const CGFloat kCornerRadius = 10.0;
-const CGFloat kShadowVerticalOffset = 1.0;
-const CGFloat kShadowOpacity = 0.5;
-const CGFloat kShadowRadius = 0.8;
 
 // UX configuration for the layout of items.
 const CGFloat kLeftMarginOnFirstLineWhenIconAbsent = 20.0;
@@ -82,16 +78,15 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
 @end
 
 @implementation SwitchView {
-  base::scoped_nsobject<UILabel> label_;
-  base::scoped_nsobject<UISwitch> switch_;
+  UILabel* label_;
+  UISwitch* switch_;
   CGFloat preferredTotalWidth_;
   CGFloat preferredLabelWidth_;
 }
 
 - (id)initWithLabel:(NSString*)labelText isOn:(BOOL)isOn {
   // Creates switch and label.
-  base::scoped_nsobject<UILabel> tempLabel(
-      [[UILabel alloc] initWithFrame:CGRectZero]);
+  UILabel* tempLabel = [[UILabel alloc] initWithFrame:CGRectZero];
   [tempLabel setTextAlignment:NSTextAlignmentNatural];
   [tempLabel setFont:[MDCTypography body1Font]];
   [tempLabel setText:labelText];
@@ -99,8 +94,7 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
   [tempLabel setLineBreakMode:NSLineBreakByWordWrapping];
   [tempLabel setNumberOfLines:0];
   [tempLabel setAdjustsFontSizeToFitWidth:NO];
-  base::scoped_nsobject<UISwitch> tempSwitch(
-      [[UISwitch alloc] initWithFrame:CGRectZero]);
+  UISwitch* tempSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
   [tempSwitch setExclusiveTouch:YES];
   [tempSwitch setAccessibilityLabel:labelText];
   [tempSwitch setOnTintColor:[[MDCPalette cr_bluePalette] tint500]];
@@ -117,8 +111,8 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
   self = [super initWithFrame:frameRect];
   if (!self)
     return nil;
-  label_.reset([tempLabel retain]);
-  switch_.reset([tempSwitch retain]);
+  label_ = tempLabel;
+  switch_ = tempSwitch;
 
   // Sets the position of the label and the switch. The label is left aligned
   // and the switch is right aligned. Both are vertically centered.
@@ -223,37 +217,37 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
 
 @implementation InfoBarView {
   // Delegates UIView events.
-  InfoBarViewDelegate* delegate_;  // weak
+  InfoBarViewDelegate* delegate_;  // weak.
   // The current height of this infobar (used for animations where part of the
   // infobar is hidden).
   CGFloat visibleHeight_;
   // The height of this infobar when fully visible.
   CGFloat targetHeight_;
   // View containing |imageView_|. Exists to apply drop shadows to the view.
-  base::scoped_nsobject<UIView> imageViewContainer_;
+  UIView* imageViewContainer_;
   // View containing the icon.
-  base::scoped_nsobject<UIImageView> imageView_;
+  UIImageView* imageView_;
   // Close button.
-  base::scoped_nsobject<UIButton> closeButton_;
+  UIButton* closeButton_;
   // View containing the switch and its label.
-  base::scoped_nsobject<SwitchView> switchView_;
+  SwitchView* switchView_;
   // We are using a LabelLinkController with an UILabel to be able to have
   // parts of the label underlined and clickable. This label_ may be nil if
   // the delegate returns an empty string for GetMessageText().
-  base::scoped_nsobject<LabelLinkController> labelLinkController_;
-  UILabel* label_;  // Weak.
+  LabelLinkController* labelLinkController_;
+  UILabel* label_;
   // Array of range information. The first element of the pair is the tag of
   // the action and the second element is the range defining the link.
   std::vector<std::pair<NSUInteger, NSRange>> linkRanges_;
   // Text for the label with link markers included.
-  base::scoped_nsobject<NSString> markedLabel_;
+  NSString* markedLabel_;
   // Buttons.
   // button1_ is tagged with ConfirmInfoBarDelegate::BUTTON_OK .
   // button2_ is tagged with ConfirmInfoBarDelegate::BUTTON_CANCEL .
-  base::scoped_nsobject<UIButton> button1_;
-  base::scoped_nsobject<UIButton> button2_;
+  UIButton* button1_;
+  UIButton* button2_;
   // Drop shadow.
-  base::scoped_nsobject<UIImageView> shadow_;
+  UIImageView* shadow_;
 }
 
 @synthesize visibleHeight = visibleHeight_;
@@ -265,7 +259,7 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
     delegate_ = delegate;
     // Make the drop shadow.
     UIImage* shadowImage = [UIImage imageNamed:@"infobar_shadow"];
-    shadow_.reset([[UIImageView alloc] initWithImage:shadowImage]);
+    shadow_ = [[UIImageView alloc] initWithImage:shadowImage];
     [self addSubview:shadow_];
     [self setAutoresizingMask:UIViewAutoresizingFlexibleWidth |
                               UIViewAutoresizingFlexibleHeight];
@@ -274,9 +268,6 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
   return self;
 }
 
-- (void)dealloc {
-  [super dealloc];
-}
 
 - (NSString*)markedLabel {
   return markedLabel_;
@@ -660,10 +651,8 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
                        action:(SEL)action {
   DCHECK(!closeButton_);
   // TODO(crbug/228611): Add IDR_ constant and use GetNativeImageNamed().
-  NSString* imagePath =
-      [[NSBundle mainBundle] pathForResource:@"infobar_close" ofType:@"png"];
-  UIImage* image = [UIImage imageWithContentsOfFile:imagePath];
-  closeButton_.reset([[UIButton buttonWithType:UIButtonTypeCustom] retain]);
+  UIImage* image = [UIImage imageNamed:@"infobar_close"];
+  closeButton_ = [UIButton buttonWithType:UIButtonTypeCustom];
   [closeButton_ setExclusiveTouch:YES];
   [closeButton_ setImage:image forState:UIControlStateNormal];
   [closeButton_ addTarget:target
@@ -679,43 +668,18 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
                        tag:(NSInteger)tag
                     target:(id)target
                     action:(SEL)action {
-  switchView_.reset([[SwitchView alloc] initWithLabel:label isOn:isOn]);
+  switchView_ = [[SwitchView alloc] initWithLabel:label isOn:isOn];
   [switchView_ setTag:tag target:target action:action];
   [self addSubview:switchView_];
 }
 
 - (void)addLeftIcon:(UIImage*)image {
   if (!imageViewContainer_) {
-    imageViewContainer_.reset([[UIView alloc] init]);
+    imageViewContainer_ = [[UIView alloc] init];
     [self addSubview:imageViewContainer_];
   }
-  imageView_.reset([[UIImageView alloc] initWithImage:image]);
+  imageView_ = [[UIImageView alloc] initWithImage:image];
   [imageViewContainer_ addSubview:imageView_];
-}
-
-- (void)addPlaceholderTransparentIcon:(CGSize const&)imageSize {
-  UIGraphicsBeginImageContext(imageSize);
-  UIImage* placeholder = UIGraphicsGetImageFromCurrentImageContext();
-  UIGraphicsEndImageContext();
-  [self addLeftIcon:placeholder];
-}
-
-// Since shadows & rounded corners cannot be applied simultaneously to a
-// UIView, this method adds rounded corners to the UIImageView and then adds
-// drop shadow to the UIView containing the UIImageView.
-- (void)addLeftIconWithRoundedCornersAndShadow:(UIImage*)image {
-  CGFloat effectScaleFactor = image.size.width / kBaseSizeForEffects;
-  [self addLeftIcon:image];
-  CALayer* layer = [imageView_ layer];
-  [layer setMasksToBounds:YES];
-  [layer setCornerRadius:kCornerRadius * effectScaleFactor];
-  layer = [imageViewContainer_ layer];
-  [layer setShadowColor:[UIColor blackColor].CGColor];
-  [layer
-      setShadowOffset:CGSizeMake(0, kShadowVerticalOffset * effectScaleFactor)];
-  [layer setShadowOpacity:kShadowOpacity];
-  [layer setShadowRadius:kShadowRadius * effectScaleFactor];
-  [imageViewContainer_ setClipsToBounds:NO];
 }
 
 - (NSString*)stripMarkersFromString:(NSString*)string {
@@ -726,7 +690,7 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
         [string rangeOfString:[[InfoBarView openingMarkerForLink]
                                   stringByAppendingString:@"("]];
     if (!startingRange.length)
-      return [[string copy] autorelease];
+      return [string copy];
     // Read the tag.
     NSUInteger beginTag = NSMaxRange(startingRange);
     NSRange closingParenthesis = [string
@@ -734,13 +698,13 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
               options:NSLiteralSearch
                 range:NSMakeRange(beginTag, [string length] - beginTag)];
     if (closingParenthesis.location == NSNotFound)
-      return [[string copy] autorelease];
+      return [string copy];
     NSInteger tag = [[string
         substringWithRange:NSMakeRange(beginTag, closingParenthesis.location -
                                                      beginTag)] integerValue];
     // If the parsing fails, |tag| is 0. Negative values are not allowed.
     if (tag <= 0)
-      return [[string copy] autorelease];
+      return [string copy];
     // Find the closing marker.
     startingRange.length =
         closingParenthesis.location - startingRange.location + 1;
@@ -764,25 +728,25 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
 }
 
 - (void)addLabel:(NSString*)label {
-  [self addLabel:label target:nil action:nil];
+  [self addLabel:label action:nil];
 }
 
-- (void)addLabel:(NSString*)text target:(id)target action:(SEL)action {
-  markedLabel_.reset([text copy]);
-  if (target)
+- (void)addLabel:(NSString*)text action:(void (^)(NSUInteger))action {
+  markedLabel_ = [text copy];
+  if (action)
     text = [self stripMarkersFromString:text];
   if ([label_ superview]) {
     [label_ removeFromSuperview];
   }
 
-  label_ = [[[UILabel alloc] initWithFrame:CGRectZero] autorelease];
+  label_ = [[UILabel alloc] initWithFrame:CGRectZero];
 
   UIFont* font = [MDCTypography subheadFont];
 
   [label_ setBackgroundColor:[UIColor clearColor]];
 
   NSMutableParagraphStyle* paragraphStyle =
-      [[[NSMutableParagraphStyle alloc] init] autorelease];
+      [[NSMutableParagraphStyle alloc] init];
   paragraphStyle.lineBreakMode = NSLineBreakByWordWrapping;
   paragraphStyle.lineSpacing = kLabelLineSpacing;
   NSDictionary* attributes = @{
@@ -791,24 +755,24 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
   };
   [label_ setNumberOfLines:0];
 
-  [label_ setAttributedText:[[[NSAttributedString alloc]
-                                initWithString:text
-                                    attributes:attributes] autorelease]];
+  [label_
+      setAttributedText:[[NSAttributedString alloc] initWithString:text
+                                                        attributes:attributes]];
 
   [self addSubview:label_];
 
   if (linkRanges_.empty())
     return;
 
-  DCHECK([target respondsToSelector:action]);
-
-  labelLinkController_.reset([[LabelLinkController alloc]
+  labelLinkController_ = [[LabelLinkController alloc]
       initWithLabel:label_
              action:^(const GURL& gurl) {
-               NSUInteger actionTag = [base::SysUTF8ToNSString(
-                   gurl.ExtractFileName()) integerValue];
-               [target performSelector:action withObject:@(actionTag)];
-             }]);
+               if (action) {
+                 NSUInteger actionTag = [base::SysUTF8ToNSString(
+                     gurl.ExtractFileName()) integerValue];
+                 action(actionTag);
+               }
+             }];
 
   [labelLinkController_ setLinkUnderlineStyle:NSUnderlineStyleSingle];
   [labelLinkController_ setLinkColor:[UIColor blackColor]];
@@ -829,20 +793,20 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
               tag2:(NSInteger)tag2
             target:(id)target
             action:(SEL)action {
-  button1_.reset([[self infoBarButton:title1
-                              palette:[MDCPalette cr_bluePalette]
-                     customTitleColor:[UIColor whiteColor]
-                                  tag:tag1
-                               target:target
-                               action:action] retain]);
+  button1_ = [self infoBarButton:title1
+                         palette:[MDCPalette cr_bluePalette]
+                customTitleColor:[UIColor whiteColor]
+                             tag:tag1
+                          target:target
+                          action:action];
   [self addSubview:button1_];
 
-  button2_.reset([[self infoBarButton:title2
-                              palette:nil
-                     customTitleColor:UIColorFromRGB(kButton2TitleColor)
-                                  tag:tag2
-                               target:target
-                               action:action] retain]);
+  button2_ = [self infoBarButton:title2
+                         palette:nil
+                customTitleColor:UIColorFromRGB(kButton2TitleColor)
+                             tag:tag2
+                          target:target
+                          action:action];
   [self addSubview:button2_];
 }
 
@@ -852,12 +816,12 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
            action:(SEL)action {
   if (![title length])
     return;
-  button1_.reset([[self infoBarButton:title
-                              palette:[MDCPalette cr_bluePalette]
-                     customTitleColor:[UIColor whiteColor]
-                                  tag:tag
-                               target:target
-                               action:action] retain]);
+  button1_ = [self infoBarButton:title
+                         palette:[MDCPalette cr_bluePalette]
+                customTitleColor:[UIColor whiteColor]
+                             tag:tag
+                          target:target
+                          action:action];
   [self addSubview:button1_];
 }
 
@@ -869,19 +833,19 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
                        tag:(NSInteger)tag
                     target:(id)target
                     action:(SEL)action {
-  base::scoped_nsobject<MDCFlatButton> button([[MDCFlatButton alloc] init]);
-  button.get().inkColor = [[palette tint300] colorWithAlphaComponent:0.5f];
+  MDCFlatButton* button = [[MDCFlatButton alloc] init];
+  button.inkColor = [[palette tint300] colorWithAlphaComponent:0.5f];
   [button setBackgroundColor:[palette tint500] forState:UIControlStateNormal];
   [button setBackgroundColor:[UIColor colorWithWhite:0.8f alpha:1.0f]
                     forState:UIControlStateDisabled];
   if (palette)
-    button.get().hasOpaqueBackground = YES;
+    button.hasOpaqueBackground = YES;
   if (customTitleColor) {
-    button.get().tintAdjustmentMode = UIViewTintAdjustmentModeNormal;
-    button.get().customTitleColor = customTitleColor;
+    button.tintAdjustmentMode = UIViewTintAdjustmentModeNormal;
+    button.customTitleColor = customTitleColor;
   }
-  button.get().titleLabel.adjustsFontSizeToFitWidth = YES;
-  button.get().titleLabel.minimumScaleFactor = 0.6f;
+  button.titleLabel.adjustsFontSizeToFitWidth = YES;
+  button.titleLabel.minimumScaleFactor = 0.6f;
   [button setTitle:message forState:UIControlStateNormal];
   [button setTag:tag];
   [button addTarget:target
@@ -890,7 +854,7 @@ enum InfoBarButtonPosition { ON_FIRST_LINE, CENTER, LEFT, RIGHT };
   // Without the call to layoutIfNeeded, |button| returns an incorrect
   // titleLabel the first time it is accessed in |narrowestWidthOfButton|.
   [button layoutIfNeeded];
-  return button.autorelease();
+  return button;
 }
 
 - (CGRect)frameOfCloseButton:(BOOL)singleLineMode {

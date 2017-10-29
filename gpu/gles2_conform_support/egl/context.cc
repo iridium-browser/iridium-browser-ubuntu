@@ -7,13 +7,15 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/shared_memory_limits.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/service/context_group.h"
-#include "gpu/command_buffer/service/mailbox_manager.h"
+#include "gpu/command_buffer/service/image_manager.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
+#include "gpu/command_buffer/service/service_discardable_manager.h"
 #include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "gpu/gles2_conform_support/egl/config.h"
 #include "gpu/gles2_conform_support/egl/display.h"
@@ -51,8 +53,8 @@ Context::Context(Display* display, const Config* config)
       config_(config),
       is_current_in_some_thread_(false),
       is_destroyed_(false),
-      gpu_driver_bug_workarounds_(base::CommandLine::ForCurrentProcess()) {
-}
+      gpu_driver_bug_workarounds_(base::CommandLine::ForCurrentProcess()),
+      translator_cache_(gpu::GpuPreferences()) {}
 
 Context::~Context() {
   // We might not have a surface, so we must lose the context.  Cleanup will
@@ -193,8 +195,12 @@ gpu::CommandBufferId Context::GetCommandBufferID() const {
   return gpu::CommandBufferId();
 }
 
-int32_t Context::GetExtraCommandBufferData() const {
+int32_t Context::GetStreamId() const {
   return 0;
+}
+
+void Context::FlushOrderingBarrierOnStream(int32_t stream_id) {
+  // This is only relevant for out-of-process command buffers.
 }
 
 uint64_t Context::GenerateFenceSyncRelease() {
@@ -223,8 +229,13 @@ void Context::SignalSyncToken(const gpu::SyncToken& sync_token,
   NOTIMPLEMENTED();
 }
 
-bool Context::CanWaitUnverifiedSyncToken(const gpu::SyncToken* sync_token) {
+void Context::WaitSyncTokenHint(const gpu::SyncToken& sync_token) {}
+
+bool Context::CanWaitUnverifiedSyncToken(const gpu::SyncToken& sync_token) {
   return false;
+}
+
+void Context::AddLatencyInfo(const std::vector<ui::LatencyInfo>& latency_info) {
 }
 
 void Context::ApplyCurrentContext(gl::GLSurface* current_surface) {
@@ -244,31 +255,25 @@ void Context::ApplyContextReleased() {
 }
 
 bool Context::CreateService(gl::GLSurface* gl_surface) {
-  scoped_refptr<gpu::TransferBufferManager> transfer_buffer_manager(
-      new gpu::TransferBufferManager(nullptr));
-  transfer_buffer_manager->Initialize();
-
-  std::unique_ptr<gpu::CommandBufferService> command_buffer(
-      new gpu::CommandBufferService(transfer_buffer_manager.get()));
-
   scoped_refptr<gpu::gles2::FeatureInfo> feature_info(
       new gpu::gles2::FeatureInfo(gpu_driver_bug_workarounds_));
   scoped_refptr<gpu::gles2::ContextGroup> group(new gpu::gles2::ContextGroup(
-      gpu_preferences_, nullptr, nullptr,
-      new gpu::gles2::ShaderTranslatorCache(gpu_preferences_),
-      new gpu::gles2::FramebufferCompletenessCache, feature_info, true, nullptr,
-      nullptr, gpu::GpuFeatureInfo()));
+      gpu::GpuPreferences(), &mailbox_manager_, nullptr /* memory_tracker */,
+      &translator_cache_, &completeness_cache_, feature_info, true,
+      &image_manager_, nullptr /* image_factory */,
+      nullptr /* progress_reporter */, gpu::GpuFeatureInfo(),
+      &discardable_manager_));
+
+  transfer_buffer_manager_ =
+      base::MakeUnique<gpu::TransferBufferManager>(nullptr);
+  std::unique_ptr<gpu::CommandBufferDirect> command_buffer(
+      new gpu::CommandBufferDirect(transfer_buffer_manager_.get()));
 
   std::unique_ptr<gpu::gles2::GLES2Decoder> decoder(
-      gpu::gles2::GLES2Decoder::Create(group.get()));
-  if (!decoder.get())
-    return false;
+      gpu::gles2::GLES2Decoder::Create(command_buffer.get(),
+                                       command_buffer->service(), group.get()));
 
-  std::unique_ptr<gpu::CommandExecutor> command_executor(
-      new gpu::CommandExecutor(command_buffer.get(), decoder.get(),
-                               decoder.get()));
-
-  decoder->set_engine(command_executor.get());
+  command_buffer->set_handler(decoder.get());
 
   gl::GLContextAttribs context_attribs;
   context_attribs.gpu_preference = gl::PreferDiscreteGpu;
@@ -297,13 +302,6 @@ bool Context::CreateService(gl::GLSurface* gl_surface) {
     return false;
   }
 
-  command_buffer->SetPutOffsetChangeCallback(
-      base::Bind(&gpu::CommandExecutor::PutChanged,
-                 base::Unretained(command_executor.get())));
-  command_buffer->SetGetBufferChangeCallback(
-      base::Bind(&gpu::CommandExecutor::SetGetBuffer,
-                 base::Unretained(command_executor.get())));
-
   std::unique_ptr<gpu::gles2::GLES2CmdHelper> gles2_cmd_helper(
       new gpu::gles2::GLES2CmdHelper(command_buffer.get()));
   if (!gles2_cmd_helper->Initialize(kCommandBufferSize)) {
@@ -317,7 +315,6 @@ bool Context::CreateService(gl::GLSurface* gl_surface) {
   gles2_cmd_helper_.reset(gles2_cmd_helper.release());
   transfer_buffer_.reset(transfer_buffer.release());
   command_buffer_.reset(command_buffer.release());
-  command_executor_.reset(command_executor.release());
   decoder_.reset(decoder.release());
   gl_context_ = gl_context.get();
 
@@ -350,7 +347,6 @@ void Context::DestroyService() {
   gl_context_ = nullptr;
 
   transfer_buffer_.reset();
-  command_executor_.reset();
   if (decoder_)
     decoder_->Destroy(have_context);
   decoder_.reset();

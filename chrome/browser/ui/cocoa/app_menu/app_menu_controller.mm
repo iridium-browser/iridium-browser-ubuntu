@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "base/strings/sys_string_conversions.h"
@@ -29,6 +30,7 @@
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
 #import "chrome/browser/ui/cocoa/l10n_util.h"
+#import "chrome/browser/ui/cocoa/toolbar/app_toolbar_button.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
 #include "chrome/browser/ui/toolbar/recent_tabs_sub_menu_model.h"
@@ -36,7 +38,6 @@
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_observer.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/zoom/zoom_event_manager.h"
-#include "content/public/browser/user_metrics.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/gfx/geometry/size.h"
@@ -364,7 +365,7 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
       viewWithTag:IDC_ZOOM_PLUS] image]
         setAccessibilityDescription:l10n_util::GetNSString(
               IDS_TEXT_BIGGER_MAC)];
-  content::RecordAction(UserMetricsAction("ShowAppMenu"));
+  base::RecordAction(UserMetricsAction("ShowAppMenu"));
 
   NSImage* icon = [self appMenuModel]->browser()->window()->IsFullscreen()
                       ? [NSImage imageNamed:NSImageNameExitFullScreenTemplate]
@@ -372,6 +373,13 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
   [[buttonViewController_ zoomFullScreen] setImage:icon];
 
   menuOpenTime_ = base::TimeTicks::Now();
+
+  BrowserWindowController* bwc = [BrowserWindowController
+      browserWindowControllerForWindow:browser_->window()->GetNativeWindow()];
+
+  AppToolbarButton* appMenuButton =
+      static_cast<AppToolbarButton*>([[bwc toolbarController] appMenuButton]);
+  [appMenuButton animateIfPossible];
 }
 
 - (void)menuDidClose:(NSMenu*)menu {

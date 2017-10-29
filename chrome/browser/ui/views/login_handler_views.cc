@@ -7,6 +7,7 @@
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/login_view.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/password_manager/core/browser/password_manager.h"
@@ -33,6 +34,7 @@ class LoginHandlerViews : public LoginHandler, public views::DialogDelegate {
       : LoginHandler(auth_info, request),
         login_view_(NULL),
         dialog_(NULL) {
+    chrome::RecordDialogCreation(chrome::DialogIdentifier::LOGIN_HANDLER);
   }
 
   // LoginModelObserver:
@@ -44,6 +46,8 @@ class LoginHandlerViews : public LoginHandler, public views::DialogDelegate {
   void OnLoginModelDestroying() override {}
 
   // views::DialogDelegate:
+  bool ShouldShowCloseButton() const override { return false; }
+
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override {
     if (button == ui::DIALOG_BUTTON_OK)
       return l10n_util::GetStringUTF16(IDS_LOGIN_DIALOG_OK_BUTTON_LABEL);

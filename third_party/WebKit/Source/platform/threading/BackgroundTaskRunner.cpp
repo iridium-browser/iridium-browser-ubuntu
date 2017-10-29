@@ -10,13 +10,12 @@
 
 namespace blink {
 
-void BackgroundTaskRunner::postOnBackgroundThread(
+void BackgroundTaskRunner::PostOnBackgroundThread(
     const WebTraceLocation& location,
     std::unique_ptr<CrossThreadClosure> closure) {
-  base::PostTaskWithTraits(
-      location, base::TaskTraits().WithShutdownBehavior(
-                    base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
-      convertToBaseCallback(std::move(closure)));
+  base::PostTaskWithTraits(location,
+                           {base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+                           ConvertToBaseCallback(std::move(closure)));
 }
 
 }  // namespace blink

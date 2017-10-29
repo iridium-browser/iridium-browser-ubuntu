@@ -15,25 +15,25 @@ found in the LICENSE file.
 'use strict';
 
 tr.b.unittest.testSuite(function() {
-  var Model = tr.Model;
-  var EventSet = tr.model.EventSet;
-  var newSliceEx = tr.c.TestUtils.newSliceEx;
+  const Model = tr.Model;
+  const EventSet = tr.model.EventSet;
+  const newSliceEx = tr.c.TestUtils.newSliceEx;
 
   test('basicNoCpu', function() {
-    var model = new Model();
-    var thread = model.getOrCreateProcess(1).getOrCreateThread(2);
-    var tsg = thread.sliceGroup;
+    const model = new Model();
+    const thread = model.getOrCreateProcess(1).getOrCreateThread(2);
+    const tsg = thread.sliceGroup;
     tsg.pushSlice(newSliceEx({title: 'a', start: 0, duration: 0.5}));
     tsg.pushSlice(newSliceEx({title: 'b', start: 1, duration: 0.5}));
     tsg.pushSlice(newSliceEx({title: 'b', start: 2, duration: 0.5}));
     tsg.createSubSlices();
 
-    var threadTrack = {};
+    const threadTrack = {};
     threadTrack.thread = thread;
 
-    var selection = new EventSet(tsg.slices);
+    const selection = new EventSet(tsg.slices);
 
-    var viewEl = document.createElement('tr-ui-a-multi-event-summary-table');
+    const viewEl = document.createElement('tr-ui-a-multi-event-summary-table');
     viewEl.configure({
       showTotals: true,
       eventsHaveDuration: true,
@@ -43,9 +43,9 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('basicWithCpu', function() {
-    var model = new Model();
-    var thread = model.getOrCreateProcess(1).getOrCreateThread(2);
-    var tsg = thread.sliceGroup;
+    const model = new Model();
+    const thread = model.getOrCreateProcess(1).getOrCreateThread(2);
+    const tsg = thread.sliceGroup;
     tsg.pushSlice(newSliceEx({title: 'a', start: 0, end: 3,
       cpuStart: 0, cpuEnd: 3}));
     tsg.pushSlice(newSliceEx({title: 'b', start: 1, end: 2,
@@ -54,31 +54,42 @@ tr.b.unittest.testSuite(function() {
       cpuStart: 3, cpuEnd: 3.75}));
     tsg.createSubSlices();
 
-    var threadTrack = {};
+    const threadTrack = {};
     threadTrack.thread = thread;
 
-    var selection = new EventSet(tsg.slices);
+    const selection = new EventSet(tsg.slices);
 
-    var viewEl = document.createElement('tr-ui-a-multi-event-summary-table');
+    const viewEl = document.createElement('tr-ui-a-multi-event-summary-table');
     viewEl.configure({
       showTotals: true,
       eventsHaveDuration: true,
       eventsByTitle: selection.getEventsOrganizedByTitle()
     });
     this.addHTMLOutput(viewEl);
+
+    const totals = tr.ui.b.findDeepElementMatchingPredicate(
+        viewEl, e => e.tagName === 'TFOOT');
+    const scalars = tr.ui.b.findDeepElementsMatchingPredicate(
+        totals, e => e.tagName === 'TR-V-UI-SCALAR-SPAN');
+    assert.strictEqual(scalars[0].value, 5);
+    assert.closeTo(scalars[1].value, 4.5, 1e-6);
+    assert.strictEqual(scalars[2].value, 4);
+    assert.closeTo(scalars[3].value, 3.75, 1e-6);
+    assert.closeTo(scalars[4].value, 1.5, 1e-6);
+    assert.strictEqual('3', totals.children[0].children[6].textContent);
   });
 
   test('noSelfTimeNoSubRows', function() {
-    var model = new Model();
+    const model = new Model();
 
-    var fe1 = new tr.model.FlowEvent('cat', 1234, 'title', 7, 10, {});
-    var fe2 = new tr.model.FlowEvent('cat', 1234, 'title', 8, 20, {});
+    const fe1 = new tr.model.FlowEvent('cat', 1234, 'title', 7, 10, {});
+    const fe2 = new tr.model.FlowEvent('cat', 1234, 'title', 8, 20, {});
 
     // Make reading some properties an explosion, as a way to ensure that they
     // aren't read. Note that 'duration' is read since it is used by the
     // EventSet to get the range.
-    var failProp = {
-      get: function() {
+    const failProp = {
+      get() {
         throw new Error('Should not be called');
       }
     };
@@ -91,9 +102,9 @@ tr.b.unittest.testSuite(function() {
     model.flowEvents.push(fe1);
     model.flowEvents.push(fe2);
 
-    var selection = new EventSet([fe1, fe2]);
+    const selection = new EventSet([fe1, fe2]);
 
-    var viewEl = document.createElement('tr-ui-a-multi-event-summary-table');
+    const viewEl = document.createElement('tr-ui-a-multi-event-summary-table');
     viewEl.configure({
       showTotals: true,
       eventsHaveDuration: false,

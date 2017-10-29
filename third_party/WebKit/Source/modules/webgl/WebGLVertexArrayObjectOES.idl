@@ -23,7 +23,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://www.khronos.org/registry/webgl/extensions/OES_vertex_array_object/
+
 [
-    NoInterfaceObject,
+    NoInterfaceObject
 ] interface WebGLVertexArrayObjectOES {
 };

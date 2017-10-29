@@ -101,11 +101,6 @@ void WebView::SetResizeBackgroundColor(SkColor resize_background_color) {
   holder_->set_resize_background_color(resize_background_color);
 }
 
-void WebView::SetPreferredSize(const gfx::Size& preferred_size) {
-  preferred_size_ = preferred_size;
-  PreferredSizeChanged();
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // WebView, View overrides:
 
@@ -228,13 +223,6 @@ gfx::NativeViewAccessible WebView::GetNativeViewAccessible() {
   return View::GetNativeViewAccessible();
 }
 
-gfx::Size WebView::GetPreferredSize() const {
-  if (preferred_size_ == gfx::Size())
-    return View::GetPreferredSize();
-  else
-    return preferred_size_;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // WebView, content::RenderProcessHostObserver implementation:
 
@@ -271,8 +259,7 @@ void WebView::RenderViewDeleted(content::RenderViewHost* render_view_host) {
 
 void WebView::RenderViewHostChanged(content::RenderViewHost* old_host,
                                     content::RenderViewHost* new_host) {
-  FocusManager* const focus_manager = GetFocusManager();
-  if (focus_manager && focus_manager->GetFocusedView() == this)
+  if (HasFocus())
     OnFocus();
   NotifyAccessibilityWebContentsChanged();
 }
@@ -309,10 +296,9 @@ void WebView::DidDetachInterstitialPage() {
   NotifyAccessibilityWebContentsChanged();
 }
 
-void WebView::OnWebContentsFocused() {
-  FocusManager* focus_manager = GetFocusManager();
-  if (focus_manager)
-    focus_manager->SetFocusedView(this);
+void WebView::OnWebContentsFocused(
+    content::RenderWidgetHost* render_widget_host) {
+  RequestFocus();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -333,11 +319,9 @@ void WebView::AttachWebContents() {
 
   holder_->Attach(view_to_attach);
 
-  // The view will not be focused automatically when it is attached, so we need
-  // to pass on focus to it if the FocusManager thinks the view is focused. Note
-  // that not every Widget has a focus manager.
-  FocusManager* const focus_manager = GetFocusManager();
-  if (focus_manager && focus_manager->GetFocusedView() == this)
+  // The WebContents is not focused automatically when attached, so we need to
+  // tell the WebContents it has focus if this has focus.
+  if (HasFocus())
     OnFocus();
 
   OnWebContentsAttached();

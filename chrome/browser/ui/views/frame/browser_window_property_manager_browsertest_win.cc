@@ -2,20 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <string>
-
+#include <objbase.h>
 #include <shlobj.h>  // Must be before propkey.
 #include <propkey.h>
 #include <shellapi.h>
 #include <stddef.h>
 
+#include <string>
+
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_propvariant.h"
-#include "base/win/windows_version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/profiles/profile.h"
@@ -61,8 +62,7 @@ void ValidateBrowserWindowProperties(
   HWND hwnd = views::HWNDForNativeWindow(browser->window()->GetNativeWindow());
 
   base::win::ScopedComPtr<IPropertyStore> pps;
-  HRESULT result = SHGetPropertyStoreForWindow(hwnd, IID_IPropertyStore,
-                                               pps.ReceiveVoid());
+  HRESULT result = SHGetPropertyStoreForWindow(hwnd, IID_PPV_ARGS(&pps));
   EXPECT_TRUE(SUCCEEDED(result));
 
   base::win::ScopedPropVariant prop_var;
@@ -105,8 +105,7 @@ void ValidateHostedAppWindowProperties(const Browser* browser,
   HWND hwnd = views::HWNDForNativeWindow(browser->window()->GetNativeWindow());
 
   base::win::ScopedComPtr<IPropertyStore> pps;
-  HRESULT result =
-      SHGetPropertyStoreForWindow(hwnd, IID_IPropertyStore, pps.ReceiveVoid());
+  HRESULT result = SHGetPropertyStoreForWindow(hwnd, IID_PPV_ARGS(&pps));
   EXPECT_TRUE(SUCCEEDED(result));
 
   base::win::ScopedPropVariant prop_var;
@@ -183,10 +182,6 @@ class BrowserTestWithProfileShortcutManager : public InProcessBrowserTest {
 // http://crbug.com/396344
 IN_PROC_BROWSER_TEST_F(BrowserTestWithProfileShortcutManager,
                        DISABLED_WindowProperties) {
-  // This test checks HWND properties that are only available on Win7+.
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return;
-
   // Single profile case. The profile name should not be shown.
   WaitAndValidateBrowserWindowProperties(base::Bind(
       &ValidateBrowserWindowProperties, browser(), base::string16()));
@@ -230,10 +225,6 @@ IN_PROC_BROWSER_TEST_F(BrowserTestWithProfileShortcutManager,
 
 // http://crbug.com/396344
 IN_PROC_BROWSER_TEST_F(BrowserWindowPropertyManagerTest, DISABLED_HostedApp) {
-  // This test checks HWND properties that are only available on Win7+.
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return;
-
   // Load an app.
   const extensions::Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("app/"));
@@ -257,5 +248,6 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowPropertyManagerTest, DISABLED_HostedApp) {
   ASSERT_TRUE(app_browser != browser());
 
   WaitAndValidateBrowserWindowProperties(
-      base::Bind(&ValidateHostedAppWindowProperties, app_browser, extension));
+      base::Bind(&ValidateHostedAppWindowProperties, app_browser,
+                 base::RetainedRef(extension)));
 }

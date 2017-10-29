@@ -11,30 +11,33 @@
 
 namespace blink {
 
-PassRefPtr<PaintRecordPattern> PaintRecordPattern::create(
+PassRefPtr<PaintRecordPattern> PaintRecordPattern::Create(
     sk_sp<PaintRecord> record,
-    RepeatMode repeatMode) {
-  return adoptRef(new PaintRecordPattern(std::move(record), repeatMode));
+    const FloatRect& record_bounds,
+    RepeatMode repeat_mode) {
+  return AdoptRef(
+      new PaintRecordPattern(std::move(record), record_bounds, repeat_mode));
 }
 
 PaintRecordPattern::PaintRecordPattern(sk_sp<PaintRecord> record,
+                                       const FloatRect& record_bounds,
                                        RepeatMode mode)
-    : Pattern(mode), m_tileRecord(std::move(record)) {
+    : Pattern(mode),
+      tile_record_(std::move(record)),
+      tile_record_bounds_(record_bounds) {
   // All current clients use RepeatModeXY, so we only support this mode for now.
-  DCHECK(isRepeatXY());
+  DCHECK(IsRepeatXY());
 
   // FIXME: we don't have a good way to account for DL memory utilization.
 }
 
 PaintRecordPattern::~PaintRecordPattern() {}
 
-sk_sp<PaintShader> PaintRecordPattern::createShader(
-    const SkMatrix& localMatrix) {
-  SkRect tileBounds = m_tileRecord->cullRect();
-
-  return MakePaintShaderRecord(m_tileRecord, SkShader::kRepeat_TileMode,
-                               SkShader::kRepeat_TileMode, &localMatrix,
-                               &tileBounds);
+sk_sp<PaintShader> PaintRecordPattern::CreateShader(
+    const SkMatrix& local_matrix) {
+  return PaintShader::MakePaintRecord(
+      tile_record_, tile_record_bounds_, SkShader::kRepeat_TileMode,
+      SkShader::kRepeat_TileMode, &local_matrix);
 }
 
 }  // namespace blink

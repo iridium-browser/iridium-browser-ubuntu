@@ -11,8 +11,8 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 
 namespace content {
@@ -52,15 +52,17 @@ class DownloadTestFileActivityObserver::MockDownloadManagerDelegate
   }
 
  protected:
-  void PromptUserForDownloadPath(
-      content::DownloadItem* item,
-      const base::FilePath& suggested_path,
-      const FileSelectedCallback& callback) override {
+  void RequestConfirmation(content::DownloadItem* item,
+                           const base::FilePath& suggested_path,
+                           DownloadConfirmationReason reason,
+                           const ConfirmationCallback& callback) override {
     file_chooser_displayed_ = true;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(callback, (file_chooser_enabled_ ? suggested_path
-                                                    : base::FilePath())));
+        FROM_HERE, base::BindOnce(callback,
+                                  (file_chooser_enabled_
+                                       ? DownloadConfirmationResult::CONFIRMED
+                                       : DownloadConfirmationResult::CANCELED),
+                                  suggested_path));
   }
 
   void OpenDownload(content::DownloadItem* item) override {}
@@ -76,7 +78,7 @@ DownloadTestFileActivityObserver::DownloadTestFileActivityObserver(
   std::unique_ptr<MockDownloadManagerDelegate> mock_delegate(
       new MockDownloadManagerDelegate(profile));
   test_delegate_ = mock_delegate->GetWeakPtr();
-  DownloadServiceFactory::GetForBrowserContext(profile)
+  DownloadCoreServiceFactory::GetForBrowserContext(profile)
       ->SetDownloadManagerDelegateForTesting(std::move(mock_delegate));
 }
 

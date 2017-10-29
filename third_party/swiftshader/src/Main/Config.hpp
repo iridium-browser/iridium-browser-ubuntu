@@ -79,7 +79,7 @@ namespace sw
 
 	enum
 	{
-		OUTLINE_RESOLUTION = 4096,   // Maximum vertical resolution of the render target
+		OUTLINE_RESOLUTION = 8192,   // Maximum vertical resolution of the render target
 		MIPMAP_LEVELS = 14,
 		TEXTURE_IMAGE_UNITS = 16,
 		VERTEX_TEXTURE_IMAGE_UNITS = 16,
@@ -87,8 +87,8 @@ namespace sw
 		FRAGMENT_UNIFORM_VECTORS = 224,
 		VERTEX_UNIFORM_VECTORS = 256,
 		MAX_VERTEX_INPUTS = 16,
-		MAX_VERTEX_OUTPUTS = 12,
-		MAX_FRAGMENT_INPUTS = 10,
+		MAX_VERTEX_OUTPUTS = 22,
+		MAX_FRAGMENT_INPUTS = 20,
 		MAX_FRAGMENT_UNIFORM_BLOCKS = 12,
 		MAX_VERTEX_UNIFORM_BLOCKS = 12,
 		MAX_UNIFORM_BUFFER_BINDINGS = MAX_FRAGMENT_UNIFORM_BLOCKS + MAX_VERTEX_UNIFORM_BLOCKS,   // Limited to 127 by SourceParameter.bufferIndex in Shader.hpp

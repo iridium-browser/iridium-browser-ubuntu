@@ -8,6 +8,7 @@
 #include "net/cert/internal/parsed_certificate.h"
 #include "net/cert/internal/test_helpers.h"
 #include "net/cert/internal/trust_store.h"
+#include "net/cert/internal/verify_certificate_chain.h"
 #include "net/cert/pem_tokenizer.h"
 #include "net/der/input.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -18,20 +19,19 @@ template <typename TestDelegate>
 class VerifyCertificateChainTest : public ::testing::Test {
  public:
   void RunTest(const char* file_name) {
-    ParsedCertificateList chain;
-    scoped_refptr<TrustAnchor> trust_anchor;
-    der::GeneralizedTime time;
-    bool expected_result;
-    std::string expected_errors;
+    VerifyCertChainTest test;
 
     std::string path =
         std::string("net/data/verify_certificate_chain_unittest/") + file_name;
 
-    ReadVerifyCertChainTestFromFile(path, &chain, &trust_anchor, &time,
-                                    &expected_result, &expected_errors);
+    SCOPED_TRACE("Test file: " + path);
 
-    TestDelegate::Verify(chain, trust_anchor, time, expected_result,
-                         expected_errors, path);
+    if (!ReadVerifyCertChainTestFromFile(path, &test)) {
+      ADD_FAILURE() << "Couldn't load test case: " << path;
+      return;
+    }
+
+    TestDelegate::Verify(test, path);
   }
 };
 
@@ -43,226 +43,150 @@ class VerifyCertificateChainSingleRootTest
 
 TYPED_TEST_CASE_P(VerifyCertificateChainSingleRootTest);
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, TargetAndIntermediate) {
-  this->RunTest("target-and-intermediate.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, Simple) {
+  this->RunTest("target-and-intermediate/main.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             IntermediateLacksBasicConstraints) {
-  this->RunTest("intermediate-lacks-basic-constraints.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, BasicConstraintsCa) {
+  this->RunTest("intermediate-lacks-basic-constraints/main.test");
+  this->RunTest("intermediate-basic-constraints-ca-false/main.test");
+  this->RunTest("intermediate-basic-constraints-not-critical/main.test");
+  this->RunTest("root-lacks-basic-constraints/main.test");
+  this->RunTest("root-lacks-basic-constraints/ta-with-constraints.test");
+  this->RunTest("root-basic-constraints-ca-false/main.test");
+  this->RunTest("root-basic-constraints-ca-false/ta-with-constraints.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             IntermediateBasicConstraintsCaFalse) {
-  this->RunTest("intermediate-basic-constraints-ca-false.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, BasicConstraintsPathlen) {
+  this->RunTest("violates-basic-constraints-pathlen-0/main.test");
+  this->RunTest("basic-constraints-pathlen-0-self-issued/main.test");
+  this->RunTest("target-has-pathlen-but-not-ca/main.test");
+  this->RunTest("violates-pathlen-1-from-root/main.test");
+  this->RunTest("violates-pathlen-1-from-root/ta-with-constraints.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             IntermediateBasicConstraintsNotCritical) {
-  this->RunTest("intermediate-basic-constraints-not-critical.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, UnknownExtension) {
+  this->RunTest("intermediate-unknown-critical-extension/main.test");
+  this->RunTest("intermediate-unknown-non-critical-extension/main.test");
+  this->RunTest("target-unknown-critical-extension/main.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             IntermediateLacksSigningKeyUsage) {
-  this->RunTest("intermediate-lacks-signing-key-usage.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, Md5) {
+  this->RunTest("target-signed-with-md5/main.test");
+  this->RunTest("intermediate-signed-with-md5/main.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             IntermediateUnknownCriticalExtension) {
-  this->RunTest("intermediate-unknown-critical-extension.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, WrongSignature) {
+  this->RunTest("target-wrong-signature/main.test");
+  this->RunTest("incorrect-trust-anchor/main.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             IntermediateUnknownNonCriticalExtension) {
-  this->RunTest("intermediate-unknown-non-critical-extension.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             ViolatesBasicConstraintsPathlen0) {
-  this->RunTest("violates-basic-constraints-pathlen-0.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             BasicConstraintsPathlen0SelfIssued) {
-  this->RunTest("basic-constraints-pathlen-0-self-issued.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, TargetSignedWithMd5) {
-  this->RunTest("target-signed-with-md5.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, IntermediateSignedWithMd5) {
-  this->RunTest("intermediate-signed-with-md5.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, TargetWrongSignature) {
-  this->RunTest("target-wrong-signature.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, LastCertificateNotTrusted) {
+  this->RunTest("target-and-intermediate/distrusted-root.test");
+  this->RunTest("target-and-intermediate/unspecified-trust-root.test");
 }
 
 TYPED_TEST_P(VerifyCertificateChainSingleRootTest, TargetSignedBy512bitRsa) {
-  this->RunTest("target-signed-by-512bit-rsa.pem");
+  this->RunTest("target-signed-by-512bit-rsa/main.test");
 }
 
 TYPED_TEST_P(VerifyCertificateChainSingleRootTest, TargetSignedUsingEcdsa) {
-  this->RunTest("target-signed-using-ecdsa.pem");
+  this->RunTest("target-signed-using-ecdsa/main.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, ExpiredIntermediate) {
-  this->RunTest("expired-intermediate.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, ExpiredTarget) {
-  this->RunTest("expired-target.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, ExpiredTargetNotBefore) {
-  this->RunTest("expired-target-notBefore.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, ExpiredUnconstrainedRoot) {
-  this->RunTest("expired-unconstrained-root.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, ExpiredConstrainedRoot) {
-  this->RunTest("expired-constrained-root.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, Expired) {
+  this->RunTest("expired-target/not-before.test");
+  this->RunTest("expired-target/not-after.test");
+  this->RunTest("expired-intermediate/not-before.test");
+  this->RunTest("expired-intermediate/not-after.test");
+  this->RunTest("expired-root/not-before.test");
+  this->RunTest("expired-root/not-after.test");
+  this->RunTest("expired-root/not-after-ta-with-constraints.test");
 }
 
 TYPED_TEST_P(VerifyCertificateChainSingleRootTest, TargetNotEndEntity) {
-  this->RunTest("target-not-end-entity.pem");
+  this->RunTest("target-not-end-entity/main.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             TargetHasKeyCertSignButNotCa) {
-  this->RunTest("target-has-keycertsign-but-not-ca.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, KeyUsage) {
+  this->RunTest("intermediate-lacks-signing-key-usage/main.test");
+  this->RunTest("target-has-keycertsign-but-not-ca/main.test");
+
+  this->RunTest("target-serverauth-various-keyusages/rsa-decipherOnly.test");
+  this->RunTest(
+      "target-serverauth-various-keyusages/rsa-digitalSignature.test");
+  this->RunTest("target-serverauth-various-keyusages/rsa-keyAgreement.test");
+  this->RunTest("target-serverauth-various-keyusages/rsa-keyEncipherment.test");
+
+  this->RunTest("target-serverauth-various-keyusages/ec-decipherOnly.test");
+  this->RunTest("target-serverauth-various-keyusages/ec-digitalSignature.test");
+  this->RunTest("target-serverauth-various-keyusages/ec-keyAgreement.test");
+  this->RunTest("target-serverauth-various-keyusages/ec-keyEncipherment.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, TargetHasPathlenButNotCa) {
-  this->RunTest("target-has-pathlen-but-not-ca.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             TargetUnknownCriticalExtension) {
-  this->RunTest("target-unknown-critical-extension.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, ExtendedKeyUsage) {
+  this->RunTest("intermediate-eku-clientauth/any.test");
+  this->RunTest("intermediate-eku-clientauth/serverauth.test");
+  this->RunTest("intermediate-eku-clientauth/clientauth.test");
+  this->RunTest("intermediate-eku-any-and-clientauth/any.test");
+  this->RunTest("intermediate-eku-any-and-clientauth/serverauth.test");
+  this->RunTest("intermediate-eku-any-and-clientauth/clientauth.test");
+  this->RunTest("target-eku-clientauth/any.test");
+  this->RunTest("target-eku-clientauth/serverauth.test");
+  this->RunTest("target-eku-clientauth/clientauth.test");
+  this->RunTest("target-eku-none/any.test");
+  this->RunTest("target-eku-none/serverauth.test");
+  this->RunTest("target-eku-none/clientauth.test");
+  this->RunTest("root-eku-clientauth/serverauth.test");
+  this->RunTest("root-eku-clientauth/serverauth-ta-with-constraints.test");
 }
 
 TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
              IssuerAndSubjectNotByteForByteEqual) {
-  this->RunTest("issuer-and-subject-not-byte-for-byte-equal.pem");
+  this->RunTest("issuer-and-subject-not-byte-for-byte-equal/target.test");
+  this->RunTest("issuer-and-subject-not-byte-for-byte-equal/anchor.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             IssuerAndSubjectNotByteForByteEqualAnchor) {
-  this->RunTest("issuer-and-subject-not-byte-for-byte-equal-anchor.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, TrustAnchorNotSelfSigned) {
+  this->RunTest("non-self-signed-root/main.test");
+  this->RunTest("non-self-signed-root/ta-with-constraints.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             ViolatesPathlen1UnconstrainedRoot) {
-  this->RunTest("violates-pathlen-1-unconstrained-root.pem");
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, KeyRollover) {
+  this->RunTest("key-rollover/oldchain.test");
+  this->RunTest("key-rollover/rolloverchain.test");
+  this->RunTest("key-rollover/longrolloverchain.test");
+  this->RunTest("key-rollover/newchain.test");
 }
 
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             ViolatesPathlen1ConstrainedRoot) {
-  this->RunTest("violates-pathlen-1-constrained-root.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, NonSelfSignedRoot) {
-  this->RunTest("non-self-signed-root.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, KeyRolloverOldChain) {
-  this->RunTest("key-rollover-oldchain.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, KeyRolloverRolloverChain) {
-  this->RunTest("key-rollover-rolloverchain.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             KeyRolloverLongRolloverChain) {
-  this->RunTest("key-rollover-longrolloverchain.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, KeyRolloverNewChain) {
-  this->RunTest("key-rollover-newchain.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest, IncorrectTrustAnchor) {
-  this->RunTest("incorrect-trust-anchor.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             UnconstrainedRootLacksBasicConstraints) {
-  this->RunTest("unconstrained-root-lacks-basic-constraints.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             ConstrainedRootLacksBasicConstraints) {
-  this->RunTest("constrained-root-lacks-basic-constraints.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             UnconstrainedRootBasicConstraintsCaFalse) {
-  this->RunTest("unconstrained-root-basic-constraints-ca-false.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             ConstrainedRootBasicConstraintsCaFalse) {
-  this->RunTest("constrained-root-basic-constraints-ca-false.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             UnconstrainedNonSelfSignedRoot) {
-  this->RunTest("unconstrained-non-self-signed-root.pem");
-}
-
-TYPED_TEST_P(VerifyCertificateChainSingleRootTest,
-             ConstrainedNonSelfSignedRoot) {
-  this->RunTest("constrained-non-self-signed-root.pem");
+// Test coverage of policies comes primarily from the PKITS tests. The
+// tests here only cover aspects not already tested by PKITS.
+TYPED_TEST_P(VerifyCertificateChainSingleRootTest, Policies) {
+  this->RunTest("unknown-critical-policy-qualifier/main.test");
+  this->RunTest("unknown-non-critical-policy-qualifier/main.test");
 }
 
 // TODO(eroman): Add test that invalid validity dates where the day or month
 // ordinal not in range, like "March 39, 2016" are rejected.
 
 REGISTER_TYPED_TEST_CASE_P(VerifyCertificateChainSingleRootTest,
-                           TargetAndIntermediate,
-                           IntermediateLacksBasicConstraints,
-                           IntermediateBasicConstraintsCaFalse,
-                           IntermediateBasicConstraintsNotCritical,
-                           IntermediateLacksSigningKeyUsage,
-                           IntermediateUnknownCriticalExtension,
-                           IntermediateUnknownNonCriticalExtension,
-                           ViolatesBasicConstraintsPathlen0,
-                           BasicConstraintsPathlen0SelfIssued,
-                           TargetSignedWithMd5,
-                           IntermediateSignedWithMd5,
-                           TargetWrongSignature,
+                           Simple,
+                           BasicConstraintsCa,
+                           BasicConstraintsPathlen,
+                           UnknownExtension,
+                           Md5,
+                           WrongSignature,
+                           LastCertificateNotTrusted,
                            TargetSignedBy512bitRsa,
                            TargetSignedUsingEcdsa,
-                           ExpiredIntermediate,
-                           ExpiredTarget,
-                           ExpiredTargetNotBefore,
-                           ExpiredUnconstrainedRoot,
-                           ExpiredConstrainedRoot,
+                           Expired,
                            TargetNotEndEntity,
-                           TargetHasKeyCertSignButNotCa,
-                           TargetHasPathlenButNotCa,
-                           TargetUnknownCriticalExtension,
+                           KeyUsage,
+                           ExtendedKeyUsage,
                            IssuerAndSubjectNotByteForByteEqual,
-                           IssuerAndSubjectNotByteForByteEqualAnchor,
-                           ViolatesPathlen1UnconstrainedRoot,
-                           ViolatesPathlen1ConstrainedRoot,
-                           NonSelfSignedRoot,
-                           KeyRolloverOldChain,
-                           KeyRolloverRolloverChain,
-                           KeyRolloverLongRolloverChain,
-                           KeyRolloverNewChain,
-                           IncorrectTrustAnchor,
-                           UnconstrainedRootLacksBasicConstraints,
-                           ConstrainedRootLacksBasicConstraints,
-                           UnconstrainedRootBasicConstraintsCaFalse,
-                           ConstrainedRootBasicConstraintsCaFalse,
-                           UnconstrainedNonSelfSignedRoot,
-                           ConstrainedNonSelfSignedRoot);
+                           TrustAnchorNotSelfSigned,
+                           KeyRollover,
+                           Policies);
 
 }  // namespace net
 

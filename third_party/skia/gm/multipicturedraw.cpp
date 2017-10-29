@@ -6,9 +6,11 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 
 #include "SkColorFilter.h"
 #include "SkMultiPictureDraw.h"
+#include "SkPath.h"
 #include "SkPictureRecorder.h"
 #include "SkSurface.h"
 
@@ -470,7 +472,7 @@ namespace skiagm {
             }
         }
 
-        virtual ~MultiPictureDraw() {
+        ~MultiPictureDraw() override {
             for (int i = 0; i < kNumPictures; ++i) {
                 SkSafeUnref(fPictures[i]);
             }

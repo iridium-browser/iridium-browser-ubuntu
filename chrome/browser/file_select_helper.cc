@@ -201,8 +201,8 @@ void FileSelectHelper::FileSelectedWithExtraInfo(
 
 #if defined(OS_MACOSX)
   base::PostTaskWithTraits(
-      FROM_HERE, base::TaskTraits().MayBlock().WithShutdownBehavior(
-                     base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
+      FROM_HERE,
+      {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&FileSelectHelper::ProcessSelectedFilesMac, this, files));
 #else
   NotifyRenderFrameHostAndEnd(files);
@@ -229,8 +229,8 @@ void FileSelectHelper::MultiFilesSelectedWithExtraInfo(
   }
 #if defined(OS_MACOSX)
   base::PostTaskWithTraits(
-      FROM_HERE, base::TaskTraits().MayBlock().WithShutdownBehavior(
-                     base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
+      FROM_HERE,
+      {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&FileSelectHelper::ProcessSelectedFilesMac, this, files));
 #else
   NotifyRenderFrameHostAndEnd(files);
@@ -339,9 +339,8 @@ void FileSelectHelper::NotifyRenderFrameHostAndEndAfterConversion(
 }
 
 void FileSelectHelper::DeleteTemporaryFiles() {
-  BrowserThread::PostTask(BrowserThread::FILE,
-                          FROM_HERE,
-                          base::Bind(&DeleteFiles, temporary_files_));
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                          base::BindOnce(&DeleteFiles, temporary_files_));
   temporary_files_.clear();
 }
 
@@ -353,6 +352,14 @@ void FileSelectHelper::CleanUp() {
     // is no longer any reason to keep this instance around.
     Release();
   }
+}
+
+bool FileSelectHelper::AbortIfWebContentsDestroyed() {
+  if (render_frame_host_ && web_contents_)
+    return false;
+
+  RunFileChooserEnd();
+  return true;
 }
 
 std::unique_ptr<ui::SelectFileDialog::FileTypeInfo>
@@ -471,8 +478,8 @@ void FileSelectHelper::RunFileChooser(
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&FileSelectHelper::GetFileTypesOnFileThread, this,
-                 base::Passed(&params)));
+      base::BindOnce(&FileSelectHelper::GetFileTypesOnFileThread, this,
+                     base::Passed(&params)));
 
   // Because this class returns notifications to the RenderViewHost, it is
   // difficult for callers to know how long to keep a reference to this
@@ -491,19 +498,24 @@ void FileSelectHelper::GetFileTypesOnFileThread(
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&FileSelectHelper::GetSanitizedFilenameOnUIThread, this,
-                 base::Passed(&params)));
+      base::BindOnce(&FileSelectHelper::GetSanitizedFilenameOnUIThread, this,
+                     base::Passed(&params)));
 }
 
 void FileSelectHelper::GetSanitizedFilenameOnUIThread(
     std::unique_ptr<FileChooserParams> params) {
+  if (AbortIfWebContentsDestroyed())
+    return;
+
   base::FilePath default_file_path = profile_->last_selected_directory().Append(
       GetSanitizedFileName(params->default_file_name));
 #if defined(FULL_SAFE_BROWSING)
-  CheckDownloadRequestWithSafeBrowsing(default_file_path, std::move(params));
-#else
-  RunFileChooserOnUIThread(default_file_path, std::move(params));
+  if (params->mode == FileChooserParams::Save) {
+    CheckDownloadRequestWithSafeBrowsing(default_file_path, std::move(params));
+    return;
+  }
 #endif
+  RunFileChooserOnUIThread(default_file_path, std::move(params));
 }
 
 #if defined(FULL_SAFE_BROWSING)
@@ -558,13 +570,8 @@ void FileSelectHelper::RunFileChooserOnUIThread(
     const base::FilePath& default_file_path,
     std::unique_ptr<FileChooserParams> params) {
   DCHECK(params);
-  if (!render_frame_host_ || !web_contents_ || !IsValidProfile(profile_) ||
-      !web_contents_->GetNativeView()) {
-    // If the renderer was destroyed before we started, just cancel the
-    // operation.
-    RunFileChooserEnd();
+  if (AbortIfWebContentsDestroyed())
     return;
-  }
 
   select_file_dialog_ = ui::SelectFileDialog::Create(
       this, new ChromeSelectFilePolicy(web_contents_));
@@ -616,9 +623,9 @@ void FileSelectHelper::RunFileChooserOnUIThread(
   select_file_types_.reset();
 }
 
-// This method is called when we receive the last callback from the file
-// chooser dialog. Perform any cleanup and release the reference we added
-// in RunFileChooser().
+// This method is called when we receive the last callback from the file chooser
+// dialog or if the renderer was destroyed. Perform any cleanup and release the
+// reference we added in RunFileChooser().
 void FileSelectHelper::RunFileChooserEnd() {
   // If there are temporary files, then this instance needs to stick around
   // until web_contents_ is destroyed, so that this instance can delete the

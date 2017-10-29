@@ -282,8 +282,6 @@ interface CSSRule
     attribute PAGE_RULE
     attribute STYLE_RULE
     attribute SUPPORTS_RULE
-    attribute WEBKIT_KEYFRAMES_RULE
-    attribute WEBKIT_KEYFRAME_RULE
     getter cssText
     getter parentRule
     getter parentStyleSheet
@@ -615,14 +613,12 @@ interface DeviceMotionEvent : Event
     getter interval
     getter rotationRate
     method constructor
-    method initDeviceMotionEvent
 interface DeviceOrientationEvent : Event
     getter absolute
     getter alpha
     getter beta
     getter gamma
     method constructor
-    method initDeviceOrientationEvent
 interface Document : Node
     getter URL
     getter activeElement
@@ -959,6 +955,7 @@ interface Element : Node
     method createShadowRoot
     method getAttribute
     method getAttributeNS
+    method getAttributeNames
     method getAttributeNode
     method getAttributeNodeNS
     method getBoundingClientRect
@@ -2541,7 +2538,6 @@ interface Headers
     method entries
     method forEach
     method get
-    method getAll
     method has
     method keys
     method set
@@ -3352,6 +3348,7 @@ interface Request
     method blob
     method clone
     method constructor
+    method formData
     method json
     method text
 interface Response
@@ -3369,6 +3366,7 @@ interface Response
     method blob
     method clone
     method constructor
+    method formData
     method json
     method text
 interface SVGAElement : SVGGraphicsElement
@@ -3455,7 +3453,6 @@ interface SVGAnimationElement : SVGElement
     getter onend
     getter onrepeat
     getter requiredExtensions
-    getter requiredFeatures
     getter systemLanguage
     getter targetElement
     method beginElement
@@ -3937,7 +3934,6 @@ interface SVGGraphicsElement : SVGElement
     getter farthestViewportElement
     getter nearestViewportElement
     getter requiredExtensions
-    getter requiredFeatures
     getter systemLanguage
     getter transform
     method constructor
@@ -4024,7 +4020,6 @@ interface SVGMaskElement : SVGElement
     getter maskContentUnits
     getter maskUnits
     getter requiredExtensions
-    getter requiredFeatures
     getter systemLanguage
     getter width
     getter x
@@ -4083,7 +4078,6 @@ interface SVGPatternElement : SVGElement
     getter patternUnits
     getter preserveAspectRatio
     getter requiredExtensions
-    getter requiredFeatures
     getter systemLanguage
     getter viewBox
     getter width
@@ -5172,7 +5166,8 @@ interface WebKitAnimationEvent : Event
     getter animationName
     getter elapsedTime
     method constructor
-interface WebKitCSSMatrix
+interface WebKitCSSMatrix : DOMMatrixReadOnly
+    attribute @@toStringTag
     getter a
     getter b
     getter c
@@ -5196,16 +5191,18 @@ interface WebKitCSSMatrix
     getter m43
     getter m44
     method constructor
-    method inverse
-    method multiply
-    method rotate
-    method rotateAxisAngle
-    method scale
+    method invertSelf
+    method multiplySelf
+    method preMultiplySelf
+    method rotateAxisAngleSelf
+    method rotateFromVectorSelf
+    method rotateSelf
+    method scale3dSelf
+    method scaleSelf
     method setMatrixValue
-    method skewX
-    method skewY
-    method toString
-    method translate
+    method skewXSelf
+    method skewYSelf
+    method translateSelf
     setter a
     setter b
     setter c

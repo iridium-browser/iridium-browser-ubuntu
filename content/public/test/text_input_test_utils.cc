@@ -6,6 +6,8 @@
 
 #include <unordered_set>
 
+#include "content/browser/frame_host/frame_tree.h"
+#include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
@@ -71,6 +73,10 @@ class TextInputManagerTester::InternalObserver
     on_text_selection_changed_callback_ = callback;
   }
 
+  const gfx::Range* last_composition_range() const {
+    return last_composition_range_.get();
+  }
+
   RenderWidgetHostView* GetUpdatedView() const { return updated_view_; }
 
   bool text_input_state_changed() const { return text_input_state_changed_; }
@@ -101,6 +107,10 @@ class TextInputManagerTester::InternalObserver
       TextInputManager* text_input_manager,
       RenderWidgetHostViewBase* updated_view) override {
     updated_view_ = updated_view;
+    const gfx::Range* range =
+        text_input_manager_->GetCompositionRangeForTesting();
+    DCHECK(range);
+    last_composition_range_.reset(new gfx::Range(range->start(), range->end()));
     if (!on_ime_composition_range_changed_callback_.is_null())
       on_ime_composition_range_changed_callback_.Run();
   }
@@ -113,12 +123,17 @@ class TextInputManagerTester::InternalObserver
   }
 
   // WebContentsObserver implementation.
-  void WebContentsDestroyed() override { text_input_manager_ = nullptr; }
+  void WebContentsDestroyed() override {
+    DCHECK(text_input_manager_);
+    text_input_manager_->RemoveObserver(this);
+    text_input_manager_ = nullptr;
+  }
 
  private:
   TextInputManager* text_input_manager_;
   RenderWidgetHostViewBase* updated_view_;
   bool text_input_state_changed_;
+  std::unique_ptr<gfx::Range> last_composition_range_;
   base::Closure update_text_input_state_callback_;
   base::Closure on_selection_bounds_changed_callback_;
   base::Closure on_ime_composition_range_changed_callback_;
@@ -190,22 +205,11 @@ class InputMethodObserverAura : public TestInputMethodObserver,
     return ui::TEXT_INPUT_TYPE_NONE;
   }
 
-  void SetOnTextInputTypeChangedCallback(
-      const base::Closure& callback) override {
-    on_text_input_type_changed_callback_ = callback;
-  }
-
   void SetOnShowImeIfNeededCallback(const base::Closure& callback) override {
     on_show_ime_if_needed_callback_ = callback;
   }
 
  private:
-  // ui::InputMethodObserver implementations.
-  void OnTextInputTypeChanged(const ui::TextInputClient* client) override {
-    text_input_client_ = client;
-    on_text_input_type_changed_callback_.Run();
-  }
-
   void OnFocus() override {}
   void OnBlur() override {}
   void OnCaretBoundsChanged(const ui::TextInputClient* client) override {}
@@ -216,7 +220,6 @@ class InputMethodObserverAura : public TestInputMethodObserver,
 
   ui::InputMethod* input_method_;
   const ui::TextInputClient* text_input_client_;
-  base::Closure on_text_input_type_changed_callback_;
   base::Closure on_show_ime_if_needed_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMethodObserverAura);
@@ -252,8 +255,8 @@ bool RequestCompositionInfoFromActiveWidget(WebContents* web_contents) {
   if (!manager || !manager->GetActiveWidget())
     return false;
 
-  manager->GetActiveWidget()->Send(new InputMsg_RequestCompositionUpdate(
-      manager->GetActiveWidget()->GetRoutingID(), true, false));
+  manager->GetActiveWidget()->RequestCompositionUpdates(
+      true /* immediate_request */, false /* monitor_updates */);
   return true;
 }
 
@@ -268,15 +271,38 @@ void SendImeCommitTextToWidget(
     const std::vector<ui::CompositionUnderline>& underlines,
     const gfx::Range& replacement_range,
     int relative_cursor_pos) {
-  std::vector<blink::WebCompositionUnderline> web_composition_underlines;
-  for (auto underline : underlines) {
-    web_composition_underlines.emplace_back(
-        static_cast<int>(underline.start_offset),
-        static_cast<int>(underline.end_offset), underline.color,
-        underline.thick, underline.background_color);
-  }
   RenderWidgetHostImpl::From(rwh)->ImeCommitText(
-      text, web_composition_underlines, replacement_range, relative_cursor_pos);
+      text, underlines, replacement_range, relative_cursor_pos);
+}
+
+void SendImeSetCompositionTextToWidget(
+    RenderWidgetHost* rwh,
+    const base::string16& text,
+    const std::vector<ui::CompositionUnderline>& underlines,
+    const gfx::Range& replacement_range,
+    int selection_start,
+    int selection_end) {
+  RenderWidgetHostImpl::From(rwh)->ImeSetComposition(
+      text, underlines, replacement_range, selection_start, selection_end);
+}
+
+bool DestroyRenderWidgetHost(int32_t process_id,
+                             int32_t local_root_routing_id) {
+  RenderFrameHostImpl* rfh =
+      RenderFrameHostImpl::FromID(process_id, local_root_routing_id);
+  if (!rfh)
+    return false;
+
+  while (!rfh->is_local_root())
+    rfh = rfh->GetParent();
+
+  FrameTreeNode* ftn = rfh->frame_tree_node();
+  if (ftn->IsMainFrame()) {
+    WebContents::FromRenderFrameHost(rfh)->Close();
+  } else {
+    ftn->frame_tree()->RemoveFrame(ftn);
+  }
+  return true;
 }
 
 size_t GetRegisteredViewsCountFromTextInputManager(WebContents* web_contents) {
@@ -353,6 +379,13 @@ bool TextInputManagerTester::GetCurrentTextSelectionLength(size_t* length) {
     return false;
 
   *length = observer_->text_input_manager()->GetTextSelection()->text().size();
+  return true;
+}
+
+bool TextInputManagerTester::GetLastCompositionRangeLength(uint32_t* length) {
+  if (!observer_->last_composition_range())
+    return false;
+  *length = observer_->last_composition_range()->length();
   return true;
 }
 

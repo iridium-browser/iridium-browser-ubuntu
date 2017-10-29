@@ -9,21 +9,19 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/json/json_reader.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/grit/theme_resources.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
 
-using content::BrowserThread;
 using extensions::Extension;
 
 // Maps scale factors (enum values) to file path.
@@ -36,17 +34,14 @@ typedef std::map<int, TestScaleFactorToFileMap> TestFilePathMap;
 
 class BrowserThemePackTest : public ::testing::Test {
  public:
-  BrowserThemePackTest()
-      : message_loop(),
-        fake_ui_thread(BrowserThread::UI, &message_loop),
-        fake_file_thread(BrowserThread::FILE, &message_loop) {
+  BrowserThemePackTest() : theme_pack_(new BrowserThemePack()) {
     std::vector<ui::ScaleFactor> scale_factors;
     scale_factors.push_back(ui::SCALE_FACTOR_100P);
     scale_factors.push_back(ui::SCALE_FACTOR_200P);
     scoped_set_supported_scale_factors_.reset(
-      new ui::test::ScopedSetSupportedScaleFactors(scale_factors));
-    theme_pack_ = new BrowserThemePack();
+        new ui::test::ScopedSetSupportedScaleFactors(scale_factors));
   }
+  ~BrowserThemePackTest() override {}
 
   // Transformation for link underline colors.
   SkColor BuildThirdOpacity(SkColor color_link) {
@@ -147,33 +142,28 @@ class BrowserThemePackTest : public ::testing::Test {
   }
 
   bool LoadRawBitmapsTo(const TestFilePathMap& out_file_paths) {
-    return theme_pack_->LoadRawBitmapsTo(out_file_paths,
-                                         &theme_pack_->images_on_ui_thread_);
+    return theme_pack_->LoadRawBitmapsTo(out_file_paths, &theme_pack_->images_);
   }
 
   // This function returns void in order to be able use ASSERT_...
   // The BrowserThemePack is returned in |pack|.
   void BuildFromUnpackedExtension(const base::FilePath& extension_path,
-                                  scoped_refptr<BrowserThemePack>& pack) {
-    base::FilePath manifest_path =
-        extension_path.AppendASCII("manifest.json");
+                                  scoped_refptr<BrowserThemePack>* pack) {
+    base::FilePath manifest_path = extension_path.AppendASCII("manifest.json");
     std::string error;
     JSONFileValueDeserializer deserializer(manifest_path);
     std::unique_ptr<base::DictionaryValue> valid_value =
         base::DictionaryValue::From(deserializer.Deserialize(NULL, &error));
     EXPECT_EQ("", error);
     ASSERT_TRUE(valid_value.get());
-    scoped_refptr<Extension> extension(
-        Extension::Create(
-            extension_path,
-            extensions::Manifest::INVALID_LOCATION,
-            *valid_value,
-            Extension::REQUIRE_KEY,
-            &error));
+    scoped_refptr<Extension> extension(Extension::Create(
+        extension_path, extensions::Manifest::INVALID_LOCATION, *valid_value,
+        Extension::REQUIRE_KEY, &error));
     ASSERT_TRUE(extension.get());
     ASSERT_EQ("", error);
-    pack = BrowserThemePack::BuildFromExtension(extension.get());
-    ASSERT_TRUE(pack.get());
+    *pack = new BrowserThemePack;
+    BrowserThemePack::BuildFromExtension(extension.get(), *pack);
+    ASSERT_TRUE((*pack)->is_valid());
   }
 
   base::FilePath GetStarGazingPath() {
@@ -287,25 +277,21 @@ class BrowserThemePackTest : public ::testing::Test {
     ASSERT_FALSE(rep1.is_null());
     EXPECT_EQ(80, rep1.sk_bitmap().width());
     EXPECT_EQ(80, rep1.sk_bitmap().height());
-    rep1.sk_bitmap().lockPixels();
     EXPECT_EQ(SkColorSetRGB(255, 255, 255), rep1.sk_bitmap().getColor(4, 4));
     EXPECT_EQ(SkColorSetRGB(255, 255, 255), rep1.sk_bitmap().getColor(8, 8));
     EXPECT_EQ(SkColorSetRGB(0, 241, 237), rep1.sk_bitmap().getColor(16, 16));
     EXPECT_EQ(SkColorSetRGB(255, 255, 255), rep1.sk_bitmap().getColor(24, 24));
     EXPECT_EQ(SkColorSetRGB(0, 241, 237), rep1.sk_bitmap().getColor(32, 32));
-    rep1.sk_bitmap().unlockPixels();
     // Scale 200%.
     const gfx::ImageSkiaRep& rep2 = image_skia->GetRepresentation(2.0f);
     ASSERT_FALSE(rep2.is_null());
     EXPECT_EQ(160, rep2.sk_bitmap().width());
     EXPECT_EQ(160, rep2.sk_bitmap().height());
-    rep2.sk_bitmap().lockPixels();
     EXPECT_EQ(SkColorSetRGB(255, 255, 255), rep2.sk_bitmap().getColor(4, 4));
     EXPECT_EQ(SkColorSetRGB(223, 42, 0), rep2.sk_bitmap().getColor(8, 8));
     EXPECT_EQ(SkColorSetRGB(223, 42, 0), rep2.sk_bitmap().getColor(16, 16));
     EXPECT_EQ(SkColorSetRGB(223, 42, 0), rep2.sk_bitmap().getColor(24, 24));
     EXPECT_EQ(SkColorSetRGB(255, 255, 255), rep2.sk_bitmap().getColor(32, 32));
-    rep2.sk_bitmap().unlockPixels();
 
     // TODO(sschmitz): I plan to remove the following (to the end of the fct)
     // Reason: this test may be brittle. It depends on details of how we scale
@@ -327,7 +313,6 @@ class BrowserThemePackTest : public ::testing::Test {
     ASSERT_FALSE(rep3.is_null());
     EXPECT_EQ(80, rep3.sk_bitmap().width());
     EXPECT_EQ(80, rep3.sk_bitmap().height());
-    rep3.sk_bitmap().lockPixels();
     // We take samples of colors and locations along the diagonal whenever
     // the color changes. Note these colors are slightly different from
     // the input PNG file due to input processing.
@@ -343,13 +328,11 @@ class BrowserThemePackTest : public ::testing::Test {
       }
     }
     EXPECT_EQ(static_cast<size_t>(9), normal.size());
-    rep3.sk_bitmap().unlockPixels();
     // Scale 200%.
     const gfx::ImageSkiaRep& rep4 = image_skia->GetRepresentation(2.0f);
     ASSERT_FALSE(rep4.is_null());
     EXPECT_EQ(160, rep4.sk_bitmap().width());
     EXPECT_EQ(160, rep4.sk_bitmap().height());
-    rep4.sk_bitmap().lockPixels();
     // We expect the same colors and at locations scaled by 2
     // since this bitmap was scaled by 2.
     for (size_t i = 0; i < normal.size(); ++i) {
@@ -357,16 +340,14 @@ class BrowserThemePackTest : public ::testing::Test {
       SkColor color = normal[i].second;
       EXPECT_EQ(color, rep4.sk_bitmap().getColor(xy, xy));
     }
-    rep4.sk_bitmap().unlockPixels();
   }
 
-  base::MessageLoop message_loop;
-  content::TestBrowserThread fake_ui_thread;
-  content::TestBrowserThread fake_file_thread;
-
+ protected:
   typedef std::unique_ptr<ui::test::ScopedSetSupportedScaleFactors>
       ScopedSetSupportedScaleFactors;
   ScopedSetSupportedScaleFactors scoped_set_supported_scale_factors_;
+
+  content::TestBrowserThreadBundle thread_bundle_;
   scoped_refptr<BrowserThemePack> theme_pack_;
 };
 
@@ -584,7 +565,7 @@ TEST_F(BrowserThemePackTest, CanBuildAndReadPack) {
   {
     base::FilePath star_gazing_path = GetStarGazingPath();
     scoped_refptr<BrowserThemePack> pack;
-    BuildFromUnpackedExtension(star_gazing_path, pack);
+    BuildFromUnpackedExtension(star_gazing_path, &pack);
     ASSERT_TRUE(pack->WriteToDisk(file));
     VerifyStarGazing(pack.get());
   }
@@ -608,7 +589,7 @@ TEST_F(BrowserThemePackTest, HiDpiThemeTest) {
   {
     base::FilePath hidpi_path = GetHiDpiThemePath();
     scoped_refptr<BrowserThemePack> pack;
-    BuildFromUnpackedExtension(hidpi_path, pack);
+    BuildFromUnpackedExtension(hidpi_path, &pack);
     ASSERT_TRUE(pack->WriteToDisk(file));
     VerifyHiDpiTheme(pack.get());
   }

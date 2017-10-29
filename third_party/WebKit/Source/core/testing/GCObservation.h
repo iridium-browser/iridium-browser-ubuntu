@@ -31,8 +31,8 @@
 #ifndef GCObservation_h
 #define GCObservation_h
 
-#include "bindings/core/v8/ScopedPersistent.h"
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScopedPersistent.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "v8/include/v8.h"
 
@@ -43,24 +43,24 @@ class GCObservation final : public GarbageCollectedFinalized<GCObservation>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static GCObservation* create(v8::Local<v8::Value> observedValue) {
-    return new GCObservation(observedValue);
+  static GCObservation* Create(v8::Local<v8::Value> observed_value) {
+    return new GCObservation(observed_value);
   }
 
   // Caution: It is only feasible to determine whether an object was
   // "near death"; it may have been kept alive through a weak
   // handle. After reaching near-death, having been collected is the
   // common case.
-  bool wasCollected() const { return m_collected; }
-  void setWasCollected();
+  bool wasCollected() const { return collected_; }
+  void SetWasCollected();
 
   DEFINE_INLINE_TRACE() {}
 
  private:
   explicit GCObservation(v8::Local<v8::Value>);
 
-  ScopedPersistent<v8::Value> m_observed;
-  bool m_collected;
+  ScopedPersistent<v8::Value> observed_;
+  bool collected_;
 };
 
 }  // namespace blink

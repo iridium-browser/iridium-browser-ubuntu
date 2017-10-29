@@ -103,7 +103,6 @@ if (is_android) {
 
 grit("generated_resources") {
   source = "generated_resources.grd"
-  use_qualified_include = true
   defines = chrome_grit_defines
   output_dir = "$root_gen_dir/chrome"
   outputs = [
@@ -182,7 +181,6 @@ if (is_android) {
 
 grit("google_chrome_strings") {
   source = "google_chrome_strings.grd"
-  use_qualified_include = true
   defines = chrome_grit_defines
   output_dir = "$root_gen_dir/chrome"
   outputs = [
@@ -246,7 +244,6 @@ grit("google_chrome_strings") {
 
 grit("chromium_strings") {
   source = "chromium_strings.grd"
-  use_qualified_include = true
   defines = chrome_grit_defines
   output_dir = "$root_gen_dir/chrome"
   outputs = [
@@ -319,6 +316,7 @@ static_library("test_support") {
 
   deps = [
     "//base",
+    "//chrome/app:shutdown_signal_handlers",
     "//chrome/browser",
     "//chrome/browser/policy:path_parser",
     "//chrome/child",
@@ -331,10 +329,13 @@ static_library("test_support") {
     "//components/startup_metric_utils/browser:lib",
     "//content/public/app:both",
     "//content/public/common",
+    "//content/public/common:service_names",
     "//pdf",
     "//ppapi/features",
     "//printing/features",
+    "//services/service_manager/embedder",
     "//ui/base",
+    "//v8:v8_headers",
   ]
 
   if (is_mac) {
@@ -364,13 +365,37 @@ static_library("test_support") {
       "//components/nacl/renderer/plugin:nacl_trusted_plugin",
     ]
   }
+
+  if (enable_package_mash_services) {
+    deps += [
+      "//chrome/app/mash:chrome_mash_catalog",
+      "//chrome/app/mash:chrome_test_catalog",
+      "//chrome/app/mash:embedded_services",
+      "//mash/common",
+      "//mash/quick_launch/public/interfaces:constants",
+      "//services/ui/public/interfaces:constants",
+    ]
+
+    if (is_chromeos) {
+      deps += [ "//chrome/app/mash:chrome_mus_catalog" ]
+    }
+  }
 }
 
 chrome_packaged_services = [
   ":chrome_manifest",
-  "//chrome/browser:preferences_manifest",
-  "//services/image_decoder:manifest",
+  "//services/preferences:local_state_manifest",
 ]
+
+if (enable_basic_printing || enable_print_preview) {
+  chrome_packaged_services +=
+      [ "//components/printing/service:pdf_compositor_manifest" ]
+}
+
+if (is_chromeos) {
+  chrome_packaged_services +=
+      [ "//chrome/browser:preferences_forwarder_manifest" ]
+}
 
 service_manifest("chrome_manifest") {
   source = "chrome_manifest.json"
@@ -387,12 +412,23 @@ service_manifest("chrome_content_packaged_services_manifest_overlay") {
       "//chrome/browser/chrome_content_packaged_services_manifest_overlay.json"
   packaged_services = chrome_packaged_services
   if (is_chromeos) {
-    packaged_services += [ "//ash/mus:manifest" ]
+    packaged_services += [
+      "//ash/mus:manifest",
+      "//services/ui:manifest",
+    ]
   }
 }
 
 service_manifest("chrome_content_browser_manifest_overlay") {
   source = "//chrome/browser/chrome_content_browser_manifest_overlay.json"
+  packaged_services = [
+    "//services/identity:manifest",
+    "//services/preferences:manifest",
+  ]
+}
+
+service_manifest("chrome_test_browser_overlay") {
+  source = "//chrome/browser/chrome_test_browser_overlay.json"
 }
 
 service_manifest("chrome_content_gpu_manifest_overlay") {
@@ -448,6 +484,11 @@ if (use_aura) {
     overlays = [ ":chrome_content_browser_manifest_overlay" ]
   }
 
+  service_manifest("chrome_test_browser_manifest") {
+    source_manifest = ":chrome_content_browser_manifest"
+    overlays = [ ":chrome_test_browser_overlay" ]
+  }
+
   service_manifest("chrome_content_gpu_manifest") {
     source_manifest = "//content/public/app:gpu_manifest"
     overlays = [ ":chrome_content_gpu_manifest_overlay" ]
@@ -490,16 +531,22 @@ if (use_aura) {
     ":chrome_content_utility_manifest",
   ]
 
-  if (enable_package_mash_services) {
-    catalog("catalog_for_mash") {
-      embedded_services =
-          chrome_embedded_services +
-          [ ":chrome_content_packaged_services_manifest_for_mash" ]
-    }
-  }
-
   catalog("catalog") {
     embedded_services = chrome_embedded_services +
                         [ ":chrome_content_packaged_services_manifest" ]
+  }
+
+  catalog("catalog_for_mash") {
+    embedded_services =
+        chrome_embedded_services +
+        [ ":chrome_content_packaged_services_manifest_for_mash" ]
+  }
+
+  catalog("catalog_for_tests_mash") {
+    embedded_services = chrome_embedded_services + [
+                          ":chrome_content_packaged_services_manifest_for_mash",
+                          ":chrome_test_browser_manifest",
+                        ]
+    embedded_services -= [ ":chrome_content_browser_manifest" ]
   }
 }

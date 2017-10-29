@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "components/vector_icons/vector_icons.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/canvas.h"
@@ -13,11 +14,8 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/paint_throbber.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/native_theme/common_theme.h"
 #include "ui/native_theme/native_theme.h"
-#include "ui/resources/grit/ui_resources.h"
-#include "ui/views/resources/grit/views_resources.h"
 
 namespace views {
 
@@ -62,7 +60,7 @@ void Throbber::SetChecked(bool checked) {
   SchedulePaint();
 }
 
-gfx::Size Throbber::GetPreferredSize() const {
+gfx::Size Throbber::CalculatePreferredSize() const {
   return gfx::Size(kDefaultDiameter, kDefaultDiameter);
 }
 
@@ -74,7 +72,7 @@ void Throbber::OnPaint(gfx::Canvas* canvas) {
     if (checked_) {
       canvas->Translate(gfx::Vector2d((width() - kCheckmarkDipSize) / 2,
                                       (height() - kCheckmarkDipSize) / 2));
-      gfx::PaintVectorIcon(canvas, gfx::VectorIconId::CHECK_CIRCLE,
+      gfx::PaintVectorIcon(canvas, vector_icons::kCheckCircleIcon,
                            kCheckmarkDipSize, color);
     }
     return;

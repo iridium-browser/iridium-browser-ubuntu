@@ -5,13 +5,15 @@
 #include "chrome/browser/installable/installable_manager.h"
 
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chrome/browser/banners/app_banner_manager_desktop.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/browser_test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 using IconPurpose = content::Manifest::Icon::IconPurpose;
@@ -58,10 +60,29 @@ InstallableParams GetPrimaryIconAndBadgeIconParams() {
 
 }  // anonymous namespace
 
+// Used only for testing pages with no service workers. This class will dispatch
+// a RunLoop::QuitClosure when it begins waiting for a service worker to be
+// registered.
+class LazyWorkerInstallableManager : public InstallableManager {
+ public:
+  LazyWorkerInstallableManager(content::WebContents* web_contents,
+                               base::Closure quit_closure)
+      : InstallableManager(web_contents), quit_closure_(quit_closure) {}
+  ~LazyWorkerInstallableManager() override {}
+
+ protected:
+  void OnWaitingForServiceWorker() override {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, quit_closure_);
+  };
+
+ private:
+  base::Closure quit_closure_;
+};
+
 class CallbackTester {
  public:
   explicit CallbackTester(base::Closure quit_closure)
-      : quit_closure_(quit_closure) { }
+      : quit_closure_(quit_closure) {}
 
   void OnDidFinishInstallableCheck(const InstallableData& data) {
     error_code_ = data.error_code;
@@ -155,8 +176,11 @@ class NestedCallbackTester {
 class InstallableManagerBrowserTest : public InProcessBrowserTest {
  public:
   void SetUpOnMainThread() override {
-    InProcessBrowserTest::SetUpOnMainThread();
     ASSERT_TRUE(embedded_test_server()->Start());
+
+    // Make sure app banners are disabled in the browser so they do not
+    // interfere with the test.
+    banners::AppBannerManagerDesktop::DisableTriggeringForTesting();
   }
 
   // Returns a test server URL to a page controlled by a service worker with
@@ -183,12 +207,6 @@ class InstallableManagerBrowserTest : public InProcessBrowserTest {
                                 base::Unretained(tester)));
   }
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    // Make sure app banners are disabled in the browser so they do not
-    // interfere with the test.
-    command_line->AppendSwitch(switches::kDisableAddToShelf);
-  }
-
   InstallableManager* GetManager() {
     content::WebContents* web_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
@@ -200,6 +218,7 @@ class InstallableManagerBrowserTest : public InProcessBrowserTest {
     return manager;
   }
 
+  InstallabilityCheckStatus GetStatus() { return GetManager()->page_status_; }
 };
 
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
@@ -213,7 +232,8 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
   EXPECT_FALSE(manager->is_installable());
 
   EXPECT_EQ(NO_ERROR_DETECTED, manager->manifest_error());
-  EXPECT_EQ(NO_ERROR_DETECTED, manager->installable_error());
+  EXPECT_EQ(NO_ERROR_DETECTED, manager->valid_manifest_error());
+  EXPECT_EQ(NO_ERROR_DETECTED, manager->worker_error());
   EXPECT_TRUE(manager->tasks_.empty());
 }
 
@@ -233,10 +253,12 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckNoManifest) {
   EXPECT_TRUE(tester->manifest_url().is_empty());
   EXPECT_TRUE(tester->primary_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->primary_icon());
+  EXPECT_FALSE(tester->is_installable());
   EXPECT_TRUE(tester->badge_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->badge_icon());
-  EXPECT_FALSE(tester->is_installable());
   EXPECT_EQ(NO_MANIFEST, tester->error_code());
+  EXPECT_EQ(GetStatus(),
+            InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifest404) {
@@ -245,8 +267,8 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifest404) {
       new CallbackTester(run_loop.QuitClosure()));
 
   NavigateAndRunInstallableManager(tester.get(), GetManifestParams(),
-      GetURLOfPageWithServiceWorkerAndManifest(
-          "/banners/manifest_missing.json"));
+                                   GetURLOfPageWithServiceWorkerAndManifest(
+                                       "/banners/manifest_missing.json"));
   run_loop.Run();
 
   // The installable manager should return a manifest URL even if it 404s.
@@ -256,10 +278,12 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifest404) {
   EXPECT_FALSE(tester->manifest_url().is_empty());
   EXPECT_TRUE(tester->primary_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->primary_icon());
+  EXPECT_FALSE(tester->is_installable());
   EXPECT_TRUE(tester->badge_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->badge_icon());
-  EXPECT_FALSE(tester->is_installable());
   EXPECT_EQ(MANIFEST_EMPTY, tester->error_code());
+  EXPECT_EQ(GetStatus(),
+            InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifestOnly) {
@@ -277,10 +301,11 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifestOnly) {
 
   EXPECT_TRUE(tester->primary_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->primary_icon());
+  EXPECT_FALSE(tester->is_installable());
   EXPECT_TRUE(tester->badge_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->badge_icon());
-  EXPECT_FALSE(tester->is_installable());
   EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+  EXPECT_EQ(GetStatus(), InstallabilityCheckStatus::NOT_COMPLETED);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
@@ -301,10 +326,11 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
   EXPECT_TRUE(tester->primary_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->primary_icon());
+  EXPECT_FALSE(tester->is_installable());
   EXPECT_TRUE(tester->badge_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->badge_icon());
-  EXPECT_FALSE(tester->is_installable());
   EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+  EXPECT_EQ(GetStatus(), InstallabilityCheckStatus::NOT_COMPLETED);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
@@ -326,10 +352,11 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
     EXPECT_TRUE(tester->primary_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->primary_icon());
+    EXPECT_FALSE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
-    EXPECT_FALSE(tester->is_installable());
     EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+    EXPECT_EQ(GetStatus(), InstallabilityCheckStatus::NOT_COMPLETED);
   }
 
   // Ask for a primary icon (but don't navigate). This should fail with
@@ -348,10 +375,12 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
     EXPECT_TRUE(tester->primary_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->primary_icon());
+    EXPECT_FALSE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
-    EXPECT_FALSE(tester->is_installable());
     EXPECT_EQ(NO_ACCEPTABLE_ICON, tester->error_code());
+    EXPECT_EQ(GetStatus(),
+              InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
   }
 
   // Ask for everything except badge icon. This should fail with
@@ -371,22 +400,22 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
     EXPECT_TRUE(tester->primary_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->primary_icon());
+    EXPECT_FALSE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
-    EXPECT_FALSE(tester->is_installable());
     EXPECT_EQ(NO_ACCEPTABLE_ICON, tester->error_code());
+    EXPECT_EQ(GetStatus(),
+              InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
   }
 
-  // Ask for a different size primary icon. This should fail with
-  // START_URL_NOT_VALID since we won't have a cached icon error.
+  // Do not ask for primary icon. This should fail with START_URL_NOT_VALID.
   {
     base::RunLoop run_loop;
     std::unique_ptr<CallbackTester> tester(
         new CallbackTester(run_loop.QuitClosure()));
 
     InstallableParams params = GetWebAppParams();
-    params.ideal_primary_icon_size_in_px = 96;
-    params.minimum_primary_icon_size_in_px = 96;
+    params.fetch_valid_primary_icon = false;
     RunInstallableManager(tester.get(), params);
     run_loop.Run();
 
@@ -400,6 +429,8 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     EXPECT_EQ(nullptr, tester->badge_icon());
     EXPECT_FALSE(tester->is_installable());
     EXPECT_EQ(START_URL_NOT_VALID, tester->error_code());
+    EXPECT_EQ(GetStatus(),
+              InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
   }
 }
 
@@ -419,10 +450,11 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifestAndIcon) {
 
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
+    EXPECT_FALSE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
-    EXPECT_FALSE(tester->is_installable());
     EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+    EXPECT_EQ(GetStatus(), InstallabilityCheckStatus::NOT_COMPLETED);
   }
 
   // Add to homescreen checks for manifest + primary icon + badge icon.
@@ -439,10 +471,11 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifestAndIcon) {
 
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
+    EXPECT_FALSE(tester->is_installable());
     EXPECT_FALSE(tester->badge_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->badge_icon());
-    EXPECT_FALSE(tester->is_installable());
     EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+    EXPECT_EQ(GetStatus(), InstallabilityCheckStatus::NOT_COMPLETED);
   }
 
   // Request an oversized badge icon. This should fetch only the manifest and
@@ -463,10 +496,37 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifestAndIcon) {
 
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
+    EXPECT_FALSE(tester->is_installable());
+    EXPECT_TRUE(tester->badge_icon_url().is_empty());
+    EXPECT_EQ(nullptr, tester->badge_icon());
+    EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+    EXPECT_EQ(GetStatus(), InstallabilityCheckStatus::NOT_COMPLETED);
+  }
+
+  // Navigate to a page with a bad badge icon. This should now fail with
+  // NO_ICON_AVAILABLE, but still have the manifest and primary icon.
+  {
+    base::RunLoop run_loop;
+    std::unique_ptr<CallbackTester> tester(
+        new CallbackTester(run_loop.QuitClosure()));
+
+    NavigateAndRunInstallableManager(tester.get(),
+                                     GetPrimaryIconAndBadgeIconParams(),
+                                     GetURLOfPageWithServiceWorkerAndManifest(
+                                         "/banners/manifest_bad_badge.json"));
+    run_loop.Run();
+
+    EXPECT_FALSE(tester->manifest().IsEmpty());
+    EXPECT_FALSE(tester->manifest_url().is_empty());
+
+    EXPECT_FALSE(tester->primary_icon_url().is_empty());
+    EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
     EXPECT_FALSE(tester->is_installable());
-    EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+    EXPECT_EQ(NO_ICON_AVAILABLE, tester->error_code());
+    EXPECT_EQ(GetStatus(),
+              InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
   }
 }
 
@@ -483,12 +543,14 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckWebapp) {
 
     EXPECT_FALSE(tester->manifest().IsEmpty());
     EXPECT_FALSE(tester->manifest_url().is_empty());
-    EXPECT_TRUE(tester->is_installable());
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
+    EXPECT_TRUE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
     EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+    EXPECT_EQ(GetStatus(),
+              InstallabilityCheckStatus::COMPLETE_PROGRESSIVE_WEB_APP);
 
     // Verify that the returned state matches manager internal state.
     InstallableManager* manager = GetManager();
@@ -500,7 +562,8 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckWebapp) {
     EXPECT_FALSE((manager->icon_url(kPrimaryIconParams).is_empty()));
     EXPECT_NE(nullptr, (manager->icon(kPrimaryIconParams)));
     EXPECT_EQ(NO_ERROR_DETECTED, manager->manifest_error());
-    EXPECT_EQ(NO_ERROR_DETECTED, manager->installable_error());
+    EXPECT_EQ(NO_ERROR_DETECTED, manager->valid_manifest_error());
+    EXPECT_EQ(NO_ERROR_DETECTED, manager->worker_error());
     EXPECT_EQ(NO_ERROR_DETECTED, (manager->icon_error(kPrimaryIconParams)));
     EXPECT_TRUE(manager->tasks_.empty());
   }
@@ -517,12 +580,14 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckWebapp) {
 
     EXPECT_FALSE(tester->manifest().IsEmpty());
     EXPECT_FALSE(tester->manifest_url().is_empty());
-    EXPECT_TRUE(tester->is_installable());
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
+    EXPECT_TRUE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
     EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+    EXPECT_EQ(GetStatus(),
+              InstallabilityCheckStatus::COMPLETE_PROGRESSIVE_WEB_APP);
 
     // Verify that the returned state matches manager internal state.
     InstallableManager* manager = GetManager();
@@ -534,7 +599,8 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckWebapp) {
     EXPECT_FALSE((manager->icon_url(kPrimaryIconParams).is_empty()));
     EXPECT_NE(nullptr, (manager->icon(kPrimaryIconParams)));
     EXPECT_EQ(NO_ERROR_DETECTED, manager->manifest_error());
-    EXPECT_EQ(NO_ERROR_DETECTED, manager->installable_error());
+    EXPECT_EQ(NO_ERROR_DETECTED, manager->valid_manifest_error());
+    EXPECT_EQ(NO_ERROR_DETECTED, manager->worker_error());
     EXPECT_EQ(NO_ERROR_DETECTED, (manager->icon_error(kPrimaryIconParams)));
     EXPECT_TRUE(manager->tasks_.empty());
   }
@@ -549,7 +615,8 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckWebapp) {
     EXPECT_FALSE(manager->is_installable());
     EXPECT_TRUE(manager->icons_.empty());
     EXPECT_EQ(NO_ERROR_DETECTED, manager->manifest_error());
-    EXPECT_EQ(NO_ERROR_DETECTED, manager->installable_error());
+    EXPECT_EQ(NO_ERROR_DETECTED, manager->valid_manifest_error());
+    EXPECT_EQ(NO_ERROR_DETECTED, manager->worker_error());
     EXPECT_TRUE(manager->tasks_.empty());
   }
 }
@@ -569,10 +636,12 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckWebappInIframe) {
   EXPECT_TRUE(tester->manifest_url().is_empty());
   EXPECT_TRUE(tester->primary_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->primary_icon());
+  EXPECT_FALSE(tester->is_installable());
   EXPECT_TRUE(tester->badge_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->badge_icon());
-  EXPECT_FALSE(tester->is_installable());
   EXPECT_EQ(NO_MANIFEST, tester->error_code());
+  EXPECT_EQ(GetStatus(),
+            InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
@@ -593,31 +662,254 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
     EXPECT_TRUE(tester->primary_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->primary_icon());
+    EXPECT_FALSE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
-    EXPECT_FALSE(tester->is_installable());
     EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+    EXPECT_EQ(GetStatus(), InstallabilityCheckStatus::NOT_COMPLETED);
   }
 
-  // Fetch the full criteria should fail.
+  // Fetching the full criteria should fail if we don't wait for the worker.
   {
     base::RunLoop run_loop;
     std::unique_ptr<CallbackTester> tester(
         new CallbackTester(run_loop.QuitClosure()));
 
-    RunInstallableManager(tester.get(), GetWebAppParams());
+    InstallableParams params = GetWebAppParams();
+    params.wait_for_worker = false;
+    RunInstallableManager(tester.get(), params);
     run_loop.Run();
 
     EXPECT_FALSE(tester->manifest().IsEmpty());
     EXPECT_FALSE(tester->manifest_url().is_empty());
 
-    EXPECT_TRUE(tester->primary_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->primary_icon());
+    EXPECT_FALSE(tester->primary_icon_url().is_empty());
+    EXPECT_NE(nullptr, tester->primary_icon());
+    EXPECT_FALSE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
+    EXPECT_EQ(NO_MATCHING_SERVICE_WORKER, tester->error_code());
+    EXPECT_EQ(GetStatus(),
+              InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
+  }
+}
+
+IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
+                       CheckLazyServiceWorkerPassesWhenWaiting) {
+  base::RunLoop tester_run_loop, sw_run_loop;
+  std::unique_ptr<CallbackTester> tester(
+      new CallbackTester(tester_run_loop.QuitClosure()));
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  auto manager = base::MakeUnique<LazyWorkerInstallableManager>(
+      web_contents, sw_run_loop.QuitClosure());
+
+  {
+    // Load a URL with no service worker.
+    GURL test_url = embedded_test_server()->GetURL(
+        "/banners/manifest_no_service_worker.html");
+    ui_test_utils::NavigateToURL(browser(), test_url);
+
+    // Kick off fetching the data. This should block on waiting for a worker.
+    manager->GetData(GetWebAppParams(),
+                     base::Bind(&CallbackTester::OnDidFinishInstallableCheck,
+                                base::Unretained(tester.get())));
+    sw_run_loop.Run();
+  }
+
+  // We should now be waiting for the service worker.
+  EXPECT_TRUE(tester->manifest().IsEmpty());
+  EXPECT_FALSE(manager->manifest().IsEmpty());
+  EXPECT_FALSE(manager->manifest_url().is_empty());
+  EXPECT_FALSE(manager->is_installable());
+  EXPECT_EQ(1u, manager->icons_.size());
+  EXPECT_FALSE((manager->icon_url(kPrimaryIconParams).is_empty()));
+  EXPECT_NE(nullptr, (manager->icon(kPrimaryIconParams)));
+  EXPECT_EQ(NO_ERROR_DETECTED, manager->manifest_error());
+  EXPECT_EQ(NO_ERROR_DETECTED, manager->valid_manifest_error());
+  EXPECT_EQ(NO_ERROR_DETECTED, manager->worker_error());
+  EXPECT_EQ(NO_ERROR_DETECTED, (manager->icon_error(kPrimaryIconParams)));
+  EXPECT_TRUE(manager->tasks_.empty());
+  EXPECT_FALSE(manager->paused_tasks_.empty());
+
+  {
+    // Fetching just the manifest and icons should not hang while the other call
+    // is waiting for a worker.
+    base::RunLoop run_loop;
+    std::unique_ptr<CallbackTester> nested_tester(
+        new CallbackTester(run_loop.QuitClosure()));
+    manager->GetData(GetPrimaryIconParams(),
+                     base::Bind(&CallbackTester::OnDidFinishInstallableCheck,
+                                base::Unretained(nested_tester.get())));
+    run_loop.Run();
+
+    EXPECT_FALSE(nested_tester->manifest().IsEmpty());
+    EXPECT_FALSE(nested_tester->manifest_url().is_empty());
+    EXPECT_FALSE(nested_tester->primary_icon_url().is_empty());
+    EXPECT_NE(nullptr, nested_tester->primary_icon());
+    EXPECT_FALSE(nested_tester->is_installable());
+    EXPECT_TRUE(nested_tester->badge_icon_url().is_empty());
+    EXPECT_EQ(nullptr, nested_tester->badge_icon());
+    EXPECT_EQ(NO_ERROR_DETECTED, nested_tester->error_code());
+  }
+
+  // Load the service worker.
+  EXPECT_TRUE(content::ExecuteScript(
+      web_contents, "navigator.serviceWorker.register('service_worker.js');"));
+  tester_run_loop.Run();
+
+  // We should have passed now.
+  EXPECT_FALSE(tester->manifest().IsEmpty());
+  EXPECT_FALSE(tester->manifest_url().is_empty());
+  EXPECT_FALSE(tester->primary_icon_url().is_empty());
+  EXPECT_NE(nullptr, tester->primary_icon());
+  EXPECT_TRUE(tester->is_installable());
+  EXPECT_TRUE(tester->badge_icon_url().is_empty());
+  EXPECT_EQ(nullptr, tester->badge_icon());
+  EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+  EXPECT_EQ(manager->page_status_,
+            InstallabilityCheckStatus::COMPLETE_PROGRESSIVE_WEB_APP);
+
+  // Verify internal state.
+  EXPECT_FALSE(manager->manifest().IsEmpty());
+  EXPECT_FALSE(manager->manifest_url().is_empty());
+  EXPECT_TRUE(manager->is_installable());
+  EXPECT_EQ(1u, manager->icons_.size());
+  EXPECT_FALSE((manager->icon_url(kPrimaryIconParams).is_empty()));
+  EXPECT_NE(nullptr, (manager->icon(kPrimaryIconParams)));
+  EXPECT_EQ(NO_ERROR_DETECTED, manager->manifest_error());
+  EXPECT_EQ(NO_ERROR_DETECTED, manager->valid_manifest_error());
+  EXPECT_EQ(NO_ERROR_DETECTED, manager->worker_error());
+  EXPECT_EQ(NO_ERROR_DETECTED, (manager->icon_error(kPrimaryIconParams)));
+  EXPECT_TRUE(manager->tasks_.empty());
+  EXPECT_TRUE(manager->paused_tasks_.empty());
+}
+
+IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
+                       CheckLazyServiceWorkerNoFetchHandlerFails) {
+  base::RunLoop tester_run_loop, sw_run_loop;
+  std::unique_ptr<CallbackTester> tester(
+      new CallbackTester(tester_run_loop.QuitClosure()));
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  auto manager = base::MakeUnique<LazyWorkerInstallableManager>(
+      web_contents, sw_run_loop.QuitClosure());
+
+  // Load a URL with no service worker.
+  GURL test_url = embedded_test_server()->GetURL(
+      "/banners/manifest_no_service_worker.html");
+  ui_test_utils::NavigateToURL(browser(), test_url);
+
+  // Kick off fetching the data. This should block on waiting for a worker.
+  manager->GetData(GetWebAppParams(),
+                   base::Bind(&CallbackTester::OnDidFinishInstallableCheck,
+                              base::Unretained(tester.get())));
+  sw_run_loop.Run();
+
+  // We should now be waiting for the service worker.
+  EXPECT_TRUE(manager->tasks_.empty());
+  EXPECT_FALSE(manager->paused_tasks_.empty());
+
+  // Load the service worker with no fetch handler.
+  EXPECT_TRUE(content::ExecuteScript(web_contents,
+                                     "navigator.serviceWorker.register('"
+                                     "service_worker_no_fetch_handler.js');"));
+  tester_run_loop.Run();
+
+  // We should fail the check.
+  EXPECT_FALSE(tester->manifest().IsEmpty());
+  EXPECT_FALSE(tester->manifest_url().is_empty());
+  EXPECT_FALSE(tester->primary_icon_url().is_empty());
+  EXPECT_NE(nullptr, tester->primary_icon());
+  EXPECT_FALSE(tester->is_installable());
+  EXPECT_TRUE(tester->badge_icon_url().is_empty());
+  EXPECT_EQ(nullptr, tester->badge_icon());
+  EXPECT_EQ(NOT_OFFLINE_CAPABLE, tester->error_code());
+  EXPECT_EQ(manager->page_status_,
+            InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
+}
+
+IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
+                       CheckServiceWorkerErrorIsNotCached) {
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  base::RunLoop sw_run_loop;
+  auto manager = base::MakeUnique<LazyWorkerInstallableManager>(
+      web_contents, sw_run_loop.QuitClosure());
+
+  // Load a URL with no service worker.
+  GURL test_url = embedded_test_server()->GetURL(
+      "/banners/manifest_no_service_worker.html");
+  ui_test_utils::NavigateToURL(browser(), test_url);
+
+  {
+    base::RunLoop tester_run_loop;
+    std::unique_ptr<CallbackTester> tester(
+        new CallbackTester(tester_run_loop.QuitClosure()));
+
+    InstallableParams params = GetWebAppParams();
+    params.wait_for_worker = false;
+    manager->GetData(params,
+                     base::Bind(&CallbackTester::OnDidFinishInstallableCheck,
+                                base::Unretained(tester.get())));
+    tester_run_loop.Run();
+
+    // We should have returned with an error.
+    EXPECT_FALSE(tester->manifest().IsEmpty());
     EXPECT_FALSE(tester->is_installable());
     EXPECT_EQ(NO_MATCHING_SERVICE_WORKER, tester->error_code());
   }
+
+  {
+    base::RunLoop tester_run_loop;
+    std::unique_ptr<CallbackTester> tester(
+        new CallbackTester(tester_run_loop.QuitClosure()));
+
+    InstallableParams params = GetWebAppParams();
+    params.wait_for_worker = true;
+    manager->GetData(params,
+                     base::Bind(&CallbackTester::OnDidFinishInstallableCheck,
+                                base::Unretained(tester.get())));
+    sw_run_loop.Run();
+
+    EXPECT_TRUE(content::ExecuteScript(
+        web_contents,
+        "navigator.serviceWorker.register('service_worker.js');"));
+    tester_run_loop.Run();
+
+    // The callback should tell us that the page is installable
+    EXPECT_FALSE(tester->manifest().IsEmpty());
+    EXPECT_TRUE(tester->is_installable());
+    EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+  }
+}
+
+IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
+                       CheckPageWithNoServiceWorkerFetchHandler) {
+  base::RunLoop run_loop;
+  std::unique_ptr<CallbackTester> tester(
+      new CallbackTester(run_loop.QuitClosure()));
+
+  NavigateAndRunInstallableManager(
+      tester.get(), GetWebAppParams(),
+      "/banners/no_sw_fetch_handler_test_page.html");
+
+  RunInstallableManager(tester.get(), GetWebAppParams());
+  run_loop.Run();
+
+  EXPECT_FALSE(tester->manifest().IsEmpty());
+  EXPECT_FALSE(tester->manifest_url().is_empty());
+
+  EXPECT_FALSE(tester->primary_icon_url().is_empty());
+  EXPECT_NE(nullptr, tester->primary_icon());
+  EXPECT_FALSE(tester->is_installable());
+  EXPECT_TRUE(tester->badge_icon_url().is_empty());
+  EXPECT_EQ(nullptr, tester->badge_icon());
+  EXPECT_EQ(NOT_OFFLINE_CAPABLE, tester->error_code());
+  EXPECT_EQ(GetStatus(),
+            InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckDataUrlIcon) {
@@ -637,10 +929,12 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckDataUrlIcon) {
   EXPECT_FALSE(tester->primary_icon_url().is_empty());
   EXPECT_NE(nullptr, tester->primary_icon());
   EXPECT_EQ(144, tester->primary_icon()->width());
+  EXPECT_TRUE(tester->is_installable());
   EXPECT_TRUE(tester->badge_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->badge_icon());
-  EXPECT_TRUE(tester->is_installable());
   EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
+  EXPECT_EQ(GetStatus(),
+            InstallabilityCheckStatus::COMPLETE_PROGRESSIVE_WEB_APP);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
@@ -660,10 +954,12 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
   EXPECT_FALSE(tester->manifest_url().is_empty());
   EXPECT_TRUE(tester->primary_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->primary_icon());
+  EXPECT_FALSE(tester->is_installable());
   EXPECT_TRUE(tester->badge_icon_url().is_empty());
   EXPECT_EQ(nullptr, tester->badge_icon());
-  EXPECT_FALSE(tester->is_installable());
   EXPECT_EQ(NO_ICON_AVAILABLE, tester->error_code());
+  EXPECT_EQ(GetStatus(),
+            InstallabilityCheckStatus::COMPLETE_NON_PROGRESSIVE_WEB_APP);
 }
 
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
@@ -681,9 +977,9 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
     EXPECT_FALSE(tester->manifest_url().is_empty());
     EXPECT_FALSE(tester->manifest().IsEmpty());
-    EXPECT_TRUE(tester->is_installable());
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
+    EXPECT_TRUE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
     EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());
@@ -695,7 +991,7 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
         new CallbackTester(run_loop.QuitClosure()));
 
     // Dial up the primary icon size requirements to something that isn't
-    // available. This should now fail with NoIconMatchingRequirements.
+    // available. This should now fail with NO_ACCEPTABLE_ICON.
     InstallableParams params = GetWebAppParams();
     params.ideal_primary_icon_size_in_px = 2000;
     params.minimum_primary_icon_size_in_px = 2000;
@@ -704,9 +1000,9 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
     EXPECT_FALSE(tester->manifest_url().is_empty());
     EXPECT_FALSE(tester->manifest().IsEmpty());
-    EXPECT_TRUE(tester->is_installable());
     EXPECT_TRUE(tester->primary_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->primary_icon());
+    EXPECT_TRUE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
     EXPECT_EQ(NO_ACCEPTABLE_ICON, tester->error_code());
@@ -719,7 +1015,7 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     std::unique_ptr<CallbackTester> tester(
         new CallbackTester(run_loop.QuitClosure()));
 
-    // This should fail with NoIconMatchingRequirements.
+    // This should fail with NO_ACCEPTABLE_ICON.
     InstallableParams params = GetWebAppParams();
     params.ideal_primary_icon_size_in_px = 2000;
     params.minimum_primary_icon_size_in_px = 2000;
@@ -729,9 +1025,9 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
     EXPECT_FALSE(tester->manifest_url().is_empty());
     EXPECT_FALSE(tester->manifest().IsEmpty());
-    EXPECT_TRUE(tester->is_installable());
     EXPECT_TRUE(tester->primary_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->primary_icon());
+    EXPECT_FALSE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
     EXPECT_EQ(NO_ACCEPTABLE_ICON, tester->error_code());
@@ -748,9 +1044,9 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     // The smaller primary icon requirements should allow this to pass.
     EXPECT_FALSE(tester->manifest_url().is_empty());
     EXPECT_FALSE(tester->manifest().IsEmpty());
-    EXPECT_TRUE(tester->is_installable());
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
+    EXPECT_TRUE(tester->is_installable());
     EXPECT_TRUE(tester->badge_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->badge_icon());
     EXPECT_EQ(NO_ERROR_DETECTED, tester->error_code());

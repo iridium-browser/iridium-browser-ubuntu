@@ -4,11 +4,14 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/browser/usb/usb_chooser_controller.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -19,9 +22,8 @@
 #include "device/usb/mock_usb_device.h"
 #include "device/usb/mock_usb_service.h"
 #include "device/usb/public/interfaces/chooser_service.mojom.h"
-#include "device/usb/webusb_descriptors.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 
 using content::RenderFrameHost;
 using device::MockDeviceClient;
@@ -58,10 +60,10 @@ class FakeChooserView : public ChooserController::View {
   DISALLOW_COPY_AND_ASSIGN(FakeChooserView);
 };
 
-class FakeChooserService : public device::usb::ChooserService {
+class FakeChooserService : public device::mojom::UsbChooserService {
  public:
   static void Create(RenderFrameHost* render_frame_host,
-                     device::usb::ChooserServiceRequest request) {
+                     device::mojom::UsbChooserServiceRequest request) {
     mojo::MakeStrongBinding(
         base::MakeUnique<FakeChooserService>(render_frame_host),
         std::move(request));
@@ -72,11 +74,12 @@ class FakeChooserService : public device::usb::ChooserService {
 
   ~FakeChooserService() override {}
 
-  // device::usb::ChooserService:
-  void GetPermission(const std::vector<device::UsbDeviceFilter>& device_filters,
-                     const GetPermissionCallback& callback) override {
+  // device::mojom::UsbChooserService:
+  void GetPermission(
+      std::vector<device::mojom::UsbDeviceFilterPtr> device_filters,
+      const GetPermissionCallback& callback) override {
     auto chooser_controller = base::MakeUnique<UsbChooserController>(
-        render_frame_host_, device_filters, callback);
+        render_frame_host_, std::move(device_filters), callback);
     new FakeChooserView(std::move(chooser_controller));
   }
 
@@ -91,111 +94,163 @@ class WebUsbTest : public InProcessBrowserTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(
         switches::kEnableExperimentalWebPlatformFeatures);
-    InProcessBrowserTest::SetUpCommandLine(command_line);
   }
 
   void SetUpOnMainThread() override {
     embedded_test_server()->ServeFilesFromSourceDirectory("content/test/data");
     ASSERT_TRUE(embedded_test_server()->Start());
-
     device_client_.reset(new MockDeviceClient());
-    scoped_refptr<MockUsbDevice> mock_device(
-        new MockUsbDevice(0, 0, "Test Manufacturer", "Test Device", "123456"));
-    device_client_->usb_service()->AddDevice(mock_device);
+    AddMockDevice("123456");
 
-    mock_device =
-        new MockUsbDevice(1, 0, "Test Manufacturer", "Test Device", "ABCDEF");
-    auto allowed_origins = base::MakeUnique<device::WebUsbAllowedOrigins>();
-    allowed_origins->origins.push_back(
-        embedded_test_server()->GetURL("localhost", "/").GetOrigin());
-    mock_device->set_webusb_allowed_origins(std::move(allowed_origins));
-    device_client_->usb_service()->AddDevice(mock_device);
+    // Force the UsbChooserContext to be created before the test begins. This
+    // ensures that it is created before any instances of DeviceManagerImpl and
+    // thus may expose ordering bugs not normally encountered.
+    UsbChooserContextFactory::GetForProfile(browser()->profile());
+
+    ui_test_utils::NavigateToURL(
+        browser(),
+        embedded_test_server()->GetURL("localhost", "/simple_page.html"));
+
+    RenderFrameHost* render_frame_host =
+        browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame();
+    EXPECT_THAT(render_frame_host->GetLastCommittedOrigin().Serialize(),
+                testing::StartsWith("http://localhost:"));
+    render_frame_host->GetInterfaceRegistry()->AddInterface(
+        base::Bind(&FakeChooserService::Create, render_frame_host));
+  }
+
+  void AddMockDevice(const std::string& serial_number) {
+    DCHECK(!mock_device_);
+    mock_device_ = base::MakeRefCounted<MockUsbDevice>(
+        0, 0, "Test Manufacturer", "Test Device", serial_number);
+    device_client_->usb_service()->AddDevice(mock_device_);
+  }
+
+  void RemoveMockDevice() {
+    DCHECK(mock_device_);
+    device_client_->usb_service()->RemoveDevice(mock_device_);
+    mock_device_ = nullptr;
   }
 
  private:
   std::unique_ptr<MockDeviceClient> device_client_;
+  scoped_refptr<MockUsbDevice> mock_device_;
 };
 
 IN_PROC_BROWSER_TEST_F(WebUsbTest, RequestAndGetDevices) {
-  ui_test_utils::NavigateToURL(
-      browser(),
-      embedded_test_server()->GetURL("localhost", "/simple_page.html"));
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  RenderFrameHost* render_frame_host = web_contents->GetMainFrame();
-  EXPECT_THAT(render_frame_host->GetLastCommittedOrigin().Serialize(),
-              testing::StartsWith("http://localhost:"));
 
-  render_frame_host->GetInterfaceRegistry()->AddInterface(
-      base::Bind(&FakeChooserService::Create, render_frame_host));
+  int int_result;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
+      web_contents,
+      "navigator.usb.getDevices()"
+      "    .then(devices => {"
+      "        domAutomationController.send(devices.length);"
+      "    });",
+      &int_result));
+  EXPECT_EQ(0, int_result);
 
-  // The mock device with vendorId == 0 has no WebUSB allowed origin descriptor
-  // but because this is a top level frame it will be allowed.
   std::string result;
   EXPECT_TRUE(content::ExecuteScriptAndExtractString(
       web_contents,
       "navigator.usb.requestDevice({ filters: [ { vendorId: 0 } ] })"
       "    .then(device => {"
       "        domAutomationController.send(device.serialNumber);"
-      "     });",
+      "    });",
       &result));
   EXPECT_EQ("123456", result);
 
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
       web_contents,
       "navigator.usb.getDevices()"
       "    .then(devices => {"
-      "        domAutomationController.send(devices.length.toString());"
-      "     });",
-      &result));
-  EXPECT_EQ("1", result);
+      "        domAutomationController.send(devices.length);"
+      "    });",
+      &int_result));
+  EXPECT_EQ(1, int_result);
 }
 
-IN_PROC_BROWSER_TEST_F(WebUsbTest, RequestAndGetDevicesInIframe) {
-  ui_test_utils::NavigateToURL(
-      browser(),
-      embedded_test_server()->GetURL("localhost", "/page_with_iframe.html"));
+IN_PROC_BROWSER_TEST_F(WebUsbTest, AddRemoveDevice) {
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  RenderFrameHost* main_frame = web_contents->GetMainFrame();
-  EXPECT_THAT(main_frame->GetLastCommittedOrigin().Serialize(),
-              testing::StartsWith("http://localhost:"));
-  RenderFrameHost* embedded_frame = ChildFrameAt(main_frame, 0);
-  EXPECT_THAT(embedded_frame->GetLastCommittedOrigin().Serialize(),
-              testing::StartsWith("http://localhost:"));
 
-  embedded_frame->GetInterfaceRegistry()->AddInterface(
-      base::Bind(&FakeChooserService::Create, embedded_frame));
-
-  // The mock device with vendorId == 0 has no allowed origin descriptor so an
-  // embedded frame will not be able to select it.
   std::string result;
   EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      embedded_frame,
+      web_contents,
       "navigator.usb.requestDevice({ filters: [ { vendorId: 0 } ] })"
-      "    .catch(e => { domAutomationController.send(e.toString()); });",
-      &result));
-  EXPECT_EQ("NotFoundError: No device selected.", result);
-
-  // The mock device with vendorId == 1 does however have the embedded test
-  // server listed as an allowed origin.
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      embedded_frame,
-      "navigator.usb.requestDevice({ filters: [ { vendorId: 1 } ] })"
       "    .then(device => {"
       "        domAutomationController.send(device.serialNumber);"
-      "     });",
-      &result));
-  EXPECT_EQ("ABCDEF", result);
+      "    });"
 
-  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-      embedded_frame,
-      "navigator.usb.getDevices()"
-      "    .then(devices => {"
-      "        domAutomationController.send(devices.length.toString());"
-      "     });",
+      "var deviceAdded = null;"
+      "navigator.usb.addEventListener('connect', e => {"
+      "    deviceAdded = e.device;"
+      "});"
+
+      "var deviceRemoved = null;"
+      "navigator.usb.addEventListener('disconnect', e => {"
+      "    deviceRemoved = e.device;"
+      "});",
       &result));
-  EXPECT_EQ("1", result);
+  EXPECT_EQ("123456", result);
+
+  RemoveMockDevice();
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      web_contents,
+      "if (deviceRemoved === null) {"
+      "  domAutomationController.send('null');"
+      "} else {"
+      "  domAutomationController.send(deviceRemoved.serialNumber);"
+      "}",
+      &result));
+  EXPECT_EQ("123456", result);
+
+  AddMockDevice("123456");
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      web_contents,
+      "if (deviceAdded === null) {"
+      "  domAutomationController.send('null');"
+      "} else {"
+      "  domAutomationController.send(deviceAdded.serialNumber);"
+      "}",
+      &result));
+  EXPECT_EQ("123456", result);
+}
+
+IN_PROC_BROWSER_TEST_F(WebUsbTest, AddRemoveDeviceEphemeral) {
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Replace the default mock device with one that has no serial number.
+  RemoveMockDevice();
+  AddMockDevice("");
+
+  std::string result;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      web_contents,
+      "navigator.usb.requestDevice({ filters: [ { vendorId: 0 } ] })"
+      "    .then(device => {"
+      "        domAutomationController.send(device.serialNumber);"
+      "    });"
+
+      "var deviceRemoved = null;"
+      "navigator.usb.addEventListener('disconnect', e => {"
+      "    deviceRemoved = e.device;"
+      "});",
+      &result));
+  EXPECT_EQ("", result);
+
+  RemoveMockDevice();
+  EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+      web_contents,
+      "if (deviceRemoved === null) {"
+      "  domAutomationController.send('null');"
+      "} else {"
+      "  domAutomationController.send(deviceRemoved.serialNumber);"
+      "}",
+      &result));
+  EXPECT_EQ("", result);
 }
 
 }  // namespace

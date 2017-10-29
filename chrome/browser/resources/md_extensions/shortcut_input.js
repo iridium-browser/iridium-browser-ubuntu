@@ -131,9 +131,11 @@ cr.define('extensions', function() {
     /** @private */
     commitPending_: function() {
       this.shortcut = this.pendingShortcut_;
-      this.fire('shortcut-updated', {keybinding: this.shortcut,
-                                     item: this.item,
-                                     commandName: this.commandName});
+      this.fire('shortcut-updated', {
+        keybinding: this.shortcut,
+        item: this.item,
+        commandName: this.commandName
+      });
     },
 
     /**
@@ -142,8 +144,8 @@ cr.define('extensions', function() {
      */
     computeText_: function() {
       if (this.capturing_)
-        return this.pendingShortcut_ || this.i18n('shortcutTypeAShortcut');
-      return this.shortcut || this.i18n('shortcutNotSet');
+        return this.pendingShortcut_;
+      return this.shortcut;
     },
 
     /**

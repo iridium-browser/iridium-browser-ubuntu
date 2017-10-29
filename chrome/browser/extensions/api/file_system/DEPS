@@ -1,5 +1,5 @@
 include_rules = [
-  "+components/constrained_window",
+  "+chrome/browser/ui/views/extensions",
 ]
 
 specific_include_rules = {

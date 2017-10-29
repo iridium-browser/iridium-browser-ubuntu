@@ -6,8 +6,8 @@ package org.chromium.chrome.browser.preferences;
 
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.res.Resources;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.SpannableString;
@@ -25,12 +25,12 @@ import android.widget.RadioButton;
 import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.omnibox.geo.GeolocationHeader;
 import org.chromium.chrome.browser.preferences.website.ContentSetting;
@@ -315,9 +315,7 @@ public class SearchEngineAdapter extends BaseAdapter
 
         TextView url = (TextView) view.findViewById(R.id.url);
         url.setText(templateUrl.getKeyword());
-        if (templateUrl.getType() == TemplateUrlService.TYPE_PREPOPULATED
-                || templateUrl.getType() == TemplateUrlService.TYPE_DEFAULT
-                || templateUrl.getKeyword().length() == 0) {
+        if (TextUtils.isEmpty(templateUrl.getKeyword())) {
             url.setVisibility(View.GONE);
         }
 
@@ -348,23 +346,25 @@ public class SearchEngineAdapter extends BaseAdapter
             assert false;
             link.setVisibility(View.GONE);
         } else if (selected) {
-            if (getLocationPermissionType(templateUrl, true) == ContentSetting.ASK) {
+            if (!locationShouldBeShown(templateUrl)) {
                 link.setVisibility(View.GONE);
             } else {
                 ForegroundColorSpan linkSpan = new ForegroundColorSpan(
                         ApiCompatibilityUtils.getColor(resources, R.color.google_blue_700));
-                if (LocationUtils.getInstance().isSystemLocationSettingEnabled()) {
-                    String message = mContext.getString(
-                            locationEnabled(templateUrl, true)
-                            ? R.string.search_engine_location_allowed
-                            : R.string.search_engine_location_blocked);
-                    SpannableString messageWithLink = new SpannableString(message);
-                    messageWithLink.setSpan(linkSpan, 0, messageWithLink.length(), 0);
-                    link.setText(messageWithLink);
-                } else {
+                // If location is allowed but system location is off, show a message explaining how
+                // to turn location on.
+                if (locationEnabled(templateUrl)
+                        && !LocationUtils.getInstance().isSystemLocationSettingEnabled()) {
                     link.setText(SpanApplier.applySpans(
                             mContext.getString(R.string.android_location_off),
                             new SpanInfo("<link>", "</link>", linkSpan)));
+                } else {
+                    String message = mContext.getString(locationEnabled(templateUrl)
+                                    ? R.string.search_engine_location_allowed
+                                    : R.string.search_engine_location_blocked);
+                    SpannableString messageWithLink = new SpannableString(message);
+                    messageWithLink.setSpan(linkSpan, 0, messageWithLink.length(), 0);
+                    link.setText(messageWithLink);
                 }
 
                 link.setOnClickListener(this);
@@ -400,21 +400,6 @@ public class SearchEngineAdapter extends BaseAdapter
     }
 
     private String searchEngineSelected(int position) {
-        // First clean up any automatically added permissions (if any) for the previously selected
-        // search engine.
-        SharedPreferences sharedPreferences =
-                ContextUtils.getAppSharedPreferences();
-        if (sharedPreferences.getBoolean(PrefServiceBridge.LOCATION_AUTO_ALLOWED, false)) {
-            TemplateUrl templateUrl = (TemplateUrl) getItem(mSelectedSearchEnginePosition);
-            if (locationEnabled(templateUrl, false)) {
-                String url = TemplateUrlService.getInstance().getSearchEngineUrlFromTemplateUrl(
-                        templateUrl.getKeyword());
-                WebsitePreferenceBridge.nativeSetGeolocationSettingForOrigin(
-                        url, url, ContentSetting.DEFAULT.toInt(), false);
-            }
-            sharedPreferences.edit().remove(PrefServiceBridge.LOCATION_AUTO_ALLOWED).apply();
-        }
-
         // Record the change in search engine.
         mSelectedSearchEnginePosition = position;
 
@@ -442,18 +427,17 @@ public class SearchEngineAdapter extends BaseAdapter
                     toKeyword(mSelectedSearchEnginePosition));
             Bundle fragmentArgs = SingleWebsitePreferences.createFragmentArgsForSite(url);
             fragmentArgs.putBoolean(SingleWebsitePreferences.EXTRA_LOCATION,
-                    locationEnabled((TemplateUrl) getItem(mSelectedSearchEnginePosition), true));
+                    locationEnabled((TemplateUrl) getItem(mSelectedSearchEnginePosition)));
             settingsIntent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, fragmentArgs);
             mContext.startActivity(settingsIntent);
         }
     }
 
-    private ContentSetting getLocationPermissionType(
-            TemplateUrl templateUrl, boolean checkGeoHeader) {
+    private String getSearchEngineUrl(TemplateUrl templateUrl) {
         if (templateUrl == null) {
             Log.e(TAG, "Invalid null template URL found");
             assert false;
-            return ContentSetting.BLOCK;
+            return "";
         }
 
         String url = TemplateUrlService.getInstance().getSearchEngineUrlFromTemplateUrl(
@@ -461,29 +445,50 @@ public class SearchEngineAdapter extends BaseAdapter
         if (url == null) {
             Log.e(TAG, "Invalid template URL found: %s", templateUrl);
             assert false;
-            return ContentSetting.BLOCK;
+            return "";
         }
+
+        return url;
+    }
+
+    private boolean locationShouldBeShown(TemplateUrl templateUrl) {
+        String url = getSearchEngineUrl(templateUrl);
+        if (url.isEmpty()) return false;
+
+        // Do not show location if the scheme isn't HTTPS.
+        Uri uri = Uri.parse(url);
+        if (!UrlConstants.HTTPS_SCHEME.equals(uri.getScheme())) return false;
+
+        // Only show the location setting if it is explicitly enabled or disabled.
+        GeolocationInfo locationSettings = new GeolocationInfo(url, null, false);
+        ContentSetting locationPermission = locationSettings.getContentSetting();
+        if (locationPermission != ContentSetting.ASK) return true;
+
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.CONSISTENT_OMNIBOX_GEOLOCATION)) {
+            return WebsitePreferenceBridge.shouldUseDSEGeolocationSetting(url, false);
+        }
+
+        return GeolocationHeader.isGeoHeaderEnabledForUrl(url, false);
+    }
+
+    private boolean locationEnabled(TemplateUrl templateUrl) {
+        String url = getSearchEngineUrl(templateUrl);
+        if (url.isEmpty()) return false;
+
         GeolocationInfo locationSettings = new GeolocationInfo(url, null, false);
         ContentSetting locationPermission = locationSettings.getContentSetting();
         if (locationPermission == ContentSetting.ASK) {
             // Handle the case where the geoHeader being sent when no permission has been specified.
-            if (checkGeoHeader) {
-                if (ChromeFeatureList.isEnabled(ChromeFeatureList.CONSISTENT_OMNIBOX_GEOLOCATION)) {
-                    if (WebsitePreferenceBridge.shouldUseDSEGeolocationSetting(url, false)) {
-                        locationPermission = WebsitePreferenceBridge.getDSEGeolocationSetting()
-                                ? ContentSetting.ALLOW
-                                : ContentSetting.BLOCK;
-                    }
-                } else if (GeolocationHeader.isGeoHeaderEnabledForUrl(url, false)) {
-                    locationPermission = ContentSetting.ALLOW;
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.CONSISTENT_OMNIBOX_GEOLOCATION)) {
+                if (WebsitePreferenceBridge.shouldUseDSEGeolocationSetting(url, false)) {
+                    return WebsitePreferenceBridge.getDSEGeolocationSetting();
                 }
+            } else if (GeolocationHeader.isGeoHeaderEnabledForUrl(url, false)) {
+                return true;
             }
         }
-        return locationPermission;
-    }
 
-    private boolean locationEnabled(TemplateUrl templateUrl, boolean checkGeoHeader) {
-        return getLocationPermissionType(templateUrl, checkGeoHeader) == ContentSetting.ALLOW;
+        return locationPermission == ContentSetting.ALLOW;
     }
 
     private int computeStartIndexForRecentSearchEngines() {

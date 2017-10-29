@@ -17,13 +17,13 @@ namespace extension_ime_util {
 
 #if defined(GOOGLE_CHROME_BUILD)
 const char kXkbExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
-const char kM17nExtensionId[] = "gjaehgfemfahhmlgpdfknkhdnemmolop";
+const char kM17nExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
 const char kHangulExtensionId[] = "bdgdidmhaijohebebipajioienkglgfo";
-const char kMozcExtensionId[] = "gjaehgfemfahhmlgpdfknkhdnemmolop";
-const char kT13nExtensionId[] = "gjaehgfemfahhmlgpdfknkhdnemmolop";
-const char kChinesePinyinExtensionId[] = "gjaehgfemfahhmlgpdfknkhdnemmolop";
-const char kChineseZhuyinExtensionId[] = "gjaehgfemfahhmlgpdfknkhdnemmolop";
-const char kChineseCangjieExtensionId[] = "gjaehgfemfahhmlgpdfknkhdnemmolop";
+const char kMozcExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+const char kT13nExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+const char kChinesePinyinExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+const char kChineseZhuyinExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
+const char kChineseCangjieExtensionId[] = "jkghodnilhceideoidjikpgommlajknk";
 #else
 const char kXkbExtensionId[] = "fgoepimhcoialccpbmpnnblemnepkkao";
 const char kM17nExtensionId[] = "jhffeifommiaekmbkkjlpmilogcfdohp";
@@ -34,6 +34,12 @@ const char kChinesePinyinExtensionId[] = "cpgalbafkoofkjmaeonnfijgpfennjjn";
 const char kChineseZhuyinExtensionId[] = "ekbifjdfhkmdeeajnolmgdlmkllopefi";
 const char kChineseCangjieExtensionId[] = "aeebooiibjahgpgmhkeocbeekccfknbj";
 #endif
+
+// Extension id, path (relative to |chrome::DIR_RESOURCES|) and IME engine
+// id for the builtin-in Braille IME extension.
+UI_BASE_IME_EXPORT extern const char kBrailleImeExtensionId[];
+UI_BASE_IME_EXPORT extern const char kBrailleImeExtensionPath[];
+UI_BASE_IME_EXPORT extern const char kBrailleImeEngineId[];
 
 // Returns InputMethodID for |engine_id| in |extension_id| of extension IME.
 // This function does not check |extension_id| is installed extension IME nor

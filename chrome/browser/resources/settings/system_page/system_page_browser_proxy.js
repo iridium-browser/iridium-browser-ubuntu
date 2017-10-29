@@ -6,38 +6,33 @@
 
 cr.define('settings', function() {
   /** @interface */
-  function SystemPageBrowserProxy() {}
-
-  SystemPageBrowserProxy.prototype = {
-    /** Allows the user to change native system proxy settings. */
-    changeProxySettings: function() {},
+  class SystemPageBrowserProxy {
+    /** Shows the native system proxy settings. */
+    showProxySettings() {}
 
     /**
      * @return {boolean} Whether hardware acceleration was enabled when the user
      *     started Chrome.
      */
-    wasHardwareAccelerationEnabledAtStartup: function() {},
-  };
+    wasHardwareAccelerationEnabledAtStartup() {}
+  }
 
   /**
-   * @constructor
    * @implements {settings.SystemPageBrowserProxy}
    */
-  function SystemPageBrowserProxyImpl() {}
+  class SystemPageBrowserProxyImpl {
+    /** @override */
+    showProxySettings() {
+      chrome.send('showProxySettings');
+    }
+
+    /** @override */
+    wasHardwareAccelerationEnabledAtStartup() {
+      return loadTimeData.getBoolean('hardwareAccelerationEnabledAtStartup');
+    }
+  }
 
   cr.addSingletonGetter(SystemPageBrowserProxyImpl);
-
-  SystemPageBrowserProxyImpl.prototype = {
-    /** @override */
-    changeProxySettings: function() {
-      chrome.send('changeProxySettings');
-    },
-
-    /** @override */
-    wasHardwareAccelerationEnabledAtStartup: function() {
-      return loadTimeData.getBoolean('hardwareAccelerationEnabledAtStartup');
-    },
-  };
 
   return {
     SystemPageBrowserProxy: SystemPageBrowserProxy,

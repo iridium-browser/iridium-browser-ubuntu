@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "base/callback_forward.h"
+#include "build/build_config.h"
 #include "storage/common/storage_common_export.h"
 
 namespace storage {
@@ -17,8 +18,16 @@ constexpr size_t kDefaultIPCMemorySize = 250u * 1024;
 constexpr size_t kDefaultSharedMemorySize = 10u * 1024 * 1024;
 constexpr size_t kDefaultMaxBlobInMemorySpace = 500u * 1024 * 1024;
 constexpr uint64_t kDefaultMaxBlobDiskSpace = 0ull;
-constexpr uint64_t kDefaultMinPageFileSize = 5ull * 1024 * 1024;
 constexpr uint64_t kDefaultMaxPageFileSize = 100ull * 1024 * 1024;
+
+#if defined(OS_ANDROID)
+// On minimal Android maximum in-memory space can be as low as 5MB.
+constexpr uint64_t kDefaultMinPageFileSize = 5ull * 1024 * 1024 / 2;
+const float kDefaultMaxBlobInMemorySpaceUnderPressureRatio = 0.02f;
+#else
+constexpr uint64_t kDefaultMinPageFileSize = 5ull * 1024 * 1024;
+const float kDefaultMaxBlobInMemorySpaceUnderPressureRatio = 0.002f;
+#endif
 
 // All sizes are in bytes.
 struct STORAGE_COMMON_EXPORT BlobStorageLimits {
@@ -43,8 +52,20 @@ struct STORAGE_COMMON_EXPORT BlobStorageLimits {
   // This is the maximum size of a shared memory handle.
   size_t max_shared_memory_size = kDefaultSharedMemorySize;
 
+  // This is the maximum size of a bytes BlobDataItem. Only used for mojo
+  // based blob transportation, as the old IPC/shared memory based
+  // implementation doesn't support different values for this and
+  // max_shared_memory_size.
+  size_t max_bytes_data_item_size = kDefaultSharedMemorySize;
+
   // This is the maximum amount of memory we can use to store blobs.
   size_t max_blob_in_memory_space = kDefaultMaxBlobInMemorySpace;
+  // The ratio applied to |max_blob_in_memory_space| to reduce memory usage
+  // under memory pressure. Note: Under pressure we modify the
+  // |min_page_file_size| to ensure we can evict items until we get below the
+  // reduced memory limit.
+  float max_blob_in_memory_space_under_pressure_ratio =
+      kDefaultMaxBlobInMemorySpaceUnderPressureRatio;
 
   // This is the maximum amount of disk space we can use.
   uint64_t desired_max_disk_space = kDefaultMaxBlobDiskSpace;
@@ -101,7 +122,10 @@ enum class BlobStatus {
   // has been populated. See BlobEntry::BuildingState for more info.
   // TODO(dmurph): Change to PENDING_REFERENCED_BLOBS (crbug.com/670398).
   PENDING_INTERNALS = 203,
-  LAST = PENDING_INTERNALS
+  // Waiting for construction to begin.
+  PENDING_CONSTRUCTION = 204,
+  LAST_PENDING = PENDING_CONSTRUCTION,
+  LAST = LAST_PENDING
 };
 
 using BlobStatusCallback = base::Callback<void(BlobStatus)>;

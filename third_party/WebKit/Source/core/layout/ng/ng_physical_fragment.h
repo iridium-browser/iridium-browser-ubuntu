@@ -6,12 +6,15 @@
 #define NGPhysicalFragment_h
 
 #include "core/CoreExport.h"
+#include "core/layout/ng/geometry/ng_border_edges.h"
+#include "core/layout/ng/geometry/ng_box_strut.h"
+#include "core/layout/ng/geometry/ng_physical_offset.h"
+#include "core/layout/ng/geometry/ng_physical_size.h"
 #include "core/layout/ng/ng_break_token.h"
-#include "core/layout/ng/ng_units.h"
 #include "platform/LayoutUnit.h"
 #include "platform/heap/Handle.h"
-#include "wtf/RefPtr.h"
-#include "wtf/Vector.h"
+#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 
@@ -31,18 +34,18 @@ class LayoutObject;
 // coordinate system.
 class CORE_EXPORT NGPhysicalFragment : public RefCounted<NGPhysicalFragment> {
  public:
-  enum NGFragmentType { kFragmentBox = 0, kFragmentText = 1 };
+  enum NGFragmentType {
+    kFragmentBox = 0,
+    kFragmentText = 1,
+    kFragmentLineBox = 2
+    // When adding new values, make sure the bit size of |type_| is large
+    // enough to store.
+  };
 
   NGFragmentType Type() const { return static_cast<NGFragmentType>(type_); }
   bool IsBox() const { return Type() == NGFragmentType::kFragmentBox; }
   bool IsText() const { return Type() == NGFragmentType::kFragmentText; }
-
-  // Override RefCounted's deref() to ensure operator delete is called on the
-  // appropriate subclass type.
-  void deref() const {
-    if (derefBase())
-      destroy();
-  }
+  bool IsLineBox() const { return Type() == NGFragmentType::kFragmentLineBox; }
 
   // The accessors in this class shouldn't be used by layout code directly,
   // instead should be accessed by the NGFragmentBase classes. These accessors
@@ -50,64 +53,61 @@ class CORE_EXPORT NGPhysicalFragment : public RefCounted<NGPhysicalFragment> {
 
   // Returns the border-box size.
   NGPhysicalSize Size() const { return size_; }
-  LayoutUnit Width() const { return size_.width; }
-  LayoutUnit Height() const { return size_.height; }
 
-  // Returns the total size, including the contents outside of the border-box.
-  LayoutUnit WidthOverflow() const { return overflow_.width; }
-  LayoutUnit HeightOverflow() const { return overflow_.height; }
+  // Bitmask for border edges, see NGBorderEdges::Physical.
+  unsigned BorderEdges() const { return border_edge_; }
+  NGPixelSnappedPhysicalBoxStrut BorderWidths() const;
 
-  // Returns the offset relative to the parent fragement's content-box.
-  LayoutUnit LeftOffset() const {
-    DCHECK(is_placed_);
-    return offset_.left;
-  }
-
-  LayoutUnit TopOffset() const {
-    DCHECK(is_placed_);
-    return offset_.top;
-  }
-
+  // Returns the offset relative to the parent fragment's content-box.
   NGPhysicalOffset Offset() const {
     DCHECK(is_placed_);
     return offset_;
   }
 
-  // Should only be used by the parent fragement's layout.
+  NGBreakToken* BreakToken() const { return break_token_.Get(); }
+  const ComputedStyle& Style() const;
+
+  RefPtr<NGPhysicalFragment> CloneWithoutOffset() const;
+
+  // GetLayoutObject should only be used when necessary for compatibility
+  // with LegacyLayout.
+  LayoutObject* GetLayoutObject() const { return layout_object_; }
+
+  // Should only be used by the parent fragment's layout.
   void SetOffset(NGPhysicalOffset offset) {
     DCHECK(!is_placed_);
     offset_ = offset;
     is_placed_ = true;
   }
 
-  NGBreakToken* BreakToken() const { return break_token_.get(); }
-
-  const ComputedStyle& Style() const;
-
-  // GetLayoutObject should only be used when necessary for compatibility
-  // with LegacyLayout.
-  LayoutObject* GetLayoutObject() const { return layout_object_; }
-
   bool IsPlaced() const { return is_placed_; }
+
+  String ToString() const;
+
+  // Override RefCounted's deref() to ensure operator delete is called on the
+  // appropriate subclass type.
+  void Deref() const {
+    if (DerefBase())
+      Destroy();
+  }
 
  protected:
   NGPhysicalFragment(LayoutObject* layout_object,
                      NGPhysicalSize size,
-                     NGPhysicalSize overflow,
                      NGFragmentType type,
                      RefPtr<NGBreakToken> break_token = nullptr);
 
   LayoutObject* layout_object_;
   NGPhysicalSize size_;
-  NGPhysicalSize overflow_;
   NGPhysicalOffset offset_;
   RefPtr<NGBreakToken> break_token_;
 
-  unsigned type_ : 1;
+  unsigned type_ : 2;  // NGFragmentType
   unsigned is_placed_ : 1;
+  unsigned border_edge_ : 4;  // NGBorderEdges::Physical
 
  private:
-  void destroy() const;
+  void Destroy() const;
 };
 
 }  // namespace blink

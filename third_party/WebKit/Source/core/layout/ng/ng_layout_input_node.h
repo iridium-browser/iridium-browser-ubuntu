@@ -10,41 +10,72 @@
 
 namespace blink {
 
+class ComputedStyle;
 class LayoutObject;
+class LayoutBox;
 class NGBreakToken;
 class NGConstraintSpace;
 class NGLayoutResult;
+struct MinMaxContentSize;
 
 // Represents the input to a layout algorithm for a given node. The layout
 // engine should use the style, node type to determine which type of layout
 // algorithm to use to produce fragments for this node.
-class CORE_EXPORT NGLayoutInputNode
-    : public GarbageCollectedFinalized<NGLayoutInputNode> {
- public:
-  enum NGLayoutInputNodeType { kLegacyBlock = 0, kLegacyInline = 1 };
+class CORE_EXPORT NGLayoutInputNode {
+  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
-  virtual ~NGLayoutInputNode(){};
+ public:
+  enum NGLayoutInputNodeType {
+    kBlock,
+    kInline
+    // When adding new values, ensure type_ below has enough bits.
+  };
+
+  NGLayoutInputNode(std::nullptr_t) : box_(nullptr), type_(kBlock) {}
+
+  bool IsInline() const;
+  bool IsBlock() const;
+  bool IsFloating() const;
+  bool IsOutOfFlowPositioned() const;
+
+  bool CreatesNewFormattingContext() const;
 
   // Performs layout on this input node, will return the layout result.
-  virtual RefPtr<NGLayoutResult> Layout(NGConstraintSpace*, NGBreakToken*) = 0;
+  RefPtr<NGLayoutResult> Layout(NGConstraintSpace*, NGBreakToken*);
+
+  MinMaxContentSize ComputeMinMaxContentSize();
 
   // Returns the next sibling.
-  virtual NGLayoutInputNode* NextSibling() = 0;
+  NGLayoutInputNode NextSibling();
 
   // Returns the LayoutObject which is associated with this node.
-  virtual LayoutObject* GetLayoutObject() = 0;
+  LayoutObject* GetLayoutObject() const;
 
-  NGLayoutInputNodeType Type() const {
-    return static_cast<NGLayoutInputNodeType>(type_);
+  const ComputedStyle& Style() const;
+
+  String ToString() const;
+
+  explicit operator bool() { return box_ != nullptr; }
+
+  bool operator==(const NGLayoutInputNode& other) const {
+    return box_ == other.box_;
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  bool operator!=(const NGLayoutInputNode& other) const {
+    return !(*this == other);
+  }
+
+#ifndef NDEBUG
+  void ShowNodeTree() const;
+#endif
 
  protected:
-  explicit NGLayoutInputNode(NGLayoutInputNodeType type) : type_(type) {}
+  NGLayoutInputNode(LayoutBox* box, NGLayoutInputNodeType type)
+      : box_(box), type_(type) {}
 
- private:
-  unsigned type_ : 1;
+  LayoutBox* box_;
+
+  unsigned type_ : 1;  // NGLayoutInputNodeType
 };
 
 }  // namespace blink

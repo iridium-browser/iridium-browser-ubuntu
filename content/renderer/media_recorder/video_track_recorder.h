@@ -16,14 +16,29 @@
 #include "content/public/renderer/media_stream_video_sink.h"
 #include "media/muxers/webm_muxer.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+
+namespace base {
+class Thread;
+}  // namespace base
+
+namespace cc {
+class PaintCanvas;
+}  // namespace cc
 
 namespace media {
+class SkCanvasVideoRenderer;
 class VideoFrame;
 }  // namespace media
 
 namespace video_track_recorder {
+#if defined(OS_ANDROID)
+const int kVEAEncoderMinResolutionWidth = 176;
+const int kVEAEncoderMinResolutionHeight = 144;
+#else
 const int kVEAEncoderMinResolutionWidth = 640;
 const int kVEAEncoderMinResolutionHeight = 480;
+#endif
 }  // namespace video_track_recorder
 
 namespace content {
@@ -46,16 +61,110 @@ class CONTENT_EXPORT VideoTrackRecorder
 #endif
     LAST
   };
-  class Encoder;
 
   using OnEncodedVideoCB =
       base::Callback<void(const media::WebmMuxer::VideoParameters& params,
                           std::unique_ptr<std::string> encoded_data,
+                          std::unique_ptr<std::string> encoded_alpha,
                           base::TimeTicks capture_timestamp,
                           bool is_key_frame)>;
   using OnErrorCB = base::Closure;
 
+  // Base class to describe a generic Encoder, encapsulating all actual encoder
+  // (re)configurations, encoding and delivery of received frames. This class is
+  // ref-counted to allow the MediaStreamVideoTrack to hold a reference to it
+  // (via the callback that MediaStreamVideoSink passes along) and to jump back
+  // and forth to an internal encoder thread. Moreover, this class:
+  // - is created on its parent's thread (usually the main Render thread), that
+  // is, |main_task_runner_|.
+  // - receives VideoFrames on |origin_task_runner_| and runs OnEncodedVideoCB
+  // on that thread as well. This task runner is cached on first frame arrival,
+  // and is supposed to be the render IO thread (but this is not enforced);
+  // - uses an internal |encoding_task_runner_| for actual encoder interactions,
+  // namely configuration, encoding (which might take some time) and
+  // destruction. This task runner can be passed on the creation. If nothing is
+  // passed, a new encoding thread is created and used.
+  class Encoder : public base::RefCountedThreadSafe<Encoder> {
+   public:
+    Encoder(const OnEncodedVideoCB& on_encoded_video_callback,
+            int32_t bits_per_second,
+            scoped_refptr<base::SingleThreadTaskRunner> encoding_task_runner =
+                nullptr);
+
+    // Start encoding |frame|, returning via |on_encoded_video_callback_|. This
+    // call will also trigger an encode configuration upon first frame arrival
+    // or parameter change, and an EncodeOnEncodingTaskRunner() to actually
+    // encode the frame. If the |frame|'s data is not directly available (e.g.
+    // it's a texture) then RetrieveFrameOnMainThread() is called, and if even
+    // that fails, black frames are sent instead.
+    void StartFrameEncode(const scoped_refptr<media::VideoFrame>& frame,
+                          base::TimeTicks capture_timestamp);
+    void RetrieveFrameOnMainThread(
+        const scoped_refptr<media::VideoFrame>& video_frame,
+        base::TimeTicks capture_timestamp);
+
+    static void OnFrameEncodeCompleted(
+        const VideoTrackRecorder::OnEncodedVideoCB& on_encoded_video_cb,
+        const media::WebmMuxer::VideoParameters& params,
+        std::unique_ptr<std::string> data,
+        std::unique_ptr<std::string> alpha_data,
+        base::TimeTicks capture_timestamp,
+        bool keyframe);
+
+    void SetPaused(bool paused);
+    virtual bool CanEncodeAlphaChannel();
+
+   protected:
+    friend class base::RefCountedThreadSafe<Encoder>;
+    friend class VideoTrackRecorderTest;
+
+    virtual ~Encoder();
+
+    virtual void EncodeOnEncodingTaskRunner(
+        scoped_refptr<media::VideoFrame> frame,
+        base::TimeTicks capture_timestamp) = 0;
+
+    // Called when the frame reference is released after encode.
+    void FrameReleased(const scoped_refptr<media::VideoFrame>& frame);
+
+    // Used to shutdown properly on the same thread we were created.
+    const scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
+
+    // Task runner where frames to encode and reply callbacks must happen.
+    scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner_;
+
+    // Task runner where encoding interactions happen.
+    scoped_refptr<base::SingleThreadTaskRunner> encoding_task_runner_;
+
+    // Optional thread for encoding. Active for the lifetime of VpxEncoder.
+    std::unique_ptr<base::Thread> encoding_thread_;
+
+    // While |paused_|, frames are not encoded. Used only from
+    // |encoding_thread_|.
+    bool paused_;
+
+    // This callback should be exercised on IO thread.
+    const OnEncodedVideoCB on_encoded_video_callback_;
+
+    // Target bitrate for video encoding. If 0, a standard bitrate is used.
+    const int32_t bits_per_second_;
+
+    // Number of frames that we keep the reference alive for encode.
+    uint32_t num_frames_in_encode_;
+
+    // Used to retrieve incoming opaque VideoFrames (i.e. VideoFrames backed by
+    // textures). Created on-demand on |main_task_runner_|.
+    std::unique_ptr<media::SkCanvasVideoRenderer> video_renderer_;
+    SkBitmap bitmap_;
+    std::unique_ptr<cc::PaintCanvas> canvas_;
+
+    DISALLOW_COPY_AND_ASSIGN(Encoder);
+  };
+
   static CodecId GetPreferredCodecId();
+  static bool CanUseAcceleratedEncoder(CodecId codec,
+                                       size_t width,
+                                       size_t height);
 
   VideoTrackRecorder(CodecId codec,
                      const blink::WebMediaStreamTrack& track,

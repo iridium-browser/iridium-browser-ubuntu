@@ -83,9 +83,9 @@ found in the LICENSE file.
 Polymer({
   is: 'tr-ui-find-control',
 
-  filterKeyDown: function(e) {
+  filterKeyDown(e) {
     if (e.keyCode === 27) {
-      var hkc = tr.b.getHotkeyControllerForElement(this);
+      const hkc = tr.b.getHotkeyControllerForElement(this);
       if (hkc) {
         hkc.childRequestsBlur(this);
       } else {
@@ -95,24 +95,25 @@ Polymer({
       e.stopPropagation();
       return;
     } else if (e.keyCode === 13) {
-      if (e.shiftKey)
+      if (e.shiftKey) {
         this.findPrevious();
-      else
+      } else {
         this.findNext();
+      }
     }
   },
 
-  filterBlur: function(e) {
+  filterBlur(e) {
     this.updateHitCountEl();
   },
 
-  filterFocus: function(e) {
+  filterFocus(e) {
     this.$.filter.select();
   },
 
   // Prevent that the input text is deselected after focusing the find
   // control with the mouse.
-  filterMouseUp: function(e) {
+  filterMouseUp(e) {
     e.preventDefault();
   },
 
@@ -125,7 +126,7 @@ Polymer({
     this.updateHitCountEl();
   },
 
-  focus: function() {
+  focus() {
     this.$.filter.focus();
   },
 
@@ -133,7 +134,7 @@ Polymer({
     return this === document.activeElement;
   },
 
-  filterTextChanged: function() {
+  filterTextChanged() {
     Polymer.dom(this.$.hitCount).textContent = '';
     this.$.spinner.style.visibility = 'visible';
     this.$.spinner.style.animation = 'spin 1s linear infinite';
@@ -144,30 +145,32 @@ Polymer({
     }.bind(this));
   },
 
-  findNext: function() {
-    if (this.controller)
+  findNext() {
+    if (this.controller) {
       this.controller.findNext();
+    }
     this.updateHitCountEl();
   },
 
-  findPrevious: function() {
-    if (this.controller)
+  findPrevious() {
+    if (this.controller) {
       this.controller.findPrevious();
+    }
     this.updateHitCountEl();
   },
 
-  updateHitCountEl: function() {
+  updateHitCountEl() {
     if (!this.controller || this.$.filter.value.length === 0) {
       Polymer.dom(this.$.hitCount).textContent = '';
       return;
     }
 
-    var n = this.controller.filterHits.length;
-    var i = n === 0 ? -1 : this.controller.currentHitIndex;
+    const n = this.controller.filterHits.length;
+    const i = n === 0 ? -1 : this.controller.currentHitIndex;
     Polymer.dom(this.$.hitCount).textContent = (i + 1) + ' of ' + n;
   },
 
-  setText: function(string) {
+  setText(string) {
     this.$.filter.value = string;
   }
 });

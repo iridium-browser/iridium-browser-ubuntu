@@ -27,6 +27,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -132,10 +133,10 @@ class DriveApiRequestsTest : public testing::Test {
     request_context_getter_ = new net::TestURLRequestContextGetter(
         message_loop_.task_runner());
 
-    request_sender_.reset(new RequestSender(new DummyAuthService,
-                                            request_context_getter_.get(),
-                                            message_loop_.task_runner(),
-                                            kTestUserAgent));
+    request_sender_.reset(
+        new RequestSender(new DummyAuthService, request_context_getter_.get(),
+                          message_loop_.task_runner(), kTestUserAgent,
+                          TRAFFIC_ANNOTATION_FOR_TESTS));
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
@@ -191,6 +192,12 @@ class DriveApiRequestsTest : public testing::Test {
     testing_properties_.clear();
     testing_properties_.push_back(private_property);
     testing_properties_.push_back(public_property);
+  }
+
+  void EnableTeamDrivesIntegration() {
+    GURL test_base_url = test_util::GetBaseUrlForTesting(test_server_.port());
+    url_generator_.reset(new DriveApiUrlGenerator(
+        test_base_url, test_base_url, TEAM_DRIVES_INTEGRATION_ENABLED));
   }
 
   base::MessageLoopForIO message_loop_;  // Test server needs IO thread.
@@ -763,6 +770,7 @@ TEST_F(DriveApiRequestsTest, AppsListRequest) {
 }
 
 TEST_F(DriveApiRequestsTest, ChangesListRequest) {
+  EnableTeamDrivesIntegration();
   // Set an expected data file containing valid result.
   expected_data_file_path_ = test_util::GetTestFilePath(
       "drive/changelist.json");
@@ -781,14 +789,18 @@ TEST_F(DriveApiRequestsTest, ChangesListRequest) {
     request->set_include_deleted(true);
     request->set_start_change_id(100);
     request->set_max_results(500);
+    request->set_team_drive_id("TEAM_DRIVE_ID");
     request_sender_->StartRequestWithAuthRetry(std::move(request));
     run_loop.Run();
   }
 
   EXPECT_EQ(HTTP_SUCCESS, error);
   EXPECT_EQ(net::test_server::METHOD_GET, http_request_.method);
-  EXPECT_EQ("/drive/v2/changes?maxResults=500&startChangeId=100",
-            http_request_.relative_url);
+  EXPECT_EQ(
+      "/drive/v2/changes?supportsTeamDrives=true&"
+      "includeTeamDriveItems=true&teamDriveId=TEAM_DRIVE_ID&"
+      "maxResults=500&startChangeId=100",
+      http_request_.relative_url);
   EXPECT_TRUE(result);
 }
 
@@ -898,6 +910,35 @@ TEST_F(DriveApiRequestsTest, FilesCopyRequest_EmptyParentResourceId) {
   EXPECT_TRUE(http_request_.has_content);
   EXPECT_EQ("{\"title\":\"new title\"}", http_request_.content);
   EXPECT_TRUE(file_resource);
+}
+
+TEST_F(DriveApiRequestsTest, TeamDriveListRequest) {
+  // Set an expected data file containing valid result.
+  expected_data_file_path_ =
+      test_util::GetTestFilePath("drive/team_drive_list.json");
+
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
+  std::unique_ptr<TeamDriveList> result;
+
+  {
+    base::RunLoop run_loop;
+    std::unique_ptr<drive::TeamDriveListRequest> request =
+        base::MakeUnique<drive::TeamDriveListRequest>(
+            request_sender_.get(), *url_generator_,
+            test_util::CreateQuitCallback(
+                &run_loop,
+                test_util::CreateCopyResultCallback(&error, &result)));
+    request->set_max_results(50);
+    request->set_page_token("PAGE_TOKEN");
+    request_sender_->StartRequestWithAuthRetry(std::move(request));
+    run_loop.Run();
+  }
+
+  EXPECT_EQ(HTTP_SUCCESS, error);
+  EXPECT_EQ(net::test_server::METHOD_GET, http_request_.method);
+  EXPECT_EQ("/drive/v2/teamdrives?maxResults=50&pageToken=PAGE_TOKEN",
+            http_request_.relative_url);
+  EXPECT_TRUE(result);
 }
 
 TEST_F(DriveApiRequestsTest, FilesListRequest) {

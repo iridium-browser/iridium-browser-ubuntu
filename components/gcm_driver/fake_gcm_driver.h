@@ -25,6 +25,11 @@ class FakeGCMDriver : public GCMDriver {
   ~FakeGCMDriver() override;
 
   // GCMDriver overrides:
+  void ValidateRegistration(
+      const std::string& app_id,
+      const std::vector<std::string>& sender_ids,
+      const std::string& registration_id,
+      const ValidateRegistrationCallback& callback) override;
   void OnSignedIn() override;
   void OnSignedOut() override;
   void AddConnectionObserver(GCMConnectionObserver* observer) override;
@@ -60,8 +65,7 @@ class FakeGCMDriver : public GCMDriver {
                 const std::string& receiver_id,
                 const OutgoingMessage& message) override;
   void RecordDecryptionFailure(const std::string& app_id,
-                               GCMEncryptionProvider::DecryptionResult result)
-      override;
+                               GCMDecryptionResult result) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeGCMDriver);

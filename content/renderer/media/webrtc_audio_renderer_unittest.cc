@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "content/public/renderer/media_stream_audio_renderer.h"
@@ -66,7 +67,7 @@ class WebRtcAudioRendererTest : public testing::Test,
       : message_loop_(new base::MessageLoopForIO),
         source_(new MockAudioRendererSource()) {
     blink::WebVector<blink::WebMediaStreamTrack> dummy_tracks;
-    stream_.initialize(blink::WebString::fromUTF8("new stream"), dummy_tracks,
+    stream_.Initialize(blink::WebString::FromUTF8("new stream"), dummy_tracks,
                        dummy_tracks);
   }
 
@@ -127,10 +128,10 @@ class WebRtcAudioRendererTest : public testing::Test,
   void TearDown() override {
     renderer_proxy_ = nullptr;
     renderer_ = nullptr;
-    stream_.reset();
+    stream_.Reset();
     source_.reset();
     mock_sink_ = nullptr;
-    blink::WebHeap::collectAllGarbageForTesting();
+    blink::WebHeap::CollectAllGarbageForTesting();
   }
 
   std::unique_ptr<base::MessageLoopForIO> message_loop_;

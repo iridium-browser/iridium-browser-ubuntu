@@ -10,37 +10,39 @@ found in the LICENSE file.
 
 'use strict';
 
-tr.exportTo('tr.b', function() {
-  function _iterateElementDeeplyImpl(element, cb, thisArg, includeElement) {
-    if (includeElement && cb.call(thisArg, element))
-      return true;
+tr.exportTo('tr.ui.b', function() {
+  function iterateElementDeeplyImpl(element, cb, thisArg, includeElement) {
+    if (includeElement && cb.call(thisArg, element)) return true;
 
     if (element.root &&
         element.root !== element &&
-        _iterateElementDeeplyImpl(element.root, cb, thisArg, false)) {
+        iterateElementDeeplyImpl(element.root, cb, thisArg, false)) {
       // Some elements, most notably Polymer template dom-repeat='...'
       // elements, are their own shadow root. Make sure that we avoid infinite
       // recursion by avoiding these elements.
       return true;
     }
-    var children = Polymer.dom(element).children;
-    for (var i = 0; i < children.length; i++)
-      if (_iterateElementDeeplyImpl(children[i], cb, thisArg, true))
+    const children = Polymer.dom(element).children;
+    for (let i = 0; i < children.length; i++) {
+      if (iterateElementDeeplyImpl(children[i], cb, thisArg, true)) {
         return true;
+      }
+    }
 
     return false;
   }
 
   function iterateElementDeeply(element, cb, thisArg) {
-    _iterateElementDeeplyImpl(element, cb, thisArg, false);
+    iterateElementDeeplyImpl(element, cb, thisArg, false);
   }
 
   function findDeepElementMatchingPredicate(element, predicate) {
-    var foundElement = undefined;
+    let foundElement = undefined;
     function matches(element) {
-      var match = predicate(element);
-      if (!match)
+      const match = predicate(element);
+      if (!match) {
         return false;
+      }
       foundElement = element;
       return true;
     }
@@ -49,9 +51,9 @@ tr.exportTo('tr.b', function() {
   }
 
   function findDeepElementsMatchingPredicate(element, predicate) {
-    var foundElements = [];
+    const foundElements = [];
     function matches(element) {
-      var match = predicate(element);
+      const match = predicate(element);
       if (match) {
         foundElements.push(element);
       }
@@ -73,13 +75,12 @@ tr.exportTo('tr.b', function() {
   }
   function findDeepElementWithTextContent(element, re) {
     return findDeepElementMatchingPredicate(element, function(element) {
-      if (element.children.length !== 0)
-        return false;
+      if (element.children.length !== 0) return false;
       return re.test(Polymer.dom(element).textContent);
     });
   }
+
   return {
-    iterateElementDeeply,
     findDeepElementMatching,
     findDeepElementsMatching,
     findDeepElementMatchingPredicate,

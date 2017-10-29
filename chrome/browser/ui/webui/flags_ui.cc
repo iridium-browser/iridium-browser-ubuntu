@@ -4,7 +4,9 @@
 
 #include "chrome/browser/ui/webui/flags_ui.h"
 
+#include <memory>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -99,7 +101,6 @@ content::WebUIDataSource* CreateFlagsUIHTMLSource() {
   }
 #endif
 
-  source->SetJsonPath("strings.js");
   source->AddResourcePath(flags_ui::kFlagsJS, IDR_FLAGS_UI_FLAGS_JS);
   source->SetDefaultResource(IDR_FLAGS_UI_FLAGS_HTML);
   return source;
@@ -173,7 +174,7 @@ void FlagsDOMHandler::Init(flags_ui::FlagsStorage* flags_storage,
   access_ = access;
 
   if (experimental_features_requested_)
-    HandleRequestExperimentalFeatures(NULL);
+    HandleRequestExperimentalFeatures(nullptr);
 }
 
 void FlagsDOMHandler::HandleRequestExperimentalFeatures(
@@ -192,8 +193,8 @@ void FlagsDOMHandler::HandleRequestExperimentalFeatures(
                                      access_,
                                      supported_features.get(),
                                      unsupported_features.get());
-  results.Set(flags_ui::kSupportedFeatures, supported_features.release());
-  results.Set(flags_ui::kUnsupportedFeatures, unsupported_features.release());
+  results.Set(flags_ui::kSupportedFeatures, std::move(supported_features));
+  results.Set(flags_ui::kUnsupportedFeatures, std::move(unsupported_features));
   results.SetBoolean(flags_ui::kNeedsRestart,
                      about_flags::IsRestartNeededToCommitChanges());
   results.SetBoolean(flags_ui::kShowOwnerWarning,

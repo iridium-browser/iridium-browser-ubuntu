@@ -4,18 +4,15 @@
 
 #include "components/safe_browsing/base_resource_throttle.h"
 
-#include <iterator>
 #include <utility>
 
-#include "base/debug/alias.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "components/safe_browsing/base_ui_manager.h"
+#include "components/safe_browsing/web_ui/constants.h"
 #include "components/safe_browsing_db/util.h"
 #include "components/security_interstitials/content/unsafe_resource.h"
-#include "components/subresource_filter/content/browser/content_subresource_filter_driver_factory.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
@@ -75,10 +72,12 @@ std::unique_ptr<base::Value> NetLogStringCallback(const char* name,
 BaseResourceThrottle::BaseResourceThrottle(
     const net::URLRequest* request,
     content::ResourceType resource_type,
+    SBThreatTypeSet threat_types,
     scoped_refptr<SafeBrowsingDatabaseManager> database_manager,
     scoped_refptr<BaseUIManager> ui_manager)
     : ui_manager_(ui_manager),
       threat_type_(SB_THREAT_TYPE_SAFE),
+      threat_types_(std::move(threat_types)),
       database_manager_(database_manager),
       request_(request),
       state_(STATE_NONE),
@@ -87,19 +86,6 @@ BaseResourceThrottle::BaseResourceThrottle(
       net_log_with_source_(
           net::NetLogWithSource::Make(request->net_log().net_log(),
                                       NetLogSourceType::SAFE_BROWSING)) {}
-
-// static
-BaseResourceThrottle* BaseResourceThrottle::MaybeCreate(
-    net::URLRequest* request,
-    content::ResourceType resource_type,
-    scoped_refptr<SafeBrowsingDatabaseManager> database_manager,
-    scoped_refptr<BaseUIManager> ui_manager) {
-  if (database_manager->IsSupported()) {
-    return new BaseResourceThrottle(request, resource_type,
-                                    database_manager, ui_manager);
-  }
-  return nullptr;
-}
 
 BaseResourceThrottle::~BaseResourceThrottle() {
   if (defer_state_ != DEFERRED_NONE) {
@@ -234,18 +220,9 @@ void BaseResourceThrottle::OnCheckBrowseUrlResult(
     SBThreatType threat_type,
     const ThreatMetadata& metadata) {
   CHECK_EQ(state_, STATE_CHECKING_URL);
-  // TODO(vakh): The following base::debug::Alias() and CHECK calls should be
-  // removed after http://crbug.com/660293 is fixed.
   CHECK(url.is_valid());
   CHECK(url_being_checked_.is_valid());
-  if (url != url_being_checked_) {
-    bool url_had_timed_out = timed_out_urls_.count(url) > 0;
-    char buf[1000];
-    snprintf(buf, sizeof(buf), "sbtr::ocbur:%d:%s -- %s\n", url_had_timed_out,
-             url.spec().c_str(), url_being_checked_.spec().c_str());
-    base::debug::Alias(buf);
-    CHECK(false) << "buf: " << buf;
-  }
+  CHECK_EQ(url, url_being_checked_);
 
   timer_.Stop();  // Cancel the timeout timer.
   threat_type_ = threat_type;
@@ -316,43 +293,12 @@ void BaseResourceThrottle::StartDisplayingBlockingPageHelper(
 }
 
 // Static
-void BaseResourceThrottle::NotifySubresourceFilterOfBlockedResource(
-    const security_interstitials::UnsafeResource& resource) {
-  content::WebContents* web_contents = resource.web_contents_getter.Run();
-  DCHECK(web_contents);
-  // Once activated, the subresource filter will filter subresources, but is
-  // triggered when the main frame document matches Safe Browsing blacklists.
-  if (!resource.is_subresource) {
-    using subresource_filter::ContentSubresourceFilterDriverFactory;
-    ContentSubresourceFilterDriverFactory* driver_factory =
-        ContentSubresourceFilterDriverFactory::FromWebContents(web_contents);
-
-    // Content embedders (such as Android Webview) do not have a driver_factory.
-    if (driver_factory) {
-      // For a redirect chain of A -> B -> C, the subresource filter expects C
-      // as the resource URL and [A, B] as redirect URLs.
-      std::vector<GURL> redirect_parent_urls;
-      if (!resource.redirect_urls.empty()) {
-        redirect_parent_urls.push_back(resource.original_url);
-        redirect_parent_urls.insert(redirect_parent_urls.end(),
-                                    resource.redirect_urls.begin(),
-                                    std::prev(resource.redirect_urls.end()));
-      }
-      driver_factory->OnMainResourceMatchedSafeBrowsingBlacklist(
-          resource.url, redirect_parent_urls, resource.threat_type,
-          resource.threat_metadata.threat_pattern_type);
-    }
-  }
-}
-
-// Static
 void BaseResourceThrottle::StartDisplayingBlockingPage(
     const base::WeakPtr<BaseResourceThrottle>& throttle,
     scoped_refptr<BaseUIManager> ui_manager,
     const security_interstitials::UnsafeResource& resource) {
   content::WebContents* web_contents = resource.web_contents_getter.Run();
   if (web_contents) {
-    NotifySubresourceFilterOfBlockedResource(resource);
     ui_manager->DisplayBlockingPage(resource);
     return;
   }
@@ -404,7 +350,11 @@ bool BaseResourceThrottle::CheckUrl(const GURL& url) {
   UMA_HISTOGRAM_ENUMERATION("SB2.ResourceTypes2.Checked", resource_type_,
                             content::RESOURCE_TYPE_LAST_TYPE);
 
-  if (database_manager_->CheckBrowseUrl(url, this)) {
+  if (CheckWebUIUrls(url)) {
+    return false;
+  }
+
+  if (database_manager_->CheckBrowseUrl(url, threat_types_, this)) {
     threat_type_ = SB_THREAT_TYPE_SAFE;
     ui_manager_->LogPauseDelay(base::TimeDelta());  // No delay.
     return true;
@@ -424,6 +374,28 @@ bool BaseResourceThrottle::CheckUrl(const GURL& url) {
   return false;
 }
 
+bool BaseResourceThrottle::CheckWebUIUrls(const GURL& url) {
+  DCHECK(threat_type_ == safe_browsing::SB_THREAT_TYPE_SAFE);
+  if (url == kChromeUISafeBrowsingMatchMalwareUrl) {
+    threat_type_ = safe_browsing::SB_THREAT_TYPE_URL_MALWARE;
+  } else if (url == kChromeUISafeBrowsingMatchPhishingUrl) {
+    threat_type_ = safe_browsing::SB_THREAT_TYPE_URL_PHISHING;
+  } else if (url == kChromeUISafeBrowsingMatchUnwantedUrl) {
+    threat_type_ = safe_browsing::SB_THREAT_TYPE_URL_UNWANTED;
+  }
+
+  if (threat_type_ != safe_browsing::SB_THREAT_TYPE_SAFE) {
+    state_ = STATE_CHECKING_URL;
+    url_being_checked_ = url;
+    content::BrowserThread::PostTask(
+        content::BrowserThread::IO, FROM_HERE,
+        base::Bind(&BaseResourceThrottle::OnCheckBrowseUrlResult, AsWeakPtr(),
+                   url, threat_type_, ThreatMetadata()));
+    return true;
+  }
+  return false;
+}
+
 void BaseResourceThrottle::OnCheckUrlTimeout() {
   CHECK_EQ(state_, STATE_CHECKING_URL);
 
@@ -431,8 +403,6 @@ void BaseResourceThrottle::OnCheckUrlTimeout() {
 
   OnCheckBrowseUrlResult(url_being_checked_, safe_browsing::SB_THREAT_TYPE_SAFE,
                          ThreatMetadata());
-
-  timed_out_urls_.insert(url_being_checked_);
 }
 
 void BaseResourceThrottle::ResumeRequest() {

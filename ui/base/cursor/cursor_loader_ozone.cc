@@ -12,11 +12,13 @@
 
 namespace ui {
 
-CursorLoaderOzone::CursorLoaderOzone() {}
+CursorLoaderOzone::CursorLoaderOzone() {
+  factory_ = CursorFactoryOzone::GetInstance();
+}
 
 CursorLoaderOzone::~CursorLoaderOzone() {}
 
-void CursorLoaderOzone::LoadImageCursor(int id,
+void CursorLoaderOzone::LoadImageCursor(CursorType id,
                                         int resource_id,
                                         const gfx::Point& hot) {
   SkBitmap bitmap;
@@ -24,11 +26,10 @@ void CursorLoaderOzone::LoadImageCursor(int id,
 
   GetImageCursorBitmap(resource_id, scale(), rotation(), &hotspot, &bitmap);
 
-  cursors_[id] =
-      CursorFactoryOzone::GetInstance()->CreateImageCursor(bitmap, hotspot);
+  cursors_[id] = factory_->CreateImageCursor(bitmap, hotspot, scale());
 }
 
-void CursorLoaderOzone::LoadAnimatedCursor(int id,
+void CursorLoaderOzone::LoadAnimatedCursor(CursorType id,
                                            int resource_id,
                                            const gfx::Point& hot,
                                            int frame_delay_ms) {
@@ -38,31 +39,31 @@ void CursorLoaderOzone::LoadAnimatedCursor(int id,
   GetAnimatedCursorBitmaps(
       resource_id, scale(), rotation(), &hotspot, &bitmaps);
 
-  cursors_[id] = CursorFactoryOzone::GetInstance()->CreateAnimatedCursor(
-      bitmaps, hotspot, frame_delay_ms);
+  cursors_[id] =
+      factory_->CreateAnimatedCursor(bitmaps, hotspot, frame_delay_ms, scale());
 }
 
 void CursorLoaderOzone::UnloadAll() {
   for (ImageCursorMap::const_iterator it = cursors_.begin();
-       it != cursors_.end();
-       ++it)
-    CursorFactoryOzone::GetInstance()->UnrefImageCursor(it->second);
+       it != cursors_.end(); ++it) {
+    factory_->UnrefImageCursor(it->second);
+  }
   cursors_.clear();
 }
 
 void CursorLoaderOzone::SetPlatformCursor(gfx::NativeCursor* cursor) {
-  int native_type = cursor->native_type();
+  CursorType native_type = cursor->native_type();
   PlatformCursor platform;
 
   if (cursors_.count(native_type)) {
     // An image cursor is loaded for this type.
     platform = cursors_[native_type];
-  } else if (native_type == kCursorCustom) {
+  } else if (native_type == CursorType::kCustom) {
     // The platform cursor was already set via WebCursor::GetPlatformCursor.
     platform = cursor->platform();
   } else {
     // Use default cursor of this type.
-    platform = CursorFactoryOzone::GetInstance()->GetDefaultCursor(native_type);
+    platform = factory_->GetDefaultCursor(native_type);
   }
 
   cursor->SetPlatformCursor(platform);

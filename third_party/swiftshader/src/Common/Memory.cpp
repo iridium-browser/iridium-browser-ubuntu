@@ -22,6 +22,7 @@
 		#define WIN32_LEAN_AND_MEAN
 	#endif
 	#include <windows.h>
+	#include <intrin.h>
 #else
 	#include <sys/mman.h>
 	#include <unistd.h>
@@ -31,8 +32,10 @@
 
 #undef allocate
 #undef deallocate
-#undef allocateZero
-#undef deallocateZero
+
+#if (defined(__i386__) || defined(_M_IX86) || defined(__x86_64__) || defined (_M_X64)) && !defined(__x86__)
+#define __x86__
+#endif
 
 namespace sw
 {
@@ -60,10 +63,10 @@ struct Allocation
 	unsigned char *block;
 };
 
-void *allocate(size_t bytes, size_t alignment)
+inline void *allocateRaw(size_t bytes, size_t alignment)
 {
 	unsigned char *block = new unsigned char[bytes + sizeof(Allocation) + alignment];
-	unsigned char *aligned = 0;
+	unsigned char *aligned = nullptr;
 
 	if(block)
 	{
@@ -77,9 +80,9 @@ void *allocate(size_t bytes, size_t alignment)
 	return aligned;
 }
 
-void *allocateZero(size_t bytes, size_t alignment)
+void *allocate(size_t bytes, size_t alignment)
 {
-	void *memory = allocate(bytes, alignment);
+	void *memory = allocateRaw(bytes, alignment);
 
 	if(memory)
 	{
@@ -127,5 +130,33 @@ void deallocateExecutable(void *memory, size_t bytes)
 	#endif
 
 	deallocate(memory);
+}
+
+void clear(uint16_t *memory, uint16_t element, size_t count)
+{
+	#if defined(_MSC_VER) && defined(__x86__)
+		__stosw(memory, element, count);
+	#elif defined(__GNUC__) && defined(__x86__)
+		__asm__("rep stosw" : : "D"(memory), "a"(element), "c"(count));
+	#else
+		for(size_t i = 0; i < count; i++)
+		{
+			memory[i] = element;
+		}
+	#endif
+}
+
+void clear(uint32_t *memory, uint32_t element, size_t count)
+{
+	#if defined(_MSC_VER) && defined(__x86__)
+		__stosd((unsigned long*)memory, element, count);
+	#elif defined(__GNUC__) && defined(__x86__)
+		__asm__("rep stosl" : : "D"(memory), "a"(element), "c"(count));
+	#else
+		for(size_t i = 0; i < count; i++)
+		{
+			memory[i] = element;
+		}
+	#endif
 }
 }

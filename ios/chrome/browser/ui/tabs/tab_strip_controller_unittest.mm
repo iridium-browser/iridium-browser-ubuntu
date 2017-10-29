@@ -121,15 +121,14 @@ class TabStripControllerTest : public PlatformTest {
     [[[tab2 stub] andReturn:@"Tab Title 2"] title];
     [[[tab1 stub] andReturn:nil] favicon];
     [[[tab2 stub] andReturn:nil] favicon];
-    [[tab1 stub] close];
-    [[tab2 stub] close];
 
     tabModel_ = tabModel;
     tab1_ = tab1;
     tab2_ = tab2;
     controller_ =
         [[TabStripController alloc] initWithTabModel:(TabModel*)tabModel_
-                                               style:TabStrip::kStyleDark];
+                                               style:TabStrip::kStyleDark
+                                          dispatcher:nil];
 
     // Force the view to load.
     UIWindow* window = [[UIWindow alloc] initWithFrame:CGRectZero];

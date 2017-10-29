@@ -98,6 +98,32 @@
   const errCannotPipeToALockedStream = 'Cannot pipe to a locked stream';
   const errDestinationStreamClosed = 'Destination stream closed';
 
+  // TODO(ricea): Share these with WritableStream.
+  function internalError() {
+    throw new RangeError('ReadableStream Internal Error');
+  }
+
+  function rejectPromise(p, reason) {
+    if (!v8.isPromise(p)) {
+      internalError();
+    }
+    v8.rejectPromise(p, reason);
+  }
+
+  function resolvePromise(p, value) {
+    if (!v8.isPromise(p)) {
+      internalError();
+    }
+    v8.resolvePromise(p, value);
+  }
+
+  function markPromiseAsHandled(p) {
+    if (!v8.isPromise(p)) {
+      internalError();
+    }
+    v8.markPromiseAsHandled(p);
+  }
+
   class ReadableStream {
     constructor() {
       // TODO(domenic): when V8 gets default parameters and destructuring, all
@@ -176,6 +202,40 @@
       throw new RangeError(errGetReaderBadMode);
     }
 
+    pipeThrough({writable, readable}, options) {
+      const promise = this.pipeTo(writable, options);
+      if (v8.isPromise(promise)) {
+        markPromiseAsHandled(promise);
+      }
+      return readable;
+    }
+
+    pipeTo(dest, {preventClose, preventAbort, preventCancel} = {}) {
+      if (!IsReadableStream(this)) {
+        return Promise_reject(new TypeError(streamErrors.illegalInvocation));
+      }
+
+      if (!binding.IsWritableStream(dest)) {
+        // TODO(ricea): Think about having a better error message.
+        return Promise_reject(new TypeError(streamErrors.illegalInvocation));
+      }
+
+      preventClose = Boolean(preventClose);
+      preventAbort = Boolean(preventAbort);
+      preventCancel = Boolean(preventCancel);
+
+      if (IsReadableStreamLocked(this)) {
+        return Promise_reject(new TypeError(errCannotPipeLockedStream));
+      }
+
+      if (binding.IsWritableStreamLocked(dest)) {
+        return Promise_reject(new TypeError(errCannotPipeToALockedStream));
+      }
+
+      return ReadableStreamPipeTo(this, dest, preventClose, preventAbort,
+                                  preventCancel);
+    }
+
     tee() {
       if (IsReadableStream(this) === false) {
         throw new TypeError(streamErrors.illegalInvocation);
@@ -185,36 +245,14 @@
     }
   }
 
-  // TODO(ricea): Move this into the class definition once it ships.
-  function ReadableStream_prototype_pipeThrough({writable, readable}, options) {
-    this.pipeTo(writable, options);
-    return readable;
-  }
-
-  // TODO(ricea): Move this into the class definition once it ships.
-  function ReadableStream_prototype_pipeTo(
-      dest, {preventClose, preventAbort, preventCancel} = {}) {
-    if (!IsReadableStream(this)) {
-      return Promise_reject(new TypeError(streamErrors.illegalInvocation));
-    }
-
-    if (!binding.IsWritableStream(dest)) {
-      // TODO(ricea): Think about having a better error message.
-      return Promise_reject(new TypeError(streamErrors.illegalInvocation));
-    }
-
-    preventClose = Boolean(preventClose);
-    preventAbort = Boolean(preventAbort);
-    preventCancel = Boolean(preventCancel);
-
-    const readable = this;
-    if (IsReadableStreamLocked(readable)) {
-      return Promise_reject(new TypeError(errCannotPipeLockedStream));
-    }
-
-    if (binding.IsWritableStreamLocked(dest)) {
-      return Promise_reject(new TypeError(errCannotPipeToALockedStream));
-    }
+  function ReadableStreamPipeTo(readable, dest, preventClose, preventAbort,
+                                preventCancel) {
+    // Callers of this function must ensure that the following invariants
+    // are enforced:
+    // assert(IsReadableStream(readable));
+    // assert(binding.IsWritableStream(dest));
+    // assert(!IsReadableStreamLocked(readable));
+    // assert(!binding.IsWritableStreamLocked(dest));
 
     const reader = AcquireReadableStreamDefaultReader(readable);
     const writer = binding.AcquireWritableStreamDefaultWriter(dest);
@@ -269,7 +307,13 @@
       const desiredSize =
           binding.WritableStreamDefaultWriterGetDesiredSize(writer);
       if (desiredSize === null) {
-        writableError(binding.getWritableStreamStoredError(dest));
+        // This can happen if abort() is queued but not yet started when
+        // pipeTo() is called. In that case [[storedError]] is not set yet, and
+        // we need to wait until it is before we can cancel the pipe. Once
+        // [[storedError]] has been set, the rejection handler set on the writer
+        // closed promise above will detect it, so all we need to do here is
+        // nothing.
+        return;
       }
       if (desiredSize <= 0) {
         thenPromise(
@@ -377,9 +421,9 @@
       binding.WritableStreamDefaultWriterRelease(writer);
       ReadableStreamReaderGenericRelease(reader);
       if (errorGiven) {
-        v8.rejectPromise(promise, error);
+        rejectPromise(promise, error);
       } else {
-        v8.resolvePromise(promise, undefined);
+        resolvePromise(promise, undefined);
       }
     }
 
@@ -400,7 +444,7 @@
 
       this[_underlyingSource] = underlyingSource;
 
-      this[_queue] = new Queue();
+      this[_queue] = new binding.SimpleQueue();
       this[_totalQueuedSize] = 0;
 
       this[_readableStreamDefaultControllerBits] = 0b0;
@@ -501,7 +545,7 @@
   }
 
   function ReadableStreamDefaultControllerCancel(controller, reason) {
-    controller[_queue] = new Queue();
+    controller[_queue] = new binding.SimpleQueue();
 
     const underlyingSource = controller[_underlyingSource];
     return PromiseCallOrNoop(underlyingSource, 'cancel', reason, 'underlyingSource.cancel');
@@ -545,7 +589,7 @@
 
       ReadableStreamReaderGenericInitialize(this, stream);
 
-      this[_readRequests] = new Queue();
+      this[_readRequests] = new binding.SimpleQueue();
     }
 
     get closed() {
@@ -642,7 +686,7 @@
     const reader = stream[_reader];
 
     const readRequest = stream[_reader][_readRequests].shift();
-    v8.resolvePromise(readRequest, CreateIterResultObject(chunk, done));
+    resolvePromise(readRequest, CreateIterResultObject(chunk, done));
   }
 
   function ReadableStreamDefaultControllerEnqueue(controller, chunk) {
@@ -688,7 +732,7 @@
   }
 
   function ReadableStreamDefaultControllerError(controller, e) {
-    controller[_queue] = new Queue();
+    controller[_queue] = new binding.SimpleQueue();
     const stream = controller[_controlledReadableStream];
     ReadableStreamError(stream, e);
   }
@@ -703,12 +747,12 @@
     }
 
     if (IsReadableStreamDefaultReader(reader) === true) {
-      reader[_readRequests].forEach(request => v8.rejectPromise(request, e));
-      reader[_readRequests] = new Queue();
+      reader[_readRequests].forEach(request => rejectPromise(request, e));
+      reader[_readRequests] = new binding.SimpleQueue();
     }
 
-    v8.rejectPromise(reader[_closedPromise], e);
-    v8.markPromiseAsHandled(reader[_closedPromise]);
+    rejectPromise(reader[_closedPromise], e);
+    markPromiseAsHandled(reader[_closedPromise]);
   }
 
   function ReadableStreamClose(stream) {
@@ -721,11 +765,11 @@
 
     if (IsReadableStreamDefaultReader(reader) === true) {
       reader[_readRequests].forEach(request =>
-          v8.resolvePromise(request, CreateIterResultObject(undefined, true)));
-      reader[_readRequests] = new Queue();
+          resolvePromise(request, CreateIterResultObject(undefined, true)));
+      reader[_readRequests] = new binding.SimpleQueue();
     }
 
-    v8.resolvePromise(reader[_closedPromise], undefined);
+    resolvePromise(reader[_closedPromise], undefined);
   }
 
   function ReadableStreamDefaultControllerGetDesiredSize(controller) {
@@ -788,7 +832,7 @@
         break;
       case STATE_ERRORED:
         reader[_closedPromise] = Promise_reject(stream[_storedError]);
-        v8.markPromiseAsHandled(reader[_closedPromise]);
+        markPromiseAsHandled(reader[_closedPromise]);
         break;
     }
   }
@@ -805,11 +849,11 @@
     }
 
     if (ReadableStreamGetState(reader[_ownerReadableStream]) === STATE_READABLE) {
-      v8.rejectPromise(reader[_closedPromise], new TypeError(errReleasedReaderClosedPromise));
+      rejectPromise(reader[_closedPromise], new TypeError(errReleasedReaderClosedPromise));
     } else {
       reader[_closedPromise] = Promise_reject(new TypeError(errReleasedReaderClosedPromise));
     }
-    v8.markPromiseAsHandled(reader[_closedPromise]);
+    markPromiseAsHandled(reader[_closedPromise]);
 
     reader[_ownerReadableStream][_reader] = undefined;
     reader[_ownerReadableStream] = undefined;
@@ -969,7 +1013,7 @@
       if (canceled2 === true) {
         const compositeReason = [reason1, reason2];
         const cancelResult = ReadableStreamCancel(stream, compositeReason);
-        v8.resolvePromise(promise, cancelResult);
+        resolvePromise(promise, cancelResult);
       }
 
       return promise;
@@ -982,7 +1026,7 @@
       if (canceled1 === true) {
         const compositeReason = [reason1, reason2];
         const cancelResult = ReadableStreamCancel(stream, compositeReason);
-        v8.resolvePromise(promise, cancelResult);
+        resolvePromise(promise, cancelResult);
       }
 
       return promise;
@@ -991,77 +1035,7 @@
 
   //
   // Queue-with-sizes
-  // Modified from taking the queue (as in the spec) to taking the stream, so we
-  // can modify the queue size alongside.
   //
-
-  // Simple queue structure. Avoids scalability issues with using
-  // InternalPackedArray directly by using multiple arrays
-  // in a linked list and keeping the array size bounded.
-  const QUEUE_MAX_ARRAY_SIZE = 16384;
-  class Queue {
-    constructor() {
-      this.front = {
-        elements: new v8.InternalPackedArray(),
-        next: undefined,
-      };
-      this.back = this.front;
-      // The cursor is used to avoid calling InternalPackedArray.shift().
-      this.cursor = 0;
-      this.size = 0;
-    }
-
-    get length() {
-      return this.size;
-    }
-
-    push(element) {
-      ++this.size;
-      if (this.back.elements.length === QUEUE_MAX_ARRAY_SIZE) {
-        const oldBack = this.back;
-        this.back = {
-          elements: new v8.InternalPackedArray(),
-          next: undefined,
-        };
-        oldBack.next = this.back;
-      }
-      this.back.elements.push(element);
-    }
-
-    shift() {
-      // assert(this.size > 0);
-      --this.size;
-      if (this.front.elements.length === this.cursor) {
-        // assert(this.cursor === QUEUE_MAX_ARRAY_SIZE);
-        // assert(this.front.next !== undefined);
-        this.front = this.front.next;
-        this.cursor = 0;
-      }
-      const element = this.front.elements[this.cursor];
-      // Permit shifted element to be garbage collected.
-      this.front.elements[this.cursor] = undefined;
-      ++this.cursor;
-
-      return element;
-    }
-
-    forEach(callback) {
-      let i = this.cursor;
-      let node = this.front;
-      let elements = node.elements;
-      while (i !== elements.length || node.next !== undefined) {
-        if (i === elements.length) {
-          // assert(node.next !== undefined);
-          // assert(i === QUEUE_MAX_ARRAY_SIZE);
-          node = node.next;
-          elements = node.elements;
-          i = 0;
-        }
-        callback(elements[i]);
-        ++i;
-      }
-    }
-  }
 
   function DequeueValue(controller) {
     const result = controller[_queue].shift();
@@ -1092,7 +1066,7 @@
 
     highWaterMark = Number(highWaterMark);
     if (Number_isNaN(highWaterMark)) {
-      throw new RangeError(streamErrors.errInvalidHWM);
+      throw new RangeError(streamErrors.invalidHWM);
     }
     if (highWaterMark < 0) {
       throw new RangeError(streamErrors.invalidHWM);
@@ -1178,9 +1152,4 @@
         return new ReadableStream(
             underlyingSource, strategy, createWithExternalControllerSentinel);
       };
-
-  // Temporary exports while pipeTo() and pipeThrough() are behind flags
-  binding.ReadableStream_prototype_pipeThrough =
-      ReadableStream_prototype_pipeThrough;
-  binding.ReadableStream_prototype_pipeTo = ReadableStream_prototype_pipeTo;
 });

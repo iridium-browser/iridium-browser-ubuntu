@@ -23,10 +23,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://www.khronos.org/registry/webgl/extensions/OES_vertex_array_object/
+
 [
     DependentLifetime,
     DoNotCheckConstants,
-    NoInterfaceObject,
+    NoInterfaceObject
 ] interface OESVertexArrayObject {
     const unsigned long VERTEX_ARRAY_BINDING_OES = 0x85B5;
 

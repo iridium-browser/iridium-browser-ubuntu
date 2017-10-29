@@ -16,7 +16,7 @@ cr.define('print_preview', function() {
      * @private
      */
     this.capabilities_ = null;
-  };
+  }
 
   CapabilitiesHolder.prototype = {
     /** @return {?print_preview.Cdd} The instance held by the holder. */
@@ -34,7 +34,5 @@ cr.define('print_preview', function() {
   };
 
   // Export
-  return {
-    CapabilitiesHolder: CapabilitiesHolder
-  };
+  return {CapabilitiesHolder: CapabilitiesHolder};
 });

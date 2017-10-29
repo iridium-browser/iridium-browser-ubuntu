@@ -33,13 +33,11 @@ bool DataFetcherSharedMemory::Start(ConsumerType consumer_type, void* buffer) {
       // implementation fire an all-null event to signal this to blink.
       orientation_absolute_buffer_->seqlock.WriteBegin();
       orientation_absolute_buffer_->data.absolute = true;
-      orientation_absolute_buffer_->data.allAvailableSensorsAreActive = true;
+      orientation_absolute_buffer_->data.all_available_sensors_are_active =
+          true;
       orientation_absolute_buffer_->seqlock.WriteEnd();
       return false;
     }
-    case CONSUMER_TYPE_LIGHT:
-      NOTIMPLEMENTED();
-      return false;
   }
   NOTREACHED();
   return false;
@@ -54,14 +52,12 @@ bool DataFetcherSharedMemory::Stop(ConsumerType consumer_type) {
     case CONSUMER_TYPE_ORIENTATION_ABSOLUTE:
       if (orientation_absolute_buffer_) {
         orientation_absolute_buffer_->seqlock.WriteBegin();
-        orientation_absolute_buffer_->data.allAvailableSensorsAreActive = false;
+        orientation_absolute_buffer_->data.all_available_sensors_are_active =
+            false;
         orientation_absolute_buffer_->seqlock.WriteEnd();
         orientation_absolute_buffer_ = nullptr;
       }
       return true;
-    case CONSUMER_TYPE_LIGHT:
-      NOTIMPLEMENTED();
-      return false;
   }
   NOTREACHED();
   return false;

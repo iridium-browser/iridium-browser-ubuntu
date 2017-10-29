@@ -9,12 +9,14 @@ from page_sets.system_health import system_health_story
 from page_sets.login_helpers import dropbox_login
 from page_sets.login_helpers import google_login
 
-from telemetry import decorators
-
 
 class _LoadingStory(system_health_story.SystemHealthStory):
   """Abstract base class for single-page System Health user stories."""
   ABSTRACT_STORY = True
+
+  @classmethod
+  def GenerateStoryDescription(cls):
+    return 'Load %s' % cls.URL
 
 
 ################################################################################
@@ -39,9 +41,10 @@ class LoadYahooStory(_LoadingStory):
   URL = 'https://search.yahoo.com/search;_ylt=?p=google'
 
 
-class LoadAmazonStory(_LoadingStory):
+class LoadAmazonDesktopStory(_LoadingStory):
   NAME = 'load:search:amazon'
   URL = 'https://www.amazon.com/s/?field-keywords=nexus'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
 class LoadTaobaoDesktopStory(_LoadingStory):
@@ -76,15 +79,13 @@ class LoadEbayStory(_LoadingStory):
 ################################################################################
 
 
-class LoadFacebookStory(_LoadingStory):
-  # Using Facebook login often causes "404 Not Found" with WPR.
-  NAME = 'load:social:facebook'
-  URL = 'https://www.facebook.com/rihanna'
-
-
 class LoadTwitterStory(_LoadingStory):
   NAME = 'load:social:twitter'
   URL = 'https://www.twitter.com/nasa'
+
+  # Desktop version is already covered by
+  # 'browse:social:twitter_infinite_scroll'
+  SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
 
 
 class LoadVkStory(_LoadingStory):
@@ -98,22 +99,19 @@ class LoadVkStory(_LoadingStory):
   TAGS = [story_tags.INTERNATIONAL]
 
 
-class LoadInstagramStory(_LoadingStory):
+class LoadInstagramDesktopStory(_LoadingStory):
   NAME = 'load:social:instagram'
   URL = 'https://www.instagram.com/selenagomez/'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
 class LoadPinterestStory(_LoadingStory):
   NAME = 'load:social:pinterest'
   URL = 'https://uk.pinterest.com/categories/popular/'
   TAGS = [story_tags.JAVASCRIPT_HEAVY]
-
-
-class LoadTumblrStory(_LoadingStory):
-  NAME = 'load:social:tumblr'
-  # Redirects to the "http://" version.
-  URL = 'https://50thousand.tumblr.com/'
-  TAGS = [story_tags.JAVASCRIPT_HEAVY]
+  # Mobile story is already covered by
+  # 'browse:social:pinterest_infinite_scroll'.
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
 ################################################################################
@@ -121,10 +119,11 @@ class LoadTumblrStory(_LoadingStory):
 ################################################################################
 
 
-class LoadBbcStory(_LoadingStory):
+class LoadBbcDesktopStory(_LoadingStory):
   NAME = 'load:news:bbc'
   # Redirects to the "http://" version.
   URL = 'https://www.bbc.co.uk/news/world-asia-china-36189636'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
 class LoadCnnStory(_LoadingStory):
@@ -134,14 +133,16 @@ class LoadCnnStory(_LoadingStory):
   TAGS = [story_tags.JAVASCRIPT_HEAVY]
 
 
-class LoadFlipboardStory(_LoadingStory):
+class LoadFlipboardDesktopStory(_LoadingStory):
   NAME = 'load:news:flipboard'
   URL = 'https://flipboard.com/explore'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
-class LoadHackerNewsStory(_LoadingStory):
+class LoadHackerNewsDesktopStory(_LoadingStory):
   NAME = 'load:news:hackernews'
   URL = 'https://news.ycombinator.com'
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
 class LoadNytimesDesktopStory(_LoadingStory):
@@ -175,18 +176,6 @@ class LoadRedditMobileStory(_LoadingStory):
   SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
 
 
-class LoadSohuMobileStory(_LoadingStory):
-  NAME = 'load:news:sohu'
-  # Using "https://" leads to missing images and scripts on mobile (due to
-  # mixed content).
-  URL = 'http://m.sohu.com/n/447433356/'
-  # The desktop page (http://news.sohu.com/20160503/n447433356.shtml) almost
-  # always fails to completely load due to
-  # https://github.com/chromium/web-page-replay/issues/74.
-  SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
-  TAGS = [story_tags.INTERNATIONAL]
-
-
 class LoadWashingtonPostMobileStory(_LoadingStory):
   NAME = 'load:news:washingtonpost'
   URL = 'https://www.washingtonpost.com/pwa'
@@ -208,6 +197,14 @@ class LoadWashingtonPostMobileStory(_LoadingStory):
 class LoadWikipediaStory(_LoadingStory):
   NAME = 'load:news:wikipedia'
   URL = 'https://en.wikipedia.org/wiki/Science'
+  TAGS = [story_tags.EMERGING_MARKET]
+
+
+class LoadIrctcStory(_LoadingStory):
+  NAME = 'load:news:irctc'
+  URL = 'https://www.irctc.co.in'
+  SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
+  TAGS = [story_tags.EMERGING_MARKET]
 
 
 ################################################################################
@@ -220,6 +217,7 @@ class LoadYouTubeStory(_LoadingStory):
   NAME = 'load:media:youtube'
   URL = 'https://www.youtube.com/watch?v=QGfhS1hfTWw&autoplay=false'
   PLATFORM_SPECIFIC = True
+  TAGS = [story_tags.EMERGING_MARKET]
 
 
 class LoadDailymotionStory(_LoadingStory):
@@ -242,21 +240,10 @@ class LoadSoundCloudStory(_LoadingStory):
   URL = 'https://soundcloud.com/lifeofdesiigner/desiigner-panda'
 
 
-class Load9GagStory(_LoadingStory):
+class Load9GagDesktopStory(_LoadingStory):
   NAME = 'load:media:9gag'
   URL = 'https://www.9gag.com/'
-
-
-class LoadFlickrStory(_LoadingStory):
-  NAME = 'load:media:flickr'
-  URL = 'https://www.flickr.com/photos/tags/farm'
-
-  def _DidLoadDocument(self, action_runner):
-    # Wait until the 'Recently tagged' view loads.
-    action_runner.WaitForJavaScriptCondition('''
-        document.querySelector(
-            '.search-photos-everyone-trending-view .photo-list-view')
-                !== null''')
+  SUPPORTED_PLATFORMS = platforms.DESKTOP_ONLY
 
 
 class LoadImgurStory(_LoadingStory):
@@ -265,13 +252,16 @@ class LoadImgurStory(_LoadingStory):
 
 
 class LoadFacebookPhotosMobileStory(_LoadingStory):
+  """Load a page of rihanna's facebook with a photo."""
   NAME = 'load:media:facebook_photos'
   URL = (
       'https://m.facebook.com/rihanna/photos/a.207477806675.138795.10092511675/10153911739606676/?type=3&source=54&ref=page_internal')
   SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
+  TAGS = [story_tags.EMERGING_MARKET]
 
 
 class LoadFacebookPhotosDesktopStory(_LoadingStory):
+  """Load a page of rihanna's facebook with a photo."""
   NAME = 'load:media:facebook_photos'
   URL = (
       'https://www.facebook.com/rihanna/photos/a.207477806675.138795.10092511675/10153911739606676/?type=3&theater')
@@ -286,6 +276,7 @@ class LoadFacebookPhotosDesktopStory(_LoadingStory):
 
 
 class LoadDocsStory(_LoadingStory):
+  """Load a typical google doc page."""
   NAME = 'load:tools:docs'
   URL = (
       'https://docs.google.com/document/d/1GvzDP-tTLmJ0myRhUAfTYWs3ZUFilUICg8psNHyccwQ/edit?usp=sharing')
@@ -321,7 +312,6 @@ class LoadGmailDesktopStory(_LoadGmailBaseStory):
         'document.getElementById("loading").style.display === "none"')
 
 
-@decorators.Disabled('android')  # crbug.com/657433
 class LoadGmailMobileStory(_LoadGmailBaseStory):
   SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
 
@@ -331,12 +321,8 @@ class LoadGmailMobileStory(_LoadGmailBaseStory):
     action_runner.WaitForJavaScriptCondition(
         'document.getElementById("apploadingdiv").style.height === "0px"')
 
-class LoadMapsStory(_LoadingStory):
-  NAME = 'load:tools:maps'
-  URL = 'https://www.google.com/maps/place/London,+UK/'
-
-
 class LoadStackOverflowStory(_LoadingStory):
+  """Load a typical question & answer page of stackoverflow.com"""
   NAME = 'load:tools:stackoverflow'
   URL = (
       'https://stackoverflow.com/questions/36827659/compiling-an-application-for-use-in-highly-radioactive-environments')
@@ -372,6 +358,7 @@ class LoadDriveStory(_LoadingStory):
 
 
 class LoadBubblesStory(_LoadingStory):
+  """Load "smarty bubbles" game on famobi.com"""
   NAME = 'load:games:bubbles'
   URL = (
       'https://games.cdn.famobi.com/html5games/s/smarty-bubbles/v010/?fg_domain=play.famobi.com&fg_uid=d8f24956-dc91-4902-9096-a46cb1353b6f&fg_pid=4638e320-4444-4514-81c4-d80a8c662371&fg_beat=620')
@@ -400,7 +387,6 @@ class LoadSpyChaseStory(_LoadingStory):
         'document.querySelector("#game canvas").style.background !== ""')
 
 
-@decorators.Disabled('mac') # crbug.com/664661
 class LoadMiniclipStory(_LoadingStory):
   NAME = 'load:games:miniclip'
   # Using "https://" causes "404 Not Found" during WPR recording.

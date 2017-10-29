@@ -99,19 +99,30 @@ class SimpleBuilder(generic_builders.Builder):
                       "option in the builder config is set to True.")
       return
 
-    for suite_config in builder_run.config.hw_tests:
-      stage_class = None
-      if suite_config.async:
-        stage_class = test_stages.ASyncHWTestStage
-      elif suite_config.suite == constants.HWTEST_AU_SUITE:
-        stage_class = test_stages.AUTestStage
-      else:
-        stage_class = test_stages.HWTestStage
+    models = [board]
 
-      new_stage = self._GetStageInstance(stage_class, board,
-                                         suite_config,
-                                         builder_run=builder_run)
-      parallel_stages.append(new_stage)
+    if builder_run.config.models:
+      models = builder_run.config.models
+
+    for suite_config in builder_run.config.hw_tests:
+      # Even for blocking stages, all models can still be run in parallel since
+      # it will still block the next stage from executing.
+      for model in models:
+        stage_class = None
+        if suite_config.async:
+          stage_class = test_stages.ASyncHWTestStage
+        elif suite_config.suite == constants.HWTEST_AU_SUITE:
+          stage_class = test_stages.AUTestStage
+        else:
+          stage_class = test_stages.HWTestStage
+
+        new_stage = self._GetStageInstance(stage_class,
+                                           board,
+                                           model,
+                                           suite_config,
+                                           builder_run=builder_run)
+        parallel_stages.append(new_stage)
+
       # Please see docstring for blocking in the HWTestConfig for more
       # information on this behavior.
       if suite_config.blocking:
@@ -121,6 +132,18 @@ class SimpleBuilder(generic_builders.Builder):
     if parallel_stages:
       self._RunParallelStages(parallel_stages)
 
+  def _RunDebugSymbolStages(self, builder_run, board):
+    """Run debug-related stages for the specified board.
+
+    Args:
+      builder_run: BuilderRun object for these background stages.
+      board: Board name.
+    """
+    # These stages should run sequentially.
+    self._RunStage(android_stages.DownloadAndroidDebugSymbolsStage,
+                   board, builder_run=builder_run)
+    self._RunStage(artifact_stages.DebugSymbolsStage, board,
+                   builder_run=builder_run)
 
   def _RunBackgroundStagesForBoardAndMarkAsSuccessful(self, builder_run, board):
     """Run background board-specific stages for the specified board.
@@ -165,7 +188,7 @@ class SimpleBuilder(generic_builders.Builder):
 
     changes = self._GetChangesUnderTest()
     if changes:
-      self._RunStage(report_stages.DetectIrrelevantChangesStage, board,
+      self._RunStage(report_stages.DetectRelevantChangesStage, board,
                      changes, builder_run=builder_run)
 
     # While this stage list is run in parallel, the order here dictates the
@@ -194,7 +217,7 @@ class SimpleBuilder(generic_builders.Builder):
       stage_list += [[generic_stages.RetryStage, 1, test_stages.VMTestStage,
                       board]]
 
-    if config.run_gce_tests:
+    if config.gce_tests:
       # Give the GCETests one retry attempt in case failures are flaky.
       stage_list += [[generic_stages.RetryStage, 1, test_stages.GCETestStage,
                       board]]
@@ -209,7 +232,6 @@ class SimpleBuilder(generic_builders.Builder):
         [test_stages.ImageTestStage, board],
         [artifact_stages.UploadPrebuiltsStage, board],
         [artifact_stages.DevInstallerPrebuiltsStage, board],
-        [artifact_stages.DebugSymbolsStage, board],
         [artifact_stages.CPEExportStage, board],
         [artifact_stages.UploadTestArtifactsStage, board],
     ]
@@ -225,6 +247,7 @@ class SimpleBuilder(generic_builders.Builder):
     parallel.RunParallelSteps([
         lambda: self._RunParallelStages(stage_objs + [archive_stage]),
         lambda: self._RunHWTests(builder_run, board),
+        lambda: self._RunDebugSymbolStages(builder_run, board),
     ])
 
   def RunSetupBoard(self):
@@ -479,8 +502,8 @@ class DistributedBuilder(SimpleBuilder):
                       updateEbuild_successful and
                       was_build_successful and
                       build_finished)
-        self._RunStage(completion_stages.PublishUprevChangesStage, publish,
-                       stage_push)
+        self._RunStage(completion_stages.PublishUprevChangesStage,
+                       self.sync_stage, publish, stage_push)
 
   def RunStages(self):
     """Runs simple builder logic and publishes information to overlays."""

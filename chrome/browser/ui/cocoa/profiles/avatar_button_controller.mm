@@ -20,7 +20,6 @@
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_button.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/appkit_utils.h"
@@ -99,8 +98,7 @@ const CGFloat kFrameColorDarkUpperBound = 0.33;
   // The image used in the generic button case as well as the error icon both
   // need to be shifted down slightly to be centered correctly.
   // TODO(noms): When the assets are fixed, remove this latter offset.
-  if (!hasError_ || switches::IsMaterialDesignUserMenu())
-    frame = NSOffsetRect(frame, 0, 1);
+  frame = NSOffsetRect(frame, 0, 1);
   [super drawImage:image withFrame:frame inView:controlView];
 }
 
@@ -181,8 +179,7 @@ const CGFloat kFrameColorDarkUpperBound = 0.33;
 
     [avatarButton setBezelStyle:NSShadowlessSquareBezelStyle];
     [avatarButton setButtonType:NSMomentaryChangeButton];
-    if (switches::IsMaterialDesignUserMenu())
-      [[avatarButton cell] setHighlightsBy:NSNoCellMask];
+    [[avatarButton cell] setHighlightsBy:NSNoCellMask];
     [avatarButton setBordered:YES];
 
     [avatarButton setTarget:self];

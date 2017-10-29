@@ -51,7 +51,7 @@ FormatterWorker.JavaScriptFormatter = class {
     this._content = text.substring(this._fromOffset, this._toOffset);
     this._lastLineNumber = 0;
     this._tokenizer = new FormatterWorker.AcornTokenizer(this._content);
-    var ast = acorn.parse(this._content, {ranges: false, ecmaVersion: 8});
+    var ast = acorn.parse(this._content, {ranges: false, ecmaVersion: 8, preserveParens: true});
     var walker = new FormatterWorker.ESTreeWalker(this._beforeVisit.bind(this), this._afterVisit.bind(this));
     walker.walk(ast);
   }
@@ -161,6 +161,11 @@ FormatterWorker.JavaScriptFormatter = class {
     } else if (node.type === 'VariableDeclarator') {
       if (AT.punctuator(token, '='))
         return 'sts';
+    } else if (node.type === 'ObjectPattern') {
+      if (node.parent && node.parent.type === 'VariableDeclarator' && AT.punctuator(token, '{'))
+        return 'st';
+      if (AT.punctuator(token, ','))
+        return 'ts';
     } else if (node.type === 'FunctionDeclaration') {
       if (AT.punctuator(token, ',)'))
         return 'ts';

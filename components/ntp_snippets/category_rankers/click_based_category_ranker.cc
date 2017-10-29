@@ -10,6 +10,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "components/ntp_snippets/category_rankers/constant_category_ranker.h"
 #include "components/ntp_snippets/content_suggestions_metrics.h"
@@ -131,6 +132,14 @@ base::Optional<Category> GetPromotedCategoryFromVariations() {
   return Category::FromIDValue(category_id);
 }
 
+std::string GetOptionalCategoryAsString(
+    const base::Optional<Category>& optional_category) {
+  if (optional_category.has_value()) {
+    return base::IntToString(optional_category->id());
+  }
+  return "None";
+}
+
 }  // namespace
 
 ClickBasedCategoryRanker::ClickBasedCategoryRanker(
@@ -246,7 +255,62 @@ void ClickBasedCategoryRanker::AppendCategoryIfNecessary(Category category) {
   if (!ContainsCategory(category)) {
     ordered_categories_.push_back(RankedCategory(
         category, /*clicks=*/0, /*last_dismissed=*/base::Time()));
+    StoreOrderToPrefs(ordered_categories_);
   }
+}
+
+void ClickBasedCategoryRanker::InsertCategoryBeforeIfNecessary(
+    Category category_to_insert,
+    Category anchor) {
+  InsertCategoryRelativeToIfNecessary(category_to_insert, anchor,
+                                      /*after=*/false);
+}
+
+void ClickBasedCategoryRanker::InsertCategoryAfterIfNecessary(
+    Category category_to_insert,
+    Category anchor) {
+  InsertCategoryRelativeToIfNecessary(category_to_insert, anchor,
+                                      /*after=*/true);
+}
+
+std::vector<CategoryRanker::DebugDataItem>
+ClickBasedCategoryRanker::GetDebugData() {
+  std::vector<CategoryRanker::DebugDataItem> result;
+  result.push_back(
+      CategoryRanker::DebugDataItem("Type", "ClickBasedCategoryRanker"));
+
+  std::string initial_order_type;
+  CategoryOrderChoice choice = GetSelectedCategoryOrder();
+  if (choice == CategoryOrderChoice::GENERAL) {
+    initial_order_type = "GENERAL";
+  }
+  if (choice == CategoryOrderChoice::EMERGING_MARKETS_ORIENTED) {
+    initial_order_type = "EMERGING_MARKETS_ORIENTED;";
+  }
+  result.push_back(
+      CategoryRanker::DebugDataItem("Initial order type", initial_order_type));
+
+  std::vector<std::string> category_strings;
+  for (const auto& ranked_category : ordered_categories_) {
+    category_strings.push_back(base::ReplaceStringPlaceholders(
+        "($1; $2)",
+        {base::IntToString(ranked_category.category.id()),
+         base::IntToString(ranked_category.clicks)},
+        /*offsets=*/nullptr));
+  }
+  result.push_back(
+      CategoryRanker::DebugDataItem("Current order (with click counts)",
+                                    base::JoinString(category_strings, ", ")));
+
+  result.push_back(CategoryRanker::DebugDataItem(
+      "Actual promoted category",
+      GetOptionalCategoryAsString(promoted_category_)));
+
+  result.push_back(CategoryRanker::DebugDataItem(
+      "Raw promoted category from variations",
+      GetOptionalCategoryAsString(GetPromotedCategoryFromVariations())));
+
+  return result;
 }
 
 void ClickBasedCategoryRanker::OnSuggestionOpened(Category category) {
@@ -384,8 +448,8 @@ void ClickBasedCategoryRanker::AppendKnownCategory(
     KnownCategories known_category) {
   Category category = Category::FromKnownCategory(known_category);
   DCHECK(!ContainsCategory(category));
-  ordered_categories_.push_back(RankedCategory(
-      category, /*clicks=*/0, /*last_dismissed=*/base::Time()));
+  ordered_categories_.push_back(
+      RankedCategory(category, /*clicks=*/0, /*last_dismissed=*/base::Time()));
 }
 
 namespace {
@@ -413,9 +477,9 @@ bool ClickBasedCategoryRanker::ReadOrderFromPrefs(
     return false;
   }
 
-  for (const std::unique_ptr<base::Value>& value : *list) {
-    base::DictionaryValue* dictionary;
-    if (!value->GetAsDictionary(&dictionary)) {
+  for (const base::Value& value : *list) {
+    const base::DictionaryValue* dictionary;
+    if (!value.GetAsDictionary(&dictionary)) {
       LOG(DFATAL) << "Failed to parse category data from prefs param "
                   << prefs::kClickBasedCategoryRankerOrderWithClicks
                   << " into dictionary.";
@@ -468,6 +532,23 @@ bool ClickBasedCategoryRanker::ContainsCategory(Category category) const {
     }
   }
   return false;
+}
+
+void ClickBasedCategoryRanker::InsertCategoryRelativeToIfNecessary(
+    Category category_to_insert,
+    Category anchor,
+    bool after) {
+  DCHECK(ContainsCategory(anchor));
+  if (ContainsCategory(category_to_insert)) {
+    return;
+  }
+
+  std::vector<RankedCategory>::iterator anchor_it = FindCategory(anchor);
+  ordered_categories_.insert(anchor_it + (after ? 1 : 0),
+                             RankedCategory(category_to_insert,
+                                            /*clicks=*/anchor_it->clicks,
+                                            /*last_dismissed=*/base::Time()));
+  StoreOrderToPrefs(ordered_categories_);
 }
 
 base::Time ClickBasedCategoryRanker::ReadLastDecayTimeFromPrefs() const {

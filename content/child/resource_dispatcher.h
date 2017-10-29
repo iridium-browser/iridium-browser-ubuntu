@@ -22,10 +22,12 @@
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "content/common/content_export.h"
-#include "content/common/url_loader.mojom.h"
 #include "content/public/common/resource_type.h"
+#include "content/public/common/url_loader.mojom.h"
+#include "content/public/common/url_loader_throttle.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 #include "net/base/request_priority.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "url/gurl.h"
@@ -46,6 +48,7 @@ struct ResourceResponseHead;
 class SharedMemoryReceivedDataFactory;
 struct SiteIsolationResponseMetaData;
 struct SyncLoadResponse;
+class ThrottlingURLLoader;
 class URLLoaderClientImpl;
 
 namespace mojom {
@@ -59,7 +62,7 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Listener {
  public:
   ResourceDispatcher(
       IPC::Sender* sender,
-      scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner);
+      scoped_refptr<base::SingleThreadTaskRunner> thread_task_runner);
   ~ResourceDispatcher() override;
 
   // IPC::Listener implementation.
@@ -75,11 +78,13 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Listener {
   //
   // |routing_id| is used to associated the bridge with a frame's network
   // context.
-  virtual void StartSync(std::unique_ptr<ResourceRequest> request,
-                         int routing_id,
-                         SyncLoadResponse* response,
-                         blink::WebURLRequest::LoadingIPCType ipc_type,
-                         mojom::URLLoaderFactory* url_loader_factory);
+  virtual void StartSync(
+      std::unique_ptr<ResourceRequest> request,
+      int routing_id,
+      SyncLoadResponse* response,
+      blink::WebURLRequest::LoadingIPCType ipc_type,
+      mojom::URLLoaderFactory* url_loader_factory,
+      std::vector<std::unique_ptr<URLLoaderThrottle>> throttles);
 
   // Call this method to initiate the request. If this method succeeds, then
   // the peer's methods will be called asynchronously to report various events.
@@ -98,7 +103,9 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Listener {
       const url::Origin& frame_origin,
       std::unique_ptr<RequestPeer> peer,
       blink::WebURLRequest::LoadingIPCType ipc_type,
-      mojom::URLLoaderFactory* url_loader_factory);
+      mojom::URLLoaderFactory* url_loader_factory,
+      std::vector<std::unique_ptr<URLLoaderThrottle>> throttles,
+      mojo::ScopedDataPipeConsumerHandle consumer_handle);
 
   // Removes a request from the |pending_requests_| list, returning true if the
   // request was found and removed.
@@ -133,9 +140,9 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Listener {
     io_timestamp_ = io_timestamp;
   }
 
-  void SetMainThreadTaskRunner(
-      scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner) {
-    main_thread_task_runner_ = main_thread_task_runner;
+  void SetThreadTaskRunner(
+      scoped_refptr<base::SingleThreadTaskRunner> thread_task_runner) {
+    thread_task_runner_ = thread_task_runner;
   }
 
   void SetResourceSchedulingFilter(
@@ -188,7 +195,7 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Listener {
     int buffer_size;
 
     // For mojo loading.
-    mojom::URLLoaderAssociatedPtr url_loader;
+    std::unique_ptr<ThrottlingURLLoader> url_loader;
     std::unique_ptr<URLLoaderClientImpl> url_loader_client;
   };
   using PendingRequestMap = std::map<int, std::unique_ptr<PendingRequestInfo>>;
@@ -203,7 +210,8 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Listener {
   // Message response handlers, called by the message handler for this process.
   void OnUploadProgress(int request_id, int64_t position, int64_t size);
   void OnReceivedResponse(int request_id, const ResourceResponseHead&);
-  void OnReceivedCachedMetadata(int request_id, const std::vector<char>& data);
+  void OnReceivedCachedMetadata(int request_id,
+                                const std::vector<uint8_t>& data);
   void OnReceivedRedirect(int request_id,
                           const net::RedirectInfo& redirect_info,
                           const ResourceResponseHead& response_head);
@@ -211,9 +219,6 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Listener {
                        base::SharedMemoryHandle shm_handle,
                        int shm_size,
                        base::ProcessId renderer_pid);
-  void OnReceivedInlinedDataChunk(int request_id,
-                                  const std::vector<char>& data,
-                                  int encoded_data_length);
   void OnReceivedData(int request_id,
                       int data_offset,
                       int data_length,
@@ -243,6 +248,10 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Listener {
   // invocations will return current time until set_io_timestamp is called.
   base::TimeTicks ConsumeIOTimestamp();
 
+  void ContinueForNavigation(
+      int request_id,
+      mojo::ScopedDataPipeConsumerHandle consumer_handle);
+
   // Returns true if the message passed in is a resource related message.
   static bool IsResourceDispatcherMessage(const IPC::Message& message);
 
@@ -267,7 +276,7 @@ class CONTENT_EXPORT ResourceDispatcher : public IPC::Listener {
   // IO thread timestamp for ongoing IPC message.
   base::TimeTicks io_timestamp_;
 
-  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> thread_task_runner_;
   scoped_refptr<ResourceSchedulingFilter> resource_scheduling_filter_;
 
   base::WeakPtrFactory<ResourceDispatcher> weak_factory_;

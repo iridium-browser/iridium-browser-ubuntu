@@ -33,6 +33,7 @@
 #include "content/public/common/result_codes.h"
 #include "content/public/common/sandbox_init.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+#include "content/public/common/service_names.mojom.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/named_platform_channel_pair.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
@@ -216,20 +217,21 @@ bool ServiceUtilityProcessHost::StartGetPrinterSemanticCapsAndDefaults(
 }
 
 bool ServiceUtilityProcessHost::StartProcess(bool no_sandbox) {
-  std::string mojo_channel_token =
-      child_process_host_->CreateChannelMojo(&process_connection_);
-  if (mojo_channel_token.empty())
-    return false;
-
   base::FilePath exe_path = GetUtilityProcessCmd();
   if (exe_path.empty()) {
     NOTREACHED() << "Unable to get utility process binary name.";
     return false;
   }
 
+  std::string mojo_bootstrap_token = mojo::edk::GenerateRandomToken();
+  utility_process_connection_.Bind(service_manager::mojom::ServicePtrInfo(
+      broker_client_invitation_.AttachMessagePipe(mojo_bootstrap_token), 0u));
+  child_process_host_->CreateChannelMojo();
+
   base::CommandLine cmd_line(exe_path);
   cmd_line.AppendSwitchASCII(switches::kProcessType, switches::kUtilityProcess);
-  cmd_line.AppendSwitchASCII(switches::kMojoChannelToken, mojo_channel_token);
+  cmd_line.AppendSwitchASCII(switches::kServiceRequestChannelToken,
+                             mojo_bootstrap_token);
   cmd_line.AppendSwitch(switches::kLang);
   cmd_line.AppendArg(switches::kPrefetchArgumentOther);
 
@@ -274,8 +276,12 @@ bool ServiceUtilityProcessHost::Launch(base::CommandLine* cmd_line,
     }
   }
 
-  if (success)
-    process_connection_.Connect(process_.Handle(), std::move(parent_handle));
+  if (success) {
+    broker_client_invitation_.Send(
+        process_.Handle(),
+        mojo::edk::ConnectionParams(mojo::edk::TransportProtocol::kLegacy,
+                                    std::move(parent_handle)));
+  }
 
   return success;
 }
@@ -328,6 +334,19 @@ bool ServiceUtilityProcessHost::OnMessageReceived(const IPC::Message& message) {
 
 const base::Process& ServiceUtilityProcessHost::GetProcess() const {
   return process_;
+}
+
+void ServiceUtilityProcessHost::BindInterface(
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle interface_pipe) {
+  service_manager::BindSourceInfo source_info;
+  // ChildThreadImpl expects a connection from the browser process for
+  // establishing its legacy IPC channel.
+  source_info.identity =
+      service_manager::Identity{content::mojom::kBrowserServiceName};
+  utility_process_connection_->OnBindInterface(source_info, interface_name,
+                                               std::move(interface_pipe),
+                                               base::Bind(&base::DoNothing));
 }
 
 void ServiceUtilityProcessHost::OnMetafileSpooled(bool success) {

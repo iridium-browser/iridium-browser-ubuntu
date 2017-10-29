@@ -8,25 +8,32 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/mac/availability.h"
+#import "base/mac/sdk_forward_declarations.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
+#import "chrome/browser/ui/cocoa/content_settings/blocked_plugin_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/l10n_util.h"
+#import "chrome/browser/ui/cocoa/location_bar/content_setting_decoration.h"
+#import "chrome/browser/ui/cocoa/subresource_filter/subresource_filter_bubble_controller.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_media_menu_model.h"
-#import "chrome/browser/ui/cocoa/location_bar/content_setting_decoration.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #import "ui/base/cocoa/controls/hyperlink_button_cell.h"
+#import "ui/base/cocoa/touch_bar_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::PluginService;
@@ -84,6 +91,13 @@ const int kMIDISysExPadding = 8;
 // Padding between host names in the MIDI bubble.
 const int kMIDISysExHostPadding = 4;
 
+// Touch bar identifier.
+NSString* const kContentSettingsBubbleTouchBarId = @"content-settings-bubble";
+
+// Touch bar item identifiers.
+NSString* const kManageTouchBarId = @"MANAGE";
+NSString* const kDoneTouchBarId = @"DONE";
+
 void SetControlSize(NSControl* control, NSControlSize controlSize) {
   CGFloat fontSize = [NSFont systemFontSizeForControlSize:controlSize];
   NSCell* cell = [control cell];
@@ -98,6 +112,7 @@ NSTextField* LabelWithFrame(NSString* text, const NSRect& frame) {
   [label setStringValue:text];
   [label setSelectable:NO];
   [label setBezeled:NO];
+  [label setAlignment:NSNaturalTextAlignment];
   return [label autorelease];
 }
 
@@ -205,18 +220,19 @@ class ContentSettingBubbleWebContentsObserverBridge
   DISALLOW_COPY_AND_ASSIGN(ContentSettingBubbleWebContentsObserverBridge);
 };
 
-@interface ContentSettingBubbleController(Private)
+@interface ContentSettingBubbleController (Private)
 - (id)initWithModel:(ContentSettingBubbleModel*)settingsBubbleModel
         webContents:(content::WebContents*)webContents
        parentWindow:(NSWindow*)parentWindow
          decoration:(ContentSettingDecoration*)decoration
          anchoredAt:(NSPoint)anchoredAt;
-- (NSString*)getNibPathForModel:(ContentSettingBubbleModel*)model;
++ (NSString*)getNibPathForModel:(ContentSettingBubbleModel*)model;
++ (ContentSettingBubbleController*)allocControllerForModel:
+    (ContentSettingBubbleModel*)model;
 - (NSButton*)hyperlinkButtonWithFrame:(NSRect)frame
                                 title:(NSString*)title
                                  icon:(NSImage*)icon
                        referenceFrame:(NSRect)referenceFrame;
-- (void)initializeBlockedPluginsList;
 - (void)initializeTitle;
 - (void)initializeMessage;
 - (void)initializeRadioGroup;
@@ -224,7 +240,6 @@ class ContentSettingBubbleWebContentsObserverBridge
 - (void)initializeGeoLists;
 - (void)initializeMediaMenus;
 - (void)initializeMIDISysExLists;
-- (void)sizeToFitLoadButton;
 - (void)initManageDoneButtons;
 - (void)removeInfoButton;
 - (void)popupLinkClicked:(id)sender;
@@ -241,12 +256,16 @@ parentWindow:(NSWindow*)parentWindow
   decoration:(ContentSettingDecoration*)decoration
   anchoredAt:(NSPoint)anchor {
   // Autoreleases itself on bubble close.
-  return [[ContentSettingBubbleController alloc]
-      initWithModel:contentSettingBubbleModel
-        webContents:webContents
-       parentWindow:parentWindow
-         decoration:decoration
-         anchoredAt:anchor];
+  ContentSettingBubbleController* controller =
+      [self allocControllerForModel:contentSettingBubbleModel];
+
+  DCHECK(controller);
+
+  return [controller initWithModel:contentSettingBubbleModel
+                       webContents:webContents
+                      parentWindow:parentWindow
+                        decoration:decoration
+                        anchoredAt:anchor];
 }
 
 struct ContentTypeToNibPath {
@@ -259,7 +278,6 @@ const ContentTypeToNibPath kNibPaths[] = {
     {CONTENT_SETTINGS_TYPE_IMAGES, @"ContentBlockedSimple"},
     {CONTENT_SETTINGS_TYPE_JAVASCRIPT, @"ContentBlockedSimple"},
     {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, @"ContentBlockedSimple"},
-    {CONTENT_SETTINGS_TYPE_PLUGINS, @"ContentBlockedPlugins"},
     {CONTENT_SETTINGS_TYPE_POPUPS, @"ContentBlockedPopups"},
     {CONTENT_SETTINGS_TYPE_GEOLOCATION, @"ContentBlockedGeolocation"},
     {CONTENT_SETTINGS_TYPE_MIXEDSCRIPT, @"ContentBlockedMixedScript"},
@@ -278,21 +296,45 @@ const ContentTypeToNibPath kNibPaths[] = {
   observerBridge_.reset(
     new ContentSettingBubbleWebContentsObserverBridge(webContents, self));
 
-  NSString* nibPath = [self getNibPathForModel:model.get()];
+  NSString* nibPath =
+      [ContentSettingBubbleController getNibPathForModel:model.get()];
 
   DCHECK_NE(0u, [nibPath length]);
 
   if ((self = [super initWithWindowNibPath:nibPath
                               parentWindow:parentWindow
                                 anchoredAt:anchoredAt])) {
-    contentSettingBubbleModel_.reset(model.release());
+    contentSettingBubbleModel_ = std::move(model);
     decoration_ = decoration;
     [self showWindow:nil];
   }
   return self;
 }
 
-- (NSString*)getNibPathForModel:(ContentSettingBubbleModel*)model {
+- (id)initWithModel:(ContentSettingBubbleModel*)contentSettingBubbleModel
+        webContents:(content::WebContents*)webContents
+             window:(NSWindow*)window
+       parentWindow:(NSWindow*)parentWindow
+         decoration:(ContentSettingDecoration*)decoration
+         anchoredAt:(NSPoint)anchoredAt {
+  // This method takes ownership of |contentSettingBubbleModel| in all cases.
+  std::unique_ptr<ContentSettingBubbleModel> model(contentSettingBubbleModel);
+  DCHECK(model.get());
+  observerBridge_.reset(
+      new ContentSettingBubbleWebContentsObserverBridge(webContents, self));
+
+  contentSettingBubbleModel_ = std::move(model);
+
+  if ((self = [super initWithWindow:window
+                       parentWindow:parentWindow
+                         anchoredAt:anchoredAt])) {
+    decoration_ = decoration;
+    [self showWindow:nil];
+  }
+  return self;
+}
+
++ (NSString*)getNibPathForModel:(ContentSettingBubbleModel*)model {
   NSString* nibPath = @"";
 
   ContentSettingSimpleBubbleModel* simple_bubble = model->AsSimpleBubbleModel();
@@ -310,12 +352,31 @@ const ContentTypeToNibPath kNibPaths[] = {
   if (model->AsMediaStreamBubbleModel())
     nibPath = @"ContentBlockedMedia";
 
-  if (model->AsSubresourceFilterBubbleModel())
-    nibPath = @"ContentSubresourceFilter";
-
   if (model->AsDownloadsBubbleModel())
     nibPath = @"ContentBlockedDownloads";
   return nibPath;
+}
+
++ (ContentSettingBubbleController*)allocControllerForModel:
+    (ContentSettingBubbleModel*)model {
+  // Check if the view is expressed in xib file or not.
+  NSString* nibPath = [self getNibPathForModel:model];
+
+  // Autoreleases itself on bubble close.
+
+  if ([nibPath length] > 0u)
+    return [ContentSettingBubbleController alloc];
+
+  if (model->AsSubresourceFilterBubbleModel())
+    return [SubresourceFilterBubbleController alloc];
+
+  if (model->AsSimpleBubbleModel() &&
+      model->AsSimpleBubbleModel()->content_type() ==
+          CONTENT_SETTINGS_TYPE_PLUGINS) {
+    return [BlockedPluginBubbleController alloc];
+  }
+
+  return nil;
 }
 
 - (void)initializeTitle {
@@ -335,6 +396,7 @@ const ContentTypeToNibPath kNibPaths[] = {
   NSRect titleFrame = [titleLabel_ frame];
   titleFrame.origin.y -= deltaY;
   [titleLabel_ setFrame:titleFrame];
+  [titleLabel_ setAlignment:NSNaturalTextAlignment];
 }
 
 - (void)initializeMessage {
@@ -353,6 +415,7 @@ const ContentTypeToNibPath kNibPaths[] = {
   NSRect messageFrame = [messageLabel_ frame];
   messageFrame.origin.y -= deltaY;
   [messageLabel_ setFrame:messageFrame];
+  [messageLabel_ setAlignment:NSNaturalTextAlignment];
 }
 
 - (void)initializeRadioGroup {
@@ -383,8 +446,8 @@ const ContentTypeToNibPath kNibPaths[] = {
   const ContentSettingBubbleModel::RadioItems& radio_items =
       radio_group.radio_items;
   for (size_t ii = 0; ii < radio_group.radio_items.size(); ++ii) {
-    NSCell* radioCell = [allowBlockRadioGroup_ cellWithTag: ii + 1];
-    [radioCell setTitle:base::SysUTF8ToNSString(radio_items[ii])];
+    NSCell* radioCell = [allowBlockRadioGroup_ cellWithTag:ii + 1];
+    [radioCell setTitle:base::SysUTF16ToNSString(radio_items[ii])];
   }
 
   // Layout radio group labels post-localization.
@@ -395,6 +458,19 @@ const ContentTypeToNibPath kNibPaths[] = {
   NSRect windowFrame = [[self window] frame];
   windowFrame.size.height += radioDeltaY;
   [[self window] setFrame:windowFrame display:NO];
+
+  // NSMatrix-based radio buttons don't get automatically flipped for
+  // RTL. Setting the user interface layout direction explicitly
+  // doesn't affect rendering, so set image position and text alignment
+  // manually.
+  if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout())
+    for (NSButtonCell* cell in [allowBlockRadioGroup_ cells]) {
+      [cell setAlignment:NSNaturalTextAlignment];
+      [cell setImagePosition:cocoa_l10n_util::LeadingCellImagePosition()];
+      // Why not?
+      [cell setUserInterfaceLayoutDirection:
+                NSUserInterfaceLayoutDirectionRightToLeft];
+    }
 }
 
 - (NSButton*)hyperlinkButtonWithFrame:(NSRect)frame
@@ -433,16 +509,6 @@ const ContentTypeToNibPath kNibPaths[] = {
   return button;
 }
 
-- (void)initializeBlockedPluginsList {
-  // Hide the empty label at the top of the dialog.
-  int delta =
-      NSMinY([titleLabel_ frame]) - NSMinY([blockedResourcesField_ frame]);
-  [blockedResourcesField_ removeFromSuperview];
-  NSRect frame = [[self window] frame];
-  frame.size.height -= delta;
-  [[self window] setFrame:frame display:NO];
-}
-
 - (void)initializeItemList {
   // I didn't put the buttons into a NSMatrix because then they are only one
   // entity in the key view loop. This way, one can tab through all of them.
@@ -473,17 +539,17 @@ const ContentTypeToNibPath kNibPaths[] = {
     NSRect frame = NSMakeRect(
         NSMinX(radioFrame), topLinkY - kLinkLineHeight * row, 200, kLinkHeight);
     if (listItem.has_link) {
-      NSButton* button =
-          [self hyperlinkButtonWithFrame:frame
-                                   title:base::SysUTF8ToNSString(listItem.title)
-                                    icon:image
-                          referenceFrame:radioFrame];
+      NSButton* button = [self
+          hyperlinkButtonWithFrame:frame
+                             title:base::SysUTF16ToNSString(listItem.title)
+                              icon:image
+                    referenceFrame:radioFrame];
       [button setAutoresizingMask:NSViewMinYMargin];
       [[self bubble] addSubview:button];
       popupLinks_[button] = row++;
     } else {
       NSTextField* label =
-          LabelWithFrame(base::SysUTF8ToNSString(listItem.title), frame);
+          LabelWithFrame(base::SysUTF16ToNSString(listItem.title), frame);
       SetControlSize(label, NSSmallControlSize);
       [label setAutoresizingMask:NSViewMinYMargin];
       [[self bubble] addSubview:label];
@@ -510,7 +576,7 @@ const ContentTypeToNibPath kNibPaths[] = {
                                       kGeoClearButtonHeight);
       NSButton* button = [[NSButton alloc] initWithFrame:buttonFrame];
       control.reset(button);
-      [button setTitle:base::SysUTF8ToNSString(content.custom_link)];
+      [button setTitle:base::SysUTF16ToNSString(content.custom_link)];
       [button setTarget:self];
       [button setAction:@selector(clearGeolocationForCurrentHost:)];
       [button setBezelStyle:NSRoundRectBezelStyle];
@@ -519,7 +585,7 @@ const ContentTypeToNibPath kNibPaths[] = {
     } else {
       // Add the notification that settings will be cleared on next reload.
       control.reset([LabelWithFrame(
-          base::SysUTF8ToNSString(content.custom_link), frame) retain]);
+          base::SysUTF16ToNSString(content.custom_link), frame) retain]);
       SetControlSize(control.get(), NSSmallControlSize);
     }
 
@@ -555,7 +621,7 @@ const ContentTypeToNibPath kNibPaths[] = {
 
     // Add the domain list's title.
     NSTextField* title =
-        LabelWithFrame(base::SysUTF8ToNSString(i->title), frame);
+        LabelWithFrame(base::SysUTF16ToNSString(i->title), frame);
     SetControlSize(title, NSSmallControlSize);
     [contentsContainer_ addSubview:title];
 
@@ -592,7 +658,7 @@ const ContentTypeToNibPath kNibPaths[] = {
     // |labelFrame| will be resized later on in this function.
     NSRect labelFrame = NSMakeRect(NSMinX(radioFrame), 0, 0, 0);
     NSTextField* label = LabelWithFrame(
-        base::SysUTF8ToNSString(map_entry.second.label), labelFrame);
+        base::SysUTF16ToNSString(map_entry.second.label), labelFrame);
     SetControlSize(label, NSSmallControlSize);
     NSCell* cell = [label cell];
     [cell setAlignment:NSRightTextAlignment];
@@ -685,7 +751,7 @@ const ContentTypeToNibPath kNibPaths[] = {
                                       kMIDISysExClearButtonHeight);
       NSButton* button = [[NSButton alloc] initWithFrame:buttonFrame];
       control.reset(button);
-      [button setTitle:base::SysUTF8ToNSString(content.custom_link)];
+      [button setTitle:base::SysUTF16ToNSString(content.custom_link)];
       [button setTarget:self];
       [button setAction:@selector(clearMIDISysExForCurrentHost:)];
       [button setBezelStyle:NSRoundRectBezelStyle];
@@ -694,7 +760,7 @@ const ContentTypeToNibPath kNibPaths[] = {
     } else {
       // Add the notification that settings will be cleared on next reload.
       control.reset([LabelWithFrame(
-          base::SysUTF8ToNSString(content.custom_link), frame) retain]);
+          base::SysUTF16ToNSString(content.custom_link), frame) retain]);
       SetControlSize(control.get(), NSSmallControlSize);
     }
 
@@ -730,7 +796,7 @@ const ContentTypeToNibPath kNibPaths[] = {
 
     // Add the domain list's title.
     NSTextField* title =
-        LabelWithFrame(base::SysUTF8ToNSString(i->title), frame);
+        LabelWithFrame(base::SysUTF16ToNSString(i->title), frame);
     SetControlSize(title, NSSmallControlSize);
     [contentsContainer_ addSubview:title];
 
@@ -751,30 +817,32 @@ const ContentTypeToNibPath kNibPaths[] = {
   [contentsContainer_ setFrame:containerFrame];
 }
 
-- (void)sizeToFitLoadButton {
-  const ContentSettingBubbleModel::BubbleContent& content =
-      contentSettingBubbleModel_->bubble_content();
-  [loadButton_ setEnabled:content.custom_link_enabled];
-
-  // Resize horizontally to fit button if necessary.
-  NSRect windowFrame = [[self window] frame];
-  int widthNeeded = NSWidth([loadButton_ frame]) +
-      2 * NSMinX([loadButton_ frame]);
-  if (NSWidth(windowFrame) < widthNeeded) {
-    windowFrame.size.width = widthNeeded;
-    [[self window] setFrame:windowFrame display:NO];
-  }
-}
-
 - (void)initManageDoneButtons {
+  if (!manageButton_ && !doneButton_)
+    return;
+
   const ContentSettingBubbleModel::BubbleContent& content =
       contentSettingBubbleModel_->bubble_content();
-  [manageButton_ setTitle:base::SysUTF8ToNSString(content.manage_text)];
-  [GTMUILocalizerAndLayoutTweaker sizeToFitView:[manageButton_ superview]];
+
+  CGFloat requiredWidthForManageButton = 0.0;
+  if (manageButton_) {
+    [manageButton_ setTitle:base::SysUTF16ToNSString(content.manage_text)];
+    [GTMUILocalizerAndLayoutTweaker sizeToFitView:[manageButton_ superview]];
+    requiredWidthForManageButton =
+        NSMaxX([manageButton_ frame]) + kManageDonePadding;
+  }
+
+  if (!doneButton_)
+    return;
+
+  NSString* doneLabel = base::SysUTF16ToNSString(content.done_button_text);
+  if ([doneLabel length] > 0u)
+    [doneButton_ setTitle:doneLabel];
 
   CGFloat actualWidth = NSWidth([[[self window] contentView] frame]);
-  CGFloat requiredWidth = NSMaxX([manageButton_ frame]) + kManageDonePadding +
-      NSWidth([[doneButton_ superview] frame]) - NSMinX([doneButton_ frame]);
+  CGFloat requiredWidth = requiredWidthForManageButton +
+                          NSWidth([[doneButton_ superview] frame]) -
+                          NSMinX([doneButton_ frame]);
   if (requiredWidth <= actualWidth || !doneButton_ || !manageButton_)
     return;
 
@@ -789,7 +857,63 @@ const ContentTypeToNibPath kNibPaths[] = {
 
 - (void)awakeFromNib {
   [super awakeFromNib];
+  [self layoutView];
+}
 
+- (NSTouchBar*)makeTouchBar {
+  if (!base::FeatureList::IsEnabled(features::kDialogTouchBar))
+    return nil;
+
+  if (!manageButton_ && !doneButton_)
+    return nil;
+
+  base::scoped_nsobject<NSTouchBar> touchBar([[ui::NSTouchBar() alloc] init]);
+  [touchBar setCustomizationIdentifier:ui::GetTouchBarId(
+                                           kContentSettingsBubbleTouchBarId)];
+  [touchBar setDelegate:self];
+
+  NSMutableArray* dialogItems = [NSMutableArray array];
+  if (manageButton_) {
+    [dialogItems
+        addObject:ui::GetTouchBarItemId(kContentSettingsBubbleTouchBarId,
+                                        kManageTouchBarId)];
+  }
+
+  if (doneButton_) {
+    [dialogItems
+        addObject:ui::GetTouchBarItemId(kContentSettingsBubbleTouchBarId,
+                                        kDoneTouchBarId)];
+  }
+
+  [touchBar setDefaultItemIdentifiers:dialogItems];
+  [touchBar setCustomizationAllowedItemIdentifiers:dialogItems];
+  return touchBar.autorelease();
+}
+
+- (NSTouchBarItem*)touchBar:(NSTouchBar*)touchBar
+      makeItemForIdentifier:(NSTouchBarItemIdentifier)identifier
+    API_AVAILABLE(macos(10.12.2)) {
+  NSButton* button = nil;
+  if ([identifier hasSuffix:kManageTouchBarId]) {
+    NSString* title = base::SysUTF16ToNSString(
+        contentSettingBubbleModel_->bubble_content().manage_text);
+    button = [NSButton buttonWithTitle:title
+                                target:self
+                                action:@selector(manageBlocking:)];
+  } else if ([identifier hasSuffix:kDoneTouchBarId]) {
+    button = ui::GetBlueTouchBarButton(l10n_util::GetNSString(IDS_DONE), self,
+                                       @selector(closeBubble:));
+  } else {
+    return nil;
+  }
+
+  base::scoped_nsobject<NSCustomTouchBarItem> item(
+      [[ui::NSCustomTouchBarItem() alloc] initWithIdentifier:identifier]);
+  [item setView:button];
+  return item.autorelease();
+}
+
+- (void)layoutView {
   ContentSettingSimpleBubbleModel* simple_bubble =
       contentSettingBubbleModel_->AsSimpleBubbleModel();
 
@@ -797,22 +921,13 @@ const ContentTypeToNibPath kNibPaths[] = {
 
   // Adapt window size to bottom buttons. Do this before all other layouting.
   if ((simple_bubble && !simple_bubble->bubble_content().manage_text.empty()) ||
-      contentSettingBubbleModel_->AsDownloadsBubbleModel())
+      contentSettingBubbleModel_->AsDownloadsBubbleModel() ||
+      contentSettingBubbleModel_->AsSubresourceFilterBubbleModel()) {
     [self initManageDoneButtons];
+  }
 
   [self initializeTitle];
   [self initializeMessage];
-
-  // Note that the per-content-type methods and |initializeRadioGroup| below
-  // must be kept in the correct order, as they make interdependent adjustments
-  // of the bubble's height.
-  if (simple_bubble &&
-      simple_bubble->content_type() == CONTENT_SETTINGS_TYPE_PLUGINS) {
-    if (!simple_bubble->bubble_content().custom_link.empty())
-      [self sizeToFitLoadButton];
-
-    [self initializeBlockedPluginsList];
-  }
 
   if (allowBlockRadioGroup_)  // Some xibs do not bind |allowBlockRadioGroup_|.
     [self initializeRadioGroup];
@@ -820,8 +935,7 @@ const ContentTypeToNibPath kNibPaths[] = {
   if (simple_bubble) {
     ContentSettingsType type = simple_bubble->content_type();
 
-    if (type == CONTENT_SETTINGS_TYPE_POPUPS ||
-        type == CONTENT_SETTINGS_TYPE_PLUGINS)
+    if (type == CONTENT_SETTINGS_TYPE_POPUPS)
       [self initializeItemList];
     if (type == CONTENT_SETTINGS_TYPE_GEOLOCATION)
       [self initializeGeoLists];
@@ -853,6 +967,20 @@ const ContentTypeToNibPath kNibPaths[] = {
 
   if (contentSettingBubbleModel_->AsMediaStreamBubbleModel())
     [self initializeMediaMenus];
+
+  // RTL-ize NIBS:
+  if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout()) {
+    cocoa_l10n_util::FlipAllSubviewsIfNecessary([self bubble]);
+
+    // Some NIBs have the manage/done buttons outside of the bubble.
+    cocoa_l10n_util::FlipAllSubviewsIfNecessary([[self bubble] superview]);
+    cocoa_l10n_util::FlipAllSubviewsIfNecessary(contentsContainer_);
+
+    // These buttons are inside |GTMWidthBasedTweaker|s, so fix margins.
+    cocoa_l10n_util::FlipAllSubviewsIfNecessary([infoButton_ superview]);
+    cocoa_l10n_util::FlipAllSubviewsIfNecessary([doneButton_ superview]);
+    cocoa_l10n_util::FlipAllSubviewsIfNecessary([manageButton_ superview]);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -890,7 +1018,7 @@ const ContentTypeToNibPath kNibPaths[] = {
 }
 
 - (IBAction)learnMoreLinkClicked:(id)sender {
-  contentSettingBubbleModel_->OnManageLinkClicked();
+  contentSettingBubbleModel_->OnLearnMoreLinkClicked();
 }
 
 - (IBAction)manageBlocking:(id)sender {

@@ -8,8 +8,8 @@
 #include <stddef.h>
 
 #include "base/callback.h"
-#include "cc/base/cc_export.h"
 #include "cc/base/resource_id.h"
+#include "cc/cc_export.h"
 #include "cc/quads/shared_quad_state.h"
 
 namespace base {
@@ -95,13 +95,13 @@ class CC_EXPORT DrawQuad {
   // Is the right edge of this tile aligned with the originating layer's
   // right edge?
   bool IsRightEdge() const {
-    return rect.right() == shared_quad_state->quad_layer_bounds.width();
+    return rect.right() == shared_quad_state->quad_layer_rect.right();
   }
 
   // Is the bottom edge of this tile aligned with the originating layer's
   // bottom edge?
   bool IsBottomEdge() const {
-    return rect.bottom() == shared_quad_state->quad_layer_bounds.height();
+    return rect.bottom() == shared_quad_state->quad_layer_rect.bottom();
   }
 
   // Is any edge of this tile aligned with the originating layer's
@@ -122,8 +122,8 @@ class CC_EXPORT DrawQuad {
       return ids + count;
     }
 
-    const ResourceId* const_begin() const { return ids; }
-    const ResourceId* const_end() const {
+    const ResourceId* begin() const { return ids; }
+    const ResourceId* end() const {
       DCHECK_LE(count, kMaxResourceIdCount);
       return ids + count;
     }

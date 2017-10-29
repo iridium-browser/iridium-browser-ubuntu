@@ -27,7 +27,7 @@
 #include "content/shell/browser/shell.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "ui/events/event_switches.h"
-#include "ui/events/latency_info.h"
+#include "ui/latency/latency_info.h"
 
 using blink::WebInputEvent;
 
@@ -127,13 +127,14 @@ class NonBlockingEventBrowserTest : public ContentBrowserTest {
         ExecuteScriptAndExtractInt("document.documentElement.scrollHeight");
     EXPECT_EQ(kWebsiteHeight, scrollHeight);
 
-    scoped_refptr<FrameWatcher> frame_watcher(new FrameWatcher());
-    frame_watcher->AttachTo(shell()->web_contents());
-    scoped_refptr<InputMsgWatcher> input_msg_watcher(
-        new InputMsgWatcher(GetWidgetHost(), blink::WebInputEvent::MouseWheel));
+    FrameWatcher frame_watcher(shell()->web_contents());
+    scoped_refptr<InputMsgWatcher> input_msg_watcher(new InputMsgWatcher(
+        GetWidgetHost(), blink::WebInputEvent::kMouseWheel));
 
-    GetWidgetHost()->ForwardWheelEvent(
-        SyntheticWebMouseWheelEventBuilder::Build(10, 10, 0, -53, 0, true));
+    blink::WebMouseWheelEvent wheel_event =
+        SyntheticWebMouseWheelEventBuilder::Build(10, 10, 0, -53, 0, true);
+    wheel_event.phase = blink::WebMouseWheelEvent::kPhaseBegan;
+    GetWidgetHost()->ForwardWheelEvent(wheel_event);
 
     // Runs until we get the InputMsgAck callback
     EXPECT_EQ(INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING,
@@ -141,8 +142,8 @@ class NonBlockingEventBrowserTest : public ContentBrowserTest {
 
     // Expect that the compositor scrolled at least one pixel while the
     // main thread was in a busy loop.
-    while (frame_watcher->LastMetadata().root_scroll_offset.y() <= 0)
-      frame_watcher->WaitFrames(1);
+    while (frame_watcher.LastMetadata().root_scroll_offset.y() <= 0)
+      frame_watcher.WaitFrames(1);
   }
 
   void DoTouchScroll() {
@@ -152,8 +153,7 @@ class NonBlockingEventBrowserTest : public ContentBrowserTest {
         ExecuteScriptAndExtractInt("document.documentElement.scrollHeight");
     EXPECT_EQ(kWebsiteHeight, scrollHeight);
 
-    scoped_refptr<FrameWatcher> frame_watcher(new FrameWatcher());
-    frame_watcher->AttachTo(shell()->web_contents());
+    FrameWatcher frame_watcher(shell()->web_contents());
 
     SyntheticSmoothScrollGestureParams params;
     params.gesture_source_type = SyntheticGestureParams::TOUCH_INPUT;
@@ -169,8 +169,8 @@ class NonBlockingEventBrowserTest : public ContentBrowserTest {
 
     // Expect that the compositor scrolled at least one pixel while the
     // main thread was in a busy loop.
-    while (frame_watcher->LastMetadata().root_scroll_offset.y() <= 0)
-      frame_watcher->WaitFrames(1);
+    while (frame_watcher.LastMetadata().root_scroll_offset.y() <= 0)
+      frame_watcher.WaitFrames(1);
   }
 
  private:

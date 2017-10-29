@@ -34,14 +34,16 @@ typedef (HTMLScriptElement or SVGScriptElement) HTMLOrSVGScriptElement;
 
 // https://dom.spec.whatwg.org/#interface-document
 
-// FIXME: Document should have a constructor. crbug.com/238234
-interface Document : Node {
+[
+    Constructor(),
+    ConstructorCallWith=Document
+] interface Document : Node {
     [SameObject] readonly attribute DOMImplementation implementation;
-    readonly attribute DOMString URL;
+    [ImplementedAs=urlForBinding] readonly attribute DOMString URL;
     // FIXME: documentURI should not be nullable.
-    [ImplementedAs=url] readonly attribute DOMString? documentURI;
+    [ImplementedAs=urlForBinding] readonly attribute DOMString? documentURI;
     [MeasureAs=DocumentOrigin] readonly attribute DOMString origin;
-    [RuntimeEnabled=suborigins] readonly attribute DOMString suborigin;
+    [RuntimeEnabled=Suborigins] readonly attribute DOMString suborigin;
     readonly attribute DOMString compatMode;
 
     readonly attribute DOMString characterSet;
@@ -93,7 +95,7 @@ interface Document : Node {
     [PutForwards=href, Unforgeable] readonly attribute Location? location;
     [RaisesException=Setter] attribute DOMString domain;
     readonly attribute DOMString referrer;
-    [RaisesException] attribute DOMString cookie;
+    [RaisesException, RuntimeCallStatsCounter=DocumentCookie] attribute DOMString cookie;
     readonly attribute DOMString lastModified;
     readonly attribute DocumentReadyState readyState;
 
@@ -119,7 +121,7 @@ interface Document : Node {
     [CallWith=EnteredWindow, CEReactions, CustomElementCallbacks, RaisesException] void writeln(DOMString... text);
 
     // user interaction
-    [ImplementedAs=domWindow] readonly attribute Window? defaultView;
+    readonly attribute Window? defaultView;
     boolean hasFocus();
     [CEReactions, CustomElementCallbacks, MeasureAs=DocumentDesignMode] attribute DOMString designMode;
     [CEReactions, CustomElementCallbacks, RaisesException] boolean execCommand(DOMString commandId, optional boolean showUI = false, optional DOMString value = "");
@@ -156,19 +158,18 @@ interface Document : Node {
 
     // Touch Events
     // https://w3c.github.io/touch-events/#extensions-to-the-document-interface
-    // FIXME: The arguments should not be optional.
     [RuntimeEnabled=TouchEventFeatureDetection, Measure, LegacyInterfaceTypeChecking, Custom=CallPrologue]
-    Touch createTouch([Default=Undefined] optional Window window,
-                      [Default=Undefined] optional EventTarget target,
-                      [Default=Undefined] optional long identifier,
-                      [Default=Undefined] optional unrestricted double pageX,
-                      [Default=Undefined] optional unrestricted double pageY,
-                      [Default=Undefined] optional unrestricted double screenX,
-                      [Default=Undefined] optional unrestricted double screenY,
-                      [Default=Undefined] optional unrestricted double radiusX,
-                      [Default=Undefined] optional unrestricted double radiusY,
-                      [Default=Undefined] optional unrestricted float rotationAngle,
-                      [Default=Undefined] optional unrestricted float force);
+    Touch createTouch(Window view,
+                      EventTarget target,
+                      long identifier,
+                      double pageX,
+                      double pageY,
+                      double screenX,
+                      double screenY,
+                      optional unrestricted double radiusX = 0,
+                      optional unrestricted double radiusY = 0,
+                      optional unrestricted float rotationAngle = 0,
+                      optional unrestricted float force = 0);
     [RuntimeEnabled=TouchEventFeatureDetection] TouchList createTouchList(Touch... touches);
 
     // Custom Elements
@@ -181,7 +182,7 @@ interface Document : Node {
     [CustomElementCallbacks, RaisesException] Element createElementNS(DOMString? namespaceURI, DOMString qualifiedName, (DOMString or Dictionary)? options);
 
     // Page Visibility
-    // https://www.w3.org/TR/page-visibility/#sec-document-interface
+    // https://w3c.github.io/page-visibility/#extensions-to-the-document-interface
     readonly attribute boolean hidden;
     readonly attribute VisibilityState visibilityState;
 
@@ -209,10 +210,10 @@ interface Document : Node {
     [RuntimeEnabled=ExperimentalContentSecurityPolicyFeatures] attribute EventHandler onsecuritypolicyviolation;
     attribute EventHandler onselectionchange;
     attribute EventHandler onselectstart;
-    attribute EventHandler onwheel;
 };
 
 Document implements GlobalEventHandlers;
 Document implements ParentNode;
 Document implements NonElementParentNode;
 Document implements DocumentOrShadowRoot;
+Document implements FontFaceSource;

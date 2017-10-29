@@ -9,6 +9,7 @@
 #include "cc/quads/shared_quad_state.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/surface_draw_quad.h"
+#include "cc/test/compositor_frame_helpers.h"
 
 namespace cc {
 namespace test {
@@ -17,8 +18,8 @@ void CreateSharedQuadState(RenderPass* pass,
                            const gfx::Transform& transform,
                            const gfx::Rect& root_rect) {
   SharedQuadState* child_shared_state = pass->CreateAndAppendSharedQuadState();
-  child_shared_state->SetAll(transform, root_rect.size(), root_rect, root_rect,
-                             false, 1.0f, SkBlendMode::kSrcOver, 0);
+  child_shared_state->SetAll(transform, root_rect, root_rect, root_rect, false,
+                             1.0f, SkBlendMode::kSrcOver, 0);
 }
 
 void CreateSolidColorDrawQuad(RenderPass* pass,
@@ -50,7 +51,7 @@ void CreateSurfaceDrawQuad(RenderPass* pass,
                            const gfx::Transform& transform,
                            const gfx::Rect& root_rect,
                            const gfx::Rect& quad_rect,
-                           SurfaceId surface_id) {
+                           viz::SurfaceId surface_id) {
   CreateSharedQuadState(pass, transform, root_rect);
   SurfaceDrawQuad* surface_quad =
       pass->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
@@ -70,7 +71,7 @@ void CreateRenderPass(int render_pass_id,
 
 CompositorFrame CreateCompositorFrame(const gfx::Rect& root_rect,
                                       RenderPass** render_pass) {
-  CompositorFrame root_frame;
+  CompositorFrame root_frame = test::MakeCompositorFrame();
   int root_id = 1;
   CreateRenderPass(root_id, root_rect, gfx::Transform(),
                    &root_frame.render_pass_list);
@@ -84,13 +85,13 @@ TestSurfaceHittestDelegate::TestSurfaceHittestDelegate()
 TestSurfaceHittestDelegate::~TestSurfaceHittestDelegate() {}
 
 void TestSurfaceHittestDelegate::AddInsetsForRejectSurface(
-    const SurfaceId& surface_id,
+    const viz::SurfaceId& surface_id,
     const gfx::Insets& inset) {
   insets_for_reject_.insert(std::make_pair(surface_id, inset));
 }
 
 void TestSurfaceHittestDelegate::AddInsetsForAcceptSurface(
-    const SurfaceId& surface_id,
+    const viz::SurfaceId& surface_id,
     const gfx::Insets& inset) {
   insets_for_accept_.insert(std::make_pair(surface_id, inset));
 }

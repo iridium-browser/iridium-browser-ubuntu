@@ -6,29 +6,85 @@
 
 from __future__ import print_function
 
+import json
 import mock
 import os
 
 from chromite.cbuildbot import cbuildbot_unittest
 from chromite.cbuildbot import commands
-from chromite.lib import config_lib
-from chromite.lib import constants
-from chromite.lib import failures_lib
 from chromite.cbuildbot import swarming_lib
 from chromite.cbuildbot import topology
 from chromite.cbuildbot.stages import artifact_stages
 from chromite.cbuildbot.stages import generic_stages_unittest
 from chromite.cbuildbot.stages import test_stages
 from chromite.lib import cgroups
+from chromite.lib import config_lib
+from chromite.lib import constants
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import cros_logging as logging
+from chromite.lib import failures_lib
+from chromite.lib import fake_cidb
 from chromite.lib import osutils
 from chromite.lib import path_util
 from chromite.lib import timeout_util
 
 
 # pylint: disable=too-many-ancestors
+
+class GCETestStageTest(generic_stages_unittest.AbstractStageTestCase,
+                       cbuildbot_unittest.SimpleBuilderTestCase):
+  """Tests for the GCETest stage."""
+
+  BOT_ID = 'x86-generic-full'
+  RELEASE_TAG = ''
+
+  def setUp(self):
+    for cmd in ('RunTestSuite', 'CreateTestRoot', 'GenerateStackTraces',
+                'ArchiveFile', 'ArchiveTestResults', 'ArchiveVMFiles',
+                'UploadArchivedFile', 'RunDevModeTest', 'RunCrosVMTest',
+                'ListFailedTests', 'GetTestResultsDir',
+                'BuildAndArchiveTestResultsTarball'):
+      self.PatchObject(commands, cmd, autospec=True)
+    self.PatchObject(test_stages.VMTestStage, '_NoTestResults',
+                     autospec=True, return_value=False)
+    self.PatchObject(osutils, 'RmDir', autospec=True)
+    self.PatchObject(cgroups, 'SimpleContainChildren', autospec=True)
+    self._Prepare()
+
+    # Simulate breakpad symbols being ready.
+    board_runattrs = self._run.GetBoardRunAttrs(self._current_board)
+    board_runattrs.SetParallel('breakpad_symbols_generated', True)
+
+  def ConstructStage(self):
+    # pylint: disable=W0212
+    self._run.GetArchive().SetupArchivePath()
+    stage = test_stages.GCETestStage(self._run, self._current_board)
+    image_dir = stage.GetImageDirSymlink()
+    osutils.Touch(os.path.join(image_dir, constants.TEST_KEY_PRIVATE),
+                  makedirs=True)
+    return stage
+
+  def testGceTests(self):
+    """Verifies that GCE_SMOKE_TEST_TYPE tests are run on GCE."""
+    self._run.config['gce_tests'] = [
+        config_lib.GCETestConfig(constants.GCE_SMOKE_TEST_TYPE)
+    ]
+    gce_tarball = constants.TEST_IMAGE_GCE_TAR
+
+    # pylint: disable=unused-argument
+    def _MockRunTestSuite(buildroot, board, image_path, results_dir, test_type,
+                          *args, **kwargs):
+      self.assertEndsWith(image_path, gce_tarball)
+      self.assertEqual(test_type, constants.GCE_SMOKE_TEST_TYPE)
+    # pylint: enable=unused-argument
+
+    commands.RunTestSuite.side_effect = _MockRunTestSuite
+
+    self.RunStage()
+
+    self.assertTrue(commands.RunTestSuite.called and
+                    commands.RunTestSuite.call_count == 1)
 
 
 class VMTestStageTest(generic_stages_unittest.AbstractStageTestCase,
@@ -78,27 +134,6 @@ class VMTestStageTest(generic_stages_unittest.AbstractStageTestCase,
     ]
     self.RunStage()
 
-  def testGceTests(self):
-    """Tests if GCE_VM_TEST_TYPE tests are run on GCE."""
-    self._run.config['vm_tests'] = [
-        config_lib.VMTestConfig(constants.GCE_VM_TEST_TYPE)
-    ]
-    gce_tarball = constants.TEST_IMAGE_GCE_TAR
-
-    # pylint: disable=unused-argument
-    def _MockRunTestSuite(buildroot, board, image_path, results_dir, test_type,
-                          *args, **kwargs):
-      self.assertEndsWith(image_path, gce_tarball)
-      self.assertEqual(test_type, constants.GCE_VM_TEST_TYPE)
-    # pylint: enable=unused-argument
-
-    commands.RunTestSuite.side_effect = _MockRunTestSuite
-
-    self.RunStage()
-
-    self.assertTrue(commands.RunTestSuite.called and
-                    commands.RunTestSuite.call_count == 1)
-
   def testFailedTest(self):
     """Tests if quick unit and cros_au_test_harness tests are run correctly."""
     self.PatchObject(test_stages.VMTestStage, '_RunTest',
@@ -111,6 +146,12 @@ class VMTestStageTest(generic_stages_unittest.AbstractStageTestCase,
         OSError('Cannot archive'))
     stage = self.ConstructStage()
     self.assertRaises(failures_lib.InfrastructureFailure, stage.PerformStage)
+
+  def testSkipVMTest(self):
+    """Tests trybot with no vm test."""
+    extra_cmd_args = ['--novmtests']
+    self._Prepare(extra_cmd_args=extra_cmd_args)
+    self.RunStage()
 
 
 class UnitTestStageTest(generic_stages_unittest.AbstractStageTestCase):
@@ -177,7 +218,7 @@ class HWTestStageTest(generic_stages_unittest.AbstractStageTestCase,
     board_runattrs = self._run.GetBoardRunAttrs(self._current_board)
     board_runattrs.SetParallelDefault('test_artifacts_uploaded', True)
     return test_stages.HWTestStage(
-        self._run, self._current_board, self.suite_config)
+        self._run, self._current_board, self._current_board, self.suite_config)
 
   def _RunHWTestSuite(self, debug=False, fails=False, warns=False,
                       cmd_fail_mode=None):
@@ -196,6 +237,9 @@ class HWTestStageTest(generic_stages_unittest.AbstractStageTestCase,
     self.run_suite_mock.reset_mock()
     self.warning_mock.reset_mock()
     self.failure_mock.reset_mock()
+
+    mock_report = self.PatchObject(
+        test_stages.HWTestStage, 'ReportHWTestResults')
 
     to_raise = None
 
@@ -240,6 +284,8 @@ class HWTestStageTest(generic_stages_unittest.AbstractStageTestCase,
       self.warning_mock.assert_called_once()
     else:
       self.assertFalse(self.warning_mock.called)
+
+    mock_report.assert_not_called()
 
   def testRemoteTrybotWithHWTest(self):
     """Test remote trybot with hw test enabled"""
@@ -349,6 +395,68 @@ class HWTestStageTest(generic_stages_unittest.AbstractStageTestCase,
     # called.
     self.assertFalse(self.run_suite_mock.called)
 
+  def testReportHWTestResults(self):
+    """Test ReportHWTestResults."""
+    stage = self.ConstructStage()
+    json_str = """
+{
+  "tests":{
+    "Suite job":{
+       "status":"FAIL"
+    },
+    "cheets_CTS.com.android.cts.dram":{
+       "status":"FAIL"
+    },
+    "cheets_ContainerSmokeTest":{
+       "status":"GOOD"
+    },
+    "cheets_DownloadsFilesystem":{
+       "status":"ABORT"
+    },
+    "cheets_KeyboardTest":{
+       "status":"UNKNOWN"
+    }
+  }
+}
+"""
+    json_dump_dict = json.loads(json_str)
+    db = fake_cidb.FakeCIDBConnection()
+    build_id = db.InsertBuild('build_1', constants.WATERFALL_INTERNAL, 1,
+                              'build_1', 'bot_hostname')
+
+    # When json_dump_dict is None
+    self.assertIsNone(stage.ReportHWTestResults(None, build_id, db))
+
+    # When db is None
+    self.assertIsNone(stage.ReportHWTestResults(json_dump_dict, build_id, None))
+
+    # When results are successfully reported
+    stage.ReportHWTestResults(json_dump_dict, build_id, db)
+    results = db.GetHWTestResultsForBuilds([build_id])
+    result_dict = {x.test_name: x.status for x in results}
+
+    expect_dict = {
+        'cheets_DownloadsFilesystem': constants.HWTEST_STATUS_ABORT,
+        'cheets_KeyboardTest': constants.HWTEST_STATUS_OTHER,
+        'Suite job': constants.HWTEST_STATUS_FAIL,
+        'cheets_CTS.com.android.cts.dram': constants.HWTEST_STATUS_FAIL,
+        'cheets_ContainerSmokeTest': constants.HWTEST_STATUS_PASS
+    }
+    self.assertItemsEqual(expect_dict, result_dict)
+    self.assertEqual(len(results), 5)
+
+  def testPerformStageOnCQ(self):
+    """Test PerformStage on CQ."""
+    self._Prepare('lumpy-paladin')
+    stage = self.ConstructStage()
+    mock_report = self.PatchObject(
+        test_stages.HWTestStage, 'ReportHWTestResults')
+    cmd_result = mock.Mock(to_raise=None)
+    self.PatchObject(commands, 'RunHWTestSuite', return_value=cmd_result)
+    stage.PerformStage()
+
+    mock_report.assert_called_once_with(mock.ANY, mock.ANY, mock.ANY)
+
 
 class AUTestStageTest(generic_stages_unittest.AbstractStageTestCase,
                       cros_build_lib_unittest.RunCommandTestCase,
@@ -383,7 +491,7 @@ class AUTestStageTest(generic_stages_unittest.AbstractStageTestCase,
     board_runattrs = self._run.GetBoardRunAttrs(self._current_board)
     board_runattrs.SetParallelDefault('test_artifacts_uploaded', True)
     return test_stages.AUTestStage(
-        self._run, self._current_board, self.suite_config)
+        self._run, self._current_board, self._current_board, self.suite_config)
 
   def _PatchJson(self):
     """Mock out the code that loads from swarming task summary."""
@@ -419,7 +527,7 @@ class AUTestStageTest(generic_stages_unittest.AbstractStageTestCase,
     self.assertCommandContains(cmd)
     # pylint: disable=W0212
     self.assertCommandContains([swarming_lib._SWARMING_PROXY_CLIENT,
-                                commands._RUN_SUITE_PATH, self.suite])
+                                commands.RUN_SUITE_PATH, self.suite])
 
   def testPayloadsNotGenerated(self):
     """Test that we exit early if payloads are not generated."""

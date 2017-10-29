@@ -279,6 +279,10 @@ void ChildAccountService::OnAccountUpdated(const AccountInfo& info) {
   SetIsChildAccount(info.is_child_account);
 }
 
+void ChildAccountService::OnAccountRemoved(const AccountInfo& info) {
+  SetIsChildAccount(false);
+}
+
 void ChildAccountService::OnGetFamilyMembersSuccess(
     const std::vector<FamilyInfoFetcher::FamilyMember>& members) {
   bool hoh_found = false;
@@ -359,10 +363,13 @@ void ChildAccountService::PropagateChildStatusToUser(bool is_child) {
 #if defined(OS_CHROMEOS)
   user_manager::User* user =
       chromeos::ProfileHelper::Get()->GetUserByProfile(profile_);
-  if (user)
+  if (user) {
     user_manager::UserManager::Get()->ChangeUserChildStatus(user, is_child);
-  else if (!chromeos::ProfileHelper::Get()->IsSigninProfile(profile_))
+  } else if (!chromeos::ProfileHelper::Get()->IsSigninProfile(profile_) &&
+             !chromeos::ProfileHelper::Get()->IsLockScreenAppProfile(
+                 profile_)) {
     LOG(DFATAL) << "User instance not found while setting child account flag.";
+  }
 #endif
 }
 

@@ -26,8 +26,8 @@
 #ifndef MediaDeviceInfo_h
 #define MediaDeviceInfo_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/ModulesExport.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebMediaDeviceInfo.h"
 
@@ -42,7 +42,7 @@ class MODULES_EXPORT MediaDeviceInfo final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static MediaDeviceInfo* create(const WebMediaDeviceInfo&);
+  static MediaDeviceInfo* Create(const WebMediaDeviceInfo&);
 
   String deviceId() const;
   String kind() const;
@@ -56,7 +56,7 @@ class MODULES_EXPORT MediaDeviceInfo final
  private:
   explicit MediaDeviceInfo(const WebMediaDeviceInfo&);
 
-  WebMediaDeviceInfo m_webMediaDeviceInfo;
+  WebMediaDeviceInfo web_media_device_info_;
 };
 
 typedef HeapVector<Member<MediaDeviceInfo>> MediaDeviceInfoVector;

@@ -27,9 +27,8 @@
 #ifndef WorkerGlobalScope_h
 #define WorkerGlobalScope_h
 
-#include "bindings/core/v8/ActiveScriptWrappable.h"
+#include <memory>
 #include "bindings/core/v8/V8CacheOptions.h"
-#include "bindings/core/v8/WorkerOrWorkletScriptController.h"
 #include "core/CoreExport.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/events/EventListener.h"
@@ -40,17 +39,16 @@
 #include "core/workers/WorkerEventQueue.h"
 #include "core/workers/WorkerOrWorkletGlobalScope.h"
 #include "core/workers/WorkerSettings.h"
+#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/CachedMetadataHandler.h"
-#include "wtf/ListHashSet.h"
-#include <memory>
+#include "platform/wtf/ListHashSet.h"
 
 namespace blink {
 
 class ConsoleMessage;
 class ExceptionState;
 class V8AbstractEventListener;
-class WorkerClients;
 class WorkerLocation;
 class WorkerNavigator;
 class WorkerThread;
@@ -66,31 +64,31 @@ class CORE_EXPORT WorkerGlobalScope
   USING_GARBAGE_COLLECTED_MIXIN(WorkerGlobalScope);
 
  public:
-  using SecurityContext::getSecurityOrigin;
-  using SecurityContext::contentSecurityPolicy;
+  using SecurityContext::GetSecurityOrigin;
+  using SecurityContext::GetContentSecurityPolicy;
 
   ~WorkerGlobalScope() override;
 
   // Returns null if caching is not supported.
-  virtual CachedMetadataHandler* createWorkerScriptCachedMetadataHandler(
-      const KURL& scriptURL,
-      const Vector<char>* metaData) {
+  virtual CachedMetadataHandler* CreateWorkerScriptCachedMetadataHandler(
+      const KURL& script_url,
+      const Vector<char>* meta_data) {
     return nullptr;
   }
 
-  KURL completeURL(const String&) const;
+  KURL CompleteURL(const String&) const;
 
   // WorkerOrWorkletGlobalScope
-  bool isClosing() const final { return m_closing; }
-  virtual void dispose();
-  void countFeature(UseCounter::Feature) final;
-  void countDeprecation(UseCounter::Feature) final;
-  WorkerThread* thread() const final { return m_thread; }
+  bool IsClosing() const final { return closing_; }
+  virtual void Dispose();
+  void ReportFeature(WebFeature) final;
+  void ReportDeprecation(WebFeature) final;
+  WorkerThread* GetThread() const final { return thread_; }
 
-  void exceptionUnhandled(int exceptionId);
+  void ExceptionUnhandled(int exception_id);
 
-  void registerEventListener(V8AbstractEventListener*);
-  void deregisterEventListener(V8AbstractEventListener*);
+  void RegisterEventListener(V8AbstractEventListener*);
+  void DeregisterEventListener(V8AbstractEventListener*);
 
   // WorkerGlobalScope
   WorkerGlobalScope* self() { return this; }
@@ -98,8 +96,10 @@ class CORE_EXPORT WorkerGlobalScope
   WorkerNavigator* navigator() const;
   void close();
   bool isSecureContextForBindings() const {
-    return ExecutionContext::isSecureContext(StandardSecureContextCheck);
+    return ExecutionContext::IsSecureContext();
   }
+
+  String origin() const;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(rejectionhandled);
@@ -109,110 +109,99 @@ class CORE_EXPORT WorkerGlobalScope
   virtual void importScripts(const Vector<String>& urls, ExceptionState&);
 
   // ScriptWrappable
-  v8::Local<v8::Object> wrap(v8::Isolate*,
-                             v8::Local<v8::Object> creationContext) final;
-  v8::Local<v8::Object> associateWithWrapper(
+  v8::Local<v8::Object> Wrap(v8::Isolate*,
+                             v8::Local<v8::Object> creation_context) final;
+  v8::Local<v8::Object> AssociateWithWrapper(
       v8::Isolate*,
       const WrapperTypeInfo*,
       v8::Local<v8::Object> wrapper) final;
 
   // ScriptWrappable
-  bool hasPendingActivity() const override;
+  bool HasPendingActivity() const override;
 
   // ExecutionContext
-  bool isWorkerGlobalScope() const final { return true; }
-  bool isJSExecutionForbidden() const final;
-  bool isContextThread() const final;
-  void disableEval(const String& errorMessage) final;
-  String userAgent() const final { return m_userAgent; }
+  bool IsWorkerGlobalScope() const final { return true; }
+  bool IsContextThread() const final;
+  String UserAgent() const final { return user_agent_; }
 
-  DOMTimerCoordinator* timers() final { return &m_timers; }
-  SecurityContext& securityContext() final { return *this; }
-  void addConsoleMessage(ConsoleMessage*) final;
-  WorkerEventQueue* getEventQueue() const final;
-  bool isSecureContext(
-      String& errorMessage,
-      const SecureContextCheck = StandardSecureContextCheck) const override;
+  DOMTimerCoordinator* Timers() final { return &timers_; }
+  SecurityContext& GetSecurityContext() final { return *this; }
+  void AddConsoleMessage(ConsoleMessage*) final;
+  WorkerEventQueue* GetEventQueue() const final;
+  bool IsSecureContext(String& error_message) const override;
+
+  CoreProbeSink* GetProbeSink() final;
 
   // EventTarget
-  ExecutionContext* getExecutionContext() const final;
+  ExecutionContext* GetExecutionContext() const final;
 
   // WorkerOrWorkletGlobalScope
-  ScriptWrappable* getScriptWrappable() const final {
+  ScriptWrappable* GetScriptWrappable() const final {
     return const_cast<WorkerGlobalScope*>(this);
   }
 
-  double timeOrigin() const { return m_timeOrigin; }
-  WorkerSettings* workerSettings() const { return m_workerSettings.get(); }
-
-  WorkerOrWorkletScriptController* scriptController() final {
-    return m_scriptController.get();
-  }
-
-  WorkerClients* clients() const { return m_workerClients.get(); }
+  double TimeOrigin() const { return time_origin_; }
+  WorkerSettings* GetWorkerSettings() const { return worker_settings_.get(); }
 
   DECLARE_VIRTUAL_TRACE();
 
  protected:
   WorkerGlobalScope(const KURL&,
-                    const String& userAgent,
+                    const String& user_agent,
                     WorkerThread*,
-                    double timeOrigin,
+                    double time_origin,
                     std::unique_ptr<SecurityOrigin::PrivilegeData>,
                     WorkerClients*);
-  void setWorkerSettings(std::unique_ptr<WorkerSettings>);
-  void applyContentSecurityPolicyFromVector(
+  void SetWorkerSettings(std::unique_ptr<WorkerSettings>);
+  void ApplyContentSecurityPolicyFromVector(
       const Vector<CSPHeaderAndType>& headers);
 
-  void setV8CacheOptions(V8CacheOptions v8CacheOptions) {
-    m_v8CacheOptions = v8CacheOptions;
+  void SetV8CacheOptions(V8CacheOptions v8_cache_options) {
+    v8_cache_options_ = v8_cache_options;
   }
 
   // ExecutionContext
-  void exceptionThrown(ErrorEvent*) override;
-  void removeURLFromMemoryCache(const KURL&) final;
+  void ExceptionThrown(ErrorEvent*) override;
+  void RemoveURLFromMemoryCache(const KURL&) final;
 
  private:
   // ExecutionContext
-  EventTarget* errorEventTarget() final { return this; }
-  const KURL& virtualURL() const final { return m_url; }
-  KURL virtualCompleteURL(const String&) const final;
+  EventTarget* ErrorEventTarget() final { return this; }
+  const KURL& VirtualURL() const final { return url_; }
+  KURL VirtualCompleteURL(const String&) const final;
 
   // SecurityContext
-  void didUpdateSecurityOrigin() final {}
+  void DidUpdateSecurityOrigin() final {}
 
-  const KURL m_url;
-  const String m_userAgent;
-  V8CacheOptions m_v8CacheOptions;
-  std::unique_ptr<WorkerSettings> m_workerSettings;
+  const KURL url_;
+  const String user_agent_;
+  V8CacheOptions v8_cache_options_;
+  std::unique_ptr<WorkerSettings> worker_settings_;
 
-  mutable Member<WorkerLocation> m_location;
-  mutable Member<WorkerNavigator> m_navigator;
+  mutable Member<WorkerLocation> location_;
+  mutable Member<WorkerNavigator> navigator_;
 
-  Member<WorkerOrWorkletScriptController> m_scriptController;
-  WorkerThread* m_thread;
+  WorkerThread* thread_;
 
-  bool m_closing;
+  bool closing_ = false;
 
-  Member<WorkerEventQueue> m_eventQueue;
+  Member<WorkerEventQueue> event_queue_;
 
-  CrossThreadPersistent<WorkerClients> m_workerClients;
+  DOMTimerCoordinator timers_;
 
-  DOMTimerCoordinator m_timers;
+  const double time_origin_;
 
-  const double m_timeOrigin;
+  HeapHashSet<Member<V8AbstractEventListener>> event_listeners_;
 
-  HeapHashSet<Member<V8AbstractEventListener>> m_eventListeners;
-
-  HeapHashMap<int, Member<ErrorEvent>> m_pendingErrorEvents;
-  int m_lastPendingErrorEventId;
+  HeapHashMap<int, Member<ErrorEvent>> pending_error_events_;
+  int last_pending_error_event_id_ = 0;
 };
 
 DEFINE_TYPE_CASTS(WorkerGlobalScope,
                   ExecutionContext,
                   context,
-                  context->isWorkerGlobalScope(),
-                  context.isWorkerGlobalScope());
+                  context->IsWorkerGlobalScope(),
+                  context.IsWorkerGlobalScope());
 
 }  // namespace blink
 

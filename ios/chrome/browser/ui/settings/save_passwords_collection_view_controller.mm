@@ -4,15 +4,10 @@
 
 #import "ios/chrome/browser/ui/settings/save_passwords_collection_view_controller.h"
 
-#include <memory>
-#include <vector>
-
 #include "base/ios/ios_util.h"
-#import "base/ios/weak_nsobject.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
-#import "base/mac/objc_property_releaser.h"
-#import "base/mac/scoped_nsobject.h"
+
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/sys_string_conversions.h"
@@ -20,14 +15,13 @@
 #include "components/autofill/core/common/password_form.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/keyed_service/core/service_access_type.h"
-#include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/password_manager_constants.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
+#include "components/password_manager/core/browser/password_ui_utils.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
-#include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_formatter.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
@@ -40,6 +34,7 @@
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_text_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 #import "ios/chrome/browser/ui/settings/password_details_collection_view_controller.h"
+#import "ios/chrome/browser/ui/settings/password_details_collection_view_controller_delegate.h"
 #import "ios/chrome/browser/ui/settings/reauthentication_module.h"
 #import "ios/chrome/browser/ui/settings/settings_utils.h"
 #import "ios/chrome/browser/ui/settings/utils/pref_backed_boolean.h"
@@ -47,6 +42,10 @@
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -65,26 +64,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeBlacklisted,    // This is a repeated item type.
 };
 
-// TODO(crbug.com/669538): This function should be removed after original
-// version of GetHumanReadableOrigin will be moved to affiliation_utils.
-std::string GetHumanReadableOriginCopy(
-    const autofill::PasswordForm& password_form) {
-  password_manager::FacetURI facet_uri =
-      password_manager::FacetURI::FromPotentiallyInvalidSpec(
-          password_form.signon_realm);
-  if (facet_uri.IsValidAndroidFacetURI())
-    return facet_uri.scheme() + "://" + facet_uri.android_package_name();
-  return base::UTF16ToUTF8(url_formatter::FormatUrl(password_form.origin));
-}
-
 }  // namespace
-
-@interface SavePasswordsCollectionViewController (UsedBySavePasswordsConsumer)
-// Callback called when the async request launched from
-// |getLoginsFromPasswordStore| finishes.
-- (void)onGetPasswordStoreResults:
-    (const std::vector<std::unique_ptr<autofill::PasswordForm>>&)result;
-@end
 
 namespace password_manager {
 // A bridge C++ class passing notification about finished password store
@@ -131,9 +111,9 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
     SuccessfulReauthTimeAccessor> {
   // The observable boolean that binds to the password manager setting state.
   // Saved passwords are only on if the password manager is enabled.
-  base::scoped_nsobject<PrefBackedBoolean> passwordManagerEnabled_;
+  PrefBackedBoolean* passwordManagerEnabled_;
   // The item related to the switch for the password manager setting.
-  base::scoped_nsobject<CollectionViewSwitchItem> savePasswordsItem_;
+  CollectionViewSwitchItem* savePasswordsItem_;
   // The interface for getting and manipulating a user's saved passwords.
   scoped_refptr<password_manager::PasswordStore> passwordStore_;
   // A helper object for passing data about saved passwords from a finished
@@ -158,13 +138,10 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
   // This is meant to be used by the |ReauthenticationModule| for keeping
   // re-authentications valid for a certain time interval within the scope
   // of the Save Passwords Settings.
-  base::scoped_nsobject<NSDate> successfulReauthTime_;
+  NSDate* successfulReauthTime_;
   // Module containing the reauthentication mechanism for viewing and copying
   // passwords.
-  base::scoped_nsobject<ReauthenticationModule> reauthenticationModule_;
-
-  base::mac::ObjCPropertyReleaser
-      propertyReleaser_SavePasswordsCollectionViewController_;
+  ReauthenticationModule* reauthenticationModule_;
 }
 // Kick off async request to get logins from password store.
 - (void)getLoginsFromPasswordStore;
@@ -176,34 +153,33 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
 
 - (instancetype)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
   DCHECK(browserState);
-  self = [super initWithStyle:CollectionViewControllerStyleAppBar];
+  UICollectionViewLayout* layout = [[MDCCollectionViewFlowLayout alloc] init];
+  self =
+      [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
   if (self) {
     browserState_ = browserState;
-    reauthenticationModule_.reset([[ReauthenticationModule alloc]
-        initWithSuccessfulReauthTimeAccessor:self]);
+    reauthenticationModule_ = [[ReauthenticationModule alloc]
+        initWithSuccessfulReauthTimeAccessor:self];
     self.title = l10n_util::GetNSString(IDS_IOS_SAVE_PASSWORDS);
+    self.collectionViewAccessibilityIdentifier =
+        @"SavePasswordsCollectionViewController";
     self.shouldHideDoneButton = YES;
     passwordStore_ = IOSChromePasswordStoreFactory::GetForBrowserState(
         browserState_, ServiceAccessType::EXPLICIT_ACCESS);
     DCHECK(passwordStore_);
-    passwordManagerEnabled_.reset([[PrefBackedBoolean alloc]
+    passwordManagerEnabled_ = [[PrefBackedBoolean alloc]
         initWithPrefService:browserState_->GetPrefs()
-                   prefName:password_manager::prefs::
-                                kPasswordManagerSavingEnabled]);
+                   prefName:password_manager::prefs::kCredentialsEnableService];
     [passwordManagerEnabled_ setObserver:self];
     [self getLoginsFromPasswordStore];
     [self updateEditButton];
     [self loadModel];
-
-    propertyReleaser_SavePasswordsCollectionViewController_.Init(
-        self, [SavePasswordsCollectionViewController class]);
   }
   return self;
 }
 
 - (void)dealloc {
   [passwordManagerEnabled_ setObserver:nil];
-  [super dealloc];
 }
 
 #pragma mark - SettingsRootCollectionViewController
@@ -222,37 +198,37 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
 
   // Save passwords switch.
   [model addSectionWithIdentifier:SectionIdentifierSavePasswordsSwitch];
-  savePasswordsItem_.reset([[self savePasswordsItem] retain]);
+  savePasswordsItem_ = [self savePasswordsItem];
   [model addItem:savePasswordsItem_
       toSectionWithIdentifier:SectionIdentifierSavePasswordsSwitch];
 
   // Saved passwords.
-  if ([passwordManagerEnabled_ value]) {
-    if (!savedForms_.empty()) {
-      [model addSectionWithIdentifier:SectionIdentifierSavedPasswords];
-      CollectionViewTextItem* headerItem = [[[CollectionViewTextItem alloc]
-          initWithType:ItemTypeHeader] autorelease];
-      headerItem.text =
-          l10n_util::GetNSString(IDS_PASSWORD_MANAGER_SHOW_PASSWORDS_TAB_TITLE);
-      [model setHeader:headerItem
-          forSectionWithIdentifier:SectionIdentifierSavedPasswords];
-      for (const auto& form : savedForms_) {
-        [model addItem:[self savedFormItemWithForm:form.get()]
-            toSectionWithIdentifier:SectionIdentifierSavedPasswords];
-      }
+  if (!savedForms_.empty()) {
+    [model addSectionWithIdentifier:SectionIdentifierSavedPasswords];
+    CollectionViewTextItem* headerItem =
+        [[CollectionViewTextItem alloc] initWithType:ItemTypeHeader];
+    headerItem.text =
+        l10n_util::GetNSString(IDS_IOS_SETTINGS_PASSWORDS_SAVED_HEADING);
+    headerItem.textColor = [[MDCPalette greyPalette] tint500];
+    [model setHeader:headerItem
+        forSectionWithIdentifier:SectionIdentifierSavedPasswords];
+    for (const auto& form : savedForms_) {
+      [model addItem:[self savedFormItemWithForm:form.get()]
+          toSectionWithIdentifier:SectionIdentifierSavedPasswords];
     }
-    if (!blacklistedForms_.empty()) {
-      [model addSectionWithIdentifier:SectionIdentifierBlacklist];
-      CollectionViewTextItem* headerItem = [[[CollectionViewTextItem alloc]
-          initWithType:ItemTypeHeader] autorelease];
-      headerItem.text =
-          l10n_util::GetNSString(IDS_PASSWORD_MANAGER_EXCEPTIONS_TAB_TITLE);
-      [model setHeader:headerItem
-          forSectionWithIdentifier:SectionIdentifierBlacklist];
-      for (const auto& form : blacklistedForms_) {
-        [model addItem:[self blacklistedFormItemWithForm:form.get()]
-            toSectionWithIdentifier:SectionIdentifierBlacklist];
-      }
+  }
+  if (!blacklistedForms_.empty()) {
+    [model addSectionWithIdentifier:SectionIdentifierBlacklist];
+    CollectionViewTextItem* headerItem =
+        [[CollectionViewTextItem alloc] initWithType:ItemTypeHeader];
+    headerItem.text =
+        l10n_util::GetNSString(IDS_IOS_SETTINGS_PASSWORDS_EXCEPTIONS_HEADING);
+    headerItem.textColor = [[MDCPalette greyPalette] tint500];
+    [model setHeader:headerItem
+        forSectionWithIdentifier:SectionIdentifierBlacklist];
+    for (const auto& form : blacklistedForms_) {
+      [model addItem:[self blacklistedFormItemWithForm:form.get()]
+          toSectionWithIdentifier:SectionIdentifierBlacklist];
     }
   }
 }
@@ -260,8 +236,8 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
 #pragma mark - Items
 
 - (CollectionViewItem*)manageAccountLinkItem {
-  CollectionViewFooterItem* footerItem = [[[CollectionViewFooterItem alloc]
-      initWithType:ItemTypeManageAccount] autorelease];
+  CollectionViewFooterItem* footerItem =
+      [[CollectionViewFooterItem alloc] initWithType:ItemTypeManageAccount];
   footerItem.text =
       l10n_util::GetNSString(IDS_IOS_SAVE_PASSWORDS_MANAGE_ACCOUNT);
   footerItem.linkURL = google_util::AppendGoogleLocaleParam(
@@ -273,18 +249,19 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
 
 - (CollectionViewSwitchItem*)savePasswordsItem {
   CollectionViewSwitchItem* savePasswordsItem =
-      [[[CollectionViewSwitchItem alloc]
-          initWithType:ItemTypeSavePasswordsSwitch] autorelease];
+      [[CollectionViewSwitchItem alloc]
+          initWithType:ItemTypeSavePasswordsSwitch];
   savePasswordsItem.text = l10n_util::GetNSString(IDS_IOS_SAVE_PASSWORDS);
   savePasswordsItem.on = [passwordManagerEnabled_ value];
+  savePasswordsItem.accessibilityIdentifier = @"savePasswordsItem_switch";
   return savePasswordsItem;
 }
 
 - (SavedFormContentItem*)savedFormItemWithForm:(autofill::PasswordForm*)form {
-  SavedFormContentItem* passwordItem = [[[SavedFormContentItem alloc]
-      initWithType:ItemTypeSavedPassword] autorelease];
-  passwordItem.text =
-      base::SysUTF8ToNSString(GetHumanReadableOriginCopy(*form));
+  SavedFormContentItem* passwordItem =
+      [[SavedFormContentItem alloc] initWithType:ItemTypeSavedPassword];
+  passwordItem.text = base::SysUTF8ToNSString(
+      password_manager::GetShownOriginAndLinkUrl(*form).first);
   passwordItem.detailText = base::SysUTF16ToNSString(form->username_value);
   if (experimental_flags::IsViewCopyPasswordsEnabled()) {
     passwordItem.accessibilityTraits |= UIAccessibilityTraitButton;
@@ -297,10 +274,14 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
 - (BlacklistedFormContentItem*)blacklistedFormItemWithForm:
     (autofill::PasswordForm*)form {
   BlacklistedFormContentItem* passwordItem =
-      [[[BlacklistedFormContentItem alloc] initWithType:ItemTypeBlacklisted]
-          autorelease];
-  passwordItem.text =
-      base::SysUTF8ToNSString(GetHumanReadableOriginCopy(*form));
+      [[BlacklistedFormContentItem alloc] initWithType:ItemTypeBlacklisted];
+  passwordItem.text = base::SysUTF8ToNSString(
+      password_manager::GetShownOriginAndLinkUrl(*form).first);
+  if (experimental_flags::IsViewCopyPasswordsEnabled()) {
+    passwordItem.accessibilityTraits |= UIAccessibilityTraitButton;
+    passwordItem.accessoryType =
+        MDCCollectionViewCellAccessoryDisclosureIndicator;
+  }
   return passwordItem;
 }
 
@@ -384,36 +365,20 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
   return cell;
 }
 
-- (UICollectionReusableView*)collectionView:(UICollectionView*)collectionView
-          viewForSupplementaryElementOfKind:(NSString*)kind
-                                atIndexPath:(NSIndexPath*)indexPath {
-  UICollectionReusableView* view = [super collectionView:collectionView
-                       viewForSupplementaryElementOfKind:kind
-                                             atIndexPath:indexPath];
-  MDCCollectionViewTextCell* textCell =
-      base::mac::ObjCCast<MDCCollectionViewTextCell>(view);
-  if (textCell) {
-    textCell.textLabel.textColor = [[MDCPalette greyPalette] tint500];
-  }
-  return view;
-};
-
 #pragma mark - BooleanObserver
 
 - (void)booleanDidChange:(id<ObservableBoolean>)observableBoolean {
-  DCHECK_EQ(observableBoolean, passwordManagerEnabled_.get());
+  DCHECK_EQ(observableBoolean, passwordManagerEnabled_);
 
   // Update the item.
-  savePasswordsItem_.get().on = [passwordManagerEnabled_ value];
+  savePasswordsItem_.on = [passwordManagerEnabled_ value];
 
   // Update the cell.
-  [self reconfigureCellsForItems:@[ savePasswordsItem_ ]
-         inSectionWithIdentifier:SectionIdentifierSavePasswordsSwitch];
+  [self reconfigureCellsForItems:@[ savePasswordsItem_ ]];
 
-  // Update the rest of the UI.
+  // Update the edit button.
   [self.editor setEditing:NO];
   [self updateEditButton];
-  [self reloadData];
 }
 
 #pragma mark - Actions
@@ -423,12 +388,11 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
   [passwordManagerEnabled_ setValue:switchView.on];
 
   // Update the item.
-  savePasswordsItem_.get().on = [passwordManagerEnabled_ value];
+  savePasswordsItem_.on = [passwordManagerEnabled_ value];
 
-  // Update the rest of the UI.
+  // Update the edit button.
   [self.editor setEditing:NO];
   [self updateEditButton];
-  [self reloadData];
 }
 
 #pragma mark - Private methods
@@ -468,36 +432,49 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
 
 #pragma mark UICollectionViewDelegate
 
+- (void)openDetailedViewForForm:(const autofill::PasswordForm&)form {
+  if (!experimental_flags::IsViewCopyPasswordsEnabled())
+    return;
+
+  UIViewController* controller =
+      [[PasswordDetailsCollectionViewController alloc]
+            initWithPasswordForm:form
+                        delegate:self
+          reauthenticationModule:reauthenticationModule_];
+  [self.navigationController pushViewController:controller animated:YES];
+}
+
 - (void)collectionView:(UICollectionView*)collectionView
     didSelectItemAtIndexPath:(NSIndexPath*)indexPath {
   [super collectionView:collectionView didSelectItemAtIndexPath:indexPath];
 
   // Actions should only take effect when not in editing mode.
-  if (self.editing) {
+  if ([self.editor isEditing]) {
     return;
   }
 
   CollectionViewModel* model = self.collectionViewModel;
-  if ([model itemTypeForIndexPath:indexPath] == ItemTypeSavedPassword) {
-    DCHECK_EQ([model sectionIdentifierForSection:indexPath.section],
-              SectionIdentifierSavedPasswords);
-    if (experimental_flags::IsViewCopyPasswordsEnabled()) {
+  NSInteger itemType = [model itemTypeForIndexPath:indexPath];
+  switch (itemType) {
+    case ItemTypeManageAccount:
+    case ItemTypeHeader:
+    case ItemTypeSavePasswordsSwitch:
+      break;
+    case ItemTypeSavedPassword:
+      DCHECK_EQ(SectionIdentifierSavedPasswords,
+                [model sectionIdentifierForSection:indexPath.section]);
       DCHECK_LT(base::checked_cast<size_t>(indexPath.item), savedForms_.size());
-      autofill::PasswordForm* form = savedForms_[indexPath.item].get();
-      NSString* username = base::SysUTF16ToNSString(form->username_value);
-      NSString* password = base::SysUTF16ToNSString(form->password_value);
-      NSString* origin =
-          base::SysUTF8ToNSString(GetHumanReadableOriginCopy(*form));
-      base::scoped_nsobject<UIViewController> controller(
-          [[PasswordDetailsCollectionViewController alloc]
-                initWithPasswordForm:*form
-                            delegate:self
-              reauthenticationModule:reauthenticationModule_
-                            username:username
-                            password:password
-                              origin:origin]);
-      [self.navigationController pushViewController:controller animated:YES];
-    }
+      [self openDetailedViewForForm:*savedForms_[indexPath.item]];
+      break;
+    case ItemTypeBlacklisted:
+      DCHECK_EQ(SectionIdentifierBlacklist,
+                [model sectionIdentifierForSection:indexPath.section]);
+      DCHECK_LT(base::checked_cast<size_t>(indexPath.item),
+                blacklistedForms_.size());
+      [self openDetailedViewForForm:*blacklistedForms_[indexPath.item]];
+      break;
+    default:
+      NOTREACHED();
   }
 }
 
@@ -562,10 +539,9 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
       [sectionsToRemove addObject:@(indexPath.section)];
     }
   }
-  base::WeakNSObject<SavePasswordsCollectionViewController> weakSelf(self);
+  __weak SavePasswordsCollectionViewController* weakSelf = self;
   [self.collectionView performBatchUpdates:^{
-    base::scoped_nsobject<SavePasswordsCollectionViewController> strongSelf(
-        [weakSelf retain]);
+    SavePasswordsCollectionViewController* strongSelf = weakSelf;
     if (!strongSelf)
       return;
     for (NSNumber* sectionNumber in sectionsToRemove) {
@@ -579,8 +555,7 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
     }
   }
       completion:^(BOOL finished) {
-        base::scoped_nsobject<SavePasswordsCollectionViewController> strongSelf(
-            [weakSelf retain]);
+        SavePasswordsCollectionViewController* strongSelf = weakSelf;
         if (!strongSelf)
           return;
         if (![strongSelf editButtonEnabled]) {
@@ -597,20 +572,21 @@ void SavePasswordsConsumer::OnGetPasswordStoreResults(
   for (auto it = savedForms_.begin(); it != savedForms_.end(); ++it) {
     if (**it == form) {
       savedForms_.erase(it);
-      return;
+      break;
     }
   }
+  [self reloadData];
   [self.navigationController popViewControllerAnimated:YES];
 }
 
 #pragma mark SuccessfulReauthTimeAccessor
 
 - (void)updateSuccessfulReauthTime {
-  successfulReauthTime_.reset([[NSDate alloc] init]);
+  successfulReauthTime_ = [[NSDate alloc] init];
 }
 
 - (NSDate*)lastSuccessfulReauthTime {
-  return successfulReauthTime_.get();
+  return successfulReauthTime_;
 }
 
 @end

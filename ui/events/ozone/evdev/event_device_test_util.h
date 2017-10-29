@@ -59,6 +59,9 @@ struct DeviceCapabilities {
 bool CapabilitiesToDeviceInfo(const DeviceCapabilities& capabilities,
                               EventDeviceInfo* devinfo);
 
+extern const DeviceCapabilities kXboxGamepad;
+extern const DeviceCapabilities kHJCGamepad;
+extern const DeviceCapabilities kiBuffaloGamepad;
 extern const DeviceCapabilities kLinkKeyboard;
 extern const DeviceCapabilities kLinkTouchscreen;
 extern const DeviceCapabilities kLinkTouchpad;
@@ -71,6 +74,7 @@ extern const DeviceCapabilities kWacomIntuosPtS_Finger;
 extern const DeviceCapabilities kLogitechTouchKeyboardK400;
 extern const DeviceCapabilities kElo_TouchSystems_2700;
 extern const DeviceCapabilities kWilsonBeachActiveStylus;
+extern const DeviceCapabilities kEveStylus;
 
 }  // namspace ui
 

@@ -9,47 +9,67 @@
 
 #include "base/macros.h"
 #include "chrome/browser/ui/views/payments/payment_request_sheet_controller.h"
-#include "components/payments/content/payment_request.h"
+#include "components/payments/content/payment_request_spec.h"
+#include "components/payments/content/payment_request_state.h"
+#include "ui/views/controls/styled_label_listener.h"
+
+namespace views {
+class StyledLabel;
+}
 
 namespace payments {
 
-class PaymentRequest;
 class PaymentRequestDialogView;
 
 // The PaymentRequestSheetController subtype for the Payment Sheet screen of the
 // Payment Request dialog.
 class PaymentSheetViewController : public PaymentRequestSheetController,
-                                   public PaymentRequest::Observer {
+                                   public PaymentRequestSpec::Observer,
+                                   public PaymentRequestState::Observer,
+                                   public views::StyledLabelListener {
  public:
   // Does not take ownership of the arguments, which should outlive this object.
-  PaymentSheetViewController(PaymentRequest* request,
+  PaymentSheetViewController(PaymentRequestSpec* spec,
+                             PaymentRequestState* state,
                              PaymentRequestDialogView* dialog);
   ~PaymentSheetViewController() override;
 
-  // PaymentRequestSheetController:
-  std::unique_ptr<views::View> CreateView() override;
-  std::unique_ptr<views::Button> CreatePrimaryButton() override;
+  // PaymentRequestSpec::Observer:
+  void OnSpecUpdated() override;
 
-  // PaymentRequest::Observer:
+  // PaymentRequestState::Observer:
   void OnSelectedInformationChanged() override;
 
  private:
   // PaymentRequestSheetController:
+  std::unique_ptr<views::Button> CreatePrimaryButton() override;
+  base::string16 GetSecondaryButtonLabel() override;
+  bool ShouldShowHeaderBackArrow() override;
+  base::string16 GetSheetTitle() override;
+  void FillContentView(views::View* content_view) override;
+  std::unique_ptr<views::View> CreateExtraFooterView() override;
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+
+  // views::StyledLabelListener:
+  void StyledLabelLinkClicked(views::StyledLabel* label,
+                              const gfx::Range& range,
+                              int event_flags) override;
 
   void UpdatePayButtonState(bool enabled);
 
-  std::unique_ptr<views::View> CreateOrderSummarySectionContent();
-  std::unique_ptr<views::View> CreateShippingSectionContent();
+  // These functions create the various sections and rows of the payment sheet.
+  // Where applicable, they also populate |accessible_content|, which shouldn't
+  // be null, with the screen reader string that represents their contents.
+  std::unique_ptr<views::View> CreateShippingSectionContent(
+      base::string16* accessible_content);
   std::unique_ptr<views::Button> CreateShippingRow();
   std::unique_ptr<views::Button> CreatePaymentSheetSummaryRow();
   std::unique_ptr<views::Button> CreatePaymentMethodRow();
-  std::unique_ptr<views::View> CreateContactInfoSectionContent();
+  std::unique_ptr<views::View> CreateContactInfoSectionContent(
+      base::string16* accessible_content);
   std::unique_ptr<views::Button> CreateContactInfoRow();
-
-  views::Button* pay_button_;
-
-  const int widest_name_column_view_width_;
+  std::unique_ptr<views::Button> CreateShippingOptionRow();
+  std::unique_ptr<views::View> CreateDataSourceRow();
 
   DISALLOW_COPY_AND_ASSIGN(PaymentSheetViewController);
 };

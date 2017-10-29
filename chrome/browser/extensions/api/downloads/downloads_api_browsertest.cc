@@ -19,10 +19,11 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_file_icon_extractor.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_test_file_activity_observer.h"
 #include "chrome/browser/extensions/api/downloads/downloads_api.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
@@ -314,8 +315,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
     ExtensionApiTest::SetUpOnMainThread();
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
-    InProcessBrowserTest::SetUpOnMainThread();
+        base::BindOnce(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
     GoOnTheRecord();
     CreateAndSetDownloadsDirectory();
     current_browser()->profile()->GetPrefs()->SetBoolean(
@@ -432,8 +432,9 @@ class DownloadExtensionTest : public ExtensionApiTest {
           (history_info[i].state != content::DownloadItem::CANCELLED
                ? content::DOWNLOAD_INTERRUPT_REASON_NONE
                : content::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED),
-          false,                  // opened
-          std::vector<DownloadItem::ReceivedSlice>());
+          false,    // opened
+          current,  // last_access_time
+          false, std::vector<DownloadItem::ReceivedSlice>());
       items->push_back(item);
     }
 
@@ -621,8 +622,8 @@ class MockIconExtractorImpl : public DownloadFileIconExtractor {
       callback_ = callback;
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          base::Bind(&MockIconExtractorImpl::RunCallback,
-                     base::Unretained(this)));
+          base::BindOnce(&MockIconExtractorImpl::RunCallback,
+                         base::Unretained(this)));
       return true;
     } else {
       return false;
@@ -694,6 +695,7 @@ class HTML5FileWriter {
                                    const storage::FileSystemURL& path,
                                    const char* data,
                                    int length) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     // Create a temp file.
     base::FilePath temp_file;
     if (!base::CreateTemporaryFile(&temp_file) ||
@@ -705,9 +707,9 @@ class HTML5FileWriter {
     base::RunLoop run_loop;
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&CreateFileForTestingOnIOThread, base::Unretained(context),
-                   path, temp_file, base::Unretained(&result),
-                   run_loop.QuitClosure()));
+        base::BindOnce(&CreateFileForTestingOnIOThread,
+                       base::Unretained(context), path, temp_file,
+                       base::Unretained(&result), run_loop.QuitClosure()));
     // Wait for that to finish.
     run_loop.Run();
     base::DeleteFile(temp_file, false);
@@ -944,7 +946,7 @@ scoped_refptr<UIThreadExtensionFunction> MockedGetFileIconFunction(
 }
 
 // https://crbug.com/678967
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_DownloadExtensionTest_FileIcon_Active DISABLED_DownloadExtensionTest_FileIcon_Active
 #else
 #define MAYBE_DownloadExtensionTest_FileIcon_Active DownloadExtensionTest_FileIcon_Active
@@ -1049,9 +1051,12 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   base::FilePath real_path = all_downloads[0]->GetTargetFilePath();
   base::FilePath fake_path = all_downloads[1]->GetTargetFilePath();
 
-  EXPECT_EQ(0, base::WriteFile(real_path, "", 0));
-  ASSERT_TRUE(base::PathExists(real_path));
-  ASSERT_FALSE(base::PathExists(fake_path));
+  {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    EXPECT_EQ(0, base::WriteFile(real_path, "", 0));
+    ASSERT_TRUE(base::PathExists(real_path));
+    ASSERT_FALSE(base::PathExists(fake_path));
+  }
 
   for (DownloadManager::DownloadVector::iterator iter = all_downloads.begin();
        iter != all_downloads.end();
@@ -1253,9 +1258,9 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
             items[1]->GetTargetFilePath().value());
   // The order of results when orderBy is empty is unspecified. When there are
   // no sorters, DownloadQuery does not call sort(), so the order of the results
-  // depends on the order of the items in base::hash_map<uint32_t,...>
-  // DownloadManagerImpl::downloads_, which is unspecified and differs between
-  // libc++ and libstdc++. http://crbug.com/365334
+  // depends on the order of the items in DownloadManagerImpl::downloads_,
+  // which is unspecified and differs between libc++ and libstdc++.
+  // http://crbug.com/365334
 }
 
 // Test the |danger| option for search().
@@ -2581,6 +2586,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                           "    \"previous\": \"in_progress\","
                           "    \"current\": \"complete\"}}]",
                           result_id)));
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   std::string disk_data;
   EXPECT_TRUE(base::ReadFileToString(item->GetTargetFilePath(), &disk_data));
   EXPECT_STREQ(kPayloadData, disk_data.c_str());
@@ -3998,20 +4004,14 @@ IN_PROC_BROWSER_TEST_F(
                           result_id)));
 }
 
-#if defined(OS_WIN)
 // This test is very flaky on Win XP and Aura. http://crbug.com/248438
-#define MAYBE_DownloadExtensionTest_OnDeterminingFilename_InterruptedResume \
-    DISABLED_DownloadExtensionTest_OnDeterminingFilename_InterruptedResume
-#else
-#define MAYBE_DownloadExtensionTest_OnDeterminingFilename_InterruptedResume \
-    DownloadExtensionTest_OnDeterminingFilename_InterruptedResume
-#endif
-
+// Also flaky on Linux. http://crbug.com/700382
+// Also flaky on Mac ASAN with PlzNavigate.
 // Test download interruption while extensions determining filename. Should not
 // re-dispatch onDeterminingFilename.
 IN_PROC_BROWSER_TEST_F(
     DownloadExtensionTest,
-    MAYBE_DownloadExtensionTest_OnDeterminingFilename_InterruptedResume) {
+    DISABLED_DownloadExtensionTest_OnDeterminingFilename_InterruptedResume) {
   LoadExtension("downloads_split");
   ASSERT_TRUE(StartEmbeddedTestServer());
   GoOnTheRecord();
@@ -4144,11 +4144,13 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                        DownloadExtensionTest_SetShelfEnabled) {
   LoadExtension("downloads_split");
   EXPECT_TRUE(RunFunction(new DownloadsSetShelfEnabledFunction(), "[false]"));
-  EXPECT_FALSE(DownloadServiceFactory::GetForBrowserContext(
-      browser()->profile())->IsShelfEnabled());
+  EXPECT_FALSE(
+      DownloadCoreServiceFactory::GetForBrowserContext(browser()->profile())
+          ->IsShelfEnabled());
   EXPECT_TRUE(RunFunction(new DownloadsSetShelfEnabledFunction(), "[true]"));
-  EXPECT_TRUE(DownloadServiceFactory::GetForBrowserContext(
-      browser()->profile())->IsShelfEnabled());
+  EXPECT_TRUE(
+      DownloadCoreServiceFactory::GetForBrowserContext(browser()->profile())
+          ->IsShelfEnabled());
   // TODO(benjhayden) Test that existing shelves are hidden.
   // TODO(benjhayden) Test multiple extensions.
   // TODO(benjhayden) Test disabling extensions.

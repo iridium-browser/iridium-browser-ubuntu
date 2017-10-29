@@ -9,11 +9,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#include "common/mathutil.h"
 #include "compiler/preprocessor/SourceLocation.h"
 #include "compiler/translator/Cache.h"
-#include "compiler/translator/glslang.h"
-#include "compiler/translator/ValidateSwitch.h"
+#include "compiler/translator/IntermNode_util.h"
 #include "compiler/translator/ValidateGlobalInitializer.h"
+#include "compiler/translator/ValidateSwitch.h"
+#include "compiler/translator/glslang.h"
 #include "compiler/translator/util.h"
 
 namespace sh
@@ -30,39 +32,29 @@ namespace
 
 const int kWebGLMaxStructNesting = 4;
 
+bool ContainsSampler(const TStructure *structType);
+
 bool ContainsSampler(const TType &type)
 {
     if (IsSampler(type.getBasicType()))
-        return true;
-
-    if (type.getBasicType() == EbtStruct || type.isInterfaceBlock())
     {
-        const TFieldList &fields = type.getStruct()->fields();
-        for (unsigned int i = 0; i < fields.size(); ++i)
-        {
-            if (ContainsSampler(*fields[i]->type()))
-                return true;
-        }
+        return true;
+    }
+    if (type.getBasicType() == EbtStruct)
+    {
+        return ContainsSampler(type.getStruct());
     }
 
     return false;
 }
 
-bool ContainsImage(const TType &type)
+bool ContainsSampler(const TStructure *structType)
 {
-    if (IsImage(type.getBasicType()))
-        return true;
-
-    if (type.getBasicType() == EbtStruct || type.isInterfaceBlock())
+    for (const auto &field : structType->fields())
     {
-        const TFieldList &fields = type.getStruct()->fields();
-        for (unsigned int i = 0; i < fields.size(); ++i)
-        {
-            if (ContainsImage(*fields[i]->type()))
-                return true;
-        }
+        if (ContainsSampler(*field->type()))
+            return true;
     }
-
     return false;
 }
 
@@ -84,7 +76,58 @@ const char *GetImageArgumentToken(TIntermTyped *imageNode)
     return "image";
 }
 
+bool CanSetDefaultPrecisionOnType(const TPublicType &type)
+{
+    if (!SupportsPrecision(type.getBasicType()))
+    {
+        return false;
+    }
+    if (type.getBasicType() == EbtUInt)
+    {
+        // ESSL 3.00.4 section 4.5.4
+        return false;
+    }
+    if (type.isAggregate())
+    {
+        // Not allowed to set for aggregate types
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
+
+// This tracks each binding point's current default offset for inheritance of subsequent
+// variables using the same binding, and keeps offsets unique and non overlapping.
+// See GLSL ES 3.1, section 4.4.6.
+class TParseContext::AtomicCounterBindingState
+{
+  public:
+    AtomicCounterBindingState() : mDefaultOffset(0) {}
+    // Inserts a new span and returns -1 if overlapping, else returns the starting offset of
+    // newly inserted span.
+    int insertSpan(int start, size_t length)
+    {
+        gl::RangeI newSpan(start, start + static_cast<int>(length));
+        for (const auto &span : mSpans)
+        {
+            if (newSpan.intersects(span))
+            {
+                return -1;
+            }
+        }
+        mSpans.push_back(newSpan);
+        mDefaultOffset = newSpan.high();
+        return start;
+    }
+    // Inserts a new span starting from the default offset.
+    int appendSpan(size_t length) { return insertSpan(mDefaultOffset, length); }
+    void setDefaultOffset(int offset) { mDefaultOffset = offset; }
+
+  private:
+    int mDefaultOffset;
+    std::vector<gl::RangeI> mSpans;
+};
 
 TParseContext::TParseContext(TSymbolTable &symt,
                              TExtensionBehavior &ext,
@@ -94,9 +137,8 @@ TParseContext::TParseContext(TSymbolTable &symt,
                              bool checksPrecErrors,
                              TDiagnostics *diagnostics,
                              const ShBuiltInResources &resources)
-    : intermediate(),
-      symbolTable(symt),
-      mDeferredSingleDeclarationErrorCheck(false),
+    : symbolTable(symt),
+      mDeferredNonEmptyDeclarationErrorCheck(false),
       mShaderType(type),
       mShaderSpec(spec),
       mCompileOptions(options),
@@ -109,8 +151,10 @@ TParseContext::TParseContext(TSymbolTable &symt,
       mFunctionReturnsValue(false),
       mChecksPrecisionErrors(checksPrecErrors),
       mFragmentPrecisionHighOnESSL1(false),
-      mDefaultMatrixPacking(EmpColumnMajor),
-      mDefaultBlockStorage(sh::IsWebGLBasedSpec(spec) ? EbsStd140 : EbsShared),
+      mDefaultUniformMatrixPacking(EmpColumnMajor),
+      mDefaultUniformBlockStorage(sh::IsWebGLBasedSpec(spec) ? EbsStd140 : EbsShared),
+      mDefaultBufferMatrixPacking(EmpColumnMajor),
+      mDefaultBufferBlockStorage(sh::IsWebGLBasedSpec(spec) ? EbsStd140 : EbsShared),
       mDiagnostics(diagnostics),
       mDirectiveHandler(ext,
                         *mDiagnostics,
@@ -130,26 +174,32 @@ TParseContext::TParseContext(TSymbolTable &symt,
       mMaxNumViews(resources.MaxViewsOVR),
       mMaxImageUnits(resources.MaxImageUnits),
       mMaxCombinedTextureImageUnits(resources.MaxCombinedTextureImageUnits),
+      mMaxUniformLocations(resources.MaxUniformLocations),
+      mMaxUniformBufferBindings(resources.MaxUniformBufferBindings),
+      mMaxAtomicCounterBindings(resources.MaxAtomicCounterBindings),
+      mMaxShaderStorageBufferBindings(resources.MaxShaderStorageBufferBindings),
       mDeclaringFunction(false)
 {
     mComputeShaderLocalSize.fill(-1);
 }
 
-//
-// Look at a '.' field selector string and change it into offsets
-// for a vector.
-//
-bool TParseContext::parseVectorFields(const TString &compString,
-                                      int vecSize,
-                                      TVectorFields &fields,
-                                      const TSourceLoc &line)
+TParseContext::~TParseContext()
 {
-    fields.num = (int)compString.size();
-    if (fields.num > 4)
+}
+
+bool TParseContext::parseVectorFields(const TSourceLoc &line,
+                                      const TString &compString,
+                                      int vecSize,
+                                      TVector<int> *fieldOffsets)
+{
+    ASSERT(fieldOffsets);
+    size_t fieldCount = compString.size();
+    if (fieldCount > 4u)
     {
         error(line, "illegal vector field selection", compString.c_str());
         return false;
     }
+    fieldOffsets->resize(fieldCount);
 
     enum
     {
@@ -158,57 +208,57 @@ bool TParseContext::parseVectorFields(const TString &compString,
         estpq
     } fieldSet[4];
 
-    for (int i = 0; i < fields.num; ++i)
+    for (unsigned int i = 0u; i < fieldOffsets->size(); ++i)
     {
         switch (compString[i])
         {
             case 'x':
-                fields.offsets[i] = 0;
+                (*fieldOffsets)[i] = 0;
                 fieldSet[i]       = exyzw;
                 break;
             case 'r':
-                fields.offsets[i] = 0;
+                (*fieldOffsets)[i] = 0;
                 fieldSet[i]       = ergba;
                 break;
             case 's':
-                fields.offsets[i] = 0;
+                (*fieldOffsets)[i] = 0;
                 fieldSet[i]       = estpq;
                 break;
             case 'y':
-                fields.offsets[i] = 1;
+                (*fieldOffsets)[i] = 1;
                 fieldSet[i]       = exyzw;
                 break;
             case 'g':
-                fields.offsets[i] = 1;
+                (*fieldOffsets)[i] = 1;
                 fieldSet[i]       = ergba;
                 break;
             case 't':
-                fields.offsets[i] = 1;
+                (*fieldOffsets)[i] = 1;
                 fieldSet[i]       = estpq;
                 break;
             case 'z':
-                fields.offsets[i] = 2;
+                (*fieldOffsets)[i] = 2;
                 fieldSet[i]       = exyzw;
                 break;
             case 'b':
-                fields.offsets[i] = 2;
+                (*fieldOffsets)[i] = 2;
                 fieldSet[i]       = ergba;
                 break;
             case 'p':
-                fields.offsets[i] = 2;
+                (*fieldOffsets)[i] = 2;
                 fieldSet[i]       = estpq;
                 break;
 
             case 'w':
-                fields.offsets[i] = 3;
+                (*fieldOffsets)[i] = 3;
                 fieldSet[i]       = exyzw;
                 break;
             case 'a':
-                fields.offsets[i] = 3;
+                (*fieldOffsets)[i] = 3;
                 fieldSet[i]       = ergba;
                 break;
             case 'q':
-                fields.offsets[i] = 3;
+                (*fieldOffsets)[i] = 3;
                 fieldSet[i]       = estpq;
                 break;
             default:
@@ -217,9 +267,9 @@ bool TParseContext::parseVectorFields(const TString &compString,
         }
     }
 
-    for (int i = 0; i < fields.num; ++i)
+    for (unsigned int i = 0u; i < fieldOffsets->size(); ++i)
     {
-        if (fields.offsets[i] >= vecSize)
+        if ((*fieldOffsets)[i] >= vecSize)
         {
             error(line, "vector field selection out of range", compString.c_str());
             return false;
@@ -339,14 +389,9 @@ void TParseContext::checkPrecisionSpecified(const TSourceLoc &line,
                 error(line, "No precision specified (int)", "");
                 return;
             default:
-                if (IsSampler(type))
+                if (IsOpaqueType(type))
                 {
-                    error(line, "No precision specified (sampler)", "");
-                    return;
-                }
-                if (IsImage(type))
-                {
-                    error(line, "No precision specified (image)", "");
+                    error(line, "No precision specified", getBasicString(type));
                     return;
                 }
         }
@@ -388,7 +433,7 @@ bool TParseContext::checkCanBeLValue(const TSourceLoc &line, const char *op, TIn
         return false;
     }
 
-    const char *message = 0;
+    std::string message;
     switch (node->getQualifier())
     {
         case EvqConst:
@@ -439,6 +484,9 @@ bool TParseContext::checkCanBeLValue(const TSourceLoc &line, const char *op, TIn
         case EvqLocalInvocationIndex:
             message = "can't modify gl_LocalInvocationIndex";
             break;
+        case EvqViewIDOVR:
+            message = "can't modify gl_ViewID_OVR";
+            break;
         case EvqComputeIn:
             message = "can't modify work group size variable";
             break;
@@ -450,17 +498,18 @@ bool TParseContext::checkCanBeLValue(const TSourceLoc &line, const char *op, TIn
             {
                 message = "can't modify void";
             }
-            if (IsSampler(node->getBasicType()))
+            if (IsOpaqueType(node->getBasicType()))
             {
-                message = "can't modify a sampler";
+                message = "can't modify a variable with type ";
+                message += getBasicString(node->getBasicType());
             }
-            if (IsImage(node->getBasicType()))
+            else if (node->getMemoryQualifier().readonly)
             {
-                message = "can't modify an image";
+                message = "can't modify a readonly variable";
             }
     }
 
-    if (message == 0 && binaryNode == 0 && symNode == 0)
+    if (message.empty() && binaryNode == 0 && symNode == 0)
     {
         error(line, "l-value required", op);
 
@@ -470,7 +519,7 @@ bool TParseContext::checkCanBeLValue(const TSourceLoc &line, const char *op, TIn
     //
     // Everything else is okay, no error.
     //
-    if (message == 0)
+    if (message.empty())
         return true;
 
     //
@@ -527,169 +576,66 @@ bool TParseContext::checkIsAtGlobalLevel(const TSourceLoc &line, const char *tok
     return true;
 }
 
-// For now, keep it simple:  if it starts "gl_", it's reserved, independent
-// of scope.  Except, if the symbol table is at the built-in push-level,
-// which is when we are parsing built-ins.
-// Also checks for "webgl_" and "_webgl_" reserved identifiers if parsing a
-// webgl shader.
+// ESSL 3.00.5 sections 3.8 and 3.9.
+// If it starts "gl_" or contains two consecutive underscores, it's reserved.
+// Also checks for "webgl_" and "_webgl_" reserved identifiers if parsing a webgl shader.
 bool TParseContext::checkIsNotReserved(const TSourceLoc &line, const TString &identifier)
 {
     static const char *reservedErrMsg = "reserved built-in name";
-    if (!symbolTable.atBuiltInLevel())
+    if (identifier.compare(0, 3, "gl_") == 0)
     {
-        if (identifier.compare(0, 3, "gl_") == 0)
+        error(line, reservedErrMsg, "gl_");
+        return false;
+    }
+    if (sh::IsWebGLBasedSpec(mShaderSpec))
+    {
+        if (identifier.compare(0, 6, "webgl_") == 0)
         {
-            error(line, reservedErrMsg, "gl_");
+            error(line, reservedErrMsg, "webgl_");
             return false;
         }
-        if (sh::IsWebGLBasedSpec(mShaderSpec))
+        if (identifier.compare(0, 7, "_webgl_") == 0)
         {
-            if (identifier.compare(0, 6, "webgl_") == 0)
-            {
-                error(line, reservedErrMsg, "webgl_");
-                return false;
-            }
-            if (identifier.compare(0, 7, "_webgl_") == 0)
-            {
-                error(line, reservedErrMsg, "_webgl_");
-                return false;
-            }
-        }
-        if (identifier.find("__") != TString::npos)
-        {
-            error(line,
-                  "identifiers containing two consecutive underscores (__) are reserved as "
-                  "possible future keywords",
-                  identifier.c_str());
+            error(line, reservedErrMsg, "_webgl_");
             return false;
         }
     }
-
+    if (identifier.find("__") != TString::npos)
+    {
+        error(line,
+              "identifiers containing two consecutive underscores (__) are reserved as "
+              "possible future keywords",
+              identifier.c_str());
+        return false;
+    }
     return true;
 }
 
-// Make sure there is enough data provided to the constructor to build
-// something of the type of the constructor.  Also returns the type of
-// the constructor.
+// Make sure the argument types are correct for constructing a specific type.
 bool TParseContext::checkConstructorArguments(const TSourceLoc &line,
                                               const TIntermSequence *arguments,
-                                              TOperator op,
                                               const TType &type)
 {
-    bool constructingMatrix = false;
-    switch (op)
-    {
-        case EOpConstructMat2:
-        case EOpConstructMat2x3:
-        case EOpConstructMat2x4:
-        case EOpConstructMat3x2:
-        case EOpConstructMat3:
-        case EOpConstructMat3x4:
-        case EOpConstructMat4x2:
-        case EOpConstructMat4x3:
-        case EOpConstructMat4:
-            constructingMatrix = true;
-            break;
-        default:
-            break;
-    }
-
-    //
-    // Note: It's okay to have too many components available, but not okay to have unused
-    // arguments.  'full' will go to true when enough args have been seen.  If we loop
-    // again, there is an extra argument, so 'overfull' will become true.
-    //
-
-    size_t size         = 0;
-    bool full           = false;
-    bool overFull       = false;
-    bool matrixInMatrix = false;
-    bool arrayArg       = false;
-    for (TIntermNode *arg : *arguments)
-    {
-        const TIntermTyped *argTyped = arg->getAsTyped();
-        size += argTyped->getType().getObjectSize();
-
-        if (constructingMatrix && argTyped->getType().isMatrix())
-            matrixInMatrix = true;
-        if (full)
-            overFull = true;
-        if (op != EOpConstructStruct && !type.isArray() && size >= type.getObjectSize())
-            full = true;
-        if (argTyped->getType().isArray())
-            arrayArg = true;
-    }
-
-    if (type.isArray())
-    {
-        // The size of an unsized constructor should already have been determined.
-        ASSERT(!type.isUnsizedArray());
-        if (static_cast<size_t>(type.getArraySize()) != arguments->size())
-        {
-            error(line, "array constructor needs one argument per array element", "constructor");
-            return false;
-        }
-    }
-
-    if (arrayArg && op != EOpConstructStruct)
-    {
-        error(line, "constructing from a non-dereferenced array", "constructor");
-        return false;
-    }
-
-    if (matrixInMatrix && !type.isArray())
-    {
-        if (arguments->size() != 1)
-        {
-            error(line, "constructing matrix from matrix can only take one argument",
-                  "constructor");
-            return false;
-        }
-    }
-
-    if (overFull)
-    {
-        error(line, "too many arguments", "constructor");
-        return false;
-    }
-
-    if (op == EOpConstructStruct && !type.isArray() &&
-        type.getStruct()->fields().size() != arguments->size())
-    {
-        error(line,
-              "Number of constructor parameters does not match the number of structure fields",
-              "constructor");
-        return false;
-    }
-
-    if (!type.isMatrix() || !matrixInMatrix)
-    {
-        if ((op != EOpConstructStruct && size != 1 && size < type.getObjectSize()) ||
-            (op == EOpConstructStruct && size < type.getObjectSize()))
-        {
-            error(line, "not enough data provided for construction", "constructor");
-            return false;
-        }
-    }
-
     if (arguments->empty())
     {
         error(line, "constructor does not have any arguments", "constructor");
         return false;
     }
 
-    for (TIntermNode *const &argNode : *arguments)
+    for (TIntermNode *arg : *arguments)
     {
-        TIntermTyped *argTyped = argNode->getAsTyped();
+        const TIntermTyped *argTyped = arg->getAsTyped();
         ASSERT(argTyped != nullptr);
-        if (op != EOpConstructStruct && IsSampler(argTyped->getBasicType()))
+        if (type.getBasicType() != EbtStruct && IsOpaqueType(argTyped->getBasicType()))
         {
-            error(line, "cannot convert a sampler", "constructor");
+            std::string reason("cannot convert a variable with type ");
+            reason += getBasicString(argTyped->getBasicType());
+            error(line, reason.c_str(), "constructor");
             return false;
         }
-        if (op != EOpConstructStruct && IsImage(argTyped->getBasicType()))
+        else if (argTyped->getMemoryQualifier().writeonly)
         {
-            error(line, "cannot convert an image", "constructor");
+            error(line, "cannot convert a variable with writeonly", "constructor");
             return false;
         }
         if (argTyped->getBasicType() == EbtVoid)
@@ -701,15 +647,21 @@ bool TParseContext::checkConstructorArguments(const TSourceLoc &line,
 
     if (type.isArray())
     {
+        // The size of an unsized constructor should already have been determined.
+        ASSERT(!type.isUnsizedArray());
+        if (static_cast<size_t>(type.getArraySize()) != arguments->size())
+        {
+            error(line, "array constructor needs one argument per array element", "constructor");
+            return false;
+        }
         // GLSL ES 3.00 section 5.4.4: Each argument must be the same type as the element type of
         // the array.
         for (TIntermNode *const &argNode : *arguments)
         {
             const TType &argType = argNode->getAsTyped()->getType();
-            // It has already been checked that the argument is not an array, but we can arrive
-            // here due to prior error conditions.
             if (argType.isArray())
             {
+                error(line, "constructing from a non-dereferenced array", "constructor");
                 return false;
             }
             if (!argType.sameElementType(type))
@@ -719,9 +671,16 @@ bool TParseContext::checkConstructorArguments(const TSourceLoc &line,
             }
         }
     }
-    else if (op == EOpConstructStruct)
+    else if (type.getBasicType() == EbtStruct)
     {
         const TFieldList &fields = type.getStruct()->fields();
+        if (fields.size() != arguments->size())
+        {
+            error(line,
+                  "Number of constructor parameters does not match the number of structure fields",
+                  "constructor");
+            return false;
+        }
 
         for (size_t i = 0; i < fields.size(); i++)
         {
@@ -730,6 +689,73 @@ bool TParseContext::checkConstructorArguments(const TSourceLoc &line,
             {
                 error(line, "Structure constructor arguments do not match structure fields",
                       "constructor");
+                return false;
+            }
+        }
+    }
+    else
+    {
+        // We're constructing a scalar, vector, or matrix.
+
+        // Note: It's okay to have too many components available, but not okay to have unused
+        // arguments. 'full' will go to true when enough args have been seen. If we loop again,
+        // there is an extra argument, so 'overFull' will become true.
+
+        size_t size    = 0;
+        bool full      = false;
+        bool overFull  = false;
+        bool matrixArg = false;
+        for (TIntermNode *arg : *arguments)
+        {
+            const TIntermTyped *argTyped = arg->getAsTyped();
+            ASSERT(argTyped != nullptr);
+
+            if (argTyped->getBasicType() == EbtStruct)
+            {
+                error(line, "a struct cannot be used as a constructor argument for this type",
+                      "constructor");
+                return false;
+            }
+            if (argTyped->getType().isArray())
+            {
+                error(line, "constructing from a non-dereferenced array", "constructor");
+                return false;
+            }
+            if (argTyped->getType().isMatrix())
+            {
+                matrixArg = true;
+            }
+
+            size += argTyped->getType().getObjectSize();
+            if (full)
+            {
+                overFull = true;
+            }
+            if (size >= type.getObjectSize())
+            {
+                full = true;
+            }
+        }
+
+        if (type.isMatrix() && matrixArg)
+        {
+            if (arguments->size() != 1)
+            {
+                error(line, "constructing matrix from matrix can only take one argument",
+                      "constructor");
+                return false;
+            }
+        }
+        else
+        {
+            if (size != 1 && size < type.getObjectSize())
+            {
+                error(line, "not enough data provided for construction", "constructor");
+                return false;
+            }
+            if (overFull)
+            {
+                error(line, "too many arguments", "constructor");
                 return false;
             }
         }
@@ -758,12 +784,14 @@ bool TParseContext::checkIsNonVoid(const TSourceLoc &line,
 
 // This function checks to see if the node (for the expression) contains a scalar boolean expression
 // or not.
-void TParseContext::checkIsScalarBool(const TSourceLoc &line, const TIntermTyped *type)
+bool TParseContext::checkIsScalarBool(const TSourceLoc &line, const TIntermTyped *type)
 {
-    if (type->getBasicType() != EbtBool || type->isArray() || type->isMatrix() || type->isVector())
+    if (type->getBasicType() != EbtBool || !type->isScalar())
     {
         error(line, "boolean expression expected", "");
+        return false;
     }
+    return true;
 }
 
 // This function checks to see if the node (for the expression) contains a scalar boolean expression
@@ -776,13 +804,13 @@ void TParseContext::checkIsScalarBool(const TSourceLoc &line, const TPublicType 
     }
 }
 
-bool TParseContext::checkIsNotSampler(const TSourceLoc &line,
-                                      const TTypeSpecifierNonArray &pType,
-                                      const char *reason)
+bool TParseContext::checkIsNotOpaqueType(const TSourceLoc &line,
+                                         const TTypeSpecifierNonArray &pType,
+                                         const char *reason)
 {
     if (pType.type == EbtStruct)
     {
-        if (ContainsSampler(*pType.userDef))
+        if (ContainsSampler(pType.userDef))
         {
             std::stringstream reasonStream;
             reasonStream << reason << " (structure contains a sampler)";
@@ -790,40 +818,13 @@ bool TParseContext::checkIsNotSampler(const TSourceLoc &line,
             error(line, reasonStr.c_str(), getBasicString(pType.type));
             return false;
         }
-
+        // only samplers need to be checked from structs, since other opaque types can't be struct
+        // members.
         return true;
     }
-    else if (IsSampler(pType.type))
+    else if (IsOpaqueType(pType.type))
     {
         error(line, reason, getBasicString(pType.type));
-        return false;
-    }
-
-    return true;
-}
-
-bool TParseContext::checkIsNotImage(const TSourceLoc &line,
-                                    const TTypeSpecifierNonArray &pType,
-                                    const char *reason)
-{
-    if (pType.type == EbtStruct)
-    {
-        if (ContainsImage(*pType.userDef))
-        {
-            std::stringstream reasonStream;
-            reasonStream << reason << " (structure contains an image)";
-            std::string reasonStr = reasonStream.str();
-            error(line, reasonStr.c_str(), getBasicString(pType.type));
-
-            return false;
-        }
-
-        return true;
-    }
-    else if (IsImage(pType.type))
-    {
-        error(line, reason, getBasicString(pType.type));
-
         return false;
     }
 
@@ -845,8 +846,13 @@ void TParseContext::checkLocationIsNotSpecified(const TSourceLoc &location,
 {
     if (layoutQualifier.location != -1)
     {
-        error(location, "invalid layout qualifier: only valid on program inputs and outputs",
-              "location");
+        const char *errorMsg = "invalid layout qualifier: only valid on program inputs and outputs";
+        if (mShaderVersion >= 310)
+        {
+            errorMsg =
+                "invalid layout qualifier: only valid on program inputs, outputs, and uniforms";
+        }
+        error(location, errorMsg, "location");
     }
 }
 
@@ -854,29 +860,10 @@ void TParseContext::checkOutParameterIsNotOpaqueType(const TSourceLoc &line,
                                                      TQualifier qualifier,
                                                      const TType &type)
 {
-    checkOutParameterIsNotSampler(line, qualifier, type);
-    checkOutParameterIsNotImage(line, qualifier, type);
-}
-
-void TParseContext::checkOutParameterIsNotSampler(const TSourceLoc &line,
-                                                  TQualifier qualifier,
-                                                  const TType &type)
-{
     ASSERT(qualifier == EvqOut || qualifier == EvqInOut);
-    if (IsSampler(type.getBasicType()))
+    if (IsOpaqueType(type.getBasicType()))
     {
-        error(line, "samplers cannot be output parameters", type.getBasicString());
-    }
-}
-
-void TParseContext::checkOutParameterIsNotImage(const TSourceLoc &line,
-                                                TQualifier qualifier,
-                                                const TType &type)
-{
-    ASSERT(qualifier == EvqOut || qualifier == EvqInOut);
-    if (IsImage(type.getBasicType()))
-    {
-        error(line, "images cannot be output parameters", type.getBasicString());
+        error(line, "opaque types cannot be output parameters", type.getBasicString());
     }
 }
 
@@ -1057,11 +1044,10 @@ bool TParseContext::declareVariable(const TSourceLoc &line,
     if (needsReservedCheck && !checkIsNotReserved(line, identifier))
         return false;
 
-    (*variable) = new TVariable(&identifier, type);
-    if (!symbolTable.declare(*variable))
+    (*variable) = symbolTable.declareVariable(&identifier, type);
+    if (!(*variable))
     {
         error(line, "redefinition", identifier.c_str());
-        *variable = nullptr;
         return false;
     }
 
@@ -1076,6 +1062,7 @@ void TParseContext::checkIsParameterQualifierValid(
     const TTypeQualifierBuilder &typeQualifierBuilder,
     TType *type)
 {
+    // The only parameter qualifiers a parameter can have are in, out, inout or const.
     TTypeQualifier typeQualifier = typeQualifierBuilder.getParameterTypeQualifier(mDiagnostics);
 
     if (typeQualifier.qualifier == EvqOut || typeQualifier.qualifier == EvqInOut)
@@ -1130,6 +1117,85 @@ bool TParseContext::checkCanUseExtension(const TSourceLoc &line, const TString &
     return true;
 }
 
+// ESSL 3.00.6 section 4.8 Empty Declarations: "The combinations of qualifiers that cause
+// compile-time or link-time errors are the same whether or not the declaration is empty".
+// This function implements all the checks that are done on qualifiers regardless of if the
+// declaration is empty.
+void TParseContext::declarationQualifierErrorCheck(const sh::TQualifier qualifier,
+                                                   const sh::TLayoutQualifier &layoutQualifier,
+                                                   const TSourceLoc &location)
+{
+    if (qualifier == EvqShared && !layoutQualifier.isEmpty())
+    {
+        error(location, "Shared memory declarations cannot have layout specified", "layout");
+    }
+
+    if (layoutQualifier.matrixPacking != EmpUnspecified)
+    {
+        error(location, "layout qualifier only valid for interface blocks",
+              getMatrixPackingString(layoutQualifier.matrixPacking));
+        return;
+    }
+
+    if (layoutQualifier.blockStorage != EbsUnspecified)
+    {
+        error(location, "layout qualifier only valid for interface blocks",
+              getBlockStorageString(layoutQualifier.blockStorage));
+        return;
+    }
+
+    if (qualifier == EvqFragmentOut)
+    {
+        if (layoutQualifier.location != -1 && layoutQualifier.yuv == true)
+        {
+            error(location, "invalid layout qualifier combination", "yuv");
+            return;
+        }
+    }
+    else
+    {
+        checkYuvIsNotSpecified(location, layoutQualifier.yuv);
+    }
+
+    // If multiview extension is enabled, "in" qualifier is allowed in the vertex shader in previous
+    // parsing steps. So it needs to be checked here.
+    if (isMultiviewExtensionEnabled() && mShaderVersion < 300 && qualifier == EvqVertexIn)
+    {
+        error(location, "storage qualifier supported in GLSL ES 3.00 and above only", "in");
+    }
+
+    bool canHaveLocation = qualifier == EvqVertexIn || qualifier == EvqFragmentOut;
+    if (mShaderVersion >= 310 && qualifier == EvqUniform)
+    {
+        canHaveLocation = true;
+        // We're not checking whether the uniform location is in range here since that depends on
+        // the type of the variable.
+        // The type can only be fully determined for non-empty declarations.
+    }
+    if (!canHaveLocation)
+    {
+        checkLocationIsNotSpecified(location, layoutQualifier);
+    }
+}
+
+void TParseContext::atomicCounterQualifierErrorCheck(const TPublicType &publicType,
+                                                     const TSourceLoc &location)
+{
+    if (publicType.precision != EbpHigh)
+    {
+        error(location, "Can only be highp", "atomic counter");
+    }
+    // dEQP enforces compile error if location is specified. See uniform_location.test.
+    if (publicType.layoutQualifier.location != -1)
+    {
+        error(location, "location must not be set for atomic_uint", "layout");
+    }
+    if (publicType.layoutQualifier.binding == -1)
+    {
+        error(location, "no binding specified", "atomic counter");
+    }
+}
+
 void TParseContext::emptyDeclarationErrorCheck(const TPublicType &publicType,
                                                const TSourceLoc &location)
 {
@@ -1139,16 +1205,12 @@ void TParseContext::emptyDeclarationErrorCheck(const TPublicType &publicType,
         // error. It is assumed that this applies to empty declarations as well.
         error(location, "empty array declaration needs to specify a size", "");
     }
-    if (publicType.qualifier == EvqShared && !publicType.layoutQualifier.isEmpty())
-    {
-        error(location, "Shared memory declarations cannot have layout specified", "layout");
-    }
 }
 
-// These checks are common for all declarations starting a declarator list, and declarators that
-// follow an empty declaration.
-void TParseContext::singleDeclarationErrorCheck(const TPublicType &publicType,
-                                                const TSourceLoc &identifierLocation)
+// These checks are done for all declarations that are non-empty. They're done for non-empty
+// declarations starting a declarator list, and declarators that follow an empty declaration.
+void TParseContext::nonEmptyDeclarationErrorCheck(const TPublicType &publicType,
+                                                  const TSourceLoc &identifierLocation)
 {
     switch (publicType.qualifier)
     {
@@ -1164,45 +1226,50 @@ void TParseContext::singleDeclarationErrorCheck(const TPublicType &publicType,
                       getQualifierString(publicType.qualifier));
                 return;
             }
-
+            break;
+        case EvqBuffer:
+            if (publicType.getBasicType() != EbtInterfaceBlock)
+            {
+                error(identifierLocation,
+                      "cannot declare buffer variables at global scope(outside a block)",
+                      getQualifierString(publicType.qualifier));
+                return;
+            }
+            break;
         default:
             break;
     }
-
+    std::string reason(getBasicString(publicType.getBasicType()));
+    reason += "s must be uniform";
     if (publicType.qualifier != EvqUniform &&
-        !checkIsNotSampler(identifierLocation, publicType.typeSpecifierNonArray,
-                           "samplers must be uniform"))
+        !checkIsNotOpaqueType(identifierLocation, publicType.typeSpecifierNonArray, reason.c_str()))
     {
         return;
     }
-    if (publicType.qualifier != EvqUniform &&
-        !checkIsNotImage(identifierLocation, publicType.typeSpecifierNonArray,
-                         "images must be uniform"))
+
+    if ((publicType.qualifier != EvqTemporary && publicType.qualifier != EvqGlobal &&
+         publicType.qualifier != EvqConst) &&
+        publicType.getBasicType() == EbtYuvCscStandardEXT)
     {
+        error(identifierLocation, "cannot be used with a yuvCscStandardEXT",
+              getQualifierString(publicType.qualifier));
         return;
+    }
+
+    if (mShaderVersion >= 310 && publicType.qualifier == EvqUniform)
+    {
+        // Valid uniform declarations can't be unsized arrays since uniforms can't be initialized.
+        // But invalid shaders may still reach here with an unsized array declaration.
+        if (!publicType.isUnsizedArray())
+        {
+            TType type(publicType);
+            checkUniformLocationInRange(identifierLocation, type.getLocationCount(),
+                                        publicType.layoutQualifier);
+        }
     }
 
     // check for layout qualifier issues
     const TLayoutQualifier layoutQualifier = publicType.layoutQualifier;
-
-    if (layoutQualifier.matrixPacking != EmpUnspecified)
-    {
-        error(identifierLocation, "layout qualifier only valid for interface blocks",
-              getMatrixPackingString(layoutQualifier.matrixPacking));
-        return;
-    }
-
-    if (layoutQualifier.blockStorage != EbsUnspecified)
-    {
-        error(identifierLocation, "layout qualifier only valid for interface blocks",
-              getBlockStorageString(layoutQualifier.blockStorage));
-        return;
-    }
-
-    if (publicType.qualifier != EvqVertexIn && publicType.qualifier != EvqFragmentOut)
-    {
-        checkLocationIsNotSpecified(identifierLocation, publicType.layoutQualifier);
-    }
 
     if (IsImage(publicType.getBasicType()))
     {
@@ -1275,8 +1342,16 @@ void TParseContext::singleDeclarationErrorCheck(const TPublicType &publicType,
     else
     {
         checkInternalFormatIsNotSpecified(identifierLocation, layoutQualifier.imageInternalFormat);
-
         checkMemoryQualifierIsNotSpecified(publicType.memoryQualifier, identifierLocation);
+    }
+
+    if (IsAtomicCounter(publicType.getBasicType()))
+    {
+        atomicCounterQualifierErrorCheck(publicType, identifierLocation);
+    }
+    else
+    {
+        checkOffsetIsNotSpecified(identifierLocation, layoutQualifier.offset);
     }
 }
 
@@ -1291,6 +1366,10 @@ void TParseContext::checkBindingIsValid(const TSourceLoc &identifierLocation, co
     else if (IsSampler(type.getBasicType()))
     {
         checkSamplerBindingIsValid(identifierLocation, layoutQualifier.binding, arraySize);
+    }
+    else if (IsAtomicCounter(type.getBasicType()))
+    {
+        checkAtomicCounterBindingIsValid(identifierLocation, layoutQualifier.binding);
     }
     else
     {
@@ -1349,6 +1428,15 @@ void TParseContext::checkBindingIsNotSpecified(const TSourceLoc &location, int b
     }
 }
 
+void TParseContext::checkOffsetIsNotSpecified(const TSourceLoc &location, int offset)
+{
+    if (offset != -1)
+    {
+        error(location, "invalid layout qualifier: only valid when used with atomic counters",
+              "offset");
+    }
+}
+
 void TParseContext::checkImageBindingIsValid(const TSourceLoc &location, int binding, int arraySize)
 {
     // Expects arraySize to be 1 when setting binding for only a single variable.
@@ -1369,22 +1457,83 @@ void TParseContext::checkSamplerBindingIsValid(const TSourceLoc &location,
     }
 }
 
-void TParseContext::functionCallLValueErrorCheck(const TFunction *fnCandidate,
-                                                 TIntermAggregate *fnCall)
+void TParseContext::checkBlockBindingIsValid(const TSourceLoc &location,
+                                             const TQualifier &qualifier,
+                                             int binding,
+                                             int arraySize)
+{
+    int size = (arraySize == 0 ? 1 : arraySize);
+    if (qualifier == EvqUniform)
+    {
+        if (binding + size > mMaxUniformBufferBindings)
+        {
+            error(location, "uniform block binding greater than MAX_UNIFORM_BUFFER_BINDINGS",
+                  "binding");
+        }
+    }
+    else if (qualifier == EvqBuffer)
+    {
+        if (binding + size > mMaxShaderStorageBufferBindings)
+        {
+            error(location,
+                  "shader storage block binding greater than MAX_SHADER_STORAGE_BUFFER_BINDINGS",
+                  "binding");
+        }
+    }
+}
+void TParseContext::checkAtomicCounterBindingIsValid(const TSourceLoc &location, int binding)
+{
+    if (binding >= mMaxAtomicCounterBindings)
+    {
+        error(location, "atomic counter binding greater than gl_MaxAtomicCounterBindings",
+              "binding");
+    }
+}
+
+void TParseContext::checkUniformLocationInRange(const TSourceLoc &location,
+                                                int objectLocationCount,
+                                                const TLayoutQualifier &layoutQualifier)
+{
+    int loc = layoutQualifier.location;
+    if (loc >= 0 && loc + objectLocationCount > mMaxUniformLocations)
+    {
+        error(location, "Uniform location out of range", "location");
+    }
+}
+
+void TParseContext::checkYuvIsNotSpecified(const TSourceLoc &location, bool yuv)
+{
+    if (yuv != false)
+    {
+        error(location, "invalid layout qualifier: only valid on program outputs", "yuv");
+    }
+}
+
+void TParseContext::functionCallRValueLValueErrorCheck(const TFunction *fnCandidate,
+                                                       TIntermAggregate *fnCall)
 {
     for (size_t i = 0; i < fnCandidate->getParamCount(); ++i)
     {
         TQualifier qual = fnCandidate->getParam(i).type->getQualifier();
+        TIntermTyped *argument = (*(fnCall->getSequence()))[i]->getAsTyped();
+        if (!IsImage(argument->getBasicType()) && (IsQualifierUnspecified(qual) || qual == EvqIn ||
+                                                   qual == EvqInOut || qual == EvqConstReadOnly))
+        {
+            if (argument->getMemoryQualifier().writeonly)
+            {
+                error(argument->getLine(),
+                      "Writeonly value cannot be passed for 'in' or 'inout' parameters.",
+                      fnCall->getFunctionSymbolInfo()->getName().c_str());
+                return;
+            }
+        }
         if (qual == EvqOut || qual == EvqInOut)
         {
-            TIntermTyped *argument = (*(fnCall->getSequence()))[i]->getAsTyped();
             if (!checkCanBeLValue(argument->getLine(), "assign", argument))
             {
-                TString unmangledName =
-                    TFunction::unmangleName(fnCall->getFunctionSymbolInfo()->getName());
                 error(argument->getLine(),
                       "Constant value cannot be passed for 'out' or 'inout' parameters.",
-                      unmangledName.c_str());
+                      fnCall->getFunctionSymbolInfo()->getName().c_str());
                 return;
             }
         }
@@ -1465,6 +1614,15 @@ sh::WorkGroupSize TParseContext::getComputeShaderLocalSize() const
     return result;
 }
 
+TIntermConstantUnion *TParseContext::addScalarLiteral(const TConstantUnion *constantUnion,
+                                                      const TSourceLoc &line)
+{
+    TIntermConstantUnion *node = new TIntermConstantUnion(
+        constantUnion, TType(constantUnion->getType(), EbpUndefined, EvqConst));
+    node->setLine(line);
+    return node;
+}
+
 /////////////////////////////////////////////////////////////////////////////////
 //
 // Non-Errors.
@@ -1475,75 +1633,65 @@ const TVariable *TParseContext::getNamedVariable(const TSourceLoc &location,
                                                  const TString *name,
                                                  const TSymbol *symbol)
 {
-    const TVariable *variable = NULL;
-
     if (!symbol)
     {
         error(location, "undeclared identifier", name->c_str());
+        return nullptr;
     }
-    else if (!symbol->isVariable())
+
+    if (!symbol->isVariable())
     {
         error(location, "variable expected", name->c_str());
+        return nullptr;
     }
-    else
+
+    const TVariable *variable = static_cast<const TVariable *>(symbol);
+
+    if (symbolTable.findBuiltIn(variable->getName(), mShaderVersion) &&
+        !variable->getExtension().empty())
     {
-        variable = static_cast<const TVariable *>(symbol);
-
-        if (symbolTable.findBuiltIn(variable->getName(), mShaderVersion) &&
-            !variable->getExtension().empty())
-        {
-            checkCanUseExtension(location, variable->getExtension());
-        }
-
-        // Reject shaders using both gl_FragData and gl_FragColor
-        TQualifier qualifier = variable->getType().getQualifier();
-        if (qualifier == EvqFragData || qualifier == EvqSecondaryFragDataEXT)
-        {
-            mUsesFragData = true;
-        }
-        else if (qualifier == EvqFragColor || qualifier == EvqSecondaryFragColorEXT)
-        {
-            mUsesFragColor = true;
-        }
-        if (qualifier == EvqSecondaryFragDataEXT || qualifier == EvqSecondaryFragColorEXT)
-        {
-            mUsesSecondaryOutputs = true;
-        }
-
-        // This validation is not quite correct - it's only an error to write to
-        // both FragData and FragColor. For simplicity, and because users shouldn't
-        // be rewarded for reading from undefined varaibles, return an error
-        // if they are both referenced, rather than assigned.
-        if (mUsesFragData && mUsesFragColor)
-        {
-            const char *errorMessage = "cannot use both gl_FragData and gl_FragColor";
-            if (mUsesSecondaryOutputs)
-            {
-                errorMessage =
-                    "cannot use both output variable sets (gl_FragData, gl_SecondaryFragDataEXT)"
-                    " and (gl_FragColor, gl_SecondaryFragColorEXT)";
-            }
-            error(location, errorMessage, name->c_str());
-        }
-
-        // GLSL ES 3.1 Revision 4, 7.1.3 Compute Shader Special Variables
-        if (getShaderType() == GL_COMPUTE_SHADER && !mComputeShaderLocalSizeDeclared &&
-            qualifier == EvqWorkGroupSize)
-        {
-            error(location,
-                  "It is an error to use gl_WorkGroupSize before declaring the local group size",
-                  "gl_WorkGroupSize");
-        }
+        checkCanUseExtension(location, variable->getExtension());
     }
 
-    if (!variable)
+    // Reject shaders using both gl_FragData and gl_FragColor
+    TQualifier qualifier = variable->getType().getQualifier();
+    if (qualifier == EvqFragData || qualifier == EvqSecondaryFragDataEXT)
     {
-        TType type(EbtFloat, EbpUndefined);
-        TVariable *fakeVariable = new TVariable(name, type);
-        symbolTable.declare(fakeVariable);
-        variable = fakeVariable;
+        mUsesFragData = true;
+    }
+    else if (qualifier == EvqFragColor || qualifier == EvqSecondaryFragColorEXT)
+    {
+        mUsesFragColor = true;
+    }
+    if (qualifier == EvqSecondaryFragDataEXT || qualifier == EvqSecondaryFragColorEXT)
+    {
+        mUsesSecondaryOutputs = true;
     }
 
+    // This validation is not quite correct - it's only an error to write to
+    // both FragData and FragColor. For simplicity, and because users shouldn't
+    // be rewarded for reading from undefined varaibles, return an error
+    // if they are both referenced, rather than assigned.
+    if (mUsesFragData && mUsesFragColor)
+    {
+        const char *errorMessage = "cannot use both gl_FragData and gl_FragColor";
+        if (mUsesSecondaryOutputs)
+        {
+            errorMessage =
+                "cannot use both output variable sets (gl_FragData, gl_SecondaryFragDataEXT)"
+                " and (gl_FragColor, gl_SecondaryFragColorEXT)";
+        }
+        error(location, errorMessage, name->c_str());
+    }
+
+    // GLSL ES 3.1 Revision 4, 7.1.3 Compute Shader Special Variables
+    if (getShaderType() == GL_COMPUTE_SHADER && !mComputeShaderLocalSizeDeclared &&
+        qualifier == EvqWorkGroupSize)
+    {
+        error(location,
+              "It is an error to use gl_WorkGroupSize before declaring the local group size",
+              "gl_WorkGroupSize");
+    }
     return variable;
 }
 
@@ -1553,6 +1701,13 @@ TIntermTyped *TParseContext::parseVariableIdentifier(const TSourceLoc &location,
 {
     const TVariable *variable = getNamedVariable(location, name, symbol);
 
+    if (!variable)
+    {
+        TIntermTyped *node = CreateZeroNode(TType(EbtFloat, EbpHigh, EvqConst));
+        node->setLine(location);
+        return node;
+    }
+
     if (variable->getType().getQualifier() == EvqViewIDOVR && IsWebGLBasedSpec(mShaderSpec) &&
         mShaderType == GL_FRAGMENT_SHADER && !isExtensionEnabled("GL_OVR_multiview2"))
     {
@@ -1561,10 +1716,12 @@ TIntermTyped *TParseContext::parseVariableIdentifier(const TSourceLoc &location,
               "gl_ViewID_OVR");
     }
 
+    TIntermTyped *node = nullptr;
+
     if (variable->getConstPointer())
     {
         const TConstantUnion *constArray = variable->getConstPointer();
-        return intermediate.addConstantUnion(constArray, variable->getType(), location);
+        node = new TIntermConstantUnion(constArray, variable->getType());
     }
     else if (variable->getType().getQualifier() == EvqWorkGroupSize &&
              mComputeShaderLocalSizeDeclared)
@@ -1583,21 +1740,21 @@ TIntermTyped *TParseContext::parseVariableIdentifier(const TSourceLoc &location,
 
         TType type(variable->getType());
         type.setQualifier(EvqConst);
-        return intermediate.addConstantUnion(constArray, type, location);
+        node = new TIntermConstantUnion(constArray, type);
     }
     else
     {
-        return intermediate.addSymbol(variable->getUniqueId(), variable->getName(),
-                                      variable->getType(), location);
+        node = new TIntermSymbol(variable->getUniqueId(), variable->getName(), variable->getType());
     }
+    ASSERT(node != nullptr);
+    node->setLine(location);
+    return node;
 }
 
-//
 // Initializers show up in several places in the grammar.  Have one set of
 // code to handle them here.
 //
-// Returns true on error, false if no error
-//
+// Returns true on success.
 bool TParseContext::executeInitializer(const TSourceLoc &line,
                                        const TString &identifier,
                                        const TPublicType &pType,
@@ -1625,7 +1782,7 @@ bool TParseContext::executeInitializer(const TSourceLoc &line,
     }
     if (!declareVariable(line, identifier, type, &variable))
     {
-        return true;
+        return false;
     }
 
     bool globalInitWarning = false;
@@ -1635,7 +1792,7 @@ bool TParseContext::executeInitializer(const TSourceLoc &line,
         // Error message does not completely match behavior with ESSL 1.00, but
         // we want to steer developers towards only using constant expressions.
         error(line, "global variable initializers must be constant expressions", "=");
-        return true;
+        return false;
     }
     if (globalInitWarning)
     {
@@ -1654,7 +1811,7 @@ bool TParseContext::executeInitializer(const TSourceLoc &line,
     {
         error(line, " cannot initialize this type of qualifier ",
               variable->getType().getQualifierString());
-        return true;
+        return false;
     }
     //
     // test for and propagate constant
@@ -1670,14 +1827,14 @@ bool TParseContext::executeInitializer(const TSourceLoc &line,
             std::string reason = reasonStream.str();
             error(line, reason.c_str(), "=");
             variable->getType().setQualifier(EvqTemporary);
-            return true;
+            return false;
         }
         if (type != initializer->getType())
         {
             error(line, " non-matching types for const initializer ",
                   variable->getType().getQualifierString());
             variable->getType().setQualifier(EvqTemporary);
-            return true;
+            return false;
         }
 
         // Save the constant folded value to the variable if possible. For example array
@@ -1688,8 +1845,8 @@ bool TParseContext::executeInitializer(const TSourceLoc &line,
         if (initializer->getAsConstantUnion())
         {
             variable->shareConstPointer(initializer->getAsConstantUnion()->getUnionArrayPointer());
-            *initNode = nullptr;
-            return false;
+            ASSERT(*initNode == nullptr);
+            return true;
         }
         else if (initializer->getAsSymbolNode())
         {
@@ -1701,22 +1858,128 @@ bool TParseContext::executeInitializer(const TSourceLoc &line,
             if (constArray)
             {
                 variable->shareConstPointer(constArray);
-                *initNode = nullptr;
-                return false;
+                ASSERT(*initNode == nullptr);
+                return true;
             }
         }
     }
 
-    TIntermSymbol *intermSymbol = intermediate.addSymbol(
-        variable->getUniqueId(), variable->getName(), variable->getType(), line);
+    TIntermSymbol *intermSymbol =
+        new TIntermSymbol(variable->getUniqueId(), variable->getName(), variable->getType());
+    intermSymbol->setLine(line);
     *initNode = createAssign(EOpInitialize, intermSymbol, initializer, line);
     if (*initNode == nullptr)
     {
         assignError(line, "=", intermSymbol->getCompleteString(), initializer->getCompleteString());
-        return true;
+        return false;
     }
 
-    return false;
+    return true;
+}
+
+TIntermNode *TParseContext::addConditionInitializer(const TPublicType &pType,
+                                                    const TString &identifier,
+                                                    TIntermTyped *initializer,
+                                                    const TSourceLoc &loc)
+{
+    checkIsScalarBool(loc, pType);
+    TIntermBinary *initNode = nullptr;
+    if (executeInitializer(loc, identifier, pType, initializer, &initNode))
+    {
+        // The initializer is valid. The init condition needs to have a node - either the
+        // initializer node, or a constant node in case the initialized variable is const and won't
+        // be recorded in the AST.
+        if (initNode == nullptr)
+        {
+            return initializer;
+        }
+        else
+        {
+            TIntermDeclaration *declaration = new TIntermDeclaration();
+            declaration->appendDeclarator(initNode);
+            return declaration;
+        }
+    }
+    return nullptr;
+}
+
+TIntermNode *TParseContext::addLoop(TLoopType type,
+                                    TIntermNode *init,
+                                    TIntermNode *cond,
+                                    TIntermTyped *expr,
+                                    TIntermNode *body,
+                                    const TSourceLoc &line)
+{
+    TIntermNode *node       = nullptr;
+    TIntermTyped *typedCond = nullptr;
+    if (cond)
+    {
+        typedCond = cond->getAsTyped();
+    }
+    if (cond == nullptr || typedCond)
+    {
+        if (type == ELoopDoWhile)
+        {
+            checkIsScalarBool(line, typedCond);
+        }
+        // In the case of other loops, it was checked before that the condition is a scalar boolean.
+        ASSERT(mDiagnostics->numErrors() > 0 || typedCond == nullptr ||
+               (typedCond->getBasicType() == EbtBool && !typedCond->isArray() &&
+                !typedCond->isVector()));
+
+        node = new TIntermLoop(type, init, typedCond, expr, EnsureBlock(body));
+        node->setLine(line);
+        return node;
+    }
+
+    ASSERT(type != ELoopDoWhile);
+
+    TIntermDeclaration *declaration = cond->getAsDeclarationNode();
+    ASSERT(declaration);
+    TIntermBinary *declarator = declaration->getSequence()->front()->getAsBinaryNode();
+    ASSERT(declarator->getLeft()->getAsSymbolNode());
+
+    // The condition is a declaration. In the AST representation we don't support declarations as
+    // loop conditions. Wrap the loop to a block that declares the condition variable and contains
+    // the loop.
+    TIntermBlock *block = new TIntermBlock();
+
+    TIntermDeclaration *declareCondition = new TIntermDeclaration();
+    declareCondition->appendDeclarator(declarator->getLeft()->deepCopy());
+    block->appendStatement(declareCondition);
+
+    TIntermBinary *conditionInit = new TIntermBinary(EOpAssign, declarator->getLeft()->deepCopy(),
+                                                     declarator->getRight()->deepCopy());
+    TIntermLoop *loop = new TIntermLoop(type, init, conditionInit, expr, EnsureBlock(body));
+    block->appendStatement(loop);
+    loop->setLine(line);
+    block->setLine(line);
+    return block;
+}
+
+TIntermNode *TParseContext::addIfElse(TIntermTyped *cond,
+                                      TIntermNodePair code,
+                                      const TSourceLoc &loc)
+{
+    bool isScalarBool = checkIsScalarBool(loc, cond);
+
+    // For compile time constant conditions, prune the code now.
+    if (isScalarBool && cond->getAsConstantUnion())
+    {
+        if (cond->getAsConstantUnion()->getBConst(0) == true)
+        {
+            return EnsureBlock(code.node1);
+        }
+        else
+        {
+            return EnsureBlock(code.node2);
+        }
+    }
+
+    TIntermIfElse *node = new TIntermIfElse(cond, EnsureBlock(code.node1), EnsureBlock(code.node2));
+    node->setLine(loc);
+
+    return node;
 }
 
 void TParseContext::addFullySpecifiedType(TPublicType *typeSpecifier)
@@ -1819,7 +2082,7 @@ void TParseContext::checkInputOutputTypeIsValidES3(const TQualifier qualifier,
             {
                 error(qualifierLocation, "cannot be array", getQualifierString(qualifier));
             }
-            // Vertex inputs with a struct type are disallowed in singleDeclarationErrorCheck
+            // Vertex inputs with a struct type are disallowed in nonEmptyDeclarationErrorCheck
             return;
         case EvqFragmentOut:
             // ESSL 3.00 section 4.3.6
@@ -1827,7 +2090,7 @@ void TParseContext::checkInputOutputTypeIsValidES3(const TQualifier qualifier,
             {
                 error(qualifierLocation, "cannot be matrix", getQualifierString(qualifier));
             }
-            // Fragment outputs with a struct type are disallowed in singleDeclarationErrorCheck
+            // Fragment outputs with a struct type are disallowed in nonEmptyDeclarationErrorCheck
             return;
         default:
             break;
@@ -1891,26 +2154,57 @@ void TParseContext::checkLocalVariableConstStorageQualifier(const TQualifierWrap
 void TParseContext::checkMemoryQualifierIsNotSpecified(const TMemoryQualifier &memoryQualifier,
                                                        const TSourceLoc &location)
 {
+    const std::string reason(
+        "Only allowed with shader storage blocks, variables declared within shader storage blocks "
+        "and variables declared as image types.");
     if (memoryQualifier.readonly)
     {
-        error(location, "Only allowed with images.", "readonly");
+        error(location, reason.c_str(), "readonly");
     }
     if (memoryQualifier.writeonly)
     {
-        error(location, "Only allowed with images.", "writeonly");
+        error(location, reason.c_str(), "writeonly");
     }
     if (memoryQualifier.coherent)
     {
-        error(location, "Only allowed with images.", "coherent");
+        error(location, reason.c_str(), "coherent");
     }
     if (memoryQualifier.restrictQualifier)
     {
-        error(location, "Only allowed with images.", "restrict");
+        error(location, reason.c_str(), "restrict");
     }
     if (memoryQualifier.volatileQualifier)
     {
-        error(location, "Only allowed with images.", "volatile");
+        error(location, reason.c_str(), "volatile");
     }
+}
+
+// Make sure there is no offset overlapping, and store the newly assigned offset to "type" in
+// intermediate tree.
+void TParseContext::checkAtomicCounterOffsetIsNotOverlapped(TPublicType &publicType,
+                                                            size_t size,
+                                                            bool forceAppend,
+                                                            const TSourceLoc &loc,
+                                                            TType &type)
+{
+    auto &bindingState = mAtomicCounterBindingStates[publicType.layoutQualifier.binding];
+    int offset;
+    if (publicType.layoutQualifier.offset == -1 || forceAppend)
+    {
+        offset = bindingState.appendSpan(size);
+    }
+    else
+    {
+        offset = bindingState.insertSpan(publicType.layoutQualifier.offset, size);
+    }
+    if (offset == -1)
+    {
+        error(loc, "Offset overlapping", "atomic counter");
+        return;
+    }
+    TLayoutQualifier qualifier = type.getLayoutQualifier();
+    qualifier.offset           = offset;
+    type.setLayoutQualifier(qualifier);
 }
 
 TIntermDeclaration *TParseContext::parseSingleDeclaration(
@@ -1946,38 +2240,56 @@ TIntermDeclaration *TParseContext::parseSingleDeclaration(
         }
     }
 
-    TIntermSymbol *symbol = intermediate.addSymbol(0, identifier, type, identifierOrTypeLocation);
+    declarationQualifierErrorCheck(publicType.qualifier, publicType.layoutQualifier,
+                                   identifierOrTypeLocation);
 
     bool emptyDeclaration = (identifier == "");
+    mDeferredNonEmptyDeclarationErrorCheck = emptyDeclaration;
 
-    mDeferredSingleDeclarationErrorCheck = emptyDeclaration;
-
-    TIntermDeclaration *declaration = new TIntermDeclaration();
-    declaration->setLine(identifierOrTypeLocation);
-
+    TIntermSymbol *symbol = nullptr;
     if (emptyDeclaration)
     {
         emptyDeclarationErrorCheck(publicType, identifierOrTypeLocation);
+        // In most cases we don't need to create a symbol node for an empty declaration.
+        // But if the empty declaration is declaring a struct type, the symbol node will store that.
+        if (type.getBasicType() == EbtStruct)
+        {
+            symbol = new TIntermSymbol(0, "", type);
+        }
+        else if (IsAtomicCounter(publicType.getBasicType()))
+        {
+            setAtomicCounterBindingDefaultOffset(publicType, identifierOrTypeLocation);
+        }
     }
     else
     {
-        singleDeclarationErrorCheck(publicType, identifierOrTypeLocation);
+        nonEmptyDeclarationErrorCheck(publicType, identifierOrTypeLocation);
 
         checkCanBeDeclaredWithoutInitializer(identifierOrTypeLocation, identifier, &publicType);
+
+        if (IsAtomicCounter(publicType.getBasicType()))
+        {
+
+            checkAtomicCounterOffsetIsNotOverlapped(publicType, kAtomicCounterSize, false,
+                                                    identifierOrTypeLocation, type);
+        }
 
         TVariable *variable = nullptr;
         declareVariable(identifierOrTypeLocation, identifier, type, &variable);
 
-        if (variable && symbol)
+        if (variable)
         {
-            symbol->setId(variable->getUniqueId());
+            symbol = new TIntermSymbol(variable->getUniqueId(), identifier, type);
         }
     }
 
-    // We append the symbol even if the declaration is empty, mainly because of struct declarations
-    // that may just declare a type.
-    declaration->appendDeclarator(symbol);
-
+    TIntermDeclaration *declaration = new TIntermDeclaration();
+    declaration->setLine(identifierOrTypeLocation);
+    if (symbol)
+    {
+        symbol->setLine(identifierOrTypeLocation);
+        declaration->appendDeclarator(symbol);
+    }
     return declaration;
 }
 
@@ -1987,9 +2299,12 @@ TIntermDeclaration *TParseContext::parseSingleArrayDeclaration(TPublicType &publ
                                                                const TSourceLoc &indexLocation,
                                                                TIntermTyped *indexExpression)
 {
-    mDeferredSingleDeclarationErrorCheck = false;
+    mDeferredNonEmptyDeclarationErrorCheck = false;
 
-    singleDeclarationErrorCheck(publicType, identifierLocation);
+    declarationQualifierErrorCheck(publicType.qualifier, publicType.layoutQualifier,
+                                   identifierLocation);
+
+    nonEmptyDeclarationErrorCheck(publicType, identifierLocation);
 
     checkCanBeDeclaredWithoutInitializer(identifierLocation, identifier, &publicType);
 
@@ -2002,16 +2317,22 @@ TIntermDeclaration *TParseContext::parseSingleArrayDeclaration(TPublicType &publ
     // This ensures useless error messages regarding the variable's non-arrayness won't follow.
     arrayType.setArraySize(size);
 
+    if (IsAtomicCounter(publicType.getBasicType()))
+    {
+        checkAtomicCounterOffsetIsNotOverlapped(publicType, kAtomicCounterArrayStride * size, false,
+                                                identifierLocation, arrayType);
+    }
+
     TVariable *variable = nullptr;
     declareVariable(identifierLocation, identifier, arrayType, &variable);
 
     TIntermDeclaration *declaration = new TIntermDeclaration();
     declaration->setLine(identifierLocation);
 
-    TIntermSymbol *symbol = intermediate.addSymbol(0, identifier, arrayType, identifierLocation);
-    if (variable && symbol)
+    if (variable)
     {
-        symbol->setId(variable->getUniqueId());
+        TIntermSymbol *symbol = new TIntermSymbol(variable->getUniqueId(), identifier, arrayType);
+        symbol->setLine(identifierLocation);
         declaration->appendDeclarator(symbol);
     }
 
@@ -2024,15 +2345,18 @@ TIntermDeclaration *TParseContext::parseSingleInitDeclaration(const TPublicType 
                                                               const TSourceLoc &initLocation,
                                                               TIntermTyped *initializer)
 {
-    mDeferredSingleDeclarationErrorCheck = false;
+    mDeferredNonEmptyDeclarationErrorCheck = false;
 
-    singleDeclarationErrorCheck(publicType, identifierLocation);
+    declarationQualifierErrorCheck(publicType.qualifier, publicType.layoutQualifier,
+                                   identifierLocation);
+
+    nonEmptyDeclarationErrorCheck(publicType, identifierLocation);
 
     TIntermDeclaration *declaration = new TIntermDeclaration();
     declaration->setLine(identifierLocation);
 
     TIntermBinary *initNode = nullptr;
-    if (!executeInitializer(identifierLocation, identifier, publicType, initializer, &initNode))
+    if (executeInitializer(identifierLocation, identifier, publicType, initializer, &initNode))
     {
         if (initNode)
         {
@@ -2051,9 +2375,12 @@ TIntermDeclaration *TParseContext::parseSingleArrayInitDeclaration(
     const TSourceLoc &initLocation,
     TIntermTyped *initializer)
 {
-    mDeferredSingleDeclarationErrorCheck = false;
+    mDeferredNonEmptyDeclarationErrorCheck = false;
 
-    singleDeclarationErrorCheck(publicType, identifierLocation);
+    declarationQualifierErrorCheck(publicType.qualifier, publicType.layoutQualifier,
+                                   identifierLocation);
+
+    nonEmptyDeclarationErrorCheck(publicType, identifierLocation);
 
     checkIsValidTypeAndQualifierForArray(indexLocation, publicType);
 
@@ -2075,7 +2402,7 @@ TIntermDeclaration *TParseContext::parseSingleArrayInitDeclaration(
 
     // initNode will correspond to the whole of "type b[n] = initializer".
     TIntermBinary *initNode = nullptr;
-    if (!executeInitializer(identifierLocation, identifier, arrayType, initializer, &initNode))
+    if (executeInitializer(identifierLocation, identifier, arrayType, initializer, &initNode))
     {
         if (initNode)
         {
@@ -2124,7 +2451,10 @@ TIntermInvariantDeclaration *TParseContext::parseInvariantDeclaration(
     }
 
     const TVariable *variable = getNamedVariable(identifierLoc, identifier, symbol);
-    ASSERT(variable);
+    if (!variable)
+    {
+        return nullptr;
+    }
     const TType &type = variable->getType();
 
     checkInvariantVariableQualifier(typeQualifier.invariant, type.getQualifier(),
@@ -2133,8 +2463,8 @@ TIntermInvariantDeclaration *TParseContext::parseInvariantDeclaration(
 
     symbolTable.addInvariantVarying(std::string(identifier->c_str()));
 
-    TIntermSymbol *intermSymbol =
-        intermediate.addSymbol(variable->getUniqueId(), *identifier, type, identifierLoc);
+    TIntermSymbol *intermSymbol = new TIntermSymbol(variable->getUniqueId(), *identifier, type);
+    intermSymbol->setLine(identifierLoc);
 
     return new TIntermInvariantDeclaration(intermSymbol, identifierLoc);
 }
@@ -2146,10 +2476,10 @@ void TParseContext::parseDeclarator(TPublicType &publicType,
 {
     // If the declaration starting this declarator list was empty (example: int,), some checks were
     // not performed.
-    if (mDeferredSingleDeclarationErrorCheck)
+    if (mDeferredNonEmptyDeclarationErrorCheck)
     {
-        singleDeclarationErrorCheck(publicType, identifierLocation);
-        mDeferredSingleDeclarationErrorCheck = false;
+        nonEmptyDeclarationErrorCheck(publicType, identifierLocation);
+        mDeferredNonEmptyDeclarationErrorCheck = false;
     }
 
     checkDeclaratorLocationIsNotSpecified(identifierLocation, publicType);
@@ -2158,12 +2488,17 @@ void TParseContext::parseDeclarator(TPublicType &publicType,
 
     TVariable *variable = nullptr;
     TType type(publicType);
+    if (IsAtomicCounter(publicType.getBasicType()))
+    {
+        checkAtomicCounterOffsetIsNotOverlapped(publicType, kAtomicCounterSize, true,
+                                                identifierLocation, type);
+    }
     declareVariable(identifierLocation, identifier, type, &variable);
 
-    TIntermSymbol *symbol = intermediate.addSymbol(0, identifier, type, identifierLocation);
-    if (variable && symbol)
+    if (variable)
     {
-        symbol->setId(variable->getUniqueId());
+        TIntermSymbol *symbol = new TIntermSymbol(variable->getUniqueId(), identifier, type);
+        symbol->setLine(identifierLocation);
         declarationOut->appendDeclarator(symbol);
     }
 }
@@ -2177,10 +2512,10 @@ void TParseContext::parseArrayDeclarator(TPublicType &publicType,
 {
     // If the declaration starting this declarator list was empty (example: int,), some checks were
     // not performed.
-    if (mDeferredSingleDeclarationErrorCheck)
+    if (mDeferredNonEmptyDeclarationErrorCheck)
     {
-        singleDeclarationErrorCheck(publicType, identifierLocation);
-        mDeferredSingleDeclarationErrorCheck = false;
+        nonEmptyDeclarationErrorCheck(publicType, identifierLocation);
+        mDeferredNonEmptyDeclarationErrorCheck = false;
     }
 
     checkDeclaratorLocationIsNotSpecified(identifierLocation, publicType);
@@ -2193,15 +2528,22 @@ void TParseContext::parseArrayDeclarator(TPublicType &publicType,
         unsigned int size = checkIsValidArraySize(arrayLocation, indexExpression);
         arrayType.setArraySize(size);
 
+        if (IsAtomicCounter(publicType.getBasicType()))
+        {
+            checkAtomicCounterOffsetIsNotOverlapped(publicType, kAtomicCounterArrayStride * size,
+                                                    true, identifierLocation, arrayType);
+        }
+
         TVariable *variable = nullptr;
         declareVariable(identifierLocation, identifier, arrayType, &variable);
 
-        TIntermSymbol *symbol =
-            intermediate.addSymbol(0, identifier, arrayType, identifierLocation);
-        if (variable && symbol)
-            symbol->setId(variable->getUniqueId());
-
-        declarationOut->appendDeclarator(symbol);
+        if (variable)
+        {
+            TIntermSymbol *symbol =
+                new TIntermSymbol(variable->getUniqueId(), identifier, arrayType);
+            symbol->setLine(identifierLocation);
+            declarationOut->appendDeclarator(symbol);
+        }
     }
 }
 
@@ -2214,16 +2556,16 @@ void TParseContext::parseInitDeclarator(const TPublicType &publicType,
 {
     // If the declaration starting this declarator list was empty (example: int,), some checks were
     // not performed.
-    if (mDeferredSingleDeclarationErrorCheck)
+    if (mDeferredNonEmptyDeclarationErrorCheck)
     {
-        singleDeclarationErrorCheck(publicType, identifierLocation);
-        mDeferredSingleDeclarationErrorCheck = false;
+        nonEmptyDeclarationErrorCheck(publicType, identifierLocation);
+        mDeferredNonEmptyDeclarationErrorCheck = false;
     }
 
     checkDeclaratorLocationIsNotSpecified(identifierLocation, publicType);
 
     TIntermBinary *initNode = nullptr;
-    if (!executeInitializer(identifierLocation, identifier, publicType, initializer, &initNode))
+    if (executeInitializer(identifierLocation, identifier, publicType, initializer, &initNode))
     {
         //
         // build the intermediate representation
@@ -2246,10 +2588,10 @@ void TParseContext::parseArrayInitDeclarator(const TPublicType &publicType,
 {
     // If the declaration starting this declarator list was empty (example: int,), some checks were
     // not performed.
-    if (mDeferredSingleDeclarationErrorCheck)
+    if (mDeferredNonEmptyDeclarationErrorCheck)
     {
-        singleDeclarationErrorCheck(publicType, identifierLocation);
-        mDeferredSingleDeclarationErrorCheck = false;
+        nonEmptyDeclarationErrorCheck(publicType, identifierLocation);
+        mDeferredNonEmptyDeclarationErrorCheck = false;
     }
 
     checkDeclaratorLocationIsNotSpecified(identifierLocation, publicType);
@@ -2271,13 +2613,45 @@ void TParseContext::parseArrayInitDeclarator(const TPublicType &publicType,
 
     // initNode will correspond to the whole of "b[n] = initializer".
     TIntermBinary *initNode = nullptr;
-    if (!executeInitializer(identifierLocation, identifier, arrayType, initializer, &initNode))
+    if (executeInitializer(identifierLocation, identifier, arrayType, initializer, &initNode))
     {
         if (initNode)
         {
             declarationOut->appendDeclarator(initNode);
         }
     }
+}
+
+void TParseContext::setAtomicCounterBindingDefaultOffset(const TPublicType &publicType,
+                                                         const TSourceLoc &location)
+{
+    const TLayoutQualifier &layoutQualifier = publicType.layoutQualifier;
+    checkAtomicCounterBindingIsValid(location, layoutQualifier.binding);
+    if (layoutQualifier.binding == -1 || layoutQualifier.offset == -1)
+    {
+        error(location, "Requires both binding and offset", "layout");
+        return;
+    }
+    mAtomicCounterBindingStates[layoutQualifier.binding].setDefaultOffset(layoutQualifier.offset);
+}
+
+void TParseContext::parseDefaultPrecisionQualifier(const TPrecision precision,
+                                                   const TPublicType &type,
+                                                   const TSourceLoc &loc)
+{
+    if ((precision == EbpHigh) && (getShaderType() == GL_FRAGMENT_SHADER) &&
+        !getFragmentPrecisionHigh())
+    {
+        error(loc, "precision is not supported in fragment shader", "highp");
+    }
+
+    if (!CanSetDefaultPrecisionOnType(type))
+    {
+        error(loc, "illegal type argument for default precision qualifier",
+              getBasicString(type.getBasicType()));
+        return;
+    }
+    symbolTable.setDefaultPrecision(type.getBasicType(), precision);
 }
 
 void TParseContext::parseGlobalLayoutQualifier(const TTypeQualifierBuilder &typeQualifierBuilder)
@@ -2306,6 +2680,10 @@ void TParseContext::parseGlobalLayoutQualifier(const TTypeQualifierBuilder &type
     checkMemoryQualifierIsNotSpecified(typeQualifier.memoryQualifier, typeQualifier.line);
 
     checkInternalFormatIsNotSpecified(typeQualifier.line, layoutQualifier.imageInternalFormat);
+
+    checkYuvIsNotSpecified(typeQualifier.line, layoutQualifier.yuv);
+
+    checkOffsetIsNotSpecified(typeQualifier.line, layoutQualifier.offset);
 
     if (typeQualifier.qualifier == EvqComputeIn)
     {
@@ -2357,9 +2735,7 @@ void TParseContext::parseGlobalLayoutQualifier(const TTypeQualifierBuilder &type
 
         mComputeShaderLocalSizeDeclared = true;
     }
-    else if (mMultiviewAvailable &&
-             (isExtensionEnabled("GL_OVR_multiview") || isExtensionEnabled("GL_OVR_multiview2")) &&
-             typeQualifier.qualifier == EvqVertexIn)
+    else if (isMultiviewExtensionEnabled() && typeQualifier.qualifier == EvqVertexIn)
     {
         // This error is only specified in WebGL, but tightens unspecified behavior in the native
         // specification.
@@ -2392,9 +2768,9 @@ void TParseContext::parseGlobalLayoutQualifier(const TTypeQualifierBuilder &type
             return;
         }
 
-        if (typeQualifier.qualifier != EvqUniform)
+        if (typeQualifier.qualifier != EvqUniform && typeQualifier.qualifier != EvqBuffer)
         {
-            error(typeQualifier.line, "invalid qualifier: global layout must be uniform",
+            error(typeQualifier.line, "invalid qualifier: global layout can only be set for blocks",
                   getQualifierString(typeQualifier.qualifier));
             return;
         }
@@ -2410,12 +2786,26 @@ void TParseContext::parseGlobalLayoutQualifier(const TTypeQualifierBuilder &type
 
         if (layoutQualifier.matrixPacking != EmpUnspecified)
         {
-            mDefaultMatrixPacking = layoutQualifier.matrixPacking;
+            if (typeQualifier.qualifier == EvqUniform)
+            {
+                mDefaultUniformMatrixPacking = layoutQualifier.matrixPacking;
+            }
+            else if (typeQualifier.qualifier == EvqBuffer)
+            {
+                mDefaultBufferMatrixPacking = layoutQualifier.matrixPacking;
+            }
         }
 
         if (layoutQualifier.blockStorage != EbsUnspecified)
         {
-            mDefaultBlockStorage = layoutQualifier.blockStorage;
+            if (typeQualifier.qualifier == EvqUniform)
+            {
+                mDefaultUniformBlockStorage = layoutQualifier.blockStorage;
+            }
+            else if (typeQualifier.qualifier == EvqBuffer)
+            {
+                mDefaultBufferBlockStorage = layoutQualifier.blockStorage;
+            }
         }
     }
 }
@@ -2425,7 +2815,10 @@ TIntermFunctionPrototype *TParseContext::createPrototypeNodeFromFunction(
     const TSourceLoc &location,
     bool insertParametersToSymbolTable)
 {
-    TIntermFunctionPrototype *prototype = new TIntermFunctionPrototype(function.getReturnType());
+    checkIsNotReserved(location, function.getName());
+
+    TIntermFunctionPrototype *prototype =
+        new TIntermFunctionPrototype(function.getReturnType(), TSymbolUniqueId(function));
     // TODO(oetuaho@nvidia.com): Instead of converting the function information here, the node could
     // point to the data that already exists in the symbol table.
     prototype->getFunctionSymbolInfo()->setFromFunction(function);
@@ -2435,27 +2828,35 @@ TIntermFunctionPrototype *TParseContext::createPrototypeNodeFromFunction(
     {
         const TConstParameter &param = function.getParam(i);
 
+        TIntermSymbol *symbol = nullptr;
+
         // If the parameter has no name, it's not an error, just don't add it to symbol table (could
         // be used for unused args).
         if (param.name != nullptr)
         {
-            TVariable *variable = new TVariable(param.name, *param.type);
-
             // Insert the parameter in the symbol table.
-            if (insertParametersToSymbolTable && !symbolTable.declare(variable))
+            if (insertParametersToSymbolTable)
             {
-                error(location, "redefinition", variable->getName().c_str());
-                prototype->appendParameter(intermediate.addSymbol(0, "", *param.type, location));
-                continue;
+                TVariable *variable = symbolTable.declareVariable(param.name, *param.type);
+                if (variable)
+                {
+                    symbol = new TIntermSymbol(variable->getUniqueId(), variable->getName(),
+                                               variable->getType());
+                }
+                else
+                {
+                    error(location, "redefinition", variable->getName().c_str());
+                }
             }
-            TIntermSymbol *symbol = intermediate.addSymbol(
-                variable->getUniqueId(), variable->getName(), variable->getType(), location);
-            prototype->appendParameter(symbol);
         }
-        else
+        if (!symbol)
         {
-            prototype->appendParameter(intermediate.addSymbol(0, "", *param.type, location));
+            // The parameter had no name or declaring the symbol failed - either way, add a nameless
+            // symbol.
+            symbol = new TIntermSymbol(0, "", *param.type);
         }
+        symbol->setLine(location);
+        prototype->appendParameter(symbol);
     }
     return prototype;
 }
@@ -2660,10 +3061,10 @@ TFunction *TParseContext::parseFunctionHeader(const TPublicType &type,
     {
         error(location, "no qualifiers allowed for function return", "layout");
     }
-    // make sure a sampler or an image is not involved as well...
-    checkIsNotSampler(location, type.typeSpecifierNonArray,
-                      "samplers can't be function return values");
-    checkIsNotImage(location, type.typeSpecifierNonArray, "images can't be function return values");
+    // make sure an opaque type is not involved as well...
+    std::string reason(getBasicString(type.getBasicType()));
+    reason += "s can't be function return values";
+    checkIsNotOpaqueType(location, type.typeSpecifierNonArray, reason.c_str());
     if (mShaderVersion < 300)
     {
         // Array return values are forbidden, but there's also no valid syntax for declaring array
@@ -2679,37 +3080,63 @@ TFunction *TParseContext::parseFunctionHeader(const TPublicType &type,
     }
 
     // Add the function as a prototype after parsing it (we do not support recursion)
-    return new TFunction(name, new TType(type));
+    return new TFunction(&symbolTable, name, new TType(type));
 }
 
-TFunction *TParseContext::addConstructorFunc(const TPublicType &publicTypeIn)
+TFunction *TParseContext::addNonConstructorFunc(const TString *name, const TSourceLoc &loc)
 {
-    TPublicType publicType = publicTypeIn;
+    const TType *returnType = TCache::getType(EbtVoid, EbpUndefined);
+    return new TFunction(&symbolTable, name, returnType);
+}
+
+TFunction *TParseContext::addConstructorFunc(const TPublicType &publicType)
+{
+    if (mShaderVersion < 300 && publicType.array)
+    {
+        error(publicType.getLine(), "array constructor supported in GLSL ES 3.00 and above only",
+              "[]");
+    }
     if (publicType.isStructSpecifier())
     {
         error(publicType.getLine(), "constructor can't be a structure definition",
               getBasicString(publicType.getBasicType()));
     }
 
-    TOperator op = EOpNull;
-    if (publicType.getUserDef())
+    TType *type = new TType(publicType);
+    if (!type->canBeConstructed())
     {
-        op = EOpConstructStruct;
-    }
-    else
-    {
-        op = sh::TypeToConstructorOperator(TType(publicType));
-        if (op == EOpNull)
-        {
-            error(publicType.getLine(), "cannot construct this type",
-                  getBasicString(publicType.getBasicType()));
-            publicType.setBasicType(EbtFloat);
-            op = EOpConstructFloat;
-        }
+        error(publicType.getLine(), "cannot construct this type",
+              getBasicString(publicType.getBasicType()));
+        type->setBasicType(EbtFloat);
     }
 
-    const TType *type = new TType(publicType);
-    return new TFunction(nullptr, type, op);
+    return new TFunction(&symbolTable, nullptr, type, EOpConstruct);
+}
+
+TParameter TParseContext::parseParameterDeclarator(const TPublicType &publicType,
+                                                   const TString *name,
+                                                   const TSourceLoc &nameLoc)
+{
+    if (publicType.getBasicType() == EbtVoid)
+    {
+        error(nameLoc, "illegal use of type 'void'", name->c_str());
+    }
+    checkIsNotReserved(nameLoc, *name);
+    TType *type      = new TType(publicType);
+    TParameter param = {name, type};
+    return param;
+}
+
+TParameter TParseContext::parseParameterArrayDeclarator(const TString *identifier,
+                                                        const TSourceLoc &identifierLoc,
+                                                        TIntermTyped *arraySize,
+                                                        const TSourceLoc &arrayLoc,
+                                                        TPublicType *type)
+{
+    checkIsValidTypeForArray(arrayLoc, *type);
+    unsigned int size = checkIsValidArraySize(arrayLoc, arraySize);
+    type->setArraySize(size);
+    return parseParameterDeclarator(*type, identifier, identifierLoc);
 }
 
 // This function is used to test for the correctness of the parameters passed to various constructor
@@ -2718,7 +3145,6 @@ TFunction *TParseContext::addConstructorFunc(const TPublicType &publicTypeIn)
 // Returns a node to add to the tree regardless of if an error was generated or not.
 //
 TIntermTyped *TParseContext::addConstructor(TIntermSequence *arguments,
-                                            TOperator op,
                                             TType type,
                                             const TSourceLoc &line)
 {
@@ -2728,27 +3154,24 @@ TIntermTyped *TParseContext::addConstructor(TIntermSequence *arguments,
         {
             error(line, "implicitly sized array constructor must have at least one argument", "[]");
             type.setArraySize(1u);
-            return TIntermTyped::CreateZero(type);
+            return CreateZeroNode(type);
         }
         type.setArraySize(static_cast<unsigned int>(arguments->size()));
     }
 
-    if (!checkConstructorArguments(line, arguments, op, type))
+    if (!checkConstructorArguments(line, arguments, type))
     {
-        return TIntermTyped::CreateZero(type);
+        return CreateZeroNode(type);
     }
 
-    TIntermAggregate *constructorNode = new TIntermAggregate(type, op, arguments);
+    TIntermAggregate *constructorNode = TIntermAggregate::CreateConstructor(type, arguments);
     constructorNode->setLine(line);
-    ASSERT(constructorNode->isConstructor());
 
-    TIntermTyped *constConstructor =
-        intermediate.foldAggregateBuiltIn(constructorNode, mDiagnostics);
-    if (constConstructor)
+    // TODO(oetuaho@nvidia.com): Add support for folding array constructors.
+    if (!constructorNode->isArray())
     {
-        return constConstructor;
+        return constructorNode->fold(mDiagnostics);
     }
-
     return constructorNode;
 }
 
@@ -2769,9 +3192,16 @@ TIntermDeclaration *TParseContext::addInterfaceBlock(
 
     TTypeQualifier typeQualifier = typeQualifierBuilder.getVariableTypeQualifier(mDiagnostics);
 
-    if (typeQualifier.qualifier != EvqUniform)
+    if (mShaderVersion < 310 && typeQualifier.qualifier != EvqUniform)
     {
-        error(typeQualifier.line, "invalid qualifier: interface blocks must be uniform",
+        error(typeQualifier.line,
+              "invalid qualifier: interface blocks must be uniform in version lower than GLSL ES "
+              "3.10",
+              getQualifierString(typeQualifier.qualifier));
+    }
+    else if (typeQualifier.qualifier != EvqUniform && typeQualifier.qualifier != EvqBuffer)
+    {
+        error(typeQualifier.line, "invalid qualifier: interface blocks must be uniform or buffer",
               getQualifierString(typeQualifier.qualifier));
     }
 
@@ -2780,30 +3210,62 @@ TIntermDeclaration *TParseContext::addInterfaceBlock(
         error(typeQualifier.line, "invalid qualifier on interface block member", "invariant");
     }
 
-    checkMemoryQualifierIsNotSpecified(typeQualifier.memoryQualifier, typeQualifier.line);
+    if (typeQualifier.qualifier != EvqBuffer)
+    {
+        checkMemoryQualifierIsNotSpecified(typeQualifier.memoryQualifier, typeQualifier.line);
+    }
 
-    // TODO(oetuaho): Remove this and support binding for blocks.
-    checkBindingIsNotSpecified(typeQualifier.line, typeQualifier.layoutQualifier.binding);
+    // add array index
+    unsigned int arraySize = 0;
+    if (arrayIndex != nullptr)
+    {
+        arraySize = checkIsValidArraySize(arrayIndexLine, arrayIndex);
+    }
+
+    if (mShaderVersion < 310)
+    {
+        checkBindingIsNotSpecified(typeQualifier.line, typeQualifier.layoutQualifier.binding);
+    }
+    else
+    {
+        checkBlockBindingIsValid(typeQualifier.line, typeQualifier.qualifier,
+                                 typeQualifier.layoutQualifier.binding, arraySize);
+    }
+
+    checkYuvIsNotSpecified(typeQualifier.line, typeQualifier.layoutQualifier.yuv);
 
     TLayoutQualifier blockLayoutQualifier = typeQualifier.layoutQualifier;
     checkLocationIsNotSpecified(typeQualifier.line, blockLayoutQualifier);
 
     if (blockLayoutQualifier.matrixPacking == EmpUnspecified)
     {
-        blockLayoutQualifier.matrixPacking = mDefaultMatrixPacking;
+        if (typeQualifier.qualifier == EvqUniform)
+        {
+            blockLayoutQualifier.matrixPacking = mDefaultUniformMatrixPacking;
+        }
+        else if (typeQualifier.qualifier == EvqBuffer)
+        {
+            blockLayoutQualifier.matrixPacking = mDefaultBufferMatrixPacking;
+        }
     }
 
     if (blockLayoutQualifier.blockStorage == EbsUnspecified)
     {
-        blockLayoutQualifier.blockStorage = mDefaultBlockStorage;
+        if (typeQualifier.qualifier == EvqUniform)
+        {
+            blockLayoutQualifier.blockStorage = mDefaultUniformBlockStorage;
+        }
+        else if (typeQualifier.qualifier == EvqBuffer)
+        {
+            blockLayoutQualifier.blockStorage = mDefaultBufferBlockStorage;
+        }
     }
 
     checkWorkGroupSizeIsNotSpecified(nameLine, blockLayoutQualifier);
 
     checkInternalFormatIsNotSpecified(nameLine, blockLayoutQualifier.imageInternalFormat);
 
-    TSymbol *blockNameSymbol = new TInterfaceBlockName(&blockName);
-    if (!symbolTable.declare(blockNameSymbol))
+    if (!symbolTable.declareInterfaceBlockName(&blockName))
     {
         error(nameLine, "redefinition of an interface block name", blockName.c_str());
     }
@@ -2813,25 +3275,32 @@ TIntermDeclaration *TParseContext::addInterfaceBlock(
     {
         TField *field    = (*fieldList)[memberIndex];
         TType *fieldType = field->type();
-        if (IsSampler(fieldType->getBasicType()))
+        if (IsOpaqueType(fieldType->getBasicType()))
         {
-            error(field->line(),
-                  "unsupported type - sampler types are not allowed in interface blocks",
-                  fieldType->getBasicString());
-        }
-
-        if (IsImage(fieldType->getBasicType()))
-        {
-            error(field->line(),
-                  "unsupported type - image types are not allowed in interface blocks",
-                  fieldType->getBasicString());
+            std::string reason("unsupported type - ");
+            reason += fieldType->getBasicString();
+            reason += " types are not allowed in interface blocks";
+            error(field->line(), reason.c_str(), fieldType->getBasicString());
         }
 
         const TQualifier qualifier = fieldType->getQualifier();
         switch (qualifier)
         {
             case EvqGlobal:
+                break;
             case EvqUniform:
+                if (typeQualifier.qualifier == EvqBuffer)
+                {
+                    error(field->line(), "invalid qualifier on shader storage block member",
+                          getQualifierString(qualifier));
+                }
+                break;
+            case EvqBuffer:
+                if (typeQualifier.qualifier == EvqUniform)
+                {
+                    error(field->line(), "invalid qualifier on uniform block member",
+                          getQualifierString(qualifier));
+                }
                 break;
             default:
                 error(field->line(), "invalid qualifier on interface block member",
@@ -2847,6 +3316,7 @@ TIntermDeclaration *TParseContext::addInterfaceBlock(
         // check layout qualifiers
         TLayoutQualifier fieldLayoutQualifier = fieldType->getLayoutQualifier();
         checkLocationIsNotSpecified(field->line(), fieldLayoutQualifier);
+        checkBindingIsNotSpecified(field->line(), fieldLayoutQualifier.binding);
 
         if (fieldLayoutQualifier.blockStorage != EbsUnspecified)
         {
@@ -2866,13 +3336,24 @@ TIntermDeclaration *TParseContext::addInterfaceBlock(
         }
 
         fieldType->setLayoutQualifier(fieldLayoutQualifier);
-    }
 
-    // add array index
-    unsigned int arraySize = 0;
-    if (arrayIndex != nullptr)
-    {
-        arraySize = checkIsValidArraySize(arrayIndexLine, arrayIndex);
+        if (typeQualifier.qualifier == EvqBuffer)
+        {
+            // set memory qualifiers
+            // GLSL ES 3.10 session 4.9 [Memory Access Qualifiers]. When a block declaration is
+            // qualified with a memory qualifier, it is as if all of its members were declared with
+            // the same memory qualifier.
+            const TMemoryQualifier &blockMemoryQualifier = typeQualifier.memoryQualifier;
+            TMemoryQualifier fieldMemoryQualifier        = fieldType->getMemoryQualifier();
+            fieldMemoryQualifier.readonly |= blockMemoryQualifier.readonly;
+            fieldMemoryQualifier.writeonly |= blockMemoryQualifier.writeonly;
+            fieldMemoryQualifier.coherent |= blockMemoryQualifier.coherent;
+            fieldMemoryQualifier.restrictQualifier |= blockMemoryQualifier.restrictQualifier;
+            fieldMemoryQualifier.volatileQualifier |= blockMemoryQualifier.volatileQualifier;
+            // TODO(jiajia.qin@intel.com): Decide whether if readonly and writeonly buffer variable
+            // is legal. See bug https://github.com/KhronosGroup/OpenGL-API/issues/7
+            fieldType->setMemoryQualifier(fieldMemoryQualifier);
+        }
     }
 
     TInterfaceBlock *interfaceBlock =
@@ -2894,10 +3375,13 @@ TIntermDeclaration *TParseContext::addInterfaceBlock(
             // set parent pointer of the field variable
             fieldType->setInterfaceBlock(interfaceBlock);
 
-            TVariable *fieldVariable = new TVariable(&field->name(), *fieldType);
-            fieldVariable->setQualifier(typeQualifier.qualifier);
+            TVariable *fieldVariable = symbolTable.declareVariable(&field->name(), *fieldType);
 
-            if (!symbolTable.declare(fieldVariable))
+            if (fieldVariable)
+            {
+                fieldVariable->setQualifier(typeQualifier.qualifier);
+            }
+            else
             {
                 error(field->line(), "redefinition of an interface block member name",
                       field->name().c_str());
@@ -2909,21 +3393,22 @@ TIntermDeclaration *TParseContext::addInterfaceBlock(
         checkIsNotReserved(instanceLine, *instanceName);
 
         // add a symbol for this interface block
-        TVariable *instanceTypeDef = new TVariable(instanceName, interfaceBlockType, false);
-        instanceTypeDef->setQualifier(typeQualifier.qualifier);
-
-        if (!symbolTable.declare(instanceTypeDef))
+        TVariable *instanceTypeDef = symbolTable.declareVariable(instanceName, interfaceBlockType);
+        if (instanceTypeDef)
+        {
+            instanceTypeDef->setQualifier(typeQualifier.qualifier);
+            symbolId = instanceTypeDef->getUniqueId();
+        }
+        else
         {
             error(instanceLine, "redefinition of an interface block instance name",
                   instanceName->c_str());
         }
-
-        symbolId   = instanceTypeDef->getUniqueId();
-        symbolName = instanceTypeDef->getName();
+        symbolName = *instanceName;
     }
 
-    TIntermSymbol *blockSymbol =
-        intermediate.addSymbol(symbolId, symbolName, interfaceBlockType, typeQualifier.line);
+    TIntermSymbol *blockSymbol = new TIntermSymbol(symbolId, symbolName, interfaceBlockType);
+    blockSymbol->setLine(typeQualifier.line);
     TIntermDeclaration *declaration = new TIntermDeclaration();
     declaration->appendDeclarator(blockSymbol);
     declaration->setLine(nameLine);
@@ -2993,10 +3478,7 @@ TIntermTyped *TParseContext::addIndexExpression(TIntermTyped *baseExpression,
             error(location, " left of '[' is not of type array, matrix, or vector ", "expression");
         }
 
-        TConstantUnion *unionArray = new TConstantUnion[1];
-        unionArray->setFConst(0.0f);
-        return intermediate.addConstantUnion(unionArray, TType(EbtFloat, EbpHigh, EvqConst),
-                                             location);
+        return CreateZeroNode(TType(EbtFloat, EbpHigh, EvqConst));
     }
 
     TIntermConstantUnion *indexConstantUnion = indexExpression->getAsConstantUnion();
@@ -3032,7 +3514,15 @@ TIntermTyped *TParseContext::addIndexExpression(TIntermTyped *baseExpression,
         // handle this case is to report a warning instead of an error and force the index to be in
         // the correct range.
         bool outOfRangeIndexIsError = indexExpression->getQualifier() == EvqConst;
-        int index                   = indexConstantUnion->getIConst(0);
+        int index                   = 0;
+        if (indexConstantUnion->getBasicType() == EbtInt)
+        {
+            index = indexConstantUnion->getIConst(0);
+        }
+        else if (indexConstantUnion->getBasicType() == EbtUInt)
+        {
+            index = static_cast<int>(indexConstantUnion->getUConst(0));
+        }
 
         int safeIndex = -1;
 
@@ -3040,16 +3530,7 @@ TIntermTyped *TParseContext::addIndexExpression(TIntermTyped *baseExpression,
         {
             if (baseExpression->getQualifier() == EvqFragData && index > 0)
             {
-                if (mShaderSpec == SH_WEBGL2_SPEC)
-                {
-                    // Error has been already generated if index is not const.
-                    if (indexExpression->getQualifier() == EvqConst)
-                    {
-                        error(location, "array index for gl_FragData must be constant zero", "[");
-                    }
-                    safeIndex = 0;
-                }
-                else if (!isExtensionEnabled("GL_EXT_draw_buffers"))
+                if (!isExtensionEnabled("GL_EXT_draw_buffers"))
                 {
                     outOfRangeError(outOfRangeIndexIsError, location,
                                     "array index for gl_FragData must be zero when "
@@ -3083,20 +3564,24 @@ TIntermTyped *TParseContext::addIndexExpression(TIntermTyped *baseExpression,
         // Data of constant unions can't be changed, because it may be shared with other
         // constant unions or even builtins, like gl_MaxDrawBuffers. Instead use a new
         // sanitized object.
-        if (safeIndex != index)
+        if (safeIndex != index || indexConstantUnion->getBasicType() != EbtInt)
         {
             TConstantUnion *safeConstantUnion = new TConstantUnion();
             safeConstantUnion->setIConst(safeIndex);
             indexConstantUnion->replaceConstantUnion(safeConstantUnion);
+            indexConstantUnion->getTypePointer()->setBasicType(EbtInt);
         }
 
-        return intermediate.addIndex(EOpIndexDirect, baseExpression, indexExpression, location,
-                                     mDiagnostics);
+        TIntermBinary *node = new TIntermBinary(EOpIndexDirect, baseExpression, indexExpression);
+        node->setLine(location);
+        return node->fold(mDiagnostics);
     }
     else
     {
-        return intermediate.addIndex(EOpIndexIndirect, baseExpression, indexExpression, location,
-                                     mDiagnostics);
+        TIntermBinary *node = new TIntermBinary(EOpIndexIndirect, baseExpression, indexExpression);
+        node->setLine(location);
+        // Indirect indexing can never be constant folded.
+        return node;
     }
 }
 
@@ -3137,15 +3622,17 @@ TIntermTyped *TParseContext::addFieldSelectionExpression(TIntermTyped *baseExpre
 
     if (baseExpression->isVector())
     {
-        TVectorFields fields;
-        if (!parseVectorFields(fieldString, baseExpression->getNominalSize(), fields,
-                               fieldLocation))
+        TVector<int> fieldOffsets;
+        if (!parseVectorFields(fieldLocation, fieldString, baseExpression->getNominalSize(),
+                               &fieldOffsets))
         {
-            fields.num        = 1;
-            fields.offsets[0] = 0;
+            fieldOffsets.resize(1);
+            fieldOffsets[0] = 0;
         }
+        TIntermSwizzle *node = new TIntermSwizzle(baseExpression, fieldOffsets);
+        node->setLine(dotLocation);
 
-        return TIntermediate::AddSwizzle(baseExpression, fields, dotLocation);
+        return node->fold();
     }
     else if (baseExpression->getBasicType() == EbtStruct)
     {
@@ -3169,10 +3656,12 @@ TIntermTyped *TParseContext::addFieldSelectionExpression(TIntermTyped *baseExpre
             }
             if (fieldFound)
             {
-                TIntermTyped *index = TIntermTyped::CreateIndexNode(i);
+                TIntermTyped *index = CreateIndexNode(i);
                 index->setLine(fieldLocation);
-                return intermediate.addIndex(EOpIndexDirectStruct, baseExpression, index,
-                                             dotLocation, mDiagnostics);
+                TIntermBinary *node =
+                    new TIntermBinary(EOpIndexDirectStruct, baseExpression, index);
+                node->setLine(dotLocation);
+                return node->fold(mDiagnostics);
             }
             else
             {
@@ -3203,10 +3692,13 @@ TIntermTyped *TParseContext::addFieldSelectionExpression(TIntermTyped *baseExpre
             }
             if (fieldFound)
             {
-                TIntermTyped *index = TIntermTyped::CreateIndexNode(i);
+                TIntermTyped *index = CreateIndexNode(i);
                 index->setLine(fieldLocation);
-                return intermediate.addIndex(EOpIndexDirectInterfaceBlock, baseExpression, index,
-                                             dotLocation, mDiagnostics);
+                TIntermBinary *node =
+                    new TIntermBinary(EOpIndexDirectInterfaceBlock, baseExpression, index);
+                node->setLine(dotLocation);
+                // Indexing interface blocks can never be constant folded.
+                return node;
             }
             else
             {
@@ -3270,6 +3762,11 @@ TLayoutQualifier TParseContext::parseLayoutQualifier(const TString &qualifierTyp
     {
         error(qualifierTypeLine, "invalid layout qualifier: location requires an argument",
               qualifierType.c_str());
+    }
+    else if (qualifierType == "yuv" && isExtensionEnabled("GL_EXT_YUV_target") &&
+             mShaderType == GL_FRAGMENT_SHADER)
+    {
+        qualifier.yuv = true;
     }
     else if (qualifierType == "rgba32f")
     {
@@ -3414,6 +3911,19 @@ TLayoutQualifier TParseContext::parseLayoutQualifier(const TString &qualifierTyp
             qualifier.binding = intValue;
         }
     }
+    else if (qualifierType == "offset")
+    {
+        checkLayoutQualifierSupported(qualifierTypeLine, qualifierType, 310);
+        if (intValue < 0)
+        {
+            error(intValueLine, "out of range: offset must be non-negative",
+                  intValueString.c_str());
+        }
+        else
+        {
+            qualifier.offset = intValue;
+        }
+    }
     else if (qualifierType == "local_size_x")
     {
         parseLocalSize(qualifierType, qualifierTypeLine, intValue, intValueLine, intValueString, 0u,
@@ -3429,8 +3939,7 @@ TLayoutQualifier TParseContext::parseLayoutQualifier(const TString &qualifierTyp
         parseLocalSize(qualifierType, qualifierTypeLine, intValue, intValueLine, intValueString, 2u,
                        &qualifier.localSize);
     }
-    else if (qualifierType == "num_views" && mMultiviewAvailable &&
-             (isExtensionEnabled("GL_OVR_multiview") || isExtensionEnabled("GL_OVR_multiview2")) &&
+    else if (qualifierType == "num_views" && isMultiviewExtensionEnabled() &&
              mShaderType == GL_VERTEX_SHADER)
     {
         parseNumViews(intValue, intValueLine, intValueString, &qualifier.numViews);
@@ -3450,12 +3959,104 @@ TTypeQualifierBuilder *TParseContext::createTypeQualifierBuilder(const TSourceLo
         mShaderVersion);
 }
 
+TStorageQualifierWrapper *TParseContext::parseGlobalStorageQualifier(TQualifier qualifier,
+                                                                     const TSourceLoc &loc)
+{
+    checkIsAtGlobalLevel(loc, getQualifierString(qualifier));
+    return new TStorageQualifierWrapper(qualifier, loc);
+}
+
+TStorageQualifierWrapper *TParseContext::parseVaryingQualifier(const TSourceLoc &loc)
+{
+    if (getShaderType() == GL_VERTEX_SHADER)
+    {
+        return parseGlobalStorageQualifier(EvqVaryingOut, loc);
+    }
+    return parseGlobalStorageQualifier(EvqVaryingIn, loc);
+}
+
+TStorageQualifierWrapper *TParseContext::parseInQualifier(const TSourceLoc &loc)
+{
+    if (declaringFunction())
+    {
+        return new TStorageQualifierWrapper(EvqIn, loc);
+    }
+    if (getShaderType() == GL_FRAGMENT_SHADER)
+    {
+        if (mShaderVersion < 300)
+        {
+            error(loc, "storage qualifier supported in GLSL ES 3.00 and above only", "in");
+        }
+        return new TStorageQualifierWrapper(EvqFragmentIn, loc);
+    }
+    if (getShaderType() == GL_VERTEX_SHADER)
+    {
+        if (mShaderVersion < 300 && !isMultiviewExtensionEnabled())
+        {
+            error(loc, "storage qualifier supported in GLSL ES 3.00 and above only", "in");
+        }
+        return new TStorageQualifierWrapper(EvqVertexIn, loc);
+    }
+    return new TStorageQualifierWrapper(EvqComputeIn, loc);
+}
+
+TStorageQualifierWrapper *TParseContext::parseOutQualifier(const TSourceLoc &loc)
+{
+    if (declaringFunction())
+    {
+        return new TStorageQualifierWrapper(EvqOut, loc);
+    }
+    if (mShaderVersion < 300)
+    {
+        error(loc, "storage qualifier supported in GLSL ES 3.00 and above only", "out");
+    }
+    if (getShaderType() != GL_VERTEX_SHADER && getShaderType() != GL_FRAGMENT_SHADER)
+    {
+        error(loc, "storage qualifier supported in vertex and fragment shaders only", "out");
+    }
+    if (getShaderType() == GL_VERTEX_SHADER)
+    {
+        return new TStorageQualifierWrapper(EvqVertexOut, loc);
+    }
+    return new TStorageQualifierWrapper(EvqFragmentOut, loc);
+}
+
+TStorageQualifierWrapper *TParseContext::parseInOutQualifier(const TSourceLoc &loc)
+{
+    if (!declaringFunction())
+    {
+        error(loc, "invalid qualifier: can be only used with function parameters", "inout");
+    }
+    return new TStorageQualifierWrapper(EvqInOut, loc);
+}
+
 TLayoutQualifier TParseContext::joinLayoutQualifiers(TLayoutQualifier leftQualifier,
                                                      TLayoutQualifier rightQualifier,
                                                      const TSourceLoc &rightQualifierLocation)
 {
     return sh::JoinLayoutQualifiers(leftQualifier, rightQualifier, rightQualifierLocation,
                                     mDiagnostics);
+}
+
+TField *TParseContext::parseStructDeclarator(TString *identifier, const TSourceLoc &loc)
+{
+    checkIsNotReserved(loc, *identifier);
+    TType *type = new TType(EbtVoid, EbpUndefined);
+    return new TField(type, identifier, loc);
+}
+
+TField *TParseContext::parseStructArrayDeclarator(TString *identifier,
+                                                  const TSourceLoc &loc,
+                                                  TIntermTyped *arraySize,
+                                                  const TSourceLoc &arraySizeLoc)
+{
+    checkIsNotReserved(loc, *identifier);
+
+    TType *type       = new TType(EbtVoid, EbpUndefined);
+    unsigned int size = checkIsValidArraySize(arraySizeLoc, arraySize);
+    type->setArraySize(size);
+
+    return new TField(type, identifier, loc);
 }
 
 TFieldList *TParseContext::combineStructFieldLists(TFieldList *processedFields,
@@ -3528,7 +4129,7 @@ TFieldList *TParseContext::addStructDeclaratorList(const TPublicType &typeSpecif
             type->setArraySize(static_cast<unsigned int>(typeSpecifier.arraySize));
         if (typeSpecifier.getUserDef())
         {
-            type->setStruct(typeSpecifier.getUserDef()->getStruct());
+            type->setStruct(typeSpecifier.getUserDef());
         }
 
         checkIsBelowStructNestingLimit(typeSpecifier.getLine(), *(*fieldList)[i]);
@@ -3542,8 +4143,7 @@ TTypeSpecifierNonArray TParseContext::addStructure(const TSourceLoc &structLine,
                                                    const TString *structName,
                                                    TFieldList *fieldList)
 {
-    TStructure *structure = new TStructure(structName, fieldList);
-    TType *structureType  = new TType(structure);
+    TStructure *structure = new TStructure(&symbolTable, structName, fieldList);
 
     // Store a bool in the struct if we're at global scope, to allow us to
     // skip the local struct scoping workaround in HLSL.
@@ -3552,8 +4152,7 @@ TTypeSpecifierNonArray TParseContext::addStructure(const TSourceLoc &structLine,
     if (!structName->empty())
     {
         checkIsNotReserved(nameLine, *structName);
-        TVariable *userTypeDef = new TVariable(structName, *structureType, true);
-        if (!symbolTable.declare(userTypeDef))
+        if (!symbolTable.declareStructType(structure))
         {
             error(nameLine, "redefinition of a struct", structName->c_str());
         }
@@ -3578,7 +4177,8 @@ TTypeSpecifierNonArray TParseContext::addStructure(const TSourceLoc &structLine,
         {
             error(field.line(), "invalid qualifier on struct member", "invariant");
         }
-        if (IsImage(field.type()->getBasicType()))
+        // ESSL 3.10 section 4.1.8 -- atomic_uint or images are not allowed as structure member.
+        if (IsImage(field.type()->getBasicType()) || IsAtomicCounter(field.type()->getBasicType()))
         {
             error(field.line(), "disallowed type in struct", field.type()->getBasicString());
         }
@@ -3591,9 +4191,7 @@ TTypeSpecifierNonArray TParseContext::addStructure(const TSourceLoc &structLine,
     }
 
     TTypeSpecifierNonArray typeSpecifierNonArray;
-    typeSpecifierNonArray.initialize(EbtStruct, structLine);
-    typeSpecifierNonArray.userDef           = structureType;
-    typeSpecifierNonArray.isStructSpecifier = true;
+    typeSpecifierNonArray.initializeStruct(structure, true, structLine);
     exitStructDeclaration();
 
     return typeSpecifierNonArray;
@@ -3620,12 +4218,8 @@ TIntermSwitch *TParseContext::addSwitch(TIntermTyped *init,
         }
     }
 
-    TIntermSwitch *node = intermediate.addSwitch(init, statementList, loc);
-    if (node == nullptr)
-    {
-        error(loc, "erroneous switch statement", "switch");
-        return nullptr;
-    }
+    TIntermSwitch *node = new TIntermSwitch(init, statementList);
+    node->setLine(loc);
     return node;
 }
 
@@ -3654,12 +4248,8 @@ TIntermCase *TParseContext::addCase(TIntermTyped *condition, const TSourceLoc &l
     {
         error(condition->getLine(), "case label must be constant", "case");
     }
-    TIntermCase *node = intermediate.addCase(condition, loc);
-    if (node == nullptr)
-    {
-        error(loc, "erroneous case statement", "case");
-        return nullptr;
-    }
+    TIntermCase *node = new TIntermCase(condition);
+    node->setLine(loc);
     return node;
 }
 
@@ -3670,12 +4260,8 @@ TIntermCase *TParseContext::addDefault(const TSourceLoc &loc)
         error(loc, "default labels need to be inside switch statements", "default");
         return nullptr;
     }
-    TIntermCase *node = intermediate.addCase(nullptr, loc);
-    if (node == nullptr)
-    {
-        error(loc, "erroneous default statement", "default");
-        return nullptr;
-    }
+    TIntermCase *node = new TIntermCase(nullptr);
+    node->setLine(loc);
     return node;
 }
 
@@ -3709,8 +4295,9 @@ TIntermTyped *TParseContext::createUnaryMath(TOperator op,
         case EOpPreDecrement:
         case EOpNegative:
         case EOpPositive:
-            if (child->getBasicType() == EbtStruct || child->getBasicType() == EbtBool ||
-                child->isArray() || IsOpaqueType(child->getBasicType()))
+            if (child->getBasicType() == EbtStruct || child->isInterfaceBlock() ||
+                child->getBasicType() == EbtBool || child->isArray() ||
+                IsOpaqueType(child->getBasicType()))
             {
                 unaryOpError(loc, GetOperatorString(op), child->getCompleteString());
                 return nullptr;
@@ -3720,18 +4307,21 @@ TIntermTyped *TParseContext::createUnaryMath(TOperator op,
             break;
     }
 
+    if (child->getMemoryQualifier().writeonly)
+    {
+        unaryOpError(loc, GetOperatorString(op), child->getCompleteString());
+        return nullptr;
+    }
+
     TIntermUnary *node = new TIntermUnary(op, child);
     node->setLine(loc);
 
-    TIntermTyped *foldedNode = node->fold(mDiagnostics);
-    if (foldedNode)
-        return foldedNode;
-
-    return node;
+    return node->fold(mDiagnostics);
 }
 
 TIntermTyped *TParseContext::addUnaryMath(TOperator op, TIntermTyped *child, const TSourceLoc &loc)
 {
+    ASSERT(op != EOpNull);
     TIntermTyped *node = createUnaryMath(op, child, loc);
     if (node == nullptr)
     {
@@ -3753,6 +4343,48 @@ bool TParseContext::binaryOpCommonCheck(TOperator op,
                                         TIntermTyped *right,
                                         const TSourceLoc &loc)
 {
+    // Check opaque types are not allowed to be operands in expressions other than array indexing
+    // and structure member selection.
+    if (IsOpaqueType(left->getBasicType()) || IsOpaqueType(right->getBasicType()))
+    {
+        switch (op)
+        {
+            case EOpIndexDirect:
+            case EOpIndexIndirect:
+                break;
+            case EOpIndexDirectStruct:
+                UNREACHABLE();
+
+            default:
+                error(loc, "Invalid operation for variables with an opaque type",
+                      GetOperatorString(op));
+                return false;
+        }
+    }
+
+    if (right->getMemoryQualifier().writeonly)
+    {
+        error(loc, "Invalid operation for variables with writeonly", GetOperatorString(op));
+        return false;
+    }
+
+    if (left->getMemoryQualifier().writeonly)
+    {
+        switch (op)
+        {
+            case EOpAssign:
+            case EOpInitialize:
+            case EOpIndexDirect:
+            case EOpIndexIndirect:
+            case EOpIndexDirectStruct:
+            case EOpIndexDirectInterfaceBlock:
+                break;
+            default:
+                error(loc, "Invalid operation for variables with writeonly", GetOperatorString(op));
+                return false;
+        }
+    }
+
     if (left->getType().getStruct() || right->getType().getStruct())
     {
         switch (op)
@@ -3771,6 +4403,19 @@ bool TParseContext::binaryOpCommonCheck(TOperator op,
                 break;
             default:
                 error(loc, "Invalid operation for structs", GetOperatorString(op));
+                return false;
+        }
+    }
+
+    if (left->isInterfaceBlock() || right->isInterfaceBlock())
+    {
+        switch (op)
+        {
+            case EOpIndexDirectInterfaceBlock:
+                ASSERT(left->getType().getInterfaceBlock());
+                break;
+            default:
+                error(loc, "Invalid operation for interface blocks", GetOperatorString(op));
                 return false;
         }
     }
@@ -3876,13 +4521,6 @@ bool TParseContext::binaryOpCommonCheck(TOperator op,
                 return false;
             }
 
-            if ((op == EOpAssign || op == EOpInitialize) &&
-                left->getType().isStructureContainingImages())
-            {
-                error(loc, "undefined operation for structs containing images",
-                      GetOperatorString(op));
-                return false;
-            }
             if ((left->getNominalSize() != right->getNominalSize()) ||
                 (left->getSecondarySize() != right->getSecondarySize()))
             {
@@ -4057,11 +4695,7 @@ TIntermTyped *TParseContext::addBinaryMathInternal(TOperator op,
     node->setLine(loc);
 
     // See if we can fold constants.
-    TIntermTyped *foldedNode = node->fold(mDiagnostics);
-    if (foldedNode)
-        return foldedNode;
-
-    return node;
+    return node->fold(mDiagnostics);
 }
 
 TIntermTyped *TParseContext::addBinaryMath(TOperator op,
@@ -4085,14 +4719,12 @@ TIntermTyped *TParseContext::addBinaryMathBooleanResult(TOperator op,
                                                         const TSourceLoc &loc)
 {
     TIntermTyped *node = addBinaryMathInternal(op, left, right, loc);
-    if (node == 0)
+    if (node == nullptr)
     {
         binaryOpError(loc, GetOperatorString(op), left->getCompleteString(),
                       right->getCompleteString());
-        TConstantUnion *unionArray = new TConstantUnion[1];
-        unionArray->setBConst(false);
-        return intermediate.addConstantUnion(unionArray, TType(EbtBool, EbpUndefined, EvqConst),
-                                             loc);
+        node = CreateBoolNode(false);
+        node->setLine(loc);
     }
     return node;
 }
@@ -4125,6 +4757,7 @@ TIntermTyped *TParseContext::addAssign(TOperator op,
                                        TIntermTyped *right,
                                        const TSourceLoc &loc)
 {
+    checkCanBeLValue(loc, "assign", left);
     TIntermTyped *node = createAssign(op, left, right, loc);
     if (node == nullptr)
     {
@@ -4150,7 +4783,10 @@ TIntermTyped *TParseContext::addComma(TIntermTyped *left,
               ",");
     }
 
-    return TIntermediate::AddComma(left, right, loc, mShaderVersion);
+    TIntermBinary *commaNode   = new TIntermBinary(EOpComma, left, right);
+    TQualifier resultQualifier = TIntermBinary::GetCommaQualifier(mShaderVersion, left, right);
+    commaNode->getTypePointer()->setQualifier(resultQualifier);
+    return commaNode->fold(mDiagnostics);
 }
 
 TIntermBranch *TParseContext::addBranch(TOperator op, const TSourceLoc &loc)
@@ -4175,28 +4811,39 @@ TIntermBranch *TParseContext::addBranch(TOperator op, const TSourceLoc &loc)
                 error(loc, "non-void function must return a value", "return");
             }
             break;
+        case EOpKill:
+            if (mShaderType != GL_FRAGMENT_SHADER)
+            {
+                error(loc, "discard supported in fragment shaders only", "discard");
+            }
+            break;
         default:
-            // No checks for discard
+            UNREACHABLE();
             break;
     }
-    return intermediate.addBranch(op, loc);
+    return addBranch(op, nullptr, loc);
 }
 
 TIntermBranch *TParseContext::addBranch(TOperator op,
-                                        TIntermTyped *returnValue,
+                                        TIntermTyped *expression,
                                         const TSourceLoc &loc)
 {
-    ASSERT(op == EOpReturn);
-    mFunctionReturnsValue = true;
-    if (mCurrentFunctionType->getBasicType() == EbtVoid)
+    if (expression != nullptr)
     {
-        error(loc, "void function cannot return a value", "return");
+        ASSERT(op == EOpReturn);
+        mFunctionReturnsValue = true;
+        if (mCurrentFunctionType->getBasicType() == EbtVoid)
+        {
+            error(loc, "void function cannot return a value", "return");
+        }
+        else if (*mCurrentFunctionType != expression->getType())
+        {
+            error(loc, "function return is not matching type:", "return");
+        }
     }
-    else if (*mCurrentFunctionType != returnValue->getType())
-    {
-        error(loc, "function return is not matching type:", "return");
-    }
-    return intermediate.addBranch(op, returnValue, loc);
+    TIntermBranch *node = new TIntermBranch(op, expression);
+    node->setLine(loc);
+    return node;
 }
 
 void TParseContext::checkTextureOffsetConst(TIntermAggregate *functionCall)
@@ -4205,16 +4852,13 @@ void TParseContext::checkTextureOffsetConst(TIntermAggregate *functionCall)
     const TString &name        = functionCall->getFunctionSymbolInfo()->getName();
     TIntermNode *offset        = nullptr;
     TIntermSequence *arguments = functionCall->getSequence();
-    if (name.compare(0, 16, "texelFetchOffset") == 0 ||
-        name.compare(0, 16, "textureLodOffset") == 0 ||
-        name.compare(0, 20, "textureProjLodOffset") == 0 ||
-        name.compare(0, 17, "textureGradOffset") == 0 ||
-        name.compare(0, 21, "textureProjGradOffset") == 0)
+    if (name == "texelFetchOffset" || name == "textureLodOffset" ||
+        name == "textureProjLodOffset" || name == "textureGradOffset" ||
+        name == "textureProjGradOffset")
     {
         offset = arguments->back();
     }
-    else if (name.compare(0, 13, "textureOffset") == 0 ||
-             name.compare(0, 17, "textureProjOffset") == 0)
+    else if (name == "textureOffset" || name == "textureProjOffset")
     {
         // A bias parameter might follow the offset parameter.
         ASSERT(arguments->size() >= 3);
@@ -4225,9 +4869,8 @@ void TParseContext::checkTextureOffsetConst(TIntermAggregate *functionCall)
         TIntermConstantUnion *offsetConstantUnion = offset->getAsConstantUnion();
         if (offset->getAsTyped()->getQualifier() != EvqConst || !offsetConstantUnion)
         {
-            TString unmangledName = TFunction::unmangleName(name);
             error(functionCall->getLine(), "Texture offset must be a constant expression",
-                  unmangledName.c_str());
+                  name.c_str());
         }
         else
         {
@@ -4359,12 +5002,13 @@ TIntermTyped *TParseContext::addFunctionCallOrMethod(TFunction *fnCall,
     }
 
     TOperator op = fnCall->getBuiltInOp();
-    if (op != EOpNull)
+    if (op == EOpConstruct)
     {
-        return addConstructor(arguments, op, fnCall->getReturnType(), loc);
+        return addConstructor(arguments, fnCall->getReturnType(), loc);
     }
     else
     {
+        ASSERT(op == EOpNull);
         return addNonConstructorFunctionCall(fnCall, arguments, loc);
     }
 }
@@ -4412,7 +5056,10 @@ TIntermTyped *TParseContext::addMethod(TFunction *fnCall,
         }
     }
     unionArray->setIConst(arraySize);
-    return intermediate.addConstantUnion(unionArray, TType(EbtInt, EbpUndefined, EvqConst), loc);
+    TIntermConstantUnion *node =
+        new TIntermConstantUnion(unionArray, TType(EbtInt, EbpUndefined, EvqConst));
+    node->setLine(loc);
+    return node;
 }
 
 TIntermTyped *TParseContext::addNonConstructorFunctionCall(TFunction *fnCall,
@@ -4461,21 +5108,22 @@ TIntermTyped *TParseContext::addNonConstructorFunctionCall(TFunction *fnCall,
                 else
                 {
                     TIntermAggregate *callNode =
-                        new TIntermAggregate(fnCandidate->getReturnType(), op, arguments);
+                        TIntermAggregate::Create(fnCandidate->getReturnType(), op, arguments);
                     callNode->setLine(loc);
 
                     // Some built-in functions have out parameters too.
-                    functionCallLValueErrorCheck(fnCandidate, callNode);
+                    functionCallRValueLValueErrorCheck(fnCandidate, callNode);
 
-                    // See if we can constant fold a built-in. Note that this may be possible even
-                    // if it is not const-qualified.
-                    TIntermTyped *foldedNode =
-                        intermediate.foldAggregateBuiltIn(callNode, mDiagnostics);
-                    if (foldedNode)
+                    if (TIntermAggregate::CanFoldAggregateBuiltInOp(callNode->getOp()))
                     {
-                        return foldedNode;
+                        // See if we can constant fold a built-in. Note that this may be possible
+                        // even if it is not const-qualified.
+                        return callNode->fold(mDiagnostics);
                     }
-                    return callNode;
+                    else
+                    {
+                        return callNode;
+                    }
                 }
             }
             else
@@ -4489,23 +5137,17 @@ TIntermTyped *TParseContext::addNonConstructorFunctionCall(TFunction *fnCall,
                 // This needs to happen after the function info including name is set.
                 if (builtIn)
                 {
-                    callNode = new TIntermAggregate(fnCandidate->getReturnType(),
-                                                    EOpCallBuiltInFunction, arguments);
-                    // Note that name needs to be set before texture function type is determined.
-                    callNode->getFunctionSymbolInfo()->setFromFunction(*fnCandidate);
-                    callNode->setBuiltInFunctionPrecision();
+                    callNode = TIntermAggregate::CreateBuiltInFunctionCall(*fnCandidate, arguments);
                     checkTextureOffsetConst(callNode);
                     checkImageMemoryAccessForBuiltinFunctions(callNode);
                 }
                 else
                 {
-                    callNode = new TIntermAggregate(fnCandidate->getReturnType(),
-                                                    EOpCallFunctionInAST, arguments);
-                    callNode->getFunctionSymbolInfo()->setFromFunction(*fnCandidate);
+                    callNode = TIntermAggregate::CreateFunctionCall(*fnCandidate, arguments);
                     checkImageMemoryAccessForUserDefinedFunctions(fnCandidate, callNode);
                 }
 
-                functionCallLValueErrorCheck(fnCandidate, callNode);
+                functionCallRValueLValueErrorCheck(fnCandidate, callNode);
 
                 callNode->setLine(loc);
 
@@ -4515,7 +5157,7 @@ TIntermTyped *TParseContext::addNonConstructorFunctionCall(TFunction *fnCall,
     }
 
     // Error message was already written. Put on a dummy node for error recovery.
-    return TIntermTyped::CreateZero(TType(EbtFloat, EbpMedium, EvqConst));
+    return CreateZeroNode(TType(EbtFloat, EbpMedium, EvqConst));
 }
 
 TIntermTyped *TParseContext::addTernarySelection(TIntermTyped *cond,
@@ -4523,42 +5165,70 @@ TIntermTyped *TParseContext::addTernarySelection(TIntermTyped *cond,
                                                  TIntermTyped *falseExpression,
                                                  const TSourceLoc &loc)
 {
-    checkIsScalarBool(loc, cond);
+    if (!checkIsScalarBool(loc, cond))
+    {
+        return falseExpression;
+    }
 
     if (trueExpression->getType() != falseExpression->getType())
     {
-        binaryOpError(loc, ":", trueExpression->getCompleteString(),
-                      falseExpression->getCompleteString());
+        std::stringstream reasonStream;
+        reasonStream << "mismatching ternary operator operand types '"
+                     << trueExpression->getCompleteString() << " and '"
+                     << falseExpression->getCompleteString() << "'";
+        std::string reason = reasonStream.str();
+        error(loc, reason.c_str(), "?:");
         return falseExpression;
     }
     if (IsOpaqueType(trueExpression->getBasicType()))
     {
         // ESSL 1.00 section 4.1.7
-        // ESSL 3.00 section 4.1.7
+        // ESSL 3.00.6 section 4.1.7
         // Opaque/sampler types are not allowed in most types of expressions, including ternary.
         // Note that structs containing opaque types don't need to be checked as structs are
         // forbidden below.
-        error(loc, "ternary operator is not allowed for opaque types", ":");
+        error(loc, "ternary operator is not allowed for opaque types", "?:");
         return falseExpression;
     }
 
-    // ESSL1 sections 5.2 and 5.7:
-    // ESSL3 section 5.7:
-    // Ternary operator is not among the operators allowed for structures/arrays.
-    if (trueExpression->isArray() || trueExpression->getBasicType() == EbtStruct)
+    if (cond->getMemoryQualifier().writeonly || trueExpression->getMemoryQualifier().writeonly ||
+        falseExpression->getMemoryQualifier().writeonly)
     {
-        error(loc, "ternary operator is not allowed for structures or arrays", ":");
+        error(loc, "ternary operator is not allowed for variables with writeonly", "?:");
         return falseExpression;
     }
+
+    // ESSL 1.00.17 sections 5.2 and 5.7:
+    // Ternary operator is not among the operators allowed for structures/arrays.
+    // ESSL 3.00.6 section 5.7:
+    // Ternary operator support is optional for arrays. No certainty that it works across all
+    // devices with struct either, so we err on the side of caution here. TODO (oetuaho@nvidia.com):
+    // Would be nice to make the spec and implementation agree completely here.
+    if (trueExpression->isArray() || trueExpression->getBasicType() == EbtStruct)
+    {
+        error(loc, "ternary operator is not allowed for structures or arrays", "?:");
+        return falseExpression;
+    }
+    if (trueExpression->getBasicType() == EbtInterfaceBlock)
+    {
+        error(loc, "ternary operator is not allowed for interface blocks", "?:");
+        return falseExpression;
+    }
+
     // WebGL2 section 5.26, the following results in an error:
     // "Ternary operator applied to void, arrays, or structs containing arrays"
     if (mShaderSpec == SH_WEBGL2_SPEC && trueExpression->getBasicType() == EbtVoid)
     {
-        error(loc, "ternary operator is not allowed for void", ":");
+        error(loc, "ternary operator is not allowed for void", "?:");
         return falseExpression;
     }
 
-    return TIntermediate::AddTernarySelection(cond, trueExpression, falseExpression, loc);
+    // Note that the node resulting from here can be a constant union without being qualified as
+    // constant.
+    TIntermTernary *node = new TIntermTernary(cond, trueExpression, falseExpression);
+    node->setLine(loc);
+
+    return node->fold();
 }
 
 //
@@ -4571,7 +5241,7 @@ int PaParseStrings(size_t count,
                    const int length[],
                    TParseContext *context)
 {
-    if ((count == 0) || (string == NULL))
+    if ((count == 0) || (string == nullptr))
         return 1;
 
     if (glslang_initialize(context))

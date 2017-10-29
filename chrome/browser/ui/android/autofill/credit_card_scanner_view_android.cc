@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/feature_list.h"
@@ -16,7 +15,6 @@
 #include "components/autofill/core/browser/autofill_experiments.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
-#include "content/public/browser/android/content_view_core.h"
 #include "jni/CreditCardScannerBridge_jni.h"
 #include "ui/android/view_android.h"
 #include "ui/android/window_android.h"
@@ -29,8 +27,7 @@ namespace autofill {
 bool CreditCardScannerView::CanShow() {
   JNIEnv* env = base::android::AttachCurrentThread();
   base::android::ScopedJavaGlobalRef<jobject> java_object(
-      Java_CreditCardScannerBridge_create(
-          env, 0, base::android::GetApplicationContext(), nullptr));
+      Java_CreditCardScannerBridge_create(env, 0, nullptr));
   return Java_CreditCardScannerBridge_canScan(env, java_object);
 }
 
@@ -42,11 +39,6 @@ std::unique_ptr<CreditCardScannerView> CreditCardScannerView::Create(
       new CreditCardScannerViewAndroid(delegate, web_contents));
 }
 
-// static
-bool CreditCardScannerViewAndroid::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
-
 CreditCardScannerViewAndroid::CreditCardScannerViewAndroid(
     const base::WeakPtr<CreditCardScannerViewDelegate>& delegate,
     content::WebContents* web_contents)
@@ -54,7 +46,6 @@ CreditCardScannerViewAndroid::CreditCardScannerViewAndroid(
       java_object_(Java_CreditCardScannerBridge_create(
           base::android::AttachCurrentThread(),
           reinterpret_cast<intptr_t>(this),
-          base::android::GetApplicationContext(),
           web_contents->GetJavaWebContents())) {}
 
 CreditCardScannerViewAndroid::~CreditCardScannerViewAndroid() {}

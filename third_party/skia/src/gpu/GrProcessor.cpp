@@ -15,8 +15,17 @@
 #include "GrXferProcessor.h"
 #include "SkSpinlock.h"
 
-#if SK_ALLOW_STATIC_GLOBAL_INITIALIZERS
 #if GR_TEST_UTILS
+
+GrResourceProvider* GrProcessorTestData::resourceProvider() {
+    return fContext->resourceProvider();
+}
+
+const GrCaps* GrProcessorTestData::caps() {
+    return fContext->caps();
+}
+
+#if SK_ALLOW_STATIC_GLOBAL_INITIALIZERS
 class GrFragmentProcessor;
 class GrGeometryProcessor;
 
@@ -48,7 +57,7 @@ SkTArray<GrXPFactoryTestFactory*, true>* GrXPFactoryTestFactory::GetFactories() 
  * we verify the count is as expected.  If a new factory is added, then these numbers must be
  * manually adjusted.
  */
-static const int kFPFactoryCount = 40;
+static const int kFPFactoryCount = 42;
 static const int kGPFactoryCount = 14;
 static const int kXPFactoryCount = 4;
 
@@ -111,65 +120,81 @@ int32_t GrProcessor::gCurrProcessorClassID = GrProcessor::kIllegalProcessorClass
 
 ///////////////////////////////////////////////////////////////////////////////
 
-GrProcessor::~GrProcessor() {}
-
-void GrProcessor::addTextureSampler(const TextureSampler* access) {
-    fTextureSamplers.push_back(access);
-}
-
-void GrProcessor::addBufferAccess(const BufferAccess* access) {
-    fBufferAccesses.push_back(access);
-}
-
-void GrProcessor::addImageStorageAccess(const ImageStorageAccess* access) {
-    fImageStorageAccesses.push_back(access);
-}
-
-void GrProcessor::addPendingIOs() const {
-    for (const auto& sampler : fTextureSamplers) {
-        sampler->programTexture()->markPendingIO();
-    }
-    for (const auto& buffer : fBufferAccesses) {
-        buffer->programBuffer()->markPendingIO();
-    }
-    for (const auto& imageStorage : fImageStorageAccesses) {
-        imageStorage->programTexture()->markPendingIO();
-    }
-}
-
-void GrProcessor::removeRefs() const {
-    for (const auto& sampler : fTextureSamplers) {
-        sampler->programTexture()->removeRef();
-    }
-    for (const auto& buffer : fBufferAccesses) {
-        buffer->programBuffer()->removeRef();
-    }
-    for (const auto& imageStorage : fImageStorageAccesses) {
-        imageStorage->programTexture()->removeRef();
-    }
-}
-
-void GrProcessor::pendingIOComplete() const {
-    for (const auto& sampler : fTextureSamplers) {
-        sampler->programTexture()->pendingIOComplete();
-    }
-    for (const auto& buffer : fBufferAccesses) {
-        buffer->programBuffer()->pendingIOComplete();
-    }
-    for (const auto& imageStorage : fImageStorageAccesses) {
-        imageStorage->programTexture()->pendingIOComplete();
-    }
-}
-
-void* GrProcessor::operator new(size_t size) {
-    return MemoryPoolAccessor().pool()->allocate(size);
-}
+void* GrProcessor::operator new(size_t size) { return MemoryPoolAccessor().pool()->allocate(size); }
 
 void GrProcessor::operator delete(void* target) {
     return MemoryPoolAccessor().pool()->release(target);
 }
 
-bool GrProcessor::hasSameSamplersAndAccesses(const GrProcessor &that) const {
+///////////////////////////////////////////////////////////////////////////////
+
+void GrResourceIOProcessor::addTextureSampler(const TextureSampler* access) {
+    fTextureSamplers.push_back(access);
+}
+
+void GrResourceIOProcessor::addBufferAccess(const BufferAccess* access) {
+    fBufferAccesses.push_back(access);
+}
+
+void GrResourceIOProcessor::addImageStorageAccess(const ImageStorageAccess* access) {
+    fImageStorageAccesses.push_back(access);
+}
+
+void GrResourceIOProcessor::addPendingIOs() const {
+    for (const auto& sampler : fTextureSamplers) {
+        sampler->programProxy()->markPendingIO();
+    }
+    for (const auto& buffer : fBufferAccesses) {
+        buffer->programBuffer()->markPendingIO();
+    }
+    for (const auto& imageStorage : fImageStorageAccesses) {
+        imageStorage->programProxy()->markPendingIO();
+    }
+}
+
+void GrResourceIOProcessor::removeRefs() const {
+    for (const auto& sampler : fTextureSamplers) {
+        sampler->programProxy()->removeRef();
+    }
+    for (const auto& buffer : fBufferAccesses) {
+        buffer->programBuffer()->removeRef();
+    }
+    for (const auto& imageStorage : fImageStorageAccesses) {
+        imageStorage->programProxy()->removeRef();
+    }
+}
+
+void GrResourceIOProcessor::pendingIOComplete() const {
+    for (const auto& sampler : fTextureSamplers) {
+        sampler->programProxy()->pendingIOComplete();
+    }
+    for (const auto& buffer : fBufferAccesses) {
+        buffer->programBuffer()->pendingIOComplete();
+    }
+    for (const auto& imageStorage : fImageStorageAccesses) {
+        imageStorage->programProxy()->pendingIOComplete();
+    }
+}
+
+bool GrResourceIOProcessor::instantiate(GrResourceProvider* resourceProvider) const {
+    for (const auto& sampler : fTextureSamplers) {
+        if (!sampler->instantiate(resourceProvider)) {
+            return false;
+        }
+    }
+
+    // MDB TODO: instantiate 'fBufferAccesses' here as well
+
+    for (const auto& imageStorage : fImageStorageAccesses) {
+        if (!imageStorage->instantiate(resourceProvider)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool GrResourceIOProcessor::hasSameSamplersAndAccesses(const GrResourceIOProcessor& that) const {
     if (this->numTextureSamplers() != that.numTextureSamplers() ||
         this->numBuffers() != that.numBuffers() ||
         this->numImageStorages() != that.numImageStorages()) {
@@ -195,97 +220,55 @@ bool GrProcessor::hasSameSamplersAndAccesses(const GrProcessor &that) const {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-GrProcessor::TextureSampler::TextureSampler() {}
+GrResourceIOProcessor::TextureSampler::TextureSampler() {}
 
-GrProcessor::TextureSampler::TextureSampler(GrTexture* texture, const GrSamplerParams& params) {
-    this->reset(texture, params);
+GrResourceIOProcessor::TextureSampler::TextureSampler(sk_sp<GrTextureProxy> proxy,
+                                                      const GrSamplerParams& params) {
+    this->reset(std::move(proxy), params);
 }
 
-GrProcessor::TextureSampler::TextureSampler(GrTexture* texture,
-                                            GrSamplerParams::FilterMode filterMode,
-                                            SkShader::TileMode tileXAndY,
-                                            GrShaderFlags visibility) {
-    this->reset(texture, filterMode, tileXAndY, visibility);
+GrResourceIOProcessor::TextureSampler::TextureSampler(sk_sp<GrTextureProxy> proxy,
+                                                      GrSamplerParams::FilterMode filterMode,
+                                                      SkShader::TileMode tileXAndY,
+                                                      GrShaderFlags visibility) {
+    this->reset(std::move(proxy), filterMode, tileXAndY, visibility);
 }
 
-GrProcessor::TextureSampler::TextureSampler(GrTextureProvider* texProvider,
-                                            sk_sp<GrTextureProxy> proxy,
-                                            const GrSamplerParams& params) {
-    this->reset(texProvider, std::move(proxy), params);
-}
-
-GrProcessor::TextureSampler::TextureSampler(GrTextureProvider* texProvider,
-                                            sk_sp<GrTextureProxy> proxy,
-                                            GrSamplerParams::FilterMode filterMode,
-                                            SkShader::TileMode tileXAndY,
-                                            GrShaderFlags visibility) {
-    this->reset(texProvider, std::move(proxy), filterMode, tileXAndY, visibility);
-}
-
-void GrProcessor::TextureSampler::reset(GrTexture* texture,
-                                        const GrSamplerParams& params,
-                                        GrShaderFlags visibility) {
-    SkASSERT(texture);
-    fTexture.set(SkRef(texture), kRead_GrIOType);
+void GrResourceIOProcessor::TextureSampler::reset(sk_sp<GrTextureProxy> proxy,
+                                                  const GrSamplerParams& params,
+                                                  GrShaderFlags visibility) {
     fParams = params;
-    fParams.setFilterMode(SkTMin(params.filterMode(), texture->texturePriv().highestFilterMode()));
+    fProxyRef.setProxy(std::move(proxy), kRead_GrIOType);
+    fParams.setFilterMode(SkTMin(params.filterMode(), this->proxy()->highestFilterMode()));
     fVisibility = visibility;
 }
 
-void GrProcessor::TextureSampler::reset(GrTexture* texture,
-                                        GrSamplerParams::FilterMode filterMode,
-                                        SkShader::TileMode tileXAndY,
-                                        GrShaderFlags visibility) {
-    SkASSERT(texture);
-    fTexture.set(SkRef(texture), kRead_GrIOType);
-    filterMode = SkTMin(filterMode, texture->texturePriv().highestFilterMode());
-    fParams.reset(tileXAndY, filterMode);
-    fVisibility = visibility;
-}
-
-void GrProcessor::TextureSampler::reset(GrTextureProvider* texProvider,
-                                        sk_sp<GrTextureProxy> proxy,
-                                        const GrSamplerParams& params,
-                                        GrShaderFlags visibility) {
-    // For now, end the deferral at this time. Once all the TextureSamplers are swapped over
-    // to taking a GrSurfaceProxy just use the IORefs on the proxy
-    GrTexture* texture = proxy->instantiate(texProvider);
-    SkASSERT(texture);
-    fTexture.set(SkRef(texture), kRead_GrIOType);
-    fParams = params;
-    fParams.setFilterMode(SkTMin(params.filterMode(), texture->texturePriv().highestFilterMode()));
-    fVisibility = visibility;
-}
-
-void GrProcessor::TextureSampler::reset(GrTextureProvider* texProvider,
-                                        sk_sp<GrTextureProxy> proxy,
-                                        GrSamplerParams::FilterMode filterMode,
-                                        SkShader::TileMode tileXAndY,
-                                        GrShaderFlags visibility) {
-    // For now, end the deferral at this time. Once all the TextureSamplers are swapped over
-    // to taking a GrSurfaceProxy just use the IORefs on the proxy
-    GrTexture* texture = proxy->instantiate(texProvider);
-    SkASSERT(texture);
-    fTexture.set(SkRef(texture), kRead_GrIOType);
-    filterMode = SkTMin(filterMode, texture->texturePriv().highestFilterMode());
+void GrResourceIOProcessor::TextureSampler::reset(sk_sp<GrTextureProxy> proxy,
+                                                  GrSamplerParams::FilterMode filterMode,
+                                                  SkShader::TileMode tileXAndY,
+                                                  GrShaderFlags visibility) {
+    fProxyRef.setProxy(std::move(proxy), kRead_GrIOType);
+    filterMode = SkTMin(filterMode, this->proxy()->highestFilterMode());
     fParams.reset(tileXAndY, filterMode);
     fVisibility = visibility;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-GrProcessor::ImageStorageAccess::ImageStorageAccess(sk_sp<GrTexture> texture, GrIOType ioType,
-                                                    GrSLMemoryModel memoryModel,
-                                                    GrSLRestrict restrict,
-                                                    GrShaderFlags visibility) {
-    SkASSERT(texture);
-    fTexture.set(texture.release(), ioType);
+GrResourceIOProcessor::ImageStorageAccess::ImageStorageAccess(sk_sp<GrTextureProxy> proxy,
+                                                              GrIOType ioType,
+                                                              GrSLMemoryModel memoryModel,
+                                                              GrSLRestrict restrict,
+                                                              GrShaderFlags visibility)
+        : fProxyRef(std::move(proxy), ioType) {
+    SkASSERT(fProxyRef.get());
+
     fMemoryModel = memoryModel;
     fRestrict = restrict;
     fVisibility = visibility;
     // We currently infer this from the config. However, we could allow the client to specify
     // a format that is different but compatible with the config.
-    switch (fTexture.get()->config()) {
+    switch (fProxyRef.get()->config()) {
         case kRGBA_8888_GrPixelConfig:
             fFormat = GrImageStorageFormat::kRGBA8;
             break;

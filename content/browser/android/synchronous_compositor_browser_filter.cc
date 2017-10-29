@@ -85,7 +85,7 @@ bool SynchronousCompositorBrowserFilter::ReceiveFrame(
   }
 
   auto frame_ptr = base::MakeUnique<SynchronousCompositor::Frame>();
-  frame_ptr->compositor_frame_sink_id = std::get<0>(param);
+  frame_ptr->layer_tree_frame_sink_id = std::get<0>(param);
   base::Optional<cc::CompositorFrame>& compositor_frame = std::get<1>(param);
   if (compositor_frame) {
     BrowserThread::PostTask(
@@ -191,11 +191,14 @@ void SynchronousCompositorBrowserFilter::VSyncComplete() {
   std::vector<SyncCompositorCommonRendererParams> params;
   params.reserve(compositor_host_pending_renderer_state_.size());
 
-  if (!render_process_host_->Send(
-          new SyncCompositorMsg_SynchronizeRendererState(routing_ids,
-                                                         &params))) {
-    compositor_host_pending_renderer_state_.clear();
-    return;
+  {
+    base::ThreadRestrictions::ScopedAllowWait wait;
+    if (!render_process_host_->Send(
+            new SyncCompositorMsg_SynchronizeRendererState(routing_ids,
+                                                           &params))) {
+      compositor_host_pending_renderer_state_.clear();
+      return;
+    }
   }
 
   if (compositor_host_pending_renderer_state_.size() != params.size()) {

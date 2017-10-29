@@ -6,7 +6,8 @@
 
 #include <memory>
 
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
+#include "ui/display/screen_base.h"
 #include "ui/display/types/display_constants.h"
 
 namespace display {
@@ -16,15 +17,21 @@ std::unique_ptr<ScreenManager> ScreenManager::Create() {
   return base::MakeUnique<ScreenManagerOzoneExternal>();
 }
 
-ScreenManagerOzoneExternal::ScreenManagerOzoneExternal() {}
+ScreenManagerOzoneExternal::ScreenManagerOzoneExternal()
+    : screen_(base::MakeUnique<display::ScreenBase>()) {}
 
 ScreenManagerOzoneExternal::~ScreenManagerOzoneExternal() {}
 
 void ScreenManagerOzoneExternal::AddInterfaces(
-    service_manager::InterfaceRegistry* registry) {}
+    service_manager::BinderRegistryWithArgs<
+        const service_manager::BindSourceInfo&>* registry) {}
 
 void ScreenManagerOzoneExternal::Init(ScreenManagerDelegate* delegate) {}
 
 void ScreenManagerOzoneExternal::RequestCloseDisplay(int64_t display_id) {}
+
+display::ScreenBase* ScreenManagerOzoneExternal::GetScreen() {
+  return screen_.get();
+}
 
 }  // namespace display

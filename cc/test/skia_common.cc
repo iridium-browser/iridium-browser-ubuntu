@@ -7,8 +7,8 @@
 #include <stddef.h>
 
 #include "base/memory/ptr_util.h"
+#include "cc/paint/display_item_list.h"
 #include "cc/paint/paint_canvas.h"
-#include "cc/playback/display_item_list.h"
 #include "third_party/skia/include/core/SkImageGenerator.h"
 #include "third_party/skia/include/core/SkPixmap.h"
 #include "ui/gfx/geometry/rect.h"
@@ -29,8 +29,7 @@ class TestImageGenerator : public SkImageGenerator {
   bool onGetPixels(const SkImageInfo& info,
                    void* pixels,
                    size_t rowBytes,
-                   SkPMColor ctable[],
-                   int* ctableCount) override {
+                   const Options&) override {
     return image_pixmap_.readPixels(info, pixels, rowBytes, 0, 0);
   }
 
@@ -50,7 +49,7 @@ void DrawDisplayList(unsigned char* buffer,
   bitmap.installPixels(info, buffer, info.minRowBytes());
   SkCanvas canvas(bitmap);
   canvas.clipRect(gfx::RectToSkRect(layer_rect));
-  list->Raster(&canvas, NULL, layer_rect, 1.0f);
+  list->Raster(&canvas);
 }
 
 bool AreDisplayListDrawingResultsSame(const gfx::Rect& layer_rect,

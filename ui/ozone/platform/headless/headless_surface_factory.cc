@@ -13,11 +13,12 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/native_pixmap.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/vsync_provider.h"
+#include "ui/ozone/common/gl_ozone_osmesa.h"
 #include "ui/ozone/platform/headless/headless_window.h"
 #include "ui/ozone/platform/headless/headless_window_manager.h"
-#include "ui/ozone/public/native_pixmap.h"
 #include "ui/ozone/public/surface_ozone_canvas.h"
 
 namespace ui {
@@ -48,16 +49,14 @@ class FileSurface : public SurfaceOzoneCanvas {
     if (location_.empty())
       return;
     SkBitmap bitmap;
-    bitmap.setInfo(surface_->getCanvas()->imageInfo());
+    bitmap.allocPixels(surface_->getCanvas()->imageInfo());
 
     // TODO(dnicoara) Use SkImage instead to potentially avoid a copy.
     // See crbug.com/361605 for details.
-    if (surface_->getCanvas()->readPixels(&bitmap, 0, 0)) {
+    if (surface_->getCanvas()->readPixels(bitmap, 0, 0)) {
       base::PostTaskWithTraits(
-          FROM_HERE, base::TaskTraits()
-                         .WithShutdownBehavior(
-                             base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN)
-                         .MayBlock(),
+          FROM_HERE,
+          {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
           base::Bind(&WriteDataToFile, location_, bitmap));
     }
   }
@@ -70,7 +69,7 @@ class FileSurface : public SurfaceOzoneCanvas {
   sk_sp<SkSurface> surface_;
 };
 
-class TestPixmap : public ui::NativePixmap {
+class TestPixmap : public gfx::NativePixmap {
  public:
   explicit TestPixmap(gfx::BufferFormat format) : format_(format) {}
 
@@ -90,8 +89,6 @@ class TestPixmap : public ui::NativePixmap {
                             const gfx::RectF& crop_rect) override {
     return true;
   }
-  void SetProcessingCallback(
-      const ProcessingCallback& processing_callback) override {}
   gfx::NativePixmapHandle ExportHandle() override {
     return gfx::NativePixmapHandle();
   }
@@ -111,9 +108,25 @@ HeadlessSurfaceFactory::HeadlessSurfaceFactory()
 
 HeadlessSurfaceFactory::HeadlessSurfaceFactory(
     HeadlessWindowManager* window_manager)
-    : window_manager_(window_manager) {}
+    : window_manager_(window_manager),
+      osmesa_implementation_(base::MakeUnique<GLOzoneOSMesa>()) {}
 
 HeadlessSurfaceFactory::~HeadlessSurfaceFactory() {}
+
+std::vector<gl::GLImplementation>
+HeadlessSurfaceFactory::GetAllowedGLImplementations() {
+  return std::vector<gl::GLImplementation>{gl::kGLImplementationOSMesaGL};
+}
+
+GLOzone* HeadlessSurfaceFactory::GetGLOzone(
+    gl::GLImplementation implementation) {
+  switch (implementation) {
+    case gl::kGLImplementationOSMesaGL:
+      return osmesa_implementation_.get();
+    default:
+      return nullptr;
+  }
+}
 
 std::unique_ptr<SurfaceOzoneCanvas>
 HeadlessSurfaceFactory::CreateCanvasForWidget(gfx::AcceleratedWidget widget) {
@@ -121,7 +134,7 @@ HeadlessSurfaceFactory::CreateCanvasForWidget(gfx::AcceleratedWidget widget) {
   return base::WrapUnique<SurfaceOzoneCanvas>(new FileSurface(window->path()));
 }
 
-scoped_refptr<NativePixmap> HeadlessSurfaceFactory::CreateNativePixmap(
+scoped_refptr<gfx::NativePixmap> HeadlessSurfaceFactory::CreateNativePixmap(
     gfx::AcceleratedWidget widget,
     gfx::Size size,
     gfx::BufferFormat format,

@@ -42,6 +42,7 @@ class SearchSuggestionParser {
            int relevance,
            bool relevance_from_server,
            AutocompleteMatchType::Type type,
+           int subtype_identifier,
            const std::string& deletion_url);
     Result(const Result& other);
     virtual ~Result();
@@ -54,6 +55,7 @@ class SearchSuggestionParser {
     }
 
     AutocompleteMatchType::Type type() const { return type_; }
+    int subtype_identifier() const { return subtype_identifier_; }
     int relevance() const { return relevance_; }
     void set_relevance(int relevance) { relevance_ = relevance; }
     bool received_after_last_keystroke() const {
@@ -88,6 +90,12 @@ class SearchSuggestionParser {
 
     AutocompleteMatchType::Type type_;
 
+    // Used to identify the specific source / type for suggestions by the
+    // suggest server. See |result_subtype_identifier| in omnibox.proto for more
+    // details.
+    // The identifier 0 is reserved for cases where this specific type is unset.
+    int subtype_identifier_;
+
     // The relevance score.
     int relevance_;
 
@@ -114,6 +122,7 @@ class SearchSuggestionParser {
    public:
     SuggestResult(const base::string16& suggestion,
                   AutocompleteMatchType::Type type,
+                  int subtype_identifier,
                   const base::string16& match_contents,
                   const base::string16& match_contents_prefix,
                   const base::string16& annotation,
@@ -163,7 +172,7 @@ class SearchSuggestionParser {
     base::string16 suggestion_;
 
     // The contents to be displayed as prefix of match contents.
-    // Used for postfix suggestions to display a leading ellipsis (or some
+    // Used for tail suggestions to display a leading ellipsis (or some
     // equivalent character) to indicate omitted text.
     // Only used to pass this information to about:omnibox's "Additional Info".
     base::string16 match_contents_prefix_;
@@ -196,6 +205,7 @@ class SearchSuggestionParser {
     NavigationResult(const AutocompleteSchemeClassifier& scheme_classifier,
                      const GURL& url,
                      AutocompleteMatchType::Type type,
+                     int subtype_identifier,
                      const base::string16& description,
                      const std::string& deletion_url,
                      bool from_keyword_provider,

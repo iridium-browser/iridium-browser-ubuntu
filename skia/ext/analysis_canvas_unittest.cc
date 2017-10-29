@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "skia/ext/analysis_canvas.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "skia/ext/analysis_canvas.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
-#include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkRRect.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "third_party/skia/include/effects/SkOffsetImageFilter.h"
 
@@ -325,11 +327,10 @@ TEST(AnalysisCanvasTest, SaveLayerRestore) {
 }
 
 TEST(AnalysisCanvasTest, EarlyOutNotSolid) {
-  SkRTreeFactory factory;
   SkPictureRecorder recorder;
 
   // Create a picture with 3 commands, last of which is non-solid.
-  SkCanvas* record_canvas = recorder.beginRecording(256, 256, &factory);
+  SkCanvas* record_canvas = recorder.beginRecording(256, 256);
 
   std::string text = "text";
   SkPoint point = SkPoint::Make(SkIntToScalar(25), SkIntToScalar(25));

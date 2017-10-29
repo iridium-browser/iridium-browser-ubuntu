@@ -38,8 +38,8 @@ class CJS_Value {
   CJS_Value(CJS_Runtime* pRuntime, const float& fValue);
   CJS_Value(CJS_Runtime* pRuntime, const bool& bValue);
   CJS_Value(CJS_Runtime* pRuntime, CJS_Object* pObj);
-  CJS_Value(CJS_Runtime* pRuntime, const FX_CHAR* pStr);
-  CJS_Value(CJS_Runtime* pRuntime, const FX_WCHAR* pWstr);
+  CJS_Value(CJS_Runtime* pRuntime, const char* pStr);
+  CJS_Value(CJS_Runtime* pRuntime, const wchar_t* pWstr);
   CJS_Value(CJS_Runtime* pRuntime, const CJS_Array& array);
   CJS_Value(CJS_Runtime* pRuntime, const CJS_Date& date);
   CJS_Value(CJS_Runtime* pRuntime, const CJS_Object* object);
@@ -89,7 +89,7 @@ class CJS_PropValue {
   void StartGetting() { m_bIsSetting = false; }
   bool IsSetting() const { return m_bIsSetting; }
   bool IsGetting() const { return !m_bIsSetting; }
-  CJS_Runtime* GetJSRuntime() const { return m_pJSRuntime; }
+  CJS_Runtime* GetJSRuntime() const { return m_pJSRuntime.Get(); }
   CJS_Value* GetJSValue() { return &m_Value; }
 
   // These calls may re-enter JS (and hence invalidate objects).
@@ -107,7 +107,7 @@ class CJS_PropValue {
   void operator>>(CFX_ByteString&) const;
   void operator<<(CFX_WideString);
   void operator>>(CFX_WideString&) const;
-  void operator<<(const FX_WCHAR* c_string);
+  void operator<<(const wchar_t* c_string);
   void operator<<(v8::Local<v8::Object>);
   void operator>>(v8::Local<v8::Object>&) const;
   void operator>>(CJS_Array& array) const;
@@ -118,7 +118,7 @@ class CJS_PropValue {
  private:
   bool m_bIsSetting;
   CJS_Value m_Value;
-  CJS_Runtime* const m_pJSRuntime;
+  CFX_UnownedPtr<CJS_Runtime> const m_pJSRuntime;
 };
 
 class CJS_Array {

@@ -10,8 +10,10 @@
 
 #include "webrtc/media/engine/nullwebrtcvideoengine.h"
 #include "webrtc/media/engine/webrtcvoiceengine.h"
-#include "webrtc/modules/audio_coding/codecs/mock/mock_audio_decoder_factory.h"
+#include "webrtc/modules/audio_processing/include/audio_processing.h"
 #include "webrtc/test/gtest.h"
+#include "webrtc/test/mock_audio_decoder_factory.h"
+#include "webrtc/test/mock_audio_encoder_factory.h"
 
 namespace cricket {
 
@@ -20,14 +22,18 @@ class WebRtcMediaEngineNullVideo
  public:
   WebRtcMediaEngineNullVideo(
       webrtc::AudioDeviceModule* adm,
+      const rtc::scoped_refptr<webrtc::AudioEncoderFactory>&
+          audio_encoder_factory,
       const rtc::scoped_refptr<webrtc::AudioDecoderFactory>&
           audio_decoder_factory,
       WebRtcVideoEncoderFactory* video_encoder_factory,
       WebRtcVideoDecoderFactory* video_decoder_factory)
       : CompositeMediaEngine<WebRtcVoiceEngine, NullWebRtcVideoEngine>(
             adm,
+            audio_encoder_factory,
             audio_decoder_factory,
-            nullptr) {
+            nullptr,
+            webrtc::AudioProcessing::Create()) {
     video_.SetExternalDecoderFactory(video_decoder_factory);
     video_.SetExternalEncoderFactory(video_encoder_factory);
   }
@@ -37,8 +43,8 @@ class WebRtcMediaEngineNullVideo
 // required by CompositeMediaEngine.
 TEST(NullWebRtcVideoEngineTest, CheckInterface) {
   WebRtcMediaEngineNullVideo engine(
-      nullptr, webrtc::MockAudioDecoderFactory::CreateUnusedFactory(), nullptr,
-      nullptr);
+      nullptr, webrtc::MockAudioEncoderFactory::CreateUnusedFactory(),
+      webrtc::MockAudioDecoderFactory::CreateUnusedFactory(), nullptr, nullptr);
   EXPECT_TRUE(engine.Init());
 }
 

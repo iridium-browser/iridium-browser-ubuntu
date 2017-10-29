@@ -4,11 +4,14 @@
 
 #include "chrome/browser/speech/chrome_speech_recognition_manager_delegate.h"
 
+#include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_restrictions.h"
@@ -105,16 +108,16 @@ class ChromeSpeechRecognitionManagerDelegate::TabWatcher
     if (FindWebContents(web_contents) != registered_web_contents_.end())
       return;
 
-    registered_web_contents_.push_back(new WebContentsTracker(
-        web_contents, base::Bind(&TabWatcher::OnTabClosed,
-                                 // |this| outlives WebContentsTracker.
-                                 base::Unretained(this), web_contents),
+    registered_web_contents_.push_back(base::MakeUnique<WebContentsTracker>(
+        web_contents,
+        base::Bind(&TabWatcher::OnTabClosed,
+                   // |this| outlives WebContentsTracker.
+                   base::Unretained(this), web_contents),
         render_process_id, render_view_id));
   }
 
   void OnTabClosed(content::WebContents* web_contents) {
-    ScopedVector<WebContentsTracker>::iterator iter =
-        FindWebContents(web_contents);
+    auto iter = FindWebContents(web_contents);
     DCHECK(iter != registered_web_contents_.end());
     int render_process_id = (*iter)->render_process_id();
     int render_view_id = (*iter)->render_view_id();
@@ -178,10 +181,9 @@ class ChromeSpeechRecognitionManagerDelegate::TabWatcher
 
   // Helper function to find the iterator in |registered_web_contents_| which
   // contains |web_contents|.
-  ScopedVector<WebContentsTracker>::iterator FindWebContents(
+  std::vector<std::unique_ptr<WebContentsTracker>>::iterator FindWebContents(
       content::WebContents* web_contents) {
-    for (ScopedVector<WebContentsTracker>::iterator i(
-             registered_web_contents_.begin());
+    for (auto i = registered_web_contents_.begin();
          i != registered_web_contents_.end(); ++i) {
       if ((*i)->GetWebContents() == web_contents)
         return i;
@@ -194,7 +196,7 @@ class ChromeSpeechRecognitionManagerDelegate::TabWatcher
   // double registrations on WebContentsObserver and to pass the correct render
   // process id and render view id to |tab_closed_callback_| after the process
   // has gone away.
-  ScopedVector<WebContentsTracker> registered_web_contents_;
+  std::vector<std::unique_ptr<WebContentsTracker>> registered_web_contents_;
 
   // Callback used to notify, on the thread specified by |callback_thread_| the
   // closure of a registered tab.
@@ -269,7 +271,7 @@ void ChromeSpeechRecognitionManagerDelegate::OnRecognitionEnd(int session_id) {
 
 void ChromeSpeechRecognitionManagerDelegate::CheckRecognitionIsAllowed(
     int session_id,
-    base::Callback<void(bool ask_user, bool is_allowed)> callback) {
+    base::OnceCallback<void(bool ask_user, bool is_allowed)> callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   const content::SpeechRecognitionSessionContext& context =
@@ -290,11 +292,10 @@ void ChromeSpeechRecognitionManagerDelegate::CheckRecognitionIsAllowed(
 
   // Check that the render view type is appropriate, and whether or not we
   // need to request permission from the user.
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(&CheckRenderViewType,
-                                     callback,
-                                     render_process_id,
-                                     render_view_id));
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&CheckRenderViewType, std::move(callback),
+                     render_process_id, render_view_id));
 }
 
 content::SpeechRecognitionEventListener*
@@ -315,7 +316,7 @@ bool ChromeSpeechRecognitionManagerDelegate::FilterProfanities(
 
 // static.
 void ChromeSpeechRecognitionManagerDelegate::CheckRenderViewType(
-    base::Callback<void(bool ask_user, bool is_allowed)> callback,
+    base::OnceCallback<void(bool ask_user, bool is_allowed)> callback,
     int render_process_id,
     int render_view_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -329,8 +330,9 @@ void ChromeSpeechRecognitionManagerDelegate::CheckRenderViewType(
     // This happens for extensions. Manifest should be checked for permission.
     allowed = true;
     check_permission = false;
-    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                            base::Bind(callback, check_permission, allowed));
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::BindOnce(std::move(callback), check_permission, allowed));
     return;
   }
 
@@ -355,8 +357,9 @@ void ChromeSpeechRecognitionManagerDelegate::CheckRenderViewType(
   check_permission = true;
 #endif
 
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::Bind(callback, check_permission, allowed));
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(std::move(callback), check_permission, allowed));
 }
 
 }  // namespace speech

@@ -5,7 +5,10 @@
 #ifndef CHROME_BROWSER_PREFS_BROWSER_PREFS_H_
 #define CHROME_BROWSER_PREFS_BROWSER_PREFS_H_
 
+#include <set>
+
 #include "build/build_config.h"
+#include "components/prefs/pref_value_store.h"
 
 class PrefRegistrySimple;
 class PrefService;

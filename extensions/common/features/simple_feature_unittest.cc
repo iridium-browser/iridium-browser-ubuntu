@@ -387,6 +387,30 @@ TEST_F(SimpleFeatureTest, Context) {
       extension.get(), Feature::BLESSED_EXTENSION_CONTEXT,
       Feature::UNSPECIFIED_PLATFORM).result());
 
+  feature.contexts_.clear();
+  feature.contexts_.push_back(Feature::BLESSED_EXTENSION_CONTEXT);
+
+  {
+    Feature::Availability availability = feature.IsAvailableToContext(
+        extension.get(), Feature::LOCK_SCREEN_EXTENSION_CONTEXT,
+        Feature::CHROMEOS_PLATFORM);
+    EXPECT_EQ(Feature::INVALID_CONTEXT, availability.result());
+    EXPECT_EQ(
+        "'somefeature' is only allowed to run in privileged pages, "
+        "but this is a lock screen app",
+        availability.message());
+  }
+
+  feature.contexts_.clear();
+  feature.contexts_.push_back(Feature::LOCK_SCREEN_EXTENSION_CONTEXT);
+
+  EXPECT_EQ(Feature::IS_AVAILABLE,
+            feature
+                .IsAvailableToContext(extension.get(),
+                                      Feature::LOCK_SCREEN_EXTENSION_CONTEXT,
+                                      Feature::CHROMEOS_PLATFORM)
+                .result());
+
   feature.set_min_manifest_version(22);
   EXPECT_EQ(Feature::INVALID_MIN_MANIFEST_VERSION, feature.IsAvailableToContext(
       extension.get(), Feature::BLESSED_EXTENSION_CONTEXT,
@@ -856,6 +880,36 @@ TEST_F(SimpleFeatureTest, ComplexFeatureAvailability) {
                   ->IsAvailableToManifest("1", Manifest::TYPE_EXTENSION,
                                           Manifest::INVALID_LOCATION,
                                           Feature::UNSPECIFIED_PLATFORM)
+                  .result());
+  }
+}
+
+TEST(SimpleFeatureUnitTest, TestChannelsWithoutExtension) {
+  // Create a webui feature available on trunk.
+  SimpleFeature feature;
+  feature.set_contexts({Feature::WEBUI_CONTEXT});
+  feature.set_matches({"chrome://settings/*"});
+  feature.set_channel(version_info::Channel::UNKNOWN);
+
+  const GURL kWhitelistedUrl("chrome://settings/foo");
+  const GURL kOtherUrl("https://example.com");
+
+  {
+    // It should be available on trunk.
+    ScopedCurrentChannel current_channel(Channel::UNKNOWN);
+    EXPECT_EQ(Feature::IS_AVAILABLE,
+              feature
+                  .IsAvailableToContext(nullptr, Feature::WEBUI_CONTEXT,
+                                        kWhitelistedUrl)
+                  .result());
+  }
+  {
+    // It should be unavailable on beta.
+    ScopedCurrentChannel current_channel(Channel::BETA);
+    EXPECT_EQ(Feature::UNSUPPORTED_CHANNEL,
+              feature
+                  .IsAvailableToContext(nullptr, Feature::WEBUI_CONTEXT,
+                                        kWhitelistedUrl)
                   .result());
   }
 }

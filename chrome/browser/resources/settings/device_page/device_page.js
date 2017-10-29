@@ -51,6 +51,27 @@ Polymer({
       },
       readOnly: true,
     },
+
+    /** @private {!Map<string, string>} */
+    focusConfig_: {
+      type: Object,
+      value: function() {
+        var map = new Map();
+        if (settings.routes.POINTERS)
+          map.set(settings.routes.POINTERS.path, '#pointersRow .subpage-arrow');
+        if (settings.routes.KEYBOARD)
+          map.set(settings.routes.KEYBOARD.path, '#keyboardRow .subpage-arrow');
+        if (settings.routes.STYLUS)
+          map.set(settings.routes.STYLUS.path, '#stylusRow .subpage-arrow');
+        if (settings.routes.DISPLAY)
+          map.set(settings.routes.DISPLAY.path, '#displayRow .subpage-arrow');
+        if (settings.routes.STORAGE)
+          map.set(settings.routes.STORAGE.path, '#storageRow .subpage-arrow');
+        if (settings.routes.POWER)
+          map.set(settings.routes.POWER.path, '#powerRow .subpage-arrow');
+        return map;
+      },
+    },
   },
 
   observers: [
@@ -89,7 +110,7 @@ Polymer({
    * @private
    */
   onPointersTap_: function() {
-    settings.navigateTo(settings.Route.POINTERS);
+    settings.navigateTo(settings.routes.POINTERS);
   },
 
   /**
@@ -97,7 +118,7 @@ Polymer({
    * @private
    */
   onKeyboardTap_: function() {
-    settings.navigateTo(settings.Route.KEYBOARD);
+    settings.navigateTo(settings.routes.KEYBOARD);
   },
 
   /**
@@ -105,7 +126,7 @@ Polymer({
    * @private
    */
   onStylusTap_: function() {
-    settings.navigateTo(settings.Route.STYLUS);
+    settings.navigateTo(settings.routes.STYLUS);
   },
 
   /**
@@ -113,7 +134,7 @@ Polymer({
    * @private
    */
   onDisplayTap_: function() {
-    settings.navigateTo(settings.Route.DISPLAY);
+    settings.navigateTo(settings.routes.DISPLAY);
   },
 
   /**
@@ -121,7 +142,7 @@ Polymer({
    * @private
    */
   onStorageTap_: function() {
-    settings.navigateTo(settings.Route.STORAGE);
+    settings.navigateTo(settings.routes.STORAGE);
   },
 
   /**
@@ -129,7 +150,7 @@ Polymer({
    * @private
    */
   onPowerTap_: function() {
-    settings.navigateTo(settings.Route.POWER);
+    settings.navigateTo(settings.routes.POWER);
   },
 
   /** @protected */
@@ -154,8 +175,8 @@ Polymer({
   checkPointerSubpage_: function() {
     // Check that the properties have explicitly been set to false.
     if (this.hasMouse_ === false && this.hasTouchpad_ === false &&
-        settings.getCurrentRoute() == settings.Route.POINTERS) {
-      settings.navigateTo(settings.Route.DEVICE);
+        settings.getCurrentRoute() == settings.routes.POINTERS) {
+      settings.navigateTo(settings.routes.DEVICE);
     }
   },
 });

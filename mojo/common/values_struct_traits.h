@@ -6,7 +6,7 @@
 #define MOJO_COMMON_VALUES_STRUCT_TRAITS_H_
 
 #include "base/values.h"
-#include "mojo/common/values.mojom.h"
+#include "mojo/common/values.mojom-shared.h"
 #include "mojo/public/cpp/bindings/array_traits.h"
 #include "mojo/public/cpp/bindings/clone_traits.h"
 #include "mojo/public/cpp/bindings/map_traits.h"
@@ -17,7 +17,7 @@ namespace mojo {
 
 template <>
 struct ArrayTraits<base::ListValue> {
-  using Element = std::unique_ptr<base::Value>;
+  using Element = base::Value;
   using ConstIterator = base::ListValue::const_iterator;
 
   static size_t GetSize(const base::ListValue& input) {
@@ -116,6 +116,15 @@ struct CloneTraits<std::unique_ptr<base::DictionaryValue>, false> {
 };
 
 template <>
+struct StructTraits<common::mojom::NullValueDataView, void*> {
+  static bool IsNull(const void* value) { return true; }
+  static void SetToNull(void** value) {}
+  static bool Read(common::mojom::NullValueDataView data, void** value) {
+    return true;
+  }
+};
+
+template <>
 struct UnionTraits<common::mojom::ValueDataView, base::Value> {
   static common::mojom::ValueDataView::Tag GetTag(const base::Value& data) {
     switch (data.GetType()) {
@@ -140,9 +149,7 @@ struct UnionTraits<common::mojom::ValueDataView, base::Value> {
     return common::mojom::ValueDataView::Tag::NULL_VALUE;
   }
 
-  static common::mojom::NullValuePtr null_value(const base::Value& value) {
-    return common::mojom::NullValuePtr();
-  }
+  static void* null_value(const base::Value& value) { return nullptr; }
 
   static bool bool_value(const base::Value& value) {
     bool bool_value{};
@@ -173,12 +180,11 @@ struct UnionTraits<common::mojom::ValueDataView, base::Value> {
   }
 
   static mojo::ConstCArray<uint8_t> binary_value(const base::Value& value) {
-    const base::BinaryValue* binary_value = nullptr;
-    if (!value.GetAsBinary(&binary_value))
+    if (!value.is_blob())
       NOTREACHED();
     return mojo::ConstCArray<uint8_t>(
-        binary_value->GetSize(),
-        reinterpret_cast<const uint8_t*>(binary_value->GetBuffer()));
+        value.GetBlob().size(),
+        reinterpret_cast<const uint8_t*>(value.GetBlob().data()));
   }
 
   static const base::ListValue& list_value(const base::Value& value) {
@@ -210,8 +216,7 @@ struct UnionTraits<common::mojom::ValueDataView, std::unique_ptr<base::Value>> {
         *value);
   }
 
-  static common::mojom::NullValuePtr null_value(
-      const std::unique_ptr<base::Value>& value) {
+  static void* null_value(const std::unique_ptr<base::Value>& value) {
     return UnionTraits<common::mojom::ValueDataView, base::Value>::null_value(
         *value);
   }
@@ -250,6 +255,12 @@ struct UnionTraits<common::mojom::ValueDataView, std::unique_ptr<base::Value>> {
 
   static bool Read(common::mojom::ValueDataView data,
                    std::unique_ptr<base::Value>* value);
+};
+
+template <>
+struct CloneTraits<std::unique_ptr<base::Value>, false> {
+  static std::unique_ptr<base::Value> Clone(
+      const std::unique_ptr<base::Value>& input);
 };
 
 }  // namespace mojo

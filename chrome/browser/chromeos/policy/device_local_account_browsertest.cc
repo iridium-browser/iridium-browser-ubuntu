@@ -13,9 +13,9 @@
 #include <utility>
 #include <vector>
 
-#include "ash/common/system/chromeos/session/logout_confirmation_controller.h"
-#include "ash/common/system/chromeos/session/logout_confirmation_dialog.h"
-#include "ash/common/wm_shell.h"
+#include "ash/shell.h"
+#include "ash/system/session/logout_confirmation_controller.h"
+#include "ash/system/session/logout_confirmation_dialog.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
@@ -37,14 +37,12 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/extensions/device_local_account_external_policy_loader.h"
 #include "chrome/browser/chromeos/extensions/external_cache.h"
-#include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/screens/base_screen.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
@@ -113,7 +111,6 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -146,6 +143,7 @@
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/base/ime/chromeos/input_method_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/image/image_skia.h"
@@ -215,10 +213,6 @@ const char* const kInvalidRecommendedLocale[] = {
 };
 const char kPublicSessionLocale[] = "de";
 const char kPublicSessionInputMethodIDTemplate[] = "_comp_ime_%sxkb:de:neo:ger";
-
-// The sequence token used by GetKeyboardLayoutsForLocale() for its background
-// tasks.
-const char kSequenceToken[] = "chromeos_login_l10n_util";
 
 // Helper that serves extension update manifests to Chrome.
 class TestingUpdateManifestProvider
@@ -532,7 +526,7 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
 
     // This shuts down the login UI.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&chrome::AttemptExit));
+        FROM_HERE, base::BindOnce(&chrome::AttemptExit));
     base::RunLoop().RunUntilIdle();
   }
 
@@ -700,21 +694,11 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
     EXPECT_EQ(initial_language_, icu::Locale::getDefault().getLanguage());
   }
 
-  // GetKeyboardLayoutsForLocale() posts a task to a background task runner.
-  // This method flushes that task runner and the current thread's message loop
-  // to ensure that GetKeyboardLayoutsForLocale() is finished.
+  // GetKeyboardLayoutsForLocale() posts a task to a background task runner and
+  // handles the response on the main thread. This method flushes both the
+  // thread pool backing the background task runner and the main thread.
   void WaitForGetKeyboardLayoutsForLocaleToFinish() {
-    base::SequencedWorkerPool* worker_pool =
-        content::BrowserThread::GetBlockingPool();
-     scoped_refptr<base::SequencedTaskRunner> background_task_runner =
-         worker_pool->GetSequencedTaskRunner(
-             worker_pool->GetNamedSequenceToken(kSequenceToken));
-    base::RunLoop run_loop;
-    background_task_runner->PostTaskAndReply(FROM_HERE,
-                                             base::Bind(&base::DoNothing),
-                                             run_loop.QuitClosure());
-    run_loop.Run();
-    base::RunLoop().RunUntilIdle();
+    content::RunAllBlockingPoolTasksUntilIdle();
 
     // Verify that the construction of the keyboard layout list did not affect
     // the current ICU locale.
@@ -1537,7 +1521,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, LastWindowClosedLogoutReminder) {
 
   // Verify that the logout confirmation dialog is not showing.
   ash::LogoutConfirmationController* logout_confirmation_controller =
-      ash::WmShell::Get()->logout_confirmation_controller();
+      ash::Shell::Get()->logout_confirmation_controller();
   ASSERT_TRUE(logout_confirmation_controller);
   EXPECT_FALSE(logout_confirmation_controller->dialog_for_testing());
 
@@ -1719,7 +1703,9 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, NoRecommendedLocaleSwitch) {
           "domAutomationController.send(pod.classList.contains('advanced'));",
           account_id_1_.Serialize().c_str()),
       &advanced));
-  EXPECT_FALSE(advanced);
+  // Public session pods switch to advanced form immediately upon being
+  // clicked, instead of waiting for animation to end which were in the old UI.
+  EXPECT_TRUE(advanced);
 
   // Manually select a different locale.
   ASSERT_TRUE(content::ExecuteScript(
@@ -2292,7 +2278,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, PolicyForExtensions) {
   }
 
   // Verify that the app policy was set.
-  base::StringValue expected_value("policy test value one");
+  base::Value expected_value("policy test value one");
   EXPECT_TRUE(base::Value::Equals(
       &expected_value,
       policy_service->GetPolicies(ns).GetValue("string")));
@@ -2317,7 +2303,7 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, PolicyForExtensions) {
   }
 
   // Verify that the app policy was updated.
-  base::StringValue expected_new_value("policy test value two");
+  base::Value expected_new_value("policy test value two");
   EXPECT_TRUE(base::Value::Equals(
       &expected_new_value,
       policy_service->GetPolicies(ns).GetValue("string")));

@@ -7,39 +7,39 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/ModulesExport.h"
 #include "modules/canvas2d/CanvasRenderingContext2D.h"
 #include "modules/shapedetection/ShapeDetector.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "services/shape_detection/public/interfaces/barcodedetection.mojom-blink.h"
 
 namespace blink {
+
+class ExecutionContext;
 
 class MODULES_EXPORT BarcodeDetector final : public ShapeDetector,
                                              public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static BarcodeDetector* create();
+  static BarcodeDetector* Create(ExecutionContext*);
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
-  BarcodeDetector();
+  explicit BarcodeDetector(ExecutionContext*);
   ~BarcodeDetector() override = default;
 
-  ScriptPromise doDetect(ScriptPromiseResolver*,
-                         mojo::ScopedSharedBufferHandle,
-                         int imageWidth,
-                         int imageHeight) override;
-  void onDetectBarcodes(
+  ScriptPromise DoDetect(ScriptPromiseResolver*,
+                         skia::mojom::blink::BitmapPtr) override;
+  void OnDetectBarcodes(
       ScriptPromiseResolver*,
       Vector<shape_detection::mojom::blink::BarcodeDetectionResultPtr>);
-  void onBarcodeServiceConnectionError();
+  void OnBarcodeServiceConnectionError();
 
-  shape_detection::mojom::blink::BarcodeDetectionPtr m_barcodeService;
+  shape_detection::mojom::blink::BarcodeDetectionPtr barcode_service_;
 
-  HeapHashSet<Member<ScriptPromiseResolver>> m_barcodeServiceRequests;
+  HeapHashSet<Member<ScriptPromiseResolver>> barcode_service_requests_;
 };
 
 }  // namespace blink

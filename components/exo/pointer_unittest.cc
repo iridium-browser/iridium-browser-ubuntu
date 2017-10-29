@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/wm/window_positioning_utils.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
+#include "components/exo/pointer.h"
+
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
+#include "ash/shell_port.h"
+#include "ash/wm/window_positioning_utils.h"
 #include "components/exo/buffer.h"
-#include "components/exo/pointer.h"
 #include "components/exo/pointer_delegate.h"
 #include "components/exo/shell_surface.h"
 #include "components/exo/surface.h"
@@ -36,7 +36,6 @@ class MockPointerDelegate : public PointerDelegate {
   MOCK_METHOD3(OnPointerButton, void(base::TimeTicks, int, bool));
   MOCK_METHOD3(OnPointerScroll,
                void(base::TimeTicks, const gfx::Vector2dF&, bool));
-  MOCK_METHOD1(OnPointerScrollCancel, void(base::TimeTicks));
   MOCK_METHOD1(OnPointerScrollStop, void(base::TimeTicks));
   MOCK_METHOD0(OnPointerFrame, void());
 };
@@ -244,7 +243,7 @@ TEST_F(PointerTest, OnPointerScroll) {
 
   EXPECT_CALL(delegate, CanAcceptPointerEventsForSurface(surface.get()))
       .WillRepeatedly(testing::Return(true));
-  EXPECT_CALL(delegate, OnPointerFrame()).Times(4);
+  EXPECT_CALL(delegate, OnPointerFrame()).Times(3);
 
   EXPECT_CALL(delegate, OnPointerEnter(surface.get(), gfx::PointF(), 0));
   generator.MoveMouseTo(location);
@@ -253,7 +252,6 @@ TEST_F(PointerTest, OnPointerScroll) {
     // Expect fling stop followed by scroll and scroll stop.
     testing::InSequence sequence;
 
-    EXPECT_CALL(delegate, OnPointerScrollCancel(testing::_));
     EXPECT_CALL(delegate,
                 OnPointerScroll(testing::_, gfx::Vector2dF(1.2, 1.2), false));
     EXPECT_CALL(delegate, OnPointerScrollStop(testing::_));
@@ -314,12 +312,12 @@ TEST_F(PointerTest, IgnorePointerEventDuringModal) {
       new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(gfx::Size(5, 5))));
   surface2->Attach(buffer2.get());
   surface2->Commit();
-  ash::wm::CenterWindow(ash::WmWindow::Get(surface2->window()));
+  ash::wm::CenterWindow(surface2->window());
   gfx::Point location2 = surface2->window()->GetBoundsInScreen().origin();
 
   // Make the window modal.
   shell_surface2->SetSystemModal(true);
-  EXPECT_TRUE(ash::WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(ash::ShellPort::Get()->IsSystemModalWindowOpen());
 
   EXPECT_CALL(delegate, OnPointerFrame()).Times(testing::AnyNumber());
   EXPECT_CALL(delegate, CanAcceptPointerEventsForSurface(surface.get()))
@@ -351,7 +349,6 @@ TEST_F(PointerTest, IgnorePointerEventDuringModal) {
 
   {
     testing::InSequence sequence;
-    EXPECT_CALL(delegate, OnPointerScrollCancel(testing::_));
     EXPECT_CALL(delegate,
                 OnPointerScroll(testing::_, gfx::Vector2dF(1.2, 1.2), false));
     EXPECT_CALL(delegate, OnPointerScrollStop(testing::_));
@@ -392,7 +389,6 @@ TEST_F(PointerTest, IgnorePointerEventDuringModal) {
 
   {
     testing::InSequence sequence;
-    EXPECT_CALL(delegate, OnPointerScrollCancel(testing::_)).Times(0);
     EXPECT_CALL(delegate,
                 OnPointerScroll(testing::_, gfx::Vector2dF(1.2, 1.2), false))
         .Times(0);
@@ -408,7 +404,7 @@ TEST_F(PointerTest, IgnorePointerEventDuringModal) {
 
   // Make the window non-modal.
   shell_surface2->SetSystemModal(false);
-  EXPECT_FALSE(ash::WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_FALSE(ash::ShellPort::Get()->IsSystemModalWindowOpen());
 
   // Check if pointer events on non-modal window are registered.
   {
@@ -434,7 +430,6 @@ TEST_F(PointerTest, IgnorePointerEventDuringModal) {
 
   {
     testing::InSequence sequence;
-    EXPECT_CALL(delegate, OnPointerScrollCancel(testing::_));
     EXPECT_CALL(delegate,
                 OnPointerScroll(testing::_, gfx::Vector2dF(1.2, 1.2), false));
     EXPECT_CALL(delegate, OnPointerScrollStop(testing::_));
@@ -446,6 +441,35 @@ TEST_F(PointerTest, IgnorePointerEventDuringModal) {
     EXPECT_CALL(delegate, OnPointerLeave(surface.get()));
   }
   generator.MoveMouseTo(surface->window()->GetBoundsInScreen().bottom_right());
+
+  EXPECT_CALL(delegate, OnPointerDestroying(pointer.get()));
+  pointer.reset();
+}
+
+TEST_F(PointerTest, OnPointerInStylusOnlyWindow) {
+  std::unique_ptr<Surface> surface(new Surface);
+  std::unique_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
+  gfx::Size buffer_size(10, 10);
+  std::unique_ptr<Buffer> buffer(
+      new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
+  surface->Attach(buffer.get());
+  surface->SetStylusOnly();
+  surface->Commit();
+
+  MockPointerDelegate delegate;
+  std::unique_ptr<Pointer> pointer(new Pointer(&delegate));
+  ui::test::EventGenerator generator(ash::Shell::GetPrimaryRootWindow());
+
+  EXPECT_CALL(delegate, CanAcceptPointerEventsForSurface(surface.get()))
+      .WillRepeatedly(testing::Return(true));
+
+  EXPECT_CALL(delegate, OnPointerFrame()).Times(0);
+  EXPECT_CALL(delegate, OnPointerEnter(surface.get(), testing::_, 0)).Times(0);
+  EXPECT_CALL(delegate, OnPointerButton(testing::_, testing::_, testing::_))
+      .Times(0);
+
+  generator.MoveMouseTo(surface->window()->GetBoundsInScreen().origin());
+  generator.ClickLeftButton();
 
   EXPECT_CALL(delegate, OnPointerDestroying(pointer.get()));
   pointer.reset();

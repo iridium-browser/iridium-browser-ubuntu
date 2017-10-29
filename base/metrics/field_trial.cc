@@ -14,11 +14,15 @@
 #include "base/logging.h"
 #include "base/metrics/field_trial_param_associator.h"
 #include "base/process/memory.h"
+#include "base/process/process_handle.h"
+#include "base/process/process_info.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/unguessable_token.h"
 
 // On POSIX, the fd is shared using the mapping in GlobalDescriptors.
 #if defined(OS_POSIX) && !defined(OS_NACL)
@@ -207,27 +211,6 @@ void AddFeatureAndFieldTrialFlags(const char* enable_features_switch,
   }
 }
 
-#if defined(OS_WIN)
-HANDLE CreateReadOnlyHandle(FieldTrialList::FieldTrialAllocator* allocator) {
-  HANDLE src = allocator->shared_memory()->handle().GetHandle();
-  ProcessHandle process = GetCurrentProcess();
-  DWORD access = SECTION_MAP_READ | SECTION_QUERY;
-  HANDLE dst;
-  if (!::DuplicateHandle(process, src, process, &dst, access, true, 0))
-    return kInvalidPlatformFile;
-  return dst;
-}
-#endif
-
-#if defined(OS_POSIX) && !defined(OS_NACL)
-int CreateReadOnlyHandle(FieldTrialList::FieldTrialAllocator* allocator) {
-  SharedMemoryHandle new_handle;
-  allocator->shared_memory()->ShareReadOnlyToProcess(GetCurrentProcessHandle(),
-                                                     &new_handle);
-  return SharedMemory::GetFdFromSharedMemoryHandle(new_handle);
-}
-#endif
-
 void OnOutOfMemory(size_t size) {
 #if defined(OS_NACL)
   NOTREACHED();
@@ -235,6 +218,23 @@ void OnOutOfMemory(size_t size) {
   TerminateBecauseOutOfMemory(size);
 #endif
 }
+
+#if !defined(OS_NACL)
+// Returns whether the operation succeeded.
+bool DeserializeGUIDFromStringPieces(base::StringPiece first,
+                                     base::StringPiece second,
+                                     base::UnguessableToken* guid) {
+  uint64_t high = 0;
+  uint64_t low = 0;
+  if (!base::StringToUint64(first, &high) ||
+      !base::StringToUint64(second, &low)) {
+    return false;
+  }
+
+  *guid = base::UnguessableToken::Deserialize(high, low);
+  return true;
+}
+#endif
 
 }  // namespace
 
@@ -414,7 +414,8 @@ FieldTrial::FieldTrial(const std::string& trial_name,
       ref_(FieldTrialList::FieldTrialAllocator::kReferenceNull) {
   DCHECK_GT(total_probability, 0);
   DCHECK(!trial_name_.empty());
-  DCHECK(!default_group_name_.empty());
+  DCHECK(!default_group_name_.empty())
+      << "Trial " << trial_name << " is missing a default group name.";
 }
 
 FieldTrial::~FieldTrial() {}
@@ -714,6 +715,7 @@ void FieldTrialList::GetActiveFieldTrialGroupsFromString(
 void FieldTrialList::GetInitiallyActiveFieldTrials(
     const base::CommandLine& command_line,
     FieldTrial::ActiveGroups* active_groups) {
+  DCHECK(global_);
   DCHECK(global_->create_trials_from_command_line_called_);
 
   if (!global_->field_trial_allocator_) {
@@ -779,21 +781,21 @@ void FieldTrialList::CreateTrialsFromCommandLine(
     int fd_key) {
   global_->create_trials_from_command_line_called_ = true;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_FUCHSIA)
   if (cmd_line.HasSwitch(field_trial_handle_switch)) {
-    std::string handle_switch =
+    std::string switch_value =
         cmd_line.GetSwitchValueASCII(field_trial_handle_switch);
-    bool result = CreateTrialsFromHandleSwitch(handle_switch);
+    bool result = CreateTrialsFromSwitchValue(switch_value);
     DCHECK(result);
   }
-#endif
-
-#if defined(OS_POSIX) && !defined(OS_NACL)
+#elif defined(OS_POSIX) && !defined(OS_NACL)
   // On POSIX, we check if the handle is valid by seeing if the browser process
   // sent over the switch (we don't care about the value). Invalid handles
   // occur in some browser tests which don't initialize the allocator.
   if (cmd_line.HasSwitch(field_trial_handle_switch)) {
-    bool result = CreateTrialsFromDescriptor(fd_key);
+    std::string switch_value =
+        cmd_line.GetSwitchValueASCII(field_trial_handle_switch);
+    bool result = CreateTrialsFromDescriptor(fd_key, switch_value);
     DCHECK(result);
   }
 #endif
@@ -824,7 +826,7 @@ void FieldTrialList::CreateFeaturesFromCommandLine(
       global_->field_trial_allocator_.get());
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_FUCHSIA)
 // static
 void FieldTrialList::AppendFieldTrialHandleIfNeeded(
     HandlesToInheritVector* handles) {
@@ -832,21 +834,19 @@ void FieldTrialList::AppendFieldTrialHandleIfNeeded(
     return;
   if (kUseSharedMemoryForFieldTrials) {
     InstantiateFieldTrialAllocatorIfNeeded();
-    if (global_->readonly_allocator_handle_)
-      handles->push_back(global_->readonly_allocator_handle_);
+    if (global_->readonly_allocator_handle_.IsValid())
+      handles->push_back(global_->readonly_allocator_handle_.GetHandle());
   }
 }
-#endif
-
-#if defined(OS_POSIX) && !defined(OS_NACL)
+#elif defined(OS_POSIX) && !defined(OS_NACL)
 // static
-int FieldTrialList::GetFieldTrialHandle() {
+SharedMemoryHandle FieldTrialList::GetFieldTrialHandle() {
   if (global_ && kUseSharedMemoryForFieldTrials) {
     InstantiateFieldTrialAllocatorIfNeeded();
     // We check for an invalid handle where this gets called.
     return global_->readonly_allocator_handle_;
   }
-  return kInvalidPlatformFile;
+  return SharedMemoryHandle();
 }
 #endif
 
@@ -873,37 +873,16 @@ void FieldTrialList::CopyFieldTrialStateToFlags(
     InstantiateFieldTrialAllocatorIfNeeded();
     // If the readonly handle didn't get duplicated properly, then fallback to
     // original behavior.
-    if (global_->readonly_allocator_handle_ == kInvalidPlatformFile) {
+    if (!global_->readonly_allocator_handle_.IsValid()) {
       AddFeatureAndFieldTrialFlags(enable_features_switch,
                                    disable_features_switch, cmd_line);
       return;
     }
 
     global_->field_trial_allocator_->UpdateTrackingHistograms();
-
-#if defined(OS_WIN)
-    // We need to pass a named anonymous handle to shared memory over the
-    // command line on Windows, since the child doesn't know which of the
-    // handles it inherited it should open.
-    // PlatformFile is typedef'd to HANDLE which is typedef'd to void *. We
-    // basically cast the handle into an int (uintptr_t, to be exact), stringify
-    // the int, and pass it as a command-line flag. The child process will do
-    // the reverse conversions to retrieve the handle. See
-    // http://stackoverflow.com/a/153077
-    auto uintptr_handle =
-        reinterpret_cast<uintptr_t>(global_->readonly_allocator_handle_);
-    std::string field_trial_handle = std::to_string(uintptr_handle);
-    cmd_line->AppendSwitchASCII(field_trial_handle_switch, field_trial_handle);
-#elif defined(OS_POSIX)
-    // On POSIX, we dup the fd into a fixed fd kFieldTrialDescriptor, so we
-    // don't have to pass over the handle (it's not even the right handle
-    // anyways). But some browser tests don't create the allocator, so we need
-    // to be able to distinguish valid and invalid handles. We do that by just
-    // checking that the flag is set with a dummy value.
-    cmd_line->AppendSwitchASCII(field_trial_handle_switch, "1");
-#else
-#error Unsupported OS
-#endif
+    std::string switch_value = SerializeSharedMemoryHandleMetadata(
+        global_->readonly_allocator_handle_);
+    cmd_line->AppendSwitchASCII(field_trial_handle_switch, switch_value);
     return;
   }
 
@@ -1132,20 +1111,113 @@ FieldTrialList::GetAllFieldTrialsFromPersistentAllocator(
   return entries;
 }
 
-#if defined(OS_WIN)
 // static
-bool FieldTrialList::CreateTrialsFromHandleSwitch(
-    const std::string& handle_switch) {
-  int field_trial_handle = std::stoi(handle_switch);
-  HANDLE handle = reinterpret_cast<HANDLE>(field_trial_handle);
-  SharedMemoryHandle shm_handle(handle, GetCurrentProcId());
-  return FieldTrialList::CreateTrialsFromSharedMemoryHandle(shm_handle);
-}
+std::string FieldTrialList::SerializeSharedMemoryHandleMetadata(
+    const SharedMemoryHandle& shm) {
+  std::stringstream ss;
+#if defined(OS_WIN)
+  // Tell the child process the name of the inherited HANDLE.
+  uintptr_t uintptr_handle = reinterpret_cast<uintptr_t>(shm.GetHandle());
+  ss << uintptr_handle << ",";
+#elif defined(OS_FUCHSIA)
+  ss << shm.GetHandle() << ",";
+#elif !defined(OS_POSIX)
+#error Unsupported OS
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_NACL)
+  base::UnguessableToken guid = shm.GetGUID();
+  ss << guid.GetHighForSerialization() << "," << guid.GetLowForSerialization();
+  ss << "," << shm.GetSize();
+  return ss.str();
+}
+
+#if defined(OS_WIN) || defined(OS_FUCHSIA)
+
+template <class RawHandle>
+SharedMemoryHandle DeserializeImpl(const std::string& switch_value) {
+  std::vector<base::StringPiece> tokens = base::SplitStringPiece(
+      switch_value, ",", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+
+  if (tokens.size() != 4)
+    return SharedMemoryHandle();
+
+  int field_trial_handle = 0;
+  if (!base::StringToInt(tokens[0], &field_trial_handle))
+    return SharedMemoryHandle();
+  RawHandle handle = reinterpret_cast<RawHandle>(field_trial_handle);
+#if defined(OS_WIN)
+  if (base::IsCurrentProcessElevated()) {
+    // base::LaunchElevatedProcess doesn't have a way to duplicate the handle,
+    // but this process can since by definition it's not sandboxed.
+    base::ProcessId parent_pid = base::GetParentProcessId(GetCurrentProcess());
+    HANDLE parent_handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, parent_pid);
+    DuplicateHandle(parent_handle, handle, GetCurrentProcess(), &handle, 0,
+                    FALSE, DUPLICATE_SAME_ACCESS);
+    CloseHandle(parent_handle);
+  }
+#endif
+
+  base::UnguessableToken guid;
+  if (!DeserializeGUIDFromStringPieces(tokens[1], tokens[2], &guid))
+    return SharedMemoryHandle();
+
+  int size;
+  if (!base::StringToInt(tokens[3], &size))
+    return SharedMemoryHandle();
+
+  return SharedMemoryHandle(handle, static_cast<size_t>(size), guid);
+}
+
 // static
-bool FieldTrialList::CreateTrialsFromDescriptor(int fd_key) {
+SharedMemoryHandle FieldTrialList::DeserializeSharedMemoryHandleMetadata(
+    const std::string& switch_value) {
+#if defined(OS_WIN)
+  return DeserializeImpl<HANDLE>(switch_value);
+#else
+  return DeserializeImpl<mx_handle_t>(switch_value);
+#endif
+}
+
+#elif defined(OS_POSIX) && !defined(OS_NACL)
+
+// static
+SharedMemoryHandle FieldTrialList::DeserializeSharedMemoryHandleMetadata(
+    int fd,
+    const std::string& switch_value) {
+  std::vector<base::StringPiece> tokens = base::SplitStringPiece(
+      switch_value, ",", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+
+  if (tokens.size() != 3)
+    return SharedMemoryHandle();
+
+  base::UnguessableToken guid;
+  if (!DeserializeGUIDFromStringPieces(tokens[0], tokens[1], &guid))
+    return SharedMemoryHandle();
+
+  int size;
+  if (!base::StringToInt(tokens[2], &size))
+    return SharedMemoryHandle();
+
+  return SharedMemoryHandle(FileDescriptor(fd, true), static_cast<size_t>(size),
+                            guid);
+}
+
+#endif
+
+#if defined(OS_WIN) || defined(OS_FUCHSIA)
+// static
+bool FieldTrialList::CreateTrialsFromSwitchValue(
+    const std::string& switch_value) {
+  SharedMemoryHandle shm = DeserializeSharedMemoryHandleMetadata(switch_value);
+  if (!shm.IsValid())
+    return false;
+  return FieldTrialList::CreateTrialsFromSharedMemoryHandle(shm);
+}
+#elif defined(OS_POSIX) && !defined(OS_NACL)
+// static
+bool FieldTrialList::CreateTrialsFromDescriptor(
+    int fd_key,
+    const std::string& switch_value) {
   if (!kUseSharedMemoryForFieldTrials)
     return false;
 
@@ -1156,17 +1228,16 @@ bool FieldTrialList::CreateTrialsFromDescriptor(int fd_key) {
   if (fd == -1)
     return false;
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  SharedMemoryHandle shm_handle(FileDescriptor(fd, true));
-#else
-  SharedMemoryHandle shm_handle(fd, true);
-#endif
+  SharedMemoryHandle shm =
+      DeserializeSharedMemoryHandleMetadata(fd, switch_value);
+  if (!shm.IsValid())
+    return false;
 
-  bool result = FieldTrialList::CreateTrialsFromSharedMemoryHandle(shm_handle);
+  bool result = FieldTrialList::CreateTrialsFromSharedMemoryHandle(shm);
   DCHECK(result);
   return true;
 }
-#endif
+#endif  // defined(OS_POSIX) && !defined(OS_NACL)
 
 // static
 bool FieldTrialList::CreateTrialsFromSharedMemoryHandle(
@@ -1253,7 +1324,7 @@ void FieldTrialList::InstantiateFieldTrialAllocatorIfNeeded() {
   // Set |readonly_allocator_handle_| so we can pass it to be inherited and
   // via the command line.
   global_->readonly_allocator_handle_ =
-      CreateReadOnlyHandle(global_->field_trial_allocator_.get());
+      global_->field_trial_allocator_->shared_memory()->GetReadOnlyHandle();
 #endif
 }
 

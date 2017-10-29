@@ -31,7 +31,7 @@ TEST(fpdf_parser_decode, A85Decode) {
     uint8_t* result = nullptr;
     uint32_t result_size = 0;
     EXPECT_EQ(ptr->processed_size,
-              A85Decode(ptr->input, ptr->input_size, result, result_size))
+              A85Decode(ptr->input, ptr->input_size, &result, &result_size))
         << "for case " << i;
     ASSERT_EQ(ptr->expected_size, result_size);
     for (size_t j = 0; j < result_size; ++j) {
@@ -66,7 +66,7 @@ TEST(fpdf_parser_decode, HexDecode) {
     uint8_t* result = nullptr;
     uint32_t result_size = 0;
     EXPECT_EQ(ptr->processed_size,
-              HexDecode(ptr->input, ptr->input_size, result, result_size))
+              HexDecode(ptr->input, ptr->input_size, &result, &result_size))
         << "for case " << i;
     ASSERT_EQ(ptr->expected_size, result_size);
     for (size_t j = 0; j < result_size; ++j) {
@@ -79,8 +79,8 @@ TEST(fpdf_parser_decode, HexDecode) {
 
 TEST(fpdf_parser_decode, EncodeText) {
   struct EncodeTestData {
-    const FX_WCHAR* input;
-    const FX_CHAR* expected_output;
+    const wchar_t* input;
+    const char* expected_output;
     FX_STRSIZE expected_length;
   } test_data[] = {
       // Empty src string.
@@ -102,7 +102,7 @@ TEST(fpdf_parser_decode, EncodeText) {
     CFX_ByteString output = PDF_EncodeText(test_case.input);
     ASSERT_EQ(test_case.expected_length, output.GetLength()) << "for case "
                                                              << i;
-    const FX_CHAR* str_ptr = output.c_str();
+    const char* str_ptr = output.c_str();
     for (FX_STRSIZE j = 0; j < test_case.expected_length; ++j) {
       EXPECT_EQ(test_case.expected_output[j], str_ptr[j]) << "for case " << i
                                                           << " char " << j;

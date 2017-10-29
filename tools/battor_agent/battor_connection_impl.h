@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
 #include "device/serial/serial.mojom.h"
 #include "tools/battor_agent/battor_connection.h"
 #include "tools/battor_agent/battor_error.h"
@@ -34,7 +35,6 @@ class BattOrConnectionImpl
   BattOrConnectionImpl(
       const std::string& path,
       BattOrConnection::Listener* listener,
-      scoped_refptr<base::SingleThreadTaskRunner> file_thread_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_thread_task_runner);
   ~BattOrConnectionImpl() override;
 
@@ -104,7 +104,6 @@ class BattOrConnectionImpl
   size_t pending_write_length_;
 
   // Threads needed for serial communication.
-  scoped_refptr<base::SingleThreadTaskRunner> file_thread_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> ui_thread_task_runner_;
 
   std::fstream serial_log_;

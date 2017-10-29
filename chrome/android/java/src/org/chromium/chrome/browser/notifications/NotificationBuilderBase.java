@@ -106,6 +106,7 @@ public abstract class NotificationBuilderBase {
     private final int mLargeIconWidthPx;
     private final int mLargeIconHeightPx;
     private final RoundedIconGenerator mIconGenerator;
+    protected final String mChannelId;
 
     protected CharSequence mTitle;
     protected CharSequence mBody;
@@ -118,19 +119,20 @@ public abstract class NotificationBuilderBase {
     protected PendingIntent mDeleteIntent;
     protected List<Action> mActions = new ArrayList<>(MAX_AUTHOR_PROVIDED_ACTION_BUTTONS);
     protected Action mSettingsAction;
-    protected int mDefaults = Notification.DEFAULT_ALL;
+    protected int mDefaults;
     protected long[] mVibratePattern;
     protected long mTimestamp;
     protected boolean mRenotify;
-
+    protected int mPriority;
     private Bitmap mLargeIcon;
 
-    public NotificationBuilderBase(Resources resources) {
+    public NotificationBuilderBase(Resources resources, String channelId) {
         mLargeIconWidthPx =
                 resources.getDimensionPixelSize(android.R.dimen.notification_large_icon_width);
         mLargeIconHeightPx =
                 resources.getDimensionPixelSize(android.R.dimen.notification_large_icon_height);
         mIconGenerator = createIconGenerator(resources);
+        mChannelId = channelId;
     }
 
     /**
@@ -299,6 +301,15 @@ public abstract class NotificationBuilderBase {
     }
 
     /**
+     * Sets the priority of the notification (if set to private, overrides |setDefaults| and
+     * |setVibrate|)
+     */
+    public NotificationBuilderBase setPriority(int priority) {
+        mPriority = priority;
+        return this;
+    }
+
+    /**
      * Sets the timestamp at which the event of the notification took place.
      */
     public NotificationBuilderBase setTimestamp(long timestamp) {
@@ -358,9 +369,10 @@ public abstract class NotificationBuilderBase {
      */
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     protected Notification createPublicNotification(Context context) {
-        // Use Android's Notification.Builder because we want the default small icon behaviour.
-        Notification.Builder builder =
-                new Notification.Builder(context)
+        // Use a non-compat builder because we want the default small icon behaviour.
+        ChromeNotificationBuilder builder =
+                NotificationBuilderFactory
+                        .createChromeNotificationBuilder(false /* preferCompat */, mChannelId)
                         .setContentText(context.getString(
                                 org.chromium.chrome.R.string.notification_hidden_text))
                         .setSmallIcon(org.chromium.chrome.R.drawable.ic_chrome);

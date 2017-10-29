@@ -18,7 +18,9 @@
 #include "core/fpdfapi/render/cpdf_imageloader.h"
 #include "core/fpdfapi/render/cpdf_rendercontext.h"
 #include "core/fpdfapi/render/cpdf_renderoptions.h"
-#include "core/fxge/cfx_fxgedevice.h"
+#include "core/fxcrt/cfx_retain_ptr.h"
+#include "core/fxcrt/cfx_unowned_ptr.h"
+#include "core/fxge/cfx_defaultrenderdevice.h"
 #include "core/fxge/cfx_renderdevice.h"
 
 class CCodec_Jbig2Context;
@@ -29,8 +31,8 @@ class CPDF_Document;
 class CPDF_Stream;
 
 typedef struct {
-  FX_FLOAT m_DecodeMin;
-  FX_FLOAT m_DecodeStep;
+  float m_DecodeMin;
+  float m_DecodeStep;
   int m_ColorKeyMin;
   int m_ColorKeyMax;
 } DIB_COMP_DATA;
@@ -39,7 +41,9 @@ typedef struct {
 
 class CPDF_DIBSource : public CFX_DIBSource {
  public:
-  CPDF_DIBSource();
+  template <typename T, typename... Args>
+  friend CFX_RetainPtr<T> pdfium::MakeRetain(Args&&... args);
+
   ~CPDF_DIBSource() override;
 
   bool Load(CPDF_Document* pDoc, const CPDF_Stream* pStream);
@@ -67,19 +71,24 @@ class CPDF_DIBSource : public CFX_DIBSource {
                          uint32_t GroupFamily = 0,
                          bool bLoadMask = false);
   int ContinueLoadDIBSource(IFX_Pause* pPause);
-  int StratLoadMask();
+  int StartLoadMask();
   int StartLoadMaskDIB();
   int ContinueLoadMaskDIB(IFX_Pause* pPause);
   int ContinueToLoadMask();
-  CPDF_DIBSource* DetachMask();
+  CFX_RetainPtr<CPDF_DIBSource> DetachMask();
 
  private:
+  CPDF_DIBSource();
+
   bool LoadColorInfo(const CPDF_Dictionary* pFormResources,
                      const CPDF_Dictionary* pPageResources);
-  DIB_COMP_DATA* GetDecodeAndMaskArray(bool& bDefaultDecode, bool& bColorKey);
+  DIB_COMP_DATA* GetDecodeAndMaskArray(bool* bDefaultDecode, bool* bColorKey);
   void LoadJpxBitmap();
   void LoadPalette();
   int CreateDecoder();
+  bool CreateDCTDecoder(const uint8_t* src_data,
+                        uint32_t src_size,
+                        const CPDF_Dictionary* pParams);
   void TranslateScanline24bpp(uint8_t* dest_scan,
                               const uint8_t* src_scan) const;
   void ValidateDictParam();
@@ -112,10 +121,10 @@ class CPDF_DIBSource : public CFX_DIBSource {
                                int clip_width) const;
   bool TransMask() const;
 
-  CPDF_Document* m_pDocument;
-  const CPDF_Stream* m_pStream;
-  std::unique_ptr<CPDF_StreamAcc> m_pStreamAcc;
-  const CPDF_Dictionary* m_pDict;
+  CFX_UnownedPtr<CPDF_Document> m_pDocument;
+  CFX_UnownedPtr<const CPDF_Stream> m_pStream;
+  CFX_UnownedPtr<const CPDF_Dictionary> m_pDict;
+  CFX_RetainPtr<CPDF_StreamAcc> m_pStreamAcc;
   CPDF_ColorSpace* m_pColorSpace;
   uint32_t m_Family;
   uint32_t m_bpc;
@@ -133,12 +142,12 @@ class CPDF_DIBSource : public CFX_DIBSource {
   DIB_COMP_DATA* m_pCompData;
   uint8_t* m_pLineBuf;
   uint8_t* m_pMaskedLine;
-  std::unique_ptr<CFX_DIBitmap> m_pCachedBitmap;
+  CFX_RetainPtr<CFX_DIBitmap> m_pCachedBitmap;
+  CFX_RetainPtr<CPDF_DIBSource> m_pMask;
+  CFX_RetainPtr<CPDF_StreamAcc> m_pGlobalStream;
   std::unique_ptr<CCodec_ScanlineDecoder> m_pDecoder;
-  CPDF_DIBSource* m_pMask;
-  std::unique_ptr<CPDF_StreamAcc> m_pGlobalStream;
   std::unique_ptr<CCodec_Jbig2Context> m_pJbig2Context;
-  CPDF_Stream* m_pMaskStream;
+  CFX_UnownedPtr<CPDF_Stream> m_pMaskStream;
   int m_Status;
 };
 

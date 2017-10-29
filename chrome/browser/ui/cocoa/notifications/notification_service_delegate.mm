@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <AppKit/AppKit.h>
-
 #import "chrome/browser/ui/cocoa/notifications/notification_service_delegate.h"
+
+#import <AppKit/AppKit.h>
 
 #include "base/mac/scoped_nsobject.h"
 #import "chrome/browser/ui/cocoa/notifications/alert_notification_service.h"
@@ -15,10 +15,14 @@
 @class NSUserNotificationCenter;
 
 @implementation ServiceDelegate {
+  // Helper to manage the XPC transaction reference count with respect to
+  // still-visible notifications.
   base::scoped_nsobject<XPCTransactionHandler> transactionHandler_;
-}
 
-@synthesize connection = connection_;
+  // Client connection accepted from the browser process, to which messages
+  // are sent in response to notification actions.
+  base::scoped_nsobject<NSXPCConnection> connection_;
+}
 
 - (instancetype)init {
   if ((self = [super init])) {
@@ -38,9 +42,10 @@
   newConnection.exportedInterface =
       [NSXPCInterface interfaceWithProtocol:@protocol(NotificationDelivery)];
   [newConnection.exportedInterface
-         setClasses:[NSSet setWithObjects:[NSData class], [NSDictionary class],
-                                          [NSImage class], [NSNumber class],
-                                          [NSString class], nil]
+         setClasses:[NSSet setWithObjects:[NSArray class], [NSData class],
+                                          [NSDictionary class], [NSImage class],
+                                          [NSNumber class], [NSString class],
+                                          nil]
         forSelector:@selector(deliverNotification:)
       argumentIndex:0
             ofReply:NO];
@@ -51,13 +56,13 @@
   newConnection.exportedObject = object.get();
   newConnection.remoteObjectInterface =
       [NSXPCInterface interfaceWithProtocol:@protocol(NotificationReply)];
-  connection_ = newConnection;
+  connection_.reset(newConnection, base::scoped_policy::RETAIN);
   [newConnection resume];
 
   return YES;
 }
 
-// NSUserNotification center delegate
+// NSUserNotificationCenterDelegate:
 - (void)userNotificationCenter:(NSUserNotificationCenter*)center
        didActivateNotification:(NSUserNotification*)notification {
   NSDictionary* response =
@@ -65,7 +70,7 @@
   [[connection_ remoteObjectProxy] notificationClick:response];
 }
 
-// _NSUserNotificationCenterDelegatePrivate
+// _NSUserNotificationCenterDelegatePrivate:
 - (void)userNotificationCenter:(NSUserNotificationCenter*)center
                didDismissAlert:(NSUserNotification*)notification {
   NSDictionary* response =

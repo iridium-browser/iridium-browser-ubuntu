@@ -36,20 +36,20 @@ SearchController::SearchController(SearchBoxModel* search_box,
 SearchController::~SearchController() {
 }
 
-void SearchController::Start(bool is_voice_query) {
+void SearchController::Start() {
   Stop();
 
   base::string16 query;
   base::TrimWhitespace(search_box_->text(), base::TRIM_ALL, &query);
 
+  is_voice_query_ = search_box_->is_voice_query();
+
   dispatching_query_ = true;
   for (const auto& provider : providers_)
-    provider->Start(is_voice_query, query);
+    provider->Start(is_voice_query_, query);
 
   dispatching_query_ = false;
   query_for_recommendation_ = query.empty() ? true : false;
-
-  is_voice_query_ = is_voice_query;
 
   OnResultsChanged();
 
@@ -103,8 +103,10 @@ void SearchController::InvokeResultAction(SearchResult* result,
   result->InvokeAction(action_index, event_flags);
 }
 
-size_t SearchController::AddGroup(size_t max_results, double multiplier) {
-  return mixer_->AddGroup(max_results, multiplier);
+size_t SearchController::AddGroup(size_t max_results,
+                                  double multiplier,
+                                  double boost) {
+  return mixer_->AddGroup(max_results, multiplier, boost);
 }
 
 void SearchController::AddProvider(size_t group_id,

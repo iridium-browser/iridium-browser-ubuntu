@@ -7,11 +7,11 @@
 
 #include "core/CoreExport.h"
 #include "platform/loader/fetch/Resource.h"
-#include "wtf/Functional.h"
-#include "wtf/HashMap.h"
-#include "wtf/HashSet.h"
-#include "wtf/Noncopyable.h"
-#include "wtf/Vector.h"
+#include "platform/wtf/Functional.h"
+#include "platform/wtf/HashMap.h"
+#include "platform/wtf/HashSet.h"
+#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 
@@ -23,37 +23,37 @@ class CORE_EXPORT InspectorResourceContentLoader final
   WTF_MAKE_NONCOPYABLE(InspectorResourceContentLoader);
 
  public:
-  static InspectorResourceContentLoader* create(LocalFrame* inspectedFrame) {
-    return new InspectorResourceContentLoader(inspectedFrame);
+  static InspectorResourceContentLoader* Create(LocalFrame* inspected_frame) {
+    return new InspectorResourceContentLoader(inspected_frame);
   }
   ~InspectorResourceContentLoader();
-  void dispose();
+  void Dispose();
   DECLARE_TRACE();
 
-  int createClientId();
-  void ensureResourcesContentLoaded(int clientId,
+  int CreateClientId();
+  void EnsureResourcesContentLoaded(int client_id,
                                     std::unique_ptr<WTF::Closure> callback);
-  void cancel(int clientId);
-  void didCommitLoadForLocalFrame(LocalFrame*);
+  void Cancel(int client_id);
+  void DidCommitLoadForLocalFrame(LocalFrame*);
 
  private:
   class ResourceClient;
 
   explicit InspectorResourceContentLoader(LocalFrame*);
-  void resourceFinished(ResourceClient*);
-  void checkDone();
-  void start();
-  void stop();
-  bool hasFinished();
+  void ResourceFinished(ResourceClient*);
+  void CheckDone();
+  void Start();
+  void Stop();
+  bool HasFinished();
 
   using Callbacks = Vector<std::unique_ptr<WTF::Closure>>;
-  HashMap<int, Callbacks> m_callbacks;
-  bool m_allRequestsStarted;
-  bool m_started;
-  Member<LocalFrame> m_inspectedFrame;
-  HeapHashSet<Member<ResourceClient>> m_pendingResourceClients;
-  HeapVector<Member<Resource>> m_resources;
-  int m_lastClientId;
+  HashMap<int, Callbacks> callbacks_;
+  bool all_requests_started_;
+  bool started_;
+  Member<LocalFrame> inspected_frame_;
+  HeapHashSet<Member<ResourceClient>> pending_resource_clients_;
+  HeapVector<Member<Resource>> resources_;
+  int last_client_id_;
 
   friend class ResourceClient;
 };

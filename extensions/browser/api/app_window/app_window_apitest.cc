@@ -30,57 +30,28 @@
 
 namespace extensions {
 
-namespace {
-
-class TestAppWindowRegistryObserver : public AppWindowRegistry::Observer {
- public:
-  explicit TestAppWindowRegistryObserver(Profile* profile)
-      : profile_(profile), icon_updates_(0) {
-    AppWindowRegistry::Get(profile_)->AddObserver(this);
-  }
-  ~TestAppWindowRegistryObserver() override {
-    AppWindowRegistry::Get(profile_)->RemoveObserver(this);
-  }
-
-  // Overridden from AppWindowRegistry::Observer:
-  void OnAppWindowIconChanged(AppWindow* app_window) override {
-    ++icon_updates_;
-  }
-
-  int icon_updates() { return icon_updates_; }
-
- private:
-  Profile* profile_;
-  int icon_updates_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestAppWindowRegistryObserver);
-};
-
-}  // namespace
+using AppWindowApiTest = PlatformAppBrowserTest;
+using ExperimentalAppWindowApiTest = ExperimentalPlatformAppBrowserTest;
 
 // Tests chrome.app.window.setIcon.
-IN_PROC_BROWSER_TEST_F(ExperimentalPlatformAppBrowserTest, WindowsApiSetIcon) {
-  std::unique_ptr<TestAppWindowRegistryObserver> test_observer(
-      new TestAppWindowRegistryObserver(browser()->profile()));
+IN_PROC_BROWSER_TEST_F(ExperimentalAppWindowApiTest, SetIcon) {
   ExtensionTestMessageListener listener("ready", true);
 
   // Launch the app and wait for it to be ready.
   LoadAndLaunchPlatformApp("windows_api_set_icon", &listener);
-  EXPECT_EQ(0, test_observer->icon_updates());
   listener.Reply("");
+
+  AppWindow* app_window = GetFirstAppWindow();
+  ASSERT_TRUE(app_window);
 
   // Now wait until the WebContent has decoded the icon and chrome has
   // processed it. This needs to be in a loop since the renderer runs in a
   // different process.
-  while (test_observer->icon_updates() < 1) {
-    base::RunLoop run_loop;
-    run_loop.RunUntilIdle();
-  }
-  AppWindow* app_window = GetFirstAppWindow();
-  ASSERT_TRUE(app_window);
+  while (app_window->custom_app_icon().IsEmpty())
+    base::RunLoop().RunUntilIdle();
+
   EXPECT_NE(std::string::npos,
             app_window->app_icon_url().spec().find("icon.png"));
-  EXPECT_EQ(1, test_observer->icon_updates());
 }
 
 // TODO(asargent) - Figure out what to do about the fact that minimize events
@@ -90,7 +61,7 @@ IN_PROC_BROWSER_TEST_F(ExperimentalPlatformAppBrowserTest, WindowsApiSetIcon) {
 // Flaky on Mac, http://crbug.com/232330
 #if defined(TOOLKIT_VIEWS) && !(defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiProperties) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, Properties) {
 #if defined(OS_MACOSX)
   if (base::mac::IsOS10_10())
     return;  // Fails when swarmed. http://crbug.com/660582
@@ -101,44 +72,40 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiProperties) {
 
 #endif  // defined(TOOLKIT_VIEWS)
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       WindowsApiAlwaysOnTopWithPermissions) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, AlwaysOnTopWithPermissions) {
   EXPECT_TRUE(RunPlatformAppTest(
       "platform_apps/windows_api_always_on_top/has_permissions")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       WindowsApiAlwaysOnTopWithOldPermissions) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, AlwaysOnTopWithOldPermissions) {
   EXPECT_TRUE(RunPlatformAppTest(
       "platform_apps/windows_api_always_on_top/has_old_permissions"))
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       WindowsApiAlwaysOnTopNoPermissions) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, AlwaysOnTopNoPermissions) {
   EXPECT_TRUE(RunPlatformAppTest(
       "platform_apps/windows_api_always_on_top/no_permissions")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiGet) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, Get) {
   EXPECT_TRUE(RunPlatformAppTest("platform_apps/windows_api_get"))
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiSetShapeHasPerm) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, SetShapeHasPerm) {
   EXPECT_TRUE(
       RunPlatformAppTest("platform_apps/windows_api_shape/has_permission"))
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiSetShapeNoPerm) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, SetShapeNoPerm) {
   EXPECT_TRUE(
       RunPlatformAppTest("platform_apps/windows_api_shape/no_permission"))
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       WindowsApiAlphaEnabledHasPermissions) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, AlphaEnabledHasPermissions) {
   const char kNoAlphaDir[] =
       "platform_apps/windows_api_alpha_enabled/has_permissions_no_alpha";
   const char kHasAlphaDir[] =
@@ -159,14 +126,13 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
   EXPECT_TRUE(RunPlatformAppTest(test_dir)) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       WindowsApiAlphaEnabledNoPermissions) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, AlphaEnabledNoPermissions) {
   EXPECT_TRUE(RunPlatformAppTest(
       "platform_apps/windows_api_alpha_enabled/no_permissions"))
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiAlphaEnabledInStable) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, AlphaEnabledInStable) {
   extensions::ScopedCurrentChannel channel(version_info::Channel::STABLE);
   EXPECT_TRUE(RunPlatformAppTestWithFlags(
       "platform_apps/windows_api_alpha_enabled/in_stable",
@@ -176,15 +142,13 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiAlphaEnabledInStable) {
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       WindowsApiAlphaEnabledWrongFrameType) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, AlphaEnabledWrongFrameType) {
   EXPECT_TRUE(RunPlatformAppTest(
       "platform_apps/windows_api_alpha_enabled/wrong_frame_type"))
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       WindowsApiVisibleOnAllWorkspacesInStable) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, VisibleOnAllWorkspacesInStable) {
   extensions::ScopedCurrentChannel channel(version_info::Channel::STABLE);
   EXPECT_TRUE(RunPlatformAppTest(
       "platform_apps/windows_api_visible_on_all_workspaces/in_stable"))
@@ -192,8 +156,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
 }
 
 #if defined(OS_CHROMEOS)
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       WindowsApiImeWindowHasPermissions) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, ImeWindowHasPermissions) {
   EXPECT_TRUE(RunComponentExtensionTest(
       "platform_apps/windows_api_ime/has_permissions_whitelisted"))
       << message_;
@@ -204,8 +167,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       WindowsApiImeWindowNoPermissions) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, ImeWindowNoPermissions) {
   EXPECT_TRUE(RunComponentExtensionTest(
       "platform_apps/windows_api_ime/no_permissions_whitelisted"))
       << message_;
@@ -215,8 +177,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       WindowsApiImeWindowNotFullscreen) {
+IN_PROC_BROWSER_TEST_F(AppWindowApiTest, ImeWindowNotFullscreen) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   command_line->AppendSwitch(switches::kForceAppMode);
   command_line->AppendSwitchASCII(switches::kAppId,

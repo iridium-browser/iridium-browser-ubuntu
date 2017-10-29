@@ -19,10 +19,8 @@ namespace chromeos {
 
 namespace {
 
-// PPD reference fields
-const char kUserSuppliedPpdUrl[] = "user_supplied_ppd_url";
-// TODO(justincarlson) -- This should be changed to effective_make_and_model to
-// match the implementation.
+// For historical reasons, the effective_make_and_model field is just
+// effective_model for policy printers.
 const char kEffectiveModel[] = "effective_model";
 
 // printer fields
@@ -31,48 +29,30 @@ const char kDescription[] = "description";
 const char kManufacturer[] = "manufacturer";
 const char kModel[] = "model";
 const char kUri[] = "uri";
-const char kPpdReference[] = "ppd_reference";
 const char kUUID[] = "uuid";
-
-// The name of the PpdResource for policy printers.
 const char kPpdResource[] = "ppd_resource";
 
-Printer::PpdReference DictionaryToPpdReference(
-    const base::DictionaryValue* value) {
-  Printer::PpdReference ppd;
-  value->GetString(kUserSuppliedPpdUrl, &ppd.user_supplied_ppd_url);
-  value->GetString(kEffectiveModel, &ppd.effective_make_and_model);
-  return ppd;
-}
-
-// Convert a PpdReference struct to a DictionaryValue.
-std::unique_ptr<base::DictionaryValue> PpdReferenceToDictionary(
-    const Printer::PpdReference& ppd) {
-  auto dictionary = base::MakeUnique<DictionaryValue>();
-  if (!ppd.user_supplied_ppd_url.empty()) {
-    dictionary->SetString(kUserSuppliedPpdUrl, ppd.user_supplied_ppd_url);
-  }
-  if (!ppd.effective_make_and_model.empty()) {
-    dictionary->SetString(kEffectiveModel, ppd.effective_make_and_model);
-  }
-  return dictionary;
-}
-
-// Converts |value| into a Printer object for the fields that are shared
-// between pref printers and policy printers.
-std::unique_ptr<Printer> DictionaryToPrinter(const DictionaryValue& value) {
-  std::string id;
-  if (!value.GetString(printing::kPrinterId, &id)) {
-    LOG(WARNING) << "Record id required";
-    return nullptr;
-  }
-
-  std::unique_ptr<Printer> printer = base::MakeUnique<Printer>(id);
-
+// Populates the |printer| object with corresponding fields from |value|.
+// Returns false if |value| is missing a required field.
+bool DictionaryToPrinter(const DictionaryValue& value, Printer* printer) {
+  // Mandatory fields
   std::string display_name;
-  if (value.GetString(kDisplayName, &display_name))
+  if (value.GetString(kDisplayName, &display_name)) {
     printer->set_display_name(display_name);
+  } else {
+    LOG(WARNING) << "Display name required";
+    return false;
+  }
 
+  std::string uri;
+  if (value.GetString(kUri, &uri)) {
+    printer->set_uri(uri);
+  } else {
+    LOG(WARNING) << "Uri required";
+    return false;
+  }
+
+  // Optional fields
   std::string description;
   if (value.GetString(kDescription, &description))
     printer->set_description(description);
@@ -85,69 +65,51 @@ std::unique_ptr<Printer> DictionaryToPrinter(const DictionaryValue& value) {
   if (value.GetString(kModel, &model))
     printer->set_model(model);
 
-  std::string uri;
-  if (value.GetString(kUri, &uri))
-    printer->set_uri(uri);
+  std::string make_and_model = manufacturer;
+  if (!manufacturer.empty() && !model.empty())
+    make_and_model.append(" ");
+  make_and_model.append(model);
+  printer->set_make_and_model(make_and_model);
 
   std::string uuid;
   if (value.GetString(kUUID, &uuid))
     printer->set_uuid(uuid);
 
-  return printer;
+  return true;
 }
 
 }  // namespace
 
-namespace printing {
-
 const char kPrinterId[] = "id";
 
-std::unique_ptr<Printer> PrefToPrinter(const DictionaryValue& value) {
-  if (!value.HasKey(kPrinterId)) {
+std::unique_ptr<Printer> RecommendedPrinterToPrinter(
+    const base::DictionaryValue& pref) {
+  std::string id;
+  if (!pref.GetString(kPrinterId, &id)) {
     LOG(WARNING) << "Record id required";
     return nullptr;
   }
 
-  std::unique_ptr<Printer> printer = DictionaryToPrinter(value);
-  printer->set_source(Printer::SRC_USER_PREFS);
-
-  const DictionaryValue* ppd;
-  if (value.GetDictionary(kPpdReference, &ppd)) {
-    *printer->mutable_ppd_reference() = DictionaryToPpdReference(ppd);
+  std::unique_ptr<Printer> printer = base::MakeUnique<Printer>(id);
+  if (!DictionaryToPrinter(pref, printer.get())) {
+    LOG(WARNING) << "Failed to parse policy printer.";
+    return nullptr;
   }
 
-  return printer;
-}
-
-std::unique_ptr<base::DictionaryValue> PrinterToPref(const Printer& printer) {
-  std::unique_ptr<DictionaryValue> dictionary =
-      base::MakeUnique<base::DictionaryValue>();
-  dictionary->SetString(kPrinterId, printer.id());
-  dictionary->SetString(kDisplayName, printer.display_name());
-  dictionary->SetString(kDescription, printer.description());
-  dictionary->SetString(kManufacturer, printer.manufacturer());
-  dictionary->SetString(kModel, printer.model());
-  dictionary->SetString(kUri, printer.uri());
-  dictionary->SetString(kUUID, printer.uuid());
-
-  dictionary->Set(kPpdReference,
-                  PpdReferenceToDictionary(printer.ppd_reference()));
-
-  return dictionary;
-}
-
-std::unique_ptr<Printer> RecommendedPrinterToPrinter(
-    const base::DictionaryValue& pref) {
-  std::unique_ptr<Printer> printer = DictionaryToPrinter(pref);
   printer->set_source(Printer::SRC_POLICY);
 
   const DictionaryValue* ppd;
-  if (pref.GetDictionary(kPpdResource, &ppd)) {
-    *printer->mutable_ppd_reference() = DictionaryToPpdReference(ppd);
+  std::string make_and_model;
+  if (pref.GetDictionary(kPpdResource, &ppd) &&
+      ppd->GetString(kEffectiveModel, &make_and_model)) {
+    printer->mutable_ppd_reference()->effective_make_and_model = make_and_model;
+  } else {
+    // Make and model is mandatory
+    LOG(WARNING) << "Missing model information for policy printer.";
+    return nullptr;
   }
 
   return printer;
 }
 
-}  // namespace printing
 }  // namespace chromeos

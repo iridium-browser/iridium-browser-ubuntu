@@ -24,7 +24,6 @@
 #include "printing/metafile.h"
 #include "printing/print_job_constants.h"
 #include "printing/print_settings.h"
-#include "printing/printing_context_no_system_dialog.h"
 #include "printing/units.h"
 
 namespace printing {
@@ -46,6 +45,8 @@ const char* GetColorModelForMode(int color_mode) {
     case RGB16:
     case RGBA:
     case COLORMODE_COLOR:
+    case BROTHER_CUPS_COLOR:
+    case BROTHER_BRSCRIPT3_COLOR:
     case HP_COLOR_COLOR:
     case PRINTOUTMODE_NORMAL:
     case PROCESSCOLORMODEL_CMYK:
@@ -56,6 +57,8 @@ const char* GetColorModelForMode(int color_mode) {
     case BLACK:
     case GRAYSCALE:
     case COLORMODE_MONOCHROME:
+    case BROTHER_CUPS_MONO:
+    case BROTHER_BRSCRIPT3_BLACK:
     case HP_COLOR_BLACK:
     case PRINTOUTMODE_NORMAL_GRAY:
     case PROCESSCOLORMODEL_GREYSCALE:
@@ -146,10 +149,7 @@ void SetPrintableArea(PrintSettings* settings,
 
 // static
 std::unique_ptr<PrintingContext> PrintingContext::Create(Delegate* delegate) {
-  if (PrintBackend::GetNativeCupsEnabled())
-    return base::MakeUnique<PrintingContextChromeos>(delegate);
-
-  return base::MakeUnique<PrintingContextNoSystemDialog>(delegate);
+  return base::MakeUnique<PrintingContextChromeos>(delegate);
 }
 
 PrintingContextChromeos::PrintingContextChromeos(Delegate* delegate)

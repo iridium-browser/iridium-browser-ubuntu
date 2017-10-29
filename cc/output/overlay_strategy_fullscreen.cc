@@ -38,12 +38,12 @@ bool OverlayStrategyFullscreen::Attempt(
   if (front == quad_list->end())
     return false;
 
-  OverlayCandidate candidate;
-  if (!OverlayCandidate::FromDrawQuad(resource_provider, *front, &candidate)) {
+  const DrawQuad* quad = *front;
+  if (quad->ShouldDrawWithBlending())
     return false;
-  }
 
-  if (candidate.transform != gfx::OVERLAY_TRANSFORM_NONE) {
+  OverlayCandidate candidate;
+  if (!OverlayCandidate::FromDrawQuad(resource_provider, quad, &candidate)) {
     return false;
   }
 

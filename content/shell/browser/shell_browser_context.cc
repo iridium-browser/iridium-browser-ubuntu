@@ -15,6 +15,7 @@
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/network_session_configurator/common/network_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
@@ -67,11 +68,15 @@ ShellBrowserContext::ShellBrowserContext(bool off_the_record,
 ShellBrowserContext::~ShellBrowserContext() {
   BrowserContextDependencyManager::GetInstance()->
       DestroyBrowserContextServices(this);
-  ShutdownStoragePartitions();
+  // Need to destruct the ResourceContext before posting tasks which may delete
+  // the URLRequestContext because ResourceContext's destructor will remove any
+  // outstanding request while URLRequestContext's destructor ensures that there
+  // are no more outstanding requests.
   if (resource_context_) {
     BrowserThread::DeleteSoon(
       BrowserThread::IO, FROM_HERE, resource_context_.release());
   }
+  ShutdownStoragePartitions();
 }
 
 void ShellBrowserContext::InitWhileIOAllowed() {
@@ -119,10 +124,12 @@ void ShellBrowserContext::InitWhileIOAllowed() {
   BrowserContext::Initialize(this, path_);
 }
 
+#if !defined(OS_ANDROID)
 std::unique_ptr<ZoomLevelDelegate> ShellBrowserContext::CreateZoomLevelDelegate(
     const base::FilePath&) {
   return std::unique_ptr<ZoomLevelDelegate>();
 }
+#endif  // !defined(OS_ANDROID)
 
 base::FilePath ShellBrowserContext::GetPath() const {
   return path_;
@@ -149,7 +156,6 @@ ShellBrowserContext::CreateURLRequestContextGetter(
   return new ShellURLRequestContextGetter(
       ignore_certificate_errors_, GetPath(),
       BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
       protocol_handlers, std::move(request_interceptors), net_log_);
 }
 
@@ -215,6 +221,11 @@ BackgroundSyncController* ShellBrowserContext::GetBackgroundSyncController() {
   if (!background_sync_controller_)
     background_sync_controller_.reset(new MockBackgroundSyncController());
   return background_sync_controller_.get();
+}
+
+BrowsingDataRemoverDelegate*
+ShellBrowserContext::GetBrowsingDataRemoverDelegate() {
+  return nullptr;
 }
 
 }  // namespace content

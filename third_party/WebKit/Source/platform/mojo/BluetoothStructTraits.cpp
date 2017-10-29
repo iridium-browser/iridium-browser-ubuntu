@@ -25,7 +25,7 @@ bool StructTraits<bluetooth::mojom::UUIDDataView, WTF::String>::Read(
 // static
 void StructTraits<bluetooth::mojom::UUIDDataView, WTF::String>::SetToNull(
     WTF::String* output) {
-  if (output->isNull())
+  if (output->IsNull())
     return;
   WTF::String result;
   output->swap(result);

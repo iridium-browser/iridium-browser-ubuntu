@@ -11,8 +11,11 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "content/public/app/content_main_delegate.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/renderer/content_renderer_client.h"
 #include "headless/lib/browser/headless_platform_event_source.h"
 #include "headless/lib/headless_content_client.h"
+#include "headless/public/headless_export.h"
 
 namespace base {
 class CommandLine;
@@ -21,9 +24,10 @@ class CommandLine;
 namespace headless {
 
 class HeadlessBrowserImpl;
-class HeadlessContentBrowserClient;
 
-class HeadlessContentMainDelegate : public content::ContentMainDelegate {
+// Exported for tests.
+class HEADLESS_EXPORT HeadlessContentMainDelegate
+    : public content::ContentMainDelegate {
  public:
   explicit HeadlessContentMainDelegate(
       std::unique_ptr<HeadlessBrowserImpl> browser);
@@ -36,6 +40,7 @@ class HeadlessContentMainDelegate : public content::ContentMainDelegate {
       const std::string& process_type,
       const content::MainFunctionParams& main_function_params) override;
   content::ContentBrowserClient* CreateContentBrowserClient() override;
+  content::ContentRendererClient* CreateContentRendererClient() override;
 
   HeadlessBrowserImpl* browser() const { return browser_.get(); }
 
@@ -52,7 +57,8 @@ class HeadlessContentMainDelegate : public content::ContentMainDelegate {
 
   static HeadlessContentMainDelegate* GetInstance();
 
-  std::unique_ptr<HeadlessContentBrowserClient> browser_client_;
+  std::unique_ptr<content::ContentRendererClient> renderer_client_;
+  std::unique_ptr<content::ContentBrowserClient> browser_client_;
   HeadlessContentClient content_client_;
   HeadlessPlatformEventSource platform_event_source_;
 

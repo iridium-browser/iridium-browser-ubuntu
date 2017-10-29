@@ -4,11 +4,45 @@
 
 #include "headless/public/util/http_url_fetcher.h"
 
+#include "net/base/elements_upload_data_stream.h"
 #include "net/base/io_buffer.h"
+#include "net/base/upload_bytes_element_reader.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/http/http_response_headers.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+
+namespace {
+
+constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
+    net::DefineNetworkTrafficAnnotation("headless_url_request", R"(
+        semantics {
+          sender: "Headless"
+          description:
+            "Headless Chromium allows running Chromium in a headless/server "
+            "environment. Expected use cases include loading web pages, "
+            "extracting metadata (e.g., the DOM) and generating bitmaps "
+            "from page contents, using all the modern web platform features "
+            "provided by Chromium and Blink."
+          trigger:
+            "User running Chrome in headless mode, please refer to https://"
+            "chromium.googlesource.com/chromium/src/+/lkgr/headless/README.md "
+            "for more information."
+          data: "Any data based on given request."
+          destination: OTHER
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store:
+            "Various, but cookies stores are deleted when session ends."
+          setting:
+            "This feature cannot be disabled by settings, but it is used only "
+            "if user enters the Headless mode."
+          policy_exception_justification: "Not implemented."
+        })");
+
+}  // namespace
 
 namespace headless {
 
@@ -16,6 +50,7 @@ class HttpURLFetcher::Delegate : public net::URLRequest::Delegate {
  public:
   Delegate(const GURL& rewritten_url,
            const std::string& method,
+           const std::string& post_data,
            const net::HttpRequestHeaders& request_headers,
            const net::URLRequestContext* url_request_context,
            ResultListener* result_listener);
@@ -56,6 +91,7 @@ class HttpURLFetcher::Delegate : public net::URLRequest::Delegate {
 HttpURLFetcher::Delegate::Delegate(
     const GURL& rewritten_url,
     const std::string& method,
+    const std::string& post_data,
     const net::HttpRequestHeaders& request_headers,
     const net::URLRequestContext* url_request_context,
     ResultListener* result_listener)
@@ -63,9 +99,18 @@ HttpURLFetcher::Delegate::Delegate(
       buf_(new net::IOBuffer(kBufSize)),
       request_(url_request_context->CreateRequest(rewritten_url,
                                                   net::DEFAULT_PRIORITY,
-                                                  this)),
+                                                  this,
+                                                  kTrafficAnnotation)),
       result_listener_(result_listener) {
   request_->set_method(method);
+
+  if (!post_data.empty()) {
+    request_->set_upload(net::ElementsUploadDataStream::CreateWithReader(
+        base::MakeUnique<net::UploadBytesElementReader>(post_data.data(),
+                                                        post_data.size()),
+        0));
+  }
+
   request_->SetExtraRequestHeaders(request_headers);
   request_->Start();
 }
@@ -170,8 +215,7 @@ void HttpURLFetcher::Delegate::OnResponseCompleted(net::URLRequest* request,
   // |request->response_info()| that we drop here.  Find a way to pipe it
   // through.
   result_listener_->OnFetchComplete(
-      request->url(), request->GetResponseCode(),
-      request->response_info().headers,
+      request->url(), request->response_info().headers,
       bytes_read_so_far_.c_str(), bytes_read_so_far_.size());
 }
 
@@ -183,10 +227,12 @@ HttpURLFetcher::~HttpURLFetcher() {}
 
 void HttpURLFetcher::StartFetch(const GURL& rewritten_url,
                                 const std::string& method,
+                                const std::string& post_data,
                                 const net::HttpRequestHeaders& request_headers,
                                 ResultListener* result_listener) {
-  delegate_.reset(new Delegate(rewritten_url, method, request_headers,
-                               url_request_context_, result_listener));
+  delegate_.reset(new Delegate(rewritten_url, method, post_data,
+                               request_headers, url_request_context_,
+                               result_listener));
 }
 
 }  // namespace headless

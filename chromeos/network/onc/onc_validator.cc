@@ -8,11 +8,13 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chromeos/network/onc/onc_signature.h"
@@ -128,6 +130,8 @@ std::unique_ptr<base::DictionaryValue> Validator::MapObject(
       valid = ValidateEAP(repaired.get());
     } else if (&signature == &kCertificateSignature) {
       valid = ValidateCertificate(repaired.get());
+    } else if (&signature == &kTetherWithStateSignature) {
+      valid = ValidateTether(repaired.get());
     }
   }
 
@@ -244,7 +248,7 @@ bool Validator::ValidateRecommendedField(
   std::unique_ptr<base::ListValue> repaired_recommended(new base::ListValue);
   for (const auto& entry : *recommended_list) {
     std::string field_name;
-    if (!entry->GetAsString(&field_name)) {
+    if (!entry.GetAsString(&field_name)) {
       NOTREACHED();  // The types of field values are already verified.
       continue;
     }
@@ -281,14 +285,14 @@ bool Validator::ValidateRecommendedField(
     repaired_recommended->AppendString(field_name);
   }
 
-  result->Set(::onc::kRecommended, repaired_recommended.release());
+  result->Set(::onc::kRecommended, std::move(repaired_recommended));
   return true;
 }
 
 bool Validator::ValidateClientCertFields(bool allow_cert_type_none,
                                          base::DictionaryValue* result) {
   using namespace ::onc::client_cert;
-  const char* const kValidCertTypes[] = {kRef, kPattern};
+  const char* const kValidCertTypes[] = {kRef, kPattern, kPKCS11Id};
   std::vector<const char*> valid_cert_types(toVector(kValidCertTypes));
   if (allow_cert_type_none)
     valid_cert_types.push_back(kClientCertTypeNone);
@@ -298,15 +302,14 @@ bool Validator::ValidateClientCertFields(bool allow_cert_type_none,
   std::string cert_type;
   result->GetStringWithoutPathExpansion(kClientCertType, &cert_type);
 
-  if (IsCertPatternInDevicePolicy(cert_type))
-    return false;
-
   bool all_required_exist = true;
 
   if (cert_type == kPattern)
     all_required_exist &= RequireField(*result, kClientCertPattern);
   else if (cert_type == kRef)
     all_required_exist &= RequireField(*result, kClientCertRef);
+  else if (cert_type == kPKCS11Id)
+    all_required_exist &= RequireField(*result, kClientCertPKCS11Id);
 
   return !error_on_missing_field_ || all_required_exist;
 }
@@ -315,8 +318,7 @@ namespace {
 
 std::string JoinStringRange(const std::vector<const char*>& strings,
                             const std::string& separator) {
-  std::vector<std::string> string_vector;
-  std::copy(strings.begin(), strings.end(), std::back_inserter(string_vector));
+  std::vector<base::StringPiece> string_vector(strings.begin(), strings.end());
   return base::JoinString(string_vector, separator);
 }
 
@@ -404,7 +406,7 @@ bool Validator::ListFieldContainsValidValues(
     path_.push_back(field_name);
     for (const auto& entry : *list) {
       std::string value;
-      if (!entry->GetAsString(&value)) {
+      if (!entry.GetAsString(&value)) {
         NOTREACHED();  // The types of field values are already verified.
         continue;
       }
@@ -506,17 +508,6 @@ bool Validator::CheckGuidIsUniqueAndAddToSet(const base::DictionaryValue& dict,
   return true;
 }
 
-bool Validator::IsCertPatternInDevicePolicy(const std::string& cert_type) {
-  if (cert_type == ::onc::client_cert::kPattern &&
-      onc_source_ == ::onc::ONC_SOURCE_DEVICE_POLICY) {
-    error_or_warning_found_ = true;
-    LOG(ERROR) << MessageHeader() << "Client certificate patterns are "
-               << "prohibited in ONC device policies.";
-    return true;
-  }
-  return false;
-}
-
 bool Validator::IsGlobalNetworkConfigInUserImport(
     const base::DictionaryValue& onc_object) {
   if (onc_source_ == ::onc::ONC_SOURCE_USER_IMPORT &&
@@ -547,11 +538,10 @@ bool Validator::ValidateToplevelConfiguration(base::DictionaryValue* result) {
 bool Validator::ValidateNetworkConfiguration(base::DictionaryValue* result) {
   using namespace ::onc::network_config;
 
-  const char* const kValidTypes[] = {::onc::network_type::kEthernet,
-                                     ::onc::network_type::kVPN,
-                                     ::onc::network_type::kWiFi,
-                                     ::onc::network_type::kCellular,
-                                     ::onc::network_type::kWimax};
+  const char* const kValidTypes[] = {
+      ::onc::network_type::kEthernet, ::onc::network_type::kVPN,
+      ::onc::network_type::kWiFi,     ::onc::network_type::kCellular,
+      ::onc::network_type::kWimax,    ::onc::network_type::kTether};
   const std::vector<const char*> valid_types(toVector(kValidTypes));
   const char* const kValidIPConfigTypes[] = {kIPConfigTypeDHCP,
                                              kIPConfigTypeStatic};
@@ -616,6 +606,9 @@ bool Validator::ValidateNetworkConfiguration(base::DictionaryValue* result) {
           RequireField(*result, ::onc::network_config::kWimax);
     } else if (type == ::onc::network_type::kVPN) {
       all_required_exist &= RequireField(*result, ::onc::network_config::kVPN);
+    } else if (type == ::onc::network_type::kTether) {
+      all_required_exist &=
+          RequireField(*result, ::onc::network_config::kTether);
     }
   }
 
@@ -898,7 +891,7 @@ bool Validator::ValidateGlobalNetworkConfiguration(
 
   // Ensure the list contains only legitimate network type identifiers.
   const char* const kValidNetworkTypeValues[] = {kCellular, kEthernet, kWiFi,
-                                                 kWimax};
+                                                 kWimax, kTether};
   const std::vector<const char*> valid_network_type_values(
       toVector(kValidNetworkTypeValues));
   if (!ListFieldContainsValidValues(*result, kDisableNetworkTypes,
@@ -961,10 +954,8 @@ bool Validator::ValidateEAP(base::DictionaryValue* result) {
     return false;
   }
 
-  if (!ValidateClientCertFields(false,  // don't allow ClientCertType None
-                                result)) {
+  if (!ValidateClientCertFields(true /* allow ClientCertType None */, result))
     return false;
-  }
 
   bool all_required_exist = RequireField(*result, kOuter);
 
@@ -983,13 +974,6 @@ bool Validator::ValidateCertificate(base::DictionaryValue* result) {
 
   std::string type;
   result->GetStringWithoutPathExpansion(kType, &type);
-  if (onc_source_ == ::onc::ONC_SOURCE_DEVICE_POLICY &&
-      (type == kServer || type == kAuthority)) {
-    error_or_warning_found_ = true;
-    LOG(ERROR) << MessageHeader() << "Server and authority certificates are "
-               << "prohibited in ONC device policies.";
-    return false;
-  }
 
   if (!CheckGuidIsUniqueAndAddToSet(*result, kGUID, &certificate_guids_))
     return false;
@@ -1011,6 +995,43 @@ bool Validator::ValidateCertificate(base::DictionaryValue* result) {
     all_required_exist &= RequireField(*result, kPKCS12);
   else if (type == kServer || type == kAuthority)
     all_required_exist &= RequireField(*result, kX509);
+
+  return !error_on_missing_field_ || all_required_exist;
+}
+
+bool Validator::ValidateTether(base::DictionaryValue* result) {
+  using namespace ::onc::tether;
+
+  int battery_percentage;
+  if (!result->GetIntegerWithoutPathExpansion(kBatteryPercentage,
+                                              &battery_percentage) ||
+      battery_percentage < 0 || battery_percentage > 100) {
+    // Battery percentage must be present and within [0, 100].
+    error_or_warning_found_ = true;
+    return false;
+  }
+
+  int signal_strength;
+  if (!result->GetIntegerWithoutPathExpansion(kSignalStrength,
+                                              &signal_strength) ||
+      signal_strength < 0 || signal_strength > 100) {
+    // Signal strength must be present and within [0, 100].
+    error_or_warning_found_ = true;
+    return false;
+  }
+
+  std::string carrier;
+  if (!result->GetStringWithoutPathExpansion(kCarrier, &carrier) ||
+      carrier.empty()) {
+    // Carrier must be a non-empty string.
+    error_or_warning_found_ = true;
+    return false;
+  }
+
+  bool all_required_exist = RequireField(*result, kHasConnectedToHost);
+  if (!all_required_exist) {
+    error_or_warning_found_ = true;
+  }
 
   return !error_on_missing_field_ || all_required_exist;
 }

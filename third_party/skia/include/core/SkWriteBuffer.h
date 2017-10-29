@@ -24,7 +24,7 @@ class SkFactorySet;
 class SkFlattenable;
 class SkRefCntSet;
 
-class SkWriteBuffer {
+class SK_API SkWriteBuffer {
 public:
     SkWriteBuffer() {}
     virtual ~SkWriteBuffer() {}
@@ -73,7 +73,7 @@ protected:
 /**
  * Concrete implementation that serializes to a flat binary blob.
  */
-class SkBinaryWriteBuffer : public SkWriteBuffer {
+class SK_API SkBinaryWriteBuffer : public SkWriteBuffer {
 public:
     enum Flags {
         kCrossProcess_Flag = 1 << 0,
@@ -81,7 +81,7 @@ public:
 
     SkBinaryWriteBuffer(uint32_t flags = 0);
     SkBinaryWriteBuffer(void* initialStorage, size_t storageSize, uint32_t flags = 0);
-    ~SkBinaryWriteBuffer();
+    ~SkBinaryWriteBuffer() override;
 
     bool isCrossProcess() const override {
         return SkToBool(fFlags & kCrossProcess_Flag);

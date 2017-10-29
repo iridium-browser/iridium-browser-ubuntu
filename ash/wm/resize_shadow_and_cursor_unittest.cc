@@ -2,15 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/ash_constants.h"
-#include "ash/common/frame/custom_frame_view_ash.h"
-#include "ash/common/wm/window_state.h"
+#include "ash/ash_constants.h"
+#include "ash/frame/custom_frame_view_ash.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/cursor_manager_test_api.h"
+#include "ash/wm/cursor_manager_test_api.h"
 #include "ash/wm/resize_shadow.h"
 #include "ash/wm/resize_shadow_controller.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/window_state.h"
 #include "base/bind.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/cursor/cursor.h"
@@ -20,7 +19,6 @@
 #include "ui/views/widget/widget_delegate.h"
 
 namespace ash {
-namespace test {
 
 namespace {
 
@@ -69,21 +67,38 @@ class ResizeShadowAndCursorTest : public AshTestBase {
     window_->AddChild(child);
   }
 
+  const ResizeShadow* GetShadow() const {
+    return Shell::Get()->resize_shadow_controller()->GetShadowForWindowForTest(
+        window_);
+  }
+
   // Returns the hit test code if there is a resize shadow. Returns HTNOWHERE if
   // there is no resize shadow.
   int ResizeShadowHitTest() const {
-    ash::ResizeShadow* resize_shadow = ash::Shell::GetInstance()
-                                           ->resize_shadow_controller()
-                                           ->GetShadowForWindowForTest(window_);
+    auto* resize_shadow = GetShadow();
     return resize_shadow ? resize_shadow->GetLastHitTestForTest() : HTNOWHERE;
   }
 
   // Returns true if there is a resize shadow.
-  bool HasResizeShadow() const { return ResizeShadowHitTest() != HTNOWHERE; }
+  void VerifyResizeShadow(bool visible) const {
+    if (visible)
+      EXPECT_TRUE(GetShadow());
+    if (GetShadow()) {
+      const ui::Layer* shadow_layer = GetShadow()->GetLayerForTest();
+      EXPECT_EQ(visible, shadow_layer->GetTargetVisibility());
+      ASSERT_TRUE(window_->layer());
+      EXPECT_EQ(window_->layer()->parent(), shadow_layer->parent());
+      const auto& layers = shadow_layer->parent()->children();
+      // Make sure the shadow layer is stacked directly beneath the window
+      // layer.
+      EXPECT_EQ(*(std::find(layers.begin(), layers.end(), shadow_layer) + 1),
+                window_->layer());
+    }
+  }
 
   // Returns the current cursor type.
-  int GetCurrentCursorType() const {
-    CursorManagerTestApi test_api(ash::Shell::GetInstance()->cursor_manager());
+  ui::CursorType GetCurrentCursorType() const {
+    CursorManagerTestApi test_api(Shell::Get()->cursor_manager());
     return test_api.GetCurrentCursor().native_type();
   }
 
@@ -93,8 +108,9 @@ class ResizeShadowAndCursorTest : public AshTestBase {
                                        const gfx::Vector2dF& delta) {
     if (type == ui::ET_GESTURE_SCROLL_END) {
       // After gesture scroll ends, there should be no resize shadow.
-      EXPECT_FALSE(HasResizeShadow());
+      VerifyResizeShadow(false);
     } else {
+      VerifyResizeShadow(true);
       EXPECT_EQ(HTBOTTOMRIGHT, ResizeShadowHitTest());
     }
   }
@@ -114,40 +130,45 @@ TEST_F(ResizeShadowAndCursorTest, MouseHover) {
   ASSERT_TRUE(ash::wm::GetWindowState(window())->IsNormalStateType());
 
   generator.MoveMouseTo(50, 50);
-  EXPECT_FALSE(HasResizeShadow());
-  EXPECT_EQ(ui::kCursorNull, GetCurrentCursorType());
+  VerifyResizeShadow(false);
+  EXPECT_EQ(ui::CursorType::kNull, GetCurrentCursorType());
 
   generator.MoveMouseTo(gfx::Point(50, 0));
+  VerifyResizeShadow(true);
   EXPECT_EQ(HTTOP, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorNorthResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kNorthResize, GetCurrentCursorType());
 
   generator.MoveMouseTo(50, 50);
-  EXPECT_FALSE(HasResizeShadow());
-  EXPECT_EQ(ui::kCursorNull, GetCurrentCursorType());
+  VerifyResizeShadow(false);
+  EXPECT_EQ(ui::CursorType::kNull, GetCurrentCursorType());
 
   generator.MoveMouseTo(200, 100);
+  VerifyResizeShadow(true);
   EXPECT_EQ(HTBOTTOMRIGHT, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorSouthEastResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kSouthEastResize, GetCurrentCursorType());
 
   generator.MoveMouseTo(50, 100);
+  VerifyResizeShadow(true);
   EXPECT_EQ(HTBOTTOM, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorSouthResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kSouthResize, GetCurrentCursorType());
 
   generator.MoveMouseTo(50, 100 + ash::kResizeOutsideBoundsSize - 1);
+  VerifyResizeShadow(true);
   EXPECT_EQ(HTBOTTOM, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorSouthResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kSouthResize, GetCurrentCursorType());
 
   generator.MoveMouseTo(50, 100 + ash::kResizeOutsideBoundsSize + 10);
-  EXPECT_FALSE(HasResizeShadow());
-  EXPECT_EQ(ui::kCursorNull, GetCurrentCursorType());
+  VerifyResizeShadow(false);
+  EXPECT_EQ(ui::CursorType::kNull, GetCurrentCursorType());
 
   generator.MoveMouseTo(50, 100 - ash::kResizeInsideBoundsSize);
+  VerifyResizeShadow(true);
   EXPECT_EQ(HTBOTTOM, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorSouthResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kSouthResize, GetCurrentCursorType());
 
   generator.MoveMouseTo(50, 100 - ash::kResizeInsideBoundsSize - 10);
-  EXPECT_FALSE(HasResizeShadow());
-  EXPECT_EQ(ui::kCursorNull, GetCurrentCursorType());
+  VerifyResizeShadow(false);
+  EXPECT_EQ(ui::CursorType::kNull, GetCurrentCursorType());
 }
 
 // Test that the resize shadows stay visible and that the cursor stays the same
@@ -159,16 +180,19 @@ TEST_F(ResizeShadowAndCursorTest, MouseDrag) {
 
   generator.MoveMouseTo(200, 50);
   generator.PressLeftButton();
+  VerifyResizeShadow(true);
   EXPECT_EQ(HTRIGHT, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorEastResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kEastResize, GetCurrentCursorType());
 
   generator.MoveMouseTo(210, 50);
+  VerifyResizeShadow(true);
   EXPECT_EQ(HTRIGHT, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorEastResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kEastResize, GetCurrentCursorType());
 
   generator.ReleaseLeftButton();
+  VerifyResizeShadow(true);
   EXPECT_EQ(HTRIGHT, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorEastResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kEastResize, GetCurrentCursorType());
 
   gfx::Size new_size(window()->bounds().size());
   EXPECT_NE(new_size.ToString(), initial_size.ToString());
@@ -196,27 +220,42 @@ TEST_F(ResizeShadowAndCursorTest, MaximizeRestore) {
 
   generator.MoveMouseTo(200, 50);
   EXPECT_EQ(HTRIGHT, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorEastResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kEastResize, GetCurrentCursorType());
   generator.MoveMouseTo(200 - ash::kResizeInsideBoundsSize, 50);
   EXPECT_EQ(HTRIGHT, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorEastResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kEastResize, GetCurrentCursorType());
 
   ash::wm::GetWindowState(window())->Maximize();
   gfx::Rect bounds(window()->GetBoundsInRootWindow());
   gfx::Point right_center(bounds.right() - 1,
                           (bounds.y() + bounds.bottom()) / 2);
   generator.MoveMouseTo(right_center);
-  EXPECT_FALSE(HasResizeShadow());
-  EXPECT_EQ(ui::kCursorNull, GetCurrentCursorType());
+  VerifyResizeShadow(false);
+  EXPECT_EQ(ui::CursorType::kNull, GetCurrentCursorType());
 
   ash::wm::GetWindowState(window())->Restore();
   generator.MoveMouseTo(200, 50);
   EXPECT_EQ(HTRIGHT, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorEastResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kEastResize, GetCurrentCursorType());
   generator.MoveMouseTo(200 - ash::kResizeInsideBoundsSize, 50);
   EXPECT_EQ(HTRIGHT, ResizeShadowHitTest());
-  EXPECT_EQ(ui::kCursorEastResize, GetCurrentCursorType());
+  EXPECT_EQ(ui::CursorType::kEastResize, GetCurrentCursorType());
 }
 
-}  // namespace test
+// Verifies that the shadow hides when a window is minimized. Regression test
+// for crbug.com/752583
+TEST_F(ResizeShadowAndCursorTest, Minimize) {
+  ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
+  ASSERT_TRUE(ash::wm::GetWindowState(window())->IsNormalStateType());
+
+  generator.MoveMouseTo(200, 50);
+  VerifyResizeShadow(true);
+
+  ash::wm::GetWindowState(window())->Minimize();
+  VerifyResizeShadow(false);
+
+  ash::wm::GetWindowState(window())->Restore();
+  VerifyResizeShadow(false);
+}
+
 }  // namespace ash

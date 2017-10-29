@@ -9,10 +9,10 @@
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_time.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/quic_config_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/test/gtest_util.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 using std::string;
 
@@ -20,7 +20,7 @@ namespace net {
 namespace test {
 namespace {
 
-class QuicConfigTest : public ::testing::Test {
+class QuicConfigTest : public QuicTest {
  protected:
   QuicConfig config_;
 };
@@ -33,7 +33,6 @@ TEST_F(QuicConfigTest, ToHandshakeMessage) {
   config_.SetIdleNetworkTimeout(QuicTime::Delta::FromSeconds(5),
                                 QuicTime::Delta::FromSeconds(2));
   config_.SetMaxStreamsPerConnection(4, 2);
-  config_.SetSocketReceiveBufferToSend(kDefaultSocketReceiveBuffer);
   CryptoHandshakeMessage msg;
   config_.ToHandshakeMessage(&msg);
 
@@ -53,10 +52,6 @@ TEST_F(QuicConfigTest, ToHandshakeMessage) {
   error = msg.GetUint32(kCFCW, &value);
   EXPECT_EQ(QUIC_NO_ERROR, error);
   EXPECT_EQ(kInitialSessionFlowControlWindowForTest, value);
-
-  error = msg.GetUint32(kSRBF, &value);
-  EXPECT_EQ(QUIC_NO_ERROR, error);
-  EXPECT_EQ(kDefaultSocketReceiveBuffer, value);
 }
 
 TEST_F(QuicConfigTest, ProcessClientHello) {
@@ -73,7 +68,6 @@ TEST_F(QuicConfigTest, ProcessClientHello) {
       2 * kInitialStreamFlowControlWindowForTest);
   client_config.SetInitialSessionFlowControlWindowToSend(
       2 * kInitialSessionFlowControlWindowForTest);
-  client_config.SetSocketReceiveBufferToSend(kDefaultSocketReceiveBuffer);
   client_config.SetForceHolBlocking();
   QuicTagVector copt;
   copt.push_back(kTBBR);
@@ -109,7 +103,6 @@ TEST_F(QuicConfigTest, ProcessClientHello) {
             2 * kInitialStreamFlowControlWindowForTest);
   EXPECT_EQ(config_.ReceivedInitialSessionFlowControlWindowBytes(),
             2 * kInitialSessionFlowControlWindowForTest);
-  EXPECT_EQ(config_.ReceivedSocketReceiveBuffer(), kDefaultSocketReceiveBuffer);
 }
 
 TEST_F(QuicConfigTest, ProcessServerHello) {
@@ -129,7 +122,6 @@ TEST_F(QuicConfigTest, ProcessServerHello) {
       2 * kInitialStreamFlowControlWindowForTest);
   server_config.SetInitialSessionFlowControlWindowToSend(
       2 * kInitialSessionFlowControlWindowForTest);
-  server_config.SetSocketReceiveBufferToSend(kDefaultSocketReceiveBuffer);
   server_config.SetAlternateServerAddressToSend(kTestServerAddress);
   CryptoHandshakeMessage msg;
   server_config.ToHandshakeMessage(&msg);
@@ -147,7 +139,6 @@ TEST_F(QuicConfigTest, ProcessServerHello) {
             2 * kInitialStreamFlowControlWindowForTest);
   EXPECT_EQ(config_.ReceivedInitialSessionFlowControlWindowBytes(),
             2 * kInitialSessionFlowControlWindowForTest);
-  EXPECT_EQ(config_.ReceivedSocketReceiveBuffer(), kDefaultSocketReceiveBuffer);
   EXPECT_TRUE(config_.HasReceivedAlternateServerAddress());
   EXPECT_EQ(kTestServerAddress, config_.ReceivedAlternateServerAddress());
 }

@@ -21,8 +21,11 @@ namespace ntp_snippets {
 // download suggestions.
 struct DownloadSuggestionExtra {
   DownloadSuggestionExtra();
+  DownloadSuggestionExtra(const DownloadSuggestionExtra&);
   ~DownloadSuggestionExtra();
 
+  // The GUID for the downloaded file.
+  std::string download_guid;
   // The file path of the downloaded file once download completes.
   base::FilePath target_file_path;
   // The effective MIME type of downloaded content.
@@ -41,6 +44,15 @@ struct RecentTabSuggestionExtra {
   int tab_id;
   // Underlying offline page identifier.
   int64_t offline_page_id = 0;
+};
+
+// ReadingListSuggestionExtra contains additional data which is only available
+// for Reading List suggestions.
+struct ReadingListSuggestionExtra {
+  // State of the distillation of the suggestion.
+  bool distilled = false;
+  // URL of the page whose favicon should be displayed for this suggestion.
+  GURL favicon_page_url;
 };
 
 // Contains additional data for notification-worthy suggestions.
@@ -94,6 +106,19 @@ class ContentSuggestion {
   // This may be an AMP URL.
   const GURL& url() const { return url_; }
 
+  // The URL of the page that links to a favicon that represents the suggestion.
+  // Path is trimmed for the URL because the current favicon server backend
+  // prefers it this way.
+  GURL url_with_favicon() const {
+    return url_with_favicon_.is_valid() ? GetFaviconDomain(url_with_favicon_)
+                                        : GetFaviconDomain(url_);
+  }
+  void set_url_with_favicon(const GURL& url_with_favicon) {
+    url_with_favicon_ = url_with_favicon;
+  }
+
+  static GURL GetFaviconDomain(const GURL& favicon_url);
+
   // Title of the suggestion.
   const base::string16& title() const { return title_; }
   void set_title(const base::string16& title) { title_ = title; }
@@ -114,6 +139,11 @@ class ContentSuggestion {
   const base::string16& publisher_name() const { return publisher_name_; }
   void set_publisher_name(const base::string16& publisher_name) {
     publisher_name_ = publisher_name;
+  }
+
+  bool is_video_suggestion() const { return is_video_suggestion_; }
+  void set_is_video_suggestion(bool is_video_suggestion) {
+    is_video_suggestion_ = is_video_suggestion;
   }
 
   // TODO(pke): Remove the score from the ContentSuggestion class. The UI only
@@ -141,6 +171,15 @@ class ContentSuggestion {
   void set_recent_tab_suggestion_extra(
       std::unique_ptr<RecentTabSuggestionExtra> recent_tab_suggestion_extra);
 
+  // Extra information for reading list suggestions. Only available for
+  // KnownCategories::READING_LIST suggestions.
+  ReadingListSuggestionExtra* reading_list_suggestion_extra() const {
+    return reading_list_suggestion_extra_.get();
+  }
+  void set_reading_list_suggestion_extra(
+      std::unique_ptr<ReadingListSuggestionExtra>
+          reading_list_suggestion_extra);
+
   // Extra information for notifications. When absent, no notification should be
   // sent for this suggestion. When present, a notification should be sent,
   // unless other factors disallow it (examples: the extra parameters say to;
@@ -159,6 +198,7 @@ class ContentSuggestion {
  private:
   ID id_;
   GURL url_;
+  GURL url_with_favicon_;
   base::string16 title_;
   base::string16 snippet_text_;
   base::Time publish_date_;
@@ -166,12 +206,15 @@ class ContentSuggestion {
   float score_;
   std::unique_ptr<DownloadSuggestionExtra> download_suggestion_extra_;
   std::unique_ptr<RecentTabSuggestionExtra> recent_tab_suggestion_extra_;
+  std::unique_ptr<ReadingListSuggestionExtra> reading_list_suggestion_extra_;
   std::unique_ptr<NotificationExtra> notification_extra_;
 
   // The time when the remote suggestion was fetched from the server. This field
   // is only populated when the ContentSuggestion is created from a
   // RemoteSuggestion.
   base::Time fetch_date_;
+
+  bool is_video_suggestion_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSuggestion);
 };

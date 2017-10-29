@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "headless/public/headless_export.h"
 #include "headless/public/util/generic_url_request_job.h"
 #include "headless/public/util/testing/generic_url_request_mocks.h"
 #include "net/cookies/cookie_store.h"
@@ -18,39 +19,37 @@
 
 namespace headless {
 
-class MockGenericURLRequestJobDelegate : public GenericURLRequestJob::Delegate {
+class HEADLESS_EXPORT MockGenericURLRequestJobDelegate
+    : public GenericURLRequestJob::Delegate {
  public:
   MockGenericURLRequestJobDelegate();
   ~MockGenericURLRequestJobDelegate() override;
 
-  bool BlockOrRewriteRequest(
-      const GURL& url,
-      const std::string& devtools_id,
-      const std::string& method,
-      const std::string& referrer,
-      GenericURLRequestJob::RewriteCallback callback) override;
+  // GenericURLRequestJob::Delegate methods:
+  void OnPendingRequest(PendingRequest* pending_request) override;
+  void OnResourceLoadFailed(const Request* request, net::Error error) override;
+  void OnResourceLoadComplete(
+      const Request* request,
+      const GURL& final_url,
+      scoped_refptr<net::HttpResponseHeaders> response_headers,
+      const char* body,
+      size_t body_size) override;
 
-  const GenericURLRequestJob::HttpResponse* MaybeMatchResource(
-      const GURL& url,
-      const std::string& devtools_id,
-      const std::string& method,
-      const net::HttpRequestHeaders& request_headers) override;
+  using Policy = base::Callback<void(PendingRequest* pending_request)>;
 
-  void OnResourceLoadComplete(const GURL& final_url,
-                              const std::string& devtools_id,
-                              const std::string& mime_type,
-                              int http_response_code) override;
-
-  void SetShouldBlock(bool should_block) { should_block_ = should_block; }
+  void SetPolicy(Policy policy);
 
  private:
-  bool should_block_;
+  void ApplyPolicy(PendingRequest* pending_request);
+
+  Policy policy_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(MockGenericURLRequestJobDelegate);
 };
 
 // TODO(alexclarke): We may be able to replace this with the CookieMonster.
-class MockCookieStore : public net::CookieStore {
+class HEADLESS_EXPORT MockCookieStore : public net::CookieStore {
  public:
   MockCookieStore();
   ~MockCookieStore() override;
@@ -59,7 +58,7 @@ class MockCookieStore : public net::CookieStore {
   void SetCookieWithOptionsAsync(const GURL& url,
                                  const std::string& cookie_line,
                                  const net::CookieOptions& options,
-                                 const SetCookiesCallback& callback) override;
+                                 SetCookiesCallback callback) override;
 
   void SetCookieWithDetailsAsync(const GURL& url,
                                  const std::string& name,
@@ -73,39 +72,43 @@ class MockCookieStore : public net::CookieStore {
                                  bool http_only,
                                  net::CookieSameSite same_site,
                                  net::CookiePriority priority,
-                                 const SetCookiesCallback& callback) override;
+                                 SetCookiesCallback callback) override;
+
+  void SetCanonicalCookieAsync(std::unique_ptr<net::CanonicalCookie> cookie,
+                               bool secure_source,
+                               bool modify_http_only,
+                               SetCookiesCallback callback) override;
 
   void GetCookiesWithOptionsAsync(const GURL& url,
                                   const net::CookieOptions& options,
-                                  const GetCookiesCallback& callback) override;
+                                  GetCookiesCallback callback) override;
 
-  void GetCookieListWithOptionsAsync(
-      const GURL& url,
-      const net::CookieOptions& options,
-      const GetCookieListCallback& callback) override;
+  void GetCookieListWithOptionsAsync(const GURL& url,
+                                     const net::CookieOptions& options,
+                                     GetCookieListCallback callback) override;
 
-  void GetAllCookiesAsync(const GetCookieListCallback& callback) override;
+  void GetAllCookiesAsync(GetCookieListCallback callback) override;
 
   void DeleteCookieAsync(const GURL& url,
                          const std::string& cookie_name,
-                         const base::Closure& callback) override;
+                         base::OnceClosure callback) override;
 
   void DeleteCanonicalCookieAsync(const net::CanonicalCookie& cookie,
-                                  const DeleteCallback& callback) override;
+                                  DeleteCallback callback) override;
 
   void DeleteAllCreatedBetweenAsync(const base::Time& delete_begin,
                                     const base::Time& delete_end,
-                                    const DeleteCallback& callback) override;
+                                    DeleteCallback callback) override;
 
   void DeleteAllCreatedBetweenWithPredicateAsync(
       const base::Time& delete_begin,
       const base::Time& delete_end,
       const CookiePredicate& predicate,
-      const DeleteCallback& callback) override;
+      DeleteCallback callback) override;
 
-  void DeleteSessionCookiesAsync(const DeleteCallback&) override;
+  void DeleteSessionCookiesAsync(DeleteCallback) override;
 
-  void FlushStore(const base::Closure& callback) override;
+  void FlushStore(base::OnceClosure callback) override;
 
   void SetForceKeepSessionState() override;
 
@@ -121,14 +124,15 @@ class MockCookieStore : public net::CookieStore {
  private:
   void SendCookies(const GURL& url,
                    const net::CookieOptions& options,
-                   const GetCookieListCallback& callback);
+                   GetCookieListCallback callback);
 
   net::CookieList cookies_;
 
   DISALLOW_COPY_AND_ASSIGN(MockCookieStore);
 };
 
-class MockURLRequestDelegate : public net::URLRequest::Delegate {
+class HEADLESS_EXPORT MockURLRequestDelegate
+    : public net::URLRequest::Delegate {
  public:
   MockURLRequestDelegate();
   ~MockURLRequestDelegate() override;

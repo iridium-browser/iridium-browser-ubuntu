@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 
-#include "ash/common/accessibility_types.h"
+#include "ash/accessibility_types.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
@@ -34,6 +34,7 @@
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/component_extension_ime_manager.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 
 using chromeos::input_method::InputMethodManager;
@@ -159,13 +160,27 @@ bool IsMonoAudioEnabled() {
 }
 
 Profile* GetProfile() {
-  Profile* profile = ProfileManager::GetActiveUserProfile();
+  // ProfileManager::GetActiveUserProfile() does not load user profile
+  // implicitly any more. Use ProfileHelper::GetProfileByUserIdHashForTest() to
+  // do an explicit load.
+  Profile* const profile = ProfileHelper::GetProfileByUserIdHashForTest(
+      user_manager::UserManager::Get()->GetActiveUser()->username_hash());
+
   DCHECK(profile);
   return profile;
 }
 
 PrefService* GetPrefs() {
   return GetProfile()->GetPrefs();
+}
+
+// Simulates how UserSessionManager starts a user session by loading user
+// profile and marking session as started.
+void StartUserSession(const AccountId& account_id) {
+  ProfileHelper::GetProfileByUserIdHashForTest(
+      user_manager::UserManager::Get()->FindUser(account_id)->username_hash());
+
+  session_manager::SessionManager::Get()->SessionStarted();
 }
 
 void SetLargeCursorEnabledPref(bool enabled) {
@@ -227,7 +242,7 @@ bool IsBrailleImeActive() {
   for (InputMethodDescriptors::const_iterator i = descriptors->begin();
        i != descriptors->end();
        ++i) {
-    if (i->id() == extension_misc::kBrailleImeEngineId)
+    if (i->id() == extension_ime_util::kBrailleImeEngineId)
       return true;
   }
   return false;
@@ -236,8 +251,9 @@ bool IsBrailleImeActive() {
 bool IsBrailleImeCurrent() {
   InputMethodManager* imm = InputMethodManager::Get();
   return imm->GetActiveIMEState()->GetCurrentInputMethod().id() ==
-         extension_misc::kBrailleImeEngineId;
+         extension_ime_util::kBrailleImeEngineId;
 }
+
 }  // anonymous namespace
 
 class AccessibilityManagerTest : public InProcessBrowserTest {
@@ -308,7 +324,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, Login) {
   EXPECT_FALSE(IsMonoAudioEnabled());
   EXPECT_EQ(default_autoclick_delay(), GetAutoclickDelay());
 
-  session_manager->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that the features are still disabled just after login.
   EXPECT_FALSE(IsLargeCursorEnabled());
@@ -367,7 +383,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, TypePref) {
   // Logs in.
   auto* session_manager = session_manager::SessionManager::Get();
   session_manager->CreateSession(test_account_id_, kTestUserName);
-  session_manager->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that the features are disabled just after login.
   EXPECT_FALSE(IsLargeCursorEnabled());
@@ -467,7 +483,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, ResumeSavedPref) {
   EXPECT_FALSE(IsMonoAudioEnabled());
 
   // Logs in.
-  session_manager->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that features are enabled by restoring from pref just after login.
   EXPECT_TRUE(IsLargeCursorEnabled());
@@ -486,7 +502,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest,
   // Logs in.
   auto* session_manager = session_manager::SessionManager::Get();
   session_manager->CreateSession(test_account_id_, kTestUserName);
-  session_manager->SessionStarted();
+  StartUserSession(test_account_id_);
 
   EXPECT_FALSE(observer.observed());
   observer.reset();
@@ -562,7 +578,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest,
   // Logs in.
   auto* session_manager = session_manager::SessionManager::Get();
   session_manager->CreateSession(test_account_id_, kTestUserName);
-  session_manager->SessionStarted();
+  StartUserSession(test_account_id_);
 
   EXPECT_FALSE(observer.observed());
   observer.reset();
@@ -683,7 +699,7 @@ IN_PROC_BROWSER_TEST_P(AccessibilityManagerUserTypeTest,
   EXPECT_EQ(kTestAutoclickDelayMs, GetAutoclickDelay());
   EXPECT_TRUE(IsMonoAudioEnabled());
 
-  session_manager->SessionStarted();
+  StartUserSession(account_id);
 
   // Confirms that the features keep enabled after session starts.
   EXPECT_TRUE(IsLargeCursorEnabled());
@@ -707,7 +723,7 @@ IN_PROC_BROWSER_TEST_P(AccessibilityManagerUserTypeTest, BrailleWhenLoggedIn) {
   const AccountId account_id = AccountId::FromUserEmail(GetParam());
   auto* session_manager = session_manager::SessionManager::Get();
   session_manager->CreateSession(account_id, account_id.GetUserEmail());
-  session_manager->SessionStarted();
+  StartUserSession(account_id);
   // This object watches for IME preference changes and reflects those in
   // the IME framework state.
   chromeos::Preferences prefs;
@@ -753,7 +769,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, AccessibilityMenuVisibility) {
   // Log in.
   auto* session_manager = session_manager::SessionManager::Get();
   session_manager->CreateSession(test_account_id_, kTestUserName);
-  session_manager->SessionStarted();
+  StartUserSession(test_account_id_);
 
   // Confirms that the features are disabled.
   EXPECT_FALSE(IsLargeCursorEnabled());

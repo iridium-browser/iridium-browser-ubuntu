@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -195,27 +196,12 @@ ProxyConfig::ProxyConfig()
       source_(PROXY_CONFIG_SOURCE_UNKNOWN), id_(kInvalidConfigID)  {
 }
 
-ProxyConfig::ProxyConfig(const ProxyConfig& config)
-    : auto_detect_(config.auto_detect_),
-      pac_url_(config.pac_url_),
-      pac_mandatory_(config.pac_mandatory_),
-      proxy_rules_(config.proxy_rules_),
-      source_(config.source_),
-      id_(config.id_) {
-}
+ProxyConfig::ProxyConfig(const ProxyConfig& config) = default;
 
 ProxyConfig::~ProxyConfig() {
 }
 
-ProxyConfig& ProxyConfig::operator=(const ProxyConfig& config) {
-  auto_detect_ = config.auto_detect_;
-  pac_url_ = config.pac_url_;
-  pac_mandatory_ = config.pac_mandatory_;
-  proxy_rules_ = config.proxy_rules_;
-  source_ = config.source_;
-  id_ = config.id_;
-  return *this;
-}
+ProxyConfig& ProxyConfig::operator=(const ProxyConfig& config) = default;
 
 bool ProxyConfig::Equals(const ProxyConfig& other) const {
   // The two configs can have different IDs and sources.  We are just interested
@@ -276,7 +262,7 @@ std::unique_ptr<base::DictionaryValue> ProxyConfig::ToValue() const {
       if (proxy_rules_.reverse_bypass)
         dict->SetBoolean("reverse_bypass", true);
 
-      base::ListValue* list = new base::ListValue();
+      auto list = base::MakeUnique<base::ListValue>();
 
       for (ProxyBypassRules::RuleList::const_iterator it =
               bypass.rules().begin();
@@ -284,7 +270,7 @@ std::unique_ptr<base::DictionaryValue> ProxyConfig::ToValue() const {
         list->AppendString((*it)->ToString());
       }
 
-      dict->Set("bypass_list", list);
+      dict->Set("bypass_list", std::move(list));
     }
   }
 

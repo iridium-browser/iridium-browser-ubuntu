@@ -87,9 +87,10 @@ void MockPersistentCookieStore::DeleteCookie(const CanonicalCookie& cookie) {
   commands_.push_back(CookieStoreCommand(CookieStoreCommand::REMOVE, cookie));
 }
 
-void MockPersistentCookieStore::Flush(const base::Closure& callback) {
+void MockPersistentCookieStore::Flush(base::OnceClosure callback) {
   if (!callback.is_null())
-    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  std::move(callback));
 }
 
 void MockPersistentCookieStore::SetForceKeepSessionState() {
@@ -130,10 +131,10 @@ std::unique_ptr<CanonicalCookie> BuildCanonicalCookie(
                       : base::Time();
   std::string cookie_path = pc.Path();
 
-  return CanonicalCookie::Create(url, pc.Name(), pc.Value(), url.host(),
-                                 cookie_path, creation_time, cookie_expires,
-                                 pc.IsSecure(), pc.IsHttpOnly(), pc.SameSite(),
-                                 pc.Priority());
+  return base::MakeUnique<CanonicalCookie>(
+      pc.Name(), pc.Value(), "." + url.host(), cookie_path, creation_time,
+      cookie_expires, base::Time(), pc.IsSecure(), pc.IsHttpOnly(),
+      pc.SameSite(), pc.Priority());
 }
 
 void AddCookieToList(const GURL& url,
@@ -195,9 +196,10 @@ void MockSimplePersistentCookieStore::DeleteCookie(
   cookies_.erase(it);
 }
 
-void MockSimplePersistentCookieStore::Flush(const base::Closure& callback) {
+void MockSimplePersistentCookieStore::Flush(base::OnceClosure callback) {
   if (!callback.is_null())
-    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  std::move(callback));
 }
 
 void MockSimplePersistentCookieStore::SetForceKeepSessionState() {
@@ -238,9 +240,9 @@ std::unique_ptr<CookieMonster> CreateMonsterFromStoreForGC(
     // The URL must be HTTPS since |secure| can be true or false, and because
     // strict secure cookies are enforced, the cookie will fail to be created if
     // |secure| is true but the URL is an insecure scheme.
-    std::unique_ptr<CanonicalCookie> cc(CanonicalCookie::Create(
-        GURL(base::StringPrintf("https://h%05d.izzle/", i)), "a", "1",
-        std::string(), "/path", creation_time, expiration_time, secure, false,
+    std::unique_ptr<CanonicalCookie> cc(base::MakeUnique<CanonicalCookie>(
+        "a", "1", base::StringPrintf("h%05d.izzle", i), "/path", creation_time,
+        expiration_time, base::Time(), secure, false,
         CookieSameSite::DEFAULT_MODE, COOKIE_PRIORITY_DEFAULT));
     cc->SetLastAccessDate(last_access_time);
     store->AddCookie(*cc);

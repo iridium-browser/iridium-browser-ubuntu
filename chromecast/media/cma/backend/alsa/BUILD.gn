@@ -17,23 +17,29 @@ declare_args() {
 # Alsa must be used for these targets to build.
 assert(use_alsa)
 
-shared_library("libcast_media_1.0_audio") {
+cast_shared_library("libcast_media_1.0_audio") {
   sources = [
     "cast_media_shlib.cc",
     "media_codec_support_cast_audio.cc",
+    "post_processing_pipeline_impl.cc",
+    "post_processing_pipeline_impl.h",
   ]
 
   deps = [
     ":alsa_cma_backend",
+    ":post_processor_factory",
     "//base",
     "//chromecast/base",
     "//chromecast/public",
+    "//chromecast/public/media",
     "//media",
   ]
 }
 
 source_set("alsa_cma_backend") {
   sources = [
+    "alsa_volume_control.cc",
+    "alsa_volume_control.h",
     "alsa_wrapper.cc",
     "alsa_wrapper.h",
     "audio_decoder_alsa.cc",
@@ -42,20 +48,24 @@ source_set("alsa_cma_backend") {
     "filter_group.h",
     "media_pipeline_backend_alsa.cc",
     "media_pipeline_backend_alsa.h",
+    "post_processing_pipeline.h",
+    "post_processing_pipeline_parser.cc",
+    "post_processing_pipeline_parser.h",
     "stream_mixer_alsa.cc",
     "stream_mixer_alsa.h",
     "stream_mixer_alsa_input.cc",
     "stream_mixer_alsa_input.h",
     "stream_mixer_alsa_input_impl.cc",
     "stream_mixer_alsa_input_impl.h",
+    "volume_control.cc",
   ]
 
   libs = [ "asound" ]
 
   deps = [
     ":alsa_features",
-    ":audio_filter_includes",
     ":slew_volume",
+    ":volume_map",
     "//base",
     "//chromecast/base",
     "//chromecast/media/base",
@@ -66,33 +76,18 @@ source_set("alsa_cma_backend") {
     "//media",
     "//media:shared_memory_support",
   ]
-
-  if (chromecast_branding == "public") {
-    deps += [ ":audio_filter_null" ]
-  } else {
-    deps += [ "//chromecast/internal/media/cma/backend/alsa:filter" ]
-  }
 }
 
-source_set("audio_filter_null") {
+source_set("volume_map") {
   sources = [
-    "audio_filter_factory_default.cc",
+    "cast_audio_json.cc",
+    "cast_audio_json.h",
+    "volume_map.cc",
+    "volume_map.h",
   ]
-
-  deps = [
-    ":audio_filter_includes",
-  ]
-}
-
-source_set("audio_filter_includes") {
-  sources = [
-    "audio_filter_factory.h",
-    "audio_filter_interface.h",
-  ]
-
   deps = [
     "//base",
-    "//media",
+    "//chromecast/base",
   ]
 }
 
@@ -103,26 +98,42 @@ source_set("slew_volume") {
   ]
   deps = [
     "//base",
-    "//media",
+    "//media:shared_memory_support",
   ]
 }
+
+alsa_owns_volume = !enable_assistant
 
 buildflag_header("alsa_features") {
   header = "alsa_features.h"
 
-  flags = [ "ALSA_MONOTONIC_RAW_TSTAMPS=$use_alsa_monotonic_raw_tstamps" ]
+  flags = [
+    "ALSA_MONOTONIC_RAW_TSTAMPS=$use_alsa_monotonic_raw_tstamps",
+    "ALSA_OWNS_VOLUME=$alsa_owns_volume",
+  ]
 }
 
 test("cast_alsa_cma_backend_unittests") {
   sources = [
+    "filter_group_unittest.cc",
+    "post_processors/governor_unittest.cc",
+    "post_processors/saturated_gain_unittest.cc",
+    "slew_volume_unittests.cc",
     "stream_mixer_alsa_unittest.cc",
   ]
 
   deps = [
+    ":governor",
+    ":libcast_governor_1.0",
+    ":libcast_saturated_gain_1.0",
+    ":post_processor_factory",
+    ":post_processor_test_support",
+    ":slew_volume",
     ":test_support",
     "//base",
     "//base/test:run_all_unittests",
     "//chromecast/media",
+    "//chromecast/public",
     "//media",
     "//media:shared_memory_support",
     "//testing/gmock",
@@ -146,5 +157,69 @@ source_set("test_support") {
     "//base",
     "//media",
     "//testing/gmock",
+  ]
+}
+
+# This is separate from ":governor" because the associated unittest needs
+# to create a Governor directly (to use test functions).
+cast_shared_library("libcast_governor_1.0") {
+  sources = [
+    "post_processors/governor_create.cc",
+  ]
+  deps = [
+    ":governor",
+    "//chromecast/public/media",
+  ]
+}
+
+source_set("governor") {
+  sources = [
+    "post_processors/governor.cc",
+    "post_processors/governor.h",
+  ]
+  deps = [
+    ":slew_volume",
+    "//base",
+    "//chromecast/base",
+    "//chromecast/public/media",
+  ]
+  public_configs = [ "//chromecast/public:public_config" ]
+}
+
+cast_shared_library("libcast_saturated_gain_1.0") {
+  sources = [
+    "post_processors/saturated_gain.cc",
+    "post_processors/saturated_gain.h",
+  ]
+  deps = [
+    ":slew_volume",
+    ":volume_map",
+    "//base",
+    "//chromecast/base",
+    "//chromecast/public/media",
+  ]
+}
+
+source_set("post_processor_test_support") {
+  testonly = true
+  sources = [
+    "post_processors/post_processor_unittest.cc",
+    "post_processors/post_processor_unittest.h",
+  ]
+  deps = [
+    "//base",
+    "//chromecast/public/media",
+    "//testing/gtest",
+  ]
+}
+
+source_set("post_processor_factory") {
+  sources = [
+    "post_processor_factory.cc",
+    "post_processor_factory.h",
+  ]
+  deps = [
+    "//base",
+    "//chromecast/public/media",
   ]
 }

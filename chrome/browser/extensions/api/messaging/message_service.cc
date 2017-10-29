@@ -22,11 +22,11 @@
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "components/guest_view/common/guest_view_constants.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -85,8 +85,8 @@ MessageService::PolicyPermission MessageService::IsNativeMessagingHostAllowed(
     return allow_result;
 
   // Check if the name or the wildcard is in the blacklist.
-  base::StringValue name_value(native_host_name);
-  base::StringValue wildcard_value("*");
+  base::Value name_value(native_host_name);
+  base::Value wildcard_value("*");
   if (blacklist->Find(name_value) == blacklist->end() &&
       blacklist->Find(wildcard_value) == blacklist->end()) {
     return allow_result;
@@ -199,8 +199,9 @@ MessageService::~MessageService() {
   channels_.clear();
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<MessageService> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<MessageService>>::DestructorAtExit g_factory =
+    LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<MessageService>*
@@ -329,7 +330,7 @@ void MessageService::OpenChannelToExtension(
       !util::IsIncognitoEnabled(target_extension_id, context)) {
     // Give the user a chance to accept an incognito connection from the web if
     // they haven't already, with the conditions:
-    // - Only for spanning-mode incognito. We don't want the complication of
+    // - Only for non-split mode incognito. We don't want the complication of
     //   spinning up an additional process here which might need to do some
     //   setup that we're not expecting.
     // - Only for extensions that can't normally be enabled in incognito, since
@@ -469,14 +470,14 @@ void MessageService::OpenChannelToTab(int source_process_id,
       content::RenderFrameHost::FromID(source_process_id, source_routing_id);
   if (!source)
     return;
-  Profile* profile =
-      Profile::FromBrowserContext(source->GetProcess()->GetBrowserContext());
+  content::BrowserContext* browser_context =
+      source->GetProcess()->GetBrowserContext();
 
   WebContents* contents = NULL;
   std::unique_ptr<MessagePort> receiver;
   PortId receiver_port_id(source_port_id.context_id, source_port_id.port_number,
                           false);
-  if (!ExtensionTabUtil::GetTabById(tab_id, profile, true, NULL, NULL,
+  if (!ExtensionTabUtil::GetTabById(tab_id, browser_context, true, NULL, NULL,
                                     &contents, NULL) ||
       contents->GetController().NeedsReload()) {
     // The tab isn't loaded yet. Don't attempt to connect.
@@ -505,8 +506,9 @@ void MessageService::OpenChannelToTab(int source_process_id,
   if (!extension_id.empty()) {
     // Source extension == target extension so the extension must exist, or
     // where did the IPC come from?
-    extension = ExtensionRegistry::Get(profile)->enabled_extensions().GetByID(
-        extension_id);
+    extension = ExtensionRegistry::Get(browser_context)
+                    ->enabled_extensions()
+                    .GetByID(extension_id);
     DCHECK(extension);
   }
 
@@ -561,8 +563,8 @@ void MessageService::OpenChannelImpl(BrowserContext* browser_context,
   std::unique_ptr<MessageChannel> channel_ptr =
       base::MakeUnique<MessageChannel>();
   MessageChannel* channel = channel_ptr.get();
-  channel->opener.reset(opener.release());
-  channel->receiver.reset(params->receiver.release());
+  channel->opener = std::move(opener);
+  channel->receiver = std::move(params->receiver);
   AddChannel(std::move(channel_ptr), params->receiver_port_id);
 
   int guest_process_id = content::ChildProcessHost::kInvalidUniqueID;
@@ -882,7 +884,7 @@ void MessageService::OnOpenChannelAllowed(
     // Capture this reference before params is invalidated by base::Passed().
     const GURL& source_url = params->source_url;
     property_provider_.GetChannelID(
-        Profile::FromBrowserContext(context), source_url,
+        context, source_url,
         base::Bind(&MessageService::GotChannelID, weak_factory_.GetWeakPtr(),
                    base::Passed(&params)));
     return;

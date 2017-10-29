@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <sstream>
 #include <utility>
 
 #include "core/fpdfapi/font/cpdf_font.h"
@@ -54,7 +55,7 @@ bool GenerateWidgetAP(CPDF_Document* pDoc,
   if (sFontName.IsEmpty())
     return false;
 
-  FX_FLOAT fFontSize = FX_atof(syntax.GetWord());
+  float fFontSize = FX_atof(syntax.GetWord());
   CPVT_Color crText = CPVT_Color::ParseColor(DA);
   CPDF_Dictionary* pDRDict = pFormDict->GetDictFor("DR");
   if (!pDRDict)
@@ -109,7 +110,7 @@ bool GenerateWidgetAP(CPDF_Document* pDoc,
   }
 
   BorderStyle nBorderStyle = BorderStyle::SOLID;
-  FX_FLOAT fBorderWidth = 1;
+  float fBorderWidth = 1;
   CPVT_Dash dsBorder(3, 0, 0);
   CPVT_Color crLeftTop, crRightBottom;
   if (CPDF_Dictionary* pBSDict = pAnnotDict->GetDictFor("BS")) {
@@ -151,7 +152,7 @@ bool GenerateWidgetAP(CPDF_Document* pDoc,
     if (CPDF_Array* pArray = pMKDict->GetArrayFor("BG"))
       crBG = CPVT_Color::ParseColor(*pArray);
   }
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sBG =
       CPVT_GenerateAP::GenerateColorAP(crBG, PaintOperation::FILL);
   if (sBG.GetLength() > 0) {
@@ -351,9 +352,9 @@ bool GenerateWidgetAP(CPDF_Document* pDoc,
       CPDF_Array* pSels = ToArray(FPDF_GetFieldAttr(pAnnotDict, "I"));
       CPDF_Object* pTi = FPDF_GetFieldAttr(pAnnotDict, "TI");
       int32_t nTop = pTi ? pTi->GetInteger() : 0;
-      CFX_ByteTextBuf sBody;
+      std::ostringstream sBody;
       if (pOpts) {
-        FX_FLOAT fy = rcBody.top;
+        float fy = rcBody.top;
         for (size_t i = nTop, sz = pOpts->GetCount(); i < sz; i++) {
           if (IsFloatSmaller(fy, rcBody.bottom))
             break;
@@ -384,7 +385,7 @@ bool GenerateWidgetAP(CPDF_Document* pDoc,
             vt.Initialize();
             vt.SetText(swItem);
             vt.RearrangeAll();
-            FX_FLOAT fItemHeight = vt.GetContentRect().Height();
+            float fItemHeight = vt.GetContentRect().Height();
             if (bSelected) {
               CFX_FloatRect rcItem = CFX_FloatRect(
                   rcBody.left, fy - fItemHeight, rcBody.right, fy);
@@ -417,16 +418,16 @@ bool GenerateWidgetAP(CPDF_Document* pDoc,
           }
         }
       }
-      if (sBody.GetSize() > 0) {
+      if (sBody.tellp() > 0) {
         sAppStream << "/Tx BMC\nq\n"
                    << rcBody.left << " " << rcBody.bottom << " "
                    << rcBody.Width() << " " << rcBody.Height() << " re\nW\nn\n"
-                   << sBody.AsStringC() << "Q\nEMC\n";
+                   << sBody.str() << "Q\nEMC\n";
       }
     } break;
   }
   if (pNormalStream) {
-    pNormalStream->SetData(sAppStream.GetBuffer(), sAppStream.GetSize());
+    pNormalStream->SetData(&sAppStream);
     pStreamDict = pNormalStream->GetDict();
     if (pStreamDict) {
       pStreamDict->SetMatrixFor("Matrix", matrix);
@@ -463,7 +464,7 @@ CFX_ByteString GetColorStringWithDefault(CPDF_Array* pColor,
   return CPVT_GenerateAP::GenerateColorAP(crDefaultColor, nOperation);
 }
 
-FX_FLOAT GetBorderWidth(const CPDF_Dictionary& pAnnotDict) {
+float GetBorderWidth(const CPDF_Dictionary& pAnnotDict) {
   if (CPDF_Dictionary* pBorderStyleDict = pAnnotDict.GetDictFor("BS")) {
     if (pBorderStyleDict->KeyExist("W"))
       return pBorderStyleDict->GetNumberFor("W");
@@ -498,14 +499,14 @@ CFX_ByteString GetDashPatternString(const CPDF_Dictionary& pAnnotDict) {
 
   // Support maximum of ten elements in the dash array.
   size_t pDashArrayCount = std::min<size_t>(pDashArray->GetCount(), 10);
-  CFX_ByteTextBuf sDashStream;
+  std::ostringstream sDashStream;
 
   sDashStream << "[";
   for (size_t i = 0; i < pDashArrayCount; ++i)
     sDashStream << pDashArray->GetNumberAt(i) << " ";
   sDashStream << "] 0 d\n";
 
-  return sDashStream.MakeString();
+  return CFX_ByteString(sDashStream);
 }
 
 CFX_ByteString GetPopupContentsString(CPDF_Document* pDoc,
@@ -535,34 +536,13 @@ CFX_ByteString GetPopupContentsString(CPDF_Document* pDoc,
   if (sContent.IsEmpty())
     return CFX_ByteString();
 
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   sAppStream << "BT\n"
              << CPVT_GenerateAP::GenerateColorAP(
                     CPVT_Color(CPVT_Color::kRGB, 0, 0, 0), PaintOperation::FILL)
              << sContent << "ET\n"
              << "Q\n";
-  return sAppStream.MakeString();
-}
-
-std::unique_ptr<CPDF_Dictionary> GenerateExtGStateDict(
-    const CPDF_Dictionary& pAnnotDict,
-    const CFX_ByteString& sExtGSDictName,
-    const CFX_ByteString& sBlendMode) {
-  auto pGSDict =
-      pdfium::MakeUnique<CPDF_Dictionary>(pAnnotDict.GetByteStringPool());
-  pGSDict->SetNewFor<CPDF_String>("Type", "ExtGState", false);
-
-  FX_FLOAT fOpacity =
-      pAnnotDict.KeyExist("CA") ? pAnnotDict.GetNumberFor("CA") : 1;
-  pGSDict->SetNewFor<CPDF_Number>("CA", fOpacity);
-  pGSDict->SetNewFor<CPDF_Number>("ca", fOpacity);
-  pGSDict->SetNewFor<CPDF_Boolean>("AIS", false);
-  pGSDict->SetNewFor<CPDF_String>("BM", sBlendMode, false);
-
-  auto pExtGStateDict =
-      pdfium::MakeUnique<CPDF_Dictionary>(pAnnotDict.GetByteStringPool());
-  pExtGStateDict->SetFor(sExtGSDictName, std::move(pGSDict));
-  return pExtGStateDict;
+  return CFX_ByteString(sAppStream);
 }
 
 std::unique_ptr<CPDF_Dictionary> GenerateResourceFontDict(
@@ -581,42 +561,6 @@ std::unique_ptr<CPDF_Dictionary> GenerateResourceFontDict(
   return pResourceFontDict;
 }
 
-std::unique_ptr<CPDF_Dictionary> GenerateResourceDict(
-    CPDF_Document* pDoc,
-    std::unique_ptr<CPDF_Dictionary> pExtGStateDict,
-    std::unique_ptr<CPDF_Dictionary> pResourceFontDict) {
-  auto pResourceDict =
-      pdfium::MakeUnique<CPDF_Dictionary>(pDoc->GetByteStringPool());
-  if (pExtGStateDict)
-    pResourceDict->SetFor("ExtGState", std::move(pExtGStateDict));
-  if (pResourceFontDict)
-    pResourceDict->SetFor("Font", std::move(pResourceFontDict));
-  return pResourceDict;
-}
-
-void GenerateAndSetAPDict(CPDF_Document* pDoc,
-                          CPDF_Dictionary* pAnnotDict,
-                          const CFX_ByteTextBuf& sAppStream,
-                          std::unique_ptr<CPDF_Dictionary> pResourceDict,
-                          bool bIsTextMarkupAnnotation) {
-  CPDF_Stream* pNormalStream = pDoc->NewIndirect<CPDF_Stream>();
-  pNormalStream->SetData(sAppStream.GetBuffer(), sAppStream.GetSize());
-
-  CPDF_Dictionary* pAPDict = pAnnotDict->SetNewFor<CPDF_Dictionary>("AP");
-  pAPDict->SetNewFor<CPDF_Reference>("N", pDoc, pNormalStream->GetObjNum());
-
-  CPDF_Dictionary* pStreamDict = pNormalStream->GetDict();
-  pStreamDict->SetNewFor<CPDF_Number>("FormType", 1);
-  pStreamDict->SetNewFor<CPDF_String>("Subtype", "Form", false);
-  pStreamDict->SetMatrixFor("Matrix", CFX_Matrix());
-
-  CFX_FloatRect rect = bIsTextMarkupAnnotation
-                           ? CPDF_Annot::RectFromQuadPoints(pAnnotDict)
-                           : pAnnotDict->GetRectFor("Rect");
-  pStreamDict->SetRectFor("BBox", rect);
-  pStreamDict->SetFor("Resources", std::move(pResourceDict));
-}
-
 CFX_ByteString GetPaintOperatorString(bool bIsStrokeRect, bool bIsFillRect) {
   if (bIsStrokeRect)
     return bIsFillRect ? "b" : "s";
@@ -624,17 +568,17 @@ CFX_ByteString GetPaintOperatorString(bool bIsStrokeRect, bool bIsFillRect) {
 }
 
 CFX_ByteString GenerateTextSymbolAP(const CFX_FloatRect& rect) {
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   sAppStream << CPVT_GenerateAP::GenerateColorAP(
       CPVT_Color(CPVT_Color::kRGB, 1, 1, 0), PaintOperation::FILL);
   sAppStream << CPVT_GenerateAP::GenerateColorAP(
       CPVT_Color(CPVT_Color::kRGB, 0, 0, 0), PaintOperation::STROKE);
 
-  const FX_FLOAT fBorderWidth = 1;
+  const float fBorderWidth = 1;
   sAppStream << fBorderWidth << " w\n";
 
-  const FX_FLOAT fHalfWidth = fBorderWidth / 2;
-  const FX_FLOAT fTipDelta = 4;
+  const float fHalfWidth = fBorderWidth / 2;
+  const float fTipDelta = 4;
 
   CFX_FloatRect outerRect1 = rect;
   outerRect1.Deflate(fHalfWidth, fHalfWidth);
@@ -644,7 +588,7 @@ CFX_ByteString GenerateTextSymbolAP(const CFX_FloatRect& rect) {
   outerRect2.left += fTipDelta;
   outerRect2.right = outerRect2.left + fTipDelta;
   outerRect2.top = outerRect2.bottom - fTipDelta;
-  FX_FLOAT outerRect2Middle = (outerRect2.left + outerRect2.right) / 2;
+  float outerRect2Middle = (outerRect2.left + outerRect2.right) / 2;
 
   // Draw outer boxes.
   sAppStream << outerRect1.left << " " << outerRect1.bottom << " m\n"
@@ -658,8 +602,8 @@ CFX_ByteString GenerateTextSymbolAP(const CFX_FloatRect& rect) {
 
   // Draw inner lines.
   CFX_FloatRect lineRect = outerRect1;
-  const FX_FLOAT fXDelta = 2;
-  const FX_FLOAT fYDelta = (lineRect.top - lineRect.bottom) / 4;
+  const float fXDelta = 2;
+  const float fYDelta = (lineRect.top - lineRect.bottom) / 4;
 
   lineRect.left += fXDelta;
   lineRect.right -= fXDelta;
@@ -670,7 +614,7 @@ CFX_ByteString GenerateTextSymbolAP(const CFX_FloatRect& rect) {
   }
   sAppStream << "B*\n";
 
-  return sAppStream.MakeString();
+  return CFX_ByteString(sAppStream);
 }
 
 }  // namespace
@@ -731,7 +675,7 @@ bool CPVT_GenerateAP::GenerateTextFieldAP(CPDF_Document* pDoc,
 
 bool CPVT_GenerateAP::GenerateCircleAP(CPDF_Document* pDoc,
                                        CPDF_Dictionary* pAnnotDict) {
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -744,7 +688,7 @@ bool CPVT_GenerateAP::GenerateCircleAP(CPDF_Document* pDoc,
                                           CPVT_Color(CPVT_Color::kRGB, 0, 0, 0),
                                           PaintOperation::STROKE);
 
-  FX_FLOAT fBorderWidth = GetBorderWidth(*pAnnotDict);
+  float fBorderWidth = GetBorderWidth(*pAnnotDict);
   bool bIsStrokeRect = fBorderWidth > 0;
 
   if (bIsStrokeRect) {
@@ -762,15 +706,15 @@ bool CPVT_GenerateAP::GenerateCircleAP(CPDF_Document* pDoc,
     rect.Deflate(fBorderWidth / 2, fBorderWidth / 2);
   }
 
-  const FX_FLOAT fMiddleX = (rect.left + rect.right) / 2;
-  const FX_FLOAT fMiddleY = (rect.top + rect.bottom) / 2;
+  const float fMiddleX = (rect.left + rect.right) / 2;
+  const float fMiddleY = (rect.top + rect.bottom) / 2;
 
   // |fL| is precalculated approximate value of 4 * tan((3.14 / 2) / 4) / 3,
   // where |fL| * radius is a good approximation of control points for
   // arc with 90 degrees.
-  const FX_FLOAT fL = 0.5523f;
-  const FX_FLOAT fDeltaX = fL * rect.Width() / 2.0;
-  const FX_FLOAT fDeltaY = fL * rect.Height() / 2.0;
+  const float fL = 0.5523f;
+  const float fDeltaX = fL * rect.Width() / 2.0;
+  const float fDeltaY = fL * rect.Height() / 2.0;
 
   // Starting point
   sAppStream << fMiddleX << " " << rect.top << " m\n";
@@ -798,14 +742,14 @@ bool CPVT_GenerateAP::GenerateCircleAP(CPDF_Document* pDoc,
       GenerateExtGStateDict(*pAnnotDict, sExtGSDictName, "Normal");
   auto pResourceDict =
       GenerateResourceDict(pDoc, std::move(pExtGStateDict), nullptr);
-  GenerateAndSetAPDict(pDoc, pAnnotDict, sAppStream, std::move(pResourceDict),
+  GenerateAndSetAPDict(pDoc, pAnnotDict, &sAppStream, std::move(pResourceDict),
                        false /*IsTextMarkupAnnotation*/);
   return true;
 }
 
 bool CPVT_GenerateAP::GenerateHighlightAP(CPDF_Document* pDoc,
                                           CPDF_Dictionary* pAnnotDict) {
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -825,7 +769,7 @@ bool CPVT_GenerateAP::GenerateHighlightAP(CPDF_Document* pDoc,
       GenerateExtGStateDict(*pAnnotDict, sExtGSDictName, "Multiply");
   auto pResourceDict =
       GenerateResourceDict(pDoc, std::move(pExtGStateDict), nullptr);
-  GenerateAndSetAPDict(pDoc, pAnnotDict, sAppStream, std::move(pResourceDict),
+  GenerateAndSetAPDict(pDoc, pAnnotDict, &sAppStream, std::move(pResourceDict),
                        true /*IsTextMarkupAnnotation*/);
 
   return true;
@@ -833,7 +777,7 @@ bool CPVT_GenerateAP::GenerateHighlightAP(CPDF_Document* pDoc,
 
 bool CPVT_GenerateAP::GenerateInkAP(CPDF_Document* pDoc,
                                     CPDF_Dictionary* pAnnotDict) {
-  FX_FLOAT fBorderWidth = GetBorderWidth(*pAnnotDict);
+  float fBorderWidth = GetBorderWidth(*pAnnotDict);
   bool bIsStroke = fBorderWidth > 0;
 
   if (!bIsStroke)
@@ -843,7 +787,7 @@ bool CPVT_GenerateAP::GenerateInkAP(CPDF_Document* pDoc,
   if (!pInkList || pInkList->IsEmpty())
     return false;
 
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -880,19 +824,19 @@ bool CPVT_GenerateAP::GenerateInkAP(CPDF_Document* pDoc,
       GenerateExtGStateDict(*pAnnotDict, sExtGSDictName, "Normal");
   auto pResourceDict =
       GenerateResourceDict(pDoc, std::move(pExtGStateDict), nullptr);
-  GenerateAndSetAPDict(pDoc, pAnnotDict, sAppStream, std::move(pResourceDict),
+  GenerateAndSetAPDict(pDoc, pAnnotDict, &sAppStream, std::move(pResourceDict),
                        false /*IsTextMarkupAnnotation*/);
   return true;
 }
 
 bool CPVT_GenerateAP::GenerateTextAP(CPDF_Document* pDoc,
                                      CPDF_Dictionary* pAnnotDict) {
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
   CFX_FloatRect rect = pAnnotDict->GetRectFor("Rect");
-  const FX_FLOAT fNoteLength = 20;
+  const float fNoteLength = 20;
   CFX_FloatRect noteRect(rect.left, rect.bottom, rect.left + fNoteLength,
                          rect.bottom + fNoteLength);
   pAnnotDict->SetRectFor("Rect", noteRect);
@@ -903,14 +847,14 @@ bool CPVT_GenerateAP::GenerateTextAP(CPDF_Document* pDoc,
       GenerateExtGStateDict(*pAnnotDict, sExtGSDictName, "Normal");
   auto pResourceDict =
       GenerateResourceDict(pDoc, std::move(pExtGStateDict), nullptr);
-  GenerateAndSetAPDict(pDoc, pAnnotDict, sAppStream, std::move(pResourceDict),
+  GenerateAndSetAPDict(pDoc, pAnnotDict, &sAppStream, std::move(pResourceDict),
                        false /*IsTextMarkupAnnotation*/);
   return true;
 }
 
 bool CPVT_GenerateAP::GenerateUnderlineAP(CPDF_Document* pDoc,
                                           CPDF_Dictionary* pAnnotDict) {
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -921,7 +865,7 @@ bool CPVT_GenerateAP::GenerateUnderlineAP(CPDF_Document* pDoc,
   CFX_FloatRect rect = CPDF_Annot::RectFromQuadPoints(pAnnotDict);
   rect.Normalize();
 
-  FX_FLOAT fLineWidth = 1.0;
+  float fLineWidth = 1.0;
   sAppStream << fLineWidth << " w " << rect.left << " "
              << rect.bottom + fLineWidth << " m " << rect.right << " "
              << rect.bottom + fLineWidth << " l S\n";
@@ -930,14 +874,14 @@ bool CPVT_GenerateAP::GenerateUnderlineAP(CPDF_Document* pDoc,
       GenerateExtGStateDict(*pAnnotDict, sExtGSDictName, "Normal");
   auto pResourceDict =
       GenerateResourceDict(pDoc, std::move(pExtGStateDict), nullptr);
-  GenerateAndSetAPDict(pDoc, pAnnotDict, sAppStream, std::move(pResourceDict),
+  GenerateAndSetAPDict(pDoc, pAnnotDict, &sAppStream, std::move(pResourceDict),
                        true /*IsTextMarkupAnnotation*/);
   return true;
 }
 
 bool CPVT_GenerateAP::GeneratePopupAP(CPDF_Document* pDoc,
                                       CPDF_Dictionary* pAnnotDict) {
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs\n";
 
@@ -946,7 +890,7 @@ bool CPVT_GenerateAP::GeneratePopupAP(CPDF_Document* pDoc,
   sAppStream << GenerateColorAP(CPVT_Color(CPVT_Color::kRGB, 0, 0, 0),
                                 PaintOperation::STROKE);
 
-  const FX_FLOAT fBorderWidth = 1;
+  const float fBorderWidth = 1;
   sAppStream << fBorderWidth << " w\n";
 
   CFX_FloatRect rect = pAnnotDict->GetRectFor("Rect");
@@ -968,14 +912,14 @@ bool CPVT_GenerateAP::GeneratePopupAP(CPDF_Document* pDoc,
                                             std::move(pExtGStateDict));
 
   sAppStream << GetPopupContentsString(pDoc, *pAnnotDict, pDefFont, sFontName);
-  GenerateAndSetAPDict(pDoc, pAnnotDict, sAppStream, std::move(pResourceDict),
+  GenerateAndSetAPDict(pDoc, pAnnotDict, &sAppStream, std::move(pResourceDict),
                        false /*IsTextMarkupAnnotation*/);
   return true;
 }
 
 bool CPVT_GenerateAP::GenerateSquareAP(CPDF_Document* pDoc,
                                        CPDF_Dictionary* pAnnotDict) {
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -988,7 +932,7 @@ bool CPVT_GenerateAP::GenerateSquareAP(CPDF_Document* pDoc,
                                           CPVT_Color(CPVT_Color::kRGB, 0, 0, 0),
                                           PaintOperation::STROKE);
 
-  FX_FLOAT fBorderWidth = GetBorderWidth(*pAnnotDict);
+  float fBorderWidth = GetBorderWidth(*pAnnotDict);
   bool bIsStrokeRect = fBorderWidth > 0;
 
   if (bIsStrokeRect) {
@@ -1016,14 +960,14 @@ bool CPVT_GenerateAP::GenerateSquareAP(CPDF_Document* pDoc,
       GenerateExtGStateDict(*pAnnotDict, sExtGSDictName, "Normal");
   auto pResourceDict =
       GenerateResourceDict(pDoc, std::move(pExtGStateDict), nullptr);
-  GenerateAndSetAPDict(pDoc, pAnnotDict, sAppStream, std::move(pResourceDict),
+  GenerateAndSetAPDict(pDoc, pAnnotDict, &sAppStream, std::move(pResourceDict),
                        false /*IsTextMarkupAnnotation*/);
   return true;
 }
 
 bool CPVT_GenerateAP::GenerateSquigglyAP(CPDF_Document* pDoc,
                                          CPDF_Dictionary* pAnnotDict) {
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -1034,16 +978,16 @@ bool CPVT_GenerateAP::GenerateSquigglyAP(CPDF_Document* pDoc,
   CFX_FloatRect rect = CPDF_Annot::RectFromQuadPoints(pAnnotDict);
   rect.Normalize();
 
-  FX_FLOAT fLineWidth = 1.0;
+  float fLineWidth = 1.0;
   sAppStream << fLineWidth << " w ";
 
-  const FX_FLOAT fDelta = 2.0;
-  const FX_FLOAT fTop = rect.bottom + fDelta;
-  const FX_FLOAT fBottom = rect.bottom;
+  const float fDelta = 2.0;
+  const float fTop = rect.bottom + fDelta;
+  const float fBottom = rect.bottom;
 
   sAppStream << rect.left << " " << fTop << " m ";
 
-  FX_FLOAT fX = rect.left + fDelta;
+  float fX = rect.left + fDelta;
   bool isUpwards = false;
 
   while (fX < rect.right) {
@@ -1053,7 +997,7 @@ bool CPVT_GenerateAP::GenerateSquigglyAP(CPDF_Document* pDoc,
     isUpwards = !isUpwards;
   }
 
-  FX_FLOAT fRemainder = rect.right - (fX - fDelta);
+  float fRemainder = rect.right - (fX - fDelta);
   if (isUpwards)
     sAppStream << rect.right << " " << fBottom + fRemainder << " l ";
   else
@@ -1065,14 +1009,14 @@ bool CPVT_GenerateAP::GenerateSquigglyAP(CPDF_Document* pDoc,
       GenerateExtGStateDict(*pAnnotDict, sExtGSDictName, "Normal");
   auto pResourceDict =
       GenerateResourceDict(pDoc, std::move(pExtGStateDict), nullptr);
-  GenerateAndSetAPDict(pDoc, pAnnotDict, sAppStream, std::move(pResourceDict),
+  GenerateAndSetAPDict(pDoc, pAnnotDict, &sAppStream, std::move(pResourceDict),
                        true /*IsTextMarkupAnnotation*/);
   return true;
 }
 
 bool CPVT_GenerateAP::GenerateStrikeOutAP(CPDF_Document* pDoc,
                                           CPDF_Dictionary* pAnnotDict) {
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -1083,8 +1027,8 @@ bool CPVT_GenerateAP::GenerateStrikeOutAP(CPDF_Document* pDoc,
   CFX_FloatRect rect = CPDF_Annot::RectFromQuadPoints(pAnnotDict);
   rect.Normalize();
 
-  FX_FLOAT fLineWidth = 1.0;
-  FX_FLOAT fY = (rect.top + rect.bottom) / 2;
+  float fLineWidth = 1.0;
+  float fY = (rect.top + rect.bottom) / 2;
   sAppStream << fLineWidth << " w " << rect.left << " " << fY << " m "
              << rect.right << " " << fY << " l S\n";
 
@@ -1092,7 +1036,7 @@ bool CPVT_GenerateAP::GenerateStrikeOutAP(CPDF_Document* pDoc,
       GenerateExtGStateDict(*pAnnotDict, sExtGSDictName, "Normal");
   auto pResourceDict =
       GenerateResourceDict(pDoc, std::move(pExtGStateDict), nullptr);
-  GenerateAndSetAPDict(pDoc, pAnnotDict, sAppStream, std::move(pResourceDict),
+  GenerateAndSetAPDict(pDoc, pAnnotDict, &sAppStream, std::move(pResourceDict),
                        true /*IsTextMarkupAnnotation*/);
   return true;
 }
@@ -1104,9 +1048,9 @@ CFX_ByteString CPVT_GenerateAP::GenerateEditAP(
     const CFX_PointF& ptOffset,
     bool bContinuous,
     uint16_t SubWord) {
-  CFX_ByteTextBuf sEditStream;
-  CFX_ByteTextBuf sLineStream;
-  CFX_ByteTextBuf sWords;
+  std::ostringstream sEditStream;
+  std::ostringstream sLineStream;
+  std::ostringstream sWords;
   CFX_PointF ptOld;
   CFX_PointF ptNew;
   int32_t nCurFontIndex = -1;
@@ -1117,11 +1061,11 @@ CFX_ByteString CPVT_GenerateAP::GenerateEditAP(
     CPVT_WordPlace place = pIterator->GetAt();
     if (bContinuous) {
       if (place.LineCmp(oldplace) != 0) {
-        if (sWords.GetSize() > 0) {
-          sLineStream << GetWordRenderString(sWords.MakeString());
-          sEditStream << sLineStream;
-          sLineStream.Clear();
-          sWords.Clear();
+        if (sWords.tellp() > 0) {
+          sLineStream << GetWordRenderString(CFX_ByteString(sWords));
+          sEditStream << sLineStream.str();
+          sLineStream.str("");
+          sWords.str("");
         }
         CPVT_Word word;
         if (pIterator->GetWord(word)) {
@@ -1142,9 +1086,9 @@ CFX_ByteString CPVT_GenerateAP::GenerateEditAP(
       CPVT_Word word;
       if (pIterator->GetWord(word)) {
         if (word.nFontIndex != nCurFontIndex) {
-          if (sWords.GetSize() > 0) {
-            sLineStream << GetWordRenderString(sWords.MakeString());
-            sWords.Clear();
+          if (sWords.tellp() > 0) {
+            sLineStream << GetWordRenderString(CFX_ByteString(sWords));
+            sWords.str("");
           }
           sLineStream << GetFontSetString(pFontMap, word.nFontIndex,
                                           word.fFontSize);
@@ -1173,31 +1117,31 @@ CFX_ByteString CPVT_GenerateAP::GenerateEditAP(
       }
     }
   }
-  if (sWords.GetSize() > 0) {
-    sLineStream << GetWordRenderString(sWords.MakeString());
-    sEditStream << sLineStream;
-    sWords.Clear();
+  if (sWords.tellp() > 0) {
+    sLineStream << GetWordRenderString(CFX_ByteString(sWords));
+    sEditStream << sLineStream.str();
+    sWords.str("");
   }
-  return sEditStream.MakeString();
+  return CFX_ByteString(sEditStream);
 }
 
 // Static.
 CFX_ByteString CPVT_GenerateAP::GenerateBorderAP(
     const CFX_FloatRect& rect,
-    FX_FLOAT fWidth,
+    float fWidth,
     const CPVT_Color& color,
     const CPVT_Color& crLeftTop,
     const CPVT_Color& crRightBottom,
     BorderStyle nStyle,
     const CPVT_Dash& dash) {
-  CFX_ByteTextBuf sAppStream;
+  std::ostringstream sAppStream;
   CFX_ByteString sColor;
-  FX_FLOAT fLeft = rect.left;
-  FX_FLOAT fRight = rect.right;
-  FX_FLOAT fTop = rect.top;
-  FX_FLOAT fBottom = rect.bottom;
+  float fLeft = rect.left;
+  float fRight = rect.right;
+  float fTop = rect.top;
+  float fBottom = rect.bottom;
   if (fWidth > 0.0f) {
-    FX_FLOAT fHalfWidth = fWidth / 2.0f;
+    float fHalfWidth = fWidth / 2.0f;
     switch (nStyle) {
       default:
       case BorderStyle::SOLID:
@@ -1286,13 +1230,13 @@ CFX_ByteString CPVT_GenerateAP::GenerateBorderAP(
         break;
     }
   }
-  return sAppStream.MakeString();
+  return CFX_ByteString(sAppStream);
 }
 
 // Static.
 CFX_ByteString CPVT_GenerateAP::GenerateColorAP(const CPVT_Color& color,
                                                 PaintOperation nOperation) {
-  CFX_ByteTextBuf sColorStream;
+  std::ostringstream sColorStream;
   switch (color.nColorType) {
     case CPVT_Color::kRGB:
       sColorStream << color.fColor1 << " " << color.fColor2 << " "
@@ -1314,7 +1258,71 @@ CFX_ByteString CPVT_GenerateAP::GenerateColorAP(const CPVT_Color& color,
     case CPVT_Color::kTransparent:
       break;
   }
-  return sColorStream.MakeString();
+  return CFX_ByteString(sColorStream);
+}
+
+// Static.
+std::unique_ptr<CPDF_Dictionary> CPVT_GenerateAP::GenerateExtGStateDict(
+    const CPDF_Dictionary& pAnnotDict,
+    const CFX_ByteString& sExtGSDictName,
+    const CFX_ByteString& sBlendMode) {
+  auto pGSDict =
+      pdfium::MakeUnique<CPDF_Dictionary>(pAnnotDict.GetByteStringPool());
+  pGSDict->SetNewFor<CPDF_String>("Type", "ExtGState", false);
+
+  float fOpacity =
+      pAnnotDict.KeyExist("CA") ? pAnnotDict.GetNumberFor("CA") : 1;
+  pGSDict->SetNewFor<CPDF_Number>("CA", fOpacity);
+  pGSDict->SetNewFor<CPDF_Number>("ca", fOpacity);
+  pGSDict->SetNewFor<CPDF_Boolean>("AIS", false);
+  pGSDict->SetNewFor<CPDF_String>("BM", sBlendMode, false);
+
+  auto pExtGStateDict =
+      pdfium::MakeUnique<CPDF_Dictionary>(pAnnotDict.GetByteStringPool());
+  pExtGStateDict->SetFor(sExtGSDictName, std::move(pGSDict));
+  return pExtGStateDict;
+}
+
+// Static.
+std::unique_ptr<CPDF_Dictionary> CPVT_GenerateAP::GenerateResourceDict(
+    CPDF_Document* pDoc,
+    std::unique_ptr<CPDF_Dictionary> pExtGStateDict,
+    std::unique_ptr<CPDF_Dictionary> pResourceFontDict) {
+  auto pResourceDict =
+      pdfium::MakeUnique<CPDF_Dictionary>(pDoc->GetByteStringPool());
+  if (pExtGStateDict)
+    pResourceDict->SetFor("ExtGState", std::move(pExtGStateDict));
+  if (pResourceFontDict)
+    pResourceDict->SetFor("Font", std::move(pResourceFontDict));
+  return pResourceDict;
+}
+
+// Static.
+void CPVT_GenerateAP::GenerateAndSetAPDict(
+    CPDF_Document* pDoc,
+    CPDF_Dictionary* pAnnotDict,
+    std::ostringstream* psAppStream,
+    std::unique_ptr<CPDF_Dictionary> pResourceDict,
+    bool bIsTextMarkupAnnotation) {
+  CPDF_Stream* pNormalStream = pDoc->NewIndirect<CPDF_Stream>();
+  pNormalStream->SetData(psAppStream);
+
+  CPDF_Dictionary* pAPDict = pAnnotDict->GetDictFor("AP");
+  if (!pAPDict)
+    pAPDict = pAnnotDict->SetNewFor<CPDF_Dictionary>("AP");
+
+  pAPDict->SetNewFor<CPDF_Reference>("N", pDoc, pNormalStream->GetObjNum());
+
+  CPDF_Dictionary* pStreamDict = pNormalStream->GetDict();
+  pStreamDict->SetNewFor<CPDF_Number>("FormType", 1);
+  pStreamDict->SetNewFor<CPDF_String>("Subtype", "Form", false);
+  pStreamDict->SetMatrixFor("Matrix", CFX_Matrix());
+
+  CFX_FloatRect rect = bIsTextMarkupAnnotation
+                           ? CPDF_Annot::RectFromQuadPoints(pAnnotDict)
+                           : pAnnotDict->GetRectFor("Rect");
+  pStreamDict->SetRectFor("BBox", rect);
+  pStreamDict->SetFor("Resources", std::move(pResourceDict));
 }
 
 // Static.
@@ -1338,7 +1346,7 @@ CFX_ByteString CPVT_GenerateAP::GetPDFWordString(IPVT_FontMap* pFontMap,
     } else {
       uint32_t dwCharCode = pPDFFont->CharCodeFromUnicode(Word);
       if (dwCharCode != CPDF_Font::kInvalidCharCode)
-        pPDFFont->AppendChar(sWord, dwCharCode);
+        pPDFFont->AppendChar(&sWord, dwCharCode);
     }
   }
   return sWord;
@@ -1348,19 +1356,19 @@ CFX_ByteString CPVT_GenerateAP::GetPDFWordString(IPVT_FontMap* pFontMap,
 CFX_ByteString CPVT_GenerateAP::GetWordRenderString(
     const CFX_ByteString& strWords) {
   if (strWords.GetLength() > 0)
-    return PDF_EncodeString(strWords) + " Tj\n";
+    return PDF_EncodeString(strWords, false) + " Tj\n";
   return "";
 }
 
 // Static.
 CFX_ByteString CPVT_GenerateAP::GetFontSetString(IPVT_FontMap* pFontMap,
                                                  int32_t nFontIndex,
-                                                 FX_FLOAT fFontSize) {
-  CFX_ByteTextBuf sRet;
+                                                 float fFontSize) {
+  std::ostringstream sRet;
   if (pFontMap) {
     CFX_ByteString sFontAlias = pFontMap->GetPDFFontAlias(nFontIndex);
     if (sFontAlias.GetLength() > 0 && fFontSize > 0)
       sRet << "/" << sFontAlias << " " << fFontSize << " Tf\n";
   }
-  return sRet.MakeString();
+  return CFX_ByteString(sRet);
 }

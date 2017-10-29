@@ -21,6 +21,8 @@
 #include "media/capture/video/blob_utils.h"
 #include "media/capture/video/linux/video_capture_device_linux.h"
 
+using media::mojom::MeteringMode;
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 6, 0)
 // 16 bit depth, Realsense F200.
 #define V4L2_PIX_FMT_Z16 v4l2_fourcc('Z', '1', '6', ' ')
@@ -190,6 +192,9 @@ static bool IsBlacklistedControl(int control_id) {
     case V4L2_CID_TILT_RESET:
     case V4L2_CID_PAN_ABSOLUTE:
     case V4L2_CID_TILT_ABSOLUTE:
+    case V4L2_CID_ZOOM_ABSOLUTE:
+    case V4L2_CID_ZOOM_RELATIVE:
+    case V4L2_CID_ZOOM_CONTINUOUS:
     case V4L2_CID_PAN_SPEED:
     case V4L2_CID_TILT_SPEED:
     case V4L2_CID_PANTILT_CMD:
@@ -372,7 +377,8 @@ V4L2CaptureDelegate::V4L2CaptureDelegate(
       power_line_frequency_(power_line_frequency),
       is_capturing_(false),
       timeout_count_(0),
-      rotation_(0) {}
+      rotation_(0),
+      weak_factory_(this) {}
 
 void V4L2CaptureDelegate::AllocateAndStart(
     int width,
@@ -504,7 +510,7 @@ void V4L2CaptureDelegate::AllocateAndStart(
 
   // Post task to start fetching frames from v4l2.
   v4l2_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&V4L2CaptureDelegate::DoCapture, this));
+      FROM_HERE, base::Bind(&V4L2CaptureDelegate::DoCapture, GetWeakPtr()));
 }
 
 void V4L2CaptureDelegate::StopAndDeAllocate() {
@@ -538,58 +544,95 @@ void V4L2CaptureDelegate::TakePhoto(
   take_photo_callbacks_.push(std::move(callback));
 }
 
-void V4L2CaptureDelegate::GetPhotoCapabilities(
-    VideoCaptureDevice::GetPhotoCapabilitiesCallback callback) {
+void V4L2CaptureDelegate::GetPhotoState(
+    VideoCaptureDevice::GetPhotoStateCallback callback) {
   DCHECK(v4l2_task_runner_->BelongsToCurrentThread());
   if (!device_fd_.is_valid() || !is_capturing_)
     return;
 
-  mojom::PhotoCapabilitiesPtr photo_capabilities =
-      mojom::PhotoCapabilities::New();
+  mojom::PhotoStatePtr photo_capabilities = mojom::PhotoState::New();
 
   photo_capabilities->zoom =
       RetrieveUserControlRange(device_fd_.get(), V4L2_CID_ZOOM_ABSOLUTE);
 
-  photo_capabilities->focus_mode = mojom::MeteringMode::NONE;
+  v4l2_queryctrl manual_focus_ctrl = {};
+  manual_focus_ctrl.id = V4L2_CID_FOCUS_ABSOLUTE;
+  if (RunIoctl(device_fd_.get(), VIDIOC_QUERYCTRL, &manual_focus_ctrl))
+    photo_capabilities->supported_focus_modes.push_back(MeteringMode::MANUAL);
+
+  v4l2_queryctrl auto_focus_ctrl = {};
+  auto_focus_ctrl.id = V4L2_CID_FOCUS_AUTO;
+  if (RunIoctl(device_fd_.get(), VIDIOC_QUERYCTRL, &auto_focus_ctrl)) {
+    photo_capabilities->supported_focus_modes.push_back(
+        MeteringMode::CONTINUOUS);
+  }
+
+  photo_capabilities->current_focus_mode = MeteringMode::NONE;
   v4l2_control auto_focus_current = {};
   auto_focus_current.id = V4L2_CID_FOCUS_AUTO;
   if (HANDLE_EINTR(
           ioctl(device_fd_.get(), VIDIOC_G_CTRL, &auto_focus_current)) >= 0) {
-    photo_capabilities->focus_mode = auto_focus_current.value
-                                         ? mojom::MeteringMode::CONTINUOUS
-                                         : mojom::MeteringMode::MANUAL;
+    photo_capabilities->current_focus_mode = auto_focus_current.value
+                                                 ? MeteringMode::CONTINUOUS
+                                                 : MeteringMode::MANUAL;
   }
 
-  photo_capabilities->exposure_mode = mojom::MeteringMode::NONE;
+  v4l2_queryctrl auto_exposure_ctrl = {};
+  auto_exposure_ctrl.id = V4L2_CID_EXPOSURE_AUTO;
+  if (RunIoctl(device_fd_.get(), VIDIOC_QUERYCTRL, &auto_exposure_ctrl)) {
+    photo_capabilities->supported_exposure_modes.push_back(
+        MeteringMode::MANUAL);
+    photo_capabilities->supported_exposure_modes.push_back(
+        MeteringMode::CONTINUOUS);
+  }
+
+  photo_capabilities->current_exposure_mode = MeteringMode::NONE;
   v4l2_control exposure_current = {};
   exposure_current.id = V4L2_CID_EXPOSURE_AUTO;
   if (HANDLE_EINTR(ioctl(device_fd_.get(), VIDIOC_G_CTRL, &exposure_current)) >=
       0) {
-    photo_capabilities->exposure_mode =
+    photo_capabilities->current_exposure_mode =
         exposure_current.value == V4L2_EXPOSURE_MANUAL
-            ? mojom::MeteringMode::MANUAL
-            : mojom::MeteringMode::CONTINUOUS;
+            ? MeteringMode::MANUAL
+            : MeteringMode::CONTINUOUS;
   }
 
-  photo_capabilities->white_balance_mode = mojom::MeteringMode::NONE;
+  photo_capabilities->exposure_compensation =
+      RetrieveUserControlRange(device_fd_.get(), V4L2_CID_EXPOSURE_ABSOLUTE);
+
+  photo_capabilities->color_temperature = RetrieveUserControlRange(
+      device_fd_.get(), V4L2_CID_WHITE_BALANCE_TEMPERATURE);
+  if (photo_capabilities->color_temperature) {
+    photo_capabilities->supported_white_balance_modes.push_back(
+        MeteringMode::MANUAL);
+  }
+
+  v4l2_queryctrl white_balance_ctrl = {};
+  white_balance_ctrl.id = V4L2_CID_AUTO_WHITE_BALANCE;
+  if (RunIoctl(device_fd_.get(), VIDIOC_QUERYCTRL, &white_balance_ctrl)) {
+    photo_capabilities->supported_white_balance_modes.push_back(
+        MeteringMode::CONTINUOUS);
+  }
+
+  photo_capabilities->current_white_balance_mode = MeteringMode::NONE;
   v4l2_control white_balance_current = {};
   white_balance_current.id = V4L2_CID_AUTO_WHITE_BALANCE;
   if (HANDLE_EINTR(ioctl(device_fd_.get(), VIDIOC_G_CTRL,
                          &white_balance_current)) >= 0) {
-    photo_capabilities->white_balance_mode =
-        white_balance_current.value ? mojom::MeteringMode::CONTINUOUS
-                                    : mojom::MeteringMode::MANUAL;
+    photo_capabilities->current_white_balance_mode =
+        white_balance_current.value ? MeteringMode::CONTINUOUS
+                                    : MeteringMode::MANUAL;
   }
 
-  photo_capabilities->color_temperature = RetrieveUserControlRange(
-      device_fd_.get(), V4L2_CID_WHITE_BALANCE_TEMPERATURE);
-
   photo_capabilities->iso = mojom::Range::New();
-  photo_capabilities->height = mojom::Range::New();
-  photo_capabilities->width = mojom::Range::New();
-  photo_capabilities->exposure_compensation = mojom::Range::New();
-  photo_capabilities->fill_light_mode = mojom::FillLightMode::NONE;
-  photo_capabilities->red_eye_reduction = false;
+  photo_capabilities->height = mojom::Range::New(
+      capture_format_.frame_size.height(), capture_format_.frame_size.height(),
+      capture_format_.frame_size.height(), 0 /* step */);
+  photo_capabilities->width = mojom::Range::New(
+      capture_format_.frame_size.width(), capture_format_.frame_size.width(),
+      capture_format_.frame_size.width(), 0 /* step */);
+  photo_capabilities->red_eye_reduction = mojom::RedEyeReduction::NEVER;
+  photo_capabilities->torch = false;
 
   photo_capabilities->brightness =
       RetrieveUserControlRange(device_fd_.get(), V4L2_CID_BRIGHTNESS);
@@ -628,17 +671,43 @@ void V4L2CaptureDelegate::SetPhotoOptions(
     HANDLE_EINTR(ioctl(device_fd_.get(), VIDIOC_S_CTRL, &white_balance_set));
   }
 
-  // Color temperature can only be applied if Auto White Balance is off.
   if (settings->has_color_temperature) {
     v4l2_control auto_white_balance_current = {};
     auto_white_balance_current.id = V4L2_CID_AUTO_WHITE_BALANCE;
     const int result = HANDLE_EINTR(
         ioctl(device_fd_.get(), VIDIOC_G_CTRL, &auto_white_balance_current));
+    // Color temperature can only be applied if Auto White Balance is off.
     if (result >= 0 && !auto_white_balance_current.value) {
       v4l2_control set_temperature = {};
       set_temperature.id = V4L2_CID_WHITE_BALANCE_TEMPERATURE;
       set_temperature.value = settings->color_temperature;
       HANDLE_EINTR(ioctl(device_fd_.get(), VIDIOC_S_CTRL, &set_temperature));
+    }
+  }
+
+  if (settings->has_exposure_mode &&
+      (settings->exposure_mode == mojom::MeteringMode::CONTINUOUS ||
+       settings->exposure_mode == mojom::MeteringMode::MANUAL)) {
+    v4l2_control exposure_mode_set = {};
+    exposure_mode_set.id = V4L2_CID_EXPOSURE_AUTO;
+    exposure_mode_set.value =
+        settings->exposure_mode == mojom::MeteringMode::CONTINUOUS
+            ? V4L2_EXPOSURE_APERTURE_PRIORITY
+            : V4L2_EXPOSURE_MANUAL;
+    HANDLE_EINTR(ioctl(device_fd_.get(), VIDIOC_S_CTRL, &exposure_mode_set));
+  }
+
+  if (settings->has_exposure_compensation) {
+    v4l2_control auto_exposure_current = {};
+    auto_exposure_current.id = V4L2_CID_EXPOSURE_AUTO;
+    const int result = HANDLE_EINTR(
+        ioctl(device_fd_.get(), VIDIOC_G_CTRL, &auto_exposure_current));
+    // Exposure Compensation can only be applied if Auto Exposure is off.
+    if (result >= 0 && auto_exposure_current.value == V4L2_EXPOSURE_MANUAL) {
+      v4l2_control set_exposure = {};
+      set_exposure.id = V4L2_CID_EXPOSURE_ABSOLUTE;
+      set_exposure.value = settings->exposure_compensation;
+      HANDLE_EINTR(ioctl(device_fd_.get(), VIDIOC_S_CTRL, &set_exposure));
     }
   }
 
@@ -678,6 +747,10 @@ void V4L2CaptureDelegate::SetRotation(int rotation) {
   DCHECK(v4l2_task_runner_->BelongsToCurrentThread());
   DCHECK(rotation >= 0 && rotation < 360 && rotation % 90 == 0);
   rotation_ = rotation;
+}
+
+base::WeakPtr<V4L2CaptureDelegate> V4L2CaptureDelegate::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 V4L2CaptureDelegate::~V4L2CaptureDelegate() {}
@@ -786,7 +859,7 @@ void V4L2CaptureDelegate::DoCapture() {
   }
 
   v4l2_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&V4L2CaptureDelegate::DoCapture, this));
+      FROM_HERE, base::Bind(&V4L2CaptureDelegate::DoCapture, GetWeakPtr()));
 }
 
 void V4L2CaptureDelegate::SetErrorState(

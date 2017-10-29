@@ -10,6 +10,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/devtools_event_listener.h"
@@ -208,7 +209,7 @@ Status DevToolsClientImpl::SendCommandAndGetResultWithTimeout(
     return status;
   if (!intermediate_result)
     return Status(kUnknownError, "inspector response missing result");
-  result->reset(intermediate_result.release());
+  *result = std::move(intermediate_result);
   return Status(kOk);
 }
 
@@ -268,7 +269,7 @@ Status DevToolsClientImpl::SendCommandInternal(
   base::DictionaryValue command;
   command.SetInteger("id", command_id);
   command.SetString("method", method);
-  command.Set("params", params.DeepCopy());
+  command.Set("params", base::MakeUnique<base::Value>(params));
   std::string message = SerializeValue(&command);
   if (IsVLogOn(1)) {
     VLOG(1) << "DEVTOOLS COMMAND " << method << " (id=" << command_id << ") "
@@ -503,7 +504,10 @@ bool ParseInspectorMessage(
     InspectorMessageType* type,
     InspectorEvent* event,
     InspectorCommandResponse* command_response) {
-  std::unique_ptr<base::Value> message_value = base::JSONReader::Read(message);
+  // We want to allow invalid characters in case they are valid ECMAScript
+  // strings. For example, webplatform tests use this to check string handling
+  std::unique_ptr<base::Value> message_value =
+      base::JSONReader::Read(message, base::JSON_REPLACE_INVALID_CHARACTERS);
   base::DictionaryValue* message_dict;
   if (!message_value || !message_value->GetAsDictionary(&message_dict))
     return false;

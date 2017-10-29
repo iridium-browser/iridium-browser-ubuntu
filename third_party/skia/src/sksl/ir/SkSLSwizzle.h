@@ -4,18 +4,20 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
- 
+
 #ifndef SKSL_SWIZZLE
 #define SKSL_SWIZZLE
 
+#include "SkSLConstructor.h"
 #include "SkSLContext.h"
 #include "SkSLExpression.h"
+#include "SkSLIRGenerator.h"
 #include "SkSLUtil.h"
 
 namespace SkSL {
 
 /**
- * Given a type and a swizzle component count, returns the type that will result from swizzling. For 
+ * Given a type and a swizzle component count, returns the type that will result from swizzling. For
  * instance, swizzling a vec3 with two components will result in a vec2. It is possible to swizzle
  * with more components than the source vector, as in 'vec2(1).xxxx'.
  */
@@ -69,8 +71,34 @@ struct Swizzle : public Expression {
         ASSERT(fComponents.size() >= 1 && fComponents.size() <= 4);
     }
 
-    SkString description() const override {
-        SkString result = fBase->description() + ".";
+    std::unique_ptr<Expression> constantPropagate(const IRGenerator& irGenerator,
+                                                  const DefinitionMap& definitions) override {
+        if (fBase->fKind == Expression::kConstructor_Kind && fBase->isConstant()) {
+            // we're swizzling a constant vector, e.g. vec4(1).x. Simplify it.
+            ASSERT(fBase->fKind == Expression::kConstructor_Kind);
+            if (fType == *irGenerator.fContext.fInt_Type) {
+                ASSERT(fComponents.size() == 1);
+                int64_t value = ((Constructor&) *fBase).getIVecComponent(fComponents[0]);
+                return std::unique_ptr<Expression>(new IntLiteral(irGenerator.fContext,
+                                                                    Position(),
+                                                                    value));
+            } else if (fType == *irGenerator.fContext.fFloat_Type) {
+                ASSERT(fComponents.size() == 1);
+                double value = ((Constructor&) *fBase).getFVecComponent(fComponents[0]);
+                return std::unique_ptr<Expression>(new FloatLiteral(irGenerator.fContext,
+                                                                    Position(),
+                                                                    value));
+            }
+        }
+        return nullptr;
+    }
+
+    bool hasSideEffects() const override {
+        return fBase->hasSideEffects();
+    }
+
+    String description() const override {
+        String result = fBase->description() + ".";
         for (int x : fComponents) {
             result += "xyzw"[x];
         }

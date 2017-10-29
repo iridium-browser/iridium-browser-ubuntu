@@ -15,15 +15,14 @@
 
 namespace media {
 
-class OpenSLESOutputStream;
+class MuteableAudioOutputStream;
 
 // Android implemention of AudioManager.
 class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
  public:
-  AudioManagerAndroid(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
-      AudioLogFactory* audio_log_factory);
+  AudioManagerAndroid(std::unique_ptr<AudioThread> audio_thread,
+                      AudioLogFactory* audio_log_factory);
+  ~AudioManagerAndroid() override;
 
   void InitializeIfNeeded();
 
@@ -55,6 +54,10 @@ class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
       const AudioParameters& params,
       const std::string& device_id,
       const LogCallback& log_callback) override;
+  AudioOutputStream* MakeBitstreamOutputStream(
+      const AudioParameters& params,
+      const std::string& device_id,
+      const LogCallback& log_callback) override;
   AudioInputStream* MakeLinearInputStream(
       const AudioParameters& params,
       const std::string& device_id,
@@ -76,8 +79,7 @@ class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
   bool HasOutputVolumeOverride(double* out_volume) const;
 
  protected:
-  ~AudioManagerAndroid() override;
-
+  void ShutdownOnAudioThread() override;
   AudioParameters GetPreferredOutputStreamParameters(
       const std::string& output_device_id,
       const AudioParameters& input_params) override;
@@ -98,7 +100,7 @@ class MEDIA_EXPORT AudioManagerAndroid : public AudioManagerBase {
   // Java AudioManager instance.
   base::android::ScopedJavaGlobalRef<jobject> j_audio_manager_;
 
-  typedef std::set<OpenSLESOutputStream*> OutputStreams;
+  typedef std::set<MuteableAudioOutputStream*> OutputStreams;
   OutputStreams streams_;
 
   // Enabled when first input stream is created and set to false when last

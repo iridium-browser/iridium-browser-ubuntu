@@ -5,6 +5,8 @@
 #include "media/gpu/ipc/service/gpu_jpeg_decode_accelerator.h"
 #include "base/bind.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
 #include "gpu/ipc/service/gpu_channel.h"
 #include "media/gpu/ipc/common/media_messages.h"
@@ -43,7 +45,7 @@ class MockJpegDecodeAccelerator : public media::JpegDecodeAccelerator {
 class GpuJpegDecodeAcceleratorTest : public ::testing::Test {
  public:
   GpuJpegDecodeAcceleratorTest() : io_thread_("io") {}
-  ~GpuJpegDecodeAcceleratorTest() override{};
+  ~GpuJpegDecodeAcceleratorTest() override {}
 
   void SetUp() override {
     output_frame_memory_.CreateAndMapAnonymous(kOutputFrameSizeInBytes);
@@ -80,7 +82,7 @@ class GpuJpegDecodeAcceleratorTest : public ::testing::Test {
  private:
   // This is required to allow base::ThreadTaskRunnerHandle::Get() from the
   // test execution thread.
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 };
 
 // Tests that the communication for decoding a frame between the caller of
@@ -93,7 +95,7 @@ TEST_F(GpuJpegDecodeAcceleratorTest, DecodeFrameCallArrivesAtDecoder) {
   auto* decoder_ptr = decoder.get();
   ON_CALL(*decoder, Initialize(_)).WillByDefault(Return(true));
 
-  IPC::MessageFilter* message_filter = nullptr;
+  scoped_refptr<IPC::MessageFilter> message_filter = nullptr;
   EXPECT_CALL(*this, GetMockJpegDecodeAccelerator(_))
       .WillOnce(InvokeWithoutArgs([&decoder]() { return std::move(decoder); }));
   EXPECT_CALL(gpu_channel_, AddFilter(_)).WillOnce(SaveArg<0>(&message_filter));
@@ -122,7 +124,8 @@ TEST_F(GpuJpegDecodeAcceleratorTest, DecodeFrameCallArrivesAtDecoder) {
   io_task_runner->PostTaskAndReply(
       FROM_HERE,
       base::Bind(&GpuJpegDecodeAcceleratorTest::SendStubFrame,
-                 base::Unretained(this), message_filter, kArbitraryRouteId),
+                 base::Unretained(this), base::RetainedRef(message_filter),
+                 kArbitraryRouteId),
       run_loop2.QuitClosure());
   run_loop2.Run();
 }

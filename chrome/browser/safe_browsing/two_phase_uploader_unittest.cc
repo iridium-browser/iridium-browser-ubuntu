@@ -8,10 +8,13 @@
 
 #include "base/files/file_path.h"
 #include "base/message_loop/message_loop.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/task_scheduler/task_traits.h"
 #include "chrome/browser/safe_browsing/local_two_phase_testserver.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/net_errors.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -71,6 +74,9 @@ class TwoPhaseUploaderTest : public testing::Test {
   content::TestBrowserThreadBundle thread_bundle_;
 
   scoped_refptr<net::TestURLRequestContextGetter> url_request_context_getter_;
+  const scoped_refptr<base::SequencedTaskRunner> task_runner_ =
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND});
 };
 
 TEST_F(TwoPhaseUploaderTest, UploadFile) {
@@ -79,12 +85,12 @@ TEST_F(TwoPhaseUploaderTest, UploadFile) {
   ASSERT_TRUE(test_server.Start());
   Delegate delegate;
   std::unique_ptr<TwoPhaseUploader> uploader(TwoPhaseUploader::Create(
-      url_request_context_getter_.get(),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::DB).get(),
+      url_request_context_getter_.get(), task_runner_.get(),
       test_server.GetURL("start"), "metadata", GetTestFilePath(),
       base::Bind(&Delegate::ProgressCallback, base::Unretained(&delegate)),
       base::Bind(&Delegate::FinishCallback, base::Unretained(&delegate),
-                 runner)));
+                 runner),
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   uploader->Start();
   runner->Run();
   EXPECT_EQ(TwoPhaseUploader::STATE_SUCCESS, delegate.state_);
@@ -103,12 +109,12 @@ TEST_F(TwoPhaseUploaderTest, BadPhaseOneResponse) {
   ASSERT_TRUE(test_server.Start());
   Delegate delegate;
   std::unique_ptr<TwoPhaseUploader> uploader(TwoPhaseUploader::Create(
-      url_request_context_getter_.get(),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::DB).get(),
+      url_request_context_getter_.get(), task_runner_.get(),
       test_server.GetURL("start?p1code=500"), "metadata", GetTestFilePath(),
       base::Bind(&Delegate::ProgressCallback, base::Unretained(&delegate)),
       base::Bind(&Delegate::FinishCallback, base::Unretained(&delegate),
-                 runner)));
+                 runner),
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   uploader->Start();
   runner->Run();
   EXPECT_EQ(TwoPhaseUploader::UPLOAD_METADATA, delegate.state_);
@@ -123,12 +129,12 @@ TEST_F(TwoPhaseUploaderTest, BadPhaseTwoResponse) {
   ASSERT_TRUE(test_server.Start());
   Delegate delegate;
   std::unique_ptr<TwoPhaseUploader> uploader(TwoPhaseUploader::Create(
-      url_request_context_getter_.get(),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::DB).get(),
+      url_request_context_getter_.get(), task_runner_.get(),
       test_server.GetURL("start?p2code=500"), "metadata", GetTestFilePath(),
       base::Bind(&Delegate::ProgressCallback, base::Unretained(&delegate)),
       base::Bind(&Delegate::FinishCallback, base::Unretained(&delegate),
-                 runner)));
+                 runner),
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   uploader->Start();
   runner->Run();
   EXPECT_EQ(TwoPhaseUploader::UPLOAD_FILE, delegate.state_);
@@ -147,12 +153,12 @@ TEST_F(TwoPhaseUploaderTest, PhaseOneConnectionClosed) {
   ASSERT_TRUE(test_server.Start());
   Delegate delegate;
   std::unique_ptr<TwoPhaseUploader> uploader(TwoPhaseUploader::Create(
-      url_request_context_getter_.get(),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::DB).get(),
+      url_request_context_getter_.get(), task_runner_.get(),
       test_server.GetURL("start?p1close=1"), "metadata", GetTestFilePath(),
       base::Bind(&Delegate::ProgressCallback, base::Unretained(&delegate)),
       base::Bind(&Delegate::FinishCallback, base::Unretained(&delegate),
-                 runner)));
+                 runner),
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   uploader->Start();
   runner->Run();
   EXPECT_EQ(TwoPhaseUploader::UPLOAD_METADATA, delegate.state_);
@@ -167,12 +173,12 @@ TEST_F(TwoPhaseUploaderTest, PhaseTwoConnectionClosed) {
   ASSERT_TRUE(test_server.Start());
   Delegate delegate;
   std::unique_ptr<TwoPhaseUploader> uploader(TwoPhaseUploader::Create(
-      url_request_context_getter_.get(),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::DB).get(),
+      url_request_context_getter_.get(), task_runner_.get(),
       test_server.GetURL("start?p2close=1"), "metadata", GetTestFilePath(),
       base::Bind(&Delegate::ProgressCallback, base::Unretained(&delegate)),
       base::Bind(&Delegate::FinishCallback, base::Unretained(&delegate),
-                 runner)));
+                 runner),
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   uploader->Start();
   runner->Run();
   EXPECT_EQ(TwoPhaseUploader::UPLOAD_FILE, delegate.state_);

@@ -20,16 +20,18 @@ import android.support.test.filters.SmallTest;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.text.TextUtils;
+import android.view.MenuItem;
 import android.view.View;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.BaseActivityInstrumentationTestCase;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.IntentHandler;
-import org.chromium.chrome.browser.childaccounts.ChildAccountService;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
 import org.chromium.chrome.browser.widget.TintedImageButton;
@@ -128,9 +130,9 @@ public class HistoryActivityTest extends BaseActivityInstrumentationTestCase<His
         mHistoryProvider = new StubbedHistoryProvider();
 
         Date today = new Date();
-        long[] timestamps = {today.getTime()};
-        mItem1 = StubbedHistoryProvider.createHistoryItem(0, timestamps);
-        mItem2 = StubbedHistoryProvider.createHistoryItem(1, timestamps);
+        long timestamp = today.getTime();
+        mItem1 = StubbedHistoryProvider.createHistoryItem(0, timestamp);
+        mItem2 = StubbedHistoryProvider.createHistoryItem(1, timestamp);
         mHistoryProvider.addItem(mItem1);
         mHistoryProvider.addItem(mItem2);
 
@@ -196,7 +198,7 @@ public class HistoryActivityTest extends BaseActivityInstrumentationTestCase<His
 
     @SmallTest
     public void testPrivacyDisclaimers_SignedOut() {
-        ChromeSigninController signinController = ChromeSigninController.get(getActivity());
+        ChromeSigninController signinController = ChromeSigninController.get();
         signinController.setSignedInAccountName(null);
 
         assertEquals(View.GONE, mAdapter.getSignedInNotSyncedViewForTests().getVisibility());
@@ -207,7 +209,7 @@ public class HistoryActivityTest extends BaseActivityInstrumentationTestCase<His
 
     @SmallTest
     public void testPrivacyDisclaimers_SignedIn() {
-        ChromeSigninController signinController = ChromeSigninController.get(getActivity());
+        ChromeSigninController signinController = ChromeSigninController.get();
         signinController.setSignedInAccountName("test@gmail.com");
 
         setHasOtherFormsOfBrowsingData(false, false);
@@ -222,7 +224,7 @@ public class HistoryActivityTest extends BaseActivityInstrumentationTestCase<His
 
     @SmallTest
     public void testPrivacyDisclaimers_SignedInSynced() {
-        ChromeSigninController signinController = ChromeSigninController.get(getActivity());
+        ChromeSigninController signinController = ChromeSigninController.get();
         signinController.setSignedInAccountName("test@gmail.com");
 
         setHasOtherFormsOfBrowsingData(false, true);
@@ -237,7 +239,7 @@ public class HistoryActivityTest extends BaseActivityInstrumentationTestCase<His
 
     @SmallTest
     public void testPrivacyDisclaimers_SignedInSyncedAndOtherForms() {
-        ChromeSigninController signinController = ChromeSigninController.get(getActivity());
+        ChromeSigninController signinController = ChromeSigninController.get();
         signinController.setSignedInAccountName("test@gmail.com");
 
         setHasOtherFormsOfBrowsingData(true, true);
@@ -269,6 +271,7 @@ public class HistoryActivityTest extends BaseActivityInstrumentationTestCase<His
     }
 
     @SmallTest
+    @RetryOnFailure(message = "crbug.com/718689")
     public void testOpenSelectedItems() throws Exception {
         IntentFilter filter = new IntentFilter(Intent.ACTION_VIEW);
         filter.addDataPath(mItem1.getUrl(), PatternMatcher.PATTERN_LITERAL);
@@ -432,6 +435,47 @@ public class HistoryActivityTest extends BaseActivityInstrumentationTestCase<His
     }
 
     @SmallTest
+    public void testToggleInfoMenuItem() throws Exception {
+        final HistoryManagerToolbar toolbar = mHistoryManager.getToolbarForTests();
+        final MenuItem infoMenuItem = toolbar.getItemById(R.id.info_menu_id);
+
+        // Not signed in
+        ChromeSigninController signinController = ChromeSigninController.get();
+        signinController.setSignedInAccountName(null);
+        assertEquals(false, infoMenuItem.isVisible());
+        assertEquals(View.GONE, mAdapter.getSignedInNotSyncedViewForTests().getVisibility());
+        assertEquals(View.GONE, mAdapter.getSignedInSyncedViewForTests().getVisibility());
+        assertEquals(
+                View.GONE, mAdapter.getOtherFormsOfBrowsingHistoryViewForTests().getVisibility());
+
+        // Signed in but not synced and history has items
+        signinController.setSignedInAccountName("test@gmail.com");
+        setHasOtherFormsOfBrowsingData(false, false);
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                toolbar.onSignInStateChange();
+            }
+        });
+        assertEquals(true, infoMenuItem.isVisible());
+
+        // Signed in, synced, has other forms and has items
+        // Privacy disclaimers should be shown by default
+        setHasOtherFormsOfBrowsingData(true, true);
+        assertEquals(true, infoMenuItem.isVisible());
+        assertEquals(View.VISIBLE, mAdapter.getPrivacyDisclaimersForTests().getVisibility());
+
+        // Toggle Info Menu Item
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                mHistoryManager.onMenuItemClick(infoMenuItem);
+            }
+        });
+        assertEquals(View.GONE, mAdapter.getPrivacyDisclaimersForTests().getVisibility());
+    }
+
+    @SmallTest
     public void testCopyLink() throws Exception {
         final ClipboardManager clipboardManager = (ClipboardManager)
                 getActivity().getSystemService(getActivity().CLIPBOARD_SERVICE);
@@ -511,7 +555,7 @@ public class HistoryActivityTest extends BaseActivityInstrumentationTestCase<His
             @Override
             public Boolean call() throws Exception {
                 PrefServiceBridge.getInstance().setSupervisedUserId("ChildAccountSUID");
-                return ChildAccountService.isChildAccount()
+                return Profile.getLastUsedProfile().isChild()
                         && !PrefServiceBridge.getInstance().canDeleteBrowsingHistory()
                         && !PrefServiceBridge.getInstance().isIncognitoModeEnabled();
             }
@@ -561,5 +605,6 @@ public class HistoryActivityTest extends BaseActivityInstrumentationTestCase<His
                 SigninManager.get(getActivity()).removeSignInStateObserver(mTestObserver);
             }
         });
+        SigninTestUtil.tearDownAuthForTest();
     }
 }

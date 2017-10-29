@@ -15,11 +15,11 @@
 #include <string>
 #include <vector>
 
-#include "webrtc/base/fakeclock.h"
-#include "webrtc/base/gunit.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/base/timeutils.h"
 #include "webrtc/pc/audiotrack.h"
+#include "webrtc/rtc_base/fakeclock.h"
+#include "webrtc/rtc_base/gunit.h"
+#include "webrtc/rtc_base/logging.h"
+#include "webrtc/rtc_base/timeutils.h"
 
 using webrtc::AudioTrackInterface;
 using webrtc::AudioTrack;
@@ -330,11 +330,11 @@ TEST_F(DtmfSenderTest, TryInsertDtmfWhenItDoesNotWork) {
 
 TEST_F(DtmfSenderTest, InsertDtmfWithInvalidDurationOrGap) {
   std::string tones = "3,4";
-  int duration = 100;
+  int duration = 40;
   int inter_tone_gap = 50;
 
   EXPECT_FALSE(dtmf_->InsertDtmf(tones, 6001, inter_tone_gap));
-  EXPECT_FALSE(dtmf_->InsertDtmf(tones, 69, inter_tone_gap));
+  EXPECT_FALSE(dtmf_->InsertDtmf(tones, 39, inter_tone_gap));
   EXPECT_FALSE(dtmf_->InsertDtmf(tones, duration, 49));
 
   EXPECT_TRUE(dtmf_->InsertDtmf(tones, duration, inter_tone_gap));

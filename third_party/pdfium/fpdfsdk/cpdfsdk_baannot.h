@@ -32,12 +32,11 @@ class CPDFSDK_BAAnnot : public CPDFSDK_Annot {
   void SetRect(const CFX_FloatRect& rect) override;
   CFX_FloatRect GetRect() const override;
   CPDF_Annot* GetPDFAnnot() const override;
-  void Annot_OnDraw(CFX_RenderDevice* pDevice,
-                    CFX_Matrix* pUser2Device,
-                    CPDF_RenderOptions* pOptions) override;
 
   CPDF_Dictionary* GetAnnotDict() const;
   CPDF_Annot* GetPDFPopupAnnot() const;
+
+  CPDF_Dictionary* GetAPDict() const;
 
   void SetContents(const CFX_WideString& sContents);
   CFX_WideString GetContents() const;
@@ -91,16 +90,10 @@ class CPDFSDK_BAAnnot : public CPDFSDK_Annot {
 
   void ClearCachedAP();
 
-  void WriteAppearance(const CFX_ByteString& sAPType,
-                       const CFX_FloatRect& rcBBox,
-                       const CFX_Matrix& matrix,
-                       const CFX_ByteString& sContents,
-                       const CFX_ByteString& sAPState = "");
-
   void SetOpenState(bool bState);
 
  protected:
-  CPDF_Annot* const m_pAnnot;
+  CFX_UnownedPtr<CPDF_Annot> const m_pAnnot;
 };
 
 #endif  // FPDFSDK_CPDFSDK_BAANNOT_H_

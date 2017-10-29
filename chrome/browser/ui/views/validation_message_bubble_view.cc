@@ -4,12 +4,12 @@
 
 #include "chrome/browser/ui/views/validation_message_bubble_view.h"
 
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/grit/theme_resources.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/display/display.h"
-#include "ui/display/screen.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/widget/widget.h"
@@ -43,8 +43,9 @@ ValidationMessageBubbleView::ValidationMessageBubbleView(
   icon->SizeToPreferredSize();
   AddChildView(icon);
 
-  views::Label* label = new views::Label(
-      main_text, bundle.GetFontList(ui::ResourceBundle::MediumFont));
+  // TODO(tapted): Move |main_text| to WidgetDelegate::GetWindowTitle().
+  views::Label* label =
+      new views::Label(main_text, views::style::CONTEXT_DIALOG_TITLE);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   int text_start_x = icon->bounds().right() + kIconTextMargin;
   int min_available = kWindowMinWidth - text_start_x;
@@ -75,9 +76,10 @@ ValidationMessageBubbleView::ValidationMessageBubbleView(
     content_bottom += kTextVerticalMargin + sub_label->height();
   }
 
-  size_ = gfx::Size(text_start_x + label_width, content_bottom);
+  SetPreferredSize(gfx::Size(text_start_x + label_width, content_bottom));
 
   views::BubbleDialogDelegateView::CreateBubble(this)->ShowInactive();
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::VALIDATION_MESSAGE);
 }
 
 ValidationMessageBubbleView::~ValidationMessageBubbleView() {
@@ -87,15 +89,9 @@ gfx::Rect ValidationMessageBubbleView::RootViewToScreenRect(
     const gfx::Rect& rect_in_root_view,
     const content::RenderWidgetHostView* render_widget_host_view) const {
   gfx::NativeView view = render_widget_host_view->GetNativeView();
-  display::Display display =
-      display::Screen::GetScreen()->GetDisplayNearestWindow(view);
-  const float scale = display.device_scale_factor();
+  const float scale = ui::GetScaleFactorForNativeView(view);
   return gfx::ScaleToEnclosingRect(rect_in_root_view, 1 / scale) +
          render_widget_host_view->GetViewBounds().origin().OffsetFromOrigin();
-}
-
-gfx::Size ValidationMessageBubbleView::GetPreferredSize() const {
-  return size_;
 }
 
 int ValidationMessageBubbleView::GetDialogButtons() const {

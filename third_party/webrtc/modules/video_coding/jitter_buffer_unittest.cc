@@ -21,6 +21,7 @@
 #include "webrtc/modules/video_coding/packet.h"
 #include "webrtc/modules/video_coding/test/stream_generator.h"
 #include "webrtc/modules/video_coding/test/test_util.h"
+#include "webrtc/rtc_base/location.h"
 #include "webrtc/system_wrappers/include/clock.h"
 #include "webrtc/system_wrappers/include/field_trial.h"
 #include "webrtc/system_wrappers/include/metrics.h"
@@ -199,7 +200,7 @@ class ProcessThreadMock : public ProcessThread {
   MOCK_METHOD0(Start, void());
   MOCK_METHOD0(Stop, void());
   MOCK_METHOD1(WakeUp, void(Module* module));
-  MOCK_METHOD1(RegisterModule, void(Module* module));
+  MOCK_METHOD2(RegisterModule, void(Module* module, const rtc::Location&));
   MOCK_METHOD1(DeRegisterModule, void(Module* module));
   void PostTask(std::unique_ptr<rtc::QueuedTask> task) /*override*/ {}
 };

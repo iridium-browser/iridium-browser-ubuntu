@@ -13,7 +13,7 @@ from telemetry import benchmark
 # are the primary means of benchmarking power.
 class _BattOrBenchmark(perf_benchmark.PerfBenchmark):
 
-  def CreateTimelineBasedMeasurementOptions(self):
+  def CreateCoreTimelineBasedMeasurementOptions(self):
     category_filter = chrome_trace_category_filter.ChromeTraceCategoryFilter(
         filter_string='toplevel')
     options = timeline_based_measurement.Options(category_filter)
@@ -36,21 +36,8 @@ class _BattOrBenchmark(perf_benchmark.PerfBenchmark):
     return True
 
 
-# android: See battor.android.tough_video_cases below
-# win8: crbug.com/531618
-# crbug.com/565180: Only include cases that report time_to_play
-# Taken directly from media benchmark.
-@benchmark.Disabled('android', 'win8')
-class BattOrToughVideoCases(_BattOrBenchmark):
-  """Obtains media metrics for key user scenarios."""
-  page_set = page_sets.ToughVideoCasesPageSet
-
-  @classmethod
-  def Name(cls):
-    return 'battor.tough_video_cases'
-
-
 @benchmark.Enabled('mac')
+@benchmark.Owner(emails=['charliea@chromium.org'])
 class BattOrTrivialPages(_BattOrBenchmark):
 
   def CreateStorySet(self, options):
@@ -61,7 +48,12 @@ class BattOrTrivialPages(_BattOrBenchmark):
   def Name(cls):
     return 'battor.trivial_pages'
 
+  def GetExpectations(self):
+    return page_sets.TrivialStoryExpectations()
+
+
 @benchmark.Enabled('mac')
+@benchmark.Owner(emails=['charliea@chromium.org'])
 class BattOrSteadyStatePages(_BattOrBenchmark):
 
   def CreateStorySet(self, options):
@@ -71,3 +63,6 @@ class BattOrSteadyStatePages(_BattOrBenchmark):
   @classmethod
   def Name(cls):
     return 'battor.steady_state'
+
+  def GetExpectations(self):
+    return page_sets.IdleAfterLoadingStoryExpectations()

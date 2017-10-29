@@ -6,9 +6,22 @@
  * @fileoverview Login UI based on a stripped down OOBE controller.
  */
 
+var isMd = false;
+
 // <include src="login_shared.js">
 // <include src="login_non_lock_shared.js">
 // <include src="notification_card.js">
+
+/**
+ * Ensures that the pin keyboard is loaded.
+ * @param {object} onLoaded Callback executed when the pin keyboard is loaded.
+ */
+function ensurePinKeyboardLoaded(onLoaded) {
+  'use strict';
+
+  // Wait a frame before running |onLoaded| to avoid any visual glitches.
+  setTimeout(onLoaded);
+}
 
 cr.define('cr.ui.Oobe', function() {
   return {
@@ -38,6 +51,9 @@ cr.define('cr.ui.Oobe', function() {
       login.DeviceDisabledScreen.register();
       login.UnrecoverableCryptohomeErrorScreen.register();
       login.ActiveDirectoryPasswordChangeScreen.register(/* lazyInit= */ true);
+      login.EncryptionMigrationScreen.register();
+      login.VoiceInteractionValuePropScreen.register();
+      login.WaitForContainerReadyScreen.register();
 
       cr.ui.Bubble.decorate($('bubble'));
       login.HeaderBar.decorate($('login-header-bar'));
@@ -55,6 +71,7 @@ cr.define('cr.ui.Oobe', function() {
     setOemEulaUrl: function(oemEulaUrl) {},
     setTpmPassword: function(password) {},
     refreshA11yInfo: function(data) {},
+    reloadEulaContent: function(data) {},
 
     /**
      * Reloads content of the page.

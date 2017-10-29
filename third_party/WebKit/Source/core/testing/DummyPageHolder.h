@@ -36,21 +36,21 @@
 #include "core/page/Page.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Allocator.h"
-#include "wtf/Noncopyable.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
 class Document;
-class LocalFrame;
-class FrameView;
-class InterfaceProvider;
 class IntSize;
+class LocalFrame;
+class LocalFrameView;
 class Settings;
 
 typedef void (*FrameSettingOverrideFunction)(Settings&);
 
-// Creates a dummy Page, LocalFrame, and FrameView whose clients are all no-op.
+// Creates a dummy Page, LocalFrame, and LocalFrameView whose clients are all
+// no-op.
 //
 // This class can be used when you write unit tests for components which do not
 // work correctly without layoutObjects.  To make sure the layoutObjects are
@@ -58,45 +58,43 @@ typedef void (*FrameSettingOverrideFunction)(Settings&);
 // |document()|.
 //
 // Since DummyPageHolder stores empty clients in it, it must outlive the Page,
-// LocalFrame, FrameView and any other objects created by it. DummyPageHolder's
-// destructor ensures this condition by checking remaining references to the
-// LocalFrame.
+// LocalFrame, LocalFrameView and any other objects created by it.
+// DummyPageHolder's destructor ensures this condition by checking remaining
+// references to the LocalFrame.
 
 class DummyPageHolder {
   WTF_MAKE_NONCOPYABLE(DummyPageHolder);
   USING_FAST_MALLOC(DummyPageHolder);
 
  public:
-  static std::unique_ptr<DummyPageHolder> create(
-      const IntSize& initialViewSize = IntSize(),
+  static std::unique_ptr<DummyPageHolder> Create(
+      const IntSize& initial_view_size = IntSize(),
       Page::PageClients* = 0,
       LocalFrameClient* = nullptr,
-      FrameSettingOverrideFunction = nullptr,
-      InterfaceProvider* = nullptr);
+      FrameSettingOverrideFunction = nullptr);
   ~DummyPageHolder();
 
-  Page& page() const;
-  LocalFrame& frame() const;
-  FrameView& frameView() const;
-  Document& document() const;
+  Page& GetPage() const;
+  LocalFrame& GetFrame() const;
+  LocalFrameView& GetFrameView() const;
+  Document& GetDocument() const;
 
  private:
-  DummyPageHolder(const IntSize& initialViewSize,
+  DummyPageHolder(const IntSize& initial_view_size,
                   Page::PageClients*,
                   LocalFrameClient*,
-                  FrameSettingOverrideFunction settingOverrider,
-                  InterfaceProvider* = nullptr);
+                  FrameSettingOverrideFunction setting_overrider);
 
-  Persistent<Page> m_page;
+  Persistent<Page> page_;
 
   // The LocalFrame is accessed from worker threads by unit tests
   // (WorkerThreadableLoaderTest), hence we need to allow cross-thread
   // usage of |m_frame|.
   //
   // TODO: rework the tests to not require cross-thread access.
-  CrossThreadPersistent<LocalFrame> m_frame;
+  CrossThreadPersistent<LocalFrame> frame_;
 
-  Persistent<LocalFrameClient> m_localFrameClient;
+  Persistent<LocalFrameClient> local_frame_client_;
 };
 
 }  // namespace blink

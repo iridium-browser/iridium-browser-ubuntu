@@ -5,10 +5,11 @@
 package org.chromium.chrome.browser.signin;
 
 import android.content.Context;
+import android.support.annotation.Nullable;
 import android.util.AttributeSet;
 import android.view.View;
+import android.view.ViewTreeObserver;
 import android.widget.LinearLayout;
-import android.widget.RelativeLayout;
 import android.widget.ScrollView;
 
 import org.chromium.chrome.R;
@@ -17,21 +18,29 @@ import org.chromium.chrome.R;
 * This view allows the user to confirm signed in account, sync, and service personalization.
 */
 public class AccountSigninConfirmationView extends ScrollView {
-    private Observer mObserver;
-    private boolean mScrolledToBottom;
-
     /**
-    * Scrolled to bottom observer.
-    */
+     * Scrolled to bottom observer.
+     */
     public interface Observer {
         /**
-        * On scrolled to bottom. This is called only once when showing the view.
-        */
+         * On scrolled to bottom. This won't be called more than once per one
+         * {@link AccountSigninConfirmationView#setObserver(Observer)} call.
+         */
         void onScrolledToBottom();
     }
 
+    private Observer mObserver;
+    private ViewTreeObserver.OnGlobalLayoutListener mOnGlobalLayoutListener;
+    private ViewTreeObserver.OnScrollChangedListener mOnScrollChangedListener;
+
     public AccountSigninConfirmationView(Context context, AttributeSet attrs) {
         super(context, attrs);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        removeObservers();
+        super.onDetachedFromWindow();
     }
 
     @Override
@@ -44,8 +53,8 @@ public class AccountSigninConfirmationView extends ScrollView {
         int height = MeasureSpec.getSize(heightMeasureSpec);
 
         View head = findViewById(R.id.signin_confirmation_head);
-        RelativeLayout.LayoutParams headLayoutParams =
-                (RelativeLayout.LayoutParams) head.getLayoutParams();
+        LinearLayout.LayoutParams headLayoutParams =
+                (LinearLayout.LayoutParams) head.getLayoutParams();
         View accountImage = findViewById(R.id.signin_account_image);
         LinearLayout.LayoutParams accountImageLayoutParams =
                 (LinearLayout.LayoutParams) accountImage.getLayoutParams();
@@ -72,40 +81,47 @@ public class AccountSigninConfirmationView extends ScrollView {
         return 0;
     }
 
-    @Override
-    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        super.onLayout(changed, left, top, right, bottom);
+    private void checkScrolledToBottom() {
+        int distance = (getChildAt(getChildCount() - 1).getBottom() - (getHeight() + getScrollY()));
+        if (distance > findViewById(R.id.signin_settings_control).getPaddingBottom()) return;
 
-        notifyIfScrolledToBottom(true);
-    }
-
-    @Override
-    protected void onScrollChanged(int l, int t, int oldl, int oldt) {
-        super.onScrollChanged(l, t, oldl, oldt);
-
-        notifyIfScrolledToBottom(false);
+        mObserver.onScrolledToBottom();
+        removeObservers();
     }
 
     /**
-     * Sets scrolled to bottom observer. See {@link Observer}
+     * Sets observer. See {@link Observer}. Regardless of the passed value, notifications for
+     * the previous observer will be canceled.
      *
-     * @param observer The observer.
+     * @param observer Instance that will receive notifications, or null to clear the observer.
      */
-    public void setScrolledToBottomObserver(Observer observer) {
+    public void setObserver(@Nullable Observer observer) {
+        removeObservers();
+        if (observer == null) return;
+
         mObserver = observer;
+        mOnGlobalLayoutListener = new ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override
+            public void onGlobalLayout() {
+                checkScrolledToBottom();
+            }
+        };
+        getViewTreeObserver().addOnGlobalLayoutListener(mOnGlobalLayoutListener);
+        mOnScrollChangedListener = new ViewTreeObserver.OnScrollChangedListener() {
+            @Override
+            public void onScrollChanged() {
+                checkScrolledToBottom();
+            }
+        };
+        getViewTreeObserver().addOnScrollChangedListener(mOnScrollChangedListener);
     }
 
-    private void notifyIfScrolledToBottom(boolean forceNotify) {
+    private void removeObservers() {
         if (mObserver == null) return;
-
-        if (!forceNotify && mScrolledToBottom) return;
-
-        int distance = (getChildAt(getChildCount() - 1).getBottom() - (getHeight() + getScrollY()));
-        if (distance <= findViewById(R.id.signin_settings_control).getPaddingBottom()) {
-            mObserver.onScrolledToBottom();
-            mScrolledToBottom = true;
-        } else {
-            mScrolledToBottom = false;
-        }
+        mObserver = null;
+        getViewTreeObserver().removeOnGlobalLayoutListener(mOnGlobalLayoutListener);
+        mOnGlobalLayoutListener = null;
+        getViewTreeObserver().removeOnScrollChangedListener(mOnScrollChangedListener);
+        mOnScrollChangedListener = null;
     }
 }

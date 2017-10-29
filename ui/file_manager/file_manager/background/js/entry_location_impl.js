@@ -6,7 +6,7 @@
  * Location information which shows where the path points in FileManager's
  * file system.
  *
- * @param {!VolumeInfo} volumeInfo Volume information.
+ * @param {VolumeInfo} volumeInfo Volume information.
  * @param {VolumeManagerCommon.RootType} rootType Root type.
  * @param {boolean} isRootEntry Whether the entry is root entry or not.
  * @param {boolean} isReadOnly Whether the entry is read only or not.
@@ -27,18 +27,24 @@ function EntryLocationImpl(volumeInfo, rootType, isRootEntry, isReadOnly) {
   this.isSpecialSearchRoot =
       this.rootType === VolumeManagerCommon.RootType.DRIVE_OFFLINE ||
       this.rootType === VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME ||
-      this.rootType === VolumeManagerCommon.RootType.DRIVE_RECENT;
+      this.rootType === VolumeManagerCommon.RootType.DRIVE_RECENT ||
+      this.rootType === VolumeManagerCommon.RootType.RECENT;
 
   /** @override */
-  this.isDriveBased =
-      this.rootType === VolumeManagerCommon.RootType.DRIVE ||
+  this.isDriveBased = this.rootType === VolumeManagerCommon.RootType.DRIVE ||
       this.rootType === VolumeManagerCommon.RootType.DRIVE_OTHER ||
       this.rootType === VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME ||
       this.rootType === VolumeManagerCommon.RootType.DRIVE_RECENT ||
-      this.rootType === VolumeManagerCommon.RootType.DRIVE_OFFLINE;
+      this.rootType === VolumeManagerCommon.RootType.DRIVE_OFFLINE ||
+      this.rootType === VolumeManagerCommon.RootType.TEAM_DRIVES_GRAND_ROOT ||
+      this.rootType === VolumeManagerCommon.RootType.TEAM_DRIVE;
 
   /** @override */
   this.isReadOnly = isReadOnly;
+
+  /** @type{boolean} */
+  this.hasFixedLabel =
+      this.isRootEntry && rootType !== VolumeManagerCommon.RootType.TEAM_DRIVE;
 
   Object.freeze(this);
 }

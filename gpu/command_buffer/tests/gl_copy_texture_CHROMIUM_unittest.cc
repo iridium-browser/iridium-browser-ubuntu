@@ -166,6 +166,7 @@ void getExpectedColor(GLenum src_internal_format,
       setColor(0, 0, 0, color[0], adjusted_color);
       break;
     case GL_R8:
+    case GL_R16_EXT:
       setColor(color[0], 0, 0, 255, adjusted_color);
       break;
     case GL_LUMINANCE:
@@ -263,6 +264,50 @@ void getExpectedColor(GLenum src_internal_format,
   }
 }
 
+std::unique_ptr<uint8_t[]> getTextureDataAndExpectedRGBA(
+    FormatType src_format_type,
+    FormatType dest_format_type,
+    GLsizei width,
+    GLsizei height,
+    uint8_t* expected_color,
+    uint8_t* expected_mask) {
+  const int src_channel_count = gles2::GLES2Util::ElementsPerGroup(
+      src_format_type.format, src_format_type.type);
+  uint8_t color[4] = {1u, 63u, 127u, 255u};
+  getExpectedColor(src_format_type.internal_format,
+                   dest_format_type.internal_format, color, expected_color,
+                   expected_mask);
+  if (src_format_type.type == GL_UNSIGNED_BYTE) {
+    std::unique_ptr<uint8_t[]> pixels(
+        new uint8_t[width * height * src_channel_count]);
+    for (int i = 0; i < width * height * src_channel_count;
+         i += src_channel_count) {
+      for (int j = 0; j < src_channel_count; ++j)
+        pixels[i + j] = color[j];
+    }
+    return pixels;
+  } else if (src_format_type.type == GL_UNSIGNED_SHORT) {
+    uint16_t color_16bit[4] = {1u << 8, 63u << 8, 127u << 8, 255u << 8};
+    std::unique_ptr<uint8_t[]> data(
+        new uint8_t[width * height * src_channel_count * sizeof(uint16_t)]);
+    uint16_t* pixels = reinterpret_cast<uint16_t*>(data.get());
+    int16_t flip_sign = -1;
+    for (int i = 0; i < width * height * src_channel_count;
+         i += src_channel_count) {
+      for (int j = 0; j < src_channel_count; ++j) {
+        // Introduce an offset to the value to check. Expected value should be
+        // the same as without the offset.
+        flip_sign *= -1;
+        pixels[i + j] =
+            color_16bit[j] + flip_sign * (0x7F * (i + j)) / (width * height);
+      }
+    }
+    return data;
+  }
+  NOTREACHED();
+  return nullptr;
+}
+
 }  // namespace
 
 // A collection of tests that exercise the GL_CHROMIUM_copy_texture extension.
@@ -351,20 +396,11 @@ class GLCopyTextureCHROMIUMTest
                       FormatType dest_format_type,
                       GLint dest_level,
                       bool is_es3) {
-    const int src_channel_count = gles2::GLES2Util::ElementsPerGroup(
-        src_format_type.format, src_format_type.type);
-    uint8_t color[4] = {1u, 63u, 127u, 255u};
-    std::unique_ptr<uint8_t[]> pixels(new uint8_t[width_ * height_ * 4]);
-    for (int i = 0; i < width_ * height_ * src_channel_count;
-         i += src_channel_count)
-      for (int j = 0; j < src_channel_count; ++j)
-        pixels[i + j] = color[j];
     uint8_t expected_color[4];
     uint8_t mask[4];
-    getExpectedColor(src_format_type.internal_format,
-                     dest_format_type.internal_format, color, expected_color,
-                     mask);
-
+    std::unique_ptr<uint8_t[]> pixels =
+        getTextureDataAndExpectedRGBA(src_format_type, dest_format_type, width_,
+                                      height_, expected_color, mask);
     GLenum source_target = GL_TEXTURE_2D;
     glGenTextures(2, textures_);
     glBindTexture(source_target, textures_[0]);
@@ -509,16 +545,6 @@ class GLCopyTextureCHROMIUMES3Test : public GLCopyTextureCHROMIUMTest {
     return (!gl_.decoder() || !gl_.decoder()->GetContextGroup());
   }
 
-  // RGB9_E5 isn't accepted by glCopyTexImage2D if underlying context is ES.
-  // TODO(qiankun.miao@intel.com): we should support RGB9_E5 in ES context.
-  // Maybe, we can add a readback path for RGB9_E5 format in ES context.
-  bool ShouldSkipRGB9_E5() const {
-    DCHECK(!ShouldSkipTest());
-    const gl::GLVersionInfo& gl_version_info =
-        gl_.decoder()->GetFeatureInfo()->gl_version_info();
-    return gl_version_info.is_es;
-  }
-
   // If EXT_color_buffer_float isn't available, float format isn't supported.
   bool ShouldSkipFloatFormat() const {
     DCHECK(!ShouldSkipTest());
@@ -538,14 +564,16 @@ class GLCopyTextureCHROMIUMES3Test : public GLCopyTextureCHROMIUMTest {
     return !gl_.decoder()->GetFeatureInfo()->feature_flags().ext_srgb;
   }
 
-  // RGB5_A1 is not color-renderable on NVIDIA Mac, see crbug.com/676209.
-  bool ShouldSkipRGB5_A1() const {
+  bool ShouldSkipNorm16() const {
     DCHECK(!ShouldSkipTest());
-#if defined(OS_MACOSX)
-    return true;
-#else
-    return false;
+#if (defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)) && \
+    (defined(ARCH_CPU_X86) || defined(ARCH_CPU_X86_64))
+    // Make sure it's tested; it is safe to assume that the flag is always true
+    // on desktop.
+    EXPECT_TRUE(
+        gl_.decoder()->GetFeatureInfo()->feature_flags().ext_texture_norm16);
 #endif
+    return !gl_.decoder()->GetFeatureInfo()->feature_flags().ext_texture_norm16;
   }
 };
 
@@ -608,6 +636,7 @@ TEST_P(GLCopyTextureCHROMIUMES3Test, FormatCombinations) {
       {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE},
       {GL_BGRA_EXT, GL_BGRA_EXT, GL_UNSIGNED_BYTE},
       {GL_BGRA8_EXT, GL_BGRA_EXT, GL_UNSIGNED_BYTE},
+      {GL_R16_EXT, GL_RED, GL_UNSIGNED_SHORT},
   };
 
   FormatType dest_format_types[] = {
@@ -656,8 +685,6 @@ TEST_P(GLCopyTextureCHROMIUMES3Test, FormatCombinations) {
 
   for (auto src_format_type : src_format_types) {
     for (auto dest_format_type : dest_format_types) {
-      if (dest_format_type.internal_format == GL_RGB9_E5 && ShouldSkipRGB9_E5())
-        continue;
       if ((src_format_type.internal_format == GL_BGRA_EXT ||
            src_format_type.internal_format == GL_BGRA8_EXT ||
            dest_format_type.internal_format == GL_BGRA_EXT ||
@@ -672,7 +699,7 @@ TEST_P(GLCopyTextureCHROMIUMES3Test, FormatCombinations) {
            dest_format_type.internal_format == GL_SRGB_ALPHA_EXT) &&
           ShouldSkipSRGBEXT())
         continue;
-      if (dest_format_type.internal_format == GL_RGB5_A1 && ShouldSkipRGB5_A1())
+      if (src_format_type.internal_format == GL_R16_EXT && ShouldSkipNorm16())
         continue;
 
       RunCopyTexture(GL_TEXTURE_2D, copy_type, src_format_type, 0,
@@ -771,6 +798,56 @@ TEST_P(GLCopyTextureCHROMIUMTest, InternalFormat) {
       glDeleteFramebuffers(1, &framebuffer_id_);
     }
   }
+}
+
+TEST_P(GLCopyTextureCHROMIUMTest, InternalFormatRGBFloat) {
+  if (!GLTestHelper::HasExtension("GL_CHROMIUM_color_buffer_float_rgb")) {
+    LOG(INFO)
+        << "GL_CHROMIUM_color_buffer_float_rgb not supported. Skipping test...";
+    return;
+  }
+  // TODO(qiankun.miao@intel.com): since RunCopyTexture requires dest texture to
+  // be texture complete, skip this test if float texture is not color
+  // filterable. We should remove this limitation when we find a way doesn't
+  // require dest texture to be texture complete in RunCopyTexture.
+  if (!gl_.decoder()
+           ->GetFeatureInfo()
+           ->feature_flags()
+           .enable_texture_float_linear) {
+    LOG(INFO) << "RGB32F texture is not filterable. Skipping test...";
+    return;
+  }
+  CopyType copy_type = GetParam();
+  FormatType src_format_type = {GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE};
+  FormatType dest_format_type = {GL_RGB32F, GL_RGB, GL_FLOAT};
+
+  RunCopyTexture(GL_TEXTURE_2D, copy_type, src_format_type, 0, dest_format_type,
+                 0, false);
+}
+
+TEST_P(GLCopyTextureCHROMIUMTest, InternalFormatRGBAFloat) {
+  if (!GLTestHelper::HasExtension("GL_CHROMIUM_color_buffer_float_rgba")) {
+    LOG(INFO) << "GL_CHROMIUM_color_buffer_float_rgba not supported. Skipping "
+                 "test...";
+    return;
+  }
+  // TODO(qiankun.miao@intel.com): since RunCopyTexture requires dest texture to
+  // be texture complete, skip this test if float texture is not color
+  // filterable. We should remove this limitation when we find a way doesn't
+  // require dest texture to be texture complete in RunCopyTexture.
+  if (!gl_.decoder()
+           ->GetFeatureInfo()
+           ->feature_flags()
+           .enable_texture_float_linear) {
+    LOG(INFO) << "RGBA32F texture is not filterable. Skipping test...";
+    return;
+  }
+  CopyType copy_type = GetParam();
+  FormatType src_format_type = {GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE};
+  FormatType dest_format_type = {GL_RGBA32F, GL_RGBA, GL_FLOAT};
+
+  RunCopyTexture(GL_TEXTURE_2D, copy_type, src_format_type, 0, dest_format_type,
+                 0, false);
 }
 
 TEST_P(GLCopyTextureCHROMIUMTest, InternalFormatNotSupported) {

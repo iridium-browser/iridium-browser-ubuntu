@@ -6,13 +6,16 @@
 
 #include "core/fxcrt/fxcrt_windows.h"
 
+#include <memory>
+
 #include "core/fxcrt/fx_string.h"
+#include "third_party/base/ptr_util.h"
 
 #if _FXM_PLATFORM_ == _FXM_PLATFORM_WINDOWS_
 
 // static
-IFXCRT_FileAccess* IFXCRT_FileAccess::Create() {
-  return new CFXCRT_FileAccess_Win64;
+std::unique_ptr<IFXCRT_FileAccess> IFXCRT_FileAccess::Create() {
+  return pdfium::MakeUnique<CFXCRT_FileAccess_Win64>();
 }
 
 void FXCRT_Windows_GetFileMode(uint32_t dwMode,
@@ -54,8 +57,8 @@ bool CFXCRT_FileAccess_Win64::Open(const CFX_ByteStringC& fileName,
 
   uint32_t dwAccess, dwShare, dwCreation;
   FXCRT_Windows_GetFileMode(dwMode, dwAccess, dwShare, dwCreation);
-  m_hFile = ::CreateFileA(fileName.c_str(), dwAccess, dwShare, nullptr,
-                          dwCreation, FILE_ATTRIBUTE_NORMAL, nullptr);
+  m_hFile = ::CreateFileA(fileName.unterminated_c_str(), dwAccess, dwShare,
+                          nullptr, dwCreation, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (m_hFile == INVALID_HANDLE_VALUE)
     m_hFile = nullptr;
 
@@ -69,8 +72,9 @@ bool CFXCRT_FileAccess_Win64::Open(const CFX_WideStringC& fileName,
 
   uint32_t dwAccess, dwShare, dwCreation;
   FXCRT_Windows_GetFileMode(dwMode, dwAccess, dwShare, dwCreation);
-  m_hFile = ::CreateFileW((LPCWSTR)fileName.c_str(), dwAccess, dwShare, nullptr,
-                          dwCreation, FILE_ATTRIBUTE_NORMAL, nullptr);
+  m_hFile =
+      ::CreateFileW((LPCWSTR)fileName.unterminated_c_str(), dwAccess, dwShare,
+                    nullptr, dwCreation, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (m_hFile == INVALID_HANDLE_VALUE)
     m_hFile = nullptr;
 

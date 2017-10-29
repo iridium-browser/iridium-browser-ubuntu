@@ -7,7 +7,7 @@
 
 #include "base/macros.h"
 #include "build/build_config.h"
-#include "chrome/browser/feedback/system_logs/system_logs_fetcher_base.h"
+#include "components/feedback/system_logs/system_logs_source.h"
 
 namespace system_logs {
 
@@ -23,6 +23,7 @@ class ChromeInternalLogSource : public SystemLogsSource {
  private:
   void PopulateSyncLogs(SystemLogsResponse* response);
   void PopulateExtensionInfoLogs(SystemLogsResponse* response);
+  void PopulatePowerApiLogs(SystemLogsResponse* response);
   void PopulateDataReductionProxyLogs(SystemLogsResponse* response);
 
 #if defined(OS_CHROMEOS)

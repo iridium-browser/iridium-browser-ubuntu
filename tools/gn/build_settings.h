@@ -14,6 +14,7 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "tools/gn/args.h"
+#include "tools/gn/label.h"
 #include "tools/gn/scope.h"
 #include "tools/gn/source_dir.h"
 #include "tools/gn/source_file.h"
@@ -30,6 +31,10 @@ class BuildSettings {
   BuildSettings();
   BuildSettings(const BuildSettings& other);
   ~BuildSettings();
+
+  // Root target label.
+  const Label& root_target_label() const { return root_target_label_; }
+  void SetRootTargetLabel(const Label& r);
 
   // Absolute path of the source root on the local system. Everything is
   // relative to this. Does not end in a [back]slash.
@@ -51,6 +56,14 @@ class BuildSettings {
 
   const SourceFile& build_config_file() const { return build_config_file_; }
   void set_build_config_file(const SourceFile& f) { build_config_file_ = f; }
+
+  // Path to a file containing the default text to use when running `gn args`.
+  const SourceFile& arg_file_template_path() const {
+    return arg_file_template_path_;
+  }
+  void set_arg_file_template_path(const SourceFile& f) {
+    arg_file_template_path_ = f;
+  }
 
   // The build directory is the root of all output files. The default toolchain
   // files go into here, and non-default toolchains will have separate
@@ -96,12 +109,14 @@ class BuildSettings {
   }
 
  private:
+  Label root_target_label_;
   base::FilePath root_path_;
   std::string root_path_utf8_;
   base::FilePath secondary_source_path_;
   base::FilePath python_path_;
 
   SourceFile build_config_file_;
+  SourceFile arg_file_template_path_;
   SourceDir build_dir_;
   Args build_args_;
 

@@ -10,20 +10,20 @@
 namespace blink {
 
 template <class T>
-T cssValueIDToPlatformEnum(CSSValueID v) {
+T CssValueIDToPlatformEnum(CSSValueID v) {
   // By default, we use the generated mappings. For special cases, we
   // specialize.
   return detail::cssValueIDToPlatformEnumGenerated<T>(v);
 }
 
 template <class T>
-inline CSSValueID platformEnumToCSSValueID(T v) {
+inline CSSValueID PlatformEnumToCSSValueID(T v) {
   // By default, we use the generated mappings. For special cases, we overload.
   return detail::platformEnumToCSSValueIDGenerated(v);
 }
 
 template <>
-inline UnicodeBidi cssValueIDToPlatformEnum(CSSValueID v) {
+inline UnicodeBidi CssValueIDToPlatformEnum(CSSValueID v) {
   if (v == CSSValueWebkitIsolate)
     return UnicodeBidi::kIsolate;
   if (v == CSSValueWebkitIsolateOverride)
@@ -34,7 +34,24 @@ inline UnicodeBidi cssValueIDToPlatformEnum(CSSValueID v) {
 }
 
 template <>
-inline ETextAlign cssValueIDToPlatformEnum(CSSValueID v) {
+inline EBoxOrient CssValueIDToPlatformEnum(CSSValueID v) {
+  if (v == CSSValueInlineAxis)
+    return EBoxOrient::kHorizontal;
+  if (v == CSSValueBlockAxis)
+    return EBoxOrient::kVertical;
+
+  return detail::cssValueIDToPlatformEnumGenerated<EBoxOrient>(v);
+}
+
+template <>
+inline ETextCombine CssValueIDToPlatformEnum(CSSValueID v) {
+  if (v == CSSValueHorizontal)  // -webkit-text-combine
+    return ETextCombine::kAll;
+  return detail::cssValueIDToPlatformEnumGenerated<ETextCombine>(v);
+}
+
+template <>
+inline ETextAlign CssValueIDToPlatformEnum(CSSValueID v) {
   if (v == CSSValueWebkitAuto)  // Legacy -webkit-auto. Eqiuvalent to start.
     return ETextAlign::kStart;
   if (v == CSSValueInternalCenter)
@@ -43,7 +60,26 @@ inline ETextAlign cssValueIDToPlatformEnum(CSSValueID v) {
 }
 
 template <>
-inline WritingMode cssValueIDToPlatformEnum(CSSValueID v) {
+inline ETextOrientation CssValueIDToPlatformEnum(CSSValueID v) {
+  if (v == CSSValueSidewaysRight)  // Legacy -webkit-auto. Eqiuvalent to start.
+    return ETextOrientation::kSideways;
+  if (v == CSSValueVerticalRight)
+    return ETextOrientation::kMixed;
+  return detail::cssValueIDToPlatformEnumGenerated<ETextOrientation>(v);
+}
+
+template <>
+inline EResize CssValueIDToPlatformEnum(CSSValueID v) {
+  if (v == CSSValueAuto) {
+    // Depends on settings, thus should be handled by the caller.
+    NOTREACHED();
+    return EResize::kNone;
+  }
+  return detail::cssValueIDToPlatformEnumGenerated<EResize>(v);
+}
+
+template <>
+inline WritingMode CssValueIDToPlatformEnum(CSSValueID v) {
   switch (v) {
     case CSSValueHorizontalTb:
     case CSSValueLr:
@@ -63,6 +99,31 @@ inline WritingMode cssValueIDToPlatformEnum(CSSValueID v) {
 
   NOTREACHED();
   return WritingMode::kHorizontalTb;
+}
+
+template <>
+inline ECursor CssValueIDToPlatformEnum(CSSValueID v) {
+  if (v == CSSValueWebkitZoomIn)
+    return ECursor::kZoomIn;
+  if (v == CSSValueWebkitZoomOut)
+    return ECursor::kZoomOut;
+  return detail::cssValueIDToPlatformEnumGenerated<ECursor>(v);
+}
+
+template <>
+inline EDisplay CssValueIDToPlatformEnum(CSSValueID v) {
+  if (v == CSSValueWebkitFlex)
+    return EDisplay::kFlex;
+  if (v == CSSValueWebkitInlineFlex)
+    return EDisplay::kInlineFlex;
+  return detail::cssValueIDToPlatformEnumGenerated<EDisplay>(v);
+}
+
+template <>
+inline EUserSelect CssValueIDToPlatformEnum(CSSValueID v) {
+  if (v == CSSValueAuto)
+    return EUserSelect::kText;
+  return detail::cssValueIDToPlatformEnumGenerated<EUserSelect>(v);
 }
 
 }  // namespace blink

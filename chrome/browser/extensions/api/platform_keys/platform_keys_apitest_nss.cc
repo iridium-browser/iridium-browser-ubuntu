@@ -5,6 +5,7 @@
 #include <cryptohi.h>
 
 #include <memory>
+#include <utility>
 
 #include "base/json/json_writer.h"
 #include "base/macros.h"
@@ -90,10 +91,10 @@ class PlatformKeysTest : public ExtensionApiTest {
       base::RunLoop loop;
       content::BrowserThread::PostTask(
           content::BrowserThread::IO, FROM_HERE,
-          base::Bind(&PlatformKeysTest::SetUpTestSystemSlotOnIO,
-                     base::Unretained(this),
-                     browser()->profile()->GetResourceContext(),
-                     loop.QuitClosure()));
+          base::BindOnce(&PlatformKeysTest::SetUpTestSystemSlotOnIO,
+                         base::Unretained(this),
+                         browser()->profile()->GetResourceContext(),
+                         loop.QuitClosure()));
       loop.Run();
     }
 
@@ -121,8 +122,8 @@ class PlatformKeysTest : public ExtensionApiTest {
     base::RunLoop loop;
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
-        base::Bind(&PlatformKeysTest::TearDownTestSystemSlotOnIO,
-                   base::Unretained(this), loop.QuitClosure()));
+        base::BindOnce(&PlatformKeysTest::TearDownTestSystemSlotOnIO,
+                       base::Unretained(this), loop.QuitClosure()));
     loop.Run();
   }
 
@@ -197,7 +198,7 @@ class PlatformKeysTest : public ExtensionApiTest {
       cert1_key_permission->SetBooleanWithoutPathExpansion(
           "allowCorporateKeyUsage", true);
       key_permissions_policy.SetWithoutPathExpansion(
-          extension_->id(), cert1_key_permission.release());
+          extension_->id(), std::move(cert1_key_permission));
     }
 
     std::string key_permissions_policy_str;

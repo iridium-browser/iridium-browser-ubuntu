@@ -27,6 +27,7 @@ namespace gles2 {
 class GPU_EXPORT MailboxManagerSync : public MailboxManager {
  public:
   MailboxManagerSync();
+  ~MailboxManagerSync() override;
 
   // MailboxManager implementation:
   Texture* ConsumeTexture(const Mailbox& mailbox) override;
@@ -37,11 +38,7 @@ class GPU_EXPORT MailboxManagerSync : public MailboxManager {
   void TextureDeleted(TextureBase* texture) override;
 
  private:
-  friend class base::RefCounted<MailboxManager>;
-
   static bool SkipTextureWorkarounds(const Texture* texture);
-
-  ~MailboxManagerSync() override;
 
   class TextureGroup : public base::RefCounted<TextureGroup> {
    public:
@@ -72,7 +69,8 @@ class GPU_EXPORT MailboxManagerSync : public MailboxManager {
 
     typedef std::map<Mailbox, scoped_refptr<TextureGroup>>
         MailboxToGroupMap;
-    static base::LazyInstance<MailboxToGroupMap> mailbox_to_group_;
+    static base::LazyInstance<MailboxToGroupMap>::DestructorAtExit
+        mailbox_to_group_;
   };
 
   struct TextureGroupRef {
@@ -95,4 +93,3 @@ class GPU_EXPORT MailboxManagerSync : public MailboxManager {
 }  // namespace gpu
 
 #endif  // GPU_COMMAND_BUFFER_SERVICE_MAILBOX_MANAGER_SYNC_H_
-

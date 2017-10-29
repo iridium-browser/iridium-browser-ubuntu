@@ -13,7 +13,6 @@
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "ios/chrome/browser/net/net_types.h"
 #include "ios/web/public/browser_state.h"
 #include "net/url_request/url_request_job_factory.h"
@@ -31,7 +30,6 @@ class Time;
 
 namespace net {
 class SSLConfigService;
-class URLRequestInterceptor;
 }
 
 namespace sync_preferences {
@@ -122,22 +120,12 @@ class ChromeBrowserState : public web::BrowserState {
   // Creates the main net::URLRequestContextGetter that will be returned by
   // GetRequestContext(). Should only be called once.
   virtual net::URLRequestContextGetter* CreateRequestContext(
-      std::map<std::string,
-               linked_ptr<net::URLRequestJobFactory::ProtocolHandler>>*
-          protocol_handlers,
-      URLRequestInterceptorScopedVector request_interceptors) = 0;
+      ProtocolHandlerMap* protocol_handlers) = 0;
 
   // Creates a isolated net::URLRequestContextGetter. Should only be called once
   // per partition_path per browser state object.
   virtual net::URLRequestContextGetter* CreateIsolatedRequestContext(
       const base::FilePath& partition_path) = 0;
-
-  // Returns the current ChromeBrowserState casted as a TestChromeBrowserState
-  // or null if it is not a TestChromeBrowserState.
-  // TODO(crbug.com/583682): This method should not be used. It is there for
-  // supporting a legacy test, and will be removed as soon as the deprecated
-  // test is removed.
-  virtual TestChromeBrowserState* AsTestChromeBrowserState();
 
   // web::BrowserState
   net::URLRequestContextGetter* GetRequestContext() override;

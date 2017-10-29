@@ -46,9 +46,8 @@ private:
         stroke.setColor(0xff008800);
         srcCanvas->drawRect(kSrcImageClip.makeInset(kStrokeWidth / 2, kStrokeWidth / 2), stroke);
 
-        fSrcImage = srcSurface->makeImageSnapshot(SkBudgeted::kYes);
-        fSrcImageShader = fSrcImage->makeShader(SkShader::kClamp_TileMode,
-                                                SkShader::kClamp_TileMode);
+        fSrcImage = srcSurface->makeImageSnapshot();
+        fSrcImageShader = fSrcImage->makeShader();
     }
 
     void onDraw(SkCanvas* canvas) override {
@@ -89,8 +88,9 @@ private:
             paint.setStrokeWidth(2 * kSrcImageClip.height());
             paint.setShader(fSrcImageShader);
             paint.setFilterQuality(kNone_SkFilterQuality);
-            canvas->translate(-90, 263);
+            canvas->translate(23, 301);
             canvas->scale(300 / kSrcImageClip.width(), 100 / kSrcImageClip.height());
+            canvas->translate(-kSrcImageClip.left(), -kSrcImageClip.top());
             canvas->clipRect(kSrcImageClip);
             canvas->drawPath(path, paint);
         }

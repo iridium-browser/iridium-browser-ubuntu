@@ -13,13 +13,16 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/containers/small_map.h"
+#include "base/containers/flat_map.h"
 #include "base/memory/ptr_util.h"
+#include "ui/display/types/display_mode.h"
+#include "ui/display/types/display_snapshot_mojo.h"
 #include "ui/display/util/edid_parser.h"
+#include "ui/ozone/common/display_snapshot_proxy.h"
 
-#if !defined(DRM_FORMAT_YV12)
-// TODO(dcastagna): after libdrm has this definition, remove it.
-#define DRM_FORMAT_YV12 fourcc_code('Y', 'V', '1', '2')
+#if !defined(DRM_FORMAT_R16)
+// TODO(riju): crbug.com/733703
+#define DRM_FORMAT_R16 fourcc_code('R', '1', '6', ' ')
 #endif
 
 namespace ui {
@@ -203,6 +206,32 @@ bool HasColorCorrectionMatrix(int fd, drmModeCrtc* crtc) {
 
 }  // namespace
 
+DisplayMode_Params GetDisplayModeParams(const display::DisplayMode& mode) {
+  DisplayMode_Params params;
+  params.size = mode.size();
+  params.is_interlaced = mode.is_interlaced();
+  params.refresh_rate = mode.refresh_rate();
+  return params;
+}
+
+std::unique_ptr<display::DisplayMode> CreateDisplayModeFromParams(
+    const DisplayMode_Params& pmode) {
+  return base::MakeUnique<display::DisplayMode>(pmode.size, pmode.is_interlaced,
+                                                pmode.refresh_rate);
+}
+
+const gfx::Size ModeSize(const drmModeModeInfo& mode) {
+  return gfx::Size(mode.hdisplay, mode.vdisplay);
+}
+
+float ModeRefreshRate(const drmModeModeInfo& mode) {
+  return GetRefreshRate(mode);
+}
+
+bool ModeIsInterlaced(const drmModeModeInfo& mode) {
+  return mode.flags & DRM_MODE_FLAG_INTERLACE;
+}
+
 gfx::Size GetMaximumCursorSize(int fd) {
   uint64_t width = 0, height = 0;
   // Querying cursor dimensions is optional and is unsupported on older Chrome
@@ -241,8 +270,7 @@ GetAvailableDisplayControllerInfos(int fd) {
       available_connectors.push_back(std::move(connector));
   }
 
-  base::SmallMap<std::map<ScopedDrmConnectorPtr::element_type*, int>>
-      connector_crtcs;
+  base::flat_map<ScopedDrmConnectorPtr::element_type*, int> connector_crtcs;
   for (auto& c : available_connectors) {
     uint32_t possible_crtcs = 0;
     for (int i = 0; i < c->count_encoders; ++i) {
@@ -297,7 +325,6 @@ DisplayMode_Params CreateDisplayModeParams(const drmModeModeInfo& mode) {
   params.size = gfx::Size(mode.hdisplay, mode.vdisplay);
   params.is_interlaced = mode.flags & DRM_MODE_FLAG_INTERLACE;
   params.refresh_rate = GetRefreshRate(mode);
-
   return params;
 }
 
@@ -365,10 +392,55 @@ DisplaySnapshot_Params CreateDisplaySnapshotParams(
   return params;
 }
 
+// TODO(rjkroege): Remove in a subsequent CL once Mojo IPC is used everywhere.
+std::vector<DisplaySnapshot_Params> CreateParamsFromSnapshot(
+    const MovableDisplaySnapshots& displays) {
+  std::vector<DisplaySnapshot_Params> params;
+  for (auto& d : displays) {
+    DisplaySnapshot_Params p;
+
+    p.display_id = d->display_id();
+    p.origin = d->origin();
+    p.physical_size = d->physical_size();
+    p.type = d->type();
+    p.is_aspect_preserving_scaling = d->is_aspect_preserving_scaling();
+    p.has_overscan = d->has_overscan();
+    p.has_color_correction_matrix = d->has_color_correction_matrix();
+    p.display_name = d->display_name();
+    p.sys_path = d->sys_path();
+
+    std::vector<DisplayMode_Params> mode_params;
+    for (const auto& m : d->modes()) {
+      mode_params.push_back(GetDisplayModeParams(*m));
+    }
+    p.modes = mode_params;
+    p.edid = d->edid();
+
+    if (d->current_mode()) {
+      p.has_current_mode = true;
+      p.current_mode = GetDisplayModeParams(*d->current_mode());
+    }
+
+    if (d->native_mode()) {
+      p.has_native_mode = true;
+      p.native_mode = GetDisplayModeParams(*d->native_mode());
+    }
+
+    p.product_id = d->product_id();
+    p.string_representation = d->ToString();
+    p.maximum_cursor_size = d->maximum_cursor_size();
+
+    params.push_back(p);
+  }
+  return params;
+}
+
 int GetFourCCFormatFromBufferFormat(gfx::BufferFormat format) {
   switch (format) {
     case gfx::BufferFormat::R_8:
       return DRM_FORMAT_R8;
+    case gfx::BufferFormat::R_16:
+      return DRM_FORMAT_R16;
     case gfx::BufferFormat::RG_88:
       return DRM_FORMAT_GR88;
     case gfx::BufferFormat::RGBA_8888:
@@ -384,7 +456,7 @@ int GetFourCCFormatFromBufferFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::UYVY_422:
       return DRM_FORMAT_UYVY;
     case gfx::BufferFormat::YVU_420:
-      return DRM_FORMAT_YV12;
+      return DRM_FORMAT_YVU420;
     case gfx::BufferFormat::YUV_420_BIPLANAR:
       return DRM_FORMAT_NV12;
     default:
@@ -413,7 +485,7 @@ gfx::BufferFormat GetBufferFormatFromFourCCFormat(int format) {
       return gfx::BufferFormat::UYVY_422;
     case DRM_FORMAT_NV12:
       return gfx::BufferFormat::YUV_420_BIPLANAR;
-    case DRM_FORMAT_YV12:
+    case DRM_FORMAT_YVU420:
       return gfx::BufferFormat::YVU_420;
     default:
       NOTREACHED();
@@ -421,8 +493,10 @@ gfx::BufferFormat GetBufferFormatFromFourCCFormat(int format) {
   }
 }
 
-int GetFourCCFormatForFramebuffer(gfx::BufferFormat format) {
-  // Currently, drm supports 24 bitcolordepth for hardware overlay.
+int GetFourCCFormatForOpaqueFramebuffer(gfx::BufferFormat format) {
+  // DRM atomic interface doesn't currently support specifying an alpha
+  // blending. We can simulate disabling alpha bleding creating an fb
+  // with a format without the alpha channel.
   switch (format) {
     case gfx::BufferFormat::RGBA_8888:
     case gfx::BufferFormat::RGBX_8888:
@@ -434,9 +508,22 @@ int GetFourCCFormatForFramebuffer(gfx::BufferFormat format) {
       return DRM_FORMAT_RGB565;
     case gfx::BufferFormat::UYVY_422:
       return DRM_FORMAT_UYVY;
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
+      return DRM_FORMAT_NV12;
+    case gfx::BufferFormat::YVU_420:
+      return DRM_FORMAT_YVU420;
     default:
       NOTREACHED();
       return 0;
   }
 }
+
+MovableDisplaySnapshots CreateMovableDisplaySnapshotsFromParams(
+    const std::vector<DisplaySnapshot_Params>& displays) {
+  MovableDisplaySnapshots snapshots;
+  for (const auto& d : displays)
+    snapshots.push_back(base::MakeUnique<DisplaySnapshotProxy>(d));
+  return snapshots;
+}
+
 }  // namespace ui

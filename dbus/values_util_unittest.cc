@@ -14,6 +14,7 @@
 
 #include "base/json/json_writer.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "dbus/message.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -100,17 +101,17 @@ TEST(ValuesUtilTest, PopBasicTypes) {
   // Pop a string.
   value = PopDataAsValue(&reader);
   ASSERT_TRUE(value.get() != NULL);
-  expected_value.reset(new base::StringValue(kStringValue));
+  expected_value.reset(new base::Value(kStringValue));
   EXPECT_TRUE(value->Equals(expected_value.get()));
   // Pop an empty string.
   value = PopDataAsValue(&reader);
   ASSERT_TRUE(value.get() != NULL);
-  expected_value.reset(new base::StringValue(kEmptyStringValue));
+  expected_value.reset(new base::Value(kEmptyStringValue));
   EXPECT_TRUE(value->Equals(expected_value.get()));
   // Pop an object path.
   value = PopDataAsValue(&reader);
   ASSERT_TRUE(value.get() != NULL);
-  expected_value.reset(new base::StringValue(kObjectPathValue.value()));
+  expected_value.reset(new base::Value(kObjectPathValue.value()));
   EXPECT_TRUE(value->Equals(expected_value.get()));
 }
 
@@ -148,7 +149,7 @@ TEST(ValuesUtilTest, PopVariant) {
   // Pop a string.
   value = PopDataAsValue(&reader);
   ASSERT_TRUE(value.get() != NULL);
-  expected_value.reset(new base::StringValue(kStringValue));
+  expected_value.reset(new base::Value(kStringValue));
   EXPECT_TRUE(value->Equals(expected_value.get()));
 }
 
@@ -338,10 +339,9 @@ TEST(ValuesUtilTest, PopDictionaryWithDottedStringKey) {
 
   // Create the expected value.
   base::DictionaryValue dictionary_value;
-  dictionary_value.SetWithoutPathExpansion(kKey1, new base::Value(kBoolValue));
-  dictionary_value.SetWithoutPathExpansion(kKey2, new base::Value(kInt32Value));
-  dictionary_value.SetWithoutPathExpansion(kKey3,
-                                           new base::Value(kDoubleValue));
+  dictionary_value.SetBooleanWithoutPathExpansion(kKey1, kBoolValue);
+  dictionary_value.SetIntegerWithoutPathExpansion(kKey2, kInt32Value);
+  dictionary_value.SetDoubleWithoutPathExpansion(kKey3, kDoubleValue);
 
   // Pop a dictinoary.
   MessageReader reader(response.get());
@@ -391,7 +391,7 @@ TEST(ValuesUtilTest, AppendBasicTypes) {
   const base::Value kBoolValue(false);
   const base::Value kIntegerValue(42);
   const base::Value kDoubleValue(4.2);
-  const base::StringValue kStringValue("string");
+  const base::Value kStringValue("string");
 
   std::unique_ptr<Response> response(Response::CreateEmpty());
   MessageWriter writer(response.get());
@@ -420,7 +420,7 @@ TEST(ValuesUtilTest, AppendBasicTypesAsVariant) {
   const base::Value kBoolValue(false);
   const base::Value kIntegerValue(42);
   const base::Value kDoubleValue(4.2);
-  const base::StringValue kStringValue("string");
+  const base::Value kStringValue("string");
 
   std::unique_ptr<Response> response(Response::CreateEmpty());
   MessageWriter writer(response.get());
@@ -449,7 +449,7 @@ TEST(ValuesUtilTest, AppendValueDataBasicTypes) {
   const base::Value kBoolValue(false);
   const base::Value kIntegerValue(42);
   const base::Value kDoubleValue(4.2);
-  const base::StringValue kStringValue("string");
+  const base::Value kStringValue("string");
 
   std::unique_ptr<Response> response(Response::CreateEmpty());
   MessageWriter writer(response.get());
@@ -478,7 +478,7 @@ TEST(ValuesUtilTest, AppendValueDataAsVariantBasicTypes) {
   const base::Value kBoolValue(false);
   const base::Value kIntegerValue(42);
   const base::Value kDoubleValue(4.2);
-  const base::StringValue kStringValue("string");
+  const base::Value kStringValue("string");
 
   std::unique_ptr<Response> response(Response::CreateEmpty());
   MessageWriter writer(response.get());
@@ -517,11 +517,11 @@ TEST(ValuesUtilTest, AppendDictionary) {
   const double kDoubleValue = 4.9;
   const std::string kStringValue = "fifty";
 
-  base::ListValue* list_value = new base::ListValue();
+  auto list_value = base::MakeUnique<base::ListValue>();
   list_value->AppendBoolean(kBoolValue);
   list_value->AppendInteger(kInt32Value);
 
-  base::DictionaryValue* dictionary_value = new base::DictionaryValue();
+  auto dictionary_value = base::MakeUnique<base::DictionaryValue>();
   dictionary_value->SetBoolean(kKey1, kBoolValue);
   dictionary_value->SetInteger(kKey2, kDoubleValue);
 
@@ -530,8 +530,8 @@ TEST(ValuesUtilTest, AppendDictionary) {
   test_dictionary.SetInteger(kKey2, kInt32Value);
   test_dictionary.SetDouble(kKey3, kDoubleValue);
   test_dictionary.SetString(kKey4, kStringValue);
-  test_dictionary.Set(kKey5, list_value);  // takes ownership
-  test_dictionary.Set(kKey6, dictionary_value);  // takes ownership
+  test_dictionary.Set(kKey5, std::move(list_value));
+  test_dictionary.Set(kKey6, std::move(dictionary_value));
 
   std::unique_ptr<Response> response(Response::CreateEmpty());
   MessageWriter writer(response.get());
@@ -564,11 +564,11 @@ TEST(ValuesUtilTest, AppendDictionaryAsVariant) {
   const double kDoubleValue = 4.9;
   const std::string kStringValue = "fifty";
 
-  base::ListValue* list_value = new base::ListValue();
+  auto list_value = base::MakeUnique<base::ListValue>();
   list_value->AppendBoolean(kBoolValue);
   list_value->AppendInteger(kInt32Value);
 
-  base::DictionaryValue* dictionary_value = new base::DictionaryValue();
+  auto dictionary_value = base::MakeUnique<base::DictionaryValue>();
   dictionary_value->SetBoolean(kKey1, kBoolValue);
   dictionary_value->SetInteger(kKey2, kDoubleValue);
 
@@ -577,8 +577,8 @@ TEST(ValuesUtilTest, AppendDictionaryAsVariant) {
   test_dictionary.SetInteger(kKey2, kInt32Value);
   test_dictionary.SetDouble(kKey3, kDoubleValue);
   test_dictionary.SetString(kKey4, kStringValue);
-  test_dictionary.Set(kKey5, list_value);  // takes ownership
-  test_dictionary.Set(kKey6, dictionary_value);  // takes ownership
+  test_dictionary.Set(kKey5, std::move(list_value));
+  test_dictionary.Set(kKey6, std::move(dictionary_value));
 
   std::unique_ptr<Response> response(Response::CreateEmpty());
   MessageWriter writer(response.get());

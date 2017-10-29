@@ -5,40 +5,17 @@
 #ifndef RelList_h
 #define RelList_h
 
-#include "core/HTMLNames.h"
 #include "core/dom/DOMTokenList.h"
-#include "core/dom/Element.h"
-#include "core/dom/SpaceSplitString.h"
 
 namespace blink {
 
 class RelList final : public DOMTokenList {
  public:
-  static RelList* create(Element* element) { return new RelList(element); }
-
-  unsigned length() const override;
-  const AtomicString item(unsigned index) const override;
-
-  void setRelValues(const AtomicString&);
-
-  DECLARE_VIRTUAL_TRACE();
+  static RelList* Create(Element* element) { return new RelList(element); }
 
  private:
   explicit RelList(Element*);
-
-  bool containsInternal(const AtomicString&) const override;
-
-  const AtomicString& value() const override {
-    return m_element->getAttribute(HTMLNames::relAttr);
-  }
-  void setValue(const AtomicString& value) override {
-    m_element->setAttribute(HTMLNames::relAttr, value);
-  }
-
-  bool validateTokenValue(const AtomicString&, ExceptionState&) const override;
-
-  Member<Element> m_element;
-  SpaceSplitString m_relValues;
+  bool ValidateTokenValue(const AtomicString&, ExceptionState&) const override;
 };
 
 }  // namespace blink

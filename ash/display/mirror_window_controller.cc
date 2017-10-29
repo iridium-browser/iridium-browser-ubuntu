@@ -114,8 +114,7 @@ class NoneCaptureClient : public aura::client::CaptureClient {
 };
 
 display::DisplayManager::MultiDisplayMode GetCurrentMultiDisplayMode() {
-  display::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  display::DisplayManager* display_manager = Shell::Get()->display_manager();
   return display_manager->IsInUnifiedMode()
              ? display::DisplayManager::UNIFIED
              : (display_manager->IsInMirrorMode()
@@ -148,8 +147,7 @@ MirrorWindowController::~MirrorWindowController() {
 void MirrorWindowController::UpdateWindow(
     const std::vector<display::ManagedDisplayInfo>& display_info_list) {
   static int mirror_host_count = 0;
-  display::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  display::DisplayManager* display_manager = Shell::Get()->display_manager();
   const display::Display& primary =
       display::Screen::GetScreen()->GetPrimaryDisplay();
   const display::ManagedDisplayInfo& source_display_info =
@@ -175,19 +173,26 @@ void MirrorWindowController::UpdateWindow(
         mirroring_host_info_map_.end()) {
       AshWindowTreeHostInitParams init_params;
       init_params.initial_bounds = display_info.bounds_in_native();
+      init_params.display_id = display_info.id();
+      init_params.device_scale_factor = display_info.device_scale_factor();
+      init_params.ui_scale_factor = display_info.configured_ui_scale();
       MirroringHostInfo* host_info = new MirroringHostInfo;
-      host_info->ash_host.reset(AshWindowTreeHost::Create(init_params));
+      host_info->ash_host = AshWindowTreeHost::Create(init_params);
       mirroring_host_info_map_[display_info.id()] = host_info;
 
       aura::WindowTreeHost* host = host_info->ash_host->AsWindowTreeHost();
-      host->SetSharedInputMethod(
-          Shell::GetInstance()->window_tree_host_manager()->input_method());
+      // TODO: Config::MUS should not install an InputMethod.
+      // http://crbug.com/706913
+      if (!host->has_input_method()) {
+        host->SetSharedInputMethod(
+            Shell::Get()->window_tree_host_manager()->input_method());
+      }
       host->window()->SetName(
           base::StringPrintf("MirrorRootWindow-%d", mirror_host_count++));
       host->compositor()->SetBackgroundColor(SK_ColorBLACK);
       // No need to remove the observer because the WindowTreeHostManager
       // outlives the host.
-      host->AddObserver(Shell::GetInstance()->window_tree_host_manager());
+      host->AddObserver(Shell::Get()->window_tree_host_manager());
       host->AddObserver(this);
       // TODO(oshima): TouchHUD is using idkey.
       InitRootWindowSettings(host->window())->display_id = display_info.id();
@@ -203,7 +208,7 @@ void MirrorWindowController::UpdateWindow(
       if (display_manager->IsInUnifiedMode()) {
         host_info->ash_host->ConfineCursorToRootWindow();
         AshWindowTreeHost* unified_ash_host =
-            Shell::GetInstance()
+            Shell::Get()
                 ->window_tree_host_manager()
                 ->GetAshWindowTreeHostForDisplayId(
                     display::Screen::GetScreen()->GetPrimaryDisplay().id());
@@ -224,13 +229,17 @@ void MirrorWindowController::UpdateWindow(
       mirror_window->Show();
       if (reflector_) {
         reflector_->AddMirroringLayer(mirror_window->layer());
-      } else {
+      } else if (aura::Env::GetInstance()->context_factory_private()) {
         reflector_ =
             aura::Env::GetInstance()
                 ->context_factory_private()
                 ->CreateReflector(
                     Shell::GetPrimaryRootWindow()->GetHost()->compositor(),
                     mirror_window->layer());
+      } else {
+        // TODO: Config::MUS needs to support reflector.
+        // http://crbug.com/601869.
+        NOTIMPLEMENTED();
       }
     } else {
       AshWindowTreeHost* ash_host =
@@ -262,20 +271,32 @@ void MirrorWindowController::UpdateWindow(
 void MirrorWindowController::UpdateWindow() {
   if (mirroring_host_info_map_.empty())
     return;
-  display::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  display::DisplayManager* display_manager = Shell::Get()->display_manager();
+  display::Screen* screen = display::Screen::GetScreen();
+
   std::vector<display::ManagedDisplayInfo> display_info_list;
-  for (auto& pair : mirroring_host_info_map_)
-    display_info_list.push_back(display_manager->GetDisplayInfo(pair.first));
+  // Prune the window on the removed displays.
+  for (auto& pair : mirroring_host_info_map_) {
+    MirroringHostInfo* info = pair.second;
+    if (screen
+            ->GetDisplayNearestWindow(
+                info->ash_host->AsWindowTreeHost()->window())
+            .is_valid()) {
+      display_info_list.push_back(display_manager->GetDisplayInfo(pair.first));
+    }
+  }
   UpdateWindow(display_info_list);
 }
 
 void MirrorWindowController::CloseIfNotNecessary() {
   display::DisplayManager::MultiDisplayMode new_mode =
       GetCurrentMultiDisplayMode();
-  if (multi_display_mode_ != new_mode)
+  if (multi_display_mode_ != new_mode) {
     Close(true);
-  multi_display_mode_ = new_mode;
+    multi_display_mode_ = new_mode;
+  } else {
+    UpdateWindow();
+  }
 }
 
 void MirrorWindowController::Close(bool delay_host_deletion) {
@@ -297,10 +318,13 @@ void MirrorWindowController::OnHostResized(const aura::WindowTreeHost* host) {
       if (info->mirror_window_host_size == host->GetBoundsInPixels().size())
         return;
       info->mirror_window_host_size = host->GetBoundsInPixels().size();
-      reflector_->OnMirroringCompositorResized();
+      // TODO: |reflector_| should always be non-null here, but isn't in MUS
+      // yet because of http://crbug.com/601869.
+      if (reflector_)
+        reflector_->OnMirroringCompositorResized();
       // No need to update the transformer as new transformer is already set
       // in UpdateWindow.
-      Shell::GetInstance()
+      Shell::Get()
           ->window_tree_host_manager()
           ->cursor_window_controller()
           ->UpdateLocation();
@@ -310,8 +334,7 @@ void MirrorWindowController::OnHostResized(const aura::WindowTreeHost* host) {
 }
 
 aura::Window* MirrorWindowController::GetWindow() {
-  display::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  display::DisplayManager* display_manager = Shell::Get()->display_manager();
   if (!display_manager->IsInMirrorMode() || mirroring_host_info_map_.empty())
     return nullptr;
   DCHECK_EQ(1U, mirroring_host_info_map_.size());
@@ -326,9 +349,8 @@ display::Display MirrorWindowController::GetDisplayForRootWindow(
     if (pair.second->ash_host->AsWindowTreeHost()->window() == root) {
       // Sanity check to catch an error early.
       int64_t id = pair.first;
-      const display::Displays& list = Shell::GetInstance()
-                                          ->display_manager()
-                                          ->software_mirroring_display_list();
+      const display::Displays& list =
+          Shell::Get()->display_manager()->software_mirroring_display_list();
       auto iter = std::find_if(
           list.begin(), list.end(),
           [id](const display::Display& display) { return display.id() == id; });
@@ -364,10 +386,13 @@ void MirrorWindowController::CloseAndDeleteHost(MirroringHostInfo* host_info,
   aura::client::SetCaptureClient(host->window(), nullptr);
   delete capture_client;
 
-  host->RemoveObserver(Shell::GetInstance()->window_tree_host_manager());
+  host->RemoveObserver(Shell::Get()->window_tree_host_manager());
   host->RemoveObserver(this);
   host_info->ash_host->PrepareForShutdown();
-  reflector_->RemoveMirroringLayer(host_info->mirror_window->layer());
+  // TODO: |reflector_| should always be non-null here, but isn't in MUS yet
+  // because of http://crbug.com/601869.
+  if (reflector_)
+    reflector_->RemoveMirroringLayer(host_info->mirror_window->layer());
 
   // EventProcessor may be accessed after this call if the mirroring window
   // was deleted as a result of input event (e.g. shortcut), so don't delete

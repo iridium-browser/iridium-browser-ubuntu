@@ -5,15 +5,15 @@
 #ifndef WebSharedWorkerCreationErrors_h
 #define WebSharedWorkerCreationErrors_h
 
-#include "../platform/WebCommon.h"
+#include "public/platform/WebCommon.h"
 
 namespace blink {
 
 // Describes errors that can occur while creating a SharedWorker.
 enum WebWorkerCreationError {
-  WebWorkerCreationErrorNone = 0,
-  WebWorkerCreationErrorSecureContextMismatch,
-  WebWorkerCreationErrorLast = WebWorkerCreationErrorSecureContextMismatch
+  kWebWorkerCreationErrorNone = 0,
+  kWebWorkerCreationErrorSecureContextMismatch,
+  kWebWorkerCreationErrorLast = kWebWorkerCreationErrorSecureContextMismatch
 };
 
 }  // namespace blink

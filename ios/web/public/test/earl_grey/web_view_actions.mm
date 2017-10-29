@@ -15,12 +15,17 @@
 #import "ios/web/public/test/web_view_interaction_test_util.h"
 #import "ios/web/web_state/web_state_impl.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 using web::test::ExecuteJavaScript;
 
 namespace {
 
-// Long press duration to trigger context menu.
-const NSTimeInterval kContextMenuLongPressDuration = 0.3;
+// Long press duration to trigger context menu.  EarlGrey LongPress action uses
+// 0.7 secs.  Use the same number to be consistent.
+const NSTimeInterval kContextMenuLongPressDuration = 0.7;
 
 // Duration to wait for verification of JavaScript action.
 // TODO(crbug.com/670910): Reduce duration if the time required for verification
@@ -90,12 +95,12 @@ bool AddVerifierToElementWithId(web::WebState* web_state,
 
   // The callback doesn't care about any of the parameters, just whether it is
   // called or not.
-  auto callback = base::BindBlock(^bool(const base::DictionaryValue& /* json */,
-                                        const GURL& /* origin_url */,
-                                        bool /* user_is_interacting */) {
-    *verified = true;
-    return true;
-  });
+  auto callback = base::BindBlockArc(
+      ^bool(const base::DictionaryValue& /* json */,
+            const GURL& /* origin_url */, bool /* user_is_interacting */) {
+        *verified = true;
+        return true;
+      });
 
   static_cast<web::WebStateImpl*>(web_state)->AddScriptCommandCallback(
       callback, kCallbackPrefix);
@@ -110,7 +115,7 @@ void RemoveVerifierForElementWithId(web::WebState* web_state,
 }
 
 // Returns a no element found error.
-id<GREYAction> webViewElementNotFound(const std::string& element_id) {
+id<GREYAction> WebViewElementNotFound(const std::string& element_id) {
   NSString* description = [NSString
       stringWithFormat:@"Couldn't locate a bounding rect for element_id %s; "
                        @"either it isn't there or it has no area.",
@@ -131,7 +136,7 @@ id<GREYAction> webViewElementNotFound(const std::string& element_id) {
 
 namespace web {
 
-id<GREYAction> webViewVerifiedActionOnElement(WebState* state,
+id<GREYAction> WebViewVerifiedActionOnElement(WebState* state,
                                               id<GREYAction> action,
                                               const std::string& element_id) {
   NSString* action_name =
@@ -198,13 +203,13 @@ id<GREYAction> webViewVerifiedActionOnElement(WebState* state,
                             performBlock:verified_tap];
 }
 
-id<GREYAction> webViewLongPressElementForContextMenu(
+id<GREYAction> WebViewLongPressElementForContextMenu(
     WebState* state,
     const std::string& element_id,
     bool triggers_context_menu) {
   CGRect rect = web::test::GetBoundingRectOfElementWithId(state, element_id);
   if (CGRectIsEmpty(rect)) {
-    return webViewElementNotFound(element_id);
+    return WebViewElementNotFound(element_id);
   }
   CGPoint point = CGPointMake(CGRectGetMidX(rect), CGRectGetMidY(rect));
   id<GREYAction> longpress =
@@ -212,15 +217,15 @@ id<GREYAction> webViewLongPressElementForContextMenu(
   if (triggers_context_menu) {
     return longpress;
   }
-  return webViewVerifiedActionOnElement(state, longpress, element_id);
+  return WebViewVerifiedActionOnElement(state, longpress, element_id);
 }
 
-id<GREYAction> webViewTapElement(WebState* state,
+id<GREYAction> WebViewTapElement(WebState* state,
                                  const std::string& element_id) {
   CGRect rect = web::test::GetBoundingRectOfElementWithId(state, element_id);
   CGPoint point = CGPointMake(CGRectGetMidX(rect), CGRectGetMidY(rect));
-  return CGRectIsEmpty(rect) ? webViewElementNotFound(element_id)
-                             : webViewVerifiedActionOnElement(
+  return CGRectIsEmpty(rect) ? WebViewElementNotFound(element_id)
+                             : WebViewVerifiedActionOnElement(
                                    state, grey_tapAtPoint(point), element_id);
 }
 

@@ -158,7 +158,7 @@ int sqlite3_status64(
   return SQLITE_OK;
 }
 int sqlite3_status(int op, int *pCurrent, int *pHighwater, int resetFlag){
-  sqlite3_int64 iCur, iHwtr;
+  sqlite3_int64 iCur = 0, iHwtr = 0;
   int rc;
 #ifdef SQLITE_ENABLE_API_ARMOR
   if( pCurrent==0 || pHighwater==0 ) return SQLITE_MISUSE_BKPT;
@@ -214,11 +214,12 @@ int sqlite3_db_status(
       break;
     }
 
-    /* 
+    /*
     ** Return an approximation for the amount of memory currently used
     ** by all pagers associated with the given database connection.  The
     ** highwater mark is meaningless and is returned as zero.
     */
+    case SQLITE_DBSTATUS_CACHE_USED_SHARED:
     case SQLITE_DBSTATUS_CACHE_USED: {
       int totalUsed = 0;
       int i;
@@ -227,7 +228,11 @@ int sqlite3_db_status(
         Btree *pBt = db->aDb[i].pBt;
         if( pBt ){
           Pager *pPager = sqlite3BtreePager(pBt);
-          totalUsed += sqlite3PagerMemUsed(pPager);
+          int nByte = sqlite3PagerMemUsed(pPager);
+          if( op==SQLITE_DBSTATUS_CACHE_USED_SHARED ){
+            nByte = nByte / sqlite3BtreeConnectionCount(pBt);
+          }
+          totalUsed += nByte;
         }
       }
       sqlite3BtreeLeaveAll(db);
@@ -253,7 +258,7 @@ int sqlite3_db_status(
           HashElem *p;
 
           nByte += sqlite3GlobalConfig.m.xRoundup(sizeof(HashElem)) * (
-              pSchema->tblHash.count 
+              pSchema->tblHash.count
             + pSchema->trigHash.count
             + pSchema->idxHash.count
             + pSchema->fkeyHash.count
@@ -303,7 +308,7 @@ int sqlite3_db_status(
 
     /*
     ** Set *pCurrent to the total cache hits or misses encountered by all
-    ** pagers the database handle is connected to. *pHighwater is always set 
+    ** pagers the database handle is connected to. *pHighwater is always set
     ** to zero.
     */
     case SQLITE_DBSTATUS_CACHE_HIT:

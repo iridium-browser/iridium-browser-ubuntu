@@ -8,50 +8,39 @@
 
 #include <algorithm>
 
+#include "core/fxcrt/fx_codepage.h"
+#include "core/fxcrt/fx_extension.h"
+#include "third_party/base/logging.h"
 #include "xfa/fde/css/cfde_cssdeclaration.h"
 #include "xfa/fde/css/fde_cssdatatable.h"
-#include "xfa/fgas/crt/fgas_codepage.h"
 
 namespace {
 
-bool IsSelectorStart(FX_WCHAR wch) {
-  return wch == '.' || wch == '#' || wch == '*' || (wch >= 'a' && wch <= 'z') ||
-         (wch >= 'A' && wch <= 'Z');
+bool IsSelectorStart(wchar_t wch) {
+  return wch == '.' || wch == '#' || wch == '*' || FXSYS_iswalpha(wch);
 }
 
 }  // namespace
 
-CFDE_CSSSyntaxParser::CFDE_CSSSyntaxParser()
+CFDE_CSSSyntaxParser::CFDE_CSSSyntaxParser(const wchar_t* pBuffer,
+                                           int32_t iBufferSize)
+    : CFDE_CSSSyntaxParser(pBuffer, iBufferSize, 32, false) {}
+
+CFDE_CSSSyntaxParser::CFDE_CSSSyntaxParser(const wchar_t* pBuffer,
+                                           int32_t iBufferSize,
+                                           int32_t iTextDatSize,
+                                           bool bOnlyDeclaration)
     : m_iTextDataLen(0),
-      m_dwCheck((uint32_t)-1),
-      m_eMode(FDE_CSSSyntaxMode::RuleSet),
-      m_eStatus(FDE_CSSSyntaxStatus::None) {}
-
-CFDE_CSSSyntaxParser::~CFDE_CSSSyntaxParser() {
-  m_TextData.Reset();
-  m_TextPlane.Reset();
-}
-
-bool CFDE_CSSSyntaxParser::Init(const FX_WCHAR* pBuffer,
-                                int32_t iBufferSize,
-                                int32_t iTextDatSize,
-                                bool bOnlyDeclaration) {
+      m_dwCheck(0xFFFFFFFF),
+      m_eStatus(FDE_CSSSyntaxStatus::None) {
   ASSERT(pBuffer && iBufferSize > 0 && iTextDatSize > 0);
-  Reset(bOnlyDeclaration);
-  if (!m_TextData.EstimateSize(iTextDatSize))
-    return false;
-  return m_TextPlane.AttachBuffer(pBuffer, iBufferSize);
-}
-
-void CFDE_CSSSyntaxParser::Reset(bool bOnlyDeclaration) {
-  m_TextPlane.Reset();
-  m_TextData.Reset();
-  m_iTextDataLen = 0;
-  m_dwCheck = (uint32_t)-1;
-  m_eStatus = FDE_CSSSyntaxStatus::None;
   m_eMode = bOnlyDeclaration ? FDE_CSSSyntaxMode::PropertyName
                              : FDE_CSSSyntaxMode::RuleSet;
+  m_TextData.InitWithSize(iTextDatSize);
+  m_TextPlane.AttachBuffer(pBuffer, iBufferSize);
 }
+
+CFDE_CSSSyntaxParser::~CFDE_CSSSyntaxParser() {}
 
 FDE_CSSSyntaxStatus CFDE_CSSSyntaxParser::DoSyntaxParse() {
   while (m_eStatus >= FDE_CSSSyntaxStatus::None) {
@@ -65,7 +54,7 @@ FDE_CSSSyntaxStatus CFDE_CSSSyntaxParser::DoSyntaxParse() {
       m_eStatus = FDE_CSSSyntaxStatus::EOS;
       return m_eStatus;
     }
-    FX_WCHAR wch;
+    wchar_t wch;
     while (!m_TextPlane.IsEOF()) {
       wch = m_TextPlane.GetChar();
       switch (m_eMode) {
@@ -169,7 +158,7 @@ FDE_CSSSyntaxStatus CFDE_CSSSyntaxParser::DoSyntaxParse() {
           break;
         case FDE_CSSSyntaxMode::Comment:
           if (wch == '/' && m_TextData.GetLength() > 0 &&
-              m_TextData.GetAt(m_TextData.GetLength() - 1) == '*') {
+              m_TextData.GetBuffer()[m_TextData.GetLength() - 1] == '*') {
             RestoreMode();
           } else {
             m_TextData.AppendChar(wch);
@@ -182,7 +171,7 @@ FDE_CSSSyntaxStatus CFDE_CSSSyntaxParser::DoSyntaxParse() {
           m_TextPlane.MoveNext();
           break;
         default:
-          ASSERT(false);
+          NOTREACHED();
           break;
       }
     }
@@ -198,7 +187,7 @@ bool CFDE_CSSSyntaxParser::IsImportEnabled() const {
   return true;
 }
 
-bool CFDE_CSSSyntaxParser::AppendChar(FX_WCHAR wch) {
+bool CFDE_CSSSyntaxParser::AppendChar(wchar_t wch) {
   m_TextPlane.MoveNext();
   if (m_TextData.GetLength() > 0 || wch > ' ') {
     m_TextData.AppendChar(wch);

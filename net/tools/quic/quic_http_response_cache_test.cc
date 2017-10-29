@@ -8,10 +8,9 @@
 #include "base/path_service.h"
 #include "net/quic/platform/api/quic_map_util.h"
 #include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace net {
@@ -22,7 +21,7 @@ typedef QuicHttpResponseCache::Response Response;
 typedef QuicHttpResponseCache::ServerPushInfo ServerPushInfo;
 };  // namespace
 
-class QuicHttpResponseCacheTest : public ::testing::Test {
+class QuicHttpResponseCacheTest : public QuicTest {
  protected:
   void CreateRequest(string host, string path, SpdyHeaderBlock* headers) {
     (*headers)[":method"] = "GET";

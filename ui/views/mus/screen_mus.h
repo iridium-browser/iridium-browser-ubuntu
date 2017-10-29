@@ -29,20 +29,19 @@ class VIEWS_MUS_EXPORT ScreenMus
   void Init(service_manager::Connector* connector);
 
  private:
+  friend class ScreenMusTestApi;
+
   // display::Screen:
-  display::Display GetDisplayNearestWindow(gfx::NativeView view) const override;
+  display::Display GetDisplayNearestWindow(
+      gfx::NativeWindow window) const override;
   gfx::Point GetCursorScreenPoint() override;
   bool IsWindowUnderCursor(gfx::NativeWindow window) override;
   aura::Window* GetWindowAtScreenPoint(const gfx::Point& point) override;
 
   // ui::mojom::DisplayManager:
-  void OnDisplays(std::vector<ui::mojom::WsDisplayPtr> ws_displays,
-                  int64_t primary_display_id,
-                  int64_t internal_display_id) override;
-  void OnDisplaysChanged(
-      std::vector<ui::mojom::WsDisplayPtr> ws_displays) override;
-  void OnDisplayRemoved(int64_t display_id) override;
-  void OnPrimaryDisplayChanged(int64_t primary_display_id) override;
+  void OnDisplaysChanged(std::vector<ui::mojom::WsDisplayPtr> ws_displays,
+                         int64_t primary_display_id,
+                         int64_t internal_display_id) override;
 
   ScreenMusDelegate* delegate_;
   ui::mojom::DisplayManagerPtr display_manager_;

@@ -6,67 +6,54 @@
 
 #include "core/html/HTMLIFrameElement.h"
 #include "platform/feature_policy/FeaturePolicy.h"
+#include "platform/wtf/text/StringBuilder.h"
 
 using blink::WebFeaturePolicyFeature;
 
 namespace blink {
 
 HTMLIFrameElementAllow::HTMLIFrameElementAllow(HTMLIFrameElement* element)
-    : DOMTokenList(this), m_element(element) {}
-
-HTMLIFrameElementAllow::~HTMLIFrameElementAllow() {}
-
-DEFINE_TRACE(HTMLIFrameElementAllow) {
-  visitor->trace(m_element);
-  DOMTokenList::trace(visitor);
-  DOMTokenListObserver::trace(visitor);
-}
+    : DOMTokenList(*element, HTMLNames::allowAttr) {}
 
 Vector<WebFeaturePolicyFeature>
-HTMLIFrameElementAllow::parseAllowedFeatureNames(
-    String& invalidTokensErrorMessage) const {
-  Vector<WebFeaturePolicyFeature> featureNames;
-  unsigned numTokenErrors = 0;
-  StringBuilder tokenErrors;
-  const SpaceSplitString& tokens = this->tokens();
+HTMLIFrameElementAllow::ParseAllowedFeatureNames(
+    String& invalid_tokens_error_message) const {
+  Vector<WebFeaturePolicyFeature> feature_names;
+  unsigned num_token_errors = 0;
+  StringBuilder token_errors;
+  const SpaceSplitString& token_set = this->TokenSet();
 
   // Collects a list of valid feature names.
-  for (size_t i = 0; i < tokens.size(); ++i) {
-    WebFeaturePolicyFeature feature =
-        FeaturePolicy::getWebFeaturePolicyFeature(tokens[i]);
-    if (feature == WebFeaturePolicyFeature::NotFound) {
-      tokenErrors.append(tokenErrors.isEmpty() ? "'" : ", '");
-      tokenErrors.append(tokens[i]);
-      tokenErrors.append("'");
-      ++numTokenErrors;
+  const FeatureNameMap& feature_name_map = GetDefaultFeatureNameMap();
+  for (size_t i = 0; i < token_set.size(); ++i) {
+    const AtomicString& token = token_set[i];
+    if (!feature_name_map.Contains(token)) {
+      token_errors.Append(token_errors.IsEmpty() ? "'" : ", '");
+      token_errors.Append(token);
+      token_errors.Append("'");
+      ++num_token_errors;
     } else {
-      featureNames.push_back(feature);
+      feature_names.push_back(feature_name_map.at(token));
     }
   }
 
-  if (numTokenErrors) {
-    tokenErrors.append(numTokenErrors > 1 ? " are invalid feature names."
-                                          : " is an invalid feature name.");
-    invalidTokensErrorMessage = tokenErrors.toString();
+  if (num_token_errors) {
+    token_errors.Append(num_token_errors > 1 ? " are invalid feature names."
+                                             : " is an invalid feature name.");
+    invalid_tokens_error_message = token_errors.ToString();
   }
 
   // Create a unique set of feature names.
-  std::sort(featureNames.begin(), featureNames.end());
-  auto it = std::unique(featureNames.begin(), featureNames.end());
-  featureNames.shrink(it - featureNames.begin());
+  std::sort(feature_names.begin(), feature_names.end());
+  auto it = std::unique(feature_names.begin(), feature_names.end());
+  feature_names.Shrink(it - feature_names.begin());
 
-  return featureNames;
+  return feature_names;
 }
 
-bool HTMLIFrameElementAllow::validateTokenValue(const AtomicString& tokenValue,
+bool HTMLIFrameElementAllow::ValidateTokenValue(const AtomicString& token_value,
                                                 ExceptionState&) const {
-  return FeaturePolicy::getWebFeaturePolicyFeature(tokenValue.getString()) !=
-         WebFeaturePolicyFeature::NotFound;
-}
-
-void HTMLIFrameElementAllow::valueWasSet() {
-  DCHECK(m_element);
-  m_element->allowValueWasSet();
+  return GetDefaultFeatureNameMap().Contains(token_value.GetString());
 }
 
 }  // namespace blink

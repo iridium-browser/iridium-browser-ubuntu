@@ -8,33 +8,44 @@
 
 #include <algorithm>
 
+#include "core/fpdfapi/page/cpdf_allstates.h"
 #include "core/fpdfapi/page/cpdf_contentparser.h"
 #include "core/fpdfapi/page/cpdf_pageobject.h"
-#include "core/fpdfapi/page/pageint.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 
-CPDF_PageObjectHolder::CPDF_PageObjectHolder()
-    : m_pFormDict(nullptr),
+CPDF_PageObjectHolder::CPDF_PageObjectHolder(CPDF_Document* pDoc,
+                                             CPDF_Dictionary* pFormDict)
+    : m_pFormDict(pFormDict),
       m_pFormStream(nullptr),
-      m_pDocument(nullptr),
+      m_pDocument(pDoc),
       m_pPageResources(nullptr),
       m_pResources(nullptr),
       m_Transparency(0),
       m_bBackgroundAlphaNeeded(false),
-      m_bHasImageMask(false),
       m_ParseState(CONTENT_NOT_PARSED) {}
 
 CPDF_PageObjectHolder::~CPDF_PageObjectHolder() {}
 
+bool CPDF_PageObjectHolder::IsPage() const {
+  return false;
+}
+
 void CPDF_PageObjectHolder::ContinueParse(IFX_Pause* pPause) {
-  if (!m_pParser) {
+  if (!m_pParser)
     return;
-  }
+
   m_pParser->Continue(pPause);
-  if (m_pParser->GetStatus() == CPDF_ContentParser::Done) {
-    m_ParseState = CONTENT_PARSED;
-    m_pParser.reset();
-  }
+  if (m_pParser->GetStatus() != CPDF_ContentParser::Done)
+    return;
+
+  m_ParseState = CONTENT_PARSED;
+  if (m_pParser->GetCurStates())
+    m_LastCTM = m_pParser->GetCurStates()->m_CTM;
+  m_pParser.reset();
+}
+
+void CPDF_PageObjectHolder::AddImageMaskBoundingBox(const CFX_FloatRect& box) {
+  m_MaskBoundingBoxes.push_back(box);
 }
 
 void CPDF_PageObjectHolder::Transform(const CFX_Matrix& matrix) {
@@ -44,12 +55,12 @@ void CPDF_PageObjectHolder::Transform(const CFX_Matrix& matrix) {
 
 CFX_FloatRect CPDF_PageObjectHolder::CalcBoundingBox() const {
   if (m_PageObjectList.empty())
-    return CFX_FloatRect(0, 0, 0, 0);
+    return CFX_FloatRect();
 
-  FX_FLOAT left = 1000000.0f;
-  FX_FLOAT right = -1000000.0f;
-  FX_FLOAT bottom = 1000000.0f;
-  FX_FLOAT top = -1000000.0f;
+  float left = 1000000.0f;
+  float right = -1000000.0f;
+  float bottom = 1000000.0f;
+  float top = -1000000.0f;
   for (const auto& pObj : m_PageObjectList) {
     left = std::min(left, pObj->m_Left);
     right = std::max(right, pObj->m_Right);

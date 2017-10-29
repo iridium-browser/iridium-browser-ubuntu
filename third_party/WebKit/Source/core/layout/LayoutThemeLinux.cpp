@@ -4,22 +4,22 @@
 
 #include "core/layout/LayoutThemeLinux.h"
 
-#include "platform/PlatformResourceLoader.h"
+#include "platform/DataResourceHelper.h"
 
 namespace blink {
 
-PassRefPtr<LayoutTheme> LayoutThemeLinux::create() {
-  return adoptRef(new LayoutThemeLinux());
+PassRefPtr<LayoutTheme> LayoutThemeLinux::Create() {
+  return AdoptRef(new LayoutThemeLinux());
 }
 
-LayoutTheme& LayoutTheme::nativeTheme() {
-  DEFINE_STATIC_REF(LayoutTheme, layoutTheme, (LayoutThemeLinux::create()));
-  return *layoutTheme;
+LayoutTheme& LayoutTheme::NativeTheme() {
+  DEFINE_STATIC_REF(LayoutTheme, layout_theme, (LayoutThemeLinux::Create()));
+  return *layout_theme;
 }
 
-String LayoutThemeLinux::extraDefaultStyleSheet() {
-  return LayoutThemeDefault::extraDefaultStyleSheet() +
-         loadResourceAsASCIIString("themeChromiumLinux.css");
+String LayoutThemeLinux::ExtraDefaultStyleSheet() {
+  return LayoutThemeDefault::ExtraDefaultStyleSheet() +
+         GetDataResourceAsASCIIString("themeChromiumLinux.css");
 }
 
 }  // namespace blink

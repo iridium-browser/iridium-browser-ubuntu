@@ -44,6 +44,8 @@ const GrVkBuffer::Resource* GrVkBuffer::Create(const GrVkGpu* gpu, const Desc& d
         case kCopyWrite_Type:
             bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
             break;
+        case kTexel_Type:
+            bufInfo.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
     }
     if (!desc.fDynamic) {
         bufInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -225,6 +227,6 @@ bool GrVkBuffer::vkUpdateData(GrVkGpu* gpu, const void* src, size_t srcSizeInByt
 
 void GrVkBuffer::validate() const {
     SkASSERT(!fResource || kVertex_Type == fDesc.fType || kIndex_Type == fDesc.fType
-             || kCopyRead_Type == fDesc.fType || kCopyWrite_Type == fDesc.fType
-             || kUniform_Type == fDesc.fType);
+             || kTexel_Type == fDesc.fType || kCopyRead_Type == fDesc.fType
+             || kCopyWrite_Type == fDesc.fType || kUniform_Type == fDesc.fType);
 }

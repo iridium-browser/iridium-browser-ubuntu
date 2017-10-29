@@ -10,7 +10,8 @@
 
 #include "base/callback_forward.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/service_info.h"
+#include "services/service_manager/embedder/embedded_service_info.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 
 namespace service_manager {
 class InterfaceRegistry;
@@ -21,7 +22,8 @@ namespace content {
 // Embedder API for participating in renderer logic.
 class CONTENT_EXPORT ContentUtilityClient {
  public:
-  using StaticServiceMap = std::map<std::string, ServiceInfo>;
+  using StaticServiceMap =
+      std::map<std::string, service_manager::EmbeddedServiceInfo>;
 
   virtual ~ContentUtilityClient() {}
 
@@ -37,6 +39,9 @@ class CONTENT_EXPORT ContentUtilityClient {
       service_manager::InterfaceRegistry* registry) {}
 
   virtual void RegisterServices(StaticServiceMap* services) {}
+
+  virtual void RegisterNetworkBinders(
+      service_manager::BinderRegistry* registry) {}
 };
 
 }  // namespace content

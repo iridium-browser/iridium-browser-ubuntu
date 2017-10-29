@@ -188,13 +188,6 @@ UI.Widget = class extends Common.Object {
     this._callOnVisibleChildren(this._processWasShown);
   }
 
-  _processWasDetachedFromHierarchy() {
-    this._notify(this.wasDetachedFromHierarchy);
-    var copy = this._children.slice();
-    for (var widget of copy)
-      widget._processWasDetachedFromHierarchy();
-  }
-
   _processWillHide() {
     if (this._inNotification())
       return;
@@ -236,13 +229,13 @@ UI.Widget = class extends Common.Object {
   willHide() {
   }
 
-  wasDetachedFromHierarchy() {
-  }
-
   onResize() {
   }
 
   onLayout() {
+  }
+
+  ownerViewDisposed() {
   }
 
   /**
@@ -379,7 +372,6 @@ UI.Widget = class extends Common.Object {
         this._parentWidget._defaultFocusedChild = null;
       this._parentWidget.childWasDetached(this);
       this._parentWidget = null;
-      this._processWasDetachedFromHierarchy();
     } else {
       UI.Widget.__assert(this._isRoot, 'Removing non-root widget from DOM');
     }
@@ -499,26 +491,6 @@ UI.Widget = class extends Common.Object {
    */
   hasFocus() {
     return this.element.hasFocus();
-  }
-
-  /**
-   * @return {!UI.Size}
-   */
-  measurePreferredSize() {
-    var document = this.element.ownerDocument;
-    var oldParent = this.element.parentElement;
-    var oldNextSibling = this.element.nextSibling;
-
-    UI.Widget._originalAppendChild.call(document.body, this.element);
-    this.element.positionAt(0, 0);
-    var result = new UI.Size(this.element.offsetWidth, this.element.offsetHeight);
-
-    this.element.positionAt(undefined, undefined);
-    if (oldParent)
-      UI.Widget._originalInsertBefore.call(oldParent, this.element, oldNextSibling);
-    else
-      UI.Widget._originalRemoveChild.call(document.body, this.element);
-    return result;
   }
 
   /**

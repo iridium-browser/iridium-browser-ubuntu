@@ -25,7 +25,7 @@
 
 #include "modules/encryptedmedia/MediaKeyMessageEvent.h"
 
-#include "core/dom/DOMArrayBuffer.h"
+#include "core/typed_arrays/DOMArrayBuffer.h"
 
 namespace blink {
 
@@ -36,20 +36,20 @@ MediaKeyMessageEvent::MediaKeyMessageEvent(
     const MediaKeyMessageEventInit& initializer)
     : Event(type, initializer) {
   if (initializer.hasMessageType())
-    m_messageType = initializer.messageType();
+    message_type_ = initializer.messageType();
   if (initializer.hasMessage())
-    m_message = initializer.message();
+    message_ = initializer.message();
 }
 
 MediaKeyMessageEvent::~MediaKeyMessageEvent() {}
 
-const AtomicString& MediaKeyMessageEvent::interfaceName() const {
+const AtomicString& MediaKeyMessageEvent::InterfaceName() const {
   return EventNames::MediaKeyMessageEvent;
 }
 
 DEFINE_TRACE(MediaKeyMessageEvent) {
-  visitor->trace(m_message);
-  Event::trace(visitor);
+  visitor->Trace(message_);
+  Event::Trace(visitor);
 }
 
 }  // namespace blink

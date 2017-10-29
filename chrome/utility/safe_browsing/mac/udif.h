@@ -16,7 +16,6 @@
 
 #include "base/mac/scoped_cftyperef.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 
 namespace safe_browsing {
 namespace dmg {
@@ -52,6 +51,9 @@ class UDIFParser {
   // If this returns false, it is not legal to call any other methods.
   bool Parse();
 
+  // Returns the blob of DMG signature data.
+  const std::vector<uint8_t>& GetCodeSignature();
+
   // Returns the number of partitions in this UDIF image.
   size_t GetNumberOfPartitions();
 
@@ -77,8 +79,10 @@ class UDIFParser {
 
   ReadStream* const stream_;  // The stream backing the UDIF image. Weak.
   std::vector<std::string> partition_names_;  // The names of all partitions.
-  ScopedVector<const UDIFBlock> blocks_;  // All blocks in the UDIF image.
+  // All blocks in the UDIF image.
+  std::vector<std::unique_ptr<const UDIFBlock>> blocks_;
   uint16_t block_size_;  // The image's block size, in bytes.
+  std::vector<uint8_t> signature_blob_;  // DMG signature.
 
   DISALLOW_COPY_AND_ASSIGN(UDIFParser);
 };

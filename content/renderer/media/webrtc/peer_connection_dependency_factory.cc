@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -61,12 +62,13 @@
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/webrtc/api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "third_party/webrtc/api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "third_party/webrtc/api/mediaconstraintsinterface.h"
 #include "third_party/webrtc/api/videosourceproxy.h"
-#include "third_party/webrtc/base/ssladapter.h"
 #include "third_party/webrtc/modules/video_coding/codecs/h264/include/h264.h"
+#include "third_party/webrtc/rtc_base/ssladapter.h"
 
 #if defined(OS_ANDROID)
 #include "media/base/android/media_codec_util.h"
@@ -113,11 +115,12 @@ PeerConnectionDependencyFactory::PeerConnectionDependencyFactory(
 }
 
 PeerConnectionDependencyFactory::~PeerConnectionDependencyFactory() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOG(1) << "~PeerConnectionDependencyFactory()";
   DCHECK(!pc_factory_);
 }
 
-blink::WebRTCPeerConnectionHandler*
+std::unique_ptr<blink::WebRTCPeerConnectionHandler>
 PeerConnectionDependencyFactory::CreateRTCPeerConnectionHandler(
     blink::WebRTCPeerConnectionHandlerClient* client) {
   // Save histogram data so we can see how much PeerConnetion is used.
@@ -125,7 +128,7 @@ PeerConnectionDependencyFactory::CreateRTCPeerConnectionHandler(
   // webKitRTCPeerConnection.
   UpdateWebRTCMethodCount(WEBKIT_RTC_PEER_CONNECTION);
 
-  return new RTCPeerConnectionHandler(client, this);
+  return base::MakeUnique<RTCPeerConnectionHandler>(client, this);
 }
 
 const scoped_refptr<webrtc::PeerConnectionFactoryInterface>&
@@ -261,7 +264,8 @@ void PeerConnectionDependencyFactory::InitializeSignalingThread(
   factory_options.disable_sctp_data_channels = false;
   factory_options.disable_encryption =
       cmd_line->HasSwitch(switches::kDisableWebRtcEncryption);
-
+  factory_options.crypto_options.enable_gcm_crypto_suites =
+      cmd_line->HasSwitch(switches::kEnableWebRtcSrtpAesGcm);
   pc_factory_->SetOptions(factory_options);
 
   event->Signal();
@@ -274,14 +278,14 @@ bool PeerConnectionDependencyFactory::PeerConnectionFactoryCreated() {
 scoped_refptr<webrtc::PeerConnectionInterface>
 PeerConnectionDependencyFactory::CreatePeerConnection(
     const webrtc::PeerConnectionInterface::RTCConfiguration& config,
-    blink::WebFrame* web_frame,
+    blink::WebLocalFrame* web_frame,
     webrtc::PeerConnectionObserver* observer) {
   CHECK(web_frame);
   CHECK(observer);
   if (!GetPcFactory().get())
     return NULL;
 
-  // Copy the flag from Preference associated with this WebFrame.
+  // Copy the flag from Preference associated with this WebLocalFrame.
   P2PPortAllocator::Config port_config;
   uint16_t min_port = 0;
   uint16_t max_port = 0;
@@ -310,9 +314,9 @@ PeerConnectionDependencyFactory::CreatePeerConnection(
     port_config.enable_nonproxied_udp = true;
     VLOG(3) << "WebRTC routing preferences will not be enforced";
   } else {
-    if (web_frame && web_frame->view()) {
+    if (web_frame && web_frame->View()) {
       RenderViewImpl* renderer_view_impl =
-          RenderViewImpl::FromWebView(web_frame->view());
+          RenderViewImpl::FromWebView(web_frame->View());
       if (renderer_view_impl) {
         // TODO(guoweis): |enable_multiple_routes| should be renamed to
         // |request_multiple_routes|. Whether local IP addresses could be
@@ -374,7 +378,7 @@ PeerConnectionDependencyFactory::CreatePeerConnection(
   }
 
   const GURL& requesting_origin =
-      GURL(web_frame->document().url()).GetOrigin();
+      GURL(web_frame->GetDocument().Url()).GetOrigin();
 
   std::unique_ptr<rtc::NetworkManager> network_manager;
   if (port_config.enable_multiple_routes) {
@@ -441,7 +445,7 @@ PeerConnectionDependencyFactory::CreateIceCandidate(
 
 WebRtcAudioDeviceImpl*
 PeerConnectionDependencyFactory::GetWebRtcAudioDevice() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   EnsureWebRtcAudioDeviceImpl();
   return audio_device_.get();
 }
@@ -532,27 +536,27 @@ void PeerConnectionDependencyFactory::CleanupPeerConnectionFactory() {
 }
 
 void PeerConnectionDependencyFactory::EnsureInitialized() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   GetPcFactory();
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
 PeerConnectionDependencyFactory::GetWebRtcWorkerThread() const {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return chrome_worker_thread_.IsRunning() ? chrome_worker_thread_.task_runner()
                                            : nullptr;
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
 PeerConnectionDependencyFactory::GetWebRtcSignalingThread() const {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return chrome_signaling_thread_.IsRunning()
              ? chrome_signaling_thread_.task_runner()
              : nullptr;
 }
 
 void PeerConnectionDependencyFactory::EnsureWebRtcAudioDeviceImpl() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (audio_device_.get())
     return;
 

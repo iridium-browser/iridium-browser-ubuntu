@@ -24,6 +24,7 @@
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/proxy/proxy_info.h"
+#include "net/proxy/proxy_server.h"
 #include "net/proxy/proxy_service.h"
 
 namespace data_reduction_proxy {
@@ -85,7 +86,9 @@ void DataReductionProxyDelegate::OnResolveProxy(
   }
 
   std::vector<DataReductionProxyServer> proxies_for_http =
-      config_->GetProxiesForHttp();
+      params::IsIncludedInHoldbackFieldTrial()
+          ? std::vector<DataReductionProxyServer>()
+          : config_->GetProxiesForHttp();
 
   // Remove the proxies that are unsupported for this request.
   proxies_for_http.erase(
@@ -99,7 +102,7 @@ void DataReductionProxyDelegate::OnResolveProxy(
       !config_->secure_proxy_allowed(), proxies_for_http);
 
   OnResolveProxyHandler(url, method, proxy_config,
-                        proxy_service.proxy_retry_info(), config_, io_data_,
+                        proxy_service.proxy_retry_info(), *config_, io_data_,
                         result);
 
   if (!first_data_saver_request_recorded_ && !result->is_empty() &&
@@ -216,37 +219,11 @@ void DataReductionProxyDelegate::OnAlternativeProxyBroken(
                            1);
 }
 
-net::ProxyServer DataReductionProxyDelegate::GetDefaultAlternativeProxy()
-    const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (!params::IsZeroRttQuicEnabled())
-    return net::ProxyServer();
-
-  if (alternative_proxies_broken_) {
-    RecordGetDefaultAlternativeProxy(DEFAULT_ALTERNATIVE_PROXY_STATUS_BROKEN);
-    return net::ProxyServer();
-  }
-
-  net::ProxyServer proxy_server(
-      net::ProxyServer::SCHEME_QUIC,
-      net::HostPortPair(kDataReductionCoreProxy, 443));
-  if (!config_ || !config_->IsDataReductionProxy(proxy_server, NULL)) {
-    RecordGetDefaultAlternativeProxy(
-        DEFAULT_ALTERNATIVE_PROXY_STATUS_UNAVAILABLE);
-    return net::ProxyServer();
-  }
-
-  RecordGetDefaultAlternativeProxy(DEFAULT_ALTERNATIVE_PROXY_STATUS_AVAILABLE);
-  return proxy_server;
-}
-
 bool DataReductionProxyDelegate::SupportsQUIC(
     const net::ProxyServer& proxy_server) const {
   DCHECK(thread_checker_.CalledOnValidThread());
   // Enable QUIC for whitelisted proxies.
-  // TODO(tbansal):  Use client config service to control this whitelist.
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kDataReductionProxyEnableQuicOnNonCoreProxies) ||
+  return params::IsQuicEnabledForNonCoreProxies() ||
          proxy_server ==
              net::ProxyServer(net::ProxyServer::SCHEME_HTTPS,
                               net::HostPortPair(kDataReductionCoreProxy, 443));
@@ -257,13 +234,6 @@ void DataReductionProxyDelegate::RecordQuicProxyStatus(
   DCHECK(thread_checker_.CalledOnValidThread());
   UMA_HISTOGRAM_ENUMERATION("DataReductionProxy.Quic.ProxyStatus", status,
                             QUIC_PROXY_STATUS_BOUNDARY);
-}
-
-void DataReductionProxyDelegate::RecordGetDefaultAlternativeProxy(
-    DefaultAlternativeProxyStatus status) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  UMA_HISTOGRAM_ENUMERATION("DataReductionProxy.Quic.DefaultAlternativeProxy",
-                            status, DEFAULT_ALTERNATIVE_PROXY_STATUS_BOUNDARY);
 }
 
 void DataReductionProxyDelegate::OnIPAddressChanged() {
@@ -277,12 +247,11 @@ void OnResolveProxyHandler(
     const std::string& method,
     const net::ProxyConfig& proxy_config,
     const net::ProxyRetryInfoMap& proxy_retry_info,
-    const DataReductionProxyConfig* data_reduction_proxy_config,
+    const DataReductionProxyConfig& data_reduction_proxy_config,
     DataReductionProxyIOData* io_data,
     net::ProxyInfo* result) {
-  DCHECK(data_reduction_proxy_config);
   DCHECK(result->is_empty() || result->is_direct() ||
-         !data_reduction_proxy_config->IsDataReductionProxy(
+         !data_reduction_proxy_config.IsDataReductionProxy(
              result->proxy_server(), NULL));
 
   if (!util::EligibleForDataReductionProxy(*result, url, method))
@@ -306,12 +275,12 @@ void OnResolveProxyHandler(
   // The |proxy_config| must be valid otherwise the proxy cannot be used.
   DCHECK(proxy_config.is_valid() || !data_saver_proxy_used);
 
-  if (data_reduction_proxy_config->enabled_by_user_and_reachable() &&
-      url.SchemeIsHTTPOrHTTPS() && !url.SchemeIsCryptographic() &&
-      !net::IsLocalhost(url.host()) &&
-      (!proxy_config.is_valid() || data_saver_proxy_used)) {
-    UMA_HISTOGRAM_BOOLEAN("DataReductionProxy.ConfigService.HTTPRequests",
-                          data_saver_proxy_used);
+  if (data_reduction_proxy_config.enabled_by_user_and_reachable() &&
+      url.SchemeIs(url::kHttpScheme) && !net::IsLocalhost(url.host_piece()) &&
+      !params::IsIncludedInHoldbackFieldTrial()) {
+    UMA_HISTOGRAM_BOOLEAN(
+        "DataReductionProxy.ConfigService.HTTPRequests",
+        !data_reduction_proxy_config.GetProxiesForHttp().empty());
   }
 }
 

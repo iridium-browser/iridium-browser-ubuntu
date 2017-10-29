@@ -58,7 +58,7 @@ class ProgramBinaryTest : public ANGLETest
 
         glGenBuffers(1, &mBuffer);
         glBindBuffer(GL_ARRAY_BUFFER, mBuffer);
-        glBufferData(GL_ARRAY_BUFFER, 128, NULL, GL_STATIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, 128, nullptr, GL_STATIC_DRAW);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
 
         ASSERT_GL_NO_ERROR();
@@ -79,6 +79,25 @@ class ProgramBinaryTest : public ANGLETest
         return formatCount;
     }
 
+    bool supported() const
+    {
+        if (!extensionEnabled("GL_OES_get_program_binary"))
+        {
+            std::cout << "Test skipped because GL_OES_get_program_binary is not available."
+                      << std::endl;
+            return false;
+        }
+
+        if (getAvailableProgramBinaryFormatCount() == 0)
+        {
+            std::cout << "Test skipped because no program binary formats are available."
+                      << std::endl;
+            return false;
+        }
+
+        return true;
+    }
+
     GLuint mProgram;
     GLuint mBuffer;
 };
@@ -87,23 +106,15 @@ class ProgramBinaryTest : public ANGLETest
 // should not internally cause a vertex shader recompile (for conversion).
 TEST_P(ProgramBinaryTest, FloatDynamicShaderSize)
 {
-    if (!extensionEnabled("GL_OES_get_program_binary"))
+    if (!supported())
     {
-        std::cout << "Test skipped because GL_OES_get_program_binary is not available."
-                  << std::endl;
-        return;
-    }
-
-    if (getAvailableProgramBinaryFormatCount() == 0)
-    {
-        std::cout << "Test skipped because no program binary formats are available." << std::endl;
         return;
     }
 
     glUseProgram(mProgram);
     glBindBuffer(GL_ARRAY_BUFFER, mBuffer);
 
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8, NULL);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8, nullptr);
     glEnableVertexAttribArray(0);
     glDrawArrays(GL_POINTS, 0, 1);
 
@@ -114,7 +125,7 @@ TEST_P(ProgramBinaryTest, FloatDynamicShaderSize)
 
     for (GLsizei size = 1; size <= 3; size++)
     {
-        glVertexAttribPointer(0, size, GL_FLOAT, GL_FALSE, 8, NULL);
+        glVertexAttribPointer(0, size, GL_FLOAT, GL_FALSE, 8, nullptr);
         glEnableVertexAttribArray(0);
         glDrawArrays(GL_POINTS, 0, 1);
 
@@ -146,16 +157,8 @@ TEST_P(ProgramBinaryTest, DynamicShadersSignatureBug)
 // This tests the ability to successfully save and load a program binary.
 TEST_P(ProgramBinaryTest, SaveAndLoadBinary)
 {
-    if (!extensionEnabled("GL_OES_get_program_binary"))
+    if (!supported())
     {
-        std::cout << "Test skipped because GL_OES_get_program_binary is not available."
-                  << std::endl;
-        return;
-    }
-
-    if (getAvailableProgramBinaryFormatCount() == 0)
-    {
-        std::cout << "Test skipped because no program binary formats are available." << std::endl;
         return;
     }
 
@@ -190,7 +193,7 @@ TEST_P(ProgramBinaryTest, SaveAndLoadBinary)
             if (infoLogLength > 0)
             {
                 std::vector<GLchar> infoLog(infoLogLength);
-                glGetProgramInfoLog(program2, static_cast<GLsizei>(infoLog.size()), NULL,
+                glGetProgramInfoLog(program2, static_cast<GLsizei>(infoLog.size()), nullptr,
                                     &infoLog[0]);
                 FAIL() << "program link failed: " << &infoLog[0];
             }
@@ -204,7 +207,7 @@ TEST_P(ProgramBinaryTest, SaveAndLoadBinary)
             glUseProgram(program2);
             glBindBuffer(GL_ARRAY_BUFFER, mBuffer);
 
-            glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8, NULL);
+            glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8, nullptr);
             glEnableVertexAttribArray(0);
             glDrawArrays(GL_POINTS, 0, 1);
 
@@ -213,6 +216,39 @@ TEST_P(ProgramBinaryTest, SaveAndLoadBinary)
 
         glDeleteProgram(program2);
     }
+}
+
+// Ensures that we init the compiler before calling ProgramBinary.
+TEST_P(ProgramBinaryTest, CallProgramBinaryBeforeLink)
+{
+    if (!supported())
+    {
+        return;
+    }
+
+    // Initialize a simple program.
+    glUseProgram(mProgram);
+
+    GLsizei length = 0;
+    glGetProgramiv(mProgram, GL_PROGRAM_BINARY_LENGTH, &length);
+    ASSERT_GL_NO_ERROR();
+    ASSERT_GT(length, 0);
+
+    GLsizei readLength  = 0;
+    GLenum binaryFormat = GL_NONE;
+    std::vector<uint8_t> binaryBlob(length);
+    glGetProgramBinaryOES(mProgram, length, &readLength, &binaryFormat, binaryBlob.data());
+    ASSERT_GL_NO_ERROR();
+
+    // Shutdown and restart GL entirely.
+    TearDown();
+    SetUp();
+
+    ANGLE_GL_BINARY_OES_PROGRAM(binaryProgram, binaryBlob, binaryFormat);
+    ASSERT_GL_NO_ERROR();
+
+    drawQuad(binaryProgram, "inputAttribute", 0.5f);
+    ASSERT_GL_NO_ERROR();
 }
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
@@ -670,7 +706,7 @@ class ProgramBinariesAcrossPlatforms : public testing::TestWithParam<PlatformsWi
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
         glDisableVertexAttribArray(positionLocation);
-        glVertexAttribPointer(positionLocation, 4, GL_FLOAT, GL_FALSE, 0, NULL);
+        glVertexAttribPointer(positionLocation, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
 
         EXPECT_PIXEL_EQ(mOSWindow->getWidth() / 2, mOSWindow->getHeight() / 2, 255, 0, 0, 255);
     }

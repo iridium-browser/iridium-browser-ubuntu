@@ -13,8 +13,7 @@ goog.scope(function() {
  * Maps a dot pattern to a command.
  * @type {!Object<number, string>}
  */
-BrailleCommandHandler.DOT_PATTERN_TO_COMMAND = {
-};
+BrailleCommandHandler.DOT_PATTERN_TO_COMMAND = {};
 
 /**
  * Makes a dot pattern given a list of dots numbered from 1 to 8 arranged in a
@@ -93,8 +92,9 @@ BrailleCommandHandler.getDots = function(command) {
  */
 BrailleCommandHandler.init_ = function() {
   var map = function(dots, command) {
-    BrailleCommandHandler.DOT_PATTERN_TO_COMMAND[
-      BrailleCommandHandler.makeDotPattern(dots)] = command;
+    BrailleCommandHandler
+        .DOT_PATTERN_TO_COMMAND[BrailleCommandHandler.makeDotPattern(dots)] =
+        command;
   };
 
   map([2, 3], 'previousGroup');
@@ -134,8 +134,18 @@ BrailleCommandHandler.init_ = function() {
 
   // Question.
   map([1, 4, 5, 6], 'toggleKeyboardHelp');
+
+  // All cells (with 7 as mod).
+  map([1, 2, 3, 4, 5, 6, 7], 'darkenScreen');
+  map([1, 2, 3, 4, 5, 6], 'undarkenScreen');
+
+  // s.
+  map([2, 3, 4], 'toggleSpeechOnOrOff');
+
+  // g.
+  map([1, 2, 4, 5], 'toggleBrailleTable');
 };
 
 BrailleCommandHandler.init_();
 
-}); //  goog.scope
+});  //  goog.scope

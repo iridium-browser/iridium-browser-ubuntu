@@ -14,6 +14,7 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -100,7 +101,7 @@ const char* GetTestGaiaId() {
 
 const char* GetTestUser() {
 #if defined(OS_CHROMEOS)
-  return user_manager::kStubUser;
+  return user_manager::kStubUserEmail;
 #else
   return "user@example.com";
 #endif
@@ -169,7 +170,7 @@ void GetExpectedTestPolicy(PolicyMap* expected, const char* homepage) {
                 base::MakeUnique<base::Value>(1000), nullptr);
   expected->Set(key::kHomepageLocation, POLICY_LEVEL_RECOMMENDED,
                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                base::MakeUnique<base::StringValue>(homepage), nullptr);
+                base::MakeUnique<base::Value>(homepage), nullptr);
 }
 
 }  // namespace
@@ -247,7 +248,8 @@ class CloudPolicyTest : public InProcessBrowserTest,
 #endif
     policy_manager->core()->client()->Register(
         registration_type, em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
-        "bogus", std::string(), std::string(), std::string());
+        em::LicenseType::UNDEFINED, "bogus", std::string(), std::string(),
+        std::string());
     run_loop.Run();
     Mock::VerifyAndClearExpectations(&observer);
     policy_manager->core()->client()->RemoveObserver(&observer);
@@ -282,6 +284,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
   }
 
   void SetServerPolicy(const std::string& policy) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     int result = base::WriteFile(policy_file_path(), policy.data(),
                                  policy.size());
     ASSERT_EQ(base::checked_cast<int>(policy.size()), result);

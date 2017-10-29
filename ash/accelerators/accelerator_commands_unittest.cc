@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/accelerators/accelerator_commands.h"
+#include "ash/accelerators/accelerator_commands.h"
 
 #include <memory>
 
-#include "ash/accelerators/accelerator_commands_aura.h"
-#include "ash/common/wm/window_state.h"
+#include "ash/accelerators/accelerator_commands_classic.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/window.h"
 
@@ -22,7 +21,7 @@
 namespace ash {
 namespace accelerators {
 
-typedef test::AshTestBase AcceleratorCommandsTest;
+using AcceleratorCommandsTest = AshTestBase;
 
 TEST_F(AcceleratorCommandsTest, ToggleMinimized) {
   std::unique_ptr<aura::Window> window1(

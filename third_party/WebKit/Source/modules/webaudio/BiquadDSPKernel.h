@@ -40,43 +40,51 @@ class BiquadProcessor;
 class BiquadDSPKernel final : public AudioDSPKernel {
  public:
   explicit BiquadDSPKernel(BiquadProcessor* processor)
-      : AudioDSPKernel(processor) {}
+      : AudioDSPKernel(processor),
+        tail_time_(std::numeric_limits<double>::infinity()) {}
 
   // AudioDSPKernel
-  void process(const float* source,
+  void Process(const float* source,
                float* dest,
-               size_t framesToProcess) override;
-  void reset() override { m_biquad.reset(); }
+               size_t frames_to_process) override;
+  void Reset() override { biquad_.Reset(); }
 
   // Get the magnitude and phase response of the filter at the given
   // set of frequencies (in Hz). The phase response is in radians.
-  void getFrequencyResponse(int nFrequencies,
-                            const float* frequencyHz,
-                            float* magResponse,
-                            float* phaseResponse);
+  void GetFrequencyResponse(int n_frequencies,
+                            const float* frequency_hz,
+                            float* mag_response,
+                            float* phase_response);
 
-  double tailTime() const override;
-  double latencyTime() const override;
+  double TailTime() const override;
+  double LatencyTime() const override;
 
  protected:
-  Biquad m_biquad;
-  BiquadProcessor* getBiquadProcessor() {
-    return static_cast<BiquadProcessor*>(processor());
+  Biquad biquad_;
+  BiquadProcessor* GetBiquadProcessor() {
+    return static_cast<BiquadProcessor*>(Processor());
   }
 
   // To prevent audio glitches when parameters are changed,
   // dezippering is used to slowly change the parameters.
-  void updateCoefficientsIfNecessary(int);
+  void UpdateCoefficientsIfNecessary(int);
   // Update the biquad cofficients with the given parameters
-  void updateCoefficients(int,
+  void UpdateCoefficients(int,
                           const float* frequency,
-                          const float* Q,
+                          const float* q,
                           const float* gain,
                           const float* detune);
 
  private:
+  // Compute the tail time using the BiquadFilter coefficients at
+  // index |coef_index|.
+  void UpdateTailTime(int coef_index);
+
   // Synchronize process() with getting and setting the filter coefficients.
-  mutable Mutex m_processLock;
+  mutable Mutex process_lock_;
+
+  // The current tail time for biquad filter.
+  double tail_time_;
 };
 
 }  // namespace blink

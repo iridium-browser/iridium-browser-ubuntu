@@ -9,6 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/network/network_state_handler_observer.h"
 #include "components/onc/onc_constants.h"
@@ -82,13 +83,6 @@ class CHROMEOS_EXPORT ProxyConfigServiceImpl
   // config is stored in |active_config_| and activated on network stack, and
   // hence, picked up by observers.
   void DetermineEffectiveConfigFromDefaultNetwork();
-
-  // State of |active_config_|.  |active_config_| is only valid if
-  // |active_config_state_| is not ProxyPrefs::CONFIG_UNSET.
-  ProxyPrefs::ConfigState active_config_state_;
-
-  // Active proxy configuration, which could be from prefs or network.
-  net::ProxyConfig active_config_;
 
   // Track changes in profile preferences: UseSharedProxies and
   // OpenNetworkConfiguration.

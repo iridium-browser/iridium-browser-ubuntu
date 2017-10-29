@@ -13,9 +13,11 @@
 #include "base/command_line.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_nsobject.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
@@ -43,7 +45,6 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
@@ -233,10 +234,6 @@ class AppControllerNewProfileManagementBrowserTest
   AppControllerNewProfileManagementBrowserTest()
       : active_browser_list_(BrowserList::GetInstance()) {}
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    switches::EnableNewProfileManagementForTesting(command_line);
-  }
-
   const BrowserList* active_browser_list_;
 };
 
@@ -262,6 +259,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerNewProfileManagementBrowserTest,
   base::scoped_nsobject<AppController> ac([[AppController alloc] init]);
 
   // Lock the active profile.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   Profile* profile = [ac lastProfile];
   ProfileAttributesEntry* entry;
   ASSERT_TRUE(g_browser_process->profile_manager()->
@@ -297,6 +295,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerNewProfileManagementBrowserTest,
 
   base::scoped_nsobject<AppController> ac([[AppController alloc] init]);
 
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   Profile* profile = [ac lastProfile];
   EXPECT_EQ(ProfileManager::GetGuestProfilePath(), profile->GetPath());
   EXPECT_TRUE(profile->IsGuestSession());
@@ -331,6 +330,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerNewProfileManagementBrowserTest,
   // Prohibiting guest mode forces the user manager flow for About Chrome.
   local_state->SetBoolean(prefs::kBrowserGuestModeEnabled, false);
 
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   Profile* guest_profile = [ac lastProfile];
   EXPECT_EQ(ProfileManager::GetGuestProfilePath(), guest_profile->GetPath());
   EXPECT_TRUE(guest_profile->IsGuestSession());
@@ -543,6 +543,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerMainMenuBrowserTest,
       BookmarkModelFactory::GetForBrowserContext(profile1));
 
   // Create profile 2.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::FilePath path2 = profile_manager->GenerateNextProfileDirectoryPath();
   Profile* profile2 =
       Profile::CreateProfile(path2, NULL, Profile::CREATE_MODE_SYNCHRONOUS);

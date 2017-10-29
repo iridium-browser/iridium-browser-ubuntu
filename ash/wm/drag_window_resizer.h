@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "ash/ash_export.h"
-#include "ash/common/wm/window_resizer.h"
+#include "ash/wm/window_resizer.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -52,8 +52,6 @@ class ASH_EXPORT DragWindowResizer : public WindowResizer {
 
   // Returns true if we should allow the mouse pointer to warp.
   bool ShouldAllowMouseWarp();
-
-  aura::Window* GetAuraTarget();
 
   std::unique_ptr<WindowResizer> next_window_resizer_;
 

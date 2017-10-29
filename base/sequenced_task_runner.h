@@ -5,7 +5,10 @@
 #ifndef BASE_SEQUENCED_TASK_RUNNER_H_
 #define BASE_SEQUENCED_TASK_RUNNER_H_
 
+#include <memory>
+
 #include "base/base_export.h"
+#include "base/callback.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/task_runner.h"
 
@@ -109,11 +112,11 @@ class BASE_EXPORT SequencedTaskRunner : public TaskRunner {
   // below.
 
   bool PostNonNestableTask(const tracked_objects::Location& from_here,
-                           const Closure& task);
+                           OnceClosure task);
 
   virtual bool PostNonNestableDelayedTask(
       const tracked_objects::Location& from_here,
-      const Closure& task,
+      OnceClosure task,
       base::TimeDelta delay) = 0;
 
   // Submits a non-nestable task to delete the given object.  Returns
@@ -124,6 +127,12 @@ class BASE_EXPORT SequencedTaskRunner : public TaskRunner {
                   const T* object) {
     return DeleteOrReleaseSoonInternal(from_here, &DeleteHelper<T>::DoDelete,
                                        object);
+  }
+
+  template <class T>
+  bool DeleteSoon(const tracked_objects::Location& from_here,
+                  std::unique_ptr<T> object) {
+    return DeleteSoon(from_here, object.release());
   }
 
   // Submits a non-nestable task to release the given object.  Returns
@@ -145,6 +154,11 @@ class BASE_EXPORT SequencedTaskRunner : public TaskRunner {
                                    const void* object);
 };
 
+// Sample usage with std::unique_ptr :
+// std::unique_ptr<Foo, base::OnTaskRunnerDeleter> ptr(
+//     new Foo, base::OnTaskRunnerDeleter(my_task_runner));
+//
+// For RefCounted see base::RefCountedDeleteOnSequence.
 struct BASE_EXPORT OnTaskRunnerDeleter {
   explicit OnTaskRunnerDeleter(scoped_refptr<SequencedTaskRunner> task_runner);
   ~OnTaskRunnerDeleter();
@@ -152,6 +166,7 @@ struct BASE_EXPORT OnTaskRunnerDeleter {
   OnTaskRunnerDeleter(OnTaskRunnerDeleter&&);
   OnTaskRunnerDeleter& operator=(OnTaskRunnerDeleter&&);
 
+  // For compatibility with std:: deleters.
   template <typename T>
   void operator()(const T* ptr) {
     if (ptr)

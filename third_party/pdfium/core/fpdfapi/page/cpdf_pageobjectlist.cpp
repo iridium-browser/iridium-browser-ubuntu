@@ -6,11 +6,8 @@
 
 #include "core/fpdfapi/page/cpdf_pageobjectlist.h"
 
-#include "core/fpdfapi/page/pageint.h"
 #include "third_party/base/stl_util.h"
 
 CPDF_PageObject* CPDF_PageObjectList::GetPageObjectByIndex(int index) {
-  if (index < 0 || index >= pdfium::CollectionSize<int>(*this))
-    return nullptr;
-  return (*this)[index].get();
+  return pdfium::IndexInBounds(*this, index) ? (*this)[index].get() : nullptr;
 }

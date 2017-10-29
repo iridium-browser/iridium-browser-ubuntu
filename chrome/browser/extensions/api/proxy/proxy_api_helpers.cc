@@ -15,7 +15,10 @@
 
 #include <stddef.h>
 
+#include <utility>
+
 #include "base/base64.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -307,7 +310,7 @@ bool GetBypassListFromExtensionPref(const base::DictionaryValue* proxy_config,
   return JoinUrlList(bypass_list, ",", out, error, bad_message);
 }
 
-base::DictionaryValue* CreateProxyConfigDict(
+std::unique_ptr<base::DictionaryValue> CreateProxyConfigDict(
     ProxyPrefs::ProxyMode mode_enum,
     bool pac_mandatory,
     const std::string& pac_url,
@@ -315,7 +318,7 @@ base::DictionaryValue* CreateProxyConfigDict(
     const std::string& proxy_rules_string,
     const std::string& bypass_list,
     std::string* error) {
-  base::DictionaryValue* result_proxy_config = NULL;
+  std::unique_ptr<base::DictionaryValue> result_proxy_config;
   switch (mode_enum) {
     case ProxyPrefs::MODE_DIRECT:
       result_proxy_config = ProxyConfigDictionary::CreateDirect();
@@ -330,12 +333,12 @@ base::DictionaryValue* CreateProxyConfigDict(
       } else if (!pac_data.empty()) {
         if (!CreateDataURLFromPACScript(pac_data, &url)) {
           *error = "Internal error, at base64 encoding of 'pacScript.data'.";
-          return NULL;
+          return nullptr;
         }
       } else {
         *error = "Proxy mode 'pac_script' requires a 'pacScript' field with "
                  "either a 'url' field or a 'data' field.";
-        return NULL;
+        return nullptr;
       }
       result_proxy_config =
           ProxyConfigDictionary::CreatePacScript(url, pac_mandatory);
@@ -344,7 +347,7 @@ base::DictionaryValue* CreateProxyConfigDict(
     case ProxyPrefs::MODE_FIXED_SERVERS: {
       if (proxy_rules_string.empty()) {
         *error = "Proxy mode 'fixed_servers' requires a 'rules' field.";
-        return NULL;
+        return nullptr;
       }
       result_proxy_config = ProxyConfigDictionary::CreateFixedServers(
           proxy_rules_string, bypass_list);
@@ -359,13 +362,12 @@ base::DictionaryValue* CreateProxyConfigDict(
   return result_proxy_config;
 }
 
-base::DictionaryValue* CreateProxyRulesDict(
+std::unique_ptr<base::DictionaryValue> CreateProxyRulesDict(
     const ProxyConfigDictionary& proxy_config) {
   ProxyPrefs::ProxyMode mode;
   CHECK(proxy_config.GetMode(&mode) && mode == ProxyPrefs::MODE_FIXED_SERVERS);
 
-  std::unique_ptr<base::DictionaryValue> extension_proxy_rules(
-      new base::DictionaryValue);
+  auto extension_proxy_rules = base::MakeUnique<base::DictionaryValue>();
 
   std::string proxy_servers;
   if (!proxy_config.GetProxyServer(&proxy_servers)) {
@@ -421,16 +423,18 @@ base::DictionaryValue* CreateProxyRulesDict(
       LOG(ERROR) << "Invalid bypassList in configuration.";
       return NULL;
     }
-    base::ListValue* bypass_list =
+    std::unique_ptr<base::ListValue> bypass_list =
         TokenizeToStringList(bypass_list_string, ",;");
-    extension_proxy_rules->Set(keys::kProxyConfigBypassList, bypass_list);
+    extension_proxy_rules->Set(keys::kProxyConfigBypassList,
+                               std::move(bypass_list));
   }
 
-  return extension_proxy_rules.release();
+  return extension_proxy_rules;
 }
 
-base::DictionaryValue* CreateProxyServerDict(const net::ProxyServer& proxy) {
-  std::unique_ptr<base::DictionaryValue> out(new base::DictionaryValue);
+std::unique_ptr<base::DictionaryValue> CreateProxyServerDict(
+    const net::ProxyServer& proxy) {
+  auto out = base::MakeUnique<base::DictionaryValue>();
   switch (proxy.scheme()) {
     case net::ProxyServer::SCHEME_HTTP:
       out->SetString(keys::kProxyConfigRuleScheme, "http");
@@ -454,16 +458,15 @@ base::DictionaryValue* CreateProxyServerDict(const net::ProxyServer& proxy) {
   }
   out->SetString(keys::kProxyConfigRuleHost, proxy.host_port_pair().host());
   out->SetInteger(keys::kProxyConfigRulePort, proxy.host_port_pair().port());
-  return out.release();
+  return out;
 }
 
-base::DictionaryValue* CreatePacScriptDict(
+std::unique_ptr<base::DictionaryValue> CreatePacScriptDict(
     const ProxyConfigDictionary& proxy_config) {
   ProxyPrefs::ProxyMode mode;
   CHECK(proxy_config.GetMode(&mode) && mode == ProxyPrefs::MODE_PAC_SCRIPT);
 
-  std::unique_ptr<base::DictionaryValue> pac_script_dict(
-      new base::DictionaryValue);
+  auto pac_script_dict = base::MakeUnique<base::DictionaryValue>();
   std::string pac_url;
   if (!proxy_config.GetPacUrl(&pac_url)) {
     LOG(ERROR) << "Invalid proxy configuration. Missing PAC URL.";
@@ -487,12 +490,13 @@ base::DictionaryValue* CreatePacScriptDict(
   }
   pac_script_dict->SetBoolean(keys::kProxyConfigPacScriptMandatory,
                               pac_mandatory);
-  return pac_script_dict.release();
+  return pac_script_dict;
 }
 
-base::ListValue* TokenizeToStringList(const std::string& in,
-                                const std::string& delims) {
-  base::ListValue* out = new base::ListValue;
+std::unique_ptr<base::ListValue> TokenizeToStringList(
+    const std::string& in,
+    const std::string& delims) {
+  auto out = base::MakeUnique<base::ListValue>();
   base::StringTokenizer entries(in, delims);
   while (entries.GetNext())
     out->AppendString(entries.token());

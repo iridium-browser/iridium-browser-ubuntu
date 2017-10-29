@@ -30,11 +30,12 @@ class CORE_EXPORT TestPermissiveDictionary : public IDLDictionaryBase {
   bool booleanMember() const;
   void setBooleanMember(bool);
 
-  v8::Local<v8::Value> toV8Impl(v8::Local<v8::Object>, v8::Isolate*) const override;
+  v8::Local<v8::Value> ToV8Impl(v8::Local<v8::Object>, v8::Isolate*) const override;
   DECLARE_VIRTUAL_TRACE();
 
  private:
   bool m_hasBooleanMember = false;
+
   bool m_booleanMember;
 
   friend class V8TestPermissiveDictionary;

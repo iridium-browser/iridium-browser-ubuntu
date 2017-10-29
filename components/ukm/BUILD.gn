@@ -9,20 +9,26 @@ import("//testing/test.gni")
 # URLs for top-level navigations.
 static_library("ukm") {
   sources = [
-    "metrics_reporting_scheduler.cc",
-    "metrics_reporting_scheduler.h",
     "persisted_logs_metrics_impl.cc",
     "persisted_logs_metrics_impl.h",
-    "ukm_entry.cc",
-    "ukm_entry.h",
-    "ukm_entry_builder.cc",
-    "ukm_entry_builder.h",
     "ukm_pref_names.cc",
     "ukm_pref_names.h",
+    "ukm_recorder_impl.cc",
+    "ukm_recorder_impl.h",
+    "ukm_reporting_service.cc",
+    "ukm_reporting_service.h",
+    "ukm_rotation_scheduler.cc",
+    "ukm_rotation_scheduler.h",
     "ukm_service.cc",
     "ukm_service.h",
     "ukm_source.cc",
     "ukm_source.h",
+  ]
+
+  public_deps = [
+    "//components/metrics/proto",
+    "//services/metrics/public/cpp:metrics_cpp",
+    "//services/metrics/public/interfaces",
   ]
 
   deps = [
@@ -32,6 +38,23 @@ static_library("ukm") {
     "//components/prefs",
     "//components/variations",
     "//url",
+  ]
+}
+
+static_library("ukm_interface") {
+  sources = [
+    "ukm_interface.cc",
+    "ukm_interface.h",
+  ]
+
+  public_deps = [
+    "//base",
+    "//services/metrics/public/interfaces",
+  ]
+
+  deps = [
+    ":ukm",
+    "//mojo/public/cpp/bindings",
   ]
 }
 
@@ -54,17 +77,19 @@ static_library("observers") {
 static_library("test_support") {
   testonly = true
   sources = [
-    "test_ukm_service.cc",
-    "test_ukm_service.h",
+    "test_ukm_recorder.cc",
+    "test_ukm_recorder.h",
   ]
 
   public_deps = [
     ":ukm",
+    "//components/metrics/proto",
   ]
   deps = [
     "//base",
     "//components/metrics:test_support",
     "//components/prefs:test_support",
+    "//testing/gtest:gtest",
   ]
 }
 
@@ -87,8 +112,9 @@ source_set("unit_tests") {
     "//components/sync:test_support_driver",
     "//components/variations",
     "//net:test_support",
+    "//services/metrics/public/cpp:ukm_builders",
     "//testing/gtest",
-    "//third_party/zlib:compression_utils",
+    "//third_party/zlib/google:compression_utils",
     "//url",
   ]
 }

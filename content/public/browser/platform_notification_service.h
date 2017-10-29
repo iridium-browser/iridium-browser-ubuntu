@@ -21,7 +21,6 @@ class GURL;
 namespace content {
 
 class BrowserContext;
-class DesktopNotificationDelegate;
 struct NotificationResources;
 struct PlatformNotificationData;
 class ResourceContext;
@@ -32,6 +31,10 @@ class ResourceContext;
 class CONTENT_EXPORT PlatformNotificationService {
  public:
   virtual ~PlatformNotificationService() {}
+
+  using DisplayedNotificationsCallback =
+      base::Callback<void(std::unique_ptr<std::set<std::string>>,
+                          bool /* supports synchronization */)>;
 
   // Checks if |origin| has permission to display Web Notifications.
   // This method must only be called on the UI thread.
@@ -59,7 +62,6 @@ class CONTENT_EXPORT PlatformNotificationService {
       const GURL& origin,
       const PlatformNotificationData& notification_data,
       const NotificationResources& notification_resources,
-      std::unique_ptr<DesktopNotificationDelegate> delegate,
       base::Closure* cancel_callback) = 0;
 
   // Displays the persistent notification described in |notification_data| to
@@ -78,12 +80,11 @@ class CONTENT_EXPORT PlatformNotificationService {
       BrowserContext* browser_context,
       const std::string& notification_id) = 0;
 
-  // Writes the ids of all currently displaying notifications for the
-  // given |browser_context| to |displayed_notifications|. Returns whether the
-  // platform is able to provide such a set.
-  virtual bool GetDisplayedNotifications(
+  // Retrieves the ids of all currently displaying notifications and
+  // posts |callback| with the result.
+  virtual void GetDisplayedNotifications(
       BrowserContext* browser_context,
-      std::set<std::string>* displayed_notifications) = 0;
+      const DisplayedNotificationsCallback& callback) = 0;
 };
 
 }  // namespace content

@@ -9,7 +9,7 @@
 
 #include "base/containers/stack_container.h"
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/tiles/picture_layer_tiling_set.h"
 #include "cc/tiles/prioritized_tile.h"
 #include "cc/tiles/tile.h"
@@ -22,12 +22,14 @@ namespace cc {
 class CC_EXPORT TilingSetRasterQueueAll {
  public:
   TilingSetRasterQueueAll(PictureLayerTilingSet* tiling_set,
-                          bool prioritize_low_res);
+                          bool prioritize_low_res,
+                          bool is_drawing_layer);
   ~TilingSetRasterQueueAll();
 
   const PrioritizedTile& Top() const;
   void Pop();
   bool IsEmpty() const;
+  bool is_drawing_layer() const { return is_drawing_layer_; }
 
  private:
   // Helper base class for individual region iterators.
@@ -44,9 +46,6 @@ class CC_EXPORT TilingSetRasterQueueAll {
 
    protected:
     ~OnePriorityRectIterator() = default;
-    bool TileNeedsRaster(const Tile* tile) const {
-      return tile->draw_info().NeedsRaster() && !tiling_->IsTileOccluded(tile);
-    }
 
     template <typename TilingIteratorType>
     void AdvanceToNextTile(TilingIteratorType* iterator);
@@ -193,6 +192,7 @@ class CC_EXPORT TilingSetRasterQueueAll {
   // ideal pending high res.
   base::StackVector<IterationStage, 6> stages_;
   TilingIterator iterators_[NUM_ITERATORS];
+  bool is_drawing_layer_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(TilingSetRasterQueueAll);
 };

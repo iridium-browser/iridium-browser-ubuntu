@@ -8,10 +8,10 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/single_thread_task_runner.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "content/browser/indexed_db/indexed_db_backing_store.h"
 #include "content/browser/indexed_db/indexed_db_cursor.h"
 #include "content/browser/indexed_db/indexed_db_database.h"
@@ -34,6 +34,41 @@ void CommitUnused(base::WeakPtr<IndexedDBTransaction> transaction) {
     return;
   leveldb::Status status = transaction->Commit();
   DCHECK(status.ok());
+}
+
+// Used for UMA metrics - do not change values.
+enum UmaIDBException {
+  UmaIDBExceptionUnknownError = 0,
+  UmaIDBExceptionConstraintError = 1,
+  UmaIDBExceptionDataError = 2,
+  UmaIDBExceptionVersionError = 3,
+  UmaIDBExceptionAbortError = 4,
+  UmaIDBExceptionQuotaError = 5,
+  UmaIDBExceptionTimeoutError = 6,
+  UmaIDBExceptionExclusiveMaxValue = 7
+};
+
+// Used for UMA metrics - do not change mappings.
+UmaIDBException ExceptionCodeToUmaEnum(uint16_t code) {
+  switch (code) {
+    case blink::kWebIDBDatabaseExceptionUnknownError:
+      return UmaIDBExceptionUnknownError;
+    case blink::kWebIDBDatabaseExceptionConstraintError:
+      return UmaIDBExceptionConstraintError;
+    case blink::kWebIDBDatabaseExceptionDataError:
+      return UmaIDBExceptionDataError;
+    case blink::kWebIDBDatabaseExceptionVersionError:
+      return UmaIDBExceptionVersionError;
+    case blink::kWebIDBDatabaseExceptionAbortError:
+      return UmaIDBExceptionAbortError;
+    case blink::kWebIDBDatabaseExceptionQuotaError:
+      return UmaIDBExceptionQuotaError;
+    case blink::kWebIDBDatabaseExceptionTimeoutError:
+      return UmaIDBExceptionTimeoutError;
+    default:
+      NOTREACHED();
+  }
+  return UmaIDBExceptionUnknownError;
 }
 
 }  // namespace
@@ -77,9 +112,10 @@ IndexedDBTransaction::IndexedDBTransaction(
     : id_(id),
       object_store_ids_(object_store_ids),
       mode_(mode),
-      connection_(std::move(connection)),
+      connection_(connection),
       transaction_(backing_store_transaction),
       ptr_factory_(this) {
+  IDB_ASYNC_TRACE_BEGIN("IndexedDBTransaction::lifetime", this);
   callbacks_ = connection_->callbacks();
   database_ = connection_->database();
 
@@ -89,6 +125,7 @@ IndexedDBTransaction::IndexedDBTransaction(
 }
 
 IndexedDBTransaction::~IndexedDBTransaction() {
+  IDB_ASYNC_TRACE_END("IndexedDBTransaction::lifetime", this);
   // It shouldn't be possible for this object to get deleted until it's either
   // complete or aborted.
   DCHECK_EQ(state_, FINISHED);
@@ -107,11 +144,11 @@ void IndexedDBTransaction::ScheduleTask(blink::WebIDBTaskType type,
 
   timeout_timer_.Stop();
   used_ = true;
-  if (type == blink::WebIDBTaskTypeNormal) {
-    task_queue_.push(task);
+  if (type == blink::kWebIDBTaskTypeNormal) {
+    task_queue_.push(std::move(task));
     ++diagnostics_.tasks_scheduled;
   } else {
-    preemptive_task_queue_.push(task);
+    preemptive_task_queue_.push(std::move(task));
   }
   RunTasksIfStarted();
 }
@@ -134,14 +171,9 @@ void IndexedDBTransaction::RunTasksIfStarted() {
     return;
 
   should_process_queue_ = true;
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&IndexedDBTransaction::ProcessTaskQueue,
-                            ptr_factory_.GetWeakPtr()));
-}
-
-void IndexedDBTransaction::Abort() {
-  Abort(IndexedDBDatabaseError(blink::WebIDBDatabaseExceptionUnknownError,
-                               "Internal error (unknown cause)"));
+  base::SequencedTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&IndexedDBTransaction::ProcessTaskQueue,
+                                ptr_factory_.GetWeakPtr()));
 }
 
 void IndexedDBTransaction::Abort(const IndexedDBDatabaseError& error) {
@@ -149,6 +181,10 @@ void IndexedDBTransaction::Abort(const IndexedDBDatabaseError& error) {
   DCHECK(!processing_event_queue_);
   if (state_ == FINISHED)
     return;
+
+  UMA_HISTOGRAM_ENUMERATION("WebCore.IndexedDB.TransactionAbortReason",
+                            ExceptionCodeToUmaEnum(error.code()),
+                            UmaIDBExceptionExclusiveMaxValue);
 
   timeout_timer_.Stop();
 
@@ -217,8 +253,8 @@ void IndexedDBTransaction::Start() {
       // The transaction has never had requests issued against it, but the
       // front-end previously requested a commit; do the commit now, but not
       // re-entrantly as that may renter the coordinator.
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&CommitUnused, ptr_factory_.GetWeakPtr()));
+      base::SequencedTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::BindOnce(&CommitUnused, ptr_factory_.GetWeakPtr()));
     }
     return;
   }
@@ -263,7 +299,7 @@ leveldb::Status IndexedDBTransaction::BlobWriteComplete(
   // Switch statement to protect against adding new enum values.
   switch (result) {
     case IndexedDBBackingStore::BlobWriteResult::FAILURE_ASYNC:
-      Abort(IndexedDBDatabaseError(blink::WebIDBDatabaseExceptionDataError,
+      Abort(IndexedDBDatabaseError(blink::kWebIDBDatabaseExceptionDataError,
                                    "Failed to write blobs."));
       return leveldb::Status::OK();
     case IndexedDBBackingStore::BlobWriteResult::SUCCESS_ASYNC:
@@ -339,6 +375,34 @@ leveldb::Status IndexedDBTransaction::CommitPhaseTwo() {
   if (!used_) {
     committed = true;
   } else {
+    base::TimeDelta active_time = base::Time::Now() - diagnostics_.start_time;
+    uint64_t size_kb = transaction_->GetTransactionSize() / 1024;
+    // All histograms record 1KB to 1GB.
+    switch (mode_) {
+      case blink::kWebIDBTransactionModeReadOnly:
+        UMA_HISTOGRAM_MEDIUM_TIMES(
+            "WebCore.IndexedDB.Transaction.ReadOnly.TimeActive", active_time);
+        UMA_HISTOGRAM_COUNTS_1M(
+            "WebCore.IndexedDB.Transaction.ReadOnly.SizeOnCommit2", size_kb);
+        break;
+      case blink::kWebIDBTransactionModeReadWrite:
+        UMA_HISTOGRAM_MEDIUM_TIMES(
+            "WebCore.IndexedDB.Transaction.ReadWrite.TimeActive", active_time);
+        UMA_HISTOGRAM_COUNTS_1M(
+            "WebCore.IndexedDB.Transaction.ReadWrite.SizeOnCommit2", size_kb);
+        break;
+      case blink::kWebIDBTransactionModeVersionChange:
+        UMA_HISTOGRAM_MEDIUM_TIMES(
+            "WebCore.IndexedDB.Transaction.VersionChange.TimeActive",
+            active_time);
+        UMA_HISTOGRAM_COUNTS_1M(
+            "WebCore.IndexedDB.Transaction.VersionChange.SizeOnCommit2",
+            size_kb);
+        break;
+      default:
+        NOTREACHED();
+    }
+
     s = transaction_->CommitPhaseTwo();
     committed = s.ok();
   }
@@ -384,11 +448,12 @@ leveldb::Status IndexedDBTransaction::CommitPhaseTwo() {
     IndexedDBDatabaseError error;
     if (leveldb_env::IndicatesDiskFull(s)) {
       error = IndexedDBDatabaseError(
-          blink::WebIDBDatabaseExceptionQuotaError,
+          blink::kWebIDBDatabaseExceptionQuotaError,
           "Encountered disk full while committing transaction.");
     } else {
-      error = IndexedDBDatabaseError(blink::WebIDBDatabaseExceptionUnknownError,
-                                     "Internal error committing transaction.");
+      error =
+          IndexedDBDatabaseError(blink::kWebIDBDatabaseExceptionUnknownError,
+                                 "Internal error committing transaction.");
     }
     callbacks_->OnAbort(*this, error);
     database_->TransactionFinished(this, false);
@@ -420,7 +485,7 @@ void IndexedDBTransaction::ProcessTaskQueue() {
   while (!task_queue->empty() && state_ != FINISHED) {
     DCHECK_EQ(state_, STARTED);
     Operation task(task_queue->pop());
-    leveldb::Status result = task.Run(this);
+    leveldb::Status result = std::move(task).Run(this);
     if (!pending_preemptive_events_) {
       DCHECK(diagnostics_.tasks_completed < diagnostics_.tasks_scheduled);
       ++diagnostics_.tasks_completed;
@@ -458,7 +523,7 @@ void IndexedDBTransaction::ProcessTaskQueue() {
   // Otherwise, start a timer in case the front-end gets wedged and
   // never requests further activity. Read-only transactions don't
   // block other transactions, so don't time those out.
-  if (mode_ != blink::WebIDBTransactionModeReadOnly) {
+  if (mode_ != blink::kWebIDBTransactionModeReadOnly) {
     timeout_timer_.Start(
         FROM_HERE, GetInactivityTimeout(),
         base::Bind(&IndexedDBTransaction::Timeout, ptr_factory_.GetWeakPtr()));
@@ -472,7 +537,7 @@ base::TimeDelta IndexedDBTransaction::GetInactivityTimeout() const {
 
 void IndexedDBTransaction::Timeout() {
   Abort(IndexedDBDatabaseError(
-      blink::WebIDBDatabaseExceptionTimeoutError,
+      blink::kWebIDBDatabaseExceptionTimeoutError,
       base::ASCIIToUTF16("Transaction timed out due to inactivity.")));
 }
 
@@ -486,7 +551,7 @@ void IndexedDBTransaction::CloseOpenCursors() {
 void IndexedDBTransaction::AddPendingObserver(
     int32_t observer_id,
     const IndexedDBObserver::Options& options) {
-  DCHECK_NE(mode(), blink::WebIDBTransactionModeVersionChange);
+  DCHECK_NE(mode(), blink::kWebIDBTransactionModeVersionChange);
   pending_observers_.push_back(base::MakeUnique<IndexedDBObserver>(
       observer_id, object_store_ids_, options));
 }

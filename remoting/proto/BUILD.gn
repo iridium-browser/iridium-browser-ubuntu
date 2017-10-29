@@ -18,6 +18,8 @@ proto_library("proto") {
     "event.proto",
     "internal.proto",
     "mux.proto",
+    "process_stats.proto",
+    "test.proto",
     "video.proto",
     "video_stats.proto",
   ]

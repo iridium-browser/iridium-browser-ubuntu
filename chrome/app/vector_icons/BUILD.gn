@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/util/branding.gni")
-import("//ui/vector_icons/vector_icons.gni")
+import("//components/vector_icons/vector_icons.gni")
 
 aggregate_vector_icons("chrome_vector_icons") {
   icon_directory = "."
@@ -13,10 +13,14 @@ aggregate_vector_icons("chrome_vector_icons") {
     "account_child.icon",
     "account_child_circle.icon",
     "account_circle.icon",
+    "add.1x.icon",
+    "add.icon",
     "apps.icon",
     "autologin.icon",
     "blocked_badge.icon",
-    "bluetooth_connected.icon",
+    "browser_tools_animated.1x.icon",
+    "browser_tools_animated.icon",
+    "browser_tools.1x.icon",
     "browser_tools.icon",
     "browser_tools_error.icon",
     "browser_tools_update.icon",
@@ -24,12 +28,14 @@ aggregate_vector_icons("chrome_vector_icons") {
     "caret_down.icon",
     "caret_up.1x.icon",
     "caret_up.icon",
+    "certificate.icon",
     "close_all.icon",
     "code.icon",
     "cookie.icon",
     "crashed_tab.icon",
     "credit_card.1x.icon",
     "credit_card.icon",
+    "eol.icon",
     "extension.icon",
     "extension_crashed.icon",
     "file_download.icon",
@@ -47,9 +53,7 @@ aggregate_vector_icons("chrome_vector_icons") {
     "incognito.1x.icon",
     "incognito.icon",
     "laptop.icon",
-    "lock.icon",
     "mixed_content.icon",
-    "mode_edit.icon",
     "my_location.icon",
     "navigate_home.1x.icon",
     "navigate_home.icon",
@@ -57,11 +61,13 @@ aggregate_vector_icons("chrome_vector_icons") {
     "navigate_reload.icon",
     "navigate_stop.1x.icon",
     "navigate_stop.icon",
-    "open_in_phone.icon",
     "overflow_chevron.1x.icon",
     "overflow_chevron.icon",
     "paintbrush.icon",
     "photo_camera.icon",
+    "profile_switcher_outline.icon",
+    "remove.1x.icon",
+    "remove.icon",
     "remove_box.icon",
     "sad_tab.icon",
     "settings.icon",
@@ -95,17 +101,33 @@ aggregate_vector_icons("chrome_vector_icons") {
   ]
 
   if (is_mac) {
-    icons += [ "new_tab_mac_touchbar.icon" ]
+    icons += [
+      "default_favicon.icon",
+      "google_search_mac_touchbar.icon",
+      "new_tab_mac_touchbar.icon",
+    ]
+  }
+
+  if (is_win) {
+    icons += [ "open_in_phone.icon" ]
+  }
+
+  if (is_chromeos) {
+    icons += [
+      "arc_migrate_encryption_notification.icon",
+      "warning_badge_circle.1x.icon",
+      "warning_badge_circle.icon",
+    ]
   }
 }
 
 source_set("vector_icons") {
   sources = get_target_outputs(":chrome_vector_icons")
-  sources += [ "//ui/gfx/vector_icon_types.h" ]
 
   deps = [
     ":chrome_vector_icons",
     "//base",
     "//skia",
+    "//ui/gfx",
   ]
 }

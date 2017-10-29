@@ -10,21 +10,17 @@ source_set("utils") {
     "observable_boolean.h",
     "pref_backed_boolean.h",
     "pref_backed_boolean.mm",
-    "resized_avatar_cache.h",
-    "resized_avatar_cache.mm",
   ]
   deps = [
     "//base",
     "//components/content_settings/core/browser",
     "//components/content_settings/core/common",
     "//components/prefs",
-    "//ios/chrome/browser/ui",
-    "//ios/public/provider/chrome/browser",
-    "//ios/public/provider/chrome/browser/signin",
   ]
 }
 
 source_set("test_support") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "fake_observable_boolean.h",
@@ -53,7 +49,7 @@ source_set("unit_tests") {
     "//components/sync_preferences:test_support",
     "//ios/chrome/browser/browser_state:test_support",
     "//ios/chrome/browser/content_settings",
-    "//ios/web:test_support",
+    "//ios/web/public/test",
     "//testing/gtest",
   ]
 }

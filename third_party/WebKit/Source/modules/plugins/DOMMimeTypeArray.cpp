@@ -20,53 +20,91 @@
 
 #include "modules/plugins/DOMMimeTypeArray.h"
 
+#include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "core/page/Page.h"
 #include "platform/plugins/PluginData.h"
-#include "wtf/Vector.h"
-#include "wtf/text/AtomicString.h"
+#include "platform/wtf/Vector.h"
+#include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
 
-DOMMimeTypeArray::DOMMimeTypeArray(LocalFrame* frame) : ContextClient(frame) {}
+DOMMimeTypeArray::DOMMimeTypeArray(LocalFrame* frame)
+    : ContextLifecycleObserver(frame ? frame->GetDocument() : nullptr),
+      PluginsChangedObserver(frame ? frame->GetPage() : nullptr) {
+  UpdatePluginData();
+}
 
 DEFINE_TRACE(DOMMimeTypeArray) {
-  ContextClient::trace(visitor);
+  ContextLifecycleObserver::Trace(visitor);
+  visitor->Trace(dom_mime_types_);
 }
 
 unsigned DOMMimeTypeArray::length() const {
-  PluginData* data = getPluginData();
-  if (!data)
-    return 0;
-  return data->mimes().size();
+  return dom_mime_types_.size();
 }
 
 DOMMimeType* DOMMimeTypeArray::item(unsigned index) {
-  PluginData* data = getPluginData();
-  if (!data)
+  if (index >= dom_mime_types_.size())
     return nullptr;
-  const Vector<MimeClassInfo>& mimes = data->mimes();
-  if (index >= mimes.size())
-    return nullptr;
-  return DOMMimeType::create(data, frame(), index);
+  if (!dom_mime_types_[index]) {
+    dom_mime_types_[index] =
+        DOMMimeType::Create(GetFrame(), *GetPluginData()->Mimes()[index]);
+  }
+
+  return dom_mime_types_[index];
 }
 
-DOMMimeType* DOMMimeTypeArray::namedItem(const AtomicString& propertyName) {
-  PluginData* data = getPluginData();
+DOMMimeType* DOMMimeTypeArray::namedItem(const AtomicString& property_name) {
+  PluginData* data = GetPluginData();
   if (!data)
     return nullptr;
-  const Vector<MimeClassInfo>& mimes = data->mimes();
-  for (unsigned i = 0; i < mimes.size(); ++i) {
-    if (mimes[i].type == propertyName)
-      return DOMMimeType::create(data, frame(), i);
+
+  for (const Member<MimeClassInfo>& mime : data->Mimes()) {
+    if (mime->Type() == property_name) {
+      size_t index = &mime - &data->Mimes()[0];
+      return item(index);
+    }
   }
   return nullptr;
 }
 
-PluginData* DOMMimeTypeArray::getPluginData() const {
-  if (!frame())
+PluginData* DOMMimeTypeArray::GetPluginData() const {
+  if (!GetFrame())
     return nullptr;
-  return frame()->pluginData();
+  return GetFrame()->GetPluginData();
+}
+
+void DOMMimeTypeArray::UpdatePluginData() {
+  PluginData* data = GetPluginData();
+  if (!data) {
+    dom_mime_types_.clear();
+    return;
+  }
+
+  HeapVector<Member<DOMMimeType>> old_dom_mime_types(
+      std::move(dom_mime_types_));
+  dom_mime_types_.clear();
+  dom_mime_types_.resize(data->Mimes().size());
+
+  for (Member<DOMMimeType>& mime : old_dom_mime_types) {
+    if (mime) {
+      for (const Member<MimeClassInfo>& mime_info : data->Mimes()) {
+        if (mime->type() == mime_info->Type()) {
+          size_t index = &mime_info - &data->Mimes()[0];
+          dom_mime_types_[index] = mime;
+        }
+      }
+    }
+  }
+}
+
+void DOMMimeTypeArray::ContextDestroyed(ExecutionContext*) {
+  dom_mime_types_.clear();
+}
+
+void DOMMimeTypeArray::PluginsChanged() {
+  UpdatePluginData();
 }
 
 }  // namespace blink

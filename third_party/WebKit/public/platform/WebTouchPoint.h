@@ -31,42 +31,48 @@
 #ifndef WebTouchPoint_h
 #define WebTouchPoint_h
 
-#include "../platform/WebCommon.h"
-#include "../platform/WebFloatPoint.h"
-#include "../platform/WebPointerProperties.h"
+#include "WebCommon.h"
+#include "WebFloatPoint.h"
+#include "WebPointerProperties.h"
 
 namespace blink {
 
-// TODO(e_hakkinen): Replace WebTouchEvent with WebPointerEvent and remove
-// WebTouchEvent and this.
+// TODO(mustaq): Unify WebTouchPoint & WebMouseEvent into WebPointerEvent.
+// crbug.com/508283
 class WebTouchPoint : public WebPointerProperties {
  public:
-  WebTouchPoint()
-      : WebPointerProperties(),
-        state(StateUndefined),
-        radiusX(0),
-        radiusY(0),
-        rotationAngle(0) {}
+  WebTouchPoint() : WebTouchPoint(WebPointerProperties(0)) {}
+
+  WebTouchPoint(WebPointerProperties web_pointer_properties)
+      : WebPointerProperties(web_pointer_properties),
+        state(kStateUndefined),
+        radius_x(0),
+        radius_y(0),
+        rotation_angle(0) {}
+
+  void SetPositionInWidget(float x, float y) {
+    position_in_widget_ = WebFloatPoint(x, y);
+  }
+
+  void SetPositionInScreen(float x, float y) {
+    position_in_screen_ = WebFloatPoint(x, y);
+  }
 
   enum State {
-    StateUndefined,
-    StateReleased,
-    StatePressed,
-    StateMoved,
-    StateStationary,
-    StateCancelled,
-    StateMax = StateCancelled
+    kStateUndefined,
+    kStateReleased,
+    kStatePressed,
+    kStateMoved,
+    kStateStationary,
+    kStateCancelled,
+    kStateMax = kStateCancelled
   };
 
   State state;
 
-  // TODO(e_hakkinen): Move position fields to WebPointerProperties.
-  WebFloatPoint screenPosition;
-  WebFloatPoint position;
-
-  float radiusX;
-  float radiusY;
-  float rotationAngle;
+  float radius_x;
+  float radius_y;
+  float rotation_angle;
 };
 
 }  // namespace blink

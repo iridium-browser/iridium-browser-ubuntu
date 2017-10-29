@@ -3,9 +3,7 @@
 // found in the LICENSE file.
 //
 // Accumulates frames for the next packet until more frames no longer fit or
-// it's time to create a packet from them. If multipath enabled, only creates
-// packets on one path at the same time. Currently, next packet number is
-// tracked per-path.
+// it's time to create a packet from them.
 
 #ifndef NET_QUIC_CORE_QUIC_PACKET_CREATOR_H_
 #define NET_QUIC_CORE_QUIC_PACKET_CREATOR_H_
@@ -13,17 +11,16 @@
 #include <cstddef>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/strings/string_piece.h"
 #include "net/quic/core/quic_connection_close_delegate_interface.h"
 #include "net/quic/core/quic_framer.h"
 #include "net/quic/core/quic_iovector.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_pending_retransmission.h"
+#include "net/quic/core/quic_stream_frame_data_producer.h"
 #include "net/quic/platform/api/quic_export.h"
 
 namespace net {
@@ -205,9 +202,19 @@ class QUIC_EXPORT_PRIVATE QuicPacketCreator {
   // Sets the maximum packet length.
   void SetMaxPacketLength(QuicByteCount length);
 
+  // Increases pending_padding_bytes by |size|. Pending padding will be sent by
+  // MaybeAddPadding().
+  void AddPendingPadding(QuicByteCount size);
+
   void set_debug_delegate(DebugDelegate* debug_delegate) {
     debug_delegate_ = debug_delegate;
   }
+
+  bool latched_flag_no_stop_waiting_frames() const {
+    return latched_flag_no_stop_waiting_frames_;
+  }
+
+  QuicByteCount pending_padding_bytes() const { return pending_padding_bytes_; }
 
  private:
   friend class test::QuicPacketCreatorPeer;
@@ -226,14 +233,6 @@ class QUIC_EXPORT_PRIVATE QuicPacketCreator {
                          bool fin,
                          QuicFrame* frame);
 
-  // Copies |length| bytes from iov starting at offset |iov_offset| into buffer.
-  // |iov| must be at least iov_offset+length total length and buffer must be
-  // at least |length| long.
-  static void CopyToBuffer(QuicIOVector iov,
-                           size_t iov_offset,
-                           size_t length,
-                           char* buffer);
-
   void FillPacketHeader(QuicPacketHeader* header);
 
   // Adds a |frame| if there is space and returns false and flushes all pending
@@ -241,9 +240,8 @@ class QUIC_EXPORT_PRIVATE QuicPacketCreator {
   // saves the |frame| in the next SerializedPacket.
   bool AddFrame(const QuicFrame& frame, bool save_retransmittable_frames);
 
-  // Adds a padding frame to the current packet only if the current packet
-  // contains a handshake message, and there is sufficient room to fit a
-  // padding frame.
+  // Adds a padding frame to the current packet (if there is space) when (1)
+  // current packet needs full padding or (2) there are pending paddings.
   void MaybeAddPadding();
 
   // Serializes all frames which have been added and adds any which should be
@@ -262,6 +260,11 @@ class QUIC_EXPORT_PRIVATE QuicPacketCreator {
   // Returns true if a diversification nonce should be included in the current
   // packet's public header.
   bool IncludeNonceInPublicHeader();
+
+  // Returns true if |frame| starts with CHLO.
+  bool StreamFrameStartsWithChlo(QuicIOVector iov,
+                                 size_t iov_offset,
+                                 const QuicStreamFrame& frame) const;
 
   // Does not own these delegates or the framer.
   DelegateInterface* delegate_;
@@ -299,8 +302,18 @@ class QUIC_EXPORT_PRIVATE QuicPacketCreator {
   // Packet used to invoke OnSerializedPacket.
   SerializedPacket packet_;
 
-  // Map mapping path_id to last sent packet number on the path.
-  std::unordered_map<QuicPathId, QuicPacketNumber> multipath_packet_number_;
+  // The latched value of FLAGS_quic_reloadable_flag_quic_no_stop_waiting_frames
+  bool latched_flag_no_stop_waiting_frames_;
+
+  // Pending padding bytes to send. Pending padding bytes will be sent in next
+  // packet(s) (after all other frames) if current constructed packet does not
+  // have room to send all of them.
+  QuicByteCount pending_padding_bytes_;
+
+  // Indicates whether current constructed packet needs full padding to max
+  // packet size. Please note, full padding does not consume pending padding
+  // bytes.
+  bool needs_full_padding_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicPacketCreator);
 };

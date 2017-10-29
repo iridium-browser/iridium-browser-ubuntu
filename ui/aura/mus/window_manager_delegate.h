@@ -10,10 +10,11 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "services/ui/public/interfaces/cursor.mojom.h"
+#include "services/ui/public/interfaces/cursor/cursor.mojom.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "services/ui/public/interfaces/window_tree_constants.mojom.h"
@@ -38,6 +39,8 @@ namespace aura {
 class Window;
 class WindowTreeHostMus;
 
+struct WindowTreeHostMusInitParams;
+
 // See the mojom with the same name for details on the functions in this
 // interface.
 class AURA_EXPORT WindowManagerClient {
@@ -45,22 +48,76 @@ class AURA_EXPORT WindowManagerClient {
   virtual void SetFrameDecorationValues(
       ui::mojom::FrameDecorationValuesPtr values) = 0;
   virtual void SetNonClientCursor(Window* window,
-                                  ui::mojom::Cursor non_client_cursor) = 0;
+                                  const ui::CursorData& non_client_cursor) = 0;
 
   virtual void AddAccelerators(
-      std::vector<ui::mojom::AcceleratorPtr> accelerators,
+      std::vector<ui::mojom::WmAcceleratorPtr> accelerators,
       const base::Callback<void(bool)>& callback) = 0;
   virtual void RemoveAccelerator(uint32_t id) = 0;
   virtual void AddActivationParent(Window* window) = 0;
   virtual void RemoveActivationParent(Window* window) = 0;
   virtual void ActivateNextWindow() = 0;
-  virtual void SetExtendedHitArea(Window* window,
-                                  const gfx::Insets& hit_area) = 0;
+  virtual void SetExtendedHitRegionForChildren(
+      Window* window,
+      const gfx::Insets& mouse_area,
+      const gfx::Insets& touch_area) = 0;
+
+  // Queues changes to the cursor instead of applying them instantly. Queued
+  // changes will be executed on UnlockCursor().
+  virtual void LockCursor() = 0;
+
+  // Executes queued changes.
+  virtual void UnlockCursor() = 0;
+
+  // Globally shows or hides the cursor.
+  virtual void SetCursorVisible(bool visible) = 0;
+
+  // Globally sets whether we use normal or large cursors.
+  virtual void SetCursorSize(ui::CursorSize cursor_size) = 0;
+
+  // Sets a cursor which is used instead of the per window cursors. Pass a
+  // nullopt in |cursor| to clear the override.
+  virtual void SetGlobalOverrideCursor(
+      base::Optional<ui::CursorData> cursor) = 0;
+
+  // Sets the list of keys which don't hide the cursor.
+  virtual void SetKeyEventsThatDontHideCursor(
+      std::vector<ui::mojom::EventMatcherPtr> cursor_key_list) = 0;
 
   // Requests the client embedded in |window| to close the window. Only
   // applicable to top-level windows. If a client is not embedded in |window|,
   // this does nothing.
   virtual void RequestClose(Window* window) = 0;
+
+  // Blocks until the initial displays have been received, or if displays are
+  // not automatically created until the connection to mus has been
+  // established.
+  virtual bool WaitForInitialDisplays() = 0;
+
+  // Used by the window manager to create a new display. This is only useful if
+  // the WindowTreeClient was configured not to automatically create displays
+  // (see ConnectAsWindowManager()). The caller needs to configure
+  // DisplayInitParams on the returned object.
+  virtual WindowTreeHostMusInitParams CreateInitParamsForNewDisplay() = 0;
+
+  // Configures the displays. This is used when the window manager manually
+  // configures display roots.
+  virtual void SetDisplayConfiguration(
+      const std::vector<display::Display>& displays,
+      std::vector<ui::mojom::WmViewportMetricsPtr> viewport_metrics,
+      int64_t primary_display_id) = 0;
+
+  // Adds |display| as a new display moving |window_tree_host| to the new
+  // display. This results in closing the previous display |window_tree_host|
+  // was associated with.
+  virtual void AddDisplayReusingWindowTreeHost(
+      WindowTreeHostMus* window_tree_host,
+      const display::Display& display,
+      ui::mojom::WmViewportMetricsPtr viewport_metrics) = 0;
+
+  // Swaps the roots of the two displays.
+  virtual void SwapDisplayRoots(WindowTreeHostMus* window_tree_host1,
+                                WindowTreeHostMus* window_tree_host2) = 0;
 
  protected:
   virtual ~WindowManagerClient() {}
@@ -75,12 +132,11 @@ class AURA_EXPORT WindowManagerDelegate {
   // the WindowManager.
   virtual void SetWindowManagerClient(WindowManagerClient* client) = 0;
 
-  // A client requested the bounds of |window| to change to |bounds|. Return
-  // true if the bounds are allowed to change. A return value of false
-  // indicates the change is not allowed.
-  // NOTE: This should not change the bounds of |window|. Instead return the
-  // bounds the window should be in |bounds|.
-  virtual bool OnWmSetBounds(Window* window, gfx::Rect* bounds) = 0;
+  // Called when the connection to mus has been fully established.
+  virtual void OnWmConnected();
+
+  // A client requested the bounds of |window| to change to |bounds|.
+  virtual void OnWmSetBounds(Window* window, const gfx::Rect& bounds) = 0;
 
   // A client requested the shared property named |name| to change to
   // |new_data|. Return true to allow the change to |new_data|, false
@@ -90,6 +146,9 @@ class AURA_EXPORT WindowManagerDelegate {
       Window* window,
       const std::string& name,
       std::unique_ptr<std::vector<uint8_t>>* new_data) = 0;
+
+  // A client requested the modal type to be changed to |type|.
+  virtual void OnWmSetModalType(Window* window, ui::ModalType type) = 0;
 
   // A client requested to change focusibility of |window|. We currently assume
   // this always succeeds.
@@ -113,6 +172,21 @@ class AURA_EXPORT WindowManagerDelegate {
       const std::set<Window*>& client_windows,
       bool janky) = 0;
 
+  // Called when a Mus client has started a drag, and wants this image to be
+  // the drag representation.
+  virtual void OnWmBuildDragImage(const gfx::Point& screen_location,
+                                  const SkBitmap& drag_image,
+                                  const gfx::Vector2d& drag_image_offset,
+                                  ui::mojom::PointerKind source) = 0;
+
+  // Called during drags when the drag location has changed and the drag
+  // representation must be moved.
+  virtual void OnWmMoveDragImage(const gfx::Point& screen_location) = 0;
+
+  // Called when a drag is complete or canceled, and signals that the drag image
+  // should be removed.
+  virtual void OnWmDestroyDragImage() = 0;
+
   // When a new display is added OnWmWillCreateDisplay() is called, and then
   // OnWmNewDisplay(). OnWmWillCreateDisplay() is intended to add the display
   // to the set of displays (see Screen).
@@ -132,8 +206,16 @@ class AURA_EXPORT WindowManagerDelegate {
   // Called when a display is modified.
   virtual void OnWmDisplayModified(const display::Display& display) = 0;
 
-  virtual ui::mojom::EventResult OnAccelerator(uint32_t id,
-                                               const ui::Event& event);
+  // Called when an accelerator is received. |id| is the id previously
+  // registered via AddAccelerators(). For pre-target accelerators the delegate
+  // may add key/value pairs to |properties| that are then added to the
+  // KeyEvent that is sent to the client with the focused window (only if this
+  // returns UNHANDLED). |properties| may be used to pass around state from the
+  // window manager to clients.
+  virtual ui::mojom::EventResult OnAccelerator(
+      uint32_t id,
+      const ui::Event& event,
+      std::unordered_map<std::string, std::vector<uint8_t>>* properties);
 
   virtual void OnWmPerformMoveLoop(
       Window* window,

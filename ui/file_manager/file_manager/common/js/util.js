@@ -633,6 +633,68 @@ util.isFakeEntry = function(entry) {
 };
 
 /**
+ * Obtains whether an entry is the root directory of a Team Drive.
+ * @param {(!Entry|!FakeEntry)} entry Entry or a fake entry.
+ * @return {boolean} True if the given entry is root of a Team Drive.
+ */
+util.isTeamDriveRoot = function(entry) {
+  if (!entry.fullPath)
+    return false;
+  var tree = entry.fullPath.split('/');
+  return tree.length == 3 && util.isTeamDriveEntry(entry);
+};
+
+/**
+ * Obtains whether an entry is the grand root directory of Team Drives.
+ * @param {(!Entry|!FakeEntry)} entry Entry or a fake entry.
+ * @return {boolean} True if the given entry is the grand root of Team Drives.
+ */
+util.isTeamDrivesGrandRoot = function(entry) {
+  if (!entry.fullPath)
+    return false;
+  var tree = entry.fullPath.split('/');
+  return tree.length == 2 && util.isTeamDriveEntry(entry);
+};
+
+/**
+ * Obtains whether an entry is descendant of the Team Drives directory.
+ * @param {(!Entry|!FakeEntry)} entry Entry or a fake entry.
+ * @return {boolean} True if the given entry is under Team Drives.
+ */
+util.isTeamDriveEntry = function(entry) {
+  if (!entry.fullPath)
+    return false;
+  var tree = entry.fullPath.split('/');
+  return tree[0] == '' &&
+      tree[1] == VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_NAME;
+};
+
+/**
+ * Extracts Team Drive name from entry path.
+ * @param {(!Entry|!FakeEntry)} entry Entry or a fake entry.
+ * @return {string} The name of Team Drive. Empty string if |entry| is not
+ *     under Team Drives.
+ */
+util.getTeamDriveName = function(entry) {
+  if (!entry.fullPath || !util.isTeamDriveEntry(entry))
+    return '';
+  var tree = entry.fullPath.split('/');
+  if (tree.length < 3)
+    return '';
+  return tree[2];
+};
+
+/**
+ * Returns true if the given entry is the root folder of recent files.
+ * @param {(!Entry|!FakeEntry)} entry Entry or a fake entry.
+ * @returns {boolean}
+ */
+util.isRecentRoot = function(entry) {
+  return util.isFakeEntry(entry) &&
+      entry.rootType == VolumeManagerCommon.RootType.RECENT;
+};
+
+/**
  * Creates an instance of UserDOMError with given error name that looks like a
  * FileError except that it does not have the deprecated FileError.code member.
  *
@@ -683,6 +745,28 @@ util.isSameEntry = function(entry1, entry2) {
 };
 
 /**
+ * Compares two entry arrays.
+ * @param {Array<!Entry>} entries1 The entry array to be compared.
+ * @param {Array<!Entry>} entries2 The entry array to be compared.
+ * @return {boolean} True if the both arrays contain same files or directories
+ *     in the same order. Returns true if both arrays are null.
+ */
+util.isSameEntries = function(entries1, entries2) {
+  if (!entries1 && !entries2)
+    return true;
+  if (!entries1 || !entries2)
+    return false;
+  if (entries1.length !== entries2.length)
+    return false;
+  for (var i = 0; i < entries1.length; i++) {
+    if (!util.isSameEntry(entries1[i], entries2[i])) {
+      return false;
+    }
+  }
+  return true;
+};
+
+/**
  * Compares two file systems.
  * @param {FileSystem} fileSystem1 The file system to be compared.
  * @param {FileSystem} fileSystem2 The file system to be compared.
@@ -695,6 +779,24 @@ util.isSameFileSystem = function(fileSystem1, fileSystem2) {
   if (!fileSystem1 || !fileSystem2)
     return false;
   return util.isSameEntry(fileSystem1.root, fileSystem2.root);
+};
+
+/**
+ * Checks if given two entries are in the same directory.
+ * @param {!Entry} entry1
+ * @param {!Entry} entry2
+ * @return {boolean} True if given entries are in the same directory.
+ */
+util.isSiblingEntry = function(entry1, entry2) {
+  var path1 = entry1.fullPath.split('/');
+  var path2 = entry2.fullPath.split('/');
+  if (path1.length != path2.length)
+    return false;
+  for (var i = 0; i < path1.length - 1; i++) {
+    if (path1[i] != path2[i])
+      return false;
+  }
+  return true;
 };
 
 /**
@@ -934,12 +1036,26 @@ util.getRootTypeLabel = function(locationInfo) {
       return str('DOWNLOADS_DIRECTORY_LABEL');
     case VolumeManagerCommon.RootType.DRIVE:
       return str('DRIVE_MY_DRIVE_LABEL');
+    case VolumeManagerCommon.RootType.TEAM_DRIVE:
+    // |locationInfo| points to either the root directory of an individual Team
+    // Drive or subdirectory under it, but not the Team Drives grand directory.
+    // Every Team Drive and its subdirectories always have individual names
+    // (locationInfo.hasFixedLabel is false). So getRootTypeLabel() is only used
+    // by LocationLine.show() to display the ancestor name in the location line
+    // like this:
+    //   Team Drives > ABC Team Drive > Folder1
+    //   ^^^^^^^^^^^
+    // By this reason, we return the label of the Team Drives grand root here.
+    case VolumeManagerCommon.RootType.TEAM_DRIVES_GRAND_ROOT:
+      return str('DRIVE_TEAM_DRIVES_LABEL');
     case VolumeManagerCommon.RootType.DRIVE_OFFLINE:
       return str('DRIVE_OFFLINE_COLLECTION_LABEL');
     case VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME:
       return str('DRIVE_SHARED_WITH_ME_COLLECTION_LABEL');
     case VolumeManagerCommon.RootType.DRIVE_RECENT:
       return str('DRIVE_RECENT_COLLECTION_LABEL');
+    case VolumeManagerCommon.RootType.RECENT:
+      return str('RECENT_ROOT_LABEL');
     case VolumeManagerCommon.RootType.MEDIA_VIEW:
       var mediaViewRootType =
           VolumeManagerCommon.getMediaViewRootTypeFromVolumeId(
@@ -964,7 +1080,7 @@ util.getRootTypeLabel = function(locationInfo) {
       console.error('Unsupported root type: ' + locationInfo.rootType);
       return locationInfo.volumeInfo.label;
   }
-}
+};
 
 /**
  * Returns the localized name of the entry.
@@ -974,7 +1090,7 @@ util.getRootTypeLabel = function(locationInfo) {
  * @return {?string} The localized name.
  */
 util.getEntryLabel = function(locationInfo, entry) {
-  if (locationInfo && locationInfo.isRootEntry)
+  if (locationInfo && locationInfo.hasFixedLabel)
     return util.getRootTypeLabel(locationInfo);
   else
     return entry.name;
@@ -1085,4 +1201,19 @@ util.timeoutPromise = function(promise, ms, opt_message) {
       throw new Error(opt_message || 'Operation timed out.');
     })
   ]);
+};
+
+/**
+ * Examines whether the touch-specific UI mode is enabled.
+ * @return {Promise} Promise fulfilled with a boolean that indicate whether
+      the touch-specific UI mode is enabled. The promise is never rejected.
+ */
+util.isTouchModeEnabled = function() {
+  return new Promise(function(resolve) {
+    chrome.commandLinePrivate.hasSwitch(
+        'disable-file-manager-touch-mode', function(isDisabled) {
+          // Enabled by default.
+          resolve(!isDisabled);
+        });
+  });
 };

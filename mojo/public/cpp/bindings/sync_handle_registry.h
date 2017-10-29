@@ -5,59 +5,83 @@
 #ifndef MOJO_PUBLIC_CPP_BINDINGS_SYNC_HANDLE_REGISTRY_H_
 #define MOJO_PUBLIC_CPP_BINDINGS_SYNC_HANDLE_REGISTRY_H_
 
-#include <unordered_map>
+#include <map>
 
 #include "base/callback.h"
+#include "base/containers/stack_container.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/threading/thread_checker.h"
+#include "base/sequence_checker.h"
+#include "base/synchronization/waitable_event.h"
 #include "mojo/public/cpp/bindings/bindings_export.h"
 #include "mojo/public/cpp/system/core.h"
+#include "mojo/public/cpp/system/wait_set.h"
 
 namespace mojo {
 
-// SyncHandleRegistry is a thread-local storage to register handles that want to
-// be watched together.
+// SyncHandleRegistry is a sequence-local storage to register handles that want
+// to be watched together.
 //
-// This class is not thread safe.
+// This class is thread unsafe.
 class MOJO_CPP_BINDINGS_EXPORT SyncHandleRegistry
     : public base::RefCounted<SyncHandleRegistry> {
  public:
-  // Returns a thread-local object.
+  // Returns a sequence-local object.
   static scoped_refptr<SyncHandleRegistry> current();
 
   using HandleCallback = base::Callback<void(MojoResult)>;
+
+  // Registers a |Handle| to be watched for |handle_signals|. If any such
+  // signals are satisfied during a Wait(), the Wait() is woken up and
+  // |callback| is run.
   bool RegisterHandle(const Handle& handle,
                       MojoHandleSignals handle_signals,
                       const HandleCallback& callback);
 
   void UnregisterHandle(const Handle& handle);
 
-  // Waits on all the registered handles and runs callbacks synchronously for
-  // those ready handles.
+  // Registers a |base::WaitableEvent| which can be used to wake up
+  // Wait() before any handle signals. |event| is not owned, and if it signals
+  // during Wait(), |callback| is invoked.  Note that |event| may be registered
+  // multiple times with different callbacks.
+  void RegisterEvent(base::WaitableEvent* event, const base::Closure& callback);
+
+  // Unregisters a specific |event|+|callback| pair.
+  void UnregisterEvent(base::WaitableEvent* event,
+                       const base::Closure& callback);
+
+  // Waits on all the registered handles and events and runs callbacks
+  // synchronously for any that become ready.
   // The method:
   //   - returns true when any element of |should_stop| is set to true;
   //   - returns false when any error occurs.
-  bool WatchAllHandles(const bool* should_stop[], size_t count);
+  bool Wait(const bool* should_stop[], size_t count);
 
  private:
   friend class base::RefCounted<SyncHandleRegistry>;
 
-  struct HandleHasher {
-    size_t operator()(const Handle& handle) const {
-      return std::hash<uint32_t>()(static_cast<uint32_t>(handle.value()));
-    }
-  };
-  using HandleMap = std::unordered_map<Handle, HandleCallback, HandleHasher>;
+  using EventCallbackList = base::StackVector<base::Closure, 1>;
+  using EventMap = std::map<base::WaitableEvent*, EventCallbackList>;
 
   SyncHandleRegistry();
   ~SyncHandleRegistry();
 
-  HandleMap handles_;
+  void RemoveInvalidEventCallbacks();
 
-  ScopedHandle wait_set_handle_;
+  WaitSet wait_set_;
+  std::map<Handle, HandleCallback> handles_;
+  EventMap events_;
 
-  base::ThreadChecker thread_checker_;
+  // |true| iff this registry is currently dispatching event callbacks in
+  // Wait(). Used to allow for safe event registration/unregistration from event
+  // callbacks.
+  bool is_dispatching_event_callbacks_ = false;
+
+  // Indicates if one or more event callbacks was unregistered during the most
+  // recent event callback dispatch.
+  bool remove_invalid_event_callbacks_after_dispatch_ = false;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(SyncHandleRegistry);
 };

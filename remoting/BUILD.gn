@@ -37,6 +37,10 @@ group("remoting_all") {
     ]
   }
 
+  if (is_ios) {
+    deps += [ "//remoting/ios:all" ]
+  }
+
   if (enable_remoting_host) {
     deps += [
       "//remoting:remoting_perftests",
@@ -60,7 +64,10 @@ group("remoting_all") {
     }
 
     if (is_linux && !is_chromeos) {
-      deps += [ "//remoting/host/linux:remoting_dev_me2me_host" ]
+      deps += [
+        "//remoting/host/linux:remoting_dev_me2me_host",
+        "//remoting/host/linux:remoting_user_session",
+      ]
     }
   }
 
@@ -147,6 +154,8 @@ test("remoting_unittests") {
     "//remoting/base:unit_tests",
     "//remoting/client:unit_tests",
     "//remoting/client/display:unit_tests",
+    "//remoting/client/input:unit_tests",
+    "//remoting/client/ui:unit_tests",
     "//remoting/protocol:unit_tests",
     "//remoting/signaling:unit_tests",
     "//remoting/test:unit_tests",
@@ -168,6 +177,8 @@ test("remoting_unittests") {
 
   if (is_android) {
     deps += [ "//net/android:net_java" ]
+
+    libs += [ "android" ]
   }
 
   if (is_win) {

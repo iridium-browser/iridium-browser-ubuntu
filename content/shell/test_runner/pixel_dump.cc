@@ -5,6 +5,7 @@
 #include "content/shell/test_runner/pixel_dump.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -12,8 +13,8 @@
 #include "base/logging.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
-#include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_flags.h"
+#include "cc/paint/skia_paint_canvas.h"
 #include "content/shell/test_runner/layout_test_runtime_flags.h"
 // FIXME: Including platform_canvas.h here is a layering violation.
 #include "skia/ext/platform_canvas.h"
@@ -23,32 +24,19 @@
 #include "third_party/WebKit/public/platform/WebMockClipboard.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebFrameWidget.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebPagePopup.h"
 #include "third_party/WebKit/public/web/WebPrintParams.h"
-#include "third_party/WebKit/public/web/WebView.h"
 #include "ui/gfx/geometry/point.h"
 
 namespace test_runner {
 
 namespace {
 
-struct PixelsDumpRequest {
-  PixelsDumpRequest(blink::WebView* web_view,
-                    const LayoutTestRuntimeFlags& layout_test_runtime_flags,
-                    const base::Callback<void(const SkBitmap&)>& callback)
-      : web_view(web_view),
-        layout_test_runtime_flags(layout_test_runtime_flags),
-        callback(callback) {}
-
-  blink::WebView* web_view;
-  const LayoutTestRuntimeFlags& layout_test_runtime_flags;
-  base::Callback<void(const SkBitmap&)> callback;
-};
-
 class CaptureCallback : public blink::WebCompositeAndReadbackAsyncCallback {
  public:
-  CaptureCallback(const base::Callback<void(const SkBitmap&)>& callback);
+  explicit CaptureCallback(base::OnceCallback<void(const SkBitmap&)> callback);
   virtual ~CaptureCallback();
 
   void set_wait_for_popup(bool wait) { wait_for_popup_ = wait; }
@@ -57,27 +45,21 @@ class CaptureCallback : public blink::WebCompositeAndReadbackAsyncCallback {
   }
 
   // WebCompositeAndReadbackAsyncCallback implementation.
-  void didCompositeAndReadback(const SkBitmap& bitmap) override;
+  void DidCompositeAndReadback(const SkBitmap& bitmap) override;
 
  private:
-  base::Callback<void(const SkBitmap&)> callback_;
+  base::OnceCallback<void(const SkBitmap&)> callback_;
   SkBitmap main_bitmap_;
   bool wait_for_popup_;
   gfx::Point popup_position_;
 };
 
-void DrawSelectionRect(const PixelsDumpRequest& dump_request,
-                       cc::PaintCanvas* canvas) {
-  // See if we need to draw the selection bounds rect. Selection bounds
-  // rect is the rect enclosing the (possibly transformed) selection.
-  // The rect should be drawn after everything is laid out and painted.
-  if (!dump_request.layout_test_runtime_flags.dump_selection_rect())
-    return;
-  // If there is a selection rect - draw a red 1px border enclosing rect
-  blink::WebRect wr = dump_request.web_view->mainFrame()->selectionBoundsRect();
-  if (wr.isEmpty())
-    return;
+void DrawSelectionRect(
+    const blink::WebRect& wr,
+    base::OnceCallback<void(const SkBitmap&)> original_callback,
+    const SkBitmap& bitmap) {
   // Render a red rectangle bounding selection rect
+  cc::SkiaPaintCanvas canvas(bitmap);
   cc::PaintFlags flags;
   flags.setColor(0xFFFF0000);  // Fully opaque red
   flags.setStyle(cc::PaintFlags::kStroke_Style);
@@ -85,16 +67,19 @@ void DrawSelectionRect(const PixelsDumpRequest& dump_request,
   flags.setStrokeWidth(1.0f);
   SkIRect rect;  // Bounding rect
   rect.set(wr.x, wr.y, wr.x + wr.width, wr.y + wr.height);
-  canvas->drawIRect(rect, flags);
+  canvas.drawIRect(rect, flags);
+
+  std::move(original_callback).Run(bitmap);
 }
 
-void CapturePixelsForPrinting(std::unique_ptr<PixelsDumpRequest> dump_request) {
-  dump_request->web_view->updateAllLifecyclePhases();
+void CapturePixelsForPrinting(
+    blink::WebLocalFrame* web_frame,
+    base::OnceCallback<void(const SkBitmap&)> callback) {
+  web_frame->FrameWidget()->UpdateAllLifecyclePhases();
 
-  blink::WebSize page_size_in_pixels = dump_request->web_view->size();
-  blink::WebFrame* web_frame = dump_request->web_view->mainFrame();
+  blink::WebSize page_size_in_pixels = web_frame->FrameWidget()->Size();
 
-  int page_count = web_frame->printBegin(page_size_in_pixels);
+  int page_count = web_frame->PrintBegin(page_size_in_pixels);
   int totalHeight = page_count * (page_size_in_pixels.height + 1) - 1;
 
   bool is_opaque = false;
@@ -104,109 +89,114 @@ void CapturePixelsForPrinting(std::unique_ptr<PixelsDumpRequest> dump_request) {
                                 is_opaque)) {
     LOG(ERROR) << "Failed to create bitmap width=" << page_size_in_pixels.width
                << " height=" << totalHeight;
-    dump_request->callback.Run(SkBitmap());
+    std::move(callback).Run(SkBitmap());
     return;
   }
 
-  cc::PaintCanvas canvas(bitmap);
-  web_frame->printPagesWithBoundaries(&canvas, page_size_in_pixels);
-  web_frame->printEnd();
+  cc::SkiaPaintCanvas canvas(bitmap);
+  web_frame->PrintPagesForTesting(&canvas, page_size_in_pixels);
+  web_frame->PrintEnd();
 
-  DrawSelectionRect(*dump_request, &canvas);
-  dump_request->callback.Run(bitmap);
+  std::move(callback).Run(bitmap);
 }
 
 CaptureCallback::CaptureCallback(
-    const base::Callback<void(const SkBitmap&)>& callback)
-    : callback_(callback), wait_for_popup_(false) {}
+    base::OnceCallback<void(const SkBitmap&)> callback)
+    : callback_(std::move(callback)), wait_for_popup_(false) {}
 
 CaptureCallback::~CaptureCallback() {}
 
-void CaptureCallback::didCompositeAndReadback(const SkBitmap& bitmap) {
+void CaptureCallback::DidCompositeAndReadback(const SkBitmap& bitmap) {
   TRACE_EVENT2("shell", "CaptureCallback::didCompositeAndReadback", "x",
                bitmap.info().width(), "y", bitmap.info().height());
   if (!wait_for_popup_) {
-    callback_.Run(bitmap);
+    std::move(callback_).Run(bitmap);
     delete this;
     return;
   }
   if (main_bitmap_.isNull()) {
-    bitmap.deepCopyTo(&main_bitmap_);
+    if (main_bitmap_.tryAllocPixels(bitmap.info())) {
+      bitmap.readPixels(main_bitmap_.info(), main_bitmap_.getPixels(),
+                        main_bitmap_.rowBytes(), 0, 0);
+    }
     return;
   }
   SkCanvas canvas(main_bitmap_);
   canvas.drawBitmap(bitmap, popup_position_.x(), popup_position_.y());
-  callback_.Run(main_bitmap_);
+  std::move(callback_).Run(main_bitmap_);
   delete this;
-}
-
-void DidCapturePixelsAsync(std::unique_ptr<PixelsDumpRequest> dump_request,
-                           const SkBitmap& bitmap) {
-  cc::PaintCanvas canvas(bitmap);
-  DrawSelectionRect(*dump_request, &canvas);
-  if (!dump_request->callback.is_null())
-    dump_request->callback.Run(bitmap);
 }
 
 }  // namespace
 
-void DumpPixelsAsync(blink::WebView* web_view,
-                     const LayoutTestRuntimeFlags& layout_test_runtime_flags,
+void DumpPixelsAsync(blink::WebLocalFrame* web_frame,
                      float device_scale_factor_for_test,
-                     const base::Callback<void(const SkBitmap&)>& callback) {
-  TRACE_EVENT0("shell", "WebViewTestProxyBase::CapturePixelsAsync");
+                     base::OnceCallback<void(const SkBitmap&)> callback) {
+  DCHECK(web_frame);
+  DCHECK_LT(0.0, device_scale_factor_for_test);
   DCHECK(!callback.is_null());
-  DCHECK(!layout_test_runtime_flags.dump_drag_image());
 
-  std::unique_ptr<PixelsDumpRequest> pixels_request(
-      new PixelsDumpRequest(web_view, layout_test_runtime_flags, callback));
-
-  if (layout_test_runtime_flags.is_printing()) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&CapturePixelsForPrinting,
-                              base::Passed(std::move(pixels_request))));
-    return;
-  }
-
-  CaptureCallback* capture_callback = new CaptureCallback(base::Bind(
-      &DidCapturePixelsAsync, base::Passed(std::move(pixels_request))));
-  web_view->compositeAndReadbackAsync(capture_callback);
-  if (blink::WebPagePopup* popup = web_view->pagePopup()) {
+  blink::WebWidget* web_widget = web_frame->FrameWidget();
+  CaptureCallback* capture_callback = new CaptureCallback(std::move(callback));
+  web_widget->CompositeAndReadbackAsync(capture_callback);
+  if (blink::WebPagePopup* popup = web_widget->GetPagePopup()) {
     capture_callback->set_wait_for_popup(true);
-    blink::WebPoint position = popup->positionRelativeToOwner();
+    blink::WebPoint position = popup->PositionRelativeToOwner();
     position.x *= device_scale_factor_for_test;
     position.y *= device_scale_factor_for_test;
     capture_callback->set_popup_position(position);
-    popup->compositeAndReadbackAsync(capture_callback);
+    popup->CompositeAndReadbackAsync(capture_callback);
   }
 }
 
+void PrintFrameAsync(blink::WebLocalFrame* web_frame,
+                     base::OnceCallback<void(const SkBitmap&)> callback) {
+  DCHECK(web_frame);
+  DCHECK(!callback.is_null());
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&CapturePixelsForPrinting, base::Unretained(web_frame),
+                 base::Passed(std::move(callback))));
+}
+
+base::OnceCallback<void(const SkBitmap&)>
+CreateSelectionBoundsRectDrawingCallback(
+    blink::WebLocalFrame* web_frame,
+    base::OnceCallback<void(const SkBitmap&)> original_callback) {
+  DCHECK(web_frame);
+  DCHECK(!original_callback.is_null());
+
+  // If there is no selection rect, just return the original callback.
+  blink::WebRect wr = web_frame->GetSelectionBoundsRectForTesting();
+  if (wr.IsEmpty())
+    return original_callback;
+
+  return base::Bind(&DrawSelectionRect, wr,
+                    base::Passed(std::move(original_callback)));
+}
+
 void CopyImageAtAndCapturePixels(
-    blink::WebView* web_view,
+    blink::WebLocalFrame* web_frame,
     int x,
     int y,
-    const base::Callback<void(const SkBitmap&)>& callback) {
+    base::OnceCallback<void(const SkBitmap&)> callback) {
   DCHECK(!callback.is_null());
   uint64_t sequence_number =
-      blink::Platform::current()->clipboard()->sequenceNumber(
+      blink::Platform::Current()->Clipboard()->SequenceNumber(
           blink::WebClipboard::Buffer());
-  // TODO(lukasza): Support image capture in OOPIFs for
-  // https://crbug.com/477150.
-  web_view->mainFrame()->toWebLocalFrame()->copyImageAt(blink::WebPoint(x, y));
+  web_frame->CopyImageAt(blink::WebPoint(x, y));
   if (sequence_number ==
-      blink::Platform::current()->clipboard()->sequenceNumber(
+      blink::Platform::Current()->Clipboard()->SequenceNumber(
           blink::WebClipboard::Buffer())) {
     SkBitmap emptyBitmap;
-    callback.Run(emptyBitmap);
+    std::move(callback).Run(emptyBitmap);
     return;
   }
 
   blink::WebImage image = static_cast<blink::WebMockClipboard*>(
-                              blink::Platform::current()->clipboard())
-                              ->readRawImage(blink::WebClipboard::Buffer());
-  const SkBitmap& bitmap = image.getSkBitmap();
-  SkAutoLockPixels autoLock(bitmap);
-  callback.Run(bitmap);
+                              blink::Platform::Current()->Clipboard())
+                              ->ReadRawImage(blink::WebClipboard::Buffer());
+  std::move(callback).Run(image.GetSkBitmap());
 }
 
 }  // namespace test_runner

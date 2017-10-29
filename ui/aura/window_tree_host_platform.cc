@@ -10,9 +10,8 @@
 #include "build/build_config.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_port.h"
+#include "ui/base/layout.h"
 #include "ui/compositor/compositor.h"
-#include "ui/display/display.h"
-#include "ui/display/screen.h"
 #include "ui/events/event.h"
 
 #if defined(OS_ANDROID)
@@ -40,6 +39,7 @@ WindowTreeHost* WindowTreeHost::Create(const gfx::Rect& bounds) {
 
 WindowTreeHostPlatform::WindowTreeHostPlatform(const gfx::Rect& bounds)
     : WindowTreeHostPlatform() {
+  bounds_ = bounds;
   CreateCompositor();
 #if defined(USE_OZONE)
   platform_window_ =
@@ -60,8 +60,7 @@ WindowTreeHostPlatform::WindowTreeHostPlatform(
     std::unique_ptr<WindowPort> window_port)
     : WindowTreeHost(std::move(window_port)),
       widget_(gfx::kNullAcceleratedWidget),
-      current_cursor_(ui::kCursorNull) {
-}
+      current_cursor_(ui::CursorType::kNull) {}
 
 void WindowTreeHostPlatform::SetPlatformWindow(
     std::unique_ptr<ui::PlatformWindow> window) {
@@ -134,9 +133,7 @@ void WindowTreeHostPlatform::OnCursorVisibilityChangedNative(bool show) {
 
 void WindowTreeHostPlatform::OnBoundsChanged(const gfx::Rect& new_bounds) {
   float current_scale = compositor()->device_scale_factor();
-  float new_scale = display::Screen::GetScreen()
-                        ->GetDisplayNearestWindow(window())
-                        .device_scale_factor();
+  float new_scale = ui::GetScaleFactorForNativeView(window());
   gfx::Rect old_bounds = bounds_;
   bounds_ = new_bounds;
   if (bounds_.origin() != old_bounds.origin()) {
@@ -153,7 +150,7 @@ void WindowTreeHostPlatform::OnDamageRect(const gfx::Rect& damage_rect) {
 
 void WindowTreeHostPlatform::DispatchEvent(ui::Event* event) {
   TRACE_EVENT0("input", "WindowTreeHostPlatform::DispatchEvent");
-  ui::EventDispatchDetails details = SendEventToProcessor(event);
+  ui::EventDispatchDetails details = SendEventToSink(event);
   if (details.dispatcher_destroyed)
     event->SetHandled();
 }

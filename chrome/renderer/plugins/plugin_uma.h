@@ -22,7 +22,7 @@ class PluginUMAReporter {
  public:
   enum ReportType {
     MISSING_PLUGIN,
-    DISABLED_PLUGIN
+    DISABLED_PLUGIN,
   };
 
   // Make sure the enum list in tools/histogram/histograms.xml is updated with

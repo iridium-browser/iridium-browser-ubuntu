@@ -7,43 +7,69 @@
 
 #include "platform/PlatformExport.h"
 #include "platform/text/Character.h"
+#include "platform/wtf/Allocator.h"
 
 namespace blink {
 
 class FontDescription;
-class TextRun;
 
+// A context object to apply letter-spacing, word-spacing, and justification to
+// ShapeResult.
+template <typename TextContainerType>
 class PLATFORM_EXPORT ShapeResultSpacing final {
+  STACK_ALLOCATED();
+
  public:
-  ShapeResultSpacing(const TextRun&, const FontDescription&);
+  ShapeResultSpacing(const TextContainerType&);
 
-  float letterSpacing() const { return m_letterSpacing; }
-  bool hasSpacing() const { return m_hasSpacing; }
-  bool isVerticalOffset() const { return m_isVerticalOffset; }
+  const TextContainerType& Text() const { return text_; }
+  float LetterSpacing() const { return letter_spacing_; }
+  bool HasSpacing() const { return has_spacing_; }
+  bool HasExpansion() const { return expansion_opportunity_count_; }
+  bool IsVerticalOffset() const { return is_vertical_offset_; }
 
-  float computeSpacing(const TextRun&, size_t, float& offset);
+  // Set letter-spacing and word-spacing.
+  bool SetSpacing(const FontDescription&);
+
+  // Set letter-spacing, word-spacing, and justification.
+  // Available only for TextRun.
+  void SetSpacingAndExpansion(const FontDescription&);
+
+  // Compute the sum of all spacings for the specified index.
+  // For justification, this function must be called incrementally since it
+  // keeps states and counts consumed justification opportunities.
+  float ComputeSpacing(const TextContainerType&, size_t, float& offset);
 
  private:
-  bool hasExpansion() const { return m_expansionOpportunityCount; }
-  bool isAfterExpansion() const { return m_isAfterExpansion; }
-  bool isFirstRun(const TextRun&) const;
+  bool IsAfterExpansion() const { return is_after_expansion_; }
+  bool IsFirstRun(const TextContainerType&) const;
 
-  float nextExpansion();
+  void ComputeExpansion(bool allows_leading_expansion,
+                        bool allows_trailing_expansion,
+                        TextDirection,
+                        TextJustify);
 
-  const TextRun& m_textRun;
-  float m_letterSpacing;
-  float m_wordSpacing;
-  float m_expansion;
-  float m_expansionPerOpportunity;
-  unsigned m_expansionOpportunityCount;
-  TextJustify m_textJustify;
-  bool m_hasSpacing;
-  bool m_normalizeSpace;
-  bool m_allowTabs;
-  bool m_isAfterExpansion;
-  bool m_isVerticalOffset;
+  float NextExpansion();
+
+  const TextContainerType& text_;
+  float letter_spacing_;
+  float word_spacing_;
+  float expansion_;
+  float expansion_per_opportunity_;
+  unsigned expansion_opportunity_count_;
+  TextJustify text_justify_;
+  bool has_spacing_;
+  bool normalize_space_;
+  bool allow_tabs_;
+  bool is_after_expansion_;
+  bool is_vertical_offset_;
 };
 
+// Forward declare so no implicit instantiations happen before the
+// first explicit instantiation (which would be a C++ violation).
+template <>
+void ShapeResultSpacing<TextRun>::SetSpacingAndExpansion(
+    const FontDescription&);
 }  // namespace blink
 
 #endif

@@ -10,8 +10,7 @@
 #include "base/json/json_reader.h"
 #include "base/strings/string_number_conversions.h"
 
-namespace ui {
-namespace devtools {
+namespace ui_devtools {
 
 using String = std::string;
 
@@ -28,9 +27,7 @@ class CustomStringBuilder {
   void reserveCapacity(std::size_t size) { s_.reserve(size); }
   void append(const String& s) { s_ += s; }
   void append(char c) { s_ += c; }
-  void append(const char* data, unsigned int length) {
-    s_.append(data, length);
-  }
+  void append(const char* data, size_t length) { s_.append(data, length); }
   String toString() { return s_; }
 };
 
@@ -44,6 +41,11 @@ class StringUtil {
   static String fromInteger(int number) { return base::IntToString(number); }
   static String fromDouble(double number) {
     return base::DoubleToString(number);
+  }
+  static double toDouble(const char* s, size_t len, bool* ok) {
+    double v = 0.0;
+    *ok = base::StringToDouble(std::string(s, len), &v);
+    return *ok ? v : 0.0;
   }
   static void builderAppend(StringBuilder& builder, const String& s) {
     builder.append(s);
@@ -71,7 +73,6 @@ class StringUtil {
 };
 
 }  // namespace protocol
-}  // namespace devtools
-}  // namespace ui
+}  // namespace ui_devtools
 
 #endif  // COMPONENTS_UI_DEVTOOLS_STRING_UTIL_H_

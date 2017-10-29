@@ -8,8 +8,11 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_task_runner_handle.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -19,50 +22,48 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 WebDataRequest::~WebDataRequest() {
-  if (IsActive()) {
-    manager_->CancelRequest(handle_);
-  }
+  WebDataRequestManager* manager = GetManager();
+  if (manager)
+    manager->CancelRequest(handle_);
 }
 
 WebDataServiceBase::Handle WebDataRequest::GetHandle() const {
   return handle_;
 }
 
-bool WebDataRequest::IsActive() const {
-  return manager_ != nullptr;
+bool WebDataRequest::IsActive() {
+  return GetManager() != nullptr;
 }
 
 WebDataRequest::WebDataRequest(WebDataRequestManager* manager,
-                               WebDataServiceConsumer* consumer)
-    : task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      manager_(manager),
+                               WebDataServiceConsumer* consumer,
+                               WebDataServiceBase::Handle handle)
+    : task_runner_(base::SequencedTaskRunnerHandle::IsSet()
+                       ? base::SequencedTaskRunnerHandle::Get()
+                       : nullptr),
+      atomic_manager_(reinterpret_cast<base::subtle::AtomicWord>(manager)),
       consumer_(consumer),
-      handle_(0) {
+      handle_(handle) {
   DCHECK(IsActive());
+  static_assert(sizeof(atomic_manager_) == sizeof(manager), "size mismatch");
 }
 
-void WebDataRequest::AssertThreadSafe() const {
-  // Manipulations of the request state should only happen when the request is
-  // active and the manager's lock is held (i.e., during request cancellation
-  // or completion).
-  DCHECK(IsActive());
-  manager_->AssertLockedByCurrentThread();
+WebDataRequestManager* WebDataRequest::GetManager() {
+  return reinterpret_cast<WebDataRequestManager*>(
+      base::subtle::Acquire_Load(&atomic_manager_));
 }
 
-WebDataServiceConsumer* WebDataRequest::GetConsumer() const {
-  AssertThreadSafe();
+WebDataServiceConsumer* WebDataRequest::GetConsumer() {
   return consumer_;
 }
 
-scoped_refptr<base::SingleThreadTaskRunner> WebDataRequest::GetTaskRunner()
-    const {
+scoped_refptr<base::SequencedTaskRunner> WebDataRequest::GetTaskRunner() {
   return task_runner_;
 }
 
 void WebDataRequest::MarkAsInactive() {
-  AssertThreadSafe();
-  consumer_ = nullptr;
-  manager_ = nullptr;
+  // Set atomic_manager_ to the equivalent of nullptr;
+  base::subtle::Release_Store(&atomic_manager_, 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -77,13 +78,13 @@ WebDataRequestManager::WebDataRequestManager()
 
 std::unique_ptr<WebDataRequest> WebDataRequestManager::NewRequest(
     WebDataServiceConsumer* consumer) {
-  std::unique_ptr<WebDataRequest> request(new WebDataRequest(this, consumer));
-
-  // Grab the lock to get the next request handle and register the request.
   base::AutoLock l(pending_lock_);
-  request->handle_ = next_request_handle_++;
-  pending_requests_[request->handle_] = request.get();
-
+  std::unique_ptr<WebDataRequest> request = base::WrapUnique(
+      new WebDataRequest(this, consumer, next_request_handle_));
+  bool inserted =
+      pending_requests_.emplace(next_request_handle_, request.get()).second;
+  DCHECK(inserted);
+  ++next_request_handle_;
   return request;
 }
 
@@ -101,16 +102,17 @@ void WebDataRequestManager::CancelRequest(WebDataServiceBase::Handle h) {
 void WebDataRequestManager::RequestCompleted(
     std::unique_ptr<WebDataRequest> request,
     std::unique_ptr<WDTypedResult> result) {
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+  // Careful: Don't swap this below the BindOnce() call below, since that
+  // effectively does a std::move() on |request|!
+  scoped_refptr<base::SequencedTaskRunner> task_runner =
       request->GetTaskRunner();
-  task_runner->PostTask(
-      FROM_HERE,
-      base::Bind(&WebDataRequestManager::RequestCompletedOnThread, this,
-                 base::Passed(&request), base::Passed(&result)));
-}
-
-void WebDataRequestManager::AssertLockedByCurrentThread() const {
-  pending_lock_.AssertAcquired();
+  auto task =
+      base::BindOnce(&WebDataRequestManager::RequestCompletedOnThread, this,
+                     base::Passed(&request), base::Passed(&result));
+  if (task_runner)
+    task_runner->PostTask(FROM_HERE, std::move(task));
+  else
+    base::PostTask(FROM_HERE, std::move(task));
 }
 
 WebDataRequestManager::~WebDataRequestManager() {
@@ -123,28 +125,15 @@ WebDataRequestManager::~WebDataRequestManager() {
 void WebDataRequestManager::RequestCompletedOnThread(
     std::unique_ptr<WebDataRequest> request,
     std::unique_ptr<WDTypedResult> result) {
-  // If the request is already inactive, early exit to avoid contending for the
-  // lock (aka, the double checked locking pattern).
+  // Check whether the request is active. It might have been cancelled in
+  // another thread before this completion handler was invoked. This means the
+  // request initiator is no longer interested in the result.
   if (!request->IsActive())
     return;
 
-  // Used to export the consumer from the locked region below so that the
-  // consumer can be notified outside of the lock and after the request has
-  // been marked as inactive.
-  WebDataServiceConsumer* consumer;
-
-  // Manipulate the pending_requests_ collection while holding the lock.
+  // Stop tracking the request. The request is already finished, so "stop
+  // tracking" is the same as post-facto cancellation.
   {
-    base::AutoLock l(pending_lock_);
-
-    // Re-check whether the request is active. It might have been cancelled in
-    // another thread before the lock was acquired.
-    if (!request->IsActive())
-      return;
-
-    // Remember the consumer for notification below.
-    consumer = request->GetConsumer();
-
     // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460
     // is fixed.
     tracked_objects::ScopedTracker tracking_profile(
@@ -152,20 +141,11 @@ void WebDataRequestManager::RequestCompletedOnThread(
             "422460 "
             "WebDataRequestManager::RequestCompletedOnThread::UpdateMap"));
 
-    auto i = pending_requests_.find(request->GetHandle());
-    DCHECK(i != pending_requests_.end());
-
-    // Take ownership of the request object and remove it from the map.
-    pending_requests_.erase(i);
-
-    // The request is no longer active.
-    request->MarkAsInactive();
+    CancelRequest(request->GetHandle());
   }
 
   // Notify the consumer if needed.
-  //
-  // NOTE: The pending_lock_ is no longer held here. It's up to the consumer to
-  // be appropriately thread safe.
+  WebDataServiceConsumer* const consumer = request->GetConsumer();
   if (consumer) {
     // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460
     // is fixed.

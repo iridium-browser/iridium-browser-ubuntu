@@ -5,10 +5,9 @@
 #ifndef CHROME_BROWSER_ANDROID_HISTORY_BROWSING_HISTORY_BRIDGE_H_
 #define CHROME_BROWSER_ANDROID_HISTORY_BROWSING_HISTORY_BRIDGE_H_
 
-#include <jni.h>
+#include <memory>
 #include <vector>
 
-#include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
 #include "chrome/browser/history/browsing_history_service_handler.h"
@@ -19,11 +18,10 @@ using base::android::JavaParamRef;
 // history UI. This queries the BrowsingHistoryService and listens
 // for callbacks.
 class BrowsingHistoryBridge : public BrowsingHistoryServiceHandler {
-
  public:
   explicit BrowsingHistoryBridge(JNIEnv* env,
                                  const JavaParamRef<jobject>& obj,
-                                 jobject j_profile);
+                                 bool is_incognito);
   void Destroy(JNIEnv*, const JavaParamRef<jobject>&);
 
   void QueryHistory(JNIEnv* env,
@@ -32,14 +30,13 @@ class BrowsingHistoryBridge : public BrowsingHistoryServiceHandler {
                     jstring j_query,
                     int64_t j_query_end_time);
 
-  // Adds a HistoryEntry with the |j_url| and |j_timestamps| to the list of
-  // items being removed. The removal will not be committed until
+  // Adds a HistoryEntry with the |j_url| and |j_native_timestamps| to the list
+  // of items being removed. The removal will not be committed until
   // ::removeItems() is called.
-  void MarkItemForRemoval(
-      JNIEnv* env,
-      const JavaParamRef<jobject>& obj,
-      jstring j_url,
-      const JavaParamRef<jlongArray>& j_timestamps);
+  void MarkItemForRemoval(JNIEnv* env,
+                          const JavaParamRef<jobject>& obj,
+                          jstring j_url,
+                          const JavaParamRef<jlongArray>& j_native_timestamps);
 
   // Removes all items that have been marked for removal through
   // ::markItemForRemoval().
@@ -68,7 +65,5 @@ class BrowsingHistoryBridge : public BrowsingHistoryServiceHandler {
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingHistoryBridge);
 };
-
-bool RegisterBrowsingHistoryBridge(JNIEnv* env);
 
 #endif  // CHROME_BROWSER_ANDROID_HISTORY_BROWSING_HISTORY_BRIDGE_H_

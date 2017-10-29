@@ -9,8 +9,9 @@
 
 #include <set>
 
-#include "compiler/translator/IntermNode.h"
-#include "compiler/translator/ParseContext.h"
+#include "compiler/translator/HashNames.h"
+#include "compiler/translator/InfoSink.h"
+#include "compiler/translator/IntermTraverse.h"
 
 namespace sh
 {
@@ -22,7 +23,7 @@ class TOutputGLSLBase : public TIntermTraverser
                     ShArrayIndexClampingStrategy clampingStrategy,
                     ShHashFunction64 hashFunction,
                     NameMap &nameMap,
-                    TSymbolTable &symbolTable,
+                    TSymbolTable *symbolTable,
                     sh::GLenum shaderType,
                     int shaderVersion,
                     ShShaderOutput output,
@@ -70,10 +71,10 @@ class TOutputGLSLBase : public TIntermTraverser
 
     // Same as hashName(), but without hashing built-in variables.
     TString hashVariableName(const TName &name);
-    // Same as hashName(), but without hashing built-in functions and with unmangling.
-    TString hashFunctionNameIfNeeded(const TName &mangledName);
+    // Same as hashName(), but without hashing internal functions or "main".
+    TString hashFunctionNameIfNeeded(const TFunctionSymbolInfo &info);
     // Used to translate function names for differences between ESSL and GLSL
-    virtual TString translateTextureFunction(TString &name) { return name; }
+    virtual TString translateTextureFunction(const TString &name) { return name; }
 
   private:
     bool structDeclared(const TStructure *structure) const;
@@ -98,8 +99,6 @@ class TOutputGLSLBase : public TIntermTraverser
     ShHashFunction64 mHashFunction;
 
     NameMap &mNameMap;
-
-    TSymbolTable &mSymbolTable;
 
     sh::GLenum mShaderType;
 

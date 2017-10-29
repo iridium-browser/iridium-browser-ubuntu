@@ -14,15 +14,20 @@ namespace media_router {
 // be presented to a media sink.  These must be declared in the priority order
 // returned by GetPreferredCastMode.
 enum MediaCastMode {
-  // The default presentation for the WebContents.  Only available when the
-  // document has provided a default presentation URL.
-  DEFAULT = 0x1,
-  // Capture the rendered WebContents and stream it to a media sink.  Always
-  // available.
+  // PresentationRequests (and their associated URLs) provided via the
+  // Presentation API.  A top-level browsing context can set a
+  // PresentationRequest as the page-level default, or any frame can use one by
+  // calling PresentationRequest.start().  Available when the Presentation API
+  // is used and there is a compatible sink.
+  PRESENTATION = 0x1,
+  // Capture the rendered WebContents and stream it to a media sink.  Available
+  // when there is a compatible sink.
   TAB_MIRROR = 0x2,
-  // Capture the entire desktop and stream it to a media sink.  Always
-  // available.
+  // Capture the entire desktop and stream it to a media sink.  Available when
+  // there is a compatible sink.
   DESKTOP_MIRROR = 0x4,
+  // Take a local media file to open in a tab and cast.
+  LOCAL_FILE = 0x8,
 };
 
 using CastModeSet = std::set<MediaCastMode>;

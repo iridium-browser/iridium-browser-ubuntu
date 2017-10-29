@@ -9,7 +9,7 @@
 
 #include "libANGLE/renderer/vulkan/ContextVk.h"
 
-#include "common/BitSetIterator.h"
+#include "common/bitset_utils.h"
 #include "common/debug.h"
 #include "libANGLE/Program.h"
 #include "libANGLE/renderer/vulkan/BufferVk.h"
@@ -35,13 +35,13 @@ namespace rx
 {
 
 ContextVk::ContextVk(const gl::ContextState &state, RendererVk *renderer)
-    : ContextImpl(state), mRenderer(renderer)
+    : ContextImpl(state), mRenderer(renderer), mCurrentDrawMode(GL_NONE)
 {
 }
 
 ContextVk::~ContextVk()
 {
-    mCurrentPipeline.destroy(getDevice());
+    invalidateCurrentPipeline();
 }
 
 gl::Error ContextVk::initialize()
@@ -52,17 +52,19 @@ gl::Error ContextVk::initialize()
 gl::Error ContextVk::flush()
 {
     UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
+    return gl::InternalError();
 }
 
 gl::Error ContextVk::finish()
 {
     UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
+    return gl::InternalError();
 }
 
-gl::Error ContextVk::drawArrays(GLenum mode, GLint first, GLsizei count)
+gl::Error ContextVk::initPipeline(const gl::Context *context)
 {
+    ASSERT(!mCurrentPipeline.valid());
+
     VkDevice device       = mRenderer->getDevice();
     const auto &state     = mState.getState();
     const auto &programGL = state.getProgram();
@@ -72,7 +74,6 @@ gl::Error ContextVk::drawArrays(GLenum mode, GLint first, GLsizei count)
     const auto &programVk = GetImplAs<ProgramVk>(programGL);
     const auto *drawFBO   = state.getDrawFramebuffer();
     FramebufferVk *vkFBO  = GetImplAs<FramebufferVk>(drawFBO);
-    Serial queueSerial    = mRenderer->getCurrentQueueSerial();
 
     // { vertex, fragment }
     VkPipelineShaderStageCreateInfo shaderStages[2];
@@ -97,20 +98,18 @@ gl::Error ContextVk::drawArrays(GLenum mode, GLint first, GLsizei count)
     // TODO(jmadill): Caching with dirty bits.
     std::vector<VkVertexInputBindingDescription> vertexBindings;
     std::vector<VkVertexInputAttributeDescription> vertexAttribs;
-    std::vector<VkBuffer> vertexHandles;
-    std::vector<VkDeviceSize> vertexOffsets;
 
-    for (auto attribIndex : angle::IterateBitSet(programGL->getActiveAttribLocationsMask()))
+    for (auto attribIndex : programGL->getActiveAttribLocationsMask())
     {
-        const auto &attrib = attribs[attribIndex];
+        const auto &attrib  = attribs[attribIndex];
         const auto &binding = bindings[attrib.bindingIndex];
         if (attrib.enabled)
         {
             VkVertexInputBindingDescription bindingDesc;
             bindingDesc.binding = static_cast<uint32_t>(vertexBindings.size());
             bindingDesc.stride  = static_cast<uint32_t>(gl::ComputeVertexAttributeTypeSize(attrib));
-            bindingDesc.inputRate =
-                (binding.divisor > 0 ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX);
+            bindingDesc.inputRate = (binding.getDivisor() > 0 ? VK_VERTEX_INPUT_RATE_INSTANCE
+                                                              : VK_VERTEX_INPUT_RATE_VERTEX);
 
             gl::VertexFormatType vertexFormatType = gl::GetVertexFormatType(attrib);
 
@@ -123,15 +122,6 @@ gl::Error ContextVk::drawArrays(GLenum mode, GLint first, GLsizei count)
 
             vertexBindings.push_back(bindingDesc);
             vertexAttribs.push_back(attribDesc);
-
-            // TODO(jmadill): Offset handling.
-            gl::Buffer *bufferGL = binding.buffer.get();
-            ASSERT(bufferGL);
-            BufferVk *bufferVk = GetImplAs<BufferVk>(bufferGL);
-            vertexHandles.push_back(bufferVk->getVkBuffer().getHandle());
-            vertexOffsets.push_back(0);
-
-            bufferVk->setQueueSerial(queueSerial);
         }
         else
         {
@@ -153,7 +143,7 @@ gl::Error ContextVk::drawArrays(GLenum mode, GLint first, GLsizei count)
     inputAssemblyState.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     inputAssemblyState.pNext    = nullptr;
     inputAssemblyState.flags    = 0;
-    inputAssemblyState.topology = gl_vk::GetPrimitiveTopology(mode);
+    inputAssemblyState.topology = gl_vk::GetPrimitiveTopology(mCurrentDrawMode);
     inputAssemblyState.primitiveRestartEnable = VK_FALSE;
 
     const gl::Rectangle &viewportGL = state.getViewport();
@@ -202,10 +192,10 @@ gl::Error ContextVk::drawArrays(GLenum mode, GLint first, GLsizei count)
     multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampleState.pNext = nullptr;
     multisampleState.flags = 0;
-    multisampleState.rasterizationSamples  = VK_SAMPLE_COUNT_1_BIT;
-    multisampleState.sampleShadingEnable   = VK_FALSE;
-    multisampleState.minSampleShading      = 0.0f;
-    multisampleState.pSampleMask           = nullptr;
+    multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampleState.sampleShadingEnable  = VK_FALSE;
+    multisampleState.minSampleShading     = 0.0f;
+    multisampleState.pSampleMask          = nullptr;
     multisampleState.alphaToCoverageEnable = VK_FALSE;
     multisampleState.alphaToOneEnable      = VK_FALSE;
 
@@ -238,7 +228,7 @@ gl::Error ContextVk::drawArrays(GLenum mode, GLint first, GLsizei count)
 
     // TODO(jmadill): Dynamic state.
     vk::RenderPass *renderPass = nullptr;
-    ANGLE_TRY_RESULT(vkFBO->getRenderPass(device), renderPass);
+    ANGLE_TRY_RESULT(vkFBO->getRenderPass(context, device), renderPass);
     ASSERT(renderPass && renderPass->valid());
 
     vk::PipelineLayout *pipelineLayout = nullptr;
@@ -271,56 +261,111 @@ gl::Error ContextVk::drawArrays(GLenum mode, GLint first, GLsizei count)
 
     mCurrentPipeline.retain(device, std::move(newPipeline));
 
-    vk::CommandBuffer *commandBuffer = mRenderer->getCommandBuffer();
-    ANGLE_TRY(vkFBO->beginRenderPass(device, commandBuffer, queueSerial, state));
+    return gl::NoError();
+}
+
+gl::Error ContextVk::drawArrays(const gl::Context *context, GLenum mode, GLint first, GLsizei count)
+{
+    if (mode != mCurrentDrawMode)
+    {
+        invalidateCurrentPipeline();
+        mCurrentDrawMode = mode;
+    }
+
+    if (!mCurrentPipeline.valid())
+    {
+        ANGLE_TRY(initPipeline(context));
+        ASSERT(mCurrentPipeline.valid());
+    }
+
+    VkDevice device       = mRenderer->getDevice();
+    const auto &state     = mState.getState();
+    const auto &programGL = state.getProgram();
+    const auto &vao       = state.getVertexArray();
+    const auto &attribs   = vao->getVertexAttributes();
+    const auto &bindings  = vao->getVertexBindings();
+    const auto *drawFBO   = state.getDrawFramebuffer();
+    FramebufferVk *vkFBO  = GetImplAs<FramebufferVk>(drawFBO);
+    Serial queueSerial    = mRenderer->getCurrentQueueSerial();
+
+    // Process vertex attributes
+    // TODO(jmadill): Caching with dirty bits.
+    std::vector<VkBuffer> vertexHandles;
+    std::vector<VkDeviceSize> vertexOffsets;
+
+    for (auto attribIndex : programGL->getActiveAttribLocationsMask())
+    {
+        const auto &attrib  = attribs[attribIndex];
+        const auto &binding = bindings[attrib.bindingIndex];
+        if (attrib.enabled)
+        {
+            // TODO(jmadill): Offset handling.
+            gl::Buffer *bufferGL = binding.getBuffer().get();
+            ASSERT(bufferGL);
+            BufferVk *bufferVk = GetImplAs<BufferVk>(bufferGL);
+            vertexHandles.push_back(bufferVk->getVkBuffer().getHandle());
+            vertexOffsets.push_back(0);
+
+            bufferVk->setQueueSerial(queueSerial);
+        }
+        else
+        {
+            UNIMPLEMENTED();
+        }
+    }
+
+    vk::CommandBuffer *commandBuffer = nullptr;
+    ANGLE_TRY(mRenderer->getStartedCommandBuffer(&commandBuffer));
+    ANGLE_TRY(vkFBO->beginRenderPass(context, device, commandBuffer, queueSerial, state));
 
     commandBuffer->bindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, mCurrentPipeline);
     commandBuffer->bindVertexBuffers(0, vertexHandles, vertexOffsets);
     commandBuffer->draw(count, 1, first, 0);
     commandBuffer->endRenderPass();
-    ANGLE_TRY(commandBuffer->end());
-
-    ANGLE_TRY(mRenderer->submitAndFinishCommandBuffer(*commandBuffer));
 
     return gl::NoError();
 }
 
-gl::Error ContextVk::drawArraysInstanced(GLenum mode,
+gl::Error ContextVk::drawArraysInstanced(const gl::Context *context,
+                                         GLenum mode,
                                          GLint first,
                                          GLsizei count,
                                          GLsizei instanceCount)
 {
     UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
+    return gl::InternalError();
 }
 
-gl::Error ContextVk::drawElements(GLenum mode,
+gl::Error ContextVk::drawElements(const gl::Context *context,
+                                  GLenum mode,
                                   GLsizei count,
                                   GLenum type,
-                                  const GLvoid *indices,
+                                  const void *indices,
                                   const gl::IndexRange &indexRange)
 {
     UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
+    return gl::InternalError();
 }
 
-gl::Error ContextVk::drawElementsInstanced(GLenum mode,
+gl::Error ContextVk::drawElementsInstanced(const gl::Context *context,
+                                           GLenum mode,
                                            GLsizei count,
                                            GLenum type,
-                                           const GLvoid *indices,
+                                           const void *indices,
                                            GLsizei instances,
                                            const gl::IndexRange &indexRange)
 {
     UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
+    return gl::InternalError();
 }
 
-gl::Error ContextVk::drawRangeElements(GLenum mode,
+gl::Error ContextVk::drawRangeElements(const gl::Context *context,
+                                       GLenum mode,
                                        GLuint start,
                                        GLuint end,
                                        GLsizei count,
                                        GLenum type,
-                                       const GLvoid *indices,
+                                       const void *indices,
                                        const gl::IndexRange &indexRange)
 {
     return gl::NoError();
@@ -331,25 +376,30 @@ VkDevice ContextVk::getDevice() const
     return mRenderer->getDevice();
 }
 
-vk::CommandBuffer *ContextVk::getCommandBuffer()
+vk::Error ContextVk::getStartedCommandBuffer(vk::CommandBuffer **commandBufferOut)
 {
-    return mRenderer->getCommandBuffer();
+    return mRenderer->getStartedCommandBuffer(commandBufferOut);
 }
 
-vk::Error ContextVk::submitCommands(const vk::CommandBuffer &commandBuffer)
+vk::Error ContextVk::submitCommands(vk::CommandBuffer *commandBuffer)
 {
-    // TODO(jmadill): Command queuing.
-    ANGLE_TRY(mRenderer->submitAndFinishCommandBuffer(commandBuffer));
+    setQueueSerial(mRenderer->getCurrentQueueSerial());
+    ANGLE_TRY(mRenderer->submitCommandBuffer(commandBuffer));
     return vk::NoError();
 }
 
-gl::Error ContextVk::drawArraysIndirect(GLenum mode, const GLvoid *indirect)
+gl::Error ContextVk::drawArraysIndirect(const gl::Context *context,
+                                        GLenum mode,
+                                        const void *indirect)
 {
     UNIMPLEMENTED();
     return gl::InternalError() << "DrawArraysIndirect hasn't been implemented for vulkan backend.";
 }
 
-gl::Error ContextVk::drawElementsIndirect(GLenum mode, GLenum type, const GLvoid *indirect)
+gl::Error ContextVk::drawElementsIndirect(const gl::Context *context,
+                                          GLenum mode,
+                                          GLenum type,
+                                          const void *indirect)
 {
     UNIMPLEMENTED();
     return gl::InternalError()
@@ -388,9 +438,13 @@ void ContextVk::popGroupMarker()
     UNIMPLEMENTED();
 }
 
-void ContextVk::syncState(const gl::State::DirtyBits & /*dirtyBits*/)
+void ContextVk::syncState(const gl::Context *context, const gl::State::DirtyBits &dirtyBits)
 {
     // TODO(jmadill): Vulkan dirty bits.
+    if (dirtyBits.any())
+    {
+        invalidateCurrentPipeline();
+    }
 }
 
 GLint ContextVk::getGPUDisjoint()
@@ -405,7 +459,7 @@ GLint64 ContextVk::getTimestamp()
     return GLint64();
 }
 
-void ContextVk::onMakeCurrent(const gl::ContextState & /*data*/)
+void ContextVk::onMakeCurrent(const gl::Context * /*context*/)
 {
 }
 
@@ -497,6 +551,21 @@ SamplerImpl *ContextVk::createSampler()
 std::vector<PathImpl *> ContextVk::createPaths(GLsizei)
 {
     return std::vector<PathImpl *>();
+}
+
+// TODO(jmadill): Use pipeline cache.
+void ContextVk::invalidateCurrentPipeline()
+{
+    mRenderer->enqueueGarbageOrDeleteNow(*this, mCurrentPipeline);
+}
+
+gl::Error ContextVk::dispatchCompute(const gl::Context *context,
+                                     GLuint numGroupsX,
+                                     GLuint numGroupsY,
+                                     GLuint numGroupsZ)
+{
+    UNIMPLEMENTED();
+    return gl::InternalError();
 }
 
 }  // namespace rx

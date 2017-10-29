@@ -8,11 +8,12 @@
 #include "core/workers/WorkerNavigator.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/GarbageCollected.h"
-#include "wtf/Noncopyable.h"
+#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
 class BudgetService;
+class ExecutionContext;
 class WorkerNavigator;
 
 // This exposes the budget object on the WorkerNavigator partial interface.
@@ -23,18 +24,18 @@ class WorkerNavigatorBudget final
   WTF_MAKE_NONCOPYABLE(WorkerNavigatorBudget);
 
  public:
-  static WorkerNavigatorBudget& from(WorkerNavigator&);
+  static WorkerNavigatorBudget& From(WorkerNavigator&);
 
-  static BudgetService* budget(WorkerNavigator&);
-  BudgetService* budget();
+  static BudgetService* budget(ExecutionContext*, WorkerNavigator&);
+  BudgetService* budget(ExecutionContext*);
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
   explicit WorkerNavigatorBudget(WorkerNavigator&);
-  static const char* supplementName();
+  static const char* SupplementName();
 
-  Member<BudgetService> m_budget;
+  Member<BudgetService> budget_;
 };
 
 }  // namespace blink

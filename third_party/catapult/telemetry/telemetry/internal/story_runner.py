@@ -5,7 +5,6 @@
 import logging
 import optparse
 import os
-import subprocess
 import sys
 import time
 
@@ -24,7 +23,15 @@ from telemetry import story as story_module
 from telemetry.util import wpr_modes
 from telemetry.value import failure
 from telemetry.value import skip
+from telemetry.value import scalar
 from telemetry.web_perf import story_test
+from tracing.value import histogram
+from tracing.value.diagnostics import reserved_infos
+
+
+# Allowed stages to pause for user interaction at.
+_PAUSE_STAGES = ('before-start-browser', 'after-start-browser',
+                 'before-run-story', 'after-run-story')
 
 
 class ArchiveError(Exception):
@@ -43,6 +50,10 @@ def AddCommandLineArgs(parser):
                    help='Maximum number of test failures before aborting '
                    'the run. Defaults to the number specified by the '
                    'PageTest.')
+  group.add_option('--pause', dest='pause', default=None,
+                   choices=_PAUSE_STAGES,
+                   help='Pause for interaction at the specified stage. '
+                   'Valid stages are %s.' % ', '.join(_PAUSE_STAGES))
   parser.add_option_group(group)
 
   # WPR options
@@ -66,16 +77,21 @@ def ProcessCommandLineArgs(parser, args):
     parser.error('--pageset-repeat must be a positive integer.')
 
 
+def _GenerateTagMapFromStorySet(stories):
+  tagmap = histogram.TagMap({})
+  for s in stories:
+    for t in s.tags:
+      tagmap.AddTagAndStoryDisplayName(t, s.name)
+  return tagmap
+
+
 def _RunStoryAndProcessErrorIfNeeded(story, results, state, test):
   def ProcessError(description=None):
     state.DumpStateUponFailure(story, results)
+    # Note: adding the FailureValue to the results object also normally
+    # cause the progress_reporter to log it in the output.
     results.AddValue(failure.FailureValue(story, sys.exc_info(), description))
   try:
-    # TODO(mikecase): Remove this logging once Android perf bots are swarmed.
-    # crbug.com/678282
-    if state.platform.GetOSName() == 'android':
-      state.platform._platform_backend.Log(
-          'START %s' % (story.name if story.name else str(story)))
     if isinstance(test, story_test.StoryTest):
       test.WillRunStory(state.platform)
     state.WillRunStory(story)
@@ -104,18 +120,17 @@ def _RunStoryAndProcessErrorIfNeeded(story, results, state, test):
   finally:
     has_existing_exception = (sys.exc_info() != (None, None, None))
     try:
-      state.DidRunStory(results)
-      # if state.DidRunStory raises exception, things are messed up badly and we
-      # do not need to run test.DidRunStory at that point.
+      # We attempt to stop tracing and/or metric collecting before possibly
+      # closing the browser. Closing the browser first and stopping tracing
+      # later appeared to cause issues where subsequent browser instances would
+      # not launch correctly on some devices (see: crbug.com/720317).
+      # The following normally cause tracing and/or metric collecting to stop.
       if isinstance(test, story_test.StoryTest):
-        test.DidRunStory(state.platform)
+        test.DidRunStory(state.platform, results)
       else:
         test.DidRunPage(state.platform)
-      # TODO(mikecase): Remove this logging once Android perf bots are swarmed.
-      # crbug.com/678282
-      if state.platform.GetOSName() == 'android':
-        state.platform._platform_backend.Log(
-            'END %s' % (story.name if story.name else str(story)))
+      # And the following normally causes the browser to be closed.
+      state.DidRunStory(results)
     except Exception:
       if not has_existing_exception:
         state.DumpStateUponFailure(story, results)
@@ -181,7 +196,8 @@ def StoriesGroupedByStateClass(story_set, allow_multiple_groups):
 
 
 def Run(test, story_set, finder_options, results, max_failures=None,
-        tear_down_after_story=False, tear_down_after_story_set=False):
+        tear_down_after_story=False, tear_down_after_story_set=False,
+        expectations=None, metadata=None):
   """Runs a given test against a given page_set with the given options.
 
   Stop execution for unexpected exceptions such as KeyboardInterrupt.
@@ -192,7 +208,7 @@ def Run(test, story_set, finder_options, results, max_failures=None,
     ValidateStory(s)
 
   # Filter page set based on options.
-  stories = filter(story_module.StoryFilter.IsSelected, story_set)
+  stories = story_module.StoryFilter.FilterStorySet(story_set)
 
   if (not finder_options.use_live_sites and
       finder_options.browser_options.wpr_mode != wpr_modes.WPR_RECORD):
@@ -231,14 +247,17 @@ def Run(test, story_set, finder_options, results, max_failures=None,
                 test, finder_options.Copy(), story_set)
 
           results.WillRunPage(story, storyset_repeat_counter)
-          try:
-            # Log ps on n7s to determine if adb changed processes.
-            # crbug.com/667470
-            if 'Nexus 7' in state.platform.GetDeviceTypeName():
-              ps_output = subprocess.check_output(['ps', '-ef'])
-              logging.info('Ongoing processes:\n%s', ps_output)
 
-            state.platform.WaitForTemperature(35)
+          if expectations:
+            disabled = expectations.IsStoryDisabled(
+                story, state.platform, finder_options)
+            if disabled and not finder_options.run_disabled_tests:
+              results.AddValue(skip.SkipValue(story, disabled))
+              results.DidRunPage(story)
+              continue
+
+          try:
+            state.platform.WaitForBatteryTemperature(35)
             _WaitForThermalThrottlingIfNeeded(state.platform)
             _RunStoryAndProcessErrorIfNeeded(story, results, state, test)
           except exceptions.Error:
@@ -275,6 +294,12 @@ def Run(test, story_set, finder_options, results, max_failures=None,
           state.TearDownState()
           state = None
     finally:
+      results.PopulateHistogramSet(metadata)
+      tagmap = _GenerateTagMapFromStorySet(stories)
+      if tagmap.tags_to_story_names:
+        results.histograms.AddSharedDiagnostic(
+            reserved_infos.TAG_MAP.name, tagmap)
+
       if state:
         has_existing_exception = sys.exc_info() != (None, None, None)
         try:
@@ -288,10 +313,10 @@ def Run(test, story_set, finder_options, results, max_failures=None,
 
 
 def ValidateStory(story):
-  if len(story.display_name) > 180:
+  if len(story.name) > 180:
     raise ValueError(
-        'User story has display name exceeding 180 characters: %s' %
-        story.display_name)
+        'User story has name exceeding 180 characters: %s' %
+        story.name)
 
 
 def RunBenchmark(benchmark, finder_options):
@@ -301,19 +326,28 @@ def RunBenchmark(benchmark, finder_options):
     The number of failure values (up to 254) or 255 if there is an uncaught
     exception.
   """
+  start = time.time()
   benchmark.CustomizeBrowserOptions(finder_options.browser_options)
 
   benchmark_metadata = benchmark.GetMetadata()
   possible_browser = browser_finder.FindBrowser(finder_options)
+  expectations = benchmark.InitializeExpectations()
+
   if not possible_browser:
     print ('Cannot find browser of type %s. To list out all '
            'available browsers, rerun your command with '
            '--browser=list' %  finder_options.browser_options.browser_type)
     return 1
-  if (possible_browser and
-    not decorators.IsBenchmarkEnabled(benchmark, possible_browser)):
+
+  permanently_disabled = expectations.IsBenchmarkDisabled(
+      possible_browser.platform, finder_options)
+  # TODO(rnephew): Remove decorators.IsBenchmarkEnabled when deprecated.
+  temporarily_disabled = not decorators.IsBenchmarkEnabled(
+      benchmark, possible_browser)
+
+  if permanently_disabled or temporarily_disabled:
     print '%s is disabled on the selected browser' % benchmark.Name()
-    if finder_options.run_disabled_tests:
+    if finder_options.run_disabled_tests and not permanently_disabled:
       print 'Running benchmark anyway due to: --also-run-disabled-tests'
     else:
       print 'Try --also-run-disabled-tests to force the benchmark to run.'
@@ -361,11 +395,19 @@ def RunBenchmark(benchmark, finder_options):
     try:
       Run(pt, stories, finder_options, results, benchmark.max_failures,
           should_tear_down_state_after_each_story_run,
-          benchmark.ShouldTearDownStateAfterEachStorySetRun())
+          benchmark.ShouldTearDownStateAfterEachStorySetRun(),
+          expectations=expectations, metadata=benchmark.GetMetadata())
       return_code = min(254, len(results.failures))
+      # We want to make sure that all expectations are linked to real stories,
+      # this will log error messages if names do not match what is in the set.
+      benchmark.GetBrokenExpectations(stories)
     except Exception:
+      results.telemetry_info.InterruptBenchmark()
       exception_formatter.PrintFormattedException()
       return_code = 255
+
+    results.histograms.AddSharedDiagnostic(
+        reserved_infos.OWNERS.name, benchmark.GetOwnership())
 
     try:
       if finder_options.upload_results:
@@ -375,6 +417,9 @@ def RunBenchmark(benchmark, finder_options):
         results.UploadTraceFilesToCloud(bucket)
         results.UploadProfilingFilesToCloud(bucket)
     finally:
+      duration = time.time() - start
+      results.AddSummaryValue(scalar.ScalarValue(
+          None, 'benchmark_duration', 'minutes', duration / 60.0))
       results.PrintSummary()
   return return_code
 
@@ -400,8 +445,6 @@ def _UpdateAndCheckArchives(archive_data_file, wpr_archive_info,
                     '.gclient using http://goto/read-src-internal, '
                     'or create a new archive using record_wpr.')
       raise ArchiveError('No archive info file.')
-    # Downloads archives for all platforms.
-    logging.info('Downloading WPR archives. This can take a long time.')
     wpr_archive_info.DownloadArchivesIfNeeded()
 
   # Report any problems with individual story.
@@ -422,7 +465,7 @@ def _UpdateAndCheckArchives(archive_data_file, wpr_archive_info,
         'pass the flag --use-live-sites.')
     logging.error(
         'stories without archives: %s',
-        ', '.join(story.display_name
+        ', '.join(story.name
                   for story in stories_missing_archive_path))
   if stories_missing_archive_data:
     logging.error(
@@ -434,7 +477,7 @@ def _UpdateAndCheckArchives(archive_data_file, wpr_archive_info,
         'pass the flag --use-live-sites.')
     logging.error(
         'stories missing archives: %s',
-        ', '.join(story.display_name
+        ', '.join(story.name
                   for story in stories_missing_archive_data))
   if stories_missing_archive_path or stories_missing_archive_data:
     raise ArchiveError('Archive file is missing stories.')

@@ -10,22 +10,20 @@ namespace content {
 void DevToolsManagerDelegate::Inspect(DevToolsAgentHost* agent_host) {
 }
 
-std::string DevToolsManagerDelegate::GetTargetType(RenderFrameHost* host) {
+std::string DevToolsManagerDelegate::GetTargetType(WebContents* wc) {
   return std::string();
 }
 
-std::string DevToolsManagerDelegate::GetTargetTitle(RenderFrameHost* host) {
+std::string DevToolsManagerDelegate::GetTargetTitle(WebContents* wc) {
   return std::string();
 }
 
-std::string DevToolsManagerDelegate::GetTargetDescription(
-    RenderFrameHost* host) {
+std::string DevToolsManagerDelegate::GetTargetDescription(WebContents* wc) {
   return std::string();
 }
 
-bool DevToolsManagerDelegate::DiscoverTargets(
-    const DevToolsAgentHost::DiscoveryCallback& callback) {
-  return false;
+DevToolsAgentHost::List DevToolsManagerDelegate::RemoteDebuggingTargets() {
+  return DevToolsAgentHost::GetOrCreateAll();
 }
 
 scoped_refptr<DevToolsAgentHost> DevToolsManagerDelegate::CreateNewTarget(
@@ -39,9 +37,10 @@ base::DictionaryValue* DevToolsManagerDelegate::HandleCommand(
   return nullptr;
 }
 
-bool DevToolsManagerDelegate::HandleAsyncCommand(DevToolsAgentHost* agent_host,
-                                                 base::DictionaryValue* command,
-                                                 CommandCallback callback) {
+bool DevToolsManagerDelegate::HandleAsyncCommand(
+    DevToolsAgentHost* agent_host,
+    base::DictionaryValue* command,
+    const CommandCallback& callback) {
   return false;
 }
 

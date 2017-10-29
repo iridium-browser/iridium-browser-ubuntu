@@ -64,18 +64,18 @@ FtpDirectoryListingResponseDelegate::FtpDirectoryListingResponseDelegate(
     const WebURLResponse& response)
     : client_(client),
       loader_(loader) {
-  if (response.getExtraData()) {
-    // extraData can be NULL during tests.
+  if (response.GetExtraData()) {
+    // |extra_data| can be NULL during tests.
     WebURLResponseExtraDataImpl* extra_data =
-        static_cast<WebURLResponseExtraDataImpl*>(response.getExtraData());
+        static_cast<WebURLResponseExtraDataImpl*>(response.GetExtraData());
     extra_data->set_is_ftp_directory_listing(true);
   }
-  Init(response.url());
+  Init(response.Url());
 }
 
 void FtpDirectoryListingResponseDelegate::Cancel() {
-  client_ = NULL;
-  loader_ = NULL;
+  client_ = nullptr;
+  loader_ = nullptr;
 }
 
 void FtpDirectoryListingResponseDelegate::OnReceivedData(const char* data,
@@ -85,7 +85,7 @@ void FtpDirectoryListingResponseDelegate::OnReceivedData(const char* data,
 
 void FtpDirectoryListingResponseDelegate::OnCompletedRequest() {
   std::vector<FtpDirectoryListingEntry> entries;
-  int rv = -1;
+  int rv = net::ERR_NOT_IMPLEMENTED;
 #if !BUILDFLAG(DISABLE_FTP_SUPPORT)
   rv = net::ParseFtpDirectoryListing(buffer_, base::Time::Now(), &entries);
 #endif
@@ -93,9 +93,7 @@ void FtpDirectoryListingResponseDelegate::OnCompletedRequest() {
     SendDataToClient("<script>onListingParsingError();</script>\n");
     return;
   }
-  for (size_t i = 0; i < entries.size(); i++) {
-    const FtpDirectoryListingEntry& entry = entries[i];
-
+  for (const FtpDirectoryListingEntry& entry : entries) {
     // Skip the current and parent directory entries in the listing. Our header
     // always includes them.
     if (base::EqualsASCII(entry.name, ".") ||
@@ -103,9 +101,8 @@ void FtpDirectoryListingResponseDelegate::OnCompletedRequest() {
       continue;
 
     bool is_directory = (entry.type == FtpDirectoryListingEntry::DIRECTORY);
-    int64_t size = entry.size;
-    if (entry.type != FtpDirectoryListingEntry::FILE)
-      size = 0;
+    int64_t size =
+        entry.type == FtpDirectoryListingEntry::FILE ? entry.size : 0;
     SendDataToClient(net::GetDirectoryListingEntry(
         entry.name, entry.raw_name, is_directory, size, entry.last_modified));
   }
@@ -123,15 +120,14 @@ void FtpDirectoryListingResponseDelegate::Init(const GURL& response_url) {
   // If this isn't top level directory (i.e. the path isn't "/",)
   // add a link to the parent directory.
   if (response_url.path().length() > 1) {
-    SendDataToClient(net::GetDirectoryListingEntry(
-        base::ASCIIToUTF16(".."), std::string(), false, 0, base::Time()));
+    SendDataToClient("<script>onHasParentDirectory();</script>\n");
   }
 }
 
 void FtpDirectoryListingResponseDelegate::SendDataToClient(
     const std::string& data) {
   if (client_) {
-    client_->didReceiveData(data.data(), data.length());
+    client_->DidReceiveData(data.data(), data.length());
   }
 }
 

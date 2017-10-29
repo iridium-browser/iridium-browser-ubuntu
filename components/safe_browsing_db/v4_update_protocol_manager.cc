@@ -17,6 +17,7 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -152,7 +153,9 @@ V4UpdateProtocolManager::V4UpdateProtocolManager(
   // when it is ready to process updates.
 }
 
-V4UpdateProtocolManager::~V4UpdateProtocolManager() {}
+V4UpdateProtocolManager::~V4UpdateProtocolManager() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+}
 
 bool V4UpdateProtocolManager::IsUpdateScheduled() const {
   return update_timer_.IsRunning();
@@ -165,7 +168,7 @@ void V4UpdateProtocolManager::ScheduleNextUpdate(
 }
 
 void V4UpdateProtocolManager::ScheduleNextUpdateWithBackoff(bool back_off) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (config_.disable_auto_update) {
     DCHECK(!IsUpdateScheduled());
@@ -180,7 +183,7 @@ void V4UpdateProtocolManager::ScheduleNextUpdateWithBackoff(bool back_off) {
 // According to section 5 of the SafeBrowsing protocol specification, we must
 // back off after a certain number of errors.
 base::TimeDelta V4UpdateProtocolManager::GetNextUpdateInterval(bool back_off) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(next_update_interval_ > base::TimeDelta());
 
   base::TimeDelta next = next_update_interval_;
@@ -207,7 +210,7 @@ base::TimeDelta V4UpdateProtocolManager::GetNextUpdateInterval(bool back_off) {
 
 void V4UpdateProtocolManager::ScheduleNextUpdateAfterInterval(
     base::TimeDelta interval) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(interval >= base::TimeDelta());
 
   // Unschedule any current timer.
@@ -298,7 +301,7 @@ bool V4UpdateProtocolManager::ParseUpdateResponse(
 }
 
 void V4UpdateProtocolManager::IssueUpdateRequest() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // If an update request is already pending, record and return silently.
   if (request_.get()) {
@@ -311,8 +314,37 @@ void V4UpdateProtocolManager::IssueUpdateRequest() {
   net::HttpRequestHeaders headers;
   GetUpdateUrlAndHeaders(req_base64, &update_url, &headers);
 
-  std::unique_ptr<net::URLFetcher> fetcher = net::URLFetcher::Create(
-      url_fetcher_id_++, update_url, net::URLFetcher::GET, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("safe_browsing_g4_update", R"(
+        semantics {
+          sender: "Safe Browsing"
+          description:
+            "Safe Browsing issues a request to Google every 30 minutes or so "
+            "to get the latest database of hashes of bad URLs."
+          trigger:
+            "On a timer, approximately every 30 minutes."
+          data:
+             "The state of the local DB is sent so the server can send just "
+             "the changes. This doesn't include any user data."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store: "Safe Browsing cookie store"
+          setting:
+            "Users can disable Safe Browsing by unchecking 'Protect you and "
+            "your device from dangerous sites' in Chromium settings under "
+            "Privacy. The feature is enabled by default."
+          chrome_policy {
+            SafeBrowsingEnabled {
+              policy_options {mode: MANDATORY}
+              SafeBrowsingEnabled: false
+            }
+          }
+        })");
+  std::unique_ptr<net::URLFetcher> fetcher =
+      net::URLFetcher::Create(url_fetcher_id_++, update_url,
+                              net::URLFetcher::GET, this, traffic_annotation);
   fetcher->SetExtraRequestHeaders(headers.ToString());
   data_use_measurement::DataUseUserData::AttachToFetcher(
       fetcher.get(), data_use_measurement::DataUseUserData::SAFE_BROWSING);
@@ -340,7 +372,7 @@ void V4UpdateProtocolManager::HandleTimeout() {
 // SafeBrowsing request responses are handled here.
 void V4UpdateProtocolManager::OnURLFetchComplete(
     const net::URLFetcher* source) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   timeout_timer_.Stop();
 

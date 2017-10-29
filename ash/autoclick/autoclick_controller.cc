@@ -6,16 +6,15 @@
 
 #include "ash/autoclick/common/autoclick_controller_common.h"
 #include "ash/autoclick/common/autoclick_controller_common_delegate.h"
-#include "ash/common/wm/root_window_finder.h"
-#include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
+#include "ash/wm/root_window_finder.h"
 #include "base/timer/timer.h"
 #include "ui/aura/window_observer.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/events/event.h"
 #include "ui/events/event_handler.h"
-#include "ui/events/event_processor.h"
+#include "ui/events/event_sink.h"
 #include "ui/events/event_utils.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/coordinate_conversion.h"
@@ -101,10 +100,10 @@ void AutoclickControllerImpl::SetEnabled(bool enabled) {
   enabled_ = enabled;
 
   if (enabled_) {
-    Shell::GetInstance()->AddPreTargetHandler(this);
+    Shell::Get()->AddPreTargetHandler(this);
     autoclick_controller_common_->CancelAutoclick();
   } else {
-    Shell::GetInstance()->RemovePreTargetHandler(this);
+    Shell::Get()->RemovePreTargetHandler(this);
   }
 }
 
@@ -138,8 +137,7 @@ void AutoclickControllerImpl::OnScrollEvent(ui::ScrollEvent* event) {
 
 views::Widget* AutoclickControllerImpl::CreateAutoclickRingWidget(
     const gfx::Point& event_location) {
-  aura::Window* target =
-      WmWindow::GetAuraWindow(ash::wm::GetRootWindowAt(event_location));
+  aura::Window* target = ash::wm::GetRootWindowAt(event_location);
   SetTapDownTarget(target);
   aura::Window* root_window = target->GetRootWindow();
   widget_.reset(new views::Widget);
@@ -160,8 +158,7 @@ views::Widget* AutoclickControllerImpl::CreateAutoclickRingWidget(
 void AutoclickControllerImpl::UpdateAutoclickRingWidget(
     views::Widget* widget,
     const gfx::Point& event_location) {
-  aura::Window* target =
-      WmWindow::GetAuraWindow(ash::wm::GetRootWindowAt(event_location));
+  aura::Window* target = ash::wm::GetRootWindowAt(event_location);
   SetTapDownTarget(target);
   aura::Window* root_window = target->GetRootWindow();
   if (widget->GetNativeView()->GetRootWindow() != root_window) {
@@ -173,8 +170,7 @@ void AutoclickControllerImpl::UpdateAutoclickRingWidget(
 
 void AutoclickControllerImpl::DoAutoclick(const gfx::Point& event_location,
                                           const int mouse_event_flags) {
-  aura::Window* root_window =
-      WmWindow::GetAuraWindow(wm::GetRootWindowAt(event_location));
+  aura::Window* root_window = wm::GetRootWindowAt(event_location);
   DCHECK(root_window) << "Root window not found while attempting autoclick.";
 
   gfx::Point click_location(event_location);
@@ -192,9 +188,9 @@ void AutoclickControllerImpl::DoAutoclick(const gfx::Point& event_location,
                                ui::EF_LEFT_MOUSE_BUTTON);
 
   ui::EventDispatchDetails details =
-      host->event_processor()->OnEventFromSource(&press_event);
+      host->event_sink()->OnEventFromSource(&press_event);
   if (!details.dispatcher_destroyed)
-    details = host->event_processor()->OnEventFromSource(&release_event);
+    details = host->event_sink()->OnEventFromSource(&release_event);
   if (details.dispatcher_destroyed)
     return;
 }

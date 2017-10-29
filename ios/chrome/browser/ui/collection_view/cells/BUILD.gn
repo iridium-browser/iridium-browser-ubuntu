@@ -14,10 +14,13 @@ source_set("cells") {
     "collection_view_detail_item.mm",
     "collection_view_footer_item.h",
     "collection_view_footer_item.mm",
+    "collection_view_item+collection_view_controller.h",
     "collection_view_item.h",
     "collection_view_item.mm",
     "collection_view_switch_item.h",
     "collection_view_switch_item.mm",
+    "collection_view_text_cell.h",
+    "collection_view_text_cell.mm",
     "collection_view_text_item.h",
     "collection_view_text_item.mm",
   ]
@@ -41,6 +44,7 @@ source_set("cells") {
 }
 
 source_set("test_support") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "test_utils.h",

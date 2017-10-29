@@ -15,7 +15,7 @@
 
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/task_manager/providers/task_provider.h"
@@ -23,7 +23,6 @@
 #include "chrome/browser/task_manager/sampling/task_group.h"
 #include "chrome/browser/task_manager/sampling/task_manager_io_thread_helper.h"
 #include "chrome/browser/task_manager/task_manager_interface.h"
-#include "content/public/browser/gpu_data_manager_observer.h"
 #include "gpu/ipc/common/memory_stats.h"
 
 namespace task_manager {
@@ -31,10 +30,8 @@ namespace task_manager {
 class SharedSampler;
 
 // Defines a concrete implementation of the TaskManagerInterface.
-class TaskManagerImpl :
-    public TaskManagerInterface,
-    public TaskProviderObserver,
-    content::GpuDataManagerObserver {
+class TaskManagerImpl : public TaskManagerInterface,
+                        public TaskProviderObserver {
  public:
   ~TaskManagerImpl() override;
 
@@ -77,7 +74,9 @@ class TaskManagerImpl :
                             base::TerminationStatus* out_status,
                             int* out_error_code) const override;
   int64_t GetNetworkUsage(TaskId task_id) const override;
+  int64_t GetCumulativeNetworkUsage(TaskId task_id) const override;
   int64_t GetProcessTotalNetworkUsage(TaskId task_id) const override;
+  int64_t GetCumulativeProcessTotalNetworkUsage(TaskId task_id) const override;
   int64_t GetSqliteMemoryUsed(TaskId task_id) const override;
   bool GetV8Memory(TaskId task_id,
                    int64_t* allocated,
@@ -97,18 +96,18 @@ class TaskManagerImpl :
   void TaskRemoved(Task* task) override;
   void TaskUnresponsive(Task* task) override;
 
-  // content::GpuDataManagerObserver:
-  void OnVideoMemoryUsageStatsUpdate(
-      const gpu::VideoMemoryUsageStats& gpu_memory_stats) override;
-
-  // The notification method on the UI thread when multiple bytes are read
-  // from URLRequests. This will be called by the |io_thread_helper_|
-  static void OnMultipleBytesReadUI(std::vector<BytesReadParam>* params);
+  // The notification method on the UI thread when multiple bytes are
+  // transferred from URLRequests. This will be called by the
+  // |io_thread_helper_|
+  static void OnMultipleBytesTransferredUI(BytesTransferredMap params);
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<TaskManagerImpl>;
+  friend struct base::LazyInstanceTraitsBase<TaskManagerImpl>;
 
   TaskManagerImpl();
+
+  void OnVideoMemoryUsageStatsUpdate(
+      const gpu::VideoMemoryUsageStats& gpu_memory_stats);
 
   // task_manager::TaskManagerInterface:
   void Refresh() override;
@@ -123,7 +122,8 @@ class TaskManagerImpl :
   // false otherwise, at which point the caller must explicitly match these
   // bytes to the browser process by calling this method again with
   // |param.origin_pid = 0| and |param.child_id = param.route_id = -1|.
-  bool UpdateTasksWithBytesRead(const BytesReadParam& param);
+  bool UpdateTasksWithBytesTransferred(const BytesTransferredKey& key,
+                                       const BytesTransferredParam& param);
 
   TaskGroup* GetTaskGroupByTaskId(TaskId task_id) const;
   Task* GetTaskByTaskId(TaskId task_id) const;
@@ -170,6 +170,7 @@ class TaskManagerImpl :
   // running.
   bool is_running_;
 
+  base::WeakPtrFactory<TaskManagerImpl> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(TaskManagerImpl);
 };
 

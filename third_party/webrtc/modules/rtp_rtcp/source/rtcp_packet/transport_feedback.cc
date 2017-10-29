@@ -12,11 +12,12 @@
 
 #include <algorithm>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
 #include "webrtc/modules/include/module_common_types.h"
 #include "webrtc/modules/rtp_rtcp/source/byte_io.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/common_header.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/logging.h"
+#include "webrtc/rtc_base/trace_event.h"
 
 namespace webrtc {
 namespace rtcp {
@@ -375,45 +376,15 @@ uint16_t TransportFeedback::GetBaseSequence() const {
   return base_seq_no_;
 }
 
-std::vector<TransportFeedback::StatusSymbol>
-TransportFeedback::GetStatusVector() const {
-  std::vector<TransportFeedback::StatusSymbol> symbols;
-  uint16_t seq_no = GetBaseSequence();
-  for (const auto& packet : packets_) {
-    for (; seq_no != packet.sequence_number(); ++seq_no)
-      symbols.push_back(StatusSymbol::kNotReceived);
-    if (packet.delta_ticks() >= 0x00 && packet.delta_ticks() <= 0xff) {
-      symbols.push_back(StatusSymbol::kReceivedSmallDelta);
-    } else {
-      symbols.push_back(StatusSymbol::kReceivedLargeDelta);
-    }
-    ++seq_no;
-  }
-  return symbols;
-}
-
-std::vector<int16_t> TransportFeedback::GetReceiveDeltas() const {
-  std::vector<int16_t> deltas;
-  for (const auto& packet : packets_)
-    deltas.push_back(packet.delta_ticks());
-  return deltas;
-}
-
 int64_t TransportFeedback::GetBaseTimeUs() const {
   return static_cast<int64_t>(base_time_ticks_) * kBaseScaleFactor;
-}
-
-std::vector<int64_t> TransportFeedback::GetReceiveDeltasUs() const {
-  std::vector<int64_t> us_deltas;
-  for (const auto& packet : packets_)
-    us_deltas.push_back(packet.delta_us());
-  return us_deltas;
 }
 
 // De-serialize packet.
 bool TransportFeedback::Parse(const CommonHeader& packet) {
   RTC_DCHECK_EQ(packet.type(), kPacketType);
   RTC_DCHECK_EQ(packet.fmt(), kFeedbackMessageType);
+  TRACE_EVENT0("webrtc", "TransportFeedback::Parse");
 
   if (packet.payload_size_bytes() < kMinPayloadSizeBytes) {
     LOG(LS_WARNING) << "Buffer too small (" << packet.payload_size_bytes()
@@ -574,6 +545,11 @@ bool TransportFeedback::IsConsistent() const {
   return true;
 }
 
+size_t TransportFeedback::BlockLength() const {
+  // Round size_bytes_ up to multiple of 32bits.
+  return (size_bytes_ + 3) & (~static_cast<size_t>(3));
+}
+
 // Serialize packet.
 bool TransportFeedback::Create(uint8_t* packet,
                                size_t* position,
@@ -629,11 +605,6 @@ bool TransportFeedback::Create(uint8_t* packet,
 
   RTC_DCHECK_EQ(*position, position_end);
   return true;
-}
-
-size_t TransportFeedback::BlockLength() const {
-  // Round size_bytes_ up to multiple of 32bits.
-  return (size_bytes_ + 3) & (~static_cast<size_t>(3));
 }
 
 void TransportFeedback::Clear() {

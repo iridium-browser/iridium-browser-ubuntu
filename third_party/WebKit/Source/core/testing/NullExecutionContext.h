@@ -16,7 +16,7 @@
 
 namespace blink {
 
-class NullExecutionContext final
+class NullExecutionContext
     : public GarbageCollectedFinalized<NullExecutionContext>,
       public SecurityContext,
       public ExecutionContext {
@@ -25,49 +25,48 @@ class NullExecutionContext final
  public:
   NullExecutionContext();
 
-  void disableEval(const String&) override {}
-  String userAgent() const override { return String(); }
+  void SetURL(const KURL& url) { url_ = url; }
 
-  void postTask(
-      TaskType,
-      const WebTraceLocation&,
-      std::unique_ptr<ExecutionContextTask>,
-      const String& taskNameForInstrumentation = emptyString) override;
+  void DisableEval(const String&) override {}
+  String UserAgent() const override { return String(); }
 
-  EventTarget* errorEventTarget() override { return nullptr; }
-  EventQueue* getEventQueue() const override { return m_queue.get(); }
+  EventTarget* ErrorEventTarget() override { return nullptr; }
+  EventQueue* GetEventQueue() const override { return queue_.Get(); }
 
-  bool tasksNeedSuspension() override { return m_tasksNeedSuspension; }
-  void setTasksNeedSuspension(bool flag) { m_tasksNeedSuspension = flag; }
+  bool TasksNeedSuspension() override { return tasks_need_suspension_; }
+  void SetTasksNeedSuspension(bool flag) { tasks_need_suspension_ = flag; }
 
-  void didUpdateSecurityOrigin() override {}
-  SecurityContext& securityContext() override { return *this; }
-  DOMTimerCoordinator* timers() override { return nullptr; }
+  void DidUpdateSecurityOrigin() override {}
+  SecurityContext& GetSecurityContext() override { return *this; }
+  DOMTimerCoordinator* Timers() override { return nullptr; }
 
-  void addConsoleMessage(ConsoleMessage*) override {}
-  void exceptionThrown(ErrorEvent*) override {}
+  void AddConsoleMessage(ConsoleMessage*) override {}
+  void ExceptionThrown(ErrorEvent*) override {}
 
-  void setIsSecureContext(bool);
-  bool isSecureContext(
-      String& errorMessage,
-      const SecureContextCheck = StandardSecureContextCheck) const override;
+  void SetIsSecureContext(bool);
+  bool IsSecureContext(String& error_message) const override;
 
-  DEFINE_INLINE_TRACE() {
-    visitor->trace(m_queue);
-    SecurityContext::trace(visitor);
-    ExecutionContext::trace(visitor);
+  void SetUpSecurityContext();
+
+  using SecurityContext::GetSecurityOrigin;
+  using SecurityContext::GetContentSecurityPolicy;
+
+  DEFINE_INLINE_VIRTUAL_TRACE() {
+    visitor->Trace(queue_);
+    SecurityContext::Trace(visitor);
+    ExecutionContext::Trace(visitor);
   }
 
  protected:
-  const KURL& virtualURL() const override { return m_dummyURL; }
-  KURL virtualCompleteURL(const String&) const override { return m_dummyURL; }
+  const KURL& VirtualURL() const override { return url_; }
+  KURL VirtualCompleteURL(const String&) const override { return url_; }
 
  private:
-  bool m_tasksNeedSuspension;
-  bool m_isSecureContext;
-  Member<EventQueue> m_queue;
+  bool tasks_need_suspension_;
+  bool is_secure_context_;
+  Member<EventQueue> queue_;
 
-  KURL m_dummyURL;
+  KURL url_;
 };
 
 }  // namespace blink

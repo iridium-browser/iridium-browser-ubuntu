@@ -50,8 +50,8 @@ Browser* ChromeNewWindowClient::GetActiveBrowser() {
   Browser* browser = BrowserList::GetInstance()->GetLastActive();
   if (browser) {
     aura::Window* window = browser->window()->GetNativeWindow();
-    aura::client::ActivationClient* client =
-        aura::client::GetActivationClient(window->GetRootWindow());
+    wm::ActivationClient* client =
+        wm::GetActivationClient(window->GetRootWindow());
     if (client->GetActiveWindow() == window)
       return browser;
   }
@@ -65,7 +65,7 @@ ChromeNewWindowClient::ChromeNewWindowClient() : binding_(this) {
 
   // Register this object as the client interface implementation.
   ash::mojom::NewWindowClientAssociatedPtrInfo ptr_info;
-  binding_.Bind(&ptr_info);
+  binding_.Bind(mojo::MakeRequest(&ptr_info));
   new_window_controller_->SetClient(std::move(ptr_info));
 }
 
@@ -218,5 +218,5 @@ void ChromeNewWindowClient::ShowTaskManager() {
 }
 
 void ChromeNewWindowClient::OpenFeedbackPage() {
-  chrome::OpenFeedbackDialog(GetActiveBrowser());
+  chrome::OpenFeedbackDialog(GetActiveBrowser(), chrome::kFeedbackSourceAsh);
 }

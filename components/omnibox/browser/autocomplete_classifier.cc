@@ -44,8 +44,7 @@ int AutocompleteClassifier::DefaultOmniboxProviders() {
       AutocompleteProvider::TYPE_KEYWORD |
 #endif
 #if !defined(OS_IOS)
-      // "Builtin", "Shortcuts" and "Zero Suggest" are not supported on iOS.
-      AutocompleteProvider::TYPE_BUILTIN |
+      // "Shortcuts" and "Zero Suggest" are not supported on iOS.
       AutocompleteProvider::TYPE_SHORTCUTS |
       AutocompleteProvider::TYPE_ZERO_SUGGEST |
 #endif
@@ -53,6 +52,7 @@ int AutocompleteClassifier::DefaultOmniboxProviders() {
            ? AutocompleteProvider::TYPE_CLIPBOARD_URL
            : 0) |
       AutocompleteProvider::TYPE_BOOKMARK |
+      AutocompleteProvider::TYPE_BUILTIN |
       AutocompleteProvider::TYPE_HISTORY_QUICK |
       AutocompleteProvider::TYPE_HISTORY_URL |
       AutocompleteProvider::TYPE_SEARCH;
@@ -68,9 +68,9 @@ void AutocompleteClassifier::Classify(
   DCHECK(!inside_classify_);
   base::AutoReset<bool> reset(&inside_classify_, true);
   controller_->Start(AutocompleteInput(
-      text, base::string16::npos, std::string(), GURL(), page_classification,
-      true, prefer_keyword, allow_exact_keyword_match, false, false,
-      *scheme_classifier_));
+      text, base::string16::npos, std::string(), GURL(), base::string16(),
+      page_classification, true, prefer_keyword, allow_exact_keyword_match,
+      false, false, *scheme_classifier_));
   DCHECK(controller_->done());
   const AutocompleteResult& result = controller_->result();
   if (result.empty()) {

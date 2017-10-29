@@ -10,7 +10,9 @@ import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.view.ViewGroup;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.signin.SigninAccessPoint;
 import org.chromium.chrome.browser.signin.SigninAndSyncView;
@@ -42,6 +44,8 @@ class BookmarkPromoHeader implements AndroidSyncSettingsObserver,
             "enhanced_bookmark_signin_promo_show_count";
     // TODO(kkimlabs): Figure out the optimal number based on UMA data.
     private static final int MAX_SIGNIN_PROMO_SHOW_COUNT = 5;
+
+    private static boolean sShouldShowForTests;
 
     private Context mContext;
     private SigninManager mSignInManager;
@@ -86,7 +90,7 @@ class BookmarkPromoHeader implements AndroidSyncSettingsObserver,
      * @return Whether it should be showing.
      */
     boolean shouldShow() {
-        return mShouldShow;
+        return mShouldShow || sShouldShowForTests;
     }
 
     /**
@@ -102,8 +106,13 @@ class BookmarkPromoHeader implements AndroidSyncSettingsObserver,
             }
         };
 
-        return new ViewHolder(
-                SigninAndSyncView.create(parent, listener, SigninAccessPoint.BOOKMARK_MANAGER)) {};
+        SigninAndSyncView view =
+                SigninAndSyncView.create(parent, listener, SigninAccessPoint.BOOKMARK_MANAGER);
+        // A MarginResizer is used to apply margins in regular and wide display modes. Remove the
+        // view's lateral padding so that margins can be used instead.
+        ApiCompatibilityUtils.setPaddingRelative(
+                view, 0, view.getPaddingTop(), 0, view.getPaddingBottom());
+        return new ViewHolder(view) {};
     }
 
     /**
@@ -153,5 +162,13 @@ class BookmarkPromoHeader implements AndroidSyncSettingsObserver,
     @Override
     public void onSignedOut() {
         updateShouldShow(true);
+    }
+
+    /**
+     * Forces the promo to show for testing purposes.
+     */
+    @VisibleForTesting
+    public static void setShouldShowForTests() {
+        sShouldShowForTests = true;
     }
 }

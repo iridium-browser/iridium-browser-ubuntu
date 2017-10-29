@@ -6,8 +6,6 @@ from page_sets.login_helpers import google_login
 from page_sets.system_health import platforms
 from page_sets.system_health import system_health_story
 
-from telemetry import decorators
-
 
 IDLE_TIME_IN_SECONDS = 100
 SAMPLING_INTERVAL_IN_SECONDS = 1
@@ -29,6 +27,15 @@ class _LongRunningStory(system_health_story.SystemHealthStory):
       action_runner.Wait(SAMPLING_INTERVAL_IN_SECONDS)
       if self._take_memory_measurement:
         action_runner.MeasureMemory()
+
+  @classmethod
+  def GenerateStoryDescription(cls):
+    if cls.BACKGROUND:
+      return ('Load %s then open a new blank tab and let the loaded page stay '
+              'in background for %s seconds.' % (cls.URL, IDLE_TIME_IN_SECONDS))
+    else:
+      return ('Load %s then let it stay in foreground for %s seconds.' %
+              (cls.URL, IDLE_TIME_IN_SECONDS))
 
 
 ##############################################################################
@@ -83,18 +90,14 @@ class _LongRunningGmailDesktopBase(_LongRunningGmailBase):
         'document.getElementById("loading").style.display === "none"')
 
 
-@decorators.Disabled('android')  # crbug.com/657433
 class LongRunningGmailMobileForegroundStory(_LongRunningGmailMobileBase):
   NAME = 'long_running:tools:gmail-foreground'
 
 
-@decorators.Disabled('all')  # crbug.com/681839
 class LongRunningGmailDesktopForegroundStory(_LongRunningGmailDesktopBase):
   NAME = 'long_running:tools:gmail-foreground'
 
 
-@decorators.Disabled('android-webview',  # Weview does not have tabs.
-                     'android')  # crbug.com/657433
 class LongRunningGmailMobileBackgroundStory(_LongRunningGmailMobileBase):
   BACKGROUND = True
   NAME = 'long_running:tools:gmail-background'

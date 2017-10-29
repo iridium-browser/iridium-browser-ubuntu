@@ -20,52 +20,36 @@
 
 namespace net {
 
-namespace {
-
-// Initial delay for broken alternative services.
-const uint64_t kBrokenAlternativeProtocolDelaySecs = 300;
-// Subsequent failures result in exponential (base 2) backoff.
-// Limit binary shift to limit delay to approximately 2 days.
-const int kBrokenDelayMaxShift = 9;
-
-}  // namespace
-
-HttpServerPropertiesImpl::HttpServerPropertiesImpl()
+HttpServerPropertiesImpl::HttpServerPropertiesImpl(base::TickClock* clock)
     : spdy_servers_map_(SpdyServersMap::NO_AUTO_EVICT),
       alternative_service_map_(AlternativeServiceMap::NO_AUTO_EVICT),
+      broken_alternative_services_(this, clock ? clock : &default_clock_),
       server_network_stats_map_(ServerNetworkStatsMap::NO_AUTO_EVICT),
       quic_server_info_map_(QuicServerInfoMap::NO_AUTO_EVICT),
-      max_server_configs_stored_in_properties_(kMaxQuicServersToPersist),
-      weak_ptr_factory_(this) {
+      max_server_configs_stored_in_properties_(kMaxQuicServersToPersist) {
   canonical_suffixes_.push_back(".ggpht.com");
   canonical_suffixes_.push_back(".c.youtube.com");
   canonical_suffixes_.push_back(".googlevideo.com");
   canonical_suffixes_.push_back(".googleusercontent.com");
 }
 
+HttpServerPropertiesImpl::HttpServerPropertiesImpl()
+    : HttpServerPropertiesImpl(nullptr) {}
+
 HttpServerPropertiesImpl::~HttpServerPropertiesImpl() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 }
 
 void HttpServerPropertiesImpl::SetSpdyServers(
-    std::vector<std::string>* spdy_servers,
-    bool support_spdy) {
-  DCHECK(CalledOnValidThread());
-  if (!spdy_servers)
-    return;
+    std::unique_ptr<SpdyServersMap> spdy_servers_map) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // Add the entries from persisted data.
-  SpdyServersMap spdy_servers_map(SpdyServersMap::NO_AUTO_EVICT);
-  for (std::vector<std::string>::reverse_iterator it = spdy_servers->rbegin();
-       it != spdy_servers->rend(); ++it) {
-    spdy_servers_map.Put(*it, support_spdy);
-  }
-
-  // |spdy_servers_map| will have the memory cache.
-  spdy_servers_map_.Swap(spdy_servers_map);
+  spdy_servers_map_.Swap(*spdy_servers_map);
 
   // Add the entries from the memory cache.
-  for (SpdyServersMap::reverse_iterator it = spdy_servers_map.rbegin();
-       it != spdy_servers_map.rend(); ++it) {
+  for (SpdyServersMap::reverse_iterator it = spdy_servers_map->rbegin();
+       it != spdy_servers_map->rend(); ++it) {
     // Add the entry if it is not in the cache, otherwise move it to the front
     // of recency list.
     if (spdy_servers_map_.Get(it->first) == spdy_servers_map_.end())
@@ -74,33 +58,23 @@ void HttpServerPropertiesImpl::SetSpdyServers(
 }
 
 void HttpServerPropertiesImpl::SetAlternativeServiceServers(
-    AlternativeServiceMap* alternative_service_map) {
+    std::unique_ptr<AlternativeServiceMap> alternative_service_map) {
   int32_t size_diff =
       alternative_service_map->size() - alternative_service_map_.size();
   if (size_diff > 0) {
-    UMA_HISTOGRAM_COUNTS("Net.AlternativeServiceServers.MorePrefsEntries",
-                         size_diff);
+    UMA_HISTOGRAM_COUNTS_1M("Net.AlternativeServiceServers.MorePrefsEntries",
+                            size_diff);
   } else {
-    UMA_HISTOGRAM_COUNTS(
+    UMA_HISTOGRAM_COUNTS_1M(
         "Net.AlternativeServiceServers.MoreOrEqualCacheEntries", -size_diff);
   }
 
-  AlternativeServiceMap new_alternative_service_map(
-      AlternativeServiceMap::NO_AUTO_EVICT);
   // Add the entries from persisted data.
-  for (AlternativeServiceMap::reverse_iterator input_it =
-           alternative_service_map->rbegin();
-       input_it != alternative_service_map->rend(); ++input_it) {
-    DCHECK(!input_it->second.empty());
-    new_alternative_service_map.Put(input_it->first, input_it->second);
-  }
-
-  alternative_service_map_.Swap(new_alternative_service_map);
+  alternative_service_map_.Swap(*alternative_service_map);
 
   // Add the entries from the memory cache.
-  for (AlternativeServiceMap::reverse_iterator input_it =
-           new_alternative_service_map.rbegin();
-       input_it != new_alternative_service_map.rend(); ++input_it) {
+  for (auto input_it = alternative_service_map->rbegin();
+       input_it != alternative_service_map->rend(); ++input_it) {
     if (alternative_service_map_.Get(input_it->first) ==
         alternative_service_map_.end()) {
       alternative_service_map_.Put(input_it->first, input_it->second);
@@ -135,28 +109,19 @@ void HttpServerPropertiesImpl::SetAlternativeServiceServers(
   }
 }
 
-void HttpServerPropertiesImpl::SetSupportsQuic(IPAddress* last_address) {
-  if (last_address)
-    last_quic_address_ = *last_address;
+void HttpServerPropertiesImpl::SetSupportsQuic(const IPAddress& last_address) {
+  last_quic_address_ = last_address;
 }
 
 void HttpServerPropertiesImpl::SetServerNetworkStats(
-    ServerNetworkStatsMap* server_network_stats_map) {
+    std::unique_ptr<ServerNetworkStatsMap> server_network_stats_map) {
   // Add the entries from persisted data.
-  ServerNetworkStatsMap new_server_network_stats_map(
-      ServerNetworkStatsMap::NO_AUTO_EVICT);
-  for (ServerNetworkStatsMap::reverse_iterator it =
-           server_network_stats_map->rbegin();
-       it != server_network_stats_map->rend(); ++it) {
-    new_server_network_stats_map.Put(it->first, it->second);
-  }
-
-  server_network_stats_map_.Swap(new_server_network_stats_map);
+  server_network_stats_map_.Swap(*server_network_stats_map);
 
   // Add the entries from the memory cache.
   for (ServerNetworkStatsMap::reverse_iterator it =
-           new_server_network_stats_map.rbegin();
-       it != new_server_network_stats_map.rend(); ++it) {
+           server_network_stats_map->rbegin();
+       it != server_network_stats_map->rend(); ++it) {
     if (server_network_stats_map_.Get(it->first) ==
         server_network_stats_map_.end()) {
       server_network_stats_map_.Put(it->first, it->second);
@@ -165,19 +130,13 @@ void HttpServerPropertiesImpl::SetServerNetworkStats(
 }
 
 void HttpServerPropertiesImpl::SetQuicServerInfoMap(
-    QuicServerInfoMap* quic_server_info_map) {
+    std::unique_ptr<QuicServerInfoMap> quic_server_info_map) {
   // Add the entries from persisted data.
-  QuicServerInfoMap temp_map(QuicServerInfoMap::NO_AUTO_EVICT);
-  for (QuicServerInfoMap::reverse_iterator it = quic_server_info_map->rbegin();
-       it != quic_server_info_map->rend(); ++it) {
-    temp_map.Put(it->first, it->second);
-  }
-
-  quic_server_info_map_.Swap(temp_map);
+  quic_server_info_map_.Swap(*quic_server_info_map);
 
   // Add the entries from the memory cache.
-  for (QuicServerInfoMap::reverse_iterator it = temp_map.rbegin();
-       it != temp_map.rend(); ++it) {
+  for (QuicServerInfoMap::reverse_iterator it = quic_server_info_map->rbegin();
+       it != quic_server_info_map->rend(); ++it) {
     if (quic_server_info_map_.Get(it->first) == quic_server_info_map_.end()) {
       quic_server_info_map_.Put(it->first, it->second);
     }
@@ -185,25 +144,45 @@ void HttpServerPropertiesImpl::SetQuicServerInfoMap(
 }
 
 void HttpServerPropertiesImpl::GetSpdyServerList(
-    base::ListValue* spdy_server_list,
+    std::vector<std::string>* spdy_servers,
     size_t max_size) const {
-  DCHECK(CalledOnValidThread());
-  DCHECK(spdy_server_list);
-  spdy_server_list->Clear();
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(spdy_servers);
+
+  spdy_servers->clear();
   size_t count = 0;
   // Get the list of servers (scheme/host/port) that support SPDY.
   for (SpdyServersMap::const_iterator it = spdy_servers_map_.begin();
        it != spdy_servers_map_.end() && count < max_size; ++it) {
-    const std::string spdy_server = it->first;
     if (it->second) {
-      spdy_server_list->AppendString(spdy_server);
+      spdy_servers->push_back(it->first);
       ++count;
     }
   }
 }
 
+void HttpServerPropertiesImpl::SetBrokenAndRecentlyBrokenAlternativeServices(
+    std::unique_ptr<BrokenAlternativeServiceList>
+        broken_alternative_service_list,
+    std::unique_ptr<RecentlyBrokenAlternativeServices>
+        recently_broken_alternative_services) {
+  broken_alternative_services_.SetBrokenAndRecentlyBrokenAlternativeServices(
+      std::move(broken_alternative_service_list),
+      std::move(recently_broken_alternative_services));
+}
+
+const BrokenAlternativeServiceList&
+HttpServerPropertiesImpl::broken_alternative_service_list() const {
+  return broken_alternative_services_.broken_alternative_service_list();
+}
+
+const RecentlyBrokenAlternativeServices&
+HttpServerPropertiesImpl::recently_broken_alternative_services() const {
+  return broken_alternative_services_.recently_broken_alternative_services();
+}
+
 void HttpServerPropertiesImpl::Clear() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   spdy_servers_map_.Clear();
   alternative_service_map_.Clear();
   canonical_host_to_origin_map_.clear();
@@ -214,17 +193,17 @@ void HttpServerPropertiesImpl::Clear() {
 
 bool HttpServerPropertiesImpl::SupportsRequestPriority(
     const url::SchemeHostPort& server) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (server.host().empty())
     return false;
 
   if (GetSupportsSpdy(server))
     return true;
-  const AlternativeServiceVector alternative_service_vector =
-      GetAlternativeServices(server);
-  for (const AlternativeService& alternative_service :
-       alternative_service_vector) {
-    if (alternative_service.protocol == kProtoQUIC) {
+  const AlternativeServiceInfoVector alternative_service_info_vector =
+      GetAlternativeServiceInfos(server);
+  for (const AlternativeServiceInfo& alternative_service_info :
+       alternative_service_info_vector) {
+    if (alternative_service_info.alternative_service().protocol == kProtoQUIC) {
       return true;
     }
   }
@@ -233,7 +212,7 @@ bool HttpServerPropertiesImpl::SupportsRequestPriority(
 
 bool HttpServerPropertiesImpl::GetSupportsSpdy(
     const url::SchemeHostPort& server) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (server.host().empty())
     return false;
 
@@ -245,7 +224,7 @@ bool HttpServerPropertiesImpl::GetSupportsSpdy(
 void HttpServerPropertiesImpl::SetSupportsSpdy(
     const url::SchemeHostPort& server,
     bool support_spdy) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (server.host().empty())
     return;
 
@@ -261,7 +240,7 @@ void HttpServerPropertiesImpl::SetSupportsSpdy(
 
 bool HttpServerPropertiesImpl::RequiresHTTP11(
     const HostPortPair& host_port_pair) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (host_port_pair.host().empty())
     return false;
 
@@ -270,7 +249,7 @@ bool HttpServerPropertiesImpl::RequiresHTTP11(
 
 void HttpServerPropertiesImpl::SetHTTP11Required(
     const HostPortPair& host_port_pair) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (host_port_pair.host().empty())
     return;
 
@@ -297,21 +276,23 @@ const std::string* HttpServerPropertiesImpl::GetCanonicalSuffix(
   return nullptr;
 }
 
-AlternativeServiceVector HttpServerPropertiesImpl::GetAlternativeServices(
+AlternativeServiceInfoVector
+HttpServerPropertiesImpl::GetAlternativeServiceInfos(
     const url::SchemeHostPort& origin) {
-  // Copy valid alternative services into |valid_alternative_services|.
-  AlternativeServiceVector valid_alternative_services;
+  // Copy valid alternative service infos into
+  // |valid_alternative_service_infos|.
+  AlternativeServiceInfoVector valid_alternative_service_infos;
   const base::Time now = base::Time::Now();
   AlternativeServiceMap::iterator map_it = alternative_service_map_.Get(origin);
   if (map_it != alternative_service_map_.end()) {
     HostPortPair host_port_pair(origin.host(), origin.port());
     for (AlternativeServiceInfoVector::iterator it = map_it->second.begin();
          it != map_it->second.end();) {
-      if (it->expiration < now) {
+      if (it->expiration() < now) {
         it = map_it->second.erase(it);
         continue;
       }
-      AlternativeService alternative_service(it->alternative_service);
+      AlternativeService alternative_service(it->alternative_service());
       if (alternative_service.host.empty()) {
         alternative_service.host = origin.host();
       }
@@ -322,30 +303,39 @@ AlternativeServiceVector HttpServerPropertiesImpl::GetAlternativeServices(
         ++it;
         continue;
       }
-      valid_alternative_services.push_back(alternative_service);
+      if (alternative_service.protocol == kProtoQUIC) {
+        valid_alternative_service_infos.push_back(
+            AlternativeServiceInfo::CreateQuicAlternativeServiceInfo(
+                alternative_service, it->expiration(),
+                it->advertised_versions()));
+      } else {
+        valid_alternative_service_infos.push_back(
+            AlternativeServiceInfo::CreateHttp2AlternativeServiceInfo(
+                alternative_service, it->expiration()));
+      }
       ++it;
     }
     if (map_it->second.empty()) {
       alternative_service_map_.Erase(map_it);
     }
-    return valid_alternative_services;
+    return valid_alternative_service_infos;
   }
 
   CanonicalHostMap::const_iterator canonical = GetCanonicalHost(origin);
   if (canonical == canonical_host_to_origin_map_.end()) {
-    return AlternativeServiceVector();
+    return AlternativeServiceInfoVector();
   }
   map_it = alternative_service_map_.Get(canonical->second);
   if (map_it == alternative_service_map_.end()) {
-    return AlternativeServiceVector();
+    return AlternativeServiceInfoVector();
   }
   for (AlternativeServiceInfoVector::iterator it = map_it->second.begin();
        it != map_it->second.end();) {
-    if (it->expiration < now) {
+    if (it->expiration() < now) {
       it = map_it->second.erase(it);
       continue;
     }
-    AlternativeService alternative_service(it->alternative_service);
+    AlternativeService alternative_service(it->alternative_service());
     if (alternative_service.host.empty()) {
       alternative_service.host = canonical->second.host();
       if (IsAlternativeServiceBroken(alternative_service)) {
@@ -357,23 +347,49 @@ AlternativeServiceVector HttpServerPropertiesImpl::GetAlternativeServices(
       ++it;
       continue;
     }
-    valid_alternative_services.push_back(alternative_service);
+    if (alternative_service.protocol == kProtoQUIC) {
+      valid_alternative_service_infos.push_back(
+          AlternativeServiceInfo::CreateQuicAlternativeServiceInfo(
+              alternative_service, it->expiration(),
+              it->advertised_versions()));
+    } else {
+      valid_alternative_service_infos.push_back(
+          AlternativeServiceInfo::CreateHttp2AlternativeServiceInfo(
+              alternative_service, it->expiration()));
+    }
     ++it;
   }
   if (map_it->second.empty()) {
     alternative_service_map_.Erase(map_it);
   }
-  return valid_alternative_services;
+  return valid_alternative_service_infos;
 }
 
-bool HttpServerPropertiesImpl::SetAlternativeService(
+bool HttpServerPropertiesImpl::SetHttp2AlternativeService(
     const url::SchemeHostPort& origin,
     const AlternativeService& alternative_service,
     base::Time expiration) {
+  DCHECK_EQ(alternative_service.protocol, kProtoHTTP2);
+
   return SetAlternativeServices(
       origin,
       AlternativeServiceInfoVector(
-          /*size=*/1, AlternativeServiceInfo(alternative_service, expiration)));
+          /*size=*/1, AlternativeServiceInfo::CreateHttp2AlternativeServiceInfo(
+                          alternative_service, expiration)));
+}
+
+bool HttpServerPropertiesImpl::SetQuicAlternativeService(
+    const url::SchemeHostPort& origin,
+    const AlternativeService& alternative_service,
+    base::Time expiration,
+    const QuicVersionVector& advertised_versions) {
+  DCHECK(alternative_service.protocol == kProtoQUIC);
+
+  return SetAlternativeServices(
+      origin, AlternativeServiceInfoVector(
+                  /*size=*/1,
+                  AlternativeServiceInfo::CreateQuicAlternativeServiceInfo(
+                      alternative_service, expiration, advertised_versions)));
 }
 
 bool HttpServerPropertiesImpl::SetAlternativeServices(
@@ -400,16 +416,22 @@ bool HttpServerPropertiesImpl::SetAlternativeServices(
       for (const auto& old : it->second) {
         // Persist to disk immediately if new entry has different scheme, host,
         // or port.
-        if (old.alternative_service != new_it->alternative_service) {
+        if (old.alternative_service() != new_it->alternative_service()) {
           changed = true;
           break;
         }
         // Also persist to disk if new expiration it more that twice as far or
         // less than half as far in the future.
-        base::Time old_time = old.expiration;
-        base::Time new_time = new_it->expiration;
+        base::Time old_time = old.expiration();
+        base::Time new_time = new_it->expiration();
         if (new_time - now > 2 * (old_time - now) ||
             2 * (new_time - now) < (old_time - now)) {
+          changed = true;
+          break;
+        }
+        // Also persist to disk if new entry has a different list of advertised
+        // versions.
+        if (old.advertised_versions() != new_it->advertised_versions()) {
           changed = true;
           break;
         }
@@ -424,7 +446,7 @@ bool HttpServerPropertiesImpl::SetAlternativeServices(
   alternative_service_map_.Put(origin, alternative_service_info_vector);
 
   if (previously_no_alternative_services &&
-      !GetAlternativeServices(origin).empty()) {
+      !GetAlternativeServiceInfos(origin).empty()) {
     // TODO(rch): Consider the case where multiple requests are started
     // before the first completes. In this case, only one of the jobs
     // would reach this code, whereas all of them should should have.
@@ -448,61 +470,31 @@ bool HttpServerPropertiesImpl::SetAlternativeServices(
 
 void HttpServerPropertiesImpl::MarkAlternativeServiceBroken(
     const AlternativeService& alternative_service) {
-  // Empty host means use host of origin, callers are supposed to substitute.
-  DCHECK(!alternative_service.host.empty());
-  if (alternative_service.protocol == kProtoUnknown) {
-    LOG(DFATAL) << "Trying to mark unknown alternate protocol broken.";
-    return;
-  }
-  ++recently_broken_alternative_services_[alternative_service];
-  int shift = recently_broken_alternative_services_[alternative_service] - 1;
-  if (shift > kBrokenDelayMaxShift)
-    shift = kBrokenDelayMaxShift;
-  base::TimeDelta delay =
-      base::TimeDelta::FromSeconds(kBrokenAlternativeProtocolDelaySecs);
-  base::TimeTicks when = base::TimeTicks::Now() + delay * (1 << shift);
-  auto result = broken_alternative_services_.insert(
-      std::make_pair(alternative_service, when));
-  // Return if alternative service is already in expiration queue.
-  if (!result.second) {
-    return;
-  }
-
-  // If this is the only entry in the list, schedule an expiration task.
-  // Otherwise it will be rescheduled automatically when the pending task runs.
-  if (broken_alternative_services_.size() == 1) {
-    ScheduleBrokenAlternateProtocolMappingsExpiration();
-  }
+  broken_alternative_services_.MarkAlternativeServiceBroken(
+      alternative_service);
 }
 
 void HttpServerPropertiesImpl::MarkAlternativeServiceRecentlyBroken(
     const AlternativeService& alternative_service) {
-  if (!base::ContainsKey(recently_broken_alternative_services_,
-                         alternative_service))
-    recently_broken_alternative_services_[alternative_service] = 1;
+  broken_alternative_services_.MarkAlternativeServiceRecentlyBroken(
+      alternative_service);
 }
 
 bool HttpServerPropertiesImpl::IsAlternativeServiceBroken(
     const AlternativeService& alternative_service) const {
-  // Empty host means use host of origin, callers are supposed to substitute.
-  DCHECK(!alternative_service.host.empty());
-  return base::ContainsKey(broken_alternative_services_, alternative_service);
+  return broken_alternative_services_.IsAlternativeServiceBroken(
+      alternative_service);
 }
 
 bool HttpServerPropertiesImpl::WasAlternativeServiceRecentlyBroken(
     const AlternativeService& alternative_service) {
-  if (alternative_service.protocol == kProtoUnknown)
-    return false;
-  return base::ContainsKey(recently_broken_alternative_services_,
-                           alternative_service);
+  return broken_alternative_services_.WasAlternativeServiceRecentlyBroken(
+      alternative_service);
 }
 
 void HttpServerPropertiesImpl::ConfirmAlternativeService(
     const AlternativeService& alternative_service) {
-  if (alternative_service.protocol == kProtoUnknown)
-    return;
-  broken_alternative_services_.erase(alternative_service);
-  recently_broken_alternative_services_.erase(alternative_service);
+  broken_alternative_services_.ConfirmAlternativeService(alternative_service);
 }
 
 const AlternativeServiceMap& HttpServerPropertiesImpl::alternative_service_map()
@@ -522,7 +514,7 @@ HttpServerPropertiesImpl::GetAlternativeServiceInfoAsValue() const {
       std::string alternative_service_string(
           alternative_service_info.ToString());
       AlternativeService alternative_service(
-          alternative_service_info.alternative_service);
+          alternative_service_info.alternative_service());
       if (alternative_service.host.empty()) {
         alternative_service.host = server.host();
       }
@@ -563,6 +555,14 @@ void HttpServerPropertiesImpl::SetServerNetworkStats(
     const url::SchemeHostPort& server,
     ServerNetworkStats stats) {
   server_network_stats_map_.Put(server, stats);
+}
+
+void HttpServerPropertiesImpl::ClearServerNetworkStats(
+    const url::SchemeHostPort& server) {
+  ServerNetworkStatsMap::iterator it = server_network_stats_map_.Get(server);
+  if (it != server_network_stats_map_.end()) {
+    server_network_stats_map_.Erase(it);
+  }
 }
 
 const ServerNetworkStats* HttpServerPropertiesImpl::GetServerNetworkStats(
@@ -650,7 +650,7 @@ HttpServerPropertiesImpl::GetAlternateProtocolIterator(
 
   for (const AlternativeServiceInfo& alternative_service_info : it->second) {
     AlternativeService alternative_service(
-        alternative_service_info.alternative_service);
+        alternative_service_info.alternative_service());
     if (alternative_service.host.empty()) {
       alternative_service.host = canonical_server.host();
     }
@@ -688,65 +688,37 @@ void HttpServerPropertiesImpl::RemoveCanonicalHost(
   canonical_host_to_origin_map_.erase(canonical->first);
 }
 
-void HttpServerPropertiesImpl::ExpireBrokenAlternateProtocolMappings() {
-  base::TimeTicks now = base::TimeTicks::Now();
-  while (!broken_alternative_services_.empty()) {
-    BrokenAlternativeServices::iterator it =
-        broken_alternative_services_.begin();
-    if (now < it->second) {
-      break;
-    }
-
-    const AlternativeService expired_alternative_service = it->first;
-    broken_alternative_services_.erase(it);
-
-    // Remove every occurrence of |expired_alternative_service| from
-    // |alternative_service_map_|.
-    for (AlternativeServiceMap::iterator map_it =
-             alternative_service_map_.begin();
-         map_it != alternative_service_map_.end();) {
-      for (AlternativeServiceInfoVector::iterator it = map_it->second.begin();
-           it != map_it->second.end();) {
-        AlternativeService alternative_service(it->alternative_service);
-        // Empty hostname in map means hostname of key: substitute before
-        // comparing to |expired_alternative_service|.
-        if (alternative_service.host.empty()) {
-          alternative_service.host = map_it->first.host();
-        }
-        if (alternative_service == expired_alternative_service) {
-          it = map_it->second.erase(it);
-          continue;
-        }
-        ++it;
+void HttpServerPropertiesImpl::OnExpireBrokenAlternativeService(
+    const AlternativeService& expired_alternative_service) {
+  // Remove every occurrence of |expired_alternative_service| from
+  // |alternative_service_map_|.
+  for (AlternativeServiceMap::iterator map_it =
+           alternative_service_map_.begin();
+       map_it != alternative_service_map_.end();) {
+    for (AlternativeServiceInfoVector::iterator it = map_it->second.begin();
+         it != map_it->second.end();) {
+      AlternativeService alternative_service(it->alternative_service());
+      // Empty hostname in map means hostname of key: substitute before
+      // comparing to |expired_alternative_service|.
+      if (alternative_service.host.empty()) {
+        alternative_service.host = map_it->first.host();
       }
-      // If an origin has an empty list of alternative services, then remove it
-      // from both |canonical_host_to_origin_map_| and
-      // |alternative_service_map_|.
-      if (map_it->second.empty()) {
-        RemoveCanonicalHost(map_it->first);
-        map_it = alternative_service_map_.Erase(map_it);
+      if (alternative_service == expired_alternative_service) {
+        it = map_it->second.erase(it);
         continue;
       }
-      ++map_it;
+      ++it;
     }
+    // If an origin has an empty list of alternative services, then remove it
+    // from both |canonical_host_to_origin_map_| and
+    // |alternative_service_map_|.
+    if (map_it->second.empty()) {
+      RemoveCanonicalHost(map_it->first);
+      map_it = alternative_service_map_.Erase(map_it);
+      continue;
+    }
+    ++map_it;
   }
-  ScheduleBrokenAlternateProtocolMappingsExpiration();
-}
-
-void
-HttpServerPropertiesImpl::ScheduleBrokenAlternateProtocolMappingsExpiration() {
-  if (broken_alternative_services_.empty()) {
-    return;
-  }
-  base::TimeTicks now = base::TimeTicks::Now();
-  base::TimeTicks when = broken_alternative_services_.front().second;
-  base::TimeDelta delay = when > now ? when - now : base::TimeDelta();
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(
-          &HttpServerPropertiesImpl::ExpireBrokenAlternateProtocolMappings,
-          weak_ptr_factory_.GetWeakPtr()),
-      delay);
 }
 
 }  // namespace net

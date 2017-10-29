@@ -44,9 +44,6 @@ void StartupPagesHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("setStartupPagesToCurrentPages",
       base::Bind(&StartupPagesHandler::HandleSetStartupPagesToCurrentPages,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback("validateStartupPage",
-      base::Bind(&StartupPagesHandler::HandleValidateStartupPage,
-                 base::Unretained(this)));
 }
 
 void StartupPagesHandler::OnJavascriptAllowed() {
@@ -85,9 +82,7 @@ void StartupPagesHandler::OnModelChanged() {
     startup_pages.Append(std::move(entry));
   }
 
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("update-startup-pages"),
-                         startup_pages);
+  FireWebUIListener("update-startup-pages", startup_pages);
 }
 
 void StartupPagesHandler::OnItemsChanged(int start, int length) {
@@ -135,7 +130,7 @@ void StartupPagesHandler::HandleEditStartupPage(const base::ListValue* args) {
   CHECK(args->GetInteger(1, &index));
 
   if (index < 0 || index > startup_custom_pages_table_model_.RowCount()) {
-    RejectJavascriptCallback(*callback_id, *base::Value::CreateNullValue());
+    RejectJavascriptCallback(*callback_id, base::Value());
     NOTREACHED();
     return;
   }
@@ -179,22 +174,9 @@ void StartupPagesHandler::HandleRemoveStartupPage(const base::ListValue* args) {
 
 void StartupPagesHandler::HandleSetStartupPagesToCurrentPages(
     const base::ListValue* args) {
-  startup_custom_pages_table_model_.SetToCurrentlyOpenPages();
+  startup_custom_pages_table_model_.SetToCurrentlyOpenPages(
+      web_ui()->GetWebContents());
   SaveStartupPagesPref();
-}
-
-void StartupPagesHandler::HandleValidateStartupPage(
-    const base::ListValue* args) {
-  CHECK_EQ(args->GetSize(), 2U);
-
-  const base::Value* callback_id;
-  CHECK(args->Get(0, &callback_id));
-
-  std::string url_string;
-  CHECK(args->GetString(1, &url_string));
-
-  bool valid = settings_utils::FixupAndValidateStartupPage(url_string, nullptr);
-  ResolveJavascriptCallback(*callback_id, base::Value(valid));
 }
 
 void StartupPagesHandler::SaveStartupPagesPref() {

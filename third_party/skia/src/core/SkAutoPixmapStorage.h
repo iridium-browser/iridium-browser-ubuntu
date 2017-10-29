@@ -8,12 +8,18 @@
 #ifndef SkAutoPixmapStorage_DEFINED
 #define SkAutoPixmapStorage_DEFINED
 
+#include "SkMalloc.h"
 #include "SkPixmap.h"
 
 class SK_API SkAutoPixmapStorage : public SkPixmap {
 public:
     SkAutoPixmapStorage();
     ~SkAutoPixmapStorage();
+
+    /**
+    * Leave the moved-from object in a free-but-valid state.
+    */
+    SkAutoPixmapStorage& operator=(SkAutoPixmapStorage&& other);
 
     /**
     *  Try to allocate memory for the pixels needed to match the specified Info. On success
@@ -51,9 +57,9 @@ public:
         this->freeStorage();
         this->INHERITED::reset();
     }
-    void reset(const SkImageInfo& info, const void* addr, size_t rb, SkColorTable* ctable = NULL) {
+    void reset(const SkImageInfo& info, const void* addr, size_t rb) {
         this->freeStorage();
-        this->INHERITED::reset(info, addr, rb, ctable);
+        this->INHERITED::reset(info, addr, rb);
     }
     void reset(const SkImageInfo& info) {
         this->freeStorage();

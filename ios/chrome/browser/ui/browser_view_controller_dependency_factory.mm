@@ -26,10 +26,16 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 NSString* const kBrowserViewControllerSnackbarCategory =
     @"BrowserViewControllerSnackbarCategory";
 
-@implementation BrowserViewControllerDependencyFactory
+@implementation BrowserViewControllerDependencyFactory {
+  ios::ChromeBrowserState* browserState_;
+}
 
 - (id)initWithBrowserState:(ios::ChromeBrowserState*)browserState {
   self = [super init];
@@ -60,11 +66,16 @@ NSString* const kBrowserViewControllerSnackbarCategory =
   return [[PreloadController alloc] initWithBrowserState:browserState_];
 }
 
-- (TabStripController*)newTabStripControllerWithTabModel:(TabModel*)model {
+- (TabStripController*)
+newTabStripControllerWithTabModel:(TabModel*)model
+                       dispatcher:(id<ApplicationCommands, BrowserCommands>)
+                                      dispatcher {
   TabStrip::Style style = TabStrip::kStyleDark;
   if (browserState_ && browserState_->IsOffTheRecord())
     style = TabStrip::kStyleIncognito;
-  return [[TabStripController alloc] initWithTabModel:model style:style];
+  return [[TabStripController alloc] initWithTabModel:model
+                                                style:style
+                                           dispatcher:dispatcher];
 }
 
 - (ToolbarModelIOS*)newToolbarModelIOSWithDelegate:
@@ -75,11 +86,14 @@ NSString* const kBrowserViewControllerSnackbarCategory =
 - (WebToolbarController*)
 newWebToolbarControllerWithDelegate:(id<WebToolbarDelegate>)delegate
                           urlLoader:(id<UrlLoader>)urlLoader
-                    preloadProvider:(id<PreloadProvider>)preload {
+                    preloadProvider:(id<PreloadProvider>)preload
+                         dispatcher:(id<ApplicationCommands, BrowserCommands>)
+                                        dispatcher {
   return [[WebToolbarController alloc] initWithDelegate:delegate
                                               urlLoader:urlLoader
                                            browserState:browserState_
-                                        preloadProvider:preload];
+                                        preloadProvider:preload
+                                             dispatcher:dispatcher];
 }
 
 - (KeyCommandsProvider*)newKeyCommandsProvider {
@@ -98,10 +112,10 @@ newWebToolbarControllerWithDelegate:(id<WebToolbarDelegate>)delegate
                                        message:(NSString*)message
                                 viewController:
                                     (UIViewController*)viewController {
-  AlertCoordinator* alertCoordinator = [[[AlertCoordinator alloc]
-      initWithBaseViewController:viewController
-                           title:title
-                         message:message] autorelease];
+  AlertCoordinator* alertCoordinator =
+      [[AlertCoordinator alloc] initWithBaseViewController:viewController
+                                                     title:title
+                                                   message:message];
   [alertCoordinator addItemWithTitle:l10n_util::GetNSString(IDS_OK)
                               action:nil
                                style:UIAlertActionStyleDefault];

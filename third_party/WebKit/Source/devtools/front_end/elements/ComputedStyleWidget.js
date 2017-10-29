@@ -32,9 +32,7 @@
  */
 Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
   constructor() {
-    super();
-    this.element.classList.add('computed-style-sidebar-pane');
-
+    super(true);
     this.registerRequiredCSS('elements/computedStyleSidebarPane.css');
     this._alwaysShowComputedProperties = {'display': true, 'height': true, 'width': true};
 
@@ -47,10 +45,10 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
     this._showInheritedComputedStylePropertiesSetting.addChangeListener(
         this._showInheritedComputedStyleChanged.bind(this));
 
-    var hbox = this.element.createChild('div', 'hbox styles-sidebar-pane-toolbar');
+    var hbox = this.contentElement.createChild('div', 'hbox styles-sidebar-pane-toolbar');
     var filterContainerElement = hbox.createChild('div', 'styles-sidebar-pane-filter-box');
     var filterInput = Elements.StylesSidebarPane.createPropertyFilterElement(
-        Common.UIString('Filter'), hbox, filterCallback.bind(this));
+        Common.UIString('Filter'), hbox, filterCallback.bind(this), 'styles-filter-engaged');
     UI.ARIAUtils.setAccessibleName(filterInput, Common.UIString('Filter Computed Styles'));
     filterContainerElement.appendChild(filterInput);
 
@@ -60,9 +58,9 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
 
     this._propertiesOutline = new UI.TreeOutlineInShadow();
     this._propertiesOutline.hideOverflow();
-    this._propertiesOutline.registerRequiredCSS('elements/computedStyleSidebarPane.css');
+    this._propertiesOutline.registerRequiredCSS('elements/computedStyleWidgetTree.css');
     this._propertiesOutline.element.classList.add('monospace', 'computed-properties');
-    this.element.appendChild(this._propertiesOutline.element);
+    this.contentElement.appendChild(this._propertiesOutline.element);
 
     this._linkifier = new Components.Linkifier(Elements.ComputedStyleWidget._maxLinkLength);
 
@@ -76,7 +74,7 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
     }
 
     var fontsWidget = new Elements.PlatformFontsWidget(this._computedStyleModel);
-    fontsWidget.show(this.element);
+    fontsWidget.show(this.contentElement);
   }
 
   _showInheritedComputedStyleChanged() {
@@ -201,7 +199,7 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
         treeElement.listItemElement.addEventListener('mousedown', e => e.consume(), false);
         treeElement.listItemElement.addEventListener('dblclick', e => e.consume(), false);
         treeElement.listItemElement.addEventListener('click', handleClick.bind(null, treeElement), false);
-        var gotoSourceElement = UI.Icon.create('smallicon-arrow-in-circle', 'goto-source-icon');
+        var gotoSourceElement = UI.Icon.create('mediumicon-arrow-in-circle', 'goto-source-icon');
         gotoSourceElement.addEventListener('click', this._navigateToSource.bind(this, activeProperty));
         propertyValueElement.appendChild(gotoSourceElement);
         if (expandedProperties.has(propertyName))
@@ -272,22 +270,22 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
       var valueElement = renderer.renderValue();
       valueElement.classList.add('property-trace-value');
       valueElement.addEventListener('click', this._navigateToSource.bind(this, property), false);
-      var gotoSourceElement = UI.Icon.create('smallicon-arrow-in-circle', 'goto-source-icon');
+      var gotoSourceElement = UI.Icon.create('mediumicon-arrow-in-circle', 'goto-source-icon');
       gotoSourceElement.addEventListener('click', this._navigateToSource.bind(this, property));
       valueElement.insertBefore(gotoSourceElement, valueElement.firstChild);
 
       trace.appendChild(valueElement);
 
       var rule = property.ownerStyle.parentRule;
+      var selectorElement = trace.createChild('span', 'property-trace-selector');
+      selectorElement.textContent = rule ? rule.selectorText() : 'element.style';
+      selectorElement.title = selectorElement.textContent;
+
       if (rule) {
         var linkSpan = trace.createChild('span', 'trace-link');
         linkSpan.appendChild(
             Elements.StylePropertiesSection.createRuleOriginNode(matchedStyles, this._linkifier, rule));
       }
-
-      var selectorElement = trace.createChild('span', 'property-trace-selector');
-      selectorElement.textContent = rule ? rule.selectorText() : 'element.style';
-      selectorElement.title = selectorElement.textContent;
 
       var traceTreeElement = new UI.TreeElement();
       traceTreeElement.title = trace;

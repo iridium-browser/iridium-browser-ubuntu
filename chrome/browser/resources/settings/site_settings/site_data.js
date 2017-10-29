@@ -34,6 +34,32 @@ Polymer({
 
     /** @private */
     confirmationDeleteMsg_: String,
+
+    /** @type {!Map<string, string>} */
+    focusConfig: {
+      type: Object,
+      observer: 'focusConfigChanged_',
+    },
+  },
+
+  /**
+   * @param {!Map<string, string>} newConfig
+   * @param {?Map<string, string>} oldConfig
+   * @private
+   */
+  focusConfigChanged_: function(newConfig, oldConfig) {
+    // focusConfig is set only once on the parent, so this observer should only
+    // fire once.
+    assert(!oldConfig);
+
+    // Populate the |focusConfig| map of the parent <settings-animated-pages>
+    // element, with additional entries that correspond to subpage trigger
+    // elements residing in this element's Shadow DOM.
+    if (settings.routes.SITE_SETTINGS_DATA_DETAILS) {
+      this.focusConfig.set(
+          settings.routes.SITE_SETTINGS_DATA_DETAILS.path,
+          '* /deep/ #filter /deep/ #searchInput');
+    }
   },
 
   /** @override */
@@ -83,6 +109,11 @@ Polymer({
     this.$.confirmDeleteDialog.close();
   },
 
+  /** @private */
+  onConfirmDeleteDialogClosed_: function() {
+    cr.ui.focusWithoutInk(assert(this.$.removeShowingSites));
+  },
+
   /**
    * Shows a dialog to confirm the deletion of multiple sites.
    * @param {!Event} e
@@ -90,8 +121,8 @@ Polymer({
    */
   onRemoveShowingSitesTap_: function(e) {
     e.preventDefault();
-    this.confirmationDeleteMsg_ = loadTimeData.getString(
-        'siteSettingsCookieRemoveMultipleConfirmation');
+    this.confirmationDeleteMsg_ =
+        loadTimeData.getString('siteSettingsCookieRemoveMultipleConfirmation');
     this.$.confirmDeleteDialog.showModal();
   },
 
@@ -111,7 +142,7 @@ Polymer({
           this.browserProxy.removeCookie(items[i].id);
       }
       // We just deleted all items found by the filter, let's reset the filter.
-      /** @type {SettingsSubpageSearchElement} */(this.$.filter).setValue('');
+      /** @type {SettingsSubpageSearchElement} */ (this.$.filter).setValue('');
     }
   },
 
@@ -130,7 +161,8 @@ Polymer({
    * @private
    */
   onSiteTap_: function(event) {
-    settings.navigateTo(settings.Route.SITE_SETTINGS_DATA_DETAILS,
+    settings.navigateTo(
+        settings.routes.SITE_SETTINGS_DATA_DETAILS,
         new URLSearchParams('site=' + event.model.item.site));
   },
 });

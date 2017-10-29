@@ -4,6 +4,7 @@
 
 """Sleep loop."""
 
+from __future__ import absolute_import
 from __future__ import print_function
 
 import time
@@ -31,7 +32,7 @@ class SleepLoop(object):
     try:
       self._callback()
     except Exception:
-      logger.exception('Error during loop.')
+      logger.exception(u'Error during loop.')
 
   def loop_forever(self):
     while True:
@@ -45,6 +46,6 @@ def _force_sleep(secs):
   finished_time = now + secs
   while now < finished_time:
     remaining = finished_time - now
-    logger.debug('Sleeping for %d, %d remaining', secs, remaining)
+    logger.debug(u'Sleeping for %d, %d remaining', secs, remaining)
     time.sleep(remaining)
     now = time.time()

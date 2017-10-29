@@ -58,14 +58,14 @@ void ContentsWebView::OnThemeChanged() {
   // view is sized specially for fullscreen tab capture.  See WebView header
   // file comments for more details.
   const int kBackgroundBrightness = 0x33;  // 20%
-  const SkColor ntp_background =
-      theme->GetColor(ThemeProperties::COLOR_NTP_BACKGROUND);
-  set_background(views::Background::CreateSolidBackground(
+  // Make sure the background is opaque.
+  const SkColor ntp_background = color_utils::GetResultingPaintColor(
+      theme->GetColor(ThemeProperties::COLOR_NTP_BACKGROUND), SK_ColorWHITE);
+  SetBackground(views::CreateSolidBackground(SkColorSetARGB(
+      SkColorGetA(ntp_background),
       SkColorGetR(ntp_background) * kBackgroundBrightness / 0xFF,
       SkColorGetG(ntp_background) * kBackgroundBrightness / 0xFF,
-      SkColorGetB(ntp_background) * kBackgroundBrightness / 0xFF,
-      SkColorGetA(ntp_background)));
-
+      SkColorGetB(ntp_background) * kBackgroundBrightness / 0xFF)));
 
   if (web_contents()) {
     content::RenderWidgetHostView* rwhv =

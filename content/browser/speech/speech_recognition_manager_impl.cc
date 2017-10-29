@@ -62,8 +62,10 @@ SpeechRecognitionManagerImpl* SpeechRecognitionManagerImpl::GetInstance() {
 
 SpeechRecognitionManagerImpl::SpeechRecognitionManagerImpl(
     media::AudioSystem* audio_system,
+    media::AudioManager* audio_manager,
     MediaStreamManager* media_stream_manager)
     : audio_system_(audio_system),
+      audio_manager_(audio_manager),
       media_stream_manager_(media_stream_manager),
       primary_session_id_(kSessionIDInvalid),
       last_session_id_(kSessionIDInvalid),
@@ -77,17 +79,15 @@ SpeechRecognitionManagerImpl::SpeechRecognitionManagerImpl(
 }
 
 SpeechRecognitionManagerImpl::~SpeechRecognitionManagerImpl() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(g_speech_recognition_manager_impl);
+
   g_speech_recognition_manager_impl = NULL;
 
   for (SessionsTable::iterator it = sessions_.begin(); it != sessions_.end();
        ++it) {
-    // MediaStreamUIProxy must be deleted on the IO thread.
-    BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE,
-                              it->second->ui.release());
     delete it->second;
   }
-  sessions_.clear();
 }
 
 int SpeechRecognitionManagerImpl::CreateSession(
@@ -132,7 +132,7 @@ int SpeechRecognitionManagerImpl::CreateSession(
   google_remote_engine->SetConfig(remote_engine_config);
 
   session->recognizer = new SpeechRecognizerImpl(
-      this, audio_system_, session_id, config.continuous,
+      this, audio_system_, audio_manager_, session_id, config.continuous,
       config.interim_results, google_remote_engine);
 #else
   session->recognizer = new SpeechRecognizerImplAndroid(this, session_id);
@@ -156,9 +156,9 @@ void SpeechRecognitionManagerImpl::StartSession(int session_id) {
   if (delegate_) {
     delegate_->CheckRecognitionIsAllowed(
         session_id,
-        base::Bind(&SpeechRecognitionManagerImpl::RecognitionAllowedCallback,
-                   weak_factory_.GetWeakPtr(),
-                   session_id));
+        base::BindOnce(
+            &SpeechRecognitionManagerImpl::RecognitionAllowedCallback,
+            weak_factory_.GetWeakPtr(), session_id));
   }
 }
 
@@ -181,7 +181,7 @@ void SpeechRecognitionManagerImpl::RecognitionAllowedCallback(int session_id,
     context.label = media_stream_manager_->MakeMediaAccessRequest(
         context.render_process_id, context.render_frame_id, context.request_id,
         StreamControls(true, false), url::Origin(GURL(context.context_name)),
-        base::Bind(
+        base::BindOnce(
             &SpeechRecognitionManagerImpl::MediaRequestPermissionCallback,
             weak_factory_.GetWeakPtr(), session_id));
     return;
@@ -274,7 +274,7 @@ void SpeechRecognitionManagerImpl::OnRecognitionStart(int session_id) {
   SessionsTable::iterator iter = sessions_.find(session_id);
   if (iter->second->ui) {
     // Notify the UI that the devices are being used.
-    iter->second->ui->OnStarted(base::Closure(),
+    iter->second->ui->OnStarted(base::OnceClosure(),
                                 MediaStreamUIProxy::WindowIdCallback());
   }
 

@@ -437,7 +437,7 @@ class LineEndsWrapper {
   int string_len_;
 
   int GetPosAfterNewLine(int index) {
-    return Smi::cast(ends_array_->get(index))->value() + 1;
+    return Smi::ToInt(ends_array_->get(index)) + 1;
   }
 };
 
@@ -603,7 +603,7 @@ static Handle<SharedFunctionInfo> UnwrapSharedFunctionInfoFromJSValue(
 static int GetArrayLength(Handle<JSArray> array) {
   Object* length = array->length();
   CHECK(length->IsSmi());
-  return Smi::cast(length)->value();
+  return Smi::ToInt(length);
 }
 
 void FunctionInfoWrapper::SetInitialProperties(Handle<String> name,
@@ -839,8 +839,6 @@ class DependentFunctionMarker: public OptimizedFunctionVisitor {
   explicit DependentFunctionMarker(SharedFunctionInfo* shared_info)
     : shared_info_(shared_info), found_(false) { }
 
-  virtual void EnterContext(Context* context) { }  // Don't care.
-  virtual void LeaveContext(Context* context)  { }  // Don't care.
   virtual void VisitFunction(JSFunction* function) {
     // It should be guaranteed by the iterator that everything is optimized.
     DCHECK(function->code()->kind() == Code::OPTIMIZED_FUNCTION);
@@ -912,9 +910,9 @@ void LiveEdit::ReplaceFunctionCode(
       }
     }
 
-    if (shared_info->HasDebugInfo()) {
+    if (shared_info->HasBreakInfo()) {
       // Existing break points will be re-applied. Reset the debug info here.
-      isolate->debug()->RemoveDebugInfoAndClearFromShared(
+      isolate->debug()->RemoveBreakInfoAndMaybeFree(
           handle(shared_info->GetDebugInfo()));
     }
     shared_info->set_scope_info(new_shared_info->scope_info());
@@ -1075,9 +1073,9 @@ void LiveEdit::PatchFunctionPositions(Handle<JSArray> shared_info_array,
         Handle<AbstractCode>(AbstractCode::cast(info->code())),
         position_change_array);
   }
-  if (info->HasDebugInfo()) {
+  if (info->HasBreakInfo()) {
     // Existing break points will be re-applied. Reset the debug info here.
-    info->GetIsolate()->debug()->RemoveDebugInfoAndClearFromShared(
+    info->GetIsolate()->debug()->RemoveBreakInfoAndMaybeFree(
         handle(info->GetDebugInfo()));
   }
 }
@@ -1245,8 +1243,7 @@ class MultipleFunctionTarget {
       Handle<Object> old_element =
           JSReceiver::GetElement(isolate, result_, i).ToHandleChecked();
       if (!old_element->IsSmi() ||
-          Smi::cast(*old_element)->value() ==
-              LiveEdit::FUNCTION_AVAILABLE_FOR_PATCH) {
+          Smi::ToInt(*old_element) == LiveEdit::FUNCTION_AVAILABLE_FOR_PATCH) {
         SetElementSloppy(result_, i,
                          Handle<Smi>(Smi::FromInt(status), isolate));
       }
@@ -1598,7 +1595,7 @@ void LiveEditFunctionTracker::VisitFunctionLiteral(FunctionLiteral* node) {
 void LiveEditFunctionTracker::FunctionStarted(FunctionLiteral* fun) {
   HandleScope handle_scope(isolate_);
   FunctionInfoWrapper info = FunctionInfoWrapper::Create(isolate_);
-  info.SetInitialProperties(fun->name(), fun->start_position(),
+  info.SetInitialProperties(fun->name(isolate_), fun->start_position(),
                             fun->end_position(), fun->parameter_count(),
                             current_parent_index_, fun->function_literal_id());
   current_parent_index_ = len_;

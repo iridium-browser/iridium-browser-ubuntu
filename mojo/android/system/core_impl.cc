@@ -7,13 +7,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/android/base_jni_registrar.h"
 #include "base/android/jni_android.h"
+#include "base/android/jni_array.h"
 #include "base/android/jni_registrar.h"
 #include "base/android/library_loader/library_loader_hooks.h"
 #include "base/android/scoped_java_ref.h"
 #include "jni/CoreImpl_jni.h"
 #include "mojo/public/c/system/core.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 
 namespace mojo {
 namespace android {
@@ -24,41 +25,6 @@ using base::android::ScopedJavaLocalRef;
 static jlong GetTimeTicksNow(JNIEnv* env,
                              const JavaParamRef<jobject>& jcaller) {
   return MojoGetTimeTicksNow();
-}
-
-static jint WaitMany(JNIEnv* env,
-                     const JavaParamRef<jobject>& jcaller,
-                     const JavaParamRef<jobject>& buffer,
-                     jlong deadline) {
-  // |buffer| contains, in this order
-  // input: The array of N handles (MojoHandle, 4 bytes each)
-  // input: The array of N signals (MojoHandleSignals, 4 bytes each)
-  // space for output: The array of N handle states (MojoHandleSignalsState, 8
-  //                   bytes each)
-  // space for output: The result index (uint32_t, 4 bytes)
-  uint8_t* buffer_start =
-      static_cast<uint8_t*>(env->GetDirectBufferAddress(buffer));
-  DCHECK(buffer_start);
-  DCHECK_EQ(reinterpret_cast<uintptr_t>(buffer_start) % 8, 0u);
-  // Each handle of the input array contributes 4 (MojoHandle) + 4
-  // (MojoHandleSignals) + 8 (MojoHandleSignalsState) = 16 bytes to the size of
-  // the buffer.
-  const size_t size_per_handle = 16;
-  const size_t buffer_size = env->GetDirectBufferCapacity(buffer);
-  DCHECK_EQ((buffer_size - 4) % size_per_handle, 0u);
-
-  const size_t nb_handles = (buffer_size - 4) / size_per_handle;
-  const MojoHandle* handle_start =
-      reinterpret_cast<const MojoHandle*>(buffer_start);
-  const MojoHandleSignals* signals_start =
-      reinterpret_cast<const MojoHandleSignals*>(buffer_start + 4 * nb_handles);
-  MojoHandleSignalsState* states_start =
-      reinterpret_cast<MojoHandleSignalsState*>(buffer_start + 8 * nb_handles);
-  uint32_t* result_index =
-      reinterpret_cast<uint32_t*>(buffer_start + 16 * nb_handles);
-  *result_index = static_cast<uint32_t>(-1);
-  return MojoWaitMany(handle_start, signals_start, nb_handles, deadline,
-                      result_index, states_start);
 }
 
 static ScopedJavaLocalRef<jobject> CreateMessagePipe(
@@ -127,21 +93,16 @@ static jint Close(JNIEnv* env,
   return MojoClose(mojo_handle);
 }
 
-static jint Wait(JNIEnv* env,
-                 const JavaParamRef<jobject>& jcaller,
-                 const JavaParamRef<jobject>& buffer,
-                 jint mojo_handle,
-                 jint signals,
-                 jlong deadline) {
-  // Buffer contains space for the MojoHandleSignalsState
-  void* buffer_start = env->GetDirectBufferAddress(buffer);
-  DCHECK(buffer_start);
-  DCHECK_EQ(reinterpret_cast<const uintptr_t>(buffer_start) % 8, 0u);
-  DCHECK_EQ(sizeof(struct MojoHandleSignalsState),
+static jint QueryHandleSignalsState(JNIEnv* env,
+                                    const JavaParamRef<jobject>& jcaller,
+                                    jint mojo_handle,
+                                    const JavaParamRef<jobject>& buffer) {
+  MojoHandleSignalsState* signals_state =
+      static_cast<MojoHandleSignalsState*>(env->GetDirectBufferAddress(buffer));
+  DCHECK(signals_state);
+  DCHECK_EQ(sizeof(MojoHandleSignalsState),
             static_cast<size_t>(env->GetDirectBufferCapacity(buffer)));
-  struct MojoHandleSignalsState* signals_state =
-      static_cast<struct MojoHandleSignalsState*>(buffer_start);
-  return MojoWait(mojo_handle, signals, deadline, signals_state);
+  return MojoQueryHandleSignalsState(mojo_handle, signals_state);
 }
 
 static jint WriteMessage(JNIEnv* env,
@@ -167,36 +128,52 @@ static jint WriteMessage(JNIEnv* env,
     num_handles = env->GetDirectBufferCapacity(handles_buffer) / 4;
   }
   // Java code will handle invalidating handles if the write succeeded.
-  return MojoWriteMessage(
-      mojo_handle, buffer_start, buffer_size, handles, num_handles, flags);
+  return WriteMessageRaw(
+      MessagePipeHandle(static_cast<MojoHandle>(mojo_handle)), buffer_start,
+      buffer_size, handles, num_handles, flags);
 }
 
 static ScopedJavaLocalRef<jobject> ReadMessage(
     JNIEnv* env,
     const JavaParamRef<jobject>& jcaller,
     jint mojo_handle,
-    const JavaParamRef<jobject>& bytes,
-    const JavaParamRef<jobject>& handles_buffer,
     jint flags) {
-  void* buffer_start = 0;
-  uint32_t buffer_size = 0;
-  if (bytes) {
-    buffer_start = env->GetDirectBufferAddress(bytes);
-    DCHECK(buffer_start);
-    buffer_size = env->GetDirectBufferCapacity(bytes);
+  ScopedMessageHandle message;
+  MojoResult result =
+      ReadMessageNew(MessagePipeHandle(mojo_handle), &message, flags);
+  if (result != MOJO_RESULT_OK)
+    return Java_CoreImpl_newReadMessageResult(env, result, nullptr, nullptr);
+  DCHECK(message.is_valid());
+
+  result = MojoSerializeMessage(message->value());
+  if (result != MOJO_RESULT_OK && result != MOJO_RESULT_FAILED_PRECONDITION) {
+    return Java_CoreImpl_newReadMessageResult(env, MOJO_RESULT_ABORTED, nullptr,
+                                              nullptr);
   }
-  MojoHandle* handles = 0;
+
+  uint32_t num_bytes;
+  void* buffer;
   uint32_t num_handles = 0;
-  if (handles_buffer) {
-    handles =
-        static_cast<MojoHandle*>(env->GetDirectBufferAddress(handles_buffer));
-    num_handles = env->GetDirectBufferCapacity(handles_buffer) / 4;
+  std::vector<MojoHandle> handles;
+  result = MojoGetSerializedMessageContents(
+      message->value(), &buffer, &num_bytes, nullptr, &num_handles,
+      MOJO_GET_SERIALIZED_MESSAGE_CONTENTS_FLAG_NONE);
+  if (result == MOJO_RESULT_RESOURCE_EXHAUSTED) {
+    handles.resize(num_handles);
+    result = MojoGetSerializedMessageContents(
+        message->value(), &buffer, &num_bytes, handles.data(), &num_handles,
+        MOJO_GET_SERIALIZED_MESSAGE_CONTENTS_FLAG_NONE);
   }
-  MojoResult result = MojoReadMessage(
-      mojo_handle, buffer_start, &buffer_size, handles, &num_handles, flags);
-  // Jave code will handle taking ownership of any received handle.
-  return Java_CoreImpl_newReadMessageResult(env, result, buffer_size,
-                                            num_handles);
+
+  if (result != MOJO_RESULT_OK)
+    return Java_CoreImpl_newReadMessageResult(env, result, nullptr, nullptr);
+
+  return Java_CoreImpl_newReadMessageResult(
+      env, result,
+      base::android::ToJavaByteArray(env, static_cast<uint8_t*>(buffer),
+                                     num_bytes),
+      base::android::ToJavaIntArray(
+          env, reinterpret_cast<jint*>(handles.data()), num_handles));
 }
 
 static ScopedJavaLocalRef<jobject> ReadData(

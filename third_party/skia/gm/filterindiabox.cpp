@@ -6,10 +6,10 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 
 #include "Resources.h"
 #include "SkBitmapProcState.h"
-#include "SkBitmapScaler.h"
 #include "SkGradientShader.h"
 #include "SkImageEncoder.h"
 #include "SkStream.h"
@@ -74,7 +74,7 @@ protected:
     }
 
     SkISize onISize() override {
-        return SkISize::Make(1024, 768);
+        return SkISize::Make(680, 130);
     }
 
     void onDraw(SkCanvas* canvas) override {

@@ -80,8 +80,7 @@ const char kProfileDownloadReason[] = "Preferences";
 }  // namespace
 
 ChangePictureHandler::ChangePictureHandler()
-    : previous_image_url_(url::kAboutBlankURL),
-      previous_image_index_(user_manager::User::USER_IMAGE_INVALID),
+    : previous_image_index_(user_manager::User::USER_IMAGE_INVALID),
       user_manager_observer_(this),
       camera_observer_(this) {
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
@@ -114,6 +113,10 @@ void ChangePictureHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "selectImage", base::Bind(&ChangePictureHandler::HandleSelectImage,
                                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "requestSelectedImage",
+      base::Bind(&ChangePictureHandler::HandleRequestSelectedImage,
+                 base::Unretained(this)));
 }
 
 void ChangePictureHandler::OnJavascriptAllowed() {
@@ -127,25 +130,12 @@ void ChangePictureHandler::OnJavascriptDisallowed() {
 }
 
 void ChangePictureHandler::SendDefaultImages() {
-  base::ListValue image_urls;
-  for (int i = default_user_image::kFirstDefaultImageIndex;
-       i < default_user_image::kDefaultImagesCount; ++i) {
-    std::unique_ptr<base::DictionaryValue> image_data(
-        new base::DictionaryValue);
-    image_data->SetString("url", default_user_image::GetDefaultImageUrl(i));
-    image_data->SetString("author",
-                          l10n_util::GetStringUTF16(
-                              default_user_image::kDefaultImageAuthorIDs[i]));
-    image_data->SetString("website",
-                          l10n_util::GetStringUTF16(
-                              default_user_image::kDefaultImageWebsiteIDs[i]));
-    image_data->SetString("title",
-                          default_user_image::GetDefaultImageDescription(i));
-    image_urls.Append(std::move(image_data));
-  }
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("default-images-changed"),
-                         image_urls);
+  base::DictionaryValue result;
+  result.SetInteger("first", default_user_image::GetFirstDefaultImage());
+  std::unique_ptr<base::ListValue> default_images =
+      default_user_image::GetAsDictionary(true /* all */);
+  result.Set("images", std::move(default_images));
+  FireWebUIListener("default-images-changed", result);
 }
 
 void ChangePictureHandler::HandleChooseFile(const base::ListValue* args) {
@@ -216,7 +206,7 @@ void ChangePictureHandler::SendSelectedImage() {
     case user_manager::User::USER_IMAGE_EXTERNAL: {
       // User has image from camera/file, record it and add to the image list.
       previous_image_ = user->GetImage();
-      SendOldImage(webui::GetBitmapDataUrl(*previous_image_.bitmap()));
+      SendOldImage(webui::GetBitmapDataUrl(*previous_image_.bitmap()), -1);
       break;
     }
     case user_manager::User::USER_IMAGE_PROFILE: {
@@ -225,21 +215,18 @@ void ChangePictureHandler::SendSelectedImage() {
       break;
     }
     default: {
-      DCHECK(previous_image_index_ >= 0 &&
-             previous_image_index_ < default_user_image::kDefaultImagesCount);
-      if (previous_image_index_ >=
-          default_user_image::kFirstDefaultImageIndex) {
+      if (default_user_image::IsInCurrentImageSet(previous_image_index_)) {
         // User has image from the current set of default images.
-        base::StringValue image_url(
+        base::Value image_url(
             default_user_image::GetDefaultImageUrl(previous_image_index_));
-        CallJavascriptFunction("cr.webUIListenerCallback",
-                               base::StringValue("selected-image-changed"),
-                               image_url);
+        FireWebUIListener("selected-image-changed", image_url);
       } else {
         // User has an old default image, so present it in the same manner as a
         // previous image from file.
+        previous_image_ = user->GetImage();
         SendOldImage(
-            default_user_image::GetDefaultImageUrl(previous_image_index_));
+            default_user_image::GetDefaultImageUrl(previous_image_index_),
+            previous_image_index_);
       }
     }
   }
@@ -247,11 +234,9 @@ void ChangePictureHandler::SendSelectedImage() {
 
 void ChangePictureHandler::SendProfileImage(const gfx::ImageSkia& image,
                                             bool should_select) {
-  base::StringValue data_url(webui::GetBitmapDataUrl(*image.bitmap()));
+  base::Value data_url(webui::GetBitmapDataUrl(*image.bitmap()));
   base::Value select(should_select);
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("profile-image-changed"), data_url,
-                         select);
+  FireWebUIListener("profile-image-changed", data_url, select);
 }
 
 void ChangePictureHandler::UpdateProfileImage() {
@@ -260,17 +245,18 @@ void ChangePictureHandler::UpdateProfileImage() {
   // If we have a downloaded profile image and haven't sent it in
   // |SendSelectedImage|, send it now (without selecting).
   if (previous_image_index_ != user_manager::User::USER_IMAGE_PROFILE &&
-      !user_image_manager->DownloadedProfileImage().isNull())
+      !user_image_manager->DownloadedProfileImage().isNull()) {
     SendProfileImage(user_image_manager->DownloadedProfileImage(), false);
-
+  }
   user_image_manager->DownloadProfileImage(kProfileDownloadReason);
 }
 
-void ChangePictureHandler::SendOldImage(const std::string& image_url) {
-  previous_image_url_ = image_url;
-  base::StringValue url(image_url);
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("old-image-changed"), url);
+void ChangePictureHandler::SendOldImage(const std::string& image_url,
+                                        int image_index) {
+  base::DictionaryValue result;
+  result.SetString("url", image_url);
+  result.SetInteger("index", image_index);
+  FireWebUIListener("old-image-changed", result);
 }
 
 void ChangePictureHandler::HandleSelectImage(const base::ListValue* args) {
@@ -286,7 +272,6 @@ void ChangePictureHandler::HandleSelectImage(const base::ListValue* args) {
 
   UserImageManager* user_image_manager =
       ChromeUserManager::Get()->GetUserImageManager(GetUser()->GetAccountId());
-  int image_index = user_manager::User::USER_IMAGE_INVALID;
   bool waiting_for_camera_photo = false;
 
   if (image_type == "old") {
@@ -297,16 +282,19 @@ void ChangePictureHandler::HandleSelectImage(const base::ListValue* args) {
             previous_image_,
             user_manager::UserImage::FORMAT_JPEG));
 
-    UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
-                              default_user_image::kHistogramImageOld,
-                              default_user_image::kHistogramImagesCount);
+    UMA_HISTOGRAM_EXACT_LINEAR("UserImage.ChangeChoice",
+                               default_user_image::kHistogramImageOld,
+                               default_user_image::kHistogramImagesCount);
     VLOG(1) << "Selected old user image";
-  } else if (image_type == "default" &&
-             default_user_image::IsDefaultImageUrl(image_url, &image_index)) {
+  } else if (image_type == "default") {
+    int image_index = user_manager::User::USER_IMAGE_INVALID;
+    if (!default_user_image::IsDefaultImageUrl(image_url, &image_index))
+      LOG(FATAL) << "Invalid image_url for default image type: " << image_url;
+
     // One of the default user images.
     user_image_manager->SaveUserDefaultImageIndex(image_index);
 
-    UMA_HISTOGRAM_ENUMERATION(
+    UMA_HISTOGRAM_EXACT_LINEAR(
         "UserImage.ChangeChoice",
         default_user_image::GetDefaultImageHistogramValue(image_index),
         default_user_image::kHistogramImagesCount);
@@ -324,14 +312,14 @@ void ChangePictureHandler::HandleSelectImage(const base::ListValue* args) {
     user_image_manager->SaveUserImageFromProfileImage();
 
     if (previous_image_index_ == user_manager::User::USER_IMAGE_PROFILE) {
-      UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
-                                default_user_image::kHistogramImageOld,
-                                default_user_image::kHistogramImagesCount);
+      UMA_HISTOGRAM_EXACT_LINEAR("UserImage.ChangeChoice",
+                                 default_user_image::kHistogramImageOld,
+                                 default_user_image::kHistogramImagesCount);
       VLOG(1) << "Selected old (profile) user image";
     } else {
-      UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
-                                default_user_image::kHistogramImageFromProfile,
-                                default_user_image::kHistogramImagesCount);
+      UMA_HISTOGRAM_EXACT_LINEAR("UserImage.ChangeChoice",
+                                 default_user_image::kHistogramImageFromProfile,
+                                 default_user_image::kHistogramImagesCount);
       VLOG(1) << "Selected profile image";
     }
   } else {
@@ -343,15 +331,20 @@ void ChangePictureHandler::HandleSelectImage(const base::ListValue* args) {
     ImageDecoder::Cancel(this);
 }
 
+void ChangePictureHandler::HandleRequestSelectedImage(
+    const base::ListValue* args) {
+  SendSelectedImage();
+}
+
 void ChangePictureHandler::FileSelected(const base::FilePath& path,
                                         int index,
                                         void* params) {
   ChromeUserManager::Get()
       ->GetUserImageManager(GetUser()->GetAccountId())
       ->SaveUserImageFromFile(path);
-  UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
-                            default_user_image::kHistogramImageFromFile,
-                            default_user_image::kHistogramImagesCount);
+  UMA_HISTOGRAM_EXACT_LINEAR("UserImage.ChangeChoice",
+                             default_user_image::kHistogramImageFromFile,
+                             default_user_image::kHistogramImagesCount);
   VLOG(1) << "Selected image from file";
 }
 
@@ -360,16 +353,14 @@ void ChangePictureHandler::SetImageFromCamera(const gfx::ImageSkia& photo) {
       ->GetUserImageManager(GetUser()->GetAccountId())
       ->SaveUserImage(user_manager::UserImage::CreateAndEncode(
           photo, user_manager::UserImage::FORMAT_JPEG));
-  UMA_HISTOGRAM_ENUMERATION("UserImage.ChangeChoice",
-                            default_user_image::kHistogramImageFromCamera,
-                            default_user_image::kHistogramImagesCount);
+  UMA_HISTOGRAM_EXACT_LINEAR("UserImage.ChangeChoice",
+                             default_user_image::kHistogramImageFromCamera,
+                             default_user_image::kHistogramImagesCount);
   VLOG(1) << "Selected camera photo";
 }
 
 void ChangePictureHandler::SetCameraPresent(bool present) {
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("camera-presence-changed"),
-                         base::Value(present));
+  FireWebUIListener("camera-presence-changed", base::Value(present));
 }
 
 void ChangePictureHandler::OnCameraPresenceCheckDone(bool is_camera_present) {

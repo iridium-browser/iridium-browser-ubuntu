@@ -8,15 +8,18 @@
 
 #include "base/base_paths.h"
 #include "base/files/file_path.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/sequenced_task_runner.h"
 #include "base/threading/thread_restrictions.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/in_memory_pref_store.h"
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_filter.h"
 #include "components/prefs/pref_service_factory.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
-#include "components/translate/core/common/translate_pref_names.h"
 #include "ios/web/public/web_thread.h"
 #include "ios/web_view/internal/pref_names.h"
 #include "ios/web_view/internal/web_view_url_request_context_getter.h"
@@ -34,6 +37,11 @@ namespace ios_web_view {
 
 WebViewBrowserState::WebViewBrowserState(bool off_the_record)
     : web::BrowserState(), off_the_record_(off_the_record) {
+  // IO access is required to setup the browser state. In Chrome, this is
+  // already allowed during thread startup. However, startup time of
+  // ChromeWebView is not predetermined, so IO access is temporarily allowed.
+  bool wasIOAllowed = base::ThreadRestrictions::SetIOAllowed(true);
+
   CHECK(PathService::Get(base::DIR_APP_DATA, &path_));
 
   request_context_getter_ = new WebViewURLRequestContextGetter(
@@ -41,6 +49,8 @@ WebViewBrowserState::WebViewBrowserState(bool off_the_record)
       web::WebThread::GetTaskRunnerForThread(web::WebThread::IO),
       web::WebThread::GetTaskRunnerForThread(web::WebThread::FILE),
       web::WebThread::GetTaskRunnerForThread(web::WebThread::CACHE));
+
+  BrowserState::Initialize(this, path_);
 
   // Initialize prefs.
   scoped_refptr<user_prefs::PrefRegistrySyncable> pref_registry =
@@ -50,12 +60,19 @@ WebViewBrowserState::WebViewBrowserState(bool off_the_record)
       JsonPrefStore::GetTaskRunnerForFile(path_,
                                           web::WebThread::GetBlockingPool());
 
-  scoped_refptr<PersistentPrefStore> user_pref_store = new JsonPrefStore(
-      path_.Append(kPreferencesFilename), sequenced_task_runner, nullptr);
+  scoped_refptr<PersistentPrefStore> user_pref_store;
+  if (off_the_record) {
+    user_pref_store = new InMemoryPrefStore();
+  } else {
+    user_pref_store = new JsonPrefStore(path_.Append(kPreferencesFilename),
+                                        sequenced_task_runner, nullptr);
+  }
 
   PrefServiceFactory factory;
   factory.set_user_prefs(user_pref_store);
   prefs_ = factory.Create(pref_registry.get());
+
+  base::ThreadRestrictions::SetIOAllowed(wasIOAllowed);
 }
 
 WebViewBrowserState::~WebViewBrowserState() = default;

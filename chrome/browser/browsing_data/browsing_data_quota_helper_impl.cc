@@ -36,16 +36,16 @@ void BrowsingDataQuotaHelperImpl::StartFetching(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&BrowsingDataQuotaHelperImpl::FetchQuotaInfoOnIOThread, this,
-                 callback));
+      base::BindOnce(&BrowsingDataQuotaHelperImpl::FetchQuotaInfoOnIOThread,
+                     this, callback));
 }
 
 void BrowsingDataQuotaHelperImpl::RevokeHostQuota(const std::string& host) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&BrowsingDataQuotaHelperImpl::RevokeHostQuotaOnIOThread, this,
-                 host));
+      base::BindOnce(&BrowsingDataQuotaHelperImpl::RevokeHostQuotaOnIOThread,
+                     this, host));
 }
 
 BrowsingDataQuotaHelperImpl::BrowsingDataQuotaHelperImpl(
@@ -71,9 +71,9 @@ void BrowsingDataQuotaHelperImpl::FetchQuotaInfoOnIOThread(
   PendingHosts* pending_hosts = new PendingHosts();
   base::Closure completion = base::BarrierClosure(
       arraysize(types),
-      base::Bind(&BrowsingDataQuotaHelperImpl::OnGetOriginsComplete,
-                 weak_factory_.GetWeakPtr(), callback,
-                 base::Owned(pending_hosts)));
+      base::BindOnce(&BrowsingDataQuotaHelperImpl::OnGetOriginsComplete,
+                     weak_factory_.GetWeakPtr(), callback,
+                     base::Owned(pending_hosts)));
 
   for (const storage::StorageType& type : types) {
     quota_manager_->GetOriginsModifiedSince(
@@ -105,9 +105,9 @@ void BrowsingDataQuotaHelperImpl::OnGetOriginsComplete(
   QuotaInfoMap* quota_info = new QuotaInfoMap();
   base::Closure completion = base::BarrierClosure(
       pending_hosts->size(),
-      base::Bind(&BrowsingDataQuotaHelperImpl::OnGetHostsUsageComplete,
-                 weak_factory_.GetWeakPtr(), callback,
-                 base::Owned(quota_info)));
+      base::BindOnce(&BrowsingDataQuotaHelperImpl::OnGetHostsUsageComplete,
+                     weak_factory_.GetWeakPtr(), callback,
+                     base::Owned(quota_info)));
 
   for (const auto& itr : *pending_hosts) {
     const std::string& host = itr.first;
@@ -159,7 +159,7 @@ void BrowsingDataQuotaHelperImpl::OnGetHostsUsageComplete(
   }
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(callback, result));
+                          base::BindOnce(callback, result));
 }
 
 void BrowsingDataQuotaHelperImpl::RevokeHostQuotaOnIOThread(

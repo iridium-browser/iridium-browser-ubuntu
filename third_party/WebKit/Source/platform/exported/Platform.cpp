@@ -28,101 +28,236 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "public/platform/Platform.h"
+
+#include <memory>
+
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
+#include "platform/FontFamilyNames.h"
 #include "platform/Histogram.h"
+#include "platform/Language.h"
 #include "platform/MemoryCoordinator.h"
 #include "platform/PartitionAllocMemoryDumpProvider.h"
 #include "platform/fonts/FontCacheMemoryDumpProvider.h"
 #include "platform/heap/BlinkGCMemoryDumpProvider.h"
 #include "platform/heap/GCTaskRunner.h"
 #include "platform/instrumentation/tracing/MemoryCacheDumpProvider.h"
+#include "platform/wtf/HashMap.h"
 #include "public/platform/InterfaceProvider.h"
-#include "public/platform/Platform.h"
+#include "public/platform/WebCanvasCaptureHandler.h"
+#include "public/platform/WebFeaturePolicy.h"
+#include "public/platform/WebGestureCurve.h"
+#include "public/platform/WebGraphicsContext3DProvider.h"
+#include "public/platform/WebImageCaptureFrameGrabber.h"
+#include "public/platform/WebMediaRecorderHandler.h"
+#include "public/platform/WebMediaStreamCenter.h"
 #include "public/platform/WebPrerenderingSupport.h"
-#include "wtf/HashMap.h"
+#include "public/platform/WebRTCCertificateGenerator.h"
+#include "public/platform/WebRTCPeerConnectionHandler.h"
+#include "public/platform/WebSocketHandshakeThrottle.h"
+#include "public/platform/WebStorageNamespace.h"
+#include "public/platform/WebThread.h"
+#include "public/platform/modules/serviceworker/WebServiceWorkerCacheStorage.h"
+#include "public/platform/modules/webmidi/WebMIDIAccessor.h"
+#include "services/service_manager/public/cpp/connector.h"
 
 namespace blink {
 
-static Platform* s_platform = nullptr;
+namespace {
 
-static GCTaskRunner* s_gcTaskRunner = nullptr;
+class DefaultConnector {
+ public:
+  DefaultConnector() {
+    service_manager::mojom::ConnectorRequest request;
+    connector_ = service_manager::Connector::Create(&request);
+  }
 
-static void maxObservedSizeFunction(size_t sizeInMB) {
-  const size_t supportedMaxSizeInMB = 4 * 1024;
-  if (sizeInMB >= supportedMaxSizeInMB)
-    sizeInMB = supportedMaxSizeInMB - 1;
+  service_manager::Connector* Get() { return connector_.get(); }
+
+ private:
+  std::unique_ptr<service_manager::Connector> connector_;
+};
+
+}  // namespace
+
+static Platform* g_platform = nullptr;
+
+static GCTaskRunner* g_gc_task_runner = nullptr;
+
+static void MaxObservedSizeFunction(size_t size_in_mb) {
+  const size_t kSupportedMaxSizeInMB = 4 * 1024;
+  if (size_in_mb >= kSupportedMaxSizeInMB)
+    size_in_mb = kSupportedMaxSizeInMB - 1;
 
   // Send a UseCounter only when we see the highest memory usage
   // we've ever seen.
-  DEFINE_STATIC_LOCAL(EnumerationHistogram, committedSizeHistogram,
-                      ("PartitionAlloc.CommittedSize", supportedMaxSizeInMB));
-  committedSizeHistogram.count(sizeInMB);
+  DEFINE_STATIC_LOCAL(EnumerationHistogram, committed_size_histogram,
+                      ("PartitionAlloc.CommittedSize", kSupportedMaxSizeInMB));
+  committed_size_histogram.Count(size_in_mb);
 }
 
-static void callOnMainThreadFunction(WTF::MainThreadFunction function,
+static void CallOnMainThreadFunction(WTF::MainThreadFunction function,
                                      void* context) {
-  Platform::current()->mainThread()->getWebTaskRunner()->postTask(
+  Platform::Current()->MainThread()->GetWebTaskRunner()->PostTask(
       BLINK_FROM_HERE,
-      crossThreadBind(function, crossThreadUnretained(context)));
+      CrossThreadBind(function, CrossThreadUnretained(context)));
 }
 
-Platform::Platform() : m_mainThread(0) {
-  WTF::Partitions::initialize(maxObservedSizeFunction);
+Platform::Platform() : main_thread_(0) {
+  WTF::Partitions::Initialize(MaxObservedSizeFunction);
 }
 
-void Platform::initialize(Platform* platform) {
-  ASSERT(!s_platform);
-  ASSERT(platform);
-  s_platform = platform;
-  s_platform->m_mainThread = platform->currentThread();
+void Platform::Initialize(Platform* platform) {
+  DCHECK(!g_platform);
+  DCHECK(platform);
+  g_platform = platform;
+  g_platform->main_thread_ = platform->CurrentThread();
 
-  WTF::initialize(callOnMainThreadFunction);
+  WTF::Initialize(CallOnMainThreadFunction);
 
-  ProcessHeap::init();
-  MemoryCoordinator::initialize();
+  ProcessHeap::Init();
+  MemoryCoordinator::Initialize();
   if (base::ThreadTaskRunnerHandle::IsSet())
     base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-        BlinkGCMemoryDumpProvider::instance(), "BlinkGC",
+        BlinkGCMemoryDumpProvider::Instance(), "BlinkGC",
         base::ThreadTaskRunnerHandle::Get());
 
-  ThreadState::attachMainThread();
+  ThreadState::AttachMainThread();
+
+  // FontFamilyNames are used by platform/fonts and are initialized by core.
+  // In case core is not available (like on PPAPI plugins), we need to init
+  // them here.
+  FontFamilyNames::init();
+  InitializePlatformLanguage();
 
   // TODO(ssid): remove this check after fixing crbug.com/486782.
-  if (s_platform->m_mainThread) {
-    ASSERT(!s_gcTaskRunner);
-    s_gcTaskRunner = new GCTaskRunner(s_platform->m_mainThread);
+  if (g_platform->main_thread_) {
+    DCHECK(!g_gc_task_runner);
+    g_gc_task_runner = new GCTaskRunner(g_platform->main_thread_);
     base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-        PartitionAllocMemoryDumpProvider::instance(), "PartitionAlloc",
+        PartitionAllocMemoryDumpProvider::Instance(), "PartitionAlloc",
         base::ThreadTaskRunnerHandle::Get());
     base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-        FontCacheMemoryDumpProvider::instance(), "FontCaches",
+        FontCacheMemoryDumpProvider::Instance(), "FontCaches",
         base::ThreadTaskRunnerHandle::Get());
     base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-        MemoryCacheDumpProvider::instance(), "MemoryCache",
+        MemoryCacheDumpProvider::Instance(), "MemoryCache",
         base::ThreadTaskRunnerHandle::Get());
   }
 }
 
-void Platform::setCurrentPlatformForTesting(Platform* platform) {
-  ASSERT(platform);
-  s_platform = platform;
-  s_platform->m_mainThread = platform->currentThread();
+void Platform::SetCurrentPlatformForTesting(Platform* platform) {
+  DCHECK(platform);
+  g_platform = platform;
+  g_platform->main_thread_ = platform->CurrentThread();
 }
 
-Platform* Platform::current() {
-  return s_platform;
+Platform* Platform::Current() {
+  return g_platform;
 }
 
-WebThread* Platform::mainThread() const {
-  return m_mainThread;
+WebThread* Platform::MainThread() const {
+  return main_thread_;
 }
 
-InterfaceProvider* Platform::interfaceProvider() {
-  return InterfaceProvider::getEmptyInterfaceProvider();
+service_manager::Connector* Platform::GetConnector() {
+  DEFINE_STATIC_LOCAL(DefaultConnector, connector, ());
+  return connector.Get();
 }
 
-void Platform::bindServiceConnector(
-    mojo::ScopedMessagePipeHandle remoteHandle) {}
+InterfaceProvider* Platform::GetInterfaceProvider() {
+  return InterfaceProvider::GetEmptyInterfaceProvider();
+}
+
+std::unique_ptr<WebMIDIAccessor> Platform::CreateMIDIAccessor(
+    WebMIDIAccessorClient*) {
+  return nullptr;
+}
+
+std::unique_ptr<WebStorageNamespace> Platform::CreateLocalStorageNamespace() {
+  return nullptr;
+}
+
+std::unique_ptr<WebServiceWorkerCacheStorage> Platform::CreateCacheStorage(
+    const WebSecurityOrigin&) {
+  return nullptr;
+}
+
+std::unique_ptr<WebThread> Platform::CreateThread(const char* name) {
+  return nullptr;
+}
+
+std::unique_ptr<WebGraphicsContext3DProvider>
+Platform::CreateOffscreenGraphicsContext3DProvider(
+    const Platform::ContextAttributes&,
+    const WebURL& top_document_url,
+    WebGraphicsContext3DProvider* share_context,
+    Platform::GraphicsInfo*) {
+  return nullptr;
+};
+
+std::unique_ptr<WebGraphicsContext3DProvider>
+Platform::CreateSharedOffscreenGraphicsContext3DProvider() {
+  return nullptr;
+}
+
+std::unique_ptr<WebGestureCurve> Platform::CreateFlingAnimationCurve(
+    WebGestureDevice device_source,
+    const WebFloatPoint& velocity,
+    const WebSize& cumulative_scroll) {
+  return nullptr;
+}
+
+std::unique_ptr<WebRTCPeerConnectionHandler>
+Platform::CreateRTCPeerConnectionHandler(WebRTCPeerConnectionHandlerClient*) {
+  return nullptr;
+}
+
+std::unique_ptr<WebMediaRecorderHandler>
+Platform::CreateMediaRecorderHandler() {
+  return nullptr;
+}
+
+std::unique_ptr<WebRTCCertificateGenerator>
+Platform::CreateRTCCertificateGenerator() {
+  return nullptr;
+}
+
+std::unique_ptr<WebMediaStreamCenter> Platform::CreateMediaStreamCenter(
+    WebMediaStreamCenterClient*) {
+  return nullptr;
+}
+
+std::unique_ptr<WebCanvasCaptureHandler> Platform::CreateCanvasCaptureHandler(
+    const WebSize&,
+    double,
+    WebMediaStreamTrack*) {
+  return nullptr;
+}
+
+std::unique_ptr<WebSocketHandshakeThrottle>
+Platform::CreateWebSocketHandshakeThrottle() {
+  return nullptr;
+}
+
+std::unique_ptr<WebImageCaptureFrameGrabber>
+Platform::CreateImageCaptureFrameGrabber() {
+  return nullptr;
+}
+
+std::unique_ptr<WebFeaturePolicy> Platform::CreateFeaturePolicy(
+    const WebFeaturePolicy* parent_policy,
+    const WebParsedFeaturePolicy& container_policy,
+    const WebParsedFeaturePolicy& policy_header,
+    const WebSecurityOrigin&) {
+  return nullptr;
+}
+
+std::unique_ptr<WebFeaturePolicy> Platform::DuplicateFeaturePolicyWithOrigin(
+    const WebFeaturePolicy&,
+    const WebSecurityOrigin&) {
+  return nullptr;
+}
 
 }  // namespace blink

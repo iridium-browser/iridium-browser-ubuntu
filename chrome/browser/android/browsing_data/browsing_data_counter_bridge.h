@@ -7,6 +7,7 @@
 
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
+#include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
 
 // This class is a wrapper for BrowsingDataCounter (C++ backend) to be used by
@@ -15,17 +16,15 @@ class BrowsingDataCounterBridge {
  public:
   // Creates a BrowsingDataCounterBridge for a certain browsing data type.
   // The |data_type| is a value of the enum BrowsingDataType.
-  BrowsingDataCounterBridge(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      jint data_type);
+  BrowsingDataCounterBridge(JNIEnv* env,
+                            const base::android::JavaParamRef<jobject>& obj,
+                            jint data_type,
+                            jint clear_browsing_data_tab);
 
   ~BrowsingDataCounterBridge();
 
   // Called by the Java counterpart when it is getting garbage collected.
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
-
-  static bool Register(JNIEnv* env);
 
  private:
   void onCounterFinished(
@@ -33,6 +32,7 @@ class BrowsingDataCounterBridge {
 
   base::android::ScopedJavaGlobalRef<jobject> jobject_;
   std::unique_ptr<browsing_data::BrowsingDataCounter> counter_;
+  browsing_data::ClearBrowsingDataTab clear_browsing_data_tab_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingDataCounterBridge);
 };

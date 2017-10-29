@@ -24,8 +24,15 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+enum EffectiveConnectionType {
+    "slow-2g",
+    "2g",
+    "3g",
+    "4g"
+};
+
 [
-    DoNotCheckConstants,
+    DoNotCheckConstants
 ] interface Internals {
     GCObservation observeGC(any observed);
 
@@ -48,6 +55,8 @@
     ShadowRoot oldestShadowRoot(Element host);
     [RaisesException] ShadowRoot youngerShadowRoot(Node root);
 
+    void setBrowserControlsState(float height, boolean shrinksLayout);
+
     [RaisesException] DOMString shadowRootType(Node root);
     [RaisesException] boolean hasShadowInsertionPoint(Node root);
     [RaisesException] boolean hasContentElement(Node root);
@@ -56,12 +65,12 @@
     [RaisesException] boolean isValidContentSelect(Element contentElement);
     Node treeScopeRootNode(Node node);
     Node parentTreeScope(Node node);
-    [RaisesException] boolean hasSelectorForIdInShadow(Element host, DOMString id);
-    [RaisesException] boolean hasSelectorForClassInShadow(Element host, DOMString className);
-    [RaisesException] boolean hasSelectorForAttributeInShadow(Element host, DOMString attributeName);
     [RaisesException] unsigned short compareTreeScopePosition(Node treeScope1, Node treeScope2);
     [RaisesException] unsigned long updateStyleAndReturnAffectedElementCount();
+    // Returns the number of LayoutObjects with needs-layout flag.
     [RaisesException] unsigned long needsLayoutCount();
+    // The number of force layout since Document creation.
+    [RaisesException] readonly attribute unsigned long forceLayoutCount;
     [RaisesException] unsigned long hitTestCount(Document document);
     [RaisesException] unsigned long hitTestCacheHits(Document document);
     [RaisesException] Element? elementFromPoint(Document document, double x, double y, boolean ignoreClipping, boolean allowChildFrameContent);
@@ -99,18 +108,19 @@
     [RaisesException] void setFormControlStateOfHistoryItem(sequence<DOMString> values);
     readonly attribute Window pagePopupWindow;
 
-    [RaisesException] ClientRect absoluteCaretBounds();
+    [RaisesException] DOMRectReadOnly absoluteCaretBounds();
 
-    ClientRect boundingBox(Element element);
+    DOMRectReadOnly boundingBox(Element element);
 
     [RaisesException] void setMarker(Document document, Range range, DOMString markerType);
     [RaisesException] unsigned long markerCountForNode(Node node, DOMString markerType);
     unsigned long activeMarkerCountForNode(Node node);
     [RaisesException] Range markerRangeForNode(Node node, DOMString markerType, unsigned long index);
     [RaisesException] DOMString markerDescriptionForNode(Node node, DOMString markerType, unsigned long index);
-    void addTextMatchMarker(Range range, boolean isActive);
-    [RaisesException] void addCompositionMarker(Range range, DOMString underlineColorValue, boolean thick, DOMString backgroundColorValue);
-    void setMarkersActive(Node node, unsigned long startOffset, unsigned long endOffset, boolean active);
+    [RaisesException] void addTextMatchMarker(Range range, DOMString matchStatus);
+    [RaisesException] void addCompositionMarker(Range range, DOMString underlineColorValue, DOMString thicknessValue, DOMString backgroundColorValue);
+    [RaisesException] void addActiveSuggestionMarker(Range range, DOMString underlineColorValue, DOMString thicknessValue, DOMString backgroundColorValue);
+    void setTextMatchMarkersActive(Node node, unsigned long startOffset, unsigned long endOffset, boolean active);
     void setMarkedTextMatchesAreHighlighted(Document document, boolean highlight);
 
     [RaisesException] void setFrameViewPosition(Document document, long x, long y);
@@ -135,10 +145,12 @@
     [RaisesException] Node touchNodeAdjustedToBestClickableNode(long x, long y, long width, long height, Document document);
     [RaisesException] DOMPoint touchPositionAdjustedToBestContextMenuNode(long x, long y, long width, long height, Document document);
     [RaisesException] Node touchNodeAdjustedToBestContextMenuNode(long x, long y, long width, long height, Document document);
-    [RaisesException] ClientRect bestZoomableAreaForTouchPoint(long x, long y, long width, long height, Document document);
+    [RaisesException] DOMRectReadOnly bestZoomableAreaForTouchPoint(long x, long y, long width, long height, Document document);
 
     [RaisesException] long lastSpellCheckRequestSequence(Document document);
     [RaisesException] long lastSpellCheckProcessedSequence(Document document);
+    [RuntimeEnabled=IdleTimeSpellChecking, RaisesException] DOMString idleTimeSpellCheckerState(Document document);
+    [RuntimeEnabled=IdleTimeSpellChecking, RaisesException] void runIdleTimeSpellChecker(Document document);
 
     sequence<DOMString> userPreferredLanguages();
     void setUserPreferredLanguages(sequence<DOMString> languages);
@@ -150,6 +162,7 @@
     unsigned long scrollEventHandlerCount(Document document);
     unsigned long touchStartOrMoveEventHandlerCount(Document document);
     unsigned long touchEndOrCancelEventHandlerCount(Document document);
+    unsigned long pointerEventHandlerCount(Document document);
     [RaisesException] LayerRectList touchEventTargetLayerRects(Document document);
 
     [RaisesException] boolean executeCommand(Document document, DOMString name, DOMString value);
@@ -199,13 +212,12 @@
 
     DOMString scrollingStateTreeAsText(Document document);
     [RaisesException] DOMString mainThreadScrollingReasons(Document document);
-    [RaisesException] ClientRectList nonFastScrollableRects(Document document);
+    [RaisesException] DOMRectList nonFastScrollableRects(Document document);
 
     void evictAllResources();
 
     unsigned long numberOfLiveNodes();
     unsigned long numberOfLiveDocuments();
-    DOMString dumpRefCountedInstanceCounts();
 
     DOMString counterValue(Element element);
     [RaisesException] long pageNumber(Element element, optional float pageWidth = 800, optional float pageHeight = 600);
@@ -236,9 +248,6 @@
 
     sequence<DOMString> getReferencedFilePaths();
 
-    [RaisesException] void startStoringCompositedLayerDebugInfo(Document document);
-    [RaisesException] void stopStoringCompositedLayerDebugInfo(Document document);
-
     // These functions both reset the tracked repaint rects. They are intended to be used in the following order:
     //  startTrackingRepaints(), repaintRectsAsText(), stopTrackingRepaints().
     [RaisesException] void startTrackingRepaints(Document document);
@@ -252,22 +261,28 @@
     [RaisesException] void forceFullRepaint(Document document);
 
     // Returns a list of draggable/non-draggable regions in the document.
-    [RaisesException] ClientRectList draggableRegions(Document document);
-    [RaisesException] ClientRectList nonDraggableRegions(Document document);
+    [RaisesException] DOMRectList draggableRegions(Document document);
+    [RaisesException] DOMRectList nonDraggableRegions(Document document);
 
     // Returns a string with information about the mouse cursor used at the specified client location.
     DOMString getCurrentCursorInfo();
 
     readonly attribute boolean cursorUpdatePending;
+    readonly attribute boolean fakeMouseMovePending; 
 
     DOMString markerTextForListItem(Element element);
 
     SerializedScriptValue deserializeBuffer(ArrayBuffer buffer);
     ArrayBuffer serializeObject(SerializedScriptValue obj);
 
+    [CallWith=ScriptState] any deserializeBufferContainingWasm(ArrayBuffer buffer);
+    ArrayBuffer serializeWithInlineWasm(any obj);
+
+
     void forceReload(boolean endToEnd);
 
     DOMString getImageSourceURL(Element element);
+    [RaisesException] void forceImageReload(Element element);
 
     DOMString selectMenuListText(HTMLSelectElement select);
     boolean isSelectPopupVisible(Node node);
@@ -279,7 +294,7 @@
     readonly attribute unsigned long visibleSelectionAnchorOffset;
     readonly attribute Node? visibleSelectionFocusNode;
     readonly attribute unsigned long visibleSelectionFocusOffset;
-    [RaisesException] ClientRect selectionBounds();
+    [RaisesException] DOMRect selectionBounds();
     readonly attribute DOMString textAffinity;
 
     boolean loseSharedGraphicsContext3D();
@@ -311,6 +326,7 @@
 
     // These functions are for testing NetInfo. You must call clearNetworkConnectionInfoOverride() at the end.
     [RaisesException] void setNetworkConnectionInfoOverride(boolean onLine, DOMString type, double downlinkMaxMbps);
+    [RaisesException] void setNetworkQualityInfoOverride(EffectiveConnectionType effective_type, unsigned long transport_rtt_msec, double downlink_throughput_mbps);
     void clearNetworkConnectionInfoOverride();
 
     // This function is for testing HitRegions on Canvas2D.
@@ -320,6 +336,8 @@
     unsigned long canvasFontCacheMaxFonts();
 
     DictionaryTest dictionaryTest();
+    RecordTest recordTest();
+    SequenceTest sequenceTest();
     UnionTypesTest unionTypesTest();
     CallbackFunctionTest callbackFunctionTest();
     [RaisesException] void setScrollChain(ScrollState scrollState, sequence<Element> elements);
@@ -338,6 +356,11 @@
 
     boolean isUseCounted(Document document, unsigned long feature);
     boolean isCSSPropertyUseCounted(Document document, DOMString propertyName);
+    boolean isAnimatedCSSPropertyUseCounted(Document document, DOMString propertyName);
+
+    sequence<DOMString> getCSSPropertyLonghands();
+    sequence<DOMString> getCSSPropertyShorthands();
+    sequence<DOMString> getCSSPropertyAliases();
 
     // Returns a promise that is resolved when |feature| is counted on
     // |document|'s UseCounter. When |feature| was already counted, it's
@@ -351,8 +374,8 @@
     [Unscopable] readonly attribute DOMString unscopableAttribute;
     [Unscopable] DOMString unscopableMethod();
 
-    ClientRectList focusRingRects(Element element);
-    ClientRectList outlineRects(Element element);
+    DOMRectList focusRingRects(Element element);
+    DOMRectList outlineRects(Element element);
     void setCapsLockState(boolean enabled);
 
     // Returns whether the scrollbar was able to be shown or hidden; not all platforms
@@ -365,11 +388,12 @@
 
     DOMString getProgrammaticScrollAnimationState(Node node);
 
-    ClientRect visualRect(Node node);
+    DOMRect visualRect(Node node);
 
     OriginTrialsTest originTrialsTest();
 
     void crash();
 
     void setIsLowEndDevice(boolean isLowEndDevice);
+    boolean isLowEndDevice();
 };

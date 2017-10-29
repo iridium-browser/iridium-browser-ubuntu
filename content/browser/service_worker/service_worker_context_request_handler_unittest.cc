@@ -11,7 +11,6 @@
 #include "base/run_loop.h"
 #include "base/test/histogram_tester.h"
 #include "content/browser/browser_thread_impl.h"
-#include "content/browser/fileapi/mock_url_request_delegate.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_provider_host.h"
@@ -24,8 +23,10 @@
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/load_flags.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory_impl.h"
+#include "net/url_request/url_request_test_util.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -65,7 +66,7 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
     script_url_ = GURL("https://host/script.js");
     import_script_url_ = GURL("https://host/import.js");
     registration_ = new ServiceWorkerRegistration(
-        scope_, 1L, context()->AsWeakPtr());
+        ServiceWorkerRegistrationOptions(scope_), 1L, context()->AsWeakPtr());
     version_ = new ServiceWorkerVersion(registration_.get(), script_url_,
                                         context()->storage()->NewVersionId(),
                                         context()->AsWeakPtr());
@@ -90,7 +91,8 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
     std::unique_ptr<ServiceWorkerProviderHost> host =
         CreateProviderHostForServiceWorkerContext(
             helper_->mock_render_process_id(), 1 /* provider_id */,
-            true /* is_parent_frame_secure */, context()->AsWeakPtr());
+            true /* is_parent_frame_secure */, context()->AsWeakPtr(),
+            &remote_endpoint_);
     provider_host_ = host->AsWeakPtr();
     context()->AddProviderHost(std::move(host));
     provider_host_->running_hosted_version_ = version_;
@@ -98,7 +100,8 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
 
   std::unique_ptr<net::URLRequest> CreateRequest(const GURL& url) {
     return url_request_context_.CreateRequest(url, net::DEFAULT_PRIORITY,
-                                              &url_request_delegate_);
+                                              &url_request_delegate_,
+                                              TRAFFIC_ANNOTATION_FOR_TESTS);
   }
 
   // Creates a ServiceWorkerContextHandler directly.
@@ -118,8 +121,9 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
         helper_->mock_render_process_id(), provider_host_->provider_id(),
         false /* skip_service_worker */, FETCH_REQUEST_MODE_NO_CORS,
         FETCH_CREDENTIALS_MODE_OMIT, FetchRedirectMode::FOLLOW_MODE,
-        RESOURCE_TYPE_SERVICE_WORKER, REQUEST_CONTEXT_TYPE_SERVICE_WORKER,
-        REQUEST_CONTEXT_FRAME_TYPE_NONE, nullptr);
+        std::string() /* integrity */, RESOURCE_TYPE_SERVICE_WORKER,
+        REQUEST_CONTEXT_TYPE_SERVICE_WORKER, REQUEST_CONTEXT_FRAME_TYPE_NONE,
+        nullptr);
   }
 
  protected:
@@ -129,11 +133,12 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
   scoped_refptr<ServiceWorkerVersion> version_;
   base::WeakPtr<ServiceWorkerProviderHost> provider_host_;
   net::URLRequestContext url_request_context_;
-  MockURLRequestDelegate url_request_delegate_;
+  net::TestDelegate url_request_delegate_;
   net::URLRequestJobFactoryImpl url_request_job_factory_;
   GURL scope_;
   GURL script_url_;
   GURL import_script_url_;
+  ServiceWorkerRemoteProviderEndpoint remote_endpoint_;
   storage::BlobStorageContext blob_storage_context_;
 };
 
@@ -249,8 +254,9 @@ TEST_F(ServiceWorkerContextRequestHandlerTest,
       helper_->mock_render_process_id(), provider_host_->provider_id(),
       true /* skip_service_worker */, FETCH_REQUEST_MODE_NO_CORS,
       FETCH_CREDENTIALS_MODE_OMIT, FetchRedirectMode::FOLLOW_MODE,
-      RESOURCE_TYPE_SERVICE_WORKER, REQUEST_CONTEXT_TYPE_SERVICE_WORKER,
-      REQUEST_CONTEXT_FRAME_TYPE_NONE, nullptr);
+      std::string() /* integrity */, RESOURCE_TYPE_SERVICE_WORKER,
+      REQUEST_CONTEXT_TYPE_SERVICE_WORKER, REQUEST_CONTEXT_FRAME_TYPE_NONE,
+      nullptr);
   // Verify a ServiceWorkerRequestHandler was created.
   ServiceWorkerRequestHandler* handler =
       ServiceWorkerRequestHandler::GetHandler(request.get());

@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
@@ -11,6 +12,7 @@
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/json/json_reader.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
@@ -33,16 +35,17 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/search_engines/default_search_manager.h"
 #include "components/search_engines/template_url_data.h"
-#include "components/user_prefs/tracked/tracked_preference_histogram_names.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/common/extension.h"
+#include "services/preferences/public/cpp/tracked/tracked_preference_histogram_names.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/chromeos_switches.h"
 #endif
 
 #if defined(OS_WIN)
-#include "base/test/test_reg_util_win.h"
+#include "base/win/registry.h"
+#include "chrome/install_static/install_util.h"
 #endif
 
 namespace {
@@ -65,9 +68,25 @@ enum AllowedBuckets {
 
 #if defined(OS_WIN)
 base::string16 GetRegistryPathForTestProfile() {
+  // Cleanup follow-up to http://crbug.com/721245 for the previous location of
+  // this test key which had similar problems (to a lesser extent). It's
+  // redundant but harmless to have multiple callers hit this on the same
+  // machine. TODO(gab): remove this mid-june 2017.
+  base::win::RegKey key;
+  if (key.Open(HKEY_CURRENT_USER, L"SOFTWARE\\Chromium\\PrefHashBrowserTest",
+               KEY_SET_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS) {
+    LONG result = key.DeleteKey(L"");
+    EXPECT_TRUE(result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND);
+  }
+
   base::FilePath profile_dir;
   EXPECT_TRUE(PathService::Get(chrome::DIR_USER_DATA, &profile_dir));
-  return L"SOFTWARE\\Chromium\\PrefHashBrowserTest\\" +
+
+  // Use a location under the real PreferenceMACs path so that the backup
+  // cleanup logic in ChromeTestLauncherDelegate::PreSharding() for interrupted
+  // tests covers this test key as well.
+  return install_static::GetRegistryPath() +
+         L"\\PreferenceMACs\\PrefHashBrowserTest\\" +
          profile_dir.BaseName().value();
 }
 #endif
@@ -221,7 +240,7 @@ class PrefHashBrowserTestBase
     // Sanity check that old protected pref file is never present in modern
     // Chromes.
     EXPECT_FALSE(base::PathExists(
-        profile_dir.Append(chrome::kProtectedPreferencesFilenameDeprecated)));
+        profile_dir.Append(FILE_PATH_LITERAL("Protected Preferences"))));
 
     // Read the preferences from disk.
 
@@ -295,8 +314,6 @@ class PrefHashBrowserTestBase
   void TearDown() override {
 #if defined(OS_WIN)
     // When done, delete the Registry key to avoid polluting the registry.
-    // TODO(proberge): it would be nice to delete keys from interrupted tests
-    // as well.
     if (!IsPRETest()) {
       base::string16 registry_key = GetRegistryPathForTestProfile();
       base::win::RegKey key;
@@ -885,9 +902,9 @@ class PrefHashBrowserTestChangedSplitPref : public PrefHashBrowserTestBase {
 
     // Drop a fake extension (for the purpose of this test, dropped settings
     // don't need to be valid extension settings).
-    base::DictionaryValue* fake_extension = new base::DictionaryValue;
+    auto fake_extension = base::MakeUnique<base::DictionaryValue>();
     fake_extension->SetString("name", "foo");
-    extensions_dict->Set(std::string(32, 'a'), fake_extension);
+    extensions_dict->Set(std::string(32, 'a'), std::move(fake_extension));
   }
 
   void VerifyReactionToPrefAttack() override {

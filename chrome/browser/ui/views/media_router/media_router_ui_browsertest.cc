@@ -49,8 +49,6 @@ class MediaRouterUIBrowserTest : public InProcessBrowserTest {
   ~MediaRouterUIBrowserTest() override {}
 
   void SetUpOnMainThread() override {
-    InProcessBrowserTest::SetUpOnMainThread();
-
     BrowserActionsContainer* browser_actions_container =
         BrowserView::GetBrowserViewForBrowser(browser())
             ->toolbar()
@@ -75,8 +73,8 @@ class MediaRouterUIBrowserTest : public InProcessBrowserTest {
     // contents to chrome://media-router.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(&MediaRouterUIBrowserTest::ExecuteMediaRouterAction,
-                   base::Unretained(this), app_menu_button));
+        base::BindOnce(&MediaRouterUIBrowserTest::ExecuteMediaRouterAction,
+                       base::Unretained(this), app_menu_button));
 
     base::RunLoop run_loop;
     app_menu_button->ShowMenu(false);
@@ -93,6 +91,11 @@ class MediaRouterUIBrowserTest : public InProcessBrowserTest {
     return MediaRouterDialogControllerImpl::GetOrCreateForWebContents(
                browser()->tab_strip_model()->GetActiveWebContents())
         ->action();
+  }
+
+  ui::SimpleMenuModel* GetActionContextMenu() {
+    return static_cast<ui::SimpleMenuModel*>(
+        GetMediaRouterAction()->GetContextMenu());
   }
 
   void ExecuteMediaRouterAction(AppMenuButton* app_menu_button) {
@@ -340,6 +343,28 @@ IN_PROC_BROWSER_TEST_F(MediaRouterUIBrowserTest,
   EXPECT_TRUE(ActionExists());
   browser2->window()->Close();
   EXPECT_TRUE(ActionExists());
+}
+
+IN_PROC_BROWSER_TEST_F(MediaRouterUIBrowserTest, UpdateActionLocation) {
+  SetAlwaysShowActionPref(true);
+
+  // Get the index for "Hide in Chrome menu" / "Show in toolbar" menu item.
+  const int command_index = GetActionContextMenu()->GetIndexOfCommandId(
+      IDC_MEDIA_ROUTER_SHOW_IN_TOOLBAR);
+
+  // Start out with the action visible on the main bar.
+  EXPECT_TRUE(
+      toolbar_actions_bar_->IsActionVisibleOnMainBar(GetMediaRouterAction()));
+  GetActionContextMenu()->ActivatedAt(command_index);
+
+  // The action should get hidden in the overflow menu.
+  EXPECT_FALSE(
+      toolbar_actions_bar_->IsActionVisibleOnMainBar(GetMediaRouterAction()));
+  GetActionContextMenu()->ActivatedAt(command_index);
+
+  // The action should be back on the main bar.
+  EXPECT_TRUE(
+      toolbar_actions_bar_->IsActionVisibleOnMainBar(GetMediaRouterAction()));
 }
 
 IN_PROC_BROWSER_TEST_F(MediaRouterUIBrowserTest, MigrateToolbarIconShownPref) {

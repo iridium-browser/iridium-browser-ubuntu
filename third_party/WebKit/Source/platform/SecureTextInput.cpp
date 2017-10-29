@@ -25,18 +25,20 @@
 
 #include "platform/SecureTextInput.h"
 
-#if OS(MACOSX)
+#include "build/build_config.h"
+
+#if defined(OS_MACOSX)
 #import <Carbon/Carbon.h>
 
 namespace blink {
 
-void enableSecureTextInput() {
+void EnableSecureTextInput() {
   if (IsSecureEventInputEnabled())
     return;
   EnableSecureEventInput();
 }
 
-void disableSecureTextInput() {
+void DisableSecureTextInput() {
   if (!IsSecureEventInputEnabled())
     return;
   DisableSecureEventInput();
@@ -44,4 +46,4 @@ void disableSecureTextInput() {
 
 }  // namespace blink
 
-#endif  // OS(MACOSX)
+#endif  // defined(OS_MACOSX)

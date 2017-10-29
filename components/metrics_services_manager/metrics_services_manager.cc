@@ -6,10 +6,12 @@
 
 #include <utility>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/metrics_service_client.h"
 #include "components/metrics/metrics_state_manager.h"
+#include "components/metrics/metrics_switches.h"
 #include "components/metrics_services_manager/metrics_services_manager_client.h"
 #include "components/rappor/rappor_service_impl.h"
 #include "components/ukm/ukm_service.h"
@@ -103,10 +105,10 @@ void MetricsServicesManager::UpdateRunningServices() {
   DCHECK(thread_checker_.CalledOnValidThread());
   metrics::MetricsService* metrics = GetMetricsService();
 
-  if (client_->OnlyDoMetricsRecording()) {
+  const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
+  if (cmdline->HasSwitch(metrics::switches::kMetricsRecordingOnly)) {
     metrics->StartRecordingForTests();
-    GetRapporServiceImpl()->Update(
-        rappor::UMA_RAPPOR_GROUP | rappor::SAFEBROWSING_RAPPOR_GROUP, false);
+    GetRapporServiceImpl()->Update(true, false);
     return;
   }
 
@@ -125,22 +127,7 @@ void MetricsServicesManager::UpdateRunningServices() {
 
   UpdateUkmService();
 
-  int recording_groups = 0;
-#if defined(GOOGLE_CHROME_BUILD)
-  if (may_record_)
-    recording_groups |= rappor::UMA_RAPPOR_GROUP;
-
-  // NOTE: It is safe to use a raw pointer to |this| because this object owns
-  // |client_|, and the contract of
-  // MetricsServicesManagerClient::IsSafeBrowsingEnabled() states that the
-  // callback passed in must not be used beyond the lifetime of the client
-  // instance.
-  base::Closure on_safe_browsing_update_callback = base::Bind(
-      &MetricsServicesManager::UpdateRunningServices, base::Unretained(this));
-  if (client_->IsSafeBrowsingEnabled(on_safe_browsing_update_callback))
-    recording_groups |= rappor::SAFEBROWSING_RAPPOR_GROUP;
-#endif  // defined(GOOGLE_CHROME_BUILD)
-  GetRapporServiceImpl()->Update(recording_groups, may_upload_);
+  GetRapporServiceImpl()->Update(may_record_, may_upload_);
 }
 
 void MetricsServicesManager::UpdateUkmService() {
@@ -148,8 +135,10 @@ void MetricsServicesManager::UpdateUkmService() {
   if (!ukm)
     return;
   bool sync_enabled =
+      client_->IsMetricsReportingForceEnabled() ||
       metrics_service_client_->IsHistorySyncEnabledOnAllProfiles();
-  if (may_record_ && sync_enabled) {
+  bool is_incognito = client_->IsIncognitoSessionActive();
+  if (may_record_ && sync_enabled & !is_incognito) {
     ukm->EnableRecording();
     if (may_upload_)
       ukm->EnableReporting();
@@ -162,7 +151,9 @@ void MetricsServicesManager::UpdateUkmService() {
 }
 
 void MetricsServicesManager::UpdateUploadPermissions(bool may_upload) {
-  UpdatePermissions(client_->IsMetricsReportingEnabled(), may_upload);
+  UpdatePermissions((client_->IsMetricsReportingForceEnabled() ||
+                     client_->IsMetricsReportingEnabled()),
+                    client_->IsMetricsReportingForceEnabled() || may_upload);
 }
 
 }  // namespace metrics_services_manager

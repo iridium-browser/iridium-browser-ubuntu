@@ -18,7 +18,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
+#include "media/base/android/android_util.h"
 #include "media/base/android/media_drm_bridge_cdm_context.h"
+#include "media/base/android/media_drm_storage.h"
+#include "media/base/android/media_drm_storage_bridge.h"
 #include "media/base/cdm_promise.h"
 #include "media/base/cdm_promise_adapter.h"
 #include "media/base/content_decryption_module.h"
@@ -60,9 +63,10 @@ class MEDIA_EXPORT MediaDrmBridge : public ContentDecryptionModule,
   // Notification called when MediaCrypto object is ready.
   // Parameters:
   // |media_crypto| - global reference to MediaCrypto object
-  // |needs_protected_surface| - true if protected surface is required.
-  using MediaCryptoReadyCB = base::Callback<void(JavaObjectPtr media_crypto,
-                                                 bool needs_protected_surface)>;
+  // |requires_secure_video_codec| - true if secure video decoder is required
+  using MediaCryptoReadyCB =
+      base::Callback<void(JavaObjectPtr media_crypto,
+                          bool requires_secure_video_codec)>;
 
   // Checks whether MediaDRM is available and usable, including for decoding.
   // All other static methods check IsAvailable() or equivalent internally.
@@ -91,8 +95,10 @@ class MEDIA_EXPORT MediaDrmBridge : public ContentDecryptionModule,
   // if |security_level| is SECURITY_LEVEL_DEFAULT.
   static scoped_refptr<MediaDrmBridge> Create(
       const std::string& key_system,
+      const GURL& security_origin,
       SecurityLevel security_level,
       const CreateFetcherCB& create_fetcher_cb,
+      const CreateStorageCB& create_storage_cb,
       const SessionMessageCB& session_message_cb,
       const SessionClosedCB& session_closed_cb,
       const SessionKeysChangeCB& session_keys_change_cb,
@@ -100,6 +106,8 @@ class MEDIA_EXPORT MediaDrmBridge : public ContentDecryptionModule,
 
   // Same as Create() except that no session callbacks are provided. This is
   // used when we need to use MediaDrmBridge without creating any sessions.
+  // TODO(yucliu): Pass |security_origin| here to clear per-origin certs and
+  // licenses.
   static scoped_refptr<MediaDrmBridge> CreateWithoutSessionSupport(
       const std::string& key_system,
       SecurityLevel security_level,
@@ -138,9 +146,9 @@ class MEDIA_EXPORT MediaDrmBridge : public ContentDecryptionModule,
                      const base::Closure& cdm_unset_cb) override;
   void UnregisterPlayer(int registration_id) override;
 
-  // Helper function to determine whether a protected surface is needed for the
+  // Helper function to determine whether a secure decoder is required for the
   // video playback.
-  bool IsProtectedSurfaceRequired();
+  bool IsSecureCodecRequired();
 
   // Reset the device credentials.
   void ResetDeviceCredentials(const ResetCredentialsCB& callback);
@@ -207,12 +215,17 @@ class MEDIA_EXPORT MediaDrmBridge : public ContentDecryptionModule,
       const base::android::JavaParamRef<jobject>& j_media_drm,
       const base::android::JavaParamRef<jbyteArray>& j_session_id);
 
+  // Called when key statuses of session are changed. |is_key_release| is set to
+  // true when releasing keys. Some of the MediaDrm key status codes should be
+  // mapped to CDM key status differently (e.g. EXPIRE -> RELEASED).
   void OnSessionKeysChange(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& j_media_drm,
       const base::android::JavaParamRef<jbyteArray>& j_session_id,
+      // List<KeyStatus>
       const base::android::JavaParamRef<jobjectArray>& j_keys_info,
-      bool has_additional_usable_key);
+      bool has_additional_usable_key,
+      bool is_key_release);
 
   // |expiry_time_ms| is the new expiration time for the keys in the session.
   // The time is in milliseconds, relative to the Unix epoch. A time of 0
@@ -235,8 +248,10 @@ class MEDIA_EXPORT MediaDrmBridge : public ContentDecryptionModule,
 
   static scoped_refptr<MediaDrmBridge> CreateInternal(
       const std::string& key_system,
+      const GURL& security_origin,
       SecurityLevel security_level,
       const CreateFetcherCB& create_fetcher_cb,
+      const CreateStorageCB& create_storage_cb,
       const SessionMessageCB& session_message_cb,
       const SessionClosedCB& session_closed_cb,
       const SessionKeysChangeCB& session_keys_change_cb,
@@ -247,8 +262,10 @@ class MEDIA_EXPORT MediaDrmBridge : public ContentDecryptionModule,
   // SECURITY_LEVEL_DEFAULT. Sessions should not be created if session callbacks
   // are null.
   MediaDrmBridge(const std::vector<uint8_t>& scheme_uuid,
+                 const GURL& security_origin,
                  SecurityLevel security_level,
                  const CreateFetcherCB& create_fetcher_cb,
+                 const CreateStorageCB& create_storage_cb,
                  const SessionMessageCB& session_message_cb,
                  const SessionClosedCB& session_closed_cb,
                  const SessionKeysChangeCB& session_keys_change_cb,
@@ -256,13 +273,8 @@ class MEDIA_EXPORT MediaDrmBridge : public ContentDecryptionModule,
 
   ~MediaDrmBridge() override;
 
-  static bool IsSecureDecoderRequired(SecurityLevel security_level);
-
   // Get the security level of the media.
   SecurityLevel GetSecurityLevel();
-
-  // A helper method to create a JavaObjectPtr.
-  JavaObjectPtr CreateJavaObjectPtr(jobject object);
 
   // A helper method that is called when MediaCrypto is ready.
   void NotifyMediaCryptoReady(JavaObjectPtr j_media_crypto);
@@ -279,6 +291,9 @@ class MEDIA_EXPORT MediaDrmBridge : public ContentDecryptionModule,
 
   // UUID of the key system.
   std::vector<uint8_t> scheme_uuid_;
+
+  // Persistent storage for session ID map.
+  MediaDrmStorageBridge storage_;
 
   // Java MediaDrm instance.
   base::android::ScopedJavaGlobalRef<jobject> j_media_drm_;

@@ -5,6 +5,7 @@
 #include "net/cert/internal/verify_certificate_chain.h"
 
 #include "net/cert/internal/signature_policy.h"
+#include "net/cert/internal/test_helpers.h"
 #include "net/cert/internal/trust_store.h"
 #include "net/cert/internal/verify_certificate_chain_typed_unittest.h"
 
@@ -14,24 +15,20 @@ namespace {
 
 class VerifyCertificateChainDelegate {
  public:
-  static void Verify(const ParsedCertificateList& chain,
-                     const scoped_refptr<TrustAnchor>& trust_anchor,
-                     const der::GeneralizedTime& time,
-                     bool expected_result,
-                     const std::string& expected_errors,
+  static void Verify(const VerifyCertChainTest& test,
                      const std::string& test_file_path) {
-    ASSERT_TRUE(trust_anchor);
-
     SimpleSignaturePolicy signature_policy(1024);
 
-    CertErrors errors;
-    bool result = VerifyCertificateChain(chain, trust_anchor.get(),
-                                         &signature_policy, time, &errors);
-    EXPECT_EQ(expected_result, result);
-    EXPECT_EQ(expected_errors, errors.ToDebugString()) << "Test file: "
-                                                       << test_file_path;
-    if (!result)
-      EXPECT_FALSE(errors.empty());
+    CertPathErrors errors;
+    // TODO(eroman): Check user_constrained_policy_set.
+    VerifyCertificateChain(
+        test.chain, test.last_cert_trust, &signature_policy, test.time,
+        test.key_purpose, test.initial_explicit_policy,
+        test.user_initial_policy_set, test.initial_policy_mapping_inhibit,
+        test.initial_any_policy_inhibit,
+        nullptr /*user_constrained_policy_set*/, &errors);
+    VerifyCertPathErrors(test.expected_errors, errors, test.chain,
+                         test_file_path);
   }
 };
 

@@ -12,8 +12,11 @@
 #include "base/test/test_suite.h"
 #include "ui/aura/env.h"
 
+namespace ui {
+class ContextFactory;
+}
+
 namespace ash {
-namespace test {
 
 class AshTestSuite : public base::TestSuite {
  public:
@@ -30,10 +33,13 @@ class AshTestSuite : public base::TestSuite {
 
   base::TestDiscardableMemoryAllocator discardable_memory_allocator_;
 
+  // Only used when running in mus/mash, and is set as the context_factory
+  // on aura::Env.
+  std::unique_ptr<ui::ContextFactory> context_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(AshTestSuite);
 };
 
-}  // namespace test
 }  // namespace ash
 
 #endif  // ASH_TEST_ASH_TEST_SUITE_H_

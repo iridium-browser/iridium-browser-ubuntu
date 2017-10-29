@@ -29,6 +29,10 @@ namespace media {
 struct MediaLogEvent;
 }
 
+namespace ukm {
+class UkmEntryBuilder;
+}
+
 namespace content {
 
 // This class stores information about currently active media.
@@ -83,18 +87,21 @@ class CONTENT_EXPORT MediaInternals
 
   // If possible, i.e. a WebContents exists for the given RenderFrameHostID,
   // tells an existing AudioLogEntry the WebContents title for easier
-  // differentiation on the UI.
+  // differentiation on the UI. Note that the log entry must be created (by
+  // calling OnCreated with |component_id| on |audio_log|) before calling this
+  // method.
   void SetWebContentsTitleForAudioLogEntry(int component_id,
                                            int render_process_id,
                                            int render_frame_id,
                                            media::AudioLog* audio_log);
+
+  void OnProcessTerminatedForTesting(int process_id);
 
  private:
   // Inner class to handle reporting pipelinestatus to UMA
   class MediaInternalsUMAHandler;
 
   friend class AudioLogImpl;
-  friend class MediaInternalsTest;
 
   MediaInternals();
 
@@ -118,6 +125,10 @@ class CONTENT_EXPORT MediaInternals
                       const std::string& cache_key,
                       const std::string& function,
                       const base::DictionaryValue* value);
+
+  std::unique_ptr<ukm::UkmEntryBuilder> CreateUkmBuilder(
+      const GURL& url,
+      const char* event_name);
 
   // Must only be accessed on the UI thread.
   std::vector<UpdateCallback> update_callbacks_;

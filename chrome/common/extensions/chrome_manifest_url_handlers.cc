@@ -51,8 +51,8 @@ URLOverrides::URLOverrides() {
 URLOverrides::~URLOverrides() {
 }
 
-static base::LazyInstance<URLOverrides::URLOverrideMap> g_empty_url_overrides =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<URLOverrides::URLOverrideMap>::DestructorAtExit
+    g_empty_url_overrides = LAZY_INSTANCE_INITIALIZER;
 
 // static
 const URLOverrides::URLOverrideMap& URLOverrides::GetChromeURLOverrides(
@@ -142,8 +142,16 @@ bool URLOverridesHandler::Parse(Extension* extension, base::string16* error) {
     *error = base::ASCIIToUTF16(errors::kMultipleOverrides);
     return false;
   }
+
+  // If this is an NTP override extension, add the NTP override permission.
+  if (url_overrides->chrome_url_overrides_.count(chrome::kChromeUINewTabHost)) {
+    PermissionsParser::AddAPIPermission(extension,
+                                        APIPermission::kNewTabPageOverride);
+  }
+
   extension->SetManifestData(keys::kChromeURLOverrides,
                              std::move(url_overrides));
+
   return true;
 }
 

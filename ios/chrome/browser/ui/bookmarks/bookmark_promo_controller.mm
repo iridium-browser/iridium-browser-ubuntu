@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/mac/scoped_nsobject.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -19,6 +18,10 @@
 #import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
 #import "ios/chrome/browser/ui/commands/show_signin_command.h"
 #import "ios/chrome/browser/ui/ui_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 // Enum is used to record the actions performed by the user on the promo cell.
@@ -57,8 +60,7 @@ class SignInObserver;
 
 // Called when a user signs into Google services such as sync.
 - (void)googleSigninSucceededWithAccountId:(const std::string&)account_id
-                                  username:(const std::string&)username
-                                  password:(const std::string&)password;
+                                  username:(const std::string&)username;
 
 // Called when the currently signed-in user for a user has been signed out.
 - (void)googleSignedOutWithAcountId:(const std::string&)account_id
@@ -73,11 +75,9 @@ class SignInObserver : public SigninManagerBase::Observer {
       : controller_(controller) {}
 
   void GoogleSigninSucceeded(const std::string& account_id,
-                             const std::string& username,
-                             const std::string& password) override {
+                             const std::string& username) override {
     [controller_ googleSigninSucceededWithAccountId:account_id
-                                           username:username
-                                           password:password];
+                                           username:username];
   }
 
   void GoogleSignedOut(const std::string& account_id,
@@ -86,8 +86,7 @@ class SignInObserver : public SigninManagerBase::Observer {
   }
 
  private:
-  // Weak
-  BookmarkPromoController* controller_;
+  __weak BookmarkPromoController* controller_;
 };
 }  // namespace
 
@@ -128,7 +127,6 @@ class SignInObserver : public SigninManagerBase::Observer {
         ios::SigninManagerFactory::GetForBrowserState(_browserState);
     signinManager->RemoveObserver(_signinObserver.get());
   }
-  [super dealloc];
 }
 
 - (void)showSignIn {
@@ -137,10 +135,10 @@ class SignInObserver : public SigninManagerBase::Observer {
                             BOOKMARKS_PROMO_ACTION_COUNT);
   base::RecordAction(
       base::UserMetricsAction("Signin_Signin_FromBookmarkManager"));
-  base::scoped_nsobject<ShowSigninCommand> command([[ShowSigninCommand alloc]
+  ShowSigninCommand* command = [[ShowSigninCommand alloc]
       initWithOperation:AUTHENTICATION_OPERATION_SIGNIN
-      signInAccessPoint:signin_metrics::AccessPoint::
-                            ACCESS_POINT_BOOKMARK_MANAGER]);
+            accessPoint:signin_metrics::AccessPoint::
+                            ACCESS_POINT_BOOKMARK_MANAGER];
   [self chromeExecuteCommand:command];
 }
 
@@ -202,8 +200,7 @@ class SignInObserver : public SigninManagerBase::Observer {
 
 // Called when a user signs into Google services such as sync.
 - (void)googleSigninSucceededWithAccountId:(const std::string&)account_id
-                                  username:(const std::string&)username
-                                  password:(const std::string&)password {
+                                  username:(const std::string&)username {
   self.promoState = NO;
 }
 

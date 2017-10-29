@@ -4,7 +4,11 @@
 
 #include "components/sync/engine_impl/js_mutation_event_observer.h"
 
+#include <utility>
+
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/values.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/js/js_event_details.h"
@@ -27,7 +31,7 @@ class JsMutationEventObserverTest : public testing::Test {
  private:
   // This must be destroyed after the member variables below in order
   // for WeakHandles to be destroyed properly.
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
  protected:
   StrictMock<MockJsEventHandler> mock_js_event_handler_;
@@ -68,11 +72,11 @@ TEST_F(JsMutationEventObserverTest, OnChangesApplied) {
     base::DictionaryValue expected_details;
     expected_details.SetString("modelType", model_type_str);
     expected_details.SetString("writeTransactionId", "0");
-    base::ListValue* expected_changes = new base::ListValue();
-    expected_details.Set("changes", expected_changes);
+    auto expected_changes = base::MakeUnique<base::ListValue>();
     for (int j = i; j < MODEL_TYPE_COUNT; ++j) {
       expected_changes->Append(changes[j].ToValue());
     }
+    expected_details.Set("changes", std::move(expected_changes));
     EXPECT_CALL(mock_js_event_handler_,
                 HandleJsEvent("onChangesApplied",
                               HasDetailsAsDictionary(expected_details)));

@@ -26,7 +26,6 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/guest_view/browser/guest_view_manager.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -68,17 +67,14 @@ UserManagerProfileDialogDelegate::UserManagerProfileDialogDelegate(
 
   web_view_->GetWebContents()->SetDelegate(this);
   web_view_->LoadInitialURL(url);
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::USER_MANAGER_PROFILE);
 }
 
 UserManagerProfileDialogDelegate::~UserManagerProfileDialogDelegate() {}
 
-gfx::Size UserManagerProfileDialogDelegate::GetPreferredSize() const {
-  return switches::UsePasswordSeparatedSigninFlow()
-             ? gfx::Size(UserManagerProfileDialog::kDialogWidth,
-                         UserManagerProfileDialog::kDialogHeight)
-             : gfx::Size(
-                   UserManagerProfileDialog::kPasswordCombinedDialogWidth,
-                   UserManagerProfileDialog::kPasswordCombinedDialogHeight);
+gfx::Size UserManagerProfileDialogDelegate::CalculatePreferredSize() const {
+  return gfx::Size(UserManagerProfileDialog::kDialogWidth,
+                   UserManagerProfileDialog::kDialogHeight);
 }
 
 void UserManagerProfileDialogDelegate::DisplayErrorMessage() {
@@ -139,7 +135,6 @@ void UserManagerProfileDialogDelegate::OnDialogDestroyed() {
 // static
 void UserManager::Show(
     const base::FilePath& profile_path_to_focus,
-    profiles::UserManagerTutorialMode tutorial_mode,
     profiles::UserManagerAction user_manager_action) {
   DCHECK(profile_path_to_focus != ProfileManager::GetGuestProfilePath());
 
@@ -169,7 +164,7 @@ void UserManager::Show(
   UserManagerView* user_manager = new UserManagerView();
   user_manager->set_user_manager_started_showing(base::Time::Now());
   profiles::CreateSystemProfileForUserManager(
-      profile_path_to_focus, tutorial_mode, user_manager_action,
+      profile_path_to_focus, user_manager_action,
       base::Bind(&UserManagerView::OnSystemProfileCreated,
                  base::Passed(base::WrapUnique(user_manager)),
                  base::Owned(new base::AutoReset<bool>(
@@ -274,6 +269,7 @@ UserManagerView::UserManagerView()
       user_manager_started_showing_(base::Time()) {
   keep_alive_.reset(new ScopedKeepAlive(KeepAliveOrigin::USER_MANAGER_VIEW,
                                         KeepAliveRestartOption::DISABLED));
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::USER_MANAGER);
 }
 
 UserManagerView::~UserManagerView() {
@@ -354,7 +350,7 @@ void UserManagerView::Init(Profile* system_profile, const GURL& url) {
           views::Widget::GetWidgetForNativeWindow(
               browser->window()->GetNativeWindow())->GetNativeView();
       bounds = display::Screen::GetScreen()
-                   ->GetDisplayNearestWindow(native_view)
+                   ->GetDisplayNearestView(native_view)
                    .work_area();
       bounds.ClampToCenteredSize(gfx::Size(UserManager::kWindowWidth,
                                            UserManager::kWindowHeight));
@@ -407,7 +403,7 @@ bool UserManagerView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   return true;
 }
 
-gfx::Size UserManagerView::GetPreferredSize() const {
+gfx::Size UserManagerView::CalculatePreferredSize() const {
   return gfx::Size(UserManager::kWindowWidth, UserManager::kWindowHeight);
 }
 

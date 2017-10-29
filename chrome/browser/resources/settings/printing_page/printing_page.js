@@ -12,19 +12,6 @@ Polymer({
       notify: true,
     },
 
-// <if expr="chromeos">
-    /**
-     * Whether to show CUPS printers settings.
-     * @private {boolean}
-     */
-    showCupsPrintingFeatures_: {
-      type: Boolean,
-      value: function() {
-        return loadTimeData.getBoolean('showCupsPrintingFeatures');
-      },
-    },
-// </if>
-
     /** @type {!Array<!CupsPrinterInfo>} */
     cupsPrinters: {
       type: Array,
@@ -34,27 +21,38 @@ Polymer({
     searchTerm: {
       type: String,
     },
+
+    /** @private {!Map<string, string>} */
+    focusConfig_: {
+      type: Object,
+      value: function() {
+        var map = new Map();
+        if (settings.routes.CLOUD_PRINTERS) {
+          map.set(
+              settings.routes.CLOUD_PRINTERS.path,
+              '#cloudPrinters .subpage-arrow');
+        }
+        // <if expr="chromeos">
+        if (settings.routes.CUPS_PRINTERS) {
+          map.set(
+              settings.routes.CUPS_PRINTERS.path,
+              '#cupsPrinters .subpage-arrow');
+        }
+        // </if>
+        return map;
+      },
+    },
   },
 
-  listeners: {
-    'show-cups-printer-details': 'onShowCupsPrinterDetailsPage_',
-  },
-
-// <if expr="chromeos">
+  // <if expr="chromeos">
   /** @private */
   onTapCupsPrinters_: function() {
-    settings.navigateTo(settings.Route.CUPS_PRINTERS);
+    settings.navigateTo(settings.routes.CUPS_PRINTERS);
   },
-
-  /** @private */
-  onShowCupsPrinterDetailsPage_: function(event) {
-    settings.navigateTo(settings.Route.CUPS_PRINTER_DETAIL);
-    this.$.arraySelector.select(event.detail);
-  },
-// </if>
+  // </if>
 
   /** @private */
   onTapCloudPrinters_: function() {
-    settings.navigateTo(settings.Route.CLOUD_PRINTERS);
+    settings.navigateTo(settings.routes.CLOUD_PRINTERS);
   },
 });

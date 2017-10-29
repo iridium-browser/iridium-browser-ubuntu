@@ -10,14 +10,18 @@ define("mojo/public/js/lib/control_message_proxy", [
 
   var Validator = validator.Validator;
 
-  function sendRunOrClosePipeMessage(receiver, runOrClosePipeMessageParams) {
+  function constructRunOrClosePipeMessage(runOrClosePipeInput) {
+    var runOrClosePipeMessageParams = new
+        controlMessages.RunOrClosePipeMessageParams();
+    runOrClosePipeMessageParams.input = runOrClosePipeInput;
+
     var messageName = controlMessages.kRunOrClosePipeMessageId;
     var payloadSize = controlMessages.RunOrClosePipeMessageParams.encodedSize;
-    var builder = new codec.MessageBuilder(messageName, payloadSize);
+    var builder = new codec.MessageV0Builder(messageName, payloadSize);
     builder.encodeStruct(controlMessages.RunOrClosePipeMessageParams,
                          runOrClosePipeMessageParams);
     var message = builder.finish();
-    receiver.accept(message);
+    return message;
   }
 
   function validateControlResponse(message) {
@@ -62,7 +66,7 @@ define("mojo/public/js/lib/control_message_proxy", [
     var messageName = controlMessages.kRunMessageId;
     var payloadSize = controlMessages.RunMessageParams.encodedSize;
     // |requestID| is set to 0, but is later properly set by Router.
-    var builder = new codec.MessageWithRequestIDBuilder(messageName,
+    var builder = new codec.MessageV1Builder(messageName,
         payloadSize, codec.kMessageExpectsResponse, 0);
     builder.encodeStruct(controlMessages.RunMessageParams, runMessageParams);
     var message = builder.finish();
@@ -71,7 +75,7 @@ define("mojo/public/js/lib/control_message_proxy", [
   }
 
   function ControlMessageProxy(receiver) {
-    this.receiver = receiver;
+    this.receiver_ = receiver;
   }
 
   ControlMessageProxy.prototype.queryVersion = function() {
@@ -79,20 +83,18 @@ define("mojo/public/js/lib/control_message_proxy", [
     runMessageParams.input = new controlMessages.RunInput();
     runMessageParams.input.query_version = new controlMessages.QueryVersion();
 
-    return sendRunMessage(this.receiver, runMessageParams).then(function(
+    return sendRunMessage(this.receiver_, runMessageParams).then(function(
         runResponseMessageParams) {
       return runResponseMessageParams.output.query_version_result.version;
     });
   };
 
   ControlMessageProxy.prototype.requireVersion = function(version) {
-    var runOrClosePipeMessageParams = new
-        controlMessages.RunOrClosePipeMessageParams();
-    runOrClosePipeMessageParams.input = new
-        controlMessages.RunOrClosePipeInput();
-    runOrClosePipeMessageParams.input.require_version = new
-        controlMessages.RequireVersion({'version': version});
-    sendRunOrClosePipeMessage(this.receiver, runOrClosePipeMessageParams);
+    var runOrClosePipeInput = new controlMessages.RunOrClosePipeInput();
+    runOrClosePipeInput.require_version = new controlMessages.RequireVersion({
+        'version': version});
+    var message = constructRunOrClosePipeMessage(runOrClosePipeInput);
+    this.receiver_.accept(message);
   };
 
   var exports = {};

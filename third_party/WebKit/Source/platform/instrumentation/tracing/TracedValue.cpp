@@ -4,88 +4,114 @@
 
 #include "platform/instrumentation/tracing/TracedValue.h"
 
-#include "wtf/PtrUtil.h"
-#include "wtf/text/StringUTF8Adaptor.h"
+#include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/text/StringUTF8Adaptor.h"
 
 namespace blink {
 
-std::unique_ptr<TracedValue> TracedValue::create() {
-  return WTF::wrapUnique(new TracedValue());
+std::unique_ptr<TracedValue> TracedValue::Create() {
+  return WTF::WrapUnique(new TracedValue());
 }
 
 TracedValue::TracedValue() {}
 
 TracedValue::~TracedValue() {}
 
-void TracedValue::setInteger(const char* name, int value) {
-  m_tracedValue.SetIntegerWithCopiedName(name, value);
+void TracedValue::SetInteger(const char* name, int value) {
+  traced_value_.SetInteger(name, value);
 }
 
-void TracedValue::setDouble(const char* name, double value) {
-  m_tracedValue.SetDoubleWithCopiedName(name, value);
+void TracedValue::SetIntegerWithCopiedName(const char* name, int value) {
+  traced_value_.SetIntegerWithCopiedName(name, value);
 }
 
-void TracedValue::setBoolean(const char* name, bool value) {
-  m_tracedValue.SetBooleanWithCopiedName(name, value);
+void TracedValue::SetDouble(const char* name, double value) {
+  traced_value_.SetDouble(name, value);
 }
 
-void TracedValue::setString(const char* name, const String& value) {
+void TracedValue::SetDoubleWithCopiedName(const char* name, double value) {
+  traced_value_.SetDoubleWithCopiedName(name, value);
+}
+
+void TracedValue::SetBoolean(const char* name, bool value) {
+  traced_value_.SetBoolean(name, value);
+}
+
+void TracedValue::SetBooleanWithCopiedName(const char* name, bool value) {
+  traced_value_.SetBooleanWithCopiedName(name, value);
+}
+
+void TracedValue::SetString(const char* name, const String& value) {
   StringUTF8Adaptor adaptor(value);
-  m_tracedValue.SetStringWithCopiedName(name, adaptor.asStringPiece());
+  traced_value_.SetString(name, adaptor.AsStringPiece());
 }
 
-void TracedValue::beginDictionary(const char* name) {
-  m_tracedValue.BeginDictionaryWithCopiedName(name);
-}
-
-void TracedValue::beginArray(const char* name) {
-  m_tracedValue.BeginArrayWithCopiedName(name);
-}
-
-void TracedValue::endDictionary() {
-  m_tracedValue.EndDictionary();
-}
-
-void TracedValue::pushInteger(int value) {
-  m_tracedValue.AppendInteger(value);
-}
-
-void TracedValue::pushDouble(double value) {
-  m_tracedValue.AppendDouble(value);
-}
-
-void TracedValue::pushBoolean(bool value) {
-  m_tracedValue.AppendBoolean(value);
-}
-
-void TracedValue::pushString(const String& value) {
+void TracedValue::SetStringWithCopiedName(const char* name,
+                                          const String& value) {
   StringUTF8Adaptor adaptor(value);
-  m_tracedValue.AppendString(adaptor.asStringPiece());
+  traced_value_.SetStringWithCopiedName(name, adaptor.AsStringPiece());
 }
 
-void TracedValue::beginArray() {
-  m_tracedValue.BeginArray();
+void TracedValue::BeginDictionary(const char* name) {
+  traced_value_.BeginDictionary(name);
 }
 
-void TracedValue::beginDictionary() {
-  m_tracedValue.BeginDictionary();
+void TracedValue::BeginDictionaryWithCopiedName(const char* name) {
+  traced_value_.BeginDictionaryWithCopiedName(name);
 }
 
-void TracedValue::endArray() {
-  m_tracedValue.EndArray();
+void TracedValue::BeginArray(const char* name) {
+  traced_value_.BeginArray(name);
 }
 
-String TracedValue::toString() const {
-  return String(m_tracedValue.ToString().c_str());
+void TracedValue::BeginArrayWithCopiedName(const char* name) {
+  traced_value_.BeginArrayWithCopiedName(name);
+}
+
+void TracedValue::EndDictionary() {
+  traced_value_.EndDictionary();
+}
+
+void TracedValue::PushInteger(int value) {
+  traced_value_.AppendInteger(value);
+}
+
+void TracedValue::PushDouble(double value) {
+  traced_value_.AppendDouble(value);
+}
+
+void TracedValue::PushBoolean(bool value) {
+  traced_value_.AppendBoolean(value);
+}
+
+void TracedValue::PushString(const String& value) {
+  StringUTF8Adaptor adaptor(value);
+  traced_value_.AppendString(adaptor.AsStringPiece());
+}
+
+void TracedValue::BeginArray() {
+  traced_value_.BeginArray();
+}
+
+void TracedValue::BeginDictionary() {
+  traced_value_.BeginDictionary();
+}
+
+void TracedValue::EndArray() {
+  traced_value_.EndArray();
+}
+
+String TracedValue::ToString() const {
+  return String(traced_value_.ToString().c_str());
 }
 
 void TracedValue::AppendAsTraceFormat(std::string* out) const {
-  m_tracedValue.AppendAsTraceFormat(out);
+  traced_value_.AppendAsTraceFormat(out);
 }
 
 void TracedValue::EstimateTraceMemoryOverhead(
     base::trace_event::TraceEventMemoryOverhead* overhead) {
-  m_tracedValue.EstimateTraceMemoryOverhead(overhead);
+  traced_value_.EstimateTraceMemoryOverhead(overhead);
 }
 
 }  // namespace blink

@@ -29,47 +29,59 @@
 #define PluginView_h
 
 #include "core/CoreExport.h"
-#include "platform/FrameViewBase.h"
+#include "core/frame/EmbeddedContentView.h"
+#include "platform/geometry/IntRect.h"
 #include "platform/scroll/ScrollTypes.h"
+#include "platform/wtf/text/WTFString.h"
+#include "public/platform/WebFocusType.h"
 #include "v8/include/v8.h"
-#include "wtf/text/WTFString.h"
-
-namespace blink {
-class WebLayer;
-}
 
 namespace blink {
 
+class Event;
 class ResourceResponse;
+class WebLayer;
+class WebPluginContainerImpl;
 
-class CORE_EXPORT PluginView : public FrameViewBase {
+// TODO(joelhockey): Remove this class.
+// The only implementation of this class is web/WebPluginContainerImpl.
+// It can be used directly.
+class CORE_EXPORT PluginView : public EmbeddedContentView {
  public:
-  bool isPluginView() const final { return true; }
+  virtual ~PluginView() {}
 
-  virtual WebLayer* platformLayer() const { return 0; }
-  virtual v8::Local<v8::Object> scriptableObject(v8::Isolate*) {
+  bool IsPluginView() const override { return true; }
+
+  virtual void SetFocused(bool, WebFocusType) = 0;
+  virtual void HandleEvent(Event*) = 0;
+  virtual void EventListenersRemoved() = 0;
+  virtual bool IsPluginContainer() const { return false; }
+  virtual bool IsErrorplaceholder() { return false; }
+
+  virtual WebLayer* PlatformLayer() const { return 0; }
+  virtual v8::Local<v8::Object> ScriptableObject(v8::Isolate*) {
     return v8::Local<v8::Object>();
   }
-  virtual bool wantsWheelEvents() { return false; }
-  virtual bool supportsKeyboardFocus() const { return false; }
-  virtual bool supportsInputMethod() const { return false; }
-  virtual bool canProcessDrag() const { return false; }
+  virtual bool WantsWheelEvents() { return false; }
+  virtual bool SupportsKeyboardFocus() const { return false; }
+  virtual bool SupportsInputMethod() const { return false; }
+  virtual bool CanProcessDrag() const { return false; }
 
-  virtual void didReceiveResponse(const ResourceResponse&) {}
-  virtual void didReceiveData(const char*, int) {}
+  virtual void DidReceiveResponse(const ResourceResponse&) {}
+  virtual void DidReceiveData(const char*, int) {}
 
-  virtual void updateAllLifecyclePhases() {}
-  virtual void invalidatePaintIfNeeded() {}
-
- protected:
-  PluginView() : FrameViewBase() {}
+  virtual void UpdateAllLifecyclePhases() {}
+  virtual void InvalidatePaint() {}
+  virtual WebPluginContainerImpl* GetWebPluginContainer() const {
+    return nullptr;
+  }
 };
 
 DEFINE_TYPE_CASTS(PluginView,
-                  FrameViewBase,
-                  frameViewBase,
-                  frameViewBase->isPluginView(),
-                  frameViewBase.isPluginView());
+                  EmbeddedContentView,
+                  embedded_content_view,
+                  embedded_content_view->IsPluginView(),
+                  embedded_content_view.IsPluginView());
 
 }  // namespace blink
 

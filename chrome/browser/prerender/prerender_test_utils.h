@@ -69,7 +69,9 @@ class FakeSafeBrowsingDatabaseManager
   // (in which that result will be communicated back via a call into the
   // client, and false will be returned).
   // Overrides SafeBrowsingDatabaseManager::CheckBrowseUrl.
-  bool CheckBrowseUrl(const GURL& gurl, Client* client) override;
+  bool CheckBrowseUrl(const GURL& gurl,
+                      const safe_browsing::SBThreatTypeSet& threat_types,
+                      Client* client) override;
 
   void SetThreatTypeForUrl(const GURL& url,
                            safe_browsing::SBThreatType threat_type) {
@@ -355,6 +357,12 @@ class PrerenderInProcessBrowserTest : virtual public InProcessBrowserTest {
   // Returns a string for pattern-matching TaskManager prerender entries.
   base::string16 MatchTaskManagerPrerender(const char* page_title);
 
+  // Returns a GURL for an EmbeddedTestServer that will serves the file
+  // |url_file| with |replacement_text| replacing |replacement_variable|.
+  GURL GetURLWithReplacement(const std::string& url_file,
+                             const std::string& replacement_variable,
+                             const std::string& replacement_text);
+
  protected:
   // For each FinalStatus in |expected_final_status_queue| creates a prerender
   // that is going to verify the correctness of its FinalStatus upon
@@ -427,10 +435,12 @@ void InterceptRequestAndCount(
 void CreateMockInterceptorOnIO(const GURL& url, const base::FilePath& file);
 
 // Makes |url| never respond on the first load, and then with the contents of
-// |file| afterwards. When the first load has been scheduled, runs |callback| on
-// the UI thread.
-void CreateHangingFirstRequestInterceptorOnIO(
-    const GURL& url, const base::FilePath& file, base::Closure callback);
+// |file| afterwards. When the first load has been scheduled, runs |callback_io|
+// on the IO thread.
+void CreateHangingFirstRequestInterceptor(
+    const GURL& url,
+    const base::FilePath& file,
+    base::Callback<void(net::URLRequest*)> callback_io);
 
 }  // namespace test_utils
 

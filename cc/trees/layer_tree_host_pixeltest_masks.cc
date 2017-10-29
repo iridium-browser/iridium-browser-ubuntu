@@ -10,9 +10,9 @@
 #include "cc/layers/picture_layer.h"
 #include "cc/layers/solid_color_layer.h"
 #include "cc/paint/paint_flags.h"
-#include "cc/paint/paint_recorder.h"
-#include "cc/paint/paint_surface.h"
-#include "cc/playback/drawing_display_item.h"
+#include "cc/paint/paint_image.h"
+#include "cc/paint/paint_op_buffer.h"
+#include "cc/test/fake_picture_layer.h"
 #include "cc/test/layer_tree_pixel_resource_test.h"
 #include "cc/test/pixel_comparator.h"
 #include "cc/test/solid_color_content_layer_client.h"
@@ -39,30 +39,29 @@ class MaskContentLayerClient : public ContentLayerClient {
 
   scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
       PaintingControlSetting picture_control) override {
-    PaintRecorder recorder;
-    PaintCanvas* canvas =
-        recorder.beginRecording(gfx::RectToSkRect(gfx::Rect(bounds_)));
+    auto display_list = make_scoped_refptr(new DisplayItemList);
+    PaintOpBuffer* buffer = display_list->StartPaint();
+
+    buffer->push<SaveOp>();
+    buffer->push<ClipRectOp>(gfx::RectToSkRect(PaintableRegion()),
+                             SkClipOp::kIntersect, false);
+    SkColor color = SK_ColorTRANSPARENT;
+    buffer->push<DrawColorOp>(color, SkBlendMode::kSrc);
 
     PaintFlags flags;
     flags.setStyle(PaintFlags::kStroke_Style);
     flags.setStrokeWidth(SkIntToScalar(2));
     flags.setColor(SK_ColorWHITE);
 
-    canvas->clear(SK_ColorTRANSPARENT);
     gfx::Rect inset_rect(bounds_);
     while (!inset_rect.IsEmpty()) {
       inset_rect.Inset(3, 3, 2, 2);
-      canvas->drawRect(
-          SkRect::MakeXYWH(inset_rect.x(), inset_rect.y(), inset_rect.width(),
-                           inset_rect.height()),
-          flags);
+      buffer->push<DrawRectOp>(gfx::RectToSkRect(inset_rect), flags);
       inset_rect.Inset(3, 3, 2, 2);
     }
 
-    auto display_list = make_scoped_refptr(new DisplayItemList);
-    display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(
-        PaintableRegion(), recorder.finishRecordingAsPicture());
-
+    buffer->push<RestoreOp>();
+    display_list->EndPaintOfUnpaired(PaintableRegion());
     display_list->Finalize();
     return display_list;
   }
@@ -72,8 +71,8 @@ class MaskContentLayerClient : public ContentLayerClient {
 };
 
 TEST_P(LayerTreeHostMasksPixelTest, MaskOfLayer) {
-  scoped_refptr<SolidColorLayer> background = CreateSolidColorLayer(
-      gfx::Rect(100, 100), SK_ColorWHITE);
+  scoped_refptr<SolidColorLayer> background =
+      CreateSolidColorLayer(gfx::Rect(100, 100), SK_ColorWHITE);
 
   scoped_refptr<SolidColorLayer> green = CreateSolidColorLayerWithBorder(
       gfx::Rect(25, 25, 50, 50), kCSSGreen, 1, SK_ColorBLACK);
@@ -84,7 +83,7 @@ TEST_P(LayerTreeHostMasksPixelTest, MaskOfLayer) {
   scoped_refptr<PictureLayer> mask = PictureLayer::Create(&client);
   mask->SetBounds(mask_bounds);
   mask->SetIsDrawable(true);
-  mask->SetLayerMaskType(Layer::LayerMaskType::MULTI_TEXTURE_MASK);
+  mask->SetLayerMaskType(mask_type_);
   green->SetMaskLayer(mask.get());
 
   RunPixelResourceTest(background,
@@ -92,14 +91,14 @@ TEST_P(LayerTreeHostMasksPixelTest, MaskOfLayer) {
 }
 
 TEST_P(LayerTreeHostMasksPixelTest, ImageMaskOfLayer) {
-  scoped_refptr<SolidColorLayer> background = CreateSolidColorLayer(
-      gfx::Rect(100, 100), SK_ColorWHITE);
+  scoped_refptr<SolidColorLayer> background =
+      CreateSolidColorLayer(gfx::Rect(100, 100), SK_ColorWHITE);
 
   gfx::Size mask_bounds(50, 50);
 
   scoped_refptr<PictureImageLayer> mask = PictureImageLayer::Create();
   mask->SetIsDrawable(true);
-  mask->SetLayerMaskType(Layer::LayerMaskType::MULTI_TEXTURE_MASK);
+  mask->SetLayerMaskType(mask_type_);
   mask->SetBounds(mask_bounds);
 
   sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(200, 200);
@@ -109,8 +108,9 @@ TEST_P(LayerTreeHostMasksPixelTest, ImageMaskOfLayer) {
   scoped_refptr<DisplayItemList> mask_display_list =
       client.PaintContentsToDisplayList(
           ContentLayerClient::PAINTING_BEHAVIOR_NORMAL);
-  mask_display_list->Raster(canvas, nullptr);
-  mask->SetImage(surface->makeImageSnapshot());
+  mask_display_list->Raster(canvas);
+  mask->SetImage(
+      PaintImage(PaintImage::GetNextId(), surface->makeImageSnapshot()));
 
   scoped_refptr<SolidColorLayer> green = CreateSolidColorLayerWithBorder(
       gfx::Rect(25, 25, 50, 50), kCSSGreen, 1, SK_ColorBLACK);
@@ -122,8 +122,8 @@ TEST_P(LayerTreeHostMasksPixelTest, ImageMaskOfLayer) {
 }
 
 TEST_P(LayerTreeHostMasksPixelTest, MaskOfClippedLayer) {
-  scoped_refptr<SolidColorLayer> background = CreateSolidColorLayer(
-      gfx::Rect(100, 100), SK_ColorWHITE);
+  scoped_refptr<SolidColorLayer> background =
+      CreateSolidColorLayer(gfx::Rect(100, 100), SK_ColorWHITE);
 
   // Clip to the top half of the green layer.
   scoped_refptr<Layer> clip = Layer::Create();
@@ -141,12 +141,34 @@ TEST_P(LayerTreeHostMasksPixelTest, MaskOfClippedLayer) {
   scoped_refptr<PictureLayer> mask = PictureLayer::Create(&client);
   mask->SetBounds(mask_bounds);
   mask->SetIsDrawable(true);
-  mask->SetLayerMaskType(Layer::LayerMaskType::MULTI_TEXTURE_MASK);
+  mask->SetLayerMaskType(mask_type_);
   green->SetMaskLayer(mask.get());
 
   RunPixelResourceTest(
       background,
       base::FilePath(FILE_PATH_LITERAL("mask_of_clipped_layer.png")));
+}
+
+TEST_P(LayerTreeHostMasksPixelTest, MaskOfLayerNonExactTextureSize) {
+  scoped_refptr<SolidColorLayer> background =
+      CreateSolidColorLayer(gfx::Rect(100, 100), SK_ColorWHITE);
+
+  scoped_refptr<SolidColorLayer> green = CreateSolidColorLayerWithBorder(
+      gfx::Rect(0, 0, 100, 100), kCSSGreen, 1, SK_ColorBLACK);
+  background->AddChild(green);
+
+  gfx::Size mask_bounds(100, 100);
+  MaskContentLayerClient client(mask_bounds);
+  scoped_refptr<FakePictureLayer> mask = FakePictureLayer::Create(&client);
+  mask->SetBounds(mask_bounds);
+  mask->SetIsDrawable(true);
+  mask->SetLayerMaskType(mask_type_);
+  mask->set_fixed_tile_size(gfx::Size(173, 135));
+  green->SetMaskLayer(mask.get());
+
+  RunPixelResourceTest(background,
+                       base::FilePath(FILE_PATH_LITERAL(
+                           "mask_with_non_exact_texture_size.png")));
 }
 
 class CheckerContentLayerClient : public ContentLayerClient {
@@ -161,29 +183,35 @@ class CheckerContentLayerClient : public ContentLayerClient {
   gfx::Rect PaintableRegion() override { return gfx::Rect(bounds_); }
   scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
       PaintingControlSetting picture_control) override {
-    PaintRecorder recorder;
-    PaintCanvas* canvas =
-        recorder.beginRecording(gfx::RectToSkRect(gfx::Rect(bounds_)));
+    auto display_list = make_scoped_refptr(new DisplayItemList);
+    PaintOpBuffer* buffer = display_list->StartPaint();
+
+    buffer->push<SaveOp>();
+    buffer->push<ClipRectOp>(gfx::RectToSkRect(PaintableRegion()),
+                             SkClipOp::kIntersect, false);
+    SkColor color = SK_ColorTRANSPARENT;
+    buffer->push<DrawColorOp>(color, SkBlendMode::kSrc);
 
     PaintFlags flags;
     flags.setStyle(PaintFlags::kStroke_Style);
     flags.setStrokeWidth(SkIntToScalar(4));
     flags.setColor(color_);
-    canvas->clear(SK_ColorTRANSPARENT);
     if (vertical_) {
       for (int i = 4; i < bounds_.width(); i += 16) {
-        canvas->drawLine(i, 0, i, bounds_.height(), flags);
+        gfx::PointF p1(i, 0.f);
+        gfx::PointF p2(i, bounds_.height());
+        buffer->push<DrawLineOp>(p1.x(), p1.y(), p2.x(), p2.y(), flags);
       }
     } else {
       for (int i = 4; i < bounds_.height(); i += 16) {
-        canvas->drawLine(0, i, bounds_.width(), i, flags);
+        gfx::PointF p1(0.f, i);
+        gfx::PointF p2(bounds_.width(), i);
+        buffer->push<DrawLineOp>(p1.x(), p1.y(), p2.x(), p2.y(), flags);
       }
     }
 
-    auto display_list = make_scoped_refptr(new DisplayItemList);
-    display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(
-        PaintableRegion(), recorder.finishRecordingAsPicture());
-
+    buffer->push<RestoreOp>();
+    display_list->EndPaintOfUnpaired(PaintableRegion());
     display_list->Finalize();
     return display_list;
   }
@@ -204,21 +232,23 @@ class CircleContentLayerClient : public ContentLayerClient {
   gfx::Rect PaintableRegion() override { return gfx::Rect(bounds_); }
   scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
       PaintingControlSetting picture_control) override {
-    PaintRecorder recorder;
-    PaintCanvas* canvas =
-        recorder.beginRecording(gfx::RectToSkRect(gfx::Rect(bounds_)));
+    auto display_list = make_scoped_refptr(new DisplayItemList);
+    PaintOpBuffer* buffer = display_list->StartPaint();
+
+    buffer->push<SaveOp>();
+    buffer->push<ClipRectOp>(gfx::RectToSkRect(PaintableRegion()),
+                             SkClipOp::kIntersect, false);
+    SkColor color = SK_ColorTRANSPARENT;
+    buffer->push<DrawColorOp>(color, SkBlendMode::kSrc);
 
     PaintFlags flags;
     flags.setStyle(PaintFlags::kFill_Style);
     flags.setColor(SK_ColorWHITE);
-    canvas->clear(SK_ColorTRANSPARENT);
-    canvas->drawCircle(bounds_.width() / 2, bounds_.height() / 2,
-                       bounds_.width() / 4, flags);
+    buffer->push<DrawCircleOp>(bounds_.width() / 2.f, bounds_.height() / 2.f,
+                               bounds_.width() / 4.f, flags);
 
-    auto display_list = make_scoped_refptr(new DisplayItemList);
-    display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(
-        PaintableRegion(), recorder.finishRecordingAsPicture());
-
+    buffer->push<RestoreOp>();
+    display_list->EndPaintOfUnpaired(PaintableRegion());
     display_list->Finalize();
     return display_list;
   }
@@ -230,16 +260,20 @@ class CircleContentLayerClient : public ContentLayerClient {
 using LayerTreeHostMasksForBackgroundFiltersPixelTest =
     ParameterizedPixelResourceTest;
 
-INSTANTIATE_TEST_CASE_P(PixelResourceTest,
-                        LayerTreeHostMasksForBackgroundFiltersPixelTest,
-                        ::testing::Values(SOFTWARE,
-                                          GL_GPU_RASTER_2D_DRAW,
-                                          GL_ONE_COPY_2D_STAGING_2D_DRAW,
-                                          GL_ONE_COPY_RECT_STAGING_2D_DRAW,
-                                          GL_ONE_COPY_EXTERNAL_STAGING_2D_DRAW,
-                                          GL_ZERO_COPY_2D_DRAW,
-                                          GL_ZERO_COPY_RECT_DRAW,
-                                          GL_ZERO_COPY_EXTERNAL_DRAW));
+INSTANTIATE_TEST_CASE_P(
+    PixelResourceTest,
+    LayerTreeHostMasksForBackgroundFiltersPixelTest,
+    ::testing::Combine(
+        ::testing::Values(SOFTWARE,
+                          GL_GPU_RASTER_2D_DRAW,
+                          GL_ONE_COPY_2D_STAGING_2D_DRAW,
+                          GL_ONE_COPY_RECT_STAGING_2D_DRAW,
+                          GL_ONE_COPY_EXTERNAL_STAGING_2D_DRAW,
+                          GL_ZERO_COPY_2D_DRAW,
+                          GL_ZERO_COPY_RECT_DRAW,
+                          GL_ZERO_COPY_EXTERNAL_DRAW),
+        ::testing::Values(Layer::LayerMaskType::SINGLE_TEXTURE_MASK,
+                          Layer::LayerMaskType::MULTI_TEXTURE_MASK)));
 
 TEST_P(LayerTreeHostMasksForBackgroundFiltersPixelTest,
        MaskOfLayerWithBackgroundFilter) {
@@ -266,7 +300,7 @@ TEST_P(LayerTreeHostMasksForBackgroundFiltersPixelTest,
   scoped_refptr<PictureLayer> mask = PictureLayer::Create(&mask_client);
   mask->SetBounds(mask_bounds);
   mask->SetIsDrawable(true);
-  mask->SetLayerMaskType(Layer::LayerMaskType::MULTI_TEXTURE_MASK);
+  mask->SetLayerMaskType(mask_type_);
   blur->SetMaskLayer(mask.get());
 
   float percentage_pixels_large_error = 2.5f;  // 2.5%, ~250px / (100*100)
@@ -317,7 +351,7 @@ TEST_P(LayerTreeHostMasksForBackgroundFiltersPixelTest,
   scoped_refptr<PictureLayer> mask = PictureLayer::Create(&mask_client);
   mask->SetBounds(mask_bounds);
   mask->SetIsDrawable(true);
-  mask->SetLayerMaskType(Layer::LayerMaskType::MULTI_TEXTURE_MASK);
+  mask->SetLayerMaskType(mask_type_);
   picture_horizontal->SetMaskLayer(mask.get());
 
   float percentage_pixels_large_error = 0.04f;  // 0.04%, ~6px / (128*128)

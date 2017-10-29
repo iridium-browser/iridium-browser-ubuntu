@@ -39,6 +39,19 @@ Polymer({
 
     /** @private */
     googleNowAvailable_: Boolean,
+
+    /** @type {?Map<string, string>} */
+    focusConfig_: Object,
+
+    // <if expr="chromeos">
+    /** @private */
+    voiceInteractionFeatureEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('enableVoiceInteraction');
+      },
+    }
+    // </if>
   },
 
   /** @private {?settings.SearchEnginesBrowserProxy} */
@@ -54,24 +67,36 @@ Polymer({
     // Omnibox search engine
     var updateSearchEngines = function(searchEngines) {
       this.set('searchEngines_', searchEngines.defaults);
+      this.requestHotwordInfoUpdate_();
     }.bind(this);
     this.browserProxy_.getSearchEnginesList().then(updateSearchEngines);
     cr.addWebUIListener('search-engines-changed', updateSearchEngines);
 
-    // Hotword (OK Google)
+    // Hotword (OK Google) listener
     cr.addWebUIListener(
         'hotword-info-update', this.hotwordInfoUpdate_.bind(this));
-    this.browserProxy_.getHotwordInfo().then(function(hotwordInfo) {
-      this.hotwordInfoUpdate_(hotwordInfo);
-    }.bind(this));
 
     // Google Now cards in the launcher
     cr.addWebUIListener(
         'google-now-availability-changed',
         this.googleNowAvailabilityUpdate_.bind(this));
     this.browserProxy_.getGoogleNowAvailability().then(function(available) {
-        this.googleNowAvailabilityUpdate_(available);
+      this.googleNowAvailabilityUpdate_(available);
     }.bind(this));
+
+    this.focusConfig_ = new Map();
+    if (settings.routes.SEARCH_ENGINES) {
+      this.focusConfig_.set(
+          settings.routes.SEARCH_ENGINES.path,
+          '#engines-subpage-trigger .subpage-arrow');
+    }
+    // <if expr="chromeos">
+    if (settings.routes.GOOGLE_ASSISTANT) {
+      this.focusConfig_.set(
+          settings.routes.GOOGLE_ASSISTANT.path,
+          '#assistant-subpage-trigger .subpage-arrow');
+    }
+    // </if>
   },
 
   /** @private */
@@ -88,17 +113,32 @@ Polymer({
 
   /** @private */
   onManageSearchEnginesTap_: function() {
-    settings.navigateTo(settings.Route.SEARCH_ENGINES);
+    settings.navigateTo(settings.routes.SEARCH_ENGINES);
   },
 
+  // <if expr="chromeos">
+  /** @private */
+  onGoogleAssistantTap_: function() {
+    assert(this.voiceInteractionFeatureEnabled_);
+    settings.navigateTo(settings.routes.GOOGLE_ASSISTANT);
+  },
+  // </if>
+
   /**
-   * @param {Event} event
+   * @param {!Event} event
    * @private
    */
   onHotwordSearchEnableChange_: function(event) {
     // Do not set the pref directly, allow Chrome to run the setup app instead.
     this.browserProxy_.setHotwordSearchEnabled(
         !!this.hotwordSearchEnablePref_.value);
+  },
+
+  /** @private */
+  requestHotwordInfoUpdate_: function() {
+    this.browserProxy_.getHotwordInfo().then(function(hotwordInfo) {
+      this.hotwordInfoUpdate_(hotwordInfo);
+    }.bind(this));
   },
 
   /**
@@ -154,16 +194,52 @@ Polymer({
     this.browserProxy_.setHotwordSearchEnabled(this.hotwordInfo_.enabled);
   },
 
-  /** @private */
-  onManageAudioHistoryTap_: function() {
-    window.open(loadTimeData.getString('manageAudioHistoryUrl'));
+  // <if expr="chromeos">
+  /**
+   * @param {boolean} toggleValue
+   * @return {string}
+   * @private
+   */
+  getAssistantEnabledDisabledLabel_: function(toggleValue) {
+    return this.i18n(
+        toggleValue ? 'searchGoogleAssistantEnabled' :
+                      'searchGoogleAssistantDisabled');
   },
 
   /**
-   * @param {Event} event
+   * @param {boolean} featureAvailable
+   * @param {boolean} arcEnabled
+   * @return {boolean}
+   * @private
+   */
+  showAssistantSection_: function(featureAvailable, arcEnabled) {
+    return featureAvailable && arcEnabled;
+  },
+  // </if>
+
+  /**
+   * @param {!Event} event
    * @private
    */
   doNothing_: function(event) {
     event.stopPropagation();
-  }
+  },
+
+  /**
+   * @param {!chrome.settingsPrivate.PrefObject} pref
+   * @return {boolean}
+   * @private
+   */
+  isDefaultSearchControlledByPolicy_: function(pref) {
+    return pref.controlledBy == chrome.settingsPrivate.ControlledBy.USER_POLICY;
+  },
+
+  /**
+   * @param {!chrome.settingsPrivate.PrefObject} pref
+   * @return {boolean}
+   * @private
+   */
+  isDefaultSearchEngineEnforced_: function(pref) {
+    return pref.enforcement == chrome.settingsPrivate.Enforcement.ENFORCED;
+  },
 });

@@ -10,11 +10,13 @@
 #include "base/files/file_util.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/rtl.h"
+#include "base/i18n/time_formatting.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/icu_test_util.h"
 #include "base/test/scoped_path_override.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,10 +28,6 @@
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include <cstdlib>
-#endif
-
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
 #endif
 
 #if !defined(OS_MACOSX)
@@ -374,22 +372,12 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   }
 
 #if defined(OS_WIN)
-  // Amharic should be blocked unless OS is Vista or newer.
-  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
-    base::i18n::SetICUDefaultLocale("am");
-    EXPECT_EQ("en-US", l10n_util::GetApplicationLocale(""));
-    EXPECT_STREQ("en", icu::Locale::getDefault().getLanguage());
-    base::i18n::SetICUDefaultLocale("en-GB");
-    EXPECT_EQ("en-GB", l10n_util::GetApplicationLocale("am"));
-    EXPECT_STREQ("en", icu::Locale::getDefault().getLanguage());
-  } else {
-    base::i18n::SetICUDefaultLocale("am");
-    EXPECT_EQ("am", l10n_util::GetApplicationLocale(""));
-    EXPECT_STREQ("am", icu::Locale::getDefault().getLanguage());
-    base::i18n::SetICUDefaultLocale("en-GB");
-    EXPECT_EQ("am", l10n_util::GetApplicationLocale("am"));
-    EXPECT_STREQ("am", icu::Locale::getDefault().getLanguage());
-  }
+  base::i18n::SetICUDefaultLocale("am");
+  EXPECT_EQ("am", l10n_util::GetApplicationLocale(""));
+  EXPECT_STREQ("am", icu::Locale::getDefault().getLanguage());
+  base::i18n::SetICUDefaultLocale("en-GB");
+  EXPECT_EQ("am", l10n_util::GetApplicationLocale("am"));
+  EXPECT_STREQ("am", icu::Locale::getDefault().getLanguage());
 #endif  // defined(OS_WIN)
 
   // Clean up.
@@ -583,4 +571,21 @@ TEST_F(L10nUtilTest, IsValidLocaleSyntax) {
   EXPECT_FALSE(l10n_util::IsValidLocaleSyntax("en-US@x"));
   EXPECT_FALSE(l10n_util::IsValidLocaleSyntax("en-US@x="));
   EXPECT_FALSE(l10n_util::IsValidLocaleSyntax("en-US@=y"));
+}
+
+TEST_F(L10nUtilTest, TimeDurationFormatAllLocales) {
+  base::test::ScopedRestoreICUDefaultLocale restore_locale;
+
+  // Verify that base::TimeDurationFormat() works for all available locales:
+  // http://crbug.com/707515
+  base::TimeDelta kDelta = base::TimeDelta::FromMinutes(15 * 60 + 42);
+  for (const std::string& locale : l10n_util::GetAvailableLocales()) {
+    base::i18n::SetICUDefaultLocale(locale);
+    base::string16 str;
+    const bool result =
+        base::TimeDurationFormat(kDelta, base::DURATION_WIDTH_NUMERIC, &str);
+    EXPECT_TRUE(result) << "Failed to format duration for " << locale;
+    if (result)
+      EXPECT_FALSE(str.empty()) << "Got empty string for " << locale;
+  }
 }

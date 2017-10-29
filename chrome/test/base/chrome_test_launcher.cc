@@ -29,6 +29,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/test_launcher.h"
 #include "content/public/test/test_utils.h"
+#include "services/service_manager/runner/common/switches.h"
 #include "ui/base/test/ui_controls.h"
 
 #if defined(OS_MACOSX)
@@ -38,9 +39,6 @@
 #if defined(USE_AURA)
 #include "ui/aura/test/ui_controls_factory_aura.h"
 #include "ui/base/test/ui_controls_aura.h"
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#include "ui/views/test/ui_controls_factory_desktop_aurax11.h"
-#endif
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -52,13 +50,21 @@
 #endif
 
 #if defined(OS_WIN)
+#include "base/win/registry.h"
 #include "chrome/app/chrome_crash_reporter_client_win.h"
+#include "chrome/install_static/install_util.h"
 #endif
 
 ChromeTestSuiteRunner::ChromeTestSuiteRunner() {}
 ChromeTestSuiteRunner::~ChromeTestSuiteRunner() {}
 
 int ChromeTestSuiteRunner::RunTestSuite(int argc, char** argv) {
+#if defined(USE_AURA)
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(service_manager::switches::kServicePipeToken))
+    content::GetContentMainParams()->env_mode = aura::Env::Mode::MUS;
+#endif  // defined(USE_AURA)
+
   return ChromeTestSuite(argc, argv).Run();
 }
 
@@ -96,7 +102,30 @@ ChromeTestLauncherDelegate::CreateContentMainDelegate() {
   return new ChromeMainDelegate();
 }
 
-int LaunchChromeTests(int default_jobs,
+void ChromeTestLauncherDelegate::PreSharding() {
+#if defined(OS_WIN)
+  // Pre-test cleanup for registry state keyed off the profile dir (which can
+  // proliferate with the use of uniquely named scoped_dirs):
+  // https://crbug.com/721245. This needs to be here in order not to be racy
+  // with any tests that will access that state.
+  base::win::RegKey distrubution_key;
+  LONG result = distrubution_key.Open(HKEY_CURRENT_USER,
+                                      install_static::GetRegistryPath().c_str(),
+                                      KEY_SET_VALUE);
+
+  if (result != ERROR_SUCCESS) {
+    LOG_IF(ERROR, result != ERROR_FILE_NOT_FOUND)
+        << "Failed to open distribution key for cleanup: " << result;
+    return;
+  }
+
+  result = distrubution_key.DeleteKey(L"PreferenceMACs");
+  LOG_IF(ERROR, result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND)
+      << "Failed to cleanup PreferenceMACs: " << result;
+#endif
+}
+
+int LaunchChromeTests(size_t parallel_jobs,
                       content::TestLauncherDelegate* delegate,
                       int argc,
                       char** argv) {
@@ -117,5 +146,5 @@ int LaunchChromeTests(int default_jobs,
   crash_reporter::SetCrashReporterClient(crash_client);
 #endif
 
-  return content::LaunchTests(delegate, default_jobs, argc, argv);
+  return content::LaunchTests(delegate, parallel_jobs, argc, argv);
 }

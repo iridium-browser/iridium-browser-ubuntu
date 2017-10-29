@@ -9,6 +9,7 @@
 
 #include <vector>
 
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
@@ -32,15 +33,15 @@ class CPDF_TextPageFind {
                         int startPos,
                         int endPos);
   bool ExtractSubString(CFX_WideString& rString,
-                        const FX_WCHAR* lpszFullString,
+                        const wchar_t* lpszFullString,
                         int iSubString,
-                        FX_WCHAR chSep);
+                        wchar_t chSep);
   CFX_WideString MakeReverse(const CFX_WideString& str);
   int GetCharIndex(int index) const;
 
  private:
   std::vector<uint16_t> m_CharIndex;
-  const CPDF_TextPage* m_pTextPage;
+  CFX_UnownedPtr<const CPDF_TextPage> m_pTextPage;
   CFX_WideString m_strText;
   CFX_WideString m_findWhat;
   int m_flags;

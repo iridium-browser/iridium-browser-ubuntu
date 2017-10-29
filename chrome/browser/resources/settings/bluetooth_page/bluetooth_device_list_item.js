@@ -25,6 +25,16 @@ Polymer({
    * @param {!Event} event
    * @private
    */
+  ignoreEnterKey_: function(event) {
+    if (event.key == 'Enter') {
+      event.stopPropagation();
+    }
+  },
+
+  /**
+   * @param {!Event} event
+   * @private
+   */
   onMenuButtonTap_: function(event) {
     var button = /** @type {!HTMLElement} */ (event.target);
     var menu = /** @type {!CrActionMenuElement} */ (this.$.dotsMenu);
@@ -57,7 +67,7 @@ Polymer({
    * @private
    */
   getConnectActionText_: function(connected) {
-    return this.i18n(connected ? 'bluetoothDisconnect' : 'bluetoothPair');
+    return this.i18n(connected ? 'bluetoothDisconnect' : 'bluetoothConnect');
   },
 
   /**
@@ -131,8 +141,8 @@ Polymer({
       case 'mouse':
         return 'settings:mouse';
       default:
-        return device.connected ?
-            'settings:bluetooth-connected' : 'settings:bluetooth';
+        return device.connected ? 'settings:bluetooth-connected' :
+                                  'settings:bluetooth';
     }
   },
 });

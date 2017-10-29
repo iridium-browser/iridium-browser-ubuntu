@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
@@ -17,6 +18,10 @@
 #include "storage/browser/quota/quota_settings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/page_transition_types.h"
+
+#if defined(OS_MACOSX)
+#include "ui/base/test/scoped_fake_full_keyboard_access.h"
+#endif
 
 namespace base {
 
@@ -166,7 +171,8 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   virtual bool SetUpUserDataDirectory() WARN_UNUSED_RESULT;
 
   // BrowserTestBase:
-  void RunTestOnMainThreadLoop() override;
+  void PreRunTestOnMainThread() override;
+  void PostRunTestOnMainThread() override;
 
   // Ensures that no devtools are open, and then opens the devtools.
   void OpenDevToolsWindow(content::WebContents* web_contents);
@@ -261,9 +267,17 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // We use hardcoded quota settings to have a consistent testing environment.
   storage::QuotaSettings quota_settings_;
 
+  base::test::ScopedFeatureList scoped_feature_list_;
+
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool* autorelease_pool_;
   std::unique_ptr<ScopedBundleSwizzlerMac> bundle_swizzler_;
+
+  // Enable fake full keyboard access by default, so that tests don't depend on
+  // system setting of the test machine. Also, this helps to make tests on Mac
+  // more consistent with other platforms, where most views are focusable by
+  // default.
+  ui::test::ScopedFakeFullKeyboardAccess faked_full_keyboard_access_;
 #endif  // OS_MACOSX
 
 #if defined(OS_WIN)

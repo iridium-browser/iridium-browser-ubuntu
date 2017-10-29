@@ -8,8 +8,8 @@
 #include "platform/graphics/ContiguousContainer.h"
 #include "platform/graphics/paint/DisplayItem.h"
 #include "platform/graphics/paint/Transform3DDisplayItem.h"
-#include "wtf/Alignment.h"
-#include "wtf/Assertions.h"
+#include "platform/wtf/Alignment.h"
+#include "platform/wtf/Assertions.h"
 
 namespace blink {
 
@@ -29,61 +29,67 @@ static const size_t kMaximumDisplayItemSize =
 class PLATFORM_EXPORT DisplayItemList
     : public ContiguousContainer<DisplayItem, kDisplayItemAlignment> {
  public:
-  DisplayItemList(size_t initialSizeBytes)
-      : ContiguousContainer(kMaximumDisplayItemSize, initialSizeBytes) {}
+  DisplayItemList(size_t initial_size_bytes)
+      : ContiguousContainer(kMaximumDisplayItemSize, initial_size_bytes) {}
   DisplayItemList(DisplayItemList&& source)
-      : ContiguousContainer(std::move(source)),
-        m_visualRects(std::move(source.m_visualRects)) {}
+      : ContiguousContainer(std::move(source)) {}
 
   DisplayItemList& operator=(DisplayItemList&& source) {
     ContiguousContainer::operator=(std::move(source));
-    m_visualRects = std::move(source.m_visualRects);
     return *this;
   }
 
-  DisplayItem& appendByMoving(DisplayItem&);
-
-  bool hasVisualRect(size_t index) const {
-    return index < m_visualRects.size();
+  DisplayItem& AppendByMoving(DisplayItem& item) {
+#ifndef NDEBUG
+    String original_debug_string = item.AsDebugString();
+#endif
+    DCHECK(item.HasValidClient());
+    DisplayItem& result =
+        ContiguousContainer::AppendByMoving(item, item.DerivedSize());
+    // ContiguousContainer::AppendByMoving() calls an in-place constructor
+    // on item which replaces it with a tombstone/"dead display item" that
+    // can be safely destructed but should never be used.
+    DCHECK(!item.HasValidClient());
+#ifndef NDEBUG
+    // Save original debug string in the old item to help debugging.
+    item.SetClientDebugString(original_debug_string);
+#endif
+    item.visual_rect_ = result.visual_rect_;
+    return result;
   }
-  IntRect visualRect(size_t index) const {
-    DCHECK(hasVisualRect(index));
-    return m_visualRects[index];
-  }
-
-  void appendVisualRect(const IntRect& visualRect);
 
   // Useful for iterating with a range-based for loop.
   template <typename Iterator>
   class Range {
    public:
     Range(const Iterator& begin, const Iterator& end)
-        : m_begin(begin), m_end(end) {}
-    Iterator begin() const { return m_begin; }
-    Iterator end() const { return m_end; }
+        : begin_(begin), end_(end) {}
+    Iterator begin() const { return begin_; }
+    Iterator end() const { return end_; }
 
    private:
-    Iterator m_begin;
-    Iterator m_end;
+    Iterator begin_;
+    Iterator end_;
   };
-  Range<iterator> itemsInPaintChunk(const PaintChunk&);
-  Range<const_iterator> itemsInPaintChunk(const PaintChunk&) const;
+  Range<iterator> ItemsInPaintChunk(const PaintChunk&);
+  Range<const_iterator> ItemsInPaintChunk(const PaintChunk&) const;
 
   enum JsonOptions {
-    Default = 0,
-    ShowPaintRecords = 1,
-    SkipNonDrawings = 1 << 1,
-    ShowClientDebugName = 1 << 2,
-    ShownOnlyDisplayItemTypes = 1 << 3
+    kDefault = 0,
+    kShowPaintRecords = 1,
+    kSkipNonDrawings = 1 << 1,
+    kShowClientDebugName = 1 << 2,
+    kShownOnlyDisplayItemTypes = 1 << 3
   };
   typedef unsigned JsonFlags;
 
-  std::unique_ptr<JSONArray> subsequenceAsJSON(size_t beginIndex,
-                                               size_t endIndex,
-                                               JsonFlags options) const;
-
- private:
-  Vector<IntRect> m_visualRects;
+  std::unique_ptr<JSONArray> SubsequenceAsJSON(size_t begin_index,
+                                               size_t end_index,
+                                               JsonFlags) const;
+  void AppendSubsequenceAsJSON(size_t begin_index,
+                               size_t end_index,
+                               JsonFlags,
+                               JSONArray&) const;
 };
 
 }  // namespace blink

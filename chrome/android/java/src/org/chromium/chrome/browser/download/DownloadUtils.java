@@ -14,6 +14,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.StrictMode;
 import android.provider.Browser;
 import android.support.annotation.IntDef;
@@ -27,9 +28,11 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.FileUtils;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.UrlConstants;
@@ -39,13 +42,22 @@ import org.chromium.chrome.browser.download.ui.BackendProvider;
 import org.chromium.chrome.browser.download.ui.BackendProvider.DownloadDelegate;
 import org.chromium.chrome.browser.download.ui.DownloadFilter;
 import org.chromium.chrome.browser.download.ui.DownloadHistoryItemWrapper;
-import org.chromium.chrome.browser.offlinepages.ClientId;
+import org.chromium.chrome.browser.feature_engagement_tracker.FeatureEngagementTrackerFactory;
+import org.chromium.chrome.browser.offlinepages.DownloadUiActionFlags;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
+import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadBridge;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
+import org.chromium.chrome.browser.util.ConversionUtils;
 import org.chromium.chrome.browser.util.IntentUtils;
+import org.chromium.components.feature_engagement_tracker.EventConstants;
+import org.chromium.components.feature_engagement_tracker.FeatureEngagementTracker;
+import org.chromium.components.offline_items_collection.OfflineItem.Progress;
+import org.chromium.components.offline_items_collection.OfflineItemProgressUnit;
+import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content_public.browser.DownloadState;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.DeviceFormFactor;
@@ -56,8 +68,11 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.text.NumberFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A class containing some utility static methods.
@@ -81,9 +96,12 @@ public class DownloadUtils {
     private static final String EXTRA_IS_OFF_THE_RECORD =
             "org.chromium.chrome.browser.download.IS_OFF_THE_RECORD";
 
-    private static final long BYTES_PER_KILOBYTE = 1024;
-    private static final long BYTES_PER_MEGABYTE = 1024 * 1024;
-    private static final long BYTES_PER_GIGABYTE = 1024 * 1024 * 1024;
+    @VisibleForTesting
+    static final long SECONDS_PER_MINUTE = TimeUnit.MINUTES.toSeconds(1);
+    @VisibleForTesting
+    static final long SECONDS_PER_HOUR = TimeUnit.HOURS.toSeconds(1);
+    @VisibleForTesting
+    static final long SECONDS_PER_DAY = TimeUnit.DAYS.toSeconds(1);
 
     @VisibleForTesting
     static final String ELLIPSIS = "\u2026";
@@ -110,7 +128,12 @@ public class DownloadUtils {
         }
 
         Context appContext = ContextUtils.getApplicationContext();
-        if (DeviceFormFactor.isTablet(appContext)) {
+        if (activity instanceof ChromeActivity
+                && ((ChromeActivity) activity).getBottomSheet() != null) {
+            ((ChromeActivity) activity)
+                    .getBottomSheetContentController()
+                    .showContentAndOpenSheet(R.id.action_downloads);
+        } else if (DeviceFormFactor.isTablet()) {
             // Download Home shows up as a tab on tablets.
             LoadUrlParams params = new LoadUrlParams(UrlConstants.DOWNLOADS_URL);
             if (tab == null || !tab.isInitialized()) {
@@ -145,6 +168,14 @@ public class DownloadUtils {
                 intent.putExtra(IntentHandler.EXTRA_PARENT_COMPONENT, activity.getComponentName());
                 activity.startActivity(intent);
             }
+        }
+
+        if (BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
+                        .isStartupSuccessfullyCompleted()) {
+            Profile profile = (tab == null ? Profile.getLastUsedProfile() : tab.getProfile());
+            FeatureEngagementTracker tracker =
+                    FeatureEngagementTrackerFactory.getFeatureEngagementTrackerForProfile(profile);
+            tracker.notifyEvent(EventConstants.DOWNLOAD_HOME_OPENED);
         }
 
         return true;
@@ -203,10 +234,9 @@ public class DownloadUtils {
         if (tab.isShowingErrorPage()) {
             // The download needs to be scheduled to happen at later time due to current network
             // error.
-            ClientId clientId = ClientId.createGuidClientIdForNamespace(
-                    OfflinePageBridge.ASYNC_NAMESPACE);
             final OfflinePageBridge bridge = OfflinePageBridge.getForProfile(tab.getProfile());
-            bridge.savePageLater(tab.getUrl(), clientId, true /* userRequested */);
+            bridge.scheduleDownload(tab.getWebContents(), OfflinePageBridge.ASYNC_NAMESPACE,
+                    tab.getUrl(), DownloadUiActionFlags.PROMPT_DUPLICATE);
         } else {
             // Otherwise, the download can be started immediately.
             final OfflinePageDownloadBridge bridge =
@@ -215,6 +245,11 @@ public class DownloadUtils {
             bridge.destroy();
             DownloadUtils.recordDownloadPageMetrics(tab);
         }
+
+        FeatureEngagementTracker tracker =
+                FeatureEngagementTrackerFactory.getFeatureEngagementTrackerForProfile(
+                        tab.getProfile());
+        tracker.notifyEvent(EventConstants.DOWNLOAD_PAGE_STARTED);
     }
 
     /**
@@ -242,7 +277,7 @@ public class DownloadUtils {
         if (tab.isShowingInterstitialPage()) return false;
 
         // Don't allow re-downloading the currently displayed offline page.
-        if (tab.isOfflinePage()) return false;
+        if (OfflinePageUtils.isOfflinePage(tab)) return false;
 
         return true;
     }
@@ -251,9 +286,12 @@ public class DownloadUtils {
      * Creates an Intent to open the file in another app by firing an Intent to Android.
      * @param fileUri  Uri pointing to the file.
      * @param mimeType MIME type for the file.
+     * @param originalUrl The original url of the downloaded file.
+     * @param referrer Referrer of the downloaded file.
      * @return Intent that can be used to start an Activity for the file.
      */
-    public static Intent createViewIntentForDownloadItem(Uri fileUri, String mimeType) {
+    public static Intent createViewIntentForDownloadItem(Uri fileUri, String mimeType,
+            String originalUrl, String referrer) {
         Intent fileIntent = new Intent(Intent.ACTION_VIEW);
         String normalizedMimeType = Intent.normalizeMimeType(mimeType);
         if (TextUtils.isEmpty(normalizedMimeType)) {
@@ -263,7 +301,21 @@ public class DownloadUtils {
         }
         fileIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         fileIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        setOriginalUrlAndReferralExtraToIntent(fileIntent, originalUrl, referrer);
         return fileIntent;
+    }
+
+    /**
+     * Adds the originating Uri and referrer extras to an intent if they are not null.
+     * @param intent      Intent for adding extras.
+     * @param originalUrl The original url of the downloaded file.
+     * @param referrer    Referrer of the downloaded file.
+     */
+    public static void setOriginalUrlAndReferralExtraToIntent(
+            Intent intent, String originalUrl, String referrer) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) return;
+        if (originalUrl != null) intent.putExtra(Intent.EXTRA_ORIGINATING_URI, originalUrl);
+        if (referrer != null) intent.putExtra(Intent.EXTRA_REFERRER, referrer);
     }
 
     /**
@@ -393,7 +445,7 @@ public class DownloadUtils {
     public static Intent getMediaViewerIntentForDownloadItem(
             Uri fileUri, Uri contentUri, String mimeType) {
         Context context = ContextUtils.getApplicationContext();
-        Intent viewIntent = createViewIntentForDownloadItem(contentUri, mimeType);
+        Intent viewIntent = createViewIntentForDownloadItem(contentUri, mimeType, null, null);
 
         Bitmap closeIcon = BitmapFactory.decodeResource(
                 context.getResources(), R.drawable.ic_arrow_back_white_24dp);
@@ -417,7 +469,8 @@ public class DownloadUtils {
 
         // Create a PendingIntent that shares the file with external apps.
         PendingIntent pendingShareIntent = PendingIntent.getActivity(
-                context, 0, createShareIntent(contentUri, mimeType), 0);
+                context, 0, createShareIntent(contentUri, mimeType),
+                PendingIntent.FLAG_CANCEL_CURRENT);
         builder.setActionButton(
                 shareIcon, context.getString(R.string.share), pendingShareIntent, true);
 
@@ -434,10 +487,10 @@ public class DownloadUtils {
         Intent intent = builder.build().intent;
         intent.setPackage(context.getPackageName());
         intent.setData(contentUri);
-        intent.putExtra(CustomTabIntentDataProvider.EXTRA_IS_MEDIA_VIEWER, true);
+        intent.putExtra(CustomTabIntentDataProvider.EXTRA_UI_TYPE,
+                CustomTabIntentDataProvider.CUSTOM_TABS_UI_TYPE_MEDIA_VIEWER);
         intent.putExtra(CustomTabIntentDataProvider.EXTRA_MEDIA_VIEWER_URL, fileUri.toString());
-        intent.putExtra(CustomTabIntentDataProvider.EXTRA_ENABLE_EMBEDDED_MEDIA_EXPERIENCE,
-                isMimeTypeVideo(mimeType));
+        intent.putExtra(CustomTabIntentDataProvider.EXTRA_ENABLE_EMBEDDED_MEDIA_EXPERIENCE, true);
         intent.putExtra(
                 CustomTabIntentDataProvider.EXTRA_INITIAL_BACKGROUND_COLOR, mediaColor);
         intent.putExtra(
@@ -474,12 +527,17 @@ public class DownloadUtils {
      * Opens a file in Chrome or in another app if appropriate.
      * @param file path to the file to open.
      * @param mimeType mime type of the file.
+     * @param downloadGuid The associated download GUID.
      * @param isOffTheRecord whether we are in an off the record context.
+     * @param originalUrl The original url of the downloaded file.
+     * @param referrer Referrer of the downloaded file.
      * @return whether the file could successfully be opened.
      */
-    public static boolean openFile(File file, String mimeType, boolean isOffTheRecord) {
+    public static boolean openFile(
+            File file, String mimeType, String downloadGuid, boolean isOffTheRecord,
+            String originalUrl, String referrer) {
         Context context = ContextUtils.getApplicationContext();
-        DownloadManagerService service = DownloadManagerService.getDownloadManagerService(context);
+        DownloadManagerService service = DownloadManagerService.getDownloadManagerService();
 
         // Check if Chrome should open the file itself.
         if (service.isDownloadOpenableInBrowser(isOffTheRecord, mimeType)) {
@@ -492,6 +550,7 @@ public class DownloadUtils {
             Intent intent =
                     getMediaViewerIntentForDownloadItem(fileUri, contentUri, normalizedMimeType);
             IntentHandler.startActivityForTrustedIntent(intent);
+            service.updateLastAccessTime(downloadGuid, isOffTheRecord);
             return true;
         }
 
@@ -501,8 +560,10 @@ public class DownloadUtils {
             StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
             Uri uri = ApiCompatibilityUtils.getUriForDownloadedFile(file);
             StrictMode.setThreadPolicy(oldPolicy);
-            Intent viewIntent = createViewIntentForDownloadItem(uri, mimeType);
+            Intent viewIntent = createViewIntentForDownloadItem(
+                    uri, mimeType, originalUrl, referrer);
             context.startActivity(viewIntent);
+            service.updateLastAccessTime(downloadGuid, isOffTheRecord);
             return true;
         } catch (ActivityNotFoundException e) {
             // Can't launch the Intent.
@@ -556,13 +617,97 @@ public class DownloadUtils {
     }
 
     /**
-     * Determine what String to show for a given download.
+     * Creates a string that shows the time left or number of files left.
+     * @param context The application context.
+     * @param progress The download progress.
+     * @param timeRemainingInMillis The remaining time in milli seconds.
+     * @return Formatted string representing the time left or the number of files left.
+     */
+    public static String getTimeOrFilesLeftString(
+            Context context, Progress progress, long timeRemainingInMillis) {
+        if (progress.unit == OfflineItemProgressUnit.FILES) {
+            return formatRemainingFiles(context, progress);
+        } else {
+            return formatRemainingTime(context, timeRemainingInMillis);
+        }
+    }
+
+    /**
+     * Creates a string that represents the number of files left to be downloaded.
+     * @param progress Current download progress.
+     * @return String representing the number of files left.
+     */
+    public static String formatRemainingFiles(Context context, Progress progress) {
+        int filesLeft = (int) (progress.max - progress.value);
+        if (filesLeft == 1) {
+            return context.getResources().getString(R.string.one_file_left);
+        } else {
+            return context.getResources().getString(R.string.files_left, filesLeft);
+        }
+    }
+
+    /**
+     * Format remaining time for the given millis, in the following format:
+     * 5 hours; will include 1 unit, can go down to seconds precision.
+     * This is similar to what android.java.text.Formatter.formatShortElapsedTime() does. Don't use
+     * ui::TimeFormat::Simple() as it is very expensive.
+     *
+     * @param context the application context.
+     * @param millis the remaining time in milli seconds.
+     * @return the formatted remaining time.
+     */
+    @VisibleForTesting
+    public static String formatRemainingTime(Context context, long millis) {
+        long secondsLong = millis / 1000;
+
+        int days = 0;
+        int hours = 0;
+        int minutes = 0;
+        if (secondsLong >= SECONDS_PER_DAY) {
+            days = (int) (secondsLong / SECONDS_PER_DAY);
+            secondsLong -= days * SECONDS_PER_DAY;
+        }
+        if (secondsLong >= SECONDS_PER_HOUR) {
+            hours = (int) (secondsLong / SECONDS_PER_HOUR);
+            secondsLong -= hours * SECONDS_PER_HOUR;
+        }
+        if (secondsLong >= SECONDS_PER_MINUTE) {
+            minutes = (int) (secondsLong / SECONDS_PER_MINUTE);
+            secondsLong -= minutes * SECONDS_PER_MINUTE;
+        }
+        int seconds = (int) secondsLong;
+
+        if (days >= 2) {
+            days += (hours + 12) / 24;
+            return context.getString(R.string.remaining_duration_days, days);
+        } else if (days > 0) {
+            return context.getString(R.string.remaining_duration_one_day);
+        } else if (hours >= 2) {
+            hours += (minutes + 30) / 60;
+            return context.getString(R.string.remaining_duration_hours, hours);
+        } else if (hours > 0) {
+            return context.getString(R.string.remaining_duration_one_hour);
+        } else if (minutes >= 2) {
+            minutes += (seconds + 30) / 60;
+            return context.getString(R.string.remaining_duration_minutes, minutes);
+        } else if (minutes > 0) {
+            return context.getString(R.string.remaining_duration_one_minute);
+        } else if (seconds == 1) {
+            return context.getString(R.string.remaining_duration_one_second);
+        } else {
+            return context.getString(R.string.remaining_duration_seconds, seconds);
+        }
+    }
+
+    /**
+     * Determine what String to show for a given download in download home.
      * @param item Download to check the status of.
-     * @return ID of a String resource to use, or 0 if the status couldn't be determined.
+     * @return String representing the current download status.
      */
     public static String getStatusString(DownloadItem item) {
         Context context = ContextUtils.getApplicationContext();
         DownloadInfo info = item.getDownloadInfo();
+        Progress progress = info.getProgress();
 
         int state = info.state();
         if (state == DownloadState.COMPLETE) {
@@ -570,7 +715,8 @@ public class DownloadUtils {
         }
 
         DownloadSharedPreferenceHelper helper = DownloadSharedPreferenceHelper.getInstance();
-        DownloadSharedPreferenceEntry entry = helper.getDownloadSharedPreferenceEntry(item.getId());
+        DownloadSharedPreferenceEntry entry =
+                helper.getDownloadSharedPreferenceEntry(item.getContentId());
         boolean isDownloadPending =
                 entry != null && state == DownloadState.INTERRUPTED && entry.isAutoResumable;
 
@@ -589,9 +735,8 @@ public class DownloadUtils {
             long bytes = info.getBytesReceived();
             return DownloadUtils.getStringForDownloadedBytes(context, bytes);
         } else {
-            // Count down the time.
-            long msRemaining = info.getTimeRemainingInMillis();
-            return DownloadNotificationService.formatRemainingTime(context, msRemaining);
+            // Count down the time or number of files.
+            return getTimeOrFilesLeftString(context, progress, info.getTimeRemainingInMillis());
         }
     }
 
@@ -606,7 +751,8 @@ public class DownloadUtils {
      */
     public static boolean isDownloadPaused(DownloadItem item) {
         DownloadSharedPreferenceHelper helper = DownloadSharedPreferenceHelper.getInstance();
-        DownloadSharedPreferenceEntry entry = helper.getDownloadSharedPreferenceEntry(item.getId());
+        DownloadSharedPreferenceEntry entry =
+                helper.getDownloadSharedPreferenceEntry(item.getContentId());
 
         if (entry != null) {
             // The Java downloads backend knows more about the download than the native backend.
@@ -644,15 +790,15 @@ public class DownloadUtils {
         int resourceId;
         float bytesInCorrectUnits;
 
-        if (bytes < BYTES_PER_MEGABYTE) {
+        if (ConversionUtils.bytesToMegabytes(bytes) < 1) {
             resourceId = stringSet[0];
-            bytesInCorrectUnits = bytes / (float) BYTES_PER_KILOBYTE;
-        } else if (bytes < BYTES_PER_GIGABYTE) {
+            bytesInCorrectUnits = bytes / (float) ConversionUtils.BYTES_PER_KILOBYTE;
+        } else if (ConversionUtils.bytesToGigabytes(bytes) < 1) {
             resourceId = stringSet[1];
-            bytesInCorrectUnits = bytes / (float) BYTES_PER_MEGABYTE;
+            bytesInCorrectUnits = bytes / (float) ConversionUtils.BYTES_PER_MEGABYTE;
         } else {
             resourceId = stringSet[2];
-            bytesInCorrectUnits = bytes / (float) BYTES_PER_GIGABYTE;
+            bytesInCorrectUnits = bytes / (float) ConversionUtils.BYTES_PER_GIGABYTE;
         }
 
         return context.getResources().getString(resourceId, bytesInCorrectUnits);
@@ -709,7 +855,7 @@ public class DownloadUtils {
                                                    : R.drawable.ic_drive_text_white_36dp;
             default:
                 return iconSize == ICON_SIZE_24_DP ? R.drawable.ic_drive_file_white_24dp
-                                                   : R.drawable.ic_drive_text_white_36dp;
+                                                   : R.drawable.ic_drive_file_white_36dp;
         }
     }
 
@@ -739,5 +885,26 @@ public class DownloadUtils {
         if (pieces.length != 2) return false;
 
         return MIME_TYPE_VIDEO.equals(pieces[0]);
+    }
+
+    /**
+     * Given two timestamps, calculates if both occur on the same date.
+     * @return True if they belong in the same day. False otherwise.
+     */
+    public static boolean isSameDay(long timestamp1, long timestamp2) {
+        return getDateAtMidnight(timestamp1).equals(getDateAtMidnight(timestamp2));
+    }
+
+    /**
+     * Calculates the {@link Date} for midnight of the date represented by the |timestamp|.
+     */
+    public static Date getDateAtMidnight(long timestamp) {
+        Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(timestamp);
+        cal.set(Calendar.HOUR_OF_DAY, 0);
+        cal.set(Calendar.MINUTE, 0);
+        cal.set(Calendar.SECOND, 0);
+        cal.set(Calendar.MILLISECOND, 0);
+        return cal.getTime();
     }
 }

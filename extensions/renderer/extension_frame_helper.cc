@@ -8,6 +8,7 @@
 #include "base/strings/string_util.h"
 #include "base/timer/elapsed_timer.h"
 #include "content/public/renderer/render_frame.h"
+#include "content/public/renderer/render_view.h"
 #include "extensions/common/api/messaging/message.h"
 #include "extensions/common/api/messaging/port_id.h"
 #include "extensions/common/constants.h"
@@ -27,8 +28,10 @@ namespace extensions {
 
 namespace {
 
-base::LazyInstance<std::set<const ExtensionFrameHelper*>> g_frame_helpers =
-    LAZY_INSTANCE_INITIALIZER;
+constexpr int kMainWorldId = 0;
+
+base::LazyInstance<std::set<const ExtensionFrameHelper*>>::DestructorAtExit
+    g_frame_helpers = LAZY_INSTANCE_INITIALIZER;
 
 // Returns true if the render frame corresponding with |frame_helper| matches
 // the given criteria.
@@ -48,10 +51,10 @@ bool RenderFrameMatches(const ExtensionFrameHelper* frame_helper,
 
   // This logic matches ExtensionWebContentsObserver::GetExtensionFromFrame.
   blink::WebSecurityOrigin origin =
-      frame_helper->render_frame()->GetWebFrame()->getSecurityOrigin();
-  if (origin.isUnique() ||
-      !base::EqualsASCII(origin.protocol().utf16(), kExtensionScheme) ||
-      !base::EqualsASCII(origin.host().utf16(), match_extension_id.c_str()))
+      frame_helper->render_frame()->GetWebFrame()->GetSecurityOrigin();
+  if (origin.IsUnique() ||
+      !base::EqualsASCII(origin.Protocol().Utf16(), kExtensionScheme) ||
+      !base::EqualsASCII(origin.Host().Utf16(), match_extension_id.c_str()))
     return false;
 
   if (match_window_id != extension_misc::kUnknownWindowId &&
@@ -130,7 +133,7 @@ content::RenderFrame* ExtensionFrameHelper::GetBackgroundPageFrame(
                            extension_misc::kUnknownTabId, extension_id)) {
       blink::WebLocalFrame* web_frame = helper->render_frame()->GetWebFrame();
       // Check if this is the top frame.
-      if (web_frame->top() == web_frame)
+      if (web_frame->Top() == web_frame)
         return helper->render_frame();
     }
   }
@@ -169,6 +172,12 @@ void ExtensionFrameHelper::RunScriptsAtDocumentEnd() {
   // |this| might be dead by now.
 }
 
+void ExtensionFrameHelper::RunScriptsAtDocumentIdle() {
+  RunCallbacksWhileFrameIsValid(weak_ptr_factory_.GetWeakPtr(),
+                                &document_idle_callbacks_);
+  // |this| might be dead by now.
+}
+
 void ExtensionFrameHelper::ScheduleAtDocumentStart(
     const base::Closure& callback) {
   document_element_created_callbacks_.push_back(callback);
@@ -177,6 +186,11 @@ void ExtensionFrameHelper::ScheduleAtDocumentStart(
 void ExtensionFrameHelper::ScheduleAtDocumentEnd(
     const base::Closure& callback) {
   document_load_finished_callbacks_.push_back(callback);
+}
+
+void ExtensionFrameHelper::ScheduleAtDocumentIdle(
+    const base::Closure& callback) {
+  document_idle_callbacks_.push_back(callback);
 }
 
 void ExtensionFrameHelper::DidMatchCSS(
@@ -195,19 +209,18 @@ void ExtensionFrameHelper::DidStartProvisionalLoad(
   delayed_main_world_script_initialization_ = false;
   v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
   v8::Local<v8::Context> context =
-      render_frame()->GetWebFrame()->mainWorldScriptContext();
+      render_frame()->GetWebFrame()->MainWorldScriptContext();
   v8::Context::Scope context_scope(context);
   extension_dispatcher_->DidCreateScriptContext(render_frame()->GetWebFrame(),
-                                                context, 0);
+                                                context, kMainWorldId);
   // TODO(devlin): Add constants for main world id, no extension group.
 }
 
 void ExtensionFrameHelper::DidCreateScriptContext(
     v8::Local<v8::Context> context,
     int world_id) {
-  if (context == render_frame()->GetWebFrame()->mainWorldScriptContext() &&
+  if (world_id == kMainWorldId &&
       render_frame()->IsBrowserSideNavigationPending()) {
-    DCHECK_EQ(0, world_id);
     DCHECK(!delayed_main_world_script_initialization_);
     // Defer initializing the extensions script context now because it depends
     // on having the URL of the provisional load which isn't available at this
@@ -321,6 +334,25 @@ void ExtensionFrameHelper::OnExtensionMessageInvoke(
 
 void ExtensionFrameHelper::OnDestruct() {
   delete this;
+}
+
+void ExtensionFrameHelper::DraggableRegionsChanged() {
+  if (!render_frame()->IsMainFrame())
+    return;
+
+  blink::WebVector<blink::WebDraggableRegion> webregions =
+      render_frame()->GetWebFrame()->GetDocument().DraggableRegions();
+  std::vector<DraggableRegion> regions;
+  for (blink::WebDraggableRegion& webregion : webregions) {
+    render_frame()->GetRenderView()->ConvertViewportToWindowViaWidget(
+        &webregion.bounds);
+
+    regions.push_back(DraggableRegion());
+    DraggableRegion& region = regions.back();
+    region.bounds = webregion.bounds;
+    region.draggable = webregion.draggable;
+  }
+  Send(new ExtensionHostMsg_UpdateDraggableRegions(routing_id(), regions));
 }
 
 }  // namespace extensions

@@ -12,8 +12,8 @@ import android.print.PageRange;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintDocumentInfo;
-import android.webkit.ValueCallback;
 
+import java.util.ArrayList;
 
 /**
  * Adapter for printing Webview. This class implements the abstract
@@ -65,19 +65,49 @@ public class AwPrintDocumentAdapter extends PrintDocumentAdapter {
     }
 
     @Override
-    public void onWrite(PageRange[] pages, ParcelFileDescriptor destination,
+    public void onWrite(final PageRange[] pages, ParcelFileDescriptor destination,
             CancellationSignal cancellationSignal, final WriteResultCallback callback) {
-        mPdfExporter.exportToPdf(destination, mAttributes, new ValueCallback<Boolean>() {
-            @Override
-            public void onReceiveValue(Boolean value) {
-                if (value) {
-                    callback.onWriteFinished(new PageRange[] { PageRange.ALL_PAGES });
-                } else {
-                    // TODO(sgurun) provide a localized error message
-                    callback.onWriteFailed(null);
-                }
+        if (pages == null || pages.length == 0) {
+            callback.onWriteFailed(null);
+            return;
+        }
+
+        mPdfExporter.exportToPdf(destination, mAttributes,
+                normalizeRanges(pages), new AwPdfExporter.AwPdfExporterCallback() {
+                    @Override
+                    public void pdfWritingDone(int pageCount) {
+                        if (pageCount > 0) {
+                            callback.onWriteFinished(validatePageRanges(pages, pageCount));
+                        } else {
+                            // TODO(sgurun) provide a localized error message
+                            callback.onWriteFailed(null);
+                        }
+                    }
+                }, cancellationSignal);
+    }
+
+    private static PageRange[] validatePageRanges(PageRange[] pages, int pageCount) {
+        if (pages.length == 1 && PageRange.ALL_PAGES.equals(pages[0])) {
+            return new PageRange[] {new PageRange(0, pageCount - 1)};
+        }
+        return pages;
+    }
+
+    private static int[] normalizeRanges(final PageRange[] ranges) {
+        if (ranges.length == 1 && PageRange.ALL_PAGES.equals(ranges[0])) {
+            return new int[0];
+        }
+        ArrayList<Integer> pages = new ArrayList<Integer>();
+        for (PageRange range : ranges) {
+            for (int i = range.getStart(); i <= range.getEnd(); ++i) {
+                pages.add(i);
             }
-        }, cancellationSignal);
+        }
+
+        int[] ret = new int[pages.size()];
+        for (int i = 0; i < pages.size(); ++i) {
+            ret[i] = pages.get(i).intValue();
+        }
+        return ret;
     }
 }
-

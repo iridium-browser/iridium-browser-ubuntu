@@ -14,7 +14,7 @@
 
 #include "libANGLE/angletypes.h"
 #include "libANGLE/renderer/d3d/BufferD3D.h"
-#include "libANGLE/signal_utils.h"
+#include "libANGLE/renderer/d3d/d3d11/renderer11_utils.h"
 
 namespace gl
 {
@@ -35,6 +35,8 @@ enum BufferUsage
     BUFFER_USAGE_STAGING,
     BUFFER_USAGE_VERTEX_OR_TRANSFORM_FEEDBACK,
     BUFFER_USAGE_INDEX,
+    // TODO: possibly share this buffer type with shader storage buffers.
+    BUFFER_USAGE_INDIRECT,
     BUFFER_USAGE_PIXEL_UNPACK,
     BUFFER_USAGE_PIXEL_PACK,
     BUFFER_USAGE_UNIFORM,
@@ -62,7 +64,8 @@ class Buffer11 : public BufferD3D
                                      UINT *numConstantsOut);
     gl::ErrorOrResult<ID3D11ShaderResourceView *> getSRV(DXGI_FORMAT srvFormat);
     bool isMapped() const { return mMappedStorage != nullptr; }
-    gl::Error packPixels(const gl::FramebufferAttachment &readAttachment,
+    gl::Error packPixels(const gl::Context *context,
+                         const gl::FramebufferAttachment &readAttachment,
                          const PackPixelsParams &params);
     size_t getTotalCPUBufferMemoryBytes() const;
 
@@ -74,35 +77,35 @@ class Buffer11 : public BufferD3D
     void invalidateStaticData() override;
 
     // BufferImpl implementation
-    gl::Error setData(ContextImpl *context,
+    gl::Error setData(const gl::Context *context,
                       GLenum target,
                       const void *data,
                       size_t size,
                       GLenum usage) override;
-    gl::Error setSubData(ContextImpl *context,
+    gl::Error setSubData(const gl::Context *context,
                          GLenum target,
                          const void *data,
                          size_t size,
                          size_t offset) override;
-    gl::Error copySubData(ContextImpl *contextImpl,
+    gl::Error copySubData(const gl::Context *context,
                           BufferImpl *source,
                           GLintptr sourceOffset,
                           GLintptr destOffset,
                           GLsizeiptr size) override;
-    gl::Error map(ContextImpl *contextImpl, GLenum access, GLvoid **mapPtr) override;
-    gl::Error mapRange(ContextImpl *contextImpl,
+    gl::Error map(const gl::Context *context, GLenum access, void **mapPtr) override;
+    gl::Error mapRange(const gl::Context *context,
                        size_t offset,
                        size_t length,
                        GLbitfield access,
-                       GLvoid **mapPtr) override;
-    gl::Error unmap(ContextImpl *contextImpl, GLboolean *result) override;
+                       void **mapPtr) override;
+    gl::Error unmap(const gl::Context *context, GLboolean *result) override;
     gl::Error markTransformFeedbackUsage() override;
 
     // We use two set of dirty events. Static buffers are marked dirty whenever
     // data changes, because they must be re-translated. Direct buffers only need to be
     // updated when the underlying ID3D11Buffer pointer changes - hopefully far less often.
-    angle::BroadcastChannel *getStaticBroadcastChannel();
-    angle::BroadcastChannel *getDirectBroadcastChannel();
+    OnBufferDataDirtyChannel *getStaticBroadcastChannel();
+    OnBufferDataDirtyChannel *getDirectBroadcastChannel();
 
   private:
     class BufferStorage;
@@ -113,7 +116,7 @@ class Buffer11 : public BufferD3D
 
     struct ConstantBufferCacheEntry
     {
-        ConstantBufferCacheEntry() : storage(nullptr), lruCount(0) { }
+        ConstantBufferCacheEntry() : storage(nullptr), lruCount(0) {}
 
         BufferStorage *storage;
         unsigned int lruCount;
@@ -160,10 +163,10 @@ class Buffer11 : public BufferD3D
     size_t mConstantBufferStorageAdditionalSize;
     unsigned int mMaxConstantBufferLruCount;
 
-    angle::BroadcastChannel mStaticBroadcastChannel;
-    angle::BroadcastChannel mDirectBroadcastChannel;
+    OnBufferDataDirtyChannel mStaticBroadcastChannel;
+    OnBufferDataDirtyChannel mDirectBroadcastChannel;
 };
 
 }  // namespace rx
 
-#endif // LIBANGLE_RENDERER_D3D_D3D11_BUFFER11_H_
+#endif  // LIBANGLE_RENDERER_D3D_D3D11_BUFFER11_H_

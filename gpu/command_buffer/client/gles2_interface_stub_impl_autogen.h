@@ -908,10 +908,10 @@ void GLES2InterfaceStub::PostSubBufferCHROMIUM(GLint /* x */,
                                                GLint /* width */,
                                                GLint /* height */) {}
 void GLES2InterfaceStub::CopyTextureCHROMIUM(
-    GLenum /* source_id */,
+    GLuint /* source_id */,
     GLint /* source_level */,
     GLenum /* dest_target */,
-    GLenum /* dest_id */,
+    GLuint /* dest_id */,
     GLint /* dest_level */,
     GLint /* internalformat */,
     GLenum /* dest_type */,
@@ -919,10 +919,10 @@ void GLES2InterfaceStub::CopyTextureCHROMIUM(
     GLboolean /* unpack_premultiply_alpha */,
     GLboolean /* unpack_unmultiply_alpha */) {}
 void GLES2InterfaceStub::CopySubTextureCHROMIUM(
-    GLenum /* source_id */,
+    GLuint /* source_id */,
     GLint /* source_level */,
     GLenum /* dest_target */,
-    GLenum /* dest_id */,
+    GLuint /* dest_id */,
     GLint /* dest_level */,
     GLint /* xoffset */,
     GLint /* yoffset */,
@@ -933,8 +933,8 @@ void GLES2InterfaceStub::CopySubTextureCHROMIUM(
     GLboolean /* unpack_flip_y */,
     GLboolean /* unpack_premultiply_alpha */,
     GLboolean /* unpack_unmultiply_alpha */) {}
-void GLES2InterfaceStub::CompressedCopyTextureCHROMIUM(GLenum /* source_id */,
-                                                       GLenum /* dest_id */) {}
+void GLES2InterfaceStub::CompressedCopyTextureCHROMIUM(GLuint /* source_id */,
+                                                       GLuint /* dest_id */) {}
 void GLES2InterfaceStub::DrawArraysInstancedANGLE(GLenum /* mode */,
                                                   GLint /* first */,
                                                   GLsizei /* count */,
@@ -965,6 +965,10 @@ void GLES2InterfaceStub::BindUniformLocationCHROMIUM(GLuint /* program */,
                                                      const char* /* name */) {}
 void GLES2InterfaceStub::BindTexImage2DCHROMIUM(GLenum /* target */,
                                                 GLint /* imageId */) {}
+void GLES2InterfaceStub::BindTexImage2DWithInternalformatCHROMIUM(
+    GLenum /* target */,
+    GLenum /* internalformat */,
+    GLint /* imageId */) {}
 void GLES2InterfaceStub::ReleaseTexImage2DCHROMIUM(GLenum /* target */,
                                                    GLint /* imageId */) {}
 void GLES2InterfaceStub::TraceBeginCHROMIUM(const char* /* category_name */,
@@ -1025,6 +1029,20 @@ void GLES2InterfaceStub::FlushDriverCachesCHROMIUM() {}
 GLuint GLES2InterfaceStub::GetLastFlushIdCHROMIUM() {
   return 0;
 }
+void GLES2InterfaceStub::ScheduleDCLayerSharedStateCHROMIUM(
+    GLfloat /* opacity */,
+    GLboolean /* is_clipped */,
+    const GLfloat* /* clip_rect */,
+    GLint /* z_order */,
+    const GLfloat* /* transform */) {}
+void GLES2InterfaceStub::ScheduleDCLayerCHROMIUM(
+    GLsizei /* num_textures */,
+    const GLuint* /* contents_texture_ids */,
+    const GLfloat* /* contents_rect */,
+    GLuint /* background_color */,
+    GLuint /* edge_aa_mask */,
+    const GLfloat* /* bounds_rect */,
+    GLuint /* filter */) {}
 void GLES2InterfaceStub::MatrixLoadfCHROMIUM(GLenum /* matrixMode */,
                                              const GLfloat* /* m */) {}
 void GLES2InterfaceStub::MatrixLoadIdentityCHROMIUM(GLenum /* matrixMode */) {}
@@ -1174,4 +1192,13 @@ void GLES2InterfaceStub::SetDrawRectangleCHROMIUM(GLint /* x */,
                                                   GLint /* y */,
                                                   GLint /* width */,
                                                   GLint /* height */) {}
+void GLES2InterfaceStub::SetEnableDCLayersCHROMIUM(GLboolean /* enabled */) {}
+void GLES2InterfaceStub::InitializeDiscardableTextureCHROMIUM(
+    GLuint /* texture_id */) {}
+void GLES2InterfaceStub::UnlockDiscardableTextureCHROMIUM(
+    GLuint /* texture_id */) {}
+bool GLES2InterfaceStub::LockDiscardableTextureCHROMIUM(
+    GLuint /* texture_id */) {
+  return 0;
+}
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_INTERFACE_STUB_IMPL_AUTOGEN_H_

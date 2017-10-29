@@ -31,21 +31,8 @@ public abstract class ChromeSwitches {
     /** Disable the First Run Experience. */
     public static final String DISABLE_FIRST_RUN_EXPERIENCE = "disable-fre";
 
-    /** Enable the Lightweight First Run Experience. */
-    public static final String ENABLE_LIGHTWEIGHT_FIRST_RUN_EXPERIENCE = "enable-lightweight-fre";
-
     /** Force the crash dump to be uploaded regardless of preferences. */
     public static final String FORCE_CRASH_DUMP_UPLOAD = "force-dump-upload";
-
-    /**
-     * Force the crash dump NOT to be uploaded regardless of preferences.
-     * This is intended for testing use, when command-line switches may be needed.
-     * Overrides any other upload preference.
-     */
-    public static final String DISABLE_CRASH_DUMP_UPLOAD = "disable-dump-upload";
-
-    /** Whether or not to enable the experimental tablet tab stack. */
-    public static final String ENABLE_TABLET_TAB_STACK = "enable-tablet-tab-stack";
 
     /** Never forward URL requests to external intents. */
     public static final String DISABLE_EXTERNAL_INTENT_REQUESTS =
@@ -134,13 +121,6 @@ public abstract class ChromeSwitches {
     public static final String NTP_SWITCH_TO_EXISTING_TAB = "ntp-switch-to-existing-tab";
 
     /**
-     * Enable keyboard accessory view that shows autofill suggestions on top of the keyboard.
-     * Native switch - autofill::switches::kEnableAccessorySuggestionView
-     */
-    public static final String ENABLE_AUTOFILL_KEYBOARD_ACCESSORY =
-            "enable-autofill-keyboard-accessory-view";
-
-    /**
      * Enables overscroll of the on screen keyboard. With this flag on, the OSK will only resize the
      * visual viewport.
      * Native switch - switches::kEnableOSKOverscroll
@@ -201,6 +181,15 @@ public abstract class ChromeSwitches {
 
     /** Enable Vr Shell development environment. */
     public static final String ENABLE_VR_SHELL_DEV = "enable-vr-shell-dev";
+
+    /** Command line switch for Chrome Home's swipe logic. */
+    public static final String CHROME_HOME_SWIPE_LOGIC = "chrome-home-swipe-logic";
+
+    /** Switch for enabling "restricted area" swipe logic for Chrome Home. */
+    public static final String CHROME_HOME_SWIPE_LOGIC_RESTRICT_AREA = "restrict-area";
+
+    /** Switch for enabling "button only" swipe logic for Chrome Home. */
+    public static final String CHROME_HOME_SWIPE_LOGIC_BUTTON_ONLY = "button-only";
 
     // Prevent instantiation.
     private ChromeSwitches() {}

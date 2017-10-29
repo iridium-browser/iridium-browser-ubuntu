@@ -8,10 +8,10 @@
 #include <map>
 #include <vector>
 
-#include "cc/base/cc_export.h"
 #include "cc/base/resource_id.h"
+#include "cc/cc_export.h"
 #include "cc/quads/render_pass.h"
-#include "cc/resources/resource_format.h"
+#include "ui/gfx/buffer_types.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/size.h"
@@ -27,6 +27,7 @@ namespace cc {
 class DrawQuad;
 class StreamVideoDrawQuad;
 class TextureDrawQuad;
+class TileDrawQuad;
 class ResourceProvider;
 
 class CC_EXPORT OverlayCandidate {
@@ -52,8 +53,8 @@ class CC_EXPORT OverlayCandidate {
 
   // Transformation to apply to layer during composition.
   gfx::OverlayTransform transform;
-  // Format of the buffer to composite.
-  ResourceFormat format;
+  // Format of the buffer to scanout.
+  gfx::BufferFormat format;
   // Size of the resource, in pixels.
   gfx::Size resource_size_in_pixels;
   // Rect on the display to position the overlay to. Implementer must convert
@@ -61,12 +62,12 @@ class CC_EXPORT OverlayCandidate {
   gfx::RectF display_rect;
   // Crop within the buffer to be placed inside |display_rect|.
   gfx::RectF uv_rect;
-  // Quad geometry rect after applying the quad_transform().
-  gfx::Rect quad_rect_in_target_space;
   // Clip rect in the target content space after composition.
   gfx::Rect clip_rect;
   // If the quad is clipped after composition.
   bool is_clipped;
+  // If the quad doesn't require blending.
+  bool is_opaque;
   // True if the texture for this overlay should be the same one used by the
   // output surface's main overlay.
   bool use_output_surface_for_resource;
@@ -97,9 +98,17 @@ class CC_EXPORT OverlayCandidate {
   bool overlay_handled;
 
  private:
+  static bool FromDrawQuadResource(ResourceProvider* resource_provider,
+                                   const DrawQuad* quad,
+                                   ResourceId resource_id,
+                                   bool y_flipped,
+                                   OverlayCandidate* candidate);
   static bool FromTextureQuad(ResourceProvider* resource_provider,
                               const TextureDrawQuad* quad,
                               OverlayCandidate* candidate);
+  static bool FromTileQuad(ResourceProvider* resource_provider,
+                           const TileDrawQuad* quad,
+                           OverlayCandidate* candidate);
   static bool FromStreamVideoQuad(ResourceProvider* resource_provider,
                                   const StreamVideoDrawQuad* quad,
                                   OverlayCandidate* candidate);

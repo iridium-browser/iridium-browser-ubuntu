@@ -5,21 +5,26 @@
 #include "chrome/browser/notifications/non_persistent_notification_handler.h"
 
 #include "base/strings/nullable_string16.h"
-#include "chrome/browser/notifications/notification_delegate.h"
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
+#include "content/public/browser/notification_event_dispatcher.h"
 
-NonPersistentNotificationHandler::NonPersistentNotificationHandler() {}
-NonPersistentNotificationHandler::~NonPersistentNotificationHandler() {}
+NonPersistentNotificationHandler::NonPersistentNotificationHandler() = default;
+NonPersistentNotificationHandler::~NonPersistentNotificationHandler() = default;
+
+void NonPersistentNotificationHandler::OnShow(
+    Profile* profile,
+    const std::string& notification_id) {
+  content::NotificationEventDispatcher::GetInstance()
+      ->DispatchNonPersistentShowEvent(notification_id);
+}
 
 void NonPersistentNotificationHandler::OnClose(
     Profile* profile,
     const std::string& origin,
     const std::string& notification_id,
     bool by_user) {
-  if (notifications_.find(notification_id) != notifications_.end()) {
-    notifications_[notification_id]->Close(by_user);
-    notifications_.erase(notification_id);
-  }
+  content::NotificationEventDispatcher::GetInstance()
+      ->DispatchNonPersistentCloseEvent(notification_id);
 }
 
 void NonPersistentNotificationHandler::OnClick(
@@ -28,23 +33,22 @@ void NonPersistentNotificationHandler::OnClick(
     const std::string& notification_id,
     int action_index,
     const base::NullableString16& reply) {
-  // Buttons and replies not supported for non persistent notifications.
-  DCHECK_EQ(action_index, -1);
   DCHECK(reply.is_null());
 
-  if (notifications_.find(notification_id) != notifications_.end()) {
-    notifications_[notification_id]->Click();
-  }
+  // Non persistent notifications don't allow buttons.
+  // https://notifications.spec.whatwg.org/#create-a-notification
+  DCHECK_EQ(-1, action_index);
+
+  content::NotificationEventDispatcher::GetInstance()
+      ->DispatchNonPersistentClickEvent(notification_id);
 }
 
 void NonPersistentNotificationHandler::OpenSettings(Profile* profile) {
   NotificationCommon::OpenNotificationSettings(profile);
 }
 
-void NonPersistentNotificationHandler::RegisterNotification(
-    const std::string& notification_id,
-    NotificationDelegate* delegate) {
-  DCHECK_EQ(notifications_.count(notification_id), 0u);
-  notifications_[notification_id] =
-      scoped_refptr<NotificationDelegate>(delegate);
+bool NonPersistentNotificationHandler::ShouldDisplayOnFullScreen(
+    Profile* profile,
+    const std::string& origin) {
+  return NotificationCommon::ShouldDisplayOnFullScreen(profile, GURL(origin));
 }

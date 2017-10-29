@@ -52,6 +52,16 @@ IN_PROC_BROWSER_TEST_F(InterstitialUITest, SSLInterstitial) {
       "Privacy error");
 }
 
+IN_PROC_BROWSER_TEST_F(InterstitialUITest, SuperfishInterstitial) {
+  TestInterstitial(GURL("chrome://interstitials/superfish-ssl"),
+                   "Privacy error");
+}
+
+IN_PROC_BROWSER_TEST_F(InterstitialUITest, PinnedCertInterstitial) {
+  TestInterstitial(GURL("chrome://interstitials/ssl?type=hpkp_failure"),
+                   "Privacy error");
+}
+
 IN_PROC_BROWSER_TEST_F(InterstitialUITest, MalwareInterstitial) {
   TestInterstitial(
       GURL("chrome://interstitials/safebrowsing?type=malware"),
@@ -61,6 +71,18 @@ IN_PROC_BROWSER_TEST_F(InterstitialUITest, MalwareInterstitial) {
 IN_PROC_BROWSER_TEST_F(InterstitialUITest, PhishingInterstitial) {
   TestInterstitial(
       GURL("chrome://interstitials/safebrowsing?type=phishing"),
+      "Security error");
+}
+
+IN_PROC_BROWSER_TEST_F(InterstitialUITest, MalwareInterstitialQuiet) {
+  TestInterstitial(
+      GURL("chrome://interstitials/quietsafebrowsing?type=malware"),
+      "Security error");
+}
+
+IN_PROC_BROWSER_TEST_F(InterstitialUITest, PhishingInterstitialQuiet) {
+  TestInterstitial(
+      GURL("chrome://interstitials/quietsafebrowsing?type=phishing"),
       "Security error");
 }
 

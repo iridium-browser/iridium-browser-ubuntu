@@ -10,7 +10,7 @@
 
 #include "webrtc/video/encoder_rtcp_feedback.h"
 
-#include "webrtc/base/checks.h"
+#include "webrtc/rtc_base/checks.h"
 #include "webrtc/video/vie_encoder.h"
 
 static const int kMinKeyFrameRequestIntervalMs = 300;
@@ -63,15 +63,4 @@ void EncoderRtcpFeedback::OnReceivedIntraFrameRequest(uint32_t ssrc) {
   vie_encoder_->OnReceivedIntraFrameRequest(index);
 }
 
-void EncoderRtcpFeedback::OnReceivedSLI(uint32_t ssrc, uint8_t picture_id) {
-  RTC_DCHECK(HasSsrc(ssrc));
-
-  vie_encoder_->OnReceivedSLI(picture_id);
-}
-
-void EncoderRtcpFeedback::OnReceivedRPSI(uint32_t ssrc, uint64_t picture_id) {
-  RTC_DCHECK(HasSsrc(ssrc));
-
-  vie_encoder_->OnReceivedRPSI(picture_id);
-}
 }  // namespace webrtc

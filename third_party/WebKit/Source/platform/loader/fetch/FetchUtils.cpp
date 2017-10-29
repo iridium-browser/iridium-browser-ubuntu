@@ -7,16 +7,16 @@
 #include "platform/HTTPNames.h"
 #include "platform/network/HTTPHeaderMap.h"
 #include "platform/network/HTTPParsers.h"
-#include "wtf/HashSet.h"
-#include "wtf/Threading.h"
-#include "wtf/text/AtomicString.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/HashSet.h"
+#include "platform/wtf/Threading.h"
+#include "platform/wtf/text/AtomicString.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
 namespace {
 
-bool isHTTPWhitespace(UChar chr) {
+bool IsHTTPWhitespace(UChar chr) {
   return chr == ' ' || chr == '\n' || chr == '\t' || chr == '\r';
 }
 
@@ -25,25 +25,25 @@ class ForbiddenHeaderNames {
   USING_FAST_MALLOC(ForbiddenHeaderNames);
 
  public:
-  bool has(const String& name) const {
-    return m_fixedNames.contains(name) ||
-           name.startsWith(m_proxyHeaderPrefix, TextCaseASCIIInsensitive) ||
-           name.startsWith(m_secHeaderPrefix, TextCaseASCIIInsensitive);
+  bool Has(const String& name) const {
+    return fixed_names_.Contains(name) ||
+           name.StartsWithIgnoringASCIICase(proxy_header_prefix_) ||
+           name.StartsWithIgnoringASCIICase(sec_header_prefix_);
   }
 
-  static const ForbiddenHeaderNames& get();
+  static const ForbiddenHeaderNames& Get();
 
  private:
   ForbiddenHeaderNames();
 
-  String m_proxyHeaderPrefix;
-  String m_secHeaderPrefix;
-  HashSet<String, CaseFoldingHash> m_fixedNames;
+  String proxy_header_prefix_;
+  String sec_header_prefix_;
+  HashSet<String, CaseFoldingHash> fixed_names_;
 };
 
 ForbiddenHeaderNames::ForbiddenHeaderNames()
-    : m_proxyHeaderPrefix("proxy-"), m_secHeaderPrefix("sec-") {
-  m_fixedNames = {
+    : proxy_header_prefix_("proxy-"), sec_header_prefix_("sec-") {
+  fixed_names_ = {
       "accept-charset",
       "accept-encoding",
       "access-control-request-headers",
@@ -68,80 +68,69 @@ ForbiddenHeaderNames::ForbiddenHeaderNames()
   };
 }
 
-const ForbiddenHeaderNames& ForbiddenHeaderNames::get() {
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(const ForbiddenHeaderNames, instance,
-                                  new ForbiddenHeaderNames);
+const ForbiddenHeaderNames& ForbiddenHeaderNames::Get() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(const ForbiddenHeaderNames, instance, ());
   return instance;
 }
 
 }  // namespace
 
-bool FetchUtils::isSimpleMethod(const String& method) {
-  // http://fetch.spec.whatwg.org/#simple-method
-  // "A simple method is a method that is `GET`, `HEAD`, or `POST`."
+bool FetchUtils::IsCORSSafelistedMethod(const String& method) {
+  // https://fetch.spec.whatwg.org/#cors-safelisted-method
+  // "A CORS-safelisted method is a method that is `GET`, `HEAD`, or `POST`."
   return method == "GET" || method == "HEAD" || method == "POST";
 }
 
-bool FetchUtils::isSimpleHeader(const AtomicString& name,
-                                const AtomicString& value) {
-  // http://fetch.spec.whatwg.org/#simple-header
-  // "A simple header is a header whose name is either one of `Accept`,
+bool FetchUtils::IsCORSSafelistedHeader(const AtomicString& name,
+                                        const AtomicString& value) {
+  // https://fetch.spec.whatwg.org/#cors-safelisted-request-header
+  // "A CORS-safelisted header is a header whose name is either one of `Accept`,
   // `Accept-Language`, and `Content-Language`, or whose name is
   // `Content-Type` and value, once parsed, is one of
   // `application/x-www-form-urlencoded`, `multipart/form-data`, and
   // `text/plain`."
-  // Treat 'Save-Data' as a simple header, since it is added by Chrome when
-  // Data Saver feature is enabled.
-  // Treat inspector headers as a simple headers, since they are added by blink
-  // when the inspector is open.
+  //
+  // Treat 'Save-Data' as a CORS-safelisted header, since it is added by Chrome
+  // when Data Saver feature is enabled. Treat inspector headers as a
+  // CORS-safelisted headers, since they are added by blink when the inspector
+  // is open.
+  //
+  // Treat 'Intervention' as a CORS-safelisted header, since it is added by
+  // Chrome when an intervention is (or may be) applied.
 
-  if (equalIgnoringCase(name, "accept") ||
-      equalIgnoringCase(name, "accept-language") ||
-      equalIgnoringCase(name, "content-language") ||
-      equalIgnoringCase(
+  if (EqualIgnoringASCIICase(name, "accept") ||
+      EqualIgnoringASCIICase(name, "accept-language") ||
+      EqualIgnoringASCIICase(name, "content-language") ||
+      EqualIgnoringASCIICase(
           name, HTTPNames::X_DevTools_Emulate_Network_Conditions_Client_Id) ||
-      equalIgnoringCase(name, HTTPNames::X_DevTools_Request_Id) ||
-      equalIgnoringCase(name, "save-data"))
+      EqualIgnoringASCIICase(name, "save-data") ||
+      EqualIgnoringASCIICase(name, "intervention"))
     return true;
 
-  if (equalIgnoringCase(name, "content-type"))
-    return isSimpleContentType(value);
+  if (EqualIgnoringASCIICase(name, "content-type"))
+    return IsCORSSafelistedContentType(value);
 
   return false;
 }
 
-bool FetchUtils::isSimpleContentType(const AtomicString& mediaType) {
-  AtomicString mimeType = extractMIMETypeFromMediaType(mediaType);
-  return equalIgnoringCase(mimeType, "application/x-www-form-urlencoded") ||
-         equalIgnoringCase(mimeType, "multipart/form-data") ||
-         equalIgnoringCase(mimeType, "text/plain");
+bool FetchUtils::IsCORSSafelistedContentType(const AtomicString& media_type) {
+  AtomicString mime_type = ExtractMIMETypeFromMediaType(media_type);
+  return EqualIgnoringASCIICase(mime_type,
+                                "application/x-www-form-urlencoded") ||
+         EqualIgnoringASCIICase(mime_type, "multipart/form-data") ||
+         EqualIgnoringASCIICase(mime_type, "text/plain");
 }
 
-bool FetchUtils::isSimpleRequest(const String& method,
-                                 const HTTPHeaderMap& headerMap) {
-  if (!isSimpleMethod(method))
-    return false;
-
-  for (const auto& header : headerMap) {
-    // Preflight is required for MIME types that can not be sent via form
-    // submission.
-    if (!isSimpleHeader(header.key, header.value))
-      return false;
-  }
-
-  return true;
-}
-
-bool FetchUtils::isForbiddenMethod(const String& method) {
+bool FetchUtils::IsForbiddenMethod(const String& method) {
   // http://fetch.spec.whatwg.org/#forbidden-method
   // "A forbidden method is a method that is a byte case-insensitive match"
   //  for one of `CONNECT`, `TRACE`, and `TRACK`."
-  return equalIgnoringCase(method, "TRACE") ||
-         equalIgnoringCase(method, "TRACK") ||
-         equalIgnoringCase(method, "CONNECT");
+  return EqualIgnoringASCIICase(method, "TRACE") ||
+         EqualIgnoringASCIICase(method, "TRACK") ||
+         EqualIgnoringASCIICase(method, "CONNECT");
 }
 
-bool FetchUtils::isForbiddenHeaderName(const String& name) {
+bool FetchUtils::IsForbiddenHeaderName(const String& name) {
   // http://fetch.spec.whatwg.org/#forbidden-header-name
   // "A forbidden header name is a header names that is one of:
   //   `Accept-Charset`, `Accept-Encoding`, `Access-Control-Request-Headers`,
@@ -152,43 +141,29 @@ bool FetchUtils::isForbiddenHeaderName(const String& name) {
   // or starts with `Proxy-` or `Sec-` (including when it is just `Proxy-` or
   // `Sec-`)."
 
-  return ForbiddenHeaderNames::get().has(name);
+  return ForbiddenHeaderNames::Get().Has(name);
 }
 
-bool FetchUtils::isForbiddenResponseHeaderName(const String& name) {
+bool FetchUtils::IsForbiddenResponseHeaderName(const String& name) {
   // http://fetch.spec.whatwg.org/#forbidden-response-header-name
   // "A forbidden response header name is a header name that is one of:
   // `Set-Cookie`, `Set-Cookie2`"
 
-  return equalIgnoringCase(name, "set-cookie") ||
-         equalIgnoringCase(name, "set-cookie2");
+  return EqualIgnoringASCIICase(name, "set-cookie") ||
+         EqualIgnoringASCIICase(name, "set-cookie2");
 }
 
-bool FetchUtils::isSimpleOrForbiddenRequest(const String& method,
-                                            const HTTPHeaderMap& headerMap) {
-  if (!isSimpleMethod(method))
-    return false;
-
-  for (const auto& header : headerMap) {
-    if (!isSimpleHeader(header.key, header.value) &&
-        !isForbiddenHeaderName(header.key))
-      return false;
-  }
-
-  return true;
-}
-
-AtomicString FetchUtils::normalizeMethod(const AtomicString& method) {
+AtomicString FetchUtils::NormalizeMethod(const AtomicString& method) {
   // https://fetch.spec.whatwg.org/#concept-method-normalize
 
   // We place GET and POST first because they are more commonly used than
   // others.
-  const char* const methods[] = {
+  const char* const kMethods[] = {
       "GET", "POST", "DELETE", "HEAD", "OPTIONS", "PUT",
   };
 
-  for (const auto& known : methods) {
-    if (equalIgnoringCase(method, known)) {
+  for (const auto& known : kMethods) {
+    if (EqualIgnoringASCIICase(method, known)) {
       // Don't bother allocating a new string if it's already all
       // uppercase.
       return method == known ? method : known;
@@ -197,12 +172,31 @@ AtomicString FetchUtils::normalizeMethod(const AtomicString& method) {
   return method;
 }
 
-String FetchUtils::normalizeHeaderValue(const String& value) {
+String FetchUtils::NormalizeHeaderValue(const String& value) {
   // https://fetch.spec.whatwg.org/#concept-header-value-normalize
   // Strip leading and trailing whitespace from header value.
   // HTTP whitespace bytes are 0x09, 0x0A, 0x0D, and 0x20.
 
-  return value.stripWhiteSpace(isHTTPWhitespace);
+  return value.StripWhiteSpace(IsHTTPWhitespace);
+}
+
+bool FetchUtils::ContainsOnlyCORSSafelistedHeaders(
+    const HTTPHeaderMap& header_map) {
+  for (const auto& header : header_map) {
+    if (!IsCORSSafelistedHeader(header.key, header.value))
+      return false;
+  }
+  return true;
+}
+
+bool FetchUtils::ContainsOnlyCORSSafelistedOrForbiddenHeaders(
+    const HTTPHeaderMap& header_map) {
+  for (const auto& header : header_map) {
+    if (!IsCORSSafelistedHeader(header.key, header.value) &&
+        !IsForbiddenHeaderName(header.key))
+      return false;
+  }
+  return true;
 }
 
 }  // namespace blink

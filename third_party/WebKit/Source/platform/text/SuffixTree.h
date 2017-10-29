@@ -26,10 +26,13 @@
 #ifndef SuffixTree_h
 #define SuffixTree_h
 
-#include "wtf/Allocator.h"
-#include "wtf/Noncopyable.h"
-#include "wtf/Vector.h"
-#include "wtf/text/WTFString.h"
+#include <algorithm>
+#include <utility>
+
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/Vector.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -37,16 +40,16 @@ class UnicodeCodebook {
   STATIC_ONLY(UnicodeCodebook);
 
  public:
-  static int codeWord(UChar c) { return c; }
-  enum { codeSize = 1 << 8 * sizeof(UChar) };
+  static int CodeWord(UChar c) { return c; }
+  enum { kCodeSize = 1 << 8 * sizeof(UChar) };
 };
 
 class ASCIICodebook {
   STATIC_ONLY(ASCIICodebook);
 
  public:
-  static int codeWord(UChar c) { return c & (codeSize - 1); }
-  enum { codeSize = 1 << (8 * sizeof(char) - 1) };
+  static int CodeWord(UChar c) { return c & (kCodeSize - 1); }
+  enum { kCodeSize = 1 << (8 * sizeof(char) - 1) };
 };
 
 template <typename Codebook>
@@ -55,18 +58,18 @@ class SuffixTree {
   WTF_MAKE_NONCOPYABLE(SuffixTree);
 
  public:
-  SuffixTree(const String& text, unsigned depth)
-      : m_depth(depth), m_leaf(true) {
-    build(text);
+  SuffixTree(const String& text, unsigned depth) : depth_(depth), leaf_(true) {
+    Build(text);
   }
 
-  bool mightContain(const String& query) {
-    Node* current = &m_root;
-    int limit = std::min(m_depth, query.length());
+  bool MightContain(const String& query) {
+    Node* current = &root_;
+    int limit = std::min(depth_, query.length());
     for (int i = 0; i < limit; ++i) {
-      current = current->at(Codebook::codeWord(query[i]));
-      if (!current)
+      auto iter = current->Find(Codebook::CodeWord(query[i]));
+      if (iter == current->End())
         return false;
+      current = iter->second;
     }
     return true;
   }
@@ -77,50 +80,62 @@ class SuffixTree {
     WTF_MAKE_NONCOPYABLE(Node);
 
    public:
-    Node(bool isLeaf = false) {
-      m_children.resize(Codebook::codeSize);
-      m_children.fill(0);
-      m_isLeaf = isLeaf;
-    }
+    Node(bool is_leaf = false) : is_leaf_(is_leaf) {}
 
     ~Node() {
-      for (unsigned i = 0; i < m_children.size(); ++i) {
-        Node* child = m_children.at(i);
-        if (child && !child->m_isLeaf)
+      for (const auto& pair : children_) {
+        Node* child = pair.second;
+        if (child && !child->is_leaf_)
           delete child;
       }
     }
 
-    Node*& at(int codeWord) { return m_children.at(codeWord); }
+    Node*& At(int key) {
+      auto it = Find(key);
+      if (it != children_.end())
+        return it->second;
+      children_.emplace_back(key, nullptr);
+      return children_.back().second;
+    }
+
+    typename Vector<std::pair<int, Node*>>::iterator Find(int key) {
+      return std::find_if(children_.begin(), children_.end(),
+                          [key](const std::pair<int, Node*>& entry) {
+                            return entry.first == key;
+                          });
+    }
+
+    typename Vector<std::pair<int, Node*>>::iterator End() {
+      return children_.end();
+    }
 
    private:
-    typedef Vector<Node*, Codebook::codeSize> ChildrenVector;
-
-    ChildrenVector m_children;
-    bool m_isLeaf;
+    // TODO(tsepez): convert to base::flat_map when allowed in blink.
+    Vector<std::pair<int, Node*>> children_;
+    const bool is_leaf_;
   };
 
-  void build(const String& text) {
+  void Build(const String& text) {
     for (unsigned base = 0; base < text.length(); ++base) {
-      Node* current = &m_root;
-      unsigned limit = std::min(base + m_depth, text.length());
+      Node* current = &root_;
+      unsigned limit = std::min(base + depth_, text.length());
       for (unsigned offset = 0; base + offset < limit; ++offset) {
-        ASSERT(current != &m_leaf);
-        Node*& child = current->at(Codebook::codeWord(text[base + offset]));
+        DCHECK_NE(current, &leaf_);
+        Node*& child = current->At(Codebook::CodeWord(text[base + offset]));
         if (!child)
-          child = base + offset + 1 == limit ? &m_leaf : new Node();
+          child = base + offset + 1 == limit ? &leaf_ : new Node();
         current = child;
       }
     }
   }
 
-  Node m_root;
-  unsigned m_depth;
+  Node root_;
+  unsigned depth_;
 
   // Instead of allocating a fresh empty leaf node for ever leaf in the tree
   // (there can be a lot of these), we alias all the leaves to this "static"
   // leaf node.
-  Node m_leaf;
+  Node leaf_;
 };
 
 }  // namespace blink

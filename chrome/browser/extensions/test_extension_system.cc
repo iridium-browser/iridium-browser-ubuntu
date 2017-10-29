@@ -28,6 +28,9 @@
 #include "extensions/browser/state_store.h"
 #include "extensions/browser/value_store/test_value_store_factory.h"
 #include "extensions/browser/value_store/testing_value_store.h"
+#if defined(OS_CHROMEOS)
+#include "components/user_manager/user_manager.h"
+#endif
 
 using content::BrowserThread;
 
@@ -38,7 +41,12 @@ TestExtensionSystem::TestExtensionSystem(Profile* profile)
       store_factory_(new TestValueStoreFactory()),
       info_map_(new InfoMap()),
       quota_service_(new QuotaService()),
-      app_sorting_(new ChromeAppSorting(profile_)) {}
+      app_sorting_(new ChromeAppSorting(profile_)) {
+#if defined(OS_CHROMEOS)
+  if (!user_manager::UserManager::IsInitialized())
+    test_user_manager_.reset(new chromeos::ScopedTestUserManager);
+#endif
+}
 
 TestExtensionSystem::~TestExtensionSystem() {
 }
@@ -51,7 +59,8 @@ void TestExtensionSystem::Shutdown() {
 ExtensionService* TestExtensionSystem::CreateExtensionService(
     const base::CommandLine* command_line,
     const base::FilePath& install_directory,
-    bool autoupdate_enabled) {
+    bool autoupdate_enabled,
+    bool extensions_enabled) {
   state_store_.reset(new StateStore(
       profile_, store_factory_, ValueStoreFrontend::BackendType::RULES, false));
   management_policy_.reset(new ManagementPolicy());
@@ -59,14 +68,10 @@ ExtensionService* TestExtensionSystem::CreateExtensionService(
       ExtensionManagementFactory::GetForBrowserContext(profile_)
           ->GetProviders());
   runtime_data_.reset(new RuntimeData(ExtensionRegistry::Get(profile_)));
-  extension_service_.reset(new ExtensionService(profile_,
-                                                command_line,
-                                                install_directory,
-                                                ExtensionPrefs::Get(profile_),
-                                                Blacklist::Get(profile_),
-                                                autoupdate_enabled,
-                                                true,
-                                                &ready_));
+  extension_service_.reset(new ExtensionService(
+      profile_, command_line, install_directory, ExtensionPrefs::Get(profile_),
+      Blacklist::Get(profile_), autoupdate_enabled, extensions_enabled,
+      &ready_));
   extension_service_->ClearProvidersForTesting();
   return extension_service_.get();
 }

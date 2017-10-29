@@ -15,8 +15,8 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/scoped_observer.h"
+#include "base/sequence_checker.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/non_thread_safe.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "content/public/browser/bluetooth_chooser.h"
@@ -38,14 +38,15 @@ class SkBitmap;
 
 namespace content {
 
+class DevToolsProtocolTestBindings;
 class LayoutTestBluetoothChooserFactory;
-class LayoutTestDevToolsFrontend;
+class LayoutTestDevToolsBindings;
 class RenderFrameHost;
 class RenderProcessHost;
 class Shell;
 
 #if defined(OS_ANDROID)
-// Android uses a nested message loop for running layout tests because the
+// Android uses a nested run loop for running layout tests because the
 // default message loop, provided by the system, does not offer a blocking
 // Run() method. The loop itself, implemented as NestedMessagePumpAndroid,
 // uses a base::WaitableEvent allowing it to sleep until more events arrive.
@@ -85,6 +86,7 @@ class BlinkTestResultPrinter {
   void PrintAudioBlock(const std::vector<unsigned char>& audio_data);
   void PrintAudioFooter();
 
+  void AddMessageToStderr(const std::string& message);
   void AddMessage(const std::string& message);
   void AddMessageRaw(const std::string& message);
   void AddErrorMessage(const std::string& message);
@@ -112,8 +114,7 @@ class BlinkTestResultPrinter {
   DISALLOW_COPY_AND_ASSIGN(BlinkTestResultPrinter);
 };
 
-class BlinkTestController : public base::NonThreadSafe,
-                            public WebContentsObserver,
+class BlinkTestController : public WebContentsObserver,
                             public RenderProcessHostObserver,
                             public NotificationObserver,
                             public GpuDataManagerObserver {
@@ -158,8 +159,6 @@ class BlinkTestController : public base::NonThreadSafe,
 
   // WebContentsObserver implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
-  bool OnMessageReceived(const IPC::Message& message,
-                         RenderFrameHost* render_frame_host) override;
   void PluginCrashed(const base::FilePath& plugin_path,
                      base::ProcessId plugin_pid) override;
   void RenderFrameCreated(RenderFrameHost* render_frame_host) override;
@@ -194,6 +193,8 @@ class BlinkTestController : public base::NonThreadSafe,
 
   static BlinkTestController* instance_;
 
+  Shell* SecondaryWindow();
+  void LoadDevToolsJSTest();
   void DiscardMainWindow();
 
   // Message handlers.
@@ -201,9 +202,12 @@ class BlinkTestController : public base::NonThreadSafe,
   void OnImageDump(const std::string& actual_pixel_hash, const SkBitmap& image);
   void OnTextDump(const std::string& dump);
   void OnInitiateLayoutDump();
-  void OnLayoutDumpResponse(RenderFrameHost* sender, const std::string& dump);
+  void OnDumpFrameLayoutResponse(int frame_tree_node_id,
+                                 const std::string& dump);
+  void OnPrintMessageToStderr(const std::string& message);
   void OnPrintMessage(const std::string& message);
   void OnOverridePreferences(const WebPreferences& prefs);
+  void OnSetPopupBlockingEnabled(bool block_popups);
   void OnTestFinished();
   void OnClearDevToolsLocalStorage();
   void OnShowDevTools(const std::string& settings,
@@ -224,12 +228,20 @@ class BlinkTestController : public base::NonThreadSafe,
   mojom::LayoutTestControl* GetLayoutTestControlPtr(RenderFrameHost* frame);
   void HandleLayoutTestControlError(RenderFrameHost* frame);
 
+  void OnAllServiceWorkersCleared();
+
   std::unique_ptr<BlinkTestResultPrinter> printer_;
 
   base::FilePath current_working_directory_;
   base::FilePath temp_path_;
 
   Shell* main_window_;
+  Shell* secondary_window_;
+  Shell* devtools_window_;
+
+  std::unique_ptr<LayoutTestDevToolsBindings> devtools_bindings_;
+  std::unique_ptr<DevToolsProtocolTestBindings>
+      devtools_protocol_test_bindings_;
 
   // The PID of the render process of the render view host of main_window_.
   int current_pid_;
@@ -266,13 +278,11 @@ class BlinkTestController : public base::NonThreadSafe,
   const bool is_leak_detection_enabled_;
   bool crash_when_leak_found_;
 
-  LayoutTestDevToolsFrontend* devtools_frontend_;
-
   std::unique_ptr<LayoutTestBluetoothChooserFactory> bluetooth_chooser_factory_;
 
   // Map from frame_tree_node_id into frame-specific dumps.
   std::map<int, std::string> frame_to_layout_dump_map_;
-  // Number of ShellViewHostMsg_LayoutDumpResponse messages we are waiting for.
+  // Number of LayoutTestControl.DumpFrameLayout responses we are waiting for.
   int pending_layout_dumps_;
 
   // Renderer processes are observed to detect crashes.
@@ -294,6 +304,8 @@ class BlinkTestController : public base::NonThreadSafe,
   // waiting on the UI thread while layout tests are being ran.
   ScopedAllowWaitForAndroidLayoutTests reduced_restrictions_;
 #endif
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(BlinkTestController);
 };

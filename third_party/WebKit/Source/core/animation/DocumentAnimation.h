@@ -5,8 +5,10 @@
 #ifndef DocumentAnimation_h
 #define DocumentAnimation_h
 
+#include "core/animation/Animation.h"
+#include "core/animation/DocumentTimeline.h"
 #include "core/dom/Document.h"
-#include "wtf/Allocator.h"
+#include "platform/wtf/Allocator.h"
 
 namespace blink {
 
@@ -15,7 +17,11 @@ class DocumentAnimation {
 
  public:
   static DocumentTimeline* timeline(Document& document) {
-    return &document.timeline();
+    return &document.Timeline();
+  }
+
+  static HeapVector<Member<Animation>> getAnimations(Document& document) {
+    return document.Timeline().getAnimations();
   }
 };
 

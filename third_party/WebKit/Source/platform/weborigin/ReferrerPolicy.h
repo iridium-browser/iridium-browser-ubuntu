@@ -34,21 +34,29 @@
 
 namespace blink {
 
-enum ReferrerPolicy {
+enum ReferrerPolicy : uint8_t {
   // https://w3c.github.io/webappsec/specs/referrer-policy/#referrer-policy-state-unsafe-url
-  ReferrerPolicyAlways,
+  kReferrerPolicyAlways,
   // The default policy, if no policy is explicitly set by the page.
-  ReferrerPolicyDefault,
+  kReferrerPolicyDefault,
   // https://w3c.github.io/webappsec/specs/referrer-policy/#referrer-policy-state-no-referrer-when-downgrade
-  ReferrerPolicyNoReferrerWhenDowngrade,
+  kReferrerPolicyNoReferrerWhenDowngrade,
   // https://w3c.github.io/webappsec/specs/referrer-policy/#referrer-policy-state-no-referrer
-  ReferrerPolicyNever,
+  kReferrerPolicyNever,
   // https://w3c.github.io/webappsec/specs/referrer-policy/#referrer-policy-state-origin
-  ReferrerPolicyOrigin,
+  kReferrerPolicyOrigin,
   // https://w3c.github.io/webappsec/specs/referrer-policy/#referrer-policy-state-origin-when-cross-origin
-  ReferrerPolicyOriginWhenCrossOrigin,
-  // Not spec conformant. set only when reduced-referrer-granularity is enabled.
-  ReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin,
+  kReferrerPolicyOriginWhenCrossOrigin,
+  // https://w3c.github.io/webappsec-referrer-policy/#referrer-policy-strict-origin-when-cross-origin
+  // Also used as the default policy when reduced-referrer-grnaularity is
+  // enabled (not spec conformant).
+  // TODO(estark): rename to kReferrerPolicyStrictOriginWhenCrossOrigin to
+  // match spec.
+  kReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin,
+  // https://w3c.github.io/webappsec-referrer-policy/#referrer-policy-same-origin
+  kReferrerPolicySameOrigin,
+  // https://w3c.github.io/webappsec-referrer-policy/#referrer-policy-strict-origin
+  kReferrerPolicyStrictOrigin,
 };
 
 }  // namespace blink

@@ -8,8 +8,9 @@
 #include "GrPathUtils.h"
 
 #include "GrTypes.h"
-#include "SkGeometry.h"
 #include "SkMathPriv.h"
+
+static const SkScalar gMinCurveTol = 0.0001f;
 
 SkScalar GrPathUtils::scaleToleranceToSrc(SkScalar devTol,
                                           const SkMatrix& viewM,
@@ -17,7 +18,6 @@ SkScalar GrPathUtils::scaleToleranceToSrc(SkScalar devTol,
     // In order to tesselate the path we get a bound on how much the matrix can
     // scale when mapping to screen coordinates.
     SkScalar stretch = viewM.getMaxScale();
-    SkScalar srcTol = devTol;
 
     if (stretch < 0) {
         // take worst case mapRadius amoung four corners.
@@ -30,22 +30,20 @@ SkScalar GrPathUtils::scaleToleranceToSrc(SkScalar devTol,
             stretch = SkMaxScalar(stretch, mat.mapRadius(SK_Scalar1));
         }
     }
-    return srcTol / stretch;
+    SkScalar srcTol = devTol / stretch;
+    if (srcTol < gMinCurveTol) {
+        srcTol = gMinCurveTol;
+    }
+    return srcTol;
 }
 
-static const int MAX_POINTS_PER_CURVE = 1 << 10;
-static const SkScalar gMinCurveTol = 0.0001f;
-
-uint32_t GrPathUtils::quadraticPointCount(const SkPoint points[],
-                                          SkScalar tol) {
-    if (tol < gMinCurveTol) {
-        tol = gMinCurveTol;
-    }
-    SkASSERT(tol > 0);
+uint32_t GrPathUtils::quadraticPointCount(const SkPoint points[], SkScalar tol) {
+    // You should have called scaleToleranceToSrc, which guarantees this
+    SkASSERT(tol >= gMinCurveTol);
 
     SkScalar d = points[1].distanceToLineSegmentBetween(points[0], points[2]);
     if (!SkScalarIsFinite(d)) {
-        return MAX_POINTS_PER_CURVE;
+        return kMaxPointsPerCurve;
     } else if (d <= tol) {
         return 1;
     } else {
@@ -55,7 +53,7 @@ uint32_t GrPathUtils::quadraticPointCount(const SkPoint points[],
         // 2^(log4(x)) = sqrt(x);
         SkScalar divSqrt = SkScalarSqrt(d / tol);
         if (((SkScalar)SK_MaxS32) <= divSqrt) {
-            return MAX_POINTS_PER_CURVE;
+            return kMaxPointsPerCurve;
         } else {
             int temp = SkScalarCeilToInt(divSqrt);
             int pow2 = GrNextPow2(temp);
@@ -65,7 +63,7 @@ uint32_t GrPathUtils::quadraticPointCount(const SkPoint points[],
             if (pow2 < 1) {
                 pow2 = 1;
             }
-            return SkTMin(pow2, MAX_POINTS_PER_CURVE);
+            return SkTMin(pow2, kMaxPointsPerCurve);
         }
     }
 }
@@ -97,23 +95,21 @@ uint32_t GrPathUtils::generateQuadraticPoints(const SkPoint& p0,
 
 uint32_t GrPathUtils::cubicPointCount(const SkPoint points[],
                                            SkScalar tol) {
-    if (tol < gMinCurveTol) {
-        tol = gMinCurveTol;
-    }
-    SkASSERT(tol > 0);
+    // You should have called scaleToleranceToSrc, which guarantees this
+    SkASSERT(tol >= gMinCurveTol);
 
     SkScalar d = SkTMax(
         points[1].distanceToLineSegmentBetweenSqd(points[0], points[3]),
         points[2].distanceToLineSegmentBetweenSqd(points[0], points[3]));
     d = SkScalarSqrt(d);
     if (!SkScalarIsFinite(d)) {
-        return MAX_POINTS_PER_CURVE;
+        return kMaxPointsPerCurve;
     } else if (d <= tol) {
         return 1;
     } else {
         SkScalar divSqrt = SkScalarSqrt(d / tol);
         if (((SkScalar)SK_MaxS32) <= divSqrt) {
-            return MAX_POINTS_PER_CURVE;
+            return kMaxPointsPerCurve;
         } else {
             int temp = SkScalarCeilToInt(SkScalarSqrt(d / tol));
             int pow2 = GrNextPow2(temp);
@@ -123,7 +119,7 @@ uint32_t GrPathUtils::cubicPointCount(const SkPoint points[],
             if (pow2 < 1) {
                 pow2 = 1;
             }
-            return SkTMin(pow2, MAX_POINTS_PER_CURVE);
+            return SkTMin(pow2, kMaxPointsPerCurve);
         }
     }
 }
@@ -158,12 +154,9 @@ uint32_t GrPathUtils::generateCubicPoints(const SkPoint& p0,
     return a + b;
 }
 
-int GrPathUtils::worstCasePointCount(const SkPath& path, int* subpaths,
-                                     SkScalar tol) {
-    if (tol < gMinCurveTol) {
-        tol = gMinCurveTol;
-    }
-    SkASSERT(tol > 0);
+int GrPathUtils::worstCasePointCount(const SkPath& path, int* subpaths, SkScalar tol) {
+    // You should have called scaleToleranceToSrc, which guarantees this
+    SkASSERT(tol >= gMinCurveTol);
 
     int pointCount = 0;
     *subpaths = 1;
@@ -183,7 +176,7 @@ int GrPathUtils::worstCasePointCount(const SkPath& path, int* subpaths,
             case SkPath::kConic_Verb: {
                 SkScalar weight = iter.conicWeight();
                 SkAutoConicToQuads converter;
-                const SkPoint* quadPts = converter.computeQuads(pts, weight, 0.25f);
+                const SkPoint* quadPts = converter.computeQuads(pts, weight, tol);
                 for (int i = 0; i < converter.countQuads(); ++i) {
                     pointCount += quadraticPointCount(quadPts + 2*i, tol);
                 }
@@ -323,7 +316,8 @@ void GrPathUtils::QuadUVMatrix::set(const SkPoint qPts[3]) {
 // k = (y2 - y0, x0 - x2, x2*y0 - x0*y2)
 // l = (y1 - y0, x0 - x1, x1*y0 - x0*y1) * 2*w
 // m = (y2 - y1, x1 - x2, x2*y1 - x1*y2) * 2*w
-void GrPathUtils::getConicKLM(const SkPoint p[3], const SkScalar weight, SkScalar klm[9]) {
+void GrPathUtils::getConicKLM(const SkPoint p[3], const SkScalar weight, SkMatrix* out) {
+    SkMatrix& klm = *out;
     const SkScalar w2 = 2.f * weight;
     klm[0] = p[2].fY - p[0].fY;
     klm[1] = p[0].fX - p[2].fX;
@@ -575,253 +569,290 @@ void GrPathUtils::convertCubicToQuadsConstrainToTangents(const SkPoint p[4],
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Solves linear system to extract klm
-// P.K = k (similarly for l, m)
-// Where P is matrix of control points
-// K is coefficients for the line K
-// k is vector of values of K evaluated at the control points
-// Solving for K, thus K = P^(-1) . k
-static void calc_cubic_klm(const SkPoint p[4], const SkScalar controlK[4],
-                           const SkScalar controlL[4], const SkScalar controlM[4],
-                           SkScalar k[3], SkScalar l[3], SkScalar m[3]) {
-    SkMatrix matrix;
-    matrix.setAll(p[0].fX, p[0].fY, 1.f,
-                  p[1].fX, p[1].fY, 1.f,
-                  p[2].fX, p[2].fY, 1.f);
-    SkMatrix inverse;
-    if (matrix.invert(&inverse)) {
-       inverse.mapHomogeneousPoints(k, controlK, 1);
-       inverse.mapHomogeneousPoints(l, controlL, 1);
-       inverse.mapHomogeneousPoints(m, controlM, 1);
+/**
+ * Computes an SkMatrix that can find the cubic KLM functionals as follows:
+ *
+ *     | ..K.. |   | ..kcoeffs.. |
+ *     | ..L.. | = | ..lcoeffs.. | * inverse_transpose_power_basis_matrix
+ *     | ..M.. |   | ..mcoeffs.. |
+ *
+ * 'kcoeffs' are the power basis coefficients to a scalar valued cubic function that returns the
+ * signed distance to line K from a given point on the curve:
+ *
+ *     k(t,s) = C(t,s) * K   [C(t,s) is defined in the following comment]
+ *
+ * The same applies for lcoeffs and mcoeffs. These are found separately, depending on the type of
+ * curve. There are 4 coefficients but 3 rows in the matrix, so in order to do this calculation the
+ * caller must first remove a specific column of coefficients.
+ *
+ * @return which column of klm coefficients to exclude from the calculation.
+ */
+static int calc_inverse_transpose_power_basis_matrix(const SkPoint pts[4], SkMatrix* out) {
+    using SkScalar4 = SkNx<4, SkScalar>;
+
+    // First we convert the bezier coordinates 'pts' to power basis coefficients X,Y,W=[0 0 0 1].
+    // M3 is the matrix that does this conversion. The homogeneous equation for the cubic becomes:
+    //
+    //                                     | X   Y   0 |
+    // C(t,s) = [t^3  t^2*s  t*s^2  s^3] * | .   .   0 |
+    //                                     | .   .   0 |
+    //                                     | .   .   1 |
+    //
+    const SkScalar4 M3[3] = {SkScalar4(-1, 3, -3, 1),
+                             SkScalar4(3, -6, 3, 0),
+                             SkScalar4(-3, 3, 0, 0)};
+    // 4th column of M3   =  SkScalar4(1, 0, 0, 0)};
+    SkScalar4 X(pts[3].x(), 0, 0, 0);
+    SkScalar4 Y(pts[3].y(), 0, 0, 0);
+    for (int i = 2; i >= 0; --i) {
+        X += M3[i] * pts[i].x();
+        Y += M3[i] * pts[i].y();
     }
 
+    // The matrix is 3x4. In order to invert it, we first need to make it square by throwing out one
+    // of the top three rows. We toss the row that leaves us with the largest absolute determinant.
+    // Since the right column will be [0 0 1], the determinant reduces to x0*y1 - y0*x1.
+    SkScalar absDet[4];
+    const SkScalar4 DETX1 = SkNx_shuffle<1,0,0,3>(X), DETY1 = SkNx_shuffle<1,0,0,3>(Y);
+    const SkScalar4 DETX2 = SkNx_shuffle<2,2,1,3>(X), DETY2 = SkNx_shuffle<2,2,1,3>(Y);
+    const SkScalar4 DET = DETX1 * DETY2 - DETY1 * DETX2;
+    DET.abs().store(absDet);
+    const int skipRow = absDet[0] > absDet[2] ? (absDet[0] > absDet[1] ? 0 : 1)
+                                              : (absDet[1] > absDet[2] ? 1 : 2);
+    const SkScalar rdet = 1 / DET[skipRow];
+    const int row0 = (0 != skipRow) ? 0 : 1;
+    const int row1 = (2 == skipRow) ? 1 : 2;
+
+    // Compute the inverse-transpose of the power basis matrix with the 'skipRow'th row removed.
+    // Since W=[0 0 0 1], it follows that our corresponding solution will be equal to:
+    //
+    //             |  y1  -x1   x1*y2 - y1*x2 |
+    //     1/det * | -y0   x0  -x0*y2 + y0*x2 |
+    //             |   0    0             det |
+    //
+    const SkScalar4 R(rdet, rdet, rdet, 1);
+    X *= R;
+    Y *= R;
+
+    SkScalar x[4], y[4], z[4];
+    X.store(x);
+    Y.store(y);
+    (X * SkNx_shuffle<3,3,3,3>(Y) - Y * SkNx_shuffle<3,3,3,3>(X)).store(z);
+
+    out->setAll( y[row1], -x[row1],  z[row1],
+                -y[row0],  x[row0], -z[row0],
+                       0,        0,        1);
+
+    return skipRow;
 }
 
-static void set_serp_klm(const SkScalar d[3], SkScalar k[4], SkScalar l[4], SkScalar m[4]) {
-    SkScalar tempSqrt = SkScalarSqrt(9.f * d[1] * d[1] - 12.f * d[0] * d[2]);
-    SkScalar ls = 3.f * d[1] - tempSqrt;
-    SkScalar lt = 6.f * d[0];
-    SkScalar ms = 3.f * d[1] + tempSqrt;
-    SkScalar mt = 6.f * d[0];
+static void calc_serp_klm(const SkPoint pts[4], SkScalar tl, SkScalar sl, SkScalar tm, SkScalar sm,
+                          SkMatrix* klm) {
+    SkMatrix CIT;
+    int skipCol = calc_inverse_transpose_power_basis_matrix(pts, &CIT);
 
-    k[0] = ls * ms;
-    k[1] = (3.f * ls * ms - ls * mt - lt * ms) / 3.f;
-    k[2] = (lt * (mt - 2.f * ms) + ls * (3.f * ms - 2.f * mt)) / 3.f;
-    k[3] = (lt - ls) * (mt - ms);
+    SkMatrix klmCoeffs;
+    int col = 0;
+    if (0 != skipCol) {
+        klmCoeffs[0] = 0;
+        klmCoeffs[3] = -sl * sl * sl;
+        klmCoeffs[6] = -sm * sm * sm;
+        ++col;
+    }
+    if (1 != skipCol) {
+        klmCoeffs[col + 0] = sl * sm;
+        klmCoeffs[col + 3] = 3 * sl * sl * tl;
+        klmCoeffs[col + 6] = 3 * sm * sm * tm;
+        ++col;
+    }
+    if (2 != skipCol) {
+        klmCoeffs[col + 0] = -tl * sm - tm * sl;
+        klmCoeffs[col + 3] = -3 * sl * tl * tl;
+        klmCoeffs[col + 6] = -3 * sm * tm * tm;
+        ++col;
+    }
 
-    l[0] = ls * ls * ls;
-    const SkScalar lt_ls = lt - ls;
-    l[1] = ls * ls * lt_ls * -1.f;
-    l[2] = lt_ls * lt_ls * ls;
-    l[3] = -1.f * lt_ls * lt_ls * lt_ls;
+    SkASSERT(2 == col);
+    klmCoeffs[2] = tl * tm;
+    klmCoeffs[5] = tl * tl * tl;
+    klmCoeffs[8] = tm * tm * tm;
 
-    m[0] = ms * ms * ms;
-    const SkScalar mt_ms = mt - ms;
-    m[1] = ms * ms * mt_ms * -1.f;
-    m[2] = mt_ms * mt_ms * ms;
-    m[3] = -1.f * mt_ms * mt_ms * mt_ms;
+    klm->setConcat(klmCoeffs, CIT);
+}
 
-    // If d0 < 0 we need to flip the orientation of our curve
+static void calc_loop_klm(const SkPoint pts[4], SkScalar td, SkScalar sd, SkScalar te, SkScalar se,
+                          SkMatrix* klm) {
+    SkMatrix CIT;
+    int skipCol = calc_inverse_transpose_power_basis_matrix(pts, &CIT);
+
+    const SkScalar tdse = td * se;
+    const SkScalar tesd = te * sd;
+
+    SkMatrix klmCoeffs;
+    int col = 0;
+    if (0 != skipCol) {
+        klmCoeffs[0] = 0;
+        klmCoeffs[3] = -sd * sd * se;
+        klmCoeffs[6] = -se * se * sd;
+        ++col;
+    }
+    if (1 != skipCol) {
+        klmCoeffs[col + 0] = sd * se;
+        klmCoeffs[col + 3] = sd * (2 * tdse + tesd);
+        klmCoeffs[col + 6] = se * (2 * tesd + tdse);
+        ++col;
+    }
+    if (2 != skipCol) {
+        klmCoeffs[col + 0] = -tdse - tesd;
+        klmCoeffs[col + 3] = -td * (tdse + 2 * tesd);
+        klmCoeffs[col + 6] = -te * (tesd + 2 * tdse);
+        ++col;
+    }
+
+    SkASSERT(2 == col);
+    klmCoeffs[2] = td * te;
+    klmCoeffs[5] = td * td * te;
+    klmCoeffs[8] = te * te * td;
+
+    klm->setConcat(klmCoeffs, CIT);
+}
+
+// For the case when we have a cusp at a parameter value of infinity (discr == 0, d1 == 0).
+static void calc_inf_cusp_klm(const SkPoint pts[4], SkScalar tn, SkScalar sn, SkMatrix* klm) {
+    SkMatrix CIT;
+    int skipCol = calc_inverse_transpose_power_basis_matrix(pts, &CIT);
+
+    SkMatrix klmCoeffs;
+    int col = 0;
+    if (0 != skipCol) {
+        klmCoeffs[0] = 0;
+        klmCoeffs[3] = -sn * sn * sn;
+        ++col;
+    }
+    if (1 != skipCol) {
+        klmCoeffs[col + 0] = 0;
+        klmCoeffs[col + 3] = 3 * sn * sn * tn;
+        ++col;
+    }
+    if (2 != skipCol) {
+        klmCoeffs[col + 0] = -sn;
+        klmCoeffs[col + 3] = -3 * sn * tn * tn;
+        ++col;
+    }
+
+    SkASSERT(2 == col);
+    klmCoeffs[2] = tn;
+    klmCoeffs[5] = tn * tn * tn;
+
+    klmCoeffs[6] = 0;
+    klmCoeffs[7] = 0;
+    klmCoeffs[8] = 1;
+
+    klm->setConcat(klmCoeffs, CIT);
+}
+
+// For the case when a cubic bezier is actually a quadratic. We duplicate k in l so that the
+// implicit becomes:
+//
+//     k^3 - l*m == k^3 - l*k == k * (k^2 - l)
+//
+// In the quadratic case we can simply assign fixed values at each control point:
+//
+//     | ..K.. |     | pts[0]  pts[1]  pts[2]  pts[3] |      | 0   1/3  2/3  1 |
+//     | ..L.. |  *  |   .       .       .       .    |  ==  | 0     0  1/3  1 |
+//     | ..K.. |     |   1       1       1       1    |      | 0   1/3  2/3  1 |
+//
+static void calc_quadratic_klm(const SkPoint pts[4], double d3, SkMatrix* klm) {
+    SkMatrix klmAtPts;
+    klmAtPts.setAll(0,  1.f/3,  1,
+                    0,      0,  1,
+                    0,  1.f/3,  1);
+
+    SkMatrix inversePts;
+    inversePts.setAll(pts[0].x(),  pts[1].x(),  pts[3].x(),
+                      pts[0].y(),  pts[1].y(),  pts[3].y(),
+                               1,           1,           1);
+    SkAssertResult(inversePts.invert(&inversePts));
+
+    klm->setConcat(klmAtPts, inversePts);
+
+    // If d3 > 0 we need to flip the orientation of our curve
     // This is done by negating the k and l values
-    // We want negative distance values to be on the inside
-    if ( d[0] > 0) {
-        for (int i = 0; i < 4; ++i) {
-            k[i] = -k[i];
-            l[i] = -l[i];
-        }
+    if (d3 > 0) {
+        klm->postScale(-1, -1);
     }
 }
 
-static void set_loop_klm(const SkScalar d[3], SkScalar k[4], SkScalar l[4], SkScalar m[4]) {
-    SkScalar tempSqrt = SkScalarSqrt(4.f * d[0] * d[2] - 3.f * d[1] * d[1]);
-    SkScalar ls = d[1] - tempSqrt;
-    SkScalar lt = 2.f * d[0];
-    SkScalar ms = d[1] + tempSqrt;
-    SkScalar mt = 2.f * d[0];
-
-    k[0] = ls * ms;
-    k[1] = (3.f * ls*ms - ls * mt - lt * ms) / 3.f;
-    k[2] = (lt * (mt - 2.f * ms) + ls * (3.f * ms - 2.f * mt)) / 3.f;
-    k[3] = (lt - ls) * (mt - ms);
-
-    l[0] = ls * ls * ms;
-    l[1] = (ls * (ls * (mt - 3.f * ms) + 2.f * lt * ms))/-3.f;
-    l[2] = ((lt - ls) * (ls * (2.f * mt - 3.f * ms) + lt * ms))/3.f;
-    l[3] = -1.f * (lt - ls) * (lt - ls) * (mt - ms);
-
-    m[0] = ls * ms * ms;
-    m[1] = (ms * (ls * (2.f * mt - 3.f * ms) + lt * ms))/-3.f;
-    m[2] = ((mt - ms) * (ls * (mt - 3.f * ms) + 2.f * lt * ms))/3.f;
-    m[3] = -1.f * (lt - ls) * (mt - ms) * (mt - ms);
-
-
-    // If (d0 < 0 && sign(k1) > 0) || (d0 > 0 && sign(k1) < 0),
-    // we need to flip the orientation of our curve.
-    // This is done by negating the k and l values
-    if ( (d[0] < 0 && k[1] > 0) || (d[0] > 0 && k[1] < 0)) {
-        for (int i = 0; i < 4; ++i) {
-            k[i] = -k[i];
-            l[i] = -l[i];
-        }
-    }
+// For the case when a cubic bezier is actually a line. We set K=0, L=1, M=-line, which results in
+// the following implicit:
+//
+//     k^3 - l*m == 0^3 - 1*(-line) == -(-line) == line
+//
+static void calc_line_klm(const SkPoint pts[4], SkMatrix* klm) {
+    SkScalar ny = pts[0].x() - pts[3].x();
+    SkScalar nx = pts[3].y() - pts[0].y();
+    SkScalar k = nx * pts[0].x() + ny * pts[0].y();
+    klm->setAll(  0,   0, 0,
+                  0,   0, 1,
+                -nx, -ny, k);
 }
 
-static void set_cusp_klm(const SkScalar d[3], SkScalar k[4], SkScalar l[4], SkScalar m[4]) {
-    const SkScalar ls = d[2];
-    const SkScalar lt = 3.f * d[1];
+SkCubicType GrPathUtils::getCubicKLM(const SkPoint src[4], SkMatrix* klm, double t[2],
+                                     double s[2]) {
+    double d[4];
+    SkCubicType type = SkClassifyCubic(src, t, s, d);
 
-    k[0] = ls;
-    k[1] = ls - lt / 3.f;
-    k[2] = ls - 2.f * lt / 3.f;
-    k[3] = ls - lt;
+    const SkScalar tt[2] = {static_cast<SkScalar>(t[0]), static_cast<SkScalar>(t[1])};
+    const SkScalar ss[2] = {static_cast<SkScalar>(s[0]), static_cast<SkScalar>(s[1])};
 
-    l[0] = ls * ls * ls;
-    const SkScalar ls_lt = ls - lt;
-    l[1] = ls * ls * ls_lt;
-    l[2] = ls_lt * ls_lt * ls;
-    l[3] = ls_lt * ls_lt * ls_lt;
-
-    m[0] = 1.f;
-    m[1] = 1.f;
-    m[2] = 1.f;
-    m[3] = 1.f;
-}
-
-// For the case when a cubic is actually a quadratic
-// M =
-// 0     0     0
-// 1/3   0     1/3
-// 2/3   1/3   2/3
-// 1     1     1
-static void set_quadratic_klm(const SkScalar d[3], SkScalar k[4], SkScalar l[4], SkScalar m[4]) {
-    k[0] = 0.f;
-    k[1] = 1.f/3.f;
-    k[2] = 2.f/3.f;
-    k[3] = 1.f;
-
-    l[0] = 0.f;
-    l[1] = 0.f;
-    l[2] = 1.f/3.f;
-    l[3] = 1.f;
-
-    m[0] = 0.f;
-    m[1] = 1.f/3.f;
-    m[2] = 2.f/3.f;
-    m[3] = 1.f;
-
-    // If d2 < 0 we need to flip the orientation of our curve
-    // This is done by negating the k and l values
-    if ( d[2] > 0) {
-        for (int i = 0; i < 4; ++i) {
-            k[i] = -k[i];
-            l[i] = -l[i];
-        }
-    }
-}
-
-int GrPathUtils::chopCubicAtLoopIntersection(const SkPoint src[4], SkPoint dst[10], SkScalar klm[9],
-                                             SkScalar klm_rev[3]) {
-    // Variable to store the two parametric values at the loop double point
-    SkScalar smallS = 0.f;
-    SkScalar largeS = 0.f;
-
-    SkScalar d[3];
-    SkCubicType cType = SkClassifyCubic(src, d);
-
-    int chop_count = 0;
-    if (kLoop_SkCubicType == cType) {
-        SkScalar tempSqrt = SkScalarSqrt(4.f * d[0] * d[2] - 3.f * d[1] * d[1]);
-        SkScalar ls = d[1] - tempSqrt;
-        SkScalar lt = 2.f * d[0];
-        SkScalar ms = d[1] + tempSqrt;
-        SkScalar mt = 2.f * d[0];
-        ls = ls / lt;
-        ms = ms / mt;
-        // need to have t values sorted since this is what is expected by SkChopCubicAt
-        if (ls <= ms) {
-            smallS = ls;
-            largeS = ms;
-        } else {
-            smallS = ms;
-            largeS = ls;
-        }
-
-        SkScalar chop_ts[2];
-        if (smallS > 0.f && smallS < 1.f) {
-            chop_ts[chop_count++] = smallS;
-        }
-        if (largeS > 0.f && largeS < 1.f) {
-            chop_ts[chop_count++] = largeS;
-        }
-        if(dst) {
-            SkChopCubicAt(src, dst, chop_ts, chop_count);
-        }
-    } else {
-        if (dst) {
-            memcpy(dst, src, sizeof(SkPoint) * 4);
-        }
+    switch (type) {
+        case SkCubicType::kSerpentine:
+            calc_serp_klm(src, tt[0], ss[0], tt[1], ss[1], klm);
+            break;
+        case SkCubicType::kLoop:
+            calc_loop_klm(src, tt[0], ss[0], tt[1], ss[1], klm);
+            break;
+        case SkCubicType::kLocalCusp:
+            calc_serp_klm(src, tt[0], ss[0], tt[1], ss[1], klm);
+            break;
+        case SkCubicType::kCuspAtInfinity:
+            calc_inf_cusp_klm(src, tt[0], ss[0], klm);
+            break;
+        case SkCubicType::kQuadratic:
+            calc_quadratic_klm(src, d[3], klm);
+            break;
+        case SkCubicType::kLineOrPoint:
+            calc_line_klm(src, klm);
+            break;
     }
 
-    if (klm && klm_rev) {
-        // Set klm_rev to to match the sub_section of cubic that needs to have its orientation
-        // flipped. This will always be the section that is the "loop"
-        if (2 == chop_count) {
-            klm_rev[0] = 1.f;
-            klm_rev[1] = -1.f;
-            klm_rev[2] = 1.f;
-        } else if (1 == chop_count) {
-            if (smallS < 0.f) {
-                klm_rev[0] = -1.f;
-                klm_rev[1] = 1.f;
-            } else {
-                klm_rev[0] = 1.f;
-                klm_rev[1] = -1.f;
+    return type;
+}
+
+int GrPathUtils::chopCubicAtLoopIntersection(const SkPoint src[4], SkPoint dst[10], SkMatrix* klm,
+                                             int* loopIndex) {
+    SkSTArray<2, SkScalar> chops;
+    *loopIndex = -1;
+
+    double t[2], s[2];
+    if (SkCubicType::kLoop == GrPathUtils::getCubicKLM(src, klm, t, s)) {
+        SkScalar t0 = static_cast<SkScalar>(t[0] / s[0]);
+        SkScalar t1 = static_cast<SkScalar>(t[1] / s[1]);
+        SkASSERT(t0 <= t1); // Technically t0 != t1 in a loop, but there may be FP error.
+
+        if (t0 < 1 && t1 > 0) {
+            *loopIndex = 0;
+            if (t0 > 0) {
+                chops.push_back(t0);
+                *loopIndex = 1;
             }
-        } else {
-            if (smallS < 0.f && largeS > 1.f) {
-                klm_rev[0] = -1.f;
-            } else {
-                klm_rev[0] = 1.f;
+            if (t1 < 1) {
+                chops.push_back(t1);
+                *loopIndex = chops.count() - 1;
             }
         }
-        SkScalar controlK[4];
-        SkScalar controlL[4];
-        SkScalar controlM[4];
-
-        if (kSerpentine_SkCubicType == cType || (kCusp_SkCubicType == cType && 0.f != d[0])) {
-            set_serp_klm(d, controlK, controlL, controlM);
-        } else if (kLoop_SkCubicType == cType) {
-            set_loop_klm(d, controlK, controlL, controlM);
-        } else if (kCusp_SkCubicType == cType) {
-            SkASSERT(0.f == d[0]);
-            set_cusp_klm(d, controlK, controlL, controlM);
-        } else if (kQuadratic_SkCubicType == cType) {
-            set_quadratic_klm(d, controlK, controlL, controlM);
-        }
-
-        calc_cubic_klm(src, controlK, controlL, controlM, klm, &klm[3], &klm[6]);
-    }
-    return chop_count + 1;
-}
-
-void GrPathUtils::getCubicKLM(const SkPoint p[4], SkScalar klm[9]) {
-    SkScalar d[3];
-    SkCubicType cType = SkClassifyCubic(p, d);
-
-    SkScalar controlK[4];
-    SkScalar controlL[4];
-    SkScalar controlM[4];
-
-    if (kSerpentine_SkCubicType == cType || (kCusp_SkCubicType == cType && 0.f != d[0])) {
-        set_serp_klm(d, controlK, controlL, controlM);
-    } else if (kLoop_SkCubicType == cType) {
-        set_loop_klm(d, controlK, controlL, controlM);
-    } else if (kCusp_SkCubicType == cType) {
-        SkASSERT(0.f == d[0]);
-        set_cusp_klm(d, controlK, controlL, controlM);
-    } else if (kQuadratic_SkCubicType == cType) {
-        set_quadratic_klm(d, controlK, controlL, controlM);
     }
 
-    calc_cubic_klm(p, controlK, controlL, controlM, klm, &klm[3], &klm[6]);
+    SkChopCubicAt(src, dst, chops.begin(), chops.count());
+    return chops.count() + 1;
 }

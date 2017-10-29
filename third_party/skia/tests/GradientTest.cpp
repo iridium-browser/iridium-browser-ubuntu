@@ -9,7 +9,6 @@
 #include "SkColorPriv.h"
 #include "SkColorShader.h"
 #include "SkGradientShader.h"
-#include "SkLinearGradient.h"
 #include "SkShader.h"
 #include "SkSurface.h"
 #include "SkTemplates.h"
@@ -149,7 +148,6 @@ static void TestConstantGradient(skiatest::Reporter*) {
     outBitmap.allocN32Pixels(10, 1);
     SkCanvas canvas(outBitmap);
     canvas.drawPaint(paint);
-    SkAutoLockPixels alp(outBitmap);
     for (int i = 0; i < 10; i++) {
         // The following is commented out because it currently fails
         // Related bug: https://code.google.com/p/skia/issues/detail?id=1098
@@ -447,13 +445,22 @@ static void test_linear_fuzzer(skiatest::Reporter*) {
         },
     };
 
-    static const uint32_t gForceFlags[] = { 0, SkLinearGradient::kForce4fContext_PrivateFlag };
+    sk_sp<SkColorSpace> srgb = SkColorSpace::MakeSRGB();
+    SkColorSpace* colorSpaces[] = {
+        nullptr,     // hits the legacy gradient impl
+        srgb.get(),  // triggers 4f/raster-pipeline
+    };
 
-    sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(100, 100);
-    SkCanvas* canvas = surface->getCanvas();
     SkPaint paint;
 
-    for (auto forceFlags : gForceFlags) {
+    for (auto colorSpace : colorSpaces) {
+
+        sk_sp<SkSurface> surface = SkSurface::MakeRaster(SkImageInfo::Make(100, 100,
+                                                                           kN32_SkColorType,
+                                                                           kPremul_SkAlphaType,
+                                                                           sk_ref_sp(colorSpace)));
+        SkCanvas* canvas = surface->getCanvas();
+
         for (const auto& config : gConfigs) {
             SkAutoCanvasRestore acr(canvas, false);
             SkTLazy<SkMatrix> localMatrix;
@@ -467,7 +474,7 @@ static void test_linear_fuzzer(skiatest::Reporter*) {
                                                          config.fPos,
                                                          config.fCount,
                                                          config.fTileMode,
-                                                         config.fFlags | forceFlags,
+                                                         config.fFlags,
                                                          localMatrix.getMaybeNull()));
             if (config.fGlobalMatrix) {
                 SkMatrix m;
@@ -481,6 +488,51 @@ static void test_linear_fuzzer(skiatest::Reporter*) {
     }
 }
 
+static void test_sweep_fuzzer(skiatest::Reporter*) {
+    static const SkColor gColors0[] = { 0x30303030, 0x30303030, 0x30303030 };
+    static const SkScalar   gPos0[] = { -47919293023455565225163489280.0f, 0, 1 };
+    static const SkScalar gMatrix0[9] = {
+        1.12116716e-13f,  0              ,  8.50489682e+16f,
+        4.1917041e-41f ,  3.51369881e-23f, -2.54344271e-26f,
+        9.61111907e+17f, -3.35263808e-29f, -1.35659403e+14f
+    };
+    static const struct {
+        SkPoint            fCenter;
+        const SkColor*     fColors;
+        const SkScalar*    fPos;
+        int                fCount;
+        const SkScalar*    fGlobalMatrix;
+    } gConfigs[] = {
+        {
+            { 0, 0 },
+            gColors0,
+            gPos0,
+            SK_ARRAY_COUNT(gColors0),
+            gMatrix0
+        },
+    };
+
+    sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(100, 100);
+    SkCanvas* canvas = surface->getCanvas();
+    SkPaint paint;
+
+    for (const auto& config : gConfigs) {
+        paint.setShader(SkGradientShader::MakeSweep(config.fCenter.x(),
+                                                    config.fCenter.y(),
+                                                    config.fColors,
+                                                    config.fPos,
+                                                    config.fCount));
+
+        SkAutoCanvasRestore acr(canvas, false);
+        if (config.fGlobalMatrix) {
+            SkMatrix m;
+            m.set9(config.fGlobalMatrix);
+            canvas->save();
+            canvas->concat(m);
+        }
+        canvas->drawPaint(paint);
+    }
+}
 
 DEF_TEST(Gradient, reporter) {
     TestGradientShaders(reporter);
@@ -494,4 +546,5 @@ DEF_TEST(Gradient, reporter) {
     test_clamping_overflow(reporter);
     test_degenerate_linear(reporter);
     test_linear_fuzzer(reporter);
+    test_sweep_fuzzer(reporter);
 }

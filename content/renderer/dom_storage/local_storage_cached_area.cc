@@ -24,15 +24,9 @@ namespace content {
 
 namespace {
 
-base::string16 Uint8VectorToString16(const std::vector<uint8_t>& input) {
-  return base::string16(reinterpret_cast<const base::char16*>(input.data()),
-                        input.size() / sizeof(base::char16));
-}
-
-std::vector<uint8_t> String16ToUint8Vector(const base::string16& input) {
-  const uint8_t* data = reinterpret_cast<const uint8_t*>(input.data());
-  return std::vector<uint8_t>(data, data + input.size() * sizeof(base::char16));
-}
+// Don't change or reorder any of the values in this enum, as these values
+// are serialized on disk.
+enum class StorageFormat : uint8_t { UTF16 = 0, Latin1 = 1 };
 
 class GetAllCallback : public mojom::LevelDBWrapperGetAllCallback {
  public:
@@ -81,7 +75,7 @@ LocalStorageCachedArea::LocalStorageCachedArea(
   storage_partition_service->OpenLocalStorage(origin_,
                                               mojo::MakeRequest(&leveldb_));
   mojom::LevelDBObserverAssociatedPtrInfo ptr_info;
-  binding_.Bind(&ptr_info);
+  binding_.Bind(mojo::MakeRequest(&ptr_info));
   leveldb_->AddObserver(std::move(ptr_info));
 }
 
@@ -164,6 +158,64 @@ void LocalStorageCachedArea::AreaDestroyed(LocalStorageArea* area) {
   areas_.erase(area->id());
 }
 
+// static
+base::string16 LocalStorageCachedArea::Uint8VectorToString16(
+    const std::vector<uint8_t>& input) {
+  if (input.empty())
+    return base::string16();
+  StorageFormat format = static_cast<StorageFormat>(input[0]);
+  const size_t payload_size = input.size() - 1;
+  base::string16 result;
+  bool corrupt = false;
+  switch (format) {
+    case StorageFormat::UTF16:
+      if (payload_size % sizeof(base::char16) != 0) {
+        corrupt = true;
+        break;
+      }
+      result.resize(payload_size / sizeof(base::char16));
+      std::memcpy(&result[0], input.data() + 1, payload_size);
+      break;
+    case StorageFormat::Latin1:
+      result.resize(payload_size);
+      std::copy(input.begin() + 1, input.end(), result.begin());
+      break;
+    default:
+      corrupt = true;
+  }
+  if (corrupt) {
+    // TODO(mek): Better error recovery when corrupt (or otherwise invalid) data
+    // is detected.
+    VLOG(1) << "Corrupt data in localstorage";
+    return base::string16();
+  }
+  return result;
+}
+
+// static
+std::vector<uint8_t> LocalStorageCachedArea::String16ToUint8Vector(
+    const base::string16& input) {
+  bool is_8bit = true;
+  for (const auto& c : input) {
+    if (c & 0xff00) {
+      is_8bit = false;
+      break;
+    }
+  }
+  if (is_8bit) {
+    std::vector<uint8_t> result(input.size() + 1);
+    result[0] = static_cast<uint8_t>(StorageFormat::Latin1);
+    std::copy(input.begin(), input.end(), result.begin() + 1);
+    return result;
+  }
+  const uint8_t* data = reinterpret_cast<const uint8_t*>(input.data());
+  std::vector<uint8_t> result;
+  result.reserve(input.size() * sizeof(base::char16) + 1);
+  result.push_back(static_cast<uint8_t>(StorageFormat::UTF16));
+  result.insert(result.end(), data, data + input.size() * sizeof(base::char16));
+  return result;
+}
+
 void LocalStorageCachedArea::KeyAdded(const std::vector<uint8_t>& key,
                                       const std::vector<uint8_t>& value,
                                       const std::string& source) {
@@ -197,15 +249,15 @@ void LocalStorageCachedArea::KeyDeleted(const std::vector<uint8_t>& key,
     // remove it from our cache if we haven't already changed it and are waiting
     // for the confirmation callback. In the latter case, we won't do anything
     // because ignore_key_mutations_ won't be updated until the callback runs.
-    if (ignore_key_mutations_.find(key_string) != ignore_key_mutations_.end()) {
+    if (ignore_key_mutations_.find(key_string) == ignore_key_mutations_.end()) {
       base::string16 unused;
       map_->RemoveItem(key_string, &unused);
     }
   }
 
-  blink::WebStorageEventDispatcher::dispatchLocalStorageEvent(
-      blink::WebString::fromUTF16(key_string),
-      blink::WebString::fromUTF16(Uint8VectorToString16(old_value)),
+  blink::WebStorageEventDispatcher::DispatchLocalStorageEvent(
+      blink::WebString::FromUTF16(key_string),
+      blink::WebString::FromUTF16(Uint8VectorToString16(old_value)),
       blink::WebString(), origin_.GetURL(), page_url, originating_area);
 }
 
@@ -235,7 +287,7 @@ void LocalStorageCachedArea::AllDeleted(const std::string& source) {
     }
   }
 
-  blink::WebStorageEventDispatcher::dispatchLocalStorageEvent(
+  blink::WebStorageEventDispatcher::DispatchLocalStorageEvent(
       blink::WebString(), blink::WebString(), blink::WebString(),
       origin_.GetURL(), page_url, originating_area);
 }
@@ -261,7 +313,7 @@ void LocalStorageCachedArea::KeyAddedOrChanged(
     // apply it to our cache if we haven't already changed it and are waiting
     // for the confirmation callback. In the latter case, we won't do anything
     // because ignore_key_mutations_ won't be updated until the callback runs.
-    if (ignore_key_mutations_.find(key_string) != ignore_key_mutations_.end()) {
+    if (ignore_key_mutations_.find(key_string) == ignore_key_mutations_.end()) {
       // We turn off quota checking here to accomodate the over budget allowance
       // that's provided in the browser process.
       base::NullableString16 unused;
@@ -271,10 +323,10 @@ void LocalStorageCachedArea::KeyAddedOrChanged(
     }
   }
 
-  blink::WebStorageEventDispatcher::dispatchLocalStorageEvent(
-      blink::WebString::fromUTF16(key_string),
-      blink::WebString::fromUTF16(old_value),
-      blink::WebString::fromUTF16(new_value_string), origin_.GetURL(), page_url,
+  blink::WebStorageEventDispatcher::DispatchLocalStorageEvent(
+      blink::WebString::FromUTF16(key_string),
+      blink::WebString::FromUTF16(old_value),
+      blink::WebString::FromUTF16(new_value_string), origin_.GetURL(), page_url,
       originating_area);
 }
 

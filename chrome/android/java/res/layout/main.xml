@@ -20,11 +20,29 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
 
+           <FrameLayout
+                android:id="@+id/overview_list_layout_holder"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
             <org.chromium.chrome.browser.snackbar.BottomContainer
                 android:id="@+id/bottom_container"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:layout_gravity="start|bottom" />
+                android:layout_gravity="start|bottom">
+
+                <HorizontalScrollView
+                    android:id="@+id/keyboard_accessory"
+                    android:layout_height="@dimen/keyboard_accessory_height"
+                    android:layout_width="match_parent"
+                    android:layout_gravity="start|bottom"
+                    android:background="@drawable/keyboard_accessory_background"
+                    android:contentDescription="@string/autofill_keyboard_accessory_content_description"
+                    android:fillViewport="true"
+                    android:scrollbars="none"
+                    android:visibility="gone" />
+
+                </org.chromium.chrome.browser.snackbar.BottomContainer>
 
             <ViewStub
                 android:id="@+id/bottombar_stub"
@@ -64,6 +82,21 @@
                 android:layout_height="wrap_content" />
 
             <ViewStub
+                android:id="@+id/bottom_nav_stub"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/bottom_nav_height"
+                android:layout_gravity="start|bottom"
+                android:inflatedId="@+id/bottom_nav"
+                android:layout="@layout/bottom_sheet_bottom_nav" />
+
+           <FrameLayout
+                android:id="@+id/bottom_sheet_snackbar_container"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="start|bottom"
+                android:layout_marginTop="@dimen/bottom_nav_height_inverse" />
+
+            <ViewStub
                 android:id="@+id/empty_container_stub"
                 android:inflatedId="@+id/empty_container"
                 android:layout="@layout/empty_background_view_tablet"
@@ -72,15 +105,6 @@
 
         </android.support.design.widget.CoordinatorLayout>
 
-        <HorizontalScrollView
-            android:id="@+id/keyboard_accessory"
-            android:layout_height="@dimen/keyboard_accessory_height"
-            android:layout_width="match_parent"
-            android:background="@drawable/keyboard_accessory_background"
-            android:contentDescription="@string/autofill_keyboard_accessory_content_description"
-            android:fillViewport="true"
-            android:scrollbars="none"
-            android:visibility="gone" />
     </LinearLayout>
 
     <!-- This empty view is used as the anchor for custom menu -->

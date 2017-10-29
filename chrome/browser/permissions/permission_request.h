@@ -35,6 +35,8 @@ enum class PermissionRequestType {
   PERMISSION_PROTECTED_MEDIA_IDENTIFIER,
   PERMISSION_PUSH_MESSAGING,
   PERMISSION_FLASH,
+  PERMISSION_MEDIASTREAM_MIC,
+  PERMISSION_MEDIASTREAM_CAMERA,
   // NUM must be the last value in the enum.
   NUM
 };
@@ -74,6 +76,12 @@ class PermissionRequest {
   // The icon to use next to the message text fragment in the permission bubble.
   virtual IconId GetIconId() const = 0;
 
+#if defined(OS_ANDROID)
+  // Returns the full prompt text for this permission. This is currently only
+  // used on Android.
+  virtual base::string16 GetMessageText() const = 0;
+#endif
+
   // Returns the shortened prompt text for this permission.  Must be phrased
   // as a heading, e.g. "Location", or "Camera". The permission bubble may
   // coalesce different requests, and if it does, this text will be displayed
@@ -104,7 +112,7 @@ class PermissionRequest {
   virtual bool ShouldShowPersistenceToggle() const;
 
   // Used to record UMA metrics for permission requests.
-  virtual PermissionRequestType GetPermissionRequestType() const;
+  virtual PermissionRequestType GetPermissionRequestType() const = 0;
 
   // Used to record UMA for whether requests are associated with a user gesture.
   // To keep things simple this metric is only recorded for the most popular

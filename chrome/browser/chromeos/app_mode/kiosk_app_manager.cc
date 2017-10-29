@@ -16,10 +16,10 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/task_scheduler/post_task.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/app_mode/app_session.h"
@@ -51,7 +51,6 @@
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
-#include "content/public/browser/browser_thread.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest_handlers/kiosk_mode_info.h"
 #include "third_party/cros_system_api/switches/chrome_switches.h"
@@ -135,10 +134,9 @@ void CheckOwnerFilePresence(bool *present) {
 }
 
 scoped_refptr<base::SequencedTaskRunner> GetBackgroundTaskRunner() {
-  base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
-  CHECK(pool);
-  return pool->GetSequencedTaskRunnerWithShutdownBehavior(
-      pool->GetSequenceToken(), base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+  return base::CreateSequencedTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 }
 
 base::Version GetPlatformVersion() {
@@ -163,14 +161,14 @@ std::string GetSwitchString(const std::string& flag_name) {
 
 // static
 const char KioskAppManager::kKioskDictionaryName[] = "kiosk";
-const char KioskAppManager::kKeyApps[] = "apps";
 const char KioskAppManager::kKeyAutoLoginState[] = "auto_login_state";
 const char KioskAppManager::kIconCacheDir[] = "kiosk/icon";
 const char KioskAppManager::kCrxCacheDir[] = "kiosk/crx";
 const char KioskAppManager::kCrxUnpackDir[] = "kiosk_unpack";
 
 // static
-static base::LazyInstance<KioskAppManager> instance = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<KioskAppManager>::DestructorAtExit instance =
+    LAZY_INSTANCE_INITIALIZER;
 KioskAppManager* KioskAppManager::Get() {
   return instance.Pointer();
 }
@@ -419,12 +417,11 @@ void KioskAppManager::OnReadImmutableAttributes(
       } else if (!ownership_established_) {
         bool* owner_present = new bool(false);
         base::PostTaskWithTraitsAndReply(
-            FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                           base::TaskPriority::BACKGROUND),
-            base::Bind(&CheckOwnerFilePresence, owner_present),
-            base::Bind(&KioskAppManager::OnOwnerFileChecked,
-                       base::Unretained(this), callback,
-                       base::Owned(owner_present)));
+            FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+            base::BindOnce(&CheckOwnerFilePresence, owner_present),
+            base::BindOnce(&KioskAppManager::OnOwnerFileChecked,
+                           base::Unretained(this), callback,
+                           base::Owned(owner_present)));
         return;
       }
       break;
@@ -638,8 +635,7 @@ void KioskAppManager::InstallFromCache(const std::string& id) {
   const base::DictionaryValue* extension = nullptr;
   if (external_cache_->cached_extensions()->GetDictionary(id, &extension)) {
     std::unique_ptr<base::DictionaryValue> prefs(new base::DictionaryValue);
-    base::DictionaryValue* extension_copy = extension->DeepCopy();
-    prefs->Set(id, extension_copy);
+    prefs->Set(id, extension->CreateDeepCopy());
     external_loader_->SetCurrentAppExtensions(std::move(prefs));
   } else {
     LOG(ERROR) << "Can't find app in the cached externsions"
@@ -853,7 +849,7 @@ void KioskAppManager::ClearRemovedApps(
       if (it.second->account_id() == active_account_id) {
         VLOG(1) << "Currently running kiosk app removed from policy, exiting";
         cryptohomes_barrier_closure = BarrierClosure(
-            old_apps.size(), base::Bind(&chrome::AttemptUserExit));
+            old_apps.size(), base::BindOnce(&chrome::AttemptUserExit));
         break;
       }
     }
@@ -886,7 +882,7 @@ void KioskAppManager::UpdateExternalCachePrefs() {
                        extension_urls::GetWebstoreUpdateUrl().spec());
     }
 
-    prefs->Set(apps_[i]->app_id(), entry.release());
+    prefs->Set(apps_[i]->app_id(), std::move(entry));
   }
   external_cache_->UpdateExtensionsList(std::move(prefs));
 }

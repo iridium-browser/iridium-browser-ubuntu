@@ -17,31 +17,33 @@ std::unique_ptr<SkImageGenerator> SkCodecImageGenerator::MakeFromEncodedCodec(sk
     return std::unique_ptr<SkImageGenerator>(new SkCodecImageGenerator(codec, data));
 }
 
-static SkImageInfo make_premul(const SkImageInfo& info) {
+static SkImageInfo adjust_info(const SkImageInfo& info) {
+    SkImageInfo newInfo = info;
     if (kUnpremul_SkAlphaType == info.alphaType()) {
-        return info.makeAlphaType(kPremul_SkAlphaType);
+        newInfo = newInfo.makeAlphaType(kPremul_SkAlphaType);
     }
-
-    return info;
+    return newInfo;
 }
 
 SkCodecImageGenerator::SkCodecImageGenerator(SkCodec* codec, sk_sp<SkData> data)
-    : INHERITED(make_premul(codec->getInfo()))
+    : INHERITED(adjust_info(codec->getInfo()))
     , fCodec(codec)
     , fData(std::move(data))
 {}
 
-SkData* SkCodecImageGenerator::onRefEncodedData(GrContext* ctx) {
+SkData* SkCodecImageGenerator::onRefEncodedData() {
     return SkRef(fData.get());
 }
 
 bool SkCodecImageGenerator::onGetPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
-        SkPMColor ctable[], int* ctableCount) {
-    SkCodec::Result result = fCodec->getPixels(info, pixels, rowBytes, nullptr, ctable,
-            ctableCount);
+                                        const Options& opts) {
+    SkCodec::Options codecOpts;
+    codecOpts.fPremulBehavior = opts.fBehavior;
+    SkCodec::Result result = fCodec->getPixels(info, pixels, rowBytes, &codecOpts);
     switch (result) {
         case SkCodec::kSuccess:
         case SkCodec::kIncompleteInput:
+        case SkCodec::kErrorInInput:
             return true;
         default:
             return false;
@@ -59,6 +61,7 @@ bool SkCodecImageGenerator::onGetYUV8Planes(const SkYUVSizeInfo& sizeInfo, void*
     switch (result) {
         case SkCodec::kSuccess:
         case SkCodec::kIncompleteInput:
+        case SkCodec::kErrorInInput:
             return true;
         default:
             return false;

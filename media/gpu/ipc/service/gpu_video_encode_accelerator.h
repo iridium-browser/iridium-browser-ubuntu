@@ -127,7 +127,6 @@ class GpuVideoEncodeAccelerator
 
   // Owned pointer to the underlying VideoEncodeAccelerator.
   std::unique_ptr<VideoEncodeAccelerator> encoder_;
-  base::Callback<bool(void)> make_context_current_;
 
   // Video encoding parameters.
   VideoPixelFormat input_format_;
@@ -159,12 +158,16 @@ class GpuVideoEncodeAccelerator
   // otherwise |main_thread_task_runner_|.
   scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner_;
 
+  base::WeakPtr<GpuVideoEncodeAccelerator> weak_this_for_encoder_worker_;
+  base::WeakPtr<GpuVideoEncodeAccelerator> weak_this_;
+
   // Weak pointer for referring back to |this| on |encoder_worker_task_runner_|.
   base::WeakPtrFactory<GpuVideoEncodeAccelerator>
       weak_this_factory_for_encoder_worker_;
 
   // Weak pointer for VideoFrames that refer back to |this| on
-  // |main_task_runner| or |io_task_runner_|.
+  // |main_task_runner| or |io_task_runner_|. |io_task_runner_| is used if and
+  // only if |filter_| is applied.
   base::WeakPtrFactory<GpuVideoEncodeAccelerator> weak_this_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuVideoEncodeAccelerator);

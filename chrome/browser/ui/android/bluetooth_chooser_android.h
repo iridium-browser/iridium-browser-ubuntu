@@ -28,7 +28,6 @@ class BluetoothChooserAndroid : public content::BluetoothChooser {
                          bool is_gatt_connected,
                          bool is_paired,
                          int signal_strength_level) override;
-  void RemoveDevice(const std::string& device_id) override;
 
   // Report the dialog's result.
   void OnDialogFinished(JNIEnv* env,
@@ -50,8 +49,6 @@ class BluetoothChooserAndroid : public content::BluetoothChooser {
   void ShowNeedLocationPermissionLink(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
-
-  static bool Register(JNIEnv* env);
 
  private:
   void OpenURL(const char* url);

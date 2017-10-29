@@ -11,10 +11,8 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/child/child_process.h"
-#include "content/common/media/audio_messages.h"
-#include "content/renderer/media/audio_message_filter.h"
+#include "content/renderer/media/audio_ipc_factory.h"
 #include "content/renderer/pepper/audio_helper.h"
-#include "content/renderer/render_thread_impl.h"
 #include "ppapi/shared_impl/ppb_audio_config_shared.h"
 
 namespace content {
@@ -92,11 +90,10 @@ void PepperPlatformAudioOutput::OnStreamCreated(
     base::SharedMemoryHandle handle,
     base::SyncSocket::Handle socket_handle,
     int length) {
-#if defined(OS_WIN)
   DCHECK(handle.IsValid());
+#if defined(OS_WIN)
   DCHECK(socket_handle);
 #else
-  DCHECK(base::SharedMemory::IsHandleValid(handle));
   DCHECK_NE(-1, socket_handle);
 #endif
   DCHECK(length);
@@ -135,9 +132,7 @@ bool PepperPlatformAudioOutput::Initialize(int sample_rate,
   DCHECK(client);
   client_ = client;
 
-  RenderThreadImpl* const render_thread = RenderThreadImpl::current();
-  ipc_ = render_thread->audio_message_filter()->CreateAudioOutputIPC(
-      source_render_frame_id);
+  ipc_ = AudioIPCFactory::get()->CreateAudioOutputIPC(source_render_frame_id);
   CHECK(ipc_);
 
   media::AudioParameters params(media::AudioParameters::AUDIO_PCM_LOW_LATENCY,

@@ -38,6 +38,9 @@ class TestWebState : public WebState {
   void Stop() override {}
   const NavigationManager* GetNavigationManager() const override;
   NavigationManager* GetNavigationManager() override;
+  const SessionCertificatePolicyCache* GetSessionCertificatePolicyCache()
+      const override;
+  SessionCertificatePolicyCache* GetSessionCertificatePolicyCache() override;
   CRWSessionStorage* BuildSessionStorage() override;
   CRWJSInjectionReceiver* GetJSInjectionReceiver() const override;
   void ExecuteJavaScript(const base::string16& javascript) override;
@@ -53,7 +56,8 @@ class TestWebState : public WebState {
   const GURL& GetVisibleURL() const override;
   const GURL& GetLastCommittedURL() const override;
   GURL GetCurrentURL(URLVerificationTrustLevel* trust_level) const override;
-  void ShowTransientContentView(CRWContentView* content_view) override {}
+  void ShowTransientContentView(CRWContentView* content_view) override;
+  void ClearTransientContentView();
   void AddScriptCommandCallback(const ScriptCommandCallback& callback,
                                 const std::string& command_prefix) override {}
   void RemoveScriptCommandCallback(const std::string& command_prefix) override {
@@ -70,7 +74,10 @@ class TestWebState : public WebState {
 
   void AddPolicyDecider(WebStatePolicyDecider* decider) override {}
   void RemovePolicyDecider(WebStatePolicyDecider* decider) override {}
-  service_manager::InterfaceRegistry* GetMojoInterfaceRegistry() override;
+  WebStateInterfaceProvider* GetWebStateInterfaceProvider() override;
+  bool HasOpener() const override;
+  void TakeSnapshot(const SnapshotCallback& callback,
+                    CGSize target_size) const override;
   base::WeakPtr<WebState> AsWeakPtr() override;
 
   // Setters for test data.
@@ -83,14 +90,19 @@ class TestWebState : public WebState {
       std::unique_ptr<NavigationManager> navigation_manager);
   void SetView(UIView* view);
 
+  // Getters for test data.
+  CRWContentView* GetTransientContentView();
+
   // Notifier for tests.
   void OnPageLoaded(PageLoadCompletionStatus load_completion_status);
-  void OnProvisionalNavigationStarted(const GURL& url);
+  void OnNavigationStarted(NavigationContext* navigation_context);
+  void OnRenderProcessGone();
 
  private:
   BrowserState* browser_state_;
   bool web_usage_enabled_;
   bool is_loading_;
+  CRWContentView* transient_content_view_;
   GURL url_;
   base::string16 title_;
   URLVerificationTrustLevel trust_level_;
@@ -98,7 +110,7 @@ class TestWebState : public WebState {
   std::string mime_type_;
   std::string content_language_;
   std::unique_ptr<NavigationManager> navigation_manager_;
-  base::scoped_nsobject<UIView> view_;
+  UIView* view_;
 
   // A list of observers notified when page state changes. Weak references.
   base::ObserverList<WebStateObserver, true> observers_;

@@ -3,6 +3,10 @@
     {
       "name": "testPageScroll",
       "_bug_id": "crbug.com/534643"
+    },
+    {
+      "name": "testJavascriptInterfaceForClientPopup",
+      "_bug_id": "crbug.com/698369"
     }
   ],
   "android.webkit.cts.WebSettingsTest": [
@@ -15,6 +19,12 @@
     {
       "name": "testShouldOverrideUrlLoadingOnCreateWindow",
       "_bug_id": "crbug.com/659077"
+    }
+  ],
+  "android.webkit.cts.WebChromeClientTest": [
+    {
+      "name": "testOnJsBeforeUnloadIsCalled",
+      "_bug_id": "crbug.com/719974"
     }
   ],
   "android.webkit.cts.ServiceWorkerClientTest": [

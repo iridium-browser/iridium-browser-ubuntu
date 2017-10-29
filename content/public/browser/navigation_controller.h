@@ -268,7 +268,9 @@ class NavigationController {
   // committed entries.
   virtual NavigationEntry* GetLastCommittedEntry() const = 0;
 
-  // Returns the index of the last committed entry.
+  // Returns the index of the last committed entry.  It will be -1 if there are
+  // no entries, or if there is a transient entry before the first entry
+  // commits.
   virtual int GetLastCommittedEntryIndex() const = 0;
 
   // Returns true if the source for the current entry can be viewed.
@@ -356,6 +358,7 @@ class NavigationController {
   // cases pass in true in production code, but would do false for testing, or
   // in cases where no user interface is available for prompting.  If a
   // transient entry is showing, initiates a new navigation to its URL.
+  // NOTE: |reload_type| should never be NONE.
   virtual void Reload(ReloadType reload_type, bool check_for_repost) = 0;
 
   // Removing of entries -------------------------------------------------------
@@ -405,9 +408,13 @@ class NavigationController {
   // entry. This will keep things in sync like the saved session.
   virtual void NotifyEntryChanged(const NavigationEntry* entry) = 0;
 
-  // Copies the navigation state from the given controller to this one. This
-  // one should be empty (just created).
-  virtual void CopyStateFrom(const NavigationController& source) = 0;
+  // Copies the navigation state from the given controller to this one. This one
+  // should be empty (just created). |needs_reload| indicates whether a reload
+  // needs to happen when activated. If false, the WebContents remains unloaded
+  // and is painted as a plain grey rectangle when activated. To force a reload,
+  // call SetNeedsReload() followed by LoadIfNecessary().
+  virtual void CopyStateFrom(const NavigationController& source,
+                             bool needs_reload) = 0;
 
   // A variant of CopyStateFrom. Removes all entries from this except the last
   // committed entry, and inserts all entries from |source| before and including

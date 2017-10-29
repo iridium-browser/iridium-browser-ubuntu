@@ -6,12 +6,17 @@
 
 #include "base/logging.h"
 #import "base/mac/bind_objc_block.h"
+#include "base/task_scheduler/post_task.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/sessions/ios_chrome_tab_restore_service_factory.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
 #import "ios/chrome/browser/ui/external_file_controller.h"
 #include "ios/web/public/web_thread.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 ExternalFileRemover::ExternalFileRemover(BrowserViewController* bvc)
     : tabRestoreService_(NULL), bvc_(bvc), weak_ptr_factory_(this) {}
@@ -67,8 +72,9 @@ void ExternalFileRemover::RemoveFiles(bool all_files,
   if (callback_wrapper.is_null()) {
     callback_wrapper = base::Bind(&base::DoNothing);
   }
-  web::WebThread::PostBlockingPoolTaskAndReply(
-      FROM_HERE, base::BindBlock(^{
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::BindBlockArc(^{
         [ExternalFileController removeFilesExcluding:referencedFiles
                                            olderThan:ageInDays];
       }),
@@ -84,7 +90,7 @@ void ExternalFileRemover::RemoveAfterDelay(const base::TimeDelta& delay,
   // make sure a method on |this| is not called when the object has gone away.
   base::WeakPtr<ExternalFileRemover> weak_this = weak_ptr_factory_.GetWeakPtr();
   web::WebThread::PostDelayedTask(
-      web::WebThread::UI, FROM_HERE, base::BindBlock(^{
+      web::WebThread::UI, FROM_HERE, base::BindBlockArc(^{
         if (weak_this) {
           weak_this->Remove(remove_all_files, callback_copy);
         } else if (!callback_copy.is_null()) {

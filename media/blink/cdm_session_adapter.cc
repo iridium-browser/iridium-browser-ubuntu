@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/stl_util.h"
@@ -69,8 +70,15 @@ void CdmSessionAdapter::SetServerCertificate(
   cdm_->SetServerCertificate(certificate, std::move(promise));
 }
 
-WebContentDecryptionModuleSessionImpl* CdmSessionAdapter::CreateSession() {
-  return new WebContentDecryptionModuleSessionImpl(this);
+void CdmSessionAdapter::GetStatusForPolicy(
+    HdcpVersion min_hdcp_version,
+    std::unique_ptr<KeyStatusCdmPromise> promise) {
+  cdm_->GetStatusForPolicy(min_hdcp_version, std::move(promise));
+}
+
+std::unique_ptr<WebContentDecryptionModuleSessionImpl>
+CdmSessionAdapter::CreateSession() {
+  return base::MakeUnique<WebContentDecryptionModuleSessionImpl>(this);
 }
 
 bool CdmSessionAdapter::RegisterSession(
@@ -155,9 +163,9 @@ void CdmSessionAdapter::OnCdmCreated(
                          error_message);
 
   if (!cdm) {
-    cdm_created_result_->completeWithError(
-        blink::WebContentDecryptionModuleExceptionNotSupportedError, 0,
-        blink::WebString::fromUTF8(error_message));
+    cdm_created_result_->CompleteWithError(
+        blink::kWebContentDecryptionModuleExceptionNotSupportedError, 0,
+        blink::WebString::FromUTF8(error_message));
     cdm_created_result_.reset();
     return;
   }
@@ -172,15 +180,14 @@ void CdmSessionAdapter::OnCdmCreated(
 
   cdm_ = cdm;
 
-  cdm_created_result_->completeWithContentDecryptionModule(
+  cdm_created_result_->CompleteWithContentDecryptionModule(
       new WebContentDecryptionModuleImpl(this));
   cdm_created_result_.reset();
 }
 
-void CdmSessionAdapter::OnSessionMessage(
-    const std::string& session_id,
-    ContentDecryptionModule::MessageType message_type,
-    const std::vector<uint8_t>& message) {
+void CdmSessionAdapter::OnSessionMessage(const std::string& session_id,
+                                         CdmMessageType message_type,
+                                         const std::vector<uint8_t>& message) {
   WebContentDecryptionModuleSessionImpl* session = GetSession(session_id);
   DLOG_IF(WARNING, !session) << __func__ << " for unknown session "
                              << session_id;
@@ -199,8 +206,8 @@ void CdmSessionAdapter::OnSessionKeysChange(const std::string& session_id,
   if (session) {
     DVLOG(2) << __func__ << ": session_id = " << session_id;
     DVLOG(2) << "  - has_additional_usable_key = " << has_additional_usable_key;
-    for (const CdmKeyInformation* info : keys_info)
-      DVLOG(2) << "  - " << *info;
+    for (const auto& info : keys_info)
+      DVLOG(2) << "  - " << *(info.get());
 
     session->OnSessionKeysChange(has_additional_usable_key,
                                  std::move(keys_info));

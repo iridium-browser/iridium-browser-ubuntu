@@ -24,31 +24,31 @@ TestDictionaryDerivedImplementedAs::TestDictionaryDerivedImplementedAs(const Tes
 TestDictionaryDerivedImplementedAs& TestDictionaryDerivedImplementedAs::operator=(const TestDictionaryDerivedImplementedAs&) = default;
 
 bool TestDictionaryDerivedImplementedAs::hasDerivedStringMember() const {
-  return !m_derivedStringMember.isNull();
+  return !m_derivedStringMember.IsNull();
 }
-String TestDictionaryDerivedImplementedAs::derivedStringMember() const {
+const String& TestDictionaryDerivedImplementedAs::derivedStringMember() const {
   return m_derivedStringMember;
 }
-void TestDictionaryDerivedImplementedAs::setDerivedStringMember(String value) {
+void TestDictionaryDerivedImplementedAs::setDerivedStringMember(const String& value) {
   m_derivedStringMember = value;
 }
 bool TestDictionaryDerivedImplementedAs::hasDerivedStringMemberWithDefault() const {
-  return !m_derivedStringMemberWithDefault.isNull();
+  return !m_derivedStringMemberWithDefault.IsNull();
 }
-String TestDictionaryDerivedImplementedAs::derivedStringMemberWithDefault() const {
+const String& TestDictionaryDerivedImplementedAs::derivedStringMemberWithDefault() const {
   return m_derivedStringMemberWithDefault;
 }
-void TestDictionaryDerivedImplementedAs::setDerivedStringMemberWithDefault(String value) {
+void TestDictionaryDerivedImplementedAs::setDerivedStringMemberWithDefault(const String& value) {
   m_derivedStringMemberWithDefault = value;
 }
 bool TestDictionaryDerivedImplementedAs::hasRequiredLongMember() const {
   return m_hasRequiredLongMember;
 }
-int TestDictionaryDerivedImplementedAs::requiredLongMember() const {
+int32_t TestDictionaryDerivedImplementedAs::requiredLongMember() const {
   DCHECK(m_hasRequiredLongMember);
   return m_requiredLongMember;
 }
-void TestDictionaryDerivedImplementedAs::setRequiredLongMember(int value) {
+void TestDictionaryDerivedImplementedAs::setRequiredLongMember(int32_t value) {
   m_requiredLongMember = value;
   m_hasRequiredLongMember = true;
 }
@@ -65,8 +65,8 @@ void TestDictionaryDerivedImplementedAs::setStringOrDoubleSequenceMember(const H
 }
 
 DEFINE_TRACE(TestDictionaryDerivedImplementedAs) {
-  visitor->trace(m_stringOrDoubleSequenceMember);
-  TestDictionary::trace(visitor);
+  visitor->Trace(m_stringOrDoubleSequenceMember);
+  TestDictionary::Trace(visitor);
 }
 
 }  // namespace blink

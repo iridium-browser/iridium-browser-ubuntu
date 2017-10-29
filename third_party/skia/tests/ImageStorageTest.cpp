@@ -9,6 +9,7 @@
 
 #if SK_SUPPORT_GPU
 
+#include "GrClip.h"
 #include "GrFragmentProcessor.h"
 #include "GrRenderTargetContext.h"
 #include "GrTexture.h"
@@ -18,17 +19,18 @@
 DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ImageStorageLoad, reporter, ctxInfo) {
     class TestFP : public GrFragmentProcessor {
     public:
-        static sk_sp<GrFragmentProcessor> Make(sk_sp<GrTexture> texture, GrSLMemoryModel mm,
+        static sk_sp<GrFragmentProcessor> Make(sk_sp<GrTextureProxy> proxy,
+                                               GrSLMemoryModel mm,
                                                GrSLRestrict restrict) {
-            return sk_sp<GrFragmentProcessor>(new TestFP(std::move(texture), mm, restrict));
+            return sk_sp<GrFragmentProcessor>(new TestFP(std::move(proxy), mm, restrict));
         }
 
         const char* name() const override { return "Image Load Test FP"; }
 
     private:
-        TestFP(sk_sp<GrTexture> texture, GrSLMemoryModel mm, GrSLRestrict restrict)
+        TestFP(sk_sp<GrTextureProxy> proxy, GrSLMemoryModel mm, GrSLRestrict restrict)
                 : INHERITED(kNone_OptimizationFlags)
-                , fImageStorageAccess(std::move(texture), kRead_GrIOType, mm, restrict) {
+                , fImageStorageAccess(std::move(proxy), kRead_GrIOType, mm, restrict) {
             this->initClassID<TestFP>();
             this->addImageStorageAccess(&fImageStorageAccess);
         }
@@ -48,7 +50,7 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ImageStorageLoad, reporter, ctxInfo) {
                     fb->codeAppend("highp vec2 coord = sk_FragCoord.xy;");
                     fb->appendImageStorageLoad(&imageLoadStr, args.fImageStorages[0],
                                                "ivec2(coord)");
-                    if (GrPixelConfigIsSint(tfp.fImageStorageAccess.texture()->config())) {
+                    if (GrPixelConfigIsSint(tfp.fImageStorageAccess.peekTexture()->config())) {
                         // Map the signed bytes so that when then get read back as unorm values they
                         // will have their original bit pattern.
                         fb->codeAppendf("highp ivec4 ivals = %s;", imageLoadStr.c_str());
@@ -125,12 +127,13 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ImageStorageLoad, reporter, ctxInfo) {
                     continue;
                 }
                 desc.fConfig = test.fConfig;
-                sk_sp<GrTexture> imageStorageTexture(context->textureProvider()->createTexture(desc,
-                    SkBudgeted::kYes, test.fData.get(), 0));
+                sk_sp<GrTextureProxy> imageStorageTexture =
+                    GrSurfaceProxy::MakeDeferred(context->resourceProvider(), desc,
+                                                 SkBudgeted::kYes, test.fData.get(), 0);
 
                 sk_sp<GrRenderTargetContext> rtContext =
-                    context->makeRenderTargetContext(SkBackingFit::kExact, kS, kS,
-                                                     kRGBA_8888_GrPixelConfig, nullptr);
+                    context->makeDeferredRenderTargetContext(SkBackingFit::kExact, kS, kS,
+                                                             kRGBA_8888_GrPixelConfig, nullptr);
                 GrPaint paint;
                 paint.setPorterDuffXPFactory(SkBlendMode::kSrc);
                 paint.addColorFragmentProcessor(TestFP::Make(imageStorageTexture, mm, restrict));

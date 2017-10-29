@@ -66,20 +66,20 @@ class UtilityProcessMojoClient {
 
   // Starts the utility process and connects to the remote Mojo service.
   void Start() {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     DCHECK(error_callback_);
     DCHECK(!start_called_);
 
     start_called_ = true;
 
-    mojo::InterfaceRequest<MojoInterface> request(&service_);
+    auto request = MakeRequest(&service_);
     service_.set_connection_error_handler(error_callback_);
     helper_->Start(MojoInterface::Name_, request.PassMessagePipe());
   }
 
   // Returns the Mojo service used to make calls to the utility process.
   MojoInterface* service() WARN_UNUSED_RESULT {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     DCHECK(start_called_);
 
     return service_.get();
@@ -124,8 +124,8 @@ class UtilityProcessMojoClient {
 #endif  // defined(OS_WIN)
 
    private:
-    // Starts the utility process and connects to the remote Mojo service.
-    void StartOnIOThread(const std::string& mojo_interface_name,
+    // Starts the utility process and binds the specified interface.
+    void StartOnIOThread(const std::string& interface_name,
                          mojo::ScopedMessagePipeHandle interface_pipe) {
       DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -136,7 +136,7 @@ class UtilityProcessMojoClient {
         utility_host_->SetExposedDir(exposed_directory_);
 
       if (disable_sandbox_)
-        utility_host_->DisableSandbox();
+        utility_host_->SetSandboxType(SANDBOX_TYPE_NO_SANDBOX);
 #if defined(OS_WIN)
       if (run_elevated_) {
         DCHECK(disable_sandbox_);
@@ -146,8 +146,7 @@ class UtilityProcessMojoClient {
 
       utility_host_->Start();
 
-      utility_host_->GetRemoteInterfaces()->GetInterface(
-          mojo_interface_name, std::move(interface_pipe));
+      utility_host_->BindInterface(interface_name, std::move(interface_pipe));
     }
 
     // Properties of the utility process.
@@ -175,7 +174,7 @@ class UtilityProcessMojoClient {
   bool start_called_ = false;
 
   // Checks that this class is always accessed from the same thread.
-  base::ThreadChecker thread_checker_;
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(UtilityProcessMojoClient);
 };

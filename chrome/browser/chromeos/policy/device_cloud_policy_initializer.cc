@@ -96,7 +96,7 @@ void DeviceCloudPolicyInitializer::Shutdown() {
   is_initialized_ = false;
 }
 
-void DeviceCloudPolicyInitializer::StartEnrollment(
+void DeviceCloudPolicyInitializer::PrepareEnrollment(
     DeviceManagementService* device_management_service,
     chromeos::ActiveDirectoryJoinDelegate* ad_join_delegate,
     const EnrollmentConfig& enrollment_config,
@@ -106,12 +106,6 @@ void DeviceCloudPolicyInitializer::StartEnrollment(
   DCHECK(!enrollment_handler_);
 
   manager_->core()->Disconnect();
-  // TODO(rsorokin): Remove that once DM server does not require requisition.
-  // See crbug.com/668455
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kEnableAd)) {
-    manager_->SetDeviceRequisition("chrome_ad");
-  }
 
   enrollment_handler_.reset(new EnrollmentHandlerChromeOS(
       device_store_, install_attributes_, state_keys_broker_,
@@ -120,7 +114,27 @@ void DeviceCloudPolicyInitializer::StartEnrollment(
       install_attributes_->GetDeviceId(), manager_->GetDeviceRequisition(),
       base::Bind(&DeviceCloudPolicyInitializer::EnrollmentCompleted,
                  base::Unretained(this), enrollment_callback)));
+}
+
+void DeviceCloudPolicyInitializer::StartEnrollment() {
+  DCHECK(is_initialized_);
+  DCHECK(enrollment_handler_);
   enrollment_handler_->StartEnrollment();
+}
+
+void DeviceCloudPolicyInitializer::CheckAvailableLicenses(
+    const AvailableLicensesCallback& callback) {
+  DCHECK(is_initialized_);
+  DCHECK(enrollment_handler_);
+  enrollment_handler_->CheckAvailableLicenses(callback);
+}
+
+void DeviceCloudPolicyInitializer::StartEnrollmentWithLicense(
+    policy::LicenseType license_type) {
+  DCHECK(is_initialized_);
+  DCHECK(enrollment_handler_);
+  DCHECK(license_type != policy::LicenseType::UNKNOWN);
+  enrollment_handler_->StartEnrollmentWithLicense(license_type);
 }
 
 EnrollmentConfig DeviceCloudPolicyInitializer::GetPrescribedEnrollmentConfig()

@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/service_manager/public/cpp/interface_factory.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_runner.h"
 #include "services/service_manager/public/interfaces/service.mojom.h"
@@ -20,7 +20,6 @@ namespace service_manager {
 namespace test {
 
 class AppClient : public Service,
-                  public InterfaceFactory<mojom::LifecycleControl>,
                   public mojom::LifecycleControl {
  public:
   AppClient();
@@ -29,16 +28,15 @@ class AppClient : public Service,
   void set_runner(ServiceRunner* runner) { runner_ = runner; }
 
   // Service:
-  bool OnConnect(const ServiceInfo& remote_info,
-                 InterfaceRegistry* registry) override;
+  void OnBindInterface(const BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override;
   bool OnServiceManagerConnectionLost() override;
 
-  // InterfaceFactory<LifecycleControl>:
-  void Create(const Identity& remote_identity,
-              mojom::LifecycleControlRequest request) override;
+  void Create(mojom::LifecycleControlRequest request);
 
   // LifecycleControl:
-  void Ping(const PingCallback& callback) override;
+  void Ping(PingCallback callback) override;
   void GracefulQuit() override;
   void Crash() override;
   void CloseServiceManagerConnection() override;
@@ -49,6 +47,7 @@ class AppClient : public Service,
   void BindingLost();
 
   ServiceRunner* runner_ = nullptr;
+  BinderRegistry registry_;
   mojo::BindingSet<mojom::LifecycleControl> bindings_;
 
   DISALLOW_COPY_AND_ASSIGN(AppClient);

@@ -93,6 +93,8 @@ BrowserContext* ShellExtensionsBrowserClient::GetOriginalContext(
 #if defined(OS_CHROMEOS)
 std::string ShellExtensionsBrowserClient::GetUserIdHashFromContext(
     content::BrowserContext* context) {
+  if (!chromeos::LoginState::IsInitialized())
+    return "";
   return chromeos::LoginState::Get()->primary_user_hash();
 }
 #endif
@@ -270,6 +272,11 @@ KioskDelegate* ShellExtensionsBrowserClient::GetKioskDelegate() {
   if (!kiosk_delegate_)
     kiosk_delegate_.reset(new ShellKioskDelegate());
   return kiosk_delegate_.get();
+}
+
+bool ShellExtensionsBrowserClient::IsLockScreenContext(
+    content::BrowserContext* context) {
+  return false;
 }
 
 }  // namespace extensions

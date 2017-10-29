@@ -17,8 +17,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task_runner.h"
-#include "base/threading/non_thread_safe.h"
-#include "base/time/time.h"
+#include "base/threading/thread_checker.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/ssl/channel_id_store.h"
@@ -32,11 +31,7 @@ namespace net {
 class ChannelIDServiceJob;
 
 // A class for creating and fetching Channel IDs.
-
-// Inherits from NonThreadSafe in order to use the function
-// |CalledOnValidThread|.
-class NET_EXPORT ChannelIDService
-    : NON_EXPORTED_BASE(public base::NonThreadSafe) {
+class NET_EXPORT ChannelIDService {
  public:
   class NET_EXPORT Request {
    public:
@@ -54,7 +49,6 @@ class NET_EXPORT ChannelIDService
     friend class ChannelIDServiceJob;
 
     void RequestStarted(ChannelIDService* service,
-                        base::TimeTicks request_start,
                         const CompletionCallback& callback,
                         std::unique_ptr<crypto::ECPrivateKey>* key,
                         ChannelIDServiceJob* job);
@@ -62,7 +56,6 @@ class NET_EXPORT ChannelIDService
     void Post(int error, std::unique_ptr<crypto::ECPrivateKey> key);
 
     ChannelIDService* service_;
-    base::TimeTicks request_start_;
     CompletionCallback callback_;
     std::unique_ptr<crypto::ECPrivateKey>* key_;
     ChannelIDServiceJob* job_;
@@ -150,8 +143,7 @@ class NET_EXPORT ChannelIDService
   // Searches for an in-flight request for the same domain. If found,
   // attaches to the request and returns true. Returns false if no in-flight
   // request is found.
-  bool JoinToInFlightRequest(const base::TimeTicks& request_start,
-                             const std::string& domain,
+  bool JoinToInFlightRequest(const std::string& domain,
                              std::unique_ptr<crypto::ECPrivateKey>* key,
                              bool create_if_missing,
                              const CompletionCallback& callback,
@@ -161,8 +153,7 @@ class NET_EXPORT ChannelIDService
   // Returns OK if it can be found synchronously, ERR_IO_PENDING if the
   // result cannot be obtained synchronously, or a network error code on
   // failure (including failure to find a channel ID of |domain|).
-  int LookupChannelID(const base::TimeTicks& request_start,
-                      const std::string& domain,
+  int LookupChannelID(const std::string& domain,
                       std::unique_ptr<crypto::ECPrivateKey>* key,
                       bool create_if_missing,
                       const CompletionCallback& callback,
@@ -180,6 +171,8 @@ class NET_EXPORT ChannelIDService
   uint64_t key_store_hits_;
   uint64_t inflight_joins_;
   uint64_t workers_created_;
+
+  THREAD_CHECKER(thread_checker_);
 
   base::WeakPtrFactory<ChannelIDService> weak_ptr_factory_;
 

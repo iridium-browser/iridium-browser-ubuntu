@@ -17,31 +17,19 @@
 #include "GrStencilAttachment.h"
 #include "GrStencilSettings.h"
 
-GrRenderTarget::GrRenderTarget(GrGpu* gpu, const GrSurfaceDesc& desc, Flags flags,
+GrRenderTarget::GrRenderTarget(GrGpu* gpu, const GrSurfaceDesc& desc,
+                               GrRenderTargetFlags flags,
                                GrStencilAttachment* stencil)
-    : INHERITED(gpu, desc)
-    , fStencilAttachment(stencil)
-    , fMultisampleSpecsID(0)
-    , fFlags(flags) {
-    SkASSERT(!(fFlags & Flags::kMixedSampled) || fDesc.fSampleCnt > 0);
-    SkASSERT(!(fFlags & Flags::kWindowRectsSupport) || gpu->caps()->maxWindowRectangles() > 0);
+        : INHERITED(gpu, desc)
+        , fSampleCnt(desc.fSampleCnt)
+        , fStencilAttachment(stencil)
+        , fMultisampleSpecsID(0)
+        , fFlags(flags) {
+    SkASSERT(desc.fFlags & kRenderTarget_GrSurfaceFlag);
+    SkASSERT(!(fFlags & GrRenderTargetFlags::kMixedSampled) || fSampleCnt > 0);
+    SkASSERT(!(fFlags & GrRenderTargetFlags::kWindowRectsSupport) ||
+             gpu->caps()->maxWindowRectangles() > 0);
     fResolveRect.setLargestInverted();
-}
-
-void GrRenderTarget::discard() {
-    // go through context so that all necessary flushing occurs
-    GrContext* context = this->getContext();
-    if (!context) {
-        return;
-    }
-
-    sk_sp<GrRenderTargetContext> renderTargetContext(
-        context->contextPriv().makeWrappedRenderTargetContext(sk_ref_sp(this), nullptr));
-    if (!renderTargetContext) {
-        return;
-    }
-
-    renderTargetContext->discard();
 }
 
 void GrRenderTarget::flagAsNeedingResolve(const SkIRect* rect) {
@@ -76,10 +64,6 @@ void GrRenderTarget::onRelease() {
 
 void GrRenderTarget::onAbandon() {
     SkSafeSetNull(fStencilAttachment);
-
-    // The contents of this renderTarget are gone/invalid. It isn't useful to point back
-    // the creating opList.
-    this->setLastOpList(nullptr);
 
     INHERITED::onAbandon();
 }

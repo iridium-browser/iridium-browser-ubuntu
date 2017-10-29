@@ -21,13 +21,13 @@
 #include "extensions/browser/api/declarative_webrequest/webrequest_constants.h"
 #include "net/base/request_priority.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::DictionaryValue;
 using base::ListValue;
-using base::StringValue;
 using base::Value;
 
 namespace extensions {
@@ -49,7 +49,7 @@ TEST(WebRequestConditionAttributeTest, CreateConditionAttribute) {
 
   std::string error;
   scoped_refptr<const WebRequestConditionAttribute> result;
-  base::StringValue string_value("main_frame");
+  base::Value string_value("main_frame");
   base::ListValue resource_types;
   resource_types.AppendString("main_frame");
 
@@ -103,7 +103,8 @@ TEST(WebRequestConditionAttributeTest, ResourceType) {
 
   net::TestURLRequestContext context;
   std::unique_ptr<net::URLRequest> url_request_ok(context.CreateRequest(
-      GURL("http://www.example.com"), net::DEFAULT_PRIORITY, NULL));
+      GURL("http://www.example.com"), net::DEFAULT_PRIORITY, nullptr,
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   content::ResourceRequestInfo::AllocateForTesting(
       url_request_ok.get(), content::RESOURCE_TYPE_SUB_FRAME,
       NULL,   // context
@@ -119,7 +120,8 @@ TEST(WebRequestConditionAttributeTest, ResourceType) {
       WebRequestData(url_request_ok.get(), ON_BEFORE_REQUEST)));
 
   std::unique_ptr<net::URLRequest> url_request_fail(context.CreateRequest(
-      GURL("http://www.example.com"), net::DEFAULT_PRIORITY, NULL));
+      GURL("http://www.example.com"), net::DEFAULT_PRIORITY, nullptr,
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   content::ResourceRequestInfo::AllocateForTesting(
       url_request_fail.get(), content::RESOURCE_TYPE_MAIN_FRAME,
       NULL,   // context
@@ -150,7 +152,8 @@ TEST(WebRequestConditionAttributeTest, ContentType) {
   net::TestURLRequestContext context;
   net::TestDelegate delegate;
   std::unique_ptr<net::URLRequest> url_request(context.CreateRequest(
-      test_server.GetURL("/headers.html"), net::DEFAULT_PRIORITY, &delegate));
+      test_server.GetURL("/headers.html"), net::DEFAULT_PRIORITY, &delegate,
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   url_request->Start();
   base::RunLoop().Run();
 
@@ -233,8 +236,8 @@ TEST(WebRequestConditionAttributeTest, ThirdParty) {
   const GURL url_b("http://b.com");
   net::TestURLRequestContext context;
   net::TestDelegate delegate;
-  std::unique_ptr<net::URLRequest> url_request(
-      context.CreateRequest(url_a, net::DEFAULT_PRIORITY, &delegate));
+  std::unique_ptr<net::URLRequest> url_request(context.CreateRequest(
+      url_a, net::DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
 
   for (unsigned int i = 1; i <= kLastActiveStage; i <<= 1) {
     if (!(kActiveStages & i))
@@ -325,7 +328,8 @@ TEST(WebRequestConditionAttributeTest, Stages) {
   net::TestURLRequestContext context;
   net::TestDelegate delegate;
   std::unique_ptr<net::URLRequest> url_request(
-      context.CreateRequest(url_empty, net::DEFAULT_PRIORITY, &delegate));
+      context.CreateRequest(url_empty, net::DEFAULT_PRIORITY, &delegate,
+                            TRAFFIC_ANNOTATION_FOR_TESTS));
 
   for (size_t i = 0; i < arraysize(active_stages); ++i) {
     EXPECT_FALSE(empty_attribute->IsFulfilled(
@@ -381,22 +385,21 @@ std::unique_ptr<base::DictionaryValue> GetDictionaryFromArray(
     if (dictionary->HasKey(*name)) {
       base::Value* entry = NULL;
       std::unique_ptr<base::Value> entry_owned;
-      base::ListValue* list = NULL;
       if (!dictionary->GetWithoutPathExpansion(*name, &entry))
         return std::unique_ptr<base::DictionaryValue>();
       switch (entry->GetType()) {
-        case base::Value::Type::STRING:
+        case base::Value::Type::STRING: {
           // Replace the present string with a list.
-          list = new base::ListValue;
+          auto list = base::MakeUnique<base::ListValue>();
           // Ignoring return value, we already verified the entry is there.
           dictionary->RemoveWithoutPathExpansion(*name, &entry_owned);
           list->Append(std::move(entry_owned));
           list->AppendString(*value);
-          dictionary->SetWithoutPathExpansion(*name, base::WrapUnique(list));
+          dictionary->SetWithoutPathExpansion(*name, std::move(list));
           break;
+        }
         case base::Value::Type::LIST:  // Just append to the list.
-          CHECK(entry->GetAsList(&list));
-          list->AppendString(*value);
+          entry->GetList().emplace_back(*value);
           break;
         default:
           NOTREACHED();  // We never put other Values here.
@@ -450,9 +453,9 @@ TEST(WebRequestConditionAttributeTest, RequestHeaders) {
 
   net::TestURLRequestContext context;
   net::TestDelegate delegate;
-  std::unique_ptr<net::URLRequest> url_request(
-      context.CreateRequest(GURL("http://example.com"),  // Dummy URL.
-                            net::DEFAULT_PRIORITY, &delegate));
+  std::unique_ptr<net::URLRequest> url_request(context.CreateRequest(
+      GURL("http://example.com"),  // Dummy URL.
+      net::DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
   url_request->SetExtraRequestHeaderByName(
       "Custom-header", "custom/value", true /* overwrite */);
   url_request->Start();
@@ -539,7 +542,8 @@ TEST(WebRequestConditionAttributeTest, ResponseHeaders) {
   net::TestURLRequestContext context;
   net::TestDelegate delegate;
   std::unique_ptr<net::URLRequest> url_request(context.CreateRequest(
-      test_server.GetURL("/headers.html"), net::DEFAULT_PRIORITY, &delegate));
+      test_server.GetURL("/headers.html"), net::DEFAULT_PRIORITY, &delegate,
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   url_request->Start();
   base::RunLoop().Run();
 

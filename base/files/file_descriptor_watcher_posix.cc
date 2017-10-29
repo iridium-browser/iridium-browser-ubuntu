@@ -108,8 +108,13 @@ FileDescriptorWatcher::Controller::Watcher::~Watcher() {
 void FileDescriptorWatcher::Controller::Watcher::StartWatching() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  MessageLoopForIO::current()->WatchFileDescriptor(
-      fd_, false, mode_, &file_descriptor_watcher_, this);
+  if (!MessageLoopForIO::current()->WatchFileDescriptor(
+          fd_, false, mode_, &file_descriptor_watcher_, this)) {
+    // TODO(wez): Ideally we would [D]CHECK here, or propagate the failure back
+    // to the caller, but there is no guarantee that they haven't already
+    // closed |fd_| on another thread, so the best we can do is Debug-log.
+    DLOG(ERROR) << "Failed to watch fd=" << fd_;
+  }
 
   if (!registered_as_destruction_observer_) {
     MessageLoopForIO::current()->AddDestructionObserver(this);
@@ -124,8 +129,8 @@ void FileDescriptorWatcher::Controller::Watcher::OnFileCanReadWithoutBlocking(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // Run the callback on the sequence on which the watch was initiated.
-  callback_task_runner_->PostTask(FROM_HERE,
-                                  Bind(&Controller::RunCallback, controller_));
+  callback_task_runner_->PostTask(
+      FROM_HERE, BindOnce(&Controller::RunCallback, controller_));
 }
 
 void FileDescriptorWatcher::Controller::Watcher::OnFileCanWriteWithoutBlocking(
@@ -135,8 +140,8 @@ void FileDescriptorWatcher::Controller::Watcher::OnFileCanWriteWithoutBlocking(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // Run the callback on the sequence on which the watch was initiated.
-  callback_task_runner_->PostTask(FROM_HERE,
-                                  Bind(&Controller::RunCallback, controller_));
+  callback_task_runner_->PostTask(
+      FROM_HERE, BindOnce(&Controller::RunCallback, controller_));
 }
 
 void FileDescriptorWatcher::Controller::Watcher::
@@ -170,7 +175,7 @@ void FileDescriptorWatcher::Controller::StartWatching() {
   // Controller's destructor. Since this delete task hasn't been posted yet, it
   // can't run before the task posted below.
   message_loop_for_io_task_runner_->PostTask(
-      FROM_HERE, Bind(&Watcher::StartWatching, Unretained(watcher_.get())));
+      FROM_HERE, BindOnce(&Watcher::StartWatching, Unretained(watcher_.get())));
 }
 
 void FileDescriptorWatcher::Controller::RunCallback() {

@@ -23,19 +23,22 @@ try:
 except ImportError:
   mox = None
 
-from chromite.cbuildbot import buildbucket_lib
 from chromite.cbuildbot import commands
-from chromite.cbuildbot import topology
 from chromite.cbuildbot import repository
+from chromite.cbuildbot import topology
+from chromite.lib import buildbucket_lib
+from chromite.lib import builder_status_lib
 from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import failures_lib
+from chromite.lib import failure_message_lib
 from chromite.lib import gs
 from chromite.lib import metrics
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import perf_uploader
 from chromite.lib import portage_util
 from chromite.lib import results_lib
 from chromite.lib import retry_util
@@ -185,6 +188,25 @@ class BuilderStage(object):
     """
     return self._run.ConstructDashboardURL(stage=stage)
 
+  def _UploadPerfValues(self, *args, **kwargs):
+    """Helper for uploading perf values.
+
+    This currently handles common checks only.  We could make perf values more
+    integrated in the overall stage running process in the future though if we
+    had more stages that cared about this.
+    """
+    # Only upload perf data for buildbots as the data from local tryjobs
+    # probably isn't useful to us.
+    if not self._run.options.buildbot:
+      return
+
+    try:
+      retry_util.RetryException(perf_uploader.PerfUploadingError, 3,
+                                perf_uploader.UploadPerfValues,
+                                *args, **kwargs)
+    except perf_uploader.PerfUploadingError:
+      logging.exception('Uploading perf data failed')
+
   def _InsertBuildStageInCIDB(self, **kwargs):
     """Insert a build stage in cidb.
 
@@ -245,6 +267,7 @@ class BuilderStage(object):
     elif result == results_lib.Results.SKIPPED:
       return constants.BUILDER_STATUS_SKIPPED
     else:
+      logging.info('Translating result %s to fail.' % result)
       return constants.BUILDER_STATUS_FAILED
 
   def _ExtractOverlays(self):
@@ -326,6 +349,59 @@ class BuilderStage(object):
 
     return buildbucket_ids
 
+  def GetBuildFailureMessageFromCIDB(self, build_id, db):
+    """Get message summarizing failures of this build from CIDB.
+
+    Args:
+      build_id: The build id of the master build.
+      db: An instance of cidb.CIDBConnection.
+
+    Returns:
+      An instance of build_failure_message.BuildFailureMessage.
+    """
+    stage_failures = db.GetBuildsFailures([build_id])
+    failure_msg_manager = failure_message_lib.FailureMessageManager()
+    failure_messages = failure_msg_manager.ConstructStageFailureMessages(
+        stage_failures)
+
+    return builder_status_lib.BuilderStatusManager.CreateBuildFailureMessage(
+        self._run.config.name,
+        self._run.config.overlays,
+        self._run.ConstructDashboardURL(),
+        failure_messages)
+
+  def GetBuildFailureMessageFromResults(self):
+    """Get message summarizing failures of this build from result_lib.Results.
+
+    Returns:
+      An instance of build_failure_message.BuildFailureMessage.
+    """
+    failure_messages = results_lib.Results.GetStageFailureMessage()
+    return builder_status_lib.BuilderStatusManager.CreateBuildFailureMessage(
+        self._run.config.name,
+        self._run.config.overlays,
+        self._run.ConstructDashboardURL(),
+        failure_messages)
+
+  def GetBuildFailureMessage(self):
+    """Get message summarizing failure of this build."""
+    build_id, db = self._run.GetCIDBHandle()
+    if db is not None:
+      return self.GetBuildFailureMessageFromCIDB(build_id, db)
+    else:
+      return self.GetBuildFailureMessageFromResults()
+
+  def GetJobKeyvals(self):
+    """Get job keyvals for the build stage."""
+    build_id, _ = self._run.GetCIDBHandle()
+    job_keyvals = {
+        constants.JOB_KEYVAL_DATASTORE_PARENT_KEY:
+            ('Build', build_id, 'BuildStage', self._build_stage_id),
+        constants.JOB_KEYVAL_CIDB_BUILD_ID: build_id,
+        constants.JOB_KEYVAL_CIDB_BUILD_STAGE_ID: self._build_stage_id,
+    }
+    return job_keyvals
+
   def _Print(self, msg):
     """Prints a msg to stderr."""
     sys.stdout.flush()
@@ -386,17 +462,23 @@ class BuilderStage(object):
     Raises:
       See config_lib.Config.GetSlavesForMaster for details.
     """
-    return self._run.site_config.GetSlavesForMaster(
+    experimental_builders = self._run.attrs.metadata.GetValueWithDefault(
+        constants.METADATA_EXPERIMENTAL_BUILDERS, [])
+    slave_configs = self._run.site_config.GetSlavesForMaster(
         self._run.config, self._run.options)
+    slave_configs = [
+        config for config in slave_configs
+        if config['name'] not in experimental_builders
+    ]
+    return slave_configs
 
-  def _GetSlaveConfigMap(self, important_only=True, active_only=True):
+  def _GetSlaveConfigMap(self, important_only=True):
     """Get slave config map for the current build config.
 
     This assumes self._run.config is a master config.
 
     Args:
       important_only: If True, only get important slaves.
-      active_only: If True, only get slaves having active_waterfall.
 
     Returns:
       A map of slave_name to slave_config for the current master.
@@ -404,9 +486,18 @@ class BuilderStage(object):
     Raises:
       See config_lib.Config.GetSlaveConfigMapForMaster for details.
     """
-    return self._run.site_config.GetSlaveConfigMapForMaster(
+
+    slave_config_map = self._run.site_config.GetSlaveConfigMapForMaster(
         self._run.config, self._run.options,
-        important_only=important_only, active_only=active_only)
+        important_only=important_only)
+    if important_only:
+      experimental_builders = self._run.attrs.metadata.GetValueWithDefault(
+          constants.METADATA_EXPERIMENTAL_BUILDERS, [])
+      slave_config_map = {
+          k: v for k, v in slave_config_map.iteritems()
+          if k not in experimental_builders
+      }
+    return slave_config_map
 
   def _BeginStepForBuildbot(self, tag=None):
     """Called before a stage is performed.
@@ -640,7 +731,8 @@ class BuilderStage(object):
         elapsed_time = time.time() - start_time
 
       self._RecordResult(self.name, result, description, prefix=self._prefix,
-                         board=board, time=elapsed_time)
+                         board=board, time=elapsed_time,
+                         build_stage_id=self._build_stage_id)
       self._FinishBuildStageInCIDBAndMonarch(cidb_result, elapsed_time)
       if isinstance(result, BaseException) and self._build_stage_id is not None:
         _, db = self._run.GetCIDBHandle()
@@ -1015,25 +1107,6 @@ class ArchivingStageMixin(object):
         # Treat gsutil flake as a warning if it's the only problem.
         self._HandleExceptionAsWarning(sys.exc_info())
 
-  @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
-  def RunExportMetadata(self, filename):
-    """Export JSON file of the builder run's metadata to Cloud Datastore.
-
-    Args:
-      filename: Name of file to export.
-    """
-    creds_file = topology.topology.get(topology.DATASTORE_WRITER_CREDS_KEY)
-    if creds_file is None:
-      logging.warn('No known path to datastore credentials file.')
-      return
-
-    export_cmd = os.path.join(self._build_root, 'chromite', 'bin',
-                              'export_to_gcloud')
-    try:
-      cros_build_lib.RunCommand([export_cmd, creds_file, filename])
-    except cros_build_lib.RunCommandError as e:
-      logging.warn('Unable to export to datastore: %s', e)
-
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def UploadMetadata(self, upload_queue=None, filename=constants.METADATA_JSON,
@@ -1054,6 +1127,9 @@ class ArchivingStageMixin(object):
       filename: Name of file to dump metadata to.
                 Defaults to constants.METADATA_JSON
       export: If true, constants.METADATA_TAGS will be exported to gcloud.
+
+    Returns:
+      If upload was successful or not
     """
     metadata_json = os.path.join(self.archive_path, filename)
 
@@ -1077,11 +1153,19 @@ class ArchivingStageMixin(object):
       if export:
         d = self._run.attrs.metadata.GetDict()
         if constants.METADATA_TAGS in d:
-          with tempfile.NamedTemporaryFile() as f:
-            logging.info('Export tags to gcloud via %s.', f.name)
-            logging.debug('Exporting: %s' % d[constants.METADATA_TAGS])
-            osutils.WriteFile(f.name, json.dumps(d[constants.METADATA_TAGS]),
-                              atomic=True, makedirs=True)
-            self.RunExportMetadata(f.name)
+          c_file = topology.topology.get(topology.DATASTORE_WRITER_CREDS_KEY)
+          if c_file:
+            with tempfile.NamedTemporaryFile() as f:
+              logging.info('Export tags to gcloud via %s.', f.name)
+              logging.debug('Exporting: %s' % d[constants.METADATA_TAGS])
+              osutils.WriteFile(f.name, json.dumps(d[constants.METADATA_TAGS]),
+                                atomic=True, makedirs=True)
+              commands.ExportToGCloud(self._build_root, c_file, f.name,
+                                      caller=type(self).__name__)
+          else:
+            logging.warn('No datastore credential file found, Skipping Export')
+            return False
     else:
       logging.info('Skipping database update, no database or build_id.')
+      return False
+    return True

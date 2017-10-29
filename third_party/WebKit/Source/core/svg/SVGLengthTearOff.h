@@ -31,9 +31,9 @@
 #ifndef SVGLengthTearOff_h
 #define SVGLengthTearOff_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/svg/SVGLength.h"
 #include "core/svg/properties/SVGPropertyTearOff.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -57,37 +57,37 @@ class SVGLengthTearOff final : public SVGPropertyTearOff<SVGLength>,
     kSvgLengthtypePc = 10
   };
 
-  static SVGLengthTearOff* create(
-      SVGLength* target,
-      SVGElement* contextElement,
-      PropertyIsAnimValType propertyIsAnimVal,
-      const QualifiedName& attributeName = QualifiedName::null()) {
-    return new SVGLengthTearOff(target, contextElement, propertyIsAnimVal,
-                                attributeName);
+  static SVGLengthTearOff* Create(SVGLength* target,
+                                  SVGElement* context_element,
+                                  PropertyIsAnimValType property_is_anim_val,
+                                  const QualifiedName& attribute_name) {
+    return new SVGLengthTearOff(target, context_element, property_is_anim_val,
+                                attribute_name);
   }
+  static SVGLengthTearOff* CreateDetached();
 
   unsigned short unitType();
-  SVGLengthMode unitMode();
+  SVGLengthMode UnitMode();
   float value(ExceptionState&);
   void setValue(float value, ExceptionState&);
   float valueInSpecifiedUnits();
   void setValueInSpecifiedUnits(float value, ExceptionState&);
   String valueAsString();
   void setValueAsString(const String&, ExceptionState&);
-  void newValueSpecifiedUnits(unsigned short unitType,
-                              float valueInSpecifiedUnits,
+  void newValueSpecifiedUnits(unsigned short unit_type,
+                              float value_in_specified_units,
                               ExceptionState&);
-  void convertToSpecifiedUnits(unsigned short unitType, ExceptionState&);
+  void convertToSpecifiedUnits(unsigned short unit_type, ExceptionState&);
 
-  bool hasExposedLengthUnit();
+  bool HasExposedLengthUnit();
 
   DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
  private:
   SVGLengthTearOff(SVGLength*,
-                   SVGElement* contextElement,
+                   SVGElement* context_element,
                    PropertyIsAnimValType,
-                   const QualifiedName& attributeName = QualifiedName::null());
+                   const QualifiedName& attribute_name);
 };
 
 }  // namespace blink

@@ -22,7 +22,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
-#include "media/base/media_switches.h"
+#include "services/service_manager/embedder/switches.h"
 #include "ui/display/display_switches.h"
 #include "ui/gfx/switches.h"
 
@@ -250,6 +250,7 @@ void ZygoteCommunication::Init() {
   // to the zygote/renderers.
   // Should this list be obtained from browser_render_process_host.cc?
   static const char* const kForwardSwitches[] = {
+      service_manager::switches::kDisableInProcessStackTraces,
       switches::kAllowSandboxDebugging, switches::kAndroidFontsPath,
       switches::kDisableSeccompFilterSandbox, switches::kEnableHeapProfiling,
       switches::kEnableLogging,  // Support, e.g., --enable-logging=stderr.
@@ -261,8 +262,6 @@ void ZygoteCommunication::Init() {
       switches::kForceDeviceScaleFactor, switches::kLoggingLevel,
       switches::kNoSandbox, switches::kPpapiInProcess,
       switches::kRegisterPepperPlugins, switches::kV, switches::kVModule,
-      // Need to tell CdmHostFile(s) to ignore missing CDM host files.
-      switches::kIgnoreMissingCdmHostFile,
   };
   cmd_line.CopySwitchesFrom(browser_command_line, kForwardSwitches,
                             arraysize(kForwardSwitches));

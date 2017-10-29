@@ -19,6 +19,10 @@
 
 namespace content {
 
+namespace {
+class InstallEventMethodsReceiver;
+}  // namespace
+
 // Handles the initial registration of a Service Worker and the
 // subsequent update of existing registrations.
 //
@@ -44,8 +48,8 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   // For registration jobs.
   CONTENT_EXPORT ServiceWorkerRegisterJob(
       base::WeakPtr<ServiceWorkerContextCore> context,
-      const GURL& pattern,
-      const GURL& script_url);
+      const GURL& script_url,
+      const ServiceWorkerRegistrationOptions& options);
 
   // For update jobs.
   CONTENT_EXPORT ServiceWorkerRegisterJob(
@@ -120,10 +124,12 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   void OnStoreRegistrationComplete(ServiceWorkerStatusCode status);
   void InstallAndContinue();
   void DispatchInstallEvent();
-  void OnInstallFinished(int request_id,
-                         blink::WebServiceWorkerEventResult result,
-                         bool has_fetch_handler,
-                         base::Time dispatch_event_time);
+  void OnInstallFinished(
+      int request_id,
+      std::unique_ptr<InstallEventMethodsReceiver> install_event_methods,
+      ServiceWorkerStatusCode status,
+      bool has_fetch_handler,
+      base::Time dispatch_event_time);
   void OnInstallFailed(ServiceWorkerStatusCode status);
   void Complete(ServiceWorkerStatusCode status);
   void Complete(ServiceWorkerStatusCode status,

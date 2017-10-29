@@ -19,46 +19,6 @@
 #include "SkStrokeRec.h"
 #include "SkTypeface.h"
 
-static inline SkPMColor rgb2gray(SkPMColor c) {
-    unsigned r = SkGetPackedR32(c);
-    unsigned g = SkGetPackedG32(c);
-    unsigned b = SkGetPackedB32(c);
-
-    unsigned x = (r * 5 + g * 7 + b * 4) >> 4;
-
-    return SkPackARGB32(0, x, x, x) | (c & (SK_A32_MASK << SK_A32_SHIFT));
-}
-
-class SkGrayScaleColorFilter : public SkColorFilter {
-public:
-    virtual void filterSpan(const SkPMColor src[], int count,
-                            SkPMColor result[]) const override {
-        for (int i = 0; i < count; i++) {
-            result[i] = rgb2gray(src[i]);
-        }
-    }
-};
-
-class SkChannelMaskColorFilter : public SkColorFilter {
-public:
-    SkChannelMaskColorFilter(U8CPU redMask, U8CPU greenMask, U8CPU blueMask) {
-        fMask = SkPackARGB32(0xFF, redMask, greenMask, blueMask);
-    }
-
-    virtual void filterSpan(const SkPMColor src[], int count,
-                            SkPMColor result[]) const override {
-        SkPMColor mask = fMask;
-        for (int i = 0; i < count; i++) {
-            result[i] = src[i] & mask;
-        }
-    }
-
-private:
-    SkPMColor   fMask;
-};
-
-///////////////////////////////////////////////////////////////////////////////
-
 #include "SkGradientShader.h"
 #include "SkLayerRasterizer.h"
 #include "SkBlurMaskFilter.h"
@@ -235,7 +195,7 @@ protected:
         paint.setTypeface(fFace);
 
         apply_shader(&paint, SkScalarToFloat(fInterp));
-        canvas->drawText(str.c_str(), str.size(), x, y, paint);
+        canvas->drawString(str, x, y, paint);
 
     //    drawdots(canvas, paint);
 

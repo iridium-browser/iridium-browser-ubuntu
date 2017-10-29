@@ -29,12 +29,14 @@
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/ui/webui/profile_helper.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
@@ -162,6 +164,8 @@ std::string GetSyncErrorAction(sync_ui_util::ActionType action_type) {
       return "upgradeClient";
     case sync_ui_util::ENTER_PASSPHRASE:
       return "enterPassphrase";
+    case sync_ui_util::CONFIRM_SYNC_SETTINGS:
+      return "confirmSyncSettings";
     default:
       return "noAction";
   }
@@ -194,6 +198,7 @@ PeopleHandler::~PeopleHandler() {
 }
 
 void PeopleHandler::RegisterMessages() {
+  InitializeSyncBlocker();
   web_ui()->RegisterMessageCallback(
       "SyncSetupDidClosePage",
       base::Bind(&PeopleHandler::OnDidClosePage, base::Unretained(this)));
@@ -323,9 +328,7 @@ void PeopleHandler::DisplaySpinner() {
                              base::TimeDelta::FromSeconds(kTimeoutSec), this,
                              &PeopleHandler::DisplayTimeout);
 
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("page-status-changed"),
-                         base::StringValue(kSpinnerPageStatus));
+  FireWebUIListener("page-status-changed", base::Value(kSpinnerPageStatus));
 }
 
 void PeopleHandler::DisplayTimeout() {
@@ -335,9 +338,7 @@ void PeopleHandler::DisplayTimeout() {
   // Do not listen to sync startup events.
   sync_startup_tracker_.reset();
 
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("page-status-changed"),
-                         base::StringValue(kTimeoutPageStatus));
+  FireWebUIListener("page-status-changed", base::Value(kTimeoutPageStatus));
 }
 
 void PeopleHandler::OnDidClosePage(const base::ListValue* args) {
@@ -391,7 +392,7 @@ void PeopleHandler::HandleSetDatatypes(const base::ListValue* args) {
   // dialog.
   if (!service || !service->IsEngineInitialized()) {
     CloseSyncSetup();
-    ResolveJavascriptCallback(*callback_id, base::StringValue(kDonePageStatus));
+    ResolveJavascriptCallback(*callback_id, base::Value(kDonePageStatus));
     return;
   }
 
@@ -399,8 +400,7 @@ void PeopleHandler::HandleSetDatatypes(const base::ListValue* args) {
                                 configuration.data_types);
 
   // Choosing data types to sync never fails.
-  ResolveJavascriptCallback(*callback_id,
-                            base::StringValue(kConfigurePageStatus));
+  ResolveJavascriptCallback(*callback_id, base::Value(kConfigurePageStatus));
 
   ProfileMetrics::LogProfileSyncInfo(ProfileMetrics::SYNC_CUSTOMIZE);
   if (!configuration.sync_everything)
@@ -422,7 +422,7 @@ void PeopleHandler::HandleSetEncryption(const base::ListValue* args) {
   // dialog.
   if (!service || !service->IsEngineInitialized()) {
     CloseSyncSetup();
-    ResolveJavascriptCallback(*callback_id, base::StringValue(kDonePageStatus));
+    ResolveJavascriptCallback(*callback_id, base::Value(kDonePageStatus));
     return;
   }
 
@@ -473,10 +473,9 @@ void PeopleHandler::HandleSetEncryption(const base::ListValue* args) {
     // TODO(tommycli): Switch this to RejectJavascriptCallback once the
     // Sync page JavaScript has been further refactored.
     ResolveJavascriptCallback(*callback_id,
-                              base::StringValue(kPassphraseFailedPageStatus));
+                              base::Value(kPassphraseFailedPageStatus));
   } else {
-    ResolveJavascriptCallback(*callback_id,
-                              base::StringValue(kConfigurePageStatus));
+    ResolveJavascriptCallback(*callback_id, base::Value(kConfigurePageStatus));
   }
 
   if (configuration.encrypt_all)
@@ -563,7 +562,7 @@ void PeopleHandler::HandleGetSyncStatus(const base::ListValue* args) {
 }
 
 void PeopleHandler::HandleManageOtherPeople(const base::ListValue* /* args */) {
-  UserManager::Show(base::FilePath(), profiles::USER_MANAGER_NO_TUTORIAL,
+  UserManager::Show(base::FilePath(),
                     profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
 }
 
@@ -629,7 +628,7 @@ void PeopleHandler::OpenSyncSetup() {
   GetLoginUIService()->SetLoginUI(this);
 
   ProfileSyncService* service = GetSyncService();
-  if (service)
+  if (service && !sync_blocker_)
     sync_blocker_ = service->GetSetupInProgressHandle();
 
   // There are several different UI flows that can bring the user here:
@@ -690,6 +689,20 @@ void PeopleHandler::OpenSyncSetup() {
   PushSyncPrefs();
 }
 
+void PeopleHandler::InitializeSyncBlocker() {
+  if (!web_ui())
+    return;
+  WebContents* web_contents = web_ui()->GetWebContents();
+  if (web_contents) {
+    ProfileSyncService* service = GetSyncService();
+    const GURL current_url = web_contents->GetVisibleURL();
+    if (service &&
+        current_url == chrome::GetSettingsUrl(chrome::kSyncSetupSubPage)) {
+      sync_blocker_ = service->GetSetupInProgressHandle();
+    }
+  }
+}
+
 void PeopleHandler::FocusUI() {
   WebContents* web_contents = web_ui()->GetWebContents();
   web_contents->GetDelegate()->ActivateContents(web_contents);
@@ -697,14 +710,11 @@ void PeopleHandler::FocusUI() {
 
 void PeopleHandler::CloseUI() {
   CloseSyncSetup();
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("page-status-changed"),
-                         base::StringValue(kDonePageStatus));
+  FireWebUIListener("page-status-changed", base::Value(kDonePageStatus));
 }
 
 void PeopleHandler::GoogleSigninSucceeded(const std::string& /* account_id */,
-                                          const std::string& /* username */,
-                                          const std::string& /* password */) {
+                                          const std::string& /* username */) {
   UpdateSyncStatus();
 }
 
@@ -887,8 +897,7 @@ void PeopleHandler::PushSyncPrefs() {
                    GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM));
   }
 
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("sync-prefs-changed"), args);
+  FireWebUIListener("sync-prefs-changed", args);
 }
 
 LoginUIService* PeopleHandler::GetLoginUIService() const {
@@ -896,9 +905,7 @@ LoginUIService* PeopleHandler::GetLoginUIService() const {
 }
 
 void PeopleHandler::UpdateSyncStatus() {
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("sync-status-changed"),
-                         *GetSyncStatusDictionary());
+  FireWebUIListener("sync-status-changed", *GetSyncStatusDictionary());
 }
 
 void PeopleHandler::MarkFirstSetupComplete() {

@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/bind.h"
+#include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/strings/string_piece.h"
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -29,13 +32,17 @@ namespace logging {
 namespace {
 
 using ::testing::Return;
+using ::testing::_;
 
 // Needs to be global since log assert handlers can't maintain state.
-int log_sink_call_count = 0;
+int g_log_sink_call_count = 0;
 
 #if !defined(OFFICIAL_BUILD) || defined(DCHECK_ALWAYS_ON) || !defined(NDEBUG)
-void LogSink(const std::string& str) {
-  ++log_sink_call_count;
+void LogSink(const char* file,
+             int line,
+             const base::StringPiece message,
+             const base::StringPiece stack_trace) {
+  ++g_log_sink_call_count;
 }
 #endif
 
@@ -47,8 +54,7 @@ class LogStateSaver {
 
   ~LogStateSaver() {
     SetMinLogLevel(old_min_log_level_);
-    SetLogAssertHandler(NULL);
-    log_sink_call_count = 0;
+    g_log_sink_call_count = 0;
   }
 
  private:
@@ -67,18 +73,23 @@ class MockLogSource {
   MOCK_METHOD0(Log, const char*());
 };
 
+class MockLogAssertHandler {
+ public:
+  MOCK_METHOD4(
+      HandleLogAssert,
+      void(const char*, int, const base::StringPiece, const base::StringPiece));
+};
+
 TEST_F(LoggingTest, BasicLogging) {
   MockLogSource mock_log_source;
-  EXPECT_CALL(mock_log_source, Log()).Times(DEBUG_MODE ? 16 : 8).
-      WillRepeatedly(Return("log message"));
+  EXPECT_CALL(mock_log_source, Log())
+      .Times(DCHECK_IS_ON() ? 16 : 8)
+      .WillRepeatedly(Return("log message"));
 
   SetMinLogLevel(LOG_INFO);
 
   EXPECT_TRUE(LOG_IS_ON(INFO));
-  // As of g++-4.5, the first argument to EXPECT_EQ cannot be a
-  // constant expression.
-  const bool kIsDebugMode = (DEBUG_MODE != 0);
-  EXPECT_TRUE(kIsDebugMode == DLOG_IS_ON(INFO));
+  EXPECT_TRUE((DCHECK_IS_ON() != 0) == DLOG_IS_ON(INFO));
   EXPECT_TRUE(VLOG_IS_ON(0));
 
   LOG(INFO) << mock_log_source.Log();
@@ -134,7 +145,7 @@ TEST_F(LoggingTest, LogIsOn) {
   EXPECT_FALSE(LOG_IS_ON(WARNING));
   EXPECT_FALSE(LOG_IS_ON(ERROR));
   EXPECT_TRUE(LOG_IS_ON(FATAL));
-  EXPECT_TRUE(kDfatalIsFatal == LOG_IS_ON(DFATAL));
+  EXPECT_EQ(kDfatalIsFatal, LOG_IS_ON(DFATAL));
 }
 
 TEST_F(LoggingTest, LoggingIsLazyBySeverity) {
@@ -187,13 +198,19 @@ TEST_F(LoggingTest, LoggingIsLazyByDestination) {
 // Official builds have CHECKs directly call BreakDebugger.
 #if !defined(OFFICIAL_BUILD)
 
-TEST_F(LoggingTest, CheckStreamsAreLazy) {
+// https://crbug.com/709067 tracks test flakiness on iOS.
+#if defined(OS_IOS)
+#define MAYBE_CheckStreamsAreLazy DISABLED_CheckStreamsAreLazy
+#else
+#define MAYBE_CheckStreamsAreLazy CheckStreamsAreLazy
+#endif
+TEST_F(LoggingTest, MAYBE_CheckStreamsAreLazy) {
   MockLogSource mock_log_source, uncalled_mock_log_source;
   EXPECT_CALL(mock_log_source, Log()).Times(8).
       WillRepeatedly(Return("check message"));
   EXPECT_CALL(uncalled_mock_log_source, Log()).Times(0);
 
-  SetLogAssertHandler(&LogSink);
+  ScopedLogAssertHandler scoped_assert_handler(base::Bind(LogSink));
 
   CHECK(mock_log_source.Log()) << uncalled_mock_log_source.Log();
   PCHECK(!mock_log_source.Log()) << mock_log_source.Log();
@@ -271,7 +288,7 @@ void CheckCrashTestSighandler(int, siginfo_t* info, void* context_ptr) {
 #if defined(OS_MACOSX)
   crash_addr = reinterpret_cast<uintptr_t>(info->si_addr);
 #else  // OS_POSIX && !OS_MACOSX
-  struct ucontext* context = reinterpret_cast<struct ucontext*>(context_ptr);
+  ucontext_t* context = reinterpret_cast<ucontext_t*>(context_ptr);
 #if defined(ARCH_CPU_X86)
   crash_addr = static_cast<uintptr_t>(context->uc_mcontext.gregs[REG_EIP]);
 #elif defined(ARCH_CPU_X86_64)
@@ -354,7 +371,7 @@ TEST_F(LoggingTest, CheckCausesDistinctBreakpoints) {
 #endif  // OS_POSIX
 
 TEST_F(LoggingTest, DebugLoggingReleaseBehavior) {
-#if !defined(NDEBUG) || defined(DCHECK_ALWAYS_ON)
+#if DCHECK_IS_ON()
   int debug_only_variable = 1;
 #endif
   // These should avoid emitting references to |debug_only_variable|
@@ -388,50 +405,56 @@ void DcheckEmptyFunction1() {
 }
 void DcheckEmptyFunction2() {}
 
-TEST_F(LoggingTest, Dcheck) {
+// https://crbug.com/709067 tracks test flakiness on iOS.
+#if defined(OS_IOS)
+#define MAYBE_Dcheck DISABLED_Dcheck
+#else
+#define MAYBE_Dcheck Dcheck
+#endif
+TEST_F(LoggingTest, MAYBE_Dcheck) {
 #if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
   // Release build.
   EXPECT_FALSE(DCHECK_IS_ON());
   EXPECT_FALSE(DLOG_IS_ON(DCHECK));
 #elif defined(NDEBUG) && defined(DCHECK_ALWAYS_ON)
   // Release build with real DCHECKS.
-  SetLogAssertHandler(&LogSink);
+  ScopedLogAssertHandler scoped_assert_handler(base::Bind(LogSink));
   EXPECT_TRUE(DCHECK_IS_ON());
   EXPECT_TRUE(DLOG_IS_ON(DCHECK));
 #else
   // Debug build.
-  SetLogAssertHandler(&LogSink);
+  ScopedLogAssertHandler scoped_assert_handler(base::Bind(LogSink));
   EXPECT_TRUE(DCHECK_IS_ON());
   EXPECT_TRUE(DLOG_IS_ON(DCHECK));
 #endif
 
-  EXPECT_EQ(0, log_sink_call_count);
+  EXPECT_EQ(0, g_log_sink_call_count);
   DCHECK(false);
-  EXPECT_EQ(DCHECK_IS_ON() ? 1 : 0, log_sink_call_count);
+  EXPECT_EQ(DCHECK_IS_ON() ? 1 : 0, g_log_sink_call_count);
   DPCHECK(false);
-  EXPECT_EQ(DCHECK_IS_ON() ? 2 : 0, log_sink_call_count);
+  EXPECT_EQ(DCHECK_IS_ON() ? 2 : 0, g_log_sink_call_count);
   DCHECK_EQ(0, 1);
-  EXPECT_EQ(DCHECK_IS_ON() ? 3 : 0, log_sink_call_count);
+  EXPECT_EQ(DCHECK_IS_ON() ? 3 : 0, g_log_sink_call_count);
 
   // Test DCHECK on std::nullptr_t
-  log_sink_call_count = 0;
+  g_log_sink_call_count = 0;
   const void* p_null = nullptr;
   const void* p_not_null = &p_null;
   DCHECK_EQ(p_null, nullptr);
   DCHECK_EQ(nullptr, p_null);
   DCHECK_NE(p_not_null, nullptr);
   DCHECK_NE(nullptr, p_not_null);
-  EXPECT_EQ(0, log_sink_call_count);
+  EXPECT_EQ(0, g_log_sink_call_count);
 
   // Test DCHECK on a scoped enum.
   enum class Animal { DOG, CAT };
   DCHECK_EQ(Animal::DOG, Animal::DOG);
-  EXPECT_EQ(0, log_sink_call_count);
+  EXPECT_EQ(0, g_log_sink_call_count);
   DCHECK_EQ(Animal::DOG, Animal::CAT);
-  EXPECT_EQ(DCHECK_IS_ON() ? 1 : 0, log_sink_call_count);
+  EXPECT_EQ(DCHECK_IS_ON() ? 1 : 0, g_log_sink_call_count);
 
   // Test DCHECK on functions and function pointers.
-  log_sink_call_count = 0;
+  g_log_sink_call_count = 0;
   struct MemberFunctions {
     void MemberFunction1() {
       // See the comment in DcheckEmptyFunction1().
@@ -445,15 +468,15 @@ TEST_F(LoggingTest, Dcheck) {
   void (*fp2)() = DcheckEmptyFunction2;
   void (*fp3)() = DcheckEmptyFunction1;
   DCHECK_EQ(fp1, fp3);
-  EXPECT_EQ(0, log_sink_call_count);
+  EXPECT_EQ(0, g_log_sink_call_count);
   DCHECK_EQ(mp1, &MemberFunctions::MemberFunction1);
-  EXPECT_EQ(0, log_sink_call_count);
+  EXPECT_EQ(0, g_log_sink_call_count);
   DCHECK_EQ(mp2, &MemberFunctions::MemberFunction2);
-  EXPECT_EQ(0, log_sink_call_count);
+  EXPECT_EQ(0, g_log_sink_call_count);
   DCHECK_EQ(fp1, fp2);
-  EXPECT_EQ(DCHECK_IS_ON() ? 1 : 0, log_sink_call_count);
+  EXPECT_EQ(DCHECK_IS_ON() ? 1 : 0, g_log_sink_call_count);
   DCHECK_EQ(mp2, &MemberFunctions::MemberFunction1);
-  EXPECT_EQ(DCHECK_IS_ON() ? 2 : 0, log_sink_call_count);
+  EXPECT_EQ(DCHECK_IS_ON() ? 2 : 0, g_log_sink_call_count);
 }
 
 TEST_F(LoggingTest, DcheckReleaseBehavior) {
@@ -487,6 +510,43 @@ TEST_F(LoggingTest, CheckEqStatements) {
 
   if (false)
     CHECK_EQ(false, true);           // Unreached.
+}
+
+TEST_F(LoggingTest, NestedLogAssertHandlers) {
+  ::testing::InSequence dummy;
+  ::testing::StrictMock<MockLogAssertHandler> handler_a, handler_b;
+
+  EXPECT_CALL(
+      handler_a,
+      HandleLogAssert(
+          _, _, base::StringPiece("First assert must be caught by handler_a"),
+          _));
+  EXPECT_CALL(
+      handler_b,
+      HandleLogAssert(
+          _, _, base::StringPiece("Second assert must be caught by handler_b"),
+          _));
+  EXPECT_CALL(
+      handler_a,
+      HandleLogAssert(
+          _, _,
+          base::StringPiece("Last assert must be caught by handler_a again"),
+          _));
+
+  logging::ScopedLogAssertHandler scoped_handler_a(base::Bind(
+      &MockLogAssertHandler::HandleLogAssert, base::Unretained(&handler_a)));
+
+  // Using LOG(FATAL) rather than CHECK(false) here since log messages aren't
+  // preserved for CHECKs in official builds.
+  LOG(FATAL) << "First assert must be caught by handler_a";
+
+  {
+    logging::ScopedLogAssertHandler scoped_handler_b(base::Bind(
+        &MockLogAssertHandler::HandleLogAssert, base::Unretained(&handler_b)));
+    LOG(FATAL) << "Second assert must be caught by handler_b";
+  }
+
+  LOG(FATAL) << "Last assert must be caught by handler_a again";
 }
 
 // Test that defining an operator<< for a type in a namespace doesn't prevent

@@ -12,9 +12,10 @@
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
-#include "components/password_manager/core/browser/http_password_migrator.h"
+#include "components/password_manager/core/browser/http_password_store_migrator.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
+#include "components/password_manager/core/common/credential_manager_types.h"
 #include "url/gurl.h"
 
 namespace autofill {
@@ -49,18 +50,19 @@ class CredentialManagerPendingRequestTaskDelegate {
   // Updates |skip_zero_click| for |form| in the PasswordStore if required.
   // Sends a credential to JavaScript.
   virtual void SendPasswordForm(const SendCredentialCallback& send_callback,
+                                CredentialMediationRequirement mediation,
                                 const autofill::PasswordForm* form) = 0;
 };
 
 // Retrieves credentials from the PasswordStore.
 class CredentialManagerPendingRequestTask
     : public PasswordStoreConsumer,
-      public HttpPasswordMigrator::Consumer {
+      public HttpPasswordStoreMigrator::Consumer {
  public:
   CredentialManagerPendingRequestTask(
       CredentialManagerPendingRequestTaskDelegate* delegate,
       const SendCredentialCallback& callback,
-      bool request_zero_click_only,
+      CredentialMediationRequirement mediation,
       bool include_passwords,
       const std::vector<GURL>& request_federations);
   ~CredentialManagerPendingRequestTask() override;
@@ -73,7 +75,7 @@ class CredentialManagerPendingRequestTask
       std::vector<std::unique_ptr<autofill::PasswordForm>> results) override;
 
  private:
-  // HttpPasswordMigrator::Consumer:
+  // HttpPasswordStoreMigrator::Consumer:
   void ProcessMigratedForms(
       std::vector<std::unique_ptr<autofill::PasswordForm>> forms) override;
 
@@ -82,12 +84,12 @@ class CredentialManagerPendingRequestTask
 
   CredentialManagerPendingRequestTaskDelegate* delegate_;  // Weak;
   SendCredentialCallback send_callback_;
-  const bool zero_click_only_;
+  const CredentialMediationRequirement mediation_;
   const GURL origin_;
   const bool include_passwords_;
   std::set<std::string> federations_;
 
-  std::unique_ptr<HttpPasswordMigrator> http_migrator_;
+  std::unique_ptr<HttpPasswordStoreMigrator> http_migrator_;
 
   DISALLOW_COPY_AND_ASSIGN(CredentialManagerPendingRequestTask);
 };

@@ -6,12 +6,14 @@
 
 #include "core/css/properties/CSSPropertyColumnUtils.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIColumnCount::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  return CSSPropertyColumnUtils::consumeColumnCount(range);
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  return CSSPropertyColumnUtils::ConsumeColumnCount(range);
 }
 
 }  // namespace blink

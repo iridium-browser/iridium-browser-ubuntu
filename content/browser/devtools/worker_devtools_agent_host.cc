@@ -39,7 +39,7 @@ void WorkerDevToolsAgentHost::AttachSession(DevToolsSession* session) {
 
 void WorkerDevToolsAgentHost::DetachSession(int session_id) {
   if (RenderProcessHost* host = RenderProcessHost::FromID(worker_id_.first))
-    host->Send(new DevToolsAgentMsg_Detach(worker_id_.second));
+    host->Send(new DevToolsAgentMsg_Detach(worker_id_.second, session_id));
   OnAttachedStateChanged(false);
   if (state_ == WORKER_INSPECTED) {
     state_ = WORKER_UNINSPECTED;
@@ -65,6 +65,7 @@ bool WorkerDevToolsAgentHost::DispatchProtocolMessage(
   if (RenderProcessHost* host = RenderProcessHost::FromID(worker_id_.first)) {
     host->Send(new DevToolsAgentMsg_DispatchOnInspectorBackend(
         worker_id_.second, session->session_id(), call_id, method, message));
+    session->waiting_messages()[call_id] = {method, message};
   }
   return true;
 }
@@ -87,7 +88,13 @@ void WorkerDevToolsAgentHost::PauseForDebugOnStart() {
 }
 
 bool WorkerDevToolsAgentHost::IsPausedForDebugOnStart() {
-  return state_ == WORKER_PAUSED_FOR_DEBUG_ON_START;
+  return state_ == WORKER_PAUSED_FOR_DEBUG_ON_START ||
+         state_ == WORKER_READY_FOR_DEBUG_ON_START;
+}
+
+bool WorkerDevToolsAgentHost::IsReadyForInspection() {
+  return state_ == WORKER_INSPECTED || state_ == WORKER_UNINSPECTED ||
+         state_ == WORKER_READY_FOR_DEBUG_ON_START;
 }
 
 void WorkerDevToolsAgentHost::WorkerReadyForInspection() {
@@ -96,11 +103,22 @@ void WorkerDevToolsAgentHost::WorkerReadyForInspection() {
     state_ = WORKER_INSPECTED;
     AttachToWorker();
     if (RenderProcessHost* host = RenderProcessHost::FromID(worker_id_.first)) {
-      host->Send(new DevToolsAgentMsg_Reattach(
-          worker_id_.second, GetId(), session()->session_id(),
-          chunk_processor_.state_cookie()));
+      for (DevToolsSession* session : sessions()) {
+        host->Send(new DevToolsAgentMsg_Reattach(worker_id_.second, GetId(),
+                                                 session->session_id(),
+                                                 session->state_cookie()));
+        for (const auto& pair : session->waiting_messages()) {
+          int call_id = pair.first;
+          const DevToolsSession::Message& message = pair.second;
+          host->Send(new DevToolsAgentMsg_DispatchOnInspectorBackend(
+              worker_id_.second, session->session_id(), call_id, message.method,
+              message.message));
+        }
+      }
     }
     OnAttachedStateChanged(true);
+  } else if (state_ == WORKER_PAUSED_FOR_DEBUG_ON_START) {
+    state_ = WORKER_READY_FOR_DEBUG_ON_START;
   }
 }
 
@@ -115,7 +133,8 @@ void WorkerDevToolsAgentHost::WorkerDestroyed() {
   DCHECK_NE(WORKER_TERMINATED, state_);
   if (state_ == WORKER_INSPECTED) {
     DCHECK(IsAttached());
-    protocol::InspectorHandler::FromSession(session())->TargetCrashed();
+    for (auto* inspector : protocol::InspectorHandler::ForAgentHost(this))
+      inspector->TargetCrashed();
     DetachFromWorker();
   }
   state_ = WORKER_TERMINATED;
@@ -128,8 +147,6 @@ bool WorkerDevToolsAgentHost::IsTerminated() {
 
 WorkerDevToolsAgentHost::WorkerDevToolsAgentHost(WorkerId worker_id)
     : DevToolsAgentHostImpl(base::GenerateGUID()),
-      chunk_processor_(base::Bind(&WorkerDevToolsAgentHost::SendMessageToClient,
-                                  base::Unretained(this))),
       state_(WORKER_UNINSPECTED),
       worker_id_(worker_id) {
   WorkerCreated();
@@ -160,8 +177,9 @@ void WorkerDevToolsAgentHost::OnDispatchOnInspectorFrontend(
     const DevToolsMessageChunk& message) {
   if (!IsAttached())
     return;
-
-  chunk_processor_.ProcessChunkedMessageFromAgent(message);
+  DevToolsSession* session = SessionById(message.session_id);
+  if (session)
+    session->ReceiveMessageChunk(message);
 }
 
 }  // namespace content

@@ -29,11 +29,11 @@ const int kStreamCloseDelaySeconds = 5;
 
 // Default maximum number of output streams that can be open simultaneously
 // for all platforms.
-const int kDefaultMaxOutputStreams = 32;
+const int kDefaultMaxOutputStreams = 16;
 
 // Default maximum number of input streams that can be open simultaneously
 // for all platforms.
-const int kDefaultMaxInputStreams = 32;
+const int kDefaultMaxInputStreams = 16;
 
 const int kMaxInputChannels = 3;
 
@@ -68,7 +68,8 @@ class AudioManagerBase::CompareByParams {
  public:
   explicit CompareByParams(const DispatcherParams* dispatcher)
       : dispatcher_(dispatcher) {}
-  bool operator()(DispatcherParams* dispatcher_in) const {
+  bool operator()(
+      const std::unique_ptr<DispatcherParams>& dispatcher_in) const {
     // We will reuse the existing dispatcher when:
     // 1) Unified IO is not used, input_params and output_params of the
     //    existing dispatcher are the same as the requested dispatcher.
@@ -83,11 +84,9 @@ class AudioManagerBase::CompareByParams {
   const DispatcherParams* dispatcher_;
 };
 
-AudioManagerBase::AudioManagerBase(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
-    AudioLogFactory* audio_log_factory)
-    : AudioManager(std::move(task_runner), std::move(worker_task_runner)),
+AudioManagerBase::AudioManagerBase(std::unique_ptr<AudioThread> audio_thread,
+                                   AudioLogFactory* audio_log_factory)
+    : AudioManager(std::move(audio_thread)),
       max_num_output_streams_(kDefaultMaxOutputStreams),
       max_num_input_streams_(kDefaultMaxInputStreams),
       num_output_streams_(0),
@@ -98,8 +97,6 @@ AudioManagerBase::AudioManagerBase(
       audio_log_factory_(audio_log_factory) {}
 
 AudioManagerBase::~AudioManagerBase() {
-  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
-
   // All the output streams should have been deleted.
   CHECK_EQ(0, num_output_streams_);
   // All the input streams should have been deleted.
@@ -169,9 +166,7 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
       break;
     case AudioParameters::AUDIO_BITSTREAM_AC3:
     case AudioParameters::AUDIO_BITSTREAM_EAC3:
-      // TODO(tsunghung): create passthrough output stream.
-      NOTREACHED();
-      stream = nullptr;
+      stream = MakeBitstreamOutputStream(params, device_id, log_callback);
       break;
     case AudioParameters::AUDIO_FAKE:
       stream = FakeAudioOutputStream::MakeFakeStream(this, params);
@@ -186,6 +181,13 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
   }
 
   return stream;
+}
+
+AudioOutputStream* AudioManagerBase::MakeBitstreamOutputStream(
+    const AudioParameters& params,
+    const std::string& device_id,
+    const LogCallback& log_callback) {
+  return nullptr;
 }
 
 AudioInputStream* AudioManagerBase::MakeAudioInputStream(
@@ -246,7 +248,16 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStreamProxy(
   // devices may return an empty string from GetDefaultOutputDeviceID().
   std::string output_device_id =
       AudioDeviceDescription::IsDefaultDevice(device_id)
-          ? GetDefaultOutputDeviceID()
+          ?
+#if defined(OS_CHROMEOS)
+          // On ChromeOS, it is expected that, if the default device is given,
+          // no specific device ID should be used since the actual output device
+          // should change dynamically if the system default device changes.
+          // See http://crbug.com/750614.
+          std::string()
+#else
+          GetDefaultOutputDeviceID()
+#endif
           : device_id;
 
   // If we're not using AudioOutputResampler our output parameters are the same
@@ -277,23 +288,22 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStreamProxy(
     }
   }
 
-  DispatcherParams* dispatcher_params =
-      new DispatcherParams(params, output_params, output_device_id);
+  std::unique_ptr<DispatcherParams> dispatcher_params =
+      base::MakeUnique<DispatcherParams>(params, output_params,
+                                         output_device_id);
 
-  AudioOutputDispatchers::iterator it =
-      std::find_if(output_dispatchers_.begin(), output_dispatchers_.end(),
-                   CompareByParams(dispatcher_params));
-  if (it != output_dispatchers_.end()) {
-    delete dispatcher_params;
+  auto it = std::find_if(output_dispatchers_.begin(), output_dispatchers_.end(),
+                         CompareByParams(dispatcher_params.get()));
+  if (it != output_dispatchers_.end())
     return (*it)->dispatcher->CreateStreamProxy();
-  }
 
   const base::TimeDelta kCloseDelay =
       base::TimeDelta::FromSeconds(kStreamCloseDelaySeconds);
   std::unique_ptr<AudioOutputDispatcher> dispatcher;
-  if (output_params.format() != AudioParameters::AUDIO_FAKE) {
+  if (output_params.format() != AudioParameters::AUDIO_FAKE &&
+      !output_params.IsBitstreamFormat()) {
     // Using unretained for |debug_recording_manager_| is safe since it
-    // outlives the dispatchers (cleared in Shutdown()).
+    // outlives the dispatchers (cleared in ShutdownOnAudioThread()).
     dispatcher = base::MakeUnique<AudioOutputResampler>(
         this, params, output_params, output_device_id, kCloseDelay,
         debug_recording_manager_
@@ -308,8 +318,8 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStreamProxy(
   }
 
   dispatcher_params->dispatcher = std::move(dispatcher);
-  output_dispatchers_.push_back(dispatcher_params);
-  return dispatcher_params->dispatcher->CreateStreamProxy();
+  output_dispatchers_.push_back(std::move(dispatcher_params));
+  return output_dispatchers_.back()->dispatcher->CreateStreamProxy();
 }
 
 void AudioManagerBase::ShowAudioInputSettings() {
@@ -342,7 +352,7 @@ void AudioManagerBase::ReleaseInputStream(AudioInputStream* stream) {
   delete stream;
 }
 
-void AudioManagerBase::Shutdown() {
+void AudioManagerBase::ShutdownOnAudioThread() {
   DCHECK(GetTaskRunner()->BelongsToCurrentThread());
 
   // Close all output streams.
@@ -448,21 +458,18 @@ std::unique_ptr<AudioLog> AudioManagerBase::CreateAudioLog(
   return audio_log_factory_->CreateAudioLog(component);
 }
 
-void AudioManagerBase::InitializeOutputDebugRecording(
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner) {
+void AudioManagerBase::InitializeOutputDebugRecording() {
   if (!GetTaskRunner()->BelongsToCurrentThread()) {
     // AudioManager is deleted on the audio thread, so it's safe to post
     // unretained.
     GetTaskRunner()->PostTask(
-        FROM_HERE,
-        base::Bind(&AudioManagerBase::InitializeOutputDebugRecording,
-                   base::Unretained(this), std::move(file_task_runner)));
+        FROM_HERE, base::Bind(&AudioManagerBase::InitializeOutputDebugRecording,
+                              base::Unretained(this)));
     return;
   }
 
   DCHECK(!debug_recording_manager_);
-  debug_recording_manager_ = CreateAudioDebugRecordingManager(
-      GetTaskRunner(), std::move(file_task_runner));
+  debug_recording_manager_ = CreateAudioDebugRecordingManager(GetTaskRunner());
 }
 
 void AudioManagerBase::EnableOutputDebugRecording(
@@ -481,10 +488,8 @@ void AudioManagerBase::DisableOutputDebugRecording() {
 
 std::unique_ptr<AudioDebugRecordingManager>
 AudioManagerBase::CreateAudioDebugRecordingManager(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner) {
-  return base::MakeUnique<AudioDebugRecordingManager>(
-      std::move(task_runner), std::move(file_task_runner));
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  return base::MakeUnique<AudioDebugRecordingManager>(std::move(task_runner));
 }
 
 void AudioManagerBase::SetMaxStreamCountForTesting(int max_input,

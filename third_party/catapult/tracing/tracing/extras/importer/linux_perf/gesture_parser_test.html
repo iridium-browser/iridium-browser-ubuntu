@@ -19,7 +19,7 @@ tr.b.unittest.testSuite(function() {
   }
 
   test('gestureImport', function() {
-    var lines = [
+    const lines = [
       '<...>-1837  [000] ...1 875292.741648: tracing_mark_write: ' +
           'log: start: TimerLogOutputs',  // 0
       '<...>-1837  [000] ...1 875292.741651: tracing_mark_write: ' +
@@ -105,30 +105,30 @@ tr.b.unittest.testSuite(function() {
       '<...>-1837  [000] ...1 875292.795231: tracing_mark_write: ' +
           'log: end: LogHardwareState'
     ];
-    var m = newModel(lines.join('\n'));
+    const m = newModel(lines.join('\n'));
     assert.isFalse(m.hasImportWarnings);
-    var threads = m.getAllThreads();
-    assert.equal(threads.length, 1);
+    const threads = m.getAllThreads();
+    assert.strictEqual(threads.length, 1);
 
-    var gestureThread = threads[0];
-    assert.equal(gestureThread.name, 'gesture');
-    assert.equal(gestureThread.sliceGroup.length, 21);
-    assert.equal('touchpad_gesture',
+    const gestureThread = threads[0];
+    assert.strictEqual(gestureThread.name, 'gesture');
+    assert.strictEqual(gestureThread.sliceGroup.length, 21);
+    assert.strictEqual('touchpad_gesture',
         gestureThread.sliceGroup.slices[0].category);
-    assert.equal('GestureLog',
+    assert.strictEqual('GestureLog',
         gestureThread.sliceGroup.slices[0].title);
-    assert.equal('touchpad_gesture',
+    assert.strictEqual('touchpad_gesture',
         gestureThread.sliceGroup.slices[2].category);
-    assert.equal('HandleTimer',
+    assert.strictEqual('HandleTimer',
         gestureThread.sliceGroup.slices[2].title);
-    assert.equal('touchpad_gesture',
+    assert.strictEqual('touchpad_gesture',
         gestureThread.sliceGroup.slices[14].category);
-    assert.equal('SyncInterpret',
+    assert.strictEqual('SyncInterpret',
         gestureThread.sliceGroup.slices[14].title);
   });
 
   test('unusualStart', function() {
-    var lines = [
+    const lines = [
       'X-30368 [000] ...1 1819362.481867: tracing_mark_write: ' +
           'SyncInterpret: start: IirFilterInterpreter',
       'X-30368 [000] ...1 1819362.481881: tracing_mark_write: ' +
@@ -178,14 +178,14 @@ tr.b.unittest.testSuite(function() {
       'X-30368 [000] ...1 1819362.482053: tracing_mark_write: ' +
           'log: end: TimerLogOutputs'
     ];
-    var m = newModel(lines.join('\n'));
+    const m = newModel(lines.join('\n'));
     assert.isFalse(m.hasImportWarnings);
-    var threads = m.getAllThreads();
-    assert.equal(threads.length, 1);
+    const threads = m.getAllThreads();
+    assert.strictEqual(threads.length, 1);
   });
 
   test('importError', function() {
-    var lines = [
+    const lines = [
       'X-30368 [000] ...1 1819362.481912: tracing_mark_write: ' +
           'SyncInterpret: start: ImmediateInterpreter',
       'X-30368 [000] ...1 1819362.481958: tracing_mark_write: ' +
@@ -203,10 +203,10 @@ tr.b.unittest.testSuite(function() {
       'X-30368 [000] ...1 1819362.481988: tracing_mark_write: ' +
           'HandleTimer: end: IntegralGestureFilterInterpreter'
     ];
-    var m = newModel(lines.join('\n'));
+    const m = newModel(lines.join('\n'));
 
     assert.isTrue(m.hasImportWarnings);
-    assert.equal(m.importWarnings.length, 7);
+    assert.strictEqual(m.importWarnings.length, 7);
   });
 });
 </script>

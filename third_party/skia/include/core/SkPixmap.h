@@ -12,7 +12,6 @@
 #include "SkFilterQuality.h"
 #include "SkImageInfo.h"
 
-class SkColorTable;
 class SkData;
 struct SkMask;
 
@@ -23,25 +22,17 @@ struct SkMask;
 class SK_API SkPixmap {
 public:
     SkPixmap()
-        : fPixels(NULL), fCTable(NULL), fRowBytes(0), fInfo(SkImageInfo::MakeUnknown(0, 0))
+        : fPixels(NULL), fRowBytes(0), fInfo(SkImageInfo::MakeUnknown(0, 0))
     {}
 
-    SkPixmap(const SkImageInfo& info, const void* addr, size_t rowBytes,
-             SkColorTable* ctable = NULL)
-        : fPixels(addr), fCTable(ctable), fRowBytes(rowBytes), fInfo(info)
-    {
-        if (kIndex_8_SkColorType == info.colorType()) {
-            SkASSERT(ctable);
-        } else {
-            SkASSERT(NULL == ctable);
-        }
-    }
+    SkPixmap(const SkImageInfo& info, const void* addr, size_t rowBytes)
+        : fPixels(addr), fRowBytes(rowBytes), fInfo(info)
+    {}
 
     void reset();
-    void reset(const SkImageInfo& info, const void* addr, size_t rowBytes,
-               SkColorTable* ctable = NULL);
+    void reset(const SkImageInfo& info, const void* addr, size_t rowBytes);
     void reset(const SkImageInfo& info) {
-        this->reset(info, NULL, 0, NULL);
+        this->reset(info, NULL, 0);
     }
 
     // overrides the colorspace in the SkImageInfo of the pixmap
@@ -64,7 +55,6 @@ public:
     const SkImageInfo& info() const { return fInfo; }
     size_t rowBytes() const { return fRowBytes; }
     const void* addr() const { return fPixels; }
-    SkColorTable* ctable() const { return fCTable; }
 
     int width() const { return fInfo.width(); }
     int height() const { return fInfo.height(); }
@@ -183,9 +173,14 @@ public:
     // copy methods
 
     bool readPixels(const SkImageInfo& dstInfo, void* dstPixels, size_t dstRowBytes,
-                    int srcX, int srcY) const;
+                    int srcX, int srcY, SkTransferFunctionBehavior behavior) const;
     bool readPixels(const SkImageInfo& dstInfo, void* dstPixels, size_t dstRowBytes) const {
         return this->readPixels(dstInfo, dstPixels, dstRowBytes, 0, 0);
+    }
+    bool readPixels(const SkImageInfo& dstInfo, void* dstPixels, size_t dstRowBytes, int srcX,
+                    int srcY) const {
+        return this->readPixels(dstInfo, dstPixels, dstRowBytes, srcX, srcY,
+                                SkTransferFunctionBehavior::kRespect);
     }
     bool readPixels(const SkPixmap& dst, int srcX, int srcY) const {
         return this->readPixels(dst.info(), dst.writable_addr(), dst.rowBytes(), srcX, srcY);
@@ -214,59 +209,8 @@ public:
 
 private:
     const void*     fPixels;
-    SkColorTable*   fCTable;
     size_t          fRowBytes;
     SkImageInfo     fInfo;
-};
-
-/////////////////////////////////////////////////////////////////////////////////////////////
-
-/////////////////////////////////////////////////////////////////////////////////////////////
-
-class SK_API SkAutoPixmapUnlock : ::SkNoncopyable {
-public:
-    SkAutoPixmapUnlock() : fUnlockProc(NULL), fIsLocked(false) {}
-    SkAutoPixmapUnlock(const SkPixmap& pm, void (*unlock)(void*), void* ctx)
-        : fUnlockProc(unlock), fUnlockContext(ctx), fPixmap(pm), fIsLocked(true)
-    {}
-    ~SkAutoPixmapUnlock() { this->unlock(); }
-
-    /**
-     *  Return the currently locked pixmap. Undefined if it has been unlocked.
-     */
-    const SkPixmap& pixmap() const {
-        SkASSERT(this->isLocked());
-        return fPixmap;
-    }
-
-    bool isLocked() const { return fIsLocked; }
-
-    /**
-     *  Unlocks the pixmap. Can safely be called more than once as it will only call the underlying
-     *  unlock-proc once.
-     */
-    void unlock() {
-        if (fUnlockProc) {
-            SkASSERT(fIsLocked);
-            fUnlockProc(fUnlockContext);
-            fUnlockProc = NULL;
-            fIsLocked = false;
-        }
-    }
-
-    /**
-     *  If there is a currently locked pixmap, unlock it, then copy the specified pixmap
-     *  and (optional) unlock proc/context.
-     */
-    void reset(const SkPixmap& pm, void (*unlock)(void*), void* ctx);
-
-private:
-    void        (*fUnlockProc)(void*);
-    void*       fUnlockContext;
-    SkPixmap    fPixmap;
-    bool        fIsLocked;
-
-    friend class SkBitmap;
 };
 
 #endif

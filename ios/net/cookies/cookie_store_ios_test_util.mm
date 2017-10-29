@@ -6,11 +6,16 @@
 
 #import <Foundation/Foundation.h>
 
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #import "ios/net/cookies/cookie_store_ios.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace net {
 
@@ -41,11 +46,11 @@ void TestPersistentCookieStore::RunLoadedCallback() {
   cookies.push_back(std::move(cookie));
 
   std::unique_ptr<net::CanonicalCookie> bad_canonical_cookie(
-      net::CanonicalCookie::Create(
-          GURL("http://domain/"), "name", "\x81r\xe4\xbd\xa0\xe5\xa5\xbd",
-          std::string(), "/path/",
+      base::MakeUnique<net::CanonicalCookie>(
+          "name", "\x81r\xe4\xbd\xa0\xe5\xa5\xbd", "domain", "/path/",
           base::Time(),  // creation
           base::Time(),  // expires
+          base::Time(),  // last accessed
           false,         // secure
           false,         // httponly
           net::CookieSameSite::DEFAULT_MODE, net::COOKIE_PRIORITY_DEFAULT));
@@ -79,7 +84,7 @@ void TestPersistentCookieStore::DeleteCookie(const net::CanonicalCookie& cc) {}
 
 void TestPersistentCookieStore::SetForceKeepSessionState() {}
 
-void TestPersistentCookieStore::Flush(const base::Closure& callback) {
+void TestPersistentCookieStore::Flush(base::OnceClosure callback) {
   flushed_ = true;
 }
 

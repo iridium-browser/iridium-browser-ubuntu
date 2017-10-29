@@ -13,11 +13,18 @@
 // This must be after wincrypt and wintrust.
 #include <mscat.h>
 
+#include <limits>
 #include <memory>
-#include <vector>
+#include <string>
 
+#include "base/environment.h"
+#include "base/files/file.h"
+#include "base/i18n/case_conversion.h"
 #include "base/scoped_generic.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
+#include "chrome/common/safe_browsing/pe_image_reader_win.h"
 
 namespace {
 
@@ -214,6 +221,8 @@ void GetCatalogCertificateInfo(const base::FilePath& filename,
 
 }  // namespace
 
+const wchar_t kClassIdRegistryKeyFormat[] = L"CLSID\\%ls\\InProcServer32";
+
 // ModuleDatabase::CertificateInfo ---------------------------------------------
 
 CertificateInfo::CertificateInfo() : type(CertificateType::NO_CERTIFICATE) {}
@@ -237,4 +246,79 @@ void GetCertificateInfo(const base::FilePath& filename,
   certificate_info->type = CertificateType::CERTIFICATE_IN_FILE;
   certificate_info->path = filename;
   certificate_info->subject = subject;
+}
+
+StringMapping GetEnvironmentVariablesMapping(
+    const std::vector<base::string16>& environment_variables) {
+  std::unique_ptr<base::Environment> environment(base::Environment::Create());
+
+  StringMapping string_mapping;
+  for (const base::string16& variable : environment_variables) {
+    std::string value;
+    if (environment->GetVar(base::UTF16ToASCII(variable).c_str(), &value)) {
+      value = base::TrimString(value, "\\", base::TRIM_TRAILING).as_string();
+      string_mapping.push_back(
+          std::make_pair(base::i18n::ToLower(base::UTF8ToUTF16(value)),
+                         L"%" + base::i18n::ToLower(variable) + L"%"));
+    }
+  }
+
+  return string_mapping;
+}
+
+void CollapseMatchingPrefixInPath(const StringMapping& prefix_mapping,
+                                  base::string16* path) {
+  const base::string16 path_copy = *path;
+  DCHECK_EQ(base::i18n::ToLower(path_copy), path_copy);
+
+  size_t min_length = std::numeric_limits<size_t>::max();
+  for (const auto& mapping : prefix_mapping) {
+    DCHECK_EQ(base::i18n::ToLower(mapping.first), mapping.first);
+    if (base::StartsWith(path_copy, mapping.first,
+                         base::CompareCase::SENSITIVE)) {
+      // Make sure the matching prefix is a full path component.
+      if (path_copy[mapping.first.length()] != '\\' &&
+          path_copy[mapping.first.length()] != '\0') {
+        continue;
+      }
+
+      base::string16 collapsed_path = path_copy;
+      base::ReplaceFirstSubstringAfterOffset(&collapsed_path, 0, mapping.first,
+                                             mapping.second);
+      size_t length = collapsed_path.length() - mapping.second.length();
+      if (length < min_length) {
+        *path = collapsed_path;
+        min_length = length;
+      }
+    }
+  }
+}
+
+bool GetModuleImageSizeAndTimeDateStamp(const base::FilePath& path,
+                                        uint32_t* size_of_image,
+                                        uint32_t* time_date_stamp) {
+  base::File file(path, base::File::FLAG_OPEN | base::File::FLAG_READ);
+  if (!file.IsValid())
+    return false;
+
+  // The values fetched here from the NT header live in the first 4k bytes of
+  // the file in a well-formed dll.
+  constexpr size_t kPageSize = 4096;
+
+  // Note: base::MakeUnique() is explicitly avoided because it does value-
+  //       initialization on arrays, which is not needed in this case.
+  auto buffer = std::unique_ptr<uint8_t[]>(new uint8_t[kPageSize]);
+  int bytes_read =
+      file.Read(0, reinterpret_cast<char*>(buffer.get()), kPageSize);
+  if (bytes_read == -1)
+    return false;
+
+  safe_browsing::PeImageReader pe_image_reader;
+  if (!pe_image_reader.Initialize(buffer.get(), bytes_read))
+    return false;
+
+  *size_of_image = pe_image_reader.GetSizeOfImage();
+  *time_date_stamp = pe_image_reader.GetCoffFileHeader()->TimeDateStamp;
+
+  return true;
 }

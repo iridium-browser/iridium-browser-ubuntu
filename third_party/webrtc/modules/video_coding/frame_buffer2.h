@@ -16,14 +16,14 @@
 #include <memory>
 #include <utility>
 
-#include "webrtc/base/constructormagic.h"
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/event.h"
-#include "webrtc/base/thread_annotations.h"
 #include "webrtc/modules/video_coding/frame_object.h"
 #include "webrtc/modules/video_coding/include/video_coding_defines.h"
 #include "webrtc/modules/video_coding/inter_frame_delay.h"
 #include "webrtc/modules/video_coding/sequence_number_util.h"
+#include "webrtc/rtc_base/constructormagic.h"
+#include "webrtc/rtc_base/criticalsection.h"
+#include "webrtc/rtc_base/event.h"
+#include "webrtc/rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
@@ -97,6 +97,8 @@ class FrameBuffer {
 
     // Which other frames that have direct unfulfilled dependencies
     // on this frame.
+    // TODO(philipel): Add simple modify/access functions to prevent adding too
+    // many |dependent_frames|.
     FrameKey dependent_frames[kMaxNumDependentFrames];
     size_t num_dependent_frames = 0;
 
@@ -119,6 +121,14 @@ class FrameBuffer {
   };
 
   using FrameMap = std::map<FrameKey, FrameInfo>;
+
+  // Check that the references of |frame| are valid.
+  bool ValidReferences(const FrameObject& frame) const;
+
+  // Updates the minimal and maximal playout delays
+  // depending on the frame.
+  void UpdatePlayoutDelays(const FrameObject& frame)
+      EXCLUSIVE_LOCKS_REQUIRED(crit_);
 
   // Update all directly dependent and indirectly dependent frames and mark
   // them as continuous if all their references has been fulfilled.
@@ -143,13 +153,18 @@ class FrameBuffer {
 
   void UpdateJitterDelay() EXCLUSIVE_LOCKS_REQUIRED(crit_);
 
+  void UpdateTimingFrameInfo() EXCLUSIVE_LOCKS_REQUIRED(crit_);
+
   void ClearFramesAndHistory() EXCLUSIVE_LOCKS_REQUIRED(crit_);
+
+  bool HasBadRenderTiming(const FrameObject& frame, int64_t now_ms)
+      EXCLUSIVE_LOCKS_REQUIRED(crit_);
 
   FrameMap frames_ GUARDED_BY(crit_);
 
   rtc::CriticalSection crit_;
   Clock* const clock_;
-  rtc::Event new_countinuous_frame_event_;
+  rtc::Event new_continuous_frame_event_;
   VCMJitterEstimator* const jitter_estimator_ GUARDED_BY(crit_);
   VCMTiming* const timing_ GUARDED_BY(crit_);
   VCMInterFrameDelay inter_frame_delay_ GUARDED_BY(crit_);

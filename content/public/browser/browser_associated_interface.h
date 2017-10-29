@@ -5,11 +5,11 @@
 #ifndef CONTENT_BROWSER_BROWSER_ASSOCIATED_INTERFACE_H_
 #define CONTENT_BROWSER_BROWSER_ASSOCIATED_INTERFACE_H_
 
-#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/browser_thread.h"
@@ -55,34 +55,27 @@ class BrowserAssociatedInterface {
   // |filter| and |impl| must live at least as long as this object.
   BrowserAssociatedInterface(BrowserMessageFilter* filter, Interface* impl)
       : internal_state_(new InternalState(impl)) {
-    internal_state_->Initialize();
     filter->AddAssociatedInterface(
         Interface::Name_,
-        base::Bind(&InternalState::BindRequest, internal_state_));
+        base::Bind(&InternalState::BindRequest, internal_state_),
+        base::BindOnce(&InternalState::ClearBindings, internal_state_));
   }
 
-  ~BrowserAssociatedInterface() {
-    internal_state_->ShutDown();
-  }
+  ~BrowserAssociatedInterface() { internal_state_->ClearBindings(); }
 
  private:
+  friend class TestDriverMessageFilter;
+
   class InternalState : public base::RefCountedThreadSafe<InternalState> {
    public:
-    explicit InternalState(Interface* impl) : impl_(impl) {}
+    explicit InternalState(Interface* impl)
+        : impl_(impl), bindings_(base::in_place) {}
 
-    void Initialize() {
+    void ClearBindings() {
       if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-        BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                                base::Bind(&InternalState::Initialize, this));
-        return;
-      }
-      bindings_.reset(new mojo::AssociatedBindingSet<Interface>);
-    }
-
-    void ShutDown() {
-      if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-        BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                                base::Bind(&InternalState::ShutDown, this));
+        BrowserThread::PostTask(
+            BrowserThread::IO, FROM_HERE,
+            base::Bind(&InternalState::ClearBindings, this));
         return;
       }
       bindings_.reset();
@@ -93,17 +86,18 @@ class BrowserAssociatedInterface {
       // If this interface has already been shut down we drop the request.
       if (!bindings_)
         return;
-      bindings_->AddBinding(
-          impl_, mojo::MakeAssociatedRequest<Interface>(std::move(handle)));
+      bindings_->AddBinding(impl_, mojo::AssociatedInterfaceRequest<Interface>(
+                                       std::move(handle)));
     }
 
    private:
     friend class base::RefCountedThreadSafe<InternalState>;
+    friend class TestDriverMessageFilter;
 
     ~InternalState() {}
 
     Interface* impl_;
-    std::unique_ptr<mojo::AssociatedBindingSet<Interface>> bindings_;
+    base::Optional<mojo::AssociatedBindingSet<Interface>> bindings_;
 
     DISALLOW_COPY_AND_ASSIGN(InternalState);
   };

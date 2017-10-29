@@ -55,15 +55,6 @@ class LayoutTestBluetoothAdapterProvider {
   static scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
   GetPresentAdapter();
 
-  // |NotPresentAdapter|
-  // Inherits from |BaseAdapter|
-  // Devices added:
-  //  None.
-  // Mock Functions:
-  //  - IsPresent: Returns false
-  static scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
-  GetNotPresentAdapter();
-
   // |PoweredAdapter|
   // Inherits from |PresentAdapter|
   // Devices added:
@@ -72,15 +63,6 @@ class LayoutTestBluetoothAdapterProvider {
   //  - IsPowered: Returns true
   static scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
   GetPoweredAdapter();
-
-  // |NotPoweredAdapter|
-  // Inherits from |PresentAdapter|
-  // Devices added:
-  //  None.
-  // Mock Functions:
-  //  - IsPowered: Returns false
-  static scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
-  GetNotPoweredAdapter();
 
   // |ScanFilterCheckingAdapter|
   // Inherits from |PoweredAdapter|
@@ -124,24 +106,6 @@ class LayoutTestBluetoothAdapterProvider {
   //  - |HeartRateDevice|
   static scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
   GetGlucoseHeartRateAdapter();
-
-  // |GetUnicodeDeviceAdapter|
-  // Inherits from |EmptyAdapter|
-  // Internal structure
-  //  - UnicodeDevice
-  //    - Mock Functions:
-  //      - GetName(): Returns "❤❤❤❤❤❤❤❤❤"
-  static scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
-  GetUnicodeDeviceAdapter();
-
-  // |GetDeviceNameLongerThan29BytesAdapter|
-  // Inherits from |EmptyAdapter|
-  // Internal structure
-  //  - DeviceNameLongerThan29Bytes
-  //    - Mock Functions:
-  //      - GetName(): Returns "a_device_name_that_is_longer_than_29_bytes_but_shorter_than_248_bytes"
-  static scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
-  GetDeviceNameLongerThan29BytesAdapter();
 
   // |SecondDiscoveryFindsHeartRateAdapter|
   // Inherits from |PoweredAdapter|
@@ -241,12 +205,6 @@ class LayoutTestBluetoothAdapterProvider {
   //           GetHeartRateService.
   static scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
   GetHeartRateAdapter();
-
-  // |GetEmptyNameDeviceAdapter|
-  // Inherits from |EmptyAdapter|
-  // Contains a single device with an empty name and no UUIDs.
-  static scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
-  GetEmptyNameDeviceAdapter();
 
   // |GetNoNameDeviceAdapter|
   // Inherits from |EmptyAdapter|
@@ -482,36 +440,22 @@ class LayoutTestBluetoothAdapterProvider {
   // they can be accessed by using different filters.
   // See connectErrorUUID() declaration below.
   // Internal Structure:
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_UNKNOWN)
-  //    connectErrorUUID(0x0)
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_INPROGRESS)
-  //    connectErrorUUID(0x1)
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_FAILED)
-  //    connectErrorUUID(0x2)
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_AUTH_FAILED)
-  //    connectErrorUUID(0x3)
   //  - UnconnectableDevice(BluetoothDevice::ERROR_AUTH_CANCELED)
-  //    connectErrorUUID(0x4)
+  //    connectErrorUUID(0x0)
+  //  - UnconnectableDevice(BluetoothDevice::ERROR_AUTH_FAILED)
+  //    connectErrorUUID(0x1)
   //  - UnconnectableDevice(BluetoothDevice::ERROR_AUTH_REJECTED)
-  //    connectErrorUUID(0x5)
+  //    connectErrorUUID(0x2)
   //  - UnconnectableDevice(BluetoothDevice::ERROR_AUTH_TIMEOUT)
+  //    connectErrorUUID(0x3)
+  //  - UnconnectableDevice(BluetoothDevice::ERROR_FAILED)
+  //    connectErrorUUID(0x4)
+  //  - UnconnectableDevice(BluetoothDevice::ERROR_INPROGRESS)
+  //    connectErrorUUID(0x5)
+  //  - UnconnectableDevice(BluetoothDevice::ERROR_UNKNOWN)
   //    connectErrorUUID(0x6)
   //  - UnconnectableDevice(BluetoothDevice::ERROR_UNSUPPORTED_DEVICE)
   //    connectErrorUUID(0x7)
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_ATTRIBUTE_LENGTH_INVALID)
-  //    connectErrorUUID(0x8)
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_CONNECTION_CONGESTED)
-  //    connectErrorUUID(0x9)
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_INSUFFICIENT_ENCRYPTION)
-  //    connectErrorUUID(0xa)
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_OFFSET_INVALID)
-  //    connectErrorUUID(0xb)
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_READ_NOT_PERMITTED)
-  //    connectErrorUUID(0xc)
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_REQUEST_NOT_SUPPORTED)
-  //    connectErrorUUID(0xd)
-  //  - UnconnectableDevice(BluetoothDevice::ERROR_WRITE_NOT_PERMITTED)
-  //    connectErrorUUID(0xe)
   static scoped_refptr<testing::NiceMock<device::MockBluetoothAdapter>>
   GetFailingConnectionsAdapter();
 
@@ -848,21 +792,12 @@ class LayoutTestBluetoothAdapterProvider {
 
   // Helper functions:
 
-  // DEPRECATED: This is a poor practice as it exposes the specific
-  //             enum values of this code base into the UUIDs used
-  //             by the test data. Prefer methods such as
-  //             connectErrorUUID.
   // errorUUID(alias) returns a UUID with the top 32 bits of
   // "00000000-97e5-4cd7-b9f1-f5a427670c59" replaced with the bits of |alias|.
   // For example, errorUUID(0xDEADBEEF) returns
   // "deadbeef-97e5-4cd7-b9f1-f5a427670c59". The bottom 96 bits of error UUIDs
   // were generated as a type 4 (random) UUID.
   static std::string errorUUID(uint32_t alias);
-
-  // Returns a stable test data UUID associated with a given
-  // BluetoothDevice::ConnectErrorCode.
-  static device::BluetoothUUID connectErrorUUID(
-      device::BluetoothDevice::ConnectErrorCode error_code);
 
   // Function to turn an integer into an MAC address of the form
   // XX:XX:XX:XX:XX:XX. For example makeMACAddress(0xdeadbeef)

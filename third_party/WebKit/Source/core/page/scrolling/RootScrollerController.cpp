@@ -6,11 +6,14 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
-#include "core/frame/FrameHost.h"
-#include "core/frame/FrameView.h"
+#include "core/dom/StyleChangeReason.h"
+#include "core/frame/LocalFrameView.h"
+#include "core/html/HTMLFrameOwnerElement.h"
 #include "core/layout/LayoutBox.h"
+#include "core/layout/LayoutEmbeddedContent.h"
 #include "core/layout/api/LayoutViewItem.h"
 #include "core/layout/compositing/PaintLayerCompositor.h"
+#include "core/page/Page.h"
 #include "core/page/scrolling/RootScrollerUtil.h"
 #include "core/page/scrolling/TopDocumentRootScrollerController.h"
 #include "core/paint/PaintLayer.h"
@@ -24,71 +27,91 @@ class RootFrameViewport;
 
 namespace {
 
-bool fillsViewport(const Element& element) {
-  DCHECK(element.layoutObject());
-  DCHECK(element.layoutObject()->isBox());
+bool FillsViewport(const Element& element) {
+  DCHECK(element.GetLayoutObject());
+  DCHECK(element.GetLayoutObject()->IsBox());
 
-  LayoutObject* layoutObject = element.layoutObject();
+  LayoutObject* layout_object = element.GetLayoutObject();
 
   // TODO(bokan): Broken for OOPIF. crbug.com/642378.
-  Document& topDocument = element.document().topDocument();
+  Document& top_document = element.GetDocument().TopDocument();
 
   Vector<FloatQuad> quads;
-  layoutObject->absoluteQuads(quads);
+  layout_object->AbsoluteQuads(quads);
   DCHECK_EQ(quads.size(), 1u);
 
-  if (!quads[0].isRectilinear())
+  if (!quads[0].IsRectilinear())
     return false;
 
-  LayoutRect boundingBox(quads[0].boundingBox());
+  LayoutRect bounding_box(quads[0].BoundingBox());
 
-  return boundingBox.location() == LayoutPoint::zero() &&
-         boundingBox.size() == topDocument.layoutViewItem().size();
+  return bounding_box.Location() == LayoutPoint::Zero() &&
+         bounding_box.Size() == top_document.GetLayoutViewItem().Size();
 }
 
 }  // namespace
 
 // static
-RootScrollerController* RootScrollerController::create(Document& document) {
+RootScrollerController* RootScrollerController::Create(Document& document) {
   return new RootScrollerController(document);
 }
 
 RootScrollerController::RootScrollerController(Document& document)
-    : m_document(&document),
-      m_effectiveRootScroller(&document),
-      m_documentHasDocumentElement(false) {}
+    : document_(&document),
+      effective_root_scroller_(&document),
+      document_has_document_element_(false) {}
 
 DEFINE_TRACE(RootScrollerController) {
-  visitor->trace(m_document);
-  visitor->trace(m_rootScroller);
-  visitor->trace(m_effectiveRootScroller);
+  visitor->Trace(document_);
+  visitor->Trace(root_scroller_);
+  visitor->Trace(effective_root_scroller_);
 }
 
-void RootScrollerController::set(Element* newRootScroller) {
-  m_rootScroller = newRootScroller;
-  recomputeEffectiveRootScroller();
+void RootScrollerController::Set(Element* new_root_scroller) {
+  if (root_scroller_ == new_root_scroller)
+    return;
+
+  root_scroller_ = new_root_scroller;
+  RecomputeEffectiveRootScroller();
 }
 
-Element* RootScrollerController::get() const {
-  return m_rootScroller;
+Element* RootScrollerController::Get() const {
+  return root_scroller_;
 }
 
-Node& RootScrollerController::effectiveRootScroller() const {
-  DCHECK(m_effectiveRootScroller);
-  return *m_effectiveRootScroller;
+Node& RootScrollerController::EffectiveRootScroller() const {
+  DCHECK(effective_root_scroller_);
+  return *effective_root_scroller_;
 }
 
-void RootScrollerController::didUpdateLayout() {
-  recomputeEffectiveRootScroller();
+void RootScrollerController::DidUpdateLayout() {
+  DCHECK(document_->Lifecycle().GetState() == DocumentLifecycle::kLayoutClean);
+  RecomputeEffectiveRootScroller();
 }
 
-void RootScrollerController::recomputeEffectiveRootScroller() {
-  bool rootScrollerValid =
-      m_rootScroller && isValidRootScroller(*m_rootScroller);
+void RootScrollerController::DidResizeFrameView() {
+  DCHECK(document_);
 
-  Node* newEffectiveRootScroller = m_document;
-  if (rootScrollerValid)
-    newEffectiveRootScroller = m_rootScroller;
+  Page* page = document_->GetPage();
+  if (document_->GetFrame() && document_->GetFrame()->IsMainFrame() && page)
+    page->GlobalRootScrollerController().DidResizeViewport();
+
+  // If the effective root scroller in this Document is a Frame, it'll match
+  // its parent's frame rect. We can't rely on layout to kick it to update its
+  // geometry so we do so explicitly here.
+  if (EffectiveRootScroller().IsFrameOwnerElement()) {
+    UpdateIFrameGeometryAndLayoutSize(
+        *ToHTMLFrameOwnerElement(&EffectiveRootScroller()));
+  }
+}
+
+void RootScrollerController::RecomputeEffectiveRootScroller() {
+  bool root_scroller_valid =
+      root_scroller_ && IsValidRootScroller(*root_scroller_);
+
+  Node* new_effective_root_scroller = document_;
+  if (root_scroller_valid)
+    new_effective_root_scroller = root_scroller_;
 
   // TODO(bokan): This is a terrible hack but required because the viewport
   // apply scroll works on Elements rather than Nodes. If we're going from
@@ -97,57 +120,111 @@ void RootScrollerController::recomputeEffectiveRootScroller() {
   // Element previously to put it's ViewportScrollCallback onto. We need this
   // to kick the global root scroller to recompute itself. We can remove this
   // if ScrollCustomization is moved to the Node rather than Element.
-  bool oldHasDocumentElement = m_documentHasDocumentElement;
-  m_documentHasDocumentElement = m_document->documentElement();
+  bool old_has_document_element = document_has_document_element_;
+  document_has_document_element_ = document_->documentElement();
 
-  if (oldHasDocumentElement || !m_documentHasDocumentElement) {
-    if (m_effectiveRootScroller == newEffectiveRootScroller)
+  if (old_has_document_element || !document_has_document_element_) {
+    if (effective_root_scroller_ == new_effective_root_scroller)
       return;
   }
 
-  PaintLayer* oldRootScrollerLayer = rootScrollerPaintLayer();
+  Node* old_effective_root_scroller = effective_root_scroller_;
+  effective_root_scroller_ = new_effective_root_scroller;
 
-  m_effectiveRootScroller = newEffectiveRootScroller;
+  ApplyRootScrollerProperties(*old_effective_root_scroller);
+  ApplyRootScrollerProperties(*effective_root_scroller_);
 
-  // This change affects both the old and new layers.
-  if (oldRootScrollerLayer)
-    oldRootScrollerLayer->setNeedsCompositingInputsUpdate();
-  if (rootScrollerPaintLayer())
-    rootScrollerPaintLayer()->setNeedsCompositingInputsUpdate();
+  // Document (i.e. LayoutView) gets its background style from the rootScroller
+  // so we need to recalc its style. Ensure that we get back to a LayoutClean
+  // state after.
+  document_->SetNeedsStyleRecalc(kLocalStyleChange,
+                                 StyleChangeReasonForTracing::Create(
+                                     StyleChangeReason::kStyleInvalidator));
+  document_->UpdateStyleAndLayout();
 
-  // The above may not be enough as we need to update existing ancestor
-  // GraphicsLayers. This will force us to rebuild the GraphicsLayer tree.
-  if (LayoutView* layoutView = m_document->layoutView()) {
-    layoutView->compositor()->setNeedsCompositingUpdate(
-        CompositingUpdateRebuildTree);
-  }
-
-  if (FrameHost* frameHost = m_document->frameHost())
-    frameHost->globalRootScrollerController().didChangeRootScroller();
+  if (Page* page = document_->GetPage())
+    page->GlobalRootScrollerController().DidChangeRootScroller();
 }
 
-bool RootScrollerController::isValidRootScroller(const Element& element) const {
-  if (!element.layoutObject())
+bool RootScrollerController::IsValidRootScroller(const Element& element) const {
+  if (!element.IsInTreeScope())
     return false;
 
-  if (!RootScrollerUtil::scrollableAreaForRootScroller(&element))
+  if (!element.GetLayoutObject())
     return false;
 
-  if (!fillsViewport(element))
+  if (!element.GetLayoutObject()->HasOverflowClip() &&
+      !element.IsFrameOwnerElement())
+    return false;
+
+  if (!FillsViewport(element))
     return false;
 
   return true;
 }
 
-PaintLayer* RootScrollerController::rootScrollerPaintLayer() const {
-  return RootScrollerUtil::paintLayerForRootScroller(m_effectiveRootScroller);
+void RootScrollerController::ApplyRootScrollerProperties(Node& node) const {
+  DCHECK(document_->GetFrame());
+  DCHECK(document_->GetFrame()->View());
+
+  // If the node has been removed from the Document, we shouldn't be touching
+  // anything related to the Frame- or Layout- hierarchies.
+  if (!node.IsInTreeScope())
+    return;
+
+  if (node.IsFrameOwnerElement()) {
+    HTMLFrameOwnerElement* frame_owner = ToHTMLFrameOwnerElement(&node);
+    DCHECK(frame_owner->ContentFrame());
+
+    if (frame_owner->ContentFrame()->IsLocalFrame()) {
+      LocalFrameView* frame_view =
+          ToLocalFrame(frame_owner->ContentFrame())->View();
+
+      bool is_root_scroller = &EffectiveRootScroller() == &node;
+
+      // If we're making the Frame the root scroller, it must have a FrameView
+      // by now.
+      DCHECK(frame_view || !is_root_scroller);
+      if (frame_view) {
+        frame_view->SetLayoutSizeFixedToFrameSize(!is_root_scroller);
+        UpdateIFrameGeometryAndLayoutSize(*frame_owner);
+      }
+    } else {
+      // TODO(bokan): Make work with OOPIF. crbug.com/642378.
+    }
+  }
 }
 
-bool RootScrollerController::scrollsViewport(const Element& element) const {
-  if (m_effectiveRootScroller->isDocumentNode())
-    return element.isSameNode(m_document->documentElement());
+void RootScrollerController::UpdateIFrameGeometryAndLayoutSize(
+    HTMLFrameOwnerElement& frame_owner) const {
+  DCHECK(document_->GetFrame());
+  DCHECK(document_->GetFrame()->View());
 
-  return element.isSameNode(m_effectiveRootScroller);
+  LocalFrameView* view =
+      ToLocalFrameView(frame_owner.OwnedEmbeddedContentView());
+  view->UpdateGeometry();
+
+  if (&EffectiveRootScroller() == frame_owner)
+    view->SetLayoutSize(document_->GetFrame()->View()->GetLayoutSize());
+}
+
+PaintLayer* RootScrollerController::RootScrollerPaintLayer() const {
+  return RootScrollerUtil::PaintLayerForRootScroller(effective_root_scroller_);
+}
+
+bool RootScrollerController::ScrollsViewport(const Element& element) const {
+  if (effective_root_scroller_->IsDocumentNode())
+    return element == document_->documentElement();
+
+  return element == effective_root_scroller_.Get();
+}
+
+void RootScrollerController::ElementRemoved(const Element& element) {
+  if (element != effective_root_scroller_.Get())
+    return;
+
+  RecomputeEffectiveRootScroller();
+  DCHECK(element != effective_root_scroller_.Get());
 }
 
 }  // namespace blink

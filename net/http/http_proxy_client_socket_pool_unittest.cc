@@ -4,12 +4,19 @@
 
 #include "net/http/http_proxy_client_socket_pool.h"
 
+#include <map>
+#include <string>
 #include <utility>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/field_trial_param_associator.h"
+#include "base/metrics/field_trial_params.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "net/base/net_errors.h"
 #include "net/base/proxy_delegate.h"
 #include "net/base/test_completion_callback.h"
@@ -18,11 +25,12 @@
 #include "net/http/http_proxy_client_socket.h"
 #include "net/http/http_response_headers.h"
 #include "net/log/net_log_with_source.h"
+#include "net/nqe/network_quality_estimator_test_util.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/socket_test_util.h"
-#include "net/spdy/spdy_protocol.h"
-#include "net/spdy/spdy_test_util_common.h"
+#include "net/spdy/chromium/spdy_test_util_common.h"
+#include "net/spdy/core/spdy_protocol.h"
 #include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -73,15 +81,49 @@ class HttpProxyClientSocketPoolTest
                          NULL,
                          session_deps_.ssl_config_service.get(),
                          NetLogWithSource().net_log()),
-        pool_(kMaxSockets,
-              kMaxSocketsPerGroup,
-              &transport_socket_pool_,
-              &ssl_socket_pool_,
-              NULL) {
+        field_trial_list_(nullptr),
+        pool_(
+            base::MakeUnique<HttpProxyClientSocketPool>(kMaxSockets,
+                                                        kMaxSocketsPerGroup,
+                                                        &transport_socket_pool_,
+                                                        &ssl_socket_pool_,
+                                                        &estimator_,
+                                                        nullptr)) {
     session_ = CreateNetworkSession();
   }
 
   virtual ~HttpProxyClientSocketPoolTest() {}
+
+  // Initializes the field trial paramters for the field trial that determines
+  // connection timeout based on the network quality.
+  void InitAdaptiveTimeoutFieldTrialWithParams(
+      bool use_default_params,
+      int transport_rtt_multiplier,
+      base::TimeDelta min_proxy_connection_timeout,
+      base::TimeDelta max_proxy_connection_timeout) {
+    std::string trial_name = "NetAdaptiveProxyConnectionTimeout";
+    std::string group_name = "Enabled";
+
+    std::map<std::string, std::string> params;
+    if (!use_default_params) {
+      params["transport_rtt_multiplier"] =
+          base::IntToString(transport_rtt_multiplier);
+      params["min_proxy_connection_timeout_seconds"] =
+          base::IntToString(min_proxy_connection_timeout.InSeconds());
+      params["max_proxy_connection_timeout_seconds"] =
+          base::IntToString(max_proxy_connection_timeout.InSeconds());
+    }
+    base::FieldTrialParamAssociator::GetInstance()->ClearAllParamsForTesting();
+    EXPECT_TRUE(
+        base::AssociateFieldTrialParams(trial_name, group_name, params));
+    EXPECT_TRUE(base::FieldTrialList::CreateFieldTrial(trial_name, group_name));
+
+    // Reset |pool_| so that the field trial parameters are read by the
+    // |pool_|.
+    pool_ = base::MakeUnique<HttpProxyClientSocketPool>(
+        kMaxSockets, kMaxSocketsPerGroup, &transport_socket_pool_,
+        &ssl_socket_pool_, &estimator_, NetLogWithSource().net_log());
+  }
 
   void AddAuthToCache() {
     const base::string16 kFoo(base::ASCIIToUTF16("foo"));
@@ -191,8 +233,14 @@ class HttpProxyClientSocketPoolTest
     return transport_socket_pool_.last_request_priority();
   }
 
+  const base::HistogramTester& histogram_tester() { return histogram_tester_; }
+
+  TestNetworkQualityEstimator* estimator() { return &estimator_; }
+
  private:
   SpdySessionDependencies session_deps_;
+
+  TestNetworkQualityEstimator estimator_;
 
   MockTransportClientSocketPool transport_socket_pool_;
   MockHostResolver host_resolver_;
@@ -201,11 +249,15 @@ class HttpProxyClientSocketPoolTest
 
   std::unique_ptr<HttpNetworkSession> session_;
 
+  base::HistogramTester histogram_tester_;
+
+  base::FieldTrialList field_trial_list_;
+
  protected:
   SpdyTestUtil spdy_util_;
   std::unique_ptr<SSLSocketDataProvider> ssl_data_;
   std::unique_ptr<SequencedSocketData> data_;
-  HttpProxyClientSocketPool pool_;
+  std::unique_ptr<HttpProxyClientSocketPool> pool_;
   ClientSocketHandle handle_;
   TestCompletionCallback callback_;
 };
@@ -222,7 +274,7 @@ TEST_P(HttpProxyClientSocketPoolTest, NoTunnel) {
   std::unique_ptr<TestProxyDelegate> proxy_delegate(new TestProxyDelegate());
   int rv = handle_.Init("a", CreateNoTunnelParams(proxy_delegate.get()), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        CompletionCallback(), &pool_, NetLogWithSource());
+                        CompletionCallback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_TRUE(handle_.is_initialized());
   ASSERT_TRUE(handle_.socket());
@@ -230,15 +282,22 @@ TEST_P(HttpProxyClientSocketPoolTest, NoTunnel) {
   EXPECT_FALSE(proxy_delegate->on_before_tunnel_request_called());
   EXPECT_FALSE(proxy_delegate->on_tunnel_headers_received_called());
   EXPECT_TRUE(proxy_delegate->on_tunnel_request_completed_called());
+
+  bool is_secure_proxy = GetParam() == HTTPS || GetParam() == SPDY;
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Insecure.Success", is_secure_proxy ? 0 : 1);
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Secure.Success", is_secure_proxy ? 1 : 0);
 }
 
 // Make sure that HttpProxyConnectJob passes on its priority to its
 // (non-SSL) socket request on Init.
 TEST_P(HttpProxyClientSocketPoolTest, SetSocketRequestPriorityOnInit) {
   Initialize(NULL, 0, NULL, 0, NULL, 0, NULL, 0);
-  EXPECT_EQ(OK, handle_.Init("a", CreateNoTunnelParams(NULL), HIGHEST,
-                             ClientSocketPool::RespectLimits::ENABLED,
-                             CompletionCallback(), &pool_, NetLogWithSource()));
+  EXPECT_EQ(
+      OK, handle_.Init("a", CreateNoTunnelParams(NULL), HIGHEST,
+                       ClientSocketPool::RespectLimits::ENABLED,
+                       CompletionCallback(), pool_.get(), NetLogWithSource()));
   EXPECT_EQ(HIGHEST, GetLastTransportRequestPriority());
 }
 
@@ -278,7 +337,7 @@ TEST_P(HttpProxyClientSocketPoolTest, NeedAuth) {
 
   int rv = handle_.Init("a", CreateTunnelParams(NULL), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        callback_.callback(), &pool_, NetLogWithSource());
+                        callback_.callback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -327,7 +386,7 @@ TEST_P(HttpProxyClientSocketPoolTest, HaveAuth) {
   std::unique_ptr<TestProxyDelegate> proxy_delegate(new TestProxyDelegate());
   int rv = handle_.Init("a", CreateTunnelParams(proxy_delegate.get()), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        callback_.callback(), &pool_, NetLogWithSource());
+                        callback_.callback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_TRUE(handle_.is_initialized());
   ASSERT_TRUE(handle_.socket());
@@ -378,7 +437,7 @@ TEST_P(HttpProxyClientSocketPoolTest, AsyncHaveAuth) {
   std::unique_ptr<TestProxyDelegate> proxy_delegate(new TestProxyDelegate());
   int rv = handle_.Init("a", CreateTunnelParams(proxy_delegate.get()), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        callback_.callback(), &pool_, NetLogWithSource());
+                        callback_.callback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -412,10 +471,11 @@ TEST_P(HttpProxyClientSocketPoolTest,
              spdy_writes, arraysize(spdy_writes));
   AddAuthToCache();
 
-  EXPECT_EQ(ERR_IO_PENDING,
-            handle_.Init("a", CreateTunnelParams(NULL), MEDIUM,
-                         ClientSocketPool::RespectLimits::ENABLED,
-                         callback_.callback(), &pool_, NetLogWithSource()));
+  EXPECT_EQ(
+      ERR_IO_PENDING,
+      handle_.Init("a", CreateTunnelParams(NULL), MEDIUM,
+                   ClientSocketPool::RespectLimits::ENABLED,
+                   callback_.callback(), pool_.get(), NetLogWithSource()));
   EXPECT_EQ(MEDIUM, GetLastTransportRequestPriority());
 
   EXPECT_THAT(callback_.WaitForResult(), IsOk());
@@ -431,7 +491,7 @@ TEST_P(HttpProxyClientSocketPoolTest, TCPError) {
 
   int rv = handle_.Init("a", CreateTunnelParams(NULL), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        callback_.callback(), &pool_, NetLogWithSource());
+                        callback_.callback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -440,6 +500,12 @@ TEST_P(HttpProxyClientSocketPoolTest, TCPError) {
 
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
+
+  bool is_secure_proxy = GetParam() == HTTPS;
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Insecure.Error", is_secure_proxy ? 0 : 1);
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Secure.Error", is_secure_proxy ? 1 : 0);
 }
 
 TEST_P(HttpProxyClientSocketPoolTest, SSLError) {
@@ -458,7 +524,7 @@ TEST_P(HttpProxyClientSocketPoolTest, SSLError) {
 
   int rv = handle_.Init("a", CreateTunnelParams(NULL), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        callback_.callback(), &pool_, NetLogWithSource());
+                        callback_.callback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -468,6 +534,10 @@ TEST_P(HttpProxyClientSocketPoolTest, SSLError) {
 
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Secure.Error", 1);
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Insecure.Error", 0);
 }
 
 TEST_P(HttpProxyClientSocketPoolTest, SslClientAuth) {
@@ -486,7 +556,7 @@ TEST_P(HttpProxyClientSocketPoolTest, SslClientAuth) {
 
   int rv = handle_.Init("a", CreateTunnelParams(NULL), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        callback_.callback(), &pool_, NetLogWithSource());
+                        callback_.callback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -496,6 +566,10 @@ TEST_P(HttpProxyClientSocketPoolTest, SslClientAuth) {
 
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Secure.Error", 1);
+  histogram_tester().ExpectTotalCount(
+      "Net.HttpProxy.ConnectLatency.Insecure.Error", 0);
 }
 
 TEST_P(HttpProxyClientSocketPoolTest, TunnelUnexpectedClose) {
@@ -525,7 +599,7 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelUnexpectedClose) {
 
   int rv = handle_.Init("a", CreateTunnelParams(NULL), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        callback_.callback(), &pool_, NetLogWithSource());
+                        callback_.callback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -565,7 +639,7 @@ TEST_P(HttpProxyClientSocketPoolTest, Tunnel1xxResponse) {
 
   int rv = handle_.Init("a", CreateTunnelParams(NULL), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        callback_.callback(), &pool_, NetLogWithSource());
+                        callback_.callback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -604,7 +678,7 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelSetupError) {
 
   int rv = handle_.Init("a", CreateTunnelParams(NULL), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        callback_.callback(), &pool_, NetLogWithSource());
+                        callback_.callback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -661,7 +735,7 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelSetupRedirect) {
 
   int rv = handle_.Init("a", CreateTunnelParams(NULL), LOW,
                         ClientSocketPool::RespectLimits::ENABLED,
-                        callback_.callback(), &pool_, NetLogWithSource());
+                        callback_.callback(), pool_.get(), NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -695,6 +769,119 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelSetupRedirect) {
     EXPECT_TRUE(headers->IsRedirect(&location));
     EXPECT_EQ(location, redirectTarget);
   }
+}
+
+TEST_P(HttpProxyClientSocketPoolTest, ProxyPoolTimeout) {
+  EXPECT_LE(base::TimeDelta(), pool_->ConnectionTimeout());
+
+  // Test against a large value.
+  EXPECT_GE(base::TimeDelta::FromMinutes(10), pool_->ConnectionTimeout());
+
+#if (defined(OS_ANDROID) || defined(OS_IOS))
+  // On Android and iOS, the timeout is fixed to 10 seconds.
+  EXPECT_EQ(base::TimeDelta::FromSeconds(10), pool_->ConnectionTimeout());
+#endif
+}
+
+// Tests the connection timeout values when the field trial parameters are
+// specified.
+TEST_P(HttpProxyClientSocketPoolTest, ProxyPoolTimeoutWithExperiment) {
+  int transport_rtt_multiplier = 2;
+  base::TimeDelta min_timeout = base::TimeDelta::FromSeconds(8);
+  base::TimeDelta max_timeout = base::TimeDelta::FromSeconds(20);
+
+  InitAdaptiveTimeoutFieldTrialWithParams(false, transport_rtt_multiplier,
+                                          min_timeout, max_timeout);
+  EXPECT_LE(base::TimeDelta(), pool_->ConnectionTimeout());
+
+  // Timeout should be |transport_rtt_multiplier| times the transport RTT
+  // estimate.
+  base::TimeDelta rtt_estimate = base::TimeDelta::FromSeconds(7);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  EXPECT_EQ(rtt_estimate + rtt_estimate, pool_->ConnectionTimeout());
+
+  // A change in RTT estimate should also change the connection timeout.
+  rtt_estimate = base::TimeDelta::FromSeconds(8);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  EXPECT_EQ(rtt_estimate + rtt_estimate, pool_->ConnectionTimeout());
+
+  // Connection timeout should not exceed |max_timeout|.
+  rtt_estimate = base::TimeDelta::FromSeconds(25);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  EXPECT_EQ(max_timeout, pool_->ConnectionTimeout());
+
+  // Connection timeout should not be less than |min_timeout|.
+  rtt_estimate = base::TimeDelta::FromSeconds(0);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  EXPECT_EQ(min_timeout, pool_->ConnectionTimeout());
+}
+
+// Tests the connection timeout values when the field trial parameters are
+// specified.
+TEST_P(HttpProxyClientSocketPoolTest,
+       ProxyPoolTimeoutWithExperimentDifferentParams) {
+  int transport_rtt_multiplier = 3;
+  base::TimeDelta min_timeout = base::TimeDelta::FromSeconds(2);
+  base::TimeDelta max_timeout = base::TimeDelta::FromSeconds(30);
+
+  InitAdaptiveTimeoutFieldTrialWithParams(false, transport_rtt_multiplier,
+                                          min_timeout, max_timeout);
+  EXPECT_LE(base::TimeDelta(), pool_->ConnectionTimeout());
+
+  // Timeout should be |transport_rtt_multiplier| times the transport RTT
+  // estimate.
+  base::TimeDelta rtt_estimate = base::TimeDelta::FromSeconds(2);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  EXPECT_EQ(rtt_estimate + rtt_estimate + rtt_estimate,
+            pool_->ConnectionTimeout());
+
+  // A change in RTT estimate should also change the connection timeout.
+  rtt_estimate = base::TimeDelta::FromSeconds(7);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  EXPECT_EQ(rtt_estimate + rtt_estimate + rtt_estimate,
+            pool_->ConnectionTimeout());
+
+  // Connection timeout should not exceed |max_timeout|.
+  rtt_estimate = base::TimeDelta::FromSeconds(35);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  EXPECT_EQ(max_timeout, pool_->ConnectionTimeout());
+
+  // Connection timeout should not be less than |min_timeout|.
+  rtt_estimate = base::TimeDelta::FromSeconds(0);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  EXPECT_EQ(min_timeout, pool_->ConnectionTimeout());
+}
+
+// Tests the connection timeout values when the field trial parameters are not
+// specified.
+TEST_P(HttpProxyClientSocketPoolTest,
+       ProxyPoolTimeoutWithExperimentDefaultParams) {
+  InitAdaptiveTimeoutFieldTrialWithParams(true, 0, base::TimeDelta(),
+                                          base::TimeDelta());
+  EXPECT_LE(base::TimeDelta(), pool_->ConnectionTimeout());
+
+  // Timeout should be |transport_rtt_multiplier| times the transport RTT
+  // estimate.
+  base::TimeDelta rtt_estimate = base::TimeDelta::FromMilliseconds(10);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  // Connection timeout should not be less than the transport RTT estimate.
+  EXPECT_LE(rtt_estimate, pool_->ConnectionTimeout());
+
+  // A change in RTT estimate should also change the connection timeout.
+  rtt_estimate = base::TimeDelta::FromSeconds(10);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  // Connection timeout should not be less than the transport RTT estimate.
+  EXPECT_LE(rtt_estimate, pool_->ConnectionTimeout());
+
+  // Set RTT to a very large value.
+  rtt_estimate = base::TimeDelta::FromMinutes(60);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  EXPECT_GT(rtt_estimate, pool_->ConnectionTimeout());
+
+  // Set RTT to a very small value.
+  rtt_estimate = base::TimeDelta::FromSeconds(0);
+  estimator()->set_start_time_null_transport_rtt(rtt_estimate);
+  EXPECT_LT(rtt_estimate, pool_->ConnectionTimeout());
 }
 
 // It would be nice to also test the timeouts in HttpProxyClientSocketPool.

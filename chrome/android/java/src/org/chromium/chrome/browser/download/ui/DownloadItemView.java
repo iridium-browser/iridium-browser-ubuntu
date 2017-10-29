@@ -21,8 +21,8 @@ import org.chromium.chrome.browser.widget.MaterialProgressBar;
 import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.chrome.browser.widget.TintedImageView;
 import org.chromium.chrome.browser.widget.selection.SelectableItemView;
+import org.chromium.components.offline_items_collection.OfflineItem.Progress;
 import org.chromium.ui.UiUtils;
-import org.chromium.ui.base.DeviceFormFactor;
 
 /**
  * The view for a downloaded item displayed in the Downloads list.
@@ -36,6 +36,7 @@ public class DownloadItemView extends SelectableItemView<DownloadHistoryItemWrap
 
     private DownloadHistoryItemWrapper mItem;
     private int mIconResId;
+    private int mIconSize;
     private Bitmap mThumbnailBitmap;
 
     // Controls common to completed and in-progress downloads.
@@ -62,11 +63,12 @@ public class DownloadItemView extends SelectableItemView<DownloadHistoryItemWrap
      */
     public DownloadItemView(Context context, AttributeSet attrs) {
         super(context, attrs);
-        mMargin = context.getResources().getDimensionPixelSize(R.dimen.downloads_item_margin);
+        mMargin = context.getResources().getDimensionPixelSize(R.dimen.list_item_default_margin);
         mIconBackgroundColor = DownloadUtils.getIconBackgroundColor(context);
         mIconBackgroundColorSelected =
                 ApiCompatibilityUtils.getColor(context.getResources(), R.color.google_grey_600);
         mIconForegroundColorList = DownloadUtils.getIconForegroundColorList(context);
+        mIconSize = getResources().getDimensionPixelSize(R.dimen.downloads_item_icon_size);
     }
 
     @Override
@@ -106,10 +108,6 @@ public class DownloadItemView extends SelectableItemView<DownloadHistoryItemWrap
                 mItem.cancel();
             }
         });
-
-        if (!DeviceFormFactor.isLargeTablet(getContext())) {
-            setLateralMarginsForDefaultDisplay(mLayoutContainer);
-        }
     }
 
     @Override
@@ -126,6 +124,11 @@ public class DownloadItemView extends SelectableItemView<DownloadHistoryItemWrap
         }
     }
 
+    @Override
+    public int getIconSize() {
+        return mIconSize;
+    }
+
     /**
      * Initialize the DownloadItemView. Must be called before the item can respond to click events.
      *
@@ -140,21 +143,22 @@ public class DownloadItemView extends SelectableItemView<DownloadHistoryItemWrap
         ThumbnailProvider thumbnailProvider = provider.getThumbnailProvider();
         thumbnailProvider.cancelRetrieval(this);
 
-        // Asynchronously grab a thumbnail for the file if it might have one.
         int fileType = item.getFilterType();
+
+        // Pick what icon to display for the item.
+        mIconResId = DownloadUtils.getIconResId(fileType, DownloadUtils.ICON_SIZE_24_DP);
+
+        // Request a thumbnail for the file to be sent to the ThumbnailCallback. This will happen
+        // immediately if the thumbnail is cached or asynchronously if it has to be fetched from a
+        // remote source.
         mThumbnailBitmap = null;
         if (fileType == DownloadFilter.FILTER_IMAGE && item.isComplete()) {
-            Bitmap cached_thumbnail = thumbnailProvider.getThumbnail(this);
-            if (cached_thumbnail != null && !cached_thumbnail.isRecycled()) {
-                mThumbnailBitmap = cached_thumbnail;
-            }
+            thumbnailProvider.getThumbnail(this);
         } else {
             // TODO(dfalcantara): Get thumbnails for audio and video files when possible.
         }
 
-        // Pick what icon to display for the item.
-        mIconResId = DownloadUtils.getIconResId(fileType, DownloadUtils.ICON_SIZE_24_DP);
-        updateIconView();
+        if (mThumbnailBitmap == null) updateIconView();
 
         Context context = mFilesizeView.getContext();
         mFilenameCompletedView.setText(item.getDisplayFileName());
@@ -169,7 +173,7 @@ public class DownloadItemView extends SelectableItemView<DownloadHistoryItemWrap
             showLayout(mLayoutInProgress);
             mDownloadStatusView.setText(item.getStatusString());
 
-            boolean isIndeterminate = item.isIndeterminate();
+            Progress progress = item.getDownloadProgress();
 
             if (item.isPaused()) {
                 mPauseResumeButton.setImageResource(R.drawable.ic_play_arrow_white_24dp);
@@ -180,21 +184,24 @@ public class DownloadItemView extends SelectableItemView<DownloadHistoryItemWrap
                 mPauseResumeButton.setImageResource(R.drawable.ic_pause_white_24dp);
                 mPauseResumeButton.setContentDescription(
                         getContext().getString(R.string.download_notification_pause_button));
-                mProgressView.setIndeterminate(isIndeterminate);
+                mProgressView.setIndeterminate(progress.isIndeterminate());
             }
-            mProgressView.setProgress(item.getDownloadProgress());
+
+            if (!progress.isIndeterminate()) {
+                mProgressView.setProgress(progress.getPercentage());
+            }
 
             // Display the percentage downloaded in text form.
             // To avoid problems with RelativeLayout not knowing how to place views relative to
             // removed views in the hierarchy, this code instead makes the percentage View's width
             // to 0 by removing its text and eliminating the margin.
-            if (isIndeterminate) {
+            if (progress.isIndeterminate()) {
                 mDownloadPercentageView.setText(null);
                 ApiCompatibilityUtils.setMarginEnd(
                         (MarginLayoutParams) mDownloadPercentageView.getLayoutParams(), 0);
             } else {
                 mDownloadPercentageView.setText(
-                        DownloadUtils.getPercentageString(item.getDownloadProgress()));
+                        DownloadUtils.getPercentageString(progress.getPercentage()));
                 ApiCompatibilityUtils.setMarginEnd(
                         (MarginLayoutParams) mDownloadPercentageView.getLayoutParams(), mMargin);
             }
@@ -202,6 +209,7 @@ public class DownloadItemView extends SelectableItemView<DownloadHistoryItemWrap
 
         setBackgroundResourceForGroupPosition(
                 getItem().isFirstInGroup(), getItem().isLastInGroup());
+        setLongClickable(item.isComplete());
     }
 
     /**
@@ -230,13 +238,6 @@ public class DownloadItemView extends SelectableItemView<DownloadHistoryItemWrap
     public void setChecked(boolean checked) {
         super.setChecked(checked);
         updateIconView();
-    }
-
-    @Override
-    public void setBackgroundResourceForGroupPosition(
-            boolean isFirstInGroup, boolean isLastInGroup) {
-        if (DeviceFormFactor.isLargeTablet(getContext())) return;
-        super.setBackgroundResourceForGroupPosition(isFirstInGroup, isLastInGroup);
     }
 
     private void updateIconView() {

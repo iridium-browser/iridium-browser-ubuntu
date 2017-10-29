@@ -43,7 +43,7 @@ class DeviceInfoSyncBridge : public ModelTypeSyncBridge,
   std::unique_ptr<MetadataChangeList> CreateMetadataChangeList() override;
   base::Optional<ModelError> MergeSyncData(
       std::unique_ptr<MetadataChangeList> metadata_change_list,
-      EntityDataMap entity_data_map) override;
+      EntityChangeList entity_data) override;
   base::Optional<ModelError> ApplySyncChanges(
       std::unique_ptr<MetadataChangeList> metadata_change_list,
       EntityChangeList entity_changes) override;
@@ -128,7 +128,7 @@ class DeviceInfoSyncBridge : public ModelTypeSyncBridge,
   // initialized during our constructor then the subscription is never used.
   std::unique_ptr<LocalDeviceInfoProvider::Subscription> subscription_;
 
-  // In charge of actually persiting changes to disk, or loading previous data.
+  // In charge of actually persisting changes to disk, or loading previous data.
   std::unique_ptr<ModelTypeStore> store_;
 
   // If |local_device_info_provider_| has initialized.

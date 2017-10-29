@@ -8,14 +8,17 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/singleton_tabs.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
@@ -26,7 +29,6 @@
 #include "ui/views/border.h"
 #include "ui/views/controls/styled_label.h"
 #include "ui/views/layout/fill_layout.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
@@ -44,6 +46,16 @@ views::Widget* PlatformVerificationDialog::ShowDialog(
     content::WebContents* web_contents,
     const GURL& requesting_origin,
     const ConsentCallback& callback) {
+  // This could happen when the permission is requested from an extension. See
+  // http://crbug.com/728534
+  // TODO(wittman): Remove this check after ShowWebModalDialogViews() API is
+  // improved/fixed. See http://crbug.com/733355
+  if (!web_modal::WebContentsModalDialogManager::FromWebContents(
+          web_contents)) {
+    DVLOG(1) << "WebContentsModalDialogManager not registered for WebContents.";
+    return nullptr;
+  }
+
   // In the case of an extension or hosted app, the origin of the request is
   // best described by the extension / app name.
   const extensions::Extension* extension =
@@ -74,8 +86,11 @@ PlatformVerificationDialog::PlatformVerificationDialog(
       domain_(domain),
       callback_(callback) {
   SetLayoutManager(new views::FillLayout());
-  SetBorder(views::CreateEmptyBorder(0, views::kButtonHEdgeMarginNew, 0,
-                                     views::kButtonHEdgeMarginNew));
+
+  gfx::Insets dialog_insets = ChromeLayoutProvider::Get()->GetInsetsMetric(
+      views::INSETS_DIALOG_CONTENTS);
+  SetBorder(views::CreateEmptyBorder(0, dialog_insets.left(), 0,
+                                     dialog_insets.right()));
   const base::string16 learn_more = l10n_util::GetStringUTF16(IDS_LEARN_MORE);
   std::vector<size_t> offsets;
   base::string16 headline = l10n_util::GetStringFUTF16(
@@ -85,6 +100,7 @@ PlatformVerificationDialog::PlatformVerificationDialog(
       gfx::Range(offsets[1], offsets[1] + learn_more.size()),
       views::StyledLabel::RangeStyleInfo::CreateForLink());
   AddChildView(headline_label);
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::PLATFORM_VERIFICATION);
 }
 
 bool PlatformVerificationDialog::Cancel() {
@@ -124,7 +140,7 @@ ui::ModalType PlatformVerificationDialog::GetModalType() const {
   return ui::MODAL_TYPE_CHILD;
 }
 
-gfx::Size PlatformVerificationDialog::GetPreferredSize() const {
+gfx::Size PlatformVerificationDialog::CalculatePreferredSize() const {
   return gfx::Size(kDialogMaxWidthInPixel,
                    GetHeightForWidth(kDialogMaxWidthInPixel));
 }
@@ -152,7 +168,8 @@ void PlatformVerificationDialog::StyledLabelLinkClicked(
 
 void PlatformVerificationDialog::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (!navigation_handle->IsInMainFrame() || navigation_handle->IsSamePage())
+  if (!navigation_handle->IsInMainFrame() ||
+      navigation_handle->IsSameDocument())
     return;
 
   views::Widget* widget = GetWidget();

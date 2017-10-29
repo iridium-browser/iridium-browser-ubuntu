@@ -16,9 +16,16 @@
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/size_conversions.h"
+#include "ui/gfx/icc_profile.h"
 
 namespace display {
 namespace {
+
+constexpr int DEFAULT_BITS_PER_PIXEL = 24;
+constexpr int DEFAULT_BITS_PER_COMPONENT = 8;
+
+constexpr int HDR_BITS_PER_PIXEL = 48;
+constexpr int HDR_BITS_PER_COMPONENT = 16;
 
 // This variable tracks whether the forced device scale factor switch needs to
 // be read from the command line, i.e. if it is set to -1 then the command line
@@ -53,6 +60,17 @@ int64_t internal_display_id_ = -1;
 
 }  // namespace
 
+bool CompareDisplayIds(int64_t id1, int64_t id2) {
+  DCHECK_NE(id1, id2);
+  // Output index is stored in the first 8 bits. See GetDisplayIdFromEDID
+  // in edid_parser.cc.
+  int index_1 = id1 & 0xFF;
+  int index_2 = id2 & 0xFF;
+  DCHECK_NE(index_1, index_2) << id1 << " and " << id2;
+  return Display::IsInternalDisplayId(id1) ||
+         (index_1 < index_2 && !Display::IsInternalDisplayId(id2));
+}
+
 // static
 float Display::GetForcedDeviceScaleFactor() {
   if (g_forced_device_scale_factor < 0)
@@ -73,8 +91,48 @@ void Display::ResetForceDeviceScaleFactorForTesting() {
   g_forced_device_scale_factor = -1.0;
 }
 
-constexpr int DEFAULT_BITS_PER_PIXEL = 24;
-constexpr int DEFAULT_BITS_PER_COMPONENT = 8;
+// static
+void Display::SetForceDeviceScaleFactor(double dsf) {
+  // Reset any previously set values and unset the flag.
+  g_forced_device_scale_factor = -1.0;
+
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kForceDeviceScaleFactor, base::StringPrintf("%.2f", dsf));
+}
+
+// static
+gfx::ColorSpace Display::GetForcedColorProfile() {
+  DCHECK(HasForceColorProfile());
+  std::string value =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kForceColorProfile);
+  if (value == "srgb") {
+    return gfx::ColorSpace::CreateSRGB();
+  } else if (value == "generic-rgb") {
+    return gfx::ColorSpace(gfx::ColorSpace::PrimaryID::APPLE_GENERIC_RGB,
+                           gfx::ColorSpace::TransferID::GAMMA18);
+  } else if (value == "color-spin-gamma24") {
+    // Run this color profile through an ICC profile. The resulting color space
+    // is slightly different from the input color space, and removing the ICC
+    // profile would require rebaselineing many layout tests.
+    gfx::ColorSpace color_space(
+        gfx::ColorSpace::PrimaryID::WIDE_GAMUT_COLOR_SPIN,
+        gfx::ColorSpace::TransferID::GAMMA24);
+    gfx::ICCProfile icc_profile;
+    color_space.GetICCProfile(&icc_profile);
+    return icc_profile.GetColorSpace();
+  }
+  LOG(ERROR) << "Invalid forced color profile";
+  return gfx::ColorSpace::CreateSRGB();
+}
+
+// static
+bool Display::HasForceColorProfile() {
+  static bool has_force_color_profile =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kForceColorProfile);
+  return has_force_color_profile;
+}
 
 Display::Display() : Display(kInvalidDisplayId) {}
 
@@ -85,8 +143,14 @@ Display::Display(int64_t id, const gfx::Rect& bounds)
       bounds_(bounds),
       work_area_(bounds),
       device_scale_factor_(GetForcedDeviceScaleFactor()),
+      color_space_(HasForceColorProfile() ? GetForcedColorProfile()
+                                          : gfx::ColorSpace::CreateSRGB()),
       color_depth_(DEFAULT_BITS_PER_PIXEL),
       depth_per_component_(DEFAULT_BITS_PER_COMPONENT) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableHDR)) {
+    color_depth_ = HDR_BITS_PER_PIXEL;
+    depth_per_component_ = HDR_BITS_PER_COMPONENT;
+  }
 #if defined(USE_AURA)
   SetScaleAndBounds(device_scale_factor_, bounds);
 #endif

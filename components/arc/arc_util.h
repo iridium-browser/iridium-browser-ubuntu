@@ -9,9 +9,17 @@
 // outside of ARC, e.g. CommandLine flag, attribute of global data/state,
 // users' preferences, and FeatureList.
 
+namespace aura {
+class Window;
+}  // namespace aura
+
 namespace base {
 class CommandLine;
 }  // namespace base
+
+namespace user_manager {
+class User;
+}  // namespace user_manager
 
 namespace arc {
 
@@ -25,6 +33,23 @@ namespace arc {
 // ArcServiceManager, ArcServiceLauncher) are instantiated regardless of this
 // check, so it is ok to access them directly.
 bool IsArcAvailable();
+
+// Returns true if ARC is not installed and the current device is not supported
+// to run ARC.
+bool IsWebstoreSearchEnabled();
+
+// Returns true if ARC image has Play Store package.
+bool IsPlayStoreAvailable();
+
+// Returns true if ARC should always start within the primary user session
+// (opted in user or not), and other supported mode such as guest and Kiosk
+// mode.
+bool ShouldArcAlwaysStart();
+
+// Enables to always start ARC for testing, by appending the command line flag.
+// If |bool play_store_available| is not set then flag that disables ARC Play
+// Store UI is added.
+void SetArcAlwaysStartForTesting(bool play_store_available);
 
 // Returns true if ARC is installed and running ARC kiosk apps on the current
 // device is officially supported.
@@ -50,13 +75,25 @@ void SetArcAvailableCommandLineForTesting(base::CommandLine* command_line);
 // should also return true in that case.
 bool IsArcKioskMode();
 
-// Returns true if it is allowed to use ARC with Active Directory managed
-// devices.
-bool IsArcAllowedForActiveDirectoryUsers();
+// Returns true if ARC is allowed for the given user. Note this should not be
+// used as a signal of whether ARC is allowed alone because it only considers
+// user meta data. e.g. a user could be allowed for ARC but if the user signs in
+// as a secondary user or signs in to create a supervised user, ARC should be
+// disabled for such cases.
+bool IsArcAllowedForUser(const user_manager::User* user);
 
 // Checks if opt-in verification was disabled by switch in command line.
 // In most cases, it is disabled for testing purpose.
 bool IsArcOptInVerificationDisabled();
+
+// Returns true if the |window|'s aura::client::kAppType is ARC_APP. When
+// |window| is nullptr, returns false.
+bool IsArcAppWindow(aura::Window* window);
+
+// Adjusts the amount of CPU the ARC instance is allowed to use. When
+// |do_restrict| is true, the limit is adjusted so ARC can only use tightly
+// restricted CPU resources.
+void SetArcCpuRestriction(bool do_restrict);
 
 }  // namespace arc
 

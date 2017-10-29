@@ -5,15 +5,17 @@
 #ifndef CHROME_INSTALLER_UTIL_SCOPED_USER_PROTOCOL_ENTRY_H_
 #define CHROME_INSTALLER_UTIL_SCOPED_USER_PROTOCOL_ENTRY_H_
 
+#include <memory>
+#include <vector>
+
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 
 class RegistryEntry;
 
 // Windows 8 shows the "No apps are installed to open this type of link"
 // dialog when choosing a default handler for a |protocol| under certain
 // circumstances. Under these circumstances, it appears that ensuring the
-// existance of the HKCU\Software\Classes\<protocol> key with an empty "URL
+// existence of the HKCU\Software\Classes\<protocol> key with an empty "URL
 // Protocol" value is sufficient to make the dialog contain the usual list of
 // registered browsers. This class creates this key and value in its constructor
 // if needed, and cleans them up in its destructor if no other values or subkeys
@@ -24,7 +26,7 @@ class ScopedUserProtocolEntry {
   ~ScopedUserProtocolEntry();
 
  private:
-  ScopedVector<RegistryEntry> entries_;
+  std::vector<std::unique_ptr<RegistryEntry>> entries_;
 
   DISALLOW_COPY_AND_ASSIGN(ScopedUserProtocolEntry);
 };

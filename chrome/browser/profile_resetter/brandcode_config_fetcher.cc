@@ -5,7 +5,9 @@
 #include "chrome/browser/profile_resetter/brandcode_config_fetcher.h"
 
 #include <stddef.h>
+#include <vector>
 
+#include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -13,6 +15,7 @@
 #include "libxml/parser.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
@@ -20,19 +23,15 @@ namespace {
 
 const int kDownloadTimeoutSec = 10;
 const char kPostXml[] =
-"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-"<request version=\"1.3.17.0\" protocol=\"3.0\" testsource=\"dev\" "
-    "shell_version=\"1.2.3.5\">\n"
-"  <os platform=\"win\" version=\"6.1\" sp=\"\" arch=\"x86\" />\n"
-"  <app\n"
-"    appid=\"{8A69D345-D564-463C-AFF1-A69D9E530F96}\"\n"
-"    version=\"0.0.0.0\"\n"
-"      >\n"
-"    <updatecheck />\n"
-"    <data name=\"install\" "
-    "index=\"__BRANDCODE_PLACEHOLDER__\" />\n"
-"  </app>\n"
-"</request>";
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+    "<request"
+    "    version=\"chromeprofilereset-1.1\""
+    "    protocol=\"3.0\""
+    "    installsource=\"profilereset\">"
+    "  <app appid=\"{8A69D345-D564-463C-AFF1-A69D9E530F96}\">"
+    "    <data name=\"install\" index=\"__BRANDCODE_PLACEHOLDER__\"/>"
+    "  </app>"
+    "</request>";
 
 // Returns the query to the server which can be used to retrieve the config.
 // |brand| is a brand code, it mustn't be empty.
@@ -138,15 +137,38 @@ bool XmlConfigParser::IsParsingData() const {
          std::equal(elements_.begin(), elements_.end(), data_path);
 }
 
-} // namespace
+}  // namespace
 
 BrandcodeConfigFetcher::BrandcodeConfigFetcher(const FetchCallback& callback,
                                                const GURL& url,
                                                const std::string& brandcode)
     : fetch_callback_(callback) {
   DCHECK(!brandcode.empty());
-  config_fetcher_ = net::URLFetcher::Create(0 /* ID used for testing */, url,
-                                            net::URLFetcher::POST, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("brandcode_config", R"(
+        semantics {
+          sender: "Brandcode Configuration Fetcher"
+          description:
+            "Chrome installation can be non-organic. That means that Chrome "
+            "is distributed by partners and it has a brand code associated "
+            "with that partner. For the settings reset operation, Chrome needs "
+            "to know the default settings which are partner specific."
+          trigger: "'Reset Settings' invocation from Chrome settings."
+          data: "Brandcode."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "This feature cannot be disabled and is only invoked by user "
+            "request."
+          policy_exception_justification:
+            "Not implemented, considered not useful as enterprises don't need "
+            "to install Chrome in a non-organic fashion."
+        })");
+  config_fetcher_ =
+      net::URLFetcher::Create(0 /* ID used for testing */, url,
+                              net::URLFetcher::POST, this, traffic_annotation);
   config_fetcher_->SetRequestContext(
       g_browser_process->system_request_context());
   config_fetcher_->SetUploadData("text/xml", GetUploadData(brandcode));
@@ -187,12 +209,12 @@ void BrandcodeConfigFetcher::OnURLFetchComplete(const net::URLFetcher* source) {
   }
   config_fetcher_.reset();
   download_timer_.Stop();
-  fetch_callback_.Run();
+  base::ResetAndReturn(&fetch_callback_).Run();
 }
 
 void BrandcodeConfigFetcher::OnDownloadTimeout() {
   if (config_fetcher_) {
     config_fetcher_.reset();
-    fetch_callback_.Run();
+    base::ResetAndReturn(&fetch_callback_).Run();
   }
 }

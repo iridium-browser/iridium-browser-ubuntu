@@ -28,8 +28,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://www.w3.org/TR/2012/WD-file-system-api-20120417/#idl-def-Metadata
 [
-    NoInterfaceObject,
+    NoInterfaceObject
 ] interface Metadata {
     readonly attribute Date modificationTime;
     readonly attribute unsigned long long size;

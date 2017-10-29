@@ -22,6 +22,7 @@
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/install_gate.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
+#include "chrome/browser/upgrade_observer.h"
 #include "components/sync/model/string_ordinal.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -160,9 +161,8 @@ class ExtensionServiceInterface
       const extensions::Extension* extension) = 0;
 
   // Unload the specified extension.
-  virtual void UnloadExtension(
-      const std::string& extension_id,
-      extensions::UnloadedExtensionInfo::Reason reason) = 0;
+  virtual void UnloadExtension(const std::string& extension_id,
+                               extensions::UnloadedExtensionReason reason) = 0;
 
   // Remove the specified component extension.
   virtual void RemoveComponentExtension(const std::string& extension_id) = 0;
@@ -170,8 +170,6 @@ class ExtensionServiceInterface
   // Whether the extension service is ready.
   virtual bool is_ready() = 0;
 
-  // Returns task runner for crx installation file I/O operations.
-  virtual base::SequencedTaskRunner* GetFileTaskRunner() = 0;
 };
 
 // Manages installed and running Chromium extensions. An instance is shared
@@ -181,7 +179,8 @@ class ExtensionService
       public extensions::ExternalProviderInterface::VisitorInterface,
       public content::NotificationObserver,
       public extensions::Blacklist::Observer,
-      public extensions::ExtensionManagement::Observer {
+      public extensions::ExtensionManagement::Observer,
+      public UpgradeObserver {
  public:
   // Attempts to uninstall an extension from a given ExtensionService. Returns
   // true iff the target extension exists.
@@ -215,9 +214,8 @@ class ExtensionService
                        bool file_ownership_passed,
                        extensions::CrxInstaller** out_crx_installer) override;
   bool IsExtensionEnabled(const std::string& extension_id) const override;
-  void UnloadExtension(
-      const std::string& extension_id,
-      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void UnloadExtension(const std::string& extension_id,
+                       extensions::UnloadedExtensionReason reason) override;
   void RemoveComponentExtension(const std::string& extension_id) override;
   void AddExtension(const extensions::Extension* extension) override;
   void AddComponentExtension(const extensions::Extension* extension) override;
@@ -227,7 +225,6 @@ class ExtensionService
   void CheckManagementPolicy() override;
   void CheckForUpdatesSoon() override;
   bool is_ready() override;
-  base::SequencedTaskRunner* GetFileTaskRunner() override;
 
   // ExternalProvider::VisitorInterface implementation.
   // Exposed for testing.
@@ -319,9 +316,6 @@ class ExtensionService
   // Check for updates (or potentially new extensions from external providers)
   void CheckForExternalUpdates();
 
-  // Called when the initial extensions load has completed.
-  virtual void OnLoadedInstalledExtensions();
-
   // Informs the service that an extension's files are in place for loading.
   //
   // |extension|     the extension
@@ -344,10 +338,6 @@ class ExtensionService
   // view has been created.
   void DidCreateRenderViewForBackgroundPage(extensions::ExtensionHost* host);
 
-  // Changes sequenced task runner for crx installation tasks to |task_runner|.
-  void SetFileTaskRunnerForTesting(
-      const scoped_refptr<base::SequencedTaskRunner>& task_runner);
-
   // Record a histogram using the PermissionMessage enum values for each
   // permission in |e|.
   // NOTE: If this is ever called with high frequency, the implementation may
@@ -361,8 +351,9 @@ class ExtensionService
   void TerminateExtension(const std::string& extension_id);
 
   // Register self and content settings API with the specified map.
-  void RegisterContentSettings(
-      HostContentSettingsMap* host_content_settings_map);
+  static void RegisterContentSettings(
+      HostContentSettingsMap* host_content_settings_map,
+      Profile* profile);
 
   // Adds/Removes update observers.
   void AddUpdateObserver(extensions::UpdateObserver* observer);
@@ -372,6 +363,9 @@ class ExtensionService
   void RegisterInstallGate(extensions::ExtensionPrefs::DelayReason reason,
                            extensions::InstallGate* install_delayer);
   void UnregisterInstallGate(extensions::InstallGate* install_delayer);
+
+  // Returns task runner for crx installation file I/O operations.
+  base::SequencedTaskRunner* GetFileTaskRunner();
 
   //////////////////////////////////////////////////////////////////////////////
   // Simple Accessors
@@ -383,7 +377,6 @@ class ExtensionService
   content::BrowserContext* GetBrowserContext() const;
 
   bool extensions_enabled() const { return extensions_enabled_; }
-  void set_extensions_enabled(bool enabled) { extensions_enabled_ = enabled; }
 
   const base::FilePath& install_directory() const { return install_directory_; }
 
@@ -450,6 +443,10 @@ class ExtensionService
     external_updates_finished_callback_ = callback;
   }
 
+  void set_external_updates_disabled_for_test(bool value) {
+    external_updates_disabled_for_test_ = value;
+  }
+
  private:
   // Loads extensions specified via a command line flag/switch.
   void LoadExtensionsFromCommandLineFlag(const char* switch_name);
@@ -466,6 +463,9 @@ class ExtensionService
 
   // extensions::Blacklist::Observer implementation.
   void OnBlacklistUpdated() override;
+
+  // UpgradeObserver implementation.
+  void OnUpgradeRecommended() override;
 
   // Similar to FinishInstallation, but first checks if there still is an update
   // pending for the extension, and makes sure the extension is still idle.
@@ -524,9 +524,8 @@ class ExtensionService
       scoped_refptr<const extensions::Extension> extension);
 
   // Handles sending notification that |extension| was unloaded.
-  void NotifyExtensionUnloaded(
-      const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason);
+  void NotifyExtensionUnloaded(const extensions::Extension* extension,
+                               extensions::UnloadedExtensionReason reason);
 
   // Common helper to finish installing the given extension.
   void FinishInstallation(const extensions::Extension* extension);
@@ -589,6 +588,13 @@ class ExtensionService
       Profile* profile,
       const base::FilePath& install_dir,
       const base::FilePath& extension_path);
+
+  // Called when the initial extensions load has completed.
+  void OnInstalledExtensionsLoaded();
+
+  // Upon reloading an extension, spins up its lazy background page if
+  // necessary.
+  void MaybeSpinUpLazyBackgroundPage(const extensions::Extension* extension_id);
 
   const base::CommandLine* command_line_ = nullptr;
 
@@ -678,6 +684,9 @@ class ExtensionService
   // decide to abort.
   bool browser_terminating_ = false;
 
+  // If set, call to CheckForExternalUpdates() will bail out.
+  bool external_updates_disabled_for_test_ = false;
+
   // Set to true if this is the first time this ExtensionService has run.
   // Used for specially handling external extensions that are installed the
   // first time.
@@ -701,9 +710,6 @@ class ExtensionService
   // The manager for extensions that were externally installed that is
   // responsible for prompting the user about suspicious extensions.
   std::unique_ptr<extensions::ExternalInstallManager> external_install_manager_;
-
-  // Sequenced task runner for extension related file operations.
-  scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
 
   std::unique_ptr<extensions::ExtensionActionStorageManager>
       extension_action_storage_manager_;

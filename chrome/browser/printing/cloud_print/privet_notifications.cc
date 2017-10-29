@@ -202,7 +202,7 @@ PrivetNotificationService::PrivetNotificationService(
     content::BrowserContext* profile)
     : profile_(profile) {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&PrivetNotificationService::Start, AsWeakPtr()),
+      FROM_HERE, base::BindOnce(&PrivetNotificationService::Start, AsWeakPtr()),
       base::TimeDelta::FromSeconds(kStartDelaySeconds +
                                    base::RandInt(0, kStartDelaySeconds / 4)));
 }
@@ -339,7 +339,7 @@ void PrivetNotificationService::StartLister() {
   device_lister_.reset(
       new PrivetDeviceListerImpl(service_discovery_client_.get(), this));
   device_lister_->Start();
-  device_lister_->DiscoverNewDevices(false);
+  device_lister_->DiscoverNewDevices();
 
   std::unique_ptr<PrivetHTTPAsynchronousFactory> http_factory(
       PrivetHTTPAsynchronousFactory::CreateInstance(

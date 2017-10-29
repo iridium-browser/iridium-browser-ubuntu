@@ -8,6 +8,7 @@ from __future__ import print_function
 
 import glob
 import os
+import re
 import shutil
 import socket
 import stat
@@ -408,7 +409,7 @@ class RemoteAccess(object):
 
   def Rsync(self, src, dest, to_local=False, follow_symlinks=False,
             recursive=True, inplace=False, verbose=False, sudo=False,
-            remote_sudo=False, **kwargs):
+            remote_sudo=False, compress=True, **kwargs):
     """Rsync a path to the remote device.
 
     Rsync a path to the remote device. If |to_local| is set True, it
@@ -426,12 +427,13 @@ class RemoteAccess(object):
       verbose: If set, print more verbose output during rsync file transfer.
       sudo: If set, invoke the command via sudo.
       remote_sudo: If set, run the command in remote shell with sudo.
+      compress: If set, compress file data during the transfer.
       **kwargs: See cros_build_lib.RunCommand documentation.
     """
     kwargs.setdefault('debug_level', self.debug_level)
 
     ssh_cmd = ' '.join(self._GetSSHCmd())
-    rsync_cmd = ['rsync', '--perms', '--verbose', '--times', '--compress',
+    rsync_cmd = ['rsync', '--perms', '--verbose', '--times',
                  '--omit-dir-times', '--exclude', '.svn']
     rsync_cmd.append('--copy-links' if follow_symlinks else '--links')
     rsync_sudo = 'sudo' if (
@@ -445,6 +447,9 @@ class RemoteAccess(object):
       rsync_cmd.append('--recursive')
     if inplace:
       rsync_cmd.append('--inplace')
+    if compress:
+      rsync_cmd.append('--compress')
+    logging.info('Using rsync compression: %s', compress)
 
     if to_local:
       rsync_cmd += ['--rsh', ssh_cmd,
@@ -656,15 +661,21 @@ class RemoteDevice(object):
 
     return self._work_dir
 
-  # Since this object is instantiated once per device, we can safely cache the
-  # result of the rsync test.  We assume the remote side doesn't go and delete
-  # or break rsync on us, but that's fine.
-  @cros_build_lib.MemoizedSingleCall
   def HasRsync(self):
     """Checks if rsync exists on the device."""
     result = self.GetAgent().RemoteSh(['PATH=%s:$PATH rsync' % DEV_BIN_PATHS,
                                        '--version'], error_code_ok=True)
     return result.returncode == 0
+
+  @cros_build_lib.MemoizedSingleCall
+  def HasGigabitEthernet(self):
+    """Checks if the device has a gigabit ethernet port.
+
+    The function checkes the device's first ethernet interface (eth0).
+    """
+    result = self.GetAgent().RemoteSh(['ethtool', 'eth0'], error_code_ok=True,
+                                      capture_output=True)
+    return re.search(r'Speed: \d+000Mb/s', result.output)
 
   def RegisterCleanupCmd(self, cmd, **kwargs):
     """Register a cleanup command to be run on the device in Cleanup().
@@ -685,13 +696,28 @@ class RemoteDevice(object):
 
     self.tempdir.Cleanup()
 
-  def CopyToDevice(self, src, dest, mode=None, **kwargs):
-    """Copy path to device."""
-    msg = 'Could not copy %s to device.' % src
-    if mode is None:
-      # Use rsync by default if it exists.
-      mode = 'rsync' if self.HasRsync() else 'scp'
+  def CopyToDevice(self, src, dest, mode, **kwargs):
+    """Copy path to device.
 
+    Args:
+      src: Local path as a string.
+      dest: rsync/scp path of the form <host>:/<path> as a string.
+      mode: can be either 'rsync' or 'scp'.
+        * Use rsync --compress when copying compressible (factor > 2, text/log)
+        files. This uses a quite a bit of CPU but preserves bandwidth.
+        * Use rsync without compression when delta transfering a whole directory
+        tree which exists at the destination and changed very little (say
+        telemetry directory or unpacked stateful or unpacked rootfs). It also
+        often works well for an uncompressed archive, copied over a previous
+        copy (which must exist at the destination) needing minor updates.
+        * Use scp when we have incompressible files (say already compressed),
+        especially if we know no previous version exist at the destination.
+    """
+    assert mode in ['rsync', 'scp']
+    msg = 'Could not copy %s to device.' % src
+    # Fall back to scp if device has no rsync. Happens when stateful is cleaned.
+    if not self.HasRsync():
+      mode = 'scp'
     if mode == 'scp':
       # scp always follow symlinks
       kwargs.pop('follow_symlinks', None)
@@ -701,12 +727,21 @@ class RemoteDevice(object):
 
     return RunCommandFuncWrapper(func, msg, src, dest, **kwargs)
 
-  def CopyFromDevice(self, src, dest, mode=None, **kwargs):
-    """Copy path from device."""
+  def CopyFromDevice(self, src, dest, mode='rsync', **kwargs):
+    """Copy path from device.
+
+    Adding --compress recommended for text like log files.
+
+    Args:
+      src: rsync/scp path of the form <host>:/<path> as a string.
+      dest: Local path as a string.
+      mode: See mode on CopyToDevice.
+    """
     msg = 'Could not copy %s from device.' % src
-    if mode is None:
+    # Fall back to scp if device has no rsync. Happens when stateful is cleaned.
+    if not self.HasRsync():
       # Use rsync by default if it exists.
-      mode = 'rsync' if self.HasRsync() else 'scp'
+      mode = 'scp'
 
     if mode == 'scp':
       # scp always follow symlinks

@@ -7,11 +7,10 @@
 #include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/base/math_util.h"
+#include "cc/base/render_surface_filters.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/output/output_surface.h"
 #include "cc/output/output_surface_frame.h"
-#include "cc/output/render_surface_filters.h"
-#include "cc/output/renderer_settings.h"
 #include "cc/output/software_output_device.h"
 #include "cc/quads/debug_border_draw_quad.h"
 #include "cc/quads/picture_draw_quad.h"
@@ -20,6 +19,7 @@
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/quads/tile_draw_quad.h"
 #include "cc/resources/scoped_resource.h"
+#include "components/viz/common/display/renderer_settings.h"
 #include "skia/ext/opacity_filter_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -29,6 +29,7 @@
 #include "third_party/skia/include/core/SkPoint.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "third_party/skia/include/effects/SkLayerRasterizer.h"
+#include "ui/gfx/geometry/axis_transform2d.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/transform.h"
@@ -52,12 +53,11 @@ bool IsScaleAndIntegerTranslate(const SkMatrix& matrix) {
 
 }  // anonymous namespace
 
-SoftwareRenderer::SoftwareRenderer(const RendererSettings* settings,
+SoftwareRenderer::SoftwareRenderer(const viz::RendererSettings* settings,
                                    OutputSurface* output_surface,
                                    ResourceProvider* resource_provider)
     : DirectRenderer(settings, output_surface, resource_provider),
-      output_device_(output_surface->software_device()) {
-}
+      output_device_(output_surface->software_device()) {}
 
 SoftwareRenderer::~SoftwareRenderer() {}
 
@@ -65,7 +65,7 @@ bool SoftwareRenderer::CanPartialSwap() {
   return true;
 }
 
-ResourceFormat SoftwareRenderer::BackbufferFormat() const {
+viz::ResourceFormat SoftwareRenderer::BackbufferFormat() const {
   return resource_provider_->best_texture_format();
 }
 
@@ -98,19 +98,10 @@ bool SoftwareRenderer::FlippedFramebuffer() const {
 
 void SoftwareRenderer::EnsureScissorTestEnabled() {
   is_scissor_enabled_ = true;
-  SetClipRect(scissor_rect_);
 }
 
 void SoftwareRenderer::EnsureScissorTestDisabled() {
-  // There is no explicit notion of enabling/disabling scissoring in software
-  // rendering, but the underlying effect we want is to clear any existing
-  // clipRect on the current SkCanvas. This is done by setting clipRect to
-  // the viewport's dimensions.
-  if (!current_canvas_)
-    return;
   is_scissor_enabled_ = false;
-  SkISize size = current_canvas_->getBaseLayerSize();
-  SetClipRect(gfx::Rect(size.width(), size.height()));
 }
 
 void SoftwareRenderer::BindFramebufferToOutputSurface() {
@@ -139,7 +130,6 @@ bool SoftwareRenderer::BindFramebufferToTexture(
 void SoftwareRenderer::SetScissorTestRect(const gfx::Rect& scissor_rect) {
   is_scissor_enabled_ = true;
   scissor_rect_ = scissor_rect;
-  SetClipRect(scissor_rect);
 }
 
 void SoftwareRenderer::SetClipRect(const gfx::Rect& rect) {
@@ -148,16 +138,29 @@ void SoftwareRenderer::SetClipRect(const gfx::Rect& rect) {
   // Skia applies the current matrix to clip rects so we reset it temporary.
   SkMatrix current_matrix = current_canvas_->getTotalMatrix();
   current_canvas_->resetMatrix();
-  // TODO(fmalita) stop using kReplace (see crbug.com/673851)
-  current_canvas_->clipRect(gfx::RectToSkRect(rect),
-                            SkClipOp::kReplace_private_internal_do_not_use);
+  // SetClipRect is assumed to be applied temporarily, on an
+  // otherwise-unclipped canvas.
+  DCHECK_EQ(current_canvas_->getDeviceClipBounds().width(),
+            current_canvas_->imageInfo().width());
+  DCHECK_EQ(current_canvas_->getDeviceClipBounds().height(),
+            current_canvas_->imageInfo().height());
+  current_canvas_->clipRect(gfx::RectToSkRect(rect));
   current_canvas_->setMatrix(current_matrix);
 }
 
 void SoftwareRenderer::ClearCanvas(SkColor color) {
   if (!current_canvas_)
     return;
-  current_canvas_->clear(color);
+
+  if (is_scissor_enabled_) {
+    // The same paint used by SkCanvas::clear, but applied to the scissor rect.
+    SkPaint clear_paint;
+    clear_paint.setColor(color);
+    clear_paint.setBlendMode(SkBlendMode::kSrc);
+    current_canvas_->drawRect(gfx::RectToSkRect(scissor_rect_), clear_paint);
+  } else {
+    current_canvas_->clear(color);
+  }
 }
 
 void SoftwareRenderer::ClearFramebuffer() {
@@ -207,11 +210,14 @@ void SoftwareRenderer::DoDrawQuad(const DrawQuad* quad,
                                   const gfx::QuadF* draw_region) {
   if (!current_canvas_)
     return;
-  if (draw_region) {
-    current_canvas_->save();
-  }
 
   TRACE_EVENT0("cc", "SoftwareRenderer::DoDrawQuad");
+  bool do_save = draw_region || is_scissor_enabled_;
+  SkAutoCanvasRestore canvas_restore(current_canvas_, do_save);
+  if (is_scissor_enabled_) {
+    SetClipRect(scissor_rect_);
+  }
+
   gfx::Transform quad_rect_matrix;
   QuadRectTransform(&quad_rect_matrix,
                     quad->shared_quad_state->quad_to_target_transform,
@@ -297,9 +303,6 @@ void SoftwareRenderer::DoDrawQuad(const DrawQuad* quad,
   }
 
   current_canvas_->resetMatrix();
-  if (draw_region) {
-    current_canvas_->restore();
-  }
 }
 
 void SoftwareRenderer::DrawDebugBorderQuad(const DebugBorderDrawQuad* quad) {
@@ -336,6 +339,11 @@ void SoftwareRenderer::DrawPictureQuad(const PictureDrawQuad* quad) {
 
   TRACE_EVENT0("cc", "SoftwareRenderer::DrawPictureQuad");
 
+  // TODO(ccameron): Determine a color space strategy for software rendering.
+  gfx::ColorSpace canvas_color_space;
+  if (settings_->enable_color_correct_rendering)
+    canvas_color_space = gfx::ColorSpace::CreateSRGB();
+
   RasterSource::PlaybackSettings playback_settings;
   playback_settings.playback_to_shared_canvas = true;
   // Indicates whether content rasterization should happen through an
@@ -356,12 +364,16 @@ void SoftwareRenderer::DrawPictureQuad(const PictureDrawQuad* quad) {
                                               quad->shared_quad_state->opacity,
                                               disable_image_filtering);
     quad->raster_source->PlaybackToCanvas(
-        &filtered_canvas, quad->content_rect, quad->content_rect,
-        quad->contents_scale, playback_settings);
+        &filtered_canvas, canvas_color_space, quad->content_rect,
+        quad->content_rect,
+        gfx::AxisTransform2d(quad->contents_scale, gfx::Vector2dF()),
+        playback_settings);
   } else {
     quad->raster_source->PlaybackToCanvas(
-        current_canvas_, quad->content_rect, quad->content_rect,
-        quad->contents_scale, playback_settings);
+        current_canvas_, canvas_color_space, quad->content_rect,
+        quad->content_rect,
+        gfx::AxisTransform2d(quad->contents_scale, gfx::Vector2dF()),
+        playback_settings);
   }
 }
 
@@ -460,7 +472,7 @@ void SoftwareRenderer::DrawRenderPassQuad(const RenderPassDrawQuad* quad) {
   SkRect dest_visible_rect = gfx::RectFToSkRect(
       MathUtil::ScaleRectProportional(QuadVertexRect(), gfx::RectF(quad->rect),
                                       gfx::RectF(quad->visible_rect)));
-  SkRect content_rect = SkRect::MakeWH(quad->rect.width(), quad->rect.height());
+  SkRect content_rect = RectFToSkRect(quad->tex_coord_rect);
 
   const SkBitmap* content = lock.sk_bitmap();
 
@@ -566,12 +578,17 @@ void SoftwareRenderer::CopyCurrentRenderPassToBitmap(
   gfx::Rect window_copy_rect = MoveFromDrawToWindowSpace(copy_rect);
 
   std::unique_ptr<SkBitmap> bitmap(new SkBitmap);
-  bitmap->setInfo(SkImageInfo::MakeN32Premul(window_copy_rect.width(),
-                                             window_copy_rect.height()));
-  current_canvas_->readPixels(
-      bitmap.get(), window_copy_rect.x(), window_copy_rect.y());
+  bitmap->allocPixels(SkImageInfo::MakeN32Premul(window_copy_rect.width(),
+                                                 window_copy_rect.height()));
+  if (!current_canvas_->readPixels(*bitmap, window_copy_rect.x(),
+                                   window_copy_rect.y()))
+    bitmap->reset();
 
   request->SendBitmapResult(std::move(bitmap));
+}
+
+void SoftwareRenderer::SetEnableDCLayers(bool enable) {
+  NOTIMPLEMENTED();
 }
 
 void SoftwareRenderer::DidChangeVisibility() {
@@ -640,9 +657,11 @@ sk_sp<SkImage> SoftwareRenderer::ApplyImageFilter(
 SkBitmap SoftwareRenderer::GetBackdropBitmap(
     const gfx::Rect& bounding_rect) const {
   SkBitmap bitmap;
-  bitmap.setInfo(SkImageInfo::MakeN32Premul(bounding_rect.width(),
-                                            bounding_rect.height()));
-  current_canvas_->readPixels(&bitmap, bounding_rect.x(), bounding_rect.y());
+  bitmap.allocPixels(SkImageInfo::MakeN32Premul(bounding_rect.width(),
+                                                bounding_rect.height()));
+  if (!current_canvas_->readPixels(bitmap, bounding_rect.x(),
+                                   bounding_rect.y()))
+    bitmap.reset();
   return bitmap;
 }
 

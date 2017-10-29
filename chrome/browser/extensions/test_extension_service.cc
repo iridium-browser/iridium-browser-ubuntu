@@ -66,11 +66,6 @@ bool TestExtensionService::is_ready() {
   return false;
 }
 
-base::SequencedTaskRunner* TestExtensionService::GetFileTaskRunner() {
-  ADD_FAILURE();
-  return NULL;
-}
-
 void TestExtensionService::AddExtension(const Extension* extension) {
   ADD_FAILURE();
 }
@@ -81,7 +76,7 @@ void TestExtensionService::AddComponentExtension(const Extension* extension) {
 
 void TestExtensionService::UnloadExtension(
     const std::string& extension_id,
-    extensions::UnloadedExtensionInfo::Reason reason) {
+    extensions::UnloadedExtensionReason reason) {
   ADD_FAILURE();
 }
 

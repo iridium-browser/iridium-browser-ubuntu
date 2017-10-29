@@ -7,10 +7,6 @@
 #include <cmath>
 
 #include "base/bind.h"
-#include "base/location.h"
-#include "base/single_thread_task_runner.h"
-#include "base/threading/thread.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "components/exo/gamepad_delegate.h"
 #include "components/exo/gaming_seat_delegate.h"
 #include "components/exo/shell_surface.h"
@@ -50,7 +46,7 @@ class GamingSeat::ThreadSafeGamepadChangeFetcher
           GamingSeat::ThreadSafeGamepadChangeFetcher> {
  public:
   using ProcessGamepadChangesCallback =
-      base::Callback<void(int index, const blink::WebGamepad)>;
+      base::Callback<void(int index, const device::Gamepad)>;
 
   ThreadSafeGamepadChangeFetcher(
       const ProcessGamepadChangesCallback& post_gamepad_changes,
@@ -60,7 +56,7 @@ class GamingSeat::ThreadSafeGamepadChangeFetcher
         create_fetcher_callback_(create_fetcher_callback),
         polling_task_runner_(task_runner),
         origin_task_runner_(base::ThreadTaskRunnerHandle::Get()) {
-    thread_checker_.DetachFromThread();
+    DETACH_FROM_THREAD(thread_checker_);
   }
 
   // Enable or disable gamepad polling. Can be called from any thread.
@@ -79,7 +75,7 @@ class GamingSeat::ThreadSafeGamepadChangeFetcher
 
   // Enables or disables polling.
   void EnablePollingOnPollingThread(bool enabled) {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
     is_enabled_ = enabled;
 
     if (is_enabled_) {
@@ -96,7 +92,7 @@ class GamingSeat::ThreadSafeGamepadChangeFetcher
 
   // Schedules the next poll on the polling thread.
   void SchedulePollOnPollingThread() {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
     DCHECK(fetcher_);
 
     if (!is_enabled_ || has_poll_scheduled_)
@@ -112,7 +108,7 @@ class GamingSeat::ThreadSafeGamepadChangeFetcher
 
   // Polls devices for new data and posts gamepad changes back to origin thread.
   void PollOnPollingThread() {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
     has_poll_scheduled_ = false;
     if (!is_enabled_)
@@ -120,11 +116,11 @@ class GamingSeat::ThreadSafeGamepadChangeFetcher
 
     DCHECK(fetcher_);
 
-    blink::WebGamepads new_state = state_;
+    device::Gamepads new_state = state_;
     fetcher_->GetGamepadData(
         false /* No hardware changed notification from the system */);
 
-    for (size_t i = 0; i < blink::WebGamepads::itemsLengthCap; ++i) {
+    for (size_t i = 0; i < device::Gamepads::kItemsLengthCap; ++i) {
       device::PadState& pad_state = pad_states_.get()[i];
 
       // After querying the gamepad clear the state if it did not have it's
@@ -171,7 +167,7 @@ class GamingSeat::ThreadSafeGamepadChangeFetcher
   std::unique_ptr<device::GamepadDataFetcher> fetcher_;
 
   // The current state of all gamepads.
-  blink::WebGamepads state_;
+  device::Gamepads state_;
 
   // True if a poll has been scheduled.
   bool has_poll_scheduled_ = false;
@@ -180,7 +176,7 @@ class GamingSeat::ThreadSafeGamepadChangeFetcher
   bool is_enabled_ = false;
 
   // ThreadChecker for the polling thread.
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(ThreadSafeGamepadChangeFetcher);
 };
@@ -190,20 +186,13 @@ class GamingSeat::ThreadSafeGamepadChangeFetcher
 
 GamingSeat::GamingSeat(GamingSeatDelegate* gaming_seat_delegate,
                        base::SingleThreadTaskRunner* polling_task_runner)
-    : GamingSeat(gaming_seat_delegate,
-                 polling_task_runner,
-                 base::Bind(CreateGamepadPlatformDataFetcher)) {}
-
-GamingSeat::GamingSeat(GamingSeatDelegate* gaming_seat_delegate,
-                       base::SingleThreadTaskRunner* polling_task_runner,
-                       CreateGamepadDataFetcherCallback create_fetcher_callback)
     : delegate_(gaming_seat_delegate),
       gamepad_delegates_{nullptr},
       weak_ptr_factory_(this) {
   gamepad_change_fetcher_ = new ThreadSafeGamepadChangeFetcher(
       base::Bind(&GamingSeat::ProcessGamepadChanges,
                  weak_ptr_factory_.GetWeakPtr()),
-      create_fetcher_callback, polling_task_runner);
+      base::Bind(CreateGamepadPlatformDataFetcher), polling_task_runner);
 
   auto* helper = WMHelper::GetInstance();
   helper->AddFocusObserver(this);
@@ -216,7 +205,7 @@ GamingSeat::~GamingSeat() {
   gamepad_change_fetcher_->EnablePolling(false);
 
   delegate_->OnGamingSeatDestroying(this);
-  for (size_t i = 0; i < blink::WebGamepads::itemsLengthCap; ++i) {
+  for (size_t i = 0; i < device::Gamepads::kItemsLengthCap; ++i) {
     if (gamepad_delegates_[i]) {
       gamepad_delegates_[i]->OnRemoved();
     }
@@ -229,7 +218,7 @@ GamingSeat::~GamingSeat() {
 
 void GamingSeat::OnWindowFocused(aura::Window* gained_focus,
                                  aura::Window* lost_focus) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   Surface* target = nullptr;
   if (gained_focus) {
     target = Surface::AsSurface(gained_focus);
@@ -249,11 +238,11 @@ void GamingSeat::OnWindowFocused(aura::Window* gained_focus,
 // GamingSeat, private:
 
 void GamingSeat::ProcessGamepadChanges(int index,
-                                       const blink::WebGamepad new_pad) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+                                       const device::Gamepad new_pad) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   bool send_frame = false;
 
-  blink::WebGamepad& pad_state = pad_state_.items[index];
+  device::Gamepad& pad_state = pad_state_.items[index];
   // Update connection state.
   GamepadDelegate* delegate = gamepad_delegates_[index];
   if (new_pad.connected != pad_state.connected) {
@@ -279,7 +268,7 @@ void GamingSeat::ProcessGamepadChanges(int index,
 
   // Notify delegate of updated axes.
   for (size_t axis = 0;
-       axis < std::max(pad_state.axesLength, new_pad.axesLength); ++axis) {
+       axis < std::max(pad_state.axes_length, new_pad.axes_length); ++axis) {
     if (!GamepadButtonValuesAreEqual(new_pad.axes[axis],
                                      pad_state.axes[axis])) {
       send_frame = true;
@@ -289,7 +278,7 @@ void GamingSeat::ProcessGamepadChanges(int index,
 
   // Notify delegate of updated buttons.
   for (size_t button_id = 0;
-       button_id < std::max(pad_state.buttonsLength, new_pad.buttonsLength);
+       button_id < std::max(pad_state.buttons_length, new_pad.buttons_length);
        ++button_id) {
     auto button = pad_state.buttons[button_id];
     auto new_button = new_pad.buttons[button_id];

@@ -9,6 +9,9 @@
 
 #include <string>
 
+#include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/common/credential_manager_types.h"
+
 namespace password_manager {
 
 namespace metrics_util {
@@ -168,9 +171,11 @@ enum CredentialManagerGetResult {
   CREDENTIAL_MANAGER_GET_COUNT
 };
 
-enum CredentialManagerGetMediation {
-  CREDENTIAL_MANAGER_GET_MEDIATED,
-  CREDENTIAL_MANAGER_GET_UNMEDIATED
+// Metrics: "PasswordManager.HttpPasswordMigrationMode"
+enum HttpPasswordMigrationMode {
+  HTTP_PASSWORD_MIGRATION_MODE_MOVE,
+  HTTP_PASSWORD_MIGRATION_MODE_COPY,
+  HTTP_PASSWORD_MIGRATION_MODE_COUNT
 };
 
 enum PasswordReusePasswordFieldDetected {
@@ -178,6 +183,64 @@ enum PasswordReusePasswordFieldDetected {
   HAS_PASSWORD_FIELD,
   PASSWORD_REUSE_PASSWORD_FIELD_DETECTED_COUNT
 };
+
+// Recorded into a UMA histogram, so order of enumerators should not be changed.
+enum class SubmittedFormFrame {
+  MAIN_FRAME,
+  IFRAME_WITH_SAME_URL_AS_MAIN_FRAME,
+  IFRAME_WITH_DIFFERENT_URL_SAME_SIGNON_REALM_AS_MAIN_FRAME,
+  IFRAME_WITH_DIFFERENT_SIGNON_REALM,
+  SUBMITTED_FORM_FRAME_COUNT
+};
+
+// Metrics: "PasswordManager.AccessPasswordInSettings"
+enum AccessPasswordInSettingsEvent {
+  ACCESS_PASSWORD_VIEWED = 0,
+  ACCESS_PASSWORD_COPIED = 1,
+  ACCESS_PASSWORD_COUNT
+};
+
+// Metrics: PasswordManager.ReauthToAccessPasswordInSettings
+enum ReauthToAccessPasswordInSettingsEvent {
+  REAUTH_SUCCESS = 0,
+  REAUTH_FAILURE = 1,
+  REAUTH_SKIPPED = 2,
+  REAUTH_COUNT
+};
+
+// Metrics: PasswordManager.IE7LookupResult
+enum IE7LookupResultStatus {
+  IE7_RESULTS_ABSENT = 0,
+  IE7_RESULTS_PRESENT = 1,
+  IE7_RESULTS_COUNT
+};
+
+// Specifies the type of PasswordFormManagers and derived classes to distinguish
+// the context in which a PasswordFormManager is being created and used.
+enum class CredentialSourceType {
+  kUnknown,
+  // This is used for form based credential management (PasswordFormManager).
+  kPasswordManager,
+  // This is used for credential management API based credential management
+  // (CredentialManagerPasswordFormManager).
+  kCredentialManagementAPI
+};
+
+#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS)) || \
+    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+enum class SyncPasswordHashChange {
+  SAVED_ON_CHROME_SIGNIN,
+  SAVED_IN_CONTENT_AREA,
+  CLEARED_ON_CHROME_SIGNOUT,
+  SAVED_SYNC_PASSWORD_CHANGE_COUNT
+};
+
+enum class IsSyncPasswordHashSaved {
+  NOT_SAVED,
+  SAVED,
+  IS_SYNC_PASSWORD_HASH_SAVED_COUNT
+};
+#endif
 
 // A version of the UMA_HISTOGRAM_BOOLEAN macro that allows the |name|
 // to vary over the program's runtime.
@@ -229,16 +292,18 @@ void LogShouldBlockPasswordForSameOriginButDifferentScheme(bool should_block);
 // Logs number of passwords migrated from HTTP to HTTPS.
 void LogCountHttpMigratedPasswords(int count);
 
+// Logs mode of HTTP password migration.
+void LogHttpPasswordMigrationMode(HttpPasswordMigrationMode mode);
+
 // Log if the account chooser has empty username or duplicate usernames. In
 // addition record number of the placeholder avatars and total number of rows.
 void LogAccountChooserUsability(AccountChooserUsabilityMetric usability,
                                 int count_empty_icons,
                                 int count_accounts);
 
-// Log the result of navigator.credentials.get. |status| specifies the
-// "unmediated" parameter of the API method.
+// Log the result of navigator.credentials.get.
 void LogCredentialManagerGetResult(CredentialManagerGetResult result,
-                                   CredentialManagerGetMediation status);
+                                   CredentialMediationRequirement mediation);
 
 // Log the password reuse.
 void LogPasswordReuse(int password_length,
@@ -253,6 +318,27 @@ void LogShowedHttpNotSecureExplanation();
 // Log that the Form-Not-Secure warning was shown. Should be called at most once
 // per main-frame navigation.
 void LogShowedFormNotSecureWarningOnCurrentNavigation();
+
+// Log a password successful submission event.
+void LogPasswordSuccessfulSubmissionIndicatorEvent(
+    autofill::PasswordForm::SubmissionIndicatorEvent event);
+
+// Log a password successful submission event for accepted by user password save
+// or update.
+void LogPasswordAcceptedSaveUpdateSubmissionIndicatorEvent(
+    autofill::PasswordForm::SubmissionIndicatorEvent event);
+
+// Log a frame of a submitted password form.
+void LogSubmittedFormFrame(SubmittedFormFrame frame);
+
+#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS)) || \
+    (defined(OS_LINUX) && !defined(OS_CHROMEOS))
+// Log a save sync password change event.
+void LogSyncPasswordHashChange(SyncPasswordHashChange event);
+
+// Log whether a sync password hash saved.
+void LogIsSyncPasswordHashSaved(IsSyncPasswordHashSaved state);
+#endif
 
 }  // namespace metrics_util
 

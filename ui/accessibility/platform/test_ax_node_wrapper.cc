@@ -5,6 +5,7 @@
 #include "base/containers/hash_tables.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/platform/test_ax_node_wrapper.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace ui {
 
@@ -22,7 +23,9 @@ class TestAXTreeDelegate : public AXTreeDelegate {
   void OnNodeDataWillChange(AXTree* tree,
                             const AXNodeData& old_node_data,
                             const AXNodeData& new_node_data) override {}
-  void OnTreeDataChanged(AXTree* tree) override {}
+  void OnTreeDataChanged(AXTree* tree,
+                         const ui::AXTreeData& old_data,
+                         const ui::AXTreeData& new_data) override {}
   void OnNodeWillBeDeleted(AXTree* tree, AXNode* node) override {
     auto iter = g_node_to_wrapper_map.find(node);
     if (iter != g_node_to_wrapper_map.end()) {
@@ -48,9 +51,7 @@ TestAXTreeDelegate g_ax_tree_delegate;
 
 // static
 TestAXNodeWrapper* TestAXNodeWrapper::GetOrCreate(AXTree* tree, AXNode* node) {
-  // Just return NULL if |node| is NULL; this makes test code simpler because
-  // now we don't have to null-check AXNode* every time we call GetOrCreate.
-  if (!node)
+  if (!tree || !node)
     return nullptr;
 
   tree->SetDelegate(&g_ax_tree_delegate);
@@ -71,8 +72,12 @@ TestAXNodeWrapper::~TestAXNodeWrapper() {
   platform_node_->Destroy();
 }
 
-const AXNodeData& TestAXNodeWrapper::GetData() {
+const AXNodeData& TestAXNodeWrapper::GetData() const {
   return node_->data();
+}
+
+const ui::AXTreeData& TestAXNodeWrapper::GetTreeData() const {
+  return tree_->data();
 }
 
 gfx::NativeWindow TestAXNodeWrapper::GetTopLevelWidget() {
@@ -100,15 +105,64 @@ gfx::NativeViewAccessible TestAXNodeWrapper::ChildAtIndex(int index) {
       nullptr;
 }
 
-gfx::Vector2d TestAXNodeWrapper::GetGlobalCoordinateOffset() {
-  return g_offset;
+gfx::Rect TestAXNodeWrapper::GetScreenBoundsRect() const {
+  gfx::RectF bounds = GetData().location;
+  bounds.Offset(g_offset);
+  return gfx::ToEnclosingRect(bounds);
+}
+
+TestAXNodeWrapper* TestAXNodeWrapper::HitTestSyncInternal(int x, int y) {
+  // Here we find the deepest child whose bounding box contains the given point.
+  // The assuptions are that there are no overlapping bounding rects and that
+  // all children have smaller bounding rects than their parents.
+  if (!GetScreenBoundsRect().Contains(gfx::Rect(x, y)))
+    return nullptr;
+
+  for (int i = 0; i < GetChildCount(); i++) {
+    TestAXNodeWrapper* child = GetOrCreate(tree_, node_->children()[i]);
+    if (!child)
+      return nullptr;
+
+    TestAXNodeWrapper* result = child->HitTestSyncInternal(x, y);
+    if (result) {
+      return result;
+    }
+  }
+  return this;
 }
 
 gfx::NativeViewAccessible TestAXNodeWrapper::HitTestSync(int x, int y) {
-  return nullptr;
+  TestAXNodeWrapper* wrapper = HitTestSyncInternal(x, y);
+  return wrapper ? wrapper->ax_platform_node()->GetNativeViewAccessible()
+                 : nullptr;
 }
 
 gfx::NativeViewAccessible TestAXNodeWrapper::GetFocus() {
+  return nullptr;
+}
+
+// Walk the AXTree and ensure that all wrappers are created
+void TestAXNodeWrapper::BuildAllWrappers(AXTree* tree, AXNode* node) {
+  for (int i = 0; i < node->child_count(); i++) {
+    auto* child = node->children()[i];
+    TestAXNodeWrapper::GetOrCreate(tree, child);
+
+    BuildAllWrappers(tree, child);
+  }
+}
+
+AXPlatformNode* TestAXNodeWrapper::GetFromNodeID(int32_t id) {
+  // Force creating all of the wrappers for this tree.
+  BuildAllWrappers(tree_, node_);
+
+  for (auto it = g_node_to_wrapper_map.begin();
+       it != g_node_to_wrapper_map.end(); ++it) {
+    AXNode* node = it->first;
+    if (node->id() == id) {
+      TestAXNodeWrapper* wrapper = it->second;
+      return wrapper->ax_platform_node();
+    }
+  }
   return nullptr;
 }
 
@@ -122,7 +176,9 @@ bool TestAXNodeWrapper::AccessibilityPerformAction(
   return true;
 }
 
-void TestAXNodeWrapper::DoDefaultAction() {}
+bool TestAXNodeWrapper::ShouldIgnoreHoveredStateForTesting() {
+  return true;
+}
 
 TestAXNodeWrapper::TestAXNodeWrapper(AXTree* tree, AXNode* node)
     : tree_(tree),

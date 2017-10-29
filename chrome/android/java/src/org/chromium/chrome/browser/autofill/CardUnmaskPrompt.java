@@ -19,13 +19,16 @@ import android.support.v4.view.MarginLayoutParamsCompat;
 import android.support.v4.view.ViewCompat;
 import android.support.v7.app.AlertDialog;
 import android.text.Editable;
+import android.text.InputFilter;
 import android.text.TextWatcher;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.View.OnFocusChangeListener;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -120,8 +123,7 @@ public class CardUnmaskPrompt
 
         /**
          * Called when the user has entered a value and pressed "verify".
-         * @param userResponse The value the user entered (a CVC), or an empty string if the
-         *        user canceled.
+         * @param cvc The value the user entered (a CVC), or an empty string if the user canceled.
          * @param month The value the user selected for expiration month, if any.
          * @param year The value the user selected for expiration month, if any.
          * @param shouldStoreLocally The state of the "Save locally?" checkbox at the time.
@@ -133,6 +135,11 @@ public class CardUnmaskPrompt
          * The controller will call update() in response.
          */
         void onNewCardLinkClicked();
+
+        /**
+         * Returns the expected length of the CVC for the card.
+         */
+        int getExpectedCvcLength();
     }
 
     /**
@@ -193,12 +200,30 @@ public class CardUnmaskPrompt
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(confirmButtonLabel, null)
                 .create();
+        mDialog.setCanceledOnTouchOutside(false);
         mDialog.setOnDismissListener(this);
 
         mShouldRequestExpirationDate = shouldRequestExpirationDate;
         mThisYear = -1;
         mThisMonth = -1;
         if (mShouldRequestExpirationDate) new CalendarTask().execute();
+
+        // Set the max length of the CVC field.
+        mCardUnmaskInput.setFilters(
+                new InputFilter[] {new InputFilter.LengthFilter(mDelegate.getExpectedCvcLength())});
+
+        // Hitting the "submit" button on the software keyboard should submit the form if valid.
+        mCardUnmaskInput.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override
+            public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
+                if (actionId == EditorInfo.IME_ACTION_DONE) {
+                    Button positiveButton = mDialog.getButton(AlertDialog.BUTTON_POSITIVE);
+                    if (positiveButton.isEnabled()) positiveButton.performClick();
+                    return true;
+                }
+                return false;
+            }
+        });
 
         // Create the listeners to be notified when the user focuses out the input fields.
         mCardUnmaskInput.setOnFocusChangeListener(new OnFocusChangeListener() {
@@ -287,6 +312,9 @@ public class CardUnmaskPrompt
         mDialog.setTitle(title);
         mInstructions.setText(instructions);
         mShouldRequestExpirationDate = shouldRequestExpirationDate;
+        if (mShouldRequestExpirationDate && (mThisYear == -1 || mThisMonth == -1)) {
+            new CalendarTask().execute();
+        }
         showExpirationDateInputsInputs();
     }
 
@@ -534,7 +562,8 @@ public class CardUnmaskPrompt
     /**
      * Applies the error filter to the invalid fields based on the errorType.
      *
-     * @param The ErrorType value representing the type of error found for the unmask fields.
+     * @param errorType The ErrorType value representing the type of error found for the unmask
+     *                  fields.
      */
     private void updateColorForInputs(@ErrorType int errorType) {
         // The rest of this code makes L-specific assumptions about the background being used to

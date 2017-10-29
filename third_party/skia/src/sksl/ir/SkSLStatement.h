@@ -4,7 +4,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
- 
+
 #ifndef SKSL_STATEMENT
 #define SKSL_STATEMENT
 
@@ -25,9 +25,12 @@ struct Statement : public IRNode {
         kDo_Kind,
         kExpression_Kind,
         kFor_Kind,
+        kGroup_Kind,
         kIf_Kind,
+        kNop_Kind,
         kReturn_Kind,
         kSwitch_Kind,
+        kVarDeclaration_Kind,
         kVarDeclarations_Kind,
         kWhile_Kind
     };
@@ -35,6 +38,10 @@ struct Statement : public IRNode {
     Statement(Position position, Kind kind)
     : INHERITED(position)
     , fKind(kind) {}
+
+    virtual bool isEmpty() const {
+        return false;
+    }
 
     const Kind fKind;
 

@@ -11,7 +11,7 @@ import traceback
 from telemetry import decorators
 from telemetry.internal.backends.chrome_inspector import inspector_websocket
 from telemetry.internal.backends.chrome_inspector import websocket
-from telemetry.timeline import trace_data as trace_data_module
+from tracing.trace_data import trace_data as trace_data_module
 
 
 class TracingUnsupportedException(Exception):
@@ -184,8 +184,11 @@ class TracingBackend(object):
     self._start_issued = False
     self._can_collect_data = True
 
-  def DumpMemory(self, timeout=30):
+  def DumpMemory(self, timeout=None):
     """Dumps memory.
+
+    Args:
+      timeout: If not specified defaults to 20 minutes.
 
     Returns:
       GUID of the generated dump if successful, None otherwise.
@@ -200,6 +203,8 @@ class TracingBackend(object):
     request = {
       'method': 'Tracing.requestMemoryDump'
     }
+    if timeout is None:
+      timeout = 1200  # 20 minutes.
     try:
       response = self._inspector_websocket.SyncRequest(request, timeout)
     except websocket.WebSocketTimeoutException:
@@ -224,7 +229,7 @@ class TracingBackend(object):
     result = response['result']
     return result['dumpGuid'] if result['success'] else None
 
-  def CollectTraceData(self, trace_data_builder, timeout=30):
+  def CollectTraceData(self, trace_data_builder, timeout=60):
     if not self._can_collect_data:
       raise Exception('Cannot collect before tracing is finished.')
     self._CollectTracingData(trace_data_builder, timeout)

@@ -47,7 +47,9 @@ BrowserNonClientFrameView::~BrowserNonClientFrameView() {
   }
 }
 
-void BrowserNonClientFrameView::OnBrowserViewInitViewsComplete() {}
+void BrowserNonClientFrameView::OnBrowserViewInitViewsComplete() {
+  UpdateMinimumSize();
+}
 
 gfx::ImageSkia BrowserNonClientFrameView::GetIncognitoAvatarIcon() const {
   const SkColor icon_color = color_utils::PickContrastingColor(
@@ -70,6 +72,16 @@ views::View* BrowserNonClientFrameView::GetProfileSwitcherView() const {
 }
 
 void BrowserNonClientFrameView::UpdateClientArea() {}
+
+void BrowserNonClientFrameView::UpdateMinimumSize() {}
+
+void BrowserNonClientFrameView::ChildPreferredSizeChanged(views::View* child) {
+  if (child == GetProfileSwitcherView()) {
+    // Perform a re-layout if the avatar button has changed, since that can
+    // affect the size of the tabs.
+    frame()->GetRootView()->Layout();
+  }
+}
 
 void BrowserNonClientFrameView::VisibilityChanged(views::View* starting_from,
                                                   bool is_visible) {
@@ -209,7 +221,7 @@ bool BrowserNonClientFrameView::DoesIntersectRect(const views::View* target,
   View::ConvertRectToTarget(this, tabstrip, &rect_in_tabstrip_coords_f);
   gfx::Rect rect_in_tabstrip_coords =
       gfx::ToEnclosingRect(rect_in_tabstrip_coords_f);
-  if (rect_in_tabstrip_coords.bottom() > tabstrip->GetLocalBounds().bottom()) {
+  if (rect_in_tabstrip_coords.y() >= tabstrip->GetLocalBounds().bottom()) {
     // |rect| is below the tabstrip.
     return false;
   }

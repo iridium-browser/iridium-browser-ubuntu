@@ -29,6 +29,7 @@ const char kKeyPermitPermitId[] = "permitRecord.permitId";
 const char kKeyPermitData[] = "permitRecord.data";
 const char kKeyPermitType[] = "permitRecord.type";
 const char kKeyPsk[] = "psk";
+const char kKeySerializedBeaconSeeds[] = "serializedBeaconSeeds";
 
 const char kKeyLabelPrefix[] = "easy-unlock-";
 
@@ -118,13 +119,14 @@ void EasyUnlockKeyManager::DeviceDataToRemoteDeviceDictionary(
   dict->SetString(kKeyPsk, data.psk);
   std::unique_ptr<base::DictionaryValue> permit_record(
       new base::DictionaryValue);
-  dict->Set(kKeyPermitRecord, permit_record.release());
+  dict->Set(kKeyPermitRecord, std::move(permit_record));
   dict->SetString(kKeyPermitId, data.public_key);
   dict->SetString(kKeyPermitData, data.public_key);
   dict->SetString(kKeyPermitType, kPermitTypeLicence);
   dict->SetString(kKeyPermitPermitId,
                   base::StringPrintf(kPermitPermitIdFormat,
                                      account_id.GetUserEmail().c_str()));
+  dict->SetString(kKeySerializedBeaconSeeds, data.serialized_beacon_seeds);
 }
 
 // static
@@ -152,6 +154,14 @@ bool EasyUnlockKeyManager::RemoteDeviceDictionaryToDeviceData(
           static_cast<EasyUnlockDeviceKeyData::BluetoothType>(
               bluetooth_type_as_int);
     }
+  }
+
+  std::string serialized_beacon_seeds;
+  if (dict.GetString(kKeySerializedBeaconSeeds, &serialized_beacon_seeds)) {
+    data->serialized_beacon_seeds = serialized_beacon_seeds;
+  } else {
+    PA_LOG(ERROR) << "Failed to parse key data: "
+                  << "expected serialized_beacon_seeds.";
   }
 
   data->bluetooth_address.swap(bluetooth_address);
@@ -184,7 +194,7 @@ bool EasyUnlockKeyManager::RemoteDeviceListToDeviceDataList(
        it != device_list.end();
        ++it) {
     const base::DictionaryValue* dict;
-    if (!(*it)->GetAsDictionary(&dict) || !dict)
+    if (!it->GetAsDictionary(&dict) || !dict)
       return false;
 
     EasyUnlockDeviceKeyData data;

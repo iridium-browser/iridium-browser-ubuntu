@@ -15,14 +15,14 @@ found in the LICENSE file.
 'use strict';
 
 tr.b.unittest.testSuite(function() {
-  var newAsyncSliceEx = tr.c.TestUtils.newAsyncSliceEx;
-  var newSliceEx = tr.c.TestUtils.newSliceEx;
-  var newFlowEventEx = tr.c.TestUtils.newFlowEventEx;
-  var newModel = tr.c.TestUtils.newModel;
-  var EventSet = tr.model.EventSet;
+  const newAsyncSliceEx = tr.c.TestUtils.newAsyncSliceEx;
+  const newSliceEx = tr.c.TestUtils.newSliceEx;
+  const newFlowEventEx = tr.c.TestUtils.newFlowEventEx;
+  const newModel = tr.c.TestUtils.newModel;
+  const EventSet = tr.model.EventSet;
 
   test('matchByType_oldStyle', function() {
-    var sOuter = newAsyncSliceEx({
+    const sOuter = newAsyncSliceEx({
       title: 'InputLatency',
       cat: 'benchmark',
       start: 0,
@@ -40,7 +40,7 @@ tr.b.unittest.testSuite(function() {
       sOuter.typeName;
     });
 
-    var sInner = newAsyncSliceEx({
+    const sInner = newAsyncSliceEx({
       title: 'InputLatency:GestureScrollUpdate',
       cat: 'benchmark',
       start: 2,
@@ -53,13 +53,15 @@ tr.b.unittest.testSuite(function() {
     sOuter.subSlices.push(sInner);
     assert.isTrue(sOuter instanceof tr.e.cc.InputLatencyAsyncSlice);
     assert.isTrue(sInner instanceof tr.e.cc.InputLatencyAsyncSlice);
-    assert.equal(sOuter.inputLatency, 10);
-    assert.equal(tr.e.cc.INPUT_EVENT_TYPE_NAMES.SCROLL_UPDATE, sInner.typeName);
-    assert.equal(tr.e.cc.INPUT_EVENT_TYPE_NAMES.SCROLL_UPDATE, sOuter.typeName);
+    assert.strictEqual(sOuter.inputLatency, 10);
+    assert.strictEqual(
+        tr.e.cc.INPUT_EVENT_TYPE_NAMES.SCROLL_UPDATE, sInner.typeName);
+    assert.strictEqual(
+        tr.e.cc.INPUT_EVENT_TYPE_NAMES.SCROLL_UPDATE, sOuter.typeName);
   });
 
   test('matchByType_newStyle', function() {
-    var sInfo = newAsyncSliceEx({
+    const sInfo = newAsyncSliceEx({
       title: 'InputLatency::GestureScrollUpdate',
       cat: 'benchmark',
       start: 2,
@@ -75,12 +77,13 @@ tr.b.unittest.testSuite(function() {
     });
 
     assert.isTrue(sInfo instanceof tr.e.cc.InputLatencyAsyncSlice);
-    assert.equal(sInfo.inputLatency, 10);
-    assert.equal(tr.e.cc.INPUT_EVENT_TYPE_NAMES.SCROLL_UPDATE, sInfo.typeName);
+    assert.strictEqual(sInfo.inputLatency, 10);
+    assert.strictEqual(
+        tr.e.cc.INPUT_EVENT_TYPE_NAMES.SCROLL_UPDATE, sInfo.typeName);
   });
 
   test('unknownType', function() {
-    var sInfo = newAsyncSliceEx({
+    const sInfo = newAsyncSliceEx({
       title: 'InputLatency::BadTypeName',
       cat: 'benchmark,latencyInfo',
       start: 2,
@@ -95,16 +98,16 @@ tr.b.unittest.testSuite(function() {
         }
       }
     });
-    assert.equal(tr.e.cc.INPUT_EVENT_TYPE_NAMES.UNKNOWN, sInfo.typeName);
+    assert.strictEqual(tr.e.cc.INPUT_EVENT_TYPE_NAMES.UNKNOWN, sInfo.typeName);
   });
 
   test('getAssociatedEventsBypassRendererMain', function() {
-    var m = newModel(function(m) {
-      var pb = m.getOrCreateProcess(1);
-      var pr = m.getOrCreateProcess(2);
-      var mainBrowserThread = pb.getOrCreateThread(10);
-      var mainRendererThread = pr.getOrCreateThread(20);
-      var compositorThread = pr.getOrCreateThread(21);
+    const m = newModel(function(m) {
+      const pb = m.getOrCreateProcess(1);
+      const pr = m.getOrCreateProcess(2);
+      const mainBrowserThread = pb.getOrCreateThread(10);
+      const mainRendererThread = pr.getOrCreateThread(20);
+      const compositorThread = pr.getOrCreateThread(21);
 
       mainBrowserThread.name = 'CrBrowserMain';
       mainRendererThread.name = 'CrRendererMain';
@@ -176,12 +179,12 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('getAssociatedEventsBypassRendererMainWithOnScroll', function() {
-    var m = newModel(function(m) {
-      var pb = m.getOrCreateProcess(1);
-      var pr = m.getOrCreateProcess(2);
-      var mainBrowserThread = pb.getOrCreateThread(10);
-      var mainRendererThread = pr.getOrCreateThread(20);
-      var compositorThread = pr.getOrCreateThread(21);
+    const m = newModel(function(m) {
+      const pb = m.getOrCreateProcess(1);
+      const pr = m.getOrCreateProcess(2);
+      const mainBrowserThread = pb.getOrCreateThread(10);
+      const mainRendererThread = pr.getOrCreateThread(20);
+      const compositorThread = pr.getOrCreateThread(21);
 
       mainBrowserThread.name = 'CrBrowserMain';
       mainRendererThread.name = 'CrRendererMain';
@@ -252,7 +255,7 @@ tr.b.unittest.testSuite(function() {
         isTopLevel: true,
         startThread: mainBrowserThread
       }));
-      assert.equal(tr.e.cc.INPUT_EVENT_TYPE_NAMES.SCROLL_UPDATE,
+      assert.strictEqual(tr.e.cc.INPUT_EVENT_TYPE_NAMES.SCROLL_UPDATE,
           m.as0.typeName);
 
       m.as1 = mainBrowserThread.asyncSliceGroup.push(newAsyncSliceEx({
@@ -267,7 +270,7 @@ tr.b.unittest.testSuite(function() {
         isTopLevel: true,
         startThread: mainBrowserThread
       }));
-      assert.equal(tr.e.cc.INPUT_EVENT_TYPE_NAMES.SCROLL_UPDATE,
+      assert.strictEqual(tr.e.cc.INPUT_EVENT_TYPE_NAMES.SCROLL_UPDATE,
           m.as1.typeName);
 
       m.as2 = compositorThread.asyncSliceGroup.push(newAsyncSliceEx({
@@ -284,7 +287,7 @@ tr.b.unittest.testSuite(function() {
         isTopLevel: true,
         startThread: compositorThread
       }));
-      assert.equal(tr.e.cc.INPUT_EVENT_TYPE_NAMES.LATENCY_SCROLL_UPDATE,
+      assert.strictEqual(tr.e.cc.INPUT_EVENT_TYPE_NAMES.LATENCY_SCROLL_UPDATE,
           m.as2.typeName);
     });
 
@@ -294,12 +297,12 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('getAssociatedEventsWithoutCommit', function() {
-    var m = newModel(function(m) {
-      var pb = m.getOrCreateProcess(1);
-      var pr = m.getOrCreateProcess(2);
-      var mainBrowserThread = pb.getOrCreateThread(10);
-      var mainRendererThread = pr.getOrCreateThread(20);
-      var compositorThread = pr.getOrCreateThread(21);
+    const m = newModel(function(m) {
+      const pb = m.getOrCreateProcess(1);
+      const pr = m.getOrCreateProcess(2);
+      const mainBrowserThread = pb.getOrCreateThread(10);
+      const mainRendererThread = pr.getOrCreateThread(20);
+      const compositorThread = pr.getOrCreateThread(21);
 
       mainBrowserThread.name = 'CrBrowserMain';
       mainRendererThread.name = 'CrRendererMain';
@@ -385,12 +388,12 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('getAssociatedEventsWillCommit', function() {
-    var m = newModel(function(m) {
-      var pb = m.getOrCreateProcess(1);
-      var pr = m.getOrCreateProcess(2);
-      var mainBrowserThread = pb.getOrCreateThread(10);
-      var mainRendererThread = pr.getOrCreateThread(20);
-      var compositorThread = pr.getOrCreateThread(21);
+    const m = newModel(function(m) {
+      const pb = m.getOrCreateProcess(1);
+      const pr = m.getOrCreateProcess(2);
+      const mainBrowserThread = pb.getOrCreateThread(10);
+      const mainRendererThread = pr.getOrCreateThread(20);
+      const compositorThread = pr.getOrCreateThread(21);
 
       mainBrowserThread.name = 'CrBrowserMain';
       mainRendererThread.name = 'CrRendererMain';
@@ -509,12 +512,12 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('getAssociatedEventsExcludeOtherInputs', function() {
-    var m = newModel(function(m) {
-      var pb = m.getOrCreateProcess(1);
-      var pr = m.getOrCreateProcess(2);
-      var mainBrowserThread = pb.getOrCreateThread(10);
-      var mainRendererThread = pr.getOrCreateThread(20);
-      var compositorThread = pr.getOrCreateThread(21);
+    const m = newModel(function(m) {
+      const pb = m.getOrCreateProcess(1);
+      const pr = m.getOrCreateProcess(2);
+      const mainBrowserThread = pb.getOrCreateThread(10);
+      const mainRendererThread = pr.getOrCreateThread(20);
+      const compositorThread = pr.getOrCreateThread(21);
 
       mainBrowserThread.name = 'CrBrowserMain';
       mainRendererThread.name = 'CrRendererMain';

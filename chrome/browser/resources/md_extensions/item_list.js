@@ -6,10 +6,7 @@ cr.define('extensions', function() {
   var ItemList = Polymer({
     is: 'extensions-item-list',
 
-    behaviors: [
-      Polymer.NeonAnimatableBehavior,
-      Polymer.IronResizableBehavior
-    ],
+    behaviors: [Polymer.NeonAnimatableBehavior, Polymer.IronResizableBehavior],
 
     properties: {
       /** @type {Array<!chrome.developerPrivate.ExtensionInfo>} */
@@ -24,6 +21,12 @@ cr.define('extensions', function() {
       },
 
       filter: String,
+
+      /** @private {Array<!chrome.developerPrivate.ExtensionInfo>} */
+      shownItems_: {
+        type: Array,
+        computed: 'computeShownItems_(items.*, filter)',
+      }
     },
 
     listeners: {
@@ -33,8 +36,8 @@ cr.define('extensions', function() {
     ready: function() {
       /** @type {extensions.AnimationHelper} */
       this.animationHelper = new extensions.AnimationHelper(this, this.$.list);
-      this.animationHelper.setEntryAnimation(extensions.Animation.FADE_IN);
-      this.animationHelper.setExitAnimation(extensions.Animation.HERO);
+      this.animationHelper.setEntryAnimations([extensions.Animation.FADE_IN]);
+      this.animationHelper.setExitAnimations([extensions.Animation.HERO]);
     },
 
     /**
@@ -75,6 +78,15 @@ cr.define('extensions', function() {
       return this.items.filter(function(item) {
         return item.name.toLowerCase().includes(this.filter.toLowerCase());
       }, this);
+    },
+
+    shouldShowEmptyItemsMessage_: function() {
+      return this.items.length === 0;
+    },
+
+    shouldShowEmptySearchMessage_: function() {
+      return !this.shouldShowEmptyItemsMessage_() &&
+          this.shownItems_.length === 0;
     },
   });
 

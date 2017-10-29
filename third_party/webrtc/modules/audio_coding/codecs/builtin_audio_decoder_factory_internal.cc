@@ -13,11 +13,11 @@
 #include <memory>
 #include <vector>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/optional.h"
 #include "webrtc/common_types.h"
 #include "webrtc/modules/audio_coding/codecs/cng/webrtc_cng.h"
 #include "webrtc/modules/audio_coding/codecs/g711/audio_decoder_pcm.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/optional.h"
 #ifdef WEBRTC_CODEC_G722
 #include "webrtc/modules/audio_coding/codecs/g722/audio_decoder_g722.h"
 #endif
@@ -78,7 +78,7 @@ NamedDecoderConstructor decoder_constructors[] = {
      [](const SdpAudioFormat& format, std::unique_ptr<AudioDecoder>* out) {
        if (format.clockrate_hz == 8000 && format.num_channels == 1) {
          if (out) {
-           out->reset(new AudioDecoderIlbc);
+           out->reset(new AudioDecoderIlbcImpl);
          }
          return true;
        } else {
@@ -130,12 +130,12 @@ NamedDecoderConstructor decoder_constructors[] = {
        if (format.clockrate_hz == 8000) {
          if (format.num_channels == 1) {
            if (out) {
-             out->reset(new AudioDecoderG722);
+             out->reset(new AudioDecoderG722Impl);
            }
            return true;
          } else if (format.num_channels == 2) {
            if (out) {
-             out->reset(new AudioDecoderG722Stereo);
+             out->reset(new AudioDecoderG722StereoImpl);
            }
            return true;
          }
@@ -162,7 +162,7 @@ NamedDecoderConstructor decoder_constructors[] = {
        if (format.clockrate_hz == 48000 && format.num_channels == 2 &&
            num_channels) {
          if (out) {
-           out->reset(new AudioDecoderOpus(*num_channels));
+           out->reset(new AudioDecoderOpusImpl(*num_channels));
          }
          return true;
        } else {
@@ -180,30 +180,37 @@ class BuiltinAudioDecoderFactory : public AudioDecoderFactory {
     static std::vector<AudioCodecSpec> specs = [] {
       std::vector<AudioCodecSpec> specs;
 #ifdef WEBRTC_CODEC_OPUS
+      AudioCodecInfo opus_info{48000, 1, 64000, 6000, 510000};
+      opus_info.allow_comfort_noise = false;
+      opus_info.supports_network_adaption = true;
       // clang-format off
-      AudioCodecSpec opus({"opus", 48000, 2, {
-                             {"minptime", "10"},
-                             {"useinbandfec", "1"}
-                           }});
+      SdpAudioFormat opus_format({"opus", 48000, 2, {
+                                    {"minptime", "10"},
+                                    {"useinbandfec", "1"}
+                                  }});
       // clang-format on
-      opus.allow_comfort_noise = false;
-      opus.supports_network_adaption = true;
-      specs.push_back(opus);
+      specs.push_back({std::move(opus_format), opus_info});
 #endif
 #if (defined(WEBRTC_CODEC_ISAC) || defined(WEBRTC_CODEC_ISACFX))
-      specs.push_back(AudioCodecSpec({"isac", 16000, 1}));
+      specs.push_back(AudioCodecSpec{{"ISAC", 16000, 1},
+                                     {16000, 1, 32000, 10000, 56000}});
 #endif
 #if (defined(WEBRTC_CODEC_ISAC))
-      specs.push_back(AudioCodecSpec({"isac", 32000, 1}));
+      specs.push_back(AudioCodecSpec{{"ISAC", 32000, 1},
+                                     {32000, 1, 56000, 10000, 56000}});
 #endif
 #ifdef WEBRTC_CODEC_G722
-      specs.push_back(AudioCodecSpec({"G722", 8000, 1}));
+      specs.push_back(AudioCodecSpec{{"G722", 8000, 1},
+                                     {16000, 1, 64000}});
 #endif
 #ifdef WEBRTC_CODEC_ILBC
-      specs.push_back(AudioCodecSpec({"iLBC", 8000, 1}));
+      specs.push_back(AudioCodecSpec{{"ILBC", 8000, 1},
+                                     {8000, 1, 13300}});
 #endif
-      specs.push_back(AudioCodecSpec({"PCMU", 8000, 1}));
-      specs.push_back(AudioCodecSpec({"PCMA", 8000, 1}));
+      specs.push_back(AudioCodecSpec{{"PCMU", 8000, 1},
+                                     {8000, 1, 64000}});
+      specs.push_back(AudioCodecSpec{{"PCMA", 8000, 1},
+                                     {8000, 1, 64000}});
       return specs;
     }();
     return specs;

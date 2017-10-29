@@ -4,11 +4,11 @@
 
 #include "chrome/browser/ui/ash/launcher/browser_status_monitor.h"
 
-#include "ash/common/shelf/shelf_item_types.h"
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/launcher/browser_shortcut_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_util.h"
@@ -83,19 +83,21 @@ BrowserStatusMonitor::BrowserStatusMonitor(
     : launcher_controller_(launcher_controller),
       browser_tab_strip_tracker_(this, this, this) {
   DCHECK(launcher_controller_);
-  ash::Shell::GetInstance()->activation_client()->AddObserver(this);
+  // TODO(crbug.com/557406): Fix this interaction pattern in Mash.
+  if (!ash_util::IsRunningInMash())
+    ash::Shell::Get()->activation_client()->AddObserver(this);
 }
 
 BrowserStatusMonitor::~BrowserStatusMonitor() {
-  ash::Shell::GetInstance()->activation_client()->RemoveObserver(this);
+  if (!ash_util::IsRunningInMash())
+    ash::Shell::Get()->activation_client()->RemoveObserver(this);
   browser_tab_strip_tracker_.StopObservingAndSendOnBrowserRemoved();
 }
 
 void BrowserStatusMonitor::Initialize() {
   DCHECK(!initialized_);
   initialized_ = true;
-  browser_tab_strip_tracker_.Init(
-      BrowserTabStripTracker::InitWith::ALL_BROWERS);
+  browser_tab_strip_tracker_.Init();
 }
 
 void BrowserStatusMonitor::UpdateAppItemState(
@@ -119,7 +121,7 @@ void BrowserStatusMonitor::UpdateBrowserItemState() {
 }
 
 void BrowserStatusMonitor::OnWindowActivated(
-    aura::client::ActivationChangeObserver::ActivationReason reason,
+    wm::ActivationChangeObserver::ActivationReason reason,
     aura::Window* gained_active,
     aura::Window* lost_active) {
   DCHECK(initialized_);
@@ -261,8 +263,9 @@ void BrowserStatusMonitor::AddV1AppToShelf(Browser* browser) {
   std::string app_id =
       web_app::GetExtensionIdFromApplicationName(browser->app_name());
   if (!app_id.empty()) {
+    if (!IsV1AppInShelfWithAppId(app_id))
+      launcher_controller_->SetV1AppStatus(app_id, ash::STATUS_RUNNING);
     browser_to_app_id_map_[browser] = app_id;
-    launcher_controller_->LockV1AppWithID(app_id);
   }
 }
 
@@ -270,14 +273,25 @@ void BrowserStatusMonitor::RemoveV1AppFromShelf(Browser* browser) {
   DCHECK(browser->is_type_popup() && browser->is_app());
   DCHECK(initialized_);
 
-  if (browser_to_app_id_map_.find(browser) != browser_to_app_id_map_.end()) {
-    launcher_controller_->UnlockV1AppWithID(browser_to_app_id_map_[browser]);
-    browser_to_app_id_map_.erase(browser);
+  auto iter = browser_to_app_id_map_.find(browser);
+  if (iter != browser_to_app_id_map_.end()) {
+    std::string app_id = iter->second;
+    browser_to_app_id_map_.erase(iter);
+    if (!IsV1AppInShelfWithAppId(app_id))
+      launcher_controller_->SetV1AppStatus(app_id, ash::STATUS_CLOSED);
   }
 }
 
 bool BrowserStatusMonitor::IsV1AppInShelf(Browser* browser) {
   return browser_to_app_id_map_.find(browser) != browser_to_app_id_map_.end();
+}
+
+bool BrowserStatusMonitor::IsV1AppInShelfWithAppId(const std::string& app_id) {
+  for (const auto& iter : browser_to_app_id_map_) {
+    if (iter.second == app_id)
+      return true;
+  }
+  return false;
 }
 
 void BrowserStatusMonitor::AddWebContentsObserver(

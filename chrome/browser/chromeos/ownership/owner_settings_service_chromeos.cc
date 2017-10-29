@@ -7,7 +7,7 @@
 #include <keyhi.h>
 #include <stdint.h>
 
-#include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -16,9 +16,12 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -30,6 +33,7 @@
 #include "components/ownership/owner_key_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
+#include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -52,6 +56,10 @@ namespace chromeos {
 
 namespace {
 
+using ReloadKeyCallback =
+    base::Callback<void(const scoped_refptr<PublicKey>& public_key,
+                        const scoped_refptr<PrivateKey>& private_key)>;
+
 bool IsOwnerInTests(const std::string& user_id) {
   if (user_id.empty() ||
       !base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -62,21 +70,24 @@ bool IsOwnerInTests(const std::string& user_id) {
   const base::Value* value = CrosSettings::Get()->GetPref(kDeviceOwner);
   if (!value || value->GetType() != base::Value::Type::STRING)
     return false;
-  return static_cast<const base::StringValue*>(value)->GetString() == user_id;
+  return static_cast<const base::Value*>(value)->GetString() == user_id;
 }
 
-void LoadPrivateKeyByPublicKey(
+void LoadPrivateKeyByPublicKeyOnWorkerThread(
     const scoped_refptr<OwnerKeyUtil>& owner_key_util,
-    scoped_refptr<PublicKey> public_key,
-    const std::string& username_hash,
-    const base::Callback<void(const scoped_refptr<PublicKey>& public_key,
-                              const scoped_refptr<PrivateKey>& private_key)>&
-        callback) {
-  crypto::EnsureNSSInit();
-  crypto::ScopedPK11Slot public_slot =
-      crypto::GetPublicSlotForChromeOSUser(username_hash);
-  crypto::ScopedPK11Slot private_slot = crypto::GetPrivateSlotForChromeOSUser(
-      username_hash, base::Callback<void(crypto::ScopedPK11Slot)>());
+    crypto::ScopedPK11Slot public_slot,
+    crypto::ScopedPK11Slot private_slot,
+    const ReloadKeyCallback& callback) {
+  std::vector<uint8_t> public_key_data;
+  scoped_refptr<PublicKey> public_key;
+  if (!owner_key_util->ImportPublicKey(&public_key_data)) {
+    scoped_refptr<PrivateKey> private_key;
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(callback, public_key, private_key));
+    return;
+  }
+  public_key = new PublicKey();
+  public_key->data().swap(public_key_data);
 
   // If private slot is already available, this will check it. If not, we'll get
   // called again later when the TPM Token is ready, and the slot will be
@@ -98,36 +109,40 @@ void LoadPrivateKeyByPublicKey(
                           base::Bind(callback, public_key, private_key));
 }
 
-void LoadPrivateKey(
+void ContinueLoadPrivateKeyOnIOThread(
     const scoped_refptr<OwnerKeyUtil>& owner_key_util,
     const std::string username_hash,
-    const base::Callback<void(const scoped_refptr<PublicKey>& public_key,
-                              const scoped_refptr<PrivateKey>& private_key)>&
-        callback) {
-  std::vector<uint8_t> public_key_data;
-  scoped_refptr<PublicKey> public_key;
-  if (!owner_key_util->ImportPublicKey(&public_key_data)) {
-    scoped_refptr<PrivateKey> private_key;
-    BrowserThread::PostTask(BrowserThread::UI,
-                            FROM_HERE,
-                            base::Bind(callback, public_key, private_key));
-    return;
-  }
-  public_key = new PublicKey();
-  public_key->data().swap(public_key_data);
-  bool rv = BrowserThread::PostTask(BrowserThread::IO,
-                                    FROM_HERE,
-                                    base::Bind(&LoadPrivateKeyByPublicKey,
-                                               owner_key_util,
-                                               public_key,
-                                               username_hash,
-                                               callback));
-  if (!rv) {
-    // IO thread doesn't exists in unit tests, but it's safe to use NSS from
-    // BlockingPool in unit tests.
-    LoadPrivateKeyByPublicKey(
-        owner_key_util, public_key, username_hash, callback);
-  }
+    const ReloadKeyCallback& callback,
+    crypto::ScopedPK11Slot private_slot) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  scoped_refptr<base::TaskRunner> task_runner =
+      base::CreateTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
+  task_runner->PostTask(
+      FROM_HERE,
+      base::Bind(
+          &LoadPrivateKeyByPublicKeyOnWorkerThread, owner_key_util,
+          base::Passed(crypto::GetPublicSlotForChromeOSUser(username_hash)),
+          base::Passed(std::move(private_slot)), callback));
+}
+
+void LoadPrivateKeyOnIOThread(const scoped_refptr<OwnerKeyUtil>& owner_key_util,
+                              const std::string username_hash,
+                              const ReloadKeyCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  crypto::EnsureNSSInit();
+
+  auto continue_load_private_key_callback =
+      base::Bind(&ContinueLoadPrivateKeyOnIOThread, owner_key_util,
+                 username_hash, callback);
+
+  crypto::ScopedPK11Slot private_slot = crypto::GetPrivateSlotForChromeOSUser(
+      username_hash, continue_load_private_key_callback);
+  if (private_slot)
+    continue_load_private_key_callback.Run(std::move(private_slot));
 }
 
 bool DoesPrivateKeyExistAsyncHelper(
@@ -150,8 +165,9 @@ void DoesPrivateKeyExistAsync(
     return;
   }
   scoped_refptr<base::TaskRunner> task_runner =
-      BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+      base::CreateTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   base::PostTaskAndReplyWithResult(
       task_runner.get(),
       FROM_HERE,
@@ -174,9 +190,6 @@ OwnerSettingsServiceChromeOS::OwnerSettingsServiceChromeOS(
     : ownership::OwnerSettingsService(owner_key_util),
       device_settings_service_(device_settings_service),
       profile_(profile),
-      waiting_for_profile_creation_(true),
-      waiting_for_tpm_token_(true),
-      has_pending_fixups_(false),
       weak_factory_(this),
       store_settings_factory_(this) {
   if (TPMTokenLoader::IsInitialized()) {
@@ -199,6 +212,16 @@ OwnerSettingsServiceChromeOS::OwnerSettingsServiceChromeOS(
   registrar_.Add(this,
                  chrome::NOTIFICATION_PROFILE_CREATED,
                  content::Source<Profile>(profile_));
+
+  if (!user_manager::UserManager::IsInitialized()) {
+    // interactive_ui_tests does not set user manager.
+    waiting_for_easy_unlock_operation_finshed_ = false;
+    return;
+  }
+
+  UserSessionManager::GetInstance()->WaitForEasyUnlockKeyOpsFinished(
+      base::Bind(&OwnerSettingsServiceChromeOS::OnEasyUnlockKeyOpsFinished,
+                 weak_factory_.GetWeakPtr()));
 }
 
 OwnerSettingsServiceChromeOS::~OwnerSettingsServiceChromeOS() {
@@ -230,6 +253,13 @@ void OwnerSettingsServiceChromeOS::OnTPMTokenReady(
 
   // TPMTokenLoader initializes the TPM and NSS database which is necessary to
   // determine ownership. Force a reload once we know these are initialized.
+  ReloadKeypair();
+}
+
+void OwnerSettingsServiceChromeOS::OnEasyUnlockKeyOpsFinished() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  waiting_for_easy_unlock_operation_finshed_ = false;
+
   ReloadKeypair();
 }
 
@@ -391,10 +421,8 @@ std::unique_ptr<em::PolicyData> OwnerSettingsServiceChromeOS::AssemblePolicy(
   policy->set_timestamp(
       (base::Time::Now() - base::Time::UnixEpoch()).InMilliseconds());
   policy->set_username(user_id);
-  if (policy_data->management_mode() == em::PolicyData::LOCAL_OWNER ||
-      policy_data->management_mode() == em::PolicyData::CONSUMER_MANAGED) {
+  if (policy_data->management_mode() == em::PolicyData::LOCAL_OWNER)
     FixupLocalOwnerPolicy(user_id, settings);
-  }
   if (!settings->SerializeToString(policy->mutable_policy_value()))
     return std::unique_ptr<em::PolicyData>();
 
@@ -409,11 +437,8 @@ void OwnerSettingsServiceChromeOS::FixupLocalOwnerPolicy(
     settings->mutable_allow_new_users()->set_allow_new_users(true);
 
   em::UserWhitelistProto* whitelist_proto = settings->mutable_user_whitelist();
-  if (whitelist_proto->user_whitelist().end() ==
-      std::find(whitelist_proto->user_whitelist().begin(),
-                whitelist_proto->user_whitelist().end(), user_id)) {
+  if (!base::ContainsValue(whitelist_proto->user_whitelist(), user_id))
     whitelist_proto->add_user_whitelist(user_id);
-  }
 }
 
 // static
@@ -461,7 +486,7 @@ void OwnerSettingsServiceChromeOS::UpdateDeviceSettings(
            entry != accounts_list->end();
            ++entry) {
         const base::DictionaryValue* entry_dict = NULL;
-        if ((*entry)->GetAsDictionary(&entry_dict)) {
+        if (entry->GetAsDictionary(&entry_dict)) {
           em::DeviceLocalAccountInfoProto* account =
               device_local_accounts->add_account();
           std::string account_id;
@@ -559,7 +584,7 @@ void OwnerSettingsServiceChromeOS::UpdateDeviceSettings(
            i != users->end();
            ++i) {
         std::string email;
-        if ((*i)->GetAsString(&email))
+        if (i->GetAsString(&email))
           whitelist_proto->add_user_whitelist(email);
       }
     }
@@ -591,7 +616,7 @@ void OwnerSettingsServiceChromeOS::UpdateDeviceSettings(
            i != flags->end();
            ++i) {
         std::string flag;
-        if ((*i)->GetAsString(&flag))
+        if (i->GetAsString(&flag))
           flags_proto->add_flags(flag);
       }
     }
@@ -660,17 +685,22 @@ void OwnerSettingsServiceChromeOS::ReloadKeypairImpl(const base::Callback<
          const scoped_refptr<PrivateKey>& private_key)>& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (waiting_for_profile_creation_ || waiting_for_tpm_token_)
+  if (waiting_for_profile_creation_ || waiting_for_tpm_token_ ||
+      waiting_for_easy_unlock_operation_finshed_) {
     return;
-  scoped_refptr<base::TaskRunner> task_runner =
-      BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
-  task_runner->PostTask(
-      FROM_HERE,
-      base::Bind(&LoadPrivateKey,
-                 owner_key_util_,
-                 ProfileHelper::GetUserIdHashFromProfile(profile_),
-                 callback));
+  }
+
+  bool rv = BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&LoadPrivateKeyOnIOThread, owner_key_util_,
+                 ProfileHelper::GetUserIdHashFromProfile(profile_), callback));
+  if (!rv) {
+    // IO thread doesn't exists in unit tests, but it's safe to use NSS from
+    // BlockingPool in unit tests.
+    LoadPrivateKeyOnIOThread(owner_key_util_,
+                             ProfileHelper::GetUserIdHashFromProfile(profile_),
+                             callback);
+  }
 }
 
 void OwnerSettingsServiceChromeOS::StorePendingChanges() {
@@ -700,8 +730,10 @@ void OwnerSettingsServiceChromeOS::StorePendingChanges() {
                      &settings);
   has_pending_fixups_ = false;
 
+  scoped_refptr<base::TaskRunner> task_runner =
+      base::CreateTaskRunnerWithTraits({base::MayBlock()});
   bool rv = AssembleAndSignPolicyAsync(
-      content::BrowserThread::GetBlockingPool(), std::move(policy),
+      task_runner.get(), std::move(policy),
       base::Bind(&OwnerSettingsServiceChromeOS::OnPolicyAssembledAndSigned,
                  store_settings_factory_.GetWeakPtr()));
   if (!rv)

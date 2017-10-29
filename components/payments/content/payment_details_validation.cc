@@ -7,8 +7,8 @@
 #include <set>
 #include <vector>
 
-#include "components/payments/content/payment_request.mojom.h"
 #include "components/payments/content/payments_validators.h"
+#include "third_party/WebKit/public/platform/modules/payments/payment_request.mojom.h"
 
 namespace payments {
 namespace {
@@ -20,11 +20,6 @@ bool validateShippingOptionOrPaymentItem(
     const T& item,
     const payments::mojom::PaymentItemPtr& total,
     std::string* error_message) {
-  if (item->label.empty()) {
-    *error_message = "Item label required";
-    return false;
-  }
-
   if (!item->amount) {
     *error_message = "Currency amount required";
     return false;
@@ -37,11 +32,6 @@ bool validateShippingOptionOrPaymentItem(
 
   if (item->amount->value.empty()) {
     *error_message = "Currency value required";
-    return false;
-  }
-
-  if (item->amount->currency != total->amount->currency) {
-    *error_message = "Currencies must all be equal";
     return false;
   }
 
@@ -142,18 +132,15 @@ bool validatePaymentDetailsModifiers(
 
 bool validatePaymentDetails(const mojom::PaymentDetailsPtr& details,
                             std::string* error_message) {
-  if (details->total.is_null()) {
-    *error_message = "Must specify total";
-    return false;
-  }
+  if (details->total) {
+    if (!validateShippingOptionOrPaymentItem(details->total, details->total,
+                                             error_message))
+      return false;
 
-  if (!validateShippingOptionOrPaymentItem(details->total, details->total,
-                                           error_message))
-    return false;
-
-  if (details->total->amount->value[0] == '-') {
-    *error_message = "Total amount value should be non-negative";
-    return false;
+    if (details->total->amount->value[0] == '-') {
+      *error_message = "Total amount value should be non-negative";
+      return false;
+    }
   }
 
   if (details->display_items.size()) {

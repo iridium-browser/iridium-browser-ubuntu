@@ -16,33 +16,33 @@
 
 #include "base/base64.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/i18n/rtl.h"
 #include "base/ios/block_types.h"
 #include "base/ios/ios_util.h"
-#include "base/ios/weak_nsobject.h"
 #include "base/logging.h"
 #include "base/mac/bind_objc_block.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
-#include "base/mac/objc_property_releaser.h"
-#import "base/mac/scoped_block.h"
-#import "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_restrictions.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/image_fetcher/ios/ios_image_data_fetcher_wrapper.h"
 #include "components/infobars/core/infobar_manager.h"
+#include "components/payments/core/features.h"
 #include "components/prefs/pref_service.h"
-#include "components/reading_list/core/reading_list_switches.h"
-#include "components/reading_list/ios/reading_list_model.h"
+#include "components/reading_list/core/reading_list_model.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/sessions/core/tab_restore_service_helper.h"
@@ -53,7 +53,6 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/chrome_url_util.h"
-#import "ios/chrome/browser/content_suggestions/content_suggestions_coordinator.h"
 #include "ios/chrome/browser/experimental_flags.h"
 #import "ios/chrome/browser/favicon/favicon_loader.h"
 #include "ios/chrome/browser/favicon/ios_chrome_favicon_loader_factory.h"
@@ -66,10 +65,8 @@
 #include "ios/chrome/browser/infobars/infobar_container_view.h"
 #import "ios/chrome/browser/metrics/new_tab_page_uma.h"
 #include "ios/chrome/browser/metrics/tab_usage_recorder.h"
-#import "ios/chrome/browser/native_app_launcher/native_app_navigation_controller.h"
 #import "ios/chrome/browser/open_url_util.h"
 #import "ios/chrome/browser/passwords/password_controller.h"
-#import "ios/chrome/browser/payments/payment_request_manager.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/reading_list/offline_url_utils.h"
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
@@ -80,7 +77,7 @@
 #import "ios/chrome/browser/snapshots/snapshot_cache.h"
 #import "ios/chrome/browser/snapshots/snapshot_overlay.h"
 #import "ios/chrome/browser/snapshots/snapshot_overlay_provider.h"
-#import "ios/chrome/browser/storekit_launcher.h"
+#import "ios/chrome/browser/store_kit/store_kit_tab_helper.h"
 #import "ios/chrome/browser/tabs/legacy_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/tabs/tab_dialog_delegate.h"
@@ -100,24 +97,20 @@
 #import "ios/chrome/browser/ui/browser_view_controller_dependency_factory.h"
 #import "ios/chrome/browser/ui/chrome_web_view_factory.h"
 #import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
+#import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
 #include "ios/chrome/browser/ui/commands/ios_command_ids.h"
+#import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/ui/commands/open_url_command.h"
 #import "ios/chrome/browser/ui/commands/reading_list_add_command.h"
 #import "ios/chrome/browser/ui/commands/show_mail_composer_command.h"
 #import "ios/chrome/browser/ui/context_menu/context_menu_coordinator.h"
-#import "ios/chrome/browser/ui/contextual_search/contextual_search_controller.h"
-#import "ios/chrome/browser/ui/contextual_search/contextual_search_mask_view.h"
-#import "ios/chrome/browser/ui/contextual_search/contextual_search_metrics.h"
-#import "ios/chrome/browser/ui/contextual_search/contextual_search_panel_protocols.h"
-#import "ios/chrome/browser/ui/contextual_search/contextual_search_panel_view.h"
-#import "ios/chrome/browser/ui/contextual_search/touch_to_search_permissions_mediator.h"
 #import "ios/chrome/browser/ui/dialogs/dialog_presenter.h"
 #import "ios/chrome/browser/ui/dialogs/java_script_dialog_presenter_impl.h"
 #import "ios/chrome/browser/ui/elements/activity_overlay_coordinator.h"
 #import "ios/chrome/browser/ui/external_file_controller.h"
 #import "ios/chrome/browser/ui/external_file_remover.h"
-#include "ios/chrome/browser/ui/file_locations.h"
 #import "ios/chrome/browser/ui/find_bar/find_bar_controller_ios.h"
 #import "ios/chrome/browser/ui/first_run/welcome_to_chrome_view_controller.h"
 #import "ios/chrome/browser/ui/fullscreen_controller.h"
@@ -129,6 +122,7 @@
 #import "ios/chrome/browser/ui/omnibox/page_info_view_controller.h"
 #import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_controller.h"
 #import "ios/chrome/browser/ui/page_not_available_controller.h"
+#import "ios/chrome/browser/ui/payments/payment_request_manager.h"
 #import "ios/chrome/browser/ui/preload_controller.h"
 #import "ios/chrome/browser/ui/preload_controller_delegate.h"
 #import "ios/chrome/browser/ui/print/print_controller.h"
@@ -147,7 +141,6 @@
 #import "ios/chrome/browser/ui/toolbar/toolbar_controller.h"
 #include "ios/chrome/browser/ui/toolbar/toolbar_model_delegate_ios.h"
 #include "ios/chrome/browser/ui/toolbar/toolbar_model_ios.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_menu_context.h"
 #import "ios/chrome/browser/ui/tools_menu/tools_menu_view_item.h"
 #import "ios/chrome/browser/ui/tools_menu/tools_popup_controller.h"
 #include "ios/chrome/browser/ui/ui_util.h"
@@ -155,11 +148,12 @@
 #import "ios/chrome/browser/ui/util/pasteboard_util.h"
 #import "ios/chrome/browser/ui/voice/text_to_speech_player.h"
 #include "ios/chrome/browser/upgrade/upgrade_center.h"
+#import "ios/chrome/browser/web/blocked_popup_tab_helper.h"
 #import "ios/chrome/browser/web/error_page_content.h"
 #import "ios/chrome/browser/web/passkit_dialog_provider.h"
 #import "ios/chrome/browser/web/repost_form_tab_helper.h"
-#import "ios/chrome/browser/xcallback_parameters.h"
-#import "ios/chrome/common/material_timing.h"
+#import "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/web_state_list/web_state_opener.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/net/request_tracker.h"
@@ -171,19 +165,19 @@
 #include "ios/public/provider/chrome/browser/voice/voice_search_controller.h"
 #include "ios/public/provider/chrome/browser/voice/voice_search_controller_delegate.h"
 #include "ios/public/provider/chrome/browser/voice/voice_search_provider.h"
-#import "ios/web/navigation/crw_session_controller.h"
-#import "ios/web/navigation/crw_session_entry.h"
-#include "ios/web/navigation/navigation_manager_impl.h"
+#import "ios/shared/chrome/browser/ui/commands/command_dispatcher.h"
+#import "ios/shared/chrome/browser/ui/tools_menu/tools_menu_configuration.h"
 #include "ios/web/public/active_state_manager.h"
 #include "ios/web/public/navigation_item.h"
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/referrer_util.h"
 #include "ios/web/public/ssl_status.h"
 #include "ios/web/public/url_scheme_util.h"
+#include "ios/web/public/user_agent.h"
 #include "ios/web/public/web_client.h"
 #import "ios/web/public/web_state/context_menu_params.h"
-#import "ios/web/public/web_state/crw_web_view_proxy.h"
 #import "ios/web/public/web_state/ui/crw_native_content_provider.h"
+#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
 #include "ios/web/public/web_state/web_state.h"
 #import "ios/web/public/web_state/web_state_delegate_bridge.h"
 #include "ios/web/public/web_thread.h"
@@ -198,6 +192,10 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using base::UserMetricsAction;
 using bookmarks::BookmarkNode;
@@ -268,50 +266,79 @@ enum HeaderBehaviour {
   Overlap
 };
 
-struct HeaderDefinition {
-  // The header view.
-  base::scoped_nsobject<UIView> view;
-  // How to place the view, and its behaviour when the headers move.
-  HeaderBehaviour behaviour;
-  // Reduces the height of a header to adjust for shadows.
-  CGFloat heightAdjustement;
-  // Nudges that particular header up by this number of points.
-  CGFloat inset;
-};
-
 const CGFloat kIPadFindBarOverlap = 11;
 
 bool IsURLAllowedInIncognito(const GURL& url) {
-  // Most URLs are allowed in incognito; the following are exceptions.
-  if (!url.SchemeIs(kChromeUIScheme))
-    return true;
-  std::string url_host = url.host();
-  return url_host != kChromeUIHistoryHost &&
-         url_host != kChromeUIHistoryFrameHost;
+  // Most URLs are allowed in incognito; the following is an exception.
+  return !(url.SchemeIs(kChromeUIScheme) && url.host() == kChromeUIHistoryHost);
 }
 
 // Temporary key to use when storing native controllers vended to tabs before
 // they are added to the tab model.
 NSString* const kNativeControllerTemporaryKey = @"NativeControllerTemporaryKey";
 
-// Helper function to return the FindInPageController for the given |tab|.  If
-// |tab| is nullptr or has no FindTabHelper, returns nil.
-FindInPageController* GetFindInPageController(Tab* tab) {
-  if (!tab) {
-    return nil;
-  }
-  FindTabHelper* helper = FindTabHelper::FromWebState(tab.webState);
-  if (!helper) {
-    return nil;
-  }
-  return helper->GetController();
+}  // namespace
+
+#pragma mark - HeaderDefinition helper
+
+@interface HeaderDefinition : NSObject
+
+// The header view.
+@property(nonatomic, strong) UIView* view;
+// How to place the view, and its behaviour when the headers move.
+@property(nonatomic, assign) HeaderBehaviour behaviour;
+// Reduces the height of a header to adjust for shadows.
+@property(nonatomic, assign) CGFloat heightAdjustement;
+// Nudges that particular header up by this number of points.
+@property(nonatomic, assign) CGFloat inset;
+
+- (instancetype)initWithView:(UIView*)view
+             headerBehaviour:(HeaderBehaviour)behaviour
+            heightAdjustment:(CGFloat)heightAdjustment
+                       inset:(CGFloat)inset;
+
++ (instancetype)definitionWithView:(UIView*)view
+                   headerBehaviour:(HeaderBehaviour)behaviour
+                  heightAdjustment:(CGFloat)heightAdjustment
+                             inset:(CGFloat)inset;
+
+@end
+
+@implementation HeaderDefinition
+@synthesize view = _view;
+@synthesize behaviour = _behaviour;
+@synthesize heightAdjustement = _heightAdjustement;
+@synthesize inset = _inset;
+
++ (instancetype)definitionWithView:(UIView*)view
+                   headerBehaviour:(HeaderBehaviour)behaviour
+                  heightAdjustment:(CGFloat)heightAdjustment
+                             inset:(CGFloat)inset {
+  return [[self alloc] initWithView:view
+                    headerBehaviour:behaviour
+                   heightAdjustment:heightAdjustment
+                              inset:inset];
 }
 
-}  // anonymous namespace
+- (instancetype)initWithView:(UIView*)view
+             headerBehaviour:(HeaderBehaviour)behaviour
+            heightAdjustment:(CGFloat)heightAdjustment
+                       inset:(CGFloat)inset {
+  self = [super init];
+  if (self) {
+    _view = view;
+    _behaviour = behaviour;
+    _heightAdjustement = heightAdjustment;
+    _inset = inset;
+  }
+  return self;
+}
+
+@end
+
+#pragma mark - BVC
 
 @interface BrowserViewController ()<AppRatingPromptDelegate,
-                                    ContextualSearchControllerDelegate,
-                                    ContextualSearchPanelMotionObserver,
                                     CRWNativeContentProvider,
                                     CRWWebStateDelegate,
                                     DialogPresenterDelegate,
@@ -336,11 +363,10 @@ FindInPageController* GetFindInPageController(Tab* tab) {
                                     VoiceSearchBarOwner> {
   // The dependency factory passed on initialization.  Used to vend objects used
   // by the BVC.
-  base::scoped_nsobject<BrowserViewControllerDependencyFactory>
-      _dependencyFactory;
+  BrowserViewControllerDependencyFactory* _dependencyFactory;
 
   // The browser's tab model.
-  base::scoped_nsobject<TabModel> _model;
+  TabModel* _model;
 
   // Facade objects used by |_toolbarController|.
   // Must outlive |_toolbarController|.
@@ -348,26 +374,29 @@ FindInPageController* GetFindInPageController(Tab* tab) {
   std::unique_ptr<ToolbarModelIOS> _toolbarModelIOS;
 
   // Preload controller.  Must outlive |_toolbarController|.
-  base::scoped_nsobject<PreloadController> _preloadController;
+  PreloadController* _preloadController;
 
   // The WebToolbarController used to display the omnibox.
-  base::scoped_nsobject<WebToolbarController> _toolbarController;
+  WebToolbarController* _toolbarController;
 
   // Controller for edge swipe gestures for page and tab navigation.
-  base::scoped_nsobject<SideSwipeController> _sideSwipeController;
+  SideSwipeController* _sideSwipeController;
 
   // Handles displaying the context menu for all form factors.
-  base::scoped_nsobject<ContextMenuCoordinator> _contextMenuCoordinator;
+  ContextMenuCoordinator* _contextMenuCoordinator;
 
   // Backing object for property of the same name.
-  base::scoped_nsobject<DialogPresenter> _dialogPresenter;
+  DialogPresenter* _dialogPresenter;
 
   // Handles presentation of JavaScript dialogs.
   std::unique_ptr<JavaScriptDialogPresenterImpl> _javaScriptDialogPresenter;
 
+  // Handles command dispatching.
+  CommandDispatcher* _dispatcher;
+
   // Keyboard commands provider.  It offloads most of the keyboard commands
   // management off of the BVC.
-  base::scoped_nsobject<KeyCommandsProvider> _keyCommandsProvider;
+  KeyCommandsProvider* _keyCommandsProvider;
 
   // Calls to |-relinquishedToolbarController| will set this to yes, and calls
   // to |-reparentToolbarController| will reset it to NO.
@@ -377,49 +406,36 @@ FindInPageController* GetFindInPageController(Tab* tab) {
   // The reference is weak because it's possible for the toolbar owner to be
   // deallocated mid-animation due to memory pressure or a tab being closed
   // before the animation is finished.
-  base::WeakNSObject<id> _relinquishedToolbarOwner;
+  __weak id _relinquishedToolbarOwner;
 
   // Always present on tablet; always nil on phone.
-  base::scoped_nsobject<TabStripController> _tabStripController;
-
-  // The contextual search controller.
-  base::scoped_nsobject<ContextualSearchController> _contextualSearchController;
-
-  // The contextual search panel (always a subview of |self.view| if it exists).
-  ContextualSearchPanelView* _contextualSearchPanel;
-
-  // The contextual search mask (always a subview of |self.view| if it exists).
-  ContextualSearchMaskView* _contextualSearchMask;
+  TabStripController* _tabStripController;
 
   // Used to inject Javascript implementing the PaymentRequest API and to
   // display the UI.
-  base::scoped_nsobject<PaymentRequestManager> _paymentRequestManager;
+  PaymentRequestManager* _paymentRequestManager;
 
   // Used to display the Page Info UI.  Nil if not visible.
-  base::scoped_nsobject<PageInfoViewController> _pageInfoController;
+  PageInfoViewController* _pageInfoController;
 
   // Used to display the Voice Search UI.  Nil if not visible.
   scoped_refptr<VoiceSearchController> _voiceSearchController;
 
   // Used to display the QR Scanner UI. Nil if not visible.
-  base::scoped_nsobject<QRScannerViewController> _qrScannerViewController;
+  QRScannerViewController* _qrScannerViewController;
 
   // Used to display the Reading List.
-  base::scoped_nsobject<ReadingListCoordinator> _readingListCoordinator;
-
-  // Used to display the Suggestions.
-  base::scoped_nsobject<ContentSuggestionsCoordinator>
-      _contentSuggestionsCoordinator;
+  ReadingListCoordinator* _readingListCoordinator;
 
   // Used to display the Find In Page UI. Nil if not visible.
-  base::scoped_nsobject<FindBarControllerIOS> _findBarController;
+  FindBarControllerIOS* _findBarController;
 
   // Used to display the Print UI. Nil if not visible.
-  base::scoped_nsobject<PrintController> _printController;
+  PrintController* _printController;
 
   // Records the set of domains for which full screen alert has already been
   // shown.
-  base::scoped_nsobject<NSMutableSet> _fullScreenAlertShown;
+  NSMutableSet* _fullScreenAlertShown;
 
   // Adapter to let BVC be the delegate for WebState.
   std::unique_ptr<web::WebStateDelegateBridge> _webStateDelegate;
@@ -437,6 +453,9 @@ FindInPageController* GetFindInPageController(Tab* tab) {
   BOOL _locationBarEditCancelledLoad;
   // YES if waiting for a foreground tab due to expectNewForegroundTab.
   BOOL _expectingForegroundTab;
+
+  // Whether or not -shutdown has been called.
+  BOOL _isShutdown;
 
   // The ChromeBrowserState associated with this BVC.
   ios::ChromeBrowserState* _browserState;  // weak
@@ -460,16 +479,16 @@ FindInPageController* GetFindInPageController(Tab* tab) {
 
   // Voice search bar at the bottom of the view overlayed on |_contentArea|
   // when displaying voice search results.
-  base::scoped_nsprotocol<UIView<VoiceSearchBar>*> _voiceSearchBar;
+  UIView<VoiceSearchBar>* _voiceSearchBar;
 
   // The image fetcher used to save images and perform image-based searches.
   std::unique_ptr<image_fetcher::IOSImageDataFetcherWrapper> _imageFetcher;
 
   // Card side swipe view.
-  base::scoped_nsobject<CardSideSwipeView> _sideSwipeView;
+  CardSideSwipeView* _sideSwipeView;
 
   // Dominant color cache. Key: (NSString*)url, val: (UIColor*)dominantColor.
-  base::scoped_nsobject<NSMutableDictionary> _dominantColorCache;
+  NSMutableDictionary* _dominantColorCache;
 
   // Bridge to register for bookmark changes.
   std::unique_ptr<BrowserBookmarkModelBridge> _bookmarkModelBridge;
@@ -479,40 +498,36 @@ FindInPageController* GetFindInPageController(Tab* tab) {
 
   // The controller that shows the bookmarking UI after the user taps the star
   // button.
-  base::scoped_nsobject<BookmarkInteractionController>
-      _bookmarkInteractionController;
+  BookmarkInteractionController* _bookmarkInteractionController;
 
   // Used to remove unreferenced external files.
   std::unique_ptr<ExternalFileRemover> _externalFileRemover;
 
   // The currently displayed "Rate This App" dialog, if one exists.
-  base::scoped_nsprotocol<id<AppRatingPrompt>> _rateThisAppDialog;
+  id<AppRatingPrompt> _rateThisAppDialog;
 
   // Maps tab IDs to the most recent native content controller vended to that
   // tab's web controller.
-  base::scoped_nsobject<NSMapTable> _nativeControllersForTabIDs;
+  NSMapTable* _nativeControllersForTabIDs;
 
   // Notifies the toolbar menu of reading list changes.
-  base::scoped_nsobject<ReadingListMenuNotifier> _readingListMenuNotifier;
+  ReadingListMenuNotifier* _readingListMenuNotifier;
 
   // The sender for the last received IDC_VOICE_SEARCH command.
-  base::WeakNSObject<UIView> _voiceSearchButton;
+  __weak UIView* _voiceSearchButton;
 
   // Coordinator for displaying alerts.
-  base::scoped_nsobject<AlertCoordinator> _alertCoordinator;
-
-  // Releaser for properties that aren't backed by scoped_nsobjects.
-  base::mac::ObjCPropertyReleaser _propertyReleaser_BrowserViewController;
+  AlertCoordinator* _alertCoordinator;
 }
 
 // The browser's side swipe controller.  Lazily instantiated on the first call.
-@property(nonatomic, retain, readonly) SideSwipeController* sideSwipeController;
+@property(nonatomic, strong, readonly) SideSwipeController* sideSwipeController;
 // The browser's preload controller.
-@property(nonatomic, retain, readonly) PreloadController* preloadController;
+@property(nonatomic, strong, readonly) PreloadController* preloadController;
 // The dialog presenter for this BVC's tab model.
-@property(nonatomic, retain, readonly) DialogPresenter* dialogPresenter;
+@property(nonatomic, strong, readonly) DialogPresenter* dialogPresenter;
 // The object that manages keyboard commands on behalf of the BVC.
-@property(nonatomic, retain, readonly) KeyCommandsProvider* keyCommandsProvider;
+@property(nonatomic, strong, readonly) KeyCommandsProvider* keyCommandsProvider;
 // Whether the current tab can enable the reader mode menu item.
 @property(nonatomic, assign, readonly) BOOL canUseReaderMode;
 // Whether the current tab can enable the request desktop menu item.
@@ -533,8 +548,7 @@ FindInPageController* GetFindInPageController(Tab* tab) {
 @property(nonatomic, assign, readonly, getter=isToolbarOnScreen)
     BOOL toolbarOnScreen;
 // Whether a new tab animation is occurring.
-@property(nonatomic, assign, readonly, getter=isInNewTabAnimation)
-    BOOL inNewTabAnimation;
+@property(nonatomic, assign, getter=isInNewTabAnimation) BOOL inNewTabAnimation;
 // Whether BVC prefers to hide the status bar. This value is used to determine
 // the response from the |prefersStatusBarHidden| method.
 @property(nonatomic, assign) BOOL hideStatusBar;
@@ -542,8 +556,20 @@ FindInPageController* GetFindInPageController(Tab* tab) {
 @property(nonatomic, readonly) BOOL shouldShowVoiceSearchBar;
 // Coordinator for displaying a modal overlay with activity indicator to prevent
 // the user from interacting with the browser view.
-@property(nonatomic, retain)
+@property(nonatomic, strong)
     ActivityOverlayCoordinator* activityOverlayCoordinator;
+// A block to be run when the |tabWasAdded:| method completes the animation
+// for the presentation of a new tab. Can be used to record performance metrics.
+@property(nonatomic, strong, nullable)
+    ProceduralBlock foregroundTabWasAddedCompletionBlock;
+
+// The user agent type used to load the currently visible page. User agent type
+// is NONE if there is no visible page or visible page is a native page.
+@property(nonatomic, assign, readonly) web::UserAgentType userAgentType;
+
+// Returns the header views, all the chrome on top of the page, including the
+// ones that cannot be scrolled off screen by full screen.
+@property(nonatomic, strong, readonly) NSArray<HeaderDefinition*>* headerViews;
 
 // BVC initialization:
 // If the BVC is initialized with a valid browser state & tab model immediately,
@@ -599,19 +625,16 @@ FindInPageController* GetFindInPageController(Tab* tab) {
 - (void)displayTab:(Tab*)tab isNewSelection:(BOOL)newSelection;
 // Initializes the bookmark interaction controller if not already initialized.
 - (void)initializeBookmarkInteractionController;
-
-// Shows the tools menu popup.
-- (void)showToolsMenuPopup;
 // Add all delegates to the provided |tab|.
 - (void)installDelegatesForTab:(Tab*)tab;
+// Remove delegates from the provided |tab|.
+- (void)uninstallDelegatesForTab:(Tab*)tab;
 // Closes the current tab, with animation if applicable.
 - (void)closeCurrentTab;
 // Shows the menu to initiate sharing |data|.
 - (void)sharePageWithData:(ShareToData*)data;
 // Convenience method to share the current page.
 - (void)sharePage;
-// Prints the web page in the current tab.
-- (void)print;
 // Shows the Online Help Page in a tab.
 - (void)showHelpPage;
 // Show the bookmarks page.
@@ -637,7 +660,7 @@ FindInPageController* GetFindInPageController(Tab* tab) {
 // Updates the toolbar display based on the current tab.
 - (void)updateToolbar;
 // Updates |dialogPresenter|'s |active| property to account for the BVC's
-// |active| and |visible| properties.
+// |active|, |visible|, and |inNewTabAnimation| properties.
 - (void)updateDialogPresenterActiveState;
 // Dismisses popups and modal dialogs that are displayed above the BVC upon size
 // changes (e.g. rotation, resizing,…) or when the accessibility escape gesture
@@ -684,8 +707,6 @@ FindInPageController* GetFindInPageController(Tab* tab) {
 - (void)tabLoadComplete:(Tab*)tab withSuccess:(BOOL)success;
 // Evaluates Javascript asynchronously using the current page context.
 - (void)openJavascript:(NSString*)javascript;
-// Sets the desktop user agent flag and reload the current page.
-- (void)enableDesktopUserAgent;
 // Helper methods used by ShareToDelegate methods.
 // Shows an alert with the given title and message id.
 - (void)showErrorAlert:(int)titleMessageId message:(int)messageId;
@@ -701,9 +722,12 @@ FindInPageController* GetFindInPageController(Tab* tab) {
 - (void)managePermissionAndSaveImage:(NSData*)data
                    withFileExtension:(NSString*)fileExtension;
 // Saves the image. In order to keep the metadata of the image, the image is
-// saved as a temporary file on disk then saved in photos.
-// This should be called on FILE thread.
-- (void)saveImage:(NSData*)data withFileExtension:(NSString*)fileExtension;
+// saved as a temporary file on disk then saved in photos. Saving will happen
+// on a background sequence and the completion block will be invoked on that
+// sequence.
+- (void)saveImage:(NSData*)data
+    withFileExtension:(NSString*)fileExtension
+           completion:(void (^)(BOOL, NSError*))completionBlock;
 // Called when Chrome has been denied access to the photos or videos and the
 // user can change it.
 // Shows a privacy alert on the main queue, allowing the user to go to Chrome's
@@ -739,15 +763,12 @@ FindInPageController* GetFindInPageController(Tab* tab) {
 // The LogoAnimationControllerOwner to be used for the next logo transition
 // animation.
 - (id<LogoAnimationControllerOwner>)currentLogoAnimationControllerOwner;
-// Returns the header views, all the chrome on top of the page, including the
-// ones that cannot be scrolled off screen by full screen.
-- (const std::vector<HeaderDefinition>)headerViews;
 // Returns the footer view if one exists (e.g. the voice search bar).
 - (UIView*)footerView;
 // Returns the height of the header view for the tab model's current tab.
 - (CGFloat)headerHeight;
 // Sets the frame for the headers.
-- (void)setFramesForHeaders:(const std::vector<HeaderDefinition>)headers
+- (void)setFramesForHeaders:(NSArray<HeaderDefinition*>*)headers
                    atOffset:(CGFloat)headerOffset;
 // Returns the y coordinate for the footer's frame when animating the footer
 // in/out of fullscreen.
@@ -767,9 +788,9 @@ FindInPageController* GetFindInPageController(Tab* tab) {
 // to download the image.
 - (void)saveImageAtURL:(const GURL&)url referrer:(const web::Referrer&)referrer;
 
-// Determines the center of |sender| if it's a view or a toolbar item, and save
-// the CGPoint and timestamp.
-- (void)setLastTapPoint:(id)sender;
+// Record the last tap point based on the |originPoint| (if any) passed in
+// |command|.
+- (void)setLastTapPoint:(OpenNewTabCommand*)command;
 // Get return the last stored |_lastTapPoint| if it's been set within the past
 // second.
 - (CGPoint)lastTapPoint;
@@ -826,7 +847,7 @@ class InfoBarContainerDelegateIOS
 
   bool DrawInfoBarArrows(int* x) const override { return false; }
 
-  BrowserViewController* controller_;  // weak
+  __weak BrowserViewController* controller_;
 };
 
 // Called from the BrowserBookmarkModelBridge from C++ -> ObjC.
@@ -885,7 +906,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   }
 
  private:
-  BrowserViewController* owner_;  // Weak.
+  __weak BrowserViewController* owner_;
 };
 
 @implementation BrowserViewController
@@ -899,23 +920,46 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 @synthesize hideStatusBar = _hideStatusBar;
 @synthesize activityOverlayCoordinator = _activityOverlayCoordinator;
 @synthesize presenting = _presenting;
+@synthesize foregroundTabWasAddedCompletionBlock =
+    _foregroundTabWasAddedCompletionBlock;
 
 #pragma mark - Object lifecycle
 
-- (instancetype)initWithTabModel:(TabModel*)model
-                    browserState:(ios::ChromeBrowserState*)browserState
-               dependencyFactory:
-                   (BrowserViewControllerDependencyFactory*)factory {
+- (instancetype)
+          initWithTabModel:(TabModel*)model
+              browserState:(ios::ChromeBrowserState*)browserState
+         dependencyFactory:(BrowserViewControllerDependencyFactory*)factory
+applicationCommandEndpoint:(id<ApplicationCommands>)applicationCommandEndpoint {
   self = [super initWithNibName:nil bundle:base::mac::FrameworkBundle()];
   if (self) {
     DCHECK(factory);
-    _propertyReleaser_BrowserViewController.Init(self,
-                                                 [BrowserViewController class]);
-    _dependencyFactory.reset([factory retain]);
-    _nativeControllersForTabIDs.reset(
-        [[NSMapTable strongToWeakObjectsMapTable] retain]);
-    _dialogPresenter.reset([[DialogPresenter alloc] initWithDelegate:self
-                                            presentingViewController:self]);
+
+    _dependencyFactory = factory;
+    _nativeControllersForTabIDs = [NSMapTable strongToWeakObjectsMapTable];
+    _dialogPresenter = [[DialogPresenter alloc] initWithDelegate:self
+                                        presentingViewController:self];
+    _dispatcher = [[CommandDispatcher alloc] init];
+    [_dispatcher startDispatchingToTarget:self
+                              forProtocol:@protocol(UrlLoader)];
+    [_dispatcher startDispatchingToTarget:self
+                              forProtocol:@protocol(WebToolbarDelegate)];
+    [_dispatcher startDispatchingToTarget:self
+                              forSelector:@selector(chromeExecuteCommand:)];
+    [_dispatcher startDispatchingToTarget:self
+                              forProtocol:@protocol(BrowserCommands)];
+    [_dispatcher startDispatchingToTarget:applicationCommandEndpoint
+                              forProtocol:@protocol(ApplicationCommands)];
+    // -startDispatchingToTarget:forProtocol: doesn't pick up protocols the
+    // passed protocol conforms to, so ApplicationSettingsCommands is explicitly
+    // dispatched to the endpoint as well. Since this is potentially
+    // fragile, DCHECK that it should still work (if the endpoint is nonnull).
+    DCHECK(!applicationCommandEndpoint ||
+           [applicationCommandEndpoint
+               conformsToProtocol:@protocol(ApplicationSettingsCommands)]);
+    [_dispatcher
+        startDispatchingToTarget:applicationCommandEndpoint
+                     forProtocol:@protocol(ApplicationSettingsCommands)];
+
     _javaScriptDialogPresenter.reset(
         new JavaScriptDialogPresenterImpl(_dialogPresenter));
     _webStateDelegate.reset(new web::WebStateDelegateBridge(self));
@@ -926,7 +970,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       [self updateWithTabModel:model browserState:browserState];
     if ([[NSUserDefaults standardUserDefaults]
             boolForKey:@"fullScreenShowAlert"]) {
-      _fullScreenAlertShown.reset([[NSMutableSet alloc] init]);
+      _fullScreenAlertShown = [[NSMutableSet alloc] init];
     }
   }
   return self;
@@ -944,20 +988,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 - (void)dealloc {
-  _tabStripController.reset();
-  _infoBarContainer.reset();
-  _readingListMenuNotifier.reset();
-  if (_bookmarkModel)
-    _bookmarkModel->RemoveObserver(_bookmarkModelBridge.get());
-  [_model removeObserver:self];
-  [[UpgradeCenter sharedInstance] unregisterClient:self];
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [_toolbarController setDelegate:nil];
-  if (_voiceSearchController.get())
-    _voiceSearchController->SetDelegate(nil);
-  [_rateThisAppDialog setDelegate:nil];
-  [_model closeAllTabs];
-  [super dealloc];
+  DCHECK(_isShutdown) << "-shutdown must be called before dealloc.";
 }
 
 #pragma mark - Accessibility
@@ -968,6 +999,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 #pragma mark - Properties
+
+- (id<ApplicationCommands, BrowserCommands>)dispatcher {
+  return static_cast<id<ApplicationCommands, BrowserCommands>>(_dispatcher);
+}
 
 - (void)setActive:(BOOL)active {
   if (_active == active) {
@@ -983,8 +1018,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     [self.activityOverlayCoordinator stop];
     self.activityOverlayCoordinator = nil;
   } else if (!self.activityOverlayCoordinator) {
-    self.activityOverlayCoordinator = [[[ActivityOverlayCoordinator alloc]
-        initWithBaseViewController:self] autorelease];
+    self.activityOverlayCoordinator =
+        [[ActivityOverlayCoordinator alloc] initWithBaseViewController:self];
     [self.activityOverlayCoordinator start];
   }
 
@@ -1002,7 +1037,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     // tab if the caller is about to create one) ends up on screen completely.
     Tab* currentTab = [_model currentTab];
     // Force loading the view in case it was not loaded yet.
-    [self ensureViewCreated];
+    [self loadViewIfNeeded];
     if (_expectingForegroundTab)
       [currentTab.webController setOverlayPreviewMode:YES];
     if (currentTab)
@@ -1010,7 +1045,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   } else {
     [_dialogPresenter cancelAllDialogs];
   }
-  [_contextualSearchController enableContextualSearch:active];
   [_paymentRequestManager enablePaymentRequest:active];
 
   [self setNeedsStatusBarAppearanceUpdate];
@@ -1034,14 +1068,14 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 - (TabModel*)tabModel {
-  return _model.get();
+  return _model;
 }
 
 - (SideSwipeController*)sideSwipeController {
   if (!_sideSwipeController) {
-    _sideSwipeController.reset([[SideSwipeController alloc]
-        initWithTabModel:_model
-            browserState:_browserState]);
+    _sideSwipeController =
+        [[SideSwipeController alloc] initWithTabModel:_model
+                                         browserState:_browserState];
     [_sideSwipeController setSnapshotDelegate:self];
     [_sideSwipeController setSwipeDelegate:self];
   }
@@ -1049,7 +1083,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 - (PreloadController*)preloadController {
-  return _preloadController.get();
+  return _preloadController;
 }
 
 - (DialogPresenter*)dialogPresenter {
@@ -1075,25 +1109,32 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
 // Whether the sharing menu should be shown.
 - (BOOL)canShowShareMenu {
-  Tab* tab = [_model currentTab];
-  // TODO(shreyasv): Make it so the URL returned by the tab is always valid and
-  // remove check on net::NSURLWithGURL(tab.url) ( http://crbug.com/400999 ).
-  return tab && !tab.url.SchemeIs(kChromeUIScheme) &&
-         net::NSURLWithGURL(tab.url);
+  const GURL& URL = [_model currentTab].lastCommittedURL;
+  return URL.is_valid() && !web::GetWebClient()->IsAppSpecificURL(URL);
 }
 
 - (BOOL)canShowFindBar {
   // Make sure web controller can handle find in page.
   Tab* tab = [_model currentTab];
-  FindInPageController* controller = GetFindInPageController(tab);
-  if (![controller canFindInPage])
+  if (!tab) {
     return NO;
+  }
 
-  // Don't show twice.
-  if (controller.findInPageModel.enabled)
-    return NO;
+  auto* helper = FindTabHelper::FromWebState(tab.webState);
+  return (helper && helper->CurrentPageSupportsFindInPage() &&
+          !helper->IsFindUIActive());
+}
 
-  return YES;
+- (web::UserAgentType)userAgentType {
+  web::WebState* webState = [_model currentTab].webState;
+  if (!webState)
+    return web::UserAgentType::NONE;
+  web::NavigationItem* visibleItem =
+      webState->GetNavigationManager()->GetVisibleItem();
+  if (!visibleItem)
+    return web::UserAgentType::NONE;
+
+  return visibleItem->GetUserAgentType();
 }
 
 - (void)setVisible:(BOOL)visible {
@@ -1112,6 +1153,13 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
 - (BOOL)isToolbarOnScreen {
   return [self headerHeight] - [self currentHeaderOffset] > 0;
+}
+
+- (void)setInNewTabAnimation:(BOOL)inNewTabAnimation {
+  if (_inNewTabAnimation == inNewTabAnimation)
+    return;
+  _inNewTabAnimation = inNewTabAnimation;
+  [self updateDialogPresenterActiveState];
 }
 
 - (BOOL)isInNewTabAnimation {
@@ -1142,17 +1190,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   [_toolbarController cancelOmniboxEdit];
 }
 
-- (void)newTab:(id)sender {
-  [self setLastTapPoint:sender];
-  DCHECK(self.visible || self.dismissingModal);
-  Tab* currentTab = [_model currentTab];
-  if (currentTab) {
-    [currentTab updateSnapshotWithOverlay:YES visibleFrameOnly:YES];
-  }
-  [self addSelectedTabWithURL:GURL(kChromeUINewTabURL)
-                   transition:ui::PAGE_TRANSITION_TYPED];
-}
-
 #pragma mark - UIViewController methods
 
 // Perform additional set up after loading the view, typically from a nib.
@@ -1163,11 +1200,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   UIViewAutoresizing initialViewAutoresizing =
       UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 
-  self.contentArea = [[[BrowserContainerView alloc]
-      initWithFrame:initialViewsRect] autorelease];
+  self.contentArea =
+      [[BrowserContainerView alloc] initWithFrame:initialViewsRect];
   self.contentArea.autoresizingMask = initialViewAutoresizing;
-  self.typingShield =
-      [[[UIButton alloc] initWithFrame:initialViewsRect] autorelease];
+  self.typingShield = [[UIButton alloc] initWithFrame:initialViewsRect];
   self.typingShield.autoresizingMask = initialViewAutoresizing;
   [self.typingShield addTarget:self
                         action:@selector(shieldWasTapped:)
@@ -1188,10 +1224,9 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   // Add a tap gesture recognizer to save the last tap location for the source
   // location of the new tab animation.
-  base::scoped_nsobject<UITapGestureRecognizer> tapRecognizer(
-      [[UITapGestureRecognizer alloc]
-          initWithTarget:self
-                  action:@selector(saveContentAreaTapLocation:)]);
+  UITapGestureRecognizer* tapRecognizer = [[UITapGestureRecognizer alloc]
+      initWithTarget:self
+              action:@selector(saveContentAreaTapLocation:)];
   [tapRecognizer setDelegate:self];
   [tapRecognizer setCancelsTouchesInView:NO];
   [_contentArea addGestureRecognizer:tapRecognizer];
@@ -1231,7 +1266,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 - (void)viewWillDisappear:(BOOL)animated {
   self.viewVisible = NO;
   [self updateDialogPresenterActiveState];
-  [[_model currentTab] updateFullscreenWithToolbarVisible:YES];
   [[_model currentTab] wasHidden];
   [_bookmarkInteractionController dismissSnackbar];
   if (IsIPadIdiom()) {
@@ -1283,16 +1317,15 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     // as the BrowserViewController.
     self.contentArea = nil;
     self.typingShield = nil;
-    if (_voiceSearchController.get())
+    if (_voiceSearchController)
       _voiceSearchController->SetDelegate(nil);
-    _contentSuggestionsCoordinator.reset();
-    _qrScannerViewController.reset();
-    _readingListCoordinator.reset();
-    _toolbarController.reset();
-    _toolbarModelDelegate.reset();
-    _toolbarModelIOS.reset();
-    _tabStripController.reset();
-    _sideSwipeController.reset();
+    _qrScannerViewController = nil;
+    _readingListCoordinator = nil;
+    _toolbarController = nil;
+    _toolbarModelDelegate = nil;
+    _toolbarModelIOS = nil;
+    _tabStripController = nil;
+    _sideSwipeController = nil;
   }
 }
 
@@ -1327,10 +1360,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   [self hideFindBarWithAnimation:NO];
 
-  base::WeakNSObject<BrowserViewController> weakSelf(self);
+  __weak BrowserViewController* weakSelf = self;
   void (^completion)(id<UIViewControllerTransitionCoordinatorContext>) = ^(
       id<UIViewControllerTransitionCoordinatorContext> context) {
-    base::scoped_nsobject<BrowserViewController> strongSelf([weakSelf retain]);
+    BrowserViewController* strongSelf = weakSelf;
     if (strongSelf)
       [strongSelf showFindBarWithAnimation:NO
                                 selectText:NO
@@ -1347,11 +1380,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 - (void)dismissViewControllerAnimated:(BOOL)flag
                            completion:(void (^)())completion {
   self.dismissingModal = YES;
-  base::WeakNSObject<BrowserViewController> weakSelf(self);
+  __weak BrowserViewController* weakSelf = self;
   [super dismissViewControllerAnimated:flag
                             completion:^{
-                              base::scoped_nsobject<BrowserViewController>
-                                  strongSelf([weakSelf retain]);
+                              BrowserViewController* strongSelf = weakSelf;
                               [strongSelf setDismissingModal:NO];
                               [strongSelf setPresenting:NO];
                               if (completion)
@@ -1363,8 +1395,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 - (void)presentViewController:(UIViewController*)viewControllerToPresent
                      animated:(BOOL)flag
                    completion:(void (^)())completion {
-  base::mac::ScopedBlock<ProceduralBlock> finalCompletionHandler(
-      [completion copy]);
+  ProceduralBlock finalCompletionHandler = [completion copy];
   // TODO(crbug.com/580098) This is an interim fix for the flicker between the
   // launch screen and the FRE Animation. The fix is, if the FRE is about to be
   // presented, to show a temporary view of the launch screen and then remove it
@@ -1400,13 +1431,13 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       // Replace the completion handler sent to the superclass with one which
       // removes |launchScreenView| and resets the status bar. If |completion|
       // exists, it is called from within the new completion handler.
-      base::WeakNSObject<BrowserViewController> weakSelf(self);
-      finalCompletionHandler.reset([^{
+      __weak BrowserViewController* weakSelf = self;
+      finalCompletionHandler = ^{
         [launchScreenView removeFromSuperview];
-        weakSelf.get().hideStatusBar = NO;
+        weakSelf.hideStatusBar = NO;
         if (completion)
           completion();
-      } copy]);
+      };
     }
   }
 
@@ -1450,11 +1481,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 - (void)pageLoadStarting:(NSNotification*)notify {
   Tab* tab = notify.userInfo[kTabModelTabKey];
   DCHECK(tab && ([_model indexOfTab:tab] != NSNotFound));
-  // Hide find bar when navigating to a new page.
-  [self hideFindBarWithAnimation:NO];
 
-  FindInPageController* controller = GetFindInPageController(tab);
-  controller.findInPageModel.enabled = NO;
+  // Stop any Find in Page searches and close the find bar when navigating to a
+  // new page.
+  [self closeFindInPage];
 
   if (tab == [_model currentTab]) {
     // TODO(pinkerton): Fill in here about hiding the forward button on
@@ -1491,7 +1521,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   Tab* tab = notify.userInfo[kTabModelTabKey];
   DCHECK(tab);
   [tab wasHidden];
-  [_toolbarController dismissTabHistoryPopup];
+  [self dismissPopups];
 }
 
 - (void)tabWasAdded:(NSNotification*)notify {
@@ -1521,9 +1551,15 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   }
 
   // The rest of this function initiates the new tab animation, which is
-  // phone-specific.
-  if (IsIPadIdiom())
+  // phone-specific.  Call the foreground tab added completion block; for
+  // iPhones, this will get executed after the animation has finished.
+  if (IsIPadIdiom()) {
+    if (self.foregroundTabWasAddedCompletionBlock) {
+      self.foregroundTabWasAddedCompletionBlock();
+      self.foregroundTabWasAddedCompletionBlock = nil;
+    }
     return;
+  }
 
   // Do nothing if browsing is currently suspended.  The BVC will set everything
   // up correctly when browsing resumes.
@@ -1541,13 +1577,13 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     }
   };
 
-  _inNewTabAnimation = YES;
+  self.inNewTabAnimation = YES;
   if (!inBackground) {
     UIView* animationParentView = _contentArea;
     // Create the new page image, and load with the new tab page snapshot.
     CGFloat newPageOffset = 0;
     UIImageView* newPage;
-    if (tab.url == GURL(kChromeUINewTabURL) && !_isOffTheRecord &&
+    if (tab.lastCommittedURL == GURL(kChromeUINewTabURL) && !_isOffTheRecord &&
         !IsIPadIdiom()) {
       animationParentView = self.view;
       newPage = [self pageFullScreenOpenCloseAnimationView];
@@ -1565,7 +1601,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
         newPage.frame.size.height - newPage.image.size.height, origin,
         _isOffTheRecord, NULL, ^{
           [newPage removeFromSuperview];
-          _inNewTabAnimation = NO;
+          self.inNewTabAnimation = NO;
           // Use the model's currentTab here because it is possible that it can
           // be reset to a new value before the new Tab animation finished (e.g.
           // if another Tab shows a dialog via |dialogPresenter|). However, that
@@ -1576,6 +1612,11 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
             [self tabSelected:currentTab];
           }
           startVoiceSearchIfNecessaryBlock();
+
+          if (self.foregroundTabWasAddedCompletionBlock) {
+            self.foregroundTabWasAddedCompletionBlock();
+            self.foregroundTabWasAddedCompletionBlock = nil;
+          }
         });
   } else {
     // -updateSnapshotWithOverlay will force a screen redraw, so take the
@@ -1585,8 +1626,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
                                       visibleFrameOnly:self.isToolbarOnScreen];
     // Add three layers in order on top of the contentArea for the animation:
     // 1. The black "background" screen.
-    base::scoped_nsobject<UIView> background(
-        [[UIView alloc] initWithFrame:[_contentArea bounds]]);
+    UIView* background = [[UIView alloc] initWithFrame:[_contentArea bounds]];
     InstallBackgroundInView(background);
     [_contentArea addSubview:background];
 
@@ -1605,7 +1645,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
         topCard, [_contentArea frame], IsPortrait(), ^{
           [background removeFromSuperview];
           [topCard removeFromSuperview];
-          _inNewTabAnimation = NO;
+          self.inNewTabAnimation = NO;
           // Resnapshot the top card if it has its own toolbar, as the toolbar
           // will be captured in the new tab animation, but isn't desired for
           // the stack view snapshots.
@@ -1614,6 +1654,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
             [topTab updateSnapshotWithOverlay:YES visibleFrameOnly:YES];
           startVoiceSearchIfNecessaryBlock();
         });
+    // Reset the foreground tab completion block so that it can never be
+    // called more than once regardless of foreground/background tab
+    // appearances.
+    self.foregroundTabWasAddedCompletionBlock = nil;
   }
 }
 
@@ -1627,7 +1671,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   DCHECK(!_browserState);
   _browserState = browserState;
   _isOffTheRecord = browserState->IsOffTheRecord() ? YES : NO;
-  _model.reset([model retain]);
+  _model = model;
+
   [_model addObserver:self];
 
   if (!_isOffTheRecord) {
@@ -1642,7 +1687,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   _imageFetcher = base::MakeUnique<image_fetcher::IOSImageDataFetcherWrapper>(
       _browserState->GetRequestContext(), web::WebThread::GetBlockingPool());
-  _dominantColorCache.reset([[NSMutableDictionary alloc] init]);
+  _dominantColorCache = [[NSMutableDictionary alloc] init];
 
   // Register for bookmark changed notification (BookmarkModel may be null
   // during testing, so explicitly support this).
@@ -1653,28 +1698,22 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   }
 }
 
-- (void)ensureViewCreated {
-  ignore_result([self view]);
-}
-
 - (void)browserStateDestroyed {
   [self setActive:NO];
   // Reset the toolbar opacity in case it was changed for contextual search.
   [self updateToolbarControlsAlpha:1.0];
   [self updateToolbarBackgroundAlpha:1.0];
-  [_contextualSearchController close];
-  _contextualSearchController.reset();
-  [_contextualSearchPanel removeFromSuperview];
-  [_contextualSearchMask removeFromSuperview];
   [_paymentRequestManager close];
-  _paymentRequestManager.reset();
+  _paymentRequestManager = nil;
   [_toolbarController browserStateDestroyed];
   [_model browserStateDestroyed];
   [_preloadController browserStateDestroyed];
-  _preloadController.reset();
+  _preloadController = nil;
   // The file remover needs the browser state, so needs to be destroyed now.
-  _externalFileRemover.reset();
+  _externalFileRemover = nil;
   _browserState = nullptr;
+  [_dispatcher stopDispatchingToTarget:self];
+  _dispatcher = nil;
 }
 
 - (void)installFakeStatusBar {
@@ -1682,8 +1721,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     CGFloat statusBarHeight = StatusBarHeight();
     CGRect statusBarFrame =
         CGRectMake(0, 0, [[self view] frame].size.width, statusBarHeight);
-    base::scoped_nsobject<UIView> statusBarView(
-        [[UIView alloc] initWithFrame:statusBarFrame]);
+    UIView* statusBarView = [[UIView alloc] initWithFrame:statusBarFrame];
     [statusBarView setBackgroundColor:TabStrip::BackgroundColor()];
     [statusBarView setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
     [statusBarView layer].zPosition = 99;
@@ -1695,8 +1733,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     CGFloat statusBarHeight = StatusBarHeight();
     CGRect statusBarFrame =
         CGRectMake(0, 0, [[self view] frame].size.width, statusBarHeight);
-    base::scoped_nsobject<UIView> statusBarView(
-        [[UIView alloc] initWithFrame:statusBarFrame]);
+    UIView* statusBarView = [[UIView alloc] initWithFrame:statusBarFrame];
     [statusBarView setBackgroundColor:[UIColor whiteColor]];
     [statusBarView setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
     [self.view insertSubview:statusBarView atIndex:0];
@@ -1710,28 +1747,32 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   // Create the preload controller before the toolbar controller.
   if (!_preloadController) {
-    _preloadController.reset([_dependencyFactory newPreloadController]);
+    _preloadController = [_dependencyFactory newPreloadController];
     [_preloadController setDelegate:self];
   }
 
   // Create the toolbar model and controller.
-  _toolbarModelDelegate.reset(new ToolbarModelDelegateIOS(_model));
+  _toolbarModelDelegate.reset(
+      new ToolbarModelDelegateIOS([_model webStateList]));
   _toolbarModelIOS.reset([_dependencyFactory
       newToolbarModelIOSWithDelegate:_toolbarModelDelegate.get()]);
-  _toolbarController.reset([_dependencyFactory
-      newWebToolbarControllerWithDelegate:self
-                                urlLoader:self
-                          preloadProvider:_preloadController.get()]);
+  _toolbarController =
+      [_dependencyFactory newWebToolbarControllerWithDelegate:self
+                                                    urlLoader:self
+                                              preloadProvider:_preloadController
+                                                   dispatcher:self.dispatcher];
+  [_dispatcher startDispatchingToTarget:_toolbarController
+                            forProtocol:@protocol(OmniboxFocuser)];
   [_toolbarController setTabCount:[_model count]];
-  if (_voiceSearchController.get())
+  if (_voiceSearchController)
     _voiceSearchController->SetDelegate(_toolbarController);
 
   // If needed, create the tabstrip.
   if (IsIPadIdiom()) {
-    _tabStripController.reset(
-        [_dependencyFactory newTabStripControllerWithTabModel:_model]);
-    _tabStripController.get().fullscreenDelegate = self;
-    [_tabStripController setHasTabSwitcherToggleSwitch:YES];
+    _tabStripController =
+        [_dependencyFactory newTabStripControllerWithTabModel:_model
+                                                   dispatcher:self.dispatcher];
+    _tabStripController.fullscreenDelegate = self;
   }
 
   // Create infobar container.
@@ -1746,6 +1787,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 // both browser state and tab model are valid.
 - (void)addUIFunctionalityForModelAndBrowserState {
   DCHECK(_browserState);
+  DCHECK(_toolbarModelIOS);
   DCHECK(_model);
   DCHECK([self isViewLoaded]);
 
@@ -1755,28 +1797,12 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       [[_model currentTab] infoBarManager];
   _infoBarContainer->ChangeInfoBarManager(infoBarManager);
 
-  // Create contextual search views and controller.
-  if ([TouchToSearchPermissionsMediator isTouchToSearchAvailableOnDevice] &&
-      !_browserState->IsOffTheRecord()) {
-    _contextualSearchMask =
-        [[[ContextualSearchMaskView alloc] init] autorelease];
-    [self.view insertSubview:_contextualSearchMask
-                belowSubview:[_toolbarController view]];
-    _contextualSearchPanel = [self createPanelView];
-    [self.view insertSubview:_contextualSearchPanel
-                aboveSubview:[_toolbarController view]];
-    _contextualSearchController.reset([[ContextualSearchController alloc]
-        initWithBrowserState:_browserState
-                    delegate:self]);
-    [_contextualSearchController setPanel:_contextualSearchPanel];
-    [_contextualSearchController setTab:[_model currentTab]];
-  }
-
-  if (experimental_flags::IsPaymentRequestEnabled()) {
-    _paymentRequestManager.reset([[PaymentRequestManager alloc]
+  if (base::FeatureList::IsEnabled(payments::features::kWebPayments)) {
+    _paymentRequestManager = [[PaymentRequestManager alloc]
         initWithBaseViewController:self
-                      browserState:_browserState]);
-    [_paymentRequestManager setWebState:[_model currentTab].webState];
+                      browserState:_browserState];
+    [_paymentRequestManager setToolbarModel:_toolbarModelIOS.get()];
+    [_paymentRequestManager setActiveWebState:[_model currentTab].webState];
   }
 }
 
@@ -1853,13 +1879,9 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
 - (void)displayTab:(Tab*)tab isNewSelection:(BOOL)newSelection {
   DCHECK(tab);
-  // Ensure that self.view is loaded to avoid errors that can otherwise occur
-  // when accessing |_contentArea| below.
-  if (!_contentArea)
-    [self ensureViewCreated];
+  [self loadViewIfNeeded];
 
-  DCHECK(_contentArea);
-  if (!_inNewTabAnimation) {
+  if (!self.inNewTabAnimation) {
     // Hide findbar.  |updateToolbar| will restore the findbar later.
     [self hideFindBarWithAnimation:NO];
 
@@ -1880,10 +1902,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 - (void)initializeBookmarkInteractionController {
   if (_bookmarkInteractionController)
     return;
-  _bookmarkInteractionController.reset([[BookmarkInteractionController alloc]
-      initWithBrowserState:_browserState
-                    loader:self
-          parentController:self]);
+  _bookmarkInteractionController =
+      [[BookmarkInteractionController alloc] initWithBrowserState:_browserState
+                                                           loader:self
+                                                 parentController:self];
 }
 
 // Update the state of back and forward buttons, hiding the forward button if
@@ -1909,8 +1931,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     [[_toolbarController toolsPopupController]
         setIsTabLoading:_toolbarModelIOS->IsLoading()];
 
-  FindInPageController* controller = GetFindInPageController(tab);
-  if (controller.findInPageModel.enabled) {
+  auto* findHelper = FindTabHelper::FromWebState(tab.webState);
+  if (findHelper && findHelper->IsFindUIActive()) {
     [self showFindBarWithAnimation:NO
                         selectText:YES
                        shouldFocus:[_findBarController isFocused]];
@@ -1918,11 +1940,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   // Hide the toolbar if displaying phone NTP.
   if (!IsIPadIdiom()) {
-    CRWSessionEntry* entry =
-        [[tab navigationManagerImpl]->GetSessionController() currentEntry];
+    web::NavigationItem* item = [tab navigationManager]->GetVisibleItem();
     BOOL hideToolbar = NO;
-    if (entry) {
-      GURL url = [entry navigationItem]->GetURL();
+    if (item) {
+      GURL url = item->GetURL();
       BOOL isNTP = url.GetOrigin() == GURL(kChromeUINewTabURL);
       hideToolbar = isNTP && !_isOffTheRecord &&
                     ![_toolbarController isOmniboxFirstResponder] &&
@@ -1933,34 +1954,26 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 - (void)updateDialogPresenterActiveState {
-  self.dialogPresenter.active = self.active && self.viewVisible;
+  self.dialogPresenter.active =
+      self.active && self.viewVisible && !self.inNewTabAnimation;
 }
 
 - (void)dismissPopups {
   [_toolbarController dismissToolsMenuPopup];
   [self hidePageInfoPopupForView:nil];
   [_toolbarController dismissTabHistoryPopup];
-  [[_model currentTab].webController recordStateInHistory];
 }
 
 #pragma mark - Tap handling
 
-- (void)setLastTapPoint:(id)sender {
-  CGPoint center;
-  UIView* parentView = nil;
-  if ([sender isKindOfClass:[UIView class]]) {
-    center = [sender center];
-    parentView = [sender superview];
+- (void)setLastTapPoint:(OpenNewTabCommand*)command {
+  if (CGPointEqualToPoint(command.originPoint, CGPointZero)) {
+    _lastTapPoint = CGPointZero;
+  } else {
+    _lastTapPoint =
+        [self.view.window convertPoint:command.originPoint toView:self.view];
   }
-  if ([sender isKindOfClass:[ToolsMenuViewItem class]]) {
-    parentView = [[sender tableViewCell] superview];
-    center = [[sender tableViewCell] center];
-  }
-
-  if (parentView) {
-    _lastTapPoint = [parentView convertPoint:center toView:self.view];
-    _lastTapTime = CACurrentMediaTime();
-  }
+  _lastTapTime = CACurrentMediaTime();
 }
 
 - (CGPoint)lastTapPoint {
@@ -2006,7 +2019,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   return [self addSelectedTabWithURL:url
                             postData:postData
                              atIndex:[_model count]
-                          transition:transition];
+                          transition:transition
+                  tabAddedCompletion:nil];
 }
 
 - (Tab*)addSelectedTabWithURL:(const GURL&)url
@@ -2020,15 +2034,27 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
                       atIndex:(NSUInteger)position
                    transition:(ui::PageTransition)transition {
   return [self addSelectedTabWithURL:url
+                             atIndex:position
+                          transition:transition
+                  tabAddedCompletion:nil];
+}
+
+- (Tab*)addSelectedTabWithURL:(const GURL&)url
+                      atIndex:(NSUInteger)position
+                   transition:(ui::PageTransition)transition
+           tabAddedCompletion:(ProceduralBlock)tabAddedCompletion {
+  return [self addSelectedTabWithURL:url
                             postData:NULL
                              atIndex:position
-                          transition:transition];
+                          transition:transition
+                  tabAddedCompletion:tabAddedCompletion];
 }
 
 - (Tab*)addSelectedTabWithURL:(const GURL&)URL
                      postData:(TemplateURLRef::PostContent*)postData
                       atIndex:(NSUInteger)position
-                   transition:(ui::PageTransition)transition {
+                   transition:(ui::PageTransition)transition
+           tabAddedCompletion:(ProceduralBlock)tabAddedCompletion {
   if (position == NSNotFound)
     position = [_model count];
   DCHECK(position <= [_model count]);
@@ -2041,9 +2067,23 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     NSString* contentType = base::SysUTF8ToNSString(postData->first);
     NSData* data = [NSData dataWithBytes:(void*)postData->second.data()
                                   length:postData->second.length()];
-    params.post_data.reset([data retain]);
-    params.extra_headers.reset([@{ @"Content-Type" : contentType } retain]);
+    params.post_data.reset(data);
+    params.extra_headers.reset(@{ @"Content-Type" : contentType });
   }
+
+  if (tabAddedCompletion) {
+    if (self.foregroundTabWasAddedCompletionBlock) {
+      ProceduralBlock oldForegroundTabWasAddedCompletionBlock =
+          self.foregroundTabWasAddedCompletionBlock;
+      self.foregroundTabWasAddedCompletionBlock = ^{
+        oldForegroundTabWasAddedCompletionBlock();
+        tabAddedCompletion();
+      };
+    } else {
+      self.foregroundTabWasAddedCompletionBlock = tabAddedCompletion;
+    }
+  }
+
   Tab* tab = [_model insertTabWithLoadParams:params
                                       opener:nil
                                  openedByDOM:NO
@@ -2057,10 +2097,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   web::WebState* webState = tab.webState;
   if (!webState)
     return NO;
-  web::NavigationManager* navigationManager = webState->GetNavigationManager();
-  if (!navigationManager)
-    return NO;
-  web::NavigationItem* visibleItem = navigationManager->GetVisibleItem();
+  web::NavigationItem* visibleItem =
+      webState->GetNavigationManager()->GetVisibleItem();
   if (!visibleItem)
     return NO;
   return web::GetWebClient()->IsAppSpecificURL(visibleItem->GetURL());
@@ -2074,7 +2112,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   CGRect viewBounds, remainder;
   CGRectDivide(self.view.bounds, &remainder, &viewBounds, StatusBarHeight(),
                CGRectMinYEdge);
-  return [[[UIImageView alloc] initWithFrame:viewBounds] autorelease];
+  return [[UIImageView alloc] initWithFrame:viewBounds];
 }
 
 - (UIImageView*)pageOpenCloseAnimationView {
@@ -2083,8 +2121,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   frame.size.height = frame.size.height - [self headerHeight];
   frame.origin.y = [self headerHeight];
 
-  UIImageView* pageView =
-      [[[UIImageView alloc] initWithFrame:frame] autorelease];
+  UIImageView* pageView = [[UIImageView alloc] initWithFrame:frame];
   CGPoint center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
   pageView.center = center;
 
@@ -2093,12 +2130,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 - (void)installDelegatesForTab:(Tab*)tab {
-  // We don't unregister any of this delegation.
-  // TODO(crbug.com/375577): Unregister these delegates correctly on BVC
-  // deallocation.
+  // Unregistration happens when the Tab is removed from the TabModel.
+  tab.dispatcher = self.dispatcher;
   tab.dialogDelegate = self;
   tab.snapshotOverlayProvider = self;
-  tab.storeKitLauncher = self;
   tab.passKitDialogProvider = self;
   tab.fullScreenControllerDelegate = self;
   if (!IsIPadIdiom()) {
@@ -2109,8 +2144,31 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   // Install the proper CRWWebController delegates.
   tab.webController.nativeProvider = self;
   tab.webController.swipeRecognizerProvider = self.sideSwipeController;
-  // Delegate will remove itself on destruction.
+  // BrowserViewController presents SKStoreKitViewController on behalf of a
+  // tab.
+  StoreKitTabHelper* tabHelper = StoreKitTabHelper::FromWebState(tab.webState);
+  if (tabHelper)
+    tabHelper->SetLauncher(self);
   tab.webState->SetDelegate(_webStateDelegate.get());
+}
+
+- (void)uninstallDelegatesForTab:(Tab*)tab {
+  tab.dispatcher = nil;
+  tab.dialogDelegate = nil;
+  tab.snapshotOverlayProvider = nil;
+  tab.passKitDialogProvider = nil;
+  tab.fullScreenControllerDelegate = nil;
+  if (!IsIPadIdiom()) {
+    tab.overscrollActionsControllerDelegate = nil;
+  }
+  tab.tabHeadersDelegate = nil;
+  tab.tabSnapshottingDelegate = nil;
+  tab.webController.nativeProvider = nil;
+  tab.webController.swipeRecognizerProvider = nil;
+  StoreKitTabHelper* tabHelper = StoreKitTabHelper::FromWebState(tab.webState);
+  if (tabHelper)
+    tabHelper->SetLauncher(nil);
+  tab.webState->SetDelegate(nullptr);
 }
 
 // Called when a tab is selected in the model. Make any required view changes.
@@ -2125,12 +2183,12 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   [self displayTab:tab isNewSelection:YES];
 
-  if (_expectingForegroundTab && !_inNewTabAnimation) {
+  if (_expectingForegroundTab && !self.inNewTabAnimation) {
     // Now that the new tab has been displayed, return to normal. Rather than
     // keep a reference to the previous tab, just turn off preview mode for all
     // tabs (since doing so is a no-op for the tabs that don't have it set).
     _expectingForegroundTab = NO;
-    for (Tab* tab in _model.get()) {
+    for (Tab* tab in _model) {
       [tab.webController setOverlayPreviewMode:NO];
     }
   }
@@ -2169,9 +2227,28 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   int delay = immediately ? 0 : kExternalFilesCleanupDelaySeconds;
   _externalFileRemover->RemoveAfterDelay(
       base::TimeDelta::FromSeconds(delay),
-      base::BindBlock(completionHandler ? completionHandler
-                                        : ^{
-                                          }));
+      base::BindBlockArc(completionHandler ? completionHandler
+                                           : ^{
+                                             }));
+}
+
+- (void)shutdown {
+  DCHECK(!_isShutdown);
+  _isShutdown = YES;
+
+  _tabStripController = nil;
+  _infoBarContainer = nil;
+  _readingListMenuNotifier = nil;
+  if (_bookmarkModel)
+    _bookmarkModel->RemoveObserver(_bookmarkModelBridge.get());
+  [_model removeObserver:self];
+  [[UpgradeCenter sharedInstance] unregisterClient:self];
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [_toolbarController setDelegate:nil];
+  if (_voiceSearchController)
+    _voiceSearchController->SetDelegate(nil);
+  [_rateThisAppDialog setDelegate:nil];
+  [_model closeAllTabs];
 }
 
 #pragma mark - SnapshotOverlayProvider methods
@@ -2184,17 +2261,17 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   UIView* voiceSearchView = [self voiceSearchOverlayViewForTab:tab];
   if (voiceSearchView) {
     CGFloat voiceSearchYOffset = [self voiceSearchOverlayYOffsetForTab:tab];
-    base::scoped_nsobject<SnapshotOverlay> voiceSearchOverlay(
+    SnapshotOverlay* voiceSearchOverlay =
         [[SnapshotOverlay alloc] initWithView:voiceSearchView
-                                      yOffset:voiceSearchYOffset]);
+                                      yOffset:voiceSearchYOffset];
     [overlays addObject:voiceSearchOverlay];
   }
   UIView* infoBarView = [self infoBarOverlayViewForTab:tab];
   if (infoBarView) {
     CGFloat infoBarYOffset = [self infoBarOverlayYOffsetForTab:tab];
-    base::scoped_nsobject<SnapshotOverlay> infoBarOverlay(
+    SnapshotOverlay* infoBarOverlay =
         [[SnapshotOverlay alloc] initWithView:infoBarView
-                                      yOffset:infoBarYOffset]);
+                                      yOffset:infoBarYOffset];
     [overlays addObject:infoBarOverlay];
   }
   return overlays;
@@ -2221,7 +2298,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 - (CGFloat)infoBarOverlayYOffsetForTab:(Tab*)tab {
-  if (tab != [_model currentTab] || !_infoBarContainer.get()) {
+  if (tab != [_model currentTab] || !_infoBarContainer) {
     // There is no UI representation for non-current tabs or there is
     // no _infoBarContainer instantiated yet.
     // Return offset outside of tab.
@@ -2259,7 +2336,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 - (void)ensureVoiceSearchControllerCreated {
-  if (!_voiceSearchController.get()) {
+  if (!_voiceSearchController) {
     VoiceSearchProvider* provider =
         ios::GetChromeBrowserProvider()->GetVoiceSearchProvider();
     if (provider) {
@@ -2277,9 +2354,9 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   CGFloat width = CGRectGetWidth([[self view] bounds]);
   CGFloat y = CGRectGetHeight([[self view] bounds]) - kVoiceSearchBarHeight;
   CGRect frame = CGRectMake(0.0, y, width, kVoiceSearchBarHeight);
-  _voiceSearchBar.reset([ios::GetChromeBrowserProvider()
-                             ->GetVoiceSearchProvider()
-                             ->BuildVoiceSearchBar(frame) retain]);
+  _voiceSearchBar = ios::GetChromeBrowserProvider()
+                        ->GetVoiceSearchProvider()
+                        ->BuildVoiceSearchBar(frame);
   [_voiceSearchBar setVoiceSearchBarDelegate:self];
   [_voiceSearchBar setHidden:YES];
   [_voiceSearchBar setAutoresizingMask:UIViewAutoresizingFlexibleTopMargin |
@@ -2291,7 +2368,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 - (void)updateVoiceSearchBarVisibilityAnimated:(BOOL)animated {
   // Voice search bar exists and is shown/hidden.
   BOOL show = self.shouldShowVoiceSearchBar;
-  if (_voiceSearchBar && _voiceSearchBar.get().hidden != show)
+  if (_voiceSearchBar && _voiceSearchBar.hidden != show)
     return;
 
   // Voice search bar doesn't exist and thus is not visible.
@@ -2299,9 +2376,9 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     return;
 
   if (animated)
-    [_voiceSearchBar.get() animateToBecomeVisible:show];
+    [_voiceSearchBar animateToBecomeVisible:show];
   else
-    _voiceSearchBar.get().hidden = !show;
+    _voiceSearchBar.hidden = !show;
 }
 
 - (id<LogoAnimationControllerOwner>)currentLogoAnimationControllerOwner {
@@ -2310,7 +2387,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       self.shouldShowVoiceSearchBar) {
     // Use |_voiceSearchBar| for VoiceSearch results tab and dismissal
     // animations.
-    return static_cast<id<LogoAnimationControllerOwner>>(_voiceSearchBar.get());
+    return static_cast<id<LogoAnimationControllerOwner>>(_voiceSearchBar);
   }
   id currentNativeController =
       [self nativeControllerForTab:self.tabModel.currentTab];
@@ -2329,9 +2406,9 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
 - (void)presentPassKitDialog:(NSData*)data {
   NSError* error = nil;
-  base::scoped_nsobject<PKPass> pass;
+  PKPass* pass = nil;
   if (data)
-    pass.reset([[PKPass alloc] initWithData:data error:&error]);
+    pass = [[PKPass alloc] initWithData:data error:&error];
   if (error || !data) {
     if ([_model currentTab]) {
       infobars::InfoBarManager* infoBarManager =
@@ -2359,6 +2436,58 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 #pragma mark - CRWWebStateDelegate methods.
+
+- (web::WebState*)webState:(web::WebState*)webState
+    createNewWebStateForURL:(const GURL&)URL
+                  openerURL:(const GURL&)openerURL
+            initiatedByUser:(BOOL)initiatedByUser {
+  // Check if requested web state is a popup and block it if necessary.
+  if (!initiatedByUser) {
+    auto* helper = BlockedPopupTabHelper::FromWebState(webState);
+    if (helper->ShouldBlockPopup(openerURL)) {
+      // It's possible for a page to inject a popup into a window created via
+      // window.open before its initial load is committed.  Rather than relying
+      // on the last committed or pending NavigationItem's referrer policy, just
+      // use ReferrerPolicyDefault.
+      // TODO(crbug.com/719993): Update this to a more appropriate referrer
+      // policy once referrer policies are correctly recorded in
+      // NavigationItems.
+      web::Referrer referrer(openerURL, web::ReferrerPolicyDefault);
+      helper->HandlePopup(URL, referrer);
+      return nil;
+    }
+  }
+
+  // Requested web state should not be blocked from opening.
+  Tab* currentTab = LegacyTabHelper::GetTabForWebState(webState);
+  [currentTab updateSnapshotWithOverlay:YES visibleFrameOnly:YES];
+
+  // Tabs open by DOM are always renderer initiated.
+  web::NavigationManager::WebLoadParams params(GURL{});
+  params.transition_type = ui::PAGE_TRANSITION_LINK;
+  params.is_renderer_initiated = true;
+  Tab* childTab = [[self tabModel]
+      insertTabWithLoadParams:params
+                       opener:currentTab
+                  openedByDOM:YES
+                      atIndex:TabModelConstants::kTabPositionAutomatically
+                 inBackground:NO];
+  return childTab.webState;
+}
+
+- (void)closeWebState:(web::WebState*)webState {
+  // Only allow a web page to close itself if it was opened by DOM, or if there
+  // are no navigation items.
+  Tab* tab = LegacyTabHelper::GetTabForWebState(webState);
+  DCHECK(webState->HasOpener() || ![tab navigationManager]->GetItemCount());
+
+  if (![self tabModel])
+    return;
+
+  NSUInteger index = [[self tabModel] indexOfTab:tab];
+  if (index != NSNotFound)
+    [[self tabModel] closeTabAtIndex:index];
+}
 
 - (web::WebState*)webState:(web::WebState*)webState
          openURLWithParams:(const web::WebState::OpenURLParams&)params {
@@ -2417,18 +2546,19 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   DCHECK(_browserState);
   DCHECK([_model currentTab]);
 
-  _contextMenuCoordinator.reset([[ContextMenuCoordinator alloc]
-      initWithBaseViewController:self
-                          params:params]);
+  _contextMenuCoordinator =
+      [[ContextMenuCoordinator alloc] initWithBaseViewController:self
+                                                          params:params];
 
   NSString* title = nil;
   ProceduralBlock action = nil;
 
-  base::WeakNSObject<BrowserViewController> weakSelf(self);
+  __weak BrowserViewController* weakSelf = self;
   GURL link = params.link_url;
   bool isLink = link.is_valid();
   GURL imageUrl = params.src_url;
   bool isImage = imageUrl.is_valid();
+  const GURL& committedURL = [_model currentTab].lastCommittedURL;
 
   if (isLink) {
     if (link.SchemeIs(url::kJavaScriptScheme)) {
@@ -2442,7 +2572,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     }
 
     if (web::UrlHasWebScheme(link)) {
-      web::Referrer referrer([_model currentTab].url, params.referrer_policy);
+      web::Referrer referrer(committedURL, params.referrer_policy);
 
       // Open in New Tab.
       title = l10n_util::GetNSStringWithFixup(
@@ -2470,8 +2600,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
         [_contextMenuCoordinator addItemWithTitle:title action:action];
       }
     }
-    if (link.SchemeIsHTTPOrHTTPS() &&
-        reading_list::switches::IsReadingListEnabled()) {
+    if (link.SchemeIsHTTPOrHTTPS()) {
       NSString* innerText = params.link_text;
       if ([innerText length] > 0) {
         // Add to reading list.
@@ -2493,15 +2622,9 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     [_contextMenuCoordinator addItemWithTitle:title action:action];
   }
   if (isImage) {
-    web::Referrer referrer([_model currentTab].url, params.referrer_policy);
+    web::Referrer referrer(committedURL, params.referrer_policy);
     // Save Image.
-    if (experimental_flags::IsDownloadRenamingEnabled()) {
-      title = l10n_util::GetNSStringWithFixup(
-          IDS_IOS_CONTENT_CONTEXT_DOWNLOADIMAGE);
-    } else {
-      title =
-          l10n_util::GetNSStringWithFixup(IDS_IOS_CONTENT_CONTEXT_SAVEIMAGE);
-    }
+    title = l10n_util::GetNSStringWithFixup(IDS_IOS_CONTENT_CONTEXT_SAVEIMAGE);
     action = ^{
       Record(ACTION_SAVE_IMAGE, isImage, isLink);
       [weakSelf saveImageAtURL:imageUrl referrer:referrer];
@@ -2531,7 +2654,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
     TemplateURLService* service =
         ios::TemplateURLServiceFactory::GetForBrowserState(_browserState);
-    TemplateURL* defaultURL = service->GetDefaultSearchProvider();
+    const TemplateURL* defaultURL = service->GetDefaultSearchProvider();
     if (defaultURL && !defaultURL->image_url().empty() &&
         defaultURL->image_url_ref().IsValid(service->search_terms_data())) {
       title = l10n_util::GetNSStringF(IDS_IOS_CONTEXT_MENU_SEARCHWEBFORIMAGE,
@@ -2558,7 +2681,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       CGPointMake(CGRectGetMidX(view.frame),
                   CGRectGetMinY(view.frame) + [self headerHeightForTab:tab]);
   auto* helper = RepostFormTabHelper::FromWebState(webState);
-  helper->PresentDialog(dialogLocation, base::BindBlock(^(bool shouldContinue) {
+  helper->PresentDialog(dialogLocation,
+                        base::BindBlockArc(^(bool shouldContinue) {
                           handler(shouldContinue);
                         }));
 }
@@ -2573,6 +2697,15 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
                       proposedCredential:(NSURLCredential*)proposedCredential
                        completionHandler:(void (^)(NSString* username,
                                                    NSString* password))handler {
+  Tab* tab = LegacyTabHelper::GetTabForWebState(webState);
+  if ([tab isPrerenderTab]) {
+    [tab discardPrerender];
+    if (handler) {
+      handler(nil, nil);
+    }
+    return;
+  }
+
   [self.dialogPresenter runAuthDialogForProtectionSpace:protectionSpace
                                      proposedCredential:proposedCredential
                                                webState:webState
@@ -2587,43 +2720,45 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   return 0.0;
 }
 
-- (const std::vector<HeaderDefinition>)headerViews {
-  std::vector<HeaderDefinition> results;
+- (NSArray<HeaderDefinition*>*)headerViews {
+  NSMutableArray<HeaderDefinition*>* results = [[NSMutableArray alloc] init];
   if (![self isViewLoaded])
     return results;
 
   if (!IsIPadIdiom()) {
     if ([_toolbarController view]) {
-      HeaderDefinition header = {
-          base::scoped_nsobject<UIView>([[_toolbarController view] retain]),
-          Hideable, [ToolbarController toolbarDropShadowHeight], 0.0,
-      };
-      results.push_back(header);
+      [results addObject:[HeaderDefinition
+                             definitionWithView:[_toolbarController view]
+                                headerBehaviour:Hideable
+                               heightAdjustment:[ToolbarController
+                                                    toolbarDropShadowHeight]
+                                          inset:0.0]];
     }
   } else {
     if ([_tabStripController view]) {
-      HeaderDefinition header = {
-          base::scoped_nsobject<UIView>([[_tabStripController view] retain]),
-          Hideable, 0.0, 0.0,
-      };
-      results.push_back(header);
+      [results addObject:[HeaderDefinition
+                             definitionWithView:[_tabStripController view]
+                                headerBehaviour:Hideable
+                               heightAdjustment:0.0
+                                          inset:0.0]];
     }
     if ([_toolbarController view]) {
-      HeaderDefinition header = {
-          base::scoped_nsobject<UIView>([[_toolbarController view] retain]),
-          Hideable, [ToolbarController toolbarDropShadowHeight], 0.0,
-      };
-      results.push_back(header);
+      [results addObject:[HeaderDefinition
+                             definitionWithView:[_toolbarController view]
+                                headerBehaviour:Hideable
+                               heightAdjustment:[ToolbarController
+                                                    toolbarDropShadowHeight]
+                                          inset:0.0]];
     }
     if ([_findBarController view]) {
-      HeaderDefinition header = {
-          base::scoped_nsobject<UIView>([[_findBarController view] retain]),
-          Overlap, 0.0, kIPadFindBarOverlap,
-      };
-      results.push_back(header);
+      [results addObject:[HeaderDefinition
+                             definitionWithView:[_findBarController view]
+                                headerBehaviour:Overlap
+                               heightAdjustment:0.0
+                                          inset:kIPadFindBarOverlap]];
     }
   }
-  return results;
+  return [results copy];
 }
 
 - (UIView*)footerView {
@@ -2644,10 +2779,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     return 0;
   }
 
-  const std::vector<HeaderDefinition> views = [self headerViews];
+  NSArray<HeaderDefinition*>* views = [self headerViews];
 
   CGFloat height = [self headerOffset];
-  for (const auto& header : views) {
+  for (HeaderDefinition* header in views) {
     if (header.view && header.behaviour == Hideable) {
       height += CGRectGetHeight([header.view frame]) -
                 header.heightAdjustement - header.inset;
@@ -2662,8 +2797,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 }
 
 - (CGFloat)currentHeaderOffset {
-  const std::vector<HeaderDefinition> headers = [self headerViews];
-  if (!headers.size())
+  NSArray<HeaderDefinition*>* headers = [self headerViews];
+  if (!headers.count)
     return 0.0;
 
   // Prerender tab does not have a toolbar, return |headerHeight| as promised by
@@ -2693,10 +2828,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     [controller setToolbarInsetsForHeaderOffset:offset];
 }
 
-- (void)setFramesForHeaders:(const std::vector<HeaderDefinition>)headers
+- (void)setFramesForHeaders:(NSArray<HeaderDefinition*>*)headers
                    atOffset:(CGFloat)headerOffset {
   CGFloat height = [self headerOffset];
-  for (const auto& header : headers) {
+  for (HeaderDefinition* header in headers) {
     CGRect frame = [header.view frame];
     frame.origin.y = height - headerOffset - header.inset;
     [header.view setFrame:frame];
@@ -2720,7 +2855,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     footerFrame.origin.y = [self footerYForHeaderOffset:headerOffset];
   }
 
-  const std::vector<HeaderDefinition> headers = [self headerViews];
+  NSArray<HeaderDefinition*>* headers = [self headerViews];
   void (^block)(void) = ^{
     [self setFramesForHeaders:headers atOffset:headerOffset];
     footer.frame = footerFrame;
@@ -2760,7 +2895,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     footerFrame.origin.y = [self footerYForHeaderOffset:headerOffset];
   }
 
-  const std::vector<HeaderDefinition> headers = [self headerViews];
+  NSArray<HeaderDefinition*>* headers = [self headerViews];
   void (^block)(void) = ^{
     [self setFramesForHeaders:headers atOffset:headerOffset];
     footer.frame = footerFrame;
@@ -2793,8 +2928,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     (StaticHtmlNativeContent*)nativeContent {
   if (!IsIPadIdiom() && !FirstRun::IsChromeFirstRun()) {
     OverscrollActionsController* controller =
-        [[[OverscrollActionsController alloc]
-            initWithScrollView:[nativeContent scrollView]] autorelease];
+        [[OverscrollActionsController alloc]
+            initWithScrollView:[nativeContent scrollView]];
     [controller setDelegate:self];
     OverscrollStyle style = _isOffTheRecord
                                 ? OverscrollStyle::REGULAR_PAGE_INCOGNITO
@@ -2810,18 +2945,27 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
                    didTriggerAction:(OverscrollAction)action {
   switch (action) {
     case OverscrollAction::NEW_TAB:
-      [self newTab:nil];
+      [self.dispatcher
+          openNewTab:[OpenNewTabCommand
+                         commandWithIncognito:self.isOffTheRecord]];
       break;
     case OverscrollAction::CLOSE_TAB:
-      [self closeCurrentTab];
+      [self.dispatcher closeCurrentTab];
       break;
-    case OverscrollAction::REFRESH:
+    case OverscrollAction::REFRESH: {
       if ([[[_model currentTab] webController] loadPhase] ==
           web::PAGE_LOADING) {
-        [[_model currentTab] stopLoading];
+        [_model currentTab].webState->Stop();
       }
-      [[_model currentTab] reload];
+
+      web::WebState* webState = [_model currentTab].webState;
+      if (webState)
+        // |check_for_repost| is true because the reload is explicitly initiated
+        // by the user.
+        webState->GetNavigationManager()->Reload(web::ReloadType::NORMAL,
+                                                 true /* check_for_repost */);
       break;
+    }
     case OverscrollAction::NONE:
       NOTREACHED();
       break;
@@ -2878,21 +3022,25 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
                                withError:(NSError*)error
                                   isPost:(BOOL)isPost {
   ErrorPageContent* errorPageContent =
-      [[[ErrorPageContent alloc] initWithLoader:self
-                                   browserState:self.browserState
-                                            url:url
-                                          error:error
-                                         isPost:isPost
-                                    isIncognito:_isOffTheRecord] autorelease];
+      [[ErrorPageContent alloc] initWithLoader:self
+                                  browserState:self.browserState
+                                           url:url
+                                         error:error
+                                        isPost:isPost
+                                   isIncognito:_isOffTheRecord];
   [self setOverScrollActionControllerToStaticNativeContent:errorPageContent];
   return errorPageContent;
 }
 
 - (BOOL)hasControllerForURL:(const GURL&)url {
   std::string host(url.host());
+  if (host == kChromeUIOfflineHost) {
+    // Only allow offline URL that are fully specified.
+    return reading_list::IsOfflineURLValid(
+        url, ReadingListModelFactory::GetForBrowserState(_browserState));
+  }
 
-  return host == kChromeUINewTabHost || host == kChromeUIBookmarksHost ||
-         host == kChromeUITermsHost || host == kChromeUIOfflineHost;
+  return host == kChromeUINewTabHost || host == kChromeUIBookmarksHost;
 }
 
 - (id<CRWNativeContent>)controllerForURL:(const GURL&)url
@@ -2903,18 +3051,20 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   std::string url_host = url.host();
   if (url_host == kChromeUINewTabHost || url_host == kChromeUIBookmarksHost) {
     NewTabPageController* pageController =
-        [[[NewTabPageController alloc] initWithUrl:url
-                                            loader:self
-                                           focuser:_toolbarController
-                                       ntpObserver:self
-                                      browserState:_browserState
-                                        colorCache:_dominantColorCache
-                                webToolbarDelegate:self
-                                          tabModel:_model] autorelease];
+        [[NewTabPageController alloc] initWithUrl:url
+                                           loader:self
+                                          focuser:_toolbarController
+                                      ntpObserver:self
+                                     browserState:_browserState
+                                       colorCache:_dominantColorCache
+                               webToolbarDelegate:self
+                                         tabModel:_model
+                             parentViewController:self
+                                       dispatcher:_dispatcher];
     pageController.swipeRecognizerProvider = self.sideSwipeController;
 
     // Panel is always NTP for iPhone.
-    NewTabPage::PanelIdentifier panelType = NewTabPage::kMostVisitedPanel;
+    NewTabPage::PanelIdentifier panelType = NewTabPage::kHomePanel;
 
     if (IsIPadIdiom()) {
       // New Tab Page can have multiple panels. Each panel is addressable
@@ -2933,24 +3083,13 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     }
     [pageController selectPanel:panelType];
     nativeController = pageController;
-  } else if (url_host == kChromeUITermsHost) {
-    const std::string& filename = GetTermsOfServicePath();
-
+  } else if (url_host == kChromeUIOfflineHost &&
+             [self hasControllerForURL:url]) {
     StaticHtmlNativeContent* staticNativeController =
-        [[[StaticHtmlNativeContent alloc]
-            initWithResourcePathResource:base::SysUTF8ToNSString(filename)
-                                  loader:self
-                            browserState:_browserState
-                                     url:GURL(kChromeUITermsURL)] autorelease];
-    [self setOverScrollActionControllerToStaticNativeContent:
-              staticNativeController];
-    nativeController = staticNativeController;
-  } else if (url_host == kChromeUIOfflineHost) {
-    StaticHtmlNativeContent* staticNativeController =
-        [[[OfflinePageNativeContent alloc] initWithLoader:self
-                                             browserState:_browserState
-                                                 webState:webState
-                                                      URL:url] autorelease];
+        [[OfflinePageNativeContent alloc] initWithLoader:self
+                                            browserState:_browserState
+                                                webState:webState
+                                                     URL:url];
     [self setOverScrollActionControllerToStaticNativeContent:
               staticNativeController];
     nativeController = staticNativeController;
@@ -2959,22 +3098,20 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     // still in the sandbox.
     NSString* filePath = [ExternalFileController pathForExternalFileURL:url];
     if ([[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
-      nativeController = [[[ExternalFileController alloc]
-           initWithURL:url
-          browserState:_browserState] autorelease];
+      nativeController =
+          [[ExternalFileController alloc] initWithURL:url
+                                         browserState:_browserState];
     }
+  } else if (url_host == kChromeUICrashHost) {
+    // There is no native controller for kChromeUICrashHost, it is instead
+    // handled as any other renderer crash by the SadTabTabHelper.
+    // nativeController must be set to nil to prevent defaulting to a
+    // PageNotAvailableController.
+    nativeController = nil;
   } else {
     DCHECK(![self hasControllerForURL:url]);
     // In any other case the PageNotAvailableController is returned.
-    nativeController =
-        [[[PageNotAvailableController alloc] initWithUrl:url] autorelease];
-    if (url_host == kChromeUIHistoryFrameHost) {
-      base::mac::ObjCCastStrict<PageNotAvailableController>(nativeController)
-          .descriptionText = l10n_util::GetNSStringFWithFixup(
-          IDS_IOS_HISTORY_URL_NOT_AVAILABLE,
-          base::UTF8ToUTF16(kChromeUIHistoryURL),
-          l10n_util::GetStringUTF16(IDS_HISTORY_SHOW_HISTORY));
-    }
+    nativeController = [[PageNotAvailableController alloc] initWithUrl:url];
   }
   // If a native controller is vended before its tab is added to the tab model,
   // use the temporary key and add it under the new tab's tabId in the
@@ -2994,7 +3131,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   // that native controllers vended here always correspond to the current tab.
   Tab* currentTab = [_model currentTab];
   NSString* nativeControllerKey = currentTab.tabId;
-  if (!currentTab || currentTab.url != url ||
+  if (!currentTab || currentTab.lastCommittedURL != url ||
       [[_nativeControllersForTabIDs objectForKey:nativeControllerKey]
           isKindOfClass:[nativeController class]]) {
     nativeControllerKey = kNativeControllerTemporaryKey;
@@ -3034,7 +3171,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 - (void)searchByImageAtURL:(const GURL&)url
                   referrer:(const web::Referrer)referrer {
   DCHECK(url.is_valid());
-  base::WeakNSObject<BrowserViewController> weakSelf(self);
+  __weak BrowserViewController* weakSelf = self;
   const GURL image_source_url = url;
   image_fetcher::IOSImageDataFetcherCallback callback = ^(
       NSData* data, const image_fetcher::RequestMetadata& metadata) {
@@ -3071,7 +3208,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   TemplateURLService* templateUrlService =
       ios::TemplateURLServiceFactory::GetForBrowserState(_browserState);
-  TemplateURL* defaultURL = templateUrlService->GetDefaultSearchProvider();
+  const TemplateURL* defaultURL =
+      templateUrlService->GetDefaultSearchProvider();
   DCHECK(!defaultURL->image_url().empty());
   DCHECK(defaultURL->image_url_ref().IsValid(
       templateUrlService->search_terms_data()));
@@ -3097,6 +3235,13 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       NSData* data, const image_fetcher::RequestMetadata& metadata) {
     DCHECK(data);
 
+    if ([data length] == 0) {
+      [self displayPrivacyErrorAlertOnMainQueue:
+                l10n_util::GetNSString(
+                    IDS_IOS_SAVE_IMAGE_NO_INTERNET_CONNECTION)];
+      return;
+    }
+
     base::FilePath::StringType extension;
 
     bool extensionSuccess =
@@ -3118,7 +3263,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
                    withFileExtension:(NSString*)fileExtension {
   switch ([PHPhotoLibrary authorizationStatus]) {
     // User was never asked for permission to access photos.
-    case PHAuthorizationStatusNotDetermined:
+    case PHAuthorizationStatusNotDetermined: {
       [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
         // Call -saveImage again to check if chrome needs to display an error or
         // saves the image.
@@ -3127,6 +3272,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
                            withFileExtension:fileExtension];
       }];
       break;
+    }
 
     // The application doesn't have permission to access photo and the user
     // cannot grant it.
@@ -3143,50 +3289,62 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       break;
 
     // The application has permission to access the photos.
-    default: {
-      web::WebThread::PostTask(
-          web::WebThread::FILE, FROM_HERE, base::BindBlock(^{
-            [self saveImage:data withFileExtension:fileExtension];
-          }));
+    default:
+      __weak BrowserViewController* weakSelf = self;
+      [self saveImage:data
+          withFileExtension:fileExtension
+                 completion:^(BOOL success, NSError* error) {
+                   [weakSelf finishSavingImageWithError:error];
+                 }];
       break;
-    }
   }
 }
 
-- (void)saveImage:(NSData*)data withFileExtension:(NSString*)fileExtension {
-  NSString* fileName = [[[NSProcessInfo processInfo] globallyUniqueString]
-      stringByAppendingString:fileExtension];
-  NSURL* fileURL =
-      [NSURL fileURLWithPath:[NSTemporaryDirectory()
-                                 stringByAppendingPathComponent:fileName]];
-  NSError* error = nil;
-  [data writeToURL:fileURL options:NSDataWritingAtomic error:&error];
+- (void)saveImage:(NSData*)data
+    withFileExtension:(NSString*)fileExtension
+           completion:(void (^)(BOOL, NSError*))completion {
+  base::PostTaskWithTraits(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      base::BindBlockArc(^{
+        base::ThreadRestrictions::AssertIOAllowed();
 
-  // Error while writing the image to disk.
-  if (error) {
-    NSString* errorMessage = [NSString
-        stringWithFormat:@"%@ (%@ %" PRIdNS ")", [error localizedDescription],
-                         [error domain], [error code]];
-    [self displayPrivacyErrorAlertOnMainQueue:errorMessage];
-    return;
-  }
+        NSString* fileName = [[[NSProcessInfo processInfo] globallyUniqueString]
+            stringByAppendingString:fileExtension];
+        NSURL* fileURL = [NSURL
+            fileURLWithPath:[NSTemporaryDirectory()
+                                stringByAppendingPathComponent:fileName]];
+        NSError* error = nil;
+        [data writeToURL:fileURL options:NSDataWritingAtomic error:&error];
+        if (error) {
+          if (completion)
+            completion(NO, error);
+          return;
+        }
 
-  // Save the image to photos.
-  [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-    [PHAssetChangeRequest creationRequestForAssetFromImageAtFileURL:fileURL];
-  }
-      completionHandler:^(BOOL success, NSError* error) {
-        // Callback for the image saving.
-        [self finishSavingImageWithError:error];
+        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+          [PHAssetChangeRequest
+              creationRequestForAssetFromImageAtFileURL:fileURL];
+        }
+            completionHandler:^(BOOL success, NSError* error) {
+              base::PostTaskWithTraits(
+                  FROM_HERE,
+                  {base::MayBlock(), base::TaskPriority::BACKGROUND,
+                   base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+                  base::BindBlockArc(^{
+                    base::ThreadRestrictions::AssertIOAllowed();
+                    if (completion)
+                      completion(success, error);
 
-        // Cleanup the temporary file.
-        web::WebThread::PostTask(
-            web::WebThread::FILE, FROM_HERE, base::BindBlock(^{
-              NSError* error = nil;
-              [[NSFileManager defaultManager] removeItemAtURL:fileURL
-                                                        error:&error];
-            }));
-      }];
+                    // Cleanup the temporary file.
+                    NSError* deleteFileError = nil;
+                    [[NSFileManager defaultManager]
+                        removeItemAtURL:fileURL
+                                  error:&deleteFileError];
+                  }));
+            }];
+      }));
 }
 
 - (void)displayImageErrorAlertWithSettingsOnMainQueue {
@@ -3212,10 +3370,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   NSString* message = l10n_util::GetNSString(
       IDS_IOS_SAVE_IMAGE_PRIVACY_ALERT_MESSAGE_GO_TO_SETTINGS);
 
-  _alertCoordinator.reset([[AlertCoordinator alloc]
-      initWithBaseViewController:self
-                           title:title
-                         message:message]);
+  _alertCoordinator =
+      [[AlertCoordinator alloc] initWithBaseViewController:self
+                                                     title:title
+                                                   message:message];
 
   [_alertCoordinator addItemWithTitle:l10n_util::GetNSString(IDS_CANCEL)
                                action:nil
@@ -3263,49 +3421,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
 #pragma mark - Showing popups
 
-- (void)showToolsMenuPopup {
-  DCHECK(_browserState);
-  DCHECK(self.visible || self.dismissingModal);
-
-  // Dismiss the omnibox (if open).
-  [_toolbarController cancelOmniboxEdit];
-  // Dismiss the soft keyboard (if open).
-  [[_model currentTab].webController dismissKeyboard];
-  // Dismiss Find in Page focus.
-  [self updateFindBar:NO shouldFocus:NO];
-
-  base::scoped_nsobject<ToolsMenuContext> context(
-      [[ToolsMenuContext alloc] initWithDisplayView:[self view]]);
-  if ([_model count] == 0)
-    [context setNoOpenedTabs:YES];
-  if (_isOffTheRecord)
-    [context setInIncognito:YES];
-  if (reading_list::switches::IsReadingListEnabled()) {
-    if (!_readingListMenuNotifier) {
-      _readingListMenuNotifier.reset([[ReadingListMenuNotifier alloc]
-          initWithReadingList:ReadingListModelFactory::GetForBrowserState(
-                                  _browserState)]);
-    }
-    [context setReadingListMenuNotifier:_readingListMenuNotifier];
-  }
-
-  [_toolbarController showToolsMenuPopupWithContext:context];
-  ToolsPopupController* toolsPopupController =
-      [_toolbarController toolsPopupController];
-  if ([_model currentTab]) {
-    BOOL isBookmarked = _toolbarModelIOS->IsCurrentTabBookmarked();
-    [toolsPopupController setIsCurrentPageBookmarked:isBookmarked];
-    [toolsPopupController setCanShowFindBar:self.canShowFindBar];
-    [toolsPopupController setCanUseReaderMode:self.canUseReaderMode];
-    [toolsPopupController
-        setCanUseDesktopUserAgent:self.canUseDesktopUserAgent];
-    [toolsPopupController setCanShowShareMenu:self.canShowShareMenu];
-
-    if (!IsIPadIdiom())
-      [toolsPopupController setIsTabLoading:_toolbarModelIOS->IsLoading()];
-  }
-}
-
 - (void)showPageInfoPopupForView:(UIView*)sourceView {
   Tab* tab = [_model currentTab];
   DCHECK([tab navigationManager]);
@@ -3346,17 +3461,18 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       _browserState, navItem->GetURL(), navItem->GetSSL(), bridge);
 
   UIView* view = [self view];
-  _pageInfoController.reset([[PageInfoViewController alloc]
+  _pageInfoController = [[PageInfoViewController alloc]
       initWithModel:pageInfoModel
              bridge:bridge
         sourceFrame:[sourceView convertRect:[sourceView bounds] toView:view]
-         parentView:view]);
-  bridge->set_controller(_pageInfoController.get());
+         parentView:view];
+  _pageInfoController.dispatcher = self.dispatcher;
+  bridge->set_controller(_pageInfoController);
 }
 
 - (void)hidePageInfoPopupForView:(UIView*)sourceView {
   [_pageInfoController dismiss];
-  _pageInfoController.reset();
+  _pageInfoController = nil;
 }
 
 - (void)showSecurityHelpPage {
@@ -3375,12 +3491,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   // Dismiss the soft keyboard (if open).
   Tab* tab = [_model currentTab];
   [tab.webController dismissKeyboard];
-
-  DCHECK([tab navigationManager]);
-  CRWSessionController* sc =
-      [tab navigationManagerImpl]->GetSessionController();
+  web::NavigationItemList backwardItems =
+      [tab navigationManager]->GetBackwardItems();
   [_toolbarController showTabHistoryPopupInView:[self view]
-                             withSessionEntries:[sc backwardEntries]
+                                      withItems:backwardItems
                                  forBackHistory:YES];
 }
 
@@ -3393,45 +3507,21 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   Tab* tab = [_model currentTab];
   [tab.webController dismissKeyboard];
 
-  DCHECK([tab navigationManager]);
-  CRWSessionController* sc =
-      [tab navigationManagerImpl]->GetSessionController();
+  web::NavigationItemList forwardItems =
+      [tab navigationManager]->GetForwardItems();
   [_toolbarController showTabHistoryPopupInView:[self view]
-                             withSessionEntries:[sc forwardEntries]
+                                      withItems:forwardItems
                                  forBackHistory:NO];
 }
 
 - (void)navigateToSelectedEntry:(id)sender {
   DCHECK([sender isKindOfClass:[TabHistoryCell class]]);
   TabHistoryCell* selectedCell = (TabHistoryCell*)sender;
-  [[_model currentTab] goToItem:selectedCell.entry.navigationItem];
+  [[_model currentTab] goToItem:selectedCell.item];
   [_toolbarController dismissTabHistoryPopup];
 }
 
-- (void)print {
-  Tab* currentTab = [_model currentTab];
-  // The UI should prevent users from printing non-printable pages. However, a
-  // redirection to an un-printable page can happen before it is reflected in
-  // the UI.
-  if (![currentTab viewForPrinting]) {
-    TriggerHapticFeedbackForNotification(UINotificationFeedbackTypeError);
-    [self showSnackbar:l10n_util::GetNSString(IDS_IOS_CANNOT_PRINT_PAGE_ERROR)];
-    return;
-  }
-  DCHECK(_browserState);
-  if (!_printController.get()) {
-    _printController.reset([[PrintController alloc]
-        initWithContextGetter:_browserState->GetRequestContext()]);
-  }
-  [_printController printView:[currentTab viewForPrinting]
-                    withTitle:[currentTab title]
-               viewController:self];
-}
-
 - (void)addToReadingListURL:(const GURL&)URL title:(NSString*)title {
-  if (!reading_list::switches::IsReadingListEnabled()) {
-    return;
-  }
   base::RecordAction(UserMetricsAction("MobileReadingListAdd"));
 
   ReadingListModel* readingModel =
@@ -3456,7 +3546,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   // If there is no first responder, try to make the webview the first
   // responder.
   if (!GetFirstResponder()) {
-    [_model.get().currentTab.webController.webViewProxy becomeFirstResponder];
+    [_model.currentTab.webController.webViewProxy becomeFirstResponder];
   }
 
   return YES;
@@ -3464,9 +3554,9 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
 - (KeyCommandsProvider*)keyCommandsProvider {
   if (!_keyCommandsProvider) {
-    _keyCommandsProvider.reset([_dependencyFactory newKeyCommandsProvider]);
+    _keyCommandsProvider = [_dependencyFactory newKeyCommandsProvider];
   }
-  return _keyCommandsProvider.get();
+  return _keyCommandsProvider;
 }
 
 #pragma mark - KeyCommandsPlumbing
@@ -3527,7 +3617,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   if (entry->type != sessions::TabRestoreService::TAB)
     return;
 
-  [self chromeExecuteCommand:[GenericChromeCommand commandWithTag:IDC_NEW_TAB]];
+  [self.dispatcher openNewTab:[OpenNewTabCommand command]];
   TabRestoreServiceDelegateImplIOS* const delegate =
       TabRestoreServiceDelegateImplIOSFactory::GetForBrowserState(
           _browserState);
@@ -3547,6 +3637,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   }
   return [self.keyCommandsProvider
       keyCommandsForConsumer:self
+                  dispatcher:self.dispatcher
                  editingText:![self isFirstResponder]];
 }
 
@@ -3576,7 +3667,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   }
 
   // NOTE: This check for the Crash Host URL is here to avoid the URL from
-  // ending up in the history causign the app to crash at every subsequent
+  // ending up in the history causing the app to crash at every subsequent
   // restart.
   if (url.host() == kChromeUIBrowserCrashHost) {
     [self induceBrowserCrash];
@@ -3586,22 +3677,24 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   }
 
   if (url == [_preloadController prerenderedURL]) {
+    std::unique_ptr<web::WebState> newWebState =
+        [_preloadController releasePrerenderContents];
+    DCHECK(newWebState);
+
     Tab* oldTab = [_model currentTab];
-    Tab* newTab = [_preloadController releasePrerenderContents];
+    Tab* newTab = LegacyTabHelper::GetTabForWebState(newWebState.get());
     DCHECK(oldTab);
     DCHECK(newTab);
-    if (oldTab && newTab) {
-      [oldTab recordStateInHistory];
-      DCHECK([newTab navigationManager]);
-      CRWSessionController* newHistory =
-          [newTab navigationManagerImpl]->GetSessionController();
-      DCHECK([oldTab navigationManager]);
-      CRWSessionController* oldHistory =
-          [oldTab navigationManagerImpl]->GetSessionController();
-      [newHistory insertStateFromSessionController:oldHistory];
-      [[newTab nativeAppNavigationController]
-          copyStateFrom:[oldTab nativeAppNavigationController]];
-      [_model replaceTab:oldTab withTab:newTab];
+
+    bool canPruneItems =
+        [newTab navigationManager]->CanPruneAllButLastCommittedItem();
+
+    if (oldTab && newTab && canPruneItems) {
+      [newTab navigationManager]->CopyStateFromAndPrune(
+          [oldTab navigationManager]);
+
+      [_model webStateList]->ReplaceWebStateAt([_model indexOfTab:oldTab],
+                                               std::move(newWebState));
 
       // Set isPrerenderTab to NO after replacing the tab. This will allow the
       // BrowserViewController to detect that a pre-rendered tab is switched in,
@@ -3609,7 +3702,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       newTab.isPrerenderTab = NO;
 
       [self tabLoadComplete:newTab withSuccess:newTab.loadFinished];
-
       return;
     }
   }
@@ -3634,12 +3726,21 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     return;
   }
 
+  // If this is a reload initiated from the omnibox.
+  // TODO(crbug.com/730192): Add DCHECK to verify that whenever urlToLood is the
+  // same as the old url, the transition type is ui::PAGE_TRANSITION_RELOAD.
+  if (PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_RELOAD)) {
+    [[_model currentTab] navigationManager]->Reload(
+        web::ReloadType::NORMAL, true /* check_for_repost */);
+    return;
+  }
+
   web::NavigationManager::WebLoadParams params(urlToLoad);
   params.referrer = referrer;
   params.transition_type = transition;
   params.is_renderer_initiated = rendererInitiated;
   DCHECK([_model currentTab]);
-  [[[_model currentTab] webController] loadWithParams:params];
+  [[_model currentTab] navigationManager]->LoadURLWithParams(params);
 }
 
 - (void)loadJavaScriptFromLocationBar:(NSString*)script {
@@ -3696,12 +3797,12 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   // ends up appended to the end of the model, not just next to what is
   // currently selected in the other mode. This is done with the |append|
   // parameter.
-  base::scoped_nsobject<OpenUrlCommand> command([[OpenUrlCommand alloc]
+  OpenUrlCommand* command = [[OpenUrlCommand alloc]
        initWithURL:url
           referrer:web::Referrer()  // Strip referrer when switching modes.
        inIncognito:inIncognito
       inBackground:inBackground
-          appendTo:kLastTab]);
+          appendTo:kLastTab];
   [self chromeExecuteCommand:command];
 }
 
@@ -3771,18 +3872,18 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   // editing ends (i.e., editing was cancelled), restart the cancelled load.
   if (_locationBarEditCancelledLoad) {
     _locationBarEditCancelledLoad = NO;
-    if (!_toolbarModelIOS->IsLoading()) {
-      [[_model currentTab] reload];
-    }
+
+    web::WebState* webState = [_model currentTab].webState;
+    if (!_toolbarModelIOS->IsLoading() && webState)
+      webState->GetNavigationManager()->Reload(web::ReloadType::NORMAL,
+                                               false /* check_for_repost */);
   }
 }
 
 - (IBAction)locationBarBeganEdit:(id)sender {
   // On handsets, if a page is currently loading it should be stopped.
   if (!IsIPadIdiom() && _toolbarModelIOS->IsLoading()) {
-    base::scoped_nsobject<GenericChromeCommand> command(
-        [[GenericChromeCommand alloc] initWithTag:IDC_STOP]);
-    [self chromeExecuteCommand:command];
+    [self.dispatcher stopLoading];
     _locationBarEditCancelledLoad = YES;
   }
 }
@@ -3824,12 +3925,159 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   CGRect cardFrame = {frame.origin, cardSize};
 
   CardView* card =
-      [[[CardView alloc] initWithFrame:cardFrame isIncognito:_isOffTheRecord]
-          autorelease];
+      [[CardView alloc] initWithFrame:cardFrame isIncognito:_isOffTheRecord];
   card.closeButtonSide = IsPortrait() ? CardCloseButtonSide::TRAILING
                                       : CardCloseButtonSide::LEADING;
   [_contentArea addSubview:card];
   return card;
+}
+
+#pragma mark - BrowserCommands
+
+- (void)goBack {
+  [[_model currentTab] goBack];
+}
+
+- (void)goForward {
+  [[_model currentTab] goForward];
+}
+
+- (void)stopLoading {
+  [_model currentTab].webState->Stop();
+}
+
+- (void)reload {
+  web::WebState* webState = [_model currentTab].webState;
+  if (webState) {
+    // |check_for_repost| is true because the reload is explicitly initiated
+    // by the user.
+    webState->GetNavigationManager()->Reload(web::ReloadType::NORMAL,
+                                             true /* check_for_repost */);
+  }
+}
+
+- (void)sharePage {
+  ShareToData* data = activity_services::ShareToDataForTab([_model currentTab]);
+  if (data)
+    [self sharePageWithData:data];
+}
+
+- (void)bookmarkPage {
+  [self initializeBookmarkInteractionController];
+  [_bookmarkInteractionController
+      presentBookmarkForTab:[_model currentTab]
+        currentlyBookmarked:_toolbarModelIOS->IsCurrentTabBookmarkedByUser()
+                     inView:[_toolbarController bookmarkButtonView]
+                 originRect:[_toolbarController bookmarkButtonAnchorRect]];
+}
+
+- (void)showToolsMenu {
+  DCHECK(_browserState);
+  DCHECK(self.visible || self.dismissingModal);
+
+  // Record the time this menu was requested; to be stored in the configuration
+  // object.
+  NSDate* showToolsMenuPopupRequestDate = [NSDate date];
+
+  // Dismiss the omnibox (if open).
+  [_toolbarController cancelOmniboxEdit];
+  // Dismiss the soft keyboard (if open).
+  [[_model currentTab].webController dismissKeyboard];
+  // Dismiss Find in Page focus.
+  [self updateFindBar:NO shouldFocus:NO];
+
+  ToolsMenuConfiguration* configuration =
+      [[ToolsMenuConfiguration alloc] initWithDisplayView:[self view]];
+  configuration.requestStartTime =
+      showToolsMenuPopupRequestDate.timeIntervalSinceReferenceDate;
+  if ([_model count] == 0)
+    [configuration setNoOpenedTabs:YES];
+
+  if (_isOffTheRecord)
+    [configuration setInIncognito:YES];
+
+  if (!_readingListMenuNotifier) {
+    _readingListMenuNotifier = [[ReadingListMenuNotifier alloc]
+        initWithReadingList:ReadingListModelFactory::GetForBrowserState(
+                                _browserState)];
+  }
+  [configuration setReadingListMenuNotifier:_readingListMenuNotifier];
+
+  [configuration setUserAgentType:self.userAgentType];
+
+  [_toolbarController showToolsMenuPopupWithConfiguration:configuration];
+
+  ToolsPopupController* toolsPopupController =
+      [_toolbarController toolsPopupController];
+  if ([_model currentTab]) {
+    BOOL isBookmarked = _toolbarModelIOS->IsCurrentTabBookmarked();
+    [toolsPopupController setIsCurrentPageBookmarked:isBookmarked];
+    [toolsPopupController setCanShowFindBar:self.canShowFindBar];
+    [toolsPopupController setCanUseReaderMode:self.canUseReaderMode];
+    [toolsPopupController setCanShowShareMenu:self.canShowShareMenu];
+
+    if (!IsIPadIdiom())
+      [toolsPopupController setIsTabLoading:_toolbarModelIOS->IsLoading()];
+  }
+}
+
+- (void)openNewTab:(OpenNewTabCommand*)command {
+  if (self.isOffTheRecord != command.incognito) {
+    // Not for this browser state, send it on its way.
+    [self.dispatcher switchModesAndOpenNewTab:command];
+    return;
+  }
+
+  NSTimeInterval startTime = [NSDate timeIntervalSinceReferenceDate];
+  BOOL offTheRecord = self.isOffTheRecord;
+  ProceduralBlock oldForegroundTabWasAddedCompletionBlock =
+      self.foregroundTabWasAddedCompletionBlock;
+  self.foregroundTabWasAddedCompletionBlock = ^{
+    if (oldForegroundTabWasAddedCompletionBlock) {
+      oldForegroundTabWasAddedCompletionBlock();
+    }
+    double duration = [NSDate timeIntervalSinceReferenceDate] - startTime;
+    base::TimeDelta timeDelta = base::TimeDelta::FromSecondsD(duration);
+    if (offTheRecord) {
+      UMA_HISTOGRAM_TIMES("Toolbar.Menu.NewIncognitoTabPresentationDuration",
+                          timeDelta);
+    } else {
+      UMA_HISTOGRAM_TIMES("Toolbar.Menu.NewTabPresentationDuration", timeDelta);
+    }
+  };
+
+  [self setLastTapPoint:command];
+  DCHECK(self.visible || self.dismissingModal);
+  Tab* currentTab = [_model currentTab];
+  if (currentTab) {
+    [currentTab updateSnapshotWithOverlay:YES visibleFrameOnly:YES];
+  }
+  [self addSelectedTabWithURL:GURL(kChromeUINewTabURL)
+                   transition:ui::PAGE_TRANSITION_TYPED];
+}
+
+- (void)printTab {
+  Tab* currentTab = [_model currentTab];
+  // The UI should prevent users from printing non-printable pages. However, a
+  // redirection to an un-printable page can happen before it is reflected in
+  // the UI.
+  if (![currentTab viewForPrinting]) {
+    TriggerHapticFeedbackForNotification(UINotificationFeedbackTypeError);
+    [self showSnackbar:l10n_util::GetNSString(IDS_IOS_CANNOT_PRINT_PAGE_ERROR)];
+    return;
+  }
+  DCHECK(_browserState);
+  if (!_printController) {
+    _printController = [[PrintController alloc]
+        initWithContextGetter:_browserState->GetRequestContext()];
+  }
+  [_printController printView:[currentTab viewForPrinting]
+                    withTitle:[currentTab title]
+               viewController:self];
+}
+
+- (void)addToReadingList:(ReadingListAddCommand*)command {
+  [self addToReadingListURL:[command URL] title:[command title]];
 }
 
 #pragma mark - Command Handling
@@ -3839,43 +4087,28 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   if (!_model || !_browserState)
     return;
+  Tab* currentTab = [_model currentTab];
 
   switch (command) {
-    case IDC_BACK:
-      [[_model currentTab] goBack];
-      break;
-    case IDC_BOOKMARK_PAGE:
-      [self initializeBookmarkInteractionController];
-      [_bookmarkInteractionController
-          presentBookmarkForTab:[_model currentTab]
-            currentlyBookmarked:_toolbarModelIOS->IsCurrentTabBookmarkedByUser()
-                         inView:[_toolbarController bookmarkButtonView]
-                     originRect:[_toolbarController bookmarkButtonAnchorRect]];
-      break;
-    case IDC_CLOSE_TAB:
-      [self closeCurrentTab];
-      break;
     case IDC_FIND:
       [self initFindBarForTab];
       break;
     case IDC_FIND_NEXT: {
-      FindInPageController* findInPageController =
-          GetFindInPageController([_model currentTab]);
+      DCHECK(currentTab);
       // TODO(crbug.com/603524): Reshow find bar if necessary.
-      [findInPageController findNextStringInPageWithCompletionHandler:^{
-        FindInPageModel* model = findInPageController.findInPageModel;
-        [_findBarController updateResultsCount:model];
-      }];
+      FindTabHelper::FromWebState(currentTab.webState)
+          ->ContinueFinding(FindTabHelper::FORWARD, ^(FindInPageModel* model) {
+            [_findBarController updateResultsCount:model];
+          });
       break;
     }
     case IDC_FIND_PREVIOUS: {
-      FindInPageController* findInPageController =
-          GetFindInPageController([_model currentTab]);
+      DCHECK(currentTab);
       // TODO(crbug.com/603524): Reshow find bar if necessary.
-      [findInPageController findPreviousStringInPageWithCompletionHandler:^{
-        FindInPageModel* model = findInPageController.findInPageModel;
-        [_findBarController updateResultsCount:model];
-      }];
+      FindTabHelper::FromWebState(currentTab.webState)
+          ->ContinueFinding(FindTabHelper::REVERSE, ^(FindInPageModel* model) {
+            [_findBarController updateResultsCount:model];
+          });
       break;
     }
     case IDC_FIND_CLOSE:
@@ -3884,42 +4117,14 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     case IDC_FIND_UPDATE:
       [self searchFindInPage];
       break;
-    case IDC_FORWARD:
-      [[_model currentTab] goForward];
-      break;
-    case IDC_FULLSCREEN:
-      NOTIMPLEMENTED();
-      break;
     case IDC_HELP_PAGE_VIA_MENU:
       [self showHelpPage];
-      break;
-    case IDC_NEW_TAB:
-      if (_isOffTheRecord) {
-        // Not for this browser state, send it on its way.
-        [super chromeExecuteCommand:sender];
-      } else {
-        [self newTab:sender];
-      }
       break;
     case IDC_PRELOAD_VOICE_SEARCH:
       // Preload VoiceSearchController and views and view controllers needed
       // for voice search.
       [self ensureVoiceSearchControllerCreated];
       _voiceSearchController->PrepareToAppear();
-      break;
-    case IDC_NEW_INCOGNITO_TAB:
-      if (_isOffTheRecord) {
-        [self newTab:sender];
-      } else {
-        // Not for this browser state, send it on its way.
-        [super chromeExecuteCommand:sender];
-      }
-      break;
-    case IDC_RELOAD:
-      [[_model currentTab] reload];
-      break;
-    case IDC_SHARE_PAGE:
-      [self sharePage];
       break;
     case IDC_SHOW_MAIL_COMPOSER:
       [self showMailComposer:sender];
@@ -3928,12 +4133,11 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       [[_model currentTab] switchToReaderMode];
       break;
     case IDC_REQUEST_DESKTOP_SITE:
-      [self enableDesktopUserAgent];
+      [[_model currentTab] reloadWithUserAgentType:web::UserAgentType::DESKTOP];
       break;
-    case IDC_SHOW_TOOLS_MENU: {
-      [self showToolsMenuPopup];
+    case IDC_REQUEST_MOBILE_SITE:
+      [[_model currentTab] reloadWithUserAgentType:web::UserAgentType::MOBILE];
       break;
-    }
     case IDC_SHOW_BOOKMARK_MANAGER: {
       if (IsIPadIdiom()) {
         [self showAllBookmarks];
@@ -3956,9 +4160,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       }
       break;
     }
-    case IDC_STOP:
-      [[_model currentTab] stopLoading];
-      break;
 #if !defined(NDEBUG)
     case IDC_VIEW_SOURCE:
       [self viewSource];
@@ -3987,37 +4188,21 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
       DCHECK([sender isKindOfClass:[TabHistoryCell class]]);
       [self navigateToSelectedEntry:sender];
       break;
-    case IDC_PRINT:
-      [self print];
-      break;
-    case IDC_ADD_READING_LIST: {
-      DCHECK(reading_list::switches::IsReadingListEnabled());
-      ReadingListAddCommand* command =
-          base::mac::ObjCCastStrict<ReadingListAddCommand>(sender);
-      [self addToReadingListURL:[command URL] title:[command title]];
-      break;
-    }
     case IDC_RATE_THIS_APP:
       [self showRateThisAppDialog];
       break;
     case IDC_SHOW_READING_LIST:
-      DCHECK(reading_list::switches::IsReadingListEnabled());
       [self showReadingList];
       break;
     case IDC_VOICE_SEARCH:
       // If the voice search command is coming from a UIView sender, store it
       // before sending the command up the responder chain.
       if ([sender isKindOfClass:[UIView class]])
-        _voiceSearchButton.reset(sender);
+        _voiceSearchButton = sender;
       [super chromeExecuteCommand:sender];
       break;
     case IDC_SHOW_QR_SCANNER:
       [self showQRScanner];
-      break;
-    case IDC_SHOW_SUGGESTIONS:
-      if (experimental_flags::IsSuggestionsUIEnabled()) {
-        [self showSuggestionsUI];
-      }
       break;
     default:
       // Unknown commands get sent up the responder chain.
@@ -4051,11 +4236,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   }
 }
 
-- (void)sharePage {
-  ShareToData* data = activity_services::ShareToDataForTab([_model currentTab]);
-  if (data)
-    [self sharePageWithData:data];
-}
 
 - (void)sharePageWithData:(ShareToData*)data {
   id<ShareProtocol> controller = [_dependencyFactory shareControllerInstance];
@@ -4066,6 +4246,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   [controller shareWithData:data
                  controller:self
                browserState:_browserState
+                 dispatcher:self.dispatcher
             shareToDelegate:self
                    fromRect:fromRect
                      inView:inView];
@@ -4084,21 +4265,21 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   Tab* currentTab = [_model currentTab];
   [currentTab dismissModals];
 
-  FindInPageController* findInPageController =
-      GetFindInPageController(currentTab);
-  [findInPageController disableFindInPageWithCompletionHandler:^{
-    [self updateFindBar:NO shouldFocus:NO];
-  }];
+  if (currentTab) {
+    auto* findHelper = FindTabHelper::FromWebState(currentTab.webState);
+    if (findHelper) {
+      findHelper->StopFinding(^{
+        [self updateFindBar:NO shouldFocus:NO];
+      });
+    }
+  }
 
-  [_contextualSearchController movePanelOffscreen];
   [_paymentRequestManager cancelRequest];
   [_printController dismissAnimated:YES];
-  _printController.reset();
+  _printController = nil;
   [_toolbarController dismissToolsMenuPopup];
   [_contextMenuCoordinator stop];
   [self dismissRateThisAppDialog];
-
-  [_contentSuggestionsCoordinator stop];
 
   if (self.presentedViewController) {
     // Dismisses any other modal controllers that may be present, e.g. Recent
@@ -4134,16 +4315,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
                   referrer:web::Referrer()
               inBackground:NO
                   appendTo:kCurrentTab];
-}
-
-- (void)enableDesktopUserAgent {
-  [[_model currentTab] enableDesktopUserAgent];
-  [[_model currentTab] reloadForDesktopUserAgent];
-}
-
-- (void)resetAllWebViews {
-  [_dialogPresenter cancelAllDialogs];
-  [_model resetAllWebViews];
 }
 
 #pragma mark - Find Bar
@@ -4183,51 +4354,60 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     return;
 
   if (!_findBarController)
-    _findBarController.reset(
-        [[FindBarControllerIOS alloc] initWithIncognito:_isOffTheRecord]);
+    _findBarController =
+        [[FindBarControllerIOS alloc] initWithIncognito:_isOffTheRecord];
 
   Tab* tab = [_model currentTab];
-  FindInPageController* controller = GetFindInPageController(tab);
-  DCHECK(!controller.findInPageModel.enabled);
-  controller.findInPageModel.enabled = YES;
+  DCHECK(tab);
+  auto* helper = FindTabHelper::FromWebState(tab.webState);
+  DCHECK(!helper->IsFindUIActive());
+  helper->SetFindUIActive(true);
   [self showFindBarWithAnimation:YES selectText:YES shouldFocus:YES];
 }
 
 - (void)searchFindInPage {
-  FindInPageController* findInPageController =
-      GetFindInPageController([_model currentTab]);
-  base::WeakNSObject<BrowserViewController> weakSelf(self);
-  [findInPageController findStringInPage:[_findBarController searchTerm]
-                       completionHandler:^{
-                         FindInPageModel* model =
-                             findInPageController.findInPageModel;
-                         [_findBarController updateResultsCount:model];
-                       }];
+  DCHECK([_model currentTab]);
+  auto* helper = FindTabHelper::FromWebState([_model currentTab].webState);
+  __weak BrowserViewController* weakSelf = self;
+  helper->StartFinding(
+      [_findBarController searchTerm], ^(FindInPageModel* model) {
+        BrowserViewController* strongSelf = weakSelf;
+        if (!strongSelf) {
+          return;
+        }
+        [strongSelf->_findBarController updateResultsCount:model];
+      });
+
   if (!_isOffTheRecord)
-    [findInPageController saveSearchTerm];
+    helper->PersistSearchTerm();
 }
 
 - (void)closeFindInPage {
-  base::WeakNSObject<BrowserViewController> weakSelf(self);
-  FindInPageController* findInPageController =
-      GetFindInPageController([_model currentTab]);
-  [findInPageController disableFindInPageWithCompletionHandler:^{
-    [weakSelf updateFindBar:NO shouldFocus:NO];
-  }];
+  __weak BrowserViewController* weakSelf = self;
+  Tab* currentTab = [_model currentTab];
+  if (currentTab) {
+    FindTabHelper::FromWebState(currentTab.webState)->StopFinding(^{
+      [weakSelf updateFindBar:NO shouldFocus:NO];
+    });
+  }
 }
 
 - (void)updateFindBar:(BOOL)initialUpdate shouldFocus:(BOOL)shouldFocus {
-  FindInPageController* findInPageController =
-      GetFindInPageController([_model currentTab]);
-  FindInPageModel* model = findInPageController.findInPageModel;
-  if (model.enabled) {
+  // TODO(crbug.com/731045): This early return temporarily replaces a DCHECK.
+  // For unknown reasons, this DCHECK sometimes was hit in the wild, resulting
+  // in a crash.
+  if (![_model currentTab]) {
+    return;
+  }
+  auto* helper = FindTabHelper::FromWebState([_model currentTab].webState);
+  if (helper && helper->IsFindUIActive()) {
     if (initialUpdate && !_isOffTheRecord) {
-      [findInPageController restoreSearchTerm];
+      helper->RestoreSearchTerm();
     }
 
     [self setFramesForHeaders:[self headerViews]
                      atOffset:[self currentHeaderOffset]];
-    [_findBarController updateView:model
+    [_findBarController updateView:helper->GetFindResult()
                      initialUpdate:initialUpdate
                     focusTextfield:shouldFocus];
   } else {
@@ -4241,36 +4421,25 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   Tab* tab = [_model currentTab];
   web::NavigationManager::WebLoadParams params(URL);
   params.transition_type = ui::PAGE_TRANSITION_AUTO_BOOKMARK;
-  [[tab webController] loadWithParams:params];
+  [tab navigationManager]->LoadURLWithParams(params);
 }
 
 - (void)showReadingList {
-  DCHECK(reading_list::switches::IsReadingListEnabled());
-  _readingListCoordinator.reset([[ReadingListCoordinator alloc]
+  _readingListCoordinator = [[ReadingListCoordinator alloc]
       initWithBaseViewController:self
                     browserState:self.browserState
-                          loader:self]);
+                          loader:self];
 
   [_readingListCoordinator start];
 }
 
 - (void)showQRScanner {
-  _qrScannerViewController.reset(
-      [[QRScannerViewController alloc] initWithDelegate:_toolbarController]);
+  _qrScannerViewController =
+      [[QRScannerViewController alloc] initWithDelegate:_toolbarController];
   [self presentViewController:[_qrScannerViewController
                                   getViewControllerToPresent]
                      animated:YES
                    completion:nil];
-}
-
-- (void)showSuggestionsUI {
-  if (!_contentSuggestionsCoordinator) {
-    _contentSuggestionsCoordinator.reset([[ContentSuggestionsCoordinator alloc]
-        initWithBaseViewController:self]);
-    [_contentSuggestionsCoordinator setURLLoader:self];
-  }
-  [_contentSuggestionsCoordinator setBrowserState:_browserState];
-  [_contentSuggestionsCoordinator start];
 }
 
 - (void)showNTPPanel:(NewTabPage::PanelIdentifier)panel {
@@ -4285,11 +4454,11 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   Tab* tab = [_model currentTab];
   web::NavigationManager::WebLoadParams params(url);
   params.transition_type = ui::PAGE_TRANSITION_AUTO_BOOKMARK;
-  [[tab webController] loadWithParams:params];
+  [tab navigationManager]->LoadURLWithParams(params);
 }
 
 - (void)showRateThisAppDialog {
-  DCHECK(!_rateThisAppDialog.get());
+  DCHECK(!_rateThisAppDialog);
 
   // Store the current timestamp whenever this dialog is shown.
   _browserState->GetPrefs()->SetInt64(prefs::kRateThisAppDialogLastShownTime,
@@ -4307,19 +4476,18 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   base::RecordAction(base::UserMetricsAction("IOSRateThisAppDialogShown"));
   [self clearPresentedStateWithCompletion:nil];
 
-  _rateThisAppDialog.reset(
-      ios::GetChromeBrowserProvider()->CreateAppRatingPrompt());
+  _rateThisAppDialog = ios::GetChromeBrowserProvider()->CreateAppRatingPrompt();
   [_rateThisAppDialog setAppStoreURL:storeURL];
   [_rateThisAppDialog setDelegate:self];
   [_rateThisAppDialog show];
 }
 
 - (void)dismissRateThisAppDialog {
-  if (_rateThisAppDialog.get()) {
+  if (_rateThisAppDialog) {
     base::RecordAction(base::UserMetricsAction(
         "IOSRateThisAppDialogDismissedProgramatically"));
     [_rateThisAppDialog dismiss];
-    _rateThisAppDialog.reset();
+    _rateThisAppDialog = nil;
   }
 }
 
@@ -4329,10 +4497,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   DCHECK(tab);
   CRWWebController* webController = tab.webController;
   NSString* script = @"document.documentElement.outerHTML;";
-  base::WeakNSObject<Tab> weakTab(tab);
-  base::WeakNSObject<BrowserViewController> weakSelf(self);
+  __weak Tab* weakTab = tab;
+  __weak BrowserViewController* weakSelf = self;
   web::JavaScriptResultBlock completionHandlerBlock = ^(id result, NSError*) {
-    base::scoped_nsobject<Tab> strongTab([weakTab retain]);
+    Tab* strongTab = weakTab;
     if (!strongTab)
       return;
     if (![result isKindOfClass:[NSString class]])
@@ -4340,7 +4508,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     std::string base64HTML;
     base::Base64Encode(base::SysNSStringToUTF8(result), &base64HTML);
     GURL URL(std::string("data:text/plain;charset=utf-8;base64,") + base64HTML);
-    web::Referrer referrer([strongTab url], web::ReferrerPolicyDefault);
+    web::Referrer referrer([strongTab lastCommittedURL],
+                           web::ReferrerPolicyDefault);
 
     [[weakSelf tabModel]
         insertTabWithURL:URL
@@ -4358,7 +4527,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
 - (void)startVoiceSearch {
   // Delay Voice Search until new tab animations have finished.
-  if (_inNewTabAnimation) {
+  if (self.inNewTabAnimation) {
     _startVoiceSearchAfterNewTabAnimation = YES;
     return;
   }
@@ -4387,17 +4556,17 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   ToolbarController* relinquishedToolbarController = nil;
   if ([_toolbarController view].hidden) {
     Tab* currentTab = [_model currentTab];
-    if (currentTab && UrlHasChromeScheme(currentTab.url)) {
+    if (currentTab && UrlHasChromeScheme(currentTab.lastCommittedURL)) {
       // Use the native content controller's toolbar when the BVC's is hidden.
       id nativeController = [self nativeControllerForTab:currentTab];
       if ([nativeController conformsToProtocol:@protocol(ToolbarOwner)]) {
         relinquishedToolbarController =
             [nativeController relinquishedToolbarController];
-        _relinquishedToolbarOwner.reset(nativeController);
+        _relinquishedToolbarOwner = nativeController;
       }
     }
   } else {
-    relinquishedToolbarController = _toolbarController.get();
+    relinquishedToolbarController = _toolbarController;
   }
   _isToolbarControllerRelinquished = (relinquishedToolbarController != nil);
   return relinquishedToolbarController;
@@ -4408,17 +4577,12 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     if ([[_toolbarController view] isDescendantOfView:self.view]) {
       // A native content controller's toolbar has been relinquished.
       [_relinquishedToolbarOwner reparentToolbarController];
-      _relinquishedToolbarOwner.reset();
+      _relinquishedToolbarOwner = nil;
     } else if ([_findBarController isFindInPageShown]) {
       [self.view insertSubview:[_toolbarController view]
                   belowSubview:[_findBarController view]];
     } else {
       [self.view addSubview:[_toolbarController view]];
-    }
-    if (_contextualSearchPanel) {
-      // Move panel back into its correct place.
-      [self.view insertSubview:_contextualSearchPanel
-                  aboveSubview:[_toolbarController view]];
     }
     _isToolbarControllerRelinquished = NO;
   }
@@ -4435,8 +4599,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   [self installDelegatesForTab:tab];
 
   if (fg) {
-    [_contextualSearchController setTab:tab];
-    [_paymentRequestManager setWebState:tab.webState];
+    [_paymentRequestManager setActiveWebState:tab.webState];
   }
 }
 
@@ -4449,14 +4612,13 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   // Currently this observer method is always called with a non-nil |newTab|,
   // but that may change in the future.  Remove this DCHECK when it does.
   DCHECK(newTab);
-  if (_infoBarContainer.get()) {
+  if (_infoBarContainer) {
     infobars::InfoBarManager* infoBarManager = [newTab infoBarManager];
     _infoBarContainer->ChangeInfoBarManager(infoBarManager);
   }
   [self updateVoiceSearchBarVisibilityAnimated:NO];
 
-  [_contextualSearchController setTab:newTab];
-  [_paymentRequestManager setWebState:newTab.webState];
+  [_paymentRequestManager setActiveWebState:newTab.webState];
 
   [self tabSelected:newTab];
   DCHECK_EQ(newTab, [model currentTab]);
@@ -4468,9 +4630,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   DCHECK(tab && ([_model indexOfTab:tab] != NSNotFound));
   if (tab == [_model currentTab]) {
     [self updateToolbar];
-    // Disable contextual search when |tab| is a voice search result tab.
-    BOOL enableContextualSearch = self.active && !tab.isVoiceSearchResultsTab;
-    [_contextualSearchController enableContextualSearch:enableContextualSearch];
   }
 }
 
@@ -4479,12 +4638,13 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     didReplaceTab:(Tab*)oldTab
           withTab:(Tab*)newTab
           atIndex:(NSUInteger)index {
-  if (_infoBarContainer.get()) {
+  [self uninstallDelegatesForTab:oldTab];
+  [self installDelegatesForTab:newTab];
+
+  if (_infoBarContainer) {
     infobars::InfoBarManager* infoBarManager = [newTab infoBarManager];
     _infoBarContainer->ChangeInfoBarManager(infoBarManager);
   }
-
-  [self installDelegatesForTab:newTab];
 
   // Add |newTab|'s view to the hierarchy if it's the current Tab.
   if (self.active && model.currentTab == newTab)
@@ -4495,6 +4655,11 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 - (void)tabModel:(TabModel*)model
     didRemoveTab:(Tab*)tab
          atIndex:(NSUInteger)index {
+  [self uninstallDelegatesForTab:tab];
+
+  // Cancel dialogs for |tab|'s WebState.
+  [self.dialogPresenter cancelDialogForWebState:tab.webState];
+
   // Remove stored native controllers for the tab.
   [_nativeControllersForTabIDs removeObjectForKey:tab.tabId];
 
@@ -4513,10 +4678,11 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     [_toolbarController selectedTabChanged];
   }
 
+  [_paymentRequestManager stopTrackingWebState:tab.webState];
+
   [[UpgradeCenter sharedInstance] tabWillClose:tab.tabId];
   if ([model count] == 1) {  // About to remove the last tab.
-    [_contextualSearchController setTab:nil];
-    [_paymentRequestManager setWebState:nil];
+    [_paymentRequestManager setActiveWebState:nullptr];
   }
 }
 
@@ -4530,170 +4696,13 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
 - (void)showUpgrade:(UpgradeCenter*)center {
   // Add an infobar on all the open tabs.
-  for (Tab* tab in _model.get()) {
+  for (Tab* tab in _model) {
     NSString* tabId = tab.tabId;
     DCHECK([tab infoBarManager]);
     [center addInfoBarToManager:[tab infoBarManager] forTabId:tabId];
   }
 }
 
-#pragma mark - ContextualSearchControllerDelegate
-
-- (void)createTabFromContextualSearchController:(const GURL&)url {
-  Tab* currentTab = [_model currentTab];
-  DCHECK(currentTab);
-  NSUInteger index = [_model indexOfTab:currentTab];
-  [self addSelectedTabWithURL:url
-                      atIndex:index + 1
-                   transition:ui::PAGE_TRANSITION_LINK];
-}
-
-- (void)promotePanelToTabProvidedBy:(id<ContextualSearchTabProvider>)tabProvider
-                         focusInput:(BOOL)focusInput {
-  // Tell the panel it will be promoted.
-  ContextualSearchPanelView* promotingPanel = _contextualSearchPanel;
-  [promotingPanel prepareForPromotion];
-
-  // Make a new panel and tell the controller about it.
-  _contextualSearchPanel = [self createPanelView];
-  [self.view insertSubview:_contextualSearchPanel belowSubview:promotingPanel];
-  [_contextualSearchController setPanel:_contextualSearchPanel];
-
-  // Figure out vertical offset.
-  CGFloat offset = StatusBarHeight();
-  if (IsIPadIdiom()) {
-    offset = MAX(offset, CGRectGetMaxY([_tabStripController view].frame));
-  }
-
-  // Transition steps: Animate the panel position, fade in the toolbar and
-  // tab strip.
-  ProceduralBlock transition = ^{
-    [promotingPanel promoteToMatchSuperviewWithVerticalOffset:offset];
-    [self updateToolbarControlsAlpha:1.0];
-    [self updateToolbarBackgroundAlpha:1.0];
-    [_tabStripController view].alpha = 1.0;
-  };
-
-  // After the transition animation completes, add the tab to the tab model
-  // (on iPad this triggers the tab strip animation too), then fade out the
-  // transitioning panel and remove it.
-  void (^completion)(BOOL) = ^(BOOL finished) {
-    _contextualSearchMask.alpha = 0;
-    Tab* newTab = [tabProvider releaseTab];
-    DCHECK(newTab);
-    DCHECK([newTab navigationManager]);
-    // Add the new tab to the tab model.
-    [newTab setParentTabModel:_model];
-    // Insert the new tab one after the current tab.
-    Tab* currentTab = [_model currentTab];
-    NSUInteger index = [_model indexOfTab:currentTab];
-    [_model insertTab:newTab atIndex:index + 1];
-
-    // Set isPrerenderTab to NO after inserting the tab. This will allow the
-    // BrowserViewController to detect that a pre-rendered tab is switched in,
-    // and show the prerendering animation. This needs to happen before the
-    // tab is made the current tab.
-    // This also enables contextual search (if otherwise applicable) on
-    // |newTab|.
-    newTab.isPrerenderTab = NO;
-    [_model setCurrentTab:newTab];
-
-    if (newTab.loadFinished)
-      [self tabLoadComplete:newTab withSuccess:YES];
-
-    if (focusInput) {
-      [_toolbarController focusOmnibox];
-    }
-    _infoBarContainer->RestoreInfobars();
-
-    [UIView animateWithDuration:ios::material::kDuration2
-        animations:^{
-          promotingPanel.alpha = 0;
-        }
-        completion:^(BOOL finished) {
-          [promotingPanel removeFromSuperview];
-        }];
-  };
-
-  [UIView animateWithDuration:ios::material::kDuration3
-                   animations:transition
-                   completion:completion];
-}
-
-- (ContextualSearchPanelView*)createPanelView {
-  PanelConfiguration* config;
-  CGSize panelContainerSize = self.view.bounds.size;
-  if (IsIPadIdiom()) {
-    config = [PadPanelConfiguration
-        configurationForContainerSize:panelContainerSize
-                  horizontalSizeClass:self.traitCollection.horizontalSizeClass];
-  } else {
-    config = [PhonePanelConfiguration
-        configurationForContainerSize:panelContainerSize
-                  horizontalSizeClass:self.traitCollection.horizontalSizeClass];
-  }
-  ContextualSearchPanelView* newPanel = [[[ContextualSearchPanelView alloc]
-      initWithConfiguration:config] autorelease];
-  [newPanel addMotionObserver:self];
-  [newPanel addMotionObserver:_contextualSearchMask];
-  return newPanel;
-}
-
-#pragma mark - ContextualSearchPanelMotionObserver
-
-- (void)panel:(ContextualSearchPanelView*)panel
-    didMoveWithMotion:(ContextualSearch::PanelMotion)motion {
-  // If the header is offset, it's offscreen (or moving offscreen) and the
-  // toolbar shouldn't be opacity-adjusted by the contextual search panel.
-  if ([self currentHeaderOffset] != 0)
-    return;
-
-  CGFloat toolbarAlpha;
-
-  if (motion.state == ContextualSearch::PREVIEWING) {
-    // As the panel moves past the previewing position, the toolbar should
-    // become more transparent.
-    toolbarAlpha = 1 - motion.gradation;
-  } else if (motion.state == ContextualSearch::COVERING) {
-    // The toolbar should be totally transparent when the panel is covering.
-    toolbarAlpha = 0.0;
-  } else {
-    return;
-  }
-
-  // On iPad, the toolbar doesn't go fully transparent, so map |toolbarAlpha|'s
-  // [0-1.0] range to [0.5-1.0].
-  if (IsIPadIdiom()) {
-    toolbarAlpha = 0.5 + (toolbarAlpha * 0.5);
-    [_tabStripController view].alpha = toolbarAlpha;
-  }
-
-  [self updateToolbarControlsAlpha:toolbarAlpha];
-  [self updateToolbarBackgroundAlpha:toolbarAlpha];
-}
-
-- (void)panel:(ContextualSearchPanelView*)panel
-    didChangeToState:(ContextualSearch::PanelState)toState
-           fromState:(ContextualSearch::PanelState)fromState {
-  if (toState == ContextualSearch::DISMISSED) {
-    // Panel has become hidden.
-    _infoBarContainer->RestoreInfobars();
-    [self updateToolbarControlsAlpha:1.0];
-    [self updateToolbarBackgroundAlpha:1.0];
-    [_tabStripController view].alpha = 1.0;
-  } else if (fromState == ContextualSearch::DISMISSED) {
-    // Panel has become visible.
-    _infoBarContainer->SuspendInfobars();
-  }
-}
-
-- (void)panelWillPromote:(ContextualSearchPanelView*)panel {
-  [panel removeMotionObserver:self];
-}
-
-- (CGFloat)currentHeaderHeight {
-  return [self headerHeight] - [self currentHeaderOffset];
-}
 
 #pragma mark - InfoBarControllerDelegate
 
@@ -4786,9 +4795,6 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   if (_voiceSearchController && _voiceSearchController->IsVisible())
     return YES;
 
-  if ([_contextualSearchPanel state] >= ContextualSearch::PEEKING)
-    return YES;
-
   if (!self.active)
     return YES;
 
@@ -4829,15 +4835,12 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
 #pragma mark - PreloadControllerDelegate methods
 
-- (BOOL)shouldUseDesktopUserAgent {
+- (BOOL)preloadShouldUseDesktopUserAgent {
   return [_model currentTab].usesDesktopUserAgent;
 }
 
-- (CRWSessionEntry*)currentSessionEntry {
-  Tab* tab = [_model currentTab];
-  if (![tab navigationManager])
-    return nil;
-  return [[tab navigationManagerImpl]->GetSessionController() currentEntry];
+- (BOOL)preloadHasNativeControllerForURL:(const GURL&)url {
+  return [self hasControllerForURL:url];
 }
 
 #pragma mark - BookmarkBridgeMethods
@@ -4845,8 +4848,10 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 // If an added or removed bookmark is the same as the current url, update the
 // toolbar so the star highlight is kept in sync.
 - (void)bookmarkNodeModified:(const BookmarkNode*)node {
-  if ([_model currentTab] && node->url() == [_model currentTab].url)
+  if ([_model currentTab] &&
+      node->url() == [_model currentTab].lastCommittedURL) {
     [self updateToolbar];
+  }
 }
 
 // If all bookmarks are removed, update the toolbar so the star highlight is
@@ -4858,7 +4863,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 #pragma mark - ShareToDelegate methods
 
 - (void)shareDidComplete:(ShareTo::ShareResult)shareStatus
-          successMessage:(NSString*)message {
+       completionMessage:(NSString*)message {
   // The shareTo dialog dismisses itself instead of through
   // |-dismissViewControllerAnimated:completion:| so we must reset the
   // presenting state here.
@@ -4893,7 +4898,7 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 - (void)passwordAppExDidFinish:(ShareTo::ShareResult)shareStatus
                       username:(NSString*)username
                       password:(NSString*)password
-                successMessage:(NSString*)message {
+             completionMessage:(NSString*)message {
   switch (shareStatus) {
     case ShareTo::SHARE_SUCCESS: {
       PasswordController* passwordController =
@@ -4927,10 +4932,9 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   // Dismiss current alert.
   [_alertCoordinator stop];
 
-  _alertCoordinator.reset(
-      [[_dependencyFactory alertCoordinatorWithTitle:title
-                                             message:message
-                                      viewController:self] retain]);
+  _alertCoordinator = [_dependencyFactory alertCoordinatorWithTitle:title
+                                                            message:message
+                                                     viewController:self];
   [_alertCoordinator start];
 }
 
@@ -4950,8 +4954,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     [self showErrorAlertWithStringTitle:alertTitle message:alertMessage];
     return;
   }
-  base::scoped_nsobject<MFMailComposeViewController> mailViewController(
-      [[MFMailComposeViewController alloc] init]);
+  MFMailComposeViewController* mailViewController =
+      [[MFMailComposeViewController alloc] init];
   [mailViewController setModalPresentationStyle:UIModalPresentationFormSheet];
   [mailViewController setToRecipients:[command toRecipients]];
   [mailViewController setSubject:[command subject]];
@@ -4994,8 +4998,8 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
     return;
   NSDictionary* product =
       @{SKStoreProductParameterITunesItemIdentifier : appId};
-  base::scoped_nsobject<SKStoreProductViewController> storeViewController(
-      [[SKStoreProductViewController alloc] init]);
+  SKStoreProductViewController* storeViewController =
+      [[SKStoreProductViewController alloc] init];
   [storeViewController setDelegate:self];
   [storeViewController loadProductWithParameters:product completionBlock:nil];
   [self presentViewController:storeViewController animated:YES completion:nil];
@@ -5011,33 +5015,33 @@ class BrowserBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
 - (void)userTappedRateApp:(UIView*)view {
   base::RecordAction(base::UserMetricsAction("IOSRateThisAppRateChosen"));
-  _rateThisAppDialog.reset();
+  _rateThisAppDialog = nil;
 }
 
 - (void)userTappedSendFeedback:(UIView*)view {
   base::RecordAction(base::UserMetricsAction("IOSRateThisAppFeedbackChosen"));
-  _rateThisAppDialog.reset();
-  base::scoped_nsobject<GenericChromeCommand> command(
-      [[GenericChromeCommand alloc] initWithTag:IDC_REPORT_AN_ISSUE]);
+  _rateThisAppDialog = nil;
+  GenericChromeCommand* command =
+      [[GenericChromeCommand alloc] initWithTag:IDC_REPORT_AN_ISSUE];
   [self chromeExecuteCommand:command];
 }
 
 - (void)userTappedDismiss:(UIView*)view {
   base::RecordAction(base::UserMetricsAction("IOSRateThisAppDismissChosen"));
-  _rateThisAppDialog.reset();
+  _rateThisAppDialog = nil;
 }
 
 #pragma mark - VoiceSearchBarDelegate
 
 - (BOOL)isTTSEnabledForVoiceSearchBar:(id<VoiceSearchBar>)voiceSearchBar {
-  DCHECK_EQ(_voiceSearchBar.get(), voiceSearchBar);
+  DCHECK_EQ(_voiceSearchBar, voiceSearchBar);
   [self ensureVoiceSearchControllerCreated];
   return _voiceSearchController->IsTextToSpeechEnabled() &&
          _voiceSearchController->IsTextToSpeechSupported();
 }
 
 - (void)voiceSearchBarDidUpdateButtonState:(id<VoiceSearchBar>)voiceSearchBar {
-  DCHECK_EQ(_voiceSearchBar.get(), voiceSearchBar);
+  DCHECK_EQ(_voiceSearchBar, voiceSearchBar);
   [self.tabModel.currentTab updateSnapshotWithOverlay:YES visibleFrameOnly:YES];
 }
 

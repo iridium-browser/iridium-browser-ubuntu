@@ -1,5 +1,6 @@
-<link rel="import" href="chrome://resources/cr_elements/cr_profile_avatar_selector/cr_profile_avatar_selector.html">
 <link rel="import" href="chrome://resources/html/polymer.html">
+
+<link rel="import" href="chrome://resources/cr_elements/cr_profile_avatar_selector/cr_profile_avatar_selector.html">
 <link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-input/paper-input.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/shadow.html">
@@ -18,13 +19,14 @@
     </style>
     <div class="settings-box first">
       <paper-input id="name" value="[[profileName]]" pattern=".*\S.*"
-          auto-validate required on-change="onProfileNameChanged_"
-          disabled="[[isProfileNameDisabled_(syncStatus)]]">
+          on-change="onProfileNameChanged_" on-keydown="onProfileNameKeydown_"
+          disabled="[[isProfileNameDisabled_(syncStatus)]]"
+          auto-validate no-label-float required>
       </paper-input>
     </div>
     <template is="dom-if" if="[[isProfileShortcutSettingVisible_]]">
       <div class="settings-box first">
-        <div id="showShortcutLabel" class="flex">$i18n{showShortcutLabel}</div>
+        <div id="showShortcutLabel" class="start">$i18n{showShortcutLabel}</div>
         <paper-toggle-button id="hasShortcutToggle"
             checked="{{hasProfileShortcut_}}"
             on-change="onHasProfileShortcutChange_"
@@ -33,8 +35,7 @@
       </div>
     </template>
     <cr-profile-avatar-selector id="selector" avatars="[[availableIcons]]"
-        selected-avatar-url="{{profileIconUrl}}"
-        on-iron-activate="onIconActivate_" ignore-modified-key-events>
+        selected-avatar="{{profileAvatar_}}" ignore-modified-key-events>
     </cr-profile-avatar-selector>
   </template>
   <script src="manage_profile.js"></script>

@@ -14,11 +14,13 @@ import android.os.IBinder;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.os.TransactionTooLargeException;
+import android.support.annotation.Nullable;
 import android.support.v4.app.BundleCompat;
 
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 
 /**
@@ -264,6 +266,23 @@ public class IntentUtils {
     }
 
     /**
+     * Just like {@link Intent#getSerializableExtra(String)} but doesn't throw exceptions.
+     */
+    @SuppressWarnings("unchecked")
+    public static <T extends Serializable> T safeGetSerializableExtra(Intent intent, String name) {
+        try {
+            return (T) intent.getSerializableExtra(name);
+        } catch (ClassCastException ex) {
+            Log.e(TAG, "Invalide class for Serializable: " + name, ex);
+            return null;
+        } catch (Throwable t) {
+            // Catches un-serializable exceptions.
+            Log.e(TAG, "getSerializableExtra failed on intent " + intent);
+            return null;
+        }
+    }
+
+    /**
      * Just like {@link BundleCompat#getBinder()}, but doesn't throw exceptions.
      */
     public static IBinder safeGetBinder(Bundle bundle, String name) {
@@ -312,15 +331,22 @@ public class IntentUtils {
         intent.putExtras(bundle);
     }
 
+    /** See {@link #safeStartActivity(Context, Intent, Bundle)}. */
+    public static boolean safeStartActivity(Context context, Intent intent) {
+        return safeStartActivity(context, intent, null);
+    }
+
     /**
      * Catches any failures to start an Activity.
      * @param context Context to use when starting the Activity.
      * @param intent  Intent to fire.
+     * @param bundle  Bundle of launch options.
      * @return Whether or not Android accepted the Intent.
      */
-    public static boolean safeStartActivity(Context context, Intent intent) {
+    public static boolean safeStartActivity(
+            Context context, Intent intent, @Nullable Bundle bundle) {
         try {
-            context.startActivity(intent);
+            context.startActivity(intent, bundle);
             return true;
         } catch (ActivityNotFoundException e) {
             return false;

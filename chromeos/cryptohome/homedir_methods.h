@@ -13,10 +13,15 @@
 #include "base/callback_forward.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
+#include "chromeos/dbus/cryptohome/key.pb.h"
+#include "chromeos/dbus/cryptohome/rpc.pb.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace cryptohome {
+
+// Converts the given KeyDefinition to a Key.
+void CHROMEOS_EXPORT KeyDefinitionToKey(const KeyDefinition& key_def, Key* key);
 
 // This class manages calls to Cryptohome service's home directory methods:
 // Mount, CheckKey, Add/UpdateKey.
@@ -34,6 +39,7 @@ class CHROMEOS_EXPORT HomedirMethods {
       MountCallback;
   typedef base::Callback<void(bool success, int64_t size)>
       GetAccountDiskUsageCallback;
+  typedef base::Callback<void(bool success)> DBusResultCallback;
 
   virtual ~HomedirMethods() {}
 
@@ -58,7 +64,7 @@ class CHROMEOS_EXPORT HomedirMethods {
   // Otherwise, the normal range of return codes is expected.
   virtual void MountEx(const Identification& id,
                        const Authorization& auth,
-                       const MountParameters& request,
+                       const MountRequest& request,
                        const MountCallback& callback) = 0;
 
   // Asks cryptohomed to try to add another |key| for user identified by |id|
@@ -104,6 +110,12 @@ class CHROMEOS_EXPORT HomedirMethods {
   virtual void GetAccountDiskUsage(
       const Identification& id,
       const GetAccountDiskUsageCallback& callback) = 0;
+
+  // Asks cryptohomed to migrate the cryptohome to the new encryption method
+  // for the user specified by |id|.
+  virtual void MigrateToDircrypto(const Identification& id,
+                                  bool minimal_migration,
+                                  const DBusResultCallback& callback) = 0;
 
   // Creates the global HomedirMethods instance.
   static void Initialize();

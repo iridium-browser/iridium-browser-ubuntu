@@ -8,14 +8,14 @@
 #include <list>
 #include <memory>
 #include <string>
+#include <vector>
 
-#include "base/files/scoped_temp_dir.h"
-#include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 #include "chrome/test/chromedriver/basic_types.h"
 #include "chrome/test/chromedriver/chrome/device_metrics.h"
 #include "chrome/test/chromedriver/chrome/geoposition.h"
 #include "chrome/test/chromedriver/chrome/network_conditions.h"
+#include "chrome/test/chromedriver/chrome/scoped_temp_dir_with_retry.h"
 #include "chrome/test/chromedriver/command_listener.h"
 
 static const char kAccept[] = "accept";
@@ -80,16 +80,16 @@ struct Session {
   std::unique_ptr<NetworkConditions> overridden_network_conditions;
   std::string orientation_type;
   // Logs that populate from DevTools events.
-  ScopedVector<WebDriverLog> devtools_logs;
+  std::vector<std::unique_ptr<WebDriverLog>> devtools_logs;
   std::unique_ptr<WebDriverLog> driver_log;
-  base::ScopedTempDir temp_dir;
+  ScopedTempDirWithRetry temp_dir;
   std::unique_ptr<base::DictionaryValue> capabilities;
   bool auto_reporting_enabled;
   // |command_listeners| should be declared after |chrome|. When the |Session|
   // is destroyed, |command_listeners| should be freed first, since some
   // |CommandListener|s might be |CommandListenerProxy|s that forward to
   // |DevToolsEventListener|s owned by |chrome|.
-  ScopedVector<CommandListener> command_listeners;
+  std::vector<std::unique_ptr<CommandListener>> command_listeners;
   std::string unexpected_alert_behaviour;
 };
 

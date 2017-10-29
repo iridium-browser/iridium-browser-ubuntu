@@ -16,6 +16,7 @@
 #include "base/process/process_handle.h"
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
+#include "content/public/common/bind_interface_helpers.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sender.h"
 #include "media/media_features.h"
@@ -28,18 +29,24 @@ class SharedPersistentMemoryAllocator;
 class TimeDelta;
 }
 
-namespace media {
-class AudioOutputController;
+namespace service_manager {
+class Identity;
 }
 
-namespace service_manager {
-class InterfaceProvider;
+namespace resource_coordinator {
+class ResourceCoordinatorInterface;
+}
+
+namespace viz {
+class SharedBitmapAllocationNotifierImpl;
 }
 
 namespace content {
 class BrowserContext;
 class BrowserMessageFilter;
 class RenderProcessHostObserver;
+class RenderWidgetHost;
+class RendererAudioOutputStreamFactoryContext;
 class StoragePartition;
 struct GlobalRequestID;
 
@@ -120,10 +127,13 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual void WidgetHidden() = 0;
   virtual int VisibleWidgetCount() const = 0;
 
-  // Called when an audio stream is added or removed and used to determine if
-  // the process should be backgrounded or not.
-  virtual void OnAudioStreamAdded() = 0;
-  virtual void OnAudioStreamRemoved() = 0;
+  virtual RendererAudioOutputStreamFactoryContext*
+  GetRendererAudioOutputStreamFactoryContext() = 0;
+
+  // Called when a video capture stream or an audio stream is added or removed
+  // and used to determine if the process should be backgrounded or not.
+  virtual void OnMediaStreamAdded() = 0;
+  virtual void OnMediaStreamRemoved() = 0;
 
   // Indicates whether the current RenderProcessHost is exclusively hosting
   // guest RenderFrames. Not all guest RenderFrames are created equal.  A guest,
@@ -143,10 +153,14 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual bool Shutdown(int exit_code, bool wait) = 0;
 
   // Try to shut down the associated renderer process as fast as possible.
-  // If this renderer has any RenderViews with unload handlers, then this
-  // function does nothing.
-  // Returns true if it was able to do fast shutdown.
-  virtual bool FastShutdownIfPossible() = 0;
+  // If a non-zero |page_count| value is provided, then a fast shutdown will
+  // only happen if the count matches the active view count. If
+  // |skip_unload_handlers| is false and this renderer has any RenderViews with
+  // unload handlers, then this function does nothing. Otherwise, the function
+  // will ingnore checking for those handlers. Returns true if it was able to do
+  // fast shutdown.
+  virtual bool FastShutdownIfPossible(size_t page_count = 0,
+                                      bool skip_unload_handlers = false) = 0;
 
   // Returns true if fast shutdown was started for the renderer.
   virtual bool FastShutdownStarted() const = 0;
@@ -197,12 +211,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Adds a message filter to the IPC channel.
   virtual void AddFilter(BrowserMessageFilter* filter) = 0;
 
-  // Try to shutdown the associated render process as fast as possible
-  virtual bool FastShutdownForPageCount(size_t count) = 0;
-
-  // TODO(ananta)
-  // Revisit whether the virtual functions declared from here on need to be
-  // part of the interface.
+  // Sets whether input events should be ignored for this process.
   virtual void SetIgnoreInputEvents(bool ignore_input_events) = 0;
   virtual bool IgnoreInputEvents() const = 0;
 
@@ -214,6 +223,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // process from exiting.
   virtual void AddPendingView() = 0;
   virtual void RemovePendingView() = 0;
+
+  // Adds and removes the widgets owned by this process.
+  virtual void AddWidget(RenderWidgetHost* widget) = 0;
+  virtual void RemoveWidget(RenderWidgetHost* widget) = 0;
 
   // Sets a flag indicating that the process can be abnormally terminated.
   virtual void SetSuddenTerminationAllowed(bool allowed) = 0;
@@ -245,6 +258,12 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // process. If no recording was in progress, this call will return false.
   virtual bool StopWebRTCEventLog() = 0;
 
+  // Enables or disables WebRTC's echo canceller AEC3. Disabled implies
+  // selecting the older AEC2.
+  // Note: This will be removed once the AEC3 is fully rolled out and the old
+  // AEC is deprecated.
+  virtual void SetEchoCanceller3(bool enable) = 0;
+
   // When set, |callback| receives log messages regarding, for example, media
   // devices (webcams, mics, etc) that were initially requested in the render
   // process associated with this RenderProcessHost.
@@ -273,10 +292,11 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // transferring it to a new renderer process.
   virtual void ResumeDeferredNavigation(const GlobalRequestID& request_id) = 0;
 
-  // Returns the service_manager::InterfaceProvider the browser process can use
-  // to bind
-  // interfaces exposed to it from the renderer.
-  virtual service_manager::InterfaceProvider* GetRemoteInterfaces() = 0;
+  // Binds interfaces exposed to the browser process from the renderer.
+  virtual void BindInterface(const std::string& interface_name,
+                             mojo::ScopedMessagePipeHandle interface_pipe) = 0;
+
+  virtual const service_manager::Identity& GetChildIdentity() const = 0;
 
   // Extracts any persistent-memory-allocator used for renderer metrics.
   // Ownership is passed to the caller. To support sharing of histogram data
@@ -292,16 +312,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // value.
   // Note: Do not use! Will disappear after PlzNavitate is completed.
   virtual const base::TimeTicks& GetInitTimeForNavigationMetrics() const = 0;
-
-  // Retrieves the list of AudioOutputController objects associated
-  // with this object and passes it to the callback you specify, on
-  // the same thread on which you called the method.
-  typedef std::list<scoped_refptr<media::AudioOutputController>>
-      AudioOutputControllerList;
-  typedef base::Callback<void(const AudioOutputControllerList&)>
-      GetAudioOutputControllersCallback;
-  virtual void GetAudioOutputControllers(
-      const GetAudioOutputControllersCallback& callback) const = 0;
 
   // Returns true if this process currently has backgrounded priority.
   virtual bool IsProcessBackgrounded() const = 0;
@@ -350,16 +360,72 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // MockRenderProcessHost usage in tests.
   virtual mojom::Renderer* GetRendererInterface() = 0;
 
+  // Acquires the interface to the Global Resource Coordinator for this process.
+  virtual resource_coordinator::ResourceCoordinatorInterface*
+  GetProcessResourceCoordinator() = 0;
+
   // Whether this process is locked out from ever being reused for sites other
   // than the ones it currently has.
   virtual void SetIsNeverSuitableForReuse() = 0;
   virtual bool MayReuseHost() = 0;
 
+  // Indicates whether this RenderProcessHost is "unused".  This starts out as
+  // true for new processes and becomes false after one of the following:
+  // (1) This process commits any page.
+  // (2) This process is given to a SiteInstance that already has a site
+  //     assigned.
+  // Note that a process hosting ServiceWorkers will be implicitly handled by
+  // (2) during ServiceWorker initialization, and SharedWorkers will be handled
+  // by (1) since a page needs to commit before it can create a SharedWorker.
+  //
+  // While a process is unused, it is still suitable to host a URL that
+  // requires a dedicated process.
+  virtual bool IsUnused() = 0;
+  virtual void SetIsUsed() = 0;
+
+  // Return true if the host has not been used. This is stronger than IsUnused()
+  // in that it checks if this RPH has ever been used to render at all, rather
+  // than just no being suitable to host a URL that requires a dedicated
+  // process.
+  // TODO(alexmos): can this be unified with IsUnused()? See also
+  // crbug.com/738634.
+  virtual bool HostHasNotBeenUsed() = 0;
+
   // Returns the current number of active views in this process.  Excludes
   // any RenderViewHosts that are swapped out.
   size_t GetActiveViewCount();
 
+  // Posts |task|, if this RenderProcessHost is ready or when it becomes ready
+  // (see RenderProcessHost::IsReady method).  The |task| might not run at all
+  // (e.g. if |render_process_host| is destroyed before becoming ready).  This
+  // function can only be called on the browser's UI thread (and the |task| will
+  // be posted back on the UI thread).
+  void PostTaskWhenProcessIsReady(base::OnceClosure task);
+
+  // Returns the SharedBitmapAllocationNotifier associated with this process.
+  // SharedBitmapAllocationNotifier manages viz::SharedBitmaps created by this
+  // process and can notify observers when a new SharedBitmap is allocated.
+  virtual viz::SharedBitmapAllocationNotifierImpl*
+  GetSharedBitmapAllocationNotifier() = 0;
+
   // Static management functions -----------------------------------------------
+
+  // Possibly start an unbound, spare RenderProcessHost. A subsequent creation
+  // of a RenderProcessHost with a matching browser_context may use this
+  // preinitialized RenderProcessHost, improving performance.
+  //
+  // It is safe to call this multiple times or when it is not certain that the
+  // spare renderer will be used, although calling this too eagerly may reduce
+  // performance as unnecessary RenderProcessHosts are created. The spare
+  // renderer will only be used if it using the default StoragePartition of a
+  // matching BrowserContext.
+  //
+  // The spare RenderProcessHost is meant to be created in a situation where a
+  // navigation is imminent and it is unlikely an existing RenderProcessHost
+  // will be used, for example in a cross-site navigation when a Service Worker
+  // will need to be started.
+  static void WarmupSpareRenderProcessHost(
+      content::BrowserContext* browser_context);
 
   // Flag to run the renderer in process.  This is primarily
   // for debugging purposes.  When running "in process", the

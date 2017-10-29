@@ -6,7 +6,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "cc/layers/layer.h"
-#include "cc/output/compositor_frame_sink.h"
+#include "cc/output/layer_tree_frame_sink.h"
 #include "cc/raster/bitmap_raster_buffer_provider.h"
 #include "cc/raster/gpu_raster_buffer_provider.h"
 #include "cc/raster/one_copy_raster_buffer_provider.h"
@@ -42,10 +42,12 @@ bool IsTestCaseSupported(PixelResourceTestCase test_case) {
 }  // namespace
 
 LayerTreeHostPixelResourceTest::LayerTreeHostPixelResourceTest(
-    PixelResourceTestCase test_case)
+    PixelResourceTestCase test_case,
+    Layer::LayerMaskType mask_type)
     : draw_texture_target_(GL_INVALID_VALUE),
       raster_buffer_provider_type_(RASTER_BUFFER_PROVIDER_TYPE_BITMAP),
       texture_hint_(ResourceProvider::TEXTURE_HINT_IMMUTABLE),
+      mask_type_(mask_type),
       initialized_(false),
       test_case_(test_case) {
   InitializeFromTestCase(test_case);
@@ -54,6 +56,7 @@ LayerTreeHostPixelResourceTest::LayerTreeHostPixelResourceTest(
 LayerTreeHostPixelResourceTest::LayerTreeHostPixelResourceTest()
     : draw_texture_target_(GL_INVALID_VALUE),
       raster_buffer_provider_type_(RASTER_BUFFER_PROVIDER_TYPE_BITMAP),
+      mask_type_(Layer::LayerMaskType::SINGLE_TEXTURE_MASK),
       initialized_(false),
       test_case_(SOFTWARE) {}
 
@@ -125,10 +128,10 @@ void LayerTreeHostPixelResourceTest::CreateResourceAndRasterBufferProvider(
   DCHECK(task_runner);
   DCHECK(initialized_);
 
-  ContextProvider* compositor_context_provider =
-      host_impl->compositor_frame_sink()->context_provider();
-  ContextProvider* worker_context_provider =
-      host_impl->compositor_frame_sink()->worker_context_provider();
+  viz::ContextProvider* compositor_context_provider =
+      host_impl->layer_tree_frame_sink()->context_provider();
+  viz::ContextProvider* worker_context_provider =
+      host_impl->layer_tree_frame_sink()->worker_context_provider();
   ResourceProvider* resource_provider = host_impl->resource_provider();
   int max_bytes_per_copy_operation = 1024 * 1024;
   int max_staging_buffer_usage_in_bytes = 32 * 1024 * 1024;
@@ -136,7 +139,7 @@ void LayerTreeHostPixelResourceTest::CreateResourceAndRasterBufferProvider(
   // Create resource pool.
   *resource_pool =
       ResourcePool::Create(resource_provider, task_runner, texture_hint_,
-                           ResourcePool::kDefaultExpirationDelay);
+                           ResourcePool::kDefaultExpirationDelay, false);
 
   switch (raster_buffer_provider_type_) {
     case RASTER_BUFFER_PROVIDER_TYPE_BITMAP:
@@ -153,14 +156,15 @@ void LayerTreeHostPixelResourceTest::CreateResourceAndRasterBufferProvider(
 
       *raster_buffer_provider = base::MakeUnique<GpuRasterBufferProvider>(
           compositor_context_provider, worker_context_provider,
-          resource_provider, false, 0, false);
+          resource_provider, false, 0, viz::PlatformColor::BestTextureFormat(),
+          false);
       break;
     case RASTER_BUFFER_PROVIDER_TYPE_ZERO_COPY:
       EXPECT_TRUE(compositor_context_provider);
       EXPECT_EQ(PIXEL_TEST_GL, test_type_);
 
       *raster_buffer_provider = ZeroCopyRasterBufferProvider::Create(
-          resource_provider, PlatformColor::BestTextureFormat());
+          resource_provider, viz::PlatformColor::BestTextureFormat());
       break;
     case RASTER_BUFFER_PROVIDER_TYPE_ONE_COPY:
       EXPECT_TRUE(compositor_context_provider);
@@ -170,8 +174,8 @@ void LayerTreeHostPixelResourceTest::CreateResourceAndRasterBufferProvider(
       *raster_buffer_provider = base::MakeUnique<OneCopyRasterBufferProvider>(
           task_runner, compositor_context_provider, worker_context_provider,
           resource_provider, max_bytes_per_copy_operation, false,
-          max_staging_buffer_usage_in_bytes, PlatformColor::BestTextureFormat(),
-          false);
+          max_staging_buffer_usage_in_bytes,
+          viz::PlatformColor::BestTextureFormat(), false);
       break;
   }
 }
@@ -185,7 +189,7 @@ void LayerTreeHostPixelResourceTest::RunPixelResourceTest(
 }
 
 ParameterizedPixelResourceTest::ParameterizedPixelResourceTest()
-    : LayerTreeHostPixelResourceTest(GetParam()) {
-}
+    : LayerTreeHostPixelResourceTest(::testing::get<0>(GetParam()),
+                                     ::testing::get<1>(GetParam())) {}
 
 }  // namespace cc

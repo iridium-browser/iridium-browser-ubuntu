@@ -6,17 +6,16 @@
 #define THIRD_PARTY_WEBKIT_SOURCE_PLATFORM_SCHEDULER_BASE_TEST_TASK_TIME_OBSERVER_H_
 
 #include "base/time/time.h"
-#include "public/platform/scheduler/base/task_time_observer.h"
+#include "platform/scheduler/base/task_time_observer.h"
 
 namespace blink {
 namespace scheduler {
 
 class TestTaskTimeObserver : public TaskTimeObserver {
  public:
-  void willProcessTask(TaskQueue* task_queue, double start_time) override {}
-  void didProcessTask(TaskQueue* task_queue,
-                      double start_time,
-                      double end_time) override {}
+  void WillProcessTask(double start_time) override {}
+  void DidProcessTask(double start_time, double end_time) override {}
+  void OnBeginNestedRunLoop() override {}
 };
 
 }  // namespace scheduler

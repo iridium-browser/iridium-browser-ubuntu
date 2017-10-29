@@ -11,6 +11,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
@@ -37,7 +38,7 @@ namespace {
 
 constexpr const char kContextKeyEstimatedTimeLeftSec[] = "time-left-sec";
 constexpr const char kContextKeyShowEstimatedTimeLeft[] = "show-time-left";
-constexpr const char kContextKeyUpdateMessage[] = "update-msg";
+constexpr const char kContextKeyUpdateCompleted[] = "update-completed";
 constexpr const char kContextKeyShowCurtain[] = "show-curtain";
 constexpr const char kContextKeyShowProgressMessage[] = "show-progress-msg";
 constexpr const char kContextKeyProgress[] = "progress";
@@ -86,6 +87,10 @@ const double kMaxTimeLeft = 24 * 60 * 60;
 // We wait for this delay to let captive portal to perform redirect and show
 // its login page before error message appears.
 const int kDelayErrorMessageSec = 10;
+
+// The delay in milliseconds at which we will send the host status to the Master
+// device periodically during the updating process.
+const int kHostStatusReportDelay = 5 * 60 * 1000;
 
 // Invoked from call to RequestUpdateCheck upon completion of the DBus call.
 void StartUpdateCallback(UpdateScreen* screen,
@@ -192,6 +197,7 @@ void UpdateScreen::ExitUpdate(UpdateScreen::ExitReason reason) {
         case UpdateEngineClient::UPDATE_STATUS_DOWNLOADING:
         case UpdateEngineClient::UPDATE_STATUS_FINALIZING:
         case UpdateEngineClient::UPDATE_STATUS_VERIFYING:
+        case UpdateEngineClient::UPDATE_STATUS_NEED_PERMISSION_TO_UPDATE:
           DCHECK(!HasCriticalUpdate());
         // Noncritical update, just exit screen as if there is no update.
         // no break
@@ -325,6 +331,7 @@ void UpdateScreen::UpdateStatusChanged(
       // else no break
     case UpdateEngineClient::UPDATE_STATUS_ERROR:
     case UpdateEngineClient::UPDATE_STATUS_REPORTING_ERROR_EVENT:
+    case UpdateEngineClient::UPDATE_STATUS_NEED_PERMISSION_TO_UPDATE:
       ExitUpdate(REASON_UPDATE_ENDED);
       break;
     default:
@@ -354,7 +361,7 @@ void UpdateScreen::OnPortalDetectionCompleted(
     is_first_detection_notification_ = false;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(
+        base::BindOnce(
             base::IgnoreResult(&NetworkPortalDetector::StartDetectionIfIdle),
             base::Unretained(network_portal_detector::GetInstance())));
     return;
@@ -497,8 +504,7 @@ bool UpdateScreen::HasCriticalUpdate() {
 void UpdateScreen::OnWaitForRebootTimeElapsed() {
   LOG(ERROR) << "Unable to reboot - asking user for a manual reboot.";
   MakeSureScreenIsShown();
-  GetContextEditor().SetString(kContextKeyUpdateMessage,
-                               l10n_util::GetStringUTF16(IDS_UPDATE_COMPLETED));
+  GetContextEditor().SetBoolean(kContextKeyUpdateCompleted, true);
 }
 
 void UpdateScreen::MakeSureScreenIsShown() {
@@ -508,8 +514,30 @@ void UpdateScreen::MakeSureScreenIsShown() {
 
 void UpdateScreen::SetHostPairingControllerStatus(
     HostPairingController::UpdateStatus update_status) {
-  if (remora_controller_) {
+  if (!remora_controller_)
+    return;
+
+  static bool is_update_in_progress = true;
+
+  if (update_status > HostPairingController::UPDATE_STATUS_UPDATING) {
+    // Set |is_update_in_progress| to false to prevent sending the scheduled
+    // UPDATE_STATUS_UPDATING message after UPDATE_STATUS_UPDATED or
+    // UPDATE_STATUS_REBOOTING is received.
+    is_update_in_progress = false;
     remora_controller_->OnUpdateStatusChanged(update_status);
+    return;
+  }
+
+  if (is_update_in_progress) {
+    DCHECK_EQ(update_status, HostPairingController::UPDATE_STATUS_UPDATING);
+    remora_controller_->OnUpdateStatusChanged(update_status);
+
+    // Send UPDATE_STATUS_UPDATING message every |kHostStatusReportDelay|ms.
+    base::SequencedTaskRunnerHandle::Get()->PostNonNestableDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&UpdateScreen::SetHostPairingControllerStatus,
+                       weak_factory_.GetWeakPtr(), update_status),
+        base::TimeDelta::FromMilliseconds(kHostStatusReportDelay));
   }
 }
 
@@ -525,6 +553,7 @@ void UpdateScreen::StartUpdateCheck() {
   connect_request_subscription_.reset();
   if (state_ == State::STATE_ERROR)
     HideErrorMessage();
+
   state_ = State::STATE_UPDATE;
   DBusThreadManager::Get()->GetUpdateEngineClient()->AddObserver(this);
   VLOG(1) << "Initiate update check";

@@ -18,6 +18,7 @@
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/mus/window_tree_client_delegate.h"
 #include "ui/aura/mus/window_tree_host_mus.h"
+#include "ui/aura/mus/window_tree_host_mus_init_params.h"
 #include "ui/aura/test/mus/window_tree_client_private.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
@@ -45,15 +46,15 @@ class TestWindowManagerDelegate : public aura::WindowManagerDelegate {
 
   // WindowManagerDelegate:
   void SetWindowManagerClient(aura::WindowManagerClient* client) override {}
-  bool OnWmSetBounds(aura::Window* window, gfx::Rect* bounds) override {
-    return false;
-  }
+  void OnWmConnected() override {}
+  void OnWmSetBounds(aura::Window* window, const gfx::Rect& bounds) override {}
   bool OnWmSetProperty(
       aura::Window* window,
       const std::string& name,
       std::unique_ptr<std::vector<uint8_t>>* new_data) override {
     return false;
   }
+  void OnWmSetModalType(aura::Window* window, ui::ModalType type) override {}
   void OnWmSetCanFocus(aura::Window* window, bool can_focus) override {}
   aura::Window* OnWmCreateTopLevelWindow(
       ui::mojom::WindowType window_type,
@@ -62,13 +63,22 @@ class TestWindowManagerDelegate : public aura::WindowManagerDelegate {
   }
   void OnWmClientJankinessChanged(const std::set<aura::Window*>& client_windows,
                                   bool not_responding) override {}
+  void OnWmBuildDragImage(const gfx::Point& screen_location,
+                          const SkBitmap& drag_image,
+                          const gfx::Vector2d& drag_image_offset,
+                          ui::mojom::PointerKind source) override {}
+  void OnWmMoveDragImage(const gfx::Point& screen_location) override {}
+  void OnWmDestroyDragImage() override {}
   void OnWmWillCreateDisplay(const display::Display& display) override {}
   void OnWmNewDisplay(std::unique_ptr<aura::WindowTreeHostMus> window_tree_host,
                       const display::Display& display) override {}
   void OnWmDisplayRemoved(aura::WindowTreeHostMus* window_tree_host) override {}
   void OnWmDisplayModified(const display::Display& display) override {}
-  mojom::EventResult OnAccelerator(uint32_t accelerator_id,
-                                   const ui::Event& event) override {
+  mojom::EventResult OnAccelerator(
+      uint32_t accelerator_id,
+      const ui::Event& event,
+      std::unordered_map<std::string, std::vector<uint8_t>>* properties)
+      override {
     return ui::mojom::EventResult::UNHANDLED;
   }
   void OnWmPerformMoveLoop(aura::Window* window,
@@ -210,10 +220,12 @@ class WindowTracker : public aura::WindowObserver {
 
 // Creates a new visible Window. If |parent| is non-null the newly created
 // window is added to it.
-aura::Window* NewVisibleWindow(aura::Window* parent,
-                               aura::WindowTreeClient* client) {
+aura::Window* NewVisibleWindow(
+    aura::Window* parent,
+    aura::WindowTreeClient* client,
+    aura::WindowMusType type = aura::WindowMusType::LOCAL) {
   std::unique_ptr<aura::WindowPortMus> window_port_mus =
-      base::MakeUnique<aura::WindowPortMus>(client, aura::WindowMusType::LOCAL);
+      base::MakeUnique<aura::WindowPortMus>(client, type);
   aura::Window* window = new aura::Window(nullptr, std::move(window_port_mus));
   window->Init(ui::LAYER_NOT_DRAWN);
   window->Show();
@@ -294,7 +306,7 @@ class WindowServerTest : public WindowServerTestBase {
 
   std::unique_ptr<ClientAreaChange> WaitForClientAreaToChange() {
     client_area_change_ = base::MakeUnique<ClientAreaChange>();
-    // The nested message loop is quit in OnWmSetClientArea(). Client area
+    // The nested run loop is quit in OnWmSetClientArea(). Client area
     // changes don't route through the window, only the WindowManagerDelegate.
     if (!WindowServerTestBase::DoRunLoopWithTimeout()) {
       client_area_change_.reset();
@@ -353,12 +365,6 @@ class WindowServerTest : public WindowServerTestBase {
       EXPECT_TRUE(WindowServerTestBase::QuitRunLoop());
   }
 
-  // mojo::test::ServiceTest::
-  std::unique_ptr<base::MessageLoop> CreateMessageLoop() override {
-    // The window server is expected to run with a TYPE_UI message loop.
-    return base::MakeUnique<base::MessageLoop>(base::MessageLoop::TYPE_UI);
-  }
-
   std::unique_ptr<EmbedDetails> embed_details_;
 
   std::unique_ptr<ClientAreaChange> client_area_change_;
@@ -372,7 +378,8 @@ TEST_F(WindowServerTest, RootWindow) {
 }
 
 TEST_F(WindowServerTest, Embed) {
-  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                          aura::WindowMusType::EMBED_IN_OWNER);
   std::unique_ptr<EmbedResult> embed_result = Embed(window_manager(), window);
   ASSERT_TRUE(embed_result->IsValid());
 
@@ -388,7 +395,8 @@ TEST_F(WindowServerTest, Embed) {
 // Window manager has two windows, N1 and N11. Embeds A at N1. A should not see
 // N11.
 TEST_F(WindowServerTest, EmbeddedDoesntSeeChild) {
-  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                          aura::WindowMusType::EMBED_IN_OWNER);
   std::unique_ptr<EmbedResult> embed_result = Embed(window_manager(), window);
   ASSERT_TRUE(embed_result->IsValid());
   aura::Window* embed_root = embed_result->window_tree_host->window();
@@ -412,7 +420,8 @@ TEST_F(WindowServerTest, EmbeddedDoesntSeeChild) {
 // Verifies that bounds changes applied to a window hierarchy in one client
 // are reflected to another.
 TEST_F(WindowServerTest, SetBounds) {
-  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                          aura::WindowMusType::EMBED_IN_OWNER);
 
   std::unique_ptr<EmbedResult> embed_result = Embed(window_manager(), window);
   ASSERT_TRUE(embed_result->IsValid());
@@ -430,7 +439,8 @@ TEST_F(WindowServerTest, SetBoundsSecurity) {
   TestWindowManagerDelegate wm_delegate;
   set_window_manager_delegate(&wm_delegate);
 
-  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                          aura::WindowMusType::EMBED_IN_OWNER);
 
   std::unique_ptr<EmbedResult> embed_result = Embed(window_manager(), window);
   ASSERT_TRUE(embed_result->IsValid());
@@ -451,7 +461,8 @@ TEST_F(WindowServerTest, SetBoundsSecurity) {
 
 // Verifies that a root window can always be destroyed.
 TEST_F(WindowServerTest, DestroySecurity) {
-  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                          aura::WindowMusType::EMBED_IN_OWNER);
 
   std::unique_ptr<EmbedResult> embed_result = Embed(window_manager(), window);
   ASSERT_TRUE(embed_result->IsValid());
@@ -470,8 +481,10 @@ TEST_F(WindowServerTest, DestroySecurity) {
 }
 
 TEST_F(WindowServerTest, MultiRoots) {
-  aura::Window* window1 = NewVisibleWindow(GetFirstWMRoot(), window_manager());
-  aura::Window* window2 = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window1 = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                           aura::WindowMusType::EMBED_IN_OWNER);
+  aura::Window* window2 = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                           aura::WindowMusType::EMBED_IN_OWNER);
   std::unique_ptr<EmbedResult> embed_result1 = Embed(window_manager(), window1);
   ASSERT_TRUE(embed_result1->IsValid());
   std::unique_ptr<EmbedResult> embed_result2 = Embed(window_manager(), window2);
@@ -479,7 +492,8 @@ TEST_F(WindowServerTest, MultiRoots) {
 }
 
 TEST_F(WindowServerTest, Reorder) {
-  aura::Window* window1 = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window1 = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                           aura::WindowMusType::EMBED_IN_OWNER);
 
   std::unique_ptr<EmbedResult> embed_result = Embed(window_manager(), window1);
   ASSERT_TRUE(embed_result->IsValid());
@@ -556,7 +570,8 @@ class VisibilityChangeObserver : public aura::WindowObserver {
 }  // namespace
 
 TEST_F(WindowServerTest, Visible) {
-  aura::Window* window1 = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window1 = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                           aura::WindowMusType::EMBED_IN_OWNER);
 
   // Embed another app and verify initial state.
   std::unique_ptr<EmbedResult> embed_result = Embed(window_manager(), window1);
@@ -597,7 +612,8 @@ TEST_F(WindowServerTest, Visible) {
 // - verify that we see events for all windows.
 
 TEST_F(WindowServerTest, EmbedFailsWithChildren) {
-  aura::Window* window1 = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window1 = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                           aura::WindowMusType::EMBED_IN_OWNER);
   ASSERT_TRUE(NewVisibleWindow(window1, window_manager()));
   std::unique_ptr<EmbedResult> embed_result = Embed(window_manager(), window1);
   // Embed() should fail as |window1| has a child.
@@ -634,7 +650,8 @@ class DestroyObserver : public aura::WindowObserver {
 // observers in the right order (OnWindowDestroyed() before
 // OnWindowManagerDestroyed()).
 TEST_F(WindowServerTest, WindowServerDestroyedAfterRootObserver) {
-  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                          aura::WindowMusType::EMBED_IN_OWNER);
 
   std::unique_ptr<EmbedResult> embed_result = Embed(window_manager(), window);
   ASSERT_TRUE(embed_result->IsValid());
@@ -655,7 +672,8 @@ TEST_F(WindowServerTest, WindowServerDestroyedAfterRootObserver) {
 }
 
 TEST_F(WindowServerTest, ClientAreaChanged) {
-  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager());
+  aura::Window* window = NewVisibleWindow(GetFirstWMRoot(), window_manager(),
+                                          aura::WindowMusType::EMBED_IN_OWNER);
 
   std::unique_ptr<EmbedResult> embed_result = Embed(window_manager(), window);
   ASSERT_TRUE(embed_result->IsValid());
@@ -694,7 +712,8 @@ class EstablishConnectionViaFactoryDelegate : public TestWindowManagerDelegate {
   aura::Window* OnWmCreateTopLevelWindow(
       ui::mojom::WindowType window_type,
       std::map<std::string, std::vector<uint8_t>>* properties) override {
-    created_window_ = NewVisibleWindow((*client_->GetRoots().begin()), client_);
+    created_window_ = NewVisibleWindow((*client_->GetRoots().begin()), client_,
+                                       aura::WindowMusType::TOP_LEVEL_IN_WM);
     if (run_loop_)
       run_loop_->Quit();
     return created_window_;
@@ -711,9 +730,11 @@ class EstablishConnectionViaFactoryDelegate : public TestWindowManagerDelegate {
 TEST_F(WindowServerTest, EstablishConnectionViaFactory) {
   EstablishConnectionViaFactoryDelegate delegate(window_manager());
   set_window_manager_delegate(&delegate);
-  aura::WindowTreeClient second_client(connector(), this);
+  aura::WindowTreeClient second_client(connector(), this, nullptr, nullptr,
+                                       nullptr, false);
   second_client.ConnectViaWindowTreeFactory();
-  aura::WindowTreeHostMus window_tree_host_in_second_client(&second_client);
+  aura::WindowTreeHostMus window_tree_host_in_second_client(
+      aura::CreateInitParamsForTopLevel(&second_client));
   window_tree_host_in_second_client.InitHost();
   window_tree_host_in_second_client.window()->Show();
   ASSERT_TRUE(second_client.GetRoots().count(
@@ -739,9 +760,11 @@ TEST_F(WindowServerTest, OnWindowHierarchyChangedIncludesTransientParent) {
   // of the first window and then add it.
   EstablishConnectionViaFactoryDelegate delegate(window_manager());
   set_window_manager_delegate(&delegate);
-  aura::WindowTreeClient second_client(connector(), this);
+  aura::WindowTreeClient second_client(connector(), this, nullptr, nullptr,
+                                       nullptr, false);
   second_client.ConnectViaWindowTreeFactory();
-  aura::WindowTreeHostMus window_tree_host_in_second_client(&second_client);
+  aura::WindowTreeHostMus window_tree_host_in_second_client(
+      aura::CreateInitParamsForTopLevel(&second_client));
   window_tree_host_in_second_client.InitHost();
   window_tree_host_in_second_client.window()->Show();
   aura::Window* second_client_child = NewVisibleWindow(

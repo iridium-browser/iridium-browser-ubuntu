@@ -8,12 +8,13 @@
 #include "base/time/time.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
+#include "components/offline_pages/features/features.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 
-#if defined(OS_ANDROID)
-#include "chrome/browser/android/offline_pages/offline_page_tab_helper.h"
-#endif  // defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+#include "chrome/browser/offline_pages/offline_page_tab_helper.h"
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 
 namespace previews {
 
@@ -42,7 +43,8 @@ PreviewsPageLoadMetricsObserver::~PreviewsPageLoadMetricsObserver() {}
 
 page_load_metrics::PageLoadMetricsObserver::ObservePolicy
 PreviewsPageLoadMetricsObserver::OnCommit(
-    content::NavigationHandle* navigation_handle) {
+    content::NavigationHandle* navigation_handle,
+    ukm::SourceId source_id) {
   return IsOfflinePreview(navigation_handle->GetWebContents())
              ? CONTINUE_OBSERVING
              : STOP_OBSERVING;
@@ -61,70 +63,70 @@ PreviewsPageLoadMetricsObserver::ShouldObserveMimeType(
 }
 
 void PreviewsPageLoadMetricsObserver::OnDomContentLoadedEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.dom_content_loaded_event_start, info)) {
+          timing.document_timing->dom_content_loaded_event_start, info)) {
     return;
   }
   PAGE_LOAD_HISTOGRAM(
       internal::kHistogramOfflinePreviewsDOMContentLoadedEventFired,
-      timing.dom_content_loaded_event_start.value());
+      timing.document_timing->dom_content_loaded_event_start.value());
 }
 
 void PreviewsPageLoadMetricsObserver::OnLoadEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(timing.load_event_start,
-                                                       info)) {
+  if (!WasStartedInForegroundOptionalEventInForeground(
+          timing.document_timing->load_event_start, info)) {
     return;
   }
   PAGE_LOAD_HISTOGRAM(internal::kHistogramOfflinePreviewsLoadEventFired,
-                      timing.load_event_start.value());
+                      timing.document_timing->load_event_start.value());
 }
 
 void PreviewsPageLoadMetricsObserver::OnFirstLayout(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(timing.first_layout,
-                                                       info)) {
+  if (!WasStartedInForegroundOptionalEventInForeground(
+          timing.document_timing->first_layout, info)) {
     return;
   }
   PAGE_LOAD_HISTOGRAM(internal::kHistogramOfflinePreviewsFirstLayout,
-                      timing.first_layout.value());
+                      timing.document_timing->first_layout.value());
 }
 
-void PreviewsPageLoadMetricsObserver::OnFirstContentfulPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void PreviewsPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
   if (!WasStartedInForegroundOptionalEventInForeground(
-          timing.first_contentful_paint, info)) {
+          timing.paint_timing->first_contentful_paint, info)) {
     return;
   }
   PAGE_LOAD_HISTOGRAM(internal::kHistogramOfflinePreviewsFirstContentfulPaint,
-                      timing.first_contentful_paint.value());
+                      timing.paint_timing->first_contentful_paint.value());
 }
 
 void PreviewsPageLoadMetricsObserver::OnParseStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!WasStartedInForegroundOptionalEventInForeground(timing.parse_start,
-                                                       info)) {
+  if (!WasStartedInForegroundOptionalEventInForeground(
+          timing.parse_timing->parse_start, info)) {
     return;
   }
   PAGE_LOAD_HISTOGRAM(internal::kHistogramOfflinePreviewsParseStart,
-                      timing.parse_start.value());
+                      timing.parse_timing->parse_start.value());
 }
 
 bool PreviewsPageLoadMetricsObserver::IsOfflinePreview(
     content::WebContents* web_contents) const {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
   offline_pages::OfflinePageTabHelper* tab_helper =
       offline_pages::OfflinePageTabHelper::FromWebContents(web_contents);
   return tab_helper && tab_helper->IsShowingOfflinePreview();
 #else
   return false;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 }
 
 }  // namespace previews

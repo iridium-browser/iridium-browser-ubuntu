@@ -1,28 +1,38 @@
 // Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+/**
+ * Specifies a custom vendor capability.
+ * @typedef {{
+ *   id: (string),
+ *   display_name: (string),
+ *   localized_display_name: (string | undefined),
+ *   type: (string),
+ *   select_cap: ({
+ *     option: (Array<{
+ *       display_name: (string),
+ *       type: (string | undefined),
+ *       value: (number | string | boolean),
+ *       is_default: (boolean | undefined)
+ *     }>|undefined)
+ *   }|undefined)
+ * }}
+ */
+print_preview.VendorCapability;
 
 cr.define('print_preview', function() {
   'use strict';
 
   /**
    * Component that renders a destination item in a destination list.
-   * @param {!cr.EventTarget} eventTarget Event target to dispatch selection
-   *     events to.
    * @param {!print_preview.PrintTicketStore} printTicketStore Contains the
    *     print ticket to print.
-   * @param {!Object} capability Capability to render.
+   * @param {!print_preview.VendorCapability} capability Capability to render.
    * @constructor
    * @extends {print_preview.Component}
    */
-  function AdvancedSettingsItem(eventTarget, printTicketStore, capability) {
+  function AdvancedSettingsItem(printTicketStore, capability) {
     print_preview.Component.call(this);
-
-    /**
-     * Event target to dispatch selection events to.
-     * @private {!cr.EventTarget}
-     */
-    this.eventTarget_ = eventTarget;
 
     /**
      * Contains the print ticket to print.
@@ -32,7 +42,7 @@ cr.define('print_preview', function() {
 
     /**
      * Capability this component renders.
-     * @private {!Object}
+     * @private {!print_preview.VendorCapability}
      */
     this.capability_ = capability;
 
@@ -58,15 +68,15 @@ cr.define('print_preview', function() {
 
     /** @private {!EventTracker} */
     this.tracker_ = new EventTracker();
-  };
+  }
 
   AdvancedSettingsItem.prototype = {
     __proto__: print_preview.Component.prototype,
 
     /** @override */
     createDom: function() {
-      this.setElementInternal(this.cloneTemplateInternal(
-          'advanced-settings-item-template'));
+      this.setElementInternal(
+          this.cloneTemplateInternal('advanced-settings-item-template'));
 
       this.tracker_.add(
           this.select_, 'change', this.onSelectChange_.bind(this));
@@ -112,20 +122,21 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * @return {HTMLSelectElement} Select element.
+     * @return {!HTMLSelectElement} Select element.
      * @private
      */
     get select_() {
-      return this.getChildElement(
-          '.advanced-settings-item-value-select-control');
+      return /** @type {!HTMLSelectElement} */ (
+          this.getChildElement('.advanced-settings-item-value-select-control'));
     },
 
     /**
-     * @return {HTMLSelectElement} Text element.
+     * @return {!HTMLSelectElement} Text element.
      * @private
      */
     get text_() {
-      return this.getChildElement('.advanced-settings-item-value-text-control');
+      return /** @type {!HTMLSelectElement} */ (
+          this.getChildElement('.advanced-settings-item-value-text-control'));
     },
 
     /**
@@ -184,8 +195,8 @@ cr.define('print_preview', function() {
           for (var i = 0; i < this.select_.length && !optionMatches; i++)
             optionMatches = this.select_.options[i].text.match(this.query_);
         } else {
-          optionMatches = (this.text_.value || this.text_.placeholder || '')
-              .match(this.query_);
+          optionMatches = (this.text_.value || this.text_.placeholder ||
+                           '').match(this.query_);
         }
       }
       var matches = nameMatches || !!optionMatches;
@@ -257,7 +268,8 @@ cr.define('print_preview', function() {
      */
     initializeSelectValue_: function() {
       setIsVisible(
-          this.getChildElement('.advanced-settings-item-value-select'), true);
+          assert(this.getChildElement('.advanced-settings-item-value-select')),
+          true);
       var selectEl = this.select_;
       var indexToSelect = 0;
       this.capability_.select_cap.option.forEach(function(option, index) {
@@ -268,7 +280,7 @@ cr.define('print_preview', function() {
           indexToSelect = index;
         selectEl.appendChild(item);
       }, this);
-      for (var i = 0, option; option = selectEl.options[i]; i++) {
+      for (var i = 0, option; (option = selectEl.options[i]); i++) {
         if (option.value == this.selectedValue_) {
           indexToSelect = i;
           break;
@@ -283,14 +295,15 @@ cr.define('print_preview', function() {
      */
     initializeTextValue_: function() {
       setIsVisible(
-          this.getChildElement('.advanced-settings-item-value-text'), true);
+          assert(this.getChildElement('.advanced-settings-item-value-text')),
+          true);
 
       var defaultValue = null;
       if (this.capability_.type == 'TYPED_VALUE' &&
           this.capability_.typed_value_cap) {
         defaultValue = this.capability_.typed_value_cap.default || null;
-      } else if (this.capability_.type == 'RANGE' &&
-                 this.capability_.range_cap) {
+      } else if (
+          this.capability_.type == 'RANGE' && this.capability_.range_cap) {
         defaultValue = this.capability_.range_cap.default || null;
       }
 
@@ -321,7 +334,5 @@ cr.define('print_preview', function() {
   };
 
   // Export
-  return {
-    AdvancedSettingsItem: AdvancedSettingsItem
-  };
+  return {AdvancedSettingsItem: AdvancedSettingsItem};
 });

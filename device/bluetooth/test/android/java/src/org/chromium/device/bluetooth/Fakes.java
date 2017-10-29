@@ -12,10 +12,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-
 import android.os.Build;
 import android.os.ParcelUuid;
-
 import android.test.mock.MockContext;
 
 import org.chromium.base.Log;
@@ -39,7 +37,7 @@ import java.util.UUID;
  * each of these classes.
  */
 @JNINamespace("device")
-@TargetApi(Build.VERSION_CODES.LOLLIPOP)
+@TargetApi(Build.VERSION_CODES.M)
 class Fakes {
     private static final String TAG = "cr.Bluetooth";
 
@@ -72,6 +70,34 @@ class Fakes {
                 };
             }
         });
+    }
+
+    /**
+     * Sets the factory for ThreadUtilsWrapper to always post a task to the UI thread
+     * rather than running the task immediately. This simulates events arriving on a separate
+     * thread on Android.
+     * runOnUiThread uses nativePostTaskFromJava. This allows java to post tasks to the
+     * message loop that the test is using rather than to the Java message loop which
+     * is not running during tests.
+     */
+    @CalledByNative
+    public static void initFakeThreadUtilsWrapper(final long nativeBluetoothTestAndroid) {
+        Wrappers.ThreadUtilsWrapper.setFactory(new Wrappers.ThreadUtilsWrapper.Factory() {
+            @Override
+            public Wrappers.ThreadUtilsWrapper create() {
+                return new Wrappers.ThreadUtilsWrapper() {
+                    @Override
+                    public void runOnUiThread(Runnable r) {
+                        nativePostTaskFromJava(nativeBluetoothTestAndroid, r);
+                    }
+                };
+            }
+        });
+    }
+
+    @CalledByNative
+    public static void runRunnable(Runnable r) {
+        r.run();
     }
 
     /**
@@ -114,8 +140,7 @@ class Fakes {
                     uuids.add(ParcelUuid.fromString("00001800-0000-1000-8000-00805f9b34fb"));
                     uuids.add(ParcelUuid.fromString("00001801-0000-1000-8000-00805f9b34fb"));
 
-                    mFakeScanner.mScanCallback.onScanResult(
-                            ScanSettings.CALLBACK_TYPE_ALL_MATCHES,
+                    mFakeScanner.mScanCallback.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES,
                             new FakeScanResult(new FakeBluetoothDevice(this, "01:00:00:90:1E:BE",
                                                        "FakeBluetoothDevice"),
                                     TestRSSI.LOWEST, uuids, TestTxPower.LOWEST));
@@ -126,8 +151,7 @@ class Fakes {
                     uuids.add(ParcelUuid.fromString("00001802-0000-1000-8000-00805f9b34fb"));
                     uuids.add(ParcelUuid.fromString("00001803-0000-1000-8000-00805f9b34fb"));
 
-                    mFakeScanner.mScanCallback.onScanResult(
-                            ScanSettings.CALLBACK_TYPE_ALL_MATCHES,
+                    mFakeScanner.mScanCallback.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES,
                             new FakeScanResult(new FakeBluetoothDevice(this, "01:00:00:90:1E:BE",
                                                        "FakeBluetoothDevice"),
                                     TestRSSI.LOWER, uuids, TestTxPower.LOWER));
@@ -135,8 +159,7 @@ class Fakes {
                 }
                 case 3: {
                     ArrayList<ParcelUuid> uuids = null;
-                    mFakeScanner.mScanCallback.onScanResult(
-                            ScanSettings.CALLBACK_TYPE_ALL_MATCHES,
+                    mFakeScanner.mScanCallback.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES,
                             new FakeScanResult(
                                     new FakeBluetoothDevice(this, "01:00:00:90:1E:BE", ""),
                                     TestRSSI.LOW, uuids, NO_TX_POWER));
@@ -145,8 +168,7 @@ class Fakes {
                 }
                 case 4: {
                     ArrayList<ParcelUuid> uuids = null;
-                    mFakeScanner.mScanCallback.onScanResult(
-                            ScanSettings.CALLBACK_TYPE_ALL_MATCHES,
+                    mFakeScanner.mScanCallback.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES,
                             new FakeScanResult(
                                     new FakeBluetoothDevice(this, "02:00:00:8B:74:63", ""),
                                     TestRSSI.MEDIUM, uuids, NO_TX_POWER));
@@ -155,8 +177,7 @@ class Fakes {
                 }
                 case 5: {
                     ArrayList<ParcelUuid> uuids = null;
-                    mFakeScanner.mScanCallback.onScanResult(
-                            ScanSettings.CALLBACK_TYPE_ALL_MATCHES,
+                    mFakeScanner.mScanCallback.onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES,
                             new FakeScanResult(
                                     new FakeBluetoothDevice(this, "01:00:00:90:1E:BE", null),
                                     TestRSSI.HIGH, uuids, NO_TX_POWER));
@@ -389,7 +410,7 @@ class Fakes {
 
         @Override
         public Wrappers.BluetoothGattWrapper connectGatt(Context context, boolean autoConnect,
-                Wrappers.BluetoothGattCallbackWrapper callback) {
+                Wrappers.BluetoothGattCallbackWrapper callback, int transport) {
             if (mGattCallback != null && mGattCallback != callback) {
                 throw new IllegalArgumentException(
                         "BluetoothGattWrapper doesn't support calls to connectGatt() with "
@@ -624,9 +645,10 @@ class Fakes {
         @CalledByNative("FakeBluetoothGattCharacteristic")
         private static void valueRead(ChromeBluetoothRemoteGattCharacteristic chromeCharacteristic,
                 int status, byte[] value) {
-            if (chromeCharacteristic == null && sRememberedCharacteristic == null)
+            if (chromeCharacteristic == null && sRememberedCharacteristic == null) {
                 throw new IllegalArgumentException(
                         "rememberCharacteristic wasn't called previously.");
+            }
 
             FakeBluetoothGattCharacteristic fakeCharacteristic = (chromeCharacteristic == null)
                     ? sRememberedCharacteristic
@@ -641,9 +663,10 @@ class Fakes {
         @CalledByNative("FakeBluetoothGattCharacteristic")
         private static void valueWrite(
                 ChromeBluetoothRemoteGattCharacteristic chromeCharacteristic, int status) {
-            if (chromeCharacteristic == null && sRememberedCharacteristic == null)
+            if (chromeCharacteristic == null && sRememberedCharacteristic == null) {
                 throw new IllegalArgumentException(
                         "rememberCharacteristic wasn't called previously.");
+            }
 
             FakeBluetoothGattCharacteristic fakeCharacteristic = (chromeCharacteristic == null)
                     ? sRememberedCharacteristic
@@ -761,8 +784,9 @@ class Fakes {
         @CalledByNative("FakeBluetoothGattDescriptor")
         private static void valueRead(
                 ChromeBluetoothRemoteGattDescriptor chromeDescriptor, int status, byte[] value) {
-            if (chromeDescriptor == null && sRememberedDescriptor == null)
+            if (chromeDescriptor == null && sRememberedDescriptor == null) {
                 throw new IllegalArgumentException("rememberDescriptor wasn't called previously.");
+            }
 
             FakeBluetoothGattDescriptor fakeDescriptor = (chromeDescriptor == null)
                     ? sRememberedDescriptor
@@ -777,8 +801,9 @@ class Fakes {
         @CalledByNative("FakeBluetoothGattDescriptor")
         private static void valueWrite(
                 ChromeBluetoothRemoteGattDescriptor chromeDescriptor, int status) {
-            if (chromeDescriptor == null && sRememberedDescriptor == null)
+            if (chromeDescriptor == null && sRememberedDescriptor == null) {
                 throw new IllegalArgumentException("rememberDescriptor wasn't called previously.");
+            }
 
             FakeBluetoothGattDescriptor fakeDescriptor = (chromeDescriptor == null)
                     ? sRememberedDescriptor
@@ -837,6 +862,9 @@ class Fakes {
 
     // ---------------------------------------------------------------------------------------------
     // BluetoothTestAndroid C++ methods declared for access from java:
+
+    // Bind to BluetoothTestAndroid::PostTaskFromJava.
+    private static native void nativePostTaskFromJava(long nativeBluetoothTestAndroid, Runnable r);
 
     // Binds to BluetoothTestAndroid::OnFakeAdapterStateChanged.
     private static native void nativeOnFakeAdapterStateChanged(

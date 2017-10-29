@@ -6,16 +6,17 @@
 
 #include <utility>
 
+#include "base/threading/thread_restrictions.h"
 #include "cc/output/compositor_frame.h"
 
 namespace content {
 
-SynchronousCompositor::Frame::Frame() : compositor_frame_sink_id(0u) {}
+SynchronousCompositor::Frame::Frame() : layer_tree_frame_sink_id(0u) {}
 
 SynchronousCompositor::Frame::~Frame() {}
 
 SynchronousCompositor::Frame::Frame(Frame&& rhs)
-    : compositor_frame_sink_id(rhs.compositor_frame_sink_id),
+    : layer_tree_frame_sink_id(rhs.layer_tree_frame_sink_id),
       frame(std::move(rhs.frame)) {}
 
 SynchronousCompositor::FrameFuture::FrameFuture()
@@ -36,13 +37,14 @@ SynchronousCompositor::FrameFuture::GetFrame() {
   DCHECK(!waited_);
   waited_ = true;
 #endif
+  base::ThreadRestrictions::ScopedAllowWait wait;
   waitable_event_.Wait();
   return std::move(frame_);
 }
 
 SynchronousCompositor::Frame& SynchronousCompositor::Frame::operator=(
     Frame&& rhs) {
-  compositor_frame_sink_id = rhs.compositor_frame_sink_id;
+  layer_tree_frame_sink_id = rhs.layer_tree_frame_sink_id;
   frame = std::move(rhs.frame);
   return *this;
 }

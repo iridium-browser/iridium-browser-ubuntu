@@ -13,7 +13,6 @@ from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import graph_data
 from dashboard.models import sheriff
-from dashboard.models import stoppage_alert
 
 # Masters, bots and test names to add to the mock datastore.
 _MOCK_DATA = [
@@ -294,74 +293,54 @@ class MigrateTestNamesTest(testing_common.TestCase):
         'migrated to ChromiumPerf/win7/moz/read_operations_browser', body)
     self.assertIn('sheriffed by Perf Sheriff Win', body)
 
-  def testPost_MigratesStoppageAlerts(self):
-    testing_common.AddTests(['Master'], ['b'], {'suite': {'foo': {}}})
-    test_path = 'Master/b/suite/foo'
-    test_key = utils.TestKey(test_path)
-    test_container_key = utils.GetTestContainerKey(test_key)
-    row_key = graph_data.Row(id=100, parent=test_container_key, value=5).put()
-    stoppage_alert.CreateStoppageAlert(test_key.get(), row_key.get()).put()
-    self.assertIsNotNone(
-        stoppage_alert.GetStoppageAlert('Master/b/suite/foo', 100))
-    self.assertIsNone(
-        stoppage_alert.GetStoppageAlert('Master/b/suite/bar', 100))
-
-    self.testapp.post('/migrate_test_names', {
-        'old_pattern': 'Master/b/suite/foo',
-        'new_pattern': 'Master/b/suite/bar',
-    })
-    self.ExecuteTaskQueueTasks(
-        '/migrate_test_names', migrate_test_names._TASK_QUEUE_NAME)
-
-    self.assertIsNotNone(
-        stoppage_alert.GetStoppageAlert('Master/b/suite/bar', 100))
-    self.assertIsNone(
-        stoppage_alert.GetStoppageAlert('Master/b/suite/foo', 100))
 
   def testGetNewTestPath_WithAsterisks(self):
     self.assertEqual(
         'A/b/c/X',
-        migrate_test_names._GetNewTestPath('A/b/c/d', '*/*/*/X'))
+        migrate_test_names._ValidateAndGetNewTestPath('A/b/c/d', '*/*/*/X'))
     self.assertEqual(
         'A/b/c/d',
-        migrate_test_names._GetNewTestPath('A/b/c/d', '*/*/*/*'))
+        migrate_test_names._ValidateAndGetNewTestPath('A/b/c/d', '*/*/*/*'))
     self.assertEqual(
         'A/b/c',
-        migrate_test_names._GetNewTestPath('A/b/c/d', '*/*/*'))
+        migrate_test_names._ValidateAndGetNewTestPath('A/b/c/d', '*/*/*'))
 
   def testGetNewTestPath_WithBrackets(self):
     # Brackets are just used to delete parts of names, no other functionality.
     self.assertEqual(
         'A/b/c/x',
-        migrate_test_names._GetNewTestPath('A/b/c/xxxx', '*/*/*/[xxx]'))
+        migrate_test_names._ValidateAndGetNewTestPath(
+            'A/b/c/xxxx', '*/*/*/[xxx]'))
     self.assertEqual(
         'A/b/c',
-        migrate_test_names._GetNewTestPath('A/b/c/xxxx', '*/*/*/[xxxx]'))
+        migrate_test_names._ValidateAndGetNewTestPath(
+            'A/b/c/xxxx', '*/*/*/[xxxx]'))
     self.assertEqual(
         'A/b/c/x',
-        migrate_test_names._GetNewTestPath('A/b/c/x', '*/*/*/[]'))
+        migrate_test_names._ValidateAndGetNewTestPath('A/b/c/x', '*/*/*/[]'))
     self.assertEqual(
         'A/b/c/d',
-        migrate_test_names._GetNewTestPath('AA/bb/cc/dd', '[A]/[b]/[c]/[d]'))
+        migrate_test_names._ValidateAndGetNewTestPath(
+            'AA/bb/cc/dd', '[A]/[b]/[c]/[d]'))
 
   def testGetNewTestPath_NewPathHasDifferentLength(self):
     self.assertEqual(
         'A/b/c',
-        migrate_test_names._GetNewTestPath('A/b/c/d', 'A/*/c'))
+        migrate_test_names._ValidateAndGetNewTestPath('A/b/c/d', 'A/*/c'))
     self.assertEqual(
         'A/b/c/d',
-        migrate_test_names._GetNewTestPath('A/b/c', 'A/*/c/d'))
+        migrate_test_names._ValidateAndGetNewTestPath('A/b/c', 'A/*/c/d'))
     self.assertRaises(
         migrate_test_names.BadInputPatternError,
-        migrate_test_names._GetNewTestPath, 'A/b/c', 'A/b/c/*')
+        migrate_test_names._ValidateAndGetNewTestPath, 'A/b/c', 'A/b/c/*')
 
   def testGetNewTestPath_InvalidArgs(self):
     self.assertRaises(
         AssertionError,
-        migrate_test_names._GetNewTestPath, 'A/b/*/d', 'A/b/c/d')
+        migrate_test_names._ValidateAndGetNewTestPath, 'A/b/*/d', 'A/b/c/d')
     self.assertRaises(
         migrate_test_names.BadInputPatternError,
-        migrate_test_names._GetNewTestPath, 'A/b/c/d', 'A/b/c/d*')
+        migrate_test_names._ValidateAndGetNewTestPath, 'A/b/c/d', 'A/b/c/d*')
 
 
 if __name__ == '__main__':

@@ -84,16 +84,16 @@ int32_t PPB_Flash_MessageLoop_Impl::InternalRun(
   state_->set_run_callback(callback);
 
   // It is possible that the PPB_Flash_MessageLoop_Impl object has been
-  // destroyed when the nested message loop exits.
+  // destroyed when the nested run loop exits.
   scoped_refptr<State> state_protector(state_);
   {
     base::MessageLoop::ScopedNestableTaskAllower allow(
         base::MessageLoop::current());
-    blink::WebView::willEnterModalLoop();
+    blink::WebView::WillEnterModalLoop();
 
     base::RunLoop().Run();
 
-    blink::WebView::didExitModalLoop();
+    blink::WebView::DidExitModalLoop();
   }
   // Don't access data members of the class below.
 

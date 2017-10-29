@@ -8,6 +8,8 @@
 #include <memory>
 
 #include "base/memory/ref_counted.h"
+#include "components/prefs/pref_value_store.h"
+#include "services/preferences/public/interfaces/tracked_preference_validation_delegate.mojom.h"
 
 namespace base {
 class DictionaryValue;
@@ -34,7 +36,6 @@ class PrefService;
 class PrefStore;
 class Profile;
 class SupervisedUserSettingsService;
-class TrackedPreferenceValidationDelegate;
 
 namespace chrome_prefs {
 
@@ -68,17 +69,19 @@ std::unique_ptr<PrefService> CreateLocalState(
     base::SequencedTaskRunner* pref_io_task_runner,
     policy::PolicyService* policy_service,
     const scoped_refptr<PrefRegistry>& pref_registry,
-    bool async);
+    bool async,
+    std::unique_ptr<PrefValueStore::Delegate> delegate);
 
 std::unique_ptr<sync_preferences::PrefServiceSyncable> CreateProfilePrefs(
     const base::FilePath& pref_filename,
-    base::SequencedTaskRunner* pref_io_task_runner,
-    TrackedPreferenceValidationDelegate* validation_delegate,
+    prefs::mojom::TrackedPreferenceValidationDelegatePtr validation_delegate,
     policy::PolicyService* policy_service,
     SupervisedUserSettingsService* supervised_user_settings,
     const scoped_refptr<PrefStore>& extension_prefs,
     const scoped_refptr<user_prefs::PrefRegistrySyncable>& pref_registry,
-    bool async);
+    bool async,
+    scoped_refptr<base::SequencedTaskRunner> io_task_runner,
+    std::unique_ptr<PrefValueStore::Delegate> delegate);
 
 // Call before startup tasks kick in to ignore the presence of a domain when
 // determining the active SettingsEnforcement group. For testing only.

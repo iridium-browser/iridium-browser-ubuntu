@@ -35,24 +35,24 @@ class PartialMagnificationControllerTestApi {
   DISALLOW_ASSIGN(PartialMagnificationControllerTestApi);
 };
 
-class PartialMagnificationControllerTest : public test::AshTestBase {
+class PartialMagnificationControllerTest : public AshTestBase {
  public:
   PartialMagnificationControllerTest() {}
   ~PartialMagnificationControllerTest() override {}
 
   void SetUp() override {
     AshTestBase::SetUp();
-    Shell::GetInstance()->display_manager()->UpdateDisplays();
+    Shell::Get()->display_manager()->UpdateDisplays();
   }
 
  protected:
   PartialMagnificationController* GetController() const {
-    return Shell::GetInstance()->partial_magnification_controller();
+    return Shell::Get()->partial_magnification_controller();
   }
 
   PartialMagnificationControllerTestApi GetTestApi() const {
     return PartialMagnificationControllerTestApi(
-        Shell::GetInstance()->partial_magnification_controller());
+        Shell::Get()->partial_magnification_controller());
   }
 
  private:

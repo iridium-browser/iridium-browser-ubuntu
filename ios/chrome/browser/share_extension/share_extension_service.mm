@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ios/chrome/browser/share_extension/share_extension_service.h"
+
 #include "base/mac/scoped_nsobject.h"
 #include "components/bookmarks/browser/bookmark_model.h"
-#include "components/reading_list/ios/reading_list_model.h"
+#include "components/reading_list/core/reading_list_model.h"
 #include "ios/chrome/browser/share_extension/share_extension_item_receiver.h"
-#include "ios/chrome/browser/share_extension/share_extension_service.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -18,7 +19,8 @@ ShareExtensionService::ShareExtensionService(
     : reading_list_model_(reading_list_model),
       reading_list_model_loaded_(false),
       bookmark_model_(bookmark_model),
-      bookmark_model_loaded_(false) {
+      bookmark_model_loaded_(false),
+      receiver_(nil) {
   DCHECK(bookmark_model);
   DCHECK(reading_list_model);
 }
@@ -35,11 +37,12 @@ void ShareExtensionService::Initialize() {
 }
 
 void ShareExtensionService::Shutdown() {
-  [[ShareExtensionItemReceiver sharedInstance] shutdown];
   reading_list_model_->RemoveObserver(this);
   reading_list_model_loaded_ = false;
   bookmark_model_->RemoveObserver(this);
   bookmark_model_loaded_ = false;
+  [receiver_ shutdown];
+  receiver_ = nil;
 }
 
 void ShareExtensionService::ReadingListModelLoaded(
@@ -54,10 +57,13 @@ void ShareExtensionService::BookmarkModelLoaded(bookmarks::BookmarkModel* model,
   this->AnyModelLoaded();
 }
 
+void ShareExtensionService::BookmarkModelChanged() {}
+
 void ShareExtensionService::AnyModelLoaded() {
   if (reading_list_model_loaded_ && bookmark_model_loaded_) {
-    [[ShareExtensionItemReceiver sharedInstance]
-        setBookmarkModel:bookmark_model_
-        readingListModel:reading_list_model_];
+    DCHECK(!receiver_);
+    receiver_ = [[ShareExtensionItemReceiver alloc]
+        initWithBookmarkModel:bookmark_model_
+             readingListModel:reading_list_model_];
   }
 }

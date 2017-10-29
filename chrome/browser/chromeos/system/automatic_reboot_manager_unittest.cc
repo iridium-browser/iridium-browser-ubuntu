@@ -11,10 +11,10 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task_scheduler/task_scheduler.h"
+#include "base/test/scoped_async_task_scheduler.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -37,7 +37,6 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/message_center/message_center.h"
@@ -202,6 +201,7 @@ class AutomaticRebootManagerBasicTest : public testing::Test {
   bool reboot_after_update_ = false;
 
   base::ThreadTaskRunnerHandle ui_thread_task_runner_handle_;
+  base::test::ScopedAsyncTaskScheduler scoped_async_task_scheduler_;
 
   TestingPrefServiceSimple local_state_;
   MockUserManager* mock_user_manager_;  // Not owned.
@@ -264,9 +264,7 @@ TestAutomaticRebootManagerTaskRunner::~TestAutomaticRebootManagerTaskRunner() {
 }
 
 void TestAutomaticRebootManagerTaskRunner::OnBeforeSelectingTask() {
-  base::SequencedWorkerPool* blocking_pool =
-      content::BrowserThread::GetBlockingPool();
-  blocking_pool->FlushForTesting();
+  base::TaskScheduler::GetInstance()->FlushForTesting();
 }
 
 void TestAutomaticRebootManagerTaskRunner::OnAfterTimePassed() {
@@ -274,9 +272,7 @@ void TestAutomaticRebootManagerTaskRunner::OnAfterTimePassed() {
 }
 
 void TestAutomaticRebootManagerTaskRunner::OnAfterTaskRun() {
-  base::SequencedWorkerPool* blocking_pool =
-      content::BrowserThread::GetBlockingPool();
-  blocking_pool->FlushForTesting();
+  base::TaskScheduler::GetInstance()->FlushForTesting();
 }
 
 MockAutomaticRebootManagerObserver::MockAutomaticRebootManagerObserver()
@@ -319,10 +315,10 @@ void AutomaticRebootManagerBasicTest::SetUp() {
   const base::FilePath& temp_dir = temp_dir_.GetPath();
   const base::FilePath uptime_file = temp_dir.Append("uptime");
   uptime_provider()->set_uptime_file_path(uptime_file);
-  ASSERT_FALSE(base::WriteFile(uptime_file, NULL, 0));
+  ASSERT_EQ(0, base::WriteFile(uptime_file, NULL, 0));
   update_reboot_needed_uptime_file_ =
       temp_dir.Append("update_reboot_needed_uptime");
-  ASSERT_FALSE(base::WriteFile(update_reboot_needed_uptime_file_, NULL, 0));
+  ASSERT_EQ(0, base::WriteFile(update_reboot_needed_uptime_file_, NULL, 0));
   ASSERT_TRUE(PathService::Override(chromeos::FILE_UPTIME, uptime_file));
   ASSERT_TRUE(PathService::Override(chromeos::FILE_UPDATE_REBOOT_NEEDED_UPTIME,
                                     update_reboot_needed_uptime_file_));
@@ -374,8 +370,9 @@ void AutomaticRebootManagerBasicTest::SetRebootAfterUpdate(
     bool reboot_after_update,
     bool expect_reboot) {
   reboot_after_update_ = reboot_after_update;
-  local_state_.SetManagedPref(prefs::kRebootAfterUpdate,
-                              new base::Value(reboot_after_update));
+  local_state_.SetManagedPref(
+      prefs::kRebootAfterUpdate,
+      base::MakeUnique<base::Value>(reboot_after_update));
   task_runner_->RunUntilIdle();
   EXPECT_EQ(expect_reboot ? 1 : 0,
             power_manager_client_->num_request_restart_calls());
@@ -390,7 +387,7 @@ void AutomaticRebootManagerBasicTest::SetUptimeLimit(
   } else {
     local_state_.SetManagedPref(
         prefs::kUptimeLimit,
-        new base::Value(static_cast<int>(limit.InSeconds())));
+        base::MakeUnique<base::Value>(static_cast<int>(limit.InSeconds())));
   }
   task_runner_->RunUntilIdle();
   EXPECT_EQ(expect_reboot ? 1 : 0,

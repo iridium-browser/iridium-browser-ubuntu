@@ -4,8 +4,8 @@
 
 #include <vector>
 
-#include "cc/debug/lap_timer.h"
-#include "cc/playback/draw_image.h"
+#include "cc/base/lap_timer.h"
+#include "cc/paint/draw_image.h"
 #include "cc/raster/tile_task.h"
 #include "cc/tiles/software_image_decode_cache.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -56,8 +56,11 @@ class SoftwareImageDecodeCachePerfTest : public testing::Test {
         auto& subrect = rect_subrect.second;
         for (auto& scale : scales) {
           images.emplace_back(
-              CreateImage(rect.width(), rect.height()), subrect, quality,
-              CreateMatrix(SkSize::Make(scale.first, scale.second)));
+              PaintImage(PaintImage::GetNextId(),
+                         CreateImage(rect.width(), rect.height())),
+              subrect, quality,
+              CreateMatrix(SkSize::Make(scale.first, scale.second)),
+              gfx::ColorSpace());
         }
       }
     }
@@ -65,7 +68,7 @@ class SoftwareImageDecodeCachePerfTest : public testing::Test {
     timer_.Reset();
     do {
       for (auto& image : images)
-        ImageDecodeCacheKey::FromDrawImage(image);
+        ImageDecodeCacheKey::FromDrawImage(image, viz::RGBA_8888);
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 

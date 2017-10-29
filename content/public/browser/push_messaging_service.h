@@ -11,11 +11,16 @@
 
 #include "base/callback_forward.h"
 #include "content/common/content_export.h"
-#include "content/public/common/push_messaging_status.h"
 #include "third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h"
 #include "url/gurl.h"
 
 namespace content {
+
+namespace mojom {
+enum class PushRegistrationStatus;
+enum class PushUnregistrationReason;
+enum class PushUnregistrationStatus;
+}  // namespace mojom
 
 class BrowserContext;
 struct PushSubscriptionOptions;
@@ -28,14 +33,13 @@ class CONTENT_EXPORT PushMessagingService {
       base::Callback<void(const std::string& registration_id,
                           const std::vector<uint8_t>& p256dh,
                           const std::vector<uint8_t>& auth,
-                          PushRegistrationStatus status)>;
-  using UnregisterCallback = base::Callback<void(PushUnregistrationStatus)>;
-
-  using EncryptionInfoCallback = base::Callback<void(
-      bool success,
-      const std::vector<uint8_t>& p256dh,
-      const std::vector<uint8_t>& auth)>;
-
+                          mojom::PushRegistrationStatus status)>;
+  using UnregisterCallback =
+      base::Callback<void(mojom::PushUnregistrationStatus)>;
+  using SubscriptionInfoCallback =
+      base::Callback<void(bool is_valid,
+                          const std::vector<uint8_t>& p256dh,
+                          const std::vector<uint8_t>& auth)>;
   using StringCallback = base::Callback<void(const std::string& data,
                                              bool success,
                                              bool not_found)>;
@@ -55,6 +59,7 @@ class CONTENT_EXPORT PushMessagingService {
                                      int renderer_id,
                                      int render_frame_id,
                                      const PushSubscriptionOptions& options,
+                                     bool user_gesture,
                                      const RegisterCallback& callback) = 0;
 
   // Subscribe the given |options.sender_info| with the push messaging service.
@@ -65,19 +70,24 @@ class CONTENT_EXPORT PushMessagingService {
                                    const PushSubscriptionOptions& options,
                                    const RegisterCallback& callback) = 0;
 
-  // Retrieves the encryption information associated with the subscription
-  // associated to |origin| and |service_worker_registration_id|. |sender_id| is
-  // also required since an InstanceID might have multiple tokens associated
-  // with different senders, though in practice Push doesn't yet use that.
-  virtual void GetEncryptionInfo(const GURL& origin,
-                                 int64_t service_worker_registration_id,
-                                 const std::string& sender_id,
-                                 const EncryptionInfoCallback& callback) = 0;
+  // Retrieves the subscription associated with |origin| and
+  // |service_worker_registration_id|, validates that the provided
+  // |subscription_id| matches the stored one, then passes the encryption
+  // information to the callback. |sender_id| is also required since an
+  // InstanceID might have multiple tokens associated with different senders,
+  // though in practice Push doesn't yet use that.
+  virtual void GetSubscriptionInfo(
+      const GURL& origin,
+      int64_t service_worker_registration_id,
+      const std::string& sender_id,
+      const std::string& subscription_id,
+      const SubscriptionInfoCallback& callback) = 0;
 
-  // Unsubscribe the given |sender_id| from the push messaging service. The
-  // subscription will be synchronously deactivated locally, and asynchronously
-  // sent to the push service, with automatic retry.
-  virtual void Unsubscribe(const GURL& requesting_origin,
+  // Unsubscribe the given |sender_id| from the push messaging service. Locally
+  // deactivates the subscription, then runs |callback|, then asynchronously
+  // attempts to unsubscribe with the push service.
+  virtual void Unsubscribe(mojom::PushUnregistrationReason reason,
+                           const GURL& requesting_origin,
                            int64_t service_worker_registration_id,
                            const std::string& sender_id,
                            const UnregisterCallback& callback) = 0;
@@ -99,6 +109,10 @@ class CONTENT_EXPORT PushMessagingService {
   virtual void DidDeleteServiceWorkerRegistration(
       const GURL& origin,
       int64_t service_worker_registration_id) = 0;
+
+  // Unsubscribes all existing push subscriptions because the Service Worker
+  // database has been deleted.
+  virtual void DidDeleteServiceWorkerDatabase() = 0;
 
  protected:
   static void GetSenderId(BrowserContext* browser_context,

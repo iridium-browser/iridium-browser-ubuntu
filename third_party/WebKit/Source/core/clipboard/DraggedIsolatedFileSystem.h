@@ -7,7 +7,7 @@
 
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -21,12 +21,12 @@ class CORE_EXPORT DraggedIsolatedFileSystem {
   virtual ~DraggedIsolatedFileSystem() {}
 
   using FileSystemIdPreparationCallback = void (*)(DataObject*);
-  static void init(FileSystemIdPreparationCallback);
+  static void Init(FileSystemIdPreparationCallback);
 
-  static void prepareForDataObject(DataObject*);
+  static void PrepareForDataObject(DataObject*);
 
  private:
-  static FileSystemIdPreparationCallback s_prepareCallback;
+  static FileSystemIdPreparationCallback prepare_callback_;
 };
 
 }  // namespace blink

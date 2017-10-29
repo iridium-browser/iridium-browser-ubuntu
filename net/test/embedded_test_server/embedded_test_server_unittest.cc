@@ -9,6 +9,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -28,6 +29,7 @@
 #include "net/test/embedded_test_server/http_response.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
 #include "net/test/gtest_util.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request.h"
@@ -252,7 +254,8 @@ TEST_P(EmbeddedTestServerTest, RegisterRequestHandler) {
   ASSERT_TRUE(server_->Start());
 
   std::unique_ptr<URLFetcher> fetcher =
-      URLFetcher::Create(server_->GetURL("/test?q=foo"), URLFetcher::GET, this);
+      URLFetcher::Create(server_->GetURL("/test?q=foo"), URLFetcher::GET, this,
+                         TRAFFIC_ANNOTATION_FOR_TESTS);
   fetcher->SetRequestContext(request_context_getter_.get());
   fetcher->Start();
   WaitForResponses(1);
@@ -274,7 +277,29 @@ TEST_P(EmbeddedTestServerTest, ServeFilesFromDirectory) {
   ASSERT_TRUE(server_->Start());
 
   std::unique_ptr<URLFetcher> fetcher =
-      URLFetcher::Create(server_->GetURL("/test.html"), URLFetcher::GET, this);
+      URLFetcher::Create(server_->GetURL("/test.html"), URLFetcher::GET, this,
+                         TRAFFIC_ANNOTATION_FOR_TESTS);
+  fetcher->SetRequestContext(request_context_getter_.get());
+  fetcher->Start();
+  WaitForResponses(1);
+
+  EXPECT_EQ(URLRequestStatus::SUCCESS, fetcher->GetStatus().status());
+  EXPECT_EQ(HTTP_OK, fetcher->GetResponseCode());
+  EXPECT_EQ("<p>Hello World!</p>", GetContentFromFetcher(*fetcher));
+  EXPECT_EQ("text/html", GetContentTypeFromFetcher(*fetcher));
+}
+
+TEST_P(EmbeddedTestServerTest, MockHeadersWithoutCRLF) {
+  base::FilePath src_dir;
+  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
+  server_->ServeFilesFromDirectory(
+      src_dir.AppendASCII("net").AppendASCII("data").AppendASCII(
+          "embedded_test_server"));
+  ASSERT_TRUE(server_->Start());
+
+  std::unique_ptr<URLFetcher> fetcher =
+      URLFetcher::Create(server_->GetURL("/mock-headers-without-crlf.html"),
+                         URLFetcher::GET, this, TRAFFIC_ANNOTATION_FOR_TESTS);
   fetcher->SetRequestContext(request_context_getter_.get());
   fetcher->Start();
   WaitForResponses(1);
@@ -288,8 +313,9 @@ TEST_P(EmbeddedTestServerTest, ServeFilesFromDirectory) {
 TEST_P(EmbeddedTestServerTest, DefaultNotFoundResponse) {
   ASSERT_TRUE(server_->Start());
 
-  std::unique_ptr<URLFetcher> fetcher = URLFetcher::Create(
-      server_->GetURL("/non-existent"), URLFetcher::GET, this);
+  std::unique_ptr<URLFetcher> fetcher =
+      URLFetcher::Create(server_->GetURL("/non-existent"), URLFetcher::GET,
+                         this, TRAFFIC_ANNOTATION_FOR_TESTS);
   fetcher->SetRequestContext(request_context_getter_.get());
 
   fetcher->Start();
@@ -320,8 +346,9 @@ TEST_P(EmbeddedTestServerTest, ConnectionListenerAccept) {
 TEST_P(EmbeddedTestServerTest, ConnectionListenerRead) {
   ASSERT_TRUE(server_->Start());
 
-  std::unique_ptr<URLFetcher> fetcher = URLFetcher::Create(
-      server_->GetURL("/non-existent"), URLFetcher::GET, this);
+  std::unique_ptr<URLFetcher> fetcher =
+      URLFetcher::Create(server_->GetURL("/non-existent"), URLFetcher::GET,
+                         this, TRAFFIC_ANNOTATION_FOR_TESTS);
   fetcher->SetRequestContext(request_context_getter_.get());
 
   fetcher->Start();
@@ -355,13 +382,16 @@ TEST_P(EmbeddedTestServerTest, ConcurrentFetches) {
   ASSERT_TRUE(server_->Start());
 
   std::unique_ptr<URLFetcher> fetcher1 =
-      URLFetcher::Create(server_->GetURL("/test1"), URLFetcher::GET, this);
+      URLFetcher::Create(server_->GetURL("/test1"), URLFetcher::GET, this,
+                         TRAFFIC_ANNOTATION_FOR_TESTS);
   fetcher1->SetRequestContext(request_context_getter_.get());
   std::unique_ptr<URLFetcher> fetcher2 =
-      URLFetcher::Create(server_->GetURL("/test2"), URLFetcher::GET, this);
+      URLFetcher::Create(server_->GetURL("/test2"), URLFetcher::GET, this,
+                         TRAFFIC_ANNOTATION_FOR_TESTS);
   fetcher2->SetRequestContext(request_context_getter_.get());
   std::unique_ptr<URLFetcher> fetcher3 =
-      URLFetcher::Create(server_->GetURL("/test3"), URLFetcher::GET, this);
+      URLFetcher::Create(server_->GetURL("/test3"), URLFetcher::GET, this,
+                         TRAFFIC_ANNOTATION_FOR_TESTS);
   fetcher3->SetRequestContext(request_context_getter_.get());
 
   // Fetch the three URLs concurrently.
@@ -436,7 +466,8 @@ std::unique_ptr<HttpResponse> HandleInfiniteRequest(
     const HttpRequest& request) {
   return base::WrapUnique(new InfiniteResponse);
 }
-}
+
+}  // anonymous namespace
 
 // Tests the case the connection is closed while the server is sending a
 // response.  May non-deterministically end up at one of three paths
@@ -450,8 +481,9 @@ TEST_P(EmbeddedTestServerTest, CloseDuringWrite) {
       &HandlePrefixedRequest, "/infinite", base::Bind(&HandleInfiniteRequest)));
   ASSERT_TRUE(server_->Start());
 
-  std::unique_ptr<URLRequest> request = context.CreateRequest(
-      server_->GetURL("/infinite"), DEFAULT_PRIORITY, &cancel_delegate);
+  std::unique_ptr<URLRequest> request =
+      context.CreateRequest(server_->GetURL("/infinite"), DEFAULT_PRIORITY,
+                            &cancel_delegate, TRAFFIC_ANNOTATION_FOR_TESTS);
   request->Start();
   cancel_delegate.WaitUntilDone();
 }
@@ -471,7 +503,7 @@ const CertificateValuesEntry kCertificateValuesEntry[] = {
      "Test Root CA"},
     {EmbeddedTestServer::CERT_EXPIRED, true, "127.0.0.1", "Test Root CA"},
     {EmbeddedTestServer::CERT_CHAIN_WRONG_ROOT, false, "127.0.0.1", "B CA"},
-#if !defined(OS_WIN)
+#if !defined(OS_WIN) && !defined(OS_ANDROID)
     {EmbeddedTestServer::CERT_BAD_VALIDITY, true, "Leaf Certificate",
      "Test Root CA"},
 #endif
@@ -482,9 +514,10 @@ TEST_P(EmbeddedTestServerTest, GetCertificate) {
     return;
 
   for (const auto& certEntry : kCertificateValuesEntry) {
+    SCOPED_TRACE(certEntry.server_cert);
     server_->SetSSLConfig(certEntry.server_cert);
     scoped_refptr<X509Certificate> cert = server_->GetCertificate();
-    DCHECK(cert.get());
+    ASSERT_TRUE(cert);
     EXPECT_EQ(cert->HasExpired(), certEntry.is_expired);
     EXPECT_EQ(cert->subject().common_name, certEntry.common_name);
     EXPECT_EQ(cert->issuer().common_name, certEntry.root);
@@ -559,7 +592,8 @@ class EmbeddedTestServerThreadingTestDelegate
       loop.reset(new base::MessageLoopForIO);
 
     std::unique_ptr<URLFetcher> fetcher =
-        URLFetcher::Create(server.GetURL("/test?q=foo"), URLFetcher::GET, this);
+        URLFetcher::Create(server.GetURL("/test?q=foo"), URLFetcher::GET, this,
+                           TRAFFIC_ANNOTATION_FOR_TESTS);
     fetcher->SetRequestContext(
         new TestURLRequestContextGetter(loop->task_runner()));
     fetcher->Start();

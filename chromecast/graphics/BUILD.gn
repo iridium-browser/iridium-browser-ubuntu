@@ -8,8 +8,6 @@ import("//testing/test.gni")
 
 source_set("graphics") {
   sources = [
-    "cast_vsync_settings.cc",
-    "cast_vsync_settings.h",
     "cast_window_manager.h",
   ]
 
@@ -18,7 +16,7 @@ source_set("graphics") {
     "//ui/gfx",
   ]
 
-  if (use_aura && !is_cast_audio_only) {
+  if (use_aura) {
     sources += [
       "cast_focus_client_aura.cc",
       "cast_focus_client_aura.h",
@@ -30,6 +28,7 @@ source_set("graphics") {
       "//ui/base/ime",
       "//ui/views",
       "//ui/wm",
+      "//ui/wm/public",
     ]
   } else {
     sources += [
@@ -54,7 +53,7 @@ source_set("graphics") {
   }
 }
 
-shared_library("libcast_graphics_1.0") {
+cast_shared_library("libcast_graphics_1.0") {
   sources = [
     "cast_egl_platform_default.cc",
     "graphics_properties_default.cc",

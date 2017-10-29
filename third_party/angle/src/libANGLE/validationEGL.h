@@ -98,6 +98,12 @@ Error ValidateStreamPostD3DTextureNV12ANGLE(const Display *display,
                                             void *texture,
                                             const AttributeMap &attribs);
 
+Error ValidateGetSyncValuesCHROMIUM(const Display *display,
+                                    const Surface *surface,
+                                    const EGLuint64KHR *ust,
+                                    const EGLuint64KHR *msc,
+                                    const EGLuint64KHR *sbc);
+
 Error ValidateSwapBuffersWithDamageEXT(const Display *display,
                                        const Surface *surface,
                                        EGLint *rects,
@@ -117,7 +123,47 @@ Error ValidateCompatibleConfigs(const Display *display,
                                 const Config *config2,
                                 EGLint surfaceType);
 
-Error ValidatePlatformType(const ClientExtensions &clientExtensions, EGLint platformType);
-}  // namespace gl
+Error ValidateGetPlatformDisplay(EGLenum platform,
+                                 void *native_display,
+                                 const EGLAttrib *attrib_list);
+Error ValidateGetPlatformDisplayEXT(EGLenum platform,
+                                    void *native_display,
+                                    const EGLint *attrib_list);
+
+Error ValidateProgramCacheGetAttribANGLE(const Display *display, EGLenum attrib);
+
+Error ValidateProgramCacheQueryANGLE(const Display *display,
+                                     EGLint index,
+                                     void *key,
+                                     EGLint *keysize,
+                                     void *binary,
+                                     EGLint *binarysize);
+
+Error ValidateProgramCachePopulateANGLE(const Display *display,
+                                        const void *key,
+                                        EGLint keysize,
+                                        const void *binary,
+                                        EGLint binarysize);
+
+Error ValidateProgramCacheResizeANGLE(const Display *display, EGLint limit, EGLenum mode);
+
+}  // namespace egl
+
+#define ANGLE_EGL_TRY(THREAD, EXPR)                   \
+    {                                                 \
+        auto ANGLE_LOCAL_VAR = (EXPR);                \
+        if (ANGLE_LOCAL_VAR.isError())                \
+            return THREAD->setError(ANGLE_LOCAL_VAR); \
+    }
+
+#define ANGLE_EGL_TRY_RETURN(THREAD, EXPR, RETVAL) \
+    {                                              \
+        auto ANGLE_LOCAL_VAR = (EXPR);             \
+        if (ANGLE_LOCAL_VAR.isError())             \
+        {                                          \
+            THREAD->setError(ANGLE_LOCAL_VAR);     \
+            return RETVAL;                         \
+        }                                          \
+    }
 
 #endif // LIBANGLE_VALIDATIONEGL_H_

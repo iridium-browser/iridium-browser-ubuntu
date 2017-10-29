@@ -5,6 +5,7 @@
 #include "chrome/browser/profiles/profile_android.h"
 
 #include "base/android/jni_android.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -27,7 +28,7 @@ ProfileAndroid* ProfileAndroid::FromProfile(Profile* profile) {
       profile->GetUserData(kProfileAndroidKey));
   if (!profile_android) {
     profile_android = new ProfileAndroid(profile);
-    profile->SetUserData(kProfileAndroidKey, profile_android);
+    profile->SetUserData(kProfileAndroidKey, base::WrapUnique(profile_android));
   }
   return profile_android;
 }
@@ -42,11 +43,6 @@ Profile* ProfileAndroid::FromProfileAndroid(jobject obj) {
   if (!profile_android)
     return NULL;
   return profile_android->profile_;
-}
-
-// static
-bool ProfileAndroid::RegisterProfileAndroid(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 // static
@@ -101,6 +97,12 @@ jboolean ProfileAndroid::HasOffTheRecordProfile(
 jboolean ProfileAndroid::IsOffTheRecord(JNIEnv* env,
                                         const JavaParamRef<jobject>& obj) {
   return profile_->IsOffTheRecord();
+}
+
+jboolean ProfileAndroid::IsChild(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
+  return profile_->IsChild();
 }
 
 // static

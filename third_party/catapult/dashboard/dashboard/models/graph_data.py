@@ -67,7 +67,6 @@ from dashboard.models import anomaly
 from dashboard.models import anomaly_config
 from dashboard.models import internal_only_model
 from dashboard.models import sheriff as sheriff_module
-from dashboard.models import stoppage_alert as stoppage_alert_module
 
 # Maximum level of nested tests.
 MAX_TEST_ANCESTORS = 10
@@ -155,11 +154,6 @@ class TestMetadata(internal_only_model.CreateHookInternalOnlyModel):
 
   # Whether or not the test has child rows. Set by hook on Row class put.
   has_rows = ndb.BooleanProperty(default=False, indexed=True)
-
-  # If there is a currently a StoppageAlert that indicates that data hasn't
-  # been received for some time, then will be set. Otherwise, it is None.
-  stoppage_alert = ndb.KeyProperty(
-      kind=stoppage_alert_module.StoppageAlert, indexed=True)
 
   # A test is marked "deprecated" if no new points have been received for
   # a long time; these tests should usually not be listed.
@@ -308,18 +302,19 @@ class TestMetadata(internal_only_model.CreateHookInternalOnlyModel):
       test_suite.put()
 
     # Set the anomaly threshold config to the first one that has a test pattern
-    # that matches this test, if there is one. Anomaly configs are sorted by
-    # name, so that a config with a name that comes earlier lexicographically
-    # is considered higher-priority.
+    # that matches this test, if there is one. Anomaly configs with a pattern
+    # that more specifically matches the test are given higher priority.
+    # ie. */*/*/foo is chosen over */*/*/*
     self.overridden_anomaly_config = None
     anomaly_configs = anomaly_config.AnomalyConfig.query().fetch()
-    anomaly_configs.sort(key=lambda config: config.key.string_id())
-    for anomaly_config_entity in anomaly_configs:
-      for pattern in anomaly_config_entity.patterns:
-        if utils.TestMatchesPattern(self, pattern):
-          self.overridden_anomaly_config = anomaly_config_entity.key
-      if self.overridden_anomaly_config:
-        break
+    anomaly_data_list = []
+    for e in anomaly_configs:
+      for p in e.patterns:
+        anomaly_data_list.append((p, e))
+    anomaly_config_to_use = utils.MostSpecificMatchingPattern(
+        self, anomaly_data_list)
+    if anomaly_config_to_use:
+      self.overridden_anomaly_config = anomaly_config_to_use.key
 
   def CreateCallback(self):
     """Called when the entity is first saved."""

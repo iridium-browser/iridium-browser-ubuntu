@@ -2,16 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/system/system_notifier.h"
-#include "ash/common/wm_shell.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_notification_blocker_chromeos.h"
+
+#include "ash/shell.h"
+#include "ash/system/system_notifier.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/test_shell_delegate.h"
+#include "ash/test_shell_delegate.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
-#include "chrome/browser/ui/ash/multi_user/multi_user_notification_blocker_chromeos.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_chromeos.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
@@ -22,7 +23,7 @@
 using base::UTF8ToUTF16;
 
 class MultiUserNotificationBlockerChromeOSTest
-    : public ash::test::AshTestBase,
+    : public ash::AshTestBase,
       public message_center::NotificationBlocker::Observer {
  public:
   MultiUserNotificationBlockerChromeOSTest()
@@ -33,18 +34,18 @@ class MultiUserNotificationBlockerChromeOSTest
         user_manager_enabler_(fake_user_manager_) {}
   ~MultiUserNotificationBlockerChromeOSTest() override {}
 
-  // ash::test::AshTestBase overrides:
+  // ash::AshTestBase overrides:
   void SetUp() override {
-    ash::test::AshTestBase::SetUp();
+    ash::AshTestBase::SetUp();
     ASSERT_TRUE(testing_profile_manager_.SetUp());
 
     // MultiUserWindowManager is initialized after the log in.
     testing_profile_manager_.CreateTestingProfile(GetDefaultUserId());
     fake_user_manager_->AddUser(AccountId::FromUserEmail(GetDefaultUserId()));
 
-    ash::test::TestShellDelegate* shell_delegate =
-        static_cast<ash::test::TestShellDelegate*>(
-            ash::WmShell::Get()->delegate());
+    ash::TestShellDelegate* shell_delegate =
+        static_cast<ash::TestShellDelegate*>(
+            ash::Shell::Get()->shell_delegate());
     shell_delegate->set_multi_profiles_enabled(true);
     chrome::MultiUserWindowManager::CreateInstance();
 
@@ -64,7 +65,7 @@ class MultiUserNotificationBlockerChromeOSTest
     GetMultiUserWindowManager()->notification_blocker_->RemoveObserver(this);
     if (chrome::MultiUserWindowManager::GetInstance())
       chrome::MultiUserWindowManager::DeleteInstance();
-    ash::test::AshTestBase::TearDown();
+    ash::AshTestBase::TearDown();
     chromeos::WallpaperManager::Shutdown();
   }
 

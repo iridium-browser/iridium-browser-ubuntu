@@ -40,7 +40,7 @@ void CallCallbackWithIdentity(
 }  // namespace
 
 BackgroundServiceManager::BackgroundServiceManager(
-    service_manager::ServiceProcessLauncher::Delegate* launcher_delegate,
+    service_manager::ServiceProcessLauncherDelegate* launcher_delegate,
     std::unique_ptr<base::Value> catalog_contents)
     : background_thread_("service_manager") {
   background_thread_.Start();
@@ -61,6 +61,13 @@ BackgroundServiceManager::~BackgroundServiceManager() {
                  base::Unretained(this), &done_event));
   done_event.Wait();
   DCHECK(!context_);
+}
+
+void BackgroundServiceManager::StartService(const Identity& identity) {
+  background_thread_.task_runner()->PostTask(
+      FROM_HERE,
+      base::Bind(&BackgroundServiceManager::StartServiceOnBackgroundThread,
+                 base::Unretained(this), identity));
 }
 
 void BackgroundServiceManager::RegisterService(
@@ -99,7 +106,7 @@ void BackgroundServiceManager::SetInstanceQuitCallbackOnBackgroundThread(
 }
 
 void BackgroundServiceManager::InitializeOnBackgroundThread(
-    service_manager::ServiceProcessLauncher::Delegate* launcher_delegate,
+    service_manager::ServiceProcessLauncherDelegate* launcher_delegate,
     std::unique_ptr<base::Value> catalog_contents) {
   context_ =
       base::MakeUnique<Context>(launcher_delegate, std::move(catalog_contents));
@@ -109,6 +116,11 @@ void BackgroundServiceManager::ShutDownOnBackgroundThread(
     base::WaitableEvent* done_event) {
   context_.reset();
   done_event->Signal();
+}
+
+void BackgroundServiceManager::StartServiceOnBackgroundThread(
+    const Identity& identity) {
+  context_->service_manager()->StartService(identity);
 }
 
 void BackgroundServiceManager::RegisterServiceOnBackgroundThread(

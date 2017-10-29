@@ -70,25 +70,6 @@ bool SkClipStack::Element::operator== (const Element& element) const {
     }
 }
 
-void SkClipStack::Element::replay(SkCanvasClipVisitor* visitor) const {
-    static const SkRect kEmptyRect = { 0, 0, 0, 0 };
-
-    switch (fType) {
-        case kPath_Type:
-            visitor->clipPath(this->getPath(), this->getOp(), this->isAA());
-            break;
-        case kRRect_Type:
-            visitor->clipRRect(this->getRRect(), this->getOp(), this->isAA());
-            break;
-        case kRect_Type:
-            visitor->clipRect(this->getRect(), this->getOp(), this->isAA());
-            break;
-        case kEmpty_Type:
-            visitor->clipRect(kEmptyRect, kIntersect_SkClipOp, false);
-            break;
-    }
-}
-
 void SkClipStack::Element::invertShapeFillType() {
     switch (fType) {
         case kRect_Type:
@@ -496,6 +477,11 @@ static const int kDefaultElementAllocCnt = 8;
 
 SkClipStack::SkClipStack()
     : fDeque(sizeof(Element), kDefaultElementAllocCnt)
+    , fSaveCount(0) {
+}
+
+SkClipStack::SkClipStack(void* storage, size_t size)
+    : fDeque(sizeof(Element), storage, size, kDefaultElementAllocCnt)
     , fSaveCount(0) {
 }
 
@@ -938,12 +924,15 @@ bool SkClipStack::isRRect(const SkRect& bounds, SkRRect* rrect, bool* aa) const 
     return false;
 }
 
-int32_t SkClipStack::GetNextGenID() {
-    // TODO: handle overflow.
-    return sk_atomic_inc(&gGenID);
+uint32_t SkClipStack::GetNextGenID() {
+    uint32_t id;
+    do {
+        id = static_cast<uint32_t>(sk_atomic_inc(&gGenID));
+    } while (id < kFirstUnreservedGenID);
+    return id;
 }
 
-int32_t SkClipStack::getTopmostGenID() const {
+uint32_t SkClipStack::getTopmostGenID() const {
     if (fDeque.empty()) {
         return kWideOpenGenID;
     }

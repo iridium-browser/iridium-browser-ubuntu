@@ -27,6 +27,13 @@ ATTRIBUTE_ORDER = {
     'with-suffix': ['name'],
 }
 
+# Attribute names that must be explicitly specified on nodes that support them.
+REQUIRED_ATTRIBUTES = [
+    'label',
+    'name',
+    'separator',
+]
+
 # Tag names for top-level nodes whose children we don't want to indent.
 TAGS_THAT_DONT_INDENT = [
     'actions',
@@ -43,7 +50,7 @@ TAGS_THAT_HAVE_EXTRA_NEWLINE = {
 }
 
 # Tags that we allow to be squished into a single line for brevity.
-TAGS_THAT_ALLOW_SINGLE_LINE = ['owner', 'description', 'obsolete']
+TAGS_THAT_ALLOW_SINGLE_LINE = ['obsolete', 'owner', 'description']
 
 LOWERCASE_NAME_FN = lambda n: n.attributes['name'].value.lower()
 
@@ -59,6 +66,7 @@ TAGS_ALPHABETIZATION_RULES = {
 def GetPrintStyle():
   """Returns an XmlStyle object for pretty printing actions."""
   return pretty_print_xml.XmlStyle(ATTRIBUTE_ORDER,
+                                   REQUIRED_ATTRIBUTES,
                                    TAGS_THAT_HAVE_EXTRA_NEWLINE,
                                    TAGS_THAT_DONT_INDENT,
                                    TAGS_THAT_ALLOW_SINGLE_LINE,

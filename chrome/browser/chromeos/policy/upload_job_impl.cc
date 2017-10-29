@@ -10,6 +10,7 @@
 
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/stringprintf.h"
@@ -195,9 +196,8 @@ void UploadJobImpl::AddDataSegment(
   if (state_ != IDLE)
     return;
 
-  std::unique_ptr<DataSegment> data_segment(
-      new DataSegment(name, filename, std::move(data), header_entries));
-  data_segments_.push_back(std::move(data_segment));
+  data_segments_.push_back(base::MakeUnique<DataSegment>(
+      name, filename, std::move(data), header_entries));
 }
 
 void UploadJobImpl::Start() {
@@ -241,7 +241,7 @@ bool UploadJobImpl::SetUpMultipart() {
   std::set<std::string> used_names;
 
   // Check uniqueness of header field names.
-  for (auto* data_segment : data_segments_) {
+  for (const auto& data_segment : data_segments_) {
     if (!used_names.insert(data_segment->GetName()).second)
       return false;
   }
@@ -253,7 +253,7 @@ bool UploadJobImpl::SetUpMultipart() {
   // allocation more efficient. It is not an error if this turns out to be too
   // small as std::string will take care of the realloc.
   size_t size = 0;
-  for (auto* data_segment : data_segments_) {
+  for (const auto& data_segment : data_segments_) {
     for (const auto& entry : data_segment->GetHeaderEntries())
       size += entry.first.size() + entry.second.size();
     size += kMaxMimeBoundarySize + data_segment->GetName().size() +
@@ -266,7 +266,7 @@ bool UploadJobImpl::SetUpMultipart() {
   post_data_.reset(new std::string);
   post_data_->reserve(size);
 
-  for (auto* data_segment : data_segments_) {
+  for (const auto& data_segment : data_segments_) {
     post_data_->append("--" + *mime_boundary_.get() + "\r\n");
     post_data_->append("Content-Disposition: form-data; name=\"" +
                        data_segment->GetName() + "\"");
@@ -378,8 +378,9 @@ void UploadJobImpl::HandleError(ErrorCode error_code) {
                                             access_token_);
       access_token_.clear();
       task_runner_->PostDelayedTask(
-          FROM_HERE, base::Bind(&UploadJobImpl::RequestAccessToken,
-                                weak_factory_.GetWeakPtr()),
+          FROM_HERE,
+          base::BindOnce(&UploadJobImpl::RequestAccessToken,
+                         weak_factory_.GetWeakPtr()),
           base::TimeDelta::FromMilliseconds(g_retry_delay_ms));
     } else {
       // Retry without a new token.
@@ -387,7 +388,8 @@ void UploadJobImpl::HandleError(ErrorCode error_code) {
       SYSLOG(WARNING) << "Retrying upload with the same token.";
       task_runner_->PostDelayedTask(
           FROM_HERE,
-          base::Bind(&UploadJobImpl::StartUpload, weak_factory_.GetWeakPtr()),
+          base::BindOnce(&UploadJobImpl::StartUpload,
+                         weak_factory_.GetWeakPtr()),
           base::TimeDelta::FromMilliseconds(g_retry_delay_ms));
     }
   }

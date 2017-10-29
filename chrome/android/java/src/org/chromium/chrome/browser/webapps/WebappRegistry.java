@@ -15,6 +15,7 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.banners.InstallerDelegate;
 import org.chromium.chrome.browser.browsing_data.UrlFilter;
 import org.chromium.chrome.browser.browsing_data.UrlFilterBridge;
+import org.chromium.webapk.lib.common.WebApkConstants;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -34,7 +35,7 @@ import java.util.concurrent.TimeUnit;
  * after it is created.
  *
  * This class is not a comprehensive list of installed web apps because it is impossible to know
- * when the user removes a web app from the home screen. The WebappDataStorage.wasLaunchedRecently()
+ * when the user removes a web app from the home screen. The WebappDataStorage.wasUsedRecently()
  * heuristic attempts to compensate for this.
  */
 public class WebappRegistry {
@@ -112,13 +113,20 @@ public class WebappRegistry {
             protected final WebappDataStorage doInBackground(Void... nothing) {
                 // Create the WebappDataStorage on the background thread, as this must create and
                 // open a new SharedPreferences.
-                return WebappDataStorage.open(webappId);
+                WebappDataStorage storage = WebappDataStorage.open(webappId);
+                // Access the WebappDataStorage to force it to finish loading. A strict mode
+                // exception is thrown if the WebappDataStorage is accessed on the UI thread prior
+                // to the storage being fully loaded.
+                storage.getLastUsedTime();
+                return storage;
             }
 
             @Override
             protected final void onPostExecute(WebappDataStorage storage) {
-                // Guarantee that last used time != WebappDataStorage.LAST_USED_INVALID. Must be
-                // run on the main thread as SharedPreferences.Editor.apply() is called.
+                // Update the last used time in order to prevent
+                // {@link WebappRegistry@unregisterOldWebapps()} from deleting the
+                // WebappDataStorage. Must be run on the main thread as
+                // SharedPreferences.Editor.apply() is called.
                 mStorages.put(webappId, storage);
                 mPreferences.edit().putStringSet(KEY_WEBAPP_SET, mStorages.keySet()).apply();
                 storage.updateLastUsedTime();
@@ -186,7 +194,11 @@ public class WebappRegistry {
             WebappDataStorage storage = entry.getValue();
             String webApkPackage = storage.getWebApkPackageName();
             if (webApkPackage != null) {
-                if (isWebApkInstalled(webApkPackage)) {
+                // Prefix check that the key matches the current scheme instead of an old
+                // deprecated naming scheme and that the WebApk is still installed. The former is
+                // necessary as we migrate away from the old naming scheme and garbage collect.
+                if (entry.getKey().startsWith(WebApkConstants.WEBAPK_ID_PREFIX)
+                        && isWebApkInstalled(webApkPackage)) {
                     continue;
                 }
             } else if ((currentTime - storage.getLastUsedTime())

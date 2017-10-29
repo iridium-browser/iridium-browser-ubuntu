@@ -14,6 +14,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/time.h"
@@ -29,15 +30,13 @@
 #include "chrome/browser/ui/proximity_auth/proximity_auth_error_bubble.h"
 #include "chrome/common/extensions/api/easy_unlock_private.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/cryptauth/bluetooth_throttler_impl.h"
 #include "components/cryptauth/cryptauth_device_manager.h"
 #include "components/cryptauth/cryptauth_enrollment_manager.h"
 #include "components/cryptauth/cryptauth_enrollment_utils.h"
 #include "components/cryptauth/proto/cryptauth_api.pb.h"
 #include "components/cryptauth/remote_device.h"
 #include "components/cryptauth/secure_message_delegate.h"
-#include "components/proximity_auth/ble/bluetooth_low_energy_connection.h"
-#include "components/proximity_auth/ble/bluetooth_low_energy_connection_finder.h"
+#include "components/proximity_auth/bluetooth_low_energy_setup_connection_finder.h"
 #include "components/proximity_auth/bluetooth_util.h"
 #include "components/proximity_auth/logging/logging.h"
 #include "components/proximity_auth/proximity_auth_client.h"
@@ -45,7 +44,6 @@
 #include "components/proximity_auth/screenlock_state.h"
 #include "components/proximity_auth/switches.h"
 #include "components/signin/core/account_id/account_id.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -53,10 +51,9 @@
 #include "ui/gfx/range/range.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/common/system/chromeos/devicetype_utils.h"
+#include "ash/system/devicetype_utils.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager_factory.h"
-#include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -68,8 +65,8 @@ namespace easy_unlock_private = api::easy_unlock_private;
 
 namespace {
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<EasyUnlockPrivateAPI> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<EasyUnlockPrivateAPI>>::
+    DestructorAtExit g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // Utility method for getting the API's crypto delegate.
 EasyUnlockPrivateCryptoDelegate* GetCryptoDelegate(
@@ -101,11 +98,11 @@ ScreenlockState ToScreenlockState(easy_unlock_private::State state) {
     case easy_unlock_private::STATE_PHONE_UNSUPPORTED:
       return ScreenlockState::PHONE_UNSUPPORTED;
     case easy_unlock_private::STATE_RSSI_TOO_LOW:
-      return ScreenlockState::RSSI_TOO_LOW;
     case easy_unlock_private::STATE_TX_POWER_TOO_HIGH:
-      return ScreenlockState::TX_POWER_TOO_HIGH;
+      // Note: TX Power is deprecated, so we merge it with the RSSI state.
+      return ScreenlockState::RSSI_TOO_LOW;
     case easy_unlock_private::STATE_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH:
-      return ScreenlockState::PHONE_LOCKED_AND_TX_POWER_TOO_HIGH;
+      return ScreenlockState::PHONE_LOCKED_AND_RSSI_TOO_LOW;
     case easy_unlock_private::STATE_AUTHENTICATED:
       return ScreenlockState::AUTHENTICATED;
     default:
@@ -229,12 +226,11 @@ ExtensionFunction::ResponseAction EasyUnlockPrivateGetStringsFunction::Run() {
   // Step 1: Intro.
   strings->SetString(
       "setupIntroHeaderTitle",
-      l10n_util::GetStringUTF16(IDS_EASY_UNLOCK_SETUP_INTRO_HEADER_TITLE));
+      l10n_util::GetStringFUTF16(IDS_EASY_UNLOCK_SETUP_INTRO_HEADER_TITLE,
+                                 device_type));
   strings->SetString(
       "setupIntroHeaderText",
-      l10n_util::GetStringFUTF16(IDS_EASY_UNLOCK_SETUP_INTRO_HEADER_TEXT,
-                                 device_type,
-                                 user_email));
+      l10n_util::GetStringUTF16(IDS_EASY_UNLOCK_SETUP_INTRO_HEADER_TEXT));
   strings->SetString(
       "setupIntroFindPhoneButtonLabel",
       l10n_util::GetStringUTF16(
@@ -313,12 +309,11 @@ ExtensionFunction::ResponseAction EasyUnlockPrivateGetStringsFunction::Run() {
   // Step 3: Setup completed successfully.
   strings->SetString(
       "setupCompleteHeaderTitle",
-      l10n_util::GetStringUTF16(
-          IDS_EASY_UNLOCK_SETUP_COMPLETE_HEADER_TITLE));
+      l10n_util::GetStringUTF16(IDS_EASY_UNLOCK_SETUP_COMPLETE_HEADER_TITLE));
   strings->SetString(
       "setupCompleteHeaderText",
-      l10n_util::GetStringUTF16(
-          IDS_EASY_UNLOCK_SETUP_COMPLETE_HEADER_TEXT));
+      l10n_util::GetStringFUTF16(IDS_EASY_UNLOCK_SETUP_COMPLETE_HEADER_TEXT,
+                                 device_type));
   strings->SetString(
       "setupCompleteTryItOutButtonLabel",
       l10n_util::GetStringUTF16(
@@ -491,9 +486,9 @@ bool EasyUnlockPrivateSeekBluetoothDeviceByAddressFunction::RunAsync() {
       base::Bind(
           &EasyUnlockPrivateSeekBluetoothDeviceByAddressFunction::OnSeekFailure,
           this),
-      content::BrowserThread::GetBlockingPool()
-          ->GetTaskRunnerWithShutdownBehavior(
-              base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN)
+      base::CreateTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})
           .get());
   return true;
 }
@@ -577,8 +572,8 @@ EasyUnlockPrivateGetPermitAccessFunction::
 
 ExtensionFunction::ResponseAction
 EasyUnlockPrivateGetPermitAccessFunction::Run() {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          proximity_auth::switches::kEnableBluetoothLowEnergyDiscovery)) {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          proximity_auth::switches::kDisableBluetoothLowEnergyDiscovery)) {
     return GetPermitAccessForExperiment();
   }
 
@@ -678,8 +673,8 @@ EasyUnlockPrivateSetRemoteDevicesFunction::Run() {
     devices.Append(device.ToValue());
 
   // Store the BLE device if we are trying out the BLE experiment.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          proximity_auth::switches::kEnableBluetoothLowEnergyDiscovery)) {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          proximity_auth::switches::kDisableBluetoothLowEnergyDiscovery)) {
     EasyUnlockService::Get(profile)->SetRemoteBleDevices(devices);
   } else {
     EasyUnlockService::Get(profile)->SetRemoteDevices(devices);
@@ -699,8 +694,8 @@ EasyUnlockPrivateGetRemoteDevicesFunction::
 bool EasyUnlockPrivateGetRemoteDevicesFunction::RunAsync() {
   // Return the remote devices stored with the native CryptAuthDeviceManager if
   // we are trying out the BLE experiment.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          proximity_auth::switches::kEnableBluetoothLowEnergyDiscovery)) {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          proximity_auth::switches::kDisableBluetoothLowEnergyDiscovery)) {
     ReturnDevicesForExperiment();
   } else {
     Profile* profile = Profile::FromBrowserContext(browser_context());
@@ -905,16 +900,12 @@ ExtensionFunction::ResponseAction EasyUnlockPrivateGetUserInfoFunction::Run() {
     user.logged_in = service->GetType() == EasyUnlockService::TYPE_REGULAR;
     user.data_ready = user.logged_in || service->GetRemoteDevices() != NULL;
 
-    EasyUnlockService::UserSettings user_settings =
-        EasyUnlockService::GetUserSettings(account_id);
-    user.require_close_proximity = user_settings.require_close_proximity;
-
     user.device_user_id = cryptauth::CalculateDeviceUserId(
         EasyUnlockService::GetDeviceId(), account_id.GetUserEmail());
 
     user.ble_discovery_enabled =
-        base::CommandLine::ForCurrentProcess()->HasSwitch(
-            proximity_auth::switches::kEnableBluetoothLowEnergyDiscovery);
+        !base::CommandLine::ForCurrentProcess()->HasSwitch(
+            proximity_auth::switches::kDisableBluetoothLowEnergyDiscovery);
     users.push_back(std::move(user));
   }
   return RespondNow(
@@ -1049,16 +1040,11 @@ EasyUnlockPrivateSetAutoPairingResultFunction::Run() {
 }
 
 EasyUnlockPrivateFindSetupConnectionFunction::
-    EasyUnlockPrivateFindSetupConnectionFunction()
-    : bluetooth_throttler_(new cryptauth::BluetoothThrottlerImpl(
-          base::MakeUnique<base::DefaultTickClock>())) {}
+    EasyUnlockPrivateFindSetupConnectionFunction() {}
 
 EasyUnlockPrivateFindSetupConnectionFunction::
     ~EasyUnlockPrivateFindSetupConnectionFunction() {
-  // |connection_finder_| has a raw pointer to |bluetooth_throttler_|, so it
-  // should be destroyed first.
   connection_finder_.reset();
-  bluetooth_throttler_.reset();
 }
 
 void EasyUnlockPrivateFindSetupConnectionFunction::
@@ -1089,10 +1075,8 @@ bool EasyUnlockPrivateFindSetupConnectionFunction::RunAsync() {
   // Creates a BLE connection finder to look for any device advertising
   // |params->setup_service_uuid|.
   connection_finder_.reset(
-      new proximity_auth::BluetoothLowEnergyConnectionFinder(
-          cryptauth::RemoteDevice(), params->setup_service_uuid,
-          proximity_auth::BluetoothLowEnergyConnectionFinder::FIND_ANY_DEVICE,
-          nullptr, bluetooth_throttler_.get(), 3));
+      new proximity_auth::BluetoothLowEnergySetupConnectionFinder(
+          params->setup_service_uuid));
 
   connection_finder_->Find(base::Bind(
       &EasyUnlockPrivateFindSetupConnectionFunction::OnConnectionFound, this));

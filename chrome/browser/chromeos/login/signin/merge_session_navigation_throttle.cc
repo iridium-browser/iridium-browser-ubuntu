@@ -45,7 +45,11 @@ MergeSessionNavigationThrottle::WillStartRequest() {
   return content::NavigationThrottle::DEFER;
 }
 
+const char* MergeSessionNavigationThrottle::GetNameForLogging() {
+  return "MergeSessionNavigationThrottle";
+}
+
 void MergeSessionNavigationThrottle::OnBlockingPageComplete() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  navigation_handle()->Resume();
+  Resume();
 }

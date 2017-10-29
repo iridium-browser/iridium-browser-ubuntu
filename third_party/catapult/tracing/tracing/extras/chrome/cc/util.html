@@ -5,18 +5,19 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<link rel="import" href="/tracing/base/quad.html">
-<link rel="import" href="/tracing/base/rect.html">
+<link rel="import" href="/tracing/base/math/quad.html">
+<link rel="import" href="/tracing/base/math/rect.html">
 <link rel="import" href="/tracing/model/object_instance.html">
 <script>
 
 'use strict';
 
 tr.exportTo('tr.e.cc', function() {
-  var convertedNameCache = {};
+  const convertedNameCache = {};
   function convertNameToJSConvention(name) {
-    if (name in convertedNameCache)
+    if (name in convertedNameCache) {
       return convertedNameCache[name];
+    }
 
     if (name[0] === '_' ||
         name[name.length - 1] === '_') {
@@ -24,60 +25,41 @@ tr.exportTo('tr.e.cc', function() {
       return name;
     }
 
-    var words = name.split('_');
+    const words = name.split('_');
     if (words.length === 1) {
       convertedNameCache[name] = words[0];
       return words[0];
     }
 
-    for (var i = 1; i < words.length; i++)
+    for (let i = 1; i < words.length; i++) {
       words[i] = words[i][0].toUpperCase() + words[i].substring(1);
+    }
 
     convertedNameCache[name] = words.join('');
     return convertedNameCache[name];
   }
 
-  function convertObjectFieldNamesToJSConventions(object) {
-    tr.b.iterObjectFieldsRecursively(
-        object,
-        function(object, fieldName, fieldValue) {
-          delete object[fieldName];
-          object[newFieldName] = fieldValue;
-          return newFieldName;
-        });
-  }
-
-  function convertQuadSuffixedTypesToQuads(object) {
-    tr.b.iterObjectFieldsRecursively(
-        object,
-        function(object, fieldName, fieldValue) {
-        });
-  }
-
-  function convertObject(object) {
-    convertObjectFieldNamesToJSConventions(object);
-    convertQuadSuffixedTypesToQuads(object);
-  }
-
   function moveRequiredFieldsFromArgsToToplevel(object, fields) {
-    for (var i = 0; i < fields.length; i++) {
-      var key = fields[i];
-      if (object.args[key] === undefined)
+    for (let i = 0; i < fields.length; i++) {
+      const key = fields[i];
+      if (object.args[key] === undefined) {
         throw Error('Expected field ' + key + ' not found in args');
-      if (object[key] !== undefined)
+      }
+      if (object[key] !== undefined) {
         throw Error('Field ' + key + ' already in object');
+      }
       object[key] = object.args[key];
       delete object.args[key];
     }
   }
 
   function moveOptionalFieldsFromArgsToToplevel(object, fields) {
-    for (var i = 0; i < fields.length; i++) {
-      var key = fields[i];
-      if (object.args[key] === undefined)
-        continue;
-      if (object[key] !== undefined)
+    for (let i = 0; i < fields.length; i++) {
+      const key = fields[i];
+      if (object.args[key] === undefined) continue;
+      if (object[key] !== undefined) {
         throw Error('Field ' + key + ' already in object');
+      }
       object[key] = object.args[key];
       delete object.args[key];
     }
@@ -88,48 +70,47 @@ tr.exportTo('tr.e.cc', function() {
   }
 
   function preInitializeObjectInner(object, hasRecursed) {
-    if (!(object instanceof Object))
-      return;
+    if (!(object instanceof Object)) return;
 
     if (object instanceof Array) {
-      for (var i = 0; i < object.length; i++)
+      for (let i = 0; i < object.length; i++) {
         preInitializeObjectInner(object[i], true);
+      }
       return;
     }
 
     if (hasRecursed &&
         (object instanceof tr.model.ObjectSnapshot ||
-         object instanceof tr.model.ObjectInstance))
+         object instanceof tr.model.ObjectInstance)) {
       return;
+    }
 
-    for (var key in object) {
-      var newKey = convertNameToJSConvention(key);
+    for (let key in object) {
+      const newKey = convertNameToJSConvention(key);
       if (newKey !== key) {
-        var value = object[key];
+        const value = object[key];
         delete object[key];
         object[newKey] = value;
         key = newKey;
       }
 
-      // Convert objects with keys ending with Quad to tr.b.Quad type.
-      if (/Quad$/.test(key) && !(object[key] instanceof tr.b.Quad)) {
-        var q;
+      // Convert objects with keys ending with Quad to tr.b.math.Quad type.
+      if (/Quad$/.test(key) && !(object[key] instanceof tr.b.math.Quad)) {
+        let q;
         try {
-          q = tr.b.Quad.from8Array(object[key]);
+          q = tr.b.math.Quad.from8Array(object[key]);
         } catch (e) {
-          console.log(e);
         }
         object[key] = q;
         continue;
       }
 
-      // Convert objects with keys ending with Rect to tr.b.Rect type.
-      if (/Rect$/.test(key) && !(object[key] instanceof tr.b.Rect)) {
-        var r;
+      // Convert objects with keys ending with Rect to tr.b.math.Rect type.
+      if (/Rect$/.test(key) && !(object[key] instanceof tr.b.math.Rect)) {
+        let r;
         try {
-          r = tr.b.Rect.fromArray(object[key]);
+          r = tr.b.math.Rect.fromArray(object[key]);
         } catch (e) {
-          console.log(e);
         }
         object[key] = r;
       }
@@ -139,10 +120,10 @@ tr.exportTo('tr.e.cc', function() {
   }
 
   return {
-    preInitializeObject: preInitializeObject,
-    convertNameToJSConvention: convertNameToJSConvention,
-    moveRequiredFieldsFromArgsToToplevel: moveRequiredFieldsFromArgsToToplevel,
-    moveOptionalFieldsFromArgsToToplevel: moveOptionalFieldsFromArgsToToplevel,
+    preInitializeObject,
+    convertNameToJSConvention,
+    moveRequiredFieldsFromArgsToToplevel,
+    moveOptionalFieldsFromArgsToToplevel,
   };
 });
 </script>

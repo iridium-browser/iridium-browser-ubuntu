@@ -13,15 +13,19 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
+#include "base/sequence_checker.h"
 #include "base/strings/string16.h"
-#include "base/threading/thread_checker.h"
 #include "content/browser/indexed_db/indexed_db_database_error.h"
 #include "content/browser/indexed_db/indexed_db_dispatcher_host.h"
 #include "content/common/indexed_db/indexed_db.mojom.h"
 #include "content/common/indexed_db/indexed_db_key.h"
 #include "content/common/indexed_db/indexed_db_key_path.h"
 #include "url/origin.h"
+
+namespace base {
+class SequencedTaskRunner;
+}
 
 namespace content {
 class IndexedDBConnection;
@@ -32,6 +36,7 @@ struct IndexedDBDatabaseMetadata;
 struct IndexedDBReturnValue;
 struct IndexedDBValue;
 
+// Expected to be constructed on IO thread and called/deleted from IDB sequence.
 class CONTENT_EXPORT IndexedDBCallbacks
     : public base::RefCounted<IndexedDBCallbacks> {
  public:
@@ -40,9 +45,10 @@ class CONTENT_EXPORT IndexedDBCallbacks
       IndexedDBValue* value);
 
   IndexedDBCallbacks(
-      scoped_refptr<IndexedDBDispatcherHost> dispatcher_host,
+      base::WeakPtr<IndexedDBDispatcherHost> dispatcher_host,
       const url::Origin& origin,
-      ::indexed_db::mojom::CallbacksAssociatedPtrInfo callbacks_info);
+      ::indexed_db::mojom::CallbacksAssociatedPtrInfo callbacks_info,
+      scoped_refptr<base::SequencedTaskRunner> idb_runner);
 
   virtual void OnError(const IndexedDBDatabaseError& error);
 
@@ -106,22 +112,23 @@ class CONTENT_EXPORT IndexedDBCallbacks
 
   class IOThreadHelper;
 
-  // Originally from IndexedDBCallbacks:
-  scoped_refptr<IndexedDBDispatcherHost> dispatcher_host_;
+  // Stores if this callbacks object is complete and should not be called again.
+  bool complete_ = false;
 
-  // IndexedDBDatabase callbacks ------------------------
-  url::Origin origin_;
-  bool database_sent_ = false;
+  // Depending on whether the database needs upgrading, we create connections in
+  // different spots. This stores if we've already created the connection so
+  // OnSuccess(Connection) doesn't create an extra one.
+  bool connection_created_ = false;
 
   // Used to assert that OnSuccess is only called if there was no data loss.
   blink::WebIDBDataLoss data_loss_;
 
   // The "blocked" event should be sent at most once per request.
-  bool sent_blocked_;
+  bool sent_blocked_ = false;
   base::TimeTicks connection_open_start_time_;
 
   std::unique_ptr<IOThreadHelper, BrowserThread::DeleteOnIOThread> io_helper_;
-  base::ThreadChecker thread_checker_;
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(IndexedDBCallbacks);
 };

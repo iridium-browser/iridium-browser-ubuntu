@@ -16,6 +16,7 @@ class Browser;
 class BrowserWindow;
 class DevToolsWindowTesting;
 class DevToolsEventForwarder;
+class DevToolsEyeDropper;
 
 namespace content {
 class DevToolsAgentHost;
@@ -97,14 +98,6 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   static void ToggleDevToolsWindow(
       Browser* browser,
       const DevToolsToggleAction& action);
-
-  // External frontend is always undocked.
-  static void OpenExternalFrontend(
-      Profile* profile,
-      const std::string& frontend_uri,
-      const scoped_refptr<content::DevToolsAgentHost>& agent_host,
-      bool is_worker,
-      bool is_v8_only);
 
   // Node frontend is always undocked.
   static void OpenNodeFrontendWindow(Profile* profile);
@@ -245,28 +238,38 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
     kClosing
   };
 
-  DevToolsWindow(Profile* profile,
+  enum FrontendType {
+    kFrontendDefault,
+    kFrontendRemote,
+    kFrontendWorker,
+    kFrontendV8,
+    kFrontendNode
+  };
+
+  DevToolsWindow(FrontendType frontend_type,
+                 Profile* profile,
                  content::WebContents* main_web_contents,
                  DevToolsUIBindings* bindings,
                  content::WebContents* inspected_web_contents,
                  bool can_dock);
 
+  // External frontend is always undocked.
+  static void OpenExternalFrontend(
+      Profile* profile,
+      const std::string& frontend_uri,
+      const scoped_refptr<content::DevToolsAgentHost>& agent_host,
+      FrontendType frontend_type);
+
   static DevToolsWindow* Create(Profile* profile,
-                                const GURL& frontend_url,
                                 content::WebContents* inspected_web_contents,
-                                bool shared_worker_frontend,
-                                bool v8_only_frontend,
-                                bool node_frontend,
-                                const std::string& remote_frontend,
+                                FrontendType frontend_type,
+                                const std::string& frontend_url,
                                 bool can_dock,
                                 const std::string& settings,
                                 const std::string& panel);
   static GURL GetDevToolsURL(Profile* profile,
-                             const GURL& base_url,
-                             bool shared_worker_frontend,
-                             bool v8_only_frontend,
-                             bool node_frontend,
-                             const std::string& remote_frontend,
+                             FrontendType frontend_type,
+                             const std::string& frontend_url,
                              bool can_dock,
                              const std::string& panel);
 
@@ -296,9 +299,9 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   void BeforeUnloadFired(content::WebContents* tab,
                          bool proceed,
                          bool* proceed_to_fire_unload) override;
-  bool PreHandleKeyboardEvent(content::WebContents* source,
-                              const content::NativeWebKeyboardEvent& event,
-                              bool* is_keyboard_shortcut) override;
+  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      content::WebContents* source,
+      const content::NativeWebKeyboardEvent& event) override;
   void HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) override;
@@ -325,6 +328,7 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   void SetIsDocked(bool is_docked) override;
   void OpenInNewTab(const std::string& url) override;
   void SetWhitelistedShortcuts(const std::string& message) override;
+  void SetEyeDropperActive(bool active) override;
   void OpenNodeFrontend() override;
   void InspectedContentsClosing() override;
   void OnLoadCompleted() override;
@@ -332,6 +336,7 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   InfoBarService* GetInfoBarService() override;
   void RenderProcessGone(bool crashed) override;
 
+  void ColorPickedInEyeDropper(int r, int g, int b, int a);
   void CreateDevToolsBrowser();
   BrowserWindow* GetInspectedBrowserWindow();
   void ScheduleShow(const DevToolsToggleAction& action);
@@ -343,6 +348,7 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
 
   std::unique_ptr<ObserverWithAccessor> inspected_contents_observer_;
 
+  FrontendType frontend_type_;
   Profile* profile_;
   content::WebContents* main_web_contents_;
   content::WebContents* toolbox_web_contents_;
@@ -364,6 +370,7 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
 
   base::TimeTicks inspect_element_start_time_;
   std::unique_ptr<DevToolsEventForwarder> event_forwarder_;
+  std::unique_ptr<DevToolsEyeDropper> eye_dropper_;
 
   friend class DevToolsEventForwarder;
   DISALLOW_COPY_AND_ASSIGN(DevToolsWindow);

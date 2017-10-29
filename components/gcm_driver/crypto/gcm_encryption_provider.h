@@ -14,6 +14,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "components/gcm_driver/crypto/gcm_message_cryptographer.h"
 
 namespace base {
 class FilePath;
@@ -22,6 +23,7 @@ class SequencedTaskRunner;
 
 namespace gcm {
 
+enum class GCMDecryptionResult;
 class GCMKeyStore;
 struct IncomingMessage;
 class KeyPair;
@@ -30,46 +32,16 @@ class KeyPair;
 // and decryption of incoming messages.
 class GCMEncryptionProvider {
  public:
-  // Result of decrypting an incoming message. The values of these reasons must
-  // not be changed, because they are being recorded using UMA.
-  enum DecryptionResult {
-    // The message had not been encrypted by the sender.
-    DECRYPTION_RESULT_UNENCRYPTED = 0,
-
-    // The message had been encrypted by the sender, and could successfully be
-    // decrypted for the registration it has been received for.
-    DECRYPTION_RESULT_DECRYPTED = 1,
-
-    // The contents of the Encryption HTTP header could not be parsed.
-    DECRYPTION_RESULT_INVALID_ENCRYPTION_HEADER = 2,
-
-    // The contents of the Crypto-Key HTTP header could not be parsed.
-    DECRYPTION_RESULT_INVALID_CRYPTO_KEY_HEADER = 3,
-
-    // No public/private key-pair was associated with the app_id.
-    DECRYPTION_RESULT_NO_KEYS = 4,
-
-    // The shared secret cannot be derived from the keying material.
-    DECRYPTION_RESULT_INVALID_SHARED_SECRET = 5,
-
-    // The payload could not be decrypted as AES-128-GCM.
-    DECRYPTION_RESULT_INVALID_PAYLOAD = 6,
-
-    DECRYPTION_RESULT_LAST = DECRYPTION_RESULT_INVALID_PAYLOAD
-  };
-
   // Callback to be invoked when the public key and auth secret are available.
-  using EncryptionInfoCallback = base::Callback<void(const std::string&,
-                                                     const std::string&)>;
+  using EncryptionInfoCallback =
+      base::Callback<void(const std::string& p256dh,
+                          const std::string& auth_secret)>;
 
   // Callback to be invoked when a message may have been decrypted, as indicated
   // by the |result|. The |message| contains the dispatchable message in success
   // cases, or will be initialized to an empty, default state for failure.
-  using MessageCallback = base::Callback<void(DecryptionResult result,
+  using MessageCallback = base::Callback<void(GCMDecryptionResult result,
                                               const IncomingMessage& message)>;
-
-  // Converts |result| to a string describing the details of said result.
-  static std::string ToDecryptionResultDetailsString(DecryptionResult result);
 
   GCMEncryptionProvider();
   ~GCMEncryptionProvider();
@@ -125,11 +97,14 @@ class GCMEncryptionProvider {
                                const KeyPair& pair,
                                const std::string& auth_secret);
 
-  void DecryptMessageWithKey(const IncomingMessage& message,
-                             const MessageCallback& callback,
+  void DecryptMessageWithKey(const std::string& collapse_key,
+                             const std::string& sender_id,
                              const std::string& salt,
-                             const std::string& dh,
-                             uint64_t rs,
+                             const std::string& public_key,
+                             uint32_t record_size,
+                             const std::string& ciphertext,
+                             GCMMessageCryptographer::Version version,
+                             const MessageCallback& callback,
                              const KeyPair& pair,
                              const std::string& auth_secret);
 

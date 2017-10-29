@@ -6,6 +6,7 @@
 
 from __future__ import print_function
 
+import json
 import mock
 import re
 import cPickle
@@ -191,6 +192,82 @@ class FindConfigsForBoardTest(cros_test_lib.TestCase):
       AtMostOneConfig(b, 'internal', internal)
 
 
+class UnifiedBuildConfigTestCase(object):
+  """Base test class that builds a fake config model based on unified builds"""
+
+  def setUp(self):
+    # Code assumes at least one non-unified build exists, so we're accommodating
+    # that by keeping the non-unified reef board.
+    self._fake_ge_build_config_json = '''
+{
+  "metadata_version": "1.0",
+  "release_branch": true,
+  "reference_board_unified_builds": [
+    {
+      "name": "reef-uni",
+      "reference_board_name": "reef-uni",
+      "builder": "RELEASE",
+      "experimental": true,
+      "arch": "X86_INTERNAL",
+      "models" : [
+        {
+          "name": "reef"
+        },
+        {
+          "name": "pyro"
+        }
+      ]
+    }
+  ],
+  "boards": [
+    {
+      "name": "reef",
+      "configs": [
+        {
+          "builder": "RELEASE",
+          "experimental": false,
+          "leader_board": true,
+          "board_group": "reef",
+          "arch": "X86_INTERNAL"
+        }
+      ]
+    }
+  ]
+}
+    '''
+    self._fake_ge_build_config = json.loads(self._fake_ge_build_config_json)
+
+    site_params = chromeos_config.SiteParameters()
+    defaults = chromeos_config.DefaultSettings(site_params)
+    self._site_config = config_lib.SiteConfig(defaults=defaults,
+                                              site_params=site_params)
+    self._ge_build_config = config_lib.LoadGEBuildConfigFromFile()
+    self._boards_dict = chromeos_config.GetBoardTypeToBoardsDict(
+        self._ge_build_config)
+
+    chromeos_config.GeneralTemplates(
+        self._site_config, self._fake_ge_build_config)
+    chromeos_config.ReleaseBuilders(
+        self._site_config, self._boards_dict, self._fake_ge_build_config)
+
+class UnifiedBuildReleaseBuilders(
+    cros_test_lib.OutputTestCase, UnifiedBuildConfigTestCase):
+  """Tests that verify how unified builder configs are generated"""
+
+  def setUp(self):
+    UnifiedBuildConfigTestCase.setUp(self)
+
+  def testUnifiedReleaseBuilders(self):
+    reef_uni_release = self._site_config['reef-uni-release']
+    self.assertIsNotNone(reef_uni_release)
+    models = reef_uni_release['models']
+    self.assertIn('reef', models)
+    self.assertIn('pyro', models)
+
+    master_release = self._site_config['master-release']
+    self.assertIn('reef-uni-release', master_release['slave_configs'])
+
+
 class ConfigPickleTest(ChromeosConfigTestBase):
   """Test that a config object is pickleable."""
 
@@ -250,6 +327,33 @@ class CBuildBotTest(ChromeosConfigTestBase):
     """Configs must have names set."""
     for build_name, config in self.site_config.iteritems():
       self.assertTrue(build_name == config['name'])
+
+  def testMasterSlaveConfigsExist(self):
+    """Configs listing slave configs, must list valid configs."""
+    for config in self.site_config.itervalues():
+      if config.master:
+        # Any builder with slaves must set both of these.
+        self.assertTrue(config.master)
+        self.assertTrue(config.manifest_version)
+        self.assertIsNotNone(config.slave_configs)
+
+        # If a builder lists slave config names, ensure they are all valid, and
+        # have an assigned waterfall.
+        for slave_name in config.slave_configs:
+          self.assertIn(slave_name, self.site_config)
+          self.assertTrue(self.site_config[slave_name].active_waterfall)
+          self.assertNotEqual(self.site_config[slave_name].active_waterfall,
+                              constants.WATERFALL_TRYBOT)
+      else:
+        self.assertIsNone(config.slave_configs)
+
+  def testMasterSlaveConfigsSorted(self):
+    """Configs listing slave configs, must list valid configs."""
+    for config in self.site_config.itervalues():
+      if config.slave_configs is not None:
+        expected = sorted(config.slave_configs)
+
+        self.assertEqual(config.slave_configs, expected)
 
   def testConfigUseflags(self):
     """Useflags must be lists.
@@ -344,6 +448,16 @@ class CBuildBotTest(ChromeosConfigTestBase):
             vm_test.test_type in constants.VALID_VM_TEST_TYPES,
             'Config %s: has unexpected vm test type value.' % build_name)
 
+  def testValidGCETestType(self):
+    """Verify gce_tests has an expected value"""
+    for build_name, config in self.site_config.iteritems():
+      if config['gce_tests'] is None:
+        continue
+      for gce_test in config['gce_tests']:
+        self.assertTrue(
+            gce_test.test_type in constants.VALID_GCE_TEST_TYPES,
+            'Config %s: has unexpected gce test type value.' % build_name)
+
   def testImageTestMustHaveBaseImage(self):
     """Verify image_test build is only enabled with 'base' in images."""
     for build_name, config in self.site_config.iteritems():
@@ -352,6 +466,14 @@ class CBuildBotTest(ChromeosConfigTestBase):
             'base' in config['images'],
             'Build %s runs image_test but does not have base image' %
             build_name)
+
+  def testDisableHWQualWithoutTestImage(self):
+    """Don't run steps that need a test image, without a test image."""
+    for build_name, config in self.site_config.iteritems():
+      if config.hwqual and config.upload_hw_test_artifacts:
+        self.assertIn('test', config.images,
+                      'Build %s must create a test image '
+                      'to enable hwqual' % build_name)
 
   def testBuildType(self):
     """Verifies that all configs use valid build types."""
@@ -475,44 +597,52 @@ class CBuildBotTest(ChromeosConfigTestBase):
                         'type for a master build. Please consult with '
                         'chrome-infra before adding this config.' %
                         (config.name, config.build_type))
-        self.assertFalse(config.build_type in found_types,
-                         'Duplicate master configs of build type %s' %
-                         config.build_type)
+        # We have multiple masters for Android PFQ.
+        self.assertTrue(config.build_type not in found_types or
+                        config.build_type in ('pfq', 'android'),
+                        'Duplicate master configs of build type %s' %
+                        config.build_type)
         found_types.add(config.build_type)
 
-  def testActivePfqsHavePaladins(self):
+  def _getSlaveConfigsForMaster(self, master_config_name):
+    """Helper to fetch the configs for all slaves of a given master."""
+    master_config = self.site_config[master_config_name]
+
+    # Get a list of all active Paladins.
+    return [self.site_config[n] for n in master_config.slave_configs]
+
+  def testPreCQHasVMTests(self):
+    """Make sure that at least one pre-cq builder enables VM tests."""
+    pre_cq_configs = constants.PRE_CQ_DEFAULT_CONFIGS
+    have_vm_tests = any([self.site_config[name].vm_tests
+                         for name in pre_cq_configs])
+    self.assertTrue(have_vm_tests, 'No Pre-CQ builder has VM tests enabled')
+
+  def testPfqsHavePaladins(self):
     """Make sure that every active PFQ has an associated Paladin.
 
     This checks that every configured active PFQ on the external or internal
     main waterfall has an associated active Paladin config.
     """
-    # Get a list of all active Paladins.
-    active_paladin_boards = set()
-    for config in self.site_config.itervalues():
-      if config.active_waterfall and config_lib.IsCQType(config.build_type):
-        active_paladin_boards.update(config.boards)
+    # Get a list of all active Paladins boards.
+    paladin_boards = set()
+    for slave_config in self._getSlaveConfigsForMaster('master-paladin'):
+      paladin_boards.update(slave_config.boards)
 
-    # Scan for active PFQs.
-    check_waterfalls = set((constants.WATERFALL_INTERNAL,
-                            constants.WATERFALL_EXTERNAL))
-    failures = set()
-    for config in self.site_config.itervalues():
-      if not (config.active_waterfall in check_waterfalls and
-              config.build_type == constants.CHROME_PFQ_TYPE):
-        continue
+    for pfq_master in (constants.PFQ_MASTER,
+                       constants.MNC_ANDROID_PFQ_MASTER,
+                       constants.NYC_ANDROID_PFQ_MASTER):
+      pfq_configs = self._getSlaveConfigsForMaster(pfq_master)
 
-      for board in config.boards:
-        if board not in active_paladin_boards:
+      failures = set()
+      for config in pfq_configs:
+        self.assertEqual(len(config.boards), 1)
+        if config.boards[0] not in paladin_boards:
           failures.add(config.name)
 
-    # TODO(dgarrett): Once crbug.com/679022 is resolved, remove this exception.
-    failures.remove('veyron_jerry-chromium-pfq')
-
-    self.assertSetEqual(
-        failures,
-        set(),
-        "Some active PFQ configs don't have active Paladins: %s" % (
-            ', '.join(sorted(failures)),))
+      if failures:
+        self.fail("Some active PFQ configs don't have active Paladins: %s" % (
+            ', '.join(sorted(failures))))
 
   def testGetSlavesOnTrybot(self):
     """Make sure every master has a sane list of slaves"""
@@ -920,6 +1050,8 @@ class CBuildBotTest(ChromeosConfigTestBase):
     for build_name, config in self.site_config.iteritems():
       if config.build_type == constants.PFQ_TYPE:
         expected = 20 * 60
+      elif config.build_type == constants.CHROME_PFQ_TYPE:
+        expected = 6 * 60 *  60
       elif config.build_type == constants.CANARY_TYPE:
         if self.isReleaseBranch():
           expected = 12 * 60 * 60

@@ -4,8 +4,12 @@
 
 #import "components/reading_list/ios/reading_list_model_bridge_observer.h"
 
-#include "components/reading_list/ios/reading_list_entry.h"
-#include "components/reading_list/ios/reading_list_model.h"
+#include "components/reading_list/core/reading_list_entry.h"
+#include "components/reading_list/core/reading_list_model.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 ReadingListModelBridge::ReadingListModelBridge(
     id<ReadingListModelBridgeObserver> observer,
@@ -24,6 +28,14 @@ ReadingListModelBridge::~ReadingListModelBridge() {
 void ReadingListModelBridge::ReadingListModelLoaded(
     const ReadingListModel* model) {
   [observer_ readingListModelLoaded:model];
+}
+
+void ReadingListModelBridge::ReadingListModelBeingShutdown(
+    const ReadingListModel* model) {
+  if ([observer_
+          respondsToSelector:@selector(readingListModelBeingShutdown:)]) {
+    [observer_ readingListModelBeingShutdown:model];
+  }
 }
 
 void ReadingListModelBridge::ReadingListModelBeingDeleted(

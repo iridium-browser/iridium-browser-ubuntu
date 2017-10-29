@@ -54,6 +54,7 @@ class URL_EXPORT GURL {
   // Copy construction is relatively inexpensive, with most of the time going
   // to reallocating the string. It does not re-parse.
   GURL(const GURL& other);
+  GURL(GURL&& other) noexcept;
 
   // The strings to this contructor should be UTF-8 / UTF-16.
   explicit GURL(base::StringPiece url_string);
@@ -76,7 +77,8 @@ class URL_EXPORT GURL {
 
   ~GURL();
 
-  GURL& operator=(GURL other);
+  GURL& operator=(const GURL& other);
+  GURL& operator=(GURL&& other);
 
   // Returns true when this object represents a valid parsed URL. When not
   // valid, other functions will still succeed, but you will not get canonical
@@ -377,6 +379,9 @@ class URL_EXPORT GURL {
   // Returns the host, excluding the square brackets surrounding IPv6 address
   // literals. This can be useful for passing to getaddrinfo().
   std::string HostNoBrackets() const;
+
+  // Returns the same characters as HostNoBrackets(), avoiding a copy.
+  base::StringPiece HostNoBracketsPiece() const;
 
   // Returns true if this URL's host matches or is in the same domain as
   // the given input string. For example, if the hostname of the URL is

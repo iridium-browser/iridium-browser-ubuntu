@@ -85,6 +85,8 @@
 // <include src="../../common/js/progress_center_common.js">
 // <include src="../../common/js/importer_common.js">
 //
+// <include src="constants.js">
+// <include src="web_store_utils.js">
 // <include src="ui/combobutton.js">
 // <include src="ui/commandbutton.js">
 // <include src="ui/file_manager_dialog_base.js">
@@ -92,10 +94,14 @@
 // <include src="metadata/metadata_provider.js">
 // <include src="metadata/metadata_request.js">
 //
-// <include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/app_installer.js">
-// <include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_webview_client.js">
-// <include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_widget_container.js">
-// <include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_widget_container_error_dialog.js">
+// <include
+// src="../../../../../components/chrome_apps/webstore_widget/cws_widget/app_installer.js">
+// <include
+// src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_webview_client.js">
+// <include
+// src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_widget_container.js">
+// <include
+// src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_widget_container_error_dialog.js">
 //
 // <include src="actions_controller.js">
 // <include src="actions_model.js">
@@ -132,15 +138,18 @@
 // <include src="metadata_update_controller.js">
 // <include src="naming_controller.js">
 // <include src="navigation_list_model.js">
+// <include src="navigation_uma.js">
 // <include src="progress_center_item_group.js">
 // <include src="quick_view_controller.js">
 // <include src="quick_view_model.js">
 // <include src="quick_view_uma.js">
 // <include src="scan_controller.js">
 // <include src="search_controller.js">
+// <include src="selection_menu_controller.js">
 // <include src="share_client.js">
 // <include src="spinner_controller.js">
 // <include src="task_controller.js">
+// <include src="task_history.js">
 // <include src="toolbar_controller.js">
 // <include src="thumbnail_loader.js">
 // <include src="list_thumbnail_loader.js">
@@ -159,6 +168,7 @@
 // <include src="ui/file_list_selection_model.js">
 // <include src="ui/file_table.js">
 // <include src="ui/file_table_list.js">
+// <include src="ui/file_tap_handler.js">
 // <include src="ui/files_alert_dialog.js">
 // <include src="ui/files_confirm_dialog.js">
 // <include src="ui/files_menu.js">
@@ -168,12 +178,12 @@
 // <include src="ui/multi_profile_share_dialog.js">
 // <include src="ui/progress_center_panel.js">
 // <include src="ui/providers_menu.js">
-// <include src="ui/scrollbar.js">
 // <include src="ui/search_box.js">
 // <include src="ui/share_dialog.js">
 // <include src="ui/suggest_apps_dialog.js">
 // <include src="main_window_component.js">
 // <include src="volume_manager_wrapper.js">
+// <include src="webui_command_extender.js">
 
 // // For accurate load performance tracking place main.js should be
 // // the last include to include.

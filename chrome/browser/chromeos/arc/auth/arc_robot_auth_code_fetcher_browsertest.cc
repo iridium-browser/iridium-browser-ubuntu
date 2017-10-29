@@ -11,8 +11,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/arc/arc_auth_service.h"
 #include "chrome/browser/chromeos/arc/arc_session_manager.h"
+#include "chrome/browser/chromeos/arc/auth/arc_auth_service.h"
 #include "chrome/browser/chromeos/arc/auth/arc_robot_auth_code_fetcher.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
@@ -73,7 +73,6 @@ class ArcRobotAuthCodeFetcherBrowserTest : public InProcessBrowserTest {
   ~ArcRobotAuthCodeFetcherBrowserTest() override = default;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(policy::switches::kDeviceManagementUrl,
                                     "http://localhost");
     arc::SetArcAvailableCommandLineForTesting(command_line);
@@ -124,15 +123,18 @@ class ArcRobotAuthCodeFetcherBrowserTest : public InProcessBrowserTest {
   policy::TestRequestInterceptor* interceptor() { return interceptor_.get(); }
 
   static void FetchAuthCode(ArcRobotAuthCodeFetcher* fetcher,
+                            bool* output_fetch_success,
                             std::string* output_auth_code) {
     base::RunLoop run_loop;
     fetcher->Fetch(base::Bind(
-        [](std::string* output_auth_code, base::RunLoop* run_loop,
+        [](bool* output_fetch_success, std::string* output_auth_code,
+           base::RunLoop* run_loop, bool fetch_success,
            const std::string& auth_code) {
+          *output_fetch_success = fetch_success;
           *output_auth_code = auth_code;
           run_loop->Quit();
         },
-        output_auth_code, &run_loop));
+        output_fetch_success, output_auth_code, &run_loop));
     // Because the Fetch() operation needs to interact with other threads,
     // RunUntilIdle() won't work here. Instead, use Run() and Quit() explicitly
     // in the callback.
@@ -151,8 +153,12 @@ IN_PROC_BROWSER_TEST_F(ArcRobotAuthCodeFetcherBrowserTest,
   interceptor()->PushJobCallback(base::Bind(&ResponseJob));
 
   std::string auth_code;
+  bool fetch_success = false;
+
   auto robot_fetcher = base::MakeUnique<ArcRobotAuthCodeFetcher>();
-  FetchAuthCode(robot_fetcher.get(), &auth_code);
+  FetchAuthCode(robot_fetcher.get(), &fetch_success, &auth_code);
+
+  EXPECT_TRUE(fetch_success);
   EXPECT_EQ(kFakeAuthCode, auth_code);
 }
 
@@ -164,9 +170,12 @@ IN_PROC_BROWSER_TEST_F(ArcRobotAuthCodeFetcherBrowserTest,
   // We expect auth_code is empty in this case. So initialize with non-empty
   // value.
   std::string auth_code = "NOT-YET-FETCHED";
-  auto robot_fetcher = base::MakeUnique<ArcRobotAuthCodeFetcher>();
-  FetchAuthCode(robot_fetcher.get(), &auth_code);
+  bool fetch_success = true;
 
+  auto robot_fetcher = base::MakeUnique<ArcRobotAuthCodeFetcher>();
+  FetchAuthCode(robot_fetcher.get(), &fetch_success, &auth_code);
+
+  EXPECT_FALSE(fetch_success);
   // Use EXPECT_EQ for better logging in case of failure.
   EXPECT_EQ(std::string(), auth_code);
 }

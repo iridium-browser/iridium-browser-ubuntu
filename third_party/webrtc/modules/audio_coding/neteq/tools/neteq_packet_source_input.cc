@@ -13,9 +13,9 @@
 #include <algorithm>
 #include <limits>
 
-#include "webrtc/base/checks.h"
 #include "webrtc/modules/audio_coding/neteq/tools/rtc_event_log_source.h"
 #include "webrtc/modules/audio_coding/neteq/tools/rtp_file_source.h"
+#include "webrtc/rtc_base/checks.h"
 
 namespace webrtc {
 namespace test {
@@ -42,7 +42,7 @@ std::unique_ptr<NetEqInput::PacketData> NetEqPacketSourceInput::PopPacket() {
     return std::unique_ptr<PacketData>();
   }
   std::unique_ptr<PacketData> packet_data(new PacketData);
-  packet_->ConvertHeader(&packet_data->header);
+  packet_data->header = packet_->header();
   if (packet_->payload_length_bytes() == 0 &&
       packet_->virtual_payload_length_bytes() > 0) {
     // This is a header-only "dummy" packet. Set the payload to all zeros, with

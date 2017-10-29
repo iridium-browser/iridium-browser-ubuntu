@@ -11,6 +11,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "headless/public/headless_export.h"
 #include "net/base/net_errors.h"
 #include "url/gurl.h"
 
@@ -22,13 +23,13 @@ class HttpResponseHeaders;
 namespace headless {
 
 // An interface for fetching URLs. Note these are only intended to be used once.
-class URLFetcher {
+class HEADLESS_EXPORT URLFetcher {
  public:
   URLFetcher() {}
   virtual ~URLFetcher() {}
 
   // Interface for reporting the fetch result.
-  class ResultListener {
+  class HEADLESS_EXPORT ResultListener {
    public:
     ResultListener() {}
 
@@ -40,7 +41,6 @@ class URLFetcher {
     // valid until the fetcher is destroyed,
     virtual void OnFetchComplete(
         const GURL& final_url,
-        int http_response_code,
         scoped_refptr<net::HttpResponseHeaders> response_headers,
         const char* body,
         size_t body_size) = 0;
@@ -48,7 +48,6 @@ class URLFetcher {
     // Helper function which extracts the headers from |response_data| and calls
     // OnFetchComplete.
     void OnFetchCompleteExtractHeaders(const GURL& final_url,
-                                       int http_response_code,
                                        const char* response_data,
                                        size_t response_data_size);
 
@@ -59,9 +58,9 @@ class URLFetcher {
     DISALLOW_COPY_AND_ASSIGN(ResultListener);
   };
 
-  // Instructs the sub-class to fetch the resource.
-  virtual void StartFetch(const GURL& rewritten_url,
+  virtual void StartFetch(const GURL& url,
                           const std::string& method,
+                          const std::string& post_data,
                           const net::HttpRequestHeaders& request_headers,
                           ResultListener* result_listener) = 0;
 

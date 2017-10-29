@@ -7,12 +7,13 @@
 #include "base/memory/ptr_util.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "cc/test/ordered_simple_task_runner.h"
-#include "public/platform/scheduler/base/task_queue.h"
 #include "platform/scheduler/base/lazy_now.h"
+#include "platform/scheduler/base/task_queue.h"
 #include "platform/scheduler/base/test_time_source.h"
 #include "platform/scheduler/child/idle_helper.h"
 #include "platform/scheduler/child/scheduler_helper.h"
 #include "platform/scheduler/child/scheduler_tqm_delegate_for_test.h"
+#include "platform/scheduler/renderer/main_thread_scheduler_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
@@ -27,7 +28,7 @@ class TestClass {
   base::WeakPtrFactory<TestClass> weak_factory_;
 };
 
-class IdleCanceledDelayedTaskSweeperTest : public testing::Test,
+class IdleCanceledDelayedTaskSweeperTest : public ::testing::Test,
                                            public IdleHelper::Delegate {
  public:
   IdleCanceledDelayedTaskSweeperTest()
@@ -36,23 +37,19 @@ class IdleCanceledDelayedTaskSweeperTest : public testing::Test,
         delegate_(SchedulerTqmDelegateForTest::Create(
             mock_task_runner_,
             base::WrapUnique(new TestTimeSource(clock_.get())))),
-        scheduler_helper_(new SchedulerHelper(
-            delegate_,
-            "test.scheduler",
-            TRACE_DISABLED_BY_DEFAULT("test.scheduler"),
-            TRACE_DISABLED_BY_DEFAULT("test.scheduler.dbg"))),
+        scheduler_helper_(new MainThreadSchedulerHelper(delegate_, nullptr)),
         idle_helper_(
             new IdleHelper(scheduler_helper_.get(),
                            this,
-                           "test.scheduler",
-                           TRACE_DISABLED_BY_DEFAULT("test.scheduler"),
-                           TRACE_DISABLED_BY_DEFAULT("test.scheduler.dbg"),
-                           base::TimeDelta::FromSeconds(30))),
+                           "test",
+                           base::TimeDelta::FromSeconds(30),
+                           scheduler_helper_->NewTaskQueue(
+                               MainThreadTaskQueue::QueueCreationParams(
+                                   MainThreadTaskQueue::QueueType::TEST)))),
         idle_canceled_delayed_taks_sweeper_(
-            new IdleCanceledDelayedTaskSweeper("test",
-                                               scheduler_helper_.get(),
+            new IdleCanceledDelayedTaskSweeper(scheduler_helper_.get(),
                                                idle_helper_->IdleTaskRunner())),
-        default_task_runner_(scheduler_helper_->DefaultTaskRunner()) {
+        default_task_queue_(scheduler_helper_->DefaultMainThreadTaskQueue()) {
     clock_->Advance(base::TimeDelta::FromMicroseconds(5000));
   }
 
@@ -74,17 +71,18 @@ class IdleCanceledDelayedTaskSweeperTest : public testing::Test,
   void IsNotQuiescent() override {}
   void OnIdlePeriodStarted() override {}
   void OnIdlePeriodEnded() override {}
+  void OnPendingTasksChanged(bool has_tasks) {}
 
  protected:
   std::unique_ptr<base::SimpleTestTickClock> clock_;
   scoped_refptr<cc::OrderedSimpleTaskRunner> mock_task_runner_;
 
   scoped_refptr<SchedulerTqmDelegateForTest> delegate_;
-  std::unique_ptr<SchedulerHelper> scheduler_helper_;
+  std::unique_ptr<MainThreadSchedulerHelper> scheduler_helper_;
   std::unique_ptr<IdleHelper> idle_helper_;
   std::unique_ptr<IdleCanceledDelayedTaskSweeper>
       idle_canceled_delayed_taks_sweeper_;
-  scoped_refptr<TaskQueue> default_task_runner_;
+  scoped_refptr<TaskQueue> default_task_queue_;
 
   DISALLOW_COPY_AND_ASSIGN(IdleCanceledDelayedTaskSweeperTest);
 };
@@ -94,28 +92,28 @@ TEST_F(IdleCanceledDelayedTaskSweeperTest, TestSweep) {
   TestClass class2;
 
   // Post one task we won't cancel.
-  default_task_runner_->PostDelayedTask(
+  default_task_queue_->PostDelayedTask(
       FROM_HERE,
       base::Bind(&TestClass::NopTask, class1.weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(100));
 
   // And a bunch we will.
-  default_task_runner_->PostDelayedTask(
+  default_task_queue_->PostDelayedTask(
       FROM_HERE,
       base::Bind(&TestClass::NopTask, class2.weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(101));
 
-  default_task_runner_->PostDelayedTask(
+  default_task_queue_->PostDelayedTask(
       FROM_HERE,
       base::Bind(&TestClass::NopTask, class2.weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(102));
 
-  default_task_runner_->PostDelayedTask(
+  default_task_queue_->PostDelayedTask(
       FROM_HERE,
       base::Bind(&TestClass::NopTask, class2.weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(103));
 
-  default_task_runner_->PostDelayedTask(
+  default_task_queue_->PostDelayedTask(
       FROM_HERE,
       base::Bind(&TestClass::NopTask, class2.weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(104));
@@ -130,7 +128,7 @@ TEST_F(IdleCanceledDelayedTaskSweeperTest, TestSweep) {
   idle_helper_->EnableLongIdlePeriod();
   mock_task_runner_->RunForPeriod(base::TimeDelta::FromSeconds(40));
 
-  EXPECT_EQ(1u, default_task_runner_->GetNumberOfPendingTasks());
+  EXPECT_EQ(1u, default_task_queue_->GetNumberOfPendingTasks());
 }
 
 }  // namespace scheduler

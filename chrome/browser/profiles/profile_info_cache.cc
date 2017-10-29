@@ -63,10 +63,12 @@ const char kSupervisedUserId[] = "managed_user_id";
 const char kProfileIsEphemeral[] = "is_ephemeral";
 const char kActiveTimeKey[] = "active_time";
 const char kIsAuthErrorKey[] = "is_auth_error";
-const char kStatsBrowsingHistoryKey[] = "stats_browsing_history";
-const char kStatsPasswordsKey[] = "stats_passwords";
-const char kStatsBookmarksKey[] = "stats_bookmarks";
-const char kStatsSettingsKey[] = "stats_settings";
+
+// TODO(dullweber): Remove these constants after the stored data is removed.
+const char kStatsBrowsingHistoryKeyDeprecated[] = "stats_browsing_history";
+const char kStatsPasswordsKeyDeprecated[] = "stats_passwords";
+const char kStatsBookmarksKeyDeprecated[] = "stats_bookmarks";
+const char kStatsSettingsKeyDeprecated[] = "stats_settings";
 
 typedef std::vector<unsigned char> ImageData;
 
@@ -171,6 +173,8 @@ ProfileInfoCache::ProfileInfoCache(PrefService* prefs,
   // profile names.
   if (!disable_avatar_download_for_testing_)
     MigrateLegacyProfileNamesAndDownloadAvatars();
+
+  RemoveDeprecatedStatistics();
 }
 
 ProfileInfoCache::~ProfileInfoCache() {
@@ -201,7 +205,7 @@ void ProfileInfoCache::AddProfileToCache(
   info->SetBoolean(kIsUsingDefaultNameKey, IsDefaultProfileName(name));
   // Assume newly created profiles use a default avatar.
   info->SetBoolean(kIsUsingDefaultAvatarKey, true);
-  cache->SetWithoutPathExpansion(key, info.release());
+  cache->SetWithoutPathExpansion(key, std::move(info));
 
   sorted_keys_.insert(FindPositionForProfile(key, name), key);
   profile_attributes_entries_[user_data_dir_.AppendASCII(key).value()] =
@@ -478,55 +482,6 @@ size_t ProfileInfoCache::GetAvatarIconIndexOfProfileAtIndex(size_t index)
   return icon_index;
 }
 
-bool ProfileInfoCache::HasStatsBrowsingHistoryOfProfileAtIndex(size_t index)
-    const {
-  int value = 0;
-  return GetInfoForProfileAtIndex(index)->GetInteger(kStatsBrowsingHistoryKey,
-                                                     &value);
-}
-
-int ProfileInfoCache::GetStatsBrowsingHistoryOfProfileAtIndex(size_t index)
-    const {
-  int value = 0;
-  GetInfoForProfileAtIndex(index)->GetInteger(kStatsBrowsingHistoryKey, &value);
-  return value;
-}
-
-bool ProfileInfoCache::HasStatsPasswordsOfProfileAtIndex(size_t index) const {
-  int value = 0;
-  return GetInfoForProfileAtIndex(index)->GetInteger(kStatsPasswordsKey,
-                                                     &value);
-}
-
-int ProfileInfoCache::GetStatsPasswordsOfProfileAtIndex(size_t index) const {
-  int value = 0;
-  GetInfoForProfileAtIndex(index)->GetInteger(kStatsPasswordsKey, &value);
-  return value;
-}
-
-bool ProfileInfoCache::HasStatsBookmarksOfProfileAtIndex(size_t index) const {
-  int value = 0;
-  return GetInfoForProfileAtIndex(index)->GetInteger(kStatsBookmarksKey,
-                                                     &value);
-}
-
-int ProfileInfoCache::GetStatsBookmarksOfProfileAtIndex(size_t index) const {
-  int value = 0;
-  GetInfoForProfileAtIndex(index)->GetInteger(kStatsBookmarksKey, &value);
-  return value;
-}
-
-bool ProfileInfoCache::HasStatsSettingsOfProfileAtIndex(size_t index) const {
-  int value = 0;
-  return GetInfoForProfileAtIndex(index)->GetInteger(kStatsSettingsKey, &value);
-}
-
-int ProfileInfoCache::GetStatsSettingsOfProfileAtIndex(size_t index) const {
-  int value = 0;
-  GetInfoForProfileAtIndex(index)->GetInteger(kStatsSettingsKey, &value);
-  return value;
-}
-
 void ProfileInfoCache::SetProfileActiveTimeAtIndex(size_t index) {
   if (base::Time::Now() - GetProfileActiveTimeAtIndex(index) <
       base::TimeDelta::FromHours(1)) {
@@ -536,8 +491,7 @@ void ProfileInfoCache::SetProfileActiveTimeAtIndex(size_t index) {
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetDouble(kActiveTimeKey, base::Time::Now().ToDoubleT());
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 }
 
 void ProfileInfoCache::SetNameOfProfileAtIndex(size_t index,
@@ -552,8 +506,7 @@ void ProfileInfoCache::SetNameOfProfileAtIndex(size_t index,
   base::string16 old_display_name = GetNameOfProfileAtIndex(index);
   info->SetString(kNameKey, name);
 
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 
   base::string16 new_display_name = GetNameOfProfileAtIndex(index);
   base::FilePath profile_path = GetPathOfProfileAtIndex(index);
@@ -573,8 +526,7 @@ void ProfileInfoCache::SetShortcutNameOfProfileAtIndex(
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetString(kShortcutNameKey, shortcut_name);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 }
 
 void ProfileInfoCache::SetAuthInfoOfProfileAtIndex(
@@ -593,8 +545,7 @@ void ProfileInfoCache::SetAuthInfoOfProfileAtIndex(
   info->SetString(kGAIAIdKey, gaia_id);
   info->SetString(kUserNameKey, user_name);
 
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 
   base::FilePath profile_path = GetPathOfProfileAtIndex(index);
   for (auto& observer : observer_list_)
@@ -612,8 +563,7 @@ void ProfileInfoCache::SetAvatarIconOfProfileAtIndex(size_t index,
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetString(kAvatarIconKey,
       profiles::GetDefaultAvatarIconUrl(icon_index));
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 
   base::FilePath profile_path = GetPathOfProfileAtIndex(index);
 
@@ -631,8 +581,7 @@ void ProfileInfoCache::SetIsOmittedProfileAtIndex(size_t index,
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetBoolean(kIsOmittedFromProfileListKey, is_omitted);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 
   base::FilePath profile_path = GetPathOfProfileAtIndex(index);
   for (auto& observer : observer_list_)
@@ -647,8 +596,7 @@ void ProfileInfoCache::SetSupervisedUserIdOfProfileAtIndex(
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetString(kSupervisedUserId, id);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 
   base::FilePath profile_path = GetPathOfProfileAtIndex(index);
   for (auto& observer : observer_list_)
@@ -661,8 +609,7 @@ void ProfileInfoCache::SetLocalAuthCredentialsOfProfileAtIndex(
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetString(kAuthCredentialsKey, credentials);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 }
 
 void ProfileInfoCache::SetPasswordChangeDetectionTokenAtIndex(
@@ -671,8 +618,7 @@ void ProfileInfoCache::SetPasswordChangeDetectionTokenAtIndex(
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetString(kPasswordTokenKey, token);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 }
 
 void ProfileInfoCache::SetBackgroundStatusOfProfileAtIndex(
@@ -683,8 +629,7 @@ void ProfileInfoCache::SetBackgroundStatusOfProfileAtIndex(
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetBoolean(kBackgroundAppsKey, running_background_apps);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 }
 
 void ProfileInfoCache::SetGAIANameOfProfileAtIndex(size_t index,
@@ -696,8 +641,7 @@ void ProfileInfoCache::SetGAIANameOfProfileAtIndex(size_t index,
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetString(kGAIANameKey, name);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
   base::string16 new_display_name = GetNameOfProfileAtIndex(index);
   base::FilePath profile_path = GetPathOfProfileAtIndex(index);
   UpdateSortForProfileIndex(index);
@@ -718,8 +662,7 @@ void ProfileInfoCache::SetGAIAGivenNameOfProfileAtIndex(
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetString(kGAIAGivenNameKey, name);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
   base::string16 new_display_name = GetNameOfProfileAtIndex(index);
   base::FilePath profile_path = GetPathOfProfileAtIndex(index);
   UpdateSortForProfileIndex(index);
@@ -748,7 +691,7 @@ void ProfileInfoCache::SetGAIAPictureOfProfileAtIndex(size_t index,
     if (!old_file_name.empty()) {
       base::FilePath image_path = path.AppendASCII(old_file_name);
       BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                              base::Bind(&DeleteBitmap, image_path));
+                              base::BindOnce(&DeleteBitmap, image_path));
     }
   } else {
     // Save the new bitmap to disk.
@@ -762,8 +705,7 @@ void ProfileInfoCache::SetGAIAPictureOfProfileAtIndex(size_t index,
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetString(kGAIAPictureFileNameKey, new_file_name);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 
   for (auto& observer : observer_list_)
     observer.OnProfileAvatarChanged(path);
@@ -774,8 +716,7 @@ void ProfileInfoCache::SetIsUsingGAIAPictureOfProfileAtIndex(size_t index,
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetBoolean(kUseGAIAPictureKey, value);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 
   base::FilePath profile_path = GetPathOfProfileAtIndex(index);
   for (auto& observer : observer_list_)
@@ -790,12 +731,8 @@ void ProfileInfoCache::SetProfileSigninRequiredAtIndex(size_t index,
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetBoolean(kSigninRequiredKey, value);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
-
-  base::FilePath profile_path = GetPathOfProfileAtIndex(index);
-  for (auto& observer : observer_list_)
-    observer.OnProfileSigninRequiredChanged(profile_path);
+  SetInfoForProfileAtIndex(index, std::move(info));
+  NotifyIsSigninRequiredChanged(GetPathOfProfileAtIndex(index));
 }
 
 void ProfileInfoCache::SetProfileIsEphemeralAtIndex(size_t index, bool value) {
@@ -805,8 +742,7 @@ void ProfileInfoCache::SetProfileIsEphemeralAtIndex(size_t index, bool value) {
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetBoolean(kProfileIsEphemeral, value);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 }
 
 void ProfileInfoCache::SetProfileIsUsingDefaultNameAtIndex(
@@ -819,8 +755,7 @@ void ProfileInfoCache::SetProfileIsUsingDefaultNameAtIndex(
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetBoolean(kIsUsingDefaultNameKey, value);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 
   base::string16 new_display_name = GetNameOfProfileAtIndex(index);
   const base::FilePath profile_path = GetPathOfProfileAtIndex(index);
@@ -839,8 +774,7 @@ void ProfileInfoCache::SetProfileIsUsingDefaultAvatarAtIndex(
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetBoolean(kIsUsingDefaultAvatarKey, value);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 }
 
 void ProfileInfoCache::SetProfileIsAuthErrorAtIndex(size_t index, bool value) {
@@ -850,44 +784,13 @@ void ProfileInfoCache::SetProfileIsAuthErrorAtIndex(size_t index, bool value) {
   std::unique_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetBoolean(kIsAuthErrorKey, value);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, std::move(info));
 }
 
-void ProfileInfoCache::SetStatsBrowsingHistoryOfProfileAtIndex(size_t index,
-                                                               int value) {
-  std::unique_ptr<base::DictionaryValue> info(
-      GetInfoForProfileAtIndex(index)->DeepCopy());
-  info->SetInteger(kStatsBrowsingHistoryKey, value);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
-}
-
-void ProfileInfoCache::SetStatsPasswordsOfProfileAtIndex(size_t index,
-                                                         int value) {
-  std::unique_ptr<base::DictionaryValue> info(
-      GetInfoForProfileAtIndex(index)->DeepCopy());
-  info->SetInteger(kStatsPasswordsKey, value);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
-}
-
-void ProfileInfoCache::SetStatsBookmarksOfProfileAtIndex(size_t index,
-                                                         int value) {
-  std::unique_ptr<base::DictionaryValue> info(
-      GetInfoForProfileAtIndex(index)->DeepCopy());
-  info->SetInteger(kStatsBookmarksKey, value);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
-}
-
-void ProfileInfoCache::SetStatsSettingsOfProfileAtIndex(size_t index,
-                                                        int value) {
-  std::unique_ptr<base::DictionaryValue> info(
-      GetInfoForProfileAtIndex(index)->DeepCopy());
-  info->SetInteger(kStatsSettingsKey, value);
-  // This takes ownership of |info|.
-  SetInfoForProfileAtIndex(index, info.release());
+void ProfileInfoCache::NotifyIsSigninRequiredChanged(
+    const base::FilePath& profile_path) {
+  for (auto& observer : observer_list_)
+    observer.OnProfileSigninRequiredChanged(profile_path);
 }
 
 const base::FilePath& ProfileInfoCache::GetUserDataDir() const {
@@ -921,8 +824,9 @@ void ProfileInfoCache::DownloadHighResAvatarIfNeeded(
                  AsWeakPtr(),
                  icon_index,
                  profile_path);
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-      base::Bind(&RunCallbackIfFileMissing, file_path, callback));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(&RunCallbackIfFileMissing, file_path, callback));
 }
 
 void ProfileInfoCache::SaveAvatarImageAtPath(
@@ -952,8 +856,9 @@ void ProfileInfoCache::SaveAvatarImageAtPath(
   } else {
     base::Closure callback = base::Bind(&ProfileInfoCache::OnAvatarPictureSaved,
         AsWeakPtr(), key, profile_path);
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-        base::Bind(&SaveBitmap, base::Passed(&data), image_path, callback));
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&SaveBitmap, base::Passed(&data), image_path, callback));
   }
 }
 
@@ -967,11 +872,12 @@ const base::DictionaryValue* ProfileInfoCache::GetInfoForProfileAtIndex(
   return info;
 }
 
-void ProfileInfoCache::SetInfoForProfileAtIndex(size_t index,
-                                                base::DictionaryValue* info) {
+void ProfileInfoCache::SetInfoForProfileAtIndex(
+    size_t index,
+    std::unique_ptr<base::DictionaryValue> info) {
   DictionaryPrefUpdate update(prefs_, prefs::kProfileInfoCache);
   base::DictionaryValue* cache = update.Get();
-  cache->SetWithoutPathExpansion(sorted_keys_[index], info);
+  cache->SetWithoutPathExpansion(sorted_keys_[index], std::move(info));
 }
 
 std::string ProfileInfoCache::CacheKeyFromProfilePath(
@@ -1095,11 +1001,12 @@ const gfx::Image* ProfileInfoCache::LoadAvatarPictureFromPath(
   cached_avatar_images_loading_[key] = true;
 
   gfx::Image** image = new gfx::Image*;
-  BrowserThread::PostTaskAndReply(BrowserThread::FILE, FROM_HERE,
-      base::Bind(&ReadBitmap, image_path, image),
-      base::Bind(&ProfileInfoCache::OnAvatarPictureLoaded,
-          const_cast<ProfileInfoCache*>(this)->AsWeakPtr(),
-          profile_path, key, image));
+  BrowserThread::PostTaskAndReply(
+      BrowserThread::FILE, FROM_HERE,
+      base::BindOnce(&ReadBitmap, image_path, image),
+      base::BindOnce(&ProfileInfoCache::OnAvatarPictureLoaded,
+                     const_cast<ProfileInfoCache*>(this)->AsWeakPtr(),
+                     profile_path, key, image));
   return NULL;
 }
 
@@ -1188,6 +1095,19 @@ void ProfileInfoCache::MigrateLegacyProfileNamesAndDownloadAvatars() {
         GetAvatarIconIndexOfProfileAtIndex(profile_index)));
   }
 #endif
+}
+
+void ProfileInfoCache::RemoveDeprecatedStatistics() {
+  for (size_t i = 0; i < GetNumberOfProfiles(); i++) {
+    if (GetInfoForProfileAtIndex(i)->HasKey(kStatsBookmarksKeyDeprecated)) {
+      auto info = GetInfoForProfileAtIndex(i)->CreateDeepCopy();
+      info->Remove(kStatsBookmarksKeyDeprecated, nullptr);
+      info->Remove(kStatsBrowsingHistoryKeyDeprecated, nullptr);
+      info->Remove(kStatsPasswordsKeyDeprecated, nullptr);
+      info->Remove(kStatsSettingsKeyDeprecated, nullptr);
+      SetInfoForProfileAtIndex(i, std::move(info));
+    }
+  }
 }
 
 void ProfileInfoCache::AddProfile(

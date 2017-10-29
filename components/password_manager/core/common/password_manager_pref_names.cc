@@ -25,16 +25,22 @@ const char kOsPasswordLastChanged[] =
 const char kKeychainMigrationStatus[] = "password_manager.keychain_migration";
 #endif
 
-const char kPasswordManagerSavingEnabled[] = "profile.password_manager_enabled";
-
 const char kWasAutoSignInFirstRunExperienceShown[] =
     "profile.was_auto_sign_in_first_run_experience_shown";
+
+const char kWasObsoleteHttpDataCleaned[] =
+    "profile.was_obsolete_http_data_cleaned";
 
 const char kWasSignInPasswordPromoClicked[] =
     "profile.was_sign_in_password_promo_clicked";
 
 const char kNumberSignInPasswordPromoShown[] =
     "profile.number_sign_in_password_promo_shown";
+
+const char kSyncPasswordHash[] = "profile.sync_password_hash";
+
+const char kSyncPasswordLengthAndHashSalt[] =
+    "profile.sync_password_length_and_hash_salt";
 
 }  // namespace prefs
 }  // namespace password_manager

@@ -6,40 +6,51 @@
 #define NGLayoutOpportunityIterator_h
 
 #include "core/CoreExport.h"
-#include "core/layout/ng/ng_constraint_space.h"
+#include "core/layout/ng/ng_exclusion.h"
+#include "core/layout/ng/ng_fragment.h"
 #include "core/layout/ng/ng_layout_opportunity_tree_node.h"
-#include "core/layout/ng/ng_units.h"
-#include "platform/heap/Handle.h"
-#include "wtf/Optional.h"
-#include "wtf/Vector.h"
+#include "platform/wtf/Vector.h"
+#include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
 
 typedef NGLogicalRect NGLayoutOpportunity;
 typedef Vector<NGLayoutOpportunity> NGLayoutOpportunities;
 
-class CORE_EXPORT NGLayoutOpportunityIterator final {
-  STACK_ALLOCATED();
+NGLayoutOpportunity FindLayoutOpportunityForFragment(
+    const NGExclusions* exclusions,
+    const NGLogicalSize& available_size,
+    const NGLogicalOffset& origin_point,
+    const NGBoxStrut& margins,
+    const NGLogicalSize& size);
 
+class CORE_EXPORT NGLayoutOpportunityIterator final {
  public:
   // Default constructor.
   //
-  // @param space Constraint space with exclusions for which this iterator needs
-  //              to generate layout opportunities.
-  // @param opt_origin_point Optional origin_point parameter that is used as a
-  //                         default start point for layout opportunities.
-  // @param opt_leader_point Optional 'leader' parameter that is used to specify
-  //                         the ending point of temporary excluded rectangle
-  //                         which starts from 'origin'. This rectangle may
-  //                         represent a text fragment for example.
-  NGLayoutOpportunityIterator(
-      const NGConstraintSpace* space,
-      const WTF::Optional<NGLogicalOffset>& opt_origin_point = WTF::nullopt,
-      const WTF::Optional<NGLogicalOffset>& opt_leader_point = WTF::nullopt);
+  // @param exclusions List of exclusions that should be avoided by this
+  //                   iterator while generating layout opportunities.
+  // @param available_size Available size that represents a rectangle where this
+  //                       iterator searches layout opportunities.
+  // @param offset Offset used as a default starting point for layout
+  //               opportunities.
+  NGLayoutOpportunityIterator(const NGExclusions* exclusions,
+                              const NGLogicalSize& available_size,
+                              const NGLogicalOffset& offset);
 
-  // Gets the next Layout Opportunity or nullptr if the search is exhausted.
+  // Gets the next Layout Opportunity or empty one if the search is exhausted.
   // TODO(chrome-layout-team): Refactor with using C++ <iterator> library.
+  // TODO(glebl): Refactor the iterator to return unique_ptr here.
   const NGLayoutOpportunity Next();
+
+  // Offset that specifies the starting point to search layout opportunities.
+  // It's either {@code opt_offset} or space->BfcOffset().
+  NGLogicalOffset Offset() const { return offset_; }
+
+#ifndef NDEBUG
+  // Prints Layout Opportunity tree for debug purposes.
+  void ShowLayoutOpportunityTree() const;
+#endif
 
  private:
   // Mutable Getters.
@@ -52,11 +63,10 @@ class CORE_EXPORT NGLayoutOpportunityIterator final {
     return opportunity_tree_root_.get();
   }
 
-  const NGConstraintSpace* constraint_space_;
-
   NGLayoutOpportunities opportunities_;
   NGLayoutOpportunities::const_iterator opportunity_iter_;
-  Persistent<NGLayoutOpportunityTreeNode> opportunity_tree_root_;
+  std::unique_ptr<NGLayoutOpportunityTreeNode> opportunity_tree_root_;
+  NGLogicalOffset offset_;
 };
 
 }  // namespace blink

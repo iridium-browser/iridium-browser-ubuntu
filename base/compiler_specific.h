@@ -71,14 +71,13 @@
 
 #endif  // COMPILER_MSVC
 
-
 // Annotate a variable indicating it's ok if the variable is not used.
 // (Typically used to silence a compiler warning when the assignment
 // is important for some other reason.)
 // Use like:
 //   int x = ...;
 //   ALLOW_UNUSED_LOCAL(x);
-#define ALLOW_UNUSED_LOCAL(x) false ? (void)x : (void)0
+#define ALLOW_UNUSED_LOCAL(x) (void)x
 
 // Annotate a typedef or function indicating it's ok if it's not used.
 // Use like:
@@ -112,19 +111,27 @@
 // Use like:
 //   class ALIGNAS(16) MyClass { ... }
 //   ALIGNAS(16) int array[4];
+//
+// In most places you can use the C++11 keyword "alignas", which is preferred.
+//
+// But compilers have trouble mixing __attribute__((...)) syntax with
+// alignas(...) syntax.
+//
+// Doesn't work in clang or gcc:
+//   struct alignas(16) __attribute__((packed)) S { char c; };
+// Works in clang but not gcc:
+//   struct __attribute__((packed)) alignas(16) S2 { char c; };
+// Works in clang and gcc:
+//   struct alignas(16) S3 { char c; } __attribute__((packed));
+//
+// There are also some attributes that must be specified *before* a class
+// definition: visibility (used for exporting functions/classes) is one of
+// these attributes. This means that it is not possible to use alignas() with a
+// class that is marked as exported.
 #if defined(COMPILER_MSVC)
 #define ALIGNAS(byte_alignment) __declspec(align(byte_alignment))
 #elif defined(COMPILER_GCC)
 #define ALIGNAS(byte_alignment) __attribute__((aligned(byte_alignment)))
-#endif
-
-// Return the byte alignment of the given type (available at compile time).
-// Use like:
-//   ALIGNOF(int32_t)  // this would be 4
-#if defined(COMPILER_MSVC)
-#define ALIGNOF(type) __alignof(type)
-#elif defined(COMPILER_GCC)
-#define ALIGNOF(type) __alignof__(type)
 #endif
 
 // Annotate a function indicating the caller must examine the return value.

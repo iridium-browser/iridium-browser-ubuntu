@@ -14,6 +14,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
@@ -36,16 +37,12 @@ class CONTENT_EXPORT BrowserGpuChannelHostFactory
   std::unique_ptr<base::SharedMemory> AllocateSharedMemory(
       size_t size) override;
 
-  int GpuProcessHostId() { return gpu_host_id_; }
   gpu::GpuChannelHost* GetGpuChannel();
   int GetGpuChannelId() { return gpu_client_id_; }
 
   // Closes the channel to the GPU process. This should be called before the IO
   // thread stops.
   void CloseChannel();
-
-  // Used to skip GpuChannelHost tests when there can be no GPU process.
-  static bool CanUseForTesting();
 
   // Overridden from gpu::GpuChannelEstablishFactory:
   // The factory will return a null GpuChannelHost in the callback during
@@ -64,8 +61,6 @@ class CONTENT_EXPORT BrowserGpuChannelHostFactory
 
   void GpuChannelEstablished();
 
-  static void AddFilterOnIO(int gpu_host_id,
-                            scoped_refptr<IPC::MessageFilter> filter);
   static void InitializeShaderDiskCacheOnIO(int gpu_client_id,
                                             const base::FilePath& cache_dir);
 
@@ -74,7 +69,6 @@ class CONTENT_EXPORT BrowserGpuChannelHostFactory
   std::unique_ptr<base::WaitableEvent> shutdown_event_;
   scoped_refptr<gpu::GpuChannelHost> gpu_channel_;
   std::unique_ptr<BrowserGpuMemoryBufferManager> gpu_memory_buffer_manager_;
-  int gpu_host_id_;
   scoped_refptr<EstablishRequest> pending_request_;
   std::vector<gpu::GpuChannelEstablishedCallback> established_callbacks_;
 

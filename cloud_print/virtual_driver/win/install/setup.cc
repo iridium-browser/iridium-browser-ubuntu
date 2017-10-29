@@ -21,9 +21,9 @@
 #include "base/win/windows_version.h"
 #include "cloud_print/common/win/cloud_print_utils.h"
 #include "cloud_print/common/win/install_utils.h"
+#include "cloud_print/virtual_driver/win/install/grit/virtual_driver_setup_resources.h"
 #include "cloud_print/virtual_driver/win/virtual_driver_consts.h"
 #include "cloud_print/virtual_driver/win/virtual_driver_helpers.h"
-#include "virtual_driver_setup_resources/grit/virtual_driver_setup_resources.h"
 
 #include <strsafe.h>  // Must be after base headers to avoid deprecation
                       // warnings.
@@ -257,8 +257,7 @@ HRESULT UninstallPrinter(void) {
 
 bool IsOSSupported() {
   // We don't support Vista or older.
-  base::win::Version version = base::win::GetVersion();
-  return (version >= base::win::VERSION_WIN7);
+  return base::win::GetVersion() >= base::win::VERSION_WIN7;
 }
 
 HRESULT RegisterVirtualDriver(const base::FilePath& install_path) {

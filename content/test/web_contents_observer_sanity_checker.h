@@ -30,6 +30,8 @@ namespace content {
 class WebContentsObserverSanityChecker : public WebContentsObserver,
                                          public base::SupportsUserData::Data {
  public:
+  ~WebContentsObserverSanityChecker() override;
+
   // Enables these checks on |web_contents|. Usually ContentBrowserSanityChecker
   // should call this for you.
   static void Enable(WebContents* web_contents);
@@ -62,7 +64,8 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
                            const Referrer& referrer,
                            WindowOpenDisposition disposition,
                            ui::PageTransition transition,
-                           bool started_from_context_menu) override;
+                           bool started_from_context_menu,
+                           bool renderer_initiated) override;
   void MediaStartedPlaying(const MediaPlayerInfo& media_info,
                            const MediaPlayerId& id) override;
   void MediaStoppedPlaying(const MediaPlayerInfo& media_info,
@@ -75,7 +78,6 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
 
  private:
   explicit WebContentsObserverSanityChecker(WebContents* web_contents);
-  ~WebContentsObserverSanityChecker() override;
 
   std::string Format(RenderFrameHost* render_frame_host);
   void AssertRenderFrameExists(RenderFrameHost* render_frame_host);

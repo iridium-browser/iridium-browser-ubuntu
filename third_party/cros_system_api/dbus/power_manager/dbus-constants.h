@@ -21,6 +21,7 @@ const char kRequestRestartMethod[] = "RequestRestart";
 const char kRequestShutdownMethod[] = "RequestShutdown";
 const char kRequestSuspendMethod[] = "RequestSuspend";
 const char kGetPowerSupplyPropertiesMethod[] = "GetPowerSupplyProperties";
+const char kGetSwitchStatesMethod[] = "GetSwitchStates";
 const char kHandleUserActivityMethod[] = "HandleUserActivity";
 const char kHandleVideoActivityMethod[] = "HandleVideoActivity";
 const char kSetIsProjectingMethod[] = "SetIsProjecting";
@@ -36,6 +37,7 @@ const char kUnregisterDarkSuspendDelayMethod[] = "UnregisterDarkSuspendDelay";
 const char kHandleDarkSuspendReadinessMethod[] = "HandleDarkSuspendReadiness";
 const char kHandlePowerButtonAcknowledgmentMethod[] =
     "HandlePowerButtonAcknowledgment";
+const char kIgnoreNextPowerButtonPressMethod[] = "IgnoreNextPowerButtonPress";
 const char kRecordDarkResumeWakeReasonMethod[] = "RecordDarkResumeWakeReason";
 // Signals emitted by powerd.
 const char kBrightnessChangedSignal[] = "BrightnessChanged";

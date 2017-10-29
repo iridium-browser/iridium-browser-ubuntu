@@ -155,7 +155,7 @@ class GNRoller(object):
 
     print('Uploading CL to build GN at {#%s} - %s' %
           (self.new_gn_version, self.new_gn_commitish))
-    ret, out, err = self.Call('git cl upload -f')
+    ret, out, err = self.Call('git cl upload --rietveld -f')
     if ret:
       print('git-cl upload failed: %s' % out + err)
       return 1
@@ -186,8 +186,7 @@ class GNRoller(object):
 
     print('Checking build')
     results = self.CheckBuild()
-    while (len(results) < 3 or
-           any(r['state'] in ('pending', 'started')
+    while (any(r['state'] in ('pending', 'started')
                for r in results.values())):
       print()
       print('Sleeping for 30 seconds')
@@ -228,16 +227,18 @@ class GNRoller(object):
     rpc_server = upload.GetRpcServer(CODE_REVIEW_SERVER, email)
     try:
       props = json.loads(rpc_server.Send('/api/%d' % issue))
-    except Exception as _e:
-      raise
+    except Exception as e:
+      print('Failed to load patch data: %s' % e)
+      return {}
 
     patchset = int(props['patchsets'][-1])
 
     try:
       try_job_results = json.loads(rpc_server.Send(
           '/api/%d/%d/try_job_results' % (issue, patchset)))
-    except Exception as _e:
-      raise
+    except Exception as e:
+      print('Failed to load try job results: %s' % e)
+      return {}
 
     if not try_job_results:
       print('No try jobs found on most recent patchset')
@@ -266,8 +267,15 @@ class GNRoller(object):
       results.setdefault(platform, {'build': -1, 'sha1': '', 'url': url_str})
 
       if state == 'success':
-        jsurl = url_str.replace('/builders/', '/json/builders/')
-        fp = urllib2.urlopen(jsurl)
+        jsurl = url_str.replace('http://build.chromium.org/',
+                                'http://chrome-build-extract.appspot.com/')
+        jsurl = jsurl + '?json=1'
+        try:
+          fp = urllib2.urlopen(jsurl)
+        except urllib2.HTTPError as e:
+          print('Failed to open %s: %s' % (jsurl, e))
+          return {}
+
         js = json.loads(fp.read())
         fp.close()
         sha1_step_name = 'gn sha1'
@@ -306,7 +314,8 @@ class GNRoller(object):
 
     results = self.CheckBuild()
     if (len(results) < 3 or
-        not all(r['state'] == 'success' for r in results.values())):
+        not all(r['state'] == 'success' for r in results.values()) or
+        not all(r['sha1'] != '-' for r in results.values())):
       print("Roll isn't done or didn't succeed, exiting:")
       return 1
 
@@ -327,7 +336,7 @@ class GNRoller(object):
       desc_file.close()
       self.Call('git commit -a -F %s' % desc_file.name,
                 cwd=self.buildtools_dir)
-      self.Call('git-cl upload -f --send-mail',
+      self.Call('git-cl upload --rietveld -f --send-mail',
                 cwd=self.buildtools_dir)
     finally:
       os.remove(desc_file.name)
@@ -392,7 +401,7 @@ class GNRoller(object):
       desc_file.write(desc)
       desc_file.close()
       self.Call('git commit -a -F %s' % desc_file.name)
-      self.Call('git-cl upload -f --send-mail --use-commit-queue')
+      self.Call('git-cl upload --rietveld -f --send-mail --use-commit-queue')
     finally:
       os.remove(desc_file.name)
 
@@ -460,7 +469,7 @@ class GNRoller(object):
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True,
                             cwd=(cwd or self.chromium_src_dir))
     out, err = proc.communicate()
-    return proc.returncode, out, err
+    return proc.returncode, out or '', err or ''
 
 
 if __name__ == '__main__':

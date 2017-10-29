@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/sequenced_task_runner.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
@@ -26,6 +26,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/install_attributes.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/policy/schema_registry_service.h"
 #include "chrome/browser/policy/schema_registry_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -146,13 +147,17 @@ UserPolicyManagerFactoryChromeOS::CreateManagerForProfile(
 
   const base::CommandLine* command_line =
       base::CommandLine::ForCurrentProcess();
-  // Don't initialize cloud policy for the signin profile.
-  if (chromeos::ProfileHelper::IsSigninProfile(profile))
+  // Don't initialize cloud policy for the signin  and the lock screen app
+  // profile.
+  if (chromeos::ProfileHelper::IsSigninProfile(profile) ||
+      chromeos::ProfileHelper::IsLockScreenAppProfile(profile)) {
     return {};
+  }
 
-  // |user| should never be nullptr except for the signin profile. This object
-  // is created as part of the Profile creation, which happens right after
-  // sign-in. The just-signed-in User is the active user during that time.
+  // |user| should never be nullptr except for the signin and lock screen app
+  // profile. This object is created as part of the Profile creation, which
+  // happens right after sign-in. The just-signed-in User is the active user
+  // during that time.
   const user_manager::User* user =
       chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
   CHECK(user);
@@ -178,18 +183,16 @@ UserPolicyManagerFactoryChromeOS::CreateManagerForProfile(
     case AccountType::UNKNOWN:
     case AccountType::GOOGLE:
       // TODO(tnagel): Return nullptr for unknown accounts once AccountId
-      // migration is finished.
+      // migration is finished.  (KioskAppManager still needs to be migrated.)
       if (!user->HasGaiaAccount()) {
         return {};
       }
       is_active_directory = false;
       break;
     case AccountType::ACTIVE_DIRECTORY:
-      // Ensure install attributes are locked into Active Directory mode before
-      // allowing Active Directory policy which is not signed.
-      if (!connector->GetInstallAttributes()->IsActiveDirectoryManaged()) {
-        return {};
-      }
+      // Active Directory users only exist on devices whose install attributes
+      // are locked into Active Directory mode.
+      CHECK(connector->GetInstallAttributes()->IsActiveDirectoryManaged());
       is_active_directory = true;
       break;
   }
@@ -199,17 +202,14 @@ UserPolicyManagerFactoryChromeOS::CreateManagerForProfile(
   const user_manager::UserManager* const user_manager =
       user_manager::UserManager::Get();
 
-  // We want to block for policy in a few situations: if the user is new, or if
-  // we are forcing an online signin. An online signin will be forced if there
-  // has been a credential error, or if the initial session creation was not
-  // completed (the oauth_token_status is not set to valid by OAuth2LoginManager
-  // until profile creation/session restore is complete).
+  // We want to block for policy if the session has never been initialized
+  // (generally true if the user is new, or if there was a crash before the
+  // profile finished initializing). There is code in UserSelectionScreen to
+  // force an online signin for uninitialized sessions to help ensure we are
+  // able to load policy.
   const bool block_forever_for_policy =
       !user_manager->IsLoggedInAsStub() &&
-      (user_manager->IsCurrentUserNew() ||
-       user_manager->GetActiveUser()->force_online_signin() ||
-       user_manager->GetActiveUser()->oauth_token_status() !=
-           user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
+      !user_manager->GetActiveUser()->profile_ever_initialized();
 
   const bool wait_for_policy_fetch =
       block_forever_for_policy || !is_browser_restart;
@@ -243,8 +243,9 @@ UserPolicyManagerFactoryChromeOS::CreateManagerForProfile(
           is_active_directory);
 
   scoped_refptr<base::SequencedTaskRunner> backend_task_runner =
-      content::BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
-          content::BrowserThread::GetBlockingPool()->GetSequenceToken());
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   scoped_refptr<base::SequencedTaskRunner> io_task_runner =
       content::BrowserThread::GetTaskRunnerForThread(
           content::BrowserThread::IO);
@@ -261,8 +262,9 @@ UserPolicyManagerFactoryChromeOS::CreateManagerForProfile(
 
   if (is_active_directory) {
     std::unique_ptr<ActiveDirectoryPolicyManager> manager =
-        ActiveDirectoryPolicyManager::CreateForUserPolicy(account_id,
-                                                          std::move(store));
+        ActiveDirectoryPolicyManager::CreateForUserPolicy(
+            account_id, initial_policy_fetch_timeout,
+            base::BindOnce(&chrome::AttemptUserExit), std::move(store));
     manager->Init(
         SchemaRegistryServiceFactory::GetForContext(profile)->registry());
 
@@ -272,9 +274,9 @@ UserPolicyManagerFactoryChromeOS::CreateManagerForProfile(
     std::unique_ptr<UserCloudPolicyManagerChromeOS> manager =
         base::MakeUnique<UserCloudPolicyManagerChromeOS>(
             std::move(store), std::move(external_data_manager),
-            component_policy_cache_dir, wait_for_policy_fetch,
-            initial_policy_fetch_timeout, base::ThreadTaskRunnerHandle::Get(),
-            file_task_runner, io_task_runner);
+            component_policy_cache_dir, initial_policy_fetch_timeout,
+            base::ThreadTaskRunnerHandle::Get(), file_task_runner,
+            io_task_runner);
 
     // TODO(tnagel): Enable whitelist for Active Directory.
     bool wildcard_match = false;

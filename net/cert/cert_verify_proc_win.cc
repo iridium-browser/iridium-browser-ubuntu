@@ -24,9 +24,10 @@
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/crl_set.h"
 #include "net/cert/ev_root_ca_metadata.h"
+#include "net/cert/known_roots_win.h"
 #include "net/cert/test_root_certs.h"
 #include "net/cert/x509_certificate.h"
-#include "net/cert/x509_certificate_known_roots_win.h"
+#include "net/cert/x509_util_win.h"
 
 #if !defined(CERT_TRUST_HAS_WEAK_SIGNATURE)
 // This was introduced in Windows 8 / Windows Server 2012, but retroactively
@@ -52,21 +53,11 @@ struct FreeCertChainContextFunctor {
   }
 };
 
-struct FreeCertContextFunctor {
-  void operator()(PCCERT_CONTEXT context) const {
-    if (context)
-      CertFreeCertificateContext(context);
-  }
-};
-
 typedef crypto::ScopedCAPIHandle<HCERTCHAINENGINE, FreeChainEngineFunctor>
     ScopedHCERTCHAINENGINE;
 
 typedef std::unique_ptr<const CERT_CHAIN_CONTEXT, FreeCertChainContextFunctor>
     ScopedPCCERT_CHAIN_CONTEXT;
-
-typedef std::unique_ptr<const CERT_CONTEXT, FreeCertContextFunctor>
-    ScopedPCCERT_CONTEXT;
 
 //-----------------------------------------------------------------------------
 
@@ -284,46 +275,7 @@ bool IsIssuedByKnownRoot(PCCERT_CHAIN_CONTEXT chain_context) {
     return false;
   PCERT_CHAIN_ELEMENT* element = first_chain->rgpElement;
   PCCERT_CONTEXT cert = element[num_elements - 1]->pCertContext;
-
-  SHA256HashValue hash = X509Certificate::CalculateFingerprint256(cert);
-  bool is_builtin =
-      IsSHA256HashInSortedArray(hash, &kKnownRootCertSHA256Hashes[0][0],
-                                sizeof(kKnownRootCertSHA256Hashes));
-
-  // Test to see if the use of a built-in set of known roots on Windows can be
-  // replaced with using AuthRoot's SHA-256 property. On any system other than
-  // a fresh RTM with no AuthRoot updates, this property should always exist for
-  // roots delivered via AuthRoot.stl, but should not exist on any manually or
-  // administratively deployed roots.
-  BYTE hash_prop[32] = {0};
-  DWORD size = sizeof(hash_prop);
-  bool found_property =
-      CertGetCertificateContextProperty(
-          cert, CERT_AUTH_ROOT_SHA256_HASH_PROP_ID, &hash_prop, &size) &&
-      size == sizeof(hash_prop);
-
-  enum BuiltinStatus {
-    BUILT_IN_PROPERTY_NOT_FOUND_BUILTIN_NOT_SET = 0,
-    BUILT_IN_PROPERTY_NOT_FOUND_BUILTIN_SET = 1,
-    BUILT_IN_PROPERTY_FOUND_BUILTIN_NOT_SET = 2,
-    BUILT_IN_PROPERTY_FOUND_BUILTIN_SET = 3,
-    BUILT_IN_MAX_VALUE,
-  } status;
-  if (!found_property && !is_builtin) {
-    status = BUILT_IN_PROPERTY_NOT_FOUND_BUILTIN_NOT_SET;
-  } else if (!found_property && is_builtin) {
-    status = BUILT_IN_PROPERTY_NOT_FOUND_BUILTIN_SET;
-  } else if (found_property && !is_builtin) {
-    status = BUILT_IN_PROPERTY_FOUND_BUILTIN_NOT_SET;
-  } else if (found_property && is_builtin) {
-    status = BUILT_IN_PROPERTY_FOUND_BUILTIN_SET;
-  } else {
-    status = BUILT_IN_MAX_VALUE;
-  }
-  UMA_HISTOGRAM_ENUMERATION("Net.SSL_AuthRootConsistency", status,
-                            BUILT_IN_MAX_VALUE);
-
-  return is_builtin;
+  return IsKnownRoot(cert);
 }
 
 // Saves some information about the certificate chain |chain_context| in
@@ -369,8 +321,13 @@ void GetCertChainInfo(PCCERT_CHAIN_CONTEXT chain_context,
     // Add the root certificate, if present, as it was not added above.
     if (has_root_ca)
       verified_chain.push_back(element[num_elements]->pCertContext);
-    verify_result->verified_cert =
-          X509Certificate::CreateFromHandle(verified_cert, verified_chain);
+    scoped_refptr<X509Certificate> verified_cert_with_chain =
+        x509_util::CreateX509CertificateFromCertContexts(verified_cert,
+                                                         verified_chain);
+    if (verified_cert_with_chain)
+      verify_result->verified_cert = std::move(verified_cert_with_chain);
+    else
+      verify_result->cert_status |= CERT_STATUS_INVALID;
   }
 }
 
@@ -582,11 +539,6 @@ void AppendPublicKeyHashes(PCCERT_CHAIN_CONTEXT chain,
     if (!asn1::ExtractSPKIFromDERCert(der_bytes, &spki_bytes))
       continue;
 
-    HashValue sha1(HASH_VALUE_SHA1);
-    base::SHA1HashBytes(reinterpret_cast<const uint8_t*>(spki_bytes.data()),
-                        spki_bytes.size(), sha1.data());
-    hashes->push_back(sha1);
-
     HashValue sha256(HASH_VALUE_SHA256);
     crypto::SHA256HashString(spki_bytes, sha256.data(), crypto::kSHA256Length);
     hashes->push_back(sha256);
@@ -662,7 +614,7 @@ class RevocationInjector {
   void SetCRLSet(CRLSet* crl_set) { thread_local_crlset.Set(crl_set); }
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<RevocationInjector>;
+  friend struct base::LazyInstanceTraitsBase<RevocationInjector>;
 
   RevocationInjector() {
     const CRYPT_OID_FUNC_ENTRY kInterceptFunction[] = {
@@ -905,9 +857,11 @@ int CertVerifyProcWin::VerifyInternal(
   // CRLSet.
   ScopedThreadLocalCRLSet thread_local_crlset(crl_set);
 
-  PCCERT_CONTEXT cert_handle = cert->os_cert_handle();
-  if (!cert_handle)
-    return ERR_UNEXPECTED;
+  ScopedPCCERT_CONTEXT cert_list = x509_util::CreateCertContextWithChain(cert);
+  if (!cert_list) {
+    verify_result->cert_status |= CERT_STATUS_INVALID;
+    return ERR_CERT_INVALID;
+  }
 
   // Build and validate certificate chain.
   CERT_CHAIN_PARA chain_para;
@@ -931,7 +885,7 @@ int CertVerifyProcWin::VerifyInternal(
   std::unique_ptr<CERT_POLICIES_INFO, base::FreeDeleter> policies_info;
   LPSTR ev_policy_oid = NULL;
   if (flags & CertVerifier::VERIFY_EV_CERT) {
-    GetCertPoliciesInfo(cert_handle, &policies_info);
+    GetCertPoliciesInfo(cert_list.get(), &policies_info);
     if (policies_info.get()) {
       EVRootCAMetadata* metadata = EVRootCAMetadata::GetInstance();
       for (DWORD i = 0; i < policies_info->cPolicyInfo; ++i) {
@@ -981,8 +935,6 @@ int CertVerifyProcWin::VerifyInternal(
   ScopedHCERTCHAINENGINE chain_engine(NULL);
   if (TestRootCerts::HasInstance())
     chain_engine.reset(TestRootCerts::GetInstance()->GetChainEngine());
-
-  ScopedPCCERT_CONTEXT cert_list(cert->CreateOSCertChainForCert());
 
   // Add stapled OCSP response data, which will be preferred over online checks
   // and used when in cache-only mode.
@@ -1154,7 +1106,7 @@ int CertVerifyProcWin::VerifyInternal(
       chain_context->TrustStatus.dwErrorStatus);
 
   // Flag certificates that have a Subject common name with a NULL character.
-  if (CertSubjectCommonNameHasNull(cert_handle))
+  if (CertSubjectCommonNameHasNull(cert_list.get()))
     verify_result->cert_status |= CERT_STATUS_INVALID;
 
   base::string16 hostname16 = base::ASCIIToUTF16(hostname);

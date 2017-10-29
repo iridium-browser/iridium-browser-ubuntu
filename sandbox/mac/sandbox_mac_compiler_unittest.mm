@@ -11,6 +11,7 @@
 #include "base/test/multiprocess_test.h"
 #include "base/test/test_timeouts.h"
 #include "sandbox/mac/sandbox_compiler.h"
+#include "sandbox/mac/seatbelt.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
 
@@ -21,6 +22,7 @@ class SandboxMacCompilerTest : public base::MultiProcessTest {};
 MULTIPROCESS_TEST_MAIN(BasicProfileProcess) {
   std::string profile =
       "(version 1)"
+      "(deny default (with no-log))"
       "(allow file-read* file-write* (literal \"/\"))";
 
   SandboxCompiler compiler(profile);
@@ -32,17 +34,18 @@ MULTIPROCESS_TEST_MAIN(BasicProfileProcess) {
 }
 
 TEST_F(SandboxMacCompilerTest, BasicProfileTest) {
-  base::Process process = SpawnChild("BasicProfileProcess");
-  ASSERT_TRUE(process.IsValid());
+  base::SpawnChildResult spawn_child = SpawnChild("BasicProfileProcess");
+  ASSERT_TRUE(spawn_child.process.IsValid());
   int exit_code = 42;
-  EXPECT_TRUE(process.WaitForExitWithTimeout(TestTimeouts::action_max_timeout(),
-                                             &exit_code));
+  EXPECT_TRUE(spawn_child.process.WaitForExitWithTimeout(
+      TestTimeouts::action_max_timeout(), &exit_code));
   EXPECT_EQ(exit_code, 0);
 }
 
 MULTIPROCESS_TEST_MAIN(BasicProfileWithParamProcess) {
   std::string profile =
       "(version 1)"
+      "(deny default (with no-log))"
       "(allow file-read* file-write* (literal (param \"DIR\")))";
 
   SandboxCompiler compiler(profile);
@@ -55,18 +58,19 @@ MULTIPROCESS_TEST_MAIN(BasicProfileWithParamProcess) {
 }
 
 TEST_F(SandboxMacCompilerTest, BasicProfileTestWithParam) {
-  base::Process process = SpawnChild("BasicProfileWithParamProcess");
-  ASSERT_TRUE(process.IsValid());
+  base::SpawnChildResult spawn_child =
+      SpawnChild("BasicProfileWithParamProcess");
+  ASSERT_TRUE(spawn_child.process.IsValid());
   int exit_code = 42;
-  EXPECT_TRUE(process.WaitForExitWithTimeout(TestTimeouts::action_max_timeout(),
-                                             &exit_code));
+  EXPECT_TRUE(spawn_child.process.WaitForExitWithTimeout(
+      TestTimeouts::action_max_timeout(), &exit_code));
   EXPECT_EQ(exit_code, 0);
 }
 
 MULTIPROCESS_TEST_MAIN(ProfileFunctionalProcess) {
   std::string profile =
       "(version 1)"
-      "(debug deny)"
+      "(deny default (with no-log))"
       "(allow file-read-data file-read-metadata (literal \"/dev/urandom\"))";
 
   SandboxCompiler compiler(profile);
@@ -86,18 +90,18 @@ MULTIPROCESS_TEST_MAIN(ProfileFunctionalProcess) {
 }
 
 TEST_F(SandboxMacCompilerTest, ProfileFunctionalityTest) {
-  base::Process process = SpawnChild("ProfileFunctionalProcess");
-  ASSERT_TRUE(process.IsValid());
+  base::SpawnChildResult spawn_child = SpawnChild("ProfileFunctionalProcess");
+  ASSERT_TRUE(spawn_child.process.IsValid());
   int exit_code = 42;
-  EXPECT_TRUE(process.WaitForExitWithTimeout(TestTimeouts::action_max_timeout(),
-                                             &exit_code));
+  EXPECT_TRUE(spawn_child.process.WaitForExitWithTimeout(
+      TestTimeouts::action_max_timeout(), &exit_code));
   EXPECT_EQ(exit_code, 0);
 }
 
 MULTIPROCESS_TEST_MAIN(ProfileFunctionalTestWithParamsProcess) {
   std::string profile =
       "(version 1)"
-      "(debug deny)"
+      "(deny default (with no-log))"
       "(if (string=? (param \"ALLOW_FILE\") \"TRUE\")"
       "    (allow file-read-data file-read-metadata (literal (param "
       "\"URANDOM\"))))";
@@ -126,11 +130,12 @@ MULTIPROCESS_TEST_MAIN(ProfileFunctionalTestWithParamsProcess) {
 }
 
 TEST_F(SandboxMacCompilerTest, ProfileFunctionalityTestWithParams) {
-  base::Process process = SpawnChild("ProfileFunctionalTestWithParamsProcess");
-  ASSERT_TRUE(process.IsValid());
+  base::SpawnChildResult spawn_child =
+      SpawnChild("ProfileFunctionalTestWithParamsProcess");
+  ASSERT_TRUE(spawn_child.process.IsValid());
   int exit_code = 42;
-  EXPECT_TRUE(process.WaitForExitWithTimeout(TestTimeouts::action_max_timeout(),
-                                             &exit_code));
+  EXPECT_TRUE(spawn_child.process.WaitForExitWithTimeout(
+      TestTimeouts::action_max_timeout(), &exit_code));
   EXPECT_EQ(exit_code, 0);
 }
 
@@ -149,11 +154,35 @@ MULTIPROCESS_TEST_MAIN(ProfileFunctionalityTestErrorProcess) {
 }
 
 TEST_F(SandboxMacCompilerTest, ProfileFunctionalityTestError) {
-  base::Process process = SpawnChild("ProfileFunctionalityTestErrorProcess");
-  ASSERT_TRUE(process.IsValid());
+  base::SpawnChildResult spawn_child =
+      SpawnChild("ProfileFunctionalityTestErrorProcess");
+  ASSERT_TRUE(spawn_child.process.IsValid());
   int exit_code = 42;
-  EXPECT_TRUE(process.WaitForExitWithTimeout(TestTimeouts::action_max_timeout(),
-                                             &exit_code));
+  EXPECT_TRUE(spawn_child.process.WaitForExitWithTimeout(
+      TestTimeouts::action_max_timeout(), &exit_code));
+  EXPECT_EQ(exit_code, 0);
+}
+
+MULTIPROCESS_TEST_MAIN(SandboxCheckTestProcess) {
+  CHECK(!Seatbelt::IsSandboxed());
+  std::string profile =
+      "(version 1)"
+      "(deny default (with no-log))";
+
+  SandboxCompiler compiler(profile);
+  std::string error;
+  CHECK(compiler.CompileAndApplyProfile(&error));
+  CHECK(Seatbelt::IsSandboxed());
+
+  return 0;
+}
+
+TEST_F(SandboxMacCompilerTest, SandboxCheckTest) {
+  base::SpawnChildResult spawn_child = SpawnChild("SandboxCheckTestProcess");
+  ASSERT_TRUE(spawn_child.process.IsValid());
+  int exit_code = 42;
+  EXPECT_TRUE(spawn_child.process.WaitForExitWithTimeout(
+      TestTimeouts::action_max_timeout(), &exit_code));
   EXPECT_EQ(exit_code, 0);
 }
 

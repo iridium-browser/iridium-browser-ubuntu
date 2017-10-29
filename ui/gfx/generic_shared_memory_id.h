@@ -22,7 +22,7 @@ class GFX_EXPORT GenericSharedMemoryId {
  public:
   int id;
 
-  // Invalid ID is -1 to match semantics of base::StaticAtomicSequenceNumber.
+  // Invalid ID is -1 to match semantics of base::AtomicSequenceNumber.
   GenericSharedMemoryId() : id(-1) {}
   explicit GenericSharedMemoryId(int id) : id(id) {}
   GenericSharedMemoryId(const GenericSharedMemoryId& other) = default;
@@ -41,7 +41,7 @@ class GFX_EXPORT GenericSharedMemoryId {
 // Generates GUID which can be used to trace shared memory using its
 // GenericSharedMemoryId.
 GFX_EXPORT base::trace_event::MemoryAllocatorDumpGuid
-GetGenericSharedMemoryGUIDForTracing(
+GetGenericSharedGpuMemoryGUIDForTracing(
     uint64_t tracing_process_id,
     GenericSharedMemoryId generic_shared_memory_id);
 

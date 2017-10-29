@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/output/compositor_frame_metadata.h"
 #include "cc/quads/render_pass.h"
 #include "cc/resources/transferable_resource.h"
@@ -31,7 +31,7 @@ class CC_EXPORT CompositorFrame {
   CompositorFrame& operator=(CompositorFrame&& other);
 
   CompositorFrameMetadata metadata;
-  TransferableResourceArray resource_list;
+  std::vector<TransferableResource> resource_list;
   // This list is in the order that each RenderPass will be drawn. The last one
   // is the "root" RenderPass that all others are directly or indirectly drawn
   // into.

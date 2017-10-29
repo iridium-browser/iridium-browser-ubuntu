@@ -11,8 +11,8 @@
 #include "gin/per_isolate_data.h"
 #include "gin/wrappable.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebKit.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
 namespace content {
@@ -63,10 +63,9 @@ TEST_F(GinBrowserTest, GinAndGarbageCollection) {
   bool alive = false;
 
   {
-    v8::Isolate* isolate = blink::mainThreadIsolate();
+    v8::Isolate* isolate = blink::MainThreadIsolate();
     v8::HandleScope handle_scope(isolate);
-    v8::Context::Scope context_scope(
-        view_->GetWebView()->mainFrame()->mainWorldScriptContext());
+    v8::Context::Scope context_scope(GetMainFrame()->MainWorldScriptContext());
 
     // We create the object inside a scope so it's not kept alive by a handle
     // on the stack.
@@ -76,7 +75,7 @@ TEST_F(GinBrowserTest, GinAndGarbageCollection) {
   CHECK(alive);
 
   // Should not crash.
-  blink::mainThreadIsolate()->LowMemoryNotification();
+  blink::MainThreadIsolate()->LowMemoryNotification();
 
   CHECK(!alive);
 }

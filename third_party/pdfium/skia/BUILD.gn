@@ -26,6 +26,7 @@ config("skia_config") {
     "//third_party/skia/include/config",
     "//third_party/skia/include/core",
     "//third_party/skia/include/effects",
+    "//third_party/skia/include/encode",
     "//third_party/skia/include/images",
     "//third_party/skia/include/lazy",
     "//third_party/skia/include/pathops",
@@ -33,12 +34,21 @@ config("skia_config") {
     "//third_party/skia/include/pipe",
     "//third_party/skia/include/ports",
     "//third_party/skia/include/utils",
-
-    # TODO(dsinclair): Right way to use //third_party/freetype?
-    "//third_party/freetype/include",
+    "//third_party/skia/third_party/vulkan",
   ]
 
   defines = []
+
+  if (is_win) {
+    defines += [ "SK_FREETYPE_MINIMUM_RUNTIME_VERSION=(((FREETYPE_MAJOR) * 0x01000000) | ((FREETYPE_MINOR) * 0x00010000) | ((FREETYPE_PATCH) * 0x00000100))" ]
+  }
+
+  if (is_component_build) {
+    defines += [
+      "SKIA_DLL",
+      "GR_GL_IGNORE_ES3_MSAA=0",
+    ]
+  }
 
   if (skia_support_gpu) {
     include_dirs += [
@@ -80,6 +90,7 @@ config("skia_library_config") {
     "//third_party/skia/src/pdf",
     "//third_party/skia/src/ports",
     "//third_party/skia/src/sfnt",
+    "//third_party/skia/src/shaders",
     "//third_party/skia/src/sksl",
     "//third_party/skia/src/utils",
     "//third_party/skia/src/lazy",
@@ -92,6 +103,10 @@ config("skia_library_config") {
   }
 
   defines = []
+
+  if (is_component_build) {
+    defines += [ "SKIA_IMPLEMENTATION=1" ]
+  }
 
   if (current_cpu == "arm") {
     if (arm_use_neon) {
@@ -171,7 +186,7 @@ component("skia") {
     "ext/google_logging.cc",
   ]
 
-  # The skia gypi values are relative to the skia_dir, so we need to rebase.
+  # The skia sources values are relative to the skia_dir, so we need to rebase.
   sources += skia_core_sources
   sources += skia_effects_sources
   sources += skia_sksl_sources
@@ -179,6 +194,7 @@ component("skia") {
   sources += [
     "//third_party/skia/src/fonts/SkFontMgr_indirect.cpp",
     "//third_party/skia/src/fonts/SkRemotableFontMgr.cpp",
+    "//third_party/skia/src/images/SkImageEncoder.cpp",
     "//third_party/skia/src/ports/SkFontHost_FreeType.cpp",
     "//third_party/skia/src/ports/SkFontHost_FreeType_common.cpp",
     "//third_party/skia/src/ports/SkFontHost_win.cpp",
@@ -186,7 +202,6 @@ component("skia") {
     "//third_party/skia/src/ports/SkFontMgr_android_factory.cpp",
     "//third_party/skia/src/ports/SkFontMgr_android_parser.cpp",
     "//third_party/skia/src/ports/SkGlobalInitialization_default.cpp",
-    "//third_party/skia/src/ports/SkImageEncoder_none.cpp",
     "//third_party/skia/src/ports/SkImageGenerator_none.cpp",
     "//third_party/skia/src/ports/SkOSFile_posix.cpp",
     "//third_party/skia/src/ports/SkOSFile_stdio.cpp",
@@ -223,14 +238,12 @@ component("skia") {
     sources += skia_null_gpu_sources
   }
 
-  # Remove unused util files include in utils.gypi
+  # Remove unused util files include in utils.gni
   sources -= [
-    "//third_party/skia/src/utils/SkBoundaryPatch.cpp",
     "//third_party/skia/src/utils/SkCamera.cpp",
     "//third_party/skia/src/utils/SkDumpCanvas.cpp",
     "//third_party/skia/src/utils/SkFrontBufferedStream.cpp",
     "//third_party/skia/src/utils/SkInterpolator.cpp",
-    "//third_party/skia/src/utils/SkMeshUtils.cpp",
     "//third_party/skia/src/utils/SkParsePath.cpp",
   ]
 
@@ -306,7 +319,8 @@ component("skia") {
 
   deps = [
     ":skia_opts",
-    "../third_party:fx_zlib",
+    "../third_party:zlib",
+    "//:freetype_common",
   ]
 
   if (is_linux) {
@@ -486,7 +500,7 @@ source_set("skia_opts") {
     cflags += [ "-fomit-frame-pointer" ]
     sources = skia_opts.none_sources
   } else {
-    assert(false, "Need to port cpu specific stuff from skia_library_opts.gyp")
+    assert(false, "Need to port cpu specific stuff from gn/BUILDCONFIG.gn")
   }
 
   if (is_android && !is_debug) {

@@ -10,9 +10,9 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/predictors/loading_test_util.h"
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor_tables.h"
-#include "chrome/browser/predictors/resource_prefetch_predictor_test_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/request_priority.h"
@@ -25,15 +25,26 @@ class ResourcePrefetchPredictorTablesTest : public testing::Test {
  public:
   ResourcePrefetchPredictorTablesTest();
   ~ResourcePrefetchPredictorTablesTest() override;
+
+  using PrefetchDataMap = std::map<std::string, PrefetchData>;
+  using RedirectDataMap = std::map<std::string, RedirectData>;
+  using OriginDataMap = std::map<std::string, OriginData>;
+
   void SetUp() override;
   void TearDown() override;
+
+  void DeleteAllData() const;
+  void GetAllData(PrefetchDataMap* url_resource_data,
+                  PrefetchDataMap* host_resource_data,
+                  RedirectDataMap* url_redirect_data,
+                  RedirectDataMap* host_redirect_data,
+                  OriginDataMap* origin_data) const;
 
  protected:
   void ReopenDatabase();
   void TestGetAllData();
   void TestUpdateData();
   void TestDeleteData();
-  void TestDeleteSingleDataPoint();
   void TestDeleteAllData();
 
   content::TestBrowserThreadBundle thread_bundle_;
@@ -41,11 +52,10 @@ class ResourcePrefetchPredictorTablesTest : public testing::Test {
   std::unique_ptr<PredictorDatabase> db_;
   scoped_refptr<ResourcePrefetchPredictorTables> tables_;
 
-  using PrefetchDataMap = ResourcePrefetchPredictorTables::PrefetchDataMap;
-  using RedirectDataMap = ResourcePrefetchPredictorTables::RedirectDataMap;
-
  private:
-  // Initializes the tables, |test_url_data_| and |test_host_data_|.
+  // Initializes the tables, |test_url_data_|, |test_host_data_|,
+  // |test_url_redirect_data_|, |test_host_redirect_data_| and
+  // |test_origin_data|.
   void InitializeSampleData();
 
   // Checks that the input PrefetchData are the same, although the resources
@@ -62,13 +72,20 @@ class ResourcePrefetchPredictorTablesTest : public testing::Test {
   void TestRedirectsAreEqual(const std::vector<RedirectStat>& lhs,
                              const std::vector<RedirectStat>& rhs) const;
 
+  void TestOriginDataAreEqual(const OriginDataMap& lhs,
+                              const OriginDataMap& rhs) const;
+  void TestOriginStatsAreEqual(const std::vector<OriginStat>& lhs,
+                               const std::vector<OriginStat>& rhs) const;
+
   void AddKey(PrefetchDataMap* m, const std::string& key) const;
   void AddKey(RedirectDataMap* m, const std::string& key) const;
+  void AddKey(OriginDataMap* m, const std::string& key) const;
 
   PrefetchDataMap test_url_data_;
   PrefetchDataMap test_host_data_;
   RedirectDataMap test_url_redirect_data_;
   RedirectDataMap test_host_redirect_data_;
+  OriginDataMap test_origin_data_;
 };
 
 class ResourcePrefetchPredictorTablesReopenTest
@@ -93,12 +110,12 @@ ResourcePrefetchPredictorTablesTest::~ResourcePrefetchPredictorTablesTest() {
 }
 
 void ResourcePrefetchPredictorTablesTest::SetUp() {
-  tables_->DeleteAllData();
+  DeleteAllData();
   InitializeSampleData();
 }
 
 void ResourcePrefetchPredictorTablesTest::TearDown() {
-  tables_ = NULL;
+  tables_ = nullptr;
   db_.reset();
   base::RunLoop().RunUntilIdle();
 }
@@ -106,38 +123,58 @@ void ResourcePrefetchPredictorTablesTest::TearDown() {
 void ResourcePrefetchPredictorTablesTest::TestGetAllData() {
   PrefetchDataMap actual_url_data, actual_host_data;
   RedirectDataMap actual_url_redirect_data, actual_host_redirect_data;
-  tables_->GetAllData(&actual_url_data, &actual_host_data,
-                      &actual_url_redirect_data, &actual_host_redirect_data);
+  OriginDataMap actual_origin_data;
+
+  GetAllData(&actual_url_data, &actual_host_data, &actual_url_redirect_data,
+             &actual_host_redirect_data, &actual_origin_data);
 
   TestPrefetchDataAreEqual(test_url_data_, actual_url_data);
   TestPrefetchDataAreEqual(test_host_data_, actual_host_data);
   TestRedirectDataAreEqual(test_url_redirect_data_, actual_url_redirect_data);
   TestRedirectDataAreEqual(test_host_redirect_data_, actual_host_redirect_data);
+  TestOriginDataAreEqual(test_origin_data_, actual_origin_data);
 }
 
 void ResourcePrefetchPredictorTablesTest::TestDeleteData() {
   std::vector<std::string> urls_to_delete = {"http://www.google.com",
                                              "http://www.yahoo.com"};
   std::vector<std::string> hosts_to_delete = {"www.yahoo.com"};
-
-  tables_->DeleteResourceData(urls_to_delete, hosts_to_delete);
+  tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+      &GlowplugKeyValueTable<PrefetchData>::DeleteData,
+      base::Unretained(tables_->url_resource_table()), urls_to_delete));
+  tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+      &GlowplugKeyValueTable<PrefetchData>::DeleteData,
+      base::Unretained(tables_->host_resource_table()), hosts_to_delete));
 
   urls_to_delete = {"http://fb.com/google", "http://google.com"};
   hosts_to_delete = {"microsoft.com"};
+  tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+      &GlowplugKeyValueTable<RedirectData>::DeleteData,
+      base::Unretained(tables_->url_redirect_table()), urls_to_delete));
+  tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+      &GlowplugKeyValueTable<RedirectData>::DeleteData,
+      base::Unretained(tables_->host_redirect_table()), hosts_to_delete));
 
-  tables_->DeleteRedirectData(urls_to_delete, hosts_to_delete);
+  hosts_to_delete = {"twitter.com"};
+  tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+      &GlowplugKeyValueTable<OriginData>::DeleteData,
+      base::Unretained(tables_->origin_table()), hosts_to_delete));
 
   PrefetchDataMap actual_url_data, actual_host_data;
   RedirectDataMap actual_url_redirect_data, actual_host_redirect_data;
-  tables_->GetAllData(&actual_url_data, &actual_host_data,
-                      &actual_url_redirect_data, &actual_host_redirect_data);
+  OriginDataMap actual_origin_data;
+
+  GetAllData(&actual_url_data, &actual_host_data, &actual_url_redirect_data,
+             &actual_host_redirect_data, &actual_origin_data);
 
   PrefetchDataMap expected_url_data, expected_host_data;
   RedirectDataMap expected_url_redirect_data, expected_host_redirect_data;
+  OriginDataMap expected_origin_data;
   AddKey(&expected_url_data, "http://www.reddit.com");
   AddKey(&expected_host_data, "www.facebook.com");
   AddKey(&expected_url_redirect_data, "http://nyt.com");
   AddKey(&expected_host_redirect_data, "bbc.com");
+  AddKey(&expected_origin_data, "abc.xyz");
 
   TestPrefetchDataAreEqual(expected_url_data, actual_url_data);
   TestPrefetchDataAreEqual(expected_host_data, actual_host_data);
@@ -145,83 +182,7 @@ void ResourcePrefetchPredictorTablesTest::TestDeleteData() {
                            actual_url_redirect_data);
   TestRedirectDataAreEqual(expected_host_redirect_data,
                            actual_host_redirect_data);
-}
-
-void ResourcePrefetchPredictorTablesTest::TestDeleteSingleDataPoint() {
-  // Delete a URL.
-  tables_->DeleteSingleResourceDataPoint("http://www.reddit.com",
-                                         PREFETCH_KEY_TYPE_URL);
-
-  PrefetchDataMap actual_url_data, actual_host_data;
-  RedirectDataMap actual_url_redirect_data, actual_host_redirect_data;
-  tables_->GetAllData(&actual_url_data, &actual_host_data,
-                      &actual_url_redirect_data, &actual_host_redirect_data);
-
-  PrefetchDataMap expected_url_data;
-  AddKey(&expected_url_data, "http://www.google.com");
-  AddKey(&expected_url_data, "http://www.yahoo.com");
-
-  TestPrefetchDataAreEqual(expected_url_data, actual_url_data);
-  TestPrefetchDataAreEqual(test_host_data_, actual_host_data);
-  TestRedirectDataAreEqual(test_url_redirect_data_, actual_url_redirect_data);
-  TestRedirectDataAreEqual(test_host_redirect_data_, actual_host_redirect_data);
-
-  // Delete a host.
-  tables_->DeleteSingleResourceDataPoint("www.facebook.com",
-                                         PREFETCH_KEY_TYPE_HOST);
-  actual_url_data.clear();
-  actual_host_data.clear();
-  actual_url_redirect_data.clear();
-  actual_host_redirect_data.clear();
-  tables_->GetAllData(&actual_url_data, &actual_host_data,
-                      &actual_url_redirect_data, &actual_host_redirect_data);
-
-  PrefetchDataMap expected_host_data;
-  AddKey(&expected_host_data, "www.yahoo.com");
-
-  TestPrefetchDataAreEqual(expected_url_data, actual_url_data);
-  TestPrefetchDataAreEqual(expected_host_data, actual_host_data);
-  TestRedirectDataAreEqual(test_url_redirect_data_, actual_url_redirect_data);
-  TestRedirectDataAreEqual(test_host_redirect_data_, actual_host_redirect_data);
-
-  // Delete a URL redirect.
-  tables_->DeleteSingleRedirectDataPoint("http://nyt.com",
-                                         PREFETCH_KEY_TYPE_URL);
-  actual_url_data.clear();
-  actual_host_data.clear();
-  actual_url_redirect_data.clear();
-  actual_host_redirect_data.clear();
-  tables_->GetAllData(&actual_url_data, &actual_host_data,
-                      &actual_url_redirect_data, &actual_host_redirect_data);
-
-  RedirectDataMap expected_url_redirect_data;
-  AddKey(&expected_url_redirect_data, "http://fb.com/google");
-  AddKey(&expected_url_redirect_data, "http://google.com");
-
-  TestPrefetchDataAreEqual(expected_url_data, actual_url_data);
-  TestPrefetchDataAreEqual(expected_host_data, actual_host_data);
-  TestRedirectDataAreEqual(expected_url_redirect_data,
-                           actual_url_redirect_data);
-  TestRedirectDataAreEqual(test_host_redirect_data_, actual_host_redirect_data);
-
-  // Delete a host redirect.
-  tables_->DeleteSingleRedirectDataPoint("bbc.com", PREFETCH_KEY_TYPE_HOST);
-  actual_url_data.clear();
-  actual_host_data.clear();
-  actual_url_redirect_data.clear();
-  actual_host_redirect_data.clear();
-  tables_->GetAllData(&actual_url_data, &actual_host_data,
-                      &actual_url_redirect_data, &actual_host_redirect_data);
-
-  RedirectDataMap expected_host_redirect_data;
-  AddKey(&expected_host_redirect_data, "microsoft.com");
-
-  TestPrefetchDataAreEqual(expected_url_data, actual_url_data);
-  TestPrefetchDataAreEqual(expected_host_data, actual_host_data);
-  TestRedirectDataAreEqual(expected_url_redirect_data,
-                           actual_url_redirect_data);
-  TestRedirectDataAreEqual(expected_host_redirect_data,
-                           actual_host_redirect_data);
+  TestOriginDataAreEqual(expected_origin_data, actual_origin_data);
 }
 
 void ResourcePrefetchPredictorTablesTest::TestUpdateData() {
@@ -240,14 +201,29 @@ void ResourcePrefetchPredictorTablesTest::TestUpdateData() {
       google.add_resources(), "http://www.resources.google.com/script.js",
       content::RESOURCE_TYPE_SCRIPT, 12, 0, 0, 8.5, net::MEDIUM, true, true);
 
+  tables_->ExecuteDBTaskOnDBThread(
+      base::BindOnce(&GlowplugKeyValueTable<PrefetchData>::UpdateData,
+                     base::Unretained(tables_->url_resource_table()),
+                     google.primary_key(), google));
+
   PrefetchData yahoo = CreatePrefetchData("www.yahoo.com", 7);
   InitializeResourceData(
       yahoo.add_resources(), "http://www.yahoo.com/image.png",
       content::RESOURCE_TYPE_IMAGE, 120, 1, 1, 10.0, net::MEDIUM, true, false);
 
+  tables_->ExecuteDBTaskOnDBThread(
+      base::BindOnce(&GlowplugKeyValueTable<PrefetchData>::UpdateData,
+                     base::Unretained(tables_->host_resource_table()),
+                     yahoo.primary_key(), yahoo));
+
   RedirectData facebook = CreateRedirectData("http://fb.com/google", 20);
   InitializeRedirectStat(facebook.add_redirect_endpoints(),
                          "https://facebook.fr/google", 4, 2, 1);
+
+  tables_->ExecuteDBTaskOnDBThread(
+      base::BindOnce(&GlowplugKeyValueTable<RedirectData>::UpdateData,
+                     base::Unretained(tables_->url_redirect_table()),
+                     facebook.primary_key(), facebook));
 
   RedirectData microsoft = CreateRedirectData("microsoft.com", 21);
   InitializeRedirectStat(microsoft.add_redirect_endpoints(), "m.microsoft.com",
@@ -255,15 +231,27 @@ void ResourcePrefetchPredictorTablesTest::TestUpdateData() {
   InitializeRedirectStat(microsoft.add_redirect_endpoints(), "microsoft.org", 7,
                          2, 0);
 
-  tables_->UpdateData(google, yahoo, facebook, microsoft);
+  tables_->ExecuteDBTaskOnDBThread(
+      base::BindOnce(&GlowplugKeyValueTable<RedirectData>::UpdateData,
+                     base::Unretained(tables_->host_redirect_table()),
+                     microsoft.primary_key(), microsoft));
+
+  OriginData twitter = CreateOriginData("twitter.com");
+  InitializeOriginStat(twitter.add_origins(), "https://dogs.twitter.com", 10, 1,
+                       0, 12., false, true);
+  tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+      &GlowplugKeyValueTable<OriginData>::UpdateData,
+      base::Unretained(tables_->origin_table()), twitter.host(), twitter));
 
   PrefetchDataMap actual_url_data, actual_host_data;
   RedirectDataMap actual_url_redirect_data, actual_host_redirect_data;
-  tables_->GetAllData(&actual_url_data, &actual_host_data,
-                      &actual_url_redirect_data, &actual_host_redirect_data);
+  OriginDataMap actual_origin_data;
+  GetAllData(&actual_url_data, &actual_host_data, &actual_url_redirect_data,
+             &actual_host_redirect_data, &actual_origin_data);
 
   PrefetchDataMap expected_url_data, expected_host_data;
   RedirectDataMap expected_url_redirect_data, expected_host_redirect_data;
+  OriginDataMap expected_origin_data;
   AddKey(&expected_url_data, "http://www.reddit.com");
   AddKey(&expected_url_data, "http://www.yahoo.com");
   expected_url_data.insert(std::make_pair("http://www.google.com", google));
@@ -280,6 +268,9 @@ void ResourcePrefetchPredictorTablesTest::TestUpdateData() {
   expected_host_redirect_data.insert(
       std::make_pair("microsoft.com", microsoft));
 
+  AddKey(&expected_origin_data, "abc.xyz");
+  expected_origin_data.insert({"twitter.com", twitter});
+
   TestPrefetchDataAreEqual(expected_url_data, actual_url_data);
   TestPrefetchDataAreEqual(expected_host_data, actual_host_data);
   TestRedirectDataAreEqual(expected_url_redirect_data,
@@ -289,12 +280,13 @@ void ResourcePrefetchPredictorTablesTest::TestUpdateData() {
 }
 
 void ResourcePrefetchPredictorTablesTest::TestDeleteAllData() {
-  tables_->DeleteAllData();
+  DeleteAllData();
 
   PrefetchDataMap actual_url_data, actual_host_data;
   RedirectDataMap actual_url_redirect_data, actual_host_redirect_data;
-  tables_->GetAllData(&actual_url_data, &actual_host_data,
-                      &actual_url_redirect_data, &actual_host_redirect_data);
+  OriginDataMap actual_origin_data;
+  GetAllData(&actual_url_data, &actual_host_data, &actual_url_redirect_data,
+             &actual_host_redirect_data, &actual_origin_data);
   EXPECT_TRUE(actual_url_data.empty());
   EXPECT_TRUE(actual_host_data.empty());
   EXPECT_TRUE(actual_url_redirect_data.empty());
@@ -389,6 +381,46 @@ void ResourcePrefetchPredictorTablesTest::TestRedirectsAreEqual(
   EXPECT_TRUE(lhs_index.empty());
 }
 
+void ResourcePrefetchPredictorTablesTest::TestOriginDataAreEqual(
+    const OriginDataMap& lhs,
+    const OriginDataMap& rhs) const {
+  EXPECT_EQ(lhs.size(), rhs.size());
+
+  for (const auto& o : rhs) {
+    const auto lhs_it = lhs.find(o.first);
+    ASSERT_TRUE(lhs_it != lhs.end()) << o.first;
+    std::vector<OriginStat> lhs_origins(lhs_it->second.origins().begin(),
+                                        lhs_it->second.origins().end());
+    std::vector<OriginStat> rhs_origins(o.second.origins().begin(),
+                                        o.second.origins().end());
+
+    TestOriginStatsAreEqual(lhs_origins, rhs_origins);
+  }
+}
+
+void ResourcePrefetchPredictorTablesTest::TestOriginStatsAreEqual(
+    const std::vector<OriginStat>& lhs,
+    const std::vector<OriginStat>& rhs) const {
+  EXPECT_EQ(lhs.size(), rhs.size());
+
+  std::map<std::string, OriginStat> lhs_index;
+  // Repeated origins are not allowed.
+  for (const auto& o : lhs)
+    EXPECT_TRUE(lhs_index.insert({o.origin(), o}).second);
+
+  for (const auto& o : rhs) {
+    auto lhs_it = lhs_index.find(o.origin());
+    if (lhs_it != lhs_index.end()) {
+      EXPECT_EQ(o, lhs_it->second);
+      lhs_index.erase(lhs_it);
+    } else {
+      ADD_FAILURE() << o.origin();
+    }
+  }
+
+  EXPECT_TRUE(lhs_index.empty());
+}
+
 void ResourcePrefetchPredictorTablesTest::AddKey(PrefetchDataMap* m,
                                                  const std::string& key) const {
   PrefetchDataMap::const_iterator it = test_url_data_.find(key);
@@ -413,10 +445,55 @@ void ResourcePrefetchPredictorTablesTest::AddKey(RedirectDataMap* m,
   m->insert(*it);
 }
 
-void ResourcePrefetchPredictorTablesTest::InitializeSampleData() {
-  PrefetchData empty_resource_data;
-  RedirectData empty_redirect_data;
+void ResourcePrefetchPredictorTablesTest::AddKey(OriginDataMap* m,
+                                                 const std::string& key) const {
+  auto it = test_origin_data_.find(key);
+  ASSERT_TRUE(it != test_origin_data_.end());
+  m->insert(*it);
+}
 
+void ResourcePrefetchPredictorTablesTest::DeleteAllData() const {
+  tables_->ExecuteDBTaskOnDBThread(
+      base::BindOnce(&GlowplugKeyValueTable<PrefetchData>::DeleteAllData,
+                     base::Unretained(tables_->url_resource_table())));
+  tables_->ExecuteDBTaskOnDBThread(
+      base::BindOnce(&GlowplugKeyValueTable<RedirectData>::DeleteAllData,
+                     base::Unretained(tables_->url_redirect_table())));
+  tables_->ExecuteDBTaskOnDBThread(
+      base::BindOnce(&GlowplugKeyValueTable<PrefetchData>::DeleteAllData,
+                     base::Unretained(tables_->host_resource_table())));
+  tables_->ExecuteDBTaskOnDBThread(
+      base::BindOnce(&GlowplugKeyValueTable<RedirectData>::DeleteAllData,
+                     base::Unretained(tables_->host_redirect_table())));
+  tables_->ExecuteDBTaskOnDBThread(
+      base::BindOnce(&GlowplugKeyValueTable<OriginData>::DeleteAllData,
+                     base::Unretained(tables_->origin_table())));
+}
+
+void ResourcePrefetchPredictorTablesTest::GetAllData(
+    PrefetchDataMap* url_resource_data,
+    PrefetchDataMap* host_resource_data,
+    RedirectDataMap* url_redirect_data,
+    RedirectDataMap* host_redirect_data,
+    OriginDataMap* origin_data) const {
+  tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+      &GlowplugKeyValueTable<PrefetchData>::GetAllData,
+      base::Unretained(tables_->url_resource_table()), url_resource_data));
+  tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+      &GlowplugKeyValueTable<RedirectData>::GetAllData,
+      base::Unretained(tables_->url_redirect_table()), url_redirect_data));
+  tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+      &GlowplugKeyValueTable<PrefetchData>::GetAllData,
+      base::Unretained(tables_->host_resource_table()), host_resource_data));
+  tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+      &GlowplugKeyValueTable<RedirectData>::GetAllData,
+      base::Unretained(tables_->host_redirect_table()), host_redirect_data));
+  tables_->ExecuteDBTaskOnDBThread(
+      base::BindOnce(&GlowplugKeyValueTable<OriginData>::GetAllData,
+                     base::Unretained(tables_->origin_table()), origin_data));
+}
+
+void ResourcePrefetchPredictorTablesTest::InitializeSampleData() {
   {  // Url data.
     PrefetchData google = CreatePrefetchData("http://www.google.com", 1);
     InitializeResourceData(google.add_resources(),
@@ -457,12 +534,18 @@ void ResourcePrefetchPredictorTablesTest::InitializeSampleData() {
     test_url_data_.insert(std::make_pair(reddit.primary_key(), reddit));
     test_url_data_.insert(std::make_pair(yahoo.primary_key(), yahoo));
 
-    tables_->UpdateData(google, empty_resource_data, empty_redirect_data,
-                        empty_redirect_data);
-    tables_->UpdateData(reddit, empty_resource_data, empty_redirect_data,
-                        empty_redirect_data);
-    tables_->UpdateData(yahoo, empty_resource_data, empty_redirect_data,
-                        empty_redirect_data);
+    tables_->ExecuteDBTaskOnDBThread(
+        base::BindOnce(&GlowplugKeyValueTable<PrefetchData>::UpdateData,
+                       base::Unretained(tables_->url_resource_table()),
+                       google.primary_key(), google));
+    tables_->ExecuteDBTaskOnDBThread(
+        base::BindOnce(&GlowplugKeyValueTable<PrefetchData>::UpdateData,
+                       base::Unretained(tables_->url_resource_table()),
+                       reddit.primary_key(), reddit));
+    tables_->ExecuteDBTaskOnDBThread(
+        base::BindOnce(&GlowplugKeyValueTable<PrefetchData>::UpdateData,
+                       base::Unretained(tables_->url_resource_table()),
+                       yahoo.primary_key(), yahoo));
   }
 
   {  // Host data.
@@ -496,10 +579,14 @@ void ResourcePrefetchPredictorTablesTest::InitializeSampleData() {
     test_host_data_.insert(std::make_pair(facebook.primary_key(), facebook));
     test_host_data_.insert(std::make_pair(yahoo.primary_key(), yahoo));
 
-    tables_->UpdateData(empty_resource_data, facebook, empty_redirect_data,
-                        empty_redirect_data);
-    tables_->UpdateData(empty_resource_data, yahoo, empty_redirect_data,
-                        empty_redirect_data);
+    tables_->ExecuteDBTaskOnDBThread(
+        base::BindOnce(&GlowplugKeyValueTable<PrefetchData>::UpdateData,
+                       base::Unretained(tables_->host_resource_table()),
+                       facebook.primary_key(), facebook));
+    tables_->ExecuteDBTaskOnDBThread(
+        base::BindOnce(&GlowplugKeyValueTable<PrefetchData>::UpdateData,
+                       base::Unretained(tables_->host_resource_table()),
+                       yahoo.primary_key(), yahoo));
   }
 
   {  // Url redirect data.
@@ -525,12 +612,18 @@ void ResourcePrefetchPredictorTablesTest::InitializeSampleData() {
     test_url_redirect_data_.insert(
         std::make_pair(google.primary_key(), google));
 
-    tables_->UpdateData(empty_resource_data, empty_resource_data, facebook,
-                        empty_redirect_data);
-    tables_->UpdateData(empty_resource_data, empty_resource_data, nytimes,
-                        empty_redirect_data);
-    tables_->UpdateData(empty_resource_data, empty_resource_data, google,
-                        empty_redirect_data);
+    tables_->ExecuteDBTaskOnDBThread(
+        base::BindOnce(&GlowplugKeyValueTable<RedirectData>::UpdateData,
+                       base::Unretained(tables_->url_redirect_table()),
+                       facebook.primary_key(), facebook));
+    tables_->ExecuteDBTaskOnDBThread(
+        base::BindOnce(&GlowplugKeyValueTable<RedirectData>::UpdateData,
+                       base::Unretained(tables_->url_redirect_table()),
+                       nytimes.primary_key(), nytimes));
+    tables_->ExecuteDBTaskOnDBThread(
+        base::BindOnce(&GlowplugKeyValueTable<RedirectData>::UpdateData,
+                       base::Unretained(tables_->url_redirect_table()),
+                       google.primary_key(), google));
   }
 
   {  // Host redirect data.
@@ -548,10 +641,42 @@ void ResourcePrefetchPredictorTablesTest::InitializeSampleData() {
     test_host_redirect_data_.insert(std::make_pair(bbc.primary_key(), bbc));
     test_host_redirect_data_.insert(
         std::make_pair(microsoft.primary_key(), microsoft));
-    tables_->UpdateData(empty_resource_data, empty_resource_data,
-                        empty_redirect_data, bbc);
-    tables_->UpdateData(empty_resource_data, empty_resource_data,
-                        empty_redirect_data, microsoft);
+
+    tables_->ExecuteDBTaskOnDBThread(
+        base::BindOnce(&GlowplugKeyValueTable<RedirectData>::UpdateData,
+                       base::Unretained(tables_->host_redirect_table()),
+                       bbc.primary_key(), bbc));
+    tables_->ExecuteDBTaskOnDBThread(
+        base::BindOnce(&GlowplugKeyValueTable<RedirectData>::UpdateData,
+                       base::Unretained(tables_->host_redirect_table()),
+                       microsoft.primary_key(), microsoft));
+  }
+
+  {  // Origin data.
+    OriginData twitter;
+    twitter.set_host("twitter.com");
+    InitializeOriginStat(twitter.add_origins(), "https://cdn.twitter.com", 10,
+                         1, 0, 12., false, true);
+    InitializeOriginStat(twitter.add_origins(), "https://cats.twitter.com", 10,
+                         1, 0, 20., false, true);
+
+    OriginData alphabet;
+    alphabet.set_host("abc.xyz");
+    InitializeOriginStat(alphabet.add_origins(), "https://abc.def.xyz", 10, 1,
+                         0, 12., false, true);
+    InitializeOriginStat(alphabet.add_origins(), "https://alpha.beta.com", 10,
+                         1, 0, 20., false, true);
+
+    test_origin_data_.clear();
+    test_origin_data_.insert({"twitter.com", twitter});
+    test_origin_data_.insert({"abc.xyz", alphabet});
+
+    tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+        &GlowplugKeyValueTable<OriginData>::UpdateData,
+        base::Unretained(tables_->origin_table()), twitter.host(), twitter));
+    tables_->ExecuteDBTaskOnDBThread(base::BindOnce(
+        &GlowplugKeyValueTable<OriginData>::UpdateData,
+        base::Unretained(tables_->origin_table()), alphabet.host(), alphabet));
   }
 }
 
@@ -574,38 +699,75 @@ TEST_F(ResourcePrefetchPredictorTablesTest, ComputeResourceScore) {
   };
 
   // Priority is more important than the rest.
-  EXPECT_TRUE(compute_score(net::HIGHEST, content::RESOURCE_TYPE_SCRIPT, 1.) >
-              compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.));
+  EXPECT_GT(compute_score(net::HIGHEST, content::RESOURCE_TYPE_SCRIPT, 1.),
+            compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.));
 
-  EXPECT_TRUE(compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.) >
-              compute_score(net::MEDIUM, content::RESOURCE_TYPE_SCRIPT, 1.));
-  EXPECT_TRUE(compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.) >
-              compute_score(net::LOW, content::RESOURCE_TYPE_SCRIPT, 1.));
-  EXPECT_TRUE(compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.) >
-              compute_score(net::LOWEST, content::RESOURCE_TYPE_SCRIPT, 1.));
-  EXPECT_TRUE(compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.) >
-              compute_score(net::IDLE, content::RESOURCE_TYPE_SCRIPT, 1.));
+  EXPECT_GT(compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.),
+            compute_score(net::MEDIUM, content::RESOURCE_TYPE_SCRIPT, 1.));
+  EXPECT_GT(compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.),
+            compute_score(net::LOW, content::RESOURCE_TYPE_SCRIPT, 1.));
+  EXPECT_GT(compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.),
+            compute_score(net::LOWEST, content::RESOURCE_TYPE_SCRIPT, 1.));
+  EXPECT_GT(compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.),
+            compute_score(net::IDLE, content::RESOURCE_TYPE_SCRIPT, 1.));
 
-  // Scripts and stylesheets are equivalent.
-  EXPECT_NEAR(
+  // Stylesheets are are more important than scripts, fonts and images, and the
+  // rest.
+  EXPECT_GT(compute_score(net::HIGHEST, content::RESOURCE_TYPE_STYLESHEET, 42.),
+            compute_score(net::HIGHEST, content::RESOURCE_TYPE_SCRIPT, 42.));
+  EXPECT_GT(
       compute_score(net::HIGHEST, content::RESOURCE_TYPE_SCRIPT, 42.),
-      compute_score(net::HIGHEST, content::RESOURCE_TYPE_STYLESHEET, 42.),
-      1e-4);
-
-  // Scripts are more important than fonts and images, and the rest.
-  EXPECT_TRUE(
-      compute_score(net::HIGHEST, content::RESOURCE_TYPE_SCRIPT, 42.) >
       compute_score(net::HIGHEST, content::RESOURCE_TYPE_FONT_RESOURCE, 42.));
-  EXPECT_TRUE(
-      compute_score(net::HIGHEST, content::RESOURCE_TYPE_FONT_RESOURCE, 42.) >
+  EXPECT_GT(
+      compute_score(net::HIGHEST, content::RESOURCE_TYPE_FONT_RESOURCE, 42.),
       compute_score(net::HIGHEST, content::RESOURCE_TYPE_IMAGE, 42.));
-  EXPECT_TRUE(
-      compute_score(net::HIGHEST, content::RESOURCE_TYPE_FONT_RESOURCE, 42.) >
+  EXPECT_GT(
+      compute_score(net::HIGHEST, content::RESOURCE_TYPE_FONT_RESOURCE, 42.),
       compute_score(net::HIGHEST, content::RESOURCE_TYPE_FAVICON, 42.));
 
   // All else being equal, position matters.
-  EXPECT_TRUE(compute_score(net::HIGHEST, content::RESOURCE_TYPE_SCRIPT, 12.) >
-              compute_score(net::HIGHEST, content::RESOURCE_TYPE_SCRIPT, 42.));
+  EXPECT_GT(compute_score(net::HIGHEST, content::RESOURCE_TYPE_SCRIPT, 12.),
+            compute_score(net::HIGHEST, content::RESOURCE_TYPE_SCRIPT, 42.));
+}
+
+TEST_F(ResourcePrefetchPredictorTablesTest, ComputeOriginScore) {
+  auto compute_score = [](int hits, int misses, double average_position,
+                          bool always_access_network, bool accessed_network) {
+    OriginStat origin;
+    InitializeOriginStat(&origin, "", hits, misses, 0, average_position,
+                         always_access_network, accessed_network);
+    return ResourcePrefetchPredictorTables::ComputeOriginScore(origin);
+  };
+
+  // High-confidence is more important than the rest.
+  EXPECT_GT(compute_score(20, 2, 12., false, false),
+            compute_score(2, 0, 12., false, false));
+  EXPECT_GT(compute_score(20, 2, 12., false, false),
+            compute_score(2, 0, 2., true, true));
+
+  // Don't care about the confidence as long as it's high.
+  EXPECT_NEAR(compute_score(20, 2, 12., false, false),
+              compute_score(50, 6, 12., false, false), 1e-4);
+
+  // Mandatory network access.
+  EXPECT_GT(compute_score(1, 1, 12., true, false),
+            compute_score(1, 1, 12., false, false));
+  EXPECT_GT(compute_score(1, 1, 12., true, false),
+            compute_score(1, 1, 12., false, true));
+  EXPECT_GT(compute_score(1, 1, 12., true, false),
+            compute_score(1, 1, 2., false, true));
+
+  // Accessed network.
+  EXPECT_GT(compute_score(1, 1, 12., false, true),
+            compute_score(1, 1, 12., false, false));
+  EXPECT_GT(compute_score(1, 1, 12., false, true),
+            compute_score(1, 1, 2., false, false));
+
+  // All else being equal, position matters.
+  EXPECT_GT(compute_score(1, 1, 2., false, false),
+            compute_score(1, 1, 12., false, false));
+  EXPECT_GT(compute_score(1, 1, 2., true, true),
+            compute_score(1, 1, 12., true, true));
 }
 
 TEST_F(ResourcePrefetchPredictorTablesTest, GetAllData) {
@@ -618,10 +780,6 @@ TEST_F(ResourcePrefetchPredictorTablesTest, UpdateData) {
 
 TEST_F(ResourcePrefetchPredictorTablesTest, DeleteData) {
   TestDeleteData();
-}
-
-TEST_F(ResourcePrefetchPredictorTablesTest, DeleteSingleDataPoint) {
-  TestDeleteSingleDataPoint();
 }
 
 TEST_F(ResourcePrefetchPredictorTablesTest, DeleteAllData) {
@@ -649,12 +807,14 @@ TEST_F(ResourcePrefetchPredictorTablesTest, DatabaseIsResetWhenIncompatible) {
 
   PrefetchDataMap url_data, host_data;
   RedirectDataMap url_redirect_data, host_redirect_data;
-  tables_->GetAllData(&url_data, &host_data, &url_redirect_data,
-                      &host_redirect_data);
+  OriginDataMap origin_data;
+  GetAllData(&url_data, &host_data, &url_redirect_data, &host_redirect_data,
+             &origin_data);
   EXPECT_TRUE(url_data.empty());
   EXPECT_TRUE(host_data.empty());
   EXPECT_TRUE(url_redirect_data.empty());
   EXPECT_TRUE(host_redirect_data.empty());
+  EXPECT_TRUE(origin_data.empty());
 }
 
 TEST_F(ResourcePrefetchPredictorTablesReopenTest, GetAllData) {
@@ -667,10 +827,6 @@ TEST_F(ResourcePrefetchPredictorTablesReopenTest, UpdateData) {
 
 TEST_F(ResourcePrefetchPredictorTablesReopenTest, DeleteData) {
   TestDeleteData();
-}
-
-TEST_F(ResourcePrefetchPredictorTablesReopenTest, DeleteSingleDataPoint) {
-  TestDeleteSingleDataPoint();
 }
 
 TEST_F(ResourcePrefetchPredictorTablesReopenTest, DeleteAllData) {

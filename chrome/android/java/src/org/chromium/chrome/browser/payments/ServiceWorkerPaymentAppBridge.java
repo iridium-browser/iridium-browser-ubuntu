@@ -4,18 +4,21 @@
 
 package org.chromium.chrome.browser.payments;
 
-import android.graphics.drawable.Drawable;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.drawable.BitmapDrawable;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.payments.mojom.PaymentDetailsModifier;
 import org.chromium.payments.mojom.PaymentItem;
 import org.chromium.payments.mojom.PaymentMethodData;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Set;
+
+import javax.annotation.Nullable;
 
 /**
  * Native bridge for interacting with service worker based payment apps.
@@ -25,87 +28,34 @@ import java.util.Set;
 @SuppressFBWarnings({"UWF_NULL_FIELD", "URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD",
         "UWF_UNWRITTEN_PUBLIC_OR_PROTECTED_FIELD", "UUF_UNUSED_PUBLIC_OR_PROTECTED_FIELD"})
 public class ServiceWorkerPaymentAppBridge implements PaymentAppFactory.PaymentAppFactoryAddition {
-    /**
-     * This class represents a payment app manifest as defined in the Payment
-     * App API specification.
-     *
-     * @see https://w3c.github.io/webpayments-payment-apps-api/#payment-app-manifest
-     */
-    public static class Manifest {
-        /**
-         * The registration ID of the service worker.
-         *
-         * This can be used to identify a service worker based payment app.
-         */
-        public long registrationId;
-        public String label;
-        public Drawable icon;
-        public List<Option> options = new ArrayList<>();
-    }
-
-    /**
-     * This class represents a payment option as defined in the Payment App API
-     * specification.
-     *
-     * @see https://w3c.github.io/webpayments-payment-apps-api/#payment-app-options
-     */
-    public static class Option {
-        public String id;
-        public String label;
-        public Drawable icon;
-        public List<String> enabledMethods = new ArrayList<>();
-    }
-
     @Override
     public void create(WebContents webContents, Set<String> methodNames,
             PaymentAppFactory.PaymentAppCreatedCallback callback) {
-        nativeGetAllAppManifests(webContents, callback);
+        nativeGetAllPaymentApps(webContents, callback);
     }
 
     /**
      * Invoke a payment app with a given option and matching method data.
      *
-     * @param webContents    The web contents that invoked PaymentRequest.
-     * @param registrationId The service worker registration ID of the Payment App.
-     * @param optionId       The ID of the PaymentOption that was selected by the user.
-     * @param methodData     The PaymentMethodData objects that are relevant for this payment
-     *                       app.
-     * @param total          The PaymentItem that represents the total cost of the payment.
-     * @param modifiers      Payment method specific modifiers to the payment items and the total.
+     * @param webContents      The web contents that invoked PaymentRequest.
+     * @param registrationId   The service worker registration ID of the Payment App.
+     * @param origin           The origin of this merchant.
+     * @param iframeOrigin     The origin of the iframe that invoked PaymentRequest. Same as origin
+     *                         if PaymentRequest was not invoked from inside an iframe.
+     * @param paymentRequestId The unique identifier of the PaymentRequest.
+     * @param methodData       The PaymentMethodData objects that are relevant for this payment
+     *                         app.
+     * @param total            The PaymentItem that represents the total cost of the payment.
+     * @param modifiers        Payment method specific modifiers to the payment items and the total.
+     * @param callback         Called after the payment app is finished running.
      */
-    public static void invokePaymentApp(WebContents webContents, long registrationId,
-            String optionId, String origin, Set<PaymentMethodData> methodData, PaymentItem total,
-            List<PaymentItem> displayItems, Set<PaymentDetailsModifier> modifiers) {
-        nativeInvokePaymentApp(webContents, registrationId, optionId, origin,
+    public static void invokePaymentApp(WebContents webContents, long registrationId, String origin,
+            String iframeOrigin, String paymentRequestId, Set<PaymentMethodData> methodData,
+            PaymentItem total, Set<PaymentDetailsModifier> modifiers,
+            PaymentInstrument.InstrumentDetailsCallback callback) {
+        nativeInvokePaymentApp(webContents, registrationId, origin, iframeOrigin, paymentRequestId,
                 methodData.toArray(new PaymentMethodData[0]), total,
-                modifiers.toArray(new PaymentDetailsModifier[0]));
-    }
-
-    @CalledByNative
-    private static Manifest createManifest(long registrationId, String label, String icon) {
-        Manifest manifest = new Manifest();
-        manifest.registrationId = registrationId;
-        manifest.label = label;
-        // TODO(tommyt): crbug.com/669876. Handle icons.
-        manifest.icon = null;
-        return manifest;
-    }
-
-    @CalledByNative
-    private static Option createAndAddOption(
-            Manifest manifest, String id, String label, String icon) {
-        Option option = new Option();
-        option.id = id;
-        option.label = label;
-        // TODO(tommyt): crbug.com/669876. Handle icons.
-        option.icon = null;
-        manifest.options.add(option);
-        return option;
-    }
-
-    @CalledByNative
-    private static void addEnabledMethod(Option option, String enabledMethod) {
-        option.enabledMethods.add(enabledMethod);
+                modifiers.toArray(new PaymentDetailsModifier[0]), callback);
     }
 
     @CalledByNative
@@ -144,26 +94,56 @@ public class ServiceWorkerPaymentAppBridge implements PaymentAppFactory.PaymentA
     }
 
     @CalledByNative
-    private static void onGotManifest(Manifest manifest, WebContents webContents, Object callback) {
-        assert callback instanceof PaymentAppFactory.PaymentAppCreatedCallback;
-        ((PaymentAppFactory.PaymentAppCreatedCallback) callback)
-                .onPaymentAppCreated(new ServiceWorkerPaymentApp(webContents, manifest));
+    private static String getCurrencySystemFromPaymentItem(PaymentItem item) {
+        return item.amount.currencySystem;
     }
 
     @CalledByNative
-    private static void onGotAllManifests(Object callback) {
+    private static void onPaymentAppCreated(long registrationId, String label,
+            @Nullable String sublabel, @Nullable Bitmap icon, String[] methodNameArray,
+            WebContents webContents, Object callback) {
+        assert callback instanceof PaymentAppFactory.PaymentAppCreatedCallback;
+        Context context = ChromeActivity.fromWebContents(webContents);
+        if (context == null) return;
+        ((PaymentAppFactory.PaymentAppCreatedCallback) callback)
+                .onPaymentAppCreated(new ServiceWorkerPaymentApp(webContents, registrationId, label,
+                        sublabel,
+                        icon == null ? null : new BitmapDrawable(context.getResources(), icon),
+                        methodNameArray));
+    }
+
+    @CalledByNative
+    private static void onAllPaymentAppsCreated(Object callback) {
         assert callback instanceof PaymentAppFactory.PaymentAppCreatedCallback;
         ((PaymentAppFactory.PaymentAppCreatedCallback) callback).onAllPaymentAppsCreated();
     }
 
+    @CalledByNative
+    private static void onPaymentAppInvoked(
+            Object callback, String methodName, String stringifiedDetails) {
+        assert callback instanceof PaymentInstrument.InstrumentDetailsCallback;
+        if (methodName == null) {
+            ((PaymentInstrument.InstrumentDetailsCallback) callback).onInstrumentDetailsError();
+        } else {
+            ((PaymentInstrument.InstrumentDetailsCallback) callback)
+                    .onInstrumentDetailsReady(methodName, stringifiedDetails);
+        }
+    }
+
     /*
      * TODO(tommyt): crbug.com/505554. Change the |callback| parameter below to
-     * be of type PaymentAppFactory.PaymentAppCreatedCallback, once this JNI bug
+     * be of type PaymentInstrument.InstrumentDetailsCallback, once this JNI bug
      * has been resolved.
      */
-    private static native void nativeGetAllAppManifests(WebContents webContents, Object callback);
+    private static native void nativeGetAllPaymentApps(WebContents webContents, Object callback);
 
+    /*
+     * TODO(tommyt): crbug.com/505554. Change the |callback| parameter below to
+     * be of type PaymentInstrument.InstrumentDetailsCallback, once this JNI bug
+     * has been resolved.
+     */
     private static native void nativeInvokePaymentApp(WebContents webContents, long registrationId,
-            String optionId, String origin, PaymentMethodData[] methodData, PaymentItem total,
-            PaymentDetailsModifier[] modifiers);
+            String topLevelOrigin, String paymentRequestOrigin, String paymentRequestId,
+            PaymentMethodData[] methodData, PaymentItem total, PaymentDetailsModifier[] modifiers,
+            Object callback);
 }

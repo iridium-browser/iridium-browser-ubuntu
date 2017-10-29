@@ -24,6 +24,10 @@ namespace base {
 class Lock;
 }
 
+namespace ui {
+class LatencyInfo;
+}
+
 namespace gpu {
 class GpuControlClient;
 struct SyncToken;
@@ -73,7 +77,13 @@ class GPU_EXPORT GpuControl {
   // the CanWaitUnverifiedSyncToken() function.
   virtual CommandBufferNamespace GetNamespaceID() const = 0;
   virtual CommandBufferId GetCommandBufferID() const = 0;
-  virtual int32_t GetExtraCommandBufferData() const = 0;
+
+  // Returns the stream id for this context. Only relevant for IPC command
+  // buffer proxy. Used as extra command buffer data in sync tokens.
+  virtual int32_t GetStreamId() const = 0;
+
+  // Flush any outstanding ordering barriers on given stream.
+  virtual void FlushOrderingBarrierOnStream(int32_t stream_id) = 0;
 
   // Generates a fence sync which should be inserted into the GL command stream.
   // When the service executes the fence sync it is released. Fence syncs are
@@ -98,15 +108,27 @@ class GPU_EXPORT GpuControl {
   // the lock provided by the client.
   virtual bool IsFenceSyncReleased(uint64_t release) = 0;
 
-  // Runs |callback| when sync token is signalled.
+  // Runs |callback| when sync token is signaled.
   virtual void SignalSyncToken(const SyncToken& sync_token,
                                const base::Closure& callback) = 0;
 
+  // This allows the command buffer proxy to mark the next flush with sync token
+  // dependencies for the gpu scheduler. This is used in addition to the
+  // WaitSyncToken command in the command buffer which is still needed. For
+  // example, the WaitSyncToken command is used to pull texture updates when
+  // used in conjunction with MailboxManagerSync.
+  virtual void WaitSyncTokenHint(const SyncToken& sync_token) = 0;
+
   // Under some circumstances a sync token may be used which has not been
-  // verified to have been flushed. For example, fence syncs queued on the
-  // same channel as the wait command guarantee that the fence sync will
-  // be enqueued first so does not need to be flushed.
-  virtual bool CanWaitUnverifiedSyncToken(const SyncToken* sync_token) = 0;
+  // verified to have been flushed. For example, fence syncs queued on the same
+  // channel as the wait command guarantee that the fence sync will be enqueued
+  // first so does not need to be flushed.
+  virtual bool CanWaitUnverifiedSyncToken(const SyncToken& sync_token) = 0;
+
+  // Add |latency_info| to be reported and augumented with GPU latency
+  // components next time there is a GPU buffer swap.
+  virtual void AddLatencyInfo(
+      const std::vector<ui::LatencyInfo>& latency_info) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GpuControl);

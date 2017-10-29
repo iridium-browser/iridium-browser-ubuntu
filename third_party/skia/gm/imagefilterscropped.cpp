@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkCanvas.h"
 #include "SkColorFilter.h"
 #include "SkColorPriv.h"
@@ -45,7 +46,7 @@ static void draw_text(SkCanvas* canvas, const SkRect& r, sk_sp<SkImageFilter> im
     sk_tool_utils::set_portable_typeface(&paint);
     paint.setTextSize(r.height()/2);
     paint.setTextAlign(SkPaint::kCenter_Align);
-    canvas->drawText("Text", 4, r.centerX(), r.centerY(), paint);
+    canvas->drawString("Text", r.centerX(), r.centerY(), paint);
 }
 
 static void draw_bitmap(SkCanvas* canvas, const SkRect& r, sk_sp<SkImageFilter> imf) {
@@ -144,7 +145,6 @@ protected:
             SkErodeImageFilter::Make(8, 8, nullptr, &cropRect),
             SkMergeImageFilter::Make(nullptr,
                                      std::move(cfOffset),
-                                     SkBlendMode::kSrcOver,
                                      &cropRect),
             SkBlurImageFilter::Make(8.0f, 8.0f, nullptr, &bogusRect),
             SkColorFilterImageFilter::Make(cf, nullptr, &bogusRect),

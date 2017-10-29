@@ -9,6 +9,7 @@
 #include "compiler/translator/ASTMetadataHLSL.h"
 
 #include "compiler/translator/CallDAG.h"
+#include "compiler/translator/IntermTraverse.h"
 #include "compiler/translator/SymbolTable.h"
 
 namespace sh
@@ -128,9 +129,8 @@ class PullGradient : public TIntermTraverser
             }
             else if (node->getOp() == EOpCallBuiltInFunction)
             {
-                TString name = TFunction::unmangleName(node->getFunctionSymbolInfo()->getName());
-
-                if (mGradientBuiltinFunctions.find(name) != mGradientBuiltinFunctions.end())
+                if (mGradientBuiltinFunctions.find(node->getFunctionSymbolInfo()->getName()) !=
+                    mGradientBuiltinFunctions.end())
                 {
                     onGradient();
                 }

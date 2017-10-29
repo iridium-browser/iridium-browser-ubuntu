@@ -32,7 +32,7 @@
 #ifndef WebPrerendererClient_h
 #define WebPrerendererClient_h
 
-#include "../platform/WebCommon.h"
+#include "public/platform/WebCommon.h"
 
 namespace blink {
 
@@ -40,8 +40,8 @@ class WebPrerender;
 
 class WebPrerendererClient {
  public:
-  virtual void willAddPrerender(WebPrerender*) = 0;
-  virtual bool isPrefetchOnly() = 0;
+  virtual void WillAddPrerender(WebPrerender*) = 0;
+  virtual bool IsPrefetchOnly() = 0;
 };
 
 }  // namespace blink

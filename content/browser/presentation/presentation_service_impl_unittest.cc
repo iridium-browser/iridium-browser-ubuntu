@@ -7,46 +7,55 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <iterator>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "base/location.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/test/test_timeouts.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/test/mock_callback.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/presentation_service_delegate.h"
-#include "content/public/common/presentation_constants.h"
-#include "content/public/common/presentation_session.h"
+#include "content/public/common/presentation_connection_message.h"
+#include "content/public/common/presentation_info.h"
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
 #include "mojo/public/cpp/bindings/interface_ptr.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
+using blink::mojom::ScreenAvailability;
 using ::testing::_;
 using ::testing::Eq;
-using ::testing::InvokeWithoutArgs;
 using ::testing::Mock;
 using ::testing::Return;
 using ::testing::SaveArg;
+using NewPresentationCallback =
+    content::PresentationServiceImpl::NewPresentationCallback;
 
 namespace content {
 
 namespace {
 
-// Matches Mojo structs.
-MATCHER_P(Equals, expected, "") {
-  return expected.Equals(arg);
+MATCHER(OptionalIsNotNull, "") {
+  return !!arg;
 }
 
-// Matches content::PresentationSessionInfo.
-MATCHER_P(SessionInfoEquals, expected, "") {
+MATCHER(OptionalIsNull, "") {
+  return !arg;
+}
+
+// Matches content::PresentationInfo.
+MATCHER_P(InfoEquals, expected, "") {
   return expected.presentation_url == arg.presentation_url &&
          expected.presentation_id == arg.presentation_id;
+}
+
+ACTION_TEMPLATE(SaveArgByMove,
+                HAS_1_TEMPLATE_PARAMS(int, k),
+                AND_1_VALUE_PARAMS(pointer)) {
+  *pointer = std::move(::testing::get<k>(args));
 }
 
 const char kPresentationId[] = "presentationId";
@@ -54,7 +63,7 @@ const char kPresentationUrl1[] = "http://foo.com/index.html";
 const char kPresentationUrl2[] = "http://example.com/index.html";
 const char kPresentationUrl3[] = "http://example.net/index.html";
 
-void DoNothing(const base::Optional<content::PresentationSessionInfo>& info,
+void DoNothing(const base::Optional<content::PresentationInfo>& info,
                const base::Optional<content::PresentationError>& error) {}
 
 }  // namespace
@@ -73,8 +82,9 @@ class MockPresentationServiceDelegate
       int render_process_id,
       int routing_id,
       PresentationScreenAvailabilityListener* listener) override {
-    if (!screen_availability_listening_supported_)
-      listener->OnScreenAvailabilityNotSupported();
+    if (!screen_availability_listening_supported_) {
+      listener->OnScreenAvailabilityChanged(ScreenAvailability::DISABLED);
+    }
 
     return AddScreenAvailabilityListener();
   }
@@ -91,20 +101,41 @@ class MockPresentationServiceDelegate
                void(int render_process_id,
                     int routing_id,
                     const std::vector<GURL>& default_presentation_urls,
-                    const PresentationSessionStartedCallback& callback));
-  MOCK_METHOD5(StartSession,
+                    DefaultPresentationConnectionCallback callback));
+
+  // TODO(crbug.com/729950): Use MOCK_METHOD directly once GMock gets the
+  // move-only type support.
+  void StartPresentation(int render_process_id,
+                         int render_frame_id,
+                         const std::vector<GURL>& presentation_urls,
+                         PresentationConnectionCallback success_cb,
+                         PresentationConnectionErrorCallback error_cb) {
+    StartPresentationInternal(render_process_id, render_frame_id,
+                              presentation_urls, success_cb, error_cb);
+  }
+  MOCK_METHOD5(StartPresentationInternal,
                void(int render_process_id,
                     int render_frame_id,
                     const std::vector<GURL>& presentation_urls,
-                    const PresentationSessionStartedCallback& success_cb,
-                    const PresentationSessionErrorCallback& error_cb));
-  MOCK_METHOD6(JoinSession,
+                    PresentationConnectionCallback& success_cb,
+                    PresentationConnectionErrorCallback& error_cb));
+  void ReconnectPresentation(int render_process_id,
+                             int render_frame_id,
+                             const std::vector<GURL>& presentation_urls,
+                             const std::string& presentation_id,
+                             PresentationConnectionCallback success_cb,
+                             PresentationConnectionErrorCallback error_cb) {
+    ReconnectPresentationInternal(render_process_id, render_frame_id,
+                                  presentation_urls, presentation_id,
+                                  success_cb, error_cb);
+  }
+  MOCK_METHOD6(ReconnectPresentationInternal,
                void(int render_process_id,
                     int render_frame_id,
                     const std::vector<GURL>& presentation_urls,
                     const std::string& presentation_id,
-                    const PresentationSessionStartedCallback& success_cb,
-                    const PresentationSessionErrorCallback& error_cb));
+                    PresentationConnectionCallback& success_cb,
+                    PresentationConnectionErrorCallback& error_cb));
   MOCK_METHOD3(CloseConnection,
                void(int render_process_id,
                     int render_frame_id,
@@ -113,47 +144,47 @@ class MockPresentationServiceDelegate
                void(int render_process_id,
                     int render_frame_id,
                     const std::string& presentation_id));
-  MOCK_METHOD4(ListenForConnectionMessages,
-               void(int render_process_id,
-                    int render_frame_id,
-                    const content::PresentationSessionInfo& session,
-                    const PresentationConnectionMessageCallback& message_cb));
-  MOCK_METHOD5(SendMessageRawPtr,
-               void(int render_process_id,
-                    int render_frame_id,
-                    const content::PresentationSessionInfo& session,
-                    PresentationConnectionMessage* message_request,
-                    const SendMessageCallback& send_message_cb));
-  void SendMessage(
-      int render_process_id,
-      int render_frame_id,
-      const content::PresentationSessionInfo& session,
-      std::unique_ptr<PresentationConnectionMessage> message_request,
-      const SendMessageCallback& send_message_cb) override {
-    SendMessageRawPtr(render_process_id, render_frame_id, session,
-                      message_request.release(), send_message_cb);
+
+  // PresentationConnectionMessage is move-only.
+  // TODO(crbug.com/729950): Use MOCK_METHOD directly once GMock gets the
+  // move-only type support.
+  void SendMessage(int render_process_id,
+                   int render_frame_id,
+                   const PresentationInfo& presentation_info,
+                   PresentationConnectionMessage message,
+                   SendMessageCallback send_message_cb) {
+    SendMessageInternal(render_process_id, render_frame_id, presentation_info,
+                        message, send_message_cb);
   }
-  MOCK_METHOD4(ListenForConnectionStateChange,
+  MOCK_METHOD5(SendMessageInternal,
                void(int render_process_id,
                     int render_frame_id,
-                    const content::PresentationSessionInfo& connection,
-                    const content::PresentationConnectionStateChangedCallback&
-                        state_changed_cb));
+                    const PresentationInfo& presentation_info,
+                    const PresentationConnectionMessage& message,
+                    const SendMessageCallback& send_message_cb));
+
+  MOCK_METHOD4(
+      ListenForConnectionStateChange,
+      void(int render_process_id,
+           int render_frame_id,
+           const PresentationInfo& connection,
+           const PresentationConnectionStateChangedCallback& state_changed_cb));
 
   void ConnectToPresentation(
       int render_process_id,
       int render_frame_id,
-      const content::PresentationSessionInfo& session,
+      const PresentationInfo& presentation_info,
       PresentationConnectionPtr controller_conn_ptr,
       PresentationConnectionRequest receiver_conn_request) override {
     RegisterOffscreenPresentationConnectionRaw(
-        render_process_id, render_frame_id, session, controller_conn_ptr.get());
+        render_process_id, render_frame_id, presentation_info,
+        controller_conn_ptr.get());
   }
 
   MOCK_METHOD4(RegisterOffscreenPresentationConnectionRaw,
                void(int render_process_id,
                     int render_frame_id,
-                    const content::PresentationSessionInfo& session,
+                    const PresentationInfo& presentation_info,
                     blink::mojom::PresentationConnection* connection));
 
   void set_screen_availability_listening_supported(bool value) {
@@ -175,17 +206,19 @@ class MockReceiverPresentationServiceDelegate
                void(int render_process_id, int render_frame_id));
   MOCK_METHOD2(Reset, void(int render_process_id, int routing_id));
   MOCK_METHOD1(RegisterReceiverConnectionAvailableCallback,
-               void(const content::ReceiverConnectionAvailableCallback&));
+               void(const ReceiverConnectionAvailableCallback&));
 };
 
 class MockPresentationConnection : public blink::mojom::PresentationConnection {
  public:
-  void OnMessage(blink::mojom::ConnectionMessagePtr message,
-                 const base::Callback<void(bool)>& send_message_cb) override {
-    OnConnectionMessageReceived(*message);
+  // PresentationConnectionMessage is move-only.
+  void OnMessage(PresentationConnectionMessage message,
+                 base::OnceCallback<void(bool)> send_message_cb) {
+    OnMessageInternal(message, send_message_cb);
   }
-  MOCK_METHOD1(OnConnectionMessageReceived,
-               void(const blink::mojom::ConnectionMessage& message));
+  MOCK_METHOD2(OnMessageInternal,
+               void(const PresentationConnectionMessage& message,
+                    base::OnceCallback<void(bool)>& send_message_cb));
   MOCK_METHOD1(DidChangeState, void(PresentationConnectionState state));
   MOCK_METHOD0(OnClose, void());
 };
@@ -194,38 +227,36 @@ class MockPresentationServiceClient
     : public blink::mojom::PresentationServiceClient {
  public:
   MOCK_METHOD2(OnScreenAvailabilityUpdated,
-               void(const GURL& url, bool available));
+               void(const GURL& url, ScreenAvailability availability));
   MOCK_METHOD2(OnConnectionStateChanged,
-               void(const content::PresentationSessionInfo& connection,
+               void(const PresentationInfo& connection,
                     PresentationConnectionState new_state));
   MOCK_METHOD3(OnConnectionClosed,
-               void(const content::PresentationSessionInfo& connection,
+               void(const PresentationInfo& connection,
                     PresentationConnectionCloseReason reason,
                     const std::string& message));
-  MOCK_METHOD1(OnScreenAvailabilityNotSupported, void(const GURL& url));
-
+  // PresentationConnectionMessage is move-only.
   void OnConnectionMessagesReceived(
-      const content::PresentationSessionInfo& session_info,
-      std::vector<blink::mojom::ConnectionMessagePtr> messages) override {
-    messages_received_ = std::move(messages);
-    MessagesReceived();
+      const PresentationInfo& presentation_info,
+      std::vector<PresentationConnectionMessage> messages) {
+    OnConnectionMessagesReceivedInternal(presentation_info, messages);
   }
-  MOCK_METHOD0(MessagesReceived, void());
-
-  MOCK_METHOD1(OnDefaultSessionStarted,
-               void(const content::PresentationSessionInfo& session_info));
+  MOCK_METHOD2(
+      OnConnectionMessagesReceivedInternal,
+      void(const PresentationInfo& presentation_info,
+           const std::vector<PresentationConnectionMessage>& messages));
+  MOCK_METHOD1(OnDefaultPresentationStarted,
+               void(const PresentationInfo& presentation_info));
 
   void OnReceiverConnectionAvailable(
-      const content::PresentationSessionInfo& session_info,
+      const PresentationInfo& presentation_info,
       blink::mojom::PresentationConnectionPtr controller_conn_ptr,
       blink::mojom::PresentationConnectionRequest receiver_conn_request)
       override {
-    OnReceiverConnectionAvailable(session_info);
+    OnReceiverConnectionAvailable(presentation_info);
   }
   MOCK_METHOD1(OnReceiverConnectionAvailable,
-               void(const content::PresentationSessionInfo& session_info));
-
-  std::vector<blink::mojom::ConnectionMessagePtr> messages_received_;
+               void(const PresentationInfo& presentation_info));
 };
 
 class PresentationServiceImplTest : public RenderViewHostImplTestHarness {
@@ -241,13 +272,11 @@ class PresentationServiceImplTest : public RenderViewHostImplTestHarness {
     // when AppendChild is called.
     NavigateAndCommit(GURL("about:blank"));
 
-    auto request = mojo::MakeRequest(&service_ptr_);
     EXPECT_CALL(mock_delegate_, AddObserver(_, _, _)).Times(1);
     TestRenderFrameHost* render_frame_host = contents()->GetMainFrame();
     render_frame_host->InitializeRenderFrameIfNeeded();
     service_impl_.reset(new PresentationServiceImpl(
         render_frame_host, contents(), &mock_delegate_, nullptr));
-    service_impl_->Bind(std::move(request));
 
     blink::mojom::PresentationServiceClientPtr client_ptr;
     client_binding_.reset(
@@ -260,7 +289,6 @@ class PresentationServiceImplTest : public RenderViewHostImplTestHarness {
   }
 
   void TearDown() override {
-    service_ptr_.reset();
     if (service_impl_.get()) {
       EXPECT_CALL(mock_delegate_, RemoveObserver(_, _)).Times(1);
       service_impl_.reset();
@@ -269,9 +297,8 @@ class PresentationServiceImplTest : public RenderViewHostImplTestHarness {
   }
 
   void Navigate(bool main_frame) {
-    content::RenderFrameHost* rfh = main_rfh();
-    content::RenderFrameHostTester* rfh_tester =
-        content::RenderFrameHostTester::For(rfh);
+    RenderFrameHost* rfh = main_rfh();
+    RenderFrameHostTester* rfh_tester = RenderFrameHostTester::For(rfh);
     if (!main_frame)
       rfh = rfh_tester->AppendChild("subframe");
     std::unique_ptr<NavigationHandle> navigation_handle =
@@ -282,45 +309,22 @@ class PresentationServiceImplTest : public RenderViewHostImplTestHarness {
 
   void ListenForScreenAvailabilityAndWait(const GURL& url,
                                           bool delegate_success) {
-    base::RunLoop run_loop;
-    // This will call to |service_impl_| via mojo. Process the message
-    // using RunLoop.
-    // The callback shouldn't be invoked since there is no availability
-    // result yet.
     EXPECT_CALL(mock_delegate_, AddScreenAvailabilityListener())
-        .WillOnce(DoAll(
-            InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit),
-            Return(delegate_success)));
-    service_ptr_->ListenForScreenAvailability(url);
-    run_loop.Run();
+        .WillOnce(Return(delegate_success));
+    service_impl_->ListenForScreenAvailability(url);
 
     EXPECT_TRUE(Mock::VerifyAndClearExpectations(&mock_delegate_));
   }
 
-  void RunLoopFor(base::TimeDelta duration) {
-    base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(), duration);
-    run_loop.Run();
-  }
-
-  void SaveQuitClosureAndRunLoop() {
-    base::RunLoop run_loop;
-    run_loop_quit_closure_ = run_loop.QuitClosure();
-    run_loop.Run();
-    run_loop_quit_closure_.Reset();
-  }
-
-  void SimulateScreenAvailabilityChangeAndWait(const GURL& url,
-                                               bool available) {
+  void SimulateScreenAvailabilityChangeAndWait(
+      const GURL& url,
+      ScreenAvailability availability) {
     auto listener_it = service_impl_->screen_availability_listeners_.find(url);
     ASSERT_TRUE(listener_it->second);
 
-    base::RunLoop run_loop;
-    EXPECT_CALL(mock_client_, OnScreenAvailabilityUpdated(url, available))
-        .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
-    listener_it->second->OnScreenAvailabilityChanged(available);
-    run_loop.Run();
+    EXPECT_CALL(mock_client_, OnScreenAvailabilityUpdated(url, availability));
+    listener_it->second->OnScreenAvailabilityChanged(availability);
+    base::RunLoop().RunUntilIdle();
   }
 
   void ExpectReset() {
@@ -334,89 +338,14 @@ class PresentationServiceImplTest : public RenderViewHostImplTestHarness {
         service_impl_->screen_availability_listeners_.end());
   }
 
-  void ExpectNewSessionCallbackSuccess(
-      const base::Optional<content::PresentationSessionInfo>& info,
-      const base::Optional<content::PresentationError>& error) {
-    EXPECT_TRUE(info);
-    EXPECT_FALSE(error);
-    if (!run_loop_quit_closure_.is_null())
-      run_loop_quit_closure_.Run();
-  }
-
-  void ExpectNewSessionCallbackError(
-      const base::Optional<content::PresentationSessionInfo>& info,
-      const base::Optional<content::PresentationError>& error) {
-    EXPECT_FALSE(info);
-    EXPECT_TRUE(error);
-    if (!run_loop_quit_closure_.is_null())
-      run_loop_quit_closure_.Run();
-  }
-
-  void ExpectConnectionMessages(
-      const std::vector<blink::mojom::ConnectionMessagePtr>& expected_msgs,
-      const std::vector<blink::mojom::ConnectionMessagePtr>& actual_msgs) {
-    EXPECT_EQ(expected_msgs.size(), actual_msgs.size());
-    for (size_t i = 0; i < actual_msgs.size(); ++i)
-      EXPECT_TRUE(expected_msgs[i].Equals(actual_msgs[i]));
-  }
-
-  void RunListenForConnectionMessages(const std::string& text_msg,
-                                      const std::vector<uint8_t>& binary_data,
-                                      bool pass_ownership) {
-    std::vector<blink::mojom::ConnectionMessagePtr> expected_msgs(2);
-    expected_msgs[0] = blink::mojom::ConnectionMessage::New();
-    expected_msgs[0]->type = blink::mojom::PresentationMessageType::TEXT;
-    expected_msgs[0]->message = text_msg;
-    expected_msgs[1] = blink::mojom::ConnectionMessage::New();
-    expected_msgs[1]->type = blink::mojom::PresentationMessageType::BINARY;
-    expected_msgs[1]->data = binary_data;
-
-    content::PresentationSessionInfo session(presentation_url1_,
-                                             kPresentationId);
-
-    PresentationConnectionMessageCallback message_cb;
-    {
-    base::RunLoop run_loop;
-    EXPECT_CALL(mock_delegate_, ListenForConnectionMessages(_, _, _, _))
-        .WillOnce(DoAll(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit),
-                        SaveArg<3>(&message_cb)));
-    service_ptr_->ListenForConnectionMessages(session);
-    run_loop.Run();
-    }
-
-    std::vector<std::unique_ptr<PresentationConnectionMessage>> messages;
-    std::unique_ptr<content::PresentationConnectionMessage> message;
-    message.reset(new content::PresentationConnectionMessage(
-        PresentationMessageType::TEXT));
-    message->message = text_msg;
-    messages.push_back(std::move(message));
-    message.reset(new content::PresentationConnectionMessage(
-        PresentationMessageType::BINARY));
-    message->data.reset(new std::vector<uint8_t>(binary_data));
-    messages.push_back(std::move(message));
-
-    std::vector<blink::mojom::ConnectionMessagePtr> actual_msgs;
-    {
-      base::RunLoop run_loop;
-      EXPECT_CALL(mock_client_, MessagesReceived())
-          .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
-      message_cb.Run(std::move(messages), pass_ownership);
-      run_loop.Run();
-    }
-    ExpectConnectionMessages(expected_msgs, mock_client_.messages_received_);
-  }
-
   MockPresentationServiceDelegate mock_delegate_;
   MockReceiverPresentationServiceDelegate mock_receiver_delegate_;
 
   std::unique_ptr<PresentationServiceImpl> service_impl_;
-  mojo::InterfacePtr<blink::mojom::PresentationService> service_ptr_;
 
   MockPresentationServiceClient mock_client_;
   std::unique_ptr<mojo::Binding<blink::mojom::PresentationServiceClient>>
       client_binding_;
-
-  base::Closure run_loop_quit_closure_;
 
   GURL presentation_url1_;
   GURL presentation_url2_;
@@ -427,9 +356,21 @@ class PresentationServiceImplTest : public RenderViewHostImplTestHarness {
 TEST_F(PresentationServiceImplTest, ListenForScreenAvailability) {
   ListenForScreenAvailabilityAndWait(presentation_url1_, true);
 
-  SimulateScreenAvailabilityChangeAndWait(presentation_url1_, true);
-  SimulateScreenAvailabilityChangeAndWait(presentation_url1_, false);
-  SimulateScreenAvailabilityChangeAndWait(presentation_url1_, true);
+  SimulateScreenAvailabilityChangeAndWait(presentation_url1_,
+                                          ScreenAvailability::AVAILABLE);
+  SimulateScreenAvailabilityChangeAndWait(presentation_url1_,
+                                          ScreenAvailability::UNAVAILABLE);
+  SimulateScreenAvailabilityChangeAndWait(presentation_url1_,
+                                          ScreenAvailability::AVAILABLE);
+}
+
+TEST_F(PresentationServiceImplTest, ScreenAvailabilityNotSupported) {
+  mock_delegate_.set_screen_availability_listening_supported(false);
+  EXPECT_CALL(mock_client_,
+              OnScreenAvailabilityUpdated(presentation_url1_,
+                                          ScreenAvailability::DISABLED));
+  ListenForScreenAvailabilityAndWait(presentation_url1_, false);
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(PresentationServiceImplTest, Reset) {
@@ -455,7 +396,8 @@ TEST_F(PresentationServiceImplTest, DidNavigateOtherFrame) {
 
   // Availability is reported and callback is invoked since it was not
   // removed.
-  SimulateScreenAvailabilityChangeAndWait(presentation_url1_, true);
+  SimulateScreenAvailabilityChangeAndWait(presentation_url1_,
+                                          ScreenAvailability::AVAILABLE);
 }
 
 TEST_F(PresentationServiceImplTest, ThisRenderFrameDeleted) {
@@ -466,25 +408,29 @@ TEST_F(PresentationServiceImplTest, ThisRenderFrameDeleted) {
   // Since the frame matched the service, |service_impl_| will be deleted.
   PresentationServiceImpl* service = service_impl_.release();
   EXPECT_CALL(mock_delegate_, RemoveObserver(_, _)).Times(1);
-  service->RenderFrameDeleted(contents()->GetMainFrame());
+  service->RenderFrameDeleted(main_rfh());
 }
 
 TEST_F(PresentationServiceImplTest, OtherRenderFrameDeleted) {
   ListenForScreenAvailabilityAndWait(presentation_url1_, true);
 
-  // TODO(imcheng): How to get a different RenderFrameHost?
-  service_impl_->RenderFrameDeleted(nullptr);
+  // Create a new frame and RFH.
+  RenderFrameHost* rfh = main_rfh();
+  RenderFrameHostTester* rfh_tester = RenderFrameHostTester::For(rfh);
+  rfh = rfh_tester->AppendChild("subframe");
+  service_impl_->RenderFrameDeleted(rfh);
 
   // Availability is reported and callback should be invoked since listener
   // has not been deleted.
-  SimulateScreenAvailabilityChangeAndWait(presentation_url1_, true);
+  SimulateScreenAvailabilityChangeAndWait(presentation_url1_,
+                                          ScreenAvailability::AVAILABLE);
 }
 
 TEST_F(PresentationServiceImplTest, DelegateFails) {
   ListenForScreenAvailabilityAndWait(presentation_url1_, false);
   ASSERT_EQ(
-      service_impl_->screen_availability_listeners_.find(presentation_url1_),
-      service_impl_->screen_availability_listeners_.end());
+      service_impl_->screen_availability_listeners_.end(),
+      service_impl_->screen_availability_listeners_.find(presentation_url1_));
 }
 
 TEST_F(PresentationServiceImplTest, SetDefaultPresentationUrls) {
@@ -498,76 +444,77 @@ TEST_F(PresentationServiceImplTest, SetDefaultPresentationUrls) {
   std::vector<GURL> more_urls = presentation_urls_;
   more_urls.push_back(presentation_url3_);
 
-  content::PresentationSessionStartedCallback callback;
+  PresentationConnectionCallback callback;
   EXPECT_CALL(mock_delegate_, SetDefaultPresentationUrls(_, _, more_urls, _))
-      .WillOnce(SaveArg<3>(&callback));
+      .WillOnce(SaveArgByMove<3>(&callback));
   service_impl_->SetDefaultPresentationUrls(more_urls);
 
-  content::PresentationSessionInfo session_info(presentation_url2_,
-                                                kPresentationId);
+  PresentationInfo presentation_info(presentation_url2_, kPresentationId);
 
-  base::RunLoop run_loop;
   EXPECT_CALL(mock_client_,
-              OnDefaultSessionStarted(SessionInfoEquals(session_info)))
-      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
+              OnDefaultPresentationStarted(InfoEquals(presentation_info)));
   EXPECT_CALL(mock_delegate_, ListenForConnectionStateChange(_, _, _, _));
-  callback.Run(
-      content::PresentationSessionInfo(presentation_url2_, kPresentationId));
-  run_loop.Run();
+  std::move(callback).Run(
+      PresentationInfo(presentation_url2_, kPresentationId));
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(PresentationServiceImplTest,
+       SetDefaultPresentationUrlsNoopsOnNonMainFrame) {
+  RenderFrameHost* rfh = main_rfh();
+  RenderFrameHostTester* rfh_tester = RenderFrameHostTester::For(rfh);
+  rfh = rfh_tester->AppendChild("subframe");
+
+  EXPECT_CALL(mock_delegate_, RemoveObserver(_, _)).Times(1);
+  EXPECT_CALL(mock_delegate_, AddObserver(_, _, _)).Times(1);
+  service_impl_.reset(
+      new PresentationServiceImpl(rfh, contents(), &mock_delegate_, nullptr));
+
+  EXPECT_CALL(mock_delegate_,
+              SetDefaultPresentationUrls(_, _, presentation_urls_, _))
+      .Times(0);
+  service_impl_->SetDefaultPresentationUrls(presentation_urls_);
 }
 
 TEST_F(PresentationServiceImplTest, ListenForConnectionStateChange) {
-  content::PresentationSessionInfo connection(presentation_url1_,
-                                              kPresentationId);
-  content::PresentationConnectionStateChangedCallback state_changed_cb;
+  PresentationInfo connection(presentation_url1_, kPresentationId);
+  PresentationConnectionStateChangedCallback state_changed_cb;
   // Trigger state change. It should be propagated back up to |mock_client_|.
-  content::PresentationSessionInfo presentation_connection(presentation_url1_,
-                                                           kPresentationId);
+  PresentationInfo presentation_connection(presentation_url1_, kPresentationId);
 
   EXPECT_CALL(mock_delegate_, ListenForConnectionStateChange(_, _, _, _))
       .WillOnce(SaveArg<3>(&state_changed_cb));
   service_impl_->ListenForConnectionStateChange(connection);
 
-  {
-    base::RunLoop run_loop;
-    EXPECT_CALL(mock_client_,
-                OnConnectionStateChanged(
-                    SessionInfoEquals(presentation_connection),
-                    content::PRESENTATION_CONNECTION_STATE_TERMINATED))
-        .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
-    state_changed_cb.Run(PresentationConnectionStateChangeInfo(
-        PRESENTATION_CONNECTION_STATE_TERMINATED));
-    run_loop.Run();
-  }
+  EXPECT_CALL(mock_client_, OnConnectionStateChanged(
+                                InfoEquals(presentation_connection),
+                                PRESENTATION_CONNECTION_STATE_TERMINATED));
+  state_changed_cb.Run(PresentationConnectionStateChangeInfo(
+      PRESENTATION_CONNECTION_STATE_TERMINATED));
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(PresentationServiceImplTest, ListenForConnectionClose) {
-  content::PresentationSessionInfo connection(presentation_url1_,
-                                              kPresentationId);
-  content::PresentationConnectionStateChangedCallback state_changed_cb;
+  PresentationInfo connection(presentation_url1_, kPresentationId);
+  PresentationConnectionStateChangedCallback state_changed_cb;
   EXPECT_CALL(mock_delegate_, ListenForConnectionStateChange(_, _, _, _))
       .WillOnce(SaveArg<3>(&state_changed_cb));
   service_impl_->ListenForConnectionStateChange(connection);
 
   // Trigger connection close. It should be propagated back up to
   // |mock_client_|.
-  content::PresentationSessionInfo presentation_connection(presentation_url1_,
-                                                           kPresentationId);
-  {
-    base::RunLoop run_loop;
-    PresentationConnectionStateChangeInfo closed_info(
-        PRESENTATION_CONNECTION_STATE_CLOSED);
-    closed_info.close_reason = PRESENTATION_CONNECTION_CLOSE_REASON_WENT_AWAY;
-    closed_info.message = "Foo";
+  PresentationInfo presentation_connection(presentation_url1_, kPresentationId);
+  PresentationConnectionStateChangeInfo closed_info(
+      PRESENTATION_CONNECTION_STATE_CLOSED);
+  closed_info.close_reason = PRESENTATION_CONNECTION_CLOSE_REASON_WENT_AWAY;
+  closed_info.message = "Foo";
 
-    EXPECT_CALL(mock_client_,
-                OnConnectionClosed(
-                    SessionInfoEquals(presentation_connection),
-                    PRESENTATION_CONNECTION_CLOSE_REASON_WENT_AWAY, "Foo"))
-        .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
-    state_changed_cb.Run(closed_info);
-    run_loop.Run();
-  }
+  EXPECT_CALL(mock_client_,
+              OnConnectionClosed(InfoEquals(presentation_connection),
+                                 PRESENTATION_CONNECTION_CLOSE_REASON_WENT_AWAY,
+                                 "Foo"));
+  state_changed_cb.Run(closed_info);
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(PresentationServiceImplTest, SetSameDefaultPresentationUrls) {
@@ -582,111 +529,121 @@ TEST_F(PresentationServiceImplTest, SetSameDefaultPresentationUrls) {
   EXPECT_TRUE(Mock::VerifyAndClearExpectations(&mock_delegate_));
 }
 
-TEST_F(PresentationServiceImplTest, StartSessionSuccess) {
-  service_ptr_->StartSession(
-      presentation_urls_,
-      base::Bind(&PresentationServiceImplTest::ExpectNewSessionCallbackSuccess,
-                 base::Unretained(this)));
-  base::RunLoop run_loop;
-  base::Callback<void(const PresentationSessionInfo&)> success_cb;
-  EXPECT_CALL(mock_delegate_, StartSession(_, _, presentation_urls_, _, _))
-      .WillOnce(DoAll(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit),
-                      SaveArg<3>(&success_cb)));
-  run_loop.Run();
-
+TEST_F(PresentationServiceImplTest, StartPresentationSuccess) {
+  base::MockCallback<NewPresentationCallback> mock_presentation_cb;
+  base::OnceCallback<void(const PresentationInfo&)> success_cb;
+  EXPECT_CALL(mock_delegate_,
+              StartPresentationInternal(_, _, presentation_urls_, _, _))
+      .WillOnce(SaveArgByMove<3>(&success_cb));
+  service_impl_->StartPresentation(presentation_urls_,
+                                   mock_presentation_cb.Get());
+  EXPECT_FALSE(success_cb.is_null());
   EXPECT_CALL(mock_delegate_, ListenForConnectionStateChange(_, _, _, _))
       .Times(1);
-  success_cb.Run(PresentationSessionInfo(presentation_url1_, kPresentationId));
-  SaveQuitClosureAndRunLoop();
+  EXPECT_CALL(mock_presentation_cb, Run(OptionalIsNotNull(), OptionalIsNull()));
+  std::move(success_cb)
+      .Run(PresentationInfo(presentation_url1_, kPresentationId));
 }
 
-TEST_F(PresentationServiceImplTest, StartSessionError) {
-  service_ptr_->StartSession(
-      presentation_urls_,
-      base::Bind(&PresentationServiceImplTest::ExpectNewSessionCallbackError,
-                 base::Unretained(this)));
-  base::RunLoop run_loop;
-  base::Callback<void(const PresentationError&)> error_cb;
-  EXPECT_CALL(mock_delegate_, StartSession(_, _, presentation_urls_, _, _))
-      .WillOnce(DoAll(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit),
-                      SaveArg<4>(&error_cb)));
-  run_loop.Run();
-  error_cb.Run(PresentationError(PRESENTATION_ERROR_UNKNOWN, "Error message"));
-  SaveQuitClosureAndRunLoop();
-}
-
-TEST_F(PresentationServiceImplTest, JoinSessionSuccess) {
-  service_ptr_->JoinSession(
-      presentation_urls_, base::Optional<std::string>(kPresentationId),
-      base::Bind(&PresentationServiceImplTest::ExpectNewSessionCallbackSuccess,
-                 base::Unretained(this)));
-  base::RunLoop run_loop;
-  base::Callback<void(const PresentationSessionInfo&)> success_cb;
+TEST_F(PresentationServiceImplTest, StartPresentationError) {
+  base::MockCallback<NewPresentationCallback> mock_presentation_cb;
+  base::OnceCallback<void(const PresentationError&)> error_cb;
   EXPECT_CALL(mock_delegate_,
-              JoinSession(_, _, presentation_urls_, kPresentationId, _, _))
-      .WillOnce(DoAll(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit),
-                      SaveArg<4>(&success_cb)));
-  run_loop.Run();
+              StartPresentationInternal(_, _, presentation_urls_, _, _))
+      .WillOnce(SaveArgByMove<4>(&error_cb));
+  service_impl_->StartPresentation(presentation_urls_,
+                                   mock_presentation_cb.Get());
+  EXPECT_FALSE(error_cb.is_null());
+  EXPECT_CALL(mock_presentation_cb, Run(OptionalIsNull(), OptionalIsNotNull()));
+  std::move(error_cb).Run(
+      PresentationError(PRESENTATION_ERROR_UNKNOWN, "Error message"));
+}
 
+TEST_F(PresentationServiceImplTest, StartPresentationInProgress) {
+  EXPECT_CALL(mock_delegate_,
+              StartPresentationInternal(_, _, presentation_urls_, _, _))
+      .Times(1);
+  // Uninvoked callbacks must outlive |service_impl_| since they get invoked
+  // at |service_impl_|'s destruction.
+  service_impl_->StartPresentation(presentation_urls_, base::Bind(&DoNothing));
+
+  // This request should fail immediately, since there is already a
+  // StartPresentation in progress.
+  base::MockCallback<NewPresentationCallback> mock_presentation_cb;
+  EXPECT_CALL(mock_presentation_cb, Run(OptionalIsNull(), OptionalIsNotNull()));
+  service_impl_->StartPresentation(presentation_urls_,
+                                   mock_presentation_cb.Get());
+}
+
+TEST_F(PresentationServiceImplTest, ReconnectPresentationSuccess) {
+  base::MockCallback<NewPresentationCallback> mock_presentation_cb;
+  base::OnceCallback<void(const PresentationInfo&)> success_cb;
+  EXPECT_CALL(mock_delegate_,
+              ReconnectPresentationInternal(_, _, presentation_urls_,
+                                            kPresentationId, _, _))
+      .WillOnce(SaveArgByMove<4>(&success_cb));
+  service_impl_->ReconnectPresentation(
+      presentation_urls_, base::Optional<std::string>(kPresentationId),
+      mock_presentation_cb.Get());
+  EXPECT_FALSE(success_cb.is_null());
   EXPECT_CALL(mock_delegate_, ListenForConnectionStateChange(_, _, _, _))
       .Times(1);
-  success_cb.Run(PresentationSessionInfo(presentation_url1_, kPresentationId));
-  SaveQuitClosureAndRunLoop();
+  EXPECT_CALL(mock_presentation_cb, Run(OptionalIsNotNull(), OptionalIsNull()));
+  std::move(success_cb)
+      .Run(PresentationInfo(presentation_url1_, kPresentationId));
 }
 
-TEST_F(PresentationServiceImplTest, JoinSessionError) {
-  service_ptr_->JoinSession(
-      presentation_urls_, base::Optional<std::string>(kPresentationId),
-      base::Bind(&PresentationServiceImplTest::ExpectNewSessionCallbackError,
-                 base::Unretained(this)));
-  base::RunLoop run_loop;
-  base::Callback<void(const PresentationError&)> error_cb;
+TEST_F(PresentationServiceImplTest, ReconnectPresentationError) {
+  base::MockCallback<NewPresentationCallback> mock_presentation_cb;
+  base::OnceCallback<void(const PresentationError&)> error_cb;
   EXPECT_CALL(mock_delegate_,
-              JoinSession(_, _, presentation_urls_, kPresentationId, _, _))
-      .WillOnce(DoAll(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit),
-                      SaveArg<5>(&error_cb)));
-  run_loop.Run();
-  error_cb.Run(PresentationError(PRESENTATION_ERROR_UNKNOWN, "Error message"));
-  SaveQuitClosureAndRunLoop();
+              ReconnectPresentationInternal(_, _, presentation_urls_,
+                                            kPresentationId, _, _))
+      .WillOnce(SaveArgByMove<5>(&error_cb));
+  service_impl_->ReconnectPresentation(
+      presentation_urls_, base::Optional<std::string>(kPresentationId),
+      mock_presentation_cb.Get());
+  EXPECT_FALSE(error_cb.is_null());
+  EXPECT_CALL(mock_presentation_cb, Run(OptionalIsNull(), OptionalIsNotNull()));
+  std::move(error_cb).Run(
+      PresentationError(PRESENTATION_ERROR_UNKNOWN, "Error message"));
+}
+
+TEST_F(PresentationServiceImplTest, MaxPendingReconnectPresentationRequests) {
+  const char* presentation_url = "http://fooUrl%d";
+  const char* presentation_id = "presentationId%d";
+  int num_requests = PresentationServiceImpl::kMaxQueuedRequests;
+  int i = 0;
+  EXPECT_CALL(mock_delegate_, ReconnectPresentationInternal(_, _, _, _, _, _))
+      .Times(num_requests);
+  for (; i < num_requests; ++i) {
+    std::vector<GURL> urls = {GURL(base::StringPrintf(presentation_url, i))};
+    // Uninvoked callbacks must outlive |service_impl_| since they get invoked
+    // at |service_impl_|'s destruction.
+    service_impl_->ReconnectPresentation(
+        urls, base::StringPrintf(presentation_id, i), base::Bind(&DoNothing));
+  }
+
+  std::vector<GURL> urls = {GURL(base::StringPrintf(presentation_url, i))};
+  // Exceeded maximum queue size, should invoke mojo callback with error.
+  base::MockCallback<NewPresentationCallback> mock_presentation_cb;
+  EXPECT_CALL(mock_presentation_cb, Run(OptionalIsNull(), OptionalIsNotNull()));
+  service_impl_->ReconnectPresentation(
+      urls, base::StringPrintf(presentation_id, i), mock_presentation_cb.Get());
 }
 
 TEST_F(PresentationServiceImplTest, CloseConnection) {
-  service_ptr_->CloseConnection(presentation_url1_, kPresentationId);
-
-  base::RunLoop run_loop;
-  EXPECT_CALL(mock_delegate_, CloseConnection(_, _, Eq(kPresentationId)))
-      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
-  run_loop.Run();
+  EXPECT_CALL(mock_delegate_, CloseConnection(_, _, Eq(kPresentationId)));
+  service_impl_->CloseConnection(presentation_url1_, kPresentationId);
 }
 
 TEST_F(PresentationServiceImplTest, Terminate) {
-  service_ptr_->Terminate(presentation_url1_, kPresentationId);
-  base::RunLoop run_loop;
-  EXPECT_CALL(mock_delegate_, Terminate(_, _, Eq(kPresentationId)))
-      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
-  run_loop.Run();
-}
-
-TEST_F(PresentationServiceImplTest, ListenForConnectionMessagesPassed) {
-  std::string text_msg("123");
-  std::vector<uint8_t> binary_data(3, '\1');
-  RunListenForConnectionMessages(text_msg, binary_data, true);
-}
-
-TEST_F(PresentationServiceImplTest, ListenForConnectionMessagesCopied) {
-  std::string text_msg("123");
-  std::vector<uint8_t> binary_data(3, '\1');
-  RunListenForConnectionMessages(text_msg, binary_data, false);
-}
-
-TEST_F(PresentationServiceImplTest, ListenForConnectionMessagesWithEmptyMsg) {
-  std::string text_msg("");
-  std::vector<uint8_t> binary_data;
-  RunListenForConnectionMessages(text_msg, binary_data, false);
+  EXPECT_CALL(mock_delegate_, Terminate(_, _, Eq(kPresentationId)));
+  service_impl_->Terminate(presentation_url1_, kPresentationId);
 }
 
 TEST_F(PresentationServiceImplTest, SetPresentationConnection) {
-  content::PresentationSessionInfo session(presentation_url1_, kPresentationId);
+  PresentationInfo presentation_info(presentation_url1_, kPresentationId);
 
   blink::mojom::PresentationConnectionPtr connection;
   MockPresentationConnection mock_presentation_connection;
@@ -695,23 +652,22 @@ TEST_F(PresentationServiceImplTest, SetPresentationConnection) {
   blink::mojom::PresentationConnectionPtr receiver_connection;
   auto request = mojo::MakeRequest(&receiver_connection);
 
-  content::PresentationSessionInfo expected(presentation_url1_,
-                                            kPresentationId);
+  PresentationInfo expected(presentation_url1_, kPresentationId);
   EXPECT_CALL(mock_delegate_, RegisterOffscreenPresentationConnectionRaw(
-                                  _, _, SessionInfoEquals(expected), _));
+                                  _, _, InfoEquals(expected), _));
 
-  service_impl_->SetPresentationConnection(session, std::move(connection),
-                                           std::move(request));
+  service_impl_->SetPresentationConnection(
+      presentation_info, std::move(connection), std::move(request));
 }
 
 TEST_F(PresentationServiceImplTest, ReceiverPresentationServiceDelegate) {
-  MockReceiverPresentationServiceDelegate mock_receiver_delegate;
+  EXPECT_CALL(mock_receiver_delegate_, AddObserver(_, _, _)).Times(1);
 
-  PresentationServiceImpl service_impl(contents()->GetMainFrame(), contents(),
-                                       nullptr, &mock_receiver_delegate);
+  PresentationServiceImpl service_impl(main_rfh(), contents(), nullptr,
+                                       &mock_receiver_delegate_);
 
   ReceiverConnectionAvailableCallback callback;
-  EXPECT_CALL(mock_receiver_delegate,
+  EXPECT_CALL(mock_receiver_delegate_,
               RegisterReceiverConnectionAvailableCallback(_))
       .WillOnce(SaveArg<0>(&callback));
 
@@ -723,57 +679,46 @@ TEST_F(PresentationServiceImplTest, ReceiverPresentationServiceDelegate) {
   service_impl.SetClient(std::move(client_ptr));
   EXPECT_FALSE(callback.is_null());
 
-  // NO-OP for ControllerPresentationServiceDelegate API functions
-  EXPECT_CALL(mock_delegate_, ListenForConnectionMessages(_, _, _, _)).Times(0);
+  PresentationInfo presentation_info(presentation_url1_, kPresentationId);
 
-  content::PresentationSessionInfo session(presentation_url1_, kPresentationId);
-  service_impl.ListenForConnectionMessages(session);
-}
-
-TEST_F(PresentationServiceImplTest, StartSessionInProgress) {
-  EXPECT_CALL(mock_delegate_, StartSession(_, _, presentation_urls_, _, _))
-      .Times(1);
-  service_ptr_->StartSession(presentation_urls_, base::Bind(&DoNothing));
-
-  // This request should fail immediately, since there is already a StartSession
-  // in progress.
-  service_ptr_->StartSession(
-      presentation_urls_,
-      base::Bind(&PresentationServiceImplTest::ExpectNewSessionCallbackError,
-                 base::Unretained(this)));
-  SaveQuitClosureAndRunLoop();
-}
-
-TEST_F(PresentationServiceImplTest, MaxPendingJoinSessionRequests) {
-  const char* presentation_url = "http://fooUrl%d";
-  const char* presentation_id = "presentationId%d";
-  int num_requests = PresentationServiceImpl::kMaxNumQueuedSessionRequests;
-  int i = 0;
-  EXPECT_CALL(mock_delegate_, JoinSession(_, _, _, _, _, _))
-      .Times(num_requests);
-  for (; i < num_requests; ++i) {
-    std::vector<GURL> urls = {GURL(base::StringPrintf(presentation_url, i))};
-    service_ptr_->JoinSession(urls, base::StringPrintf(presentation_id, i),
-                              base::Bind(&DoNothing));
-  }
-
-  std::vector<GURL> urls = {GURL(base::StringPrintf(presentation_url, i))};
-  // Exceeded maximum queue size, should invoke mojo callback with error.
-  service_ptr_->JoinSession(
-      urls, base::StringPrintf(presentation_id, i),
-      base::Bind(&PresentationServiceImplTest::ExpectNewSessionCallbackError,
-                 base::Unretained(this)));
-  SaveQuitClosureAndRunLoop();
-}
-
-TEST_F(PresentationServiceImplTest, ScreenAvailabilityNotSupported) {
-  mock_delegate_.set_screen_availability_listening_supported(false);
-  base::RunLoop run_loop;
+  // Client gets notified of receiver connections.
+  blink::mojom::PresentationConnectionPtr controller_connection;
+  MockPresentationConnection mock_presentation_connection;
+  mojo::Binding<blink::mojom::PresentationConnection> connection_binding(
+      &mock_presentation_connection, mojo::MakeRequest(&controller_connection));
+  blink::mojom::PresentationConnectionPtr receiver_connection;
   EXPECT_CALL(mock_client_,
-              OnScreenAvailabilityNotSupported(presentation_url1_))
-      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
-  ListenForScreenAvailabilityAndWait(presentation_url1_, false);
-  run_loop.Run();
+              OnReceiverConnectionAvailable(InfoEquals(presentation_info)));
+  callback.Run(presentation_info, std::move(controller_connection),
+               mojo::MakeRequest(&receiver_connection));
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_CALL(mock_receiver_delegate_, RemoveObserver(_, _)).Times(1);
+}
+
+TEST_F(PresentationServiceImplTest, ReceiverDelegateOnSubFrame) {
+  EXPECT_CALL(mock_receiver_delegate_, AddObserver(_, _, _)).Times(1);
+
+  PresentationServiceImpl service_impl(main_rfh(), contents(), nullptr,
+                                       &mock_receiver_delegate_);
+  service_impl.is_main_frame_ = false;
+
+  ReceiverConnectionAvailableCallback callback;
+  EXPECT_CALL(mock_receiver_delegate_,
+              RegisterReceiverConnectionAvailableCallback(_))
+      .Times(0);
+
+  blink::mojom::PresentationServiceClientPtr client_ptr;
+  client_binding_.reset(
+      new mojo::Binding<blink::mojom::PresentationServiceClient>(
+          &mock_client_, mojo::MakeRequest(&client_ptr)));
+  service_impl.controller_delegate_ = nullptr;
+  service_impl.SetClient(std::move(client_ptr));
+
+  EXPECT_CALL(mock_receiver_delegate_, Reset(_, _)).Times(0);
+  service_impl.Reset();
+
+  EXPECT_CALL(mock_receiver_delegate_, RemoveObserver(_, _)).Times(1);
 }
 
 }  // namespace content

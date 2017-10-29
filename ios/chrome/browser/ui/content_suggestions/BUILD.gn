@@ -3,70 +3,84 @@
 # found in the LICENSE file.
 
 source_set("content_suggestions") {
-  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
-    "content_suggestion.h",
-    "content_suggestion.mm",
-    "content_suggestion_identifier.h",
-    "content_suggestion_identifier.mm",
-    "content_suggestions_article_item.h",
-    "content_suggestions_article_item.mm",
+    "content_suggestions_collection_controlling.h",
+    "content_suggestions_collection_synchronizing.h",
     "content_suggestions_collection_updater.h",
     "content_suggestions_collection_updater.mm",
     "content_suggestions_commands.h",
     "content_suggestions_data_sink.h",
     "content_suggestions_data_source.h",
-    "content_suggestions_expandable_item.h",
-    "content_suggestions_expandable_item.mm",
-    "content_suggestions_favicon_internal_cell.h",
-    "content_suggestions_favicon_internal_cell.mm",
-    "content_suggestions_favicon_item.h",
-    "content_suggestions_favicon_item.mm",
-    "content_suggestions_image_fetcher.h",
-    "content_suggestions_section_information.h",
-    "content_suggestions_section_information.mm",
-    "content_suggestions_stack_item.h",
-    "content_suggestions_stack_item.mm",
-    "content_suggestions_stack_item_actions.h",
-    "content_suggestions_text_item.h",
-    "content_suggestions_text_item.mm",
-    "content_suggestions_text_item_actions.h",
+    "content_suggestions_header_controlling.h",
+    "content_suggestions_header_synchronizer.h",
+    "content_suggestions_header_synchronizer.mm",
+    "content_suggestions_header_synchronizing.h",
+    "content_suggestions_layout.h",
+    "content_suggestions_layout.mm",
     "content_suggestions_view_controller.h",
     "content_suggestions_view_controller.mm",
-    "expandable_item.h",
+    "content_suggestions_view_controller_audience.h",
+    "content_suggestions_view_controller_delegate.h",
   ]
   deps = [
+    ":content_suggestions_util",
+    "resources:content_suggestions_no_image",
+    "resources:content_suggestions_offline",
     "//base",
+    "//components/strings",
     "//ios/chrome/browser/ui",
     "//ios/chrome/browser/ui/collection_view",
-    "//ios/chrome/browser/ui/colors",
-    "//ios/chrome/browser/ui/util",
-    "//ios/third_party/material_roboto_font_loader_ios",
+    "//ios/chrome/browser/ui/content_suggestions/cells:cells_ui",
+    "//ios/chrome/browser/ui/content_suggestions/identifier",
+    "//ios/chrome/browser/ui/favicon:favicon_ui",
+    "//ios/chrome/browser/ui/ntp:ntp_header",
+    "//ios/chrome/browser/ui/overscroll_actions",
     "//ui/base",
-    "//url",
   ]
   public_deps = [
     "//ios/third_party/material_components_ios",
   ]
+  configs += [ "//build/config/compiler:enable_arc" ]
+}
+
+source_set("content_suggestions_util") {
+  sources = [
+    "content_suggestions_collection_utils.h",
+    "content_suggestions_collection_utils.mm",
+  ]
+  deps = [
+    "//base",
+    "//components/strings",
+    "//ios/chrome/app/strings",
+    "//ios/chrome/browser/ui",
+    "//ios/chrome/browser/ui/commands",
+    "//ios/chrome/browser/ui/content_suggestions/cells:cells_ui",
+    "//ios/chrome/browser/ui/toolbar",
+    "//ios/third_party/material_components_ios",
+    "//mojo/common:common_custom_types",
+    "//ui/base",
+  ]
+  configs += [ "//build/config/compiler:enable_arc" ]
 }
 
 source_set("unit_tests") {
-  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
-    "content_suggestion_identifier_unittest.mm",
-    "content_suggestions_article_item_unittest.mm",
-    "content_suggestions_expandable_item_unittest.mm",
-    "content_suggestions_favicon_item_unittest.mm",
-    "content_suggestions_stack_item_unittest.mm",
-    "content_suggestions_text_item_unittest.mm",
+    "content_suggestions_collection_updater_unittest.mm",
+    "content_suggestions_collection_utils_unittest.mm",
+    "content_suggestions_header_synchronizer_unittest.mm",
   ]
   deps = [
     ":content_suggestions",
+    ":content_suggestions_util",
     "//base",
+    "//ios/chrome/browser/ui",
     "//ios/chrome/browser/ui/collection_view",
+    "//ios/chrome/browser/ui/content_suggestions/cells:cells_ui",
+    "//ios/chrome/browser/ui/content_suggestions/identifier",
+    "//ios/chrome/test/base",
     "//testing/gtest",
     "//third_party/ocmock",
-    "//url",
   ]
+  configs += [ "//build/config/compiler:enable_arc" ]
 }

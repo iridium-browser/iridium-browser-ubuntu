@@ -4,7 +4,11 @@
 
 #include "content/browser/devtools/protocol/page_handler.h"
 
+#include <algorithm>
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/base64.h"
 #include "base/bind.h"
@@ -18,7 +22,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/devtools/devtools_session.h"
 #include "content/browser/devtools/page_navigation_throttle.h"
-#include "content/browser/devtools/protocol/color_picker.h"
+#include "content/browser/devtools/protocol/emulation_handler.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -82,9 +86,15 @@ std::string EncodeImage(const gfx::Image& image,
   return base_64_data;
 }
 
+std::string EncodeSkBitmap(const SkBitmap& image,
+                           const std::string& format,
+                           int quality) {
+  return EncodeImage(gfx::Image::CreateFrom1xBitmap(image), format, quality);
+}
+
 }  // namespace
 
-PageHandler::PageHandler()
+PageHandler::PageHandler(EmulationHandler* emulation_handler)
     : DevToolsDomainHandler(Page::Metainfo::domainName),
       enabled_(false),
       screencast_enabled_(false),
@@ -97,20 +107,22 @@ PageHandler::PageHandler()
       session_id_(0),
       frame_counter_(0),
       frames_in_flight_(0),
-      color_picker_(new ColorPicker(
-          base::Bind(&PageHandler::OnColorPicked, base::Unretained(this)))),
       navigation_throttle_enabled_(false),
       next_navigation_id_(0),
       host_(nullptr),
-      weak_factory_(this) {}
+      emulation_handler_(emulation_handler),
+      weak_factory_(this) {
+  DCHECK(emulation_handler_);
+}
 
 PageHandler::~PageHandler() {
 }
 
 // static
-PageHandler* PageHandler::FromSession(DevToolsSession* session) {
-  return static_cast<PageHandler*>(
-      session->GetHandlerByName(Page::Metainfo::domainName));
+std::vector<PageHandler*> PageHandler::ForAgentHost(
+    DevToolsAgentHostImpl* host) {
+  return DevToolsSession::HandlersForAgentHost<PageHandler>(
+      host, Page::Metainfo::domainName);
 }
 
 void PageHandler::SetRenderFrameHost(RenderFrameHostImpl* host) {
@@ -128,7 +140,6 @@ void PageHandler::SetRenderFrameHost(RenderFrameHostImpl* host) {
 
   host_ = host;
   widget_host = host_ ? host_->GetRenderWidgetHost() : nullptr;
-  color_picker_->SetRenderWidgetHost(widget_host);
 
   if (widget_host) {
     registrar_.Add(
@@ -150,7 +161,6 @@ void PageHandler::OnSwapCompositorFrame(
 
   if (screencast_enabled_)
     InnerSwapCompositorFrame();
-  color_picker_->OnSwapCompositorFrame();
 }
 
 void PageHandler::OnSynchronousSwapCompositorFrame(
@@ -167,7 +177,6 @@ void PageHandler::OnSynchronousSwapCompositorFrame(
 
   if (screencast_enabled_)
     InnerSwapCompositorFrame();
-  color_picker_->OnSwapCompositorFrame();
 }
 
 void PageHandler::Observe(int type,
@@ -203,7 +212,6 @@ Response PageHandler::Disable() {
   enabled_ = false;
   screencast_enabled_ = false;
   SetControlNavigations(false);
-  color_picker_->SetEnabled(false);
   return Response::FallThrough();
 }
 
@@ -229,6 +237,7 @@ Response PageHandler::Reload(Maybe<bool> bypassCache,
 
 Response PageHandler::Navigate(const std::string& url,
                                Maybe<std::string> referrer,
+                               Maybe<std::string> maybe_transition_type,
                                Page::FrameId* frame_id) {
   GURL gurl(url);
   if (!gurl.is_valid())
@@ -238,11 +247,69 @@ Response PageHandler::Navigate(const std::string& url,
   if (!web_contents)
     return Response::InternalError();
 
+  ui::PageTransition type;
+  std::string transition_type =
+      maybe_transition_type.fromMaybe(Page::TransitionTypeEnum::Typed);
+  if (transition_type == Page::TransitionTypeEnum::Link)
+    type = ui::PAGE_TRANSITION_LINK;
+  else if (transition_type == Page::TransitionTypeEnum::Typed)
+    type = ui::PAGE_TRANSITION_TYPED;
+  else if (transition_type == Page::TransitionTypeEnum::Auto_bookmark)
+    type = ui::PAGE_TRANSITION_AUTO_BOOKMARK;
+  else if (transition_type == Page::TransitionTypeEnum::Auto_subframe)
+    type = ui::PAGE_TRANSITION_AUTO_SUBFRAME;
+  else if (transition_type == Page::TransitionTypeEnum::Manual_subframe)
+    type = ui::PAGE_TRANSITION_MANUAL_SUBFRAME;
+  else if (transition_type == Page::TransitionTypeEnum::Generated)
+    type = ui::PAGE_TRANSITION_GENERATED;
+  else if (transition_type == Page::TransitionTypeEnum::Auto_toplevel)
+    type = ui::PAGE_TRANSITION_AUTO_TOPLEVEL;
+  else if (transition_type == Page::TransitionTypeEnum::Form_submit)
+    type = ui::PAGE_TRANSITION_FORM_SUBMIT;
+  else if (transition_type == Page::TransitionTypeEnum::Reload)
+    type = ui::PAGE_TRANSITION_RELOAD;
+  else if (transition_type == Page::TransitionTypeEnum::Keyword)
+    type = ui::PAGE_TRANSITION_KEYWORD;
+  else if (transition_type == Page::TransitionTypeEnum::Keyword_generated)
+    type = ui::PAGE_TRANSITION_KEYWORD_GENERATED;
+  else
+    type = ui::PAGE_TRANSITION_TYPED;
+
   web_contents->GetController().LoadURL(
       gurl,
-      Referrer(GURL(referrer.fromMaybe("")), blink::WebReferrerPolicyDefault),
-      ui::PAGE_TRANSITION_TYPED, std::string());
+      Referrer(GURL(referrer.fromMaybe("")), blink::kWebReferrerPolicyDefault),
+      type, std::string());
   return Response::FallThrough();
+}
+
+static const char* TransitionTypeName(ui::PageTransition type) {
+  int32_t t = type & ~ui::PAGE_TRANSITION_QUALIFIER_MASK;
+  switch (t) {
+    case ui::PAGE_TRANSITION_LINK:
+      return Page::TransitionTypeEnum::Link;
+    case ui::PAGE_TRANSITION_TYPED:
+      return Page::TransitionTypeEnum::Typed;
+    case ui::PAGE_TRANSITION_AUTO_BOOKMARK:
+      return Page::TransitionTypeEnum::Auto_bookmark;
+    case ui::PAGE_TRANSITION_AUTO_SUBFRAME:
+      return Page::TransitionTypeEnum::Auto_subframe;
+    case ui::PAGE_TRANSITION_MANUAL_SUBFRAME:
+      return Page::TransitionTypeEnum::Manual_subframe;
+    case ui::PAGE_TRANSITION_GENERATED:
+      return Page::TransitionTypeEnum::Generated;
+    case ui::PAGE_TRANSITION_AUTO_TOPLEVEL:
+      return Page::TransitionTypeEnum::Auto_toplevel;
+    case ui::PAGE_TRANSITION_FORM_SUBMIT:
+      return Page::TransitionTypeEnum::Form_submit;
+    case ui::PAGE_TRANSITION_RELOAD:
+      return Page::TransitionTypeEnum::Reload;
+    case ui::PAGE_TRANSITION_KEYWORD:
+      return Page::TransitionTypeEnum::Keyword;
+    case ui::PAGE_TRANSITION_KEYWORD_GENERATED:
+      return Page::TransitionTypeEnum::Keyword_generated;
+    default:
+      return Page::TransitionTypeEnum::Other;
+  }
 }
 
 Response PageHandler::GetNavigationHistory(
@@ -256,11 +323,15 @@ Response PageHandler::GetNavigationHistory(
   *current_index = controller.GetCurrentEntryIndex();
   *entries = NavigationEntries::create();
   for (int i = 0; i != controller.GetEntryCount(); ++i) {
-    (*entries)->addItem(Page::NavigationEntry::Create()
-        .SetId(controller.GetEntryAtIndex(i)->GetUniqueID())
-        .SetUrl(controller.GetEntryAtIndex(i)->GetURL().spec())
-        .SetTitle(base::UTF16ToUTF8(controller.GetEntryAtIndex(i)->GetTitle()))
-        .Build());
+    auto* entry = controller.GetEntryAtIndex(i);
+    (*entries)->addItem(
+        Page::NavigationEntry::Create()
+            .SetId(entry->GetUniqueID())
+            .SetUrl(entry->GetURL().spec())
+            .SetUserTypedURL(entry->GetUserTypedURL().spec())
+            .SetTitle(base::UTF16ToUTF8(entry->GetTitle()))
+            .SetTransitionType(TransitionTypeName(entry->GetTransitionType()))
+            .Build());
   }
   return Response::OK();
 }
@@ -284,22 +355,80 @@ Response PageHandler::NavigateToHistoryEntry(int entry_id) {
 void PageHandler::CaptureScreenshot(
     Maybe<std::string> format,
     Maybe<int> quality,
+    Maybe<Page::Viewport> clip,
+    Maybe<bool> from_surface,
     std::unique_ptr<CaptureScreenshotCallback> callback) {
   if (!host_ || !host_->GetRenderWidgetHost()) {
     callback->sendFailure(Response::InternalError());
     return;
   }
 
+  RenderWidgetHostImpl* widget_host = host_->GetRenderWidgetHost();
+  bool emulation_enabled = emulation_handler_->device_emulation_enabled();
+  gfx::Size original_view_size =
+      emulation_enabled ? widget_host->GetView()->GetViewBounds().size()
+                        : gfx::Size();
+  blink::WebDeviceEmulationParams original_params =
+      emulation_handler_->GetDeviceEmulationParams();
+
+  if (emulation_enabled && from_surface.fromMaybe(true)) {
+    blink::WebDeviceEmulationParams modified_params = original_params;
+    gfx::Size emulated_view_size = modified_params.view_size;
+    if (!modified_params.view_size.width)
+      emulated_view_size = original_view_size;
+
+    ScreenInfo screen_info;
+    widget_host->GetScreenInfo(&screen_info);
+    double dpfactor =
+        modified_params.device_scale_factor / screen_info.device_scale_factor;
+    modified_params.scale = dpfactor;
+    modified_params.view_size.width = emulated_view_size.width();
+    modified_params.view_size.height = emulated_view_size.height();
+    if (clip.isJust()) {
+      // TODO(pfeldman): Modifying here to save on the extra
+      // RenderWidgetScreenMetricsEmulator / DevToolsEmulator delegate back
+      // and forth.
+      modified_params.viewport_offset.x = clip.fromJust()->GetX() * dpfactor;
+      modified_params.viewport_offset.y = clip.fromJust()->GetY() * dpfactor;
+      modified_params.viewport_scale = clip.fromJust()->GetScale();
+    }
+
+    emulation_handler_->SetDeviceEmulationParams(modified_params);
+
+    if (clip.isJust()) {
+      double scale = dpfactor * clip.fromJust()->GetScale();
+      widget_host->GetView()->SetSize(
+          gfx::Size(gfx::ToRoundedInt(clip.fromJust()->GetWidth() * scale),
+                    gfx::ToRoundedInt(clip.fromJust()->GetHeight() * scale)));
+    } else {
+      widget_host->GetView()->SetSize(
+          gfx::ScaleToFlooredSize(emulated_view_size, dpfactor));
+    }
+  }
+
   std::string screenshot_format = format.fromMaybe(kPng);
   int screenshot_quality = quality.fromMaybe(kDefaultScreenshotQuality);
 
-  host_->GetRenderWidgetHost()->GetSnapshotFromBrowser(
+  widget_host->GetSnapshotFromBrowser(
       base::Bind(&PageHandler::ScreenshotCaptured, weak_factory_.GetWeakPtr(),
                  base::Passed(std::move(callback)), screenshot_format,
-                 screenshot_quality));
+                 screenshot_quality, original_view_size, original_params),
+      from_surface.fromMaybe(true));
 }
 
-void PageHandler::PrintToPDF(std::unique_ptr<PrintToPDFCallback> callback) {
+void PageHandler::PrintToPDF(Maybe<bool> landscape,
+                             Maybe<bool> display_header_footer,
+                             Maybe<bool> print_background,
+                             Maybe<double> scale,
+                             Maybe<double> paper_width,
+                             Maybe<double> paper_height,
+                             Maybe<double> margin_top,
+                             Maybe<double> margin_bottom,
+                             Maybe<double> margin_left,
+                             Maybe<double> margin_right,
+                             Maybe<String> page_ranges,
+                             Maybe<bool> ignore_invalid_page_ranges,
+                             std::unique_ptr<PrintToPDFCallback> callback) {
   callback->sendFailure(Response::Error("PrintToPDF is not implemented"));
   return;
 }
@@ -369,14 +498,6 @@ Response PageHandler::HandleJavaScriptDialog(bool accept,
   }
 
   return Response::Error("Could not handle JavaScript dialog");
-}
-
-Response PageHandler::SetColorPickerEnabled(bool enabled) {
-  if (!host_)
-    return Response::InternalError();
-
-  color_picker_->SetEnabled(enabled);
-  return Response::OK();
 }
 
 Response PageHandler::RequestAppBanner() {
@@ -526,10 +647,9 @@ void PageHandler::ScreencastFrameCaptured(cc::CompositorFrameMetadata metadata,
     return;
   }
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().WithShutdownBehavior(
-                     base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
-      base::Bind(&EncodeImage, gfx::Image::CreateFrom1xBitmap(bitmap),
-                 screencast_format_, screencast_quality_),
+      FROM_HERE, {base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+      base::Bind(&EncodeSkBitmap, bitmap, screencast_format_,
+                 screencast_quality_),
       base::Bind(&PageHandler::ScreencastFrameEncoded,
                  weak_factory_.GetWeakPtr(), base::Passed(&metadata),
                  base::Time::Now()));
@@ -572,18 +692,21 @@ void PageHandler::ScreenshotCaptured(
     std::unique_ptr<CaptureScreenshotCallback> callback,
     const std::string& format,
     int quality,
+    const gfx::Size& original_view_size,
+    const blink::WebDeviceEmulationParams& original_emulation_params,
     const gfx::Image& image) {
+  if (original_view_size.width()) {
+    RenderWidgetHostImpl* widget_host = host_->GetRenderWidgetHost();
+    widget_host->GetView()->SetSize(original_view_size);
+    emulation_handler_->SetDeviceEmulationParams(original_emulation_params);
+  }
+
   if (image.IsEmpty()) {
     callback->sendFailure(Response::Error("Unable to capture screenshot"));
     return;
   }
 
   callback->sendSuccess(EncodeImage(image, format, quality));
-}
-
-void PageHandler::OnColorPicked(int r, int g, int b, int a) {
-  frontend_->ColorPicked(
-      DOM::RGBA::Create().SetR(r).SetG(g).SetB(b).SetA(a).Build());
 }
 
 Response PageHandler::StopLoading() {

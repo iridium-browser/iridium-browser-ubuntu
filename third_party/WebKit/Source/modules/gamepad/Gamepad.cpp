@@ -27,53 +27,53 @@
 
 namespace blink {
 
-Gamepad::Gamepad() : m_index(0), m_timestamp(0), m_displayId(0) {}
+Gamepad::Gamepad() : index_(0), timestamp_(0), display_id_(0) {}
 
 Gamepad::~Gamepad() {}
 
-void Gamepad::setAxes(unsigned count, const double* data) {
-  m_axes.resize(count);
+void Gamepad::SetAxes(unsigned count, const double* data) {
+  axes_.resize(count);
   if (count)
-    std::copy(data, data + count, m_axes.begin());
+    std::copy(data, data + count, axes_.begin());
 }
 
-void Gamepad::setButtons(unsigned count, const WebGamepadButton* data) {
-  if (m_buttons.size() != count) {
-    m_buttons.resize(count);
+void Gamepad::SetButtons(unsigned count, const device::GamepadButton* data) {
+  if (buttons_.size() != count) {
+    buttons_.resize(count);
     for (unsigned i = 0; i < count; ++i)
-      m_buttons[i] = GamepadButton::create();
+      buttons_[i] = GamepadButton::Create();
   }
   for (unsigned i = 0; i < count; ++i) {
-    m_buttons[i]->setValue(data[i].value);
-    m_buttons[i]->setPressed(data[i].pressed);
-    m_buttons[i]->setTouched(data[i].touched || data[i].pressed ||
-                             (data[i].value > 0.0f));
+    buttons_[i]->SetValue(data[i].value);
+    buttons_[i]->SetPressed(data[i].pressed);
+    buttons_[i]->SetTouched(data[i].touched || data[i].pressed ||
+                            (data[i].value > 0.0f));
   }
 }
 
-void Gamepad::setPose(const WebGamepadPose& pose) {
-  if (!pose.notNull) {
-    if (m_pose)
-      m_pose = nullptr;
+void Gamepad::SetPose(const device::GamepadPose& pose) {
+  if (!pose.not_null) {
+    if (pose_)
+      pose_ = nullptr;
     return;
   }
 
-  if (!m_pose)
-    m_pose = GamepadPose::create();
+  if (!pose_)
+    pose_ = GamepadPose::Create();
 
-  m_pose->setPose(pose);
+  pose_->SetPose(pose);
 }
 
-void Gamepad::setHand(const WebGamepadHand& hand) {
+void Gamepad::SetHand(const device::GamepadHand& hand) {
   switch (hand) {
-    case GamepadHandNone:
-      m_hand = "";
+    case device::GamepadHand::kNone:
+      hand_ = "";
       break;
-    case GamepadHandLeft:
-      m_hand = "left";
+    case device::GamepadHand::kLeft:
+      hand_ = "left";
       break;
-    case GamepadHandRight:
-      m_hand = "right";
+    case device::GamepadHand::kRight:
+      hand_ = "right";
       break;
     default:
       NOTREACHED();
@@ -81,8 +81,8 @@ void Gamepad::setHand(const WebGamepadHand& hand) {
 }
 
 DEFINE_TRACE(Gamepad) {
-  visitor->trace(m_buttons);
-  visitor->trace(m_pose);
+  visitor->Trace(buttons_);
+  visitor->Trace(pose_);
 }
 
 }  // namespace blink

@@ -26,7 +26,7 @@ found in the LICENSE file.
   Polymer({
     is: 'tr-ui-b-checkbox',
 
-    created: function() {
+    created() {
       this.needsInit_ = true;
       this.defaultCheckedValue_ = undefined;
       this.settingsKey_ = undefined;
@@ -35,7 +35,7 @@ found in the LICENSE file.
       this.is_ready_ = false;
     },
 
-    ready: function() {
+    ready() {
       this.is_ready_ = true;
       this.$.checkbox.addEventListener('click', function() {
         this.checked = this.$.checkbox.checked;
@@ -43,9 +43,8 @@ found in the LICENSE file.
       this.maybeUpdateElements_();
     },
 
-    maybeUpdateElements_: function() {
-      if (!this.is_ready_)
-        return;
+    maybeUpdateElements_() {
+      if (!this.is_ready_) return;
       this.$.label.innerText = this.label_;
       this.$.checkbox.checked = this.checked_;
     },
@@ -55,8 +54,9 @@ found in the LICENSE file.
     },
 
     set defaultCheckedValue(defaultCheckedValue) {
-      if (!this.needsInit_)
+      if (!this.needsInit_) {
         throw new Error('Already initialized.');
+      }
       this.defaultCheckedValue_ = defaultCheckedValue;
       this.maybeInit_();
     },
@@ -66,19 +66,17 @@ found in the LICENSE file.
     },
 
     set settingsKey(settingsKey) {
-      if (!this.needsInit_)
+      if (!this.needsInit_) {
         throw new Error('Already initialized.');
+      }
       this.settingsKey_ = settingsKey;
       this.maybeInit_();
     },
 
-    maybeInit_: function() {
-      if (!this.needsInit_)
-        return;
-      if (this.settingsKey_ === undefined)
-        return;
-      if (this.defaultCheckedValue_ === undefined)
-        return;
+    maybeInit_() {
+      if (!this.needsInit_) return;
+      if (this.settingsKey_ === undefined) return;
+      if (this.defaultCheckedValue_ === undefined) return;
       this.needsInit_ = false;
       this.checked = tr.b.Settings.get(
           this.settingsKey_, this.defaultCheckedValue_);

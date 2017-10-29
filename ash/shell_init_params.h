@@ -7,33 +7,22 @@
 
 #include "ash/ash_export.h"
 
-namespace aura {
-class WindowTreeHostMus;
-}
-
-namespace base {
-class SequencedWorkerPool;
-}
-
 namespace ui {
 class ContextFactory;
+class ContextFactoryPrivate;
 }
 
 namespace ash {
 
 class ShellDelegate;
+class ShellPort;
 
 struct ASH_EXPORT ShellInitParams {
-  // Shell takes ownership of |wm_shell|, if null WmShellAura is created.
-  // TODO(sky): temporary, will eventually go away.
-  WmShell* wm_shell = nullptr;
-  // Shell takes ownership of |primary_window_tree_host|. This is only used
-  // by mash.
-  aura::WindowTreeHostMus* primary_window_tree_host = nullptr;
+  // Shell takes ownership of |shell_port|, if null ShellPortClassic is created.
+  ShellPort* shell_port = nullptr;
   ShellDelegate* delegate = nullptr;
   ui::ContextFactory* context_factory = nullptr;
   ui::ContextFactoryPrivate* context_factory_private = nullptr;
-  base::SequencedWorkerPool* blocking_pool = nullptr;
 };
 
 }  // namespace ash

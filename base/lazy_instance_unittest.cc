@@ -7,14 +7,14 @@
 #include "base/at_exit.h"
 #include "base/atomic_sequence_num.h"
 #include "base/lazy_instance.h"
-#include "base/memory/aligned_memory.h"
 #include "base/threading/simple_thread.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
-base::StaticAtomicSequenceNumber constructed_seq_;
-base::StaticAtomicSequenceNumber destructed_seq_;
+base::AtomicSequenceNumber constructed_seq_;
+base::AtomicSequenceNumber destructed_seq_;
 
 class ConstructAndDestructLogger {
  public:
@@ -45,7 +45,8 @@ int SlowConstructor::constructed = 0;
 
 class SlowDelegate : public base::DelegateSimpleThread::Delegate {
  public:
-  explicit SlowDelegate(base::LazyInstance<SlowConstructor>* lazy)
+  explicit SlowDelegate(
+      base::LazyInstance<SlowConstructor>::DestructorAtExit* lazy)
       : lazy_(lazy) {}
 
   void Run() override {
@@ -54,13 +55,13 @@ class SlowDelegate : public base::DelegateSimpleThread::Delegate {
   }
 
  private:
-  base::LazyInstance<SlowConstructor>* lazy_;
+  base::LazyInstance<SlowConstructor>::DestructorAtExit* lazy_;
 };
 
 }  // namespace
 
-static base::LazyInstance<ConstructAndDestructLogger> lazy_logger =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<ConstructAndDestructLogger>::DestructorAtExit
+    lazy_logger = LAZY_INSTANCE_INITIALIZER;
 
 TEST(LazyInstanceTest, Basic) {
   {
@@ -81,7 +82,7 @@ TEST(LazyInstanceTest, Basic) {
   EXPECT_EQ(4, destructed_seq_.GetNext());
 }
 
-static base::LazyInstance<SlowConstructor> lazy_slow =
+static base::LazyInstance<SlowConstructor>::DestructorAtExit lazy_slow =
     LAZY_INSTANCE_INITIALIZER;
 
 TEST(LazyInstanceTest, ConstructorThreadSafety) {
@@ -126,7 +127,8 @@ TEST(LazyInstanceTest, LeakyLazyInstance) {
   bool deleted1 = false;
   {
     base::ShadowingAtExitManager shadow;
-    static base::LazyInstance<DeleteLogger> test = LAZY_INSTANCE_INITIALIZER;
+    static base::LazyInstance<DeleteLogger>::DestructorAtExit test =
+        LAZY_INSTANCE_INITIALIZER;
     test.Get().SetDeletedPtr(&deleted1);
   }
   EXPECT_TRUE(deleted1);
@@ -150,10 +152,10 @@ class AlignedData {
  public:
   AlignedData() {}
   ~AlignedData() {}
-  base::AlignedMemory<alignment, alignment> data_;
+  alignas(alignment) char data_[alignment];
 };
 
-}  // anonymous namespace
+}  // namespace
 
 #define EXPECT_ALIGNED(ptr, align) \
     EXPECT_EQ(0u, reinterpret_cast<uintptr_t>(ptr) & (align - 1))
@@ -164,9 +166,12 @@ TEST(LazyInstanceTest, Alignment) {
   // Create some static instances with increasing sizes and alignment
   // requirements. By ordering this way, the linker will need to do some work to
   // ensure proper alignment of the static data.
-  static LazyInstance<AlignedData<4> > align4 = LAZY_INSTANCE_INITIALIZER;
-  static LazyInstance<AlignedData<32> > align32 = LAZY_INSTANCE_INITIALIZER;
-  static LazyInstance<AlignedData<4096> > align4096 = LAZY_INSTANCE_INITIALIZER;
+  static LazyInstance<AlignedData<4>>::DestructorAtExit align4 =
+      LAZY_INSTANCE_INITIALIZER;
+  static LazyInstance<AlignedData<32>>::DestructorAtExit align32 =
+      LAZY_INSTANCE_INITIALIZER;
+  static LazyInstance<AlignedData<4096>>::DestructorAtExit align4096 =
+      LAZY_INSTANCE_INITIALIZER;
 
   EXPECT_ALIGNED(align4.Pointer(), 4);
   EXPECT_ALIGNED(align32.Pointer(), 32);

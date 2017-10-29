@@ -45,8 +45,6 @@ ChromeNativeAppWindowViewsAura::GetRestorableState(
     case ui::SHOW_STATE_DEFAULT:
     case ui::SHOW_STATE_MINIMIZED:
     case ui::SHOW_STATE_INACTIVE:
-    // TODO(afakhry): Remove Docked Windows in M58.
-    case ui::SHOW_STATE_DOCKED:
     case ui::SHOW_STATE_END:
       return ui::SHOW_STATE_NORMAL;
   }
@@ -58,7 +56,7 @@ void ChromeNativeAppWindowViewsAura::OnBeforeWidgetInit(
     const AppWindow::CreateParams& create_params,
     views::Widget::InitParams* init_params,
     views::Widget* widget) {
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
   std::string app_name = web_app::GenerateApplicationNameFromExtensionId(
       app_window()->extension_id());
   // Set up a custom WM_CLASS for app windows. This allows task switchers in
@@ -104,14 +102,6 @@ ui::WindowShowState ChromeNativeAppWindowViewsAura::GetRestoredState() const {
   // Use kPreMinimizedShowStateKey in case a window is minimized/hidden.
   ui::WindowShowState restore_state = widget()->GetNativeWindow()->GetProperty(
       aura::client::kPreMinimizedShowStateKey);
-
-  // TODO(afakhry): Remove in M58.
-  if (widget()->GetNativeWindow()->GetProperty(aura::client::kShowStateKey) ==
-          ui::SHOW_STATE_DOCKED ||
-      restore_state == ui::SHOW_STATE_DOCKED) {
-    return ui::SHOW_STATE_DOCKED;
-  }
-
   return GetRestorableState(restore_state);
 }
 

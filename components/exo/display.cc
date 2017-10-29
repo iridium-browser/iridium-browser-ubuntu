@@ -12,6 +12,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
+#include "components/exo/data_device.h"
+#include "components/exo/file_helper.h"
 #include "components/exo/notification_surface.h"
 #include "components/exo/notification_surface_manager.h"
 #include "components/exo/shared_memory.h"
@@ -24,7 +26,7 @@
 #if defined(USE_OZONE)
 #include <GLES2/gl2extchromium.h>
 #include "components/exo/buffer.h"
-#include "gpu/ipc/client/gpu_memory_buffer_impl_ozone_native_pixmap.h"
+#include "gpu/ipc/client/gpu_memory_buffer_impl_native_pixmap.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "ui/ozone/public/ozone_switches.h"
@@ -45,7 +47,7 @@ const gfx::BufferFormat kOverlayFormats[] = {
 
 const gfx::BufferFormat kOverlayFormatsForDrmAtomic[] = {
     gfx::BufferFormat::RGBX_8888, gfx::BufferFormat::RGBA_8888,
-    gfx::BufferFormat::BGR_565};
+    gfx::BufferFormat::BGR_565, gfx::BufferFormat::YUV_420_BIPLANAR};
 #endif
 
 }  // namespace
@@ -53,10 +55,12 @@ const gfx::BufferFormat kOverlayFormatsForDrmAtomic[] = {
 ////////////////////////////////////////////////////////////////////////////////
 // Display, public:
 
-Display::Display() : Display(nullptr) {}
+Display::Display() : Display(nullptr, std::unique_ptr<FileHelper>()) {}
 
-Display::Display(NotificationSurfaceManager* notification_surface_manager)
-    : notification_surface_manager_(notification_surface_manager)
+Display::Display(NotificationSurfaceManager* notification_surface_manager,
+                 std::unique_ptr<FileHelper> file_helper)
+    : notification_surface_manager_(notification_surface_manager),
+      file_helper_(std::move(file_helper))
 #if defined(USE_OZONE)
       ,
       overlay_formats_(std::begin(kOverlayFormats), std::end(kOverlayFormats))
@@ -101,7 +105,7 @@ std::unique_ptr<Buffer> Display::CreateLinuxDMABufBuffer(
                size.ToString());
 
   gfx::GpuMemoryBufferHandle handle;
-  handle.type = gfx::OZONE_NATIVE_PIXMAP;
+  handle.type = gfx::NATIVE_PIXMAP;
   for (auto& fd : fds)
     handle.native_pixmap_handle.fds.emplace_back(std::move(fd));
 
@@ -109,7 +113,7 @@ std::unique_ptr<Buffer> Display::CreateLinuxDMABufBuffer(
     handle.native_pixmap_handle.planes.push_back(plane);
 
   std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer =
-      gpu::GpuMemoryBufferImplOzoneNativePixmap::CreateFromHandle(
+      gpu::GpuMemoryBufferImplNativePixmap::CreateFromHandle(
           handle, size, format, gfx::BufferUsage::GPU_READ,
           gpu::GpuMemoryBufferImpl::DestructionCallback());
   if (!gpu_memory_buffer) {
@@ -179,7 +183,6 @@ std::unique_ptr<ShellSurface> Display::CreatePopupShellSurface(
 
 std::unique_ptr<ShellSurface> Display::CreateRemoteShellSurface(
     Surface* surface,
-    const gfx::Point& origin,
     int container) {
   TRACE_EVENT2("exo", "Display::CreateRemoteShellSurface", "surface",
                surface->AsTracedValue(), "container", container);
@@ -193,7 +196,7 @@ std::unique_ptr<ShellSurface> Display::CreateRemoteShellSurface(
   bool can_minimize = container != ash::kShellWindowId_SystemModalContainer;
 
   return base::MakeUnique<ShellSurface>(
-      surface, nullptr, ShellSurface::BoundsMode::CLIENT, origin,
+      surface, nullptr, ShellSurface::BoundsMode::CLIENT, gfx::Point(),
       true /* activatable */, can_minimize, container);
 }
 
@@ -217,18 +220,23 @@ std::unique_ptr<SubSurface> Display::CreateSubSurface(Surface* surface,
 
 std::unique_ptr<NotificationSurface> Display::CreateNotificationSurface(
     Surface* surface,
-    const std::string& notification_id) {
+    const std::string& notification_key) {
   TRACE_EVENT2("exo", "Display::CreateNotificationSurface", "surface",
-               surface->AsTracedValue(), "notification_id", notification_id);
+               surface->AsTracedValue(), "notification_key", notification_key);
 
   if (!notification_surface_manager_ ||
-      notification_surface_manager_->GetSurface(notification_id)) {
-    DLOG(ERROR) << "Invalid notification id, id=" << notification_id;
+      notification_surface_manager_->GetSurface(notification_key)) {
+    DLOG(ERROR) << "Invalid notification key, key=" << notification_key;
     return nullptr;
   }
 
   return base::MakeUnique<NotificationSurface>(notification_surface_manager_,
-                                               surface, notification_id);
+                                               surface, notification_key);
+}
+
+std::unique_ptr<DataDevice> Display::CreateDataDevice(
+    DataDeviceDelegate* delegate) {
+  return base::MakeUnique<DataDevice>(delegate, file_helper_.get());
 }
 
 }  // namespace exo

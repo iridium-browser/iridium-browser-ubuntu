@@ -3,15 +3,49 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/path_service.h"
 #include "base/test/launcher/unit_test_launcher.h"
+#include "base/test/test_discardable_memory_allocator.h"
 #include "base/test/test_suite.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_paths.h"
+#include "ui/gl/test/gl_surface_test_support.h"
+
+namespace {
+
+class UiArcTestSuite : public base::TestSuite {
+ public:
+  UiArcTestSuite(int argc, char** argv) : base::TestSuite(argc, argv) {}
+
+ protected:
+  void Initialize() override {
+    base::TestSuite::Initialize();
+    gl::GLSurfaceTestSupport::InitializeOneOff();
+
+    // To use resource bundles
+    ui::RegisterPathProvider();
+    base::FilePath ui_test_pak_path;
+    ASSERT_TRUE(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
+    ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
+  }
+
+  void Shutdown() override {
+    ui::ResourceBundle::CleanupSharedInstance();
+    base::TestSuite::Shutdown();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(UiArcTestSuite);
+};
+
+}  // namespace
 
 int main(int argc, char** argv) {
-  base::TestSuite test_suite(argc, argv);
+  UiArcTestSuite test_suite(argc, argv);
 
   mojo::edk::Init();
   return base::LaunchUnitTests(
       argc, argv,
-      base::Bind(&base::TestSuite::Run, base::Unretained(&test_suite)));
+      base::Bind(&UiArcTestSuite::Run, base::Unretained(&test_suite)));
 }

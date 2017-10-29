@@ -6,10 +6,14 @@
 
 #include <utility>
 
+#include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "content/browser/frame_host/navigation_request_info.h"
 #include "content/browser/loader/navigation_url_loader_factory.h"
 #include "content/browser/loader/navigation_url_loader_impl.h"
+#include "content/browser/loader/navigation_url_loader_network_service.h"
 #include "content/public/browser/navigation_ui_data.h"
+#include "content/public/common/content_features.h"
 
 namespace content {
 
@@ -28,10 +32,17 @@ std::unique_ptr<NavigationURLLoader> NavigationURLLoader::Create(
         resource_context, storage_partition, std::move(request_info),
         std::move(navigation_ui_data), service_worker_handle, delegate);
   }
-  return std::unique_ptr<NavigationURLLoader>(new NavigationURLLoaderImpl(
-      resource_context, storage_partition, std::move(request_info),
-      std::move(navigation_ui_data), service_worker_handle, appcache_handle,
-      delegate));
+  if (base::FeatureList::IsEnabled(features::kNetworkService)) {
+    return base::MakeUnique<NavigationURLLoaderNetworkService>(
+        resource_context, storage_partition, std::move(request_info),
+        std::move(navigation_ui_data), service_worker_handle, appcache_handle,
+        delegate);
+  } else {
+    return base::MakeUnique<NavigationURLLoaderImpl>(
+        resource_context, storage_partition, std::move(request_info),
+        std::move(navigation_ui_data), service_worker_handle, appcache_handle,
+        delegate);
+  }
 }
 
 void NavigationURLLoader::SetFactoryForTesting(

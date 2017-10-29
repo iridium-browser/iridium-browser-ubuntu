@@ -17,7 +17,10 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
 
+#if !defined(OS_ANDROID)
 class ChromeZoomLevelPrefs;
+#endif
+
 class DevToolsNetworkControllerHandle;
 class ExtensionSpecialStoragePolicy;
 class PrefProxyConfigTracker;
@@ -176,15 +179,22 @@ class Profile : public content::BrowserContext {
   virtual PrefService* GetPrefs() = 0;
   virtual const PrefService* GetPrefs() const = 0;
 
+#if !defined(OS_ANDROID)
   // Retrieves a pointer to the PrefService that manages the default zoom
   // level and the per-host zoom levels for this user profile.
   // TODO(wjmaclean): Remove this when HostZoomMap migrates to StoragePartition.
   virtual ChromeZoomLevelPrefs* GetZoomLevelPrefs();
+#endif
 
   // Retrieves a pointer to the PrefService that manages the preferences
   // for OffTheRecord Profiles.  This PrefService is lazily created the first
   // time that this method is called.
   virtual PrefService* GetOffTheRecordPrefs() = 0;
+
+  // Like GetOffTheRecordPrefs but gives a read-only view of prefs that can be
+  // used even if there's no OTR profile at the moment
+  // (i.e. HasOffTheRecordProfile is false).
+  virtual PrefService* GetReadOnlyOffTheRecordPrefs();
 
   // Returns the main request context.
   virtual net::URLRequestContextGetter* GetRequestContext() = 0;
@@ -325,9 +335,11 @@ class Profile : public content::BrowserContext {
   // Creates an OffTheRecordProfile which points to this Profile.
   Profile* CreateOffTheRecordProfile();
 
+#if !defined(OS_ANDROID)
   // Convenience method to retrieve the default zoom level for the default
   // storage partition.
   double GetDefaultZoomLevelForProfile();
+#endif
 
  protected:
   void set_is_guest_profile(bool is_guest_profile) {

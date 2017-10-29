@@ -11,8 +11,6 @@
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_service.mojom.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 
 namespace content {
 
@@ -39,7 +37,7 @@ class UtilityProcessHostImplBrowserTest : public ContentBrowserTest {
 #endif
     EXPECT_TRUE(host->Start());
 
-    host->GetRemoteInterfaces()->GetInterface(&service_);
+    BindInterface(host, &service_);
     service_->DoSomething(base::Bind(
         &UtilityProcessHostImplBrowserTest::OnSomething,
         base::Unretained(this)));

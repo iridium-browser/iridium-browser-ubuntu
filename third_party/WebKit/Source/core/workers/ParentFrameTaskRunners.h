@@ -5,14 +5,14 @@
 #ifndef ParentFrameTaskRunners_h
 #define ParentFrameTaskRunners_h
 
+#include <memory>
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/TaskRunnerHelper.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Allocator.h"
-#include "wtf/Noncopyable.h"
-#include "wtf/PtrUtil.h"
-#include <memory>
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -20,12 +20,9 @@ class LocalFrame;
 class WebTaskRunner;
 
 // Represents a set of task runners of the parent (or associated) document's
-// frame. This could be accessed from worker thread(s) and must be initialized
-// on the parent context thread (i.e. MainThread) on construction time, rather
-// than being done lazily.
+// frame, or default task runners of the main thread.
 //
-// This observes LocalFrame lifecycle only for in-process worker cases (i.e.
-// only when a non-null LocalFrame is given).
+// This observes LocalFrame lifecycle only when this is created with LocalFrame.
 class CORE_EXPORT ParentFrameTaskRunners final
     : public GarbageCollectedFinalized<ParentFrameTaskRunners>,
       public ContextLifecycleObserver {
@@ -33,12 +30,19 @@ class CORE_EXPORT ParentFrameTaskRunners final
   WTF_MAKE_NONCOPYABLE(ParentFrameTaskRunners);
 
  public:
-  static ParentFrameTaskRunners* create(LocalFrame* frame) {
-    return new ParentFrameTaskRunners(frame);
-  }
+  // Returns task runners associated with a given frame. This must be called on
+  // the frame's context thread, that is, the main thread. The given frame must
+  // have a valid execution context.
+  static ParentFrameTaskRunners* Create(LocalFrame&);
 
-  // Might return nullptr for unsupported task types.
-  RefPtr<WebTaskRunner> get(TaskType);
+  // Returns default task runners of the main thread. This can be called from
+  // any threads. This must be used only for shared workers, service workers and
+  // tests that don't have a parent frame.
+  static ParentFrameTaskRunners* Create();
+
+  // Might return nullptr for unsupported task types. This can be called from
+  // any threads.
+  RefPtr<WebTaskRunner> Get(TaskType);
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -52,10 +56,10 @@ class CORE_EXPORT ParentFrameTaskRunners final
   // particular local frame.
   explicit ParentFrameTaskRunners(LocalFrame*);
 
-  void contextDestroyed(ExecutionContext*) override;
+  void ContextDestroyed(ExecutionContext*) override;
 
-  Mutex m_taskRunnersMutex;
-  TaskRunnerHashMap m_taskRunners;
+  Mutex task_runners_mutex_;
+  TaskRunnerHashMap task_runners_;
 };
 
 }  // namespace blink

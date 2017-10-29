@@ -8,7 +8,6 @@
 #include "base/bind.h"
 #include "base/format_macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/condition_variable.h"
@@ -65,8 +64,8 @@ class ScheduleWorkTest : public testing::Test {
     min_batch_times_[index] = minimum;
     max_batch_times_[index] = maximum;
     target_message_loop()->task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ScheduleWorkTest::Increment,
-                              base::Unretained(this), schedule_calls));
+        FROM_HERE, base::BindOnce(&ScheduleWorkTest::Increment,
+                                  base::Unretained(this), schedule_calls));
   }
 
   void ScheduleWork(MessageLoop::Type target_type, int num_scheduling_threads) {
@@ -101,8 +100,8 @@ class ScheduleWorkTest : public testing::Test {
 
     for (int i = 0; i < num_scheduling_threads; ++i) {
       scheduling_threads[i]->task_runner()->PostTask(
-          FROM_HERE,
-          base::Bind(&ScheduleWorkTest::Schedule, base::Unretained(this), i));
+          FROM_HERE, base::BindOnce(&ScheduleWorkTest::Schedule,
+                                    base::Unretained(this), i));
     }
 
     for (int i = 0; i < num_scheduling_threads; ++i) {
@@ -263,8 +262,8 @@ class PostTaskTest : public testing::Test {
     do {
       for (int i = 0; i < batch_size; ++i) {
         for (int j = 0; j < tasks_per_reload; ++j) {
-          queue->AddToIncomingQueue(
-              FROM_HERE, base::Bind(&DoNothing), base::TimeDelta(), false);
+          queue->AddToIncomingQueue(FROM_HERE, base::BindOnce(&DoNothing),
+                                    base::TimeDelta(), false);
           num_posted++;
         }
         TaskQueue loop_local_queue;

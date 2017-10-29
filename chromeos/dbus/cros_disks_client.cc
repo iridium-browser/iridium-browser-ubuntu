@@ -18,7 +18,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
-#include "base/threading/worker_pool.h"
 #include "base/values.h"
 #include "chromeos/dbus/fake_cros_disks_client.h"
 #include "dbus/bus.h"
@@ -39,10 +38,6 @@ const char kReadOnlyOption[] = "ro";
 const char kReadWriteOption[] = "rw";
 const char kRemountOption[] = "remount";
 const char kMountLabelOption[] = "mountlabel";
-
-const char* kDefaultUnmountOptions[] = {
-  "force",
-};
 
 const char kLazyUnmountOption[] = "lazy";
 
@@ -133,9 +128,7 @@ class CrosDisksClientImpl : public CrosDisksClient {
     dbus::MessageWriter writer(&method_call);
     writer.AppendString(device_path);
 
-    std::vector<std::string> unmount_options(
-        kDefaultUnmountOptions,
-        kDefaultUnmountOptions + arraysize(kDefaultUnmountOptions));
+    std::vector<std::string> unmount_options;
     if (options == UNMOUNT_OPTIONS_LAZY)
       unmount_options.push_back(kLazyUnmountOption);
 

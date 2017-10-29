@@ -29,28 +29,28 @@
 #include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
+#include "cc/base/devtools_instrumentation.h"
 #include "cc/base/histograms.h"
 #include "cc/base/math_util.h"
-#include "cc/debug/devtools_instrumentation.h"
-#include "cc/debug/frame_viewer_instrumentation.h"
 #include "cc/debug/rendering_stats_instrumentation.h"
 #include "cc/input/layer_selection_bound.h"
 #include "cc/input/page_scale_animation.h"
 #include "cc/layers/heads_up_display_layer.h"
 #include "cc/layers/heads_up_display_layer_impl.h"
 #include "cc/layers/layer.h"
-#include "cc/layers/layer_iterator.h"
 #include "cc/layers/painted_scrollbar_layer.h"
 #include "cc/resources/ui_resource_manager.h"
+#include "cc/tiles/frame_viewer_instrumentation.h"
+#include "cc/trees/clip_node.h"
 #include "cc/trees/draw_property_utils.h"
 #include "cc/trees/effect_node.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_host_impl.h"
-#include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/mutator_host.h"
 #include "cc/trees/property_tree_builder.h"
 #include "cc/trees/proxy_main.h"
+#include "cc/trees/scroll_node.h"
 #include "cc/trees/single_thread_proxy.h"
 #include "cc/trees/swap_promise_manager.h"
 #include "cc/trees/transform_node.h"
@@ -59,7 +59,7 @@
 #include "ui/gfx/geometry/vector2d_conversions.h"
 
 namespace {
-static base::StaticAtomicSequenceNumber s_layer_tree_host_sequence_number;
+static base::AtomicSequenceNumber s_layer_tree_host_sequence_number;
 }
 
 namespace cc {
@@ -109,8 +109,6 @@ LayerTreeHost::LayerTreeHost(InitParams* params, CompositorMode mode)
       mutator_host_(params->mutator_host) {
   DCHECK(task_graph_runner_);
   DCHECK(!settings_.enable_checker_imaging || image_worker_task_runner_);
-  DCHECK(!settings_.enable_checker_imaging ||
-         settings_.image_decode_tasks_enabled);
 
   mutator_host_->SetMutatorHostClient(this);
 
@@ -161,20 +159,22 @@ void LayerTreeHost::InitializeProxy(std::unique_ptr<Proxy> proxy) {
   proxy_ = std::move(proxy);
   proxy_->Start();
 
+  UpdateDeferCommitsInternal();
+
   mutator_host_->SetSupportsScrollAnimations(proxy_->SupportsImplScrolling());
 }
 
 LayerTreeHost::~LayerTreeHost() {
   // Track when we're inside a main frame to see if compositor is being
   // destroyed midway which causes a crash. crbug.com/654672
-  CHECK(!inside_main_frame_);
+  DCHECK(!inside_main_frame_);
   TRACE_EVENT0("cc", "LayerTreeHostInProcess::~LayerTreeHostInProcess");
 
   // Clear any references into the LayerTreeHost.
   mutator_host_->SetMutatorHostClient(nullptr);
 
   // We must clear any pointers into the layer tree prior to destroying it.
-  RegisterViewportLayers(nullptr, nullptr, nullptr, nullptr);
+  RegisterViewportLayers(ViewportLayers());
 
   if (root_layer_) {
     root_layer_->SetLayerTreeHost(nullptr);
@@ -218,7 +218,7 @@ const LayerTreeSettings& LayerTreeHost::GetSettings() const {
   return settings_;
 }
 
-void LayerTreeHost::SetFrameSinkId(const FrameSinkId& frame_sink_id) {
+void LayerTreeHost::SetFrameSinkId(const viz::FrameSinkId& frame_sink_id) {
   surface_sequence_generator_.set_frame_sink_id(frame_sink_id);
 }
 
@@ -227,8 +227,7 @@ void LayerTreeHost::QueueSwapPromise(
   swap_promise_manager_.QueueSwapPromise(std::move(swap_promise));
 }
 
-SurfaceSequenceGenerator*
-LayerTreeHost::GetSurfaceSequenceGenerator() {
+viz::SurfaceSequenceGenerator* LayerTreeHost::GetSurfaceSequenceGenerator() {
   return &surface_sequence_generator_;
 }
 
@@ -246,6 +245,10 @@ void LayerTreeHost::DidBeginMainFrame() {
 
 void LayerTreeHost::BeginMainFrameNotExpectedSoon() {
   client_->BeginMainFrameNotExpectedSoon();
+}
+
+void LayerTreeHost::BeginMainFrameNotExpectedUntil(base::TimeTicks time) {
+  client_->BeginMainFrameNotExpectedUntil(time);
 }
 
 void LayerTreeHost::BeginMainFrame(const BeginFrameArgs& args) {
@@ -287,6 +290,7 @@ void LayerTreeHost::FinishCommitOnImplThread(
   }
 
   LayerTreeImpl* sync_tree = host_impl->sync_tree();
+  sync_tree->lifecycle().AdvanceTo(LayerTreeLifecycle::kBeginningSync);
 
   if (next_commit_forces_redraw_) {
     sync_tree->ForceRedrawNextActivation();
@@ -302,29 +306,38 @@ void LayerTreeHost::FinishCommitOnImplThread(
   if (needs_full_tree_sync_)
     TreeSynchronizer::SynchronizeTrees(root_layer(), sync_tree);
 
-  PushPropertiesTo(sync_tree);
-
-  sync_tree->PassSwapPromises(swap_promise_manager_.TakeSwapPromises());
-
-  host_impl->SetHasGpuRasterizationTrigger(has_gpu_rasterization_trigger_);
-  host_impl->SetContentIsSuitableForGpuRasterization(
-      content_is_suitable_for_gpu_rasterization_);
-  RecordGpuRasterizationHistogram(host_impl);
-
-  host_impl->SetViewportSize(device_viewport_size_);
-  sync_tree->SetDeviceScaleFactor(device_scale_factor_);
-  host_impl->SetDebugState(debug_state_);
-
-  sync_tree->set_ui_resource_request_queue(
-      ui_resource_manager_->TakeUIResourcesRequests());
+  // Track the navigation state before pushing properties since it overwrites
+  // the |content_source_id_| on the sync tree.
+  bool did_navigate = content_source_id_ != sync_tree->content_source_id();
+  if (did_navigate)
+    host_impl->ClearImageCacheOnNavigation();
 
   {
     TRACE_EVENT0("cc", "LayerTreeHostInProcess::PushProperties");
 
+    PushPropertyTreesTo(sync_tree);
+    sync_tree->lifecycle().AdvanceTo(LayerTreeLifecycle::kSyncedPropertyTrees);
+
+    PushSurfaceIdsTo(sync_tree);
     TreeSynchronizer::PushLayerProperties(this, sync_tree);
+    sync_tree->lifecycle().AdvanceTo(
+        LayerTreeLifecycle::kSyncedLayerProperties);
+
+    PushLayerTreePropertiesTo(sync_tree);
+    PushLayerTreeHostPropertiesTo(host_impl);
+
+    sync_tree->PassSwapPromises(swap_promise_manager_.TakeSwapPromises());
+
+    // TODO(pdr): Move this into PushPropertyTreesTo or introduce a lifecycle
+    // state for it.
+    sync_tree->SetDeviceScaleFactor(device_scale_factor_);
+
+    sync_tree->set_ui_resource_request_queue(
+        ui_resource_manager_->TakeUIResourcesRequests());
 
     // This must happen after synchronizing property trees and after pushing
     // properties, which updates the clobber_active_value flag.
+    // TODO(pdr): Enforce this comment with DCHECKS and a lifecycle state.
     sync_tree->property_trees()->scroll_tree.PushScrollUpdatesFromMainThread(
         property_trees(), sync_tree);
 
@@ -333,15 +346,40 @@ void LayerTreeHost::FinishCommitOnImplThread(
     // host pushes properties as animation host push properties can change
     // Animation::InEffect and we want the old InEffect value for updating
     // property tree scrolling and animation.
-    sync_tree->UpdatePropertyTreeScrollingAndAnimationFromMainThread();
+    // TODO(pdr): Enforce this comment with DCHECKS and a lifecycle state.
+    sync_tree->UpdatePropertyTreeAnimationFromMainThread();
 
     TRACE_EVENT0("cc", "LayerTreeHostInProcess::AnimationHost::PushProperties");
     DCHECK(host_impl->mutator_host());
     mutator_host_->PushPropertiesTo(host_impl->mutator_host());
+
+    sync_tree->lifecycle().AdvanceTo(LayerTreeLifecycle::kNotSyncing);
   }
+
+  // Transfer image decode requests to the impl thread.
+  for (auto& request : queued_image_decodes_)
+    host_impl->QueueImageDecode(std::move(request.first), request.second);
+  queued_image_decodes_.clear();
 
   micro_benchmark_controller_.ScheduleImplBenchmarks(host_impl);
   property_trees_.ResetAllChangeTracking();
+}
+
+void LayerTreeHost::PushPropertyTreesTo(LayerTreeImpl* tree_impl) {
+  bool property_trees_changed_on_active_tree =
+      tree_impl->IsActiveTree() && tree_impl->property_trees()->changed;
+  // Property trees may store damage status. We preserve the sync tree damage
+  // status by pushing the damage status from sync tree property trees to main
+  // thread property trees or by moving it onto the layers.
+  if (root_layer_ && property_trees_changed_on_active_tree) {
+    if (property_trees_.sequence_number ==
+        tree_impl->property_trees()->sequence_number)
+      tree_impl->property_trees()->PushChangeTrackingTo(&property_trees_);
+    else
+      tree_impl->MoveChangeTrackingToLayers();
+  }
+
+  tree_impl->SetPropertyTrees(&property_trees_);
 }
 
 void LayerTreeHost::WillCommit() {
@@ -349,7 +387,12 @@ void LayerTreeHost::WillCommit() {
   client_->WillCommit();
 }
 
-void LayerTreeHost::UpdateHudLayer() {}
+
+void LayerTreeHost::UpdateDeferCommitsInternal() {
+  proxy_->SetDeferCommits(defer_commits_ ||
+                          (settings_.enable_surface_synchronization &&
+                           !local_surface_id_.is_valid()));
+}
 
 void LayerTreeHost::CommitComplete() {
   source_frame_number_++;
@@ -360,43 +403,42 @@ void LayerTreeHost::CommitComplete() {
   }
 }
 
-void LayerTreeHost::SetCompositorFrameSink(
-    std::unique_ptr<CompositorFrameSink> surface) {
-  TRACE_EVENT0("cc", "LayerTreeHostInProcess::SetCompositorFrameSink");
+void LayerTreeHost::SetLayerTreeFrameSink(
+    std::unique_ptr<LayerTreeFrameSink> surface) {
+  TRACE_EVENT0("cc", "LayerTreeHostInProcess::SetLayerTreeFrameSink");
   DCHECK(surface);
 
-  DCHECK(!new_compositor_frame_sink_);
-  new_compositor_frame_sink_ = std::move(surface);
-  proxy_->SetCompositorFrameSink(new_compositor_frame_sink_.get());
+  DCHECK(!new_layer_tree_frame_sink_);
+  new_layer_tree_frame_sink_ = std::move(surface);
+  proxy_->SetLayerTreeFrameSink(new_layer_tree_frame_sink_.get());
 }
 
-std::unique_ptr<CompositorFrameSink>
-LayerTreeHost::ReleaseCompositorFrameSink() {
+std::unique_ptr<LayerTreeFrameSink> LayerTreeHost::ReleaseLayerTreeFrameSink() {
   DCHECK(!visible_);
 
-  DidLoseCompositorFrameSink();
-  proxy_->ReleaseCompositorFrameSink();
-  return std::move(current_compositor_frame_sink_);
+  DidLoseLayerTreeFrameSink();
+  proxy_->ReleaseLayerTreeFrameSink();
+  return std::move(current_layer_tree_frame_sink_);
 }
 
-void LayerTreeHost::RequestNewCompositorFrameSink() {
-  client_->RequestNewCompositorFrameSink();
+void LayerTreeHost::RequestNewLayerTreeFrameSink() {
+  client_->RequestNewLayerTreeFrameSink();
 }
 
-void LayerTreeHost::DidInitializeCompositorFrameSink() {
-  DCHECK(new_compositor_frame_sink_);
-  current_compositor_frame_sink_ = std::move(new_compositor_frame_sink_);
-  client_->DidInitializeCompositorFrameSink();
+void LayerTreeHost::DidInitializeLayerTreeFrameSink() {
+  DCHECK(new_layer_tree_frame_sink_);
+  current_layer_tree_frame_sink_ = std::move(new_layer_tree_frame_sink_);
+  client_->DidInitializeLayerTreeFrameSink();
 }
 
-void LayerTreeHost::DidFailToInitializeCompositorFrameSink() {
-  DCHECK(new_compositor_frame_sink_);
+void LayerTreeHost::DidFailToInitializeLayerTreeFrameSink() {
+  DCHECK(new_layer_tree_frame_sink_);
   // Note: It is safe to drop all output surface references here as
   // LayerTreeHostImpl will not keep a pointer to either the old or
-  // new CompositorFrameSink after failing to initialize the new one.
-  current_compositor_frame_sink_ = nullptr;
-  new_compositor_frame_sink_ = nullptr;
-  client_->DidFailToInitializeCompositorFrameSink();
+  // new LayerTreeFrameSink after failing to initialize the new one.
+  current_layer_tree_frame_sink_ = nullptr;
+  new_layer_tree_frame_sink_ = nullptr;
+  client_->DidFailToInitializeLayerTreeFrameSink();
 }
 
 std::unique_ptr<LayerTreeHostImpl>
@@ -413,21 +455,24 @@ LayerTreeHost::CreateLayerTreeHostImpl(
       rendering_stats_instrumentation_.get(), task_graph_runner_,
       std::move(mutator_host_impl), id_, std::move(image_worker_task_runner_));
   host_impl->SetHasGpuRasterizationTrigger(has_gpu_rasterization_trigger_);
-  host_impl->SetContentIsSuitableForGpuRasterization(
-      content_is_suitable_for_gpu_rasterization_);
+  host_impl->SetContentHasSlowPaths(content_has_slow_paths_);
+  host_impl->SetContentHasNonAAPaint(content_has_non_aa_paint_);
   task_graph_runner_ = NULL;
   input_handler_weak_ptr_ = host_impl->AsWeakPtr();
   return host_impl;
 }
 
-void LayerTreeHost::DidLoseCompositorFrameSink() {
-  TRACE_EVENT0("cc", "LayerTreeHostInProcess::DidLoseCompositorFrameSink");
+void LayerTreeHost::DidLoseLayerTreeFrameSink() {
+  TRACE_EVENT0("cc", "LayerTreeHostInProcess::DidLoseLayerTreeFrameSink");
   DCHECK(task_runner_provider_->IsMainThread());
   SetNeedsCommit();
 }
 
 void LayerTreeHost::SetDeferCommits(bool defer_commits) {
-  proxy_->SetDeferCommits(defer_commits);
+  if (defer_commits_ == defer_commits)
+    return;
+  defer_commits_ = defer_commits;
+  UpdateDeferCommitsInternal();
 }
 
 DISABLE_CFI_PERF
@@ -464,9 +509,9 @@ void LayerTreeHost::SetNextCommitWaitsForActivation() {
   proxy_->SetNextCommitWaitsForActivation();
 }
 
-void LayerTreeHost::SetNextCommitForcesRedraw() {
+void LayerTreeHost::SetNeedsCommitWithForcedRedraw() {
   next_commit_forces_redraw_ = true;
-  proxy_->SetNeedsUpdateLayers();
+  proxy_->SetNeedsCommit();
 }
 
 void LayerTreeHost::SetAnimationEvents(
@@ -492,7 +537,8 @@ void LayerTreeHost::SetDebugState(
 }
 
 void LayerTreeHost::ResetGpuRasterizationTracking() {
-  content_is_suitable_for_gpu_rasterization_ = true;
+  content_has_slow_paths_ = false;
+  content_has_non_aa_paint_ = false;
   gpu_rasterization_histogram_recorded_ = false;
 }
 
@@ -581,7 +627,7 @@ bool LayerTreeHost::UpdateLayers() {
         ->Add(timer.Elapsed().InMicroseconds());
   }
 
-  return result || next_commit_forces_redraw_;
+  return result;
 }
 
 void LayerTreeHost::DidCompletePageScaleAnimation() {
@@ -596,9 +642,9 @@ void LayerTreeHost::RecordGpuRasterizationHistogram(
     return;
 
   bool gpu_rasterization_enabled = false;
-  if (host_impl->compositor_frame_sink()) {
-    ContextProvider* compositor_context_provider =
-        host_impl->compositor_frame_sink()->context_provider();
+  if (host_impl->layer_tree_frame_sink()) {
+    viz::ContextProvider* compositor_context_provider =
+        host_impl->layer_tree_frame_sink()->context_provider();
     if (compositor_context_provider) {
       gpu_rasterization_enabled =
           compositor_context_provider->ContextCapabilities().gpu_rasterization;
@@ -615,11 +661,13 @@ void LayerTreeHost::RecordGpuRasterizationHistogram(
     UMA_HISTOGRAM_BOOLEAN("Renderer4.GpuRasterizationTriggered",
                           has_gpu_rasterization_trigger_);
     UMA_HISTOGRAM_BOOLEAN("Renderer4.GpuRasterizationSuitableContent",
-                          content_is_suitable_for_gpu_rasterization_);
+                          !content_has_slow_paths_);
+    UMA_HISTOGRAM_BOOLEAN("Renderer4.GpuRasterizationSlowPathsWithNonAAPaint",
+                          content_has_slow_paths_ && content_has_non_aa_paint_);
     // Record how many pages actually get gpu rasterization when enabled.
-    UMA_HISTOGRAM_BOOLEAN("Renderer4.GpuRasterizationUsed",
-                          (has_gpu_rasterization_trigger_ &&
-                           content_is_suitable_for_gpu_rasterization_));
+    UMA_HISTOGRAM_BOOLEAN(
+        "Renderer4.GpuRasterizationUsed",
+        (has_gpu_rasterization_trigger_ && !content_has_slow_paths_));
   }
 
   gpu_rasterization_histogram_recorded_ = true;
@@ -630,17 +678,26 @@ bool LayerTreeHost::DoUpdateLayers(Layer* root_layer) {
                "source_frame_number", SourceFrameNumber());
 
   UpdateHudLayer(debug_state_.ShowHudInfo());
-  UpdateHudLayer();
 
   Layer* root_scroll =
       PropertyTreeBuilder::FindFirstScrollableLayer(root_layer);
-  Layer* page_scale_layer = page_scale_layer_.get();
+  Layer* page_scale_layer = viewport_layers_.page_scale.get();
   if (!page_scale_layer && root_scroll)
     page_scale_layer = root_scroll->parent();
 
   if (hud_layer_) {
     hud_layer_->PrepareForCalculateDrawProperties(device_viewport_size_,
                                                   device_scale_factor_);
+    // The HUD layer is managed outside the layer list sent to LayerTreeHost
+    // and needs to have its property tree state set.
+    if (settings_.use_layer_lists && root_layer_.get()) {
+      hud_layer_->SetTransformTreeIndex(root_layer_->transform_tree_index());
+      hud_layer_->SetEffectTreeIndex(root_layer_->effect_tree_index());
+      hud_layer_->SetClipTreeIndex(root_layer_->clip_tree_index());
+      hud_layer_->SetScrollTreeIndex(root_layer_->scroll_tree_index());
+      hud_layer_->set_property_tree_sequence_number(
+          root_layer_->property_tree_sequence_number());
+    }
   }
 
   gfx::Transform identity_transform;
@@ -654,8 +711,6 @@ bool LayerTreeHost::DoUpdateLayers(Layer* root_layer) {
     TRACE_EVENT0(
         TRACE_DISABLED_BY_DEFAULT("cc.debug.cdp-perf"),
         "LayerTreeHostInProcessCommon::ComputeVisibleRectsWithPropertyTrees");
-    PropertyTreeBuilder::PreCalculateMetaInformation(root_layer);
-    bool can_render_to_separate_surface = true;
     PropertyTrees* property_trees = &property_trees_;
     if (!settings_.use_layer_lists) {
       // If use_layer_lists is set, then the property trees should have been
@@ -675,35 +730,40 @@ bool LayerTreeHost::DoUpdateLayers(Layer* root_layer) {
           TRACE_EVENT_SCOPE_THREAD, "property_trees",
           property_trees->AsTracedValue());
     }
-    draw_property_utils::UpdatePropertyTrees(property_trees,
-                                             can_render_to_separate_surface);
+
+    draw_property_utils::UpdatePropertyTrees(this, property_trees);
     draw_property_utils::FindLayersThatNeedUpdates(this, property_trees,
                                                    &update_layer_list);
   }
 
-  for (const auto& layer : update_layer_list)
-    layer->SavePaintProperties();
+  bool content_has_slow_paths = false;
+  bool content_has_non_aa_paint = false;
+  bool did_paint_content = PaintContent(
+      update_layer_list, &content_has_slow_paths, &content_has_non_aa_paint);
 
-  bool content_is_suitable_for_gpu = true;
-  bool did_paint_content =
-      PaintContent(update_layer_list, &content_is_suitable_for_gpu);
+  // |content_has_non_aa_paint| is a correctness (not performance) modifier, if
+  // it changes we immediately update. To prevent churn, this flag is sticky.
+  content_has_non_aa_paint_ |= content_has_non_aa_paint;
 
-  if (content_is_suitable_for_gpu) {
-    ++num_consecutive_frames_suitable_for_gpu_;
-    if (num_consecutive_frames_suitable_for_gpu_ >=
-        kNumFramesToConsiderBeforeGpuRasterization) {
-      content_is_suitable_for_gpu_rasterization_ = true;
+  // If no slow-path content has appeared for a required number of frames,
+  // update the flag.
+  if (!content_has_slow_paths) {
+    ++num_consecutive_frames_without_slow_paths_;
+    if (num_consecutive_frames_without_slow_paths_ >=
+        kNumFramesToConsiderBeforeRemovingSlowPathFlag) {
+      content_has_slow_paths_ = false;
     }
   } else {
-    num_consecutive_frames_suitable_for_gpu_ = 0;
-    content_is_suitable_for_gpu_rasterization_ = false;
+    num_consecutive_frames_without_slow_paths_ = 0;
+    content_has_slow_paths_ = true;
   }
+
   return did_paint_content;
 }
 
 void LayerTreeHost::ApplyViewportDeltas(ScrollAndScaleSet* info) {
   gfx::Vector2dF inner_viewport_scroll_delta;
-  if (info->inner_viewport_scroll.layer_id != Layer::INVALID_ID)
+  if (info->inner_viewport_scroll.element_id)
     inner_viewport_scroll_delta = info->inner_viewport_scroll.scroll_delta;
 
   if (inner_viewport_scroll_delta.IsZero() && info->page_scale_delta == 1.f &&
@@ -713,10 +773,10 @@ void LayerTreeHost::ApplyViewportDeltas(ScrollAndScaleSet* info) {
   // Preemptively apply the scroll offset and scale delta here before sending
   // it to the client.  If the client comes back and sets it to the same
   // value, then the layer can early out without needing a full commit.
-  if (inner_viewport_scroll_layer_) {
-    inner_viewport_scroll_layer_->SetScrollOffsetFromImplSide(
+  if (viewport_layers_.inner_viewport_scroll) {
+    viewport_layers_.inner_viewport_scroll->SetScrollOffsetFromImplSide(
         gfx::ScrollOffsetWithDelta(
-            inner_viewport_scroll_layer_->scroll_offset(),
+            viewport_layers_.inner_viewport_scroll->scroll_offset(),
             inner_viewport_scroll_delta));
   }
 
@@ -732,6 +792,16 @@ void LayerTreeHost::ApplyViewportDeltas(ScrollAndScaleSet* info) {
   SetNeedsUpdateLayers();
 }
 
+void LayerTreeHost::RecordWheelAndTouchScrollingCount(ScrollAndScaleSet* info) {
+  bool has_scrolled_by_wheel = info->has_scrolled_by_wheel;
+  bool has_scrolled_by_touch = info->has_scrolled_by_touch;
+
+  if (has_scrolled_by_wheel || has_scrolled_by_touch) {
+    client_->RecordWheelAndTouchScrollingCount(has_scrolled_by_wheel,
+                                               has_scrolled_by_touch);
+  }
+}
+
 void LayerTreeHost::ApplyScrollAndScale(ScrollAndScaleSet* info) {
   for (auto& swap_promise : info->swap_promises) {
     TRACE_EVENT_WITH_FLOW1("input,benchmark", "LatencyInfo.Flow",
@@ -743,7 +813,7 @@ void LayerTreeHost::ApplyScrollAndScale(ScrollAndScaleSet* info) {
 
   if (root_layer_) {
     for (size_t i = 0; i < info->scrolls.size(); ++i) {
-      Layer* layer = LayerById(info->scrolls[i].layer_id);
+      Layer* layer = LayerByElementId(info->scrolls[i].element_id);
       if (!layer)
         continue;
       layer->SetScrollOffsetFromImplSide(gfx::ScrollOffsetWithDelta(
@@ -751,7 +821,7 @@ void LayerTreeHost::ApplyScrollAndScale(ScrollAndScaleSet* info) {
       SetNeedsUpdateLayers();
     }
     for (size_t i = 0; i < info->scrollbars.size(); ++i) {
-      Layer* layer = LayerById(info->scrollbars[i].layer_id);
+      Layer* layer = LayerByElementId(info->scrollbars[i].element_id);
       if (!layer)
         continue;
       layer->SetScrollbarsHiddenFromImplSide(info->scrollbars[i].hidden);
@@ -762,6 +832,8 @@ void LayerTreeHost::ApplyScrollAndScale(ScrollAndScaleSet* info) {
   // controls from clamping the layout viewport both on the compositor and
   // on the main thread.
   ApplyViewportDeltas(info);
+
+  RecordWheelAndTouchScrollingCount(info);
 }
 
 const base::WeakPtr<InputHandler>& LayerTreeHost::GetInputHandler()
@@ -841,17 +913,31 @@ void LayerTreeHost::SetRootLayer(scoped_refptr<Layer> root_layer) {
   SetNeedsFullTreeSync();
 }
 
-void LayerTreeHost::RegisterViewportLayers(
-    scoped_refptr<Layer> overscroll_elasticity_layer,
-    scoped_refptr<Layer> page_scale_layer,
-    scoped_refptr<Layer> inner_viewport_scroll_layer,
-    scoped_refptr<Layer> outer_viewport_scroll_layer) {
-  DCHECK(!inner_viewport_scroll_layer ||
-         inner_viewport_scroll_layer != outer_viewport_scroll_layer);
-  overscroll_elasticity_layer_ = overscroll_elasticity_layer;
-  page_scale_layer_ = page_scale_layer;
-  inner_viewport_scroll_layer_ = inner_viewport_scroll_layer;
-  outer_viewport_scroll_layer_ = outer_viewport_scroll_layer;
+LayerTreeHost::ViewportLayers::ViewportLayers() {}
+
+LayerTreeHost::ViewportLayers::~ViewportLayers() {}
+
+void LayerTreeHost::RegisterViewportLayers(const ViewportLayers& layers) {
+  DCHECK(!layers.inner_viewport_scroll ||
+         layers.inner_viewport_scroll != layers.outer_viewport_scroll);
+  // The page scale layer only affects the innter viewport scroll layer. The
+  // page scale layer should be sandwiched between the inner viewport scroll and
+  // inner viewport container layers:
+  //   inner viewport container
+  //     overscroll elasticity (optional)
+  //       page scale
+  //         inner viewport scroll
+  DCHECK(!layers.page_scale ||
+         layers.inner_viewport_scroll->parent() == layers.page_scale);
+  DCHECK(!layers.page_scale ||
+         layers.page_scale->parent() == layers.overscroll_elasticity ||
+         layers.page_scale->parent() == layers.inner_viewport_container);
+  viewport_layers_.overscroll_elasticity = layers.overscroll_elasticity;
+  viewport_layers_.page_scale = layers.page_scale;
+  viewport_layers_.inner_viewport_container = layers.inner_viewport_container;
+  viewport_layers_.outer_viewport_container = layers.outer_viewport_container;
+  viewport_layers_.inner_viewport_scroll = layers.inner_viewport_scroll;
+  viewport_layers_.outer_viewport_scroll = layers.outer_viewport_scroll;
 }
 
 void LayerTreeHost::RegisterSelection(const LayerSelection& selection) {
@@ -964,11 +1050,11 @@ void LayerTreeHost::SetPaintedDeviceScaleFactor(
   SetNeedsCommit();
 }
 
-void LayerTreeHost::SetDeviceColorSpace(
-    const gfx::ColorSpace& device_color_space) {
-  if (device_color_space_ == device_color_space)
+void LayerTreeHost::SetRasterColorSpace(
+    const gfx::ColorSpace& raster_color_space) {
+  if (raster_color_space_ == raster_color_space)
     return;
-  device_color_space_ = device_color_space;
+  raster_color_space_ = raster_color_space;
   LayerTreeHostCommon::CallFunctionForEveryLayer(
       this, [](Layer* layer) { layer->SetNeedsDisplay(); });
 }
@@ -977,6 +1063,15 @@ void LayerTreeHost::SetContentSourceId(uint32_t id) {
   if (content_source_id_ == id)
     return;
   content_source_id_ = id;
+  SetNeedsCommit();
+}
+
+void LayerTreeHost::SetLocalSurfaceId(
+    const viz::LocalSurfaceId& local_surface_id) {
+  if (local_surface_id_ == local_surface_id)
+    return;
+  local_surface_id_ = local_surface_id;
+  UpdateDeferCommitsInternal();
   SetNeedsCommit();
 }
 
@@ -1011,14 +1106,39 @@ size_t LayerTreeHost::NumLayers() const {
 }
 
 bool LayerTreeHost::PaintContent(const LayerList& update_layer_list,
-                                 bool* content_is_suitable_for_gpu) {
+                                 bool* content_has_slow_paths,
+                                 bool* content_has_non_aa_paint) {
   base::AutoReset<bool> painting(&in_paint_layer_contents_, true);
   bool did_paint_content = false;
   for (const auto& layer : update_layer_list) {
     did_paint_content |= layer->Update();
-    *content_is_suitable_for_gpu &= layer->IsSuitableForGpuRasterization();
+    *content_has_slow_paths |= layer->HasSlowPaths();
+    *content_has_non_aa_paint |= layer->HasNonAAPaint();
   }
   return did_paint_content;
+}
+
+void LayerTreeHost::AddSurfaceLayerId(const viz::SurfaceId& surface_id) {
+  if (++surface_layer_ids_[surface_id] == 1)
+    needs_surface_ids_sync_ = true;
+}
+
+void LayerTreeHost::RemoveSurfaceLayerId(const viz::SurfaceId& surface_id) {
+  auto iter = surface_layer_ids_.find(surface_id);
+  if (iter == surface_layer_ids_.end())
+    return;
+
+  if (--iter->second <= 0) {
+    surface_layer_ids_.erase(iter);
+    needs_surface_ids_sync_ = true;
+  }
+}
+
+base::flat_set<viz::SurfaceId> LayerTreeHost::SurfaceLayerIds() const {
+  base::flat_set<viz::SurfaceId> ids;
+  for (auto& map_entry : surface_layer_ids_)
+    ids.insert(map_entry.first);
+  return ids;
 }
 
 void LayerTreeHost::AddLayerShouldPushProperties(Layer* layer) {
@@ -1036,10 +1156,6 @@ std::unordered_set<Layer*>& LayerTreeHost::LayersThatShouldPushProperties() {
 bool LayerTreeHost::LayerNeedsPushPropertiesForTesting(Layer* layer) const {
   return layers_that_should_push_properties_.find(layer) !=
          layers_that_should_push_properties_.end();
-}
-
-void LayerTreeHost::SetNeedsMetaInfoRecomputation(bool needs_recomputation) {
-  needs_meta_info_recomputation_ = needs_recomputation;
 }
 
 void LayerTreeHost::SetPageScaleFromImplSide(float page_scale) {
@@ -1070,8 +1186,6 @@ void LayerTreeHost::UpdateHudLayer(bool show_hud_info) {
 
 void LayerTreeHost::SetNeedsFullTreeSync() {
   needs_full_tree_sync_ = true;
-  needs_meta_info_recomputation_ = true;
-
   property_trees_.needs_rebuild = true;
   SetNeedsCommit();
 }
@@ -1081,7 +1195,7 @@ void LayerTreeHost::SetPropertyTreesNeedRebuild() {
   SetNeedsUpdateLayers();
 }
 
-void LayerTreeHost::PushPropertiesTo(LayerTreeImpl* tree_impl) {
+void LayerTreeHost::PushLayerTreePropertiesTo(LayerTreeImpl* tree_impl) {
   tree_impl->set_needs_full_tree_sync(needs_full_tree_sync_);
   needs_full_tree_sync_ = false;
 
@@ -1105,34 +1219,28 @@ void LayerTreeHost::PushPropertiesTo(LayerTreeImpl* tree_impl) {
       EventListenerClass::kTouchEndOrCancel,
       event_listener_properties(EventListenerClass::kTouchEndOrCancel));
 
-  if (page_scale_layer_ && inner_viewport_scroll_layer_) {
-    tree_impl->SetViewportLayersFromIds(
-        overscroll_elasticity_layer_ ? overscroll_elasticity_layer_->id()
-                                     : Layer::INVALID_ID,
-        page_scale_layer_->id(), inner_viewport_scroll_layer_->id(),
-        outer_viewport_scroll_layer_ ? outer_viewport_scroll_layer_->id()
-                                     : Layer::INVALID_ID);
-    DCHECK(inner_viewport_scroll_layer_->IsContainerForFixedPositionLayers());
+  if (viewport_layers_.page_scale && viewport_layers_.inner_viewport_scroll) {
+    LayerTreeImpl::ViewportLayerIds ids;
+    if (viewport_layers_.overscroll_elasticity)
+      ids.overscroll_elasticity = viewport_layers_.overscroll_elasticity->id();
+    ids.page_scale = viewport_layers_.page_scale->id();
+    if (viewport_layers_.inner_viewport_container)
+      ids.inner_viewport_container =
+          viewport_layers_.inner_viewport_container->id();
+    if (viewport_layers_.outer_viewport_container)
+      ids.outer_viewport_container =
+          viewport_layers_.outer_viewport_container->id();
+    ids.inner_viewport_scroll = viewport_layers_.inner_viewport_scroll->id();
+    if (viewport_layers_.outer_viewport_scroll)
+      ids.outer_viewport_scroll = viewport_layers_.outer_viewport_scroll->id();
+    tree_impl->SetViewportLayersFromIds(ids);
+    DCHECK(viewport_layers_.inner_viewport_scroll
+               ->IsContainerForFixedPositionLayers());
   } else {
     tree_impl->ClearViewportLayers();
   }
 
   tree_impl->RegisterSelection(selection_);
-
-  bool property_trees_changed_on_active_tree =
-      tree_impl->IsActiveTree() && tree_impl->property_trees()->changed;
-  // Property trees may store damage status. We preserve the sync tree damage
-  // status by pushing the damage status from sync tree property trees to main
-  // thread property trees or by moving it onto the layers.
-  if (root_layer_ && property_trees_changed_on_active_tree) {
-    if (property_trees_.sequence_number ==
-        tree_impl->property_trees()->sequence_number)
-      tree_impl->property_trees()->PushChangeTrackingTo(&property_trees_);
-    else
-      tree_impl->MoveChangeTrackingToLayers();
-  }
-  // Setting property trees must happen before pushing the page scale.
-  tree_impl->SetPropertyTrees(&property_trees_);
 
   tree_impl->PushPageScaleFromMainThread(
       page_scale_factor_, min_page_scale_factor_, max_page_scale_factor_);
@@ -1148,9 +1256,11 @@ void LayerTreeHost::PushPropertiesTo(LayerTreeImpl* tree_impl) {
 
   tree_impl->set_painted_device_scale_factor(painted_device_scale_factor_);
 
-  tree_impl->SetDeviceColorSpace(device_color_space_);
+  tree_impl->SetRasterColorSpace(raster_color_space_);
 
   tree_impl->set_content_source_id(content_source_id_);
+
+  tree_impl->set_local_surface_id(local_surface_id_);
 
   if (pending_page_scale_animation_) {
     tree_impl->SetPendingPageScaleAnimation(
@@ -1160,6 +1270,26 @@ void LayerTreeHost::PushPropertiesTo(LayerTreeImpl* tree_impl) {
   DCHECK(!tree_impl->ViewportSizeInvalid());
 
   tree_impl->set_has_ever_been_drawn(false);
+}
+
+void LayerTreeHost::PushSurfaceIdsTo(LayerTreeImpl* tree_impl) {
+  if (needs_surface_ids_sync()) {
+    tree_impl->ClearSurfaceLayerIds();
+    tree_impl->SetSurfaceLayerIds(SurfaceLayerIds());
+    // Reset for next update
+    set_needs_surface_ids_sync(false);
+  }
+}
+
+void LayerTreeHost::PushLayerTreeHostPropertiesTo(
+    LayerTreeHostImpl* host_impl) {
+  host_impl->SetHasGpuRasterizationTrigger(has_gpu_rasterization_trigger_);
+  host_impl->SetContentHasSlowPaths(content_has_slow_paths_);
+  host_impl->SetContentHasNonAAPaint(content_has_non_aa_paint_);
+  RecordGpuRasterizationHistogram(host_impl);
+
+  host_impl->SetViewportSize(device_viewport_size_);
+  host_impl->SetDebugState(debug_state_);
 }
 
 Layer* LayerTreeHost::LayerByElementId(ElementId element_id) const {
@@ -1196,7 +1326,6 @@ void LayerTreeHost::SetElementIdsForTesting() {
 }
 
 void LayerTreeHost::BuildPropertyTreesForTesting() {
-  PropertyTreeBuilder::PreCalculateMetaInformation(root_layer());
   gfx::Transform identity_transform;
   PropertyTreeBuilder::BuildPropertyTrees(
       root_layer(), page_scale_layer(), inner_viewport_scroll_layer(),
@@ -1221,6 +1350,13 @@ void LayerTreeHost::SetMutatorsNeedRebuildPropertyTrees() {
 void LayerTreeHost::SetElementFilterMutated(ElementId element_id,
                                             ElementListType list_type,
                                             const FilterOperations& filters) {
+  if (settings_.use_layer_lists) {
+    // In SPv2 we always have property trees and can set the filter
+    // directly on the effect node.
+    property_trees_.effect_tree.OnFilterAnimated(element_id, filters);
+    return;
+  }
+
   Layer* layer = LayerByElementId(element_id);
   DCHECK(layer);
   layer->OnFilterAnimated(filters);
@@ -1229,18 +1365,21 @@ void LayerTreeHost::SetElementFilterMutated(ElementId element_id,
 void LayerTreeHost::SetElementOpacityMutated(ElementId element_id,
                                              ElementListType list_type,
                                              float opacity) {
-  Layer* layer = LayerByElementId(element_id);
-  DCHECK(layer);
   DCHECK_GE(opacity, 0.f);
   DCHECK_LE(opacity, 1.f);
+
+  if (settings_.use_layer_lists) {
+    property_trees_.effect_tree.OnOpacityAnimated(element_id, opacity);
+    return;
+  }
+
+  Layer* layer = LayerByElementId(element_id);
+  DCHECK(layer);
   layer->OnOpacityAnimated(opacity);
 
-  if (property_trees_.IsInIdToIndexMap(PropertyTrees::TreeType::EFFECT,
-                                       layer->id())) {
-    DCHECK_EQ(layer->effect_tree_index(),
-              property_trees_.layer_id_to_effect_node_index[layer->id()]);
-    EffectNode* node =
-        property_trees_.effect_tree.Node(layer->effect_tree_index());
+  if (EffectNode* node =
+          property_trees_.effect_tree.Node(layer->effect_tree_index())) {
+    DCHECK_EQ(layer->effect_tree_index(), node->id);
     if (node->opacity == opacity)
       return;
 
@@ -1255,16 +1394,16 @@ void LayerTreeHost::SetElementTransformMutated(
     ElementId element_id,
     ElementListType list_type,
     const gfx::Transform& transform) {
+  if (settings_.use_layer_lists) {
+    property_trees_.transform_tree.OnTransformAnimated(element_id, transform);
+    return;
+  }
+
   Layer* layer = LayerByElementId(element_id);
   DCHECK(layer);
   layer->OnTransformAnimated(transform);
 
-  if (property_trees_.IsInIdToIndexMap(PropertyTrees::TreeType::TRANSFORM,
-                                       layer->id())) {
-    DCHECK_EQ(layer->transform_tree_index(),
-              property_trees_.layer_id_to_transform_node_index[layer->id()]);
-    TransformNode* node =
-        property_trees_.transform_tree.Node(layer->transform_tree_index());
+  if (TransformNode* node = layer->GetTransformNode()) {
     if (node->local == transform)
       return;
 
@@ -1291,9 +1430,9 @@ void LayerTreeHost::ElementIsAnimatingChanged(
     ElementListType list_type,
     const PropertyAnimationState& mask,
     const PropertyAnimationState& state) {
-  Layer* layer = LayerByElementId(element_id);
-  if (layer)
-    layer->OnIsAnimatingChanged(mask, state);
+  DCHECK_EQ(ElementListType::ACTIVE, list_type);
+  property_trees()->ElementIsAnimatingChanged(mutator_host(), element_id,
+                                              list_type, mask, state, true);
 }
 
 gfx::ScrollOffset LayerTreeHost::GetScrollOffsetForAnimation(
@@ -1301,6 +1440,14 @@ gfx::ScrollOffset LayerTreeHost::GetScrollOffsetForAnimation(
   Layer* layer = LayerByElementId(element_id);
   DCHECK(layer);
   return layer->ScrollOffsetForAnimation();
+}
+
+void LayerTreeHost::QueueImageDecode(
+    const PaintImage& image,
+    const base::Callback<void(bool)>& callback) {
+  TRACE_EVENT0("cc", "LayerTreeHost::QueueImageDecode");
+  queued_image_decodes_.emplace_back(image, callback);
+  SetNeedsCommit();
 }
 
 LayerListIterator<Layer> LayerTreeHost::begin() const {
@@ -1322,6 +1469,14 @@ LayerListReverseIterator<Layer> LayerTreeHost::rend() {
 void LayerTreeHost::SetNeedsDisplayOnAllLayers() {
   for (auto* layer : *this)
     layer->SetNeedsDisplay();
+}
+
+void LayerTreeHost::SetHasCopyRequest(bool has_copy_request) {
+  has_copy_request_ = has_copy_request;
+}
+
+void LayerTreeHost::RequestBeginMainFrameNotExpected(bool new_state) {
+  proxy_->RequestBeginMainFrameNotExpected(new_state);
 }
 
 }  // namespace cc

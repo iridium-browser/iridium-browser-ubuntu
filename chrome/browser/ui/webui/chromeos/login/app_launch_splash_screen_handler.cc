@@ -4,6 +4,10 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/app_launch_splash_screen_handler.h"
 
+#include <utility>
+
+#include "base/memory/ptr_util.h"
+#include "base/values.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/screens/network_error.h"
@@ -39,7 +43,8 @@ namespace chromeos {
 AppLaunchSplashScreenHandler::AppLaunchSplashScreenHandler(
     const scoped_refptr<NetworkStateInformer>& network_state_informer,
     ErrorScreen* error_screen)
-    : network_state_informer_(network_state_informer),
+    : BaseScreenHandler(kScreenId),
+      network_state_informer_(network_state_informer),
       error_screen_(error_screen) {
   set_call_js_prefix(kJsScreenPath);
   network_state_informer_->AddObserver(this);
@@ -84,13 +89,12 @@ void AppLaunchSplashScreenHandler::Show(const std::string& app_id) {
   data.SetBoolean("shortcutEnabled",
                   !KioskAppManager::Get()->GetDisableBailoutShortcut());
 
-  // |data| will take ownership of |app_info|.
-  base::DictionaryValue *app_info = new base::DictionaryValue();
-  PopulateAppInfo(app_info);
-  data.Set("appInfo", app_info);
+  auto app_info = base::MakeUnique<base::DictionaryValue>();
+  PopulateAppInfo(app_info.get());
+  data.Set("appInfo", std::move(app_info));
 
   SetLaunchText(l10n_util::GetStringUTF8(GetProgressMessageFromState(state_)));
-  ShowScreenWithData(OobeScreen::SCREEN_APP_LAUNCH_SPLASH, &data);
+  ShowScreenWithData(kScreenId, &data);
 }
 
 void AppLaunchSplashScreenHandler::RegisterMessages() {
@@ -176,7 +180,7 @@ void AppLaunchSplashScreenHandler::ShowNetworkConfigureUI() {
   }
 
   if (GetCurrentScreen() != OobeScreen::SCREEN_ERROR_MESSAGE)
-    error_screen_->SetParentScreen(OobeScreen::SCREEN_APP_LAUNCH_SPLASH);
+    error_screen_->SetParentScreen(kScreenId);
   error_screen_->Show();
 }
 

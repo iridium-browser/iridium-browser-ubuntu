@@ -30,9 +30,9 @@
 #define V8DOMConfiguration_h
 
 #include "bindings/core/v8/GeneratedCodeHelper.h"
-#include "bindings/core/v8/V8Binding.h"
-#include "bindings/core/v8/V8DOMWrapper.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "core/CoreExport.h"
+#include "platform/bindings/V8DOMWrapper.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -49,62 +49,73 @@ class CORE_EXPORT V8DOMConfiguration final {
 
   // Bitflags to show where the member will be defined.
   enum PropertyLocationConfiguration : unsigned {
-    OnInstance = 1 << 0,
-    OnPrototype = 1 << 1,
-    OnInterface = 1 << 2,
+    kOnInstance = 1 << 0,
+    kOnPrototype = 1 << 1,
+    kOnInterface = 1 << 2,
   };
 
   // TODO(dcheng): Make these enum classes.
   enum HolderCheckConfiguration : unsigned {
-    CheckHolder,
-    DoNotCheckHolder,
+    kCheckHolder,
+    kDoNotCheckHolder,
   };
 
   enum AccessCheckConfiguration : unsigned {
-    CheckAccess,
-    DoNotCheckAccess,
+    kCheckAccess,
+    kDoNotCheckAccess,
   };
 
-  typedef v8::Local<v8::Private> (*CachedAccessorCallback)(v8::Isolate*);
+  // Bit field to select which worlds the member will be defined in.
+  enum WorldConfiguration : unsigned {
+    kMainWorld = 1 << 0,
+    kNonMainWorlds = 1 << 1,
+    kAllWorlds = kMainWorld | kNonMainWorlds,
+  };
+
+  typedef v8::Local<v8::Private> (*CachedPropertyKey)(v8::Isolate*);
 
   // AttributeConfiguration translates into calls to SetNativeDataProperty() on
-  // either the instance or the prototype ObjectTemplate, based on
-  // |propertyLocationConfiguration|.
+  // either of instance or prototype object (or their object template).
   struct AttributeConfiguration {
     AttributeConfiguration& operator=(const AttributeConfiguration&) = delete;
     DISALLOW_NEW();
     const char* const name;
     v8::AccessorNameGetterCallback getter;
     v8::AccessorNameSetterCallback setter;
-    v8::AccessorNameGetterCallback getterForMainWorld;
-    v8::AccessorNameSetterCallback setterForMainWorld;
-    // TODO(vogelheim): This has to be removed too since it's only used in
-    //                  accessors.
-    // The accessor's 'result' is stored in a private property.
-    CachedAccessorCallback cachedAccessorCallback;
+
     const WrapperTypeInfo* data;
     // v8::PropertyAttribute
     unsigned attribute : 8;
     // PropertyLocationConfiguration
-    unsigned propertyLocationConfiguration : 3;
+    unsigned property_location_configuration : 3;
     // HolderCheckConfiguration
-    unsigned holderCheckConfiguration : 1;
+    unsigned holder_check_configuration : 1;
+    // WorldConfiguration
+    unsigned world_configuration : 2;
   };
 
-  static void installAttributes(v8::Isolate*,
-                                const DOMWrapperWorld&,
-                                v8::Local<v8::ObjectTemplate> instanceTemplate,
-                                v8::Local<v8::ObjectTemplate> prototypeTemplate,
-                                const AttributeConfiguration*,
-                                size_t attributeCount);
-
-  static void installAttribute(v8::Isolate*,
+  static void InstallAttributes(
+      v8::Isolate*,
+      const DOMWrapperWorld&,
+      v8::Local<v8::ObjectTemplate> instance_template,
+      v8::Local<v8::ObjectTemplate> prototype_template,
+      const AttributeConfiguration*,
+      size_t attribute_count);
+  static void InstallAttribute(v8::Isolate*,
                                const DOMWrapperWorld&,
-                               v8::Local<v8::ObjectTemplate> instanceTemplate,
-                               v8::Local<v8::ObjectTemplate> prototypeTemplate,
+                               v8::Local<v8::ObjectTemplate> instance_template,
+                               v8::Local<v8::ObjectTemplate> prototype_template,
                                const AttributeConfiguration&);
 
-  static void installAttribute(v8::Isolate*,
+  // If an empty handle is passed as |instance| or |prototype|, that object is
+  // ignored and no properties are installed on that object.
+  static void InstallAttributes(v8::Isolate*,
+                                const DOMWrapperWorld&,
+                                v8::Local<v8::Object> instance,
+                                v8::Local<v8::Object> prototype,
+                                const AttributeConfiguration*,
+                                size_t attribute_count);
+  static void InstallAttribute(v8::Isolate*,
                                const DOMWrapperWorld&,
                                v8::Local<v8::Object> instance,
                                v8::Local<v8::Object> prototype,
@@ -116,54 +127,65 @@ class CORE_EXPORT V8DOMConfiguration final {
   //
   // This also means that the AttributeConfiguration must not specify a setter,
   // nor any non-default attributes.
-  static void installLazyDataAttributes(
+  static void InstallLazyDataAttributes(
       v8::Isolate*,
       const DOMWrapperWorld&,
-      v8::Local<v8::ObjectTemplate> instanceTemplate,
-      v8::Local<v8::ObjectTemplate> prototypeTemplate,
+      v8::Local<v8::ObjectTemplate> instance_template,
+      v8::Local<v8::ObjectTemplate> prototype_template,
       const AttributeConfiguration*,
-      size_t attributeCount);
+      size_t attribute_count);
 
-  // AccessorConfiguration translates into calls to SetAccessorProperty()
-  // on prototype ObjectTemplate.
+  // AccessorConfiguration translates into calls to SetAccessorProperty() on
+  // either of instance, prototype, or interface object (or their object
+  // template).
   struct AccessorConfiguration {
     AccessorConfiguration& operator=(const AccessorConfiguration&) = delete;
     DISALLOW_NEW();
     const char* const name;
     v8::FunctionCallback getter;
     v8::FunctionCallback setter;
-    v8::FunctionCallback getterForMainWorld;
-    v8::FunctionCallback setterForMainWorld;
     // The accessor's 'result' is stored in a private property.
-    CachedAccessorCallback cachedAccessorCallback;
+    CachedPropertyKey cached_property_key;
     const WrapperTypeInfo* data;
     // v8::PropertyAttribute
     unsigned attribute : 8;
     // PropertyLocationConfiguration
-    unsigned propertyLocationConfiguration : 3;
+    unsigned property_location_configuration : 3;
     // HolderCheckConfiguration
-    unsigned holderCheckConfiguration : 1;
+    unsigned holder_check_configuration : 1;
+    // WorldConfiguration
+    unsigned world_configuration : 2;
   };
 
-  static void installAccessors(
+  static void InstallAccessors(
       v8::Isolate*,
       const DOMWrapperWorld&,
-      v8::Local<v8::ObjectTemplate> instanceTemplate,
-      v8::Local<v8::ObjectTemplate> prototypeTemplate,
-      v8::Local<v8::FunctionTemplate> interfaceTemplate,
+      v8::Local<v8::ObjectTemplate> instance_template,
+      v8::Local<v8::ObjectTemplate> prototype_template,
+      v8::Local<v8::FunctionTemplate> interface_template,
       v8::Local<v8::Signature>,
       const AccessorConfiguration*,
-      size_t accessorCount);
+      size_t accessor_count);
+  static void InstallAccessor(
+      v8::Isolate*,
+      const DOMWrapperWorld&,
+      v8::Local<v8::ObjectTemplate> instance_template,
+      v8::Local<v8::ObjectTemplate> prototype_template,
+      v8::Local<v8::FunctionTemplate> interface_template,
+      v8::Local<v8::Signature>,
+      const AccessorConfiguration&);
 
-  static void installAccessor(v8::Isolate*,
-                              const DOMWrapperWorld&,
-                              v8::Local<v8::ObjectTemplate> instanceTemplate,
-                              v8::Local<v8::ObjectTemplate> prototypeTemplate,
-                              v8::Local<v8::FunctionTemplate> interfaceTemplate,
-                              v8::Local<v8::Signature>,
-                              const AccessorConfiguration&);
-
-  static void installAccessor(v8::Isolate*,
+  // If an empty handle is passed as |instance|, |prototype|, or |interface|,
+  // then that object is ignored and no properties are installed on that object.
+  static void InstallAccessors(v8::Isolate*,
+                               const DOMWrapperWorld&,
+                               v8::Local<v8::Object> instance,
+                               v8::Local<v8::Object> prototype,
+                               v8::Local<v8::Function> interface,
+                               v8::Local<v8::Signature>,
+                               const AccessorConfiguration*,
+                               size_t accessor_count);
+  static void InstallAccessor(v8::Isolate*,
                               const DOMWrapperWorld&,
                               v8::Local<v8::Object> instance,
                               v8::Local<v8::Object> prototype,
@@ -172,12 +194,12 @@ class CORE_EXPORT V8DOMConfiguration final {
                               const AccessorConfiguration&);
 
   enum ConstantType {
-    ConstantTypeShort,
-    ConstantTypeLong,
-    ConstantTypeUnsignedShort,
-    ConstantTypeUnsignedLong,
-    ConstantTypeFloat,
-    ConstantTypeDouble
+    kConstantTypeShort,
+    kConstantTypeLong,
+    kConstantTypeUnsignedShort,
+    kConstantTypeUnsignedLong,
+    kConstantTypeFloat,
+    kConstantTypeDouble
   };
 
   // ConstantConfiguration translates into calls to Set() for setting up an
@@ -200,101 +222,102 @@ class CORE_EXPORT V8DOMConfiguration final {
   // installConstantWithGetter is used when some C++ code needs to be executed
   // when the constant is accessed, e.g. to handle deprecation or measuring
   // usage. The property appears the same to scripts, but is slower to access.
-  static void installConstants(
+  static void InstallConstants(
       v8::Isolate*,
-      v8::Local<v8::FunctionTemplate> interfaceTemplate,
-      v8::Local<v8::ObjectTemplate> prototypeTemplate,
+      v8::Local<v8::FunctionTemplate> interface_template,
+      v8::Local<v8::ObjectTemplate> prototype_template,
       const ConstantConfiguration*,
-      size_t constantCount);
+      size_t constant_count);
+  static void InstallConstant(
+      v8::Isolate*,
+      v8::Local<v8::FunctionTemplate> interface_template,
+      v8::Local<v8::ObjectTemplate> prototype_template,
+      const ConstantConfiguration&);
 
-  static void installConstant(v8::Isolate*,
-                              v8::Local<v8::FunctionTemplate> interfaceTemplate,
-                              v8::Local<v8::ObjectTemplate> prototypeTemplate,
-                              const ConstantConfiguration&);
-
-  static void installConstant(v8::Isolate*,
+  static void InstallConstant(v8::Isolate*,
                               v8::Local<v8::Function> interface,
                               v8::Local<v8::Object> prototype,
                               const ConstantConfiguration&);
 
-  static void installConstantWithGetter(
+  static void InstallConstantWithGetter(
       v8::Isolate*,
-      v8::Local<v8::FunctionTemplate> interfaceTemplate,
-      v8::Local<v8::ObjectTemplate> prototypeTemplate,
+      v8::Local<v8::FunctionTemplate> interface_template,
+      v8::Local<v8::ObjectTemplate> prototype_template,
       const char* name,
       v8::AccessorNameGetterCallback);
 
   // MethodConfiguration translates into calls to Set() for setting up an
-  // object's callbacks. It sets the method on both the FunctionTemplate or
-  // the ObjectTemplate.
+  // object's callbacks. It sets a method on instance, prototype or
+  // interface object (or their object tepmplate).
   struct MethodConfiguration {
     MethodConfiguration& operator=(const MethodConfiguration&) = delete;
     DISALLOW_NEW();
-    v8::Local<v8::Name> methodName(v8::Isolate* isolate) const {
-      return v8AtomicString(isolate, name);
-    }
-    v8::FunctionCallback callbackForWorld(const DOMWrapperWorld& world) const {
-      return world.isMainWorld() && callbackForMainWorld ? callbackForMainWorld
-                                                         : callback;
+    v8::Local<v8::Name> MethodName(v8::Isolate* isolate) const {
+      return V8AtomicString(isolate, name);
     }
 
     const char* const name;
     v8::FunctionCallback callback;
-    v8::FunctionCallback callbackForMainWorld;
     int length;
     // v8::PropertyAttribute
     unsigned attribute : 8;
     // PropertyLocationConfiguration
-    unsigned propertyLocationConfiguration : 3;
+    unsigned property_location_configuration : 3;
     // HolderCheckConfiguration
-    unsigned holderCheckConfiguration : 1;
+    unsigned holder_check_configuration : 1;
     // AccessCheckConfiguration
-    unsigned accessCheckConfiguration : 1;
+    unsigned access_check_configuration : 1;
+    // WorldConfiguration
+    unsigned world_configuration : 2;
   };
 
   struct SymbolKeyedMethodConfiguration {
     SymbolKeyedMethodConfiguration& operator=(
         const SymbolKeyedMethodConfiguration&) = delete;
     DISALLOW_NEW();
-    v8::Local<v8::Name> methodName(v8::Isolate* isolate) const {
-      return getSymbol(isolate);
-    }
-    v8::FunctionCallback callbackForWorld(const DOMWrapperWorld&) const {
-      return callback;
+    v8::Local<v8::Name> MethodName(v8::Isolate* isolate) const {
+      return get_symbol(isolate);
     }
 
-    v8::Local<v8::Symbol> (*getSymbol)(v8::Isolate*);
+    v8::Local<v8::Symbol> (*get_symbol)(v8::Isolate*);
+    const char* const symbol_alias;
     v8::FunctionCallback callback;
     // SymbolKeyedMethodConfiguration doesn't support per-world bindings.
     int length;
     // v8::PropertyAttribute
     unsigned attribute : 8;
     // PropertyLocationConfiguration
-    unsigned propertyLocationConfiguration : 3;
+    unsigned property_location_configuration : 3;
     // HolderCheckConfiguration
-    unsigned holderCheckConfiguration : 1;
+    unsigned holder_check_configuration : 1;
     // AccessCheckConfiguration
-    unsigned accessCheckConfiguration : 1;
+    unsigned access_check_configuration : 1;
   };
 
-  static void installMethods(v8::Isolate*,
+  static void InstallMethods(v8::Isolate*,
                              const DOMWrapperWorld&,
-                             v8::Local<v8::ObjectTemplate> instanceTemplate,
-                             v8::Local<v8::ObjectTemplate> prototypeTemplate,
-                             v8::Local<v8::FunctionTemplate> interfaceTemplate,
+                             v8::Local<v8::ObjectTemplate> instance_template,
+                             v8::Local<v8::ObjectTemplate> prototype_template,
+                             v8::Local<v8::FunctionTemplate> interface_template,
                              v8::Local<v8::Signature>,
                              const MethodConfiguration*,
-                             size_t methodCount);
-
-  static void installMethod(v8::Isolate*,
+                             size_t method_count);
+  static void InstallMethod(v8::Isolate*,
                             const DOMWrapperWorld&,
-                            v8::Local<v8::ObjectTemplate> instanceTemplate,
-                            v8::Local<v8::ObjectTemplate> prototypeTemplate,
-                            v8::Local<v8::FunctionTemplate> interfaceTemplate,
+                            v8::Local<v8::ObjectTemplate> instance_template,
+                            v8::Local<v8::ObjectTemplate> prototype_template,
+                            v8::Local<v8::FunctionTemplate> interface_template,
                             v8::Local<v8::Signature>,
                             const MethodConfiguration&);
+  static void InstallMethod(v8::Isolate*,
+                            const DOMWrapperWorld&,
+                            v8::Local<v8::ObjectTemplate>,
+                            v8::Local<v8::Signature>,
+                            const SymbolKeyedMethodConfiguration&);
 
-  static void installMethod(v8::Isolate*,
+  // If an empty handle is passed as |instance|, |prototype|, or |interface|,
+  // then that object is ignored and no properties are installed on that object.
+  static void InstallMethod(v8::Isolate*,
                             const DOMWrapperWorld&,
                             v8::Local<v8::Object> instance,
                             v8::Local<v8::Object> prototype,
@@ -302,20 +325,14 @@ class CORE_EXPORT V8DOMConfiguration final {
                             v8::Local<v8::Signature>,
                             const MethodConfiguration&);
 
-  static void installMethod(v8::Isolate*,
-                            const DOMWrapperWorld&,
-                            v8::Local<v8::ObjectTemplate>,
-                            v8::Local<v8::Signature>,
-                            const SymbolKeyedMethodConfiguration&);
-
-  static void initializeDOMInterfaceTemplate(
+  static void InitializeDOMInterfaceTemplate(
       v8::Isolate*,
-      v8::Local<v8::FunctionTemplate> interfaceTemplate,
-      const char* interfaceName,
-      v8::Local<v8::FunctionTemplate> parentInterfaceTemplate,
-      size_t v8InternalFieldCount);
+      v8::Local<v8::FunctionTemplate> interface_template,
+      const char* interface_name,
+      v8::Local<v8::FunctionTemplate> parent_interface_template,
+      size_t v8_internal_field_count);
 
-  static v8::Local<v8::FunctionTemplate> domClassTemplate(
+  static v8::Local<v8::FunctionTemplate> DomClassTemplate(
       v8::Isolate*,
       const DOMWrapperWorld&,
       WrapperTypeInfo*,
@@ -323,9 +340,9 @@ class CORE_EXPORT V8DOMConfiguration final {
 
   // Sets the class string of platform objects, interface prototype objects,
   // etc.  See also http://heycam.github.io/webidl/#dfn-class-string
-  static void setClassString(v8::Isolate*,
+  static void SetClassString(v8::Isolate*,
                              v8::Local<v8::ObjectTemplate>,
-                             const char* classString);
+                             const char* class_string);
 };
 
 }  // namespace blink

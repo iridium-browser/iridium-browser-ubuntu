@@ -4,6 +4,8 @@
 
 #include "content/browser/frame_host/frame_tree_node.h"
 
+#include <math.h>
+
 #include <queue>
 #include <utility>
 
@@ -13,6 +15,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
+#include "base/strings/string_util.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/navigation_request.h"
 #include "content/browser/frame_host/navigator.h"
@@ -32,8 +35,8 @@ namespace {
 // FrameTreeNodes.
 typedef base::hash_map<int, FrameTreeNode*> FrameTreeNodeIdMap;
 
-base::LazyInstance<FrameTreeNodeIdMap> g_frame_tree_node_id_map =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<FrameTreeNodeIdMap>::DestructorAtExit
+    g_frame_tree_node_id_map = LAZY_INSTANCE_INITIALIZER;
 
 // These values indicate the loading progress status. The minimum progress
 // value matches what Blink's ProgressTracker has traditionally used for a
@@ -42,8 +45,44 @@ const double kLoadingProgressNotStarted = 0.0;
 const double kLoadingProgressMinimum = 0.1;
 const double kLoadingProgressDone = 1.0;
 
-void RecordUniqueNameLength(size_t length) {
-  UMA_HISTOGRAM_COUNTS("SessionRestore.FrameUniqueNameLength", length);
+void RecordUniqueNameSize(FrameTreeNode* node) {
+  const auto& unique_name = node->current_replication_state().unique_name;
+
+  // Don't record numbers for the root node, which always has an empty unique
+  // name.
+  if (!node->parent()) {
+    DCHECK(unique_name.empty());
+    return;
+  }
+
+  // The original requested name is derived from the browsing context name and
+  // is essentially unbounded in size...
+  UMA_HISTOGRAM_COUNTS_1M(
+      "SessionRestore.FrameUniqueNameOriginalRequestedNameSize",
+      node->current_replication_state().name.size());
+  // If the name is a frame path, attempt to normalize the statistics based on
+  // the number of frames in the frame path.
+  if (base::StartsWith(unique_name, "<!--framePath //",
+                       base::CompareCase::SENSITIVE)) {
+    size_t depth = 1;
+    while (node->parent()) {
+      ++depth;
+      node = node->parent();
+    }
+    // The max possible size of a unique name is 80 characters, so the expected
+    // size per component shouldn't be much more than that.
+    UMA_HISTOGRAM_COUNTS_100(
+        "SessionRestore.FrameUniqueNameWithFramePathSizePerComponent",
+        round(unique_name.size() / static_cast<float>(depth)));
+    // Blink allows a maximum of ~1024 subframes in a document, so this should
+    // be less than (80 character name + 1 character delimiter) * 1024.
+    UMA_HISTOGRAM_COUNTS_100000(
+        "SessionRestore.FrameUniqueNameWithFramePathSize", unique_name.size());
+  } else {
+    UMA_HISTOGRAM_COUNTS_100(
+        "SessionRestore.FrameUniqueNameFromRequestedNameSize",
+        unique_name.size());
+  }
 }
 
 }  // namespace
@@ -106,15 +145,16 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
       original_opener_(nullptr),
       original_opener_observer_(nullptr),
       has_committed_real_load_(false),
+      is_collapsed_(false),
       replication_state_(
           scope,
           name,
           unique_name,
-          blink::WebSandboxFlags::None,
+          blink::WebSandboxFlags::kNone,
           false /* should enforce strict mixed content checking */,
           false /* is a potentially trustworthy unique origin */,
           false /* has received a user gesture */),
-      pending_sandbox_flags_(blink::WebSandboxFlags::None),
+      pending_sandbox_flags_(blink::WebSandboxFlags::kNone),
       frame_owner_properties_(frame_owner_properties),
       loading_progress_(kLoadingProgressNotStarted),
       blame_context_(frame_tree_node_id_, parent) {
@@ -123,7 +163,7 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
           std::make_pair(frame_tree_node_id_, this));
   CHECK(result.second);
 
-  RecordUniqueNameLength(unique_name.size());
+  RecordUniqueNameSize(this);
 
   // Note: this should always be done last in the constructor.
   blame_context_.Initialize();
@@ -260,6 +300,15 @@ void FrameTreeNode::SetCurrentOrigin(
       is_potentially_trustworthy_unique_origin;
 }
 
+void FrameTreeNode::SetCollapsed(bool collapsed) {
+  DCHECK(!IsMainFrame());
+  if (is_collapsed_ == collapsed)
+    return;
+
+  is_collapsed_ = collapsed;
+  render_manager_.OnDidChangeCollapsedState(collapsed);
+}
+
 void FrameTreeNode::SetFrameName(const std::string& name,
                                  const std::string& unique_name) {
   if (name == replication_state_.name) {
@@ -276,7 +325,10 @@ void FrameTreeNode::SetFrameName(const std::string& name,
     DCHECK(unique_name.empty());
   }
 
-  RecordUniqueNameLength(unique_name.size());
+  // Note the unique name should only be able to change before the first real
+  // load is committed, but that's not strongly enforced here.
+  if (unique_name != replication_state_.unique_name)
+    RecordUniqueNameSize(this);
   render_manager_.OnDidUpdateName(name, unique_name);
   replication_state_.name = name;
   replication_state_.unique_name = unique_name;
@@ -291,18 +343,17 @@ void FrameTreeNode::ResetFeaturePolicyHeader() {
   replication_state_.feature_policy_header.clear();
 }
 
-void FrameTreeNode::AddContentSecurityPolicy(
-    const ContentSecurityPolicyHeader& header,
-    const std::vector<ContentSecurityPolicy>& policies) {
-  replication_state_.accumulated_csp_headers.push_back(header);
-  render_manager_.OnDidAddContentSecurityPolicy(header);
-  csp_policies_.insert(csp_policies_.end(), policies.begin(), policies.end());
+void FrameTreeNode::AddContentSecurityPolicies(
+    const std::vector<ContentSecurityPolicyHeader>& headers) {
+  replication_state_.accumulated_csp_headers.insert(
+      replication_state_.accumulated_csp_headers.end(), headers.begin(),
+      headers.end());
+  render_manager_.OnDidAddContentSecurityPolicies(headers);
 }
 
-void FrameTreeNode::ResetContentSecurityPolicy() {
+void FrameTreeNode::ResetCspHeaders() {
   replication_state_.accumulated_csp_headers.clear();
   render_manager_.OnDidResetContentSecurityPolicy();
-  csp_policies_.clear();
 }
 
 void FrameTreeNode::SetInsecureRequestPolicy(
@@ -320,6 +371,14 @@ void FrameTreeNode::SetPendingSandboxFlags(
   // Subframes should always inherit their parent's sandbox flags.
   if (parent())
     pending_sandbox_flags_ |= parent()->effective_sandbox_flags();
+}
+
+void FrameTreeNode::SetPendingContainerPolicy(
+    const ParsedFeaturePolicyHeader& container_policy) {
+  // This should only be called on subframes; container policy is not mutable on
+  // main frame.
+  DCHECK(!IsMainFrame());
+  pending_container_policy_ = container_policy;
 }
 
 bool FrameTreeNode::IsDescendantOf(FrameTreeNode* other) const {
@@ -365,11 +424,16 @@ bool FrameTreeNode::IsLoading() const {
   return current_frame_host->is_loading();
 }
 
-bool FrameTreeNode::CommitPendingSandboxFlags() {
+bool FrameTreeNode::CommitPendingFramePolicy() {
   bool did_change_flags =
       pending_sandbox_flags_ != replication_state_.sandbox_flags;
-  replication_state_.sandbox_flags = pending_sandbox_flags_;
-  return did_change_flags;
+  bool did_change_container_policy =
+      pending_container_policy_ != replication_state_.container_policy;
+  if (did_change_flags)
+    replication_state_.sandbox_flags = pending_sandbox_flags_;
+  if (did_change_container_policy)
+    replication_state_.container_policy = pending_container_policy_;
+  return did_change_flags || did_change_container_policy;
 }
 
 void FrameTreeNode::CreatedNavigationRequest(
@@ -387,8 +451,14 @@ void FrameTreeNode::CreatedNavigationRequest(
   // There's no need to reset the state: there's still an ongoing load, and the
   // RenderFrameHostManager will take care of updates to the speculative
   // RenderFrameHost in DidCreateNavigationRequest below.
-  if (was_previously_loading)
-    ResetNavigationRequest(true);
+  if (was_previously_loading) {
+    if (navigation_request_ && navigation_request_->navigation_handle()) {
+      // Mark the old request as aborted.
+      navigation_request_->navigation_handle()->set_net_error_code(
+          net::ERR_ABORTED);
+    }
+    ResetNavigationRequest(true, true);
+  }
 
   navigation_request_ = std::move(navigation_request);
   render_manager()->DidCreateNavigationRequest(navigation_request_.get());
@@ -399,11 +469,17 @@ void FrameTreeNode::CreatedNavigationRequest(
   DidStartLoading(to_different_document, was_previously_loading);
 }
 
-void FrameTreeNode::ResetNavigationRequest(bool keep_state) {
+void FrameTreeNode::ResetNavigationRequest(bool keep_state,
+                                           bool inform_renderer) {
   CHECK(IsBrowserSideNavigationEnabled());
   if (!navigation_request_)
     return;
-  bool was_renderer_initiated = !navigation_request_->browser_initiated();
+
+  // The renderer should be informed if the caller allows to do so and the
+  // navigation came from a BeginNavigation IPC.
+  int need_to_inform_renderer =
+      inform_renderer && navigation_request_->from_begin_navigation();
+
   NavigationRequest::AssociatedSiteInstanceType site_instance_type =
       navigation_request_->associated_site_instance_type();
   navigation_request_.reset();
@@ -424,10 +500,13 @@ void FrameTreeNode::ResetNavigationRequest(bool keep_state) {
   }
 
   // If the navigation is renderer-initiated, the renderer should also be
-  // informed that the navigation stopped.
-  if (was_renderer_initiated) {
+  // informed that the navigation stopped if needed. In the case the renderer
+  // process asked for the navigation to be aborted, e.g. following a
+  // document.open, do not send an IPC to the renderer process as it already
+  // expects the navigation to stop.
+  if (need_to_inform_renderer) {
     current_frame_host()->Send(
-        new FrameMsg_Stop(current_frame_host()->GetRoutingID()));
+        new FrameMsg_DroppedNavigation(current_frame_host()->GetRoutingID()));
   }
 
 }
@@ -461,36 +540,16 @@ void FrameTreeNode::DidStartLoading(bool to_different_document,
 }
 
 void FrameTreeNode::DidStopLoading() {
-  // TODO(erikchen): Remove ScopedTracker below once crbug.com/465796 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "465796 FrameTreeNode::DidStopLoading::Start"));
-
   // Set final load progress and update overall progress. This will notify
   // the WebContents of the load progress change.
   DidChangeLoadProgress(kLoadingProgressDone);
-
-  // TODO(erikchen): Remove ScopedTracker below once crbug.com/465796 is fixed.
-  tracked_objects::ScopedTracker tracking_profile2(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "465796 FrameTreeNode::DidStopLoading::WCIDidStopLoading"));
 
   // Notify the WebContents.
   if (!frame_tree_->IsLoading())
     navigator()->GetDelegate()->DidStopLoading();
 
-  // TODO(erikchen): Remove ScopedTracker below once crbug.com/465796 is fixed.
-  tracked_objects::ScopedTracker tracking_profile3(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "465796 FrameTreeNode::DidStopLoading::RFHMDidStopLoading"));
-
   // Notify the RenderFrameHostManager of the event.
   render_manager()->OnDidStopLoading();
-
-  // TODO(erikchen): Remove ScopedTracker below once crbug.com/465796 is fixed.
-  tracked_objects::ScopedTracker tracking_profile4(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "465796 FrameTreeNode::DidStopLoading::End"));
 }
 
 void FrameTreeNode::DidChangeLoadProgress(double load_progress) {
@@ -499,8 +558,19 @@ void FrameTreeNode::DidChangeLoadProgress(double load_progress) {
 }
 
 bool FrameTreeNode::StopLoading() {
-  if (IsBrowserSideNavigationEnabled())
-    ResetNavigationRequest(false);
+  if (IsBrowserSideNavigationEnabled()) {
+    if (navigation_request_) {
+      int expected_pending_nav_entry_id = navigation_request_->nav_entry_id();
+      if (navigation_request_->navigation_handle()) {
+        navigation_request_->navigation_handle()->set_net_error_code(
+            net::ERR_ABORTED);
+        expected_pending_nav_entry_id =
+            navigation_request_->navigation_handle()->pending_nav_entry_id();
+      }
+      navigator_->DiscardPendingEntryIfNeeded(expected_pending_nav_entry_id);
+    }
+    ResetNavigationRequest(false, true);
+  }
 
   // TODO(nasko): see if child frames should send IPCs in site-per-process
   // mode.
@@ -532,6 +602,11 @@ void FrameTreeNode::BeforeUnloadCanceled() {
         render_manager_.speculative_frame_host();
     if (speculative_frame_host)
       speculative_frame_host->ResetLoadingState();
+    // Note: there is no need to set an error code on the NavigationHandle here
+    // as it has not been created yet. It is only created when the
+    // BeforeUnloadACK is received.
+    if (navigation_request_)
+      ResetNavigationRequest(false, true);
   } else {
     RenderFrameHostImpl* pending_frame_host =
         render_manager_.pending_frame_host();

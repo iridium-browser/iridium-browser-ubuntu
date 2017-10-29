@@ -10,7 +10,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/arc/arc_support_host.h"
-#include "chrome/browser/chromeos/arc/auth/arc_auth_info_fetcher.h"
+#include "chrome/browser/chromeos/arc/auth/arc_auth_code_fetcher.h"
 
 namespace net {
 class URLRequestContextGetter;
@@ -22,8 +22,8 @@ class ArcAuthContext;
 
 // Implements the auth token fetching procedure with user's "SIGN IN" button
 // click.
-class ArcManualAuthCodeFetcher : public ArcAuthInfoFetcher,
-                                 public ArcSupportHost::Observer {
+class ArcManualAuthCodeFetcher : public ArcAuthCodeFetcher,
+                                 public ArcSupportHost::AuthDelegate {
  public:
   ArcManualAuthCodeFetcher(ArcAuthContext* context,
                            ArcSupportHost* support_host);
@@ -38,10 +38,10 @@ class ArcManualAuthCodeFetcher : public ArcAuthInfoFetcher,
   // Called when HTTP request gets ready.
   void OnContextPrepared(net::URLRequestContextGetter* request_context_getter);
 
-  // ArcSupportHost::Observer:
+  // ArcSupportHost::AuthDelegate:
   void OnAuthSucceeded(const std::string& auth_code) override;
-  void OnAuthFailed() override;
-  void OnRetryClicked() override;
+  void OnAuthFailed(const std::string& error_msg) override;
+  void OnAuthRetryClicked() override;
 
   ArcAuthContext* const context_;
   ArcSupportHost* const support_host_;

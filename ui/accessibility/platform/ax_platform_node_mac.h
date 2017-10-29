@@ -39,19 +39,23 @@ class AXPlatformNodeMac : public AXPlatformNodeBase {
 }  // namespace ui
 
 AX_EXPORT
-@interface AXPlatformNodeCocoa : NSObject {
- @private
-  ui::AXPlatformNodeBase* node_;  // Weak. Retains us.
-}
+@interface AXPlatformNodeCocoa : NSObject
 
+// Maps AX roles to native roles. Returns NSAccessibilityUnknownRole if not
+// found.
 + (NSString*)nativeRoleFromAXRole:(ui::AXRole)role;
+
+// Maps AX roles to native subroles. Returns nil if not found.
 + (NSString*)nativeSubroleFromAXRole:(ui::AXRole)role;
+
+// Maps AX events to native notifications. Returns nil if not found.
 + (NSString*)nativeNotificationFromAXEvent:(ui::AXEvent)event;
 
 - (instancetype)initWithNode:(ui::AXPlatformNodeBase*)node;
 - (void)detach;
 
 @property(nonatomic, readonly) NSRect boundsInScreen;
+@property(nonatomic, readonly) ui::AXPlatformNodeBase* node;
 
 @end
 

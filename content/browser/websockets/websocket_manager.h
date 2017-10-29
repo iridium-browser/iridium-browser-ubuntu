@@ -28,8 +28,10 @@ class CONTENT_EXPORT WebSocketManager
       NON_EXPORTED_BASE(public net::URLRequestContextGetterObserver) {
  public:
   // Called on the UI thread:
-  static void CreateWebSocket(int process_id, int frame_id,
-                              blink::mojom::WebSocketRequest request);
+  static void CreateWebSocket(
+      int process_id,
+      int frame_id,
+      blink::mojom::WebSocketRequest request);
 
   // net::URLRequestContextGetterObserver implementation.
   void OnContextShuttingDown() override;

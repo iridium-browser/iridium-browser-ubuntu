@@ -13,7 +13,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/stringprintf.h"
-#include "base/template_util.h"
 
 namespace ntp_snippets {
 namespace metrics {
@@ -24,8 +23,10 @@ const int kMaxSuggestionsPerCategory = 10;
 const int kMaxSuggestionsTotal = 50;
 const int kMaxCategories = 10;
 
-const char kHistogramCountOnNtpOpened[] =
-    "NewTabPage.ContentSuggestions.CountOnNtpOpened";
+const char kHistogramCountOnNtpOpenedIfVisible[] =
+    "NewTabPage.ContentSuggestions.CountOnNtpOpenedIfVisible";
+const char kHistogramSectionCountOnNtpOpened[] =
+    "NewTabPage.ContentSuggestions.SectionCountOnNtpOpened";
 const char kHistogramShown[] = "NewTabPage.ContentSuggestions.Shown";
 const char kHistogramShownAge[] = "NewTabPage.ContentSuggestions.ShownAge";
 const char kHistogramShownScore[] =
@@ -76,14 +77,16 @@ enum HistogramCategories {
   PHYSICAL_WEB_PAGES,
   FOREIGN_TABS,
   ARTICLES,
+  READING_LIST,
+  BREAKING_NEWS,
   // Insert new values here!
   COUNT
 };
 
 HistogramCategories GetHistogramCategory(Category category) {
   static_assert(
-      std::is_same<decltype(category.id()), typename base::underlying_type<
-                                                KnownCategories>::type>::value,
+      std::is_same<decltype(category.id()),
+                   typename std::underlying_type<KnownCategories>::type>::value,
       "KnownCategories must have the same underlying type as category.id()");
   // Note: Since the underlying type of KnownCategories is int, it's legal to
   // cast from int to KnownCategories, even if the given value isn't listed in
@@ -103,6 +106,10 @@ HistogramCategories GetHistogramCategory(Category category) {
       return HistogramCategories::FOREIGN_TABS;
     case KnownCategories::ARTICLES:
       return HistogramCategories::ARTICLES;
+    case KnownCategories::READING_LIST:
+      return HistogramCategories::READING_LIST;
+    case KnownCategories::BREAKING_NEWS:
+      return HistogramCategories::BREAKING_NEWS;
     case KnownCategories::LOCAL_CATEGORIES_COUNT:
     case KnownCategories::REMOTE_CATEGORIES_OFFSET:
       NOTREACHED();
@@ -131,6 +138,10 @@ std::string GetCategorySuffix(Category category) {
       return "Articles";
     case HistogramCategories::EXPERIMENTAL:
       return "Experimental";
+    case HistogramCategories::READING_LIST:
+      return "ReadingList";
+    case HistogramCategories::BREAKING_NEWS:
+      return "BreakingNews";
     case HistogramCategories::COUNT:
       NOTREACHED();
       break;
@@ -207,16 +218,26 @@ void RecordContentSuggestionsUsage() {
 
 }  // namespace
 
-void OnPageShown(
-    const std::vector<std::pair<Category, int>>& suggestions_per_category) {
+void OnPageShown(const std::vector<Category>& categories,
+                 const std::vector<int>& suggestions_per_category,
+                 const std::vector<bool>& is_category_visible) {
+  DCHECK_EQ(categories.size(), suggestions_per_category.size());
+  DCHECK_EQ(categories.size(), is_category_visible.size());
   int suggestions_total = 0;
-  for (const std::pair<Category, int>& item : suggestions_per_category) {
-    LogCategoryHistogramPosition(kHistogramCountOnNtpOpened, item.first,
-                                 item.second, kMaxSuggestionsPerCategory);
-    suggestions_total += item.second;
+  int visible_categories_count = 0;
+  for (size_t i = 0; i < categories.size(); ++i) {
+    if (is_category_visible[i]) {
+      LogCategoryHistogramPosition(kHistogramCountOnNtpOpenedIfVisible,
+                                   categories[i], suggestions_per_category[i],
+                                   kMaxSuggestionsPerCategory);
+      suggestions_total += suggestions_per_category[i];
+      ++visible_categories_count;
+    }
   }
-  UMA_HISTOGRAM_EXACT_LINEAR(kHistogramCountOnNtpOpened, suggestions_total,
-                             kMaxSuggestionsTotal);
+  UMA_HISTOGRAM_EXACT_LINEAR(kHistogramCountOnNtpOpenedIfVisible,
+                             suggestions_total, kMaxSuggestionsTotal);
+  UMA_HISTOGRAM_EXACT_LINEAR(kHistogramSectionCountOnNtpOpened,
+                             visible_categories_count, kMaxCategories);
 }
 
 void OnSuggestionShown(int global_position,
@@ -288,6 +309,8 @@ void OnSuggestionOpened(int global_position,
   if (category.IsKnownCategory(KnownCategories::ARTICLES)) {
     RecordContentSuggestionsUsage();
   }
+
+  base::RecordAction(base::UserMetricsAction("Suggestions.Content.Opened"));
 }
 
 void OnSuggestionMenuOpened(int global_position,
@@ -355,6 +378,23 @@ void OnCategoryDismissed(Category category) {
   UMA_HISTOGRAM_ENUMERATION(kHistogramCategoryDismissed,
                             GetHistogramCategory(category),
                             HistogramCategories::COUNT);
+}
+
+void RecordRemoteSuggestionsProviderState(bool enabled) {
+  UMA_HISTOGRAM_BOOLEAN(
+      "NewTabPage.ContentSuggestions.Preferences.RemoteSuggestions", enabled);
+}
+
+void RecordContentSuggestionDismissed() {
+  base::RecordAction(base::UserMetricsAction("Suggestions.Content.Dismissed"));
+}
+
+void RecordCategoryDismissed() {
+  base::RecordAction(base::UserMetricsAction("Suggestions.Category.Dismissed"));
+}
+
+void RecordFetchAction() {
+  base::RecordAction(base::UserMetricsAction("Suggestions.Category.Fetch"));
 }
 
 }  // namespace metrics

@@ -17,7 +17,7 @@ from v8_interface import constant_filters
 from v8_types import set_component_dirs
 from v8_methods import method_filters
 import v8_utilities
-from v8_utilities import capitalize, unique_by
+from v8_utilities import capitalize
 from utilities import (idl_filename_to_component, is_valid_component_dependency,
                        format_remove_duplicates, format_blink_cpp_source_code)
 
@@ -58,9 +58,11 @@ def exposed_if(code, exposed_test):
 
 
 # [SecureContext]
-def secure_context_if(code, secure_context_test):
+def secure_context_if(code, secure_context_test, test_result=None):
     if not secure_context_test:
         return code
+    if test_result:
+        return generate_indented_conditional(code, test_result)
     return generate_indented_conditional(code, 'executionContext && (%s)' % secure_context_test)
 
 
@@ -71,7 +73,6 @@ def runtime_enabled_if(code, name):
 
     function = v8_utilities.runtime_enabled_function(name)
     return generate_indented_conditional(code, function)
-
 
 def initialize_jinja_env(cache_dir):
     jinja_env = jinja2.Environment(
@@ -89,8 +90,7 @@ def initialize_jinja_env(cache_dir):
         'format_remove_duplicates': format_remove_duplicates,
         'runtime_enabled': runtime_enabled_if,
         'runtime_enabled_function': v8_utilities.runtime_enabled_function,
-        'secure_context': secure_context_if,
-        'unique_by': unique_by})
+        'secure_context': secure_context_if})
     jinja_env.filters.update(constant_filters())
     jinja_env.filters.update(method_filters())
     return jinja_env

@@ -66,13 +66,13 @@ class StorySetTest(unittest.TestCase):
 
   def testRemoveWithEmptySetRaises(self):
     story_set = story.StorySet()
-    foo_story = StoryFoo()
+    foo_story = StoryFoo(name='foo')
     with self.assertRaises(ValueError):
       story_set.RemoveStory(foo_story)
 
   def testBasicAddRemove(self):
     story_set = story.StorySet()
-    foo_story = StoryFoo()
+    foo_story = StoryFoo(name='foo')
     story_set.AddStory(foo_story)
     self.assertEqual([foo_story], story_set.stories)
 

@@ -31,7 +31,7 @@
 #ifndef WebSelectElement_h
 #define WebSelectElement_h
 
-#include "../platform/WebVector.h"
+#include "public/platform/WebVector.h"
 #include "WebFormControlElement.h"
 #include "WebOptionElement.h"
 
@@ -47,14 +47,14 @@ class WebSelectElement final : public WebFormControlElement {
       : WebFormControlElement(element) {}
 
   WebSelectElement& operator=(const WebSelectElement& element) {
-    WebFormControlElement::assign(element);
+    WebFormControlElement::Assign(element);
     return *this;
   }
-  void assign(const WebSelectElement& element) {
-    WebFormControlElement::assign(element);
+  void Assign(const WebSelectElement& element) {
+    WebFormControlElement::Assign(element);
   }
 
-  BLINK_EXPORT WebVector<WebElement> listItems() const;
+  BLINK_EXPORT WebVector<WebElement> GetListItems() const;
 
 #if BLINK_IMPLEMENTATION
   WebSelectElement(HTMLSelectElement*);

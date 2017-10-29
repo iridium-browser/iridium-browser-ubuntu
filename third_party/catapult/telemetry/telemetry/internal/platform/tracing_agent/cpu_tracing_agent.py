@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import json
+import logging
 import os
 import re
 import subprocess
@@ -10,7 +10,7 @@ from threading import Timer
 
 from py_trace_event import trace_time
 from telemetry.internal.platform import tracing_agent
-from telemetry.timeline import trace_data
+from tracing.trace_data import trace_data
 
 
 def _ParsePsProcessString(line):
@@ -137,38 +137,44 @@ class WindowsProcessCollector(ProcessCollector):
     return int(raw_output.strip().split('\n')[1])
 
   def _GetProcessesAsStrings(self):
-    # Skip the header and total rows and strip the trailing newline.
-    return subprocess.check_output(
-        self._GET_PERF_DATA_SHELL_COMMAND).strip().split('\n')[2:]
+    try:
+      # Skip the header and total rows and strip the trailing newline.
+      return subprocess.check_output(
+          self._GET_PERF_DATA_SHELL_COMMAND).strip().split('\n')[2:]
+    except subprocess.CalledProcessError as e:
+      logging.warning('Error when running wmic command, which gave output: %s',
+                      e.output)
 
   def _ParseProcessString(self, proc_string):
     assert self._physicalMemoryBytes, 'Must call Init() before using collector'
 
     token_list = proc_string.strip().split()
-    if len(token_list) != 5:
-      raise ValueError('Line does not have five tokens: %s.' % token_list)
+    if len(token_list) < 5:
+      raise ValueError('Line has too few tokens: %s.' % token_list)
 
     # Process names are given in the form:
     #
     #   windowsUpdate
+    #   Windows Explorer
     #   chrome#1
     #   chrome#2
     #
     # In order to match other platforms, where multiple processes can have the
     # same name and can be easily grouped based on that name, we strip any
     # pound sign and number.
-    name = re.sub(r'#[0-9]+$', '', token_list[2])
+    name = ' '.join(token_list[2:-2])
+    name = re.sub(r'#[0-9]+$', '', name)
     # The working set size (roughly equivalent to the resident set size on Unix)
     # is given in bytes. In order to convert this to percent of physical memory
     # occupied by the process, we divide by the amount of total physical memory
     # on the machine.
-    percent_memory = float(token_list[4]) / self._physicalMemoryBytes * 100
+    percent_memory = float(token_list[-1]) / self._physicalMemoryBytes * 100
 
     return {
       'ppid': int(token_list[0]),
       'pid': int(token_list[1]),
       'name': name,
-      'pCpu': float(token_list[3]),
+      'pCpu': float(token_list[-2]),
       'pMem': percent_memory
     }
 
@@ -302,8 +308,12 @@ class CpuTracingAgent(tracing_agent.TracingAgent):
     assert not self._snapshot_ongoing, (
            'Agent is still taking snapshots when data is collected.')
     self._snapshot_ongoing = False
-    data = json.dumps(self._FormatSnapshotsData())
-    trace_data_builder.AddTraceFor(trace_data.CPU_TRACE_DATA, data)
+    trace_data_builder.AddTraceFor(trace_data.CPU_TRACE_DATA, {
+        "traceEvents": self._FormatSnapshotsData(),
+        "metadata": {
+            "clock-domain": "TELEMETRY"
+        }
+    })
 
   def _FormatSnapshotsData(self):
     """Format raw data into Object Event specified in Trace Format document."""

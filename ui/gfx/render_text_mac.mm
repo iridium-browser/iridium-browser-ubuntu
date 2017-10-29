@@ -259,11 +259,12 @@ void RenderTextMac::DrawVisualText(internal::SkiaTextRenderer* renderer) {
 
     renderer->DrawPosText(&run.glyph_positions[0], &run.glyphs[0],
                           run.glyphs.size());
-    renderer->DrawDecorations(run.origin.x(), run.origin.y(), run.width,
-                              run.underline, run.strike, run.diagonal_strike);
+    if (run.underline)
+      renderer->DrawUnderline(run.origin.x(), run.origin.y(), run.width);
+    if (run.strike)
+      renderer->DrawStrike(run.origin.x(), run.origin.y(), run.width,
+                           strike_thickness_factor());
   }
-
-  renderer->EndDiagonalStrike();
 }
 
 RenderTextMac::TextRun::TextRun()
@@ -272,8 +273,7 @@ RenderTextMac::TextRun::TextRun()
       width(0),
       foreground(SK_ColorBLACK),
       underline(false),
-      strike(false),
-      diagonal_strike(false) {}
+      strike(false) {}
 
 RenderTextMac::TextRun::TextRun(TextRun&& other) = default;
 
@@ -428,14 +428,6 @@ void RenderTextMac::ComputeRuns() {
     run->width = run_width;
     run->glyphs.resize(glyph_count);
     CTRunGetGlyphs(ct_run, empty_cf_range, &run->glyphs[0]);
-    // CTRunGetGlyphs() sometimes returns glyphs with value 65535 and zero
-    // width (this has been observed at the beginning of a string containing
-    // Arabic content). Passing these to Skia will trigger an assertion;
-    // instead set their values to 0.
-    for (size_t glyph = 0; glyph < glyph_count; glyph++) {
-      if (run->glyphs[glyph] == 65535)
-        run->glyphs[glyph] = 0;
-    }
 
     run->glyph_positions.resize(glyph_count);
     const CGPoint* positions_ptr = CTRunGetPositionsPtr(ct_run);
@@ -452,7 +444,7 @@ void RenderTextMac::ComputeRuns() {
     }
 
     // TODO(asvitkine): Style boundaries are not necessarily per-run. Handle
-    //                  this better. Also, support strike and diagonal_strike.
+    //                  this better. Also, support strike.
     CFDictionaryRef attributes = CTRunGetAttributes(ct_run);
     CTFontRef ct_font = base::mac::GetValueFromDictionary<CTFontRef>(
         attributes, kCTFontAttributeName);

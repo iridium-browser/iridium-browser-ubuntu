@@ -27,11 +27,11 @@
 #include "base/cancelable_callback.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
+#include "media/audio/mac/scoped_audio_unit.h"
 #include "media/base/audio_parameters.h"
 
 namespace media {
@@ -91,7 +91,9 @@ class AUHALStream : public AudioOutputStream {
 
   AudioDeviceID device_id() const { return device_; }
   size_t requested_buffer_size() const { return number_of_frames_; }
-  AudioUnit audio_unit() const { return audio_unit_; }
+  AudioUnit audio_unit() const {
+    return audio_unit_ ? audio_unit_->audio_unit() : nullptr;
+  }
 
  private:
   // AUHAL callback.
@@ -111,19 +113,8 @@ class AUHALStream : public AudioOutputStream {
   // Called by either |audio_fifo_| or Render() to provide audio data.
   void ProvideInput(int frame_delay, AudioBus* dest);
 
-  // Sets the stream format on the AUHAL to PCM Float32 non-interleaved
-  // for the given number of channels on the given scope and element.
-  // The created stream description will be stored in |desc|.
-  bool SetStreamFormat(AudioStreamBasicDescription* desc,
-                       int channels,
-                       UInt32 scope,
-                       UInt32 element);
-
   // Creates the AUHAL, sets its stream format, buffer-size, etc.
   bool ConfigureAUHAL();
-
-  // Uninitializes audio_unit_ if needed.
-  void CloseAudioUnit();
 
   // Creates the input and output busses.
   void CreateIOBusses();
@@ -141,16 +132,10 @@ class AUHALStream : public AudioOutputStream {
   // Called from the dtor and when the stream is reset.
   void ReportAndResetStats();
 
-  // Converts |params_.channel_layout()| into CoreAudio format and sets up the
-  // AUHAL with our layout information so it knows how to remap the channels.
-  void SetAudioChannelLayout();
-
   // Our creator, the audio manager needs to be notified when we close.
   AudioManagerMac* const manager_;
 
   const AudioParameters params_;
-  // For convenience - same as in params_.
-  const int output_channels_;
 
   // Size of audio buffer requested at construction. The actual buffer size
   // is given by |actual_io_buffer_frame_size_| and it can differ from the
@@ -165,10 +150,6 @@ class AUHALStream : public AudioOutputStream {
   // Pointer to the object that will provide the audio samples.
   AudioSourceCallback* source_;
 
-  // Protects |source_|.  Necessary since Render() calls seem to be in flight
-  // when |audio_unit_| is supposedly stopped.  See http://crbug.com/178765.
-  base::Lock source_lock_;
-
   // Holds the stream format details such as bitrate.
   AudioStreamBasicDescription output_format_;
 
@@ -177,7 +158,7 @@ class AUHALStream : public AudioOutputStream {
   const AudioDeviceID device_;
 
   // The AUHAL Audio Unit which talks to |device_|.
-  AudioUnit audio_unit_;
+  std::unique_ptr<ScopedAudioUnit> audio_unit_;
 
   // Volume level from 0 to 1.
   float volume_;

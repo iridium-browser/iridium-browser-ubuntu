@@ -10,6 +10,7 @@
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -25,6 +26,7 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/extension_registry.h"
 #include "net/base/request_priority.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_interceptor.h"
@@ -175,16 +177,16 @@ class UserScriptListenerTest : public testing::Test {
       const std::string& url_string,
       net::TestURLRequestContext* context) {
     GURL url(url_string);
-    std::unique_ptr<net::URLRequest> request(
-        context->CreateRequest(url, net::DEFAULT_PRIORITY, delegate));
+    std::unique_ptr<net::URLRequest> request(context->CreateRequest(
+        url, net::DEFAULT_PRIORITY, delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
 
     ResourceThrottle* throttle = listener_->CreateResourceThrottle(
         url, content::RESOURCE_TYPE_MAIN_FRAME);
 
     bool defer = false;
     if (throttle) {
-      request->SetUserData(nullptr,
-                           new ThrottleDelegate(request.get(), throttle));
+      request->SetUserData(
+          nullptr, base::MakeUnique<ThrottleDelegate>(request.get(), throttle));
 
       throttle->WillStartRequest(&defer);
     }
@@ -212,7 +214,7 @@ class UserScriptListenerTest : public testing::Test {
         ExtensionRegistry::Get(profile_)->enabled_extensions();
     ASSERT_FALSE(extensions.is_empty());
     service_->UnloadExtension((*extensions.begin())->id(),
-                              UnloadedExtensionInfo::REASON_DISABLE);
+                              UnloadedExtensionReason::DISABLE);
   }
 
   content::TestBrowserThreadBundle thread_bundle_;
@@ -351,13 +353,14 @@ TEST_F(UserScriptListenerTest, ResumeBeforeStart) {
   net::TestDelegate delegate;
   net::TestURLRequestContext context;
   GURL url(kMatchingUrl);
-  std::unique_ptr<net::URLRequest> request(
-      context.CreateRequest(url, net::DEFAULT_PRIORITY, &delegate));
+  std::unique_ptr<net::URLRequest> request(context.CreateRequest(
+      url, net::DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
 
   ResourceThrottle* throttle =
       listener_->CreateResourceThrottle(url, content::RESOURCE_TYPE_MAIN_FRAME);
   ASSERT_TRUE(throttle);
-  request->SetUserData(nullptr, new ThrottleDelegate(request.get(), throttle));
+  request->SetUserData(
+      nullptr, base::MakeUnique<ThrottleDelegate>(request.get(), throttle));
 
   ASSERT_FALSE(request->is_pending());
 

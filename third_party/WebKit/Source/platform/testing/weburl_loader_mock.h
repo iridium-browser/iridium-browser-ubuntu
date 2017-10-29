@@ -5,10 +5,10 @@
 #ifndef WebURLLoaderMock_h
 #define WebURLLoaderMock_h
 
-#include "base/macros.h"
-#include "public/platform/WebURLLoader.h"
-#include "wtf/WeakPtr.h"
 #include <memory>
+#include "base/macros.h"
+#include "platform/wtf/WeakPtr.h"
+#include "public/platform/WebURLLoader.h"
 
 namespace blink {
 
@@ -30,7 +30,7 @@ class WebURLLoaderMock : public WebURLLoader {
  public:
   // This object becomes the owner of |default_loader|.
   WebURLLoaderMock(WebURLLoaderMockFactoryImpl* factory,
-                   WebURLLoader* default_loader);
+                   std::unique_ptr<WebURLLoader> default_loader);
   ~WebURLLoaderMock() override;
 
   // Simulates the asynchronous request being served.
@@ -41,20 +41,21 @@ class WebURLLoaderMock : public WebURLLoader {
 
   // Simulates the redirect being served.
   WebURLRequest ServeRedirect(const WebURLRequest& request,
-                              const WebURLResponse& redirectResponse);
+                              const WebURLResponse& redirect_response);
 
   // WebURLLoader methods:
-  void loadSynchronously(const WebURLRequest& request,
+  void LoadSynchronously(const WebURLRequest& request,
                          WebURLResponse& response,
                          WebURLError& error,
                          WebData& data,
                          int64_t& encoded_data_length,
                          int64_t& encoded_body_length) override;
-  void loadAsynchronously(const WebURLRequest& request,
+  void LoadAsynchronously(const WebURLRequest& request,
                           WebURLLoaderClient* client) override;
-  void cancel() override;
-  void setDefersLoading(bool defer) override;
-  void setLoadingTaskRunner(base::SingleThreadTaskRunner*) override;
+  void Cancel() override;
+  void SetDefersLoading(bool defer) override;
+  void DidChangePriority(WebURLRequest::Priority new_priority,
+                         int intra_priority_value) override;
 
   bool is_deferred() { return is_deferred_; }
   bool is_cancelled() { return !client_; }

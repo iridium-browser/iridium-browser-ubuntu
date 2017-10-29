@@ -5,75 +5,80 @@
 #include "modules/shapedetection/TextDetector.h"
 
 #include "core/dom/DOMException.h"
-#include "core/dom/DOMRect.h"
+#include "core/frame/LocalFrame.h"
+#include "core/geometry/DOMRect.h"
 #include "core/html/canvas/CanvasImageSource.h"
+#include "core/workers/WorkerThread.h"
 #include "modules/shapedetection/DetectedText.h"
-#include "public/platform/InterfaceProvider.h"
-#include "public/platform/Platform.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 
 namespace blink {
 
-TextDetector* TextDetector::create() {
-  return new TextDetector();
+TextDetector* TextDetector::Create(ExecutionContext* context) {
+  return new TextDetector(context);
 }
 
-TextDetector::TextDetector() : ShapeDetector() {
-  Platform::current()->interfaceProvider()->getInterface(
-      mojo::MakeRequest(&m_textService));
-  m_textService.set_connection_error_handler(convertToBaseCallback(WTF::bind(
-      &TextDetector::onTextServiceConnectionError, wrapWeakPersistent(this))));
+TextDetector::TextDetector(ExecutionContext* context) : ShapeDetector() {
+  auto request = mojo::MakeRequest(&text_service_);
+  if (context->IsDocument()) {
+    LocalFrame* frame = ToDocument(context)->GetFrame();
+    if (frame)
+      frame->GetInterfaceProvider().GetInterface(std::move(request));
+  } else {
+    WorkerThread* thread = ToWorkerGlobalScope(context)->GetThread();
+    thread->GetInterfaceProvider().GetInterface(std::move(request));
+  }
+
+  text_service_.set_connection_error_handler(ConvertToBaseCallback(WTF::Bind(
+      &TextDetector::OnTextServiceConnectionError, WrapWeakPersistent(this))));
 }
 
-ScriptPromise TextDetector::doDetect(
-    ScriptPromiseResolver* resolver,
-    mojo::ScopedSharedBufferHandle sharedBufferHandle,
-    int imageWidth,
-    int imageHeight) {
-  ScriptPromise promise = resolver->promise();
-  if (!m_textService) {
-    resolver->reject(DOMException::create(
-        NotSupportedError, "Text detection service unavailable."));
+ScriptPromise TextDetector::DoDetect(ScriptPromiseResolver* resolver,
+                                     skia::mojom::blink::BitmapPtr bitmap) {
+  ScriptPromise promise = resolver->Promise();
+  if (!text_service_) {
+    resolver->Reject(DOMException::Create(
+        kNotSupportedError, "Text detection service unavailable."));
     return promise;
   }
-  m_textServiceRequests.insert(resolver);
-  m_textService->Detect(std::move(sharedBufferHandle), imageWidth, imageHeight,
-                        convertToBaseCallback(WTF::bind(
-                            &TextDetector::onDetectText, wrapPersistent(this),
-                            wrapPersistent(resolver))));
+  text_service_requests_.insert(resolver);
+  text_service_->Detect(std::move(bitmap),
+                        ConvertToBaseCallback(WTF::Bind(
+                            &TextDetector::OnDetectText, WrapPersistent(this),
+                            WrapPersistent(resolver))));
   return promise;
 }
 
-void TextDetector::onDetectText(
+void TextDetector::OnDetectText(
     ScriptPromiseResolver* resolver,
     Vector<shape_detection::mojom::blink::TextDetectionResultPtr>
-        textDetectionResults) {
-  DCHECK(m_textServiceRequests.contains(resolver));
-  m_textServiceRequests.erase(resolver);
+        text_detection_results) {
+  DCHECK(text_service_requests_.Contains(resolver));
+  text_service_requests_.erase(resolver);
 
-  HeapVector<Member<DetectedText>> detectedText;
-  for (const auto& text : textDetectionResults) {
-    detectedText.push_back(DetectedText::create(
+  HeapVector<Member<DetectedText>> detected_text;
+  for (const auto& text : text_detection_results) {
+    detected_text.push_back(DetectedText::Create(
         text->raw_value,
-        DOMRect::create(text->bounding_box->x, text->bounding_box->y,
-                        text->bounding_box->width,
-                        text->bounding_box->height)));
+        DOMRect::Create(text->bounding_box.x, text->bounding_box.y,
+                        text->bounding_box.width, text->bounding_box.height)));
   }
 
-  resolver->resolve(detectedText);
+  resolver->Resolve(detected_text);
 }
 
-void TextDetector::onTextServiceConnectionError() {
-  for (const auto& request : m_textServiceRequests) {
-    request->reject(DOMException::create(NotSupportedError,
+void TextDetector::OnTextServiceConnectionError() {
+  for (const auto& request : text_service_requests_) {
+    request->Reject(DOMException::Create(kNotSupportedError,
                                          "Text Detection not implemented."));
   }
-  m_textServiceRequests.clear();
-  m_textService.reset();
+  text_service_requests_.clear();
+  text_service_.reset();
 }
 
 DEFINE_TRACE(TextDetector) {
-  ShapeDetector::trace(visitor);
-  visitor->trace(m_textServiceRequests);
+  ShapeDetector::Trace(visitor);
+  visitor->Trace(text_service_requests_);
 }
 
 }  // namespace blink

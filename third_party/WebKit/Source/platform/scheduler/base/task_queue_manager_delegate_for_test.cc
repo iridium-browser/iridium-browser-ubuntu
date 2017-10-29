@@ -30,20 +30,21 @@ TaskQueueManagerDelegateForTest::~TaskQueueManagerDelegateForTest() {}
 
 bool TaskQueueManagerDelegateForTest::PostDelayedTask(
     const tracked_objects::Location& from_here,
-    const base::Closure& task,
+    base::OnceClosure task,
     base::TimeDelta delay) {
-  return task_runner_->PostDelayedTask(from_here, task, delay);
+  return task_runner_->PostDelayedTask(from_here, std::move(task), delay);
 }
 
 bool TaskQueueManagerDelegateForTest::PostNonNestableDelayedTask(
     const tracked_objects::Location& from_here,
-    const base::Closure& task,
+    base::OnceClosure task,
     base::TimeDelta delay) {
-  return task_runner_->PostNonNestableDelayedTask(from_here, task, delay);
+  return task_runner_->PostNonNestableDelayedTask(from_here, std::move(task),
+                                                  delay);
 }
 
-bool TaskQueueManagerDelegateForTest::RunsTasksOnCurrentThread() const {
-  return task_runner_->RunsTasksOnCurrentThread();
+bool TaskQueueManagerDelegateForTest::RunsTasksInCurrentSequence() const {
+  return task_runner_->RunsTasksInCurrentSequence();
 }
 
 bool TaskQueueManagerDelegateForTest::IsNested() const {
@@ -51,10 +52,10 @@ bool TaskQueueManagerDelegateForTest::IsNested() const {
 }
 
 void TaskQueueManagerDelegateForTest::AddNestingObserver(
-    base::MessageLoop::NestingObserver* observer) {}
+    base::RunLoop::NestingObserver* observer) {}
 
 void TaskQueueManagerDelegateForTest::RemoveNestingObserver(
-    base::MessageLoop::NestingObserver* observer) {}
+    base::RunLoop::NestingObserver* observer) {}
 
 base::TimeTicks TaskQueueManagerDelegateForTest::NowTicks() {
   return time_source_->NowTicks();

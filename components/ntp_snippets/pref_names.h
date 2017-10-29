@@ -18,20 +18,25 @@ extern const char kRemoteSuggestionCategories[];
 
 // The pref name for the last time when a background fetch was attempted.
 extern const char kSnippetLastFetchAttempt[];
-// The pref name for the currently applied minimal interval between two
-// successive soft background fetches that react to user activity (such as
-// opening Chrome).
-extern const char kSnippetSoftFetchingIntervalOnUsageEvent[];
-// The pref name for the currently applied minimal interval between two
-// successive soft brackground fetches when the New Tab Page is opened.
-extern const char kSnippetSoftFetchingIntervalOnNtpOpened[];
 
-// The pref name for the currently-scheduled background fetching interval when
-// there is WiFi connectivity.
+// Pref names for minimal intervals between two successive background fetches.
+//
+// The prefs store *currently applied* minimal intervals. For each trigger type
+// there are two intervals stored in prefs:
+//  - "Wifi" for situations with Wifi / unmetered network connectivity, and
+//  - "Fallback" for situations with only non-Wifi / metered network.
+// We check "meteredness" of the current network only on platforms that support
+// that, notably Android; we use WiFi as the proxy of being unmetered elsewhere.
+//
+// Intervals for trigger type 1: wake-up of the persistent scheduler.
 extern const char kSnippetPersistentFetchingIntervalWifi[];
-// The pref name for the currently-scheduled background fetching interval when
-// there is no WiFi connectivity.
 extern const char kSnippetPersistentFetchingIntervalFallback[];
+// Intervals for trigger type 2: browser started-up (both cold and warm start).
+extern const char kSnippetStartupFetchingIntervalWifi[];
+extern const char kSnippetStartupFetchingIntervalFallback[];
+// Intervals for trigger type 3: suggestions shown to the user.
+extern const char kSnippetShownFetchingIntervalWifi[];
+extern const char kSnippetShownFetchingIntervalFallback[];
 
 // The pref name for today's count of RemoteSuggestionsFetcher requests, so far.
 extern const char kSnippetFetcherRequestCount[];
@@ -84,6 +89,26 @@ extern const char kUserClassifierLastTimeToUseSuggestions[];
 extern const char kClickBasedCategoryRankerOrderWithClicks[];
 // The pref name for the time when last click decay has happened.
 extern const char kClickBasedCategoryRankerLastDecayTime[];
+
+// The folllowing prefs hold the data used when subscribing for content
+// suggestions via GCM push updates. They are stored in pref such that in case
+// of change (e.g. the token renders invalid), re-subscription is required.
+// They are stored in prefs for persisting them across Chrome restarts.
+///////////////////////////////////////////////////////////////////////////////
+// The pref name for the subscription token used when subscription for
+// breaking news push updates.
+extern const char kBreakingNewsSubscriptionDataToken[];
+// The pref name for whether the subscription is authenticated or not.
+extern const char kBreakingNewsSubscriptionDataIsAuthenticated[];
+//////////////////////// End of breaking news subscription-related prefs.
+
+// The pref name for the subscription token received from the gcm server. As
+// recommended by the GCM team, it is cached in pref for faster bookkeeping to
+// see if subscription exists. This is pref holds the valid token even if
+// different from the one used for subscription. When they are different, Chrome
+// unsubscribes the old token from the content suggestions server, subscribe
+// with the new one and update kBreakingNewsSubscriptionDataToken.
+extern const char kBreakingNewsGCMSubscriptionTokenCache[];
 
 }  // namespace prefs
 }  // namespace ntp_snippets

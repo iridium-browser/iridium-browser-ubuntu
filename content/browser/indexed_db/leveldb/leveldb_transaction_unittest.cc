@@ -24,6 +24,7 @@
 namespace content {
 
 namespace {
+static const size_t kTestingMaxOpenCursors = 3;
 
 class SimpleComparator : public LevelDBComparator {
  public:
@@ -35,12 +36,17 @@ class SimpleComparator : public LevelDBComparator {
   const char* Name() const override { return "temp_comparator"; }
 };
 
+}  // namespace
+
 class LevelDBTransactionTest : public testing::Test {
  public:
   LevelDBTransactionTest() {}
   void SetUp() override {
     ASSERT_TRUE(temp_directory_.CreateUniqueTempDir());
-    LevelDBDatabase::Open(temp_directory_.GetPath(), &comparator_, &leveldb_);
+    leveldb::Status s =
+        LevelDBDatabase::Open(temp_directory_.GetPath(), &comparator_,
+                              kTestingMaxOpenCursors, &leveldb_);
+    ASSERT_TRUE(s.ok());
     ASSERT_TRUE(leveldb_);
   }
   void TearDown() override {}
@@ -96,6 +102,14 @@ class LevelDBTransactionTest : public testing::Test {
 
   LevelDBDatabase* db() { return leveldb_.get(); }
 
+  scoped_refptr<LevelDBTransaction> CreateTransaction() {
+    return new LevelDBTransaction(db());
+  }
+
+  static constexpr size_t SizeOfRecord() {
+    return sizeof(LevelDBTransaction::Record);
+  }
+
  private:
   base::ScopedTempDir temp_directory_;
   SimpleComparator comparator_;
@@ -104,9 +118,7 @@ class LevelDBTransactionTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(LevelDBTransactionTest);
 };
 
-}  // namespace
-
-TEST_F(LevelDBTransactionTest, GetAndPut) {
+TEST_F(LevelDBTransactionTest, GetPutDelete) {
   leveldb::Status status;
 
   const std::string key("key");
@@ -142,12 +154,19 @@ TEST_F(LevelDBTransactionTest, GetAndPut) {
 
   const std::string another_key("another key");
   const std::string another_value("another value");
+  EXPECT_EQ(0ull, transaction->GetTransactionSize());
   TransactionPut(transaction.get(), another_key, another_value);
+  EXPECT_EQ(SizeOfRecord() + another_key.size() * 2 + another_value.size(),
+            transaction->GetTransactionSize());
 
   status = transaction->Get(another_key, &got_value, &found);
   EXPECT_TRUE(status.ok());
   EXPECT_TRUE(found);
   EXPECT_EQ(Compare(got_value, another_value), 0);
+
+  transaction->Remove(another_key);
+  EXPECT_EQ(SizeOfRecord() + another_key.size() * 2,
+            transaction->GetTransactionSize());
 }
 
 TEST_F(LevelDBTransactionTest, Iterator) {
@@ -208,6 +227,67 @@ TEST_F(LevelDBTransactionTest, Commit) {
   Get(key2, &got_value, &found);
   EXPECT_TRUE(found);
   EXPECT_EQ(value3, got_value);
+}
+
+TEST_F(LevelDBTransactionTest, IterationWithEvictedCursors) {
+  leveldb::Status status;
+
+  Put("key1", "value1");
+  Put("key2", "value2");
+  Put("key3", "value3");
+
+  scoped_refptr<LevelDBTransaction> transaction = CreateTransaction();
+
+  std::unique_ptr<LevelDBIterator> evicted_normal_location =
+      transaction->CreateIterator();
+
+  std::unique_ptr<LevelDBIterator> evicted_before_start =
+      transaction->CreateIterator();
+
+  std::unique_ptr<LevelDBIterator> evicted_after_end =
+      transaction->CreateIterator();
+
+  std::unique_ptr<LevelDBIterator> it1 = transaction->CreateIterator();
+  std::unique_ptr<LevelDBIterator> it2 = transaction->CreateIterator();
+  std::unique_ptr<LevelDBIterator> it3 = transaction->CreateIterator();
+
+  evicted_normal_location->Seek("key1");
+  evicted_before_start->Seek("key1");
+  evicted_before_start->Prev();
+  evicted_after_end->SeekToLast();
+  evicted_after_end->Next();
+
+  // Nothing is purged, as we just have 3 iterators used.
+  EXPECT_FALSE(evicted_normal_location->IsDetached());
+  EXPECT_FALSE(evicted_before_start->IsDetached());
+  EXPECT_FALSE(evicted_after_end->IsDetached());
+
+  // Should purge all of our earlier iterators.
+  it1->Seek("key1");
+  it2->Seek("key2");
+  it3->Seek("key3");
+
+  EXPECT_TRUE(evicted_normal_location->IsDetached());
+  EXPECT_TRUE(evicted_before_start->IsDetached());
+  EXPECT_TRUE(evicted_after_end->IsDetached());
+
+  EXPECT_FALSE(evicted_before_start->IsValid());
+  EXPECT_TRUE(evicted_normal_location->IsValid());
+  EXPECT_FALSE(evicted_after_end->IsValid());
+
+  // Check we don't need to reload for just the key.
+  EXPECT_EQ("key1", evicted_normal_location->Key());
+  EXPECT_TRUE(evicted_normal_location->IsDetached());
+
+  // Make sure iterators are reloaded correctly.
+  EXPECT_TRUE(evicted_normal_location->IsValid());
+  EXPECT_EQ("value1", evicted_normal_location->Value());
+  EXPECT_FALSE(evicted_normal_location->IsDetached());
+  EXPECT_FALSE(evicted_before_start->IsValid());
+  EXPECT_FALSE(evicted_after_end->IsValid());
+
+  // And our |Value()| call purged the earlier iterator.
+  EXPECT_TRUE(it1->IsDetached());
 }
 
 namespace {

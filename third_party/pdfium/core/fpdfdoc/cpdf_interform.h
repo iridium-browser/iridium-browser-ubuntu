@@ -13,6 +13,7 @@
 
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
 #include "core/fpdfdoc/cpdf_defaultappearance.h"
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
 
@@ -29,7 +30,7 @@ class IPDF_FormNotify;
 
 CPDF_Font* AddNativeInterFormFont(CPDF_Dictionary*& pFormDict,
                                   CPDF_Document* pDocument,
-                                  CFX_ByteString& csNameTag);
+                                  CFX_ByteString* csNameTag);
 
 class CPDF_InterForm {
  public:
@@ -39,9 +40,9 @@ class CPDF_InterForm {
   static void SetUpdateAP(bool bUpdateAP);
   static bool IsUpdateAPEnabled();
   static CFX_ByteString GenerateNewResourceName(const CPDF_Dictionary* pResDict,
-                                                const FX_CHAR* csType,
+                                                const char* csType,
                                                 int iMinLen,
-                                                const FX_CHAR* csPrefix);
+                                                const char* csPrefix);
   static CPDF_Font* AddStandardFont(CPDF_Document* pDocument,
                                     CFX_ByteString csFontName);
   static CFX_ByteString GetNativeFont(uint8_t iCharSet, void* pLogFont);
@@ -64,18 +65,18 @@ class CPDF_InterForm {
   CPDF_FormField* GetFieldInCalculationOrder(int index);
   int FindFieldInCalculationOrder(const CPDF_FormField* pField);
 
-  CPDF_Font* GetFormFont(CFX_ByteString csNameTag);
+  CPDF_Font* GetFormFont(CFX_ByteString csNameTag) const;
   CPDF_DefaultAppearance GetDefaultAppearance() const;
   int GetFormAlignment() const;
 
   bool CheckRequiredFields(const std::vector<CPDF_FormField*>* fields,
                            bool bIncludeOrExclude) const;
 
-  std::unique_ptr<CFDF_Document> ExportToFDF(const CFX_WideStringC& pdf_path,
+  std::unique_ptr<CFDF_Document> ExportToFDF(const CFX_WideString& pdf_path,
                                              bool bSimpleFileSpec) const;
 
   std::unique_ptr<CFDF_Document> ExportToFDF(
-      const CFX_WideStringC& pdf_path,
+      const CFX_WideString& pdf_path,
       const std::vector<CPDF_FormField*>& fields,
       bool bIncludeOrExclude,
       bool bSimpleFileSpec) const;
@@ -94,7 +95,7 @@ class CPDF_InterForm {
   friend class CPDF_FormField;
 
   void LoadField(CPDF_Dictionary* pFieldDict, int nLevel);
-  CPDF_FormField* AddTerminalField(CPDF_Dictionary* pFieldDict);
+  void AddTerminalField(CPDF_Dictionary* pFieldDict);
   CPDF_FormControl* AddControl(CPDF_FormField* pField,
                                CPDF_Dictionary* pWidgetDict);
   void FDF_ImportField(CPDF_Dictionary* pField,
@@ -108,13 +109,13 @@ class CPDF_InterForm {
 
   static bool s_bUpdateAP;
 
-  CPDF_Document* const m_pDocument;
-  CPDF_Dictionary* m_pFormDict;
+  CFX_UnownedPtr<CPDF_Document> const m_pDocument;
+  CFX_UnownedPtr<CPDF_Dictionary> m_pFormDict;
   std::map<const CPDF_Dictionary*, std::unique_ptr<CPDF_FormControl>>
       m_ControlMap;
   std::unique_ptr<CFieldTree> m_pFieldTree;
   CFX_ByteString m_bsEncoding;
-  IPDF_FormNotify* m_pFormNotify;
+  CFX_UnownedPtr<IPDF_FormNotify> m_pFormNotify;
 };
 
 #endif  // CORE_FPDFDOC_CPDF_INTERFORM_H_

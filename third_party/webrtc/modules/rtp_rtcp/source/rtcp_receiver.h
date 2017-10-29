@@ -16,11 +16,11 @@
 #include <string>
 #include <vector>
 
-#include "webrtc/base/criticalsection.h"
-#include "webrtc/base/thread_annotations.h"
 #include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_nack_stats.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/dlrr.h"
+#include "webrtc/rtc_base/criticalsection.h"
+#include "webrtc/rtc_base/thread_annotations.h"
 #include "webrtc/system_wrappers/include/ntp_time.h"
 #include "webrtc/typedefs.h"
 
@@ -180,14 +180,6 @@ class RTCPReceiver {
 
   void HandlePli(const rtcp::CommonHeader& rtcp_block,
                  PacketInformation* packet_information)
-      EXCLUSIVE_LOCKS_REQUIRED(rtcp_receiver_lock_);
-
-  void HandleSli(const rtcp::CommonHeader& rtcp_block,
-                 PacketInformation* packet_information)
-      EXCLUSIVE_LOCKS_REQUIRED(rtcp_receiver_lock_);
-
-  void HandleRpsi(const rtcp::CommonHeader& rtcp_block,
-                  PacketInformation* packet_information)
       EXCLUSIVE_LOCKS_REQUIRED(rtcp_receiver_lock_);
 
   void HandlePsfbApp(const rtcp::CommonHeader& rtcp_block,

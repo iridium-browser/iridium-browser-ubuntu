@@ -173,71 +173,73 @@ class HistogramWatcher
     if (peak_kbps_since_last_connection_change_) {
       switch (last_connection_type_) {
         case NetworkChangeNotifier::CONNECTION_UNKNOWN:
-          UMA_HISTOGRAM_COUNTS("NCN.CM.PeakKbpsOnUnknown",
-                               peak_kbps_since_last_connection_change_);
+          UMA_HISTOGRAM_COUNTS_1M("NCN.CM.PeakKbpsOnUnknown",
+                                  peak_kbps_since_last_connection_change_);
           break;
         case NetworkChangeNotifier::CONNECTION_ETHERNET:
-          UMA_HISTOGRAM_COUNTS("NCN.CM.PeakKbpsOnEthernet",
-                               peak_kbps_since_last_connection_change_);
+          UMA_HISTOGRAM_COUNTS_1M("NCN.CM.PeakKbpsOnEthernet",
+                                  peak_kbps_since_last_connection_change_);
           break;
         case NetworkChangeNotifier::CONNECTION_WIFI:
-          UMA_HISTOGRAM_COUNTS("NCN.CM.PeakKbpsOnWifi",
-                               peak_kbps_since_last_connection_change_);
+          UMA_HISTOGRAM_COUNTS_1M("NCN.CM.PeakKbpsOnWifi",
+                                  peak_kbps_since_last_connection_change_);
           break;
         case NetworkChangeNotifier::CONNECTION_2G:
-          UMA_HISTOGRAM_COUNTS("NCN.CM.PeakKbpsOn2G",
-                               peak_kbps_since_last_connection_change_);
+          UMA_HISTOGRAM_COUNTS_1M("NCN.CM.PeakKbpsOn2G",
+                                  peak_kbps_since_last_connection_change_);
           break;
         case NetworkChangeNotifier::CONNECTION_3G:
-          UMA_HISTOGRAM_COUNTS("NCN.CM.PeakKbpsOn3G",
-                               peak_kbps_since_last_connection_change_);
+          UMA_HISTOGRAM_COUNTS_1M("NCN.CM.PeakKbpsOn3G",
+                                  peak_kbps_since_last_connection_change_);
           break;
         case NetworkChangeNotifier::CONNECTION_4G:
-          UMA_HISTOGRAM_COUNTS("NCN.CM.PeakKbpsOn4G",
-                               peak_kbps_since_last_connection_change_);
+          UMA_HISTOGRAM_COUNTS_1M("NCN.CM.PeakKbpsOn4G",
+                                  peak_kbps_since_last_connection_change_);
           break;
         case NetworkChangeNotifier::CONNECTION_NONE:
-          UMA_HISTOGRAM_COUNTS("NCN.CM.PeakKbpsOnNone",
-                               peak_kbps_since_last_connection_change_);
+          UMA_HISTOGRAM_COUNTS_1M("NCN.CM.PeakKbpsOnNone",
+                                  peak_kbps_since_last_connection_change_);
           break;
         case NetworkChangeNotifier::CONNECTION_BLUETOOTH:
-          UMA_HISTOGRAM_COUNTS("NCN.CM.PeakKbpsOnBluetooth",
-                               peak_kbps_since_last_connection_change_);
+          UMA_HISTOGRAM_COUNTS_1M("NCN.CM.PeakKbpsOnBluetooth",
+                                  peak_kbps_since_last_connection_change_);
           break;
       }
     }
     switch (last_connection_type_) {
       case NetworkChangeNotifier::CONNECTION_UNKNOWN:
         UMA_HISTOGRAM_LONG_TIMES("NCN.CM.TimeOnUnknown", state_duration);
-        UMA_HISTOGRAM_COUNTS("NCN.CM.KBTransferedOnUnknown", kilobytes_read);
+        UMA_HISTOGRAM_COUNTS_1M("NCN.CM.KBTransferedOnUnknown", kilobytes_read);
         break;
       case NetworkChangeNotifier::CONNECTION_ETHERNET:
         UMA_HISTOGRAM_LONG_TIMES("NCN.CM.TimeOnEthernet", state_duration);
-        UMA_HISTOGRAM_COUNTS("NCN.CM.KBTransferedOnEthernet", kilobytes_read);
+        UMA_HISTOGRAM_COUNTS_1M("NCN.CM.KBTransferedOnEthernet",
+                                kilobytes_read);
         break;
       case NetworkChangeNotifier::CONNECTION_WIFI:
         UMA_HISTOGRAM_LONG_TIMES("NCN.CM.TimeOnWifi", state_duration);
-        UMA_HISTOGRAM_COUNTS("NCN.CM.KBTransferedOnWifi", kilobytes_read);
+        UMA_HISTOGRAM_COUNTS_1M("NCN.CM.KBTransferedOnWifi", kilobytes_read);
         break;
       case NetworkChangeNotifier::CONNECTION_2G:
         UMA_HISTOGRAM_LONG_TIMES("NCN.CM.TimeOn2G", state_duration);
-        UMA_HISTOGRAM_COUNTS("NCN.CM.KBTransferedOn2G", kilobytes_read);
+        UMA_HISTOGRAM_COUNTS_1M("NCN.CM.KBTransferedOn2G", kilobytes_read);
         break;
       case NetworkChangeNotifier::CONNECTION_3G:
         UMA_HISTOGRAM_LONG_TIMES("NCN.CM.TimeOn3G", state_duration);
-        UMA_HISTOGRAM_COUNTS("NCN.CM.KBTransferedOn3G", kilobytes_read);
+        UMA_HISTOGRAM_COUNTS_1M("NCN.CM.KBTransferedOn3G", kilobytes_read);
         break;
       case NetworkChangeNotifier::CONNECTION_4G:
         UMA_HISTOGRAM_LONG_TIMES("NCN.CM.TimeOn4G", state_duration);
-        UMA_HISTOGRAM_COUNTS("NCN.CM.KBTransferedOn4G", kilobytes_read);
+        UMA_HISTOGRAM_COUNTS_1M("NCN.CM.KBTransferedOn4G", kilobytes_read);
         break;
       case NetworkChangeNotifier::CONNECTION_NONE:
         UMA_HISTOGRAM_LONG_TIMES("NCN.CM.TimeOnNone", state_duration);
-        UMA_HISTOGRAM_COUNTS("NCN.CM.KBTransferedOnNone", kilobytes_read);
+        UMA_HISTOGRAM_COUNTS_1M("NCN.CM.KBTransferedOnNone", kilobytes_read);
         break;
       case NetworkChangeNotifier::CONNECTION_BLUETOOTH:
         UMA_HISTOGRAM_LONG_TIMES("NCN.CM.TimeOnBluetooth", state_duration);
-        UMA_HISTOGRAM_COUNTS("NCN.CM.KBTransferedOnBluetooth", kilobytes_read);
+        UMA_HISTOGRAM_COUNTS_1M("NCN.CM.KBTransferedOnBluetooth",
+                                kilobytes_read);
         break;
     }
 
@@ -547,6 +549,14 @@ NetworkChangeNotifier::GetConnectionType() {
 }
 
 // static
+NetworkChangeNotifier::ConnectionSubtype
+NetworkChangeNotifier::GetConnectionSubtype() {
+  return g_network_change_notifier
+             ? g_network_change_notifier->GetCurrentConnectionSubtype()
+             : SUBTYPE_UNKNOWN;
+}
+
+// static
 void NetworkChangeNotifier::GetMaxBandwidthAndConnectionType(
     double* max_bandwidth_mbps,
     ConnectionType* connection_type) {
@@ -789,6 +799,15 @@ bool NetworkChangeNotifier::IsConnectionCellular(ConnectionType type) {
 
 // static
 NetworkChangeNotifier::ConnectionType
+NetworkChangeNotifier::ConnectionTypeFromInterfaces() {
+  NetworkInterfaceList interfaces;
+  if (!GetNetworkList(&interfaces, EXCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES))
+    return CONNECTION_UNKNOWN;
+  return ConnectionTypeFromInterfaceList(interfaces);
+}
+
+// static
+NetworkChangeNotifier::ConnectionType
 NetworkChangeNotifier::ConnectionTypeFromInterfaceList(
     const NetworkInterfaceList& interfaces) {
   bool first = true;
@@ -798,6 +817,16 @@ NetworkChangeNotifier::ConnectionTypeFromInterfaceList(
     if (interfaces[i].friendly_name == "Teredo Tunneling Pseudo-Interface")
       continue;
 #endif
+#if defined(OS_MACOSX)
+    // Ignore tunnel and airdrop interfaces.
+    if (base::StartsWith(interfaces[i].friendly_name, "utun",
+                         base::CompareCase::SENSITIVE) ||
+        base::StartsWith(interfaces[i].friendly_name, "awdl",
+                         base::CompareCase::SENSITIVE)) {
+      continue;
+    }
+#endif
+
     // Remove VMware network interfaces as they're internal and should not be
     // used to determine the network connection type.
     if (base::ToLowerASCII(interfaces[i].friendly_name).find("vmnet") !=
@@ -922,6 +951,12 @@ void NetworkChangeNotifier::NotifyObserversOfConnectionTypeChangeForTests(
 }
 
 // static
+void NetworkChangeNotifier::NotifyObserversOfDNSChangeForTests() {
+  if (g_network_change_notifier)
+    g_network_change_notifier->NotifyObserversOfDNSChangeImpl();
+}
+
+// static
 void NetworkChangeNotifier::NotifyObserversOfNetworkChangeForTests(
     ConnectionType type) {
   if (g_network_change_notifier)
@@ -984,6 +1019,11 @@ NetworkChangeNotifier::GetAddressTrackerInternal() const {
   return NULL;
 }
 #endif
+
+NetworkChangeNotifier::ConnectionSubtype
+NetworkChangeNotifier::GetCurrentConnectionSubtype() const {
+  return SUBTYPE_UNKNOWN;
+}
 
 void NetworkChangeNotifier::GetCurrentMaxBandwidthAndConnectionType(
     double* max_bandwidth_mbps,

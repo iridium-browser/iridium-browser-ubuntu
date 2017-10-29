@@ -6,7 +6,7 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/base/base.html">
-<link rel="import" href="/tracing/base/range_utils.html">
+<link rel="import" href="/tracing/base/math/range_utils.html">
 <link rel="import" href="/tracing/core/auditor.html">
 <link rel="import" href="/tracing/model/event_info.html">
 <link rel="import" href="/tracing/model/user_model/animation_expectation.html">
@@ -42,7 +42,7 @@ tr.exportTo('tr.importer', function() {
    * initiator titles (e.g. a scroll is higher than a touch, because a
    * touch could mean many different things, of which a scroll is one)
    */
-  var INITIATOR_HIERARCHY = [
+  const INITIATOR_HIERARCHY = [
     tr.model.um.INITIATOR_TYPE.PINCH,
     tr.model.um.INITIATOR_TYPE.FLING,
     tr.model.um.INITIATOR_TYPE.MOUSE_WHEEL,
@@ -57,10 +57,10 @@ tr.exportTo('tr.importer', function() {
   ];
 
   function combineInitiatorTypes(title1, title2) {
-    for (var item of INITIATOR_HIERARCHY)
+    for (const item of INITIATOR_HIERARCHY) {
       if (title1 === item || title2 === item) return item;
-    console.error('Invalid titles in combineInitiatorTypes');
-    return undefined;
+    }
+    throw new Error('Invalid titles in combineInitiatorTypes');
   }
 
   ProtoExpectation.prototype = {
@@ -69,25 +69,28 @@ tr.exportTo('tr.importer', function() {
     },
 
     // Return true if any associatedEvent's typeName is in typeNames.
-    containsTypeNames: function(typeNames) {
+    containsTypeNames(typeNames) {
       return this.associatedEvents.some(
           x => typeNames.indexOf(x.typeName) >= 0);
     },
 
-    containsSliceTitle: function(title) {
+    containsSliceTitle(title) {
       return this.associatedEvents.some(x => title === x.title);
     },
 
-    createInteractionRecord: function(model) {
+    createInteractionRecord(model) {
       if (this.type !== ProtoExpectation.IGNORED_TYPE && !this.isValid) {
-        console.error('Invalid ProtoExpectation: ' + this.debug() +
-                      ' File a bug with this trace!');
+        model.importWarning({
+          type: 'ProtoExpectation',
+          message: 'Please file a bug with this trace. ' + this.debug(),
+          showToUser: true
+        });
         return undefined;
       }
 
-      var duration = this.end - this.start;
+      const duration = this.end - this.start;
 
-      var ir = undefined;
+      let ir = undefined;
       switch (this.type) {
         case ProtoExpectation.RESPONSE_TYPE:
           ir = new tr.model.um.ResponseExpectation(
@@ -99,8 +102,7 @@ tr.exportTo('tr.importer', function() {
               model, this.initiatorType, this.start, duration);
           break;
       }
-      if (!ir)
-        return undefined;
+      if (!ir) return undefined;
 
       ir.sourceEvents.addEventSet(this.associatedEvents);
 
@@ -110,16 +112,18 @@ tr.exportTo('tr.importer', function() {
         // |event| is either an InputLatencyAsyncSlice (which collects all of
         // its associated events transitively) or a CSS Animation (which doesn't
         // have any associated events). So this does not need to recurse.
-        if (event.associatedEvents)
+        if (event.associatedEvents) {
           ir.associatedEvents.addEventSet(event.associatedEvents);
+        }
       }
 
       this.associatedEvents.forEach(function(event) {
         pushAssociatedEvents(event);
 
         // Old-style InputLatencyAsyncSlices have subSlices.
-        if (event.subSlices)
+        if (event.subSlices) {
           event.subSlices.forEach(pushAssociatedEvents);
+        }
       });
 
       return ir;
@@ -129,7 +133,7 @@ tr.exportTo('tr.importer', function() {
     // The types need not match: ignored ProtoExpectations might be merged
     // into overlapping ProtoExpectations, and Touch-only Animations are merged
     // into Tap Responses.
-    merge: function(other) {
+    merge(other) {
       this.initiatorType = combineInitiatorTypes(
           this.initiatorType, other.initiatorType);
 
@@ -137,13 +141,14 @@ tr.exportTo('tr.importer', function() {
       this.associatedEvents.addEventSet(other.associatedEvents);
       this.start = Math.min(this.start, other.start);
       this.end = Math.max(this.end, other.end);
-      if (other.isAnimationBegin)
+      if (other.isAnimationBegin) {
         this.isAnimationBegin = true;
+      }
     },
 
     // Include |event| in this ProtoExpectation, expanding start/end to include
     // it.
-    pushEvent: function(event) {
+    pushEvent(event) {
       // Usually, this method will be called while iterating over a list of
       // events sorted by start time, so this method won't usually change
       // this.start. However, this will sometimes be called for
@@ -155,23 +160,23 @@ tr.exportTo('tr.importer', function() {
     },
 
     // Returns true if timestamp is contained in this ProtoExpectation.
-    containsTimestampInclusive: function(timestamp) {
+    containsTimestampInclusive(timestamp) {
       return (this.start <= timestamp) && (timestamp <= this.end);
     },
 
     // Return true if the other event intersects this ProtoExpectation.
-    intersects: function(other) {
+    intersects(other) {
       // http://stackoverflow.com/questions/325933
       return (other.start < this.end) && (other.end > this.start);
     },
 
-    isNear: function(event, threshold) {
+    isNear(event, threshold) {
       return (this.end + threshold) > event.start;
     },
 
     // Return a string describing this ProtoExpectation for debugging.
-    debug: function() {
-      var debugString = this.type + '(';
+    debug() {
+      let debugString = this.type + '(';
       debugString += parseInt(this.start) + ' ';
       debugString += parseInt(this.end);
       this.associatedEvents.forEach(function(event) {

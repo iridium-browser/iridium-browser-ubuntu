@@ -67,7 +67,7 @@ class OmniboxResultView : public views::View,
   void OnSelected();
 
   // views::View:
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
 
@@ -102,7 +102,7 @@ class OmniboxResultView : public views::View,
   // Draws given |render_text| on |canvas| at given location (|x|, |y|).
   // |contents| indicates if the |render_text| is for the match contents,
   // separator, or description.  Additional properties from |match| are used to
-  // render Infinite suggestions correctly.  If |max_width| is a non-negative
+  // render tail suggestions correctly.  If |max_width| is a non-negative
   // number, the text will be elided to fit within |max_width|.  Returns the x
   // position to the right of the string.
   int DrawRenderText(const AutocompleteMatch& match,
@@ -158,17 +158,17 @@ class OmniboxResultView : public views::View,
                        bool is_ui_rtl,
                        bool is_match_contents_rtl) const;
 
-  // Returns the font to use for the description line of answer suggestions.
-  const gfx::FontList& GetAnswerLineFont() const;
+  // Returns the font to use for the description section of answer suggestions.
+  const gfx::FontList& GetAnswerFont() const;
 
-  // Returns the height of the the description line of answer suggestions.
-  int GetAnswerLineHeight() const;
+  // Returns the height of the the description section of answer suggestions.
+  int GetAnswerHeight() const;
 
-  // Returns the height of the content line.
-  int GetContentLineHeight() const;
+  // Returns the margin that should appear at the top and bottom of the result.
+  int GetVerticalMargin() const;
 
   // Creates a RenderText with text and styling from the image line.
-  std::unique_ptr<gfx::RenderText> CreateAnswerLine(
+  std::unique_ptr<gfx::RenderText> CreateAnswerText(
       const SuggestionAnswer::ImageLine& line,
       const gfx::FontList& font_list) const;
 

@@ -4,6 +4,9 @@
 
 #import "ios/clean/chrome/browser/ui/web_contents/web_contents_mediator.h"
 
+#include "base/memory/ptr_util.h"
+#include "base/scoped_observer.h"
+#include "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/clean/chrome/browser/ui/web_contents/web_contents_consumer.h"
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/web_state/web_state.h"
@@ -18,28 +21,43 @@
 @synthesize webState = _webState;
 @synthesize consumer = _consumer;
 
+#pragma mark - Properties
+
 - (void)setWebState:(web::WebState*)webState {
-  if (_webState)
-    _webState->SetWebUsageEnabled(false);
-
   _webState = webState;
-  if (!self.webState)
-    return;
-
-  self.webState->SetWebUsageEnabled(true);
-  if (!self.webState->GetNavigationManager()->GetItemCount()) {
-    web::NavigationManager::WebLoadParams params(
-        GURL("https://dev.chromium.org/"));
-    params.transition_type = ui::PAGE_TRANSITION_TYPED;
-    self.webState->GetNavigationManager()->LoadURLWithParams(params);
-  }
-  [self.consumer contentViewDidChange:self.webState->GetView()];
+  [self updateConsumerWithWebState:webState];
 }
 
 - (void)setConsumer:(id<WebContentsConsumer>)consumer {
   _consumer = consumer;
-  if (self.webState)
-    [self.consumer contentViewDidChange:self.webState->GetView()];
+  if (self.webState) {
+    [self updateConsumerWithWebState:self.webState];
+  }
+}
+
+#pragma mark - Private
+
+// Updates the consumer's contentView.
+- (void)updateConsumerWithWebState:(web::WebState*)webState {
+  UIView* updatedView = nil;
+  if (webState) {
+    updatedView = webState->GetView();
+    // PLACEHOLDER: This navigates the page since the omnibox is not yet
+    // hooked up.
+    [self navigateToDefaultPage:webState];
+  }
+  if (self.consumer) {
+    [self.consumer contentViewDidChange:updatedView];
+  }
+}
+
+// PLACEHOLDER: This navigates an empty webstate to the NTP.
+- (void)navigateToDefaultPage:(web::WebState*)webState {
+  if (!webState->GetNavigationManager()->GetItemCount()) {
+    web::NavigationManager::WebLoadParams params((GURL(kChromeUINewTabURL)));
+    params.transition_type = ui::PAGE_TRANSITION_TYPED;
+    webState->GetNavigationManager()->LoadURLWithParams(params);
+  }
 }
 
 @end

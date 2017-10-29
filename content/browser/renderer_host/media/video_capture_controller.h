@@ -14,29 +14,39 @@
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
 #include "content/browser/renderer_host/media/video_capture_controller_event_handler.h"
+#include "content/browser/renderer_host/media/video_capture_provider.h"
 #include "content/common/content_export.h"
 #include "content/common/media/video_capture.h"
+#include "content/public/common/media_stream_request.h"
 #include "media/capture/video/video_frame_receiver.h"
 #include "media/capture/video_capture_types.h"
 
 namespace content {
 
+class VideoCaptureDeviceLaunchObserver;
+
 // Implementation of media::VideoFrameReceiver that distributes received frames
 // to potentially multiple connected clients.
-class CONTENT_EXPORT VideoCaptureController : public media::VideoFrameReceiver {
+// A call to CreateAndStartDeviceAsync() asynchronously brings up the device. If
+// CreateAndStartDeviceAsync() has been called, ReleaseDeviceAsync() must be
+// called before releasing the instance.
+// Instances must be RefCountedThreadSafe, because an owner
+// (VideoCaptureManager) wants to be able to release its reference during an
+// (asynchronously executing) run of CreateAndStartDeviceAsync(). To this end,
+// the owner passes in the shared ownership as part of |done_cb| into
+// CreateAndStartDeviceAsync().
+class CONTENT_EXPORT VideoCaptureController
+    : public media::VideoFrameReceiver,
+      public VideoCaptureDeviceLauncher::Callbacks,
+      public base::RefCountedThreadSafe<VideoCaptureController> {
  public:
-  VideoCaptureController();
-  ~VideoCaptureController() override;
+  VideoCaptureController(
+      const std::string& device_id,
+      MediaStreamType stream_type,
+      const media::VideoCaptureParams& params,
+      std::unique_ptr<VideoCaptureDeviceLauncher> device_launcher);
 
   base::WeakPtr<VideoCaptureController> GetWeakPtrForIOThread();
-
-  // Factory code creating instances of VideoCaptureController may optionally
-  // set a VideoFrameConsumerFeedbackObserver. Setting the observer is done in
-  // this method separate from the constructor to allow clients to create and
-  // use instances before they can provide the observer. (This is the case with
-  // VideoCaptureManager).
-  void SetConsumerFeedbackObserver(
-      std::unique_ptr<media::VideoFrameConsumerFeedbackObserver> observer);
 
   // Start video capturing and try to use the resolution specified in |params|.
   // Buffers will be shared to the client as necessary. The client will continue
@@ -82,7 +92,7 @@ class CONTENT_EXPORT VideoCaptureController : public media::VideoFrameReceiver {
                     int buffer_id,
                     double consumer_resource_utilization);
 
-  const media::VideoCaptureFormat& GetVideoCaptureFormat() const;
+  const base::Optional<media::VideoCaptureFormat> GetVideoCaptureFormat() const;
 
   bool has_received_frames() const { return has_received_frames_; }
 
@@ -102,8 +112,39 @@ class CONTENT_EXPORT VideoCaptureController : public media::VideoFrameReceiver {
   void OnError() override;
   void OnLog(const std::string& message) override;
   void OnStarted() override;
+  void OnStartedUsingGpuDecode() override;
+
+  // Implementation of VideoCaptureDeviceLauncher::Callbacks interface:
+  void OnDeviceLaunched(
+      std::unique_ptr<LaunchedVideoCaptureDevice> device) override;
+  void OnDeviceLaunchFailed() override;
+  void OnDeviceLaunchAborted() override;
+
+  void OnDeviceConnectionLost();
+
+  void CreateAndStartDeviceAsync(const media::VideoCaptureParams& params,
+                                 VideoCaptureDeviceLaunchObserver* callbacks,
+                                 base::OnceClosure done_cb);
+  void ReleaseDeviceAsync(base::OnceClosure done_cb);
+  bool IsDeviceAlive() const;
+  void GetPhotoState(
+      media::VideoCaptureDevice::GetPhotoStateCallback callback) const;
+  void SetPhotoOptions(
+      media::mojom::PhotoSettingsPtr settings,
+      media::VideoCaptureDevice::SetPhotoOptionsCallback callback);
+  void TakePhoto(media::VideoCaptureDevice::TakePhotoCallback callback);
+  void MaybeSuspend();
+  void Resume();
+  void RequestRefreshFrame();
+  void SetDesktopCaptureWindowIdAsync(gfx::NativeViewId window_id,
+                                      base::OnceClosure done_cb);
+  int serial_id() const { return serial_id_; }
+  const std::string& device_id() const { return device_id_; }
+  MediaStreamType stream_type() const { return stream_type_; }
+  const media::VideoCaptureParams& parameters() const { return parameters_; }
 
  private:
+  friend class base::RefCountedThreadSafe<VideoCaptureController>;
   struct ControllerClient;
   typedef std::list<std::unique_ptr<ControllerClient>> ControllerClients;
 
@@ -152,6 +193,8 @@ class CONTENT_EXPORT VideoCaptureController : public media::VideoFrameReceiver {
         buffer_read_permission_;
   };
 
+  ~VideoCaptureController() override;
+
   // Find a client of |id| and |handler| in |clients|.
   ControllerClient* FindClient(VideoCaptureControllerID id,
                                VideoCaptureControllerEventHandler* handler,
@@ -172,24 +215,35 @@ class CONTENT_EXPORT VideoCaptureController : public media::VideoFrameReceiver {
   void ReleaseBufferContext(
       const std::vector<BufferContext>::iterator& buffer_state_iter);
 
-  std::unique_ptr<media::VideoFrameConsumerFeedbackObserver>
-      consumer_feedback_observer_;
+  using EventHandlerAction =
+      base::Callback<void(VideoCaptureControllerEventHandler* client,
+                          VideoCaptureControllerID id)>;
+  void PerformForClientsWithOpenSession(EventHandlerAction action);
+
+  const int serial_id_;
+  const std::string device_id_;
+  const MediaStreamType stream_type_;
+  const media::VideoCaptureParams parameters_;
+  std::unique_ptr<VideoCaptureDeviceLauncher> device_launcher_;
+  std::unique_ptr<LaunchedVideoCaptureDevice> launched_device_;
+  VideoCaptureDeviceLaunchObserver* device_launch_observer_;
 
   std::vector<BufferContext> buffer_contexts_;
 
   // All clients served by this controller.
   ControllerClients controller_clients_;
 
-  // Takes on only the states 'STARTED' and 'ERROR'. 'ERROR' is an absorbing
-  // state which stops the flow of data to clients.
+  // Takes on only the states 'STARTING', 'STARTED' and 'ERROR'. 'ERROR' is an
+  // absorbing state which stops the flow of data to clients.
   VideoCaptureState state_;
 
   int next_buffer_context_id_ = 0;
 
   // True if the controller has received a video frame from the device.
   bool has_received_frames_;
+  base::TimeTicks time_of_start_request_;
 
-  media::VideoCaptureFormat video_capture_format_;
+  base::Optional<media::VideoCaptureFormat> video_capture_format_;
 
   base::WeakPtrFactory<VideoCaptureController> weak_ptr_factory_;
 

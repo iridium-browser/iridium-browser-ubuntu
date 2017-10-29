@@ -21,10 +21,9 @@
 #import "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/spinner_view.h"
 #include "chrome/browser/ui/cocoa/themed_window.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/browser/ui/card_unmask_prompt_controller.h"
-#include "components/grit/components_scaled_resources.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/web_contents.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/controls/hyperlink_button_cell.h"
@@ -33,7 +32,6 @@
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/native_theme/native_theme.h"
 
 namespace {
@@ -504,7 +502,7 @@ void CardUnmaskPromptViewBridge::PerformClose() {
                                       autofill::kHorizontalFieldPadding];
   [storageTooltip_
       setImage:gfx::NSImageFromImageSkia(gfx::CreateVectorIcon(
-                   gfx::VectorIconId::INFO_OUTLINE, autofill::kInfoIconSize,
+                   vector_icons::kInfoOutlineIcon, autofill::kInfoIconSize,
                    gfx::kChromeIconGrey))];
   [storageTooltip_
       setMessage:base::SysUTF16ToNSString(l10n_util::GetStringUTF16(

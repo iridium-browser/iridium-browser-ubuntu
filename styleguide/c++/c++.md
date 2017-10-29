@@ -16,8 +16,7 @@ You can propose changes to this style guide by sending an email to
 request review for a change to this file. If there's no consensus,
 `src/styleguide/c++/OWNERS` get to decide.
 
-Blink code in `third_party/WebKit` uses [Blink
-style](https://sites.google.com/a/chromium.org/dev/blink/coding-style).
+Blink code in `third_party/WebKit` uses [Blink style](blink-c++.md).
 
 ## C++11 features
 
@@ -29,12 +28,6 @@ separate [C++11 use in Chromium](https://chromium-cpp.appspot.com/) page.
 
   * "Chromium" is the name of the project, not the product, and should never
     appear in code, variable names, API names etc. Use "Chrome" instead.
-
-  * Though the Google C++ Style Guide now says to use `kConstantNaming` for
-    enums, Chromium was written using `MACRO_STYLE` naming. In enums that are
-    actually enumerations (i.e. have multiple values), continue to use this
-    style for consistency. Use `kConstantNaming` when using the "enum hack" to
-    define a single constant, as you would for a const int or the like.
 
   * Functions used only for testing should be restricted to test-only scenarios
     either by `#ifdefing` them appropriately (e.g. `#if defined(UNIT_TEST)`) or
@@ -230,7 +223,7 @@ following conventions. Here we refer to the parameter type as `T` and name as
   * If the function does not modify `t`'s ownership, declare the param as `T*`. The
     caller is expected to ensure `t` stays alive as long as necessary, generally
     through the duration of the call. Exception: In rare cases (e.g. using
-    lambdas with STL algorithms over containers of `uniuqe_ptr<>`s), you may be
+    lambdas with STL algorithms over containers of `unique_ptr<>`s), you may be
     forced to declare the param as `const std::unique_ptr<T>&`. Do this only when
     required.
 

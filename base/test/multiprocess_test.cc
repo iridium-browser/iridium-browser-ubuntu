@@ -8,12 +8,13 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 
 namespace base {
 
 #if !defined(OS_ANDROID)
-Process SpawnMultiProcessTestChild(
+SpawnChildResult SpawnMultiProcessTestChild(
     const std::string& procname,
     const CommandLine& base_command_line,
     const LaunchOptions& options) {
@@ -24,7 +25,9 @@ Process SpawnMultiProcessTestChild(
   if (!command_line.HasSwitch(switches::kTestChildProcess))
     command_line.AppendSwitchASCII(switches::kTestChildProcess, procname);
 
-  return LaunchProcess(command_line, options);
+  SpawnChildResult result;
+  result.process = LaunchProcess(command_line, options);
+  return result;
 }
 
 bool WaitForMultiprocessTestChildExit(const Process& process,
@@ -42,6 +45,7 @@ bool TerminateMultiProcessTestChild(const Process& process,
 #endif  // !defined(OS_ANDROID)
 
 CommandLine GetMultiProcessTestChildBaseCommandLine() {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   CommandLine cmd_line = *CommandLine::ForCurrentProcess();
   cmd_line.SetProgram(MakeAbsoluteFilePath(cmd_line.GetProgram()));
   return cmd_line;
@@ -52,7 +56,7 @@ CommandLine GetMultiProcessTestChildBaseCommandLine() {
 MultiProcessTest::MultiProcessTest() {
 }
 
-Process MultiProcessTest::SpawnChild(const std::string& procname) {
+SpawnChildResult MultiProcessTest::SpawnChild(const std::string& procname) {
   LaunchOptions options;
 #if defined(OS_WIN)
   options.start_hidden = true;
@@ -60,7 +64,7 @@ Process MultiProcessTest::SpawnChild(const std::string& procname) {
   return SpawnChildWithOptions(procname, options);
 }
 
-Process MultiProcessTest::SpawnChildWithOptions(
+SpawnChildResult MultiProcessTest::SpawnChildWithOptions(
     const std::string& procname,
     const LaunchOptions& options) {
   return SpawnMultiProcessTestChild(procname, MakeCmdLine(procname), options);

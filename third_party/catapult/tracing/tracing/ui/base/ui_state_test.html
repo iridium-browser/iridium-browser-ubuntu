@@ -6,14 +6,14 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/core/test_utils.html">
-<link rel="import" href="/tracing/ui/tracks/track.html">
 <link rel="import" href="/tracing/ui/base/ui_state.html">
+<link rel="import" href="/tracing/ui/tracks/track.html">
 
 <script>
 'use strict';
 
 tr.b.unittest.testSuite(function() {
-  var UIState = tr.ui.b.UIState;
+  const UIState = tr.ui.b.UIState;
 
   function FakeModel() {
     this.processes = { 1: { threads: { 2: { stableId: '1.2' } } } };
@@ -29,7 +29,7 @@ tr.b.unittest.testSuite(function() {
       return { stableId: '1.2' };
     },
 
-    getBoundingClientRect: function() {
+    getBoundingClientRect() {
       return { top: 5, height: 2 };
     },
 
@@ -41,17 +41,18 @@ tr.b.unittest.testSuite(function() {
   function FakeViewPort() {
     this.containerToTrackMap = {
       // "1.2" is the only valid stableId this test function accepts.
-      getTrackByStableId: function(stableId) {
-        if (stableId === '1.2')
+      getTrackByStableId(stableId) {
+        if (stableId === '1.2') {
           return new FakeTrack;
+        }
         return undefined;
       }
     };
   }
 
   test('invalidStableId', function() {
-    var model = new FakeModel;
-    var vp = new FakeViewPort;
+    const model = new FakeModel;
+    const vp = new FakeViewPort;
     assert.throws(function() {
       UIState.fromUserFriendlyString(model, vp, '15@1.3x6');
     });
@@ -64,8 +65,8 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('invalidScaleX', function() {
-    var model = new FakeModel;
-    var vp = new FakeViewPort;
+    const model = new FakeModel;
+    const vp = new FakeViewPort;
     assert.isUndefined(UIState.fromUserFriendlyString(model, vp, '1@1.2x-1'));
     assert.throws(function() {
       UIState.fromUserFriendlyString(model, vp, '1@1.2x0');
@@ -73,27 +74,27 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('invalidSyntax', function() {
-    var model = new FakeModel;
-    var vp = new FakeViewPort;
+    const model = new FakeModel;
+    const vp = new FakeViewPort;
     assert.isUndefined(UIState.fromUserFriendlyString(model, vp, '5'));
     assert.isUndefined(UIState.fromUserFriendlyString(model, vp, '5@x5'));
     assert.isUndefined(UIState.fromUserFriendlyString(model, vp, 'ab@1.2x5'));
   });
 
   test('validString', function() {
-    var model = new FakeModel;
-    var vp = new FakeViewPort;
-    var str = '-50125.51231@1.2x1.12345';
-    var uiState = UIState.fromUserFriendlyString(model, vp, str);
+    const model = new FakeModel;
+    const vp = new FakeViewPort;
+    const str = '-50125.51231@1.2x1.12345';
+    const uiState = UIState.fromUserFriendlyString(model, vp, str);
 
     assert.isDefined(uiState);
-    assert.equal(uiState.location.xWorld, -50125.51231);
-    assert.equal(
+    assert.strictEqual(uiState.location.xWorld, -50125.51231);
+    assert.strictEqual(
         uiState.location.getContainingTrack(vp).eventContainer.stableId,
         '1.2');
-    assert.equal(uiState.scaleX, 1.12345);
+    assert.strictEqual(uiState.scaleX, 1.12345);
 
-    assert.equal(uiState.toUserFriendlyString(vp), str);
+    assert.strictEqual(uiState.toUserFriendlyString(vp), str);
   });
 });
 </script>

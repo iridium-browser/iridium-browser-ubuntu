@@ -242,6 +242,7 @@ bool NinjaBuildWriter::RunAndWriteFile(
 }
 
 void NinjaBuildWriter::WriteNinjaRules() {
+  out_ << "ninja_required_version = 1.7.2\n\n";
   out_ << "rule gn\n";
   out_ << "  command = " << GetSelfInvocationCommand(build_settings_) << "\n";
   out_ << "  description = Regenerating ninja files\n\n";
@@ -282,6 +283,14 @@ void NinjaBuildWriter::WriteAllPools() {
       const Tool* tool = pair.second->GetTool(tool_type);
       if (tool && tool->pool().ptr)
         used_pools.insert(tool->pool().ptr);
+    }
+  }
+
+  for (const Target* target : default_toolchain_targets_) {
+    if (target->output_type() == Target::ACTION) {
+      const LabelPtrPair<Pool>& pool = target->action_values().pool();
+      if (pool.ptr)
+        used_pools.insert(pool.ptr);
     }
   }
 
@@ -349,8 +358,9 @@ The "all" and "default" rules
   All generated targets (see "gn help execution") will be added to an implicit
   build rule called "all" so "ninja all" will always compile everything. The
   default rule will be used by Ninja if no specific target is specified (just
-  typing "ninja"). If there is a target named "//:default" it will be the
-  default build rule, otherwise the implicit "all" rule will be used.
+  typing "ninja"). If there is a target named "default" in the root build file,
+  it will be the default build rule, otherwise the implicit "all" rule will be
+  used.
 
 Phony rules
 
@@ -396,7 +406,7 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
   written_rules.insert("all");
 
   // Set if we encounter a target named "//:default".
-  bool default_target_exists = false;
+  const Target* default_target = nullptr;
 
   // Targets in the root build file.
   std::vector<const Target*> toplevel_targets;
@@ -418,8 +428,9 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
     const Label& label = target->label();
     const std::string& short_name = label.name();
 
-    if (label.dir().value() == "//" && label.name() == "default")
-      default_target_exists = true;
+    if (label.dir() == build_settings_->root_target_label().dir() &&
+        short_name == "default")
+      default_target = target;
 
     // Count the number of targets with the given short name.
     Counts& short_names_counts = short_names[short_name];
@@ -537,10 +548,18 @@ bool NinjaBuildWriter::WritePhonyAndAllRules(Err* err) {
   }
   out_ << std::endl;
 
-  if (default_target_exists)
-    out_ << "\ndefault default" << std::endl;
-  else if (!default_toolchain_targets_.empty())
+  if (default_target) {
+    // Use the short name when available
+    if (written_rules.find("default") != written_rules.end()) {
+      out_ << "\ndefault default" << std::endl;
+    } else {
+      out_ << "\ndefault ";
+      path_output_.WriteFile(out_, default_target->dependency_output_file());
+      out_ << std::endl;
+    }
+  } else if (!default_toolchain_targets_.empty()) {
     out_ << "\ndefault all" << std::endl;
+  }
 
   return true;
 }

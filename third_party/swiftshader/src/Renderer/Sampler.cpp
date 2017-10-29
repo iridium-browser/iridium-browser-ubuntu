@@ -60,6 +60,7 @@ namespace sw
 		mipmapFilterState = MIPMAP_NONE;
 		sRGB = false;
 		gather = false;
+		highPrecisionFiltering = false;
 
 		swizzleR = SWIZZLE_RED;
 		swizzleG = SWIZZLE_GREEN;
@@ -97,6 +98,7 @@ namespace sw
 			state.swizzleG = swizzleG;
 			state.swizzleB = swizzleB;
 			state.swizzleA = swizzleA;
+			state.highPrecisionFiltering = highPrecisionFiltering;
 
 			#if PERF_PROFILE
 				state.compressedFormat = Surface::isCompressed(externalTextureFormat);
@@ -298,6 +300,11 @@ namespace sw
 		texture.maxAnisotropy = maxAnisotropy;
 	}
 
+	void Sampler::setHighPrecisionFiltering(bool highPrecisionFiltering)
+	{
+		this->highPrecisionFiltering = highPrecisionFiltering;
+	}
+
 	void Sampler::setSwizzleR(SwizzleType swizzleR)
 	{
 		this->swizzleR = swizzleR;
@@ -406,6 +413,15 @@ namespace sw
 
 	FilterType Sampler::getTextureFilter() const
 	{
+		// Don't filter 1x1 textures.
+		if(texture.mipmap[0].width[0] == 1 && texture.mipmap[0].height[0] == 1 && texture.mipmap[0].depth[0] == 1)
+		{
+			if(mipmapFilter() == MIPMAP_NONE)
+			{
+				return FILTER_POINT;
+			}
+		}
+
 		FilterType filter = textureFilter;
 
 		if(gather && Surface::componentCount(internalTextureFormat) == 1)

@@ -7,10 +7,10 @@
 
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
+#include "gpu/command_buffer/common/scheduling_priority.h"
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/gpu_export.h"
-#include "gpu/ipc/common/gpu_stream_constants.h"
 #include "ipc/ipc_message_macros.h"
 #include "ui/gfx/ipc/geometry/gfx_param_traits.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
@@ -38,11 +38,10 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::VideoEncodeAcceleratorSupportedProfile)
   IPC_STRUCT_TRAITS_MEMBER(max_framerate_denominator)
 IPC_STRUCT_TRAITS_END()
 
-IPC_ENUM_TRAITS_MAX_VALUE(gpu::GpuStreamPriority, gpu::GpuStreamPriority::LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(gpu::SchedulingPriority,
+                          gpu::SchedulingPriority::kLast)
 IPC_ENUM_TRAITS_MAX_VALUE(gpu::MemoryAllocation::PriorityCutoff,
                           gpu::MemoryAllocation::CUTOFF_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(gpu::error::ContextLostReason,
-                          gpu::error::kContextLostReasonLast)
 IPC_ENUM_TRAITS_MIN_MAX_VALUE(gpu::CollectInfoResult,
                               gpu::kCollectInfoNone,
                               gpu::kCollectInfoFatalFailure)
@@ -91,6 +90,8 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GPUInfo)
   IPC_STRUCT_TRAITS_MEMBER(process_crash_count)
   IPC_STRUCT_TRAITS_MEMBER(in_process_gpu)
   IPC_STRUCT_TRAITS_MEMBER(passthrough_cmd_decoder)
+  IPC_STRUCT_TRAITS_MEMBER(supports_overlays)
+  IPC_STRUCT_TRAITS_MEMBER(hdr)
   IPC_STRUCT_TRAITS_MEMBER(basic_info_state)
   IPC_STRUCT_TRAITS_MEMBER(context_info_state)
 #if defined(OS_WIN)

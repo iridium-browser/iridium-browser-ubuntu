@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/driver/data_type_encryption_handler.h"
 #include "components/sync/driver/sync_service_observer.h"
@@ -20,6 +21,7 @@
 #include "google_apis/gaia/google_service_auth_error.h"
 
 class GoogleServiceAuthError;
+class SigninManagerBase;
 
 namespace sync_sessions {
 class OpenTabsUIDelegate;
@@ -71,7 +73,7 @@ class SyncSetupInProgressHandle {
   base::Closure on_destroy_;
 };
 
-class SyncService : public DataTypeEncryptionHandler {
+class SyncService : public DataTypeEncryptionHandler, public KeyedService {
  public:
   // Used to specify the kind of passphrase with which sync data is encrypted.
   enum PassphraseType {
@@ -346,6 +348,10 @@ class SyncService : public DataTypeEncryptionHandler {
   virtual void GetAllNodes(
       const base::Callback<void(std::unique_ptr<base::ListValue>)>&
           callback) = 0;
+
+  // Non-owning pointer to sign in logic that can be used to fetch information
+  // about the currently signed in user.
+  virtual SigninManagerBase* signin() const = 0;
 
  protected:
   SyncService() {}

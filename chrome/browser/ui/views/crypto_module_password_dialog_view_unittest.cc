@@ -9,15 +9,25 @@
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/crypto_module_password_dialog.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/test/views_test_base.h"
 
 namespace chrome {
 
-class CryptoModulePasswordDialogViewTest : public testing::Test {
+class CryptoModulePasswordDialogViewTest : public views::ViewsTestBase {
  public:
   CryptoModulePasswordDialogViewTest() {}
   ~CryptoModulePasswordDialogViewTest() override {}
+
+  // Overrides from views::ViewsTestBase:
+  void SetUp() override {
+    ViewsTestBase::SetUp();
+    // Set the ChromeLayoutProvider as the default layout provider.
+    test_views_delegate()->set_layout_provider(
+        ChromeLayoutProvider::CreateLayoutProvider());
+  }
 
   void Capture(const std::string& text) {
     text_ = text;

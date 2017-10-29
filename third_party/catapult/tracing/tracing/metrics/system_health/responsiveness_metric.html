@@ -5,7 +5,7 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<link rel="import" href="/tracing/base/statistics.html">
+<link rel="import" href="/tracing/base/math/statistics.html">
 <link rel="import" href="/tracing/metrics/metric_registry.html">
 <link rel="import" href="/tracing/metrics/system_health/utils.html">
 <link rel="import" href="/tracing/model/user_model/animation_expectation.html">
@@ -29,11 +29,12 @@ tr.exportTo('tr.metrics.sh', function() {
 
   function computeAnimationThroughput(animationExpectation) {
     if (animationExpectation.frameEvents === undefined ||
-        animationExpectation.frameEvents.length === 0)
+        animationExpectation.frameEvents.length === 0) {
       throw new Error('Animation missing frameEvents ' +
                       animationExpectation.stableId);
+    }
 
-    var durationInS = tr.b.convertUnit(animationExpectation.duration,
+    const durationInS = tr.b.convertUnit(animationExpectation.duration,
         tr.b.UnitPrefixScale.METRIC.MILLI,
         tr.b.UnitPrefixScale.METRIC.NONE);
     return animationExpectation.frameEvents.length / durationInS;
@@ -41,17 +42,19 @@ tr.exportTo('tr.metrics.sh', function() {
 
   function computeAnimationframeTimeDiscrepancy(animationExpectation) {
     if (animationExpectation.frameEvents === undefined ||
-        animationExpectation.frameEvents.length === 0)
+        animationExpectation.frameEvents.length === 0) {
       throw new Error('Animation missing frameEvents ' +
                       animationExpectation.stableId);
+    }
 
-    var frameTimestamps = animationExpectation.frameEvents;
+    let frameTimestamps = animationExpectation.frameEvents;
     frameTimestamps = frameTimestamps.toArray().map(function(event) {
       return event.start;
     });
 
-    var absolute = true;
-    return tr.b.Statistics.timestampsDiscrepancy(frameTimestamps, absolute);
+    const absolute = true;
+    return tr.b.math.Statistics.timestampsDiscrepancy(
+        frameTimestamps, absolute);
   }
 
   /**
@@ -60,28 +63,29 @@ tr.exportTo('tr.metrics.sh', function() {
    * @param {!Object=} opt_options
    */
   function responsivenessMetric(histograms, model, opt_options) {
-    var responseNumeric = new tr.v.Histogram('response latency',
+    const responseNumeric = new tr.v.Histogram('response latency',
         tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
         tr.v.HistogramBinBoundaries.createLinear(100, 1e3, 50));
-    var throughputNumeric = new tr.v.Histogram('animation throughput',
+    const throughputNumeric = new tr.v.Histogram('animation throughput',
         tr.b.Unit.byName.unitlessNumber_biggerIsBetter,
         tr.v.HistogramBinBoundaries.createLinear(10, 60, 10));
-    var frameTimeDiscrepancyNumeric = new tr.v.Histogram(
+    const frameTimeDiscrepancyNumeric = new tr.v.Histogram(
         'animation frameTimeDiscrepancy',
         tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
         tr.v.HistogramBinBoundaries.createLinear(0, 1e3, 50).
           addExponentialBins(1e4, 10));
-    var latencyNumeric = new tr.v.Histogram('animation latency',
+    const latencyNumeric = new tr.v.Histogram('animation latency',
         tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
         tr.v.HistogramBinBoundaries.createLinear(0, 300, 60));
 
     model.userModel.expectations.forEach(function(ue) {
       if (opt_options && opt_options.rangeOfInterest &&
           !opt_options.rangeOfInterest.intersectsExplicitRangeInclusive(
-              ue.start, ue.end))
+              ue.start, ue.end)) {
         return;
+      }
 
-      var sampleDiagnosticMap = tr.v.d.DiagnosticMap.fromObject(
+      const sampleDiagnosticMap = tr.v.d.DiagnosticMap.fromObject(
           {relatedEvents: new tr.v.d.RelatedEventSet([ue])});
 
       // Responsiveness is not defined for Idle or Startup expectations.
@@ -99,24 +103,27 @@ tr.exportTo('tr.metrics.sh', function() {
           // https://github.com/catapult-project/catapult/issues/2446
           return;
         }
-        var throughput = computeAnimationThroughput(ue);
-        if (throughput === undefined)
+        const throughput = computeAnimationThroughput(ue);
+        if (throughput === undefined) {
           throw new Error('Missing throughput for ' +
                           ue.stableId);
+        }
 
         throughputNumeric.addSample(throughput, sampleDiagnosticMap);
 
-        var frameTimeDiscrepancy = computeAnimationframeTimeDiscrepancy(ue);
-        if (frameTimeDiscrepancy === undefined)
+        const frameTimeDiscrepancy = computeAnimationframeTimeDiscrepancy(ue);
+        if (frameTimeDiscrepancy === undefined) {
           throw new Error('Missing frameTimeDiscrepancy for ' +
                           ue.stableId);
+        }
 
         frameTimeDiscrepancyNumeric.addSample(
             frameTimeDiscrepancy, sampleDiagnosticMap);
 
         ue.associatedEvents.forEach(function(event) {
-          if (!(event instanceof tr.e.cc.InputLatencyAsyncSlice))
+          if (!(event instanceof tr.e.cc.InputLatencyAsyncSlice)) {
             return;
+          }
 
           latencyNumeric.addSample(event.duration, sampleDiagnosticMap);
         });

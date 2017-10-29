@@ -6,6 +6,7 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_danger_prompt.h"
 #include "chrome/browser/profiles/profile.h"
@@ -15,9 +16,9 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "components/safe_browsing_db/database_manager.h"
 #include "content/public/test/mock_download_item.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -156,10 +157,10 @@ class DownloadDangerPromptTest
     EXPECT_CALL(download_, GetFileNameToReportUser()).WillRepeatedly(Return(
         base::FilePath(FILE_PATH_LITERAL("evil.exe"))));
     EXPECT_CALL(download_, GetDangerType()).WillRepeatedly(Return(danger_type));
-    DownloadProtectionService::DownloadPingToken* token_obj =
-        new DownloadProtectionService::DownloadPingToken(token);
+    auto token_obj =
+        base::MakeUnique<DownloadProtectionService::DownloadPingToken>(token);
     download_.SetUserData(DownloadProtectionService::kDownloadPingTokenKey,
-                          token_obj);
+                          std::move(token_obj));
   }
 
   void SetUpSafeBrowsingReportExpectations(

@@ -41,4 +41,24 @@ class AccessibilityPrivateSetKeyboardListenerFunction
                              ACCESSIBILITY_PRIVATE_SETKEYBOARDLISTENER)
 };
 
+// API function that darkens or undarkens the screen.
+class AccessibilityPrivateDarkenScreenFunction
+    : public UIThreadExtensionFunction {
+  ~AccessibilityPrivateDarkenScreenFunction() override {}
+  ResponseAction Run() override;
+  DECLARE_EXTENSION_FUNCTION("accessibilityPrivate.darkenScreen",
+                             ACCESSIBILITY_PRIVATE_DARKENSCREEN)
+};
+
+// API function that sets the keys to be captured by Switch Access.
+#if defined(OS_CHROMEOS)
+class AccessibilityPrivateSetSwitchAccessKeysFunction
+    : public UIThreadExtensionFunction {
+  ~AccessibilityPrivateSetSwitchAccessKeysFunction() override {}
+  ResponseAction Run() override;
+  DECLARE_EXTENSION_FUNCTION("accessibilityPrivate.setSwitchAccessKeys",
+                             ACCESSIBILITY_PRIVATE_SETSWITCHACCESSKEYS)
+};
+#endif  // defined (OS_CHROMEOS)
+
 #endif  // CHROME_BROWSER_ACCESSIBILITY_ACCESSIBILITY_EXTENSION_API_H_

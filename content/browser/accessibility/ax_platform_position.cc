@@ -4,6 +4,7 @@
 
 #include "content/browser/accessibility/ax_platform_position.h"
 
+#include "content/browser/accessibility/accessibility_flags.h"
 #include "content/browser/accessibility/browser_accessibility.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "ui/accessibility/ax_enums.h"
@@ -69,13 +70,13 @@ void AXPlatformPosition::AnchorParent(AXTreeID* tree_id,
   DCHECK(tree_id);
   DCHECK(parent_id);
 
-  if (!GetAnchor() || !GetAnchor()->GetParent()) {
+  if (!GetAnchor() || !GetAnchor()->PlatformGetParent()) {
     *tree_id = AXPosition::INVALID_TREE_ID;
     *parent_id = AXPosition::INVALID_ANCHOR_ID;
     return;
   }
 
-  BrowserAccessibility* parent = GetAnchor()->GetParent();
+  BrowserAccessibility* parent = GetAnchor()->PlatformGetParent();
   *tree_id = parent->manager()->ax_tree_id();
   *parent_id = parent->GetId();
 }
@@ -97,6 +98,25 @@ int AXPlatformPosition::MaxTextOffset() const {
   if (IsNullPosition())
     return INVALID_OFFSET;
   return static_cast<int>(GetInnerText().length());
+}
+
+// On some platforms, most objects are represented in the text of their parents
+// with a special (embedded object) character and not with their actual text
+// contents.
+int AXPlatformPosition::MaxTextOffsetInParent() const {
+#if defined(OS_WIN) || BUILDFLAG(USE_ATK)
+  if (IsNullPosition())
+    return INVALID_OFFSET;
+  if (GetAnchor()->IsTextOnlyObject())
+    return MaxTextOffset();
+  // Not all objects in the internal accessibility tree are exposed to platform
+  // APIs.
+  if (GetAnchor()->PlatformIsChildOfLeaf())
+    return MaxTextOffset();
+  return 1;
+#else
+  return MaxTextOffset();
+#endif
 }
 
 bool AXPlatformPosition::IsInLineBreak() const {

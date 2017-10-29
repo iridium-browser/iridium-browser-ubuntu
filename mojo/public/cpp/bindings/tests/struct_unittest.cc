@@ -9,6 +9,7 @@
 
 #include "mojo/public/cpp/bindings/lib/fixed_buffer.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "mojo/public/interfaces/bindings/tests/test_export2.mojom.h"
 #include "mojo/public/interfaces/bindings/tests/test_structs.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -123,15 +124,17 @@ TEST_F(StructTest, Clone) {
 TEST_F(StructTest, Serialization_Basic) {
   RectPtr rect(MakeRect());
 
-  size_t size = mojo::internal::PrepareToSerialize<RectDataView>(rect, nullptr);
+  mojo::internal::SerializationContext context;
+  size_t size =
+      mojo::internal::PrepareToSerialize<RectDataView>(rect, &context);
   EXPECT_EQ(8U + 16U, size);
 
   mojo::internal::FixedBufferForTesting buf(size);
   internal::Rect_Data* data;
-  mojo::internal::Serialize<RectDataView>(rect, &buf, &data, nullptr);
+  mojo::internal::Serialize<RectDataView>(rect, &buf, &data, &context);
 
   RectPtr rect2;
-  mojo::internal::Deserialize<RectDataView>(data, &rect2, nullptr);
+  mojo::internal::Deserialize<RectDataView>(data, &rect2, &context);
 
   CheckRect(*rect2);
 }
@@ -154,16 +157,17 @@ TEST_F(StructTest, Construction_StructPointers) {
 TEST_F(StructTest, Serialization_StructPointers) {
   RectPairPtr pair(RectPair::New(MakeRect(), MakeRect()));
 
+  mojo::internal::SerializationContext context;
   size_t size =
-      mojo::internal::PrepareToSerialize<RectPairDataView>(pair, nullptr);
+      mojo::internal::PrepareToSerialize<RectPairDataView>(pair, &context);
   EXPECT_EQ(8U + 16U + 2 * (8U + 16U), size);
 
   mojo::internal::FixedBufferForTesting buf(size);
   internal::RectPair_Data* data;
-  mojo::internal::Serialize<RectPairDataView>(pair, &buf, &data, nullptr);
+  mojo::internal::Serialize<RectPairDataView>(pair, &buf, &data, &context);
 
   RectPairPtr pair2;
-  mojo::internal::Deserialize<RectPairDataView>(data, &pair2, nullptr);
+  mojo::internal::Deserialize<RectPairDataView>(data, &pair2, &context);
 
   CheckRect(*pair2->first);
   CheckRect(*pair2->second);
@@ -178,8 +182,9 @@ TEST_F(StructTest, Serialization_ArrayPointers) {
   NamedRegionPtr region(
       NamedRegion::New(std::string("region"), std::move(rects)));
 
+  mojo::internal::SerializationContext context;
   size_t size =
-      mojo::internal::PrepareToSerialize<NamedRegionDataView>(region, nullptr);
+      mojo::internal::PrepareToSerialize<NamedRegionDataView>(region, &context);
   EXPECT_EQ(8U +            // header
                 8U +        // name pointer
                 8U +        // rects pointer
@@ -193,10 +198,10 @@ TEST_F(StructTest, Serialization_ArrayPointers) {
 
   mojo::internal::FixedBufferForTesting buf(size);
   internal::NamedRegion_Data* data;
-  mojo::internal::Serialize<NamedRegionDataView>(region, &buf, &data, nullptr);
+  mojo::internal::Serialize<NamedRegionDataView>(region, &buf, &data, &context);
 
   NamedRegionPtr region2;
-  mojo::internal::Deserialize<NamedRegionDataView>(data, &region2, nullptr);
+  mojo::internal::Deserialize<NamedRegionDataView>(data, &region2, &context);
 
   EXPECT_EQ("region", *region2->name);
 
@@ -211,8 +216,9 @@ TEST_F(StructTest, Serialization_NullArrayPointers) {
   EXPECT_FALSE(region->name);
   EXPECT_FALSE(region->rects);
 
+  mojo::internal::SerializationContext context;
   size_t size =
-      mojo::internal::PrepareToSerialize<NamedRegionDataView>(region, nullptr);
+      mojo::internal::PrepareToSerialize<NamedRegionDataView>(region, &context);
   EXPECT_EQ(8U +      // header
                 8U +  // name pointer
                 8U,   // rects pointer
@@ -220,10 +226,10 @@ TEST_F(StructTest, Serialization_NullArrayPointers) {
 
   mojo::internal::FixedBufferForTesting buf(size);
   internal::NamedRegion_Data* data;
-  mojo::internal::Serialize<NamedRegionDataView>(region, &buf, &data, nullptr);
+  mojo::internal::Serialize<NamedRegionDataView>(region, &buf, &data, &context);
 
   NamedRegionPtr region2;
-  mojo::internal::Deserialize<NamedRegionDataView>(data, &region2, nullptr);
+  mojo::internal::Deserialize<NamedRegionDataView>(data, &region2, &context);
 
   EXPECT_FALSE(region2->name);
   EXPECT_FALSE(region2->rects);
@@ -363,40 +369,42 @@ TEST_F(StructTest, Serialization_NativeStruct) {
   {
     // Serialization of a null native struct.
     NativeStructPtr native;
+    mojo::internal::SerializationContext context;
     size_t size = mojo::internal::PrepareToSerialize<NativeStructDataView>(
-        native, nullptr);
+        native, &context);
     EXPECT_EQ(0u, size);
     mojo::internal::FixedBufferForTesting buf(size);
 
     Data* data = nullptr;
     mojo::internal::Serialize<NativeStructDataView>(std::move(native), &buf,
-                                                    &data, nullptr);
+                                                    &data, &context);
 
     EXPECT_EQ(nullptr, data);
 
     NativeStructPtr output_native;
     mojo::internal::Deserialize<NativeStructDataView>(data, &output_native,
-                                                      nullptr);
+                                                      &context);
     EXPECT_TRUE(output_native.is_null());
   }
 
   {
     // Serialization of a native struct with null data.
     NativeStructPtr native(NativeStruct::New());
+    mojo::internal::SerializationContext context;
     size_t size = mojo::internal::PrepareToSerialize<NativeStructDataView>(
-        native, nullptr);
+        native, &context);
     EXPECT_EQ(0u, size);
     mojo::internal::FixedBufferForTesting buf(size);
 
     Data* data = nullptr;
     mojo::internal::Serialize<NativeStructDataView>(std::move(native), &buf,
-                                                    &data, nullptr);
+                                                    &data, &context);
 
     EXPECT_EQ(nullptr, data);
 
     NativeStructPtr output_native;
     mojo::internal::Deserialize<NativeStructDataView>(data, &output_native,
-                                                      nullptr);
+                                                      &context);
     EXPECT_TRUE(output_native.is_null());
   }
 
@@ -404,20 +412,21 @@ TEST_F(StructTest, Serialization_NativeStruct) {
     NativeStructPtr native(NativeStruct::New());
     native->data = std::vector<uint8_t>{'X', 'Y'};
 
+    mojo::internal::SerializationContext context;
     size_t size = mojo::internal::PrepareToSerialize<NativeStructDataView>(
-        native, nullptr);
+        native, &context);
     EXPECT_EQ(16u, size);
     mojo::internal::FixedBufferForTesting buf(size);
 
     Data* data = nullptr;
     mojo::internal::Serialize<NativeStructDataView>(std::move(native), &buf,
-                                                    &data, nullptr);
+                                                    &data, &context);
 
     EXPECT_NE(nullptr, data);
 
     NativeStructPtr output_native;
     mojo::internal::Deserialize<NativeStructDataView>(data, &output_native,
-                                                      nullptr);
+                                                      &context);
     ASSERT_TRUE(output_native);
     ASSERT_FALSE(output_native->data->empty());
     EXPECT_EQ(2u, output_native->data->size());
@@ -435,7 +444,7 @@ TEST_F(StructTest, Serialization_PublicAPI) {
 
     // Initialize it to non-null.
     RectPtr output(Rect::New());
-    ASSERT_TRUE(Rect::Deserialize(std::move(data), &output));
+    ASSERT_TRUE(Rect::Deserialize(data, &output));
     EXPECT_TRUE(output.is_null());
   }
 
@@ -446,7 +455,7 @@ TEST_F(StructTest, Serialization_PublicAPI) {
     EXPECT_FALSE(data.empty());
 
     EmptyStructPtr output;
-    ASSERT_TRUE(EmptyStruct::Deserialize(std::move(data), &output));
+    ASSERT_TRUE(EmptyStruct::Deserialize(data, &output));
     EXPECT_FALSE(output.is_null());
   }
 
@@ -457,7 +466,7 @@ TEST_F(StructTest, Serialization_PublicAPI) {
     auto data = Rect::Serialize(&rect);
 
     RectPtr output;
-    ASSERT_TRUE(Rect::Deserialize(std::move(data), &output));
+    ASSERT_TRUE(Rect::Deserialize(data, &output));
     EXPECT_TRUE(output.Equals(cloned_rect));
   }
 
@@ -475,7 +484,7 @@ TEST_F(StructTest, Serialization_PublicAPI) {
     // Make sure that the serialized result gets pointers encoded properly.
     auto cloned_data = data;
     NamedRegionPtr output;
-    ASSERT_TRUE(NamedRegion::Deserialize(std::move(cloned_data), &output));
+    ASSERT_TRUE(NamedRegion::Deserialize(cloned_data, &output));
     EXPECT_TRUE(output.Equals(cloned_region));
   }
 
@@ -485,7 +494,17 @@ TEST_F(StructTest, Serialization_PublicAPI) {
     auto data = Rect::Serialize(&rect);
 
     NamedRegionPtr output;
-    EXPECT_FALSE(NamedRegion::Deserialize(std::move(data), &output));
+    EXPECT_FALSE(NamedRegion::Deserialize(data, &output));
+  }
+
+  {
+    // A struct from another component.
+    auto pair = test_export2::StringPair::New("hello", "world");
+    auto data = test_export2::StringPair::Serialize(&pair);
+
+    test_export2::StringPairPtr output;
+    ASSERT_TRUE(test_export2::StringPair::Deserialize(data, &output));
+    EXPECT_TRUE(output.Equals(pair));
   }
 }
 

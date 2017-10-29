@@ -12,10 +12,10 @@
 
 #include <string.h>
 
-#include "webrtc/base/constructormagic.h"
 #include "webrtc/modules/desktop_capture/desktop_capturer.h"
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/mouse_cursor.h"
+#include "webrtc/rtc_base/constructormagic.h"
 
 namespace webrtc {
 
@@ -81,6 +81,7 @@ DesktopFrameWithCursor::DesktopFrameWithCursor(
                    frame->shared_memory()) {
   set_dpi(frame->dpi());
   set_capture_time_ms(frame->capture_time_ms());
+  set_capturer_id(frame->capturer_id());
   mutable_updated_region()->Swap(frame->mutable_updated_region());
   original_frame_ = std::move(frame);
 

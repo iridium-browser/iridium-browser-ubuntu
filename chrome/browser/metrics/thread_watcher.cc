@@ -29,25 +29,7 @@
 #include "components/version_info/version_info.h"
 #include "content/public/browser/notification_service.h"
 
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
-
 using content::BrowserThread;
-
-namespace {
-
-base::StackSamplingProfiler::SamplingParams GetJankTimeBombSamplingParams() {
-  base::StackSamplingProfiler::SamplingParams params;
-  params.initial_delay = base::TimeDelta::FromMilliseconds(0);
-  params.bursts = 1;
-  // 5 seconds at 10Hz.
-  params.samples_per_burst = 50;
-  params.sampling_interval = base::TimeDelta::FromMilliseconds(100);
-  return params;
-}
-
-}  // namespace
 
 // ThreadWatcher methods and members.
 ThreadWatcher::ThreadWatcher(const WatchingParams& params)
@@ -110,8 +92,8 @@ void ThreadWatcher::ActivateThreadWatching() {
   ping_count_ = unresponsive_threshold_;
   ResetHangCounters();
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ThreadWatcher::PostPingMessage,
-                            weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&ThreadWatcher::PostPingMessage,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ThreadWatcher::DeActivateThreadWatching() {
@@ -160,15 +142,14 @@ void ThreadWatcher::PostPingMessage() {
       base::Bind(&ThreadWatcher::OnPongMessage, weak_ptr_factory_.GetWeakPtr(),
                  ping_sequence_number_));
   if (watched_runner_->PostTask(
-          FROM_HERE,
-          base::Bind(&ThreadWatcher::OnPingMessage, thread_id_,
-                     callback))) {
-      // Post a task to check the responsiveness of watched thread.
-      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&ThreadWatcher::OnCheckResponsiveness,
-                     weak_ptr_factory_.GetWeakPtr(), ping_sequence_number_),
-          unresponsive_time_);
+          FROM_HERE, base::BindOnce(&ThreadWatcher::OnPingMessage, thread_id_,
+                                    callback))) {
+    // Post a task to check the responsiveness of watched thread.
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&ThreadWatcher::OnCheckResponsiveness,
+                       weak_ptr_factory_.GetWeakPtr(), ping_sequence_number_),
+        unresponsive_time_);
   } else {
     // Watched thread might have gone away, stop watching it.
     DeActivateThreadWatching();
@@ -201,8 +182,9 @@ void ThreadWatcher::OnPongMessage(uint64_t ping_sequence_number) {
     return;
 
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&ThreadWatcher::PostPingMessage,
-                            weak_ptr_factory_.GetWeakPtr()),
+      FROM_HERE,
+      base::BindOnce(&ThreadWatcher::PostPingMessage,
+                     weak_ptr_factory_.GetWeakPtr()),
       sleep_time_);
 }
 
@@ -230,8 +212,8 @@ void ThreadWatcher::OnCheckResponsiveness(uint64_t ping_sequence_number) {
   // Post a task to check the responsiveness of watched thread.
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&ThreadWatcher::OnCheckResponsiveness,
-                 weak_ptr_factory_.GetWeakPtr(), ping_sequence_number_),
+      base::BindOnce(&ThreadWatcher::OnCheckResponsiveness,
+                     weak_ptr_factory_.GetWeakPtr(), ping_sequence_number_),
       unresponsive_time_);
   responsive_ = false;
 }
@@ -468,14 +450,6 @@ void ThreadWatcherList::ParseCommandLine(
     *unresponsive_threshold *= 2;
   }
 
-#if defined(OS_WIN)
-  // For Windows XP (old systems), double the unresponsive_threshold to give
-  // the OS a chance to schedule UI/IO threads a time slice to respond with a
-  // pong message (to get around limitations with the OS).
-  if (base::win::GetVersion() <= base::win::VERSION_XP)
-    *unresponsive_threshold *= 2;
-#endif
-
   uint32_t crash_seconds = *unresponsive_threshold * kUnresponsiveSeconds;
   std::string crash_on_hang_thread_names;
   if (command_line.HasSwitch(switches::kCrashOnHangThreads)) {
@@ -537,9 +511,8 @@ void ThreadWatcherList::InitializeAndStartWatching(
 
   // Disarm the startup timebomb, even if stop has been called.
   BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&StartupTimeBomb::DisarmStartupTimeBomb));
+      BrowserThread::UI, FROM_HERE,
+      base::BindOnce(&StartupTimeBomb::DisarmStartupTimeBomb));
 
   // This method is deferred in relationship to its StopWatchingAll()
   // counterpart. If a previous initialization has already happened, or if
@@ -917,8 +890,9 @@ void StartupTimeBomb::DeleteStartupWatchdog(
     return;
   }
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&StartupTimeBomb::DeleteStartupWatchdog, thread_id,
-                            base::Unretained(startup_watchdog)),
+      FROM_HERE,
+      base::BindOnce(&StartupTimeBomb::DeleteStartupWatchdog, thread_id,
+                     base::Unretained(startup_watchdog)),
       base::TimeDelta::FromSeconds(10));
 }
 
@@ -927,47 +901,6 @@ void StartupTimeBomb::DisarmStartupTimeBomb() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (g_startup_timebomb_)
     g_startup_timebomb_->Disarm();
-}
-
-// JankTimeBomb methods and members.
-//
-JankTimeBomb::JankTimeBomb(base::TimeDelta duration,
-                           metrics::CallStackProfileParams::Thread thread)
-    : thread_(thread), weak_ptr_factory_(this) {
-  if (IsEnabled()) {
-    WatchDogThread::PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&JankTimeBomb::Alarm,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   base::PlatformThread::CurrentId()),
-        duration);
-  }
-}
-
-JankTimeBomb::~JankTimeBomb() {
-}
-
-bool JankTimeBomb::IsEnabled() const {
-  version_info::Channel channel = chrome::GetChannel();
-  return channel == version_info::Channel::UNKNOWN ||
-      channel == version_info::Channel::CANARY ||
-      channel == version_info::Channel::DEV;
-}
-
-void JankTimeBomb::Alarm(base::PlatformThreadId thread_id) {
-  DCHECK(WatchDogThread::CurrentlyOnWatchDogThread());
-  sampling_profiler_.reset(new base::StackSamplingProfiler(
-      thread_id,
-      GetJankTimeBombSamplingParams(),
-      metrics::CallStackProfileMetricsProvider::GetProfilerCallback(
-          metrics::CallStackProfileParams(
-              metrics::CallStackProfileParams::BROWSER_PROCESS,
-              thread_,
-              metrics::CallStackProfileParams::JANKY_TASK,
-              metrics::CallStackProfileParams::PRESERVE_ORDER))));
-  // Use synchronous profiler. It will automatically stop collection when
-  // destroyed.
-  sampling_profiler_->Start();
 }
 
 // ShutdownWatcherHelper methods and members.
@@ -1003,12 +936,6 @@ void ShutdownWatcherHelper::Arm(const base::TimeDelta& duration) {
   } else {
     actual_duration *= 2;
   }
-
-#if defined(OS_WIN)
-  // On Windows XP, give twice the time for shutdown.
-  if (base::win::GetVersion() <= base::win::VERSION_XP)
-    actual_duration *= 2;
-#endif
 
   shutdown_watchdog_ = new ShutdownWatchDogThread(actual_duration);
   shutdown_watchdog_->Arm();

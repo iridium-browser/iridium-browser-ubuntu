@@ -1,6 +1,17 @@
 {
     "extensions": [
         {
+            "type": "@QuickOpen.FilteredListWidget.Provider",
+            "title": "Run command",
+            "prefix": ">",
+            "className": "QuickOpen.CommandMenuProvider"
+        },
+        {
+            "type": "@QuickOpen.FilteredListWidget.Provider",
+            "prefix": "?",
+            "className": "QuickOpen.HelpQuickOpen"
+        },
+        {
             "type": "@UI.ActionDelegate",
             "actionId": "commandMenu.show",
             "className": "QuickOpen.CommandMenu.ShowActionDelegate",
@@ -14,6 +25,28 @@
                     "shortcut": "Meta+Shift+P"
                 }
             ]
+        },
+        {
+            "type": "@UI.ActionDelegate",
+            "actionId": "quickOpen.show",
+            "title": "Open file",
+            "className": "QuickOpen.QuickOpen.ShowActionDelegate",
+            "order": 100,
+            "bindings": [
+                {
+                    "platform": "mac",
+                    "shortcut": "Meta+P Meta+O"
+                },
+                {
+                    "platform": "windows,linux",
+                    "shortcut": "Ctrl+P Ctrl+O"
+                }
+            ]
+        },
+        {
+            "type": "context-menu-item",
+            "location": "mainMenu/navigate",
+            "actionId": "quickOpen.show"
         }
     ],
     "dependencies": [
@@ -22,7 +55,9 @@
     ],
     "scripts": [
         "FilteredListWidget.js",
-        "CommandMenu.js"
+        "QuickOpen.js",
+        "CommandMenu.js",
+        "HelpQuickOpen.js"
     ],
     "resources": [
         "filteredListWidget.css"

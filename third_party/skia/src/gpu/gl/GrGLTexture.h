@@ -36,9 +36,19 @@ public:
     GrGLTexture(GrGLGpu*, SkBudgeted, const GrSurfaceDesc&, const IDDesc&,
                 bool wasMipMapDataProvided);
 
+    ~GrGLTexture() override {
+        // check that invokeReleaseProc has been called (if needed)
+        SkASSERT(!fReleaseProc);
+    }
+
     GrBackendObject getTextureHandle() const override;
 
     void textureParamsModified() override { fTexParams.invalidate(); }
+
+    void setRelease(ReleaseProc proc, ReleaseCtx ctx) override {
+        fReleaseProc = proc;
+        fReleaseCtx = ctx;
+    }
 
     // These functions are used to track the texture parameters associated with the texture.
     const TexParams& getCachedTexParams(GrGpu::ResetTimestamp* timestamp) const {
@@ -56,7 +66,11 @@ public:
 
     GrGLenum target() const { return fInfo.fTarget; }
 
+    bool hasBaseLevelBeenBoundToFBO() const { return fBaseLevelHasBeenBoundToFBO; }
+    void baseLevelWasBoundToFBO() { fBaseLevelHasBeenBoundToFBO = true; }
+
     static sk_sp<GrGLTexture> MakeWrapped(GrGLGpu*, const GrSurfaceDesc&, const IDDesc&);
+
 protected:
     // Constructor for subclasses.
     GrGLTexture(GrGLGpu*, const GrSurfaceDesc&, const IDDesc&, bool wasMipMapDataProvided);
@@ -71,15 +85,25 @@ protected:
     void onRelease() override;
     void setMemoryBacking(SkTraceMemoryDump* traceMemoryDump,
                           const SkString& dumpName) const override;
-    std::unique_ptr<GrExternalTextureData> detachBackendTexture() override;
 
 private:
+    void invokeReleaseProc() {
+        if (fReleaseProc) {
+            fReleaseProc(fReleaseCtx);
+            fReleaseProc = nullptr;
+        }
+    }
+
     TexParams                       fTexParams;
     GrGpu::ResetTimestamp           fTexParamsTimestamp;
     // Holds the texture target and ID. A pointer to this may be shared to external clients for
     // direct interaction with the GL object.
     GrGLTextureInfo                 fInfo;
     GrBackendObjectOwnership        fTextureIDOwnership;
+    bool                            fBaseLevelHasBeenBoundToFBO = false;
+
+    ReleaseProc                     fReleaseProc = nullptr;
+    ReleaseCtx                      fReleaseCtx = nullptr;
 
     typedef GrTexture INHERITED;
 };

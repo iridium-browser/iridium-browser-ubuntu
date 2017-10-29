@@ -7,6 +7,7 @@
 
 #include "base/macros.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
+#include "components/ukm/ukm_source.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -17,7 +18,11 @@ namespace prerender {
 class PrerenderManager;
 }
 
-// Observer recording metrics related to prerender.
+// Observer responsible for recording First Contentful Paing metrics related to
+// Prerender.
+//
+// To record FCP metrics for non-Prerender loads, the
+// |NoStatePrefetchPageLoadMetricsObserver| is used.
 class PrerenderPageLoadMetricsObserver
     : public page_load_metrics::PageLoadMetricsObserver {
  public:
@@ -34,12 +39,13 @@ class PrerenderPageLoadMetricsObserver
   ObservePolicy OnStart(content::NavigationHandle* navigation_handle,
                         const GURL& currently_committed_url,
                         bool started_in_foreground) override;
-  ObservePolicy OnCommit(content::NavigationHandle* navigation_handle) override;
-  void OnFirstContentfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
+                         ukm::SourceId source_id) override;
+  void OnFirstContentfulPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
   ObservePolicy OnHidden(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
 
   void SetNavigationStartTicksForTesting(base::TimeTicks ticks);

@@ -1,6 +1,7 @@
+<link rel="import" href="chrome://resources/html/polymer.html">
+
 <link rel="import" href="chrome://resources/cr_elements/cr_dialog/cr_dialog.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
-<link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-spinner/paper-spinner.html">
@@ -12,11 +13,12 @@
   <template>
     <style include="settings-shared"></style>
     <dialog is="cr-dialog" id="dialog" close-text="$i18n{close}">
-      <div class="title">[[getTitleText_(status_)]]</div>
-      <div class="body">
+      <div class="title" slot="title">[[getTitleText_(status_)]]</div>
+      <div class="body" slot="body">
         [[getDescriptionText_(status_)]]
       </div>
-      <div class="button-container" hidden="[[isButtonBarHidden_(status_)]]">
+      <div class="button-container" slot="button-container"
+          hidden="[[isButtonBarHidden_(status_)]]">
         <paper-spinner active="[[isSpinnerActive_(status_)]]">
         </paper-spinner>
         <paper-button class="cancel-button" on-tap="onCancelTap_"

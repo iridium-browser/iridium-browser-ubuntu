@@ -10,10 +10,12 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/captive_portal/captive_portal_testing_utils.h"
 #include "net/base/net_errors.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -75,9 +77,11 @@ class CaptivePortalDetectorTest : public testing::Test,
     GURL url(CaptivePortalDetector::kDefaultURL);
     CaptivePortalClient client(detector());
 
-    detector()->DetectCaptivePortal(url,
+    detector()->DetectCaptivePortal(
+        url,
         base::Bind(&CaptivePortalClient::OnPortalDetectionCompleted,
-                   base::Unretained(&client)));
+                   base::Unretained(&client)),
+        TRAFFIC_ANNOTATION_FOR_TESTS);
 
     ASSERT_TRUE(FetchingURL());
     base::RunLoop().RunUntilIdle();
@@ -99,9 +103,11 @@ class CaptivePortalDetectorTest : public testing::Test,
     GURL url(CaptivePortalDetector::kDefaultURL);
     CaptivePortalClient client(detector());
 
-    detector()->DetectCaptivePortal(url,
+    detector()->DetectCaptivePortal(
+        url,
         base::Bind(&CaptivePortalClient::OnPortalDetectionCompleted,
-                   base::Unretained(&client)));
+                   base::Unretained(&client)),
+        TRAFFIC_ANNOTATION_FOR_TESTS);
 
     ASSERT_TRUE(FetchingURL());
     base::RunLoop().RunUntilIdle();
@@ -113,7 +119,7 @@ class CaptivePortalDetectorTest : public testing::Test,
   }
 
  private:
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<CaptivePortalDetector> detector_;
 };
 

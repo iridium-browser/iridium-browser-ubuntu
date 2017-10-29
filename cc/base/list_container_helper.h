@@ -10,24 +10,21 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/base/base_export.h"
 
 namespace cc {
 
 // Helper class for ListContainer non-templated logic. All methods are private,
 // and only exposed to friend classes.
 // For usage, see comments in ListContainer (list_container.h).
-class CC_EXPORT ListContainerHelper final {
+class CC_BASE_EXPORT ListContainerHelper final {
  private:
   template <typename T>
   friend class ListContainer;
 
-  template <typename T>
-  friend class RandomAccessListContainer;
-
-  explicit ListContainerHelper(size_t max_size_for_derived_class);
-  ListContainerHelper(size_t max_size_for_derived_class,
-                      size_t num_of_elements_to_reserve_for);
+  explicit ListContainerHelper(size_t alignment,
+                               size_t max_size_for_derived_class,
+                               size_t num_of_elements_to_reserve_for);
   ~ListContainerHelper();
 
   // This class deals only with char* and void*. It does allocation and passing
@@ -36,7 +33,7 @@ class CC_EXPORT ListContainerHelper final {
 
   // This class points to a certain position inside memory of
   // CharAllocator. It is a base class for ListContainer iterators.
-  struct CC_EXPORT PositionInCharAllocator {
+  struct CC_BASE_EXPORT PositionInCharAllocator {
     CharAllocator* ptr_to_container;
     size_t vector_index;
     char* item_iterator;
@@ -56,7 +53,7 @@ class CC_EXPORT ListContainerHelper final {
 
   // Iterator classes that can be used to access data.
   /////////////////////////////////////////////////////////////////
-  class CC_EXPORT Iterator : public PositionInCharAllocator {
+  class CC_BASE_EXPORT Iterator : public PositionInCharAllocator {
     // This class is only defined to forward iterate through
     // CharAllocator.
    public:
@@ -76,7 +73,7 @@ class CC_EXPORT ListContainerHelper final {
     size_t index_;
   };
 
-  class CC_EXPORT ConstIterator : public PositionInCharAllocator {
+  class CC_BASE_EXPORT ConstIterator : public PositionInCharAllocator {
     // This class is only defined to forward iterate through
     // CharAllocator.
    public:
@@ -97,7 +94,7 @@ class CC_EXPORT ListContainerHelper final {
     size_t index_;
   };
 
-  class CC_EXPORT ReverseIterator : public PositionInCharAllocator {
+  class CC_BASE_EXPORT ReverseIterator : public PositionInCharAllocator {
     // This class is only defined to reverse iterate through
     // CharAllocator.
    public:
@@ -117,7 +114,7 @@ class CC_EXPORT ListContainerHelper final {
     size_t index_;
   };
 
-  class CC_EXPORT ConstReverseIterator : public PositionInCharAllocator {
+  class CC_BASE_EXPORT ConstReverseIterator : public PositionInCharAllocator {
     // This class is only defined to reverse iterate through
     // CharAllocator.
    public:
@@ -170,7 +167,7 @@ class CC_EXPORT ListContainerHelper final {
   size_t AvailableSizeWithoutAnotherAllocationForTesting() const;
 
   // Hands out memory location for an element at the end of data structure.
-  void* Allocate(size_t size_of_actual_element_in_bytes);
+  void* Allocate(size_t alignment, size_t size_of_actual_element_in_bytes);
 
   std::unique_ptr<CharAllocator> data_;
 

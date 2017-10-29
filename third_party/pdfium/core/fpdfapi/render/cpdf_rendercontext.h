@@ -9,6 +9,7 @@
 
 #include <vector>
 
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxcrt/fx_basic.h"
 #include "core/fxcrt/fx_coordinates.h"
 
@@ -27,7 +28,11 @@ class CPDF_RenderContext {
  public:
   class Layer {
    public:
-    CPDF_PageObjectHolder* m_pObjectHolder;
+    Layer();
+    Layer(const Layer& that);
+    ~Layer();
+
+    CFX_UnownedPtr<CPDF_PageObjectHolder> m_pObjectHolder;
     CFX_Matrix m_Matrix;
   };
 
@@ -47,7 +52,7 @@ class CPDF_RenderContext {
               const CPDF_RenderOptions* pOptions,
               const CFX_Matrix* pFinalMatrix);
 
-  void GetBackground(CFX_DIBitmap* pBuffer,
+  void GetBackground(const CFX_RetainPtr<CFX_DIBitmap>& pBuffer,
                      const CPDF_PageObject* pObj,
                      const CPDF_RenderOptions* pOptions,
                      CFX_Matrix* pFinalMatrix);
@@ -55,14 +60,14 @@ class CPDF_RenderContext {
   size_t CountLayers() const { return m_Layers.size(); }
   Layer* GetLayer(uint32_t index) { return &m_Layers[index]; }
 
-  CPDF_Document* GetDocument() const { return m_pDocument; }
-  CPDF_Dictionary* GetPageResources() const { return m_pPageResources; }
-  CPDF_PageRenderCache* GetPageCache() const { return m_pPageCache; }
+  CPDF_Document* GetDocument() const { return m_pDocument.Get(); }
+  CPDF_Dictionary* GetPageResources() const { return m_pPageResources.Get(); }
+  CPDF_PageRenderCache* GetPageCache() const { return m_pPageCache.Get(); }
 
  protected:
-  CPDF_Document* const m_pDocument;
-  CPDF_Dictionary* m_pPageResources;
-  CPDF_PageRenderCache* m_pPageCache;
+  CFX_UnownedPtr<CPDF_Document> const m_pDocument;
+  CFX_UnownedPtr<CPDF_Dictionary> m_pPageResources;
+  CFX_UnownedPtr<CPDF_PageRenderCache> m_pPageCache;
   std::vector<Layer> m_Layers;
 };
 

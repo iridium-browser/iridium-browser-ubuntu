@@ -28,7 +28,6 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/gfx/x/x11_types.h"
 
 namespace ui {
@@ -301,6 +300,16 @@ class EVENTS_DEVICES_X11_EXPORT DeviceDataManagerX11
     AxisInfo vertical, horizontal;
   };
 
+  // Information from XIValuatorClassInfo.
+  struct ValuatorInfo {
+    // The valuator number.
+    int number = -1;
+    // The valuator min value.
+    double min = 0.0;
+    // The valuator max value.
+    double max = 0.0;
+  };
+
   DeviceDataManagerX11();
   ~DeviceDataManagerX11() override;
 
@@ -359,9 +368,9 @@ class EVENTS_DEVICES_X11_EXPORT DeviceDataManagerX11
   // Number of valuators on the specific device.
   int valuator_count_[kMaxDeviceNum];
 
-  // Index table to find the valuator for DataType on the specific device
-  // by valuator_lookup_[device_id][data_type].
-  std::vector<int> valuator_lookup_[kMaxDeviceNum];
+  // Index table to find valuator number, min and max for DataType on the
+  // specific device by valuator_lookup_[device_id][data_type].
+  std::vector<ValuatorInfo> valuator_lookup_[kMaxDeviceNum];
 
   // Indicates if the user has disabled high precision scrolling support.
   bool high_precision_scrolling_disabled_;
@@ -373,11 +382,6 @@ class EVENTS_DEVICES_X11_EXPORT DeviceDataManagerX11
   // Index table to find the DataType for valuator on the specific device
   // by data_type_lookup_[device_id][valuator].
   std::vector<int> data_type_lookup_[kMaxDeviceNum];
-
-  // Index table to find the min & max value of the Valuator on a specific
-  // device.
-  std::vector<double> valuator_min_[kMaxDeviceNum];
-  std::vector<double> valuator_max_[kMaxDeviceNum];
 
   // Table to keep track of the last seen value for the specified valuator for
   // a specified slot of a device. Defaults to 0 if the valuator for that slot
@@ -391,9 +395,6 @@ class EVENTS_DEVICES_X11_EXPORT DeviceDataManagerX11
   // Map that stores meta-data for blocked keyboards. This is needed to restore
   // devices when they are re-enabled.
   std::map<int, ui::InputDevice> blocked_keyboard_devices_;
-
-  // X11 atoms cache.
-  X11AtomCache atom_cache_;
 
   unsigned char button_map_[256];
   int button_map_count_;

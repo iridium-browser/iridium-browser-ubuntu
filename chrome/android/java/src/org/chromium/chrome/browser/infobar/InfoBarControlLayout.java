@@ -7,12 +7,13 @@ package org.chromium.chrome.browser.infobar;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Paint;
+import android.support.annotation.Nullable;
 import android.support.v7.widget.SwitchCompat;
 import android.text.method.LinkMovementMethod;
+import android.util.AttributeSet;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewGroup.LayoutParams;
 import android.widget.ArrayAdapter;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -24,6 +25,9 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.widget.DualControlLayout;
+import org.chromium.chrome.browser.widget.RadioButtonLayout;
+
+import java.util.List;
 
 /**
  * Lays out a group of controls (e.g. switches, spinners, or additional text) for InfoBars that need
@@ -46,6 +50,7 @@ public final class InfoBarControlLayout extends ViewGroup {
     /**
      * ArrayAdapter that automatically determines what size make its Views to accommodate all of
      * its potential values.
+     * @param <T> Type of object that the ArrayAdapter stores.
      */
     public static final class InfoBarArrayAdapter<T> extends ArrayAdapter<T> {
         private final String mLabel;
@@ -153,8 +158,12 @@ public final class InfoBarControlLayout extends ViewGroup {
     /**
      * Do not call this method directly; use {@link InfoBarLayout#addControlLayout()}.
      */
-    InfoBarControlLayout(Context context) {
-        super(context);
+    public InfoBarControlLayout(Context context) {
+        this(context, null);
+    }
+
+    public InfoBarControlLayout(Context context, AttributeSet attrs) {
+        super(context, attrs);
 
         Resources resources = context.getResources();
         mMarginBetweenRows =
@@ -165,9 +174,6 @@ public final class InfoBarControlLayout extends ViewGroup {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        assert getLayoutParams().height == LayoutParams.WRAP_CONTENT
-                : "Height of this layout cannot be constrained.";
-
         int fullWidth = MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.UNSPECIFIED
                 ? Integer.MAX_VALUE : MeasureSpec.getSize(widthMeasureSpec);
         int columnWidth = Math.max(0, (fullWidth - mMarginBetweenColumns) / 2);
@@ -350,6 +356,23 @@ public final class InfoBarControlLayout extends ViewGroup {
         switchView.setChecked(isChecked);
 
         return switchLayout;
+    }
+
+    /**
+     * Creates a set of standard radio buttons and adds it to the layout.
+     *
+     * @param messages      Messages to display for the options.
+     * @param tags          Optional list of tags to attach to the buttons.
+     */
+    public RadioButtonLayout addRadioButtons(List<CharSequence> messages, @Nullable List<?> tags) {
+        ControlLayoutParams params = new ControlLayoutParams();
+        params.mMustBeFullWidth = true;
+
+        RadioButtonLayout radioLayout = new RadioButtonLayout(getContext());
+        radioLayout.addOptions(messages, tags);
+
+        addView(radioLayout, params);
+        return radioLayout;
     }
 
     /**

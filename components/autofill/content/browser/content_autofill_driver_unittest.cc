@@ -52,8 +52,7 @@ class FakeAutofillAgent : public mojom::AutofillAgent {
   ~FakeAutofillAgent() override {}
 
   void BindRequest(mojo::ScopedMessagePipeHandle handle) {
-    bindings_.AddBinding(
-        this, mojo::MakeRequest<mojom::AutofillAgent>(std::move(handle)));
+    bindings_.AddBinding(this, mojom::AutofillAgentRequest(std::move(handle)));
   }
 
   void SetQuitLoopClosure(base::Closure closure) { quit_closure_ = closure; }
@@ -202,6 +201,10 @@ class FakeAutofillAgent : public mojom::AutofillAgent {
       int32_t key,
       const PasswordFormFillData& form_data) override {}
 
+  void SetUserGestureRequired(bool required) override {}
+
+  void SetSecureContextRequired(bool required) override {}
+
   mojo::BindingSet<mojom::AutofillAgent> bindings_;
 
   base::Closure quit_closure_;
@@ -246,7 +249,11 @@ class TestContentAutofillDriver : public ContentAutofillDriver {
  public:
   TestContentAutofillDriver(content::RenderFrameHost* rfh,
                             AutofillClient* client)
-      : ContentAutofillDriver(rfh, client, kAppLocale, kDownloadState) {
+      : ContentAutofillDriver(rfh,
+                              client,
+                              kAppLocale,
+                              kDownloadState,
+                              nullptr) {
     std::unique_ptr<AutofillManager> autofill_manager(
         new MockAutofillManager(this, client));
     SetAutofillManager(std::move(autofill_manager));
@@ -489,17 +496,6 @@ TEST_F(ContentAutofillDriverTest, CreditCardFormInteractionOnHTTPS) {
   EXPECT_EQ(url, entry->GetURL());
   EXPECT_FALSE(!!(entry->GetSSL().content_status &
                   content::SSLStatus::DISPLAYED_CREDIT_CARD_FIELD_ON_HTTP));
-}
-
-TEST_F(ContentAutofillDriverTest, NotifyFirstUserGestureObservedInTab) {
-  driver_->NotifyFirstUserGestureObservedInTab();
-  EXPECT_CALL(fake_agent_, FirstUserGestureObservedInTab());
-  base::RunLoop().RunUntilIdle();
-}
-
-TEST_F(ContentAutofillDriverTest, FirstUserGestureObserved) {
-  EXPECT_CALL(*test_autofill_client_, OnFirstUserGestureObserved());
-  driver_->FirstUserGestureObserved();
 }
 
 }  // namespace autofill

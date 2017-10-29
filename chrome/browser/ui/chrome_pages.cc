@@ -7,12 +7,13 @@
 #include <stddef.h>
 
 #include "base/command_line.h"
-#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -27,14 +28,14 @@
 #include "chrome/browser/ui/settings_window_manager.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/options/content_settings_handler.h"
+#include "chrome/browser/ui/webui/md_bookmarks/md_bookmarks_ui.h"
 #include "chrome/browser/ui/webui/site_settings_helper.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "components/bookmarks/browser/bookmark_model.h"
+#include "components/bookmarks/browser/bookmark_node.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/common/profile_management_switches.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/common/constants.h"
@@ -47,9 +48,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "base/feature_list.h"
 #include "chrome/browser/chromeos/genius_app/app_id.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/browser/extension_registry.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -67,15 +66,12 @@ namespace {
 
 const char kHashMark[] = "#";
 
-void OpenBookmarkManagerWithHash(Browser* browser,
-                                 const std::string& action,
-                                 int64_t node_id) {
-  content::RecordAction(UserMetricsAction("ShowBookmarkManager"));
-  content::RecordAction(UserMetricsAction("ShowBookmarks"));
-  NavigateParams params(GetSingletonTabNavigateParams(
-      browser,
-      GURL(kChromeUIBookmarksURL).Resolve(base::StringPrintf(
-          "/#%s%s", action.c_str(), base::Int64ToString(node_id).c_str()))));
+void OpenBookmarkManagerForNode(Browser* browser, int64_t node_id) {
+  GURL url = GURL(kChromeUIBookmarksURL)
+                 .Resolve(base::StringPrintf(
+                     MdBookmarksUI::IsEnabled() ? "/?id=%s" : "/#%s",
+                     base::Int64ToString(node_id).c_str()));
+  NavigateParams params(GetSingletonTabNavigateParams(browser, url));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
   ShowSingletonTabOverwritingNTP(browser, params);
 }
@@ -91,8 +87,8 @@ void NavigateToSingletonTab(Browser* browser, const GURL& url) {
 // shown in the last active browser. If there is no such browser, a new browser
 // is created.
 void ShowHelpImpl(Browser* browser, Profile* profile, HelpSource source) {
-  content::RecordAction(UserMetricsAction("ShowHelpTab"));
-#if defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
+  base::RecordAction(UserMetricsAction("ShowHelpTab"));
+#if defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
   const extensions::Extension* extension =
       extensions::ExtensionRegistry::Get(profile)->GetExtensionById(
           genius_app::kGeniusAppId,
@@ -141,20 +137,15 @@ void ShowHelpImpl(Browser* browser, Profile* profile, HelpSource source) {
 }
 
 std::string GenerateContentSettingsExceptionsSubPage(ContentSettingsType type) {
-  if (!base::FeatureList::IsEnabled(features::kMaterialDesignSettings)) {
-    return kDeprecatedOptionsContentSettingsExceptionsSubPage +
-           std::string(kHashMark) +
-           site_settings::ContentSettingsTypeToGroupName(type);
-  }
-
   // In MD Settings, the exceptions no longer have a separate subpage.
   // This list overrides the group names defined in site_settings_helper for the
   // purposes of URL generation for MD Settings only. We need this because some
   // of the old group names are no longer appropriate: i.e. "plugins" =>
   // "flash".
   //
-  // TODO(tommycli): Update the group names defined in site_settings_helper once
-  // Options is removed from Chrome. Then this list will no longer be needed.
+  // TODO(crbug.com/728353): Update the group names defined in
+  // site_settings_helper once Options is removed from Chrome. Then this list
+  // will no longer be needed.
   typedef std::map<ContentSettingsType, std::string> ContentSettingPathMap;
   CR_DEFINE_STATIC_LOCAL(
       ContentSettingPathMap, kSettingsPathOverrides,
@@ -163,6 +154,7 @@ std::string GenerateContentSettingsExceptionsSubPage(ContentSettingsType type) {
         {CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, "microphone"},
         {CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, "camera"},
         {CONTENT_SETTINGS_TYPE_PLUGINS, "flash"},
+        {CONTENT_SETTINGS_TYPE_ADS, "ads"},
         {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, "unsandboxedPlugins"}}));
   const auto it = kSettingsPathOverrides.find(type);
   const std::string content_type_path =
@@ -173,29 +165,23 @@ std::string GenerateContentSettingsExceptionsSubPage(ContentSettingsType type) {
   return std::string(kContentSettingsSubPage) + "/" + content_type_path;
 }
 
-#if defined(OS_CHROMEOS)
-std::string GenerateContentSettingsSearchQueryPath(int query_message_id) {
-  return std::string(chrome::kDeprecatedOptionsSearchSubPage) + kHashMark +
-         l10n_util::GetStringUTF8(query_message_id);
-}
-#endif
-
 }  // namespace
 
 void ShowBookmarkManager(Browser* browser) {
-  content::RecordAction(UserMetricsAction("ShowBookmarkManager"));
-  content::RecordAction(UserMetricsAction("ShowBookmarks"));
-  ShowSingletonTabOverwritingNTP(
-      browser,
+  base::RecordAction(UserMetricsAction("ShowBookmarkManager"));
+  NavigateParams params(
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIBookmarksURL)));
+  params.path_behavior = NavigateParams::IGNORE_AND_STAY_PUT;
+  ShowSingletonTabOverwritingNTP(browser, params);
 }
 
 void ShowBookmarkManagerForNode(Browser* browser, int64_t node_id) {
-  OpenBookmarkManagerWithHash(browser, std::string(), node_id);
+  base::RecordAction(UserMetricsAction("ShowBookmarkManager"));
+  OpenBookmarkManagerForNode(browser, node_id);
 }
 
 void ShowHistory(Browser* browser) {
-  content::RecordAction(UserMetricsAction("ShowHistory"));
+  base::RecordAction(UserMetricsAction("ShowHistory"));
   NavigateParams params(
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIHistoryURL)));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
@@ -203,7 +189,7 @@ void ShowHistory(Browser* browser) {
 }
 
 void ShowDownloads(Browser* browser) {
-  content::RecordAction(UserMetricsAction("ShowDownloads"));
+  base::RecordAction(UserMetricsAction("ShowDownloads"));
   if (browser->window() && browser->window()->IsDownloadShelfVisible())
     browser->window()->GetDownloadShelf()->Close(DownloadShelf::USER_ACTION);
 
@@ -214,7 +200,7 @@ void ShowDownloads(Browser* browser) {
 
 void ShowExtensions(Browser* browser,
                     const std::string& extension_to_highlight) {
-  content::RecordAction(UserMetricsAction("ShowExtensions"));
+  base::RecordAction(UserMetricsAction("ShowExtensions"));
   NavigateParams params(
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIExtensionsURL)));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
@@ -230,16 +216,9 @@ void ShowExtensions(Browser* browser,
 
 void ShowConflicts(Browser* browser) {
 #if defined(OS_WIN)
-  EnumerateModulesModel* model = EnumerateModulesModel::GetInstance();
-  GURL conflict_url = model->GetConflictUrl();
-  if (conflict_url.is_valid()) {
-    ShowSingletonTab(browser, conflict_url);
-    model->AcknowledgeConflictNotification();
-    return;
-  }
+  EnumerateModulesModel::GetInstance()->AcknowledgeConflictNotification();
 #endif
 
-  content::RecordAction(UserMetricsAction("AboutConflicts"));
   ShowSingletonTab(browser, GURL(kChromeUIConflictsURL));
 }
 
@@ -249,6 +228,10 @@ void ShowHelp(Browser* browser, HelpSource source) {
 
 void ShowHelpForProfile(Profile* profile, HelpSource source) {
   ShowHelpImpl(NULL, profile, source);
+}
+
+void ShowBetaForum(Browser* browser) {
+  ShowSingletonTab(browser, GURL(kChromeBetaForumURL));
 }
 
 void ShowPolicy(Browser* browser) {
@@ -267,8 +250,7 @@ GURL GetSettingsUrl(const std::string& sub_page) {
 
 bool IsSettingsSubPage(const GURL& url, const std::string& sub_page) {
   return (url.SchemeIs(content::kChromeUIScheme) &&
-          (url.host_piece() == chrome::kChromeUISettingsHost ||
-           url.host_piece() == chrome::kChromeUISettingsFrameHost) &&
+          (url.host_piece() == chrome::kChromeUISettingsHost) &&
           url.path_piece() == "/" + sub_page);
 }
 
@@ -283,7 +265,7 @@ bool IsTrustedPopupWindowWithScheme(const Browser* browser,
   if (!web_contents)
     return false;
   GURL url(web_contents->GetURL());
-  return url.SchemeIs(scheme.c_str());
+  return url.SchemeIs(scheme);
 }
 
 
@@ -303,32 +285,8 @@ void ShowSettingsSubPageForProfile(Profile* profile,
                                    const std::string& sub_page) {
   std::string sub_page_path = sub_page;
 
-#if defined(OS_CHROMEOS)
-  if (!base::FeatureList::IsEnabled(features::kMaterialDesignSettings)) {
-    if (sub_page == chrome::kAccessibilitySubPage) {
-      sub_page_path = GenerateContentSettingsSearchQueryPath(
-          IDS_OPTIONS_SETTINGS_SECTION_TITLE_ACCESSIBILITY);
-    } else if (sub_page == chrome::kBluetoothSubPage) {
-      sub_page_path = GenerateContentSettingsSearchQueryPath(
-          IDS_OPTIONS_SETTINGS_SECTION_TITLE_BLUETOOTH);
-    } else if (sub_page == chrome::kDateTimeSubPage) {
-      sub_page_path = GenerateContentSettingsSearchQueryPath(
-          IDS_OPTIONS_SETTINGS_SECTION_TITLE_DATETIME);
-    } else if (sub_page == chrome::kStylusSubPage ||
-               sub_page == chrome::kPowerSubPage) {
-      sub_page_path += "-overlay";
-    }
-  } else {
-    if (sub_page == chrome::kPowerSubPage) {
-      // TODO(stevenjbj/derat): Remove this once we have a 'power' subpage,
-      // crbug.com/633455.
-      sub_page_path = "device";
-    }
-  }
-#endif
-
   if (::switches::SettingsWindowEnabled()) {
-    content::RecordAction(base::UserMetricsAction("ShowOptions"));
+    base::RecordAction(base::UserMetricsAction("ShowOptions"));
     SettingsWindowManager::GetInstance()->ShowChromePageForProfile(
         profile, GetSettingsUrl(sub_page_path));
     return;
@@ -342,7 +300,7 @@ void ShowSettingsSubPageForProfile(Profile* profile,
 
 void ShowSettingsSubPageInTabbedBrowser(Browser* browser,
                                         const std::string& sub_page) {
-  content::RecordAction(UserMetricsAction("ShowOptions"));
+  base::RecordAction(UserMetricsAction("ShowOptions"));
   GURL gurl = GetSettingsUrl(sub_page);
   NavigateParams params(GetSingletonTabNavigateParams(browser, gurl));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
@@ -372,22 +330,22 @@ void ShowContentSettings(Browser* browser,
 }
 
 void ShowClearBrowsingDataDialog(Browser* browser) {
-  content::RecordAction(UserMetricsAction("ClearBrowsingData_ShowDlg"));
+  base::RecordAction(UserMetricsAction("ClearBrowsingData_ShowDlg"));
   ShowSettingsSubPage(browser, kClearBrowserDataSubPage);
 }
 
 void ShowPasswordManager(Browser* browser) {
-  content::RecordAction(UserMetricsAction("Options_ShowPasswordManager"));
+  base::RecordAction(UserMetricsAction("Options_ShowPasswordManager"));
   ShowSettingsSubPage(browser, kPasswordManagerSubPage);
 }
 
 void ShowImportDialog(Browser* browser) {
-  content::RecordAction(UserMetricsAction("Import_ShowDlg"));
+  base::RecordAction(UserMetricsAction("Import_ShowDlg"));
   ShowSettingsSubPage(browser, kImportDataSubPage);
 }
 
 void ShowAboutChrome(Browser* browser) {
-  content::RecordAction(UserMetricsAction("AboutChrome"));
+  base::RecordAction(UserMetricsAction("AboutChrome"));
   if (::switches::SettingsWindowEnabled()) {
     SettingsWindowManager::GetInstance()->ShowChromePageForProfile(
         browser->profile(), GURL(kChromeUIHelpURL));
@@ -400,7 +358,7 @@ void ShowAboutChrome(Browser* browser) {
 }
 
 void ShowSearchEngineSettings(Browser* browser) {
-  content::RecordAction(UserMetricsAction("EditSearchEngines"));
+  base::RecordAction(UserMetricsAction("EditSearchEngines"));
   ShowSettingsSubPage(browser, kSearchEnginesSubPage);
 }
 

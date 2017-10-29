@@ -8,7 +8,9 @@
 
 #include <utility>
 
+#include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/extensions/users_private/users_private_delegate.h"
@@ -85,8 +87,8 @@ UsersPrivateGetWhitelistedUsersFunction::Run() {
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   const user_manager::UserList& users = user_manager->GetUsers();
   for (const auto* user : users) {
-    email_list->AppendIfNotPresent(base::MakeUnique<base::StringValue>(
-        user->GetAccountId().GetUserEmail()));
+    email_list->AppendIfNotPresent(
+        base::MakeUnique<base::Value>(user->GetAccountId().GetUserEmail()));
   }
 
   if (chromeos::OwnerSettingsServiceChromeOS* service =
@@ -97,13 +99,27 @@ UsersPrivateGetWhitelistedUsersFunction::Run() {
 
   // Now populate the list of User objects for returning to the JS.
   for (size_t i = 0; i < email_list->GetSize(); ++i) {
-    api::users_private::User user;
-    email_list->GetString(i, &user.email);
-    user.name =
-        user_manager->GetUserDisplayEmail(AccountId::FromUserEmail(user.email));
-    user.is_owner = chromeos::ProfileHelper::IsOwnerProfile(profile) &&
-                    user.email == profile->GetProfileUserName();
-    user_list->Append(user.ToValue());
+    std::string email;
+    email_list->GetString(i, &email);
+    AccountId account_id = AccountId::FromUserEmail(email);
+    const user_manager::User* user = user_manager->FindUser(account_id);
+    api::users_private::User api_user;
+    if (user) {
+      api_user.email = email;
+      api_user.display_email = user->GetDisplayEmail();
+      api_user.name = base::UTF16ToUTF8(user->GetDisplayName());
+      api_user.is_owner =
+          user->GetAccountId() == user_manager->GetOwnerAccountId();
+      api_user.is_supervised = user->IsSupervised();
+    } else {
+      // User is unknown (i.e. not on device).
+      api_user.email = email;
+      api_user.display_email = email;
+      api_user.name = email;
+      api_user.is_owner = false;
+      api_user.is_supervised = false;
+    }
+    user_list->Append(api_user.ToValue());
   }
 
   return RespondNow(OneArgument(std::move(user_list)));
@@ -137,7 +153,7 @@ UsersPrivateAddWhitelistedUserFunction::Run() {
     return RespondNow(OneArgument(base::MakeUnique<base::Value>(false)));
   }
 
-  base::StringValue username_value(username);
+  base::Value username_value(username);
 
   UsersPrivateDelegate* delegate =
       UsersPrivateDelegateFactory::GetForBrowserContext(browser_context());
@@ -171,7 +187,7 @@ UsersPrivateRemoveWhitelistedUserFunction::Run() {
     return RespondNow(OneArgument(base::MakeUnique<base::Value>(false)));
   }
 
-  base::StringValue canonical_email(gaia::CanonicalizeEmail(parameters->email));
+  base::Value canonical_email(gaia::CanonicalizeEmail(parameters->email));
 
   UsersPrivateDelegate* delegate =
       UsersPrivateDelegateFactory::GetForBrowserContext(browser_context());
@@ -196,9 +212,15 @@ UsersPrivateIsCurrentUserOwnerFunction::
 
 ExtensionFunction::ResponseAction
 UsersPrivateIsCurrentUserOwnerFunction::Run() {
-  bool is_owner =
-      chromeos::ProfileHelper::IsOwnerProfile(chrome_details_.GetProfile());
-  return RespondNow(OneArgument(base::MakeUnique<base::Value>(is_owner)));
+  chromeos::OwnerSettingsServiceChromeOSFactory::GetForBrowserContext(
+      browser_context())
+      ->IsOwnerAsync(base::Bind(
+          &UsersPrivateIsCurrentUserOwnerFunction::IsOwnerCallback, this));
+  return RespondLater();
+}
+
+void UsersPrivateIsCurrentUserOwnerFunction::IsOwnerCallback(bool is_owner) {
+  Respond(OneArgument(base::MakeUnique<base::Value>(is_owner)));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

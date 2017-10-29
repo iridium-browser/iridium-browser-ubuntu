@@ -9,6 +9,7 @@ import os
 import posixpath
 import time
 
+from devil.android import crash_handler
 from devil.android import device_errors
 from devil.android import device_temp_file
 from devil.android import ports
@@ -172,9 +173,15 @@ class _ApkDelegate(object):
         logging.exception('gtest shard failed.')
       except device_errors.CommandTimeoutError:
         logging.exception('gtest shard timed out.')
+      except device_errors.DeviceUnreachableError:
+        logging.exception('gtest shard device unreachable.')
       except Exception:
         device.ForceStop(self._package)
         raise
+      # TODO(jbudorick): Remove this after resolving crbug.com/726880
+      logging.info(
+          '%s size on device: %s',
+          stdout_file.name, device.StatPath(stdout_file.name).get('st_size', 0))
       return device.ReadFile(stdout_file.name).splitlines()
 
   def PullAppFiles(self, device, files, directory):
@@ -234,6 +241,8 @@ class _ExeDelegate(object):
     except (device_errors.CommandFailedError, KeyError):
       pass
 
+    # Executable tests return a nonzero exit code on test failure, which is
+    # fine from the test runner's perspective; thus check_return=False.
     output = device.RunShellCommand(
         cmd, cwd=cwd, env=env, check_return=False, large_output=True, **kwargs)
     return output
@@ -269,9 +278,9 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
         on_failure=self._env.BlacklistDevice)
     @trace_event.traced
     def individual_device_set_up(dev, host_device_tuples):
-      def install_apk():
+      def install_apk(d):
         # Install test APK.
-        self._delegate.Install(dev)
+        self._delegate.Install(d)
 
       def push_test_data():
         # Push data dependencies.
@@ -300,7 +309,9 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
         for s in self._servers[str(dev)]:
           s.SetUp()
 
-      steps = (install_apk, push_test_data, init_tool_and_start_servers)
+      steps = (
+          lambda: crash_handler.RetryOnSystemCrash(install_apk, dev),
+          push_test_data, init_tool_and_start_servers)
       if self._env.concurrent_adb:
         reraiser_thread.RunAsync(steps)
       else:
@@ -352,14 +363,15 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
     @local_device_environment.handle_shard_failures_with(
         on_failure=self._env.BlacklistDevice)
     def list_tests(dev):
-      raw_test_list = self._delegate.Run(
-          None, dev, flags='--gtest_list_tests', timeout=30)
+      raw_test_list = crash_handler.RetryOnSystemCrash(
+          lambda d: self._delegate.Run(
+              None, d, flags='--gtest_list_tests', timeout=30),
+          device=dev)
       tests = gtest_test_instance.ParseGTestListTests(raw_test_list)
       if not tests:
         logging.info('No tests found. Output:')
         for l in raw_test_list:
           logging.info('  %s', l)
-      tests = self._test_instance.FilterTests(tests)
       return tests
 
     # Query all devices in case one fails.
@@ -370,7 +382,12 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
     if all(not tl for tl in test_lists):
       raise device_errors.CommandFailedError(
           'Failed to list tests on any device')
-    return list(sorted(set().union(*[set(tl) for tl in test_lists if tl])))
+    tests = list(sorted(set().union(*[set(tl) for tl in test_lists if tl])))
+    tests = self._test_instance.FilterTests(tests)
+    tests = self._ApplyExternalSharding(
+        tests, self._test_instance.external_shard_index,
+        self._test_instance.total_external_shards)
+    return tests
 
   #override
   def _RunTest(self, device, test):
@@ -384,17 +401,19 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
         dir=self._delegate.ResultsDirectory(device),
         suffix='.xml') as device_tmp_results_file:
 
-      flags = self._test_instance.test_arguments or ''
+      flags = list(self._test_instance.flags)
       if self._test_instance.enable_xml_result_parsing:
-        flags += ' --gtest_output=xml:%s' % device_tmp_results_file.name
-      if self._test_instance.gtest_also_run_disabled_tests:
-        flags += ' --gtest_also_run_disabled_tests'
+        flags.append('--gtest_output=xml:%s' % device_tmp_results_file.name)
+
+      logging.info('flags:')
+      for f in flags:
+        logging.info('  %s', f)
 
       with contextlib_ext.Optional(
           trace_event.trace(str(test)),
           self._env.trace_output):
         output = self._delegate.Run(
-            test, device, flags=flags,
+            test, device, flags=' '.join(flags),
             timeout=timeout, retries=0)
 
       if self._test_instance.enable_xml_result_parsing:
@@ -409,6 +428,9 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
                                   self._test_instance.app_file_dir)
     if not self._env.skip_clear_data:
       self._delegate.Clear(device)
+
+    for l in output:
+      logging.info(l)
 
     # Parse the output.
     # TODO(jbudorick): Transition test scripts away from parsing stdout.
@@ -435,10 +457,15 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
                 time.strftime('%Y%m%dT%H%M%S', time.localtime()),
                 device.serial)
             tombstones_url = logdog_helper.text(
-                stream_name, resolved_tombstones)
+                stream_name, '\n'.join(resolved_tombstones))
           result.SetLink('tombstones', tombstones_url)
 
-    not_run_tests = set(test).difference(set(r.GetName() for r in results))
+    tests_stripped_disabled_prefix = set()
+    for t in test:
+      tests_stripped_disabled_prefix.add(
+          gtest_test_instance.TestNameWithoutDisabledPrefix(t))
+    not_run_tests = tests_stripped_disabled_prefix.difference(
+        set(r.GetName() for r in results))
     return results, list(not_run_tests) if results else None
 
   #override

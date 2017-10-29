@@ -7,9 +7,11 @@
 
 #import <UIKit/UIKit.h>
 
+@protocol ApplicationCommands;
+@protocol BrowserCommands;
+@protocol FullScreenControllerDelegate;
 @class TabModel;
 @class TabView;
-@protocol FullScreenControllerDelegate;
 
 namespace TabStrip {
 enum Style { kStyleDark, kStyleIncognito };
@@ -34,16 +36,9 @@ extern NSString* const kTabStripDragEnded;
 
 @property(nonatomic, assign) BOOL highlightsSelectedTab;
 @property(nonatomic, readonly, retain) UIView* view;
-// YES if the tab strip will display the mode toggle switch. May be set to the
-// same value repeatedly with no layout penalty.
-@property(nonatomic, assign) BOOL hasModeToggleSwitch;
 
-// YES if the tab strip will display the tab switcher toggle switch. May be set
-// to the same value repeatedly with no layout penalty.
-@property(nonatomic, assign) BOOL hasTabSwitcherToggleSwitch;
+@property(nonatomic, readonly, weak) id<BrowserCommands> dispatcher;
 
-// May be nil if there is no mode toggle button.
-@property(nonatomic, readonly, assign) UIButton* modeToggleButton;
 // Used to check if the tabstrip is visible before starting an animation.
 @property(nonatomic, assign) id<FullScreenControllerDelegate>
     fullscreenDelegate;
@@ -51,6 +46,7 @@ extern NSString* const kTabStripDragEnded;
 // Designated initializer.
 - (instancetype)initWithTabModel:(TabModel*)tabModel
                            style:(TabStrip::Style)style
+                      dispatcher:(id<BrowserCommands>)dispatcher
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;

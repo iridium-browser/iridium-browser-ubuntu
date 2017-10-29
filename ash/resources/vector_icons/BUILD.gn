@@ -2,12 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//ui/vector_icons/vector_icons.gni")
+import("//components/vector_icons/vector_icons.gni")
 
 aggregate_vector_icons("ash_vector_icons") {
   icon_directory = "."
 
   icons = [
+    "captive_portal.1x.icon",
+    "captive_portal.icon",
+    "check_circle.1x.icon",
+    "check_circle.icon",
     "ime_menu_emoticon.1x.icon",
     "ime_menu_emoticon.icon",
     "ime_menu_microphone.1x.icon",
@@ -16,10 +20,18 @@ aggregate_vector_icons("ash_vector_icons") {
     "ime_menu_on_screen_keyboard.icon",
     "ime_menu_write.1x.icon",
     "ime_menu_write.icon",
+    "lock_screen_arrow.1x.icon",
+    "lock_screen_arrow.icon",
+    "lock_screen_backspace.1x.icon",
+    "lock_screen_backspace.icon",
+    "lock_screen_dropdown.1x.icon",
+    "lock_screen_dropdown.icon",
     "network_badge_add_other.1x.icon",
     "network_badge_add_other.icon",
     "network_badge_captive_portal.1x.icon",
     "network_badge_captive_portal.icon",
+    "network_badge_off.1x.icon",
+    "network_badge_off.icon",
     "network_badge_roaming.1x.icon",
     "network_badge_roaming.icon",
     "network_badge_secure.1x.icon",
@@ -50,6 +62,7 @@ aggregate_vector_icons("ash_vector_icons") {
     "network_ethernet.icon",
     "network_vpn.1x.icon",
     "network_vpn.icon",
+    "notification_accessibility_braille.icon",
     "notification_display_error.icon",
     "notification_feedback_button.1x.icon",
     "notification_feedback_button.icon",
@@ -63,6 +76,8 @@ aggregate_vector_icons("ash_vector_icons") {
     "palette_mode_laser_pointer.icon",
     "palette_mode_magnify.1x.icon",
     "palette_mode_magnify.icon",
+    "palette_mode_metalayer.1x.icon",
+    "palette_mode_metalayer.icon",
     "palette_tray_icon_capture_region.1x.icon",
     "palette_tray_icon_capture_region.icon",
     "palette_tray_icon_default.1x.icon",
@@ -71,6 +86,10 @@ aggregate_vector_icons("ash_vector_icons") {
     "palette_tray_icon_laser_pointer.icon",
     "palette_tray_icon_magnify.1x.icon",
     "palette_tray_icon_magnify.icon",
+    "palette_tray_icon_metalayer.1x.icon",
+    "palette_tray_icon_metalayer.icon",
+    "shelf_back.1x.icon",
+    "shelf_back.icon",
     "shelf_keyboard.1x.icon",
     "shelf_keyboard.icon",
     "shelf_logout.1x.icon",
@@ -119,6 +138,8 @@ aggregate_vector_icons("ash_vector_icons") {
     "system_menu_cast.icon",
     "system_menu_cast_device.1x.icon",
     "system_menu_cast_device.icon",
+    "system_menu_cast_enabled.1x.icon",
+    "system_menu_cast_enabled.icon",
     "system_menu_child_user.1x.icon",
     "system_menu_child_user.icon",
     "system_menu_computer.1x.icon",
@@ -137,6 +158,8 @@ aggregate_vector_icons("ash_vector_icons") {
     "system_menu_info.icon",
     "system_menu_keyboard.1x.icon",
     "system_menu_keyboard.icon",
+    "system_menu_keyboard_brightness.1x.icon",
+    "system_menu_keyboard_brightness.icon",
     "system_menu_lock.1x.icon",
     "system_menu_lock.icon",
     "system_menu_mouse.1x.icon",
@@ -147,8 +170,10 @@ aggregate_vector_icons("ash_vector_icons") {
     "system_menu_power.icon",
     "system_menu_rotation_lock_auto.1x.icon",
     "system_menu_rotation_lock_auto.icon",
-    "system_menu_rotation_lock_locked.1x.icon",
-    "system_menu_rotation_lock_locked.icon",
+    "system_menu_rotation_lock_landscape.1x.icon",
+    "system_menu_rotation_lock_landscape.icon",
+    "system_menu_rotation_lock_portrait.1x.icon",
+    "system_menu_rotation_lock_portrait.icon",
     "system_menu_screen_share.1x.icon",
     "system_menu_screen_share.icon",
     "system_menu_settings.1x.icon",
@@ -166,6 +191,10 @@ aggregate_vector_icons("ash_vector_icons") {
     "system_menu_update.icon",
     "system_menu_new_user.1x.icon",
     "system_menu_new_user.icon",
+    "system_menu_night_light_off.1x.icon",
+    "system_menu_night_light_off.icon",
+    "system_menu_night_light_on.1x.icon",
+    "system_menu_night_light_on.icon",
     "system_menu_usb.1x.icon",
     "system_menu_usb.icon",
     "system_menu_videocam.1x.icon",
@@ -180,8 +209,6 @@ aggregate_vector_icons("ash_vector_icons") {
     "system_menu_volume_mute.icon",
     "system_tray_accessibility.1x.icon",
     "system_tray_accessibility.icon",
-    "system_tray_battery.1x.icon",
-    "system_tray_battery.icon",
     "system_tray_battery_alert.1x.icon",
     "system_tray_battery_alert.icon",
     "system_tray_battery_bolt.1x.icon",
@@ -194,8 +221,12 @@ aggregate_vector_icons("ash_vector_icons") {
     "system_tray_caps_lock.icon",
     "system_tray_cast.1x.icon",
     "system_tray_cast.icon",
+    "system_tray_night_light.1x.icon",
+    "system_tray_night_light.icon",
     "system_tray_recording.1x.icon",
     "system_tray_recording.icon",
+    "system_tray_rotation_lock_auto.1x.icon",
+    "system_tray_rotation_lock_auto.icon",
     "system_tray_rotation_lock_locked.1x.icon",
     "system_tray_rotation_lock_locked.icon",
     "system_tray_screen_share.1x.icon",
@@ -209,6 +240,8 @@ aggregate_vector_icons("ash_vector_icons") {
     "touch_calibration_complete_check.1x.icon",
     "touch_calibration_complete_check.icon",
     "touch_calibration_hand.icon",
+    "tray_action_new_lock_screen_note.1x.icon",
+    "tray_action_new_lock_screen_note.icon",
     "window_control_back.1x.icon",
     "window_control_back.icon",
     "window_control_close.1x.icon",
@@ -228,11 +261,11 @@ aggregate_vector_icons("ash_vector_icons") {
 
 source_set("vector_icons") {
   sources = get_target_outputs(":ash_vector_icons")
-  sources += [ "//ui/gfx/vector_icon_types.h" ]
 
   deps = [
     ":ash_vector_icons",
     "//base",
     "//skia",
+    "//ui/gfx",
   ]
 }

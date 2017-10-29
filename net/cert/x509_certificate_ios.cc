@@ -13,6 +13,7 @@
 #include "base/strings/string_util.h"
 #include "crypto/openssl_util.h"
 #include "net/base/ip_address.h"
+#include "net/cert/x509_util_ios.h"
 #include "net/cert/x509_util_openssl.h"
 #include "net/ssl/openssl_ssl_util.h"
 #include "third_party/boringssl/src/include/openssl/x509.h"
@@ -24,19 +25,13 @@ namespace net {
 
 namespace {
 
-// Returns true if a given |cert_handle| is actually a valid X.509 certificate
-// handle.
-//
-// SecCertificateCreateFromData() does not always force the immediate parsing of
-// the certificate, and as such, may return a SecCertificateRef for an
-// invalid/unparsable certificate. Force parsing to occur to ensure that the
-// SecCertificateRef is correct. On later versions where
-// SecCertificateCreateFromData() immediately parses, rather than lazily, this
-// call is cheap, as the subject is cached.
-bool IsValidOSCertHandle(SecCertificateRef cert_handle) {
-  ScopedCFTypeRef<CFStringRef> sanity_check(
-      SecCertificateCopySubjectSummary(cert_handle));
-  return sanity_check != nullptr;
+bssl::UniquePtr<X509> OSCertHandleToOpenSSL(
+    X509Certificate::OSCertHandle os_handle) {
+  std::string der_encoded;
+  if (!X509Certificate::GetDEREncoded(os_handle, &der_encoded))
+    return nullptr;
+  const uint8_t* bytes = reinterpret_cast<const uint8_t*>(der_encoded.data());
+  return bssl::UniquePtr<X509>(d2i_X509(nullptr, &bytes, der_encoded.size()));
 }
 
 void CreateOSCertHandlesFromPKCS7Bytes(
@@ -75,11 +70,11 @@ void ParsePrincipalValues(X509_NAME* name,
   }
 }
 
-void ParsePrincipal(X509Certificate::OSCertHandle os_cert,
+bool ParsePrincipal(X509Certificate::OSCertHandle os_cert,
                     X509_NAME* x509_name,
                     CertPrincipal* principal) {
   if (!x509_name)
-    return;
+    return false;
 
   ParsePrincipalValues(x509_name, NID_streetAddress,
                        &principal->street_addresses);
@@ -98,6 +93,7 @@ void ParsePrincipal(X509Certificate::OSCertHandle os_cert,
                                       &principal->state_or_province_name);
   x509_util::ParsePrincipalValueByNID(x509_name, NID_countryName,
                                       &principal->country_name);
+  return true;
 }
 
 bool ParseSubjectAltName(X509Certificate::OSCertHandle os_cert,
@@ -165,31 +161,34 @@ void X509Certificate::FreeOSCertHandle(OSCertHandle cert_handle) {
     CFRelease(cert_handle);
 }
 
-void X509Certificate::Initialize() {
+bool X509Certificate::Initialize() {
   crypto::EnsureOpenSSLInit();
   bssl::UniquePtr<X509> x509_cert = OSCertHandleToOpenSSL(cert_handle_);
   if (!x509_cert)
-    return;
+    return false;
   ASN1_INTEGER* serial_num = X509_get_serialNumber(x509_cert.get());
-  if (serial_num) {
-    // ASN1_INTEGERS represent the decoded number, in a format internal to
-    // OpenSSL. Most notably, this may have leading zeroes stripped off for
-    // numbers whose first byte is >= 0x80. Thus, it is necessary to
-    // re-encoded the integer back into DER, which is what the interface
-    // of X509Certificate exposes, to ensure callers get the proper (DER)
-    // value.
-    int bytes_required = i2c_ASN1_INTEGER(serial_num, nullptr);
-    unsigned char* buffer = reinterpret_cast<unsigned char*>(
-        base::WriteInto(&serial_number_, bytes_required + 1));
-    int bytes_written = i2c_ASN1_INTEGER(serial_num, &buffer);
-    DCHECK_EQ(static_cast<size_t>(bytes_written), serial_number_.size());
-  }
+  if (!serial_num)
+    return false;
+  // ASN1_INTEGERS represent the decoded number, in a format internal to
+  // OpenSSL. Most notably, this may have leading zeroes stripped off for
+  // numbers whose first byte is >= 0x80. Thus, it is necessary to
+  // re-encoded the integer back into DER, which is what the interface
+  // of X509Certificate exposes, to ensure callers get the proper (DER)
+  // value.
+  int bytes_required = i2c_ASN1_INTEGER(serial_num, nullptr);
+  unsigned char* buffer = reinterpret_cast<unsigned char*>(
+      base::WriteInto(&serial_number_, bytes_required + 1));
+  int bytes_written = i2c_ASN1_INTEGER(serial_num, &buffer);
+  DCHECK_EQ(static_cast<size_t>(bytes_written), serial_number_.size());
 
-  ParsePrincipal(cert_handle_, X509_get_subject_name(x509_cert.get()),
-                 &subject_);
-  ParsePrincipal(cert_handle_, X509_get_issuer_name(x509_cert.get()), &issuer_);
-  x509_util::ParseDate(X509_get_notBefore(x509_cert.get()), &valid_start_);
-  x509_util::ParseDate(X509_get_notAfter(x509_cert.get()), &valid_expiry_);
+  return (
+      ParsePrincipal(cert_handle_, X509_get_subject_name(x509_cert.get()),
+                     &subject_) &&
+      ParsePrincipal(cert_handle_, X509_get_issuer_name(x509_cert.get()),
+                     &issuer_) &&
+      x509_util::ParseDate(X509_get_notBefore(x509_cert.get()),
+                           &valid_start_) &&
+      x509_util::ParseDate(X509_get_notAfter(x509_cert.get()), &valid_expiry_));
 }
 
 // static
@@ -232,19 +231,8 @@ SHA256HashValue X509Certificate::CalculateCAFingerprint256(
 X509Certificate::OSCertHandle X509Certificate::CreateOSCertHandleFromBytes(
     const char* data,
     size_t length) {
-  ScopedCFTypeRef<CFDataRef> cert_data(CFDataCreateWithBytesNoCopy(
-      kCFAllocatorDefault, reinterpret_cast<const UInt8*>(data),
-      base::checked_cast<CFIndex>(length), kCFAllocatorNull));
-  if (!cert_data)
-    return nullptr;
-  OSCertHandle cert_handle = SecCertificateCreateWithData(nullptr, cert_data);
-  if (!cert_handle)
-    return nullptr;
-  if (!IsValidOSCertHandle(cert_handle)) {
-    CFRelease(cert_handle);
-    return nullptr;
-  }
-  return cert_handle;
+  return x509_util::CreateSecCertificateFromBytes(
+      reinterpret_cast<const uint8_t*>(data), length);
 }
 
 // static
@@ -360,23 +348,6 @@ void X509Certificate::GetPublicKeyInfo(OSCertHandle os_cert,
       break;
   }
   *size_bits = EVP_PKEY_bits(key);
-}
-
-bool X509Certificate::SupportsSSLClientAuth() const {
-  return false;
-}
-
-CFMutableArrayRef X509Certificate::CreateOSCertChainForCert() const {
-  CFMutableArrayRef cert_list =
-      CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
-  if (!cert_list)
-    return nullptr;
-
-  CFArrayAppendValue(cert_list, os_cert_handle());
-  for (size_t i = 0; i < intermediate_ca_certs_.size(); ++i)
-    CFArrayAppendValue(cert_list, intermediate_ca_certs_[i]);
-
-  return cert_list;
 }
 
 bool X509Certificate::IsIssuedByEncoded(

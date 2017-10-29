@@ -22,15 +22,6 @@
 #include "webrtc/api/stats/rtcstatsreport.h"
 #include "webrtc/api/test/mock_rtpreceiver.h"
 #include "webrtc/api/test/mock_rtpsender.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/base/fakeclock.h"
-#include "webrtc/base/fakesslidentity.h"
-#include "webrtc/base/gunit.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/base/socketaddress.h"
-#include "webrtc/base/thread_checker.h"
-#include "webrtc/base/timedelta.h"
-#include "webrtc/base/timeutils.h"
 #include "webrtc/logging/rtc_event_log/rtc_event_log.h"
 #include "webrtc/media/base/fakemediaengine.h"
 #include "webrtc/media/base/test/mock_mediachannel.h"
@@ -42,6 +33,15 @@
 #include "webrtc/pc/test/mock_peerconnection.h"
 #include "webrtc/pc/test/mock_webrtcsession.h"
 #include "webrtc/pc/test/rtcstatsobtainer.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/fakeclock.h"
+#include "webrtc/rtc_base/fakesslidentity.h"
+#include "webrtc/rtc_base/gunit.h"
+#include "webrtc/rtc_base/logging.h"
+#include "webrtc/rtc_base/socketaddress.h"
+#include "webrtc/rtc_base/thread_checker.h"
+#include "webrtc/rtc_base/timedelta.h"
+#include "webrtc/rtc_base/timeutils.h"
 
 using testing::_;
 using testing::Invoke;
@@ -281,12 +281,7 @@ class RTCStatsCollectorTestHelper : public SetSessionDescriptionObserver {
             std::unique_ptr<cricket::MediaEngineInterface>(media_engine_),
             worker_thread_,
             network_thread_)),
-        media_controller_(
-            MediaControllerInterface::Create(cricket::MediaConfig(),
-                                             worker_thread_,
-                                             channel_manager_.get(),
-                                             &event_log_)),
-        session_(media_controller_.get()),
+        session_(channel_manager_.get(), cricket::MediaConfig()),
         pc_() {
     // Default return values for mocks.
     EXPECT_CALL(pc_, local_streams()).WillRepeatedly(Return(nullptr));
@@ -493,7 +488,6 @@ class RTCStatsCollectorTestHelper : public SetSessionDescriptionObserver {
   // |media_engine_| is actually owned by |channel_manager_|.
   cricket::FakeMediaEngine* media_engine_;
   std::unique_ptr<cricket::ChannelManager> channel_manager_;
-  std::unique_ptr<MediaControllerInterface> media_controller_;
   MockWebRtcSession session_;
   MockPeerConnection pc_;
 
@@ -1269,9 +1263,6 @@ TEST_F(RTCStatsCollectorTest, CollectRTCIceCandidatePairStats) {
   // Mock the session to return bandwidth estimation info. These should only
   // be used for a selected candidate pair.
   cricket::VideoMediaInfo video_media_info;
-  video_media_info.bw_estimations.push_back(cricket::BandwidthEstimationInfo());
-  video_media_info.bw_estimations[0].available_send_bandwidth = 8888;
-  video_media_info.bw_estimations[0].available_recv_bandwidth = 9999;
   EXPECT_CALL(*video_media_channel, GetStats(_))
       .WillOnce(DoAll(SetArgPointee<0>(video_media_info), Return(true)));
   EXPECT_CALL(test_->session(), video_channel())
@@ -1351,8 +1342,6 @@ TEST_F(RTCStatsCollectorTest, CollectRTCIceCandidatePairStats) {
       .channel_stats[0]
       .connection_infos[0]
       .best_connection = true;
-  video_media_info.bw_estimations[0].available_send_bandwidth = 0;
-  video_media_info.bw_estimations[0].available_recv_bandwidth = 0;
   EXPECT_CALL(*video_media_channel, GetStats(_))
       .WillOnce(DoAll(SetArgPointee<0>(video_media_info), Return(true)));
   collector_->ClearCachedStatsReport();
@@ -1366,14 +1355,19 @@ TEST_F(RTCStatsCollectorTest, CollectRTCIceCandidatePairStats) {
   EXPECT_TRUE(report->Get(*expected_pair.transport_id));
 
   // Set bandwidth and "GetStats" again.
-  video_media_info.bw_estimations[0].available_send_bandwidth = 888;
-  video_media_info.bw_estimations[0].available_recv_bandwidth = 999;
+  webrtc::Call::Stats call_stats;
+  const int kSendBandwidth = 888;
+  call_stats.send_bandwidth_bps = kSendBandwidth;
+  const int kRecvBandwidth = 999;
+  call_stats.recv_bandwidth_bps = kRecvBandwidth;
+  EXPECT_CALL(test_->session(), GetCallStats())
+      .WillRepeatedly(Return(call_stats));
   EXPECT_CALL(*video_media_channel, GetStats(_))
       .WillOnce(DoAll(SetArgPointee<0>(video_media_info), Return(true)));
   collector_->ClearCachedStatsReport();
   report = GetStatsReport();
-  expected_pair.available_outgoing_bitrate = 888;
-  expected_pair.available_incoming_bitrate = 999;
+  expected_pair.available_outgoing_bitrate = kSendBandwidth;
+  expected_pair.available_incoming_bitrate = kRecvBandwidth;
   ASSERT_TRUE(report->Get(expected_pair.id()));
   EXPECT_EQ(
       expected_pair,
@@ -1463,6 +1457,39 @@ TEST_F(RTCStatsCollectorTest, CollectRTCPeerConnectionStats) {
               report->Get("RTCPeerConnection")->cast_to<
                   RTCPeerConnectionStats>());
   }
+
+  // Re-opening a data channel (or opening a new data channel that is re-using
+  // the same address in memory) should increase the opened count.
+  dummy_channel_b->SignalOpened(dummy_channel_b.get());
+
+  {
+    collector_->ClearCachedStatsReport();
+    rtc::scoped_refptr<const RTCStatsReport> report = GetStatsReport();
+    RTCPeerConnectionStats expected("RTCPeerConnection",
+                                    report->timestamp_us());
+    expected.data_channels_opened = 3;
+    expected.data_channels_closed = 1;
+    ASSERT_TRUE(report->Get("RTCPeerConnection"));
+    EXPECT_EQ(expected,
+              report->Get("RTCPeerConnection")->cast_to<
+                  RTCPeerConnectionStats>());
+  }
+
+  dummy_channel_a->SignalClosed(dummy_channel_a.get());
+  dummy_channel_b->SignalClosed(dummy_channel_b.get());
+
+  {
+    collector_->ClearCachedStatsReport();
+    rtc::scoped_refptr<const RTCStatsReport> report = GetStatsReport();
+    RTCPeerConnectionStats expected("RTCPeerConnection",
+                                    report->timestamp_us());
+    expected.data_channels_opened = 3;
+    expected.data_channels_closed = 3;
+    ASSERT_TRUE(report->Get("RTCPeerConnection"));
+    EXPECT_EQ(expected,
+              report->Get("RTCPeerConnection")->cast_to<
+                  RTCPeerConnectionStats>());
+  }
 }
 
 TEST_F(RTCStatsCollectorTest,
@@ -1494,6 +1521,8 @@ TEST_F(RTCStatsCollectorTest,
   voice_sender_info_ssrc1.local_stats.push_back(cricket::SsrcSenderInfo());
   voice_sender_info_ssrc1.local_stats[0].ssrc = 1;
   voice_sender_info_ssrc1.audio_level = 32767;
+  voice_sender_info_ssrc1.total_input_energy = 0.25;
+  voice_sender_info_ssrc1.total_input_duration = 0.5;
   voice_sender_info_ssrc1.echo_return_loss = 42;
   voice_sender_info_ssrc1.echo_return_loss_enhancement = 52;
 
@@ -1503,6 +1532,8 @@ TEST_F(RTCStatsCollectorTest,
   voice_sender_info_ssrc2.local_stats.push_back(cricket::SsrcSenderInfo());
   voice_sender_info_ssrc2.local_stats[0].ssrc = 2;
   voice_sender_info_ssrc2.audio_level = 0;
+  voice_sender_info_ssrc2.total_input_energy = 0.0;
+  voice_sender_info_ssrc2.total_input_duration = 0.0;
   voice_sender_info_ssrc2.echo_return_loss = -100;
   voice_sender_info_ssrc2.echo_return_loss_enhancement = -100;
 
@@ -1517,6 +1548,8 @@ TEST_F(RTCStatsCollectorTest,
   voice_receiver_info.local_stats.push_back(cricket::SsrcReceiverInfo());
   voice_receiver_info.local_stats[0].ssrc = 3;
   voice_receiver_info.audio_level = 16383;
+  voice_receiver_info.total_output_energy = 0.125;
+  voice_receiver_info.total_output_duration = 0.25;
 
   test_->CreateMockRtpSendersReceiversAndChannels(
       { std::make_pair(local_audio_track.get(), voice_sender_info_ssrc1),
@@ -1555,6 +1588,8 @@ TEST_F(RTCStatsCollectorTest,
   expected_local_audio_track_ssrc1.ended = true;
   expected_local_audio_track_ssrc1.detached = false;
   expected_local_audio_track_ssrc1.audio_level = 1.0;
+  expected_local_audio_track_ssrc1.total_audio_energy = 0.25;
+  expected_local_audio_track_ssrc1.total_samples_duration = 0.5;
   expected_local_audio_track_ssrc1.echo_return_loss = 42.0;
   expected_local_audio_track_ssrc1.echo_return_loss_enhancement = 52.0;
   ASSERT_TRUE(report->Get(expected_local_audio_track_ssrc1.id()));
@@ -1570,6 +1605,8 @@ TEST_F(RTCStatsCollectorTest,
   expected_local_audio_track_ssrc2.ended = true;
   expected_local_audio_track_ssrc2.detached = false;
   expected_local_audio_track_ssrc2.audio_level = 0.0;
+  expected_local_audio_track_ssrc2.total_audio_energy = 0.0;
+  expected_local_audio_track_ssrc2.total_samples_duration = 0.0;
   // Should be undefined: |expected_local_audio_track_ssrc2.echo_return_loss|
   // and |expected_local_audio_track_ssrc2.echo_return_loss_enhancement|.
   ASSERT_TRUE(report->Get(expected_local_audio_track_ssrc2.id()));
@@ -1585,6 +1622,8 @@ TEST_F(RTCStatsCollectorTest,
   expected_remote_audio_track.ended = false;
   expected_remote_audio_track.detached = false;
   expected_remote_audio_track.audio_level = 16383.0 / 32767.0;
+  expected_remote_audio_track.total_audio_energy = 0.125;
+  expected_remote_audio_track.total_samples_duration = 0.25;
   ASSERT_TRUE(report->Get(expected_remote_audio_track.id()));
   EXPECT_EQ(expected_remote_audio_track,
             report->Get(expected_remote_audio_track.id())->cast_to<

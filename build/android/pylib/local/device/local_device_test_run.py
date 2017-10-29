@@ -10,6 +10,7 @@ import signal
 import thread
 import threading
 
+from devil.android import crash_handler
 from devil.utils import signal_handler
 from pylib import valgrind_tools
 from pylib.base import base_test_result
@@ -54,6 +55,17 @@ def SubstituteDeviceRoot(device_path, device_root):
     return device_path
 
 
+class TestsTerminated(Exception):
+  pass
+
+
+class InvalidShardingSettings(Exception):
+  def __init__(self, shard_index, total_shards):
+    super(InvalidShardingSettings, self).__init__(
+        'Invalid sharding settings. shard_index: %d total_shards: %d'
+            % (shard_index, total_shards))
+
+
 class LocalDeviceTestRun(test_run.TestRun):
 
   def __init__(self, env, test_instance):
@@ -75,7 +87,9 @@ class LocalDeviceTestRun(test_run.TestRun):
         result = None
         rerun = None
         try:
-          result, rerun = self._RunTest(dev, test)
+          result, rerun = crash_handler.RetryOnSystemCrash(
+              lambda d, t=test: self._RunTest(d, t),
+              device=dev)
           if isinstance(result, base_test_result.BaseTestResult):
             results.AddResult(result)
           elif isinstance(result, list):
@@ -94,9 +108,6 @@ class LocalDeviceTestRun(test_run.TestRun):
             tests.test_completed()
 
       logging.info('Finished running tests on this device.')
-
-    class TestsTerminated(Exception):
-      pass
 
     def stop_tests(_signum, _frame):
       logging.critical('Received SIGTERM. Stopping test execution.')
@@ -176,6 +187,17 @@ class LocalDeviceTestRun(test_run.TestRun):
     failed_tests = (t for t in tests if test_failed(self._GetUniqueTestName(t)))
 
     return [t for t in failed_tests if self._ShouldRetry(t)]
+
+  def _ApplyExternalSharding(self, tests, shard_index, total_shards):
+    logging.info('Using external sharding settings. This is shard %d/%d',
+                 shard_index, total_shards)
+
+    if total_shards < 0 or shard_index < 0 or total_shards <= shard_index:
+      raise InvalidShardingSettings(shard_index, total_shards)
+
+    return [
+        t for t in tests
+        if hash(self._GetUniqueTestName(t)) % total_shards == shard_index]
 
   def GetTool(self, device):
     if not str(device) in self._tools:

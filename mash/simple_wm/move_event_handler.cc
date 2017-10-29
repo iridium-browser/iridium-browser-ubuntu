@@ -5,36 +5,37 @@
 #include "mash/simple_wm/move_event_handler.h"
 
 #include "mash/simple_wm/move_loop.h"
-#include "services/ui/public/interfaces/cursor.mojom.h"
+#include "services/ui/public/interfaces/cursor/cursor.mojom.h"
 #include "ui/aura/mus/window_port_mus.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/base/cursor/cursor.h"
 #include "ui/base/hit_test.h"
 #include "ui/events/event.h"
 
 namespace simple_wm {
 namespace {
 
-ui::mojom::Cursor CursorForWindowComponent(int window_component) {
+ui::CursorType CursorForWindowComponent(int window_component) {
   switch (window_component) {
     case HTBOTTOM:
-      return ui::mojom::Cursor::SOUTH_RESIZE;
+      return ui::CursorType::kSouthResize;
     case HTBOTTOMLEFT:
-      return ui::mojom::Cursor::SOUTH_WEST_RESIZE;
+      return ui::CursorType::kSouthWestResize;
     case HTBOTTOMRIGHT:
-      return ui::mojom::Cursor::SOUTH_EAST_RESIZE;
+      return ui::CursorType::kSouthEastResize;
     case HTLEFT:
-      return ui::mojom::Cursor::WEST_RESIZE;
+      return ui::CursorType::kWestResize;
     case HTRIGHT:
-      return ui::mojom::Cursor::EAST_RESIZE;
+      return ui::CursorType::kEastResize;
     case HTTOP:
-      return ui::mojom::Cursor::NORTH_RESIZE;
+      return ui::CursorType::kNorthResize;
     case HTTOPLEFT:
-      return ui::mojom::Cursor::NORTH_WEST_RESIZE;
+      return ui::CursorType::kNorthWestResize;
     case HTTOPRIGHT:
-      return ui::mojom::Cursor::NORTH_EAST_RESIZE;
+      return ui::CursorType::kNorthEastResize;
     default:
-      return ui::mojom::Cursor::CURSOR_NULL;
+      return ui::CursorType::kNull;
   }
 }
 
@@ -78,8 +79,8 @@ void MoveEventHandler::ProcessLocatedEvent(ui::LocatedEvent* event) {
       move_loop_ = MoveLoop::Create(window_, ht_location, *pointer_event.get());
   } else if (pointer_event->type() == ui::ET_POINTER_MOVED) {
     const int ht_location = GetNonClientComponentForEvent(pointer_event.get());
-    aura::WindowPortMus::Get(window_)->SetPredefinedCursor(
-        CursorForWindowComponent(ht_location));
+    aura::WindowPortMus::Get(window_)->SetCursor(
+        ui::CursorData(CursorForWindowComponent(ht_location)));
   }
   if (had_move_loop || move_loop_)
     event->SetHandled();

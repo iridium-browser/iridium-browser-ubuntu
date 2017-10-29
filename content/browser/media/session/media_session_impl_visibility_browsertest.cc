@@ -97,10 +97,9 @@ class MediaSessionImplVisibilityBrowserTest
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(
-        switches::kDisableGestureRequirementForMediaPlayback);
+    command_line->AppendSwitch(switches::kIgnoreAutoplayRestrictionsForTests);
 #if !defined(OS_ANDROID)
-    command_line->AppendSwitch(switches::kEnableDefaultMediaSession);
+    command_line->AppendSwitch(switches::kEnableAudioFocus);
 #endif  // !defined(OS_ANDROID)
 
     VisibilityTestData params = GetVisibilityTestData();
@@ -251,12 +250,7 @@ VisibilityTestData kTestParams[] = {
     {MediaSuspend::ENABLED, BackgroundResuming::DISABLED, SessionState::ACTIVE,
      SessionState::INACTIVE},
     {MediaSuspend::ENABLED, BackgroundResuming::ENABLED, SessionState::ACTIVE,
-// TODO(avayvod): Revert after merge to 58. See https://crbug.com/699106.
-#if defined(OS_ANDROID)
      SessionState::SUSPENDED},
-#else
-     SessionState::ACTIVE},
-#endif
     {MediaSuspend::ENABLED, BackgroundResuming::ENABLED,
      SessionState::SUSPENDED, SessionState::SUSPENDED},
     {MediaSuspend::DISABLED, BackgroundResuming::DISABLED,

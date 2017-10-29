@@ -8,7 +8,6 @@ package org.chromium.chrome.browser;
  * Java side version of chrome/common/url_constants.cc
  */
 public class UrlConstants {
-    public static final String ABOUT_SCHEME = "about";
     public static final String CHROME_SCHEME = "chrome";
     public static final String CHROME_NATIVE_SCHEME = "chrome-native";
     public static final String CONTENT_SCHEME = "content";
@@ -23,7 +22,6 @@ public class UrlConstants {
     public static final String JAR_SCHEME = "jar";
     public static final String JAVASCRIPT_SCHEME = "javascript";
 
-    public static final String ABOUT_URL_SHORT_PREFIX = "about:";
     public static final String CONTENT_URL_SHORT_PREFIX = "content:";
     public static final String CHROME_URL_SHORT_PREFIX = "chrome:";
     public static final String CHROME_NATIVE_URL_SHORT_PREFIX = "chrome-native:";
@@ -52,6 +50,7 @@ public class UrlConstants {
     public static final String RECENT_TABS_HOST = "recent-tabs";
     public static final String RECENT_TABS_URL = "chrome-native://recent-tabs/";
 
+    // TODO(dbeam): do we need both HISTORY_URL and NATIVE_HISTORY_URL?
     public static final String HISTORY_HOST = "history";
     public static final String HISTORY_URL = "chrome://history/";
     public static final String NATIVE_HISTORY_URL = "chrome-native://history/";
@@ -61,9 +60,6 @@ public class UrlConstants {
 
     public static final String PHYSICAL_WEB_DIAGNOSTICS_HOST = "physical-web-diagnostics";
     public static final String PHYSICAL_WEB_URL = "chrome://physical-web/";
-
-    public static final String ABOUT_BLANK_DISPLAY_URL = "about:blank";
-    public static final String ABOUT_BLANK_URL = "about://blank";
 
     public static final String GOOGLE_ACCOUNT_ACTIVITY_CONTROLS_URL =
             "https://myaccount.google.com/activitycontrols/search";

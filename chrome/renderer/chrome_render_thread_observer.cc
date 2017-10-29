@@ -19,7 +19,6 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
@@ -28,9 +27,9 @@
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "chrome/common/cache_stats_recorder.mojom.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/field_trial_recorder.mojom.h"
 #include "chrome/common/media/media_resource_provider.h"
 #include "chrome/common/net/net_resource_provider.h"
 #include "chrome/common/render_messages.h"
@@ -40,19 +39,24 @@
 #include "chrome/renderer/content_settings_observer.h"
 #include "chrome/renderer/security_filter_peer.h"
 #include "components/visitedlink/renderer/visitedlink_slave.h"
+#include "content/public/child/child_thread.h"
 #include "content/public/child/resource_dispatcher_delegate.h"
 #include "content/public/common/associated_interface_registry.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/service_manager_connection.h"
+#include "content/public/common/service_names.mojom.h"
+#include "content/public/common/simple_connection_filter.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_view_visitor.h"
 #include "extensions/features/features.h"
+#include "ipc/ipc_sync_channel.h"
 #include "media/base/localized_strings.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_module.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "third_party/WebKit/public/platform/WebCache.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
@@ -116,11 +120,15 @@ class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
  private:
   void InformHostOfCacheStats() {
     WebCache::UsageStats stats;
-    WebCache::getUsageStats(&stats);
-    RenderThread::Get()->Send(new ChromeViewHostMsg_UpdatedCacheStats(
-        static_cast<uint64_t>(stats.capacity),
-        static_cast<uint64_t>(stats.size)));
+    WebCache::GetUsageStats(&stats);
+    if (!cache_stats_recorder_) {
+      RenderThread::Get()->GetChannel()->GetRemoteAssociatedInterface(
+          &cache_stats_recorder_);
+    }
+    cache_stats_recorder_->RecordCacheStats(stats.capacity, stats.size);
   }
+
+  chrome::mojom::CacheStatsRecorderAssociatedPtr cache_stats_recorder_;
 
   base::WeakPtrFactory<RendererResourceDelegate> weak_factory_;
 
@@ -186,7 +194,7 @@ class ResourceUsageReporterImpl : public chrome::mojom::ResourceUsageReporter {
     }
 
     WebCache::ResourceTypeStats stats;
-    WebCache::getResourceTypeStats(&stats);
+    WebCache::GetResourceTypeStats(&stats);
     usage_data_->web_cache_stats =
         chrome::mojom::ResourceTypeStats::From(stats);
 
@@ -226,7 +234,7 @@ class ResourceUsageReporterImpl : public chrome::mojom::ResourceUsageReporter {
 
 void CreateResourceUsageReporter(
     base::WeakPtr<ChromeRenderThreadObserver> observer,
-    mojo::InterfaceRequest<chrome::mojom::ResourceUsageReporter> request) {
+    chrome::mojom::ResourceUsageReporterRequest request) {
   mojo::MakeStrongBinding(base::MakeUnique<ResourceUsageReporterImpl>(observer),
                           std::move(request));
 }
@@ -236,41 +244,41 @@ void CreateResourceUsageReporter(
 bool ChromeRenderThreadObserver::is_incognito_process_ = false;
 
 ChromeRenderThreadObserver::ChromeRenderThreadObserver()
-    : field_trial_syncer_(this),
-      visited_link_slave_(new visitedlink::VisitedLinkSlave),
+    : visited_link_slave_(new visitedlink::VisitedLinkSlave),
       weak_factory_(this) {
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-
   RenderThread* thread = RenderThread::Get();
   resource_delegate_.reset(new RendererResourceDelegate());
   thread->SetResourceDispatcherDelegate(resource_delegate_.get());
-
-  thread->GetInterfaceRegistry()->AddInterface(
-      base::Bind(CreateResourceUsageReporter, weak_factory_.GetWeakPtr()));
 
   // Configure modules that need access to resources.
   net::NetModule::SetResourceProvider(chrome_common_net::NetResourceProvider);
   media::SetLocalizedStringProvider(
       chrome_common_media::LocalizedStringProvider);
 
-  field_trial_syncer_.InitFieldTrialObserving(command_line,
-                                              switches::kSingleProcess);
-
   // chrome-native: is a scheme used for placeholder navigations that allow
   // UIs to be drawn with platform native widgets instead of HTML.  These pages
-  // should not be accessible, and should also be treated as empty documents
-  // that can commit synchronously.  No code should be runnable in these pages,
+  // should not be accessible.  No code should be runnable in these pages,
   // so it should not need to access anything nor should it allow javascript
   // URLs since it should never be visible to the user.
-  WebString native_scheme(WebString::fromASCII(chrome::kChromeNativeScheme));
-  WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(native_scheme);
-  WebSecurityPolicy::registerURLSchemeAsEmptyDocument(native_scheme);
-  WebSecurityPolicy::registerURLSchemeAsNotAllowingJavascriptURLs(
+  // See also ChromeContentClient::AddAdditionalSchemes that adds it as an
+  // empty document scheme.
+  WebString native_scheme(WebString::FromASCII(chrome::kChromeNativeScheme));
+  WebSecurityPolicy::RegisterURLSchemeAsDisplayIsolated(native_scheme);
+  WebSecurityPolicy::RegisterURLSchemeAsNotAllowingJavascriptURLs(
       native_scheme);
 
-  thread->GetInterfaceRegistry()->AddInterface(
-      visited_link_slave_->GetBindCallback());
+  auto registry = base::MakeUnique<service_manager::BinderRegistry>();
+  registry->AddInterface(
+      base::Bind(CreateResourceUsageReporter, weak_factory_.GetWeakPtr()),
+      base::ThreadTaskRunnerHandle::Get());
+  registry->AddInterface(visited_link_slave_->GetBindCallback(),
+                         base::ThreadTaskRunnerHandle::Get());
+  if (content::ChildThread::Get()) {
+    content::ChildThread::Get()
+        ->GetServiceManagerConnection()
+        ->AddConnectionFilter(base::MakeUnique<content::SimpleConnectionFilter>(
+            std::move(registry)));
+  }
 }
 
 ChromeRenderThreadObserver::~ChromeRenderThreadObserver() {}
@@ -295,15 +303,6 @@ void ChromeRenderThreadObserver::OnRenderProcessShutdown() {
   renderer_configuration_bindings_.CloseAllBindings();
 }
 
-void ChromeRenderThreadObserver::OnFieldTrialGroupFinalized(
-    const std::string& trial_name,
-    const std::string& group_name) {
-  chrome::mojom::FieldTrialRecorderPtr field_trial_recorder;
-  content::RenderThread::Get()->GetRemoteInterfaces()->GetInterface(
-      &field_trial_recorder);
-  field_trial_recorder->FieldTrialActivated(trial_name);
-}
-
 void ChromeRenderThreadObserver::SetInitialConfiguration(
     bool is_incognito_process) {
   is_incognito_process_ = is_incognito_process;
@@ -317,7 +316,7 @@ void ChromeRenderThreadObserver::SetContentSettingRules(
 void ChromeRenderThreadObserver::SetFieldTrialGroup(
     const std::string& trial_name,
     const std::string& group_name) {
-  field_trial_syncer_.OnSetFieldTrialGroup(trial_name, group_name);
+  RenderThread::Get()->SetFieldTrialGroup(trial_name, group_name);
 }
 
 void ChromeRenderThreadObserver::OnRendererConfigurationAssociatedRequest(

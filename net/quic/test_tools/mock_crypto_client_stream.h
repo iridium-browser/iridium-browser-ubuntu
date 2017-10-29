@@ -18,7 +18,8 @@
 
 namespace net {
 
-class MockCryptoClientStream : public QuicCryptoClientStream {
+class MockCryptoClientStream : public QuicCryptoClientStream,
+                               public QuicCryptoHandshaker {
  public:
   // TODO(zhongyi): might consider move HandshakeMode up to
   // MockCryptoClientStreamFactory.
@@ -58,7 +59,12 @@ class MockCryptoClientStream : public QuicCryptoClientStream {
   void OnHandshakeMessage(const CryptoHandshakeMessage& message) override;
 
   // QuicCryptoClientStream implementation.
-  void CryptoConnect() override;
+  bool CryptoConnect() override;
+  bool encryption_established() const override;
+  bool handshake_confirmed() const override;
+  const QuicCryptoNegotiatedParameters& crypto_negotiated_params()
+      const override;
+  CryptoMessageParser* crypto_message_parser() override;
 
   // Invokes the sessions's CryptoHandshakeEvent method with the specified
   // event.
@@ -66,8 +72,17 @@ class MockCryptoClientStream : public QuicCryptoClientStream {
 
   HandshakeMode handshake_mode_;
 
+ protected:
+  using QuicCryptoClientStream::session;
+
  private:
   void SetConfigNegotiated();
+
+  bool encryption_established_;
+  bool handshake_confirmed_;
+  QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters>
+      crypto_negotiated_params_;
+  CryptoFramer crypto_framer_;
 
   const QuicServerId server_id_;
   const ProofVerifyDetailsChromium* proof_verify_details_;

@@ -54,7 +54,7 @@
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "components/user_manager/user.h"
+#include "components/arc/arc_util.h"
 #else
 #include "chrome/browser/extensions/default_apps.h"
 #endif
@@ -66,6 +66,29 @@
 using content::BrowserThread;
 
 namespace extensions {
+
+namespace {
+
+#if defined(OS_CHROMEOS)
+
+// Certain default extensions are no longer needed on ARC devices as they were
+// replaced by their ARC counterparts.
+bool ShouldUninstallExtensionReplacedByArcApp(const std::string& extension_id) {
+  if (arc::IsWebstoreSearchEnabled())
+    return false;
+
+  if (extension_id == extension_misc::kGooglePlayBooksAppId ||
+      extension_id == extension_misc::kGooglePlayMoviesAppId ||
+      extension_id == extension_misc::kGooglePlayMusicAppId) {
+    return true;
+  }
+
+  return false;
+}
+
+#endif  // defined(OS_CHROMEOS)
+
+}  // namespace
 
 // Constants for keeping track of extension preferences in a dictionary.
 const char ExternalProviderImpl::kInstallParam[] = "install_parameter";
@@ -140,8 +163,9 @@ void ExternalProviderImpl::SetPrefs(base::DictionaryValue* prefs) {
 
 void ExternalProviderImpl::UpdatePrefs(base::DictionaryValue* prefs) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // We only expect updates from windows registry.
-  CHECK(crx_location_ == Manifest::EXTERNAL_REGISTRY);
+  // We only expect updates from windows registry or via policies on chromeos.
+  CHECK(crx_location_ == Manifest::EXTERNAL_REGISTRY ||
+        download_location_ == Manifest::EXTERNAL_POLICY_DOWNLOAD);
 
   // Check if the service is still alive. It is possible that it went
   // away while |loader_| was working on the FILE thread.
@@ -188,6 +212,15 @@ void ExternalProviderImpl::RetrieveExtensionsFromPrefs(
   for (base::DictionaryValue::Iterator i(*prefs_); !i.IsAtEnd(); i.Advance()) {
     const std::string& extension_id = i.key();
     const base::DictionaryValue* extension = NULL;
+
+#if defined(OS_CHROMEOS)
+    if (ShouldUninstallExtensionReplacedByArcApp(extension_id)) {
+      VLOG(1) << "Extension with key: " << extension_id << " was replaced "
+              << "by a default ARC app, and will be uninstalled.";
+      unsupported_extensions.emplace(extension_id);
+      continue;
+    }
+#endif  // defined(OS_CHROMEOS)
 
     if (!crx_file::id_util::IdIsValid(extension_id)) {
       LOG(WARNING) << "Malformed extension dictionary: key "
@@ -497,7 +530,23 @@ void ExternalProviderImpl::CreateExternalProviders(
   scoped_refptr<ExternalLoader> external_loader;
   scoped_refptr<ExternalLoader> external_recommended_loader;
   extensions::Manifest::Location crx_location = Manifest::INVALID_LOCATION;
+
 #if defined(OS_CHROMEOS)
+  if (chromeos::ProfileHelper::IsSigninProfile(profile)) {
+    // Download apps installed by policy in the login profile. Flags
+    // FROM_WEBSTORE/WAS_INSTALLED_BY_DEFAULT are applied because these apps are
+    // downloaded from the webstore, and we want to treat them as built-in
+    // extensions.
+    external_loader = new ExternalPolicyLoader(
+        ExtensionManagementFactory::GetForBrowserContext(profile),
+        ExternalPolicyLoader::FORCED);
+    provider_list->push_back(base::MakeUnique<ExternalProviderImpl>(
+        service, external_loader, profile, crx_location,
+        Manifest::EXTERNAL_POLICY_DOWNLOAD,
+        Extension::FROM_WEBSTORE | Extension::WAS_INSTALLED_BY_DEFAULT));
+    return;
+  }
+
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   bool is_chrome_os_public_session = false;

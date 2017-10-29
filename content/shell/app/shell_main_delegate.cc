@@ -12,6 +12,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/trace_event/trace_log.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
 #include "content/common/content_constants_internal.h"
@@ -30,10 +31,12 @@
 #include "content/shell/common/layout_test/layout_test_switches.h"
 #include "content/shell/common/shell_content_client.h"
 #include "content/shell/common/shell_switches.h"
+#include "content/shell/gpu/shell_content_gpu_client.h"
 #include "content/shell/renderer/layout_test/layout_test_content_renderer_client.h"
 #include "content/shell/renderer/shell_content_renderer_client.h"
 #include "content/shell/utility/shell_content_utility_client.h"
 #include "gpu/config/gpu_switches.h"
+#include "ipc/ipc_features.h"
 #include "media/base/media_switches.h"
 #include "media/base/mime_util.h"
 #include "net/cookies/cookie_monster.h"
@@ -45,9 +48,7 @@
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
 
-#include "ipc/ipc_message.h"  // For IPC_MESSAGE_LOG_ENABLED.
-
-#if defined(IPC_MESSAGE_LOG_ENABLED)
+#if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
 #define IPC_MESSAGE_MACROS_LOG_ENABLED
 #include "content/public/common/content_ipc_logging.h"
 #define IPC_LOG_TABLE_ADD_ENTRY(msg_id, logger) \
@@ -165,7 +166,6 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
     }
 #endif
     command_line.AppendSwitch(cc::switches::kEnableGpuBenchmarking);
-    command_line.AppendSwitch(switches::kProcessPerTab);
     command_line.AppendSwitch(switches::kEnableLogging);
     command_line.AppendSwitch(switches::kAllowFileAccessFromFiles);
     // only default to a software GL if the flag isn't already specified.
@@ -181,8 +181,7 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
         switches::kTouchEventFeatureDetectionEnabled);
     if (!command_line.HasSwitch(switches::kForceDeviceScaleFactor))
       command_line.AppendSwitchASCII(switches::kForceDeviceScaleFactor, "1.0");
-    command_line.AppendSwitch(
-        switches::kDisableGestureRequirementForMediaPlayback);
+    command_line.AppendSwitch(switches::kIgnoreAutoplayRestrictionsForTests);
 
     if (!command_line.HasSwitch(switches::kStableReleaseMode)) {
       command_line.AppendSwitch(
@@ -213,6 +212,15 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
       command_line.AppendSwitch(switches::kDisableGpuRasterization);
     }
 
+    // If the virtual test suite didn't specify a color space, then force sRGB.
+    if (!command_line.HasSwitch(switches::kForceColorProfile))
+      command_line.AppendSwitchASCII(switches::kForceColorProfile, "srgb");
+
+    // We want stable/baseline results when running layout tests.
+    command_line.AppendSwitch(switches::kDisableSkiaRuntimeOpts);
+
+    command_line.AppendSwitch(cc::switches::kDisallowNonExactResourceReuse);
+
     // Unless/until WebM files are added to the media layout tests, we need to
     // avoid removing MP4/H264/AAC so that layout tests can run on Android.
 #if !defined(OS_ANDROID)
@@ -223,6 +231,13 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
       *exit_code = 1;
       return true;
     }
+
+    // Enable additional base::Features. Note that there already may exist a
+    // list of enabled features from the virtual or physical test suite.
+    std::string enabled_features =
+        command_line.GetSwitchValueASCII(switches::kEnableFeatures);
+    enabled_features = "ColorCorrectRendering," + enabled_features;
+    command_line.AppendSwitchASCII(switches::kEnableFeatures, enabled_features);
   }
 
   content_client_.reset(base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -360,6 +375,11 @@ ContentBrowserClient* ShellMainDelegate::CreateContentBrowserClient() {
                             : new ShellContentBrowserClient);
 
   return browser_client_.get();
+}
+
+ContentGpuClient* ShellMainDelegate::CreateContentGpuClient() {
+  gpu_client_.reset(new ShellContentGpuClient);
+  return gpu_client_.get();
 }
 
 ContentRendererClient* ShellMainDelegate::CreateContentRendererClient() {

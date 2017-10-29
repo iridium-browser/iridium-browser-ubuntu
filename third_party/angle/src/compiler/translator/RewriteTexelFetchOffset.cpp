@@ -9,7 +9,8 @@
 #include "compiler/translator/RewriteTexelFetchOffset.h"
 
 #include "common/angleutils.h"
-#include "compiler/translator/IntermNode.h"
+#include "compiler/translator/IntermNode_util.h"
+#include "compiler/translator/IntermTraverse.h"
 #include "compiler/translator/SymbolTable.h"
 
 namespace sh
@@ -71,7 +72,7 @@ bool Traverser::visitAggregate(Visit visit, TIntermAggregate *node)
         return true;
     }
 
-    if (node->getFunctionSymbolInfo()->getName().compare(0, 16, "texelFetchOffset") != 0)
+    if (node->getFunctionSymbolInfo()->getName() != "texelFetchOffset")
     {
         return true;
     }
@@ -80,17 +81,10 @@ bool Traverser::visitAggregate(Visit visit, TIntermAggregate *node)
     const TIntermSequence *sequence = node->getSequence();
     ASSERT(sequence->size() == 4u);
 
-    // Decide if there is a 2DArray sampler.
-    bool is2DArray = node->getFunctionSymbolInfo()->getName().find("s2a1") != TString::npos;
-
-    // Create new argument list from node->getName().
-    // e.g. Get "(is2a1;vi3;i1;" from "texelFetchOffset(is2a1;vi3;i1;vi2;"
-    TString newArgs = node->getFunctionSymbolInfo()->getName().substr(
-        16, node->getFunctionSymbolInfo()->getName().length() - 20);
-    TString newName           = "texelFetch" + newArgs;
-    TSymbol *texelFetchSymbol = symbolTable->findBuiltIn(newName, shaderVersion);
-    ASSERT(texelFetchSymbol);
-    int uniqueId = texelFetchSymbol->getUniqueId();
+    // Decide if the sampler is a 2DArray sampler. In that case position is ivec3 and offset is
+    // ivec2.
+    bool is2DArray = sequence->at(1)->getAsTyped()->getNominalSize() == 3 &&
+                     sequence->at(3)->getAsTyped()->getNominalSize() == 2;
 
     // Create new node that represents the call of function texelFetch.
     // Its argument list will be: texelFetch(sampler, Position+offset, lod).
@@ -114,11 +108,11 @@ bool Traverser::visitAggregate(Visit visit, TIntermAggregate *node)
         TIntermSequence *constructOffsetIvecArguments = new TIntermSequence();
         constructOffsetIvecArguments->push_back(sequence->at(3)->getAsTyped());
 
-        TIntermTyped *zeroNode = TIntermTyped::CreateZero(TType(EbtInt));
+        TIntermTyped *zeroNode = CreateZeroNode(TType(EbtInt));
         constructOffsetIvecArguments->push_back(zeroNode);
 
-        offsetNode = new TIntermAggregate(texCoordNode->getType(), EOpConstructIVec3,
-                                          constructOffsetIvecArguments);
+        offsetNode = TIntermAggregate::CreateConstructor(texCoordNode->getType(),
+                                                         constructOffsetIvecArguments);
         offsetNode->setLine(texCoordNode->getLine());
     }
     else
@@ -136,14 +130,12 @@ bool Traverser::visitAggregate(Visit visit, TIntermAggregate *node)
 
     ASSERT(texelFetchArguments->size() == 3u);
 
-    TIntermAggregate *texelFetchNode =
-        new TIntermAggregate(node->getType(), EOpCallBuiltInFunction, texelFetchArguments);
-    texelFetchNode->getFunctionSymbolInfo()->setName(newName);
-    texelFetchNode->getFunctionSymbolInfo()->setId(uniqueId);
+    TIntermTyped *texelFetchNode = CreateBuiltInFunctionCallNode("texelFetch", texelFetchArguments,
+                                                                 *symbolTable, shaderVersion);
     texelFetchNode->setLine(node->getLine());
 
     // Replace the old node by this new node.
-    queueReplacement(node, texelFetchNode, OriginalNode::IS_DROPPED);
+    queueReplacement(texelFetchNode, OriginalNode::IS_DROPPED);
     mFound = true;
     return false;
 }

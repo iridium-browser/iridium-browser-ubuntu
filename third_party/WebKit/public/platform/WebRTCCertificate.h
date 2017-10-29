@@ -5,6 +5,8 @@
 #ifndef WebRTCCertificate_h
 #define WebRTCCertificate_h
 
+#include "WebVector.h"
+
 #include "public/platform/WebRTCKeyParams.h"
 #include "public/platform/WebString.h"
 
@@ -12,19 +14,33 @@
 
 namespace blink {
 
+// https://w3c.github.io/webrtc-pc/#rtcdtlsfingerprint*
+class WebRTCDtlsFingerprint {
+ public:
+  WebRTCDtlsFingerprint(WebString algorithm, WebString value)
+      : algorithm_(algorithm), value_(value) {}
+
+  WebString Algorithm() const { return algorithm_; }
+  WebString Value() const { return value_; }
+
+ private:
+  WebString algorithm_;
+  WebString value_;
+};
+
 // Corresponds to |rtc::RTCCertificatePEM| in WebRTC.
 // See |WebRTCCertificate::toPEM| and |WebRTCCertificateGenerator::fromPEM|.
 class WebRTCCertificatePEM {
  public:
-  WebRTCCertificatePEM(WebString privateKey, WebString certificate)
-      : m_privateKey(privateKey), m_certificate(certificate) {}
+  WebRTCCertificatePEM(WebString private_key, WebString certificate)
+      : private_key_(private_key), certificate_(certificate) {}
 
-  WebString privateKey() const { return m_privateKey; }
-  WebString certificate() const { return m_certificate; }
+  WebString PrivateKey() const { return private_key_; }
+  WebString Certificate() const { return certificate_; }
 
  private:
-  WebString m_privateKey;
-  WebString m_certificate;
+  WebString private_key_;
+  WebString certificate_;
 };
 
 // WebRTCCertificate is an interface defining what Blink needs to know about
@@ -41,16 +57,17 @@ class WebRTCCertificate {
   // Copies the WebRTCCertificate object without copying the underlying
   // implementation specific (WebRTC layer) certificate. When all copies are
   // destroyed the underlying data is freed.
-  virtual std::unique_ptr<WebRTCCertificate> shallowCopy() const = 0;
+  virtual std::unique_ptr<WebRTCCertificate> ShallowCopy() const = 0;
 
   // Returns the expiration time in ms relative to epoch, 1970-01-01T00:00:00Z.
-  virtual uint64_t expires() const = 0;
+  virtual uint64_t Expires() const = 0;
+  virtual WebVector<WebRTCDtlsFingerprint> GetFingerprints() const = 0;
   // Creates a PEM strings representation of the certificate. See also
   // |WebRTCCertificateGenerator::fromPEM|.
-  virtual WebRTCCertificatePEM toPEM() const = 0;
+  virtual WebRTCCertificatePEM ToPEM() const = 0;
   // Checks if the two certificate objects represent the same certificate value,
   // as should be the case for a clone and the original.
-  virtual bool equals(const WebRTCCertificate& other) const = 0;
+  virtual bool Equals(const WebRTCCertificate& other) const = 0;
 
  private:
   WebRTCCertificate(const WebRTCCertificate&) = delete;

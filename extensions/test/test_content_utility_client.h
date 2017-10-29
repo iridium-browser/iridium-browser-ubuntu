@@ -15,12 +15,8 @@ class TestContentUtilityClient : public content::ContentUtilityClient {
   TestContentUtilityClient();
   ~TestContentUtilityClient() override;
 
-  // ContentUtilityClient implementation
+  // content::ContentUtilityClient:
   void UtilityThreadStarted() override;
-  bool OnMessageReceived(const IPC::Message& message) override;
-
- private:
-  UtilityHandler utility_handler_;
 };
 
 }  // namespace extensions

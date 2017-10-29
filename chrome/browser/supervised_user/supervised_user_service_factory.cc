@@ -25,6 +25,13 @@ SupervisedUserService* SupervisedUserServiceFactory::GetForProfile(
 }
 
 // static
+SupervisedUserService* SupervisedUserServiceFactory::GetForProfileIfExists(
+    Profile* profile) {
+  return static_cast<SupervisedUserService*>(
+      GetInstance()->GetServiceForBrowserContext(profile, /*create=*/false));
+}
+
+// static
 SupervisedUserServiceFactory* SupervisedUserServiceFactory::GetInstance() {
   return base::Singleton<SupervisedUserServiceFactory>::get();
 }

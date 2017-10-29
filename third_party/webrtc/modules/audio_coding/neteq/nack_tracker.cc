@@ -14,9 +14,8 @@
 
 #include <algorithm>  // For std::max.
 
-#include "webrtc/base/checks.h"
 #include "webrtc/modules/include/module_common_types.h"
-#include "webrtc/system_wrappers/include/logging.h"
+#include "webrtc/rtc_base/checks.h"
 
 namespace webrtc {
 namespace {

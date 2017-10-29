@@ -7,10 +7,13 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "content/browser/appcache/appcache_group.h"
 #include "content/browser/appcache/appcache_service_impl.h"
@@ -42,6 +45,7 @@ class AppCache;
 class AppCacheFrontend;
 class AppCacheGroupTest;
 class AppCacheHostTest;
+class AppCacheRequest;
 class AppCacheRequestHandler;
 class AppCacheRequestHandlerTest;
 class AppCacheStorageImplTest;
@@ -113,8 +117,8 @@ class CONTENT_EXPORT AppCacheHost
 
   // Support for loading resources out of the appcache.
   // May return NULL if the request isn't subject to retrieval from an appache.
-  AppCacheRequestHandler* CreateRequestHandler(
-      net::URLRequest* request,
+  std::unique_ptr<AppCacheRequestHandler> CreateRequestHandler(
+      std::unique_ptr<AppCacheRequest> request,
       ResourceType resource_type,
       bool should_reset_appcache);
 
@@ -190,6 +194,9 @@ class CONTENT_EXPORT AppCacheHost
   // Methods to support cross site navigations.
   void PrepareForTransfer();
   void CompleteTransfer(int host_id, AppCacheFrontend* frontend);
+
+  // Returns a weak pointer reference to the host.
+  base::WeakPtr<AppCacheHost> GetWeakPtr();
 
  private:
   friend class content::AppCacheHostTest;
@@ -349,6 +356,8 @@ class CONTENT_EXPORT AppCacheHost
   FRIEND_TEST_ALL_PREFIXES(content::AppCacheHostTest, SelectCacheBlocked);
   FRIEND_TEST_ALL_PREFIXES(content::AppCacheHostTest, SelectCacheTwice);
   FRIEND_TEST_ALL_PREFIXES(content::AppCacheTest, CleanupUnusedCache);
+
+  base::WeakPtrFactory<AppCacheHost> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AppCacheHost);
 };

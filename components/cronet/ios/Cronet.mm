@@ -5,15 +5,16 @@
 #import "components/cronet/ios/Cronet.h"
 
 #include <memory>
+#include <vector>
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/scoped_block.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/synchronization/lock.h"
+#include "components/cronet/ios/accept_languages_table.h"
 #include "components/cronet/ios/cronet_environment.h"
 #include "components/cronet/url_request_context_config.h"
 #include "ios/net/crn_http_protocol_handler.h"
@@ -21,28 +22,44 @@
 #include "net/cert/cert_verifier.h"
 #include "net/url_request/url_request_context_getter.h"
 
+// Cronet NSError constants.
+NSString* const CRNCronetErrorDomain = @"CRNCronetErrorDomain";
+NSString* const CRNInvalidArgumentKey = @"CRNInvalidArgumentKey";
+
 namespace {
 
 class CronetHttpProtocolHandlerDelegate;
 
+using QuicHintVector =
+    std::vector<std::unique_ptr<cronet::URLRequestContextConfig::QuicHint>>;
 // Currently there is one and only one instance of CronetEnvironment,
 // which is leaked at the shutdown. We should consider allowing multiple
 // instances if that makes sense in the future.
 base::LazyInstance<std::unique_ptr<cronet::CronetEnvironment>>::Leaky
     gChromeNet = LAZY_INSTANCE_INITIALIZER;
 
+// TODO(lilyhoughton) make these independent across Cronet instances, i.e.:
+// refresh them on shutdown, and add tests to make sure the defaults are
+// sane.
 BOOL gHttp2Enabled = YES;
 BOOL gQuicEnabled = NO;
+BOOL gBrotliEnabled = NO;
 cronet::URLRequestContextConfig::HttpCacheType gHttpCache =
     cronet::URLRequestContextConfig::HttpCacheType::DISK;
-ScopedVector<cronet::URLRequestContextConfig::QuicHint> gQuicHints;
+QuicHintVector gQuicHints;
+NSString* gExperimentalOptions = @"{}";
 NSString* gUserAgent = nil;
 BOOL gUserAgentPartial = NO;
 NSString* gSslKeyLogFileName = nil;
+std::vector<std::unique_ptr<cronet::URLRequestContextConfig::Pkp>> gPkpList;
 RequestFilterBlock gRequestFilterBlock = nil;
-std::unique_ptr<CronetHttpProtocolHandlerDelegate> gHttpProtocolHandlerDelegate;
+base::LazyInstance<std::unique_ptr<CronetHttpProtocolHandlerDelegate>>::Leaky
+    gHttpProtocolHandlerDelegate = LAZY_INSTANCE_INITIALIZER;
 NSURLCache* gPreservedSharedURLCache = nil;
-BOOL gEnableTestCertVerifierForTesting = FALSE;
+BOOL gEnableTestCertVerifierForTesting = NO;
+std::unique_ptr<net::CertVerifier> gMockCertVerifier;
+NSString* gAcceptLanguages = nil;
+BOOL gEnablePKPBypassForLocalTrustAnchors = YES;
 
 // CertVerifier, which allows any certificates for testing.
 class TestCertVerifier : public net::CertVerifier {
@@ -89,8 +106,7 @@ class CronetHttpProtocolHandlerDelegate
     NSString* scheme = [[request URL] scheme];
     if (!scheme)
       return false;
-    return [scheme caseInsensitiveCompare:@"data"] == NSOrderedSame ||
-           [scheme caseInsensitiveCompare:@"http"] == NSOrderedSame ||
+    return [scheme caseInsensitiveCompare:@"http"] == NSOrderedSame ||
            [scheme caseInsensitiveCompare:@"https"] == NSOrderedSame;
   }
 
@@ -114,26 +130,44 @@ class CronetHttpProtocolHandlerDelegate
         base::MakeUnique<TestCertVerifier>();
     cronetEnvironment->set_mock_cert_verifier(std::move(test_cert_verifier));
   }
+  if (gMockCertVerifier) {
+    gChromeNet.Get()->set_mock_cert_verifier(std::move(gMockCertVerifier));
+  }
+}
+
++ (NSString*)getAcceptLanguagesFromPreferredLanguages:
+    (NSArray<NSString*>*)languages {
+  NSMutableArray* acceptLanguages = [NSMutableArray new];
+  for (NSString* lang_region in languages) {
+    NSString* lang = [lang_region componentsSeparatedByString:@"-"][0];
+    NSString* localeAcceptLangs = acceptLangs[lang_region] ?: acceptLangs[lang];
+    if (localeAcceptLangs)
+      [acceptLanguages
+          addObjectsFromArray:[localeAcceptLangs
+                                  componentsSeparatedByString:@","]];
+  }
+
+  NSString* acceptLanguageString =
+      [[[NSOrderedSet orderedSetWithArray:acceptLanguages] array]
+          componentsJoinedByString:@","];
+
+  return [acceptLanguageString length] != 0 ? acceptLanguageString
+                                            : @"en-US,en";
 }
 
 + (NSString*)getAcceptLanguages {
-  // Use the framework bundle to search for resources.
-  NSBundle* frameworkBundle = [NSBundle bundleForClass:self];
-  NSString* bundlePath =
-      [frameworkBundle pathForResource:@"cronet_resources" ofType:@"bundle"];
-  NSBundle* bundle = [NSBundle bundleWithPath:bundlePath];
-  NSString* acceptLanguages = NSLocalizedStringWithDefaultValue(
-      @"IDS_ACCEPT_LANGUAGES", @"Localizable", bundle, @"en-US,en",
-      @"These values are copied from Chrome's .xtb files, so the same "
-       "values are used in the |Accept-Language| header. Key name matches "
-       "Chrome's.");
-  if (acceptLanguages == Nil)
-    acceptLanguages = @"";
-  return acceptLanguages;
+  return [self
+      getAcceptLanguagesFromPreferredLanguages:[NSLocale preferredLanguages]];
 }
 
++ (void)setAcceptLanguages:(NSString*)acceptLanguages {
+  [self checkNotStarted];
+  gAcceptLanguages = acceptLanguages;
+}
+
+// TODO(lilyhoughton) this should either be removed, or made more sophisticated
 + (void)checkNotStarted {
-  CHECK(gChromeNet == NULL) << "Cronet is already started.";
+  CHECK(!gChromeNet.Get()) << "Cronet is already started.";
 }
 
 + (void)setHttp2Enabled:(BOOL)http2Enabled {
@@ -146,10 +180,21 @@ class CronetHttpProtocolHandlerDelegate
   gQuicEnabled = quicEnabled;
 }
 
++ (void)setBrotliEnabled:(BOOL)brotliEnabled {
+  [self checkNotStarted];
+  gBrotliEnabled = brotliEnabled;
+}
+
 + (void)addQuicHint:(NSString*)host port:(int)port altPort:(int)altPort {
   [self checkNotStarted];
-  gQuicHints.push_back(new cronet::URLRequestContextConfig::QuicHint(
-      base::SysNSStringToUTF8(host), port, altPort));
+  gQuicHints.push_back(
+      base::MakeUnique<cronet::URLRequestContextConfig::QuicHint>(
+          base::SysNSStringToUTF8(host), port, altPort));
+}
+
++ (void)setExperimentalOptions:(NSString*)experimentalOptions {
+  [self checkNotStarted];
+  gExperimentalOptions = experimentalOptions;
 }
 
 + (void)setUserAgent:(NSString*)userAgent partial:(BOOL)partial {
@@ -160,7 +205,7 @@ class CronetHttpProtocolHandlerDelegate
 
 + (void)setSslKeyLogFileName:(NSString*)sslKeyLogFileName {
   [self checkNotStarted];
-  gSslKeyLogFileName = sslKeyLogFileName;
+  gSslKeyLogFileName = [self getNetLogPathForFile:sslKeyLogFileName];
 }
 
 + (void)setHttpCacheType:(CRNHttpCacheType)httpCacheType {
@@ -181,36 +226,89 @@ class CronetHttpProtocolHandlerDelegate
 }
 
 + (void)setRequestFilterBlock:(RequestFilterBlock)block {
-  if (gHttpProtocolHandlerDelegate.get())
-    gHttpProtocolHandlerDelegate.get()->SetRequestFilterBlock(block);
+  if (gHttpProtocolHandlerDelegate.Get().get())
+    gHttpProtocolHandlerDelegate.Get().get()->SetRequestFilterBlock(block);
   else
     gRequestFilterBlock = block;
 }
 
++ (BOOL)addPublicKeyPinsForHost:(NSString*)host
+                      pinHashes:(NSSet<NSData*>*)pinHashes
+              includeSubdomains:(BOOL)includeSubdomains
+                 expirationDate:(NSDate*)expirationDate
+                          error:(NSError**)outError {
+  [self checkNotStarted];
+
+  // Pinning a key only makes sense if pin bypassing has been disabled
+  if (gEnablePKPBypassForLocalTrustAnchors) {
+    *outError =
+        [self createUnsupportedConfigurationError:
+                  @"Cannot pin keys while public key pinning is bypassed"];
+    return NO;
+  }
+
+  auto pkp = base::MakeUnique<cronet::URLRequestContextConfig::Pkp>(
+      base::SysNSStringToUTF8(host), includeSubdomains,
+      base::Time::FromCFAbsoluteTime(
+          [expirationDate timeIntervalSinceReferenceDate]));
+
+  for (NSData* hash in pinHashes) {
+    net::SHA256HashValue hashValue = net::SHA256HashValue();
+    if (sizeof(hashValue.data) != hash.length) {
+      *outError =
+          [self createIllegalArgumentErrorWithArgument:@"pinHashes"
+                                                reason:
+                                                    @"The length of PKP SHA256 "
+                                                    @"hash should be 256 bits"];
+      return NO;
+    }
+    memcpy((void*)(hashValue.data), [hash bytes], sizeof(hashValue.data));
+    pkp->pin_hashes.push_back(net::HashValue(hashValue));
+  }
+  gPkpList.push_back(std::move(pkp));
+  if (outError) {
+    *outError = nil;
+  }
+  return YES;
+}
+
++ (void)setEnablePublicKeyPinningBypassForLocalTrustAnchors:(BOOL)enable {
+  gEnablePKPBypassForLocalTrustAnchors = enable;
+}
+
 + (void)startInternal {
-  cronet::CronetEnvironment::Initialize();
   std::string user_agent = base::SysNSStringToUTF8(gUserAgent);
+
   gChromeNet.Get().reset(
       new cronet::CronetEnvironment(user_agent, gUserAgentPartial));
+
   gChromeNet.Get()->set_accept_language(
-      base::SysNSStringToUTF8([self getAcceptLanguages]));
+      base::SysNSStringToUTF8(gAcceptLanguages ?: [self getAcceptLanguages]));
 
   gChromeNet.Get()->set_http2_enabled(gHttp2Enabled);
   gChromeNet.Get()->set_quic_enabled(gQuicEnabled);
+  gChromeNet.Get()->set_brotli_enabled(gBrotliEnabled);
+  gChromeNet.Get()->set_experimental_options(
+      base::SysNSStringToUTF8(gExperimentalOptions));
   gChromeNet.Get()->set_http_cache(gHttpCache);
   gChromeNet.Get()->set_ssl_key_log_file_name(
       base::SysNSStringToUTF8(gSslKeyLogFileName));
-  for (const auto* quicHint : gQuicHints) {
+  gChromeNet.Get()->set_pkp_list(std::move(gPkpList));
+  gChromeNet.Get()
+      ->set_enable_public_key_pinning_bypass_for_local_trust_anchors(
+          gEnablePKPBypassForLocalTrustAnchors);
+  for (const auto& quicHint : gQuicHints) {
     gChromeNet.Get()->AddQuicHint(quicHint->host, quicHint->port,
                                   quicHint->alternate_port);
   }
 
   [self configureCronetEnvironmentForTesting:gChromeNet.Get().get()];
   gChromeNet.Get()->Start();
-  gHttpProtocolHandlerDelegate.reset(new CronetHttpProtocolHandlerDelegate(
-      gChromeNet.Get()->GetURLRequestContextGetter(), gRequestFilterBlock));
+  gHttpProtocolHandlerDelegate.Get().reset(
+      new CronetHttpProtocolHandlerDelegate(
+          gChromeNet.Get()->GetURLRequestContextGetter(), gRequestFilterBlock));
   net::HTTPProtocolHandlerDelegate::SetInstance(
-      gHttpProtocolHandlerDelegate.get());
+      gHttpProtocolHandlerDelegate.Get().get());
   gRequestFilterBlock = nil;
 }
 
@@ -219,12 +317,18 @@ class CronetHttpProtocolHandlerDelegate
   dispatch_once(&onceToken, ^{
     if (![NSThread isMainThread]) {
       dispatch_sync(dispatch_get_main_queue(), ^(void) {
-        [self startInternal];
+        cronet::CronetEnvironment::Initialize();
       });
     } else {
-      [self startInternal];
+      cronet::CronetEnvironment::Initialize();
     }
   });
+
+  [self startInternal];
+}
+
++ (void)shutdownForTesting {
+  gChromeNet.Get().reset();
 }
 
 + (void)registerHttpProtocolHandler {
@@ -235,7 +339,7 @@ class CronetHttpProtocolHandlerDelegate
   [NSURLCache setSharedURLCache:[EmptyNSURLCache emptyNSURLCache]];
   // Register the chrome http protocol handler to replace the default one.
   BOOL success =
-      [NSURLProtocol registerClass:[CRNPauseableHTTPProtocolHandler class]];
+      [NSURLProtocol registerClass:[CRNHTTPProtocolHandler class]];
   DCHECK(success);
 }
 
@@ -245,11 +349,11 @@ class CronetHttpProtocolHandlerDelegate
     [NSURLCache setSharedURLCache:gPreservedSharedURLCache];
     gPreservedSharedURLCache = nil;
   }
-  [NSURLProtocol unregisterClass:[CRNPauseableHTTPProtocolHandler class]];
+  [NSURLProtocol unregisterClass:[CRNHTTPProtocolHandler class]];
 }
 
 + (void)installIntoSessionConfiguration:(NSURLSessionConfiguration*)config {
-  config.protocolClasses = @[ [CRNPauseableHTTPProtocolHandler class] ];
+  config.protocolClasses = @[ [CRNHTTPProtocolHandler class] ];
 }
 
 + (NSString*)getNetLogPathForFile:(NSString*)fileName {
@@ -306,6 +410,11 @@ class CronetHttpProtocolHandlerDelegate
   gEnableTestCertVerifierForTesting = YES;
 }
 
++ (void)setMockCertVerifierForTesting:
+    (std::unique_ptr<net::CertVerifier>)certVerifier {
+  gMockCertVerifier = std::move(certVerifier);
+}
+
 + (void)setHostResolverRulesForTesting:(NSString*)hostResolverRulesForTesting {
   DCHECK(gChromeNet.Get().get());
   gChromeNet.Get()->SetHostResolverRules(
@@ -316,6 +425,46 @@ class CronetHttpProtocolHandlerDelegate
 // the otherwise non-referenced methods from 'bidirectional_stream.cc'.
 + (void)preventStrippingCronetBidirectionalStream {
   bidirectional_stream_create(NULL, 0, 0);
+}
+
++ (NSError*)createIllegalArgumentErrorWithArgument:(NSString*)argumentName
+                                            reason:(NSString*)reason {
+  NSMutableDictionary* errorDictionary =
+      [[NSMutableDictionary alloc] initWithDictionary:@{
+        NSLocalizedDescriptionKey :
+            [NSString stringWithFormat:@"Invalid argument: %@", argumentName],
+        CRNInvalidArgumentKey : argumentName
+      }];
+  if (reason) {
+    errorDictionary[NSLocalizedFailureReasonErrorKey] = reason;
+  }
+  return [self createCronetErrorWithCode:CRNErrorInvalidArgument
+                                userInfo:errorDictionary];
+}
+
++ (NSError*)createUnsupportedConfigurationError:(NSString*)contradiction {
+  NSMutableDictionary* errorDictionary =
+      [[NSMutableDictionary alloc] initWithDictionary:@{
+        NSLocalizedDescriptionKey : @"Unsupported configuration",
+        NSLocalizedRecoverySuggestionErrorKey :
+            @"Try disabling Public Key Pinning Bypass before pinning keys.",
+        NSLocalizedFailureReasonErrorKey : @"Pinning public keys while local "
+                                           @"anchor bypass is enabled is "
+                                           @"currently not supported.",
+      }];
+  if (contradiction) {
+    errorDictionary[NSLocalizedFailureReasonErrorKey] = contradiction;
+  }
+
+  return [self createCronetErrorWithCode:CRNErrorUnsupportedConfig
+                                userInfo:errorDictionary];
+}
+
++ (NSError*)createCronetErrorWithCode:(int)errorCode
+                             userInfo:(NSDictionary*)userInfo {
+  return [NSError errorWithDomain:CRNCronetErrorDomain
+                             code:errorCode
+                         userInfo:userInfo];
 }
 
 @end

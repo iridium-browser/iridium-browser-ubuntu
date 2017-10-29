@@ -9,6 +9,7 @@
 #include "SkMallocPixelRef.h"
 #include "SkRandom.h"
 #include "Test.h"
+#include "sk_tool_utils.h"
 
 static void test_peekpixels(skiatest::Reporter* reporter) {
     const SkImageInfo info = SkImageInfo::MakeN32Premul(10, 10);
@@ -32,7 +33,6 @@ static void test_peekpixels(skiatest::Reporter* reporter) {
     REPORTER_ASSERT(reporter, pmap.info() == bm.info());
     REPORTER_ASSERT(reporter, pmap.addr() == bm.getPixels());
     REPORTER_ASSERT(reporter, pmap.rowBytes() == bm.rowBytes());
-    REPORTER_ASSERT(reporter, pmap.ctable() == bm.getColorTable());
 }
 
 // https://code.google.com/p/chromium/issues/detail?id=446164
@@ -44,7 +44,7 @@ static void test_bigalloc(skiatest::Reporter* reporter) {
     SkBitmap bm;
     REPORTER_ASSERT(reporter, !bm.tryAllocPixels(info));
 
-    SkPixelRef* pr = SkMallocPixelRef::NewAllocate(info, info.minRowBytes(), nullptr);
+    sk_sp<SkPixelRef> pr = SkMallocPixelRef::MakeAllocate(info, info.minRowBytes());
     REPORTER_ASSERT(reporter, !pr);
 }
 
@@ -137,12 +137,10 @@ DEF_TEST(Bitmap_getColor_Swizzle, r) {
     };
     for (SkColorType ct : colorTypes) {
         SkBitmap copy;
-        if (!source.copyTo(&copy, ct)) {
+        if (!sk_tool_utils::copy_to(&copy, ct, source)) {
             ERRORF(r, "SkBitmap::copy failed %d", (int)ct);
             continue;
         }
-        SkAutoLockPixels autoLockPixels1(copy);
-        SkAutoLockPixels autoLockPixels2(source);
         REPORTER_ASSERT(r, source.getColor(0, 0) == copy.getColor(0, 0));
     }
 }

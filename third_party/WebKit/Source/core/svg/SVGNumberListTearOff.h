@@ -42,30 +42,31 @@ class SVGNumberListTearOff final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGNumberListTearOff* create(
+  static SVGNumberListTearOff* Create(
       SVGNumberList* target,
-      SVGElement* contextElement,
-      PropertyIsAnimValType propertyIsAnimVal,
-      const QualifiedName& attributeName = QualifiedName::null()) {
-    return new SVGNumberListTearOff(target, contextElement, propertyIsAnimVal,
-                                    attributeName);
+      SVGElement* context_element,
+      PropertyIsAnimValType property_is_anim_val,
+      const QualifiedName& attribute_name) {
+    return new SVGNumberListTearOff(target, context_element,
+                                    property_is_anim_val, attribute_name);
   }
 
   DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
-    visitor->traceWrappers(contextElement());
+    SVGListPropertyTearOffHelper<SVGNumberListTearOff,
+                                 SVGNumberList>::TraceWrappers(visitor);
+    ScriptWrappable::TraceWrappers(visitor);
   }
 
  private:
-  SVGNumberListTearOff(
-      SVGNumberList* target,
-      SVGElement* contextElement,
-      PropertyIsAnimValType propertyIsAnimVal,
-      const QualifiedName& attributeName = QualifiedName::null())
+  SVGNumberListTearOff(SVGNumberList* target,
+                       SVGElement* context_element,
+                       PropertyIsAnimValType property_is_anim_val,
+                       const QualifiedName& attribute_name)
       : SVGListPropertyTearOffHelper<SVGNumberListTearOff, SVGNumberList>(
             target,
-            contextElement,
-            propertyIsAnimVal,
-            attributeName) {}
+            context_element,
+            property_is_anim_val,
+            attribute_name) {}
 };
 
 }  // namespace blink

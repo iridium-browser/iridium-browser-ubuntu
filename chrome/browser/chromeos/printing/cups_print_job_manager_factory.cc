@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/printing/cups_print_job_manager_factory.h"
 
 #include "chrome/browser/chromeos/printing/cups_print_job_manager.h"
-#include "chrome/browser/chromeos/printing/printers_manager_factory.h"
+#include "chrome/browser/chromeos/printing/synced_printers_manager_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
@@ -13,7 +13,7 @@
 namespace chromeos {
 namespace {
 
-static base::LazyInstance<CupsPrintJobManagerFactory>
+static base::LazyInstance<CupsPrintJobManagerFactory>::DestructorAtExit
     g_cups_print_job_manager_factory = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
@@ -39,7 +39,7 @@ CupsPrintJobManagerFactory::CupsPrintJobManagerFactory()
     : BrowserContextKeyedServiceFactory(
           "CupsPrintJobManagerFactory",
           BrowserContextDependencyManager::GetInstance()) {
-  DependsOn(chromeos::PrintersManagerFactory::GetInstance());
+  DependsOn(chromeos::SyncedPrintersManagerFactory::GetInstance());
 }
 
 CupsPrintJobManagerFactory::~CupsPrintJobManagerFactory() {}

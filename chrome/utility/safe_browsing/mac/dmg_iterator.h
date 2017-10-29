@@ -8,9 +8,9 @@
 #include <stddef.h>
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
 #include "chrome/utility/safe_browsing/mac/udif.h"
 
@@ -37,6 +37,10 @@ class DMGIterator {
   // invalid element before the first item.
   bool Open();
 
+  // Returns the raw code signature file metadata. This will be empty for DMGs
+  // that are not signed.
+  const std::vector<uint8_t>& GetCodeSignature();
+
   // Advances the iterator to the next file item. Returns true on success
   // and false on end-of-iterator.
   bool Next();
@@ -49,7 +53,8 @@ class DMGIterator {
 
  private:
   UDIFParser udif_;  // The UDIF parser that accesses the partitions.
-  ScopedVector<ReadStream> partitions_;  // Streams for all the HFS partitions.
+  // Streams for all the HFS partitions.
+  std::vector<std::unique_ptr<ReadStream>> partitions_;
   size_t current_partition_;  // The index in |partitions_| of the current one.
   std::unique_ptr<HFSIterator>
       hfs_;  // The HFSIterator for |current_partition_|.

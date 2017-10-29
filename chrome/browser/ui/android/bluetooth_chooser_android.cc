@@ -11,7 +11,6 @@
 #include "chrome/common/url_constants.h"
 #include "components/security_state/core/security_state.h"
 #include "components/url_formatter/elide_url.h"
-#include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/render_frame_host.h"
 #include "jni/BluetoothChooserDialog_jni.h"
 #include "ui/android/window_android.h"
@@ -33,9 +32,7 @@ BluetoothChooserAndroid::BluetoothChooserAndroid(
   DCHECK(!origin.unique());
 
   base::android::ScopedJavaLocalRef<jobject> window_android =
-      content::ContentViewCore::FromWebContents(web_contents_)
-          ->GetWindowAndroid()
-          ->GetJavaObject();
+      web_contents_->GetNativeView()->GetWindowAndroid()->GetJavaObject();
 
   SecurityStateTabHelper* helper =
       SecurityStateTabHelper::FromWebContents(web_contents_);
@@ -106,14 +103,8 @@ void BluetoothChooserAndroid::AddOrUpdateDevice(
   ScopedJavaLocalRef<jstring> java_device_name =
       ConvertUTF16ToJavaString(env, device_name);
   Java_BluetoothChooserDialog_addOrUpdateDevice(
-      env, java_dialog_, java_device_id, java_device_name);
-}
-
-void BluetoothChooserAndroid::RemoveDevice(const std::string& device_id) {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jstring> java_device_id =
-      ConvertUTF16ToJavaString(env, base::UTF8ToUTF16(device_id));
-  Java_BluetoothChooserDialog_removeDevice(env, java_dialog_, java_device_id);
+      env, java_dialog_, java_device_id, java_device_name, is_gatt_connected,
+      signal_strength_level);
 }
 
 void BluetoothChooserAndroid::OnDialogFinished(
@@ -166,11 +157,6 @@ void BluetoothChooserAndroid::ShowNeedLocationPermissionLink(
     const JavaParamRef<jobject>& obj) {
   OpenURL(chrome::kChooserBluetoothOverviewURL);
   event_handler_.Run(Event::SHOW_NEED_LOCATION_HELP, "");
-}
-
-// static
-bool BluetoothChooserAndroid::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 void BluetoothChooserAndroid::OpenURL(const char* url) {

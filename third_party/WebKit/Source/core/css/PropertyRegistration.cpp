@@ -22,149 +22,135 @@
 
 namespace blink {
 
-static InterpolationTypes setRegistrationOnCSSInterpolationTypes(
-    CSSInterpolationTypes cssInterpolationTypes,
-    const PropertyRegistration& registration) {
-  InterpolationTypes result;
-  for (auto& cssInterpolationType : cssInterpolationTypes) {
-    cssInterpolationType->setCustomPropertyRegistration(registration);
-    result.push_back(std::move(cssInterpolationType));
-  }
-  return result;
-}
-
 PropertyRegistration::PropertyRegistration(
+    const AtomicString& name,
     const CSSSyntaxDescriptor& syntax,
     bool inherits,
     const CSSValue* initial,
-    PassRefPtr<CSSVariableData> initialVariableData,
-    CSSInterpolationTypes cssInterpolationTypes)
-    : m_syntax(syntax),
-      m_inherits(inherits),
-      m_initial(initial),
-      m_initialVariableData(initialVariableData),
-      m_interpolationTypes(setRegistrationOnCSSInterpolationTypes(
-          std::move(cssInterpolationTypes),
-          *this)) {}
+    PassRefPtr<CSSVariableData> initial_variable_data)
+    : syntax_(syntax),
+      inherits_(inherits),
+      initial_(initial),
+      initial_variable_data_(std::move(initial_variable_data)),
+      interpolation_types_(
+          CSSInterpolationTypesMap::CreateInterpolationTypesForCSSSyntax(
+              name,
+              syntax,
+              *this)) {}
 
-static bool computationallyIndependent(const CSSValue& value) {
-  DCHECK(!value.isCSSWideKeyword());
+static bool ComputationallyIndependent(const CSSValue& value) {
+  DCHECK(!value.IsCSSWideKeyword());
 
-  if (value.isVariableReferenceValue())
-    return !toCSSVariableReferenceValue(value)
-                .variableDataValue()
-                ->needsVariableResolution();
+  if (value.IsVariableReferenceValue())
+    return !ToCSSVariableReferenceValue(value)
+                .VariableDataValue()
+                ->NeedsVariableResolution();
 
-  if (value.isValueList()) {
-    for (const CSSValue* innerValue : toCSSValueList(value)) {
-      if (!computationallyIndependent(*innerValue))
+  if (value.IsValueList()) {
+    for (const CSSValue* inner_value : ToCSSValueList(value)) {
+      if (!ComputationallyIndependent(*inner_value))
         return false;
     }
     return true;
   }
 
-  if (value.isPrimitiveValue()) {
-    const CSSPrimitiveValue& primitiveValue = toCSSPrimitiveValue(value);
-    if (!primitiveValue.isLength() &&
-        !primitiveValue.isCalculatedPercentageWithLength())
+  if (value.IsPrimitiveValue()) {
+    const CSSPrimitiveValue& primitive_value = ToCSSPrimitiveValue(value);
+    if (!primitive_value.IsLength() &&
+        !primitive_value.IsCalculatedPercentageWithLength())
       return true;
 
-    CSSPrimitiveValue::CSSLengthArray lengthArray;
-    primitiveValue.accumulateLengthArray(lengthArray);
-    for (size_t i = 0; i < lengthArray.values.size(); i++) {
-      if (lengthArray.typeFlags.get(i) &&
-          i != CSSPrimitiveValue::UnitTypePixels &&
-          i != CSSPrimitiveValue::UnitTypePercentage)
+    CSSPrimitiveValue::CSSLengthArray length_array;
+    primitive_value.AccumulateLengthArray(length_array);
+    for (size_t i = 0; i < length_array.values.size(); i++) {
+      if (length_array.type_flags.Get(i) &&
+          i != CSSPrimitiveValue::kUnitTypePixels &&
+          i != CSSPrimitiveValue::kUnitTypePercentage)
         return false;
     }
     return true;
   }
 
-  // TODO(timloh): Images and transform-function values can also contain
-  // lengths.
+  // TODO(timloh): Images values can also contain lengths.
 
   return true;
 }
 
 void PropertyRegistration::registerProperty(
-    ScriptState* scriptState,
+    ExecutionContext* execution_context,
     const PropertyDescriptor& descriptor,
-    ExceptionState& exceptionState) {
+    ExceptionState& exception_state) {
   // Bindings code ensures these are set.
   DCHECK(descriptor.hasName());
   DCHECK(descriptor.hasInherits());
   DCHECK(descriptor.hasSyntax());
 
   String name = descriptor.name();
-  if (!CSSVariableParser::isValidVariableName(name)) {
-    exceptionState.throwDOMException(
-        SyntaxError, "Custom property names must start with '--'.");
+  if (!CSSVariableParser::IsValidVariableName(name)) {
+    exception_state.ThrowDOMException(
+        kSyntaxError, "Custom property names must start with '--'.");
     return;
   }
-  AtomicString atomicName(name);
-  Document* document = toDocument(scriptState->getExecutionContext());
-  PropertyRegistry& registry = *document->propertyRegistry();
-  if (registry.registration(atomicName)) {
-    exceptionState.throwDOMException(
-        InvalidModificationError,
+  AtomicString atomic_name(name);
+  Document* document = ToDocument(execution_context);
+  PropertyRegistry& registry = *document->GetPropertyRegistry();
+  if (registry.Registration(atomic_name)) {
+    exception_state.ThrowDOMException(
+        kInvalidModificationError,
         "The name provided has already been registered.");
     return;
   }
 
-  CSSSyntaxDescriptor syntaxDescriptor(descriptor.syntax());
-  if (!syntaxDescriptor.isValid()) {
-    exceptionState.throwDOMException(
-        SyntaxError,
+  CSSSyntaxDescriptor syntax_descriptor(descriptor.syntax());
+  if (!syntax_descriptor.IsValid()) {
+    exception_state.ThrowDOMException(
+        kSyntaxError,
         "The syntax provided is not a valid custom property syntax.");
     return;
   }
 
-  CSSInterpolationTypes cssInterpolationTypes =
-      CSSInterpolationTypesMap::createCSSInterpolationTypesForSyntax(
-          atomicName, syntaxDescriptor);
-
+  const CSSValue* initial = nullptr;
+  RefPtr<CSSVariableData> initial_variable_data;
   if (descriptor.hasInitialValue()) {
     CSSTokenizer tokenizer(descriptor.initialValue());
-    bool isAnimationTainted = false;
-    const CSSValue* initial = syntaxDescriptor.parse(
-        tokenizer.tokenRange(),
-        document->elementSheet().contents()->parserContext(),
-        isAnimationTainted);
+    bool is_animation_tainted = false;
+    initial = syntax_descriptor.Parse(
+        tokenizer.TokenRange(),
+        document->ElementSheet().Contents()->ParserContext(),
+        is_animation_tainted);
     if (!initial) {
-      exceptionState.throwDOMException(
-          SyntaxError,
+      exception_state.ThrowDOMException(
+          kSyntaxError,
           "The initial value provided does not parse for the given syntax.");
       return;
     }
-    if (!computationallyIndependent(*initial)) {
-      exceptionState.throwDOMException(
-          SyntaxError,
+    if (!ComputationallyIndependent(*initial)) {
+      exception_state.ThrowDOMException(
+          kSyntaxError,
           "The initial value provided is not computationally independent.");
       return;
     }
     initial =
-        &StyleBuilderConverter::convertRegisteredPropertyInitialValue(*initial);
-    RefPtr<CSSVariableData> initialVariableData = CSSVariableData::create(
-        tokenizer.tokenRange(), isAnimationTainted, false);
-    registry.registerProperty(
-        atomicName, syntaxDescriptor, descriptor.inherits(), initial,
-        std::move(initialVariableData), std::move(cssInterpolationTypes));
+        &StyleBuilderConverter::ConvertRegisteredPropertyInitialValue(*initial);
+    initial_variable_data = CSSVariableData::Create(
+        tokenizer.TokenRange(), is_animation_tainted, false);
   } else {
-    if (!syntaxDescriptor.isTokenStream()) {
-      exceptionState.throwDOMException(
-          SyntaxError,
+    if (!syntax_descriptor.IsTokenStream()) {
+      exception_state.ThrowDOMException(
+          kSyntaxError,
           "An initial value must be provided if the syntax is not '*'");
       return;
     }
-    registry.registerProperty(atomicName, syntaxDescriptor,
-                              descriptor.inherits(), nullptr, nullptr,
-                              std::move(cssInterpolationTypes));
   }
+  registry.RegisterProperty(
+      atomic_name, *new PropertyRegistration(atomic_name, syntax_descriptor,
+                                             descriptor.inherits(), initial,
+                                             std::move(initial_variable_data)));
 
   // TODO(timloh): Invalidate only elements with this custom property set
-  document->setNeedsStyleRecalc(SubtreeStyleChange,
-                                StyleChangeReasonForTracing::create(
-                                    StyleChangeReason::PropertyRegistration));
+  document->SetNeedsStyleRecalc(kSubtreeStyleChange,
+                                StyleChangeReasonForTracing::Create(
+                                    StyleChangeReason::kPropertyRegistration));
 }
 
 }  // namespace blink

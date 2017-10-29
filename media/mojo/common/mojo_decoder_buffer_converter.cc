@@ -20,26 +20,23 @@ namespace media {
 namespace {
 
 std::unique_ptr<mojo::DataPipe> CreateDataPipe(DemuxerStream::Type type) {
-  MojoCreateDataPipeOptions options;
-  options.struct_size = sizeof(MojoCreateDataPipeOptions);
-  options.flags = MOJO_CREATE_DATA_PIPE_OPTIONS_FLAG_NONE;
-  options.element_num_bytes = 1;
+  uint32_t capacity = 0;
 
   if (type == DemuxerStream::AUDIO) {
     // TODO(timav): Consider capacity calculation based on AudioDecoderConfig.
-    options.capacity_num_bytes = 512 * 1024;
+    capacity = 512 * 1024;
   } else if (type == DemuxerStream::VIDEO) {
     // Video can get quite large; at 4K, VP9 delivers packets which are ~1MB in
     // size; so allow for some head room.
     // TODO(xhwang, sandersd): Provide a better way to customize this value.
-    options.capacity_num_bytes = 2 * (1024 * 1024);
+    capacity = 2 * (1024 * 1024);
   } else {
     NOTREACHED() << "Unsupported type: " << type;
     // Choose an arbitrary size.
-    options.capacity_num_bytes = 512 * 1024;
+    capacity = 512 * 1024;
   }
 
-  return base::MakeUnique<mojo::DataPipe>(options);
+  return base::MakeUnique<mojo::DataPipe>(capacity);
 }
 
 bool IsPipeReadWriteError(MojoResult result) {
@@ -64,18 +61,20 @@ std::unique_ptr<MojoDecoderBufferReader> MojoDecoderBufferReader::Create(
 MojoDecoderBufferReader::MojoDecoderBufferReader(
     mojo::ScopedDataPipeConsumerHandle consumer_handle)
     : consumer_handle_(std::move(consumer_handle)),
-      pipe_watcher_(FROM_HERE),
+      pipe_watcher_(FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::MANUAL),
       bytes_read_(0) {
   DVLOG(1) << __func__;
 
   MojoResult result =
-      pipe_watcher_.Start(consumer_handle_.get(), MOJO_HANDLE_SIGNAL_READABLE,
+      pipe_watcher_.Watch(consumer_handle_.get(), MOJO_HANDLE_SIGNAL_READABLE,
                           base::Bind(&MojoDecoderBufferReader::OnPipeReadable,
                                      base::Unretained(this)));
   if (result != MOJO_RESULT_OK) {
     DVLOG(1) << __func__
              << ": Failed to start watching the pipe. result=" << result;
     consumer_handle_.reset();
+  } else {
+    pipe_watcher_.ArmOrNotify();
   }
 }
 
@@ -159,13 +158,16 @@ void MojoDecoderBufferReader::ReadDecoderBufferData() {
 
   if (IsPipeReadWriteError(result)) {
     OnPipeError(result);
-  } else if (result == MOJO_RESULT_OK) {
-    DCHECK_GT(num_bytes, 0u);
-    bytes_read_ += num_bytes;
-    if (bytes_read_ == buffer_size) {
-      DCHECK(read_cb_);
-      bytes_read_ = 0;
-      std::move(read_cb_).Run(std::move(media_buffer_));
+  } else {
+    pipe_watcher_.ArmOrNotify();
+    if (result == MOJO_RESULT_OK) {
+      DCHECK_GT(num_bytes, 0u);
+      bytes_read_ += num_bytes;
+      if (bytes_read_ == buffer_size) {
+        DCHECK(read_cb_);
+        bytes_read_ = 0;
+        std::move(read_cb_).Run(std::move(media_buffer_));
+      }
     }
   }
 }
@@ -186,18 +188,20 @@ std::unique_ptr<MojoDecoderBufferWriter> MojoDecoderBufferWriter::Create(
 MojoDecoderBufferWriter::MojoDecoderBufferWriter(
     mojo::ScopedDataPipeProducerHandle producer_handle)
     : producer_handle_(std::move(producer_handle)),
-      pipe_watcher_(FROM_HERE),
+      pipe_watcher_(FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::MANUAL),
       bytes_written_(0) {
   DVLOG(1) << __func__;
 
   MojoResult result =
-      pipe_watcher_.Start(producer_handle_.get(), MOJO_HANDLE_SIGNAL_WRITABLE,
+      pipe_watcher_.Watch(producer_handle_.get(), MOJO_HANDLE_SIGNAL_WRITABLE,
                           base::Bind(&MojoDecoderBufferWriter::OnPipeWritable,
                                      base::Unretained(this)));
   if (result != MOJO_RESULT_OK) {
     DVLOG(1) << __func__
              << ": Failed to start watching the pipe. result=" << result;
     producer_handle_.reset();
+  } else {
+    pipe_watcher_.ArmOrNotify();
   }
 }
 
@@ -273,12 +277,15 @@ MojoResult MojoDecoderBufferWriter::WriteDecoderBufferData() {
 
   if (IsPipeReadWriteError(result)) {
     OnPipeError(result);
-  } else if (result == MOJO_RESULT_OK) {
-    DCHECK_GT(num_bytes, 0u);
-    bytes_written_ += num_bytes;
-    if (bytes_written_ == buffer_size) {
-      media_buffer_ = nullptr;
-      bytes_written_ = 0;
+  } else {
+    pipe_watcher_.ArmOrNotify();
+    if (result == MOJO_RESULT_OK) {
+      DCHECK_GT(num_bytes, 0u);
+      bytes_written_ += num_bytes;
+      if (bytes_written_ == buffer_size) {
+        media_buffer_ = nullptr;
+        bytes_written_ = 0;
+      }
     }
   }
 

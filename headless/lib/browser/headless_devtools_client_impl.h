@@ -13,6 +13,7 @@
 #include "headless/public/devtools/domains/accessibility.h"
 #include "headless/public/devtools/domains/animation.h"
 #include "headless/public/devtools/domains/application_cache.h"
+#include "headless/public/devtools/domains/browser.h"
 #include "headless/public/devtools/domains/cache_storage.h"
 #include "headless/public/devtools/domains/console.h"
 #include "headless/public/devtools/domains/css.h"
@@ -21,6 +22,7 @@
 #include "headless/public/devtools/domains/device_orientation.h"
 #include "headless/public/devtools/domains/dom.h"
 #include "headless/public/devtools/domains/dom_debugger.h"
+#include "headless/public/devtools/domains/dom_snapshot.h"
 #include "headless/public/devtools/domains/dom_storage.h"
 #include "headless/public/devtools/domains/emulation.h"
 #include "headless/public/devtools/domains/heap_profiler.h"
@@ -34,7 +36,6 @@
 #include "headless/public/devtools/domains/network.h"
 #include "headless/public/devtools/domains/page.h"
 #include "headless/public/devtools/domains/profiler.h"
-#include "headless/public/devtools/domains/rendering.h"
 #include "headless/public/devtools/domains/runtime.h"
 #include "headless/public/devtools/domains/security.h"
 #include "headless/public/devtools/domains/service_worker.h"
@@ -66,6 +67,7 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
   accessibility::Domain* GetAccessibility() override;
   animation::Domain* GetAnimation() override;
   application_cache::Domain* GetApplicationCache() override;
+  browser::Domain* GetBrowser() override;
   cache_storage::Domain* GetCacheStorage() override;
   console::Domain* GetConsole() override;
   css::Domain* GetCSS() override;
@@ -74,6 +76,7 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
   device_orientation::Domain* GetDeviceOrientation() override;
   dom::Domain* GetDOM() override;
   dom_debugger::Domain* GetDOMDebugger() override;
+  dom_snapshot::Domain* GetDOMSnapshot() override;
   dom_storage::Domain* GetDOMStorage() override;
   emulation::Domain* GetEmulation() override;
   heap_profiler::Domain* GetHeapProfiler() override;
@@ -87,12 +90,16 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
   network::Domain* GetNetwork() override;
   page::Domain* GetPage() override;
   profiler::Domain* GetProfiler() override;
-  rendering::Domain* GetRendering() override;
   runtime::Domain* GetRuntime() override;
   security::Domain* GetSecurity() override;
   service_worker::Domain* GetServiceWorker() override;
   target::Domain* GetTarget() override;
   tracing::Domain* GetTracing() override;
+  void SetRawProtocolListener(
+      RawProtocolListener* raw_protocol_listener) override;
+  int GetNextRawDevToolsMessageId() override;
+  void SendRawDevToolsMessage(const std::string& json_message) override;
+  void SendRawDevToolsMessage(const base::DictionaryValue& message) override;
 
   // content::DevToolstAgentHostClient implementation:
   void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
@@ -106,11 +113,7 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
                    base::Callback<void(const base::Value&)> callback) override;
   void SendMessage(const char* method,
                    std::unique_ptr<base::Value> params,
-                   base::Callback<void()> callback) override;
-  void SendMessage(const char* method,
-                   base::Callback<void(const base::Value&)> callback) override;
-  void SendMessage(const char* method,
-                   base::Callback<void()> callback) override;
+                   base::Closure callback) override;
   void RegisterEventHandler(
       const char* method,
       base::Callback<void(const base::Value&)> callback) override;
@@ -125,13 +128,13 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
   struct Callback {
     Callback();
     Callback(Callback&& other);
-    explicit Callback(base::Callback<void()> callback);
+    explicit Callback(base::Closure callback);
     explicit Callback(base::Callback<void(const base::Value&)> callback);
     ~Callback();
 
     Callback& operator=(Callback&& other);
 
-    base::Callback<void()> callback;
+    base::Closure callback;
     base::Callback<void(const base::Value&)> callback_with_result;
   };
 
@@ -144,9 +147,6 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
                              std::unique_ptr<base::Value> params,
                              CallbackType callback);
 
-  template <typename CallbackType>
-  void SendMessageWithoutParams(const char* method, CallbackType callback);
-
   bool DispatchMessageReply(const base::DictionaryValue& message_dict);
 
   using EventHandler = base::Callback<void(const base::Value&)>;
@@ -158,8 +158,10 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
                          const EventHandler* event_handler,
                          const base::DictionaryValue* result_dict);
 
-  content::DevToolsAgentHost* agent_host_;  // Not owned.
+  content::DevToolsAgentHost* agent_host_;      // Not owned.
+  RawProtocolListener* raw_protocol_listener_;  // Not owned.
   int next_message_id_;
+  int next_raw_message_id_;
   std::unordered_map<int, Callback> pending_messages_;
 
   EventHandlerMap event_handlers_;
@@ -169,14 +171,16 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
   accessibility::ExperimentalDomain accessibility_domain_;
   animation::ExperimentalDomain animation_domain_;
   application_cache::ExperimentalDomain application_cache_domain_;
+  browser::ExperimentalDomain browser_domain_;
   cache_storage::ExperimentalDomain cache_storage_domain_;
   console::ExperimentalDomain console_domain_;
   css::ExperimentalDomain css_domain_;
   database::ExperimentalDomain database_domain_;
   debugger::ExperimentalDomain debugger_domain_;
   device_orientation::ExperimentalDomain device_orientation_domain_;
-  dom_debugger::ExperimentalDomain dom_debugger_domain_;
   dom::ExperimentalDomain dom_domain_;
+  dom_debugger::ExperimentalDomain dom_debugger_domain_;
+  dom_snapshot::ExperimentalDomain dom_snapshot_domain_;
   dom_storage::ExperimentalDomain dom_storage_domain_;
   emulation::ExperimentalDomain emulation_domain_;
   heap_profiler::ExperimentalDomain heap_profiler_domain_;
@@ -190,7 +194,6 @@ class HeadlessDevToolsClientImpl : public HeadlessDevToolsClient,
   network::ExperimentalDomain network_domain_;
   page::ExperimentalDomain page_domain_;
   profiler::ExperimentalDomain profiler_domain_;
-  rendering::ExperimentalDomain rendering_domain_;
   runtime::ExperimentalDomain runtime_domain_;
   security::ExperimentalDomain security_domain_;
   service_worker::ExperimentalDomain service_worker_domain_;

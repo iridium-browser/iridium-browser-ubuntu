@@ -12,10 +12,10 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "jni/GlDisplay_jni.h"
+#include "remoting/client/chromoting_client_runtime.h"
 #include "remoting/client/cursor_shape_stub_proxy.h"
 #include "remoting/client/display/gl_canvas.h"
 #include "remoting/client/dual_buffer_frame_consumer.h"
-#include "remoting/client/jni/chromoting_jni_runtime.h"
 #include "remoting/client/jni/egl_thread_context.h"
 #include "remoting/client/software_video_renderer.h"
 #include "remoting/protocol/frame_consumer.h"
@@ -27,7 +27,7 @@ namespace remoting {
 class JniGlDisplayHandler::Core : public protocol::CursorShapeStub,
                                   public GlRendererDelegate {
  public:
-  Core(ChromotingJniRuntime* runtime, base::WeakPtr<JniGlDisplayHandler> shell);
+  Core(base::WeakPtr<JniGlDisplayHandler> shell);
   ~Core() override;
 
   // GlRendererDelegate interface.
@@ -60,7 +60,7 @@ class JniGlDisplayHandler::Core : public protocol::CursorShapeStub,
   // Initializes the core on the display thread.
   void Initialize();
 
-  ChromotingJniRuntime* runtime_;
+  ChromotingClientRuntime* runtime_;
   base::WeakPtr<JniGlDisplayHandler> shell_;
 
   // Will be std::move'd when GrabFrameConsumer() is called.
@@ -79,9 +79,9 @@ class JniGlDisplayHandler::Core : public protocol::CursorShapeStub,
   DISALLOW_COPY_AND_ASSIGN(Core);
 };
 
-JniGlDisplayHandler::Core::Core(ChromotingJniRuntime* runtime,
-                                base::WeakPtr<JniGlDisplayHandler> shell)
-    : runtime_(runtime), shell_(shell), weak_factory_(this) {
+JniGlDisplayHandler::Core::Core(base::WeakPtr<JniGlDisplayHandler> shell)
+    : shell_(shell), weak_factory_(this) {
+  runtime_ = ChromotingClientRuntime::GetInstance();
   DCHECK(!runtime_->display_task_runner()->BelongsToCurrentThread());
 
   weak_ptr_ = weak_factory_.GetWeakPtr();
@@ -159,6 +159,10 @@ void JniGlDisplayHandler::Core::SurfaceCreated(
 
 void JniGlDisplayHandler::Core::SurfaceChanged(int width, int height) {
   DCHECK(runtime_->display_task_runner()->BelongsToCurrentThread());
+  // Note that this doesn't resize the OpenGL viewport. The OpenGL viewport is
+  // initialized once it is first bound to the surface. We don't need to call
+  // glViewport() since the activity/surface is recreated and hence the viewport
+  // is re-initialized every time the surface size is changed.
   renderer_->OnSurfaceChanged(width, height);
 }
 
@@ -210,12 +214,11 @@ void JniGlDisplayHandler::Core::Initialize() {
 // Shell implementations.
 
 JniGlDisplayHandler::JniGlDisplayHandler(
-    ChromotingJniRuntime* runtime,
     const base::android::JavaRef<jobject>& java_client)
-    : runtime_(runtime),
-      ui_task_poster_(runtime->display_task_runner()),
+    : runtime_(ChromotingClientRuntime::GetInstance()),
+      ui_task_poster_(runtime_->display_task_runner()),
       weak_factory_(this) {
-  core_.reset(new Core(runtime_, weak_factory_.GetWeakPtr()));
+  core_.reset(new Core(weak_factory_.GetWeakPtr()));
   JNIEnv* env = base::android::AttachCurrentThread();
   java_display_.Reset(Java_GlDisplay_createJavaDisplayObject(
       env, reinterpret_cast<intptr_t>(this)));

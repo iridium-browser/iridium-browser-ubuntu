@@ -11,8 +11,8 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
-#include "cc/output/context_cache_controller.h"
 #include "cc/output/managed_memory_policy.h"
+#include "components/viz/common/gpu/context_cache_controller.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/shared_memory_limits.h"
@@ -96,7 +96,7 @@ bool InProcessContextProvider::BindToCurrentThread() {
     if (!context_)
       return false;
 
-    cache_controller_.reset(new cc::ContextCacheController(
+    cache_controller_.reset(new viz::ContextCacheController(
         context_->GetImplementation(), base::ThreadTaskRunnerHandle::Get()));
   }
 
@@ -135,13 +135,14 @@ class GrContext* InProcessContextProvider::GrContext() {
   if (gr_context_)
     return gr_context_->get();
 
-  gr_context_.reset(new skia_bindings::GrContextForGLES2Interface(ContextGL()));
+  gr_context_.reset(new skia_bindings::GrContextForGLES2Interface(
+      ContextGL(), ContextCapabilities()));
   cache_controller_->SetGrContext(gr_context_->get());
 
   return gr_context_->get();
 }
 
-cc::ContextCacheController* InProcessContextProvider::CacheController() {
+viz::ContextCacheController* InProcessContextProvider::CacheController() {
   DCHECK(context_thread_checker_.CalledOnValidThread());
   return cache_controller_.get();
 }

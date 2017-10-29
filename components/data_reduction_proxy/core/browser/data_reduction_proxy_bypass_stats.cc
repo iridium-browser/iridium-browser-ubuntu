@@ -8,7 +8,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_tamper_detection.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "net/base/load_flags.h"
@@ -100,8 +99,8 @@ void DataReductionProxyBypassStats::RecordDataReductionProxyBypassInfo(
 // static
 void DataReductionProxyBypassStats::DetectAndRecordMissingViaHeaderResponseCode(
     bool is_primary,
-    const net::HttpResponseHeaders* headers) {
-  if (HasDataReductionProxyViaHeader(headers, NULL)) {
+    const net::HttpResponseHeaders& headers) {
+  if (HasDataReductionProxyViaHeader(headers, nullptr)) {
     // The data reduction proxy via header is present, so don't record anything.
     return;
   }
@@ -109,11 +108,11 @@ void DataReductionProxyBypassStats::DetectAndRecordMissingViaHeaderResponseCode(
   if (is_primary) {
     UMA_HISTOGRAM_SPARSE_SLOWLY(
         "DataReductionProxy.MissingViaHeader.ResponseCode.Primary",
-        headers->response_code());
+        headers.response_code());
   } else {
     UMA_HISTOGRAM_SPARSE_SLOWLY(
         "DataReductionProxy.MissingViaHeader.ResponseCode.Fallback",
-        headers->response_code());
+        headers.response_code());
   }
 }
 
@@ -280,18 +279,6 @@ void DataReductionProxyBypassStats::RecordBypassedBytesHistograms(
     RecordBypassedBytes(last_bypass_type_,
                         DataReductionProxyBypassStats::NOT_BYPASSED,
                         content_length);
-
-    if (data_reduction_proxy_type_info.proxy_servers.empty())
-      return;
-
-    // Obtain the proxy that this request used.
-    const net::ProxyServer& proxy =
-        data_reduction_proxy_type_info.proxy_servers.front();
-    if (proxy.is_valid() && !proxy.host_port_pair().IsEmpty()) {
-      DataReductionProxyTamperDetection::DetectAndReport(
-          request.response_info().headers.get(),
-          proxy.is_https() || proxy.is_quic(), content_length);
-    }
     return;
   }
 
@@ -385,7 +372,7 @@ void DataReductionProxyBypassStats::RecordMissingViaHeaderBytes(
 
   if (!data_reduction_proxy_config_->WasDataReductionProxyUsed(&request,
                                                                NULL) ||
-      HasDataReductionProxyViaHeader(request.response_headers(), NULL)) {
+      HasDataReductionProxyViaHeader(*request.response_headers(), NULL)) {
     // Only track requests that used the data reduction proxy and had responses
     // that were missing the data reduction proxy via header.
     return;
@@ -535,6 +522,11 @@ void DataReductionProxyBypassStats::RecordBypassedBytes(
           UMA_HISTOGRAM_COUNTS(
               "DataReductionProxy.BypassedBytes."
               "Status503HttpServiceUnavailable",
+              content_length);
+          break;
+        case BYPASS_EVENT_TYPE_URL_REDIRECT_CYCLE:
+          UMA_HISTOGRAM_COUNTS(
+              "DataReductionProxy.BypassedBytes.URLRedirectCycle",
               content_length);
           break;
         default:

@@ -29,11 +29,12 @@ enum MessageType {
 
 // The action associated with the sync status.
 enum ActionType {
-  NO_ACTION,           // No action to take.
-  REAUTHENTICATE,      // User needs to reauthenticate.
-  SIGNOUT_AND_SIGNIN,  // User needs to sign out and sign in.
-  UPGRADE_CLIENT,      // User needs to upgrade the client.
-  ENTER_PASSPHRASE,    // User needs to enter their passphrase.
+  NO_ACTION,              // No action to take.
+  REAUTHENTICATE,         // User needs to reauthenticate.
+  SIGNOUT_AND_SIGNIN,     // User needs to sign out and sign in.
+  UPGRADE_CLIENT,         // User needs to upgrade the client.
+  ENTER_PASSPHRASE,       // User needs to enter their passphrase.
+  CONFIRM_SYNC_SETTINGS,  // User needs to confirm sync settings.
 };
 
 enum StatusLabelStyle {
@@ -49,7 +50,8 @@ enum AvatarSyncErrorType {
   SUPERVISED_USER_AUTH_ERROR,        // Auth token error for supervised users.
   AUTH_ERROR,                        // Authentication error.
   UPGRADE_CLIENT_ERROR,              // Out-of-date client error.
-  PASSPHRASE_ERROR                   // Sync passphrase error.
+  PASSPHRASE_ERROR,                  // Sync passphrase error.
+  SETTINGS_UNCONFIRMED_ERROR,        // Sync settings dialog not confirmed yet.
 };
 
 // TODO(akalin): audit the use of ProfileSyncService* service below,
@@ -76,20 +78,13 @@ MessageType GetStatusLabelsForNewTabPage(
     base::string16* link_label);
 
 #if !defined(OS_CHROMEOS)
-// Gets various labels for the sync global error based on the sync error state.
-// |menu_item_label|, |bubble_message|, and |bubble_accept_label| must not be
-// null. Note that we don't use SyncGlobalError on Chrome OS.
-void GetStatusLabelsForSyncGlobalError(
-    const browser_sync::ProfileSyncService* service,
-    base::string16* menu_item_label,
-    base::string16* bubble_message,
-    base::string16* bubble_accept_label);
-
 // Gets the error message and button label for the sync errors that should be
 // exposed to the user through the titlebar avatar button.
-AvatarSyncErrorType GetMessagesForAvatarSyncError(Profile* profile,
-                                                  int* content_string_id,
-                                                  int* button_string_id);
+AvatarSyncErrorType GetMessagesForAvatarSyncError(
+    Profile* profile,
+    const SigninManagerBase& signin,
+    int* content_string_id,
+    int* button_string_id);
 #endif
 
 MessageType GetStatus(Profile* profile,

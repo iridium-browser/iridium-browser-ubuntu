@@ -6,19 +6,15 @@
  */
 
 #include "GrSWMaskHelper.h"
-
 #include "GrCaps.h"
 #include "GrContext.h"
 #include "GrContextPriv.h"
-#include "GrPipelineBuilder.h"
 #include "GrRenderTargetContext.h"
 #include "GrShape.h"
 #include "GrSurfaceContext.h"
 #include "GrTextureProxy.h"
-#include "ops/GrDrawOp.h"
-
 #include "SkDistanceFieldGen.h"
-
+#include "ops/GrDrawOp.h"
 #include "ops/GrRectOpFactory.h"
 
 /*
@@ -97,8 +93,9 @@ bool GrSWMaskHelper::init(const SkIRect& resultBounds, const SkMatrix* matrix) {
     return true;
 }
 
-sk_sp<GrTextureProxy> GrSWMaskHelper::toTexture(GrContext* context, SkBackingFit fit) {
+sk_sp<GrTextureProxy> GrSWMaskHelper::toTextureProxy(GrContext* context, SkBackingFit fit) {
     GrSurfaceDesc desc;
+    desc.fOrigin = kTopLeft_GrSurfaceOrigin;
     desc.fWidth = fPixels.width();
     desc.fHeight = fPixels.height();
     desc.fConfig = kAlpha_8_GrPixelConfig;
@@ -132,12 +129,12 @@ void GrSWMaskHelper::toSDF(unsigned char* sdf) {
  * Software rasterizes shape to A8 mask and uploads the result to a scratch texture. Returns the
  * resulting texture on success; nullptr on failure.
  */
-sk_sp<GrTexture> GrSWMaskHelper::DrawShapeMaskToTexture(GrContext* context,
-                                                        const GrShape& shape,
-                                                        const SkIRect& resultBounds,
-                                                        GrAA aa,
-                                                        SkBackingFit fit,
-                                                        const SkMatrix* matrix) {
+sk_sp<GrTextureProxy> GrSWMaskHelper::DrawShapeMaskToTexture(GrContext* context,
+                                                             const GrShape& shape,
+                                                             const SkIRect& resultBounds,
+                                                             GrAA aa,
+                                                             SkBackingFit fit,
+                                                             const SkMatrix* matrix) {
     GrSWMaskHelper helper;
 
     if (!helper.init(resultBounds, matrix)) {
@@ -146,15 +143,10 @@ sk_sp<GrTexture> GrSWMaskHelper::DrawShapeMaskToTexture(GrContext* context,
 
     helper.drawShape(shape, SkRegion::kReplace_Op, aa, 0xFF);
 
-    sk_sp<GrTextureProxy> tProxy = helper.toTexture(context, fit);
-    if (!tProxy) {
-        return nullptr;
-    }
-
-    return sk_ref_sp(tProxy->instantiate(context->textureProvider()));
+    return helper.toTextureProxy(context, fit);
 }
 
-void GrSWMaskHelper::DrawToTargetWithShapeMask(GrTexture* texture,
+void GrSWMaskHelper::DrawToTargetWithShapeMask(sk_sp<GrTextureProxy> proxy,
                                                GrRenderTargetContext* renderTargetContext,
                                                GrPaint&& paint,
                                                const GrUserStencilSettings& userStencilSettings,
@@ -175,11 +167,11 @@ void GrSWMaskHelper::DrawToTargetWithShapeMask(GrTexture* texture,
     SkMatrix maskMatrix = SkMatrix::MakeTrans(SkIntToScalar(-textureOriginInDeviceSpace.fX),
                                               SkIntToScalar(-textureOriginInDeviceSpace.fY));
     maskMatrix.preConcat(viewMatrix);
-    std::unique_ptr<GrDrawOp> op = GrRectOpFactory::MakeNonAAFill(paint.getColor(), SkMatrix::I(),
-                                                                  dstRect, nullptr, &invert);
     paint.addCoverageFragmentProcessor(GrSimpleTextureEffect::Make(
-            texture, nullptr, maskMatrix, GrSamplerParams::kNone_FilterMode));
-    GrPipelineBuilder pipelineBuilder(std::move(paint), GrAAType::kNone);
-    pipelineBuilder.setUserStencil(&userStencilSettings);
-    renderTargetContext->addDrawOp(pipelineBuilder, clip, std::move(op));
+            std::move(proxy), nullptr, maskMatrix,
+            GrSamplerParams::kNone_FilterMode));
+    renderTargetContext->addDrawOp(clip,
+                                   GrRectOpFactory::MakeNonAAFillWithLocalMatrix(
+                                           std::move(paint), SkMatrix::I(), invert, dstRect,
+                                           GrAAType::kNone, &userStencilSettings));
 }

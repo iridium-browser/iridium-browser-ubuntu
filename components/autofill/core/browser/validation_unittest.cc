@@ -56,6 +56,8 @@ const char* const kValidNumbers[] = {
     "5019717010103742",
     "6331101999990016",
     "6247130048162403",
+    "4532261615476013542", // Visa, 19 digits.
+    "6362970000457013", // Elo
 };
 const char* const kInvalidNumbers[] = {
   "4111 1111 112", /* too short */
@@ -346,7 +348,7 @@ TEST_P(AutofillCCNumberValidationTest, IsValidCreditCardNumber) {
 }
 
 const static std::set<std::string> kAllBasicCardNetworks{
-    "amex",       "discover", "diners",   "jcb",
+    "amex",       "discover", "diners",   "elo",  "jcb",
     "mastercard", "mir",      "unionpay", "visa"};
 
 INSTANTIATE_TEST_CASE_P(
@@ -384,6 +386,8 @@ INSTANTIATE_TEST_CASE_P(
                      IDS_PAYMENTS_VALIDATION_UNSUPPORTED_CREDIT_CARD_TYPE),
 
         CCNumberCase(kValidNumbers[17], kAllBasicCardNetworks, true, 0),
+        CCNumberCase(kValidNumbers[18], kAllBasicCardNetworks, true, 0),
+        CCNumberCase(kValidNumbers[19], kAllBasicCardNetworks, true, 0),
 
         CCNumberCase(kInvalidNumbers[0],
                      kAllBasicCardNetworks,
@@ -411,5 +415,83 @@ INSTANTIATE_TEST_CASE_P(
                      {"jcb", "diners", "unionpay", "mastercard"},
                      false,
                      IDS_PAYMENTS_VALIDATION_UNSUPPORTED_CREDIT_CARD_TYPE)));
+
+struct GetCvcLengthForCardTypeCase {
+  GetCvcLengthForCardTypeCase(const char* card_type, size_t expected_length)
+      : card_type(card_type), expected_length(expected_length) {}
+  ~GetCvcLengthForCardTypeCase() {}
+
+  const char* const card_type;
+  const size_t expected_length;
+};
+
+class AutofillGetCvcLengthForCardType
+    : public testing::TestWithParam<GetCvcLengthForCardTypeCase> {};
+
+TEST_P(AutofillGetCvcLengthForCardType, GetCvcLengthForCardType) {
+  EXPECT_EQ(GetParam().expected_length,
+            GetCvcLengthForCardType(GetParam().card_type));
+}
+
+INSTANTIATE_TEST_CASE_P(
+    CreditCardCvcLength,
+    AutofillGetCvcLengthForCardType,
+    testing::Values(
+        GetCvcLengthForCardTypeCase{kAmericanExpressCard, AMEX_CVC_LENGTH},
+        GetCvcLengthForCardTypeCase{kDinersCard, GENERAL_CVC_LENGTH},
+        GetCvcLengthForCardTypeCase{kDiscoverCard, GENERAL_CVC_LENGTH},
+        GetCvcLengthForCardTypeCase{kEloCard, GENERAL_CVC_LENGTH},
+        GetCvcLengthForCardTypeCase{kGenericCard, GENERAL_CVC_LENGTH},
+        GetCvcLengthForCardTypeCase{kJCBCard, GENERAL_CVC_LENGTH},
+        GetCvcLengthForCardTypeCase{kMasterCard, GENERAL_CVC_LENGTH},
+        GetCvcLengthForCardTypeCase{kMirCard, GENERAL_CVC_LENGTH},
+        GetCvcLengthForCardTypeCase{kUnionPay, GENERAL_CVC_LENGTH},
+        GetCvcLengthForCardTypeCase{kVisaCard, GENERAL_CVC_LENGTH}));
+
+class AutofillIsUPIVirtualPaymentAddress
+    : public testing::TestWithParam<std::string> {};
+
+TEST_P(AutofillIsUPIVirtualPaymentAddress, IsUPIVirtualPaymentAddress) {
+  // Expected format is user@bank
+  EXPECT_TRUE(IsUPIVirtualPaymentAddress(ASCIIToUTF16("user@" + GetParam())));
+
+  // Deviations should not match: bank, @bank, user@prefixbank, user@banksuffix.
+  EXPECT_FALSE(IsUPIVirtualPaymentAddress(ASCIIToUTF16(GetParam())));
+  EXPECT_FALSE(IsUPIVirtualPaymentAddress(ASCIIToUTF16(GetParam() + "@")));
+  EXPECT_FALSE(IsUPIVirtualPaymentAddress(ASCIIToUTF16("@" + GetParam())));
+  EXPECT_FALSE(
+      IsUPIVirtualPaymentAddress(ASCIIToUTF16("user@invalid" + GetParam())));
+  EXPECT_FALSE(
+      IsUPIVirtualPaymentAddress(ASCIIToUTF16("user@" + GetParam() + ".com")));
+}
+
+INSTANTIATE_TEST_CASE_P(UPIVirtualPaymentAddress,
+                        AutofillIsUPIVirtualPaymentAddress,
+                        testing::Values("upi",
+                                        "allbank",
+                                        "andb",
+                                        "axisbank",
+                                        "barodampay",
+                                        "mahb",
+                                        "cnrb",
+                                        "csbpay",
+                                        "dcb",
+                                        "federal",
+                                        "hdfcbank",
+                                        "pockets",
+                                        "icici",
+                                        "idfcbank",
+                                        "indus",
+                                        "kbl",
+                                        "kaypay",
+                                        "pnb",
+                                        "sib",
+                                        "sbi",
+                                        "tjsp",
+                                        "uco",
+                                        "unionbank",
+                                        "united",
+                                        "vijb",
+                                        "ybl"));
 
 }  // namespace autofill

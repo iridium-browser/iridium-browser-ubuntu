@@ -15,6 +15,7 @@
 
 #include "SkTLList.h"
 
+class GrCaps;
 class GrOpFlushState;
 
 /**
@@ -24,21 +25,21 @@ class GrMeshDrawOp : public GrDrawOp {
 public:
     class Target;
 
+protected:
     GrMeshDrawOp(uint32_t classID);
 
-protected:
-    /** Helper for rendering instances using an instanced index index buffer. This class creates the
+    /** Helper for rendering repeating meshes using a patterned index buffer. This class creates the
         space for the vertices and flushes the draws to the GrMeshDrawOp::Target. */
-    class InstancedHelper {
+    class PatternHelper {
     public:
-        InstancedHelper() {}
+        PatternHelper(GrPrimitiveType primitiveType) : fMesh(primitiveType) {}
         /** Returns the allocated storage for the vertices. The caller should populate the vertices
             before calling recordDraws(). */
-        void* init(Target*, GrPrimitiveType, size_t vertexStride, const GrBuffer*,
-                   int verticesPerInstance, int indicesPerInstance, int instancesToDraw);
+        void* init(Target*, size_t vertexStride, const GrBuffer*, int verticesPerRepetition,
+                   int indicesPerRepetition, int repeatCount);
 
         /** Call after init() to issue draws to the GrMeshDrawOp::Target.*/
-        void recordDraw(Target*, const GrGeometryProcessor*);
+        void recordDraw(Target*, const GrGeometryProcessor*, const GrPipeline*);
 
     private:
         GrMesh fMesh;
@@ -48,23 +49,23 @@ protected:
     static const int kIndicesPerQuad = 6;
 
     /** A specialization of InstanceHelper for quad rendering. */
-    class QuadHelper : private InstancedHelper {
+    class QuadHelper : private PatternHelper {
     public:
-        QuadHelper() : INHERITED() {}
+        QuadHelper() : INHERITED(GrPrimitiveType::kTriangles) {}
         /** Finds the cached quad index buffer and reserves vertex space. Returns nullptr on failure
             and on success a pointer to the vertex data that the caller should populate before
             calling recordDraws(). */
         void* init(Target*, size_t vertexStride, int quadsToDraw);
 
-        using InstancedHelper::recordDraw;
+        using PatternHelper::recordDraw;
 
     private:
-        typedef InstancedHelper INHERITED;
+        typedef PatternHelper INHERITED;
     };
 
 private:
     void onPrepare(GrOpFlushState* state) final;
-    void onExecute(GrOpFlushState* state, const SkRect& bounds) final;
+    void onExecute(GrOpFlushState* state) final;
 
     virtual void onPrepareDraws(Target*) const = 0;
 
@@ -76,13 +77,13 @@ private:
     struct QueuedDraw {
         int fMeshCnt = 0;
         GrPendingProgramElement<const GrGeometryProcessor> fGeometryProcessor;
+        const GrPipeline* fPipeline;
     };
 
     // All draws in all the GrMeshDrawOps have implicit tokens based on the order they are enqueued
     // globally across all ops. This is the offset of the first entry in fQueuedDraws.
     // fQueuedDraws[i]'s token is fBaseDrawToken + i.
     GrDrawOpUploadToken fBaseDrawToken;
-
     SkSTArray<4, GrMesh> fMeshes;
     SkSTArray<4, QueuedDraw, true> fQueuedDraws;
 

@@ -5,22 +5,26 @@
 #ifndef RemotePlayback_h
 #define RemotePlayback_h
 
-#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/events/EventTarget.h"
 #include "modules/ModulesExport.h"
+#include "platform/bindings/ActiveScriptWrappable.h"
+#include "platform/bindings/TraceWrapperMember.h"
 #include "platform/heap/Handle.h"
+#include "platform/wtf/Compiler.h"
+#include "platform/wtf/text/AtomicString.h"
+#include "platform/wtf/text/WTFString.h"
+#include "public/platform/WebURL.h"
+#include "public/platform/WebVector.h"
+#include "public/platform/modules/presentation/WebPresentationAvailabilityObserver.h"
 #include "public/platform/modules/remoteplayback/WebRemotePlaybackAvailability.h"
 #include "public/platform/modules/remoteplayback/WebRemotePlaybackClient.h"
 #include "public/platform/modules/remoteplayback/WebRemotePlaybackState.h"
-#include "wtf/Compiler.h"
-#include "wtf/text/AtomicString.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
+class AvailabilityCallbackWrapper;
 class HTMLMediaElement;
 class RemotePlaybackAvailabilityCallback;
 class ScriptPromiseResolver;
@@ -29,20 +33,25 @@ class ScriptState;
 class MODULES_EXPORT RemotePlayback final
     : public EventTargetWithInlineData,
       public ActiveScriptWrappable<RemotePlayback>,
-      NON_EXPORTED_BASE(public WebRemotePlaybackClient) {
+      NON_EXPORTED_BASE(public WebRemotePlaybackClient),
+      public WebPresentationAvailabilityObserver {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(RemotePlayback);
 
  public:
-  static RemotePlayback* create(HTMLMediaElement&);
+  // Result of WatchAvailabilityInternal that means availability is not
+  // supported.
+  static const int kWatchAvailabilityNotSupported = -1;
+
+  static RemotePlayback* Create(HTMLMediaElement&);
 
   // Notifies this object that disableRemotePlayback attribute was set on the
   // corresponding media element.
-  void remotePlaybackDisabled();
+  void RemotePlaybackDisabled();
 
   // EventTarget implementation.
-  const WTF::AtomicString& interfaceName() const override;
-  ExecutionContext* getExecutionContext() const override;
+  const WTF::AtomicString& InterfaceName() const override;
+  ExecutionContext* GetExecutionContext() const override;
 
   // Starts notifying the page about the changes to the remote playback devices
   // availability via the provided callback. May start the monitoring of remote
@@ -63,8 +72,30 @@ class MODULES_EXPORT RemotePlayback final
 
   String state() const;
 
+  // The implementation of prompt(). Used by the native remote playback button.
+  void PromptInternal();
+
+  // The implementation of watchAvailability() and cancelWatchAvailability().
+  // Can return kWatchAvailabilityNotSupported to indicate the availability
+  // monitoring is disabled. RemotePlaybackAvailable() will return true then.
+  int WatchAvailabilityInternal(AvailabilityCallbackWrapper*);
+  bool CancelWatchAvailabilityInternal(int id);
+
+  WebRemotePlaybackState GetState() const { return state_; }
+
+  // WebPresentationAvailabilityObserver implementation.
+  void AvailabilityChanged(mojom::ScreenAvailability) override;
+  const WebVector<WebURL>& Urls() const override;
+
+  // WebRemotePlaybackClient implementation.
+  void StateChanged(WebRemotePlaybackState) override;
+  void AvailabilityChanged(WebRemotePlaybackAvailability) override;
+  void PromptCancelled() override;
+  bool RemotePlaybackAvailable() const override;
+  void SourceChanged(const WebURL&) override;
+
   // ScriptWrappable implementation.
-  bool hasPendingActivity() const final;
+  bool HasPendingActivity() const final;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(connecting);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(connect);
@@ -76,25 +107,31 @@ class MODULES_EXPORT RemotePlayback final
  private:
   friend class V8RemotePlayback;
   friend class RemotePlaybackTest;
+  friend class MediaControlsImplTest;
 
   explicit RemotePlayback(HTMLMediaElement&);
 
   // Calls the specified availability callback with the current availability.
   // Need a void() method to post it as a task.
-  void notifyInitialAvailability(int callbackId);
+  void NotifyInitialAvailability(int callback_id);
 
-  // WebRemotePlaybackClient implementation.
-  void stateChanged(WebRemotePlaybackState) override;
-  void availabilityChanged(WebRemotePlaybackAvailability) override;
-  void promptCancelled() override;
-  bool remotePlaybackAvailable() const override;
+  // Starts listening for remote playback device availability if there're both
+  // registered availability callbacks and a valid source set. May be called
+  // more than once in a row.
+  void MaybeStartListeningForAvailability();
 
-  WebRemotePlaybackState m_state;
-  WebRemotePlaybackAvailability m_availability;
-  HeapHashMap<int, TraceWrapperMember<RemotePlaybackAvailabilityCallback>>
-      m_availabilityCallbacks;
-  Member<HTMLMediaElement> m_mediaElement;
-  Member<ScriptPromiseResolver> m_promptPromiseResolver;
+  // Stops listening for remote playback device availability (unconditionally).
+  // May be called more than once in a row.
+  void StopListeningForAvailability();
+
+  WebRemotePlaybackState state_;
+  WebRemotePlaybackAvailability availability_;
+  HeapHashMap<int, TraceWrapperMember<AvailabilityCallbackWrapper>>
+      availability_callbacks_;
+  Member<HTMLMediaElement> media_element_;
+  Member<ScriptPromiseResolver> prompt_promise_resolver_;
+  WebVector<WebURL> availability_urls_;
+  bool is_listening_;
 };
 
 }  // namespace blink

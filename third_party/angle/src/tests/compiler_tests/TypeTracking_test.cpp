@@ -75,7 +75,7 @@ class TypeTrackingTest : public testing::Test
     std::string mInfoLog;
 };
 
-TEST_F(TypeTrackingTest, FunctionPrototypeMangling)
+TEST_F(TypeTrackingTest, FunctionPrototype)
 {
     const std::string &shaderString =
         "precision mediump float;\n"
@@ -90,7 +90,7 @@ TEST_F(TypeTrackingTest, FunctionPrototypeMangling)
         "}\n";
     compile(shaderString);
     ASSERT_FALSE(foundErrorInIntermediateTree());
-    ASSERT_TRUE(foundInIntermediateTree("Function Prototype: fun(f1;"));
+    ASSERT_TRUE(foundInIntermediateTree("Function Prototype: fun"));
 }
 
 TEST_F(TypeTrackingTest, BuiltInFunctionResultPrecision)
@@ -157,12 +157,12 @@ TEST_F(TypeTrackingTest, BuiltInMatFunctionResultTypeAndPrecision)
         "}\n";
     compile(shaderString);
     ASSERT_FALSE(foundErrorInIntermediateTree());
-    ASSERT_TRUE(foundInIntermediateTree("Construct mat2x3 (mediump 2X3 matrix of float)"));
-    ASSERT_TRUE(foundInIntermediateTree("Construct mat3x2 (mediump 3X2 matrix of float)"));
-    ASSERT_TRUE(foundInIntermediateTree("Construct mat2x4 (mediump 2X4 matrix of float)"));
-    ASSERT_TRUE(foundInIntermediateTree("Construct mat4x2 (mediump 4X2 matrix of float)"));
-    ASSERT_TRUE(foundInIntermediateTree("Construct mat3x4 (mediump 3X4 matrix of float)"));
-    ASSERT_TRUE(foundInIntermediateTree("Construct mat4x3 (mediump 4X3 matrix of float)"));
+    ASSERT_TRUE(foundInIntermediateTree("Construct (mediump 2X3 matrix of float)"));
+    ASSERT_TRUE(foundInIntermediateTree("Construct (mediump 3X2 matrix of float)"));
+    ASSERT_TRUE(foundInIntermediateTree("Construct (mediump 2X4 matrix of float)"));
+    ASSERT_TRUE(foundInIntermediateTree("Construct (mediump 4X2 matrix of float)"));
+    ASSERT_TRUE(foundInIntermediateTree("Construct (mediump 3X4 matrix of float)"));
+    ASSERT_TRUE(foundInIntermediateTree("Construct (mediump 4X3 matrix of float)"));
 }
 
 TEST_F(TypeTrackingTest, BuiltInFunctionChoosesHigherPrecision)
@@ -233,7 +233,7 @@ TEST_F(TypeTrackingTest, Texture2DResultTypeAndPrecision)
         "}\n";
     compile(shaderString);
     ASSERT_FALSE(foundErrorInIntermediateTree());
-    ASSERT_TRUE(foundInIntermediateTree("texture2D(s21;vf2; (lowp 4-component vector of float)"));
+    ASSERT_TRUE(foundInIntermediateTree("texture2D (lowp 4-component vector of float)"));
 }
 
 TEST_F(TypeTrackingTest, TextureCubeResultTypeAndPrecision)
@@ -250,7 +250,7 @@ TEST_F(TypeTrackingTest, TextureCubeResultTypeAndPrecision)
         "}\n";
     compile(shaderString);
     ASSERT_FALSE(foundErrorInIntermediateTree());
-    ASSERT_TRUE(foundInIntermediateTree("textureCube(sC1;vf3; (lowp 4-component vector of float)"));
+    ASSERT_TRUE(foundInIntermediateTree("textureCube (lowp 4-component vector of float)"));
 }
 
 TEST_F(TypeTrackingTest, TextureSizeResultTypeAndPrecision)
@@ -271,7 +271,7 @@ TEST_F(TypeTrackingTest, TextureSizeResultTypeAndPrecision)
         "}\n";
     compile(shaderString);
     ASSERT_FALSE(foundErrorInIntermediateTree());
-    ASSERT_TRUE(foundInIntermediateTree("textureSize(s21;i1; (highp 2-component vector of int)"));
+    ASSERT_TRUE(foundInIntermediateTree("textureSize (highp 2-component vector of int)"));
 }
 
 TEST_F(TypeTrackingTest, BuiltInConstructorResultTypeAndPrecision)
@@ -288,7 +288,7 @@ TEST_F(TypeTrackingTest, BuiltInConstructorResultTypeAndPrecision)
         "}\n";
     compile(shaderString);
     ASSERT_FALSE(foundErrorInIntermediateTree());
-    ASSERT_TRUE(foundInIntermediateTree("Construct vec4 (mediump 4-component vector of float)"));
+    ASSERT_TRUE(foundInIntermediateTree("Construct (mediump 4-component vector of float)"));
 }
 
 TEST_F(TypeTrackingTest, StructConstructorResultNoPrecision)
@@ -304,7 +304,7 @@ TEST_F(TypeTrackingTest, StructConstructorResultNoPrecision)
         "}\n";
     compile(shaderString);
     ASSERT_FALSE(foundErrorInIntermediateTree());
-    ASSERT_TRUE(foundInIntermediateTree("Construct structure (structure)"));
+    ASSERT_TRUE(foundInIntermediateTree("Construct (structure)"));
 }
 
 TEST_F(TypeTrackingTest, PackResultTypeAndPrecision)

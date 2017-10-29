@@ -30,16 +30,16 @@
  *
  * Run steps 1-5 above to produce polygons.
  * 5b) Apply fill rules to extract boundary contours from the polygons (extract_boundaries()).
- * 5c) Simplify boundaries to remove "pointy" vertices which cause inversions (simplify_boundary()).
+ * 5c) Simplify boundaries to remove "pointy" vertices that cause inversions (simplify_boundary()).
  * 5d) Displace edges by half a pixel inward and outward along their normals. Intersect to find
  *     new vertices, and set zero alpha on the exterior and one alpha on the interior. Build a new
- *     antialiased mesh from those vertices (boundary_to_aa_mesh()).
+ *     antialiased mesh from those vertices (stroke_boundary()).
  * Run steps 3-6 above on the new mesh, and produce antialiased triangles.
  *
  * The vertex sorting in step (3) is a merge sort, since it plays well with the linked list
  * of vertices (and the necessity of inserting new vertices on intersection).
  *
- * Stages (4) and (5) use an active edge list, which a list of all edges for which the
+ * Stages (4) and (5) use an active edge list -- a list of all edges for which the
  * sweep line has crossed the top vertex, but not the bottom vertex.  It's sorted
  * left-to-right based on the point where both edges are active (when both top vertices
  * have been seen, so the "lower" top vertex of the two). If the top vertices are equal
@@ -50,17 +50,15 @@
  * line-sweep algorithm, but due to floating point inaccuracy, the intersection points are
  * not exact and may violate the mesh topology or active edge list ordering. We
  * accommodate this by adjusting the topology of the mesh and AEL to match the intersection
- * points. This occurs in three ways:
+ * points. This occurs in two ways:
  *
  * A) Intersections may cause a shortened edge to no longer be ordered with respect to its
  *    neighbouring edges at the top or bottom vertex. This is handled by merging the
  *    edges (merge_collinear_edges()).
  * B) Intersections may cause an edge to violate the left-to-right ordering of the
- *    active edge list. This is handled by splitting the neighbour edge on the
- *    intersected vertex (cleanup_active_edges()).
- * C) Shortening an edge may cause an active edge to become inactive or an inactive edge
- *    to become active. This is handled by removing or inserting the edge in the active
- *    edge list (fix_active_state()).
+ *    active edge list. This is handled by detecting potential violations and rewinding
+ *    the active edge list to the vertex before they occur (rewind() during merging,
+ *    rewind_if_necessary() during splitting).
  *
  * The tessellation steps (5) and (6) are based on "Triangulating Simple Polygons and
  * Equivalent Problems" (Fournier and Montuno); also a line-sweep algorithm. Note that it
@@ -145,23 +143,26 @@ struct Vertex {
     : fPoint(point), fPrev(nullptr), fNext(nullptr)
     , fFirstEdgeAbove(nullptr), fLastEdgeAbove(nullptr)
     , fFirstEdgeBelow(nullptr), fLastEdgeBelow(nullptr)
-    , fProcessed(false)
+    , fLeftEnclosingEdge(nullptr), fRightEnclosingEdge(nullptr)
+    , fPartner(nullptr)
     , fAlpha(alpha)
 #if LOGGING_ENABLED
     , fID (-1.0f)
 #endif
     {}
-    SkPoint fPoint;           // Vertex position
-    Vertex* fPrev;            // Linked list of contours, then Y-sorted vertices.
-    Vertex* fNext;            // "
-    Edge*   fFirstEdgeAbove;  // Linked list of edges above this vertex.
-    Edge*   fLastEdgeAbove;   // "
-    Edge*   fFirstEdgeBelow;  // Linked list of edges below this vertex.
-    Edge*   fLastEdgeBelow;   // "
-    bool    fProcessed;       // Has this vertex been seen in simplify()?
+    SkPoint fPoint;               // Vertex position
+    Vertex* fPrev;                // Linked list of contours, then Y-sorted vertices.
+    Vertex* fNext;                // "
+    Edge*   fFirstEdgeAbove;      // Linked list of edges above this vertex.
+    Edge*   fLastEdgeAbove;       // "
+    Edge*   fFirstEdgeBelow;      // Linked list of edges below this vertex.
+    Edge*   fLastEdgeBelow;       // "
+    Edge*   fLeftEnclosingEdge;   // Nearest edge in the AEL left of this vertex.
+    Edge*   fRightEnclosingEdge;  // Nearest edge in the AEL right of this vertex.
+    Vertex* fPartner;             // Corresponding inner or outer vertex (for AA).
     uint8_t fAlpha;
 #if LOGGING_ENABLED
-    float   fID;              // Identifier used for logging.
+    float   fID;                  // Identifier used for logging.
 #endif
 };
 
@@ -242,6 +243,18 @@ struct VertexList {
     void append(Vertex* v) {
         insert(v, fTail, nullptr);
     }
+    void append(const VertexList& list) {
+        if (!list.fHead) {
+            return;
+        }
+        if (fTail) {
+            fTail->fNext = list.fHead;
+            list.fHead->fPrev = fTail;
+        } else {
+            fHead = list.fHead;
+        }
+        fTail = list.fTail;
+    }
     void prepend(Vertex* v) {
         insert(v, nullptr, fHead);
     }
@@ -287,6 +300,7 @@ struct Line {
         double scale = 1.0f / denom;
         point->fX = SkDoubleToScalar((fB * other.fC - other.fB * fC) * scale);
         point->fY = SkDoubleToScalar((other.fA * fC - fA * other.fC) * scale);
+        round(point);
         return true;
     }
     double fA, fB, fC;
@@ -296,8 +310,8 @@ struct Line {
  * An Edge joins a top Vertex to a bottom Vertex. Edge ordering for the list of "edges above" and
  * "edge below" a vertex as well as for the active edge list is handled by isLeftOf()/isRightOf().
  * Note that an Edge will give occasionally dist() != 0 for its own endpoints (because floating
- * point). For speed, that case is only tested by the callers which require it (e.g.,
- * cleanup_active_edges()). Edges also handle checking for intersection with other edges.
+ * point). For speed, that case is only tested by the callers that require it (e.g.,
+ * rewind_if_necessary()). Edges also handle checking for intersection with other edges.
  * Currently, this converts the edges to the parametric form, in order to avoid doing a division
  * until an intersection has been confirmed. This is slightly slower in the "found" case, but
  * a lot faster in the "not found" case.
@@ -418,6 +432,11 @@ struct EdgeList {
     void remove(Edge* edge) {
         list_remove<Edge, &Edge::fLeft, &Edge::fRight>(edge, &fHead, &fTail);
     }
+    void removeAll() {
+        while (fHead) {
+            this->remove(fHead);
+        }
+    }
     void close() {
         if (fHead && fTail) {
             fTail->fRight = fHead;
@@ -480,6 +499,7 @@ struct Poly {
             Edge* e = fFirstEdge;
             VertexList vertices;
             vertices.append(e->fTop);
+            int count = 1;
             while (e != nullptr) {
                 if (kRight_Side == fSide) {
                     vertices.append(e->fBottom);
@@ -488,6 +508,7 @@ struct Poly {
                     vertices.prepend(e->fBottom);
                     e = e->fLeftPolyNext;
                 }
+                count++;
             }
             Vertex* first = vertices.fHead;
             Vertex* v = first->fNext;
@@ -496,6 +517,9 @@ struct Poly {
                 Vertex* prev = v->fPrev;
                 Vertex* curr = v;
                 Vertex* next = v->fNext;
+                if (count == 3) {
+                    return emit_triangle(prev, curr, next, aaParams, data);
+                }
                 double ax = static_cast<double>(curr->fPoint.fX) - prev->fPoint.fX;
                 double ay = static_cast<double>(curr->fPoint.fY) - prev->fPoint.fY;
                 double bx = static_cast<double>(next->fPoint.fX) - curr->fPoint.fX;
@@ -504,6 +528,7 @@ struct Poly {
                     data = emit_triangle(prev, curr, next, aaParams, data);
                     v->fPrev->fNext = v->fNext;
                     v->fNext->fPrev = v->fPrev;
+                    count--;
                     if (v->fPrev == first) {
                         v = v->fNext;
                     } else {
@@ -593,61 +618,63 @@ Poly* new_poly(Poly** head, Vertex* v, int winding, SkArenaAlloc& alloc) {
     return poly;
 }
 
-Vertex* append_point_to_contour(const SkPoint& p, Vertex* prev, Vertex** head,
-                                SkArenaAlloc& alloc) {
+void append_point_to_contour(const SkPoint& p, VertexList* contour, SkArenaAlloc& alloc) {
     Vertex* v = alloc.make<Vertex>(p, 255);
 #if LOGGING_ENABLED
     static float gID = 0.0f;
     v->fID = gID++;
 #endif
-    if (prev) {
-        prev->fNext = v;
-        v->fPrev = prev;
-    } else {
-        *head = v;
-    }
-    return v;
+    contour->append(v);
 }
 
-Vertex* generate_quadratic_points(const SkPoint& p0,
-                                  const SkPoint& p1,
-                                  const SkPoint& p2,
-                                  SkScalar tolSqd,
-                                  Vertex* prev,
-                                  Vertex** head,
-                                  int pointsLeft,
-                                  SkArenaAlloc& alloc) {
-    SkScalar d = p1.distanceToLineSegmentBetweenSqd(p0, p2);
-    if (pointsLeft < 2 || d < tolSqd || !SkScalarIsFinite(d)) {
-        return append_point_to_contour(p2, prev, head, alloc);
+SkScalar quad_error_at(const SkPoint pts[3], SkScalar t, SkScalar u) {
+    SkQuadCoeff quad(pts);
+    SkPoint p0 = to_point(quad.eval(t - 0.5f * u));
+    SkPoint mid = to_point(quad.eval(t));
+    SkPoint p1 = to_point(quad.eval(t + 0.5f * u));
+    if (!p0.isFinite() || !mid.isFinite() || !p1.isFinite()) {
+        return 0;
     }
-
-    const SkPoint q[] = {
-        { SkScalarAve(p0.fX, p1.fX), SkScalarAve(p0.fY, p1.fY) },
-        { SkScalarAve(p1.fX, p2.fX), SkScalarAve(p1.fY, p2.fY) },
-    };
-    const SkPoint r = { SkScalarAve(q[0].fX, q[1].fX), SkScalarAve(q[0].fY, q[1].fY) };
-
-    pointsLeft >>= 1;
-    prev = generate_quadratic_points(p0, q[0], r, tolSqd, prev, head, pointsLeft, alloc);
-    prev = generate_quadratic_points(r, q[1], p2, tolSqd, prev, head, pointsLeft, alloc);
-    return prev;
+    return mid.distanceToLineSegmentBetweenSqd(p0, p1);
 }
 
-Vertex* generate_cubic_points(const SkPoint& p0,
-                              const SkPoint& p1,
-                              const SkPoint& p2,
-                              const SkPoint& p3,
-                              SkScalar tolSqd,
-                              Vertex* prev,
-                              Vertex** head,
-                              int pointsLeft,
-                              SkArenaAlloc& alloc) {
+void append_quadratic_to_contour(const SkPoint pts[3], SkScalar toleranceSqd, VertexList* contour,
+                                 SkArenaAlloc& alloc) {
+    SkQuadCoeff quad(pts);
+    Sk2s aa = quad.fA * quad.fA;
+    SkScalar denom = 2.0f * (aa[0] + aa[1]);
+    Sk2s ab = quad.fA * quad.fB;
+    SkScalar t = denom ? (-ab[0] - ab[1]) / denom : 0.0f;
+    int nPoints = 1;
+    SkScalar u;
+    // Test possible subdivision values only at the point of maximum curvature.
+    // If it passes the flatness metric there, it'll pass everywhere.
+    for (;;) {
+        u = 1.0f / nPoints;
+        if (quad_error_at(pts, t, u) < toleranceSqd) {
+            break;
+        }
+        nPoints++;
+    }
+    for (int j = 1; j <= nPoints; j++) {
+        append_point_to_contour(to_point(quad.eval(j * u)), contour, alloc);
+    }
+}
+
+void generate_cubic_points(const SkPoint& p0,
+                           const SkPoint& p1,
+                           const SkPoint& p2,
+                           const SkPoint& p3,
+                           SkScalar tolSqd,
+                           VertexList* contour,
+                           int pointsLeft,
+                           SkArenaAlloc& alloc) {
     SkScalar d1 = p1.distanceToLineSegmentBetweenSqd(p0, p3);
     SkScalar d2 = p2.distanceToLineSegmentBetweenSqd(p0, p3);
     if (pointsLeft < 2 || (d1 < tolSqd && d2 < tolSqd) ||
         !SkScalarIsFinite(d1) || !SkScalarIsFinite(d2)) {
-        return append_point_to_contour(p3, prev, head, alloc);
+        append_point_to_contour(p3, contour, alloc);
+        return;
     }
     const SkPoint q[] = {
         { SkScalarAve(p0.fX, p1.fX), SkScalarAve(p0.fY, p1.fY) },
@@ -660,92 +687,66 @@ Vertex* generate_cubic_points(const SkPoint& p0,
     };
     const SkPoint s = { SkScalarAve(r[0].fX, r[1].fX), SkScalarAve(r[0].fY, r[1].fY) };
     pointsLeft >>= 1;
-    prev = generate_cubic_points(p0, q[0], r[0], s, tolSqd, prev, head, pointsLeft, alloc);
-    prev = generate_cubic_points(s, r[1], q[2], p3, tolSqd, prev, head, pointsLeft, alloc);
-    return prev;
+    generate_cubic_points(p0, q[0], r[0], s, tolSqd, contour, pointsLeft, alloc);
+    generate_cubic_points(s, r[1], q[2], p3, tolSqd, contour, pointsLeft, alloc);
 }
 
 // Stage 1: convert the input path to a set of linear contours (linked list of Vertices).
 
 void path_to_contours(const SkPath& path, SkScalar tolerance, const SkRect& clipBounds,
-                      Vertex** contours, SkArenaAlloc& alloc, bool *isLinear) {
+                      VertexList* contours, SkArenaAlloc& alloc, bool *isLinear) {
     SkScalar toleranceSqd = tolerance * tolerance;
 
     SkPoint pts[4];
-    bool done = false;
     *isLinear = true;
+    VertexList* contour = contours;
     SkPath::Iter iter(path, false);
-    Vertex* prev = nullptr;
-    Vertex* head = nullptr;
     if (path.isInverseFillType()) {
         SkPoint quad[4];
         clipBounds.toQuad(quad);
         for (int i = 3; i >= 0; i--) {
-            prev = append_point_to_contour(quad[i], prev, &head, alloc);
+            append_point_to_contour(quad[i], contours, alloc);
         }
-        head->fPrev = prev;
-        prev->fNext = head;
-        *contours++ = head;
-        head = prev = nullptr;
+        contour++;
     }
     SkAutoConicToQuads converter;
-    while (!done) {
-        SkPath::Verb verb = iter.next(pts);
+    SkPath::Verb verb;
+    while ((verb = iter.next(pts)) != SkPath::kDone_Verb) {
         switch (verb) {
             case SkPath::kConic_Verb: {
                 SkScalar weight = iter.conicWeight();
                 const SkPoint* quadPts = converter.computeQuads(pts, weight, toleranceSqd);
                 for (int i = 0; i < converter.countQuads(); ++i) {
-                    int pointsLeft = GrPathUtils::quadraticPointCount(quadPts, tolerance);
-                    prev = generate_quadratic_points(quadPts[0], quadPts[1], quadPts[2],
-                                                     toleranceSqd, prev, &head, pointsLeft, alloc);
+                    append_quadratic_to_contour(quadPts, toleranceSqd, contour, alloc);
                     quadPts += 2;
                 }
                 *isLinear = false;
                 break;
             }
             case SkPath::kMove_Verb:
-                if (head) {
-                    head->fPrev = prev;
-                    prev->fNext = head;
-                    *contours++ = head;
+                if (contour->fHead) {
+                    contour++;
                 }
-                head = prev = nullptr;
-                prev = append_point_to_contour(pts[0], prev, &head, alloc);
+                append_point_to_contour(pts[0], contour, alloc);
                 break;
             case SkPath::kLine_Verb: {
-                prev = append_point_to_contour(pts[1], prev, &head, alloc);
+                append_point_to_contour(pts[1], contour, alloc);
                 break;
             }
             case SkPath::kQuad_Verb: {
-                int pointsLeft = GrPathUtils::quadraticPointCount(pts, tolerance);
-                prev = generate_quadratic_points(pts[0], pts[1], pts[2], toleranceSqd, prev,
-                                                 &head, pointsLeft, alloc);
+                append_quadratic_to_contour(pts, toleranceSqd, contour, alloc);
                 *isLinear = false;
                 break;
             }
             case SkPath::kCubic_Verb: {
                 int pointsLeft = GrPathUtils::cubicPointCount(pts, tolerance);
-                prev = generate_cubic_points(pts[0], pts[1], pts[2], pts[3],
-                                toleranceSqd, prev, &head, pointsLeft, alloc);
+                generate_cubic_points(pts[0], pts[1], pts[2], pts[3], toleranceSqd, contour,
+                                      pointsLeft, alloc);
                 *isLinear = false;
                 break;
             }
             case SkPath::kClose_Verb:
-                if (head) {
-                    head->fPrev = prev;
-                    prev->fNext = head;
-                    *contours++ = head;
-                }
-                head = prev = nullptr;
-                break;
             case SkPath::kDone_Verb:
-                if (head) {
-                    head->fPrev = prev;
-                    prev->fNext = head;
-                    *contours++ = head;
-                }
-                done = true;
                 break;
         }
     }
@@ -809,40 +810,6 @@ void find_enclosing_edges(Vertex* v, EdgeList* edges, Edge** left, Edge** right)
     *right = next;
 }
 
-void find_enclosing_edges(Edge* edge, EdgeList* edges, Comparator& c, Edge** left, Edge** right) {
-    Edge* prev = nullptr;
-    Edge* next;
-    for (next = edges->fHead; next != nullptr; next = next->fRight) {
-        if ((c.sweep_lt(next->fTop->fPoint, edge->fTop->fPoint) && next->isRightOf(edge->fTop)) ||
-            (c.sweep_lt(edge->fTop->fPoint, next->fTop->fPoint) && edge->isLeftOf(next->fTop)) ||
-            (c.sweep_lt(edge->fBottom->fPoint, next->fBottom->fPoint) &&
-             next->isRightOf(edge->fBottom)) ||
-            (c.sweep_lt(next->fBottom->fPoint, edge->fBottom->fPoint) &&
-             edge->isLeftOf(next->fBottom))) {
-            break;
-        }
-        prev = next;
-    }
-    *left = prev;
-    *right = next;
-}
-
-void fix_active_state(Edge* edge, EdgeList* activeEdges, Comparator& c) {
-    if (!activeEdges) {
-        return;
-    }
-    if (activeEdges->contains(edge)) {
-        if (edge->fBottom->fProcessed || !edge->fTop->fProcessed) {
-            remove_edge(edge, activeEdges);
-        }
-    } else if (edge->fTop->fProcessed && !edge->fBottom->fProcessed) {
-        Edge* left;
-        Edge* right;
-        find_enclosing_edges(edge, activeEdges, c, &left, &right);
-        insert_edge(edge, left, activeEdges);
-    }
-}
-
 void insert_edge_above(Edge* edge, Vertex* v, Comparator& c) {
     if (edge->fTop->fPoint == edge->fBottom->fPoint ||
         c.sweep_lt(edge->fBottom->fPoint, edge->fTop->fPoint)) {
@@ -899,136 +866,174 @@ void disconnect(Edge* edge)
     remove_edge_below(edge);
 }
 
-void erase_edge(Edge* edge, EdgeList* edges) {
-    LOG("erasing edge (%g -> %g)\n", edge->fTop->fID, edge->fBottom->fID);
-    disconnect(edge);
-    if (edges && edges->contains(edge)) {
-        remove_edge(edge, edges);
+void merge_collinear_edges(Edge* edge, EdgeList* activeEdges, Vertex** current, Comparator& c);
+
+void rewind(EdgeList* activeEdges, Vertex** current, Vertex* dst, Comparator& c) {
+    if (!current || *current == dst || c.sweep_lt((*current)->fPoint, dst->fPoint)) {
+        return;
     }
-}
-
-void merge_collinear_edges(Edge* edge, EdgeList* activeEdges, Comparator& c);
-
-void set_top(Edge* edge, Vertex* v, EdgeList* activeEdges, Comparator& c) {
-    remove_edge_below(edge);
-    edge->fTop = v;
-    edge->recompute();
-    insert_edge_below(edge, v, c);
-    fix_active_state(edge, activeEdges, c);
-    merge_collinear_edges(edge, activeEdges, c);
-}
-
-void set_bottom(Edge* edge, Vertex* v, EdgeList* activeEdges, Comparator& c) {
-    remove_edge_above(edge);
-    edge->fBottom = v;
-    edge->recompute();
-    insert_edge_above(edge, v, c);
-    fix_active_state(edge, activeEdges, c);
-    merge_collinear_edges(edge, activeEdges, c);
-}
-
-void merge_edges_above(Edge* edge, Edge* other, EdgeList* activeEdges, Comparator& c) {
-    if (coincident(edge->fTop->fPoint, other->fTop->fPoint)) {
-        LOG("merging coincident above edges (%g, %g) -> (%g, %g)\n",
-            edge->fTop->fPoint.fX, edge->fTop->fPoint.fY,
-            edge->fBottom->fPoint.fX, edge->fBottom->fPoint.fY);
-        other->fWinding += edge->fWinding;
-        erase_edge(edge, activeEdges);
-    } else if (c.sweep_lt(edge->fTop->fPoint, other->fTop->fPoint)) {
-        other->fWinding += edge->fWinding;
-        set_bottom(edge, other->fTop, activeEdges, c);
-    } else {
-        edge->fWinding += other->fWinding;
-        set_bottom(other, edge->fTop, activeEdges, c);
+    Vertex* v = *current;
+    LOG("rewinding active edges from vertex %g to vertex %g\n", v->fID, dst->fID);
+    while (v != dst) {
+        v = v->fPrev;
+        for (Edge* e = v->fFirstEdgeBelow; e; e = e->fNextEdgeBelow) {
+            remove_edge(e, activeEdges);
+        }
+        Edge* leftEdge = v->fLeftEnclosingEdge;
+        for (Edge* e = v->fFirstEdgeAbove; e; e = e->fNextEdgeAbove) {
+            insert_edge(e, leftEdge, activeEdges);
+            leftEdge = e;
+        }
     }
+    *current = v;
 }
 
-void merge_edges_below(Edge* edge, Edge* other, EdgeList* activeEdges, Comparator& c) {
-    if (coincident(edge->fBottom->fPoint, other->fBottom->fPoint)) {
-        LOG("merging coincident below edges (%g, %g) -> (%g, %g)\n",
-            edge->fTop->fPoint.fX, edge->fTop->fPoint.fY,
-            edge->fBottom->fPoint.fX, edge->fBottom->fPoint.fY);
-        other->fWinding += edge->fWinding;
-        erase_edge(edge, activeEdges);
-    } else if (c.sweep_lt(edge->fBottom->fPoint, other->fBottom->fPoint)) {
-        edge->fWinding += other->fWinding;
-        set_top(other, edge->fBottom, activeEdges, c);
-    } else {
-        other->fWinding += edge->fWinding;
-        set_top(edge, other->fBottom, activeEdges, c);
+void rewind_if_necessary(Edge* edge, EdgeList* activeEdges, Vertex** current, Comparator& c) {
+    if (!activeEdges || !current) {
+        return;
     }
-}
-
-void merge_collinear_edges(Edge* edge, EdgeList* activeEdges, Comparator& c) {
-    if (edge->fPrevEdgeAbove && (edge->fTop == edge->fPrevEdgeAbove->fTop ||
-                                 !edge->fPrevEdgeAbove->isLeftOf(edge->fTop))) {
-        merge_edges_above(edge, edge->fPrevEdgeAbove, activeEdges, c);
-    } else if (edge->fNextEdgeAbove && (edge->fTop == edge->fNextEdgeAbove->fTop ||
-                                        !edge->isLeftOf(edge->fNextEdgeAbove->fTop))) {
-        merge_edges_above(edge, edge->fNextEdgeAbove, activeEdges, c);
-    }
-    if (edge->fPrevEdgeBelow && (edge->fBottom == edge->fPrevEdgeBelow->fBottom ||
-                                 !edge->fPrevEdgeBelow->isLeftOf(edge->fBottom))) {
-        merge_edges_below(edge, edge->fPrevEdgeBelow, activeEdges, c);
-    } else if (edge->fNextEdgeBelow && (edge->fBottom == edge->fNextEdgeBelow->fBottom ||
-                                        !edge->isLeftOf(edge->fNextEdgeBelow->fBottom))) {
-        merge_edges_below(edge, edge->fNextEdgeBelow, activeEdges, c);
-    }
-}
-
-void split_edge(Edge* edge, Vertex* v, EdgeList* activeEdges, Comparator& c, SkArenaAlloc& alloc);
-
-void cleanup_active_edges(Edge* edge, EdgeList* activeEdges, Comparator& c, SkArenaAlloc& alloc) {
     Vertex* top = edge->fTop;
     Vertex* bottom = edge->fBottom;
     if (edge->fLeft) {
         Vertex* leftTop = edge->fLeft->fTop;
         Vertex* leftBottom = edge->fLeft->fBottom;
         if (c.sweep_lt(leftTop->fPoint, top->fPoint) && !edge->fLeft->isLeftOf(top)) {
-            split_edge(edge->fLeft, edge->fTop, activeEdges, c, alloc);
+            rewind(activeEdges, current, leftTop, c);
         } else if (c.sweep_lt(top->fPoint, leftTop->fPoint) && !edge->isRightOf(leftTop)) {
-            split_edge(edge, leftTop, activeEdges, c, alloc);
+            rewind(activeEdges, current, top, c);
         } else if (c.sweep_lt(bottom->fPoint, leftBottom->fPoint) &&
                    !edge->fLeft->isLeftOf(bottom)) {
-            split_edge(edge->fLeft, bottom, activeEdges, c, alloc);
+            rewind(activeEdges, current, leftTop, c);
         } else if (c.sweep_lt(leftBottom->fPoint, bottom->fPoint) && !edge->isRightOf(leftBottom)) {
-            split_edge(edge, leftBottom, activeEdges, c, alloc);
+            rewind(activeEdges, current, top, c);
         }
     }
     if (edge->fRight) {
         Vertex* rightTop = edge->fRight->fTop;
         Vertex* rightBottom = edge->fRight->fBottom;
         if (c.sweep_lt(rightTop->fPoint, top->fPoint) && !edge->fRight->isRightOf(top)) {
-            split_edge(edge->fRight, top, activeEdges, c, alloc);
+            rewind(activeEdges, current, rightTop, c);
         } else if (c.sweep_lt(top->fPoint, rightTop->fPoint) && !edge->isLeftOf(rightTop)) {
-            split_edge(edge, rightTop, activeEdges, c, alloc);
+            rewind(activeEdges, current, top, c);
         } else if (c.sweep_lt(bottom->fPoint, rightBottom->fPoint) &&
                    !edge->fRight->isRightOf(bottom)) {
-            split_edge(edge->fRight, bottom, activeEdges, c, alloc);
+            rewind(activeEdges, current, rightTop, c);
         } else if (c.sweep_lt(rightBottom->fPoint, bottom->fPoint) &&
                    !edge->isLeftOf(rightBottom)) {
-            split_edge(edge, rightBottom, activeEdges, c, alloc);
+            rewind(activeEdges, current, top, c);
         }
     }
 }
 
-void split_edge(Edge* edge, Vertex* v, EdgeList* activeEdges, Comparator& c, SkArenaAlloc& alloc) {
+void set_top(Edge* edge, Vertex* v, EdgeList* activeEdges, Vertex** current, Comparator& c) {
+    remove_edge_below(edge);
+    edge->fTop = v;
+    edge->recompute();
+    insert_edge_below(edge, v, c);
+    rewind_if_necessary(edge, activeEdges, current, c);
+    merge_collinear_edges(edge, activeEdges, current, c);
+}
+
+void set_bottom(Edge* edge, Vertex* v, EdgeList* activeEdges, Vertex** current, Comparator& c) {
+    remove_edge_above(edge);
+    edge->fBottom = v;
+    edge->recompute();
+    insert_edge_above(edge, v, c);
+    rewind_if_necessary(edge, activeEdges, current, c);
+    merge_collinear_edges(edge, activeEdges, current, c);
+}
+
+void merge_edges_above(Edge* edge, Edge* other, EdgeList* activeEdges, Vertex** current,
+                       Comparator& c) {
+    if (coincident(edge->fTop->fPoint, other->fTop->fPoint)) {
+        LOG("merging coincident above edges (%g, %g) -> (%g, %g)\n",
+            edge->fTop->fPoint.fX, edge->fTop->fPoint.fY,
+            edge->fBottom->fPoint.fX, edge->fBottom->fPoint.fY);
+        rewind(activeEdges, current, edge->fTop, c);
+        other->fWinding += edge->fWinding;
+        disconnect(edge);
+    } else if (c.sweep_lt(edge->fTop->fPoint, other->fTop->fPoint)) {
+        rewind(activeEdges, current, edge->fTop, c);
+        other->fWinding += edge->fWinding;
+        set_bottom(edge, other->fTop, activeEdges, current, c);
+    } else {
+        rewind(activeEdges, current, other->fTop, c);
+        edge->fWinding += other->fWinding;
+        set_bottom(other, edge->fTop, activeEdges, current, c);
+    }
+}
+
+void merge_edges_below(Edge* edge, Edge* other, EdgeList* activeEdges, Vertex** current,
+                       Comparator& c) {
+    if (coincident(edge->fBottom->fPoint, other->fBottom->fPoint)) {
+        LOG("merging coincident below edges (%g, %g) -> (%g, %g)\n",
+            edge->fTop->fPoint.fX, edge->fTop->fPoint.fY,
+            edge->fBottom->fPoint.fX, edge->fBottom->fPoint.fY);
+        rewind(activeEdges, current, edge->fTop, c);
+        other->fWinding += edge->fWinding;
+        disconnect(edge);
+    } else if (c.sweep_lt(edge->fBottom->fPoint, other->fBottom->fPoint)) {
+        rewind(activeEdges, current, other->fTop, c);
+        edge->fWinding += other->fWinding;
+        set_top(other, edge->fBottom, activeEdges, current, c);
+    } else {
+        rewind(activeEdges, current, edge->fTop, c);
+        other->fWinding += edge->fWinding;
+        set_top(edge, other->fBottom, activeEdges, current, c);
+    }
+}
+
+void merge_collinear_edges(Edge* edge, EdgeList* activeEdges, Vertex** current, Comparator& c) {
+    for (;;) {
+        if (edge->fPrevEdgeAbove && (edge->fTop == edge->fPrevEdgeAbove->fTop ||
+                                     !edge->fPrevEdgeAbove->isLeftOf(edge->fTop))) {
+            merge_edges_above(edge, edge->fPrevEdgeAbove, activeEdges, current, c);
+        } else if (edge->fNextEdgeAbove && (edge->fTop == edge->fNextEdgeAbove->fTop ||
+                                            !edge->isLeftOf(edge->fNextEdgeAbove->fTop))) {
+            merge_edges_above(edge, edge->fNextEdgeAbove, activeEdges, current, c);
+        } else if (edge->fPrevEdgeBelow && (edge->fBottom == edge->fPrevEdgeBelow->fBottom ||
+                                     !edge->fPrevEdgeBelow->isLeftOf(edge->fBottom))) {
+            merge_edges_below(edge, edge->fPrevEdgeBelow, activeEdges, current, c);
+        } else if (edge->fNextEdgeBelow && (edge->fBottom == edge->fNextEdgeBelow->fBottom ||
+                                            !edge->isLeftOf(edge->fNextEdgeBelow->fBottom))) {
+            merge_edges_below(edge, edge->fNextEdgeBelow, activeEdges, current, c);
+        } else {
+            break;
+        }
+    }
+    SkASSERT(!edge->fPrevEdgeAbove || edge->fPrevEdgeAbove->isLeftOf(edge->fTop));
+    SkASSERT(!edge->fPrevEdgeBelow || edge->fPrevEdgeBelow->isLeftOf(edge->fBottom));
+    SkASSERT(!edge->fNextEdgeAbove || edge->fNextEdgeAbove->isRightOf(edge->fTop));
+    SkASSERT(!edge->fNextEdgeBelow || edge->fNextEdgeBelow->isRightOf(edge->fBottom));
+}
+
+void split_edge(Edge* edge, Vertex* v, EdgeList* activeEdges, Vertex** current, Comparator& c,
+                SkArenaAlloc& alloc) {
+    if (v == edge->fTop || v == edge->fBottom) {
+        return;
+    }
     LOG("splitting edge (%g -> %g) at vertex %g (%g, %g)\n",
         edge->fTop->fID, edge->fBottom->fID,
         v->fID, v->fPoint.fX, v->fPoint.fY);
+    Vertex* top;
+    Vertex* bottom;
     if (c.sweep_lt(v->fPoint, edge->fTop->fPoint)) {
-        set_top(edge, v, activeEdges, c);
+        top = v;
+        bottom = edge->fTop;
+        set_top(edge, v, activeEdges, current, c);
     } else if (c.sweep_lt(edge->fBottom->fPoint, v->fPoint)) {
-        set_bottom(edge, v, activeEdges, c);
+        top = edge->fBottom;
+        bottom = v;
+        set_bottom(edge, v, activeEdges, current, c);
     } else {
-        Edge* newEdge = alloc.make<Edge>(v, edge->fBottom, edge->fWinding, edge->fType);
-        insert_edge_below(newEdge, v, c);
-        insert_edge_above(newEdge, edge->fBottom, c);
-        set_bottom(edge, v, activeEdges, c);
-        cleanup_active_edges(edge, activeEdges, c, alloc);
-        fix_active_state(newEdge, activeEdges, c);
-        merge_collinear_edges(newEdge, activeEdges, c);
+        top = v;
+        bottom = edge->fBottom;
+        set_bottom(edge, v, activeEdges, current, c);
     }
+    Edge* newEdge = alloc.make<Edge>(top, bottom, edge->fWinding, edge->fType);
+    insert_edge_below(newEdge, top, c);
+    insert_edge_above(newEdge, bottom, c);
+    merge_collinear_edges(newEdge, activeEdges, current, c);
 }
 
 Edge* connect(Vertex* prev, Vertex* next, Edge::Type type, Comparator& c, SkArenaAlloc& alloc,
@@ -1037,7 +1042,7 @@ Edge* connect(Vertex* prev, Vertex* next, Edge::Type type, Comparator& c, SkAren
     insert_edge_below(edge, edge->fTop, c);
     insert_edge_above(edge, edge->fBottom, c);
     edge->fWinding *= winding_scale;
-    merge_collinear_edges(edge, nullptr, c);
+    merge_collinear_edges(edge, nullptr, nullptr, c);
     return edge;
 }
 
@@ -1046,14 +1051,17 @@ void merge_vertices(Vertex* src, Vertex* dst, VertexList* mesh, Comparator& c,
     LOG("found coincident verts at %g, %g; merging %g into %g\n", src->fPoint.fX, src->fPoint.fY,
         src->fID, dst->fID);
     dst->fAlpha = SkTMax(src->fAlpha, dst->fAlpha);
+    if (src->fPartner) {
+        src->fPartner->fPartner = dst;
+    }
     for (Edge* edge = src->fFirstEdgeAbove; edge;) {
         Edge* next = edge->fNextEdgeAbove;
-        set_bottom(edge, dst, nullptr, c);
+        set_bottom(edge, dst, nullptr, nullptr, c);
         edge = next;
     }
     for (Edge* edge = src->fFirstEdgeBelow; edge;) {
         Edge* next = edge->fNextEdgeBelow;
-        set_top(edge, dst, nullptr, c);
+        set_top(edge, dst, nullptr, nullptr, c);
         edge = next;
     }
     mesh->remove(src);
@@ -1070,94 +1078,90 @@ uint8_t max_edge_alpha(Edge* a, Edge* b) {
     }
 }
 
-Vertex* check_for_intersection(Edge* edge, Edge* other, EdgeList* activeEdges, Comparator& c,
-                               SkArenaAlloc& alloc) {
+bool check_for_intersection(Edge* edge, Edge* other, EdgeList* activeEdges, Vertex** current,
+                            VertexList* mesh, Comparator& c, SkArenaAlloc& alloc) {
     if (!edge || !other) {
-        return nullptr;
+        return false;
     }
     SkPoint p;
     uint8_t alpha;
-    if (edge->intersect(*other, &p, &alpha)) {
+    if (edge->intersect(*other, &p, &alpha) && p.isFinite()) {
         Vertex* v;
         LOG("found intersection, pt is %g, %g\n", p.fX, p.fY);
-        if (p == edge->fTop->fPoint || c.sweep_lt(p, edge->fTop->fPoint)) {
-            split_edge(other, edge->fTop, activeEdges, c, alloc);
+        Vertex* top = *current;
+        // If the intersection point is above the current vertex, rewind to the vertex above the
+        // intersection.
+        while (top && c.sweep_lt(p, top->fPoint)) {
+            top = top->fPrev;
+        }
+        if (p == edge->fTop->fPoint) {
             v = edge->fTop;
-        } else if (p == edge->fBottom->fPoint || c.sweep_lt(edge->fBottom->fPoint, p)) {
-            split_edge(other, edge->fBottom, activeEdges, c, alloc);
+        } else if (p == edge->fBottom->fPoint) {
             v = edge->fBottom;
-        } else if (p == other->fTop->fPoint || c.sweep_lt(p, other->fTop->fPoint)) {
-            split_edge(edge, other->fTop, activeEdges, c, alloc);
+        } else if (p == other->fTop->fPoint) {
             v = other->fTop;
-        } else if (p == other->fBottom->fPoint || c.sweep_lt(other->fBottom->fPoint, p)) {
-            split_edge(edge, other->fBottom, activeEdges, c, alloc);
+        } else if (p == other->fBottom->fPoint) {
             v = other->fBottom;
         } else {
-            Vertex* nextV = edge->fTop;
-            while (c.sweep_lt(p, nextV->fPoint)) {
-                nextV = nextV->fPrev;
-            }
-            while (c.sweep_lt(nextV->fPoint, p)) {
+            Vertex* prevV = top;
+            Vertex* nextV = top ? top->fNext : mesh->fHead;
+            while (nextV && c.sweep_lt(nextV->fPoint, p)) {
+                prevV = nextV;
                 nextV = nextV->fNext;
             }
-            Vertex* prevV = nextV->fPrev;
-            if (coincident(prevV->fPoint, p)) {
+            if (prevV && coincident(prevV->fPoint, p)) {
                 v = prevV;
-            } else if (coincident(nextV->fPoint, p)) {
+            } else if (nextV && coincident(nextV->fPoint, p)) {
                 v = nextV;
             } else {
                 v = alloc.make<Vertex>(p, alpha);
-                LOG("inserting between %g (%g, %g) and %g (%g, %g)\n",
-                    prevV->fID, prevV->fPoint.fX, prevV->fPoint.fY,
-                    nextV->fID, nextV->fPoint.fX, nextV->fPoint.fY);
 #if LOGGING_ENABLED
-                v->fID = (nextV->fID + prevV->fID) * 0.5f;
+                if (!prevV) {
+                    v->fID = mesh->fHead->fID - 1.0f;
+                } else if (!nextV) {
+                    v->fID = mesh->fTail->fID + 1.0f;
+                } else {
+                    v->fID = (prevV->fID + nextV->fID) * 0.5f;
+                }
 #endif
-                v->fPrev = prevV;
-                v->fNext = nextV;
-                prevV->fNext = v;
-                nextV->fPrev = v;
+                mesh->insert(v, prevV, nextV);
             }
-            split_edge(edge, v, activeEdges, c, alloc);
-            split_edge(other, v, activeEdges, c, alloc);
         }
+        rewind(activeEdges, current, top ? top : v, c);
+        split_edge(edge, v, activeEdges, current, c, alloc);
+        split_edge(other, v, activeEdges, current, c, alloc);
         v->fAlpha = SkTMax(v->fAlpha, alpha);
-        return v;
+        return true;
     }
-    return nullptr;
+    return false;
 }
 
-void sanitize_contours(Vertex** contours, int contourCnt, bool approximate) {
-    for (int i = 0; i < contourCnt; ++i) {
-        SkASSERT(contours[i]);
+void sanitize_contours(VertexList* contours, int contourCnt, bool approximate) {
+    for (VertexList* contour = contours; contourCnt > 0; --contourCnt, ++contour) {
+        SkASSERT(contour->fHead);
+        Vertex* prev = contour->fTail;
         if (approximate) {
-            round(&contours[i]->fPrev->fPoint);
+            round(&prev->fPoint);
         }
-        for (Vertex* v = contours[i];;) {
+        for (Vertex* v = contour->fHead; v;) {
             if (approximate) {
                 round(&v->fPoint);
             }
-            if (coincident(v->fPrev->fPoint, v->fPoint)) {
+            Vertex* next = v->fNext;
+            if (coincident(prev->fPoint, v->fPoint)) {
                 LOG("vertex %g,%g coincident; removing\n", v->fPoint.fX, v->fPoint.fY);
-                if (v->fPrev == v) {
-                    contours[i] = nullptr;
-                    break;
-                }
-                v->fPrev->fNext = v->fNext;
-                v->fNext->fPrev = v->fPrev;
-                if (contours[i] == v) {
-                    contours[i] = v->fPrev;
-                }
-                v = v->fPrev;
-            } else {
-                v = v->fNext;
-                if (v == contours[i]) break;
+                contour->remove(v);
             }
+            prev = v;
+            v = next;
         }
     }
 }
 
 void merge_coincident_vertices(VertexList* mesh, Comparator& c, SkArenaAlloc& alloc) {
+    if (!mesh->fHead) {
+        return;
+    }
     for (Vertex* v = mesh->fHead->fNext; v != nullptr; v = v->fNext) {
         if (c.sweep_lt(v->fPoint, v->fPrev->fPoint)) {
             v->fPoint = v->fPrev->fPoint;
@@ -1170,28 +1174,62 @@ void merge_coincident_vertices(VertexList* mesh, Comparator& c, SkArenaAlloc& al
 
 // Stage 2: convert the contours to a mesh of edges connecting the vertices.
 
-void build_edges(Vertex** contours, int contourCnt, VertexList* mesh, Comparator& c,
+void build_edges(VertexList* contours, int contourCnt, VertexList* mesh, Comparator& c,
                  SkArenaAlloc& alloc) {
-    Vertex* prev = nullptr;
-    for (int i = 0; i < contourCnt; ++i) {
-        for (Vertex* v = contours[i]; v != nullptr;) {
-            Vertex* vNext = v->fNext;
-            connect(v->fPrev, v, Edge::Type::kInner, c, alloc);
-            if (prev) {
-                prev->fNext = v;
-                v->fPrev = prev;
-            } else {
-                mesh->fHead = v;
-            }
+    for (VertexList* contour = contours; contourCnt > 0; --contourCnt, ++contour) {
+        Vertex* prev = contour->fTail;
+        for (Vertex* v = contour->fHead; v;) {
+            Vertex* next = v->fNext;
+            connect(prev, v, Edge::Type::kInner, c, alloc);
+            mesh->append(v);
             prev = v;
-            v = vNext;
-            if (v == contours[i]) break;
+            v = next;
         }
     }
-    if (prev) {
-        prev->fNext = mesh->fHead->fPrev = nullptr;
+}
+
+void connect_partners(VertexList* outerVertices, Comparator& c, SkArenaAlloc& alloc) {
+    for (Vertex* outer = outerVertices->fHead; outer; outer = outer->fNext) {
+        if (Vertex* inner = outer->fPartner) {
+            // Connector edges get zero winding, since they're only structural (i.e., to ensure
+            // no 0-0-0 alpha triangles are produced), and shouldn't affect the poly winding number.
+            connect(outer, inner, Edge::Type::kConnector, c, alloc, 0);
+            inner->fPartner = outer->fPartner = nullptr;
+        }
     }
-    mesh->fTail = prev;
+}
+
+template <CompareFunc sweep_lt>
+void sorted_merge(VertexList* front, VertexList* back, VertexList* result) {
+    Vertex* a = front->fHead;
+    Vertex* b = back->fHead;
+    while (a && b) {
+        if (sweep_lt(a->fPoint, b->fPoint)) {
+            front->remove(a);
+            result->append(a);
+            a = front->fHead;
+        } else {
+            back->remove(b);
+            result->append(b);
+            b = back->fHead;
+        }
+    }
+    result->append(*front);
+    result->append(*back);
+}
+
+void sorted_merge(VertexList* front, VertexList* back, VertexList* result, Comparator& c) {
+    if (c.fDirection == Comparator::Direction::kHorizontal) {
+        sorted_merge<sweep_lt_horiz>(front, back, result);
+    } else {
+        sorted_merge<sweep_lt_vert>(front, back, result);
+    }
+#if LOGGING_ENABLED
+    float id = 0.0f;
+    for (Vertex* v = result->fHead; v; v = v->fNext) {
+        v->fID = id++;
+    }
+#endif
 }
 
 // Stage 3: sort the vertices by increasing sweep direction.
@@ -1221,62 +1259,49 @@ void merge_sort(VertexList* vertices) {
     merge_sort<sweep_lt>(&back);
 
     vertices->fHead = vertices->fTail = nullptr;
-    Vertex* a = front.fHead;
-    Vertex* b = back.fHead;
-    while (a && b) {
-        if (sweep_lt(a->fPoint, b->fPoint)) {
-            Vertex* next = a->fNext;
-            vertices->append(a);
-            a = next;
-        } else {
-            Vertex* next = b->fNext;
-            vertices->append(b);
-            b = next;
-        }
-    }
-    if (a) {
-        vertices->insert(a, vertices->fTail, a->fNext);
-    }
-    if (b) {
-        vertices->insert(b, vertices->fTail, b->fNext);
-    }
+    sorted_merge<sweep_lt>(&front, &back, vertices);
 }
 
 // Stage 4: Simplify the mesh by inserting new vertices at intersecting edges.
 
-void simplify(const VertexList& vertices, Comparator& c, SkArenaAlloc& alloc) {
+void simplify(VertexList* mesh, Comparator& c, SkArenaAlloc& alloc) {
     LOG("simplifying complex polygons\n");
     EdgeList activeEdges;
-    for (Vertex* v = vertices.fHead; v != nullptr; v = v->fNext) {
+    for (Vertex* v = mesh->fHead; v != nullptr; v = v->fNext) {
         if (!v->fFirstEdgeAbove && !v->fFirstEdgeBelow) {
             continue;
         }
-#if LOGGING_ENABLED
-        LOG("\nvertex %g: (%g,%g), alpha %d\n", v->fID, v->fPoint.fX, v->fPoint.fY, v->fAlpha);
-#endif
         Edge* leftEnclosingEdge;
         Edge* rightEnclosingEdge;
         bool restartChecks;
         do {
+            LOG("\nvertex %g: (%g,%g), alpha %d\n", v->fID, v->fPoint.fX, v->fPoint.fY, v->fAlpha);
             restartChecks = false;
             find_enclosing_edges(v, &activeEdges, &leftEnclosingEdge, &rightEnclosingEdge);
+            if (rightEnclosingEdge && !rightEnclosingEdge->isRightOf(v)) {
+                split_edge(rightEnclosingEdge, v, &activeEdges, &v, c, alloc);
+                restartChecks = true;
+                continue;
+            }
+            SkASSERT(!rightEnclosingEdge || rightEnclosingEdge->isRightOf(v));
+            v->fLeftEnclosingEdge = leftEnclosingEdge;
+            v->fRightEnclosingEdge = rightEnclosingEdge;
             if (v->fFirstEdgeBelow) {
                 for (Edge* edge = v->fFirstEdgeBelow; edge; edge = edge->fNextEdgeBelow) {
-                    if (check_for_intersection(edge, leftEnclosingEdge, &activeEdges, c, alloc)) {
+                    if (check_for_intersection(edge, leftEnclosingEdge, &activeEdges, &v, mesh, c,
+                                               alloc)) {
                         restartChecks = true;
                         break;
                     }
-                    if (check_for_intersection(edge, rightEnclosingEdge, &activeEdges, c, alloc)) {
+                    if (check_for_intersection(edge, rightEnclosingEdge, &activeEdges, &v, mesh, c,
+                                               alloc)) {
                         restartChecks = true;
                         break;
                     }
                 }
             } else {
-                if (Vertex* pv = check_for_intersection(leftEnclosingEdge, rightEnclosingEdge,
-                                                        &activeEdges, c, alloc)) {
-                    if (c.sweep_lt(pv->fPoint, v->fPoint)) {
-                        v = pv;
-                    }
+                if (check_for_intersection(leftEnclosingEdge, rightEnclosingEdge,
+                                           &activeEdges, &v, mesh, c, alloc)) {
                     restartChecks = true;
                 }
 
@@ -1296,8 +1321,49 @@ void simplify(const VertexList& vertices, Comparator& c, SkArenaAlloc& alloc) {
             insert_edge(e, leftEdge, &activeEdges);
             leftEdge = e;
         }
-        v->fProcessed = true;
     }
+}
+
+// This is a stripped-down version of simplify() (the Bentley-Ottmann algorithm) that
+// early-returns true on the first found intersection, false if none.
+bool is_complex(const VertexList& vertices) {
+    LOG("testing polygon complexity\n");
+    EdgeList activeEdges;
+    for (Vertex* v = vertices.fHead; v != nullptr; v = v->fNext) {
+        if (!v->fFirstEdgeAbove && !v->fFirstEdgeBelow) {
+            continue;
+        }
+        Edge* leftEnclosingEdge;
+        Edge* rightEnclosingEdge;
+        find_enclosing_edges(v, &activeEdges, &leftEnclosingEdge, &rightEnclosingEdge);
+        SkPoint dummy;
+        if (v->fFirstEdgeBelow) {
+            for (Edge* edge = v->fFirstEdgeBelow; edge; edge = edge->fNextEdgeBelow) {
+                if (edge && leftEnclosingEdge && edge->intersect(*leftEnclosingEdge, &dummy)) {
+                    activeEdges.removeAll();
+                    return true;
+                }
+                if (edge && rightEnclosingEdge && edge->intersect(*rightEnclosingEdge, &dummy)) {
+                    activeEdges.removeAll();
+                    return true;
+                }
+            }
+        } else if (leftEnclosingEdge && rightEnclosingEdge &&
+                   leftEnclosingEdge->intersect(*rightEnclosingEdge, &dummy)) {
+            activeEdges.removeAll();
+            return true;
+        }
+        for (Edge* e = v->fFirstEdgeAbove; e; e = e->fNextEdgeAbove) {
+            remove_edge(e, &activeEdges);
+        }
+        Edge* leftEdge = leftEnclosingEdge;
+        for (Edge* e = v->fFirstEdgeBelow; e; e = e->fNextEdgeBelow) {
+            insert_edge(e, leftEdge, &activeEdges);
+            leftEdge = e;
+        }
+    }
+    activeEdges.removeAll();
+    return false;
 }
 
 // Stage 5: Tessellate the simplified mesh into monotone polygons.
@@ -1346,7 +1412,6 @@ Poly* tessellate(const VertexList& vertices, SkArenaAlloc& alloc) {
             }
             for (Edge* e = v->fFirstEdgeAbove; e != v->fLastEdgeAbove; e = e->fNextEdgeAbove) {
                 Edge* rightEdge = e->fNextEdgeAbove;
-                SkASSERT(rightEdge->isRightOf(e->fTop));
                 remove_edge(e, &activeEdges);
                 if (e->fRightPoly) {
                     e->fRightPoly->addEdge(e, Poly::kLeft_Side, alloc);
@@ -1504,7 +1569,8 @@ void fix_inversions(Vertex* prev, Vertex* next, Edge* prevBisector, Edge* nextBi
 // find new vertices, and set zero alpha on the exterior and one alpha on the interior. Build a
 // new antialiased mesh from those vertices.
 
-void boundary_to_aa_mesh(EdgeList* boundary, VertexList* mesh, Comparator& c, SkArenaAlloc& alloc) {
+void stroke_boundary(EdgeList* boundary, VertexList* innerMesh, VertexList* outerMesh,
+                     Comparator& c, SkArenaAlloc& alloc) {
     // A boundary with fewer than 3 edges is degenerate.
     if (!boundary->fHead || !boundary->fHead->fRight || !boundary->fHead->fRight->fRight) {
         return;
@@ -1533,6 +1599,8 @@ void boundary_to_aa_mesh(EdgeList* boundary, VertexList* mesh, Comparator& c, Sk
             Edge* bisector = new_edge(outerVertex, innerVertex, Edge::Type::kConnector, c, alloc);
             fix_inversions(innerVertices.fTail, innerVertex, prevBisector, bisector, prevEdge, c);
             fix_inversions(outerVertices.fTail, outerVertex, prevBisector, bisector, prevEdge, c);
+            innerVertex->fPartner = outerVertex;
+            outerVertex->fPartner = innerVertex;
             innerVertices.append(innerVertex);
             outerVertices.append(outerVertex);
             prevBisector = bisector;
@@ -1541,8 +1609,6 @@ void boundary_to_aa_mesh(EdgeList* boundary, VertexList* mesh, Comparator& c, Sk
         prevOuter = outer;
         prevEdge = e;
     }
-    innerVertices.close();
-    outerVertices.close();
 
     Vertex* innerVertex = innerVertices.fHead;
     Vertex* outerVertex = outerVertices.fHead;
@@ -1553,22 +1619,21 @@ void boundary_to_aa_mesh(EdgeList* boundary, VertexList* mesh, Comparator& c, Sk
                               alloc);
     fix_inversions(innerVertices.fTail, innerVertices.fHead, prevBisector, bisector, prevEdge, c);
     fix_inversions(outerVertices.fTail, outerVertices.fHead, prevBisector, bisector, prevEdge, c);
-    do {
+    Vertex* prevInnerVertex = innerVertices.fTail;
+    Vertex* prevOuterVertex = outerVertices.fTail;
+    while (innerVertex && outerVertex) {
         // Connect vertices into a quad mesh. Outer edges get default (1) winding.
         // Inner edges get -2 winding. This ensures that the interior is always filled
         // (-1 winding number for normal cases, 3 for thin features where the interior inverts).
-        // Connector edges get zero winding, since they're only structural (i.e., to ensure
-        // no 0-0-0 alpha triangles are produced), and shouldn't affect the poly winding number.
-        connect(outerVertex->fPrev, outerVertex, Edge::Type::kOuter, c, alloc);
-        connect(innerVertex->fPrev, innerVertex, Edge::Type::kInner, c, alloc, -2);
-        connect(outerVertex, innerVertex, Edge::Type::kConnector, c, alloc, 0);
-        Vertex* innerNext = innerVertex->fNext;
-        Vertex* outerNext = outerVertex->fNext;
-        mesh->append(innerVertex);
-        mesh->append(outerVertex);
-        innerVertex = innerNext;
-        outerVertex = outerNext;
-    } while (innerVertex != innerVertices.fHead && outerVertex != outerVertices.fHead);
+        connect(prevOuterVertex, outerVertex, Edge::Type::kOuter, c, alloc);
+        connect(prevInnerVertex, innerVertex, Edge::Type::kInner, c, alloc, -2);
+        prevInnerVertex = innerVertex;
+        prevOuterVertex = outerVertex;
+        innerVertex = innerVertex->fNext;
+        outerVertex = outerVertex->fNext;
+    }
+    innerMesh->append(innerVertices);
+    outerMesh->append(outerVertices);
 }
 
 void extract_boundary(EdgeList* boundary, Edge* e, SkPath::FillType fillType, SkArenaAlloc& alloc) {
@@ -1603,7 +1668,8 @@ void extract_boundary(EdgeList* boundary, Edge* e, SkPath::FillType fillType, Sk
 
 // Stage 5b: Extract boundaries from mesh, simplify and stroke them into a new mesh.
 
-void extract_boundaries(const VertexList& inMesh, VertexList* outMesh, SkPath::FillType fillType,
+void extract_boundaries(const VertexList& inMesh, VertexList* innerVertices,
+                        VertexList* outerVertices, SkPath::FillType fillType,
                         Comparator& c, SkArenaAlloc& alloc) {
     remove_non_boundary_edges(inMesh, fillType, alloc);
     for (Vertex* v = inMesh.fHead; v; v = v->fNext) {
@@ -1611,21 +1677,21 @@ void extract_boundaries(const VertexList& inMesh, VertexList* outMesh, SkPath::F
             EdgeList boundary;
             extract_boundary(&boundary, v->fFirstEdgeBelow, fillType, alloc);
             simplify_boundary(&boundary, c, alloc);
-            boundary_to_aa_mesh(&boundary, outMesh, c, alloc);
+            stroke_boundary(&boundary, innerVertices, outerVertices, c, alloc);
         }
     }
 }
 
-// This is a driver function which calls stages 2-5 in turn.
+// This is a driver function that calls stages 2-5 in turn.
 
-void contours_to_mesh(Vertex** contours, int contourCnt, bool antialias,
+void contours_to_mesh(VertexList* contours, int contourCnt, bool antialias,
                       VertexList* mesh, Comparator& c, SkArenaAlloc& alloc) {
 #if LOGGING_ENABLED
     for (int i = 0; i < contourCnt; ++i) {
-        Vertex* v = contours[i];
+        Vertex* v = contours[i].fHead;
         SkASSERT(v);
         LOG("path.moveTo(%20.20g, %20.20g);\n", v->fPoint.fX, v->fPoint.fY);
-        for (v = v->fNext; v != contours[i]; v = v->fNext) {
+        for (v = v->fNext; v; v = v->fNext) {
             LOG("path.lineTo(%20.20g, %20.20g);\n", v->fPoint.fX, v->fPoint.fY);
         }
     }
@@ -1634,7 +1700,7 @@ void contours_to_mesh(Vertex** contours, int contourCnt, bool antialias,
     build_edges(contours, contourCnt, mesh, c, alloc);
 }
 
-void sort_and_simplify(VertexList* vertices, Comparator& c, SkArenaAlloc& alloc) {
+void sort_mesh(VertexList* vertices, Comparator& c, SkArenaAlloc& alloc) {
     if (!vertices || !vertices->fHead) {
         return;
     }
@@ -1645,29 +1711,43 @@ void sort_and_simplify(VertexList* vertices, Comparator& c, SkArenaAlloc& alloc)
     } else {
         merge_sort<sweep_lt_vert>(vertices);
     }
-    merge_coincident_vertices(vertices, c, alloc);
 #if LOGGING_ENABLED
     for (Vertex* v = vertices->fHead; v != nullptr; v = v->fNext) {
         static float gID = 0.0f;
         v->fID = gID++;
     }
 #endif
-    simplify(*vertices, c, alloc);
 }
 
-Poly* contours_to_polys(Vertex** contours, int contourCnt, SkPath::FillType fillType,
-                        const SkRect& pathBounds, bool antialias,
+Poly* contours_to_polys(VertexList* contours, int contourCnt, SkPath::FillType fillType,
+                        const SkRect& pathBounds, bool antialias, VertexList* outerMesh,
                         SkArenaAlloc& alloc) {
     Comparator c(pathBounds.width() > pathBounds.height() ? Comparator::Direction::kHorizontal
                                                           : Comparator::Direction::kVertical);
     VertexList mesh;
     contours_to_mesh(contours, contourCnt, antialias, &mesh, c, alloc);
-    sort_and_simplify(&mesh, c, alloc);
+    sort_mesh(&mesh, c, alloc);
+    merge_coincident_vertices(&mesh, c, alloc);
+    simplify(&mesh, c, alloc);
     if (antialias) {
-        VertexList aaMesh;
-        extract_boundaries(mesh, &aaMesh, fillType, c, alloc);
-        sort_and_simplify(&aaMesh, c, alloc);
-        return tessellate(aaMesh, alloc);
+        VertexList innerMesh;
+        extract_boundaries(mesh, &innerMesh, outerMesh, fillType, c, alloc);
+        sort_mesh(&innerMesh, c, alloc);
+        sort_mesh(outerMesh, c, alloc);
+        if (is_complex(innerMesh) || is_complex(*outerMesh)) {
+            LOG("found complex mesh; taking slow path\n");
+            VertexList aaMesh;
+            connect_partners(outerMesh, c, alloc);
+            sorted_merge(&innerMesh, outerMesh, &aaMesh, c);
+            merge_coincident_vertices(&aaMesh, c, alloc);
+            simplify(&aaMesh, c, alloc);
+            outerMesh->fHead = outerMesh->fTail = nullptr;
+            return tessellate(aaMesh, alloc);
+        } else {
+            LOG("no complex polygons; taking fast path\n");
+            merge_coincident_vertices(&innerMesh, c, alloc);
+            return tessellate(innerMesh, alloc);
+        }
     } else {
         return tessellate(mesh, alloc);
     }
@@ -1685,16 +1765,17 @@ void* polys_to_triangles(Poly* polys, SkPath::FillType fillType, const AAParams*
 }
 
 Poly* path_to_polys(const SkPath& path, SkScalar tolerance, const SkRect& clipBounds,
-                    int contourCnt, SkArenaAlloc& alloc, bool antialias, bool* isLinear) {
+                    int contourCnt, SkArenaAlloc& alloc, bool antialias, bool* isLinear,
+                    VertexList* outerMesh) {
     SkPath::FillType fillType = path.getFillType();
     if (SkPath::IsInverseFillType(fillType)) {
         contourCnt++;
     }
-    std::unique_ptr<Vertex*[]> contours(new Vertex* [contourCnt]);
+    std::unique_ptr<VertexList[]> contours(new VertexList[contourCnt]);
 
     path_to_contours(path, tolerance, clipBounds, contours.get(), alloc, isLinear);
     return contours_to_polys(contours.get(), contourCnt, path.getFillType(), path.getBounds(),
-                             antialias, alloc);
+                             antialias, outerMesh, alloc);
 }
 
 int get_contour_count(const SkPath& path, SkScalar tolerance) {
@@ -1720,6 +1801,30 @@ int count_points(Poly* polys, SkPath::FillType fillType) {
     return count;
 }
 
+int count_outer_mesh_points(const VertexList& outerMesh) {
+    int count = 0;
+    for (Vertex* v = outerMesh.fHead; v; v = v->fNext) {
+        for (Edge* e = v->fFirstEdgeBelow; e; e = e->fNextEdgeBelow) {
+            count += TESSELLATOR_WIREFRAME ? 12 : 6;
+        }
+    }
+    return count;
+}
+
+void* outer_mesh_to_triangles(const VertexList& outerMesh, const AAParams* aaParams, void* data) {
+    for (Vertex* v = outerMesh.fHead; v; v = v->fNext) {
+        for (Edge* e = v->fFirstEdgeBelow; e; e = e->fNextEdgeBelow) {
+            Vertex* v0 = e->fTop;
+            Vertex* v1 = e->fBottom;
+            Vertex* v2 = e->fBottom->fPartner;
+            Vertex* v3 = e->fTop->fPartner;
+            data = emit_triangle(v0, v1, v2, aaParams, data);
+            data = emit_triangle(v0, v2, v3, aaParams, data);
+        }
+    }
+    return data;
+}
+
 } // namespace
 
 namespace GrTessellator {
@@ -1735,10 +1840,14 @@ int PathToTriangles(const SkPath& path, SkScalar tolerance, const SkRect& clipBo
         return 0;
     }
     SkArenaAlloc alloc(kArenaChunkSize);
+    VertexList outerMesh;
     Poly* polys = path_to_polys(path, tolerance, clipBounds, contourCnt, alloc, antialias,
-                                isLinear);
+                                isLinear, &outerMesh);
     SkPath::FillType fillType = antialias ? SkPath::kWinding_FillType : path.getFillType();
     int count = count_points(polys, fillType);
+    if (antialias) {
+        count += count_outer_mesh_points(outerMesh);
+    }
     if (0 == count) {
         return 0;
     }
@@ -1755,6 +1864,7 @@ int PathToTriangles(const SkPath& path, SkScalar tolerance, const SkRect& clipBo
     aaParams.fColor = color;
 
     void* end = polys_to_triangles(polys, fillType, antialias ? &aaParams : nullptr, verts);
+    end = outer_mesh_to_triangles(outerMesh, &aaParams, end);
     int actualCount = static_cast<int>((static_cast<uint8_t*>(end) - static_cast<uint8_t*>(verts))
                                        / vertexAllocator->stride());
     SkASSERT(actualCount <= count);
@@ -1770,7 +1880,8 @@ int PathToVertices(const SkPath& path, SkScalar tolerance, const SkRect& clipBou
     }
     SkArenaAlloc alloc(kArenaChunkSize);
     bool isLinear;
-    Poly* polys = path_to_polys(path, tolerance, clipBounds, contourCnt, alloc, false, &isLinear);
+    Poly* polys = path_to_polys(path, tolerance, clipBounds, contourCnt, alloc, false, &isLinear,
+                                nullptr);
     SkPath::FillType fillType = path.getFillType();
     int count = count_points(polys, fillType);
     if (0 == count) {

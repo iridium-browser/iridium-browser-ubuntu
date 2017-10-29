@@ -13,23 +13,23 @@ found in the LICENSE file.
 
 tr.b.unittest.testSuite(function() {
   test('subViewThrowsNotImplementedErrors', function() {
-    var subView = document.createElement('tr-ui-a-sub-view');
+    const subView = document.createElement('tr-ui-a-sub-view');
 
     assert.throw(function() {
       subView.selection = new tr.model.EventSet();
     }, 'Not implemented!');
 
     assert.throw(function() {
-      var viewSelection = subView.selection;
+      const viewSelection = subView.selection;
     }, 'Not implemented!');
 
     subView.tabLabel = 'Tab Label';
-    assert.equal(subView.getAttribute('tab-label'), 'Tab Label');
-    assert.equal(subView.tabLabel, 'Tab Label');
+    assert.strictEqual(subView.getAttribute('tab-label'), 'Tab Label');
+    assert.strictEqual(subView.tabLabel, 'Tab Label');
 
     subView.tabLabel = 'New Label';
-    assert.equal(subView.getAttribute('tab-label'), 'New Label');
-    assert.equal(subView.tabLabel, 'New Label');
+    assert.strictEqual(subView.getAttribute('tab-label'), 'New Label');
+    assert.strictEqual(subView.tabLabel, 'New Label');
   });
 });
 </script>

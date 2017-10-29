@@ -171,8 +171,6 @@ public:
                                      IXpsOMObjectFactory* xpsFactory,
                                      SkScalar dpi = SK_ScalarDefaultRasterDPI);
 #endif
-    // DEPRECATED; TODO(halcanary): remove this function after Chromium switches to new API.
-    static sk_sp<SkDocument> MakeXPS(SkWStream*) { return nullptr; }
 
     /**
      *  Begin a new page for the document, returning the canvas that will draw
@@ -210,8 +208,7 @@ protected:
     // cannot do this for them.
     virtual ~SkDocument();
 
-    virtual SkCanvas* onBeginPage(SkScalar width, SkScalar height,
-                                  const SkRect& content) = 0;
+    virtual SkCanvas* onBeginPage(SkScalar width, SkScalar height) = 0;
     virtual void onEndPage() = 0;
     virtual void onClose(SkWStream*) = 0;
     virtual void onAbort() = 0;

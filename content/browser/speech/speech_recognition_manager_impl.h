@@ -21,6 +21,7 @@
 
 namespace media {
 class AudioSystem;
+class AudioManager;
 }
 
 namespace content {
@@ -92,11 +93,15 @@ class CONTENT_EXPORT SpeechRecognitionManagerImpl :
   SpeechRecognitionManagerDelegate* delegate() const { return delegate_.get(); }
 
  protected:
-  // BrowserMainLoop is the only one allowed to istantiate and free us.
+  // BrowserMainLoop is the only one allowed to instantiate this class.
   friend class BrowserMainLoop;
-  // Needed for dtor.
+
+  // Needed for deletion on the IO thread.
   friend std::default_delete<SpeechRecognitionManagerImpl>;
+  friend class base::DeleteHelper<content::SpeechRecognitionManagerImpl>;
+
   SpeechRecognitionManagerImpl(media::AudioSystem* audio_system,
+                               media::AudioManager* audio_manager,
                                MediaStreamManager* media_stream_manager);
   ~SpeechRecognitionManagerImpl() override;
 
@@ -172,6 +177,7 @@ class CONTENT_EXPORT SpeechRecognitionManagerImpl :
   int GetNextSessionID();
 
   media::AudioSystem* audio_system_;
+  media::AudioManager* audio_manager_;
   MediaStreamManager* media_stream_manager_;
   typedef std::map<int, Session*> SessionsTable;
   SessionsTable sessions_;

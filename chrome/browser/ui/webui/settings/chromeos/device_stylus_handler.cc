@@ -4,7 +4,11 @@
 
 #include "chrome/browser/ui/webui/settings/chromeos/device_stylus_handler.h"
 
-#include "ash/common/system/chromeos/palette/palette_utils.h"
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "ash/system/palette/palette_utils.h"
 #include "base/bind.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -20,6 +24,7 @@ namespace {
 constexpr char kAppNameKey[] = "name";
 constexpr char kAppIdKey[] = "value";
 constexpr char kAppPreferredKey[] = "preferred";
+constexpr char kAppLockScreenSupportKey[] = "lockScreenSupport";
 
 }  // namespace
 
@@ -47,12 +52,21 @@ void StylusHandler::RegisterMessages() {
       base::Bind(&StylusHandler::SetPreferredNoteTakingApp,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
+      "setPreferredNoteTakingAppEnabledOnLockScreen",
+      base::Bind(&StylusHandler::SetPreferredNoteTakingAppEnabledOnLockScreen,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
       "showPlayStoreApps",
       base::Bind(&StylusHandler::ShowPlayStoreApps, base::Unretained(this)));
 }
 
 void StylusHandler::OnAvailableNoteTakingAppsUpdated() {
   UpdateNoteTakingApps();
+}
+
+void StylusHandler::OnPreferredNoteTakingAppUpdated(Profile* profile) {
+  if (Profile::FromWebUI(web_ui()) == profile)
+    UpdateNoteTakingApps();
 }
 
 void StylusHandler::OnDeviceListsComplete() {
@@ -65,8 +79,8 @@ void StylusHandler::UpdateNoteTakingApps() {
   base::ListValue apps_list;
 
   NoteTakingHelper* helper = NoteTakingHelper::Get();
-  if (helper->android_enabled() && !helper->android_apps_received()) {
-    // If Android is enabled but not ready yet, let the JS know so it can
+  if (helper->play_store_enabled() && !helper->android_apps_received()) {
+    // If Play Store is enabled but not ready yet, let the JS know so it can
     // disable the menu and display an explanatory message.
     waiting_for_android = true;
   } else {
@@ -77,6 +91,8 @@ void StylusHandler::UpdateNoteTakingApps() {
       dict->SetString(kAppNameKey, info.name);
       dict->SetString(kAppIdKey, info.app_id);
       dict->SetBoolean(kAppPreferredKey, info.preferred);
+      dict->SetInteger(kAppLockScreenSupportKey,
+                       static_cast<int>(info.lock_screen_support));
       apps_list.Append(std::move(dict));
 
       note_taking_app_ids_.insert(info.app_id);
@@ -84,9 +100,8 @@ void StylusHandler::UpdateNoteTakingApps() {
   }
 
   AllowJavascript();
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("onNoteTakingAppsUpdated"),
-                         apps_list, base::Value(waiting_for_android));
+  FireWebUIListener("onNoteTakingAppsUpdated", apps_list,
+                    base::Value(waiting_for_android));
 }
 
 void StylusHandler::RequestApps(const base::ListValue* unused_args) {
@@ -108,6 +123,15 @@ void StylusHandler::SetPreferredNoteTakingApp(const base::ListValue* args) {
                                            app_id);
 }
 
+void StylusHandler::SetPreferredNoteTakingAppEnabledOnLockScreen(
+    const base::ListValue* args) {
+  bool enabled = false;
+  CHECK(args->GetBoolean(0, &enabled));
+
+  NoteTakingHelper::Get()->SetPreferredAppEnabledOnLockScreen(
+      Profile::FromWebUI(web_ui()), enabled);
+}
+
 void StylusHandler::HandleInitialize(const base::ListValue* args) {
   if (ui::InputDeviceManager::GetInstance()->AreDeviceListsComplete())
     SendHasStylus();
@@ -116,9 +140,8 @@ void StylusHandler::HandleInitialize(const base::ListValue* args) {
 void StylusHandler::SendHasStylus() {
   DCHECK(ui::InputDeviceManager::GetInstance()->AreDeviceListsComplete());
   AllowJavascript();
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("has-stylus-changed"),
-                         base::Value(ash::palette_utils::HasStylusInput()));
+  FireWebUIListener("has-stylus-changed",
+                    base::Value(ash::palette_utils::HasStylusInput()));
 }
 
 void StylusHandler::ShowPlayStoreApps(const base::ListValue* args) {

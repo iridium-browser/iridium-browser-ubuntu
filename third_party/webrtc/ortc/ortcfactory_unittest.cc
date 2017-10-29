@@ -10,14 +10,13 @@
 
 #include <memory>
 
-#include "webrtc/base/fakenetwork.h"
-#include "webrtc/base/gunit.h"
-#include "webrtc/base/physicalsocketserver.h"
-#include "webrtc/base/virtualsocketserver.h"
 #include "webrtc/media/base/fakemediaengine.h"
 #include "webrtc/ortc/ortcfactory.h"
 #include "webrtc/ortc/testrtpparameters.h"
 #include "webrtc/p2p/base/fakepackettransport.h"
+#include "webrtc/rtc_base/fakenetwork.h"
+#include "webrtc/rtc_base/gunit.h"
+#include "webrtc/rtc_base/virtualsocketserver.h"
 
 namespace webrtc {
 
@@ -27,11 +26,10 @@ namespace webrtc {
 class OrtcFactoryTest : public testing::Test {
  public:
   OrtcFactoryTest()
-      : virtual_socket_server_(&physical_socket_server_),
-        socket_server_scope_(&virtual_socket_server_),
+      : thread_(&virtual_socket_server_),
         fake_packet_transport_("fake transport") {
     ortc_factory_ =
-        OrtcFactory::Create(nullptr, nullptr, &fake_network_manager_, nullptr,
+        OrtcFactory::Create(&thread_, nullptr, &fake_network_manager_, nullptr,
                             nullptr,
                             std::unique_ptr<cricket::MediaEngineInterface>(
                                 new cricket::FakeMediaEngine()))
@@ -49,9 +47,8 @@ class OrtcFactoryTest : public testing::Test {
         .MoveValue();
   }
 
-  rtc::PhysicalSocketServer physical_socket_server_;
   rtc::VirtualSocketServer virtual_socket_server_;
-  rtc::SocketServerScope socket_server_scope_;
+  rtc::AutoSocketServerThread thread_;
   rtc::FakeNetworkManager fake_network_manager_;
   rtc::FakePacketTransport fake_packet_transport_;
   std::unique_ptr<OrtcFactoryInterface> ortc_factory_;
@@ -79,6 +76,24 @@ TEST_F(OrtcFactoryTest, CreateRtpTransportWithAndWithoutMux) {
   rtcp_parameters.mux = false;
   result =
       ortc_factory_->CreateRtpTransport(rtcp_parameters, &rtp, &rtcp, nullptr);
+  EXPECT_TRUE(result.ok());
+}
+
+// Simple test for the successful cases of CreateSrtpTransport.
+TEST_F(OrtcFactoryTest, CreateSrtpTransport) {
+  rtc::FakePacketTransport rtp("rtp");
+  rtc::FakePacketTransport rtcp("rtcp");
+  // With muxed RTCP.
+  RtcpParameters rtcp_parameters;
+  rtcp_parameters.mux = true;
+  auto result = ortc_factory_->CreateSrtpTransport(rtcp_parameters, &rtp,
+                                                   nullptr, nullptr);
+  EXPECT_TRUE(result.ok());
+  result.MoveValue().reset();
+  // With non-muxed RTCP.
+  rtcp_parameters.mux = false;
+  result =
+      ortc_factory_->CreateSrtpTransport(rtcp_parameters, &rtp, &rtcp, nullptr);
   EXPECT_TRUE(result.ok());
 }
 

@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkImageFilter.h"
 #include "SkRandom.h"
 
@@ -42,7 +43,7 @@ DEF_SIMPLE_GM(imageresizetiled, canvas, WIDTH, HEIGHT) {
                 int posY = 0;
                 for (unsigned i = 0; i < SK_ARRAY_COUNT(str); i++) {
                     posY += 100;
-                    canvas->drawText(str[i], strlen(str[i]), SkIntToScalar(0),
+                    canvas->drawString(str[i], SkIntToScalar(0),
                                      SkIntToScalar(posY), textPaint);
                 }
                 canvas->restore();

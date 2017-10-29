@@ -59,7 +59,6 @@ config("mesa_internal_config") {
     "USE_XCB",
     "GLX_INDIRECT_RENDERING",
     "GLX_DIRECT_RENDERING",
-    "USE_EXTERNAL_DXTN_LIB=1",
     "IN_DRI_DRIVER",
     "HAVE_ALIAS",
     "HAVE_MINCORE",
@@ -114,6 +113,14 @@ config("mesa_internal_config") {
       cflags += [ "-fPIC" ]
     }
   }
+
+  if (is_msan) {
+    # Disable code in mesa that loads the libtxc_dxtn.so library if msan is
+    # enabled, as the library will be loaded from a system directory, which
+    # may cause spurious msan reports because msan expects most libraries in
+    # the process to be compiled with msan.
+    defines += [ "USE_EXTERNAL_DXTN_LIB=0" ]
+  }
 }
 
 # mesa_internal_config is prepended to the config lists.  Flags that
@@ -129,6 +136,9 @@ config("mesa_internal_warnings") {
 
       # mesa's STATIC_ASSERT() macro expands to an ununused typedef.
       "-Wno-unused-local-typedef",
+
+      # mesa's flex scanner code uses "register" a lot.
+      "-Wno-deprecated-register",
     ]
   }
   if (is_win) {
@@ -753,13 +763,8 @@ loadable_module("osmesa") {
     ":mesa",
     ":mesa_headers",
     ":mesa_libglslcommon",
-    "//build/config/sanitizers:deps",
+    "//build/config:exe_and_shlib_deps",
   ]
-
-  # Required for the allocator implementation, which is not used on Mac.
-  if (!is_mac) {
-    deps += [ "//base" ]
-  }
 
   if (is_win) {
     defines = [

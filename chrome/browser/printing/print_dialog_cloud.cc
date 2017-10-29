@@ -45,8 +45,8 @@ class SignInObserver : public content::WebContentsObserver {
 
     if (cloud_devices::IsCloudPrintURL(navigation_handle->GetURL())) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&SignInObserver::OnSignIn,
-                                weak_ptr_factory_.GetWeakPtr()));
+          FROM_HERE, base::BindOnce(&SignInObserver::OnSignIn,
+                                    weak_ptr_factory_.GetWeakPtr()));
     }
   }
 
@@ -71,7 +71,7 @@ void CreateCloudPrintSigninTab(Browser* browser,
                                bool add_account,
                                const base::Closure& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (switches::IsEnableAccountConsistency() &&
+  if (switches::IsAccountConsistencyMirrorEnabled() &&
       !browser->profile()->IsOffTheRecord()) {
     browser->window()->ShowAvatarBubbleFromAvatarButton(
         add_account ? BrowserWindow::AVATAR_BUBBLE_MODE_ADD_ACCOUNT

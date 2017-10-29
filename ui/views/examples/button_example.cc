@@ -6,8 +6,8 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/image/image.h"
-#include "ui/resources/grit/ui_resources.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/blue_button.h"
 #include "ui/views/controls/button/image_button.h"
@@ -38,8 +38,8 @@ ButtonExample::~ButtonExample() {
 }
 
 void ButtonExample::CreateExampleView(View* container) {
-  container->set_background(Background::CreateSolidBackground(SK_ColorWHITE));
-  BoxLayout* layout = new BoxLayout(BoxLayout::kVertical, 10, 10, 10);
+  container->SetBackground(CreateSolidBackground(SK_ColorWHITE));
+  BoxLayout* layout = new BoxLayout(BoxLayout::kVertical, gfx::Insets(10), 10);
   layout->set_cross_axis_alignment(BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
   container->SetLayoutManager(layout);
 
@@ -49,11 +49,11 @@ void ButtonExample::CreateExampleView(View* container) {
   container->AddChildView(label_button_);
 
   styled_button_ = new LabelButton(this, ASCIIToUTF16("Styled Button"));
-  styled_button_->SetStyle(Button::STYLE_BUTTON);
+  styled_button_->SetStyleDeprecated(Button::STYLE_BUTTON);
   container->AddChildView(styled_button_);
 
   disabled_button_ = new LabelButton(this, ASCIIToUTF16("Disabled Button"));
-  disabled_button_->SetStyle(Button::STYLE_BUTTON);
+  disabled_button_->SetStyleDeprecated(Button::STYLE_BUTTON);
   disabled_button_->SetState(Button::STATE_DISABLED);
   container->AddChildView(disabled_button_);
 
@@ -108,7 +108,7 @@ void ButtonExample::LabelButtonPressed(LabelButton* label_button,
           ? label_button_->SetFocusBehavior(View::FocusBehavior::NEVER)
           : label_button_->SetFocusForPlatform();
     } else {
-      label_button->SetStyle(static_cast<Button::ButtonStyle>(
+      label_button->SetStyleDeprecated(static_cast<Button::ButtonStyle>(
           (label_button->style() + 1) % Button::STYLE_COUNT));
     }
   } else if (event.IsAltDown()) {

@@ -6,6 +6,8 @@
 
 #import <Foundation/Foundation.h>
 
+#include "ios/web/public/app/web_main_parts.h"
+
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
@@ -22,13 +24,16 @@ WebClient* GetWebClient() {
   return g_client;
 }
 
+WebClient::Schemes::Schemes() = default;
+WebClient::Schemes::~Schemes() = default;
+
 WebClient::WebClient() {
 }
 
 WebClient::~WebClient() {
 }
 
-WebMainParts* WebClient::CreateWebMainParts() {
+std::unique_ptr<WebMainParts> WebClient::CreateWebMainParts() {
   return nullptr;
 }
 
@@ -70,8 +75,13 @@ base::RefCountedMemory* WebClient::GetDataResourceBytes(int resource_id) const {
   return nullptr;
 }
 
-NSString* WebClient::GetEarlyPageScript() const {
+NSString* WebClient::GetEarlyPageScript(BrowserState* browser_state) const {
   return @"";
+}
+
+std::unique_ptr<base::Value> WebClient::GetServiceManifestOverlay(
+    base::StringPiece name) {
+  return nullptr;
 }
 
 void WebClient::AllowCertificateError(
@@ -82,6 +92,10 @@ void WebClient::AllowCertificateError(
     bool overridable,
     const base::Callback<void(bool)>& callback) {
   callback.Run(false);
+}
+
+bool WebClient::IsSlimNavigationManagerEnabled() const {
+  return false;
 }
 
 }  // namespace web

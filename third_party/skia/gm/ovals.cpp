@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkTArray.h"
 #include "SkRandom.h"
 #include "SkMatrix.h"
@@ -265,6 +266,26 @@ protected:
 
             fPaints[i].setShader(nullptr);
 
+            canvas->restore();
+        }
+
+        // reflected oval
+        for (int i = 0; i < fPaints.count(); ++i) {
+            SkRect oval = SkRect::MakeLTRB(-30, -30, 30, 30);
+            canvas->save();
+            // position the oval, and make it at off-integer coords.
+            canvas->translate(kXStart + SK_Scalar1 * kXStep * 5 + SK_Scalar1 / 4,
+                              kYStart + SK_Scalar1 * kYStep * i + 3 * SK_Scalar1 / 4 +
+                              SK_ScalarHalf * kYStep);
+            canvas->rotate(90);
+            canvas->scale(1, -1);
+            canvas->scale(1, 0.66f);
+
+            SkColor color = genColor(&rand);
+            fPaints[i].setColor(color);
+
+            canvas->drawRect(oval, rectPaint);
+            canvas->drawOval(oval, fPaints[i]);
             canvas->restore();
         }
     }

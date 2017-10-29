@@ -15,6 +15,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/test/test_file_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_window.h"
@@ -153,9 +154,9 @@ class StartupBrowserCreatorCorruptProfileTest : public InProcessBrowserTest {
 
     base::RunLoop run_loop;
     BrowserList::GetInstance()->CloseAllBrowsersWithProfile(
-        profile, base::Bind(&OnCloseAllBrowsersSucceeded,
-                            run_loop.QuitClosure()),
-        BrowserList::CloseCallback());
+        profile,
+        base::Bind(&OnCloseAllBrowsersSucceeded, run_loop.QuitClosure()),
+        BrowserList::CloseCallback(), false);
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -198,7 +199,6 @@ if (testing::UnitTest::GetInstance()->current_test_info()->name() == \
 
   void TearDownOnMainThread() override {
     test_body_has_run_ = true;
-    InProcessBrowserTest::TearDownOnMainThread();
   }
 
   void TearDown() override {
@@ -273,6 +273,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
   CloseBrowsersSynchronouslyForProfileBasePath("Profile 1");
   CreateAndSwitchToProfile("Profile 2");
 
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   ASSERT_TRUE(base::CreateDirectory(ProfileManager::GetGuestProfilePath()));
   ASSERT_TRUE(base::CreateDirectory(ProfileManager::GetSystemProfilePath()));
 }
@@ -302,6 +303,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
   // Create the guest profile path, but not the system profile one. This will
   // make it impossible to create the system profile once the permissions are
   // locked down during setup.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   ASSERT_TRUE(base::CreateDirectory(ProfileManager::GetGuestProfilePath()));
 }
 
@@ -402,6 +404,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
 // manager instead.
 IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorCorruptProfileTest,
                        PRE_DeletedProfileFallbackToUserManager) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   ASSERT_TRUE(base::CreateDirectory(ProfileManager::GetGuestProfilePath()));
   ASSERT_TRUE(base::CreateDirectory(ProfileManager::GetSystemProfilePath()));
 }

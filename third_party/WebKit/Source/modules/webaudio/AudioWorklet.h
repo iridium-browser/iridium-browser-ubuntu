@@ -12,29 +12,22 @@
 namespace blink {
 
 class LocalFrame;
-class ThreadedWorkletMessagingProxy;
-class WorkletGlobalScopeProxy;
 
 class MODULES_EXPORT AudioWorklet final : public Worklet {
   WTF_MAKE_NONCOPYABLE(AudioWorklet);
 
  public:
-  static AudioWorklet* create(LocalFrame*);
+  static AudioWorklet* Create(LocalFrame*);
   ~AudioWorklet() override;
-
-  void initialize() final;
-  bool isInitialized() const final;
-
-  WorkletGlobalScopeProxy* workletGlobalScopeProxy() const final;
 
   DECLARE_VIRTUAL_TRACE();
 
  private:
   explicit AudioWorklet(LocalFrame*);
 
-  // The proxy outlives the worklet as it is used to perform thread shutdown,
-  // it deletes itself once this has occurred.
-  ThreadedWorkletMessagingProxy* m_workletMessagingProxy;
+  // Implements Worklet.
+  bool NeedsToCreateGlobalScope() final;
+  WorkletGlobalScopeProxy* CreateGlobalScope() final;
 };
 
 }  // namespace blink

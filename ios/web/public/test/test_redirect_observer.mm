@@ -4,10 +4,16 @@
 
 #include "ios/web/public/test/test_redirect_observer.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/supports_user_data.h"
 #import "ios/web/public/navigation_item.h"
 #import "ios/web/public/navigation_manager.h"
+#include "ios/web/public/web_state/navigation_context.h"
 #import "ios/web/public/web_state/web_state.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 // The key under which TestRedirectObservers are stored in a WebState's user
@@ -37,7 +43,7 @@ class TestRedirectObserverUserDataWrapper
   explicit TestRedirectObserverUserDataWrapper(web::WebState* web_state)
       : redirect_observer_(web_state) {
     DCHECK(web_state);
-    web_state->SetUserData(kTestRedirectObserverKey, this);
+    web_state->SetUserData(kTestRedirectObserverKey, base::WrapUnique(this));
   }
 
   web::TestRedirectObserver* redirect_observer() { return &redirect_observer_; }
@@ -75,7 +81,8 @@ GURL TestRedirectObserver::GetFinalUrlForUrl(const GURL& url) {
   return GURL();
 }
 
-void TestRedirectObserver::ProvisionalNavigationStarted(const GURL& url) {
+void TestRedirectObserver::DidStartNavigation(NavigationContext* context) {
+  GURL url = context->GetUrl();
   NavigationItem* item = web_state()->GetNavigationManager()->GetVisibleItem();
   DCHECK(item);
   if (redirect_chains_.find(item) != redirect_chains_.end()) {

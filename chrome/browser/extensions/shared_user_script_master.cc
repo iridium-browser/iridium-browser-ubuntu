@@ -5,10 +5,10 @@
 #include "chrome/browser/extensions/shared_user_script_master.h"
 
 #include "base/memory/ptr_util.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/common/host_id.h"
 
 namespace extensions {
@@ -34,7 +34,7 @@ void SharedUserScriptMaster::OnExtensionLoaded(
 void SharedUserScriptMaster::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   const UserScriptList& script_list =
       ContentScriptsInfo::GetContentScripts(extension);
   std::set<UserScriptIDPair> scripts_to_remove;

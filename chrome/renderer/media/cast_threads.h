@@ -15,6 +15,7 @@
 
 #include "base/lazy_instance.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 
 class CastThreads {
@@ -23,7 +24,7 @@ class CastThreads {
   scoped_refptr<base::SingleThreadTaskRunner> GetVideoEncodeTaskRunner();
 
  private:
-  friend struct base::DefaultLazyInstanceTraits<CastThreads>;
+  friend struct base::LazyInstanceTraitsBase<CastThreads>;
 
   CastThreads();
 

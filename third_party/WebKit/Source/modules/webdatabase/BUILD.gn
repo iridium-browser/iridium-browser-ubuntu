@@ -16,7 +16,6 @@ blink_modules_sources("webdatabase") {
     "DatabaseAuthorizer.cpp",
     "DatabaseAuthorizer.h",
     "DatabaseBasicTypes.h",
-    "DatabaseCallback.h",
     "DatabaseClient.cpp",
     "DatabaseClient.h",
     "DatabaseContext.cpp",
@@ -39,25 +38,32 @@ blink_modules_sources("webdatabase") {
     "SQLError.cpp",
     "SQLError.h",
     "SQLResultSet.cpp",
+    "SQLResultSet.h",
     "SQLResultSetRowList.cpp",
+    "SQLResultSetRowList.h",
     "SQLStatement.cpp",
     "SQLStatement.h",
     "SQLStatementBackend.cpp",
     "SQLStatementBackend.h",
+    "SQLStatementCallback.h",
+    "SQLStatementErrorCallback.h",
     "SQLTransaction.cpp",
     "SQLTransaction.h",
     "SQLTransactionBackend.cpp",
     "SQLTransactionBackend.h",
+    "SQLTransactionCallback.h",
     "SQLTransactionClient.cpp",
     "SQLTransactionClient.h",
     "SQLTransactionCoordinator.cpp",
     "SQLTransactionCoordinator.h",
+    "SQLTransactionErrorCallback.h",
     "SQLTransactionState.h",
     "SQLTransactionStateMachine.cpp",
     "SQLTransactionStateMachine.h",
     "StorageLog.h",
     "sqlite/SQLLog.h",
     "sqlite/SQLValue.cpp",
+    "sqlite/SQLValue.h",
     "sqlite/SQLiteAuthorizer.cpp",
     "sqlite/SQLiteDatabase.cpp",
     "sqlite/SQLiteDatabase.h",
@@ -74,4 +80,7 @@ blink_modules_sources("webdatabase") {
   } else if (is_posix) {
     sources += [ "sqlite/SQLiteFileSystemPosix.cpp" ]
   }
+
+  # Expose chromium_sqlite3_* functions from Chromium's patched SQLite.
+  defines = [ "CHROMIUM_SQLITE_INTERNALS" ]  # So that sqlite3.h is not included without this set.
 }

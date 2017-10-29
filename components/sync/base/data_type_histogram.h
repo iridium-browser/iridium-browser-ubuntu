@@ -11,11 +11,20 @@
 #include "base/time/time.h"
 #include "components/sync/base/model_type.h"
 
+// Prefix for histogram recording datatype's memory usage.
+extern const char kModelTypeMemoryHistogramPrefix[];
+
 // This function adds |value| to |sample| bucket of histogram |name|. |value|
 // should be greater or equal to 1 and |name| can be variable. DataTypes are
 // mapped to proper |sample| bucket by using ModelTypeToHistogramInt() function.
 // So different DataTypes play the role of different buckets in this histogram.
 void SyncRecordDatatypeBin(const std::string& name, int sample, int value);
+
+// Converts memory size |value| into kilobytes and records it into |model_type|
+// related histogram with prefix |histogram_name_prefix|.
+void SyncRecordMemoryKbHistogram(const std::string& histogram_name_prefix,
+                                 syncer::ModelType model_type,
+                                 size_t value);
 
 // For now, this just implements UMA_HISTOGRAM_LONG_TIMES. This can be adjusted
 // if we feel the min, max, or bucket count amount are not appropriate.
@@ -53,11 +62,11 @@ void SyncRecordDatatypeBin(const std::string& name, int sample, int value);
       case ::syncer::PASSWORDS:                                \
         PER_DATA_TYPE_MACRO("Passwords");                      \
         break;                                                 \
-      case ::syncer::AUTOFILL:                                 \
-        PER_DATA_TYPE_MACRO("Autofill");                       \
-        break;                                                 \
       case ::syncer::AUTOFILL_PROFILE:                         \
         PER_DATA_TYPE_MACRO("AutofillProfiles");               \
+        break;                                                 \
+      case ::syncer::AUTOFILL:                                 \
+        PER_DATA_TYPE_MACRO("Autofill");                       \
         break;                                                 \
       case ::syncer::AUTOFILL_WALLET_DATA:                     \
         PER_DATA_TYPE_MACRO("AutofillWallet");                 \
@@ -74,9 +83,6 @@ void SyncRecordDatatypeBin(const std::string& name, int sample, int value);
       case ::syncer::EXTENSIONS:                               \
         PER_DATA_TYPE_MACRO("Extensions");                     \
         break;                                                 \
-      case ::syncer::NIGORI:                                   \
-        PER_DATA_TYPE_MACRO("Nigori");                         \
-        break;                                                 \
       case ::syncer::SEARCH_ENGINES:                           \
         PER_DATA_TYPE_MACRO("SearchEngines");                  \
         break;                                                 \
@@ -86,14 +92,8 @@ void SyncRecordDatatypeBin(const std::string& name, int sample, int value);
       case ::syncer::APPS:                                     \
         PER_DATA_TYPE_MACRO("Apps");                           \
         break;                                                 \
-      case ::syncer::APP_LIST:                                 \
-        PER_DATA_TYPE_MACRO("AppList");                        \
-        break;                                                 \
       case ::syncer::APP_SETTINGS:                             \
         PER_DATA_TYPE_MACRO("AppSettings");                    \
-        break;                                                 \
-      case ::syncer::ARC_PACKAGE:                              \
-        PER_DATA_TYPE_MACRO("ArcPackage");                     \
         break;                                                 \
       case ::syncer::EXTENSION_SETTINGS:                       \
         PER_DATA_TYPE_MACRO("ExtensionSettings");              \
@@ -110,18 +110,6 @@ void SyncRecordDatatypeBin(const std::string& name, int sample, int value);
       case ::syncer::SYNCED_NOTIFICATION_APP_INFO:             \
         PER_DATA_TYPE_MACRO("SyncedNotificationAppInfo");      \
         break;                                                 \
-      case ::syncer::DEVICE_INFO:                              \
-        PER_DATA_TYPE_MACRO("DeviceInfo");                     \
-        break;                                                 \
-      case ::syncer::EXPERIMENTS:                              \
-        PER_DATA_TYPE_MACRO("Experiments");                    \
-        break;                                                 \
-      case ::syncer::PRINTERS:                                 \
-        PER_DATA_TYPE_MACRO("Printers");                       \
-        break;                                                 \
-      case ::syncer::PRIORITY_PREFERENCES:                     \
-        PER_DATA_TYPE_MACRO("PriorityPreferences");            \
-        break;                                                 \
       case ::syncer::DICTIONARY:                               \
         PER_DATA_TYPE_MACRO("Dictionary");                     \
         break;                                                 \
@@ -130,6 +118,12 @@ void SyncRecordDatatypeBin(const std::string& name, int sample, int value);
         break;                                                 \
       case ::syncer::FAVICON_TRACKING:                         \
         PER_DATA_TYPE_MACRO("FaviconTracking");                \
+        break;                                                 \
+      case ::syncer::DEVICE_INFO:                              \
+        PER_DATA_TYPE_MACRO("DeviceInfo");                     \
+        break;                                                 \
+      case ::syncer::PRIORITY_PREFERENCES:                     \
+        PER_DATA_TYPE_MACRO("PriorityPreferences");            \
         break;                                                 \
       case ::syncer::SUPERVISED_USER_SETTINGS:                 \
         PER_DATA_TYPE_MACRO("ManagedUserSetting");             \
@@ -140,20 +134,38 @@ void SyncRecordDatatypeBin(const std::string& name, int sample, int value);
       case ::syncer::SUPERVISED_USER_SHARED_SETTINGS:          \
         PER_DATA_TYPE_MACRO("ManagedUserSharedSetting");       \
         break;                                                 \
-      case ::syncer::SUPERVISED_USER_WHITELISTS:               \
-        PER_DATA_TYPE_MACRO("ManagedUserWhitelist");           \
-        break;                                                 \
       case ::syncer::ARTICLES:                                 \
         PER_DATA_TYPE_MACRO("Article");                        \
+        break;                                                 \
+      case ::syncer::APP_LIST:                                 \
+        PER_DATA_TYPE_MACRO("AppList");                        \
         break;                                                 \
       case ::syncer::WIFI_CREDENTIALS:                         \
         PER_DATA_TYPE_MACRO("WifiCredentials");                \
         break;                                                 \
-      case ::syncer::PROXY_TABS:                               \
-        PER_DATA_TYPE_MACRO("Tabs");                           \
+      case ::syncer::SUPERVISED_USER_WHITELISTS:               \
+        PER_DATA_TYPE_MACRO("ManagedUserWhitelist");           \
+        break;                                                 \
+      case ::syncer::ARC_PACKAGE:                              \
+        PER_DATA_TYPE_MACRO("ArcPackage");                     \
+        break;                                                 \
+      case ::syncer::PRINTERS:                                 \
+        PER_DATA_TYPE_MACRO("Printers");                       \
         break;                                                 \
       case ::syncer::READING_LIST:                             \
         PER_DATA_TYPE_MACRO("ReadingList");                    \
+        break;                                                 \
+      case ::syncer::USER_EVENTS:                              \
+        PER_DATA_TYPE_MACRO("UserEvents");                     \
+        break;                                                 \
+      case ::syncer::PROXY_TABS:                               \
+        PER_DATA_TYPE_MACRO("Tabs");                           \
+        break;                                                 \
+      case ::syncer::NIGORI:                                   \
+        PER_DATA_TYPE_MACRO("Nigori");                         \
+        break;                                                 \
+      case ::syncer::EXPERIMENTS:                              \
+        PER_DATA_TYPE_MACRO("Experiments");                    \
         break;                                                 \
       default:                                                 \
         NOTREACHED() << "Unknown datatype "                    \

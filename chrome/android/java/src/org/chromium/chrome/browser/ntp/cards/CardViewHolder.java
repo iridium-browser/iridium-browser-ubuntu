@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.ntp.cards;
 
+import android.content.res.Resources;
 import android.graphics.Rect;
 import android.support.annotation.CallSuper;
 import android.support.annotation.DrawableRes;
@@ -22,6 +23,8 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ntp.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.ContextMenuManager.ContextMenuItemId;
+import org.chromium.chrome.browser.suggestions.SuggestionsConfig;
+import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.chrome.browser.util.ViewUtils;
 import org.chromium.chrome.browser.widget.displaystyle.HorizontalDisplayStyle;
@@ -36,7 +39,7 @@ import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
  * - Cards can peek above the fold if there is enough space.
  *
  * - When peeking, tapping on cards will make them request a scroll up (see
- *   {@link NewTabPageRecyclerView#scrollToFirstCard()}). Tap events in non-peeking state will be
+ *   {@link SuggestionsRecyclerView#interceptCardTapped}). Tap events in non-peeking state will be
  *   routed through {@link #onCardTapped()} for subclasses to override.
  *
  * - Cards will get some lateral margins when the viewport is sufficiently wide.
@@ -65,9 +68,9 @@ public abstract class CardViewHolder
     private final int mDefaultLateralMargin;
     private final int mWideLateralMargin;
 
-    protected final NewTabPageRecyclerView mRecyclerView;
+    protected final SuggestionsRecyclerView mRecyclerView;
 
-    private final UiConfig mUiConfig;
+    protected final UiConfig mUiConfig;
     private final MarginResizer mMarginResizer;
 
     /**
@@ -85,28 +88,25 @@ public abstract class CardViewHolder
      * @param uiConfig The NTP UI configuration object used to adjust the card UI.
      * @param contextMenuManager The manager responsible for the context menu.
      */
-    public CardViewHolder(int layoutId, final NewTabPageRecyclerView recyclerView,
+    public CardViewHolder(int layoutId, final SuggestionsRecyclerView recyclerView,
             UiConfig uiConfig, final ContextMenuManager contextMenuManager) {
         super(inflateView(layoutId, recyclerView));
 
-        ApiCompatibilityUtils.getDrawable(recyclerView.getResources(), R.drawable.card_single)
+        Resources resources = recyclerView.getResources();
+        ApiCompatibilityUtils.getDrawable(resources, R.drawable.card_single)
                 .getPadding(mCardShadow);
 
         mCardGap = recyclerView.getResources().getDimensionPixelSize(R.dimen.snippets_card_gap);
 
-        mMaxPeekPadding = recyclerView.getResources().getDimensionPixelSize(
-                R.dimen.snippets_padding);
+        mMaxPeekPadding = resources.getDimensionPixelSize(R.dimen.snippets_padding);
 
         mRecyclerView = recyclerView;
 
         itemView.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (isPeeking()) {
-                    recyclerView.scrollToFirstCard();
-                } else {
-                    onCardTapped();
-                }
+                if (recyclerView.interceptCardTapped(CardViewHolder.this)) return;
+                onCardTapped();
             }
         });
 
@@ -123,15 +123,18 @@ public abstract class CardViewHolder
 
         // Configure the resizer to use negative margins on regular display to balance out the
         // lateral shadow of the card 9-patch and avoid a rounded corner effect.
-        int cardCornerRadius = recyclerView.getResources().getDimensionPixelSize(
-                R.dimen.card_corner_radius);
+        int cardCornerRadius = resources.getDimensionPixelSize(R.dimen.card_corner_radius);
         assert mCardShadow.left == mCardShadow.right;
-        mDefaultLateralMargin = -(mCardShadow.left + cardCornerRadius);
-        mWideLateralMargin = recyclerView.getResources().getDimensionPixelSize(
-                R.dimen.ntp_wide_card_lateral_margins);
+        if (SuggestionsConfig.useModern()) {
+            mDefaultLateralMargin =
+                    resources.getDimensionPixelSize(R.dimen.content_suggestions_card_modern_margin);
+        } else {
+            mDefaultLateralMargin = -(mCardShadow.left + cardCornerRadius);
+        }
+        mWideLateralMargin = resources.getDimensionPixelSize(R.dimen.ntp_wide_card_lateral_margins);
 
-        mMarginResizer = MarginResizer.createWithViewAdapter(itemView, mUiConfig,
-                mDefaultLateralMargin, mWideLateralMargin);
+        mMarginResizer =
+                new MarginResizer(itemView, uiConfig, mDefaultLateralMargin, mWideLateralMargin);
     }
 
     @Override
@@ -173,14 +176,6 @@ public abstract class CardViewHolder
      */
     @CallSuper
     protected void onBindViewHolder() {
-        // Reset the peek status to avoid recycled view holders to be peeking at the wrong moment.
-        if (getAdapterPosition() != mRecyclerView.getNewTabPageAdapter().getFirstCardPosition()) {
-            // Not the first card, we can't peek anyway.
-            setNotPeeking();
-        } else {
-            mRecyclerView.updatePeekingCard(this);
-        }
-
         // Reset the transparency and translation in case a dismissed card is being recycled.
         itemView.setAlpha(1f);
         itemView.setTranslationX(0f);
@@ -202,12 +197,25 @@ public abstract class CardViewHolder
 
         // Make sure we use the right background.
         updateLayoutParams();
+
+        mMarginResizer.attach();
+
+        mRecyclerView.onCardBound(this);
+    }
+
+    @Override
+    public void recycle() {
+        mMarginResizer.detach();
+        super.recycle();
     }
 
     @Override
     public void updateLayoutParams() {
         // Nothing to do for dismissed cards.
         if (getAdapterPosition() == RecyclerView.NO_POSITION) return;
+
+        // Nothing to do for the modern layout.
+        if (SuggestionsConfig.useModern()) return;
 
         NewTabPageAdapter adapter = mRecyclerView.getNewTabPageAdapter();
 
@@ -322,6 +330,7 @@ public abstract class CardViewHolder
             case ItemViewType.PROGRESS:
             case ItemViewType.FOOTER:
             case ItemViewType.ALL_DISMISSED:
+            case ItemViewType.CAROUSEL:
                 return false;
             default:
                 assert false;
@@ -337,7 +346,7 @@ public abstract class CardViewHolder
         return R.drawable.card_single;
     }
 
-    protected NewTabPageRecyclerView getRecyclerView() {
+    public SuggestionsRecyclerView getRecyclerView() {
         return mRecyclerView;
     }
 }

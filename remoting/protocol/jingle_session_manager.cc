@@ -16,7 +16,7 @@
 #include "remoting/signaling/signal_strategy.h"
 #include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
 #include "third_party/libjingle_xmpp/xmpp/constants.h"
-#include "third_party/webrtc/base/socketaddress.h"
+#include "third_party/webrtc/rtc_base/socketaddress.h"
 
 using buzz::QName;
 
@@ -46,17 +46,17 @@ void JingleSessionManager::set_protocol_config(
 }
 
 std::unique_ptr<Session> JingleSessionManager::Connect(
-    const std::string& host_jid,
+    const SignalingAddress& peer_address,
     std::unique_ptr<Authenticator> authenticator) {
   std::unique_ptr<JingleSession> session(new JingleSession(this));
-  session->StartConnection(host_jid, std::move(authenticator));
+  session->StartConnection(peer_address, std::move(authenticator));
   sessions_[session->session_id_] = session.get();
   return std::move(session);
 }
 
 void JingleSessionManager::set_authenticator_factory(
     std::unique_ptr<AuthenticatorFactory> authenticator_factory) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   authenticator_factory_ = std::move(authenticator_factory);
 }
 
@@ -84,10 +84,10 @@ bool JingleSessionManager::OnSignalStrategyIncomingStanza(
 
     std::unique_ptr<Authenticator> authenticator =
         authenticator_factory_->CreateAuthenticator(
-            signal_strategy_->GetLocalJid(), message->from.id());
+            signal_strategy_->GetLocalAddress().id(), message->from.id());
 
     JingleSession* session = new JingleSession(this);
-    session->InitializeIncomingConnection(*message,
+    session->InitializeIncomingConnection(stanza->Attr(buzz::QN_ID), *message,
                                           std::move(authenticator));
     sessions_[session->session_id_] = session;
 

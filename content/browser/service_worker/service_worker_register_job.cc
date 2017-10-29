@@ -17,15 +17,46 @@
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_storage.h"
 #include "content/browser/service_worker/service_worker_write_to_cache_job.h"
+#include "content/common/service_worker/service_worker_event_dispatcher.mojom.h"
 #include "content/common/service_worker/service_worker_messages.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/browser_thread.h"
+#include "mojo/public/cpp/bindings/associated_binding.h"
 #include "net/base/net_errors.h"
 
 namespace content {
 
 namespace {
+
+class InstallEventMethodsReceiver
+    : public mojom::ServiceWorkerInstallEventMethods {
+ public:
+  InstallEventMethodsReceiver(ServiceWorkerVersion* version)
+      : version_(version), install_methods_binding_(this) {}
+  ~InstallEventMethodsReceiver() override {}
+
+  void BindInterface(
+      mojom::ServiceWorkerInstallEventMethodsAssociatedPtrInfo* ptr_info) {
+    install_methods_binding_.Bind(mojo::MakeRequest(ptr_info));
+  }
+
+  // Implements mojom::ServiceWorkerInstallEventMethod.
+  void RegisterForeignFetchScopes(
+      const std::vector<GURL>& sub_scopes,
+      const std::vector<url::Origin>& origins) override {
+    DCHECK(version_);
+    version_->RegisterForeignFetchScopes(sub_scopes, origins);
+  }
+
+ private:
+  ServiceWorkerVersion* version_;
+
+  mojo::AssociatedBinding<mojom::ServiceWorkerInstallEventMethods>
+      install_methods_binding_;
+
+  DISALLOW_COPY_AND_ASSIGN(InstallEventMethodsReceiver);
+};
 
 void RunSoon(const base::Closure& closure) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, closure);
@@ -37,11 +68,11 @@ typedef ServiceWorkerRegisterJobBase::RegistrationJobType RegistrationJobType;
 
 ServiceWorkerRegisterJob::ServiceWorkerRegisterJob(
     base::WeakPtr<ServiceWorkerContextCore> context,
-    const GURL& pattern,
-    const GURL& script_url)
+    const GURL& script_url,
+    const ServiceWorkerRegistrationOptions& options)
     : context_(context),
       job_type_(REGISTRATION_JOB),
-      pattern_(pattern),
+      pattern_(options.scope),
       script_url_(script_url),
       phase_(INITIAL),
       doom_installing_worker_(false),
@@ -288,8 +319,8 @@ void ServiceWorkerRegisterJob::RegisterAndContinue() {
     return;
   }
 
-  set_registration(
-      new ServiceWorkerRegistration(pattern_, registration_id, context_));
+  set_registration(new ServiceWorkerRegistration(
+      ServiceWorkerRegistrationOptions(pattern_), registration_id, context_));
   AddRegistrationToMatchingProviderHosts(registration());
   UpdateAndContinue();
 }
@@ -431,34 +462,27 @@ void ServiceWorkerRegisterJob::DispatchInstallEvent() {
       ServiceWorkerMetrics::EventType::INSTALL,
       base::Bind(&ServiceWorkerRegisterJob::OnInstallFailed,
                  weak_factory_.GetWeakPtr()));
-  new_version()
-      ->RegisterRequestCallback<ServiceWorkerHostMsg_InstallEventFinished>(
-          request_id, base::Bind(&ServiceWorkerRegisterJob::OnInstallFinished,
-                                 weak_factory_.GetWeakPtr()));
-  new_version()->DispatchEvent({request_id},
-                               ServiceWorkerMsg_InstallEvent(request_id));
+
+  std::unique_ptr<InstallEventMethodsReceiver> install_methods_receiver =
+      base::MakeUnique<InstallEventMethodsReceiver>(new_version());
+  mojom::ServiceWorkerInstallEventMethodsAssociatedPtrInfo ptr_info;
+  install_methods_receiver->BindInterface(&ptr_info);
+  new_version()->event_dispatcher()->DispatchInstallEvent(
+      std::move(ptr_info),
+      base::Bind(&ServiceWorkerRegisterJob::OnInstallFinished,
+                 weak_factory_.GetWeakPtr(), request_id,
+                 base::Passed(&install_methods_receiver)));
 }
 
 void ServiceWorkerRegisterJob::OnInstallFinished(
     int request_id,
-    blink::WebServiceWorkerEventResult result,
+    std::unique_ptr<InstallEventMethodsReceiver> install_methods_receiver,
+    ServiceWorkerStatusCode status,
     bool has_fetch_handler,
     base::Time dispatch_event_time) {
-  new_version()->FinishRequest(
-      request_id, result == blink::WebServiceWorkerEventResultCompleted,
-      dispatch_event_time);
-
-  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
-  switch (result) {
-    case blink::WebServiceWorkerEventResultCompleted:
-      status = SERVICE_WORKER_OK;
-      break;
-    case blink::WebServiceWorkerEventResultRejected:
-      status = SERVICE_WORKER_ERROR_EVENT_WAITUNTIL_REJECTED;
-      break;
-    default:
-      NOTREACHED();
-  }
+  install_methods_receiver.reset();
+  new_version()->FinishRequest(request_id, status == SERVICE_WORKER_OK,
+                               dispatch_event_time);
 
   if (status != SERVICE_WORKER_OK) {
     OnInstallFailed(status);

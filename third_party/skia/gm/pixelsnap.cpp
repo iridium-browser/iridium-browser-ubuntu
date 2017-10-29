@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 
 #include "SkShader.h"
 
@@ -54,7 +55,7 @@ protected:
             canvas->translate(0, SkIntToScalar(kLabelOffsetY));
             for (int i = 0; i <= kSubPixelSteps; ++i) {
                 offset.printf("%d", i);
-                canvas->drawText(offset.c_str(), offset.size(),
+                canvas->drawString(offset,
                                     0, i * kTrans + labelPaint.getTextSize(),
                                     labelPaint);
             }
@@ -65,7 +66,7 @@ protected:
             canvas->translate(SkIntToScalar(kLabelOffsetX), 0);
             for (int i = 0; i <= kSubPixelSteps; ++i) {
                 offset.printf("%d", i);
-                canvas->drawText(offset.c_str(), offset.size(),
+                canvas->drawString(offset,
                                     i * SkIntToScalar(kTrans), labelPaint.getTextSize(),
                                     labelPaint);
             }

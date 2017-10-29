@@ -12,13 +12,16 @@
 
 namespace angle
 {
+
+constexpr GLsizei kWindowSize = 128;
+
 class RobustClientMemoryTest : public ANGLETest
 {
   protected:
     RobustClientMemoryTest()
     {
-        setWindowWidth(128);
-        setWindowHeight(128);
+        setWindowWidth(kWindowSize);
+        setWindowHeight(kWindowSize);
         setConfigRedBits(8);
         setConfigGreenBits(8);
         setConfigBlueBits(8);
@@ -301,7 +304,7 @@ TEST_P(RobustClientMemoryTest, GetInteger)
     EXPECT_GL_NO_ERROR();
 }
 
-// Test basic usage and validation of glTexImage2DRobustANGLE
+// Test basic usage and validation of glTexImage2DRobustANGLE and glTexSubImage2DRobustANGLE
 TEST_P(RobustClientMemoryTest, TexImage2D)
 {
     if (!extensionsPresent())
@@ -320,10 +323,20 @@ TEST_P(RobustClientMemoryTest, TexImage2D)
                             rgbaData.data());
     EXPECT_GL_NO_ERROR();
 
+    glTexSubImage2DRobustANGLE(GL_TEXTURE_2D, 0, 0, 0, dataDimension, dataDimension, GL_RGBA,
+                               GL_UNSIGNED_BYTE, static_cast<GLsizei>(rgbaData.size()),
+                               rgbaData.data());
+    EXPECT_GL_NO_ERROR();
+
     // Test with a data size that is too small
     glTexImage2DRobustANGLE(GL_TEXTURE_2D, 0, GL_RGBA, dataDimension, dataDimension, 0, GL_RGBA,
                             GL_UNSIGNED_BYTE, static_cast<GLsizei>(rgbaData.size()) / 2,
                             rgbaData.data());
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+    glTexSubImage2DRobustANGLE(GL_TEXTURE_2D, 0, 0, 0, dataDimension, dataDimension, GL_RGBA,
+                               GL_UNSIGNED_BYTE, static_cast<GLsizei>(rgbaData.size()) / 2,
+                               rgbaData.data());
     EXPECT_GL_ERROR(GL_INVALID_OPERATION);
 
     if (getClientMajorVersion() >= 3)
@@ -357,14 +370,29 @@ TEST_P(RobustClientMemoryTest, ReadPixels)
 
     // Test the regular case
     GLsizei length = 0;
+    GLsizei width  = 0;
+    GLsizei height = 0;
     glReadPixelsRobustANGLE(0, 0, dataDimension, dataDimension, GL_RGBA, GL_UNSIGNED_BYTE,
-                            static_cast<GLsizei>(rgbaData.size()), &length, rgbaData.data());
+                            static_cast<GLsizei>(rgbaData.size()), &length, &width, &height,
+                            rgbaData.data());
     EXPECT_GL_NO_ERROR();
     EXPECT_EQ(static_cast<GLsizei>(rgbaData.size()), length);
+    EXPECT_EQ(dataDimension, width);
+    EXPECT_EQ(dataDimension, height);
+
+    // Test a case that would be partially clipped
+    glReadPixelsRobustANGLE(-1, kWindowSize - dataDimension + 3, dataDimension, dataDimension,
+                            GL_RGBA, GL_UNSIGNED_BYTE, static_cast<GLsizei>(rgbaData.size()),
+                            &length, &width, &height, rgbaData.data());
+    EXPECT_GL_NO_ERROR();
+    EXPECT_EQ(static_cast<GLsizei>(rgbaData.size()), length);
+    EXPECT_EQ(dataDimension - 1, width);
+    EXPECT_EQ(dataDimension - 3, height);
 
     // Test with a data size that is too small
     glReadPixelsRobustANGLE(0, 0, dataDimension, dataDimension, GL_RGBA, GL_UNSIGNED_BYTE,
-                            static_cast<GLsizei>(rgbaData.size()) - 1, &length, rgbaData.data());
+                            static_cast<GLsizei>(rgbaData.size()) - 1, &length, nullptr, nullptr,
+                            rgbaData.data());
     EXPECT_GL_ERROR(GL_INVALID_OPERATION);
 
     if (getClientMajorVersion() >= 3)
@@ -372,7 +400,8 @@ TEST_P(RobustClientMemoryTest, ReadPixels)
         // Set a pack parameter that would cause the driver to write past the end of the buffer
         glPixelStorei(GL_PACK_ROW_LENGTH, dataDimension + 1);
         glReadPixelsRobustANGLE(0, 0, dataDimension, dataDimension, GL_RGBA, GL_UNSIGNED_BYTE,
-                                static_cast<GLsizei>(rgbaData.size()), &length, rgbaData.data());
+                                static_cast<GLsizei>(rgbaData.size()), &length, nullptr, nullptr,
+                                rgbaData.data());
         EXPECT_GL_ERROR(GL_INVALID_OPERATION);
     }
 }

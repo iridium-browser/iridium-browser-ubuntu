@@ -72,6 +72,10 @@ def depending_union_type(idl_type):
     def find_base_type(current_type):
         if current_type.is_array_or_sequence_type:
             return find_base_type(current_type.element_type)
+        if current_type.is_record_type:
+            # IdlRecordType.key_type is always a string type, so we only need
+            # to looking into value_type.
+            return find_base_type(current_type.value_type)
         if current_type.is_nullable:
             return find_base_type(current_type.inner_type)
         return current_type
@@ -177,7 +181,14 @@ class CodeGeneratorV8(CodeGeneratorV8Base):
         include_paths = interface_info.get('dependencies_include_paths')
 
         # Select appropriate Jinja template and contents function
-        if interface.is_callback:
+        #
+        # A callback interface with constants needs a special handling.
+        # https://heycam.github.io/webidl/#legacy-callback-interface-object
+        if interface.is_callback and len(interface.constants) > 0:
+            header_template_filename = 'legacy_callback_interface.h.tmpl'
+            cpp_template_filename = 'legacy_callback_interface.cpp.tmpl'
+            interface_context = v8_callback_interface.legacy_callback_interface_context
+        elif interface.is_callback:
             header_template_filename = 'callback_interface.h.tmpl'
             cpp_template_filename = 'callback_interface.cpp.tmpl'
             interface_context = v8_callback_interface.callback_interface_context
@@ -201,7 +212,7 @@ class CodeGeneratorV8(CodeGeneratorV8Base):
             template_context['exported'] = self.info_provider.specifier_for_export
         # Add the include for interface itself
         if IdlType(interface_name).is_typed_array:
-            template_context['header_includes'].add('core/dom/DOMTypedArray.h')
+            template_context['header_includes'].add('core/typed_arrays/DOMTypedArray.h')
         else:
             template_context['header_includes'].add(interface_info['include_path'])
         template_context['header_includes'].update(
@@ -287,12 +298,20 @@ class CodeGeneratorUnionType(CodeGeneratorBase):
     def __init__(self, info_provider, cache_dir, output_dir, target_component):
         CodeGeneratorBase.__init__(self, MODULE_PYNAME, info_provider, cache_dir, output_dir)
         self.target_component = target_component
+        # The code below duplicates parts of TypedefResolver. We do not use it
+        # directly because IdlUnionType is not a type defined in
+        # idl_definitions.py. What we do instead is to resolve typedefs in
+        # _generate_container_code() whenever a new union file is generated.
+        self.typedefs = {}
+        for name, typedef in self.info_provider.typedefs.iteritems():
+            self.typedefs[name] = typedef.idl_type
 
     def _generate_container_code(self, union_type):
+        union_type = union_type.resolve_typedefs(self.typedefs)
         header_template = self.jinja_env.get_template('union_container.h.tmpl')
         cpp_template = self.jinja_env.get_template('union_container.cpp.tmpl')
         template_context = v8_union.container_context(
-            union_type, self.info_provider.interfaces_info)
+            union_type, self.info_provider)
         template_context['header_includes'].append(
             self.info_provider.include_path_for_export)
         template_context['header_includes'] = normalize_and_sort_includes(

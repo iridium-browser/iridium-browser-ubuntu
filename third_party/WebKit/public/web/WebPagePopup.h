@@ -31,7 +31,7 @@
 #ifndef WebPagePopup_h
 #define WebPagePopup_h
 
-#include "../platform/WebCommon.h"
+#include "public/platform/WebCommon.h"
 #include "WebWidget.h"
 
 namespace blink {
@@ -40,8 +40,8 @@ class WebWidgetClient;
 
 class WebPagePopup : public WebWidget {
  public:
-  BLINK_EXPORT static WebPagePopup* create(WebWidgetClient*);
-  virtual WebPoint positionRelativeToOwner() = 0;
+  BLINK_EXPORT static WebPagePopup* Create(WebWidgetClient*);
+  virtual WebPoint PositionRelativeToOwner() = 0;
 };
 
 }  // namespace blink

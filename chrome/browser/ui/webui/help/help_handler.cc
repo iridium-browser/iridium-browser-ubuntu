@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "ash/common/system/chromeos/devicetype_utils.h"
+#include "ash/system/devicetype_utils.h"
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -26,13 +26,13 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/obsolete_system/obsolete_system.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/pref_names.h"
@@ -46,7 +46,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -98,7 +97,10 @@ struct RegulatoryLabel {
 // Returns message that informs user that for update it's better to
 // connect to a network of one of the allowed types.
 base::string16 GetAllowedConnectionTypesMessage() {
-  if (help_utils_chromeos::IsUpdateOverCellularAllowed()) {
+  // Old help page does not support interactive-updates over cellular, so just
+  // sets |interactive| to false to make its behavior the same as before.
+  if (help_utils_chromeos::IsUpdateOverCellularAllowed(
+          false /* interactive */)) {
     return l10n_util::GetStringUTF16(IDS_UPGRADE_NETWORK_LIST_CELLULAR_ALLOWED);
   } else {
     return l10n_util::GetStringUTF16(
@@ -136,7 +138,7 @@ bool CanChangeChannel(Profile* profile) {
       domain = email.substr(email.find('@') + 1);
     policy::BrowserPolicyConnectorChromeOS* connector =
         g_browser_process->platform_part()->browser_policy_connector_chromeos();
-    return domain == connector->GetEnterpriseDomain();
+    return domain == connector->GetEnterpriseEnrollmentDomain();
   } else {
     chromeos::OwnerSettingsServiceChromeOS* service =
         chromeos::OwnerSettingsServiceChromeOSFactory::GetInstance()
@@ -204,12 +206,15 @@ std::string ReadRegulatoryLabelText(const base::FilePath& path) {
 
 HelpHandler::HelpHandler()
     : policy_registrar_(
-        g_browser_process->policy_service(),
-        policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME, std::string())),
+          g_browser_process->policy_service(),
+          policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME, std::string())),
+      apply_changes_from_upgrade_observer_(false),
       weak_factory_(this) {
+  UpgradeDetector::GetInstance()->AddObserver(this);
 }
 
 HelpHandler::~HelpHandler() {
+  UpgradeDetector::GetInstance()->RemoveObserver(this);
 }
 
 void HelpHandler::GetLocalizedValues(base::DictionaryValue* localized_strings) {
@@ -371,8 +376,7 @@ void HelpHandler::GetLocalizedValues(base::DictionaryValue* localized_strings) {
 
 void HelpHandler::RegisterMessages() {
   version_updater_.reset(VersionUpdater::Create(web_ui()->GetWebContents()));
-  registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
-                 content::NotificationService::AllSources());
+  apply_changes_from_upgrade_observer_ = true;
   policy_registrar_.Observe(
       policy::key::kDeviceAutoUpdateDisabled,
       base::Bind(&HelpHandler::OnDeviceAutoUpdatePolicyChanged,
@@ -406,13 +410,12 @@ void HelpHandler::RegisterMessages() {
 #endif
 }
 
-void HelpHandler::Observe(int type, const content::NotificationSource& source,
-                          const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_UPGRADE_RECOMMENDED, type);
-
-  // A version update is installed and ready to go. Refresh the UI so the
-  // correct state will be shown.
-  RequestUpdate(nullptr);
+void HelpHandler::OnUpgradeRecommended() {
+  if (apply_changes_from_upgrade_observer_) {
+    // A version update is installed and ready to go. Refresh the UI so the
+    // correct state will be shown.
+    RequestUpdate(nullptr);
+  }
 }
 
 // static
@@ -460,19 +463,16 @@ void HelpHandler::RefreshUpdateStatus() {
 void HelpHandler::OnPageLoaded(const base::ListValue* args) {
 #if defined(OS_CHROMEOS)
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&chromeos::version_loader::GetVersion,
                  chromeos::version_loader::VERSION_FULL),
       base::Bind(&HelpHandler::OnOSVersion, weak_factory_.GetWeakPtr()));
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&chromeos::version_loader::GetARCVersion),
       base::Bind(&HelpHandler::OnARCVersion, weak_factory_.GetWeakPtr()));
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&chromeos::version_loader::GetFirmware),
       base::Bind(&HelpHandler::OnOSFirmware, weak_factory_.GetWeakPtr()));
 
@@ -483,7 +483,7 @@ void HelpHandler::OnPageLoaded(const base::ListValue* args) {
   base::Time build_time = base::SysInfo::GetLsbReleaseTime();
   base::string16 build_date = base::TimeFormatFriendlyDate(build_time);
   web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.setBuildDate",
-                                         base::StringValue(build_date));
+                                         base::Value(build_date));
 #endif  // defined(OS_CHROMEOS)
 
   RefreshUpdateStatus();
@@ -515,8 +515,7 @@ void HelpHandler::OnPageLoaded(const base::ListValue* args) {
   }
 
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&FindRegulatoryLabelDir),
       base::Bind(&HelpHandler::OnRegulatoryLabelDirFound,
                  weak_factory_.GetWeakPtr()));
@@ -538,7 +537,8 @@ void HelpHandler::OpenFeedbackDialog(const base::ListValue* args) {
   DCHECK(args->empty());
   Browser* browser = chrome::FindBrowserWithWebContents(
       web_ui()->GetWebContents());
-  chrome::OpenFeedbackDialog(browser);
+  chrome::OpenFeedbackDialog(browser,
+                             chrome::kFeedbackSourceOldSettingsAboutPage);
 }
 
 void HelpHandler::OpenHelpPage(const base::ListValue* args) {
@@ -605,7 +605,10 @@ void HelpHandler::RequestUpdate(const base::ListValue* args) {
 }
 
 void HelpHandler::SetUpdateStatus(VersionUpdater::Status status,
-                                  int progress, const base::string16& message) {
+                                  int progress,
+                                  const std::string& /* version */,
+                                  int64_t /* size */,
+                                  const base::string16& message) {
   // Only UPDATING state should have progress set.
   DCHECK(status == VersionUpdater::UPDATING || progress == 0);
 
@@ -626,6 +629,9 @@ void HelpHandler::SetUpdateStatus(VersionUpdater::Status status,
   case VersionUpdater::FAILED:
   case VersionUpdater::FAILED_OFFLINE:
   case VersionUpdater::FAILED_CONNECTION_TYPE_DISALLOWED:
+  // Old help page does not support update over cellular connection. Treat this
+  // signal as FAILED.
+  case VersionUpdater::NEED_PERMISSION_TO_UPDATE:
     status_str = "failed";
     break;
   case VersionUpdater::DISABLED:
@@ -637,8 +643,8 @@ void HelpHandler::SetUpdateStatus(VersionUpdater::Status status,
   }
 
   web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.setUpdateStatus",
-                                         base::StringValue(status_str),
-                                         base::StringValue(message));
+                                         base::Value(status_str),
+                                         base::Value(message));
 
   if (status == VersionUpdater::UPDATING) {
     web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.setProgress",
@@ -652,7 +658,7 @@ void HelpHandler::SetUpdateStatus(VersionUpdater::Status status,
     if (!types_msg.empty()) {
       web_ui()->CallJavascriptFunctionUnsafe(
           "help.HelpPage.setAndShowAllowedConnectionTypesMsg",
-          base::StringValue(types_msg));
+          base::Value(types_msg));
     } else {
       web_ui()->CallJavascriptFunctionUnsafe(
           "help.HelpPage.showAllowedConnectionTypesMsg", base::Value(false));
@@ -681,34 +687,34 @@ void HelpHandler::SetPromotionState(VersionUpdater::PromotionState state) {
   }
 
   web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.setPromotionState",
-                                         base::StringValue(state_str));
+                                         base::Value(state_str));
 }
 #endif  // defined(OS_MACOSX)
 
 #if defined(OS_CHROMEOS)
 void HelpHandler::OnOSVersion(const std::string& version) {
   web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.setOSVersion",
-                                         base::StringValue(version));
+                                         base::Value(version));
 }
 
 void HelpHandler::OnARCVersion(const std::string& firmware) {
   web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.setARCVersion",
-                                         base::StringValue(firmware));
+                                         base::Value(firmware));
 }
 
 void HelpHandler::OnOSFirmware(const std::string& firmware) {
   web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.setOSFirmware",
-                                         base::StringValue(firmware));
+                                         base::Value(firmware));
 }
 
 void HelpHandler::OnCurrentChannel(const std::string& channel) {
   web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.updateCurrentChannel",
-                                         base::StringValue(channel));
+                                         base::Value(channel));
 }
 
 void HelpHandler::OnTargetChannel(const std::string& channel) {
   web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.updateTargetChannel",
-                                         base::StringValue(channel));
+                                         base::Value(channel));
 }
 
 void HelpHandler::OnRegulatoryLabelDirFound(const base::FilePath& path) {
@@ -716,8 +722,7 @@ void HelpHandler::OnRegulatoryLabelDirFound(const base::FilePath& path) {
     return;
 
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&ReadRegulatoryLabelText, path),
       base::Bind(&HelpHandler::OnRegulatoryLabelTextRead,
                  weak_factory_.GetWeakPtr()));
@@ -730,14 +735,14 @@ void HelpHandler::OnRegulatoryLabelImageFound(const base::FilePath& path) {
   std::string url = std::string("chrome://") + chrome::kChromeOSAssetHost +
       "/" + path.MaybeAsASCII();
   web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.setRegulatoryLabelPath",
-                                         base::StringValue(url));
+                                         base::Value(url));
 }
 
 void HelpHandler::OnRegulatoryLabelTextRead(const std::string& text) {
   // Remove unnecessary whitespace.
   web_ui()->CallJavascriptFunctionUnsafe(
       "help.HelpPage.setRegulatoryLabelText",
-      base::StringValue(base::CollapseWhitespaceASCII(text, true)));
+      base::Value(base::CollapseWhitespaceASCII(text, true)));
 }
 
 void HelpHandler::OnEolStatus(update_engine::EndOfLifeStatus status) {
@@ -748,13 +753,13 @@ void HelpHandler::OnEolStatus(update_engine::EndOfLifeStatus status) {
   }
 
   if (status == update_engine::EndOfLifeStatus::kSupported) {
-    web_ui()->CallJavascriptFunctionUnsafe(
-        "help.HelpPage.updateEolMessage", base::StringValue("device_supported"),
-        base::StringValue(""));
+    web_ui()->CallJavascriptFunctionUnsafe("help.HelpPage.updateEolMessage",
+                                           base::Value("device_supported"),
+                                           base::Value(""));
   } else {
     web_ui()->CallJavascriptFunctionUnsafe(
-        "help.HelpPage.updateEolMessage", base::StringValue("device_endoflife"),
-        base::StringValue(l10n_util::GetStringUTF16(IDS_ABOUT_PAGE_EOL_EOL)));
+        "help.HelpPage.updateEolMessage", base::Value("device_endoflife"),
+        base::Value(l10n_util::GetStringUTF16(IDS_ABOUT_PAGE_EOL_EOL)));
   }
 }
 

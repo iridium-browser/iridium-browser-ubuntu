@@ -118,7 +118,7 @@ void ReaderModeChecker::CheckIsDistillableDetector(
         }
         const dom_distiller::DistillablePageDetector* detector =
             dom_distiller::DistillablePageDetector::GetDefault();
-        const base::StringValue value(base::SysNSStringToUTF8(result));
+        const base::Value value(base::SysNSStringToUTF8(result));
         std::vector<double> features(
             dom_distiller::CalculateDerivedFeaturesFromJSON(&value));
         if (detector->Classify(features)) {
@@ -148,6 +148,7 @@ void ReaderModeChecker::CheckIsDistillable() {
       CheckIsDistillableOG(receiver);
       break;
     case dom_distiller::DistillerHeuristicsType::ADABOOST_MODEL:
+    case dom_distiller::DistillerHeuristicsType::ALL_ARTICLES:
       CheckIsDistillableDetector(receiver);
       break;
     case dom_distiller::DistillerHeuristicsType::ALWAYS_TRUE:

@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "components/autofill/content/renderer/password_generation_agent.h"
 
 namespace autofill {
@@ -21,7 +20,7 @@ class TestPasswordGenerationAgent : public PasswordGenerationAgent {
 
   // PasswordGenreationAgent implementation:
   // Always return true to allow loading of data URLs.
-  bool ShouldAnalyzeDocument() const override;
+  bool ShouldAnalyzeDocument() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestPasswordGenerationAgent);

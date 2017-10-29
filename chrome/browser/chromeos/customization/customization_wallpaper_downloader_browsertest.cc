@@ -6,11 +6,12 @@
 
 #include <vector>
 
-#include "ash/common/wallpaper/wallpaper_controller.h"
-#include "ash/common/wm_shell.h"
+#include "ash/shell.h"
+#include "ash/wallpaper/wallpaper_controller.h"
 #include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
@@ -250,7 +251,7 @@ IN_PROC_BROWSER_TEST_F(CustomizationWallpaperDownloaderBrowserTest,
   WallpaperManager::Get()->SetDefaultWallpaperNow(EmptyAccountId());
   wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
   EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
-      ash::WmShell::Get()->wallpaper_controller()->GetWallpaper(),
+      ash::Shell::Get()->wallpaper_controller()->GetWallpaper(),
       wallpaper_manager_test_utils::kSmallDefaultWallpaperColor));
 
   WallpaperImageFetcherFactory url_factory(
@@ -268,7 +269,7 @@ IN_PROC_BROWSER_TEST_F(CustomizationWallpaperDownloaderBrowserTest,
 
   observer.WaitForWallpaperAnimationFinished();
   EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
-      ash::WmShell::Get()->wallpaper_controller()->GetWallpaper(),
+      ash::Shell::Get()->wallpaper_controller()->GetWallpaper(),
       wallpaper_manager_test_utils::kCustomWallpaperColor));
   EXPECT_EQ(1U, url_factory.num_attempts());
 }
@@ -279,7 +280,7 @@ IN_PROC_BROWSER_TEST_F(CustomizationWallpaperDownloaderBrowserTest,
   WallpaperManager::Get()->SetDefaultWallpaperNow(EmptyAccountId());
   wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
   EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
-      ash::WmShell::Get()->wallpaper_controller()->GetWallpaper(),
+      ash::Shell::Get()->wallpaper_controller()->GetWallpaper(),
       wallpaper_manager_test_utils::kSmallDefaultWallpaperColor));
 
   WallpaperImageFetcherFactory url_factory(
@@ -297,7 +298,7 @@ IN_PROC_BROWSER_TEST_F(CustomizationWallpaperDownloaderBrowserTest,
 
   observer.WaitForWallpaperAnimationFinished();
   EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
-      ash::WmShell::Get()->wallpaper_controller()->GetWallpaper(),
+      ash::Shell::Get()->wallpaper_controller()->GetWallpaper(),
       wallpaper_manager_test_utils::kCustomWallpaperColor));
 
   EXPECT_EQ(2U, url_factory.num_attempts());

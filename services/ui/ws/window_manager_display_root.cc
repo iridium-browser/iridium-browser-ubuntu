@@ -11,7 +11,9 @@
 #include "services/ui/ws/display.h"
 #include "services/ui/ws/display_manager.h"
 #include "services/ui/ws/server_window.h"
+#include "services/ui/ws/window_manager_state.h"
 #include "services/ui/ws/window_server.h"
+#include "services/ui/ws/window_tree.h"
 
 namespace ui {
 namespace ws {
@@ -31,12 +33,22 @@ WindowManagerDisplayRoot::WindowManagerDisplayRoot(Display* display)
   // Our root is always a child of the Display's root. Do this
   // before the WindowTree has been created so that the client doesn't get
   // notified of the add, bounds change and visibility change.
-  root_->SetBounds(gfx::Rect(display->root_window()->bounds().size()));
+  root_->SetBounds(gfx::Rect(display->root_window()->bounds().size()),
+                   allocator_.GenerateId());
   root_->SetVisible(true);
   display->root_window()->Add(root_.get());
 }
 
 WindowManagerDisplayRoot::~WindowManagerDisplayRoot() {}
+
+const ServerWindow* WindowManagerDisplayRoot::GetClientVisibleRoot() const {
+  if (window_manager_state_->window_tree()
+          ->automatically_create_display_roots()) {
+    return root_.get();
+  }
+
+  return root_->children().empty() ? nullptr : root_->children()[0];
+}
 
 WindowServer* WindowManagerDisplayRoot::window_server() {
   return display_->window_server();

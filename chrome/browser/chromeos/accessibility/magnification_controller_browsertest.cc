@@ -45,7 +45,7 @@ aura::Window* GetRootWindow() {
 }
 
 ash::MagnificationController* GetMagnificationController() {
-  return ash::Shell::GetInstance()->magnification_controller();
+  return ash::Shell::Get()->magnification_controller();
 }
 
 bool IsMagnifierEnabled() {
@@ -98,7 +98,6 @@ class MagnificationControllerTest : public InProcessBrowserTest {
   ~MagnificationControllerTest() override {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
     // Make screens sufficiently wide to host 2 browsers side by side.
     command_line->AppendSwitchASCII("ash-host-window-bounds", "1200x800");
   }

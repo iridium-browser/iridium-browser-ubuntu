@@ -2,14 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "bindings/core/v8/V8CacheOptions.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/inspector/ConsoleMessageStorage.h"
 #include "core/testing/DummyPageHolder.h"
+#include "core/workers/GlobalScopeCreationParams.h"
 #include "core/workers/ThreadedWorkletGlobalScope.h"
 #include "core/workers/ThreadedWorkletMessagingProxy.h"
 #include "core/workers/ThreadedWorkletObjectProxy.h"
 #include "core/workers/WorkerInspectorProxy.h"
 #include "core/workers/WorkerThread.h"
-#include "core/workers/WorkerThreadStartupData.h"
 #include "core/workers/WorkerThreadTestHelper.h"
 #include "core/workers/WorkletThreadHolder.h"
 #include "platform/CrossThreadFunctional.h"
@@ -19,179 +21,222 @@
 
 namespace blink {
 
+class ThreadedWorkletObjectProxyForTest final
+    : public ThreadedWorkletObjectProxy {
+ public:
+  ThreadedWorkletObjectProxyForTest(
+      ThreadedWorkletMessagingProxy* messaging_proxy,
+      ParentFrameTaskRunners* parent_frame_task_runners)
+      : ThreadedWorkletObjectProxy(messaging_proxy, parent_frame_task_runners),
+        reported_features_(static_cast<int>(WebFeature::kNumberOfFeatures)) {}
+
+ protected:
+  void CountFeature(WebFeature feature) override {
+    // Any feature should be reported only one time.
+    EXPECT_FALSE(reported_features_.QuickGet(static_cast<int>(feature)));
+    reported_features_.QuickSet(static_cast<int>(feature));
+    ThreadedWorkletObjectProxy::CountFeature(feature);
+  }
+
+  void CountDeprecation(WebFeature feature) final {
+    // Any feature should be reported only one time.
+    EXPECT_FALSE(reported_features_.QuickGet(static_cast<int>(feature)));
+    reported_features_.QuickSet(static_cast<int>(feature));
+    ThreadedWorkletObjectProxy::CountDeprecation(feature);
+  }
+
+ private:
+  BitVector reported_features_;
+};
+
 class ThreadedWorkletThreadForTest : public WorkerThread {
  public:
-  ThreadedWorkletThreadForTest(
-      WorkerLoaderProxyProvider* workerLoaderProxyProvider,
-      WorkerReportingProxy& workerReportingProxy)
-      : WorkerThread(WorkerLoaderProxy::create(workerLoaderProxyProvider),
-                     workerReportingProxy) {}
-  ~ThreadedWorkletThreadForTest() override{};
+  explicit ThreadedWorkletThreadForTest(
+      WorkerReportingProxy& worker_reporting_proxy)
+      : WorkerThread(nullptr, worker_reporting_proxy) {}
+  ~ThreadedWorkletThreadForTest() override {}
 
-  WorkerBackingThread& workerBackingThread() override {
-    auto workletThreadHolder =
-        WorkletThreadHolder<ThreadedWorkletThreadForTest>::getInstance();
-    DCHECK(workletThreadHolder);
-    return *workletThreadHolder->thread();
+  WorkerBackingThread& GetWorkerBackingThread() override {
+    auto worklet_thread_holder =
+        WorkletThreadHolder<ThreadedWorkletThreadForTest>::GetInstance();
+    DCHECK(worklet_thread_holder);
+    return *worklet_thread_holder->GetThread();
   }
 
-  void clearWorkerBackingThread() override {}
+  void ClearWorkerBackingThread() override {}
 
-  WorkerOrWorkletGlobalScope* createWorkerGlobalScope(
-      std::unique_ptr<WorkerThreadStartupData> startupData) final {
-    RefPtr<SecurityOrigin> securityOrigin =
-        SecurityOrigin::create(startupData->m_scriptURL);
+  WorkerOrWorkletGlobalScope* CreateWorkerGlobalScope(
+      std::unique_ptr<GlobalScopeCreationParams> creation_params) final {
+    RefPtr<SecurityOrigin> security_origin =
+        SecurityOrigin::Create(creation_params->script_url);
     return new ThreadedWorkletGlobalScope(
-        startupData->m_scriptURL, startupData->m_userAgent,
-        securityOrigin.release(), this->isolate(), this);
+        creation_params->script_url, creation_params->user_agent,
+        std::move(security_origin), this->GetIsolate(), this,
+        creation_params->worker_clients);
   }
 
-  bool isOwningBackingThread() const final { return false; }
+  bool IsOwningBackingThread() const final { return false; }
 
-  static void ensureSharedBackingThread() {
-    DCHECK(isMainThread());
-    WorkletThreadHolder<ThreadedWorkletThreadForTest>::createForTest(
+  static void EnsureSharedBackingThread() {
+    DCHECK(IsMainThread());
+    WorkletThreadHolder<ThreadedWorkletThreadForTest>::CreateForTest(
         "ThreadedWorkletThreadForTest");
   }
 
-  static void clearSharedBackingThread() {
-    DCHECK(isMainThread());
-    WorkletThreadHolder<ThreadedWorkletThreadForTest>::clearInstance();
+  static void ClearSharedBackingThread() {
+    DCHECK(IsMainThread());
+    WorkletThreadHolder<ThreadedWorkletThreadForTest>::ClearInstance();
   }
 
   // Emulates API use on ThreadedWorkletGlobalScope.
-  void countFeature(UseCounter::Feature feature) {
-    EXPECT_TRUE(isCurrentThread());
-    globalScope()->countFeature(feature);
-    getParentFrameTaskRunners()
-        ->get(TaskType::UnspecedTimer)
-        ->postTask(BLINK_FROM_HERE, crossThreadBind(&testing::exitRunLoop));
+  void CountFeature(WebFeature feature) {
+    EXPECT_TRUE(IsCurrentThread());
+    GlobalScope()->CountFeature(feature);
+    GetParentFrameTaskRunners()
+        ->Get(TaskType::kUnspecedTimer)
+        ->PostTask(BLINK_FROM_HERE, CrossThreadBind(&testing::ExitRunLoop));
   }
 
   // Emulates deprecated API use on ThreadedWorkletGlobalScope.
-  void countDeprecation(UseCounter::Feature feature) {
-    EXPECT_TRUE(isCurrentThread());
-    EXPECT_EQ(0u, consoleMessageStorage()->size());
-    globalScope()->countDeprecation(feature);
+  void CountDeprecation(WebFeature feature) {
+    EXPECT_TRUE(IsCurrentThread());
+    GlobalScope()->CountDeprecation(feature);
 
     // countDeprecation() should add a warning message.
-    EXPECT_EQ(1u, consoleMessageStorage()->size());
-    String consoleMessage = consoleMessageStorage()->at(0)->message();
-    EXPECT_TRUE(consoleMessage.contains("deprecated"));
+    EXPECT_EQ(1u, GetConsoleMessageStorage()->size());
+    String console_message = GetConsoleMessageStorage()->at(0)->Message();
+    EXPECT_TRUE(console_message.Contains("deprecated"));
 
-    getParentFrameTaskRunners()
-        ->get(TaskType::UnspecedTimer)
-        ->postTask(BLINK_FROM_HERE, crossThreadBind(&testing::exitRunLoop));
+    GetParentFrameTaskRunners()
+        ->Get(TaskType::kUnspecedTimer)
+        ->PostTask(BLINK_FROM_HERE, CrossThreadBind(&testing::ExitRunLoop));
   }
 };
 
 class ThreadedWorkletMessagingProxyForTest
     : public ThreadedWorkletMessagingProxy {
  public:
-  ThreadedWorkletMessagingProxyForTest(ExecutionContext* executionContext)
-      : ThreadedWorkletMessagingProxy(executionContext) {
-    m_mockWorkerLoaderProxyProvider =
-        WTF::makeUnique<MockWorkerLoaderProxyProvider>();
-    m_workerThread = WTF::makeUnique<ThreadedWorkletThreadForTest>(
-        m_mockWorkerLoaderProxyProvider.get(), workletObjectProxy());
-    ThreadedWorkletThreadForTest::ensureSharedBackingThread();
+  ThreadedWorkletMessagingProxyForTest(ExecutionContext* execution_context,
+                                       WorkerClients* worker_clients)
+      : ThreadedWorkletMessagingProxy(execution_context, worker_clients) {
+    worklet_object_proxy_ = WTF::MakeUnique<ThreadedWorkletObjectProxyForTest>(
+        this, GetParentFrameTaskRunners());
+    ThreadedWorkletThreadForTest::EnsureSharedBackingThread();
   }
 
   ~ThreadedWorkletMessagingProxyForTest() override {
-    m_workerThread->workerLoaderProxy()->detachProvider(
-        m_mockWorkerLoaderProxyProvider.get());
-    m_workerThread->terminateAndWait();
-    ThreadedWorkletThreadForTest::clearSharedBackingThread();
+    ThreadedWorkletThreadForTest::ClearSharedBackingThread();
   };
 
-  void start() {
-    KURL scriptURL(ParsedURLString, "http://fake.url/");
-    std::unique_ptr<Vector<char>> cachedMetaData = nullptr;
-    Vector<CSPHeaderAndType> contentSecurityPolicyHeaders;
-    String referrerPolicy = "";
-    m_securityOrigin = SecurityOrigin::create(scriptURL);
-    WorkerClients* workerClients = nullptr;
-    Vector<String> originTrialTokens;
-    std::unique_ptr<WorkerSettings> workerSettings = nullptr;
-    m_workerThread->start(
-        WorkerThreadStartupData::create(
-            scriptURL, "fake user agent", "// fake source code",
-            std::move(cachedMetaData), DontPauseWorkerGlobalScopeOnStart,
-            &contentSecurityPolicyHeaders, referrerPolicy,
-            m_securityOrigin.get(), workerClients, WebAddressSpaceLocal,
-            &originTrialTokens, std::move(workerSettings),
-            WorkerV8Settings::Default()),
-        getParentFrameTaskRunners());
-    workerInspectorProxy()->workerThreadCreated(
-        toDocument(getExecutionContext()), m_workerThread.get(), scriptURL);
-  }
-
- protected:
-  std::unique_ptr<WorkerThread> createWorkerThread(double originTime) final {
-    NOTREACHED();
-    return nullptr;
+  void Start() {
+    KURL script_url(kParsedURLString, "http://fake.url/");
+    std::unique_ptr<Vector<char>> cached_meta_data = nullptr;
+    Vector<CSPHeaderAndType> content_security_policy_headers;
+    String referrer_policy = "";
+    security_origin_ = SecurityOrigin::Create(script_url);
+    WorkerClients* worker_clients = nullptr;
+    Vector<String> origin_trial_tokens;
+    std::unique_ptr<WorkerSettings> worker_settings = nullptr;
+    InitializeWorkerThread(
+        WTF::MakeUnique<GlobalScopeCreationParams>(
+            script_url, "fake user agent", "// fake source code",
+            std::move(cached_meta_data), kDontPauseWorkerGlobalScopeOnStart,
+            &content_security_policy_headers, referrer_policy,
+            security_origin_.Get(), worker_clients, kWebAddressSpaceLocal,
+            &origin_trial_tokens, std::move(worker_settings),
+            kV8CacheOptionsDefault),
+        WTF::nullopt, script_url);
   }
 
  private:
   friend class ThreadedWorkletTest;
 
-  std::unique_ptr<MockWorkerLoaderProxyProvider>
-      m_mockWorkerLoaderProxyProvider;
-  RefPtr<SecurityOrigin> m_securityOrigin;
+  std::unique_ptr<WorkerThread> CreateWorkerThread() final {
+    return WTF::MakeUnique<ThreadedWorkletThreadForTest>(WorkletObjectProxy());
+  }
+
+  RefPtr<SecurityOrigin> security_origin_;
 };
 
 class ThreadedWorkletTest : public ::testing::Test {
  public:
   void SetUp() override {
-    m_page = DummyPageHolder::create();
-    m_messagingProxy = WTF::makeUnique<ThreadedWorkletMessagingProxyForTest>(
-        &m_page->document());
+    page_ = DummyPageHolder::Create();
+    messaging_proxy_ = new ThreadedWorkletMessagingProxyForTest(
+        &page_->GetDocument(), WorkerClients::Create());
   }
 
-  ThreadedWorkletMessagingProxyForTest* messagingProxy() {
-    return m_messagingProxy.get();
+  void TearDown() override {
+    GetWorkerThread()->Terminate();
+    GetWorkerThread()->WaitForShutdownForTesting();
+    testing::RunPendingTasks();
+    messaging_proxy_ = nullptr;
   }
 
-  ThreadedWorkletThreadForTest* workerThread() {
+  ThreadedWorkletMessagingProxyForTest* MessagingProxy() {
+    return messaging_proxy_.Get();
+  }
+
+  ThreadedWorkletThreadForTest* GetWorkerThread() {
     return static_cast<ThreadedWorkletThreadForTest*>(
-        m_messagingProxy->workerThread());
+        messaging_proxy_->GetWorkerThread());
   }
 
-  Document& document() { return m_page->document(); }
+  Document& GetDocument() { return page_->GetDocument(); }
 
  private:
-  std::unique_ptr<DummyPageHolder> m_page;
-  std::unique_ptr<ThreadedWorkletMessagingProxyForTest> m_messagingProxy;
+  std::unique_ptr<DummyPageHolder> page_;
+  Persistent<ThreadedWorkletMessagingProxyForTest> messaging_proxy_;
 };
 
 TEST_F(ThreadedWorkletTest, UseCounter) {
-  messagingProxy()->start();
+  MessagingProxy()->Start();
 
   // This feature is randomly selected.
-  const UseCounter::Feature feature1 = UseCounter::Feature::RequestFileSystem;
+  const WebFeature kFeature1 = WebFeature::kRequestFileSystem;
 
-  // API use on the DedicatedWorkerGlobalScope should be recorded in UseCounter
+  // API use on the ThreadedWorkletGlobalScope should be recorded in UseCounter
   // on the Document.
-  EXPECT_FALSE(UseCounter::isCounted(document(), feature1));
-  workerThread()->postTask(
-      BLINK_FROM_HERE,
-      crossThreadBind(&ThreadedWorkletThreadForTest::countFeature,
-                      crossThreadUnretained(workerThread()), feature1));
-  testing::enterRunLoop();
-  EXPECT_TRUE(UseCounter::isCounted(document(), feature1));
+  EXPECT_FALSE(UseCounter::IsCounted(GetDocument(), kFeature1));
+  TaskRunnerHelper::Get(TaskType::kUnspecedTimer, GetWorkerThread())
+      ->PostTask(
+          BLINK_FROM_HERE,
+          CrossThreadBind(&ThreadedWorkletThreadForTest::CountFeature,
+                          CrossThreadUnretained(GetWorkerThread()), kFeature1));
+  testing::EnterRunLoop();
+  EXPECT_TRUE(UseCounter::IsCounted(GetDocument(), kFeature1));
+
+  // API use should be reported to the Document only one time. See comments in
+  // ThreadedWorkletGlobalScopeForTest::CountFeature.
+  TaskRunnerHelper::Get(TaskType::kUnspecedTimer, GetWorkerThread())
+      ->PostTask(
+          BLINK_FROM_HERE,
+          CrossThreadBind(&ThreadedWorkletThreadForTest::CountFeature,
+                          CrossThreadUnretained(GetWorkerThread()), kFeature1));
+  testing::EnterRunLoop();
 
   // This feature is randomly selected from Deprecation::deprecationMessage().
-  const UseCounter::Feature feature2 = UseCounter::Feature::PrefixedStorageInfo;
+  const WebFeature kFeature2 = WebFeature::kPrefixedStorageInfo;
 
   // Deprecated API use on the ThreadedWorkletGlobalScope should be recorded in
   // UseCounter on the Document.
-  EXPECT_FALSE(UseCounter::isCounted(document(), feature2));
-  workerThread()->postTask(
-      BLINK_FROM_HERE,
-      crossThreadBind(&ThreadedWorkletThreadForTest::countDeprecation,
-                      crossThreadUnretained(workerThread()), feature2));
-  testing::enterRunLoop();
-  EXPECT_TRUE(UseCounter::isCounted(document(), feature2));
+  EXPECT_FALSE(UseCounter::IsCounted(GetDocument(), kFeature2));
+  TaskRunnerHelper::Get(TaskType::kUnspecedTimer, GetWorkerThread())
+      ->PostTask(
+          BLINK_FROM_HERE,
+          CrossThreadBind(&ThreadedWorkletThreadForTest::CountDeprecation,
+                          CrossThreadUnretained(GetWorkerThread()), kFeature2));
+  testing::EnterRunLoop();
+  EXPECT_TRUE(UseCounter::IsCounted(GetDocument(), kFeature2));
+
+  // API use should be reported to the Document only one time. See comments in
+  // ThreadedWorkletGlobalScopeForTest::CountDeprecation.
+  TaskRunnerHelper::Get(TaskType::kUnspecedTimer, GetWorkerThread())
+      ->PostTask(
+          BLINK_FROM_HERE,
+          CrossThreadBind(&ThreadedWorkletThreadForTest::CountDeprecation,
+                          CrossThreadUnretained(GetWorkerThread()), kFeature2));
+  testing::EnterRunLoop();
 }
 
 }  // namespace blink

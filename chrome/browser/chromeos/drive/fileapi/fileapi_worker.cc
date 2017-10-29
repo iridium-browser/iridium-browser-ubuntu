@@ -185,7 +185,7 @@ void OpenFileAfterFileSystemOpenFile(int file_flags,
 
   // Cache file prepared for modification is available. Open it locally.
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().MayBlock(),
+      FROM_HERE, {base::MayBlock()},
       base::Bind(&OpenFile, local_path, file_flags),
       base::Bind(&RunOpenFileCallback, callback, close_callback));
 }
@@ -341,9 +341,9 @@ void OpenFile(const base::FilePath& file_path,
                      base::File::FLAG_APPEND)) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(callback,
-                   Passed(base::File(base::File::FILE_ERROR_FAILED)),
-                   base::Closure()));
+        base::BindOnce(callback,
+                       Passed(base::File(base::File::FILE_ERROR_FAILED)),
+                       base::Closure()));
     return;
   }
 

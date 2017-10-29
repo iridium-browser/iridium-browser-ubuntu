@@ -9,15 +9,28 @@
 #include "base/json/json_writer.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/webstore_data_fetcher.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/safe_browsing/safe_browsing_navigation_observer_manager.h"
+#include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
+#include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 
 using content::WebContents;
+using safe_browsing::SafeBrowsingNavigationObserverManager;
+using safe_browsing::ReferrerChain;
+
+namespace {
+
+// The number of user gestures to trace back for CWS pings.
+const int kExtensionReferrerUserGestureLimit = 2;
+}
 
 namespace extensions {
 
@@ -84,7 +97,7 @@ bool WebstoreInlineInstaller::IsRequestorPermitted(
     for (base::ListValue::const_iterator it = verified_sites->begin();
          it != verified_sites->end() && !requestor_is_ok; ++it) {
       std::string verified_site;
-      if (!(*it)->GetAsString(&verified_site)) {
+      if (!it->GetAsString(&verified_site)) {
         *error = kInvalidWebstoreResponseError;
         return false;
       }
@@ -101,36 +114,84 @@ bool WebstoreInlineInstaller::IsRequestorPermitted(
   return true;
 }
 
+bool WebstoreInlineInstaller::SafeBrowsingNavigationEventsEnabled() const {
+  return SafeBrowsingNavigationObserverManager::IsEnabledAndReady(profile());
+}
+
 std::string WebstoreInlineInstaller::GetJsonPostData() {
   // web_contents() might return null during tab destruction. This object would
   // also be destroyed shortly thereafter but check to be on the safe side.
   if (!web_contents())
     return std::string();
 
-  content::NavigationController& navigation_controller =
-      web_contents()->GetController();
-  content::NavigationEntry* navigation_entry =
-      navigation_controller.GetLastCommittedEntry();
+  // Report extra data only when SafeBrowsing is enabled for the current
+  // profile.
+  if (!profile()->GetPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled))
+    return std::string();
 
-  if (navigation_entry) {
-    const std::vector<GURL>& redirect_urls =
-        navigation_entry->GetRedirectChain();
+  auto redirect_chain = base::MakeUnique<base::ListValue>();
 
-    if (!redirect_urls.empty()) {
-      base::DictionaryValue dictionary;
-      dictionary.SetString("id", id());
-      dictionary.SetString("referrer", requestor_url_.spec());
-      std::unique_ptr<base::ListValue> redirect_chain =
-          base::MakeUnique<base::ListValue>();
+  if (SafeBrowsingNavigationEventsEnabled()) {
+    // If we have it, use the new referrer checker.
+    safe_browsing::SafeBrowsingService* safe_browsing_service =
+        g_browser_process->safe_browsing_service();
+    // May be null in some tests.
+    if (!safe_browsing_service)
+      return std::string();
+
+    scoped_refptr<SafeBrowsingNavigationObserverManager>
+        navigation_observer_manager =
+            safe_browsing_service->navigation_observer_manager();
+    // This may be null if the navigation observer manager feature is
+    // disabled by experiment.
+    if (!navigation_observer_manager)
+      return std::string();
+
+    ReferrerChain referrer_chain;
+    SafeBrowsingNavigationObserverManager::AttributionResult result =
+        navigation_observer_manager->IdentifyReferrerChainByWebContents(
+            web_contents(), kExtensionReferrerUserGestureLimit,
+            &referrer_chain);
+    if (result !=
+        SafeBrowsingNavigationObserverManager::NAVIGATION_EVENT_NOT_FOUND) {
+      // For now the CWS post data is JSON encoded. Consider moving it to a
+      // proto.
+      for (const auto& referrer_chain_entry : referrer_chain) {
+        // Referrer chain entries are a list of URLs in reverse chronological
+        // order, so the final URL is the last thing in the list and the initial
+        // landing page is the first thing in the list.
+        // Furthermore each entry may contain a series of server redirects
+        // stored in the same order.
+        redirect_chain->AppendString(referrer_chain_entry.url());
+        for (const auto& server_side_redirect :
+             referrer_chain_entry.server_redirect_chain()) {
+          redirect_chain->AppendString(server_side_redirect.url());
+        }
+      }
+    }
+  } else {
+    content::NavigationController& navigation_controller =
+        web_contents()->GetController();
+    content::NavigationEntry* navigation_entry =
+        navigation_controller.GetLastCommittedEntry();
+    if (navigation_entry) {
+      const std::vector<GURL>& redirect_urls =
+          navigation_entry->GetRedirectChain();
       for (const GURL& url : redirect_urls) {
         redirect_chain->AppendString(url.spec());
       }
-      dictionary.Set("redirect_chain", std::move(redirect_chain));
-
-      std::string json;
-      base::JSONWriter::Write(dictionary, &json);
-      return json;
     }
+  }
+
+  if (!redirect_chain->empty()) {
+    base::DictionaryValue dictionary;
+    dictionary.SetString("id", id());
+    dictionary.SetString("referrer", requestor_url_.spec());
+    dictionary.Set("redirect_chain", std::move(redirect_chain));
+
+    std::string json;
+    base::JSONWriter::Write(dictionary, &json);
+    return json;
   }
 
   return std::string();
@@ -210,7 +271,7 @@ bool WebstoreInlineInstaller::CheckInlineInstallPermitted(
         content::Referrer::SanitizeForRequest(
             GURL(redirect_url),
             content::Referrer(web_contents()->GetURL(),
-                              blink::WebReferrerPolicyDefault)),
+                              blink::kWebReferrerPolicyDefault)),
         WindowOpenDisposition::NEW_FOREGROUND_TAB,
         ui::PAGE_TRANSITION_AUTO_BOOKMARK, false));
     *error = kInlineInstallSupportedError;
@@ -233,7 +294,7 @@ bool WebstoreInlineInstaller::CheckRequestorPermitted(
 void WebstoreInlineInstaller::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
   if (navigation_handle->HasCommitted() &&
-      !navigation_handle->IsSamePage() &&
+      !navigation_handle->IsSameDocument() &&
       (navigation_handle->GetRenderFrameHost() == host_ ||
        navigation_handle->IsInMainFrame())) {
     host_ = nullptr;

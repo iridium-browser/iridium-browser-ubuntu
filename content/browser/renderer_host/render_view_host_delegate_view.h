@@ -11,6 +11,7 @@
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/common/drag_event_source_info.h"
+#include "content/common/features.h"
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
 
 namespace gfx {
@@ -58,14 +59,17 @@ class CONTENT_EXPORT RenderViewHostDelegateView {
   virtual void UpdateDragCursor(blink::WebDragOperation operation) {}
 
   // Notification that view for this delegate got the focus.
-  virtual void GotFocus() {}
+  virtual void GotFocus(RenderWidgetHostImpl* render_widget_host) {}
+
+  // Notification that view for this delegate lost the focus.
+  virtual void LostFocus(RenderWidgetHostImpl* render_widget_host) {}
 
   // Callback to inform the browser that the page is returning the focus to
   // the browser's chrome. If reverse is true, it means the focus was
   // retrieved by doing a Shift-Tab.
   virtual void TakeFocus(bool reverse) {}
 
-#if defined(USE_EXTERNAL_POPUP_MENU)
+#if BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
   // Shows a popup menu with the specified items.
   // This method should call RenderFrameHost::DidSelectPopupMenuItem[s]() or
   // RenderFrameHost::DidCancelPopupMenu() based on the user action.

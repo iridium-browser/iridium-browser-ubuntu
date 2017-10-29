@@ -6,7 +6,7 @@
 #define CSSPropertyShapeUtils_h
 
 #include "core/css/parser/CSSParserMode.h"
-#include "wtf/Allocator.h"
+#include "platform/wtf/Allocator.h"
 
 namespace blink {
 
@@ -17,13 +17,14 @@ class CSSParserTokenRange;
 class CSSPropertyShapeUtils {
   STATIC_ONLY(CSSPropertyShapeUtils);
 
-  static CSSValue* consumeBasicShape(CSSParserTokenRange&,
-                                     const CSSParserContext*);
-  static bool consumeRadii(CSSValue* horizontalRadii[4],
-                           CSSValue* verticalRadii[4],
+ public:
+  static CSSValue* ConsumeBasicShape(CSSParserTokenRange&,
+                                     const CSSParserContext&);
+  static bool ConsumeRadii(CSSValue* horizontal_radii[4],
+                           CSSValue* vertical_radii[4],
                            CSSParserTokenRange&,
                            CSSParserMode,
-                           bool useLegacyParsing);
+                           bool use_legacy_parsing);
 };
 
 }  // namespace blink

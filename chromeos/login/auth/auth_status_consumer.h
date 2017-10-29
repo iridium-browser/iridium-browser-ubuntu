@@ -105,6 +105,14 @@ class CHROMEOS_EXPORT AuthFailure {
   GoogleServiceAuthError error_;
 };
 
+// Enum used for UMA. Do NOT reorder or remove entry. Don't forget to
+// update histograms.xml when adding new entries.
+enum SuccessReason {
+  OFFLINE_AND_ONLINE = 0,
+  OFFLINE_ONLY = 1,
+  NUM_SUCCESS_REASONS,  // This has to be the last item.
+};
+
 // An interface that defines the callbacks for objects that the
 // Authenticator class will call to report the success/failure of
 // authentication for Chromium OS.
@@ -120,6 +128,9 @@ class CHROMEOS_EXPORT AuthStatusConsumer {
   virtual void OnOffTheRecordAuthSuccess() {}
   // The same password didn't work both online and offline.
   virtual void OnPasswordChangeDetected();
+  // The cryptohome is encrypted in old format and needs migration.
+  virtual void OnOldEncryptionDetected(const UserContext& user_context,
+                                       bool has_incomplete_migration);
 };
 
 }  // namespace chromeos

@@ -64,13 +64,16 @@ class OmniboxPopupMatrixObserver {
   ui::ScopedCrTrackingArea trackingArea_;
   NSAttributedString* separator_;
 
-  // The width of widest match contents in a set of infinite suggestions.
+  // The width of widest match contents in a set of tail suggestions.
   CGFloat maxMatchContentsWidth_;
 
   CGFloat answerLineHeight_;
 
   // Left margin padding for the content (i.e. icon and text) in a cell.
   CGFloat contentLeftPadding_;
+
+  // Max width for the content in the cell.
+  CGFloat contentMaxWidth_;
 
   // true if the OmniboxPopupMatrix should use the dark theme style.
   BOOL hasDarkTheme_;
@@ -80,6 +83,7 @@ class OmniboxPopupMatrixObserver {
 @property(nonatomic) CGFloat maxMatchContentsWidth;
 @property(nonatomic) CGFloat answerLineHeight;
 @property(nonatomic) CGFloat contentLeftPadding;
+@property(nonatomic) CGFloat contentMaxWidth;
 @property(readonly, nonatomic) BOOL hasDarkTheme;
 
 // Create a zero-size matrix.

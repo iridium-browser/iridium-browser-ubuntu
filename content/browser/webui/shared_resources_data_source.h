@@ -7,6 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "content/public/browser/url_data_source.h"
 
 namespace content {
@@ -22,11 +23,13 @@ class SharedResourcesDataSource : public URLDataSource {
       const std::string& path,
       const ResourceRequestInfo::WebContentsGetter& wc_getter,
       const URLDataSource::GotDataCallback& callback) override;
+  bool AllowCaching() const override;
   std::string GetMimeType(const std::string& path) const override;
   scoped_refptr<base::SingleThreadTaskRunner> TaskRunnerForRequestPath(
       const std::string& path) const override;
   std::string GetAccessControlAllowOriginForOrigin(
       const std::string& origin) const override;
+  bool IsGzipped(const std::string& path) const override;
 
  private:
   ~SharedResourcesDataSource() override;

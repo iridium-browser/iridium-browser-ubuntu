@@ -8,20 +8,20 @@
 #include "content/public/renderer/render_thread.h"
 #include "content/renderer/java/gin_java_function_invocation_helper.h"
 #include "gin/function_template.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebKit.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 
 namespace content {
 
 // static
 GinJavaBridgeObject* GinJavaBridgeObject::InjectNamed(
-    blink::WebFrame* frame,
+    blink::WebLocalFrame* frame,
     const base::WeakPtr<GinJavaBridgeDispatcher>& dispatcher,
     const std::string& object_name,
     GinJavaBridgeDispatcher::ObjectID object_id) {
-  v8::Isolate* isolate = blink::mainThreadIsolate();
+  v8::Isolate* isolate = blink::MainThreadIsolate();
   v8::HandleScope handle_scope(isolate);
-  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
+  v8::Local<v8::Context> context = frame->MainWorldScriptContext();
   if (context.IsEmpty())
     return NULL;
 
@@ -45,8 +45,8 @@ GinJavaBridgeObject* GinJavaBridgeObject::InjectNamed(
 GinJavaBridgeObject* GinJavaBridgeObject::InjectAnonymous(
     const base::WeakPtr<GinJavaBridgeDispatcher>& dispatcher,
     GinJavaBridgeDispatcher::ObjectID object_id) {
-  return new GinJavaBridgeObject(
-      blink::mainThreadIsolate(), dispatcher, object_id);
+  return new GinJavaBridgeObject(blink::MainThreadIsolate(), dispatcher,
+                                 object_id);
 }
 
 GinJavaBridgeObject::GinJavaBridgeObject(

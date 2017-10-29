@@ -46,7 +46,8 @@ enum ProfileSignout {
   // The credentials are being transfered to a new profile, so the old one is
   // signed out.
   TRANSFER_CREDENTIALS,
-
+  // Signed out because credentials are invalid and force-sign-in is enabled.
+  AUTHENTICATION_FAILED_WITH_FORCE_SIGNIN,
   // Keep this as the last enum.
   NUM_PROFILE_SIGNOUT_METRICS,
 };
@@ -142,7 +143,16 @@ enum class AccessPoint : int {
   ACCESS_POINT_NTP_CONTENT_SUGGESTIONS,
   ACCESS_POINT_RESIGNIN_INFOBAR,
   ACCESS_POINT_TAB_SWITCHER,
+  ACCESS_POINT_FORCE_SIGNIN_WARNING,
   ACCESS_POINT_MAX,  // This must be last.
+};
+
+// Enum values which enumerates all user actions on the mobile sign-in promo.
+enum class PromoAction : int {
+  PROMO_ACTION_NO_SIGNIN_PROMO = 0,
+  PROMO_ACTION_WITH_DEFAULT,
+  PROMO_ACTION_NOT_DEFAULT,
+  PROMO_ACTION_NEW_ACCOUNT,
 };
 
 // Enum values which enumerates all reasons to start sign in process.
@@ -284,9 +294,15 @@ enum class AccountRelation : int {
 // Different types of reporting. This is used as a histogram suffix.
 enum class ReportingType { PERIODIC, ON_CHANGE };
 
-// Tracks the access point of sign in.
+// Tracks the access point of sign in on desktop.
 void LogSigninAccessPointStarted(AccessPoint access_point);
 void LogSigninAccessPointCompleted(AccessPoint access_point);
+
+// Tracks the access point of sign in on iOS.
+void LogSigninAccessPointStarted(AccessPoint access_point,
+                                 PromoAction promo_action);
+void LogSigninAccessPointCompleted(AccessPoint access_point,
+                                   PromoAction promo_action);
 
 // Tracks the reason of sign in.
 void LogSigninReason(Reason reason);

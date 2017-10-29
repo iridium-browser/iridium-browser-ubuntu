@@ -16,16 +16,15 @@
 #include "chrome/browser/chromeos/login/demo_mode/demo_mode_detector.h"
 #include "chrome/browser/chromeos/login/screens/core_oobe_view.h"
 #include "chrome/browser/chromeos/login/version_info_updater.h"
-#include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/base_webui_handler.h"
 #include "ui/events/event_source.h"
-#include "ui/keyboard/scoped_keyboard_disabler.h"
 
 namespace base {
 class ListValue;
 }
 
 namespace ui {
-class EventProcessor;
+class EventSink;
 }
 
 namespace chromeos {
@@ -34,22 +33,14 @@ class HelpAppLauncher;
 class OobeUI;
 
 // The core handler for Javascript messages related to the "oobe" view.
-class CoreOobeHandler : public BaseScreenHandler,
+class CoreOobeHandler : public BaseWebUIHandler,
                         public VersionInfoUpdater::Delegate,
                         public CoreOobeView,
                         public ui::EventSource {
  public:
-  class Delegate {
-   public:
-    // Called when current screen is changed.
-    virtual void OnCurrentScreenChanged(OobeScreen screen) = 0;
-  };
-
   explicit CoreOobeHandler(OobeUI* oobe_ui,
                            JSCallsContainer* js_calls_container);
   ~CoreOobeHandler() override;
-
-  void SetDelegate(Delegate* delegate);
 
   // BaseScreenHandler implementation:
   void DeclareLocalizedValues(
@@ -64,9 +55,10 @@ class CoreOobeHandler : public BaseScreenHandler,
       const std::string& os_version_label_text) override;
   void OnEnterpriseInfoUpdated(const std::string& message_text,
                                const std::string& asset_id) override;
+  void OnDeviceInfoUpdated(const std::string& bluetooth_name) override;
 
   // ui::EventSource implementation:
-  ui::EventProcessor* GetEventProcessor() override;
+  ui::EventSink* GetEventSink() override;
 
   // Show or hide OOBE UI.
   void ShowOobeUI(bool show);
@@ -81,7 +73,7 @@ class CoreOobeHandler : public BaseScreenHandler,
   void UpdateShutdownAndRebootVisibility(bool reboot_on_shutdown);
 
  private:
-  // CoreOobeActor implementation:
+  // CoreOobeView implementation:
   void ShowSignInError(int login_attempts,
                        const std::string& error_text,
                        const std::string& help_link_text,
@@ -98,8 +90,9 @@ class CoreOobeHandler : public BaseScreenHandler,
   void SetTpmPassword(const std::string& tmp_password) override;
   void ClearErrors() override;
   void ReloadContent(const base::DictionaryValue& dictionary) override;
+  void ReloadEulaContent(const base::DictionaryValue& dictionary) override;
   void ShowControlBar(bool show) override;
-  void ShowPinKeyboard(bool show) override;
+  void SetVirtualKeyboardShown(bool displayed) override;
   void SetClientAreaSize(int width, int height) override;
   void ShowDeviceResetScreen() override;
   void ShowEnableDebuggingScreen() override;
@@ -114,7 +107,6 @@ class CoreOobeHandler : public BaseScreenHandler,
   void HandleEnableLargeCursor(bool enabled);
   void HandleEnableHighContrast(bool enabled);
   void HandleEnableVirtualKeyboard(bool enabled);
-  void HandleSetForceDisableVirtualKeyboard(bool disable);
   void HandleEnableScreenMagnifier(bool enabled);
   void HandleEnableSpokenFeedback(bool /* enabled */);
   void HandleInitialized();
@@ -164,13 +156,9 @@ class CoreOobeHandler : public BaseScreenHandler,
   // Help application used for help dialogs.
   scoped_refptr<HelpAppLauncher> help_app_;
 
-  Delegate* delegate_ = nullptr;
-
   std::unique_ptr<AccessibilityStatusSubscription> accessibility_subscription_;
 
   DemoModeDetector demo_mode_detector_;
-
-  keyboard::ScopedKeyboardDisabler scoped_keyboard_disabler_;
 
   DISALLOW_COPY_AND_ASSIGN(CoreOobeHandler);
 };

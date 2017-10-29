@@ -66,6 +66,11 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
     // about request interception.
     STATE_BUFFERING,
 
+    // In these states, the MimeSniffingResourceHandler is calling OnWillRead on
+    // the downstream ResourceHandler and then waiting for the response.
+    STATE_CALLING_ON_WILL_READ,
+    STATE_WAITING_FOR_BUFFER,
+
     // In this state, the MimeSniffingResourceHandler has identified the mime
     // type and made a decision on whether the request should be intercepted or
     // not. It is nows attempting to replay the response to downstream
@@ -88,8 +93,9 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
   void OnResponseStarted(
       ResourceResponse* response,
       std::unique_ptr<ResourceController> controller) override;
-  bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
-                  int* buf_size) override;
+  void OnWillRead(scoped_refptr<net::IOBuffer>* buf,
+                  int* buf_size,
+                  std::unique_ptr<ResourceController> controller) override;
   void OnReadCompleted(int bytes_read,
                        std::unique_ptr<ResourceController> controller) override;
   void OnResponseCompleted(
@@ -110,6 +116,12 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
   // Intercepts the request as a stream/download if needed.
   void MaybeIntercept();
 
+  // Calls OnWillRead on the downstream handlers.
+  void CallOnWillRead();
+
+  // Copies received buffer to parent.
+  void BufferReceived();
+
   // Replays OnResponseStarted on the downstream handlers.
   void ReplayResponseReceived();
 
@@ -117,10 +129,6 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
   void ReplayReadCompleted();
 
   // --------------------------------------------------------------------------
-
-  // Whether the response body should be sniffed in order to determine the MIME
-  // type of the response.
-  bool ShouldSniffContent();
 
   // Checks whether this request should be intercepted as a stream or a
   // download. If this is the case, sets up the new ResourceHandler that will be
@@ -161,11 +169,16 @@ class CONTENT_EXPORT MimeSniffingResourceHandler
   bool must_download_;
   bool must_download_is_set_;
 
-  // Used to buffer the reponse received until replay.
+  // Used to buffer the response received until replay.
   scoped_refptr<ResourceResponse> response_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   int read_buffer_size_;
   int bytes_read_;
+
+  // Pointers to parent-owned read buffer and its size.  Only used for first
+  // OnWillRead call.
+  scoped_refptr<net::IOBuffer>* parent_read_buffer_;
+  int* parent_read_buffer_size_;
 
   // The InterceptingResourceHandler that will perform ResourceHandler swap if
   // needed.

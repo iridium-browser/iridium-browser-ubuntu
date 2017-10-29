@@ -37,6 +37,12 @@ VolumeManagerCommon.RootType = {
   // Root for a drive volume.
   DRIVE: 'drive',
 
+  // The grand root entry of Team Drives in Drive volume.
+  TEAM_DRIVES_GRAND_ROOT: 'team_drives_grand_root',
+
+  // Root directory of a Team Drive.
+  TEAM_DRIVE: 'team_drive',
+
   // Root for a MTP volume.
   MTP: 'mtp',
 
@@ -58,6 +64,9 @@ VolumeManagerCommon.RootType = {
 
   // Root for media views.
   MEDIA_VIEW: 'media_view',
+
+  // Fake root for the mixed "Recent" view.
+  RECENT: 'recent',
 };
 Object.freeze(VolumeManagerCommon.RootType);
 
@@ -179,6 +188,8 @@ VolumeManagerCommon.getVolumeTypeFromRootType = function(rootType) {
     case VolumeManagerCommon.RootType.REMOVABLE:
       return VolumeManagerCommon.VolumeType.REMOVABLE;
     case VolumeManagerCommon.RootType.DRIVE:
+    case VolumeManagerCommon.RootType.TEAM_DRIVES_GRAND_ROOT:
+    case VolumeManagerCommon.RootType.TEAM_DRIVE:
     case VolumeManagerCommon.RootType.DRIVE_OTHER:
     case VolumeManagerCommon.RootType.DRIVE_OFFLINE:
     case VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME:
@@ -243,12 +254,14 @@ VolumeManagerCommon.getMediaViewRootTypeFromVolumeId = function(volumeId) {
 };
 
 /**
- * Fake entries for Google Drive's virtual folders.
- * (OFFLINE, RECENT, and SHARED_WITH_ME)
+ * Fake entries for virtual folders which hold Google Drive offline files,
+ * Google Drive "Shared with me" files, and mixed Recent files.
+ * |sourceRestriction| is valid only for the Recent folder.
  * @typedef {{
  *   isDirectory: boolean,
  *   rootType: VolumeManagerCommon.RootType,
- *   toURL: function(): string
+ *   toURL: function(): string,
+ *   sourceRestriction: (string|undefined)
  * }}
  */
 var FakeEntry;
@@ -259,3 +272,7 @@ var FakeEntry;
   * @const {string}
   */
 VolumeManagerCommon.VOLUME_ALREADY_MOUNTED = 'volume_already_mounted';
+
+VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_NAME = 'team_drives';
+VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_PATH =
+    '/' + VolumeManagerCommon.TEAM_DRIVES_DIRECTORY_NAME;

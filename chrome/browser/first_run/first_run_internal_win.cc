@@ -17,12 +17,12 @@
 #include "base/process/kill.h"
 #include "base/process/launch.h"
 #include "base/process/process.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/task_scheduler/task_traits.h"
 #include "base/time/time.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/grit/locale_settings.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/master_preferences.h"
@@ -108,40 +108,19 @@ namespace internal {
 void DoPostImportPlatformSpecificTasks(Profile* /* profile */) {
   // Trigger the Active Setup command for system-level Chromes to finish
   // configuring this user's install (e.g. per-user shortcuts).
-  // Delay the task slightly to give Chrome launch I/O priority while also
-  // making sure shortcuts are created promptly to avoid annoying the user by
-  // re-creating shortcuts they previously deleted.
-  static const int64_t kTiggerActiveSetupDelaySeconds = 5;
   if (!InstallUtil::IsPerUserInstall()) {
-    content::BrowserThread::GetBlockingPool()->PostDelayedTask(
+    content::BrowserThread::PostAfterStartupTask(
         FROM_HERE,
-        base::Bind(&InstallUtil::TriggerActiveSetupCommand),
-        base::TimeDelta::FromSeconds(kTiggerActiveSetupDelaySeconds));
+        base::CreateTaskRunnerWithTraits(
+            {base::MayBlock(), base::TaskPriority::BACKGROUND,
+             base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}),
+        base::BindOnce(&InstallUtil::TriggerActiveSetupCommand));
   }
 }
 
 bool IsFirstRunSentinelPresent() {
   base::FilePath sentinel;
-  if (!GetFirstRunSentinelFilePath(&sentinel) || base::PathExists(sentinel))
-    return true;
-
-  // Copy any legacy first run sentinel file for Windows user-level installs
-  // from the application directory to the user data directory.
-  base::FilePath exe_path;
-  if (PathService::Get(base::DIR_EXE, &exe_path) &&
-      InstallUtil::IsPerUserInstall()) {
-    base::FilePath legacy_sentinel = exe_path.Append(chrome::kFirstRunSentinel);
-    if (base::PathExists(legacy_sentinel)) {
-      // Copy the file instead of moving it to avoid breaking developer builds
-      // where the sentinel is dropped beside chrome.exe by a build action.
-      bool migrated = base::CopyFile(legacy_sentinel, sentinel);
-      DPCHECK(migrated);
-      // The sentinel is present regardless of whether or not it was migrated.
-      return true;
-    }
-  }
-
-  return false;
+  return !GetFirstRunSentinelFilePath(&sentinel) || base::PathExists(sentinel);
 }
 
 bool ShowPostInstallEULAIfNeeded(installer::MasterPreferences* install_prefs) {

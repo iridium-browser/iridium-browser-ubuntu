@@ -33,9 +33,8 @@ ExtensionFunction::ResponseAction
   PasswordsPrivateDelegate* delegate =
       PasswordsPrivateDelegateFactory::GetForBrowserContext(browser_context(),
                                                             true /* create */);
-  delegate->RemoveSavedPassword(
-      parameters->login_pair.origin_url,
-      parameters->login_pair.username);
+  delegate->RemoveSavedPassword(parameters->login_pair.urls.origin,
+                                parameters->login_pair.username);
 
   return RespondNow(NoArguments());
 }
@@ -80,7 +79,7 @@ ExtensionFunction::ResponseAction
       PasswordsPrivateDelegateFactory::GetForBrowserContext(browser_context(),
                                                             true /* create */);
 
-  delegate->RequestShowPassword(parameters->login_pair.origin_url,
+  delegate->RequestShowPassword(parameters->login_pair.urls.origin,
                                 parameters->login_pair.username,
                                 GetSenderWebContents());
 
@@ -101,7 +100,8 @@ PasswordsPrivateGetSavedPasswordListFunction::Run() {
   // RespondLater()). So we post a task to preserve order.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&PasswordsPrivateGetSavedPasswordListFunction::GetList, this));
+      base::BindOnce(&PasswordsPrivateGetSavedPasswordListFunction::GetList,
+                     this));
   return RespondLater();
 }
 
@@ -131,8 +131,8 @@ PasswordsPrivateGetPasswordExceptionListFunction::Run() {
   // RespondLater()). So we post a task to preserve order.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&PasswordsPrivateGetPasswordExceptionListFunction::GetList,
-                 this));
+      base::BindOnce(&PasswordsPrivateGetPasswordExceptionListFunction::GetList,
+                     this));
   return RespondLater();
 }
 
@@ -145,9 +145,10 @@ void PasswordsPrivateGetPasswordExceptionListFunction::GetList() {
 }
 
 void PasswordsPrivateGetPasswordExceptionListFunction::GotList(
-    const PasswordsPrivateDelegate::ExceptionPairs& list) {
+    const PasswordsPrivateDelegate::ExceptionEntries& entries) {
   Respond(ArgumentList(
-      api::passwords_private::GetPasswordExceptionList::Results::Create(list)));
+      api::passwords_private::GetPasswordExceptionList::Results::Create(
+          entries)));
 }
 
 }  // namespace extensions

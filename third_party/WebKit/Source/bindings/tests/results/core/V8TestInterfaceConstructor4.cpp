@@ -12,31 +12,45 @@
 #include "V8TestInterfaceConstructor4.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/IDLTypes.h"
+#include "bindings/core/v8/NativeValueTraitsImpl.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
-#include "bindings/core/v8/V8ObjectConstructor.h"
 #include "bindings/core/v8/V8TestInterfaceConstructor4.h"
-#include "core/dom/Document.h"
+#include "core/dom/ExecutionContext.h"
 #include "core/frame/LocalDOMWindow.h"
-#include "wtf/GetPtr.h"
-#include "wtf/RefPtr.h"
+#include "platform/bindings/V8ObjectConstructor.h"
+#include "platform/wtf/GetPtr.h"
+#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
 // Suppress warning: global constructors, because struct WrapperTypeInfo is trivial
 // and does not depend on another global objects.
-#if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
+#if defined(COMPONENT_BUILD) && defined(WIN32) && defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestInterfaceConstructor4::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructor4::domTemplate, V8TestInterfaceConstructor4::trace, V8TestInterfaceConstructor4::traceWrappers, nullptr, "TestInterfaceConstructor4", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromActiveScriptWrappable, WrapperTypeInfo::Independent };
-#if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
+const WrapperTypeInfo V8TestInterfaceConstructor4::wrapperTypeInfo = {
+    gin::kEmbedderBlink,
+    V8TestInterfaceConstructor4::domTemplate,
+    V8TestInterfaceConstructor4::Trace,
+    V8TestInterfaceConstructor4::TraceWrappers,
+    nullptr,
+    "TestInterfaceConstructor4",
+    nullptr,
+    WrapperTypeInfo::kWrapperTypeObjectPrototype,
+    WrapperTypeInfo::kObjectClassId,
+    WrapperTypeInfo::kNotInheritFromActiveScriptWrappable,
+    WrapperTypeInfo::kIndependent,
+};
+#if defined(COMPONENT_BUILD) && defined(WIN32) && defined(__clang__)
 #pragma clang diagnostic pop
 #endif
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceConstructor4.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
-// bindings/core/v8/ScriptWrappable.h.
-const WrapperTypeInfo& TestInterfaceConstructor4::s_wrapperTypeInfo = V8TestInterfaceConstructor4::wrapperTypeInfo;
+// platform/bindings/ScriptWrappable.h.
+const WrapperTypeInfo& TestInterfaceConstructor4::wrapper_type_info_ = V8TestInterfaceConstructor4::wrapperTypeInfo;
 
 // not [ActiveScriptWrappable]
 static_assert(
@@ -45,8 +59,8 @@ static_assert(
     "[ActiveScriptWrappable] extended attribute in the IDL file.  "
     "Be consistent.");
 static_assert(
-    std::is_same<decltype(&TestInterfaceConstructor4::hasPendingActivity),
-                 decltype(&ScriptWrappable::hasPendingActivity)>::value,
+    std::is_same<decltype(&TestInterfaceConstructor4::HasPendingActivity),
+                 decltype(&ScriptWrappable::HasPendingActivity)>::value,
     "TestInterfaceConstructor4 is overriding hasPendingActivity(), but is not specifying "
     "[ActiveScriptWrappable] extended attribute in the IDL file.  "
     "Be consistent.");
@@ -57,33 +71,33 @@ static void constructor1(const v8::FunctionCallbackInfo<v8::Value>& info) {
   TestInterfaceConstructor4* testInterface4Arg;
   testInterface4Arg = V8TestInterfaceConstructor4::toImplWithTypeCheck(info.GetIsolate(), info[0]);
   if (!testInterface4Arg) {
-    V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToConstruct("TestInterfaceConstructor4", "parameter 1 is not of type 'TestInterfaceConstructor4'."));
+    V8ThrowException::ThrowTypeError(info.GetIsolate(), ExceptionMessages::FailedToConstruct("TestInterfaceConstructor4", "parameter 1 is not of type 'TestInterfaceConstructor4'."));
 
     return;
   }
 
-  TestInterfaceConstructor4* impl = TestInterfaceConstructor4::create(testInterface4Arg);
+  TestInterfaceConstructor4* impl = TestInterfaceConstructor4::Create(testInterface4Arg);
   v8::Local<v8::Object> wrapper = info.Holder();
-  wrapper = impl->associateWithWrapper(info.GetIsolate(), &V8TestInterfaceConstructor4::wrapperTypeInfo, wrapper);
-  v8SetReturnValue(info, wrapper);
+  wrapper = impl->AssociateWithWrapper(info.GetIsolate(), &V8TestInterfaceConstructor4::wrapperTypeInfo, wrapper);
+  V8SetReturnValue(info, wrapper);
 }
 
 static void constructor2(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::ConstructionContext, "TestInterfaceConstructor4");
+  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::kConstructionContext, "TestInterfaceConstructor4");
 
   V8StringResource<> usvStringArg;
-  usvStringArg = toUSVString(info.GetIsolate(), info[0], exceptionState);
-  if (exceptionState.hadException())
+  usvStringArg = NativeValueTraits<IDLUSVString>::NativeValue(info.GetIsolate(), info[0], exceptionState);
+  if (exceptionState.HadException())
     return;
 
-  TestInterfaceConstructor4* impl = TestInterfaceConstructor4::create(usvStringArg);
+  TestInterfaceConstructor4* impl = TestInterfaceConstructor4::Create(usvStringArg);
   v8::Local<v8::Object> wrapper = info.Holder();
-  wrapper = impl->associateWithWrapper(info.GetIsolate(), &V8TestInterfaceConstructor4::wrapperTypeInfo, wrapper);
-  v8SetReturnValue(info, wrapper);
+  wrapper = impl->AssociateWithWrapper(info.GetIsolate(), &V8TestInterfaceConstructor4::wrapperTypeInfo, wrapper);
+  V8SetReturnValue(info, wrapper);
 }
 
 static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::ConstructionContext, "TestInterfaceConstructor4");
+  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::kConstructionContext, "TestInterfaceConstructor4");
   switch (std::min(1, info.Length())) {
     case 1:
       if (V8TestInterfaceConstructor4::hasInstance(info[0], info.GetIsolate())) {
@@ -96,31 +110,34 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info) {
       }
       break;
     default:
-      exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(1, info.Length()));
+      exceptionState.ThrowTypeError(ExceptionMessages::NotEnoughArguments(1, info.Length()));
       return;
   }
-  exceptionState.throwTypeError("No matching constructor signature.");
+  exceptionState.ThrowTypeError("No matching constructor signature.");
 }
 
 } // namespace TestInterfaceConstructor4V8Internal
 
 void V8TestInterfaceConstructor4::constructorCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
   if (!info.IsConstructCall()) {
-    V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::constructorNotCallableAsFunction("TestInterfaceConstructor4"));
+    V8ThrowException::ThrowTypeError(info.GetIsolate(), ExceptionMessages::ConstructorNotCallableAsFunction("TestInterfaceConstructor4"));
     return;
   }
 
-  if (ConstructorMode::current(info.GetIsolate()) == ConstructorMode::WrapExistingObject) {
-    v8SetReturnValue(info, info.Holder());
+  if (ConstructorMode::Current(info.GetIsolate()) == ConstructorMode::kWrapExistingObject) {
+    V8SetReturnValue(info, info.Holder());
     return;
   }
 
   TestInterfaceConstructor4V8Internal::constructor(info);
 }
 
-static void installV8TestInterfaceConstructor4Template(v8::Isolate* isolate, const DOMWrapperWorld& world, v8::Local<v8::FunctionTemplate> interfaceTemplate) {
+static void installV8TestInterfaceConstructor4Template(
+    v8::Isolate* isolate,
+    const DOMWrapperWorld& world,
+    v8::Local<v8::FunctionTemplate> interfaceTemplate) {
   // Initialize the interface object's template.
-  V8DOMConfiguration::initializeDOMInterfaceTemplate(isolate, interfaceTemplate, V8TestInterfaceConstructor4::wrapperTypeInfo.interfaceName, v8::Local<v8::FunctionTemplate>(), V8TestInterfaceConstructor4::internalFieldCount);
+  V8DOMConfiguration::InitializeDOMInterfaceTemplate(isolate, interfaceTemplate, V8TestInterfaceConstructor4::wrapperTypeInfo.interface_name, v8::Local<v8::FunctionTemplate>(), V8TestInterfaceConstructor4::internalFieldCount);
   interfaceTemplate->SetCallHandler(V8TestInterfaceConstructor4::constructorCallback);
   interfaceTemplate->SetLength(1);
 
@@ -131,23 +148,53 @@ static void installV8TestInterfaceConstructor4Template(v8::Isolate* isolate, con
   v8::Local<v8::ObjectTemplate> prototypeTemplate = interfaceTemplate->PrototypeTemplate();
   ALLOW_UNUSED_LOCAL(prototypeTemplate);
 
-  // Register DOM constants, attributes and operations.
+  // Register IDL constants, attributes and operations.
+
+  // Custom signature
+
+  V8TestInterfaceConstructor4::InstallRuntimeEnabledFeaturesOnTemplate(
+      isolate, world, interfaceTemplate);
+}
+
+void V8TestInterfaceConstructor4::InstallRuntimeEnabledFeaturesOnTemplate(
+    v8::Isolate* isolate,
+    const DOMWrapperWorld& world,
+    v8::Local<v8::FunctionTemplate> interface_template) {
+  v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interface_template);
+  ALLOW_UNUSED_LOCAL(signature);
+  v8::Local<v8::ObjectTemplate> instance_template = interface_template->InstanceTemplate();
+  ALLOW_UNUSED_LOCAL(instance_template);
+  v8::Local<v8::ObjectTemplate> prototype_template = interface_template->PrototypeTemplate();
+  ALLOW_UNUSED_LOCAL(prototype_template);
+
+  // Register IDL constants, attributes and operations.
+
+  // Custom signature
 }
 
 v8::Local<v8::FunctionTemplate> V8TestInterfaceConstructor4::domTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world) {
-  return V8DOMConfiguration::domClassTemplate(isolate, world, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceConstructor4Template);
+  return V8DOMConfiguration::DomClassTemplate(isolate, world, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceConstructor4Template);
 }
 
 bool V8TestInterfaceConstructor4::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate) {
-  return V8PerIsolateData::from(isolate)->hasInstance(&wrapperTypeInfo, v8Value);
+  return V8PerIsolateData::From(isolate)->HasInstance(&wrapperTypeInfo, v8Value);
 }
 
 v8::Local<v8::Object> V8TestInterfaceConstructor4::findInstanceInPrototypeChain(v8::Local<v8::Value> v8Value, v8::Isolate* isolate) {
-  return V8PerIsolateData::from(isolate)->findInstanceInPrototypeChain(&wrapperTypeInfo, v8Value);
+  return V8PerIsolateData::From(isolate)->FindInstanceInPrototypeChain(&wrapperTypeInfo, v8Value);
 }
 
 TestInterfaceConstructor4* V8TestInterfaceConstructor4::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value) {
   return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : nullptr;
+}
+
+TestInterfaceConstructor4* NativeValueTraits<TestInterfaceConstructor4>::NativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState) {
+  TestInterfaceConstructor4* nativeValue = V8TestInterfaceConstructor4::toImplWithTypeCheck(isolate, value);
+  if (!nativeValue) {
+    exceptionState.ThrowTypeError(ExceptionMessages::FailedToConvertJSValue(
+        "TestInterfaceConstructor4"));
+  }
+  return nativeValue;
 }
 
 }  // namespace blink

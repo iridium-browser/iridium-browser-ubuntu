@@ -95,16 +95,15 @@ RendererVk::RendererVk()
       mDevice(VK_NULL_HANDLE),
       mHostVisibleMemoryIndex(std::numeric_limits<uint32_t>::max()),
       mGlslangWrapper(nullptr),
-      mCurrentQueueSerial(),
-      mLastCompletedQueueSerial(),
+      mLastCompletedQueueSerial(mQueueSerialFactory.generate()),
+      mCurrentQueueSerial(mQueueSerialFactory.generate()),
       mInFlightCommands()
 {
-    ++mCurrentQueueSerial;
 }
 
 RendererVk::~RendererVk()
 {
-    if (!mInFlightCommands.empty())
+    if (!mInFlightCommands.empty() || !mInFlightFences.empty() || !mGarbage.empty())
     {
         vk::Error error = finish();
         if (error.isError())
@@ -153,19 +152,9 @@ RendererVk::~RendererVk()
     mPhysicalDevice = VK_NULL_HANDLE;
 }
 
-vk::Error RendererVk::initialize(const egl::AttributeMap &attribs)
+vk::Error RendererVk::initialize(const egl::AttributeMap &attribs, const char *wsiName)
 {
-#if !defined(NDEBUG)
-    // Validation layers enabled by default in Debug.
-    mEnableValidationLayers = true;
-#endif
-
-    // If specified in the attributes, override the default.
-    if (attribs.contains(EGL_PLATFORM_ANGLE_ENABLE_VALIDATION_LAYER_ANGLE))
-    {
-        mEnableValidationLayers =
-            (attribs.get(EGL_PLATFORM_ANGLE_ENABLE_VALIDATION_LAYER_ANGLE, EGL_FALSE) == EGL_TRUE);
-    }
+    mEnableValidationLayers = ShouldUseDebugLayers(attribs);
 
     // If we're loading the validation layers, we could be running from any random directory.
     // Change to the executable directory so we can find the layers, then change back to the
@@ -215,7 +204,8 @@ vk::Error RendererVk::initialize(const egl::AttributeMap &attribs)
         if (!HasStandardValidationLayer(instanceLayerProps))
         {
             // Generate an error if the attribute was requested, warning otherwise.
-            if (attribs.contains(EGL_PLATFORM_ANGLE_ENABLE_VALIDATION_LAYER_ANGLE))
+            if (attribs.get(EGL_PLATFORM_ANGLE_DEBUG_LAYERS_ENABLED_ANGLE, EGL_DONT_CARE) ==
+                EGL_TRUE)
             {
                 ERR() << "Vulkan standard validation layers are missing.";
             }
@@ -229,11 +219,7 @@ vk::Error RendererVk::initialize(const egl::AttributeMap &attribs)
 
     std::vector<const char *> enabledInstanceExtensions;
     enabledInstanceExtensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-#if defined(ANGLE_PLATFORM_WINDOWS)
-    enabledInstanceExtensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
-#else
-#error Unsupported Vulkan platform.
-#endif  // defined(ANGLE_PLATFORM_WINDOWS)
+    enabledInstanceExtensions.push_back(wsiName);
 
     // TODO(jmadill): Should be able to continue initialization if debug report ext missing.
     if (mEnableValidationLayers)
@@ -571,19 +557,21 @@ const gl::Limitations &RendererVk::getNativeLimitations() const
     return mNativeLimitations;
 }
 
-vk::CommandBuffer *RendererVk::getCommandBuffer()
+vk::Error RendererVk::getStartedCommandBuffer(vk::CommandBuffer **commandBufferOut)
 {
-    return &mCommandBuffer;
+    ANGLE_TRY(mCommandBuffer.begin(mDevice));
+    *commandBufferOut = &mCommandBuffer;
+    return vk::NoError();
 }
 
-vk::Error RendererVk::submitAndFinishCommandBuffer(const vk::CommandBuffer &commandBuffer)
+vk::Error RendererVk::submitCommandBuffer(vk::CommandBuffer *commandBuffer)
 {
+    ANGLE_TRY(commandBuffer->end());
+
     VkFenceCreateInfo fenceInfo;
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.pNext = nullptr;
     fenceInfo.flags = 0;
-
-    VkCommandBuffer commandBufferHandle = commandBuffer.getHandle();
 
     VkSubmitInfo submitInfo;
     submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -592,42 +580,45 @@ vk::Error RendererVk::submitAndFinishCommandBuffer(const vk::CommandBuffer &comm
     submitInfo.pWaitSemaphores      = nullptr;
     submitInfo.pWaitDstStageMask    = nullptr;
     submitInfo.commandBufferCount   = 1;
-    submitInfo.pCommandBuffers      = &commandBufferHandle;
+    submitInfo.pCommandBuffers      = commandBuffer->ptr();
     submitInfo.signalSemaphoreCount = 0;
     submitInfo.pSignalSemaphores    = nullptr;
 
     // TODO(jmadill): Investigate how to properly submit command buffers.
     ANGLE_TRY(submit(submitInfo));
 
-    // Wait indefinitely for the queue to finish.
+    return vk::NoError();
+}
+
+vk::Error RendererVk::submitAndFinishCommandBuffer(vk::CommandBuffer *commandBuffer)
+{
+    ANGLE_TRY(submitCommandBuffer(commandBuffer));
     ANGLE_TRY(finish());
 
     return vk::NoError();
 }
 
-vk::Error RendererVk::waitThenFinishCommandBuffer(const vk::CommandBuffer &commandBuffer,
-                                                  const vk::Semaphore &waitSemaphore)
+vk::Error RendererVk::submitCommandsWithSync(vk::CommandBuffer *commandBuffer,
+                                             const vk::Semaphore &waitSemaphore,
+                                             const vk::Semaphore &signalSemaphore)
 {
-    VkCommandBuffer commandBufferHandle = commandBuffer.getHandle();
-    VkSemaphore waitHandle              = waitSemaphore.getHandle();
+    ANGLE_TRY(commandBuffer->end());
+
     VkPipelineStageFlags waitStageMask  = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 
     VkSubmitInfo submitInfo;
     submitInfo.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.pNext                = nullptr;
     submitInfo.waitSemaphoreCount   = 1;
-    submitInfo.pWaitSemaphores      = &waitHandle;
+    submitInfo.pWaitSemaphores      = waitSemaphore.ptr();
     submitInfo.pWaitDstStageMask    = &waitStageMask;
     submitInfo.commandBufferCount   = 1;
-    submitInfo.pCommandBuffers      = &commandBufferHandle;
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.pSignalSemaphores    = nullptr;
+    submitInfo.pCommandBuffers      = commandBuffer->ptr();
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores    = signalSemaphore.ptr();
 
     // TODO(jmadill): Investigate how to properly queue command buffer work.
-    ANGLE_TRY(submit(submitInfo));
-
-    // Wait indefinitely for the queue to finish.
-    ANGLE_TRY(finish());
+    ANGLE_TRY(submitFrame(submitInfo));
 
     return vk::NoError();
 }
@@ -635,31 +626,86 @@ vk::Error RendererVk::waitThenFinishCommandBuffer(const vk::CommandBuffer &comma
 vk::Error RendererVk::finish()
 {
     ASSERT(mQueue != VK_NULL_HANDLE);
-    checkInFlightCommands();
     ANGLE_VK_TRY(vkQueueWaitIdle(mQueue));
+    freeAllInFlightResources();
     return vk::NoError();
+}
+
+void RendererVk::freeAllInFlightResources()
+{
+    for (auto &fence : mInFlightFences)
+    {
+        fence.destroy(mDevice);
+    }
+    mInFlightFences.clear();
+
+    for (auto &command : mInFlightCommands)
+    {
+        command.destroy(mDevice);
+    }
+    mInFlightCommands.clear();
+
+    for (auto &garbage : mGarbage)
+    {
+        garbage->destroy(mDevice);
+    }
+    mGarbage.clear();
 }
 
 vk::Error RendererVk::checkInFlightCommands()
 {
-    // Check if any in-flight command buffers are finished.
-    for (size_t index = 0; index < mInFlightCommands.size();)
-    {
-        auto *inFlightCommand = &mInFlightCommands[index];
+    size_t finishedIndex = 0;
 
-        bool done = false;
-        ANGLE_TRY_RESULT(inFlightCommand->finished(mDevice), done);
-        if (done)
-        {
-            ASSERT(inFlightCommand->queueSerial() > mLastCompletedQueueSerial);
-            mLastCompletedQueueSerial = inFlightCommand->queueSerial();
-            inFlightCommand->destroy(mDevice);
-            mInFlightCommands.erase(mInFlightCommands.begin() + index);
-        }
-        else
-        {
-            ++index;
-        }
+    // Check if any in-flight command buffers are finished.
+    for (size_t index = 0; index < mInFlightFences.size(); index++)
+    {
+        auto *inFlightFence = &mInFlightFences[index];
+
+        VkResult result = inFlightFence->get().getStatus(mDevice);
+        if (result == VK_NOT_READY)
+            break;
+        ANGLE_VK_TRY(result);
+        finishedIndex = index + 1;
+
+        // Release the fence handle.
+        // TODO(jmadill): Re-use fences.
+        inFlightFence->destroy(mDevice);
+    }
+
+    if (finishedIndex == 0)
+        return vk::NoError();
+
+    Serial finishedSerial = mInFlightFences[finishedIndex - 1].queueSerial();
+    mInFlightFences.erase(mInFlightFences.begin(), mInFlightFences.begin() + finishedIndex);
+
+    size_t completedCBIndex = 0;
+    for (size_t cbIndex = 0; cbIndex < mInFlightCommands.size(); ++cbIndex)
+    {
+        auto *inFlightCB = &mInFlightCommands[cbIndex];
+        if (inFlightCB->queueSerial() > finishedSerial)
+            break;
+
+        completedCBIndex = cbIndex + 1;
+        inFlightCB->destroy(mDevice);
+    }
+
+    if (completedCBIndex == 0)
+        return vk::NoError();
+
+    mInFlightCommands.erase(mInFlightCommands.begin(),
+                            mInFlightCommands.begin() + completedCBIndex);
+
+    size_t freeIndex = 0;
+    for (; freeIndex < mGarbage.size(); ++freeIndex)
+    {
+        if (!mGarbage[freeIndex]->destroyIfComplete(mDevice, finishedSerial))
+            break;
+    }
+
+    // Remove the entries from the garbage list - they should be ready to go.
+    if (freeIndex > 0)
+    {
+        mGarbage.erase(mGarbage.begin(), mGarbage.begin() + freeIndex);
     }
 
     return vk::NoError();
@@ -667,28 +713,46 @@ vk::Error RendererVk::checkInFlightCommands()
 
 vk::Error RendererVk::submit(const VkSubmitInfo &submitInfo)
 {
-    checkInFlightCommands();
-
-    // Start a Fence to record when this command buffer finishes.
-    VkFenceCreateInfo fenceInfo;
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.pNext = nullptr;
-    fenceInfo.flags = 0;
-
-    vk::Fence fence;
-    ANGLE_TRY(fence.init(mDevice, fenceInfo));
-
-    ANGLE_VK_TRY(vkQueueSubmit(mQueue, 1, &submitInfo, fence.getHandle()));
+    ANGLE_VK_TRY(vkQueueSubmit(mQueue, 1, &submitInfo, VK_NULL_HANDLE));
 
     // Store this command buffer in the in-flight list.
-    mInFlightCommands.emplace_back(vk::FenceAndCommandBuffer(mCurrentQueueSerial, std::move(fence),
-                                                             std::move(mCommandBuffer)));
+    mInFlightCommands.emplace_back(std::move(mCommandBuffer), mCurrentQueueSerial);
 
     // Sanity check.
     ASSERT(mInFlightCommands.size() < 1000u);
 
-    // Increment the command buffer serial. If this fails, we need to restart ANGLE.
-    ANGLE_VK_CHECK(++mCurrentQueueSerial, VK_ERROR_OUT_OF_HOST_MEMORY);
+    // Increment the queue serial. If this fails, we should restart ANGLE.
+    // TODO(jmadill): Overflow check.
+    mCurrentQueueSerial = mQueueSerialFactory.generate();
+
+    return vk::NoError();
+}
+
+vk::Error RendererVk::submitFrame(const VkSubmitInfo &submitInfo)
+{
+    VkFenceCreateInfo createInfo;
+    createInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    createInfo.pNext = nullptr;
+    createInfo.flags = 0;
+
+    vk::Fence fence;
+    ANGLE_TRY(fence.init(mDevice, createInfo));
+
+    ANGLE_VK_TRY(vkQueueSubmit(mQueue, 1, &submitInfo, fence.getHandle()));
+
+    // Store this command buffer in the in-flight list.
+    mInFlightFences.emplace_back(std::move(fence), mCurrentQueueSerial);
+    mInFlightCommands.emplace_back(std::move(mCommandBuffer), mCurrentQueueSerial);
+
+    // Sanity check.
+    ASSERT(mInFlightCommands.size() < 1000u);
+
+    // Increment the queue serial. If this fails, we should restart ANGLE.
+    // TODO(jmadill): Overflow check.
+    mCurrentQueueSerial = mQueueSerialFactory.generate();
+
+    ANGLE_TRY(checkInFlightCommands());
+
     return vk::NoError();
 }
 

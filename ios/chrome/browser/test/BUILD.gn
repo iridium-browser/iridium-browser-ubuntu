@@ -5,6 +5,7 @@
 import("//ios/public/provider/chrome/browser/build_config.gni")
 
 source_set("perf_test_support") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "perf_test_with_bvc_ios.h",
@@ -18,13 +19,14 @@ source_set("perf_test_support") {
     "//ios/chrome/browser/browser_state:test_support",
     "//ios/chrome/browser/search_engines",
     "//ios/chrome/browser/sessions",
+    "//ios/chrome/browser/sessions:serialisation",
     "//ios/chrome/browser/tabs",
     "//ios/chrome/browser/ui:ui_internal",
     "//ios/chrome/browser/web:web_internal",
     "//ios/chrome/test:test_support",
     "//ios/chrome/test/base:perf_test_support",
     "//ios/public/provider/chrome/browser",
-    "//ios/web:test_support",
+    "//ios/web/public/test",
 
     # Perf tests can run with any provider, but the resulting numbers will only
     # be meaningful if ChromeBrowserProviderImpl is used.

@@ -33,7 +33,6 @@ MenuRunnerImpl::MenuRunnerImpl(MenuItemView* menu)
     : menu_(menu),
       running_(false),
       delete_after_run_(false),
-      async_(false),
       for_drop_(false),
       controller_(NULL),
       owns_controller_(false),
@@ -48,7 +47,7 @@ void MenuRunnerImpl::Release() {
     if (delete_after_run_)
       return;  // We already canceled.
 
-    // The menu is running a nested message loop, we can't delete it now
+    // The menu is running a nested run loop, we can't delete it now
     // otherwise the stack would be in a really bad state (many frames would
     // have deleted objects on them). Instead cancel the menu, when it returns
     // Holder will delete itself.
@@ -74,16 +73,16 @@ void MenuRunnerImpl::Release() {
   delete this;
 }
 
-MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(Widget* parent,
-                                                MenuButton* button,
-                                                const gfx::Rect& bounds,
-                                                MenuAnchorPosition anchor,
-                                                int32_t run_types) {
+void MenuRunnerImpl::RunMenuAt(Widget* parent,
+                               MenuButton* button,
+                               const gfx::Rect& bounds,
+                               MenuAnchorPosition anchor,
+                               int32_t run_types) {
   closing_event_time_ = base::TimeTicks();
   if (running_) {
     // Ignore requests to show the menu while it's already showing. MenuItemView
     // doesn't handle this very well (meaning it crashes).
-    return MenuRunner::NORMAL_EXIT;
+    return;
   }
 
   MenuController* controller = MenuController::GetActiveInstance();
@@ -105,7 +104,7 @@ MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(Widget* parent,
         // We can't open another menu, otherwise the message loop would become
         // twice nested. This isn't necessarily a problem, but generally isn't
         // expected.
-        return MenuRunner::NORMAL_EXIT;
+        return;
       }
       // Drop menus don't block the message loop, so it's ok to create a new
       // MenuController.
@@ -114,7 +113,6 @@ MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(Widget* parent,
   }
 
   running_ = true;
-  async_ = (run_types & MenuRunner::ASYNC) != 0;
   for_drop_ = (run_types & MenuRunner::FOR_DROP) != 0;
   bool has_mnemonics = (run_types & MenuRunner::HAS_MNEMONICS) != 0;
   owns_controller_ = false;
@@ -123,7 +121,6 @@ MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(Widget* parent,
     controller = new MenuController(!for_drop_, this);
     owns_controller_ = true;
   }
-  controller->SetAsyncRun(async_);
   controller->set_is_combobox((run_types & MenuRunner::COMBOBOX) != 0);
   controller_ = controller->AsWeakPtr();
   menu_->set_controller(controller_.get());
@@ -131,25 +128,9 @@ MenuRunner::RunResult MenuRunnerImpl::RunMenuAt(Widget* parent,
                        has_mnemonics,
                        !for_drop_ && ShouldShowMnemonics(button));
 
-  // Run the loop.
-  int mouse_event_flags = 0;
-  MenuItemView* result =
-      controller->Run(parent,
-                      button,
-                      menu_,
-                      bounds,
-                      anchor,
-                      (run_types & MenuRunner::CONTEXT_MENU) != 0,
-                      (run_types & MenuRunner::NESTED_DRAG) != 0,
-                      &mouse_event_flags);
-  // Get the time of the event which closed this menu.
-  closing_event_time_ = controller->closing_event_time();
-  if (for_drop_ || async_) {
-    // Drop and asynchronous menus return immediately. We finish processing in
-    // OnMenuClosed.
-    return MenuRunner::NORMAL_EXIT;
-  }
-  return MenuDone(NOTIFY_DELEGATE, result, mouse_event_flags);
+  controller->Run(parent, button, menu_, bounds, anchor,
+                  (run_types & MenuRunner::CONTEXT_MENU) != 0,
+                  (run_types & MenuRunner::NESTED_DRAG) != 0);
 }
 
 void MenuRunnerImpl::Cancel() {
@@ -164,25 +145,8 @@ base::TimeTicks MenuRunnerImpl::GetClosingEventTime() const {
 void MenuRunnerImpl::OnMenuClosed(NotifyType type,
                                   MenuItemView* menu,
                                   int mouse_event_flags) {
-  MenuDone(type, menu, mouse_event_flags);
-}
-
-void MenuRunnerImpl::SiblingMenuCreated(MenuItemView* menu) {
-  if (menu != menu_ && sibling_menus_.count(menu) == 0)
-    sibling_menus_.insert(menu);
-}
-
-MenuRunnerImpl::~MenuRunnerImpl() {
-  delete menu_;
-  for (std::set<MenuItemView*>::iterator i = sibling_menus_.begin();
-       i != sibling_menus_.end();
-       ++i)
-    delete *i;
-}
-
-MenuRunner::RunResult MenuRunnerImpl::MenuDone(NotifyType type,
-                                               MenuItemView* result,
-                                               int mouse_event_flags) {
+  if (controller_)
+    closing_event_time_ = controller_->closing_event_time();
   menu_->RemoveEmptyMenus();
   menu_->set_controller(nullptr);
 
@@ -197,24 +161,33 @@ MenuRunner::RunResult MenuRunnerImpl::MenuDone(NotifyType type,
   menu_->DestroyAllMenuHosts();
   if (delete_after_run_) {
     delete this;
-    return MenuRunner::MENU_DELETED;
+    return;
   }
   running_ = false;
   if (menu_->GetDelegate()) {
     // Executing the command may also delete this.
     base::WeakPtr<MenuRunnerImpl> ref(weak_factory_.GetWeakPtr());
-    if (result && !for_drop_) {
+    if (menu && !for_drop_) {
       // Do not execute the menu that was dragged/dropped.
-      menu_->GetDelegate()->ExecuteCommand(result->GetCommand(),
+      menu_->GetDelegate()->ExecuteCommand(menu->GetCommand(),
                                            mouse_event_flags);
     }
     // Only notify the delegate if it did not delete this.
-    if (!ref)
-      return MenuRunner::MENU_DELETED;
-    else if (type == NOTIFY_DELEGATE)
-      menu_->GetDelegate()->OnMenuClosed(result, MenuRunner::NORMAL_EXIT);
+    if (ref && type == NOTIFY_DELEGATE)
+      menu_->GetDelegate()->OnMenuClosed(menu);
   }
-  return MenuRunner::NORMAL_EXIT;
+}
+
+void MenuRunnerImpl::SiblingMenuCreated(MenuItemView* menu) {
+  if (menu != menu_ && sibling_menus_.count(menu) == 0)
+    sibling_menus_.insert(menu);
+}
+
+MenuRunnerImpl::~MenuRunnerImpl() {
+  delete menu_;
+  for (std::set<MenuItemView*>::iterator i = sibling_menus_.begin();
+       i != sibling_menus_.end(); ++i)
+    delete *i;
 }
 
 bool MenuRunnerImpl::ShouldShowMnemonics(MenuButton* button) {

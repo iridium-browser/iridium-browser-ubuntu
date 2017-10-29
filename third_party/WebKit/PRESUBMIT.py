@@ -14,10 +14,7 @@ import sys
 
 
 _EXCLUDED_PATHS = (
-    # LayoutTests/imported is excluded because these files are automatically
-    # imported, so we do not have direct control over their content.
-    r'^third_party[\\\/]WebKit[\\\/]LayoutTests[\\\/]imported[\\\/].*',
-    # Also created and imported via a script:
+    # This directory is created and updated via a script.
     r'^third_party[\\\/]WebKit[\\\/]Tools[\\\/]Scripts[\\\/]webkitpy[\\\/]thirdparty[\\\/]wpt[\\\/]wpt[\\\/].*',
 )
 
@@ -35,29 +32,9 @@ def _CheckForNonBlinkVariantMojomIncludes(input_api, output_api):
     results = []
     if errors:
         results.append(output_api.PresubmitError(
-            'Files that include non-Blink variant mojoms found:', errors))
-    return results
-
-
-def _CheckForVersionControlConflictsInFile(input_api, f):
-    pattern = input_api.re.compile('^(?:<<<<<<<|>>>>>>>) |^=======$')
-    errors = []
-    for line_num, line in f.ChangedContents():
-        if pattern.match(line):
-            errors.append('    %s:%d %s' % (f.LocalPath(), line_num, line))
-    return errors
-
-
-def _CheckForVersionControlConflicts(input_api, output_api):
-    """Usually this is not intentional and will cause a compile failure."""
-    errors = []
-    for f in input_api.AffectedFiles():
-        errors.extend(_CheckForVersionControlConflictsInFile(input_api, f))
-
-    results = []
-    if errors:
-        results.append(output_api.PresubmitError(
-            'Version control conflict markers found, please resolve.', errors))
+            'Files that include non-Blink variant mojoms found. '
+            'You must include .mojom-blink.h or .mojom-shared.h instead:',
+            errors))
     return results
 
 
@@ -101,23 +78,9 @@ def _CommonChecks(input_api, output_api):
         input_api, output_api, excluded_paths=_EXCLUDED_PATHS,
         maxlen=800, license_header=license_header))
     results.extend(_CheckForNonBlinkVariantMojomIncludes(input_api, output_api))
-    results.extend(_CheckForVersionControlConflicts(input_api, output_api))
-    results.extend(_CheckPatchFiles(input_api, output_api))
     results.extend(_CheckTestExpectations(input_api, output_api))
-    results.extend(_CheckChromiumPlatformMacros(input_api, output_api))
     results.extend(_CheckWatchlist(input_api, output_api))
-    results.extend(_CheckFilePermissions(input_api, output_api))
     return results
-
-
-def _CheckPatchFiles(input_api, output_api):
-  problems = [f.LocalPath() for f in input_api.AffectedFiles()
-      if f.LocalPath().endswith(('.orig', '.rej'))]
-  if problems:
-    return [output_api.PresubmitError(
-        "Don't commit .rej and .orig files.", problems)]
-  else:
-    return []
 
 
 def _CheckTestExpectations(input_api, output_api):
@@ -169,21 +132,6 @@ def _CheckStyle(input_api, output_api):
     return results
 
 
-def _CheckChromiumPlatformMacros(input_api, output_api, source_file_filter=None):
-    """Ensures that Blink code uses WTF's platform macros instead of
-    Chromium's. Using the latter has resulted in at least one subtle
-    build breakage."""
-    os_macro_re = input_api.re.compile(r'^\s*#(el)?if.*\bOS_')
-    errors = input_api.canned_checks._FindNewViolationsOfRule(
-        lambda _, x: not os_macro_re.search(x),
-        input_api, source_file_filter)
-    errors = ['Found use of Chromium OS_* macro in %s. '
-        'Use WTF platform macros instead.' % violation for violation in errors]
-    if errors:
-        return [output_api.PresubmitPromptWarning('\n'.join(errors))]
-    return []
-
-
 def _CheckForPrintfDebugging(input_api, output_api):
     """Generally speaking, we'd prefer not to land patches that printf
     debug output."""
@@ -229,26 +177,6 @@ def _CheckForFailInFile(input_api, f):
         if pattern.match(line):
             errors.append('    %s:%d %s' % (f.LocalPath(), line_num, line))
     return errors
-
-
-def _CheckFilePermissions(input_api, output_api):
-    """Check that all files have their permissions properly set."""
-    if input_api.platform == 'win32':
-        return []
-    args = [input_api.python_executable,
-            input_api.os_path.join(
-                input_api.change.RepositoryRoot(),
-                'tools/checkperms/checkperms.py'),
-            '--root', input_api.change.RepositoryRoot()]
-    for f in input_api.AffectedFiles():
-        args += ['--file', f.LocalPath()]
-    try:
-        input_api.subprocess.check_output(args)
-        return []
-    except input_api.subprocess.CalledProcessError as error:
-        return [output_api.PresubmitError(
-            'checkperms.py failed:',
-            long_text=error.output)]
 
 
 def _CheckForInvalidPreferenceError(input_api, output_api):
@@ -344,6 +272,10 @@ def _ArePaintOrCompositingDirectoriesModified(change):  # pylint: disable=C0103
         os.path.join('third_party', 'WebKit', 'Source', 'core', 'layout',
                      'compositing'),
         os.path.join('third_party', 'WebKit', 'Source', 'core', 'paint'),
+        os.path.join('third_party', 'WebKit', 'LayoutTests', 'FlagExpectations',
+                     'enable-slimming-paint-v2'),
+        os.path.join('third_party', 'WebKit', 'LayoutTests', 'flag-specific',
+                     'enable-slimming-paint-v2'),
     ]
     for affected_file in change.AffectedFiles():
         file_path = affected_file.LocalPath()
@@ -352,19 +284,43 @@ def _ArePaintOrCompositingDirectoriesModified(change):  # pylint: disable=C0103
     return False
 
 
+def _AreLayoutNGDirectoriesModified(change):  # pylint: disable=C0103
+    """Checks whether CL has changes to a layout ng directory."""
+    layout_ng_paths = [
+        os.path.join('third_party', 'WebKit', 'Source', 'core', 'layout',
+                     'ng'),
+    ]
+    for affected_file in change.AffectedFiles():
+        file_path = affected_file.LocalPath()
+        if any(x in file_path for x in layout_ng_paths):
+            return True
+    return False
+
+
 def PostUploadHook(cl, change, output_api):  # pylint: disable=C0103
     """git cl upload will call this hook after the issue is created/modified.
 
     This hook adds extra try bots to the CL description in order to run slimming
-    paint v2 tests in addition to the CQ try bots if the change contains paint
-    or compositing changes (see: _ArePaintOrCompositingDirectoriesModified). For
-    more information about slimming-paint-v2 tests see https://crbug.com/601275.
+    paint v2 tests or LayoutNG tests in addition to the CQ try bots if the
+    change contains changes in a relevant direcotry (see:
+    _ArePaintOrCompositingDirectoriesModified and
+    _AreLayoutNGDirectoriesModified). For more information about
+    slimming-paint-v2 tests see https://crbug.com/601275 and for information
+    about the LayoutNG tests see https://crbug.com/706183.
     """
-    if not _ArePaintOrCompositingDirectoriesModified(change):
-        return []
-    return output_api.EnsureCQIncludeTrybotsAreAdded(
-        cl,
-        ['master.tryserver.chromium.linux:'
-         'linux_layout_tests_slimming_paint_v2'],
-        'Automatically added slimming-paint-v2 tests to run on CQ due to '
-        'changes in paint or compositing directories.')
+    results = []
+    if _ArePaintOrCompositingDirectoriesModified(change):
+        results.extend(output_api.EnsureCQIncludeTrybotsAreAdded(
+            cl,
+            ['master.tryserver.chromium.linux:'
+             'linux_layout_tests_slimming_paint_v2'],
+            'Automatically added slimming-paint-v2 tests to run on CQ due to '
+            'changes in paint or compositing directories.'))
+    if _AreLayoutNGDirectoriesModified(change):
+        results.extend(output_api.EnsureCQIncludeTrybotsAreAdded(
+            cl,
+            ['master.tryserver.chromium.linux:'
+             'linux_layout_tests_layout_ng'],
+            'Automatically added linux_layout_tests_layout_ng to run on CQ due '
+            'to changes in LayoutNG directories.'))
+    return results

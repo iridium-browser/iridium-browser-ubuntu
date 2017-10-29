@@ -156,7 +156,8 @@ void WebContentsViewChildFrame::UpdateDragCursor(WebDragOperation operation) {
     view->UpdateDragCursor(operation);
 }
 
-void WebContentsViewChildFrame::GotFocus() {
+void WebContentsViewChildFrame::GotFocus(
+    RenderWidgetHostImpl* render_widget_host) {
   NOTREACHED();
 }
 
@@ -171,7 +172,8 @@ void WebContentsViewChildFrame::TakeFocus(bool reverse) {
       outer_node->parent()->render_manager()->current_frame_host();
 
   rfhi->AdvanceFocus(
-      reverse ? blink::WebFocusTypeBackward : blink::WebFocusTypeForward, rfp);
+      reverse ? blink::kWebFocusTypeBackward : blink::kWebFocusTypeForward,
+      rfp);
 }
 
 void WebContentsViewChildFrame::ShowContextMenu(

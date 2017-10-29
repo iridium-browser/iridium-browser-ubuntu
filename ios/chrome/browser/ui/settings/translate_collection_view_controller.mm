@@ -8,12 +8,11 @@
 #include <memory>
 
 #include "base/mac/foundation_util.h"
-#include "base/mac/scoped_nsobject.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
-#include "components/translate/core/common/translate_pref_names.h"
 #include "ios/chrome/browser/application_context.h"
 #import "ios/chrome/browser/translate/chrome_ios_translate_client.h"
 #import "ios/chrome/browser/ui/collection_view/cells/MDCCollectionViewCell+Chrome.h"
@@ -28,9 +27,13 @@
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
-#import "ios/third_party/material_roboto_font_loader_ios/src/src/MaterialRobotoFontLoader.h"
+#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -54,9 +57,9 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
 @interface TranslateCollectionViewController ()<BooleanObserver> {
   // Profile preferences.
   PrefService* _prefs;  // weak
-  base::scoped_nsobject<PrefBackedBoolean> _translationEnabled;
+  PrefBackedBoolean* _translationEnabled;
   // The item related to the switch for the translation setting.
-  base::scoped_nsobject<CollectionViewSwitchItem> _translationItem;
+  CollectionViewSwitchItem* _translationItem;
 }
 
 @end
@@ -67,15 +70,17 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
 
 - (instancetype)initWithPrefs:(PrefService*)prefs {
   DCHECK(prefs);
-  self = [super initWithStyle:CollectionViewControllerStyleAppBar];
+  UICollectionViewLayout* layout = [[MDCCollectionViewFlowLayout alloc] init];
+  self =
+      [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
   if (self) {
     self.title = l10n_util::GetNSString(IDS_IOS_TRANSLATE_SETTING);
     self.collectionViewAccessibilityIdentifier =
         @"translate_settings_view_controller";
     _prefs = prefs;
-    _translationEnabled.reset([[PrefBackedBoolean alloc]
-        initWithPrefService:_prefs
-                   prefName:prefs::kEnableTranslate]);
+    _translationEnabled =
+        [[PrefBackedBoolean alloc] initWithPrefService:_prefs
+                                              prefName:prefs::kEnableTranslate];
     [_translationEnabled setObserver:self];
     [self loadModel];
   }
@@ -84,7 +89,6 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
 
 - (void)dealloc {
   [_translationEnabled setObserver:nil];
-  [super dealloc];
 }
 
 #pragma mark - SettingsRootCollectionViewController
@@ -95,25 +99,25 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
 
   // Translate Section
   [model addSectionWithIdentifier:SectionIdentifierTranslate];
-  _translationItem.reset(
-      [[CollectionViewSwitchItem alloc] initWithType:ItemTypeTranslate]);
-  _translationItem.get().text =
-      l10n_util::GetNSString(IDS_IOS_TRANSLATE_SETTING);
-  _translationItem.get().on = [_translationEnabled value];
+  _translationItem =
+      [[CollectionViewSwitchItem alloc] initWithType:ItemTypeTranslate];
+  _translationItem.text = l10n_util::GetNSString(IDS_IOS_TRANSLATE_SETTING);
+  _translationItem.on = [_translationEnabled value];
   [model addItem:_translationItem
       toSectionWithIdentifier:SectionIdentifierTranslate];
 
-  CollectionViewTextItem* resetTranslate = [[[CollectionViewTextItem alloc]
-      initWithType:ItemTypeResetTranslate] autorelease];
+  CollectionViewTextItem* resetTranslate =
+      [[CollectionViewTextItem alloc] initWithType:ItemTypeResetTranslate];
   resetTranslate.text = l10n_util::GetNSString(IDS_IOS_TRANSLATE_SETTING_RESET);
   resetTranslate.accessibilityTraits |= UIAccessibilityTraitButton;
+  resetTranslate.textFont = [MDCTypography body2Font];
   [model addItem:resetTranslate
       toSectionWithIdentifier:SectionIdentifierTranslate];
 
   // Footer Section
   [model addSectionWithIdentifier:SectionIdentifierFooter];
-  CollectionViewFooterItem* footer = [[[CollectionViewFooterItem alloc]
-      initWithType:ItemTypeFooter] autorelease];
+  CollectionViewFooterItem* footer =
+      [[CollectionViewFooterItem alloc] initWithType:ItemTypeFooter];
   footer.text = l10n_util::GetNSString(IDS_IOS_TRANSLATE_SETTING_DESCRIPTION);
   footer.linkURL = google_util::AppendGoogleLocaleParam(
       GURL(kTranslateLearnMoreUrl),
@@ -138,13 +142,6 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
       [switchCell.switchView addTarget:self
                                 action:@selector(translateToggled:)
                       forControlEvents:UIControlEventValueChanged];
-      break;
-    }
-    case ItemTypeResetTranslate: {
-      MDCCollectionViewTextCell* textCell =
-          base::mac::ObjCCastStrict<MDCCollectionViewTextCell>(cell);
-      textCell.textLabel.font =
-          [[MDFRobotoFontLoader sharedInstance] mediumFontOfSize:14];
       break;
     }
     default:
@@ -229,14 +226,13 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
 #pragma mark - BooleanObserver
 
 - (void)booleanDidChange:(id<ObservableBoolean>)observableBoolean {
-  DCHECK_EQ(observableBoolean, _translationEnabled.get());
+  DCHECK_EQ(observableBoolean, _translationEnabled);
 
   // Update the item.
-  _translationItem.get().on = [_translationEnabled value];
+  _translationItem.on = [_translationEnabled value];
 
   // Update the cell.
-  [self reconfigureCellsForItems:@[ _translationItem ]
-         inSectionWithIdentifier:SectionIdentifierTranslate];
+  [self reconfigureCellsForItems:@[ _translationItem ]];
 }
 
 #pragma mark - Actions

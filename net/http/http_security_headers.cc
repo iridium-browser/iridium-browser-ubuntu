@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "base/base64.h"
+#include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
@@ -49,8 +50,7 @@ bool MaxAgeToLimitedInt(std::string::const_iterator begin,
 bool IsBackupPinPresent(const HashValueVector& pins,
                         const HashValueVector& from_cert_chain) {
   for (const auto& pin : pins) {
-    auto p = std::find(from_cert_chain.begin(), from_cert_chain.end(), pin);
-    if (p == from_cert_chain.end())
+    if (!base::ContainsValue(from_cert_chain, pin))
       return true;
   }
   return false;
@@ -61,8 +61,7 @@ bool IsBackupPinPresent(const HashValueVector& pins,
 bool HashesIntersect(const HashValueVector& a,
                      const HashValueVector& b) {
   for (const auto& pin : a) {
-    auto p = std::find(b.begin(), b.end(), pin);
-    if (p != b.end())
+    if (base::ContainsValue(b, pin))
       return true;
   }
   return false;
@@ -363,6 +362,77 @@ bool ParseHPKPReportOnlyHeader(const std::string& value,
   base::TimeDelta unused_max_age;
   return ParseHPKPHeaderImpl(value, DO_NOT_REQUIRE_MAX_AGE, &unused_max_age,
                              include_subdomains, hashes, report_uri);
+}
+
+// "Expect-CT" ":"
+//     "max-age" "=" delta-seconds
+//     [ "," "enforce" ]
+//     [ "," "report-uri" "=" absolute-URI ]
+bool ParseExpectCTHeader(const std::string& value,
+                         base::TimeDelta* max_age,
+                         bool* enforce,
+                         GURL* report_uri) {
+  bool parsed_max_age = false;
+  bool enforce_candidate = false;
+  bool has_report_uri = false;
+  uint32_t max_age_candidate = 0;
+  GURL parsed_report_uri;
+
+  HttpUtil::NameValuePairsIterator name_value_pairs(
+      value.begin(), value.end(), ',',
+      HttpUtil::NameValuePairsIterator::Values::NOT_REQUIRED,
+      // Use STRICT_QUOTES because "UAs must not attempt to fix malformed header
+      // fields."
+      HttpUtil::NameValuePairsIterator::Quotes::STRICT_QUOTES);
+
+  while (name_value_pairs.GetNext()) {
+    base::StringPiece name(name_value_pairs.name_begin(),
+                           name_value_pairs.name_end());
+    if (base::LowerCaseEqualsASCII(name, "max-age")) {
+      // "A given directive MUST NOT appear more than once in a given header
+      // field."
+      if (parsed_max_age)
+        return false;
+      if (!MaxAgeToLimitedInt(name_value_pairs.value_begin(),
+                              name_value_pairs.value_end(), kMaxExpectCTAgeSecs,
+                              &max_age_candidate)) {
+        return false;
+      }
+      parsed_max_age = true;
+    } else if (base::LowerCaseEqualsASCII(name, "enforce")) {
+      // "A given directive MUST NOT appear more than once in a given header
+      // field."
+      if (enforce_candidate)
+        return false;
+      if (!name_value_pairs.value().empty())
+        return false;
+      enforce_candidate = true;
+    } else if (base::LowerCaseEqualsASCII(name, "report-uri")) {
+      // "A given directive MUST NOT appear more than once in a given header
+      // field."
+      if (has_report_uri)
+        return false;
+
+      has_report_uri = true;
+      parsed_report_uri = GURL(base::StringPiece(name_value_pairs.value_begin(),
+                                                 name_value_pairs.value_end()));
+      if (parsed_report_uri.is_empty() || !parsed_report_uri.is_valid())
+        return false;
+    } else {
+      // Silently ignore unknown directives for forward compatibility.
+    }
+  }
+
+  if (!name_value_pairs.valid())
+    return false;
+
+  if (!parsed_max_age)
+    return false;
+
+  *max_age = base::TimeDelta::FromSeconds(max_age_candidate);
+  *enforce = enforce_candidate;
+  *report_uri = parsed_report_uri;
+  return true;
 }
 
 }  // namespace net

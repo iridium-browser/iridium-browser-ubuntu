@@ -12,10 +12,12 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/in_memory_url_index_factory.h"
@@ -23,10 +25,12 @@
 #include "chrome/browser/bookmarks/chrome_bookmark_client.h"
 #include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/arc/arc_service_launcher.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/favicon/chrome_fallback_icon_client_factory.h"
-#include "chrome/browser/favicon/fallback_icon_service_factory.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -45,7 +49,6 @@
 #include "chrome/browser/search_engines/template_url_fetcher_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
-#include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
 #include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -56,7 +59,6 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/common/bookmark_constants.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/favicon/core/fallback_icon_service.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/history/content/browser/content_visit_delegate.h"
 #include "components/history/content/browser/history_database_helper.h"
@@ -67,6 +69,7 @@
 #include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
+#include "components/offline_pages/features/features.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/history_index_restore_observer.h"
 #include "components/omnibox/browser/in_memory_url_index.h"
@@ -83,13 +86,11 @@
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/webdata_services/web_data_service_wrapper.h"
-#include "components/zoom/zoom_event_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/zoom_level_delegate.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/common/constants.h"
@@ -117,7 +118,11 @@
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/signin/oauth2_token_service_delegate_android.h"
-#endif
+#else  // !defined(OS_ANDROID)
+#include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
+#include "components/zoom/zoom_event_manager.h"
+#include "content/public/browser/zoom_level_delegate.h"
+#endif  // defined(OS_ANDROID)
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
@@ -126,8 +131,8 @@
 #include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "chrome/browser/android/offline_pages/offline_page_model_factory.h"
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+#include "chrome/browser/offline_pages/offline_page_model_factory.h"
 #include "components/offline_pages/core/stub_offline_page_model.h"
 #endif
 
@@ -215,7 +220,6 @@ std::unique_ptr<KeyedService> BuildInMemoryURLIndex(
                            HistoryServiceFactory::GetForProfile(
                                profile, ServiceAccessType::IMPLICIT_ACCESS),
                            TemplateURLServiceFactory::GetForProfile(profile),
-                           content::BrowserThread::GetBlockingPool(),
                            profile->GetPath(), SchemeSet()));
   in_memory_url_index->Init();
   return std::move(in_memory_url_index);
@@ -251,7 +255,7 @@ std::unique_ptr<KeyedService> BuildWebDataService(
       &TestProfileErrorCallback);
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
 std::unique_ptr<KeyedService> BuildOfflinePageModel(
     content::BrowserContext* context) {
   return base::MakeUnique<offline_pages::StubOfflinePageModel>();
@@ -391,6 +395,7 @@ TestingProfile::TestingProfile(
 }
 
 void TestingProfile::CreateTempProfileDir() {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   if (!temp_dir_.CreateUniqueTempDir()) {
     LOG(ERROR) << "Failed to create unique temporary directory.";
 
@@ -418,6 +423,7 @@ void TestingProfile::CreateTempProfileDir() {
 }
 
 void TestingProfile::Init() {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   // If threads have been initialized, we should be on the UI thread.
   DCHECK(!content::BrowserThread::IsThreadInitialized(
              content::BrowserThread::UI) ||
@@ -465,6 +471,16 @@ void TestingProfile::Init() {
 
   if (!base::PathExists(profile_path_))
     base::CreateDirectory(profile_path_);
+
+#if defined(OS_CHROMEOS)
+  if (!chromeos::CrosSettings::IsInitialized()) {
+    scoped_cros_settings_test_helper_.reset(
+        new chromeos::ScopedCrosSettingsTestHelper);
+  }
+  arc::ArcServiceLauncher* launcher = arc::ArcServiceLauncher::Get();
+  if (launcher)
+    launcher->MaybeSetProfile(this);
+#endif
 
   // TODO(joaodasilva): remove this once this PKS isn't created in ProfileImpl
   // anymore, after converting the PrefService to a PKS. Until then it must
@@ -559,6 +575,9 @@ TestingProfile::~TestingProfile() {
     resource_context_ = NULL;
     content::RunAllPendingInMessageLoop(BrowserThread::IO);
   }
+
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  ignore_result(temp_dir_.Delete());
 }
 
 void TestingProfile::CreateFaviconService() {
@@ -624,7 +643,7 @@ void TestingProfile::CreateBookmarkModel(bool delete_file) {
     base::FilePath path = GetPath().Append(bookmarks::kBookmarksFileName);
     base::DeleteFile(path, false);
   }
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
   offline_pages::OfflinePageModelFactory::GetInstance()->SetTestingFactory(
       this, BuildOfflinePageModel);
 #endif
@@ -666,12 +685,14 @@ base::FilePath TestingProfile::GetPath() const {
   return profile_path_;
 }
 
+#if !defined(OS_ANDROID)
 std::unique_ptr<content::ZoomLevelDelegate>
 TestingProfile::CreateZoomLevelDelegate(const base::FilePath& partition_path) {
   return base::MakeUnique<ChromeZoomLevelPrefs>(
       GetPrefs(), GetPath(), partition_path,
       zoom::ZoomEventManager::GetForBrowserContext(this)->GetWeakPtr());
 }
+#endif  // !defined(OS_ANDROID)
 
 scoped_refptr<base::SequencedTaskRunner> TestingProfile::GetIOTaskRunner() {
   return base::ThreadTaskRunnerHandle::Get();
@@ -810,7 +831,7 @@ void TestingProfile::CreateIncognitoPrefService() {
   // Simplified version of ProfileImpl::GetOffTheRecordPrefs(). Note this
   // leaves testing_prefs_ unset.
   prefs_.reset(CreateIncognitoPrefServiceSyncable(
-      original_profile_->prefs_.get(), NULL));
+      original_profile_->prefs_.get(), nullptr, nullptr));
   user_prefs::UserPrefs::Set(this, prefs_.get());
 }
 
@@ -843,10 +864,12 @@ const PrefService* TestingProfile::GetPrefs() const {
   return prefs_.get();
 }
 
+#if !defined(OS_ANDROID)
 ChromeZoomLevelPrefs* TestingProfile::GetZoomLevelPrefs() {
   return static_cast<ChromeZoomLevelPrefs*>(
       GetDefaultStoragePartition(this)->GetZoomLevelDelegate());
 }
+#endif  // !defined(OS_ANDROID)
 
 DownloadManagerDelegate* TestingProfile::GetDownloadManagerDelegate() {
   return NULL;
@@ -973,6 +996,19 @@ content::PermissionManager* TestingProfile::GetPermissionManager() {
 content::BackgroundSyncController*
 TestingProfile::GetBackgroundSyncController() {
   return nullptr;
+}
+
+content::BrowsingDataRemoverDelegate*
+TestingProfile::GetBrowsingDataRemoverDelegate() {
+  // TestingProfile contains a real BrowsingDataRemover from BrowserContext.
+  // Since ChromeBrowsingDataRemoverDelegate is just a Chrome-specific extension
+  // of BrowsingDataRemover, we include it here for consistency.
+  //
+  // This is not a problem, since ChromeBrowsingDataRemoverDelegate mostly
+  // just serves as an interface to deletion mechanisms of various browsing
+  // data backends, which are already mocked if considered too heavy-weight
+  // for TestingProfile.
+  return ChromeBrowsingDataRemoverDelegateFactory::GetForProfile(this);
 }
 
 net::URLRequestContextGetter* TestingProfile::CreateRequestContext(

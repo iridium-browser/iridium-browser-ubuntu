@@ -26,7 +26,6 @@ class ExtensionOptionsGuest
   ~ExtensionOptionsGuest() override;
 
   // GuestViewBase implementation.
-  bool CanRunInDetachedState() const final;
   void CreateWebContents(const base::DictionaryValue& create_params,
                          const WebContentsCreatedCallback& callback) final;
   void DidInitialize(const base::DictionaryValue& create_params) final;
@@ -35,7 +34,6 @@ class ExtensionOptionsGuest
   int GetTaskPrefix() const final;
   bool IsPreferredSizeModeEnabled() const final;
   void OnPreferredSizeChanged(const gfx::Size& pref_size) final;
-  bool ShouldHandleFindRequestsForEmbedder() const final;
 
   // content::WebContentsDelegate implementation.
   content::WebContents* OpenURLFromTab(
@@ -45,6 +43,7 @@ class ExtensionOptionsGuest
   bool HandleContextMenu(const content::ContextMenuParams& params) final;
   bool ShouldCreateWebContents(
       content::WebContents* web_contents,
+      content::RenderFrameHost* opener,
       content::SiteInstance* source_site_instance,
       int32_t route_id,
       int32_t main_frame_route_id,

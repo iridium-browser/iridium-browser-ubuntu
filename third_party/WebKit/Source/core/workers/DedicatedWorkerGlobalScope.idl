@@ -32,11 +32,12 @@
 
 [
     Global=(Worker,DedicatedWorker),
-    Exposed=DedicatedWorker,
+    Exposed=DedicatedWorker
 ] interface DedicatedWorkerGlobalScope : WorkerGlobalScope {
-    [PostMessage, RaisesException] void postMessage(any message, optional sequence<Transferable> transfer);
+    [PostMessage, RaisesException] void postMessage(any message, optional sequence<object> transfer = []);
 
     void close();
 
     attribute EventHandler onmessage;
+    attribute EventHandler onmessageerror;
 };

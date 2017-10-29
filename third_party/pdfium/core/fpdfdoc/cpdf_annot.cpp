@@ -34,9 +34,10 @@ bool IsTextMarkupAnnotation(CPDF_Annot::Subtype type) {
 }
 
 bool ShouldGenerateAPForAnnotation(CPDF_Dictionary* pAnnotDict) {
-  // If AP dictionary exists, we use the appearance defined in the
-  // existing AP dictionary.
-  if (pAnnotDict->KeyExist("AP"))
+  // If AP dictionary exists and defines an appearance for normal mode, we use
+  // the appearance defined in the existing AP dictionary.
+  CPDF_Dictionary* pAP = pAnnotDict->GetDictFor("AP");
+  if (pAP && pAP->GetDictFor("N"))
     return false;
 
   return !CPDF_Annot::IsAnnotationHidden(pAnnotDict);
@@ -90,23 +91,23 @@ void CPDF_Annot::GenerateAPIfNeeded() {
   CPDF_Dictionary* pDict = m_pAnnotDict.Get();
   bool result = false;
   if (m_nSubtype == CPDF_Annot::Subtype::CIRCLE)
-    result = CPVT_GenerateAP::GenerateCircleAP(m_pDocument, pDict);
+    result = CPVT_GenerateAP::GenerateCircleAP(m_pDocument.Get(), pDict);
   else if (m_nSubtype == CPDF_Annot::Subtype::HIGHLIGHT)
-    result = CPVT_GenerateAP::GenerateHighlightAP(m_pDocument, pDict);
+    result = CPVT_GenerateAP::GenerateHighlightAP(m_pDocument.Get(), pDict);
   else if (m_nSubtype == CPDF_Annot::Subtype::INK)
-    result = CPVT_GenerateAP::GenerateInkAP(m_pDocument, pDict);
+    result = CPVT_GenerateAP::GenerateInkAP(m_pDocument.Get(), pDict);
   else if (m_nSubtype == CPDF_Annot::Subtype::POPUP)
-    result = CPVT_GenerateAP::GeneratePopupAP(m_pDocument, pDict);
+    result = CPVT_GenerateAP::GeneratePopupAP(m_pDocument.Get(), pDict);
   else if (m_nSubtype == CPDF_Annot::Subtype::SQUARE)
-    result = CPVT_GenerateAP::GenerateSquareAP(m_pDocument, pDict);
+    result = CPVT_GenerateAP::GenerateSquareAP(m_pDocument.Get(), pDict);
   else if (m_nSubtype == CPDF_Annot::Subtype::SQUIGGLY)
-    result = CPVT_GenerateAP::GenerateSquigglyAP(m_pDocument, pDict);
+    result = CPVT_GenerateAP::GenerateSquigglyAP(m_pDocument.Get(), pDict);
   else if (m_nSubtype == CPDF_Annot::Subtype::STRIKEOUT)
-    result = CPVT_GenerateAP::GenerateStrikeOutAP(m_pDocument, pDict);
+    result = CPVT_GenerateAP::GenerateStrikeOutAP(m_pDocument.Get(), pDict);
   else if (m_nSubtype == CPDF_Annot::Subtype::TEXT)
-    result = CPVT_GenerateAP::GenerateTextAP(m_pDocument, pDict);
+    result = CPVT_GenerateAP::GenerateTextAP(m_pDocument.Get(), pDict);
   else if (m_nSubtype == CPDF_Annot::Subtype::UNDERLINE)
-    result = CPVT_GenerateAP::GenerateUnderlineAP(m_pDocument, pDict);
+    result = CPVT_GenerateAP::GenerateUnderlineAP(m_pDocument.Get(), pDict);
 
   if (result) {
     m_pAnnotDict->SetNewFor<CPDF_Boolean>(kPDFiumKey_HasGeneratedAP, result);
@@ -157,13 +158,13 @@ uint32_t CPDF_Annot::GetFlags() const {
   return m_pAnnotDict->GetIntegerFor("F");
 }
 
-CPDF_Stream* FPDFDOC_GetAnnotAP(CPDF_Dictionary* pAnnotDict,
+CPDF_Stream* FPDFDOC_GetAnnotAP(const CPDF_Dictionary* pAnnotDict,
                                 CPDF_Annot::AppearanceMode mode) {
   CPDF_Dictionary* pAP = pAnnotDict->GetDictFor("AP");
   if (!pAP) {
     return nullptr;
   }
-  const FX_CHAR* ap_entry = "N";
+  const char* ap_entry = "N";
   if (mode == CPDF_Annot::Down)
     ap_entry = "D";
   else if (mode == CPDF_Annot::Rollover)
@@ -204,8 +205,8 @@ CPDF_Form* CPDF_Annot::GetAPForm(const CPDF_Page* pPage, AppearanceMode mode) {
   if (it != m_APMap.end())
     return it->second.get();
 
-  auto pNewForm =
-      pdfium::MakeUnique<CPDF_Form>(m_pDocument, pPage->m_pResources, pStream);
+  auto pNewForm = pdfium::MakeUnique<CPDF_Form>(
+      m_pDocument.Get(), pPage->m_pResources.Get(), pStream);
   pNewForm->ParseContent(nullptr, nullptr, nullptr);
 
   CPDF_Form* pResult = pNewForm.get();
@@ -426,7 +427,7 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
   }
   CPDF_Dictionary* pBS = m_pAnnotDict->GetDictFor("BS");
   char style_char;
-  FX_FLOAT width;
+  float width;
   CPDF_Array* pDashArray = nullptr;
   if (!pBS) {
     CPDF_Array* pBorderArray = m_pAnnotDict->GetArrayFor("Border");
@@ -479,7 +480,7 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
       if (dash_count % 2) {
         dash_count++;
       }
-      graph_state.m_DashArray = FX_Alloc(FX_FLOAT, dash_count);
+      graph_state.m_DashArray = FX_Alloc(float, dash_count);
       graph_state.m_DashCount = dash_count;
       size_t i;
       for (i = 0; i < pDashArray->GetCount(); ++i) {
@@ -489,7 +490,7 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
         graph_state.m_DashArray[i] = graph_state.m_DashArray[i - 1];
       }
     } else {
-      graph_state.m_DashArray = FX_Alloc(FX_FLOAT, 2);
+      graph_state.m_DashArray = FX_Alloc(float, 2);
       graph_state.m_DashCount = 2;
       graph_state.m_DashArray[0] = graph_state.m_DashArray[1] = 3 * 1.0f;
     }

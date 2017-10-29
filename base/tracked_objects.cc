@@ -8,6 +8,8 @@
 #include <limits.h>
 #include <stdlib.h>
 
+#include <limits>
+
 #include "base/atomicops.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
@@ -19,6 +21,7 @@
 #include "base/numerics/safe_math.h"
 #include "base/process/process_handle.h"
 #include "base/third_party/valgrind/memcheck.h"
+#include "base/threading/platform_thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/tracking_info.h"
 #include "build/build_config.h"
@@ -110,13 +113,17 @@ DeathData::DeathData()
       queue_duration_max_(0),
       alloc_ops_(0),
       free_ops_(0),
-      allocated_bytes_(0),
-      freed_bytes_(0),
-      alloc_overhead_bytes_(0),
+#if !defined(ARCH_CPU_64_BITS)
+      byte_update_counter_(0),
+#endif
+      allocated_bytes_(),
+      freed_bytes_(),
+      alloc_overhead_bytes_(),
       max_allocated_bytes_(0),
       run_duration_sample_(0),
       queue_duration_sample_(0),
-      last_phase_snapshot_(nullptr) {}
+      last_phase_snapshot_(nullptr) {
+}
 
 DeathData::DeathData(const DeathData& other)
     : count_(other.count_),
@@ -127,6 +134,9 @@ DeathData::DeathData(const DeathData& other)
       queue_duration_max_(other.queue_duration_max_),
       alloc_ops_(other.alloc_ops_),
       free_ops_(other.free_ops_),
+#if !defined(ARCH_CPU_64_BITS)
+      byte_update_counter_(0),
+#endif
       allocated_bytes_(other.allocated_bytes_),
       freed_bytes_(other.freed_bytes_),
       alloc_overhead_bytes_(other.alloc_overhead_bytes_),
@@ -158,8 +168,8 @@ DeathData::~DeathData() {
 #define CONDITIONAL_ASSIGN(assign_it, target, source) \
   ((target) ^= ((target) ^ (source)) & -static_cast<int32_t>(assign_it))
 
-void DeathData::RecordDurations(const int32_t queue_duration,
-                                const int32_t run_duration,
+void DeathData::RecordDurations(const base::TimeDelta queue_duration,
+                                const base::TimeDelta run_duration,
                                 const uint32_t random_number) {
   // We'll just clamp at INT_MAX, but we should note this in the UI as such.
   if (count_ < INT_MAX)
@@ -172,15 +182,18 @@ void DeathData::RecordDurations(const int32_t queue_duration,
   base::subtle::NoBarrier_Store(&sample_probability_count_,
                                 sample_probability_count);
 
-  base::subtle::NoBarrier_Store(&queue_duration_sum_,
-                                queue_duration_sum_ + queue_duration);
-  base::subtle::NoBarrier_Store(&run_duration_sum_,
-                                run_duration_sum_ + run_duration);
+  base::subtle::NoBarrier_Store(
+      &queue_duration_sum_,
+      queue_duration_sum_ + queue_duration.InMilliseconds());
+  base::subtle::NoBarrier_Store(
+      &run_duration_sum_, run_duration_sum_ + run_duration.InMilliseconds());
 
-  if (queue_duration_max() < queue_duration)
-    base::subtle::NoBarrier_Store(&queue_duration_max_, queue_duration);
-  if (run_duration_max() < run_duration)
-    base::subtle::NoBarrier_Store(&run_duration_max_, run_duration);
+  if (queue_duration_max() < queue_duration.InMilliseconds())
+    base::subtle::NoBarrier_Store(&queue_duration_max_,
+                                  queue_duration.InMilliseconds());
+  if (run_duration_max() < run_duration.InMilliseconds())
+    base::subtle::NoBarrier_Store(&run_duration_max_,
+                                  run_duration.InMilliseconds());
 
   // Take a uniformly distributed sample over all durations ever supplied during
   // the current profiling phase.
@@ -192,8 +205,10 @@ void DeathData::RecordDurations(const int32_t queue_duration,
   // used them to generate random_number).
   CHECK_GT(sample_probability_count, 0);
   if (0 == (random_number % sample_probability_count)) {
-    base::subtle::NoBarrier_Store(&queue_duration_sample_, queue_duration);
-    base::subtle::NoBarrier_Store(&run_duration_sample_, run_duration);
+    base::subtle::NoBarrier_Store(&queue_duration_sample_,
+                                  queue_duration.InMilliseconds());
+    base::subtle::NoBarrier_Store(&run_duration_sample_,
+                                  run_duration.InMilliseconds());
   }
 }
 
@@ -203,16 +218,32 @@ void DeathData::RecordAllocations(const uint32_t alloc_ops,
                                   const uint32_t freed_bytes,
                                   const uint32_t alloc_overhead_bytes,
                                   const uint32_t max_allocated_bytes) {
+#if !defined(ARCH_CPU_64_BITS)
+  // On 32 bit systems, we use an even/odd locking scheme to make possible to
+  // read 64 bit sums consistently. Note that since writes are bound to the
+  // thread owning this DeathData, there's no race on these writes.
+  int32_t counter_val =
+      base::subtle::Barrier_AtomicIncrement(&byte_update_counter_, 1);
+  // The counter must be odd.
+  DCHECK_EQ(1, counter_val & 1);
+#endif
+
   // Use saturating arithmetic.
   SaturatingMemberAdd(alloc_ops, &alloc_ops_);
   SaturatingMemberAdd(free_ops, &free_ops_);
-  SaturatingMemberAdd(allocated_bytes, &allocated_bytes_);
-  SaturatingMemberAdd(freed_bytes, &freed_bytes_);
-  SaturatingMemberAdd(alloc_overhead_bytes, &alloc_overhead_bytes_);
+  SaturatingByteCountMemberAdd(allocated_bytes, &allocated_bytes_);
+  SaturatingByteCountMemberAdd(freed_bytes, &freed_bytes_);
+  SaturatingByteCountMemberAdd(alloc_overhead_bytes, &alloc_overhead_bytes_);
 
   int32_t max = base::saturated_cast<int32_t>(max_allocated_bytes);
   if (max > max_allocated_bytes_)
     base::subtle::NoBarrier_Store(&max_allocated_bytes_, max);
+
+#if !defined(ARCH_CPU_64_BITS)
+  // Now release the value while rolling to even.
+  counter_val = base::subtle::Barrier_AtomicIncrement(&byte_update_counter_, 1);
+  DCHECK_EQ(0, counter_val & 1);
+#endif
 }
 
 void DeathData::OnProfilingPhaseCompleted(int profiling_phase) {
@@ -250,15 +281,102 @@ void DeathData::OnProfilingPhaseCompleted(int profiling_phase) {
   base::subtle::NoBarrier_Store(&queue_duration_max_, 0);
 }
 
+// static
+int64_t DeathData::UnsafeCumulativeByteCountRead(
+    const CumulativeByteCount* count) {
+#if defined(ARCH_CPU_64_BITS)
+  return base::subtle::NoBarrier_Load(count);
+#else
+  return static_cast<int64_t>(base::subtle::NoBarrier_Load(&count->hi_word))
+             << 32 |
+         static_cast<uint32_t>(base::subtle::NoBarrier_Load(&count->lo_word));
+#endif
+}
+
+int64_t DeathData::ConsistentCumulativeByteCountRead(
+    const CumulativeByteCount* count) const {
+#if defined(ARCH_CPU_64_BITS)
+  return base::subtle::NoBarrier_Load(count);
+#else
+  // We're on a 32 bit system, this is going to be complicated.
+  while (true) {
+    int32_t update_counter = 0;
+    // Acquire the starting count, spin until it's even.
+
+    // The value of |kYieldProcessorTries| is cargo culted from the page
+    // allocator, TCMalloc, Window critical section defaults, and various other
+    // recommendations.
+    // This is not performance critical here, as the reads are vanishingly rare
+    // and only happen under the --enable-heap-profiling=task-profiler flag.
+    constexpr size_t kYieldProcessorTries = 1000;
+    size_t lock_attempts = 0;
+    do {
+      ++lock_attempts;
+      if (lock_attempts == kYieldProcessorTries) {
+        // Yield the current thread periodically to avoid writer starvation.
+        base::PlatformThread::YieldCurrentThread();
+        lock_attempts = 0;
+      }
+
+      update_counter = base::subtle::NoBarrier_Load(&byte_update_counter_);
+    } while (update_counter & 1);
+
+    // Make sure the reads below see all changes before the update counter.
+    base::subtle::MemoryBarrier();
+
+    DCHECK_EQ(update_counter & 1, 0);
+
+    int64_t value =
+        static_cast<int64_t>(base::subtle::NoBarrier_Load(&count->hi_word))
+            << 32 |
+        static_cast<uint32_t>(base::subtle::NoBarrier_Load(&count->lo_word));
+
+    // Release_Load() semantics here ensure that the |byte_update_counter_|
+    // value seen is at least as old as the |hi_word|/|lo_word| values seen
+    // above, which means that if it's still equal to |update_counter|, the read
+    // is consistent, since the above MemoryBarrier() ensures they're at least
+    // as new as the afore-obtained |update_counter|'s value.
+    if (update_counter == base::subtle::Release_Load(&byte_update_counter_))
+      return value;
+  }
+#endif
+}
+
+// static
 void DeathData::SaturatingMemberAdd(const uint32_t addend,
                                     base::subtle::Atomic32* sum) {
+  constexpr int32_t kInt32Max = std::numeric_limits<int32_t>::max();
   // Bail quick if no work or already saturated.
-  if (addend == 0U || *sum == INT_MAX)
+  if (addend == 0U || *sum == kInt32Max)
     return;
 
   base::CheckedNumeric<int32_t> new_sum = *sum;
   new_sum += addend;
-  base::subtle::NoBarrier_Store(sum, new_sum.ValueOrDefault(INT_MAX));
+  base::subtle::NoBarrier_Store(sum, new_sum.ValueOrDefault(kInt32Max));
+}
+
+void DeathData::SaturatingByteCountMemberAdd(const uint32_t addend,
+                                             CumulativeByteCount* sum) {
+  constexpr int64_t kInt64Max = std::numeric_limits<int64_t>::max();
+  // Bail quick if no work or already saturated.
+  if (addend == 0U || UnsafeCumulativeByteCountRead(sum) == kInt64Max)
+    return;
+
+  base::CheckedNumeric<int64_t> new_sum = UnsafeCumulativeByteCountRead(sum);
+  new_sum += addend;
+  int64_t new_value = new_sum.ValueOrDefault(kInt64Max);
+// Update our value.
+#if defined(ARCH_CPU_64_BITS)
+  base::subtle::NoBarrier_Store(sum, new_value);
+#else
+  // This must only be called while the update counter is "locked" (i.e. odd).
+  DCHECK_EQ(base::subtle::NoBarrier_Load(&byte_update_counter_) & 1, 1);
+
+  base::subtle::NoBarrier_Store(&sum->hi_word,
+                                static_cast<int32_t>(new_value >> 32));
+  base::subtle::NoBarrier_Store(&sum->lo_word,
+                                static_cast<int32_t>(new_value & 0xFFFFFFFF));
+#endif
 }
 
 //------------------------------------------------------------------------------
@@ -286,9 +404,9 @@ DeathDataSnapshot::DeathDataSnapshot(int count,
                                      int32_t queue_duration_sample,
                                      int32_t alloc_ops,
                                      int32_t free_ops,
-                                     int32_t allocated_bytes,
-                                     int32_t freed_bytes,
-                                     int32_t alloc_overhead_bytes,
+                                     int64_t allocated_bytes,
+                                     int64_t freed_bytes,
+                                     int64_t alloc_overhead_bytes,
                                      int32_t max_allocated_bytes)
     : count(count),
       run_duration_sum(run_duration_sum),
@@ -420,7 +538,8 @@ void ThreadData::PushToHeadOfList() {
                                                  sizeof(random_number_));
   MSAN_UNPOISON(&random_number_, sizeof(random_number_));
   random_number_ += static_cast<uint32_t>(this - static_cast<ThreadData*>(0));
-  random_number_ ^= (Now() - TrackedTime()).InMilliseconds();
+  random_number_ ^=
+      static_cast<uint32_t>((Now() - base::TimeTicks()).InMilliseconds());
 
   DCHECK(!next_);
   base::AutoLock lock(*list_lock_.Pointer());
@@ -565,13 +684,14 @@ Births* ThreadData::TallyABirth(const Location& location) {
 }
 
 void ThreadData::TallyADeath(const Births& births,
-                             int32_t queue_duration,
+                             const base::TimeDelta queue_duration,
                              const TaskStopwatch& stopwatch) {
-  int32_t run_duration = stopwatch.RunDurationMs();
+  base::TimeDelta run_duration = stopwatch.RunDuration();
 
   // Stir in some randomness, plus add constant in case durations are zero.
   const uint32_t kSomePrimeNumber = 2147483647;
-  random_number_ += queue_duration + run_duration + kSomePrimeNumber;
+  random_number_ += queue_duration.InMilliseconds() +
+                    run_duration.InMilliseconds() + kSomePrimeNumber;
   // An address is going to have some randomness to it as well ;-).
   random_number_ ^=
       static_cast<uint32_t>(&births - reinterpret_cast<Births*>(0));
@@ -586,7 +706,7 @@ void ThreadData::TallyADeath(const Births& births,
   }  // Release lock ASAP.
   death_data->RecordDurations(queue_duration, run_duration, random_number_);
 
-#if BUILDFLAG(ENABLE_MEMORY_TASK_PROFILER)
+#if BUILDFLAG(USE_ALLOCATOR_SHIM)
   if (stopwatch.heap_tracking_enabled()) {
     base::debug::ThreadHeapUsage heap_usage = stopwatch.heap_usage().usage();
     // Saturate the 64 bit counts on conversion to 32 bit storage.
@@ -630,11 +750,10 @@ void ThreadData::TallyRunOnNamedThreadIfTracking(
   // get a time value since we "weren't tracking" and we were trying to be
   // efficient by not calling for a genuine time value.  For simplicity, we'll
   // use a default zero duration when we can't calculate a true value.
-  TrackedTime start_of_run = stopwatch.StartTime();
-  int32_t queue_duration = 0;
+  base::TimeTicks start_of_run = stopwatch.StartTime();
+  base::TimeDelta queue_duration;
   if (!start_of_run.is_null()) {
-    queue_duration = (start_of_run - completed_task.EffectiveTimePosted())
-        .InMilliseconds();
+    queue_duration = start_of_run - completed_task.EffectiveTimePosted();
   }
   current_thread_data->TallyADeath(*births, queue_duration, stopwatch);
 }
@@ -642,7 +761,7 @@ void ThreadData::TallyRunOnNamedThreadIfTracking(
 // static
 void ThreadData::TallyRunOnWorkerThreadIfTracking(
     const Births* births,
-    const TrackedTime& time_posted,
+    const base::TimeTicks& time_posted,
     const TaskStopwatch& stopwatch) {
   // Even if we have been DEACTIVATED, we will process any pending births so
   // that our data structures (which counted the outstanding births) remain
@@ -663,10 +782,10 @@ void ThreadData::TallyRunOnWorkerThreadIfTracking(
   if (!current_thread_data)
     return;
 
-  TrackedTime start_of_run = stopwatch.StartTime();
-  int32_t queue_duration = 0;
+  base::TimeTicks start_of_run = stopwatch.StartTime();
+  base::TimeDelta queue_duration;
   if (!start_of_run.is_null()) {
-    queue_duration = (start_of_run - time_posted).InMilliseconds();
+    queue_duration = start_of_run - time_posted;
   }
   current_thread_data->TallyADeath(*births, queue_duration, stopwatch);
 }
@@ -685,7 +804,7 @@ void ThreadData::TallyRunInAScopedRegionIfTracking(
   if (!current_thread_data)
     return;
 
-  int32_t queue_duration = 0;
+  base::TimeDelta queue_duration;
   current_thread_data->TallyADeath(*births, queue_duration, stopwatch);
 }
 
@@ -814,12 +933,13 @@ void ThreadData::EnableProfilerTiming() {
 }
 
 // static
-TrackedTime ThreadData::Now() {
+base::TimeTicks ThreadData::Now() {
   if (now_function_for_testing_)
-    return TrackedTime::FromMilliseconds((*now_function_for_testing_)());
+    return base::TimeTicks() +
+           base::TimeDelta::FromMilliseconds((*now_function_for_testing_)());
   if (IsProfilerTimingEnabled() && TrackingStatus())
-    return TrackedTime::Now();
-  return TrackedTime();  // Super fast when disabled, or not compiled.
+    return base::TimeTicks::Now();
+  return base::TimeTicks();  // Super fast when disabled, or not compiled.
 }
 
 // static
@@ -923,15 +1043,15 @@ ThreadData* ThreadData::GetRetiredOrCreateThreadData(
 
 //------------------------------------------------------------------------------
 TaskStopwatch::TaskStopwatch()
-    : wallclock_duration_ms_(0),
+    : wallclock_duration_(),
       current_thread_data_(NULL),
-      excluded_duration_ms_(0),
+      excluded_duration_(),
       parent_(NULL) {
 #if DCHECK_IS_ON()
   state_ = CREATED;
   child_ = NULL;
 #endif
-#if BUILDFLAG(ENABLE_MEMORY_TASK_PROFILER)
+#if BUILDFLAG(USE_ALLOCATOR_SHIM)
   heap_tracking_enabled_ =
       base::debug::ThreadHeapUsageTracker::IsHeapTrackingEnabled();
 #endif
@@ -951,7 +1071,7 @@ void TaskStopwatch::Start() {
 #endif
 
   start_time_ = ThreadData::Now();
-#if BUILDFLAG(ENABLE_MEMORY_TASK_PROFILER)
+#if BUILDFLAG(USE_ALLOCATOR_SHIM)
   if (heap_tracking_enabled_)
     heap_usage_.Start();
 #endif
@@ -972,19 +1092,19 @@ void TaskStopwatch::Start() {
 }
 
 void TaskStopwatch::Stop() {
-  const TrackedTime end_time = ThreadData::Now();
+  const base::TimeTicks end_time = ThreadData::Now();
 #if DCHECK_IS_ON()
   DCHECK(state_ == RUNNING);
   state_ = STOPPED;
   DCHECK(child_ == NULL);
 #endif
-#if BUILDFLAG(ENABLE_MEMORY_TASK_PROFILER)
+#if BUILDFLAG(USE_ALLOCATOR_SHIM)
   if (heap_tracking_enabled_)
     heap_usage_.Stop(true);
 #endif
 
   if (!start_time_.is_null() && !end_time.is_null()) {
-    wallclock_duration_ms_ = (end_time - start_time_).InMilliseconds();
+    wallclock_duration_ = end_time - start_time_;
   }
 
   if (!current_thread_data_)
@@ -1000,11 +1120,11 @@ void TaskStopwatch::Stop() {
   DCHECK(parent_->child_ == this);
   parent_->child_ = NULL;
 #endif
-  parent_->excluded_duration_ms_ += wallclock_duration_ms_;
+  parent_->excluded_duration_ += wallclock_duration_;
   parent_ = NULL;
 }
 
-TrackedTime TaskStopwatch::StartTime() const {
+base::TimeTicks TaskStopwatch::StartTime() const {
 #if DCHECK_IS_ON()
   DCHECK(state_ != CREATED);
 #endif
@@ -1012,12 +1132,12 @@ TrackedTime TaskStopwatch::StartTime() const {
   return start_time_;
 }
 
-int32_t TaskStopwatch::RunDurationMs() const {
+base::TimeDelta TaskStopwatch::RunDuration() const {
 #if DCHECK_IS_ON()
   DCHECK(state_ == STOPPED);
 #endif
 
-  return wallclock_duration_ms_ - excluded_duration_ms_;
+  return wallclock_duration_ - excluded_duration_;
 }
 
 ThreadData* TaskStopwatch::GetThreadData() const {

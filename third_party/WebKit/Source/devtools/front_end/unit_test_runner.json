@@ -4,6 +4,7 @@
         { "name": "dom_extension", "type": "autostart" },
         { "name": "ui", "type": "autostart" },
         { "name": "host", "type": "autostart" },
+        { "name": "text_utils", "type": "autostart" },
         { "name": "common", "type": "autostart" },
         { "name": "workspace", "type": "autostart" },
         { "name": "text_editor", "type": "autostart" },
@@ -14,7 +15,11 @@
         { "name": "test_runner", "type": "autostart" },
         { "name": "quick_open" },
         { "name": "inline_editor" },
-        { "name": "data_grid" }
+        { "name": "sdk" },
+        { "name": "protocol" },
+        { "name": "data_grid" },
+        { "name": "product_registry" },
+        { "name": "product_registry_impl" }
     ],
     "has_html": true
 }

@@ -12,20 +12,19 @@
 
 #include <pthread.h>
 
-#include "webrtc/base/ignore_wundef.h"
+#include "webrtc/rtc_base/ignore_wundef.h"
 
 // Note: this dependency is dangerous since it reaches into Chromium's base.
 // There's a risk of e.g. macro clashes. This file may only be used in tests.
 // Since we use Chromes build system for creating the gtest binary, this should
 // be fine.
 RTC_PUSH_IGNORING_WUNDEF()
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 RTC_POP_IGNORING_WUNDEF()
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/ssladapter.h"
-#include "webrtc/voice_engine/include/voe_base.h"
+#include "webrtc/modules/utility/include/jvm_android.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/ssladapter.h"
 
 namespace webrtc {
 
@@ -41,11 +40,10 @@ void EnsureInitializedOnce() {
   JNIEnv* jni = ::base::android::AttachCurrentThread();
   JavaVM* jvm = NULL;
   RTC_CHECK_EQ(0, jni->GetJavaVM(&jvm));
-  jobject context = ::base::android::GetApplicationContext().obj();
 
   RTC_CHECK(rtc::InitializeSSL()) << "Failed to InitializeSSL()";
 
-  webrtc::VoiceEngine::SetAndroidObjects(jvm, context);
+  webrtc::JVM::Initialize(jvm);
 }
 
 }  // anonymous namespace

@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -18,7 +19,6 @@
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_external_agent_proxy.h"
 #include "content/public/browser/devtools_external_agent_proxy_delegate.h"
-#include "content/public/browser/user_metrics.h"
 #include "net/base/escape.h"
 
 using content::BrowserThread;
@@ -260,7 +260,7 @@ AgentHostDelegate::~AgentHostDelegate() {
 
 void AgentHostDelegate::Attach(content::DevToolsExternalAgentProxy* proxy) {
   proxy_ = proxy;
-  content::RecordAction(
+  base::RecordAction(
       base::StartsWith(browser_id_, kWebViewSocketPrefix,
                        base::CompareCase::SENSITIVE)
           ? base::UserMetricsAction("DevTools_InspectAndroidWebView")
@@ -483,8 +483,8 @@ void DevToolsDeviceDiscovery::DiscoveryRequest::ReceivedPages(
   base::ListValue* list_value;
   if (value && value->GetAsList(&list_value)) {
     for (const auto& page_value : *list_value) {
-      base::DictionaryValue* dict;
-      if (page_value->GetAsDictionary(&dict))
+      const base::DictionaryValue* dict;
+      if (page_value.GetAsDictionary(&dict))
         browser->pages_.push_back(
             new RemotePage(device, browser->browser_id_, *dict));
     }
@@ -512,9 +512,9 @@ DevToolsDeviceDiscovery::RemotePage::CreateTarget() {
                                              dict_.get());
   std::string target_path = GetTargetPath(dict_.get());
   std::string type = GetStringProperty(dict_.get(), "type");
-
-  return AgentHostDelegate::GetOrCreateAgentHost(
+  agent_host_ = AgentHostDelegate::GetOrCreateAgentHost(
       device_, browser_id_, local_id, target_path, type, dict_.get());
+  return agent_host_;
 }
 
 // DevToolsDeviceDiscovery::RemoteBrowser -------------------------------------

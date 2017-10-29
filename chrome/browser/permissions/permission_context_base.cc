@@ -35,7 +35,9 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/origin_util.h"
+#include "extensions/common/constants.h"
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
@@ -49,6 +51,12 @@ const char kPermissionBlockedKillSwitchMessage[] =
 
 const char kPermissionBlockedRepeatedDismissalsMessage[] =
     "%s permission has been blocked as the user has dismissed the permission "
+    "prompt several times. See "
+    "https://www.chromestatus.com/features/6443143280984064 for more "
+    "information.";
+
+const char kPermissionBlockedRepeatedIgnoresMessage[] =
+    "%s permission has been blocked as the user has ignored the permission "
     "prompt several times. See "
     "https://www.chromestatus.com/features/6443143280984064 for more "
     "information.";
@@ -76,9 +84,11 @@ const char PermissionContextBase::kPermissionsKillSwitchBlockedValue[] =
 
 PermissionContextBase::PermissionContextBase(
     Profile* profile,
-    const ContentSettingsType content_settings_type)
+    ContentSettingsType content_settings_type,
+    blink::WebFeaturePolicyFeature feature_policy_feature)
     : profile_(profile),
       content_settings_type_(content_settings_type),
+      feature_policy_feature_(feature_policy_feature),
       weak_factory_(this) {
 #if defined(OS_ANDROID)
   permission_queue_controller_.reset(
@@ -118,22 +128,37 @@ void PermissionContextBase::RequestPermission(
   // Synchronously check the content setting to see if the user has already made
   // a decision, or if the origin is under embargo. If so, respect that
   // decision.
-  PermissionResult result =
-      GetPermissionStatus(requesting_origin, embedding_origin);
+  // TODO(raymes): Pass in the RenderFrameHost of the request here.
+  PermissionResult result = GetPermissionStatus(
+      nullptr /* render_frame_host */, requesting_origin, embedding_origin);
 
   if (result.content_setting == CONTENT_SETTING_ALLOW ||
       result.content_setting == CONTENT_SETTING_BLOCK) {
-    if (result.source == PermissionStatusSource::KILL_SWITCH) {
-      // Block the request and log to the developer console.
-      LogPermissionBlockedMessage(web_contents,
-                                  kPermissionBlockedKillSwitchMessage,
-                                  content_settings_type_);
-      callback.Run(CONTENT_SETTING_BLOCK);
-      return;
-    } else if (result.source == PermissionStatusSource::MULTIPLE_DISMISSALS) {
-      LogPermissionBlockedMessage(web_contents,
-                                  kPermissionBlockedRepeatedDismissalsMessage,
-                                  content_settings_type_);
+    switch (result.source) {
+      case PermissionStatusSource::KILL_SWITCH:
+        // Block the request and log to the developer console.
+        LogPermissionBlockedMessage(web_contents,
+                                    kPermissionBlockedKillSwitchMessage,
+                                    content_settings_type_);
+        callback.Run(CONTENT_SETTING_BLOCK);
+        return;
+      case PermissionStatusSource::MULTIPLE_DISMISSALS:
+        LogPermissionBlockedMessage(web_contents,
+                                    kPermissionBlockedRepeatedDismissalsMessage,
+                                    content_settings_type_);
+        break;
+      case PermissionStatusSource::MULTIPLE_IGNORES:
+        LogPermissionBlockedMessage(web_contents,
+                                    kPermissionBlockedRepeatedIgnoresMessage,
+                                    content_settings_type_);
+        break;
+      case PermissionStatusSource::SAFE_BROWSING_BLACKLIST:
+        LogPermissionBlockedMessage(web_contents,
+                                    kPermissionBlockedBlacklistMessage,
+                                    content_settings_type_);
+        break;
+      case PermissionStatusSource::UNSPECIFIED:
+        break;
     }
 
     // If we are under embargo, record the embargo reason for which we have
@@ -188,7 +213,14 @@ void PermissionContextBase::ContinueRequestPermission(
                    user_gesture, callback);
 }
 
+void PermissionContextBase::UserMadePermissionDecision(
+    const PermissionRequestID& id,
+    const GURL& requesting_origin,
+    const GURL& embedding_origin,
+    ContentSetting content_setting) {}
+
 PermissionResult PermissionContextBase::GetPermissionStatus(
+    content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     const GURL& embedding_origin) const {
   // If the permission has been disabled through Finch, block all requests.
@@ -197,14 +229,34 @@ PermissionResult PermissionContextBase::GetPermissionStatus(
                             PermissionStatusSource::KILL_SWITCH);
   }
 
-  if (IsRestrictedToSecureOrigins() &&
-      !content::IsOriginSecure(requesting_origin)) {
+  if (IsRestrictedToSecureOrigins()) {
+    if (!content::IsOriginSecure(requesting_origin)) {
+      return PermissionResult(CONTENT_SETTING_BLOCK,
+                              PermissionStatusSource::UNSPECIFIED);
+    }
+
+    // TODO(raymes): We should check the entire chain of embedders here whenever
+    // possible as this corresponds to the requirements of the secure contexts
+    // spec and matches what is implemented in blink. Right now we just check
+    // the top level and requesting origins. Note: chrome-extension:// origins
+    // are currently exempt from checking the embedder chain. crbug.com/530507.
+    if (!requesting_origin.SchemeIs(extensions::kExtensionScheme) &&
+        !content::IsOriginSecure(embedding_origin)) {
+      return PermissionResult(CONTENT_SETTING_BLOCK,
+                              PermissionStatusSource::UNSPECIFIED);
+    }
+  }
+
+  // Check whether the feature is enabled for the frame by feature policy. We
+  // can only do this when a RenderFrameHost has been provided.
+  if (render_frame_host &&
+      !PermissionAllowedByFeaturePolicy(render_frame_host)) {
     return PermissionResult(CONTENT_SETTING_BLOCK,
                             PermissionStatusSource::UNSPECIFIED);
   }
 
-  ContentSetting content_setting =
-      GetPermissionStatusInternal(requesting_origin, embedding_origin);
+  ContentSetting content_setting = GetPermissionStatusInternal(
+      render_frame_host, requesting_origin, embedding_origin);
   if (content_setting == CONTENT_SETTING_ASK) {
     PermissionResult result =
         PermissionDecisionAutoBlocker::GetForProfile(profile_)
@@ -215,6 +267,13 @@ PermissionResult PermissionContextBase::GetPermissionStatus(
   }
 
   return PermissionResult(content_setting, PermissionStatusSource::UNSPECIFIED);
+}
+
+PermissionResult PermissionContextBase::UpdatePermissionStatusWithDeviceStatus(
+    PermissionResult result,
+    const GURL& requesting_origin,
+    const GURL& embedding_origin) const {
+  return result;
 }
 
 void PermissionContextBase::ResetPermission(const GURL& requesting_origin,
@@ -255,6 +314,7 @@ bool PermissionContextBase::IsPermissionKillSwitchOn() const {
 }
 
 ContentSetting PermissionContextBase::GetPermissionStatusInternal(
+    content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     const GURL& embedding_origin) const {
   return HostContentSettingsMapFactory::GetForProfile(profile_)
@@ -349,6 +409,8 @@ void PermissionContextBase::PermissionDecided(
     PermissionUmaUtil::RecordEmbargoStatus(embargo_status);
   }
 
+  UserMadePermissionDecision(id, requesting_origin, embedding_origin,
+                             content_setting);
   NotifyPermissionSet(id, requesting_origin, embedding_origin, callback,
                       persist, content_setting);
 }
@@ -408,7 +470,20 @@ void PermissionContextBase::UpdateContentSetting(
 
 ContentSettingsType PermissionContextBase::content_settings_storage_type()
     const {
-  if (content_settings_type_ == CONTENT_SETTINGS_TYPE_PUSH_MESSAGING)
-    return CONTENT_SETTINGS_TYPE_NOTIFICATIONS;
-  return content_settings_type_;
+  return PermissionUtil::GetContentSettingsStorageType(content_settings_type_);
+}
+
+bool PermissionContextBase::PermissionAllowedByFeaturePolicy(
+    content::RenderFrameHost* rfh) const {
+  if (!base::FeatureList::IsEnabled(
+          features::kUseFeaturePolicyForPermissions)) {
+    // Default to ignoring the feature policy.
+    return true;
+  }
+
+  // Some features don't have an associated feature policy yet. Allow those.
+  if (feature_policy_feature_ == blink::WebFeaturePolicyFeature::kNotFound)
+    return true;
+
+  return rfh->IsFeatureEnabled(feature_policy_feature_);
 }

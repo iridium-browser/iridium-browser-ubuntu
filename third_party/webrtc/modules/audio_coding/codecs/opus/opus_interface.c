@@ -10,7 +10,7 @@
 
 #include "webrtc/modules/audio_coding/codecs/opus/opus_interface.h"
 
-#include "webrtc/base/checks.h"
+#include "webrtc/rtc_base/checks.h"
 #include "webrtc/modules/audio_coding/codecs/opus/opus_inst.h"
 
 #include <stdlib.h>
@@ -200,6 +200,22 @@ int16_t WebRtcOpus_DisableDtx(OpusEncInst* inst) {
     if (ret != OPUS_OK)
       return ret;
     return opus_encoder_ctl(inst->encoder, OPUS_SET_DTX(0));
+  } else {
+    return -1;
+  }
+}
+
+int16_t WebRtcOpus_EnableCbr(OpusEncInst* inst) {
+  if (inst) {
+    return opus_encoder_ctl(inst->encoder, OPUS_SET_VBR(0));
+  } else {
+    return -1;
+  }
+}
+
+int16_t WebRtcOpus_DisableCbr(OpusEncInst* inst) {
+  if (inst) {
+    return opus_encoder_ctl(inst->encoder, OPUS_SET_VBR(1));
   } else {
     return -1;
   }

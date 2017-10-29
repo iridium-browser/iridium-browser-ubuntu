@@ -9,19 +9,19 @@
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_logging.h"
+#include "base/stl_util.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_decoration.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
-#include "chrome/grit/theme_resources.h"
 #import "extensions/common/feature_switch.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #import "ui/base/cocoa/appkit_utils.h"
-#import "ui/base/cocoa/tracking_area.h"
 #import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/cocoa/scoped_cg_context_smooth_fonts.h"
+#import "ui/base/cocoa/tracking_area.h"
 #include "ui/base/material_design/material_design_controller.h"
 
 using extensions::FeatureSwitch;
@@ -35,6 +35,9 @@ const CGFloat kCornerRadius = 3.0;
 // bounds.
 const CGFloat kTrailingDecorationXPadding = 2.0;
 const CGFloat kLeadingDecorationXPadding = 1.0;
+
+// The padding between each decoration on the right.
+const CGFloat kRightDecorationPadding = 1.0f;
 
 // How much the text frame needs to overlap the outermost leading
 // decoration.
@@ -53,7 +56,8 @@ const NSTimeInterval kLocationIconDragTimeout = 0.25;
 // |x_edge| describes the edge to layout the decorations against
 // (|NSMinXEdge| or |NSMaxXEdge|).  |regular_padding| is the padding
 // from the edge of |cell_frame| to use when the first visible decoration
-// is a regular decoration.
+// is a regular decoration. |decoration_padding| is the padding between each
+// decoration.
 void CalculatePositionsHelper(
     NSRect frame,
     const std::vector<LocationBarDecoration*>& all_decorations,
@@ -61,7 +65,8 @@ void CalculatePositionsHelper(
     CGFloat regular_padding,
     std::vector<LocationBarDecoration*>* decorations,
     std::vector<NSRect>* decoration_frames,
-    NSRect* remaining_frame) {
+    NSRect* remaining_frame,
+    CGFloat decoration_padding) {
   DCHECK(x_edge == NSMinXEdge || x_edge == NSMaxXEdge);
   DCHECK_EQ(decorations->size(), decoration_frames->size());
 
@@ -75,6 +80,8 @@ void CalculatePositionsHelper(
       if (is_first_visible_decoration) {
         padding = regular_padding;
         is_first_visible_decoration = false;
+      } else {
+        padding = decoration_padding;
       }
 
       NSRect padding_rect, available;
@@ -131,7 +138,7 @@ size_t CalculatePositionsInFrame(
   // Layout |leading_decorations| against the leading side.
   CalculatePositionsHelper(*text_frame, leading_decorations, NSMinXEdge,
                            kLeadingDecorationXPadding, decorations,
-                           decoration_frames, text_frame);
+                           decoration_frames, text_frame, 0.0f);
   DCHECK_EQ(decorations->size(), decoration_frames->size());
 
   // Capture the number of visible leading decorations.
@@ -147,7 +154,8 @@ size_t CalculatePositionsInFrame(
   // Layout |trailing_decorations| against the trailing side.
   CalculatePositionsHelper(*text_frame, trailing_decorations, NSMaxXEdge,
                            kTrailingDecorationXPadding, decorations,
-                           decoration_frames, text_frame);
+                           decoration_frames, text_frame,
+                           kRightDecorationPadding);
   DCHECK_EQ(decorations->size(), decoration_frames->size());
 
   // Reverse the right-hand decorations so that overall everything is
@@ -159,9 +167,10 @@ size_t CalculatePositionsInFrame(
   // Flip all frames in RTL.
   if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout()) {
     for (NSRect& rect : *decoration_frames)
-      rect.origin.x = NSWidth(frame) - NSWidth(rect) - NSMinX(rect);
-    text_frame->origin.x =
-        NSWidth(frame) - NSWidth(*text_frame) - NSMinX(*text_frame);
+      rect.origin.x =
+          NSMinX(frame) + NSMaxX(frame) - NSWidth(rect) - NSMinX(rect);
+    text_frame->origin.x = NSMinX(frame) + NSMaxX(frame) -
+                           NSWidth(*text_frame) - NSMinX(*text_frame);
     leading_count = decorations->size() - leading_count;
   }
 
@@ -193,6 +202,16 @@ size_t CalculatePositionsInFrame(
 
 - (CGFloat)lineHeight {
   return 17;
+}
+
+- (NSText*)setUpFieldEditorAttributes:(NSText*)textObj {
+  NSText* fieldEditor = [super setUpFieldEditorAttributes:textObj];
+
+  // -[NSTextFieldCell setUpFieldEditorAttributes:] matches the field editor's
+  // background to its own background, which can cover our decorations in their
+  // hover state. See https://crbug.com/669870.
+  [fieldEditor setDrawsBackground:NO];
+  return fieldEditor;
 }
 
 - (void)clearTrackingArea {
@@ -250,23 +269,16 @@ size_t CalculatePositionsInFrame(
 
   // Decorations which are not visible should have been filtered out
   // at the top, but return |NSZeroRect| rather than a 0-width rect
-  // for consistency.
-  NOTREACHED();
+  // for consistency. This can happen while a window is being resized, if it
+  // becomes too small to contain a decoration in the process of shrinking.
   return NSZeroRect;
 }
 
-- (NSRect)backgroundFrameForDecoration:(LocationBarDecoration*)decoration
-                               inFrame:(NSRect)cellFrame
-                      isLeftDecoration:(BOOL*)isLeftDecoration {
-  NSRect decorationFrame =
-      [self frameForDecoration:decoration inFrame:cellFrame];
+- (BOOL)isLeftDecoration:(LocationBarDecoration*)decoration {
   std::vector<LocationBarDecoration*>& left_decorations =
       cocoa_l10n_util::ShouldDoExperimentalRTLLayout() ? trailingDecorations_
                                                        : leadingDecorations_;
-  *isLeftDecoration =
-      std::find(left_decorations.begin(), left_decorations.end(), decoration) !=
-      left_decorations.end();
-  return decoration->GetBackgroundFrame(decorationFrame);
+  return base::ContainsValue(left_decorations, decoration);
 }
 
 // Overriden to account for the decorations.
@@ -734,6 +746,13 @@ static NSString* UnusedLegalNameForNewDropFile(NSURL* saveLocation,
     const bool controlDown = ([event modifierFlags] & NSControlKeyMask) != 0;
     [controlView observer]->OnSetFocus(controlDown);
   }
+}
+
+- (int)leadingDecorationIndex:(LocationBarDecoration*)decoration {
+  for (size_t i = 0; i < leadingDecorations_.size(); ++i)
+    if (leadingDecorations_[i] == decoration)
+      return leadingDecorations_.size() - (i + 1);
+  return -1;
 }
 
 @end

@@ -22,7 +22,7 @@ TranslatorVulkan::TranslatorVulkan(sh::GLenum type, ShShaderSpec spec)
 {
 }
 
-void TranslatorVulkan::translate(TIntermNode *root, ShCompileOptions compileOptions)
+void TranslatorVulkan::translate(TIntermBlock *root, ShCompileOptions compileOptions)
 {
     TInfoSinkBase &sink = getInfoSink().obj;
 
@@ -63,7 +63,7 @@ void TranslatorVulkan::translate(TIntermNode *root, ShCompileOptions compileOpti
 
     // Write translated shader.
     TOutputVulkanGLSL outputGLSL(sink, getArrayIndexClampingStrategy(), getHashFunction(),
-                                 getNameMap(), getSymbolTable(), getShaderType(),
+                                 getNameMap(), &getSymbolTable(), getShaderType(),
                                  getShaderVersion(), getOutputType(), compileOptions);
     root->traverse(&outputGLSL);
 }

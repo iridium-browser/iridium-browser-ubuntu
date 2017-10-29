@@ -9,8 +9,10 @@
 #include <memory>
 #include <vector>
 
+#include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "net/base/net_export.h"
+#include "net/cert/internal/certificate_policies.h"
 #include "net/cert/internal/parse_certificate.h"
 #include "net/der/input.h"
 #include "third_party/boringssl/src/include/openssl/base.h"
@@ -96,14 +98,7 @@ class NET_EXPORT ParsedCertificate
   // Accessor for struct containing raw fields of the TbsCertificate.
   const ParsedTbsCertificate& tbs() const { return tbs_; }
 
-  // Returns true if the signatureAlgorithm of the Certificate is supported and
-  // valid.
-  bool has_valid_supported_signature_algorithm() const {
-    return signature_algorithm_ != nullptr;
-  }
-
   // Returns the signatureAlgorithm of the Certificate (not the tbsCertificate).
-  // Must not be called if has_valid_supported_signature_algorithm() is false.
   const SignatureAlgorithm& signature_algorithm() const {
     DCHECK(signature_algorithm_);
     return *signature_algorithm_;
@@ -140,6 +135,16 @@ class NET_EXPORT ParsedCertificate
   const der::BitString& key_usage() const {
     DCHECK(has_key_usage_);
     return key_usage_;
+  }
+
+  // Returns true if the certificate has a ExtendedKeyUsage extension.
+  bool has_extended_key_usage() const { return has_extended_key_usage_; }
+
+  // Returns the ExtendedKeyUsage key purpose OIDs. Caller must check
+  // has_extended_key_usage() before accessing this.
+  const std::vector<der::Input>& extended_key_usage() const {
+    DCHECK(has_extended_key_usage_);
+    return extended_key_usage_;
   }
 
   // Returns true if the certificate has a SubjectAltName extension.
@@ -184,10 +189,53 @@ class NET_EXPORT ParsedCertificate
   // Returns any OCSP URIs from the AuthorityInfoAccess extension.
   const std::vector<base::StringPiece>& ocsp_uris() const { return ocsp_uris_; }
 
-  // Returns a map of unhandled extensions (excludes the ones above).
-  const ExtensionsMap& unparsed_extensions() const {
-    return unparsed_extensions_;
+  // Returns true if the certificate has a Policies extension.
+  bool has_policy_oids() const { return has_policy_oids_; }
+
+  // Returns the policy OIDs. Caller must check has_policy_oids() before
+  // accessing this.
+  const std::vector<der::Input>& policy_oids() const {
+    DCHECK(has_policy_oids());
+    return policy_oids_;
   }
+
+  // Returns true if the certificate has a PolicyConstraints extension.
+  bool has_policy_constraints() const { return has_policy_constraints_; }
+
+  // Returns the ParsedPolicyConstraints struct. Caller must check
+  // has_policy_constraints() before accessing this.
+  const ParsedPolicyConstraints& policy_constraints() const {
+    DCHECK(has_policy_constraints_);
+    return policy_constraints_;
+  }
+
+  // Returns true if the certificate has a PolicyMappings extension.
+  bool has_policy_mappings() const { return has_policy_mappings_; }
+
+  // Returns the PolicyMappings extension. Caller must check
+  // has_policy_mappings() before accessing this.
+  const std::vector<ParsedPolicyMapping>& policy_mappings() const {
+    DCHECK(has_policy_mappings_);
+    return policy_mappings_;
+  }
+
+  // Returns true if the certificate has a InhibitAnyPolicy extension.
+  bool has_inhibit_any_policy() const { return has_inhibit_any_policy_; }
+
+  // Returns the Inhibit Any Policy extension. Caller must check
+  // has_inhibit_any_policy() before accessing this.
+  uint8_t inhibit_any_policy() const {
+    DCHECK(has_inhibit_any_policy_);
+    return inhibit_any_policy_;
+  }
+
+  // Returns a map of all the extensions in the certificate.
+  const ExtensionsMap& extensions() const { return extensions_; }
+
+  // Gets the value for extension matching |extension_oid|. Returns false if the
+  // extension is not present.
+  bool GetExtension(const der::Input& extension_oid,
+                    ParsedExtension* parsed_extension) const;
 
  private:
   friend class base::RefCountedThreadSafe<ParsedCertificate>;
@@ -232,6 +280,10 @@ class NET_EXPORT ParsedCertificate
   bool has_key_usage_ = false;
   der::BitString key_usage_;
 
+  // ExtendedKeyUsage extension.
+  bool has_extended_key_usage_ = false;
+  std::vector<der::Input> extended_key_usage_;
+
   // Raw SubjectAltName extension.
   ParsedExtension subject_alt_names_extension_;
   // Parsed SubjectAltName extension.
@@ -249,8 +301,24 @@ class NET_EXPORT ParsedCertificate
   std::vector<base::StringPiece> ca_issuers_uris_;
   std::vector<base::StringPiece> ocsp_uris_;
 
-  // The remaining extensions (excludes the standard ones above).
-  ExtensionsMap unparsed_extensions_;
+  // Policies extension.
+  bool has_policy_oids_ = false;
+  std::vector<der::Input> policy_oids_;
+
+  // Policy constraints extension.
+  bool has_policy_constraints_ = false;
+  ParsedPolicyConstraints policy_constraints_;
+
+  // Policy mappings extension.
+  bool has_policy_mappings_ = false;
+  std::vector<ParsedPolicyMapping> policy_mappings_;
+
+  // Inhibit Any Policy extension.
+  bool has_inhibit_any_policy_ = false;
+  uint8_t inhibit_any_policy_;
+
+  // All of the extensions.
+  ExtensionsMap extensions_;
 
   DISALLOW_COPY_AND_ASSIGN(ParsedCertificate);
 };

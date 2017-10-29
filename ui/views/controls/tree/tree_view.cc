@@ -371,7 +371,7 @@ void TreeView::Layout() {
   LayoutEditor();
 }
 
-gfx::Size TreeView::GetPreferredSize() const {
+gfx::Size TreeView::CalculatePreferredSize() const {
   return preferred_size_;
 }
 
@@ -414,7 +414,8 @@ void TreeView::ShowContextMenu(const gfx::Point& p,
 
 void TreeView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   node_data->role = ui::AX_ROLE_TREE;
-  node_data->AddStateFlag(ui::AX_STATE_READ_ONLY);
+  node_data->AddIntAttribute(ui::AX_ATTR_RESTRICTION,
+                             ui::AX_RESTRICTION_READ_ONLY);
   if (!selected_node_)
     return;
 
@@ -729,6 +730,8 @@ void TreeView::LayoutEditor() {
                    -(empty_editor_size_.height() - font_list_.GetHeight()) / 2);
   // Give a little extra space for editing.
   row_bounds.set_width(row_bounds.width() + 50);
+  // Scroll as necessary to ensure that the editor is visible.
+  ScrollRectToVisible(row_bounds);
   editor_->SetBoundsRect(row_bounds);
   editor_->Layout();
 }
@@ -780,7 +783,7 @@ void TreeView::PaintRow(gfx::Canvas* canvas,
   int icon_index = model_->GetIconIndex(node->model_node());
   if (icon_index != -1)
     icon = icons_[icon_index];
-  else if (node == selected_node_)
+  else if (node == selected_node_ && PlatformStyle::kTreeViewUsesOpenIcon)
     icon = open_icon_;
   else
     icon = closed_icon_;

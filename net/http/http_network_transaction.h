@@ -62,8 +62,8 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
             const CompletionCallback& callback,
             const NetLogWithSource& net_log) override;
   int RestartIgnoringLastError(const CompletionCallback& callback) override;
-  int RestartWithCertificate(X509Certificate* client_cert,
-                             SSLPrivateKey* client_private_key,
+  int RestartWithCertificate(scoped_refptr<X509Certificate> client_cert,
+                             scoped_refptr<SSLPrivateKey> client_private_key,
                              const CompletionCallback& callback) override;
   int RestartWithAuth(const AuthCredentials& credentials,
                       const CompletionCallback& callback) override;
@@ -95,14 +95,15 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   // HttpStreamRequest::Delegate methods:
   void OnStreamReady(const SSLConfig& used_ssl_config,
                      const ProxyInfo& used_proxy_info,
-                     HttpStream* stream) override;
-  void OnBidirectionalStreamImplReady(const SSLConfig& used_ssl_config,
-                                      const ProxyInfo& used_proxy_info,
-                                      BidirectionalStreamImpl* stream) override;
+                     std::unique_ptr<HttpStream> stream) override;
+  void OnBidirectionalStreamImplReady(
+      const SSLConfig& used_ssl_config,
+      const ProxyInfo& used_proxy_info,
+      std::unique_ptr<BidirectionalStreamImpl> stream) override;
   void OnWebSocketHandshakeStreamReady(
       const SSLConfig& used_ssl_config,
       const ProxyInfo& used_proxy_info,
-      WebSocketHandshakeStreamBase* stream) override;
+      std::unique_ptr<WebSocketHandshakeStreamBase> stream) override;
   void OnStreamFailed(int status, const SSLConfig& used_ssl_config) override;
   void OnCertificateError(int status,
                           const SSLConfig& used_ssl_config,
@@ -116,7 +117,7 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   void OnHttpsProxyTunnelResponse(const HttpResponseInfo& response_info,
                                   const SSLConfig& used_ssl_config,
                                   const ProxyInfo& used_proxy_info,
-                                  HttpStream* stream) override;
+                                  std::unique_ptr<HttpStream> stream) override;
 
   void OnQuicBroken() override;
   void GetConnectionAttempts(ConnectionAttempts* out) const override;
@@ -269,9 +270,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   // and resets the stream.
   void CacheNetErrorDetailsAndResetStream();
 
-  // Records metrics relating to SSL fallbacks.
-  void RecordSSLFallbackMetrics(int result);
-
   // Returns true if we should try to add a Proxy-Authorization header
   bool ShouldApplyProxyAuth() const;
 
@@ -295,6 +293,10 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   void SetStream(HttpStream* stream);
 
   void CopyConnectionAttemptsFromStreamRequest();
+
+  // Returns true if response "Content-Encoding" headers respect
+  // "Accept-Encoding".
+  bool ContentEncodingsValid() const;
 
   scoped_refptr<HttpAuthController>
       auth_controllers_[HttpAuth::AUTH_NUM_TARGETS];
@@ -368,6 +370,17 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   // True when the tunnel is in the process of being established - we can't
   // read from the socket until the tunnel is done.
   bool establishing_tunnel_;
+
+  // Enable pooling to a SpdySession with matching IP and certificate
+  // even if the SpdySessionKey is different.
+  bool enable_ip_based_pooling_;
+
+  // Enable using alternative services for the request.
+  bool enable_alternative_services_;
+
+  // When a request is retried because of errors with the alternative service,
+  // this will store the alternative service used.
+  AlternativeService retried_alternative_service_;
 
   // The helper object to use to create WebSocketHandshakeStreamBase
   // objects. Only relevant when establishing a WebSocket connection.

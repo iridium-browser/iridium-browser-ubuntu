@@ -19,8 +19,6 @@
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/test/browser_test.h"
-#include "content/public/test/test_file_system_backend.h"
-#include "content/public/test/test_file_system_context.h"
 #include "content/public/test/test_utils.h"
 #include "storage/browser/fileapi/copy_or_move_file_validator.h"
 #include "storage/browser/fileapi/file_system_backend.h"
@@ -28,6 +26,8 @@
 #include "storage/browser/fileapi/file_system_operation_runner.h"
 #include "storage/browser/fileapi/file_system_url.h"
 #include "storage/browser/fileapi/isolated_context.h"
+#include "storage/browser/test/test_file_system_backend.h"
+#include "storage/browser/test/test_file_system_context.h"
 #include "storage/common/fileapi/file_system_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -77,15 +77,25 @@ class MediaFileValidatorTest : public InProcessBrowserTest {
 
   ~MediaFileValidatorTest() override {}
 
+  void TearDownOnMainThread() override {
+    // Release our ref to |file_system_context_| before the test framework winds
+    // down, otherwise releasing it in the destructor posts a destruction task
+    // to the FILE thread after it has been shutdown (which base/task_scheduler
+    // guards against in the RedirectNonUINonIOBrowserThreads experiment per the
+    // FILE thread's tasks being marked as shutdown blocking for legacy
+    // reasons).
+    file_system_context_ = nullptr;
+  }
+
   // Write |content| into |filename| in a test file system and try to move
   // it into a media file system.  The result is compared to |expected_result|.
   void MoveTest(const std::string& filename, const std::string& content,
                 bool expected_result) {
     content::BrowserThread::PostTask(
-        content::BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&MediaFileValidatorTest::SetupOnFileThread,
-                   base::Unretained(this), filename, content, expected_result));
+        content::BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&MediaFileValidatorTest::SetupOnFileThread,
+                       base::Unretained(this), filename, content,
+                       expected_result));
     loop_runner_ = new content::MessageLoopRunner;
     loop_runner_->Run();
   }
@@ -95,10 +105,10 @@ class MediaFileValidatorTest : public InProcessBrowserTest {
   void MoveTestFromFile(const std::string& filename,
                         const base::FilePath& source, bool expected_result) {
     content::BrowserThread::PostTask(
-        content::BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&MediaFileValidatorTest::SetupFromFileOnFileThread,
-                   base::Unretained(this), filename, source, expected_result));
+        content::BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&MediaFileValidatorTest::SetupFromFileOnFileThread,
+                       base::Unretained(this), filename, source,
+                       expected_result));
     loop_runner_ = new content::MessageLoopRunner;
     loop_runner_->Run();
   }
@@ -152,12 +162,11 @@ class MediaFileValidatorTest : public InProcessBrowserTest {
           dest_root_fs_url + "move_dest" + extension));
 
     content::BrowserThread::PostTask(
-        content::BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&MediaFileValidatorTest::CheckFiles,
-                   base::Unretained(this), true,
-                   base::Bind(&MediaFileValidatorTest::OnTestFilesReady,
-                              base::Unretained(this), expected_result)));
+        content::BrowserThread::IO, FROM_HERE,
+        base::BindOnce(&MediaFileValidatorTest::CheckFiles,
+                       base::Unretained(this), true,
+                       base::Bind(&MediaFileValidatorTest::OnTestFilesReady,
+                                  base::Unretained(this), expected_result)));
   }
 
   void SetupFromFileOnFileThread(const std::string& filename,
@@ -253,7 +262,13 @@ class MediaFileValidatorTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(MediaFileValidatorTest);
 };
 
-IN_PROC_BROWSER_TEST_F(MediaFileValidatorTest, UnsupportedExtension) {
+// Flaky on linux_chromium_rel_ng. https://crbug.com/704614.
+#if defined(OS_LINUX)
+#define MAYBE_UnsupportedExtension DISABLED_UnsupportedExtension
+#else
+#define MAYBE_UnsupportedExtension UnsupportedExtension
+#endif
+IN_PROC_BROWSER_TEST_F(MediaFileValidatorTest, MAYBE_UnsupportedExtension) {
   MoveTest("a.txt", std::string(kValidImage, arraysize(kValidImage)), false);
 }
 

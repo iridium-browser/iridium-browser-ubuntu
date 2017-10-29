@@ -7,15 +7,16 @@
 #include "base/logging.h"
 #include "net/cert/internal/cert_error_params.h"
 #include "net/cert/internal/cert_errors.h"
-#include "third_party/boringssl/src/include/openssl/obj.h"
+#include "third_party/boringssl/src/include/openssl/nid.h"
 
 namespace net {
+
+DEFINE_CERT_ERROR_ID(kRsaModulusTooSmall, "RSA modulus too small");
 
 namespace {
 
 DEFINE_CERT_ERROR_ID(kUnacceptableCurveForEcdsa,
                      "Only P-256, P-384, P-521 are supported for ECDSA");
-DEFINE_CERT_ERROR_ID(kRsaModulusTooSmall, "RSA modulus too small");
 
 bool IsModulusSizeGreaterOrEqual(size_t modulus_length_bits,
                                  size_t min_length_bits,
@@ -65,6 +66,8 @@ bool SignaturePolicy::IsAcceptableSignatureAlgorithm(
   //    SHA384
   //    SHA512
   switch (algorithm.algorithm()) {
+    case SignatureAlgorithmId::Dsa:
+      return false;
     case SignatureAlgorithmId::Ecdsa:
     case SignatureAlgorithmId::RsaPkcs1:
       return IsAcceptableDigest(algorithm.digest());

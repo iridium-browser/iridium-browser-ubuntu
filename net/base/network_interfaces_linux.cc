@@ -76,7 +76,7 @@ namespace internal {
 // or ethtool extensions.
 NetworkChangeNotifier::ConnectionType GetInterfaceConnectionType(
     const std::string& ifname) {
-  base::ScopedFD s(socket(AF_INET, SOCK_STREAM, 0));
+  base::ScopedFD s = GetSocketForIoctl();
   if (!s.is_valid())
     return NetworkChangeNotifier::CONNECTION_UNKNOWN;
 
@@ -101,9 +101,9 @@ NetworkChangeNotifier::ConnectionType GetInterfaceConnectionType(
 }
 
 std::string GetInterfaceSSID(const std::string& ifname) {
-  base::ScopedFD ioctl_socket(socket(AF_INET, SOCK_DGRAM, 0));
+  base::ScopedFD ioctl_socket = GetSocketForIoctl();
   if (!ioctl_socket.is_valid())
-    return "";
+    return std::string();
   struct iwreq wreq = {};
   strncpy(wreq.ifr_name, ifname.c_str(), IFNAMSIZ - 1);
 
@@ -112,7 +112,7 @@ std::string GetInterfaceSSID(const std::string& ifname) {
   wreq.u.essid.length = IW_ESSID_MAX_SIZE;
   if (ioctl(ioctl_socket.get(), SIOCGIWESSID, &wreq) != -1)
     return ssid;
-  return "";
+  return std::string();
 }
 
 bool GetNetworkListImpl(
@@ -190,15 +190,22 @@ std::string GetWifiSSIDFromInterfaceListInternal(
   std::string connected_ssid;
   for (size_t i = 0; i < interfaces.size(); ++i) {
     if (interfaces[i].type != NetworkChangeNotifier::CONNECTION_WIFI)
-      return "";
+      return std::string();
     std::string ssid = get_interface_ssid(interfaces[i].name);
     if (i == 0) {
       connected_ssid = ssid;
     } else if (ssid != connected_ssid) {
-      return "";
+      return std::string();
     }
   }
   return connected_ssid;
+}
+
+base::ScopedFD GetSocketForIoctl() {
+  base::ScopedFD ioctl_socket(socket(AF_INET6, SOCK_DGRAM, 0));
+  if (ioctl_socket.is_valid())
+    return ioctl_socket;
+  return base::ScopedFD(socket(AF_INET, SOCK_DGRAM, 0));
 }
 
 }  // namespace internal
@@ -225,7 +232,7 @@ std::string GetWifiSSID() {
     return internal::GetWifiSSIDFromInterfaceListInternal(
         networks, internal::GetInterfaceSSID);
   }
-  return "";
+  return std::string();
 }
 
 }  // namespace net

@@ -41,7 +41,8 @@ enum RejectionBuckets {
 // The number of updates can be from 0 to 2. See the tests in
 // "distillable_page_utils_browsertest.cc".
 // Most heuristics types only require one update after parsing.
-// Adaboost is the only one doing the second update, which is after loading.
+// Adaboost-based heuristics are the only ones doing the second update,
+// which is after loading.
 bool NeedToUpdate(bool is_loaded) {
   switch (GetDistillerHeuristicsType()) {
     case DistillerHeuristicsType::ALWAYS_TRUE:
@@ -49,6 +50,7 @@ bool NeedToUpdate(bool is_loaded) {
     case DistillerHeuristicsType::OG_ARTICLE:
       return !is_loaded;
     case DistillerHeuristicsType::ADABOOST_MODEL:
+    case DistillerHeuristicsType::ALL_ARTICLES:
       return true;
     case DistillerHeuristicsType::NONE:
     default:
@@ -58,7 +60,8 @@ bool NeedToUpdate(bool is_loaded) {
 
 // Returns whether this update is the last one for the page.
 bool IsLast(bool is_loaded) {
-  if (GetDistillerHeuristicsType() == DistillerHeuristicsType::ADABOOST_MODEL)
+  if (GetDistillerHeuristicsType() == DistillerHeuristicsType::ADABOOST_MODEL ||
+      GetDistillerHeuristicsType() == DistillerHeuristicsType::ALL_ARTICLES)
     return is_loaded;
 
   return true;
@@ -76,29 +79,24 @@ bool IsBlacklisted(const GURL& url) {
 bool IsDistillablePageAdaboost(WebDocument& doc,
                                const DistillablePageDetector* detector,
                                const DistillablePageDetector* long_page,
-                               bool is_last) {
-  WebDistillabilityFeatures features = doc.distillabilityFeatures();
-  GURL parsed_url(doc.url());
+                               bool is_last,
+                               bool exclude_mobile) {
+  WebDistillabilityFeatures features = doc.DistillabilityFeatures();
+  GURL parsed_url(doc.Url());
   if (!parsed_url.is_valid()) {
     return false;
   }
   std::vector<double> derived = CalculateDerivedFeatures(
-    features.openGraph,
-    parsed_url,
-    features.elementCount,
-    features.anchorCount,
-    features.formCount,
-    features.mozScore,
-    features.mozScoreAllSqrt,
-    features.mozScoreAllLinear
-  );
+      features.open_graph, parsed_url, features.element_count,
+      features.anchor_count, features.form_count, features.moz_score,
+      features.moz_score_all_sqrt, features.moz_score_all_linear);
   double score = detector->Score(derived) - detector->GetThreshold();
   double long_score = long_page->Score(derived) - long_page->GetThreshold();
   bool distillable = score > 0;
   bool long_article = long_score > 0;
   bool blacklisted = IsBlacklisted(parsed_url);
 
-  if (!features.isMobileFriendly) {
+  if (!features.is_mobile_friendly) {
     int score_int = std::round(score * 100);
     if (score > 0) {
       UMA_HISTOGRAM_COUNTS_1000("DomDistiller.DistillabilityScoreNMF.Positive",
@@ -122,8 +120,8 @@ bool IsDistillablePageAdaboost(WebDocument& doc,
     }
   }
 
-  int bucket = static_cast<unsigned>(features.isMobileFriendly) |
-      (static_cast<unsigned>(distillable) << 1);
+  int bucket = static_cast<unsigned>(features.is_mobile_friendly) |
+               (static_cast<unsigned>(distillable) << 1);
   if (is_last) {
     UMA_HISTOGRAM_ENUMERATION("DomDistiller.PageDistillableAfterLoading",
         bucket, 4);
@@ -133,7 +131,7 @@ bool IsDistillablePageAdaboost(WebDocument& doc,
     if (!distillable) {
       UMA_HISTOGRAM_ENUMERATION("DomDistiller.DistillabilityRejection",
           NOT_ARTICLE, REJECTION_BUCKET_BOUNDARY);
-    } else if (features.isMobileFriendly) {
+    } else if (features.is_mobile_friendly) {
       UMA_HISTOGRAM_ENUMERATION("DomDistiller.DistillabilityRejection",
           MOBILE_FRIENDLY, REJECTION_BUCKET_BOUNDARY);
     } else if (blacklisted) {
@@ -151,7 +149,7 @@ bool IsDistillablePageAdaboost(WebDocument& doc,
   if (blacklisted) {
     return false;
   }
-  if (features.isMobileFriendly) {
+  if (exclude_mobile && features.is_mobile_friendly) {
     return false;
   }
   return distillable && long_article;
@@ -162,11 +160,15 @@ bool IsDistillablePage(WebDocument& doc, bool is_last) {
     case DistillerHeuristicsType::ALWAYS_TRUE:
       return true;
     case DistillerHeuristicsType::OG_ARTICLE:
-      return doc.distillabilityFeatures().openGraph;
+      return doc.DistillabilityFeatures().open_graph;
     case DistillerHeuristicsType::ADABOOST_MODEL:
-      return IsDistillablePageAdaboost(doc,
-          DistillablePageDetector::GetNewModel(),
-          DistillablePageDetector::GetLongPageModel(), is_last);
+      return IsDistillablePageAdaboost(
+          doc, DistillablePageDetector::GetNewModel(),
+          DistillablePageDetector::GetLongPageModel(), is_last, true);
+    case DistillerHeuristicsType::ALL_ARTICLES:
+      return IsDistillablePageAdaboost(
+          doc, DistillablePageDetector::GetNewModel(),
+          DistillablePageDetector::GetLongPageModel(), is_last, false);
     case DistillerHeuristicsType::NONE:
     default:
       return false;
@@ -182,19 +184,21 @@ DistillabilityAgent::DistillabilityAgent(
 
 void DistillabilityAgent::DidMeaningfulLayout(
     WebMeaningfulLayout layout_type) {
-  if (layout_type != WebMeaningfulLayout::FinishedParsing &&
-      layout_type != WebMeaningfulLayout::FinishedLoading) {
+  if (layout_type != WebMeaningfulLayout::kFinishedParsing &&
+      layout_type != WebMeaningfulLayout::kFinishedLoading) {
     return;
   }
 
   DCHECK(render_frame());
   if (!render_frame()->IsMainFrame()) return;
   DCHECK(render_frame()->GetWebFrame());
-  WebDocument doc = render_frame()->GetWebFrame()->document();
-  if (doc.isNull() || doc.body().isNull()) return;
-  if (!url_utils::IsUrlDistillable(doc.url())) return;
+  WebDocument doc = render_frame()->GetWebFrame()->GetDocument();
+  if (doc.IsNull() || doc.Body().IsNull())
+    return;
+  if (!url_utils::IsUrlDistillable(doc.Url()))
+    return;
 
-  bool is_loaded = layout_type == WebMeaningfulLayout::FinishedLoading;
+  bool is_loaded = layout_type == WebMeaningfulLayout::kFinishedLoading;
   if (!NeedToUpdate(is_loaded)) return;
 
   bool is_last = IsLast(is_loaded);

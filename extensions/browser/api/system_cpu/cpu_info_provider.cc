@@ -6,13 +6,17 @@
 
 #include "base/sys_info.h"
 
+#if defined(OS_CHROMEOS)
+#include "chromeos/system/cpu_temperature_reader.h"
+#endif  // defined(OS_CHROMEOS)
+
 namespace extensions {
 
 using api::system_cpu::CpuInfo;
 
 // Static member intialization.
-base::LazyInstance<scoped_refptr<CpuInfoProvider> > CpuInfoProvider::provider_ =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<scoped_refptr<CpuInfoProvider>>::DestructorAtExit
+    CpuInfoProvider::provider_ = LAZY_INSTANCE_INITIALIZER;
 
 CpuInfoProvider::CpuInfoProvider() {
 }
@@ -39,6 +43,19 @@ bool CpuInfoProvider::QueryInfo() {
   // Initialize the ProcessorInfos, or return an empty array if that fails.
   if (!QueryCpuTimePerProcessor(&info_.processors))
     info_.processors.clear();
+
+#if defined(OS_CHROMEOS)
+  using CPUTemperatureInfo =
+      chromeos::system::CPUTemperatureReader::CPUTemperatureInfo;
+  std::vector<CPUTemperatureInfo> cpu_temp_info =
+      chromeos::system::CPUTemperatureReader().GetCPUTemperatures();
+  info_.temperatures.clear();
+  info_.temperatures.reserve(cpu_temp_info.size());
+  for (const CPUTemperatureInfo& info : cpu_temp_info) {
+    info_.temperatures.push_back(info.temp_celsius);
+  }
+#endif  // defined(OS_CHROMEOS)
+
   return true;
 }
 

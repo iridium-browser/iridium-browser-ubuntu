@@ -213,10 +213,9 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   // ExtensionRegistryObserver:
   void OnExtensionLoaded(content::BrowserContext* browser_context,
                          const extensions::Extension* extension) override;
-  void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const extensions::Extension* extension,
+                           extensions::UnloadedExtensionReason reason) override;
   void OnExtensionUninstalled(content::BrowserContext* browser_context,
                               const extensions::Extension* extension,
                               extensions::UninstallReason reason) override;
@@ -226,8 +225,6 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
       ExtensionAction* extension_action,
       content::WebContents* web_contents,
       content::BrowserContext* browser_context) override;
-  void OnExtensionActionVisibilityChanged(const std::string& extension_id,
-                                          bool is_now_visible) override;
 
   // To be called after the extension service is ready; gets loaded extensions
   // from the ExtensionRegistry, their saved order from the pref service, and
@@ -299,9 +296,6 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
 
   // True if we've handled the initial EXTENSIONS_READY notification.
   bool actions_initialized_;
-
-  // If true, we include all actions in the toolbar model.
-  bool use_redesign_;
 
   // Ordered list of browser actions.
   std::vector<ToolbarItem> toolbar_items_;

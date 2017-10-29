@@ -131,9 +131,7 @@ public class AppBannerManager {
     /** Returns the language option to use for the add to homescreen dialog and menu item. */
     public static int getHomescreenLanguageOption() {
         int languageOption = nativeGetHomescreenLanguageOption();
-        if (languageOption == LanguageOption.ADD) {
-            return R.string.menu_add_to_homescreen_add;
-        } else if (languageOption == LanguageOption.INSTALL) {
+        if (languageOption == LanguageOption.INSTALL) {
             return R.string.menu_add_to_homescreen_install;
         }
         return R.string.menu_add_to_homescreen;
@@ -158,8 +156,18 @@ public class AppBannerManager {
 
     /** Returns whether the native AppBannerManager is working. */
     @VisibleForTesting
-    public boolean isActiveForTesting() {
-        return nativeIsActiveForTesting(mNativePointer);
+    public boolean isRunningForTesting() {
+        return nativeIsRunningForTesting(mNativePointer);
+    }
+
+    /** Signal to native that the add to homescreen menu item was tapped for metrics purposes. */
+    public void recordMenuItemAddToHomescreen() {
+        nativeRecordMenuItemAddToHomescreen(mNativePointer);
+    }
+
+    /** Signal to native that the menu was opened for metrics purposes. */
+    public void recordMenuOpen() {
+        nativeRecordMenuOpen(mNativePointer);
     }
 
     /** Sets constants (in days) the banner should be blocked for after dismissing and ignoring. */
@@ -186,13 +194,15 @@ public class AppBannerManager {
     }
 
     private static native int nativeGetHomescreenLanguageOption();
+    private native void nativeRecordMenuItemAddToHomescreen(long nativeAppBannerManagerAndroid);
+    private native void nativeRecordMenuOpen(long nativeAppBannerManagerAndroid);
     private static native AppBannerManager nativeGetJavaBannerManagerForWebContents(
             WebContents webContents);
     private native boolean nativeOnAppDetailsRetrieved(long nativeAppBannerManagerAndroid,
             AppData data, String title, String packageName, String imageUrl);
 
     // Testing methods.
-    private native boolean nativeIsActiveForTesting(long nativeAppBannerManagerAndroid);
+    private native boolean nativeIsRunningForTesting(long nativeAppBannerManagerAndroid);
     private static native void nativeSetDaysAfterDismissAndIgnoreToTrigger(
             int dismissDays, int ignoreDays);
     private static native void nativeSetTimeDeltaForTesting(int days);

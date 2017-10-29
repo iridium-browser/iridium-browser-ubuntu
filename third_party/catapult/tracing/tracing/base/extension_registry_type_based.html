@@ -11,15 +11,15 @@ found in the LICENSE file.
 'use strict';
 
 tr.exportTo('tr.b', function() {
-  var getCategoryParts = tr.b.getCategoryParts;
+  const getCategoryParts = tr.b.getCategoryParts;
 
-  var RegisteredTypeInfo = tr.b.RegisteredTypeInfo;
-  var ExtensionRegistryOptions = tr.b.ExtensionRegistryOptions;
+  const RegisteredTypeInfo = tr.b.RegisteredTypeInfo;
+  const ExtensionRegistryOptions = tr.b.ExtensionRegistryOptions;
 
 
   function decorateTypeBasedExtensionRegistry(registry,
       extensionRegistryOptions) {
-    var savedStateStack = [];
+    const savedStateStack = [];
 
     registry.registeredTypeInfos_ = [];
 
@@ -30,14 +30,15 @@ tr.exportTo('tr.b', function() {
         metadata) {
       extensionRegistryOptions.validateConstructor(constructor);
 
-      var typeInfo = new RegisteredTypeInfo(
+      const typeInfo = new RegisteredTypeInfo(
           constructor,
           metadata || extensionRegistryOptions.defaultMetadata);
 
       typeInfo.typeNames = [];
       typeInfo.categoryParts = [];
-      if (metadata && metadata.typeName)
+      if (metadata && metadata.typeName) {
         typeInfo.typeNames.push(metadata.typeName);
+      }
       if (metadata && metadata.typeNames) {
         typeInfo.typeNames.push.apply(
             typeInfo.typeNames, metadata.typeNames);
@@ -48,13 +49,15 @@ tr.exportTo('tr.b', function() {
       }
 
       if (typeInfo.typeNames.length === 0 &&
-          typeInfo.categoryParts.length === 0)
+          typeInfo.categoryParts.length === 0) {
         throw new Error('typeName or typeNames must be provided');
+      }
 
       // Sanity checks...
       typeInfo.typeNames.forEach(function(typeName) {
-        if (registry.typeNameToTypeInfoMap_.has(typeName))
+        if (registry.typeNameToTypeInfoMap_.has(typeName)) {
           throw new Error('typeName ' + typeName + ' already registered');
+        }
       });
       typeInfo.categoryParts.forEach(function(categoryPart) {
         if (registry.categoryPartToTypeInfoMap_.has(categoryPart)) {
@@ -63,7 +66,7 @@ tr.exportTo('tr.b', function() {
         }
       });
 
-      var e = new tr.b.Event('will-register');
+      let e = new tr.b.Event('will-register');
       e.typeInfo = typeInfo;
       registry.dispatchEvent(e);
 
@@ -76,7 +79,7 @@ tr.exportTo('tr.b', function() {
       });
       registry.registeredTypeInfos_.push(typeInfo);
 
-      var e = new tr.b.Event('registry-changed');
+      e = new tr.b.Event('registry-changed');
       registry.dispatchEvent(e);
     };
 
@@ -89,33 +92,34 @@ tr.exportTo('tr.b', function() {
       registry.registeredTypeInfos_ = [];
       registry.typeNameToTypeInfoMap_ = new Map();
       registry.categoryPartToTypeInfoMap_ = new Map();
-      var e = new tr.b.Event('registry-changed');
+      const e = new tr.b.Event('registry-changed');
       registry.dispatchEvent(e);
     };
 
     registry.popCleanStateAfterTest = function() {
-      var state = savedStateStack[0];
+      const state = savedStateStack[0];
       savedStateStack.splice(0, 1);
 
       registry.registeredTypeInfos_ = state.registeredTypeInfos;
       registry.typeNameToTypeInfoMap_ = state.typeNameToTypeInfoMap;
       registry.categoryPartToTypeInfoMap_ = state.categoryPartToTypeInfoMap;
-      var e = new tr.b.Event('registry-changed');
+      const e = new tr.b.Event('registry-changed');
       registry.dispatchEvent(e);
     };
 
     registry.unregister = function(constructor) {
-      var typeInfoIndex = -1;
-      for (var i = 0; i < registry.registeredTypeInfos_.length; i++) {
+      let typeInfoIndex = -1;
+      for (let i = 0; i < registry.registeredTypeInfos_.length; i++) {
         if (registry.registeredTypeInfos_[i].constructor === constructor) {
           typeInfoIndex = i;
           break;
         }
       }
-      if (typeInfoIndex === -1)
+      if (typeInfoIndex === -1) {
         throw new Error(constructor + ' not registered');
+      }
 
-      var typeInfo = registry.registeredTypeInfos_[typeInfoIndex];
+      const typeInfo = registry.registeredTypeInfos_[typeInfoIndex];
       registry.registeredTypeInfos_.splice(typeInfoIndex, 1);
       typeInfo.typeNames.forEach(function(typeName) {
         registry.typeNameToTypeInfoMap_.delete(typeName);
@@ -123,32 +127,30 @@ tr.exportTo('tr.b', function() {
       typeInfo.categoryParts.forEach(function(categoryPart) {
         registry.categoryPartToTypeInfoMap_.delete(categoryPart);
       });
-      var e = new tr.b.Event('registry-changed');
+      const e = new tr.b.Event('registry-changed');
       registry.dispatchEvent(e);
     };
 
     registry.getTypeInfo = function(category, typeName) {
       if (category) {
-        var categoryParts = getCategoryParts(category);
-        for (var i = 0; i < categoryParts.length; i++) {
-          var categoryPart = categoryParts[i];
-          var typeInfo = registry.categoryPartToTypeInfoMap_.get(categoryPart);
-          if (typeInfo !== undefined)
-            return typeInfo;
+        const categoryParts = getCategoryParts(category);
+        for (let i = 0; i < categoryParts.length; i++) {
+          const categoryPart = categoryParts[i];
+          const typeInfo = registry.categoryPartToTypeInfoMap_.get(
+              categoryPart);
+          if (typeInfo !== undefined) return typeInfo;
         }
       }
-      var typeInfo = registry.typeNameToTypeInfoMap_.get(typeName);
-      if (typeInfo !== undefined)
-        return typeInfo;
+      const typeInfo = registry.typeNameToTypeInfoMap_.get(typeName);
+      if (typeInfo !== undefined) return typeInfo;
 
       return extensionRegistryOptions.defaultTypeInfo;
     };
 
     // TODO(nduca): Remove or rename.
     registry.getConstructor = function(category, typeName) {
-      var typeInfo = registry.getTypeInfo(category, typeName);
-      if (typeInfo)
-        return typeInfo.constructor;
+      const typeInfo = registry.getTypeInfo(category, typeName);
+      if (typeInfo) return typeInfo.constructor;
       return undefined;
     };
   }

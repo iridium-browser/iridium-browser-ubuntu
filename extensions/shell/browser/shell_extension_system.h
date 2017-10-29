@@ -32,8 +32,14 @@ class ShellExtensionSystem : public ExtensionSystem {
   explicit ShellExtensionSystem(content::BrowserContext* browser_context);
   ~ShellExtensionSystem() override;
 
-  // Loads an unpacked application from a directory. Returns the extension on
-  // success, or null otherwise.
+  // Loads an unpacked extension from a directory. Returns the extension on
+  // success, or nullptr otherwise.
+  const Extension* LoadExtension(const base::FilePath& extension_dir);
+
+  // Loads an unpacked platform app from a directory. Returns the extension on
+  // success, or nullptr otherwise.
+  // Currently this just calls LoadExtension, as apps are not loaded differently
+  // than other extensions. Use LaunchApp() to actually launch the loaded app.
   const Extension* LoadApp(const base::FilePath& app_dir);
 
   // Initializes the extension system.
@@ -63,7 +69,7 @@ class ShellExtensionSystem : public ExtensionSystem {
       const base::Closure& callback) override;
   void UnregisterExtensionWithRequestContexts(
       const std::string& extension_id,
-      const UnloadedExtensionInfo::Reason reason) override;
+      const UnloadedExtensionReason reason) override;
   const OneShotEvent& ready() const override;
   ContentVerifier* content_verifier() override;
   std::unique_ptr<ExtensionSet> GetDependentExtensions(

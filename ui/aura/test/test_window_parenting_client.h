@@ -7,7 +7,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "ui/aura/aura_export.h"
 #include "ui/aura/client/window_parenting_client.h"
 
 namespace aura {
@@ -19,9 +18,7 @@ class TestWindowParentingClient : public client::WindowParentingClient {
   ~TestWindowParentingClient() override;
 
   // Overridden from client::WindowParentingClient:
-  Window* GetDefaultParent(Window* context,
-                           Window* window,
-                           const gfx::Rect& bounds) override;
+  Window* GetDefaultParent(Window* window, const gfx::Rect& bounds) override;
 
  private:
   Window* root_window_;

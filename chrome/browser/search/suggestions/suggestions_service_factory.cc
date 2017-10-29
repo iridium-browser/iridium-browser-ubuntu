@@ -8,6 +8,8 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "base/sequenced_task_runner.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/suggestions/image_decoder_impl.h"
@@ -15,8 +17,8 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "components/browser_sync/profile_sync_service.h"
-#include "components/image_fetcher/image_fetcher.h"
-#include "components/image_fetcher/image_fetcher_impl.h"
+#include "components/image_fetcher/core/image_fetcher.h"
+#include "components/image_fetcher/core/image_fetcher_impl.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/leveldb_proto/proto_database.h"
 #include "components/leveldb_proto/proto_database_impl.h"
@@ -62,8 +64,8 @@ SuggestionsServiceFactory::~SuggestionsServiceFactory() {}
 KeyedService* SuggestionsServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
-      BrowserThread::GetBlockingPool()->GetSequencedTaskRunner(
-          base::SequencedWorkerPool::GetSequenceToken());
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::USER_VISIBLE});
 
   Profile* profile = static_cast<Profile*>(context);
 
@@ -89,9 +91,8 @@ KeyedService* SuggestionsServiceFactory::BuildServiceInstanceFor(
       new ImageFetcherImpl(
           base::MakeUnique<suggestions::ImageDecoderImpl>(),
           profile->GetRequestContext()));
-  std::unique_ptr<ImageManager> thumbnail_manager(new ImageManager(
-      std::move(image_fetcher), std::move(db), database_dir,
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::DB)));
+  std::unique_ptr<ImageManager> thumbnail_manager(
+      new ImageManager(std::move(image_fetcher), std::move(db), database_dir));
   return new SuggestionsServiceImpl(
       signin_manager, token_service, sync_service, profile->GetRequestContext(),
       std::move(suggestions_store), std::move(thumbnail_manager),

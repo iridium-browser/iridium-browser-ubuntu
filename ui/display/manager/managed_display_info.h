@@ -153,11 +153,6 @@ class DISPLAY_MANAGER_EXPORT ManagedDisplayInfo {
   static ManagedDisplayInfo CreateFromSpecWithID(const std::string& spec,
                                                  int64_t id);
 
-  // When this is set to true on the device whose internal display has
-  // 1.25 dsf, Chrome uses 1.0f as a default scale factor, and uses
-  // dsf 1.25 when UI scaling is set to 0.8f.
-  static void SetUse125DSFForUIScalingForTest(bool enable);
-
   ManagedDisplayInfo();
   ManagedDisplayInfo(int64_t id, const std::string& name, bool has_overscan);
   ManagedDisplayInfo(const ManagedDisplayInfo& other);
@@ -231,6 +226,10 @@ class DISPLAY_MANAGER_EXPORT ManagedDisplayInfo {
 
   // Returns the rotation set by a given |source|.
   Display::Rotation GetRotation(Display::RotationSource source) const;
+
+  // Returns a measure of density relative to a display with 1.0 DSF. Unlike the
+  // effective DSF, this is independent from the UI scale.
+  float GetDensityRatio() const;
 
   // Returns the ui scale and device scale factor actually used to create
   // display that chrome sees. This can be different from one obtained

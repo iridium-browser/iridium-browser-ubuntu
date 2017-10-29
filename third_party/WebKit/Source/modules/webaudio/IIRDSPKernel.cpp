@@ -4,53 +4,53 @@
 
 #include "modules/webaudio/IIRDSPKernel.h"
 
-#include "wtf/MathExtras.h"
+#include "platform/wtf/MathExtras.h"
 
 namespace blink {
 
-void IIRDSPKernel::process(const float* source,
+IIRDSPKernel::IIRDSPKernel(IIRProcessor* processor)
+    : AudioDSPKernel(processor),
+      iir_(processor->Feedforward(), processor->Feedback()) {
+  tail_time_ = iir_.TailTime(processor->SampleRate());
+}
+
+void IIRDSPKernel::Process(const float* source,
                            float* destination,
-                           size_t framesToProcess) {
+                           size_t frames_to_process) {
   DCHECK(source);
   DCHECK(destination);
 
-  m_iir.process(source, destination, framesToProcess);
+  iir_.Process(source, destination, frames_to_process);
 }
 
-void IIRDSPKernel::getFrequencyResponse(int nFrequencies,
-                                        const float* frequencyHz,
-                                        float* magResponse,
-                                        float* phaseResponse) {
-  bool isGood = nFrequencies > 0 && frequencyHz && magResponse && phaseResponse;
-  DCHECK(isGood);
-  if (!isGood)
+void IIRDSPKernel::GetFrequencyResponse(int n_frequencies,
+                                        const float* frequency_hz,
+                                        float* mag_response,
+                                        float* phase_response) {
+  bool is_good =
+      n_frequencies > 0 && frequency_hz && mag_response && phase_response;
+  DCHECK(is_good);
+  if (!is_good)
     return;
 
-  Vector<float> frequency(nFrequencies);
+  Vector<float> frequency(n_frequencies);
 
-  double nyquist = this->nyquist();
+  double nyquist = this->Nyquist();
 
   // Convert from frequency in Hz to normalized frequency (0 -> 1),
   // with 1 equal to the Nyquist frequency.
-  for (int k = 0; k < nFrequencies; ++k)
-    frequency[k] = clampTo<float>(frequencyHz[k] / nyquist);
+  for (int k = 0; k < n_frequencies; ++k)
+    frequency[k] = frequency_hz[k] / nyquist;
 
-  m_iir.getFrequencyResponse(nFrequencies, frequency.data(), magResponse,
-                             phaseResponse);
+  iir_.GetFrequencyResponse(n_frequencies, frequency.data(), mag_response,
+                            phase_response);
 }
 
-double IIRDSPKernel::tailTime() const {
-  // TODO(rtoy): This is true mathematically (infinite impulse response), but
-  // perhaps it should be limited to a smaller value, possibly based on the
-  // actual filter coefficients.  To do that, we would probably need to find the
-  // pole, r, with largest magnitude and select some threshold, eps, such that
-  // |r|^n < eps for all n >= N.  N is then the tailTime for the filter.  If the
-  // the magnitude of r is greater than or equal to 1, the infinity is the right
-  // answer. (There is no constraint on the IIR filter that it be stable.)
-  return std::numeric_limits<double>::infinity();
+double IIRDSPKernel::TailTime() const {
+  return tail_time_;
 }
 
-double IIRDSPKernel::latencyTime() const {
+double IIRDSPKernel::LatencyTime() const {
   return 0;
 }
 

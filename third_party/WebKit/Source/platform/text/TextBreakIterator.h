@@ -23,8 +23,8 @@
 #define TextBreakIterator_h
 
 #include "platform/PlatformExport.h"
-#include "wtf/text/AtomicString.h"
-#include "wtf/text/Unicode.h"
+#include "platform/wtf/text/AtomicString.h"
+#include "platform/wtf/text/Unicode.h"
 
 #include <unicode/brkiter.h>
 
@@ -39,182 +39,239 @@ typedef icu::BreakIterator TextBreakIterator;
 // platform UI conventions. One notable example where this can be different
 // from character break iterator is Thai prepend characters, see bug 24342.
 // Use this for insertion point and selection manipulations.
-PLATFORM_EXPORT TextBreakIterator* cursorMovementIterator(const UChar*,
+PLATFORM_EXPORT TextBreakIterator* CursorMovementIterator(const UChar*,
                                                           int length);
 
-PLATFORM_EXPORT TextBreakIterator* wordBreakIterator(const String&,
+PLATFORM_EXPORT TextBreakIterator* WordBreakIterator(const String&,
                                                      int start,
                                                      int length);
-PLATFORM_EXPORT TextBreakIterator* wordBreakIterator(const UChar*, int length);
-PLATFORM_EXPORT TextBreakIterator* acquireLineBreakIterator(
+PLATFORM_EXPORT TextBreakIterator* WordBreakIterator(const UChar*, int length);
+PLATFORM_EXPORT TextBreakIterator* AcquireLineBreakIterator(
     const LChar*,
     int length,
     const AtomicString& locale,
-    const UChar* priorContext,
-    unsigned priorContextLength);
-PLATFORM_EXPORT TextBreakIterator* acquireLineBreakIterator(
+    const UChar* prior_context,
+    unsigned prior_context_length);
+PLATFORM_EXPORT TextBreakIterator* AcquireLineBreakIterator(
     const UChar*,
     int length,
     const AtomicString& locale,
-    const UChar* priorContext,
-    unsigned priorContextLength);
-PLATFORM_EXPORT void releaseLineBreakIterator(TextBreakIterator*);
-PLATFORM_EXPORT TextBreakIterator* sentenceBreakIterator(const UChar*,
+    const UChar* prior_context,
+    unsigned prior_context_length);
+PLATFORM_EXPORT void ReleaseLineBreakIterator(TextBreakIterator*);
+PLATFORM_EXPORT TextBreakIterator* SentenceBreakIterator(const UChar*,
                                                          int length);
 
-PLATFORM_EXPORT bool isWordTextBreak(TextBreakIterator*);
+PLATFORM_EXPORT bool IsWordTextBreak(TextBreakIterator*);
 
-const int TextBreakDone = -1;
+const int kTextBreakDone = -1;
 
 enum class LineBreakType {
-  Normal,
-  BreakAll,  // word-break:break-all allows breaks between letters/numbers
-  KeepAll,   // word-break:keep-all doesn't allow breaks between all kind of
-             // letters/numbers except some south east asians'.
+  kNormal,
+
+  // word-break:break-all allows breaks between letters/numbers, but prohibits
+  // break before/after certain punctuation.
+  kBreakAll,
+
+  // Allows breaks at every grapheme cluster boundary.
+  // Terminal style line breaks described in UAX#14: Examples of Customization
+  // http://unicode.org/reports/tr14/#Examples
+  // CSS is discussing to add this feature crbug.com/720205
+  // Used internally for word-break:break-word.
+  kBreakCharacter,
+
+  // word-break:keep-all doesn't allow breaks between all kind of
+  // letters/numbers except some south east asians'.
+  kKeepAll,
 };
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, LineBreakType);
 
 class PLATFORM_EXPORT LazyLineBreakIterator final {
   STACK_ALLOCATED();
 
  public:
   LazyLineBreakIterator()
-      : m_iterator(0), m_cachedPriorContext(0), m_cachedPriorContextLength(0) {
-    resetPriorContext();
+      : iterator_(0),
+        cached_prior_context_(0),
+        cached_prior_context_length_(0),
+        break_type_(LineBreakType::kNormal) {
+    ResetPriorContext();
   }
 
   LazyLineBreakIterator(String string,
-                        const AtomicString& locale = AtomicString())
-      : m_string(string),
-        m_locale(locale),
-        m_iterator(0),
-        m_cachedPriorContext(0),
-        m_cachedPriorContextLength(0) {
-    resetPriorContext();
+                        const AtomicString& locale = AtomicString(),
+                        LineBreakType break_type = LineBreakType::kNormal)
+      : string_(string),
+        locale_(locale),
+        iterator_(0),
+        cached_prior_context_(0),
+        cached_prior_context_length_(0),
+        break_type_(break_type) {
+    ResetPriorContext();
   }
 
   ~LazyLineBreakIterator() {
-    if (m_iterator)
-      releaseLineBreakIterator(m_iterator);
+    if (iterator_)
+      ReleaseLineBreakIterator(iterator_);
   }
 
-  String getString() const { return m_string; }
+  String GetString() const { return string_; }
 
-  UChar lastCharacter() const {
-    static_assert(WTF_ARRAY_LENGTH(m_priorContext) == 2,
+  UChar LastCharacter() const {
+    static_assert(WTF_ARRAY_LENGTH(prior_context_) == 2,
                   "TextBreakIterator has unexpected prior context length");
-    return m_priorContext[1];
+    return prior_context_[1];
   }
 
-  UChar secondToLastCharacter() const {
-    static_assert(WTF_ARRAY_LENGTH(m_priorContext) == 2,
+  UChar SecondToLastCharacter() const {
+    static_assert(WTF_ARRAY_LENGTH(prior_context_) == 2,
                   "TextBreakIterator has unexpected prior context length");
-    return m_priorContext[0];
+    return prior_context_[0];
   }
 
-  void setPriorContext(UChar last, UChar secondToLast) {
-    static_assert(WTF_ARRAY_LENGTH(m_priorContext) == 2,
+  void SetPriorContext(UChar last, UChar second_to_last) {
+    static_assert(WTF_ARRAY_LENGTH(prior_context_) == 2,
                   "TextBreakIterator has unexpected prior context length");
-    m_priorContext[0] = secondToLast;
-    m_priorContext[1] = last;
+    prior_context_[0] = second_to_last;
+    prior_context_[1] = last;
   }
 
-  void updatePriorContext(UChar last) {
-    static_assert(WTF_ARRAY_LENGTH(m_priorContext) == 2,
+  void UpdatePriorContext(UChar last) {
+    static_assert(WTF_ARRAY_LENGTH(prior_context_) == 2,
                   "TextBreakIterator has unexpected prior context length");
-    m_priorContext[0] = m_priorContext[1];
-    m_priorContext[1] = last;
+    prior_context_[0] = prior_context_[1];
+    prior_context_[1] = last;
   }
 
-  void resetPriorContext() {
-    static_assert(WTF_ARRAY_LENGTH(m_priorContext) == 2,
+  void ResetPriorContext() {
+    static_assert(WTF_ARRAY_LENGTH(prior_context_) == 2,
                   "TextBreakIterator has unexpected prior context length");
-    m_priorContext[0] = 0;
-    m_priorContext[1] = 0;
+    prior_context_[0] = 0;
+    prior_context_[1] = 0;
   }
 
-  unsigned priorContextLength() const {
-    unsigned priorContextLength = 0;
-    static_assert(WTF_ARRAY_LENGTH(m_priorContext) == 2,
+  unsigned PriorContextLength() const {
+    unsigned prior_context_length = 0;
+    static_assert(WTF_ARRAY_LENGTH(prior_context_) == 2,
                   "TextBreakIterator has unexpected prior context length");
-    if (m_priorContext[1]) {
-      ++priorContextLength;
-      if (m_priorContext[0])
-        ++priorContextLength;
+    if (prior_context_[1]) {
+      ++prior_context_length;
+      if (prior_context_[0])
+        ++prior_context_length;
     }
-    return priorContextLength;
+    return prior_context_length;
   }
 
   // Obtain text break iterator, possibly previously cached, where this iterator
   // is (or has been) initialized to use the previously stored string as the
   // primary breaking context and using previously stored prior context if
   // non-empty.
-  TextBreakIterator* get(unsigned priorContextLength) {
-    ASSERT(priorContextLength <= priorContextCapacity);
-    const UChar* priorContext =
-        priorContextLength
-            ? &m_priorContext[priorContextCapacity - priorContextLength]
+  TextBreakIterator* Get(unsigned prior_context_length) const {
+    DCHECK(prior_context_length <= kPriorContextCapacity);
+    const UChar* prior_context =
+        prior_context_length
+            ? &prior_context_[kPriorContextCapacity - prior_context_length]
             : 0;
-    if (!m_iterator) {
-      if (m_string.is8Bit())
-        m_iterator = acquireLineBreakIterator(m_string.characters8(),
-                                              m_string.length(), m_locale,
-                                              priorContext, priorContextLength);
+    if (!iterator_) {
+      if (string_.Is8Bit())
+        iterator_ = AcquireLineBreakIterator(
+            string_.Characters8(), string_.length(), locale_, prior_context,
+            prior_context_length);
       else
-        m_iterator = acquireLineBreakIterator(m_string.characters16(),
-                                              m_string.length(), m_locale,
-                                              priorContext, priorContextLength);
-      m_cachedPriorContext = priorContext;
-      m_cachedPriorContextLength = priorContextLength;
-    } else if (priorContext != m_cachedPriorContext ||
-               priorContextLength != m_cachedPriorContextLength) {
-      this->resetStringAndReleaseIterator(m_string, m_locale);
-      return this->get(priorContextLength);
+        iterator_ = AcquireLineBreakIterator(
+            string_.Characters16(), string_.length(), locale_, prior_context,
+            prior_context_length);
+      cached_prior_context_ = prior_context;
+      cached_prior_context_length_ = prior_context_length;
+    } else if (prior_context != cached_prior_context_ ||
+               prior_context_length != cached_prior_context_length_) {
+      ReleaseIterator();
+      return Get(prior_context_length);
     }
-    return m_iterator;
+    return iterator_;
   }
 
-  void resetStringAndReleaseIterator(String string,
+  void ResetStringAndReleaseIterator(String string,
                                      const AtomicString& locale) {
-    if (m_iterator)
-      releaseLineBreakIterator(m_iterator);
+    string_ = string;
+    locale_ = locale;
 
-    m_string = string;
-    m_locale = locale;
-    m_iterator = 0;
-    m_cachedPriorContext = 0;
-    m_cachedPriorContextLength = 0;
+    ReleaseIterator();
   }
 
-  inline bool isBreakable(int pos,
-                          int& nextBreakable,
-                          LineBreakType lineBreakType = LineBreakType::Normal) {
-    if (pos > nextBreakable) {
-      switch (lineBreakType) {
-        case LineBreakType::BreakAll:
-          nextBreakable = nextBreakablePositionBreakAll(pos);
-          break;
-        case LineBreakType::KeepAll:
-          nextBreakable = nextBreakablePositionKeepAll(pos);
-          break;
-        default:
-          nextBreakable = nextBreakablePositionIgnoringNBSP(pos);
-      }
+  void SetLocale(const AtomicString& locale) {
+    if (locale == locale_)
+      return;
+    locale_ = locale;
+    ReleaseIterator();
+  }
+
+  LineBreakType BreakType() const { return break_type_; }
+  void SetBreakType(LineBreakType break_type) { break_type_ = break_type; }
+
+  // By default, this class breaks before spaces. This is a specialized
+  // optimization for CSS, where leading/trailing spaces in each line are
+  // removed, and thus breaking before spaces can save computing hanging spaces.
+  //
+  // When 'white-space:pre-wrap', or when in editing, leaging/trailing spaces
+  // need to be preserved, and this optimization needs to be disabled. This mode
+  // is compatible with UAX#14/ICU. http://unicode.org/reports/tr14/
+  void SetBreakAfterSpace(bool break_after_space) {
+    break_after_space_ = break_after_space;
+  }
+
+  inline bool IsBreakable(int pos,
+                          int& next_breakable,
+                          LineBreakType line_break_type) const {
+    if (pos > next_breakable) {
+      next_breakable = NextBreakablePosition(pos, line_break_type);
     }
-    return pos == nextBreakable;
+    return pos == next_breakable;
   }
+
+  inline bool IsBreakable(int pos, int& next_breakable) const {
+    return IsBreakable(pos, next_breakable, break_type_);
+  }
+
+  inline bool IsBreakable(int pos) const {
+    int next_breakable = -1;
+    return IsBreakable(pos, next_breakable, break_type_);
+  }
+
+  // Returns the break opportunity at or after |offset|.
+  unsigned NextBreakOpportunity(unsigned offset) const;
+
+  // Returns the break opportunity at or before |offset|.
+  unsigned PreviousBreakOpportunity(unsigned offset, unsigned min = 0) const;
 
  private:
-  int nextBreakablePositionIgnoringNBSP(int pos);
-  int nextBreakablePositionBreakAll(int pos);
-  int nextBreakablePositionKeepAll(int pos);
+  void ReleaseIterator() const {
+    if (iterator_)
+      ReleaseLineBreakIterator(iterator_);
+    iterator_ = 0;
+    cached_prior_context_ = 0;
+    cached_prior_context_length_ = 0;
+  }
 
-  static const unsigned priorContextCapacity = 2;
-  String m_string;
-  AtomicString m_locale;
-  TextBreakIterator* m_iterator;
-  UChar m_priorContext[priorContextCapacity];
-  const UChar* m_cachedPriorContext;
-  unsigned m_cachedPriorContextLength;
+  template <typename CharacterType, LineBreakType, bool>
+  int NextBreakablePosition(int pos, const CharacterType* str) const;
+  template <typename CharacterType, LineBreakType>
+  int NextBreakablePosition(int pos, const CharacterType* str) const;
+  template <LineBreakType>
+  int NextBreakablePosition(int pos) const;
+  int NextBreakablePositionBreakCharacter(int pos) const;
+  int NextBreakablePosition(int pos, LineBreakType) const;
+
+  static const unsigned kPriorContextCapacity = 2;
+  String string_;
+  AtomicString locale_;
+  mutable TextBreakIterator* iterator_;
+  UChar prior_context_[kPriorContextCapacity];
+  mutable const UChar* cached_prior_context_;
+  mutable unsigned cached_prior_context_length_;
+  LineBreakType break_type_;
+  bool break_after_space_ = false;
 };
 
 // Iterates over "extended grapheme clusters", as defined in UAX #29.
@@ -231,51 +288,51 @@ class PLATFORM_EXPORT NonSharedCharacterBreakIterator final {
   NonSharedCharacterBreakIterator(const UChar*, unsigned length);
   ~NonSharedCharacterBreakIterator();
 
-  int next();
-  int current();
+  int Next();
+  int Current();
 
-  bool isBreak(int offset) const;
-  int preceding(int offset) const;
-  int following(int offset) const;
+  bool IsBreak(int offset) const;
+  int Preceding(int offset) const;
+  int Following(int offset) const;
 
-  bool operator!() const { return !m_is8Bit && !m_iterator; }
+  bool operator!() const { return !is8_bit_ && !iterator_; }
 
  private:
-  void createIteratorForBuffer(const UChar*, unsigned length);
+  void CreateIteratorForBuffer(const UChar*, unsigned length);
 
-  unsigned clusterLengthStartingAt(unsigned offset) const {
-    ASSERT(m_is8Bit);
+  unsigned ClusterLengthStartingAt(unsigned offset) const {
+    DCHECK(is8_bit_);
     // The only Latin-1 Extended Grapheme Cluster is CR LF
-    return isCRBeforeLF(offset) ? 2 : 1;
+    return IsCRBeforeLF(offset) ? 2 : 1;
   }
 
-  bool isCRBeforeLF(unsigned offset) const {
-    ASSERT(m_is8Bit);
-    return m_charaters8[offset] == '\r' && offset + 1 < m_length &&
-           m_charaters8[offset + 1] == '\n';
+  bool IsCRBeforeLF(unsigned offset) const {
+    DCHECK(is8_bit_);
+    return charaters8_[offset] == '\r' && offset + 1 < length_ &&
+           charaters8_[offset + 1] == '\n';
   }
 
-  bool isLFAfterCR(unsigned offset) const {
-    ASSERT(m_is8Bit);
-    return m_charaters8[offset] == '\n' && offset >= 1 &&
-           m_charaters8[offset - 1] == '\r';
+  bool IsLFAfterCR(unsigned offset) const {
+    DCHECK(is8_bit_);
+    return charaters8_[offset] == '\n' && offset >= 1 &&
+           charaters8_[offset - 1] == '\r';
   }
 
-  bool m_is8Bit;
+  bool is8_bit_;
 
   // For 8 bit strings, we implement the iterator ourselves.
-  const LChar* m_charaters8;
-  unsigned m_offset;
-  unsigned m_length;
+  const LChar* charaters8_;
+  unsigned offset_;
+  unsigned length_;
 
   // For 16 bit strings, we use a TextBreakIterator.
-  TextBreakIterator* m_iterator;
+  TextBreakIterator* iterator_;
 };
 
 // Counts the number of grapheme clusters. A surrogate pair or a sequence
 // of a non-combining character and following combining characters is
 // counted as 1 grapheme cluster.
-PLATFORM_EXPORT unsigned numGraphemeClusters(const String&);
+PLATFORM_EXPORT unsigned NumGraphemeClusters(const String&);
 
 }  // namespace blink
 

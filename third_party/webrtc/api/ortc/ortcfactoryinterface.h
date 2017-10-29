@@ -23,13 +23,14 @@
 #include "webrtc/api/ortc/packettransportinterface.h"
 #include "webrtc/api/ortc/rtptransportcontrollerinterface.h"
 #include "webrtc/api/ortc/rtptransportinterface.h"
+#include "webrtc/api/ortc/srtptransportinterface.h"
 #include "webrtc/api/ortc/udptransportinterface.h"
 #include "webrtc/api/rtcerror.h"
 #include "webrtc/api/rtpparameters.h"
-#include "webrtc/base/network.h"
-#include "webrtc/base/scoped_ref_ptr.h"
-#include "webrtc/base/thread.h"
 #include "webrtc/p2p/base/packetsocketfactory.h"
+#include "webrtc/rtc_base/network.h"
+#include "webrtc/rtc_base/scoped_ref_ptr.h"
+#include "webrtc/rtc_base/thread.h"
 
 namespace webrtc {
 
@@ -121,6 +122,14 @@ class OrtcFactoryInterface {
   // done if a single RtpTransport is being used to communicate with the remote
   // endpoint.
   virtual RTCErrorOr<std::unique_ptr<RtpTransportInterface>> CreateRtpTransport(
+      const RtcpParameters& rtcp_parameters,
+      PacketTransportInterface* rtp,
+      PacketTransportInterface* rtcp,
+      RtpTransportControllerInterface* transport_controller) = 0;
+
+  // Creates an SrtpTransport which is an RTP transport that uses SRTP.
+  virtual RTCErrorOr<std::unique_ptr<SrtpTransportInterface>>
+  CreateSrtpTransport(
       const RtcpParameters& rtcp_parameters,
       PacketTransportInterface* rtp,
       PacketTransportInterface* rtcp,

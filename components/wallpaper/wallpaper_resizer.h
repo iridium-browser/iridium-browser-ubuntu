@@ -11,7 +11,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "components/wallpaper/wallpaper_layout.h"
+#include "base/time/time.h"
+#include "components/wallpaper/wallpaper_info.h"
 #include "components/wallpaper/wallpaper_resizer_observer.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -72,6 +73,10 @@ class WALLPAPER_EXPORT WallpaperResizer {
   gfx::Size target_size_;
 
   WallpaperLayout layout_;
+
+  // The time that StartResize() was last called. Used for recording timing
+  // metrics.
+  base::TimeTicks start_calculation_time_;
 
   scoped_refptr<base::TaskRunner> task_runner_;
 

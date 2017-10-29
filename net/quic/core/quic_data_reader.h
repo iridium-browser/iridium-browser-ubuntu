@@ -9,9 +9,11 @@
 #include <cstdint>
 
 #include "base/macros.h"
-#include "base/strings/string_piece.h"
 #include "net/base/int128.h"
+#include "net/quic/core/quic_types.h"
+#include "net/quic/platform/api/quic_endian.h"
 #include "net/quic/platform/api/quic_export.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
 
@@ -32,25 +34,25 @@ namespace net {
 class QUIC_EXPORT_PRIVATE QuicDataReader {
  public:
   // Caller must provide an underlying buffer to work on.
-  QuicDataReader(const char* data, const size_t len);
+  QuicDataReader(const char* data,
+                 const size_t len,
+                 Perspective perspective,
+                 Endianness endianness);
 
   // Empty destructor.
   ~QuicDataReader() {}
 
-  // Reads a 16-bit unsigned integer into the given output parameter.
-  // Forwards the internal iterator on success.
-  // Returns true on success, false otherwise.
+  // Reads an 8/16/32/64-bit unsigned integer into the given output
+  // parameter. Forwards the internal iterator on success. Returns true on
+  // success, false otherwise.
+  bool ReadUInt8(uint8_t* result);
   bool ReadUInt16(uint16_t* result);
-
-  // Reads a 32-bit unsigned integer into the given output parameter.
-  // Forwards the internal iterator on success.
-  // Returns true on success, false otherwise.
   bool ReadUInt32(uint32_t* result);
-
-  // Reads a 64-bit unsigned integer into the given output parameter.
-  // Forwards the internal iterator on success.
-  // Returns true on success, false otherwise.
   bool ReadUInt64(uint64_t* result);
+
+  // Reads |num_bytes| bytes in the correct byte order into least significant
+  // bytes of |result|.
+  bool ReadBytesToUInt64(size_t num_bytes, uint64_t* result);
 
   // Reads a 16-bit unsigned float into the given output parameter.
   // Forwards the internal iterator on success.
@@ -64,29 +66,45 @@ class QUIC_EXPORT_PRIVATE QuicDataReader {
   //
   // Forwards the internal iterator on success.
   // Returns true on success, false otherwise.
-  bool ReadStringPiece16(base::StringPiece* result);
+  bool ReadStringPiece16(QuicStringPiece* result);
 
   // Reads a given number of bytes into the given buffer. The buffer
   // must be of adequate size.
   // Forwards the internal iterator on success.
   // Returns true on success, false otherwise.
-  bool ReadStringPiece(base::StringPiece* result, size_t len);
+  bool ReadStringPiece(QuicStringPiece* result, size_t len);
 
-  // Returns the remaining payload as a StringPiece.
+  // Reads connection ID represented as 64-bit unsigned integer into the given
+  // output parameter.
+  // Forwards the internal iterator on success.
+  // Returns true on success, false otherwise.
+  // TODO(fayang): Remove this method and use ReadUInt64() once deprecating
+  // quic_restart_flag_quic_rw_cid_in_big_endian and QuicDataReader has a mode
+  // indicating reading in little/big endian.
+  bool ReadConnectionId(uint64_t* connection_id);
+
+  // Returns the remaining payload as a QuicStringPiece.
+  // Reads tag represented as 32-bit unsigned integer into given output
+  // parameter. Tags are in big endian on the wire (e.g., CHLO is
+  // 'C','H','L','O') and are read in byte order, so tags in memory are in big
+  // endian.
+  bool ReadTag(uint32_t* tag);
+
+  // Returns the remaining payload as a QuicStringPiece.
   //
   // NOTE: Does not copy but rather references strings in the underlying buffer.
   // This should be kept in mind when handling memory management!
   //
   // Forwards the internal iterator.
-  base::StringPiece ReadRemainingPayload();
+  QuicStringPiece ReadRemainingPayload();
 
-  // Returns the remaining payload as a StringPiece.
+  // Returns the remaining payload as a QuicStringPiece.
   //
   // NOTE: Does not copy but rather references strings in the underlying buffer.
   // This should be kept in mind when handling memory management!
   //
   // DOES NOT forward the internal iterator.
-  base::StringPiece PeekRemainingPayload();
+  QuicStringPiece PeekRemainingPayload();
 
   // Reads a given number of bytes into the given buffer. The buffer
   // must be of adequate size.
@@ -100,6 +118,14 @@ class QUIC_EXPORT_PRIVATE QuicDataReader {
 
   // Returns the number of bytes remaining to be read.
   size_t BytesRemaining() const;
+
+  // Returns the next byte that to be read. Must not be called when there are no
+  // bytes to be read.
+  //
+  // DOES NOT forward the internal iterator.
+  uint8_t PeekByte() const;
+
+  void set_endianness(Endianness endianness) { endianness_ = endianness; }
 
  private:
   // Returns true if the underlying buffer has enough room to read the given
@@ -117,6 +143,15 @@ class QUIC_EXPORT_PRIVATE QuicDataReader {
 
   // The location of the next read from our data buffer.
   size_t pos_;
+
+  // TODO(zhongyi): remove this field as it is no longer used.
+  // Perspective of this data reader. Please note, although client and server
+  // may have different in-memory representation of the same field, the on wire
+  // representation must be consistent.
+  Perspective perspective_;
+
+  // The endianness to read integers and floating numbers.
+  Endianness endianness_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicDataReader);
 };

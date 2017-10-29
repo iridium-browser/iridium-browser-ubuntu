@@ -96,7 +96,7 @@ ProxyPrefTransformer::ProxyPrefTransformer() {
 ProxyPrefTransformer::~ProxyPrefTransformer() {
 }
 
-base::Value* ProxyPrefTransformer::ExtensionToBrowserPref(
+std::unique_ptr<base::Value> ProxyPrefTransformer::ExtensionToBrowserPref(
     const base::Value* extension_pref,
     std::string* error,
     bool* bad_message) {
@@ -130,27 +130,28 @@ base::Value* ProxyPrefTransformer::ExtensionToBrowserPref(
           config, &proxy_rules_string, error, bad_message) ||
       !helpers::GetBypassListFromExtensionPref(
           config, &bypass_list, error, bad_message)) {
-    return NULL;
+    return nullptr;
   }
 
-  return helpers::CreateProxyConfigDict(
-      mode_enum, pac_mandatory, pac_url, pac_data, proxy_rules_string,
-      bypass_list, error);
+  return helpers::CreateProxyConfigDict(mode_enum, pac_mandatory, pac_url,
+                                        pac_data, proxy_rules_string,
+                                        bypass_list, error);
 }
 
-base::Value* ProxyPrefTransformer::BrowserToExtensionPref(
+std::unique_ptr<base::Value> ProxyPrefTransformer::BrowserToExtensionPref(
     const base::Value* browser_pref) {
   CHECK(browser_pref->IsType(base::Value::Type::DICTIONARY));
 
   // This is a dictionary wrapper that exposes the proxy configuration stored in
   // the browser preferences.
   ProxyConfigDictionary config(
-      static_cast<const base::DictionaryValue*>(browser_pref));
+      static_cast<const base::DictionaryValue*>(browser_pref)
+          ->CreateDeepCopy());
 
   ProxyPrefs::ProxyMode mode;
   if (!config.GetMode(&mode)) {
     LOG(ERROR) << "Cannot determine proxy mode.";
-    return NULL;
+    return nullptr;
   }
 
   // Build a new ProxyConfig instance as defined in the extension API.
@@ -170,25 +171,27 @@ base::Value* ProxyPrefTransformer::BrowserToExtensionPref(
       // A PAC URL either point to a PAC script or contain a base64 encoded
       // PAC script. In either case we build a PacScript dictionary as defined
       // in the extension API.
-      base::DictionaryValue* pac_dict = helpers::CreatePacScriptDict(config);
+      std::unique_ptr<base::DictionaryValue> pac_dict =
+          helpers::CreatePacScriptDict(config);
       if (!pac_dict)
-        return NULL;
-      extension_pref->Set(keys::kProxyConfigPacScript, pac_dict);
+        return nullptr;
+      extension_pref->Set(keys::kProxyConfigPacScript, std::move(pac_dict));
       break;
     }
     case ProxyPrefs::MODE_FIXED_SERVERS: {
       // Build ProxyRules dictionary according to the extension API.
-      base::DictionaryValue* proxy_rules_dict =
+      std::unique_ptr<base::DictionaryValue> proxy_rules_dict =
           helpers::CreateProxyRulesDict(config);
       if (!proxy_rules_dict)
-        return NULL;
-      extension_pref->Set(keys::kProxyConfigRules, proxy_rules_dict);
+        return nullptr;
+      extension_pref->Set(keys::kProxyConfigRules, std::move(proxy_rules_dict));
       break;
     }
     case ProxyPrefs::kModeCount:
       NOTREACHED();
   }
-  return extension_pref.release();
+  // TODO(crbug.com/703565): remove std::move() once compiler support improves.
+  return std::move(extension_pref);
 }
 
 }  // namespace extensions

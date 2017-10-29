@@ -31,13 +31,13 @@
 #ifndef CompositorAnimations_h
 #define CompositorAnimations_h
 
+#include <memory>
 #include "core/CoreExport.h"
 #include "core/animation/EffectModel.h"
 #include "core/animation/Timing.h"
 #include "platform/animation/TimingFunction.h"
-#include "wtf/Allocator.h"
-#include "wtf/Vector.h"
-#include <memory>
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 
@@ -51,65 +51,112 @@ class CORE_EXPORT CompositorAnimations {
   STATIC_ONLY(CompositorAnimations);
 
  public:
-  static bool isCompositableProperty(CSSPropertyID);
-  static const CSSPropertyID compositableProperties[7];
+  static bool IsCompositableProperty(CSSPropertyID);
+  static const CSSPropertyID kCompositableProperties[7];
 
-  static bool isCandidateForAnimationOnCompositor(const Timing&,
-                                                  const Element&,
-                                                  const Animation*,
-                                                  const EffectModel&,
-                                                  double animationPlaybackRate);
-  static void cancelIncompatibleAnimationsOnCompositor(const Element&,
+  struct FailureCode {
+    const bool can_composite;
+    const bool web_developer_actionable;
+    const String reason;
+
+    static FailureCode None() { return FailureCode(true, false, String()); }
+    static FailureCode Actionable(const String& reason) {
+      return FailureCode(false, true, reason);
+    }
+    static FailureCode NonActionable(const String& reason) {
+      return FailureCode(false, false, reason);
+    }
+
+    bool Ok() const { return can_composite; }
+
+    bool operator==(const FailureCode& other) const {
+      return can_composite == other.can_composite &&
+             web_developer_actionable == other.web_developer_actionable &&
+             reason == other.reason;
+    }
+
+   private:
+    FailureCode(bool can_composite,
+                bool web_developer_actionable,
+                const String& reason)
+        : can_composite(can_composite),
+          web_developer_actionable(web_developer_actionable),
+          reason(reason) {}
+  };
+
+  static FailureCode CheckCanStartAnimationOnCompositor(
+      const Timing&,
+      const Element&,
+      const Animation*,
+      const EffectModel&,
+      double animation_playback_rate);
+  static void CancelIncompatibleAnimationsOnCompositor(const Element&,
                                                        const Animation&,
                                                        const EffectModel&);
-  static bool canStartAnimationOnCompositor(const Element&);
-  static void startAnimationOnCompositor(const Element&,
+  static void StartAnimationOnCompositor(const Element&,
                                          int group,
-                                         double startTime,
-                                         double timeOffset,
+                                         double start_time,
+                                         double time_offset,
                                          const Timing&,
                                          const Animation&,
                                          const EffectModel&,
-                                         Vector<int>& startedAnimationIds,
-                                         double animationPlaybackRate);
-  static void cancelAnimationOnCompositor(const Element&,
+                                         Vector<int>& started_animation_ids,
+                                         double animation_playback_rate);
+  static void CancelAnimationOnCompositor(const Element&,
                                           const Animation&,
                                           int id);
-  static void pauseAnimationForTestingOnCompositor(const Element&,
+  static void PauseAnimationForTestingOnCompositor(const Element&,
                                                    const Animation&,
                                                    int id,
-                                                   double pauseTime);
+                                                   double pause_time);
 
-  static void attachCompositedLayers(Element&, const Animation&);
+  static void AttachCompositedLayers(Element&, const Animation&);
 
-  static bool getAnimatedBoundingBox(FloatBox&,
+  static bool GetAnimatedBoundingBox(FloatBox&,
                                      const EffectModel&,
-                                     double minValue,
-                                     double maxValue);
+                                     double min_value,
+                                     double max_value);
 
   struct CompositorTiming {
     Timing::PlaybackDirection direction;
-    double scaledDuration;
-    double scaledTimeOffset;
-    double adjustedIterationCount;
-    double playbackRate;
-    Timing::FillMode fillMode;
-    double iterationStart;
+    double scaled_duration;
+    double scaled_time_offset;
+    double adjusted_iteration_count;
+    double playback_rate;
+    Timing::FillMode fill_mode;
+    double iteration_start;
   };
 
-  static bool convertTimingForCompositor(const Timing&,
-                                         double timeOffset,
+  static bool ConvertTimingForCompositor(const Timing&,
+                                         double time_offset,
                                          CompositorTiming& out,
-                                         double animationPlaybackRate);
+                                         double animation_playback_rate);
 
-  static void getAnimationOnCompositor(
+  static void GetAnimationOnCompositor(
       const Timing&,
       int group,
-      double startTime,
-      double timeOffset,
+      double start_time,
+      double time_offset,
       const KeyframeEffectModelBase&,
       Vector<std::unique_ptr<CompositorAnimation>>& animations,
-      double animationPlaybackRate);
+      double animation_playback_rate);
+
+ private:
+  static FailureCode CheckCanStartEffectOnCompositor(
+      const Timing&,
+      const Element&,
+      const Animation*,
+      const EffectModel&,
+      double animation_playback_rate);
+  static FailureCode CheckCanStartElementOnCompositor(const Element&);
+
+  friend class AnimationCompositorAnimationsTest;
+  FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,
+                           canStartElementOnCompositorTransformSPv2);
+  FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,
+                           canStartElementOnCompositorEffectSPv2);
+  FRIEND_TEST_ALL_PREFIXES(AnimationCompositorAnimationsTest,
+                           cancelIncompatibleCompositorAnimations);
 };
 
 }  // namespace blink

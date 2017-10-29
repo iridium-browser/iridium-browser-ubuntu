@@ -10,6 +10,10 @@ if (is_android) {
   import("//build/config/android/rules.gni")
 }
 
+if (is_win) {
+  import("//build/config/win/visual_studio_version.gni")
+}
+
 config("tools_config") {
   include_dirs = [
     "src",
@@ -191,7 +195,7 @@ if (!is_win) {
 
       deps = [
         ":stackwalk_common",
-        "//build/config/sanitizers:deps",
+        "//build/config:exe_and_shlib_deps",
       ]
 
       defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
@@ -211,7 +215,7 @@ if (!is_win) {
 
       deps = [
         ":stackwalk_common",
-        "//build/config/sanitizers:deps",
+        "//build/config:exe_and_shlib_deps",
       ]
 
       defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
@@ -256,7 +260,7 @@ if (!is_win) {
       configs += [ "//build/config/compiler:no_chromium_code" ]
 
       deps = [
-        "//build/config/sanitizers:deps",
+        "//build/config:exe_and_shlib_deps",
       ]
     }
   } else {
@@ -336,7 +340,7 @@ if (is_mac) {
       }
 
       deps = [
-        "//build/config/sanitizers:deps",
+        "//build/config:exe_and_shlib_deps",
       ]
     }
 
@@ -354,7 +358,7 @@ if (is_mac) {
       configs += [ "//build/config/compiler:no_chromium_code" ]
 
       deps = [
-        "//build/config/sanitizers:deps",
+        "//build/config:exe_and_shlib_deps",
       ]
     }
   } else {
@@ -426,7 +430,7 @@ if (is_mac) {
 
     deps = [
       ":utilities",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
     ]
   }
 
@@ -489,7 +493,7 @@ if (is_linux || is_android) {
       libs = [ "dl" ]
 
       deps = [
-        "//build/config/sanitizers:deps",
+        "//build/config:exe_and_shlib_deps",
       ]
     }
 
@@ -552,7 +556,7 @@ if (is_linux || is_android) {
       include_dirs = [ "src" ]
 
       deps = [
-        "//build/config/sanitizers:deps",
+        "//build/config:exe_and_shlib_deps",
       ]
     }
   } else {
@@ -717,7 +721,7 @@ if (is_linux || is_android) {
       ":client",
       ":linux_dumper_unittest_helper",
       ":processor_support",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
       "//testing/gmock",
       "//testing/gtest",
       "//testing/gtest:gtest_main",
@@ -764,7 +768,7 @@ if (is_linux || is_android) {
     ]
     deps = [
       ":processor_support",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
     ]
 
     configs += [ ":client_config" ]
@@ -786,7 +790,7 @@ if (is_linux || is_android) {
 
     deps = [
       ":client",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
     ]
 
     if (is_android) {
@@ -804,7 +808,7 @@ if (is_linux || is_android) {
 
     deps = [
       ":client",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
     ]
   }
 
@@ -816,10 +820,52 @@ if (is_linux || is_android) {
 
     deps = [
       ":client",
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
     ]
 
     include_dirs = [ "src" ]
+  }
+}
+
+if (is_win) {
+  executable("dump_syms") {
+    # TODO(scottmg) using this with VS2015 may break the crash server.
+    # https://crbug.com/696671
+    include_dirs = [
+      "$visual_studio_path/DIA SDK/include",
+      "src",
+    ]
+
+    sources = [
+      "src/common/windows/dia_util.cc",
+      "src/common/windows/dia_util.h",
+      "src/common/windows/guid_string.cc",
+      "src/common/windows/guid_string.h",
+      "src/common/windows/omap.cc",
+      "src/common/windows/omap.h",
+      "src/common/windows/pdb_source_line_writer.cc",
+      "src/common/windows/pdb_source_line_writer.h",
+      "src/common/windows/string_utils-inl.h",
+      "src/common/windows/string_utils.cc",
+      "src/tools/windows/dump_syms/dump_syms.cc",
+    ]
+
+    lib_dirs = []
+    if (target_cpu == "x64") {
+      lib_dirs += [ "$visual_studio_path/DIA SDK/lib/amd64" ]
+    } else {
+      lib_dirs += [ "$visual_studio_path/DIA SDK/lib" ]
+    }
+
+    libs = [
+      "diaguids.lib",
+      "imagehlp.lib",
+    ]
+    if (is_clang) {
+      # clang complains about microsoft-specific goto extensions. Instead of
+      # rewriting decade-old, goto-ridden code, disable the warning.
+      cflags = [ "-Wno-microsoft-goto" ]
+    }
   }
 }
 
@@ -937,15 +983,5 @@ if (is_win) {
     ]
     configs += [ ":sender_config" ]
     public_configs = [ ":sender_config" ]
-  }
-}
-
-if (is_android) {
-  # TODO(GYP_GONE) Delete this after we've converted everything to GN.
-  group("breakpad_unittests_deps") {
-    testonly = true
-    deps = [
-      ":breakpad_unittests",
-    ]
   }
 }

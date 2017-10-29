@@ -93,13 +93,14 @@ class TestRunner : public WebTestRunner {
   bool IsRecursiveLayoutDumpRequested() override;
   std::string DumpLayout(blink::WebLocalFrame* frame) override;
   void DumpPixelsAsync(
-      blink::WebView* web_view,
-      const base::Callback<void(const SkBitmap&)>& callback) override;
+      blink::WebLocalFrame* frame,
+      base::OnceCallback<void(const SkBitmap&)> callback) override;
   void ReplicateLayoutTestRuntimeFlagsChanges(
       const base::DictionaryValue& changed_values) override;
   bool HasCustomTextDump(std::string* custom_text_dump) const override;
   bool ShouldDumpBackForwardList() const override;
   blink::WebContentSettingsClient* GetWebContentSettings() const override;
+  blink::WebTextCheckClient* GetWebTextCheckClient() const override;
   void InitializeWebViewWithMocks(blink::WebView* web_view) override;
   void SetFocus(blink::WebView* web_view, bool focus) override;
 
@@ -134,7 +135,6 @@ class TestRunner : public WebTestRunner {
   bool canOpenWindows() const;
   bool shouldDumpResourceLoadCallbacks() const;
   bool shouldDumpResourceResponseMIMETypes() const;
-  bool shouldDumpStatusCallbacks() const;
   bool shouldDumpSpellCheckCallbacks() const;
   bool shouldWaitUntilExternalURLLoad() const;
   const std::set<std::string>* httpHeadersToClear() const;
@@ -283,8 +283,6 @@ class TestRunner : public WebTestRunner {
                             int max_height);
   bool DisableAutoResizeMode(int new_width, int new_height);
 
-  void SetMockDeviceLight(double value);
-  void ResetDeviceLight();
   // Device Motion / Device Orientation related functions
   void SetMockDeviceMotion(bool has_acceleration_x,
                            double acceleration_x,
@@ -427,11 +425,6 @@ class TestRunner : public WebTestRunner {
   // contains the empty string, all subresource loads will be disallowed.
   void SetDisallowedSubresourcePathSuffixes(
       const std::vector<std::string>& suffixes);
-
-  // This function sets a flag that tells the test_shell to dump all calls
-  // to window.status().
-  // It takes no arguments, and ignores any that may be present.
-  void DumpWindowStatusChanges();
 
   // This function sets a flag that tells the test_shell to dump all
   // the lines of descriptive text about spellcheck execution.
@@ -656,7 +649,7 @@ class TestRunner : public WebTestRunner {
   // is ok, because this is taken care of in WebTestDelegate::SetFocus).
   blink::WebView* previously_focused_view_;
 
-  // True if we run a test in LayoutTests/imported/{csswg-test,wpt}/.
+  // True when running a test in LayoutTests/external/wpt/.
   bool is_web_platform_tests_mode_;
 
   // An effective connection type settable by layout tests.

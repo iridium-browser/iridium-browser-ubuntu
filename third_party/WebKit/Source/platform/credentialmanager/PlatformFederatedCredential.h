@@ -7,8 +7,9 @@
 
 #include "platform/credentialmanager/PlatformCredential.h"
 #include "platform/heap/Handle.h"
+#include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -17,24 +18,26 @@ class PLATFORM_EXPORT PlatformFederatedCredential final
   WTF_MAKE_NONCOPYABLE(PlatformFederatedCredential);
 
  public:
-  static PlatformFederatedCredential* create(
-      const String& id,
-      PassRefPtr<SecurityOrigin> provider,
-      const String& name,
-      const KURL& iconURL);
+  static PlatformFederatedCredential* Create(const String& id,
+                                             RefPtr<SecurityOrigin> provider,
+                                             const String& name,
+                                             const KURL& icon_url);
   ~PlatformFederatedCredential() override;
 
-  PassRefPtr<SecurityOrigin> provider() const { return m_provider; }
+  RefPtr<SecurityOrigin> Provider() const { return provider_; }
 
-  bool isFederated() override { return true; }
+  bool IsFederated() override { return true; }
+  const String& Name() const { return name_; }
+  const KURL& IconURL() const { return icon_url_; }
 
  private:
   PlatformFederatedCredential(const String& id,
-                              PassRefPtr<SecurityOrigin> provider,
+                              RefPtr<SecurityOrigin> provider,
                               const String& name,
-                              const KURL& iconURL);
-
-  RefPtr<SecurityOrigin> m_provider;
+                              const KURL& icon_url);
+  String name_;
+  KURL icon_url_;
+  RefPtr<SecurityOrigin> provider_;
 };
 
 }  // namespace blink

@@ -10,6 +10,7 @@
 
 #include "base/logging.h"
 #include "base/stl_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/manifest_permission.h"
 #include "extensions/common/permissions/manifest_permission_set.h"
@@ -18,8 +19,8 @@ namespace extensions {
 
 namespace {
 
-static base::LazyInstance<ManifestHandlerRegistry> g_registry =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<ManifestHandlerRegistry>::DestructorAtExit
+    g_registry = LAZY_INSTANCE_INITIALIZER;
 static ManifestHandlerRegistry* g_registry_override = NULL;
 
 ManifestHandlerRegistry* GetRegistry() {
@@ -90,6 +91,7 @@ bool ManifestHandler::ParseExtension(Extension* extension,
 bool ManifestHandler::ValidateExtension(const Extension* extension,
                                         std::string* error,
                                         std::vector<InstallWarning>* warnings) {
+  base::ThreadRestrictions::AssertIOAllowed();
   return GetRegistry()->ValidateExtension(extension, error, warnings);
 }
 

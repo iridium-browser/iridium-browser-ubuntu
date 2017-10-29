@@ -11,7 +11,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "cc/layers/picture_layer.h"
-#include "cc/playback/recording_source.h"
+#include "cc/layers/recording_source.h"
 
 namespace cc {
 class FakePictureLayer : public PictureLayer {
@@ -29,7 +29,8 @@ class FakePictureLayer : public PictureLayer {
   // Layer implementation.
   std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
   bool Update() override;
-  bool IsSuitableForGpuRasterization() const override;
+  bool HasSlowPaths() const override;
+  bool HasNonAAPaint() const override;
 
   int update_count() const { return update_count_; }
   void reset_update_count() { update_count_ = 0; }
@@ -38,8 +39,16 @@ class FakePictureLayer : public PictureLayer {
     always_update_resources_ = always_update_resources;
   }
 
-  void set_force_unsuitable_for_gpu_rasterization(bool flag) {
-    force_unsuitable_for_gpu_rasterization_ = flag;
+  void set_force_content_has_slow_paths(bool flag) {
+    force_content_has_slow_paths_ = flag;
+  }
+
+  void set_force_content_has_non_aa_paint(bool flag) {
+    force_content_has_non_aa_paint_ = flag;
+  }
+
+  void set_fixed_tile_size(gfx::Size fixed_tile_size) {
+    fixed_tile_size_ = fixed_tile_size;
   }
 
  private:
@@ -48,10 +57,12 @@ class FakePictureLayer : public PictureLayer {
                    std::unique_ptr<RecordingSource> source);
   ~FakePictureLayer() override;
 
-  int update_count_;
-  bool always_update_resources_;
+  int update_count_ = 0;
+  bool always_update_resources_ = false;
 
-  bool force_unsuitable_for_gpu_rasterization_;
+  bool force_content_has_slow_paths_ = false;
+  bool force_content_has_non_aa_paint_ = false;
+  gfx::Size fixed_tile_size_;
 };
 
 }  // namespace cc

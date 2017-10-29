@@ -4,18 +4,19 @@
 
 #include "ash/wm/power_button_controller.h"
 
-#include "ash/common/accelerators/accelerator_controller.h"
-#include "ash/common/ash_switches.h"
-#include "ash/common/session/session_state_delegate.h"
-#include "ash/common/system/chromeos/audio/tray_audio.h"
-#include "ash/common/system/tray/system_tray.h"
-#include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
-#include "ash/common/wm_shell.h"
+#include "ash/accelerators/accelerator_controller.h"
+#include "ash/ash_switches.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/session/session_controller.h"
 #include "ash/shell.h"
-#include "ash/system/chromeos/power/tablet_power_button_controller.h"
+#include "ash/shell_delegate.h"
+#include "ash/shutdown_reason.h"
+#include "ash/system/audio/tray_audio.h"
+#include "ash/system/power/tablet_power_button_controller.h"
+#include "ash/system/tray/system_tray.h"
 #include "ash/wm/lock_state_controller.h"
 #include "ash/wm/session_state_animator.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/command_line.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -26,31 +27,19 @@
 namespace ash {
 
 PowerButtonController::PowerButtonController(LockStateController* controller)
-    : power_button_down_(false),
-      lock_button_down_(false),
-      volume_down_pressed_(false),
-      volume_percent_before_screenshot_(0),
-      brightness_is_zero_(false),
-      internal_display_off_and_external_display_on_(false),
-      has_legacy_power_button_(
-          base::CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kAuraLegacyPowerButton)),
-      lock_state_controller_(controller) {
+    : lock_state_controller_(controller) {
+  ProcessCommandLine();
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(
       this);
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshEnableTouchView)) {
-    tablet_controller_.reset(
-        new TabletPowerButtonController(lock_state_controller_));
-  }
-  Shell::GetInstance()->display_configurator()->AddObserver(this);
-  Shell::GetInstance()->PrependPreTargetHandler(this);
+  chromeos::AccelerometerReader::GetInstance()->AddObserver(this);
+  Shell::Get()->display_configurator()->AddObserver(this);
+  Shell::Get()->PrependPreTargetHandler(this);
 }
 
 PowerButtonController::~PowerButtonController() {
-  Shell::GetInstance()->RemovePreTargetHandler(this);
-  Shell::GetInstance()->display_configurator()->RemoveObserver(this);
-  tablet_controller_.reset();
+  Shell::Get()->RemovePreTargetHandler(this);
+  Shell::Get()->display_configurator()->RemoveObserver(this);
+  chromeos::AccelerometerReader::GetInstance()->RemoveObserver(this);
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(
       this);
 }
@@ -68,9 +57,9 @@ void PowerButtonController::OnPowerButtonEvent(
     return;
 
   bool should_take_screenshot = down && volume_down_pressed_ &&
-                                WmShell::Get()
-                                    ->maximize_mode_controller()
-                                    ->IsMaximizeModeWindowManagerEnabled();
+                                Shell::Get()
+                                    ->tablet_mode_controller()
+                                    ->IsTabletModeWindowManagerEnabled();
 
   if (!has_legacy_power_button_ && !should_take_screenshot &&
       tablet_controller_ &&
@@ -87,11 +76,11 @@ void PowerButtonController::OnPowerButtonEvent(
 
   // Take screenshot on power button down plus volume down when in touch view.
   if (should_take_screenshot) {
-    SystemTray* system_tray = Shell::GetInstance()->GetPrimarySystemTray();
+    SystemTray* system_tray = Shell::Get()->GetPrimarySystemTray();
     if (system_tray && system_tray->GetTrayAudio())
       system_tray->GetTrayAudio()->HideDetailedView(false);
 
-    WmShell::Get()->accelerator_controller()->PerformActionIfEnabled(
+    Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
         TAKE_SCREENSHOT);
 
     // Restore volume.
@@ -103,19 +92,19 @@ void PowerButtonController::OnPowerButtonEvent(
     return;
   }
 
-  const SessionStateDelegate* session_state_delegate =
-      WmShell::Get()->GetSessionStateDelegate();
+  const SessionController* const session_controller =
+      Shell::Get()->session_controller();
   if (has_legacy_power_button_) {
     // If power button releases won't get reported correctly because we're not
     // running on official hardware, just lock the screen or shut down
     // immediately.
     if (down) {
-      if (session_state_delegate->CanLockScreen() &&
-          !session_state_delegate->IsUserSessionBlocked() &&
+      if (session_controller->CanLockScreen() &&
+          !session_controller->IsUserSessionBlocked() &&
           !lock_state_controller_->LockRequested()) {
-        lock_state_controller_->StartLockAnimationAndLockImmediately(false);
+        lock_state_controller_->StartLockAnimationAndLockImmediately();
       } else {
-        lock_state_controller_->RequestShutdown();
+        lock_state_controller_->RequestShutdown(ShutdownReason::POWER_BUTTON);
       }
     }
   } else {  // !has_legacy_power_button_
@@ -124,11 +113,13 @@ void PowerButtonController::OnPowerButtonEvent(
       if (lock_state_controller_->LockRequested())
         return;
 
-      if (session_state_delegate->CanLockScreen() &&
-          !session_state_delegate->IsUserSessionBlocked()) {
-        lock_state_controller_->StartLockAnimation(true);
+      if (session_controller->CanLockScreen() &&
+          !session_controller->IsUserSessionBlocked()) {
+        lock_state_controller_->StartLockThenShutdownAnimation(
+            ShutdownReason::POWER_BUTTON);
       } else {
-        lock_state_controller_->StartShutdownAnimation();
+        lock_state_controller_->StartShutdownAnimation(
+            ShutdownReason::POWER_BUTTON);
       }
     } else {  // Button is up.
       if (lock_state_controller_->CanCancelLockAnimation())
@@ -144,10 +135,10 @@ void PowerButtonController::OnLockButtonEvent(
     const base::TimeTicks& timestamp) {
   lock_button_down_ = down;
 
-  const SessionStateDelegate* session_state_delegate =
-      WmShell::Get()->GetSessionStateDelegate();
-  if (!session_state_delegate->CanLockScreen() ||
-      session_state_delegate->IsScreenLocked() ||
+  const SessionController* const session_controller =
+      Shell::Get()->session_controller();
+  if (!session_controller->CanLockScreen() ||
+      session_controller->IsScreenLocked() ||
       lock_state_controller_->LockRequested() ||
       lock_state_controller_->ShutdownRequested()) {
     return;
@@ -158,7 +149,7 @@ void PowerButtonController::OnLockButtonEvent(
     return;
 
   if (down)
-    lock_state_controller_->StartLockAnimation(false);
+    lock_state_controller_->StartLockAnimation();
   else
     lock_state_controller_->CancelLockAnimation();
 }
@@ -195,6 +186,34 @@ void PowerButtonController::PowerButtonEventReceived(
     bool down,
     const base::TimeTicks& timestamp) {
   OnPowerButtonEvent(down, timestamp);
+}
+
+void PowerButtonController::OnAccelerometerUpdated(
+    scoped_refptr<const chromeos::AccelerometerUpdate> update) {
+  if (force_clamshell_power_button_ || tablet_controller_)
+    return;
+  tablet_controller_.reset(
+      new TabletPowerButtonController(lock_state_controller_));
+}
+
+void PowerButtonController::ResetTabletPowerButtonControllerForTest() {
+  tablet_controller_.reset();
+  ProcessCommandLine();
+}
+
+void PowerButtonController::ProcessCommandLine() {
+  const base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
+  has_legacy_power_button_ = cl->HasSwitch(switches::kAuraLegacyPowerButton);
+  force_clamshell_power_button_ =
+      cl->HasSwitch(switches::kForceClamshellPowerButton);
+  if (force_clamshell_power_button_) {
+    // We may update power button behavior from tablet behavior to clamshell
+    // behavior with touchscreen local state disabled. Enabling touchscreen
+    // local state to ensure touchscreen is initially enabled for clamshell.
+    ShellDelegate* delegate = Shell::Get()->shell_delegate();
+    delegate->SetTouchscreenEnabledInPrefs(true, true /* use_local_state */);
+    delegate->UpdateTouchscreenStatusFromPrefs();
+  }
 }
 
 }  // namespace ash

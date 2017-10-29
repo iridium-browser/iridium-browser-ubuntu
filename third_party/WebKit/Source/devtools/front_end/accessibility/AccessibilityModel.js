@@ -4,13 +4,12 @@
 /**
  * @unrestricted
  */
-Accessibility.AccessibilityNode = class extends SDK.SDKObject {
+Accessibility.AccessibilityNode = class {
   /**
    * @param {!Accessibility.AccessibilityModel} accessibilityModel
    * @param {!Protocol.Accessibility.AXNode} payload
    */
   constructor(accessibilityModel, payload) {
-    super(accessibilityModel.target());
     this._accessibilityModel = accessibilityModel;
     this._agent = accessibilityModel._agent;
 
@@ -19,7 +18,7 @@ Accessibility.AccessibilityNode = class extends SDK.SDKObject {
     if (payload.backendDOMNodeId) {
       accessibilityModel._setAXNodeForBackendDOMNodeId(payload.backendDOMNodeId, this);
       this._backendDOMNodeId = payload.backendDOMNodeId;
-      this._deferredDOMNode = new SDK.DeferredDOMNode(this.target(), payload.backendDOMNodeId);
+      this._deferredDOMNode = new SDK.DeferredDOMNode(accessibilityModel.target(), payload.backendDOMNodeId);
     } else {
       this._backendDOMNodeId = null;
       this._deferredDOMNode = null;
@@ -35,6 +34,13 @@ Accessibility.AccessibilityNode = class extends SDK.SDKObject {
     this._properties = payload.properties || null;
     this._childIds = payload.childIds || null;
     this._parentNode = null;
+  }
+
+  /**
+   * @return {!Accessibility.AccessibilityModel}
+   */
+  accessibilityModel() {
+    return this._accessibilityModel;
   }
 
   /**
@@ -140,10 +146,17 @@ Accessibility.AccessibilityNode = class extends SDK.SDKObject {
   }
 
   highlightDOMNode() {
-    if (!this.isDOMNode())
+    if (!this.deferredDOMNode())
       return;
+
+    // Highlight node in page.
+    this.deferredDOMNode().highlight();
+
+    // Highlight node in Elements tree.
     this.deferredDOMNode().resolvePromise().then(node => {
-      SDK.DOMModel.fromTarget(this.target()).nodeHighlightRequested(node.id);
+      if (!node)
+        return;
+      node.domModel().overlayModel().nodeHighlightRequested(node.id);
     });
   }
 
@@ -223,14 +236,6 @@ Accessibility.AccessibilityModel = class extends SDK.SDKModel {
     this._backendDOMNodeIdToAXNode = new Map();
   }
 
-  /**
-   * @param {!SDK.Target} target
-   * @return {?Accessibility.AccessibilityModel}
-   */
-  static fromTarget(target) {
-    return target.model(Accessibility.AccessibilityModel);
-  }
-
   clear() {
     this._axIdToAXNode.clear();
   }
@@ -239,30 +244,18 @@ Accessibility.AccessibilityModel = class extends SDK.SDKModel {
    * @param {!SDK.DOMNode} node
    * @return {!Promise}
    */
-  requestPartialAXTree(node) {
-    /**
-     * @this {Accessibility.AccessibilityModel}
-     * @param {?string} error
-     * @param {!Array<!Protocol.Accessibility.AXNode>=} payloads
-     */
-    function parsePayload(error, payloads) {
-      if (error) {
-        console.error('AccessibilityAgent.getAXNodeChain(): ' + error);
-        return null;
-      }
+  async requestPartialAXTree(node) {
+    var payloads = await this._agent.getPartialAXTree(node.id, true);
+    if (!payloads)
+      return;
 
-      if (!payloads)
-        return;
+    for (var payload of payloads)
+      new Accessibility.AccessibilityNode(this, payload);
 
-      for (var payload of payloads)
-        new Accessibility.AccessibilityNode(this, payload);
-
-      for (var axNode of this._axIdToAXNode.values()) {
-        for (var axChild of axNode.children())
-          axChild._setParentNode(axNode);
-      }
+    for (var axNode of this._axIdToAXNode.values()) {
+      for (var axChild of axNode.children())
+        axChild._setParentNode(axNode);
     }
-    return this._agent.getPartialAXTree(node.id, true, parsePayload.bind(this));
   }
 
   /**
@@ -311,4 +304,4 @@ Accessibility.AccessibilityModel = class extends SDK.SDKModel {
   }
 };
 
-SDK.SDKModel.register(Accessibility.AccessibilityModel, SDK.Target.Capability.DOM);
+SDK.SDKModel.register(Accessibility.AccessibilityModel, SDK.Target.Capability.DOM, false);

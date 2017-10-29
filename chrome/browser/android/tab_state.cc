@@ -4,7 +4,6 @@
 
 #include "chrome/browser/android/tab_state.h"
 
-#include <jni.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -15,7 +14,6 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/logging.h"
-#include "base/memory/scoped_vector.h"
 #include "base/pickle.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/profiles/profile.h"
@@ -287,37 +285,26 @@ bool ExtractNavigationEntries(
 };  // anonymous namespace
 
 ScopedJavaLocalRef<jobject> WebContentsState::GetContentsStateAsByteBuffer(
-    JNIEnv* env, TabAndroid* tab) {
+    JNIEnv* env,
+    TabAndroid* tab) {
   Profile* profile = tab->GetProfile();
   if (!profile)
     return ScopedJavaLocalRef<jobject>();
 
   content::NavigationController& controller =
       tab->web_contents()->GetController();
-  const int pending_index = controller.GetPendingEntryIndex();
-  int entry_count = controller.GetEntryCount();
-  if (entry_count == 0 && pending_index == 0)
-    entry_count++;
-
+  const int entry_count = controller.GetEntryCount();
   if (entry_count == 0)
     return ScopedJavaLocalRef<jobject>();
 
-  int current_entry = controller.GetLastCommittedEntryIndex();
-  if (current_entry == -1 && entry_count > 0)
-    current_entry = 0;
-
   std::vector<content::NavigationEntry*> navigations(entry_count);
   for (int i = 0; i < entry_count; ++i) {
-    content::NavigationEntry* entry = (i == pending_index) ?
-        controller.GetPendingEntry() : controller.GetEntryAtIndex(i);
-    navigations[i] = entry;
+    navigations[i] = controller.GetEntryAtIndex(i);
   }
 
   return WebContentsState::WriteNavigationsAsByteBuffer(
-      env,
-      profile->IsOffTheRecord(),
-      navigations,
-      current_entry);
+      env, profile->IsOffTheRecord(), navigations,
+      controller.GetLastCommittedEntryIndex());
 }
 
 // Common implementation for GetContentsStateAsByteBuffer() and
@@ -575,8 +562,4 @@ static void CreateHistoricalTab(JNIEnv* env,
           env, clazz, state, saved_state_version, true)));
   if (web_contents.get())
     TabAndroid::CreateHistoricalTabFromContents(web_contents.get());
-}
-
-bool RegisterTabState(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }

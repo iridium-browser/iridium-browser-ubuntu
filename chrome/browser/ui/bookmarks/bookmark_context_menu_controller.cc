@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/metrics/user_metrics.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
@@ -31,7 +32,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/undo/bookmark_undo_service.h"
 #include "content/public/browser/page_navigator.h"
-#include "content/public/browser/user_metrics.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using base::UserMetricsAction;
@@ -77,11 +77,19 @@ void BookmarkContextMenuController::BuildMenu() {
     AddItem(IDC_BOOKMARK_BAR_OPEN_ALL_INCOGNITO,
             IDS_BOOKMARK_BAR_OPEN_INCOGNITO);
   } else {
-    AddItem(IDC_BOOKMARK_BAR_OPEN_ALL, IDS_BOOKMARK_BAR_OPEN_ALL);
+    int count = chrome::OpenCount(parent_window_, selection_);
+    AddItem(IDC_BOOKMARK_BAR_OPEN_ALL,
+            l10n_util::GetPluralStringFUTF16(IDS_BOOKMARK_BAR_OPEN_ALL_COUNT,
+                                             count));
     AddItem(IDC_BOOKMARK_BAR_OPEN_ALL_NEW_WINDOW,
-            IDS_BOOKMARK_BAR_OPEN_ALL_NEW_WINDOW);
+            l10n_util::GetPluralStringFUTF16(
+                IDS_BOOKMARK_BAR_OPEN_ALL_COUNT_NEW_WINDOW, count));
+
+    int incognito_count =
+        chrome::OpenCount(parent_window_, selection_, profile_);
     AddItem(IDC_BOOKMARK_BAR_OPEN_ALL_INCOGNITO,
-            IDS_BOOKMARK_BAR_OPEN_ALL_INCOGNITO);
+            l10n_util::GetPluralStringFUTF16(
+                IDS_BOOKMARK_BAR_OPEN_ALL_COUNT_INCOGNITO, incognito_count));
   }
 
   AddSeparator();
@@ -120,6 +128,10 @@ void BookmarkContextMenuController::BuildMenu() {
   AddCheckboxItem(IDC_BOOKMARK_BAR_ALWAYS_SHOW, IDS_SHOW_BOOKMARK_BAR);
 }
 
+void BookmarkContextMenuController::AddItem(int id, const base::string16 str) {
+  menu_model_->AddItem(id, str);
+}
+
 void BookmarkContextMenuController::AddItem(int id, int localization_id) {
   menu_model_->AddItemWithStringId(id, localization_id);
 }
@@ -146,15 +158,15 @@ void BookmarkContextMenuController::ExecuteCommand(int id, int event_flags) {
       WindowOpenDisposition initial_disposition;
       if (id == IDC_BOOKMARK_BAR_OPEN_ALL) {
         initial_disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
-        content::RecordAction(
+        base::RecordAction(
             UserMetricsAction("BookmarkBar_ContextMenu_OpenAll"));
       } else if (id == IDC_BOOKMARK_BAR_OPEN_ALL_NEW_WINDOW) {
         initial_disposition = WindowOpenDisposition::NEW_WINDOW;
-        content::RecordAction(
+        base::RecordAction(
             UserMetricsAction("BookmarkBar_ContextMenu_OpenAllInNewWindow"));
       } else {
         initial_disposition = WindowOpenDisposition::OFF_THE_RECORD;
-        content::RecordAction(
+        base::RecordAction(
             UserMetricsAction("BookmarkBar_ContextMenu_OpenAllIncognito"));
       }
       chrome::OpenAll(parent_window_, navigator_, selection_,
@@ -164,8 +176,7 @@ void BookmarkContextMenuController::ExecuteCommand(int id, int event_flags) {
 
     case IDC_BOOKMARK_BAR_RENAME_FOLDER:
     case IDC_BOOKMARK_BAR_EDIT:
-      content::RecordAction(
-          UserMetricsAction("BookmarkBar_ContextMenu_Edit"));
+      base::RecordAction(UserMetricsAction("BookmarkBar_ContextMenu_Edit"));
 
       if (selection_.size() != 1) {
         NOTREACHED();
@@ -181,24 +192,21 @@ void BookmarkContextMenuController::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_BOOKMARK_BAR_UNDO: {
-      content::RecordAction(
-          UserMetricsAction("BookmarkBar_ContextMenu_Undo"));
+      base::RecordAction(UserMetricsAction("BookmarkBar_ContextMenu_Undo"));
       BookmarkUndoServiceFactory::GetForProfile(profile_)->undo_manager()->
           Undo();
       break;
     }
 
     case IDC_BOOKMARK_BAR_REDO: {
-      content::RecordAction(
-          UserMetricsAction("BookmarkBar_ContextMenu_Redo"));
+      base::RecordAction(UserMetricsAction("BookmarkBar_ContextMenu_Redo"));
       BookmarkUndoServiceFactory::GetForProfile(profile_)->undo_manager()->
           Redo();
       break;
     }
 
     case IDC_BOOKMARK_BAR_REMOVE: {
-      content::RecordAction(
-          UserMetricsAction("BookmarkBar_ContextMenu_Remove"));
+      base::RecordAction(UserMetricsAction("BookmarkBar_ContextMenu_Remove"));
 
       for (size_t i = 0; i < selection_.size(); ++i) {
         int index = selection_[i]->parent()->GetIndexOf(selection_[i]);
@@ -210,8 +218,7 @@ void BookmarkContextMenuController::ExecuteCommand(int id, int event_flags) {
     }
 
     case IDC_BOOKMARK_BAR_ADD_NEW_BOOKMARK: {
-      content::RecordAction(
-          UserMetricsAction("BookmarkBar_ContextMenu_Add"));
+      base::RecordAction(UserMetricsAction("BookmarkBar_ContextMenu_Add"));
 
       int index;
       const BookmarkNode* parent =
@@ -230,7 +237,7 @@ void BookmarkContextMenuController::ExecuteCommand(int id, int event_flags) {
     }
 
     case IDC_BOOKMARK_BAR_NEW_FOLDER: {
-      content::RecordAction(
+      base::RecordAction(
           UserMetricsAction("BookmarkBar_ContextMenu_NewFolder"));
 
       int index;
@@ -266,7 +273,6 @@ void BookmarkContextMenuController::ExecuteCommand(int id, int event_flags) {
     }
 
     case IDC_BOOKMARK_MANAGER: {
-      content::RecordAction(UserMetricsAction("ShowBookmarkManager"));
       if (selection_.size() != 1)
         chrome::ShowBookmarkManager(browser_);
       else if (selection_[0]->is_folder())
@@ -396,7 +402,7 @@ bool BookmarkContextMenuController::IsCommandIdEnabled(int command_id) const {
     case IDC_BOOKMARK_BAR_NEW_FOLDER:
     case IDC_BOOKMARK_BAR_ADD_NEW_BOOKMARK:
       return can_edit && model_->client()->CanBeEditedByUser(parent_) &&
-             bookmarks::GetParentForNewNodes(parent_, selection_, NULL) != NULL;
+             bookmarks::GetParentForNewNodes(parent_, selection_, nullptr);
 
     case IDC_BOOKMARK_BAR_ALWAYS_SHOW:
       return !prefs->IsManagedPreference(bookmarks::prefs::kShowBookmarkBar);

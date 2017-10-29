@@ -32,21 +32,21 @@ extern const char kChromeUIOfflineURL[];
 extern const char kChromeUIPhysicalWebURL[];
 extern const char kChromeUIPopularSitesInternalsURL[];
 extern const char kChromeUISettingsURL[];
+extern const char kChromeUISuggestionsURL[];
 extern const char kChromeUITermsURL[];
 extern const char kChromeUIVersionURL[];
 
 // URL components for Chrome on iOS.
-extern const char kChromeUIAppleFlagsHost[];
 extern const char kChromeUIBookmarksHost[];
 extern const char kChromeUIBrowserCrashHost[];
 extern const char kChromeUIChromeURLsHost[];
 extern const char kChromeUICrashesHost[];
+extern const char kChromeUICrashHost[];
 extern const char kChromeUICreditsHost[];
 extern const char kChromeUIExternalFileHost[];
 extern const char kChromeUIFlagsHost[];
 extern const char kChromeUIGCMInternalsHost[];
 extern const char kChromeUIHistogramHost[];
-extern const char kChromeUIHistoryFrameHost[];
 extern const char kChromeUIHistoryHost[];
 extern const char kChromeUINetExportHost[];
 extern const char kChromeUINewTabHost[];
@@ -57,6 +57,7 @@ extern const char kChromeUIPhysicalWebHost[];
 extern const char kChromeUIPopularSitesInternalsHost[];
 extern const char kChromeUIPolicyHost[];
 extern const char kChromeUISignInInternalsHost[];
+extern const char kChromeUISuggestionsHost[];
 extern const char kChromeUISyncInternalsHost[];
 extern const char kChromeUITermsHost[];
 extern const char kChromeUIVersionHost[];
@@ -98,7 +99,7 @@ extern const char kClearBrowsingDataMyActivityUrlInFooterURL[];
 extern const char kClearBrowsingDataMyActivityUrlInDialogURL[];
 
 // Google history URL for the header notifying the user of other forms of
-// browsing history on the hisory page.
+// browsing history on the history page.
 extern const char kHistoryMyActivityURL[];
 
 // Google history URL for the Clear Browsing Data under Privacy Options.

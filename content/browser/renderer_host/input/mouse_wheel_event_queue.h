@@ -9,18 +9,12 @@
 #include <memory>
 
 #include "base/time/time.h"
-#include "base/timer/timer.h"
 #include "content/browser/renderer_host/event_with_latency_info.h"
 #include "content/common/content_export.h"
 #include "content/common/input/input_event_ack_state.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 
 namespace content {
-
-// The duration in which a ScrollEnd will be sent after the last
-// ScrollUpdate was sent for wheel based gesture scrolls.
-// This value is used only if |enable_scroll_latching_| is true.
-const int64_t kDefaultWheelScrollLatchingTransactionMs = 100;
 
 class QueuedWebMouseWheelEvent;
 
@@ -85,7 +79,6 @@ class CONTENT_EXPORT MouseWheelEventQueue {
                        bool synthetic);
 
   MouseWheelEventQueueClient* client_;
-  base::OneShotTimer scroll_end_timer_;
 
   std::deque<std::unique_ptr<QueuedWebMouseWheelEvent>> wheel_queue_;
   std::unique_ptr<QueuedWebMouseWheelEvent> event_sent_for_gesture_ack_;
@@ -97,10 +90,17 @@ class CONTENT_EXPORT MouseWheelEventQueue {
   // GSB has been sent in the past.
   bool needs_scroll_end_;
 
-  // True if the touchpad and wheel scroll latching is enabled.
+  // True if the touchpad and wheel scroll latching flag is enabled.
   bool enable_scroll_latching_;
 
-  int64_t scroll_transaction_ms_;
+  // True if the async wheel events flag is enabled.
+  bool enable_async_wheel_events_;
+
+  // True if the ack for the first wheel event in a scroll sequence is not
+  // consumed. This lets us to send the rest of the wheel events in the sequence
+  // as non-blocking.
+  bool send_wheel_events_async_;
+
   blink::WebGestureDevice scrolling_device_;
 
   DISALLOW_COPY_AND_ASSIGN(MouseWheelEventQueue);

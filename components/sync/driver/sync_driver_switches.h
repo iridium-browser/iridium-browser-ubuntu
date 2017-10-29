@@ -20,8 +20,12 @@ extern const char kSyncShortInitialRetryOverride[];
 extern const char kSyncShortNudgeDelayForTest[];
 
 extern const base::Feature kSyncClearDataOnPassphraseEncryption;
-extern const base::Feature kSyncUSSDeviceInfo;
+extern const base::Feature kSyncUserEvents;
+extern const base::Feature kSyncUserLanguageDetectionEvents;
+extern const base::Feature kSyncUserTranslationEvents;
 extern const base::Feature kSyncUSSAutocomplete;
+extern const base::Feature kSyncUSSTypedURL;
+extern const base::Feature kSyncUSSDeviceInfo;
 
 }  // namespace switches
 

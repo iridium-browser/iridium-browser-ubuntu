@@ -31,20 +31,19 @@ import android.view.ViewGroup;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.BuildInfo;
-import org.chromium.base.Callback;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
-import org.chromium.chrome.browser.childaccounts.ChildAccountService;
 import org.chromium.chrome.browser.invalidation.InvalidationController;
 import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
 import org.chromium.chrome.browser.preferences.SyncedAccountPreference;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.sync.GoogleServiceAuthError;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.chrome.browser.sync.SyncAccountSwitcher;
-import org.chromium.components.signin.AccountManagerHelper;
+import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.ChromeSigninController;
 import org.chromium.components.sync.AndroidSyncSettings;
 import org.chromium.components.sync.ModelType;
@@ -254,7 +253,7 @@ public class SyncCustomizationFragment extends PreferenceFragment
      * @return Whether Sync can be disabled.
      */
     private boolean canDisableSync() {
-        return !ChildAccountService.isChildAccount();
+        return !Profile.getLastUsedProfile().isChild();
     }
 
     private boolean isSyncTypePreference(Preference preference) {
@@ -336,7 +335,7 @@ public class SyncCustomizationFragment extends PreferenceFragment
         // We remove the the SyncedAccountPreference if there's only 1 account on the device, so
         // it's possible for accountList to be null
         if (accountList != null) {
-            Account[] accounts = AccountManagerHelper.get(getActivity()).getGoogleAccounts();
+            Account[] accounts = AccountManagerFacade.get().tryGetGoogleAccounts();
             if (accounts.length <= 1) {
                 getPreferenceScreen().removePreference(accountList);
             } else {
@@ -680,8 +679,7 @@ public class SyncCustomizationFragment extends PreferenceFragment
             case SYNC_AUTH_ERROR:
                 return res.getString(R.string.hint_sync_auth_error);
             case SYNC_CLIENT_OUT_OF_DATE:
-                return res.getString(
-                        R.string.hint_client_out_of_date, BuildInfo.getPackageLabel(getActivity()));
+                return res.getString(R.string.hint_client_out_of_date, BuildInfo.getPackageLabel());
             case SYNC_OTHER_ERRORS:
                 return res.getString(R.string.hint_other_sync_errors);
             case SYNC_PASSPHRASE_REQUIRED:
@@ -710,26 +708,21 @@ public class SyncCustomizationFragment extends PreferenceFragment
         }
 
         if (mCurrentSyncError == SYNC_AUTH_ERROR) {
-            AccountManagerHelper.get(getActivity())
-                    .updateCredentials(ChromeSigninController.get(getActivity()).getSignedInUser(),
-                            getActivity(), new Callback<Boolean>() {
-                                @Override
-                                public void onResult(Boolean result) {}
-                            });
+            AccountManagerFacade.get().updateCredentials(
+                    ChromeSigninController.get().getSignedInUser(), getActivity(), null);
             return;
         }
 
         if (mCurrentSyncError == SYNC_CLIENT_OUT_OF_DATE) {
             // Opens the client in play store for update.
             Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setData(
-                    Uri.parse("market://details?id=" + BuildInfo.getPackageName(getActivity())));
+            intent.setData(Uri.parse("market://details?id=" + BuildInfo.getPackageName()));
             startActivity(intent);
             return;
         }
 
         if (mCurrentSyncError == SYNC_OTHER_ERRORS) {
-            final Account account = ChromeSigninController.get(getActivity()).getSignedInUser();
+            final Account account = ChromeSigninController.get().getSignedInUser();
             SigninManager.get(getActivity()).signOut(new Runnable() {
                 @Override
                 public void run() {

@@ -11,7 +11,7 @@
 #include "content/common/indexed_db/indexed_db.mojom.h"
 
 namespace base {
-class SingleThreadTaskRunner;
+class SequencedTaskRunner;
 }
 
 namespace content {
@@ -20,11 +20,13 @@ class IndexedDBCursor;
 class IndexedDBDispatcherHost;
 class IndexedDBKey;
 
+// Expected to be constructed, called, and destructed on the IO thread.
 class CursorImpl : public ::indexed_db::mojom::Cursor {
  public:
   CursorImpl(std::unique_ptr<IndexedDBCursor> cursor,
              const url::Origin& origin,
-             scoped_refptr<IndexedDBDispatcherHost> dispatcher_host);
+             IndexedDBDispatcherHost* dispatcher_host,
+             scoped_refptr<base::SequencedTaskRunner> idb_runner);
   ~CursorImpl() override;
 
   // ::indexed_db::mojom::Cursor implementation
@@ -44,12 +46,14 @@ class CursorImpl : public ::indexed_db::mojom::Cursor {
       const std::vector<std::string>& unused_blob_uuids) override;
 
  private:
-  class IDBThreadHelper;
+  class IDBSequenceHelper;
 
-  IDBThreadHelper* helper_;
-  scoped_refptr<IndexedDBDispatcherHost> dispatcher_host_;
+  IDBSequenceHelper* helper_;
+  // This raw pointer is safe because all CursorImpl instances are owned by an
+  // IndexedDBDispatcherHost.
+  IndexedDBDispatcherHost* dispatcher_host_;
   const url::Origin origin_;
-  scoped_refptr<base::SingleThreadTaskRunner> idb_runner_;
+  scoped_refptr<base::SequencedTaskRunner> idb_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(CursorImpl);
 };

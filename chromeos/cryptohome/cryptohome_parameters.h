@@ -149,24 +149,6 @@ struct CHROMEOS_EXPORT Authorization {
   std::string label;
 };
 
-// Parameters for Mount call.
-class CHROMEOS_EXPORT MountParameters {
- public:
-  explicit MountParameters(bool ephemeral);
-  MountParameters(const MountParameters& other);
-  ~MountParameters();
-
-  bool operator==(const MountParameters& other) const;
-
-  // If |true|, the mounted home dir will be backed by tmpfs. If |false|, the
-  // ephemeral users policy decides whether tmpfs or an encrypted directory is
-  // used as the backend.
-  bool ephemeral;
-
-  // If not empty, home dir will be created with these keys if it exist.
-  std::vector<KeyDefinition> create_keys;
-};
-
 // This function returns true if cryptohome of |account_id| is migrated to
 // accountId-based identifier (AccountId::GetAccountIdKey()).
 bool GetGaiaIdMigrationStatus(const AccountId& account_id);
@@ -176,16 +158,5 @@ bool GetGaiaIdMigrationStatus(const AccountId& account_id);
 void SetGaiaIdMigrationStatusDone(const AccountId& account_id);
 
 }  // namespace cryptohome
-
-namespace BASE_HASH_NAMESPACE {
-
-// Implement hashing of cryptohome::Identification, so it can be used as a key
-// in STL containers.
-template <>
-struct hash<cryptohome::Identification> {
-  std::size_t operator()(const cryptohome::Identification& cryptohome_id) const;
-};
-
-}  // namespace BASE_HASH_NAMESPACE
 
 #endif  // CHROMEOS_CRYPTOHOME_CRYPTOHOME_PARAMETERS_H_

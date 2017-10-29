@@ -10,6 +10,7 @@
 #include "base/atomicops.h"
 #include "base/base_export.h"
 #include "base/callback_forward.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_base.h"
 #include "base/synchronization/waitable_event.h"
@@ -22,7 +23,6 @@ namespace base {
 
 class ConditionVariable;
 class HistogramBase;
-class SequenceToken;
 
 namespace internal {
 
@@ -55,11 +55,11 @@ class BASE_EXPORT TaskTracker {
   // this operation is allowed (|task| should be posted if-and-only-if it is).
   bool WillPostTask(const Task* task);
 
-  // Runs |task| unless the current shutdown state prevents that.
-  // |sequence_token| is the token identifying the sequence from which |task|
-  // was extracted. Returns true if |task| ran. WillPostTask() must have allowed
-  // |task| to be posted before this is called.
-  bool RunTask(std::unique_ptr<Task> task, const SequenceToken& sequence_token);
+  // Runs the next task in |sequence| unless the current shutdown state
+  // prevents that. Then, pops the task from |sequence| (even if it didn't run).
+  // Returns true if the sequence was made empty after popping the task.
+  // WillPostTask() must have allowed |task| to be posted before this is called.
+  bool RunNextTask(Sequence* sequence);
 
   // Returns true once shutdown has started (Shutdown() has been called but
   // might not have returned). Note: sequential consistency with the thread
@@ -76,9 +76,25 @@ class BASE_EXPORT TaskTracker {
   void SetHasShutdownStartedForTesting();
 
  protected:
-  // Runs |task|. An override is expected to call its parent's implementation
-  // but is free to perform extra work before and after doing so.
-  virtual void PerformRunTask(std::unique_ptr<Task> task);
+  // Runs |task|. |sequence| is the sequence from which |task| was extracted.
+  // An override is expected to call its parent's implementation but
+  // is free to perform extra work before and after doing so.
+  virtual void PerformRunTask(std::unique_ptr<Task> task, Sequence* sequence);
+
+#if DCHECK_IS_ON()
+  // Returns true if this context should be exempt from blocking shutdown
+  // DCHECKs.
+  // TODO(robliao): Remove when http://crbug.com/698140 is fixed.
+  virtual bool IsPostingBlockShutdownTaskAfterShutdownAllowed();
+#endif
+
+  // Called at the very end of RunNextTask() after the completion of all task
+  // metrics accounting.
+  virtual void OnRunNextTaskCompleted() {}
+
+  // Returns the number of undelayed tasks that haven't completed their
+  // execution.
+  int GetNumPendingUndelayedTasksForTesting() const;
 
  private:
   class State;
@@ -117,9 +133,9 @@ class BASE_EXPORT TaskTracker {
   const std::unique_ptr<State> state_;
 
   // Number of undelayed tasks that haven't completed their execution. Is
-  // incremented and decremented without a barrier. When it reaches zero,
-  // |flush_lock_| is acquired (forcing memory synchronization) and |flush_cv_|
-  // is signaled.
+  // decremented with a memory barrier after a task runs. Is accessed with an
+  // acquire memory barrier in Flush(). The memory barriers ensure that the
+  // memory written by flushed tasks is visible when Flush() returns.
   subtle::Atomic32 num_pending_undelayed_tasks_ = 0;
 
   // Lock associated with |flush_cv_|. Partially synchronizes access to

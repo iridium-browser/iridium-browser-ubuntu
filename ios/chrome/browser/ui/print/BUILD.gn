@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 source_set("print") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "print_controller.h",
     "print_controller.mm",
@@ -32,7 +33,7 @@ source_set("eg_tests") {
     "//ios/chrome/test/app:test_support",
     "//ios/chrome/test/earl_grey:test_support",
     "//ios/third_party/earl_grey",
-    "//ios/web:test_support",
+    "//ios/web/public/test/http_server",
     "//ui/base",
     "//url",
   ]

@@ -24,30 +24,45 @@
 #include "core/dom/TagCollection.h"
 
 #include "core/dom/NodeRareData.h"
-#include "wtf/Assertions.h"
+#include "platform/wtf/Assertions.h"
 
 namespace blink {
 
-TagCollection::TagCollection(ContainerNode& rootNode,
+TagCollection::TagCollection(ContainerNode& root_node,
                              CollectionType type,
-                             const AtomicString& namespaceURI,
-                             const AtomicString& localName)
-    : HTMLCollection(rootNode, type, DoesNotOverrideItemAfter),
-      m_namespaceURI(namespaceURI),
-      m_localName(localName) {
-  DCHECK(m_namespaceURI.isNull() || !m_namespaceURI.isEmpty());
-}
+                             const AtomicString& qualified_name)
+    : HTMLCollection(root_node, type, kDoesNotOverrideItemAfter),
+      qualified_name_(qualified_name) {}
 
 TagCollection::~TagCollection() {}
 
-bool TagCollection::elementMatches(const Element& testNode) const {
+bool TagCollection::ElementMatches(const Element& test_node) const {
+  if (qualified_name_ == g_star_atom)
+    return true;
+
+  return qualified_name_ == test_node.TagQName().ToString();
+}
+
+TagCollectionNS::TagCollectionNS(ContainerNode& root_node,
+                                 CollectionType type,
+                                 const AtomicString& namespace_uri,
+                                 const AtomicString& local_name)
+    : HTMLCollection(root_node, type, kDoesNotOverrideItemAfter),
+      namespace_uri_(namespace_uri),
+      local_name_(local_name) {
+  DCHECK(namespace_uri_.IsNull() || !namespace_uri_.IsEmpty());
+}
+
+TagCollectionNS::~TagCollectionNS() {}
+
+bool TagCollectionNS::ElementMatches(const Element& test_node) const {
   // Implements
   // https://dom.spec.whatwg.org/#concept-getelementsbytagnamens
-  if (m_localName != starAtom && m_localName != testNode.localName())
+  if (local_name_ != g_star_atom && local_name_ != test_node.localName())
     return false;
 
-  return m_namespaceURI == starAtom ||
-         m_namespaceURI == testNode.namespaceURI();
+  return namespace_uri_ == g_star_atom ||
+         namespace_uri_ == test_node.namespaceURI();
 }
 
 }  // namespace blink

@@ -21,9 +21,14 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.WindowDelegate;
+import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.ntp.NewTabPage;
-import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.search_engines.TemplateUrlService;
+import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
 import org.chromium.chrome.browser.util.MathUtils;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContentController;
+import org.chromium.chrome.browser.widget.bottomsheet.EmptyBottomSheetObserver;
 import org.chromium.ui.UiUtils;
 
 /**
@@ -153,7 +158,6 @@ public class LocationBarPhone extends LocationBarLayout {
      * @param hasFocus Whether the URL field has gained focus.
      */
     public void finishUrlFocusChange(boolean hasFocus) {
-        final WindowDelegate windowDelegate = getWindowDelegate();
         if (!hasFocus) {
             // Remove the selection from the url text.  The ending selection position
             // will determine the scroll position when the url field is restored.  If
@@ -183,29 +187,15 @@ public class LocationBarPhone extends LocationBarLayout {
             }, KEYBOARD_HIDE_DELAY_MS);
             // Convert the keyboard back to resize mode (delay the change for an arbitrary amount
             // of time in hopes the keyboard will be completely hidden before making this change).
-            if (mKeyboardResizeModeTask == null
-                    && windowDelegate.getWindowSoftInputMode()
-                            != WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE) {
-                mKeyboardResizeModeTask = new Runnable() {
-                    @Override
-                    public void run() {
-                        windowDelegate.setWindowSoftInputMode(
-                                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-                        mKeyboardResizeModeTask = null;
-                    }
-                };
-                postDelayed(mKeyboardResizeModeTask, KEYBOARD_MODE_CHANGE_DELAY_MS);
+            // If Chrome Home is enabled, it will handle its own mode changes.
+            if (mBottomSheet == null) {
+                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE, true);
             }
             mUrlActionsContainer.setVisibility(GONE);
         } else {
-            if (mKeyboardResizeModeTask != null) {
-                removeCallbacks(mKeyboardResizeModeTask);
-                mKeyboardResizeModeTask = null;
-            }
-            if (windowDelegate.getWindowSoftInputMode()
-                    != WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN) {
-                windowDelegate.setWindowSoftInputMode(
-                        WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
+            // If Chrome Home is enabled, it will handle its own mode changes.
+            if (mBottomSheet == null) {
+                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN, false);
             }
             UiUtils.showKeyboard(mUrlBar);
             // As the position of the navigation icon has changed, ensure the suggestions are
@@ -225,17 +215,33 @@ public class LocationBarPhone extends LocationBarLayout {
 
     @Override
     protected void updateButtonVisibility() {
-        updateDeleteButtonVisibility();
+        super.updateButtonVisibility();
         updateMicButtonVisibility(mUrlFocusChangePercent);
         updateGoogleG();
     }
 
     private void updateGoogleG() {
-        NewTabPage ntp = getToolbarDataProvider().getNewTabPageForCurrentTab();
+        // The toolbar data provider can be null during startup, before the ToolbarManager has been
+        // initialized.
+        ToolbarDataProvider toolbarDataProvider = getToolbarDataProvider();
+        if (toolbarDataProvider == null) return;
 
-        // If the default search engine is not Google, isLocationBarShownInNTP() will return false.
-        if (ntp == null || !ntp.isLocationBarShownInNTP()
-                || !ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_SHOW_GOOGLE_G_IN_OMNIBOX)) {
+        if (LocaleManager.getInstance().hasShownSearchEnginePromo()) {
+            mGoogleGContainer.setVisibility(View.GONE);
+            return;
+        }
+
+        // Only access ChromeFeatureList and TemplateUrlService after the NTP check,
+        // to prevent native method calls before the native side has been initialized.
+        NewTabPage ntp = toolbarDataProvider.getNewTabPageForCurrentTab();
+        boolean isShownInRegularNtp = ntp != null && ntp.isLocationBarShownInNTP()
+                && ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_SHOW_GOOGLE_G_IN_OMNIBOX)
+                && TemplateUrlService.getInstance().isDefaultSearchEngineGoogle();
+
+        boolean isShownInBottomSheetNtp =
+                mBottomSheet != null && mBottomSheet.shouldShowGoogleGInLocationBar();
+
+        if (!isShownInRegularNtp && !isShownInBottomSheetNtp) {
             mGoogleGContainer.setVisibility(View.GONE);
             return;
         }
@@ -243,22 +249,29 @@ public class LocationBarPhone extends LocationBarLayout {
         mGoogleGContainer.setVisibility(View.VISIBLE);
         float animationProgress =
                 GOOGLE_G_FADE_INTERPOLATOR.getInterpolation(mUrlFocusChangePercent);
-        mGoogleG.setAlpha(1 - animationProgress);
+
+        final float finalGScale = 0.3f;
+        // How much we have reduced the size of the G, 0 at the beginning, 0.7 at the end.
+        final float shrinkingProgress = animationProgress * (1 - finalGScale);
 
         FrameLayout.LayoutParams layoutParams =
                 (FrameLayout.LayoutParams) mGoogleG.getLayoutParams();
+        layoutParams.width = Math.round(mGoogleGWidth * (1f - shrinkingProgress));
 
-        // Shrink the width down to 30%.
-        layoutParams.width = Math.round(
-                MathUtils.interpolate(mGoogleGWidth, mGoogleGWidth * 0.3f, animationProgress));
-
-        // Shrink the margin down to 50% minus half of the G width (in the end state), i.e. 15%.
-        ApiCompatibilityUtils.setMarginEnd(layoutParams,
-                Math.round(MathUtils.interpolate(mGoogleGMargin,
-                        mGoogleGMargin * 0.5f - mGoogleGWidth * 0.15f, animationProgress)));
-
+        // Shrink the margin down to 50% minus half of the G width (in the end state).
+        final float finalGoogleGMargin = (mGoogleGMargin - mGoogleGWidth * finalGScale) / 2f;
+        ApiCompatibilityUtils.setMarginEnd(layoutParams, Math.round(MathUtils.interpolate(
+                mGoogleGMargin, finalGoogleGMargin, animationProgress)));
         // Just calling requestLayout() would not resolve the end margin.
         mGoogleG.setLayoutParams(layoutParams);
+
+        // We want the G to be fully transparent when it is 45% of its size.
+        final float scaleWhenTransparent = 0.45f;
+        assert scaleWhenTransparent >= finalGScale;
+
+        // How much we have faded out the G, 0 at the beginning, 1 when we've reduced size to 0.45.
+        final float fadingProgress = Math.min(1, shrinkingProgress / (1 - scaleWhenTransparent));
+        mGoogleG.setAlpha(1 - fadingProgress);
     }
 
     @Override
@@ -284,8 +297,8 @@ public class LocationBarPhone extends LocationBarLayout {
     public void updateVisualsForState() {
         super.updateVisualsForState();
 
-        Tab tab = getCurrentTab();
-        boolean isIncognito = tab != null && tab.isIncognito();
+        boolean isIncognito =
+                getToolbarDataProvider() != null && getToolbarDataProvider().isIncognito();
         mIncognitoBadge.setVisibility(isIncognito ? VISIBLE : GONE);
         updateIncognitoBadgePadding();
     }
@@ -299,5 +312,71 @@ public class LocationBarPhone extends LocationBarLayout {
     public void setLayoutDirection(int layoutDirection) {
         super.setLayoutDirection(layoutDirection);
         updateIncognitoBadgePadding();
+    }
+
+    /**
+     * @param softInputMode The software input resize mode.
+     * @param delay Delay the change in input mode.
+     */
+    private void setSoftInputMode(final int softInputMode, boolean delay) {
+        final WindowDelegate delegate = getWindowDelegate();
+
+        if (mKeyboardResizeModeTask != null) {
+            removeCallbacks(mKeyboardResizeModeTask);
+            mKeyboardResizeModeTask = null;
+        }
+
+        if (delegate == null || delegate.getWindowSoftInputMode() == softInputMode) return;
+
+        if (delay) {
+            mKeyboardResizeModeTask = new Runnable() {
+                @Override
+                public void run() {
+                    delegate.setWindowSoftInputMode(softInputMode);
+                    mKeyboardResizeModeTask = null;
+                }
+            };
+            postDelayed(mKeyboardResizeModeTask, KEYBOARD_MODE_CHANGE_DELAY_MS);
+        } else {
+            delegate.setWindowSoftInputMode(softInputMode);
+        }
+    }
+
+    @Override
+    public void setBottomSheet(BottomSheet sheet) {
+        super.setBottomSheet(sheet);
+
+        sheet.addObserver(new EmptyBottomSheetObserver() {
+            @Override
+            public void onSheetStateChanged(int state) {
+                switch (state) {
+                    case BottomSheet.SHEET_STATE_FULL:
+                        setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN, false);
+                        break;
+                    case BottomSheet.SHEET_STATE_PEEK:
+                        setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE, true);
+                        break;
+                    default:
+                        setSoftInputMode(
+                                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING, false);
+                }
+            }
+        });
+
+        mGoogleGWidth = getResources().getDimensionPixelSize(
+                R.dimen.location_bar_google_g_width_bottom_sheet);
+        mGoogleG.getLayoutParams().width = mGoogleGWidth;
+    }
+
+    @Override
+    public void backKeyPressed() {
+        super.backKeyPressed();
+
+        // If the back button was pressed while the placeholder content was showing, hide the sheet.
+        if (mBottomSheet != null && mBottomSheet.getCurrentSheetContent() != null
+                && mBottomSheet.getCurrentSheetContent().getType()
+                        == BottomSheetContentController.TYPE_PLACEHOLDER) {
+            mBottomSheet.setSheetState(BottomSheet.SHEET_STATE_PEEK, true);
+        }
     }
 }

@@ -12,14 +12,15 @@
 
 #include <utility>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
 #include "webrtc/modules/rtp_rtcp/source/byte_io.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/common_header.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/logging.h"
 
 namespace webrtc {
 namespace rtcp {
 constexpr uint8_t Sdes::kPacketType;
+constexpr size_t Sdes::kMaxNumberOfChunks;
 // Source Description (SDES) (RFC 3550).
 //
 //         0                   1                   2                   3
@@ -152,6 +153,10 @@ bool Sdes::AddCName(uint32_t ssrc, std::string cname) {
   chunks_.push_back(chunk);
   block_length_ += ChunkSize(chunk);
   return true;
+}
+
+size_t Sdes::BlockLength() const {
+  return block_length_;
 }
 
 bool Sdes::Create(uint8_t* packet,

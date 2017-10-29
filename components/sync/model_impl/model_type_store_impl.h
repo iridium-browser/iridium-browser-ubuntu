@@ -10,8 +10,8 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequence_checker.h"
 #include "base/sequenced_task_runner.h"
-#include "base/threading/non_thread_safe.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/model/model_type_store.h"
 
@@ -26,15 +26,13 @@ class ModelTypeStoreBackend;
 // ModelTypeStoreImpl handles details of store initialization, threading and
 // leveldb key formatting. Actual leveldb IO calls are performed by
 // ModelTypeStoreBackend.
-class ModelTypeStoreImpl : public ModelTypeStore, public base::NonThreadSafe {
+class ModelTypeStoreImpl : public ModelTypeStore {
  public:
   ~ModelTypeStoreImpl() override;
 
-  static void CreateStore(
-      ModelType type,
-      const std::string& path,
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
-      const InitCallback& callback);
+  static void CreateStore(ModelType type,
+                          const std::string& path,
+                          const InitCallback& callback);
   static void CreateInMemoryStoreForTest(ModelType type,
                                          const InitCallback& callback);
 
@@ -123,6 +121,8 @@ class ModelTypeStoreImpl : public ModelTypeStore, public base::NonThreadSafe {
 
   // Key for this type's global metadata record.
   const std::string global_metadata_key_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<ModelTypeStoreImpl> weak_ptr_factory_;
 };

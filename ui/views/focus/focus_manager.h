@@ -71,12 +71,6 @@
 // Note that FocusTraversable views do not have to be RootViews:
 // AccessibleToolbarView is FocusTraversable.
 
-namespace base {
-namespace debug {
-class StackTrace;
-}
-}
-
 namespace ui {
 class Accelerator;
 class AcceleratorTarget;
@@ -88,6 +82,7 @@ namespace views {
 class FocusManagerDelegate;
 class FocusSearch;
 class View;
+class ViewTracker;
 class Widget;
 
 // The FocusTraversable interface is used by components that want to process
@@ -212,9 +207,6 @@ class VIEWS_EXPORT FocusManager : public ViewObserver {
   // Returns the View that either currently has focus, or if no view has focus
   // the view that last had focus.
   View* GetStoredFocusView();
-
-  // Clears the stored focused view.
-  void ClearStoredFocusedView();
 
   // Disable shortcut handling.
   void set_shortcut_handling_suspended(bool suspended) {
@@ -355,18 +347,13 @@ class VIEWS_EXPORT FocusManager : public ViewObserver {
   // The view that currently is focused.
   View* focused_view_ = nullptr;
 
-  // TODO(sky): remove, used for debugging 687232.
-  std::unique_ptr<base::debug::StackTrace> stack_when_focused_view_set_;
-
   // The AcceleratorManager this FocusManager is associated with.
   ui::AcceleratorManager accelerator_manager_;
 
   // Keeps track of whether shortcut handling is currently suspended.
   bool shortcut_handling_suspended_ = false;
 
-  // The storage id used in the ViewStorage to store/restore the view that last
-  // had focus.
-  const int stored_focused_view_storage_id_;
+  std::unique_ptr<ViewTracker> view_tracker_for_stored_view_;
 
   // The reason why the focus most recently changed.
   FocusChangeReason focus_change_reason_ = kReasonDirectFocusChange;

@@ -11,9 +11,9 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/webui/signin/sync_confirmation_ui.h"
 #include "chrome/common/url_constants.h"
 #include "components/constrained_window/constrained_window_views.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -22,8 +22,6 @@
 
 namespace {
 
-const int kPasswordCombinedFixedGaiaViewHeight = 440;
-const int kPasswordCombinedFixedGaiaViewWidth = 360;
 const int kFixedGaiaViewHeight = 612;
 const int kModalDialogWidth = 448;
 const int kSyncConfirmationDialogHeight = 487;
@@ -45,14 +43,11 @@ SigninViewControllerDelegateViews::SigninViewControllerDelegateViews(
     ui::ModalType dialog_modal_type,
     bool wait_for_size)
     : SigninViewControllerDelegate(signin_view_controller,
-                                   content_view->GetWebContents()),
+                                   content_view->GetWebContents(),
+                                   browser),
       content_view_(content_view.release()),
       modal_signin_widget_(nullptr),
-      dialog_modal_type_(dialog_modal_type),
-      browser_(browser) {
-  DCHECK(browser_);
-  DCHECK(browser_->tab_strip_model()->GetActiveWebContents())
-      << "A tab must be active to present the sign-in modal dialog.";
+      dialog_modal_type_(dialog_modal_type) {
   DCHECK(dialog_modal_type == ui::MODAL_TYPE_CHILD ||
          dialog_modal_type == ui::MODAL_TYPE_WINDOW)
       << "Unsupported dialog modal type " << dialog_modal_type;
@@ -98,13 +93,13 @@ void SigninViewControllerDelegateViews::PerformClose() {
 }
 
 void SigninViewControllerDelegateViews::ResizeNativeView(int height) {
-  int max_height = browser_
-      ->window()
-      ->GetWebContentsModalDialogHost()
-      ->GetMaximumDialogSize().height();
+  int max_height = browser()
+                       ->window()
+                       ->GetWebContentsModalDialogHost()
+                       ->GetMaximumDialogSize()
+                       .height();
   content_view_->SetPreferredSize(
       gfx::Size(kModalDialogWidth, std::min(height, max_height)));
-  content_view_->Layout();
 
   if (!modal_signin_widget_) {
     // The modal wasn't displayed yet so just show it with the already resized
@@ -117,7 +112,7 @@ void SigninViewControllerDelegateViews::DisplayModal() {
   DCHECK(!modal_signin_widget_);
 
   content::WebContents* host_web_contents =
-      browser_->tab_strip_model()->GetActiveWebContents();
+      browser()->tab_strip_model()->GetActiveWebContents();
 
   // Avoid displaying the sign-in modal view if there are no active web
   // contents. This happens if the user closes the browser window before this
@@ -134,7 +129,7 @@ void SigninViewControllerDelegateViews::DisplayModal() {
       break;
     case ui::MODAL_TYPE_CHILD:
       modal_signin_widget_ = constrained_window::ShowWebModalDialogViews(
-          this, browser_->tab_strip_model()->GetActiveWebContents());
+          this, browser()->tab_strip_model()->GetActiveWebContents());
       break;
     default:
       NOTREACHED() << "Unsupported dialog modal type " << dialog_modal_type_;
@@ -158,12 +153,8 @@ SigninViewControllerDelegateViews::CreateGaiaWebView(
       ->GetWebContentsModalDialogHost()
       ->GetMaximumDialogSize().height();
   // Adds Gaia signin webview.
-  const gfx::Size pref_size =
-      switches::UsePasswordSeparatedSigninFlow()
-          ? gfx::Size(kModalDialogWidth,
-                      std::min(kFixedGaiaViewHeight, max_height))
-          : gfx::Size(kPasswordCombinedFixedGaiaViewWidth,
-                      kPasswordCombinedFixedGaiaViewHeight);
+  const gfx::Size pref_size(kModalDialogWidth,
+                            std::min(kFixedGaiaViewHeight, max_height));
   views::WebView* web_view = new views::WebView(browser->profile());
   web_view->LoadInitialURL(url);
 
@@ -182,32 +173,35 @@ SigninViewControllerDelegateViews::CreateGaiaWebView(
 std::unique_ptr<views::WebView>
 SigninViewControllerDelegateViews::CreateSyncConfirmationWebView(
     Browser* browser) {
-  views::WebView* web_view = new views::WebView(browser->profile());
-  web_view->LoadInitialURL(GURL(chrome::kChromeUISyncConfirmationURL));
-
-  int dialog_preferred_height =
-      GetSyncConfirmationDialogPreferredHeight(browser->profile());
-  int max_height = browser
-      ->window()
-      ->GetWebContentsModalDialogHost()
-      ->GetMaximumDialogSize().height();
-  web_view->SetPreferredSize(gfx::Size(
-      kModalDialogWidth, std::min(dialog_preferred_height, max_height)));
-
-  return std::unique_ptr<views::WebView>(web_view);
+  return CreateDialogWebView(
+      browser, chrome::kChromeUISyncConfirmationURL,
+      GetSyncConfirmationDialogPreferredHeight(browser->profile()));
 }
 
 std::unique_ptr<views::WebView>
 SigninViewControllerDelegateViews::CreateSigninErrorWebView(Browser* browser) {
+  return CreateDialogWebView(browser, chrome::kChromeUISigninErrorURL,
+                             kSigninErrorDialogHeight);
+}
+
+// static
+std::unique_ptr<views::WebView>
+SigninViewControllerDelegateViews::CreateDialogWebView(Browser* browser,
+                                                       const std::string& url,
+                                                       int dialog_height) {
   views::WebView* web_view = new views::WebView(browser->profile());
-  web_view->LoadInitialURL(GURL(chrome::kChromeUISigninErrorURL));
+  web_view->LoadInitialURL(GURL(url));
+
+  SigninWebDialogUI* web_dialog_ui = static_cast<SigninWebDialogUI*>(
+      web_view->GetWebContents()->GetWebUI()->GetController());
+  web_dialog_ui->InitializeMessageHandlerWithBrowser(browser);
 
   int max_height = browser->window()
                        ->GetWebContentsModalDialogHost()
                        ->GetMaximumDialogSize()
                        .height();
-  web_view->SetPreferredSize(gfx::Size(
-      kModalDialogWidth, std::min(kSigninErrorDialogHeight, max_height)));
+  web_view->SetPreferredSize(
+      gfx::Size(kModalDialogWidth, std::min(dialog_height, max_height)));
 
   return std::unique_ptr<views::WebView>(web_view);
 }

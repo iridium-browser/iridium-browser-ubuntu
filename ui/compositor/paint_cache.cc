@@ -4,31 +4,36 @@
 
 #include "ui/compositor/paint_cache.h"
 
-#include "cc/playback/display_item_list.h"
+#include "cc/paint/display_item_list.h"
+#include "cc/paint/paint_op_buffer.h"
 #include "ui/compositor/paint_context.h"
 
 namespace ui {
 
-PaintCache::PaintCache() : has_cache_(false) {
-}
+PaintCache::PaintCache() {}
 
 PaintCache::~PaintCache() {
 }
 
 bool PaintCache::UseCache(const PaintContext& context,
                           const gfx::Size& size_in_context) {
-  if (!has_cache_)
+  if (!paint_op_buffer_)
     return false;
   DCHECK(context.list_);
+  cc::PaintOpBuffer* buffer = context.list_->StartPaint();
+  buffer->push<cc::DrawRecordOp>(paint_op_buffer_);
   gfx::Rect bounds_in_layer = context.ToLayerSpaceBounds(size_in_context);
-  context.list_->CreateAndAppendDrawingItem<cc::DrawingDisplayItem>(
-      bounds_in_layer, display_item_);
+  context.list_->EndPaintOfUnpaired(bounds_in_layer);
   return true;
 }
 
-void PaintCache::SetCache(const cc::DrawingDisplayItem& item) {
-  item.CloneTo(&display_item_);
-  has_cache_ = true;
+cc::PaintOpBuffer* PaintCache::ResetCache() {
+  paint_op_buffer_ = sk_make_sp<cc::PaintOpBuffer>();
+  return paint_op_buffer_.get();
+}
+
+void PaintCache::FinalizeCache() {
+  paint_op_buffer_->ShrinkToFit();
 }
 
 }  // namespace ui

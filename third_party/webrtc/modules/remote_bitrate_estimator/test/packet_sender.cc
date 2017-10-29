@@ -14,10 +14,10 @@
 #include <list>
 #include <sstream>
 
-#include "webrtc/base/checks.h"
 #include "webrtc/modules/include/module_common_types.h"
 #include "webrtc/modules/remote_bitrate_estimator/test/bwe.h"
 #include "webrtc/modules/remote_bitrate_estimator/test/metric_recorder.h"
+#include "webrtc/rtc_base/checks.h"
 
 namespace webrtc {
 namespace testing {
@@ -156,8 +156,7 @@ uint32_t VideoSender::TargetBitrateKbps() {
 PacedVideoSender::PacedVideoSender(PacketProcessorListener* listener,
                                    VideoSource* source,
                                    BandwidthEstimatorType estimator)
-    : VideoSender(listener, source, estimator),
-      pacer_(&clock_, this) {
+    : VideoSender(listener, source, estimator), pacer_(&clock_, this, nullptr) {
   modules_.push_back(&pacer_);
   pacer_.SetEstimatedBitrate(source->bits_per_second());
 }

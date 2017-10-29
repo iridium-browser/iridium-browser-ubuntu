@@ -30,12 +30,13 @@ enum FeatureState {
 // The Feature struct is used to define the default state for a feature. See
 // comment below for more details. There must only ever be one struct instance
 // for a given feature name - generally defined as a constant global variable or
-// file static.
+// file static. It should never be used as a constexpr as it breaks
+// pointer-based identity lookup.
 struct BASE_EXPORT Feature {
-  constexpr Feature(const char* name, FeatureState default_state)
-      : name(name), default_state(default_state) {}
   // The name of the feature. This should be unique to each feature and is used
   // for enabling/disabling features via command line flags and experiments.
+  // It is strongly recommended to use CamelCase style for feature names, e.g.
+  // "MyGreatFeature".
   const char* const name;
 
   // The default state (i.e. enabled or disabled) for this feature.
@@ -69,6 +70,10 @@ struct BASE_EXPORT Feature {
 //
 //   --enable-features=Feature5,Feature7
 //   --disable-features=Feature1,Feature2,Feature3
+//
+// To enable/disable features in a test, do NOT append --enable-features or
+// --disable-features to the command-line directly. Instead, use
+// ScopedFeatureList. See base/test/scoped_feature_list.h for details.
 //
 // After initialization (which should be done single-threaded), the FeatureList
 // API is thread safe.
@@ -156,9 +161,10 @@ class BASE_EXPORT FeatureList {
   // called after the singleton instance has been registered via SetInstance().
   static FieldTrial* GetFieldTrial(const Feature& feature);
 
-  // Splits a comma-separated string containing feature names into a vector.
-  static std::vector<std::string> SplitFeatureListString(
-      const std::string& input);
+  // Splits a comma-separated string containing feature names into a vector. The
+  // resulting pieces point to parts of |input|.
+  static std::vector<base::StringPiece> SplitFeatureListString(
+      base::StringPiece input);
 
   // Initializes and sets an instance of FeatureList with feature overrides via
   // command-line flags |enable_features| and |disable_features| if one has not

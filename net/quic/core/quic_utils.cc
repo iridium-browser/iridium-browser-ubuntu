@@ -11,9 +11,9 @@
 #include "base/containers/adapters.h"
 #include "base/logging.h"
 #include "net/quic/core/quic_constants.h"
-#include "net/quic/core/quic_flags.h"
+#include "net/quic/platform/api/quic_bug_tracker.h"
+#include "net/quic/platform/api/quic_flags.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace net {
@@ -29,7 +29,7 @@ namespace {
 #endif
 
 #ifdef QUIC_UTIL_HAS_UINT128
-uint128 IncrementalHashFast(uint128 uhash, StringPiece data) {
+uint128 IncrementalHashFast(uint128 uhash, QuicStringPiece data) {
   // This code ends up faster than the naive implementation for 2 reasons:
   // 1. uint128 from base/int128.h is sufficiently complicated that the compiler
   //    cannot transform the multiplication by kPrime into a shift-multiply-add;
@@ -53,7 +53,7 @@ uint128 IncrementalHashFast(uint128 uhash, StringPiece data) {
 
 #ifndef QUIC_UTIL_HAS_UINT128
 // Slow implementation of IncrementalHash. In practice, only used by Chromium.
-uint128 IncrementalHashSlow(uint128 hash, StringPiece data) {
+uint128 IncrementalHashSlow(uint128 hash, QuicStringPiece data) {
   // kPrime = 309485009821345068724781371
   static const uint128 kPrime = MakeUint128(16777216, 315);
   const uint8_t* octets = reinterpret_cast<const uint8_t*>(data.data());
@@ -65,7 +65,7 @@ uint128 IncrementalHashSlow(uint128 hash, StringPiece data) {
 }
 #endif
 
-uint128 IncrementalHash(uint128 hash, StringPiece data) {
+uint128 IncrementalHash(uint128 hash, QuicStringPiece data) {
 #ifdef QUIC_UTIL_HAS_UINT128
   return IncrementalHashFast(hash, data);
 #else
@@ -76,7 +76,7 @@ uint128 IncrementalHash(uint128 hash, StringPiece data) {
 }  // namespace
 
 // static
-uint64_t QuicUtils::FNV1a_64_Hash(StringPiece data) {
+uint64_t QuicUtils::FNV1a_64_Hash(QuicStringPiece data) {
   static const uint64_t kOffset = UINT64_C(14695981039346656037);
   static const uint64_t kPrime = UINT64_C(1099511628211);
 
@@ -93,19 +93,20 @@ uint64_t QuicUtils::FNV1a_64_Hash(StringPiece data) {
 }
 
 // static
-uint128 QuicUtils::FNV1a_128_Hash(StringPiece data) {
-  return FNV1a_128_Hash_Three(data, StringPiece(), StringPiece());
+uint128 QuicUtils::FNV1a_128_Hash(QuicStringPiece data) {
+  return FNV1a_128_Hash_Three(data, QuicStringPiece(), QuicStringPiece());
 }
 
 // static
-uint128 QuicUtils::FNV1a_128_Hash_Two(StringPiece data1, StringPiece data2) {
-  return FNV1a_128_Hash_Three(data1, data2, StringPiece());
+uint128 QuicUtils::FNV1a_128_Hash_Two(QuicStringPiece data1,
+                                      QuicStringPiece data2) {
+  return FNV1a_128_Hash_Three(data1, data2, QuicStringPiece());
 }
 
 // static
-uint128 QuicUtils::FNV1a_128_Hash_Three(StringPiece data1,
-                                        StringPiece data2,
-                                        StringPiece data3) {
+uint128 QuicUtils::FNV1a_128_Hash_Three(QuicStringPiece data1,
+                                        QuicStringPiece data2,
+                                        QuicStringPiece data3) {
   // The two constants are defined as part of the hash algorithm.
   // see http://www.isthe.com/chongo/tech/comp/fnv/
   // kOffset = 144066263297769815596495629667062367629
@@ -176,21 +177,6 @@ string QuicUtils::PeerAddressChangeTypeToString(PeerAddressChangeType type) {
 }
 
 // static
-uint64_t QuicUtils::PackPathIdAndPacketNumber(QuicPathId path_id,
-                                              QuicPacketNumber packet_number) {
-  // Setting the nonce below relies on QuicPathId and QuicPacketNumber being
-  // specific sizes.
-  static_assert(sizeof(path_id) == 1, "Size of QuicPathId changed.");
-  static_assert(sizeof(packet_number) == 8,
-                "Size of QuicPacketNumber changed.");
-  // Use path_id and lower 7 bytes of packet_number as lower 8 bytes of nonce.
-  uint64_t path_id_packet_number =
-      (static_cast<uint64_t>(path_id) << 56) | packet_number;
-  DCHECK(path_id != kDefaultPathId || path_id_packet_number == packet_number);
-  return path_id_packet_number;
-}
-
-// static
 PeerAddressChangeType QuicUtils::DetermineAddressChangeType(
     const QuicSocketAddress& old_address,
     const QuicSocketAddress& new_address) {
@@ -221,6 +207,59 @@ PeerAddressChangeType QuicUtils::DetermineAddressChangeType(
   }
 
   return IPV4_TO_IPV4_CHANGE;
+}
+
+// static
+void QuicUtils::CopyToBuffer(QuicIOVector iov,
+                             size_t iov_offset,
+                             size_t length,
+                             char* buffer) {
+  int iovnum = 0;
+  while (iovnum < iov.iov_count && iov_offset >= iov.iov[iovnum].iov_len) {
+    iov_offset -= iov.iov[iovnum].iov_len;
+    ++iovnum;
+  }
+  DCHECK_LE(iovnum, iov.iov_count);
+  DCHECK_LE(iov_offset, iov.iov[iovnum].iov_len);
+  if (iovnum >= iov.iov_count || length == 0) {
+    return;
+  }
+
+  // Unroll the first iteration that handles iov_offset.
+  const size_t iov_available = iov.iov[iovnum].iov_len - iov_offset;
+  size_t copy_len = std::min(length, iov_available);
+
+  // Try to prefetch the next iov if there is at least one more after the
+  // current. Otherwise, it looks like an irregular access that the hardware
+  // prefetcher won't speculatively prefetch. Only prefetch one iov because
+  // generally, the iov_offset is not 0, input iov consists of 2K buffers and
+  // the output buffer is ~1.4K.
+  if (copy_len == iov_available && iovnum + 1 < iov.iov_count) {
+    // TODO(ckrasic) - this is unused without prefetch()
+    // char* next_base = static_cast<char*>(iov.iov[iovnum + 1].iov_base);
+    // char* next_base = static_cast<char*>(iov.iov[iovnum + 1].iov_base);
+    // Prefetch 2 cachelines worth of data to get the prefetcher started; leave
+    // it to the hardware prefetcher after that.
+    // TODO(ckrasic) - investigate what to do about prefetch directives.
+    // prefetch(next_base, PREFETCH_HINT_T0);
+    if (iov.iov[iovnum + 1].iov_len >= 64) {
+      // TODO(ckrasic) - investigate what to do about prefetch directives.
+      // prefetch(next_base + CACHELINE_SIZE, PREFETCH_HINT_T0);
+    }
+  }
+
+  const char* src = static_cast<char*>(iov.iov[iovnum].iov_base) + iov_offset;
+  while (true) {
+    memcpy(buffer, src, copy_len);
+    length -= copy_len;
+    buffer += copy_len;
+    if (length == 0 || ++iovnum >= iov.iov_count) {
+      break;
+    }
+    src = static_cast<char*>(iov.iov[iovnum].iov_base);
+    copy_len = std::min(length, iov.iov[iovnum].iov_len);
+  }
+  QUIC_BUG_IF(length > 0) << "Failed to copy entire length to buffer.";
 }
 
 }  // namespace net

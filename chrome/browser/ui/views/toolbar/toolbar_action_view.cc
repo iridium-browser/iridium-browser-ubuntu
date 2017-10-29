@@ -106,6 +106,10 @@ SkColor ToolbarActionView::GetInkDropBaseColor() const {
       ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON);
 }
 
+bool ToolbarActionView::ShouldUseFloodFillInkDrop() const {
+  return delegate_->ShownInsideMenu();
+}
+
 std::unique_ptr<views::InkDrop> ToolbarActionView::CreateInkDrop() {
   std::unique_ptr<views::InkDropImpl> ink_drop =
       CustomButton::CreateDefaultInkDropImpl();
@@ -175,7 +179,7 @@ gfx::ImageSkia ToolbarActionView::GetIconForTest() {
   return GetImage(views::Button::STATE_NORMAL);
 }
 
-gfx::Size ToolbarActionView::GetPreferredSize() const {
+gfx::Size ToolbarActionView::CalculatePreferredSize() const {
   return gfx::Size(ToolbarActionsBar::IconWidth(false),
                    ToolbarActionsBar::IconHeight());
 }
@@ -274,8 +278,8 @@ void ToolbarActionView::DoShowContextMenu(
   gfx::Point screen_loc;
   ConvertPointToScreen(this, &screen_loc);
 
-  int run_types = views::MenuRunner::HAS_MNEMONICS |
-                  views::MenuRunner::CONTEXT_MENU | views::MenuRunner::ASYNC;
+  int run_types =
+      views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU;
   if (delegate_->ShownInsideMenu())
     run_types |= views::MenuRunner::IS_NESTED;
 
@@ -294,9 +298,8 @@ void ToolbarActionView::DoShowContextMenu(
   menu_ = menu_adapter_->CreateMenu();
   menu_runner_.reset(new views::MenuRunner(menu_, run_types));
 
-  ignore_result(
-      menu_runner_->RunMenuAt(parent, this, gfx::Rect(screen_loc, size()),
-                              views::MENU_ANCHOR_TOPLEFT, source_type));
+  menu_runner_->RunMenuAt(parent, this, gfx::Rect(screen_loc, size()),
+                          views::MENU_ANCHOR_TOPLEFT, source_type);
 }
 
 bool ToolbarActionView::CloseActiveMenuIfNeeded() {

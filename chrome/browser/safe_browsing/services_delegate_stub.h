@@ -26,8 +26,8 @@ class ServicesDelegateStub : public ServicesDelegate {
   void ShutdownServices() override;
   void RefreshState(bool enable) override;
   void ProcessResourceRequest(const ResourceRequestInfo* request) override;
-  std::unique_ptr<TrackedPreferenceValidationDelegate>
-      CreatePreferenceValidationDelegate(Profile* profile) override;
+  std::unique_ptr<prefs::mojom::TrackedPreferenceValidationDelegate>
+  CreatePreferenceValidationDelegate(Profile* profile) override;
   void RegisterDelayedAnalysisCallback(
       const DelayedAnalysisCallback& callback) override;
   void AddDownloadManager(content::DownloadManager* download_manager) override;
@@ -38,6 +38,10 @@ class ServicesDelegateStub : public ServicesDelegate {
     net::URLRequestContextGetter* url_request_context_getter,
     const V4ProtocolConfig& v4_config) override;
   void StopOnIOThread(bool shutdown) override;
+  void CreatePasswordProtectionService(Profile* profile) override;
+  void RemovePasswordProtectionService(Profile* profile) override;
+  PasswordProtectionService* GetPasswordProtectionService(
+      Profile* profile) const override;
 
   scoped_refptr<SafeBrowsingDatabaseManager> v4_local_database_manager_;
 

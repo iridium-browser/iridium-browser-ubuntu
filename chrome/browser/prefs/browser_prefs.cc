@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "base/files/file_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -74,21 +73,25 @@
 #include "components/certificate_transparency/ct_policy_manager.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/dom_distiller/core/distilled_page_prefs.h"
+#include "components/doodle/doodle_service.h"
 #include "components/flags_ui/pref_service_flags_storage.h"
 #include "components/gcm_driver/gcm_channel_status_syncer.h"
-#include "components/metrics/metrics_service.h"
+#include "components/language/core/browser/url_language_histogram.h"
 #include "components/network_time/network_time_tracker.h"
-#include "components/ntp_snippets/bookmarks/bookmark_suggestions_provider.h"
+#include "components/ntp_snippets/breaking_news/breaking_news_gcm_app_handler.h"
+#include "components/ntp_snippets/breaking_news/subscription_manager_impl.h"
 #include "components/ntp_snippets/content_suggestions_service.h"
 #include "components/ntp_snippets/remote/remote_suggestions_provider_impl.h"
+#include "components/ntp_snippets/remote/remote_suggestions_scheduler_impl.h"
 #include "components/ntp_snippets/remote/request_throttler.h"
-#include "components/ntp_snippets/remote/scheduling_remote_suggestions_provider.h"
 #include "components/ntp_snippets/sessions/foreign_sessions_suggestions_provider.h"
 #include "components/ntp_snippets/user_classifier.h"
 #include "components/ntp_tiles/most_visited_sites.h"
+#include "components/offline_pages/features/features.h"
 #include "components/omnibox/browser/zero_suggest_provider.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/browser/password_manager.h"
+#include "components/payments/core/payment_prefs.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/browser/url_blacklist_manager.h"
 #include "components/policy/core/common/policy_statistics_collector.h"
@@ -97,17 +100,16 @@
 #include "components/prefs/pref_service.h"
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #include "components/rappor/rappor_service_impl.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/ssl_config/ssl_config_service_manager.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #include "components/subresource_filter/core/browser/ruleset_service.h"
 #include "components/sync/base/sync_prefs.h"
 #include "components/sync_preferences/pref_service_syncable.h"
-#include "components/translate/core/browser/language_model.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/update_client/update_client.h"
 #include "components/variations/service/variations_service.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/features/features.h"
 #include "net/http/http_server_properties_manager.h"
@@ -132,17 +134,22 @@
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/extensions/launch_util.h"
+#include "chrome/browser/extensions/ntp_overridden_bubble_delegate.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
+#include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/webui/extensions/extension_settings_handler.h"
+#include "extensions/browser/api/audio/audio_api.h"
 #include "extensions/browser/api/runtime/runtime_api.h"
 #include "extensions/browser/extension_prefs.h"
-#if defined(ENABLE_MEDIA_ROUTER)
-#include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
-#endif  // defined(ENABLE_MEDIA_ROUTER)
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
-#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+#include "chrome/browser/android/offline_pages/prefetch/prefetch_background_task.h"
+#include "chrome/browser/offline_pages/prefetch/offline_metrics_collector_impl.h"
+#endif
+
+#if BUILDFLAG(ENABLE_PLUGINS)
 #include "chrome/browser/plugins/plugins_resource_service.h"
 #endif
 
@@ -163,7 +170,9 @@
 #include "chrome/browser/android/ntp/content_suggestions_notifier_service.h"
 #include "chrome/browser/android/ntp/recent_tabs_page_prefs.h"
 #include "chrome/browser/android/preferences/browser_prefs_android.h"
+#include "chrome/browser/geolocation/geolocation_permission_context_android.h"
 #include "chrome/browser/ntp_snippets/download_suggestions_provider.h"
+#include "components/cdm/browser/media_drm_storage_impl.h"
 #include "components/ntp_snippets/category_rankers/click_based_category_ranker.h"
 #include "components/ntp_snippets/offline_pages/recent_tab_suggestions_provider.h"
 #include "components/ntp_snippets/physical_web_pages/physical_web_page_suggestions_provider.h"
@@ -186,7 +195,9 @@
 #include "chrome/browser/chromeos/extensions/echo_private_api.h"
 #include "chrome/browser/chromeos/file_system_provider/registry.h"
 #include "chrome/browser/chromeos/first_run/first_run.h"
+#include "chrome/browser/chromeos/lock_screen_apps/state_controller.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_mode_detector.h"
+#include "chrome/browser/chromeos/login/quick_unlock/fingerprint_storage.h"
 #include "chrome/browser/chromeos/login/quick_unlock/pin_storage.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_utils.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter.h"
@@ -207,7 +218,7 @@
 #include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
 #include "chrome/browser/chromeos/power/power_prefs.h"
 #include "chrome/browser/chromeos/preferences.h"
-#include "chrome/browser/chromeos/printing/printers_manager.h"
+#include "chrome/browser/chromeos/printing/synced_printers_manager.h"
 #include "chrome/browser/chromeos/resource_reporter/resource_reporter.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service.h"
 #include "chrome/browser/chromeos/settings/device_settings_cache.h"
@@ -223,11 +234,13 @@
 #include "chrome/browser/ui/webui/chromeos/login/reset_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chromeos/audio/audio_devices_pref_handler_impl.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/network/proxy/proxy_config_handler.h"
 #include "chromeos/timezone/timezone_resolver.h"
 #include "components/invalidation/impl/invalidator_storage.h"
 #include "components/onc/onc_pref_names.h"
 #include "components/quirks/quirks_manager.h"
+#include "extensions/browser/api/lock_screen_data/lock_screen_item_storage.h"
 #else
 #include "chrome/browser/extensions/default_apps.h"
 #endif
@@ -244,8 +257,13 @@
 #if defined(OS_WIN)
 #include "chrome/browser/apps/app_launch_for_metro_restart_win.h"
 #include "chrome/browser/component_updater/sw_reporter_installer_win.h"
+#include "chrome/browser/safe_browsing/chrome_cleaner/settings_resetter_win.h"
 #include "chrome/browser/safe_browsing/settings_reset_prompt/settings_reset_prompt_prefs_manager.h"
 #include "chrome/browser/ui/desktop_ios_promotion/desktop_ios_promotion_util.h"
+#endif
+
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
+#include "chrome/browser/feature_engagement_tracker/new_tab/new_tab_tracker.h"
 #endif
 
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
@@ -260,28 +278,12 @@
 #include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
 #endif
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
 #include "chrome/browser/ui/webui/md_history_ui.h"
+#include "chrome/browser/ui/webui/settings/md_settings_ui.h"
 #endif
 
 namespace {
-
-#if BUILDFLAG(ENABLE_GOOGLE_NOW)
-// Deprecated 3/2016
-constexpr char kGoogleGeolocationAccessEnabled[] =
-    "googlegeolocationaccess.enabled";
-#endif
-
-// Deprecated 4/2016.
-constexpr char kCheckDefaultBrowser[] = "browser.check_default_browser";
-
-// Deprecated 5/2016.
-constexpr char kDesktopSearchRedirectionInfobarShownPref[] =
-    "desktop_search_redirection_infobar_shown";
-
-// Deprecated 7/2016.
-constexpr char kNetworkPredictionEnabled[] = "dns_prefetching.enabled";
-constexpr char kDisableSpdy[] = "spdy.disabled";
 
 // Deprecated 8/2016.
 constexpr char kRecentlySelectedEncoding[] =
@@ -310,22 +312,6 @@ constexpr char kDistroRlzPingDelay[] = "ping_delay";
 // stripped in first_run.cc prior to applying this mapping. Cleanup for existing
 // Preferences files added here 2/2017.
 constexpr char kDistroDict[] = "distribution";
-
-void DeleteWebRTCIdentityStoreDBOnFileThread(
-    const base::FilePath& profile_path) {
-  base::DeleteFile(profile_path.Append(
-      FILE_PATH_LITERAL("WebRTCIdentityStore")), false);
-  base::DeleteFile(profile_path.Append(
-      FILE_PATH_LITERAL("WebRTCIdentityStore-journal")), false);
-}
-
-void DeleteWebRTCIdentityStoreDB(const Profile& profile) {
-  content::BrowserThread::PostDelayedTask(
-      content::BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(&DeleteWebRTCIdentityStoreDBOnFileThread, profile.GetPath()),
-      base::TimeDelta::FromSeconds(120));
-}
 
 }  // namespace
 
@@ -369,10 +355,11 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   PluginFinder::RegisterPrefs(registry);
+  PluginsResourceService::RegisterPrefs(registry);
 #endif
 
-#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
-  PluginsResourceService::RegisterPrefs(registry);
+#if defined(OS_ANDROID)
+  ::android::RegisterPrefs(registry);
 #endif
 
 #if !defined(OS_ANDROID)
@@ -425,6 +412,8 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   chromeos::WallpaperManager::RegisterPrefs(registry);
   chromeos::echo_offer::RegisterPrefs(registry);
   extensions::ExtensionAssetsManagerChromeOS::RegisterPrefs(registry);
+  extensions::lock_screen_data::LockScreenItemStorage::RegisterLocalState(
+      registry);
   invalidation::InvalidatorStorage::RegisterPrefs(registry);
   ::onc::RegisterPrefs(registry);
   policy::AutoEnrollmentClient::RegisterPrefs(registry);
@@ -472,29 +461,32 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   chrome_browser_net::RegisterPredictionOptionsProfilePrefs(registry);
   chrome_prefs::RegisterProfilePrefs(registry);
   dom_distiller::DistilledPagePrefs::RegisterProfilePrefs(registry);
+  doodle::DoodleService::RegisterProfilePrefs(registry);
   DownloadPrefs::RegisterProfilePrefs(registry);
   HostContentSettingsMap::RegisterProfilePrefs(registry);
   ImportantSitesUtil::RegisterProfilePrefs(registry);
   IncognitoModePrefs::RegisterProfilePrefs(registry);
   InstantUI::RegisterProfilePrefs(registry);
-  NavigationCorrectionTabObserver::RegisterProfilePrefs(registry);
+  language::UrlLanguageHistogram::RegisterProfilePrefs(registry);
   MediaCaptureDevicesDispatcher::RegisterProfilePrefs(registry);
   MediaDeviceIDSalt::RegisterProfilePrefs(registry);
   MediaStreamDevicesController::RegisterProfilePrefs(registry);
+  NavigationCorrectionTabObserver::RegisterProfilePrefs(registry);
   NetHttpSessionParamsObserver::RegisterProfilePrefs(registry);
   NotifierStateTracker::RegisterProfilePrefs(registry);
-  ntp_snippets::BookmarkSuggestionsProvider::RegisterProfilePrefs(registry);
+  ntp_snippets::BreakingNewsGCMAppHandler::RegisterProfilePrefs(registry);
   ntp_snippets::ContentSuggestionsService::RegisterProfilePrefs(registry);
   ntp_snippets::ForeignSessionsSuggestionsProvider::RegisterProfilePrefs(
       registry);
   ntp_snippets::RemoteSuggestionsProviderImpl::RegisterProfilePrefs(registry);
+  ntp_snippets::RemoteSuggestionsSchedulerImpl::RegisterProfilePrefs(registry);
   ntp_snippets::RequestThrottler::RegisterProfilePrefs(registry);
-  ntp_snippets::SchedulingRemoteSuggestionsProvider::RegisterProfilePrefs(
-      registry);
+  ntp_snippets::SubscriptionManagerImpl::RegisterProfilePrefs(registry);
   ntp_snippets::UserClassifier::RegisterProfilePrefs(registry);
   ntp_tiles::MostVisitedSites::RegisterProfilePrefs(registry);
   password_bubble_experiment::RegisterPrefs(registry);
   password_manager::PasswordManager::RegisterProfilePrefs(registry);
+  payments::RegisterProfilePrefs(registry);
   PrefProxyConfigTrackerImpl::RegisterProfilePrefs(registry);
   PrefsTabHelper::RegisterProfilePrefs(registry);
   Profile::RegisterProfilePrefs(registry);
@@ -502,9 +494,9 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   ProtocolHandlerRegistry::RegisterProfilePrefs(registry);
   PushMessagingAppIdentifier::RegisterProfilePrefs(registry);
   RegisterBrowserUserPrefs(registry);
+  safe_browsing::RegisterProfilePrefs(registry);
   SessionStartupPref::RegisterProfilePrefs(registry);
   TemplateURLPrepopulateData::RegisterProfilePrefs(registry);
-  translate::LanguageModel::RegisterProfilePrefs(registry);
   translate::TranslatePrefs::RegisterProfilePrefs(registry);
   UINetworkQualityEstimatorService::RegisterProfilePrefs(registry);
   ZeroSuggestProvider::RegisterProfilePrefs(registry);
@@ -514,13 +506,14 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   certificate_transparency::CTPolicyManager::RegisterPrefs(registry);
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  EasyUnlockService::RegisterProfilePrefs(registry);
   ExtensionWebUI::RegisterProfilePrefs(registry);
   RegisterAnimationPolicyPrefs(registry);
   ToolbarActionsBar::RegisterProfilePrefs(registry);
   extensions::ActivityLog::RegisterProfilePrefs(registry);
+  extensions::AudioAPI::RegisterUserPrefs(registry);
   extensions::ExtensionPrefs::RegisterProfilePrefs(registry);
   extensions::launch_util::RegisterProfilePrefs(registry);
+  extensions::NtpOverriddenBubbleDelegate::RegisterPrefs(registry);
   extensions::RuntimeAPI::RegisterPrefs(registry);
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
@@ -551,6 +544,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 #if defined(OS_ANDROID)
   ntp_tiles::PopularSitesImpl::RegisterProfilePrefs(registry);
   variations::VariationsService::RegisterProfilePrefs(registry);
+  GeolocationPermissionContextAndroid::RegisterProfilePrefs(registry);
   PartnerBookmarksShim::RegisterProfilePrefs(registry);
   RecentTabsPagePrefs::RegisterProfilePrefs(registry);
 #else
@@ -571,6 +565,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 #endif
 
 #if defined(OS_ANDROID)
+  cdm::MediaDrmStorageImpl::RegisterProfilePrefs(registry);
   ContentSuggestionsNotifierService::RegisterProfilePrefs(registry);
   DownloadSuggestionsProvider::RegisterProfilePrefs(registry);
   ntp_snippets::ClickBasedCategoryRanker::RegisterProfilePrefs(registry);
@@ -581,6 +576,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 
 #if !defined(OS_ANDROID)
   browser_sync::ForeignSessionHandler::RegisterProfilePrefs(registry);
+  first_run::RegisterProfilePrefs(registry);
   gcm::GCMChannelStatusSyncer::RegisterProfilePrefs(registry);
   gcm::RegisterProfilePrefs(registry);
   StartupBrowserCreator::RegisterProfilePrefs(registry);
@@ -590,15 +586,21 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   default_apps::RegisterProfilePrefs(registry);
 #endif
 
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
+  feature_engagement_tracker::NewTabTracker::RegisterProfilePrefs(registry);
+#endif
+
 #if defined(OS_CHROMEOS)
   arc::ArcSessionManager::RegisterProfilePrefs(registry);
+  arc::ArcPolicyBridge::RegisterProfilePrefs(registry);
   chromeos::first_run::RegisterProfilePrefs(registry);
   chromeos::file_system_provider::RegisterProfilePrefs(registry);
   chromeos::KeyPermissions::RegisterProfilePrefs(registry);
   chromeos::MultiProfileUserController::RegisterProfilePrefs(registry);
+  chromeos::quick_unlock::FingerprintStorage::RegisterProfilePrefs(registry);
   chromeos::quick_unlock::PinStorage::RegisterProfilePrefs(registry);
   chromeos::Preferences::RegisterProfilePrefs(registry);
-  chromeos::PrintersManager::RegisterProfilePrefs(registry);
+  chromeos::SyncedPrintersManager::RegisterProfilePrefs(registry);
   chromeos::quick_unlock::RegisterProfilePrefs(registry);
   chromeos::SAMLOfflineSigninLimiter::RegisterProfilePrefs(registry);
   chromeos::ServicesCustomizationDocument::RegisterProfilePrefs(registry);
@@ -606,6 +608,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   chromeos::UserImageSyncObserver::RegisterProfilePrefs(registry);
   extensions::EPKPChallengeUserKey::RegisterProfilePrefs(registry);
   flags_ui::PrefServiceFlagsStorage::RegisterProfilePrefs(registry);
+  lock_screen_apps::StateController::RegisterProfilePrefs(registry);
   policy::DeviceStatusCollector::RegisterProfilePrefs(registry);
   ::onc::RegisterProfilePrefs(registry);
 #endif
@@ -624,6 +627,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   NetworkProfileBubble::RegisterProfilePrefs(registry);
   safe_browsing::SettingsResetPromptPrefsManager::RegisterProfilePrefs(
       registry);
+  safe_browsing::PostCleanupSettingsResetter::RegisterProfilePrefs(registry);
 #endif
 
 #if defined(TOOLKIT_VIEWS)
@@ -632,27 +636,17 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 #endif
 
 #if defined(USE_ASH)
-  ash::launcher::RegisterChromeLauncherUserPrefs(registry);
+  RegisterChromeLauncherUserPrefs(registry);
 #endif
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_ANDROID)
   MdHistoryUI::RegisterProfilePrefs(registry);
+  settings::MdSettingsUI::RegisterProfilePrefs(registry);
 #endif
 
   // Preferences registered only for migration (clearing or moving to a new key)
   // go here.
 
-#if BUILDFLAG(ENABLE_GOOGLE_NOW)
-  registry->RegisterBooleanPref(kGoogleGeolocationAccessEnabled, false);
-#endif
-
-  registry->RegisterBooleanPref(kCheckDefaultBrowser, true);
-
-  registry->RegisterBooleanPref(kDesktopSearchRedirectionInfobarShownPref,
-                                false);
-
-  registry->RegisterBooleanPref(kNetworkPredictionEnabled, true);
-  registry->RegisterBooleanPref(kDisableSpdy, false);
   registry->RegisterStringPref(kStaticEncodings, std::string());
   registry->RegisterStringPref(kRecentlySelectedEncoding, std::string());
   registry->RegisterBooleanPref(kWebKitUsesUniversalDetector, true);
@@ -664,6 +658,11 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 #endif
 
   registry->RegisterDictionaryPref(kDistroDict);
+
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+  offline_pages::OfflineMetricsCollectorImpl::RegisterPrefs(registry);
+  offline_pages::RegisterPrefetchBackgroundTaskPrefs(registry);
+#endif
 }
 
 void RegisterUserProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
@@ -703,47 +702,6 @@ void MigrateObsoleteBrowserPrefs(Profile* profile, PrefService* local_state) {
 void MigrateObsoleteProfilePrefs(Profile* profile) {
   PrefService* profile_prefs = profile->GetPrefs();
 
-#if defined(OS_MACOSX)
-  // Migrate the value of kHideFullscreenToolbar to kShowFullscreenToolbar if
-  // it was set by the user. See crbug.com/590827.
-  // Added 03/2016.
-  const PrefService::Preference* hide_pref =
-      profile_prefs->FindPreference(prefs::kHideFullscreenToolbar);
-  if (!hide_pref->IsDefaultValue()) {
-    bool hide_pref_value =
-        profile_prefs->GetBoolean(prefs::kHideFullscreenToolbar);
-    profile_prefs->SetBoolean(prefs::kShowFullscreenToolbar, !hide_pref_value);
-    profile_prefs->ClearPref(prefs::kHideFullscreenToolbar);
-  }
-#endif
-
-#if BUILDFLAG(ENABLE_GOOGLE_NOW)
-  // Added 3/2016.
-  profile_prefs->ClearPref(kGoogleGeolocationAccessEnabled);
-#endif
-
-  // Added 4/2016.
-  if (!profile_prefs->GetBoolean(kCheckDefaultBrowser)) {
-    // Seed kDefaultBrowserLastDeclined with the install date.
-    metrics::MetricsService* metrics_service =
-        g_browser_process->metrics_service();
-    base::Time install_time =
-        metrics_service
-            ? base::Time::FromTimeT(metrics_service->GetInstallDate())
-            : base::Time::Now();
-    profile_prefs->SetInt64(prefs::kDefaultBrowserLastDeclined,
-                            install_time.ToInternalValue());
-  }
-  profile_prefs->ClearPref(kCheckDefaultBrowser);
-
-  // Added 5/2016.
-  profile_prefs->ClearPref(kDesktopSearchRedirectionInfobarShownPref);
-
-  // Added 7/2016.
-  DeleteWebRTCIdentityStoreDB(*profile);
-  profile_prefs->ClearPref(kNetworkPredictionEnabled);
-  profile_prefs->ClearPref(kDisableSpdy);
-
   // Added 8/2016.
   profile_prefs->ClearPref(kStaticEncodings);
   profile_prefs->ClearPref(kRecentlySelectedEncoding);
@@ -758,7 +716,6 @@ void MigrateObsoleteProfilePrefs(Profile* profile) {
   //  - MediaRouterUIBrowserTest.MigrateToolbarIconShownPref
   //  - MediaRouterUIBrowserTest.MigrateToolbarIconUnshownPref
   {
-#if defined(ENABLE_MEDIA_ROUTER)
     bool show_cast_icon = false;
     const base::DictionaryValue* action_migration_dict =
         profile_prefs->GetDictionary(kToolbarMigratedComponentActionStatus);
@@ -768,7 +725,6 @@ void MigrateObsoleteProfilePrefs(Profile* profile) {
             &show_cast_icon)) {
       profile_prefs->SetBoolean(prefs::kShowCastIconInToolbar, show_cast_icon);
     }
-#endif  // defined(ENABLE_MEDIA_ROUTER)
     profile_prefs->ClearPref(kToolbarMigratedComponentActionStatus);
   }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)

@@ -23,14 +23,19 @@ namespace {
 constexpr float kUIScalesFor2x[] = {0.5f,   0.625f, 0.8f, 1.0f,
                                     1.125f, 1.25f,  1.5f, 2.0f};
 constexpr float kUIScalesFor1_25x[] = {0.5f, 0.625f, 0.8f, 1.0f, 1.25f};
+constexpr float kUIScalesFor1_6x[] = {0.5f, 0.8f, 1.0f, 1.2f, 1.6f};
+
 constexpr float kUIScalesFor1280[] = {0.5f, 0.625f, 0.8f, 1.0f, 1.125f};
 constexpr float kUIScalesFor1366[] = {0.5f, 0.6f, 0.75f, 1.0f, 1.125f};
+constexpr float kUIScalesForFHD[] = {0.5f, 0.625f, 0.8f, 1.0f, 1.25f};
 
 // The default UI scales for the above display densities.
 constexpr float kDefaultUIScaleFor2x = 1.0f;
 constexpr float kDefaultUIScaleFor1_25x = 0.8f;
+constexpr float kDefaultUIScaleFor1_6x = 1.0f;
 constexpr float kDefaultUIScaleFor1280 = 1.0f;
 constexpr float kDefaultUIScaleFor1366 = 1.0f;
+constexpr float kDefaultUIScaleForFHD = 1.0f;
 
 // Encapsulates the list of UI scales and the default one.
 struct DisplayUIScales {
@@ -51,6 +56,10 @@ DisplayUIScales GetScalesForDisplay(
     ASSIGN_ARRAY(ret.scales, kUIScalesFor1_25x);
     ret.default_scale = kDefaultUIScaleFor1_25x;
     return ret;
+  } else if (native_mode->device_scale_factor() == 1.6f) {
+    ASSIGN_ARRAY(ret.scales, kUIScalesFor1_6x);
+    ret.default_scale = kDefaultUIScaleFor1_6x;
+    return ret;
   }
   switch (native_mode->size().width()) {
     case 1280:
@@ -60,6 +69,10 @@ DisplayUIScales GetScalesForDisplay(
     case 1366:
       ASSIGN_ARRAY(ret.scales, kUIScalesFor1366);
       ret.default_scale = kDefaultUIScaleFor1366;
+      break;
+    case 1980:
+      ASSIGN_ARRAY(ret.scales, kUIScalesForFHD);
+      ret.default_scale = kDefaultUIScaleForFHD;
       break;
     default:
       ASSIGN_ARRAY(ret.scales, kUIScalesFor1280);
@@ -266,15 +279,6 @@ bool ComputeBoundary(const Display& a_display,
   return true;
 }
 
-int FindDisplayIndexContainingPoint(const std::vector<Display>& displays,
-                                    const gfx::Point& point_in_screen) {
-  auto iter = std::find_if(displays.begin(), displays.end(),
-                           [point_in_screen](const Display& display) {
-                             return display.bounds().Contains(point_in_screen);
-                           });
-  return iter == displays.end() ? -1 : (iter - displays.begin());
-}
-
 DisplayIdList CreateDisplayIdList(const Displays& list) {
   return GenerateDisplayIdList(
       list.begin(), list.end(),
@@ -294,17 +298,6 @@ std::string DisplayIdListToString(const DisplayIdList& list) {
     sep = ",";
   }
   return s.str();
-}
-
-bool CompareDisplayIds(int64_t id1, int64_t id2) {
-  DCHECK_NE(id1, id2);
-  // Output index is stored in the first 8 bits. See GetDisplayIdFromEDID
-  // in edid_parser.cc.
-  int index_1 = id1 & 0xFF;
-  int index_2 = id2 & 0xFF;
-  DCHECK_NE(index_1, index_2) << id1 << " and " << id2;
-  return Display::IsInternalDisplayId(id1) ||
-         (index_1 < index_2 && !Display::IsInternalDisplayId(id2));
 }
 
 }  // namespace display

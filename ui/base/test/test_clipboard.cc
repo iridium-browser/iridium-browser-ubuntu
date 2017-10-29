@@ -26,6 +26,10 @@ Clipboard* TestClipboard::CreateForCurrentThread() {
   return clipboard;
 }
 
+void TestClipboard::SetLastModifiedTime(const base::Time& time) {
+  last_modified_time_ = time;
+}
+
 void TestClipboard::OnPreShutdown() {}
 
 uint64_t TestClipboard::GetSequenceNumber(ClipboardType type) const {
@@ -126,6 +130,14 @@ void TestClipboard::ReadData(const FormatType& format,
     *result = it->second;
 }
 
+base::Time TestClipboard::GetLastModifiedTime() const {
+  return last_modified_time_;
+}
+
+void TestClipboard::ClearLastModifiedTime() {
+  last_modified_time_ = base::Time();
+}
+
 void TestClipboard::WriteObjects(ClipboardType type, const ObjectMap& objects) {
   Clear(type);
   default_store_type_ = type;
@@ -173,7 +185,10 @@ void TestClipboard::WriteWebSmartPaste() {
 void TestClipboard::WriteBitmap(const SkBitmap& bitmap) {
   // Create a dummy entry.
   GetDefaultStore().data[GetBitmapFormatType()];
-  bitmap.copyTo(&GetDefaultStore().image);
+  SkBitmap& dst = GetDefaultStore().image;
+  if (dst.tryAllocPixels(bitmap.info())) {
+    bitmap.readPixels(dst.info(), dst.getPixels(), dst.rowBytes(), 0, 0);
+  }
 }
 
 void TestClipboard::WriteData(const FormatType& format,

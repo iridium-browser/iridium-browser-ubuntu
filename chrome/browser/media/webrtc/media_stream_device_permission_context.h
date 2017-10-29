@@ -17,23 +17,22 @@ class MediaStreamDevicePermissionContext : public PermissionContextBase {
   ~MediaStreamDevicePermissionContext() override;
 
   // PermissionContextBase:
-  void RequestPermission(content::WebContents* web_contents,
-                         const PermissionRequestID& id,
-                         const GURL& requesting_frame,
-                         bool user_gesture,
-                         const BrowserPermissionCallback& callback) override;
+  void DecidePermission(content::WebContents* web_contents,
+                        const PermissionRequestID& id,
+                        const GURL& requesting_origin,
+                        const GURL& embedding_origin,
+                        bool user_gesture,
+                        const BrowserPermissionCallback& callback) override;
 
   // TODO(xhwang): GURL.GetOrigin() shouldn't be used as the origin. Need to
   // refactor to use url::Origin. crbug.com/527149 is filed for this.
   ContentSetting GetPermissionStatusInternal(
+      content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
       const GURL& embedding_origin) const override;
 
   void ResetPermission(const GURL& requesting_origin,
                        const GURL& embedding_origin) override;
-
-  void CancelPermissionRequest(content::WebContents* web_contents,
-                               const PermissionRequestID& id) override;
 
  private:
   // PermissionContextBase:

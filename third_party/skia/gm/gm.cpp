@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkShader.h"
 using namespace skiagm;
 
@@ -81,7 +82,7 @@ void GM::DrawGpuOnlyMessage(SkCanvas* canvas) {
     paint.setColor(SK_ColorRED);
     sk_tool_utils::set_portable_typeface(&paint);
     constexpr char kTxt[] = "GPU Only";
-    bmpCanvas.drawText(kTxt, strlen(kTxt), 20, 40, paint);
+    bmpCanvas.drawString(kTxt, 20, 40, paint);
     SkMatrix localM;
     localM.setRotate(35.f);
     localM.postTranslate(10.f, 0.f);

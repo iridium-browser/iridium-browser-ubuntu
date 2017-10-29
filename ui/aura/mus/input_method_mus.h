@@ -34,15 +34,16 @@ class AURA_EXPORT InputMethodMus : public ui::InputMethodBase {
   ~InputMethodMus() override;
 
   void Init(service_manager::Connector* connector);
-  void DispatchKeyEvent(ui::KeyEvent* event,
-                        std::unique_ptr<EventResultCallback> ack_callback);
+  ui::EventDispatchDetails DispatchKeyEvent(
+      ui::KeyEvent* event,
+      std::unique_ptr<EventResultCallback> ack_callback) WARN_UNUSED_RESULT;
 
   // Overridden from ui::InputMethod:
   void OnFocus() override;
   void OnBlur() override;
   bool OnUntranslatedIMEMessage(const base::NativeEvent& event,
                                 NativeEventResult* result) override;
-  void DispatchKeyEvent(ui::KeyEvent* event) override;
+  ui::EventDispatchDetails DispatchKeyEvent(ui::KeyEvent* event) override;
   void OnTextInputTypeChanged(const ui::TextInputClient* client) override;
   void OnCaretBoundsChanged(const ui::TextInputClient* client) override;
   void CancelComposition(const ui::TextInputClient* client) override;
@@ -54,15 +55,20 @@ class AURA_EXPORT InputMethodMus : public ui::InputMethodBase {
   friend TextInputClientImpl;
 
   // Called from DispatchKeyEvent() to call to the InputMethod.
-  void SendKeyEventToInputMethod(
+  ui::EventDispatchDetails SendKeyEventToInputMethod(
       const ui::KeyEvent& event,
-      std::unique_ptr<EventResultCallback> ack_callback);
+      std::unique_ptr<EventResultCallback> ack_callback) WARN_UNUSED_RESULT;
 
   // Overridden from ui::InputMethodBase:
   void OnDidChangeFocusedClient(ui::TextInputClient* focused_before,
                                 ui::TextInputClient* focused) override;
 
   void UpdateTextInputType();
+
+  // Runs all pending callbacks with UNHANDLED. This is called during shutdown,
+  // or any time |input_method_ptr_| is reset to ensure we don't leave mus
+  // waiting for an ack.
+  void AckPendingCallbacksUnhandled();
 
   // Called when the server responds to our request to process an event.
   void ProcessKeyEventCallback(
@@ -74,7 +80,7 @@ class AURA_EXPORT InputMethodMus : public ui::InputMethodBase {
   Window* window_;
 
   // May be null in tests.
-  ui::mojom::IMEServerPtr ime_server_;
+  ui::mojom::IMEDriverPtr ime_driver_;
   ui::mojom::InputMethodPtr input_method_ptr_;
   // Typically this is the same as |input_method_ptr_|, but it may be mocked
   // in tests.

@@ -4,71 +4,90 @@
 
 #include "ui/aura/mus/client_surface_embedder.h"
 
-#include "cc/surfaces/surface_reference_factory.h"
+#include "base/memory/ptr_util.h"
+#include "cc/surfaces/stub_surface_reference_factory.h"
 #include "ui/aura/window.h"
+#include "ui/gfx/geometry/dip_util.h"
 
 namespace aura {
-namespace {
 
-// TODO(mfomitchev, samans): Remove these stub classes once the SurfaceReference
-// work is complete.
-class StubSurfaceReferenceFactory : public cc::SurfaceReferenceFactory {
- public:
-  StubSurfaceReferenceFactory() = default;
-
-  // cc::SurfaceReferenceFactory:
-  base::Closure CreateReference(
-      cc::SurfaceReferenceOwner* owner,
-      const cc::SurfaceId& surface_id) const override {
-    return base::Closure();
-  }
-
- protected:
-  ~StubSurfaceReferenceFactory() override = default;
-
-  DISALLOW_COPY_AND_ASSIGN(StubSurfaceReferenceFactory);
-};
-}  // namespace
-
-ClientSurfaceEmbedder::ClientSurfaceEmbedder(Window* window) : window_(window) {
+ClientSurfaceEmbedder::ClientSurfaceEmbedder(
+    Window* window,
+    const gfx::Insets& client_area_insets)
+    : window_(window), client_area_insets_(client_area_insets) {
   surface_layer_ = base::MakeUnique<ui::Layer>(ui::LAYER_TEXTURED);
-  surface_layer_->SetVisible(true);
+  surface_layer_->SetMasksToBounds(true);
   // The frame provided by the parent window->layer() needs to show through
   // the surface layer.
   surface_layer_->SetFillsBoundsOpaquely(false);
 
-  clip_layer_ = base::MakeUnique<ui::Layer>(ui::LAYER_NOT_DRAWN);
-  clip_layer_->SetFillsBoundsOpaquely(false);
-
-  clip_layer_->Add(surface_layer_.get());
-  window_->layer()->Add(clip_layer_.get());
+  window_->layer()->Add(surface_layer_.get());
 
   // Window's layer may contain content from this client (the embedder), e.g.
   // this is the case with window decorations provided by Window Manager.
   // This content should appear underneath the content of the embedded client.
-  window_->layer()->StackAtTop(clip_layer_.get());
-
-  // We can't set this on window's layer, because that would clip the window
-  // shadow.
-  clip_layer_->SetMasksToBounds(true);
+  window_->layer()->StackAtTop(surface_layer_.get());
+  ref_factory_ = new cc::StubSurfaceReferenceFactory();
 }
 
 ClientSurfaceEmbedder::~ClientSurfaceEmbedder() = default;
 
-void ClientSurfaceEmbedder::UpdateSurface(const cc::SurfaceInfo& surface_info) {
-  // TODO(mfomitchev): Currently the frame size may not match the window size.
-  // In the future the surface id will be created by Ash (and used with the
-  // surface layer) when the window resize happens, which will ensure that the
-  // surface size matches the window size (unless a timeout occurs).
-  gfx::Size frame_size = surface_info.size_in_pixels();
-  surface_layer_->SetBounds(
-      gfx::Rect(0, 0, frame_size.width(), frame_size.height()));
-  // Clip to window bounds.
-  clip_layer_->SetBounds(
-      gfx::Rect(0, 0, window_->bounds().width(), window_->bounds().height()));
+void ClientSurfaceEmbedder::SetPrimarySurfaceInfo(
+    const viz::SurfaceInfo& surface_info) {
+  surface_layer_->SetShowPrimarySurface(surface_info, ref_factory_);
+  surface_layer_->SetBounds(gfx::Rect(window_->bounds().size()));
+}
 
-  surface_layer_->SetShowPrimarySurface(
-      surface_info, make_scoped_refptr(new StubSurfaceReferenceFactory));
+void ClientSurfaceEmbedder::SetFallbackSurfaceInfo(
+    const viz::SurfaceInfo& surface_info) {
+  surface_layer_->SetFallbackSurface(surface_info);
+  UpdateSizeAndGutters();
+}
+
+void ClientSurfaceEmbedder::UpdateSizeAndGutters() {
+  surface_layer_->SetBounds(gfx::Rect(window_->bounds().size()));
+  gfx::Size fallback_surface_size_in_dip;
+  const viz::SurfaceInfo* fallback_surface_info =
+      surface_layer_->GetFallbackSurfaceInfo();
+  if (fallback_surface_info) {
+    float fallback_device_scale_factor =
+        fallback_surface_info->device_scale_factor();
+    fallback_surface_size_in_dip = gfx::ConvertSizeToDIP(
+        fallback_device_scale_factor, fallback_surface_info->size_in_pixels());
+  }
+  gfx::Rect window_bounds(window_->bounds());
+  if (!window_->transparent() &&
+      fallback_surface_size_in_dip.width() < window_bounds.width()) {
+    right_gutter_ = base::MakeUnique<ui::Layer>(ui::LAYER_SOLID_COLOR);
+    // TODO(fsamuel): Use the embedded client's background color.
+    right_gutter_->SetColor(SK_ColorWHITE);
+    int width = window_bounds.width() - fallback_surface_size_in_dip.width();
+    // The right gutter also includes the bottom-right corner, if necessary.
+    int height = window_bounds.height() - client_area_insets_.height();
+    right_gutter_->SetBounds(gfx::Rect(
+        client_area_insets_.left() + fallback_surface_size_in_dip.width(),
+        client_area_insets_.top(), width, height));
+    window_->layer()->Add(right_gutter_.get());
+  } else {
+    right_gutter_.reset();
+  }
+
+  // Only create a bottom gutter if a fallback surface is available. Otherwise,
+  // the right gutter will fill the whole window until a fallback is available.
+  if (!window_->transparent() && !fallback_surface_size_in_dip.IsEmpty() &&
+      fallback_surface_size_in_dip.height() < window_bounds.height()) {
+    bottom_gutter_ = base::MakeUnique<ui::Layer>(ui::LAYER_SOLID_COLOR);
+    // TODO(fsamuel): Use the embedded client's background color.
+    bottom_gutter_->SetColor(SK_ColorWHITE);
+    int width = fallback_surface_size_in_dip.width();
+    int height = window_bounds.height() - fallback_surface_size_in_dip.height();
+    bottom_gutter_->SetBounds(
+        gfx::Rect(0, fallback_surface_size_in_dip.height(), width, height));
+    window_->layer()->Add(bottom_gutter_.get());
+  } else {
+    bottom_gutter_.reset();
+  }
+  window_->layer()->StackAtTop(surface_layer_.get());
 }
 
 }  // namespace aura

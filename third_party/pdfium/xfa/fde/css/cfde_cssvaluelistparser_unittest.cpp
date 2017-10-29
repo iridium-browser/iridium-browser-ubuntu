@@ -7,11 +7,12 @@
 #include "xfa/fde/css/cfde_cssvaluelistparser.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/test_support.h"
 #include "third_party/base/ptr_util.h"
 
-TEST(CFDE_CSSValueListParser, rgb_short) {
+TEST(CFDE_CSSValueListParserTest, rgb_short) {
   FDE_CSSPrimitiveType type;
-  const FX_WCHAR* start;
+  const wchar_t* start;
   int32_t len;
 
   auto parser = pdfium::MakeUnique<CFDE_CSSValueListParser>(L"#abc", 4, L' ');
@@ -40,9 +41,9 @@ TEST(CFDE_CSSValueListParser, rgb_short) {
   EXPECT_FALSE(parser->NextValue(type, start, len));
 }
 
-TEST(CFDE_CSSValueListParser, number_parsing) {
+TEST(CFDE_CSSValueListParserTest, number_parsing) {
   FDE_CSSPrimitiveType type;
-  const FX_WCHAR* start;
+  const wchar_t* start;
   int32_t len;
 
   auto parser = pdfium::MakeUnique<CFDE_CSSValueListParser>(L"1234", 4, L' ');
@@ -82,9 +83,9 @@ TEST(CFDE_CSSValueListParser, number_parsing) {
   EXPECT_EQ(L"43a1.12.34", CFX_WideString(start, len));
 }
 
-TEST(CFDE_CSSValueListParser, string_parsing) {
+TEST(CFDE_CSSValueListParserTest, string_parsing) {
   FDE_CSSPrimitiveType type;
-  const FX_WCHAR* start;
+  const wchar_t* start;
   int32_t len;
 
   auto parser =
@@ -105,9 +106,9 @@ TEST(CFDE_CSSValueListParser, string_parsing) {
   EXPECT_EQ(L"standalone", CFX_WideString(start, len));
 }
 
-TEST(CFDE_CSSValueListParser, multiparsing) {
+TEST(CFDE_CSSValueListParserTest, multiparsing) {
   FDE_CSSPrimitiveType type;
-  const FX_WCHAR* start;
+  const wchar_t* start;
   int32_t len;
 
   auto parser =

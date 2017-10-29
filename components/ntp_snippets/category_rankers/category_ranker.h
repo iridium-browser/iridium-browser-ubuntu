@@ -5,13 +5,13 @@
 #ifndef COMPONENTS_NTP_SNIPPETS_CATEGORY_RANKERS_CATEGORY_RANKER_H_
 #define COMPONENTS_NTP_SNIPPETS_CATEGORY_RANKERS_CATEGORY_RANKER_H_
 
+#include <string>
+#include <vector>
+
 #include "base/time/time.h"
 #include "components/ntp_snippets/category.h"
 
 namespace ntp_snippets {
-
-// TODO(vitaliii): Ensure that changes in the order are propagated to the UI.
-// (crbug.com/673743)
 
 // Orders categories.
 // The order may be dynamic and change at any time.
@@ -31,6 +31,27 @@ class CategoryRanker {
   // If |category| has not been added previously, it is added after all already
   // known categories, otherwise nothing is changed.
   virtual void AppendCategoryIfNecessary(Category category) = 0;
+
+  // If |category_to_insert| has not been added previously, it is added before
+  // |anchor|, otherwise nothing is changed.
+  virtual void InsertCategoryBeforeIfNecessary(Category category_to_insert,
+                                               Category anchor) = 0;
+
+  // If |category_to_insert| has not been added previously, it is added after
+  // |anchor|, otherwise nothing is changed.
+  virtual void InsertCategoryAfterIfNecessary(Category category_to_insert,
+                                              Category anchor) = 0;
+
+  struct DebugDataItem {
+    std::string label;
+    std::string content;
+    DebugDataItem(const std::string& label, const std::string& content)
+        : label(label), content(content) {}
+  };
+
+  // Returns DebugData in form of pairs of strings (label; content),
+  // e.g. describing internal state or parameter values.
+  virtual std::vector<DebugDataItem> GetDebugData() = 0;
 
   // Feedback data from the user to update the ranking.
 

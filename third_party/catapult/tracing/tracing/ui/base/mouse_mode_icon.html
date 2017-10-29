@@ -36,12 +36,12 @@ Polymer({
     },
   },
 
-  created: function() {
+  created() {
     this.active_ = false;
     this.acceleratorKey_ = undefined;
   },
 
-  ready: function() {
+  ready() {
     this.updateContents_();
   },
 
@@ -50,18 +50,14 @@ Polymer({
   },
 
   set mode(mode) {
-    var modeInfo = tr.ui.b.MOUSE_SELECTOR_MODE_INFOS[mode];
-    var modeName = tr.b.findFirstKeyInDictMatching(
-        tr.ui.b.MOUSE_SELECTOR_MODE,
-        function(modeName, candidateMode) {
-          return candidateMode === mode;
-        });
-    if (modeName === undefined)
+    const modeInfo = tr.ui.b.MOUSE_SELECTOR_MODE_INFOS[mode];
+    if (modeInfo === undefined) {
       throw new Error('Unknown mode');
-    this.modeName = modeName;
+    }
+    this.modeName = modeInfo.name;
   },
 
-  modeNameChanged: function() {
+  modeNameChanged() {
     this.updateContents_();
   },
 
@@ -71,10 +67,11 @@ Polymer({
 
   set active(active) {
     this.active_ = !!active;
-    if (this.active_)
+    if (this.active_) {
       Polymer.dom(this).classList.add('active');
-    else
+    } else {
       Polymer.dom(this).classList.remove('active');
+    }
     this.updateContents_();
   },
 
@@ -87,28 +84,31 @@ Polymer({
     this.updateContents_();
   },
 
-  updateContents_: function() {
-    if (this.modeName === undefined)
-      return;
+  updateContents_() {
+    if (this.modeName === undefined) return;
 
-    var mode = this.mode;
-    if (mode === undefined)
+    const mode = this.mode;
+    if (mode === undefined) {
       throw new Error('Invalid mode');
+    }
 
-    var modeInfo = tr.ui.b.MOUSE_SELECTOR_MODE_INFOS[mode];
-    if (!modeInfo)
+    const modeInfo = tr.ui.b.MOUSE_SELECTOR_MODE_INFOS[mode];
+    if (!modeInfo) {
       throw new Error('Invalid mode');
+    }
 
-    var title = modeInfo.title;
-    if (this.acceleratorKey_)
+    let title = modeInfo.title;
+    if (this.acceleratorKey_) {
       title = title + ' (' + this.acceleratorKey_ + ')';
+    }
     this.title = title;
 
-    var bp;
-    if (this.active_)
+    let bp;
+    if (this.active_) {
       bp = modeInfo.activeBackgroundPosition;
-    else
+    } else {
       bp = modeInfo.defaultBackgroundPosition;
+    }
     this.style.backgroundPosition = bp;
   }
 });

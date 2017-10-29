@@ -15,6 +15,7 @@
 #include "cc/test/fake_layer_tree_host.h"
 #include "cc/test/fake_layer_tree_host_client.h"
 #include "cc/test/test_task_graph_runner.h"
+#include "cc/trees/effect_node.h"
 #include "cc/trees/layer_tree_host_impl.h"
 
 #define EXPECT_SET_NEEDS_COMMIT(expect, code_to_test)                 \
@@ -35,10 +36,13 @@ namespace gfx { class Rect; }
 
 namespace cc {
 class LayerImpl;
-class CompositorFrameSink;
+class LayerTreeFrameSink;
 class QuadList;
 class RenderSurfaceImpl;
 class ResourceProvider;
+
+// Returns the RenderSurfaceImpl into which the given layer draws.
+RenderSurfaceImpl* GetRenderSurface(LayerImpl* layer_impl);
 
 class LayerTestCommon {
  public:
@@ -55,10 +59,10 @@ class LayerTestCommon {
    public:
     LayerImplTest();
     explicit LayerImplTest(
-        std::unique_ptr<CompositorFrameSink> compositor_frame_sink);
+        std::unique_ptr<LayerTreeFrameSink> layer_tree_frame_sink);
     explicit LayerImplTest(const LayerTreeSettings& settings);
     LayerImplTest(const LayerTreeSettings& settings,
-                  std::unique_ptr<CompositorFrameSink> compositor_frame_sink);
+                  std::unique_ptr<LayerTreeFrameSink> layer_tree_frame_sink);
     ~LayerImplTest();
 
     template <typename T>
@@ -142,6 +146,25 @@ class LayerTestCommon {
       return ptr;
     }
 
+    template <typename T,
+              typename A,
+              typename B,
+              typename C,
+              typename D,
+              typename E>
+    T* AddChild(LayerImpl* parent,
+                const A& a,
+                const B& b,
+                const C& c,
+                const D& d,
+                const E& e) {
+      std::unique_ptr<T> layer = T::Create(host_->host_impl()->active_tree(),
+                                           layer_impl_id_++, a, b, c, d, e);
+      T* ptr = layer.get();
+      parent->test_properties()->AddChild(std::move(layer));
+      return ptr;
+    }
+
     void CalcDrawProps(const gfx::Size& viewport_size);
     void AppendQuadsWithOcclusion(LayerImpl* layer_impl,
                                   const gfx::Rect& occluded);
@@ -153,8 +176,8 @@ class LayerTestCommon {
 
     void RequestCopyOfOutput();
 
-    CompositorFrameSink* compositor_frame_sink() const {
-      return host_->host_impl()->compositor_frame_sink();
+    LayerTreeFrameSink* layer_tree_frame_sink() const {
+      return host_->host_impl()->layer_tree_frame_sink();
     }
     ResourceProvider* resource_provider() const {
       return host_->host_impl()->resource_provider();
@@ -171,6 +194,9 @@ class LayerTestCommon {
     scoped_refptr<AnimationTimeline> timeline() { return timeline_; }
     scoped_refptr<AnimationTimeline> timeline_impl() { return timeline_impl_; }
 
+    void BuildPropertyTreesForTesting() {
+      host_impl()->active_tree()->BuildPropertyTreesForTesting();
+    }
     void SetElementIdsForTesting() {
       host_impl()->active_tree()->SetElementIdsForTesting();
     }
@@ -178,7 +204,7 @@ class LayerTestCommon {
    private:
     FakeLayerTreeHostClient client_;
     TestTaskGraphRunner task_graph_runner_;
-    std::unique_ptr<CompositorFrameSink> compositor_frame_sink_;
+    std::unique_ptr<LayerTreeFrameSink> layer_tree_frame_sink_;
     std::unique_ptr<AnimationHost> animation_host_;
     std::unique_ptr<FakeLayerTreeHost> host_;
     std::unique_ptr<RenderPass> render_pass_;

@@ -7,11 +7,12 @@
 
 #include <stddef.h>
 
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 
 namespace cc {
 
 CC_EXPORT size_t LargestDrawQuadSize();
+CC_EXPORT size_t LargestDrawQuadAlignment();
 
 }  // namespace cc
 

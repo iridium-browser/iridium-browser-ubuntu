@@ -11,6 +11,8 @@
 
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
+#include "net/quic/platform/api/quic_test.h"
+#include "net/quic/platform/api/quic_test_loopback.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/quic_test_utils.h"
@@ -48,8 +50,7 @@ size_t NumOpenSocketFDs() {
 // Creates a new QuicClient and Initializes it. Caller is responsible for
 // deletion.
 QuicClient* CreateAndInitializeQuicClient(EpollServer* eps, uint16_t port) {
-  QuicSocketAddress server_address(
-      QuicSocketAddress(QuicIpAddress::Loopback4(), port));
+  QuicSocketAddress server_address(QuicSocketAddress(TestLoopback(), port));
   QuicServerId server_id("hostname", server_address.port(),
                          PRIVACY_MODE_DISABLED);
   QuicVersionVector versions = AllSupportedVersions();
@@ -60,7 +61,9 @@ QuicClient* CreateAndInitializeQuicClient(EpollServer* eps, uint16_t port) {
   return client;
 }
 
-TEST(QuicClientTest, DoNotLeakSocketFDs) {
+class QuicClientTest : public QuicTest {};
+
+TEST_F(QuicClientTest, DoNotLeakSocketFDs) {
   // Make sure that the QuicClient doesn't leak socket FDs. Doing so could cause
   // port exhaustion in long running processes which repeatedly create clients.
 
@@ -87,7 +90,7 @@ TEST(QuicClientTest, DoNotLeakSocketFDs) {
   EXPECT_EQ(number_of_open_fds, NumOpenSocketFDs());
 }
 
-TEST(QuicClientTest, CreateAndCleanUpUDPSockets) {
+TEST_F(QuicClientTest, CreateAndCleanUpUDPSockets) {
   // Create a ProofVerifier before counting the number of open FDs to work
   // around some ASAN weirdness.
   crypto_test_utils::ProofVerifierForTesting().reset();

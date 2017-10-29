@@ -124,8 +124,8 @@ void RulesRegistryService::Shutdown() {
                  scoped_refptr<WebRequestRulesRegistry>(NULL)));
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<RulesRegistryService> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<RulesRegistryService>>::
+    DestructorAtExit g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<RulesRegistryService>*
@@ -215,7 +215,7 @@ void RulesRegistryService::OnExtensionLoaded(
 void RulesRegistryService::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   NotifyRegistriesHelper(&RulesRegistry::OnExtensionUnloaded, extension);
 }
 

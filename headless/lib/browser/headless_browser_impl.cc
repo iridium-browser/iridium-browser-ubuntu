@@ -10,20 +10,29 @@
 
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/public/app/content_main.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "headless/app/headless_shell_switches.h"
 #include "headless/lib/browser/headless_browser_context_impl.h"
 #include "headless/lib/browser/headless_browser_main_parts.h"
+#include "headless/lib/browser/headless_devtools_client_impl.h"
 #include "headless/lib/browser/headless_web_contents_impl.h"
 #include "headless/lib/headless_content_main_delegate.h"
+#include "net/http/http_util.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/events/devices/device_data_manager.h"
 #include "ui/gfx/geometry/size.h"
+
+namespace content {
+class DevToolsAgentHost;
+}
 
 namespace headless {
 namespace {
@@ -32,8 +41,15 @@ int RunContentMain(
     HeadlessBrowser::Options options,
     const base::Callback<void(HeadlessBrowser*)>& on_browser_start_callback) {
   content::ContentMainParams params(nullptr);
+#if defined(OS_WIN)
+  // Sandbox info has to be set and initialized.
+  CHECK(options.sandbox_info);
+  params.instance = options.instance;
+  params.sandbox_info = std::move(options.sandbox_info);
+#elif !defined(OS_ANDROID)
   params.argc = options.argc;
   params.argv = options.argv;
+#endif
 
   // TODO(skyostil): Implement custom message pumps.
   DCHECK(!options.message_pump);
@@ -54,6 +70,7 @@ HeadlessBrowserImpl::HeadlessBrowserImpl(
       options_(std::move(options)),
       browser_main_parts_(nullptr),
       default_browser_context_(nullptr),
+      agent_host_(nullptr),
       weak_ptr_factory_(this) {}
 
 HeadlessBrowserImpl::~HeadlessBrowserImpl() {}
@@ -62,12 +79,6 @@ HeadlessBrowserContext::Builder
 HeadlessBrowserImpl::CreateBrowserContextBuilder() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return HeadlessBrowserContext::Builder(this);
-}
-
-scoped_refptr<base::SingleThreadTaskRunner>
-HeadlessBrowserImpl::BrowserFileThread() const {
-  return content::BrowserThread::GetTaskRunnerForThread(
-      content::BrowserThread::FILE);
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
@@ -120,7 +131,11 @@ void HeadlessBrowserImpl::set_browser_main_parts(
 }
 
 void HeadlessBrowserImpl::RunOnStartCallback() {
-  PlatformCreateWindow();
+  // We don't support the tethering domain on this agent host.
+  agent_host_ = content::DevToolsAgentHost::CreateForBrowser(
+      nullptr, content::DevToolsAgentHost::CreateServerSocketCallback());
+
+  PlatformStart();
   on_start_callback_.Run(this);
   on_start_callback_ = base::Callback<void(HeadlessBrowser*)>();
 }
@@ -179,6 +194,19 @@ HeadlessWebContents* HeadlessBrowserImpl::GetWebContentsForDevToolsAgentHostId(
   return nullptr;
 }
 
+HeadlessWebContentsImpl* HeadlessBrowserImpl::GetWebContentsForWindowId(
+    const int window_id) {
+  for (HeadlessBrowserContext* context : GetAllBrowserContexts()) {
+    for (HeadlessWebContents* web_contents : context->GetAllWebContents()) {
+      auto* contents = HeadlessWebContentsImpl::From(web_contents);
+      if (contents->window_id() == window_id) {
+        return contents;
+      }
+    }
+  }
+  return nullptr;
+}
+
 HeadlessBrowserContext* HeadlessBrowserImpl::GetBrowserContextForId(
     const std::string& id) {
   auto find_it = browser_contexts_.find(id);
@@ -187,13 +215,56 @@ HeadlessBrowserContext* HeadlessBrowserImpl::GetBrowserContextForId(
   return find_it->second.get();
 }
 
+HeadlessDevToolsTarget* HeadlessBrowserImpl::GetDevToolsTarget() {
+  return agent_host_ ? this : nullptr;
+}
+
+bool HeadlessBrowserImpl::AttachClient(HeadlessDevToolsClient* client) {
+  DCHECK(agent_host_);
+  return HeadlessDevToolsClientImpl::From(client)->AttachToHost(
+      agent_host_.get());
+}
+
+void HeadlessBrowserImpl::ForceAttachClient(HeadlessDevToolsClient* client) {
+  DCHECK(agent_host_);
+  HeadlessDevToolsClientImpl::From(client)->ForceAttachToHost(
+      agent_host_.get());
+}
+
+void HeadlessBrowserImpl::DetachClient(HeadlessDevToolsClient* client) {
+  DCHECK(agent_host_);
+  HeadlessDevToolsClientImpl::From(client)->DetachFromHost(agent_host_.get());
+}
+
+bool HeadlessBrowserImpl::IsAttached() {
+  DCHECK(agent_host_);
+  return agent_host_->IsAttached();
+}
+
+#if defined(OS_WIN)
+void RunChildProcessIfNeeded(HINSTANCE instance,
+                             sandbox::SandboxInterfaceInfo* sandbox_info) {
+  base::CommandLine::Init(0, nullptr);
+  HeadlessBrowser::Options::Builder builder(0, nullptr);
+  builder.SetInstance(instance);
+  builder.SetSandboxInfo(std::move(sandbox_info));
+#else
 void RunChildProcessIfNeeded(int argc, const char** argv) {
   base::CommandLine::Init(argc, argv);
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kProcessType))
+  HeadlessBrowser::Options::Builder builder(argc, argv);
+#endif  // defined(OS_WIN)
+  const base::CommandLine& command_line(
+      *base::CommandLine::ForCurrentProcess());
+
+  if (!command_line.HasSwitch(::switches::kProcessType))
     return;
 
-  HeadlessBrowser::Options::Builder builder(argc, argv);
+  if (command_line.HasSwitch(switches::kUserAgent)) {
+    std::string ua = command_line.GetSwitchValueASCII(switches::kUserAgent);
+    if (net::HttpUtil::IsValidHeaderValue(ua))
+      builder.SetUserAgent(ua);
+  }
+
   exit(RunContentMain(builder.Build(),
                       base::Callback<void(HeadlessBrowser*)>()));
 }
@@ -210,7 +281,7 @@ int HeadlessBrowserMain(
 
   // Child processes should not end up here.
   DCHECK(!base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kProcessType));
+      ::switches::kProcessType));
 #endif
   return RunContentMain(std::move(options),
                         std::move(on_browser_start_callback));

@@ -1,4 +1,3 @@
-
 // Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -6,32 +5,28 @@
 #ifndef LayoutSliderItem_h
 #define LayoutSliderItem_h
 
-#include "core/layout/LayoutSlider.h"
+#include "core/CoreExport.h"
 #include "core/layout/api/LayoutBlockItem.h"
 
 namespace blink {
 
-class LayoutSliderItem : public LayoutBlockItem {
+class LayoutSlider;
+
+class CORE_EXPORT LayoutSliderItem : NON_EXPORTED_BASE(public LayoutBlockItem) {
  public:
-  explicit LayoutSliderItem(LayoutSlider* layoutSlider)
-      : LayoutBlockItem(layoutSlider) {}
+  explicit LayoutSliderItem(LayoutSlider*);
 
-  explicit LayoutSliderItem(const LayoutBlockItem& item)
-      : LayoutBlockItem(item) {
-    SECURITY_DCHECK(!item || item.isSlider());
-  }
+  explicit LayoutSliderItem(const LayoutBlockItem&);
 
-  explicit LayoutSliderItem(std::nullptr_t) : LayoutBlockItem(nullptr) {}
+  explicit LayoutSliderItem(std::nullptr_t);
 
-  LayoutSliderItem() {}
+  LayoutSliderItem();
 
-  bool inDragMode() const { return toSlider()->inDragMode(); }
+  bool InDragMode() const;
 
  private:
-  LayoutSlider* toSlider() { return toLayoutSlider(layoutObject()); }
-  const LayoutSlider* toSlider() const {
-    return toLayoutSlider(layoutObject());
-  }
+  LayoutSlider* ToSlider();
+  const LayoutSlider* ToSlider() const;
 };
 
 }  // namespace blink

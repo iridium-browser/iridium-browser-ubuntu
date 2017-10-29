@@ -14,7 +14,6 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "net/extras/sqlite/sqlite_channel_id_store.h"
 #include "net/ssl/default_channel_id_store.h"
 
@@ -48,6 +47,7 @@ class QuotaPolicyChannelIDStore
       const net::DefaultChannelIDStore::ChannelID& channel_id) override;
   void DeleteChannelID(
       const net::DefaultChannelIDStore::ChannelID& channel_id) override;
+  void Flush() override;
   void SetForceKeepSessionState() override;
 
  private:

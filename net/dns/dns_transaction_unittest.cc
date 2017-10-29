@@ -13,6 +13,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/sys_byteorder.h"
@@ -1000,6 +1001,10 @@ TEST_F(DnsTransactionTest, InvalidQuery) {
 
   TransactionHelper helper0(".", dns_protocol::kTypeA, ERR_INVALID_ARGUMENT);
   EXPECT_TRUE(helper0.Run(transaction_factory_.get()));
+
+  TransactionHelper helper1("foo,bar.com", dns_protocol::kTypeA,
+                            ERR_INVALID_ARGUMENT);
+  EXPECT_TRUE(helper1.Run(transaction_factory_.get()));
 }
 
 }  // namespace

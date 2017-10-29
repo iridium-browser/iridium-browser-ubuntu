@@ -12,8 +12,8 @@
 
 #include <utility>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/safe_conversions.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/safe_conversions.h"
 
 namespace webrtc {
 namespace test {
@@ -52,7 +52,7 @@ void EncodeNetEqInput::AdvanceOutputEvent() {
 
 rtc::Optional<RTPHeader> EncodeNetEqInput::NextHeader() const {
   RTC_DCHECK(packet_data_);
-  return rtc::Optional<RTPHeader>(packet_data_->header.header);
+  return rtc::Optional<RTPHeader>(packet_data_->header);
 }
 
 void EncodeNetEqInput::CreatePacket() {
@@ -72,14 +72,14 @@ void EncodeNetEqInput::CreatePacket() {
     info = encoder_->Encode(rtp_timestamp_, generator_->Generate(num_samples),
                             &packet_data_->payload);
 
-    rtp_timestamp_ += rtc::checked_cast<uint32_t>(
+    rtp_timestamp_ += rtc::dchecked_cast<uint32_t>(
         num_samples * encoder_->RtpTimestampRateHz() /
         encoder_->SampleRateHz());
     ++num_blocks;
   }
-  packet_data_->header.header.timestamp = info.encoded_timestamp;
-  packet_data_->header.header.payloadType = info.payload_type;
-  packet_data_->header.header.sequenceNumber = sequence_number_++;
+  packet_data_->header.timestamp = info.encoded_timestamp;
+  packet_data_->header.payloadType = info.payload_type;
+  packet_data_->header.sequenceNumber = sequence_number_++;
   packet_data_->time_ms = next_packet_time_ms_;
   next_packet_time_ms_ += num_blocks * kOutputPeriodMs;
 }

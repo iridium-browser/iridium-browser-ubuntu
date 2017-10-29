@@ -5,6 +5,7 @@
 #include "chrome/browser/first_run/upgrade_util.h"
 
 #include <windows.h>
+#include <objbase.h>
 #include <psapi.h>
 #include <shellapi.h>
 
@@ -34,7 +35,6 @@
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "components/prefs/pref_service.h"
 #include "ui/base/ui_base_switches.h"
@@ -55,7 +55,8 @@ bool GetNewerChromeFile(base::FilePath* path) {
 bool InvokeGoogleUpdateForRename() {
 #if defined(GOOGLE_CHROME_BUILD)
   base::win::ScopedComPtr<IProcessLauncher> ipl;
-  if (!FAILED(ipl.CreateInstance(__uuidof(ProcessLauncherClass)))) {
+  if (!FAILED(::CoCreateInstance(__uuidof(ProcessLauncherClass), nullptr,
+                                 CLSCTX_ALL, IID_PPV_ARGS(&ipl)))) {
     ULONG_PTR phandle = NULL;
     DWORD id = GetCurrentProcessId();
     if (!FAILED(ipl->LaunchCmdElevated(install_static::GetAppGuid(),

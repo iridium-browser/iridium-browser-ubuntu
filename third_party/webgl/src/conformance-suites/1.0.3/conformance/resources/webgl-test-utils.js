@@ -1274,7 +1274,7 @@ var create3DContext = function(opt_canvas, opt_attributes, opt_version) {
   var names;
   switch (opt_version) {
     case 2:
-      names = ["webgl2", "experimental-webgl2"]; break;
+      names = ["webgl2"]; break;
     default:
       names = ["webgl", "experimental-webgl"]; break;
   }
@@ -1352,8 +1352,9 @@ var shouldGenerateGLError = function(gl, glErrors, evalStr) {
   }
   if (exception) {
     testFailed(evalStr + " threw exception " + exception);
+    return -1;
   } else {
-    glErrorShouldBe(gl, glErrors, "after evaluating: " + evalStr);
+    return glErrorShouldBe(gl, glErrors, "after evaluating: " + evalStr);
   }
 };
 
@@ -1373,11 +1374,12 @@ var shouldThrowOrGenerateGLError = function(gl, glErrors, evalStr, opt_msg) {
   }
   if (exception) {
     testPassed(evalStr + " threw exception " + exception);
+    return 0;
   } else {
     if (!opt_msg) {
       opt_msg = "after evaluating: " + evalStr;
     }
-    glErrorShouldBe(gl, glErrors, opt_msg);
+    return glErrorShouldBe(gl, glErrors, opt_msg);
   }
 };
 
@@ -1406,6 +1408,7 @@ var glErrorShouldBe = function(gl, glErrors, opt_msg) {
     var msg = "getError was " + ((glErrors.length > 1) ? "one of: " : "expected value: ");
     testPassed(msg + expected + " : " + opt_msg);
   }
+  return err;
 };
 
 /**

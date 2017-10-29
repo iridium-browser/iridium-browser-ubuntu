@@ -34,27 +34,34 @@ class FakeSessionManagerClient : public SessionManagerClient {
   void EmitLoginPromptVisible() override;
   void RestartJob(int socket_fd,
                   const std::vector<std::string>& argv,
-                  const VoidDBusMethodCallback& callback) override;
+                  VoidDBusMethodCallback callback) override;
   void StartSession(const cryptohome::Identification& cryptohome_id) override;
   void StopSession() override;
   void NotifySupervisedUserCreationStarted() override;
   void NotifySupervisedUserCreationFinished() override;
   void StartDeviceWipe() override;
+  void StartTPMFirmwareUpdate(const std::string& update_mode) override;
   void RequestLockScreen() override;
   void NotifyLockScreenShown() override;
   void NotifyLockScreenDismissed() override;
   void RetrieveActiveSessions(const ActiveSessionsCallback& callback) override;
   void RetrieveDevicePolicy(const RetrievePolicyCallback& callback) override;
-  std::string BlockingRetrieveDevicePolicy() override;
+  RetrievePolicyResponseType BlockingRetrieveDevicePolicy(
+      std::string* policy_out) override;
   void RetrievePolicyForUser(const cryptohome::Identification& cryptohome_id,
                              const RetrievePolicyCallback& callback) override;
-  std::string BlockingRetrievePolicyForUser(
-      const cryptohome::Identification& cryptohome_id) override;
+  RetrievePolicyResponseType BlockingRetrievePolicyForUser(
+      const cryptohome::Identification& cryptohome_id,
+      std::string* policy_out) override;
+  void RetrievePolicyForUserWithoutSession(
+      const cryptohome::Identification& cryptohome_id,
+      const RetrievePolicyCallback& callback) override;
   void RetrieveDeviceLocalAccountPolicy(
       const std::string& account_id,
       const RetrievePolicyCallback& callback) override;
-  std::string BlockingRetrieveDeviceLocalAccountPolicy(
-      const std::string& account_id) override;
+  RetrievePolicyResponseType BlockingRetrieveDeviceLocalAccountPolicy(
+      const std::string& account_id,
+      std::string* policy_out) override;
   void StoreDevicePolicy(const std::string& policy_blob,
                          const StorePolicyCallback& callback) override;
   void StorePolicyForUser(const cryptohome::Identification& cryptohome_id,
@@ -70,8 +77,10 @@ class FakeSessionManagerClient : public SessionManagerClient {
   void GetServerBackedStateKeys(const StateKeysCallback& callback) override;
 
   void CheckArcAvailability(const ArcCallback& callback) override;
-  void StartArcInstance(const cryptohome::Identification& cryptohome_id,
+  void StartArcInstance(ArcStartupMode startup_mode,
+                        const cryptohome::Identification& cryptohome_id,
                         bool disable_boot_completed_broadcast,
+                        bool enable_vendor_privileged,
                         const StartArcInstanceCallback& callback) override;
   void StopArcInstance(const ArcCallback& callback) override;
   void SetArcCpuRestriction(

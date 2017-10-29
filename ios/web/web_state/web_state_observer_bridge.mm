@@ -14,10 +14,11 @@ WebStateObserverBridge::WebStateObserverBridge(web::WebState* webState,
 WebStateObserverBridge::~WebStateObserverBridge() {
 }
 
-void WebStateObserverBridge::ProvisionalNavigationStarted(const GURL& url) {
-  SEL selector = @selector(webState:didStartProvisionalNavigationForURL:);
+void WebStateObserverBridge::NavigationItemsPruned(size_t pruned_item_count) {
+  SEL selector = @selector(webState:didPruneNavigationItemsWithCount:);
   if ([observer_ respondsToSelector:selector]) {
-    [observer_ webState:web_state() didStartProvisionalNavigationForURL:url];
+    [observer_ webState:web_state()
+        didPruneNavigationItemsWithCount:pruned_item_count];
   }
 }
 
@@ -27,6 +28,13 @@ void WebStateObserverBridge::NavigationItemCommitted(
   if ([observer_ respondsToSelector:selector]) {
     [observer_ webState:web_state()
         didCommitNavigationWithDetails:load_detatils];
+  }
+}
+
+void WebStateObserverBridge::DidStartNavigation(
+    web::NavigationContext* navigation_context) {
+  if ([observer_ respondsToSelector:@selector(webState:didStartNavigation:)]) {
+    [observer_ webState:web_state() didStartNavigation:navigation_context];
   }
 }
 
@@ -83,6 +91,17 @@ void WebStateObserverBridge::LoadProgressChanged(double progress) {
 void WebStateObserverBridge::TitleWasSet() {
   if ([observer_ respondsToSelector:@selector(webStateDidChangeTitle:)])
     [observer_ webStateDidChangeTitle:web_state()];
+}
+
+void WebStateObserverBridge::DidChangeVisibleSecurityState() {
+  SEL selector = @selector(webStateDidChangeVisibleSecurityState:);
+  if ([observer_ respondsToSelector:selector])
+    [observer_ webStateDidChangeVisibleSecurityState:web_state()];
+}
+
+void WebStateObserverBridge::DidSuppressDialog() {
+  if ([observer_ respondsToSelector:@selector(webStateDidSuppressDialog:)])
+    [observer_ webStateDidSuppressDialog:web_state()];
 }
 
 void WebStateObserverBridge::DocumentSubmitted(const std::string& form_name,

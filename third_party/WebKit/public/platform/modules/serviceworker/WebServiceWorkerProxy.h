@@ -11,11 +11,11 @@ namespace blink {
 
 // A proxy interface, passed via WebServiceWorker.setProxy() from blink to
 // the embedder, to talk to the ServiceWorker object from embedder.
-class BLINK_PLATFORM_EXPORT WebServiceWorkerProxy {
+class WebServiceWorkerProxy {
  public:
   // Notifies the proxy that the service worker state changed. The new state
   // should be accessible via WebServiceWorker.state().
-  virtual void dispatchStateChangeEvent() = 0;
+  virtual void DispatchStateChangeEvent() = 0;
 
  protected:
   virtual ~WebServiceWorkerProxy() {}

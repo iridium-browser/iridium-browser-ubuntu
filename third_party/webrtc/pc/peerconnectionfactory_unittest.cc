@@ -13,13 +13,13 @@
 #include <utility>
 
 #include "webrtc/api/mediastreaminterface.h"
-#include "webrtc/base/gunit.h"
-#include "webrtc/base/thread.h"
 #include "webrtc/media/base/fakevideocapturer.h"
 #include "webrtc/media/engine/webrtccommon.h"
 #include "webrtc/media/engine/webrtcvoe.h"
 #include "webrtc/p2p/base/fakeportallocator.h"
 #include "webrtc/pc/peerconnectionfactory.h"
+#include "webrtc/rtc_base/gunit.h"
+#include "webrtc/rtc_base/thread.h"
 #ifdef WEBRTC_ANDROID
 #include "webrtc/pc/test/androidtestinitializer.h"
 #endif
@@ -63,13 +63,6 @@ static const char kTurnIceServerWithIPv6Address[] =
 
 class NullPeerConnectionObserver : public PeerConnectionObserver {
  public:
-  // We need these using declarations because there are two versions of each of
-  // the below methods and we only override one of them.
-  // TODO(deadbeef): Remove once there's only one version of the methods.
-  using PeerConnectionObserver::OnAddStream;
-  using PeerConnectionObserver::OnRemoveStream;
-  using PeerConnectionObserver::OnDataChannel;
-
   virtual ~NullPeerConnectionObserver() = default;
   void OnSignalingChange(
       PeerConnectionInterface::SignalingState new_state) override {}

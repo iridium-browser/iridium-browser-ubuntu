@@ -12,16 +12,18 @@
 #include "GrShaderCaps.h"
 #include "gl/GrGLCaps.h"
 #include "GrContext.h"
+#include "GrContextPriv.h"
 #include "GrGpu.h"
 
+#include "ccpr/GrCoverageCountingPathRenderer.h"
+
 #include "ops/GrAAConvexPathRenderer.h"
-#include "ops/GrAADistanceFieldPathRenderer.h"
 #include "ops/GrAAHairLinePathRenderer.h"
 #include "ops/GrAALinearizingConvexPathRenderer.h"
+#include "ops/GrSmallPathRenderer.h"
 #include "ops/GrDashLinePathRenderer.h"
 #include "ops/GrDefaultPathRenderer.h"
 #include "ops/GrMSAAPathRenderer.h"
-#include "ops/GrPLSPathRenderer.h"
 #include "ops/GrStencilAndCoverPathRenderer.h"
 #include "ops/GrTessellatingPathRenderer.h"
 
@@ -54,20 +56,20 @@ GrPathRendererChain::GrPathRendererChain(GrContext* context, const Options& opti
     if (options.fGpuPathRenderers & GpuPathRenderers::kAALinearizing) {
         fChain.push_back(sk_make_sp<GrAALinearizingConvexPathRenderer>());
     }
-    if (options.fGpuPathRenderers & GpuPathRenderers::kPLS) {
-        if (caps.shaderCaps()->plsPathRenderingSupport()) {
-            fChain.push_back(sk_make_sp<GrPLSPathRenderer>());
-        }
+    if (options.fGpuPathRenderers & GpuPathRenderers::kSmall) {
+        fChain.push_back(sk_make_sp<GrSmallPathRenderer>());
     }
-    if (options.fGpuPathRenderers & GpuPathRenderers::kDistanceField) {
-        fChain.push_back(sk_make_sp<GrAADistanceFieldPathRenderer>());
+    if (options.fGpuPathRenderers & Options::GpuPathRenderers::kCoverageCounting) {
+        if (auto ccpr = GrCoverageCountingPathRenderer::CreateIfSupported(*context->caps())) {
+            context->contextPriv().addOnFlushCallbackObject(ccpr.get());
+            fChain.push_back(std::move(ccpr));
+        }
     }
     if (options.fGpuPathRenderers & GpuPathRenderers::kTessellating) {
         fChain.push_back(sk_make_sp<GrTessellatingPathRenderer>());
     }
     if (options.fGpuPathRenderers & GpuPathRenderers::kDefault) {
-        fChain.push_back(sk_make_sp<GrDefaultPathRenderer>(caps.twoSidedStencilSupport(),
-                                                           caps.stencilWrapOpsSupport()));
+        fChain.push_back(sk_make_sp<GrDefaultPathRenderer>());
     }
 }
 

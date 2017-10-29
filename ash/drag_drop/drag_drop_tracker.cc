@@ -4,10 +4,9 @@
 
 #include "ash/drag_drop/drag_drop_tracker.h"
 
-#include "ash/common/wm/root_window_finder.h"
-#include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
+#include "ash/wm/root_window_finder.h"
 #include "ui/aura/client/window_parenting_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -20,13 +19,12 @@ namespace ash {
 namespace {
 
 // An activation delegate which disables activating the drag and drop window.
-class CaptureWindowActivationDelegate
-    : public aura::client::ActivationDelegate {
+class CaptureWindowActivationDelegate : public ::wm::ActivationDelegate {
  public:
   CaptureWindowActivationDelegate() {}
   ~CaptureWindowActivationDelegate() override {}
 
-  // aura::client::ActivationDelegate overrides:
+  // wm::ActivationDelegate overrides:
   bool ShouldActivate() const override { return false; }
 
  private:
@@ -42,10 +40,10 @@ aura::Window* CreateCaptureWindow(aura::Window* context_root,
   aura::Window* window = new aura::Window(delegate);
   // Set type of window as popup to prevent different window manager codes
   // trying to manage this window.
-  window->SetType(ui::wm::WINDOW_TYPE_POPUP);
+  window->SetType(aura::client::WINDOW_TYPE_POPUP);
   window->Init(ui::LAYER_NOT_DRAWN);
   aura::client::ParentWindowWithContext(window, context_root, gfx::Rect());
-  aura::client::SetActivationDelegate(window, activation_delegate_instance);
+  ::wm::SetActivationDelegate(window, activation_delegate_instance);
   window->Show();
   DCHECK(window->bounds().size().IsEmpty());
   return window;
@@ -69,8 +67,7 @@ aura::Window* DragDropTracker::GetTarget(const ui::LocatedEvent& event) {
   DCHECK(capture_window_.get());
   gfx::Point location_in_screen = event.location();
   ::wm::ConvertPointToScreen(capture_window_.get(), &location_in_screen);
-  aura::Window* root_window_at_point =
-      WmWindow::GetAuraWindow(wm::GetRootWindowAt(location_in_screen));
+  aura::Window* root_window_at_point = wm::GetRootWindowAt(location_in_screen);
   gfx::Point location_in_root = location_in_screen;
   ::wm::ConvertPointFromScreen(root_window_at_point, &location_in_root);
   return root_window_at_point->GetEventHandlerForPoint(location_in_root);
@@ -85,10 +82,9 @@ ui::LocatedEvent* DragDropTracker::ConvertEvent(aura::Window* target,
   gfx::Point location_in_screen = event.location();
   ::wm::ConvertPointToScreen(capture_window_.get(), &location_in_screen);
   gfx::Point target_root_location = event.root_location();
-  aura::Window::ConvertPointToTarget(
-      capture_window_->GetRootWindow(),
-      WmWindow::GetAuraWindow(wm::GetRootWindowAt(location_in_screen)),
-      &target_root_location);
+  aura::Window::ConvertPointToTarget(capture_window_->GetRootWindow(),
+                                     wm::GetRootWindowAt(location_in_screen),
+                                     &target_root_location);
   return new ui::MouseEvent(
       event.type(), target_location, target_root_location,
       ui::EventTimeForNow(), event.flags(),

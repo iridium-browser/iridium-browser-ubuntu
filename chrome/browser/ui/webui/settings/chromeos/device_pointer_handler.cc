@@ -36,15 +36,11 @@ void PointerHandler::OnJavascriptDisallowed() {
 }
 
 void PointerHandler::TouchpadExists(bool exists) {
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("has-touchpad-changed"),
-                         base::Value(exists));
+  FireWebUIListener("has-touchpad-changed", base::Value(exists));
 }
 
 void PointerHandler::MouseExists(bool exists) {
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("has-mouse-changed"),
-                         base::Value(exists));
+  FireWebUIListener("has-mouse-changed", base::Value(exists));
 }
 
 void PointerHandler::HandleInitialize(const base::ListValue* args) {

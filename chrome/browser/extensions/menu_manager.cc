@@ -209,14 +209,13 @@ std::unique_ptr<base::DictionaryValue> MenuItem::ToValue() const {
   if (type_ == CHECKBOX || type_ == RADIO)
     value->SetBoolean(kCheckedKey, checked_);
   value->SetBoolean(kEnabledKey, enabled_);
-  value->Set(kContextsKey, contexts_.ToValue().release());
+  value->Set(kContextsKey, contexts_.ToValue());
   if (parent_id_) {
     DCHECK_EQ(0, parent_id_->uid);
     value->SetString(kParentUIDKey, parent_id_->string_uid);
   }
-  value->Set(kDocumentURLPatternsKey,
-             document_url_patterns_.ToValue().release());
-  value->Set(kTargetURLPatternsKey, target_url_patterns_.ToValue().release());
+  value->Set(kDocumentURLPatternsKey, document_url_patterns_.ToValue());
+  value->Set(kTargetURLPatternsKey, target_url_patterns_.ToValue());
   return value;
 }
 
@@ -626,7 +625,6 @@ void MenuManager::ExecuteCommand(content::BrowserContext* context,
   if (item->type() == MenuItem::RADIO)
     RadioItemSelected(item);
 
-  std::unique_ptr<base::ListValue> args(new base::ListValue());
 
   std::unique_ptr<base::DictionaryValue> properties(
       new base::DictionaryValue());
@@ -635,13 +633,13 @@ void MenuManager::ExecuteCommand(content::BrowserContext* context,
     SetIdKeyValue(properties.get(), "parentMenuItemId", *item->parent_id());
 
   switch (params.media_type) {
-    case blink::WebContextMenuData::MediaTypeImage:
+    case blink::WebContextMenuData::kMediaTypeImage:
       properties->SetString("mediaType", "image");
       break;
-    case blink::WebContextMenuData::MediaTypeVideo:
+    case blink::WebContextMenuData::kMediaTypeVideo:
       properties->SetString("mediaType", "video");
       break;
-    case blink::WebContextMenuData::MediaTypeAudio:
+    case blink::WebContextMenuData::kMediaTypeAudio:
       properties->SetString("mediaType", "audio");
       break;
     default:  {}  // Do nothing.
@@ -665,8 +663,14 @@ void MenuManager::ExecuteCommand(content::BrowserContext* context,
                            webview_guest->view_instance_id());
   }
 
-  base::DictionaryValue* raw_properties = properties.get();
+  auto args = base::MakeUnique<base::ListValue>();
+  args->Reserve(2);
   args->Append(std::move(properties));
+  // |properties| is invalidated at this time, which is why |args| needs to be
+  // queried for the pointer. The obtained pointer is guaranteed to stay valid
+  // even after further Appends, because enough storage was reserved above.
+  base::DictionaryValue* raw_properties = nullptr;
+  args->GetDictionary(0, &raw_properties);
 
   // Add the tab info to the argument list.
   // No tab info in a platform app.
@@ -710,28 +714,26 @@ void MenuManager::ExecuteCommand(content::BrowserContext* context,
   {
     // Dispatch to menu item's .onclick handler (this is the legacy API, from
     // before chrome.contextMenus.onClicked existed).
-    std::unique_ptr<Event> event(
-        new Event(webview_guest ? events::WEB_VIEW_INTERNAL_CONTEXT_MENUS
-                                : events::CONTEXT_MENUS,
-                  webview_guest ? kOnWebviewContextMenus : kOnContextMenus,
-                  std::unique_ptr<base::ListValue>(args->DeepCopy())));
-    event->restrict_to_browser_context = context;
+    auto event = base::MakeUnique<Event>(
+        webview_guest ? events::WEB_VIEW_INTERNAL_CONTEXT_MENUS
+                      : events::CONTEXT_MENUS,
+        webview_guest ? kOnWebviewContextMenus : kOnContextMenus,
+        std::unique_ptr<base::ListValue>(args->DeepCopy()), context);
     event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
     event_router->DispatchEventToExtension(item->extension_id(),
                                            std::move(event));
   }
   {
     // Dispatch to .contextMenus.onClicked handler.
-    std::unique_ptr<Event> event(new Event(
+    auto event = base::MakeUnique<Event>(
         webview_guest ? events::CHROME_WEB_VIEW_INTERNAL_ON_CLICKED
                       : events::CONTEXT_MENUS_ON_CLICKED,
         webview_guest ? api::chrome_web_view_internal::OnClicked::kEventName
                       : api::context_menus::OnClicked::kEventName,
-        std::move(args)));
-    event->restrict_to_browser_context = context;
+        std::move(args), context);
     event->user_gesture = EventRouter::USER_GESTURE_ENABLED;
     if (webview_guest)
-      event->filter_info.SetInstanceID(webview_guest->view_instance_id());
+      event->filter_info.instance_id = webview_guest->view_instance_id();
     event_router->DispatchEventToExtension(item->extension_id(),
                                            std::move(event));
   }
@@ -851,7 +853,7 @@ void MenuManager::OnExtensionLoaded(content::BrowserContext* browser_context,
 
 void MenuManager::OnExtensionUnloaded(content::BrowserContext* browser_context,
                                       const Extension* extension,
-                                      UnloadedExtensionInfo::Reason reason) {
+                                      UnloadedExtensionReason reason) {
   MenuItem::ExtensionKey extension_key(extension->id());
   if (base::ContainsKey(context_items_, extension_key)) {
     RemoveAllContextItems(extension_key);

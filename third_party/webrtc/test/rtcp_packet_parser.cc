@@ -8,9 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
 #include "webrtc/test/rtcp_packet_parser.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/logging.h"
 
 namespace webrtc {
 namespace test {
@@ -54,12 +54,6 @@ bool RtcpPacketParser::Parse(const void* data, size_t length) {
             break;
           case rtcp::Remb::kFeedbackMessageType:
             remb_.Parse(header, &sender_ssrc_);
-            break;
-          case rtcp::Rpsi::kFeedbackMessageType:
-            rpsi_.Parse(header, &sender_ssrc_);
-            break;
-          case rtcp::Sli::kFeedbackMessageType:
-            sli_.Parse(header, &sender_ssrc_);
             break;
           default:
             LOG(LS_WARNING) << "Unknown rtcp payload specific feedback type "

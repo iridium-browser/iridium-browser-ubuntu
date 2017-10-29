@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.ntp.snippets;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
 
 import com.google.android.gms.gcm.GcmNetworkManager;
 import com.google.android.gms.gcm.PeriodicTask;
@@ -30,11 +31,6 @@ public class SnippetsLauncher {
     // Task tags for fetching snippets.
     public static final String TASK_TAG_WIFI = "FetchSnippetsWifi";
     public static final String TASK_TAG_FALLBACK = "FetchSnippetsFallback";
-    // TODO(treib): Remove this after M55.
-    private static final String OBSOLETE_TASK_TAG_WIFI_CHARGING = "FetchSnippetsWifiCharging";
-
-    // TODO(treib): Remove this after M55.
-    private static final String OBSOLETE_TASK_TAG_RESCHEDULE = "RescheduleSnippets";
 
     // The amount of "flex" to add around the fetching periods, as a ratio of the period.
     private static final double FLEX_FACTOR = 0.1;
@@ -52,16 +48,15 @@ public class SnippetsLauncher {
 
     /**
      * Create a SnippetsLauncher object, which is owned by C++.
-     * @param context The app context.
      */
     @VisibleForTesting
     @CalledByNative
-    public static SnippetsLauncher create(Context context) {
+    public static SnippetsLauncher create() {
         if (sInstance != null) {
             throw new IllegalStateException("Already instantiated");
         }
 
-        sInstance = new SnippetsLauncher(context);
+        sInstance = new SnippetsLauncher();
         return sInstance;
     }
 
@@ -84,19 +79,19 @@ public class SnippetsLauncher {
         return sInstance != null;
     }
 
-    protected SnippetsLauncher(Context context) {
-        checkGCM(context);
-        mScheduler = GcmNetworkManager.getInstance(context);
+    protected SnippetsLauncher() {
+        checkGCM();
+        mScheduler = GcmNetworkManager.getInstance(ContextUtils.getApplicationContext());
     }
 
-    private boolean canUseGooglePlayServices(Context context) {
+    private boolean canUseGooglePlayServices() {
         return ExternalAuthUtils.getInstance().canUseGooglePlayServices(
-                context, new UserRecoverableErrorHandler.Silent());
+                ContextUtils.getApplicationContext(), new UserRecoverableErrorHandler.Silent());
     }
 
-    private void checkGCM(Context context) {
+    private void checkGCM() {
         // Check to see if Play Services is up to date, and disable GCM if not.
-        if (!canUseGooglePlayServices(context)) {
+        if (!canUseGooglePlayServices()) {
             mGCMEnabled = false;
             Log.i(TAG, "Disabling SnippetsLauncher because Play Services is not up to date.");
         }
@@ -144,12 +139,10 @@ public class SnippetsLauncher {
         // Google Play Services may not be up to date, if the application was not installed through
         // the Play Store. In this case, scheduling the task will fail silently.
         try {
-            mScheduler.cancelTask(OBSOLETE_TASK_TAG_WIFI_CHARGING, ChromeBackgroundService.class);
             scheduleOrCancelFetchTask(
                     TASK_TAG_WIFI, periodWifiSeconds, Task.NETWORK_STATE_UNMETERED);
             scheduleOrCancelFetchTask(
                     TASK_TAG_FALLBACK, periodFallbackSeconds, Task.NETWORK_STATE_CONNECTED);
-            mScheduler.cancelTask(OBSOLETE_TASK_TAG_RESCHEDULE, ChromeBackgroundService.class);
         } catch (IllegalArgumentException e) {
             // Disable GCM for the remainder of this session.
             mGCMEnabled = false;
@@ -168,8 +161,16 @@ public class SnippetsLauncher {
         return schedule(0, 0);
     }
 
-    public static boolean shouldRescheduleTasksOnUpgrade() {
-        // Reschedule the periodic tasks if they were enabled previously.
+    @CalledByNative
+    public boolean isOnUnmeteredConnection() {
+        Context context = ContextUtils.getApplicationContext();
+        ConnectivityManager manager =
+                (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        return !manager.isActiveNetworkMetered();
+    }
+
+    public static boolean shouldNotifyOnBrowserUpgraded() {
+        // If there was no schedule previously, we do not need to react to upgrades.
         return ContextUtils.getAppSharedPreferences().getBoolean(PREF_IS_SCHEDULED, false);
     }
 }

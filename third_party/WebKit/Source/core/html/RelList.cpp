@@ -4,42 +4,22 @@
 
 #include "core/html/RelList.h"
 
+#include "core/HTMLNames.h"
 #include "core/dom/Document.h"
+#include "core/dom/Element.h"
 #include "core/origin_trials/OriginTrials.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "wtf/HashMap.h"
+#include "platform/wtf/HashMap.h"
 
 namespace blink {
 
-using namespace HTMLNames;
-
 RelList::RelList(Element* element)
-    : DOMTokenList(nullptr), m_element(element) {}
+    : DOMTokenList(*element, HTMLNames::relAttr) {}
 
-unsigned RelList::length() const {
-  return !m_element->fastGetAttribute(relAttr).isEmpty() ? m_relValues.size()
-                                                         : 0;
-}
-
-const AtomicString RelList::item(unsigned index) const {
-  if (index >= length())
-    return AtomicString();
-  return m_relValues[index];
-}
-
-bool RelList::containsInternal(const AtomicString& token) const {
-  return !m_element->fastGetAttribute(relAttr).isEmpty() &&
-         m_relValues.contains(token);
-}
-
-void RelList::setRelValues(const AtomicString& value) {
-  m_relValues.set(value, SpaceSplitString::ShouldNotFoldCase);
-}
-
-static HashSet<AtomicString>& supportedTokens() {
+static HashSet<AtomicString>& SupportedTokens() {
   DEFINE_STATIC_LOCAL(HashSet<AtomicString>, tokens, ());
 
-  if (tokens.isEmpty()) {
+  if (tokens.IsEmpty()) {
     tokens = {
         "preload",
         "preconnect",
@@ -60,18 +40,13 @@ static HashSet<AtomicString>& supportedTokens() {
   return tokens;
 }
 
-bool RelList::validateTokenValue(const AtomicString& tokenValue,
+bool RelList::ValidateTokenValue(const AtomicString& token_value,
                                  ExceptionState&) const {
-  if (supportedTokens().contains(tokenValue))
+  if (SupportedTokens().Contains(token_value))
     return true;
   return OriginTrials::linkServiceWorkerEnabled(
-             m_element->getExecutionContext()) &&
-         tokenValue == "serviceworker";
-}
-
-DEFINE_TRACE(RelList) {
-  visitor->trace(m_element);
-  DOMTokenList::trace(visitor);
+             GetElement().GetExecutionContext()) &&
+         token_value == "serviceworker";
 }
 
 }  // namespace blink

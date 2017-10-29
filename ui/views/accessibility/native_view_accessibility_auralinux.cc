@@ -5,9 +5,11 @@
 #include "ui/views/accessibility/native_view_accessibility_auralinux.h"
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/stl_util.h"
 #include "ui/accessibility/ax_action_data.h"
@@ -68,8 +70,11 @@ class AuraLinuxApplication
 
   // ui::AXPlatformNodeDelegate:
 
-  const ui::AXNodeData& GetData() override {
-    return data_;
+  const ui::AXNodeData& GetData() const override { return data_; }
+
+  const ui::AXTreeData& GetTreeData() const override {
+    CR_DEFINE_STATIC_LOCAL(ui::AXTreeData, empty_data, ());
+    return empty_data;
   }
 
   gfx::NativeWindow GetTopLevelWidget() override { return nullptr; }
@@ -91,9 +96,7 @@ class AuraLinuxApplication
     return widget->GetRootView()->GetNativeViewAccessible();
   }
 
-  gfx::Vector2d GetGlobalCoordinateOffset() override {
-    return gfx::Vector2d();
-  }
+  gfx::Rect GetScreenBoundsRect() const override { return gfx::Rect(); }
 
   gfx::NativeViewAccessible HitTestSync(int x, int y) override {
     return nullptr;
@@ -103,6 +106,8 @@ class AuraLinuxApplication
     return nullptr;
   }
 
+  ui::AXPlatformNode* GetFromNodeID(int32_t id) override { return nullptr; }
+
   gfx::AcceleratedWidget GetTargetForNativeAccessibilityEvent() override {
     return gfx::kNullAcceleratedWidget;
   }
@@ -111,7 +116,7 @@ class AuraLinuxApplication
     return false;
   }
 
-  void DoDefaultAction() override {}
+  bool ShouldIgnoreHoveredStateForTesting() override { return false; }
 
  private:
   friend struct base::DefaultSingletonTraits<AuraLinuxApplication>;
@@ -150,20 +155,20 @@ class AuraLinuxApplication
 }  // namespace
 
 // static
-NativeViewAccessibility* NativeViewAccessibility::Create(View* view) {
+std::unique_ptr<NativeViewAccessibility> NativeViewAccessibility::Create(
+    View* view) {
   AuraLinuxApplication::GetInstance()->RegisterWidget(view->GetWidget());
-  return new NativeViewAccessibilityAuraLinux(view);
+  return base::MakeUnique<NativeViewAccessibilityAuraLinux>(view);
 }
 
 NativeViewAccessibilityAuraLinux::NativeViewAccessibilityAuraLinux(View* view)
-    : NativeViewAccessibility(view) {
-}
+    : NativeViewAccessibilityBase(view) {}
 
 NativeViewAccessibilityAuraLinux::~NativeViewAccessibilityAuraLinux() {
 }
 
 gfx::NativeViewAccessible NativeViewAccessibilityAuraLinux::GetParent() {
-  gfx::NativeViewAccessible parent = NativeViewAccessibility::GetParent();
+  gfx::NativeViewAccessible parent = NativeViewAccessibilityBase::GetParent();
   if (!parent)
     parent = AuraLinuxApplication::GetInstance()->GetNativeViewAccessible();
   return parent;

@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "components/payments/content/payment_request.mojom.h"
+#include "third_party/WebKit/public/platform/modules/payments/payment_request.mojom.h"
 
 namespace payments {
 

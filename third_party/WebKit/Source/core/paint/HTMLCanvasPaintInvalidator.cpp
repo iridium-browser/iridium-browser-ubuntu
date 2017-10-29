@@ -11,15 +11,15 @@
 
 namespace blink {
 
-PaintInvalidationReason HTMLCanvasPaintInvalidator::invalidatePaintIfNeeded() {
+PaintInvalidationReason HTMLCanvasPaintInvalidator::InvalidatePaint() {
   PaintInvalidationReason reason =
-      BoxPaintInvalidator(m_htmlCanvas, m_context).invalidatePaintIfNeeded();
+      BoxPaintInvalidator(html_canvas_, context_).InvalidatePaint();
 
-  HTMLCanvasElement* element = toHTMLCanvasElement(m_htmlCanvas.node());
-  if (element->isDirty()) {
-    element->doDeferredPaintInvalidation();
-    if (reason < PaintInvalidationRectangle)
-      reason = PaintInvalidationRectangle;
+  HTMLCanvasElement* element = toHTMLCanvasElement(html_canvas_.GetNode());
+  if (element->IsDirty()) {
+    element->DoDeferredPaintInvalidation();
+    if (reason < PaintInvalidationReason::kRectangle)
+      reason = PaintInvalidationReason::kRectangle;
   }
 
   return reason;

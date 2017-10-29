@@ -10,11 +10,11 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/shell/test_runner/test_runner_export.h"
-#include "third_party/WebKit/public/platform/WebGamepads.h"
+#include "device/gamepad/public/cpp/gamepads.h"
 
 namespace blink {
-class WebFrame;
 class WebGamepadListener;
+class WebLocalFrame;
 }
 
 namespace test_runner {
@@ -28,9 +28,9 @@ class TEST_RUNNER_EXPORT GamepadController
   ~GamepadController();
 
   void Reset();
-  void Install(blink::WebFrame* frame);
+  void Install(blink::WebLocalFrame* frame);
 
-  void SampleGamepads(blink::WebGamepads& gamepads);
+  void SampleGamepads(device::Gamepads& gamepads);
   void SetListener(blink::WebGamepadListener* listener);
 
  private:
@@ -55,7 +55,7 @@ class TEST_RUNNER_EXPORT GamepadController
 
   blink::WebGamepadListener* listener_;
 
-  blink::WebGamepads gamepads_;
+  device::Gamepads gamepads_;
 
   // Mapping from gamepad index to connection state.
   std::map<int, bool> pending_changes_;

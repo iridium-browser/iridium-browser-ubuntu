@@ -99,7 +99,7 @@ class EnterpriseDeviceAttributesTest :
     std::unique_ptr<chromeos::StubInstallAttributes> attributes =
         base::MakeUnique<chromeos::StubInstallAttributes>();
 
-    attributes->SetEnterprise("fake-domain", "fake-id");
+    attributes->SetCloudManaged("fake-domain", "fake-id");
     policy::BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
         attributes.release());
 
@@ -199,7 +199,7 @@ IN_PROC_BROWSER_TEST_P(EnterpriseDeviceAttributesTest, PRE_Success) {
 IN_PROC_BROWSER_TEST_P(EnterpriseDeviceAttributesTest, Success) {
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(chrome_browser_net::SetUrlRequestMocksEnabled, true));
+      base::BindOnce(chrome_browser_net::SetUrlRequestMocksEnabled, true));
 
   SetPolicy();
 

@@ -23,6 +23,7 @@ LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += niklas_1280_720_30.y4m
 LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += noisy_clip_640_360.y4m
 LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += rush_hour_444.y4m
 LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += screendata.y4m
+LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += niklas_640_480_30.yuv
 
 # Test vectors
 LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += vp80-00-comprehensive-001.ivf
@@ -731,6 +732,8 @@ LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += vp93-2-20-12bit-yuv444.webm.md5
 endif  # CONFIG_VP9_HIGHBITDEPTH
 
 # Invalid files for testing libvpx error checking.
+LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-bug-1443.ivf
+LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-bug-1443.ivf.res
 LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-vp80-00-comprehensive-018.ivf.2kf_0x6.ivf
 LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-vp80-00-comprehensive-018.ivf.2kf_0x6.ivf.res
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-01-v3.webm
@@ -814,7 +817,6 @@ LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += kirland_640_480_30.yuv
 LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += macmarcomoving_640_480_30.yuv
 LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += macmarcostationary_640_480_30.yuv
 LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += niklas_1280_720_30.yuv
-LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += niklas_640_480_30.yuv
 LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += tacomanarrows_640_480_30.yuv
 LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += tacomasmallcameramovement_640_480_30.yuv
 LIBVPX_TEST_DATA-$(CONFIG_VP9_ENCODER) += thaloundeskmtg_640_480_30.yuv

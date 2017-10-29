@@ -8,9 +8,9 @@
 
 #include "base/format_macros.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/heap_profiler_serialization_state.h"
 #include "base/trace_event/memory_allocator_dump_guid.h"
 #include "base/trace_event/memory_dump_provider.h"
-#include "base/trace_event/memory_dump_session_state.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "base/values.h"
@@ -117,6 +117,7 @@ TEST(MemoryAllocatorDumpTest, GuidGeneration) {
   ASSERT_FALSE(guid_bar.empty());
   ASSERT_FALSE(guid_bar.ToString().empty());
   ASSERT_EQ(guid_bar, mad->guid());
+  ASSERT_EQ(guid_bar, MemoryAllocatorDump::GetDumpIdFromName("bar"));
 
   mad.reset(new MemoryAllocatorDump("bar", nullptr));
   const MemoryAllocatorDumpGuid guid_bar_2 = mad->guid();
@@ -130,7 +131,7 @@ TEST(MemoryAllocatorDumpTest, GuidGeneration) {
 TEST(MemoryAllocatorDumpTest, DumpIntoProcessMemoryDump) {
   FakeMemoryAllocatorDumpProvider fmadp;
   MemoryDumpArgs dump_args = {MemoryDumpLevelOfDetail::DETAILED};
-  ProcessMemoryDump pmd(new MemoryDumpSessionState, dump_args);
+  ProcessMemoryDump pmd(new HeapProfilerSerializationState, dump_args);
 
   fmadp.OnMemoryDump(dump_args, &pmd);
 
@@ -172,12 +173,23 @@ TEST(MemoryAllocatorDumpTest, DumpIntoProcessMemoryDump) {
   pmd.AsValueInto(traced_value.get());
 }
 
-// DEATH tests are not supported in Android / iOS.
-#if !defined(NDEBUG) && !defined(OS_ANDROID) && !defined(OS_IOS)
+TEST(MemoryAllocatorDumpTest, GetSize) {
+  MemoryDumpArgs dump_args = {MemoryDumpLevelOfDetail::DETAILED};
+  ProcessMemoryDump pmd(new HeapProfilerSerializationState, dump_args);
+  MemoryAllocatorDump* dump = pmd.CreateAllocatorDump("allocator_for_size");
+  dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                  MemoryAllocatorDump::kUnitsBytes, 1);
+  dump->AddScalar("foo", MemoryAllocatorDump::kUnitsBytes, 2);
+  EXPECT_EQ(1u, dump->GetSizeInternal());
+}
+
+// DEATH tests are not supported in Android/iOS/Fuchsia.
+#if !defined(NDEBUG) && !defined(OS_ANDROID) && !defined(OS_IOS) && \
+    !defined(OS_FUCHSIA)
 TEST(MemoryAllocatorDumpTest, ForbidDuplicatesDeathTest) {
   FakeMemoryAllocatorDumpProvider fmadp;
   MemoryDumpArgs dump_args = {MemoryDumpLevelOfDetail::DETAILED};
-  ProcessMemoryDump pmd(new MemoryDumpSessionState, dump_args);
+  ProcessMemoryDump pmd(new HeapProfilerSerializationState, dump_args);
   pmd.CreateAllocatorDump("foo_allocator");
   pmd.CreateAllocatorDump("bar_allocator/heap");
   ASSERT_DEATH(pmd.CreateAllocatorDump("foo_allocator"), "");

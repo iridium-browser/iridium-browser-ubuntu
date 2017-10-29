@@ -77,8 +77,9 @@ static void create_enc_workers(VP9_COMP *cpi, int num_workers) {
     int allocated_workers = num_workers;
 
     // While using SVC, we need to allocate threads according to the highest
-    // resolution.
-    if (cpi->use_svc) {
+    // resolution. When row based multithreading is enabled, it is OK to
+    // allocate more threads than the number of max tile columns.
+    if (cpi->use_svc && !cpi->row_mt) {
       int max_tile_cols = get_max_tile_cols(cpi);
       allocated_workers = VPXMIN(cpi->oxcf.max_threads, max_tile_cols);
     }
@@ -216,6 +217,7 @@ void vp9_encode_tiles_mt(VP9_COMP *cpi) {
   }
 }
 
+#if !CONFIG_REALTIME_ONLY
 static void accumulate_fp_tile_stat(TileDataEnc *tile_data,
                                     TileDataEnc *tile_data_t) {
   tile_data->fp_data.intra_factor += tile_data_t->fp_data.intra_factor;
@@ -250,6 +252,7 @@ static void accumulate_fp_tile_stat(TileDataEnc *tile_data,
           : VPXMIN(tile_data->fp_data.image_data_start_row,
                    tile_data_t->fp_data.image_data_start_row);
 }
+#endif  // !CONFIG_REALTIME_ONLY
 
 // Allocate memory for row synchronization
 void vp9_row_mt_sync_mem_alloc(VP9RowMTSync *row_mt_sync, VP9_COMMON *cm,
@@ -319,7 +322,7 @@ void vp9_row_mt_sync_read(VP9RowMTSync *const row_mt_sync, int r, int c) {
     pthread_mutex_t *const mutex = &row_mt_sync->mutex_[r - 1];
     pthread_mutex_lock(mutex);
 
-    while (c > row_mt_sync->cur_col[r - 1] - nsync) {
+    while (c > row_mt_sync->cur_col[r - 1] - nsync + 1) {
       pthread_cond_wait(&row_mt_sync->cond_[r - 1], mutex);
     }
     pthread_mutex_unlock(mutex);
@@ -348,7 +351,7 @@ void vp9_row_mt_sync_write(VP9RowMTSync *const row_mt_sync, int r, int c,
 
   if (c < cols - 1) {
     cur = c;
-    if (c % nsync) sig = 0;
+    if (c % nsync != nsync - 1) sig = 0;
   } else {
     cur = cols + nsync;
   }
@@ -378,6 +381,7 @@ void vp9_row_mt_sync_write_dummy(VP9RowMTSync *const row_mt_sync, int r, int c,
   return;
 }
 
+#if !CONFIG_REALTIME_ONLY
 static int first_pass_worker_hook(EncWorkerData *const thread_data,
                                   MultiThreadHandle *multi_thread_ctxt) {
   VP9_COMP *const cpi = thread_data->cpi;
@@ -467,6 +471,7 @@ void vp9_encode_fp_row_mt(VP9_COMP *cpi) {
     accumulate_fp_tile_stat(first_tile_col, this_tile);
   }
 }
+#endif  // !CONFIG_REALTIME_ONLY
 
 static int temporal_filter_worker_hook(EncWorkerData *const thread_data,
                                        MultiThreadHandle *multi_thread_ctxt) {
@@ -551,7 +556,6 @@ static int enc_row_mt_worker_hook(EncWorkerData *const thread_data,
   const VP9_COMMON *const cm = &cpi->common;
   const int tile_cols = 1 << cm->log2_tile_cols;
   int tile_row, tile_col;
-  TileDataEnc *this_tile;
   int end_of_frame;
   int thread_id = thread_data->thread_id;
   int cur_tile_id = multi_thread_ctxt->thread_id_to_tile_id[thread_id];
@@ -572,13 +576,6 @@ static int enc_row_mt_worker_hook(EncWorkerData *const thread_data,
       tile_col = proc_job->tile_col_id;
       tile_row = proc_job->tile_row_id;
       mi_row = proc_job->vert_unit_row_num * MI_BLOCK_SIZE;
-
-      this_tile = &cpi->tile_data[tile_row * tile_cols + tile_col];
-      thread_data->td->mb.m_search_count_ptr = &this_tile->m_search_count;
-      thread_data->td->mb.ex_search_count_ptr = &this_tile->ex_search_count;
-#if CONFIG_MULTITHREAD
-      thread_data->td->mb.search_count_mutex = this_tile->search_count_mutex;
-#endif
 
       vp9_encode_sb_row(cpi, thread_data->td, tile_row, tile_col, mi_row);
     }
@@ -615,7 +612,6 @@ void vp9_encode_tiles_row_mt(VP9_COMP *cpi) {
   for (i = 0; i < num_workers; i++) {
     EncWorkerData *thread_data;
     thread_data = &cpi->tile_thr_data[i];
-
     // Before encoding a frame, copy the thread data from cpi.
     if (thread_data->td != &cpi->td) {
       thread_data->td->mb = cpi->td.mb;
@@ -624,6 +620,23 @@ void vp9_encode_tiles_row_mt(VP9_COMP *cpi) {
     if (thread_data->td->counts != &cpi->common.counts) {
       memcpy(thread_data->td->counts, &cpi->common.counts,
              sizeof(cpi->common.counts));
+    }
+
+    // Handle use_nonrd_pick_mode case.
+    if (cpi->sf.use_nonrd_pick_mode) {
+      MACROBLOCK *const x = &thread_data->td->mb;
+      MACROBLOCKD *const xd = &x->e_mbd;
+      struct macroblock_plane *const p = x->plane;
+      struct macroblockd_plane *const pd = xd->plane;
+      PICK_MODE_CONTEXT *ctx = &thread_data->td->pc_root->none;
+      int j;
+
+      for (j = 0; j < MAX_MB_PLANE; ++j) {
+        p[j].coeff = ctx->coeff_pbuf[j][0];
+        p[j].qcoeff = ctx->qcoeff_pbuf[j][0];
+        pd[j].dqcoeff = ctx->dqcoeff_pbuf[j][0];
+        p[j].eobs = ctx->eobs_pbuf[j][0];
+      }
     }
   }
 

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/values.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "components/variations/variations_associated_data.h"
@@ -28,15 +30,13 @@
 #include "extensions/browser/extension_util.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_icon_set.h"
-#include "extensions/common/features/behavior_feature.h"
-#include "extensions/common/features/feature.h"
-#include "extensions/common/features/feature_provider.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_handlers/app_isolation_info.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/grit/extensions_browser_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/file_manager/app_id.h"
@@ -49,13 +49,6 @@ namespace {
 // The entry into the prefs used to flag an extension as installed by custodian.
 // It is relevant only for supervised users.
 const char kWasInstalledByCustodianPrefName[] = "was_installed_by_custodian";
-
-// Returns true if |extension| should always be enabled in incognito mode.
-bool IsWhitelistedForIncognito(const Extension* extension) {
-  const Feature* feature = FeatureProvider::GetBehaviorFeature(
-      behavior_feature::kWhitelistedForIncognito);
-  return feature && feature->IsAvailableToExtension(extension).is_available();
-}
 
 // Returns |extension_id|. See note below.
 std::string ReloadExtensionIfEnabled(const std::string& extension_id,
@@ -78,25 +71,6 @@ std::string ReloadExtensionIfEnabled(const std::string& extension_id,
 }
 
 }  // namespace
-
-bool IsIncognitoEnabled(const std::string& extension_id,
-                        content::BrowserContext* context) {
-  const Extension* extension = ExtensionRegistry::Get(context)->
-      GetExtensionById(extension_id, ExtensionRegistry::ENABLED);
-  if (extension) {
-    if (!util::CanBeIncognitoEnabled(extension))
-      return false;
-    // If this is an existing component extension we always allow it to
-    // work in incognito mode.
-    if (extension->location() == Manifest::COMPONENT ||
-        extension->location() == Manifest::EXTERNAL_COMPONENT) {
-      return true;
-    }
-    if (IsWhitelistedForIncognito(extension))
-      return true;
-  }
-  return ExtensionPrefs::Get(context)->IsIncognitoEnabled(extension_id);
-}
 
 void SetIsIncognitoEnabled(const std::string& extension_id,
                            content::BrowserContext* context,
@@ -199,7 +173,7 @@ void SetWasInstalledByCustodian(const std::string& extension_id,
 
   ExtensionPrefs::Get(context)->UpdateExtensionPref(
       extension_id, kWasInstalledByCustodianPrefName,
-      installed_by_custodian ? new base::Value(true) : nullptr);
+      installed_by_custodian ? base::MakeUnique<base::Value>(true) : nullptr);
   ExtensionService* service =
       ExtensionSystem::Get(context)->extension_service();
 
@@ -295,12 +269,6 @@ bool IsExtensionIdle(const std::string& extension_id,
   return true;
 }
 
-GURL GetSiteForExtensionId(const std::string& extension_id,
-                           content::BrowserContext* context) {
-  return content::SiteInstance::GetSiteForURL(
-      context, Extension::GetBaseURLFromExtensionId(extension_id));
-}
-
 std::unique_ptr<base::DictionaryValue> GetExtensionInfo(
     const Extension* extension) {
   DCHECK(extension);
@@ -330,18 +298,19 @@ const gfx::ImageSkia& GetDefaultExtensionIcon() {
 
 bool IsNewBookmarkAppsEnabled() {
 #if defined(OS_MACOSX)
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableNewBookmarkApps);
+  return base::FeatureList::IsEnabled(features::kBookmarkApps) ||
+         base::FeatureList::IsEnabled(features::kAppBanners) ||
+         base::FeatureList::IsEnabled(features::kExperimentalAppBanners);
 #else
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableNewBookmarkApps);
+  return true;
 #endif
 }
 
 bool CanHostedAppsOpenInWindows() {
 #if defined(OS_MACOSX)
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableHostedAppsInWindows);
+             switches::kEnableHostedAppsInWindows) ||
+         base::FeatureList::IsEnabled(features::kDesktopPWAWindowing);
 #else
   return true;
 #endif

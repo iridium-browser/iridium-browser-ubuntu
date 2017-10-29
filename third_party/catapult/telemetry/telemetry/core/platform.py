@@ -5,7 +5,6 @@ import logging as real_logging
 import os
 import sys
 
-from telemetry.core import discover
 from telemetry.core import local_server
 from telemetry.core import memory_cache_http_server
 from telemetry.core import network_controller
@@ -13,6 +12,8 @@ from telemetry.core import tracing_controller
 from telemetry.core import util
 from telemetry.internal.platform import (platform_backend as
                                          platform_backend_module)
+
+from py_utils import discover
 
 _host_platform = None
 # Remote platform is a dictionary from device ids to remote platform instances.
@@ -149,11 +150,12 @@ class Platform(object):
     Examples: VISTA, WIN7, LION, MOUNTAINLION"""
     return self._platform_backend.GetOSVersionName()
 
-  def GetOSVersionNumber(self):
-    """Returns an integer description of the Platform OS major version.
+  def GetOSVersionDetailString(self):
+    """Returns more detailed information about the OS version than
+    GetOSVersionName, if available. Otherwise returns the empty string.
 
-    Examples: On Mac, 13 for Mavericks, 14 for Yosemite."""
-    return self._platform_backend.GetOSVersionNumber()
+    Examples: '10.12.4' on macOS."""
+    return self._platform_backend.GetOSVersionDetailString()
 
   def GetSystemTotalPhysicalMemory(self):
     """Returns an integer with the total physical memory in bytes."""
@@ -421,5 +423,10 @@ class Platform(object):
   def HasBattOrConnected(self):
     return  self._platform_backend.HasBattOrConnected()
 
-  def WaitForTemperature(self, temp):
-    return self._platform_backend.WaitForTemperature(temp)
+  def WaitForBatteryTemperature(self, temp):
+    """Waits for the battery on the device under test to cool down to temp.
+
+    Args:
+      temp: temperature target in degrees C.
+    """
+    return self._platform_backend.WaitForBatteryTemperature(temp)

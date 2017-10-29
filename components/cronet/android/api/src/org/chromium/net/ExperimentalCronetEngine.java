@@ -15,9 +15,13 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 
 /**
- * {@link CronetEngine} that exposes experimental features. Use {@link Builder} to build an
- * instance of this class. Every instance of {@link CronetEngine} can be casted to an instance
- * of this class.
+ * {@link CronetEngine} that exposes experimental features. To obtain an
+ * instance of this class, cast a {@code CronetEngine} to this type. Every
+ * instance of {@code CronetEngine} can be cast to an instance of this class,
+ * as they are backed by the same implementation and hence perform identically.
+ * Instances of this class are not meant for general use, but instead only
+ * to access experimental features. Experimental features may be deprecated in the
+ * future. Use at your own risk.
  *
  * {@hide since this class exposes experimental features that should be hidden.}
  */
@@ -70,7 +74,10 @@ public abstract class ExperimentalCronetEngine extends CronetEngine {
     public static final int EFFECTIVE_CONNECTION_TYPE_4G = 5;
 
     /**
-     * Builder for building {@link ExperimentalCronetEngine}.
+     * A version of {@link CronetEngine.Builder} that exposes experimental
+     * features. Instances of this class are not meant for general use, but
+     * instead only to access experimental features. Experimental features
+     * may be deprecated in the future. Use at your own risk.
      */
     public static class Builder extends CronetEngine.Builder {
         /**
@@ -132,37 +139,6 @@ public abstract class ExperimentalCronetEngine extends CronetEngine {
         }
 
         /**
-         * Overrides
-         * <a href="https://developer.chrome.com/multidevice/data-compression">
-         * Data Reduction Proxy</a> configuration parameters with a primary
-         * proxy name, fallback proxy name, and a secure proxy check URL. Proxies
-         * are specified as [scheme://]host[:port]. Used for testing.
-         * @param primaryProxy the primary data reduction proxy to use.
-         * @param fallbackProxy a fallback data reduction proxy to use.
-         * @param secureProxyCheckUrl a URL to fetch to determine if using a secure
-         * proxy is allowed.
-         * @return the builder to facilitate chaining.
-         */
-        public Builder setDataReductionProxyOptions(
-                String primaryProxy, String fallbackProxy, String secureProxyCheckUrl) {
-            mBuilderDelegate.setDataReductionProxyOptions(
-                    primaryProxy, fallbackProxy, secureProxyCheckUrl);
-            return this;
-        }
-
-        /**
-         * Enables
-         * <a href="https://developer.chrome.com/multidevice/data-compression">Data
-         * Reduction Proxy</a>. Defaults to disabled.
-         * @param key key to use when authenticating with the proxy.
-         * @return the builder to facilitate chaining.
-         */
-        public Builder enableDataReductionProxy(String key) {
-            mBuilderDelegate.enableDataReductionProxy(key);
-            return this;
-        }
-
-        /**
          * Sets experimental options to be used in Cronet.
          *
          * @param options JSON formatted experimental options.
@@ -170,6 +146,23 @@ public abstract class ExperimentalCronetEngine extends CronetEngine {
          */
         public Builder setExperimentalOptions(String options) {
             mBuilderDelegate.setExperimentalOptions(options);
+            return this;
+        }
+
+        /**
+         * Sets the thread priority of Cronet's internal thread.
+         *
+         * @param priority the thread priority of Cronet's internal thread.
+         *        A Linux priority level, from -20 for highest scheduling
+         *        priority to 19 for lowest scheduling priority. For more
+         *        information on values, see
+         *        {@link android.os.Process#setThreadPriority(int, int)} and
+         *        {@link android.os.Process#THREAD_PRIORITY_DEFAULT
+         *        THREAD_PRIORITY_*} values.
+         * @return the builder to facilitate chaining.
+         */
+        public Builder setThreadPriority(int priority) {
+            mBuilderDelegate.setThreadPriority(priority);
             return this;
         }
 
@@ -276,7 +269,7 @@ public abstract class ExperimentalCronetEngine extends CronetEngine {
     /**
      * Starts NetLog logging to a specified directory with a bounded size. The NetLog will contain
      * events emitted by all live CronetEngines. The NetLog is useful for debugging.
-     * The log can be viewed by stitching the files using net/log/stitch_net_log_files.py and
+     * The log can be viewed by stitching the files using net/tools/stitch_net_log_files.py and
      * using a Chrome browser navigated to chrome://net-internals/#import
      * @param dirPath the directory where the log files will be created. It must already exist.
      *            NetLog files must not already exist in the directory. If actively logging,

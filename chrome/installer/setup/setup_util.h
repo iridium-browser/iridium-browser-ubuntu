@@ -9,15 +9,13 @@
 #ifndef CHROME_INSTALLER_SETUP_SETUP_UTIL_H_
 #define CHROME_INSTALLER_SETUP_SETUP_UTIL_H_
 
-#include <windows.h>
 #include <stdint.h>
 
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/strings/string16.h"
-#include "base/win/scoped_handle.h"
+#include "base/time/time.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/lzma_util.h"
 #include "chrome/installer/util/util_constants.h"
@@ -121,6 +119,10 @@ bool IsDowngradeAllowed(const MasterPreferences& prefs);
 // Returns true if Chrome has been run within the last 28 days.
 bool IsChromeActivelyUsed(const InstallerState& installer_state);
 
+// Returns the age (in days) of the installation based on the creation time of
+// its installation directory, or -1 in case of error.
+int GetInstallAge(const InstallerState& installer_state);
+
 // Records UMA metrics for unpack result.
 void RecordUnPackMetrics(UnPackStatus unpack_status,
                          int32_t status,
@@ -145,34 +147,9 @@ bool AreBinariesInstalled(const InstallerState& installer_state);
 void DoLegacyCleanups(const InstallerState& installer_state,
                       InstallStatus install_status);
 
-// This class will enable the privilege defined by |privilege_name| on the
-// current process' token. The privilege will be disabled upon the
-// ScopedTokenPrivilege's destruction (unless it was already enabled when the
-// ScopedTokenPrivilege object was constructed).
-// Some privileges might require admin rights to be enabled (check is_enabled()
-// to know whether |privilege_name| was successfully enabled).
-class ScopedTokenPrivilege {
- public:
-  explicit ScopedTokenPrivilege(const wchar_t* privilege_name);
-  ~ScopedTokenPrivilege();
-
-  // Always returns true unless the privilege could not be enabled.
-  bool is_enabled() const { return is_enabled_; }
-
- private:
-  // Always true unless the privilege could not be enabled.
-  bool is_enabled_;
-
-  // A scoped handle to the current process' token. This will be closed
-  // preemptively should enabling the privilege fail in the constructor.
-  base::win::ScopedHandle token_;
-
-  // The previous state of the privilege this object is responsible for. As set
-  // by AdjustTokenPrivileges() upon construction.
-  TOKEN_PRIVILEGES previous_privileges_;
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(ScopedTokenPrivilege);
-};
+// Returns the time of the start of the console user's Windows logon session, or
+// a null time in case of error.
+base::Time GetConsoleSessionStartTime();
 
 }  // namespace installer
 

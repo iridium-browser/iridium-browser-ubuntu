@@ -14,11 +14,10 @@
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/install_static/install_details.h"
 #include "components/grit/components_resources.h"
-#include "components/strings/grit/components_chromium_strings.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
 #include "components/version_ui/version_ui_constants.h"
@@ -103,6 +102,9 @@ WebUIDataSource* CreateVersionUIDataSource() {
 #if defined(OS_ANDROID)
   html_source->AddString(version_ui::kOSVersion,
                          AndroidAboutAppInfo::GetOsInfo());
+  html_source->AddLocalizedString(version_ui::kGmsName, IDS_VERSION_UI_GMS);
+  html_source->AddString(version_ui::kGmsVersion,
+                         AndroidAboutAppInfo::GetGmsInfo());
 #else
   html_source->AddString(version_ui::kFlashPlugin, "Flash");
   // Note that the Flash version is retrieve asynchronously and returned in
@@ -142,7 +144,7 @@ WebUIDataSource* CreateVersionUIDataSource() {
 #else
   html_source->AddString(version_ui::kCompiler, "MSVC 2015");
 #endif
-#elif defined(_MSC_VER) && _MSC_VER == 1910
+#elif defined(_MSC_VER) && _MSC_VER >= 1910 && _MSC_VER < 2000
 #if BUILDFLAG(PGO_BUILD)
   html_source->AddString(version_ui::kCompiler, "MSVC 2017 (PGO)");
 #else
@@ -153,6 +155,16 @@ WebUIDataSource* CreateVersionUIDataSource() {
 #else
   html_source->AddString(version_ui::kCompiler, "Unknown");
 #endif
+
+  base::string16 update_cohort_name =
+      install_static::InstallDetails::Get().update_cohort_name();
+  if (!update_cohort_name.empty()) {
+    html_source->AddString(version_ui::kUpdateCohortName,
+                           l10n_util::GetStringFUTF16(
+                               IDS_VERSION_UI_COHORT_NAME, update_cohort_name));
+  } else {
+    html_source->AddString(version_ui::kUpdateCohortName, std::string());
+  }
 #endif  // defined(OS_WIN)
 
   html_source->SetJsonPath("strings.js");

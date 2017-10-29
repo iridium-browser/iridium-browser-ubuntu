@@ -31,9 +31,9 @@
 #ifndef SVGAnimatedTransformList_h
 #define SVGAnimatedTransformList_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/svg/SVGTransformListTearOff.h"
 #include "core/svg/properties/SVGAnimatedProperty.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -45,26 +45,27 @@ class SVGAnimatedTransformList final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGAnimatedTransformList* create(
-      SVGElement* contextElement,
-      const QualifiedName& attributeName,
-      CSSPropertyID cssPropertyId = CSSPropertyInvalid) {
-    return new SVGAnimatedTransformList(contextElement, attributeName,
-                                        cssPropertyId);
+  static SVGAnimatedTransformList* Create(
+      SVGElement* context_element,
+      const QualifiedName& attribute_name,
+      CSSPropertyID css_property_id = CSSPropertyInvalid) {
+    return new SVGAnimatedTransformList(context_element, attribute_name,
+                                        css_property_id);
   }
 
   DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
-    visitor->traceWrappers(contextElement());
+    SVGAnimatedProperty<SVGTransformList>::TraceWrappers(visitor);
+    ScriptWrappable::TraceWrappers(visitor);
   }
 
  protected:
-  SVGAnimatedTransformList(SVGElement* contextElement,
-                           const QualifiedName& attributeName,
-                           CSSPropertyID cssPropertyId)
-      : SVGAnimatedProperty<SVGTransformList>(contextElement,
-                                              attributeName,
-                                              SVGTransformList::create(),
-                                              cssPropertyId) {}
+  SVGAnimatedTransformList(SVGElement* context_element,
+                           const QualifiedName& attribute_name,
+                           CSSPropertyID css_property_id)
+      : SVGAnimatedProperty<SVGTransformList>(context_element,
+                                              attribute_name,
+                                              SVGTransformList::Create(),
+                                              css_property_id) {}
 };
 
 }  // namespace blink

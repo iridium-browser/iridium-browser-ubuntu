@@ -32,64 +32,78 @@
 
 #include <memory>
 
-#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
 ErrorEvent::ErrorEvent()
-    : m_sanitizedMessage(),
-      m_location(SourceLocation::create(String(), 0, 0, nullptr)),
-      m_world(DOMWrapperWorld::current(v8::Isolate::GetCurrent())) {}
+    : sanitized_message_(),
+      location_(SourceLocation::Create(String(), 0, 0, nullptr)),
+      error_(this),
+      world_(DOMWrapperWorld::Current(v8::Isolate::GetCurrent())) {}
 
-ErrorEvent::ErrorEvent(const AtomicString& type,
+ErrorEvent::ErrorEvent(ScriptState* script_state,
+                       const AtomicString& type,
                        const ErrorEventInit& initializer)
     : Event(type, initializer),
-      m_sanitizedMessage(),
-      m_world(DOMWrapperWorld::current(v8::Isolate::GetCurrent())) {
+      sanitized_message_(),
+      error_(this),
+      world_(script_state->World()) {
   if (initializer.hasMessage())
-    m_sanitizedMessage = initializer.message();
-  m_location = SourceLocation::create(
+    sanitized_message_ = initializer.message();
+  location_ = SourceLocation::Create(
       initializer.hasFilename() ? initializer.filename() : String(),
       initializer.hasLineno() ? initializer.lineno() : 0,
       initializer.hasColno() ? initializer.colno() : 0, nullptr);
-  if (initializer.hasError())
-    m_error = initializer.error();
+  if (initializer.hasError()) {
+    error_.Set(initializer.error().GetIsolate(), initializer.error().V8Value());
+  }
 }
 
 ErrorEvent::ErrorEvent(const String& message,
                        std::unique_ptr<SourceLocation> location,
+                       ScriptValue error,
                        DOMWrapperWorld* world)
     : Event(EventTypeNames::error, false, true),
-      m_sanitizedMessage(message),
-      m_location(std::move(location)),
-      m_world(world) {}
+      sanitized_message_(message),
+      location_(std::move(location)),
+      error_(this),
+      world_(world) {
+  if (!error.IsEmpty())
+    error_.Set(error.GetIsolate(), error.V8Value());
+}
 
-void ErrorEvent::setUnsanitizedMessage(const String& message) {
-  DCHECK(m_unsanitizedMessage.isEmpty());
-  m_unsanitizedMessage = message;
+void ErrorEvent::SetUnsanitizedMessage(const String& message) {
+  DCHECK(unsanitized_message_.IsEmpty());
+  unsanitized_message_ = message;
 }
 
 ErrorEvent::~ErrorEvent() {}
 
-const AtomicString& ErrorEvent::interfaceName() const {
+const AtomicString& ErrorEvent::InterfaceName() const {
   return EventNames::ErrorEvent;
 }
 
-ScriptValue ErrorEvent::error(ScriptState* scriptState) const {
+ScriptValue ErrorEvent::error(ScriptState* script_state) const {
   // Don't return |m_error| when we are in the different worlds to avoid
   // leaking a V8 value.
   // We do not clone Error objects (exceptions), for 2 reasons:
   // 1) Errors carry a reference to the isolated world's global object, and
   //    thus passing it around would cause leakage.
   // 2) Errors cannot be cloned (or serialized):
-  if (world() != &scriptState->world())
+  if (World() != &script_state->World() || error_.IsEmpty())
     return ScriptValue();
-  return m_error;
+  return ScriptValue(script_state, error_.NewLocal(script_state->GetIsolate()));
 }
 
 DEFINE_TRACE(ErrorEvent) {
-  Event::trace(visitor);
+  Event::Trace(visitor);
+}
+
+DEFINE_TRACE_WRAPPERS(ErrorEvent) {
+  visitor->TraceWrappers(error_);
+  Event::TraceWrappers(visitor);
 }
 
 }  // namespace blink

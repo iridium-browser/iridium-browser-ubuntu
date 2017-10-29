@@ -11,13 +11,13 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Color;
 import android.media.AudioManager;
-import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.PatternMatcher;
 import android.support.v4.content.LocalBroadcastManager;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.Toast;
@@ -27,7 +27,6 @@ import org.chromium.base.annotations.JNINamespace;
 import org.chromium.content.browser.ActivityContentVideoViewEmbedder;
 import org.chromium.content.browser.ContentVideoViewEmbedder;
 import org.chromium.content.browser.ContentView;
-import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.ContentViewRenderView;
 import org.chromium.content_public.browser.WebContents;
@@ -36,7 +35,7 @@ import org.chromium.ui.base.WindowAndroid;
 
 /**
  * Activity for displaying a WebContents in CastShell.
- *
+ * <p>
  * Typically, this class is controlled by CastContentWindowAndroid, which will
  * start a new instance of this activity. If the CastContentWindowAndroid is
  * destroyed, CastWebContentsActivity should finish(). Similarily, if this
@@ -53,26 +52,27 @@ public class CastWebContentsActivity extends Activity {
     private IntentFilter mWindowDestroyedIntentFilter;
     private FrameLayout mCastWebContentsLayout;
     private AudioManager mAudioManager;
-    private ContentViewClient mContentViewClient;
     private ContentViewRenderView mContentViewRenderView;
     private WindowAndroid mWindow;
     private ContentViewCore mContentViewCore;
     private ContentView mContentView;
+    private boolean mReceivedUserLeave = false;
 
     private static final int TEARDOWN_GRACE_PERIOD_TIMEOUT_MILLIS = 300;
-    public static final String ACTION_DATA_SCHEME = "cast";
-    public static final String ACTION_DATA_AUTHORITY = "webcontents";
 
-    public static final String ACTION_EXTRA_WEB_CONTENTS =
-            "com.google.android.apps.castshell.intent.extra.WEB_CONTENTS";
-    public static final String ACTION_EXTRA_KEY_CODE =
-            "com.google.android.apps.castshell.intent.extra.KEY_CODE";
-    public static final String ACTION_KEY_EVENT =
-            "com.google.android.apps.castshell.intent.action.KEY_EVENT";
     public static final String ACTION_STOP_ACTIVITY =
             "com.google.android.apps.castshell.intent.action.STOP_ACTIVITY";
-    public static final String ACTION_ACTIVITY_STOPPED =
-            "com.google.android.apps.castshell.intent.action.ACTIVITY_STOPPED";
+
+    /*
+     * Intended to be called from "onStop" to determine if this is a "legitimate" stop or not.
+     * When starting CastShellActivity from the TV in sleep mode, an extra onPause/onStop will be
+     * fired.
+     * Details: http://stackoverflow.com/questions/25369909/
+     * We use onUserLeaveHint to determine if the onPause/onStop called because of user intent.
+     */
+    private boolean isStopping() {
+        return mReceivedUserLeave;
+    }
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
@@ -81,7 +81,6 @@ public class CastWebContentsActivity extends Activity {
 
         mHandler = new Handler();
 
-        // TODO(derekjchow): Remove this call.
         if (!CastBrowserHelper.initializeBrowser(getApplicationContext())) {
             Toast.makeText(this, R.string.browser_process_initialization_failed, Toast.LENGTH_SHORT)
                     .show();
@@ -128,7 +127,6 @@ public class CastWebContentsActivity extends Activity {
         intent.setExtrasClassLoader(WebContents.class.getClassLoader());
         mInstanceId = intent.getData().getPath();
 
-        final String instanceId = mInstanceId;
         if (mWindowDestroyedBroadcastReceiver != null) {
             LocalBroadcastManager.getInstance(this).unregisterReceiver(
                     mWindowDestroyedBroadcastReceiver);
@@ -148,8 +146,8 @@ public class CastWebContentsActivity extends Activity {
         LocalBroadcastManager.getInstance(this).registerReceiver(
                 mWindowDestroyedBroadcastReceiver, mWindowDestroyedIntentFilter);
 
-        WebContents webContents =
-                (WebContents) intent.getParcelableExtra(ACTION_EXTRA_WEB_CONTENTS);
+        WebContents webContents = (WebContents) intent.getParcelableExtra(
+                CastWebContentsComponent.ACTION_EXTRA_WEB_CONTENTS);
         if (webContents == null) {
             Log.e(TAG, "Received null WebContents in intent.");
             maybeFinishLater();
@@ -193,9 +191,10 @@ public class CastWebContentsActivity extends Activity {
     @Override
     protected void onStop() {
         if (DEBUG) Log.d(TAG, "onStop");
-
-        detachWebContentsIfAny();
-        releaseStreamMuteIfNecessary();
+        if (isStopping()) {
+            detachWebContentsIfAny();
+            releaseStreamMuteIfNecessary();
+        }
         super.onStop();
     }
 
@@ -204,8 +203,9 @@ public class CastWebContentsActivity extends Activity {
         if (DEBUG) Log.d(TAG, "onResume");
         super.onResume();
 
-        if (mAudioManager.requestAudioFocus(null, AudioManager.STREAM_MUSIC,
-                    AudioManager.AUDIOFOCUS_GAIN) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+        if (mAudioManager.requestAudioFocus(
+                    null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+                != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
             Log.e(TAG, "Failed to obtain audio focus");
         }
     }
@@ -223,6 +223,22 @@ public class CastWebContentsActivity extends Activity {
     }
 
     @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        if (DEBUG) Log.d(TAG, "onWindowFocusChanged(%b)", hasFocus);
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_FULLSCREEN);
+        }
+    }
+
+    @Override
+    protected void onUserLeaveHint() {
+        if (DEBUG) Log.d(TAG, "onUserLeaveHint");
+        mReceivedUserLeave = true;
+    }
+
+    @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (DEBUG) Log.d(TAG, "dispatchKeyEvent");
         int keyCode = event.getKeyCode();
@@ -237,12 +253,11 @@ public class CastWebContentsActivity extends Activity {
                     || keyCode == KeyEvent.KEYCODE_MEDIA_STOP
                     || keyCode == KeyEvent.KEYCODE_MEDIA_NEXT
                     || keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
-                Intent intent = new Intent(ACTION_KEY_EVENT, getInstanceUri());
-                intent.putExtra(ACTION_EXTRA_KEY_CODE, keyCode);
-                LocalBroadcastManager.getInstance(this).sendBroadcastSync(intent);
+                CastWebContentsComponent.onKeyDown(this, mInstanceId, keyCode);
 
                 // Stop key should end the entire session.
                 if (keyCode == KeyEvent.KEYCODE_MEDIA_STOP) {
+                    mReceivedUserLeave = true;
                     finish();
                 }
 
@@ -251,6 +266,7 @@ public class CastWebContentsActivity extends Activity {
         }
 
         if (keyCode == KeyEvent.KEYCODE_BACK) {
+            mReceivedUserLeave = true;
             return super.dispatchKeyEvent(event);
         }
         return false;
@@ -321,13 +337,11 @@ public class CastWebContentsActivity extends Activity {
         mContentView = ContentView.createContentView(this, mContentViewCore);
         mContentViewCore.initialize(ViewAndroidDelegate.createBasicDelegate(mContentView),
                 mContentView, webContents, mWindow);
-        mContentViewClient = new ContentViewClient();
-        mContentViewCore.setContentViewClient(mContentViewClient);
         // Enable display of current webContents.
         if (getParent() != null) mContentViewCore.onShow();
-        mCastWebContentsLayout.addView(
-                mContentView, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
-                                                           FrameLayout.LayoutParams.MATCH_PARENT));
+        mCastWebContentsLayout.addView(mContentView,
+                new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
         mContentView.requestFocus();
         mContentViewRenderView.setCurrentContentViewCore(mContentViewCore);
     }
@@ -340,19 +354,8 @@ public class CastWebContentsActivity extends Activity {
             mContentView = null;
             mContentViewCore = null;
 
-            // Inform CastContentWindowAndroid we're detaching.
-            Intent intent = new Intent(ACTION_ACTIVITY_STOPPED, getInstanceUri());
-            LocalBroadcastManager.getInstance(this).sendBroadcastSync(intent);
+            CastWebContentsComponent.onComponentClosed(this, mInstanceId);
         }
-    }
-
-    private Uri getInstanceUri() {
-        Uri instanceUri = new Uri.Builder()
-                .scheme(CastWebContentsActivity.ACTION_DATA_SCHEME)
-                .authority(CastWebContentsActivity.ACTION_DATA_AUTHORITY)
-                .path(mInstanceId)
-                .build();
-        return instanceUri;
     }
 
     private native void nativeSetContentVideoViewEmbedder(

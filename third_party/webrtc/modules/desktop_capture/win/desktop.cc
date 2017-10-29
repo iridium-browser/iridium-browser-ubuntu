@@ -12,7 +12,7 @@
 
 #include <vector>
 
-#include "webrtc/system_wrappers/include/logging.h"
+#include "webrtc/rtc_base/logging.h"
 
 namespace webrtc {
 

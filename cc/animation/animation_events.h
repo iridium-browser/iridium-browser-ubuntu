@@ -11,7 +11,7 @@
 #include "cc/animation/animation.h"
 #include "cc/animation/animation_curve.h"
 #include "cc/animation/animation_export.h"
-#include "cc/output/filter_operations.h"
+#include "cc/base/filter_operations.h"
 #include "cc/trees/element_id.h"
 #include "cc/trees/mutator_host.h"
 #include "ui/gfx/transform.h"
@@ -19,7 +19,7 @@
 namespace cc {
 
 struct CC_ANIMATION_EXPORT AnimationEvent {
-  enum Type { STARTED, FINISHED, ABORTED, PROPERTY_UPDATE, TAKEOVER };
+  enum Type { STARTED, FINISHED, ABORTED, TAKEOVER };
 
   AnimationEvent(Type type,
                  ElementId element_id,

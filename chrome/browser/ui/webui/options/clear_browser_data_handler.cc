@@ -24,8 +24,7 @@
 #include "chrome/browser/browsing_data/browsing_data_counter_factory.h"
 #include "chrome/browser/browsing_data/browsing_data_counter_utils.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_remover.h"
-#include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -40,6 +39,7 @@
 #include "components/browsing_data/core/pref_names.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/browsing_data_remover.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -145,7 +145,7 @@ void ClearBrowserDataHandler::UpdateInfoBannerVisibility() {
   }
 
   web_ui()->CallJavascriptFunctionUnsafe(
-      "ClearBrowserDataOverlay.setBannerText", base::StringValue(text));
+      "ClearBrowserDataOverlay.setBannerText", base::Value(text));
 }
 
 void ClearBrowserDataHandler::OnPageOpened(const base::ListValue* value) {
@@ -198,7 +198,7 @@ void ClearBrowserDataHandler::GetLocalizedValues(
           IDS_CLEAR_BROWSING_DATA_HISTORY_NOTICE,
           base::ASCIIToUTF16(kMyActivityUrlInDialog)));
 
-  base::ListValue* time_list = new base::ListValue;
+  auto time_list = base::MakeUnique<base::ListValue>();
   for (int i = 0; i < 5; i++) {
     base::string16 label_string;
     switch (i) {
@@ -223,7 +223,7 @@ void ClearBrowserDataHandler::GetLocalizedValues(
     option->AppendString(label_string);
     time_list->Append(std::move(option));
   }
-  localized_strings->Set("clearBrowserDataTimeList", time_list);
+  localized_strings->Set("clearBrowserDataTimeList", std::move(time_list));
   localized_strings->SetBoolean("showDeleteBrowsingHistoryCheckboxes",
                                 !Profile::FromWebUI(web_ui())->IsSupervised());
 }
@@ -246,51 +246,51 @@ void ClearBrowserDataHandler::HandleClearBrowserData(
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
 
-  int site_data_mask = BrowsingDataRemover::REMOVE_SITE_DATA;
+  int site_data_mask = ChromeBrowsingDataRemoverDelegate::DATA_TYPE_SITE_DATA;
   // Don't try to clear LSO data if it's not supported.
   if (!*clear_plugin_lso_data_enabled_)
-    site_data_mask &= ~BrowsingDataRemover::REMOVE_PLUGIN_DATA;
+    site_data_mask &= ~ChromeBrowsingDataRemoverDelegate::DATA_TYPE_PLUGIN_DATA;
 
   int remove_mask = 0;
   int origin_mask = 0;
   if (prefs->GetBoolean(browsing_data::prefs::kDeleteBrowsingHistory) &&
       *allow_deleting_browser_history_) {
-    remove_mask |= BrowsingDataRemover::REMOVE_HISTORY;
+    remove_mask |= ChromeBrowsingDataRemoverDelegate::DATA_TYPE_HISTORY;
   }
   if (prefs->GetBoolean(browsing_data::prefs::kDeleteDownloadHistory) &&
       *allow_deleting_browser_history_) {
-    remove_mask |= BrowsingDataRemover::REMOVE_DOWNLOADS;
+    remove_mask |= content::BrowsingDataRemover::DATA_TYPE_DOWNLOADS;
   }
   if (prefs->GetBoolean(browsing_data::prefs::kDeleteCache))
-    remove_mask |= BrowsingDataRemover::REMOVE_CACHE;
+    remove_mask |= content::BrowsingDataRemover::DATA_TYPE_CACHE;
   if (prefs->GetBoolean(browsing_data::prefs::kDeleteCookies)) {
     remove_mask |= site_data_mask;
-    origin_mask |= BrowsingDataHelper::UNPROTECTED_WEB;
+    origin_mask |= content::BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB;
   }
   if (prefs->GetBoolean(browsing_data::prefs::kDeletePasswords))
-    remove_mask |= BrowsingDataRemover::REMOVE_PASSWORDS;
+    remove_mask |= ChromeBrowsingDataRemoverDelegate::DATA_TYPE_PASSWORDS;
   if (prefs->GetBoolean(browsing_data::prefs::kDeleteFormData))
-    remove_mask |= BrowsingDataRemover::REMOVE_FORM_DATA;
+    remove_mask |= ChromeBrowsingDataRemoverDelegate::DATA_TYPE_FORM_DATA;
   if (prefs->GetBoolean(browsing_data::prefs::kDeleteMediaLicenses))
-    remove_mask |= BrowsingDataRemover::REMOVE_MEDIA_LICENSES;
+    remove_mask |= content::BrowsingDataRemover::DATA_TYPE_MEDIA_LICENSES;
   if (prefs->GetBoolean(browsing_data::prefs::kDeleteHostedAppsData)) {
     remove_mask |= site_data_mask;
-    origin_mask |= BrowsingDataHelper::PROTECTED_WEB;
+    origin_mask |= content::BrowsingDataRemover::ORIGIN_TYPE_PROTECTED_WEB;
   }
 
   // Record the deletion of cookies and cache.
-  BrowsingDataRemover::CookieOrCacheDeletionChoice choice =
-      BrowsingDataRemover::NEITHER_COOKIES_NOR_CACHE;
+  content::BrowsingDataRemover::CookieOrCacheDeletionChoice choice =
+      content::BrowsingDataRemover::NEITHER_COOKIES_NOR_CACHE;
   if (prefs->GetBoolean(browsing_data::prefs::kDeleteCookies)) {
     choice = prefs->GetBoolean(browsing_data::prefs::kDeleteCache)
-                 ? BrowsingDataRemover::BOTH_COOKIES_AND_CACHE
-                 : BrowsingDataRemover::ONLY_COOKIES;
+                 ? content::BrowsingDataRemover::BOTH_COOKIES_AND_CACHE
+                 : content::BrowsingDataRemover::ONLY_COOKIES;
   } else if (prefs->GetBoolean(browsing_data::prefs::kDeleteCache)) {
-    choice = BrowsingDataRemover::ONLY_CACHE;
+    choice = content::BrowsingDataRemover::ONLY_CACHE;
   }
   UMA_HISTOGRAM_ENUMERATION(
-      "History.ClearBrowsingData.UserDeletedCookieOrCacheFromDialog",
-      choice, BrowsingDataRemover::MAX_CHOICE_VALUE);
+      "History.ClearBrowsingData.UserDeletedCookieOrCacheFromDialog", choice,
+      content::BrowsingDataRemover::MAX_CHOICE_VALUE);
 
   // Record the circumstances under which passwords are deleted.
   if (prefs->GetBoolean(browsing_data::prefs::kDeletePasswords)) {
@@ -313,7 +313,7 @@ void ClearBrowserDataHandler::HandleClearBrowserData(
         checked_other_types);
   }
 
-  remover_ = BrowsingDataRemoverFactory::GetForBrowserContext(profile);
+  remover_ = content::BrowserContext::GetBrowsingDataRemover(profile);
   remover_->AddObserver(this);
   int period_selected =
       prefs->GetInteger(browsing_data::prefs::kDeleteTimePeriod);
@@ -375,6 +375,7 @@ void ClearBrowserDataHandler::AddCounter(
   DCHECK(AreCountersEnabled());
 
   counter->Init(Profile::FromWebUI(web_ui())->GetPrefs(),
+                browsing_data::ClearBrowsingDataTab::ADVANCED,
                 base::Bind(&ClearBrowserDataHandler::UpdateCounterText,
                            base::Unretained(this)));
   counters_.push_back(std::move(counter));
@@ -385,8 +386,8 @@ void ClearBrowserDataHandler::UpdateCounterText(
   DCHECK(AreCountersEnabled());
   web_ui()->CallJavascriptFunctionUnsafe(
       "ClearBrowserDataOverlay.updateCounter",
-      base::StringValue(result->source()->GetPrefName()),
-      base::StringValue(GetChromeCounterTextFromResult(result.get())));
+      base::Value(result->source()->GetPrefName()),
+      base::Value(GetChromeCounterTextFromResult(result.get())));
 }
 
 void ClearBrowserDataHandler::OnStateChanged(syncer::SyncService* sync) {

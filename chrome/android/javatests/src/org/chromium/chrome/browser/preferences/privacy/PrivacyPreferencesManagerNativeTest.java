@@ -6,32 +6,43 @@ package org.chromium.chrome.browser.preferences.privacy;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.support.test.InstrumentationRegistry;
+import android.support.test.annotation.UiThreadTest;
 import android.support.test.filters.SmallTest;
-import android.test.UiThreadTest;
+import android.support.test.rule.UiThreadTestRule;
+
+import org.junit.Assert;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.RuleChain;
+import org.junit.runner.RunWith;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.AdvancedMockContext;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
-import org.chromium.content.browser.test.NativeLibraryTestBase;
+import org.chromium.chrome.browser.test.ChromeBrowserTestRule;
 
 /**
  *  Tests "Usage and Crash reporting" settings screen.
  */
-public class PrivacyPreferencesManagerNativeTest extends NativeLibraryTestBase {
-    @Override
-    protected void setUp() throws Exception {
-        super.setUp();
-        loadNativeLibraryAndInitBrowserProcess();
-    }
+@RunWith(BaseJUnit4ClassRunner.class)
+public class PrivacyPreferencesManagerNativeTest {
+    @Rule
+    public final RuleChain mChain =
+            RuleChain.outerRule(new ChromeBrowserTestRule()).around(new UiThreadTestRule());
 
+    @Test
     @SmallTest
-    @Feature({"Android-AppBase"})
     @UiThreadTest
-    public void testSyncUsageAndCrashReporting {
+    @Feature({"Android-AppBase"})
+    public void testSyncUsageAndCrashReporting() throws Throwable {
         CommandLine.init(null);
-        PermissionContext context = new PermissionContext(getInstrumentation().getTargetContext());
+        PermissionContext context = new PermissionContext(
+                InstrumentationRegistry.getInstrumentation().getTargetContext());
         PrefServiceBridge prefBridge = PrefServiceBridge.getInstance();
         SharedPreferences pref = ContextUtils.getAppSharedPreferences();
         PrivacyPreferencesManager preferenceManager = new PrivacyPreferencesManager(context);
@@ -41,26 +52,33 @@ public class PrivacyPreferencesManagerNativeTest extends NativeLibraryTestBase {
         pref.edit().putBoolean(PrivacyPreferencesManager.PREF_METRICS_REPORTING, true).apply();
 
         preferenceManager.syncUsageAndCrashReportingPrefs();
-        assertTrue("Native preference should be True ", prefBridge.isMetricsReportingEnabled());
+        Assert.assertTrue(
+                "Native preference should be True ", prefBridge.isMetricsReportingEnabled());
     }
 
+    @Test
     @SmallTest
     @Feature({"Android-AppBase"})
     @UiThreadTest
-    public void testSetUsageAndCrashReporting() {
+    @DisabledTest(message = "crbug.com/700500")
+    public void testSetUsageAndCrashReporting() throws Throwable {
         CommandLine.init(null);
-        PermissionContext context = new PermissionContext(getInstrumentation().getTargetContext());
+        PermissionContext context = new PermissionContext(
+                InstrumentationRegistry.getInstrumentation().getTargetContext());
         PrefServiceBridge prefBridge = PrefServiceBridge.getInstance();
         SharedPreferences pref = ContextUtils.getAppSharedPreferences();
         PrivacyPreferencesManager preferenceManager = new PrivacyPreferencesManager(context);
 
         preferenceManager.setUsageAndCrashReporting(true);
-        assertTrue(pref.getBoolean(PrivacyPreferencesManager.PREF_METRICS_REPORTING, false));
-        assertTrue("Native preference should be True ", prefBridge.isMetricsReportingEnabled());
+        Assert.assertTrue(pref.getBoolean(PrivacyPreferencesManager.PREF_METRICS_REPORTING, false));
+        Assert.assertTrue(
+                "Native preference should be True ", prefBridge.isMetricsReportingEnabled());
 
         preferenceManager.setUsageAndCrashReporting(false);
-        assertFalse(pref.getBoolean(PrivacyPreferencesManager.PREF_METRICS_REPORTING, false));
-        assertFalse("Native preference should be False ", prefBridge.isMetricsReportingEnabled());
+        Assert.assertFalse(
+                pref.getBoolean(PrivacyPreferencesManager.PREF_METRICS_REPORTING, false));
+        Assert.assertFalse(
+                "Native preference should be False ", prefBridge.isMetricsReportingEnabled());
     }
 
     private static class PermissionContext extends AdvancedMockContext {
@@ -73,7 +91,7 @@ public class PrivacyPreferencesManagerNativeTest extends NativeLibraryTestBase {
             if (Context.CONNECTIVITY_SERVICE.equals(name)) {
                 return null;
             }
-            fail("Should not ask for any other service than the ConnectionManager.");
+            Assert.fail("Should not ask for any other service than the ConnectionManager.");
             return super.getSystemService(name);
         }
     }

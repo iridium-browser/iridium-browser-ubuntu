@@ -31,6 +31,12 @@
 #include "components/password_manager/core/browser/webdata/password_web_data_service_win.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "components/payments/android/payment_manifest_web_data_service.h"
+#include "components/payments/android/payment_method_manifest_table.h"
+#include "components/payments/android/web_app_manifest_section_table.h"
+#endif
+
 namespace {
 
 void InitSyncableServicesOnDBThread(
@@ -86,13 +92,19 @@ WebDataServiceWrapper::WebDataServiceWrapper(
 
   // All tables objects that participate in managing the database must
   // be added here.
-  web_database_->AddTable(base::WrapUnique(new autofill::AutofillTable));
-  web_database_->AddTable(base::WrapUnique(new KeywordTable));
+  web_database_->AddTable(base::MakeUnique<autofill::AutofillTable>());
+  web_database_->AddTable(base::MakeUnique<KeywordTable>());
   // TODO(mdm): We only really need the LoginsTable on Windows for IE7 password
   // access, but for now, we still create it on all platforms since it deletes
   // the old logins table. We can remove this after a while, e.g. in M22 or so.
-  web_database_->AddTable(base::WrapUnique(new LoginsTable));
-  web_database_->AddTable(base::WrapUnique(new TokenServiceTable));
+  web_database_->AddTable(base::MakeUnique<LoginsTable>());
+  web_database_->AddTable(base::MakeUnique<TokenServiceTable>());
+#if defined(OS_ANDROID)
+  web_database_->AddTable(
+      base::MakeUnique<payments::PaymentMethodManifestTable>());
+  web_database_->AddTable(
+      base::MakeUnique<payments::WebAppManifestSectionTable>());
+#endif
   web_database_->LoadDatabase();
 
   autofill_web_data_ = new autofill::AutofillWebDataService(
@@ -117,6 +129,13 @@ WebDataServiceWrapper::WebDataServiceWrapper(
   password_web_data_->Init();
 #endif
 
+#if defined(OS_ANDROID)
+  payment_manifest_web_data_ = new payments::PaymentManifestWebDataService(
+      web_database_,
+      base::Bind(show_error_callback, ERROR_LOADING_PAYMENT_MANIFEST),
+      ui_thread);
+#endif
+
   autofill_web_data_->GetAutofillBackend(
       base::Bind(&InitSyncableServicesOnDBThread, db_thread, flare,
                  autofill_web_data_, context_path, application_locale));
@@ -132,6 +151,10 @@ void WebDataServiceWrapper::Shutdown() {
 
 #if defined(OS_WIN)
   password_web_data_->ShutdownOnUIThread();
+#endif
+
+#if defined(OS_ANDROID)
+  payment_manifest_web_data_->ShutdownOnUIThread();
 #endif
 
   web_database_->ShutdownDatabase();
@@ -155,5 +178,12 @@ scoped_refptr<TokenWebData> WebDataServiceWrapper::GetTokenWebData() {
 scoped_refptr<PasswordWebDataService>
 WebDataServiceWrapper::GetPasswordWebData() {
   return password_web_data_.get();
+}
+#endif
+
+#if defined(OS_ANDROID)
+scoped_refptr<payments::PaymentManifestWebDataService>
+WebDataServiceWrapper::GetPaymentManifestWebData() {
+  return payment_manifest_web_data_.get();
 }
 #endif

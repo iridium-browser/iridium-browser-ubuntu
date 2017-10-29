@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/avatar_menu.h"
@@ -57,6 +58,9 @@ class ProfileListDesktopBrowserTest : public InProcessBrowserTest {
 #elif defined(OS_CHROMEOS)
 // This test doesn't make sense for Chrome OS since it has a different
 // multi-profiles menu in the system tray instead.
+#define MAYBE_SignOut DISABLED_SignOut
+#elif defined(OS_LINUX)
+// Flaky on Linux debug builds with libc++ (https://crbug.com/734875)
 #define MAYBE_SignOut DISABLED_SignOut
 #else
 #define MAYBE_SignOut SignOut

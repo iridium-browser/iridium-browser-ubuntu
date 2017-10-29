@@ -8,11 +8,16 @@
 namespace blink {
 
 enum BackgroundBleedAvoidance {
-  BackgroundBleedNone,
-  BackgroundBleedShrinkBackground,
-  BackgroundBleedClipOnly,
-  BackgroundBleedClipLayer,
+  kBackgroundBleedNone,
+  kBackgroundBleedShrinkBackground,
+  kBackgroundBleedClipOnly,
+  kBackgroundBleedClipLayer,
 };
+
+inline bool BleedAvoidanceIsClipping(BackgroundBleedAvoidance bleed_avoidance) {
+  return bleed_avoidance == kBackgroundBleedClipOnly ||
+         bleed_avoidance == kBackgroundBleedClipLayer;
+}
 
 }  // namespace blink
 

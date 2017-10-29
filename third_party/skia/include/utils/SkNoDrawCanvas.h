@@ -28,6 +28,11 @@ public:
     // TODO: investigate the users of this ctor.
     SkNoDrawCanvas(const SkIRect&);
 
+    // Optimization to reset state to be the same as after construction.
+    void resetCanvas(int width, int height) {
+        resetForNextPicture(SkIRect::MakeWH(width, height));
+    }
+
 protected:
     SaveLayerStrategy getSaveLayerStrategy(const SaveLayerRec& rec) override;
 
@@ -66,12 +71,7 @@ protected:
                             const SkPaint*) override {}
     void onDrawBitmapLattice(const SkBitmap&, const Lattice&, const SkRect&,
                              const SkPaint*) override {}
-    void onDrawVertices(VertexMode, int, const SkPoint[], const SkPoint[], const SkColor[],
-                        SkBlendMode, const uint16_t[], int, const SkPaint&) override {}
-    void onDrawVerticesObject(sk_sp<SkVertices> vertices, SkBlendMode mode, const SkPaint& paint,
-                              uint32_t flags) override {
-        this->onDrawVerticesObjectFallback(std::move(vertices), mode, paint, flags);
-    }
+    void onDrawVerticesObject(const SkVertices*, SkBlendMode, const SkPaint&) override {}
     void onDrawAtlas(const SkImage*, const SkRSXform[], const SkRect[], const SkColor[],
                      int, SkBlendMode, const SkRect*, const SkPaint*) override {}
 

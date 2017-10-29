@@ -5,38 +5,39 @@
 #include "core/css/MediaQuery.h"
 
 #include "core/css/MediaList.h"
+#include "platform/wtf/text/StringBuilder.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/text/StringBuilder.h"
 
 namespace blink {
 
 typedef struct {
   const char* input;
   const char* output;
-} TestCase;
+} MediaQuerySetTestCase;
 
-static void testMediaQuery(TestCase test, MediaQuerySet& querySet) {
+static void TestMediaQuery(MediaQuerySetTestCase test,
+                           MediaQuerySet& query_set) {
   StringBuilder output;
   size_t j = 0;
-  while (j < querySet.queryVector().size()) {
-    String queryText = querySet.queryVector()[j]->cssText();
-    output.append(queryText);
+  while (j < query_set.QueryVector().size()) {
+    String query_text = query_set.QueryVector()[j]->CssText();
+    output.Append(query_text);
     ++j;
-    if (j >= querySet.queryVector().size())
+    if (j >= query_set.QueryVector().size())
       break;
-    output.append(", ");
+    output.Append(", ");
   }
   if (test.output)
-    ASSERT_STREQ(test.output, output.toString().ascii().data());
+    ASSERT_STREQ(test.output, output.ToString().Ascii().data());
   else
-    ASSERT_STREQ(test.input, output.toString().ascii().data());
+    ASSERT_STREQ(test.input, output.ToString().Ascii().data());
 }
 
 TEST(MediaQuerySetTest, Basic) {
   // The first string represents the input string.
   // The second string represents the output string, if present.
   // Otherwise, the output string is identical to the first string.
-  TestCase testCases[] = {
+  MediaQuerySetTestCase test_cases[] = {
       {"", nullptr},
       {" ", ""},
       {"screen", nullptr},
@@ -181,9 +182,10 @@ TEST(MediaQuerySetTest, Basic) {
       {nullptr, nullptr}  // Do not remove the terminator line.
   };
 
-  for (unsigned i = 0; testCases[i].input; ++i) {
-    MediaQuerySet* querySet = MediaQuerySet::create(testCases[i].input);
-    testMediaQuery(testCases[i], *querySet);
+  for (unsigned i = 0; test_cases[i].input; ++i) {
+    RefPtr<MediaQuerySet> query_set =
+        MediaQuerySet::Create(test_cases[i].input);
+    TestMediaQuery(test_cases[i], *query_set);
   }
 }
 

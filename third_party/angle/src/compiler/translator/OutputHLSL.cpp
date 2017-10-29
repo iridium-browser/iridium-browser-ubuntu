@@ -131,7 +131,7 @@ OutputHLSL::OutputHLSL(sh::GLenum shaderType,
     mInsideDiscontinuousLoop = false;
     mNestedLoopDepth         = 0;
 
-    mExcessiveLoopIndex = NULL;
+    mExcessiveLoopIndex = nullptr;
 
     mStructureHLSL       = new StructureHLSL;
     mUniformHLSL         = new UniformHLSL(mStructureHLSL, outputType, uniforms);
@@ -639,13 +639,16 @@ void OutputHLSL::header(TInfoSinkBase &out, const BuiltInFunctionEmulator *built
     else  // Compute shader
     {
         ASSERT(mShaderType == GL_COMPUTE_SHADER);
+
+        out << "cbuffer DriverConstants : register(b1)\n"
+               "{\n";
         if (mUsesNumWorkGroups)
         {
-            out << "cbuffer DriverConstants : register(b1)\n"
-                   "{\n";
             out << "    uint3 gl_NumWorkGroups : packoffset(c0);\n";
-            out << "};\n";
         }
+        ASSERT(mOutputType == SH_HLSL_4_1_OUTPUT);
+        mUniformHLSL->samplerMetadataUniforms(out, "c1");
+        out << "};\n";
 
         // Follow built-in variables would be initialized in
         // DynamicHLSL::generateComputeShaderLinkHLSL, if they
@@ -780,8 +783,7 @@ void OutputHLSL::visitSymbol(TIntermSymbol *node)
 
             ensureStructDefined(nodeType);
 
-            const TName &nameWithMetadata = node->getName();
-            out << DecorateUniform(nameWithMetadata, nodeType);
+            out << DecorateVariableIfNeeded(node->getName());
         }
         else if (qualifier == EvqAttribute || qualifier == EvqVertexIn)
         {
@@ -870,7 +872,7 @@ void OutputHLSL::visitSymbol(TIntermSymbol *node)
         }
         else
         {
-            out << DecorateIfNeeded(node->getName());
+            out << DecorateVariableIfNeeded(node->getName());
         }
     }
 }
@@ -1642,9 +1644,9 @@ bool OutputHLSL::visitDeclaration(Visit visit, TIntermDeclaration *node)
         TIntermSequence *sequence = node->getSequence();
         TIntermTyped *variable    = (*sequence)[0]->getAsTyped();
         ASSERT(sequence->size() == 1);
+        ASSERT(variable);
 
-        if (variable &&
-            (variable->getQualifier() == EvqTemporary || variable->getQualifier() == EvqGlobal ||
+        if ((variable->getQualifier() == EvqTemporary || variable->getQualifier() == EvqGlobal ||
              variable->getQualifier() == EvqConst))
         {
             ensureStructDefined(variable->getType());
@@ -1680,23 +1682,14 @@ bool OutputHLSL::visitDeclaration(Visit visit, TIntermDeclaration *node)
             else
                 UNREACHABLE();
         }
-        else if (variable && IsVaryingOut(variable->getQualifier()))
+        else if (IsVaryingOut(variable->getQualifier()))
         {
-            for (TIntermSequence::iterator sit = sequence->begin(); sit != sequence->end(); sit++)
-            {
-                TIntermSymbol *symbol = (*sit)->getAsSymbolNode();
+            TIntermSymbol *symbol = variable->getAsSymbolNode();
+            ASSERT(symbol);  // Varying declarations can't have initializers.
 
-                if (symbol)
-                {
-                    // Vertex (output) varyings which are declared but not written to should
-                    // still be declared to allow successful linking
-                    mReferencedVaryings[symbol->getSymbol()] = symbol;
-                }
-                else
-                {
-                    (*sit)->traverse(this);
-                }
-            }
+            // Vertex outputs which are declared but not written to should still be declared to
+            // allow successful linking.
+            mReferencedVaryings[symbol->getSymbol()] = symbol;
         }
     }
     return false;
@@ -1788,7 +1781,7 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
             }
             else
             {
-                TString name = TFunction::unmangleName(node->getFunctionSymbolInfo()->getName());
+                const TString &name    = node->getFunctionSymbolInfo()->getName();
                 TBasicType samplerType = (*arguments)[0]->getAsTyped()->getType().getBasicType();
                 int coords = 0;  // textureSize(gsampler2DMS) doesn't have a second argument.
                 if (arguments->size() > 1)
@@ -1846,92 +1839,47 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
 
             return false;
         }
-        case EOpConstructFloat:
-            outputConstructor(out, visit, node->getType(), "vec1", node->getSequence());
-            break;
-        case EOpConstructVec2:
-            outputConstructor(out, visit, node->getType(), "vec2", node->getSequence());
-            break;
-        case EOpConstructVec3:
-            outputConstructor(out, visit, node->getType(), "vec3", node->getSequence());
-            break;
-        case EOpConstructVec4:
-            outputConstructor(out, visit, node->getType(), "vec4", node->getSequence());
-            break;
-        case EOpConstructBool:
-            outputConstructor(out, visit, node->getType(), "bvec1", node->getSequence());
-            break;
-        case EOpConstructBVec2:
-            outputConstructor(out, visit, node->getType(), "bvec2", node->getSequence());
-            break;
-        case EOpConstructBVec3:
-            outputConstructor(out, visit, node->getType(), "bvec3", node->getSequence());
-            break;
-        case EOpConstructBVec4:
-            outputConstructor(out, visit, node->getType(), "bvec4", node->getSequence());
-            break;
-        case EOpConstructInt:
-            outputConstructor(out, visit, node->getType(), "ivec1", node->getSequence());
-            break;
-        case EOpConstructIVec2:
-            outputConstructor(out, visit, node->getType(), "ivec2", node->getSequence());
-            break;
-        case EOpConstructIVec3:
-            outputConstructor(out, visit, node->getType(), "ivec3", node->getSequence());
-            break;
-        case EOpConstructIVec4:
-            outputConstructor(out, visit, node->getType(), "ivec4", node->getSequence());
-            break;
-        case EOpConstructUInt:
-            outputConstructor(out, visit, node->getType(), "uvec1", node->getSequence());
-            break;
-        case EOpConstructUVec2:
-            outputConstructor(out, visit, node->getType(), "uvec2", node->getSequence());
-            break;
-        case EOpConstructUVec3:
-            outputConstructor(out, visit, node->getType(), "uvec3", node->getSequence());
-            break;
-        case EOpConstructUVec4:
-            outputConstructor(out, visit, node->getType(), "uvec4", node->getSequence());
-            break;
-        case EOpConstructMat2:
-            outputConstructor(out, visit, node->getType(), "mat2", node->getSequence());
-            break;
-        case EOpConstructMat2x3:
-            outputConstructor(out, visit, node->getType(), "mat2x3", node->getSequence());
-            break;
-        case EOpConstructMat2x4:
-            outputConstructor(out, visit, node->getType(), "mat2x4", node->getSequence());
-            break;
-        case EOpConstructMat3x2:
-            outputConstructor(out, visit, node->getType(), "mat3x2", node->getSequence());
-            break;
-        case EOpConstructMat3:
-            outputConstructor(out, visit, node->getType(), "mat3", node->getSequence());
-            break;
-        case EOpConstructMat3x4:
-            outputConstructor(out, visit, node->getType(), "mat3x4", node->getSequence());
-            break;
-        case EOpConstructMat4x2:
-            outputConstructor(out, visit, node->getType(), "mat4x2", node->getSequence());
-            break;
-        case EOpConstructMat4x3:
-            outputConstructor(out, visit, node->getType(), "mat4x3", node->getSequence());
-            break;
-        case EOpConstructMat4:
-            outputConstructor(out, visit, node->getType(), "mat4", node->getSequence());
-            break;
-        case EOpConstructStruct:
-        {
-            if (node->getType().isArray())
+        case EOpConstruct:
+            if (node->getBasicType() == EbtStruct)
             {
-                UNIMPLEMENTED();
+                if (node->getType().isArray())
+                {
+                    UNIMPLEMENTED();
+                }
+                const TString &structName = StructNameString(*node->getType().getStruct());
+                mStructureHLSL->addConstructor(node->getType(), structName, node->getSequence());
+                outputTriplet(out, visit, (structName + "_ctor(").c_str(), ", ", ")");
             }
-            const TString &structName = StructNameString(*node->getType().getStruct());
-            mStructureHLSL->addConstructor(node->getType(), structName, node->getSequence());
-            outputTriplet(out, visit, (structName + "_ctor(").c_str(), ", ", ")");
-        }
-        break;
+            else
+            {
+                const char *name = "";
+                if (node->getType().getNominalSize() == 1)
+                {
+                    switch (node->getBasicType())
+                    {
+                        case EbtFloat:
+                            name = "vec1";
+                            break;
+                        case EbtInt:
+                            name = "ivec1";
+                            break;
+                        case EbtUInt:
+                            name = "uvec1";
+                            break;
+                        case EbtBool:
+                            name = "bvec1";
+                            break;
+                        default:
+                            UNREACHABLE();
+                    }
+                }
+                else
+                {
+                    name = node->getType().getBuiltInTypeNameString();
+                }
+                outputConstructor(out, visit, node->getType(), name, node->getSequence());
+            }
+            break;
         case EOpEqualComponentWise:
             outputTriplet(out, visit, "(", " == ", ")");
             break;
@@ -2011,7 +1959,7 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
         case EOpCross:
             outputTriplet(out, visit, "cross(", ", ", ")");
             break;
-        case EOpFaceForward:
+        case EOpFaceforward:
             ASSERT(node->getUseEmulatedFunction());
             writeEmulatedFunctionTriplet(out, visit, node->getOp());
             break;
@@ -2317,7 +2265,7 @@ bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
 
     // Parse loops of the form:
     // for(int index = initial; index [comparator] limit; index += increment)
-    TIntermSymbol *index = NULL;
+    TIntermSymbol *index = nullptr;
     TOperator comparator = EOpNull;
     int initial          = 0;
     int limit            = 0;
@@ -2356,7 +2304,7 @@ bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
     }
 
     // Parse comparator and limit value
-    if (index != NULL && node->getCondition())
+    if (index != nullptr && node->getCondition())
     {
         TIntermBinary *test = node->getCondition()->getAsBinaryNode();
 
@@ -2376,7 +2324,7 @@ bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
     }
 
     // Parse increment
-    if (index != NULL && comparator != EOpNull && node->getExpression())
+    if (index != nullptr && comparator != EOpNull && node->getExpression())
     {
         TIntermBinary *binaryTerminal = node->getExpression()->getAsBinaryNode();
         TIntermUnary *unaryTerminal   = node->getExpression()->getAsUnaryNode();
@@ -2430,7 +2378,7 @@ bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
         }
     }
 
-    if (index != NULL && comparator != EOpNull && increment != 0)
+    if (index != nullptr && comparator != EOpNull && increment != 0)
     {
         if (comparator == EOpLessThanEqual)
         {
@@ -2472,7 +2420,7 @@ bool OutputHLSL::handleExcessiveLoop(TInfoSinkBase &out, TIntermLoop *node)
 
                 if (iterations <= MAX_LOOP_ITERATIONS)  // Last loop fragment
                 {
-                    mExcessiveLoopIndex = NULL;  // Stops setting the Break flag
+                    mExcessiveLoopIndex = nullptr;  // Stops setting the Break flag
                 }
 
                 // for(int index = initial; index < clampedLimit; index += increment)
@@ -2579,7 +2527,7 @@ TString OutputHLSL::argumentString(const TIntermSymbol *symbol)
     }
     else
     {
-        nameStr = DecorateIfNeeded(name);
+        nameStr = DecorateVariableIfNeeded(name);
     }
 
     if (IsSampler(type.getBasicType()))
@@ -2609,34 +2557,33 @@ TString OutputHLSL::argumentString(const TIntermSymbol *symbol)
     {
         ASSERT(qualifier != EvqOut && qualifier != EvqInOut);
         TVector<TIntermSymbol *> samplerSymbols;
-        type.createSamplerSymbols("angle" + nameStr, "", 0u, &samplerSymbols, nullptr);
+        type.createSamplerSymbols("angle" + nameStr, "", type.isArray() ? type.getArraySize() : 0u,
+                                  &samplerSymbols, nullptr);
         for (const TIntermSymbol *sampler : samplerSymbols)
         {
             if (mOutputType == SH_HLSL_4_1_OUTPUT)
             {
-                argString << ", const uint " << sampler->getSymbol() << ArrayString(type);
+                ASSERT(!sampler->getType().isArray());
+                argString << ", const uint " << sampler->getSymbol();
             }
             else if (mOutputType == SH_HLSL_4_0_FL9_3_OUTPUT)
             {
                 const TType &samplerType = sampler->getType();
-                ASSERT((!type.isArray() && !samplerType.isArray()) ||
-                       type.getArraySize() == samplerType.getArraySize());
+                ASSERT(!samplerType.isArray());
                 ASSERT(IsSampler(samplerType.getBasicType()));
                 argString << ", " << QualifierString(qualifier) << " "
                           << TextureString(samplerType.getBasicType()) << " texture_"
-                          << sampler->getSymbol() << ArrayString(type) << ", "
-                          << QualifierString(qualifier) << " "
+                          << sampler->getSymbol() << ", " << QualifierString(qualifier) << " "
                           << SamplerString(samplerType.getBasicType()) << " sampler_"
-                          << sampler->getSymbol() << ArrayString(type);
+                          << sampler->getSymbol();
             }
             else
             {
                 const TType &samplerType = sampler->getType();
-                ASSERT((!type.isArray() && !samplerType.isArray()) ||
-                       type.getArraySize() == samplerType.getArraySize());
+                ASSERT(!samplerType.isArray());
                 ASSERT(IsSampler(samplerType.getBasicType()));
                 argString << ", " << QualifierString(qualifier) << " " << TypeString(samplerType)
-                          << " " << sampler->getSymbol() << ArrayString(type);
+                          << " " << sampler->getSymbol();
             }
         }
     }

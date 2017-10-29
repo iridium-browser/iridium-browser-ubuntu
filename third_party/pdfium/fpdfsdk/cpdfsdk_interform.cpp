@@ -32,7 +32,6 @@
 #include "fpdfsdk/ipdfsdk_annothandler.h"
 #include "fpdfsdk/javascript/ijs_event_context.h"
 #include "fpdfsdk/javascript/ijs_runtime.h"
-#include "fpdfsdk/pdfwindow/PWL_Utils.h"
 #include "third_party/base/stl_util.h"
 
 #ifdef PDF_ENABLE_XFA
@@ -40,14 +39,15 @@
 #include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
 #include "fpdfsdk/fpdfxfa/cxfa_fwladaptertimermgr.h"
 #include "xfa/fxfa/cxfa_eventparam.h"
-#include "xfa/fxfa/xfa_ffdocview.h"
-#include "xfa/fxfa/xfa_ffwidget.h"
-#include "xfa/fxfa/xfa_ffwidgethandler.h"
+#include "xfa/fxfa/cxfa_ffdocview.h"
+#include "xfa/fxfa/cxfa_ffwidget.h"
+#include "xfa/fxfa/cxfa_ffwidgethandler.h"
 #endif  // PDF_ENABLE_XFA
 
 CPDFSDK_InterForm::CPDFSDK_InterForm(CPDFSDK_FormFillEnvironment* pFormFillEnv)
     : m_pFormFillEnv(pFormFillEnv),
-      m_pInterForm(new CPDF_InterForm(m_pFormFillEnv->GetPDFDocument())),
+      m_pInterForm(
+          pdfium::MakeUnique<CPDF_InterForm>(m_pFormFillEnv->GetPDFDocument())),
 #ifdef PDF_ENABLE_XFA
       m_bXfaCalculate(true),
       m_bXfaValidationsEnabled(true),
@@ -73,8 +73,8 @@ bool CPDFSDK_InterForm::HighlightWidgets() {
 
 CPDFSDK_Widget* CPDFSDK_InterForm::GetSibling(CPDFSDK_Widget* pWidget,
                                               bool bNext) const {
-  std::unique_ptr<CBA_AnnotIterator> pIterator(new CBA_AnnotIterator(
-      pWidget->GetPageView(), CPDF_Annot::Subtype::WIDGET));
+  auto pIterator = pdfium::MakeUnique<CBA_AnnotIterator>(
+      pWidget->GetPageView(), CPDF_Annot::Subtype::WIDGET);
 
   if (bNext)
     return static_cast<CPDFSDK_Widget*>(pIterator->GetNextAnnot(pWidget));
@@ -321,7 +321,7 @@ void CPDFSDK_InterForm::ResetFieldAppearance(CPDF_FormField* pFormField,
 }
 
 void CPDFSDK_InterForm::UpdateField(CPDF_FormField* pFormField) {
-  auto formfiller = m_pFormFillEnv->GetInteractiveFormFiller();
+  auto* formfiller = m_pFormFillEnv->GetInteractiveFormFiller();
   for (int i = 0, sz = pFormField->CountControls(); i < sz; i++) {
     CPDF_FormControl* pFormCtrl = pFormField->GetControl(i);
     ASSERT(pFormCtrl);
@@ -345,13 +345,13 @@ bool CPDFSDK_InterForm::OnKeyStrokeCommit(CPDF_FormField* pFormField,
   if (!action.GetDict())
     return true;
 
-  CPDFSDK_ActionHandler* pActionHandler = m_pFormFillEnv->GetActionHander();
+  CPDFSDK_ActionHandler* pActionHandler = m_pFormFillEnv->GetActionHandler();
   PDFSDK_FieldAction fa;
   fa.bModifier = m_pFormFillEnv->IsCTRLKeyDown(0);
   fa.bShift = m_pFormFillEnv->IsSHIFTKeyDown(0);
   fa.sValue = csValue;
-  pActionHandler->DoAction_FieldJavaScript(action, CPDF_AAction::KeyStroke,
-                                           m_pFormFillEnv, pFormField, fa);
+  pActionHandler->DoAction_FieldJavaScript(
+      action, CPDF_AAction::KeyStroke, m_pFormFillEnv.Get(), pFormField, fa);
   return fa.bRC;
 }
 
@@ -365,13 +365,13 @@ bool CPDFSDK_InterForm::OnValidate(CPDF_FormField* pFormField,
   if (!action.GetDict())
     return true;
 
-  CPDFSDK_ActionHandler* pActionHandler = m_pFormFillEnv->GetActionHander();
+  CPDFSDK_ActionHandler* pActionHandler = m_pFormFillEnv->GetActionHandler();
   PDFSDK_FieldAction fa;
   fa.bModifier = m_pFormFillEnv->IsCTRLKeyDown(0);
   fa.bShift = m_pFormFillEnv->IsSHIFTKeyDown(0);
   fa.sValue = csValue;
-  pActionHandler->DoAction_FieldJavaScript(action, CPDF_AAction::Validate,
-                                           m_pFormFillEnv, pFormField, fa);
+  pActionHandler->DoAction_FieldJavaScript(
+      action, CPDF_AAction::Validate, m_pFormFillEnv.Get(), pFormField, fa);
   return fa.bRC;
 }
 
@@ -493,7 +493,7 @@ bool CPDFSDK_InterForm::FDFToURLEncodedData(uint8_t*& pBuf,
 
   nBufSize = fdfEncodedData.GetLength();
   pBuf = FX_Alloc(uint8_t, nBufSize);
-  FXSYS_memcpy(pBuf, fdfEncodedData.GetBuffer(), nBufSize);
+  memcpy(pBuf, fdfEncodedData.GetBuffer(), nBufSize);
   return true;
 }
 
@@ -501,9 +501,8 @@ bool CPDFSDK_InterForm::ExportFieldsToFDFTextBuf(
     const std::vector<CPDF_FormField*>& fields,
     bool bIncludeOrExclude,
     CFX_ByteTextBuf& textBuf) {
-  std::unique_ptr<CFDF_Document> pFDF =
-      m_pInterForm->ExportToFDF(m_pFormFillEnv->JS_docGetFilePath().AsStringC(),
-                                fields, bIncludeOrExclude, false);
+  std::unique_ptr<CFDF_Document> pFDF = m_pInterForm->ExportToFDF(
+      m_pFormFillEnv->JS_docGetFilePath(), fields, bIncludeOrExclude, false);
   return pFDF ? pFDF->WriteBuf(textBuf) : false;
 }
 
@@ -520,8 +519,8 @@ bool CPDFSDK_InterForm::SubmitForm(const CFX_WideString& sDestination,
   if (!m_pFormFillEnv || !m_pInterForm)
     return false;
 
-  std::unique_ptr<CFDF_Document> pFDFDoc = m_pInterForm->ExportToFDF(
-      m_pFormFillEnv->JS_docGetFilePath().AsStringC(), false);
+  std::unique_ptr<CFDF_Document> pFDFDoc =
+      m_pInterForm->ExportToFDF(m_pFormFillEnv->JS_docGetFilePath(), false);
   if (!pFDFDoc)
     return false;
 
@@ -542,8 +541,8 @@ bool CPDFSDK_InterForm::SubmitForm(const CFX_WideString& sDestination,
 }
 
 bool CPDFSDK_InterForm::ExportFormToFDFTextBuf(CFX_ByteTextBuf& textBuf) {
-  std::unique_ptr<CFDF_Document> pFDF = m_pInterForm->ExportToFDF(
-      m_pFormFillEnv->JS_docGetFilePath().AsStringC(), false);
+  std::unique_ptr<CFDF_Document> pFDF =
+      m_pInterForm->ExportToFDF(m_pFormFillEnv->JS_docGetFilePath(), false);
   return pFDF && pFDF->WriteBuf(textBuf);
 }
 

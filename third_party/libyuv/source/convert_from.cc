@@ -15,9 +15,9 @@
 #include "libyuv/cpu_id.h"
 #include "libyuv/planar_functions.h"
 #include "libyuv/rotate.h"
+#include "libyuv/row.h"
 #include "libyuv/scale.h"  // For ScalePlane()
 #include "libyuv/video_common.h"
-#include "libyuv/row.h"
 
 #ifdef __cplusplus
 namespace libyuv {
@@ -886,6 +886,75 @@ int I420ToRGB565(const uint8* src_y,
       src_u += src_stride_u;
       src_v += src_stride_v;
     }
+  }
+  return 0;
+}
+
+// Convert I422 to RGB565.
+LIBYUV_API
+int I422ToRGB565(const uint8* src_y,
+                 int src_stride_y,
+                 const uint8* src_u,
+                 int src_stride_u,
+                 const uint8* src_v,
+                 int src_stride_v,
+                 uint8* dst_rgb565,
+                 int dst_stride_rgb565,
+                 int width,
+                 int height) {
+  int y;
+  void (*I422ToRGB565Row)(const uint8* y_buf, const uint8* u_buf,
+                          const uint8* v_buf, uint8* rgb_buf,
+                          const struct YuvConstants* yuvconstants, int width) =
+      I422ToRGB565Row_C;
+  if (!src_y || !src_u || !src_v || !dst_rgb565 || width <= 0 || height == 0) {
+    return -1;
+  }
+  // Negative height means invert the image.
+  if (height < 0) {
+    height = -height;
+    dst_rgb565 = dst_rgb565 + (height - 1) * dst_stride_rgb565;
+    dst_stride_rgb565 = -dst_stride_rgb565;
+  }
+#if defined(HAS_I422TORGB565ROW_SSSE3)
+  if (TestCpuFlag(kCpuHasSSSE3)) {
+    I422ToRGB565Row = I422ToRGB565Row_Any_SSSE3;
+    if (IS_ALIGNED(width, 8)) {
+      I422ToRGB565Row = I422ToRGB565Row_SSSE3;
+    }
+  }
+#endif
+#if defined(HAS_I422TORGB565ROW_AVX2)
+  if (TestCpuFlag(kCpuHasAVX2)) {
+    I422ToRGB565Row = I422ToRGB565Row_Any_AVX2;
+    if (IS_ALIGNED(width, 16)) {
+      I422ToRGB565Row = I422ToRGB565Row_AVX2;
+    }
+  }
+#endif
+#if defined(HAS_I422TORGB565ROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON)) {
+    I422ToRGB565Row = I422ToRGB565Row_Any_NEON;
+    if (IS_ALIGNED(width, 8)) {
+      I422ToRGB565Row = I422ToRGB565Row_NEON;
+    }
+  }
+#endif
+#if defined(HAS_I422TORGB565ROW_MSA)
+  if (TestCpuFlag(kCpuHasMSA)) {
+    I422ToRGB565Row = I422ToRGB565Row_Any_MSA;
+    if (IS_ALIGNED(width, 8)) {
+      I422ToRGB565Row = I422ToRGB565Row_MSA;
+    }
+  }
+#endif
+
+  for (y = 0; y < height; ++y) {
+    I422ToRGB565Row(src_y, src_u, src_v, dst_rgb565, &kYuvI601Constants, width);
+    dst_rgb565 += dst_stride_rgb565;
+    src_y += src_stride_y;
+    src_u += src_stride_u;
+    src_v += src_stride_v;
   }
   return 0;
 }

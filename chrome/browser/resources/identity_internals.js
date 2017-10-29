@@ -34,8 +34,8 @@ cr.define('identity_internals', function() {
           'extensionName', this.data_.extensionName, 'extension-name'));
       tbody.appendChild(this.createEntry_(
           'extensionId', this.data_.extensionId, 'extension-id'));
-      tbody.appendChild(this.createEntry_(
-          'tokenStatus', this.data_.status, 'token-status'));
+      tbody.appendChild(
+          this.createEntry_('tokenStatus', this.data_.status, 'token-status'));
       tbody.appendChild(this.createEntry_(
           'expirationTime', this.data_.expirationTime, 'expiration-time'));
       tbody.appendChild(this.createEntryForScopes_());
@@ -113,8 +113,9 @@ cr.define('identity_internals', function() {
       var revokeButton = this.ownerDocument.createElement('button');
       revokeButton.classList.add('revoke-button');
       revokeButton.addEventListener('click', function() {
-        chrome.send('identityInternalsRevokeToken',
-                    [this.data_.extensionId, this.data_.accessToken]);
+        chrome.send(
+            'identityInternalsRevokeToken',
+            [this.data_.extensionId, this.data_.accessToken]);
       }.bind(this));
       revokeButton.textContent = loadTimeData.getString('revoke');
       return revokeButton;
@@ -173,17 +174,17 @@ cr.define('identity_internals', function() {
     },
   };
 
-  var tokenList_;
+  var tokenList;
 
   /**
    * Initializes the UI by asking the contoller for list of identity tokens.
    */
   function initialize() {
     chrome.send('identityInternalsGetTokens');
-    tokenList_ = $('token-list');
-    tokenList_.data_ = [];
-    tokenList_.__proto__ = TokenList.prototype;
-    tokenList_.decorate();
+    tokenList = $('token-list');
+    tokenList.data_ = [];
+    tokenList.__proto__ = TokenList.prototype;
+    tokenList.decorate();
   }
 
   /**
@@ -191,8 +192,8 @@ cr.define('identity_internals', function() {
    * @param {!Token[]} tokens A list of tokens to be displayed
    */
   function returnTokens(tokens) {
-    tokenList_.data_ = tokens;
-    tokenList_.showTokenNodes_();
+    tokenList.data_ = tokens;
+    tokenList.showTokenNodes_();
   }
 
   /**
@@ -202,7 +203,7 @@ cr.define('identity_internals', function() {
    */
   function tokenRevokeDone(accessTokens) {
     assert(accessTokens.length > 0);
-    tokenList_.removeTokenNode_(accessTokens[0]);
+    tokenList.removeTokenNode_(accessTokens[0]);
   }
 
   // Return an object with all of the exports.

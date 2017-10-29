@@ -17,16 +17,17 @@ class SkGpuDevice;
 class SkSurface_Gpu : public SkSurface_Base {
 public:
     SkSurface_Gpu(sk_sp<SkGpuDevice>);
-    virtual ~SkSurface_Gpu();
+    ~SkSurface_Gpu() override;
 
     GrBackendObject onGetTextureHandle(BackendHandleAccess) override;
     bool onGetRenderTargetHandle(GrBackendObject*, BackendHandleAccess) override;
     SkCanvas* onNewCanvas() override;
     sk_sp<SkSurface> onNewSurface(const SkImageInfo&) override;
-    sk_sp<SkImage> onNewImageSnapshot(SkBudgeted) override;
+    sk_sp<SkImage> onNewImageSnapshot() override;
     void onCopyOnWrite(ContentChangeMode) override;
     void onDiscard() override;
-    void onPrepareForExternalIO() override;
+    bool onFlush(int numSemaphores, GrBackendSemaphore* signalSemaphores) override;
+    bool onWait(int numSemaphores, const GrBackendSemaphore* waitSemaphores) override;
 
     SkGpuDevice* getDevice() { return fDevice.get(); }
 

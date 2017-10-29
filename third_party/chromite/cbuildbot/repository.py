@@ -7,6 +7,7 @@
 from __future__ import print_function
 
 import glob
+import multiprocessing
 import os
 import re
 import shutil
@@ -14,13 +15,14 @@ import time
 import urlparse
 
 from chromite.lib import config_lib
-from chromite.cbuildbot import commands
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import git
+from chromite.lib import locking
 from chromite.lib import metrics
 from chromite.lib import osutils
+from chromite.lib import parallel
 from chromite.lib import path_util
 from chromite.lib import retry_util
 from chromite.lib import rewrite_git_alternates
@@ -273,12 +275,8 @@ class RepoRepository(object):
     self._referenced_repo = referenced_repo
     self._manifest = manifest
 
-    # If the repo exists already, force a selfupdate as the first step.
-    self._repo_update_needed = IsARepoRoot(self.directory)
-    if not self._repo_update_needed and git.FindRepoDir(self.directory):
-      raise ValueError('Given directory %s is not the root of a repository.'
-                       % self.directory)
-
+    # Use by Intialize to avoid updating more than once.
+    self._repo_update_needed = True
     self._depth = int(depth) if depth is not None else None
 
   def _SwitchToLocalManifest(self, local_manifest):
@@ -344,6 +342,94 @@ class RepoRepository(object):
       self._CleanUpRepoManifest(self.directory)
       raise e
 
+  def BuildRootGitCleanup(self, prune_all=False):
+    """Put buildroot onto manifest branch. Delete branches created on last run.
+
+    Args:
+      prune_all: If True, prune all loose objects regardless of gc.pruneExpire.
+
+    Raises:
+      A variety of exceptions if the buildroot is missing/corrupt.
+    """
+    lock_path = os.path.join(self.directory, '.clean_lock')
+    deleted_objdirs = multiprocessing.Event()
+
+    def RunCleanupCommands(project, cwd):
+      with locking.FileLock(lock_path, verbose=False).read_lock() as lock:
+        # Calculate where the git repository is stored.
+        relpath = os.path.relpath(cwd, self.directory)
+        projects_dir = os.path.join(self.directory, '.repo', 'projects')
+        project_objects_dir = os.path.join(
+            self.directory, '.repo', 'project-objects')
+        repo_git_store = '%s.git' % os.path.join(projects_dir, relpath)
+        repo_obj_store = '%s.git' % os.path.join(project_objects_dir, project)
+
+        try:
+          if os.path.isdir(cwd):
+            git.CleanAndDetachHead(cwd)
+
+          if os.path.isdir(repo_git_store):
+            git.GarbageCollection(repo_git_store, prune_all=prune_all)
+        except cros_build_lib.RunCommandError as e:
+          result = e.result
+          logging.PrintBuildbotStepWarnings()
+          logging.warning('\n%s', result.error)
+
+          # If there's no repository corruption, just delete the index.
+          corrupted = git.IsGitRepositoryCorrupted(repo_git_store)
+          lock.write_lock()
+          logging.warning('Deleting %s because %s failed', cwd, result.cmd)
+          osutils.RmDir(cwd, ignore_missing=True, sudo=True)
+          if corrupted:
+            # Looks like the object dir is corrupted. Delete it.
+            deleted_objdirs.set()
+            for store in (repo_git_store, repo_obj_store):
+              logging.warning('Deleting %s as well', store)
+              osutils.RmDir(store, ignore_missing=True)
+
+        # TODO: Make the deletions below smarter. Look to see what exists,
+        # instead of just deleting things we think might be there.
+
+        # Delete all branches created by cbuildbot.
+        if os.path.isdir(repo_git_store):
+          cmd = ['branch', '-D'] + list(constants.CREATED_BRANCHES)
+          # Ignore errors, since we delete branches without checking existence.
+          git.RunGit(repo_git_store, cmd, error_code_ok=True)
+
+        if os.path.isdir(cwd):
+          # Above we deleted refs/heads/<branch> for each created branch, now we
+          # need to delete the bare ref <branch> if it was created somehow.
+          for ref in constants.CREATED_BRANCHES:
+            # Ignore errors, since we delete branches without checking
+            # existence.
+            git.RunGit(cwd, ['update-ref', '-d', ref], error_code_ok=True)
+
+
+    # Cleanup all of the directories.
+    dirs = [[attrs['name'], os.path.join(self.directory, attrs['path'])]
+            for attrs in
+            git.ManifestCheckout.Cached(self.directory).ListCheckouts()]
+    parallel.RunTasksInProcessPool(RunCleanupCommands, dirs)
+
+    # repo shares git object directories amongst multiple project paths. If the
+    # first pass deleted an object dir for a project path, then other
+    # repositories (project paths) of that same project may now be broken. Do a
+    # second pass to clean them up as well.
+    if deleted_objdirs.is_set():
+      parallel.RunTasksInProcessPool(RunCleanupCommands, dirs)
+
+  def AssertNotNested(self):
+    """Assert that the current repository isn't inside another repository.
+
+    Since repo detects it's root by looking for .repo, it can't support having
+    one repo inside another.
+    """
+    if not IsARepoRoot(self.directory):
+      repo_root = git.FindRepoDir(self.directory)
+      if repo_root:
+        raise ValueError('%s is nested inside a repo at %s.' %
+                         (self.directory, repo_root))
+
   def Initialize(self, local_manifest=None, manifest_repo_url=None,
                  extra_args=()):
     """Initializes a repository.  Optionally forces a local manifest.
@@ -354,6 +440,8 @@ class RepoRepository(object):
       manifest_repo_url: A new value for manifest_repo_url.
       extra_args: Extra args to pass to 'repo init'
     """
+    self.AssertNotNested()
+
     if manifest_repo_url:
       self.manifest_repo_url = manifest_repo_url
 
@@ -376,17 +464,11 @@ class RepoRepository(object):
     # we can destroy it.
     osutils.SafeUnlink(os.path.join(self.directory, 'local_manifest.xml'))
 
-    # Force a repo self update first; during reinit, repo doesn't do the
-    # update itself, but we could be doing the init on a repo version less
-    # then v1.9.4, which didn't have proper support for doing reinit that
-    # involved changing the manifest branch in use; thus selfupdate.
-    # Additionally, if the self update fails for *any* reason, wipe the repo
-    # innards and force repo init to redownload it; same end result, just
-    # less efficient.
-    # Additionally, note that this method may be called multiple times;
-    # thus code appropriately.
+    # Force a repo update the first time we initialize an old repo checkout.
+    # Don't update if there is nothing to update.
     if self._repo_update_needed:
-      self._RepoSelfupdate()
+      if IsARepoRoot(self.directory):
+        self._RepoSelfupdate()
       self._repo_update_needed = False
 
     # Use our own repo, in case android.kernel.org (the default location) is
@@ -409,15 +491,18 @@ class RepoRepository(object):
     if self.groups:
       init_cmd.extend(['--groups', self.groups])
 
-    fields = {'manifest_url': self.manifest_repo_url}
+    def _StatusCallback(attempt, _):
+      if attempt:
+        metrics.Counter(constants.MON_REPO_INIT_RETRY_COUNT).increment(
+            fields={'manifest_url': self.manifest_repo_url})
+
     retry_util.RetryCommand(self._RepoInit,
                             REPO_INIT_RETRY_LIMIT,
                             init_cmd,
                             sleep=DEFAULT_SLEEP_TIME,
                             backoff_factor=2,
                             log_retries=True,
-                            mon_retry_name=constants.MON_REPO_INIT_RETRY_COUNT,
-                            mon_fields=fields)
+                            status_callback=_StatusCallback)
 
     if local_manifest and local_manifest != self._manifest:
       self._SwitchToLocalManifest(local_manifest)
@@ -483,7 +568,7 @@ class RepoRepository(object):
 
     This is only called in repo network Sync retries.
     """
-    commands.BuildRootGitCleanup(self.directory)
+    self.BuildRootGitCleanup()
     local_manifest = kwargs.pop('local_manifest', None)
     # Always re-initialize to the current branch.
     self.Initialize(local_manifest)

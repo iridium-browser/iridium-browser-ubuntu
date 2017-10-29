@@ -5,15 +5,20 @@
 #import "ios/web/net/crw_cert_verification_controller.h"
 
 #import "base/mac/bind_objc_block.h"
-#import "base/mac/scoped_nsobject.h"
+#include "base/mac/foundation_util.h"
 #include "base/message_loop/message_loop.h"
 #import "base/test/ios/wait_util.h"
 #include "ios/web/public/test/web_test.h"
 #include "ios/web/public/web_thread.h"
 #import "ios/web/web_state/wk_web_view_security_util.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util_ios_and_mac.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 
@@ -30,26 +35,21 @@ class CRWCertVerificationControllerTest : public web::WebTest {
   void SetUp() override {
     web::WebTest::SetUp();
 
-    controller_.reset([[CRWCertVerificationController alloc]
-        initWithBrowserState:GetBrowserState()]);
+    controller_ = [[CRWCertVerificationController alloc]
+        initWithBrowserState:GetBrowserState()];
     cert_ =
         net::ImportCertFromFile(net::GetTestCertsDirectory(), kCertFileName);
     ASSERT_TRUE(cert_);
 
-    NSArray* chain = GetChain(cert_);
-    valid_trust_ = web::CreateServerTrustFromChain(chain, kHostName);
+    base::ScopedCFTypeRef<CFMutableArrayRef> chain(
+        net::x509_util::CreateSecCertificateArrayForX509Certificate(
+            cert_.get()));
+    ASSERT_TRUE(chain);
+    valid_trust_ = web::CreateServerTrustFromChain(
+        base::mac::CFToNSCast(chain.get()), kHostName);
     web::EnsureFutureTrustEvaluationSucceeds(valid_trust_.get());
-    invalid_trust_ = web::CreateServerTrustFromChain(chain, kHostName);
-  }
-
-  // Returns NSArray of SecCertificateRef objects for the given |cert|.
-  NSArray* GetChain(const scoped_refptr<net::X509Certificate>& cert) const {
-    NSMutableArray* result = [NSMutableArray
-        arrayWithObject:static_cast<id>(cert->os_cert_handle())];
-    for (SecCertificateRef intermediate : cert->GetIntermediateCertificates()) {
-      [result addObject:static_cast<id>(intermediate)];
-    }
-    return result;
+    invalid_trust_ = web::CreateServerTrustFromChain(
+        base::mac::CFToNSCast(chain.get()), kHostName);
   }
 
   // Synchronously returns result of
@@ -100,7 +100,7 @@ class CRWCertVerificationControllerTest : public web::WebTest {
   scoped_refptr<net::X509Certificate> cert_;
   base::ScopedCFTypeRef<SecTrustRef> valid_trust_;
   base::ScopedCFTypeRef<SecTrustRef> invalid_trust_;
-  base::scoped_nsobject<CRWCertVerificationController> controller_;
+  CRWCertVerificationController* controller_;
 };
 
 // Tests cert policy with a valid trust.
@@ -140,6 +140,7 @@ TEST_F(CRWCertVerificationControllerTest, AllowCertIgnoresIntermediateCerts) {
   scoped_refptr<net::X509Certificate> cert(
       net::X509Certificate::CreateFromHandle(cert_->os_cert_handle(),
                                              {cert_->os_cert_handle()}));
+  ASSERT_TRUE(cert);
   [controller_ allowCert:cert.get()
                  forHost:kHostName
                   status:net::CERT_STATUS_ALL_ERRORS];

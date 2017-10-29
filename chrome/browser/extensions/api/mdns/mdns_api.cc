@@ -36,7 +36,10 @@ bool IsServiceTypeWhitelisted(const std::string& service_type) {
 
 }  // namespace
 
-MDnsAPI::MDnsAPI(content::BrowserContext* context) : browser_context_(context) {
+using DnsSdRegistry = media_router::DnsSdRegistry;
+
+MDnsAPI::MDnsAPI(content::BrowserContext* context)
+    : browser_context_(context), dns_sd_registry_(nullptr) {
   DCHECK(browser_context_);
   extensions::EventRouter* event_router = EventRouter::Get(context);
   DCHECK(event_router);
@@ -44,7 +47,7 @@ MDnsAPI::MDnsAPI(content::BrowserContext* context) : browser_context_(context) {
 }
 
 MDnsAPI::~MDnsAPI() {
-  if (dns_sd_registry_.get()) {
+  if (dns_sd_registry_) {
     dns_sd_registry_->RemoveObserver(this);
   }
 }
@@ -54,7 +57,8 @@ MDnsAPI* MDnsAPI::Get(content::BrowserContext* context) {
   return BrowserContextKeyedAPIFactory<MDnsAPI>::Get(context);
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<MDnsAPI> > g_factory =
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<MDnsAPI>>::DestructorAtExit g_factory =
     LAZY_INSTANCE_INITIALIZER;
 
 // static
@@ -62,10 +66,9 @@ BrowserContextKeyedAPIFactory<MDnsAPI>* MDnsAPI::GetFactoryInstance() {
   return g_factory.Pointer();
 }
 
-void MDnsAPI::SetDnsSdRegistryForTesting(
-    std::unique_ptr<DnsSdRegistry> dns_sd_registry) {
-  dns_sd_registry_ = std::move(dns_sd_registry);
-  if (dns_sd_registry_.get())
+void MDnsAPI::SetDnsSdRegistryForTesting(DnsSdRegistry* dns_sd_registry) {
+  dns_sd_registry_ = dns_sd_registry;
+  if (dns_sd_registry_)
     dns_sd_registry_->AddObserver(this);
 }
 
@@ -77,11 +80,11 @@ void MDnsAPI::ForceDiscovery() {
 
 DnsSdRegistry* MDnsAPI::dns_sd_registry() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!dns_sd_registry_.get()) {
-    dns_sd_registry_.reset(new extensions::DnsSdRegistry());
+  if (!dns_sd_registry_) {
+    dns_sd_registry_ = media_router::DnsSdRegistry::GetInstance();
     dns_sd_registry_->AddObserver(this);
   }
-  return dns_sd_registry_.get();
+  return dns_sd_registry_;
 }
 
 void MDnsAPI::OnListenerAdded(const EventListenerInfo& details) {
@@ -145,7 +148,7 @@ void MDnsAPI::OnDnsSdEvent(const std::string& service_type,
   DCHECK(thread_checker_.CalledOnValidThread());
 
   std::vector<mdns::MDnsService> args;
-  for (const DnsSdService& service : services) {
+  for (const auto& service : services) {
     if (static_cast<int>(args.size()) ==
         api::mdns::MAX_SERVICE_INSTANCES_PER_EVENT) {
       // TODO(reddaly): This is not the most meaningful way of notifying the
@@ -171,11 +174,10 @@ void MDnsAPI::OnDnsSdEvent(const std::string& service_type,
   }
 
   std::unique_ptr<base::ListValue> results = mdns::OnServiceList::Create(args);
-  std::unique_ptr<Event> event(new Event(events::MDNS_ON_SERVICE_LIST,
-                                         mdns::OnServiceList::kEventName,
-                                         std::move(results)));
-  event->restrict_to_browser_context = browser_context_;
-  event->filter_info.SetServiceType(service_type);
+  auto event = base::MakeUnique<Event>(events::MDNS_ON_SERVICE_LIST,
+                                       mdns::OnServiceList::kEventName,
+                                       std::move(results), browser_context_);
+  event->filter_info.service_type = service_type;
 
   // TODO(justinlin): To avoid having listeners without filters getting all
   // events, modify API to have this event require filters.

@@ -13,7 +13,7 @@
 #include "SkTArray.h"
 #include "SkThreadUtils.h"
 
-#if defined(_MSC_VER)
+#if defined(SK_BUILD_FOR_WIN32)
     #include <windows.h>
     static int num_cores() {
         SYSTEM_INFO sysinfo;
@@ -56,7 +56,7 @@ public:
         }
     }
 
-    ~SkThreadPool() {
+    ~SkThreadPool() override {
         // Signal each thread that it's time to shut down.
         for (int i = 0; i < fThreads.count(); i++) {
             this->add(nullptr);

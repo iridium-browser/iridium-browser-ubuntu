@@ -57,6 +57,10 @@ SupervisedUserGoogleAuthNavigationThrottle::WillRedirectRequest() {
   return WillStartOrRedirectRequest();
 }
 
+const char* SupervisedUserGoogleAuthNavigationThrottle::GetNameForLogging() {
+  return "SupervisedUserGoogleAuthNavigationThrottle";
+}
+
 content::NavigationThrottle::ThrottleCheckResult
 SupervisedUserGoogleAuthNavigationThrottle::WillStartOrRedirectRequest() {
   const GURL& url = navigation_handle()->GetURL();
@@ -89,12 +93,12 @@ void SupervisedUserGoogleAuthNavigationThrottle::OnGoogleAuthStateChanged(
   switch (result) {
     case content::NavigationThrottle::PROCEED: {
       google_auth_state_subscription_.reset();
-      navigation_handle()->Resume();
+      Resume();
       break;
     }
     case content::NavigationThrottle::CANCEL:
     case content::NavigationThrottle::CANCEL_AND_IGNORE: {
-      navigation_handle()->CancelDeferredNavigation(result);
+      CancelDeferredNavigation(result);
       break;
     }
     case content::NavigationThrottle::DEFER: {
@@ -102,6 +106,7 @@ void SupervisedUserGoogleAuthNavigationThrottle::OnGoogleAuthStateChanged(
       break;
     }
     case content::NavigationThrottle::BLOCK_REQUEST:
+    case content::NavigationThrottle::BLOCK_REQUEST_AND_COLLAPSE:
     case content::NavigationThrottle::BLOCK_RESPONSE: {
       NOTREACHED();
     }
@@ -145,6 +150,5 @@ void SupervisedUserGoogleAuthNavigationThrottle::OnReauthenticationResult(
   }
 
   // Otherwise cancel immediately.
-  navigation_handle()->CancelDeferredNavigation(
-      content::NavigationThrottle::CANCEL_AND_IGNORE);
+  CancelDeferredNavigation(content::NavigationThrottle::CANCEL_AND_IGNORE);
 }

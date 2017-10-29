@@ -5,37 +5,34 @@
 #include "platform/fonts/AcceptLanguagesResolver.h"
 
 #include "platform/LayoutLocale.h"
+#include "platform/fonts/FontGlobalContext.h"
 
 namespace blink {
 
-static String& currentAcceptLanguages() {
-  DEFINE_STATIC_LOCAL(String, s_current, ());
-  return s_current;
-}
-
-void AcceptLanguagesResolver::acceptLanguagesChanged(
-    const String& acceptLanguages) {
-  String& currentValue = currentAcceptLanguages();
-  if (currentValue == acceptLanguages)
+void AcceptLanguagesResolver::AcceptLanguagesChanged(
+    const String& accept_languages) {
+  String& current_value = FontGlobalContext::CurrentAcceptLanguages();
+  if (current_value == accept_languages)
     return;
 
-  currentValue = acceptLanguages;
-  LayoutLocale::invalidateLocaleForHan();
+  current_value = accept_languages;
+  FontGlobalContext::InvalidateLocaleForHan();
 }
 
-const LayoutLocale* AcceptLanguagesResolver::localeForHan() {
-  return localeForHanFromAcceptLanguages(currentAcceptLanguages());
+const LayoutLocale* AcceptLanguagesResolver::LocaleForHan() {
+  return LocaleForHanFromAcceptLanguages(
+      FontGlobalContext::CurrentAcceptLanguages());
 }
 
-const LayoutLocale* AcceptLanguagesResolver::localeForHanFromAcceptLanguages(
-    const String& acceptLanguages) {
+const LayoutLocale* AcceptLanguagesResolver::LocaleForHanFromAcceptLanguages(
+    const String& accept_languages) {
   // Use the first acceptLanguages that can disambiguate.
   Vector<String> languages;
-  acceptLanguages.split(',', languages);
+  accept_languages.Split(',', languages);
   for (String token : languages) {
-    token = token.stripWhiteSpace();
-    const LayoutLocale* locale = LayoutLocale::get(AtomicString(token));
-    if (locale->hasScriptForHan())
+    token = token.StripWhiteSpace();
+    const LayoutLocale* locale = LayoutLocale::Get(AtomicString(token));
+    if (locale->HasScriptForHan())
       return locale;
   }
 

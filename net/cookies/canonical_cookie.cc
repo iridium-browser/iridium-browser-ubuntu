@@ -50,10 +50,12 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "net/base/url_util.h"
 #include "net/cookies/cookie_util.h"
 #include "net/cookies/parsed_cookie.h"
 #include "url/gurl.h"
 #include "url/url_canon.h"
+#include "url/url_util.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -74,8 +76,59 @@ bool GetCookieDomain(const GURL& url,
   return cookie_util::GetCookieDomainWithString(url, domain_string, result);
 }
 
-std::string CanonPathWithString(const GURL& url,
-                                const std::string& path_string) {
+// Compares cookies using name, domain and path, so that "equivalent" cookies
+// (per RFC 2965) are equal to each other.
+int PartialCookieOrdering(const CanonicalCookie& a, const CanonicalCookie& b) {
+  int diff = a.Name().compare(b.Name());
+  if (diff != 0)
+    return diff;
+
+  diff = a.Domain().compare(b.Domain());
+  if (diff != 0)
+    return diff;
+
+  return a.Path().compare(b.Path());
+}
+
+}  // namespace
+
+CanonicalCookie::CanonicalCookie()
+    : secure_(false),
+      httponly_(false),
+      same_site_(CookieSameSite::NO_RESTRICTION),
+      priority_(COOKIE_PRIORITY_MEDIUM) {}
+
+CanonicalCookie::CanonicalCookie(const CanonicalCookie& other) = default;
+
+CanonicalCookie::CanonicalCookie(const std::string& name,
+                                 const std::string& value,
+                                 const std::string& domain,
+                                 const std::string& path,
+                                 const base::Time& creation,
+                                 const base::Time& expiration,
+                                 const base::Time& last_access,
+                                 bool secure,
+                                 bool httponly,
+                                 CookieSameSite same_site,
+                                 CookiePriority priority)
+    : name_(name),
+      value_(value),
+      domain_(domain),
+      path_(path),
+      creation_date_(creation),
+      expiry_date_(expiration),
+      last_access_date_(last_access),
+      secure_(secure),
+      httponly_(httponly),
+      same_site_(same_site),
+      priority_(priority) {}
+
+CanonicalCookie::~CanonicalCookie() {}
+
+// static
+std::string CanonicalCookie::CanonPathWithString(
+    const GURL& url,
+    const std::string& path_string) {
   // The RFC says the path should be a prefix of the current URL path.
   // However, Mozilla allows you to set any path for compatibility with
   // broken websites.  We unfortunately will mimic this behavior.  We try
@@ -102,40 +155,6 @@ std::string CanonPathWithString(const GURL& url,
 
   // Return up to the rightmost '/'.
   return url_path.substr(0, idx);
-}
-
-// Compares cookies using name, domain and path, so that "equivalent" cookies
-// (per RFC 2965) are equal to each other.
-int PartialCookieOrdering(const CanonicalCookie& a, const CanonicalCookie& b) {
-  int diff = a.Name().compare(b.Name());
-  if (diff != 0)
-    return diff;
-
-  diff = a.Domain().compare(b.Domain());
-  if (diff != 0)
-    return diff;
-
-  return a.Path().compare(b.Path());
-}
-
-}  // namespace
-
-CanonicalCookie::CanonicalCookie()
-    : secure_(false),
-      httponly_(false) {
-}
-
-CanonicalCookie::CanonicalCookie(const CanonicalCookie& other) = default;
-
-CanonicalCookie::~CanonicalCookie() {}
-
-// static
-std::string CanonicalCookie::CanonPath(const GURL& url,
-                                       const ParsedCookie& pc) {
-  std::string path_string;
-  if (pc.HasPath())
-    path_string = pc.Path();
-  return CanonPathWithString(url, path_string);
 }
 
 // static
@@ -201,104 +220,34 @@ std::unique_ptr<CanonicalCookie> CanonicalCookie::Create(
     return nullptr;
   }
 
-  std::string cookie_path = CanonicalCookie::CanonPath(url, parsed_cookie);
+  std::string cookie_path = CanonPathWithString(
+      url, parsed_cookie.HasPath() ? parsed_cookie.Path() : std::string());
+
   Time server_time(creation_time);
   if (options.has_server_time())
     server_time = options.server_time();
 
+  DCHECK(!creation_time.is_null());
   Time cookie_expires = CanonicalCookie::CanonExpiration(parsed_cookie,
                                                          creation_time,
                                                          server_time);
 
-  CookiePrefix prefix = CanonicalCookie::GetCookiePrefix(parsed_cookie.Name());
-  bool is_cookie_valid =
-      CanonicalCookie::IsCookiePrefixValid(prefix, url, parsed_cookie);
-  CanonicalCookie::RecordCookiePrefixMetrics(prefix, is_cookie_valid);
+  CookiePrefix prefix = GetCookiePrefix(parsed_cookie.Name());
+  bool is_cookie_valid = IsCookiePrefixValid(prefix, url, parsed_cookie);
+  RecordCookiePrefixMetrics(prefix, is_cookie_valid);
   if (!is_cookie_valid) {
     VLOG(kVlogSetCookies)
         << "Create() failed because the cookie violated prefix rules.";
     return nullptr;
   }
 
-  return base::WrapUnique(new CanonicalCookie(
+  std::unique_ptr<CanonicalCookie> cc(base::MakeUnique<CanonicalCookie>(
       parsed_cookie.Name(), parsed_cookie.Value(), cookie_domain, cookie_path,
       creation_time, cookie_expires, creation_time, parsed_cookie.IsSecure(),
       parsed_cookie.IsHttpOnly(), parsed_cookie.SameSite(),
       parsed_cookie.Priority()));
-}
-
-// static
-std::unique_ptr<CanonicalCookie> CanonicalCookie::Create(
-    const GURL& url,
-    const std::string& name,
-    const std::string& value,
-    const std::string& domain,
-    const std::string& path,
-    const base::Time& creation,
-    const base::Time& expiration,
-    bool secure,
-    bool http_only,
-    CookieSameSite same_site,
-    CookiePriority priority) {
-  // Expect valid attribute tokens and values, as defined by the ParsedCookie
-  // logic, otherwise don't create the cookie.
-  std::string parsed_name = ParsedCookie::ParseTokenString(name);
-  if (parsed_name != name)
-    return nullptr;
-  std::string parsed_value = ParsedCookie::ParseValueString(value);
-  if (parsed_value != value)
-    return nullptr;
-
-  std::string parsed_domain = ParsedCookie::ParseValueString(domain);
-  if (parsed_domain != domain)
-    return nullptr;
-  std::string cookie_domain;
-  if (!cookie_util::GetCookieDomainWithString(url, parsed_domain,
-                                               &cookie_domain)) {
-    return nullptr;
-  }
-
-  if (secure && !url.SchemeIsCryptographic())
-    return nullptr;
-
-  std::string parsed_path = ParsedCookie::ParseValueString(path);
-  if (parsed_path != path)
-    return nullptr;
-
-  std::string cookie_path = CanonPathWithString(url, parsed_path);
-  // Expect that the path was either not specified (empty), or is valid.
-  if (!parsed_path.empty() && cookie_path != parsed_path)
-    return nullptr;
-  // Canonicalize path again to make sure it escapes characters as needed.
-  url::Component path_component(0, cookie_path.length());
-  url::RawCanonOutputT<char> canon_path;
-  url::Component canon_path_component;
-  url::CanonicalizePath(cookie_path.data(), path_component, &canon_path,
-                        &canon_path_component);
-  cookie_path = std::string(canon_path.data() + canon_path_component.begin,
-                            canon_path_component.len);
-
-  return base::WrapUnique(new CanonicalCookie(
-      parsed_name, parsed_value, cookie_domain, cookie_path, creation,
-      expiration, creation, secure, http_only, same_site, priority));
-}
-
-// static
-std::unique_ptr<CanonicalCookie> CanonicalCookie::Create(
-    const std::string& name,
-    const std::string& value,
-    const std::string& domain,
-    const std::string& path,
-    const base::Time& creation,
-    const base::Time& expiration,
-    const base::Time& last_access,
-    bool secure,
-    bool http_only,
-    CookieSameSite same_site,
-    CookiePriority priority) {
-  return base::WrapUnique(
-      new CanonicalCookie(name, value, domain, path, creation, expiration,
-                          last_access, secure, http_only, same_site, priority));
+  DCHECK(cc->IsCanonical());
+  return cc;
 }
 
 bool CanonicalCookie::IsEquivalentForSecureCookieMatching(
@@ -455,28 +404,53 @@ bool CanonicalCookie::FullCompare(const CanonicalCookie& other) const {
   return Priority() < other.Priority();
 }
 
-CanonicalCookie::CanonicalCookie(const std::string& name,
-                                 const std::string& value,
-                                 const std::string& domain,
-                                 const std::string& path,
-                                 const base::Time& creation,
-                                 const base::Time& expiration,
-                                 const base::Time& last_access,
-                                 bool secure,
-                                 bool httponly,
-                                 CookieSameSite same_site,
-                                 CookiePriority priority)
-    : name_(name),
-      value_(value),
-      domain_(domain),
-      path_(path),
-      creation_date_(creation),
-      expiry_date_(expiration),
-      last_access_date_(last_access),
-      secure_(secure),
-      httponly_(httponly),
-      same_site_(same_site),
-      priority_(priority) {}
+bool CanonicalCookie::IsCanonical() const {
+  // Not checking domain or path against ParsedCookie as it may have
+  // come purely from the URL.
+  if (ParsedCookie::ParseTokenString(name_) != name_ ||
+      ParsedCookie::ParseValueString(value_) != value_ ||
+      !ParsedCookie::IsValidCookieAttributeValue(name_) ||
+      !ParsedCookie::IsValidCookieAttributeValue(value_)) {
+    return false;
+  }
+
+  if (!last_access_date_.is_null() && creation_date_.is_null())
+    return false;
+
+  url::CanonHostInfo canon_host_info;
+  std::string canonical_domain(CanonicalizeHost(domain_, &canon_host_info));
+  // TODO(rdsmith): This specifically allows for empty domains.  The spec
+  // suggests this is invalid (if a domain attribute is empty, the cookie's
+  // domain is set to the canonicalized request host; see
+  // https://tools.ietf.org/html/rfc6265#section-5.3).  However, it is
+  // needed for Chrome extension cookies.
+  // See http://crbug.com/730633 for more information.
+  if (canonical_domain != domain_)
+    return false;
+
+  if (path_.empty() || path_[0] != '/')
+    return false;
+
+  switch (GetCookiePrefix(name_)) {
+    case COOKIE_PREFIX_HOST:
+      if (!secure_ || path_ != "/" || domain_.empty() || domain_[0] == '.')
+        return false;
+      break;
+    case COOKIE_PREFIX_SECURE:
+      if (!secure_)
+        return false;
+      break;
+    default:
+      break;
+  }
+
+  return true;
+}
+
+void CanonicalCookie::SetCreationDate(base::Time new_creation_date) {
+  DCHECK(CreationDate().is_null());
+  creation_date_ = new_creation_date;
+}
 
 // static
 CanonicalCookie::CookiePrefix CanonicalCookie::GetCookiePrefix(

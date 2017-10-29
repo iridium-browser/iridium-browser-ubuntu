@@ -4,6 +4,8 @@
 
 #include "ash/shell/example_app_list_presenter.h"
 
+#include <memory>
+
 #include "ash/app_list/app_list_presenter_delegate_factory.h"
 #include "ash/shell/example_factory.h"
 #include "ui/app_list/presenter/app_list_view_delegate_factory.h"
@@ -40,14 +42,16 @@ ExampleAppListPresenter::ExampleAppListPresenter()
           base::MakeUnique<AppListPresenterDelegateFactory>(
               base::MakeUnique<ExampleAppListViewDelegateFactory>())) {
   // Note: This example |app_list_presenter_impl_| does not report visibility
-  // changes to the app_list::mojom::AppList implementation owned by WmShell.
+  // changes to the app_list::mojom::AppList implementation owned by ShellPort.
 }
 
 ExampleAppListPresenter::~ExampleAppListPresenter() {}
 
 app_list::mojom::AppListPresenterPtr
 ExampleAppListPresenter::CreateInterfacePtrAndBind() {
-  return binding_.CreateInterfacePtrAndBind();
+  app_list::mojom::AppListPresenterPtr ptr;
+  binding_.Bind(mojo::MakeRequest(&ptr));
+  return ptr;
 }
 
 void ExampleAppListPresenter::Show(int64_t display_id) {
@@ -61,6 +65,15 @@ void ExampleAppListPresenter::Dismiss() {
 void ExampleAppListPresenter::ToggleAppList(int64_t display_id) {
   app_list_presenter_impl_.ToggleAppList(display_id);
 }
+
+void ExampleAppListPresenter::StartVoiceInteractionSession() {}
+
+void ExampleAppListPresenter::ToggleVoiceInteractionSession() {}
+
+void ExampleAppListPresenter::UpdateYPositionAndOpacity(
+    int new_y_position,
+    float background_opacity,
+    bool is_end_gesture) {}
 
 }  // namespace shell
 }  // namespace ash

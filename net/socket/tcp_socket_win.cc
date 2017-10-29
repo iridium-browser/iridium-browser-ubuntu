@@ -30,30 +30,13 @@
 #include "net/log/net_log_source_type.h"
 #include "net/socket/socket_descriptor.h"
 #include "net/socket/socket_net_log_params.h"
+#include "net/socket/socket_options.h"
 
 namespace net {
 
 namespace {
 
 const int kTCPKeepAliveSeconds = 45;
-
-int SetSocketReceiveBufferSize(SOCKET socket, int32_t size) {
-  int rv = setsockopt(socket, SOL_SOCKET, SO_RCVBUF,
-                      reinterpret_cast<const char*>(&size), sizeof(size));
-  int os_error = WSAGetLastError();
-  int net_error = (rv == 0) ? OK : MapSystemError(os_error);
-  DCHECK(!rv) << "Could not set socket receive buffer size: " << net_error;
-  return net_error;
-}
-
-int SetSocketSendBufferSize(SOCKET socket, int32_t size) {
-  int rv = setsockopt(socket, SOL_SOCKET, SO_SNDBUF,
-                      reinterpret_cast<const char*>(&size), sizeof(size));
-  int os_error = WSAGetLastError();
-  int net_error = (rv == 0) ? OK : MapSystemError(os_error);
-  DCHECK(!rv) << "Could not set socket send buffer size: " << net_error;
-  return net_error;
-}
 
 // Disable Nagle.
 // Enable TCP Keep-Alive to prevent NAT routers from timing out TCP
@@ -276,12 +259,13 @@ TCPSocketWin::TCPSocketWin(
 }
 
 TCPSocketWin::~TCPSocketWin() {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   Close();
   net_log_.EndEvent(NetLogEventType::SOCKET_ALIVE);
 }
 
 int TCPSocketWin::Open(AddressFamily family) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_EQ(socket_, INVALID_SOCKET);
 
   socket_ = CreatePlatformSocket(ConvertAddressFamily(family), SOCK_STREAM,
@@ -301,9 +285,9 @@ int TCPSocketWin::Open(AddressFamily family) {
   return OK;
 }
 
-int TCPSocketWin::AdoptConnectedSocket(SOCKET socket,
+int TCPSocketWin::AdoptConnectedSocket(SocketDescriptor socket,
                                        const IPEndPoint& peer_address) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_EQ(socket_, INVALID_SOCKET);
   DCHECK(!core_.get());
 
@@ -322,8 +306,8 @@ int TCPSocketWin::AdoptConnectedSocket(SOCKET socket,
   return OK;
 }
 
-int TCPSocketWin::AdoptListenSocket(SOCKET socket) {
-  DCHECK(CalledOnValidThread());
+int TCPSocketWin::AdoptUnconnectedSocket(SocketDescriptor socket) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_EQ(socket_, INVALID_SOCKET);
 
   socket_ = socket;
@@ -342,7 +326,7 @@ int TCPSocketWin::AdoptListenSocket(SOCKET socket) {
 }
 
 int TCPSocketWin::Bind(const IPEndPoint& address) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_NE(socket_, INVALID_SOCKET);
 
   SockaddrStorage storage;
@@ -360,7 +344,7 @@ int TCPSocketWin::Bind(const IPEndPoint& address) {
 }
 
 int TCPSocketWin::Listen(int backlog) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_GT(backlog, 0);
   DCHECK_NE(socket_, INVALID_SOCKET);
   DCHECK_EQ(accept_event_, WSA_INVALID_EVENT);
@@ -385,7 +369,7 @@ int TCPSocketWin::Listen(int backlog) {
 int TCPSocketWin::Accept(std::unique_ptr<TCPSocketWin>* socket,
                          IPEndPoint* address,
                          const CompletionCallback& callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(socket);
   DCHECK(address);
   DCHECK(!callback.is_null());
@@ -410,7 +394,7 @@ int TCPSocketWin::Accept(std::unique_ptr<TCPSocketWin>* socket,
 
 int TCPSocketWin::Connect(const IPEndPoint& address,
                           const CompletionCallback& callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_NE(socket_, INVALID_SOCKET);
   DCHECK(!waiting_connect_);
 
@@ -443,7 +427,7 @@ int TCPSocketWin::Connect(const IPEndPoint& address,
 }
 
 bool TCPSocketWin::IsConnected() const {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (socket_ == INVALID_SOCKET || waiting_connect_)
     return false;
@@ -464,7 +448,7 @@ bool TCPSocketWin::IsConnected() const {
 }
 
 bool TCPSocketWin::IsConnectedAndIdle() const {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (socket_ == INVALID_SOCKET || waiting_connect_)
     return false;
@@ -488,19 +472,59 @@ bool TCPSocketWin::IsConnectedAndIdle() const {
 int TCPSocketWin::Read(IOBuffer* buf,
                        int buf_len,
                        const CompletionCallback& callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(!core_->read_iobuffer_.get());
+  // base::Unretained() is safe because RetryRead() won't be called when |this|
+  // is gone.
+  int rv =
+      ReadIfReady(buf, buf_len,
+                  base::Bind(&TCPSocketWin::RetryRead, base::Unretained(this)));
+  if (rv != ERR_IO_PENDING)
+    return rv;
+  read_callback_ = callback;
+  core_->read_iobuffer_ = buf;
+  core_->read_buffer_length_ = buf_len;
+  return ERR_IO_PENDING;
+}
+
+int TCPSocketWin::ReadIfReady(IOBuffer* buf,
+                              int buf_len,
+                              const CompletionCallback& callback) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_NE(socket_, INVALID_SOCKET);
   DCHECK(!waiting_read_);
-  CHECK(read_callback_.is_null());
-  DCHECK(!core_->read_iobuffer_.get());
+  DCHECK(read_if_ready_callback_.is_null());
 
-  return DoRead(buf, buf_len, callback);
+  if (!core_->non_blocking_reads_initialized_) {
+    WSAEventSelect(socket_, core_->read_overlapped_.hEvent, FD_READ | FD_CLOSE);
+    core_->non_blocking_reads_initialized_ = true;
+  }
+  int rv = recv(socket_, buf->data(), buf_len, 0);
+  int os_error = WSAGetLastError();
+  if (rv == SOCKET_ERROR) {
+    if (os_error != WSAEWOULDBLOCK) {
+      int net_error = MapSystemError(os_error);
+      net_log_.AddEvent(NetLogEventType::SOCKET_READ_ERROR,
+                        CreateNetLogSocketErrorCallback(net_error, os_error));
+      return net_error;
+    }
+  } else {
+    net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_RECEIVED, rv,
+                                  buf->data());
+    NetworkActivityMonitor::GetInstance()->IncrementBytesReceived(rv);
+    return rv;
+  }
+
+  waiting_read_ = true;
+  read_if_ready_callback_ = callback;
+  core_->WatchForRead();
+  return ERR_IO_PENDING;
 }
 
 int TCPSocketWin::Write(IOBuffer* buf,
                         int buf_len,
                         const CompletionCallback& callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_NE(socket_, INVALID_SOCKET);
   DCHECK(!waiting_write_);
   CHECK(write_callback_.is_null());
@@ -549,7 +573,7 @@ int TCPSocketWin::Write(IOBuffer* buf,
 }
 
 int TCPSocketWin::GetLocalAddress(IPEndPoint* address) const {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(address);
 
   SockaddrStorage storage;
@@ -564,7 +588,7 @@ int TCPSocketWin::GetLocalAddress(IPEndPoint* address) const {
 }
 
 int TCPSocketWin::GetPeerAddress(IPEndPoint* address) const {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(address);
   if (!IsConnected())
     return ERR_SOCKET_NOT_CONNECTED;
@@ -608,12 +632,12 @@ int TCPSocketWin::SetExclusiveAddrUse() {
 }
 
 int TCPSocketWin::SetReceiveBufferSize(int32_t size) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return SetSocketReceiveBufferSize(socket_, size);
 }
 
 int TCPSocketWin::SetSendBufferSize(int32_t size) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   return SetSocketSendBufferSize(socket_, size);
 }
 
@@ -622,11 +646,11 @@ bool TCPSocketWin::SetKeepAlive(bool enable, int delay) {
 }
 
 bool TCPSocketWin::SetNoDelay(bool no_delay) {
-  return SetTCPNoDelay(socket_, no_delay);
+  return SetTCPNoDelay(socket_, no_delay) == OK;
 }
 
 void TCPSocketWin::Close() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   if (socket_ != INVALID_SOCKET) {
     // Only log the close event if there's actually a socket to close.
@@ -677,13 +701,14 @@ void TCPSocketWin::Close() {
   waiting_write_ = false;
 
   read_callback_.Reset();
+  read_if_ready_callback_.Reset();
   write_callback_.Reset();
   peer_address_.reset();
   connect_os_error_ = 0;
 }
 
 void TCPSocketWin::DetachFromThread() {
-  base::NonThreadSafe::DetachFromThread();
+  DETACH_FROM_THREAD(thread_checker_);
 }
 
 void TCPSocketWin::StartLoggingMultipleConnectAttempts(
@@ -703,6 +728,13 @@ void TCPSocketWin::EndLoggingMultipleConnectAttempts(int net_error) {
   } else {
     NOTREACHED();
   }
+}
+
+SocketDescriptor TCPSocketWin::ReleaseSocketDescriptorForTesting() {
+  SocketDescriptor socket_descriptor = socket_;
+  socket_ = INVALID_SOCKET;
+  Close();
+  return socket_descriptor;
 }
 
 int TCPSocketWin::AcceptInternal(std::unique_ptr<TCPSocketWin>* socket,
@@ -783,17 +815,7 @@ int TCPSocketWin::DoConnect() {
   if (!peer_address_->ToSockAddr(storage.addr, &storage.addr_len))
     return ERR_ADDRESS_INVALID;
 
-  int result;
-  int os_error;
-  {
-    // TODO(ricea): Remove ScopedTracker below once crbug.com/436634 is fixed.
-    tracked_objects::ScopedTracker tracking_profile(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 connect()"));
-    result = connect(socket_, storage.addr, storage.addr_len);
-    os_error = WSAGetLastError();
-  }
-
-  if (!result) {
+  if (!connect(socket_, storage.addr, storage.addr_len)) {
     // Connected without waiting!
     //
     // The MSDN page for connect says:
@@ -809,6 +831,7 @@ int TCPSocketWin::DoConnect() {
     if (ResetEventIfSignaled(core_->read_overlapped_.hEvent))
       return OK;
   } else {
+    int os_error = WSAGetLastError();
     if (os_error != WSAEWOULDBLOCK) {
       LOG(ERROR) << "connect failed: " << os_error;
       connect_os_error_ = os_error;
@@ -817,10 +840,6 @@ int TCPSocketWin::DoConnect() {
       return rv;
     }
   }
-
-  // TODO(ricea): Remove ScopedTracker below once crbug.com/436634 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 WatchForRead()"));
 
   core_->WatchForRead();
   return ERR_IO_PENDING;
@@ -871,35 +890,21 @@ void TCPSocketWin::LogConnectEnd(int net_error) {
           sizeof(source_address)));
 }
 
-int TCPSocketWin::DoRead(IOBuffer* buf, int buf_len,
-                         const CompletionCallback& callback) {
-  if (!core_->non_blocking_reads_initialized_) {
-    WSAEventSelect(socket_, core_->read_overlapped_.hEvent,
-                   FD_READ | FD_CLOSE);
-    core_->non_blocking_reads_initialized_ = true;
-  }
-  int rv = recv(socket_, buf->data(), buf_len, 0);
-  int os_error = WSAGetLastError();
-  if (rv == SOCKET_ERROR) {
-    if (os_error != WSAEWOULDBLOCK) {
-      int net_error = MapSystemError(os_error);
-      net_log_.AddEvent(NetLogEventType::SOCKET_READ_ERROR,
-                        CreateNetLogSocketErrorCallback(net_error, os_error));
-      return net_error;
-    }
-  } else {
-    net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_RECEIVED, rv,
-                                  buf->data());
-    NetworkActivityMonitor::GetInstance()->IncrementBytesReceived(rv);
-    return rv;
-  }
+void TCPSocketWin::RetryRead(int rv) {
+  DCHECK(core_->read_iobuffer_);
 
-  waiting_read_ = true;
-  read_callback_ = callback;
-  core_->read_iobuffer_ = buf;
-  core_->read_buffer_length_ = buf_len;
-  core_->WatchForRead();
-  return ERR_IO_PENDING;
+  if (rv == OK) {
+    // base::Unretained() is safe because RetryRead() won't be called when
+    // |this| is gone.
+    rv = ReadIfReady(
+        core_->read_iobuffer_.get(), core_->read_buffer_length_,
+        base::Bind(&TCPSocketWin::RetryRead, base::Unretained(this)));
+    if (rv == ERR_IO_PENDING)
+      return;
+  }
+  core_->read_iobuffer_ = nullptr;
+  core_->read_buffer_length_ = 0;
+  base::ResetAndReturn(&read_callback_).Run(rv);
 }
 
 void TCPSocketWin::DidCompleteConnect() {
@@ -981,7 +986,7 @@ void TCPSocketWin::DidCompleteWrite() {
 
 void TCPSocketWin::DidSignalRead() {
   DCHECK(waiting_read_);
-  DCHECK(!read_callback_.is_null());
+  DCHECK(!read_if_ready_callback_.is_null());
 
   int os_error = 0;
   WSANETWORKEVENTS network_events;
@@ -1002,20 +1007,17 @@ void TCPSocketWin::DidSignalRead() {
     // network_events.iErrorCode[FD_CLOSE_BIT] is 0, it is a graceful
     // connection closure. It is tempting to directly set rv to 0 in
     // this case, but the MSDN pages for WSAEventSelect and
-    // WSAAsyncSelect recommend we still call DoRead():
+    // WSAAsyncSelect recommend we still call RetryRead():
     //   FD_CLOSE should only be posted after all data is read from a
     //   socket, but an application should check for remaining data upon
     //   receipt of FD_CLOSE to avoid any possibility of losing data.
     //
     // If network_events.iErrorCode[FD_READ_BIT] or
     // network_events.iErrorCode[FD_CLOSE_BIT] is nonzero, still call
-    // DoRead() because recv() reports a more accurate error code
+    // RetryRead() because recv() reports a more accurate error code
     // (WSAECONNRESET vs. WSAECONNABORTED) when the connection was
     // reset.
-    rv = DoRead(core_->read_iobuffer_.get(), core_->read_buffer_length_,
-                read_callback_);
-    if (rv == ERR_IO_PENDING)
-      return;
+    rv = OK;
   } else {
     // This may happen because Read() may succeed synchronously and
     // consume all the received data without resetting the event object.
@@ -1023,12 +1025,9 @@ void TCPSocketWin::DidSignalRead() {
     return;
   }
 
-  waiting_read_ = false;
-  core_->read_iobuffer_ = NULL;
-  core_->read_buffer_length_ = 0;
-
   DCHECK_NE(rv, ERR_IO_PENDING);
-  base::ResetAndReturn(&read_callback_).Run(rv);
+  waiting_read_ = false;
+  base::ResetAndReturn(&read_if_ready_callback_).Run(rv);
 }
 
 bool TCPSocketWin::GetEstimatedRoundTripTime(base::TimeDelta* out_rtt) const {

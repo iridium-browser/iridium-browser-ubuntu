@@ -164,7 +164,7 @@ enum MINIDUMP_STREAM_TYPE {
   UnloadedModuleListStream = 14,
 
   //! \brief The stream type for MINIDUMP_MISC_INFO, MINIDUMP_MISC_INFO_2,
-  //!     MINIDUMP_MISC_INFO_3, and MINIDUMP_MISC_INFO_4.
+  //!     MINIDUMP_MISC_INFO_3, MINIDUMP_MISC_INFO_4, and MINIDUMP_MISC_INFO_5.
   //!
   //! More recent versions of this stream are supersets of earlier versions.
   //!
@@ -533,11 +533,11 @@ struct __attribute__((packed, aligned(4))) MINIDUMP_MODULE {
   uint32_t CheckSum;
 
   //! \brief The module’s timestamp, in `time_t` units, seconds since the POSIX
-  //!     epoch.
+  //!     epoch, or `0` if unknown.
   //!
   //! On Windows, this field comes from the `TimeDateStamp` field of the
-  //! module’s `IMAGE_HEADER` structure. It reflects the timestamp at the time
-  //! the module was linked.
+  //! module’s `IMAGE_FILE_HEADER` structure. It reflects the timestamp at the
+  //! time the module was linked.
   uint32_t TimeDateStamp;
 
   //! \brief ::RVA of a MINIDUMP_STRING containing the module’s path or file
@@ -723,11 +723,11 @@ struct __attribute__((packed, aligned(4))) MINIDUMP_UNLOADED_MODULE {
   uint32_t CheckSum;
 
   //! \brief The module’s timestamp, in `time_t` units, seconds since the POSIX
-  //!     epoch.
+  //!     epoch, or `0` if unknown.
   //!
   //! On Windows, this field comes from the `TimeDateStamp` field of the
-  //! module’s `IMAGE_HEADER` structure. It reflects the timestamp at the time
-  //! the module was linked.
+  //! module’s `IMAGE_FILE_HEADER` structure. It reflects the timestamp at the
+  //! time the module was linked.
   uint32_t TimeDateStamp;
 
   //! \brief ::RVA of a MINIDUMP_STRING containing the module’s path or file
@@ -751,6 +751,33 @@ struct __attribute__((packed, aligned(4))) MINIDUMP_UNLOADED_MODULE_LIST {
 
   //! \brief The number of entries in the stream.
   uint32_t NumberOfEntries;
+};
+
+//! \brief Information about XSAVE-managed state stored within CPU-specific
+//!     context structures.
+struct __attribute__((packed, aligned(4))) XSTATE_CONFIG_FEATURE_MSC_INFO {
+  //! \brief The size of this structure, in bytes. This value is
+  //!     `sizeof(XSTATE_CONFIG_FEATURE_MSC_INFO)`.
+  uint32_t SizeOfInfo;
+
+  //! \brief The size of a CPU-specific context structure carrying all XSAVE
+  //!     state components described by this structure.
+  //!
+  //! Equivalent to the value returned by `InitializeContext()` in \a
+  //! ContextLength.
+  uint32_t ContextSize;
+
+  //! \brief The XSAVE state-component bitmap, XSAVE_BV.
+  //!
+  //! See Intel Software Developer’s Manual, Volume 1: Basic Architecture
+  //! (253665-060), 13.4.2 “XSAVE Header”.
+  uint64_t EnabledFeatures;
+
+  //! \brief The location of each state component within a CPU-specific context
+  //!     structure.
+  //!
+  //! This array is indexed by bit position numbers used in #EnabledFeatures.
+  XSTATE_FEATURE Features[MAXIMUM_XSTATE_FEATURES];
 };
 
 //! \anchor MINIDUMP_MISCx
@@ -805,6 +832,10 @@ struct __attribute__((packed, aligned(4))) MINIDUMP_UNLOADED_MODULE_LIST {
 //!  - MINIDUMP_MISC_INFO_4::BuildString
 //!  - MINIDUMP_MISC_INFO_4::DbgBldStr
 #define MINIDUMP_MISC4_BUILDSTRING 0x00000100
+
+//! \brief MINIDUMP_MISC_INFO_5::ProcessCookie is valid.
+#define MINIDUMP_MISC5_PROCESS_COOKIE 0x00000200
+
 //! \}
 
 //! \brief Information about the process that the minidump file contains a
@@ -814,6 +845,7 @@ struct __attribute__((packed, aligned(4))) MINIDUMP_UNLOADED_MODULE_LIST {
 //! \sa MINIDUMP_MISC_INFO_2
 //! \sa MINIDUMP_MISC_INFO_3
 //! \sa MINIDUMP_MISC_INFO_4
+//! \sa MINIDUMP_MISC_INFO_5
 //! \sa MINIDUMP_MISC_INFO_N
 struct __attribute__((packed, aligned(4))) MINIDUMP_MISC_INFO {
   //! \brief The size of the structure.
@@ -854,6 +886,7 @@ struct __attribute__((packed, aligned(4))) MINIDUMP_MISC_INFO {
 //! \sa MINIDUMP_MISC_INFO
 //! \sa MINIDUMP_MISC_INFO_3
 //! \sa MINIDUMP_MISC_INFO_4
+//! \sa MINIDUMP_MISC_INFO_5
 //! \sa MINIDUMP_MISC_INFO_N
 struct __attribute__((packed, aligned(4))) MINIDUMP_MISC_INFO_2
     : public MINIDUMP_MISC_INFO {
@@ -885,6 +918,7 @@ struct __attribute__((packed, aligned(4))) MINIDUMP_MISC_INFO_2
 //! \sa MINIDUMP_MISC_INFO
 //! \sa MINIDUMP_MISC_INFO_2
 //! \sa MINIDUMP_MISC_INFO_4
+//! \sa MINIDUMP_MISC_INFO_5
 //! \sa MINIDUMP_MISC_INFO_N
 struct __attribute__((packed, aligned(4))) MINIDUMP_MISC_INFO_3
     : public MINIDUMP_MISC_INFO_2 {
@@ -946,6 +980,7 @@ struct __attribute__((packed, aligned(4))) MINIDUMP_MISC_INFO_3
 //! \sa MINIDUMP_MISC_INFO
 //! \sa MINIDUMP_MISC_INFO_2
 //! \sa MINIDUMP_MISC_INFO_3
+//! \sa MINIDUMP_MISC_INFO_5
 //! \sa MINIDUMP_MISC_INFO_N
 struct __attribute__((packed, aligned(4))) MINIDUMP_MISC_INFO_4
     : public MINIDUMP_MISC_INFO_3 {
@@ -968,8 +1003,31 @@ struct __attribute__((packed, aligned(4))) MINIDUMP_MISC_INFO_4
   base::char16 DbgBldStr[40];
 };
 
+//! \brief Information about the process that the minidump file contains a
+//!     snapshot of, as well as the system that hosted that process.
+//!
+//! This structure variant is used on Windows 10 and later.
+//!
+//! \sa \ref MINIDUMP_MISCx "MINIDUMP_MISC*"
+//! \sa MINIDUMP_MISC_INFO
+//! \sa MINIDUMP_MISC_INFO_2
+//! \sa MINIDUMP_MISC_INFO_3
+//! \sa MINIDUMP_MISC_INFO_4
+//! \sa MINIDUMP_MISC_INFO_N
+struct __attribute__((packed, aligned(4))) MINIDUMP_MISC_INFO_5
+    : public MINIDUMP_MISC_INFO_4 {
+  //! \brief Information about XSAVE-managed state stored within CPU-specific
+  //!     context structures.
+  //!
+  //! This information can be used to locate state components within
+  //! CPU-specific context structures.
+  XSTATE_CONFIG_FEATURE_MSC_INFO XStateData;
+
+  uint32_t ProcessCookie;
+};
+
 //! \brief The latest known version of the MINIDUMP_MISC_INFO structure.
-typedef MINIDUMP_MISC_INFO_4 MINIDUMP_MISC_INFO_N;
+typedef MINIDUMP_MISC_INFO_5 MINIDUMP_MISC_INFO_N;
 
 //! \brief Describes a region of memory.
 struct __attribute__((packed, aligned(4))) MINIDUMP_MEMORY_INFO {

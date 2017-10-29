@@ -16,22 +16,28 @@
 
 namespace ui {
 
-X11WindowOzone::X11WindowOzone(X11EventSourceLibevent* event_source,
-                               X11WindowManagerOzone* window_manager,
+X11WindowOzone::X11WindowOzone(X11WindowManagerOzone* window_manager,
                                PlatformWindowDelegate* delegate,
                                const gfx::Rect& bounds)
-    : X11WindowBase(delegate, bounds),
-      event_source_(event_source),
-      window_manager_(window_manager) {
-  DCHECK(event_source_);
+    : X11WindowBase(delegate, bounds), window_manager_(window_manager) {
   DCHECK(window_manager);
-  event_source_->AddPlatformEventDispatcher(this);
-  event_source_->AddXEventDispatcher(this);
+  auto* event_source = X11EventSourceLibevent::GetInstance();
+  if (event_source) {
+    event_source->AddPlatformEventDispatcher(this);
+    event_source->AddXEventDispatcher(this);
+  }
 }
 
 X11WindowOzone::~X11WindowOzone() {
-  event_source_->RemovePlatformEventDispatcher(this);
-  event_source_->RemoveXEventDispatcher(this);
+  X11WindowOzone::PrepareForShutdown();
+}
+
+void X11WindowOzone::PrepareForShutdown() {
+  auto* event_source = X11EventSourceLibevent::GetInstance();
+  if (event_source) {
+    event_source->RemovePlatformEventDispatcher(this);
+    event_source->RemoveXEventDispatcher(this);
+  }
 }
 
 void X11WindowOzone::SetCapture() {
@@ -64,13 +70,9 @@ bool X11WindowOzone::CanDispatchEvent(const PlatformEvent& platform_event) {
   if (grabber != None)
     return grabber == xwindow();
 
-  // TODO(kylechar): We may need to do something special for TouchEvents similar
-  // to how DrmWindowHost handles them.
-  if (static_cast<Event*>(platform_event)->IsLocatedEvent()) {
-    const LocatedEvent* event =
-        static_cast<const LocatedEvent*>(platform_event);
-    return GetBounds().Contains(event->root_location());
-  }
+  const Event* event = static_cast<const Event*>(platform_event);
+  if (event->IsLocatedEvent())
+    return GetBounds().Contains(event->AsLocatedEvent()->root_location());
 
   return true;
 }

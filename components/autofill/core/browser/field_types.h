@@ -163,9 +163,14 @@ enum ServerFieldType {
   // forms.
   CONFIRMATION_PASSWORD = 95,
 
+  // The data entered by the user matches multiple pieces of autofill data,
+  // none of which were predicted by autofill. This value is used for metrics
+  // only, it is not a predicted nor uploaded type.
+  AMBIGUOUS_TYPE = 96,
+
   // No new types can be added without a corresponding change to the Autofill
   // server.
-  MAX_VALID_FIELD_TYPE = 96,
+  MAX_VALID_FIELD_TYPE = 97,
 };
 
 // The list of all HTML autocomplete field type hints supported by Chrome.
@@ -234,7 +239,10 @@ enum HtmlFieldType {
   HTML_TYPE_CREDIT_CARD_EXP_2_DIGIT_YEAR,
   HTML_TYPE_CREDIT_CARD_EXP_4_DIGIT_YEAR,
 
-  // Non standard autcomplete types.
+  // Universal Payment Interface - Virtual Payment Address.
+  HTML_TYPE_UPI_VPA,
+
+  // Non-standard autocomplete types.
   HTML_TYPE_UNRECOGNIZED,
 };
 

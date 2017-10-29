@@ -10,7 +10,6 @@
 #include "SkImage.h"
 #include "SkPatchUtils.h"
 #include "SkPicture.h"
-#include "SkPictureUtils.h"
 #include "SkRecorder.h"
 #include "SkSurface.h"
 
@@ -55,7 +54,8 @@ void SkRecorder::reset(SkRecord* record, const SkRect& bounds,
     this->forgetRecord();
     fDrawPictureMode = dpm;
     fRecord = record;
-    this->resetForNextPicture(bounds.roundOut());
+    SkIRect rounded = bounds.roundOut();
+    this->resetCanvas(rounded.right(), rounded.bottom());
     fMiniRecorder = mr;
 }
 
@@ -301,7 +301,7 @@ void SkRecorder::onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y,
 
 void SkRecorder::onDrawPicture(const SkPicture* pic, const SkMatrix* matrix, const SkPaint* paint) {
     if (fDrawPictureMode == Record_DrawPictureMode) {
-        fApproxBytesUsedBySubPictures += SkPictureUtils::ApproximateBytesUsed(pic);
+        fApproxBytesUsedBySubPictures += pic->approximateBytesUsed();
         APPEND(DrawPicture, this->copy(paint), sk_ref_sp(pic), matrix ? *matrix : SkMatrix::I());
     } else {
         SkASSERT(fDrawPictureMode == Playback_DrawPictureMode);
@@ -310,37 +310,9 @@ void SkRecorder::onDrawPicture(const SkPicture* pic, const SkMatrix* matrix, con
     }
 }
 
-void SkRecorder::onDrawShadowedPicture(const SkPicture* pic, const SkMatrix* matrix,
-                                       const SkPaint* paint, const SkShadowParams& params) {
-    if (fDrawPictureMode == Record_DrawPictureMode) {
-        fApproxBytesUsedBySubPictures += SkPictureUtils::ApproximateBytesUsed(pic);
-        APPEND(DrawShadowedPicture, this->copy(paint),
-                                    sk_ref_sp(pic),
-                                    matrix ? *matrix : SkMatrix::I(),
-                                    params);
-    } else {
-        // TODO update pic->playback(this) to draw the shadowed pic
-        SkASSERT(fDrawPictureMode == Playback_DrawPictureMode);
-        SkAutoCanvasMatrixPaint acmp(this,  matrix, paint, pic->cullRect());
-        pic->playback(this);
-    }
-}
-
-
-void SkRecorder::onDrawVertices(VertexMode vmode,
-                                int vertexCount, const SkPoint vertices[],
-                                const SkPoint texs[], const SkColor colors[],
-                                SkBlendMode bmode,
-                                const uint16_t indices[], int indexCount, const SkPaint& paint) {
-    APPEND(DrawVertices, paint,
-                         vmode,
-                         vertexCount,
-                         this->copy(vertices, vertexCount),
-                         texs ? this->copy(texs, vertexCount) : nullptr,
-                         colors ? this->copy(colors, vertexCount) : nullptr,
-                         bmode,
-                         this->copy(indices, indexCount),
-                         indexCount);
+void SkRecorder::onDrawVerticesObject(const SkVertices* vertices, SkBlendMode bmode,
+                                      const SkPaint& paint) {
+    APPEND(DrawVertices, paint, sk_ref_sp(const_cast<SkVertices*>(vertices)), bmode);
 }
 
 void SkRecorder::onDrawPatch(const SkPoint cubics[12], const SkColor colors[4],
@@ -366,6 +338,10 @@ void SkRecorder::onDrawAtlas(const SkImage* atlas, const SkRSXform xform[], cons
            this->copy(cull));
 }
 
+void SkRecorder::onDrawShadowRec(const SkPath& path, const SkDrawShadowRec& rec) {
+    APPEND(DrawShadowRec, path, rec);
+}
+
 void SkRecorder::onDrawAnnotation(const SkRect& rect, const char key[], SkData* value) {
     APPEND(DrawAnnotation, rect, SkString(key), sk_ref_sp(value));
 }
@@ -378,6 +354,8 @@ SkCanvas::SaveLayerStrategy SkRecorder::getSaveLayerStrategy(const SaveLayerRec&
     APPEND(SaveLayer, this->copy(rec.fBounds)
                     , this->copy(rec.fPaint)
                     , sk_ref_sp(rec.fBackdrop)
+                    , sk_ref_sp(rec.fClipMask)
+                    , this->copy(rec.fClipMatrix)
                     , rec.fSaveLayerFlags);
     return SkCanvas::kNoLayer_SaveLayerStrategy;
 }
@@ -396,12 +374,6 @@ void SkRecorder::didSetMatrix(const SkMatrix& matrix) {
 
 void SkRecorder::didTranslate(SkScalar dx, SkScalar dy) {
     APPEND(Translate, dx, dy);
-}
-
-void SkRecorder::didTranslateZ(SkScalar z) {
-#ifdef SK_EXPERIMENTAL_SHADOWING
-    APPEND(TranslateZ, z);
-#endif
 }
 
 void SkRecorder::onClipRect(const SkRect& rect, SkClipOp op, ClipEdgeStyle edgeStyle) {

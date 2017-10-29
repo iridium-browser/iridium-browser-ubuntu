@@ -37,7 +37,7 @@ UI.SettingsUI = {};
  * @return {!Element}
  */
 UI.SettingsUI.createSettingCheckbox = function(name, setting, omitParagraphElement, tooltip) {
-  var label = UI.createCheckboxLabel(name);
+  var label = UI.CheckboxLabel.create(name);
   if (tooltip)
     label.title = tooltip;
 
@@ -51,6 +51,43 @@ UI.SettingsUI.createSettingCheckbox = function(name, setting, omitParagraphEleme
   var p = createElement('p');
   p.appendChild(label);
   return p;
+};
+
+/**
+ * @param {string} name
+ * @param {!Array<!{text: string, value: *, raw: (boolean|undefined)}>} options
+ * @param {!Common.Setting} setting
+ * @return {!Element}
+ */
+UI.SettingsUI.createSettingSelect = function(name, options, setting) {
+  var p = createElement('p');
+  p.createChild('label').textContent = name;
+  var select = p.createChild('select', 'chrome-select');
+
+  for (var i = 0; i < options.length; ++i) {
+    // The "raw" flag indicates text is non-i18n-izable.
+    var option = options[i];
+    var optionName = option.raw ? option.text : Common.UIString(option.text);
+    select.add(new Option(optionName, option.value));
+  }
+
+  setting.addChangeListener(settingChanged);
+  settingChanged();
+  select.addEventListener('change', selectChanged, false);
+  return p;
+
+  function settingChanged() {
+    var newValue = setting.get();
+    for (var i = 0; i < options.length; i++) {
+      if (options[i].value === newValue)
+        select.selectedIndex = i;
+    }
+  }
+
+  function selectChanged() {
+    // Don't use event.target.value to avoid conversion of the value to string.
+    setting.set(options[select.selectedIndex].value);
+  }
 };
 
 /**
@@ -87,16 +124,24 @@ UI.SettingsUI.createCustomSetting = function(name, element) {
 
 /**
  * @param {!Common.Setting} setting
- * @return {!Element}
+ * @return {?Element}
  */
-UI.SettingsUI.createSettingFieldset = function(setting) {
-  var fieldset = createElement('fieldset');
-  fieldset.disabled = !setting.get();
-  setting.addChangeListener(settingChanged);
-  return fieldset;
-
-  function settingChanged() {
-    fieldset.disabled = !setting.get();
+UI.SettingsUI.createControlForSetting = function(setting) {
+  if (!setting.extension())
+    return null;
+  var descriptor = setting.extension().descriptor();
+  var uiTitle = Common.UIString(setting.title() || '');
+  switch (descriptor['settingType']) {
+    case 'boolean':
+      return UI.SettingsUI.createSettingCheckbox(uiTitle, setting);
+    case 'enum':
+      if (Array.isArray(descriptor['options']))
+        return UI.SettingsUI.createSettingSelect(uiTitle, descriptor['options'], setting);
+      console.error('Enum setting defined without options');
+      return null;
+    default:
+      console.error('Invalid setting type: ' + descriptor['settingType']);
+      return null;
   }
 };
 

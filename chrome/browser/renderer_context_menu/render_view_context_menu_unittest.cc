@@ -49,7 +49,7 @@ namespace {
 static content::ContextMenuParams CreateParams(int contexts) {
   content::ContextMenuParams rv;
   rv.is_editable = false;
-  rv.media_type = blink::WebContextMenuData::MediaTypeNone;
+  rv.media_type = blink::WebContextMenuData::kMediaTypeNone;
   rv.page_url = GURL("http://test.page/");
 
   static const base::char16 selected_text[] = { 's', 'e', 'l', 0 };
@@ -64,17 +64,17 @@ static content::ContextMenuParams CreateParams(int contexts) {
 
   if (contexts & MenuItem::IMAGE) {
     rv.src_url = GURL("http://test.image/");
-    rv.media_type = blink::WebContextMenuData::MediaTypeImage;
+    rv.media_type = blink::WebContextMenuData::kMediaTypeImage;
   }
 
   if (contexts & MenuItem::VIDEO) {
     rv.src_url = GURL("http://test.video/");
-    rv.media_type = blink::WebContextMenuData::MediaTypeVideo;
+    rv.media_type = blink::WebContextMenuData::kMediaTypeVideo;
   }
 
   if (contexts & MenuItem::AUDIO) {
     rv.src_url = GURL("http://test.audio/");
-    rv.media_type = blink::WebContextMenuData::MediaTypeAudio;
+    rv.media_type = blink::WebContextMenuData::kMediaTypeAudio;
   }
 
   if (contexts & MenuItem::FRAME)
@@ -101,6 +101,12 @@ std::unique_ptr<TestRenderViewContextMenu> CreateContextMenu(
 class RenderViewContextMenuTest : public testing::Test {
  protected:
   RenderViewContextMenuTest() = default;
+  // If the test uses a TestExtensionEnvironment, which provides a MessageLoop,
+  // it needs to be passed to the constructor so that it exists before the
+  // RenderViewHostTestEnabler which needs to use the MessageLoop.
+  explicit RenderViewContextMenuTest(
+      std::unique_ptr<extensions::TestExtensionEnvironment> env)
+      : environment_(std::move(env)) {}
 
   // Proxy defined here to minimize friend classes in RenderViewContextMenu
   static bool ExtensionContextAndPatternMatch(
@@ -123,6 +129,9 @@ class RenderViewContextMenuTest : public testing::Test {
     return base::MakeUnique<MenuItem>(id, "Added by an extension", false, true,
                                       type, contexts);
   }
+
+ protected:
+  std::unique_ptr<extensions::TestExtensionEnvironment> environment_;
 
  private:
   content::RenderViewHostTestEnabler rvh_test_enabler_;
@@ -301,7 +310,9 @@ TEST_F(RenderViewContextMenuTest, TargetIgnoredForSelectionOnImage) {
 
 class RenderViewContextMenuExtensionsTest : public RenderViewContextMenuTest {
  protected:
-  RenderViewContextMenuExtensionsTest() = default;
+  RenderViewContextMenuExtensionsTest()
+      : RenderViewContextMenuTest(
+            base::MakeUnique<extensions::TestExtensionEnvironment>()) {}
 
   void SetUp() override {
     RenderViewContextMenuTest::SetUp();
@@ -314,14 +325,11 @@ class RenderViewContextMenuExtensionsTest : public RenderViewContextMenuTest {
     RenderViewContextMenuTest::TearDown();
   }
 
-  TestingProfile* profile() const { return environment_.profile(); }
+  TestingProfile* profile() const { return environment_->profile(); }
 
-  extensions::TestExtensionEnvironment& environment() {
-    return environment_;
-  }
+  extensions::TestExtensionEnvironment& environment() { return *environment_; }
 
  protected:
-  extensions::TestExtensionEnvironment environment_;
   std::unique_ptr<ProtocolHandlerRegistry> registry_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewContextMenuExtensionsTest);
@@ -380,6 +388,18 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
     return ::CreateContextMenu(web_contents(), registry_.get());
   }
 
+  // Returns a test context menu for a chrome:// url not permitted to open in
+  // incognito mode.
+  std::unique_ptr<TestRenderViewContextMenu> CreateContextMenuOnChromeLink() {
+    content::ContextMenuParams params = CreateParams(MenuItem::LINK);
+    params.unfiltered_link_url = params.link_url = GURL("chrome://settings");
+    std::unique_ptr<TestRenderViewContextMenu> menu(
+        new TestRenderViewContextMenu(web_contents()->GetMainFrame(), params));
+    menu->set_protocol_handler_registry(registry_.get());
+    menu->Init();
+    return menu;
+  }
+
   void AppendImageItems(TestRenderViewContextMenu* menu) {
     menu->AppendImageItems();
   }
@@ -387,8 +407,6 @@ class RenderViewContextMenuPrefsTest : public ChromeRenderViewHostTestHarness {
   void SetupDataReductionProxy(bool enable_data_reduction_proxy) {
     drp_test_context_ =
         data_reduction_proxy::DataReductionProxyTestContext::Builder()
-            .WithParamsFlags(
-                 data_reduction_proxy::DataReductionProxyParams::kPromoAllowed)
             .WithMockConfig()
             .SkipSettingsInitialization()
             .Build();
@@ -450,6 +468,17 @@ TEST_F(RenderViewContextMenuPrefsTest,
   IncognitoModePrefs::SetAvailability(profile()->GetPrefs(),
                                       IncognitoModePrefs::DISABLED);
   menu = CreateContextMenu();
+  ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD));
+  EXPECT_FALSE(
+      menu->IsCommandIdEnabled(IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD));
+}
+
+// Verifies Incognito Mode is not enabled for links disallowed in Incognito.
+TEST_F(RenderViewContextMenuPrefsTest,
+       DisableOpenInIncognitoWindowForDisallowedUrls) {
+  std::unique_ptr<TestRenderViewContextMenu> menu(
+      CreateContextMenuOnChromeLink());
+
   ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD));
   EXPECT_FALSE(
       menu->IsCommandIdEnabled(IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD));

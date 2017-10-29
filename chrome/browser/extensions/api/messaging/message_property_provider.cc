@@ -11,8 +11,9 @@
 #include "base/strings/string_piece.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
-#include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/storage_partition.h"
 #include "crypto/ec_private_key.h"
 #include "extensions/common/api/runtime.h"
 #include "net/base/completion_callback.h"
@@ -27,22 +28,25 @@ namespace extensions {
 
 MessagePropertyProvider::MessagePropertyProvider() {}
 
-void MessagePropertyProvider::GetChannelID(Profile* profile,
-    const GURL& source_url, const ChannelIDCallback& reply) {
+void MessagePropertyProvider::GetChannelID(
+    content::BrowserContext* browser_context,
+    const GURL& source_url,
+    const ChannelIDCallback& reply) {
   if (!source_url.is_valid()) {
     // This isn't a real URL, so there's no sense in looking for a channel ID
     // for it. Dispatch with an empty tls channel ID.
     reply.Run(std::string());
     return;
   }
+
   scoped_refptr<net::URLRequestContextGetter> request_context_getter(
-      profile->GetRequestContext());
-  content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&MessagePropertyProvider::GetChannelIDOnIOThread,
-                 base::ThreadTaskRunnerHandle::Get(),
-                 request_context_getter,
-                 source_url.host(),
-                 reply));
+      content::BrowserContext::GetDefaultStoragePartition(browser_context)
+          ->GetURLRequestContext());
+  content::BrowserThread::PostTask(
+      content::BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&MessagePropertyProvider::GetChannelIDOnIOThread,
+                     base::ThreadTaskRunnerHandle::Get(),
+                     request_context_getter, source_url.host(), reply));
 }
 
 // Helper struct to bind the memory addresses that will be written to by
@@ -101,7 +105,7 @@ void MessagePropertyProvider::GotChannelID(
   }
   std::string jwk_str;
   base::JSONWriter::Write(jwk_value, &jwk_str);
-  original_task_runner->PostTask(FROM_HERE, base::Bind(reply, jwk_str));
+  original_task_runner->PostTask(FROM_HERE, base::BindOnce(reply, jwk_str));
 }
 
 }  // namespace extensions

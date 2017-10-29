@@ -9,19 +9,19 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.text.SpannableString;
-import android.text.style.TypefaceSpan;
+import android.text.style.TextAppearanceSpan;
 import android.view.View;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.preferences.SearchEnginePreference;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.snackbar.Snackbar;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
+import org.chromium.chrome.browser.util.AccessibilityUtil;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.text.SpanApplier;
 import org.chromium.ui.text.SpanApplier.SpanInfo;
@@ -74,13 +74,14 @@ public class GeolocationSnackbarController implements SnackbarController {
         }
 
         Uri searchUri = Uri.parse(TemplateUrlService.getInstance().getUrlForSearchQuery("foo"));
-        TypefaceSpan robotoMediumSpan = new TypefaceSpan("sans-serif-medium");
+        TextAppearanceSpan robotoMediumSpan =
+                new TextAppearanceSpan(context, R.style.RobotoMediumStyle);
         String messageWithoutSpans = context.getResources().getString(
                 R.string.omnibox_geolocation_disclosure, "<b>" + searchUri.getHost() + "</b>");
         SpannableString message = SpanApplier.applySpans(messageWithoutSpans,
                 new SpanInfo("<b>", "</b>", robotoMediumSpan));
         String settings = context.getResources().getString(R.string.preferences);
-        int durationMs = DeviceClassManager.isAccessibilityModeEnabled(view.getContext())
+        int durationMs = AccessibilityUtil.isAccessibilityEnabled()
                 ? ACCESSIBILITY_SNACKBAR_DURATION_MS : SNACKBAR_DURATION_MS;
         final GeolocationSnackbarController controller = new GeolocationSnackbarController();
         final Snackbar snackbar = Snackbar

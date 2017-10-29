@@ -4,7 +4,6 @@
 
 #include "chrome/browser/safe_browsing/certificate_reporting_service.h"
 
-#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/test/histogram_tester.h"
@@ -12,18 +11,20 @@
 #include "base/test/thread_test_helper.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/certificate_reporting_service_factory.h"
 #include "chrome/browser/safe_browsing/certificate_reporting_service_test_utils.h"
+#include "chrome/browser/ssl/cert_report_helper.h"
 #include "chrome/browser/ssl/certificate_reporting_test_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/certificate_reporting/error_report.h"
 #include "components/prefs/pref_service.h"
-#include "components/variations/variations_switches.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/variations/variations_params_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -64,7 +65,9 @@ namespace safe_browsing {
 class CertificateReportingServiceBrowserTest : public InProcessBrowserTest {
  public:
   CertificateReportingServiceBrowserTest()
-      : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {}
+      : https_server_(net::EmbeddedTestServer::TYPE_HTTPS) {
+    CertReportHelper::SetFakeOfficialBuildForTesting();
+  }
 
   void SetUpOnMainThread() override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -84,13 +87,12 @@ class CertificateReportingServiceBrowserTest : public InProcessBrowserTest {
         ->SetServiceResetCallbackForTesting(
             base::Bind(&CertificateReportingServiceObserver::OnServiceReset,
                        base::Unretained(&service_observer_)));
-    InProcessBrowserTest::SetUpOnMainThread();
   }
 
   void TearDownOnMainThread() override {
     test_helper()->ExpectNoRequests(service());
     content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
-                                     base::Bind(&CleanUpOnIOThread));
+                                     base::BindOnce(&CleanUpOnIOThread));
     EXPECT_GE(num_expected_failed_report_, 0)
         << "Don't forget to set expected failed report count.";
     // Check the histogram as the last thing. This makes sure no in-flight
@@ -105,13 +107,10 @@ class CertificateReportingServiceBrowserTest : public InProcessBrowserTest {
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(
-        switches::kForceFieldTrials,
-        "ReportCertificateErrors/ShowAndPossiblySend/");
     // Setting the sending threshold to 1.0 ensures reporting is enabled.
-    command_line->AppendSwitchASCII(
-        variations::switches::kForceFieldTrialParams,
-        "ReportCertificateErrors.ShowAndPossiblySend:sendingThreshold/1.0");
+    variations::testing::VariationParamsManager::AppendVariationParams(
+        "ReportCertificateErrors", "ShowAndPossiblySend",
+        {{"sendingThreshold", "1.0"}}, command_line);
   }
 
   CertificateReportingServiceTestHelper* test_helper() { return &test_helper_; }
@@ -446,6 +445,15 @@ IN_PROC_BROWSER_TEST_F(CertificateReportingServiceBrowserTest,
   // Send pending reports. report2 should be discarded since it's too old. No
   // other reports remain. If any report is sent, test teardown will catch it.
   SendPendingReports();
+
+  // Let all reports succeed and send a single report. This is to make sure
+  // that any (incorrectly) pending reports are dropped before the test tear
+  // down.
+  test_helper()->SetFailureMode(certificate_reporting_test_utils::
+                                    ReportSendingResult::REPORTS_SUCCESSFUL);
+  SendReport("report3");
+  test_helper()->WaitForRequestsDestroyed(
+      ReportExpectation::Successful({{"report3", RetryStatus::NOT_RETRIED}}));
 }
 
 // CertificateReportingService should drop old reports from its pending report

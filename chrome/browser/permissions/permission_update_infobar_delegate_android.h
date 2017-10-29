@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_PERMISSIONS_PERMISSION_UPDATE_INFOBAR_DELEGATE_ANDROID_H_
 #define CHROME_BROWSER_PERMISSIONS_PERMISSION_UPDATE_INFOBAR_DELEGATE_ANDROID_H_
 
-#include <jni.h>
 #include <string>
 #include <vector>
 
@@ -31,6 +30,13 @@ class PermissionUpdateInfoBarDelegate : public ConfirmInfoBarDelegate {
   // ContentSettingsTypes passed in. Returns the infobar if it was successfully
   // added.
   //
+  // This function can only be called with one of
+  // CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+  // CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA or
+  // CONTENT_SETTINGS_TYPE_GEOLOCATION, or with both
+  // CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC and
+  // CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA.
+  //
   // The |callback| will not be triggered if this is deleted.
   static infobars::InfoBar* Create(
       content::WebContents* web_contents,
@@ -53,8 +59,6 @@ class PermissionUpdateInfoBarDelegate : public ConfirmInfoBarDelegate {
   static bool ShouldShowPermissionInfobar(
       content::WebContents* web_contents,
       const std::vector<ContentSettingsType>& content_settings_types);
-
-  static bool RegisterPermissionUpdateInfoBarDelegate(JNIEnv* env);
 
   void OnPermissionResult(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj,

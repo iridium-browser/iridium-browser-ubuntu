@@ -19,6 +19,7 @@
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/http/http_response_headers.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
 #include "storage/browser/blob/blob_storage_context.h"
@@ -78,10 +79,12 @@ class LinkHeaderServiceWorkerTest : public ::testing::Test {
 
   void CreateDocumentProviderHost() {
     // An empty host.
+    remote_endpoints_.emplace_back();
     std::unique_ptr<ServiceWorkerProviderHost> host =
         CreateProviderHostForWindow(render_process_id(), kMockProviderId,
                                     true /* is_parent_frame_secure */,
-                                    context()->AsWeakPtr());
+                                    context()->AsWeakPtr(),
+                                    &remote_endpoints_.back());
     provider_host_ = host->AsWeakPtr();
     EXPECT_FALSE(
         context()->GetProviderHost(host->process_id(), host->provider_id()));
@@ -90,10 +93,12 @@ class LinkHeaderServiceWorkerTest : public ::testing::Test {
 
   void CreateInsecureDocumentProviderHost() {
     // An empty host.
+    remote_endpoints_.emplace_back();
     std::unique_ptr<ServiceWorkerProviderHost> host =
         CreateProviderHostForWindow(render_process_id(), kMockProviderId,
                                     false /* is_parent_frame_secure */,
-                                    context()->AsWeakPtr());
+                                    context()->AsWeakPtr(),
+                                    &remote_endpoints_.back());
     provider_host_ = host->AsWeakPtr();
     EXPECT_FALSE(
         context()->GetProviderHost(host->process_id(), host->provider_id()));
@@ -101,18 +106,21 @@ class LinkHeaderServiceWorkerTest : public ::testing::Test {
   }
 
   void CreateServiceWorkerProviderHost() {
+    remote_endpoints_.emplace_back();
     std::unique_ptr<ServiceWorkerProviderHost> host =
         CreateProviderHostForServiceWorkerContext(
             render_process_id(), kMockProviderId,
-            true /* is_parent_frame_secure */, context()->AsWeakPtr());
+            true /* is_parent_frame_secure */, context()->AsWeakPtr(),
+            &remote_endpoints_.back());
     provider_host_ = host->AsWeakPtr();
     EXPECT_FALSE(
         context()->GetProviderHost(host->process_id(), host->provider_id()));
     context()->AddProviderHost(std::move(host));
 
     scoped_refptr<ServiceWorkerRegistration> registration =
-        new ServiceWorkerRegistration(GURL("https://host/scope"), 1L,
-                                      context()->AsWeakPtr());
+        new ServiceWorkerRegistration(
+            ServiceWorkerRegistrationOptions(GURL("https://host/scope")), 1L,
+            context()->AsWeakPtr());
     scoped_refptr<ServiceWorkerVersion> version = new ServiceWorkerVersion(
         registration.get(), GURL("https://host/script.js"), 1L,
         context()->AsWeakPtr());
@@ -121,9 +129,11 @@ class LinkHeaderServiceWorkerTest : public ::testing::Test {
   }
 
   std::unique_ptr<net::URLRequest> CreateRequest(const GURL& request_url,
-                                                 ResourceType resource_type) {
+                                                 ResourceType resource_type,
+                                                 int provider_id) {
     std::unique_ptr<net::URLRequest> request = request_context_.CreateRequest(
-        request_url, net::DEFAULT_PRIORITY, &request_delegate_);
+        request_url, net::DEFAULT_PRIORITY, &request_delegate_,
+        TRAFFIC_ANNOTATION_FOR_TESTS);
     ResourceRequestInfo::AllocateForTesting(
         request.get(), resource_type, &resource_context_,
         -1 /* render_process_id */, -1 /* render_view_id */,
@@ -135,18 +145,19 @@ class LinkHeaderServiceWorkerTest : public ::testing::Test {
 
     ServiceWorkerRequestHandler::InitializeHandler(
         request.get(), context_wrapper(), &blob_storage_context_,
-        render_process_id(), kMockProviderId, false /* skip_service_worker */,
+        render_process_id(), provider_id, false /* skip_service_worker */,
         FETCH_REQUEST_MODE_NO_CORS, FETCH_CREDENTIALS_MODE_OMIT,
-        FetchRedirectMode::FOLLOW_MODE, resource_type,
-        REQUEST_CONTEXT_TYPE_HYPERLINK, REQUEST_CONTEXT_FRAME_TYPE_TOP_LEVEL,
-        nullptr);
+        FetchRedirectMode::FOLLOW_MODE, std::string() /* integrity */,
+        resource_type, REQUEST_CONTEXT_TYPE_HYPERLINK,
+        REQUEST_CONTEXT_FRAME_TYPE_TOP_LEVEL, nullptr);
 
     return request;
   }
 
   std::unique_ptr<net::URLRequest> CreateSubresourceRequest(
-      const GURL& request_url) {
-    return CreateRequest(request_url, RESOURCE_TYPE_SCRIPT);
+      const GURL& request_url,
+      int provider_id) {
+    return CreateRequest(request_url, RESOURCE_TYPE_SCRIPT, provider_id);
   }
 
   std::vector<ServiceWorkerRegistrationInfo> GetRegistrations() {
@@ -159,7 +170,7 @@ class LinkHeaderServiceWorkerTest : public ::testing::Test {
     return registrations;
   }
 
- private:
+ protected:
   TestBrowserThreadBundle thread_bundle_;
   std::unique_ptr<EmbeddedWorkerTestHelper> helper_;
   net::TestURLRequestContext request_context_;
@@ -167,12 +178,15 @@ class LinkHeaderServiceWorkerTest : public ::testing::Test {
   MockResourceContext resource_context_;
   base::WeakPtr<ServiceWorkerProviderHost> provider_host_;
   storage::BlobStorageContext blob_storage_context_;
+  std::vector<ServiceWorkerRemoteProviderEndpoint> remote_endpoints_;
 };
 
 TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_Basic) {
   CreateDocumentProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foo/bar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foo/bar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<../foo.js>; rel=serviceworker", context_wrapper());
   base::RunLoop().RunUntilIdle();
 
@@ -186,7 +200,9 @@ TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_Basic) {
 TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_ScopeWithFragment) {
   CreateDocumentProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foo/bar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foo/bar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<../bar.js>; rel=serviceworker; scope=\"scope#ref\"", context_wrapper());
   base::RunLoop().RunUntilIdle();
 
@@ -201,7 +217,9 @@ TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_ScopeWithFragment) {
 TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_ScopeAbsoluteUrl) {
   CreateDocumentProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foo/bar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foo/bar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<bar.js>; rel=serviceworker; "
       "scope=\"https://example.com:443/foo/bar/scope\"",
       context_wrapper());
@@ -218,7 +236,9 @@ TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_ScopeAbsoluteUrl) {
 TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_ScopeDifferentOrigin) {
   CreateDocumentProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foobar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foobar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<bar.js>; rel=serviceworker; scope=\"https://google.com/scope\"",
       context_wrapper());
   base::RunLoop().RunUntilIdle();
@@ -230,7 +250,9 @@ TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_ScopeDifferentOrigin) {
 TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_ScopeUrlEncodedSlash) {
   CreateDocumentProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foobar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foobar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<bar.js>; rel=serviceworker; scope=\"./foo%2Fbar\"", context_wrapper());
   base::RunLoop().RunUntilIdle();
 
@@ -242,7 +264,9 @@ TEST_F(LinkHeaderServiceWorkerTest,
        InstallServiceWorker_ScriptUrlEncodedSlash) {
   CreateDocumentProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foobar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foobar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<foo%2Fbar.js>; rel=serviceworker", context_wrapper());
   base::RunLoop().RunUntilIdle();
 
@@ -253,7 +277,9 @@ TEST_F(LinkHeaderServiceWorkerTest,
 TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_ScriptAbsoluteUrl) {
   CreateDocumentProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foobar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foobar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<https://example.com/bar.js>; rel=serviceworker; scope=foo",
       context_wrapper());
   base::RunLoop().RunUntilIdle();
@@ -269,7 +295,9 @@ TEST_F(LinkHeaderServiceWorkerTest,
        InstallServiceWorker_ScriptDifferentOrigin) {
   CreateDocumentProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foobar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foobar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<https://google.com/bar.js>; rel=serviceworker; scope=foo",
       context_wrapper());
   base::RunLoop().RunUntilIdle();
@@ -281,7 +309,9 @@ TEST_F(LinkHeaderServiceWorkerTest,
 TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_MultipleWorkers) {
   CreateDocumentProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foobar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foobar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<bar.js>; rel=serviceworker; scope=foo, <baz.js>; "
       "rel=serviceworker; scope=scope",
       context_wrapper());
@@ -301,7 +331,9 @@ TEST_F(LinkHeaderServiceWorkerTest,
        InstallServiceWorker_ValidAndInvalidValues) {
   CreateDocumentProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foobar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foobar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<https://google.com/bar.js>; rel=serviceworker; scope=foo, <baz.js>; "
       "rel=serviceworker; scope=scope",
       context_wrapper());
@@ -316,8 +348,8 @@ TEST_F(LinkHeaderServiceWorkerTest,
 
 TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_InsecureContext) {
   CreateDocumentProviderHost();
-  std::unique_ptr<net::URLRequest> request =
-      CreateSubresourceRequest(GURL("https://example.com/foo/bar/"));
+  std::unique_ptr<net::URLRequest> request = CreateSubresourceRequest(
+      GURL("https://example.com/foo/bar/"), provider_host()->provider_id());
   ResourceRequestInfoImpl::ForRequest(request.get())
       ->set_initiated_in_secure_context_for_testing(false);
   ProcessLinkHeaderForRequest(request.get(), "<../foo.js>; rel=serviceworker",
@@ -331,8 +363,9 @@ TEST_F(LinkHeaderServiceWorkerTest, InstallServiceWorker_InsecureContext) {
 TEST_F(LinkHeaderServiceWorkerTest,
        InstallServiceWorker_NavigationFromInsecureContextToSecureContext) {
   CreateDocumentProviderHost();
-  std::unique_ptr<net::URLRequest> request = CreateRequest(
-      GURL("https://example.com/foo/bar/"), RESOURCE_TYPE_MAIN_FRAME);
+  std::unique_ptr<net::URLRequest> request =
+      CreateRequest(GURL("https://example.com/foo/bar/"),
+                    RESOURCE_TYPE_MAIN_FRAME, provider_host()->provider_id());
   ResourceRequestInfoImpl::ForRequest(request.get())
       ->set_initiated_in_secure_context_for_testing(false);
 
@@ -353,11 +386,11 @@ TEST_F(LinkHeaderServiceWorkerTest,
        InstallServiceWorker_NavigationToInsecureContext) {
   CreateDocumentProviderHost();
   provider_host()->SetDocumentUrl(GURL("http://example.com/foo/bar/"));
-  ProcessLinkHeaderForRequest(CreateRequest(GURL("http://example.com/foo/bar/"),
-                                            RESOURCE_TYPE_MAIN_FRAME)
-                                  .get(),
-                              "<../foo.js>; rel=serviceworker",
-                              context_wrapper());
+  ProcessLinkHeaderForRequest(
+      CreateRequest(GURL("http://example.com/foo/bar/"),
+                    RESOURCE_TYPE_MAIN_FRAME, provider_host()->provider_id())
+          .get(),
+      "<../foo.js>; rel=serviceworker", context_wrapper());
   base::RunLoop().RunUntilIdle();
 
   std::vector<ServiceWorkerRegistrationInfo> registrations = GetRegistrations();
@@ -370,7 +403,7 @@ TEST_F(LinkHeaderServiceWorkerTest,
   provider_host()->SetDocumentUrl(GURL("https://example.com/foo/bar/"));
   ProcessLinkHeaderForRequest(
       CreateRequest(GURL("https://example.com/foo/bar/"),
-                    RESOURCE_TYPE_MAIN_FRAME)
+                    RESOURCE_TYPE_MAIN_FRAME, provider_host()->provider_id())
           .get(),
       "<../foo.js>; rel=serviceworker", context_wrapper());
   base::RunLoop().RunUntilIdle();
@@ -383,7 +416,9 @@ TEST_F(LinkHeaderServiceWorkerTest,
        InstallServiceWorker_FromWorkerWithoutControllees) {
   CreateServiceWorkerProviderHost();
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foo/bar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foo/bar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<../foo.js>; rel=serviceworker", context_wrapper());
   base::RunLoop().RunUntilIdle();
 
@@ -395,14 +430,18 @@ TEST_F(LinkHeaderServiceWorkerTest,
        InstallServiceWorker_FromWorkerWithControllees) {
   CreateServiceWorkerProviderHost();
 
+  remote_endpoints_.emplace_back();
   std::unique_ptr<ServiceWorkerProviderHost> controllee =
       CreateProviderHostForWindow(render_process_id(), kMockProviderId,
                                   true /* is_parent_frame_secure */,
-                                  context()->AsWeakPtr());
+                                  context()->AsWeakPtr(),
+                                  &remote_endpoints_.back());
   provider_host()->running_hosted_version()->AddControllee(controllee.get());
 
   ProcessLinkHeaderForRequest(
-      CreateSubresourceRequest(GURL("https://example.com/foo/bar/")).get(),
+      CreateSubresourceRequest(GURL("https://example.com/foo/bar/"),
+                               provider_host()->provider_id())
+          .get(),
       "<../foo.js>; rel=serviceworker", context_wrapper());
   base::RunLoop().RunUntilIdle();
 

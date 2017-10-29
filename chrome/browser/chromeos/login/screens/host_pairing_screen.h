@@ -35,6 +35,10 @@ class HostPairingScreen
     // Called when a network configuration has been received, and should be
     // used on this device.
     virtual void AddNetworkRequested(const std::string& onc_spec) = 0;
+
+    // Called when a reboot message has been received, and should reboot this
+    // device.
+    virtual void RebootHostRequested() = 0;
   };
 
   HostPairingScreen(BaseScreenDelegate* base_screen_delegate,
@@ -61,12 +65,15 @@ class HostPairingScreen
                               const std::string& keyboard_layout) override;
   void AddNetworkRequested(const std::string& onc_spec) override;
   void EnrollHostRequested(const std::string& auth_token) override;
+  void RebootHostRequested() override;
 
   // Overridden from ControllerPairingView::Delegate:
   void OnViewDestroyed(HostPairingScreenView* view) override;
 
   // Overridden from EnterpriseEnrollmentHelper::EnrollmentStatusConsumer:
   void OnAuthError(const GoogleServiceAuthError& error) override;
+  void OnMultipleLicensesAvailable(
+      const EnrollmentLicenseMap& licenses) override;
   void OnEnrollmentError(policy::EnrollmentStatus status) override;
   void OnOtherError(EnterpriseEnrollmentHelper::OtherError error) override;
   void OnDeviceEnrolled(const std::string& additional_token) override;
@@ -85,6 +92,11 @@ class HostPairingScreen
   pairing_chromeos::HostPairingController* remora_controller_ = nullptr;
 
   std::unique_ptr<EnterpriseEnrollmentHelper> enrollment_helper_;
+
+  // Describes the error code of an enrollment operation. For the format, see
+  // the definition of |error_code_| in bluetooth_host_pairing_controller.h.
+  int enrollment_error_code_ = 0;
+  std::string enrollment_error_string_;
 
   // Current stage of pairing process.
   Stage current_stage_ = pairing_chromeos::HostPairingController::STAGE_NONE;

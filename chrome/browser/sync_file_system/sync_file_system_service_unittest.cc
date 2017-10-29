@@ -13,6 +13,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/sync_file_system/local/canned_syncable_file_system.h"
 #include "chrome/browser/sync_file_system/local/local_file_sync_context.h"
@@ -104,7 +105,7 @@ ACTION_P3(NotifyStateAndCallback,
   mock_remote_service->NotifyRemoteServiceStateUpdated(
       service_state, "Test event.");
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(arg1, operation_status));
+      FROM_HERE, base::BindOnce(arg1, operation_status));
 }
 
 ACTION_P(RecordState, states) {
@@ -112,13 +113,13 @@ ACTION_P(RecordState, states) {
 }
 
 ACTION_P(MockStatusCallback, status) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(arg4, status));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                base::BindOnce(arg4, status));
 }
 
 ACTION_P2(MockSyncFileCallback, status, url) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(arg0, status, url));
+      FROM_HERE, base::BindOnce(arg0, status, url));
 }
 
 ACTION(InvokeCompletionClosure) {
@@ -128,15 +129,14 @@ ACTION(InvokeCompletionClosure) {
 class SyncFileSystemServiceTest : public testing::Test {
  protected:
   SyncFileSystemServiceTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::REAL_FILE_THREAD |
-                       content::TestBrowserThreadBundle::REAL_IO_THREAD) {}
+      : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD) {}
 
   void SetUp() override {
     in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
     file_system_.reset(new CannedSyncableFileSystem(
         GURL(kOrigin), in_memory_env_.get(),
         BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE)));
+        base::CreateSingleThreadTaskRunnerWithTraits({base::MayBlock()})));
 
     std::unique_ptr<LocalFileSyncService> local_service =
         LocalFileSyncService::CreateForTesting(&profile_, in_memory_env_.get());
@@ -168,7 +168,7 @@ class SyncFileSystemServiceTest : public testing::Test {
     sync_service_->Shutdown();
     file_system_->TearDown();
     RevokeSyncableFileSystem();
-    content::RunAllPendingInMessageLoop(BrowserThread::FILE);
+    base::TaskScheduler::GetInstance()->FlushForTesting();
   }
 
   void InitializeApp() {
@@ -424,12 +424,11 @@ TEST_F(SyncFileSystemServiceTest, SimpleSyncFlowWithFileBusy) {
   // Start a local operation on the same file (to make it BUSY).
   base::RunLoop verify_file_error_run_loop;
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&CannedSyncableFileSystem::DoCreateFile,
-                 base::Unretained(file_system_.get()),
-                 kFile, base::Bind(&VerifyFileError,
-                                   verify_file_error_run_loop.QuitClosure())));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&CannedSyncableFileSystem::DoCreateFile,
+                     base::Unretained(file_system_.get()), kFile,
+                     base::Bind(&VerifyFileError,
+                                verify_file_error_run_loop.QuitClosure())));
 
   run_loop.Run();
 

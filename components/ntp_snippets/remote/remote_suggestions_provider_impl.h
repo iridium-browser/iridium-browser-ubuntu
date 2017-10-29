@@ -17,13 +17,16 @@
 #include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
-#include "components/image_fetcher/image_fetcher_delegate.h"
 #include "components/ntp_snippets/category.h"
 #include "components/ntp_snippets/category_status.h"
 #include "components/ntp_snippets/content_suggestion.h"
 #include "components/ntp_snippets/content_suggestions_provider.h"
+#include "components/ntp_snippets/remote/cached_image_fetcher.h"
+#include "components/ntp_snippets/remote/json_to_categories.h"
+#include "components/ntp_snippets/remote/prefetched_pages_tracker.h"
 #include "components/ntp_snippets/remote/remote_suggestion.h"
 #include "components/ntp_snippets/remote/remote_suggestions_fetcher.h"
 #include "components/ntp_snippets/remote/remote_suggestions_provider.h"
@@ -34,12 +37,7 @@
 class PrefRegistrySimple;
 class PrefService;
 
-namespace gfx {
-class Image;
-}  // namespace gfx
-
 namespace image_fetcher {
-class ImageDecoder;
 class ImageFetcher;
 }  // namespace image_fetcher
 
@@ -48,59 +46,6 @@ namespace ntp_snippets {
 class CategoryRanker;
 class RemoteSuggestionsDatabase;
 class RemoteSuggestionsScheduler;
-
-// CachedImageFetcher takes care of fetching images from the network and caching
-// them in the database.
-// TODO(tschumann): Move into a separate library and inject the
-// CachedImageFetcher into the RemoteSuggestionsProvider. This allows us to get
-// rid of exposing this member for testing and lets us test the caching logic
-// separately.
-class CachedImageFetcher : public image_fetcher::ImageFetcherDelegate {
- public:
-  // |pref_service| and |database| need to outlive the created image fetcher
-  // instance.
-  CachedImageFetcher(std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
-                     std::unique_ptr<image_fetcher::ImageDecoder> image_decoder,
-                     PrefService* pref_service,
-                     RemoteSuggestionsDatabase* database);
-  ~CachedImageFetcher() override;
-
-  // Fetches the image for a suggestion. The fetcher will first issue a lookup
-  // to the underlying cache with a fallback to the network.
-  void FetchSuggestionImage(const ContentSuggestion::ID& suggestion_id,
-                            const GURL& image_url,
-                            const ImageFetchedCallback& callback);
-
- private:
-  // image_fetcher::ImageFetcherDelegate implementation.
-  void OnImageDataFetched(const std::string& id_within_category,
-                          const std::string& image_data) override;
-
-  void OnImageDecodingDone(const ImageFetchedCallback& callback,
-                           const std::string& id_within_category,
-                           const gfx::Image& image);
-  void OnImageFetchedFromDatabase(
-      const ImageFetchedCallback& callback,
-      const ContentSuggestion::ID& suggestion_id,
-      const GURL& image_url,
-      // SnippetImageCallback requires by-value (not const ref).
-      std::string data);
-  void OnImageDecodedFromDatabase(const ImageFetchedCallback& callback,
-                                  const ContentSuggestion::ID& suggestion_id,
-                                  const GURL& url,
-                                  const gfx::Image& image);
-  void FetchImageFromNetwork(const ContentSuggestion::ID& suggestion_id,
-                             const GURL& url,
-                             const ImageFetchedCallback& callback);
-
-  std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher_;
-  std::unique_ptr<image_fetcher::ImageDecoder> image_decoder_;
-  RemoteSuggestionsDatabase* database_;
-  // Request throttler for limiting requests to thumbnail images.
-  RequestThrottler thumbnail_requests_throttler_;
-
-  DISALLOW_COPY_AND_ASSIGN(CachedImageFetcher);
-};
 
 // Retrieves fresh content data (articles) from the server, stores them and
 // provides them as content suggestions.
@@ -118,11 +63,12 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
       PrefService* pref_service,
       const std::string& application_language_code,
       CategoryRanker* category_ranker,
+      RemoteSuggestionsScheduler* scheduler,
       std::unique_ptr<RemoteSuggestionsFetcher> suggestions_fetcher,
       std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
-      std::unique_ptr<image_fetcher::ImageDecoder> image_decoder,
       std::unique_ptr<RemoteSuggestionsDatabase> database,
-      std::unique_ptr<RemoteSuggestionsStatusService> status_service);
+      std::unique_ptr<RemoteSuggestionsStatusService> status_service,
+      std::unique_ptr<PrefetchedPagesTracker> prefetched_pages_tracker);
 
   ~RemoteSuggestionsProviderImpl() override;
 
@@ -137,20 +83,18 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   // false, some calls may trigger DCHECKs.
   bool initialized() const { return ready() || state_ == State::DISABLED; }
 
-  // Set the scheduler to be notified whenever the provider becomes active /
-  // in-active and whenever history is deleted. The initial change is also
-  // notified (switching from an initial undecided status). If the scheduler is
-  // set after the first change, it is called back immediately.
-  void SetRemoteSuggestionsScheduler(RemoteSuggestionsScheduler* scheduler);
-
   // RemoteSuggestionsProvider implementation.
-  void RefetchInTheBackground(
-      std::unique_ptr<FetchStatusCallback> callback) override;
+  void RefetchInTheBackground(const FetchStatusCallback& callback) override;
 
   // TODO(fhorschig): Remove this getter when there is an interface for the
   // fetcher that allows better mocks.
   const RemoteSuggestionsFetcher* suggestions_fetcher_for_debugging()
       const override;
+
+  GURL GetUrlWithFavicon(
+      const ContentSuggestion::ID& suggestion_id) const override;
+
+  bool IsDisabled() const override;
 
   // ContentSuggestionsProvider implementation.
   CategoryStatus GetCategoryStatus(Category category) override;
@@ -300,7 +244,7 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   // the fetch finished, the provided |callback| will be triggered with the
   // status of the fetch.
   void FetchSuggestions(bool interactive_request,
-                        std::unique_ptr<FetchStatusCallback> callback);
+                        const FetchStatusCallback& callback);
 
   // Returns the URL of the image of a suggestion if it is among the current or
   // among the archived suggestions in the matching category. Returns an empty
@@ -319,7 +263,7 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
 
   // Callback for regular fetch requests with the RemoteSuggestionsFetcher.
   void OnFetchFinished(
-      std::unique_ptr<FetchStatusCallback> callback,
+      const FetchStatusCallback& callback,
       bool interactive_request,
       Status status,
       RemoteSuggestionsFetcher::OptionalFetchedCategories fetched_categories);
@@ -337,8 +281,9 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   void SanitizeReceivedSuggestions(const RemoteSuggestion::PtrVector& dismissed,
                                    RemoteSuggestion::PtrVector* suggestions);
 
-  // Adds newly available suggestions to |content|.
-  void IntegrateSuggestions(CategoryContent* content,
+  // Adds newly available suggestions to |content| corresponding to |category|.
+  void IntegrateSuggestions(Category category,
+                            CategoryContent* content,
                             RemoteSuggestion::PtrVector new_suggestions);
 
   // Dismisses a suggestion within a given category content.
@@ -414,7 +359,9 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
   void RestoreCategoriesFromPrefs();
   void StoreCategoriesToPrefs();
 
-  RequestParams BuildFetchParams() const;
+  // Absence of fetched category corresponds to fetching all categories.
+  RequestParams BuildFetchParams(
+      base::Optional<Category> fetched_category) const;
 
   void MarkEmptyCategoriesAsLoading();
 
@@ -431,6 +378,9 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
 
   // Ranker that orders the categories. Not owned.
   CategoryRanker* category_ranker_;
+
+  // Scheduler to inform about scheduling-related events. Not owned.
+  RemoteSuggestionsScheduler* remote_suggestions_scheduler_;
 
   // The suggestions fetcher.
   std::unique_ptr<RemoteSuggestionsFetcher> suggestions_fetcher_;
@@ -452,9 +402,7 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
 
   // The parameters for the fetch to perform later.
   bool fetch_when_ready_interactive_;
-  std::unique_ptr<FetchStatusCallback> fetch_when_ready_callback_;
-
-  RemoteSuggestionsScheduler* remote_suggestions_scheduler_;
+  FetchStatusCallback fetch_when_ready_callback_;
 
   // Set to true if ClearHistoryDependentState is called while the service isn't
   // ready. The nuke will be executed once the service finishes initialization
@@ -463,6 +411,9 @@ class RemoteSuggestionsProviderImpl final : public RemoteSuggestionsProvider {
 
   // A clock for getting the time. This allows to inject a clock in tests.
   std::unique_ptr<base::Clock> clock_;
+
+  // Prefetched pages tracker to query which urls have been prefetched.
+  std::unique_ptr<PrefetchedPagesTracker> prefetched_pages_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(RemoteSuggestionsProviderImpl);
 };

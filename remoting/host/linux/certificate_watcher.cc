@@ -98,7 +98,9 @@ CertDbContentWatcher::CertDbContentWatcher(
   thread_checker_.DetachFromThread();
 }
 
-CertDbContentWatcher::~CertDbContentWatcher() {}
+CertDbContentWatcher::~CertDbContentWatcher() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+}
 
 void CertDbContentWatcher::StartWatching() {
   DCHECK(!cert_watch_path_.empty());
@@ -208,7 +210,7 @@ void CertificateWatcher::Start() {
   VLOG(1) << "Started watching certificate changes.";
 }
 
-void CertificateWatcher::SetMonitor(base::WeakPtr<HostStatusMonitor> monitor) {
+void CertificateWatcher::SetMonitor(scoped_refptr<HostStatusMonitor> monitor) {
   DCHECK(is_started());
   if (monitor_) {
     monitor_->RemoveStatusObserver(this);

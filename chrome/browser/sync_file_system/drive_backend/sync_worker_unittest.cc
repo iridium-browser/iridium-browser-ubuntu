@@ -39,8 +39,8 @@ namespace {
 const char kAppID[] = "app_id";
 
 void EmptyTask(SyncStatusCode status, const SyncStatusCallback& callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                base::Bind(callback, status));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(callback, status));
 }
 
 }  // namespace
@@ -117,8 +117,7 @@ class SyncWorkerTest : public testing::Test,
             std::move(fake_drive_service), nullptr /* drive_uploader */,
             nullptr /* task_logger */,
             base::ThreadTaskRunnerHandle::Get() /* ui_task_runner */,
-            base::ThreadTaskRunnerHandle::Get() /* worker_task_runner */,
-            nullptr /* worker_pool */));
+            base::ThreadTaskRunnerHandle::Get() /* worker_task_runner */));
 
     sync_worker_.reset(new SyncWorker(profile_dir_.GetPath(),
                                       extension_service_->AsWeakPtr(),

@@ -31,9 +31,9 @@
 #ifndef MutationRecord_h
 #define MutationRecord_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -48,17 +48,17 @@ class MutationRecord : public GarbageCollectedFinalized<MutationRecord>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static MutationRecord* createChildList(Node* target,
+  static MutationRecord* CreateChildList(Node* target,
                                          StaticNodeList* added,
                                          StaticNodeList* removed,
-                                         Node* previousSibling,
-                                         Node* nextSibling);
-  static MutationRecord* createAttributes(Node* target,
+                                         Node* previous_sibling,
+                                         Node* next_sibling);
+  static MutationRecord* CreateAttributes(Node* target,
                                           const QualifiedName&,
-                                          const AtomicString& oldValue);
-  static MutationRecord* createCharacterData(Node* target,
-                                             const String& oldValue);
-  static MutationRecord* createWithNullOldValue(MutationRecord*);
+                                          const AtomicString& old_value);
+  static MutationRecord* CreateCharacterData(Node* target,
+                                             const String& old_value);
+  static MutationRecord* CreateWithNullOldValue(MutationRecord*);
 
   MutationRecord() {}
 
@@ -69,11 +69,11 @@ class MutationRecord : public GarbageCollectedFinalized<MutationRecord>,
 
   virtual StaticNodeList* addedNodes() = 0;
   virtual StaticNodeList* removedNodes() = 0;
-  virtual Node* previousSibling() { return 0; }
-  virtual Node* nextSibling() { return 0; }
+  virtual Node* previousSibling() { return nullptr; }
+  virtual Node* nextSibling() { return nullptr; }
 
-  virtual const AtomicString& attributeName() { return nullAtom; }
-  virtual const AtomicString& attributeNamespace() { return nullAtom; }
+  virtual const AtomicString& attributeName() { return g_null_atom; }
+  virtual const AtomicString& attributeNamespace() { return g_null_atom; }
 
   virtual String oldValue() { return String(); }
 

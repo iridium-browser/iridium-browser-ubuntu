@@ -45,9 +45,8 @@ public:
     GrGLProgramDataManager(GrGLGpu*, GrGLuint programID, const UniformInfoArray&,
                            const VaryingInfoArray&);
 
-
-    void setSamplers(const UniformInfoArray& samplers) const;
-    void setImageStorages(const UniformInfoArray &images) const;
+    void setSamplerUniforms(const UniformInfoArray& samplers, int startUnit) const;
+    void setImageStorages(const UniformInfoArray& images) const;
 
     /** Functions for uploading uniform values. The varities ending in v can be used to upload to an
     *  array of uniforms. arrayCount must be <= the array count of the uniform.
@@ -98,8 +97,6 @@ private:
             int         fArrayCount;
         );
     };
-
-    SkDEBUGCODE(void printUnused(const Uniform&) const;)
 
     template<int N> inline void setMatrices(UniformHandle, int arrayCount,
                                             const float matrices[]) const;

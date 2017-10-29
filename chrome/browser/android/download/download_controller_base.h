@@ -21,7 +21,6 @@ class URLRequest;
 }
 
 namespace content {
-class DownloadItem;
 class WebContents;
 }
 
@@ -72,7 +71,7 @@ class DownloadControllerBase : public content::DownloadItem::Observer {
   // Called to prompt the user for file access permission. When finished,
   // |callback| will be executed.
   virtual void AcquireFileAccessPermission(
-      content::WebContents* web_contents,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const AcquireFileAccessPermissionCallback& callback) = 0;
 
   // Called by unit test to approve or disapprove file access request.
@@ -82,6 +81,9 @@ class DownloadControllerBase : public content::DownloadItem::Observer {
   virtual void CreateAndroidDownload(
       const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const DownloadInfo& info) = 0;
+
+  // Called before resuming a download.
+  virtual void AboutToResumeDownload(content::DownloadItem* download_item) = 0;
 
  protected:
   ~DownloadControllerBase() override {}

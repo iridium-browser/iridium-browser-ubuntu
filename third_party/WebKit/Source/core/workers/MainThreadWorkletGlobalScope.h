@@ -9,51 +9,59 @@
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/workers/WorkletGlobalScope.h"
-#include "core/workers/WorkletGlobalScopeProxy.h"
+#include "core/workers/WorkletPendingTasks.h"
+#include "platform/WebTaskRunner.h"
+#include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
 class ConsoleMessage;
 class LocalFrame;
-class ScriptSourceCode;
 
-class CORE_EXPORT MainThreadWorkletGlobalScope : public WorkletGlobalScope,
-                                                 public WorkletGlobalScopeProxy,
-                                                 public ContextClient {
+class CORE_EXPORT MainThreadWorkletGlobalScope
+    : public WorkletGlobalScope,
+      public ContextClient {
   USING_GARBAGE_COLLECTED_MIXIN(MainThreadWorkletGlobalScope);
 
  public:
   MainThreadWorkletGlobalScope(LocalFrame*,
                                const KURL&,
-                               const String& userAgent,
+                               const String& user_agent,
                                PassRefPtr<SecurityOrigin>,
                                v8::Isolate*);
   ~MainThreadWorkletGlobalScope() override;
-  bool isMainThreadWorkletGlobalScope() const final { return true; }
+  bool IsMainThreadWorkletGlobalScope() const final { return true; }
 
   // WorkerOrWorkletGlobalScope
-  void countFeature(UseCounter::Feature) final;
-  void countDeprecation(UseCounter::Feature) final;
-  WorkerThread* thread() const final;
+  void ReportFeature(WebFeature) override;
+  void ReportDeprecation(WebFeature) override;
+  WorkerThread* GetThread() const final;
 
-  // WorkletGlobalScopeProxy
-  void evaluateScript(const ScriptSourceCode&) final;
-  void terminateWorkletGlobalScope() final;
+  // Implementation of the "fetch and invoke a worklet script" algorithm:
+  // https://drafts.css-houdini.org/worklets/#fetch-and-invoke-a-worklet-script
+  // When script evaluation is done or any exception happens, it's notified to
+  // the given WorkletPendingTasks via |outside_settings_task_runner| (i.e., the
+  // parent frame's task runner).
+  void FetchAndInvokeScript(const KURL& module_url_record,
+                            WebURLRequest::FetchCredentialsMode,
+                            RefPtr<WebTaskRunner> outside_settings_task_runner,
+                            WorkletPendingTasks*);
 
-  void addConsoleMessage(ConsoleMessage*) final;
-  void exceptionThrown(ErrorEvent*) final;
+  void Terminate();
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
-    WorkletGlobalScope::trace(visitor);
-    ContextClient::trace(visitor);
-  }
+  // ExecutionContext
+  void AddConsoleMessage(ConsoleMessage*) final;
+  void ExceptionThrown(ErrorEvent*) final;
+  CoreProbeSink* GetProbeSink() final;
+
+  DECLARE_VIRTUAL_TRACE();
 };
 
 DEFINE_TYPE_CASTS(MainThreadWorkletGlobalScope,
                   ExecutionContext,
                   context,
-                  context->isMainThreadWorkletGlobalScope(),
-                  context.isMainThreadWorkletGlobalScope());
+                  context->IsMainThreadWorkletGlobalScope(),
+                  context.IsMainThreadWorkletGlobalScope());
 
 }  // namespace blink
 

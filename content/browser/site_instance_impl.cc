@@ -4,6 +4,9 @@
 
 #include "content/browser/site_instance_impl.h"
 
+#include "base/command_line.h"
+#include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/frame_host/debug_urls.h"
@@ -14,13 +17,12 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host_factory.h"
 #include "content/public/browser/web_ui_controller_factory.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
 namespace content {
 
-const RenderProcessHostFactory*
-    SiteInstanceImpl::g_render_process_host_factory_ = NULL;
 int32_t SiteInstanceImpl::next_site_instance_id_ = 1;
 
 SiteInstanceImpl::SiteInstanceImpl(BrowsingInstance* browsing_instance)
@@ -29,7 +31,8 @@ SiteInstanceImpl::SiteInstanceImpl(BrowsingInstance* browsing_instance)
       browsing_instance_(browsing_instance),
       process_(nullptr),
       has_site_(false),
-      is_default_subframe_site_instance_(false) {
+      process_reuse_policy_(ProcessReusePolicy::DEFAULT),
+      is_for_service_worker_(false) {
   DCHECK(browsing_instance);
 }
 
@@ -82,81 +85,6 @@ bool SiteInstanceImpl::HasProcess() const {
   return false;
 }
 
-namespace {
-
-const void* const kDefaultSubframeProcessHostHolderKey =
-    &kDefaultSubframeProcessHostHolderKey;
-
-class DefaultSubframeProcessHostHolder : public base::SupportsUserData::Data,
-                                         public RenderProcessHostObserver {
- public:
-  explicit DefaultSubframeProcessHostHolder(BrowserContext* browser_context)
-      : browser_context_(browser_context) {}
-  ~DefaultSubframeProcessHostHolder() override {}
-
-  // Gets the correct render process to use for this SiteInstance.
-  RenderProcessHost* GetProcessHost(SiteInstance* site_instance,
-                                    bool is_for_guests_only) {
-    StoragePartition* default_partition =
-        BrowserContext::GetDefaultStoragePartition(browser_context_);
-    StoragePartition* partition =
-        BrowserContext::GetStoragePartition(browser_context_, site_instance);
-
-    // Is this the default storage partition? If it isn't, then just give it its
-    // own non-shared process.
-    if (partition != default_partition || is_for_guests_only) {
-      RenderProcessHostImpl* host = new RenderProcessHostImpl(
-          browser_context_, static_cast<StoragePartitionImpl*>(partition),
-          is_for_guests_only);
-      host->SetIsNeverSuitableForReuse();
-      return host;
-    }
-
-    if (host_) {
-      // If we already have a shared host for the default storage partition, use
-      // it.
-      return host_;
-    }
-
-    host_ = new RenderProcessHostImpl(
-        browser_context_, static_cast<StoragePartitionImpl*>(partition),
-        false /* for guests only */);
-    host_->SetIsNeverSuitableForReuse();
-    host_->AddObserver(this);
-
-    return host_;
-  }
-
-  void RenderProcessHostDestroyed(RenderProcessHost* host) override {
-    DCHECK_EQ(host_, host);
-    host_->RemoveObserver(this);
-    host_ = nullptr;
-  }
-
- private:
-  BrowserContext* browser_context_;
-
-  // The default subframe render process used for the default storage partition
-  // of this BrowserContext.
-  RenderProcessHostImpl* host_ = nullptr;
-};
-
-}  // namespace
-
-RenderProcessHost* SiteInstanceImpl::GetDefaultSubframeProcessHost(
-    BrowserContext* browser_context,
-    bool is_for_guests_only) {
-  DefaultSubframeProcessHostHolder* holder =
-      static_cast<DefaultSubframeProcessHostHolder*>(
-          browser_context->GetUserData(&kDefaultSubframeProcessHostHolderKey));
-  if (!holder) {
-    holder = new DefaultSubframeProcessHostHolder(browser_context);
-    browser_context->SetUserData(kDefaultSubframeProcessHostHolderKey, holder);
-  }
-
-  return holder->GetProcessHost(this, is_for_guests_only);
-}
-
 RenderProcessHost* SiteInstanceImpl::GetProcess() {
   // TODO(erikkay) It would be nice to ensure that the renderer type had been
   // properly set before we get here.  The default tab creation case winds up
@@ -168,50 +96,28 @@ RenderProcessHost* SiteInstanceImpl::GetProcess() {
   // Create a new process if ours went away or was reused.
   if (!process_) {
     BrowserContext* browser_context = browsing_instance_->browser_context();
-    bool is_for_guests_only = site_.SchemeIs(kGuestScheme);
 
-    // If we should use process-per-site mode (either in general or for the
-    // given site), then look for an existing RenderProcessHost for the site.
-    bool use_process_per_site = has_site_ &&
+    // Check if the ProcessReusePolicy should be updated.
+    bool should_use_process_per_site =
+        has_site_ &&
         RenderProcessHost::ShouldUseProcessPerSite(browser_context, site_);
-    if (use_process_per_site) {
-      process_ = RenderProcessHostImpl::GetProcessHostForSite(browser_context,
-                                                              site_);
+    if (should_use_process_per_site) {
+      process_reuse_policy_ = ProcessReusePolicy::PROCESS_PER_SITE;
+    } else if (process_reuse_policy_ == ProcessReusePolicy::PROCESS_PER_SITE) {
+      process_reuse_policy_ = ProcessReusePolicy::DEFAULT;
     }
 
-    if (!process_ && IsDefaultSubframeSiteInstance() &&
-        SiteIsolationPolicy::IsTopDocumentIsolationEnabled()) {
-      process_ =
-          GetDefaultSubframeProcessHost(browser_context, is_for_guests_only);
-    }
+    process_ = RenderProcessHostImpl::GetProcessHostForSiteInstance(
+        browser_context, this);
 
-    // If not (or if none found), see if we should reuse an existing process.
-    if (!process_ && RenderProcessHostImpl::ShouldTryToUseExistingProcessHost(
-            browser_context, site_)) {
-      process_ = RenderProcessHostImpl::GetExistingProcessHost(browser_context,
-                                                               site_);
-    }
-
-    // Otherwise (or if that fails), create a new one.
-    if (!process_) {
-      if (g_render_process_host_factory_) {
-        process_ = g_render_process_host_factory_->CreateRenderProcessHost(
-            browser_context, this);
-      } else {
-        StoragePartitionImpl* partition =
-            static_cast<StoragePartitionImpl*>(
-                BrowserContext::GetStoragePartition(browser_context, this));
-        process_ = new RenderProcessHostImpl(browser_context, partition,
-                                             is_for_guests_only);
-      }
-    }
     CHECK(process_);
     process_->AddObserver(this);
 
     // If we are using process-per-site, we need to register this process
     // for the current site so that we can find it again.  (If no site is set
     // at this time, we will register it in SetSite().)
-    if (use_process_per_site) {
+    if (process_reuse_policy_ == ProcessReusePolicy::PROCESS_PER_SITE &&
+        has_site_) {
       RenderProcessHostImpl::RegisterProcessHostForSite(browser_context,
                                                         process_, site_);
     }
@@ -221,7 +127,7 @@ RenderProcessHost* SiteInstanceImpl::GetProcess() {
     GetContentClient()->browser()->SiteInstanceGotProcess(this);
 
     if (has_site_)
-      LockToOrigin();
+      LockToOriginIfNeeded();
   }
   DCHECK(process_);
 
@@ -250,11 +156,18 @@ void SiteInstanceImpl::SetSite(const GURL& url) {
   // BrowsingInstance can script each other.
   browsing_instance_->RegisterSiteInstance(this);
 
+  // Update the process reuse policy based on the site.
+  bool should_use_process_per_site =
+      RenderProcessHost::ShouldUseProcessPerSite(browser_context, site_);
+  if (should_use_process_per_site) {
+    process_reuse_policy_ = ProcessReusePolicy::PROCESS_PER_SITE;
+  }
+
   if (process_) {
-    LockToOrigin();
+    LockToOriginIfNeeded();
 
     // Ensure the process is registered for this site if necessary.
-    if (RenderProcessHost::ShouldUseProcessPerSite(browser_context, site_)) {
+    if (should_use_process_per_site) {
       RenderProcessHostImpl::RegisterProcessHostForSite(
           browser_context, process_, site_);
     }
@@ -301,6 +214,15 @@ bool SiteInstanceImpl::HasWrongProcessForURL(const GURL& url) {
   if (IsRendererDebugURL(url))
     return false;
 
+  // Any process can host an about:blank URL.  This check avoids a process
+  // transfer for browser-initiated navigations to about:blank in a dedicated
+  // process; without it, IsSuitableHost would consider this process unsuitable
+  // for about:blank when it compares origin locks.  Renderer-initiated
+  // navigations will handle about:blank navigations elsewhere and leave them
+  // in the source SiteInstance, along with about:srcdoc and data:.
+  if (url == url::kAboutBlankURL)
+    return false;
+
   // If the site URL is an extension (e.g., for hosted apps or WebUI) but the
   // process is not (or vice versa), make sure we notice and fix it.
   GURL site_url = GetSiteForURL(browsing_instance_->browser_context(), url);
@@ -321,7 +243,8 @@ bool SiteInstanceImpl::RequiresDedicatedProcess() {
 }
 
 bool SiteInstanceImpl::IsDefaultSubframeSiteInstance() const {
-  return is_default_subframe_site_instance_;
+  return process_reuse_policy_ ==
+         ProcessReusePolicy::USE_DEFAULT_SUBFRAME_PROCESS;
 }
 
 void SiteInstanceImpl::IncrementActiveFrameCount() {
@@ -349,11 +272,6 @@ void SiteInstanceImpl::AddObserver(Observer* observer) {
 
 void SiteInstanceImpl::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
-}
-
-void SiteInstanceImpl::set_render_process_host_factory(
-    const RenderProcessHostFactory* rph_factory) {
-  g_render_process_host_factory_ = rph_factory;
 }
 
 BrowserContext* SiteInstanceImpl::GetBrowserContext() const {
@@ -403,14 +321,36 @@ bool SiteInstance::IsSameWebSite(BrowserContext* browser_context,
   if (dest_url == blank_page)
     return true;
 
+  url::Origin src_origin(src_url);
+  url::Origin dest_origin(dest_url);
+
   // If the schemes differ, they aren't part of the same site.
-  if (src_url.scheme() != dest_url.scheme())
+  if (src_origin.scheme() != dest_origin.scheme())
     return false;
 
-  return net::registry_controlled_domains::SameDomainOrHost(
-      src_url,
-      dest_url,
-      net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
+  if (!net::registry_controlled_domains::SameDomainOrHost(
+          src_origin, dest_origin,
+          net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES)) {
+    return false;
+  }
+
+  // If the sites are the same, check isolated origins.  If either URL matches
+  // an isolated origin, compare origins rather than sites.
+  auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
+  url::Origin src_isolated_origin;
+  url::Origin dest_isolated_origin;
+  bool src_origin_is_isolated =
+      policy->GetMatchingIsolatedOrigin(src_origin, &src_isolated_origin);
+  bool dest_origin_is_isolated =
+      policy->GetMatchingIsolatedOrigin(dest_origin, &dest_isolated_origin);
+  if (src_origin_is_isolated || dest_origin_is_isolated) {
+    // Compare most specific matching origins to ensure that a subdomain of an
+    // isolated origin (e.g., https://subdomain.isolated.foo.com) also matches
+    // the isolated origin's site URL (e.g., https://isolated.foo.com).
+    return src_isolated_origin == dest_isolated_origin;
+  }
+
+  return true;
 }
 
 // static
@@ -422,6 +362,15 @@ GURL SiteInstance::GetSiteForURL(BrowserContext* browser_context,
 
   GURL url = SiteInstanceImpl::GetEffectiveURL(browser_context, real_url);
   url::Origin origin(url);
+
+  // Isolated origins should use the full origin as their site URL. A subdomain
+  // of an isolated origin should also use that isolated origin's site URL.
+  auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
+  url::Origin isolated_origin;
+  if (policy->GetMatchingIsolatedOrigin(url::Origin(real_url),
+                                        &isolated_origin)) {
+    return isolated_origin.GetURL();
+  }
 
   // If the url has a host, then determine the site.
   if (!origin.host().empty()) {
@@ -448,6 +397,12 @@ GURL SiteInstance::GetSiteForURL(BrowserContext* browser_context,
 // static
 GURL SiteInstanceImpl::GetEffectiveURL(BrowserContext* browser_context,
                                        const GURL& url) {
+  // Don't resolve URLs corresponding to isolated origins, as isolated origins
+  // take precedence over hosted apps.
+  auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
+  if (policy->IsIsolatedOrigin(url::Origin(url)))
+    return url;
+
   return GetContentClient()->browser()->
       GetEffectiveURL(browser_context, url);
 }
@@ -460,10 +415,15 @@ bool SiteInstanceImpl::DoesSiteRequireDedicatedProcess(
   if (SiteIsolationPolicy::UseDedicatedProcessesForAllSites())
     return true;
 
+  // Always require a dedicated process for isolated origins.
+  GURL site_url = GetSiteForURL(browser_context, url);
+  auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
+  if (policy->IsIsolatedOrigin(url::Origin(site_url)))
+    return true;
+
   // Let the content embedder enable site isolation for specific URLs. Use the
   // canonical site url for this check, so that schemes with nested origins
   // (blob and filesystem) work properly.
-  GURL site_url = GetSiteForURL(browser_context, url);
   if (GetContentClient()->IsSupplementarySiteIsolationModeEnabled() &&
       GetContentClient()->browser()->DoesSiteRequireDedicatedProcess(
           browser_context, site_url)) {
@@ -471,6 +431,44 @@ bool SiteInstanceImpl::DoesSiteRequireDedicatedProcess(
   }
 
   return false;
+}
+
+// static
+bool SiteInstanceImpl::ShouldLockToOrigin(BrowserContext* browser_context,
+                                          GURL site_url) {
+  // Don't lock to origin in --single-process mode, since this mode puts
+  // cross-site pages into the same process.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSingleProcess))
+    return false;
+
+  if (!DoesSiteRequireDedicatedProcess(browser_context, site_url))
+    return false;
+
+  // Guest processes cannot be locked to their site because guests always have
+  // a fixed SiteInstance. The site of GURLs a guest loads doesn't match that
+  // SiteInstance. So we skip locking the guest process to the site.
+  // TODO(ncarter): Remove this exclusion once we can make origin lock per
+  // RenderFrame routing id.
+  if (site_url.SchemeIs(content::kGuestScheme))
+    return false;
+
+  // TODO(creis, nick) https://crbug.com/510588 Chrome UI pages use the same
+  // site (chrome://chrome), so they can't be locked because the site being
+  // loaded doesn't match the SiteInstance.
+  if (site_url.SchemeIs(content::kChromeUIScheme))
+    return false;
+
+  // TODO(creis, nick): Until we can handle sites with effective URLs at the
+  // call sites of ChildProcessSecurityPolicy::CanAccessDataForOrigin, we
+  // must give the embedder a chance to exempt some sites to avoid process
+  // kills.
+  if (!GetContentClient()->browser()->ShouldLockToOrigin(browser_context,
+                                                         site_url)) {
+    return false;
+  }
+
+  return true;
 }
 
 void SiteInstanceImpl::RenderProcessHostDestroyed(RenderProcessHost* host) {
@@ -493,34 +491,26 @@ void SiteInstanceImpl::RenderProcessExited(RenderProcessHost* host,
     observer.RenderProcessGone(this);
 }
 
-void SiteInstanceImpl::LockToOrigin() {
+void SiteInstanceImpl::LockToOriginIfNeeded() {
+  DCHECK(HasSite());
+
+  // From now on, this process should be considered "tainted" for future
+  // process reuse decisions:
+  // (1) If |site_| required a dedicated process, this SiteInstance's process
+  //     can only host URLs for the same site.
+  // (2) Even if |site_| does not require a dedicated process, this
+  //     SiteInstance's process still cannot be reused to host other sites
+  //     requiring dedicated sites in the future.
+  // We can get here either when we commit a URL into a SiteInstance that does
+  // not yet have a site, or when we create a process for a SiteInstance with a
+  // preassigned site.
+  process_->SetIsUsed();
+
   // TODO(nick): When all sites are isolated, this operation provides strong
   // protection. If only some sites are isolated, we need additional logic to
   // prevent the non-isolated sites from requesting resources for isolated
   // sites. https://crbug.com/509125
-  if (RequiresDedicatedProcess()) {
-    // Guest processes cannot be locked to its site because guests always have
-    // a fixed SiteInstance. The site of GURLs a guest loads doesn't match that
-    // SiteInstance. So we skip locking the guest process to the site.
-    // TODO(ncarter): Remove this exclusion once we can make origin lock per
-    // RenderFrame routing id.
-    if (site_.SchemeIs(content::kGuestScheme))
-      return;
-
-    // TODO(creis, nick) https://crbug.com/510588 Chrome UI pages use the same
-    // site (chrome://chrome), so they can't be locked because the site being
-    // loaded doesn't match the SiteInstance.
-    if (site_.SchemeIs(content::kChromeUIScheme))
-      return;
-
-    // TODO(creis, nick): Until we can handle sites with effective URLs at the
-    // call sites of ChildProcessSecurityPolicy::CanAccessDataForOrigin, we
-    // must give the embedder a chance to exempt some sites to avoid process
-    // kills.
-    if (!GetContentClient()->browser()->ShouldLockToOrigin(
-            browsing_instance_->browser_context(), site_))
-      return;
-
+  if (ShouldLockToOrigin(GetBrowserContext(), site_)) {
     ChildProcessSecurityPolicyImpl* policy =
         ChildProcessSecurityPolicyImpl::GetInstance();
     policy->LockToOrigin(process_->GetID(), site_);

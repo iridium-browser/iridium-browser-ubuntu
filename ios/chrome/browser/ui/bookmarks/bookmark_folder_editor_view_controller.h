@@ -39,7 +39,7 @@ class ChromeBrowserState;
 // bookmark model can affect this controller's state.
 @interface BookmarkFolderEditorViewController : CollectionViewController
 
-@property(nonatomic, assign) id<BookmarkFolderEditorViewControllerDelegate>
+@property(nonatomic, weak) id<BookmarkFolderEditorViewControllerDelegate>
     delegate;
 
 // Designated factory methods.
@@ -58,6 +58,10 @@ folderCreatorWithBookmarkModel:(bookmarks::BookmarkModel*)bookmarkModel
 folderEditorWithBookmarkModel:(bookmarks::BookmarkModel*)bookmarkModel
                        folder:(const bookmarks::BookmarkNode*)folder
                  browserState:(ios::ChromeBrowserState*)browserState;
+
+- (instancetype)initWithLayout:(UICollectionViewLayout*)layout
+                         style:(CollectionViewControllerStyle)style
+    NS_UNAVAILABLE;
 
 @end
 

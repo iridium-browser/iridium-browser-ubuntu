@@ -4,16 +4,26 @@
 
 package org.chromium.chrome.browser.bookmarks;
 
+import android.support.test.annotation.UiThreadTest;
 import android.support.test.filters.SmallTest;
-import android.test.UiThreadTest;
+import android.support.test.rule.UiThreadTestRule;
+
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.RuleChain;
+import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkItem;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.test.ChromeBrowserTestRule;
 import org.chromium.chrome.test.util.BookmarkTestUtil;
 import org.chromium.components.bookmarks.BookmarkId;
-import org.chromium.content.browser.test.NativeLibraryTestBase;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -23,18 +33,20 @@ import java.util.List;
 /**
  * Tests for bookmark bridge
  */
-public class BookmarkBridgeTest extends NativeLibraryTestBase {
+@RetryOnFailure(message = "crbug.com/740786")
+@RunWith(BaseJUnit4ClassRunner.class)
+public class BookmarkBridgeTest {
+    @Rule
+    public final RuleChain mChain =
+            RuleChain.outerRule(new ChromeBrowserTestRule()).around(new UiThreadTestRule());
 
     private BookmarkBridge mBookmarkBridge;
     private BookmarkId mMobileNode;
     private BookmarkId mOtherNode;
     private BookmarkId mDesktopNode;
 
-    @Override
-    protected void setUp() throws Exception {
-        super.setUp();
-        loadNativeLibraryAndInitBrowserProcess();
-
+    @Before
+    public void setUp() throws Exception {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
@@ -55,10 +67,11 @@ public class BookmarkBridgeTest extends NativeLibraryTestBase {
         });
     }
 
-    @UiThreadTest
+    @Test
     @SmallTest
+    @UiThreadTest
     @Feature({"Bookmark"})
-    public void testAddBookmarksAndFolders() {
+    public void testAddBookmarksAndFolders() throws Throwable {
         BookmarkId bookmarkA = mBookmarkBridge.addBookmark(mDesktopNode, 0, "a", "http://a.com");
         verifyBookmark(bookmarkA, "a", "http://a.com/", false, mDesktopNode);
         BookmarkId bookmarkB = mBookmarkBridge.addBookmark(mOtherNode, 0, "b", "http://b.com");
@@ -79,18 +92,19 @@ public class BookmarkBridgeTest extends NativeLibraryTestBase {
 
     private void verifyBookmark(BookmarkId idToVerify, String expectedTitle,
             String expectedUrl, boolean isFolder, BookmarkId expectedParent) {
-        assertNotNull(idToVerify);
+        Assert.assertNotNull(idToVerify);
         BookmarkItem item = mBookmarkBridge.getBookmarkById(idToVerify);
-        assertEquals(expectedTitle, item.getTitle());
-        assertEquals(item.isFolder(), isFolder);
-        if (!isFolder) assertEquals(expectedUrl, item.getUrl());
-        assertEquals(item.getParentId(), expectedParent);
+        Assert.assertEquals(expectedTitle, item.getTitle());
+        Assert.assertEquals(item.isFolder(), isFolder);
+        if (!isFolder) Assert.assertEquals(expectedUrl, item.getUrl());
+        Assert.assertEquals(item.getParentId(), expectedParent);
     }
 
-    @UiThreadTest
+    @Test
     @SmallTest
+    @UiThreadTest
     @Feature({"Bookmark"})
-    public void testGetAllFoldersWithDepths() {
+    public void testGetAllFoldersWithDepths() throws Throwable {
         BookmarkId folderA = mBookmarkBridge.addFolder(mMobileNode, 0, "a");
         BookmarkId folderB = mBookmarkBridge.addFolder(mDesktopNode, 0, "b");
         BookmarkId folderC = mBookmarkBridge.addFolder(mOtherNode, 0, "c");
@@ -123,10 +137,11 @@ public class BookmarkBridgeTest extends NativeLibraryTestBase {
         verifyFolderDepths(folderList, depthList, idToDepth);
     }
 
-    @UiThreadTest
+    @Test
     @SmallTest
+    @UiThreadTest
     @Feature({"Bookmark"})
-    public void testGetMoveDestinations() {
+    public void testGetMoveDestinations() throws Throwable {
         BookmarkId folderA = mBookmarkBridge.addFolder(mMobileNode, 0, "a");
         BookmarkId folderB = mBookmarkBridge.addFolder(mDesktopNode, 0, "b");
         BookmarkId folderC = mBookmarkBridge.addFolder(mOtherNode, 0, "c");
@@ -186,8 +201,8 @@ public class BookmarkBridgeTest extends NativeLibraryTestBase {
         idToDepth.put(folderC, 1);
         verifyFolderDepths(folderList, depthList, idToDepth);
 
-        mBookmarkBridge.getMoveDestinations(folderList, depthList,
-                Arrays.asList(folderAA, folderC));
+        mBookmarkBridge.getMoveDestinations(
+                folderList, depthList, Arrays.asList(folderAA, folderC));
         idToDepth.put(mMobileNode, 0);
         idToDepth.put(folderA, 1);
         idToDepth.put(mDesktopNode, 0);
@@ -199,20 +214,21 @@ public class BookmarkBridgeTest extends NativeLibraryTestBase {
 
     private void verifyFolderDepths(List<BookmarkId> folderList, List<Integer> depthList,
             HashMap<BookmarkId, Integer> idToDepth) {
-        assertEquals(folderList.size(), depthList.size());
-        assertEquals(folderList.size(), idToDepth.size());
+        Assert.assertEquals(folderList.size(), depthList.size());
+        Assert.assertEquals(folderList.size(), idToDepth.size());
         for (int i = 0; i < folderList.size(); i++) {
             BookmarkId folder = folderList.get(i);
             Integer depth = depthList.get(i);
-            assertNotNull(folder);
-            assertNotNull(depthList.get(i));
-            assertTrue("Folder list contains non-folder elements: ",
+            Assert.assertNotNull(folder);
+            Assert.assertNotNull(depthList.get(i));
+            Assert.assertTrue("Folder list contains non-folder elements: ",
                     mBookmarkBridge.getBookmarkById(folder).isFolder());
-            assertTrue("Returned list contained unexpected key: ", idToDepth.containsKey(folder));
-            assertEquals(idToDepth.get(folder), depth);
+            Assert.assertTrue(
+                    "Returned list contained unexpected key: ", idToDepth.containsKey(folder));
+            Assert.assertEquals(idToDepth.get(folder), depth);
             idToDepth.remove(folder);
         }
-        assertEquals(idToDepth.size(), 0);
+        Assert.assertEquals(idToDepth.size(), 0);
         folderList.clear();
         depthList.clear();
     }

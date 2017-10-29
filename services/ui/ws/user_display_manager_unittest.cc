@@ -36,61 +36,6 @@ namespace {
 
 const char kUserId1[] = "123";
 
-class TestDisplayManagerObserver : public mojom::DisplayManagerObserver {
- public:
-  TestDisplayManagerObserver() : binding_(this) {}
-  ~TestDisplayManagerObserver() override {}
-
-  mojom::DisplayManagerObserverPtr GetPtr() {
-    return binding_.CreateInterfacePtrAndBind();
-  }
-
-  std::string GetAndClearObserverCalls() {
-    std::string result;
-    std::swap(observer_calls_, result);
-    return result;
-  }
-
- private:
-  void AddCall(const std::string& call) {
-    if (!observer_calls_.empty())
-      observer_calls_ += "\n";
-    observer_calls_ += call;
-  }
-
-  std::string DisplayIdsToString(
-      const std::vector<mojom::WsDisplayPtr>& wm_displays) {
-    std::string display_ids;
-    for (const auto& wm_display : wm_displays) {
-      if (!display_ids.empty())
-        display_ids += " ";
-      display_ids += base::Int64ToString(wm_display->display.id());
-    }
-    return display_ids;
-  }
-
-  // mojom::DisplayManagerObserver:
-  void OnDisplays(std::vector<mojom::WsDisplayPtr> displays,
-                  int64_t primary_display_id,
-                  int64_t internal_display_id) override {
-    AddCall("OnDisplays " + DisplayIdsToString(displays));
-  }
-  void OnDisplaysChanged(std::vector<mojom::WsDisplayPtr> displays) override {
-    AddCall("OnDisplaysChanged " + DisplayIdsToString(displays));
-  }
-  void OnDisplayRemoved(int64_t id) override {
-    AddCall("OnDisplayRemoved " + base::Int64ToString(id));
-  }
-  void OnPrimaryDisplayChanged(int64_t id) override {
-    AddCall("OnPrimaryDisplayChanged " + base::Int64ToString(id));
-  }
-
-  mojo::Binding<mojom::DisplayManagerObserver> binding_;
-  std::string observer_calls_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestDisplayManagerObserver);
-};
-
 mojom::FrameDecorationValuesPtr CreateDefaultFrameDecorationValues() {
   return mojom::FrameDecorationValues::New();
 }
@@ -147,7 +92,7 @@ TEST_F(UserDisplayManagerTest, OnlyNotifyWhenFrameDecorationsSet) {
       ->SetFrameDecorationValues(CreateDefaultFrameDecorationValues());
   RunUntilIdle();
 
-  EXPECT_EQ("OnDisplays 1",
+  EXPECT_EQ("OnDisplaysChanged 1 -1",
             display_manager_observer1.GetAndClearObserverCalls());
 }
 
@@ -169,7 +114,7 @@ TEST_F(UserDisplayManagerTest, AddObserverAfterFrameDecorationsSet) {
   user_display_manager1->AddObserver(display_manager_observer1.GetPtr());
   RunUntilIdle();
 
-  EXPECT_EQ("OnDisplays 1",
+  EXPECT_EQ("OnDisplaysChanged 1 -1",
             display_manager_observer1.GetAndClearObserverCalls());
 }
 
@@ -190,7 +135,7 @@ TEST_F(UserDisplayManagerTest, AddRemoveDisplay) {
   user_display_manager1->AddObserver(display_manager_observer1.GetPtr());
   RunUntilIdle();
 
-  EXPECT_EQ("OnDisplays 1",
+  EXPECT_EQ("OnDisplaysChanged 1 -1",
             display_manager_observer1.GetAndClearObserverCalls());
 
   // Add another display.
@@ -198,14 +143,14 @@ TEST_F(UserDisplayManagerTest, AddRemoveDisplay) {
   RunUntilIdle();
 
   // Observer should be notified immediately as frame decorations were set.
-  EXPECT_EQ("OnDisplaysChanged 2",
+  EXPECT_EQ("OnDisplaysChanged 1 2 -1",
             display_manager_observer1.GetAndClearObserverCalls());
 
   // Remove the display and verify observer is notified.
   screen_manager().RemoveDisplay(second_display_id);
   RunUntilIdle();
 
-  EXPECT_EQ("OnDisplayRemoved 2",
+  EXPECT_EQ("OnDisplaysChanged 1 -1",
             display_manager_observer1.GetAndClearObserverCalls());
 }
 

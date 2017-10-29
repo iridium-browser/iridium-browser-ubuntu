@@ -4,7 +4,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
- 
+
 #ifndef SKSL_FUNCTIONCALL
 #define SKSL_FUNCTIONCALL
 
@@ -23,9 +23,18 @@ struct FunctionCall : public Expression {
     , fFunction(std::move(function))
     , fArguments(std::move(arguments)) {}
 
-    SkString description() const override {
-        SkString result = fFunction.fName + "(";
-        SkString separator;
+    bool hasSideEffects() const override {
+        for (const auto& arg : fArguments) {
+            if (arg->hasSideEffects()) {
+                return true;
+            }
+        }
+        return fFunction.fModifiers.fFlags & Modifiers::kHasSideEffects_Flag;
+    }
+
+    String description() const override {
+        String result = fFunction.fName + "(";
+        String separator;
         for (size_t i = 0; i < fArguments.size(); i++) {
             result += separator;
             result += fArguments[i]->description();

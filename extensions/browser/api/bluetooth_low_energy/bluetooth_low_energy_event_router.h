@@ -90,24 +90,19 @@ class BluetoothLowEnergyEventRouter
     kStatusSuccess = 0,
     kStatusErrorAlreadyConnected,
     kStatusErrorAlreadyNotifying,
-    kStatusErrorAttributeLengthInvalid,
     kStatusErrorAuthenticationFailed,
     kStatusErrorCanceled,
-    kStatusErrorConnectionCongested,
     kStatusErrorFailed,
     kStatusErrorGattNotSupported,
     kStatusErrorHigherSecurity,
     kStatusErrorInProgress,
     kStatusErrorInsufficientAuthorization,
-    kStatusErrorInsufficientEncryption,
     kStatusErrorInvalidArguments,
     kStatusErrorInvalidLength,
     kStatusErrorNotConnected,
     kStatusErrorNotFound,
     kStatusErrorNotNotifying,
-    kStatusErrorOffsetInvalid,
     kStatusErrorPermissionDenied,
-    kStatusErrorRequestNotSupported,
     kStatusErrorTimeout,
     kStatusErrorUnsupportedDevice,
     kStatusErrorInvalidServiceId,
@@ -344,10 +339,9 @@ class BluetoothLowEnergyEventRouter
       const device::BluetoothLocalGattCharacteristic* characteristic) override;
 
   // extensions::ExtensionRegistryObserver overrides:
-  void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const extensions::Extension* extension,
+                           extensions::UnloadedExtensionReason reason) override;
 
   // Adds a mapping for a local characteristic ID to its service ID
   void AddLocalCharacteristic(const std::string& id,
@@ -429,11 +423,16 @@ class BluetoothLowEnergyEventRouter
   device::BluetoothRemoteGattDescriptor* FindDescriptorById(
       const std::string& instance_id) const;
 
-  // Called by BluetoothRemoteGattCharacteristic and
-  // BluetoothRemoteGattDescriptor in
-  // response to ReadRemoteCharacteristic and ReadRemoteDescriptor.
-  void OnValueSuccess(const base::Closure& callback,
-                      const std::vector<uint8_t>& value);
+  // Dispatches a BLUETOOTH_LOW_ENERGY_ON_CHARACTERISTIC_VALUE_CHANGED and runs
+  // |callback|.
+  void OnReadRemoteCharacteristicSuccess(
+      const std::string& characteristic_instance_id,
+      const base::Closure& callback,
+      const std::vector<uint8_t>& value);
+
+  // Runs |callback|.
+  void OnReadRemoteDescriptorSuccess(const base::Closure& callback,
+                                     const std::vector<uint8_t>& value);
 
   // Called by BluetoothDevice in response to a call to CreateGattConnection.
   void OnCreateGattConnection(

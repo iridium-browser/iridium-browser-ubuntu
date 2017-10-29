@@ -23,10 +23,12 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://www.khronos.org/registry/webgl/extensions/OES_texture_half_float/
+
 [
     DependentLifetime,
     NoInterfaceObject,
-    DoNotCheckConstants,
+    DoNotCheckConstants
 ] interface OESTextureHalfFloat {
     const GLenum HALF_FLOAT_OES                 = 0x8D61;
 };

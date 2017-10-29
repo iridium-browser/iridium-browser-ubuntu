@@ -74,7 +74,7 @@ void PolicyConverter::SetPolicyString(JNIEnv* env,
                                       const JavaRef<jstring>& value) {
   SetPolicyValue(
       ConvertJavaStringToUTF8(env, policyKey),
-      base::MakeUnique<base::StringValue>(ConvertJavaStringToUTF8(env, value)));
+      base::MakeUnique<base::Value>(ConvertJavaStringToUTF8(env, value)));
 }
 
 void PolicyConverter::SetPolicyStringArray(JNIEnv* env,
@@ -113,7 +113,7 @@ std::unique_ptr<base::Value> PolicyConverter::ConvertValueToSchema(
 
   switch (schema.type()) {
     case base::Value::Type::NONE:
-      return base::Value::CreateNullValue();
+      return base::MakeUnique<base::Value>();
 
     case base::Value::Type::BOOLEAN: {
       std::string string_value;
@@ -180,11 +180,6 @@ std::unique_ptr<base::Value> PolicyConverter::ConvertValueToSchema(
 
   NOTREACHED();
   return std::unique_ptr<base::Value>();
-}
-
-// static
-bool PolicyConverter::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 void PolicyConverter::SetPolicyValue(const std::string& key,

@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
@@ -17,6 +18,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/views/animation/ink_drop_host_view.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/image_button.h"
@@ -108,7 +110,7 @@ void IntentPickerBubbleView::ShowBubble(
   delegate->set_parent_window(browser_view->GetNativeWindow());
   views::Widget* widget =
       views::BubbleDialogDelegateView::CreateBubble(delegate);
-  delegate->GetDialogClientView()->set_button_row_insets(
+  delegate->GetDialogClientView()->SetButtonRowInsets(
       gfx::Insets(kDialogDelegateInsets));
 
   delegate->SetArrowPaintType(views::BubbleBorder::PAINT_NONE);
@@ -168,7 +170,7 @@ void IntentPickerBubbleView::Init() {
   // Creates a view to hold the views for each app.
   views::View* scrollable_view = new views::View();
   views::BoxLayout* scrollable_layout =
-      new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0);
+      new views::BoxLayout(views::BoxLayout::kVertical);
   scrollable_view->SetLayoutManager(scrollable_layout);
   for (size_t i = 0; i < app_info_.size(); ++i) {
     IntentPickerLabelButton* app_button = new IntentPickerLabelButton(
@@ -179,7 +181,7 @@ void IntentPickerBubbleView::Init() {
   }
 
   scroll_view_ = new views::ScrollView();
-  scroll_view_->EnableViewPortLayer();
+  scroll_view_->SetBackgroundColor(SK_ColorWHITE);
   scroll_view_->SetContents(scrollable_view);
   // Setting a customized ScrollBar which is shown only when the mouse pointer
   // is inside the ScrollView.
@@ -225,7 +227,9 @@ IntentPickerBubbleView::IntentPickerBubbleView(
       intent_picker_cb_(intent_picker_cb),
       selected_app_tag_(0),
       scroll_view_(nullptr),
-      app_info_(app_info) {}
+      app_info_(app_info) {
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::INTENT_PICKER);
+}
 
 IntentPickerBubbleView::~IntentPickerBubbleView() {
   SetLayoutManager(nullptr);

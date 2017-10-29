@@ -39,9 +39,6 @@ class Configurator : public base::RefCountedThreadSafe<Configurator> {
   // Delay in seconds to every subsequent update check. 0 means don't check.
   virtual int NextCheckDelay() const = 0;
 
-  // Delay in seconds from each task step. Used to smooth out CPU/IO usage.
-  virtual int StepDelay() const = 0;
-
   // Minimum delta time in seconds before an on-demand check is allowed
   // for the same component.
   virtual int OnDemandDelay() const = 0;
@@ -135,6 +132,12 @@ class Configurator : public base::RefCountedThreadSafe<Configurator> {
   // if Chrome is installed for all users on the machine. This function must be
   // called only from a blocking pool thread, as it may access the file system.
   virtual bool IsPerUserInstall() const = 0;
+
+  // Returns the key hash corresponding to a CRX trusted by ActionRun. The
+  // CRX payloads are signed with this key, and their integrity is verified
+  // during the unpacking by the action runner. This is a dependency injection
+  // feature to support testing.
+  virtual std::vector<uint8_t> GetRunActionKeyHash() const = 0;
 
  protected:
   friend class base::RefCountedThreadSafe<Configurator>;

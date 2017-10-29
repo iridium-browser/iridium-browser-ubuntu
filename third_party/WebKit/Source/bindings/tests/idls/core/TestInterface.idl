@@ -37,9 +37,9 @@
     Custom=LegacyCallAsFunction,
     DoNotCheckConstants,
     ImplementedAs=TestInterfaceImplementation,
-    Iterable,
     RuntimeEnabled=FeatureName,
-    Exposed=(Worker,Window),
+    ContextEnabled=FeatureName,
+    Exposed=(Worker,Window)
 ] interface TestInterface : TestInterfaceEmpty {
     // members needed to test [ImplementedAs], as this affect attribute
     // configuration and method configuration
@@ -111,6 +111,8 @@
     Promise promiseMethodPartialOverload();
     Promise promiseMethodPartialOverload(Window window);
     static Promise staticPromiseMethodPartialOverload();
+
+    iterable<ByteString, long>;
 
     [LenientThis] attribute any lenientThisAttribute;
 

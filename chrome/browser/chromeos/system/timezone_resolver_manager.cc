@@ -98,8 +98,12 @@ ServiceConfiguration GetServiceConfigurationFromUserPrefs(
 
 // Returns service configuration for the signin screen.
 ServiceConfiguration GetServiceConfigurationForSigninScreen() {
-  if (!g_browser_process->local_state()->GetBoolean(
-          prefs::kResolveDeviceTimezoneByGeolocation)) {
+  const PrefService::Preference* device_pref =
+      g_browser_process->local_state()->FindPreference(
+          prefs::kResolveDeviceTimezoneByGeolocation);
+  bool device_pref_value;
+  if (!device_pref ||
+      !device_pref->GetValue()->GetAsBoolean(&device_pref_value)) {
     // CfM devices default to static timezone.
     bool keyboard_driven_oobe =
         system::InputDeviceSettings::Get()->ForceKeyboardDrivenUINavigation();
@@ -112,13 +116,16 @@ ServiceConfiguration GetServiceConfigurationForSigninScreen() {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kLoginUser))
     return SHOULD_STOP;
 
-  return SHOULD_START;
+  return device_pref_value ? SHOULD_START : SHOULD_STOP;
 }
 
 }  // anonymous namespace.
 
-TimeZoneResolverManager::TimeZoneResolverManager()
-    : primary_user_prefs_(nullptr) {
+TimeZoneResolverManager::TimeZoneResolverManager() : weak_factory_(this) {
+  g_browser_process->local_state()->AddPrefInitObserver(
+      base::Bind(&TimeZoneResolverManager::OnLocalStateInitialized,
+                 weak_factory_.GetWeakPtr()));
+
   local_state_pref_change_registrar_.Init(g_browser_process->local_state());
   local_state_pref_change_registrar_.Add(
       prefs::kSystemTimezoneAutomaticDetectionPolicy,
@@ -164,17 +171,22 @@ int TimeZoneResolverManager::GetTimezoneManagementSetting() {
 }
 
 void TimeZoneResolverManager::UpdateTimezoneResolver() {
+  initialized_ = true;
+  chromeos::TimeZoneResolver* resolver =
+      g_browser_process->platform_part()->GetTimezoneResolver();
+  // Local state becomes initialized when policy data is loaded,
+  // and we need policies to decide whether resolver can be started.
+  if (!local_state_initialized_) {
+    resolver->Stop();
+    return;
+  }
   if (TimeZoneResolverShouldBeRunning())
-    g_browser_process->platform_part()->GetTimezoneResolver()->Start();
+    resolver->Start();
   else
-    g_browser_process->platform_part()->GetTimezoneResolver()->Stop();
+    resolver->Stop();
 }
 
 bool TimeZoneResolverManager::ShouldApplyResolvedTimezone() {
-  return TimeZoneResolverShouldBeRunning();
-}
-
-bool TimeZoneResolverManager::TimeZoneResolverShouldBeRunningForTests() {
   return TimeZoneResolverShouldBeRunning();
 }
 
@@ -190,6 +202,12 @@ bool TimeZoneResolverManager::TimeZoneResolverShouldBeRunning() {
     }
   }
   return result == SHOULD_START;
+}
+
+void TimeZoneResolverManager::OnLocalStateInitialized(bool initialized) {
+  local_state_initialized_ = initialized;
+  if (initialized_)
+    UpdateTimezoneResolver();
 }
 
 }  // namespace system

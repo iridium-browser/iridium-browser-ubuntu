@@ -14,11 +14,12 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/browser/browsing_data_remover.h"
 
 class ArcAppTest;
+class SessionControllerClientTest;
 class Profile;
 
 namespace base {
@@ -30,13 +31,12 @@ class ExtensionGarbageCollectorChromeOSUnitTest;
 }
 
 namespace arc {
-class SyncArcPackageHelper;
+class ArcAuthServiceTest;
+class ArcSessionManagerTest;
 }
 
 namespace ash {
-namespace test {
 class MultiUserWindowManagerChromeOSTest;
-}  // namespace test
 }  // namespace ash
 
 namespace policy {
@@ -63,7 +63,7 @@ class FileFlusher;
 //    GetActiveUserProfileDir()
 // 3. Get mapping from user_id_hash to Profile instance/profile path etc.
 class ProfileHelper
-    : public BrowsingDataRemover::Observer,
+    : public content::BrowsingDataRemover::Observer,
       public OAuth2LoginManager::Observer,
       public user_manager::UserManager::UserSessionStateObserver {
  public:
@@ -75,8 +75,13 @@ class ProfileHelper
   // knowledge in one place.
   static ProfileHelper* Get();
 
-  // Returns Profile instance that corresponds to |user_id_hash|.
-  static Profile* GetProfileByUserIdHash(const std::string& user_id_hash);
+  // Loads and returns Profile instance that corresponds to |user_id_hash| for
+  // test. It should not be used in production code because it could load a
+  // not-yet-loaded user profile and skip the user profile initialization code
+  // in UserSessionManager.
+  // See http://crbug.com/728683 and http://crbug.com/718734.
+  static Profile* GetProfileByUserIdHashForTest(
+      const std::string& user_id_hash);
 
   // Returns profile path that corresponds to a given |user_id_hash|.
   static base::FilePath GetProfilePathByUserIdHash(
@@ -99,6 +104,19 @@ class ProfileHelper
   // construction of the signin Profile to determine if that Profile is the
   // signin Profile.
   static bool IsSigninProfile(const Profile* profile);
+
+  // Returns the path used for the lock screen apps profile - profile used
+  // for launching platform apps that can display windows on top of the lock
+  // screen.
+  static base::FilePath GetLockScreenAppProfilePath();
+
+  // Returns the name used for the lock screen app profile.
+  static std::string GetLockScreenAppProfileName();
+
+  // Returns whether |profile| is the lock screen app profile - the profile used
+  // for launching platform apps that can display a window on top of the lock
+  // screen.
+  static bool IsLockScreenAppProfile(const Profile* profile);
 
   // Returns true when |profile| corresponds to owner's profile.
   static bool IsOwnerProfile(const Profile* profile);
@@ -149,6 +167,8 @@ class ProfileHelper
   static std::string GetUserIdHashByUserIdForTesting(
       const std::string& user_id);
 
+  void SetActiveUserIdForTesting(const std::string& user_id);
+
   // Flushes all files of |profile|.
   void FlushProfile(Profile* profile);
 
@@ -167,11 +187,12 @@ class ProfileHelper
   friend class PrinterDetectorAppSearchEnabledTest;
   friend class ProfileHelperTest;
   friend class ProfileListChromeOSTest;
-  friend class SessionStateDelegateChromeOSTest;
   friend class SystemTrayDelegateChromeOSTest;
-  friend class arc::SyncArcPackageHelper;
-  friend class ash::test::MultiUserWindowManagerChromeOSTest;
+  friend class ash::MultiUserWindowManagerChromeOSTest;
+  friend class arc::ArcSessionManagerTest;
+  friend class arc::ArcAuthServiceTest;
   friend class ::ArcAppTest;
+  friend class ::SessionControllerClientTest;
   friend class ::test::BrowserFinderChromeOSTest;
 
   // Called when signin profile is cleared.
@@ -218,7 +239,7 @@ class ProfileHelper
   base::Closure on_clear_profile_stage_finished_;
 
   // A currently running browsing data remover.
-  BrowsingDataRemover* browsing_data_remover_;
+  content::BrowsingDataRemover* browsing_data_remover_;
 
   // Used for testing by unit tests and FakeUserManager/MockUserManager.
   std::map<const user_manager::User*, Profile*> user_to_profile_for_testing_;

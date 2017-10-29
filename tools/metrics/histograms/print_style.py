@@ -17,9 +17,9 @@ import pretty_print_xml
 ATTRIBUTE_ORDER = {
     'affected-histogram': ['name'],
     'details': [],
-    'enum': ['name', 'type'],
+    'enum': ['name'],
     'enums': [],
-    'histogram': ['base', 'name', 'enum', 'units'],
+    'histogram': ['base', 'name', 'enum', 'units', 'expiry_date'],
     'histogram-configuration': ['logsource'],
     'histogram_suffixes': ['name', 'separator', 'ordering'],
     'histogram_suffixes_list': [],
@@ -31,6 +31,15 @@ ATTRIBUTE_ORDER = {
     'summary': [],
     'with-suffix': ['name'],
 }
+
+# Attribute names that must be explicitly specified on nodes that support them.
+REQUIRED_ATTRIBUTES = [
+    # TODO(isherman): Make the 'label' attribute required as well. This requires
+    # fixing up existing suffixes that omit a label.
+    'name',
+    'separator',
+    'value',
+]
 
 # Tag names for top-level nodes whose children we don't want to indent.
 TAGS_THAT_DONT_INDENT = [
@@ -72,6 +81,7 @@ TAGS_ALPHABETIZATION_RULES = {
 def GetPrintStyle():
   """Returns an XmlStyle object for pretty printing histograms."""
   return pretty_print_xml.XmlStyle(ATTRIBUTE_ORDER,
+                                   REQUIRED_ATTRIBUTES,
                                    TAGS_THAT_HAVE_EXTRA_NEWLINE,
                                    TAGS_THAT_DONT_INDENT,
                                    TAGS_THAT_ALLOW_SINGLE_LINE,

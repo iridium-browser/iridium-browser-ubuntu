@@ -4,11 +4,13 @@
 
 #include "ash/wm/session_state_animator_impl.h"
 
+#include <utility>
 #include <vector>
 
-#include "ash/common/wm/wm_window_animations.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
+#include "ash/wm/wm_window_animations.h"
+#include "base/barrier_closure.h"
 #include "base/memory/ptr_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -393,12 +395,12 @@ void GetContainersInRootWindow(int container_mask,
     containers->push_back(
         Shell::GetContainer(root_window, kShellWindowId_WallpaperContainer));
   }
-  if (container_mask & SessionStateAnimator::LAUNCHER) {
+  if (container_mask & SessionStateAnimator::SHELF) {
     containers->push_back(
         Shell::GetContainer(root_window, kShellWindowId_ShelfContainer));
   }
   if (container_mask & SessionStateAnimator::NON_LOCK_SCREEN_CONTAINERS) {
-    // TODO(antrim): Figure out a way to eliminate a need to exclude launcher
+    // TODO(antrim): Figure out a way to eliminate a need to exclude shelf
     // in such way.
     aura::Window* non_lock_screen_containers = Shell::GetContainer(
         root_window, kShellWindowId_NonLockScreenContainersContainer);
@@ -441,8 +443,8 @@ class SessionStateAnimatorImpl::AnimationSequence
       public ui::LayerAnimationObserver {
  public:
   explicit AnimationSequence(SessionStateAnimatorImpl* animator,
-                             base::Closure callback)
-      : SessionStateAnimator::AnimationSequence(callback),
+                             base::OnceClosure callback)
+      : SessionStateAnimator::AnimationSequence(std::move(callback)),
         animator_(animator),
         sequences_attached_(0),
         sequences_completed_(0) {}
@@ -545,20 +547,22 @@ void SessionStateAnimatorImpl::StartAnimationWithCallback(
     int container_mask,
     AnimationType type,
     AnimationSpeed speed,
-    base::Closure callback) {
+    base::OnceClosure callback) {
   aura::Window::Windows containers;
   GetContainers(container_mask, &containers);
+  base::Closure animation_done_closure =
+      base::BarrierClosure(containers.size(), std::move(callback));
   for (aura::Window::Windows::const_iterator it = containers.begin();
        it != containers.end(); ++it) {
     ui::LayerAnimationObserver* observer =
-        new CallbackAnimationObserver(callback);
+        new CallbackAnimationObserver(animation_done_closure);
     RunAnimationForWindow(*it, type, speed, observer);
   }
 }
 
 SessionStateAnimator::AnimationSequence*
-SessionStateAnimatorImpl::BeginAnimationSequence(base::Closure callback) {
-  return new AnimationSequence(this, callback);
+SessionStateAnimatorImpl::BeginAnimationSequence(base::OnceClosure callback) {
+  return new AnimationSequence(this, std::move(callback));
 }
 
 bool SessionStateAnimatorImpl::IsWallpaperHidden() const {

@@ -6,10 +6,11 @@
 
 #include "base/debug/alias.h"
 #include "base/memory/shared_memory.h"
-#include "cc/resources/shared_bitmap.h"
+#include "components/viz/common/quads/shared_bitmap.h"
 #include "content/public/browser/browser_thread.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/skia_utils_win.h"
+#include "ui/base/win/internal_constants.h"
 #include "ui/compositor/compositor.h"
 #include "ui/gfx/gdi_util.h"
 #include "ui/gfx/skia_util.h"
@@ -57,7 +58,7 @@ base::SharedMemory* OutputDeviceBacking::GetSharedMemory(
     return backing_.get();
   size_t expected_byte_size = GetMaxByteSize();
   size_t required_size;
-  if (!cc::SharedBitmap::SizeInBytes(size, &required_size))
+  if (!viz::SharedBitmap::SizeInBytes(size, &required_size))
     return nullptr;
   if (required_size > expected_byte_size)
     return nullptr;
@@ -75,8 +76,8 @@ size_t OutputDeviceBacking::GetMaxByteSize() {
   size_t max_size = 1;
   for (const SoftwareOutputDeviceWin* device : devices_) {
     size_t current_size;
-    if (!cc::SharedBitmap::SizeInBytes(device->viewport_pixel_size(),
-                                       &current_size))
+    if (!viz::SharedBitmap::SizeInBytes(device->viewport_pixel_size(),
+                                        &current_size))
       continue;
     if (current_size > kMaxBitmapSizeBytes)
       continue;
@@ -93,8 +94,7 @@ SoftwareOutputDeviceWin::SoftwareOutputDeviceWin(OutputDeviceBacking* backing,
       in_paint_(false) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  LONG style = GetWindowLong(hwnd_, GWL_EXSTYLE);
-  is_hwnd_composited_ = !!(style & WS_EX_COMPOSITED);
+  is_hwnd_composited_ = !!::GetProp(hwnd_, ui::kWindowTranslucent);
   // Layered windows must be completely updated every time, so they can't
   // share contents with other windows.
   if (is_hwnd_composited_)
@@ -177,7 +177,7 @@ void SoftwareOutputDeviceWin::EndPaint() {
     BLENDFUNCTION blend = {AC_SRC_OVER, 0x00, 0xFF, AC_SRC_ALPHA};
 
     DWORD style = GetWindowLong(hwnd_, GWL_EXSTYLE);
-    style &= ~WS_EX_COMPOSITED;
+    DCHECK(!(style & WS_EX_COMPOSITED));
     style |= WS_EX_LAYERED;
     SetWindowLong(hwnd_, GWL_EXSTYLE, style);
 

@@ -34,8 +34,8 @@ namespace {
 
 void DumbTask(SyncStatusCode status,
               const SyncStatusCallback& callback) {
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                base::Bind(callback, status));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(callback, status));
 }
 
 void IncrementAndAssign(int expected_before_counter,
@@ -43,15 +43,6 @@ void IncrementAndAssign(int expected_before_counter,
                         SyncStatusCode* status_out,
                         SyncStatusCode status) {
   EXPECT_EQ(expected_before_counter, *counter);
-  ++(*counter);
-  *status_out = status;
-}
-
-template <typename T>
-void IncrementAndAssignWithOwnedPointer(T* object,
-                                        int* counter,
-                                        SyncStatusCode* status_out,
-                                        SyncStatusCode status) {
   ++(*counter);
   *status_out = status;
 }
@@ -65,10 +56,9 @@ class TaskManagerClient
         task_scheduled_count_(0),
         idle_task_scheduled_count_(0),
         last_operation_status_(SYNC_STATUS_OK) {
-    task_manager_.reset(new SyncTaskManager(
-        AsWeakPtr(), maximum_background_task,
-        base::ThreadTaskRunnerHandle::Get(),
-        nullptr /* worker_pool */));
+    task_manager_.reset(
+        new SyncTaskManager(AsWeakPtr(), maximum_background_task,
+                            base::ThreadTaskRunnerHandle::Get()));
     task_manager_->Initialize(SYNC_STATUS_OK);
     base::RunLoop().RunUntilIdle();
     maybe_schedule_next_task_count_ = 0;
@@ -119,7 +109,7 @@ class TaskManagerClient
     if (is_idle_task)
       ++idle_task_scheduled_count_;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, status_to_return));
+        FROM_HERE, base::BindOnce(callback, status_to_return));
   }
 
   std::unique_ptr<SyncTaskManager> task_manager_;
@@ -150,8 +140,8 @@ class MultihopSyncTask : public ExclusiveTask {
     DCHECK(!*task_started_);
     *task_started_ = true;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&MultihopSyncTask::CompleteTask,
-                              weak_ptr_factory_.GetWeakPtr(), callback));
+        FROM_HERE, base::BindOnce(&MultihopSyncTask::CompleteTask,
+                                  weak_ptr_factory_.GetWeakPtr(), callback));
   }
 
  private:
@@ -212,8 +202,8 @@ class BackgroundTask : public SyncTask {
 
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(&BackgroundTask::CompleteTask,
-                   weak_ptr_factory_.GetWeakPtr(), base::Passed(&token)));
+        base::BindOnce(&BackgroundTask::CompleteTask,
+                       weak_ptr_factory_.GetWeakPtr(), base::Passed(&token)));
   }
 
   void CompleteTask(std::unique_ptr<SyncTaskToken> token) {
@@ -282,8 +272,8 @@ class BlockerUpdateTestHelper : public SyncTask {
     log_->push_back(name_ + ": updated to " + updated_to);
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(&BlockerUpdateTestHelper::UpdateBlocker,
-                   weak_ptr_factory_.GetWeakPtr(), base::Passed(&token)));
+        base::BindOnce(&BlockerUpdateTestHelper::UpdateBlocker,
+                       weak_ptr_factory_.GetWeakPtr(), base::Passed(&token)));
   }
 
   std::string name_;
@@ -396,8 +386,7 @@ TEST(SyncTaskManagerTest, ScheduleAndCancelSyncTask) {
   {
     SyncTaskManager task_manager(base::WeakPtr<SyncTaskManager::Client>(),
                                  0 /* maximum_background_task */,
-                                 base::ThreadTaskRunnerHandle::Get(),
-                                 nullptr /* worker_pool */);
+                                 base::ThreadTaskRunnerHandle::Get());
     task_manager.Initialize(SYNC_STATUS_OK);
     base::RunLoop().RunUntilIdle();
     task_manager.ScheduleSyncTask(
@@ -418,8 +407,7 @@ TEST(SyncTaskManagerTest, ScheduleTaskAtPriority) {
   base::MessageLoop message_loop;
   SyncTaskManager task_manager(base::WeakPtr<SyncTaskManager::Client>(),
                                0 /* maximum_background_task */,
-                               base::ThreadTaskRunnerHandle::Get(),
-                               nullptr /* worker_pool */);
+                               base::ThreadTaskRunnerHandle::Get());
   task_manager.Initialize(SYNC_STATUS_OK);
   base::RunLoop().RunUntilIdle();
 
@@ -480,8 +468,7 @@ TEST(SyncTaskManagerTest, BackgroundTask_Sequential) {
   base::MessageLoop message_loop;
   SyncTaskManager task_manager(base::WeakPtr<SyncTaskManager::Client>(),
                                10 /* maximum_background_task */,
-                               base::ThreadTaskRunnerHandle::Get(),
-                               nullptr /* worker_pool */);
+                               base::ThreadTaskRunnerHandle::Get());
   task_manager.Initialize(SYNC_STATUS_OK);
 
   SyncStatusCode status = SYNC_STATUS_FAILED;
@@ -513,8 +500,7 @@ TEST(SyncTaskManagerTest, BackgroundTask_Parallel) {
   base::MessageLoop message_loop;
   SyncTaskManager task_manager(base::WeakPtr<SyncTaskManager::Client>(),
                                10 /* maximum_background_task */,
-                               base::ThreadTaskRunnerHandle::Get(),
-                               nullptr /* worker_pool */);
+                               base::ThreadTaskRunnerHandle::Get());
   task_manager.Initialize(SYNC_STATUS_OK);
 
   SyncStatusCode status = SYNC_STATUS_FAILED;
@@ -546,8 +532,7 @@ TEST(SyncTaskManagerTest, BackgroundTask_Throttled) {
   base::MessageLoop message_loop;
   SyncTaskManager task_manager(base::WeakPtr<SyncTaskManager::Client>(),
                                2 /* maximum_background_task */,
-                               base::ThreadTaskRunnerHandle::Get(),
-                               nullptr /* worker_pool */);
+                               base::ThreadTaskRunnerHandle::Get());
   task_manager.Initialize(SYNC_STATUS_OK);
 
   SyncStatusCode status = SYNC_STATUS_FAILED;
@@ -579,8 +564,7 @@ TEST(SyncTaskManagerTest, UpdateTaskBlocker) {
   base::MessageLoop message_loop;
   SyncTaskManager task_manager(base::WeakPtr<SyncTaskManager::Client>(),
                                10 /* maximum_background_task */,
-                               base::ThreadTaskRunnerHandle::Get(),
-                               nullptr /* worker_pool */);
+                               base::ThreadTaskRunnerHandle::Get());
   task_manager.Initialize(SYNC_STATUS_OK);
 
   SyncStatusCode status1 = SYNC_STATUS_FAILED;

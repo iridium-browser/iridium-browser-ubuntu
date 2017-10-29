@@ -18,8 +18,8 @@ namespace media {
 namespace mp4 {
 
 struct SampleInfo {
-  int size;
-  int duration;
+  uint32_t size;
+  uint32_t duration;
   int cts_offset;
   bool is_keyframe;
   uint32_t cenc_group_description_index;
@@ -94,8 +94,7 @@ DecodeTimestamp DecodeTimestampFromRational(int64_t numer, int64_t denom) {
       TimeDeltaFromRational(numer, denom));
 }
 
-TrackRunIterator::TrackRunIterator(const Movie* moov,
-                                   const scoped_refptr<MediaLog>& media_log)
+TrackRunIterator::TrackRunIterator(const Movie* moov, MediaLog* media_log)
     : moov_(moov), media_log_(media_log), sample_offset_(0) {
   CHECK(moov);
 }
@@ -117,7 +116,7 @@ static bool PopulateSampleInfo(const TrackExtends& trex,
                                SampleInfo* sample_info,
                                const SampleDependsOn sdtp_sample_depends_on,
                                bool is_audio,
-                               const scoped_refptr<MediaLog>& media_log) {
+                               MediaLog* media_log) {
   if (i < trun.sample_sizes.size()) {
     sample_info->size = trun.sample_sizes[i];
   } else if (tfhd.default_sample_size > 0) {
@@ -170,11 +169,11 @@ static bool PopulateSampleInfo(const TrackExtends& trex,
   // that marks non-key video frames as sync samples (http://crbug.com/507916
   // and http://crbug.com/310712). Hence, for video we additionally check that
   // the sample does not depend on others (FFmpeg does too, see mov_read_trun).
-  // Sample dependency is not ignored for audio because encoded audio samples
-  // can depend on other samples and still be used for random access. Generally
-  // all audio samples are expected to be sync samples, but we  prefer to check
-  // the flags to catch badly muxed audio (for now anyway ;P). History of
-  // attempts to get this right discussed in http://crrev.com/1319813002
+  // Sample dependency is ignored for audio because encoded audio samples can
+  // depend on other samples and still be used for random access. Generally all
+  // audio samples are expected to be sync samples, but we  prefer to check the
+  // flags to catch badly muxed audio (for now anyway ;P). History of attempts
+  // to get this right discussed in http://crrev.com/1319813002
   bool sample_is_sync_sample = !(flags & kSampleIsNonSyncSample);
   bool sample_depends_on_others = sample_depends_on == kSampleDependsOnOthers;
   sample_info->is_keyframe = sample_is_sync_sample &&
@@ -327,13 +326,13 @@ bool TrackRunIterator::Init(const MovieFragment& moof) {
       tri.is_audio = (stsd.type == kAudio);
       if (tri.is_audio) {
         RCHECK(!stsd.audio_entries.empty());
-        if (desc_idx > stsd.audio_entries.size())
+        if (desc_idx >= stsd.audio_entries.size())
           desc_idx = 0;
         tri.audio_description = &stsd.audio_entries[desc_idx];
         track_encryption = &tri.audio_description->sinf.info.track_encryption;
       } else {
         RCHECK(!stsd.video_entries.empty());
-        if (desc_idx > stsd.video_entries.size())
+        if (desc_idx >= stsd.video_entries.size())
           desc_idx = 0;
         tri.video_description = &stsd.video_entries[desc_idx];
         track_encryption = &tri.video_description->sinf.info.track_encryption;
@@ -506,7 +505,9 @@ bool TrackRunIterator::CacheAuxInfo(const uint8_t* buf, int buf_size) {
       const uint8_t iv_size = GetIvSize(i);
       const bool has_subsamples = info_size > iv_size;
       SampleEncryptionEntry& entry = sample_encryption_entries[i];
-      RCHECK(entry.Parse(&reader, iv_size, has_subsamples));
+      RCHECK_MEDIA_LOGGED(
+          entry.Parse(&reader, iv_size, has_subsamples), media_log_,
+          "SampleEncryptionEntry parse failed when caching aux info");
 #if BUILDFLAG(ENABLE_CBCS_ENCRYPTION_SCHEME)
       // if we don't have a per-sample IV, get the constant IV.
       if (!iv_size) {
@@ -595,7 +596,7 @@ int64_t TrackRunIterator::sample_offset() const {
   return sample_offset_;
 }
 
-int TrackRunIterator::sample_size() const {
+uint32_t TrackRunIterator::sample_size() const {
   DCHECK(IsSampleValid());
   return sample_itr_->size;
 }

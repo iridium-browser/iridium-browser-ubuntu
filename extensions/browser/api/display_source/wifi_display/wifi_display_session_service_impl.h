@@ -24,9 +24,8 @@ class WiFiDisplaySessionServiceImpl
       public DisplaySourceConnectionDelegate::Observer {
  public:
   ~WiFiDisplaySessionServiceImpl() override;
-  static void BindToRequest(
-      content::BrowserContext* context,
-      mojo::InterfaceRequest<mojom::WiFiDisplaySessionService> request);
+  static void BindToRequest(content::BrowserContext* context,
+                            mojom::WiFiDisplaySessionServiceRequest request);
 
  private:
   // WiFiDisplaySessionService overrides.

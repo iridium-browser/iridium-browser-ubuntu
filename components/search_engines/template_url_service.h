@@ -135,14 +135,14 @@ class TemplateURLService : public WebDataServiceConsumer,
 
   // Returns whether the engine is a "pre-existing" engine, either from the
   // prepopulate list or created by policy.
-  bool IsPrepopulatedOrCreatedByPolicy(const TemplateURL* template_url);
+  bool IsPrepopulatedOrCreatedByPolicy(const TemplateURL* template_url) const;
 
   // Returns whether |template_url| should be shown in the list of engines
   // most likely to be selected as a default engine. This is meant to highlight
   // the current default, as well as the other most likely choices of default
   // engine, separately from a full list of all TemplateURLs (which might be
   // very long).
-  bool ShowInDefaultList(const TemplateURL* template_url);
+  bool ShowInDefaultList(const TemplateURL* template_url) const;
 
   // Adds to |matches| all TemplateURLs whose keywords begin with |prefix|,
   // sorted shortest-keyword-first. If |supports_replacement_only| is true, only
@@ -167,15 +167,19 @@ class TemplateURLService : public WebDataServiceConsumer,
   // The caller should not try to delete the returned pointer; the data store
   // retains ownership of it.
   TemplateURL* GetTemplateURLForKeyword(const base::string16& keyword);
+  const TemplateURL* GetTemplateURLForKeyword(
+      const base::string16& keyword) const;
 
   // Returns that TemplateURL with the specified GUID, or NULL if not found.
   // The caller should not try to delete the returned pointer; the data store
   // retains ownership of it.
   TemplateURL* GetTemplateURLForGUID(const std::string& sync_guid);
+  const TemplateURL* GetTemplateURLForGUID(const std::string& sync_guid) const;
 
   // Returns the first TemplateURL found with a URL using the specified |host|,
   // or NULL if there are no such TemplateURLs
   TemplateURL* GetTemplateURLForHost(const std::string& host);
+  const TemplateURL* GetTemplateURLForHost(const std::string& host) const;
 
   // Adds |template_url| to this model.  Returns a raw pointer to |template_url|
   // if the addition succeeded, or null on failure.  (Many callers need still
@@ -188,11 +192,6 @@ class TemplateURLService : public WebDataServiceConsumer,
                                 const base::string16& short_name,
                                 const base::string16& keyword,
                                 const std::string& url);
-
-  // Adds a search engine with the specified info for extensions.
-  TemplateURL* AddExtensionControlledTURL(
-      std::unique_ptr<TemplateURL> template_url,
-      std::unique_ptr<TemplateURL::AssociatedExtensionInfo> info);
 
   // Removes the keyword from the model. This deletes the supplied TemplateURL.
   // This fails if the supplied template_url is the default search provider.
@@ -248,7 +247,7 @@ class TemplateURLService : public WebDataServiceConsumer,
   // Return true if the given |url| can be made the default. This returns false
   // regardless of |url| if the default search provider is managed by policy or
   // controlled by an extension.
-  bool CanMakeDefault(const TemplateURL* url);
+  bool CanMakeDefault(const TemplateURL* url) const;
 
   // Set the default search provider.  |url| may be null.
   // This will assert if the default search is managed; the UI should not be
@@ -258,10 +257,9 @@ class TemplateURLService : public WebDataServiceConsumer,
   // Returns the default search provider. If the TemplateURLService hasn't been
   // loaded, the default search provider is pulled from preferences.
   //
-  // NOTE: At least in unittest mode, this may return NULL.
-  // TODO(blundell): See if all callers can be converted to take in const
-  // pointers and eliminate this version of the method.
-  TemplateURL* GetDefaultSearchProvider();
+  // NOTE: This may return null in certain circumstances such as:
+  //       1.) Unit test mode
+  //       2.) The default search engine is disabled by policy.
   const TemplateURL* GetDefaultSearchProvider() const;
 
   // Returns true if the |url| is a search results page from the default search
@@ -274,7 +272,7 @@ class TemplateURLService : public WebDataServiceConsumer,
   }
 
   // Returns true if the default search provider is controlled by an extension.
-  bool IsExtensionControlledDefaultSearch();
+  bool IsExtensionControlledDefaultSearch() const;
 
   // Returns the default search specified in the prepopulated data, if it
   // exists.  If not, returns first URL in |template_urls_|, or NULL if that's
@@ -330,8 +328,9 @@ class TemplateURLService : public WebDataServiceConsumer,
   // Returns the locale-direction-adjusted short name for the given keyword.
   // Also sets the out param to indicate whether the keyword belongs to an
   // Omnibox extension.
-  base::string16 GetKeywordShortName(const base::string16& keyword,
-                                     bool* is_omnibox_api_extension_keyword);
+  base::string16 GetKeywordShortName(
+      const base::string16& keyword,
+      bool* is_omnibox_api_extension_keyword) const;
 
   // Called by the history service when a URL is visited.
   void OnHistoryURLVisited(const URLVisitedDetails& details);
@@ -392,7 +391,7 @@ class TemplateURLService : public WebDataServiceConsumer,
       TemplateURLServiceClient* client,
       PrefService* prefs,
       const SearchTermsData& search_terms_data,
-      TemplateURL* existing_turl,
+      const TemplateURL* existing_turl,
       const syncer::SyncData& sync_data,
       syncer::SyncChangeList* change_list);
 
@@ -543,13 +542,13 @@ class TemplateURLService : public WebDataServiceConsumer,
 
   // Returns false if there is a TemplateURL that has a search url with the
   // specified host and that TemplateURL has been manually modified.
-  bool CanAddAutogeneratedKeywordForHost(const std::string& host);
+  bool CanAddAutogeneratedKeywordForHost(const std::string& host) const;
 
   // Returns true if the TemplateURL is replaceable. This doesn't look at the
   // uniqueness of the keyword or host and is intended to be called after those
   // checks have been done. This returns true if the TemplateURL doesn't appear
   // in the default list and is marked as safe_for_autoreplace.
-  bool CanReplace(const TemplateURL* t_url);
+  bool CanReplace(const TemplateURL* t_url) const;
 
   // Like GetTemplateURLForKeyword(), but ignores extension-provided keywords.
   TemplateURL* FindNonExtensionTemplateURLForKeyword(
@@ -661,7 +660,7 @@ class TemplateURLService : public WebDataServiceConsumer,
   //    search provider
   bool IsLocalTemplateURLBetter(const TemplateURL* local_turl,
                                 const TemplateURL* sync_turl,
-                                bool prefer_local_default = true);
+                                bool prefer_local_default = true) const;
 
   // Given two synced TemplateURLs with a conflicting keyword, one of which
   // needs to be added to or updated in the local model (|unapplied_sync_turl|)
@@ -724,6 +723,11 @@ class TemplateURLService : public WebDataServiceConsumer,
   // wants to be default. Returns nullptr if not found.
   TemplateURL* FindMatchingDefaultExtensionTemplateURL(
       const TemplateURLData& data);
+
+  // Returns whether |template_urls_| contains more than one normal engine with
+  // same keyword. Used to validate state after search engines are
+  // added/updated.
+  bool HasDuplicateKeywords() const;
 
   // ---------- Browser state related members ---------------------------------
   PrefService* prefs_;

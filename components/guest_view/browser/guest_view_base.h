@@ -23,6 +23,7 @@
 namespace guest_view {
 
 class GuestViewEvent;
+class GuestViewManager;
 
 // A struct of parameters for SetSize(). The parameters are all declared as
 // scoped pointers since they are all optional. Null pointers indicate that the
@@ -154,7 +155,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // Returns whether this guest has an associated embedder.
   bool attached() const {
-    return element_instance_id_ != kInstanceIDNone;
+    return (element_instance_id_ != kInstanceIDNone) && !attach_in_progress_;
   }
 
   // Returns the instance ID of the <*view> element.
@@ -192,7 +193,12 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   int proxy_routing_id() const { return guest_proxy_routing_id_; }
 
   // Destroy this guest.
-  void Destroy();
+  void Destroy(bool also_delete);
+
+  // Indicates whether a guest should call destroy during DidDetach().
+  // TODO(wjmaclean): Delete this when browser plugin goes away;
+  // https://crbug.com/533069 .
+  virtual bool ShouldDestroyOnDetach() const;
 
   // Saves the attach state of the custom element hosting this GuestView.
   void SetAttachParams(const base::DictionaryValue& params);
@@ -222,12 +228,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
       const content::NativeWebKeyboardEvent& event) override;
   bool PreHandleGestureEvent(content::WebContents* source,
                              const blink::WebGestureEvent& event) override;
-  void FindReply(content::WebContents* source,
-                 int request_id,
-                 int number_of_matches,
-                 const gfx::Rect& selection_rect,
-                 int active_match_ordinal,
-                 bool final_update) override;
 
   // WebContentsObserver implementation.
   void DidFinishNavigation(
@@ -296,11 +296,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // asynchronous setup.
   virtual void SignalWhenReady(const base::Closure& callback);
 
-  // Returns true if this guest should handle find requests for its
-  // embedder. This should generally be true for guests that make up the
-  // entirety of the embedder's content.
-  virtual bool ShouldHandleFindRequestsForEmbedder() const;
-
   // This method is called immediately before suspended resource loads have been
   // resumed on attachment to an embedder.
   //
@@ -345,10 +340,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   void DidAttach(int guest_proxy_routing_id) final;
   void DidDetach() final;
   content::WebContents* GetOwnerWebContents() const final;
-  bool HandleFindForEmbedder(int request_id,
-                             const base::string16& search_text,
-                             const blink::WebFindOptions& options) final;
-  bool HandleStopFindingForEmbedder(content::StopFindAction action) final;
   void GuestSizeChanged(const gfx::Size& new_size) final;
   void SetGuestHost(content::GuestHost* guest_host) final;
   void WillAttach(content::WebContents* embedder_web_contents,
@@ -411,6 +402,9 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   void UpdateGuestSize(const gfx::Size& new_size, bool due_to_auto_resize);
 
+  GuestViewManager* GetGuestViewManager();
+  void SetOwnerHost();
+
   // This guest tracks the lifetime of the WebContents specified by
   // |owner_web_contents_|. If |owner_web_contents_| is destroyed then this
   // guest will also self-destruct.
@@ -429,6 +423,12 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // |element_instance_id_| is an identifer that's unique to a particular
   // GuestViewContainer element.
   int element_instance_id_;
+
+  // |attach_in_progress_| is used to make sure that attached() doesn't return
+  // true until after DidAttach() is called, since that's when we are guaranteed
+  // that the contentWindow for cross-process-iframe based guests will become
+  // valid.
+  bool attach_in_progress_;
 
   // |initialized_| indicates whether GuestViewBase::Init has been called for
   // this object.
@@ -451,7 +451,8 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   std::unique_ptr<base::DictionaryValue> attach_params_;
 
   // This observer ensures that this guest self-destructs if the embedder goes
-  // away.
+  // away. It also tracks when the embedder's fullscreen is toggled or when its
+  // page scale factor changes so the guest can change itself accordingly.
   std::unique_ptr<OwnerContentsObserver> owner_contents_observer_;
 
   // This observer ensures that if the guest is unattached and its opener goes

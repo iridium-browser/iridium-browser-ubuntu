@@ -4,17 +4,6 @@
 
 import("//ios/web/js_compile.gni")
 
-bundle_data("resources") {
-  sources = [
-    "resources/expand_less.png",
-    "resources/expand_less@2x.png",
-    "resources/expand_less@3x.png",
-  ]
-  outputs = [
-    "{{bundle_resources_dir}}/{{source_file_part}}",
-  ]
-}
-
 js_compile_unchecked("injected_js") {
   sources = [
     "resources/contextualsearch.js",
@@ -32,6 +21,7 @@ bundle_data("resources_unit_tests") {
 }
 
 source_set("contextual_search") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "contextual_search_context.cc",
     "contextual_search_context.h",
@@ -56,6 +46,8 @@ source_set("contextual_search") {
     "contextual_search_results_view.mm",
     "contextual_search_web_state_observer.h",
     "contextual_search_web_state_observer.mm",
+    "contextual_search_wrangler.h",
+    "contextual_search_wrangler.mm",
     "js_contextual_search_manager.h",
     "js_contextual_search_manager.mm",
     "panel_configuration.h",
@@ -67,7 +59,7 @@ source_set("contextual_search") {
   ]
   deps = [
     ":injected_js",
-    ":resources",
+    "resources:expand_less",
     "//base",
     "//components/google/core/browser",
     "//components/prefs",
@@ -88,6 +80,7 @@ source_set("contextual_search") {
     "//ios/chrome/browser/ui/contextual_search/protos",
     "//ios/chrome/browser/ui/util",
     "//ios/chrome/browser/web",
+    "//ios/chrome/browser/web_state_list",
     "//ios/chrome/common",
     "//ios/public/provider/chrome/browser",
     "//ios/public/provider/chrome/browser/images",
@@ -102,6 +95,7 @@ source_set("contextual_search") {
 }
 
 source_set("test_support") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "touch_to_search_permissions_mediator+testing.h",
@@ -113,6 +107,7 @@ source_set("test_support") {
 }
 
 source_set("unit_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "contextual_search_js_unittest.mm",
@@ -134,7 +129,7 @@ source_set("unit_tests") {
     "//ios/chrome/browser/sync:test_support",
     "//ios/chrome/browser/web:test_support",
     "//ios/web",
-    "//ios/web:test_support",
+    "//ios/web/public/test",
     "//net",
     "//testing/gtest",
     "//third_party/ocmock",

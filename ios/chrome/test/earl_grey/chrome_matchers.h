@@ -11,30 +11,25 @@
 
 namespace chrome_test_util {
 
-// Matcher for element with accessbitility label corresponding to |message_id|
-// and acessibility trait UIAccessibilityTraitButton.
+// Matcher for element with accessibility label corresponding to |message_id|
+// and accessibility trait UIAccessibilityTraitButton.
 id<GREYMatcher> ButtonWithAccessibilityLabelId(int message_id);
 
-// Matcher for element with accessbitility label corresponding to |label| and
-// acessibility trait UIAccessibilityTraitButton.
+// Matcher for element with accessibility label corresponding to |label| and
+// accessibility trait UIAccessibilityTraitButton.
 id<GREYMatcher> ButtonWithAccessibilityLabel(NSString* label);
 
-// Matcher for element with accessbitility label corresponding to |message_id|
-// and acessibility trait UIAccessibilityTraitStaticText.
+// Matcher for element with an image corresponding to |image_id| and
+// accessibility trait UIAccessibilityTraitButton.
+id<GREYMatcher> ButtonWithImage(int image_id);
+
+// Matcher for element with accessibility label corresponding to |message_id|
+// and accessibility trait UIAccessibilityTraitStaticText.
 id<GREYMatcher> StaticTextWithAccessibilityLabelId(int message_id);
 
-// Matcher for element with accessbitility label corresponding to |label| and
-// acessibility trait UIAccessibilityTraitStaticText.
+// Matcher for element with accessibility label corresponding to |label| and
+// accessibility trait UIAccessibilityTraitStaticText.
 id<GREYMatcher> StaticTextWithAccessibilityLabel(NSString* label);
-
-// Returns matcher for webview containing |text|.
-id<GREYMatcher> WebViewContainingText(std::string text);
-
-// Returns matcher for webview not containing |text|.
-id<GREYMatcher> WebViewNotContainingText(std::string text);
-
-// Returns matcher for a StaticHtmlViewController containing |text|.
-id<GREYMatcher> StaticHtmlViewContainingText(NSString* text);
 
 // Returns matcher for WKWebView containing a blocked |image_id|.  When blocked,
 // the image element will be smaller than actual image.
@@ -83,6 +78,53 @@ id<GREYMatcher> ShowTabsButton();
 // callsites.
 id<GREYMatcher> CollectionViewSwitchCell(NSString* accessibilityIdentifier,
                                          BOOL isOn);
+
+// Matcher for the Open in New Tab option in the context menu when long pressing
+// a link.
+id<GREYMatcher> OpenLinkInNewTabButton();
+
+// Matcher for the done button on the navigation bar.
+id<GREYMatcher> NavigationBarDoneButton();
+
+// Returns matcher for the account consistency setup signin button.
+id<GREYMatcher> AccountConsistencySetupSigninButton();
+
+// Returns matcher for the account consistency confirmation button.
+id<GREYMatcher> AccountConsistencyConfirmationOkButton();
+
+// Returns matcher for the sign out accounts button.
+id<GREYMatcher> SignOutAccountsButton();
+
+// Returns matcher for the clear browsing data collection view.
+id<GREYMatcher> ClearBrowsingDataCollectionView();
+
+// Returns matcher for the settings button in the tools menu.
+id<GREYMatcher> SettingsMenuButton();
+
+// Returns matcher for the OK button.
+id<GREYMatcher> OKButton();
+
+// Returns matcher for the signin button in the settings menu.
+id<GREYMatcher> SignInMenuButton();
+
+// Returns matcher for the button for the currently signed in account in the
+// settings menu.
+id<GREYMatcher> SettingsAccountButton();
+
+// Returns matcher for the menu button to sync accounts.
+id<GREYMatcher> AccountsSyncButton();
+
+// Returns matcher for the Content Settings button on the main Settings screen.
+id<GREYMatcher> ContentSettingsButton();
+
+// Returns matcher for the back button on a settings menu.
+id<GREYMatcher> SettingsMenuBackButton();
+
+// Returns matcher for the Privacy cell on the main Settings screen.
+id<GREYMatcher> SettingsMenuPrivacyButton();
+
+// Returns matcher for the Save passwords cell on the main Settings screen.
+id<GREYMatcher> SettingsMenuPasswordsButton();
 
 }  // namespace chrome_test_util
 

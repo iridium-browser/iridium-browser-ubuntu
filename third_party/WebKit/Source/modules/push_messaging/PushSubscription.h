@@ -5,15 +5,16 @@
 #ifndef PushSubscription_h
 #define PushSubscription_h
 
+#include <memory>
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
-#include "bindings/core/v8/ScriptWrappable.h"
-#include "core/dom/DOMArrayBuffer.h"
+#include "core/dom/DOMTimeStamp.h"
+#include "core/typed_arrays/DOMArrayBuffer.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefPtr.h"
-#include <memory>
+#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -29,16 +30,17 @@ class PushSubscription final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static PushSubscription* take(ScriptPromiseResolver*,
+  static PushSubscription* Take(ScriptPromiseResolver*,
                                 std::unique_ptr<WebPushSubscription>,
                                 ServiceWorkerRegistration*);
-  static void dispose(WebPushSubscription* subscriptionRaw);
+  static void Dispose(WebPushSubscription* subscription_raw);
 
   virtual ~PushSubscription();
 
-  KURL endpoint() const { return m_endpoint; }
+  KURL endpoint() const { return endpoint_; }
+  DOMTimeStamp expirationTime(bool& out_is_null) const;
 
-  PushSubscriptionOptions* options() const { return m_options.get(); }
+  PushSubscriptionOptions* options() const { return options_.Get(); }
 
   DOMArrayBuffer* getKey(const AtomicString& name) const;
   ScriptPromise unsubscribe(ScriptState*);
@@ -50,14 +52,14 @@ class PushSubscription final
  private:
   PushSubscription(const WebPushSubscription&, ServiceWorkerRegistration*);
 
-  KURL m_endpoint;
+  KURL endpoint_;
 
-  Member<PushSubscriptionOptions> m_options;
+  Member<PushSubscriptionOptions> options_;
 
-  Member<DOMArrayBuffer> m_p256dh;
-  Member<DOMArrayBuffer> m_auth;
+  Member<DOMArrayBuffer> p256dh_;
+  Member<DOMArrayBuffer> auth_;
 
-  Member<ServiceWorkerRegistration> m_serviceWorkerRegistration;
+  Member<ServiceWorkerRegistration> service_worker_registration_;
 };
 
 }  // namespace blink

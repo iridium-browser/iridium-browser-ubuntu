@@ -6,6 +6,7 @@
 #define CONTENT_RENDERER_DEVTOOLS_DEVTOOLS_AGENT_H_
 
 #include <memory>
+#include <set>
 #include <string>
 
 #include "base/callback.h"
@@ -53,6 +54,7 @@ class CONTENT_EXPORT DevToolsAgent
   blink::WebDevToolsAgent* GetWebAgent();
 
   bool IsAttached();
+  void DetachAllSessions();
 
  private:
   friend class DevToolsAgentTest;
@@ -63,27 +65,27 @@ class CONTENT_EXPORT DevToolsAgent
   void OnDestruct() override;
 
   // WebDevToolsAgentClient implementation.
-  void sendProtocolMessage(int session_id,
+  void SendProtocolMessage(int session_id,
                            int call_id,
                            const blink::WebString& response,
                            const blink::WebString& state) override;
   blink::WebDevToolsAgentClient::WebKitClientMessageLoop*
-      createClientMessageLoop() override;
-  void willEnterDebugLoop() override;
-  void didExitDebugLoop() override;
+  CreateClientMessageLoop() override;
+  void WillEnterDebugLoop() override;
+  void DidExitDebugLoop() override;
 
-  bool requestDevToolsForFrame(blink::WebLocalFrame* frame) override;
+  bool RequestDevToolsForFrame(blink::WebLocalFrame* frame) override;
 
-  void enableTracing(const blink::WebString& category_filter) override;
-  void disableTracing() override;
+  void EnableTracing(const blink::WebString& category_filter) override;
+  void DisableTracing() override;
 
-  void setCPUThrottlingRate(double rate) override;
+  void SetCPUThrottlingRate(double rate) override;
 
   void OnAttach(const std::string& host_id, int session_id);
   void OnReattach(const std::string& host_id,
                   int session_id,
                   const std::string& agent_state);
-  void OnDetach();
+  void OnDetach(int session_id);
   void OnDispatchOnInspectorBackend(int session_id,
                                     int call_id,
                                     const std::string& method,
@@ -91,7 +93,7 @@ class CONTENT_EXPORT DevToolsAgent
   void OnInspectElement(int session_id, int x, int y);
   void OnRequestNewWindowACK(bool success);
   void ContinueProgram();
-  void OnSetupDevToolsClient(const std::string& compatibility_script);
+  void OnSetupDevToolsClient(const std::string& api_script);
 
   void GotManifest(int session_id,
                    int command_id,
@@ -99,9 +101,8 @@ class CONTENT_EXPORT DevToolsAgent
                    const Manifest& manifest,
                    const ManifestDebugInfo& debug_info);
 
-  bool is_attached_;
+  std::set<int> session_ids_;
   bool is_devtools_client_;
-  bool paused_in_mouse_move_;
   bool paused_;
   RenderFrameImpl* frame_;
   base::Callback<void(int, int, const std::string&, const std::string&)>

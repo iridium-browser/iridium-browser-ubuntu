@@ -9,227 +9,285 @@
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/dom/UserGestureIndicator.h"
 #include "device/usb/public/interfaces/device.mojom-blink.h"
 #include "modules/EventTargetModules.h"
 #include "modules/webusb/USBConnectionEvent.h"
 #include "modules/webusb/USBDevice.h"
 #include "modules/webusb/USBDeviceFilter.h"
 #include "modules/webusb/USBDeviceRequestOptions.h"
-#include "platform/UserGestureIndicator.h"
+#include "platform/feature_policy/FeaturePolicy.h"
 #include "platform/mojo/MojoHelper.h"
-#include "public/platform/InterfaceProvider.h"
-#include "public/platform/Platform.h"
-#include "wtf/Functional.h"
+#include "platform/wtf/Functional.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 
-namespace usb = device::usb::blink;
+using device::mojom::blink::UsbDeviceFilterPtr;
+using device::mojom::blink::UsbDeviceInfoPtr;
+using device::mojom::blink::UsbDevicePtr;
 
 namespace blink {
 namespace {
 
-const char kNoServiceError[] = "USB service unavailable.";
+const char kFeaturePolicyBlocked[] =
+    "Access to the feature \"usb\" is disallowed by feature policy.";
+const char kIframeBlocked[] =
+    "Access to this method is not allowed in embedded frames.";
+const char kNoDeviceSelected[] = "No device selected.";
 
-usb::DeviceFilterPtr convertDeviceFilter(const USBDeviceFilter& filter) {
-  auto mojoFilter = usb::DeviceFilter::New();
-  mojoFilter->has_vendor_id = filter.hasVendorId();
-  if (mojoFilter->has_vendor_id)
-    mojoFilter->vendor_id = filter.vendorId();
-  mojoFilter->has_product_id = filter.hasProductId();
-  if (mojoFilter->has_product_id)
-    mojoFilter->product_id = filter.productId();
-  mojoFilter->has_class_code = filter.hasClassCode();
-  if (mojoFilter->has_class_code)
-    mojoFilter->class_code = filter.classCode();
-  mojoFilter->has_subclass_code = filter.hasSubclassCode();
-  if (mojoFilter->has_subclass_code)
-    mojoFilter->subclass_code = filter.subclassCode();
-  mojoFilter->has_protocol_code = filter.hasProtocolCode();
-  if (mojoFilter->has_protocol_code)
-    mojoFilter->protocol_code = filter.protocolCode();
+UsbDeviceFilterPtr ConvertDeviceFilter(const USBDeviceFilter& filter) {
+  auto mojo_filter = device::mojom::blink::UsbDeviceFilter::New();
+  mojo_filter->has_vendor_id = filter.hasVendorId();
+  if (mojo_filter->has_vendor_id)
+    mojo_filter->vendor_id = filter.vendorId();
+  mojo_filter->has_product_id = filter.hasProductId();
+  if (mojo_filter->has_product_id)
+    mojo_filter->product_id = filter.productId();
+  mojo_filter->has_class_code = filter.hasClassCode();
+  if (mojo_filter->has_class_code)
+    mojo_filter->class_code = filter.classCode();
+  mojo_filter->has_subclass_code = filter.hasSubclassCode();
+  if (mojo_filter->has_subclass_code)
+    mojo_filter->subclass_code = filter.subclassCode();
+  mojo_filter->has_protocol_code = filter.hasProtocolCode();
+  if (mojo_filter->has_protocol_code)
+    mojo_filter->protocol_code = filter.protocolCode();
   if (filter.hasSerialNumber())
-    mojoFilter->serial_number = filter.serialNumber();
-  return mojoFilter;
+    mojo_filter->serial_number = filter.serialNumber();
+  return mojo_filter;
 }
 
 }  // namespace
 
 USB::USB(LocalFrame& frame)
-    : ContextLifecycleObserver(frame.document()), m_clientBinding(this) {
-  frame.interfaceProvider()->getInterface(mojo::MakeRequest(&m_deviceManager));
-  m_deviceManager.set_connection_error_handler(convertToBaseCallback(WTF::bind(
-      &USB::onDeviceManagerConnectionError, wrapWeakPersistent(this))));
-  m_deviceManager->SetClient(m_clientBinding.CreateInterfacePtrAndBind());
-}
+    : ContextLifecycleObserver(frame.GetDocument()), client_binding_(this) {}
 
 USB::~USB() {
   // |m_deviceManager| and |m_chooserService| may still be valid but there
   // should be no more outstanding requests to them because each holds a
   // persistent handle to this object.
-  DCHECK(m_deviceManagerRequests.isEmpty());
-  DCHECK(m_chooserServiceRequests.isEmpty());
+  DCHECK(device_manager_requests_.IsEmpty());
+  DCHECK(chooser_service_requests_.IsEmpty());
 }
 
-void USB::dispose() {
+void USB::Dispose() {
   // The pipe to this object must be closed when is marked unreachable to
   // prevent messages from being dispatched before lazy sweeping.
-  m_clientBinding.Close();
+  client_binding_.Close();
 }
 
-ScriptPromise USB::getDevices(ScriptState* scriptState) {
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  ScriptPromise promise = resolver->promise();
-  if (!m_deviceManager) {
-    resolver->reject(DOMException::create(NotSupportedError));
-  } else {
-    m_deviceManagerRequests.insert(resolver);
-    m_deviceManager->GetDevices(
-        nullptr, convertToBaseCallback(WTF::bind(&USB::onGetDevices,
-                                                 wrapPersistent(this),
-                                                 wrapPersistent(resolver))));
+ScriptPromise USB::getDevices(ScriptState* script_state) {
+  LocalFrame* frame = GetFrame();
+  if (!frame) {
+    return ScriptPromise::RejectWithDOMException(
+        script_state, DOMException::Create(kNotSupportedError));
   }
-  return promise;
+
+  if (IsSupportedInFeaturePolicy(WebFeaturePolicyFeature::kUsb)) {
+    if (!frame->IsFeatureEnabled(WebFeaturePolicyFeature::kUsb)) {
+      return ScriptPromise::RejectWithDOMException(
+          script_state,
+          DOMException::Create(kSecurityError, kFeaturePolicyBlocked));
+    }
+  } else if (!frame->IsMainFrame()) {
+    return ScriptPromise::RejectWithDOMException(
+        script_state, DOMException::Create(kSecurityError, kIframeBlocked));
+  }
+
+  EnsureDeviceManagerConnection();
+  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  device_manager_requests_.insert(resolver);
+  device_manager_->GetDevices(
+      nullptr,
+      ConvertToBaseCallback(WTF::Bind(&USB::OnGetDevices, WrapPersistent(this),
+                                      WrapPersistent(resolver))));
+  return resolver->Promise();
 }
 
-ScriptPromise USB::requestDevice(ScriptState* scriptState,
+ScriptPromise USB::requestDevice(ScriptState* script_state,
                                  const USBDeviceRequestOptions& options) {
-  ExecutionContext* executionContext = scriptState->getExecutionContext();
-
-  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
-  ScriptPromise promise = resolver->promise();
-
-  if (!m_chooserService) {
-    LocalFrame* frame = executionContext->isDocument()
-                            ? toDocument(executionContext)->frame()
-                            : nullptr;
-    if (!frame) {
-      resolver->reject(DOMException::create(NotSupportedError));
-      return promise;
-    }
-    frame->interfaceProvider()->getInterface(
-        mojo::MakeRequest(&m_chooserService));
-    m_chooserService.set_connection_error_handler(
-        convertToBaseCallback(WTF::bind(&USB::onChooserServiceConnectionError,
-                                        wrapWeakPersistent(this))));
+  LocalFrame* frame = GetFrame();
+  if (!frame) {
+    return ScriptPromise::RejectWithDOMException(
+        script_state, DOMException::Create(kNotSupportedError));
   }
 
-  if (!UserGestureIndicator::consumeUserGesture()) {
-    resolver->reject(DOMException::create(
-        SecurityError,
-        "Must be handling a user gesture to show a permission request."));
-  } else {
-    Vector<usb::DeviceFilterPtr> filters;
-    if (options.hasFilters()) {
-      filters.reserveCapacity(options.filters().size());
-      for (const auto& filter : options.filters())
-        filters.push_back(convertDeviceFilter(filter));
+  if (IsSupportedInFeaturePolicy(WebFeaturePolicyFeature::kUsb)) {
+    if (!frame->IsFeatureEnabled(WebFeaturePolicyFeature::kUsb)) {
+      return ScriptPromise::RejectWithDOMException(
+          script_state,
+          DOMException::Create(kSecurityError, kFeaturePolicyBlocked));
     }
-    m_chooserServiceRequests.insert(resolver);
-    m_chooserService->GetPermission(
-        std::move(filters), convertToBaseCallback(WTF::bind(
-                                &USB::onGetPermission, wrapPersistent(this),
-                                wrapPersistent(resolver))));
+  } else if (!frame->IsMainFrame()) {
+    return ScriptPromise::RejectWithDOMException(
+        script_state, DOMException::Create(kSecurityError, kIframeBlocked));
   }
-  return promise;
+
+  if (!chooser_service_) {
+    GetFrame()->GetInterfaceProvider().GetInterface(
+        mojo::MakeRequest(&chooser_service_));
+    chooser_service_.set_connection_error_handler(
+        ConvertToBaseCallback(WTF::Bind(&USB::OnChooserServiceConnectionError,
+                                        WrapWeakPersistent(this))));
+  }
+
+  if (!UserGestureIndicator::ConsumeUserGesture()) {
+    return ScriptPromise::RejectWithDOMException(
+        script_state,
+        DOMException::Create(
+            kSecurityError,
+            "Must be handling a user gesture to show a permission request."));
+  }
+
+  Vector<UsbDeviceFilterPtr> filters;
+  if (options.hasFilters()) {
+    filters.ReserveCapacity(options.filters().size());
+    for (const auto& filter : options.filters())
+      filters.push_back(ConvertDeviceFilter(filter));
+  }
+
+  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  chooser_service_requests_.insert(resolver);
+  chooser_service_->GetPermission(
+      std::move(filters), ConvertToBaseCallback(WTF::Bind(
+                              &USB::OnGetPermission, WrapPersistent(this),
+                              WrapPersistent(resolver))));
+  return resolver->Promise();
 }
 
-ExecutionContext* USB::getExecutionContext() const {
-  return ContextLifecycleObserver::getExecutionContext();
+ExecutionContext* USB::GetExecutionContext() const {
+  return ContextLifecycleObserver::GetExecutionContext();
 }
 
-const AtomicString& USB::interfaceName() const {
+const AtomicString& USB::InterfaceName() const {
   return EventTargetNames::USB;
 }
 
-void USB::contextDestroyed(ExecutionContext*) {
-  m_deviceManager.reset();
-  m_deviceManagerRequests.clear();
-  m_chooserService.reset();
-  m_chooserServiceRequests.clear();
+void USB::ContextDestroyed(ExecutionContext*) {
+  device_manager_.reset();
+  device_manager_requests_.clear();
+  chooser_service_.reset();
+  chooser_service_requests_.clear();
 }
 
-USBDevice* USB::getOrCreateDevice(usb::DeviceInfoPtr deviceInfo) {
-  USBDevice* device = m_deviceCache.at(deviceInfo->guid);
+USBDevice* USB::GetOrCreateDevice(UsbDeviceInfoPtr device_info) {
+  USBDevice* device = device_cache_.at(device_info->guid);
   if (!device) {
-    String guid = deviceInfo->guid;
-    usb::DevicePtr pipe;
-    m_deviceManager->GetDevice(guid, mojo::MakeRequest(&pipe));
-    device = USBDevice::create(std::move(deviceInfo), std::move(pipe),
-                               getExecutionContext());
-    m_deviceCache.insert(guid, device);
+    String guid = device_info->guid;
+    UsbDevicePtr pipe;
+    device_manager_->GetDevice(guid, mojo::MakeRequest(&pipe));
+    device = USBDevice::Create(std::move(device_info), std::move(pipe),
+                               GetExecutionContext());
+    device_cache_.insert(guid, device);
   }
   return device;
 }
 
-void USB::onGetDevices(ScriptPromiseResolver* resolver,
-                       Vector<usb::DeviceInfoPtr> deviceInfos) {
-  auto requestEntry = m_deviceManagerRequests.find(resolver);
-  if (requestEntry == m_deviceManagerRequests.end())
+void USB::OnGetDevices(ScriptPromiseResolver* resolver,
+                       Vector<UsbDeviceInfoPtr> device_infos) {
+  auto request_entry = device_manager_requests_.find(resolver);
+  if (request_entry == device_manager_requests_.end())
     return;
-  m_deviceManagerRequests.erase(requestEntry);
+  device_manager_requests_.erase(request_entry);
 
   HeapVector<Member<USBDevice>> devices;
-  for (auto& deviceInfo : deviceInfos)
-    devices.push_back(getOrCreateDevice(std::move(deviceInfo)));
-  resolver->resolve(devices);
-  m_deviceManagerRequests.erase(resolver);
+  for (auto& device_info : device_infos)
+    devices.push_back(GetOrCreateDevice(std::move(device_info)));
+  resolver->Resolve(devices);
+  device_manager_requests_.erase(resolver);
 }
 
-void USB::onGetPermission(ScriptPromiseResolver* resolver,
-                          usb::DeviceInfoPtr deviceInfo) {
-  auto requestEntry = m_chooserServiceRequests.find(resolver);
-  if (requestEntry == m_chooserServiceRequests.end())
+void USB::OnGetPermission(ScriptPromiseResolver* resolver,
+                          UsbDeviceInfoPtr device_info) {
+  auto request_entry = chooser_service_requests_.find(resolver);
+  if (request_entry == chooser_service_requests_.end())
     return;
-  m_chooserServiceRequests.erase(requestEntry);
+  chooser_service_requests_.erase(request_entry);
 
-  if (!m_deviceManager) {
-    resolver->reject(DOMException::create(NotFoundError, kNoServiceError));
+  EnsureDeviceManagerConnection();
+
+  if (device_manager_ && device_info)
+    resolver->Resolve(GetOrCreateDevice(std::move(device_info)));
+  else
+    resolver->Reject(DOMException::Create(kNotFoundError, kNoDeviceSelected));
+}
+
+void USB::OnDeviceAdded(UsbDeviceInfoPtr device_info) {
+  if (!device_manager_)
+    return;
+
+  DispatchEvent(USBConnectionEvent::Create(
+      EventTypeNames::connect, GetOrCreateDevice(std::move(device_info))));
+}
+
+void USB::OnDeviceRemoved(UsbDeviceInfoPtr device_info) {
+  String guid = device_info->guid;
+  USBDevice* device = device_cache_.at(guid);
+  if (!device) {
+    device = USBDevice::Create(std::move(device_info), nullptr,
+                               GetExecutionContext());
+  }
+  DispatchEvent(USBConnectionEvent::Create(EventTypeNames::disconnect, device));
+  device_cache_.erase(guid);
+}
+
+void USB::OnDeviceManagerConnectionError() {
+  device_manager_.reset();
+  client_binding_.Close();
+  for (ScriptPromiseResolver* resolver : device_manager_requests_)
+    resolver->Resolve(HeapVector<Member<USBDevice>>(0));
+  device_manager_requests_.clear();
+}
+
+void USB::OnChooserServiceConnectionError() {
+  chooser_service_.reset();
+  for (ScriptPromiseResolver* resolver : chooser_service_requests_)
+    resolver->Reject(DOMException::Create(kNotFoundError, kNoDeviceSelected));
+  chooser_service_requests_.clear();
+}
+
+void USB::AddedEventListener(const AtomicString& event_type,
+                             RegisteredEventListener& listener) {
+  EventTargetWithInlineData::AddedEventListener(event_type, listener);
+  if (event_type != EventTypeNames::connect &&
+      event_type != EventTypeNames::disconnect) {
     return;
   }
 
-  if (deviceInfo)
-    resolver->resolve(getOrCreateDevice(std::move(deviceInfo)));
-  else
-    resolver->reject(
-        DOMException::create(NotFoundError, "No device selected."));
-}
-
-void USB::OnDeviceAdded(usb::DeviceInfoPtr deviceInfo) {
-  if (!m_deviceManager)
+  LocalFrame* frame = GetFrame();
+  if (!frame)
     return;
 
-  dispatchEvent(USBConnectionEvent::create(
-      EventTypeNames::connect, getOrCreateDevice(std::move(deviceInfo))));
+  if (IsSupportedInFeaturePolicy(WebFeaturePolicyFeature::kUsb)) {
+    if (frame->IsFeatureEnabled(WebFeaturePolicyFeature::kUsb))
+      EnsureDeviceManagerConnection();
+  } else if (frame->IsMainFrame()) {
+    EnsureDeviceManagerConnection();
+  }
 }
 
-void USB::OnDeviceRemoved(usb::DeviceInfoPtr deviceInfo) {
-  String guid = deviceInfo->guid;
-  USBDevice* device = m_deviceCache.at(guid);
-  if (!device)
-    device = USBDevice::create(std::move(deviceInfo), nullptr,
-                               getExecutionContext());
-  dispatchEvent(USBConnectionEvent::create(EventTypeNames::disconnect, device));
-  m_deviceCache.erase(guid);
-}
+void USB::EnsureDeviceManagerConnection() {
+  if (device_manager_)
+    return;
 
-void USB::onDeviceManagerConnectionError() {
-  m_deviceManager.reset();
-  for (ScriptPromiseResolver* resolver : m_deviceManagerRequests)
-    resolver->reject(DOMException::create(NotFoundError, kNoServiceError));
-  m_deviceManagerRequests.clear();
-}
+  DCHECK(GetFrame());
+  GetFrame()->GetInterfaceProvider().GetInterface(
+      mojo::MakeRequest(&device_manager_));
+  device_manager_.set_connection_error_handler(ConvertToBaseCallback(WTF::Bind(
+      &USB::OnDeviceManagerConnectionError, WrapWeakPersistent(this))));
 
-void USB::onChooserServiceConnectionError() {
-  m_chooserService.reset();
-  for (ScriptPromiseResolver* resolver : m_chooserServiceRequests)
-    resolver->reject(DOMException::create(NotFoundError, kNoServiceError));
-  m_chooserServiceRequests.clear();
+  DCHECK(!client_binding_.is_bound());
+
+  device::mojom::blink::UsbDeviceManagerClientPtr client;
+  client_binding_.Bind(mojo::MakeRequest(&client));
+  device_manager_->SetClient(std::move(client));
 }
 
 DEFINE_TRACE(USB) {
-  visitor->trace(m_deviceManagerRequests);
-  visitor->trace(m_chooserServiceRequests);
-  visitor->trace(m_deviceCache);
-  EventTargetWithInlineData::trace(visitor);
-  ContextLifecycleObserver::trace(visitor);
+  visitor->Trace(device_manager_requests_);
+  visitor->Trace(chooser_service_requests_);
+  visitor->Trace(device_cache_);
+  EventTargetWithInlineData::Trace(visitor);
+  ContextLifecycleObserver::Trace(visitor);
 }
 
 }  // namespace blink

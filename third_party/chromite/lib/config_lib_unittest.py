@@ -8,6 +8,7 @@ from __future__ import print_function
 
 import copy
 import cPickle
+import json
 import mock
 
 from chromite.lib import config_lib
@@ -722,7 +723,7 @@ class SiteConfigTest(cros_test_lib.TestCase):
     )
 
 
-class SiteConfigFindTest(cros_test_lib.TestCase):
+class SiteConfigFindTests(cros_test_lib.TestCase):
   """Tests related to Find helpers on SiteConfig."""
 
   def testGetBoardsMockConfig(self):
@@ -740,6 +741,40 @@ class SiteConfigFindTest(cros_test_lib.TestCase):
     self.assertEqual(
         site_config.GetBoards(),
         set(['x86-generic', 'foo_board', 'bar_board', 'car_board']))
+
+  def testGetSlaveConfigMapForMasterAll(self):
+    """Test GetSlaveConfigMapForMaster, GetSlavesForMaster all slaves."""
+
+    site_config = MockSiteConfig()
+    master = site_config.Add('master', master=True, manifest_version=True,
+                             slave_configs=['slave_a', 'slave_b'])
+    slave_a = site_config.Add('slave_a', important=True)
+    slave_b = site_config.Add('slave_b', important=False)
+    site_config.Add('other')
+
+    results_map = site_config.GetSlaveConfigMapForMaster(master,
+                                                         important_only=False)
+    results_slaves = site_config.GetSlavesForMaster(master,
+                                                    important_only=False)
+
+    self.assertEqual(results_map, {'slave_a': slave_a, 'slave_b': slave_b})
+    self.assertItemsEqual(results_slaves, [slave_a, slave_b])
+
+  def testGetSlaveConfigMapForMasterImportant(self):
+    """Test GetSlaveConfigMapForMaster, GetSlavesForMaster important only."""
+
+    site_config = MockSiteConfig()
+    master = site_config.Add('master', master=True, manifest_version=True,
+                             slave_configs=['slave_a', 'slave_b'])
+    slave_a = site_config.Add('slave_a', important=True)
+    site_config.Add('slave_b', important=False)
+    site_config.Add('other')
+
+    results_map = site_config.GetSlaveConfigMapForMaster(master)
+    results_slaves = site_config.GetSlavesForMaster(master)
+
+    self.assertEqual(results_map, {'slave_a': slave_a})
+    self.assertItemsEqual(results_slaves, [slave_a])
 
 
 class OverrideForTrybotTest(cros_test_lib.TestCase):
@@ -934,8 +969,89 @@ class ConfigLibHelperTests(cros_test_lib.TestCase):
 class GEBuildConfigTests(cros_test_lib.TestCase):
   """Test GE build config related methods."""
 
+  _fake_ge_build_config_json = '''
+{
+  "metadata_version": "1.0",
+  "reference_board_unified_builds": [
+    {
+      "name": "reef-uni",
+      "reference_board_name": "reef-uni",
+      "builder": "RELEASE",
+      "experimental": true,
+      "arch": "X86_INTERNAL",
+      "models" : [
+        {
+          "board_name": "pyro"
+        },
+        {
+          "board_name": "sand"
+        },
+        {
+          "board_name": "snappy"
+        }
+      ]
+    }
+  ]
+}
+  '''
+  _fake_ge_build_config = json.loads(_fake_ge_build_config_json)
+
+  def setUp(self):
+    self._fake_ge_build_config_json = '''
+{
+  "metadata_version": "1.0",
+  "reference_board_unified_builds": [
+    {
+      "name": "reef-uni",
+      "reference_board_name": "reef-uni",
+      "builder": "RELEASE",
+      "experimental": true,
+      "arch": "X86_INTERNAL",
+      "models" : [
+        {
+          "board_name": "reef"
+        },
+        {
+          "board_name": "pyro"
+        }
+      ]
+    }
+  ],
+  "boards": [
+    {
+      "name": "reef",
+      "configs": [
+        {
+          "builder": "RELEASE",
+          "experimental": false,
+          "leader_board": true,
+          "board_group": "reef",
+          "arch": "X86_INTERNAL"
+        }
+      ]
+    }
+  ]
+}
+    '''
+    self._fake_ge_build_config = json.loads(self._fake_ge_build_config_json)
+
   def testGetArchBoardDict(self):
     """Test GetArchBoardDict."""
     ge_build_config = config_lib.LoadGEBuildConfigFromFile()
     arch_board_dict = config_lib.GetArchBoardDict(ge_build_config)
     self.assertIsNotNone(arch_board_dict)
+
+  def testGetArchBoardDictUnifiedBuilds(self):
+    """Test GetArchBoardDict."""
+    arch_board_dict = config_lib.GetArchBoardDict(self._fake_ge_build_config)
+    self.assertIsNotNone(arch_board_dict)
+    self.assertIs(2, len(arch_board_dict[config_lib.CONFIG_X86_INTERNAL]))
+
+  def testGetUnifiedBuildConfigAllBuilds(self):
+    uni_builds = config_lib.GetUnifiedBuildConfigAllBuilds(
+        self._fake_ge_build_config)
+    self.assertEquals(1, len(uni_builds))
+
+  def testGetUnifiedBuildConfigAllBuildsWithNoBuilds(self):
+    uni_builds = config_lib.GetUnifiedBuildConfigAllBuilds({})
+    self.assertEquals(0, len(uni_builds))

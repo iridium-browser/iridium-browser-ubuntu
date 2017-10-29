@@ -10,6 +10,7 @@
 #include "base/time/time.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
+#include "components/browsing_data/core/counters/sync_tracker.h"
 #include "components/webdata/common/web_data_service_consumer.h"
 
 namespace autofill {
@@ -21,12 +22,13 @@ namespace browsing_data {
 class AutofillCounter : public browsing_data::BrowsingDataCounter,
                         public WebDataServiceConsumer {
  public:
-  class AutofillResult : public FinishedResult {
+  class AutofillResult : public SyncResult {
    public:
     AutofillResult(const AutofillCounter* source,
                    ResultInt num_suggestions,
                    ResultInt num_credit_cards,
-                   ResultInt num_addresses);
+                   ResultInt num_addresses,
+                   bool autofill_sync_enabled_);
     ~AutofillResult() override;
 
     ResultInt num_credit_cards() const { return num_credit_cards_; }
@@ -40,7 +42,8 @@ class AutofillCounter : public browsing_data::BrowsingDataCounter,
   };
 
   explicit AutofillCounter(
-      scoped_refptr<autofill::AutofillWebDataService> web_data_service);
+      scoped_refptr<autofill::AutofillWebDataService> web_data_service,
+      syncer::SyncService* sync_service);
   ~AutofillCounter() override;
 
   // BrowsingDataCounter implementation.
@@ -70,6 +73,7 @@ class AutofillCounter : public browsing_data::BrowsingDataCounter,
   base::ThreadChecker thread_checker_;
 
   scoped_refptr<autofill::AutofillWebDataService> web_data_service_;
+  SyncTracker sync_tracker_;
 
   WebDataServiceBase::Handle suggestions_query_;
   WebDataServiceBase::Handle credit_cards_query_;

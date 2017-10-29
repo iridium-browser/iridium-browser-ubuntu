@@ -13,7 +13,7 @@ namespace wm {
 
 // A set of basic focus and activation rules. Specializations should most likely
 // subclass this and call up to these methods rather than reimplementing them.
-class WM_EXPORT BaseFocusRules : public FocusRules {
+class WM_CORE_EXPORT BaseFocusRules : public FocusRules {
  protected:
   BaseFocusRules();
   ~BaseFocusRules() override;
@@ -28,7 +28,8 @@ class WM_EXPORT BaseFocusRules : public FocusRules {
   // Overridden from FocusRules:
   bool IsToplevelWindow(aura::Window* window) const override;
   bool CanActivateWindow(aura::Window* window) const override;
-  bool CanFocusWindow(aura::Window* window) const override;
+  bool CanFocusWindow(aura::Window* window,
+                      const ui::Event* event) const override;
   aura::Window* GetToplevelWindow(aura::Window* window) const override;
   aura::Window* GetActivatableWindow(aura::Window* window) const override;
   aura::Window* GetFocusableWindow(aura::Window* window) const override;

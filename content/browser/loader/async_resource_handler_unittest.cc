@@ -29,11 +29,11 @@
 #include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/common/resource_messages.h"
-#include "content/common/resource_request.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/previews_state.h"
+#include "content/public/common/resource_request.h"
 #include "content/public/common/resource_type.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -42,6 +42,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
 #include "net/ssl/client_cert_store.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
@@ -101,7 +102,8 @@ class RecordingResourceMessageFilter : public ResourceMessageFilter {
             nullptr,
             nullptr,
             base::Bind(&RecordingResourceMessageFilter::GetContexts,
-                       base::Unretained(this))),
+                       base::Unretained(this)),
+            BrowserThread::GetTaskRunnerForThread(BrowserThread::IO)),
         resource_context_(resource_context),
         request_context_(request_context) {
     InitializeForTest();
@@ -159,39 +161,39 @@ class AsyncResourceHandlerTest : public ::testing::Test,
         "test", base::MakeUnique<TestProtocolHandler>(response_data_size));
     context_.set_job_factory(&test_job_factory_);
     context_.Init();
-    std::unique_ptr<net::URLRequest> request = context_.CreateRequest(
-        GURL("test:test"), net::DEFAULT_PRIORITY, nullptr);
+    std::unique_ptr<net::URLRequest> request =
+        context_.CreateRequest(GURL("test:test"), net::DEFAULT_PRIORITY,
+                               nullptr, TRAFFIC_ANNOTATION_FOR_TESTS);
     resource_context_ = base::MakeUnique<MockResourceContext>(&context_);
     filter_ =
         new RecordingResourceMessageFilter(resource_context_.get(), &context_);
     ResourceRequestInfoImpl* info = new ResourceRequestInfoImpl(
         filter_->requester_info_for_test(),
-        0,                                     // route_id
-        -1,                                    // frame_tree_node_id
-        0,                                     // origin_pid
-        0,                                     // request_id
-        0,                                     // render_frame_id
-        false,                                 // is_main_frame
-        false,                                 // parent_is_main_frame
-        RESOURCE_TYPE_IMAGE,                   // resource_type
-        ui::PAGE_TRANSITION_LINK,              // transition_type
-        false,                                 // should_replace_current_entry
-        false,                                 // is_download
-        false,                                 // is_stream
-        false,                                 // allow_download
-        false,                                 // has_user_gesture
-        false,                                 // enable load timing
-        false,                                 // enable upload progress
-        false,                                 // do_not_prompt_for_login
-        blink::WebReferrerPolicyDefault,       // referrer_policy
-        blink::WebPageVisibilityStateVisible,  // visibility_state
-        resource_context_.get(),               // context
-        false,                                 // report_raw_headers
-        true,                                  // is_async
-        PREVIEWS_OFF,                          // previews_state
-        std::string(),                         // original_headers
-        nullptr,                               // body
-        false);                                // initiated_in_secure_context
+        0,                                      // route_id
+        -1,                                     // frame_tree_node_id
+        0,                                      // origin_pid
+        0,                                      // request_id
+        0,                                      // render_frame_id
+        false,                                  // is_main_frame
+        false,                                  // parent_is_main_frame
+        RESOURCE_TYPE_IMAGE,                    // resource_type
+        ui::PAGE_TRANSITION_LINK,               // transition_type
+        false,                                  // should_replace_current_entry
+        false,                                  // is_download
+        false,                                  // is_stream
+        false,                                  // allow_download
+        false,                                  // has_user_gesture
+        false,                                  // enable load timing
+        false,                                  // enable upload progress
+        false,                                  // do_not_prompt_for_login
+        blink::kWebReferrerPolicyDefault,       // referrer_policy
+        blink::kWebPageVisibilityStateVisible,  // visibility_state
+        resource_context_.get(),                // context
+        false,                                  // report_raw_headers
+        true,                                   // is_async
+        PREVIEWS_OFF,                           // previews_state
+        nullptr,                                // body
+        false);                                 // initiated_in_secure_context
     info->AssociateWithRequest(request.get());
     std::unique_ptr<AsyncResourceHandler> handler =
         base::MakeUnique<AsyncResourceHandler>(request.get(), &rdh_);
@@ -224,7 +226,8 @@ class AsyncResourceHandlerTest : public ::testing::Test,
   void DidReceiveRedirect(ResourceLoader* loader,
                           const GURL& new_url,
                           ResourceResponse* response) override {}
-  void DidReceiveResponse(ResourceLoader* loader) override {}
+  void DidReceiveResponse(ResourceLoader* loader,
+                          ResourceResponse* response) override {}
   void DidFinishLoading(ResourceLoader* loader) override {
     loader_.reset();
     finish_waiter_->Quit();
@@ -264,36 +267,6 @@ TEST_F(AsyncResourceHandlerTest, OneChunkLengths) {
   ASSERT_EQ(ResourceMsg_RequestComplete::ID, messages[3]->type());
   ResourceMsg_RequestComplete::Param completion_params;
   ResourceMsg_RequestComplete::Read(messages[3].get(), &completion_params);
-  ResourceRequestCompletionStatus completion_status =
-      std::get<1>(completion_params);
-
-  EXPECT_EQ(TotalReceivedBytes(kDataSize),
-            completion_status.encoded_data_length);
-  EXPECT_EQ(kDataSize, completion_status.encoded_body_length);
-}
-
-TEST_F(AsyncResourceHandlerTest, InlinedChunkLengths) {
-  // TODO(ricea): Remove this Feature-enabling code once the feature is on by
-  // default.
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(
-      features::kOptimizeLoadingIPCForSmallResources);
-
-  // Smaller than kInlinedLeadingChunkSize.
-  constexpr auto kDataSize = 8;
-  StartRequestAndWaitWithResponseDataSize(kDataSize);
-  const auto& messages = filter_->messages();
-  ASSERT_EQ(3u, messages.size());
-  ASSERT_EQ(ResourceMsg_InlinedDataChunkReceived::ID, messages[1]->type());
-  ResourceMsg_InlinedDataChunkReceived::Param params;
-  ResourceMsg_InlinedDataChunkReceived::Read(messages[1].get(), &params);
-
-  int encoded_data_length = std::get<2>(params);
-  EXPECT_EQ(kDataSize, encoded_data_length);
-
-  ASSERT_EQ(ResourceMsg_RequestComplete::ID, messages[2]->type());
-  ResourceMsg_RequestComplete::Param completion_params;
-  ResourceMsg_RequestComplete::Read(messages[2].get(), &completion_params);
   ResourceRequestCompletionStatus completion_status =
       std::get<1>(completion_params);
 

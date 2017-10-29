@@ -54,8 +54,8 @@ struct ResponseInfo {
 };
 
 using PendingResponseMap = std::map<int, std::unique_ptr<ResponseInfo>>;
-static base::LazyInstance<PendingResponseMap> pending_response_map =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<PendingResponseMap>::DestructorAtExit
+    pending_response_map = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -154,10 +154,6 @@ bool AppViewGuest::CheckMediaAccessPermission(WebContents* web_contents,
 
   return app_delegate_->CheckMediaAccessPermission(
       web_contents, security_origin, type, guest_extension);
-}
-
-bool AppViewGuest::CanRunInDetachedState() const {
-  return true;
 }
 
 void AppViewGuest::CreateWebContents(
@@ -268,7 +264,7 @@ void AppViewGuest::LaunchAppAndFireEvent(
       new base::DictionaryValue());
   embed_request->SetInteger(appview::kGuestInstanceID, guest_instance_id());
   embed_request->SetString(appview::kEmbedderID, owner_host());
-  embed_request->Set(appview::kData, data.release());
+  embed_request->Set(appview::kData, std::move(data));
   AppRuntimeEventRouter::DispatchOnEmbedRequestedEvent(
       browser_context(), std::move(embed_request), extension_host->extension());
 }

@@ -86,6 +86,12 @@ struct AX_EXPORT AXNodeData {
   bool GetIntListAttribute(AXIntListAttribute attribute,
                            std::vector<int32_t>* value) const;
 
+  bool HasStringListAttribute(AXStringListAttribute attribute) const;
+  const std::vector<std::string>& GetStringListAttribute(
+      AXStringListAttribute attribute) const;
+  bool GetStringListAttribute(AXStringListAttribute attribute,
+                              std::vector<std::string>* value) const;
+
   bool GetHtmlAttribute(const char* attr, base::string16* value) const;
   bool GetHtmlAttribute(const char* attr, std::string* value) const;
 
@@ -97,6 +103,8 @@ struct AX_EXPORT AXNodeData {
   void AddBoolAttribute(AXBoolAttribute attribute, bool value);
   void AddIntListAttribute(AXIntListAttribute attribute,
                            const std::vector<int32_t>& value);
+  void AddStringListAttribute(AXStringListAttribute attribute,
+                              const std::vector<std::string>& value);
 
   // Convenience functions, mainly for writing unit tests.
   // Equivalent to AddStringAttribute(ATTR_NAME, name).
@@ -106,12 +114,13 @@ struct AX_EXPORT AXNodeData {
   void SetValue(const std::string& value);
   void SetValue(const base::string16& value);
 
-  // Helper to check whether |state_flag| is set in the given |state|.
-  static bool IsFlagSet(uint32_t state, ui::AXState state_flag);
+  // Returns true if the given enum bit is 1.
+  bool HasState(ui::AXState state_enum) const;
+  bool HasAction(ui::AXAction state_enum) const;
 
-  // Set or check bits in |state_|.
-  void AddStateFlag(ui::AXState state_flag);
-  bool HasStateFlag(ui::AXState state_flag) const;
+  // Set bits in the given enum's corresponding bitfield.
+  void AddState(ui::AXState state_enum);
+  void AddAction(ui::AXAction action_enum);
 
   // Return a string representation of this data, for debugging.
   virtual std::string ToString() const;
@@ -121,12 +130,15 @@ struct AX_EXPORT AXNodeData {
   int32_t id;
   AXRole role;
   uint32_t state;
+  uint32_t actions;
   std::vector<std::pair<AXStringAttribute, std::string>> string_attributes;
   std::vector<std::pair<AXIntAttribute, int32_t>> int_attributes;
   std::vector<std::pair<AXFloatAttribute, float>> float_attributes;
   std::vector<std::pair<AXBoolAttribute, bool>> bool_attributes;
   std::vector<std::pair<AXIntListAttribute, std::vector<int32_t>>>
       intlist_attributes;
+  std::vector<std::pair<AXStringListAttribute, std::vector<std::string>>>
+      stringlist_attributes;
   base::StringPairs html_attributes;
   std::vector<int32_t> child_ids;
 

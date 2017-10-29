@@ -34,6 +34,9 @@ enum class KnownCategories {
   // Pages recently browsed to on other devices.
   FOREIGN_TABS,
 
+  // Pages from the user reading list.
+  READING_LIST,
+
   // ****************** INSERT NEW LOCAL CATEGORIES HERE! ******************
   // Existing categories are persisted and they must never be removed. This may
   // happen implicitly, e.g. when an older version without some local category
@@ -48,10 +51,12 @@ enum class KnownCategories {
   // Articles for you.
   ARTICLES,
 
+  // Breaking News
+  BREAKING_NEWS = 10008,
   // ****************** INSERT NEW REMOTE CATEGORIES HERE! ******************
 
   // Tracks the last known remote category
-  LAST_KNOWN_REMOTE_CATEGORY = ARTICLES,
+  LAST_KNOWN_REMOTE_CATEGORY = BREAKING_NEWS,
 };
 
 // A category groups ContentSuggestions which belong together. Use the

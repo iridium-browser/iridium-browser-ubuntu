@@ -27,15 +27,23 @@ public:
     void onPaint(SkCanvas* canvas);
     void onIdle() override;
     bool onTouch(intptr_t owner, sk_app::Window::InputState state, float x, float y);
+    bool onMouse(float x, float y, sk_app::Window::InputState state, uint32_t modifiers);
     void onUIStateChanged(const SkString& stateName, const SkString& stateValue);
     bool onKey(sk_app::Window::Key key, sk_app::Window::InputState state, uint32_t modifiers);
     bool onChar(SkUnichar c, uint32_t modifiers);
 
 private:
+    enum class ColorMode {
+        kLegacy,                                 // N32, no color management
+        kColorManagedSRGB8888_NonLinearBlending, // N32, sRGB transfer function, nonlinear blending
+        kColorManagedSRGB8888,                   // N32, sRGB transfer function, linear blending
+        kColorManagedLinearF16,                  // F16, linear transfer function, linear blending
+    };
+
     void initSlides();
     void updateTitle();
     void setBackend(sk_app::Window::BackendType);
-    void setColorMode(SkColorType, bool colorManaged);
+    void setColorMode(ColorMode);
     void setStartupSlide();
     void setupCurrentSlide(int previousSlide);
     void listNames();
@@ -75,23 +83,25 @@ private:
     sk_app::Window::BackendType fBackendType;
 
     // Color properties for slide rendering
-    SkColorType            fColorType;
-    bool                   fColorManaged;
+    ColorMode              fColorMode;
     SkColorSpacePrimaries  fColorSpacePrimaries;
 
     // transform data
-    SkScalar               fZoomCenterX;
-    SkScalar               fZoomCenterY;
     SkScalar               fZoomLevel;
-    SkScalar               fZoomScale;
 
     sk_app::CommandSet     fCommands;
 
+    enum class GestureDevice {
+        kNone,
+        kTouch,
+        kMouse,
+    };
+
     SkTouchGesture         fGesture;
+    GestureDevice          fGestureDevice;
 
     // identity unless the window initially scales the content to fit the screen.
     SkMatrix               fDefaultMatrix;
-    SkMatrix               fDefaultMatrixInv;
 
     SkTArray<std::function<void(void)>> fDeferredActions;
 

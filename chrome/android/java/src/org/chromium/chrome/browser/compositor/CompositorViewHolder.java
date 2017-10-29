@@ -20,7 +20,6 @@ import android.util.AttributeSet;
 import android.util.Pair;
 import android.view.DragEvent;
 import android.view.MotionEvent;
-import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
@@ -40,7 +39,6 @@ import org.chromium.chrome.browser.compositor.layouts.content.ContentOffsetProvi
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManagementDelegate;
 import org.chromium.chrome.browser.device.DeviceClassManager;
-import org.chromium.chrome.browser.dom_distiller.ReaderModeManagerDelegate;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager.FullscreenListener;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
@@ -55,9 +53,9 @@ import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.DrawingInfo;
 import org.chromium.chrome.browser.widget.ControlContainer;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.SPenSupport;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.DeviceFormFactor;
+import org.chromium.ui.base.SPenSupport;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.resources.ResourceManager;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
@@ -215,7 +213,7 @@ public class CompositorViewHolder extends FrameLayout
             }
         };
 
-        mEnableCompositorTabStrip = DeviceFormFactor.isTablet(getContext());
+        mEnableCompositorTabStrip = DeviceFormFactor.isTablet();
 
         addOnLayoutChangeListener(new OnLayoutChangeListener() {
             @Override
@@ -287,20 +285,13 @@ public class CompositorViewHolder extends FrameLayout
     }
 
     /**
-     * Reset command line flags. This gets called after the native library finishes
-     * loading.
-     */
-    public void resetFlags() {
-        mCompositorView.resetFlags();
-    }
-
-    /**
      * Should be called for cleanup when the CompositorView instance is no longer used.
      */
     public void shutDown() {
         setTab(null);
         if (mLayerTitleCache != null) mLayerTitleCache.shutDown();
         mCompositorView.shutDown();
+        if (mLayoutManager != null) mLayoutManager.destroy();
     }
 
     /**
@@ -418,9 +409,9 @@ public class CompositorViewHolder extends FrameLayout
     }
 
     /**
-     * @return The SurfaceView used by the Compositor.
+     * @return The SurfaceView proxy used by the Compositor.
      */
-    public SurfaceView getSurfaceView() {
+    public View getCompositorView() {
         return mCompositorView;
     }
 
@@ -444,7 +435,7 @@ public class CompositorViewHolder extends FrameLayout
     }
 
     @Override
-    public void onPhysicalBackingSizeChanged(int width, int height) {
+    public void onSurfaceResized(int width, int height) {
         ContentViewCore content = getActiveContent();
         if (content != null) adjustPhysicalBackingSize(content, width, height);
     }
@@ -497,11 +488,7 @@ public class CompositorViewHolder extends FrameLayout
         ContentViewCore contentViewCore = mTabVisible.getContentViewCore();
         if (contentViewCore == null) return;
 
-        int actionMasked = e.getActionMasked();
-
-        if (SPenSupport.isSPenSupported(getContext())) {
-            actionMasked = SPenSupport.convertSPenEventAction(actionMasked);
-        }
+        int actionMasked = SPenSupport.convertSPenEventAction(e.getActionMasked());
 
         if (actionMasked == MotionEvent.ACTION_DOWN
                 || actionMasked == MotionEvent.ACTION_HOVER_ENTER) {
@@ -527,7 +514,7 @@ public class CompositorViewHolder extends FrameLayout
         if (mLayoutManager != null) {
             mLayoutManager.onUpdate();
 
-            if (!DeviceFormFactor.isTablet(getContext()) && mControlContainer != null) {
+            if (!DeviceFormFactor.isTablet() && mControlContainer != null) {
                 if (mProgressBarDrawingInfo == null) mProgressBarDrawingInfo = new DrawingInfo();
                 mControlContainer.getProgressBarDrawingInfo(mProgressBarDrawingInfo);
             } else {
@@ -591,14 +578,17 @@ public class CompositorViewHolder extends FrameLayout
     public void didSwapFrame(int pendingFrameCount) {
         TraceEvent.instant("didSwapFrame");
 
-        // Wait until the second frame to turn off the placeholder background on
-        // tablets so the tab strip has time to start drawing.
+        // Wait until the second frame to turn off the placeholder background for the CompositorView
+        // and the tab strip, to ensure the compositor frame has been drawn.
         final ViewGroup controlContainer = (ViewGroup) mControlContainer;
-        if (controlContainer != null && controlContainer.getBackground() != null && mHasDrawnOnce) {
+        if (mHasDrawnOnce) {
             post(new Runnable() {
                 @Override
                 public void run() {
-                    controlContainer.setBackgroundResource(0);
+                    mCompositorView.setBackgroundResource(0);
+                    if (controlContainer != null) {
+                        controlContainer.setBackgroundResource(0);
+                    }
                 }
             });
         }
@@ -731,7 +721,6 @@ public class CompositorViewHolder extends FrameLayout
 
     @Override
     public void onDetachedFromWindow() {
-        if (mLayoutManager != null) mLayoutManager.destroy();
         flushInvalidation();
         mInvalidator.set(null);
         super.onDetachedFromWindow();
@@ -782,16 +771,14 @@ public class CompositorViewHolder extends FrameLayout
      * @param androidContentContainer The {@link ViewGroup} the {@link LayoutManager} should bind
      *                                Android content to.
      * @param contextualSearchManager A {@link ContextualSearchManagementDelegate} instance.
-     * @param readerModeManager       A {@link ReaderModeManagerDelegate} instance.
      */
     public void onFinishNativeInitialization(TabModelSelector tabModelSelector,
             TabCreatorManager tabCreatorManager, TabContentManager tabContentManager,
             ViewGroup androidContentContainer,
-            ContextualSearchManagementDelegate contextualSearchManager,
-            ReaderModeManagerDelegate readerModeManager) {
+            ContextualSearchManagementDelegate contextualSearchManager) {
         assert mLayoutManager != null;
         mLayoutManager.init(tabModelSelector, tabCreatorManager, tabContentManager,
-                androidContentContainer, contextualSearchManager, readerModeManager,
+                androidContentContainer, contextualSearchManager,
                 mCompositorView.getResourceManager().getDynamicResourceLoader());
 
         attachToTabModelSelector(tabModelSelector);
@@ -922,7 +909,8 @@ public class CompositorViewHolder extends FrameLayout
             width = MeasureSpec.getSize(mOverlayContentWidthMeasureSpec);
             height = MeasureSpec.getSize(mOverlayContentHeightMeasureSpec);
         }
-        contentViewCore.onPhysicalBackingSizeChanged(width, height);
+        mCompositorView.onPhysicalBackingSizeChanged(
+                contentViewCore.getWebContents(), width, height);
     }
 
     /**
@@ -974,13 +962,13 @@ public class CompositorViewHolder extends FrameLayout
      * {@link CompositorViewHolder} so that VR can take ownership of Chrome's rendering.
      * @return The detached {@link TabModelSelector}.
      */
-    public TabModelSelector detachForVR() {
+    public TabModelSelector detachForVr() {
         if (mTabModelSelector != null) mTabModelSelector.removeObserver(mTabModelSelectorObserver);
         TabModelSelector selector = mTabModelSelector;
         mTabModelSelector = null;
         mLayerTitleCache.setTabModelSelector(null);
         setTab(null);
-        getSurfaceView().setVisibility(View.INVISIBLE);
+        getCompositorView().setVisibility(View.INVISIBLE);
         return selector;
     }
 
@@ -989,8 +977,8 @@ public class CompositorViewHolder extends FrameLayout
      * so that it can take back ownership of Chrome's rendering.
      * @param tabModelSelector
      */
-    public void onExitVR(TabModelSelector tabModelSelector) {
-        getSurfaceView().setVisibility(View.VISIBLE);
+    public void onExitVr(TabModelSelector tabModelSelector) {
+        getCompositorView().setVisibility(View.VISIBLE);
         attachToTabModelSelector(tabModelSelector);
     }
 

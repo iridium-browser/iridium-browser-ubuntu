@@ -7,8 +7,9 @@
 /**
  * Creates a new OpenPDFParamsParser. This parses the open pdf parameters
  * passed in the url to set initial viewport settings for opening the pdf.
- * @param {Object} getNamedDestinationsFunction The function called to fetch
+ * @param {!Function} getNamedDestinationsFunction The function called to fetch
  *     the page number for a named destination.
+ * @constructor
  */
 function OpenPDFParamsParser(getNamedDestinationsFunction) {
   this.outstandingRequests_ = [];
@@ -21,7 +22,7 @@ OpenPDFParamsParser.prototype = {
    * Parse zoom parameter of open PDF parameters. If this
    * parameter is passed while opening PDF then PDF should be opened
    * at the specified zoom level.
-   * @param {number} zoom value.
+   * @param {string} paramValue zoom value.
    * @param {Object} viewportPosition to store zoom and position value.
    */
   parseZoomParam_: function(paramValue, viewportPosition) {
@@ -41,8 +42,10 @@ OpenPDFParamsParser.prototype = {
     }
 
     // Handle #zoom=scale,left,top.
-    var position = {x: parseFloat(paramValueSplit[1]),
-                    y: parseFloat(paramValueSplit[2])};
+    var position = {
+      x: parseFloat(paramValueSplit[1]),
+      y: parseFloat(paramValueSplit[2])
+    };
     viewportPosition['position'] = position;
     viewportPosition['zoom'] = zoomFactor;
   },
@@ -112,7 +115,7 @@ OpenPDFParamsParser.prototype = {
 
     if ('page' in paramsDictionary) {
       // |pageNumber| is 1-based, but goToPage() take a zero-based page number.
-      var pageNumber = parseInt(paramsDictionary['page']);
+      var pageNumber = parseInt(paramsDictionary['page'], 10);
       if (!isNaN(pageNumber) && pageNumber > 0)
         viewportPosition['page'] = pageNumber - 1;
     }
@@ -122,10 +125,8 @@ OpenPDFParamsParser.prototype = {
 
     if (viewportPosition.page === undefined &&
         'nameddest' in paramsDictionary) {
-      this.outstandingRequests_.push({
-        callback: callback,
-        viewportPosition: viewportPosition
-      });
+      this.outstandingRequests_.push(
+          {callback: callback, viewportPosition: viewportPosition});
       this.getNamedDestinationsFunction_(paramsDictionary['nameddest']);
     } else {
       callback(viewportPosition);

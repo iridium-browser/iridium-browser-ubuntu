@@ -154,7 +154,7 @@ std::unique_ptr<StreamContainer> MimeHandlerStreamManager::ReleaseStream(
 void MimeHandlerStreamManager::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
-    UnloadedExtensionInfo::Reason reason) {
+    UnloadedExtensionReason reason) {
   auto streams = streams_by_extension_id_.find(extension->id());
   if (streams == streams_by_extension_id_.end())
     return;
@@ -204,7 +204,7 @@ void MimeHandlerStreamManager::EmbedderObserver::RenderProcessGone(
 
 void MimeHandlerStreamManager::EmbedderObserver::ReadyToCommitNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (navigation_handle->IsSamePage() ||
+  if (navigation_handle->IsSameDocument() ||
       !IsTrackedRenderFrameHost(navigation_handle->GetRenderFrameHost())) {
     return;
   }
@@ -221,8 +221,10 @@ void MimeHandlerStreamManager::EmbedderObserver::ReadyToCommitNavigation(
 void MimeHandlerStreamManager::EmbedderObserver::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
   // If the top level frame is navigating away, clean up the stream.
-  if (navigation_handle->IsInMainFrame() && !navigation_handle->IsSamePage())
+  if (navigation_handle->IsInMainFrame() &&
+      !navigation_handle->IsSameDocument()) {
     AbortStream();
+  }
 }
 
 void MimeHandlerStreamManager::EmbedderObserver::RenderFrameHostChanged(

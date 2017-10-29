@@ -10,14 +10,21 @@ static_library("core") {
   sources = [
     "browsing_data_utils.cc",
     "browsing_data_utils.h",
+    "clear_browsing_data_tab.h",
     "counters/autofill_counter.cc",
     "counters/autofill_counter.h",
+    "counters/bookmark_counter.cc",
+    "counters/bookmark_counter.h",
     "counters/browsing_data_counter.cc",
     "counters/browsing_data_counter.h",
     "counters/history_counter.cc",
     "counters/history_counter.h",
     "counters/passwords_counter.cc",
     "counters/passwords_counter.h",
+    "counters/site_settings_counter.cc",
+    "counters/site_settings_counter.h",
+    "counters/sync_tracker.cc",
+    "counters/sync_tracker.h",
     "history_notice_utils.cc",
     "history_notice_utils.h",
     "pref_names.cc",
@@ -27,10 +34,13 @@ static_library("core") {
   deps = [
     "//base",
     "//components/autofill/core/browser",
+    "//components/bookmarks/browser",
+    "//components/content_settings/core/browser",
+    "//components/content_settings/core/common",
     "//components/history/core/browser",
     "//components/password_manager/core/browser",
-    "//components/pref_registry:pref_registry",
-    "//components/prefs:prefs",
+    "//components/pref_registry",
+    "//components/prefs",
     "//components/strings",
     "//components/sync",
     "//components/version_info",
@@ -43,6 +53,11 @@ if (is_android) {
   java_cpp_enum("browsing_data_utils_java") {
     sources = [
       "browsing_data_utils.h",
+    ]
+  }
+  java_cpp_enum("clear_browsing_data_tab_java") {
+    sources = [
+      "clear_browsing_data_tab.h",
     ]
   }
 }
@@ -60,9 +75,11 @@ source_set("unit_tests") {
     "//base",
     "//components/autofill/core/browser:browser",
     "//components/history/core/test:test",
+    "//components/password_manager/core/browser:test_support",
     "//components/signin/core/browser:test_support",
     "//components/sync",
     "//components/sync:test_support_driver",
+    "//components/sync_preferences:test_support",
     "//components/version_info:version_info",
     "//net",
     "//testing/gtest",

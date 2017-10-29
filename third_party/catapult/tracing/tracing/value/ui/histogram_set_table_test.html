@@ -8,406 +8,1218 @@ found in the LICENSE file.
 <link rel="import" href="/tracing/base/assert_utils.html">
 <link rel="import" href="/tracing/base/utils.html">
 <link rel="import" href="/tracing/ui/base/deep_utils.html">
-<link rel="import" href="/tracing/value/histogram.html">
-<link rel="import" href="/tracing/value/histogram_set.html">
-<link rel="import" href="/tracing/value/ui/histogram_set_table.html">
+<link rel="import" href="/tracing/value/ui/histogram_set_view.html">
 
 <script>
 'use strict';
-
 tr.b.unittest.testSuite(function() {
+  // TODO(benjhayden): use table-cell and name-cell APIs, don't pierce them.
+
   const TEST_BOUNDARIES = tr.v.HistogramBinBoundaries.createLinear(0, 1e3, 20);
 
-  test('overviewCharts', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
-    let now = new Date().getTime();
-    let boundaries = tr.v.HistogramBinBoundaries.createLinear(0, 150, 10);
+  async function buildTable(test, histograms) {
+    // This should mirror HistogramImporter in order to be as similar to
+    // results.html as possible.
+    const table = document.createElement('tr-v-ui-histogram-set-table');
 
-    for (let i = 0; i < 2; ++i) {
-      for (let j = 0; j < 2; ++j) {
-        let telemetry = new tr.v.d.TelemetryInfo({
-          storyDisplayName: 'story' + i,
-          label: '' + j,
-          benchmarkStartMs: now,
+    table.viewState = new tr.v.ui.HistogramSetViewState();
+    await table.viewState.update({
+      displayStatisticName: 'avg',
+      groupings: [tr.v.HistogramGrouping.HISTOGRAM_NAME],
+    });
+
+    table.style.display = 'none';
+    test.addHTMLOutput(table);
+
+    table.addEventListener('display-ready', () => {
+      table.style.display = '';
+    });
+
+    const collector = new tr.v.HistogramParameterCollector();
+    collector.process(histograms);
+
+    await table.build(
+        histograms,
+        histograms.sourceHistograms,
+        collector.labels,
+        async message => {
+          await tr.b.animationFrame();
         });
+    return table;
+  }
 
-        let sample = (i * 100) + (j * 10);
+  function range(start, end) {
+    const result = [];
+    for (let i = start; i < end; ++i) result.push(i);
+    return result;
+  }
 
-        let fooHist = new tr.v.Histogram(
-            'foo', tr.b.Unit.byName.count, boundaries);
-        telemetry.addToHistogram(fooHist);
-        fooHist.addSample(sample);
-        histograms.addHistogram(fooHist);
+  function getBaseTable(table) {
+    return tr.ui.b.findDeepElementMatchingPredicate(table, e =>
+        e.tagName === 'TR-UI-B-TABLE');
+  }
 
-        let barHist = new tr.v.Histogram(
-            'bar', tr.b.Unit.byName.count, boundaries);
-        telemetry.addToHistogram(barHist);
-        barHist.addSample(sample * 9 / 10);
-        histograms.addHistogram(barHist);
-      }
+  function getNameCells(table) {
+    return tr.ui.b.findDeepElementsMatchingPredicate(table, e =>
+        e.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-NAME-CELL');
+  }
+
+  function getTableCells(table) {
+    return tr.ui.b.findDeepElementsMatchingPredicate(table, e =>
+        e.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL');
+  }
+
+  test('viewSearchQuery', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    histograms.createHistogram('b', tr.b.Unit.byName.count, [2]);
+    const table = await buildTable(this, histograms);
+
+    await table.viewState.update({searchQuery: 'a'});
+    let cells = getTableCells(table);
+    assert.lengthOf(cells, 1);
+
+    await table.viewState.update({searchQuery: '[z-'});
+    cells = getTableCells(table);
+    assert.lengthOf(cells, 2);
+
+    await table.viewState.update({searchQuery: 'x'});
+    cells = getTableCells(table);
+    assert.lengthOf(cells, 0);
+
+    await table.viewState.update({searchQuery: ''});
+    cells = getTableCells(table);
+    assert.lengthOf(cells, 2);
+  });
+
+  test('controlSearchQuery', async function() {
+    const histograms = new tr.v.HistogramSet();
+    const aHist = histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    const bHist = histograms.createHistogram('b', tr.b.Unit.byName.count, []);
+    aHist.diagnostics.set('r', new tr.v.d.RelatedHistogramSet([bHist]));
+    const table = await buildTable(this, histograms);
+    await table.viewState.tableRowStates.get('a').cells.get('Value').update(
+      {isOpen: true});
+    const link = tr.ui.b.findDeepElementMatchingPredicate(
+        table, e => e.tagName === 'TR-UI-A-ANALYSIS-LINK');
+    link.click();
+    assert.strictEqual('^(b)$', table.viewState.searchQuery);
+  });
+
+  test('viewReferenceDisplayLabel', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          label: 'A',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('b', tr.b.Unit.byName.count, [2], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          label: 'B',
+        }),
+      ]]),
+    });
+    const table = await buildTable(this, histograms);
+    const baseTable = getBaseTable(table);
+    assert.isUndefined(baseTable.selectedTableColumnIndex);
+    // TODO assert cell.referenceHistogram
+
+    await table.viewState.update({referenceDisplayLabel: 'A'});
+    assert.strictEqual(1, baseTable.selectedTableColumnIndex);
+    // TODO assert cell.referenceHistogram
+
+    await table.viewState.update({referenceDisplayLabel: 'B'});
+    assert.strictEqual(2, baseTable.selectedTableColumnIndex);
+    // TODO assert delta statistics
+    // TODO assert cell.referenceHistogram
+  });
+
+  test('viewDisplayStatisticName', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, range(0, 10), {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          label: 'A',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('a', tr.b.Unit.byName.count, range(10, 20), {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          label: 'B',
+        }),
+      ]]),
+    });
+    const table = await buildTable(this, histograms);
+    let scalarSpans = tr.ui.b.findDeepElementsMatchingPredicate(table, e =>
+        e.tagName === 'TR-V-UI-SCALAR-SPAN');
+    assert.lengthOf(scalarSpans, 2);
+    assert.strictEqual('5', scalarSpans[0].unit.format(scalarSpans[0].value));
+    assert.strictEqual('15', scalarSpans[1].unit.format(scalarSpans[1].value));
+
+    await table.viewState.update({displayStatisticName: 'std'});
+    scalarSpans = tr.ui.b.findDeepElementsMatchingPredicate(table, e =>
+        e.tagName === 'TR-V-UI-SCALAR-SPAN');
+    assert.lengthOf(scalarSpans, 2);
+    assert.strictEqual('3', scalarSpans[0].unit.format(scalarSpans[0].value));
+    assert.strictEqual('3', scalarSpans[1].unit.format(scalarSpans[1].value));
+  });
+
+  test('viewShowAll', async function() {
+    const histograms = new tr.v.HistogramSet();
+    const aHist = histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    const bHist = histograms.createHistogram('b', tr.b.Unit.byName.count, []);
+    aHist.diagnostics.set('r', new tr.v.d.RelatedHistogramSet([bHist]));
+    const table = await buildTable(this, histograms);
+
+    let cells = getNameCells(table);
+    assert.lengthOf(cells, 1);
+    assert.strictEqual('a', cells[0].row.name);
+
+    await table.viewState.update({showAll: true});
+    cells = getNameCells(table);
+    assert.lengthOf(cells, 2);
+    assert.strictEqual('a', cells[0].row.name);
+    assert.strictEqual('b', cells[1].row.name);
+  });
+
+  test('viewSortColumnIndex', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    histograms.createHistogram('b', tr.b.Unit.byName.count, [2]);
+    const table = await buildTable(this, histograms);
+
+    // TODO assert sorting
+
+    await table.viewState.update({sortColumnIndex: 0});
+    // TODO assert sorting
+
+    await table.viewState.update({sortColumnIndex: 1});
+    // TODO assert sorting
+  });
+
+  test('controlSortColumnIndex', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    histograms.createHistogram('b', tr.b.Unit.byName.count, [2]);
+    const table = await buildTable(this, histograms);
+
+    assert.strictEqual(0, table.viewState.sortColumnIndex);
+
+    tr.ui.b.findDeepElementsMatchingPredicate(
+        table, e => e.tagName === 'TR-UI-B-TABLE-HEADER-CELL')[0].click();
+    assert.strictEqual(0, table.viewState.sortColumnIndex);
+
+    tr.ui.b.findDeepElementsMatchingPredicate(
+        table, e => e.tagName === 'TR-UI-B-TABLE-HEADER-CELL')[1].click();
+    assert.strictEqual(1, table.viewState.sortColumnIndex);
+  });
+
+  test('viewSortDescending', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    histograms.createHistogram('b', tr.b.Unit.byName.count, [2]);
+    const table = await buildTable(this, histograms);
+
+    await table.viewState.update({sortColumnIndex: 0});
+    // TODO assert sorting
+
+    await table.viewState.update({sortDescending: true});
+    // TODO assert sorting
+
+    await table.viewState.update({sortDescending: false});
+    // TODO assert sorting
+  });
+
+  test('controlSortDescending', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    histograms.createHistogram('b', tr.b.Unit.byName.count, [2]);
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({sortColumnIndex: 0});
+
+    assert.isFalse(table.viewState.sortDescending);
+
+    tr.ui.b.findDeepElementsMatchingPredicate(
+        table, e => e.tagName === 'TR-UI-B-TABLE-HEADER-CELL')[0].click();
+    assert.isTrue(table.viewState.sortDescending);
+
+    tr.ui.b.findDeepElementsMatchingPredicate(
+        table, e => e.tagName === 'TR-UI-B-TABLE-HEADER-CELL')[0].click();
+    assert.isFalse(table.viewState.sortDescending);
+  });
+
+  test('sortUndefinedStatistics', async function() {
+    // The 'avg' statistic Scalar of an empty histogram is undefined, so
+    // HistogramSetTableRow.compareCells must not throw when it encounters
+    // undefined Scalars.
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    histograms.createHistogram('b', tr.b.Unit.byName.count, []);
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({sortColumnIndex: 1});
+  });
+
+  test('sortByDeltaStatistic', async function() {
+    const histograms0 = new tr.v.HistogramSet();
+    const histograms1 = new tr.v.HistogramSet();
+    const a0Hist = histograms0.createHistogram(
+        'a', tr.b.Unit.byName.count, [0]);
+    const b0Hist = histograms0.createHistogram(
+        'b', tr.b.Unit.byName.count, [0]);
+    const c0Hist = histograms0.createHistogram(
+        'c', tr.b.Unit.byName.count, [3]);
+    const a1Hist = histograms1.createHistogram(
+        'a', tr.b.Unit.byName.count, [1]);
+    const b1Hist = histograms1.createHistogram(
+        'b', tr.b.Unit.byName.count, [2]);
+    const c1Hist = histograms1.createHistogram(
+        'c', tr.b.Unit.byName.count, [3]);
+    histograms0.addSharedDiagnostic(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          label: 'L0', benchmarkStartMs: 0,
+        }));
+    histograms1.addSharedDiagnostic(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          label: 'L1', benchmarkStartMs: 1,
+        }));
+
+    const table = await buildTable(this, new tr.v.HistogramSet(
+        Array.from(histograms0).concat(Array.from(histograms1))));
+    await table.viewState.update({
+      displayStatisticName: tr.v.DELTA + 'avg',
+      referenceDisplayLabel: 'L0',
+      sortColumnIndex: 2,
+    });
+    const nameCells = getNameCells(table);
+    assert.strictEqual('c', nameCells[0].row.name);
+    assert.strictEqual('a', nameCells[1].row.name);
+    assert.strictEqual('b', nameCells[2].row.name);
+  });
+
+  test('viewConstrainNameColumn', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a'.repeat(100), tr.b.Unit.byName.count, []);
+    const table = await buildTable(this, histograms);
+    const nameCell = tr.b.getOnlyElement(getNameCells(table));
+    assert.isTrue(nameCell.isOverflowing);
+    assert.isAbove(350, nameCell.getBoundingClientRect().width);
+    assert.isTrue(table.viewState.constrainNameColumn);
+    const dots = tr.ui.b.findDeepElementMatchingPredicate(
+        table, e => e.textContent === tr.v.ui.MIDLINE_HORIZONTAL_ELLIPSIS);
+    assert.strictEqual('block', dots.style.display);
+
+    await table.viewState.update({constrainNameColumn: false});
+    assert.isFalse(nameCell.isOverflowing);
+    assert.isBelow(350, nameCell.getBoundingClientRect().width);
+
+    await table.viewState.update({constrainNameColumn: true});
+    assert.isTrue(nameCell.isOverflowing);
+    assert.isAbove(350, nameCell.getBoundingClientRect().width);
+  });
+
+  test('controlConstrainNameColumn', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a'.repeat(100), tr.b.Unit.byName.count, []);
+    const table = await buildTable(this, histograms);
+    const nameCell = tr.b.getOnlyElement(getNameCells(table));
+    assert.isTrue(nameCell.isOverflowing);
+    assert.isAbove(350, nameCell.getBoundingClientRect().width);
+    assert.isTrue(table.viewState.constrainNameColumn);
+    const dots = tr.ui.b.findDeepElementMatchingPredicate(
+        table, e => e.textContent === tr.v.ui.MIDLINE_HORIZONTAL_ELLIPSIS);
+    assert.strictEqual('block', dots.style.display);
+
+    tr.ui.b.findDeepElementMatchingPredicate(table, e =>
+        e.textContent === tr.v.ui.MIDLINE_HORIZONTAL_ELLIPSIS).click();
+    assert.isFalse(table.viewState.constrainNameColumn);
+    await tr.b.animationFrame();
+    assert.isFalse(nameCell.isOverflowing);
+    assert.isBelow(350, nameCell.getBoundingClientRect().width);
+
+    tr.ui.b.findDeepElementMatchingPredicate(table, e =>
+        e.textContent === tr.v.ui.MIDLINE_HORIZONTAL_ELLIPSIS).click();
+    assert.isTrue(table.viewState.constrainNameColumn);
+    await tr.b.animationFrame();
+    assert.isTrue(nameCell.isOverflowing);
+    assert.isAbove(350, nameCell.getBoundingClientRect().width);
+  });
+
+  test('viewRowExpanded', async function() {
+    const histograms = new tr.v.HistogramSet();
+    const aHist = histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    aHist.diagnostics.set(tr.v.d.RESERVED_NAMES.TELEMETRY,
+        new tr.v.d.TelemetryInfo({storyDisplayName: 'A'}));
+    const bHist = histograms.createHistogram('a', tr.b.Unit.byName.count, [2]);
+    bHist.diagnostics.set(tr.v.d.RESERVED_NAMES.TELEMETRY,
+        new tr.v.d.TelemetryInfo({storyDisplayName: 'B'}));
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({groupings: [
+      tr.v.HistogramGrouping.HISTOGRAM_NAME,
+      tr.v.HistogramGrouping.STORY_NAME,
+    ]});
+    assert.lengthOf(getTableCells(table), 1);
+
+    await table.viewState.tableRowStates.get('a').update({isExpanded: true});
+    assert.lengthOf(getTableCells(table), 3);
+
+    await table.viewState.tableRowStates.get('a').update({isExpanded: false});
+    assert.lengthOf(getTableCells(table), 1);
+  });
+
+  test('controlRowExpanded', async function() {
+    const histograms = new tr.v.HistogramSet();
+    const aHist = histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    aHist.diagnostics.set(tr.v.d.RESERVED_NAMES.TELEMETRY,
+        new tr.v.d.TelemetryInfo({storyDisplayName: 'A'}));
+    const bHist = histograms.createHistogram('a', tr.b.Unit.byName.count, [2]);
+    bHist.diagnostics.set(tr.v.d.RESERVED_NAMES.TELEMETRY,
+        new tr.v.d.TelemetryInfo({storyDisplayName: 'B'}));
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({groupings: [
+      tr.v.HistogramGrouping.HISTOGRAM_NAME,
+      tr.v.HistogramGrouping.STORY_NAME,
+    ]});
+    assert.isFalse(table.viewState.tableRowStates.get('a').isExpanded);
+
+    const nameCell = tr.b.getOnlyElement(getNameCells(table));
+    nameCell.click();
+    assert.isTrue(table.viewState.tableRowStates.get('a').isExpanded);
+
+    nameCell.click();
+    assert.isFalse(table.viewState.tableRowStates.get('a').isExpanded);
+  });
+
+  test('viewIsOverviewed', async function() {
+    const histograms = new tr.v.HistogramSet();
+    let hist = histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'A', label: 'A',
+        }));
+    hist = histograms.createHistogram('a', tr.b.Unit.byName.count, [2]);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'B', label: 'A',
+        }));
+    hist = histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'A', label: 'B',
+        }));
+    hist = histograms.createHistogram('a', tr.b.Unit.byName.count, [2]);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'B', label: 'B',
+        }));
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({groupings: [
+      tr.v.HistogramGrouping.HISTOGRAM_NAME,
+      tr.v.HistogramGrouping.STORY_NAME,
+    ]});
+
+    const nameCells = getNameCells(table);
+    const cells = getTableCells(table);
+    assert.isFalse(nameCells[0].isOverviewed);
+
+    await table.viewState.tableRowStates.get('a').update({isOverviewed: true});
+    assert.isTrue(nameCells[0].isOverviewed);
+
+    await table.viewState.tableRowStates.get('a').update({isOverviewed: false});
+    assert.isFalse(nameCells[0].isOverviewed);
+  });
+
+  test('overviewSorted', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [4], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'D',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [2], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'B',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [3], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'C',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'A',
+        }),
+      ]]),
+    });
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({
+      groupings: [
+        tr.v.HistogramGrouping.HISTOGRAM_NAME,
+        tr.v.HistogramGrouping.STORY_NAME,
+      ],
+      sortColumnIndex: 0,
+      sortDescending: true,
+    });
+    await table.viewState.tableRowStates.get('a').update({isOverviewed: true});
+
+    let cells = getTableCells(table);
+    let chart = tr.ui.b.findDeepElementMatchingPredicate(cells[0], e =>
+        e.tagName === 'svg' && e.parentNode.id === 'overview_container');
+    assert.strictEqual('D', chart.data[0].x);
+    assert.strictEqual('C', chart.data[1].x);
+    assert.strictEqual('B', chart.data[2].x);
+    assert.strictEqual('A', chart.data[3].x);
+
+    await table.viewState.update({
+      sortDescending: false,
+    });
+    cells = getTableCells(table);
+    chart = tr.ui.b.findDeepElementMatchingPredicate(cells[0], e =>
+        e.tagName === 'svg' && e.parentNode.id === 'overview_container');
+    assert.strictEqual('A', chart.data[0].x);
+    assert.strictEqual('B', chart.data[1].x);
+    assert.strictEqual('C', chart.data[2].x);
+    assert.strictEqual('D', chart.data[3].x);
+  });
+
+  test('controlIsOverviewed', async function() {
+    const histograms = new tr.v.HistogramSet();
+    let hist = histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'A',
+          label: 'A',
+        }));
+    hist = histograms.createHistogram('a', tr.b.Unit.byName.count, [2]);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'B',
+          label: 'A',
+        }));
+    hist = histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'A',
+          label: 'B',
+        }));
+    hist = histograms.createHistogram('a', tr.b.Unit.byName.count, [2]);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'B',
+          label: 'B',
+        }));
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({groupings: [
+      tr.v.HistogramGrouping.HISTOGRAM_NAME,
+      tr.v.HistogramGrouping.STORY_NAME,
+    ]});
+
+    assert.isFalse(table.viewState.tableRowStates.get('a').isOverviewed);
+
+    const nameCells = getNameCells(table);
+    tr.ui.b.findDeepElementMatchingPredicate(nameCells[0], e =>
+        e.id === 'show_overview').click();
+    assert.isTrue(table.viewState.tableRowStates.get('a').isOverviewed);
+
+    tr.ui.b.findDeepElementMatchingPredicate(nameCells[0], e =>
+        e.id === 'hide_overview').click();
+    assert.isFalse(table.viewState.tableRowStates.get('a').isOverviewed);
+  });
+
+  test('overviewStatistic', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'X',
+          label: 'A',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1, 1], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'Y',
+          label: 'A',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1, 1, 1], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'X',
+          label: 'B',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1, 1, 1, 1], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'Y',
+          label: 'B',
+        }),
+      ]]),
+    });
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({
+      displayStatisticName: 'count',
+      groupings: [
+        tr.v.HistogramGrouping.HISTOGRAM_NAME,
+        tr.v.HistogramGrouping.STORY_NAME,
+      ],
+    });
+    await table.viewState.tableRowStates.get('a').update({isOverviewed: true});
+
+    let charts = tr.ui.b.findDeepElementsMatchingPredicate(table, e =>
+        e.tagName === 'svg' && e.parentNode.id === 'overview_container');
+    assert.lengthOf(charts, 3);
+    assert.lengthOf(charts[0].data, 2);
+    assert.lengthOf(charts[1].data, 2);
+    assert.lengthOf(charts[2].data, 2);
+    assert.strictEqual(charts[0].data[0].y, 3);
+    assert.strictEqual(charts[0].data[1].y, 7);
+    assert.strictEqual(charts[1].data[0].y, 1);
+    assert.strictEqual(charts[1].data[1].y, 2);
+    assert.strictEqual(charts[2].data[0].y, 3);
+    assert.strictEqual(charts[2].data[1].y, 4);
+
+    await table.viewState.update({
+      displayStatisticName: tr.v.DELTA + 'count',
+      referenceDisplayLabel: 'A',
+    });
+    charts = tr.ui.b.findDeepElementsMatchingPredicate(table, e =>
+        e.tagName === 'svg' && e.parentNode.id === 'overview_container');
+    assert.lengthOf(charts, 3);
+    assert.lengthOf(charts[0].data, 2);
+    assert.lengthOf(charts[1].data, 2);
+    assert.lengthOf(charts[2].data, 2);
+    assert.strictEqual(charts[0].data[0].y, 3);
+    assert.strictEqual(charts[0].data[1].y, 7);
+    assert.strictEqual(charts[1].data[0].y, 1);
+    assert.strictEqual(charts[1].data[1].y, 2);
+    assert.strictEqual(charts[2].data[0].y, 2);
+    assert.strictEqual(charts[2].data[1].y, 2);
+  });
+
+  // TODO(benjhayden): Move this to a unit test for table-cell.
+  test('viewCellOpen', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    const table = await buildTable(this, histograms);
+    const cell = tr.b.getOnlyElement(getTableCells(table));
+    assert.isFalse(cell.isHistogramOpen);
+
+    await table.viewState.tableRowStates.get('a').cells.get('Value').update(
+        {isOpen: true});
+    assert.isTrue(cell.isHistogramOpen);
+
+    await table.viewState.tableRowStates.get('a').cells.get('Value').update(
+        {isOpen: false});
+    assert.isFalse(cell.isHistogramOpen);
+  });
+
+  // TODO(benjhayden): Move this to a unit test for table-cell.
+  test('controlCellOpen', async function() {
+    const histograms = new tr.v.HistogramSet();
+    let hist = histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          label: 'A',
+        }));
+    hist = histograms.createHistogram('a', tr.b.Unit.byName.count, [1]);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          label: 'B',
+        }));
+    const table = await buildTable(this, histograms);
+
+    assert.isFalse(table.viewState.tableRowStates.get('a').cells.get('A')
+        .isOpen);
+    const cells = getTableCells(table);
+
+    tr.ui.b.findDeepElementMatchingPredicate(cells[0], e =>
+        e.tagName === 'TR-V-UI-SCALAR-SPAN').click();
+    assert.isTrue(table.viewState.tableRowStates.get('a').cells.get('A')
+        .isOpen);
+
+    tr.ui.b.findDeepElementMatchingPredicate(cells[0], e =>
+        e.id === 'close_histogram').click();
+    assert.isFalse(table.viewState.tableRowStates.get('a').cells.get('A')
+        .isOpen);
+
+    tr.ui.b.findDeepElementMatchingPredicate(table, e =>
+        e.id === 'open_histograms').click();
+    assert.isTrue(table.viewState.tableRowStates.get('a').cells.get('A')
+        .isOpen);
+    assert.isTrue(table.viewState.tableRowStates.get('a').cells.get('B')
+        .isOpen);
+
+    tr.ui.b.findDeepElementMatchingPredicate(table, e =>
+        e.id === 'close_histograms').click();
+    assert.isFalse(table.viewState.tableRowStates.get('a').cells.get('A')
+        .isOpen);
+    assert.isFalse(table.viewState.tableRowStates.get('a').cells.get('B')
+        .isOpen);
+  });
+
+  test('rebin', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a', tr.b.Unit.byName.count, range(0, 100), {
+      binBoundaries: tr.v.HistogramBinBoundaries.SINGULAR,
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          label: 'A',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('a', tr.b.Unit.byName.count, range(50, 150), {
+      binBoundaries: tr.v.HistogramBinBoundaries.SINGULAR,
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          label: 'B',
+        }),
+      ]]),
+    });
+    const table = await buildTable(this, histograms);
+
+    const cells = getTableCells(table);
+    assert.lengthOf(cells, 2);
+    assert.lengthOf(cells[0].histogram.allBins,
+        2 + tr.v.DEFAULT_REBINNED_COUNT);
+    assert.lengthOf(cells[1].histogram.allBins,
+        2 + tr.v.DEFAULT_REBINNED_COUNT);
+    assert.strictEqual(cells[0].histogram.allBins[0].range.max, 0);
+    assert.strictEqual(cells[1].histogram.allBins[0].range.max, 0);
+    assert.strictEqual(cells[0].histogram.allBins[41].range.min, 200);
+    assert.strictEqual(cells[1].histogram.allBins[41].range.min, 200);
+  });
+
+  test('leafHistograms', async function() {
+    const histograms = new tr.v.HistogramSet();
+    let hist = histograms.createHistogram('a', tr.b.Unit.byName.count, []);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'A',
+        }));
+    hist = histograms.createHistogram('a', tr.b.Unit.byName.count, []);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'B',
+        }));
+    const table = await buildTable(this, histograms);
+    assert.lengthOf(table.leafHistograms, 1);
+    await table.viewState.update({groupings: [
+      tr.v.HistogramGrouping.HISTOGRAM_NAME,
+      tr.v.HistogramGrouping.STORY_NAME,
+    ]});
+    assert.lengthOf(table.leafHistograms, 2);
+  });
+
+  test('nameCellOverflow', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('a'.repeat(100), tr.b.Unit.byName.count, []);
+    const table = await buildTable(this, histograms);
+    const nameCell = tr.b.getOnlyElement(getNameCells(table));
+    assert.isTrue(nameCell.isOverflowing);
+    assert.isAbove(350, nameCell.getBoundingClientRect().width);
+
+    const dots = tr.ui.b.findDeepElementMatchingPredicate(
+        table, e => e.textContent === tr.v.ui.MIDLINE_HORIZONTAL_ELLIPSIS);
+    assert.strictEqual('block', dots.style.display);
+    dots.click();
+
+    await tr.b.animationFrame();
+    assert.isFalse(nameCell.isOverflowing);
+    assert.isBelow(350, nameCell.getBoundingClientRect().width);
+  });
+
+  test('nameCellOverflowOnExpand', async function() {
+    const histograms = new tr.v.HistogramSet();
+    let hist = histograms.createHistogram('a', tr.b.Unit.byName.count, []);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: '0'.repeat(100),
+        }));
+    hist = histograms.createHistogram('a', tr.b.Unit.byName.count, []);
+    hist.diagnostics.set(
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: '1'.repeat(100),
+        }));
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({groupings: [
+      tr.v.HistogramGrouping.HISTOGRAM_NAME,
+      tr.v.HistogramGrouping.STORY_NAME,
+    ]});
+
+    const dots = tr.ui.b.findDeepElementMatchingPredicate(
+        table, e => e.textContent === tr.v.ui.MIDLINE_HORIZONTAL_ELLIPSIS);
+    assert.strictEqual('none', dots.style.display);
+
+    const baseTable = getBaseTable(table);
+    await table.viewState.tableRowStates.get('a').update({isExpanded: true});
+
+    const nameCell = tr.ui.b.findDeepElementMatchingPredicate(table, e =>
+        e.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-NAME-CELL' &&
+        e.row.name === '0'.repeat(100));
+    await tr.b.animationFrame();
+    assert.isTrue(nameCell.isOverflowing);
+    assert.isAbove(350, nameCell.getBoundingClientRect().width);
+
+    assert.strictEqual('block', dots.style.display);
+    dots.click();
+
+    await tr.b.animationFrame();
+    assert.isFalse(nameCell.isOverflowing);
+    assert.isBelow(350, nameCell.getBoundingClientRect().width);
+  });
+
+  test('overviewCharts', async function() {
+    const binBoundaries = tr.v.HistogramBinBoundaries.createLinear(0, 150, 10);
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('foo', tr.b.Unit.byName.count, [0], {
+      binBoundaries,
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'story0',
+          label: '0',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('foo', tr.b.Unit.byName.count, [10], {
+      binBoundaries,
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'story0',
+          label: '1',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('foo', tr.b.Unit.byName.count, [100], {
+      binBoundaries,
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'story1',
+          label: '0',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('foo', tr.b.Unit.byName.count, [110], {
+      binBoundaries,
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'story1',
+          label: '1',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('bar', tr.b.Unit.byName.count, [0], {
+      binBoundaries,
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'story0',
+          label: '0',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('bar', tr.b.Unit.byName.count, [9], {
+      binBoundaries,
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'story0',
+          label: '1',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('bar', tr.b.Unit.byName.count, [90], {
+      binBoundaries,
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'story1',
+          label: '0',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('bar', tr.b.Unit.byName.count, [99], {
+      binBoundaries,
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'story1',
+          label: '1',
+        }),
+      ]]),
+    });
+    const now = new Date().getTime();
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({groupings: [
+      tr.v.HistogramGrouping.HISTOGRAM_NAME,
+      tr.v.HistogramGrouping.STORY_NAME,
+    ]});
+
+    for (const row of tr.v.ui.HistogramSetTableRowState.walkAll(
+        table.viewState.tableRowStates.values())) {
+      await row.update({isOverviewed: true});
     }
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
 
-    let showOverview = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.id === 'show_overview');
-    // SVG doesn't have click().
-    table.fire('click', {}, {node: showOverview});
-
-    let charts = tr.b.findDeepElementsMatchingPredicate(
+    let charts = tr.ui.b.findDeepElementsMatchingPredicate(
         table, e => ((e.id === 'overview_container') &&
                      (e.style.display !== 'none')));
     charts = charts.map(div => div.children[0]);
     assert.lengthOf(charts, 6);
 
-    assert.deepEqual(charts[0].data, [{x: '0', y: 45}, {x: '1', y: 54}]);
+    assert.deepEqual(JSON.stringify(charts[0].data),
+        JSON.stringify([{x: '0', y: 45}, {x: '1', y: 54}]));
     tr.b.assertRangeEquals(
-        charts[0].dataRange, tr.b.Range.fromExplicitRange(0, 99));
+        charts[0].dataRange, tr.b.math.Range.fromExplicitRange(0, 99));
 
     assert.deepEqual(
         charts[1].data, [{x: 'story0', y: 0}, {x: 'story1', y: 90}]);
     tr.b.assertRangeEquals(
-        charts[1].dataRange, tr.b.Range.fromExplicitRange(0, 99));
+        charts[1].dataRange, tr.b.math.Range.fromExplicitRange(0, 99));
 
     assert.deepEqual(
         charts[2].data, [{x: 'story0', y: 9}, {x: 'story1', y: 99}]);
     tr.b.assertRangeEquals(
-        charts[2].dataRange, tr.b.Range.fromExplicitRange(0, 99));
+        charts[2].dataRange, tr.b.math.Range.fromExplicitRange(0, 99));
 
     assert.deepEqual(charts[3].data, [{x: '0', y: 50}, {x: '1', y: 60}]);
     tr.b.assertRangeEquals(
-        charts[3].dataRange, tr.b.Range.fromExplicitRange(0, 110));
+        charts[3].dataRange, tr.b.math.Range.fromExplicitRange(0, 110));
 
     assert.deepEqual(
         charts[4].data, [{x: 'story0', y: 0}, {x: 'story1', y: 100}]);
     tr.b.assertRangeEquals(
-        charts[4].dataRange, tr.b.Range.fromExplicitRange(0, 110));
+        charts[4].dataRange, tr.b.math.Range.fromExplicitRange(0, 110));
 
     assert.deepEqual(
         charts[5].data, [{x: 'story0', y: 10}, {x: 'story1', y: 110}]);
     tr.b.assertRangeEquals(
-        charts[5].dataRange, tr.b.Range.fromExplicitRange(0, 110));
+        charts[5].dataRange, tr.b.math.Range.fromExplicitRange(0, 110));
 
-    let hideOverview = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.id === 'hide_overview');
-    // SVG doesn't have click().
-    table.fire('click', {}, {node: hideOverview});
+    for (const row of tr.v.ui.HistogramSetTableRowState.walkAll(
+        table.viewState.tableRowStates.values())) {
+      await row.update({isOverviewed: false});
+    }
 
-    charts = tr.b.findDeepElementsMatchingPredicate(
+    charts = tr.ui.b.findDeepElementsMatchingPredicate(
         table, e => ((e.id === 'overview_container') &&
                      (e.style.display !== 'none')));
     assert.lengthOf(charts, 0);
   });
 
-  test('mergeRelationships', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
-    let now = new Date().getTime();
-    let boundaries = tr.v.HistogramBinBoundaries.createLinear(0, 150, 10);
+  test('mergeRelationships', async function() {
+    const benchmarkStartMs = new Date().getTime();
+    const boundaries = tr.v.HistogramBinBoundaries.createLinear(0, 150, 10);
+    const histograms = new tr.v.HistogramSet();
 
     for (let i = 0; i < 2; ++i) {
       for (let j = 0; j < 2; ++j) {
-        let telemetry = new tr.v.d.TelemetryInfo({
+        const telemetry = new tr.v.d.TelemetryInfo({
           storyDisplayName: 'story' + i,
           benchmarkName: 'bench' + j,
-          benchmarkStartMs: now,
+          benchmarkStartMs,
           label: 'Value',
         });
 
-        let sample = (i * 100) + (j * 10);
+        const sample = (i * 100) + (j * 10);
 
-        let sourceHist = new tr.v.Histogram(
-            'source', tr.b.Unit.byName.count, boundaries);
-        sourceHist.addSample(sample);
-        telemetry.addToHistogram(sourceHist);
-        histograms.addHistogram(sourceHist);
+        const sourceHist = histograms.createHistogram(
+            'source', tr.b.Unit.byName.count, [sample], {
+              binBoundaries: boundaries,
+              diagnostics: new Map([[
+                tr.v.d.RESERVED_NAMES.TELEMETRY, telemetry,
+              ]]),
+            });
 
-        let aHist = new tr.v.Histogram('a', tr.b.Unit.byName.count, boundaries);
-        aHist.addSample(sample / 10);
-        telemetry.addToHistogram(aHist);
-        histograms.addHistogram(aHist);
+        const aHist = histograms.createHistogram(
+            'a', tr.b.Unit.byName.count, [sample / 10], {
+              binBoundaries: boundaries,
+              diagnostics: new Map([[
+                tr.v.d.RESERVED_NAMES.TELEMETRY, telemetry,
+              ]]),
+            });
 
-        let bHist = new tr.v.Histogram('b', tr.b.Unit.byName.count, boundaries);
-        bHist.addSample(sample * 9 / 10);
-        telemetry.addToHistogram(bHist);
-        histograms.addHistogram(bHist);
+        const bHist = histograms.createHistogram(
+            'b', tr.b.Unit.byName.count, [sample * 9 / 10], {
+              binBoundaries: boundaries,
+              diagnostics: new Map([[
+                tr.v.d.RESERVED_NAMES.TELEMETRY, telemetry,
+              ]]),
+            });
 
-        let breakdown = new tr.v.d.RelatedHistogramBreakdown();
+        const breakdown = new tr.v.d.RelatedHistogramBreakdown();
         breakdown.add(aHist);
         breakdown.add(bHist);
         sourceHist.diagnostics.set('breakdown', breakdown);
       }
     }
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
+
+    const table = await buildTable(this, histograms);
+    // TODO test
+    // TODO move to histogram_set_table_row_test.html
   });
 
-  test('regression3281', function() {
+  test('regression3281', async function() {
     // https://github.com/catapult-project/catapult/issues/3281
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
+    const histograms = new tr.v.HistogramSet();
 
-    let telemetryA = new tr.v.d.TelemetryInfo({label: 'A'});
-    let telemetryB = new tr.v.d.TelemetryInfo({label: 'B'});
+    const telemetryA = new tr.v.d.TelemetryInfo({label: 'A'});
+    const telemetryB = new tr.v.d.TelemetryInfo({label: 'B'});
 
     tr.b.Settings.set(tr.v.ui.REFERENCE_DISPLAY_LABEL_KEY, telemetryA.label);
     tr.b.Settings.set(tr.v.ui.DISPLAY_STATISTIC_KEY, 'z-score');
 
-    let hist0a = new tr.v.Histogram('foo',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i) {
-      hist0a.addSample(Math.random() * 1e3);
-    }
-    histograms.addHistogram(hist0a);
-    telemetryA.addToHistogram(hist0a);
+    histograms.createHistogram(
+        'foo', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, telemetryA,
+          ]]),
+        });
 
-    let hist1a = new tr.v.Histogram('bar',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i) {
-      hist1a.addSample(Math.random() * 1e3);
-    }
-    histograms.addHistogram(hist1a);
-    telemetryA.addToHistogram(hist1a);
+    histograms.createHistogram(
+        'bar', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, telemetryA,
+          ]]),
+        });
 
-    let hist0b = new tr.v.Histogram('foo',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i) {
-      hist0b.addSample(Math.random() * 1e3);
-    }
-    histograms.addHistogram(hist0b);
-    telemetryB.addToHistogram(hist0b);
+    histograms.createHistogram(
+        'foo', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, telemetryB,
+          ]]),
+        });
 
-    let hist1b = new tr.v.Histogram('bar',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i) {
-      hist1b.addSample(Math.random() * 1e3);
-    }
-    histograms.addHistogram(hist1b);
-    telemetryB.addToHistogram(hist1b);
+    histograms.createHistogram(
+        'bar', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, telemetryB,
+          ]]),
+        });
 
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
+    const table = await buildTable(this, histograms);
+    // TODO test
   });
 
-  test('sortByDisplayStatistic', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
-    let now = new Date().getTime();
+  test('sortByDisplayStatistic', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram(
+        'bar', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [0, 10], {
+          binBoundaries: TEST_BOUNDARIES,
+        });
+    histograms.createHistogram(
+        'foo', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [5], {
+          binBoundaries: TEST_BOUNDARIES,
+        });
 
-    let barHist = new tr.v.Histogram('bar',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    barHist.addSample(0);
-    barHist.addSample(10);
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({
+      sortColumnIndex: 1,
+      sortDescending: false,
+      displayStatisticName: 'min',
+    });
 
-    let fooHist = new tr.v.Histogram('foo',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    fooHist.addSample(5);
-
-    histograms.addHistogram(fooHist);
-    histograms.addHistogram(barHist);
-
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
-
-    table.sortColumnIndex = 1;
-    table.sortDescending = false;
-
-    table.displayStatistic = 'min';
-
-    let nameCells = tr.b.findDeepElementsMatchingPredicate(
-        table, e => e.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-NAME-CELL');
+    let nameCells = getNameCells(table);
     assert.strictEqual(nameCells[0].row.name, 'bar');
     assert.strictEqual(nameCells[1].row.name, 'foo');
 
-    table.sortDescending = true;
-    let baseTable = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.tagName === 'TR-UI-B-TABLE');
-    baseTable.rebuild();
+    await table.viewState.update({sortDescending: true});
 
-    nameCells = tr.b.findDeepElementsMatchingPredicate(
-        table, e => e.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-NAME-CELL');
+    nameCells = getNameCells(table);
     assert.strictEqual(nameCells[0].row.name, 'foo');
     assert.strictEqual(nameCells[1].row.name, 'bar');
 
-    table.displayStatistic = 'max';
+    await table.viewState.update({displayStatisticName: 'max'});
 
-    nameCells = tr.b.findDeepElementsMatchingPredicate(
-        table, e => e.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-NAME-CELL');
+    nameCells = getNameCells(table);
     assert.strictEqual(nameCells[0].row.name, 'bar');
     assert.strictEqual(nameCells[1].row.name, 'foo');
 
-    table.sortDescending = false;
-    baseTable.rebuild();
+    await table.viewState.update({sortDescending: false});
 
-    nameCells = tr.b.findDeepElementsMatchingPredicate(
-        table, e => e.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-NAME-CELL');
+    nameCells = getNameCells(table);
     assert.strictEqual(nameCells[0].row.name, 'foo');
     assert.strictEqual(nameCells[1].row.name, 'bar');
   });
 
-  test('displayStatistic', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
-    let now = new Date().getTime();
-
-    let barHist = new tr.v.Histogram('a',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    barHist.addSample(1);
-    barHist.addSample(2);
-    barHist.addSample(3);
-    new tr.v.d.TelemetryInfo({
-      label: 'bar',
-      benchmarkStartMs: now,
-    }).addToHistogram(barHist);
-
-    let fooHist = new tr.v.Histogram('a',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    fooHist.addSample(10);
-    fooHist.addSample(20);
-    fooHist.addSample(30);
-    new tr.v.d.TelemetryInfo({
-      label: 'foo',
-      benchmarkStartMs: now,
-    }).addToHistogram(fooHist);
+  test('displayStatistic', async function() {
+    const histograms = new tr.v.HistogramSet();
+    const now = new Date().getTime();
+    const barHist = histograms.createHistogram(
+        'a', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [1, 2, 3], {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'bar',
+              benchmarkStartMs: now,
+            }),
+          ]]),
+        });
+    const fooHist = histograms.createHistogram(
+        'a', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [10, 20, 30], {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'foo',
+              benchmarkStartMs: now,
+            }),
+          ]]),
+        });
 
     // Add a Histogram with another name so that the table displays the scalars.
-    let quxHist = new tr.v.Histogram('qux',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    new tr.v.d.TelemetryInfo({
-      label: 'foo',
-      benchmarkStartMs: now,
-    }).addToHistogram(quxHist);
+    const quxHist = histograms.createHistogram(
+        'qux', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [], {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'foo',
+              benchmarkStartMs: now,
+            }),
+          ]]),
+        });
 
-    histograms.addHistogram(fooHist);
-    histograms.addHistogram(barHist);
-    histograms.addHistogram(quxHist);
-
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
+    const table = await buildTable(this, histograms);
 
     function histogramsEqual(a, b) {
       // This is not an exhaustive equality check. This only tests the fields
       // that are distinguishing for this test().
       if (a.name !== b.name) return false;
-      let aTelemetry = tr.v.d.TelemetryInfo.getFromHistogram(a);
-      let bTelemetry = tr.v.d.TelemetryInfo.getFromHistogram(b);
+      const aTelemetry = tr.v.d.TelemetryInfo.getFromHistogram(a);
+      const bTelemetry = tr.v.d.TelemetryInfo.getFromHistogram(b);
       if (!aTelemetry || !bTelemetry) return false;
       // In this test(), |a| is always a merged Histogram and |b| is never a
       // merged Histogram.
       return tr.b.getOnlyElement(aTelemetry.labels) === bTelemetry.label;
     }
 
-    let fooCell = tr.b.findDeepElementMatchingPredicate(table, elem => (
+    let fooCell = tr.ui.b.findDeepElementMatchingPredicate(table, elem => (
       (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
       elem.histogram &&
       histogramsEqual(elem.histogram, fooHist)));
     assert.isDefined(fooCell);
 
-    let fooContent = tr.b.findDeepElementMatchingPredicate(
+    let fooContent = tr.ui.b.findDeepElementMatchingPredicate(
         fooCell, elem => elem.id === 'content');
     assert.isDefined(fooContent);
 
-    let barCell = tr.b.findDeepElementMatchingPredicate(table, elem => (
+    let barCell = tr.ui.b.findDeepElementMatchingPredicate(table, elem => (
       (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
       elem.histogram &&
       histogramsEqual(elem.histogram, barHist)));
     assert.isDefined(barCell);
 
-    let barContent = tr.b.findDeepElementMatchingPredicate(
+    let barContent = tr.ui.b.findDeepElementMatchingPredicate(
         barCell, elem => elem.id === 'content');
     assert.isDefined(barContent);
 
-    assert.strictEqual(table.displayStatistic, 'avg');
+    assert.strictEqual(table.viewState.displayStatisticName, 'avg');
     assert.strictEqual('20.000 ms', fooContent.textContent);
     assert.strictEqual('2.000 ms', barContent.textContent);
 
-    table.referenceDisplayLabel = 'foo';
+    await table.viewState.update({referenceDisplayLabel: 'foo'});
 
-    let baseTable = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.tagName === 'TR-UI-B-TABLE');
-    baseTable.rebuild();
-
-    fooCell = tr.b.findDeepElementMatchingPredicate(table, elem => (
+    fooCell = tr.ui.b.findDeepElementMatchingPredicate(table, elem => (
       (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
       elem.histogram &&
       histogramsEqual(elem.histogram, fooHist)));
     assert.isDefined(fooCell);
 
-    fooContent = tr.b.findDeepElementMatchingPredicate(
+    fooContent = tr.ui.b.findDeepElementMatchingPredicate(
         fooCell, elem => elem.id === 'content');
     assert.isDefined(fooContent);
 
-    barCell = tr.b.findDeepElementMatchingPredicate(table, elem => (
+    barCell = tr.ui.b.findDeepElementMatchingPredicate(table, elem => (
       (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
       elem.histogram &&
       histogramsEqual(elem.histogram, barHist)));
     assert.isDefined(barCell);
 
-    barContent = tr.b.findDeepElementMatchingPredicate(
+    barContent = tr.ui.b.findDeepElementMatchingPredicate(
         barCell, elem => elem.id === 'content');
     assert.isDefined(barContent);
 
-    assert.strictEqual(table.displayStatistic, tr.v.ABS_DELTA_AVG_NAME);
+    // TODO(benjhayden): Test that histogram-set-controls automatically prepend
+    // DELTA when a reference columns is selected.
+    await table.viewState.update({displayStatisticName: `${tr.v.DELTA}avg`});
     assert.strictEqual('20.000 ms', fooContent.textContent);
     assert.strictEqual('-18.000 ms', barContent.textContent);
 
-    table.displayStatistic = tr.v.PCT_DELTA_AVG_NAME;
+    await table.viewState.update({displayStatisticName: `%${tr.v.DELTA}avg`});
 
-    fooCell = tr.b.findDeepElementMatchingPredicate(table, elem => (
+    fooCell = tr.ui.b.findDeepElementMatchingPredicate(table, elem => (
       (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
       elem.histogram &&
       histogramsEqual(elem.histogram, fooHist)));
     assert.isDefined(fooCell);
 
-    fooContent = tr.b.findDeepElementMatchingPredicate(
+    fooContent = tr.ui.b.findDeepElementMatchingPredicate(
         fooCell, elem => elem.id === 'content');
     assert.isDefined(fooContent);
 
-    barCell = tr.b.findDeepElementMatchingPredicate(table, elem => (
+    barCell = tr.ui.b.findDeepElementMatchingPredicate(table, elem => (
       (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
       elem.histogram &&
       histogramsEqual(elem.histogram, barHist)));
     assert.isDefined(barCell);
 
-    barContent = tr.b.findDeepElementMatchingPredicate(
+    barContent = tr.ui.b.findDeepElementMatchingPredicate(
         barCell, elem => elem.id === 'content');
     assert.isDefined(barContent);
 
-    assert.strictEqual(table.displayStatistic, tr.v.PCT_DELTA_AVG_NAME);
+    assert.strictEqual(table.viewState.displayStatisticName,
+        `%${tr.v.DELTA}avg`);
     assert.strictEqual('20.000 ms', fooContent.textContent);
     assert.strictEqual('-90.000%', barContent.textContent);
   });
 
-  test('requestSelectionChange', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
+  test('requestSelectionChange', async function() {
+    const histograms = new tr.v.HistogramSet();
+    const barHist = histograms.createHistogram(
+        'bar', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [1], {
+          binBoundaries: TEST_BOUNDARIES,
+        });
 
-    let barHist = new tr.v.Histogram('bar',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    barHist.addSample(1);
+    const fooHist = histograms.createHistogram(
+        'foo', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [1], {
+          binBoundaries: TEST_BOUNDARIES,
+        });
 
-    let fooHist = new tr.v.Histogram('foo',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    fooHist.addSample(1);
-    let breakdown = new tr.v.d.RelatedHistogramBreakdown();
+    const quxHist = histograms.createHistogram(
+        'qux', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [], {
+          binBoundaries: TEST_BOUNDARIES,
+        });
+    const breakdown = new tr.v.d.RelatedHistogramBreakdown();
     breakdown.set('bar', barHist);
-
+    breakdown.set('qux', quxHist);
     fooHist.diagnostics.set('breakdown', breakdown);
-    histograms.addHistogram(fooHist);
-    histograms.addHistogram(barHist);
 
-    this.addHTMLOutput(table);
+    const table = await buildTable(this, histograms);
 
-    table.histograms = histograms;
-
-    let fooCell = tr.b.findDeepElementMatchingPredicate(
+    let fooCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'foo')));
     assert.isDefined(fooCell);
 
-    let barCell = tr.b.findDeepElementMatchingPredicate(
+    let barCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'bar')));
@@ -415,29 +1227,21 @@ tr.b.unittest.testSuite(function() {
 
     fooCell.isHistogramOpen = true;
 
-    let barLink = tr.b.findDeepElementMatchingPredicate(
+    const barLink = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => elem.tagName === 'TR-UI-A-ANALYSIS-LINK');
     assert.isDefined(barLink);
     barLink.click();
 
-    barCell = tr.b.findDeepElementMatchingPredicate(
+    await tr.b.animationFrame();
+    barCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'bar')));
     assert.isDefined(barCell);
 
-    let quxHist = new tr.v.Histogram('qux',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    histograms.addHistogram(quxHist);
-    breakdown.set('qux', quxHist);
+    await table.viewState.update({searchQuery: ''});
 
-    let search = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.id === 'search');
-    search.value = '';
-
-    table.histograms = histograms;
-
-    fooCell = tr.b.findDeepElementMatchingPredicate(
+    fooCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'foo')));
@@ -445,96 +1249,83 @@ tr.b.unittest.testSuite(function() {
 
     fooCell.isHistogramOpen = true;
 
-    let selectAllLink = tr.b.findDeepElementMatchingPredicate(
+    const selectAllLink = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-UI-A-ANALYSIS-LINK') &&
           (elem.textContent === 'Select All')));
     assert.isDefined(selectAllLink);
     selectAllLink.click();
 
-    assert.strictEqual(search.value, '^(bar|qux)$');
+    assert.strictEqual(table.viewState.searchQuery, '^(bar|qux)$');
 
-    fooCell = tr.b.findDeepElementMatchingPredicate(
+    await tr.b.animationFrame();
+    fooCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'foo')));
     assert.isUndefined(fooCell);
 
-    barCell = tr.b.findDeepElementMatchingPredicate(
+    barCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'bar')));
     assert.isDefined(barCell);
 
-    let quxCell = tr.b.findDeepElementMatchingPredicate(
+    const quxCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'qux')));
     assert.isDefined(quxCell);
   });
 
-  test('search', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
+  test('search', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram(
+        'bar', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [1], {
+          binBoundaries: TEST_BOUNDARIES,
+        });
+    histograms.createHistogram(
+        'foo', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [1], {
+          binBoundaries: TEST_BOUNDARIES,
+        });
 
-    let barHist = new tr.v.Histogram('bar',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    barHist.addSample(1);
+    const table = await buildTable(this, histograms);
 
-    let fooHist = new tr.v.Histogram('foo',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    fooHist.addSample(1);
-
-    histograms.addHistogram(fooHist);
-    histograms.addHistogram(barHist);
-
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
-
-    let search = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.id === 'search');
-    search.value = 'bar';
-
-    let fooCell = tr.b.findDeepElementMatchingPredicate(
+    let fooCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'foo')));
     assert.isDefined(fooCell);
 
-    let barCell = tr.b.findDeepElementMatchingPredicate(
+    let barCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'bar')));
     assert.isDefined(barCell);
 
-    search = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.id === 'search');
+    await table.viewState.update({searchQuery: 'bar'});
 
-    search.value = 'bar';
-    table.onSearch_();
-
-    fooCell = tr.b.findDeepElementMatchingPredicate(
+    fooCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'foo')));
     assert.isUndefined(fooCell);
 
-    barCell = tr.b.findDeepElementMatchingPredicate(
+    barCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'bar')));
     assert.isDefined(barCell);
 
-    search.value = 'foo';
-    table.onSearch_();
+    await table.viewState.update({searchQuery: 'foo'});
 
-    fooCell = tr.b.findDeepElementMatchingPredicate(
+    fooCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'foo')));
     assert.isDefined(fooCell);
 
-    barCell = tr.b.findDeepElementMatchingPredicate(
+    barCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'bar')));
@@ -542,389 +1333,303 @@ tr.b.unittest.testSuite(function() {
 
     // As users type in regexes, some intermediate forms may be invalid regexes.
     // When the search is an invalid regex, just ignore it.
-    search.value = '[a-';
-    table.onSearch_();
+    await table.viewState.update({searchQuery: '[a-'});
 
-    fooCell = tr.b.findDeepElementMatchingPredicate(
+    fooCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'foo')));
     assert.isDefined(fooCell);
 
-    barCell = tr.b.findDeepElementMatchingPredicate(
+    barCell = tr.ui.b.findDeepElementMatchingPredicate(
         table, elem => (
           (elem.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-CELL') &&
           (elem.histogram.name === 'bar')));
     assert.isDefined(barCell);
   });
 
-  test('implicitUndefinedValues', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    this.addHTMLOutput(table);
-    assert.strictEqual('block', getComputedStyle(
-        tr.b.findDeepElementMatchingPredicate(
-            table, e => e.textContent === 'zero Histograms')).display);
-    assert.strictEqual('none', getComputedStyle(
-        tr.b.findDeepElementMatchingPredicate(
-            table, e => e.id === 'container')).display);
-  });
-
-  test('explicitUndefinedValues', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    table.histograms = undefined;
-    this.addHTMLOutput(table);
-    assert.strictEqual('block', getComputedStyle(
-        tr.b.findDeepElementMatchingPredicate(
-            table, e => e.textContent === 'zero Histograms')).display);
-    assert.strictEqual('none', getComputedStyle(
-        tr.b.findDeepElementMatchingPredicate(
-            table, e => e.id === 'container')).display);
-  });
-
-  test('emptyValues', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
-    assert.strictEqual('block', getComputedStyle(
-        tr.b.findDeepElementMatchingPredicate(
-            table, e => e.textContent === 'zero Histograms')).display);
-    assert.strictEqual('none', getComputedStyle(
-        tr.b.findDeepElementMatchingPredicate(
-            table, e => e.id === 'container')).display);
-  });
-
-  test('shortName', function() {
+  test('shortName', async function() {
     // One value has |name|='long name' and |shortName|='short name',
     // another value has |name|='short name' to demonstrate the fundamental
     // ambiguity that arises when Histograms can have multiple different
     // "names".
 
-    let now = new Date().getTime();
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
+    const now = new Date().getTime();
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram(
+        'long name', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          binBoundaries: TEST_BOUNDARIES,
+          shortName: 'short name',
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'iteration A',
+              benchmarkStartMs: now,
+            }),
+          ]]),
+        });
 
-    let histA = new tr.v.Histogram('long name',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i)
-      histA.addSample(Math.random() * 1e3);
-    histA.shortName = 'short name';
-    new tr.v.d.TelemetryInfo({
-      label: 'iteration A',
-      benchmarkStartMs: now,
-    }).addToHistogram(histA);
-    histograms.addHistogram(histA);
+    histograms.createHistogram(
+        'short name', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'iteration B',
+              benchmarkStartMs: now,
+            }),
+          ]]),
+        });
 
-    let histB = new tr.v.Histogram('short name',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i)
-      histB.addSample(Math.random() * 1e3);
-    new tr.v.d.TelemetryInfo({
-      label: 'iteration B',
-      benchmarkStartMs: now,
-    }).addToHistogram(histB);
-    histograms.addHistogram(histB);
+    const table = await buildTable(this, histograms);
 
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
-
-    assert.strictEqual('none', getComputedStyle(
-        tr.b.findDeepElementMatchingPredicate(
-            table, e => e.textContent === 'zero Histograms')).display);
-    assert.strictEqual('flex', getComputedStyle(
-        tr.b.findDeepElementMatchingPredicate(
-            table, e => e.id === 'container')).display);
-    assert.isDefined(tr.b.findDeepElementMatchingPredicate(
+    // TODO(benjhayden): The shortName version of GROUPINGS.HISTOGRAM_NAME moved
+    // to histogram_set_view. Move this test to histogram_set_view_test.
+    /*
+    assert.isDefined(tr.ui.b.findDeepElementMatchingPredicate(
         table, e => e.textContent === 'short name'));
-    assert.isUndefined(tr.b.findDeepElementMatchingPredicate(
+    assert.isUndefined(tr.ui.b.findDeepElementMatchingPredicate(
         table, e => e.textContent === 'long name'));
+    */
   });
 
-  test('emptyAndMissing', function() {
-    let now = new Date().getTime();
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
+  test('emptyAndMissing', async function() {
+    const now = new Date().getTime();
+    const histograms = new tr.v.HistogramSet();
 
-    let histA = new tr.v.Histogram('histogram A',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i)
-      histA.addSample(Math.random() * 1e3);
-    new tr.v.d.TelemetryInfo({
-      label: 'iteration A',
-      benchmarkStartMs: now,
-    }).addToHistogram(histA);
-    histograms.addHistogram(histA);
+    const histA = histograms.createHistogram(
+        'histogram A', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'iteration A',
+              benchmarkStartMs: now,
+            }),
+          ]]),
+        });
 
-    let histB = new tr.v.Histogram('histogram B',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i)
-      histB.addSample(Math.random() * 1e3);
-    new tr.v.d.TelemetryInfo({
-      label: 'iteration B',
-      benchmarkStartMs: now,
-    }).addToHistogram(histB);
-    histograms.addHistogram(histB);
+    const histB = histograms.createHistogram(
+        'histogram B', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'iteration B',
+              benchmarkStartMs: now,
+            }),
+          ]]),
+        });
 
-    let histC = new tr.v.Histogram('histogram A',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    new tr.v.d.TelemetryInfo({
-      label: 'iteration B',
-      benchmarkStartMs: now,
-    }).addToHistogram(histC);
-    histograms.addHistogram(histC);
+    const histC = histograms.createHistogram(
+        'histogram A', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, [], {
+          binBoundaries: TEST_BOUNDARIES,
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'iteration B',
+              benchmarkStartMs: now,
+            }),
+          ]]),
+        });
 
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
+    const table = await buildTable(this, histograms);
 
-    assert.isDefined(tr.b.findDeepElementMatchingPredicate(
+    assert.isDefined(tr.ui.b.findDeepElementMatchingPredicate(
         table, e => e.textContent === '(empty)'));
-    assert.isDefined(tr.b.findDeepElementMatchingPredicate(
+    assert.isDefined(tr.ui.b.findDeepElementMatchingPredicate(
         table, e => e.textContent === '(missing)'));
   });
 
-  test('instantiate_1x1', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
+  test('instantiate_1x1', async function() {
+    const histograms = new tr.v.HistogramSet();
+    const hist = histograms.createHistogram(
+        'foo', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          binBoundaries: TEST_BOUNDARIES,
+        });
+    const table = await buildTable(this, histograms);
 
-    let hist = new tr.v.Histogram('foo',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i)
-      hist.addSample(Math.random() * 1e3);
-    histograms.addHistogram(hist);
-
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
-
-    let baseTable = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.tagName === 'TR-UI-B-TABLE');
+    const baseTable = getBaseTable(table);
     assert.strictEqual(baseTable.tableRows.length, 1);
+
+    const cell = tr.ui.b.findDeepElementMatchingPredicate(table, elem =>
+        elem.tagName === 'TR-V-UI-SCALAR-SPAN');
+    cell.click();
+
+    const yAxisText = tr.ui.b.findDeepElementMatchingPredicate(table, e =>
+        e.tagName === 'text' && e.textContent === '<0.000 ms');
+    assert.isBelow(0, yAxisText.getBBox().width);
   });
 
-  test('merge_unmergeable', function() {
-    let now = new Date().getTime();
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
-
-    let histA = new tr.v.Histogram('histogram A',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i)
-      histA.addSample(Math.random() * 1e3);
-    new tr.v.d.TelemetryInfo({
-      label: 'Value',
-      benchmarkStartMs: now,
-      storyDisplayName: 'story A'
-    }).addToHistogram(histA);
-    histograms.addHistogram(histA);
-
-    let histB = new tr.v.Histogram('histogram B',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
-        tr.v.HistogramBinBoundaries.createExponential(1e-3, 1e3, 20));
-    for (let i = 0; i < 100; ++i)
-      histB.addSample(Math.random() * Math.random() * 1e3);
-    new tr.v.d.TelemetryInfo({
-      label: 'Value',
-      benchmarkStartMs: now,
-      storyDisplayName: 'story A'
-    }).addToHistogram(histB);
-    histograms.addHistogram(histB);
-
-    let histC = new tr.v.Histogram('histogram C',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
-        tr.v.HistogramBinBoundaries.createExponential(1e-3, 1e3, 30));
-    for (let i = 0; i < 100; ++i)
-      histC.addSample(Math.random() * Math.random() * 1e3);
-    new tr.v.d.TelemetryInfo({
-      label: 'Value',
-      benchmarkStartMs: now,
-      storyDisplayName: 'story B'
-    }).addToHistogram(histC);
-    histograms.addHistogram(histC);
-
-    table.histograms = histograms;
-    table.groupingKeys = [
-      tr.v.HistogramSet.GROUPINGS.STORY_NAME.key,
-      tr.v.HistogramSet.GROUPINGS.HISTOGRAM_NAME.key,
-    ];
-    this.addHTMLOutput(table);
-
-    let baseTable = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.tagName === 'TR-UI-B-TABLE');
-    assert.strictEqual(baseTable.tableRows.length, 2);
+  test('merge_unmergeable', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('foo', tr.b.Unit.byName.count, [], {
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'A',
+          label: 'Value',
+        }),
+      ]]),
+    });
+    histograms.createHistogram('foo', tr.b.Unit.byName.count, [], {
+      binBoundaries: tr.v.HistogramBinBoundaries.createLinear(0, 1e3, 21),
+      diagnostics: new Map([[
+        tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+          storyDisplayName: 'B',
+          label: 'Value',
+        }),
+      ]]),
+    });
+    const table = await buildTable(this, histograms);
+    assert.strictEqual(table.viewState.tableRowStates.size, 1);
+    assert.instanceOf(tr.b.getOnlyElement(getTableCells(table)).histogram,
+        tr.v.HistogramSet);
   });
 
-  test('instantiate_2x2', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
+  // TODO(benjhayden): Merge this with the pure instantiation 'merged' test.
+  test('instantiate_1x5', async function() {
+    const histograms = new tr.v.HistogramSet();
 
-    let hist0a = new tr.v.Histogram('foo',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i)
-      hist0a.addSample(Math.random() * 1e3);
-    histograms.addHistogram(hist0a);
-    new tr.v.d.TelemetryInfo({
-      label: 'iteration A',
-      benchmarkStartMs: new Date().getTime(),
-    }).addToHistogram(hist0a);
+    for (let i = 0; i < 5; ++i) {
+      histograms.createHistogram(
+          'foo', tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
+          range(0, 100).map(i => Math.random() * 1e3), {
+            binBoundaries: TEST_BOUNDARIES,
+            diagnostics: new Map([[
+              tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+                label: '' + i,
+                benchmarkStartMs: new Date().getTime(),
+              }),
+            ]]),
+          });
+    }
+    const table = await buildTable(this, histograms);
+  });
 
-    let hist1a = new tr.v.Histogram('bar',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i)
-      hist1a.addSample(Math.random() * 1e3);
-    histograms.addHistogram(hist1a);
-    new tr.v.d.TelemetryInfo({
-      label: 'iteration A',
-      benchmarkStartMs: new Date().getTime(),
-    }).addToHistogram(hist1a);
-
-    let hist0b = new tr.v.Histogram('foo',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i)
-      hist0b.addSample(Math.random() * 1e3);
-    histograms.addHistogram(hist0b);
-    new tr.v.d.TelemetryInfo({
-      label: 'iteration B',
-      benchmarkStartMs: new Date().getTime(),
-    }).addToHistogram(hist0b);
-
-    let hist1b = new tr.v.Histogram('bar',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter, TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i)
-      hist1b.addSample(Math.random() * 1e3);
-    histograms.addHistogram(hist1b);
-    new tr.v.d.TelemetryInfo({
-      label: 'iteration B',
-      benchmarkStartMs: new Date().getTime(),
-    }).addToHistogram(hist1b);
-
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
-
-    let baseTable = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.tagName === 'TR-UI-B-TABLE');
+  // TODO(benjhayden): Merge this with the pure instantiation 'merged' test.
+  test('instantiate_2x2', async function() {
+    const histograms = new tr.v.HistogramSet();
+    histograms.createHistogram('foo', tr.b.Unit.byName.count,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'A',
+              benchmarkStartMs: new Date().getTime(),
+            }),
+          ]]),
+        });
+    histograms.createHistogram('bar', tr.b.Unit.byName.count,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'A',
+              benchmarkStartMs: new Date().getTime(),
+            }),
+          ]]),
+        });
+    histograms.createHistogram('foo', tr.b.Unit.byName.count,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'B',
+              benchmarkStartMs: new Date().getTime(),
+            }),
+          ]]),
+        });
+    histograms.createHistogram('bar', tr.b.Unit.byName.count,
+        range(0, 100).map(i => Math.random() * 1e3), {
+          diagnostics: new Map([[
+            tr.v.d.RESERVED_NAMES.TELEMETRY, new tr.v.d.TelemetryInfo({
+              label: 'B',
+              benchmarkStartMs: new Date().getTime(),
+            }),
+          ]]),
+        });
+    const table = await buildTable(this, histograms);
+    const baseTable = getBaseTable(table);
 
     assert.lengthOf(baseTable.tableColumns, 3);
     assert.strictEqual('Name',
         baseTable.tableColumns[0].title.children[0].textContent);
-    assert.strictEqual('iteration A',
-        baseTable.tableColumns[1].title);
-    assert.strictEqual('iteration B',
-        baseTable.tableColumns[2].title);
+    assert.strictEqual('A',
+        baseTable.tableColumns[1].title.textContent);
+    assert.strictEqual('B',
+        baseTable.tableColumns[2].title.textContent);
 
-    table.referenceDisplayLabel = 'iteration A';
+    await table.viewState.update({referenceDisplayLabel: 'A'});
     baseTable.rebuild();
     assert.strictEqual(1, baseTable.selectedTableColumnIndex);
-    assert.strictEqual(
-        table.rows_[0].cells.get('iteration B').referenceHistogram,
-        table.rows_[0].cells.get('iteration A').histogram);
-    assert.strictEqual(
-        table.rows_[1].cells.get('iteration B').referenceHistogram,
-        table.rows_[1].cells.get('iteration A').histogram);
+    let cells = getTableCells(table);
+    assert.strictEqual(cells[1].referenceHistogram, cells[0].histogram);
+    assert.strictEqual(cells[3].referenceHistogram, cells[2].histogram);
 
-    table.referenceDisplayLabel = 'iteration B';
-    baseTable.rebuild();
+    await table.viewState.update({referenceDisplayLabel: 'B'});
+    cells = getTableCells(table);
     assert.strictEqual(2, baseTable.selectedTableColumnIndex);
-    assert.strictEqual(
-        table.rows_[0].cells.get('iteration A').referenceHistogram,
-        table.rows_[0].cells.get('iteration B').histogram);
-    assert.strictEqual(
-        table.rows_[1].cells.get('iteration A').referenceHistogram,
-        table.rows_[1].cells.get('iteration B').histogram);
+    assert.strictEqual(cells[0].referenceHistogram, cells[1].histogram);
+    assert.strictEqual(cells[2].referenceHistogram, cells[3].histogram);
 
     // Test sorting by the reference column when the displayStatistic is a delta
     // statistic.
-    table.sortColumnIndex = 2;
-    baseTable.rebuild();
-    let nameCell = tr.b.findDeepElementMatchingPredicate(
-        table, e => e.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-NAME-CELL');
-    let originalFirstRow = nameCell.row.name;
+    await table.viewState.update({sortColumnIndex: 2});
+    let nameCell = getNameCells(table)[0];
+    const originalFirstRow = nameCell.row.name;
     // This is either 'foo' or 'bar' depending on Math.random() above.
 
-    table.sortDescending = !table.sortDescending;
+    await table.viewState.update({
+      sortDescending: !table.viewState.sortDescending,
+    });
     baseTable.rebuild();
-    nameCell = tr.b.findDeepElementMatchingPredicate(
-        table, e => e.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-NAME-CELL');
+    nameCell = getNameCells(table)[0];
     assert.notEqual(originalFirstRow, nameCell.row.name);
   });
 
-  test('defaultDisplayLabel', function() {
-    let histograms = new tr.v.HistogramSet();
-
-    let hist = new tr.v.Histogram('foo',
-        tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
-        TEST_BOUNDARIES);
-    for (let i = 0; i < 100; ++i) {
-      hist.addSample(Math.random() * 1e3, {
-        sample_diagnostic: new tr.v.d.Generic(i),
-      });
-    }
-
-    histograms.addHistogram(hist);
-
-    new tr.v.d.TelemetryInfo({
-      benchmarkName: 'benchmarkName',
-      benchmarkStartMs: 1439708400000,
-    }).addToHistogram(hist);
-
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    table.histograms = histograms;
-    this.addHTMLOutput(table);
-
-    // When TelemetryInfo.label is undefined, displayLabel defaults to
-    // benchmarkName + '\n' + benchmarkStartString, which
-    // histogram-set-table.buildColumn_ should render as a div containing 2
-    // divs.
-    let headerCell = tr.b.findDeepElementsMatchingPredicate(
-        table, elem => elem.tagName === 'TR-UI-B-TABLE-HEADER-CELL')[1];
-    let titleSpan = tr.b.findDeepElementMatching(headerCell, 'span#title');
-    assert.strictEqual(titleSpan.children[0].tagName, 'DIV');
-    assert.lengthOf(titleSpan.children[0].children, 2);
-    assert.strictEqual(titleSpan.children[0].children[0].tagName, 'DIV');
-    assert.strictEqual(titleSpan.children[0].children[1].tagName, 'DIV');
-  });
-
-  test('merged', function() {
-    let table = document.createElement('tr-v-ui-histogram-set-table');
-    let histograms = new tr.v.HistogramSet();
+  // TODO(benjhayden): Move this to a pure instantiation test in
+  // histogram_set_view_test.html
+  test('merged', async function() {
+    const histograms = new tr.v.HistogramSet();
     // Add 2^8=256 Histograms, all with the same name, with different
     // TelemetryInfos.
-    let benchmarkNames = ['bm A', 'bm B'];
-    let storyGroupingKeys0 = ['A', 'B'];
-    let storyGroupingKeys1 = ['C', 'D'];
-    let storyNames = ['story A', 'story B'];
-    let starts = [1439708400000, 1439794800000];
-    let labels = ['label A', 'label B'];
-    let name = 'name '.repeat(20);
+    const benchmarkNames = ['bm A', 'bm B'];
+    const storyGroupingKeys0 = ['A', 'B'];
+    const storyGroupingKeys1 = ['C', 'D'];
+    const storyNames = ['story A', 'story B'];
+    const starts = [1439708400000, 1439794800000];
+    const labels = ['label A', 'label B'];
+    const name = 'name '.repeat(20);
+    const unit = tr.b.Unit.byName.timeDurationInMs_smallerIsBetter;
 
-    for (let benchmarkName of benchmarkNames) {
-      for (let storyGroupingKey0 of storyGroupingKeys0) {
-        for (let storyGroupingKey1 of storyGroupingKeys1) {
-          for (let storyName of storyNames) {
-            for (let startMs of starts) {
+    for (const benchmarkName of benchmarkNames) {
+      for (const storyGroupingKey0 of storyGroupingKeys0) {
+        for (const storyGroupingKey1 of storyGroupingKeys1) {
+          for (const storyName of storyNames) {
+            for (const startMs of starts) {
               for (let storysetCounter = 0; storysetCounter < 2;
                   ++storysetCounter) {
-                for (let label of labels) {
-                  let hist = new tr.v.Histogram(name,
-                      tr.b.Unit.byName.timeDurationInMs_smallerIsBetter,
-                      TEST_BOUNDARIES);
-                  for (let i = 0; i < 100; ++i) {
-                    hist.addSample(Math.random() * 1e3, {
-                      sample_diagnostic: new tr.v.d.Generic(i)});
-                  }
-                  hist.description = 'The best description.';
-
-                  histograms.addHistogram(hist);
-
-                  new tr.v.d.TelemetryInfo({
-                    storyGroupingKeys: {
-                      storyGroupingKey0: storyGroupingKey0,
-                      storyGroupingKey1: storyGroupingKey1
-                    },
-                    benchmarkName: benchmarkName,
-                    storyDisplayName: storyName,
-                    benchmarkStartMs: startMs,
-                    storysetRepeatCounter: storysetCounter,
-                    label: label,
-                  }).addToHistogram(hist);
+                for (const label of labels) {
+                  const samples = range(0, 100).map(i => {
+                    return {
+                      value: Math.random() * 1e3,
+                      diagnostics: {i: new tr.v.d.GenericSet([i])},
+                    };
+                  });
+                  histograms.createHistogram(name, unit, samples, {
+                    description: 'The best description.',
+                    diagnostics: new Map([[
+                      tr.v.d.RESERVED_NAMES.TELEMETRY,
+                      new tr.v.d.TelemetryInfo({
+                        storyGroupingKeys: {
+                          storyGroupingKey0,
+                          storyGroupingKey1,
+                        },
+                        benchmarkName,
+                        storyDisplayName: storyName,
+                        benchmarkStartMs: startMs,
+                        storysetRepeatCounter: storysetCounter,
+                        label,
+                      }),
+                    ]]),
+                  });
                 }
               }
             }
@@ -933,33 +1638,39 @@ tr.b.unittest.testSuite(function() {
       }
     }
 
-    table.histograms = histograms;
-    table.groupingKeys = [
-      tr.v.HistogramSet.GROUPINGS.HISTOGRAM_NAME.key,
-      tr.v.HistogramSet.GROUPINGS.BENCHMARK_NAME.key,
-      'storyGroupingKey_storyGroupingKey0',
-      'storyGroupingKey_storyGroupingKey1',
-      tr.v.HistogramSet.GROUPINGS.STORY_NAME.key,
-      tr.v.HistogramSet.GROUPINGS.BENCHMARK_START.key,
-      tr.v.HistogramSet.GROUPINGS.STORYSET_REPEAT.key,
-    ];
-    this.addHTMLOutput(table);
-    let baseTable = tr.b.findDeepElementMatchingPredicate(
-        table, elem => elem.tagName === 'TR-UI-B-TABLE');
+    const table = await buildTable(this, histograms);
+    await table.viewState.update({groupings: [
+      tr.v.HistogramGrouping.HISTOGRAM_NAME,
+      tr.v.HistogramGrouping.BENCHMARK_NAME,
+      new tr.v.HistogramGrouping('storyGroupingKey_storyGroupingKey0',
+          tr.v.d.TelemetryInfo.makeStoryGroupingKeyLabelGetter(
+              'storyGroupingKey0')),
+      new tr.v.HistogramGrouping('storyGroupingKey_storyGroupingKey1',
+          tr.v.d.TelemetryInfo.makeStoryGroupingKeyLabelGetter(
+              'storyGroupingKey1')),
+      tr.v.HistogramGrouping.STORY_NAME,
+      tr.v.HistogramGrouping.BENCHMARK_START,
+      tr.v.HistogramGrouping.STORYSET_REPEAT,
+    ]});
+    const baseTable = getBaseTable(table);
 
     assert.lengthOf(baseTable.tableColumns, 3);
-    let nameHeaderCell = baseTable.tableColumns[0].title;
+    const nameHeaderCell = baseTable.tableColumns[0].title;
     assert.strictEqual('Name', nameHeaderCell.children[0].textContent);
-    assert.strictEqual('label A', baseTable.tableColumns[1].title);
-    assert.strictEqual('label B', baseTable.tableColumns[2].title);
+    assert.strictEqual('label A', baseTable.tableColumns[1].title.textContent);
+    assert.strictEqual('label B', baseTable.tableColumns[2].title.textContent);
 
-    let nameCell = tr.b.findDeepElementMatchingPredicate(
-        table, e => e.tagName === 'TR-V-UI-HISTOGRAM-SET-TABLE-NAME-CELL');
-    assert.strictEqual(321, nameCell.getBoundingClientRect().width);
+    const nameCell = tr.b.getOnlyElement(getNameCells(table));
+    assert.closeTo(346, nameCell.getBoundingClientRect().width, 1);
+
     nameHeaderCell.children[1].click();
+    // toggleNameColumnWidth_ does not await viewState.update()
+    await tr.b.animationFrame();
     assert.isBelow(322, nameCell.getBoundingClientRect().width);
+
     nameHeaderCell.children[1].click();
-    assert.strictEqual(321, nameCell.getBoundingClientRect().width);
+    await tr.b.animationFrame();
+    assert.closeTo(346, nameCell.getBoundingClientRect().width, 1);
 
     assert.lengthOf(baseTable.tableRows, 1);
     assert.strictEqual(name, baseTable.tableRows[0].name);
@@ -970,10 +1681,10 @@ tr.b.unittest.testSuite(function() {
     // the particular row is needed. This code would be a bit simpler if each
     // row were given a named variable, but the path to each subRow would still
     // need to be tracked in order to provide for diagnosing.
-    let subRowPath = [];
+    const subRowPath = [];
     function getSubRow() {
       let row = baseTable.tableRows[0];
-      for (let index of subRowPath) {
+      for (const index of subRowPath) {
         row = row.subRows[index];
       }
       return row;

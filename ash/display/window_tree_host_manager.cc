@@ -10,20 +10,20 @@
 #include <memory>
 #include <utility>
 
-#include "ash/common/ash_switches.h"
-#include "ash/common/system/tray/system_tray.h"
+#include "ash/ash_switches.h"
 #include "ash/display/cursor_window_controller.h"
 #include "ash/display/mirror_window_controller.h"
 #include "ash/display/root_window_transformers.h"
 #include "ash/host/ash_window_tree_host.h"
 #include "ash/host/ash_window_tree_host_init_params.h"
 #include "ash/host/root_window_transformer.h"
-#include "ash/ime/input_method_event_handler.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/magnifier/partial_magnification_controller.h"
+#include "ash/public/cpp/config.h"
 #include "ash/root_window_controller.h"
 #include "ash/root_window_settings.h"
 #include "ash/shell.h"
+#include "ash/system/tray/system_tray.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
@@ -59,10 +59,6 @@
 #undef RootWindow
 #endif  // defined(USE_X11)
 
-#if defined(USE_OZONE)
-#include "ui/events/ozone/chromeos/cursor_controller.h"
-#endif
-
 namespace ash {
 namespace {
 
@@ -73,13 +69,8 @@ namespace {
 // This is initialized in the constructor, and then in CreatePrimaryHost().
 int64_t primary_display_id = -1;
 
-#if defined(USE_OZONE)
-// Add 20% more cursor motion on non-integrated displays.
-const float kCursorMultiplierForExternalDisplays = 1.2f;
-#endif
-
 display::DisplayManager* GetDisplayManager() {
-  return Shell::GetInstance()->display_manager();
+  return Shell::Get()->display_manager();
 }
 
 void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
@@ -122,14 +113,7 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
   ui::SetIntProperty(xwindow, kScaleFactorProp, kCARDINAL,
                      100 * display.device_scale_factor());
 #elif defined(USE_OZONE)
-  // Scale all motion on High-DPI displays.
-  float scale = display.device_scale_factor();
-
-  if (!display.IsInternal())
-    scale *= kCursorMultiplierForExternalDisplays;
-
-  ui::CursorController::GetInstance()->SetCursorConfigForWindow(
-      host->GetAcceleratedWidget(), info.GetActiveRotation(), scale);
+  ash_host->SetCursorConfig(display, info.GetActiveRotation());
 #endif
   std::unique_ptr<RootWindowTransformer> transformer(
       CreateRootWindowTransformerForDisplay(host->window(), display));
@@ -143,37 +127,20 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
                                           mode->refresh_rate()));
   }
 
-  // Just movnig the display requires the full redraw.
+  // Just moving the display requires the full redraw.
   // chrome-os-partner:33558.
   host->compositor()->ScheduleFullRedraw();
 }
 
 void ClearDisplayPropertiesOnHost(AshWindowTreeHost* ash_host) {
 #if defined(USE_OZONE)
-  aura::WindowTreeHost* host = ash_host->AsWindowTreeHost();
-  ui::CursorController::GetInstance()->ClearCursorConfigForWindow(
-      host->GetAcceleratedWidget());
+  ash_host->ClearCursorConfig();
 #endif
 }
 
 aura::Window* GetWindow(AshWindowTreeHost* ash_host) {
   CHECK(ash_host->AsWindowTreeHost());
   return ash_host->AsWindowTreeHost()->window();
-}
-
-void SwapRecursive(
-    const std::map<int64_t, display::DisplayPlacement*>& id_to_placement,
-    int64_t current_primary_id,
-    int64_t display_id) {
-  if (display_id == current_primary_id)
-    return;
-
-  DCHECK(id_to_placement.count(display_id));
-  display::DisplayPlacement* placement = id_to_placement.at(display_id);
-  DCHECK(placement);
-  SwapRecursive(id_to_placement, current_primary_id,
-                placement->parent_display_id);
-  placement->Swap();
 }
 
 }  // namespace
@@ -192,7 +159,7 @@ class FocusActivationStore {
   void Store(bool clear_focus) {
     if (!activation_client_) {
       aura::Window* root = Shell::GetPrimaryRootWindow();
-      activation_client_ = aura::client::GetActivationClient(root);
+      activation_client_ = ::wm::GetActivationClient(root);
       capture_client_ = aura::client::GetCaptureClient(root);
       focus_client_ = aura::client::GetFocusClient(root);
     }
@@ -233,7 +200,7 @@ class FocusActivationStore {
   }
 
  private:
-  aura::client::ActivationClient* activation_client_;
+  ::wm::ActivationClient* activation_client_;
   aura::client::CaptureClient* capture_client_;
   aura::client::FocusClient* focus_client_;
   aura::WindowTracker tracker_;
@@ -262,7 +229,7 @@ WindowTreeHostManager::~WindowTreeHostManager() {}
 
 void WindowTreeHostManager::Start() {
   display::Screen::GetScreen()->AddObserver(this);
-  Shell::GetInstance()->display_manager()->set_delegate(this);
+  Shell::Get()->display_manager()->set_delegate(this);
 }
 
 void WindowTreeHostManager::Shutdown() {
@@ -271,7 +238,7 @@ void WindowTreeHostManager::Shutdown() {
 
   // Unset the display manager's delegate here because
   // DisplayManager outlives WindowTreeHostManager.
-  Shell::GetInstance()->display_manager()->set_delegate(nullptr);
+  Shell::Get()->display_manager()->set_delegate(nullptr);
 
   cursor_window_controller_.reset();
   mirror_window_controller_.reset();
@@ -288,7 +255,7 @@ void WindowTreeHostManager::Shutdown() {
   RootWindowController* primary_rwc = nullptr;
   for (aura::Window::Windows::iterator iter = root_windows.begin();
        iter != root_windows.end(); ++iter) {
-    RootWindowController* rwc = GetRootWindowController(*iter);
+    RootWindowController* rwc = RootWindowController::ForWindow(*iter);
     if (GetRootWindowSettings(*iter)->display_id == primary_id)
       primary_rwc = rwc;
     else
@@ -342,6 +309,10 @@ int64_t WindowTreeHostManager::GetPrimaryDisplayId() {
 }
 
 aura::Window* WindowTreeHostManager::GetPrimaryRootWindow() {
+  // If |primary_tree_host_for_replace_| is set, it means |primary_display_id|
+  // is kInvalidDisplayId.
+  if (primary_tree_host_for_replace_)
+    return GetWindow(primary_tree_host_for_replace_);
   return GetRootWindowForDisplayId(primary_display_id);
 }
 
@@ -361,7 +332,7 @@ aura::Window::Windows WindowTreeHostManager::GetAllRootWindows() {
   for (WindowTreeHostMap::const_iterator it = window_tree_hosts_.begin();
        it != window_tree_hosts_.end(); ++it) {
     DCHECK(it->second);
-    if (GetRootWindowController(GetWindow(it->second)))
+    if (RootWindowController::ForWindow(GetWindow(it->second)))
       windows.push_back(GetWindow(it->second));
   }
   return windows;
@@ -383,7 +354,7 @@ WindowTreeHostManager::GetAllRootWindowControllers() {
   for (WindowTreeHostMap::const_iterator it = window_tree_hosts_.begin();
        it != window_tree_hosts_.end(); ++it) {
     RootWindowController* controller =
-        GetRootWindowController(GetWindow(it->second));
+        RootWindowController::ForWindow(GetWindow(it->second));
     if (controller)
       controllers.push_back(controller);
   }
@@ -440,28 +411,17 @@ void WindowTreeHostManager::SetPrimaryDisplayId(int64_t id) {
   primary_window->SetTitle(non_primary_window->GetTitle());
   non_primary_window->SetTitle(old_primary_title);
 
+  for (auto& observer : observers_)
+    observer.OnWindowTreeHostsSwappedDisplays(primary_host, non_primary_host);
+
   const display::DisplayLayout& layout =
       GetDisplayManager()->GetCurrentDisplayLayout();
   // The requested primary id can be same as one in the stored layout
   // when the primary id is set after new displays are connected.
   // Only update the layout if it is requested to swap primary display.
   if (layout.primary_id != new_primary_display.id()) {
-    std::unique_ptr<display::DisplayLayout> swapped_layout(layout.Copy());
-
-    std::map<int64_t, display::DisplayPlacement*> id_to_placement;
-    for (auto& placement : swapped_layout->placement_list)
-      id_to_placement[placement.display_id] = &placement;
-    SwapRecursive(id_to_placement, primary_display_id,
-                  new_primary_display.id());
-
-    std::sort(swapped_layout->placement_list.begin(),
-              swapped_layout->placement_list.end(),
-              [](const display::DisplayPlacement& d1,
-                 const display::DisplayPlacement& d2) {
-                return d1.display_id < d2.display_id;
-              });
-
-    swapped_layout->primary_id = new_primary_display.id();
+    std::unique_ptr<display::DisplayLayout> swapped_layout = layout.Copy();
+    swapped_layout->SwapPrimaryDisplay(new_primary_display.id());
     display::DisplayIdList list = display_manager->GetCurrentDisplayIdList();
     GetDisplayManager()->layout_store()->RegisterLayoutForDisplayIdList(
         list, std::move(swapped_layout));
@@ -540,7 +500,7 @@ void WindowTreeHostManager::UpdateMouseLocationAfterDisplayChange() {
   // Do not move the cursor if the cursor's location did not change. This avoids
   // moving (and showing) the cursor:
   // - At startup.
-  // - When the device is rotated in maximized mode.
+  // - When the device is rotated in tablet mode.
   // |cursor_display_id_for_restore_| is checked to ensure that the cursor is
   // moved when the cursor's native position does not change but the display
   // that it is on has changed. This occurs when swapping the primary display.
@@ -553,7 +513,9 @@ void WindowTreeHostManager::UpdateMouseLocationAfterDisplayChange() {
     // The cursor's native position did not change but its screen position did
     // change. This occurs when the scale factor or the rotation of the display
     // that the cursor is on changes.
-    Shell::GetInstance()->cursor_manager()->SetDisplay(target_display);
+    // TODO: conditional should not be necessary. http://crbug.com/631103.
+    if (Shell::Get()->cursor_manager())
+      Shell::Get()->cursor_manager()->SetDisplay(target_display);
 
     // Update the cursor's root location. This ends up dispatching a synthetic
     // mouse move. The synthetic mouse move updates the composited cursor's
@@ -593,9 +555,9 @@ void WindowTreeHostManager::OnDisplayAdded(const display::Display& display) {
 
     // Magnifier controllers keep pointers to the current root window.
     // Update them here to avoid accessing them later.
-    Shell::GetInstance()->magnification_controller()->SwitchTargetRootWindow(
+    Shell::Get()->magnification_controller()->SwitchTargetRootWindow(
         ash_host->AsWindowTreeHost()->window(), false);
-    Shell::GetInstance()
+    Shell::Get()
         ->partial_magnification_controller()
         ->SwitchTargetRootWindowIfNeeded(
             ash_host->AsWindowTreeHost()->window());
@@ -606,10 +568,9 @@ void WindowTreeHostManager::OnDisplayAdded(const display::Display& display) {
     // Show the shelf if the original WTH had a visible system
     // tray. It may or may not be visible depending on OOBE state.
     ash::SystemTray* old_tray =
-        GetRootWindowController(to_delete->AsWindowTreeHost()->window())
+        RootWindowController::ForWindow(to_delete->AsWindowTreeHost()->window())
             ->GetSystemTray();
-    ash::SystemTray* new_tray =
-        ash::Shell::GetInstance()->GetPrimarySystemTray();
+    ash::SystemTray* new_tray = ash::Shell::Get()->GetPrimarySystemTray();
     if (old_tray->GetWidget()->IsVisible()) {
       new_tray->SetVisible(true);
       new_tray->GetWidget()->Show();
@@ -630,14 +591,15 @@ void WindowTreeHostManager::OnDisplayAdded(const display::Display& display) {
     // unified and non unified, but I'm keeping them separated to minimize
     // the risk in M44. I'll consolidate this in M45.
     DCHECK(window_tree_hosts_.empty());
-    primary_display_id = display.id();
-    window_tree_hosts_[display.id()] = primary_tree_host_for_replace_;
-    GetRootWindowSettings(GetWindow(primary_tree_host_for_replace_))
-        ->display_id = display.id();
+    AshWindowTreeHost* ash_host = primary_tree_host_for_replace_;
     primary_tree_host_for_replace_ = nullptr;
+    primary_display_id = display.id();
+    window_tree_hosts_[display.id()] = ash_host;
+    GetRootWindowSettings(GetWindow(ash_host))->display_id = display.id();
+    for (auto& observer : observers_)
+      observer.OnWindowTreeHostReusedForDisplay(ash_host, display);
     const display::ManagedDisplayInfo& display_info =
         GetDisplayManager()->GetDisplayInfo(display.id());
-    AshWindowTreeHost* ash_host = window_tree_hosts_[display.id()];
     ash_host->AsWindowTreeHost()->SetBoundsInPixels(
         display_info.bounds_in_native());
     SetDisplayPropertiesOnHost(ash_host, display);
@@ -654,12 +616,14 @@ void WindowTreeHostManager::OnDisplayAdded(const display::Display& display) {
 void WindowTreeHostManager::DeleteHost(AshWindowTreeHost* host_to_delete) {
   ClearDisplayPropertiesOnHost(host_to_delete);
   RootWindowController* controller =
-      GetRootWindowController(GetWindow(host_to_delete));
+      RootWindowController::ForWindow(GetWindow(host_to_delete));
   DCHECK(controller);
   controller->MoveWindowsTo(GetPrimaryRootWindow());
   // Delete most of root window related objects, but don't delete
   // root window itself yet because the stack may be using it.
   controller->Shutdown();
+  if (primary_tree_host_for_replace_ == host_to_delete)
+    primary_tree_host_for_replace_ = nullptr;
   base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, controller);
 }
 
@@ -697,6 +661,9 @@ void WindowTreeHostManager::OnDisplayRemoved(const display::Display& display) {
     window_tree_hosts_[primary_display_id] = primary_host;
     GetRootWindowSettings(GetWindow(primary_host))->display_id =
         primary_display_id;
+
+    for (auto& observer : observers_)
+      observer.OnWindowTreeHostsSwappedDisplays(host_to_delete, primary_host);
 
     OnDisplayMetricsChanged(
         GetDisplayManager()->GetDisplayForId(primary_display_id),
@@ -801,10 +768,11 @@ void WindowTreeHostManager::PostDisplayConfigurationChange(
        display_manager->active_display_list()) {
     bool output_is_secure =
         !display_manager->IsInMirrorMode() && display.IsInternal();
-    GetAshWindowTreeHostForDisplayId(display.id())
-        ->AsWindowTreeHost()
-        ->compositor()
-        ->SetOutputIsSecure(output_is_secure);
+    ui::Compositor* compositor = GetAshWindowTreeHostForDisplayId(display.id())
+                                     ->AsWindowTreeHost()
+                                     ->compositor();
+    compositor->SetOutputIsSecure(output_is_secure);
+    compositor->ScheduleFullRedraw();
   }
 
   for (auto& observer : observers_)
@@ -818,17 +786,23 @@ void WindowTreeHostManager::PostDisplayConfigurationChange(
 }
 
 display::DisplayConfigurator* WindowTreeHostManager::display_configurator() {
-  return Shell::GetInstance()->display_configurator();
+  return Shell::Get()->display_configurator();
 }
 
 ui::EventDispatchDetails WindowTreeHostManager::DispatchKeyEventPostIME(
     ui::KeyEvent* event) {
-  // Getting the active root window to dispatch the event. This isn't
-  // significant as the event will be sent to the window resolved by
-  // aura::client::FocusClient which is FocusController in ash.
-  aura::Window* active_window = wm::GetActiveWindow();
-  aura::Window* root_window = active_window ? active_window->GetRootWindow()
-                                            : Shell::GetPrimaryRootWindow();
+  aura::Window* root_window = nullptr;
+  if (event->target()) {
+    root_window = static_cast<aura::Window*>(event->target())->GetRootWindow();
+    DCHECK(root_window);
+  } else {
+    // Getting the active root window to dispatch the event. This isn't
+    // significant as the event will be sent to the window resolved by
+    // aura::client::FocusClient which is FocusController in ash.
+    aura::Window* active_window = wm::GetActiveWindow();
+    root_window = active_window ? active_window->GetRootWindow()
+                                : Shell::GetPrimaryRootWindow();
+  }
   return root_window->GetHost()->DispatchKeyEventPostIME(event);
 }
 
@@ -842,19 +816,27 @@ AshWindowTreeHost* WindowTreeHostManager::AddWindowTreeHostForDisplay(
   params_with_bounds.initial_bounds = display_info.bounds_in_native();
   params_with_bounds.offscreen =
       display.id() == display::DisplayManager::kUnifiedDisplayId;
-  AshWindowTreeHost* ash_host = AshWindowTreeHost::Create(params_with_bounds);
+  params_with_bounds.display_id = display.id();
+  params_with_bounds.device_scale_factor = display.device_scale_factor();
+  params_with_bounds.ui_scale_factor = display_info.configured_ui_scale();
+  // The AshWindowTreeHost ends up owned by the RootWindowControllers created
+  // by this class.
+  AshWindowTreeHost* ash_host =
+      AshWindowTreeHost::Create(params_with_bounds).release();
   aura::WindowTreeHost* host = ash_host->AsWindowTreeHost();
-  if (!input_method_) {  // Singleton input method instance for Ash.
-    input_method_ = ui::CreateInputMethod(this, host->GetAcceleratedWidget());
-    // Makes sure the input method is focused by default when created, because
-    // Ash uses singleton InputMethod and it won't call OnFocus/OnBlur when the
-    // active window changed.
-    input_method_->OnFocus();
-    input_method_event_handler_.reset(
-        new InputMethodEventHandler(input_method_.get()));
+  // When using IME service, input method is hosted by the browser process, so
+  // we don't need to create and set it here.
+  if (!Shell::ShouldUseIMEService()) {
+    DCHECK(!host->has_input_method());
+    if (!input_method_) {  // Singleton input method instance for Ash.
+      input_method_ = ui::CreateInputMethod(this, host->GetAcceleratedWidget());
+      // Makes sure the input method is focused by default when created, because
+      // Ash uses singleton InputMethod and it won't call OnFocus/OnBlur when
+      // the active window changed.
+      input_method_->OnFocus();
+    }
+    host->SetSharedInputMethod(input_method_.get());
   }
-  host->SetSharedInputMethod(input_method_.get());
-  ash_host->set_input_method_handler(input_method_event_handler_.get());
 
   host->window()->SetName(base::StringPrintf(
       "%sRootWindow-%d", params_with_bounds.offscreen ? "Offscreen" : "",

@@ -16,7 +16,9 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
+#include "chrome/renderer/media/chrome_key_systems_provider.h"
 #include "components/rappor/public/interfaces/rappor_recorder.mojom.h"
+#include "components/safe_browsing/common/safe_browsing.mojom.h"
 #include "components/spellcheck/spellcheck_build_features.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "extensions/features/features.h"
@@ -110,7 +112,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   SkBitmap* GetSadPluginBitmap() override;
   SkBitmap* GetSadWebViewBitmap() override;
   bool OverrideCreatePlugin(content::RenderFrame* render_frame,
-                            blink::WebLocalFrame* frame,
                             const blink::WebPluginParams& params,
                             blink::WebPlugin** plugin) override;
   blink::WebPlugin* CreatePluginReplacement(
@@ -136,10 +137,12 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                   bool is_initial_navigation,
                   bool is_server_redirect,
                   bool* send_referrer) override;
-  bool WillSendRequest(blink::WebLocalFrame* frame,
-                       ui::PageTransition transition_type,
-                       const blink::WebURL& url,
-                       GURL* new_url) override;
+  bool WillSendRequest(
+      blink::WebLocalFrame* frame,
+      ui::PageTransition transition_type,
+      const blink::WebURL& url,
+      std::vector<std::unique_ptr<content::URLLoaderThrottle>>* throttles,
+      GURL* new_url) override;
   bool IsPrefetchOnly(content::RenderFrame* render_frame,
                       const blink::WebURLRequest& request) override;
   unsigned long long VisitedLinkHash(const char* canonical_url,
@@ -150,18 +153,21 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       const content::RenderFrame* render_frame,
       blink::WebPageVisibilityState* override_state) override;
   bool IsExternalPepperPlugin(const std::string& module_name) override;
-  blink::WebSpeechSynthesizer* OverrideSpeechSynthesizer(
+  std::unique_ptr<blink::WebSocketHandshakeThrottle>
+  CreateWebSocketHandshakeThrottle() override;
+  std::unique_ptr<blink::WebSpeechSynthesizer> OverrideSpeechSynthesizer(
       blink::WebSpeechSynthesizerClient* client) override;
   bool ShouldReportDetailedMessageForSource(
       const base::string16& source) const override;
   bool ShouldGatherSiteIsolationStats() const override;
-  blink::WebWorkerContentSettingsClientProxy*
-  CreateWorkerContentSettingsClientProxy(content::RenderFrame* render_frame,
-                                         blink::WebFrame* frame) override;
+  std::unique_ptr<blink::WebContentSettingsClient>
+  CreateWorkerContentSettingsClient(
+      content::RenderFrame* render_frame) override;
   bool AllowPepperMediaStreamAPI(const GURL& url) override;
   void AddSupportedKeySystems(
       std::vector<std::unique_ptr<::media::KeySystemProperties>>* key_systems)
       override;
+  bool IsKeySystemsUpdateNeeded() override;
   bool IsPluginAllowedToUseDevChannelAPIs() override;
   bool IsPluginAllowedToUseCameraDeviceAPI(const GURL& url) override;
   bool IsPluginAllowedToUseCompositorAPI(const GURL& url) override;
@@ -177,20 +183,21 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       std::map<std::string, std::string>* properties) override;
   void RunScriptsAtDocumentStart(content::RenderFrame* render_frame) override;
   void RunScriptsAtDocumentEnd(content::RenderFrame* render_frame) override;
+  void RunScriptsAtDocumentIdle(content::RenderFrame* render_frame) override;
   void DidInitializeServiceWorkerContextOnWorkerThread(
       v8::Local<v8::Context> context,
       int64_t service_worker_version_id,
-      const GURL& url) override;
+      const GURL& service_worker_scope,
+      const GURL& script_url) override;
   void WillDestroyServiceWorkerContextOnWorkerThread(
       v8::Local<v8::Context> context,
       int64_t service_worker_version_id,
-      const GURL& url) override;
+      const GURL& service_worker_scope,
+      const GURL& script_url) override;
   bool ShouldEnforceWebRTCRoutingPreferences() override;
   GURL OverrideFlashEmbedWithHTML(const GURL& url) override;
-  void GetTaskSchedulerInitializationParams(
-      std::vector<base::SchedulerWorkerPoolParams>* params_vector,
-      base::TaskScheduler::WorkerPoolIndexForTraitsCallback*
-          index_to_traits_callback) override;
+  std::unique_ptr<base::TaskScheduler::InitParams> GetTaskSchedulerInitParams()
+      override;
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   // Sets a new |spellcheck|. Used for testing only.
@@ -201,7 +208,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
 #if BUILDFLAG(ENABLE_PLUGINS)
   static blink::WebPlugin* CreatePlugin(
       content::RenderFrame* render_frame,
-      blink::WebLocalFrame* frame,
       const blink::WebPluginParams& params,
       const ChromeViewHostMsg_GetPluginInfo_Output& output);
 #endif
@@ -218,6 +224,10 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
 
   static GURL GetNaClContentHandlerURL(const std::string& actual_mime_type,
                                        const content::WebPluginInfo& plugin);
+
+  // Returns |true| if we should use the SafeBrowsing mojo service. Initialises
+  // |safe_browsing_| on the first call as a side-effect.
+  bool UsingSafeBrowsingMojoService();
 
   // Time at which this object was created. This is very close to the time at
   // which the RendererMain function was entered.
@@ -240,6 +250,10 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
 
   std::unique_ptr<network_hints::PrescientNetworkingDispatcher>
       prescient_networking_dispatcher_;
+
+  chrome::ChromeKeySystemsProvider key_systems_provider_;
+
+  safe_browsing::mojom::SafeBrowsingPtr safe_browsing_;
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   std::unique_ptr<SpellCheck> spellcheck_;

@@ -51,8 +51,7 @@ Msgs.getMsg = function(messageId, opt_subs) {
   var message = Msgs.Untranslated[messageId.toUpperCase()];
   if (message !== undefined)
     return Msgs.applySubstitutions_(message, opt_subs);
-  message = chrome.i18n.getMessage(
-      Msgs.NAMESPACE_ + messageId, opt_subs);
+  message = chrome.i18n.getMessage(Msgs.NAMESPACE_ + messageId, opt_subs);
   if (message == undefined || message == '') {
     throw new Error('Invalid ChromeVox message id: ' + messageId);
   }
@@ -105,8 +104,8 @@ Msgs.getNumber = function(num) {
  */
 Msgs.getLocaleDisplayName = function(locale) {
   if (!Msgs.localeNameDict_) {
-    Msgs.localeNameDict_ = /** @type {!Object<string>} */(
-        JSON.parse(this.getMsg('locale_dict')));
+    Msgs.localeNameDict_ =
+        /** @type {!Object<string>} */ (JSON.parse(this.getMsg('locale_dict')));
   }
   var name = Msgs.localeNameDict_[locale];
   if (!name) {
@@ -152,12 +151,12 @@ Msgs.Untranslated = {
   ROLE_OPTION: ' ',
   /** Braille of element with the ARIA role option. */
   ROLE_OPTION_BRL: ' ',
-  /** Braille of element with the ARIA attribute aria-checked=true. */
-  ARIA_CHECKED_TRUE_BRL: '(x)',
-  /** Braille of element with the ARIA attribute aria-checked=false. */
-  ARIA_CHECKED_FALSE_BRL: '( )',
-  /** Braille of element with the ARIA attribute aria-checked=mixed. */
-  ARIA_CHECKED_MIXED_BRL: '(-)',
+  /** Braille of element that is checked. */
+  CHECKED_TRUE_BRL: '(x)',
+  /** Braille of element that is unchecked. */
+  CHECKED_FALSE_BRL: '( )',
+  /** Braille of element where the checked state is mixed or indeterminate. */
+  CHECKED_MIXED_BRL: '(-)',
   /** Braille of element with the ARIA attribute aria-disabled=true. */
   ARIA_DISABLED_TRUE_BRL: 'xx',
   /** Braille of element with the ARIA attribute aria-expanded=true. */

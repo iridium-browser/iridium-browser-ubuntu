@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import json
 import sys
 import unittest
 
@@ -13,6 +14,7 @@ from dashboard.common import testing_common
 from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import graph_data
+from dashboard.models import histogram
 from dashboard.models import sheriff
 
 # Sample time series.
@@ -131,7 +133,7 @@ class ProcessAlertsTest(testing_common.TestCase):
         email='a@google.com', id='sheriff', patterns=[test_path]).put()
     test.put()
 
-    find_anomalies.ProcessTest(test.key)
+    find_anomalies.ProcessTests([test.key])
 
     expected_calls = [
         mock.call(ModelMatcher('sheriff'),
@@ -207,7 +209,7 @@ class ProcessAlertsTest(testing_common.TestCase):
         email='a@google.com', id='sheriff', patterns=[test.test_path]).put()
     test.improvement_direction = anomaly.DOWN
     test.put()
-    find_anomalies.ProcessTest(test.key)
+    find_anomalies.ProcessTests([test.key])
     anomalies = anomaly.Anomaly.query().fetch()
     self.assertEqual(len(anomalies), 1)
     self.assertTrue(anomalies[0].is_improvement)
@@ -217,7 +219,7 @@ class ProcessAlertsTest(testing_common.TestCase):
     self._AddDataForTests()
     ref = utils.TestKey(
         'ChromiumGPU/linux-release/scrolling_benchmark/ref').get()
-    find_anomalies.ProcessTest(ref.key)
+    find_anomalies.ProcessTests([ref.key])
     mock_logging_error.assert_called_with('No sheriff for %s', ref.key)
 
   @mock.patch.object(
@@ -235,7 +237,7 @@ class ProcessAlertsTest(testing_common.TestCase):
         email='a@google.com', id='sheriff', patterns=[test.test_path]).put()
     test.improvement_direction = anomaly.UP
     test.put()
-    find_anomalies.ProcessTest(test.key)
+    find_anomalies.ProcessTests([test.key])
     mock_email_sheriff.assert_called_once_with(
         ModelMatcher('sheriff'),
         ModelMatcher('ChromiumGPU/linux-release/scrolling_benchmark/ref'),
@@ -256,7 +258,7 @@ class ProcessAlertsTest(testing_common.TestCase):
         email='a@google.com', id='sheriff', patterns=[test.test_path]).put()
     test.put()
 
-    find_anomalies.ProcessTest(test.key)
+    find_anomalies.ProcessTests([test.key])
     expected_calls = [
         mock.call(ModelMatcher('sheriff'),
                   ModelMatcher(
@@ -272,6 +274,28 @@ class ProcessAlertsTest(testing_common.TestCase):
     self.assertEqual(10007, anomalies[0].start_revision)
     self.assertEqual(10011, anomalies[0].end_revision)
     self.assertTrue(anomalies[0].internal_only)
+
+  def testProcessTest_CreatesAnAnomaly_RefMovesToo_BenchmarkDuration(self):
+    testing_common.AddTests(
+        ['ChromiumGPU'], ['linux-release'], {
+            'foo': {'benchmark_duration': {'ref': {}}},
+        })
+    ref = utils.TestKey(
+        'ChromiumGPU/linux-release/foo/benchmark_duration/ref').get()
+    non_ref = utils.TestKey(
+        'ChromiumGPU/linux-release/foo/benchmark_duration').get()
+    test_container_key = utils.GetTestContainerKey(ref.key)
+    test_container_key_non_ref = utils.GetTestContainerKey(non_ref.key)
+    for row in _TEST_ROW_DATA:
+      graph_data.Row(id=row[0], value=row[1], parent=test_container_key).put()
+      graph_data.Row(id=row[0], value=row[1],
+                     parent=test_container_key_non_ref).put()
+    sheriff.Sheriff(
+        email='a@google.com', id='sheriff', patterns=[ref.test_path]).put()
+    ref.put()
+    find_anomalies.ProcessTests([ref.key])
+    new_anomalies = anomaly.Anomaly.query().fetch()
+    self.assertEqual(1, len(new_anomalies))
 
   def testProcessTest_AnomaliesMatchRefSeries_NoAlertCreated(self):
     # Tests that a Anomaly entity is not created if both the test and its
@@ -294,7 +318,7 @@ class ProcessAlertsTest(testing_common.TestCase):
         email='a@google.com', id='sheriff', patterns=[non_ref.test_path]).put()
     ref.put()
     non_ref.put()
-    find_anomalies.ProcessTest(non_ref.key)
+    find_anomalies.ProcessTests([non_ref.key])
     new_anomalies = anomaly.Anomaly.query().fetch()
     self.assertEqual(0, len(new_anomalies))
 
@@ -321,7 +345,7 @@ class ProcessAlertsTest(testing_common.TestCase):
         email='a@google.com', id='sheriff', patterns=[non_ref.test_path]).put()
     ref.put()
     non_ref.put()
-    find_anomalies.ProcessTest(non_ref.key)
+    find_anomalies.ProcessTests([non_ref.key])
     new_anomalies = anomaly.Anomaly.query().fetch()
     self.assertEqual(len(new_anomalies), 1)
 
@@ -338,7 +362,7 @@ class ProcessAlertsTest(testing_common.TestCase):
     sheriff.Sheriff(
         email='a@google.com', id='sheriff', patterns=[ref.test_path]).put()
     ref.put()
-    find_anomalies.ProcessTest(ref.key)
+    find_anomalies.ProcessTests([ref.key])
     new_anomalies = anomaly.Anomaly.query().fetch()
     self.assertEqual(1, len(new_anomalies))
     self.assertEqual(anomaly.UP, new_anomalies[0].direction)
@@ -355,7 +379,7 @@ class ProcessAlertsTest(testing_common.TestCase):
         'ChromiumGPU/linux-release/scrolling_benchmark/ref').get()
     test.last_alerted_revision = 1234567890
     test.put()
-    find_anomalies.ProcessTest(test.key)
+    find_anomalies.ProcessTests([test.key])
     self.assertIsNone(test.key.get().last_alerted_revision)
     calls = [
         mock.call(
@@ -457,6 +481,151 @@ class ProcessAlertsTest(testing_common.TestCase):
         list(graph_data.Row.query()))
     self.assertEqual(alert.display_start, 203)
     self.assertEqual(alert.display_end, 302)
+
+  def testMakeAnomalyEntity_AddsOwnership(self):
+    data = json.dumps({
+        'type': 'Ownership',
+        'guid': 'eb212e80-db58-4cbd-b331-c2245ecbb826',
+        'emails': ['alice@chromium.org', 'bob@chromium.org'],
+        'component': 'fooBar'
+    })
+
+    testing_common.AddTests(
+        ['ChromiumPerf'],
+        ['linux'], {
+            'page_cycler_v2': {
+                'cnn': {},
+                'cnn_ref': {},
+                'yahoo': {},
+                'nytimes': {},
+            },
+        })
+    test_key = utils.TestKey('ChromiumPerf/linux/page_cycler_v2/cnn')
+    test = test_key.get()
+    testing_common.AddRows(test.test_path, [100, 200, 300, 400])
+    entity = histogram.SparseDiagnostic(
+        data=data, test=test_key, id='abc', start_revision=1,
+        end_revision=sys.maxint)
+    entity.put()
+
+    alert = find_anomalies._MakeAnomalyEntity(
+        _MakeSampleChangePoint(10011, 50, 100),
+        test,
+        list(graph_data.Row.query()))
+
+    self.assertEqual(alert.ownership['component'], 'fooBar')
+    self.assertListEqual(alert.ownership['emails'],
+                         ['alice@chromium.org', 'bob@chromium.org'])
+
+
+class GetMostRecentDiagnosticDataTest(testing_common.TestCase):
+  def setUp(self):
+    super(GetMostRecentDiagnosticDataTest, self).setUp()
+    self.SetCurrentUser('foo@bar.com', is_admin=True)
+
+  def testGetMostRecentDiagnosticData_ReturnsAllData(self):
+    data_samples = [
+        {
+            'type': 'Ownership',
+            'guid': 'eb212e80-db58-4cbd-b331-c2245ecbb826',
+            'emails': ['alice@chromium.org', 'bob@chromium.org'],
+            'component': 'fooBar'
+        },
+        {
+            'guid': 'abc',
+            'osName': 'linux',
+            'type': 'DeviceInfo'
+        }]
+
+    test_key = utils.TestKey('Chromium/win7/foo')
+    for data in data_samples:
+      entity = histogram.SparseDiagnostic(
+          data=json.dumps(data), test=test_key, start_revision=1,
+          end_revision=sys.maxint, id='sample' + data.get('type'))
+      entity.put()
+
+    owner_lookup_result = find_anomalies.GetMostRecentDiagnosticData(
+        test_key, 'Ownership')
+    device_lookup_result = find_anomalies.GetMostRecentDiagnosticData(
+        test_key, 'DeviceInfo')
+
+    self.assertEqual(owner_lookup_result.get('component'), 'fooBar')
+    self.assertListEqual(owner_lookup_result.get('emails'),
+                         ['alice@chromium.org', 'bob@chromium.org'])
+
+    self.assertIsNone(device_lookup_result.get('component'))
+    self.assertEqual(device_lookup_result.get('osName'), 'linux')
+
+  def testGetMostRecentDiagnosticData_WithoutComponent(self):
+    data = json.dumps({
+        'type': 'Ownership',
+        'guid': 'eb212e80-db58-4cbd-b331-c2245ecbb826',
+        'emails': ['charlie@chromium.org']
+    })
+    test_key = utils.TestKey('Chromium/win7/foo')
+    entity = histogram.SparseDiagnostic(
+        data=data, test=test_key, start_revision=1, end_revision=sys.maxint,
+        id='abc')
+    entity.put()
+
+    lookup_result = find_anomalies.GetMostRecentDiagnosticData(test_key,
+                                                               'Ownership')
+
+    self.assertIsNone(lookup_result.get('component'))
+    self.assertListEqual(lookup_result.get('emails'), ['charlie@chromium.org'])
+
+  def testGetMostRecentDiagnosticData_ReturnsNoneIfNoneFound(self):
+    data = json.dumps({
+        'guid': 'abc',
+        'osName': 'linux',
+        'type': 'DeviceInfo'
+    })
+    test_key = utils.TestKey('Chromium/win7/foo')
+    entity = histogram.SparseDiagnostic(
+        data=data, test=test_key, start_revision=1, end_revision=sys.maxint,
+        id='abc')
+    entity.put()
+
+    lookup_result = find_anomalies.GetMostRecentDiagnosticData(test_key,
+                                                               'Ownership')
+    self.assertIsNone(lookup_result)
+
+  def testGetMostRecentDiagnosticData_LooksUpRightType(self):
+    data_samples = [
+        {
+            'buildNumber': 0,
+            'buildbotMasterName': '',
+            'buildbotName': '',
+            'displayBotName': 'bot',
+            'displayMasterName': 'master',
+            'guid': 'e9c2891d-2b04-413f-8cf4-099827e67626',
+            'logUri': '',
+            'type': 'BuildbotInfo'
+        },
+        {
+            'type': 'Ownership',
+            'guid': 'eb212e80-db58-4cbd-b331-c2245ecbb826',
+            'emails': ['charlie@chromium.org']
+        }
+    ]
+
+    test_key = utils.TestKey('Chromium/win7/foo')
+
+    for data in data_samples:
+      entity = histogram.SparseDiagnostic(
+          data=json.dumps(data), test=test_key, start_revision=1,
+          end_revision=sys.maxint, id='sample' + data.get('type'))
+      entity.put()
+
+    ownership_lookup_result = find_anomalies.GetMostRecentDiagnosticData(
+        test_key, 'Ownership')
+    buildbot_lookup_result = find_anomalies.GetMostRecentDiagnosticData(
+        test_key, 'BuildbotInfo')
+
+    self.assertIsNotNone(ownership_lookup_result)
+    self.assertEqual(ownership_lookup_result['type'], 'Ownership')
+    self.assertIsNotNone(buildbot_lookup_result)
+    self.assertEqual(buildbot_lookup_result['type'], 'BuildbotInfo')
 
 if __name__ == '__main__':
   unittest.main()

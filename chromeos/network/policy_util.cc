@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chromeos/network/network_profile.h"
 #include "chromeos/network/network_ui_data.h"
@@ -35,18 +36,17 @@ const char kFakeCredential[] = "FAKE_CREDENTIAL_VPaJDV9x";
 void RemoveFakeCredentials(
     const onc::OncValueSignature& signature,
     base::DictionaryValue* onc_object) {
-  base::DictionaryValue::Iterator it(*onc_object);
-  while (!it.IsAtEnd()) {
-    base::Value* value = NULL;
+  std::vector<std::string> entries_to_remove;
+  for (base::DictionaryValue::Iterator it(*onc_object); !it.IsAtEnd();
+       it.Advance()) {
+    base::Value* value = nullptr;
     std::string field_name = it.key();
     // We need the non-const entry to remove nested values but DictionaryValue
     // has no non-const iterator.
     onc_object->GetWithoutPathExpansion(field_name, &value);
-    // Advance before delete.
-    it.Advance();
 
     // If |value| is a dictionary, recurse.
-    base::DictionaryValue* nested_object = NULL;
+    base::DictionaryValue* nested_object = nullptr;
     if (value->GetAsDictionary(&nested_object)) {
       const onc::OncFieldSignature* field_signature =
           onc::GetFieldSignature(signature, field_name);
@@ -64,12 +64,14 @@ void RemoveFakeCredentials(
       if (string_value == kFakeCredential) {
         // The value wasn't modified by the UI, thus we remove the field to keep
         // the existing value that is stored in Shill.
-        onc_object->RemoveWithoutPathExpansion(field_name, NULL);
+        entries_to_remove.push_back(field_name);
       }
       // Otherwise, the value is set and modified by the UI, thus we keep that
       // value to overwrite whatever is stored in Shill.
     }
   }
+  for (auto field_name : entries_to_remove)
+    onc_object->RemoveWithoutPathExpansion(field_name, nullptr);
 }
 
 // Returns true if |policy| matches |actual_network|, which must be part of a
@@ -163,8 +165,8 @@ base::DictionaryValue* GetOrCreateDictionary(const std::string& key,
                                              base::DictionaryValue* dict) {
   base::DictionaryValue* inner_dict = NULL;
   if (!dict->GetDictionaryWithoutPathExpansion(key, &inner_dict)) {
-    inner_dict = new base::DictionaryValue;
-    dict->SetWithoutPathExpansion(key, inner_dict);
+    inner_dict = dict->SetDictionaryWithoutPathExpansion(
+        key, base::MakeUnique<base::DictionaryValue>());
   }
   return inner_dict;
 }

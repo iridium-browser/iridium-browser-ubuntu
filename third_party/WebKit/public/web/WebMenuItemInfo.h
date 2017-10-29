@@ -31,33 +31,31 @@
 #ifndef WebMenuItemInfo_h
 #define WebMenuItemInfo_h
 
-#include "../platform/WebCommon.h"
-#include "../platform/WebString.h"
-#include "../platform/WebVector.h"
+#include "public/platform/WebCommon.h"
+#include "public/platform/WebString.h"
+#include "public/platform/WebVector.h"
 #include "WebTextDirection.h"
 
 namespace blink {
 
 struct WebMenuItemInfo {
-  enum Type { Option, CheckableOption, Group, Separator, SubMenu };
+  enum Type { kOption, kCheckableOption, kGroup, kSeparator, kSubMenu };
 
   WebMenuItemInfo()
-      : type(Option),
+      : type(kOption),
         action(0),
-        textDirection(WebTextDirectionDefault),
-        hasTextDirectionOverride(false),
+        text_direction(kWebTextDirectionDefault),
+        has_text_direction_override(false),
         enabled(false),
         checked(false) {}
 
   WebString label;
-  // "icon" provides absolute URL of an image that repesents the command.
-  WebString icon;
-  WebString toolTip;
+  WebString tool_tip;
   Type type;
   unsigned action;
-  WebTextDirection textDirection;
-  WebVector<WebMenuItemInfo> subMenuItems;
-  bool hasTextDirectionOverride;
+  WebTextDirection text_direction;
+  WebVector<WebMenuItemInfo> sub_menu_items;
+  bool has_text_direction_override;
   bool enabled;
   bool checked;
 };

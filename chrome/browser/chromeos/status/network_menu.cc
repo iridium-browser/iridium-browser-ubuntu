@@ -8,8 +8,8 @@
 
 #include <algorithm>
 
-#include "ash/common/system/chromeos/network/network_icon.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/system/network/network_icon.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
@@ -338,11 +338,13 @@ ui::MenuModelDelegate* NetworkMenuModel::GetMenuModelDelegate() const {
 // NetworkMenuModel, private methods:
 
 void NetworkMenuModel::ShowOther(const std::string& type) const {
-  gfx::NativeWindow native_window = owner_->delegate()->GetNativeWindow();
-  if (type == shill::kTypeCellular)
-    ChooseMobileNetworkDialog::ShowDialog(native_window);
-  else
-    NetworkConfigView::ShowForType(shill::kTypeWifi, native_window);
+  if (type == shill::kTypeCellular) {
+    // TODO(jamescook): This should not need a parent.
+    ChooseMobileNetworkDialog::ShowDialog(
+        owner_->delegate()->GetNativeWindow());
+  } else {
+    NetworkConfigView::ShowForType(shill::kTypeWifi);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -511,7 +513,7 @@ void MainMenuModel::InitMenuItems(bool should_open_button_options) {
     if (scanning_msg)
       AddMessageItem(l10n_util::GetStringUTF16(scanning_msg));
     const gfx::ImageSkia icon =
-        ash::network_icon::GetImageForConnectedMobileNetwork();
+        ash::network_icon::GetImageForWiFiEnabledState(true);
     menu_items_.push_back(MenuItem(
         ui::MenuModel::TYPE_COMMAND,
         l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OTHER_WIFI_NETWORKS),

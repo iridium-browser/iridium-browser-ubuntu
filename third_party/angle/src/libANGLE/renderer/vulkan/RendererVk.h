@@ -37,7 +37,7 @@ class RendererVk : angle::NonCopyable
     RendererVk();
     ~RendererVk();
 
-    vk::Error initialize(const egl::AttributeMap &attribs);
+    vk::Error initialize(const egl::AttributeMap &attribs, const char *wsiName);
 
     std::string getVendorString() const;
     std::string getRendererDescription() const;
@@ -50,10 +50,12 @@ class RendererVk : angle::NonCopyable
     vk::ErrorOrResult<uint32_t> selectPresentQueueForSurface(VkSurfaceKHR surface);
 
     // TODO(jmadill): Use ContextImpl for command buffers to enable threaded contexts.
-    vk::CommandBuffer *getCommandBuffer();
-    vk::Error submitAndFinishCommandBuffer(const vk::CommandBuffer &commandBuffer);
-    vk::Error waitThenFinishCommandBuffer(const vk::CommandBuffer &commandBuffer,
-                                          const vk::Semaphore &waitSemaphore);
+    vk::Error getStartedCommandBuffer(vk::CommandBuffer **commandBufferOut);
+    vk::Error submitCommandBuffer(vk::CommandBuffer *commandBuffer);
+    vk::Error submitAndFinishCommandBuffer(vk::CommandBuffer *commandBuffer);
+    vk::Error submitCommandsWithSync(vk::CommandBuffer *commandBuffer,
+                                     const vk::Semaphore &waitSemaphore,
+                                     const vk::Semaphore &signalSemaphore);
     vk::Error finish();
 
     const gl::Caps &getNativeCaps() const;
@@ -70,6 +72,26 @@ class RendererVk : angle::NonCopyable
 
     Serial getCurrentQueueSerial() const;
 
+    template <typename T>
+    void enqueueGarbage(Serial serial, T &&object)
+    {
+        mGarbage.emplace_back(std::unique_ptr<vk::GarbageObject<T>>(
+            new vk::GarbageObject<T>(serial, std::move(object))));
+    }
+
+    template <typename T>
+    void enqueueGarbageOrDeleteNow(const ResourceVk &resouce, T &&object)
+    {
+        if (resouce.getDeleteSchedule(mLastCompletedQueueSerial) == DeleteSchedule::NOW)
+        {
+            object.destroy(mDevice);
+        }
+        else
+        {
+            enqueueGarbage(resouce.getStoredQueueSerial(), std::move(object));
+        }
+    }
+
   private:
     void ensureCapsInitialized() const;
     void generateCaps(gl::Caps *outCaps,
@@ -77,7 +99,9 @@ class RendererVk : angle::NonCopyable
                       gl::Extensions *outExtensions,
                       gl::Limitations *outLimitations) const;
     vk::Error submit(const VkSubmitInfo &submitInfo);
+    vk::Error submitFrame(const VkSubmitInfo &submitInfo);
     vk::Error checkInFlightCommands();
+    void freeAllInFlightResources();
 
     mutable bool mCapsInitialized;
     mutable gl::Caps mNativeCaps;
@@ -100,9 +124,12 @@ class RendererVk : angle::NonCopyable
     vk::CommandBuffer mCommandBuffer;
     uint32_t mHostVisibleMemoryIndex;
     GlslangWrapper *mGlslangWrapper;
-    Serial mCurrentQueueSerial;
+    SerialFactory mQueueSerialFactory;
     Serial mLastCompletedQueueSerial;
-    std::vector<vk::FenceAndCommandBuffer> mInFlightCommands;
+    Serial mCurrentQueueSerial;
+    std::vector<vk::CommandBufferAndSerial> mInFlightCommands;
+    std::vector<vk::FenceAndSerial> mInFlightFences;
+    std::vector<std::unique_ptr<vk::IGarbageObject>> mGarbage;
 };
 
 }  // namespace rx

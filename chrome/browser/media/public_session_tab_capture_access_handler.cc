@@ -23,9 +23,11 @@ PublicSessionTabCaptureAccessHandler::PublicSessionTabCaptureAccessHandler() {}
 PublicSessionTabCaptureAccessHandler::~PublicSessionTabCaptureAccessHandler() {}
 
 bool PublicSessionTabCaptureAccessHandler::SupportsStreamType(
+    content::WebContents* web_contents,
     const content::MediaStreamType type,
     const extensions::Extension* extension) {
-  return tab_capture_access_handler_.SupportsStreamType(type, extension);
+  return tab_capture_access_handler_.SupportsStreamType(web_contents, type,
+                                                        extension);
 }
 
 bool PublicSessionTabCaptureAccessHandler::CheckMediaAccessPermission(
@@ -53,9 +55,10 @@ void PublicSessionTabCaptureAccessHandler::HandleRequest(
 
   // This Unretained is safe because the lifetime of this object is until
   // process exit (living inside a base::Singleton object).
-  auto prompt_resolved_callback = base::Bind(
-      &PublicSessionTabCaptureAccessHandler::ChainHandleRequest,
-      base::Unretained(this), web_contents, request, callback, extension);
+  auto prompt_resolved_callback =
+      base::Bind(&PublicSessionTabCaptureAccessHandler::ChainHandleRequest,
+                 base::Unretained(this), web_contents, request, callback,
+                 base::RetainedRef(extension));
 
   extensions::permission_helper::HandlePermissionRequest(
       *extension, {extensions::APIPermission::kTabCapture}, web_contents,

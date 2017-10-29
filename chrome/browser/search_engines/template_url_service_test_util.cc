@@ -50,7 +50,8 @@ void SetManagedDefaultSearchPreferences(const TemplateURLData& managed_data,
   dict->SetBoolean(DefaultSearchManager::kDisabledByPolicy, !enabled);
 
   profile->GetTestingPrefService()->SetManagedPref(
-      DefaultSearchManager::kDefaultSearchProviderDataPrefName, dict.release());
+      DefaultSearchManager::kDefaultSearchProviderDataPrefName,
+      std::move(dict));
 }
 
 void RemoveManagedDefaultSearchPreferences(TestingProfile* profile) {
@@ -157,12 +158,11 @@ void TemplateURLServiceTestUtil::SetGoogleBaseURL(const GURL& base_url) {
 }
 
 TemplateURL* TemplateURLServiceTestUtil::AddExtensionControlledTURL(
-    std::unique_ptr<TemplateURL> extension_turl,
-    std::unique_ptr<TemplateURL::AssociatedExtensionInfo> info) {
-  bool wants_to_be_default = info->wants_to_be_default_engine;
-  TemplateURL* result = model()->AddExtensionControlledTURL(
-      std::move(extension_turl), std::move(info));
-  if (wants_to_be_default && result) {
+    std::unique_ptr<TemplateURL> extension_turl) {
+  TemplateURL* result = model()->Add(std::move(extension_turl));
+  DCHECK(result);
+  DCHECK(result->GetExtensionInfoForTesting());
+  if (result->GetExtensionInfoForTesting()->wants_to_be_default_engine) {
     SetExtensionDefaultSearchInPrefs(profile()->GetTestingPrefService(),
                                      result->data());
   }

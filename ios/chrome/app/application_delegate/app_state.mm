@@ -4,11 +4,15 @@
 
 #import "ios/chrome/app/application_delegate/app_state.h"
 
+#include <utility>
+
+#include "base/callback.h"
 #include "base/critical_closure.h"
 #import "base/mac/bind_objc_block.h"
 #include "base/metrics/histogram_macros.h"
+#include "components/feature_engagement_tracker/public/event_constants.h"
+#include "components/feature_engagement_tracker/public/feature_engagement_tracker.h"
 #include "components/metrics/metrics_service.h"
-#import "ios/chrome/app/main_application_delegate.h"
 #import "ios/chrome/app/application_delegate/app_navigation.h"
 #import "ios/chrome/app/application_delegate/browser_launcher.h"
 #import "ios/chrome/app/application_delegate/memory_warning_helper.h"
@@ -18,8 +22,10 @@
 #import "ios/chrome/app/application_delegate/tab_switching.h"
 #import "ios/chrome/app/application_delegate/user_activity_handler.h"
 #import "ios/chrome/app/deferred_initialization_runner.h"
+#import "ios/chrome/app/main_application_delegate.h"
 #import "ios/chrome/app/safe_mode/safe_mode_coordinator.h"
 #import "ios/chrome/app/safe_mode_crashing_modules_config.h"
+#import "ios/chrome/app/startup/content_suggestions_scheduler_notifications.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_constants.h"
@@ -27,11 +33,13 @@
 #include "ios/chrome/browser/crash_report/breakpad_helper.h"
 #import "ios/chrome/browser/crash_report/crash_report_background_uploader.h"
 #import "ios/chrome/browser/device_sharing/device_sharing_manager.h"
+#include "ios/chrome/browser/feature_engagement_tracker/feature_engagement_tracker_factory.h"
 #import "ios/chrome/browser/geolocation/omnibox_geolocation_config.h"
 #import "ios/chrome/browser/metrics/previous_session_info.h"
 #import "ios/chrome/browser/ui/authentication/signed_in_accounts_view_controller.h"
 #include "ios/chrome/browser/ui/background_generator.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
+#import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/ui/main/browser_view_information.h"
 #include "ios/net/cookies/cookie_store_ios.h"
 #include "ios/net/cookies/system_cookie_util.h"
@@ -47,8 +55,8 @@
 
 namespace {
 // Helper method to post |closure| on the UI thread.
-void PostTaskOnUIThread(const base::Closure& closure) {
-  web::WebThread::PostTask(web::WebThread::UI, FROM_HERE, closure);
+void PostTaskOnUIThread(base::OnceClosure closure) {
+  web::WebThread::PostTask(web::WebThread::UI, FROM_HERE, std::move(closure));
 }
 NSString* const kStartupAttemptReset = @"StartupAttempReset";
 }  // namespace
@@ -212,17 +220,19 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
         [[_browserLauncher browserViewInformation] currentBVC]
             .browserState->GetRequestContext();
     _savingCookies = YES;
-    base::Closure criticalClosure =
+    base::OnceClosure criticalClosure =
         base::MakeCriticalClosure(base::BindBlockArc(^{
           DCHECK_CURRENTLY_ON(web::WebThread::UI);
           _savingCookies = NO;
         }));
+    base::Closure post_back_to_ui =
+        base::Bind(&PostTaskOnUIThread, base::Passed(&criticalClosure));
     web::WebThread::PostTask(
         web::WebThread::IO, FROM_HERE, base::BindBlockArc(^{
           net::CookieStoreIOS* store = static_cast<net::CookieStoreIOS*>(
               getter->GetURLRequestContext()->cookie_store());
           // FlushStore() runs its callback on any thread. Jump back to UI.
-          store->FlushStore(base::Bind(&PostTaskOnUIThread, criticalClosure));
+          store->FlushStore(post_back_to_ui);
         }));
   }
 
@@ -303,6 +313,9 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
                        currentBrowserState];
   }
 
+  [ContentSuggestionsSchedulerNotifications
+      notifyForeground:currentBrowserState];
+
   // If the current browser state is not OTR, check for cookie loss.
   if (currentBrowserState && !currentBrowserState->IsOffTheRecord() &&
       currentBrowserState->GetOriginalChromeBrowserState()
@@ -315,6 +328,13 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
                                cookie_count);
     net::CheckForCookieLoss(cookie_count,
                             net::COOKIES_APPLICATION_FOREGROUNDED);
+  }
+
+  if (currentBrowserState) {
+    // Send the "Chrome Opened" event to the FeatureEngagementTracker on a warm
+    // start.
+    FeatureEngagementTrackerFactory::GetForBrowserState(currentBrowserState)
+        ->NotifyEvent(feature_engagement_tracker::events::kChromeOpened);
   }
 }
 
@@ -335,12 +355,15 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
                           startupInformation:_startupInformation
                       browserViewInformation:[_browserLauncher
                                                  browserViewInformation]];
-  } else if (_shouldOpenNTPTabOnActive) {
-    if (![tabSwitcher openNewTabFromTabSwitcher]) {
-      [[[_browserLauncher browserViewInformation] currentBVC] newTab:nil];
-    }
-    _shouldOpenNTPTabOnActive = NO;
+  } else if (_shouldOpenNTPTabOnActive &&
+             ![tabSwitcher openNewTabFromTabSwitcher]) {
+    BrowserViewController* bvc =
+        [[_browserLauncher browserViewInformation] currentBVC];
+    BOOL incognito = bvc == [[_browserLauncher browserViewInformation] otrBVC];
+    [bvc.dispatcher
+        openNewTab:[OpenNewTabCommand commandWithIncognito:incognito]];
   }
+  _shouldOpenNTPTabOnActive = NO;
 
   [MetricsMediator logStartupDuration:_startupInformation];
 }

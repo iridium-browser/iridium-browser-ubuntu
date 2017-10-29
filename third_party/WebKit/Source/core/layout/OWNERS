@@ -1,7 +1,6 @@
 cbiesinger@chromium.org
 chrishtr@chromium.org
 eae@chromium.org
-esprehn@chromium.org
 fmalita@chromium.org
 fs@opera.com
 mstensho@opera.com
@@ -12,5 +11,5 @@ svillar@igalia.com
 tkent@chromium.org
 wangxianzhu@chromium.org
 
-# TEAM: layout-dev@
+# TEAM: layout-dev@chromium.org
 # COMPONENT: Blink>Layout

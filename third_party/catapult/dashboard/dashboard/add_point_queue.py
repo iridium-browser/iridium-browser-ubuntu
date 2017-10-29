@@ -4,7 +4,6 @@
 
 """URL endpoint to add new graph data to the datastore."""
 
-import datetime
 import json
 import logging
 
@@ -66,18 +65,20 @@ class AddPointQueueHandler(request_handler.RequestHandler):
       except add_point.BadRequestError as e:
         logging.error('Could not add %s, it was invalid.', e.message)
       except datastore_errors.BadRequestError as e:
+        logging.info('While trying to store %s', row_dict)
         logging.error('Datastore request failed: %s.', e.message)
         return
 
     ndb.Future.wait_all(all_put_futures)
 
+    tests_keys = [k for k in monitored_test_keys if not _IsRefBuild(k)]
+
     # Updating of the cached graph revisions should happen after put because
     # it requires the new row to have a timestamp, which happens upon put.
-    graph_revisions.AddRowsToCache(added_rows)
-
-    for test_key in monitored_test_keys:
-      if not _IsRefBuild(test_key):
-        find_anomalies.ProcessTest(test_key)
+    futures = [
+        graph_revisions.AddRowsToCacheAsync(added_rows),
+        find_anomalies.ProcessTestsAsync(tests_keys)]
+    ndb.Future.wait_all(futures)
 
 
 def _PrewarmGets(data):
@@ -177,14 +178,13 @@ def _GetParentTest(row_dict, bot_whitelist):
   units = row_dict.get('units')
   higher_is_better = row_dict.get('higher_is_better')
   improvement_direction = _ImprovementDirection(higher_is_better)
-  internal_only = _BotInternalOnly(bot_name, bot_whitelist)
+  internal_only = BotInternalOnly(bot_name, bot_whitelist)
   benchmark_description = row_dict.get('benchmark_description')
 
-  parent_test = _GetOrCreateAncestors(
-      master_name, bot_name, test_name, units=units,
-      improvement_direction=improvement_direction,
-      internal_only=internal_only,
-      benchmark_description=benchmark_description)
+  parent_test = GetOrCreateAncestors(
+      master_name, bot_name, test_name, internal_only=internal_only,
+      benchmark_description=benchmark_description, units=units,
+      improvement_direction=improvement_direction)
 
   return parent_test
 
@@ -196,7 +196,7 @@ def _ImprovementDirection(higher_is_better):
   return anomaly.UP if higher_is_better else anomaly.DOWN
 
 
-def _BotInternalOnly(bot_name, bot_whitelist):
+def BotInternalOnly(bot_name, bot_whitelist):
   """Checks whether a given bot name is internal-only.
 
   If a bot name is internal only, then new data for that bot should be marked
@@ -210,9 +210,9 @@ def _BotInternalOnly(bot_name, bot_whitelist):
   return bot_name not in bot_whitelist
 
 
-def _GetOrCreateAncestors(
-    master_name, bot_name, test_name, units=None,
-    improvement_direction=None, internal_only=True, benchmark_description=''):
+def GetOrCreateAncestors(
+    master_name, bot_name, test_name, internal_only=True,
+    benchmark_description='', units=None, improvement_direction=None):
   """Gets or creates all parent Master, Bot, TestMetadata entities for a Row."""
 
   master_entity = _GetOrCreateMaster(master_name)
@@ -229,10 +229,10 @@ def _GetOrCreateAncestors(
     is_leaf_test = (index == len(ancestor_test_parts) - 1)
     test_properties = {
         'units': units if is_leaf_test else None,
-        'improvement_direction': (improvement_direction
-                                  if is_leaf_test else None),
         'internal_only': internal_only,
     }
+    if is_leaf_test and improvement_direction is not None:
+      test_properties['improvement_direction'] = improvement_direction
     ancestor_test = _GetOrCreateTest(
         ancestor_test_name, test_path, test_properties)
     if index == 0:
@@ -274,8 +274,8 @@ def _GetOrCreateTest(name, parent_test_path, properties):
   If the entity already exists but the properties are different than the ones
   specified, then the properties will be updated first. This implies that a
   new point is being added for an existing TestMetadata, so if the TestMetadata
-  has been previously marked as deprecated or associated with a stoppage alert,
-  then it can be updated and marked as non-deprecated.
+  has been previously marked as deprecated then it can be updated and marked as
+  non-deprecated.
 
   If the entity doesn't yet exist, a new one will be created with the given
   properties.
@@ -296,10 +296,14 @@ def _GetOrCreateTest(name, parent_test_path, properties):
 
   if not existing:
     # Add improvement direction if this is a new test.
-    if 'units' in properties:
+    if 'units' in properties and 'improvement_direction' not in properties:
       units = properties['units']
       direction = units_to_direction.GetImprovementDirection(units)
       properties['improvement_direction'] = direction
+    elif 'units' not in properties or properties['units'] is None:
+      properties['improvement_direction'] = anomaly.UNKNOWN
+    else:
+      print properties
     new_entity = graph_data.TestMetadata(id=test_path, **properties)
     new_entity.put()
     # TODO(sullivan): Consider putting back Test entity in a scoped down
@@ -313,26 +317,17 @@ def _GetOrCreateTest(name, parent_test_path, properties):
     existing.deprecated = False
     properties_changed = True
 
-  if existing.stoppage_alert:
-    alert = existing.stoppage_alert.get()
-    if alert:
-      alert.recovered = True
-      alert.last_row_timestamp = datetime.datetime.now()
-      alert.put()
-    else:
-      logging.warning('Stoppage alert %s not found.', existing.stoppage_alert)
-    existing.stoppage_alert = None
-    properties_changed = True
-
   # Special case to update improvement direction from units for TestMetadata
   # entities when units are being updated. If an improvement direction is
-  # explicitly provided in the properties, then it will be updated again below.
-  units = properties.get('units')
-  if units:
-    direction = units_to_direction.GetImprovementDirection(units)
-    if direction != existing.improvement_direction:
-      existing.improvement_direction = direction
-      properties_changed = True
+  # explicitly provided in the properties, then we can skip this check since it
+  # will get overwritten below. Additionally, by skipping we avoid
+  # touching the entity and setting off an expensive put() operation.
+  if properties.get('improvement_direction') is None:
+    units = properties.get('units')
+    if units:
+      direction = units_to_direction.GetImprovementDirection(units)
+      if direction != existing.improvement_direction:
+        properties['improvement_direction'] = direction
 
   # Go through the list of general properties and update if necessary.
   for prop, value in properties.items():

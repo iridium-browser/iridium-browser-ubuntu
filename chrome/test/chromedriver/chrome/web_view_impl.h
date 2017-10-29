@@ -52,6 +52,11 @@ class WebViewImpl : public WebView {
   Status GetUrl(std::string* url) override;
   Status Load(const std::string& url, const Timeout* timeout) override;
   Status Reload(const Timeout* timeout) override;
+  Status SendCommand(const std::string& cmd,
+                     const base::DictionaryValue& params) override;
+  Status SendCommandAndGetResult(const std::string& cmd,
+                                 const base::DictionaryValue& params,
+                                 std::unique_ptr<base::Value>* value) override;
   Status TraverseHistory(int delta, const Timeout* timeout) override;
   Status EvaluateScript(const std::string& frame,
                         const std::string& expression,
@@ -79,8 +84,17 @@ class WebViewImpl : public WebView {
   Status DispatchTouchEvent(const TouchEvent& event) override;
   Status DispatchTouchEvents(const std::list<TouchEvent>& events) override;
   Status DispatchKeyEvents(const std::list<KeyEvent>& events) override;
-  Status GetCookies(std::unique_ptr<base::ListValue>* cookies) override;
+  Status GetCookies(std::unique_ptr<base::ListValue>* cookies,
+                    const std::string& current_page_url) override;
   Status DeleteCookie(const std::string& name, const std::string& url) override;
+  Status AddCookie(const std::string& name,
+                   const std::string& url,
+                   const std::string& value,
+                   const std::string& domain,
+                   const std::string& path,
+                   bool secure,
+                   bool httpOnly,
+                   double expiry) override;
   Status WaitForPendingNavigations(const std::string& frame_id,
                                    const Timeout& timeout,
                                    bool stop_load_on_timeout) override;

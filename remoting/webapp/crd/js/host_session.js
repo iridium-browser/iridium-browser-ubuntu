@@ -64,25 +64,27 @@ remoting.HostSession.State.fromString = function(stateString) {
  * @param {remoting.It2MeHostFacade} hostFacade It2Me host facade to use.
  * @param {string} email The user's email address.
  * @param {string} accessToken A valid OAuth2 access token.
+ * @param {Object} iceConfig ICE config for the host.
  * @param {function(remoting.HostSession.State):void} onStateChanged
  *     Callback for notifications of changes to the host plugin's state.
  * @param {function(boolean):void} onNatTraversalPolicyChanged Callback
  *     for notification of changes to the NAT traversal policy.
  * @param {function(string):void} logDebugInfo Callback allowing the plugin
  *     to log messages to the debug log.
- * @param {function():void} onError Callback to invoke in case of an error.
+ * @param {function(remoting.Error):void} onError Callback to invoke in case
+ *     of an error.
  */
-remoting.HostSession.prototype.connect =
-    function(hostFacade, email, accessToken, onStateChanged,
-             onNatTraversalPolicyChanged, logDebugInfo, onError) {
+remoting.HostSession.prototype.connect = function(
+    hostFacade, email, accessToken, iceConfig, onStateChanged,
+    onNatTraversalPolicyChanged, logDebugInfo, onError) {
   /** @private */
   this.hostFacade_ = hostFacade;
 
-  this.hostFacade_.connect(email, 'oauth2:' + accessToken, onStateChanged,
-                           onNatTraversalPolicyChanged, logDebugInfo,
-                           remoting.settings.XMPP_SERVER,
-                           remoting.settings.XMPP_SERVER_USE_TLS,
-                           remoting.settings.DIRECTORY_BOT_JID, onError);
+  this.hostFacade_.connect(
+      email, 'oauth2:' + accessToken, iceConfig, onStateChanged,
+      onNatTraversalPolicyChanged, logDebugInfo, remoting.settings.XMPP_SERVER,
+      remoting.settings.XMPP_SERVER_USE_TLS,
+      remoting.settings.DIRECTORY_BOT_JID, onError);
 };
 
 /**

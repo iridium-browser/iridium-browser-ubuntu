@@ -11,29 +11,63 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/default_clock.h"
 #include "base/values.h"
+#include "components/favicon/core/large_icon_service.h"
+#include "components/favicon_base/fallback_icon_style.h"
+#include "components/favicon_base/favicon_types.h"
+#include "components/ntp_snippets/content_suggestions_metrics.h"
 #include "components/ntp_snippets/pref_names.h"
+#include "components/ntp_snippets/remote/remote_suggestions_provider.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "ui/gfx/image/image.h"
 
 namespace ntp_snippets {
+
+namespace {
+
+// Enumeration listing all possible outcomes for fetch attempts of favicons for
+// content suggestions. Used for UMA histograms, so do not change existing
+// values. Insert new values at the end, and update the histogram definition.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.ntp.snippets
+enum class FaviconFetchResult {
+  SUCCESS_CACHED = 0,
+  SUCCESS_FETCHED = 1,
+  FAILURE = 2,
+  COUNT = 3
+};
+
+void RecordFaviconFetchResult(FaviconFetchResult result) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "NewTabPage.ContentSuggestions.ArticleFaviconFetchResult", result,
+      FaviconFetchResult::COUNT);
+}
+
+}  // namespace
 
 ContentSuggestionsService::ContentSuggestionsService(
     State state,
     SigninManagerBase* signin_manager,
     history::HistoryService* history_service,
+    favicon::LargeIconService* large_icon_service,
     PrefService* pref_service,
-    std::unique_ptr<CategoryRanker> category_ranker)
+    std::unique_ptr<CategoryRanker> category_ranker,
+    std::unique_ptr<UserClassifier> user_classifier,
+    std::unique_ptr<RemoteSuggestionsScheduler> remote_suggestions_scheduler)
     : state_(state),
       signin_observer_(this),
       history_service_observer_(this),
       remote_suggestions_provider_(nullptr),
-      remote_suggestions_scheduler_(nullptr),
+      large_icon_service_(large_icon_service),
       pref_service_(pref_service),
-      user_classifier_(pref_service),
+      remote_suggestions_scheduler_(std::move(remote_suggestions_scheduler)),
+      user_classifier_(std::move(user_classifier)),
       category_ranker_(std::move(category_ranker)) {
   // Can be null in tests.
   if (signin_manager) {
@@ -123,6 +157,149 @@ void ContentSuggestionsService::FetchSuggestionImage(
       suggestion_id, callback);
 }
 
+// TODO(jkrcal): Split the favicon fetching into a separate class.
+void ContentSuggestionsService::FetchSuggestionFavicon(
+    const ContentSuggestion::ID& suggestion_id,
+    int minimum_size_in_pixel,
+    int desired_size_in_pixel,
+    const ImageFetchedCallback& callback) {
+  const GURL& domain_with_favicon = GetFaviconDomain(suggestion_id);
+  if (!domain_with_favicon.is_valid() || !large_icon_service_) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback, gfx::Image()));
+    RecordFaviconFetchResult(FaviconFetchResult::FAILURE);
+    return;
+  }
+
+  GetFaviconFromCache(domain_with_favicon, minimum_size_in_pixel,
+                      desired_size_in_pixel, callback,
+                      /*continue_to_google_server=*/true);
+}
+
+GURL ContentSuggestionsService::GetFaviconDomain(
+    const ContentSuggestion::ID& suggestion_id) {
+  const std::vector<ContentSuggestion>& suggestions =
+      suggestions_by_category_[suggestion_id.category()];
+  auto position =
+      std::find_if(suggestions.begin(), suggestions.end(),
+                   [&suggestion_id](const ContentSuggestion& suggestion) {
+                     return suggestion_id == suggestion.id();
+                   });
+  if (position != suggestions.end()) {
+    return position->url_with_favicon();
+  }
+
+  // Look up the URL in the archive of |remote_suggestions_provider_|.
+  // TODO(jkrcal): Fix how Fetch more works or find other ways to remove this
+  // hack. crbug.com/714031
+  if (providers_by_category_[suggestion_id.category()] ==
+      remote_suggestions_provider_) {
+    return remote_suggestions_provider_->GetUrlWithFavicon(suggestion_id);
+  }
+  return GURL();
+}
+
+void ContentSuggestionsService::GetFaviconFromCache(
+    const GURL& publisher_url,
+    int minimum_size_in_pixel,
+    int desired_size_in_pixel,
+    const ImageFetchedCallback& callback,
+    bool continue_to_google_server) {
+  // TODO(jkrcal): Create a general wrapper function in LargeIconService that
+  // does handle the get-from-cache-and-fallback-to-google-server functionality
+  // in one shot (for all clients that do not need to react in between).
+
+  // Use desired_size = 0 for getting the icon from the cache (so that the icon
+  // is not poorly rescaled by LargeIconService).
+  large_icon_service_->GetLargeIconImageOrFallbackStyle(
+      publisher_url, minimum_size_in_pixel, /*desired_size_in_pixel=*/0,
+      base::Bind(&ContentSuggestionsService::OnGetFaviconFromCacheFinished,
+                 base::Unretained(this), publisher_url, minimum_size_in_pixel,
+                 desired_size_in_pixel, callback, continue_to_google_server),
+      &favicons_task_tracker_);
+}
+
+void ContentSuggestionsService::OnGetFaviconFromCacheFinished(
+    const GURL& publisher_url,
+    int minimum_size_in_pixel,
+    int desired_size_in_pixel,
+    const ImageFetchedCallback& callback,
+    bool continue_to_google_server,
+    const favicon_base::LargeIconImageResult& result) {
+  if (!result.image.IsEmpty()) {
+    callback.Run(result.image);
+    // The icon is from cache if we haven't gone to Google server yet. The icon
+    // is freshly fetched, otherwise.
+    RecordFaviconFetchResult(continue_to_google_server
+                                 ? FaviconFetchResult::SUCCESS_CACHED
+                                 : FaviconFetchResult::SUCCESS_FETCHED);
+    // Update the time when the icon was last requested - postpone thus the
+    // automatic eviction of the favicon from the favicon database.
+    large_icon_service_->TouchIconFromGoogleServer(result.icon_url);
+    return;
+  }
+
+  if (!continue_to_google_server ||
+      (result.fallback_icon_style &&
+       !result.fallback_icon_style->is_default_background_color)) {
+    // We cannot download from the server if there is some small icon in the
+    // cache (resulting in non-default background color) or if we already did
+    // so.
+    callback.Run(gfx::Image());
+    RecordFaviconFetchResult(FaviconFetchResult::FAILURE);
+    return;
+  }
+
+  // Try to fetch the favicon from a Google favicon server.
+  // TODO(jkrcal): Currently used only for Articles for you which have public
+  // URLs. Let the provider decide whether |publisher_url| may be private or
+  // not.
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("content_suggestion_get_favicon", R"(
+        semantics {
+          sender: "Content Suggestion"
+          description:
+            "Sends a request to a Google server to retrieve the favicon bitmap "
+            "for an article suggestion on the new tab page (URLs are public "
+            "and provided by Google)."
+          trigger:
+            "A request can be sent if Chrome does not have a favicon for a "
+            "particular page."
+          data: "Page URL and desired icon size."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting: "This feature cannot be disabled by settings."
+          policy_exception_justification: "Not implemented."
+        })");
+  large_icon_service_
+      ->GetLargeIconOrFallbackStyleFromGoogleServerSkippingLocalCache(
+          publisher_url, minimum_size_in_pixel, desired_size_in_pixel,
+          /*may_page_url_be_private=*/false, traffic_annotation,
+          base::Bind(
+              &ContentSuggestionsService::OnGetFaviconFromGoogleServerFinished,
+              base::Unretained(this), publisher_url, minimum_size_in_pixel,
+              desired_size_in_pixel, callback));
+}
+
+void ContentSuggestionsService::OnGetFaviconFromGoogleServerFinished(
+    const GURL& publisher_url,
+    int minimum_size_in_pixel,
+    int desired_size_in_pixel,
+    const ImageFetchedCallback& callback,
+    favicon_base::GoogleFaviconServerRequestStatus status) {
+  if (status != favicon_base::GoogleFaviconServerRequestStatus::SUCCESS) {
+    callback.Run(gfx::Image());
+    RecordFaviconFetchResult(FaviconFetchResult::FAILURE);
+    return;
+  }
+
+  GetFaviconFromCache(publisher_url, minimum_size_in_pixel,
+                      desired_size_in_pixel, callback,
+                      /*continue_to_google_server=*/false);
+}
+
 void ContentSuggestionsService::ClearHistory(
     base::Time begin,
     base::Time end,
@@ -183,6 +360,9 @@ void ContentSuggestionsService::DismissSuggestion(
                  << " for unavailable category " << suggestion_id.category();
     return;
   }
+
+  metrics::RecordContentSuggestionDismissed();
+
   providers_by_category_[suggestion_id.category()]->DismissSuggestion(
       suggestion_id);
 
@@ -197,6 +377,8 @@ void ContentSuggestionsService::DismissCategory(Category category) {
   if (providers_it == providers_by_category_.end()) {
     return;
   }
+
+  metrics::RecordCategoryDismissed();
 
   ContentSuggestionsProvider* provider = providers_it->second;
   UnregisterCategory(category, provider);
@@ -241,6 +423,8 @@ void ContentSuggestionsService::Fetch(
     return;
   }
 
+  metrics::RecordFetchAction();
+
   providers_it->second->Fetch(category, known_suggestion_ids, callback);
 }
 
@@ -248,6 +432,31 @@ void ContentSuggestionsService::ReloadSuggestions() {
   for (const auto& provider : providers_) {
     provider->ReloadSuggestions();
   }
+}
+
+void ContentSuggestionsService::SetRemoteSuggestionsEnabled(bool enabled) {
+  // TODO(dgn): Rewire if we decide to implement a dedicated prefs page. If not
+  // remove by M62.
+  NOTREACHED();
+}
+
+bool ContentSuggestionsService::AreRemoteSuggestionsEnabled() const {
+  return remote_suggestions_provider_ &&
+         !remote_suggestions_provider_->IsDisabled();
+}
+
+bool ContentSuggestionsService::AreRemoteSuggestionsManaged() const {
+  // TODO(dgn): Rewire if we decide to implement a dedicated prefs page. If not
+  // remove by M62.
+  NOTREACHED();
+  return false;
+}
+
+bool ContentSuggestionsService::AreRemoteSuggestionsManagedByCustodian() const {
+  // TODO(dgn): Rewire if we decide to implement a dedicated prefs page. If not
+  // remove by M62.
+  NOTREACHED();
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -320,8 +529,7 @@ void ContentSuggestionsService::OnSuggestionInvalidated(
 // SigninManagerBase::Observer implementation
 void ContentSuggestionsService::GoogleSigninSucceeded(
     const std::string& account_id,
-    const std::string& username,
-    const std::string& password) {
+    const std::string& username) {
   OnSignInStateChanged();
 }
 
@@ -360,11 +568,10 @@ void ContentSuggestionsService::OnURLsDeleted(
     for (const history::URLRow& row : deleted_rows) {
       deleted_urls.insert(row.url());
     }
-    base::Callback<bool(const GURL& url)> filter = base::Bind(
-        [](const std::set<GURL>& set, const GURL& url) {
-          return set.count(url) != 0;
-        },
-        deleted_urls);
+    base::Callback<bool(const GURL& url)> filter =
+        base::Bind([](const std::set<GURL>& set,
+                      const GURL& url) { return set.count(url) != 0; },
+                   deleted_urls);
     // We usually don't have any time-related information (the URLRow objects
     // usually don't provide a |last_visit()| timestamp. Hence we simply clear
     // the whole history for the selected URLs.
@@ -494,10 +701,10 @@ void ContentSuggestionsService::RestoreDismissedCategoriesFromPrefs() {
 
   const base::ListValue* list =
       pref_service_->GetList(prefs::kDismissedCategories);
-  for (const std::unique_ptr<base::Value>& entry : *list) {
+  for (const base::Value& entry : *list) {
     int id = 0;
-    if (!entry->GetAsInteger(&id)) {
-      DLOG(WARNING) << "Invalid category pref value: " << *entry;
+    if (!entry.GetAsInteger(&id)) {
+      DLOG(WARNING) << "Invalid category pref value: " << entry;
       continue;
     }
 

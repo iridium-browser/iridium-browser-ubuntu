@@ -15,6 +15,12 @@ ozone_platform_headless = true
 # Embed resource.pak into binary to simplify deployment.
 headless_use_embedded_resources = true
 
+# Expose headless bindings for freetype library bundled with Chromium.
+headless_fontconfig_utils = true
+
+# Remove a dependency on a system fontconfig library.
+use_bundled_fontconfig = true
+
 # In order to simplify deployment we build ICU data file
 # into binary.
 icu_use_data_file = false
@@ -23,7 +29,10 @@ icu_use_data_file = false
 # to simplify deployment.
 v8_use_external_startup_data = false
 
-enable_basic_printing = false
+# Do not use bundled libc++ to ensure that everything works when Headless
+# Chromium is embedded.
+use_custom_libcxx = false
+
 enable_nacl = false
 enable_print_preview = false
 enable_remoting = false

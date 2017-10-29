@@ -50,17 +50,13 @@ GrGLProgramDataManager::GrGLProgramDataManager(GrGLGpu* gpu, GrGLuint programID,
     }
 }
 
-void GrGLProgramDataManager::setSamplers(const UniformInfoArray& samplers) const {
+void GrGLProgramDataManager::setSamplerUniforms(const UniformInfoArray& samplers,
+                                                int startUnit) const {
     for (int i = 0; i < samplers.count(); ++i) {
         const UniformInfo& sampler = samplers[i];
         SkASSERT(sampler.fVisibility);
         if (kUnusedUniform != sampler.fLocation) {
-            GR_GL_CALL(fGpu->glInterface(), Uniform1i(sampler.fLocation, i));
-        } else {
-            // FIXME: We still insert a single sampler uniform for every stage. If the shader does
-            // not reference the sampler then the compiler may have optimized it out. Uncomment this
-            // assert once stages insert their own samplers.
-            // this->printUnused(uni);
+            GR_GL_CALL(fGpu->glInterface(), Uniform1i(sampler.fLocation, i + startUnit));
         }
     }
 }
@@ -79,7 +75,6 @@ void GrGLProgramDataManager::set1i(UniformHandle u, int32_t i) const {
     const Uniform& uni = fUniforms[u.toIndex()];
     SkASSERT(uni.fType == kInt_GrSLType);
     SkASSERT(GrShaderVar::kNonArray == uni.fArrayCount);
-    SkDEBUGCODE(this->printUnused(uni));
     if (kUnusedUniform != uni.fLocation) {
         GR_GL_CALL(fGpu->glInterface(), Uniform1i(uni.fLocation, i));
     }
@@ -101,7 +96,6 @@ void GrGLProgramDataManager::set1f(UniformHandle u, float v0) const {
     const Uniform& uni = fUniforms[u.toIndex()];
     SkASSERT(uni.fType == kFloat_GrSLType);
     SkASSERT(GrShaderVar::kNonArray == uni.fArrayCount);
-    SkDEBUGCODE(this->printUnused(uni);)
     if (kUnusedUniform != uni.fLocation) {
         GR_GL_CALL(fGpu->glInterface(), Uniform1f(uni.fLocation, v0));
     }
@@ -127,7 +121,6 @@ void GrGLProgramDataManager::set2f(UniformHandle u, float v0, float v1) const {
     const Uniform& uni = fUniforms[u.toIndex()];
     SkASSERT(uni.fType == kVec2f_GrSLType);
     SkASSERT(GrShaderVar::kNonArray == uni.fArrayCount);
-    SkDEBUGCODE(this->printUnused(uni);)
     if (kUnusedUniform != uni.fLocation) {
         GR_GL_CALL(fGpu->glInterface(), Uniform2f(uni.fLocation, v0, v1));
     }
@@ -140,7 +133,6 @@ void GrGLProgramDataManager::set2fv(UniformHandle u,
     SkASSERT(uni.fType == kVec2f_GrSLType);
     SkASSERT(arrayCount > 0);
     ASSERT_ARRAY_UPLOAD_IN_BOUNDS(uni, arrayCount);
-    SkDEBUGCODE(this->printUnused(uni);)
     if (kUnusedUniform != uni.fLocation) {
         GR_GL_CALL(fGpu->glInterface(), Uniform2fv(uni.fLocation, arrayCount, v));
     }
@@ -150,7 +142,6 @@ void GrGLProgramDataManager::set3f(UniformHandle u, float v0, float v1, float v2
     const Uniform& uni = fUniforms[u.toIndex()];
     SkASSERT(uni.fType == kVec3f_GrSLType);
     SkASSERT(GrShaderVar::kNonArray == uni.fArrayCount);
-    SkDEBUGCODE(this->printUnused(uni);)
     if (kUnusedUniform != uni.fLocation) {
         GR_GL_CALL(fGpu->glInterface(), Uniform3f(uni.fLocation, v0, v1, v2));
     }
@@ -163,7 +154,6 @@ void GrGLProgramDataManager::set3fv(UniformHandle u,
     SkASSERT(uni.fType == kVec3f_GrSLType);
     SkASSERT(arrayCount > 0);
     ASSERT_ARRAY_UPLOAD_IN_BOUNDS(uni, arrayCount);
-    SkDEBUGCODE(this->printUnused(uni);)
     if (kUnusedUniform != uni.fLocation) {
         GR_GL_CALL(fGpu->glInterface(), Uniform3fv(uni.fLocation, arrayCount, v));
     }
@@ -177,7 +167,6 @@ void GrGLProgramDataManager::set4f(UniformHandle u,
     const Uniform& uni = fUniforms[u.toIndex()];
     SkASSERT(uni.fType == kVec4f_GrSLType);
     SkASSERT(GrShaderVar::kNonArray == uni.fArrayCount);
-    SkDEBUGCODE(this->printUnused(uni);)
     if (kUnusedUniform != uni.fLocation) {
         GR_GL_CALL(fGpu->glInterface(), Uniform4f(uni.fLocation, v0, v1, v2, v3));
     }
@@ -190,7 +179,6 @@ void GrGLProgramDataManager::set4fv(UniformHandle u,
     SkASSERT(uni.fType == kVec4f_GrSLType);
     SkASSERT(arrayCount > 0);
     ASSERT_ARRAY_UPLOAD_IN_BOUNDS(uni, arrayCount);
-    SkDEBUGCODE(this->printUnused(uni);)
     if (kUnusedUniform != uni.fLocation) {
         GR_GL_CALL(fGpu->glInterface(), Uniform4fv(uni.fLocation, arrayCount, v));
     }
@@ -229,7 +217,6 @@ template<int N> inline void GrGLProgramDataManager::setMatrices(UniformHandle u,
     SkASSERT(uni.fType == kMat22f_GrSLType + (N - 2));
     SkASSERT(arrayCount > 0);
     ASSERT_ARRAY_UPLOAD_IN_BOUNDS(uni, arrayCount);
-    SkDEBUGCODE(this->printUnused(uni);)
     if (kUnusedUniform != uni.fLocation) {
         set_uniform_matrix<N>::set(fGpu->glInterface(), uni.fLocation, arrayCount, matrices);
     }
@@ -268,11 +255,3 @@ void GrGLProgramDataManager::setPathFragmentInputTransform(VaryingHandle u,
                                                                   components,
                                                                   matrix);
 }
-
-#ifdef SK_DEBUG
-void GrGLProgramDataManager::printUnused(const Uniform& uni) const {
-    if (kUnusedUniform == uni.fLocation) {
-        GrCapsDebugf(fGpu->caps(), "Unused uniform in shader\n");
-    }
-}
-#endif

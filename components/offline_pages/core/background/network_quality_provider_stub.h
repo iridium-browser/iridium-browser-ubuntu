@@ -7,15 +7,14 @@
 
 #include "base/supports_user_data.h"
 #include "net/nqe/effective_connection_type.h"
-#include "net/nqe/network_quality_estimator.h"
+#include "net/nqe/network_quality_provider.h"
 
 namespace offline_pages {
 
 // Test class stubbing out the functionality of NQE::NetworkQualityProvider.
 // It is only used for test support.
-class NetworkQualityProviderStub
-    : public net::NetworkQualityEstimator::NetworkQualityProvider,
-      public base::SupportsUserData::Data {
+class NetworkQualityProviderStub : public net::NetworkQualityProvider,
+                                   public base::SupportsUserData::Data {
  public:
   NetworkQualityProviderStub();
   ~NetworkQualityProviderStub() override;
@@ -23,17 +22,9 @@ class NetworkQualityProviderStub
   static NetworkQualityProviderStub* GetUserData(
       base::SupportsUserData* supports_user_data);
   static void SetUserData(base::SupportsUserData* supports_user_data,
-                          NetworkQualityProviderStub* stub);
+                          std::unique_ptr<NetworkQualityProviderStub> stub);
 
   net::EffectiveConnectionType GetEffectiveConnectionType() const override;
-
-  void AddEffectiveConnectionTypeObserver(
-      net::NetworkQualityEstimator::EffectiveConnectionTypeObserver* observer)
-      override;
-
-  void RemoveEffectiveConnectionTypeObserver(
-      net::NetworkQualityEstimator::EffectiveConnectionTypeObserver* observer)
-      override;
 
   void SetEffectiveConnectionTypeForTest(net::EffectiveConnectionType type) {
     connection_type_ = type;

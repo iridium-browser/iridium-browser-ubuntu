@@ -15,8 +15,6 @@
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_frontend_host.h"
-#include "content/public/browser/site_instance.h"
-#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -27,7 +25,6 @@
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "storage/browser/fileapi/file_system_context.h"
 #include "third_party/WebKit/public/public_features.h"
 
 using content::BrowserThread;
@@ -41,17 +38,6 @@ std::string PathWithoutParams(const std::string& path) {
 }
 
 const char kHttpNotFound[] = "HTTP/1.1 404 Not Found\n\n";
-
-#if BUILDFLAG(DEBUG_DEVTOOLS)
-// Local frontend url provided by InspectUI.
-const char kFallbackFrontendURL[] =
-    "chrome-devtools://devtools/bundled/inspector.html";
-#else
-// URL causing the DevTools window to display a plain text warning.
-const char kFallbackFrontendURL[] =
-    "data:text/plain,Cannot load DevTools frontend from an untrusted origin";
-#endif  // BUILDFLAG(DEBUG_DEVTOOLS)
-
 
 // DevToolsDataSource ---------------------------------------------------------
 
@@ -245,7 +231,7 @@ void DevToolsDataSource::StartRemoteDataRequest(
         semantics {
           sender: "Developer Tools Remote Data Request From Google"
           description:
-            "This service fetches Chrome DevTools front-end files from the "
+            "This service fetches Chromium DevTools front-end files from the "
             "cloud for the remote debugging scenario."
           trigger:
             "When user attaches to mobile phone for debugging."
@@ -256,10 +242,10 @@ void DevToolsDataSource::StartRemoteDataRequest(
           cookies_allowed: true
           cookies_store: "user"
           setting: "This feature cannot be disabled by settings."
-          policy {
+          chrome_policy {
             DeveloperToolsDisabled {
               policy_options {mode: MANDATORY}
-              value: True
+              DeveloperToolsDisabled: true
             }
           }
         })");
@@ -284,7 +270,7 @@ void DevToolsDataSource::StartCustomDataRequest(
         semantics {
           sender: "Developer Tools Remote Data Request"
           description:
-            "This service fetches Chrome DevTools front-end files from the "
+            "This service fetches Chromium DevTools front-end files from the "
             "cloud for the remote debugging scenario. This can only happen if "
             "a URL was passed on the commandline via flag "
             "'--custom-devtools-frontend'. This URL overrides the default "
@@ -300,10 +286,10 @@ void DevToolsDataSource::StartCustomDataRequest(
           cookies_allowed: true
           cookies_store: "user"
           setting: "This feature cannot be disabled by settings."
-          policy {
+          chrome_policy {
             DeveloperToolsDisabled {
               policy_options {mode: MANDATORY}
-              DeveloperToolsDisabled: True
+              DeveloperToolsDisabled: true
             }
           }
         })");
@@ -337,9 +323,8 @@ GURL DevToolsUI::GetProxyURL(const std::string& frontend_url) {
   if (url.scheme() == content::kChromeDevToolsScheme &&
       url.host() == chrome::kChromeUIDevToolsHost)
     return GURL();
-
   if (!url.is_valid() || url.host() != kRemoteFrontendDomain)
-    return GURL(kFallbackFrontendURL);
+    return GURL();
   return GURL(base::StringPrintf("%s://%s/%s/%s",
               content::kChromeDevToolsScheme,
               chrome::kChromeUIDevToolsHost,
@@ -363,13 +348,6 @@ DevToolsUI::DevToolsUI(content::WebUI* web_ui)
   content::URLDataSource::Add(
       profile,
       new DevToolsDataSource(profile->GetRequestContext()));
-
-  if (!profile->IsOffTheRecord())
-    return;
-  GURL url = web_ui->GetWebContents()->GetVisibleURL();
-  GURL site = content::SiteInstance::GetSiteForURL(profile, url);
-  content::BrowserContext::GetStoragePartitionForSite(profile, site)->
-      GetFileSystemContext()->EnableTemporaryFileSystemInIncognito();
 }
 
 DevToolsUI::~DevToolsUI() {

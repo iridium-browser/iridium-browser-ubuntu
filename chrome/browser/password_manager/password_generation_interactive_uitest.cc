@@ -118,9 +118,10 @@ class PasswordGenerationInteractiveTest :
 
   void SendKeyToPopup(ui::KeyboardCode key) {
     content::NativeWebKeyboardEvent event(
-        blink::WebKeyboardEvent::RawKeyDown, blink::WebInputEvent::NoModifiers,
-        blink::WebInputEvent::TimeStampForTesting);
-    event.windowsKeyCode = key;
+        blink::WebKeyboardEvent::kRawKeyDown,
+        blink::WebInputEvent::kNoModifiers,
+        blink::WebInputEvent::kTimeStampForTesting);
+    event.windows_key_code = key;
     RenderViewHost()->GetWidget()->ForwardKeyboardEvent(event);
   }
 
@@ -136,9 +137,8 @@ class PasswordGenerationInteractiveTest :
   TestPopupObserver observer_;
 };
 
-// Disabled due to flakiness due to resizes, see http://crbug.com/407998.
 IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
-                       DISABLED_PopupShownAndPasswordSelected) {
+                       PopupShownAndPasswordSelected) {
   FocusPasswordField();
   EXPECT_TRUE(GenerationPopupShowing());
   SendKeyToPopup(ui::VKEY_DOWN);
@@ -156,9 +156,8 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
   EXPECT_TRUE(EditingPopupShowing());
 }
 
-// Disabled due to flakiness due to resizes, see http://crbug.com/407998.
 IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
-                       DISABLED_PopupShownAndDismissed) {
+                       PopupShownAndDismissed) {
   FocusPasswordField();
   EXPECT_TRUE(GenerationPopupShowing());
 
@@ -168,9 +167,8 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
   EXPECT_FALSE(GenerationPopupShowing());
 }
 
-// Disabled due to flakiness due to resizes, see http://crbug.com/407998.
 IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
-                       DISABLED_PopupShownAndDismissedByScrolling) {
+                       PopupShownAndDismissedByScrolling) {
   FocusPasswordField();
   EXPECT_TRUE(GenerationPopupShowing());
 
@@ -180,23 +178,25 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
   EXPECT_FALSE(GenerationPopupShowing());
 }
 
-// Disabled due to flakiness due to resizes, see http://crbug.com/407998.
 IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
-                       DISABLED_GenerationTriggeredInIFrame) {
+                       GenerationTriggeredInIFrame) {
   NavigateToFile("/password/framed_signup_form.html");
 
-  std::string focus_script =
-      "var frame = document.getElementById('signup_iframe');"
-      "var frame_doc = frame.contentDocument;"
-      "frame_doc.getElementById('password_field').focus();";
+  // Execute the script in the context of the iframe so that it kinda receives a
+  // user gesture.
+  std::vector<content::RenderFrameHost*> frames = WebContents()->GetAllFrames();
+  ASSERT_EQ(2u, frames.size());
+  ASSERT_TRUE(frames[0] == RenderFrameHost());
 
-  ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), focus_script));
+  std::string focus_script =
+      "document.getElementById('password_field').focus();";
+
+  ASSERT_TRUE(content::ExecuteScript(frames[1], focus_script));
   EXPECT_TRUE(GenerationPopupShowing());
 }
 
-// Disabled due to flakiness due to resizes, see http://crbug.com/407998.
 IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
-                       DISABLED_AutoSavingGeneratedPassword) {
+                       AutoSavingGeneratedPassword) {
   scoped_refptr<password_manager::TestPasswordStore> password_store =
       static_cast<password_manager::TestPasswordStore*>(
           PasswordStoreFactory::GetForProfile(
@@ -215,10 +215,7 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
   ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), submit_script));
   observer.Wait();
 
-  // Spin the message loop to make sure the password store had a chance to save
-  // the password.
-  base::RunLoop run_loop;
-  run_loop.RunUntilIdle();
+  WaitForPasswordStore();
   EXPECT_FALSE(password_store->IsEmpty());
 
   // Make sure the username is correct.

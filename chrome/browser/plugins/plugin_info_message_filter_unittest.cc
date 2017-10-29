@@ -134,7 +134,7 @@ class PluginInfoMessageFilterTest : public ::testing::Test {
 #endif
     base::RunLoop run_loop;
     PluginService::GetInstance()->GetPlugins(
-        base::Bind(&PluginsLoaded, run_loop.QuitClosure()));
+        base::BindOnce(&PluginsLoaded, run_loop.QuitClosure()));
     run_loop.Run();
 #if !defined(OS_WIN)
     content::RenderProcessHost::SetRunRendererInProcess(false);
@@ -323,7 +323,7 @@ TEST_F(PluginInfoMessageFilterTest, GetPluginContentSetting) {
   sync_preferences::TestingPrefServiceSyncable* prefs =
       profile()->GetTestingPrefService();
   prefs->SetManagedPref(prefs::kManagedDefaultPluginsSetting,
-                        new base::Value(CONTENT_SETTING_BLOCK));
+                        base::MakeUnique<base::Value>(CONTENT_SETTING_BLOCK));
 
   // All plugins should be blocked now.
   VerifyPluginContentSetting(host, "foo", CONTENT_SETTING_BLOCK, true, true);

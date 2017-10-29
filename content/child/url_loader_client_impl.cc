@@ -17,8 +17,7 @@ URLLoaderClientImpl::URLLoaderClientImpl(
     int request_id,
     ResourceDispatcher* resource_dispatcher,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-    : binding_(this),
-      request_id_(request_id),
+    : request_id_(request_id),
       resource_dispatcher_(resource_dispatcher),
       task_runner_(std::move(task_runner)),
       weak_factory_(this) {}
@@ -26,10 +25,6 @@ URLLoaderClientImpl::URLLoaderClientImpl(
 URLLoaderClientImpl::~URLLoaderClientImpl() {
   if (body_consumer_)
     body_consumer_->Cancel();
-}
-
-void URLLoaderClientImpl::Bind(mojom::URLLoaderClientPtr* client_ptr) {
-  binding_.Bind(client_ptr, task_runner_);
 }
 
 void URLLoaderClientImpl::SetDefersLoading() {
@@ -60,7 +55,7 @@ void URLLoaderClientImpl::FlushDeferredMessages() {
       has_completion_message = true;
       break;
     }
-    Dispatch(messages[index]);
+    resource_dispatcher_->DispatchMessage(messages[index]);
     if (!weak_this)
       return;
     if (is_deferred_) {
@@ -103,16 +98,21 @@ void URLLoaderClientImpl::FlushDeferredMessages() {
     DCHECK_GT(messages.size(), 0u);
     DCHECK_EQ(messages.back().type(),
               static_cast<uint32_t>(ResourceMsg_RequestComplete::ID));
-    Dispatch(messages.back());
+
+    resource_dispatcher_->DispatchMessage(messages.back());
   }
 }
 
 void URLLoaderClientImpl::OnReceiveResponse(
     const ResourceResponseHead& response_head,
+    const base::Optional<net::SSLInfo>& ssl_info,
     mojom::DownloadedTempFilePtr downloaded_file) {
   has_received_response_ = true;
   downloaded_file_ = std::move(downloaded_file);
-  Dispatch(ResourceMsg_ReceivedResponse(request_id_, response_head));
+  if (NeedsStoringMessage())
+    StoreAndDispatch(ResourceMsg_ReceivedResponse(request_id_, response_head));
+  else
+    resource_dispatcher_->OnReceivedResponse(request_id_, response_head);
 }
 
 void URLLoaderClientImpl::OnReceiveRedirect(
@@ -120,20 +120,33 @@ void URLLoaderClientImpl::OnReceiveRedirect(
     const ResourceResponseHead& response_head) {
   DCHECK(!has_received_response_);
   DCHECK(!body_consumer_);
-  Dispatch(
-      ResourceMsg_ReceivedRedirect(request_id_, redirect_info, response_head));
+  if (NeedsStoringMessage()) {
+    StoreAndDispatch(ResourceMsg_ReceivedRedirect(request_id_, redirect_info,
+                                                  response_head));
+  } else {
+    resource_dispatcher_->OnReceivedRedirect(request_id_, redirect_info,
+                                             response_head);
+  }
 }
 
 void URLLoaderClientImpl::OnDataDownloaded(int64_t data_len,
                                            int64_t encoded_data_len) {
-  Dispatch(ResourceMsg_DataDownloaded(request_id_, data_len, encoded_data_len));
+  if (NeedsStoringMessage()) {
+    StoreAndDispatch(
+        ResourceMsg_DataDownloaded(request_id_, data_len, encoded_data_len));
+  } else {
+    resource_dispatcher_->OnDownloadedData(request_id_, data_len,
+                                           encoded_data_len);
+  }
 }
 
 void URLLoaderClientImpl::OnReceiveCachedMetadata(
     const std::vector<uint8_t>& data) {
-  const char* data_ptr = reinterpret_cast<const char*>(data.data());
-  Dispatch(ResourceMsg_ReceivedCachedMetadata(
-      request_id_, std::vector<char>(data_ptr, data_ptr + data.size())));
+  if (NeedsStoringMessage()) {
+    StoreAndDispatch(ResourceMsg_ReceivedCachedMetadata(request_id_, data));
+  } else {
+    resource_dispatcher_->OnReceivedCachedMetadata(request_id_, data);
+  }
 }
 
 void URLLoaderClientImpl::OnTransferSizeUpdated(int32_t transfer_size_diff) {
@@ -151,36 +164,56 @@ void URLLoaderClientImpl::OnStartLoadingResponseBody(
   DCHECK(has_received_response_);
   body_consumer_ = new URLResponseBodyConsumer(
       request_id_, resource_dispatcher_, std::move(body), task_runner_);
-  if (is_deferred_)
+
+  if (is_deferred_) {
     body_consumer_->SetDefersLoading();
+    return;
+  }
+
+  body_consumer_->OnReadable(MOJO_RESULT_OK);
 }
 
 void URLLoaderClientImpl::OnComplete(
     const ResourceRequestCompletionStatus& status) {
   if (!body_consumer_) {
-    Dispatch(ResourceMsg_RequestComplete(request_id_, status));
+    if (NeedsStoringMessage()) {
+      StoreAndDispatch(ResourceMsg_RequestComplete(request_id_, status));
+    } else {
+      resource_dispatcher_->OnRequestComplete(request_id_, status);
+    }
     return;
   }
   body_consumer_->OnComplete(status);
 }
 
-void URLLoaderClientImpl::Dispatch(const IPC::Message& message) {
+bool URLLoaderClientImpl::NeedsStoringMessage() const {
+  return is_deferred_ || deferred_messages_.size() > 0;
+}
+
+void URLLoaderClientImpl::StoreAndDispatch(const IPC::Message& message) {
+  DCHECK(NeedsStoringMessage());
   if (is_deferred_) {
     deferred_messages_.push_back(message);
   } else if (deferred_messages_.size() > 0) {
     deferred_messages_.push_back(message);
     FlushDeferredMessages();
   } else {
-    resource_dispatcher_->DispatchMessage(message);
+    NOTREACHED();
   }
 }
 
-void URLLoaderClientImpl::OnUploadProgress(int64_t current_position,
-                                           int64_t total_size,
-                                           const base::Closure& ack_callback) {
-  Dispatch(
-      ResourceMsg_UploadProgress(request_id_, current_position, total_size));
-  ack_callback.Run();
+void URLLoaderClientImpl::OnUploadProgress(
+    int64_t current_position,
+    int64_t total_size,
+    OnUploadProgressCallback ack_callback) {
+  if (NeedsStoringMessage()) {
+    StoreAndDispatch(
+        ResourceMsg_UploadProgress(request_id_, current_position, total_size));
+  } else {
+    resource_dispatcher_->OnUploadProgress(request_id_, current_position,
+                                           total_size);
+  }
+  std::move(ack_callback).Run();
 }
 
 }  // namespace content

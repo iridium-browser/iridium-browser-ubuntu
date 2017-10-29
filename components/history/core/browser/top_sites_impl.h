@@ -23,10 +23,8 @@
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
-#include "components/history/core/browser/page_usage_data.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/history/core/browser/top_sites_backend.h"
 #include "components/history/core/common/thumbnail_score.h"
@@ -41,7 +39,6 @@ namespace base {
 class FilePath;
 class RefCountedBytes;
 class RefCountedMemory;
-class SingleThreadTaskRunner;
 }
 
 namespace history {
@@ -66,8 +63,7 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
                const CanAddURLToHistoryFn& can_add_url_to_history);
 
   // Initializes TopSitesImpl.
-  void Init(const base::FilePath& db_name,
-            const scoped_refptr<base::SingleThreadTaskRunner>& db_task_runner);
+  void Init(const base::FilePath& db_name);
 
   // TopSites implementation.
   bool SetPageThumbnail(const GURL& url,
@@ -121,6 +117,21 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
     CALL_LOCATION_FROM_OTHER_PLACES,
   };
 
+  // An enum representing various outcomes of adding a page thumbnail, for use
+  // in UMA histograms. Most of these are recorded from SetPageThumbnail,
+  // except for PROMOTED_TEMP_TO_REGULAR which can happen during SetTopSites.
+  // Do not change existing entries, and only add new ones at the end!
+  enum ThumbnailEvent {
+    THUMBNAIL_FAILURE = 0,
+    THUMBNAIL_TOPSITES_FULL = 1,
+    THUMBNAIL_KEPT_EXISTING = 2,
+    THUMBNAIL_ADDED_TEMP = 3,
+    THUMBNAIL_ADDED_REGULAR = 4,
+    THUMBNAIL_PROMOTED_TEMP_TO_REGULAR = 5,
+    // Add new entries here.
+    THUMBNAIL_EVENT_COUNT = 6
+  };
+
   friend class TopSitesImplTest;
   FRIEND_TEST_ALL_PREFIXES(TopSitesImplTest, DiffMostVisited);
   FRIEND_TEST_ALL_PREFIXES(TopSitesImplTest, DiffMostVisitedWithForced);
@@ -148,15 +159,22 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
                               const MostVisitedURLList& new_list,
                               TopSitesDelta* delta);
 
-  // Sets the thumbnail without writing to the database. Useful when
-  // reading last known top sites from the DB.
-  // Returns true if the thumbnail was set, false if the existing one is better.
-  bool SetPageThumbnailNoDB(const GURL& url,
-                            const base::RefCountedMemory* thumbnail_data,
-                            const ThumbnailScore& score);
+  // The actual implementation of SetPageThumbnail. It returns a more detailed
+  // status code (for UMA) rather than just a bool.
+  ThumbnailEvent SetPageThumbnailImpl(const GURL& url,
+                                      const gfx::Image& thumbnail,
+                                      const ThumbnailScore& score);
 
-  // A version of SetPageThumbnail that takes RefCountedBytes as
-  // returned by HistoryService.
+  // Sets the thumbnail without writing to the database, i.e. updates the cache
+  // only. Must only be called for known URLs. Returns true if the thumbnail was
+  // set, false if the existing one (if any) is better.
+  bool SetPageThumbnailInCache(const GURL& url,
+                               const base::RefCountedMemory* thumbnail_data,
+                               const ThumbnailScore& score);
+
+  // The major part of SetPageThumbnail, which sets the thumbnail both in the
+  // cache and in the database. Must only be called for known URLs. Returns true
+  // if the thumbnail was set, false if the existing one (if any) is better.
   bool SetPageThumbnailEncoded(const GURL& url,
                                const base::RefCountedMemory* thumbnail,
                                const ThumbnailScore& score);
@@ -166,13 +184,13 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
   static bool EncodeBitmap(const gfx::Image& bitmap,
                            scoped_refptr<base::RefCountedBytes>* bytes);
 
-  // Removes the cached thumbnail for url. Does nothing if |url| if not cached
+  // Removes the cached thumbnail for |url|. Does nothing if |url| is not cached
   // in |temp_images_|.
   void RemoveTemporaryThumbnailByURL(const GURL& url);
 
-  // Add a thumbnail for an unknown url. See temp_thumbnails_map_.
+  // Add a thumbnail for an unknown url. See |temp_images_|.
   void AddTemporaryThumbnail(const GURL& url,
-                             const base::RefCountedMemory* thumbnail,
+                             base::RefCountedMemory* thumbnail,
                              const ThumbnailScore& score);
 
   // Called by our timer. Starts the query for the most visited sites.
@@ -187,7 +205,7 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
   // Add prepopulated pages: 'welcome to Chrome' and themes gallery to |urls|.
   // Returns true if any pages were added.
   bool AddPrepopulatedPages(MostVisitedURLList* urls,
-                            size_t num_forced_urls);
+                            size_t num_forced_urls) const;
 
   // Add all the forced URLs from |cache_| into |new_list|, making sure not to
   // add any URL that's already in |new_list|'s non-forced URLs. The forced URLs
@@ -195,7 +213,7 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
   // and be sorted in increasing |last_forced_time|. This will still be true
   // after the call. If the list of forced URLs overflows the older ones are
   // dropped. Returns the number of forced URLs after the merge.
-  size_t MergeCachedForcedURLs(MostVisitedURLList* new_list);
+  size_t MergeCachedForcedURLs(MostVisitedURLList* new_list) const;
 
   // Takes |urls|, produces it's copy in |out| after removing blacklisted URLs.
   // Also ensures we respect the maximum number of forced URLs and non-forced
@@ -203,11 +221,11 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
   void ApplyBlacklist(const MostVisitedURLList& urls, MostVisitedURLList* out);
 
   // Returns an MD5 hash of the URL. Hashing is required for blacklisted URLs.
-  std::string GetURLHash(const GURL& url);
+  static std::string GetURLHash(const GURL& url);
 
   // Returns the delay until the next update of history is needed.
-  // Uses num_urls_changed
-  base::TimeDelta GetUpdateDelay();
+  // Uses |last_num_urls_changed_|.
+  base::TimeDelta GetUpdateDelay() const;
 
   // Updates URLs in |cache_| and the db (in the background).
   // The non-forced URLs in |new_top_sites| replace those in |cache_|.
@@ -258,8 +276,8 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
   std::unique_ptr<TopSitesCache> cache_;
 
   // Copy of the top sites data that may be accessed on any thread (assuming
-  // you hold |lock_|). The data in |thread_safe_cache_| has blacklisted and
-  // pinned urls applied (|cache_| does not).
+  // you hold |lock_|). The data in |thread_safe_cache_| has blacklisted urls
+  // applied (|cache_| does not).
   std::unique_ptr<TopSitesCache> thread_safe_cache_;
 
   // Lock used to access |thread_safe_cache_|.
@@ -286,11 +304,11 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
   // Stores thumbnails for unknown pages. When SetPageThumbnail is
   // called, if we don't know about that URL yet and we don't have
   // enough Top Sites (new profile), we store it until the next
-  // SetNonForcedTopSites call.
+  // SetTopSites call.
   TempImages temp_images_;
 
   // URL List of prepopulated page.
-  PrepopulatedPageList prepopulated_pages_;
+  const PrepopulatedPageList prepopulated_pages_;
 
   // PrefService holding the NTP URL blacklist dictionary. Must outlive
   // TopSitesImpl.

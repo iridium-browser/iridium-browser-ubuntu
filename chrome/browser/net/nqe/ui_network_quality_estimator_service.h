@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_NET_NQE_UI_NETWORK_QUALITY_ESTIMATOR_SERVICE_H_
 #define CHROME_BROWSER_NET_NQE_UI_NETWORK_QUALITY_ESTIMATOR_SERVICE_H_
 
+#include <stdint.h>
+
 #include <map>
 #include <memory>
 
@@ -22,7 +24,9 @@ class PrefRegistrySimple;
 class Profile;
 
 namespace net {
+class EffectiveConnectionTypeObserver;
 class NetworkQualitiesPrefsManager;
+class RTTAndThroughputEstimatesObserver;
 }
 
 // UI service to determine the current EffectiveConnectionType.
@@ -36,16 +40,17 @@ class UINetworkQualityEstimatorService
   // NetworkQualityProvider implementation:
   // Must be called on the UI thread.
   net::EffectiveConnectionType GetEffectiveConnectionType() const override;
-  // Must be called on the UI thread. |observer| will be notified on the UI
-  // thread.  |observer| would be notified of the current effective connection
-  // type in the next message pump.
   void AddEffectiveConnectionTypeObserver(
-      net::NetworkQualityEstimator::EffectiveConnectionTypeObserver* observer)
-      override;
-  // Must be called on the UI thread.
+      net::EffectiveConnectionTypeObserver* observer) override;
   void RemoveEffectiveConnectionTypeObserver(
-      net::NetworkQualityEstimator::EffectiveConnectionTypeObserver* observer)
-      override;
+      net::EffectiveConnectionTypeObserver* observer) override;
+  base::Optional<base::TimeDelta> GetHttpRTT() const override;
+  base::Optional<base::TimeDelta> GetTransportRTT() const override;
+  base::Optional<int32_t> GetDownstreamThroughputKbps() const override;
+  void AddRTTAndThroughputEstimatesObserver(
+      net::RTTAndThroughputEstimatesObserver* observer) override;
+  void RemoveRTTAndThroughputEstimatesObserver(
+      net::RTTAndThroughputEstimatesObserver* observer) override;
 
   // Registers the profile-specific network quality estimator prefs.
   static void RegisterProfilePrefs(PrefRegistrySimple* registry);
@@ -69,8 +74,12 @@ class UINetworkQualityEstimatorService
   // Notifies |observer| of the current effective connection type if |observer|
   // is still registered as an observer.
   void NotifyEffectiveConnectionTypeObserverIfPresent(
-      net::NetworkQualityEstimator::EffectiveConnectionTypeObserver* observer)
-      const;
+      net::EffectiveConnectionTypeObserver* observer) const;
+
+  // Notifies |observer| of the current effective connection type if |observer|
+  // is still registered as an observer.
+  void NotifyRTTAndThroughputObserverIfPresent(
+      net::RTTAndThroughputEstimatesObserver* observer) const;
 
   // KeyedService implementation:
   void Shutdown() override;
@@ -81,17 +90,31 @@ class UINetworkQualityEstimatorService
   // reported by NetworkchangeNotifier::GetConnectionType.
   void EffectiveConnectionTypeChanged(net::EffectiveConnectionType type);
 
+  // Called when the estimated HTTP RTT, estimated transport RTT or estimated
+  // downstream throughput is computed.
+  void RTTOrThroughputComputed(base::TimeDelta http_rtt,
+                               base::TimeDelta transport_rtt,
+                               int32_t downstream_throughput_kbps);
+
   // The current EffectiveConnectionType.
   net::EffectiveConnectionType type_;
+
+  // Current network quality metrics.
+  base::TimeDelta http_rtt_;
+  base::TimeDelta transport_rtt_;
+  int32_t downstream_throughput_kbps_;
 
   // IO thread based observer that is owned by this service. Created on the UI
   // thread, but used and deleted on the IO thread.
   std::unique_ptr<IONetworkQualityObserver> io_observer_;
 
   // Observer list for changes in effective connection type.
-  base::ObserverList<
-      net::NetworkQualityEstimator::EffectiveConnectionTypeObserver>
+  base::ObserverList<net::EffectiveConnectionTypeObserver>
       effective_connection_type_observer_list_;
+
+  // Observer list for changes in RTT or throughput values.
+  base::ObserverList<net::RTTAndThroughputEstimatesObserver>
+      rtt_throughput_observer_list_;
 
   // Prefs manager that is owned by this service. Created on the UI thread, but
   // used and deleted on the IO thread.

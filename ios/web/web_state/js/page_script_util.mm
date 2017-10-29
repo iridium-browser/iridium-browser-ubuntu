@@ -8,6 +8,7 @@
 #include "base/files/file_util.h"
 #include "base/mac/bundle_locations.h"
 #include "base/strings/sys_string_conversions.h"
+#include "ios/web/public/browser_state.h"
 #import "ios/web/public/web_client.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -27,14 +28,16 @@ NSString* GetPageScript(NSString* script_file_name) {
   NSString* content = [NSString stringWithContentsOfFile:path
                                                 encoding:NSUTF8StringEncoding
                                                    error:&error];
-  DCHECK(!error) << "Error fetching script: " << [error.description UTF8String];
+  DCHECK(!error) << "Error fetching script: "
+                 << base::SysNSStringToUTF8(error.description);
   DCHECK(content);
   return content;
 }
 
-NSString* GetEarlyPageScript() {
+NSString* GetEarlyPageScript(BrowserState* browser_state) {
   DCHECK(GetWebClient());
-  NSString* embedder_page_script = GetWebClient()->GetEarlyPageScript();
+  NSString* embedder_page_script =
+      GetWebClient()->GetEarlyPageScript(browser_state);
   DCHECK(embedder_page_script);
 
   // Make sure that script is injected only once. For example, content of
@@ -45,9 +48,16 @@ NSString* GetEarlyPageScript() {
   // JS to the native code. Wrapping injected script into "if (!injected)" check
   // prevents multiple injections into the same page.
   NSString* kScriptTemplate = @"if (typeof __gCrWeb !== 'object') { %@; %@ }";
-  return [NSString stringWithFormat:kScriptTemplate,
-                                    GetPageScript(@"web_bundle"),
-                                    embedder_page_script];
+
+  NSString* web_bundle = GetPageScript(@"web_bundle");
+  // The WKBackForwardList based navigation manager doesn't need to inject
+  // JavaScript to intercept navigation calls.
+  if (!GetWebClient()->IsSlimNavigationManagerEnabled()) {
+    web_bundle = [NSString
+        stringWithFormat:@"%@; %@", web_bundle, GetPageScript(@"nav_bundle")];
+  }
+  return [NSString
+      stringWithFormat:kScriptTemplate, web_bundle, embedder_page_script];
 }
 
 }  // namespace web

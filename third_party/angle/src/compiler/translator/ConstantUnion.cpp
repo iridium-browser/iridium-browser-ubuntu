@@ -72,6 +72,36 @@ TConstantUnion::TConstantUnion()
     type   = EbtVoid;
 }
 
+int TConstantUnion::getIConst() const
+{
+    ASSERT(type == EbtInt);
+    return iConst;
+}
+
+unsigned int TConstantUnion::getUConst() const
+{
+    ASSERT(type == EbtUInt);
+    return uConst;
+}
+
+float TConstantUnion::getFConst() const
+{
+    ASSERT(type == EbtFloat);
+    return fConst;
+}
+
+bool TConstantUnion::getBConst() const
+{
+    ASSERT(type == EbtBool);
+    return bConst;
+}
+
+TYuvCscStandardEXT TConstantUnion::getYuvCscStandardEXTConst() const
+{
+    ASSERT(type == EbtYuvCscStandardEXT);
+    return yuvCscStandardEXTConst;
+}
+
 bool TConstantUnion::cast(TBasicType newType, const TConstantUnion &constant)
 {
     switch (newType)
@@ -198,6 +228,11 @@ bool TConstantUnion::operator==(const bool b) const
     return b == bConst;
 }
 
+bool TConstantUnion::operator==(const TYuvCscStandardEXT s) const
+{
+    return s == yuvCscStandardEXTConst;
+}
+
 bool TConstantUnion::operator==(const TConstantUnion &constant) const
 {
     if (constant.type != type)
@@ -213,6 +248,8 @@ bool TConstantUnion::operator==(const TConstantUnion &constant) const
             return constant.fConst == fConst;
         case EbtBool:
             return constant.bConst == bConst;
+        case EbtYuvCscStandardEXT:
+            return constant.yuvCscStandardEXTConst == yuvCscStandardEXTConst;
         default:
             return false;
     }
@@ -236,6 +273,11 @@ bool TConstantUnion::operator!=(const float f) const
 bool TConstantUnion::operator!=(const bool b) const
 {
     return !operator==(b);
+}
+
+bool TConstantUnion::operator!=(const TYuvCscStandardEXT s) const
+{
+    return !operator==(s);
 }
 
 bool TConstantUnion::operator!=(const TConstantUnion &constant) const

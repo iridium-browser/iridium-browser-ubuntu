@@ -24,9 +24,10 @@
 #define ImageResourceObserver_h
 
 #include "core/CoreExport.h"
+#include "core/style/StyleImage.h"
 #include "platform/graphics/ImageAnimationPolicy.h"
-#include "platform/network/ResourceLoadPriority.h"
-#include "wtf/Forward.h"
+#include "platform/loader/fetch/ResourceLoadPriority.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -40,11 +41,15 @@ class CORE_EXPORT ImageResourceObserver {
   // Called whenever a frame of an image changes, either because we got more
   // data from the network or because we are animating. If not null, the IntRect
   // is the changed rect of the image.
-  virtual void imageChanged(ImageResourceContent*, const IntRect* = 0) {}
+  virtual void ImageChanged(ImageResourceContent*, const IntRect* = nullptr) {}
+
+  // Sub-classes that have an associated image need to override this function
+  // to get notified of any image change.
+  virtual void ImageChanged(WrappedImagePtr, const IntRect* = nullptr) {}
 
   // Called just after imageChanged() if all image data is received or errored.
   // TODO(hiroshige): Merge imageNotifyFinished() into imageChanged().
-  virtual void imageNotifyFinished(ImageResourceContent*) {}
+  virtual void ImageNotifyFinished(ImageResourceContent*) {}
 
   // Called to find out if this client wants to actually display the image. Used
   // to tell when we can halt animation. Content nodes that hold image refs for
@@ -54,22 +59,22 @@ class CORE_EXPORT ImageResourceObserver {
   //
   // An implementation of this method is not allowed to add or remove
   // ImageResource observers.
-  virtual bool willRenderImage() { return false; }
+  virtual bool WillRenderImage() { return false; }
 
   // Called to get imageAnimation policy from settings. An implementation of
   // this method is not allowed to add or remove ImageResource observers.
-  virtual bool getImageAnimationPolicy(ImageAnimationPolicy&) { return false; }
+  virtual bool GetImageAnimationPolicy(ImageAnimationPolicy&) { return false; }
 
   // Return the observer's requested resource priority. An implementation of
   // this method is not allowed to add or remove ImageResource observers.
-  virtual ResourcePriority computeResourcePriority() const {
+  virtual ResourcePriority ComputeResourcePriority() const {
     return ResourcePriority();
   }
 
   // Name for debugging, e.g. shown in memory-infra.
-  virtual String debugName() const = 0;
+  virtual String DebugName() const = 0;
 
-  static bool isExpectedType(ImageResourceObserver*) { return true; }
+  static bool IsExpectedType(ImageResourceObserver*) { return true; }
 };
 
 }  // namespace blink

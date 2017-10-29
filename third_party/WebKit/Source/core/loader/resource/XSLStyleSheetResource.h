@@ -27,40 +27,44 @@
 #define XSLStyleSheetResource_h
 
 #include "core/loader/resource/StyleSheetResource.h"
+#include "platform/loader/fetch/TextResourceDecoderOptions.h"
 
 namespace blink {
 
-class FetchRequest;
+class FetchParameters;
 class ResourceFetcher;
 
 class XSLStyleSheetResource final : public StyleSheetResource {
  public:
-  static XSLStyleSheetResource* fetchSynchronously(FetchRequest&,
+  static XSLStyleSheetResource* FetchSynchronously(FetchParameters&,
                                                    ResourceFetcher*);
-  static XSLStyleSheetResource* fetch(FetchRequest&, ResourceFetcher*);
+  static XSLStyleSheetResource* Fetch(FetchParameters&, ResourceFetcher*);
 
-  const String& sheet() const { return m_sheet; }
+  const String& Sheet() const { return sheet_; }
 
-  void didAddClient(ResourceClient*) override;
+  void DidAddClient(ResourceClient*) override;
 
  private:
   class XSLStyleSheetResourceFactory : public ResourceFactory {
    public:
-    XSLStyleSheetResourceFactory() : ResourceFactory(Resource::XSLStyleSheet) {}
+    XSLStyleSheetResourceFactory()
+        : ResourceFactory(Resource::kXSLStyleSheet,
+                          TextResourceDecoderOptions::kXMLContent) {}
 
-    Resource* create(const ResourceRequest& request,
-                     const ResourceLoaderOptions& options,
-                     const String& charset) const override {
-      return new XSLStyleSheetResource(request, options, charset);
+    Resource* Create(
+        const ResourceRequest& request,
+        const ResourceLoaderOptions& options,
+        const TextResourceDecoderOptions& decoder_options) const override {
+      return new XSLStyleSheetResource(request, options, decoder_options);
     }
   };
   XSLStyleSheetResource(const ResourceRequest&,
                         const ResourceLoaderOptions&,
-                        const String& charset);
+                        const TextResourceDecoderOptions&);
 
-  void checkNotify() override;
+  void CheckNotify() override;
 
-  String m_sheet;
+  String sheet_;
 };
 
 DEFINE_RESOURCE_TYPE_CASTS(XSLStyleSheet);

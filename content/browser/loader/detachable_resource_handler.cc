@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "content/browser/loader/null_resource_controller.h"
 #include "content/browser/loader/resource_controller.h"
@@ -36,7 +37,7 @@ class DetachableResourceHandler::Controller : public ResourceController {
   // ResourceController implementation:
   void Resume() override {
     MarkAsUsed();
-    detachable_handler_->Resume();
+    detachable_handler_->ResumeInternal();
   }
 
   void Cancel() override {
@@ -78,6 +79,8 @@ DetachableResourceHandler::DetachableResourceHandler(
     : ResourceHandler(request),
       next_handler_(std::move(next_handler)),
       cancel_delay_(cancel_delay),
+      parent_read_buffer_(nullptr),
+      parent_read_buffer_size_(nullptr),
       is_finished_(false) {
   GetRequestInfo()->set_detachable_handler(this);
 }
@@ -134,6 +137,23 @@ void DetachableResourceHandler::Detach() {
     // The nested ResourceHandler may have logged that it's blocking the
     // request.  Log it as no longer doing so, to avoid a DCHECK on resume.
     request()->LogUnblocked();
+
+    // If in the middle of an OnWillRead call, need to allocate the read buffer
+    // before resuming.
+    if (parent_read_buffer_) {
+      DCHECK(parent_read_buffer_size_);
+
+      scoped_refptr<net::IOBuffer>* parent_read_buffer = parent_read_buffer_;
+      int* parent_read_buffer_size = parent_read_buffer_size_;
+      parent_read_buffer_ = nullptr;
+      parent_read_buffer_size_ = nullptr;
+
+      // Will allocate the buffer and resume the request.
+      OnWillRead(parent_read_buffer, parent_read_buffer_size,
+                 ReleaseController());
+      return;
+    }
+
     Resume();
   }
 }
@@ -183,17 +203,24 @@ void DetachableResourceHandler::OnWillStart(
   next_handler_->OnWillStart(url, base::MakeUnique<Controller>(this));
 }
 
-bool DetachableResourceHandler::OnWillRead(scoped_refptr<net::IOBuffer>* buf,
-                                           int* buf_size) {
+void DetachableResourceHandler::OnWillRead(
+    scoped_refptr<net::IOBuffer>* buf,
+    int* buf_size,
+    std::unique_ptr<ResourceController> controller) {
   if (!next_handler_) {
     if (!read_buffer_.get())
       read_buffer_ = new net::IOBuffer(kReadBufSize);
     *buf = read_buffer_;
     *buf_size = kReadBufSize;
-    return true;
+    controller->Resume();
+    return;
   }
 
-  return next_handler_->OnWillRead(buf, buf_size);
+  parent_read_buffer_ = buf;
+  parent_read_buffer_size_ = buf_size;
+
+  HoldController(std::move(controller));
+  next_handler_->OnWillRead(buf, buf_size, base::MakeUnique<Controller>(this));
 }
 
 void DetachableResourceHandler::OnReadCompleted(
@@ -214,6 +241,10 @@ void DetachableResourceHandler::OnReadCompleted(
 void DetachableResourceHandler::OnResponseCompleted(
     const net::URLRequestStatus& status,
     std::unique_ptr<ResourceController> controller) {
+  UMA_HISTOGRAM_MEDIUM_TIMES(
+      "Net.DetachableResourceHandler.Duration",
+      base::TimeTicks::Now() - request()->creation_time());
+
   // No DCHECK(!is_deferred_) as the request may have been cancelled while
   // deferred.
 
@@ -234,6 +265,12 @@ void DetachableResourceHandler::OnDataDownloaded(int bytes_downloaded) {
     return;
 
   next_handler_->OnDataDownloaded(bytes_downloaded);
+}
+
+void DetachableResourceHandler::ResumeInternal() {
+  parent_read_buffer_ = nullptr;
+  parent_read_buffer_size_ = nullptr;
+  Resume();
 }
 
 void DetachableResourceHandler::OnTimedOut() {

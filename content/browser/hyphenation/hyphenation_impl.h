@@ -18,9 +18,11 @@ class HyphenationImpl : public blink::mojom::Hyphenation {
 
   static void Create(blink::mojom::HyphenationRequest);
 
+  static scoped_refptr<base::SequencedTaskRunner> GetTaskRunner();
+
   // Hyphenation:
   void OpenDictionary(const std::string& locale,
-                      const OpenDictionaryCallback& callback) override;
+                      OpenDictionaryCallback callback) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HyphenationImpl);

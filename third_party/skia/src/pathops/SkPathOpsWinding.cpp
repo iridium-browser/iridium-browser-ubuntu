@@ -101,7 +101,7 @@ struct SkOpRayHit {
 };
 
 void SkOpContour::rayCheck(const SkOpRayHit& base, SkOpRayDir dir, SkOpRayHit** hits,
-        SkChunkAlloc* allocator) {
+                           SkArenaAlloc* allocator) {
     // if the bounds extreme is outside the best, we're done
     SkScalar baseXY = pt_xy(base.fPt, dir);
     SkScalar boundsXY = rect_side(fBounds, dir);
@@ -116,7 +116,7 @@ void SkOpContour::rayCheck(const SkOpRayHit& base, SkOpRayDir dir, SkOpRayHit** 
 }
 
 void SkOpSegment::rayCheck(const SkOpRayHit& base, SkOpRayDir dir, SkOpRayHit** hits,
-        SkChunkAlloc* allocator) {
+                           SkArenaAlloc* allocator) {
     if (!sideways_overlap(fBounds, base.fPt, dir)) {
         return;
     }
@@ -174,7 +174,7 @@ void SkOpSegment::rayCheck(const SkOpRayHit& base, SkOpRayDir dir, SkOpRayHit** 
         } else if (!span->windValue() && !span->oppValue()) {
             continue;
         }
-        SkOpRayHit* newHit = SkOpTAllocator<SkOpRayHit>::Allocate(allocator);
+        SkOpRayHit* newHit = allocator->make<SkOpRayHit>();
         newHit->fNext = *hits;
         newHit->fPt = pt;
         newHit->fSlope = slope;
@@ -233,7 +233,7 @@ static double get_t_guess(int tTry, int* dirOffset) {
 }
 
 bool SkOpSpan::sortableTop(SkOpContour* contourHead) {
-    SkChunkAlloc allocator(1024);
+    SkSTArenaAlloc<1024> allocator;
     int dirOffset;
     double t = get_t_guess(fTopTTry++, &dirOffset);
     SkOpRayHit hitBase;

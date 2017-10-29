@@ -29,12 +29,9 @@
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "v8/include/v8.h"
-
-using content::V8ValueConverter;
 
 namespace extensions {
 
@@ -58,6 +55,8 @@ std::string GetContextTypeDescriptionString(Feature::Context context_type) {
       return "WEBUI";
     case Feature::SERVICE_WORKER_CONTEXT:
       return "SERVICE_WORKER";
+    case Feature::LOCK_SCREEN_EXTENSION_CONTEXT:
+      return "LOCK_SCREEN_EXTENSION";
   }
   NOTREACHED();
   return std::string();
@@ -179,29 +178,6 @@ content::RenderFrame* ScriptContext::GetRenderFrame() const {
   return NULL;
 }
 
-v8::Local<v8::Value> ScriptContext::CallFunction(
-    const v8::Local<v8::Function>& function,
-    int argc,
-    v8::Local<v8::Value> argv[]) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  v8::EscapableHandleScope handle_scope(isolate());
-  v8::Context::Scope scope(v8_context());
-
-  v8::MicrotasksScope microtasks(
-      isolate(), v8::MicrotasksScope::kDoNotRunMicrotasks);
-  if (!is_valid_) {
-    return handle_scope.Escape(
-        v8::Local<v8::Primitive>(v8::Undefined(isolate())));
-  }
-
-  v8::Local<v8::Object> global = v8_context()->Global();
-  if (!web_frame_)
-    return handle_scope.Escape(function->Call(global, argc, argv));
-  return handle_scope.Escape(
-      v8::Local<v8::Value>(web_frame_->callFunctionEvenIfScriptDisabled(
-          function, global, argc, argv)));
-}
-
 void ScriptContext::SafeCallFunction(const v8::Local<v8::Function>& function,
                                      int argc,
                                      v8::Local<v8::Value> argv[]) {
@@ -226,7 +202,7 @@ void ScriptContext::SafeCallFunction(
       // ScriptInjectionCallback manages its own lifetime.
       wrapper_callback = new ScriptInjectionCallback(callback);
     }
-    web_frame_->requestExecuteV8Function(v8_context(), function, global, argc,
+    web_frame_->RequestExecuteV8Function(v8_context(), function, global, argc,
                                          argv, wrapper_callback);
   } else {
     // TODO(devlin): This probably isn't safe.
@@ -268,18 +244,6 @@ Feature::Availability ScriptContext::GetAvailability(
       api_name, extension, context_type_, url(), check_alias);
 }
 
-void ScriptContext::DispatchEvent(const char* event_name,
-                                  v8::Local<v8::Array> args) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  v8::HandleScope handle_scope(isolate());
-  v8::Context::Scope context_scope(v8_context());
-
-  v8::Local<v8::Value> argv[] = {v8::String::NewFromUtf8(isolate(), event_name),
-                                 args};
-  module_system_->CallModuleMethodSafe(kEventBindings, "dispatchEvent",
-                                       arraysize(argv), argv);
-}
-
 std::string ScriptContext::GetContextTypeDescription() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   return GetContextTypeDescriptionString(context_type_);
@@ -288,6 +252,11 @@ std::string ScriptContext::GetContextTypeDescription() const {
 std::string ScriptContext::GetEffectiveContextTypeDescription() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   return GetContextTypeDescriptionString(effective_context_type_);
+}
+
+const GURL& ScriptContext::service_worker_scope() const {
+  DCHECK_EQ(Feature::SERVICE_WORKER_CONTEXT, context_type());
+  return service_worker_scope_;
 }
 
 bool ScriptContext::IsAnyFeatureAvailableToContext(
@@ -302,7 +271,8 @@ bool ScriptContext::IsAnyFeatureAvailableToContext(
 }
 
 // static
-GURL ScriptContext::GetDataSourceURLForFrame(const blink::WebFrame* frame) {
+GURL ScriptContext::GetDataSourceURLForFrame(
+    const blink::WebLocalFrame* frame) {
   // Normally we would use frame->document().url() to determine the document's
   // URL, but to decide whether to inject a content script, we use the URL from
   // the data source. This "quirk" helps prevents content scripts from
@@ -311,30 +281,31 @@ GURL ScriptContext::GetDataSourceURLForFrame(const blink::WebFrame* frame) {
   // changes to match the parent document after Gmail document.writes into
   // it to create the editor.
   // http://code.google.com/p/chromium/issues/detail?id=86742
-  blink::WebDataSource* data_source = frame->provisionalDataSource()
-                                          ? frame->provisionalDataSource()
-                                          : frame->dataSource();
-  return data_source ? GURL(data_source->getRequest().url()) : GURL();
+  blink::WebDataSource* data_source = frame->ProvisionalDataSource()
+                                          ? frame->ProvisionalDataSource()
+                                          : frame->DataSource();
+  return data_source ? GURL(data_source->GetRequest().Url()) : GURL();
 }
 
 // static
-GURL ScriptContext::GetAccessCheckedFrameURL(const blink::WebFrame* frame) {
-  const blink::WebURL& weburl = frame->document().url();
-  if (weburl.isEmpty()) {
-    blink::WebDataSource* data_source = frame->provisionalDataSource()
-                                            ? frame->provisionalDataSource()
-                                            : frame->dataSource();
+GURL ScriptContext::GetAccessCheckedFrameURL(
+    const blink::WebLocalFrame* frame) {
+  const blink::WebURL& weburl = frame->GetDocument().Url();
+  if (weburl.IsEmpty()) {
+    blink::WebDataSource* data_source = frame->ProvisionalDataSource()
+                                            ? frame->ProvisionalDataSource()
+                                            : frame->DataSource();
     if (data_source &&
-        frame->getSecurityOrigin().canAccess(blink::WebSecurityOrigin::create(
-            data_source->getRequest().url()))) {
-      return GURL(data_source->getRequest().url());
+        frame->GetSecurityOrigin().CanAccess(blink::WebSecurityOrigin::Create(
+            data_source->GetRequest().Url()))) {
+      return GURL(data_source->GetRequest().Url());
     }
   }
   return GURL(weburl);
 }
 
 // static
-GURL ScriptContext::GetEffectiveDocumentURL(const blink::WebFrame* frame,
+GURL ScriptContext::GetEffectiveDocumentURL(blink::WebLocalFrame* frame,
                                             const GURL& document_url,
                                             bool match_about_blank) {
   // Common scenario. If |match_about_blank| is false (as is the case in most
@@ -346,23 +317,27 @@ GURL ScriptContext::GetEffectiveDocumentURL(const blink::WebFrame* frame,
   // Non-sandboxed about:blank and about:srcdoc pages inherit their security
   // origin from their parent frame/window. So, traverse the frame/window
   // hierarchy to find the closest non-about:-page and return its URL.
-  const blink::WebFrame* parent = frame;
+  blink::WebFrame* parent = frame;
+  blink::WebDocument parent_document;
   do {
-    if (parent->parent())
-      parent = parent->parent();
-    else if (parent->opener() != parent)
-      parent = parent->opener();
+    if (parent->Parent())
+      parent = parent->Parent();
+    else if (parent->Opener() != parent)
+      parent = parent->Opener();
     else
       parent = nullptr;
-  } while (parent && !parent->document().isNull() &&
-           GURL(parent->document().url()).SchemeIs(url::kAboutScheme));
 
-  if (parent && !parent->document().isNull()) {
+    parent_document = parent && parent->IsWebLocalFrame()
+                          ? parent->ToWebLocalFrame()->GetDocument()
+                          : blink::WebDocument();
+  } while (!parent_document.IsNull() &&
+           GURL(parent_document.Url()).SchemeIs(url::kAboutScheme));
+
+  if (!parent_document.IsNull()) {
     // Only return the parent URL if the frame can access it.
-    const blink::WebDocument& parent_document = parent->document();
-    if (frame->document().getSecurityOrigin().canAccess(
-            parent_document.getSecurityOrigin())) {
-      return parent_document.url();
+    if (frame->GetDocument().GetSecurityOrigin().CanAccess(
+            parent_document.GetSecurityOrigin())) {
+      return parent_document.Url();
     }
   }
   return document_url;
@@ -381,22 +356,16 @@ void ScriptContext::OnResponseReceived(const std::string& name,
   DCHECK(thread_checker_.CalledOnValidThread());
   v8::HandleScope handle_scope(isolate());
 
-  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
   v8::Local<v8::Value> argv[] = {
       v8::Integer::New(isolate(), request_id),
       v8::String::NewFromUtf8(isolate(), name.c_str()),
       v8::Boolean::New(isolate(), success),
-      converter->ToV8Value(&response,
-                           v8::Local<v8::Context>::New(isolate(), v8_context_)),
+      content::V8ValueConverter::Create()->ToV8Value(
+          &response, v8::Local<v8::Context>::New(isolate(), v8_context_)),
       v8::String::NewFromUtf8(isolate(), error.c_str())};
 
-  v8::Local<v8::Value> retval = module_system()->CallModuleMethod(
-      "sendRequest", "handleResponse", arraysize(argv), argv);
-
-  // In debug, the js will validate the callback parameters and return a
-  // string if a validation error has occured.
-  DCHECK(retval.IsEmpty() || retval->IsUndefined())
-      << *v8::String::Utf8Value(retval);
+  module_system()->CallModuleMethodSafe("sendRequest", "handleResponse",
+                                        arraysize(argv), argv);
 }
 
 bool ScriptContext::HasAPIPermission(APIPermission::ID permission) const {
@@ -542,6 +511,29 @@ v8::Local<v8::Value> ScriptContext::Runner::Call(
 gin::ContextHolder* ScriptContext::Runner::GetContextHolder() {
   v8::HandleScope handle_scope(context_->isolate());
   return gin::PerContextData::From(context_->v8_context())->context_holder();
+}
+
+v8::Local<v8::Value> ScriptContext::CallFunction(
+    const v8::Local<v8::Function>& function,
+    int argc,
+    v8::Local<v8::Value> argv[]) const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  v8::EscapableHandleScope handle_scope(isolate());
+  v8::Context::Scope scope(v8_context());
+
+  v8::MicrotasksScope microtasks(isolate(),
+                                 v8::MicrotasksScope::kDoNotRunMicrotasks);
+  if (!is_valid_) {
+    return handle_scope.Escape(
+        v8::Local<v8::Primitive>(v8::Undefined(isolate())));
+  }
+
+  v8::Local<v8::Object> global = v8_context()->Global();
+  if (!web_frame_)
+    return handle_scope.Escape(function->Call(global, argc, argv));
+  return handle_scope.Escape(
+      v8::Local<v8::Value>(web_frame_->CallFunctionEvenIfScriptDisabled(
+          function, global, argc, argv)));
 }
 
 }  // namespace extensions

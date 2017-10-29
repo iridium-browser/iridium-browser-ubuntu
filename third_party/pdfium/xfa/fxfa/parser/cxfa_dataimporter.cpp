@@ -9,28 +9,30 @@
 #include <memory>
 
 #include "core/fxcrt/fx_stream.h"
+#include "core/fxcrt/xml/cfx_xmlnode.h"
 #include "third_party/base/ptr_util.h"
-#include "xfa/fde/xml/fde_xml_imp.h"
 #include "xfa/fxfa/fxfa.h"
 #include "xfa/fxfa/fxfa_basic.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
+#include "xfa/fxfa/parser/cxfa_node.h"
 #include "xfa/fxfa/parser/cxfa_simple_parser.h"
-#include "xfa/fxfa/parser/xfa_object.h"
 
 CXFA_DataImporter::CXFA_DataImporter(CXFA_Document* pDocument)
     : m_pDocument(pDocument) {
   ASSERT(m_pDocument);
 }
 
+CXFA_DataImporter::~CXFA_DataImporter() {}
+
 bool CXFA_DataImporter::ImportData(
-    const CFX_RetainPtr<IFX_SeekableReadStream>& pDataDocument) {
+    const CFX_RetainPtr<IFX_SeekableStream>& pDataDocument) {
   auto pDataDocumentParser =
-      pdfium::MakeUnique<CXFA_SimpleParser>(m_pDocument, false);
+      pdfium::MakeUnique<CXFA_SimpleParser>(m_pDocument.Get(), false);
   if (pDataDocumentParser->StartParse(pDataDocument, XFA_XDPPACKET_Datasets) !=
       XFA_PARSESTATUS_Ready) {
     return false;
   }
-  if (pDataDocumentParser->DoParse(nullptr) < XFA_PARSESTATUS_Done)
+  if (pDataDocumentParser->DoParse() < XFA_PARSESTATUS_Done)
     return false;
 
   CXFA_Node* pImportDataRoot = pDataDocumentParser->GetRootNode();
@@ -53,8 +55,8 @@ bool CXFA_DataImporter::ImportData(
       pDataModel->InsertChild(pChildNode);
     }
   } else {
-    CFDE_XMLNode* pXMLNode = pImportDataRoot->GetXMLMappingNode();
-    CFDE_XMLNode* pParentXMLNode = pXMLNode->GetNodeItem(CFDE_XMLNode::Parent);
+    CFX_XMLNode* pXMLNode = pImportDataRoot->GetXMLMappingNode();
+    CFX_XMLNode* pParentXMLNode = pXMLNode->GetNodeItem(CFX_XMLNode::Parent);
     if (pParentXMLNode)
       pParentXMLNode->RemoveChildNode(pXMLNode);
     pDataModel->InsertChild(pImportDataRoot);

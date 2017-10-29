@@ -7,7 +7,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/mac/scoped_nsobject.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -27,6 +26,10 @@
 #include "testing/gtest_mac.h"
 #include "url/gurl.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 // When C++ exceptions are disabled, the C++ library defines |try| and
 // |catch| so as to allow exception-expecting C++ code to build properly when
 // language support for exceptions is not present.  These macros interfere
@@ -39,7 +42,6 @@
 namespace net {
 namespace {
 
-const int kResponseCode = 200;
 const char* kTextHtml = "text/html";
 const char* kTextPlain = "text/plain";
 const char* kAscii = "US-ASCII";
@@ -87,9 +89,6 @@ class HeadersURLRequestJob : public URLRequestJob {
     info->headers = new HttpResponseHeaders(header_string);
   }
 
-  int GetResponseCode() const override {
-    return kResponseCode;
-  }
  protected:
   ~HeadersURLRequestJob() override {}
 
@@ -232,8 +231,8 @@ TEST_F(ProtocolHandlerUtilTest, MultipleHttpContentType) {
 
 TEST_F(ProtocolHandlerUtilTest, CopyHttpHeaders) {
   GURL url(std::string("http://url"));
-  base::scoped_nsobject<NSMutableURLRequest> in_request(
-      [[NSMutableURLRequest alloc] initWithURL:NSURLWithGURL(url)]);
+  NSMutableURLRequest* in_request =
+      [[NSMutableURLRequest alloc] initWithURL:NSURLWithGURL(url)];
   [in_request setAllHTTPHeaderFields:@{
       @"Referer" : @"referrer",
       @"User-Agent" : @"secret",
@@ -257,8 +256,8 @@ TEST_F(ProtocolHandlerUtilTest, CopyHttpHeaders) {
 
 TEST_F(ProtocolHandlerUtilTest, AddMissingHeaders) {
   GURL url(std::string("http://url"));
-  base::scoped_nsobject<NSMutableURLRequest> in_request(
-      [[NSMutableURLRequest alloc] initWithURL:NSURLWithGURL(url)]);
+  NSMutableURLRequest* in_request =
+      [[NSMutableURLRequest alloc] initWithURL:NSURLWithGURL(url)];
   std::unique_ptr<URLRequest> out_request(
       request_context_->CreateRequest(url, DEFAULT_PRIORITY, nullptr));
   out_request->set_method("POST");

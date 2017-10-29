@@ -10,10 +10,10 @@
 #include "base/android/jni_string.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ntp_snippets/ntp_snippets_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
+#include "components/ntp_snippets/features.h"
 #include "components/prefs/pref_service.h"
 #include "components/variations/variations_associated_data.h"
 #include "jni/ContentSuggestionsNotificationHelper_jni.h"
@@ -22,9 +22,9 @@
 #include "ui/gfx/image/image_skia.h"
 
 using base::android::JavaParamRef;
-using params::ntp_snippets::kNotificationsFeature;
-using params::ntp_snippets::kNotificationsIgnoredLimitParam;
-using params::ntp_snippets::kNotificationsIgnoredDefaultLimit;
+using ntp_snippets::kNotificationsFeature;
+using ntp_snippets::kNotificationsIgnoredLimitParam;
+using ntp_snippets::kNotificationsIgnoredDefaultLimit;
 
 namespace ntp_snippets {
 
@@ -32,6 +32,10 @@ namespace {
 
 bool IsDisabledForProfile(Profile* profile) {
   PrefService* prefs = profile->GetPrefs();
+  if (!prefs->GetBoolean(prefs::kContentSuggestionsNotificationsEnabled)) {
+    return true;
+  }
+
   int current =
       prefs->GetInteger(prefs::kContentSuggestionsConsecutiveIgnoredPrefName);
   int limit = variations::GetVariationParamByFeatureAsInt(
@@ -101,9 +105,18 @@ bool ContentSuggestionsNotificationHelper::IsDisabledForProfile(
   return ntp_snippets::IsDisabledForProfile(profile);
 }
 
-// static
-bool ContentSuggestionsNotificationHelper::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
+static void RecordNotificationOptOut(JNIEnv* env,
+                                     const JavaParamRef<jclass>& class_object,
+                                     jint reason) {
+  RecordContentSuggestionsNotificationOptOut(
+      static_cast<ContentSuggestionsNotificationOptOut>(reason));
+}
+
+static void RecordNotificationAction(JNIEnv* env,
+                                     const JavaParamRef<jclass>& class_object,
+                                     jint action) {
+  RecordContentSuggestionsNotificationAction(
+      static_cast<ContentSuggestionsNotificationAction>(action));
 }
 
 static void ReceiveFlushedMetrics(JNIEnv* env,

@@ -43,16 +43,20 @@ extern "C" {
 #define SAFEBUFFERS
 #endif
 
+// cpu_info_ variable for SIMD instruction sets detected.
+LIBYUV_API int cpu_info_ = 0;
+
+// TODO(fbarchard): Consider using int for cpuid so casting is not needed.
 // Low level cpuid for X86.
 #if (defined(_M_IX86) || defined(_M_X64) || defined(__i386__) || \
      defined(__x86_64__)) &&                                     \
     !defined(__pnacl__) && !defined(__CLR_VER)
 LIBYUV_API
-void CpuId(uint32 info_eax, uint32 info_ecx, uint32* cpu_info) {
+void CpuId(int info_eax, int info_ecx, int* cpu_info) {
 #if defined(_MSC_VER)
 // Visual C version uses intrinsic or inline x86 assembly.
 #if defined(_MSC_FULL_VER) && (_MSC_FULL_VER >= 160040219)
-  __cpuidex((int*)(cpu_info), info_eax, info_ecx);
+  __cpuidex(cpu_info, info_eax, info_ecx);
 #elif defined(_M_IX86)
   __asm {
     mov        eax, info_eax
@@ -66,14 +70,14 @@ void CpuId(uint32 info_eax, uint32 info_ecx, uint32* cpu_info) {
   }
 #else  // Visual C but not x86
   if (info_ecx == 0) {
-    __cpuid((int*)(cpu_info), info_eax);
+    __cpuid(cpu_info, info_eax);
   } else {
     cpu_info[3] = cpu_info[2] = cpu_info[1] = cpu_info[0] = 0u;
   }
 #endif
 // GCC version uses inline x86 assembly.
 #else  // defined(_MSC_VER)
-  uint32 info_ebx, info_edx;
+  int info_ebx, info_edx;
   asm volatile(
 #if defined(__i386__) && defined(__PIC__)
       // Preserve ebx for fpic 32 bit.
@@ -94,7 +98,7 @@ void CpuId(uint32 info_eax, uint32 info_ecx, uint32* cpu_info) {
 }
 #else  // (defined(_M_IX86) || defined(_M_X64) ...
 LIBYUV_API
-void CpuId(uint32 eax, uint32 ecx, uint32* cpu_info) {
+void CpuId(int eax, int ecx, int* cpu_info) {
   (void)eax;
   (void)ecx;
   cpu_info[0] = cpu_info[1] = cpu_info[2] = cpu_info[3] = 0;
@@ -118,9 +122,9 @@ void CpuId(uint32 eax, uint32 ecx, uint32* cpu_info) {
     !defined(__pnacl__) && !defined(__CLR_VER) && !defined(__native_client__)
 // X86 CPUs have xgetbv to detect OS saves high parts of ymm registers.
 int GetXCR0() {
-  uint32 xcr0 = 0u;
+  int xcr0 = 0;
 #if defined(_MSC_FULL_VER) && (_MSC_FULL_VER >= 160040219)
-  xcr0 = (uint32)(_xgetbv(0));  // VS2010 SP1 required.
+  xcr0 = _xgetbv(0);  // VS2010 SP1 required.
 #elif defined(__i386__) || defined(__x86_64__)
   asm(".byte 0x0f, 0x01, 0xd0" : "=a"(xcr0) : "c"(0) : "%edx");
 #endif  // defined(__i386__) || defined(__x86_64__)
@@ -154,7 +158,7 @@ LIBYUV_API SAFEBUFFERS int ArmCpuCaps(const char* cpuinfo_name) {
       }
       // aarch64 uses asimd for Neon.
       p = strstr(cpuinfo_line, " asimd");
-      if (p && (p[6] == ' ' || p[6] == '\n')) {
+      if (p) {
         fclose(f);
         return kCpuHasNEON;
       }
@@ -164,10 +168,11 @@ LIBYUV_API SAFEBUFFERS int ArmCpuCaps(const char* cpuinfo_name) {
   return 0;
 }
 
+// TODO(fbarchard): Consider read_msa_ir().
+// TODO(fbarchard): Add unittest.
 LIBYUV_API SAFEBUFFERS int MipsCpuCaps(const char* cpuinfo_name,
                                        const char ase[]) {
   char cpuinfo_line[512];
-  int len = (int)strlen(ase);
   FILE* f = fopen(cpuinfo_name, "r");
   if (!f) {
     // ase enabled if /proc/cpuinfo is unavailable.
@@ -179,7 +184,7 @@ LIBYUV_API SAFEBUFFERS int MipsCpuCaps(const char* cpuinfo_name,
   while (fgets(cpuinfo_line, sizeof(cpuinfo_line) - 1, f)) {
     if (memcmp(cpuinfo_line, "ASEs implemented", 16) == 0) {
       char* p = strstr(cpuinfo_line, ase);
-      if (p && (p[len] == ' ' || p[len] == '\n')) {
+      if (p) {
         fclose(f);
         if (strcmp(ase, " msa") == 0) {
           return kCpuHasMSA;
@@ -191,10 +196,6 @@ LIBYUV_API SAFEBUFFERS int MipsCpuCaps(const char* cpuinfo_name,
   fclose(f);
   return 0;
 }
-
-// CPU detect function for SIMD instruction sets.
-LIBYUV_API
-int cpu_info_ = 0;  // cpu_info is not initialized yet.
 
 // Test environment variable for disabling CPU features. Any non-zero value
 // to disable. Zero ignored to make it easy to set the variable on/off.
@@ -215,12 +216,12 @@ static LIBYUV_BOOL TestEnv(const char*) {
 }
 #endif
 
-LIBYUV_API SAFEBUFFERS int InitCpuFlags(void) {
+static SAFEBUFFERS int GetCpuFlags(void) {
   int cpu_info = 0;
 #if !defined(__pnacl__) && !defined(__CLR_VER) && defined(CPU_X86)
-  uint32 cpu_info0[4] = {0, 0, 0, 0};
-  uint32 cpu_info1[4] = {0, 0, 0, 0};
-  uint32 cpu_info7[4] = {0, 0, 0, 0};
+  int cpu_info0[4] = {0, 0, 0, 0};
+  int cpu_info1[4] = {0, 0, 0, 0};
+  int cpu_info7[4] = {0, 0, 0, 0};
   CpuId(0, 0, cpu_info0);
   CpuId(1, 0, cpu_info1);
   if (cpu_info0[0] >= 7) {
@@ -321,14 +322,24 @@ LIBYUV_API SAFEBUFFERS int InitCpuFlags(void) {
     cpu_info = 0;
   }
   cpu_info |= kCpuInitialized;
-  cpu_info_ = cpu_info;
   return cpu_info;
 }
 
 // Note that use of this function is not thread safe.
 LIBYUV_API
-void MaskCpuFlags(int enable_flags) {
-  cpu_info_ = InitCpuFlags() & enable_flags;
+int MaskCpuFlags(int enable_flags) {
+  int cpu_info = GetCpuFlags() & enable_flags;
+#ifdef __ATOMIC_RELAXED
+  __atomic_store_n(&cpu_info_, cpu_info, __ATOMIC_RELAXED);
+#else
+  cpu_info_ = cpu_info;
+#endif
+  return cpu_info;
+}
+
+LIBYUV_API
+int InitCpuFlags(void) {
+  return MaskCpuFlags(-1);
 }
 
 #ifdef __cplusplus

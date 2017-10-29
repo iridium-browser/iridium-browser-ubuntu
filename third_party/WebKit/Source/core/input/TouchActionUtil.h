@@ -6,14 +6,14 @@
 #define TouchActionUtil_h
 
 #include "core/CoreExport.h"
-#include "core/style/ComputedStyleConstants.h"
+#include "platform/graphics/TouchAction.h"
 
 namespace blink {
 
 class Node;
 
 namespace TouchActionUtil {
-CORE_EXPORT TouchAction computeEffectiveTouchAction(const Node&);
+CORE_EXPORT TouchAction ComputeEffectiveTouchAction(const Node&);
 }  // namespace TouchActionUtil
 
 }  // namespace blink

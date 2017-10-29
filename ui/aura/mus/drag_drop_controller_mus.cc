@@ -50,7 +50,7 @@ struct DragDropControllerMus::CurrentDragState {
   // OSExchangeData supplied to StartDragAndDrop().
   const ui::OSExchangeData& drag_data;
 
-  // StartDragDrop() runs a nested message loop. This closure is used to quit
+  // StartDragDrop() runs a nested run loop. This closure is used to quit
   // the run loop when the drag completes.
   base::Closure runloop_quit_closure;
 };
@@ -133,27 +133,34 @@ int DragDropControllerMus::StartDragAndDrop(
     ui::DragDropTypes::DragEventSource source) {
   DCHECK(!current_drag_state_);
 
-  // TODO(erg): Pass |cursor_location| and |bitmap| in PerformDragDrop() when
-  // we start showing an image representation of the drag under he cursor.
-
   base::RunLoop run_loop;
-  WindowMus* source_window_mus = WindowMus::Get(source_window);
+  WindowMus* root_window_mus = WindowMus::Get(root_window);
   const uint32_t change_id =
-      drag_drop_controller_host_->CreateChangeIdForDrag(source_window_mus);
-  CurrentDragState current_drag_state = {source_window_mus->server_id(),
+      drag_drop_controller_host_->CreateChangeIdForDrag(root_window_mus);
+  CurrentDragState current_drag_state = {root_window_mus->server_id(),
                                          change_id, ui::mojom::kDropEffectNone,
                                          data, run_loop.QuitClosure()};
   base::AutoReset<CurrentDragState*> resetter(&current_drag_state_,
                                               &current_drag_state);
-  std::map<std::string, std::vector<uint8_t>> drag_data =
-      static_cast<const aura::OSExchangeDataProviderMus&>(data.provider())
-          .GetData();
-  window_tree_->PerformDragDrop(change_id, source_window_mus->server_id(),
-                                mojo::MapToUnorderedMap(drag_data),
-                                drag_operations);
 
   base::MessageLoop* loop = base::MessageLoop::current();
   base::MessageLoop::ScopedNestableTaskAllower allow_nested(loop);
+
+  ui::mojom::PointerKind mojo_source = ui::mojom::PointerKind::MOUSE;
+  if (source != ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE) {
+    // TODO(erg): This collapses both touch and pen events to touch.
+    mojo_source = ui::mojom::PointerKind::TOUCH;
+  }
+
+  std::map<std::string, std::vector<uint8_t>> drag_data =
+      static_cast<const aura::OSExchangeDataProviderMus&>(data.provider())
+          .GetData();
+  window_tree_->PerformDragDrop(
+      change_id, root_window_mus->server_id(), screen_location,
+      mojo::MapToUnorderedMap(drag_data),
+      *data.provider().GetDragImage().bitmap(),
+      data.provider().GetDragImageOffset(), drag_operations, mojo_source);
+
   run_loop.Run();
 
   return current_drag_state.completed_action;
@@ -209,6 +216,7 @@ DragDropControllerMus::CreateDropTargetEvent(Window* window,
                               : *(os_exchange_data_.get()),
           location, root_location, effect_bitmask);
   event->set_flags(event_flags);
+  ui::Event::DispatcherApi(event.get()).set_target(window);
   return event;
 }
 

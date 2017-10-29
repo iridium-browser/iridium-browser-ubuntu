@@ -16,12 +16,13 @@ namespace extensions {
 
 namespace networking_private {
 
+extern const char kErrorAccessToSharedConfig[];
 extern const char kErrorInvalidNetworkGuid[];
 extern const char kErrorInvalidNetworkOperation[];
 extern const char kErrorNetworkUnavailable[];
-extern const char kErrorEncryptionError[];
 extern const char kErrorNotReady[];
 extern const char kErrorNotSupported[];
+extern const char kErrorPolicyControlled[];
 extern const char kErrorSimLocked[];
 
 }  // namespace networking_private
@@ -297,7 +298,7 @@ class NetworkingPrivateStartConnectFunction : public UIThreadExtensionFunction {
 
  private:
   void Success();
-  void Failure(const std::string& error);
+  void Failure(const std::string& guid, const std::string& error);
 
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateStartConnectFunction);
 };
@@ -525,6 +526,23 @@ class NetworkingPrivateGetGlobalPolicyFunction
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateGetGlobalPolicyFunction);
+};
+
+class NetworkingPrivateGetCertificateListsFunction
+    : public UIThreadExtensionFunction {
+ public:
+  NetworkingPrivateGetCertificateListsFunction() {}
+  DECLARE_EXTENSION_FUNCTION("networkingPrivate.getCertificateLists",
+                             NETWORKINGPRIVATE_GETCERTIFICATELISTS);
+
+ protected:
+  ~NetworkingPrivateGetCertificateListsFunction() override;
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateGetCertificateListsFunction);
 };
 
 }  // namespace extensions

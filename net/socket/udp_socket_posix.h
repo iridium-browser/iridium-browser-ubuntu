@@ -12,7 +12,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/threading/thread_checker.h"
 #include "net/base/address_family.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
@@ -31,7 +31,7 @@ class IPAddress;
 class NetLog;
 struct NetLogSource;
 
-class NET_EXPORT UDPSocketPosix : public base::NonThreadSafe {
+class NET_EXPORT UDPSocketPosix {
  public:
   UDPSocketPosix(DatagramSocket::BindType bind_type,
                  const RandIntCallback& rand_int_cb,
@@ -133,14 +133,13 @@ class NET_EXPORT UDPSocketPosix : public base::NonThreadSafe {
 
   const NetLogWithSource& NetLog() const { return net_log_; }
 
-  // Sets corresponding flags in |socket_options_| to allow the socket
-  // to share the local address to which the socket will be bound with
-  // other processes. Should be called between Open() and Bind().
+  // Call this to enable SO_REUSEADDR on the underlying socket.
+  // Should be called between Open() and Bind().
   // Returns a net error code.
   int AllowAddressReuse();
 
-  // Sets corresponding flags in |socket_options_| to allow or disallow sending
-  // and receiving packets to and from broadcast addresses.
+  // Call this to allow or disallow sending and receiving packets to and from
+  // broadcast addresses.
   // Returns a net error code.
   int SetBroadcast(bool broadcast);
 
@@ -321,6 +320,8 @@ class NET_EXPORT UDPSocketPosix : public base::NonThreadSafe {
 
   // Network that this socket is bound to via BindToNetwork().
   NetworkChangeNotifier::NetworkHandle bound_network_;
+
+  THREAD_CHECKER(thread_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(UDPSocketPosix);
 };

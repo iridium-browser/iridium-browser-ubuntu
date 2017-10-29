@@ -13,6 +13,7 @@ component("init") {
 
   sources = [
     "gl_factory.cc",
+    "gl_factory.h",
     "gl_init_export.h",
     "gl_initializer.h",
   ]
@@ -48,13 +49,21 @@ component("init") {
     ]
 
     libs = [ "OpenGL.framework" ]
+  } else if (is_fuchsia) {
+    sources += [
+      "gl_factory_fuchsia.cc",
+      "gl_initializer_fuchsia.cc",
+    ]
   } else if (use_x11) {
     sources += [
       "gl_factory_x11.cc",
       "gl_initializer_x11.cc",
     ]
 
-    deps += [ "//ui/gfx/x" ]
+    deps += [
+      "//ui/gfx/x",
+      "//ui/gl:gl_features",
+    ]
   } else if (use_ozone) {
     sources += [
       "gl_factory_ozone.cc",

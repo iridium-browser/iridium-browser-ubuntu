@@ -23,8 +23,10 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://www.khronos.org/registry/webgl/extensions/EXT_frag_depth/
+
 [
     DependentLifetime,
-    NoInterfaceObject,
+    NoInterfaceObject
 ] interface EXTFragDepth {
 };

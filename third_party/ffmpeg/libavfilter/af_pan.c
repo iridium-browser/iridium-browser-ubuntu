@@ -115,6 +115,11 @@ static av_cold int init(AVFilterContext *ctx)
     if (!args)
         return AVERROR(ENOMEM);
     arg = av_strtok(args, "|", &tokenizer);
+    if (!arg) {
+        av_log(ctx, AV_LOG_ERROR, "Channel layout not specified\n");
+        ret = AVERROR(EINVAL);
+        goto fail;
+    }
     ret = ff_parse_channel_layout(&pan->out_channel_layout,
                                   &pan->nb_output_channels, arg, ctx);
     if (ret < 0)
@@ -384,7 +389,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *insamples)
                 (void *)insamples->extended_data, n);
     av_frame_copy_props(outsamples, insamples);
     outsamples->channel_layout = outlink->channel_layout;
-    av_frame_set_channels(outsamples, outlink->channels);
+    outsamples->channels = outlink->channels;
 
     ret = ff_filter_frame(outlink, outsamples);
     av_frame_free(&insamples);

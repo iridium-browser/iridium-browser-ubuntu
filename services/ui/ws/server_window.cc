@@ -14,6 +14,7 @@
 #include "services/ui/ws/server_window_compositor_frame_sink_manager.h"
 #include "services/ui/ws/server_window_delegate.h"
 #include "services/ui/ws/server_window_observer.h"
+#include "ui/base/cursor/cursor.h"
 
 namespace ui {
 namespace ws {
@@ -30,12 +31,12 @@ ServerWindow::ServerWindow(ServerWindowDelegate* delegate,
       parent_(nullptr),
       stacking_target_(nullptr),
       transient_parent_(nullptr),
-      is_modal_(false),
+      modal_type_(MODAL_TYPE_NONE),
       visible_(false),
-      // Default to POINTER as CURSOR_NULL doesn't change the cursor, it leaves
+      // Default to kPointer as kNull doesn't change the cursor, it leaves
       // the last non-null cursor.
-      cursor_id_(mojom::Cursor::POINTER),
-      non_client_cursor_id_(mojom::Cursor::POINTER),
+      cursor_(ui::CursorType::kPointer),
+      non_client_cursor_(ui::CursorType::kPointer),
       opacity_(1),
       can_focus_(true),
       properties_(properties),
@@ -87,8 +88,8 @@ bool ServerWindow::HasObserver(ServerWindowObserver* observer) {
 
 void ServerWindow::CreateRootCompositorFrameSink(
     gfx::AcceleratedWidget widget,
-    cc::mojom::MojoCompositorFrameSinkAssociatedRequest sink_request,
-    cc::mojom::MojoCompositorFrameSinkClientPtr client,
+    cc::mojom::CompositorFrameSinkAssociatedRequest sink_request,
+    cc::mojom::CompositorFrameSinkClientPtr client,
     cc::mojom::DisplayPrivateAssociatedRequest display_request) {
   GetOrCreateCompositorFrameSinkManager()->CreateRootCompositorFrameSink(
       widget, std::move(sink_request), std::move(client),
@@ -96,8 +97,8 @@ void ServerWindow::CreateRootCompositorFrameSink(
 }
 
 void ServerWindow::CreateCompositorFrameSink(
-    cc::mojom::MojoCompositorFrameSinkRequest request,
-    cc::mojom::MojoCompositorFrameSinkClientPtr client) {
+    cc::mojom::CompositorFrameSinkRequest request,
+    cc::mojom::CompositorFrameSinkClientPtr client) {
   GetOrCreateCompositorFrameSinkManager()->CreateCompositorFrameSink(
       std::move(request), std::move(client));
 }
@@ -172,13 +173,16 @@ void ServerWindow::StackChildAtTop(ServerWindow* child) {
   child->Reorder(children_.back(), mojom::OrderDirection::ABOVE);
 }
 
-void ServerWindow::SetBounds(const gfx::Rect& bounds) {
-  if (bounds_ == bounds)
+void ServerWindow::SetBounds(
+    const gfx::Rect& bounds,
+    const base::Optional<viz::LocalSurfaceId>& local_surface_id) {
+  if (bounds_ == bounds && current_local_surface_id_ == local_surface_id)
     return;
 
-  // TODO(fsamuel): figure out how will this work with CompositorFrames.
-
   const gfx::Rect old_bounds = bounds_;
+
+  current_local_surface_id_ = local_surface_id;
+
   bounds_ = bounds;
   for (auto& observer : observers_)
     observer.OnWindowBoundsChanged(this, old_bounds, bounds);
@@ -228,10 +232,6 @@ ServerWindow* ServerWindow::GetChildWindow(const WindowId& window_id) {
 }
 
 bool ServerWindow::AddTransientWindow(ServerWindow* child) {
-  // A system modal window cannot become a transient child.
-  if (child->is_modal() && !child->transient_parent())
-    return false;
-
   if (child->transient_parent())
     child->transient_parent()->RemoveTransientWindow(child);
 
@@ -268,8 +268,8 @@ void ServerWindow::RemoveTransientWindow(ServerWindow* child) {
     observer.OnTransientWindowRemoved(this, child);
 }
 
-void ServerWindow::SetModal() {
-  is_modal_ = true;
+void ServerWindow::SetModalType(ModalType modal_type) {
+  modal_type_ = modal_type;
 }
 
 bool ServerWindow::Contains(const ServerWindow* window) const {
@@ -300,27 +300,30 @@ void ServerWindow::SetOpacity(float value) {
     observer.OnWindowOpacityChanged(this, old_opacity, opacity_);
 }
 
-void ServerWindow::SetPredefinedCursor(ui::mojom::Cursor value) {
-  if (value == cursor_id_)
+void ServerWindow::SetCursor(ui::CursorData value) {
+  if (cursor_.IsSameAs(value))
     return;
-  cursor_id_ = value;
+  cursor_ = std::move(value);
   for (auto& observer : observers_)
-    observer.OnWindowPredefinedCursorChanged(this, value);
+    observer.OnWindowCursorChanged(this, cursor_);
 }
 
-void ServerWindow::SetNonClientCursor(ui::mojom::Cursor value) {
-  if (value == non_client_cursor_id_)
+void ServerWindow::SetNonClientCursor(ui::CursorData value) {
+  if (non_client_cursor_.IsSameAs(value))
     return;
-  non_client_cursor_id_ = value;
+  non_client_cursor_ = std::move(value);
   for (auto& observer : observers_)
-    observer.OnWindowNonClientCursorChanged(this, value);
+    observer.OnWindowNonClientCursorChanged(this, non_client_cursor_);
 }
 
 void ServerWindow::SetTransform(const gfx::Transform& transform) {
   if (transform_ == transform)
     return;
 
+  const gfx::Transform old_transform = transform_;
   transform_ = transform;
+  for (auto& observer : observers_)
+    observer.OnWindowTransformChanged(this, old_transform, transform);
 }
 
 void ServerWindow::SetProperty(const std::string& name,
@@ -372,6 +375,14 @@ bool ServerWindow::IsDrawn() const {
   while (window && window != root && window->visible())
     window = window->parent();
   return root == window;
+}
+
+mojom::ShowState ServerWindow::GetShowState() const {
+  auto iter = properties_.find(mojom::WindowManager::kShowState_Property);
+  if (iter == properties_.end() || iter->second.empty())
+    return mojom::ShowState::DEFAULT;
+
+  return static_cast<mojom::ShowState>(iter->second[0]);
 }
 
 ServerWindowCompositorFrameSinkManager*

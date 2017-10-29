@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/layers/layer_collections.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -21,6 +21,7 @@ namespace cc {
 
 class FilterOperations;
 class LayerImpl;
+class LayerTreeImpl;
 class RenderSurfaceImpl;
 
 // Computes the region where pixels have actually changed on a
@@ -31,17 +32,21 @@ class CC_EXPORT DamageTracker {
   static std::unique_ptr<DamageTracker> Create();
   ~DamageTracker();
 
-  void DidDrawDamagedArea() { current_damage_ = DamageAccumulator(); }
+  static void UpdateDamageTracking(
+      LayerTreeImpl* layer_tree_impl,
+      const RenderSurfaceList& render_surface_list);
+
+  void DidDrawDamagedArea() {
+    current_damage_ = DamageAccumulator();
+    has_damage_from_contributing_content_ = false;
+  }
   void AddDamageNextUpdate(const gfx::Rect& dmg) { current_damage_.Union(dmg); }
-  void UpdateDamageTrackingState(
-      const LayerImplList& layer_list,
-      const RenderSurfaceImpl* target_surface,
-      bool target_surface_property_changed_only_from_descendant,
-      const gfx::Rect& target_surface_content_rect,
-      LayerImpl* target_surface_mask_layer,
-      const FilterOperations& filters);
 
   bool GetDamageRectIfValid(gfx::Rect* rect);
+
+  bool has_damage_from_contributing_content() const {
+    return has_damage_from_contributing_content_;
+  }
 
  private:
   DamageTracker();
@@ -84,21 +89,17 @@ class CC_EXPORT DamageTracker {
     int bottom_ = 0;
   };
 
-  DamageAccumulator TrackDamageFromActiveLayers(
-      const LayerImplList& layer_list,
-      const RenderSurfaceImpl* target_surface);
   DamageAccumulator TrackDamageFromSurfaceMask(
       LayerImpl* target_surface_mask_layer);
   DamageAccumulator TrackDamageFromLeftoverRects();
-  void PrepareRectHistoryForUpdate();
 
-  // These helper functions are used only in TrackDamageFromActiveLayers().
-  void ExtendDamageForLayer(LayerImpl* layer, DamageAccumulator* target_damage);
-  void ExtendDamageForRenderSurface(RenderSurfaceImpl* render_surface,
-                                    DamageAccumulator* target_damage);
+  // These helper functions are used only during UpdateDamageTracking().
+  void PrepareForUpdate();
+  void AccumulateDamageFromLayer(LayerImpl* layer);
+  void AccumulateDamageFromRenderSurface(RenderSurfaceImpl* render_surface);
+  void ComputeSurfaceDamage(RenderSurfaceImpl* render_surface);
   void ExpandDamageInsideRectWithFilters(const gfx::Rect& pre_filter_rect,
-                                         const FilterOperations& filters,
-                                         DamageAccumulator* damage);
+                                         const FilterOperations& filters);
 
   struct LayerRectMapData {
     LayerRectMapData() : layer_id_(0), mailboxId_(0) {}
@@ -120,7 +121,7 @@ class CC_EXPORT DamageTracker {
 
   struct SurfaceRectMapData {
     SurfaceRectMapData() : surface_id_(0), mailboxId_(0) {}
-    explicit SurfaceRectMapData(int surface_id)
+    explicit SurfaceRectMapData(uint64_t surface_id)
         : surface_id_(surface_id), mailboxId_(0) {}
     void Update(const gfx::Rect& rect, unsigned int mailboxId) {
       mailboxId_ = mailboxId;
@@ -131,7 +132,7 @@ class CC_EXPORT DamageTracker {
       return surface_id_ < other.surface_id_;
     }
 
-    int surface_id_;
+    uint64_t surface_id_;
     unsigned int mailboxId_;
     gfx::Rect rect_;
   };
@@ -139,13 +140,19 @@ class CC_EXPORT DamageTracker {
   typedef std::vector<SurfaceRectMapData> SortedRectMapForSurfaces;
 
   LayerRectMapData& RectDataForLayer(int layer_id, bool* layer_is_new);
-  SurfaceRectMapData& RectDataForSurface(int layer_id, bool* layer_is_new);
+  SurfaceRectMapData& RectDataForSurface(uint64_t surface_id,
+                                         bool* layer_is_new);
 
   SortedRectMapForLayers rect_history_for_layers_;
   SortedRectMapForSurfaces rect_history_for_surfaces_;
 
   unsigned int mailboxId_;
   DamageAccumulator current_damage_;
+  // Damage from contributing render surface and layer
+  bool has_damage_from_contributing_content_;
+
+  // Damage accumulated since the last call to PrepareForUpdate().
+  DamageAccumulator damage_for_this_update_;
 
   DISALLOW_COPY_AND_ASSIGN(DamageTracker);
 };

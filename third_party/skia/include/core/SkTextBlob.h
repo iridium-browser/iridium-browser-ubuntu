@@ -9,12 +9,16 @@
 #define SkTextBlob_DEFINED
 
 #include "../private/SkTemplates.h"
+#include "../private/SkAtomics.h"
 #include "SkPaint.h"
 #include "SkString.h"
 #include "SkRefCnt.h"
 
 class SkReadBuffer;
 class SkWriteBuffer;
+
+typedef std::function<void(SkTypeface*)> SkTypefaceCataloger;
+typedef std::function<sk_sp<SkTypeface>(uint32_t)> SkTypefaceResolver;
 
 /** \class SkTextBlob
 
@@ -56,11 +60,25 @@ public:
         kFull_Positioning         = 2  // Point positioning -- two scalars per glyph.
     };
 
+    /**
+     *  Serialize the typeface into a data blob, storing type uniqueID of each referenced typeface.
+     *  During this process, each time a typeface is encountered, it is passed to the catalog,
+     *  allowing the caller to what typeface IDs will need to be resolved in Deserialize().
+     */
+    sk_sp<SkData> serialize(const SkTypefaceCataloger&) const;
+
+    /**
+     *  Re-create a text blob previously serialized. Since the serialized form records the uniqueIDs
+     *  of its typefaces, deserialization requires that the caller provide the corresponding
+     *  SkTypefaces for those IDs.
+     */
+    static sk_sp<SkTextBlob> Deserialize(const void* data, size_t size, const SkTypefaceResolver&);
+
 private:
     friend class SkNVRefCnt<SkTextBlob>;
     class RunRecord;
 
-    SkTextBlob(int runCount, const SkRect& bounds);
+    explicit SkTextBlob(const SkRect& bounds);
 
     ~SkTextBlob();
 
@@ -75,12 +93,19 @@ private:
 
     static unsigned ScalarsPerGlyph(GlyphPositioning pos);
 
+    // Call when this blob is part of the key to a cache entry. This allows the cache
+    // to know automatically those entries can be purged when this SkTextBlob is deleted.
+    void notifyAddedToCache() const {
+        fAddedToCache.store(true);
+    }
+
+    friend class GrTextBlobCache;
     friend class SkTextBlobBuilder;
     friend class SkTextBlobRunIterator;
 
-    const int        fRunCount;
-    const SkRect     fBounds;
-    const uint32_t fUniqueID;
+    const SkRect           fBounds;
+    const uint32_t         fUniqueID;
+    mutable SkAtomic<bool> fAddedToCache;
 
     SkDEBUGCODE(size_t fStorageSize;)
 
@@ -101,8 +126,10 @@ public:
     ~SkTextBlobBuilder();
 
     /**
-     *  Returns an immutable SkTextBlob for the current runs/glyphs. The builder is reset and
-     *  can be reused.
+     *  Returns an immutable SkTextBlob for the current runs/glyphs,
+     *  or nullptr if no runs were allocated.
+     *
+     *  The builder is reset and can be reused.
      */
     sk_sp<SkTextBlob> make();
 

@@ -217,7 +217,7 @@ namespace sw
 		LOCK_DISCARD
 	};
 
-	class Surface
+	class [[clang::lto_visibility_public]] Surface
 	{
 	private:
 		struct Buffer
@@ -250,13 +250,15 @@ namespace sw
 			bool dirty;
 		};
 
-		virtual void typeinfo();   // Dummy key method (https://gcc.gnu.org/onlinedocs/gcc/Vague-Linkage.html)
-
-	public:
+	protected:
 		Surface(int width, int height, int depth, Format format, void *pixels, int pitch, int slice);
 		Surface(Resource *texture, int width, int height, int depth, Format format, bool lockable, bool renderTarget, int pitchP = 0);
 
-		virtual ~Surface();
+	public:
+		static Surface *create(int width, int height, int depth, Format format, void *pixels, int pitch, int slice);
+		static Surface *create(Resource *texture, int width, int height, int depth, Format format, bool lockable, bool renderTarget, int pitchP = 0);
+
+		virtual ~Surface() = 0;
 
 		inline void *lock(int x, int y, int z, Lock lock, Accessor client, bool internal = false);
 		inline void unlock(bool internal = false);
@@ -277,8 +279,8 @@ namespace sw
 		inline int getExternalSliceB() const;
 		inline int getExternalSliceP() const;
 
-		virtual void *lockInternal(int x, int y, int z, Lock lock, Accessor client);
-		virtual void unlockInternal();
+		virtual void *lockInternal(int x, int y, int z, Lock lock, Accessor client) = 0;
+		virtual void unlockInternal() = 0;
 		inline Format getInternalFormat() const;
 		inline int getInternalPitchB() const;
 		inline int getInternalPitchP() const;
@@ -290,6 +292,9 @@ namespace sw
 		inline Format getStencilFormat() const;
 		inline int getStencilPitchB() const;
 		inline int getStencilSliceB() const;
+
+		void sync();                      // Wait for lock(s) to be released.
+		inline bool isUnlocked() const;   // Only reliable after sync().
 
 		inline int getMultiSampleCount() const;
 		inline int getSuperSampleCount() const;
@@ -337,15 +342,17 @@ namespace sw
 		static bool isSRGBreadable(Format format);
 		static bool isSRGBwritable(Format format);
 		static bool isCompressed(Format format);
+		static bool isSignedNonNormalizedInteger(Format format);
+		static bool isUnsignedNonNormalizedInteger(Format format);
 		static bool isNonNormalizedInteger(Format format);
+		static bool isNormalizedInteger(Format format);
 		static int componentCount(Format format);
 
 		static void setTexturePalette(unsigned int *palette);
 
-	protected:
+	private:
 		sw::Resource *resource;
 
-	private:
 		typedef unsigned char byte;
 		typedef unsigned short word;
 		typedef unsigned int dword;
@@ -600,6 +607,13 @@ namespace sw
 	int Surface::getSuperSampleCount() const
 	{
 		return internal.depth > 4 ? internal.depth / 4 : 1;
+	}
+
+	bool Surface::isUnlocked() const
+	{
+		return external.lock == LOCK_UNLOCKED &&
+		       internal.lock == LOCK_UNLOCKED &&
+		       stencil.lock == LOCK_UNLOCKED;
 	}
 
 	bool Surface::isExternalDirty() const

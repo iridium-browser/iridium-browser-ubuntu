@@ -18,16 +18,32 @@ Various git commands have underlying executable with a hyphenated name, such as
 The following resources can provide background on how Git works:
 
 *   [Git-SVN Crash Course](http://git-scm.com/course/svn.html) -- this crash
-    course is useful for Subversion users  witching to Git.
+    course is useful for Subversion users switching to Git.
 *   [Think Like (a) Git](http://think-like-a-git.net/) -- does a great job of
     explaining the main purpose of Git operations.
 *   [Git User's Manual](http://schacon.github.com/git/user-manual.html) -- a
     great resource to learn more about ho to use Git properly.
 *   [A Visual Git Reference](http://marklodato.github.com/visual-git-guide/index-en.html)
-    -- a resource that explains various Git operations for visual reasons.
+    -- a resource that explains various Git operations for visual learners.
 *   [Git Cheat Sheet](http://cheat.errtheblog.com/s/git) -- now that you
     understand Git, here's a cheat sheet to quickly remind you of all the
     commands you need.
+
+## Configuring the output of "git log"
+
+By default, the date that "git log" displays is the "author date." In Chromium,
+this generally corresponds to the date that the committed patch was last
+uploaded. In most cases, however, the date that is of interest is the date that
+the patch was committed in the tree. To configure "git log" to instead display
+the latter date for your Chromium checkout, execute the following command:
+
+```shell
+git config format.pretty 'format:%C(auto,yellow)commit %H%C(auto)%d%nAuthor:    %an <%ae>%nCommitted: %cd%n%n%w(0,4,4)%B%-%n'
+```
+
+If you want to change *all* your repos (e.g., because you have multiple Chromium
+checkouts and don't care about having the default for other repos), add
+"--global" after "config" in the above command.
 
 ## Committing changes
 

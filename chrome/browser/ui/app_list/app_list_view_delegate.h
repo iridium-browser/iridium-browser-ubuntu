@@ -11,24 +11,23 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "ash/public/interfaces/wallpaper.mojom.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
-#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/search/hotword_client.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/app_list/start_page_observer.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/search_engines/template_url_service_observer.h"
-#include "components/signin/core/browser/signin_manager_base.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "ui/app_list/app_list_view_delegate.h"
-
-class AppListControllerDelegate;
-class Profile;
+#include "ui/app_list/app_list_view_delegate_observer.h"
+#include "ui/app_list/views/app_list_view.h"
 
 namespace app_list {
 class CustomLauncherPageContents;
@@ -38,24 +37,18 @@ class SearchResourceManager;
 class SpeechUIModel;
 }
 
-namespace base {
-class FilePath;
-}
-
 namespace content {
 struct SpeechRecognitionSessionPreamble;
 }
 
-#if defined(USE_ASH)
+class AppListControllerDelegate;
 class AppSyncUIStateWatcher;
-#endif
+class Profile;
 
 class AppListViewDelegate : public app_list::AppListViewDelegate,
                             public app_list::StartPageObserver,
+                            public ash::mojom::WallpaperObserver,
                             public HotwordClient,
-                            public ProfileAttributesStorage::Observer,
-                            public SigninManagerBase::Observer,
-                            public SigninManagerFactory::Observer,
                             public content::NotificationObserver,
                             public TemplateURLServiceObserver {
  public:
@@ -73,12 +66,9 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
       const scoped_refptr<content::SpeechRecognitionSessionPreamble>& preamble);
 
   // Overridden from app_list::AppListViewDelegate:
-  bool ForceNativeDesktop() const override;
-  void SetProfileByPath(const base::FilePath& profile_path) override;
   app_list::AppListModel* GetModel() override;
   app_list::SpeechUIModel* GetSpeechUI() override;
   void StartSearch() override;
-  void StopSearch() override;
   void OpenSearchResult(app_list::SearchResult* result,
                         bool auto_launch,
                         int event_flags) override;
@@ -90,30 +80,27 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
   void ViewInitialized() override;
   void Dismiss() override;
   void ViewClosing() override;
-  void OpenHelp() override;
-  void OpenFeedback() override;
   void StartSpeechRecognition() override;
   void StopSpeechRecognition() override;
-  void ShowForProfileByPath(const base::FilePath& profile_path) override;
-#if defined(TOOLKIT_VIEWS)
   views::View* CreateStartPageWebView(const gfx::Size& size) override;
   std::vector<views::View*> CreateCustomPageWebViews(
       const gfx::Size& size) override;
   void CustomLauncherPageAnimationChanged(double progress) override;
   void CustomLauncherPagePopSubpage() override;
-#endif
   bool IsSpeechRecognitionEnabled() override;
-  const Users& GetUsers() const override;
+  void GetWallpaperProminentColors(std::vector<SkColor>* colors) override;
+  void AddObserver(app_list::AppListViewDelegateObserver* observer) override;
+  void RemoveObserver(app_list::AppListViewDelegateObserver* observer) override;
 
   // Overridden from TemplateURLServiceObserver:
   void OnTemplateURLServiceChanged() override;
 
  private:
+  // Callback for ash::mojom::GetWallpaperColors.
+  void OnGetWallpaperColorsCallback(const std::vector<SkColor>& colors);
+
   // Updates the speech webview and start page for the current |profile_|.
   void SetUpSearchUI();
-
-  // Updates the app list's ProfileMenuItems for the current |profile_|.
-  void SetUpProfileSwitcher();
 
   // Updates the app list's custom launcher pages for the current |profile_|.
   void SetUpCustomLauncherPages();
@@ -124,30 +111,15 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
   void OnSpeechRecognitionStateChanged(
       app_list::SpeechRecognitionState new_state) override;
 
+  // Overridden from ash::mojom::WallpaperObserver:
+  void OnWallpaperColorsChanged(
+      const std::vector<SkColor>& prominent_colors) override;
+
   // Overridden from HotwordClient:
   void OnHotwordStateChanged(bool started) override;
   void OnHotwordRecognized(
       const scoped_refptr<content::SpeechRecognitionSessionPreamble>& preamble)
       override;
-
-  // Overridden from SigninManagerFactory::Observer:
-  void SigninManagerCreated(SigninManagerBase* manager) override;
-  void SigninManagerShutdown(SigninManagerBase* manager) override;
-
-  // Overridden from SigninManagerBase::Observer:
-  void GoogleSigninFailed(const GoogleServiceAuthError& error) override;
-  void GoogleSigninSucceeded(const std::string& account_id,
-                             const std::string& username,
-                             const std::string& password) override;
-  void GoogleSignedOut(const std::string& account_id,
-                       const std::string& username) override;
-
-  // Overridden from ProfileAttributesStorage::Observer:
-  void OnProfileAdded(const base::FilePath& profile_path) override;
-  void OnProfileWasRemoved(const base::FilePath& profile_path,
-                           const base::string16& profile_name) override;
-  void OnProfileNameChanged(const base::FilePath& profile_path,
-                            const base::string16& old_profile_name) override;
 
   // Overridden from content::NotificationObserver:
   void Observe(int type,
@@ -173,21 +145,11 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
       launcher_page_event_dispatcher_;
 
   base::TimeDelta auto_launch_timeout_;
-  // Determines whether the current search was initiated by speech.
-  bool is_voice_query_;
 
-  Users users_;
-
-#if defined(USE_ASH)
   std::unique_ptr<AppSyncUIStateWatcher> app_sync_ui_state_watcher_;
-#endif
 
   ScopedObserver<TemplateURLService, AppListViewDelegate>
       template_url_service_observer_;
-
-  // Used to track the SigninManagers that this instance is observing so that
-  // this instance can be removed as an observer on its destruction.
-  ScopedObserver<SigninManagerBase, AppListViewDelegate> scoped_observer_;
 
   // Window contents of additional custom launcher pages.
   std::vector<std::unique_ptr<app_list::CustomLauncherPageContents>>
@@ -195,6 +157,18 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
 
   // Registers for NOTIFICATION_APP_TERMINATING to unload custom launcher pages.
   content::NotificationRegistrar registrar_;
+
+  // The binding this instance uses to implement mojom::WallpaperObserver.
+  mojo::AssociatedBinding<ash::mojom::WallpaperObserver> observer_binding_;
+
+  // Ash's mojom::WallpaperController.
+  ash::mojom::WallpaperControllerPtr wallpaper_controller_ptr_;
+
+  std::vector<SkColor> wallpaper_prominent_colors_;
+
+  base::ObserverList<app_list::AppListViewDelegateObserver> observers_;
+
+  base::WeakPtrFactory<AppListViewDelegate> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListViewDelegate);
 };

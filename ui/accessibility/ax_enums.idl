@@ -80,6 +80,7 @@
     abbr,
     alert_dialog,
     alert,
+    anchor,
     annotation,
     application,
     article,
@@ -92,6 +93,7 @@
     button_drop_down,  // Not used on Web.
     canvas,
     caption,
+    caret,
     cell,
     check_box,
     client,
@@ -112,7 +114,6 @@
     dialog,
     directory,
     disclosure_triangle,
-    div,
     document,
     embedded_object,
     feed,
@@ -120,6 +121,7 @@
     figure,
     footer,
     form,
+    generic_container,
     grid,
     group,
     heading,
@@ -212,10 +214,8 @@
 
   enum AXState {
     busy,
-    checked,
     collapsed,
     default,
-    disabled,
     editable,
     expanded,
     focusable,
@@ -228,9 +228,7 @@
     multiline,
     multiselectable,
     offscreen,
-    pressed,
     protected,
-    read_only,
     required,
     richly_editable,
     selectable,
@@ -241,10 +239,12 @@
   };
 
   // An action to be taken on an accessibility node.
-  // In contrast to |AXSupportedAction|, these describe what happens to the
+  // In contrast to |AXDefaultActionVerb|, these describe what happens to the
   // object, e.g. "FOCUS".
   enum AXAction {
     blur,
+
+    custom_action,
 
     // Decrement a slider or range control by one step value.
     decrement,
@@ -258,7 +258,7 @@
     get_image_data,
 
     // Given a point, find the object it corresponds to and fire a
-    // HOVER event on it in response.
+    // |AXActionData.hit_test_event_to_fire| event on it in response.
     hit_test,
 
     // Increment a slider or range control by one step value.
@@ -298,11 +298,13 @@
     request_inline_text_boxes
   };
 
-  // Lists the actions that can be performed on a given node.
+  // A list of valid values for the |AXIntAttribute| |default_action_verb|.
+  // These will describe the action that will be performed on a given node when
+  // executing the default action, which is a click.
   // In contrast to |AXAction|, these describe what the user can do on the
   // object, e.g. "PRESS", not what happens to the object as a result.
-  // Only one action is supported for now.
-  enum AXSupportedAction {
+  // Only one verb can be used at a time to describe the default action.
+  enum AXDefaultActionVerb {
     activate,
     check,
     click,
@@ -335,6 +337,7 @@
     font_family,
     html_tag,
     image_data_url,
+    inner_html,
     key_shortcuts,
     // Only present when different from parent.
     language,
@@ -344,13 +347,12 @@
     placeholder,
     role,
     role_description,
-    shortcut,
     url,
     value
   };
 
   [cpp_enum_prefix_override="ax_attr"] enum AXIntAttribute {
-    action,
+    default_action_verb,
     // Scrollable container attributes.
     scroll_x,
     scroll_x_min,
@@ -364,10 +366,10 @@
     text_sel_end,
 
     // aria_col* and aria_row* attributes
-    aria_col_count,
-    aria_col_index,
+    aria_column_count,
+    aria_cell_column_index,
     aria_row_count,
-    aria_row_index,
+    aria_cell_row_index,
 
     // Table attributes.
     table_row_count,
@@ -402,13 +404,20 @@
 
     // Relationships between this element and other elements.
     activedescendant_id,
+    details_id,
     errormessage_id,
+    in_page_link_target_id,
     member_of_id,
     next_on_line_id,
     previous_on_line_id,
 
     // Identifies a child tree which this node hosts.
     child_tree_id,
+
+    // Input restriction, if any, such as readonly or disabled.
+    // Of type AXRestriction, see below.
+    // No value or enabled control or other object that is not disabled.
+    restriction,
 
     // Position or Number of items in current set of listitems or treeitems
     set_size,
@@ -431,6 +440,9 @@
     // if an element has an aria-invalid attribute.
     invalid_state,
 
+    // Of type AXCheckedState
+    checked_state,
+
     // Specifies the direction of the text, e.g., right-to-left.
     text_direction,
 
@@ -450,10 +462,6 @@
   };
 
   [cpp_enum_prefix_override="ax_attr"] enum AXBoolAttribute {
-    // True if an ARIA toggle button, a checkbox or
-    // a menu item checkbox is in the "mixed" state.
-    STATE_mixed,
-
     // Live region attributes.
     container_live_atomic,
     container_live_busy,
@@ -462,12 +470,6 @@
 
     // If a dialog box is marked as explicitly modal
     modal,
-
-    // ARIA readonly flag.
-    aria_readonly,
-
-    // Writeable attributes
-    can_set_value,
 
     // If this is set, all of the other fields in this struct should
     // be ignored and only the locations should change.
@@ -487,9 +489,9 @@
     // Relationships between this element and other elements.
     controls_ids,
     describedby_ids,
-    details_ids,
     flowto_ids,
     labelledby_ids,
+    radio_group_ids,
 
     // For static text. Character indices where line breaks occur. Note that
     // this attribute is only available on Chrome OS and will be deprecated
@@ -529,9 +531,23 @@
     // For inline text. These int lists must be the same size; they represent
     // the start and end character offset of each word within this text.
     word_starts,
-    word_ends
+    word_ends,
+
+    // Used for an UI element to define custom actions for it. For example, a
+    // list UI will allow a user to reorder items in the list by dragging the
+    // items. Developer can expose those actions as custom actions. Currently
+    // custom actions are used only in Android window.
+    custom_action_ids
   };
 
+  [cpp_enum_prefix_override="ax_attr"] enum AXStringListAttribute {
+    // Descriptions for custom actions. This must be aligned with
+    // custom_action_ids.
+    custom_action_descriptions
+  };
+
+  // TODO(dmazzoni, nektar): make this list not grow exponentially as new
+  // MarkerTypes are added
   enum AXMarkerType {
     // Assignments are ignored by the parser, but are kept here for clarity.
     spelling = 1,
@@ -540,7 +556,17 @@
     text_match = 4,
     spelling_text_match = 5,
     grammar_text_match = 6,
-    spelling_grammar_text_match = 7
+    spelling_grammar_text_match = 7,
+    // DocumentMarker::MarkerType::Composition = 8 is ignored for accessibility
+    // purposes
+    active_suggestion = 16,
+    spelling_active_suggestion = 17,
+    grammar_active_suggestion = 18,
+    spelling_grammar_active_suggestion = 19,
+    text_match_active_suggestion = 20,
+    spelling_text_match_active_suggestion = 21,
+    grammar_text_match_active_suggestion = 22,
+    spelling_grammar_text_match_active_suggestion = 23
   };
 
   enum AXTextDirection {
@@ -589,6 +615,21 @@
     other
   };
 
+  // Input restriction associated with an object.
+  // No value for a control means it is enabled.
+  // Use read_only for a textbox that allows focus/selection but not input.
+  // Use disabled for a control or group of controls that disallows input.
+  enum AXRestriction {
+    read_only,
+    disabled
+  };
+
+  enum AXCheckedState {
+    false,
+    true,
+    mixed
+  };
+
   enum AXSortDirection {
     unsorted,
     ascending,
@@ -599,6 +640,7 @@
   enum AXNameFrom {
     uninitialized,
     attribute,
+    attribute_explicitly_empty,
     contents,
     placeholder,
     related_element,

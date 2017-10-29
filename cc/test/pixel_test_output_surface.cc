@@ -17,7 +17,7 @@
 namespace cc {
 
 PixelTestOutputSurface::PixelTestOutputSurface(
-    scoped_refptr<ContextProvider> context_provider,
+    scoped_refptr<viz::ContextProvider> context_provider,
     bool flipped_output_surface)
     : OutputSurface(std::move(context_provider)), weak_ptr_factory_(this) {
   capabilities_.flipped_output_surface = flipped_output_surface;
@@ -69,8 +69,8 @@ void PixelTestOutputSurface::ApplyExternalStencil() {}
 
 void PixelTestOutputSurface::SwapBuffers(OutputSurfaceFrame frame) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&PixelTestOutputSurface::SwapBuffersCallback,
-                            weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&PixelTestOutputSurface::SwapBuffersCallback,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
 void PixelTestOutputSurface::SwapBuffersCallback() {
@@ -88,6 +88,10 @@ bool PixelTestOutputSurface::IsDisplayedAsOverlayPlane() const {
 
 unsigned PixelTestOutputSurface::GetOverlayTextureId() const {
   return 0;
+}
+
+gfx::BufferFormat PixelTestOutputSurface::GetOverlayBufferFormat() const {
+  return gfx::BufferFormat::RGBX_8888;
 }
 
 bool PixelTestOutputSurface::SurfaceIsSuspendForRecycle() const {

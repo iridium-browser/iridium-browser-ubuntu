@@ -7,6 +7,7 @@
 #include <deque>
 
 #include "base/bind.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
@@ -71,9 +72,10 @@ class MockBrlapiConnection : public BrlapiConnection {
     data_->connected = true;
     on_data_ready_ = on_data_ready;
     if (!data_->pending_keys.empty()) {
-      BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                              base::Bind(&MockBrlapiConnection::NotifyDataReady,
-                                        base::Unretained(this)));
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::BindOnce(&MockBrlapiConnection::NotifyDataReady,
+                         base::Unretained(this)));
     }
     return CONNECT_SUCCESS;
   }
@@ -84,8 +86,9 @@ class MockBrlapiConnection : public BrlapiConnection {
       data_->display_columns *= 2;
       BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,
-          base::Bind(&BrailleControllerImpl::PokeSocketDirForTesting,
-                     base::Unretained(BrailleControllerImpl::GetInstance())));
+          base::BindOnce(
+              &BrailleControllerImpl::PokeSocketDirForTesting,
+              base::Unretained(BrailleControllerImpl::GetInstance())));
     }
   }
 
@@ -131,9 +134,10 @@ class MockBrlapiConnection : public BrlapiConnection {
   void NotifyDataReady() {
     on_data_ready_.Run();
     if (!data_->pending_keys.empty()) {
-      BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                              base::Bind(&MockBrlapiConnection::NotifyDataReady,
-                                        base::Unretained(this)));
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::BindOnce(&MockBrlapiConnection::NotifyDataReady,
+                         base::Unretained(this)));
     }
   }
 
@@ -336,6 +340,8 @@ IN_PROC_BROWSER_TEST_F(BrailleDisplayPrivateAPIUserTest,
   // Log in.
   session_manager::SessionManager::Get()->CreateSession(
       AccountId::FromUserEmail(kTestUserName), kTestUserName);
+  g_browser_process->profile_manager()->GetProfile(
+      ProfileHelper::Get()->GetProfilePathByUserIdHash(kTestUserName));
   session_manager::SessionManager::Get()->SessionStarted();
   Profile* profile = ProfileManager::GetActiveUserProfile();
   ASSERT_FALSE(

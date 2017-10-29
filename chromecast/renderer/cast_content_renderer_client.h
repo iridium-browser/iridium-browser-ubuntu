@@ -17,6 +17,7 @@ class PrescientNetworkingDispatcher;
 }  // namespace network_hints
 
 namespace chromecast {
+class MemoryPressureObserverImpl;
 namespace media {
 class MediaCapsObserverImpl;
 class SupportedCodecProfileLevelsMemo;
@@ -38,11 +39,15 @@ class CastContentRendererClient : public content::ContentRendererClient {
   void AddSupportedKeySystems(
       std::vector<std::unique_ptr<::media::KeySystemProperties>>*
           key_systems_properties) override;
+  bool IsSupportedAudioConfig(const ::media::AudioConfig& config) override;
+  bool IsSupportedVideoConfig(const ::media::VideoConfig& config) override;
+  bool IsSupportedBitstreamAudioCodec(::media::AudioCodec codec) override;
   blink::WebPrescientNetworking* GetPrescientNetworking() override;
   void DeferMediaLoad(content::RenderFrame* render_frame,
                       bool render_frame_has_played_media_before,
                       const base::Closure& closure) override;
-  bool AllowMediaSuspend() override;
+  bool AllowIdleMediaSuspend() override;
+  void SetRuntimeFeaturesDefaultsBeforeBlinkInitialization() override;
 
  protected:
   CastContentRendererClient();
@@ -55,6 +60,9 @@ class CastContentRendererClient : public content::ContentRendererClient {
       prescient_networking_dispatcher_;
   std::unique_ptr<media::MediaCapsObserverImpl> media_caps_observer_;
   std::unique_ptr<media::SupportedCodecProfileLevelsMemo> supported_profiles_;
+#if !defined(OS_ANDROID)
+  std::unique_ptr<MemoryPressureObserverImpl> memory_pressure_observer_;
+#endif
 
   const bool allow_hidden_media_playback_;
 

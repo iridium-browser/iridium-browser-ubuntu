@@ -8,6 +8,7 @@
 
 #include "common/debug.h"
 #include "common/mathutil.h"
+#include "compiler/translator/Compiler.h"
 
 #include <cfloat>
 
@@ -73,6 +74,11 @@ bool NeedsToWriteLayoutQualifier(const TType &type)
         return true;
     }
 
+    if (type.getQualifier() == EvqFragmentOut && layoutQualifier.yuv == true)
+    {
+        return true;
+    }
+
     if (IsOpaqueType(type.getBasicType()) && layoutQualifier.binding != -1)
     {
         return true;
@@ -115,18 +121,17 @@ TOutputGLSLBase::TOutputGLSLBase(TInfoSinkBase &objSink,
                                  ShArrayIndexClampingStrategy clampingStrategy,
                                  ShHashFunction64 hashFunction,
                                  NameMap &nameMap,
-                                 TSymbolTable &symbolTable,
+                                 TSymbolTable *symbolTable,
                                  sh::GLenum shaderType,
                                  int shaderVersion,
                                  ShShaderOutput output,
                                  ShCompileOptions compileOptions)
-    : TIntermTraverser(true, true, true),
+    : TIntermTraverser(true, true, true, symbolTable),
       mObjSink(objSink),
       mDeclaringVariables(false),
       mClampingStrategy(clampingStrategy),
       mHashFunction(hashFunction),
       mNameMap(nameMap),
-      mSymbolTable(symbolTable),
       mShaderType(shaderType),
       mShaderVersion(shaderVersion),
       mOutput(output),
@@ -211,6 +216,14 @@ void TOutputGLSLBase::writeLayoutQualifier(const TType &type)
         if (layoutQualifier.location >= 0)
         {
             out << listItemPrefix << "location = " << layoutQualifier.location;
+        }
+    }
+
+    if (type.getQualifier() == EvqFragmentOut)
+    {
+        if (layoutQualifier.yuv == true)
+        {
+            out << listItemPrefix << "yuv";
         }
     }
 
@@ -355,7 +368,7 @@ void TOutputGLSLBase::writeFunctionParameters(const TIntermSequence &args)
     for (TIntermSequence::const_iterator iter = args.begin(); iter != args.end(); ++iter)
     {
         const TIntermSymbol *arg = (*iter)->getAsSymbolNode();
-        ASSERT(arg != NULL);
+        ASSERT(arg != nullptr);
 
         const TType &type = arg->getType();
         writeVariableType(type);
@@ -385,7 +398,7 @@ const TConstantUnion *TOutputGLSLBase::writeConstantUnion(const TType &type,
         for (size_t i = 0; i < fields.size(); ++i)
         {
             const TType *fieldType = fields[i]->type();
-            ASSERT(fieldType != NULL);
+            ASSERT(fieldType != nullptr);
             pConstUnion = writeConstantUnion(*fieldType, pConstUnion);
             if (i != fields.size() - 1)
                 out << ", ";
@@ -413,6 +426,9 @@ const TConstantUnion *TOutputGLSLBase::writeConstantUnion(const TType &type,
                     break;
                 case EbtBool:
                     out << pConstUnion->getBConst();
+                    break;
+                case EbtYuvCscStandardEXT:
+                    out << getYuvCscStandardEXTString(pConstUnion->getYuvCscStandardEXTConst());
                     break;
                 default:
                     UNREACHABLE();
@@ -530,7 +546,7 @@ bool TOutputGLSLBase::visitBinary(Visit visit, TIntermBinary *node)
             break;
 
         case EOpIndexDirect:
-            writeTriplet(visit, NULL, "[", "]");
+            writeTriplet(visit, nullptr, "[", "]");
             break;
         case EOpIndexIndirect:
             if (node->getAddIndexClamp())
@@ -566,7 +582,7 @@ bool TOutputGLSLBase::visitBinary(Visit visit, TIntermBinary *node)
             }
             else
             {
-                writeTriplet(visit, NULL, "[", "]");
+                writeTriplet(visit, nullptr, "[", "]");
             }
             break;
         case EOpIndexDirectStruct:
@@ -583,7 +599,7 @@ bool TOutputGLSLBase::visitBinary(Visit visit, TIntermBinary *node)
                 const TField *field               = structure->fields()[index->getIConst(0)];
 
                 TString fieldName = field->name();
-                if (!mSymbolTable.findBuiltIn(structure->name(), mShaderVersion))
+                if (!mSymbolTable->findBuiltIn(structure->name(), mShaderVersion))
                     fieldName = hashName(TName(fieldName));
 
                 out << fieldName;
@@ -600,7 +616,7 @@ bool TOutputGLSLBase::visitBinary(Visit visit, TIntermBinary *node)
                 const TField *field               = interfaceBlock->fields()[index->getIConst(0)];
 
                 TString fieldName = field->name();
-                ASSERT(!mSymbolTable.findBuiltIn(interfaceBlock->name(), mShaderVersion));
+                ASSERT(!mSymbolTable->findBuiltIn(interfaceBlock->name(), mShaderVersion));
                 fieldName = hashName(TName(fieldName));
 
                 out << fieldName;
@@ -783,7 +799,7 @@ bool TOutputGLSLBase::visitUnary(Visit visit, TIntermUnary *node)
             UNREACHABLE();
     }
 
-    writeTriplet(visit, preString.c_str(), NULL, postString.c_str());
+    writeTriplet(visit, preString.c_str(), nullptr, postString.c_str());
 
     return true;
 }
@@ -910,7 +926,7 @@ bool TOutputGLSLBase::visitFunctionPrototype(Visit visit, TIntermFunctionPrototy
     if (type.isArray())
         out << arrayBrackets(type);
 
-    out << " " << hashFunctionNameIfNeeded(node->getFunctionSymbolInfo()->getNameObj());
+    out << " " << hashFunctionNameIfNeeded(*node->getFunctionSymbolInfo());
 
     out << "(";
     writeFunctionParameters(*(node->getSequence()));
@@ -930,38 +946,23 @@ bool TOutputGLSLBase::visitAggregate(Visit visit, TIntermAggregate *node)
         case EOpCallBuiltInFunction:
             // Function call.
             if (visit == PreVisit)
-                out << hashFunctionNameIfNeeded(node->getFunctionSymbolInfo()->getNameObj()) << "(";
+            {
+                if (node->getOp() == EOpCallBuiltInFunction)
+                {
+                    out << translateTextureFunction(node->getFunctionSymbolInfo()->getName());
+                }
+                else
+                {
+                    out << hashFunctionNameIfNeeded(*node->getFunctionSymbolInfo());
+                }
+                out << "(";
+            }
             else if (visit == InVisit)
                 out << ", ";
             else
                 out << ")";
             break;
-        case EOpConstructFloat:
-        case EOpConstructVec2:
-        case EOpConstructVec3:
-        case EOpConstructVec4:
-        case EOpConstructBool:
-        case EOpConstructBVec2:
-        case EOpConstructBVec3:
-        case EOpConstructBVec4:
-        case EOpConstructInt:
-        case EOpConstructIVec2:
-        case EOpConstructIVec3:
-        case EOpConstructIVec4:
-        case EOpConstructUInt:
-        case EOpConstructUVec2:
-        case EOpConstructUVec3:
-        case EOpConstructUVec4:
-        case EOpConstructMat2:
-        case EOpConstructMat2x3:
-        case EOpConstructMat2x4:
-        case EOpConstructMat3x2:
-        case EOpConstructMat3:
-        case EOpConstructMat3x4:
-        case EOpConstructMat4x2:
-        case EOpConstructMat4x3:
-        case EOpConstructMat4:
-        case EOpConstructStruct:
+        case EOpConstruct:
             writeConstructorTriplet(visit, node->getType());
             break;
 
@@ -986,7 +987,7 @@ bool TOutputGLSLBase::visitAggregate(Visit visit, TIntermAggregate *node)
         case EOpDistance:
         case EOpDot:
         case EOpCross:
-        case EOpFaceForward:
+        case EOpFaceforward:
         case EOpReflect:
         case EOpRefract:
         case EOpMulMatrixComponentWise:
@@ -1064,7 +1065,7 @@ bool TOutputGLSLBase::visitLoop(Visit visit, TIntermLoop *node)
     else if (loopType == ELoopWhile)  // while loop
     {
         out << "while (";
-        ASSERT(node->getCondition() != NULL);
+        ASSERT(node->getCondition() != nullptr);
         node->getCondition()->traverse(this);
         out << ")\n";
 
@@ -1078,7 +1079,7 @@ bool TOutputGLSLBase::visitLoop(Visit visit, TIntermLoop *node)
         visitCodeBlock(node->getBody());
 
         out << "while (";
-        ASSERT(node->getCondition() != NULL);
+        ASSERT(node->getCondition() != nullptr);
         node->getCondition()->traverse(this);
         out << ");\n";
     }
@@ -1093,16 +1094,16 @@ bool TOutputGLSLBase::visitBranch(Visit visit, TIntermBranch *node)
     switch (node->getFlowOp())
     {
         case EOpKill:
-            writeTriplet(visit, "discard", NULL, NULL);
+            writeTriplet(visit, "discard", nullptr, nullptr);
             break;
         case EOpBreak:
-            writeTriplet(visit, "break", NULL, NULL);
+            writeTriplet(visit, "break", nullptr, nullptr);
             break;
         case EOpContinue:
-            writeTriplet(visit, "continue", NULL, NULL);
+            writeTriplet(visit, "continue", nullptr, nullptr);
             break;
         case EOpReturn:
-            writeTriplet(visit, "return ", NULL, NULL);
+            writeTriplet(visit, "return ", nullptr, nullptr);
             break;
         default:
             UNREACHABLE();
@@ -1114,7 +1115,7 @@ bool TOutputGLSLBase::visitBranch(Visit visit, TIntermBranch *node)
 void TOutputGLSLBase::visitCodeBlock(TIntermBlock *node)
 {
     TInfoSinkBase &out = objSink();
-    if (node != NULL)
+    if (node != nullptr)
     {
         node->traverse(this);
         // Single statements not part of a sequence need to be terminated
@@ -1159,14 +1160,14 @@ TString TOutputGLSLBase::hashName(const TName &name)
     NameMap::const_iterator it = mNameMap.find(name.getString().c_str());
     if (it != mNameMap.end())
         return it->second.c_str();
-    TString hashedName                 = TIntermTraverser::hash(name.getString(), mHashFunction);
+    TString hashedName                 = HashName(name.getString(), mHashFunction);
     mNameMap[name.getString().c_str()] = hashedName.c_str();
     return hashedName;
 }
 
 TString TOutputGLSLBase::hashVariableName(const TName &name)
 {
-    if (mSymbolTable.findBuiltIn(name.getString(), mShaderVersion) != NULL)
+    if (mSymbolTable->findBuiltIn(name.getString(), mShaderVersion) != nullptr)
     {
         if (mCompileOptions & SH_TRANSLATE_VIEWID_OVR_TO_UNIFORM &&
             name.getString() == "gl_ViewID_OVR")
@@ -1180,22 +1181,17 @@ TString TOutputGLSLBase::hashVariableName(const TName &name)
     return hashName(name);
 }
 
-TString TOutputGLSLBase::hashFunctionNameIfNeeded(const TName &mangledName)
+TString TOutputGLSLBase::hashFunctionNameIfNeeded(const TFunctionSymbolInfo &info)
 {
-    TString mangledStr = mangledName.getString();
-    TString name       = TFunction::unmangleName(mangledStr);
-    if (mSymbolTable.findBuiltIn(mangledStr, mShaderVersion) != nullptr || name == "main")
-        return translateTextureFunction(name);
-    if (mangledName.isInternal())
+    if (info.isMain() || info.getNameObj().isInternal())
     {
         // Internal function names are outputted as-is - they may refer to functions manually added
         // to the output shader source that are not included in the AST at all.
-        return name;
+        return info.getName();
     }
     else
     {
-        TName nameObj(name);
-        return hashName(nameObj);
+        return hashName(info.getNameObj());
     }
 }
 

@@ -35,7 +35,7 @@ enum MediaStreamTrackState {
 
 [
     ActiveScriptWrappable,
-    DependentLifetime,
+    DependentLifetime
 ] interface MediaStreamTrack : EventTarget {
     readonly attribute DOMString kind;
     readonly attribute DOMString id;
@@ -49,10 +49,12 @@ enum MediaStreamTrackState {
 
     [CallWith=ScriptState] MediaStreamTrack clone();
     [ImplementedAs=stopTrack, RaisesException] void stop();
-    [RuntimeEnabled=MediaConstraints] MediaTrackConstraints getConstraints();
-    [RuntimeEnabled=MediaGetSettings] MediaTrackSettings getSettings();
 
-
-    // Non-standard APIs
-    [MeasureAs=MediaStreamTrackRemote] readonly attribute boolean remote;
+    [RuntimeEnabled=MediaTrackCapabilities] MediaTrackCapabilities getCapabilities();
+    MediaTrackConstraints getConstraints();
+    MediaTrackSettings getSettings();
+    // Spec resolves applyConstraints() with void, here we resolve with the
+    // applied MediaTrackConstraints instead:
+    // https://github.com/w3c/mediacapture-main/issues/462
+    [RuntimeEnabled=MediaTrackApplyConstraints, CallWith=ScriptState] Promise<MediaTrackConstraints> applyConstraints(optional MediaTrackConstraints constraints);
 };

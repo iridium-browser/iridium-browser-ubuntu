@@ -29,7 +29,9 @@
 #include "core/HTMLNames.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/ElementTraversal.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLTableElement.h"
+#include "core/html/TableConstants.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/layout/LayoutTableCell.h"
 
@@ -37,37 +39,37 @@ namespace blink {
 
 using namespace HTMLNames;
 
-inline HTMLTableCellElement::HTMLTableCellElement(const QualifiedName& tagName,
+inline HTMLTableCellElement::HTMLTableCellElement(const QualifiedName& tag_name,
                                                   Document& document)
-    : HTMLTablePartElement(tagName, document) {}
+    : HTMLTablePartElement(tag_name, document) {}
 
 DEFINE_ELEMENT_FACTORY_WITH_TAGNAME(HTMLTableCellElement)
 
 unsigned HTMLTableCellElement::colSpan() const {
-  const AtomicString& colSpanValue = fastGetAttribute(colspanAttr);
+  const AtomicString& col_span_value = FastGetAttribute(colspanAttr);
   unsigned value = 0;
-  if (colSpanValue.isEmpty() ||
-      !parseHTMLNonNegativeInteger(colSpanValue, value))
-    return 1;
+  if (!ParseHTMLClampedNonNegativeInteger(col_span_value, kMinColSpan,
+                                          kMaxColSpan, value))
+    return kDefaultColSpan;
   // Counting for https://github.com/whatwg/html/issues/1198
-  UseCounter::count(document(), UseCounter::HTMLTableCellElementColspan);
+  UseCounter::Count(GetDocument(), WebFeature::kHTMLTableCellElementColspan);
   if (value > 8190) {
-    UseCounter::count(document(),
-                      UseCounter::HTMLTableCellElementColspanGreaterThan8190);
+    UseCounter::Count(GetDocument(),
+                      WebFeature::kHTMLTableCellElementColspanGreaterThan8190);
   } else if (value > 1000) {
-    UseCounter::count(document(),
-                      UseCounter::HTMLTableCellElementColspanGreaterThan1000);
+    UseCounter::Count(GetDocument(),
+                      WebFeature::kHTMLTableCellElementColspanGreaterThan1000);
   }
-  return std::max(1u, std::min(value, maxColSpan()));
+  return value;
 }
 
 unsigned HTMLTableCellElement::rowSpan() const {
-  const AtomicString& rowSpanValue = fastGetAttribute(rowspanAttr);
+  const AtomicString& row_span_value = FastGetAttribute(rowspanAttr);
   unsigned value = 0;
-  if (rowSpanValue.isEmpty() ||
-      !parseHTMLNonNegativeInteger(rowSpanValue, value))
-    return 1;
-  return std::max(1u, std::min(value, maxRowSpan()));
+  if (!ParseHTMLClampedNonNegativeInteger(row_span_value, kMinRowSpan,
+                                          kMaxRowSpan, value))
+    return kDefaultRowSpan;
+  return value;
 }
 
 int HTMLTableCellElement::cellIndex() const {
@@ -76,97 +78,98 @@ int HTMLTableCellElement::cellIndex() const {
 
   int index = 0;
   for (const HTMLTableCellElement* element =
-           Traversal<HTMLTableCellElement>::previousSibling(*this);
+           Traversal<HTMLTableCellElement>::PreviousSibling(*this);
        element;
-       element = Traversal<HTMLTableCellElement>::previousSibling(*element))
+       element = Traversal<HTMLTableCellElement>::PreviousSibling(*element))
     ++index;
 
   return index;
 }
 
-bool HTMLTableCellElement::isPresentationAttribute(
+bool HTMLTableCellElement::IsPresentationAttribute(
     const QualifiedName& name) const {
   if (name == nowrapAttr || name == widthAttr || name == heightAttr)
     return true;
-  return HTMLTablePartElement::isPresentationAttribute(name);
+  return HTMLTablePartElement::IsPresentationAttribute(name);
 }
 
-void HTMLTableCellElement::collectStyleForPresentationAttribute(
+void HTMLTableCellElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableStylePropertySet* style) {
   if (name == nowrapAttr) {
-    addPropertyToPresentationAttributeStyle(style, CSSPropertyWhiteSpace,
+    AddPropertyToPresentationAttributeStyle(style, CSSPropertyWhiteSpace,
                                             CSSValueWebkitNowrap);
   } else if (name == widthAttr) {
-    if (!value.isEmpty()) {
-      int widthInt = value.toInt();
-      if (widthInt > 0)  // width="0" is ignored for compatibility with WinIE.
-        addHTMLLengthToStyle(style, CSSPropertyWidth, value);
+    if (!value.IsEmpty()) {
+      int width_int = value.ToInt();
+      if (width_int > 0)  // width="0" is ignored for compatibility with WinIE.
+        AddHTMLLengthToStyle(style, CSSPropertyWidth, value);
     }
   } else if (name == heightAttr) {
-    if (!value.isEmpty()) {
-      int heightInt = value.toInt();
-      if (heightInt > 0)  // height="0" is ignored for compatibility with WinIE.
-        addHTMLLengthToStyle(style, CSSPropertyHeight, value);
+    if (!value.IsEmpty()) {
+      int height_int = value.ToInt();
+      if (height_int >
+          0)  // height="0" is ignored for compatibility with WinIE.
+        AddHTMLLengthToStyle(style, CSSPropertyHeight, value);
     }
   } else {
-    HTMLTablePartElement::collectStyleForPresentationAttribute(name, value,
+    HTMLTablePartElement::CollectStyleForPresentationAttribute(name, value,
                                                                style);
   }
 }
 
-void HTMLTableCellElement::parseAttribute(
+void HTMLTableCellElement::ParseAttribute(
     const AttributeModificationParams& params) {
   if (params.name == rowspanAttr || params.name == colspanAttr) {
-    if (layoutObject() && layoutObject()->isTableCell())
-      toLayoutTableCell(layoutObject())->colSpanOrRowSpanChanged();
+    if (GetLayoutObject() && GetLayoutObject()->IsTableCell())
+      ToLayoutTableCell(GetLayoutObject())->ColSpanOrRowSpanChanged();
   } else {
-    HTMLTablePartElement::parseAttribute(params);
+    HTMLTablePartElement::ParseAttribute(params);
   }
 }
 
 const StylePropertySet*
-HTMLTableCellElement::additionalPresentationAttributeStyle() {
-  if (HTMLTableElement* table = findParentTable())
-    return table->additionalCellStyle();
+HTMLTableCellElement::AdditionalPresentationAttributeStyle() {
+  if (HTMLTableElement* table = FindParentTable())
+    return table->AdditionalCellStyle();
   return nullptr;
 }
 
-bool HTMLTableCellElement::isURLAttribute(const Attribute& attribute) const {
-  return attribute.name() == backgroundAttr ||
-         HTMLTablePartElement::isURLAttribute(attribute);
+bool HTMLTableCellElement::IsURLAttribute(const Attribute& attribute) const {
+  return attribute.GetName() == backgroundAttr ||
+         HTMLTablePartElement::IsURLAttribute(attribute);
 }
 
-bool HTMLTableCellElement::hasLegalLinkAttribute(
+bool HTMLTableCellElement::HasLegalLinkAttribute(
     const QualifiedName& name) const {
-  return (hasTagName(tdTag) && name == backgroundAttr) ||
-         HTMLTablePartElement::hasLegalLinkAttribute(name);
+  return (HasTagName(tdTag) && name == backgroundAttr) ||
+         HTMLTablePartElement::HasLegalLinkAttribute(name);
 }
 
-const QualifiedName& HTMLTableCellElement::subResourceAttributeName() const {
-  return hasTagName(tdTag) ? backgroundAttr
-                           : HTMLTablePartElement::subResourceAttributeName();
+const QualifiedName& HTMLTableCellElement::SubResourceAttributeName() const {
+  return HasTagName(tdTag) ? backgroundAttr
+                           : HTMLTablePartElement::SubResourceAttributeName();
 }
 
-const AtomicString& HTMLTableCellElement::abbr() const {
-  return fastGetAttribute(abbrAttr);
+const AtomicString& HTMLTableCellElement::Abbr() const {
+  return FastGetAttribute(abbrAttr);
 }
 
-const AtomicString& HTMLTableCellElement::axis() const {
-  return fastGetAttribute(axisAttr);
+const AtomicString& HTMLTableCellElement::Axis() const {
+  return FastGetAttribute(axisAttr);
 }
 
 void HTMLTableCellElement::setColSpan(unsigned n) {
-  setUnsignedIntegralAttribute(colspanAttr, n);
+  SetUnsignedIntegralAttribute(colspanAttr, n, kDefaultColSpan);
 }
 
-const AtomicString& HTMLTableCellElement::headers() const {
-  return fastGetAttribute(headersAttr);
+const AtomicString& HTMLTableCellElement::Headers() const {
+  return FastGetAttribute(headersAttr);
 }
 
 void HTMLTableCellElement::setRowSpan(unsigned n) {
-  setUnsignedIntegralAttribute(rowspanAttr, n);
+  SetUnsignedIntegralAttribute(rowspanAttr, n, kDefaultRowSpan);
 }
 
 }  // namespace blink

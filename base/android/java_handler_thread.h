@@ -24,7 +24,12 @@ namespace android {
 // with a prepared Looper.
 class BASE_EXPORT JavaHandlerThread {
  public:
-  JavaHandlerThread(const char* name);
+  // Create new thread.
+  explicit JavaHandlerThread(const char* name);
+  // Wrap and connect to an existing JavaHandlerThread.
+  // |obj| is an instance of JavaHandlerThread.
+  explicit JavaHandlerThread(
+      const base::android::ScopedJavaLocalRef<jobject>& obj);
   virtual ~JavaHandlerThread();
 
   base::MessageLoop* message_loop() const { return message_loop_.get(); }
@@ -42,8 +47,6 @@ class BASE_EXPORT JavaHandlerThread {
 
   virtual void StartMessageLoop();
   virtual void StopMessageLoop();
-
-  static bool RegisterBindings(JNIEnv* env);
 
  protected:
   std::unique_ptr<base::MessageLoop> message_loop_;

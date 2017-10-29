@@ -48,7 +48,7 @@ public:
     static sk_sp<GrFragmentProcessor> Make(GrPrimitiveEdgeType, uint32_t circularCornerFlags,
                                            const SkRRect&);
 
-    virtual ~CircularRRectEffect() {}
+    ~CircularRRectEffect() override {}
 
     const char* name() const override { return "CircularRRect"; }
 
@@ -71,7 +71,7 @@ private:
     GrPrimitiveEdgeType    fEdgeType;
     uint32_t               fCircularCornerFlags;
 
-    GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
+    GR_DECLARE_FRAGMENT_PROCESSOR_TEST
 
     typedef GrFragmentProcessor INHERITED;
 };
@@ -135,7 +135,7 @@ public:
     static inline void GenKey(const GrProcessor&, const GrShaderCaps&, GrProcessorKeyBuilder*);
 
 protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
+    void onSetData(const GrGLSLProgramDataManager&, const GrFragmentProcessor&) override;
 
 private:
     GrGLSLProgramDataManager::UniformHandle fInnerRectUniform;
@@ -279,8 +279,7 @@ void GLCircularRRectEffect::emitCode(EmitArgs& args) {
         fragBuilder->codeAppend("alpha = 1.0 - alpha;");
     }
 
-    fragBuilder->codeAppendf("%s = %s;", args.fOutputColor,
-                             (GrGLSLExpr4(args.fInputColor) * GrGLSLExpr1("alpha")).c_str());
+    fragBuilder->codeAppendf("%s = %s * alpha;", args.fOutputColor, args.fInputColor);
 }
 
 void GLCircularRRectEffect::GenKey(const GrProcessor& processor, const GrShaderCaps&,
@@ -291,7 +290,7 @@ void GLCircularRRectEffect::GenKey(const GrProcessor& processor, const GrShaderC
 }
 
 void GLCircularRRectEffect::onSetData(const GrGLSLProgramDataManager& pdman,
-                                      const GrProcessor& processor) {
+                                      const GrFragmentProcessor& processor) {
     const CircularRRectEffect& crre = processor.cast<CircularRRectEffect>();
     const SkRRect& rrect = crre.getRRect();
     if (rrect != fPrevRRect) {
@@ -387,7 +386,7 @@ class EllipticalRRectEffect : public GrFragmentProcessor {
 public:
     static sk_sp<GrFragmentProcessor> Make(GrPrimitiveEdgeType, const SkRRect&);
 
-    virtual ~EllipticalRRectEffect() {}
+    ~EllipticalRRectEffect() override {}
 
     const char* name() const override { return "EllipticalRRect"; }
 
@@ -407,7 +406,7 @@ private:
     SkRRect fRRect;
     GrPrimitiveEdgeType fEdgeType;
 
-    GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
+    GR_DECLARE_FRAGMENT_PROCESSOR_TEST
 
     typedef GrFragmentProcessor INHERITED;
 };
@@ -487,7 +486,7 @@ public:
     static inline void GenKey(const GrProcessor&, const GrShaderCaps&, GrProcessorKeyBuilder*);
 
 protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
+    void onSetData(const GrGLSLProgramDataManager&, const GrFragmentProcessor&) override;
 
 private:
     GrGLSLProgramDataManager::UniformHandle fInnerRectUniform;
@@ -590,8 +589,7 @@ void GLEllipticalRRectEffect::emitCode(EmitArgs& args) {
         fragBuilder->codeAppend("float alpha = clamp(0.5 + approx_dist, 0.0, 1.0);");
     }
 
-    fragBuilder->codeAppendf("%s = %s;", args.fOutputColor,
-                             (GrGLSLExpr4(args.fInputColor) * GrGLSLExpr1("alpha")).c_str());
+    fragBuilder->codeAppendf("%s = %s * alpha;", args.fOutputColor, args.fInputColor);
 }
 
 void GLEllipticalRRectEffect::GenKey(const GrProcessor& effect, const GrShaderCaps&,
@@ -602,7 +600,7 @@ void GLEllipticalRRectEffect::GenKey(const GrProcessor& effect, const GrShaderCa
 }
 
 void GLEllipticalRRectEffect::onSetData(const GrGLSLProgramDataManager& pdman,
-                                        const GrProcessor& effect) {
+                                        const GrFragmentProcessor& effect) {
     const EllipticalRRectEffect& erre = effect.cast<EllipticalRRectEffect>();
     const SkRRect& rrect = erre.getRRect();
     // If we're using a scale factor to work around precision issues, choose the largest radius

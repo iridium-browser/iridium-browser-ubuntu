@@ -26,8 +26,8 @@
 #ifndef WebGLContextObject_h
 #define WebGLContextObject_h
 
-#include "bindings/core/v8/TraceWrapperMember.h"
 #include "modules/webgl/WebGLObject.h"
+#include "platform/bindings/TraceWrapperMember.h"
 
 namespace blink {
 
@@ -37,9 +37,9 @@ class WebGLRenderingContextBase;
 // WebGLRenderingContextBase.
 class WebGLContextObject : public WebGLObject {
  public:
-  WebGLRenderingContextBase* context() const { return m_context; }
+  WebGLRenderingContextBase* Context() const { return context_; }
 
-  bool validate(const WebGLContextGroup*,
+  bool Validate(const WebGLContextGroup*,
                 const WebGLRenderingContextBase*) const final;
 
   DECLARE_VIRTUAL_TRACE();
@@ -49,14 +49,14 @@ class WebGLContextObject : public WebGLObject {
  protected:
   explicit WebGLContextObject(WebGLRenderingContextBase*);
 
-  bool hasGroupOrContext() const final { return m_context; }
+  bool HasGroupOrContext() const final { return context_; }
 
-  uint32_t currentNumberOfContextLosses() const final;
+  uint32_t CurrentNumberOfContextLosses() const final;
 
-  gpu::gles2::GLES2Interface* getAGLInterface() const final;
+  gpu::gles2::GLES2Interface* GetAGLInterface() const final;
 
  private:
-  TraceWrapperMember<WebGLRenderingContextBase> m_context;
+  TraceWrapperMember<WebGLRenderingContextBase> context_;
 };
 
 }  // namespace blink

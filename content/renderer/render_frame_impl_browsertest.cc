@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/debug/leak_annotations.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "content/child/web_url_loader_impl.h"
@@ -24,13 +25,17 @@
 #include "content/test/fake_compositor_dependencies.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebEffectiveConnectionType.h"
+#include "third_party/WebKit/public/platform/WebRuntimeFeatures.h"
 #include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebHistoryItem.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
+#include "ui/native_theme/native_theme_features.h"
 
 using blink::WebString;
+using blink::WebURLRequest;
 
 namespace {
 const int32_t kSubframeRouteId = 20;
@@ -48,6 +53,8 @@ class RenderFrameImplTest : public RenderViewTest {
   ~RenderFrameImplTest() override {}
 
   void SetUp() override {
+    blink::WebRuntimeFeatures::EnableOverlayScrollbars(
+        ui::IsOverlayScrollbarEnabled());
     RenderViewTest::SetUp();
     EXPECT_TRUE(GetMainRenderFrame()->is_main_frame_);
 
@@ -64,7 +71,7 @@ class RenderFrameImplTest : public RenderViewTest {
     frame_replication_state.unique_name = "frame-uniqueName";
 
     RenderFrameImpl::FromWebFrame(
-        view_->GetMainRenderFrame()->GetWebFrame()->firstChild())
+        view_->GetMainRenderFrame()->GetWebFrame()->FirstChild())
         ->OnSwapOut(kFrameProxyRouteId, false, frame_replication_state);
 
     RenderFrameImpl::CreateFrame(
@@ -104,6 +111,14 @@ class RenderFrameImplTest : public RenderViewTest {
     return frame_->render_widget_.get();
   }
 
+#if defined(OS_ANDROID)
+  void ReceiveOverlayRoutingToken(const base::UnguessableToken& token) {
+    overlay_routing_token_ = token;
+  }
+
+  base::Optional<base::UnguessableToken> overlay_routing_token_;
+#endif
+
  private:
   RenderFrameImpl* frame_;
   FakeCompositorDependencies compositor_deps_;
@@ -142,6 +157,7 @@ TEST_F(RenderFrameImplTest, FrameResize) {
   resize_params.screen_info = ScreenInfo();
   resize_params.new_size = size;
   resize_params.physical_backing_size = size;
+  resize_params.visible_viewport_size = size;
   resize_params.top_controls_height = 0.f;
   resize_params.browser_controls_shrink_blink_size = false;
   resize_params.is_fullscreen_granted = false;
@@ -149,7 +165,8 @@ TEST_F(RenderFrameImplTest, FrameResize) {
   ViewMsg_Resize resize_message(0, resize_params);
   frame_widget()->OnMessageReceived(resize_message);
 
-  EXPECT_EQ(frame_widget()->GetWebWidget()->size(), blink::WebSize(size));
+  EXPECT_EQ(frame_widget()->GetWebWidget()->Size(), blink::WebSize(size));
+  EXPECT_EQ(view_->GetWebView()->Size(), blink::WebSize(size));
 }
 
 // Verify a subframe RenderWidget properly processes a WasShown message.
@@ -188,38 +205,35 @@ TEST_F(RenderFrameImplTest, LoFiNotUpdatedOnSubframeCommits) {
   EXPECT_EQ(SERVER_LOFI_ON, frame()->GetPreviewsState());
 
   blink::WebHistoryItem item;
-  item.initialize();
+  item.Initialize();
 
   // The main frame's and subframe's LoFi states should stay the same on
   // navigations within the page.
-  frame()->didNavigateWithinPage(frame()->GetWebFrame(), item,
-                                 blink::WebStandardCommit, true);
+  frame()->DidNavigateWithinPage(item, blink::kWebStandardCommit, true);
   EXPECT_EQ(SERVER_LOFI_ON, frame()->GetPreviewsState());
-  GetMainRenderFrame()->didNavigateWithinPage(
-      GetMainRenderFrame()->GetWebFrame(), item, blink::WebStandardCommit,
-      true);
+  GetMainRenderFrame()->DidNavigateWithinPage(item, blink::kWebStandardCommit,
+                                              true);
   EXPECT_EQ(SERVER_LOFI_ON, GetMainRenderFrame()->GetPreviewsState());
 
   // The subframe's LoFi state should not be reset on commit.
   DocumentState* document_state =
-      DocumentState::FromDataSource(frame()->GetWebFrame()->dataSource());
+      DocumentState::FromDataSource(frame()->GetWebFrame()->DataSource());
   static_cast<NavigationStateImpl*>(document_state->navigation_state())
-      ->set_was_within_same_page(false);
+      ->set_was_within_same_document(false);
 
-  frame()->didCommitProvisionalLoad(frame()->GetWebFrame(), item,
-                                    blink::WebStandardCommit);
+  frame()->DidCommitProvisionalLoad(item, blink::kWebStandardCommit);
   EXPECT_EQ(SERVER_LOFI_ON, frame()->GetPreviewsState());
 
   // The main frame's LoFi state should be reset to off on commit.
   document_state = DocumentState::FromDataSource(
-      GetMainRenderFrame()->GetWebFrame()->dataSource());
+      GetMainRenderFrame()->GetWebFrame()->DataSource());
   static_cast<NavigationStateImpl*>(document_state->navigation_state())
-      ->set_was_within_same_page(false);
+      ->set_was_within_same_document(false);
 
   // Calling didCommitProvisionalLoad is not representative of a full navigation
   // but serves the purpose of testing the LoFi state logic.
-  GetMainRenderFrame()->didCommitProvisionalLoad(
-      GetMainRenderFrame()->GetWebFrame(), item, blink::WebStandardCommit);
+  GetMainRenderFrame()->DidCommitProvisionalLoad(item,
+                                                 blink::kWebStandardCommit);
   EXPECT_EQ(PREVIEWS_OFF, GetMainRenderFrame()->GetPreviewsState());
   // The subframe would be deleted here after a cross-document navigation. It
   // happens to be left around in this test because this does not simulate the
@@ -229,58 +243,55 @@ TEST_F(RenderFrameImplTest, LoFiNotUpdatedOnSubframeCommits) {
 // Test that effective connection type only updates for new main frame
 // documents.
 TEST_F(RenderFrameImplTest, EffectiveConnectionType) {
-  EXPECT_EQ(blink::WebEffectiveConnectionType::TypeUnknown,
-            frame()->getEffectiveConnectionType());
-  EXPECT_EQ(blink::WebEffectiveConnectionType::TypeUnknown,
-            GetMainRenderFrame()->getEffectiveConnectionType());
+  EXPECT_EQ(blink::WebEffectiveConnectionType::kTypeUnknown,
+            frame()->GetEffectiveConnectionType());
+  EXPECT_EQ(blink::WebEffectiveConnectionType::kTypeUnknown,
+            GetMainRenderFrame()->GetEffectiveConnectionType());
 
   const struct {
     blink::WebEffectiveConnectionType type;
-  } tests[] = {{blink::WebEffectiveConnectionType::TypeUnknown},
-               {blink::WebEffectiveConnectionType::Type2G},
-               {blink::WebEffectiveConnectionType::Type4G}};
+  } tests[] = {{blink::WebEffectiveConnectionType::kTypeUnknown},
+               {blink::WebEffectiveConnectionType::kType2G},
+               {blink::WebEffectiveConnectionType::kType4G}};
 
   for (size_t i = 0; i < arraysize(tests); ++i) {
     SetEffectionConnectionType(GetMainRenderFrame(), tests[i].type);
     SetEffectionConnectionType(frame(), tests[i].type);
 
-    EXPECT_EQ(tests[i].type, frame()->getEffectiveConnectionType());
+    EXPECT_EQ(tests[i].type, frame()->GetEffectiveConnectionType());
     EXPECT_EQ(tests[i].type,
-              GetMainRenderFrame()->getEffectiveConnectionType());
+              GetMainRenderFrame()->GetEffectiveConnectionType());
 
     blink::WebHistoryItem item;
-    item.initialize();
+    item.Initialize();
 
     // The main frame's and subframe's effective connection type should stay the
     // same on navigations within the page.
-    frame()->didNavigateWithinPage(frame()->GetWebFrame(), item,
-                                   blink::WebStandardCommit, true);
-    EXPECT_EQ(tests[i].type, frame()->getEffectiveConnectionType());
-    GetMainRenderFrame()->didNavigateWithinPage(
-        GetMainRenderFrame()->GetWebFrame(), item, blink::WebStandardCommit,
-        true);
-    EXPECT_EQ(tests[i].type, frame()->getEffectiveConnectionType());
+    frame()->DidNavigateWithinPage(item, blink::kWebStandardCommit, true);
+    EXPECT_EQ(tests[i].type, frame()->GetEffectiveConnectionType());
+    GetMainRenderFrame()->DidNavigateWithinPage(item, blink::kWebStandardCommit,
+                                                true);
+    EXPECT_EQ(tests[i].type, frame()->GetEffectiveConnectionType());
 
     // The subframe's effective connection type should not be reset on commit.
     DocumentState* document_state =
-        DocumentState::FromDataSource(frame()->GetWebFrame()->dataSource());
+        DocumentState::FromDataSource(frame()->GetWebFrame()->DataSource());
     static_cast<NavigationStateImpl*>(document_state->navigation_state())
-        ->set_was_within_same_page(false);
+        ->set_was_within_same_document(false);
 
-    frame()->didCommitProvisionalLoad(frame()->GetWebFrame(), item,
-                                      blink::WebStandardCommit);
-    EXPECT_EQ(tests[i].type, frame()->getEffectiveConnectionType());
+    frame()->DidCommitProvisionalLoad(item, blink::kWebStandardCommit);
+    EXPECT_EQ(tests[i].type, frame()->GetEffectiveConnectionType());
 
     // The main frame's effective connection type should be reset on commit.
     document_state = DocumentState::FromDataSource(
-        GetMainRenderFrame()->GetWebFrame()->dataSource());
+        GetMainRenderFrame()->GetWebFrame()->DataSource());
     static_cast<NavigationStateImpl*>(document_state->navigation_state())
-        ->set_was_within_same_page(false);
+        ->set_was_within_same_document(false);
 
-    GetMainRenderFrame()->didCommitProvisionalLoad(
-        GetMainRenderFrame()->GetWebFrame(), item, blink::WebStandardCommit);
-    EXPECT_EQ(blink::WebEffectiveConnectionType::TypeUnknown,
-              GetMainRenderFrame()->getEffectiveConnectionType());
+    GetMainRenderFrame()->DidCommitProvisionalLoad(item,
+                                                   blink::kWebStandardCommit);
+    EXPECT_EQ(blink::WebEffectiveConnectionType::kTypeUnknown,
+              GetMainRenderFrame()->GetEffectiveConnectionType());
 
     // The subframe would be deleted here after a cross-document navigation.
     // It happens to be left around in this test because this does not simulate
@@ -297,8 +308,8 @@ TEST_F(RenderFrameImplTest, SaveImageFromDataURL) {
   const std::string image_data_url =
       "data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=";
 
-  frame()->saveImageFromDataURL(WebString::fromUTF8(image_data_url));
-  ProcessPendingMessages();
+  frame()->SaveImageFromDataURL(WebString::FromUTF8(image_data_url));
+  base::RunLoop().RunUntilIdle();
   const IPC::Message* msg2 = render_thread_->sink().GetFirstMessageMatching(
       FrameHostMsg_SaveImageFromDataURL::ID);
   EXPECT_TRUE(msg2);
@@ -307,13 +318,13 @@ TEST_F(RenderFrameImplTest, SaveImageFromDataURL) {
   FrameHostMsg_SaveImageFromDataURL::Read(msg2, &param1);
   EXPECT_EQ(std::get<2>(param1), image_data_url);
 
-  ProcessPendingMessages();
+  base::RunLoop().RunUntilIdle();
   render_thread_->sink().ClearMessages();
 
   const std::string large_data_url(1024 * 1024 * 20 - 1, 'd');
 
-  frame()->saveImageFromDataURL(WebString::fromUTF8(large_data_url));
-  ProcessPendingMessages();
+  frame()->SaveImageFromDataURL(WebString::FromUTF8(large_data_url));
+  base::RunLoop().RunUntilIdle();
   const IPC::Message* msg3 = render_thread_->sink().GetFirstMessageMatching(
       FrameHostMsg_SaveImageFromDataURL::ID);
   EXPECT_TRUE(msg3);
@@ -322,13 +333,13 @@ TEST_F(RenderFrameImplTest, SaveImageFromDataURL) {
   FrameHostMsg_SaveImageFromDataURL::Read(msg3, &param2);
   EXPECT_EQ(std::get<2>(param2), large_data_url);
 
-  ProcessPendingMessages();
+  base::RunLoop().RunUntilIdle();
   render_thread_->sink().ClearMessages();
 
   const std::string exceeded_data_url(1024 * 1024 * 20 + 1, 'd');
 
-  frame()->saveImageFromDataURL(WebString::fromUTF8(exceeded_data_url));
-  ProcessPendingMessages();
+  frame()->SaveImageFromDataURL(WebString::FromUTF8(exceeded_data_url));
+  base::RunLoop().RunUntilIdle();
   const IPC::Message* msg4 = render_thread_->sink().GetFirstMessageMatching(
       FrameHostMsg_SaveImageFromDataURL::ID);
   EXPECT_FALSE(msg4);
@@ -348,19 +359,19 @@ TEST_F(RenderFrameImplTest, ZoomLimit) {
   GetMainRenderFrame()->NavigateInternal(
       common_params, StartNavigationParams(), RequestNavigationParams(),
       std::unique_ptr<StreamOverrideParameters>());
-  ProcessPendingMessages();
-  EXPECT_DOUBLE_EQ(kMinZoomLevel, view_->GetWebView()->zoomLevel());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_DOUBLE_EQ(kMinZoomLevel, view_->GetWebView()->ZoomLevel());
 
   // It should work even when the zoom limit is temporarily changed in the page.
-  view_->GetWebView()->zoomLimitsChanged(ZoomFactorToZoomLevel(1.0),
+  view_->GetWebView()->ZoomLimitsChanged(ZoomFactorToZoomLevel(1.0),
                                          ZoomFactorToZoomLevel(1.0));
   common_params.url = GURL("data:text/html,max_zoomlimit_test");
   GetMainRenderFrame()->SetHostZoomLevel(common_params.url, kMaxZoomLevel);
   GetMainRenderFrame()->NavigateInternal(
       common_params, StartNavigationParams(), RequestNavigationParams(),
       std::unique_ptr<StreamOverrideParameters>());
-  ProcessPendingMessages();
-  EXPECT_DOUBLE_EQ(kMaxZoomLevel, view_->GetWebView()->zoomLevel());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_DOUBLE_EQ(kMaxZoomLevel, view_->GetWebView()->ZoomLevel());
 }
 
 // Regression test for crbug.com/692557. It shouldn't crash if we inititate a
@@ -376,4 +387,202 @@ TEST_F(RenderFrameImplTest, NoCrashWhenDeletingFrameDuringFind) {
   frame()->OnMessageReceived(delete_message);
 }
 
-}  // namespace
+#if defined(OS_ANDROID)
+// Verify that RFI defers token requests if the token hasn't arrived yet.
+TEST_F(RenderFrameImplTest, TestOverlayRoutingTokenSendsLater) {
+  ASSERT_FALSE(overlay_routing_token_.has_value());
+
+  frame()->RequestOverlayRoutingToken(
+      base::Bind(&RenderFrameImplTest::ReceiveOverlayRoutingToken,
+                 base::Unretained(this)));
+  ASSERT_FALSE(overlay_routing_token_.has_value());
+
+  // The host should receive a request for it sent to the frame.
+  const IPC::Message* msg = render_thread_->sink().GetFirstMessageMatching(
+      FrameHostMsg_RequestOverlayRoutingToken::ID);
+  EXPECT_TRUE(msg);
+
+  // Send a token.
+  base::UnguessableToken token = base::UnguessableToken::Create();
+  FrameMsg_SetOverlayRoutingToken token_message(0, token);
+  frame()->OnMessageReceived(token_message);
+
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(overlay_routing_token_.has_value());
+  ASSERT_EQ(overlay_routing_token_.value(), token);
+}
+
+// Verify that RFI sends tokens if they're already available.
+TEST_F(RenderFrameImplTest, TestOverlayRoutingTokenSendsNow) {
+  ASSERT_FALSE(overlay_routing_token_.has_value());
+  base::UnguessableToken token = base::UnguessableToken::Create();
+  FrameMsg_SetOverlayRoutingToken token_message(0, token);
+  frame()->OnMessageReceived(token_message);
+
+  // The frame now has a token.  We don't care if it sends the token before
+  // returning or posts a message.
+  base::RunLoop().RunUntilIdle();
+  frame()->RequestOverlayRoutingToken(
+      base::Bind(&RenderFrameImplTest::ReceiveOverlayRoutingToken,
+                 base::Unretained(this)));
+  ASSERT_TRUE(overlay_routing_token_.has_value());
+  ASSERT_EQ(overlay_routing_token_.value(), token);
+
+  // Since the token already arrived, a request for it shouldn't be sent.
+  const IPC::Message* msg = render_thread_->sink().GetFirstMessageMatching(
+      FrameHostMsg_RequestOverlayRoutingToken::ID);
+  EXPECT_FALSE(msg);
+}
+#endif
+
+TEST_F(RenderFrameImplTest, PreviewsStateAfterWillSendRequest) {
+  const struct {
+    PreviewsState frame_previews_state;
+    WebURLRequest::PreviewsState initial_request_previews_state;
+    WebURLRequest::PreviewsState expected_final_request_previews_state;
+  } tests[] = {
+      // With no previews enabled for the frame, no previews should be
+      // activated.
+      {PREVIEWS_UNSPECIFIED, WebURLRequest::kPreviewsUnspecified,
+       WebURLRequest::kPreviewsOff},
+
+      // If the request already has a previews state set, then it shouldn't be
+      // overridden.
+      {SERVER_LOFI_ON, WebURLRequest::kPreviewsNoTransform,
+       WebURLRequest::kPreviewsNoTransform},
+      {SERVER_LOFI_ON, WebURLRequest::kPreviewsOff,
+       WebURLRequest::kPreviewsOff},
+
+      // Server Lo-Fi and Server Lite Pages should be enabled for the request
+      // when they're enabled for the frame.
+      {SERVER_LOFI_ON, WebURLRequest::kPreviewsUnspecified,
+       WebURLRequest::kServerLoFiOn},
+      {SERVER_LITE_PAGE_ON, WebURLRequest::kPreviewsUnspecified,
+       WebURLRequest::kServerLitePageOn},
+      {SERVER_LITE_PAGE_ON | SERVER_LOFI_ON,
+       WebURLRequest::kPreviewsUnspecified,
+       WebURLRequest::kServerLitePageOn | WebURLRequest::kServerLoFiOn},
+
+      // The CLIENT_LOFI_ON frame flag should be ignored at this point in the
+      // request.
+      {CLIENT_LOFI_ON, WebURLRequest::kPreviewsUnspecified,
+       WebURLRequest::kPreviewsOff},
+      {SERVER_LOFI_ON | CLIENT_LOFI_ON, WebURLRequest::kPreviewsUnspecified,
+       WebURLRequest::kServerLoFiOn},
+
+      // A request that's using Client Lo-Fi should continue using Client Lo-Fi.
+      {SERVER_LOFI_ON | CLIENT_LOFI_ON, WebURLRequest::kClientLoFiOn,
+       WebURLRequest::kClientLoFiOn},
+      {CLIENT_LOFI_ON, WebURLRequest::kClientLoFiOn,
+       WebURLRequest::kClientLoFiOn},
+      {SERVER_LITE_PAGE_ON, WebURLRequest::kClientLoFiOn,
+       WebURLRequest::kClientLoFiOn},
+  };
+
+  for (const auto& test : tests) {
+    SetPreviewsState(frame(), test.frame_previews_state);
+
+    WebURLRequest request;
+    request.SetURL(GURL("http://example.com"));
+    request.SetPreviewsState(test.initial_request_previews_state);
+
+    frame()->WillSendRequest(request);
+
+    EXPECT_EQ(test.expected_final_request_previews_state,
+              request.GetPreviewsState())
+        << (&test - tests);
+  }
+}
+
+TEST_F(RenderFrameImplTest, IsClientLoFiActiveForFrame) {
+  const struct {
+    PreviewsState frame_previews_state;
+    bool expected_is_client_lo_fi_active_for_frame;
+  } tests[] = {
+      // With no previews enabled for the frame, no previews should be
+      // activated.
+      {PREVIEWS_UNSPECIFIED, false},
+
+      // Server Lo-Fi should not make Client Lo-Fi active.
+      {SERVER_LOFI_ON, false},
+
+      // PREVIEWS_NO_TRANSFORM and PREVIEWS_OFF should
+      // take precedence over Client Lo-Fi.
+      {CLIENT_LOFI_ON | PREVIEWS_NO_TRANSFORM, false},
+      {CLIENT_LOFI_ON | PREVIEWS_OFF, false},
+
+      // Otherwise, if Client Lo-Fi is enabled on its own or with
+      // SERVER_LOFI_ON, then it is active for the frame.
+      {CLIENT_LOFI_ON, true},
+      {CLIENT_LOFI_ON | SERVER_LOFI_ON, true},
+  };
+
+  for (const auto& test : tests) {
+    SetPreviewsState(frame(), test.frame_previews_state);
+
+    EXPECT_EQ(test.expected_is_client_lo_fi_active_for_frame,
+              frame()->IsClientLoFiActiveForFrame())
+        << (&test - tests);
+  }
+}
+
+TEST_F(RenderFrameImplTest, ShouldUseClientLoFiForRequest) {
+  const struct {
+    PreviewsState frame_previews_state;
+    bool is_https;
+    WebURLRequest::PreviewsState initial_request_previews_state;
+    bool expected_should_use_client_lo_fi_for_request;
+  } tests[] = {
+      // With no previews enabled for the frame, no previews should be
+      // activated.
+      {PREVIEWS_UNSPECIFIED, false, WebURLRequest::kPreviewsUnspecified, false},
+
+      // If the request already has a previews state set, then Client Lo-Fi
+      // should only be used if the request already has that bit set.
+      {CLIENT_LOFI_ON, false, WebURLRequest::kServerLoFiOn, false},
+      {PREVIEWS_UNSPECIFIED, false, WebURLRequest::kClientLoFiOn, true},
+      {CLIENT_LOFI_ON, false, WebURLRequest::kClientLoFiOn, true},
+      {CLIENT_LOFI_ON | SERVER_LITE_PAGE_ON, true,
+       WebURLRequest::kPreviewsUnspecified, true},
+      {CLIENT_LOFI_ON | SERVER_LITE_PAGE_ON, false,
+       WebURLRequest::kPreviewsUnspecified, true},
+
+      // If Client Lo-Fi isn't enabled for the frame, then it shouldn't be used
+      // for any requests.
+      {SERVER_LOFI_ON, true, WebURLRequest::kPreviewsUnspecified, false},
+
+      // PREVIEWS_NO_TRANSFORM and PREVIEWS_OFF should take precedence
+      // over Client Lo-Fi.
+      {CLIENT_LOFI_ON | PREVIEWS_NO_TRANSFORM, false,
+       WebURLRequest::kPreviewsUnspecified, false},
+      {CLIENT_LOFI_ON | PREVIEWS_OFF, false,
+       WebURLRequest::kPreviewsUnspecified, false},
+
+      // If both Server Lo-Fi and Client Lo-Fi are enabled for the frame, then
+      // only https:// requests should use Client Lo-Fi.
+      {CLIENT_LOFI_ON | SERVER_LOFI_ON, false,
+       WebURLRequest::kPreviewsUnspecified, false},
+      {CLIENT_LOFI_ON | SERVER_LOFI_ON, true,
+       WebURLRequest::kPreviewsUnspecified, true},
+
+      // Otherwise, if Client Lo-Fi is enabled on its own, then requests should
+      // use Client Lo-Fi.
+      {CLIENT_LOFI_ON, false, WebURLRequest::kPreviewsUnspecified, true},
+      {CLIENT_LOFI_ON, true, WebURLRequest::kPreviewsUnspecified, true},
+  };
+
+  for (const auto& test : tests) {
+    SetPreviewsState(frame(), test.frame_previews_state);
+
+    WebURLRequest request;
+    request.SetURL(
+        GURL(test.is_https ? "https://example.com" : "http://example.com"));
+    request.SetPreviewsState(test.initial_request_previews_state);
+
+    EXPECT_EQ(test.expected_should_use_client_lo_fi_for_request,
+              frame()->ShouldUseClientLoFiForRequest(request))
+        << (&test - tests);
+  }
+}
+
+}  // namespace content

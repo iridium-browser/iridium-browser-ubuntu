@@ -111,7 +111,11 @@ void GrGLGetDriverInfo(GrGLStandard standard,
         versionString = "";
     }
 
-    if (0 == strcmp(rendererString, "Chromium")) {
+    static const char kChromium[] = "Chromium";
+    char suffix[SK_ARRAY_COUNT(kChromium)];
+    if (0 == strcmp(rendererString, kChromium) ||
+        (3 == sscanf(versionString, "OpenGL ES %d.%d %8s", &major, &minor, suffix) &&
+         0 == strcmp(kChromium, suffix))) {
         *outDriver = kChromium_GrGLDriver;
         return;
     }
@@ -168,6 +172,16 @@ void GrGLGetDriverInfo(GrGLStandard standard,
     if (kIntel_GrGLVendor == vendor) {
         // We presume we're on the Intel driver since it hasn't identified itself as Mesa.
         *outDriver = kIntel_GrGLDriver;
+    }
+
+    if (kQualcomm_GrGLVendor == vendor) {
+        *outDriver = kQualcomm_GrGLDriver;
+        int n = sscanf(versionString, "OpenGL ES %d.%d V@%d.%d", &major, &minor, &driverMajor,
+                       &driverMinor);
+        if (4 == n) {
+            *outVersion = GR_GL_DRIVER_VER(driverMajor, driverMinor);
+        }
+        return;
     }
 }
 
@@ -309,8 +323,26 @@ GrGLRenderer GrGLGetRendererFromString(const char* rendererString) {
                 }
             }
         }
+        int intelNumber;
+        n = sscanf(rendererString, "Intel(R) Iris(TM) Graphics %d", &intelNumber);
+        if (1 != n) {
+            n = sscanf(rendererString, "Intel(R) HD Graphics %d", &intelNumber);
+        }
+        if (1 == n) {
+            if (intelNumber >= 6000 && intelNumber < 7000) {
+                return kIntel6xxx_GrGLRenderer;
+            }
+        }
         if (0 == strcmp("Mesa Offscreen", rendererString)) {
             return kOSMesa_GrGLRenderer;
+        }
+        static const char kMaliTStr[] = "Mali-T";
+        if (0 == strncmp(rendererString, kMaliTStr, SK_ARRAY_COUNT(kMaliTStr) - 1)) {
+            return kMaliT_GrGLRenderer;
+        }
+        static const char kANGLEStr[] = "ANGLE";
+        if (0 == strncmp(rendererString, kANGLEStr, SK_ARRAY_COUNT(kANGLEStr) - 1)) {
+            return kANGLE_GrGLRenderer;
         }
     }
     return kOther_GrGLRenderer;

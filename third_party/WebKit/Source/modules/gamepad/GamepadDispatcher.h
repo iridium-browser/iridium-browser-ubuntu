@@ -6,13 +6,11 @@
 #define GamepadDispatcher_h
 
 #include "core/frame/PlatformEventDispatcher.h"
+#include "device/gamepad/public/cpp/gamepads.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/WebGamepad.h"
 #include "public/platform/WebGamepadListener.h"
 
 namespace blink {
-
-class WebGamepads;
 
 class GamepadDispatcher final
     : public GarbageCollectedFinalized<GamepadDispatcher>,
@@ -21,19 +19,19 @@ class GamepadDispatcher final
   USING_GARBAGE_COLLECTED_MIXIN(GamepadDispatcher);
 
  public:
-  static GamepadDispatcher& instance();
+  static GamepadDispatcher& Instance();
   ~GamepadDispatcher() override;
 
-  void sampleGamepads(WebGamepads&);
+  void SampleGamepads(device::Gamepads&);
 
   struct ConnectionChange {
     DISALLOW_NEW();
-    WebGamepad pad;
+    device::Gamepad pad;
     unsigned index;
   };
 
-  const ConnectionChange& latestConnectionChange() const {
-    return m_latestChange;
+  const ConnectionChange& LatestConnectionChange() const {
+    return latest_change_;
   }
 
   DECLARE_VIRTUAL_TRACE();
@@ -42,18 +40,18 @@ class GamepadDispatcher final
   GamepadDispatcher();
 
   // WebGamepadListener
-  void didConnectGamepad(unsigned index, const WebGamepad&) override;
-  void didDisconnectGamepad(unsigned index, const WebGamepad&) override;
+  void DidConnectGamepad(unsigned index, const device::Gamepad&) override;
+  void DidDisconnectGamepad(unsigned index, const device::Gamepad&) override;
 
   // PlatformEventDispatcher
-  void startListening() override;
-  void stopListening() override;
+  void StartListening() override;
+  void StopListening() override;
 
-  void dispatchDidConnectOrDisconnectGamepad(unsigned index,
-                                             const WebGamepad&,
+  void DispatchDidConnectOrDisconnectGamepad(unsigned index,
+                                             const device::Gamepad&,
                                              bool connected);
 
-  ConnectionChange m_latestChange;
+  ConnectionChange latest_change_;
 };
 
 }  // namespace blink

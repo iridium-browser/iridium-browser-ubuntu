@@ -4,99 +4,132 @@
 
 #include "components/content_settings/core/common/content_settings.h"
 
-#include "base/containers/hash_tables.h"
+#include <algorithm>
+
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/stl_util.h"
 #include "build/build_config.h"
+#include "components/content_settings/core/common/content_settings_utils.h"
+
+namespace {
+
+struct HistogramValue {
+  ContentSettingsType type;
+  int value;
+};
+
+// WARNING: The value specified here for a type should match exactly the value
+// specified in the ContentType enum in histograms.xml. Since these values are
+// used for histograms, please do not reuse the same value for a different
+// content setting. Always append to the end and increment.
+//
+// TODO(raymes): We should use a sparse histogram here on the hash of the
+// content settings type name instead.
+//
+// The array size must be explicit for the static_asserts below.
+constexpr size_t kNumHistogramValues = 30;
+constexpr HistogramValue kHistogramValue[kNumHistogramValues] = {
+    {CONTENT_SETTINGS_TYPE_COOKIES, 0},
+    {CONTENT_SETTINGS_TYPE_IMAGES, 1},
+    {CONTENT_SETTINGS_TYPE_JAVASCRIPT, 2},
+    {CONTENT_SETTINGS_TYPE_PLUGINS, 3},
+    {CONTENT_SETTINGS_TYPE_POPUPS, 4},
+    {CONTENT_SETTINGS_TYPE_GEOLOCATION, 5},
+    {CONTENT_SETTINGS_TYPE_NOTIFICATIONS, 6},
+    {CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE, 7},
+    {CONTENT_SETTINGS_TYPE_MIXEDSCRIPT, 10},
+    {CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, 12},
+    {CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, 13},
+    {CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS, 14},
+    {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, 15},
+    {CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS, 16},
+    {CONTENT_SETTINGS_TYPE_MIDI_SYSEX, 17},
+    {CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, 19},
+    {CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER, 21},
+    {CONTENT_SETTINGS_TYPE_APP_BANNER, 22},
+    {CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT, 23},
+    {CONTENT_SETTINGS_TYPE_DURABLE_STORAGE, 24},
+    {CONTENT_SETTINGS_TYPE_BLUETOOTH_GUARD, 26},
+    {CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC, 27},
+    {CONTENT_SETTINGS_TYPE_AUTOPLAY, 28},
+    {CONTENT_SETTINGS_TYPE_IMPORTANT_SITE_INFO, 30},
+    {CONTENT_SETTINGS_TYPE_PERMISSION_AUTOBLOCKER_DATA, 31},
+    {CONTENT_SETTINGS_TYPE_ADS, 32},
+    {CONTENT_SETTINGS_TYPE_ADS_DATA, 33},
+    {CONTENT_SETTINGS_TYPE_PASSWORD_PROTECTION, 34},
+    {CONTENT_SETTINGS_TYPE_MEDIA_ENGAGEMENT, 35},
+    {CONTENT_SETTINGS_TYPE_SOUND, 36},
+};
+
+}  // namespace
 
 ContentSetting IntToContentSetting(int content_setting) {
   return ((content_setting < 0) ||
-          (content_setting >= CONTENT_SETTING_NUM_SETTINGS)) ?
-      CONTENT_SETTING_DEFAULT : static_cast<ContentSetting>(content_setting);
+          (content_setting >= CONTENT_SETTING_NUM_SETTINGS))
+             ? CONTENT_SETTING_DEFAULT
+             : static_cast<ContentSetting>(content_setting);
 }
-
-// WARNING: This array should not be reordered or removed as it is used for
-// histogram values. If a ContentSettingsType value has been removed, the entry
-// must be replaced by a placeholder. It should correspond directly to the
-// ContentType enum in histograms.xml.
-// TODO(raymes): We should use a sparse histogram here on the hash of the
-// content settings type name instead.
-ContentSettingsType kHistogramOrder[] = {
-    CONTENT_SETTINGS_TYPE_COOKIES,
-    CONTENT_SETTINGS_TYPE_IMAGES,
-    CONTENT_SETTINGS_TYPE_JAVASCRIPT,
-    CONTENT_SETTINGS_TYPE_PLUGINS,
-    CONTENT_SETTINGS_TYPE_POPUPS,
-    CONTENT_SETTINGS_TYPE_GEOLOCATION,
-    CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-    CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE,
-    CONTENT_SETTINGS_TYPE_DEFAULT,  // FULLSCREEN (removed).
-    CONTENT_SETTINGS_TYPE_DEFAULT,  // MOUSELOCK (removed).
-    CONTENT_SETTINGS_TYPE_MIXEDSCRIPT,
-    CONTENT_SETTINGS_TYPE_DEFAULT,  // MEDIASTREAM (removed).
-    CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-    CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-    CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS,
-    CONTENT_SETTINGS_TYPE_PPAPI_BROKER,
-    CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
-    CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
-    CONTENT_SETTINGS_TYPE_DEFAULT,  // PUSH_MESSAGING (removed).
-    CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS,
-    CONTENT_SETTINGS_TYPE_DEFAULT,  // METRO_SWITCH_TO_DESKTOP (removed).
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
-    CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER,
-#else
-    CONTENT_SETTINGS_TYPE_DEFAULT,  // PROTECTED_MEDIA_IDENTIFIER (mobile only).
-#endif
-    CONTENT_SETTINGS_TYPE_APP_BANNER,
-    CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT,
-    CONTENT_SETTINGS_TYPE_DURABLE_STORAGE,
-    CONTENT_SETTINGS_TYPE_DEFAULT,  // KEYGEN (removed).
-    CONTENT_SETTINGS_TYPE_BLUETOOTH_GUARD,
-    CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC,
-    CONTENT_SETTINGS_TYPE_AUTOPLAY,
-    CONTENT_SETTINGS_TYPE_DEFAULT,  // PROMPT_NO_DECISION_COUNT (migrated).
-    CONTENT_SETTINGS_TYPE_IMPORTANT_SITE_INFO,
-    CONTENT_SETTINGS_TYPE_PERMISSION_AUTOBLOCKER_DATA,
-    CONTENT_SETTINGS_TYPE_SUBRESOURCE_FILTER,
-};
 
 int ContentSettingTypeToHistogramValue(ContentSettingsType content_setting,
                                        size_t* num_values) {
-  // Translate the list above into a map for fast lookup.
-  typedef base::hash_map<int, int> Map;
-  CR_DEFINE_STATIC_LOCAL(Map, kMap, ());
-  if (kMap.empty()) {
-    for (size_t i = 0; i < arraysize(kHistogramOrder); ++i) {
-      if (kHistogramOrder[i] != CONTENT_SETTINGS_TYPE_DEFAULT)
-        kMap[kHistogramOrder[i]] = static_cast<int>(i);
-    }
-  }
+  *num_values = arraysize(kHistogramValue);
 
-  DCHECK(base::ContainsKey(kMap, content_setting));
-  *num_values = arraysize(kHistogramOrder);
-  return kMap[content_setting];
+  // Verify the array is sorted by enum type and contains all values.
+  DCHECK(std::is_sorted(std::begin(kHistogramValue), std::end(kHistogramValue),
+                        [](const HistogramValue& a, const HistogramValue& b) {
+                          return a.type < b.type;
+                        }));
+  static_assert(kHistogramValue[kNumHistogramValues - 1].type ==
+                    CONTENT_SETTINGS_NUM_TYPES - 1,
+                "Update content settings histogram lookup");
+
+  const HistogramValue* found = std::lower_bound(
+      std::begin(kHistogramValue), std::end(kHistogramValue), content_setting,
+      [](const HistogramValue& a, ContentSettingsType b) {
+        return a.type < b;
+      });
+  if (found != std::end(kHistogramValue) && found->type == content_setting)
+    return found->value;
+  NOTREACHED();
+  return -1;
 }
 
 ContentSettingPatternSource::ContentSettingPatternSource(
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern,
-    ContentSetting setting,
+    std::unique_ptr<base::Value> setting_value,
     const std::string& source,
     bool incognito)
     : primary_pattern(primary_pattern),
       secondary_pattern(secondary_pattern),
-      setting(setting),
+      setting_value(std::move(setting_value)),
       source(source),
       incognito(incognito) {}
 
-ContentSettingPatternSource::ContentSettingPatternSource()
-    : setting(CONTENT_SETTING_DEFAULT), incognito(false) {
-}
+ContentSettingPatternSource::ContentSettingPatternSource() : incognito(false) {}
 
 ContentSettingPatternSource::ContentSettingPatternSource(
-    const ContentSettingPatternSource& other) = default;
+    const ContentSettingPatternSource& other) {
+  *this = other;
+}
+
+ContentSettingPatternSource& ContentSettingPatternSource::operator=(
+    const ContentSettingPatternSource& other) {
+  primary_pattern = other.primary_pattern;
+  secondary_pattern = other.secondary_pattern;
+  if (other.setting_value)
+    setting_value = base::MakeUnique<base::Value>(*(other.setting_value));
+  source = other.source;
+  incognito = other.incognito;
+  return *this;
+}
+
+ContentSettingPatternSource::~ContentSettingPatternSource() {}
+
+ContentSetting ContentSettingPatternSource::GetContentSetting() const {
+  return content_settings::ValueToContentSetting(setting_value.get());
+}
 
 RendererContentSettingRules::RendererContentSettingRules() {}
 

@@ -131,7 +131,7 @@ IPC_MESSAGE_ROUTED1(SyncCompositorMsg_DemandDrawHwAsync,
 IPC_SYNC_MESSAGE_ROUTED1_3(SyncCompositorMsg_DemandDrawHw,
                            content::SyncCompositorDemandDrawHwParams,
                            content::SyncCompositorCommonRendererParams,
-                           uint32_t /* compositor_frame_sink_id */,
+                           uint32_t /* layer_tree_frame_sink_id */,
                            base::Optional<cc::CompositorFrame>);
 
 IPC_SYNC_MESSAGE_ROUTED1_2(SyncCompositorMsg_SetSharedMemory,
@@ -141,11 +141,10 @@ IPC_SYNC_MESSAGE_ROUTED1_2(SyncCompositorMsg_SetSharedMemory,
 
 IPC_MESSAGE_ROUTED0(SyncCompositorMsg_ZeroSharedMemory);
 
-IPC_SYNC_MESSAGE_ROUTED1_3(SyncCompositorMsg_DemandDrawSw,
+IPC_SYNC_MESSAGE_ROUTED1_2(SyncCompositorMsg_DemandDrawSw,
                            content::SyncCompositorDemandDrawSwParams,
-                           bool /* result */,
                            content::SyncCompositorCommonRendererParams,
-                           cc::CompositorFrame)
+                           base::Optional<cc::CompositorFrameMetadata>)
 
 IPC_SYNC_MESSAGE_ROUTED2_1(SyncCompositorMsg_ZoomBy,
                            float /* delta */,
@@ -156,19 +155,19 @@ IPC_MESSAGE_ROUTED1(SyncCompositorMsg_SetMemoryPolicy,
                     uint32_t /* bytes_limit */);
 
 IPC_MESSAGE_ROUTED2(SyncCompositorMsg_ReclaimResources,
-                    uint32_t /* compositor_frame_sink_id */,
-                    cc::ReturnedResourceArray /* resources */);
+                    uint32_t /* layer_tree_frame_sink_id */,
+                    std::vector<cc::ReturnedResource> /* resources */);
 
 IPC_MESSAGE_ROUTED1(SyncCompositorMsg_SetScroll, gfx::ScrollOffset);
 
 // -----------------------------------------------------------------------------
 // Messages sent from the renderer to the browser.
 
-IPC_MESSAGE_ROUTED0(SyncCompositorHostMsg_CompositorFrameSinkCreated);
+IPC_MESSAGE_ROUTED0(SyncCompositorHostMsg_LayerTreeFrameSinkCreated);
 
 IPC_MESSAGE_ROUTED1(SyncCompositorHostMsg_UpdateState,
                     content::SyncCompositorCommonRendererParams)
 
 IPC_MESSAGE_ROUTED2(SyncCompositorHostMsg_ReturnFrame,
-                    uint32_t /* compositor_frame_sink_id */,
+                    uint32_t /* layer_tree_frame_sink_id */,
                     base::Optional<cc::CompositorFrame>);

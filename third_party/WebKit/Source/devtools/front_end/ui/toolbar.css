@@ -22,6 +22,7 @@
 
 .toolbar-shadow.wrappable {
     flex-wrap: wrap;
+    overflow: visible;
 }
 
 .toolbar-shadow.wrappable-reverse {
@@ -54,7 +55,6 @@
 .toolbar-dropdown-arrow {
     background-color: #6D6D6D;
     pointer-events: none;
-    margin: auto 0;
     flex: none;
 }
 
@@ -79,6 +79,7 @@
 
 .toolbar-has-dropdown {
     justify-content: space-between;
+    padding: 0 3px 0 5px;
 }
 
 .toolbar-has-dropdown .toolbar-text {
@@ -201,9 +202,21 @@ select.toolbar-item {
     -webkit-appearance: none;
     border: 0;
     border-radius: 0;
-    padding: 0 8px 0 5px;
+    padding: 0 13px 0 5px;
     margin-right: -10px;
     position: relative;
+    height: 22px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+select.toolbar-item[data-keyboard-focus="true"]:focus {
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 2px;
+}
+
+select.toolbar-item[data-keyboard-focus="true"]:focus > * {
+    background: white;
 }
 
 /* Input */
@@ -215,6 +228,7 @@ select.toolbar-item {
     margin: 1px 3px;
     background-color: white;
     border: solid 1px #d8d8d8;
+    border-radius: 2px;
     min-width: 35px;
 }
 
@@ -232,7 +246,7 @@ select.toolbar-item {
     opacity: 0.7;
     flex-basis: 13px;
     flex-shrink: 0;
-    height: 13px;
+    height: 16px;
 }
 
 .toolbar-input-clear-button:hover {
@@ -269,6 +283,17 @@ select.toolbar-item {
     background-color: rgb(163, 163, 163);
 }
 
+.toolbar-button[data-keyboard-focus="true"]:focus::after {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    left: 2px;
+    right: 2px;
+    background-color: rgba(0, 0, 0, 0.08);
+    border-radius: 2px;
+    content: "";
+}
+
 .toolbar-shadow.floating {
     flex-direction: column;
     height: auto;
@@ -277,10 +302,4 @@ select.toolbar-item {
     margin-top: -1px;
     width: 28px;
     left: -2px;
-}
-
-span.toolbar-select-container.toolbar-item.warning {
-    background: #ffd7d7;
-    padding: 0 5px 0 0;
-    margin-right: 1px;
 }

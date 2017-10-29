@@ -72,6 +72,7 @@ class EVENTS_EXPORT GestureRecognizerImpl : public GestureRecognizer,
 
   Gestures AckTouchEvent(uint32_t unique_event_id,
                          ui::EventResult result,
+                         bool is_source_touch_event_set_non_blocking,
                          GestureConsumer* consumer) override;
 
   bool CleanupStateForConsumer(GestureConsumer* consumer) override;
@@ -87,6 +88,12 @@ class EVENTS_EXPORT GestureRecognizerImpl : public GestureRecognizer,
   GestureEventHelper* FindDispatchHelperForConsumer(GestureConsumer* consumer);
   std::map<GestureConsumer*, std::unique_ptr<GestureProviderAura>>
       consumer_gesture_provider_;
+
+  // Maps an event via its |unique_event_id| to the corresponding gesture
+  // provider. This avoids any invalid reference while routing ACKs for events
+  // that may arise post |TransferEventsTo()| function call.
+  // See http://crbug.com/698843 for more info.
+  std::map<uint32_t, GestureProviderAura*> event_to_gesture_provider_;
 
   // |touch_id_target_| maps a touch-id to its target window.
   // touch-ids are removed from |touch_id_target_| on

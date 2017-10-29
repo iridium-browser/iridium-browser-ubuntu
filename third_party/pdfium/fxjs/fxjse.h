@@ -14,10 +14,20 @@
 class CFXJSE_Arguments;
 class CFXJSE_Value;
 
-// C++ object which can be wrapped by CFXJSE_value.
+// C++ object which is retrieved from v8 object's slot.
 class CFXJSE_HostObject {
  public:
   virtual ~CFXJSE_HostObject() {}
+
+  // Small layering violation here, but we need to distinguish between the
+  // two kinds of subclasses.
+  enum Type { kXFA, kFM2JS };
+  Type type() const { return type_; }
+
+ protected:
+  explicit CFXJSE_HostObject(Type type) { type_ = type; }
+
+  Type type_;
 };
 
 typedef void (*FXJSE_FuncCallback)(CFXJSE_Value* pThis,
@@ -39,18 +49,18 @@ enum FXJSE_ClassPropTypes {
 };
 
 struct FXJSE_FUNCTION_DESCRIPTOR {
-  const FX_CHAR* name;
+  const char* name;
   FXJSE_FuncCallback callbackProc;
 };
 
 struct FXJSE_PROPERTY_DESCRIPTOR {
-  const FX_CHAR* name;
+  const char* name;
   FXJSE_PropAccessor getProc;
   FXJSE_PropAccessor setProc;
 };
 
 struct FXJSE_CLASS_DESCRIPTOR {
-  const FX_CHAR* name;
+  const char* name;
   FXJSE_FuncCallback constructor;
   const FXJSE_PROPERTY_DESCRIPTOR* properties;
   const FXJSE_FUNCTION_DESCRIPTOR* methods;

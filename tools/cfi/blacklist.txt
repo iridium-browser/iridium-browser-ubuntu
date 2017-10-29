@@ -1,8 +1,8 @@
 # e.g. RolloverProtectedTickClock
 fun:*MutableInstance*
 
-# WTF allocators.
-fun:*allocate*Backing*
+# WTF allocators. See https://crbug.com/713293.
+fun:*Allocate*Backing*
 
 # WTF::ThreadSpecific
 fun:*ThreadSpecific*
@@ -65,9 +65,6 @@ src:*wtf/PartitionAllocator.h*
 # Methods disabled due to perf considerations.
 
 # Skia
-
-# https://crbug.com/638064#c1
-fun:*SkPictureUtils*ApproximateBytesUsed*
 
 # https://crbug.com/638056#c1
 fun:*SkCanvas*onDrawRect*

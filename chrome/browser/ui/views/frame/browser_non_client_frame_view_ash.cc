@@ -6,15 +6,14 @@
 
 #include <algorithm>
 
-#include "ash/common/ash_layout_constants.h"
-#include "ash/common/frame/caption_buttons/frame_caption_button_container_view.h"
-#include "ash/common/frame/default_header_painter.h"
-#include "ash/common/frame/frame_border_hit_test.h"
-#include "ash/common/frame/header_painter_util.h"
-#include "ash/common/wm_lookup.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
-#include "base/feature_list.h"
+#include "ash/ash_layout_constants.h"
+#include "ash/frame/caption_buttons/frame_caption_button_container_view.h"
+#include "ash/frame/default_header_painter.h"
+#include "ash/frame/frame_border_hit_test.h"
+#include "ash/frame/header_painter_util.h"
+#include "ash/shell.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "ash/wm/window_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -30,7 +29,6 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/grit/theme_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -45,12 +43,11 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/shared/app_types.h"
+#include "ash/public/cpp/app_types.h"
 #endif
 
 namespace {
@@ -76,14 +73,17 @@ BrowserNonClientFrameViewAsh::BrowserNonClientFrameViewAsh(
     : BrowserNonClientFrameView(frame, browser_view),
       caption_button_container_(nullptr),
       window_icon_(nullptr) {
-  ash::WmLookup::Get()
-      ->GetWindowForWidget(frame)
-      ->InstallResizeHandleWindowTargeter(nullptr);
-  ash::WmShell::Get()->AddShellObserver(this);
+  ash::wm::InstallResizeHandleWindowTargeterForWindow(frame->GetNativeWindow(),
+                                                      nullptr);
+  ash::Shell::Get()->AddShellObserver(this);
+  ash::Shell::Get()->tablet_mode_controller()->AddObserver(this);
 }
 
 BrowserNonClientFrameViewAsh::~BrowserNonClientFrameViewAsh() {
-  ash::WmShell::Get()->RemoveShellObserver(this);
+  // TODO(sammiequon): Add test for shutdown procedure.
+  if (ash::Shell::Get()->tablet_mode_controller())
+    ash::Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
+  ash::Shell::Get()->RemoveShellObserver(this);
 }
 
 void BrowserNonClientFrameViewAsh::Init() {
@@ -105,11 +105,9 @@ void BrowserNonClientFrameViewAsh::Init() {
     header_painter->Init(frame(), this, caption_button_container_);
     if (window_icon_)
       header_painter->UpdateLeftHeaderView(window_icon_);
-    if (base::FeatureList::IsEnabled(features::kMaterialDesignSettings)) {
-      // For non app (i.e. WebUI) windows (e.g. Settings) use MD frame color.
-      if (!browser_view()->browser()->is_app())
-        header_painter->SetFrameColors(kMdWebUIFrameColor, kMdWebUIFrameColor);
-    }
+    // For non app (i.e. WebUI) windows (e.g. Settings) use MD frame color.
+    if (!browser_view()->browser()->is_app())
+      header_painter->SetFrameColors(kMdWebUIFrameColor, kMdWebUIFrameColor);
   } else {
     BrowserHeaderPainterAsh* header_painter = new BrowserHeaderPainterAsh;
     header_painter_.reset(header_painter);
@@ -175,6 +173,17 @@ int BrowserNonClientFrameViewAsh::GetThemeBackgroundXInset() const {
 void BrowserNonClientFrameViewAsh::UpdateThrobber(bool running) {
   if (window_icon_)
     window_icon_->Update();
+}
+
+void BrowserNonClientFrameViewAsh::UpdateMinimumSize() {
+  gfx::Size min_size = GetMinimumSize();
+  aura::Window* frame_window = frame()->GetNativeWindow();
+  const gfx::Size* previous_min_size =
+      frame_window->GetProperty(aura::client::kMinimumSize);
+  if (!previous_min_size || *previous_min_size != min_size) {
+    frame_window->SetProperty(aura::client::kMinimumSize,
+                              new gfx::Size(min_size));
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -327,15 +336,38 @@ void BrowserNonClientFrameViewAsh::OnOverviewModeEnded() {
   caption_button_container_->SetVisible(true);
 }
 
-void BrowserNonClientFrameViewAsh::OnMaximizeModeStarted() {
+void BrowserNonClientFrameViewAsh::OnTabletModeStarted() {
   caption_button_container_->UpdateSizeButtonVisibility();
+
+  // Enter immersive mode if the feature is enabled and the widget is not
+  // already in fullscreen mode. Popups that are not activated but not
+  // minimized are still put in immersive mode, since they may still be visible
+  // but not activated due to something transparent and/or not fullscreen (ie.
+  // fullscreen launcher).
+  if (ash::Shell::Get()->tablet_mode_controller()->ShouldAutoHideTitlebars() &&
+      !frame()->IsFullscreen() && !browser_view()->IsBrowserTypeNormal() &&
+      !frame()->IsMinimized()) {
+    browser_view()->immersive_mode_controller()->SetEnabled(true);
+    return;
+  }
   InvalidateLayout();
   frame()->client_view()->InvalidateLayout();
   frame()->GetRootView()->Layout();
 }
 
-void BrowserNonClientFrameViewAsh::OnMaximizeModeEnded() {
-  OnMaximizeModeStarted();
+void BrowserNonClientFrameViewAsh::OnTabletModeEnded() {
+  caption_button_container_->UpdateSizeButtonVisibility();
+
+  // Exit immersive mode if the feature is enabled and the widget is not in
+  // fullscreen mode.
+  if (!frame()->IsFullscreen() && !browser_view()->IsBrowserTypeNormal() &&
+      ash::Shell::Get()->tablet_mode_controller()->auto_hide_title_bars()) {
+    browser_view()->immersive_mode_controller()->SetEnabled(false);
+    return;
+  }
+  InvalidateLayout();
+  frame()->client_view()->InvalidateLayout();
+  frame()->GetRootView()->Layout();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -447,8 +479,8 @@ void BrowserNonClientFrameViewAsh::PaintToolbarBackground(gfx::Canvas* canvas) {
 
   // Top stroke.
   gfx::ScopedCanvas scoped_canvas(canvas);
-  gfx::Rect tabstrip_bounds(GetBoundsForTabStrip(browser_view()->tabstrip()));
-  tabstrip_bounds.set_x(GetMirroredXForRect(tabstrip_bounds));
+  gfx::Rect tabstrip_bounds =
+      GetMirroredRect(GetBoundsForTabStrip(browser_view()->tabstrip()));
   canvas->ClipRect(tabstrip_bounds, SkClipOp::kDifference);
   const gfx::Rect separator_rect(toolbar_bounds.x(), tabstrip_bounds.bottom(),
                                  toolbar_bounds.width(), 0);

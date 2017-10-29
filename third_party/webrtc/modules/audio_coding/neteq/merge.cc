@@ -22,6 +22,8 @@
 #include "webrtc/modules/audio_coding/neteq/dsp_helper.h"
 #include "webrtc/modules/audio_coding/neteq/expand.h"
 #include "webrtc/modules/audio_coding/neteq/sync_buffer.h"
+#include "webrtc/rtc_base/safe_conversions.h"
+#include "webrtc/rtc_base/safe_minmax.h"
 
 namespace webrtc {
 
@@ -156,6 +158,7 @@ size_t Merge::Process(int16_t* input, size_t input_length,
 
   // Return new added length. |old_length| samples were borrowed from
   // |sync_buffer_|.
+  RTC_DCHECK_GE(output_length, old_length);
   return output_length - old_length;
 }
 
@@ -209,8 +212,8 @@ size_t Merge::GetExpandedSignal(size_t* old_length, size_t* expand_period) {
 int16_t Merge::SignalScaling(const int16_t* input, size_t input_length,
                              const int16_t* expanded_signal) const {
   // Adjust muting factor if new vector is more or less of the BGN energy.
-  const size_t mod_input_length =
-      std::min(static_cast<size_t>(64 * fs_mult_), input_length);
+  const auto mod_input_length = rtc::SafeMin<size_t>(
+      64 * rtc::dchecked_cast<size_t>(fs_mult_), input_length);
   const int16_t expanded_max =
       WebRtcSpl_MaxAbsValueW16(expanded_signal, mod_input_length);
   int32_t factor = (expanded_max * expanded_max) /

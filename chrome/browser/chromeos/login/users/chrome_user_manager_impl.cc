@@ -10,7 +10,7 @@
 #include <set>
 #include <utility>
 
-#include "ash/common/multi_profile_uma.h"
+#include "ash/multi_profile_uma.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -32,6 +32,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "chrome/browser/chromeos/extensions/active_tab_permission_granter_delegate_chromeos.h"
+#include "chrome/browser/chromeos/extensions/extension_tab_util_delegate_chromeos.h"
+#include "chrome/browser/chromeos/extensions/permissions_updater_delegate_chromeos.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/enterprise_user_session_metrics.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
@@ -51,6 +54,8 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
 #include "chrome/browser/chromeos/system/timezone_util.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/supervised_user/chromeos/manager_password_service_factory.h"
@@ -59,7 +64,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/theme_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/login/login_state.h"
@@ -83,7 +87,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
-#include "ui/chromeos/strings/grit/ui_chromeos_strings.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/wm/core/wm_core_switches.h"
 
@@ -150,6 +153,21 @@ bool GetUserLockAttributes(const user_manager::User* user,
   return true;
 }
 
+// Sets the neccessary delegates in Public Session. They will be active for the
+// whole user-session and they will go away together with the browser process
+// during logout (the browser process is destroyed during logout), ie. they are
+// not freed and they leak but that is fine.
+void SetPublicAccountDelegates() {
+  extensions::PermissionsUpdater::SetPlatformDelegate(
+      new extensions::PermissionsUpdaterDelegateChromeOS);
+
+  extensions::ExtensionTabUtil::SetPlatformDelegate(
+      new extensions::ExtensionTabUtilDelegateChromeOS);
+
+  extensions::ActiveTabPermissionGranter::SetPlatformDelegate(
+      new extensions::ActiveTabPermissionGranterDelegateChromeOS);
+}
+
 }  // namespace
 
 // static
@@ -174,7 +192,9 @@ ChromeUserManagerImpl::CreateChromeUserManager() {
 }
 
 ChromeUserManagerImpl::ChromeUserManagerImpl()
-    : ChromeUserManager(base::ThreadTaskRunnerHandle::Get()),
+    : ChromeUserManager(base::ThreadTaskRunnerHandle::IsSet()
+                            ? base::ThreadTaskRunnerHandle::Get()
+                            : scoped_refptr<base::TaskRunner>()),
       cros_settings_(CrosSettings::Get()),
       device_local_account_policy_service_(NULL),
       supervised_user_manager_(new SupervisedUserManagerImpl(this)),
@@ -183,7 +203,10 @@ ChromeUserManagerImpl::ChromeUserManagerImpl()
   UpdateNumberOfUsers();
 
   // UserManager instance should be used only on UI thread.
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  // (or in unit tests)
+  if (base::ThreadTaskRunnerHandle::IsSet())
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   registrar_.Add(this,
                  chrome::NOTIFICATION_OWNERSHIP_STATUS_CHANGED,
                  content::NotificationService::AllSources());
@@ -198,8 +221,8 @@ ChromeUserManagerImpl::ChromeUserManagerImpl()
   if (base::ThreadTaskRunnerHandle::IsSet()) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(&ChromeUserManagerImpl::RetrieveTrustedDevicePolicies,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&ChromeUserManagerImpl::RetrieveTrustedDevicePolicies,
+                       weak_factory_.GetWeakPtr()));
   }
 
   local_accounts_subscription_ = cros_settings_->AddSettingsObserver(
@@ -496,9 +519,9 @@ void ChromeUserManagerImpl::Observe(
         // in ProfileManager. It happens in case of sync profile load when
         // NOTIFICATION_PROFILE_CREATED is called synchronously.
         base::ThreadTaskRunnerHandle::Get()->PostTask(
-            FROM_HERE,
-            base::Bind(&ChromeUserManagerImpl::SwitchActiveUser,
-                       weak_factory_.GetWeakPtr(), GetPendingUserSwitchID()));
+            FROM_HERE, base::BindOnce(&ChromeUserManagerImpl::SwitchActiveUser,
+                                      weak_factory_.GetWeakPtr(),
+                                      GetPendingUserSwitchID()));
         SetPendingUserSwitchId(EmptyAccountId());
       }
       break;
@@ -738,7 +761,7 @@ void ChromeUserManagerImpl::GuestUserLoggedIn() {
   active_user_->SetStubImage(
       base::MakeUnique<user_manager::UserImage>(
           *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-              IDR_PROFILE_PICTURE_LOADING)),
+              IDR_LOGIN_DEFAULT_USER)),
       user_manager::User::USER_IMAGE_INVALID, false);
 
   // Initializes wallpaper after active_user_ is set.
@@ -801,7 +824,7 @@ void ChromeUserManagerImpl::SupervisedUserLoggedIn(
   // Add the user to the front of the user list.
   ListPrefUpdate prefs_users_update(GetLocalState(), kRegularUsers);
   prefs_users_update->Insert(
-      0, base::MakeUnique<base::StringValue>(account_id.GetUserEmail()));
+      0, base::MakeUnique<base::Value>(account_id.GetUserEmail()));
   users_.insert(users_.begin(), active_user_);
 
   // Now that user is in the list, save display name.
@@ -831,7 +854,16 @@ void ChromeUserManagerImpl::PublicAccountUserLoggedIn(
   // for the first time. Tell the UserImageManager that this user is not new to
   // prevent the avatar from getting changed.
   GetUserImageManager(user->GetAccountId())->UserLoggedIn(false, true);
+
+  // For public account, it's possible that the user-policy controlled wallpaper
+  // was fetched/cleared at the login screen (while for a regular user it was
+  // always fetched/cleared inside a user session), in the case the user-policy
+  // controlled wallpaper was cached/cleared by not updated in the login screen,
+  // so we need to update the wallpaper after the public user logged in.
+  WallpaperManager::Get()->SetUserWallpaperNow(user->GetAccountId());
   WallpaperManager::Get()->EnsureLoggedInUserWallpaperLoaded();
+
+  SetPublicAccountDelegates();
 }
 
 void ChromeUserManagerImpl::KioskAppLoggedIn(user_manager::User* user) {
@@ -841,7 +873,7 @@ void ChromeUserManagerImpl::KioskAppLoggedIn(user_manager::User* user) {
   active_user_->SetStubImage(
       base::MakeUnique<user_manager::UserImage>(
           *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-              IDR_PROFILE_PICTURE_LOADING)),
+              IDR_LOGIN_DEFAULT_USER)),
       user_manager::User::USER_IMAGE_INVALID, false);
 
   const AccountId& kiosk_app_account_id = user->GetAccountId();
@@ -895,7 +927,7 @@ void ChromeUserManagerImpl::ArcKioskAppLoggedIn(user_manager::User* user) {
   active_user_->SetStubImage(
       base::MakeUnique<user_manager::UserImage>(
           *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-              IDR_PROFILE_PICTURE_LOADING)),
+              IDR_LOGIN_DEFAULT_USER)),
       user_manager::User::USER_IMAGE_INVALID, false);
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -914,7 +946,7 @@ void ChromeUserManagerImpl::DemoAccountLoggedIn() {
   active_user_->SetStubImage(
       base::MakeUnique<user_manager::UserImage>(
           *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-              IDR_PROFILE_PICTURE_LOADING)),
+              IDR_LOGIN_DEFAULT_USER)),
       user_manager::User::USER_IMAGE_INVALID, false);
   WallpaperManager::Get()->SetUserWallpaperNow(user_manager::DemoAccountId());
 
@@ -1251,20 +1283,20 @@ void ChromeUserManagerImpl::SetUserAffiliation(
 bool ChromeUserManagerImpl::ShouldReportUser(const std::string& user_id) const {
   const base::ListValue& reporting_users =
       *(GetLocalState()->GetList(kReportingUsers));
-  base::StringValue user_id_value(FullyCanonicalize(user_id));
+  base::Value user_id_value(FullyCanonicalize(user_id));
   return !(reporting_users.Find(user_id_value) == reporting_users.end());
 }
 
 void ChromeUserManagerImpl::AddReportingUser(const AccountId& account_id) {
   ListPrefUpdate users_update(GetLocalState(), kReportingUsers);
   users_update->AppendIfNotPresent(
-      base::MakeUnique<base::StringValue>(account_id.GetUserEmail()));
+      base::MakeUnique<base::Value>(account_id.GetUserEmail()));
 }
 
 void ChromeUserManagerImpl::RemoveReportingUser(const AccountId& account_id) {
   ListPrefUpdate users_update(GetLocalState(), kReportingUsers);
   users_update->Remove(
-      base::StringValue(FullyCanonicalize(account_id.GetUserEmail())), NULL);
+      base::Value(FullyCanonicalize(account_id.GetUserEmail())), NULL);
 }
 
 void ChromeUserManagerImpl::UpdateLoginState(
@@ -1335,15 +1367,14 @@ void ChromeUserManagerImpl::ScheduleResolveLocale(
     const base::Closure& on_resolved_callback,
     std::string* out_resolved_locale) const {
   base::PostTaskWithTraitsAndReply(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
-      base::Bind(ResolveLocale, locale, base::Unretained(out_resolved_locale)),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::BindOnce(ResolveLocale, locale,
+                     base::Unretained(out_resolved_locale)),
       on_resolved_callback);
 }
 
 bool ChromeUserManagerImpl::IsValidDefaultUserImageId(int image_index) const {
-  return image_index >= 0 &&
-         image_index < chromeos::default_user_image::kDefaultImagesCount;
+  return chromeos::default_user_image::IsValidIndex(image_index);
 }
 
 std::unique_ptr<user_manager::User>

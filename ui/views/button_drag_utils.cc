@@ -5,7 +5,6 @@
 #include "ui/views/button_drag_utils.h"
 
 #include "base/strings/utf_string_conversions.h"
-#include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/canvas_painter.h"
@@ -19,7 +18,6 @@
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/drag_utils.h"
-#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
 
@@ -32,35 +30,36 @@ void SetURLAndDragImage(const GURL& url,
                         const base::string16& title,
                         const gfx::ImageSkia& icon,
                         const gfx::Point* press_pt,
-                        ui::OSExchangeData* data,
-                        views::Widget* widget) {
-  DCHECK(url.is_valid() && data);
+                        const views::Widget& widget,
+                        ui::OSExchangeData* data) {
+  DCHECK(url.is_valid());
+  DCHECK(data);
   data->SetURL(url, title);
-  SetDragImage(url, title, icon, press_pt, data, widget);
+  SetDragImage(url, title, icon, press_pt, widget, data);
 }
 
 void SetDragImage(const GURL& url,
                   const base::string16& title,
                   const gfx::ImageSkia& icon,
                   const gfx::Point* press_pt,
-                  ui::OSExchangeData* data,
-                  views::Widget* widget) {
+                  const views::Widget& widget,
+                  ui::OSExchangeData* data) {
   // Create a button to render the drag image for us.
   views::LabelButton button(NULL,
                             title.empty() ? base::UTF8ToUTF16(url.spec())
                                           : title);
   button.SetTextSubpixelRenderingEnabled(false);
-  const ui::NativeTheme* theme = widget->GetNativeTheme();
+  const ui::NativeTheme* theme = widget.GetNativeTheme();
   button.SetTextColor(views::Button::STATE_NORMAL,
       theme->GetSystemColor(ui::NativeTheme::kColorId_TextfieldDefaultColor));
 
   SkColor bg_color = theme->GetSystemColor(
       ui::NativeTheme::kColorId_TextfieldDefaultBackground);
-  if (widget->IsTranslucentWindowOpacitySupported()) {
+  if (widget.IsTranslucentWindowOpacitySupported()) {
     button.SetTextShadows(gfx::ShadowValues(
         10, gfx::ShadowValue(gfx::Vector2d(0, 0), 2.0f, bg_color)));
   } else {
-    button.set_background(views::Background::CreateSolidBackground(bg_color));
+    button.SetBackground(views::CreateSolidBackground(bg_color));
     button.SetBorder(button.CreateDefaultBorder());
   }
   button.SetMaxSize(gfx::Size(kLinkDragImageMaxWidth, 0));
@@ -82,11 +81,11 @@ void SetDragImage(const GURL& url,
     press_point = gfx::Vector2d(size.width() / 2, size.height() / 2);
 
   SkBitmap bitmap;
-  float raster_scale = ScaleFactorForDragFromWidget(widget);
+  float raster_scale = ScaleFactorForDragFromWidget(&widget);
   SkColor color = SK_ColorTRANSPARENT;
   button.Paint(ui::CanvasPainter(&bitmap, size, raster_scale, color).context());
   gfx::ImageSkia image(gfx::ImageSkiaRep(bitmap, raster_scale));
-  drag_utils::SetDragImageOnDataObject(image, press_point, data);
+  data->provider().SetDragImage(image, press_point);
 }
 
 }  // namespace button_drag_utils

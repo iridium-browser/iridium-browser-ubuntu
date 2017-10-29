@@ -37,32 +37,27 @@
 
 namespace blink {
 
-class WorkerThreadStartupData;
+struct GlobalScopeCreationParams;
 
 class CORE_EXPORT SharedWorkerThread : public WorkerThread {
  public:
-  static std::unique_ptr<SharedWorkerThread> create(
-      const String& name,
-      PassRefPtr<WorkerLoaderProxy>,
-      WorkerReportingProxy&);
+  SharedWorkerThread(const String& name,
+                     ThreadableLoadingContext*,
+                     WorkerReportingProxy&);
   ~SharedWorkerThread() override;
 
-  WorkerBackingThread& workerBackingThread() override {
-    return *m_workerBackingThread;
+  WorkerBackingThread& GetWorkerBackingThread() override {
+    return *worker_backing_thread_;
   }
-  void clearWorkerBackingThread() override;
+  void ClearWorkerBackingThread() override;
 
  protected:
-  WorkerOrWorkletGlobalScope* createWorkerGlobalScope(
-      std::unique_ptr<WorkerThreadStartupData>) override;
+  WorkerOrWorkletGlobalScope* CreateWorkerGlobalScope(
+      std::unique_ptr<GlobalScopeCreationParams>) override;
 
  private:
-  SharedWorkerThread(const String& name,
-                     PassRefPtr<WorkerLoaderProxy>,
-                     WorkerReportingProxy&);
-
-  std::unique_ptr<WorkerBackingThread> m_workerBackingThread;
-  String m_name;
+  std::unique_ptr<WorkerBackingThread> worker_backing_thread_;
+  String name_;
 };
 
 }  // namespace blink

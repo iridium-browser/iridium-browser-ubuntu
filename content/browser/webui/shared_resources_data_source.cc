@@ -39,6 +39,13 @@ const char* const kPathAliases[][2] = {
     {"../../views/resources/default_200_percent/common/", "images/2x/apps/"},
     {"../../webui/resources/cr_elements/", "cr_elements/"}};
 
+const struct {
+  const char* const path;
+  const int resource_id;
+} kAdditionalResourceMapEntries[] = {
+    {"js/mojo_bindings.js", IDR_WEBUI_MOJO_BINDINGS_JS},
+};
+
 void AddResource(const std::string& path,
                  int resource_id,
                  ResourcesMap* resources_map) {
@@ -60,7 +67,10 @@ const ResourcesMap* CreateResourcesMap() {
       }
     }
   }
-
+  for (size_t i = 0; i < arraysize(kAdditionalResourceMapEntries); ++i) {
+    const auto& entry = kAdditionalResourceMapEntries[i];
+    AddResource(entry.path, entry.resource_id, result);
+  }
   return result;
 }
 
@@ -107,6 +117,12 @@ void SharedResourcesDataSource::StartDataRequest(
   }
 
   callback.Run(bytes.get());
+}
+
+bool SharedResourcesDataSource::AllowCaching() const {
+  // Should not be cached to reflect dynamically-generated contents that may
+  // depend on the current locale.
+  return false;
 }
 
 std::string SharedResourcesDataSource::GetMimeType(
@@ -178,6 +194,10 @@ SharedResourcesDataSource::GetAccessControlAllowOriginForOrigin(
     return "null";
   }
   return origin;
+}
+
+bool SharedResourcesDataSource::IsGzipped(const std::string& path) const {
+  return path == "js/mojo_bindings.js";
 }
 
 }  // namespace content

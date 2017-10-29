@@ -58,6 +58,15 @@ class VIEWS_EXPORT InkDropHostView : public View, public InkDropHost {
   }
   float ink_drop_visible_opacity() const { return ink_drop_visible_opacity_; }
 
+  // Animates |ink_drop_| to the desired |ink_drop_state|. Caches |event| as the
+  // last_ripple_triggering_event().
+  //
+  // *** NOTE ***: |event| has been plumbed through on a best effort basis for
+  // the purposes of centering ink drop ripples on located Events.  Thus nullptr
+  // has been used by clients who do not have an Event instance available to
+  // them.
+  void AnimateInkDrop(InkDropState state, const ui::LocatedEvent* event);
+
  protected:
   static constexpr int kInkDropSmallCornerRadius = 2;
   static constexpr int kInkDropLargeCornerRadius = 4;
@@ -85,15 +94,6 @@ class VIEWS_EXPORT InkDropHostView : public View, public InkDropHost {
   // LocatedEvent, otherwise the center point of the local bounds is returned.
   gfx::Point GetInkDropCenterBasedOnLastEvent() const;
 
-  // Animates |ink_drop_| to the desired |ink_drop_state|. Caches |event| as the
-  // last_ripple_triggering_event().
-  //
-  // *** NOTE ***: |event| has been plumbed through on a best effort basis for
-  // the purposes of centering ink drop ripples on located Events.  Thus nullptr
-  // has been used by clients who do not have an Event instance available to
-  // them.
-  void AnimateInkDrop(InkDropState state, const ui::LocatedEvent* event);
-
   // View:
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
   void VisibilityChanged(View* starting_from, bool is_visible) override;
@@ -107,12 +107,26 @@ class VIEWS_EXPORT InkDropHostView : public View, public InkDropHost {
 
   // Subclasses can override to return a mask for the ink drop. By default,
   // returns nullptr (i.e no mask).
+  // TODO(bruthig): InkDropMasks do not currently work on Windows. See
+  // crbug.com/713359.
   virtual std::unique_ptr<views::InkDropMask> CreateInkDropMask() const;
+
+  // Called after a new InkDrop instance is created.
+  virtual void OnInkDropCreated() {}
+
+  // Returns true if an ink drop instance has been created.
+  bool HasInkDrop() const;
 
   // Provides access to |ink_drop_|. Implements lazy initialization of
   // |ink_drop_| so as to avoid virtual method calls during construction since
   // subclasses should be able to call SetInkDropMode() during construction.
   InkDrop* GetInkDrop();
+
+  // Initializes and sets a mask on |ink_drop_layer|. No-op if
+  // CreateInkDropMask() returns null.
+  void InstallInkDropMask(ui::Layer* ink_drop_layer);
+
+  void ResetInkDropMask();
 
   // Returns an InkDropImpl configured to work well with a
   // flood-fill ink drop ripple.
@@ -121,8 +135,6 @@ class VIEWS_EXPORT InkDropHostView : public View, public InkDropHost {
   // Returns an InkDropImpl with default configuration. The base implementation
   // of CreateInkDrop() delegates to this function.
   std::unique_ptr<InkDropImpl> CreateDefaultInkDropImpl();
-
-  InkDropMode ink_drop_mode() const { return ink_drop_mode_; }
 
  private:
   class InkDropGestureHandler;

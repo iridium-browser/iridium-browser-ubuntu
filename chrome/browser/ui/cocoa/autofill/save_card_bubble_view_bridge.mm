@@ -6,12 +6,12 @@
 
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ui/autofill/save_card_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/chrome_style.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#include "components/autofill/core/browser/ui/save_card_bubble_controller.h"
 #include "components/strings/grit/components_strings.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
@@ -71,7 +71,7 @@ const LegalMessageLines SaveCardBubbleViewBridge::GetLegalMessageLines() const {
 
 void SaveCardBubbleViewBridge::OnSaveButton() {
   if (controller_)
-    controller_->OnSaveButton();
+    controller_->OnSaveButton(base::string16());
   Hide();
 }
 
@@ -236,17 +236,18 @@ void SaveCardBubbleViewBridge::Hide() {
   autofill::CreditCard card = bridge_->GetCard();
   base::scoped_nsobject<NSImageView> cardIcon(
       [[NSImageView alloc] initWithFrame:NSZeroRect]);
-  [cardIcon setToolTip:base::SysUTF16ToNSString(card.TypeForDisplay())];
+  [cardIcon setToolTip:base::SysUTF16ToNSString(card.NetworkForDisplay())];
   [cardIcon setWantsLayer:YES];
   [[cardIcon layer] setBorderWidth:1.0];
   [[cardIcon layer] setCornerRadius:2.0];
   [[cardIcon layer] setMasksToBounds:YES];
   [[cardIcon layer]
       setBorderColor:skia::CGColorCreateFromSkColor(kIconBorderColor)];
-  [cardIcon setImage:ResourceBundle::GetSharedInstance()
-                         .GetNativeImageNamed(
-                             autofill::CreditCard::IconResourceId(card.type()))
-                         .AsNSImage()];
+  [cardIcon
+      setImage:ResourceBundle::GetSharedInstance()
+                   .GetNativeImageNamed(
+                       autofill::CreditCard::IconResourceId(card.network()))
+                   .AsNSImage()];
   [cardIcon setFrameSize:[[cardIcon image] size]];
 
   // Midline horizontal ellipsis follwed by last four digits.

@@ -5,10 +5,12 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/message_loop/message_loop.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "content/child/child_process.h"
 #include "content/renderer/media/webrtc/webrtc_video_capturer_adapter.h"
+#include "content/renderer/media/webrtc/webrtc_video_frame_adapter.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,7 +28,7 @@ class WebRtcVideoCapturerAdapterTest
   WebRtcVideoCapturerAdapterTest()
       : adapter_(new WebRtcVideoCapturerAdapter(
             false,
-            blink::WebMediaStreamTrack::ContentHintType::None)),
+            blink::WebMediaStreamTrack::ContentHintType::kNone)),
         output_frame_width_(0),
         output_frame_height_(0) {
     adapter_->AddOrUpdateSink(this, rtc::VideoSinkWants());
@@ -66,12 +68,14 @@ class WebRtcVideoCapturerAdapterTest
     ASSERT_TRUE(output_frame_);
     rtc::scoped_refptr<webrtc::VideoFrameBuffer> texture_frame =
         output_frame_->video_frame_buffer();
+    EXPECT_EQ(webrtc::VideoFrameBuffer::Type::kNative, texture_frame->type());
     EXPECT_EQ(media::VideoFrame::STORAGE_OPAQUE,
-              static_cast<media::VideoFrame*>(texture_frame->native_handle())
+              static_cast<WebRtcVideoFrameAdapter*>(texture_frame.get())
+                  ->getMediaVideoFrame()
                   ->storage_type());
 
-    rtc::scoped_refptr<webrtc::VideoFrameBuffer> copied_frame =
-        texture_frame->NativeToI420Buffer();
+    rtc::scoped_refptr<webrtc::I420BufferInterface> copied_frame =
+        texture_frame->ToI420();
     EXPECT_TRUE(copied_frame);
     EXPECT_TRUE(copied_frame->DataY());
     EXPECT_TRUE(copied_frame->DataU());
@@ -105,7 +109,10 @@ class WebRtcVideoCapturerAdapterTest
 
     // Request smaller scale to make sure scaling normally kicks in.
     rtc::VideoSinkWants wants;
-    wants.max_pixel_count = rtc::Optional<int>(kInputWidth * kInputHeight / 2);
+    // TODO(sprang): Remove this type hack when webrtc has updated the sink
+    // wants api. https://codereview.webrtc.org/2781433002/
+    using MaxPixelCountType = decltype(wants.max_pixel_count);
+    wants.max_pixel_count = MaxPixelCountType(kInputWidth * kInputHeight / 2);
     adapter_->AddOrUpdateSink(this, wants);
 
     adapter_->OnFrameCaptured(frame);
@@ -158,40 +165,40 @@ TEST_F(WebRtcVideoCapturerAdapterTest,
        NonScreencastAdapterDoesNotAdaptContentHintDetail) {
   // Non-screenshare adapter should not adapt frames when detail is set.
   TestContentHintResolutionAdaptation(
-      false, blink::WebMediaStreamTrack::ContentHintType::None, true,
-      blink::WebMediaStreamTrack::ContentHintType::VideoDetail, false);
+      false, blink::WebMediaStreamTrack::ContentHintType::kNone, true,
+      blink::WebMediaStreamTrack::ContentHintType::kVideoDetail, false);
 }
 
 TEST_F(WebRtcVideoCapturerAdapterTest,
        NonScreencastAdapterAdaptsContentHintFluid) {
   // Non-screenshare adapter should still adapt frames when motion is set.
   TestContentHintResolutionAdaptation(
-      false, blink::WebMediaStreamTrack::ContentHintType::None, true,
-      blink::WebMediaStreamTrack::ContentHintType::VideoMotion, true);
+      false, blink::WebMediaStreamTrack::ContentHintType::kNone, true,
+      blink::WebMediaStreamTrack::ContentHintType::kVideoMotion, true);
 }
 
 TEST_F(WebRtcVideoCapturerAdapterTest,
        ScreencastAdapterAdaptsContentHintFluid) {
   // Screenshare adapter should adapt frames when motion is set.
   TestContentHintResolutionAdaptation(
-      true, blink::WebMediaStreamTrack::ContentHintType::None, false,
-      blink::WebMediaStreamTrack::ContentHintType::VideoMotion, true);
+      true, blink::WebMediaStreamTrack::ContentHintType::kNone, false,
+      blink::WebMediaStreamTrack::ContentHintType::kVideoMotion, true);
 }
 
 TEST_F(WebRtcVideoCapturerAdapterTest,
        ScreencastAdapterDoesNotAdaptContentHintDetailed) {
   // Screenshare adapter should still not adapt frames when detail is set.
   TestContentHintResolutionAdaptation(
-      true, blink::WebMediaStreamTrack::ContentHintType::None, false,
-      blink::WebMediaStreamTrack::ContentHintType::VideoDetail, false);
+      true, blink::WebMediaStreamTrack::ContentHintType::kNone, false,
+      blink::WebMediaStreamTrack::ContentHintType::kVideoDetail, false);
 }
 
 TEST_F(WebRtcVideoCapturerAdapterTest, RespectsConstructionTimeContentHint) {
   // Non-screenshare adapter constructed with detail content hint should not
   // adapt before SetContentHint is run.
   TestContentHintResolutionAdaptation(
-      false, blink::WebMediaStreamTrack::ContentHintType::VideoDetail, false,
-      blink::WebMediaStreamTrack::ContentHintType::VideoMotion, true);
+      false, blink::WebMediaStreamTrack::ContentHintType::kVideoDetail, false,
+      blink::WebMediaStreamTrack::ContentHintType::kVideoMotion, true);
 }
 
 }  // namespace content

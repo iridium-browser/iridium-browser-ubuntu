@@ -22,7 +22,7 @@
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_provider.h"
 #include "components/metrics/metrics_service_client.h"
-#include "components/metrics/net/version_utils.h"
+#include "components/metrics/version_utils.h"
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -46,9 +46,6 @@ NSString* const kTodayExtensionMetricsSessionID = @"MetricsSessionID";
 // restart, this log can be written to disk for upload.
 NSString* const kTodayExtensionMetricsCurrentLog = @"MetricsCurrentLog";
 
-// Maximum number of event in a log.
-const int kMaxEventsPerLog = 1000;
-
 // Maximum age of a log.
 const int kMaxLogLifeTimeInSeconds = 86400;
 
@@ -69,10 +66,11 @@ class TodayMetricsServiceClient : public metrics::MetricsServiceClient {
       const base::Closure& done_callback) override;
   void CollectFinalMetricsForLog(const base::Closure& done_callback) override;
   std::unique_ptr<metrics::MetricsLogUploader> CreateUploader(
-      const std::string& server_url,
-      const std::string& mime_type,
+      base::StringPiece server_url,
+      base::StringPiece mime_type,
       metrics::MetricsLogUploader::MetricServiceType service_type,
-      const base::Callback<void(int)>& on_upload_complete) override;
+      const metrics::MetricsLogUploader::UploadCallback& on_upload_complete)
+      override;
   base::TimeDelta GetStandardUploadInterval() override;
 
  private:
@@ -150,10 +148,10 @@ void TodayMetricsServiceClient::CollectFinalMetricsForLog(
 
 std::unique_ptr<metrics::MetricsLogUploader>
 TodayMetricsServiceClient::CreateUploader(
-    const std::string& server_url,
-    const std::string& mime_type,
+    base::StringPiece server_url,
+    base::StringPiece mime_type,
     metrics::MetricsLogUploader::MetricServiceType service_type,
-    const base::Callback<void(int)>& on_upload_complete) {
+    const metrics::MetricsLogUploader::UploadCallback& on_upload_complete) {
   NOTREACHED();
   return nullptr;
 }
@@ -206,9 +204,9 @@ void TodayMetricsLogger::PersistLogs() {
   [[NSUserDefaults standardUserDefaults]
       setObject:ns_encoded_log
          forKey:kTodayExtensionMetricsCurrentLog];
-  if (log_->num_events() >= kMaxEventsPerLog ||
-      (base::TimeTicks::Now() - log_->creation_time()).InSeconds() >=
-          kMaxLogLifeTimeInSeconds) {
+  log_->TruncateEvents();
+  if ((base::TimeTicks::Now() - log_->creation_time()).InSeconds() >=
+      kMaxLogLifeTimeInSeconds) {
     CreateNewLog();
   }
 }
@@ -252,8 +250,7 @@ bool TodayMetricsLogger::CreateNewLog() {
 
   log_->RecordEnvironment(
       std::vector<std::unique_ptr<metrics::MetricsProvider>>(),
-      std::vector<variations::ActiveGroupId>(), [install_date longLongValue],
-      [enabled_date longLongValue]);
+      [install_date longLongValue], [enabled_date longLongValue]);
 
   return true;
 }

@@ -22,7 +22,6 @@ tr.exportTo('tr.v.d', function() {
       this.legacyTIRLabel_ = '';
       this.storyDisplayName_ = '';
       this.storyGroupingKeys_ = new Map();
-      this.storyUrl_ = '';
       this.storysetRepeatCounter_ = undefined;
       this.canonicalUrl_ = '';
 
@@ -32,7 +31,7 @@ tr.exportTo('tr.v.d', function() {
     }
 
     clone() {
-      let clone = new tr.v.d.MergedTelemetryInfo();
+      const clone = new tr.v.d.MergedTelemetryInfo();
       clone.addDiagnostic(this);
       return clone;
     }
@@ -43,7 +42,6 @@ tr.exportTo('tr.v.d', function() {
      * @param {undefined|string} info.label
      * @param {undefined|!Object} info.storyGroupingKeys
      * @param {undefined|string} info.storyDisplayName
-     * @param {undefined|string} info.storyUrl
      * @param {number} info.storysetRepeatCounter
      * @param {number} info.benchmarkStartMs Milliseconds since Unix epoch.
      */
@@ -60,11 +58,9 @@ tr.exportTo('tr.v.d', function() {
       if (info.storyDisplayName) {
         this.storyDisplayName_ = info.storyDisplayName;
       }
-      for (let [name, value] of Object.entries(info.storyGroupingKeys || {})) {
+      for (const [name, value] of Object.entries(
+          info.storyGroupingKeys || {})) {
         this.storyGroupingKeys_.set(name, value);
-      }
-      if (info.storyUrl) {
-        this.storyUrl_ = info.storyUrl;
       }
       if (info.storysetRepeatCounter !== undefined) {
         this.storysetRepeatCounter_ = info.storysetRepeatCounter;
@@ -78,7 +74,7 @@ tr.exportTo('tr.v.d', function() {
     }
 
     addToHistogram(hist) {
-      hist.diagnostics.set(TelemetryInfo.NAME, this);
+      hist.diagnostics.set(tr.v.d.RESERVED_NAMES.TELEMETRY, this);
     }
 
     /**
@@ -86,8 +82,8 @@ tr.exportTo('tr.v.d', function() {
      * @return {(undefined|!tr.v.d.TelemetryInfo)}
      */
     static getFromHistogram(hist) {
-      return hist.diagnostics.get(TelemetryInfo.NAME) ||
-             hist.diagnostics.get('iteration');
+      return hist.diagnostics.get(tr.v.d.RESERVED_NAMES.TELEMETRY) ||
+             hist.diagnostics.get(tr.v.d.RESERVED_NAMES.ITERATION);
     }
 
     asDictInto_(d) {
@@ -99,18 +95,17 @@ tr.exportTo('tr.v.d', function() {
       d.storyDisplayName = this.storyDisplayName;
       if (this.storyGroupingKeys.size > 0) {
         d.storyGroupingKeys = {};
-        for (let [name, value] of this.storyGroupingKeys) {
+        for (const [name, value] of this.storyGroupingKeys) {
           d.storyGroupingKeys[name] = value;
         }
       }
-      d.storyUrl = this.storyUrl;
       d.storysetRepeatCounter = this.storysetRepeatCounter;
       d.legacyTIRLabel = this.legacyTIRLabel;
       d.canonicalUrl = this.canonicalUrl;
     }
 
     static fromDict(d) {
-      let info = new TelemetryInfo();
+      const info = new TelemetryInfo();
       info.addInfo(d);
       return info;
     }
@@ -144,10 +139,6 @@ tr.exportTo('tr.v.d', function() {
       return this.storyDisplayName_;
     }
 
-    get storyUrl() {
-      return this.storyUrl_;
-    }
-
     get storysetRepeatCounter() {
       return this.storysetRepeatCounter_;
     }
@@ -176,7 +167,7 @@ tr.exportTo('tr.v.d', function() {
      * @return {*}
      */
     static getField(hist, fieldName, defaultValue) {
-      let telemetry = tr.v.d.TelemetryInfo.getFromHistogram(hist);
+      const telemetry = tr.v.d.TelemetryInfo.getFromHistogram(hist);
       if (!(telemetry instanceof tr.v.d.TelemetryInfo) ||
           !telemetry[fieldName]) {
         return defaultValue;
@@ -190,7 +181,7 @@ tr.exportTo('tr.v.d', function() {
      * @return {string}
      */
     static getStoryGroupingKeyLabel(hist, storyGroupingKey) {
-      let telemetry = tr.v.d.TelemetryInfo.getFromHistogram(hist);
+      const telemetry = tr.v.d.TelemetryInfo.getFromHistogram(hist);
       if (!(telemetry instanceof tr.v.d.TelemetryInfo)) {
         return storyGroupingKey + ': undefined';
       }
@@ -209,15 +200,6 @@ tr.exportTo('tr.v.d', function() {
           v, storyGroupingKey);
     }
   }
-
-  // Diagnostics generally do not need a constant name or getFromHistogram().
-  // TelemetryInfo is a special kind of Diagnostic that is produced by
-  // telemetry, which shepherds whole flocks of traces at once, and needs a
-  // system to identify and find traces by these attributes.
-
-  // Histograms produced by telemetry all have a single TelemetryInfo at this
-  // key in their DiagnosticMap.
-  TelemetryInfo.NAME = 'telemetry';
 
   tr.v.d.Diagnostic.register(TelemetryInfo, {
     elementName: 'tr-v-ui-telemetry-info-span'

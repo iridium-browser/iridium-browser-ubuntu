@@ -15,6 +15,7 @@ found in the LICENSE file.
 
 <script>
 'use strict';
+/* eslint-disable no-console */
 
 tr.exportTo('tr.mre', function() {
   function jsonReplacer(key, value) {
@@ -25,32 +26,34 @@ tr.exportTo('tr.mre', function() {
   }
 
   function reduceMapResultsMain(args) {
-    if (args.length !== 3)
+    if (args.length !== 3) {
       throw new Error('Must provide three arguments');
+    }
 
-    var options = {
+    const options = {
       key: args[0],
       fileHandle: tr.mre.FileHandle.fromDict(JSON.parse(args[1])),
       job: tr.mre.Job.fromDict(JSON.parse(args[2]))
     };
 
-    var mapResultsLoaded = options.fileHandle.load();
-    var mapResults = JSON.parse(mapResultsLoaded);
+    const mapResultsLoaded = options.fileHandle.load();
+    const mapResults = JSON.parse(mapResultsLoaded);
 
-    var jobResults = new tr.mre.MreResult();
+    const jobResults = new tr.mre.MreResult();
 
     tr.mre.runAndConvertErrorsToFailures(
         jobResults, options.job, options.job.reduceFunctionHandle,
         undefined,
         function() {
-          var reduceFunction = options.job.reduceFunctionHandle.load();
+          const reduceFunction = options.job.reduceFunctionHandle.load();
           tr.mre.reduceMapResults(jobResults, options.key, mapResults.pairs,
               reduceFunction);
         });
 
-    if (Object.keys(jobResults.pairs).length !== 0)
+    if (Object.keys(jobResults.pairs).length !== 0) {
       console.log('JOB_RESULTS: ' + JSON.stringify(jobResults.pairs,
           jsonReplacer));
+    }
     jobResults.failures.forEach(function(failure) {
       console.log('JOB_FAILURE: ' + JSON.stringify(failure.asDict()));
     });
@@ -58,12 +61,13 @@ tr.exportTo('tr.mre', function() {
   }
 
   return {
-    reduceMapResultsMain: reduceMapResultsMain
+    reduceMapResultsMain
   };
 });
 
 
-if (tr.isHeadless)
+if (tr.isHeadless) {
   quit(tr.mre.reduceMapResultsMain(sys.argv.slice(1)));
+}
 
 </script>

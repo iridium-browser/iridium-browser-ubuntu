@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <set>
+#include <sstream>
 
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_object.h"
@@ -33,12 +34,14 @@ class CPDF_Stream : public CPDF_Object {
   bool IsStream() const override;
   CPDF_Stream* AsStream() override;
   const CPDF_Stream* AsStream() const override;
+  bool WriteTo(IFX_ArchiveStream* archive) const override;
 
   uint32_t GetRawSize() const { return m_dwSize; }
   uint8_t* GetRawData() const { return m_pDataBuf.get(); }
 
-  // Does not takes onwership of |pData|, copies into internally-owned buffer.
+  // Does not takes ownership of |pData|, copies into internally-owned buffer.
   void SetData(const uint8_t* pData, uint32_t size);
+  void SetData(std::ostringstream* stream);
 
   void InitStream(const uint8_t* pData,
                   uint32_t size,

@@ -12,6 +12,7 @@
 #include "base/numerics/safe_math.h"
 #include "base/process/memory.h"
 #include "ui/gfx/buffer_format_util.h"
+#include "ui/gfx/gpu_memory_buffer_tracing.h"
 #include "ui/gl/gl_bindings.h"
 
 namespace gpu {
@@ -128,6 +129,7 @@ bool GpuMemoryBufferImplSharedMemory::IsSizeValidForFormat(
       // by the block size.
       return size.width() % 4 == 0 && size.height() % 4 == 0;
     case gfx::BufferFormat::R_8:
+    case gfx::BufferFormat::R_16:
     case gfx::BufferFormat::RG_88:
     case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
@@ -135,6 +137,7 @@ bool GpuMemoryBufferImplSharedMemory::IsSizeValidForFormat(
     case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::RGBA_F16:
       return true;
     case gfx::BufferFormat::YVU_420:
     case gfx::BufferFormat::YUV_420_BIPLANAR: {
@@ -208,6 +211,12 @@ gfx::GpuMemoryBufferHandle GpuMemoryBufferImplSharedMemory::GetHandle() const {
   handle.stride = stride_;
   handle.handle = shared_memory_->handle();
   return handle;
+}
+
+base::trace_event::MemoryAllocatorDumpGuid
+GpuMemoryBufferImplSharedMemory::GetGUIDForTracing(
+    uint64_t tracing_process_id) const {
+  return gfx::GetSharedMemoryGUIDForTracing(tracing_process_id, id_);
 }
 
 }  // namespace gpu

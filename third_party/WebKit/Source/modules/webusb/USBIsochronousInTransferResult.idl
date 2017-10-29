@@ -5,10 +5,10 @@
 // https://wicg.github.io/webusb/#usbisochronousintransferresult
 
 [
-    OriginTrialEnabled=WebUSB,
+    RuntimeEnabled=WebUSB,
     Constructor(sequence<USBIsochronousInTransferPacket> packets,
                 optional DataView? data)
 ] interface USBIsochronousInTransferResult {
     readonly attribute DataView? data;
-    readonly attribute sequence<USBIsochronousInTransferPacket> packets;
+    readonly attribute FrozenArray<USBIsochronousInTransferPacket> packets;
 };

@@ -23,8 +23,7 @@ namespace media {
 
 class WebMStreamParserTest : public testing::Test {
  public:
-  WebMStreamParserTest()
-      : media_log_(new testing::StrictMock<MockMediaLog>()) {}
+  WebMStreamParserTest() {}
 
  protected:
   void ParseWebMFile(const std::string& filename,
@@ -52,7 +51,7 @@ class WebMStreamParserTest : public testing::Test {
                    base::Unretained(this)),
         base::Bind(&WebMStreamParserTest::EndMediaSegmentCB,
                    base::Unretained(this)),
-        media_log_);
+        &media_log_);
     bool result = parser_->Parse(buffer->data(), buffer->data_size());
     EXPECT_TRUE(result);
   }
@@ -86,7 +85,7 @@ class WebMStreamParserTest : public testing::Test {
   MOCK_METHOD0(NewMediaSegmentCB, void());
   MOCK_METHOD0(EndMediaSegmentCB, void());
 
-  scoped_refptr<testing::StrictMock<MockMediaLog>> media_log_;
+  testing::StrictMock<MockMediaLog> media_log_;
   std::unique_ptr<WebMStreamParser> parser_;
   std::unique_ptr<MediaTracks> media_tracks_;
 };
@@ -169,26 +168,26 @@ TEST_F(WebMStreamParserTest, ColourElement) {
   const VideoDecoderConfig& video_config =
       media_tracks_->getVideoConfig(video_track->bytestream_track_id());
 
-  gfx::ColorSpace expected_color_space(gfx::ColorSpace::PrimaryID::SMPTEST428_1,
-                                       gfx::ColorSpace::TransferID::LOG,
-                                       gfx::ColorSpace::MatrixID::RGB,
+  VideoColorSpace expected_color_space(VideoColorSpace::PrimaryID::SMPTEST428_1,
+                                       VideoColorSpace::TransferID::LOG,
+                                       VideoColorSpace::MatrixID::RGB,
                                        gfx::ColorSpace::RangeID::FULL);
   EXPECT_EQ(video_config.color_space_info(), expected_color_space);
 
   base::Optional<HDRMetadata> hdr_metadata = video_config.hdr_metadata();
   EXPECT_TRUE(hdr_metadata.has_value());
-  EXPECT_EQ(hdr_metadata->max_cll, 11u);
-  EXPECT_EQ(hdr_metadata->max_fall, 12u);
+  EXPECT_EQ(hdr_metadata->max_content_light_level, 11u);
+  EXPECT_EQ(hdr_metadata->max_frame_average_light_level, 12u);
 
   const MasteringMetadata& mmdata = hdr_metadata->mastering_metadata;
-  EXPECT_FLOAT_EQ(mmdata.primary_r_chromaticity_x, 0.1f);
-  EXPECT_FLOAT_EQ(mmdata.primary_r_chromaticity_y, 0.2f);
-  EXPECT_FLOAT_EQ(mmdata.primary_g_chromaticity_x, 0.1f);
-  EXPECT_FLOAT_EQ(mmdata.primary_g_chromaticity_y, 0.2f);
-  EXPECT_FLOAT_EQ(mmdata.primary_b_chromaticity_x, 0.1f);
-  EXPECT_FLOAT_EQ(mmdata.primary_b_chromaticity_y, 0.2f);
-  EXPECT_FLOAT_EQ(mmdata.white_point_chromaticity_x, 0.1f);
-  EXPECT_FLOAT_EQ(mmdata.white_point_chromaticity_y, 0.2f);
+  EXPECT_FLOAT_EQ(mmdata.primary_r.x(), 0.1f);
+  EXPECT_FLOAT_EQ(mmdata.primary_r.y(), 0.2f);
+  EXPECT_FLOAT_EQ(mmdata.primary_g.x(), 0.1f);
+  EXPECT_FLOAT_EQ(mmdata.primary_g.y(), 0.2f);
+  EXPECT_FLOAT_EQ(mmdata.primary_b.x(), 0.1f);
+  EXPECT_FLOAT_EQ(mmdata.primary_b.y(), 0.2f);
+  EXPECT_FLOAT_EQ(mmdata.white_point.x(), 0.1f);
+  EXPECT_FLOAT_EQ(mmdata.white_point.y(), 0.2f);
   EXPECT_EQ(mmdata.luminance_max, 40);
   EXPECT_EQ(mmdata.luminance_min, 30);
 }

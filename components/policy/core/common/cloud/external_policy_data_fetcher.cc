@@ -17,6 +17,7 @@
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
@@ -87,7 +88,7 @@ ExternalPolicyDataFetcher::ExternalPolicyDataFetcher(
 }
 
 ExternalPolicyDataFetcher::~ExternalPolicyDataFetcher() {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
   for (JobSet::iterator it = jobs_.begin(); it != jobs_.end(); ++it)
     CancelJob(*it);
 }
@@ -96,7 +97,7 @@ ExternalPolicyDataFetcher::Job* ExternalPolicyDataFetcher::StartJob(
     const GURL& url,
     int64_t max_size,
     const FetchCallback& callback) {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
   Job* job = new Job(
       url, max_size,
       base::Bind(&ForwardJobFinished,
@@ -112,7 +113,7 @@ ExternalPolicyDataFetcher::Job* ExternalPolicyDataFetcher::StartJob(
 }
 
 void ExternalPolicyDataFetcher::CancelJob(Job* job) {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
   DCHECK(jobs_.find(job) != jobs_.end());
   jobs_.erase(job);
   // Post a task that will cancel the |job| in the |backend_|. The |job| is
@@ -136,7 +137,7 @@ void ExternalPolicyDataFetcher::OnJobFinished(
     Job* job,
     Result result,
     std::unique_ptr<std::string> data) {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
   JobSet::iterator it = jobs_.find(job);
   if (it == jobs_.end()) {
     // The |job| has been canceled and removed from |jobs_| already. This can
@@ -164,7 +165,7 @@ ExternalPolicyDataFetcherBackend::ExternalPolicyDataFetcherBackend(
 }
 
 ExternalPolicyDataFetcherBackend::~ExternalPolicyDataFetcherBackend() {
-  DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
 }
 
 std::unique_ptr<ExternalPolicyDataFetcher>
@@ -176,9 +177,33 @@ ExternalPolicyDataFetcherBackend::CreateFrontend(
 
 void ExternalPolicyDataFetcherBackend::StartJob(
     ExternalPolicyDataFetcher::Job* job) {
-  DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
-  std::unique_ptr<net::URLFetcher> owned_fetcher = net::URLFetcher::Create(
-      ++last_fetch_id_, job->url, net::URLFetcher::GET, this);
+  DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("external_policy_fetcher", R"(
+        semantics {
+          sender: "Cloud Policy"
+          description:
+            "Used to fetch policy for extensions, policy-controlled wallpaper, "
+            "and custom terms of service."
+          trigger:
+            "Periodically loaded when a managed user is signed in to Chrome."
+          data:
+            "This request does not send any data. It loads external resources "
+            "by a unique URL provided by the admin."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "This feature cannot be controlled by Chrome settings, but users "
+            "can sign out of Chrome to disable it."
+          policy_exception_justification:
+            "Not implemented, considered not useful. This request is part of "
+            "the policy fetcher itself."
+        })");
+  std::unique_ptr<net::URLFetcher> owned_fetcher =
+      net::URLFetcher::Create(++last_fetch_id_, job->url, net::URLFetcher::GET,
+                              this, traffic_annotation);
   net::URLFetcher* fetcher = owned_fetcher.get();
   data_use_measurement::DataUseUserData::AttachToFetcher(
       fetcher, data_use_measurement::DataUseUserData::POLICY);
@@ -195,7 +220,7 @@ void ExternalPolicyDataFetcherBackend::StartJob(
 void ExternalPolicyDataFetcherBackend::CancelJob(
     ExternalPolicyDataFetcher::Job* job,
     const base::Closure& callback) {
-  DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
   for (auto it = job_map_.begin(); it != job_map_.end();) {
     if (it->second.job == job) {
       job_map_.erase(it++);
@@ -208,7 +233,7 @@ void ExternalPolicyDataFetcherBackend::CancelJob(
 
 void ExternalPolicyDataFetcherBackend::OnURLFetchComplete(
     const net::URLFetcher* source) {
-  DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
   auto it = job_map_.find(const_cast<net::URLFetcher*>(source));
   if (it == job_map_.end()) {
     NOTREACHED();
@@ -255,7 +280,7 @@ void ExternalPolicyDataFetcherBackend::OnURLFetchDownloadProgress(
     int64_t current,
     int64_t total,
     int64_t current_network_bytes) {
-  DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
   auto it = job_map_.find(source);
   DCHECK(it != job_map_.end());
   if (it == job_map_.end())

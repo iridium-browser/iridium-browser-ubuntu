@@ -14,9 +14,12 @@
 #include "base/metrics/field_trial_params.h"
 #include "chrome/common/chrome_features.h"
 #include "components/autofill/core/browser/autofill_experiments.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
 #include "components/ntp_snippets/features.h"
 #include "components/offline_pages/core/offline_page_feature.h"
 #include "components/password_manager/core/common/password_manager_features.h"
+#include "components/payments/core/features.h"
+#include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "content/public/common/content_features.h"
 #include "jni/ChromeFeatureList_jni.h"
 
@@ -36,49 +39,75 @@ namespace {
 const base::Feature* kFeaturesExposedToJava[] = {
     &autofill::kAutofillScanCardholderName,
     &features::kConsistentOmniboxGeolocation,
-    &features::kCredentialManagementAPI,
-    &features::kNativeAndroidHistoryManager,
+    &features::kCopylessPaste,
+    &features::kImportantSitesInCbd,
+    &features::kMaterialDesignIncognitoNTP,
     &features::kServiceWorkerPaymentApps,
+    &features::kSiteNotificationChannels,
     &features::kSimplifiedFullscreenUI,
     &features::kVrShell,
     &features::kWebPayments,
+    &features::kTabsInCbd,
     &kAndroidPayIntegrationV1,
     &kAndroidPayIntegrationV2,
     &kAndroidPaymentApps,
+    &kCCTBackgroundTab,
     &kCCTExternalLinkHandling,
     &kCCTPostMessageAPI,
+    &kCCTRedirectPreconnect,
     &kChromeHomeFeature,
+    &kChromeHomeExpandButton,
+    &kChromeHomeSwipeLogic,
+    &kContentSuggestionsLargeThumbnail,
+    &kContentSuggestionsVideoOverlay,
+    &kContentSuggestionsSettings,
+    &kContentSuggestionsShowSummary,
     &kContextualSearchSingleActions,
     &kContextualSearchUrlActions,
+    &kContextualSuggestionsCarousel,
+    &kCustomContextMenu,
     &kCustomFeedbackUi,
-    &kImportantSitesInCBD,
+    &kDontPrefetchLibraries,
+    &kDownloadHomeShowStorageInfo,
+    &data_reduction_proxy::features::kDataReductionMainMenu,
+    &data_reduction_proxy::features::kDataReductionSiteBreakdown,
+    &kFullscreenActivity,
     &kImprovedA2HS,
+    &kNewPhotoPicker,
     &kNoCreditCardAbort,
     &kNTPCondensedLayoutFeature,
     &kNTPCondensedTileLayoutFeature,
-    &kNTPFakeOmniboxTextFeature,
     &kNTPLaunchAfterInactivity,
     &kNTPOfflinePagesFeature,
     &NTPShowGoogleGInOmniboxFeature,
+    &kOmniboxSpareRenderer,
+    &kPayWithGoogleV1,
     &kPhysicalWebFeature,
     &kPhysicalWebSharing,
+    &kSearchEnginePromoExistingDevice,
+    &kSearchEnginePromoNewDevice,
+    &kSpannableInlineAutocomplete,
     &kSpecialLocaleFeature,
     &kSpecialLocaleWrapper,
-    &kTabsInCBD,
+    &kSuggestionsHomeModernLayout,
     &kTabReparenting,
-    &kUploadCrashReportsUsingJobScheduler,
     &kVideoPersistence,
-    &kWebPaymentsModifiers,
+    &kVrBrowsingFeedback,
+    &kVrCustomTabBrowsing,
+    &payments::features::kWebPaymentsModifiers,
     &kWebPaymentsSingleAppUiSkip,
+    &kWebVrAutopresent,
     &kWebVRCardboardSupport,
+    &kXGEOVisibleNetworks,
     &ntp_snippets::kIncreasedVisibility,
     &ntp_snippets::kForeignSessionsSuggestionsFeature,
-    &ntp_snippets::kOfflineBadgeFeature,
-    &ntp_snippets::kSaveToOfflineFeature,
+    &ntp_snippets::kNotificationsFeature,
+    &ntp_snippets::kPublisherFaviconsFromNewServerFeature,
     &offline_pages::kBackgroundLoaderForDownloadsFeature,
     &offline_pages::kOfflinePagesCTFeature,  // See crbug.com/620421.
     &offline_pages::kOfflinePagesSharingFeature,
     &password_manager::features::kViewPasswords,
+    &subresource_filter::kSafeBrowsingSubresourceFilterExperimentalUI,
 };
 
 const base::Feature* FindFeatureExposedToJava(const std::string& feature_name) {
@@ -86,8 +115,8 @@ const base::Feature* FindFeatureExposedToJava(const std::string& feature_name) {
     if (kFeaturesExposedToJava[i]->name == feature_name)
       return kFeaturesExposedToJava[i];
   }
-  NOTREACHED() << "Features queried via ChromeFeatureList must be present in "
-                  "|kFeaturesExposedToJava|.";
+  NOTREACHED() << "Queried feature cannot be found in ChromeFeatureList: "
+               << feature_name;
   return nullptr;
 }
 
@@ -101,7 +130,10 @@ const base::Feature kAndroidPayIntegrationV2{"AndroidPayIntegrationV2",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kAndroidPaymentApps{"AndroidPaymentApps",
-                                        base::FEATURE_DISABLED_BY_DEFAULT};
+                                        base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kCCTBackgroundTab{"CCTBackgroundTab",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kCCTExternalLinkHandling{"CCTExternalLinkHandling",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
@@ -109,28 +141,70 @@ const base::Feature kCCTExternalLinkHandling{"CCTExternalLinkHandling",
 const base::Feature kCCTPostMessageAPI{"CCTPostMessageAPI",
                                        base::FEATURE_ENABLED_BY_DEFAULT};
 
+const base::Feature kCCTRedirectPreconnect{"CCTRedirectPreconnect",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kChromeHomeFeature{"ChromeHome",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kChromeHomeExpandButton{"ChromeHomeExpandButton",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kChromeHomeSwipeLogic{"ChromeHomeSwipeLogic",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kContentSuggestionsLargeThumbnail{
+    "ContentSuggestionsLargeThumbnail", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kContentSuggestionsVideoOverlay{
+    "ContentSuggestionsVideoOverlay", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kContentSuggestionsSettings{
+    "ContentSuggestionsSettings", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kContentSuggestionsShowSummary{
+    "ContentSuggestionsShowSummary", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kContextualSearchSingleActions{
     "ContextualSearchSingleActions", base::FEATURE_ENABLED_BY_DEFAULT};
 
+const base::Feature kContextualSearchUrlActions{
+    "ContextualSearchUrlActions", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kContextualSuggestionsCarousel{
+    "ContextualSuggestionsCarousel", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kCustomContextMenu{"CustomContextMenu",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kCustomFeedbackUi{"CustomFeedbackUi",
                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kDontPrefetchLibraries{"DontPrefetchLibraries",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kDownloadAutoResumptionThrottling{
     "DownloadAutoResumptionThrottling", base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kContextualSearchUrlActions{
-    "ContextualSearchUrlActions", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kDownloadHomeShowStorageInfo{
+    "DownloadHomeShowStorageInfo", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kImportantSitesInCBD{"ImportantSitesInCBD",
-                                         base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kFullscreenActivity{"FullscreenActivity",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Makes "Add to Home screen" in the app menu generate an APK for the shortcut
 // URL which opens Chrome in fullscreen.
 const base::Feature kImprovedA2HS{"ImprovedA2HS",
                                   base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kSearchEnginePromoExistingDevice{
+    "SearchEnginePromo.ExistingDevice", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kSearchEnginePromoNewDevice{
+    "SearchEnginePromo.NewDevice", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kNewPhotoPicker{"NewPhotoPicker",
+                                    base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kNoCreditCardAbort{"NoCreditCardAbort",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
@@ -141,9 +215,6 @@ const base::Feature kNTPCondensedLayoutFeature{
 const base::Feature kNTPCondensedTileLayoutFeature{
     "NTPCondensedTileLayout", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kNTPFakeOmniboxTextFeature{
-    "NTPFakeOmniboxText", base::FEATURE_DISABLED_BY_DEFAULT};
-
 const base::Feature kNTPLaunchAfterInactivity{
     "NTPLaunchAfterInactivity", base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -153,11 +224,20 @@ const base::Feature kNTPOfflinePagesFeature{"NTPOfflinePages",
 const base::Feature NTPShowGoogleGInOmniboxFeature{
     "NTPShowGoogleGInOmnibox", base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kOmniboxSpareRenderer{"OmniboxSpareRenderer",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kPayWithGoogleV1{"PayWithGoogleV1",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kPhysicalWebFeature{"PhysicalWeb",
                                         base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kPhysicalWebSharing{"PhysicalWebSharing",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kSpannableInlineAutocomplete{
+    "SpannableInlineAutocomplete", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kSpecialLocaleFeature{"SpecialLocale",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
@@ -165,13 +245,11 @@ const base::Feature kSpecialLocaleFeature{"SpecialLocale",
 const base::Feature kSpecialLocaleWrapper{"SpecialLocaleWrapper",
                                           base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kTabsInCBD{"TabsInCBD", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kSuggestionsHomeModernLayout{
+    "SuggestionsHomeModernLayout", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kTabReparenting{"TabReparenting",
                                     base::FEATURE_ENABLED_BY_DEFAULT};
-
-const base::Feature kUploadCrashReportsUsingJobScheduler{
-    "UploadCrashReportsUsingJobScheduler", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kUserMediaScreenCapturing{
     "UserMediaScreenCapturing", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -179,14 +257,27 @@ const base::Feature kUserMediaScreenCapturing{
 const base::Feature kVideoPersistence{"VideoPersistence",
                                       base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kWebPaymentsModifiers{"WebPaymentsModifiers",
-                                          base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kVrBrowsingFeedback{"VrBrowsingFeedback",
+                                        base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kVrCustomTabBrowsing{"VrCustomTabBrowsing",
+                                         base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kWebPaymentsSingleAppUiSkip{
     "WebPaymentsSingleAppUiSkip", base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kWebVRCardboardSupport{
-    "WebVRCardboardSupport", base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kWebVrAutopresent{"WebVrAutopresent",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kWebVRCardboardSupport{"WebVRCardboardSupport",
+                                           base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kXGEOVisibleNetworks{"XGEOVisibleNetworks",
+                                         base::FEATURE_DISABLED_BY_DEFAULT};
+
+static jboolean IsInitialized(JNIEnv* env, const JavaParamRef<jclass>& clazz) {
+  return !!base::FeatureList::GetInstance();
+}
 
 static jboolean IsEnabled(JNIEnv* env,
                           const JavaParamRef<jclass>& clazz,
@@ -246,10 +337,6 @@ static jboolean GetFieldTrialParamByFeatureAsBoolean(
   const std::string& param_name = ConvertJavaStringToUTF8(env, jparam_name);
   return base::GetFieldTrialParamByFeatureAsBool(*feature, param_name,
                                                  jdefault_value);
-}
-
-bool RegisterChromeFeatureListJni(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace android

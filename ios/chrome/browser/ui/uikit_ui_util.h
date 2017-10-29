@@ -234,6 +234,20 @@ void ApplyVisualConstraintsWithMetricsAndOptions(
     NSLayoutFormatOptions options,
     UIView* unused_parentView);
 
+// Returns constraints based on the visual constraints described with
+// |constraints| and |metrics| to views in |subviewsDictionary|.
+NSArray* VisualConstraintsWithMetrics(NSArray* constraints,
+                                      NSDictionary* subviewsDictionary,
+                                      NSDictionary* metrics);
+
+// Returns constraints based on the visual constraints described with
+// |constraints|, |metrics| and |options| to views in |subviewsDictionary|.
+NSArray* VisualConstraintsWithMetricsAndOptions(
+    NSArray* constraints,
+    NSDictionary* subviewsDictionary,
+    NSDictionary* metrics,
+    NSLayoutFormatOptions options);
+
 // Adds a constraint that |view1| and |view2| are center-aligned horizontally
 // and vertically.
 void AddSameCenterConstraints(UIView* view1, UIView* view2);
@@ -254,9 +268,9 @@ void AddSameCenterYConstraint(UIView* unused_parentView,
                               UIView* subview1,
                               UIView* subview2);
 
-// Adds constraints to make two views' sizes equal by pinning leading, trailing,
-// top and bottom anchors.
-void AddSameSizeConstraint(UIView* view1, UIView* view2);
+// Adds constraints to make two views' size and center equal by pinning leading,
+// trailing, top and bottom anchors.
+void AddSameConstraints(UIView* view1, UIView* view2);
 
 // Whether the |environment| has a compact horizontal size class.
 bool IsCompact(id<UITraitEnvironment> environment);

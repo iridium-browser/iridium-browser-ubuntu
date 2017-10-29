@@ -52,14 +52,13 @@ weiliangc@chromium.org
 vollick@chromium.org
 ajuma@chromium.org
 
+# property trees
+chrishtr@chromium.org
+
 # we miss you
 # jamesr@chromium.org
 # nduca@chromium.org
 # mithro@mithis.com / tansell@chromium.org
-
-per-file *.isolate=maruel@chromium.org
-per-file *.isolate=tandrii@chromium.org
-per-file *.isolate=vadimsh@chromium.org
 
 # TEAM: graphics-dev@chromium.org
 # COMPONENT: Internals>Compositing

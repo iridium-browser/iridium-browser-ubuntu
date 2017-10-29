@@ -21,15 +21,15 @@ TEST_F(NGBlockChildIteratorTest, NullFirstChild) {
 }
 
 TEST_F(NGBlockChildIteratorTest, NoBreakToken) {
-  setBodyInnerHTML(R"HTML(
+  SetBodyInnerHTML(R"HTML(
       <div id='child1'></div>
       <div id='child2'></div>
       <div id='child3'></div>
     )HTML");
-  NGLayoutInputNode* node1 =
-      new NGBlockNode(toLayoutBlockFlow(getLayoutObjectByElementId("child1")));
-  NGLayoutInputNode* node2 = node1->NextSibling();
-  NGLayoutInputNode* node3 = node2->NextSibling();
+  NGLayoutInputNode node1 =
+      NGBlockNode(ToLayoutBox(GetLayoutObjectByElementId("child1")));
+  NGLayoutInputNode node2 = node1.NextSibling();
+  NGLayoutInputNode node3 = node2.NextSibling();
 
   // The iterator should loop through three children.
   NGBlockChildIterator iterator(node1, nullptr);
@@ -41,37 +41,37 @@ TEST_F(NGBlockChildIteratorTest, NoBreakToken) {
 }
 
 TEST_F(NGBlockChildIteratorTest, BreakTokenWithFinishedChild) {
-  setBodyInnerHTML(R"HTML(
+  SetBodyInnerHTML(R"HTML(
       <div id='container'>
         <div id='child1'></div>
         <div id='child2'></div>
         <div id='child3'></div>
       </div>
     )HTML");
-  NGBlockNode* container = new NGBlockNode(
-      toLayoutBlockFlow(getLayoutObjectByElementId("container")));
-  NGLayoutInputNode* node1 = container->FirstChild();
-  NGLayoutInputNode* node2 = node1->NextSibling();
-  NGLayoutInputNode* node3 = node2->NextSibling();
+  NGBlockNode container =
+      NGBlockNode(ToLayoutBox(GetLayoutObjectByElementId("container")));
+  NGLayoutInputNode node1 = container.FirstChild();
+  NGLayoutInputNode node2 = node1.NextSibling();
+  NGLayoutInputNode node3 = node2.NextSibling();
 
   Vector<RefPtr<NGBreakToken>> child_break_tokens;
-  child_break_tokens.push_back(NGBlockBreakToken::create(toNGBlockNode(node1)));
+  child_break_tokens.push_back(NGBlockBreakToken::Create(node1));
   RefPtr<NGBlockBreakToken> parent_token =
-      NGBlockBreakToken::create(container, LayoutUnit(50), child_break_tokens);
+      NGBlockBreakToken::Create(container, LayoutUnit(50), child_break_tokens);
 
   // The iterator should loop through two children.
-  NGBlockChildIterator iterator(node1, parent_token.get());
+  NGBlockChildIterator iterator(node1, parent_token.Get());
   ASSERT_EQ(NGBlockChildIterator::Entry(node2, nullptr), iterator.NextChild());
   ASSERT_EQ(NGBlockChildIterator::Entry(node3, nullptr), iterator.NextChild());
   ASSERT_EQ(NGBlockChildIterator::Entry(nullptr, nullptr),
             iterator.NextChild());
 
-  child_break_tokens.push_back(NGBlockBreakToken::create(toNGBlockNode(node2)));
+  child_break_tokens.push_back(NGBlockBreakToken::Create(node2));
   parent_token =
-      NGBlockBreakToken::create(container, LayoutUnit(50), child_break_tokens);
+      NGBlockBreakToken::Create(container, LayoutUnit(50), child_break_tokens);
 
   // The iterator should loop through two children.
-  NGBlockChildIterator iterator2(node1, parent_token.get());
+  NGBlockChildIterator iterator2(node1, parent_token.Get());
   ASSERT_EQ(NGBlockChildIterator::Entry(node1, nullptr), iterator2.NextChild());
   ASSERT_EQ(NGBlockChildIterator::Entry(node3, nullptr), iterator2.NextChild());
   ASSERT_EQ(NGBlockChildIterator::Entry(nullptr, nullptr),
@@ -79,45 +79,45 @@ TEST_F(NGBlockChildIteratorTest, BreakTokenWithFinishedChild) {
 }
 
 TEST_F(NGBlockChildIteratorTest, BreakTokenWithUnFinishedChild) {
-  setBodyInnerHTML(R"HTML(
+  SetBodyInnerHTML(R"HTML(
       <div id='container'>
         <div id='child1'></div>
         <div id='child2'></div>
         <div id='child3'></div>
       </div>
     )HTML");
-  NGBlockNode* container = new NGBlockNode(
-      toLayoutBlockFlow(getLayoutObjectByElementId("container")));
-  NGLayoutInputNode* node1 = container->FirstChild();
-  NGLayoutInputNode* node2 = node1->NextSibling();
-  NGLayoutInputNode* node3 = node2->NextSibling();
+  NGBlockNode container =
+      NGBlockNode(ToLayoutBox(GetLayoutObjectByElementId("container")));
+  NGLayoutInputNode node1 = container.FirstChild();
+  NGLayoutInputNode node2 = node1.NextSibling();
+  NGLayoutInputNode node3 = node2.NextSibling();
 
   Vector<RefPtr<NGBreakToken>> child_break_tokens;
-  RefPtr<NGBreakToken> child_token = NGBlockBreakToken::create(
-      toNGBlockNode(node1), LayoutUnit(), child_break_tokens);
+  RefPtr<NGBreakToken> child_token =
+      NGBlockBreakToken::Create(node1, LayoutUnit(), child_break_tokens);
   child_break_tokens.push_back(child_token);
   RefPtr<NGBlockBreakToken> parent_token =
-      NGBlockBreakToken::create(container, LayoutUnit(50), child_break_tokens);
+      NGBlockBreakToken::Create(container, LayoutUnit(50), child_break_tokens);
 
   // The iterator should loop through three children, one with a break token.
-  NGBlockChildIterator iterator(node1, parent_token.get());
-  ASSERT_EQ(NGBlockChildIterator::Entry(node1, child_token.get()),
+  NGBlockChildIterator iterator(node1, parent_token.Get());
+  ASSERT_EQ(NGBlockChildIterator::Entry(node1, child_token.Get()),
             iterator.NextChild());
   ASSERT_EQ(NGBlockChildIterator::Entry(node2, nullptr), iterator.NextChild());
   ASSERT_EQ(NGBlockChildIterator::Entry(node3, nullptr), iterator.NextChild());
   ASSERT_EQ(NGBlockChildIterator::Entry(nullptr, nullptr),
             iterator.NextChild());
 
-  child_token = NGBlockBreakToken::create(toNGBlockNode(node2), LayoutUnit(),
-                                          child_break_tokens);
+  child_token =
+      NGBlockBreakToken::Create(node2, LayoutUnit(), child_break_tokens);
   child_break_tokens.push_back(child_token);
   parent_token =
-      NGBlockBreakToken::create(container, LayoutUnit(50), child_break_tokens);
+      NGBlockBreakToken::Create(container, LayoutUnit(50), child_break_tokens);
 
   // The iterator should loop through three children, one with a break token.
-  NGBlockChildIterator iterator2(node1, parent_token.get());
+  NGBlockChildIterator iterator2(node1, parent_token.Get());
   ASSERT_EQ(NGBlockChildIterator::Entry(node1, nullptr), iterator2.NextChild());
-  ASSERT_EQ(NGBlockChildIterator::Entry(node2, child_token.get()),
+  ASSERT_EQ(NGBlockChildIterator::Entry(node2, child_token.Get()),
             iterator2.NextChild());
   ASSERT_EQ(NGBlockChildIterator::Entry(node3, nullptr), iterator2.NextChild());
   ASSERT_EQ(NGBlockChildIterator::Entry(nullptr, nullptr),

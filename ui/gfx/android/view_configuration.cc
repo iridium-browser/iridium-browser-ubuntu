@@ -4,15 +4,13 @@
 
 #include "ui/gfx/android/view_configuration.h"
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/synchronization/lock.h"
 #include "jni/ViewConfigurationHelper_jni.h"
 
 using base::android::AttachCurrentThread;
-using base::android::GetApplicationContext;
 using base::android::JavaParamRef;
 
 namespace gfx {
@@ -31,8 +29,7 @@ struct ViewConfigurationData {
         min_scaling_span_in_dips_(0) {
     JNIEnv* env = AttachCurrentThread();
     j_view_configuration_helper_.Reset(
-        Java_ViewConfigurationHelper_createWithListener(
-            env, base::android::GetApplicationContext()));
+        Java_ViewConfigurationHelper_createWithListener(env));
 
     double_tap_timeout_in_ms_ =
         Java_ViewConfigurationHelper_getDoubleTapTimeout(env);

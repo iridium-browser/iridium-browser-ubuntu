@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_export.h"
 #include "ui/views/bubble/tray_bubble_view.h"
@@ -31,10 +32,6 @@ class MESSAGE_CENTER_EXPORT MessageBubbleBase {
   void SetMaxHeight(int height);
   int max_height() const { return max_height_; }
 
-  // Gets the init params for the implementation.
-  virtual views::TrayBubbleView::InitParams GetInitParams(
-      views::TrayBubbleView::AnchorAlignment anchor_alignment) = 0;
-
   // Called after the bubble view has been constructed. Creates and initializes
   // the bubble contents.
   virtual void InitializeContents(views::TrayBubbleView* bubble_view) = 0;
@@ -57,11 +54,7 @@ class MESSAGE_CENTER_EXPORT MessageBubbleBase {
 
   views::TrayBubbleView* bubble_view() const { return bubble_view_; }
 
-  static const SkColor kBackgroundColor;
-
  protected:
-  views::TrayBubbleView::InitParams GetDefaultInitParams(
-      views::TrayBubbleView::AnchorAlignment anchor_alignment);
   MessageCenter* message_center() { return message_center_; }
   MessageCenterTray* tray() { return tray_; }
   void set_bubble_view(views::TrayBubbleView* bubble_view) {

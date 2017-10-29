@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/files/file_path.h"
+#include "base/single_thread_task_runner.h"
 #include "base/test/null_task_runner.h"
 #include "content/public/browser/permission_manager.h"
 #include "content/public/test/mock_resource_context.h"
@@ -78,13 +79,15 @@ base::FilePath TestBrowserContext::GetPath() const {
   return browser_context_dir_.GetPath();
 }
 
+#if !defined(OS_ANDROID)
 std::unique_ptr<ZoomLevelDelegate> TestBrowserContext::CreateZoomLevelDelegate(
     const base::FilePath& partition_path) {
   return std::unique_ptr<ZoomLevelDelegate>();
 }
+#endif  // !defined(OS_ANDROID)
 
 bool TestBrowserContext::IsOffTheRecord() const {
-  return false;
+  return is_off_the_record_;
 }
 
 DownloadManagerDelegate* TestBrowserContext::GetDownloadManagerDelegate() {
@@ -125,6 +128,13 @@ BackgroundSyncController* TestBrowserContext::GetBackgroundSyncController() {
     background_sync_controller_.reset(new MockBackgroundSyncController());
 
   return background_sync_controller_.get();
+}
+
+BrowsingDataRemoverDelegate*
+TestBrowserContext::GetBrowsingDataRemoverDelegate() {
+  // Most BrowsingDataRemover tests do not require a delegate
+  // (not even a mock one).
+  return nullptr;
 }
 
 net::URLRequestContextGetter* TestBrowserContext::CreateRequestContext(

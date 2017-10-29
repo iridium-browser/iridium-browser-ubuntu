@@ -14,7 +14,6 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
-#include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/web_contents.h"
 #include "jni/PermissionUpdateInfoBarDelegate_jni.h"
 #include "ui/android/window_android.h"
@@ -31,21 +30,15 @@ infobars::InfoBar* PermissionUpdateInfoBarDelegate::Create(
       << "Caller should check ShouldShowPermissionInfobar before creating the "
       << "infobar.";
 
-  content::ContentViewCore* cvc =
-      content::ContentViewCore::FromWebContents(web_contents);
-  ui::WindowAndroid* window_android = cvc->GetWindowAndroid();
+  auto* window_android = web_contents->GetNativeView()->GetWindowAndroid();
 
   std::vector<std::string> permissions;
-  int missing_permission_count = 0;
-  int message_id = IDS_INFOBAR_MISSING_MULTIPLE_PERMISSIONS_TEXT;
+  int message_id = -1;
 
   for (ContentSettingsType content_settings_type : content_settings_types) {
     int previous_size = permissions.size();
     PrefServiceBridge::GetAndroidPermissionsForContentSetting(
         content_settings_type, &permissions);
-
-    if (missing_permission_count > 1)
-      continue;
 
     bool has_all_permissions = true;
     for (auto it = permissions.begin() + previous_size; it != permissions.end();
@@ -54,20 +47,27 @@ infobars::InfoBar* PermissionUpdateInfoBarDelegate::Create(
     }
 
     if (!has_all_permissions) {
-      missing_permission_count++;
-      if (missing_permission_count > 1) {
-        message_id = IDS_INFOBAR_MISSING_MULTIPLE_PERMISSIONS_TEXT;
-      } else if (content_settings_type == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
-        message_id = IDS_INFOBAR_MISSING_LOCATION_PERMISSION_TEXT;
-      } else if (content_settings_type ==
-                 CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC) {
-        message_id = IDS_INFOBAR_MISSING_MICROPHONE_PERMISSION_TEXT;
-      } else if (content_settings_type ==
-                 CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA) {
-        message_id = IDS_INFOBAR_MISSING_CAMERA_PERMISSION_TEXT;
+      if (message_id == -1) {
+        if (content_settings_type == CONTENT_SETTINGS_TYPE_GEOLOCATION) {
+          message_id = IDS_INFOBAR_MISSING_LOCATION_PERMISSION_TEXT;
+        } else if (content_settings_type ==
+                   CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC) {
+          message_id = IDS_INFOBAR_MISSING_MICROPHONE_PERMISSION_TEXT;
+        } else if (content_settings_type ==
+                   CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA) {
+          message_id = IDS_INFOBAR_MISSING_CAMERA_PERMISSION_TEXT;
+        } else {
+          NOTREACHED();
+        }
+      } else if (message_id == IDS_INFOBAR_MISSING_CAMERA_PERMISSION_TEXT) {
+        DCHECK(content_settings_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
+        message_id = IDS_INFOBAR_MISSING_MICROPHONE_CAMERA_PERMISSIONS_TEXT;
+      } else if (message_id == IDS_INFOBAR_MISSING_MICROPHONE_PERMISSION_TEXT) {
+        DCHECK(content_settings_type ==
+               CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
+        message_id = IDS_INFOBAR_MISSING_MICROPHONE_CAMERA_PERMISSIONS_TEXT;
       } else {
         NOTREACHED();
-        message_id = IDS_INFOBAR_MISSING_MULTIPLE_PERMISSIONS_TEXT;
       }
     }
   }
@@ -102,11 +102,9 @@ bool PermissionUpdateInfoBarDelegate::ShouldShowPermissionInfobar(
   if (!web_contents)
     return false;
 
-  content::ContentViewCore* cvc =
-      content::ContentViewCore::FromWebContents(web_contents);
-  if (!cvc || !cvc->GetWindowAndroid())
+  auto* window_android = web_contents->GetNativeView()->GetWindowAndroid();
+  if (!window_android)
     return false;
-  ui::WindowAndroid* window_android = cvc->GetWindowAndroid();
 
   for (ContentSettingsType content_settings_type : content_settings_types) {
     std::vector<std::string> android_permissions;
@@ -120,12 +118,6 @@ bool PermissionUpdateInfoBarDelegate::ShouldShowPermissionInfobar(
   }
 
   return false;
-}
-
-// static
-bool PermissionUpdateInfoBarDelegate::RegisterPermissionUpdateInfoBarDelegate(
-    JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 void PermissionUpdateInfoBarDelegate::OnPermissionResult(

@@ -9,6 +9,7 @@
 
 #include <vector>
 
+#include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
 #include "xfa/fxfa/parser/cxfa_assist.h"
@@ -21,7 +22,6 @@
 #include "xfa/fxfa/parser/cxfa_margin.h"
 #include "xfa/fxfa/parser/cxfa_para.h"
 #include "xfa/fxfa/parser/cxfa_validate.h"
-#include "xfa/fxfa/parser/xfa_object.h"
 
 enum XFA_CHECKSTATE {
   XFA_CHECKSTATE_On = 0,
@@ -46,29 +46,30 @@ class CXFA_WidgetData : public CXFA_Data {
   CXFA_Node* GetUIChild();
   XFA_Element GetUIType();
   CFX_WideString GetRawValue();
-  int32_t GetAccess(bool bTemplate = false);
+  int32_t GetAccess();
   int32_t GetRotate();
-  CXFA_Border GetBorder(bool bModified = false);
-  CXFA_Caption GetCaption(bool bModified = false);
-  CXFA_Font GetFont(bool bModified = false);
-  CXFA_Margin GetMargin(bool bModified = false);
-  CXFA_Para GetPara(bool bModified = false);
-  void GetEventList(CXFA_NodeArray& events);
-  int32_t GetEventByActivity(int32_t iActivity,
-                             CXFA_NodeArray& events,
-                             bool bIsFormReady = false);
-  CXFA_Value GetDefaultValue(bool bModified = false);
-  CXFA_Value GetFormValue(bool bModified = false);
-  CXFA_Calculate GetCalculate(bool bModified = false);
-  CXFA_Validate GetValidate(bool bModified = false);
-  CXFA_Bind GetBind(bool bModified = false);
-  CXFA_Assist GetAssist(bool bModified = false);
-  bool GetWidth(FX_FLOAT& fWidth);
-  bool GetHeight(FX_FLOAT& fHeight);
-  bool GetMinWidth(FX_FLOAT& fMinWidth);
-  bool GetMinHeight(FX_FLOAT& fMinHeight);
-  bool GetMaxWidth(FX_FLOAT& fMaxWidth);
-  bool GetMaxHeight(FX_FLOAT& fMaxHeight);
+
+  CXFA_Assist GetAssist();
+  CXFA_Border GetBorder(bool bModified);
+  CXFA_Caption GetCaption();
+  CXFA_Font GetFont(bool bModified);
+  CXFA_Margin GetMargin();
+  CXFA_Para GetPara();
+  std::vector<CXFA_Node*> GetEventList();
+  std::vector<CXFA_Node*> GetEventByActivity(int32_t iActivity,
+                                             bool bIsFormReady);
+  CXFA_Value GetDefaultValue();
+  CXFA_Value GetFormValue();
+  CXFA_Calculate GetCalculate();
+  CXFA_Validate GetValidate(bool bModified);
+
+  bool GetWidth(float& fWidth);
+  bool GetHeight(float& fHeight);
+  bool GetMinWidth(float& fMinWidth);
+  bool GetMinHeight(float& fMinHeight);
+  bool GetMaxWidth(float& fMaxWidth);
+  bool GetMaxHeight(float& fMaxHeight);
+
   CXFA_Border GetUIBorder();
   CFX_RectF GetUIMargin();
   int32_t GetButtonHighlight();
@@ -76,7 +77,7 @@ class CXFA_WidgetData : public CXFA_Data {
   bool GetButtonDown(CFX_WideString& wsDown, bool& bRichText);
   int32_t GetCheckButtonShape();
   int32_t GetCheckButtonMark();
-  FX_FLOAT GetCheckButtonSize();
+  float GetCheckButtonSize();
   bool IsAllowNeutral();
   bool IsRadioButton();
   XFA_CHECKSTATE GetCheckState();
@@ -94,37 +95,32 @@ class CXFA_WidgetData : public CXFA_Data {
   bool IsChoiceListAllowTextEntry();
   int32_t GetChoiceListOpen();
   bool IsListBox();
-  int32_t CountChoiceListItems(bool bSaveValue = false);
+  int32_t CountChoiceListItems(bool bSaveValue);
   bool GetChoiceListItem(CFX_WideString& wsText,
                          int32_t nIndex,
-                         bool bSaveValue = false);
-  void GetChoiceListItems(std::vector<CFX_WideString>& wsTextArray,
-                          bool bSaveValue = false);
+                         bool bSaveValue);
+  std::vector<CFX_WideString> GetChoiceListItems(bool bSaveValue);
   int32_t CountSelectedItems();
-  int32_t GetSelectedItem(int32_t nIndex = 0);
-  void GetSelectedItems(CFX_ArrayTemplate<int32_t>& iSelArray);
-  void GetSelectedItemsValue(std::vector<CFX_WideString>& wsSelTextArray);
+  int32_t GetSelectedItem(int32_t nIndex);
+  std::vector<int32_t> GetSelectedItems();
+  std::vector<CFX_WideString> GetSelectedItemsValue();
   bool GetItemState(int32_t nIndex);
   void SetItemState(int32_t nIndex,
                     bool bSelected,
                     bool bNotify,
                     bool bScriptModify,
                     bool bSyncData);
-  void SetSelectedItems(CFX_ArrayTemplate<int32_t>& iSelArray,
+  void SetSelectedItems(const std::vector<int32_t>& iSelArray,
                         bool bNotify,
                         bool bScriptModify,
                         bool bSyncData);
   void ClearAllSelections();
   void InsertItem(const CFX_WideString& wsLabel,
                   const CFX_WideString& wsValue,
-                  int32_t nIndex = -1,
-                  bool bNotify = false);
+                  bool bNotify);
   void GetItemLabel(const CFX_WideStringC& wsValue, CFX_WideString& wsLabel);
   void GetItemValue(const CFX_WideStringC& wsLabel, CFX_WideString& wsValue);
-  bool DeleteItem(int32_t nIndex,
-                  bool bNotify = false,
-                  bool bScriptModify = false,
-                  bool bSyncData = true);
+  bool DeleteItem(int32_t nIndex, bool bNotify, bool bScriptModify);
   int32_t GetHorizontalScrollPolicy();
   int32_t GetNumberOfCells();
   bool SetValue(const CFX_WideString& wsValue, XFA_VALUEPICTURE eValueType);
@@ -136,20 +132,22 @@ class CXFA_WidgetData : public CXFA_Data {
   bool GetFormatDataValue(const CFX_WideString& wsValue,
                           CFX_WideString& wsFormattedValue);
   void NormalizeNumStr(const CFX_WideString& wsValue, CFX_WideString& wsOutput);
+
   CFX_WideString GetBarcodeType();
-  bool GetBarcodeAttribute_CharEncoding(int32_t& val);
-  bool GetBarcodeAttribute_Checksum(bool& val);
-  bool GetBarcodeAttribute_DataLength(int32_t& val);
-  bool GetBarcodeAttribute_StartChar(FX_CHAR& val);
-  bool GetBarcodeAttribute_EndChar(FX_CHAR& val);
-  bool GetBarcodeAttribute_ECLevel(int32_t& val);
-  bool GetBarcodeAttribute_ModuleWidth(int32_t& val);
-  bool GetBarcodeAttribute_ModuleHeight(int32_t& val);
-  bool GetBarcodeAttribute_PrintChecksum(bool& val);
-  bool GetBarcodeAttribute_TextLocation(int32_t& val);
-  bool GetBarcodeAttribute_Truncate(bool& val);
-  bool GetBarcodeAttribute_WideNarrowRatio(FX_FLOAT& val);
+  bool GetBarcodeAttribute_CharEncoding(int32_t* val);
+  bool GetBarcodeAttribute_Checksum(bool* val);
+  bool GetBarcodeAttribute_DataLength(int32_t* val);
+  bool GetBarcodeAttribute_StartChar(char* val);
+  bool GetBarcodeAttribute_EndChar(char* val);
+  bool GetBarcodeAttribute_ECLevel(int32_t* val);
+  bool GetBarcodeAttribute_ModuleWidth(int32_t* val);
+  bool GetBarcodeAttribute_ModuleHeight(int32_t* val);
+  bool GetBarcodeAttribute_PrintChecksum(bool* val);
+  bool GetBarcodeAttribute_TextLocation(int32_t* val);
+  bool GetBarcodeAttribute_Truncate(bool* val);
+  bool GetBarcodeAttribute_WideNarrowRatio(float* val);
   void GetPasswordChar(CFX_WideString& wsPassWord);
+
   bool IsMultiLine();
   int32_t GetVerticalScrollPolicy();
   int32_t GetMaxChars(XFA_Element& eType);
@@ -163,11 +161,12 @@ class CXFA_WidgetData : public CXFA_Data {
   bool m_bIsNull;
   bool m_bPreNull;
 
- protected:
+ private:
+  CXFA_Bind GetBind();
   void SyncValue(const CFX_WideString& wsValue, bool bNotify);
   void InsertListTextItem(CXFA_Node* pItems,
                           const CFX_WideString& wsText,
-                          int32_t nIndex = -1);
+                          int32_t nIndex);
   void FormatNumStr(const CFX_WideString& wsValue,
                     IFX_Locale* pLocale,
                     CFX_WideString& wsOutput);

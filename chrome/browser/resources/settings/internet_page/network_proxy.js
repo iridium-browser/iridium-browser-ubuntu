@@ -131,7 +131,7 @@ Polymer({
   currentRouteChanged: function(newRoute) {
     this.proxyModified_ = false;
     this.proxy_ = this.createDefaultProxySettings_();
-    if (newRoute == settings.Route.NETWORK_DETAIL)
+    if (newRoute == settings.routes.NETWORK_DETAIL)
       this.updateProxy_();
   },
 
@@ -174,21 +174,23 @@ Polymer({
             /** @type {!CrOnc.ProxyLocation|undefined} */ (
                 CrOnc.getSimpleActiveProperties(
                     proxySettings.Manual.SecureHTTPProxy)) ||
-            proxy.Manual.HTTPProxy;
+            {Host: '', Port: 80};
         proxy.Manual.FTPProxy =
             /** @type {!CrOnc.ProxyLocation|undefined} */ (
                 CrOnc.getSimpleActiveProperties(
                     proxySettings.Manual.FTPProxy)) ||
-            proxy.Manual.HTTPProxy;
+            {Host: '', Port: 80};
         proxy.Manual.SOCKS =
             /** @type {!CrOnc.ProxyLocation|undefined} */ (
                 CrOnc.getSimpleActiveProperties(proxySettings.Manual.SOCKS)) ||
-            proxy.Manual.HTTPProxy;
+            {Host: '', Port: 80};
         var jsonHttp = proxy.Manual.HTTPProxy;
         this.useSameProxy_ =
-            CrOnc.proxyMatches(jsonHttp, proxy.Manual.SecureHTTPProxy) &&
-            CrOnc.proxyMatches(jsonHttp, proxy.Manual.FTPProxy) &&
-            CrOnc.proxyMatches(jsonHttp, proxy.Manual.SOCKS);
+            (CrOnc.proxyMatches(jsonHttp, proxy.Manual.SecureHTTPProxy) &&
+             CrOnc.proxyMatches(jsonHttp, proxy.Manual.FTPProxy) &&
+             CrOnc.proxyMatches(jsonHttp, proxy.Manual.SOCKS)) ||
+            (!proxy.Manual.SecureHTTPProxy.Host &&
+             !proxy.Manual.FTPProxy.Host && !proxy.Manual.SOCKS.Host);
       }
       if (proxySettings.ExcludeDomains) {
         proxy.ExcludeDomains = /** @type {!Array<string>|undefined} */ (
@@ -197,7 +199,7 @@ Polymer({
       proxy.PAC = /** @type {string|undefined} */ (
           CrOnc.getActiveValue(proxySettings.PAC));
     }
-    // Use saved ExcludeDomanains and Manual if not defined.
+    // Use saved ExcludeDomains and Manual if not defined.
     proxy.ExcludeDomains = proxy.ExcludeDomains || this.savedExcludeDomains_;
     proxy.Manual = proxy.Manual || this.savedManual_;
 
@@ -256,33 +258,36 @@ Polymer({
    * @private
    */
   sendProxyChange_: function() {
-    if (this.proxy_.Type == CrOnc.ProxySettingsType.MANUAL) {
-      var proxy =
-          /** @type {!CrOnc.ProxySettings} */ (Object.assign({}, this.proxy_));
+    var proxy =
+        /** @type {!CrOnc.ProxySettings} */ (Object.assign({}, this.proxy_));
+    if (proxy.Type == CrOnc.ProxySettingsType.MANUAL) {
       var manual = proxy.Manual;
-      var defaultProxy = manual.HTTPProxy;
-      if (!defaultProxy || !defaultProxy.Host)
-        return;
-      if (this.useSameProxy_ || !this.get('SecureHTTPProxy.Host', manual)) {
+      var defaultProxy = manual.HTTPProxy || {Host: '', Port: 80};
+      if (this.useSameProxy_) {
         proxy.Manual.SecureHTTPProxy = /** @type {!CrOnc.ProxyLocation} */ (
             Object.assign({}, defaultProxy));
-      }
-      if (this.useSameProxy_ || !this.get('FTPProxy.Host', manual)) {
         proxy.Manual.FTPProxy = /** @type {!CrOnc.ProxyLocation} */ (
             Object.assign({}, defaultProxy));
-      }
-      if (this.useSameProxy_ || !this.get('SOCKS.Host', manual)) {
         proxy.Manual.SOCKS = /** @type {!CrOnc.ProxyLocation} */ (
             Object.assign({}, defaultProxy));
+      } else {
+        // Remove properties with empty hosts to unset them.
+        if (manual.HTTPProxy && !manual.HTTPProxy.Host)
+          delete manual.HTTPProxy;
+        if (manual.SecureHTTPProxy && !manual.SecureHTTPProxy.Host)
+          delete manual.SecureHTTPProxy;
+        if (manual.FTPProxy && !manual.FTPProxy.Host)
+          delete manual.FTPProxy;
+        if (manual.SOCKS && !manual.SOCKS.Host)
+          delete manual.SOCKS;
       }
-      this.savedManual_ = Object.assign({}, proxy.Manual);
+      this.savedManual_ = Object.assign({}, manual);
       this.savedExcludeDomains_ = proxy.ExcludeDomains;
-      this.proxy_ = proxy;
-    } else if (this.proxy_.Type == CrOnc.ProxySettingsType.PAC) {
-      if (!this.proxy_.PAC)
+    } else if (proxy.Type == CrOnc.ProxySettingsType.PAC) {
+      if (!proxy.PAC)
         return;
     }
-    this.fire('proxy-change', {field: 'ProxySettings', value: this.proxy_});
+    this.fire('proxy-change', {field: 'ProxySettings', value: proxy});
     this.proxyModified_ = false;
   },
 
@@ -314,7 +319,7 @@ Polymer({
 
   /**
    * Event triggered when a proxy exclusion is added.
-   * @param {Event} event The add proxy exclusion event.
+   * @param {!Event} event The add proxy exclusion event.
    * @private
    */
   onAddProxyExclusionTap_: function(event) {
@@ -329,7 +334,7 @@ Polymer({
 
   /**
    * Event triggered when the proxy exclusion list changes.
-   * @param {Event} event The remove proxy exclusions change event.
+   * @param {!Event} event The remove proxy exclusions change event.
    * @private
    */
   onProxyExclusionsChange_: function(event) {
@@ -436,7 +441,12 @@ Polymer({
   isSaveManualProxyEnabled_: function() {
     if (!this.proxyModified_)
       return false;
-    return !!this.get('HTTPProxy.Host', this.proxy_.Manual);
+    var manual = this.proxy_.Manual;
+    var httpHost = this.get('HTTPProxy.Host', manual);
+    if (this.useSameProxy_)
+      return !!httpHost;
+    return !!httpHost || !!this.get('SecureHTTPProxy.Host', manual) ||
+        !!this.get('FTPProxy.Host', manual) || !!this.get('SOCKS.Host', manual);
   },
 
   /**
@@ -452,7 +462,7 @@ Polymer({
   /**
    * Handles the change event for the shared proxy checkbox. Shows a
    * confirmation dialog.
-   * @param {Event} event
+   * @param {!Event} event
    * @private
    */
   onAllowSharedProxiesChange_: function(event) {
@@ -478,5 +488,10 @@ Polymer({
     /** @type {!SettingsCheckboxElement} */ (this.$.allowShared)
         .resetToPrefValue();
     this.$.confirmAllowSharedDialog.close();
+  },
+
+  /** @private */
+  onAllowSharedDialogClose_: function() {
+    cr.ui.focusWithoutInk(assert(this.$$('#allowShared')));
   },
 });

@@ -12,8 +12,10 @@
 
 #import "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
+#import "ios/web/navigation/navigation_item_impl.h"
 #import "ios/web/public/navigation_item_list.h"
 #import "ios/web/public/navigation_manager.h"
+#include "ios/web/public/reload_type.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
@@ -22,9 +24,7 @@
 namespace web {
 class BrowserState;
 class NavigationItem;
-struct Referrer;
 class NavigationManagerDelegate;
-class NavigationManagerFacadeDelegate;
 class SessionStorageBuilder;
 
 // Defines the ways how a pending navigation can be initiated.
@@ -50,11 +50,11 @@ enum class NavigationInitiationType {
 class NavigationManagerImpl : public NavigationManager {
  public:
   NavigationManagerImpl();
-  ~NavigationManagerImpl() override;
+  ~NavigationManagerImpl() override {}
 
   // Setters for NavigationManagerDelegate and BrowserState.
-  void SetDelegate(NavigationManagerDelegate* delegate);
-  void SetBrowserState(BrowserState* browser_state);
+  virtual void SetDelegate(NavigationManagerDelegate* delegate);
+  virtual void SetBrowserState(BrowserState* browser_state);
 
   // Sets the CRWSessionController that backs this object.
   // Keeps a strong reference to |session_controller|.
@@ -64,143 +64,97 @@ class NavigationManagerImpl : public NavigationManager {
   // TODO(stuartmorgan): Also move deserialization of CRWSessionControllers
   // under the control of this class, and move the bulk of CRWSessionController
   // logic into it.
-  void SetSessionController(CRWSessionController* session_controller);
+  virtual void SetSessionController(
+      CRWSessionController* session_controller) = 0;
 
-  // Initializes a new session history. |opened_by_dom| is YES if the page was
-  // opened by DOM.
-  void InitializeSession(BOOL opened_by_dom);
+  // Initializes a new session history.
+  virtual void InitializeSession() = 0;
 
   // Replace the session history with a new one, where |items| is the
   // complete set of navigation items in the new history, and |current_index|
   // is the index of the currently active item.
-  void ReplaceSessionHistory(std::vector<std::unique_ptr<NavigationItem>> items,
-                             int current_index);
+  virtual void ReplaceSessionHistory(
+      std::vector<std::unique_ptr<NavigationItem>> items,
+      int current_index) = 0;
 
-  // Sets the delegate used to drive the navigation controller facade.
-  void SetFacadeDelegate(NavigationManagerFacadeDelegate* facade_delegate);
-  NavigationManagerFacadeDelegate* GetFacadeDelegate() const;
-
-  // Helper functions for communicating with the facade layer.
+  // Helper functions for notifying WebStateObservers of changes.
   // TODO(stuartmorgan): Make these private once the logic triggering them moves
   // into this layer.
-  void OnNavigationItemsPruned(size_t pruned_item_count);
-  void OnNavigationItemChanged();
-  void OnNavigationItemCommitted();
+  virtual void OnNavigationItemsPruned(size_t pruned_item_count) = 0;
+  virtual void OnNavigationItemChanged() = 0;
+  virtual void OnNavigationItemCommitted() = 0;
 
   // Temporary accessors and content/ class pass-throughs.
   // TODO(stuartmorgan): Re-evaluate this list once the refactorings have
   // settled down.
-  CRWSessionController* GetSessionController();
-  void LoadURL(const GURL& url,
-               const Referrer& referrer,
-               ui::PageTransition type);
+  virtual CRWSessionController* GetSessionController() const = 0;
 
-  // Adds a new item with the given url, referrer, navigation type, and
-  // initiation type, making it the pending item. If pending item is the same as
-  // the current item, this does nothing. |referrer| may be nil if there isn't
-  // one. The item starts out as pending, and will be lost unless
-  // |-commitPendingItem| is called.
-  void AddPendingItem(const GURL& url,
-                      const web::Referrer& referrer,
-                      ui::PageTransition navigation_type,
-                      NavigationInitiationType initiation_type);
+  // Adds a transient item with the given URL. A transient item will be
+  // discarded on any navigation.
+  virtual void AddTransientItem(const GURL& url) = 0;
 
-  // Convenience accessors to get the underlying NavigationItems from the
-  // SessionEntries returned from |session_controller_|'s -lastUserEntry and
-  // -previousEntry methods.
-  // TODO(crbug.com/546365): Remove these methods.
-  NavigationItem* GetLastUserItem() const;
+  // Adds a new item with the given url, referrer, navigation type, initiation
+  // type and user agent override option, making it the pending item. If pending
+  // item is the same as the current item, this does nothing. |referrer| may be
+  // nil if there isn't one. The item starts out as pending, and will be lost
+  // unless |-commitPendingItem| is called.
+  virtual void AddPendingItem(
+      const GURL& url,
+      const web::Referrer& referrer,
+      ui::PageTransition navigation_type,
+      NavigationInitiationType initiation_type,
+      UserAgentOverrideOption user_agent_override_option) = 0;
 
-  // Temporary method. Returns a vector of NavigationItems corresponding to
-  // the SessionEntries of the uderlying CRWSessionController.
-  // TODO(crbug.com/546365): Remove this method.
-  NavigationItemList GetItems() const;
-
-  // NavigationManager:
-  BrowserState* GetBrowserState() const override;
-  WebState* GetWebState() const override;
-  NavigationItem* GetVisibleItem() const override;
-  NavigationItem* GetLastCommittedItem() const override;
-  NavigationItem* GetPendingItem() const override;
-  NavigationItem* GetTransientItem() const override;
-  void DiscardNonCommittedItems() override;
-  void LoadIfNecessary() override;
-  void LoadURLWithParams(const NavigationManager::WebLoadParams&) override;
-  void AddTransientURLRewriter(
-      BrowserURLRewriter::URLRewriter rewriter) override;
-  int GetItemCount() const override;
-  NavigationItem* GetItemAtIndex(size_t index) const override;
-  int GetCurrentItemIndex() const override;
-  int GetPendingItemIndex() const override;
-  int GetLastCommittedItemIndex() const override;
-  bool RemoveItemAtIndex(int index) override;
-  bool CanGoBack() const override;
-  bool CanGoForward() const override;
-  bool CanGoToOffset(int offset) const override;
-  void GoBack() override;
-  void GoForward() override;
-  void GoToIndex(int index) override;
-  void Reload(bool check_for_reposts) override;
-  void OverrideDesktopUserAgentForNextPendingItem() override;
+  // Commits the pending item, if any.
+  virtual void CommitPendingItem() = 0;
 
   // Returns the current list of transient url rewriters, passing ownership to
   // the caller.
   // TODO(crbug.com/546197): remove once NavigationItem creation occurs in this
   // class.
-  std::unique_ptr<std::vector<BrowserURLRewriter::URLRewriter>>
-  GetTransientURLRewriters();
+  virtual std::unique_ptr<std::vector<BrowserURLRewriter::URLRewriter>>
+  GetTransientURLRewriters() = 0;
 
   // Called to reset the transient url rewriter list.
-  void RemoveTransientURLRewriters();
-
-  // Copy state from |navigation_manager|, including a copy of that object's
-  // CRWSessionController.
-  void CopyState(NavigationManagerImpl* navigation_manager);
+  virtual void RemoveTransientURLRewriters() = 0;
 
   // Returns the navigation index that differs from the current item (or pending
   // item if it exists) by the specified |offset|, skipping redirect navigation
   // items. The index returned is not guaranteed to be valid.
   // TODO(crbug.com/661316): Make this method private once navigation code is
   // moved from CRWWebController to NavigationManagerImpl.
-  int GetIndexForOffset(int offset) const;
+  virtual int GetIndexForOffset(int offset) const = 0;
 
- private:
+  // Returns the index of the previous item. Only used by SessionStorageBuilder.
+  virtual int GetPreviousItemIndex() const = 0;
+
+  // NavigationManager:
+  void Reload(ReloadType reload_type, bool check_for_reposts) override;
+
+ protected:
   // The SessionStorageBuilder functions require access to private variables of
   // NavigationManagerImpl.
   friend SessionStorageBuilder;
 
-  // Returns true if the PageTransition for the underlying navigation item at
-  // |index| has ui::PAGE_TRANSITION_IS_REDIRECT_MASK.
-  bool IsRedirectItemAtIndex(int index) const;
+  // TODO(crbug.com/738020): Remove legacy code and merge
+  // WKBasedNavigationManager into this class after the navigation experiment.
 
-  // Returns the most recent NavigationItem that does not have an app-specific
-  // URL.
-  NavigationItem* GetLastCommittedNonAppSpecificItem() const;
+  // Identical to GetItemAtIndex() but returns the underlying NavigationItemImpl
+  // instead of the public NavigationItem interface. This is used by
+  // SessionStorageBuilder to persist session state.
+  virtual NavigationItemImpl* GetNavigationItemImplAtIndex(
+      size_t index) const = 0;
 
-  // If true, override navigation item's useDesktopUserAgent flag and always
-  // create the pending entry using the desktop user agent.
-  // TODO(crbug.com/692303): Remove this when overriding the user agent doesn't
-  // create a new NavigationItem.
-  bool override_desktop_user_agent_for_next_pending_item_;
+  // Checks whether or not two URL are an in-page navigation (differing only
+  // in the fragment).
+  static bool AreUrlsFragmentChangeNavigation(const GURL& existing_url,
+                                              const GURL& new_url);
 
   // The primary delegate for this manager.
   NavigationManagerDelegate* delegate_;
 
   // The BrowserState that is associated with this instance.
   BrowserState* browser_state_;
-
-  // CRWSessionController that backs this instance.
-  // TODO(stuartmorgan): Fold CRWSessionController into this class.
-  base::scoped_nsobject<CRWSessionController> session_controller_;
-
-  // Weak pointer to the facade delegate.
-  NavigationManagerFacadeDelegate* facade_delegate_;
-
-  // List of transient url rewriters added by |AddTransientURLRewriter()|.
-  std::unique_ptr<std::vector<BrowserURLRewriter::URLRewriter>>
-      transient_url_rewriters_;
-
-  DISALLOW_COPY_AND_ASSIGN(NavigationManagerImpl);
 };
 
 }  // namespace web

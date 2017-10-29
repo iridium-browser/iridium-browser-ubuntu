@@ -27,6 +27,7 @@ group("all") {
   if (is_chromeos) {
     deps += [
       "//ash/autoclick/mus:accessibility_autoclick",
+      "//ash/mus/standalone:ash_standalone",
       "//ash/touch_hud/mus:touch_hud",
       "//mash:mash_unittests",
     ]
@@ -44,7 +45,6 @@ catalog("catalog") {
     "//mash/quick_launch:manifest",
     "//mash/session:manifest",
     "//mash/task_viewer:manifest",
-    "//services/tracing:manifest",
     "//services/ui:manifest",
     "//services/ui/demo:manifest",
     "//services/ui/ime/test_ime_driver:manifest",
@@ -69,7 +69,10 @@ catalog("catalog") {
   catalog_deps = [ "//mash/example:catalog" ]
 
   if (is_chromeos) {
-    standalone_services += [ "//ash/mus:manifest" ]
+    standalone_services += [
+      "//ash/mus:manifest",
+      "//ash/mus/standalone:manifest",
+    ]
   }
 
   if (is_linux && !is_android) {
@@ -95,16 +98,6 @@ copy("mash_catalog") {
   ]
 }
 
-group("browser") {
-  testonly = true
-
-  deps = [
-    ":all",
-    "//mash/browser",
-    "//mash/webtest",
-  ]
-}
-
 if (is_chromeos) {
   # TODO(jamescook): Move these tests into //ash/mus.
   test("mash_unittests") {
@@ -114,9 +107,10 @@ if (is_chromeos) {
       "test/mash_unittests.cc",
     ]
     deps = [
-      "//ash:common_unittests",
+      "//ash:test_support_without_content",
       "//ash/mus:resources",
       "//ash/mus:unittests",
+      "//ash/public/cpp:ash_public_cpp",
       "//base",
       "//base/test:test_support",
       "//cc",

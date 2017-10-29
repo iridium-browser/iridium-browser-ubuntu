@@ -12,6 +12,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -51,13 +52,13 @@ const StringToConstant kDataReductionProxyBypassActionTypeTable[] = {
 };
 
 std::string JoinListValueStrings(base::ListValue* list_value) {
-  std::vector<std::string> values;
+  std::vector<base::StringPiece> values;
   for (const auto& value : *list_value) {
-    std::string value_string;
-    if (!value->GetAsString(&value_string))
+    base::StringPiece value_string;
+    if (!value.GetAsString(&value_string))
       return std::string();
 
-    values.push_back(std::move(value_string));
+    values.push_back(value_string);
   }
 
   return base::JoinString(values, ";");
@@ -105,8 +106,8 @@ DataReductionProxyEventStore::GetSummaryValue() const {
   auto data_reduction_proxy_values = base::MakeUnique<base::DictionaryValue>();
   data_reduction_proxy_values->SetBoolean("enabled", enabled_);
   if (current_configuration_) {
-    data_reduction_proxy_values->Set("proxy_config",
-                                     current_configuration_->DeepCopy());
+    data_reduction_proxy_values->Set(
+        "proxy_config", base::MakeUnique<base::Value>(*current_configuration_));
   }
 
   switch (secure_proxy_check_state_) {
@@ -128,8 +129,8 @@ DataReductionProxyEventStore::GetSummaryValue() const {
     int current_time_ticks_ms =
         (base::TimeTicks::Now() - base::TimeTicks()).InMilliseconds();
     if (expiration_ticks_ > current_time_ticks_ms) {
-      data_reduction_proxy_values->Set("last_bypass",
-                                       last_bypass_event->DeepCopy());
+      data_reduction_proxy_values->Set(
+          "last_bypass", base::MakeUnique<base::Value>(*last_bypass_event));
     }
   }
 

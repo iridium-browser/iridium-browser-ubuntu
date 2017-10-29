@@ -26,14 +26,15 @@
 // https://dom.spec.whatwg.org/#interface-domtokenlist
 
 [
-    DependentLifetime,
+    DependentLifetime
 ] interface DOMTokenList {
     readonly attribute unsigned long length;
     getter DOMString? item(unsigned long index);
-    [RaisesException] boolean contains(DOMString token);
+    boolean contains(DOMString token);
     [RaisesException, CEReactions, CustomElementCallbacks] void add(DOMString... tokens);
     [RaisesException, CEReactions, CustomElementCallbacks] void remove(DOMString... tokens);
     [RaisesException, CEReactions, CustomElementCallbacks] boolean toggle(DOMString token, optional boolean force);
+    [RaisesException, CEReactions] void replace(DOMString token, DOMString newToken);
     [RaisesException, CustomElementCallbacks] boolean supports(DOMString token);
     [CEReactions] attribute DOMString value;
     stringifier;

@@ -31,8 +31,7 @@ const char kUserImageInfo[] = "user_image_info";
 const char kImageIndex[] = "image_index";
 
 bool IsIndexSupported(int index) {
-  return (index >= default_user_image::kFirstDefaultImageIndex &&
-          index < default_user_image::kDefaultImagesCount) ||
+  return default_user_image::IsValidIndex(index) ||
          (index == user_manager::User::USER_IMAGE_PROFILE);
 }
 
@@ -189,7 +188,8 @@ bool UserImageSyncObserver::GetSyncedImageIndex(int* index) {
 bool UserImageSyncObserver::CanUpdateLocalImageNow() {
   if (WizardController* wizard_controller =
           WizardController::default_controller()) {
-    UserImageScreen* screen = UserImageScreen::Get(wizard_controller);
+    UserImageScreen* screen =
+        UserImageScreen::Get(wizard_controller->screen_manager());
     if (wizard_controller->current_screen() == screen) {
       if (screen->user_selected_image())
         return false;

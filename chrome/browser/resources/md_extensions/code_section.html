@@ -1,14 +1,11 @@
+<link rel="import" href="chrome://resources/cr_elements/hidden_style_css.html">
 <link rel="import" href="chrome://resources/html/cr.html">
 <link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
 
 <dom-module id="extensions-code-section">
   <template>
-    <style>
-      [hidden] {
-        display: none !important;
-      }
-
+    <style include="cr-hidden-style">
       #main {
         border: 1px solid var(--paper-grey-500);
         color: var(--paper-grey-800);
@@ -40,7 +37,7 @@
         text-align: center;
       }
     </style>
-    <div id="main" hidden$="[[isMainHidden_(code)]]">
+    <div id="main" hidden$="[[isEmpty(code)]]">
       <div id="line-numbers">
         <span>[[computeLineNumbersContent_(code.*)]]</span>
       </div>
@@ -51,7 +48,7 @@
      --></span>[[code.afterHighlight]]</span>
       </div>
     </div>
-    <div id="no-code" hidden$="[[!isMainHidden_(code)]]">[[noCodeError]]</div>
+    <div id="no-code" hidden$="[[!isEmpty(code)]]">[[couldNotDisplayCode]]</div>
   </template>
   <script src="chrome://extensions/code_section.js"></script>
 </dom-module>

@@ -10,7 +10,9 @@
 
 #include <limits>
 #include <memory>
+#include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -65,9 +67,9 @@ TEST(IPCMessageTest, BasicMessageTest) {
 
 TEST(IPCMessageTest, ListValue) {
   base::ListValue input;
-  input.Set(0, new base::Value(42.42));
-  input.Set(1, new base::StringValue("forty"));
-  input.Set(2, base::Value::CreateNullValue());
+  input.AppendDouble(42.42);
+  input.AppendString("forty");
+  input.Append(base::MakeUnique<base::Value>());
 
   IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
   IPC::WriteParam(&msg, input);
@@ -87,22 +89,22 @@ TEST(IPCMessageTest, ListValue) {
 
 TEST(IPCMessageTest, DictionaryValue) {
   base::DictionaryValue input;
-  input.Set("null", base::Value::CreateNullValue());
-  input.Set("bool", new base::Value(true));
-  input.Set("int", new base::Value(42));
-  input.SetWithoutPathExpansion("int.with.dot", new base::Value(43));
+  input.Set("null", base::MakeUnique<base::Value>());
+  input.SetBoolean("bool", true);
+  input.SetInteger("int", 42);
+  input.SetIntegerWithoutPathExpansion("int.with.dot", 43);
 
-  std::unique_ptr<base::DictionaryValue> subdict(new base::DictionaryValue());
-  subdict->Set("str", new base::StringValue("forty two"));
-  subdict->Set("bool", new base::Value(false));
+  auto subdict = base::MakeUnique<base::DictionaryValue>();
+  subdict->SetString("str", "forty two");
+  subdict->SetBoolean("bool", false);
 
-  std::unique_ptr<base::ListValue> sublist(new base::ListValue());
-  sublist->Set(0, new base::Value(42.42));
-  sublist->Set(1, new base::StringValue("forty"));
-  sublist->Set(2, new base::StringValue("two"));
-  subdict->Set("list", sublist.release());
+  auto sublist = base::MakeUnique<base::ListValue>();
+  sublist->AppendDouble(42.42);
+  sublist->AppendString("forty");
+  sublist->AppendString("two");
+  subdict->Set("list", std::move(sublist));
 
-  input.Set("dict", subdict.release());
+  input.Set("dict", std::move(subdict));
 
   IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
   IPC::WriteParam(&msg, input);

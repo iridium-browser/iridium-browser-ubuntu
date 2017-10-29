@@ -10,7 +10,7 @@ found in the LICENSE file.
 'use strict';
 
 tr.exportTo('tr.e.cc', function() {
-  var knownRasterTaskNames = [
+  const knownRasterTaskNames = [
     'TileManager::RunRasterTask',
     'RasterWorkerPoolTaskImpl::RunRasterOnThread',
     'RasterWorkerPoolTaskImpl::Raster',
@@ -19,7 +19,7 @@ tr.exportTo('tr.e.cc', function() {
     'RasterTask'
   ];
 
-  var knownAnalysisTaskNames = [
+  const knownAnalysisTaskNames = [
     'TileManager::RunAnalyzeTask',
     'RasterWorkerPoolTaskImpl::RunAnalysisOnThread',
     'RasterWorkerPoolTaskImpl::Analyze',
@@ -29,41 +29,38 @@ tr.exportTo('tr.e.cc', function() {
   ];
 
   function getTileFromRasterTaskSlice(slice) {
-    if (!(isSliceDoingRasterization(slice) || isSliceDoingAnalysis(slice)))
+    if (!(isSliceDoingRasterization(slice) || isSliceDoingAnalysis(slice))) {
       return undefined;
+    }
 
-    var tileData;
-    if (slice.args.data)
+    let tileData;
+    if (slice.args.data) {
       tileData = slice.args.data;
-    else
+    } else {
       tileData = slice.args.tileData;
-    if (tileData === undefined)
-      return undefined;
-    if (tileData.tile_id)
-      return tileData.tile_id;
+    }
+    if (tileData === undefined) return undefined;
+    if (tileData.tile_id) return tileData.tile_id;
 
-    var tile = tileData.tileId;
-    if (!(tile instanceof tr.e.cc.TileSnapshot))
+    const tile = tileData.tileId;
+    if (!(tile instanceof tr.e.cc.TileSnapshot)) {
       return undefined;
+    }
     return tileData.tileId;
   }
 
   function isSliceDoingRasterization(slice) {
-    if (knownRasterTaskNames.indexOf(slice.title) !== -1)
-      return true;
-    return false;
+    return knownRasterTaskNames.includes(slice.title);
   }
 
   function isSliceDoingAnalysis(slice) {
-    if (knownAnalysisTaskNames.indexOf(slice.title) !== -1)
-      return true;
-    return false;
+    return knownAnalysisTaskNames.includes(slice.title);
   }
 
   return {
-    getTileFromRasterTaskSlice: getTileFromRasterTaskSlice,
-    isSliceDoingRasterization: isSliceDoingRasterization,
-    isSliceDoingAnalysis: isSliceDoingAnalysis
+    getTileFromRasterTaskSlice,
+    isSliceDoingRasterization,
+    isSliceDoingAnalysis
   };
 });
 </script>

@@ -15,16 +15,16 @@
 #include "base/strings/nullable_string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/notifications/native_notification_display_service.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_common.h"
+#include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/notifications/notification_display_service_factory.h"
-#include "chrome/browser/notifications/persistent_notification_delegate.h"
 #include "chrome/browser/notifications/platform_notification_service_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/common/persistent_notification_status.h"
 #include "content/public/common/platform_notification_data.h"
 #include "jni/ActionInfo_jni.h"
@@ -115,12 +115,12 @@ void ProfileLoadedCallback(NotificationCommon::Operation operation,
     return;
   }
 
-  NotificationDisplayService* display_service =
+  auto* display_service =
       NotificationDisplayServiceFactory::GetForProfile(profile);
 
-  static_cast<NativeNotificationDisplayService*>(display_service)
-      ->ProcessNotificationOperation(operation, notification_type, origin,
-                                     notification_id, action_index, reply);
+  display_service->ProcessNotificationOperation(operation, notification_type,
+                                                origin, notification_id,
+                                                action_index, reply);
 }
 
 }  // namespace
@@ -311,18 +311,20 @@ void NotificationPlatformBridgeAndroid::Close(
       webapk_package);
 }
 
-bool NotificationPlatformBridgeAndroid::GetDisplayed(
+void NotificationPlatformBridgeAndroid::GetDisplayed(
     const std::string& profile_id,
     bool incognito,
-    std::set<std::string>* notifications) const {
-  // TODO(miguelg): This can actually be implemented for M+
-  return false;
+    const GetDisplayedNotificationsCallback& callback) const {
+  auto displayed_notifications = base::MakeUnique<std::set<std::string>>();
+  content::BrowserThread::PostTask(
+      content::BrowserThread::UI, FROM_HERE,
+      base::Bind(callback, base::Passed(&displayed_notifications),
+                 false /* supports_synchronization */));
 }
 
-// static
-bool NotificationPlatformBridgeAndroid::RegisterNotificationPlatformBridge(
-    JNIEnv* env) {
-  return RegisterNativesImpl(env);
+void NotificationPlatformBridgeAndroid::SetReadyCallback(
+    NotificationBridgeReadyCallback callback) {
+  std::move(callback).Run(true);
 }
 
 // static

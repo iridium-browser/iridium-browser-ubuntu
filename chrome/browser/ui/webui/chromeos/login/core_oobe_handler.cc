@@ -6,7 +6,7 @@
 
 #include <type_traits>
 
-#include "ash/common/accessibility_types.h"
+#include "ash/accessibility_types.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
@@ -42,12 +42,21 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
+#include "ui/events/event_sink.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/keyboard/keyboard_controller.h"
 
 namespace {
 
 const char kJsScreenPath[] = "cr.ui.Oobe";
+
+bool IsRemoraRequisition() {
+  policy::DeviceCloudPolicyManagerChromeOS* policy_manager =
+      g_browser_process->platform_part()
+          ->browser_policy_connector_chromeos()
+          ->GetDeviceCloudPolicyManager();
+  return policy_manager && policy_manager->IsRemoraRequisition();
+}
 
 }  // namespace
 
@@ -57,7 +66,7 @@ namespace chromeos {
 // OOBE UI is not visible by default.
 CoreOobeHandler::CoreOobeHandler(OobeUI* oobe_ui,
                                  JSCallsContainer* js_calls_container)
-    : BaseScreenHandler(js_calls_container),
+    : BaseWebUIHandler(js_calls_container),
       oobe_ui_(oobe_ui),
       version_info_updater_(this) {
   DCHECK(js_calls_container);
@@ -74,10 +83,6 @@ CoreOobeHandler::CoreOobeHandler(OobeUI* oobe_ui,
 }
 
 CoreOobeHandler::~CoreOobeHandler() {
-}
-
-void CoreOobeHandler::SetDelegate(Delegate* delegate) {
-  delegate_ = delegate;
 }
 
 void CoreOobeHandler::DeclareLocalizedValues(
@@ -144,8 +149,6 @@ void CoreOobeHandler::RegisterMessages() {
               &CoreOobeHandler::HandleEnableLargeCursor);
   AddCallback("enableVirtualKeyboard",
               &CoreOobeHandler::HandleEnableVirtualKeyboard);
-  AddCallback("setForceDisableVirtualKeyboard",
-              &CoreOobeHandler::HandleSetForceDisableVirtualKeyboard);
   AddCallback("enableScreenMagnifier",
               &CoreOobeHandler::HandleEnableScreenMagnifier);
   AddCallback("enableSpokenFeedback",
@@ -255,12 +258,17 @@ void CoreOobeHandler::ReloadContent(const base::DictionaryValue& dictionary) {
   CallJSOrDefer("reloadContent", dictionary);
 }
 
+void CoreOobeHandler::ReloadEulaContent(
+    const base::DictionaryValue& dictionary) {
+  CallJSOrDefer("reloadEulaContent", dictionary);
+}
+
 void CoreOobeHandler::ShowControlBar(bool show) {
   CallJSOrDefer("showControlBar", show);
 }
 
-void CoreOobeHandler::ShowPinKeyboard(bool show) {
-  CallJSOrDefer("showPinKeyboard", show);
+void CoreOobeHandler::SetVirtualKeyboardShown(bool shown) {
+  CallJSOrDefer("setVirtualKeyboardShown", shown);
 }
 
 void CoreOobeHandler::SetClientAreaSize(int width, int height) {
@@ -282,8 +290,7 @@ void CoreOobeHandler::HandleSkipUpdateEnrollAfterEula() {
 void CoreOobeHandler::HandleUpdateCurrentScreen(
     const std::string& screen_name) {
   const OobeScreen screen = GetOobeScreenFromName(screen_name);
-  if (delegate_)
-    delegate_->OnCurrentScreenChanged(screen);
+  oobe_ui_->CurrentScreenChanged(screen);
   // TODO(mash): Support EventRewriterController; see crbug.com/647781
   if (!ash_util::IsRunningInMash()) {
     KeyboardDrivenEventRewriter::GetInstance()->SetArrowToTabRewritingEnabled(
@@ -301,10 +308,6 @@ void CoreOobeHandler::HandleEnableLargeCursor(bool enabled) {
 
 void CoreOobeHandler::HandleEnableVirtualKeyboard(bool enabled) {
   AccessibilityManager::Get()->EnableVirtualKeyboard(enabled);
-}
-
-void CoreOobeHandler::HandleSetForceDisableVirtualKeyboard(bool disable) {
-  scoped_keyboard_disabler_.SetForceDisableVirtualKeyboard(disable);
 }
 
 void CoreOobeHandler::HandleEnableScreenMagnifier(bool enabled) {
@@ -327,6 +330,13 @@ void CoreOobeHandler::HandleSetDeviceRequisition(
   std::string initial_requisition =
       connector->GetDeviceCloudPolicyManager()->GetDeviceRequisition();
   connector->GetDeviceCloudPolicyManager()->SetDeviceRequisition(requisition);
+
+  if (IsRemoraRequisition()) {
+    // CfM devices default to static timezone.
+    g_browser_process->local_state()->SetBoolean(
+        prefs::kResolveDeviceTimezoneByGeolocation, false);
+  }
+
   // Exit Chrome to force the restart as soon as a new requisition is set.
   if (initial_requisition !=
           connector->GetDeviceCloudPolicyManager()->GetDeviceRequisition()) {
@@ -419,8 +429,12 @@ void CoreOobeHandler::OnEnterpriseInfoUpdated(
   CallJSOrDefer("setEnterpriseInfo", message_text, asset_id);
 }
 
-ui::EventProcessor* CoreOobeHandler::GetEventProcessor() {
-  return ash::Shell::GetPrimaryRootWindow()->GetHost()->event_processor();
+void CoreOobeHandler::OnDeviceInfoUpdated(const std::string& bluetooth_name) {
+  CallJSOrDefer("setBluetoothDeviceInfo", bluetooth_name);
+}
+
+ui::EventSink* CoreOobeHandler::GetEventSink() {
+  return ash::Shell::GetPrimaryRootWindow()->GetHost()->event_sink();
 }
 
 void CoreOobeHandler::UpdateLabel(const std::string& id,
@@ -445,7 +459,7 @@ void CoreOobeHandler::UpdateKeyboardState() {
   if (keyboard_controller) {
     gfx::Rect bounds = keyboard_controller->current_keyboard_bounds();
     ShowControlBar(bounds.IsEmpty());
-    ShowPinKeyboard(bounds.IsEmpty());
+    SetVirtualKeyboardShown(!bounds.IsEmpty());
   }
 }
 
@@ -475,14 +489,14 @@ void CoreOobeHandler::HandleHeaderBarVisible() {
   if (login_display_host)
     login_display_host->SetStatusAreaVisible(true);
   if (ScreenLocker::default_screen_locker())
-    ScreenLocker::default_screen_locker()->web_ui()->OnHeaderBarVisible();
+    ScreenLocker::default_screen_locker()->delegate()->OnHeaderBarVisible();
 }
 
 void CoreOobeHandler::HandleRaiseTabKeyEvent(bool reverse) {
   ui::KeyEvent event(ui::ET_KEY_PRESSED, ui::VKEY_TAB, ui::EF_NONE);
   if (reverse)
     event.set_flags(ui::EF_SHIFT_DOWN);
-  SendEventToProcessor(&event);
+  SendEventToSink(&event);
 }
 
 void CoreOobeHandler::HandleSetOobeBootstrappingSlave() {

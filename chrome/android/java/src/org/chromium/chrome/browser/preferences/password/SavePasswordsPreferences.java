@@ -16,9 +16,7 @@ import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
 
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.PasswordUIView;
 import org.chromium.chrome.browser.PasswordUIView.PasswordListObserver;
 import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreference;
@@ -42,15 +40,13 @@ public class SavePasswordsPreferences extends PreferenceFragment
     // Keys for name/password dictionaries.
     public static final String PASSWORD_LIST_URL = "url";
     public static final String PASSWORD_LIST_NAME = "name";
+    public static final String PASSWORD_LIST_PASSWORD = "password";
 
     // Used to pass the password id into a new activity.
     public static final String PASSWORD_LIST_ID = "id";
 
     public static final String PREF_SAVE_PASSWORDS_SWITCH = "save_passwords_switch";
     public static final String PREF_AUTOSIGNIN_SWITCH = "autosignin_switch";
-
-    @VisibleForTesting
-    public static final String CREDENTIAL_MANAGER_API = "CredentialManagementAPI";
 
     private static final String PREF_CATEGORY_SAVED_PASSWORDS = "saved_passwords";
     private static final String PREF_CATEGORY_EXCEPTIONS = "exceptions";
@@ -71,6 +67,21 @@ public class SavePasswordsPreferences extends PreferenceFragment
     private ChromeSwitchPreference mSavePasswordsSwitch;
     private ChromeBaseCheckBoxPreference mAutoSignInSwitch;
     private TextMessagePreference mEmptyView;
+
+    // Used for verifying if 60 seconds have passed since last authenticating, its value is set in
+    // PasswordReauthentication using System.currentTimeMillis().
+    private static long sLastReauthTimeMillis;
+
+    /**
+     * Stores the timestamp of last reauthentication of the user.
+     */
+    public static void setLastReauthTimeMillis(long value) {
+        sLastReauthTimeMillis = value;
+    }
+
+    public static long getLastReauthTimeMillis() {
+        return sLastReauthTimeMillis;
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -95,6 +106,12 @@ public class SavePasswordsPreferences extends PreferenceFragment
     public boolean onPreferenceChange(Preference preference, Object newValue) {
         rebuildPasswordLists();
         return true;
+    }
+
+    @Override
+    public void onDetach() {
+        super.onDetach();
+        setLastReauthTimeMillis(0);
     }
 
     void rebuildPasswordLists() {
@@ -139,12 +156,14 @@ public class SavePasswordsPreferences extends PreferenceFragment
             PreferenceScreen screen = getPreferenceManager().createPreferenceScreen(getActivity());
             String url = saved.getUrl();
             String name = saved.getUserName();
+            String password = saved.getPassword();
             screen.setTitle(url);
             screen.setOnPreferenceClickListener(this);
             screen.setSummary(name);
             Bundle args = screen.getExtras();
             args.putString(PASSWORD_LIST_NAME, name);
             args.putString(PASSWORD_LIST_URL, url);
+            args.putString(PASSWORD_LIST_PASSWORD, password);
             args.putInt(PASSWORD_LIST_ID, i);
             profileCategory.addPreference(screen);
         }
@@ -200,17 +219,15 @@ public class SavePasswordsPreferences extends PreferenceFragment
     public boolean onPreferenceClick(Preference preference) {
         if (preference == mLinkPref) {
             Intent intent = new Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse(PasswordUIView.getAccountDashboardURL()));
+                    Intent.ACTION_VIEW, Uri.parse(PasswordUIView.getAccountDashboardURL()));
             intent.setPackage(getActivity().getPackageName());
             getActivity().startActivity(intent);
         } else {
             // Launch preference activity with PasswordEntryEditor fragment with
             // intent extras specifying the object.
-            Intent intent = PreferencesLauncher.createIntentForSettingsPage(getActivity(),
-                    PasswordEntryEditor.class.getName());
-            intent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS,
-                    preference.getExtras());
+            Intent intent = PreferencesLauncher.createIntentForSettingsPage(
+                    getActivity(), PasswordEntryEditor.class.getName());
+            intent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, preference.getExtras());
             startActivity(intent);
         }
         return true;
@@ -247,9 +264,6 @@ public class SavePasswordsPreferences extends PreferenceFragment
     }
 
     private void createAutoSignInCheckbox() {
-        if (!ChromeFeatureList.isEnabled(CREDENTIAL_MANAGER_API)) {
-            return;
-        }
         mAutoSignInSwitch = new ChromeBaseCheckBoxPreference(getActivity(), null);
         mAutoSignInSwitch.setKey(PREF_AUTOSIGNIN_SWITCH);
         mAutoSignInSwitch.setTitle(R.string.passwords_auto_signin_title);

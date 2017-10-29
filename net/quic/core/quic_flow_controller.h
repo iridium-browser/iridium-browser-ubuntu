@@ -62,8 +62,10 @@ class QUIC_EXPORT_PRIVATE QuicFlowController
   // Called when bytes are sent to the peer.
   void AddBytesSent(QuicByteCount bytes_sent);
 
-  // Set a new send window offset.
-  // Returns true if this increases send_window_offset_ and is now blocked.
+  // Increases |send_window_offset_| if |new_send_window_offset| is
+  // greater than the current value.  Returns true if this increase
+  // also causes us to change from a blocked state to unblocked.  In
+  // all other cases, returns false.
   bool UpdateSendWindowOffset(QuicStreamOffset new_send_window_offset);
 
   // QuicFlowControllerInterface.
@@ -81,6 +83,9 @@ class QUIC_EXPORT_PRIVATE QuicFlowController
   // Returns true if flow control receive limits have been violated by the peer.
   bool FlowControlViolation();
 
+  // Inform the peer of new receive window.
+  void SendWindowUpdate();
+
   QuicByteCount bytes_consumed() const { return bytes_consumed_; }
 
   QuicStreamOffset highest_received_byte_offset() const {
@@ -90,10 +95,6 @@ class QUIC_EXPORT_PRIVATE QuicFlowController
   void set_receive_window_size_limit(QuicByteCount receive_window_size_limit) {
     DCHECK_GE(receive_window_size_limit, receive_window_size_limit_);
     receive_window_size_limit_ = receive_window_size_limit;
-  }
-
-  void set_auto_tune_receive_window(bool enable) {
-    auto_tune_receive_window_ = enable;
   }
 
   // Should only be called before any data is received.
@@ -111,7 +112,8 @@ class QUIC_EXPORT_PRIVATE QuicFlowController
   void MaybeIncreaseMaxWindowSize();
 
   // Updates the current offset and sends a window update frame.
-  void SendWindowUpdate(QuicStreamOffset available_window);
+  void UpdateReceiveWindowOffsetAndSendWindowUpdate(
+      QuicStreamOffset available_window);
 
   // Double the window size as long as we haven't hit the max window size.
   void IncreaseWindowSize();
@@ -176,8 +178,7 @@ class QUIC_EXPORT_PRIVATE QuicFlowController
   // Used to dynamically enable receive window auto-tuning.
   bool auto_tune_receive_window_;
 
-  // The session's flow controller.  null if this is stream id 0 or
-  // FLAGS_quic_reloadable_flag_quic_flow_control_invariant is false.
+  // The session's flow controller.  null if this is stream id 0.
   // Not owned.
   QuicFlowControllerInterface* session_flow_controller_;
 

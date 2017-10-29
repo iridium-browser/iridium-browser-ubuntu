@@ -17,7 +17,6 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/path.h"
-#include "ui/resources/grit/ui_resources.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/resources/grit/views_resources.h"
@@ -247,7 +246,7 @@ void CustomFrameView::Layout() {
   LayoutClientView();
 }
 
-gfx::Size CustomFrameView::GetPreferredSize() const {
+gfx::Size CustomFrameView::CalculatePreferredSize() const {
   return frame_->non_client_view()->GetWindowBoundsForClientBounds(
       gfx::Rect(frame_->client_view()->GetPreferredSize())).size();
 }

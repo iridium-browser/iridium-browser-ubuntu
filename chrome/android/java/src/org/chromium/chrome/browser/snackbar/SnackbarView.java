@@ -9,17 +9,19 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
-import android.graphics.Bitmap;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.support.annotation.Nullable;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.View.OnLayoutChangeListener;
 import android.view.ViewGroup;
-import android.view.ViewGroup.MarginLayoutParams;
 import android.view.animation.DecelerateInterpolator;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -46,6 +48,7 @@ class SnackbarView {
     private ViewGroup mOriginalParent;
     private ViewGroup mParent;
     private Snackbar mSnackbar;
+    private boolean mAnimateOverWebContent;
 
     // Variables used to calculate the virtual keyboard's height.
     private Rect mCurrentVisibleRect = new Rect();
@@ -65,11 +68,21 @@ class SnackbarView {
      * @param listener An {@link OnClickListener} that will be called when the action button is
      *                 clicked.
      * @param snackbar The snackbar to be displayed.
+     * @param parentView The ViewGroup used to display this snackbar. If this is null, this class
+     *                   will determine where to attach the snackbar.
      */
-    SnackbarView(Activity activity, OnClickListener listener, Snackbar snackbar) {
+    SnackbarView(Activity activity, OnClickListener listener, Snackbar snackbar,
+            @Nullable ViewGroup parentView) {
         mActivity = activity;
-        mIsTablet = DeviceFormFactor.isTablet(activity);
-        mOriginalParent = findParentView(activity);
+        mIsTablet = DeviceFormFactor.isTablet();
+
+        if (parentView == null) {
+            mOriginalParent = findParentView(activity);
+            if (activity instanceof ChromeActivity) mAnimateOverWebContent = true;
+        } else {
+            mOriginalParent = parentView;
+        }
+
         mParent = mOriginalParent;
         mView = (ViewGroup) LayoutInflater.from(activity).inflate(
                 R.layout.snackbar, mParent, false);
@@ -132,16 +145,15 @@ class SnackbarView {
 
             int keyboardHeight = mParent.getHeight() - mCurrentVisibleRect.bottom
                     + mCurrentVisibleRect.top;
-            MarginLayoutParams lp = getLayoutParams();
+            FrameLayout.LayoutParams lp = getLayoutParams();
             lp.bottomMargin = keyboardHeight;
             if (mIsTablet) {
                 int margin = mParent.getResources()
                         .getDimensionPixelSize(R.dimen.snackbar_margin_tablet);
-                ApiCompatibilityUtils.setMarginStart(lp, margin);
-                lp.bottomMargin += margin;
                 int width = mParent.getResources()
                         .getDimensionPixelSize(R.dimen.snackbar_width_tablet);
                 lp.width = Math.min(width, mParent.getWidth() - 2 * margin);
+                lp.gravity = Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM;
             }
             mView.setLayoutParams(lp);
         }
@@ -161,6 +173,10 @@ class SnackbarView {
 
     boolean isShowing() {
         return mView.isShown();
+    }
+
+    void bringToFront() {
+        mView.bringToFront();
     }
 
     /**
@@ -221,10 +237,10 @@ class SnackbarView {
         } else {
             mActionButtonView.setVisibility(View.GONE);
         }
-        Bitmap profileImage = snackbar.getProfileImage();
+        Drawable profileImage = snackbar.getProfileImage();
         if (profileImage != null) {
             mProfileImageView.setVisibility(View.VISIBLE);
-            mProfileImageView.setImageBitmap(profileImage);
+            mProfileImageView.setImageDrawable(profileImage);
         } else {
             mProfileImageView.setVisibility(View.GONE);
         }
@@ -248,15 +264,15 @@ class SnackbarView {
      * in the normal way.
      */
     private void startAnimatorOnSurfaceView(Animator animator) {
-        if (mActivity instanceof ChromeActivity) {
+        if (mAnimateOverWebContent) {
             ((ChromeActivity) mActivity).getWindowAndroid().startAnimationOverContent(animator);
         } else {
             animator.start();
         }
     }
 
-    private MarginLayoutParams getLayoutParams() {
-        return (MarginLayoutParams) mView.getLayoutParams();
+    private FrameLayout.LayoutParams getLayoutParams() {
+        return (FrameLayout.LayoutParams) mView.getLayoutParams();
     }
 
     private void setViewText(TextView view, CharSequence text, boolean animate) {

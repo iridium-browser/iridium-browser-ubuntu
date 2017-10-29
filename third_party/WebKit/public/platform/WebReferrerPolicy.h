@@ -33,16 +33,21 @@
 
 namespace blink {
 
+// These values are serialized and persisted, so do not remove values and add
+// new ones at the end.
 enum WebReferrerPolicy {
-  WebReferrerPolicyAlways,
-  WebReferrerPolicyDefault,
-  WebReferrerPolicyNoReferrerWhenDowngrade,
-  WebReferrerPolicyNever,
-  WebReferrerPolicyOrigin,
-  WebReferrerPolicyOriginWhenCrossOrigin,
-  WebReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin,
-  WebReferrerPolicyLast =
-      WebReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin
+  kWebReferrerPolicyAlways,
+  kWebReferrerPolicyDefault,
+  kWebReferrerPolicyNoReferrerWhenDowngrade,
+  kWebReferrerPolicyNever,
+  kWebReferrerPolicyOrigin,
+  kWebReferrerPolicyOriginWhenCrossOrigin,
+  // This policy corresponds to strict-origin-when-cross-origin.
+  // TODO(estark): rename to match the spec.
+  kWebReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin,
+  kWebReferrerPolicySameOrigin,
+  kWebReferrerPolicyStrictOrigin,
+  kWebReferrerPolicyLast = kWebReferrerPolicyStrictOrigin
 };
 
 }  // namespace blink

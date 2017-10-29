@@ -25,15 +25,13 @@ class PasswordModelWorker : public syncer::ModelSafeWorker {
 
   // syncer::ModelSafeWorker implementation.
   syncer::ModelSafeGroup GetModelSafeGroup() override;
-  bool IsOnModelThread() override;
+  bool IsOnModelSequence() override;
   void RequestStop() override;
-
- protected:
-  syncer::SyncerError DoWorkAndWaitUntilDoneImpl(
-      const syncer::WorkCallback& work) override;
 
  private:
   ~PasswordModelWorker() override;
+
+  void ScheduleWork(base::OnceClosure work) override;
 
   // |password_store_| is used on password thread but released on UI thread.
   // Protected by |password_store_lock_|.

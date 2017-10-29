@@ -5,8 +5,7 @@
 #ifndef NET_QUIC_TEST_TOOLS_SIMULATOR_SWITCH_H_
 #define NET_QUIC_TEST_TOOLS_SIMULATOR_SWITCH_H_
 
-#include <unordered_map>
-
+#include "net/quic/platform/api/quic_containers.h"
 #include "net/quic/test_tools/simulator/queue.h"
 
 namespace net {
@@ -31,7 +30,10 @@ class Switch {
     return &ports_[port_number - 1];
   }
 
-  inline const Queue* port_queue(SwitchPortNumber port_number) {
+  inline const Queue* port_queue(SwitchPortNumber port_number) const {
+    return ports_[port_number - 1].queue();
+  }
+  inline Queue* port_queue(SwitchPortNumber port_number) {
     return ports_[port_number - 1].queue();
   }
 
@@ -58,6 +60,7 @@ class Switch {
 
     inline bool connected() const { return connected_; }
     inline const Queue* queue() const { return &queue_; }
+    inline Queue* queue() { return &queue_; }
 
    private:
     Switch* parent_;
@@ -75,7 +78,7 @@ class Switch {
                       std::unique_ptr<Packet> packet);
 
   std::deque<Port> ports_;
-  std::unordered_map<std::string, Port*> switching_table_;
+  QuicUnorderedMap<std::string, Port*> switching_table_;
 
   DISALLOW_COPY_AND_ASSIGN(Switch);
 };

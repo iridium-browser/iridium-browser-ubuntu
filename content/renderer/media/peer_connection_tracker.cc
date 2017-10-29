@@ -8,11 +8,15 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/values.h"
 #include "content/common/media/peer_connection_tracker_messages.h"
 #include "content/renderer/media/rtc_peer_connection_handler.h"
 #include "content/renderer/render_thread_impl.h"
@@ -25,7 +29,7 @@
 #include "third_party/WebKit/public/platform/WebRTCOfferOptions.h"
 #include "third_party/WebKit/public/platform/WebRTCPeerConnectionHandlerClient.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebUserMediaRequest.h"
 
 using webrtc::MediaConstraintsInterface;
@@ -55,46 +59,46 @@ static std::string SerializeServers(
 
 static std::string SerializeMediaConstraints(
     const blink::WebMediaConstraints& constraints) {
-  return constraints.toString().utf8();
+  return constraints.ToString().Utf8();
 }
 
 static std::string SerializeOfferOptions(
     const blink::WebRTCOfferOptions& options) {
-  if (options.isNull())
+  if (options.IsNull())
     return "null";
 
   std::ostringstream result;
-  result << "offerToReceiveVideo: " << options.offerToReceiveVideo()
-         << ", offerToReceiveAudio: " << options.offerToReceiveAudio()
+  result << "offerToReceiveVideo: " << options.OfferToReceiveVideo()
+         << ", offerToReceiveAudio: " << options.OfferToReceiveAudio()
          << ", voiceActivityDetection: "
-         << SerializeBoolean(options.voiceActivityDetection())
-         << ", iceRestart: " << SerializeBoolean(options.iceRestart());
+         << SerializeBoolean(options.VoiceActivityDetection())
+         << ", iceRestart: " << SerializeBoolean(options.IceRestart());
   return result.str();
 }
 
 static std::string SerializeAnswerOptions(
     const blink::WebRTCAnswerOptions& options) {
-  if (options.isNull())
+  if (options.IsNull())
     return "null";
 
   std::ostringstream result;
   result << ", voiceActivityDetection: "
-         << SerializeBoolean(options.voiceActivityDetection());
+         << SerializeBoolean(options.VoiceActivityDetection());
   return result.str();
 }
 
 static std::string SerializeMediaStreamComponent(
     const blink::WebMediaStreamTrack& component) {
-  return component.source().id().utf8();
+  return component.Source().Id().Utf8();
 }
 
 static std::string SerializeMediaDescriptor(
     const blink::WebMediaStream& stream) {
-  std::string id = stream.id().utf8();
+  std::string id = stream.Id().Utf8();
   std::string result = "id: " + id;
   blink::WebVector<blink::WebMediaStreamTrack> tracks;
-  stream.audioTracks(tracks);
-  if (!tracks.isEmpty()) {
+  stream.AudioTracks(tracks);
+  if (!tracks.IsEmpty()) {
     result += ", audio: [";
     for (size_t i = 0; i < tracks.size(); ++i) {
       result += SerializeMediaStreamComponent(tracks[i]);
@@ -103,8 +107,8 @@ static std::string SerializeMediaDescriptor(
     }
     result += "]";
   }
-  stream.videoTracks(tracks);
-  if (!tracks.isEmpty()) {
+  stream.VideoTracks(tracks);
+  if (!tracks.IsEmpty()) {
     result += ", video: [";
     for (size_t i = 0; i < tracks.size(); ++i) {
       result += SerializeMediaStreamComponent(tracks[i]);
@@ -134,7 +138,7 @@ static const char* SerializeIceTransportType(
     break;
   default:
     NOTREACHED();
-  };
+  }
   return transport_type;
 }
 
@@ -153,7 +157,7 @@ static const char* SerializeBundlePolicy(
     break;
   default:
     NOTREACHED();
-  };
+  }
   return policy_str;
 }
 
@@ -169,14 +173,30 @@ static const char* SerializeRtcpMuxPolicy(
     break;
   default:
     NOTREACHED();
-  };
+  }
   return policy_str;
 }
 
-#define GET_STRING_OF_STATE(state)                \
-  case WebRTCPeerConnectionHandlerClient::state:  \
-    result = #state;                              \
+static std::string SerializeConfiguration(
+    const webrtc::PeerConnectionInterface::RTCConfiguration& config) {
+  std::ostringstream oss;
+  // TODO(hbos): Add serialization of certificate.
+  oss << "{ iceServers: " << SerializeServers(config.servers)
+      << ", iceTransportPolicy: " << SerializeIceTransportType(config.type)
+      << ", bundlePolicy: " << SerializeBundlePolicy(config.bundle_policy)
+      << ", rtcpMuxPolicy: " << SerializeRtcpMuxPolicy(config.rtcp_mux_policy)
+      << ", iceCandidatePoolSize: " << config.ice_candidate_pool_size << " }";
+  return oss.str();
+}
+
+#define GET_STRING_OF_STATE(state)                  \
+  case WebRTCPeerConnectionHandlerClient::k##state: \
+    result = #state;                                \
     break;
+
+// Note: All of these strings need to be kept in sync with
+// peer_connection_update_table.js, in order to be displayed as friendly
+// strings on chrome://webrtc-internals.
 
 static const char* GetSignalingStateString(
     WebRTCPeerConnectionHandlerClient::SignalingState state) {
@@ -228,19 +248,15 @@ static const char* GetIceGatheringStateString(
 }
 
 // Builds a DictionaryValue from the StatsReport.
-// The caller takes the ownership of the returned value.
 // Note:
 // The format must be consistent with what webrtc_internals.js expects.
 // If you change it here, you must change webrtc_internals.js as well.
-static base::DictionaryValue* GetDictValueStats(const StatsReport& report) {
+static std::unique_ptr<base::DictionaryValue> GetDictValueStats(
+    const StatsReport& report) {
   if (report.values().empty())
     return NULL;
 
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  dict->SetDouble("timestamp", report.timestamp());
-
-  base::ListValue* values = new base::ListValue();
-  dict->Set("values", values);
+  auto values = base::MakeUnique<base::ListValue>();
 
   for (const auto& v : report.values()) {
     const StatsReport::ValuePtr& value = v.second;
@@ -270,6 +286,10 @@ static base::DictionaryValue* GetDictValueStats(const StatsReport& report) {
     }
   }
 
+  auto dict = base::MakeUnique<base::DictionaryValue>();
+  dict->SetDouble("timestamp", report.timestamp());
+  dict->Set("values", std::move(values));
+
   return dict;
 }
 
@@ -277,17 +297,15 @@ static base::DictionaryValue* GetDictValueStats(const StatsReport& report) {
 // The caller takes the ownership of the returned value.
 static std::unique_ptr<base::DictionaryValue> GetDictValue(
     const StatsReport& report) {
-  std::unique_ptr<base::DictionaryValue> stats, result;
-
-  stats.reset(GetDictValueStats(report));
+  std::unique_ptr<base::DictionaryValue> stats = GetDictValueStats(report);
   if (!stats)
     return NULL;
 
-  result.reset(new base::DictionaryValue());
   // Note:
   // The format must be consistent with what webrtc_internals.js expects.
   // If you change it here, you must change webrtc_internals.js as well.
-  result->Set("stats", stats.release());
+  auto result = base::MakeUnique<base::DictionaryValue>();
+  result->Set("stats", std::move(stats));
   result->SetString("id", report.id()->ToString());
   result->SetString("type", report.TypeToString());
 
@@ -296,7 +314,7 @@ static std::unique_ptr<base::DictionaryValue> GetDictValue(
 
 class InternalStatsObserver : public webrtc::StatsObserver {
  public:
-  InternalStatsObserver(int lid)
+  explicit InternalStatsObserver(int lid)
       : lid_(lid), main_thread_(base::ThreadTaskRunnerHandle::Get()) {}
 
   void OnComplete(const StatsReports& reports) override {
@@ -366,9 +384,8 @@ void PeerConnectionTracker::OnGetAllStats() {
 
     // The last type parameter is ignored when the track id is empty.
     it->first->GetStats(
-        observer,
-        webrtc::PeerConnectionInterface::kStatsOutputLevelDebug,
-        empty_track_id, blink::WebMediaStreamSource::TypeAudio);
+        observer, webrtc::PeerConnectionInterface::kStatsOutputLevelDebug,
+        empty_track_id, blink::WebMediaStreamSource::kTypeAudio);
   }
 }
 
@@ -421,22 +438,18 @@ void PeerConnectionTracker::RegisterPeerConnection(
     RTCPeerConnectionHandler* pc_handler,
     const webrtc::PeerConnectionInterface::RTCConfiguration& config,
     const blink::WebMediaConstraints& constraints,
-    const blink::WebFrame* frame) {
+    const blink::WebLocalFrame* frame) {
   DCHECK(main_thread_.CalledOnValidThread());
   DCHECK_EQ(GetLocalIDForHandler(pc_handler), -1);
   DVLOG(1) << "PeerConnectionTracker::RegisterPeerConnection()";
   PeerConnectionInfo info;
 
   info.lid = GetNextLocalID();
-  info.rtc_configuration =
-      "{ iceServers: " +  SerializeServers(config.servers) + ", " +
-      "iceTransportPolicy: " + SerializeIceTransportType(config.type) + ", " +
-      "bundlePolicy: " + SerializeBundlePolicy(config.bundle_policy) + ", " +
-      "rtcpMuxPolicy: " + SerializeRtcpMuxPolicy(config.rtcp_mux_policy) + " }";
+  info.rtc_configuration = SerializeConfiguration(config);
 
   info.constraints = SerializeMediaConstraints(constraints);
   if (frame)
-    info.url = frame->document().url().string().utf8();
+    info.url = frame->GetDocument().Url().GetString().Utf8();
   else
     info.url = "test:testing";
   SendTarget()->Send(new PeerConnectionTrackerHost_AddPeerConnection(info));
@@ -532,14 +545,8 @@ void PeerConnectionTracker::TrackSetConfiguration(
   if (id == -1)
     return;
 
-  std::ostringstream result;
-  result << "servers: " << SerializeServers(config.servers)
-         << "iceTransportType: " << SerializeIceTransportType(config.type)
-         << "bundlePolicy: " << SerializeBundlePolicy(config.bundle_policy)
-         << "rtcpMuxPolicy: " << SerializeRtcpMuxPolicy(config.rtcp_mux_policy)
-         << "}";
-
-  SendPeerConnectionUpdate(id, "setConfiguration", result.str());
+  SendPeerConnectionUpdate(id, "setConfiguration",
+                           SerializeConfiguration(config));
 }
 
 void PeerConnectionTracker::TrackAddIceCandidate(
@@ -551,10 +558,10 @@ void PeerConnectionTracker::TrackAddIceCandidate(
   int id = GetLocalIDForHandler(pc_handler);
   if (id == -1)
     return;
-  std::string value = "sdpMid: " + candidate.sdpMid().utf8() + ", " +
-                      "sdpMLineIndex: " +
-                      base::UintToString(candidate.sdpMLineIndex()) + ", " +
-                      "candidate: " + candidate.candidate().utf8();
+  std::string value =
+      "sdpMid: " + candidate.SdpMid().Utf8() + ", " +
+      "sdpMLineIndex: " + base::UintToString(candidate.SdpMLineIndex()) + ", " +
+      "candidate: " + candidate.Candidate().Utf8();
 
   // OnIceCandidate always succeeds as it's a callback from the browser.
   DCHECK(source != SOURCE_LOCAL || succeeded);
@@ -583,7 +590,7 @@ void PeerConnectionTracker::TrackAddStream(
 void PeerConnectionTracker::TrackRemoveStream(
     RTCPeerConnectionHandler* pc_handler,
     const blink::WebMediaStream& stream,
-    Source source){
+    Source source) {
   DCHECK(main_thread_.CalledOnValidThread());
   int id = GetLocalIDForHandler(pc_handler);
   if (id == -1)
@@ -700,7 +707,7 @@ void PeerConnectionTracker::TrackCreateDTMFSender(
   int id = GetLocalIDForHandler(pc_handler);
   if (id == -1)
     return;
-  SendPeerConnectionUpdate(id, "createDTMFSender", track.id().utf8());
+  SendPeerConnectionUpdate(id, "createDTMFSender", track.Id().Utf8());
 }
 
 void PeerConnectionTracker::TrackGetUserMedia(
@@ -708,10 +715,10 @@ void PeerConnectionTracker::TrackGetUserMedia(
   DCHECK(main_thread_.CalledOnValidThread());
 
   SendTarget()->Send(new PeerConnectionTrackerHost_GetUserMedia(
-      user_media_request.getSecurityOrigin().toString().utf8(),
-      user_media_request.audio(), user_media_request.video(),
-      SerializeMediaConstraints(user_media_request.audioConstraints()),
-      SerializeMediaConstraints(user_media_request.videoConstraints())));
+      user_media_request.GetSecurityOrigin().ToString().Utf8(),
+      user_media_request.Audio(), user_media_request.Video(),
+      SerializeMediaConstraints(user_media_request.AudioConstraints()),
+      SerializeMediaConstraints(user_media_request.VideoConstraints())));
 }
 
 int PeerConnectionTracker::GetNextLocalID() {

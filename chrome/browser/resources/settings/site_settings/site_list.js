@@ -3,18 +3,6 @@
 // found in the LICENSE file.
 
 /**
- * Enumeration mapping all possible controlled-by values for exceptions to
- * icons.
- * @enum {string}
- */
-var iconControlledBy = {
-  'extension': 'cr:extension',
-  'HostedApp': 'cr:extension',
-  'platform_app': 'cr:extension',
-  'policy' : 'cr20:domain',
-};
-
-/**
  * @fileoverview
  * 'site-list' shows a list of Allowed and Blocked sites for a given
  * category.
@@ -35,6 +23,16 @@ Polymer({
     },
 
     /**
+     * Some content types (like Location) do not allow the user to manually
+     * edit the exception list from within Settings.
+     * @private
+     */
+    readOnlyList: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
      * The site serving as the model for the currently open action menu.
      * @private {?SiteException}
      */
@@ -52,22 +50,16 @@ Polymer({
      */
     sites: {
       type: Array,
-      value: function() { return []; },
+      value: function() {
+        return [];
+      },
     },
 
     /**
-     * Whether this list is for the All Sites category.
+     * The type of category this widget is displaying data for. Normally
+     * either 'allow' or 'block', representing which sites are allowed or
+     * blocked respectively.
      */
-    allSites: {
-      type: Boolean,
-      value: false,
-    },
-
-    /**
-      * The type of category this widget is displaying data for. Normally
-      * either 'allow' or 'block', representing which sites are allowed or
-      * blocked respectively.
-      */
     categorySubtype: {
       type: String,
       value: settings.INVALID_CATEGORY_SUBTYPE,
@@ -93,22 +85,6 @@ Polymer({
     showSessionOnlyAction_: Boolean,
 
     /**
-     * Whether to show the 'edit' action in the action menu.
-     * @private
-     */
-    showEditAction_: Boolean,
-
-    /**
-     * Keeps track of the incognito status of the current profile (whether one
-     * exists).
-     * @private
-     */
-    incognitoProfileActive_: {
-      type: Boolean,
-      value: false,
-    },
-
-    /**
      * All possible actions in the action menu.
      * @private
      */
@@ -124,15 +100,21 @@ Polymer({
     },
   },
 
-  observers: [
-    'configureWidget_(category, categorySubtype)'
-  ],
+  /**
+   * The element to return focus to, when the currently active dialog is closed.
+   * @private {?HTMLElement}
+   */
+  activeDialogAnchor_: null,
 
+  observers: ['configureWidget_(category, categorySubtype)'],
+
+  /** @override */
   ready: function() {
-    this.addWebUIListener('contentSettingSitePermissionChanged',
+    this.addWebUIListener(
+        'contentSettingSitePermissionChanged',
         this.siteWithinCategoryChanged_.bind(this));
-    this.addWebUIListener('onIncognitoStatusChanged',
-        this.onIncognitoStatusChanged_.bind(this));
+    this.addWebUIListener(
+        'onIncognitoStatusChanged', this.onIncognitoStatusChanged_.bind(this));
   },
 
   /**
@@ -142,22 +124,25 @@ Polymer({
    * @private
    */
   siteWithinCategoryChanged_: function(category, site) {
-    if (category == this.category || this.allSites)
+    if (category == this.category)
       this.configureWidget_();
   },
 
-  onIncognitoStatusChanged_: function(incognitoEnabled) {
-    // A change notification is not sent for each site that is deleted during
-    // incognito profile destruction. Therefore, we reconfigure the list when
-    // the incognito profile is destroyed, except for SESSION_ONLY, which won't
-    // have any incognito exceptions.
-    if (this.categorySubtype == settings.PermissionValues.SESSION_ONLY)
+  /**
+   * Called for each site list when incognito is enabled or disabled. Only
+   * called on change (opening N incognito windows only fires one message).
+   * Another message is sent when the *last* incognito window closes.
+   * @private
+   */
+  onIncognitoStatusChanged_: function() {
+    // The SESSION_ONLY list won't have any incognito exceptions. (Minor
+    // optimization, not required).
+    if (this.categorySubtype == settings.ContentSetting.SESSION_ONLY)
       return;
 
-    if (this.incognitoProfileActive_)
-      this.configureWidget_();  // The incognito profile is being destroyed.
-
-    this.incognitoProfileActive_ = incognitoEnabled;
+    // A change notification is not sent for each site. So we repopulate the
+    // whole list when the incognito profile is created or destroyed.
+    this.populateList_();
   },
 
   /**
@@ -176,23 +161,10 @@ Polymer({
     this.populateList_();
 
     // The Session permissions are only for cookies.
-    if (this.categorySubtype == settings.PermissionValues.SESSION_ONLY) {
+    if (this.categorySubtype == settings.ContentSetting.SESSION_ONLY) {
       this.$.category.hidden =
           this.category != settings.ContentSettingsTypes.COOKIES;
     }
-  },
-
-  /**
-   * Returns which icon, if any, should represent the fact that this exception
-   * is controlled.
-   * @param {!SiteException} item The item from the list we're computing the
-   *    icon for.
-   * @return {string} The icon to show (or blank, if none).
-   */
-  computeIconControlledBy_: function(item) {
-    if (this.allSites)
-      return '';
-    return iconControlledBy[item.source] || '';
   },
 
   /**
@@ -205,12 +177,27 @@ Polymer({
   },
 
   /**
-   * @param {string} source Where the setting came from.
+   * @param {!SiteException} exception The content setting exception.
+   * @param {boolean} readOnlyList Whether the site exception list is read-only.
    * @return {boolean}
    * @private
    */
-  isActionMenuHidden_: function(source) {
-    return this.isExceptionControlled_(source) || this.allSites;
+  shouldHideResetButton_: function(exception, readOnlyList) {
+    return exception.enforcement ==
+        chrome.settingsPrivate.Enforcement.ENFORCED ||
+        !(readOnlyList || !!exception.embeddingOrigin);
+  },
+
+  /**
+   * @param {!SiteException} exception The content setting exception.
+   * @param {boolean} readOnlyList Whether the site exception list is read-only.
+   * @return {boolean}
+   * @private
+   */
+  shouldHideActionMenu_: function(exception, readOnlyList) {
+    return exception.enforcement ==
+        chrome.settingsPrivate.Enforcement.ENFORCED ||
+        readOnlyList || !!exception.embeddingOrigin;
   },
 
   /**
@@ -219,6 +206,7 @@ Polymer({
    * @private
    */
   onAddSiteTap_: function(e) {
+    assert(!this.readOnlyList);
     e.preventDefault();
     var dialog = document.createElement('add-site-dialog');
     dialog.category = this.category;
@@ -228,8 +216,9 @@ Polymer({
     dialog.open(this.categorySubtype);
 
     dialog.addEventListener('close', function() {
+      cr.ui.focusWithoutInk(assert(this.$.addSite));
       dialog.remove();
-    });
+    }.bind(this));
   },
 
   /**
@@ -237,128 +226,49 @@ Polymer({
    * @private
    */
   populateList_: function() {
-    if (this.allSites) {
-      this.getAllSitesList_().then(function(lists) {
-        this.processExceptions_(lists);
-        this.closeActionMenu_();
-      }.bind(this));
-    } else {
-      this.browserProxy_.getExceptionList(this.category).then(
-        function(exceptionList) {
+    this.browserProxy_.getExceptionList(this.category)
+        .then(function(exceptionList) {
           this.processExceptions_([exceptionList]);
           this.closeActionMenu_();
-      }.bind(this));
-    }
+        }.bind(this));
   },
 
   /**
    * Process the exception list returned from the native layer.
-   * @param {!Array<!Array<SiteException>>} data List of sites (exceptions) to
-   *     process.
+   * @param {!Array<!Array<RawSiteException>>} data List of sites (exceptions)
+   *     to process.
    * @private
    */
   processExceptions_: function(data) {
-    var sites = [];
-    for (var i = 0; i < data.length; ++i)
-      sites = this.appendSiteList_(sites, data[i]);
+    var sites = /** @type {!Array<RawSiteException>} */ ([]);
+    for (var i = 0; i < data.length; ++i) {
+      var exceptionList = data[i];
+      for (var k = 0; k < exceptionList.length; ++k) {
+        if (exceptionList[k].setting == settings.ContentSetting.DEFAULT ||
+            exceptionList[k].setting != this.categorySubtype) {
+          continue;
+        }
+
+        sites.push(exceptionList[k]);
+      }
+    }
     this.sites = this.toSiteArray_(sites);
   },
 
   /**
-   * Retrieves a list of all known sites (any category/setting).
-   * @return {!Promise}
-   * @private
-   */
-  getAllSitesList_: function() {
-    var promiseList = [];
-    for (var type in settings.ContentSettingsTypes) {
-      if (settings.ContentSettingsTypes[type] ==
-          settings.ContentSettingsTypes.PROTOCOL_HANDLERS ||
-          settings.ContentSettingsTypes[type] ==
-          settings.ContentSettingsTypes.USB_DEVICES ||
-          settings.ContentSettingsTypes[type] ==
-          settings.ContentSettingsTypes.ZOOM_LEVELS) {
-        // Some categories store their data in a custom way.
-        continue;
-      }
-
-      promiseList.push(
-          this.browserProxy_.getExceptionList(
-              settings.ContentSettingsTypes[type]));
-    }
-
-    return Promise.all(promiseList);
-  },
-
-  /**
-   * Appends to |list| the sites for a given category and subtype.
-   * @param {!Array<SiteException>} sites The site list to add to.
-   * @param {!Array<SiteException>} exceptionList List of sites (exceptions) to
-   *     add.
-   * @return {!Array<SiteException>} The list of sites.
-   * @private
-   */
-  appendSiteList_: function(sites, exceptionList) {
-    for (var i = 0; i < exceptionList.length; ++i) {
-      if (!this.allSites) {
-        if (exceptionList[i].setting == settings.PermissionValues.DEFAULT)
-          continue;
-
-        if (exceptionList[i].setting != this.categorySubtype)
-          continue;
-      }
-
-      sites.push(exceptionList[i]);
-    }
-    return sites;
-  },
-
-  /**
    * Converts a list of exceptions received from the C++ handler to
-   * full SiteException objects. If this site-list is used as an all sites
-   * view, the list is sorted by site name, then protocol and port and de-duped
-   * (by origin).
-   * @param {!Array<SiteException>} sites A list of sites to convert.
-   * @return {!Array<SiteException>} A list of full SiteExceptions. Sorted and
-   *    deduped if allSites is set.
+   * full SiteException objects.
+   * @param {!Array<RawSiteException>} sites A list of sites to convert.
+   * @return {!Array<SiteException>} A list of full SiteExceptions.
    * @private
    */
   toSiteArray_: function(sites) {
-    var self = this;
-    if (this.allSites) {
-      sites.sort(function(a, b) {
-        var url1 = self.toUrl(a.origin);
-        var url2 = self.toUrl(b.origin);
-        var comparison = url1.host.localeCompare(url2.host);
-        if (comparison == 0) {
-          comparison = url1.protocol.localeCompare(url2.protocol);
-          if (comparison == 0) {
-            comparison = url1.port.localeCompare(url2.port);
-            if (comparison == 0) {
-              // Compare hosts for the embedding origins.
-              var host1 = self.toUrl(a.embeddingOrigin);
-              var host2 = self.toUrl(b.embeddingOrigin);
-              host1 = (host1 == null) ? '' : host1.host;
-              host2 = (host2 == null) ? '' : host2.host;
-              return host1.localeCompare(host2);
-            }
-          }
-        }
-        return comparison;
-      });
-    }
-    var results = /** @type {!Array<SiteException>} */([]);
+    var results = /** @type {!Array<SiteException>} */ ([]);
     var lastOrigin = '';
     var lastEmbeddingOrigin = '';
     for (var i = 0; i < sites.length; ++i) {
       /** @type {!SiteException} */
       var siteException = this.expandSiteException(sites[i]);
-
-      // The All Sites category can contain duplicates (from other categories).
-      if (this.allSites && siteException.origin == lastOrigin &&
-          siteException.embeddingOrigin == lastEmbeddingOrigin) {
-        continue;
-      }
 
       results.push(siteException);
       lastOrigin = siteException.origin;
@@ -373,13 +283,11 @@ Polymer({
    */
   setUpActionMenu_: function() {
     this.showAllowAction_ =
-        this.categorySubtype != settings.PermissionValues.ALLOW;
+        this.categorySubtype != settings.ContentSetting.ALLOW;
     this.showBlockAction_ =
-        this.categorySubtype != settings.PermissionValues.BLOCK;
+        this.categorySubtype != settings.ContentSetting.BLOCK;
     this.showSessionOnlyAction_ =
-        this.categorySubtype != settings.PermissionValues.SESSION_ONLY &&
-        this.category == settings.ContentSettingsTypes.COOKIES;
-    this.showEditAction_ =
+        this.categorySubtype != settings.ContentSetting.SESSION_ONLY &&
         this.category == settings.ContentSettingsTypes.COOKIES;
   },
 
@@ -406,63 +314,71 @@ Polymer({
   onOriginTap_: function(event) {
     if (!this.enableSiteSettings_)
       return;
-    settings.navigateTo(settings.Route.SITE_SETTINGS_SITE_DETAILS,
+    settings.navigateTo(
+        settings.routes.SITE_SETTINGS_SITE_DETAILS,
         new URLSearchParams('site=' + event.model.item.origin));
   },
 
   /**
-   * A handler for activating one of the menu action items.
-   * @param {string} action The permission to set (Allow, Block, SessionOnly,
-   *     etc).
+   * @param {?SiteException} site
    * @private
    */
-  onActionMenuActivate_: function(action) {
-    var origin = this.actionMenuSite_.origin;
-    var incognito = this.actionMenuSite_.incognito;
-    var embeddingOrigin = this.actionMenuSite_.embeddingOrigin;
-    if (action == settings.PermissionValues.DEFAULT) {
-      this.browserProxy.resetCategoryPermissionForOrigin(
-          origin, embeddingOrigin, this.category, incognito);
-    } else {
-      this.browserProxy.setCategoryPermissionForOrigin(
-          origin, embeddingOrigin, this.category, action, incognito);
-    }
+  resetPermissionForOrigin_: function(site) {
+    assert(site);
+    this.browserProxy.resetCategoryPermissionForOrigin(
+        site.origin, site.embeddingOrigin, this.category, site.incognito);
+  },
+
+  /**
+   * @param {!settings.ContentSetting} contentSetting
+   * @private
+   */
+  setContentSettingForActionMenuSite_: function(contentSetting) {
+    assert(this.actionMenuSite_);
+    this.browserProxy.setCategoryPermissionForOrigin(
+        this.actionMenuSite_.origin, this.actionMenuSite_.embeddingOrigin,
+        this.category, contentSetting, this.actionMenuSite_.incognito);
   },
 
   /** @private */
   onAllowTap_: function() {
-    this.onActionMenuActivate_(settings.PermissionValues.ALLOW);
+    this.setContentSettingForActionMenuSite_(settings.ContentSetting.ALLOW);
     this.closeActionMenu_();
   },
 
   /** @private */
   onBlockTap_: function() {
-    this.onActionMenuActivate_(settings.PermissionValues.BLOCK);
+    this.setContentSettingForActionMenuSite_(settings.ContentSetting.BLOCK);
     this.closeActionMenu_();
   },
 
   /** @private */
   onSessionOnlyTap_: function() {
-    this.onActionMenuActivate_(settings.PermissionValues.SESSION_ONLY);
+    this.setContentSettingForActionMenuSite_(
+        settings.ContentSetting.SESSION_ONLY);
     this.closeActionMenu_();
   },
 
   /** @private */
   onEditTap_: function() {
+    // Close action menu without resetting |this.actionMenuSite_| since it is
+    // bound to the dialog.
+    /** @type {!CrActionMenuElement} */ (this.$$('dialog[is=cr-action-menu]'))
+        .close();
     this.showEditExceptionDialog_ = true;
   },
 
   /** @private */
   onEditExceptionDialogClosed_: function() {
     this.showEditExceptionDialog_ = false;
-    // Close action menu after dialog has been closed, otherwise
-    // |actionMenuSite_| is reset while the dialog is still accessing it.
-    this.closeActionMenu_();
+    this.actionMenuSite_ = null;
+    this.activeDialogAnchor_.focus();
+    this.activeDialogAnchor_ = null;
   },
 
   /** @private */
   onResetTap_: function() {
-    this.onActionMenuActivate_(settings.PermissionValues.DEFAULT);
+    this.resetPermissionForOrigin_(this.actionMenuSite_);
     this.closeActionMenu_();
   },
 
@@ -474,14 +390,28 @@ Polymer({
    * @return {string} The site description.
    */
   computeSiteDescription_: function(item) {
-    if (item.incognito && item.embeddingDisplayName.length > 0) {
-      return loadTimeData.getStringF('embeddedIncognitoSite',
-          item.embeddingDisplayName);
+    var displayName = '';
+    if (item.embeddingOrigin) {
+      displayName = loadTimeData.getStringF(
+          'embeddedOnHost', this.sanitizePort(item.embeddingOrigin));
+    } else if (this.category == settings.ContentSettingsTypes.GEOLOCATION) {
+      displayName = loadTimeData.getString('embeddedOnAnyHost');
     }
 
-    if (item.incognito)
+    if (item.incognito) {
+      if (displayName.length > 0)
+        return loadTimeData.getStringF('embeddedIncognitoSite', displayName);
       return loadTimeData.getString('incognitoSite');
-    return item.embeddingDisplayName;
+    }
+    return displayName;
+  },
+
+  /**
+   * @param {!{model: !{item: !SiteException}}} e
+   * @private
+   */
+  onResetButtonTap_: function(e) {
+    this.resetPermissionForOrigin_(e.model.item);
   },
 
   /**
@@ -489,16 +419,18 @@ Polymer({
    * @private
    */
   onShowActionMenuTap_: function(e) {
+    this.activeDialogAnchor_ = /** @type {!HTMLElement} */ (
+        Polymer.dom(/** @type {!Event} */ (e)).localTarget);
+
     this.actionMenuSite_ = e.model.item;
-    /** @type {!CrActionMenuElement} */ (
-        this.$$('dialog[is=cr-action-menu]')).showAt(
-            /** @type {!Element} */ (
-                Polymer.dom(/** @type {!Event} */ (e)).localTarget));
+    /** @type {!CrActionMenuElement} */ (this.$$('dialog[is=cr-action-menu]'))
+        .showAt(this.activeDialogAnchor_);
   },
 
   /** @private */
   closeActionMenu_: function() {
     this.actionMenuSite_ = null;
+    this.activeDialogAnchor_ = null;
     var actionMenu = /** @type {!CrActionMenuElement} */ (
         this.$$('dialog[is=cr-action-menu]'));
     if (actionMenu.open)

@@ -9,15 +9,48 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/values.h"
+#include "components/prefs/in_memory_pref_store.h"
 
-OverlayUserPrefStore::OverlayUserPrefStore(
-    PersistentPrefStore* underlay)
-    : underlay_(underlay) {
-  underlay_->AddObserver(this);
+// Allows us to monitor two pref stores and tell updates from them apart. It
+// essentially mimics a Callback for the Observer interface (e.g. it allows
+// binding additional arguments).
+class OverlayUserPrefStore::ObserverAdapter : public PrefStore::Observer {
+ public:
+  ObserverAdapter(bool overlay, OverlayUserPrefStore* parent)
+      : overlay_(overlay), parent_(parent) {}
+
+  // Methods of PrefStore::Observer.
+  void OnPrefValueChanged(const std::string& key) override {
+    parent_->OnPrefValueChanged(overlay_, key);
+  }
+  void OnInitializationCompleted(bool succeeded) override {
+    parent_->OnInitializationCompleted(overlay_, succeeded);
+  }
+
+ private:
+  // Is the update for the overlay?
+  const bool overlay_;
+  OverlayUserPrefStore* const parent_;
+};
+
+OverlayUserPrefStore::OverlayUserPrefStore(PersistentPrefStore* underlay)
+    : OverlayUserPrefStore(new InMemoryPrefStore(), underlay) {}
+
+OverlayUserPrefStore::OverlayUserPrefStore(PersistentPrefStore* overlay,
+                                           PersistentPrefStore* underlay)
+    : overlay_observer_(
+          base::MakeUnique<OverlayUserPrefStore::ObserverAdapter>(true, this)),
+      underlay_observer_(
+          base::MakeUnique<OverlayUserPrefStore::ObserverAdapter>(false, this)),
+      overlay_(overlay),
+      underlay_(underlay) {
+  DCHECK(overlay->IsInitializationComplete());
+  overlay_->AddObserver(overlay_observer_.get());
+  underlay_->AddObserver(underlay_observer_.get());
 }
 
 bool OverlayUserPrefStore::IsSetInOverlay(const std::string& key) const {
-  return overlay_.GetValue(key, NULL);
+  return overlay_->GetValue(key, NULL);
 }
 
 void OverlayUserPrefStore::AddObserver(PrefStore::Observer* observer) {
@@ -33,33 +66,29 @@ bool OverlayUserPrefStore::HasObservers() const {
 }
 
 bool OverlayUserPrefStore::IsInitializationComplete() const {
-  return underlay_->IsInitializationComplete();
+  return underlay_->IsInitializationComplete() &&
+         overlay_->IsInitializationComplete();
 }
 
 bool OverlayUserPrefStore::GetValue(const std::string& key,
                                     const base::Value** result) const {
   // If the |key| shall NOT be stored in the overlay store, there must not
   // be an entry.
-  DCHECK(ShallBeStoredInOverlay(key) || !overlay_.GetValue(key, NULL));
+  DCHECK(ShallBeStoredInOverlay(key) || !overlay_->GetValue(key, NULL));
 
-  if (overlay_.GetValue(key, result))
+  if (overlay_->GetValue(key, result))
     return true;
-  return underlay_->GetValue(GetUnderlayKey(key), result);
+  return underlay_->GetValue(key, result);
 }
 
 std::unique_ptr<base::DictionaryValue> OverlayUserPrefStore::GetValues() const {
   auto values = underlay_->GetValues();
-  auto overlay_values = overlay_.AsDictionaryValue();
-  for (const auto& overlay_mapping : overlay_to_underlay_names_map_) {
-    const std::string& overlay_key = overlay_mapping.first;
-    const std::string& underlay_key = overlay_mapping.second;
+  auto overlay_values = overlay_->GetValues();
+  for (const auto& key : overlay_names_set_) {
     std::unique_ptr<base::Value> out_value;
-    if (overlay_key != underlay_key) {
-      values->Remove(underlay_key, &out_value);
-    }
-    overlay_values->Remove(overlay_key, &out_value);
+    overlay_values->Remove(key, &out_value);
     if (out_value) {
-      values->Set(overlay_key, std::move(out_value));
+      values->Set(key, std::move(out_value));
     }
   }
   return values;
@@ -68,18 +97,20 @@ std::unique_ptr<base::DictionaryValue> OverlayUserPrefStore::GetValues() const {
 bool OverlayUserPrefStore::GetMutableValue(const std::string& key,
                                            base::Value** result) {
   if (!ShallBeStoredInOverlay(key))
-    return underlay_->GetMutableValue(GetUnderlayKey(key), result);
+    return underlay_->GetMutableValue(key, result);
 
-  if (overlay_.GetValue(key, result))
+  written_overlay_names_.insert(key);
+  if (overlay_->GetMutableValue(key, result))
     return true;
 
   // Try to create copy of underlay if the overlay does not contain a value.
   base::Value* underlay_value = NULL;
-  if (!underlay_->GetMutableValue(GetUnderlayKey(key), &underlay_value))
+  if (!underlay_->GetMutableValue(key, &underlay_value))
     return false;
 
   *result = underlay_value->DeepCopy();
-  overlay_.SetValue(key, base::WrapUnique(*result));
+  overlay_->SetValue(key, base::WrapUnique(*result),
+                     WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   return true;
 }
 
@@ -87,33 +118,34 @@ void OverlayUserPrefStore::SetValue(const std::string& key,
                                     std::unique_ptr<base::Value> value,
                                     uint32_t flags) {
   if (!ShallBeStoredInOverlay(key)) {
-    underlay_->SetValue(GetUnderlayKey(key), std::move(value), flags);
+    underlay_->SetValue(key, std::move(value), flags);
     return;
   }
 
-  if (overlay_.SetValue(key, std::move(value)))
-    ReportValueChanged(key, flags);
+  written_overlay_names_.insert(key);
+  overlay_->SetValue(key, std::move(value), flags);
 }
 
 void OverlayUserPrefStore::SetValueSilently(const std::string& key,
                                             std::unique_ptr<base::Value> value,
                                             uint32_t flags) {
   if (!ShallBeStoredInOverlay(key)) {
-    underlay_->SetValueSilently(GetUnderlayKey(key), std::move(value), flags);
+    underlay_->SetValueSilently(key, std::move(value), flags);
     return;
   }
 
-  overlay_.SetValue(key, std::move(value));
+  written_overlay_names_.insert(key);
+  overlay_->SetValueSilently(key, std::move(value), flags);
 }
 
 void OverlayUserPrefStore::RemoveValue(const std::string& key, uint32_t flags) {
   if (!ShallBeStoredInOverlay(key)) {
-    underlay_->RemoveValue(GetUnderlayKey(key), flags);
+    underlay_->RemoveValue(key, flags);
     return;
   }
 
-  if (overlay_.RemoveValue(key))
-    ReportValueChanged(key, flags);
+  written_overlay_names_.insert(key);
+  overlay_->RemoveValue(key, flags);
 }
 
 bool OverlayUserPrefStore::ReadOnly() const {
@@ -126,7 +158,7 @@ PersistentPrefStore::PrefReadError OverlayUserPrefStore::GetReadError() const {
 
 PersistentPrefStore::PrefReadError OverlayUserPrefStore::ReadPrefs() {
   // We do not read intentionally.
-  OnInitializationCompleted(true);
+  OnInitializationCompleted(/* overlay */ false, true);
   return PersistentPrefStore::PREF_READ_ERROR_NONE;
 }
 
@@ -134,11 +166,11 @@ void OverlayUserPrefStore::ReadPrefsAsync(
     ReadErrorDelegate* error_delegate_raw) {
   std::unique_ptr<ReadErrorDelegate> error_delegate(error_delegate_raw);
   // We do not read intentionally.
-  OnInitializationCompleted(true);
+  OnInitializationCompleted(/* overlay */ false, true);
 }
 
-void OverlayUserPrefStore::CommitPendingWrite() {
-  underlay_->CommitPendingWrite();
+void OverlayUserPrefStore::CommitPendingWrite(base::OnceClosure done_callback) {
+  underlay_->CommitPendingWrite(std::move(done_callback));
   // We do not write our content intentionally.
 }
 
@@ -152,59 +184,43 @@ void OverlayUserPrefStore::ReportValueChanged(const std::string& key,
     observer.OnPrefValueChanged(key);
 }
 
-void OverlayUserPrefStore::OnPrefValueChanged(const std::string& key) {
-  if (!overlay_.GetValue(GetOverlayKey(key), NULL))
-    ReportValueChanged(GetOverlayKey(key), DEFAULT_PREF_WRITE_FLAGS);
+void OverlayUserPrefStore::RegisterOverlayPref(const std::string& key) {
+  DCHECK(!key.empty()) << "Key is empty";
+  DCHECK(overlay_names_set_.find(key) == overlay_names_set_.end())
+      << "Key already registered";
+  overlay_names_set_.insert(key);
 }
 
-void OverlayUserPrefStore::OnInitializationCompleted(bool succeeded) {
+void OverlayUserPrefStore::ClearMutableValues() {
+  for (const auto& key : written_overlay_names_) {
+    overlay_->RemoveValue(key, WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+  }
+}
+
+OverlayUserPrefStore::~OverlayUserPrefStore() {
+  overlay_->RemoveObserver(overlay_observer_.get());
+  underlay_->RemoveObserver(underlay_observer_.get());
+}
+
+void OverlayUserPrefStore::OnPrefValueChanged(bool overlay,
+                                              const std::string& key) {
+  if (overlay) {
+    ReportValueChanged(key, DEFAULT_PREF_WRITE_FLAGS);
+  } else {
+    if (!overlay_->GetValue(key, NULL))
+      ReportValueChanged(key, DEFAULT_PREF_WRITE_FLAGS);
+  }
+}
+
+void OverlayUserPrefStore::OnInitializationCompleted(bool overlay,
+                                                     bool succeeded) {
+  if (!IsInitializationComplete())
+    return;
   for (PrefStore::Observer& observer : observers_)
     observer.OnInitializationCompleted(succeeded);
 }
 
-void OverlayUserPrefStore::RegisterOverlayPref(const std::string& key) {
-  RegisterOverlayPref(key, key);
-}
-
-void OverlayUserPrefStore::RegisterOverlayPref(
-    const std::string& overlay_key,
-    const std::string& underlay_key) {
-  DCHECK(!overlay_key.empty()) << "Overlay key is empty";
-  DCHECK(overlay_to_underlay_names_map_.find(overlay_key) ==
-         overlay_to_underlay_names_map_.end()) <<
-      "Overlay key already registered";
-  DCHECK(!underlay_key.empty()) << "Underlay key is empty";
-  DCHECK(underlay_to_overlay_names_map_.find(underlay_key) ==
-         underlay_to_overlay_names_map_.end()) <<
-      "Underlay key already registered";
-  overlay_to_underlay_names_map_[overlay_key] = underlay_key;
-  underlay_to_overlay_names_map_[underlay_key] = overlay_key;
-}
-
-void OverlayUserPrefStore::ClearMutableValues() {
-  overlay_.Clear();
-}
-
-OverlayUserPrefStore::~OverlayUserPrefStore() {
-  underlay_->RemoveObserver(this);
-}
-
-const std::string& OverlayUserPrefStore::GetOverlayKey(
-    const std::string& underlay_key) const {
-  NamesMap::const_iterator i =
-      underlay_to_overlay_names_map_.find(underlay_key);
-  return i != underlay_to_overlay_names_map_.end() ? i->second : underlay_key;
-}
-
-const std::string& OverlayUserPrefStore::GetUnderlayKey(
-    const std::string& overlay_key) const {
-  NamesMap::const_iterator i =
-      overlay_to_underlay_names_map_.find(overlay_key);
-  return i != overlay_to_underlay_names_map_.end() ? i->second : overlay_key;
-}
-
 bool OverlayUserPrefStore::ShallBeStoredInOverlay(
     const std::string& key) const {
-  return overlay_to_underlay_names_map_.find(key) !=
-      overlay_to_underlay_names_map_.end();
+  return overlay_names_set_.find(key) != overlay_names_set_.end();
 }

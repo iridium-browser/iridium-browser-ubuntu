@@ -16,6 +16,7 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/rand_util.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -324,8 +325,8 @@ class InternalAuthVerificationService {
 
 namespace {
 
-static base::LazyInstance<chrome::InternalAuthVerificationService>
-    g_verification_service = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<chrome::InternalAuthVerificationService>::
+    DestructorAtExit g_verification_service = LAZY_INSTANCE_INITIALIZER;
 static base::LazyInstance<base::Lock>::Leaky
     g_verification_service_lock = LAZY_INSTANCE_INITIALIZER;
 
@@ -388,8 +389,7 @@ class InternalAuthGenerationService : public base::ThreadChecker {
       int idx = static_cast<int>(used_ticks_.size()) -
           static_cast<int>(current_tick - tick + 1);
       if (idx < 0 || used_ticks_[idx] != tick) {
-        DCHECK(used_ticks_.end() ==
-            std::find(used_ticks_.begin(), used_ticks_.end(), tick));
+        DCHECK(!base::ContainsValue(used_ticks_, tick));
         return tick;
       }
     }
@@ -432,8 +432,8 @@ class InternalAuthGenerationService : public base::ThreadChecker {
 
 namespace {
 
-static base::LazyInstance<chrome::InternalAuthGenerationService>
-    g_generation_service = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<chrome::InternalAuthGenerationService>::
+    DestructorAtExit g_generation_service = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 

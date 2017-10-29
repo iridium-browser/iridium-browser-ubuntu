@@ -21,6 +21,7 @@
 #include "remoting/host/logging.h"
 #include "remoting/host/native_messaging/native_messaging_pipe.h"
 #include "remoting/host/native_messaging/pipe_messaging_channel.h"
+#include "remoting/host/policy_watcher.h"
 #include "remoting/host/resources.h"
 #include "remoting/host/usage_stats_consent.h"
 
@@ -39,10 +40,29 @@
 #include <commctrl.h>
 
 #include "remoting/host/switches.h"
-#include "remoting/host/win/elevation_helpers.h"
 #endif  // defined(OS_WIN)
 
 namespace remoting {
+
+namespace {
+
+#if defined(OS_WIN) && defined(OFFICIAL_BUILD)
+bool CurrentProcessHasUiAccess() {
+  HANDLE process_token;
+  OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &process_token);
+
+  DWORD size;
+  DWORD uiaccess_value = 0;
+  if (!GetTokenInformation(process_token, TokenUIAccess, &uiaccess_value,
+                           sizeof(uiaccess_value), &size)) {
+    PLOG(ERROR) << "GetTokenInformation() failed";
+  }
+  CloseHandle(process_token);
+  return uiaccess_value != 0;
+}
+#endif  // defined(OS_WIN) && defined(OFFICIAL_BUILD)
+
+}  // namespace
 
 // Creates a It2MeNativeMessagingHost instance, attaches it to stdin/stdout and
 // runs the message loop until It2MeNativeMessagingHost signals shutdown.
@@ -62,10 +82,9 @@ int It2MeNativeMessagingHostMain(int argc, char** argv) {
   // Initialize Breakpad as early as possible. On Mac the command-line needs to
   // be initialized first, so that the preference for crash-reporting can be
   // looked up in the config file.
-  // TODO(nicholss): Commenting out Breakpad. See crbug.com/637884
-  // if (IsUsageStatsAllowed()) {
-  //   InitializeCrashReporting();
-  // }
+  if (IsUsageStatsAllowed()) {
+    InitializeCrashReporting();
+  }
 #endif  // defined(REMOTING_ENABLE_BREAKPAD)
 
 #if defined(OS_WIN)
@@ -79,9 +98,7 @@ int It2MeNativeMessagingHostMain(int argc, char** argv) {
   // Required to find the ICU data file, used by some file_util routines.
   base::i18n::InitializeICU();
 
-  // TODO(sergeyu): Consider adding separate pools for different task classes.
-  const int kMaxBackgroundThreads = 5;
-  base::TaskScheduler::CreateAndSetSimpleTaskScheduler(kMaxBackgroundThreads);
+  base::TaskScheduler::CreateAndStartWithDefaultParams("It2Me");
 
   remoting::LoadResources("");
 
@@ -189,8 +206,10 @@ int It2MeNativeMessagingHostMain(int argc, char** argv) {
   std::unique_ptr<ChromotingHostContext> context =
       ChromotingHostContext::Create(new remoting::AutoThreadTaskRunner(
           message_loop.task_runner(), run_loop.QuitClosure()));
+  std::unique_ptr<PolicyWatcher> policy_watcher =
+      PolicyWatcher::CreateWithTaskRunner(context->file_task_runner());
   std::unique_ptr<extensions::NativeMessageHost> host(
-      new It2MeNativeMessagingHost(needs_elevation, /*policy_service=*/nullptr,
+      new It2MeNativeMessagingHost(needs_elevation, std::move(policy_watcher),
                                    std::move(context), std::move(factory)));
 
   host->Start(native_messaging_pipe.get());

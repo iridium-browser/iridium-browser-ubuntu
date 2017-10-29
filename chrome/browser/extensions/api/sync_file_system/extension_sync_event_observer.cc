@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/lazy_instance.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/extensions/api/sync_file_system/sync_file_system_api_helpers.h"
 #include "chrome/browser/sync_file_system/sync_event_observer.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service.h"
@@ -27,8 +28,8 @@ using sync_file_system::SyncEventObserver;
 namespace extensions {
 
 static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<ExtensionSyncEventObserver> > g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+    BrowserContextKeyedAPIFactory<ExtensionSyncEventObserver>>::DestructorAtExit
+    g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<ExtensionSyncEventObserver>*
@@ -94,8 +95,8 @@ void ExtensionSyncEventObserver::OnFileSynced(
     sync_file_system::SyncDirection direction) {
   std::unique_ptr<base::ListValue> params(new base::ListValue());
 
-  std::unique_ptr<base::DictionaryValue> entry(
-      CreateDictionaryValueForFileSystemEntry(url, file_type));
+  std::unique_ptr<base::DictionaryValue> entry =
+      CreateDictionaryValueForFileSystemEntry(url, file_type);
   if (!entry)
     return;
   params->Append(std::move(entry));
@@ -128,9 +129,8 @@ void ExtensionSyncEventObserver::BroadcastOrDispatchEvent(
   EventRouter* event_router = EventRouter::Get(browser_context_);
   DCHECK(event_router);
 
-  std::unique_ptr<Event> event(
-      new Event(histogram_value, event_name, std::move(values)));
-  event->restrict_to_browser_context = browser_context_;
+  auto event = base::MakeUnique<Event>(histogram_value, event_name,
+                                       std::move(values), browser_context_);
 
   // No app_origin, broadcast to all listening extensions for this event name.
   if (broadcast_mode) {

@@ -151,16 +151,15 @@ TEST_F(DevToolsHttpHandlerTest, TestServerSocketFailed) {
   std::unique_ptr<DevToolsSocketFactory> factory(
       new FailingServerSocketFactory(run_loop.QuitClosure(),
                                      run_loop_2.QuitClosure()));
+  LOG(INFO) << "Following error message is expected:";
   DevToolsAgentHost::StartRemoteDebuggingServer(
       std::move(factory), std::string(), base::FilePath(), base::FilePath(),
       std::string(), std::string());
   // Our dummy socket factory will post a quit message once the server will
   // become ready.
   run_loop.Run();
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 5; i++)
     RunAllPendingInMessageLoop(BrowserThread::UI);
-    RunAllPendingInMessageLoop(BrowserThread::FILE);
-  }
   DevToolsAgentHost::StopRemoteDebuggingServer();
   // Make sure the handler actually stops.
   run_loop_2.Run();

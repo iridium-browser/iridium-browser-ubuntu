@@ -6,6 +6,8 @@ static_library("suggestions") {
   sources = [
     "blacklist_store.cc",
     "blacklist_store.h",
+    "features.cc",
+    "features.h",
     "image_encoder.h",
     "image_manager.cc",
     "image_manager.h",
@@ -16,6 +18,8 @@ static_library("suggestions") {
     "suggestions_service_impl.h",
     "suggestions_store.cc",
     "suggestions_store.h",
+    "webui/suggestions_source.cc",
+    "webui/suggestions_source.h",
   ]
 
   public_deps = [
@@ -23,13 +27,14 @@ static_library("suggestions") {
     "//components/prefs",
     "//components/suggestions/proto",
     "//net",
+    "//ui/base",
     "//ui/gfx",
     "//url",
   ]
   deps = [
     "//components/data_use_measurement/core",
     "//components/google/core/browser",
-    "//components/image_fetcher",
+    "//components/image_fetcher/core",
     "//components/keyed_service/core",
     "//components/leveldb_proto",
     "//components/pref_registry",
@@ -58,7 +63,7 @@ source_set("unit_tests") {
   deps = [
     ":suggestions",
     "//base/test:test_support",
-    "//components/image_fetcher",
+    "//components/image_fetcher/core",
     "//components/leveldb_proto:test_support",
     "//components/signin/core/browser:test_support",
     "//components/sync",

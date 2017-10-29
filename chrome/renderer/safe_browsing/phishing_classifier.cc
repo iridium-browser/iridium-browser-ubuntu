@@ -15,7 +15,6 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/safe_browsing/feature_extractor_clock.h"
 #include "chrome/renderer/safe_browsing/features.h"
@@ -23,6 +22,7 @@
 #include "chrome/renderer/safe_browsing/phishing_term_feature_extractor.h"
 #include "chrome/renderer/safe_browsing/phishing_url_feature_extractor.h"
 #include "chrome/renderer/safe_browsing/scorer.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "content/public/renderer/render_frame.h"
 #include "crypto/sha2.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
@@ -42,8 +42,9 @@ namespace {
 // Used for UMA, do not reorder.
 enum SkipClassificationReason {
   CLASSIFICATION_PROCEED = 0,
-  SKIP_HTTPS = 1,
+  DEPRECATED_SKIP_HTTPS = 1,
   SKIP_NONE_GET = 2,
+  SKIP_SCHEME_NOT_SUPPORTED = 3,
   SKIP_REASON_MAX
 };
 
@@ -118,24 +119,24 @@ void PhishingClassifier::BeginClassification(
   // this is the case, post a task to begin feature extraction on the next
   // iteration of the message loop.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&PhishingClassifier::BeginFeatureExtraction,
-                            weak_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&PhishingClassifier::BeginFeatureExtraction,
+                                weak_factory_.GetWeakPtr()));
 }
 
 void PhishingClassifier::BeginFeatureExtraction() {
   blink::WebLocalFrame* frame = render_frame_->GetWebFrame();
 
   // Check whether the URL is one that we should classify.
-  // Currently, we only classify http: URLs that are GET requests.
-  GURL url(frame->document().url());
-  if (!url.SchemeIs(url::kHttpScheme)) {
-    RecordReasonForSkippingClassificationToUMA(SKIP_HTTPS);
+  // Currently, we only classify http/https URLs that are GET requests.
+  GURL url(frame->GetDocument().Url());
+  if (!url.SchemeIsHTTPOrHTTPS()) {
+    RecordReasonForSkippingClassificationToUMA(SKIP_SCHEME_NOT_SUPPORTED);
     RunFailureCallback();
     return;
   }
 
-  blink::WebDataSource* ds = frame->dataSource();
-  if (!ds || ds->getRequest().httpMethod().ascii() != "GET") {
+  blink::WebDataSource* ds = frame->DataSource();
+  if (!ds || ds->GetRequest().HttpMethod().Ascii() != "GET") {
     if (ds)
       RecordReasonForSkippingClassificationToUMA(SKIP_NONE_GET);
     RunFailureCallback();
@@ -152,7 +153,7 @@ void PhishingClassifier::BeginFeatureExtraction() {
   // DOM feature extraction can take awhile, so it runs asynchronously
   // in several chunks of work and invokes the callback when finished.
   dom_extractor_->ExtractFeatures(
-      frame->document(), features_.get(),
+      frame->GetDocument(), features_.get(),
       base::Bind(&PhishingClassifier::DOMExtractionFinished,
                  base::Unretained(this)));
 }
@@ -192,21 +193,18 @@ void PhishingClassifier::TermExtractionFinished(bool success) {
     FeatureMap hashed_features;
     ClientPhishingRequest verdict;
     verdict.set_model_version(scorer_->model_version());
-    verdict.set_url(main_frame->document().url().string().utf8());
-    for (base::hash_map<std::string, double>::const_iterator it =
-             features_->features().begin();
-         it != features_->features().end(); ++it) {
-      DVLOG(2) << "Feature: " << it->first << " = " << it->second;
+    verdict.set_url(main_frame->GetDocument().Url().GetString().Utf8());
+    for (const auto& it : features_->features()) {
+      DVLOG(2) << "Feature: " << it.first << " = " << it.second;
       bool result = hashed_features.AddRealFeature(
-          crypto::SHA256HashString(it->first), it->second);
+          crypto::SHA256HashString(it.first), it.second);
       DCHECK(result);
       ClientPhishingRequest::Feature* feature = verdict.add_feature_map();
-      feature->set_name(it->first);
-      feature->set_value(it->second);
+      feature->set_name(it.first);
+      feature->set_value(it.second);
     }
-    for (std::set<uint32_t>::const_iterator it = shingle_hashes_->begin();
-         it != shingle_hashes_->end(); ++it) {
-      verdict.add_shingle_hashes(*it);
+    for (const auto& it : *shingle_hashes_) {
+      verdict.add_shingle_hashes(it);
     }
     float score = static_cast<float>(scorer_->ComputeScore(hashed_features));
     verdict.set_client_score(score);

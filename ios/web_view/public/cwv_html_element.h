@@ -7,8 +7,11 @@
 
 #import <Foundation/Foundation.h>
 
+#import "cwv_export.h"
+
 // Encapsulates information about HTML element. Used in
 // delegate methods.
+CWV_EXPORT
 @interface CWVHTMLElement : NSObject
 
 // |href| property of an HTML element.

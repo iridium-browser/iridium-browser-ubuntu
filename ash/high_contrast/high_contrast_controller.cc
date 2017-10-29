@@ -4,8 +4,6 @@
 
 #include "ash/high_contrast/high_contrast_controller.h"
 
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
 #include "ash/shell.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/compositor/layer.h"
@@ -13,11 +11,11 @@
 namespace ash {
 
 HighContrastController::HighContrastController() : enabled_(false) {
-  WmShell::Get()->AddShellObserver(this);
+  Shell::Get()->AddShellObserver(this);
 }
 
 HighContrastController::~HighContrastController() {
-  WmShell::Get()->RemoveShellObserver(this);
+  Shell::Get()->RemoveShellObserver(this);
 }
 
 void HighContrastController::SetEnabled(bool enabled) {
@@ -35,8 +33,8 @@ void HighContrastController::UpdateDisplay(aura::Window* root_window) {
   root_window->layer()->SetLayerInverted(enabled_);
 }
 
-void HighContrastController::OnRootWindowAdded(WmWindow* root_window) {
-  UpdateDisplay(WmWindow::GetAuraWindow(root_window));
+void HighContrastController::OnRootWindowAdded(aura::Window* root_window) {
+  UpdateDisplay(root_window);
 }
 
 }  // namespace ash

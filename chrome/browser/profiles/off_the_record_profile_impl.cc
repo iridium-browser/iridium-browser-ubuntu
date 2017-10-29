@@ -14,16 +14,19 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/background_sync/background_sync_controller_factory.h"
 #include "chrome/browser/background_sync/background_sync_controller_impl.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
+#include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/dom_distiller/profile_utils.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
 #include "chrome/browser/net/proxy_service_factory.h"
@@ -31,6 +34,8 @@
 #include "chrome/browser/permissions/permission_manager_factory.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
+#include "chrome/browser/prefs/browser_prefs.h"
+#include "chrome/browser/prefs/in_process_service_factory_factory.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -38,8 +43,8 @@
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
-#include "chrome/browser/ui/zoom/chrome_zoom_level_otr_delegate.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/features.h"
@@ -49,9 +54,7 @@
 #include "components/proxy_config/pref_proxy_config_tracker.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/user_prefs/user_prefs.h"
-#include "components/zoom/zoom_event_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/url_data_source.h"
@@ -60,11 +63,19 @@
 #include "net/http/http_server_properties.h"
 #include "net/http/transport_security_state.h"
 #include "ppapi/features/features.h"
+#include "services/preferences/public/cpp/in_process_service_factory.h"
+#include "services/preferences/public/cpp/pref_service_main.h"
+#include "services/preferences/public/interfaces/preferences.mojom.h"
+#include "services/service_manager/public/cpp/service.h"
 #include "storage/browser/database/database_tracker.h"
 
 #if defined(OS_ANDROID)
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/proxy_config/proxy_prefs.h"
+#else  // !defined(OS_ANDROID)
+#include "chrome/browser/ui/zoom/chrome_zoom_level_otr_delegate.h"
+#include "components/zoom/zoom_event_manager.h"
+#include "content/public/browser/host_zoom_map.h"
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
@@ -81,6 +92,8 @@
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
+#include "extensions/browser/extension_pref_store.h"
+#include "extensions/browser/extension_pref_value_map_factory.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #endif
@@ -93,7 +106,9 @@
 
 using content::BrowserThread;
 using content::DownloadManagerDelegate;
+#if !defined(OS_ANDROID)
 using content::HostZoomMap;
+#endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 namespace {
@@ -113,13 +128,29 @@ void NotifyOTRProfileDestroyedOnIOThread(void* original_profile,
 }  // namespace
 #endif
 
+PrefStore* CreateExtensionPrefStore(Profile* profile,
+                                    bool incognito_pref_store) {
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  return new ExtensionPrefStore(
+      ExtensionPrefValueMapFactory::GetForBrowserContext(profile),
+      incognito_pref_store);
+#else
+  return NULL;
+#endif
+}
+
 OffTheRecordProfileImpl::OffTheRecordProfileImpl(Profile* real_profile)
-    : profile_(real_profile),
-      prefs_(PrefServiceSyncableIncognitoFromProfile(real_profile)),
-      start_time_(Time::Now()) {
+    : profile_(real_profile), start_time_(Time::Now()) {
+  // Must happen before we ask for prefs as prefs needs the connection to the
+  // service manager, which is set up in Initialize.
   BrowserContext::Initialize(this, profile_->GetPath());
+  prefs_.reset(CreateIncognitoPrefServiceSyncable(
+      PrefServiceSyncableFromProfile(profile_),
+      CreateExtensionPrefStore(profile_, true),
+      InProcessPrefServiceFactoryFactory::GetInstanceForContext(this)
+          ->CreateDelegate()));
   // Register on BrowserContext.
-  user_prefs::UserPrefs::Set(this, prefs_);
+  user_prefs::UserPrefs::Set(this, prefs_.get());
 }
 
 void OffTheRecordProfileImpl::Init() {
@@ -148,7 +179,9 @@ void OffTheRecordProfileImpl::Init() {
          IncognitoModePrefs::GetAvailability(profile_->GetPrefs()) !=
              IncognitoModePrefs::DISABLED);
 
+#if !defined(OS_ANDROID)
   TrackZoomLevelsFromParent();
+#endif
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   ChromePluginServiceFilter::GetInstance()->RegisterResourceContext(
@@ -163,7 +196,7 @@ void OffTheRecordProfileImpl::Init() {
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&NotifyOTRProfileCreatedOnIOThread, profile_, this));
+      base::BindOnce(&NotifyOTRProfileCreatedOnIOThread, profile_, this));
 #endif
 
   // The DomDistillerViewerSource is not a normal WebUI so it must be registered
@@ -185,7 +218,7 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&NotifyOTRProfileDestroyedOnIOThread, profile_, this));
+      base::BindOnce(&NotifyOTRProfileDestroyedOnIOThread, profile_, this));
 #endif
 
   if (pref_proxy_config_tracker_)
@@ -204,6 +237,7 @@ void OffTheRecordProfileImpl::InitIoData() {
   io_data_.reset(new OffTheRecordProfileIOData::Handle(this));
 }
 
+#if !defined(OS_ANDROID)
 void OffTheRecordProfileImpl::TrackZoomLevelsFromParent() {
   DCHECK_NE(INCOGNITO_PROFILE, profile_->GetProfileType());
 
@@ -228,6 +262,7 @@ void OffTheRecordProfileImpl::TrackZoomLevelsFromParent() {
           base::Bind(&OffTheRecordProfileImpl::UpdateDefaultZoomLevel,
                      base::Unretained(this)));
 }
+#endif  // !defined(OS_ANDROID)
 
 std::string OffTheRecordProfileImpl::GetProfileUserName() const {
   // Incognito profile should not return the username.
@@ -246,12 +281,14 @@ base::FilePath OffTheRecordProfileImpl::GetPath() const {
   return profile_->GetPath();
 }
 
+#if !defined(OS_ANDROID)
 std::unique_ptr<content::ZoomLevelDelegate>
 OffTheRecordProfileImpl::CreateZoomLevelDelegate(
     const base::FilePath& partition_path) {
   return base::MakeUnique<ChromeZoomLevelOTRDelegate>(
       zoom::ZoomEventManager::GetForBrowserContext(this)->GetWeakPtr());
 }
+#endif  // !defined(OS_ANDROID)
 
 scoped_refptr<base::SequencedTaskRunner>
 OffTheRecordProfileImpl::GetIOTaskRunner() {
@@ -299,20 +336,20 @@ bool OffTheRecordProfileImpl::IsLegacySupervised() const {
 }
 
 PrefService* OffTheRecordProfileImpl::GetPrefs() {
-  return prefs_;
+  return prefs_.get();
 }
 
 const PrefService* OffTheRecordProfileImpl::GetPrefs() const {
-  return prefs_;
+  return prefs_.get();
 }
 
 PrefService* OffTheRecordProfileImpl::GetOffTheRecordPrefs() {
-  return prefs_;
+  return prefs_.get();
 }
 
 DownloadManagerDelegate* OffTheRecordProfileImpl::GetDownloadManagerDelegate() {
-  return DownloadServiceFactory::GetForBrowserContext(this)->
-      GetDownloadManagerDelegate();
+  return DownloadCoreServiceFactory::GetForBrowserContext(this)
+      ->GetDownloadManagerDelegate();
 }
 
 net::URLRequestContextGetter* OffTheRecordProfileImpl::CreateRequestContext(
@@ -335,6 +372,19 @@ OffTheRecordProfileImpl::CreateMediaRequestContextForStoragePartition(
     bool in_memory) {
   return io_data_->GetIsolatedAppRequestContextGetter(partition_path, in_memory)
       .get();
+}
+
+void OffTheRecordProfileImpl::RegisterInProcessServices(
+    StaticServiceMap* services) {
+  {
+    service_manager::EmbeddedServiceInfo info;
+    info.factory =
+        InProcessPrefServiceFactoryFactory::GetInstanceForContext(this)
+            ->CreatePrefServiceFactory();
+    info.task_runner = content::BrowserThread::GetTaskRunnerForThread(
+        content::BrowserThread::UI);
+    services->insert(std::make_pair(prefs::mojom::kServiceName, info));
+  }
 }
 
 net::URLRequestContextGetter* OffTheRecordProfileImpl::GetRequestContext() {
@@ -403,6 +453,11 @@ content::PermissionManager* OffTheRecordProfileImpl::GetPermissionManager() {
 content::BackgroundSyncController*
 OffTheRecordProfileImpl::GetBackgroundSyncController() {
   return BackgroundSyncControllerFactory::GetForProfile(this);
+}
+
+content::BrowsingDataRemoverDelegate*
+OffTheRecordProfileImpl::GetBrowsingDataRemoverDelegate() {
+  return ChromeBrowsingDataRemoverDelegateFactory::GetForProfile(this);
 }
 
 bool OffTheRecordProfileImpl::IsSameProfile(Profile* profile) {
@@ -521,6 +576,7 @@ Profile* Profile::CreateOffTheRecordProfile() {
   return profile;
 }
 
+#if !defined(OS_ANDROID)
 void OffTheRecordProfileImpl::OnParentZoomLevelChanged(
     const HostZoomMap::ZoomLevelChange& change) {
   HostZoomMap* host_zoom_map = HostZoomMap::GetDefaultForBrowserContext(this);
@@ -550,6 +606,7 @@ void OffTheRecordProfileImpl::UpdateDefaultZoomLevel() {
   zoom::ZoomEventManager::GetForBrowserContext(this)
       ->OnDefaultZoomLevelChanged();
 }
+#endif  // !defined(OS_ANDROID)
 
 PrefProxyConfigTracker* OffTheRecordProfileImpl::CreateProxyConfigTracker() {
 #if defined(OS_CHROMEOS)

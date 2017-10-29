@@ -15,6 +15,7 @@ import org.chromium.chrome.browser.compositor.layouts.LayoutRenderHost;
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.BlackHoleEventFilter;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilter;
 import org.chromium.chrome.browser.compositor.layouts.phone.stack.Stack;
 import org.chromium.chrome.browser.compositor.layouts.phone.stack.StackAnimation;
@@ -66,17 +67,18 @@ public class SimpleAnimationLayout
 
     private LayoutTab mAnimatedTab;
     private final TabListSceneLayer mSceneLayer;
+    private final BlackHoleEventFilter mBlackHoleEventFilter;
 
     /**
      * Creates an instance of the {@link SimpleAnimationLayout}.
      * @param context     The current Android's context.
      * @param updateHost  The {@link LayoutUpdateHost} view for this layout.
      * @param renderHost  The {@link LayoutRenderHost} view for this layout.
-     * @param eventFilter The {@link EventFilter} that is needed for this view.
      */
-    public SimpleAnimationLayout(Context context, LayoutUpdateHost updateHost,
-            LayoutRenderHost renderHost, EventFilter eventFilter) {
-        super(context, updateHost, renderHost, eventFilter);
+    public SimpleAnimationLayout(
+            Context context, LayoutUpdateHost updateHost, LayoutRenderHost renderHost) {
+        super(context, updateHost, renderHost);
+        mBlackHoleEventFilter = new BlackHoleEventFilter(context);
         mSceneLayer = new TabListSceneLayer();
     }
 
@@ -405,6 +407,11 @@ public class SimpleAnimationLayout
 
     @Override
     public void onPropertyAnimationFinished(Property prop) {}
+
+    @Override
+    protected EventFilter getEventFilter() {
+        return mBlackHoleEventFilter;
+    }
 
     @Override
     protected SceneLayer getSceneLayer() {

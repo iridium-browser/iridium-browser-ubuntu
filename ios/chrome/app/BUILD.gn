@@ -29,6 +29,7 @@ source_set("app") {
 }
 
 source_set("unit_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "chrome_app_startup_parameters_unittest.mm",
@@ -64,6 +65,8 @@ source_set("tests_hook") {
 }
 
 source_set("tests_fake_hook") {
+  configs += [ "//build/config/compiler:enable_arc" ]
+
   # This target is intentionally not test-only, as the main app depends on it.
   sources = [
     "tests_fake_hook.mm",
@@ -111,6 +114,7 @@ compile_plist("entitlements") {
 }
 
 source_set("app_internal") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "application_mode.h",
     "chrome_app_startup_parameters.h",
@@ -141,15 +145,16 @@ source_set("app_internal") {
     "//components/crash/core/common",
     "//components/favicon/core",
     "//components/favicon_base",
+    "//components/feature_engagement_tracker",
     "//components/handoff",
     "//components/history/core/browser",
     "//components/infobars/core",
     "//components/keyed_service/core",
     "//components/keyed_service/ios",
     "//components/metrics",
+    "//components/ntp_snippets",
     "//components/prefs",
     "//components/proxy_config",
-    "//components/reading_list/core",
     "//components/signin/core/browser",
     "//components/suggestions",
     "//components/sync",
@@ -160,6 +165,7 @@ source_set("app_internal") {
     "//ios/chrome/app/safe_mode",
     "//ios/chrome/app/spotlight",
     "//ios/chrome/app/startup",
+    "//ios/chrome/app/startup:startup_basic",
     "//ios/chrome/app/strings",
     "//ios/chrome/browser",
     "//ios/chrome/browser:browser_internal",
@@ -172,6 +178,7 @@ source_set("app_internal") {
     "//ios/chrome/browser/crash_report",
     "//ios/chrome/browser/crash_report:crash_report_internal",
     "//ios/chrome/browser/favicon",
+    "//ios/chrome/browser/feature_engagement_tracker",
     "//ios/chrome/browser/first_run",
     "//ios/chrome/browser/geolocation",
     "//ios/chrome/browser/geolocation:geolocation_internal",
@@ -179,8 +186,8 @@ source_set("app_internal") {
     "//ios/chrome/browser/memory",
     "//ios/chrome/browser/metrics",
     "//ios/chrome/browser/metrics:metrics_internal",
-    "//ios/chrome/browser/native_app_launcher:native_app_launcher_internal",
     "//ios/chrome/browser/net",
+    "//ios/chrome/browser/ntp_snippets",
     "//ios/chrome/browser/omaha",
     "//ios/chrome/browser/prefs",
     "//ios/chrome/browser/reading_list",
@@ -217,7 +224,6 @@ source_set("app_internal") {
     "//ios/net",
     "//ios/public/provider/chrome/browser",
     "//ios/public/provider/chrome/browser/distribution",
-    "//ios/public/provider/chrome/browser/native_app_launcher",
     "//ios/public/provider/chrome/browser/signin",
     "//ios/public/provider/chrome/browser/user_feedback",
     "//ios/third_party/material_roboto_font_loader_ios",
@@ -242,6 +248,7 @@ source_set("app_internal") {
 }
 
 source_set("main") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "chrome_exe_main.mm",
   ]
@@ -250,7 +257,7 @@ source_set("main") {
     ":app_internal",
     "//base",
     "//components/crash/core/common",
-    "//ios/chrome/app/startup",
+    "//ios/chrome/app/startup:startup_basic",
     "//ios/chrome/browser:browser_internal",
     "//ios/chrome/browser/crash_report",
     "//ios/chrome/common",
@@ -275,8 +282,11 @@ ios_app_bundle("chrome") {
     if (ios_enable_today_extension) {
       deps += [ ":today_extension_bundle" ]
     }
-    if (ios_enable_widget_extension) {
-      deps += [ ":widget_extension_bundle" ]
+    if (ios_enable_search_widget_extension) {
+      deps += [ ":search_widget_extension_bundle" ]
+    }
+    if (ios_enable_content_widget_extension) {
+      deps += [ ":content_widget_extension_bundle" ]
     }
     if (ios_enable_share_extension) {
       deps += [ ":share_extension_bundle" ]
@@ -315,22 +325,30 @@ if (current_toolchain == default_toolchain) {
     }
   }
 
-  if (ios_enable_widget_extension) {
-    bundle_data("widget_extension_bundle") {
+  if (ios_enable_content_widget_extension) {
+    bundle_data("content_widget_extension_bundle") {
       public_deps = [
-        "//ios/chrome/widget_extension",
+        "//ios/chrome/content_widget_extension",
       ]
       sources = [
-        "$root_out_dir/widget_extension.appex",
+        "$root_out_dir/content_widget_extension.appex",
       ]
-
-      # The output is renamed today_extension.appex so that signing in canary
-      # works and clobbering is not necessary when switching between this
-      # extension and the today extension.
-      # TODO(crbug.com/682230) : Rename this when widget gets its own
-      # mobileprovision.
       outputs = [
-        "{{bundle_plugins_dir}}/today_extension.appex",
+        "{{bundle_plugins_dir}}/{{source_file_part}}",
+      ]
+    }
+  }
+
+  if (ios_enable_search_widget_extension) {
+    bundle_data("search_widget_extension_bundle") {
+      public_deps = [
+        "//ios/chrome/search_widget_extension",
+      ]
+      sources = [
+        "$root_out_dir/search_widget_extension.appex",
+      ]
+      outputs = [
+        "{{bundle_plugins_dir}}/{{source_file_part}}",
       ]
     }
   }

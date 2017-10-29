@@ -13,9 +13,16 @@ namespace internal {
 
 RUNTIME_FUNCTION(Runtime_DynamicImportCall) {
   HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
-  // TODO(gsathya): Implement ImportCall.
-  return isolate->heap()->undefined_value();
+  DCHECK_EQ(2, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
+  CONVERT_ARG_HANDLE_CHECKED(Object, specifier, 1);
+
+  Handle<Script> script(Script::cast(function->shared()->script()));
+  Handle<String> source_url(String::cast(script->name()));
+
+  RETURN_RESULT_OR_FAILURE(
+      isolate,
+      isolate->RunHostImportModuleDynamicallyCallback(source_url, specifier));
 }
 
 RUNTIME_FUNCTION(Runtime_GetModuleNamespace) {

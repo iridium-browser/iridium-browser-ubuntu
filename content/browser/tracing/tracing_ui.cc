@@ -55,58 +55,12 @@ void OnGotCategories(const WebUIDataSource::GotDataCallback& callback,
   callback.Run(res);
 }
 
-bool GetTracingOptions(const std::string& data64,
-                       base::trace_event::TraceConfig* trace_config) {
-  std::string data;
-  if (!base::Base64Decode(data64, &data)) {
-    LOG(ERROR) << "Options were not base64 encoded.";
-    return false;
-  }
-
-  std::unique_ptr<base::Value> optionsRaw = base::JSONReader::Read(data);
-  if (!optionsRaw) {
-    LOG(ERROR) << "Options were not valid JSON";
-    return false;
-  }
-  base::DictionaryValue* options;
-  if (!optionsRaw->GetAsDictionary(&options)) {
-    LOG(ERROR) << "Options must be dict";
-    return false;
-  }
-
-  if (!trace_config) {
-    LOG(ERROR) << "trace_config can't be passed as NULL";
-    return false;
-  }
-
-  bool options_ok = true;
-  std::string category_filter_string;
-  options_ok &= options->GetString("categoryFilter", &category_filter_string);
-
-  std::string record_mode;
-  options_ok &= options->GetString("tracingRecordMode", &record_mode);
-
-  *trace_config = base::trace_event::TraceConfig(category_filter_string,
-                                                 record_mode);
-
-  bool enable_systrace;
-  options_ok &= options->GetBoolean("useSystemTracing", &enable_systrace);
-  if (enable_systrace)
-    trace_config->EnableSystrace();
-
-  if (!options_ok) {
-    LOG(ERROR) << "Malformed options";
-    return false;
-  }
-  return true;
-}
-
 void OnRecordingEnabledAck(const WebUIDataSource::GotDataCallback& callback);
 
 bool BeginRecording(const std::string& data64,
                     const WebUIDataSource::GotDataCallback& callback) {
   base::trace_event::TraceConfig trace_config("", "");
-  if (!GetTracingOptions(data64, &trace_config))
+  if (!TracingUI::GetTracingOptions(data64, &trace_config))
     return false;
 
   return TracingController::GetInstance()->StartTracing(
@@ -150,14 +104,6 @@ void TracingCallbackWrapperBase64(
   callback.Run(data_base64);
 }
 
-void AddCustomMetadata() {
-  base::DictionaryValue metadata_dict;
-  metadata_dict.SetString(
-      "command_line",
-      base::CommandLine::ForCurrentProcess()->GetCommandLineString());
-  TracingController::GetInstance()->AddMetadata(metadata_dict);
-}
-
 bool OnBeginJSONRequest(const std::string& path,
                         const WebUIDataSource::GotDataCallback& callback) {
   if (path == "json/categories") {
@@ -186,7 +132,6 @@ bool OnBeginJSONRequest(const std::string& path,
         TracingControllerImpl::CreateCompressedStringSink(
             TracingControllerImpl::CreateCallbackEndpoint(
                 base::Bind(TracingCallbackWrapperBase64, callback)));
-    AddCustomMetadata();
     return TracingController::GetInstance()->StopTracing(data_sink);
   }
 
@@ -231,6 +176,13 @@ TracingUI::TracingUI(WebUI* web_ui)
       web_ui->GetWebContents()->GetBrowserContext();
 
   WebUIDataSource* source = WebUIDataSource::Create(kChromeUITracingHost);
+  std::unordered_set<std::string> exclusions;
+  exclusions.insert("json/begin_recording");
+  exclusions.insert("json/categories");
+  exclusions.insert("json/end_recording_compressed");
+  exclusions.insert("json/get_buffer_percent_full");
+  exclusions.insert("json/get_buffer_status");
+  source->UseGzip(exclusions);
   source->SetJsonPath("strings.js");
   source->SetDefaultResource(IDR_TRACING_HTML);
   source->AddResourcePath("tracing.js", IDR_TRACING_JS);
@@ -247,7 +199,7 @@ void TracingUI::DoUploadBase64Encoded(const base::ListValue* args) {
   std::string file_contents_base64;
   if (!args || args->empty() || !args->GetString(0, &file_contents_base64)) {
     web_ui()->CallJavascriptFunctionUnsafe("onUploadError",
-                                           base::StringValue("Missing data"));
+                                           base::Value("Missing data"));
     return;
   }
 
@@ -263,7 +215,7 @@ void TracingUI::DoUpload(const base::ListValue* args) {
   std::string file_contents;
   if (!args || args->empty() || !args->GetString(0, &file_contents)) {
     web_ui()->CallJavascriptFunctionUnsafe("onUploadError",
-                                           base::StringValue("Missing data"));
+                                           base::Value("Missing data"));
     return;
   }
 
@@ -273,14 +225,14 @@ void TracingUI::DoUpload(const base::ListValue* args) {
 void TracingUI::DoUploadInternal(const std::string& file_contents,
                                  TraceUploader::UploadMode upload_mode) {
   if (!delegate_) {
-    web_ui()->CallJavascriptFunctionUnsafe(
-        "onUploadError", base::StringValue("Not implemented"));
+    web_ui()->CallJavascriptFunctionUnsafe("onUploadError",
+                                           base::Value("Not implemented"));
     return;
   }
 
   if (trace_uploader_) {
-    web_ui()->CallJavascriptFunctionUnsafe(
-        "onUploadError", base::StringValue("Upload in progress"));
+    web_ui()->CallJavascriptFunctionUnsafe("onUploadError",
+                                           base::Value("Upload in progress"));
     return;
   }
 
@@ -301,23 +253,77 @@ void TracingUI::DoUploadInternal(const std::string& file_contents,
   // TODO(mmandlis): Add support for stopping the upload in progress.
 }
 
+// static
+bool TracingUI::GetTracingOptions(
+    const std::string& data64,
+    base::trace_event::TraceConfig* trace_config) {
+  std::string data;
+  if (!base::Base64Decode(data64, &data)) {
+    LOG(ERROR) << "Options were not base64 encoded.";
+    return false;
+  }
+
+  std::unique_ptr<base::Value> optionsRaw = base::JSONReader::Read(data);
+  if (!optionsRaw) {
+    LOG(ERROR) << "Options were not valid JSON";
+    return false;
+  }
+  base::DictionaryValue* options;
+  if (!optionsRaw->GetAsDictionary(&options)) {
+    LOG(ERROR) << "Options must be dict";
+    return false;
+  }
+
+  if (!trace_config) {
+    LOG(ERROR) << "trace_config can't be passed as NULL";
+    return false;
+  }
+
+  // New style options dictionary.
+  if (options->HasKey("included_categories")) {
+    *trace_config = base::trace_event::TraceConfig(*options);
+    return true;
+  }
+
+  bool options_ok = true;
+  std::string category_filter_string;
+  options_ok &= options->GetString("categoryFilter", &category_filter_string);
+
+  std::string record_mode;
+  options_ok &= options->GetString("tracingRecordMode", &record_mode);
+
+  *trace_config =
+      base::trace_event::TraceConfig(category_filter_string, record_mode);
+
+  bool enable_systrace;
+  options_ok &= options->GetBoolean("useSystemTracing", &enable_systrace);
+  if (enable_systrace)
+    trace_config->EnableSystrace();
+
+  if (!options_ok) {
+    LOG(ERROR) << "Malformed options";
+    return false;
+  }
+  return true;
+}
+
 void TracingUI::OnTraceUploadProgress(int64_t current, int64_t total) {
   DCHECK(current <= total);
   int percent = (current / total) * 100;
   web_ui()->CallJavascriptFunctionUnsafe(
       "onUploadProgress", base::Value(percent),
-      base::StringValue(base::StringPrintf("%" PRId64, current)),
-      base::StringValue(base::StringPrintf("%" PRId64, total)));
+      base::Value(base::StringPrintf("%" PRId64, current)),
+      base::Value(base::StringPrintf("%" PRId64, total)));
 }
 
 void TracingUI::OnTraceUploadComplete(bool success,
                                       const std::string& feedback) {
   if (success) {
     web_ui()->CallJavascriptFunctionUnsafe("onUploadComplete",
-                                           base::StringValue(feedback));
+                                           base::Value(feedback));
   } else {
     web_ui()->CallJavascriptFunctionUnsafe("onUploadError",
-                                           base::StringValue(feedback));
+                                           base::Value(feedback));
   }
   trace_uploader_.reset();
 }

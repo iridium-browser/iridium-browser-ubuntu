@@ -15,14 +15,14 @@ tr.b.unittest.testSuite(function() {
     this.layoutObjectsById = {};
   }
   FakeSnapshot.prototype = {
-    getLayoutObjectById: function(id) {
+    getLayoutObjectById(id) {
       return this.layoutObjectsById[id];
     }
   };
 
   test('instantiate', function() {
-    var snapshot = new FakeSnapshot();
-    var layoutObject = new tr.e.chrome.LayoutObject(snapshot, {
+    const snapshot = new FakeSnapshot();
+    const layoutObject = new tr.e.chrome.LayoutObject(snapshot, {
       address: 'deadbeef',
       name: 'LayoutView',
       other: 1,
@@ -37,31 +37,31 @@ tr.b.unittest.testSuite(function() {
     snapshot.layoutObjectsById[layoutObject.id] = layoutObject;
 
     assert.strictEqual(snapshot, layoutObject.snapshot);
-    assert.equal('LayoutView', layoutObject.name);
-    assert.equal('deadbeef', layoutObject.id);
-    assert.equal(1, layoutObject.otherPropertyNames.length);
-    assert.equal(1, layoutObject.getProperty('other'));
+    assert.strictEqual('LayoutView', layoutObject.name);
+    assert.strictEqual('deadbeef', layoutObject.id);
+    assert.strictEqual(1, layoutObject.otherPropertyNames.length);
+    assert.strictEqual(1, layoutObject.getProperty('other'));
     assert.isTrue(layoutObject.hasChildLayoutObjects);
-    var child = layoutObject.childLayoutObjects[0];
-    assert.equal('LayoutBlockFlow', child.name);
-    assert.equal('beef2', child.id);
-    assert.equal(1, child.otherPropertyNames.length);
-    assert.equal(2, child.getProperty('other'));
+    const child = layoutObject.childLayoutObjects[0];
+    assert.strictEqual('LayoutBlockFlow', child.name);
+    assert.strictEqual('beef2', child.id);
+    assert.strictEqual(1, child.otherPropertyNames.length);
+    assert.strictEqual(2, child.getProperty('other'));
 
     assert.isUndefined(layoutObject.previousSnapshotLayoutObject);
     assert.isUndefined(layoutObject.nextSnapshotLayoutObject);
 
-    var count = 0;
+    let count = 0;
     layoutObject.traverseTree(function(node) {
       count += 1;
     });
-    assert.equal(2, count);
+    assert.strictEqual(2, count);
 
-    var nextSnapshot = new FakeSnapshot();
+    const nextSnapshot = new FakeSnapshot();
     nextSnapshot.previousSnapshot = snapshot;
     snapshot.nextSnapshot = nextSnapshot;
 
-    var nextLayoutObject = new tr.e.chrome.LayoutObject(nextSnapshot, {
+    const nextLayoutObject = new tr.e.chrome.LayoutObject(nextSnapshot, {
       address: 'deadbeef',
       name: 'LayoutView'
     });

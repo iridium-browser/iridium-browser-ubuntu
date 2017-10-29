@@ -9,13 +9,15 @@ from __future__ import print_function
 import glob
 import os
 
-from chromite.cbuildbot import buildbucket_lib
 from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot import chroot_lib
 from chromite.cbuildbot import commands
+from chromite.cbuildbot import goma_util
 from chromite.cbuildbot import repository
+from chromite.cbuildbot import topology
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import test_stages
+from chromite.lib import buildbucket_lib
 from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
@@ -91,7 +93,8 @@ class CleanUpStage(generic_stages.BuilderStage):
   def _BuildRootGitCleanup(self):
     logging.info('Cleaning up buildroot git repositories.')
     # Run git gc --auto --prune=all on all repos in CleanUpStage
-    commands.BuildRootGitCleanup(self._build_root, prune_all=True)
+    repo = self.GetRepoRepository()
+    repo.BuildRootGitCleanup(prune_all=True)
 
   def _DeleteAutotestSitePackages(self):
     """Clears any previously downloaded site-packages."""
@@ -144,7 +147,8 @@ class CleanUpStage(generic_stages.BuilderStage):
             buckets=slave_buildbucket_buckets,
             tags=['build_type:%s' % self._run.config.build_type,
                   'cbb_branch:%s' % self._run.manifest_branch,
-                  'master:False',],
+                  'master:False',
+                  'master_config:%s' % self._run.config.name],
             status=status)
 
         ids = buildbucket_lib.ExtractBuildIds(builds)
@@ -165,8 +169,6 @@ class CleanUpStage(generic_stages.BuilderStage):
             buildbucket_ids,
             dryrun=self._run.options.debug)
 
-        build_id, db = self._run.GetCIDBHandle()
-
         result_map = buildbucket_lib.GetResultMap(cancel_content)
         for buildbucket_id, result in result_map.iteritems():
           # Check if the result contains error messages.
@@ -176,15 +178,6 @@ class CleanUpStage(generic_stages.BuilderStage):
                             "Please check the status of the build.",
                             buildbucket_id,
                             buildbucket_lib.GetErrorReason(result))
-          elif db:
-            # The build was successfully canceled by Buildbucket,
-            # change its status to 'aborted' in CIDB.
-            build = db.GetBuildStatusWithBuildbucketId(buildbucket_id)
-            if build is not None:
-              db.FinishBuild(build['id'],
-                             status=constants.BUILDER_STATUS_ABORTED,
-                             summary=('Canceled by master build %s '
-                                      'CleanUpStage' % build_id))
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
@@ -404,13 +397,50 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
       logging.info('Recording packages under test')
       self.board_runattrs.SetParallel('packages_under_test', set(deps.keys()))
 
+  def _ShouldEnableGoma(self):
+    # Enable goma if 1) chrome actually needs to be built, 2) not
+    # latest_toolchain (because toolchain prebuilt package may not be available
+    # for goma, crbug.com/728971) and 3) goma is available.
+    return (self._run.options.managed_chrome and
+            not self._latest_toolchain and
+            self._run.options.goma_dir)
+
+  def _SetupGomaIfNecessary(self):
+    """Sets up goma envs if necessary.
+
+    Updates related env vars, and returns args to chroot.
+
+    Returns:
+      args which should be provided to chroot in order to enable goma.
+      If goma is unusable or disabled, None is returned.
+    """
+    if not self._ShouldEnableGoma():
+      return None
+
+    goma = goma_util.Goma(
+        self._run.options.goma_dir, self._run.options.goma_client_json)
+
+    # Set USE_GOMA env var so that chrome is built with goma.
+    self._portage_extra_env['USE_GOMA'] = 'true'
+    self._portage_extra_env.update(goma.GetChrootExtraEnv())
+
+    # Keep GOMA_TMP_DIR for Report stage to upload logs.
+    self._run.attrs.metadata.UpdateWithDict(
+        {'goma_tmp_dir': goma.goma_tmp_dir})
+
+    # Mount goma directory and service account json file (if necessary)
+    # into chroot.
+    chroot_args = ['--goma_dir', goma.goma_dir]
+    if goma.goma_client_json:
+      chroot_args.extend(['--goma_client_json', goma.goma_client_json])
+    return chroot_args
+
   def PerformStage(self):
     # If we have rietveld patches, always compile Chrome from source.
     noworkon = not self._run.options.rietveld_patches
     packages = self.GetListOfPackagesToBuild()
     self.VerifyChromeBinpkg(packages)
     self.RecordPackagesUnderTest(packages)
-
 
     try:
       event_filename = 'build-events.json'
@@ -424,7 +454,8 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
       event_file = None
       event_file_in_chroot = None
 
-
+    # Set up goma. Use goma iff chrome needs to be built.
+    chroot_args = self._SetupGomaIfNecessary()
     commands.Build(self._build_root,
                    self._current_board,
                    build_autotest=self._run.ShouldBuildAutotest(),
@@ -435,12 +466,30 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
                    chrome_root=self._run.options.chrome_root,
                    noworkon=noworkon,
                    noretry=self._run.config.nobuildretry,
+                   chroot_args=chroot_args,
                    extra_env=self._portage_extra_env,
-                   event_file=event_file_in_chroot,)
+                   event_file=event_file_in_chroot,
+                   run_goma=bool(chroot_args))
 
     if event_file and os.path.isfile(event_file):
       logging.info('Archive build-events.json file')
+      #TODO: @chingcodes Remove upload after events DB is final
       self.UploadArtifact(event_filename, archive=False, strict=True)
+
+      creds_file = topology.topology.get(topology.DATASTORE_WRITER_CREDS_KEY)
+
+      build_id, db = self._run.GetCIDBHandle()
+      if db and creds_file:
+        parent_key = ('Build',
+                      build_id,
+                      'BuildStage',
+                      self._build_stage_id)
+
+        commands.ExportToGCloud(self._build_root,
+                                creds_file,
+                                event_file,
+                                parent_key=parent_key,
+                                caller=type(self).__name__)
     else:
       logging.info('No build-events.json file to archive')
 
@@ -522,7 +571,8 @@ class BuildImageStage(BuildPackagesStage):
       commands.BuildVMImageForTesting(
           self._build_root,
           self._current_board,
-          extra_env=self._portage_extra_env)
+          extra_env=self._portage_extra_env,
+          disk_layout=self._run.config.disk_layout)
 
   def _GenerateAuZip(self, image_dir):
     """Create au-generator.zip."""
@@ -539,7 +589,7 @@ class BuildImageStage(BuildPackagesStage):
     compute images create" command. This will convert them into images that can
     be used to create GCE VM instances.
     """
-    if self._run.config.run_gce_tests:
+    if self._run.config.gce_tests:
       image_bins = []
       if 'base' in self._run.config['images']:
         image_bins.append(constants.IMAGE_TYPE_TO_NAME['base'])

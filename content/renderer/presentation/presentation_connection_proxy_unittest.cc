@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "base/run_loop.h"
+#include "base/test/mock_callback.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/renderer/presentation/presentation_connection_proxy.h"
 #include "content/renderer/presentation/test_presentation_connection.h"
@@ -13,10 +14,23 @@
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/modules/presentation/WebPresentationConnection.h"
 #include "third_party/WebKit/public/platform/modules/presentation/WebPresentationController.h"
+#include "third_party/WebKit/public/platform/modules/presentation/WebPresentationInfo.h"
+#include "third_party/WebKit/public/platform/modules/presentation/WebPresentationReceiver.h"
 
 using ::testing::_;
 
 namespace content {
+
+class MockWebPresentationReceiver : public blink::WebPresentationReceiver {
+ public:
+  MOCK_METHOD1(
+      OnReceiverConnectionAvailable,
+      blink::WebPresentationConnection*(const blink::WebPresentationInfo&));
+  MOCK_METHOD1(DidChangeConnectionState,
+               void(blink::WebPresentationConnectionState));
+  MOCK_METHOD0(TerminateConnection, void());
+  MOCK_METHOD1(RemoveConnection, void(blink::WebPresentationConnection*));
+};
 
 class PresentationConnectionProxyTest : public ::testing::Test {
  public:
@@ -30,19 +44,19 @@ class PresentationConnectionProxyTest : public ::testing::Test {
 
     controller_connection_proxy_ =
         new ControllerConnectionProxy(controller_connection_.get());
-    controller_connection_->bindProxy(
+    controller_connection_->BindProxy(
         base::WrapUnique(controller_connection_proxy_));
-    receiver_connection_proxy_ =
-        new ReceiverConnectionProxy(receiver_connection_.get());
-    receiver_connection_->bindProxy(
+    receiver_connection_proxy_ = new ReceiverConnectionProxy(
+        receiver_connection_.get(), &mock_receiver_);
+    receiver_connection_->BindProxy(
         base::WrapUnique(receiver_connection_proxy_));
 
     EXPECT_CALL(
         *controller_connection_,
-        didChangeState(blink::WebPresentationConnectionState::Connected));
+        DidChangeState(blink::WebPresentationConnectionState::kConnected));
     EXPECT_CALL(
         *receiver_connection_,
-        didChangeState(blink::WebPresentationConnectionState::Connected));
+        DidChangeState(blink::WebPresentationConnectionState::kConnected));
 
     receiver_connection_proxy_->Bind(
         controller_connection_proxy_->MakeRemoteRequest());
@@ -55,34 +69,22 @@ class PresentationConnectionProxyTest : public ::testing::Test {
     receiver_connection_.reset();
   }
 
-  void ExpectSendConnectionMessageCallback(bool success) {
-    EXPECT_TRUE(success);
-  }
-
  protected:
   std::unique_ptr<TestPresentationConnection> controller_connection_;
   std::unique_ptr<TestPresentationConnection> receiver_connection_;
   ControllerConnectionProxy* controller_connection_proxy_;
   ReceiverConnectionProxy* receiver_connection_proxy_;
+  MockWebPresentationReceiver mock_receiver_;
 
  private:
   content::TestBrowserThreadBundle thread_bundle_;
 };
 
 TEST_F(PresentationConnectionProxyTest, TestSendString) {
-  blink::WebString message = blink::WebString::fromUTF8("test message");
-  blink::mojom::ConnectionMessagePtr session_message =
-      blink::mojom::ConnectionMessage::New();
-  session_message->type = blink::mojom::PresentationMessageType::TEXT;
-  session_message->message = message.utf8();
-
+  blink::WebString message = blink::WebString::FromUTF8("test message");
   base::RunLoop run_loop;
-  EXPECT_CALL(*receiver_connection_, didReceiveTextMessage(message));
-  controller_connection_proxy_->SendConnectionMessage(
-      std::move(session_message),
-      base::Bind(
-          &PresentationConnectionProxyTest::ExpectSendConnectionMessageCallback,
-          base::Unretained(this)));
+  EXPECT_CALL(*receiver_connection_, DidReceiveTextMessage(message));
+  controller_connection_proxy_->SendTextMessage(message);
   run_loop.RunUntilIdle();
 }
 
@@ -91,44 +93,44 @@ TEST_F(PresentationConnectionProxyTest, TestSendArrayBuffer) {
   expected_data.push_back(42);
   expected_data.push_back(36);
 
-  blink::mojom::ConnectionMessagePtr session_message =
-      blink::mojom::ConnectionMessage::New();
-  session_message->type = blink::mojom::PresentationMessageType::BINARY;
-  session_message->data = expected_data;
-
   base::RunLoop run_loop;
-  EXPECT_CALL(*receiver_connection_, didReceiveBinaryMessage(_, _))
+  EXPECT_CALL(*receiver_connection_, DidReceiveBinaryMessage(_, _))
       .WillOnce(::testing::Invoke(
           [&expected_data](const uint8_t* data, size_t length) {
             std::vector<uint8_t> message_data(data, data + length);
             EXPECT_EQ(expected_data, message_data);
           }));
 
-  controller_connection_proxy_->SendConnectionMessage(
-      std::move(session_message),
-      base::Bind(
-          &PresentationConnectionProxyTest::ExpectSendConnectionMessageCallback,
-          base::Unretained(this)));
+  controller_connection_proxy_->SendBinaryMessage(expected_data.data(),
+                                                  expected_data.size());
   run_loop.RunUntilIdle();
 }
 
 TEST_F(PresentationConnectionProxyTest, TestControllerConnectionCallsClose) {
   base::RunLoop run_loop;
-  EXPECT_CALL(*controller_connection_,
-              didChangeState(blink::WebPresentationConnectionState::Closed));
-  EXPECT_CALL(*receiver_connection_,
-              didChangeState(blink::WebPresentationConnectionState::Closed));
-  controller_connection_proxy_->close();
+  EXPECT_CALL(*controller_connection_, DidClose());
+  EXPECT_CALL(*receiver_connection_, DidClose());
+  EXPECT_CALL(mock_receiver_, RemoveConnection(receiver_connection_.get()));
+  controller_connection_proxy_->Close();
   run_loop.RunUntilIdle();
 }
 
 TEST_F(PresentationConnectionProxyTest, TestReceiverConnectionCallsClose) {
   base::RunLoop run_loop;
-  EXPECT_CALL(*controller_connection_,
-              didChangeState(blink::WebPresentationConnectionState::Closed));
-  EXPECT_CALL(*receiver_connection_,
-              didChangeState(blink::WebPresentationConnectionState::Closed));
-  receiver_connection_proxy_->close();
+  EXPECT_CALL(*controller_connection_, DidClose());
+  EXPECT_CALL(*receiver_connection_, DidClose());
+  EXPECT_CALL(mock_receiver_, RemoveConnection(receiver_connection_.get()));
+  receiver_connection_proxy_->Close();
+  run_loop.RunUntilIdle();
+}
+
+TEST_F(PresentationConnectionProxyTest, TestReceiverNotifyTargetConnection) {
+  base::RunLoop run_loop;
+  EXPECT_CALL(
+      *controller_connection_,
+      DidChangeState(blink::WebPresentationConnectionState::kTerminated));
+  receiver_connection_proxy_->NotifyTargetConnection(
+      blink::WebPresentationConnectionState::kTerminated);
   run_loop.RunUntilIdle();
 }
 

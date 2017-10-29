@@ -43,18 +43,18 @@ class ShillIPConfigClientImpl : public ShillIPConfigClient {
     GetHelper(ipconfig_path)->RemovePropertyChangedObserver(observer);
   }
   void Refresh(const dbus::ObjectPath& ipconfig_path,
-               const VoidDBusMethodCallback& callback) override;
+               VoidDBusMethodCallback callback) override;
   void GetProperties(const dbus::ObjectPath& ipconfig_path,
                      const DictionaryValueCallback& callback) override;
   void SetProperty(const dbus::ObjectPath& ipconfig_path,
                    const std::string& name,
                    const base::Value& value,
-                   const VoidDBusMethodCallback& callback) override;
+                   VoidDBusMethodCallback callback) override;
   void ClearProperty(const dbus::ObjectPath& ipconfig_path,
                      const std::string& name,
-                     const VoidDBusMethodCallback& callback) override;
+                     VoidDBusMethodCallback callback) override;
   void Remove(const dbus::ObjectPath& ipconfig_path,
-              const VoidDBusMethodCallback& callback) override;
+              VoidDBusMethodCallback callback) override;
   ShillIPConfigClient::TestInterface* GetTestInterface() override;
 
  protected:
@@ -97,19 +97,17 @@ void ShillIPConfigClientImpl::GetProperties(
   GetHelper(ipconfig_path)->CallDictionaryValueMethod(&method_call, callback);
 }
 
-void ShillIPConfigClientImpl::Refresh(
-    const dbus::ObjectPath& ipconfig_path,
-    const VoidDBusMethodCallback& callback) {
+void ShillIPConfigClientImpl::Refresh(const dbus::ObjectPath& ipconfig_path,
+                                      VoidDBusMethodCallback callback) {
   dbus::MethodCall method_call(shill::kFlimflamIPConfigInterface,
                                shill::kRefreshFunction);
-  GetHelper(ipconfig_path)->CallVoidMethod(&method_call, callback);
+  GetHelper(ipconfig_path)->CallVoidMethod(&method_call, std::move(callback));
 }
 
-void ShillIPConfigClientImpl::SetProperty(
-    const dbus::ObjectPath& ipconfig_path,
-    const std::string& name,
-    const base::Value& value,
-    const VoidDBusMethodCallback& callback) {
+void ShillIPConfigClientImpl::SetProperty(const dbus::ObjectPath& ipconfig_path,
+                                          const std::string& name,
+                                          const base::Value& value,
+                                          VoidDBusMethodCallback callback) {
   dbus::MethodCall method_call(shill::kFlimflamIPConfigInterface,
                                shill::kSetPropertyFunction);
   dbus::MessageWriter writer(&method_call);
@@ -126,10 +124,10 @@ void ShillIPConfigClientImpl::SetProperty(
       for (base::ListValue::const_iterator it = list_value->begin();
            it != list_value->end();
            ++it) {
-        DLOG_IF(ERROR, (*it)->GetType() != base::Value::Type::STRING)
-            << "Unexpected type " << (*it)->GetType();
+        DLOG_IF(ERROR, it->GetType() != base::Value::Type::STRING)
+            << "Unexpected type " << it->GetType();
         std::string str;
-        (*it)->GetAsString(&str);
+        it->GetAsString(&str);
         array_writer.AppendString(str);
       }
       variant_writer.CloseContainer(&array_writer);
@@ -144,26 +142,25 @@ void ShillIPConfigClientImpl::SetProperty(
     default:
       DLOG(ERROR) << "Unexpected type " << value.GetType();
   }
-  GetHelper(ipconfig_path)->CallVoidMethod(&method_call, callback);
+  GetHelper(ipconfig_path)->CallVoidMethod(&method_call, std::move(callback));
 }
 
 void ShillIPConfigClientImpl::ClearProperty(
     const dbus::ObjectPath& ipconfig_path,
     const std::string& name,
-    const VoidDBusMethodCallback& callback) {
+    VoidDBusMethodCallback callback) {
   dbus::MethodCall method_call(shill::kFlimflamIPConfigInterface,
                                shill::kClearPropertyFunction);
   dbus::MessageWriter writer(&method_call);
   writer.AppendString(name);
-  GetHelper(ipconfig_path)->CallVoidMethod(&method_call, callback);
+  GetHelper(ipconfig_path)->CallVoidMethod(&method_call, std::move(callback));
 }
 
-void ShillIPConfigClientImpl::Remove(
-    const dbus::ObjectPath& ipconfig_path,
-    const VoidDBusMethodCallback& callback) {
+void ShillIPConfigClientImpl::Remove(const dbus::ObjectPath& ipconfig_path,
+                                     VoidDBusMethodCallback callback) {
   dbus::MethodCall method_call(shill::kFlimflamIPConfigInterface,
                                shill::kRemoveConfigFunction);
-  GetHelper(ipconfig_path)->CallVoidMethod(&method_call, callback);
+  GetHelper(ipconfig_path)->CallVoidMethod(&method_call, std::move(callback));
 }
 
 ShillIPConfigClient::TestInterface*

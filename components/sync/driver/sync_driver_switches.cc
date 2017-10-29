@@ -36,14 +36,31 @@ const char kSyncShortNudgeDelayForTest[] = "sync-short-nudge-delay-for-test";
 const base::Feature kSyncClearDataOnPassphraseEncryption{
     "ClearSyncDataOnPassphraseEncryption", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Gates registration and construction of user events machinery. Enabled by
+// default as each use case should have their own gating feature as well.
+const base::Feature kSyncUserEvents{"SyncUserEvents",
+                                    base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Gates registration for user language detection events.
+const base::Feature kSyncUserLanguageDetectionEvents{
+    "SyncUserLanguageDetectionEvents", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Gates registration for user translation events.
+const base::Feature kSyncUserTranslationEvents{
+    "SyncUserTranslationEvents", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables USS implementation of Autocomplete datatype.
+const base::Feature kSyncUSSAutocomplete{"SyncUSSAutocomplete",
+                                         base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Enables USS implementation of DeviceInfo datatype. This flag controls whether
 // SyncableService based or ModelTypeSyncBridge based implementation is used for
 // DeviceInfo type.
 const base::Feature kSyncUSSDeviceInfo{"EnableSyncUSSDeviceInfo",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Enables USS implementation of Autocomplete datatype.
-const base::Feature kSyncUSSAutocomplete{"SyncUSSAutocomplete",
-                                         base::FEATURE_DISABLED_BY_DEFAULT};
+// Enables USS implementation of typed URL datatype.
+const base::Feature kSyncUSSTypedURL{"SyncUSSTypedURL",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace switches

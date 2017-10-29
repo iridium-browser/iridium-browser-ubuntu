@@ -15,10 +15,12 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "build/build_config.h"
 #include "components/device_event_log/device_event_log.h"
 #include "device/usb/usb_device_handle.h"
@@ -153,13 +155,10 @@ void SaveStringsAndRunContinuation(
 
 void OnReadBosDescriptor(scoped_refptr<UsbDeviceHandle> device_handle,
                          const base::Closure& barrier,
-                         std::unique_ptr<WebUsbAllowedOrigins> allowed_origins,
                          const GURL& landing_page) {
   scoped_refptr<UsbDeviceImpl> device =
       static_cast<UsbDeviceImpl*>(device_handle->GetDevice().get());
 
-  if (allowed_origins)
-    device->set_webusb_allowed_origins(std::move(allowed_origins));
   if (landing_page.is_valid())
     device->set_webusb_landing_page(landing_page);
 
@@ -216,15 +215,14 @@ void OnDeviceOpenedReadDescriptors(
 
 }  // namespace
 
-UsbServiceImpl::UsbServiceImpl(
-    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_in)
-    : UsbService(std::move(blocking_task_runner_in)),
+UsbServiceImpl::UsbServiceImpl()
+    : UsbService(nullptr),
 #if defined(OS_WIN)
       device_observer_(this),
 #endif
       weak_factory_(this) {
-  blocking_task_runner()->PostTask(
-      FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, kBlockingTaskTraits,
       base::Bind(&InitializeUsbContextOnBlockingThread, task_runner(),
                  base::Bind(&UsbServiceImpl::OnUsbContext,
                             weak_factory_.GetWeakPtr())));
@@ -238,7 +236,7 @@ UsbServiceImpl::~UsbServiceImpl() {
 }
 
 void UsbServiceImpl::GetDevices(const GetDevicesCallback& callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (usb_unavailable_) {
     task_runner()->PostTask(
@@ -310,7 +308,7 @@ void UsbServiceImpl::OnUsbContext(scoped_refptr<UsbContext> context) {
 }
 
 void UsbServiceImpl::RefreshDevices() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (!context_ || enumeration_in_progress_)
     return;
@@ -324,16 +322,16 @@ void UsbServiceImpl::RefreshDevices() {
     pending_path_enumerations_.pop();
   }
 
-  blocking_task_runner()->PostTask(
-      FROM_HERE,
-      base::Bind(&GetDeviceListOnBlockingThread, device_path, context_,
-                 task_runner(), base::Bind(&UsbServiceImpl::OnDeviceList,
-                                           weak_factory_.GetWeakPtr())));
+  base::PostTaskWithTraits(FROM_HERE, kBlockingTaskTraits,
+                           base::Bind(&GetDeviceListOnBlockingThread,
+                                      device_path, context_, task_runner(),
+                                      base::Bind(&UsbServiceImpl::OnDeviceList,
+                                                 weak_factory_.GetWeakPtr())));
 }
 
 void UsbServiceImpl::OnDeviceList(libusb_device** platform_devices,
                                   size_t device_count) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!platform_devices) {
     RefreshDevicesComplete();
     return;
@@ -350,7 +348,7 @@ void UsbServiceImpl::OnDeviceList(libusb_device** platform_devices,
   for (size_t i = 0; i < device_count; ++i) {
     PlatformUsbDevice platform_device = platform_devices[i];
     // Ignore some devices.
-    if (base::ContainsValue(ignored_devices_, platform_device)) {
+    if (base::ContainsKey(ignored_devices_, platform_device)) {
       existing_ignored_devices.insert(platform_device);
       refresh_complete.Run();
       continue;
@@ -383,7 +381,7 @@ void UsbServiceImpl::OnDeviceList(libusb_device** platform_devices,
   for (auto it = ignored_devices_.begin(); it != ignored_devices_.end();
        /* incremented internally */) {
     auto current = it++;
-    if (!base::ContainsValue(existing_ignored_devices, *current)) {
+    if (!base::ContainsKey(existing_ignored_devices, *current)) {
       libusb_unref_device(*current);
       ignored_devices_.erase(current);
     }
@@ -397,7 +395,7 @@ void UsbServiceImpl::OnDeviceList(libusb_device** platform_devices,
 }
 
 void UsbServiceImpl::RefreshDevicesComplete() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(enumeration_in_progress_);
 
   enumeration_ready_ = true;
@@ -437,8 +435,8 @@ void UsbServiceImpl::EnumerateDevice(PlatformUsbDevice platform_device,
       return;
     }
 
-    scoped_refptr<UsbDeviceImpl> device(new UsbDeviceImpl(
-        context_, platform_device, descriptor, blocking_task_runner()));
+    scoped_refptr<UsbDeviceImpl> device(
+        new UsbDeviceImpl(context_, platform_device, descriptor));
     base::Closure add_device =
         base::Bind(&UsbServiceImpl::AddDevice, weak_factory_.GetWeakPtr(),
                    refresh_complete, device);
@@ -532,7 +530,7 @@ int LIBUSB_CALL UsbServiceImpl::HotplugCallback(libusb_context* context,
 }
 
 void UsbServiceImpl::OnPlatformDeviceAdded(PlatformUsbDevice platform_device) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!base::ContainsKey(platform_devices_, platform_device));
   EnumerateDevice(platform_device, base::Bind(&base::DoNothing));
   libusb_unref_device(platform_device);
@@ -540,7 +538,7 @@ void UsbServiceImpl::OnPlatformDeviceAdded(PlatformUsbDevice platform_device) {
 
 void UsbServiceImpl::OnPlatformDeviceRemoved(
     PlatformUsbDevice platform_device) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   PlatformDeviceMap::iterator it = platform_devices_.find(platform_device);
   if (it != platform_devices_.end()) {
     RemoveDevice(it->second);

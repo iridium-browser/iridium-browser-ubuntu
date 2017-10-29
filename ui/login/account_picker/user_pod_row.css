@@ -44,18 +44,9 @@ pin-keyboard {
   transition: all 180ms;
 }
 
-.pod.flying-pin-pod {
-  transition: height 180ms ease-in-out,
-              top 180ms ease-in-out;
-}
-
 .pod.pin-enabled {
   height: 417px;
   top: -87px !important;
-}
-
-.disable-pin-animation .pod.pin-enabled {
-  transition: none;
 }
 
 .pod .pin-container {
@@ -115,6 +106,18 @@ html[dir=rtl] .user-image-pane {
   flex: none;
 }
 
+.pod.focused .user-image {
+  display: none;
+}
+
+.pod .animated-image {
+  display: none;
+}
+
+.pod.focused .animated-image {
+  display: block;
+}
+
 /* TODO(noms): Refactor this out into a CrOS-specific file and simplify the
  style rule once it is included on CrOS only. crbug.com/397638 */
 html:not([screen=login-add-user]) .pod .user-image {
@@ -160,7 +163,7 @@ html[dir=rtl] .main-pane {
 }
 
 .name-container,
-.pod.focused:not(.multiprofiles-policy-applied) .auth-container {
+.pod.focused:not(.multiprofiles-policy-applied):not(.public-account) .auth-container {
   background-color: white;
   display: flex;
   position: absolute;
@@ -415,6 +418,7 @@ html[dir=rtl] .main-pane {
   display: none;
 }
 
+.fingerprint-icon-container,
 .custom-icon-container {
   display: flex;
   flex: none;
@@ -554,6 +558,42 @@ html[dir=rtl] .user-type-icon-area {
   background-image: url(chrome://theme/IDR_KIOSK_APP_USER_POD_ICON);
 }
 
+.fingerprint-icon-container.hidden {
+  display: none;
+}
+
+.fingerprint-icon-container.default .fingerprint-icon-image {
+  background-image: url(../../webui/resources/images/fingerprint_default.svg);
+}
+
+.fingerprint-icon-container.default:hover .fingerprint-icon-image {
+  background-image: url(../../webui/resources/images/fingerprint_signin.svg);
+}
+
+.fingerprint-icon-container.signin .fingerprint-icon-image {
+  background-image: url(../../webui/resources/images/fingerprint_signin.svg);
+}
+
+.fingerprint-icon-container.failed .fingerprint-icon-image {
+  background-image: url(../../webui/resources/images/fingerprint_failed.svg);
+}
+
+.pod input[type='password'].hidden::-webkit-input-placeholder {
+  color: grey;
+}
+
+.pod input[type='password'].default::-webkit-input-placeholder {
+  color: grey;
+}
+
+.pod input[type='password'].signin::-webkit-input-placeholder {
+  color: var(--google-blue-500);
+}
+
+.pod input[type='password'].failed::-webkit-input-placeholder {
+  color: var(--google-red-500);
+}
+
 .action-box-menu {
   display: none;
   z-index: 6;
@@ -667,8 +707,7 @@ html[dir=rtl] .action-box-area.active ~ .action-box-menu {
 .pod.legacy-supervised .action-box-remove-non-owner-user-warning-text,
 .pod:not(.legacy-supervised)
     .action-box-remove-legacy-supervised-user-warning-text,
-.pod.synced .non-sync,
-.pod.has-no-stats .has-stats {
+.pod.synced .non-sync {
   display: none;
 }
 

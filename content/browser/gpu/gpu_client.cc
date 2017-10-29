@@ -41,7 +41,22 @@ void GpuClient::OnError() {
 void GpuClient::OnEstablishGpuChannel(
     const EstablishGpuChannelCallback& callback,
     const IPC::ChannelHandle& channel,
-    const gpu::GPUInfo& gpu_info) {
+    const gpu::GPUInfo& gpu_info,
+    GpuProcessHost::EstablishChannelStatus status) {
+  if (status == GpuProcessHost::EstablishChannelStatus::GPU_ACCESS_DENIED) {
+    // GPU access is not allowed. Notify the client immediately.
+    DCHECK(!channel.mojo_handle.is_valid());
+    callback.Run(render_process_id_, mojo::ScopedMessagePipeHandle(), gpu_info);
+    return;
+  }
+
+  if (status == GpuProcessHost::EstablishChannelStatus::GPU_HOST_INVALID) {
+    // GPU process may have crashed or been killed. Try again.
+    DCHECK(!channel.mojo_handle.is_valid());
+    EstablishGpuChannel(callback);
+    return;
+  }
+  DCHECK(channel.mojo_handle.is_valid());
   mojo::ScopedMessagePipeHandle channel_handle;
   channel_handle.reset(channel.mojo_handle);
   callback.Run(render_process_id_, std::move(channel_handle), gpu_info);
@@ -55,10 +70,11 @@ void GpuClient::OnCreateGpuMemoryBuffer(
 
 void GpuClient::EstablishGpuChannel(
     const EstablishGpuChannelCallback& callback) {
-  GpuProcessHost* host =
-      GpuProcessHost::Get(GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED);
+  GpuProcessHost* host = GpuProcessHost::Get();
   if (!host) {
-    OnEstablishGpuChannel(callback, IPC::ChannelHandle(), gpu::GPUInfo());
+    OnEstablishGpuChannel(
+        callback, IPC::ChannelHandle(), gpu::GPUInfo(),
+        GpuProcessHost::EstablishChannelStatus::GPU_ACCESS_DENIED);
     return;
   }
 
@@ -72,6 +88,20 @@ void GpuClient::EstablishGpuChannel(
       preempts, allow_view_command_buffers, allow_real_time_streams,
       base::Bind(&GpuClient::OnEstablishGpuChannel, weak_factory_.GetWeakPtr(),
                  callback));
+}
+
+void GpuClient::CreateJpegDecodeAccelerator(
+    media::mojom::GpuJpegDecodeAcceleratorRequest jda_request) {
+  GpuProcessHost* host = GpuProcessHost::Get();
+  if (host)
+    host->gpu_service()->CreateJpegDecodeAccelerator(std::move(jda_request));
+}
+
+void GpuClient::CreateVideoEncodeAccelerator(
+    media::mojom::VideoEncodeAcceleratorRequest vea_request) {
+  GpuProcessHost* host = GpuProcessHost::Get();
+  if (host)
+    host->gpu_service()->CreateVideoEncodeAccelerator(std::move(vea_request));
 }
 
 void GpuClient::CreateGpuMemoryBuffer(

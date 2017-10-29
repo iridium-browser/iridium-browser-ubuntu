@@ -29,8 +29,8 @@
 #ifndef InspectorOverlayHost_h
 #define InspectorOverlayHost_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -40,24 +40,22 @@ class CORE_EXPORT InspectorOverlayHost final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static InspectorOverlayHost* create() { return new InspectorOverlayHost(); }
+  class Listener : public GarbageCollectedMixin {
+   public:
+    virtual ~Listener() {}
+    virtual void OverlayResumed() = 0;
+    virtual void OverlaySteppedOver() = 0;
+  };
+
+  explicit InspectorOverlayHost(Listener*);
   DECLARE_TRACE();
 
   void resume();
   void stepOver();
-
-  class Listener : public GarbageCollectedMixin {
-   public:
-    virtual ~Listener() {}
-    virtual void overlayResumed() = 0;
-    virtual void overlaySteppedOver() = 0;
-  };
-  void setListener(Listener* listener) { m_listener = listener; }
+  void ClearListener();
 
  private:
-  InspectorOverlayHost();
-
-  Member<Listener> m_listener;
+  Member<Listener> listener_;
 };
 
 }  // namespace blink

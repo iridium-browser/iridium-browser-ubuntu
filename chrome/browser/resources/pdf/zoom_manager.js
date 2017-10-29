@@ -86,13 +86,13 @@ class ZoomManager {
     // due to floating point error.
     return Math.abs(a - b) <= MIN_ZOOM_DELTA;
   }
-};
+}
 
 /**
  * InactiveZoomManager has no control over the browser's zoom
  * and does not respond to browser zoom changes.
  */
-class InactiveZoomManager extends ZoomManager {};
+class InactiveZoomManager extends ZoomManager {}
 
 /**
  * ActiveZoomManager controls the browser's zoom.
@@ -145,16 +145,16 @@ class ActiveZoomManager extends ZoomManager {
     if (this.floatingPointEquals(this.browserZoom_, zoom))
       return;
 
-    this.changingBrowserZoom_ = this.setBrowserZoomFunction_(zoom).then(
-        function() {
-      this.browserZoom_ = zoom;
-      this.changingBrowserZoom_ = null;
+    this.changingBrowserZoom_ =
+        this.setBrowserZoomFunction_(zoom).then(function() {
+          this.browserZoom_ = zoom;
+          this.changingBrowserZoom_ = null;
 
-      // The extension's zoom level may have changed while the browser zoom
-      // change was in progress. We call back into onPdfZoomChange to ensure the
-      // browser zoom is up to date.
-      this.onPdfZoomChange();
-    }.bind(this));
+          // The extension's zoom level may have changed while the browser zoom
+          // change was in progress. We call back into onPdfZoomChange to ensure
+          // the browser zoom is up to date.
+          this.onPdfZoomChange();
+        }.bind(this));
   }
 
   /**
@@ -180,7 +180,7 @@ class ActiveZoomManager extends ZoomManager {
     // internal zoom is the total zoom.
     return totalZoom;
   }
-};
+}
 
 /**
  * This EmbeddedZoomManager responds to changes in the browser zoom,
@@ -196,4 +196,4 @@ class EmbeddedZoomManager extends ZoomManager {
     this.browserZoom_ = newZoom;
     this.viewport_.updateZoomFromBrowserChange(oldZoom);
   }
-};
+}

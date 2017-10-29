@@ -39,22 +39,27 @@ def TrivialContextManager():
 
 
 def SetupTsMonGlobalState(service_name,
-                          short_lived=False,
                           indirect=False,
+                          suppress_exception=True,
+                          short_lived=False,
                           auto_flush=True,
-                          debug_file=None):
+                          debug_file=None,
+                          task_num=0):
   """Uses a dummy argument parser to get the default behavior from ts-mon.
 
   Args:
     service_name: The name of the task we are sending metrics from.
-    short_lived: Whether this process is short-lived and should use the autogen
-                 hostname prefix.
     indirect: Whether to create a metrics.METRICS_QUEUE object and a separate
               process for indirect metrics flushing. Useful for forking,
               because forking would normally create a duplicate ts_mon thread.
+    suppress_exception: True to silence any exception during the setup. Default
+                        is set to True.
+    short_lived: Whether this process is short-lived and should use the autogen
+                 hostname prefix.
     auto_flush: Whether to create a thread to automatically flush metrics every
                 minute.
     debug_file: If non-none, send metrics to this path instead of to PubSub.
+    task_num: (Default 0) The task_num target field of the metrics to emit.
   """
   if not config:
     return TrivialContextManager()
@@ -68,6 +73,37 @@ def SetupTsMonGlobalState(service_name,
   googleapiclient.discovery.logger.setLevel(logging.WARNING)
   parser = argparse.ArgumentParser()
   config.add_argparse_options(parser)
+  args = GenerateTsMonArgparseOptions(
+      service_name, short_lived, auto_flush, debug_file, task_num)
+
+  try:
+    config.process_argparse_options(parser.parse_args(args=args))
+    logging.notice('ts_mon was set up.')
+    global _WasSetup  # pylint: disable=global-statement
+    _WasSetup = True
+  except Exception as e:
+    logging.warning('Failed to configure ts_mon, monitoring is disabled: %s', e,
+                    exc_info=True)
+    if not suppress_exception:
+      raise
+
+
+  return TrivialContextManager()
+
+
+def GenerateTsMonArgparseOptions(service_name, short_lived,
+                                 auto_flush, debug_file, task_num):
+  """Generates an arg list for ts-mon to consume.
+
+  Args:
+    service_name: The name of the task we are sending metrics from.
+    short_lived: Whether this process is short-lived and should use the autogen
+                 hostname prefix.
+    auto_flush: Whether to create a thread to automatically flush metrics every
+                minute.
+    debug_file: If non-none, send metrics to this path instead of to PubSub.
+    task_num: Override the default task num of 0.
+  """
   args = [
       '--ts-mon-target-type', 'task',
       '--ts-mon-task-service-name', service_name,
@@ -89,21 +125,11 @@ def SetupTsMonGlobalState(service_name,
     host = fqdn.split('.')[0]
     args.extend(['--ts-mon-task-hostname', 'autogen:' + host,
                  '--ts-mon-task-number', str(os.getpid())])
+  elif task_num:
+    args.extend(['--ts-mon-task-number', task_num])
 
   args.extend(['--ts-mon-flush', 'auto' if auto_flush else 'manual'])
-
-  try:
-    config.process_argparse_options(parser.parse_args(args=args))
-    logging.notice('ts_mon was set up.')
-    global _WasSetup  # pylint: disable=global-statement
-    _WasSetup = True
-  except Exception as e:
-    logging.warning('Failed to configure ts_mon, monitoring is disabled: %s', e,
-                    exc_info=True)
-
-
-  return TrivialContextManager()
-
+  return args
 
 @contextlib.contextmanager
 def _CreateTsMonFlushingProcess(setup_args, setup_kwargs):
@@ -125,15 +151,16 @@ def _CreateTsMonFlushingProcess(setup_args, setup_kwargs):
   """
   # If this is nested, we don't need to create another queue and another
   # message consumer. Do nothing to continue to use the existing queue.
-  if metrics.MESSAGE_QUEUE:
+  if metrics.MESSAGE_QUEUE or metrics.FLUSHING_PROCESS:
     return
 
   with parallel.Manager() as manager:
     message_q = manager.Queue()
 
-    p = multiprocessing.Process(
-        target=lambda: _ConsumeMessages(message_q, setup_args, setup_kwargs))
-    p.start()
+    metrics.FLUSHING_PROCESS = multiprocessing.Process(
+        target=lambda: _SetupAndConsumeMessages(
+            message_q, setup_args, setup_kwargs))
+    metrics.FLUSHING_PROCESS.start()
 
     # this makes the chromite.lib.metric functions use the queue.
     # note - we have to do this *after* forking the ConsumeMessages process.
@@ -142,124 +169,157 @@ def _CreateTsMonFlushingProcess(setup_args, setup_kwargs):
     try:
       yield message_q
     finally:
-      # Now that there is no longer a process to listen to the Queue, re-set it
-      # to None so that any future metrics are created within this process.
-      metrics.MESSAGE_QUEUE = None
-      # Send the sentinal value for "flush one more time and exit".
-      message_q.put(None)
-      logging.info("Waiting for ts_mon flushing process to finish...")
-      p.join(timeout=FLUSH_INTERVAL*2)
-      if p.is_alive():
-        p.terminate()
-      if p.exitcode:
-        logging.warning("ts_mon_config flushing process did not exit cleanly.")
-      logging.info("Finished waiting for ts_mon process.")
+      _CleanupMetricsFlushingProcess()
 
 
-def _WaitToFlush(last_flush, reset_after=()):
-  """Sleeps until the next time we can call metrics.Flush(), then flushes.
+def _CleanupMetricsFlushingProcess():
+  """Sends sentinal value to flushing process and .joins it."""
+  # Now that there is no longer a process to listen to the Queue, re-set it
+  # to None so that any future metrics are created within this process.
+  message_q = metrics.MESSAGE_QUEUE
+  flushing_process = metrics.FLUSHING_PROCESS
+  metrics.MESSAGE_QUEUE = None
+  metrics.FLUSHING_PROCESS = None
 
-  Args:
-    last_flush: timestamp of the last flush
-    reset_after: A list of metrics to reset after the flush.
-  """
-  time_delta = time.time() - last_flush
-  time.sleep(max(0, FLUSH_INTERVAL - time_delta))
-  metrics.Flush(reset_after=reset_after)
+  # If the process has already died, we don't need to try to clean it up.
+  if not flushing_process.is_alive():
+    return
 
+  # Send the sentinal value for "flush one more time and exit".
+  try:
+    message_q.put(None)
+  # If the flushing process quits, the message Queue can become full.
+  except IOError:
+    if not flushing_process.is_alive():
+      return
 
-def _FlushIfReady(pending, last_flush, reset_after=()):
-  """Call metrics.Flush() if we are ready and have pending metrics.
-
-  This allows us to only call flush every FLUSH_INTERVAL seconds.
-
-  Args:
-    pending: bool indicating whether there are pending metrics to flush.
-    last_flush: time stamp of the last time flush() was called.
-    reset_after: A list of metrics to reset after the flush.
-  """
-  now = time.time()
-  time_delta = now - last_flush
-  if time_delta > FLUSH_INTERVAL and pending:
-    last_flush = now
-    time_delta = 0
-    metrics.Flush(reset_after=reset_after)
-    pending = False
-  else:
-    pending = True
-
-  return pending, last_flush, time_delta
+  logging.info("Waiting for ts_mon flushing process to finish...")
+  flushing_process.join(timeout=FLUSH_INTERVAL*2)
+  if flushing_process.is_alive():
+    flushing_process.terminate()
+  if flushing_process.exitcode:
+    logging.warning("ts_mon_config flushing process did not exit cleanly.")
+  logging.info("Finished waiting for ts_mon process.")
 
 
-def _MethodCallRepr(obj, method, args, kwargs):
-  """Gives a string representation of |obj|.|method|(*|args|, **|kwargs|)
+def _SetupAndConsumeMessages(message_q, setup_args, setup_kwargs):
+  """Sets up ts-mon, and starts a MetricConsumer loop.
 
   Args:
-    obj: An object
-    method: A method name
-    args: A list of arguments
-    kwargs: A dict of keyword arguments
+    message_q: The metric multiprocessing.Queue to read from.
+    setup_args: The args to pass SetupTsMonGlobalState.
+    setup_kwargs: The kwargs to pass SetupTsMonGlobalState.
   """
-  args_strings = (map(repr, args) +
-                  [(str(k) + '=' + repr(v))
-                   for (k, v) in kwargs.iteritems()])
-  return '%s.%s(%s)' % (repr(obj), method, ', '.join(args_strings))
-
-
-def _ConsumeMessages(message_q, setup_args, setup_kwargs):
-  """Configures ts_mon and gets metrics from a message queue.
-
-  Args:
-    message_q: A multiprocessing.Queue to read metrics from.
-    setup_args: Arguments to pass to SetupTsMonGlobalState.
-    setup_kwargs: Keyword arguments to pass to SetupTsMonGlobalState.
-  """
-
-  last_flush = 0
-  pending = False
-
-  # If our parent dies, finish flushing before exiting.
-  reset_after = []
-  if parallel.ExitWithParent(signal.SIGHUP):
-    signal.signal(signal.SIGHUP,
-                  lambda _sig, _stack: _WaitToFlush(last_flush,
-                                                    reset_after=reset_after))
-
   # Configure ts-mon, but don't start up a sending thread.
   setup_kwargs['auto_flush'] = False
   SetupTsMonGlobalState(*setup_args, **setup_kwargs)
+  if not _WasSetup:
+    return
 
-  message = message_q.get()
-  while message:
+  return MetricConsumer(message_q).Consume()
+
+
+
+class MetricConsumer(object):
+  """Configures ts_mon and gets metrics from a message queue.
+
+  This class is meant to be used in a subprocess. It configures itself
+  to receive a SIGHUP signal when the parent process dies, and catches the
+  signal in order to have a chance to flush any pending metrics one more time
+  before quitting.
+  """
+  def __init__(self, message_q):
+    # If our parent dies, finish flushing before exiting.
+    self.reset_after_flush = []
+    self.last_flush = 0
+    self.pending = False
+    self.message_q = message_q
+
+    if parallel.ExitWithParent(signal.SIGHUP):
+      signal.signal(signal.SIGHUP, lambda _sig, _stack: self._WaitToFlush())
+
+
+  def Consume(self):
+    """Emits metrics from self.message_q, flushing periodically.
+
+    The loop is terminated by a None entry on the Queue, which is a friendly
+    signal from the parent process that it's time to shut down. Before
+    returning, we wait to flush one more time to make sure that all the
+    metrics were sent.
+    """
+    message = self.message_q.get()
+    while message:
+      self._CallMetric(message)
+      message = self._WaitForNextMessage()
+
+    if self.pending:
+      self._WaitToFlush()
+
+
+  def _CallMetric(self, message):
+    """Calls the metric method from |message|, ignoring exceptions."""
     try:
       cls = getattr(metrics, message.metric_name)
       metric = cls(*message.metric_args, **message.metric_kwargs)
       if message.reset_after:
-        reset_after.append(metric)
+        self.reset_after_flush.append(metric)
       getattr(metric, message.method)(
           *message.method_args,
           **message.method_kwargs)
+      self.pending = True
     except Exception:
       logging.exception('Caught an exception while running %s',
-                        _MethodCallRepr(message.metric_name,
-                                        message.method,
-                                        message.method_args,
-                                        message.method_kwargs))
+                        _MethodCallRepr(message))
 
-    pending, last_flush, time_delta = _FlushIfReady(True, last_flush,
-                                                    reset_after=reset_after)
 
-    try:
-      # Only wait until the next flush time if we have pending metrics.
-      timeout = FLUSH_INTERVAL - time_delta if pending else None
-      message = message_q.get(timeout=timeout)
-    except Queue.Empty:
-      # We had pending metrics, but we didn't get a new message. Flush and wait
-      # indefinitely.
-      pending, last_flush, _ = _FlushIfReady(pending, last_flush,
-                                             reset_after=reset_after)
-      # Wait as long as we need to for the next metric.
-      message = message_q.get()
+  def _WaitForNextMessage(self):
+    """Waits for a new message, flushing every |FLUSH_INTERVAL| seconds."""
+    while True:
+      time_delta = self._FlushIfReady()
+      try:
+        timeout = FLUSH_INTERVAL - time_delta
+        message = self.message_q.get(timeout=timeout)
+        return message
+      except Queue.Empty:
+        pass
 
-  if pending:
-    _WaitToFlush(last_flush, reset_after=reset_after)
+
+  def _WaitToFlush(self):
+    """Sleeps until the next time we can call metrics.Flush(), then flushes."""
+    time_delta = time.time() - self.last_flush
+    time.sleep(max(0, FLUSH_INTERVAL - time_delta))
+    metrics.Flush(reset_after=self.reset_after_flush)
+
+
+  def _FlushIfReady(self):
+    """Call metrics.Flush() if we are ready and have pending metrics.
+
+    This allows us to only call flush every FLUSH_INTERVAL seconds.
+    """
+    now = time.time()
+    time_delta = now - self.last_flush
+    if time_delta > FLUSH_INTERVAL:
+      self.last_flush = now
+      time_delta = 0
+      metrics.Flush(reset_after=self.reset_after_flush)
+      self.pending = False
+    return time_delta
+
+
+def _MethodCallRepr(message):
+  """Gives a string representation of |obj|.|method|(*|args|, **|kwargs|)
+
+  Args:
+    message: A MetricCall object.
+  """
+  if not message:
+    return repr(message)
+  obj = message.metric_name,
+  method = message.method,
+  args = message.method_args,
+  kwargs = message.method_kwargs
+
+  args_strings = (map(repr, args) +
+                  [(str(k) + '=' + repr(v))
+                   for k, v in kwargs.iteritems()])
+  return '%s.%s(%s)' % (repr(obj), method, ', '.join(args_strings))

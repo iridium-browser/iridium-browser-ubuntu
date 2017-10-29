@@ -21,13 +21,47 @@ Polymer({
     },
 
     /**
-     * Note taking apps the user can pick between.
-     * @type {Array<{name:string, value:string, preferred:boolean}>}
+     * Policy indicator type for user policy - used for policy indicator UI
+     * shown when an app that is not allowed to run on lock screen by policy is
+     * selected.
+     * @const {CrPolicyIndicatorType}
      * @private
+     */
+    userPolicyIndicator_: {
+      type: String,
+      value: CrPolicyIndicatorType.USER_POLICY,
+    },
+
+    /**
+     * Note taking apps the user can pick between.
+     * @private {Array<!settings.NoteAppInfo>}
      */
     appChoices_: {
       type: Array,
-      value: function() { return []; }
+      value: function() {
+        return [];
+      }
+    },
+
+    /**
+     * True if the device has an internal stylus.
+     * @private
+     */
+    hasInternalStylus_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('hasInternalStylus');
+      },
+      readOnly: true,
+    },
+
+    /**
+     * Currently selected note taking app.
+     * @private {?settings.NoteAppInfo}
+     */
+    selectedApp_: {
+      type: Object,
+      value: null,
     },
 
     /**
@@ -36,41 +70,114 @@ Polymer({
      */
     waitingForAndroid_: {
       type: Boolean,
-      value: false
+      value: false,
     },
   },
 
+  /**
+   * @return {boolean} Whether note taking from the lock screen is supported
+   *     by the selected note-taking app.
+   * @private
+   */
+  supportsLockScreen_: function() {
+    return !!this.selectedApp_ &&
+        this.selectedApp_.lockScreenSupport !=
+        settings.NoteAppLockScreenSupport.NOT_SUPPORTED;
+  },
+
+  /**
+   * @return {boolean} Whether the selected app is disallowed to handle note
+   *     actions from lock screen as a result of a user policy.
+   * @private
+   */
+  disallowedOnLockScreenByPolicy_: function() {
+    return !!this.selectedApp_ &&
+        this.selectedApp_.lockScreenSupport ==
+        settings.NoteAppLockScreenSupport.NOT_ALLOWED_BY_POLICY;
+  },
+
+  /**
+   * @return {boolean} Whether the selected app is enabled as a note action
+   *     handler on the lock screen.
+   * @private
+   */
+  lockScreenSupportEnabled_: function() {
+    return !!this.selectedApp_ &&
+        this.selectedApp_.lockScreenSupport ==
+        settings.NoteAppLockScreenSupport.ENABLED;
+  },
 
   /** @private {?settings.DevicePageBrowserProxy} */
   browserProxy_: null,
 
+  /** @override */
   created: function() {
     this.browserProxy_ = settings.DevicePageBrowserProxyImpl.getInstance();
   },
 
+  /** @override */
   ready: function() {
     this.browserProxy_.setNoteTakingAppsUpdatedCallback(
         this.onNoteAppsUpdated_.bind(this));
     this.browserProxy_.requestNoteTakingApps();
   },
 
-  /** @private */
-  onSelectedAppChanged_: function() {
-    this.browserProxy_.setPreferredNoteTakingApp(this.$.menu.value);
+  /**
+   * Finds note app info with the provided app id.
+   * @param {!string} id
+   * @return {?settings.NoteAppInfo}
+   * @private
+   */
+  findApp_: function(id) {
+    return this.appChoices_.find(function(app) {
+      return app.value == id;
+    }) ||
+        null;
   },
 
   /**
-   * @param {Array<settings.NoteAppInfo>} apps
+   * Toggles whether the selected app is enabled as a note action handler on
+   * the lock screen.
+   * @private
+   */
+  toggleLockScreenSupport_: function() {
+    assert(!!this.selectedApp_);
+    if (this.selectedApp_.lockScreenSupport !=
+            settings.NoteAppLockScreenSupport.ENABLED &&
+        this.selectedApp_.lockScreenSupport !=
+            settings.NoteAppLockScreenSupport.SUPPORTED) {
+      return;
+    }
+
+    this.browserProxy_.setPreferredNoteTakingAppEnabledOnLockScreen(
+        this.selectedApp_.lockScreenSupport ==
+        settings.NoteAppLockScreenSupport.SUPPORTED);
+  },
+
+  /** @private */
+  onSelectedAppChanged_: function() {
+    var app = this.findApp_(this.$.menu.value);
+    this.selectedApp_ = app;
+
+    if (app && !app.preferred)
+      this.browserProxy_.setPreferredNoteTakingApp(app.value);
+  },
+
+  /**
+   * @param {Array<!settings.NoteAppInfo>} apps
    * @param {boolean} waitingForAndroid
    * @private
    */
   onNoteAppsUpdated_: function(apps, waitingForAndroid) {
     this.waitingForAndroid_ = waitingForAndroid;
     this.appChoices_ = apps;
+
+    // Wait until app selection UI is updated before setting the selected app.
+    this.async(this.onSelectedAppChanged_.bind(this));
   },
 
   /**
-   * @param {Array<settings.NoteAppInfo>} apps
+   * @param {Array<!settings.NoteAppInfo>} apps
    * @param {boolean} waitingForAndroid
    * @private
    */
@@ -79,7 +186,7 @@ Polymer({
   },
 
   /**
-   * @param {Array<settings.NoteAppInfo>} apps
+   * @param {Array<!settings.NoteAppInfo>} apps
    * @param {boolean} waitingForAndroid
    * @private
    */

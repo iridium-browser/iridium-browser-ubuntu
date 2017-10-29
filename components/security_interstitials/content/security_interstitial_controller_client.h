@@ -40,16 +40,18 @@ class SecurityInterstitialControllerClient
 
   // security_interstitials::ControllerClient overrides.
   void GoBack() override;
+  bool CanGoBack() override;
   void GoBackAfterNavigationCommitted() override;
   void Proceed() override;
   void Reload() override;
   void OpenUrlInCurrentTab(const GURL& url) override;
+  void OpenUrlInNewForegroundTab(const GURL& url) override;
   PrefService* GetPrefService() override;
   const std::string& GetApplicationLocale() const override;
   bool CanLaunchDateAndTimeSettings() override;
   void LaunchDateAndTimeSettings() override;
 
-protected:
+ protected:
   // security_interstitials::ControllerClient overrides.
   const std::string GetExtendedReportingPrefName() const override;
   content::WebContents* web_contents_;

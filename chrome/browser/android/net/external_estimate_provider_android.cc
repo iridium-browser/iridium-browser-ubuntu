@@ -6,7 +6,6 @@
 
 #include <stdint.h>
 
-#include "base/android/context_utils.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "content/public/browser/browser_thread.h"
@@ -26,8 +25,7 @@ ExternalEstimateProviderAndroid::ExternalEstimateProviderAndroid()
   JNIEnv* env = base::android::AttachCurrentThread();
   j_external_estimate_provider_.Reset(
       Java_ExternalEstimateProviderAndroid_create(
-          env, base::android::GetApplicationContext(),
-          reinterpret_cast<intptr_t>(this)));
+          env, reinterpret_cast<intptr_t>(this)));
   DCHECK(!j_external_estimate_provider_.is_null());
   no_value_ = Java_ExternalEstimateProviderAndroid_getNoValue(env);
 }
@@ -143,10 +141,6 @@ void ExternalEstimateProviderAndroid::NotifyUpdatedEstimateAvailable() const {
     delegate_->OnUpdatedEstimateAvailable(rtt, downstream_throughput_kbps,
                                           upstream_throughput_kbps);
   }
-}
-
-bool RegisterExternalEstimateProviderAndroid(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace android

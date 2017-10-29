@@ -8,14 +8,22 @@
 #include "base/mac/mac_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
 #include "chrome/browser/ui/autofill/autofill_popup_layout_model.h"
 #include "chrome/browser/ui/cocoa/autofill/autofill_popup_view_bridge.h"
+#import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
+#import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
+#import "chrome/browser/ui/cocoa/web_textfield_touch_bar_controller.h"
+#include "components/autofill/core/browser/autofill_experiments.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
 #include "components/autofill/core/browser/suggestion.h"
+#include "components/grit/components_scaled_resources.h"
 #include "components/toolbar/vector_icons.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkColor.h"
+#import "ui/base/cocoa/touch_bar_util.h"
 #include "ui/base/cocoa/window_size_constants.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_palette.h"
@@ -31,6 +39,33 @@
 using autofill::AutofillPopupView;
 using autofill::AutofillPopupLayoutModel;
 
+namespace {
+
+// Touch bar identifier.
+NSString* const kCreditCardAutofillTouchBarId = @"credit-card-autofill";
+
+// Touch bar items identifiers.
+NSString* const kCreditCardTouchId = @"CREDIT-CARD";
+NSString* const kCreditCardItemsTouchId = @"CREDIT-CARD-ITEMS";
+
+// Returns the credit card image.
+NSImage* GetCreditCardTouchBarImage(int iconId) {
+  if (iconId == -1)
+    return nil;
+
+  // If it's a generic card image, use the vector icon instead.
+  if (iconId == IDR_AUTOFILL_CC_GENERIC) {
+    return NSImageFromImageSkia(
+        gfx::CreateVectorIcon(kCreditCardIcon, 16, SK_ColorWHITE));
+  }
+
+  return ResourceBundle::GetSharedInstance()
+      .GetNativeImageNamed(iconId)
+      .AsNSImage();
+}
+
+}  // namespace
+
 @interface AutofillPopupViewCocoa ()
 
 #pragma mark -
@@ -42,7 +77,7 @@ using autofill::AutofillPopupLayoutModel;
 // if the row requires it -- such as for credit cards.
 - (void)drawSuggestionWithName:(NSString*)name
                        subtext:(NSString*)subtext
-                         index:(size_t)index
+                         index:(NSInteger)index
                         bounds:(NSRect)bounds
                       selected:(BOOL)isSelected
                    textYOffset:(CGFloat)textYOffset;
@@ -56,24 +91,26 @@ using autofill::AutofillPopupLayoutModel;
 //   Returns the x value of right border of the widget.
 - (CGFloat)drawName:(NSString*)name
                 atX:(CGFloat)x
-              index:(size_t)index
+              index:(NSInteger)index
          rightAlign:(BOOL)rightAlign
              bounds:(NSRect)bounds
         textYOffset:(CGFloat)textYOffset;
-- (CGFloat)drawIconAtIndex:(size_t)index
+- (CGFloat)drawIconAtIndex:(NSInteger)index
                        atX:(CGFloat)x
                 rightAlign:(BOOL)rightAlign
                     bounds:(NSRect)bounds;
 - (CGFloat)drawSubtext:(NSString*)subtext
                    atX:(CGFloat)x
-                 index:(size_t)index
+                 index:(NSInteger)index
             rightAlign:(BOOL)rightAlign
                 bounds:(NSRect)bounds
            textYOffset:(CGFloat)textYOffset;
 
 // Returns the icon for the row with the given |index|, or |nil| if there is
 // none.
-- (NSImage*)iconAtIndex:(size_t)index;
+- (NSImage*)iconAtIndex:(NSInteger)index;
+
+- (NSColor*)touchBarSubtextColor;
 
 @end
 
@@ -109,7 +146,7 @@ using autofill::AutofillPopupLayoutModel;
 
   [self drawBackgroundAndBorder];
 
-  for (size_t i = 0; i < controller_->GetLineCount(); ++i) {
+  for (int i = 0; i < controller_->GetLineCount(); ++i) {
     // Skip rows outside of the dirty rect.
     NSRect rowBounds = NSRectFromCGRect(delegate_->GetRowBounds(i).ToCGRect());
     if (!NSIntersectsRect(rowBounds, dirtyRect))
@@ -126,7 +163,8 @@ using autofill::AutofillPopupLayoutModel;
 
     NSString* value = SysUTF16ToNSString(controller_->GetElidedValueAt(i));
     NSString* label = SysUTF16ToNSString(controller_->GetElidedLabelAt(i));
-    BOOL isSelected = static_cast<int>(i) == controller_->selected_line();
+    BOOL isSelected =
+        controller_->selected_line() && i == *controller_->selected_line();
     [self drawSuggestionWithName:value
                          subtext:label
                            index:i
@@ -134,6 +172,87 @@ using autofill::AutofillPopupLayoutModel;
                         selected:isSelected
                      textYOffset:textYOffset];
   }
+}
+
+#pragma mark -
+#pragma mark NSTouchBarDelegate implementation:
+
+- (NSTouchBarItem*)touchBar:(NSTouchBar*)touchBar
+      makeItemForIdentifier:(NSTouchBarItemIdentifier)identifier
+    API_AVAILABLE(macos(10.12.2)) {
+  if (![identifier hasSuffix:kCreditCardItemsTouchId])
+    return nil;
+
+  NSMutableArray* creditCardItems = [NSMutableArray array];
+  for (int i = 0; i < controller_->GetLineCount(); i++) {
+    const autofill::Suggestion& suggestion = controller_->GetSuggestionAt(i);
+    if (suggestion.frontend_id < autofill::POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY)
+      continue;
+
+    NSString* identifier = [NSString
+        stringWithFormat:@"%@-%i",
+                         ui::GetTouchBarItemId(kCreditCardAutofillTouchBarId,
+                                               kCreditCardTouchId),
+                         i];
+
+    base::scoped_nsobject<NSCustomTouchBarItem> item(
+        [[ui::NSCustomTouchBarItem() alloc] initWithIdentifier:identifier]);
+    NSString* label = SysUTF16ToNSString(controller_->GetElidedValueAt(i));
+    NSString* subtext = SysUTF16ToNSString(controller_->GetElidedLabelAt(i));
+
+    // Create the button title based on the text direction.
+    NSString* buttonTitle =
+        [subtext length] ? [NSString stringWithFormat:@"%@ %@", label, subtext]
+                         : label;
+
+    // Create the button.
+    NSImage* cardIconImage = GetCreditCardTouchBarImage(
+        controller_->layout_model().GetIconResourceID(suggestion.icon));
+    NSButton* button = nil;
+    if (cardIconImage) {
+      button = [NSButton buttonWithTitle:buttonTitle
+                                   image:cardIconImage
+                                  target:self
+                                  action:@selector(acceptCreditCard:)];
+      button.imageHugsTitle = YES;
+      button.imagePosition = controller_->IsRTL() ? NSImageLeft : NSImageRight;
+    } else {
+      button = [NSButton buttonWithTitle:buttonTitle
+                                  target:self
+                                  action:@selector(acceptCreditCard:)];
+    }
+
+    // Apply text attributes to the button so that the subtext will appear
+    // smaller and lighter than the rest of the title.
+    base::scoped_nsobject<NSMutableAttributedString> attributedString(
+        [[NSMutableAttributedString alloc]
+            initWithAttributedString:button.attributedTitle]);
+    NSFont* subtextFont = [[NSFontManager sharedFontManager]
+        convertFont:button.font
+             toSize:button.font.pointSize - 1];
+    NSRange labelRange = NSMakeRange(0, label.length);
+    NSRange subtextRange =
+        NSMakeRange(buttonTitle.length - subtext.length, subtext.length);
+    [attributedString addAttribute:NSForegroundColorAttributeName
+                             value:[NSColor whiteColor]
+                             range:labelRange];
+    [attributedString addAttribute:NSForegroundColorAttributeName
+                             value:[self touchBarSubtextColor]
+                             range:subtextRange];
+    [attributedString addAttribute:NSFontAttributeName
+                             value:subtextFont
+                             range:subtextRange];
+    button.attributedTitle = attributedString;
+
+    // The tag is used to store the suggestion index.
+    button.tag = i;
+
+    [item setView:button];
+    [creditCardItems addObject:item.autorelease()];
+  }
+
+  return [ui::NSGroupTouchBarItem() groupItemWithIdentifier:identifier
+                                                      items:creditCardItems];
 }
 
 #pragma mark -
@@ -146,9 +265,41 @@ using autofill::AutofillPopupLayoutModel;
   [super delegateDestroyed];
 }
 
-- (void)invalidateRow:(size_t)row {
+- (void)invalidateRow:(NSInteger)row {
   NSRect dirty_rect = NSRectFromCGRect(delegate_->GetRowBounds(row).ToCGRect());
   [self setNeedsDisplayInRect:dirty_rect];
+}
+
+- (NSTouchBar*)makeTouchBar {
+  if (!autofill::IsCreditCardAutofillTouchBarExperimentEnabled())
+    return nil;
+
+  if (!controller_->GetLineCount() ||
+      !controller_->layout_model().is_credit_card_popup()) {
+    return nil;
+  }
+
+  base::scoped_nsobject<NSTouchBar> touchBar([[ui::NSTouchBar() alloc] init]);
+  [touchBar setCustomizationIdentifier:ui::GetTouchBarId(
+                                           kCreditCardAutofillTouchBarId)];
+  [touchBar setDelegate:self];
+
+  [touchBar setDefaultItemIdentifiers:@[ kCreditCardItemsTouchId ]];
+  return touchBar.autorelease();
+}
+
+- (void)showPopup {
+  [super showPopup];
+
+  // The following code may show/update the touch bar by eventually calling
+  // into |makeTouchBar|.
+  BrowserWindowController* bwc = [BrowserWindowController
+      browserWindowControllerForWindow:[[self window] parentWindow]];
+  TabContentsController* tabContentsController =
+      [[bwc tabStripController] activeTabContentsController];
+  WebTextfieldTouchBarController* touchBarController =
+      [tabContentsController webTextfieldTouchBarController];
+  [touchBarController showCreditCardAutofillForPopupView:self];
 }
 
 #pragma mark -
@@ -156,7 +307,7 @@ using autofill::AutofillPopupLayoutModel;
 
 - (void)drawSuggestionWithName:(NSString*)name
                        subtext:(NSString*)subtext
-                         index:(size_t)index
+                         index:(NSInteger)index
                         bounds:(NSRect)bounds
                       selected:(BOOL)isSelected
                    textYOffset:(CGFloat)textYOffset {
@@ -211,7 +362,7 @@ using autofill::AutofillPopupLayoutModel;
 
 - (CGFloat)drawName:(NSString*)name
                 atX:(CGFloat)x
-              index:(size_t)index
+              index:(NSInteger)index
          rightAlign:(BOOL)rightAlign
              bounds:(NSRect)bounds
         textYOffset:(CGFloat)textYOffset {
@@ -236,7 +387,7 @@ using autofill::AutofillPopupLayoutModel;
   return x;
 }
 
-- (CGFloat)drawIconAtIndex:(size_t)index
+- (CGFloat)drawIconAtIndex:(NSInteger)index
                        atX:(CGFloat)x
                 rightAlign:(BOOL)rightAlign
                     bounds:(NSRect)bounds {
@@ -260,7 +411,7 @@ using autofill::AutofillPopupLayoutModel;
 
 - (CGFloat)drawSubtext:(NSString*)subtext
                    atX:(CGFloat)x
-                 index:(size_t)index
+                 index:(NSInteger)index
             rightAlign:(BOOL)rightAlign
                 bounds:(NSRect)bounds
            textYOffset:(CGFloat)textYOffset {
@@ -281,7 +432,7 @@ using autofill::AutofillPopupLayoutModel;
   return x;
 }
 
-- (NSImage*)iconAtIndex:(size_t)index {
+- (NSImage*)iconAtIndex:(NSInteger)index {
   const int kHttpWarningIconWidth = 16;
   const base::string16& icon = controller_->GetSuggestionAt(index).icon;
   if (icon.empty())
@@ -308,6 +459,18 @@ using autofill::AutofillPopupLayoutModel;
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   return rb.GetNativeImageNamed(iconId).ToNSImage();
+}
+
+- (NSColor*)touchBarSubtextColor {
+  return [NSColor colorWithCalibratedRed:180.0 / 255.0
+                                   green:180.0 / 255.0
+                                    blue:180.0 / 255.0
+                                   alpha:1.0];
+}
+
+- (void)acceptCreditCard:(id)sender {
+  ui::LogTouchBarUMA(ui::TouchBarAction::CREDIT_CARD_AUTOFILL);
+  controller_->AcceptSuggestion([sender tag]);
 }
 
 @end

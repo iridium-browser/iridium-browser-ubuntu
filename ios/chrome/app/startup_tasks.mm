@@ -6,10 +6,8 @@
 
 #import <MediaPlayer/MediaPlayer.h>
 
-#import "base/ios/weak_nsobject.h"
 #import "base/mac/bind_objc_block.h"
 #include "components/bookmarks/browser/startup_task_runner_service.h"
-#include "components/reading_list/core/reading_list_switches.h"
 #import "ios/chrome/app/deferred_initialization_runner.h"
 #include "ios/chrome/app/tests_hook.h"
 #include "ios/chrome/browser/application_context.h"
@@ -21,6 +19,10 @@
 #include "ios/chrome/browser/reading_list/reading_list_download_service_factory.h"
 #import "ios/chrome/browser/ui/main/browser_view_information.h"
 #import "ios/chrome/browser/upgrade/upgrade_center.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 // Constants for deferred initilization of the profile start-up task runners.
@@ -64,7 +66,7 @@ NSString* const kStartProfileStartupTaskRunners =
       GetApplicationContext()
           ->GetIOSChromeIOThread()
           ->system_url_request_context_getter(),
-      base::BindBlock(^(const UpgradeRecommendedDetails& details) {
+      base::BindBlockArc(^(const UpgradeRecommendedDetails& details) {
         [[UpgradeCenter sharedInstance] upgradeNotificationDidOccur:details];
       }));
 #endif  // defined(GOOGLE_CHROME_BUILD)
@@ -84,10 +86,8 @@ NSString* const kStartProfileStartupTaskRunners =
     (ios::ChromeBrowserState*)browserState {
   ios::StartupTaskRunnerServiceFactory::GetForBrowserState(browserState)
       ->StartDeferredTaskRunners();
-  if (reading_list::switches::IsReadingListEnabled()) {
-    ReadingListDownloadServiceFactory::GetForBrowserState(browserState)
-        ->Initialize();
-  }
+  ReadingListDownloadServiceFactory::GetForBrowserState(browserState)
+      ->Initialize();
 }
 
 - (void)applicationWillResignActiveNotification:(NSNotification*)notification {

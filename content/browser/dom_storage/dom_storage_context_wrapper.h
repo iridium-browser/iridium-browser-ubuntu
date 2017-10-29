@@ -77,6 +77,9 @@ class CONTENT_EXPORT DOMStorageContextWrapper :
   void OpenLocalStorage(const url::Origin& origin,
                         mojom::LevelDBWrapperRequest request);
 
+  void SetLocalStorageDatabaseForTesting(
+      leveldb::mojom::LevelDBDatabaseAssociatedPtr database);
+
  private:
   friend class DOMStorageMessageFilter;  // for access to context()
   friend class SessionStorageNamespaceImpl;  // ditto
@@ -95,12 +98,11 @@ class CONTENT_EXPORT DOMStorageContextWrapper :
 
   void PurgeMemory(DOMStorageContextImpl::PurgeOption purge_option);
 
-  void GotMojoLocalStorageUsage(GetLocalStorageUsageCallback callback,
-                                std::vector<LocalStorageUsageInfo> usage);
-
   // Keep all mojo-ish details together and not bleed them through the public
-  // interface.
-  std::unique_ptr<LocalStorageContextMojo> mojo_state_;
+  // interface. The |mojo_state_| object is owned by this object, but destroyed
+  // asynchronously on the |mojo_task_runner_|.
+  LocalStorageContextMojo* mojo_state_ = nullptr;
+  scoped_refptr<base::SingleThreadTaskRunner> mojo_task_runner_;
 
   // To receive memory pressure signals.
   std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;

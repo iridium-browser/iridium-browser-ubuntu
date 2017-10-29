@@ -8,10 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <assert.h>
 #include <math.h>
 #include <limits.h>
 
 #include "vp9/common/vp9_alloccommon.h"
+#include "vp9/common/vp9_common.h"
 #include "vp9/common/vp9_onyxc_int.h"
 #include "vp9/common/vp9_quant_common.h"
 #include "vp9/common/vp9_reconinter.h"
@@ -53,16 +55,19 @@ static void temporal_filter_predictors_mb_c(
 
 #if CONFIG_VP9_HIGHBITDEPTH
   if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
-    vp9_highbd_build_inter_predictor(y_mb_ptr, stride, &pred[0], 16, &mv, scale,
-                                     16, 16, which_mv, kernel, MV_PRECISION_Q3,
-                                     x, y, xd->bd);
+    vp9_highbd_build_inter_predictor(CONVERT_TO_SHORTPTR(y_mb_ptr), stride,
+                                     CONVERT_TO_SHORTPTR(&pred[0]), 16, &mv,
+                                     scale, 16, 16, which_mv, kernel,
+                                     MV_PRECISION_Q3, x, y, xd->bd);
 
-    vp9_highbd_build_inter_predictor(u_mb_ptr, uv_stride, &pred[256],
+    vp9_highbd_build_inter_predictor(CONVERT_TO_SHORTPTR(u_mb_ptr), uv_stride,
+                                     CONVERT_TO_SHORTPTR(&pred[256]),
                                      uv_block_width, &mv, scale, uv_block_width,
                                      uv_block_height, which_mv, kernel,
                                      mv_precision_uv, x, y, xd->bd);
 
-    vp9_highbd_build_inter_predictor(v_mb_ptr, uv_stride, &pred[512],
+    vp9_highbd_build_inter_predictor(CONVERT_TO_SHORTPTR(v_mb_ptr), uv_stride,
+                                     CONVERT_TO_SHORTPTR(&pred[512]),
                                      uv_block_width, &mv, scale, uv_block_width,
                                      uv_block_height, which_mv, kernel,
                                      mv_precision_uv, x, y, xd->bd);
@@ -89,15 +94,22 @@ void vp9_temporal_filter_init(void) {
   for (i = 1; i < 512; ++i) fixed_divide[i] = 0x80000 / i;
 }
 
-void vp9_temporal_filter_apply_c(uint8_t *frame1, unsigned int stride,
-                                 uint8_t *frame2, unsigned int block_width,
+void vp9_temporal_filter_apply_c(const uint8_t *frame1, unsigned int stride,
+                                 const uint8_t *frame2,
+                                 unsigned int block_width,
                                  unsigned int block_height, int strength,
-                                 int filter_weight, unsigned int *accumulator,
+                                 int filter_weight, uint32_t *accumulator,
                                  uint16_t *count) {
   unsigned int i, j, k;
   int modifier;
   int byte = 0;
   const int rounding = strength > 0 ? 1 << (strength - 1) : 0;
+
+  assert(strength >= 0);
+  assert(strength <= 6);
+
+  assert(filter_weight >= 0);
+  assert(filter_weight <= 2);
 
   for (i = 0, k = 0; i < block_height; i++) {
     for (j = 0; j < block_width; j++, k++) {
@@ -152,11 +164,11 @@ void vp9_temporal_filter_apply_c(uint8_t *frame1, unsigned int stride,
 
 #if CONFIG_VP9_HIGHBITDEPTH
 void vp9_highbd_temporal_filter_apply_c(
-    uint8_t *frame1_8, unsigned int stride, uint8_t *frame2_8,
+    const uint8_t *frame1_8, unsigned int stride, const uint8_t *frame2_8,
     unsigned int block_width, unsigned int block_height, int strength,
-    int filter_weight, unsigned int *accumulator, uint16_t *count) {
-  uint16_t *frame1 = CONVERT_TO_SHORTPTR(frame1_8);
-  uint16_t *frame2 = CONVERT_TO_SHORTPTR(frame2_8);
+    int filter_weight, uint32_t *accumulator, uint16_t *count) {
+  const uint16_t *frame1 = CONVERT_TO_SHORTPTR(frame1_8);
+  const uint16_t *frame2 = CONVERT_TO_SHORTPTR(frame2_8);
   unsigned int i, j, k;
   int modifier;
   int byte = 0;
@@ -225,6 +237,7 @@ static uint32_t temporal_filter_find_matching_mb_c(VP9_COMP *cpi,
   uint32_t distortion;
   uint32_t sse;
   int cost_list[5];
+  const MvLimits tmp_mv_limits = x->mv_limits;
 
   MV best_ref_mv1 = { 0, 0 };
   MV best_ref_mv1_full; /* full-pixel value of best_ref_mv1 */
@@ -245,9 +258,14 @@ static uint32_t temporal_filter_find_matching_mb_c(VP9_COMP *cpi,
   step_param = mv_sf->reduce_first_step_size;
   step_param = VPXMIN(step_param, MAX_MVSEARCH_STEPS - 2);
 
+  vp9_set_mv_search_range(&x->mv_limits, &best_ref_mv1);
+
   vp9_full_pixel_search(cpi, x, BLOCK_16X16, &best_ref_mv1_full, step_param,
                         search_method, sadpb, cond_cost_list(cpi, cost_list),
                         &best_ref_mv1, ref_mv, 0, 0);
+
+  /* restore UMV window */
+  x->mv_limits = tmp_mv_limits;
 
   // Ignore mv costing by sending NULL pointer instead of cost array
   bestsme = cpi->find_fractional_mv_step(
@@ -278,7 +296,7 @@ void vp9_temporal_filter_iterate_row_c(VP9_COMP *cpi, ThreadData *td,
   unsigned int filter_weight;
   int mb_cols = (frames[alt_ref_index]->y_crop_width + 15) >> 4;
   int mb_rows = (frames[alt_ref_index]->y_crop_height + 15) >> 4;
-  DECLARE_ALIGNED(16, unsigned int, accumulator[16 * 16 * 3]);
+  DECLARE_ALIGNED(16, uint32_t, accumulator[16 * 16 * 3]);
   DECLARE_ALIGNED(16, uint16_t, count[16 * 16 * 3]);
   MACROBLOCKD *mbd = &td->mb.e_mbd;
   YV12_BUFFER_CONFIG *f = frames[alt_ref_index];
@@ -325,8 +343,8 @@ void vp9_temporal_filter_iterate_row_c(VP9_COMP *cpi, ThreadData *td,
     int stride;
     MV ref_mv;
 
-    memset(accumulator, 0, 16 * 16 * 3 * sizeof(accumulator[0]));
-    memset(count, 0, 16 * 16 * 3 * sizeof(count[0]));
+    vp9_zero_array(accumulator, 16 * 16 * 3);
+    vp9_zero_array(count, 16 * 16 * 3);
 
     td->mb.mv_limits.col_min = -((mb_col * 16) + (17 - 2 * VP9_INTERP_EXTEND));
     td->mb.mv_limits.col_max =
@@ -369,45 +387,44 @@ void vp9_temporal_filter_iterate_row_c(VP9_COMP *cpi, ThreadData *td,
         if (mbd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
           int adj_strength = strength + 2 * (mbd->bd - 8);
           // Apply the filter (YUV)
-          vp9_highbd_temporal_filter_apply_c(
+          vp9_highbd_temporal_filter_apply(
               f->y_buffer + mb_y_offset, f->y_stride, predictor, 16, 16,
               adj_strength, filter_weight, accumulator, count);
-          vp9_highbd_temporal_filter_apply_c(
+          vp9_highbd_temporal_filter_apply(
               f->u_buffer + mb_uv_offset, f->uv_stride, predictor + 256,
               mb_uv_width, mb_uv_height, adj_strength, filter_weight,
               accumulator + 256, count + 256);
-          vp9_highbd_temporal_filter_apply_c(
+          vp9_highbd_temporal_filter_apply(
               f->v_buffer + mb_uv_offset, f->uv_stride, predictor + 512,
               mb_uv_width, mb_uv_height, adj_strength, filter_weight,
               accumulator + 512, count + 512);
         } else {
           // Apply the filter (YUV)
-          vp9_temporal_filter_apply_c(f->y_buffer + mb_y_offset, f->y_stride,
-                                      predictor, 16, 16, strength,
-                                      filter_weight, accumulator, count);
-          vp9_temporal_filter_apply_c(f->u_buffer + mb_uv_offset, f->uv_stride,
-                                      predictor + 256, mb_uv_width,
-                                      mb_uv_height, strength, filter_weight,
-                                      accumulator + 256, count + 256);
-          vp9_temporal_filter_apply_c(f->v_buffer + mb_uv_offset, f->uv_stride,
-                                      predictor + 512, mb_uv_width,
-                                      mb_uv_height, strength, filter_weight,
-                                      accumulator + 512, count + 512);
-        }
-#else
-        // Apply the filter (YUV)
-        // TODO(jingning): Need SIMD optimization for this.
-        vp9_temporal_filter_apply_c(f->y_buffer + mb_y_offset, f->y_stride,
+          vp9_temporal_filter_apply(f->y_buffer + mb_y_offset, f->y_stride,
                                     predictor, 16, 16, strength, filter_weight,
                                     accumulator, count);
-        vp9_temporal_filter_apply_c(f->u_buffer + mb_uv_offset, f->uv_stride,
+          vp9_temporal_filter_apply(f->u_buffer + mb_uv_offset, f->uv_stride,
                                     predictor + 256, mb_uv_width, mb_uv_height,
                                     strength, filter_weight, accumulator + 256,
                                     count + 256);
-        vp9_temporal_filter_apply_c(f->v_buffer + mb_uv_offset, f->uv_stride,
+          vp9_temporal_filter_apply(f->v_buffer + mb_uv_offset, f->uv_stride,
                                     predictor + 512, mb_uv_width, mb_uv_height,
                                     strength, filter_weight, accumulator + 512,
                                     count + 512);
+        }
+#else
+        // Apply the filter (YUV)
+        vp9_temporal_filter_apply(f->y_buffer + mb_y_offset, f->y_stride,
+                                  predictor, 16, 16, strength, filter_weight,
+                                  accumulator, count);
+        vp9_temporal_filter_apply(f->u_buffer + mb_uv_offset, f->uv_stride,
+                                  predictor + 256, mb_uv_width, mb_uv_height,
+                                  strength, filter_weight, accumulator + 256,
+                                  count + 256);
+        vp9_temporal_filter_apply(f->v_buffer + mb_uv_offset, f->uv_stride,
+                                  predictor + 512, mb_uv_width, mb_uv_height,
+                                  strength, filter_weight, accumulator + 512,
+                                  count + 512);
 #endif  // CONFIG_VP9_HIGHBITDEPTH
       }
     }
@@ -738,7 +755,8 @@ void vp9_temporal_filter(VP9_COMP *cpi, int distance) {
                                "Failed to reallocate alt_ref_buffer");
           }
           frames[frame] = vp9_scale_if_required(
-              cm, frames[frame], &cpi->svc.scaled_frames[frame_used], 0);
+              cm, frames[frame], &cpi->svc.scaled_frames[frame_used], 0,
+              EIGHTTAP, 0);
           ++frame_used;
         }
       }
@@ -766,7 +784,7 @@ void vp9_temporal_filter(VP9_COMP *cpi, int distance) {
   set_error_per_bit(&cpi->td.mb, rdmult);
   vp9_initialize_me_consts(cpi, &cpi->td.mb, ARNR_FILT_QINDEX);
 
-  if (!cpi->new_mt)
+  if (!cpi->row_mt)
     temporal_filter_iterate_c(cpi);
   else
     vp9_temporal_filter_row_mt(cpi);

@@ -8,8 +8,8 @@ import android.view.LayoutInflater;
 import android.widget.TextView;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ntp.cards.NewTabPageRecyclerView;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder;
+import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.chrome.browser.widget.displaystyle.MarginResizer;
 import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
@@ -21,8 +21,9 @@ public class SectionHeaderViewHolder extends NewTabPageViewHolder {
     private static final double SCROLL_HEADER_HEIGHT_PERCENTAGE = 0.7;
 
     private final int mMaxSnippetHeaderHeight;
+    private final MarginResizer mMarginResizer;
 
-    public SectionHeaderViewHolder(final NewTabPageRecyclerView recyclerView, UiConfig config) {
+    public SectionHeaderViewHolder(final SuggestionsRecyclerView recyclerView, UiConfig config) {
         super(LayoutInflater.from(recyclerView.getContext())
                         .inflate(R.layout.new_tab_page_snippets_header, recyclerView, false));
         mMaxSnippetHeaderHeight = itemView.getResources().getDimensionPixelSize(
@@ -30,13 +31,19 @@ public class SectionHeaderViewHolder extends NewTabPageViewHolder {
 
         int wideLateralMargin = recyclerView.getResources().getDimensionPixelSize(
                 R.dimen.ntp_wide_card_lateral_margins);
-        MarginResizer.createWithViewAdapter(itemView, config, 0,
-                wideLateralMargin);
+        mMarginResizer = new MarginResizer(itemView, config, 0, wideLateralMargin);
     }
 
     public void onBindViewHolder(SectionHeader header) {
         ((TextView) itemView).setText(header.getHeaderText());
         updateDisplay(0, false);
+        mMarginResizer.attach();
+    }
+
+    @Override
+    public void recycle() {
+        mMarginResizer.detach();
+        super.recycle();
     }
 
     /**

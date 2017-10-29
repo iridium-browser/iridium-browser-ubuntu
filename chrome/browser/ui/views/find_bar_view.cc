@@ -21,39 +21,33 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/find_bar_host.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/vector_icons/vector_icons.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_flags.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/theme_provider.h"
 #include "ui/events/event.h"
 #include "ui/gfx/color_palette.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/native_theme/native_theme.h"
-#include "ui/vector_icons/vector_icons.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/controls/button/image_button.h"
-#include "ui/views/controls/button/vector_icon_button.h"
+#include "ui/views/controls/button/image_button_factory.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/painter.h"
+#include "ui/views/view_properties.h"
 #include "ui/views/view_targeter.h"
 #include "ui/views/widget/widget.h"
 
 namespace {
-
-// These layout constants are all in dp.
-// The horizontal and vertical insets for the bar.
-const int kInteriorPadding = 8;
-// Default spacing between child views.
-const int kInterChildSpacing = 4;
-// Additional spacing around the separator.
-const int kSeparatorLeftSpacing = 12 - kInterChildSpacing;
-const int kSeparatorRightSpacing = 8 - kInterChildSpacing;
 
 // The default number of average characters that the text box will be.
 const int kDefaultCharWidth = 30;
@@ -69,11 +63,11 @@ class MatchCountLabel : public views::Label {
   // views::Label overrides:
   bool CanProcessEventsWithinSubtree() const override { return true; }
 
-  gfx::Size GetPreferredSize() const override {
+  gfx::Size CalculatePreferredSize() const override {
     // We need to return at least 1dip so that box layout adds padding on either
     // side (otherwise there will be a jump when our size changes between empty
     // and non-empty).
-    gfx::Size size = views::Label::GetPreferredSize();
+    gfx::Size size = views::Label::CalculatePreferredSize();
     size.set_width(std::max(1, size.width()));
     return size;
   }
@@ -117,19 +111,15 @@ FindBarView::FindBarView(FindBarHost* host)
       match_count_text_(new MatchCountLabel()),
       focus_forwarder_view_(new FocusForwarderView(find_text_)),
       separator_(new views::Separator()),
-      find_previous_button_(new views::VectorIconButton(this)),
-      find_next_button_(new views::VectorIconButton(this)),
-      close_button_(new views::VectorIconButton(this)) {
+      find_previous_button_(views::CreateVectorImageButton(this)),
+      find_next_button_(views::CreateVectorImageButton(this)),
+      close_button_(views::CreateVectorImageButton(this)) {
   find_text_->set_id(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD);
   find_text_->set_default_width_in_chars(kDefaultCharWidth);
   find_text_->set_controller(this);
   find_text_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_FIND));
   find_text_->SetTextInputFlags(ui::TEXT_INPUT_FLAG_AUTOCORRECT_OFF);
   AddChildView(find_text_);
-
-  find_previous_button_->SetIcon(kCaretUpIcon);
-  find_next_button_->SetIcon(kCaretDownIcon);
-  close_button_->SetIcon(ui::kCloseIcon);
 
   find_previous_button_->set_id(VIEW_ID_FIND_IN_PAGE_PREVIOUS_BUTTON);
   find_previous_button_->SetFocusForPlatform();
@@ -164,15 +154,56 @@ FindBarView::FindBarView(FindBarHost* host)
       base::MakeUnique<views::ViewTargeter>(this));
   AddChildViewAt(match_count_text_, 1);
 
-  separator_->SetBorder(views::CreateEmptyBorder(0, kSeparatorLeftSpacing, 0,
-                                                 kSeparatorRightSpacing));
+  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
+
   AddChildViewAt(separator_, 2);
+
+  // Normally we could space objects horizontally by simply passing a constant
+  // value to BoxLayout for between-child spacing.  But for the vector image
+  // buttons, we want the spacing to apply between the inner "glyph" portions
+  // of the buttons, ignoring the surrounding borders.  BoxLayout has no way
+  // to dynamically adjust for this, so instead of using between-child spacing,
+  // we place views directly adjacent, with horizontal margins on each view
+  // that will add up to the right spacing amounts.
+
+  const gfx::Insets horizontal_margin(
+      0,
+      provider->GetDistanceMetric(DISTANCE_UNRELATED_CONTROL_HORIZONTAL) / 2);
+  const gfx::Insets vector_button =
+      provider->GetInsetsMetric(views::INSETS_VECTOR_IMAGE_BUTTON);
+  const gfx::Insets vector_button_horizontal_margin(
+      0, horizontal_margin.left() - vector_button.left(), 0,
+      horizontal_margin.right() - vector_button.right());
+  const gfx::Insets toast_control_vertical_margin(
+      provider->GetDistanceMetric(DISTANCE_TOAST_CONTROL_VERTICAL), 0);
+  const gfx::Insets toast_label_vertical_margin(
+      provider->GetDistanceMetric(DISTANCE_TOAST_LABEL_VERTICAL), 0);
+  find_previous_button_->SetProperty(
+      views::kMarginsKey, new gfx::Insets(toast_control_vertical_margin +
+                                          vector_button_horizontal_margin));
+  find_next_button_->SetProperty(
+      views::kMarginsKey, new gfx::Insets(toast_control_vertical_margin +
+                                          vector_button_horizontal_margin));
+  close_button_->SetProperty(views::kMarginsKey,
+                             new gfx::Insets(toast_control_vertical_margin +
+                                             vector_button_horizontal_margin));
+  separator_->SetProperty(
+      views::kMarginsKey,
+      new gfx::Insets(toast_control_vertical_margin + horizontal_margin));
+  find_text_->SetProperty(
+      views::kMarginsKey,
+      new gfx::Insets(toast_control_vertical_margin + horizontal_margin));
+  match_count_text_->SetProperty(
+      views::kMarginsKey,
+      new gfx::Insets(toast_label_vertical_margin + horizontal_margin));
 
   find_text_->SetBorder(views::NullBorder());
 
-  views::BoxLayout* manager =
-      new views::BoxLayout(views::BoxLayout::kHorizontal, kInteriorPadding,
-                           kInteriorPadding, kInterChildSpacing);
+  views::BoxLayout* manager = new views::BoxLayout(
+      views::BoxLayout::kHorizontal,
+      gfx::Insets(provider->GetInsetsMetric(INSETS_TOAST) - horizontal_margin),
+      0);
+
   SetLayoutManager(manager);
   manager->SetFlexForView(find_text_, 1);
 }
@@ -260,8 +291,8 @@ void FindBarView::Layout() {
       find_previous_button_->height());
 }
 
-gfx::Size FindBarView::GetPreferredSize() const {
-  gfx::Size size = views::View::GetPreferredSize();
+gfx::Size FindBarView::CalculatePreferredSize() const {
+  gfx::Size size = views::View::CalculatePreferredSize();
   // Ignore the preferred size for the match count label, and just let it take
   // up part of the space for the input textfield. This prevents the overall
   // width from changing every time the match count text changes.
@@ -280,7 +311,7 @@ void FindBarView::SetFocusAndSelection(bool select_all) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// FindBarView, views::VectorIconButtonDelegate implementation:
+// FindBarView, views::ButtonListener implementation:
 
 void FindBarView::ButtonPressed(
     views::Button* sender, const ui::Event& event) {
@@ -305,11 +336,6 @@ void FindBarView::ButtonPressed(
       NOTREACHED() << "Unknown button";
       break;
   }
-}
-
-SkColor FindBarView::GetVectorIconBaseColor() const {
-  return GetNativeTheme()->GetSystemColor(
-      ui::NativeTheme::kColorId_TextfieldDefaultColor);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -414,7 +440,7 @@ void FindBarView::OnNativeThemeChanged(const ui::NativeTheme* theme) {
   auto border = base::MakeUnique<views::BubbleBorder>(
       views::BubbleBorder::NONE, views::BubbleBorder::SMALL_SHADOW,
       bg_color);
-  set_background(new views::BubbleBackground(border.get()));
+  SetBackground(base::MakeUnique<views::BubbleBackground>(border.get()));
   SetBorder(std::move(border));
 
   match_count_text_->SetBackgroundColor(bg_color);
@@ -422,5 +448,13 @@ void FindBarView::OnNativeThemeChanged(const ui::NativeTheme* theme) {
       theme->GetSystemColor(ui::NativeTheme::kColorId_TextfieldDefaultColor);
   match_count_text_->SetEnabledColor(SkColorSetA(text_color, 0x69));
   separator_->SetColor(SkColorSetA(text_color, 0x26));
-}
 
+  const SkColor base_icon_color = GetNativeTheme()->GetSystemColor(
+      ui::NativeTheme::kColorId_TextfieldDefaultColor);
+  views::SetImageFromVectorIcon(find_previous_button_, kCaretUpIcon,
+                                base_icon_color);
+  views::SetImageFromVectorIcon(find_next_button_, kCaretDownIcon,
+                                base_icon_color);
+  views::SetImageFromVectorIcon(close_button_, vector_icons::kCloseIcon,
+                                base_icon_color);
+}

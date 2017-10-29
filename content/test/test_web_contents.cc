@@ -8,6 +8,7 @@
 
 #include "content/browser/browser_url_handler_impl.h"
 #include "content/browser/frame_host/cross_process_frame_connector.h"
+#include "content/browser/frame_host/debug_urls.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/frame_host/navigation_handle_impl.h"
 #include "content/browser/frame_host/navigator.h"
@@ -99,6 +100,13 @@ int TestWebContents::DownloadImage(const GURL& url,
   return g_next_image_download_id;
 }
 
+const GURL& TestWebContents::GetLastCommittedURL() const {
+  if (last_committed_url_.is_valid()) {
+    return last_committed_url_;
+  }
+  return WebContentsImpl::GetLastCommittedURL();
+}
+
 void TestWebContents::TestDidNavigate(RenderFrameHost* render_frame_host,
                                       int nav_entry_id,
                                       bool did_create_new_entry,
@@ -131,7 +139,7 @@ void TestWebContents::TestDidNavigateWithSequenceNumber(
     const GURL& url,
     const Referrer& referrer,
     ui::PageTransition transition,
-    bool was_within_same_page,
+    bool was_within_same_document,
     int item_sequence_number,
     int document_sequence_number) {
   TestRenderFrameHost* rfh =
@@ -161,7 +169,7 @@ void TestWebContents::TestDidNavigateWithSequenceNumber(
   params.gesture = NavigationGestureUser;
   params.method = "GET";
   params.post_id = 0;
-  params.was_within_same_page = was_within_same_page;
+  params.was_within_same_document = was_within_same_document;
   params.http_status_code = 200;
   params.url_is_unreachable = false;
   if (item_sequence_number != -1 && document_sequence_number != -1) {
@@ -207,6 +215,10 @@ bool TestWebContents::TestDidDownloadImage(
   return true;
 }
 
+void TestWebContents::SetLastCommittedURL(const GURL& url) {
+  last_committed_url_ = url;
+}
+
 bool TestWebContents::CrossProcessNavigationPending() {
   if (IsBrowserSideNavigationEnabled()) {
     return GetRenderManager()->speculative_render_frame_host_ != nullptr;
@@ -229,7 +241,7 @@ bool TestWebContents::CreateRenderViewForRenderManager(
 WebContents* TestWebContents::Clone() {
   WebContentsImpl* contents =
       Create(GetBrowserContext(), SiteInstance::Create(GetBrowserContext()));
-  contents->GetController().CopyStateFrom(controller_);
+  contents->GetController().CopyStateFrom(controller_, true);
   return contents;
 }
 
@@ -260,7 +272,7 @@ void TestWebContents::TestSetIsLoading(bool value) {
             node->render_manager()->speculative_frame_host();
         if (speculative_frame_host)
           speculative_frame_host->ResetLoadingState();
-        node->ResetNavigationRequest(false);
+        node->ResetNavigationRequest(false, true);
       } else {
         RenderFrameHostImpl* pending_frame_host =
             node->render_manager()->pending_frame_host();
@@ -294,7 +306,8 @@ void TestWebContents::CommitPendingNavigation() {
   if (!rfh)
     rfh = old_rfh;
   const bool browser_side_navigation = IsBrowserSideNavigationEnabled();
-  CHECK(!browser_side_navigation || rfh->is_loading());
+  CHECK(!browser_side_navigation || rfh->is_loading() ||
+        IsRendererDebugURL(entry->GetURL()));
   CHECK(!browser_side_navigation ||
         !rfh->frame_tree_node()->navigation_request());
 
@@ -370,8 +383,15 @@ void TestWebContents::SetNavigationData(
       ->set_navigation_data(std::move(navigation_data));
 }
 
+void TestWebContents::SetHttpResponseHeaders(
+    NavigationHandle* navigation_handle,
+    scoped_refptr<net::HttpResponseHeaders> response_headers) {
+  static_cast<NavigationHandleImpl*>(navigation_handle)
+      ->set_response_headers_for_testing(response_headers);
+}
+
 void TestWebContents::CreateNewWindow(
-    SiteInstance* source_site_instance,
+    RenderFrameHost* opener,
     int32_t route_id,
     int32_t main_frame_route_id,
     int32_t main_frame_widget_route_id,
@@ -380,10 +400,12 @@ void TestWebContents::CreateNewWindow(
 
 void TestWebContents::CreateNewWidget(int32_t render_process_id,
                                       int32_t route_id,
+                                      mojom::WidgetPtr widget,
                                       blink::WebPopupType popup_type) {}
 
 void TestWebContents::CreateNewFullscreenWidget(int32_t render_process_id,
-                                                int32_t route_id) {}
+                                                int32_t route_id,
+                                                mojom::WidgetPtr widget) {}
 
 void TestWebContents::ShowCreatedWindow(int process_id,
                                         int route_id,
@@ -405,6 +427,10 @@ void TestWebContents::SaveFrameWithHeaders(const GURL& url,
                                            const Referrer& referrer,
                                            const std::string& headers) {
   save_frame_headers_ = headers;
+}
+
+void TestWebContents::SetWasRecentlyAudible(bool audible) {
+  audio_stream_monitor()->set_was_recently_audible_for_testing(audible);
 }
 
 }  // namespace content

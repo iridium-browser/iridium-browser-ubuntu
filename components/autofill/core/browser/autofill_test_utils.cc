@@ -35,7 +35,12 @@ namespace test {
 std::unique_ptr<PrefService> PrefServiceForTesting() {
   scoped_refptr<user_prefs::PrefRegistrySyncable> registry(
       new user_prefs::PrefRegistrySyncable());
-  AutofillManager::RegisterProfilePrefs(registry.get());
+  return PrefServiceForTesting(registry.get());
+}
+
+std::unique_ptr<PrefService> PrefServiceForTesting(
+    user_prefs::PrefRegistrySyncable* registry) {
+  AutofillManager::RegisterProfilePrefs(registry);
 
   // PDM depends on these prefs, which are normally registered in
   // SigninManagerFactory.
@@ -59,7 +64,7 @@ std::unique_ptr<PrefService> PrefServiceForTesting() {
 
   PrefServiceFactory factory;
   factory.set_user_prefs(make_scoped_refptr(new TestingPrefStore()));
-  return factory.Create(registry.get());
+  return factory.Create(registry);
 }
 
 void CreateTestFormField(const char* label,
@@ -212,6 +217,21 @@ AutofillProfile GetFullProfile2() {
   return profile;
 }
 
+AutofillProfile GetIncompleteProfile1() {
+  AutofillProfile profile(base::GenerateGUID(), "https://www.example.com/");
+  SetProfileInfo(&profile, "John", "H.", "Doe", "jsmith@example.com", "ACME",
+                 "123 Main Street", "Unit 1", "Greensdale", "MI", "48838", "US",
+                 "");
+  return profile;
+}
+
+AutofillProfile GetIncompleteProfile2() {
+  AutofillProfile profile(base::GenerateGUID(), "https://www.example.com/");
+  SetProfileInfo(&profile, "", "", "", "jsmith@example.com", "", "", "", "", "",
+                 "", "", "");
+  return profile;
+}
+
 AutofillProfile GetVerifiedProfile() {
   AutofillProfile profile(GetFullProfile());
   profile.set_origin(kSettingsOrigin);
@@ -226,15 +246,15 @@ AutofillProfile GetVerifiedProfile2() {
 
 CreditCard GetCreditCard() {
   CreditCard credit_card(base::GenerateGUID(), "http://www.example.com");
-  SetCreditCardInfo(
-      &credit_card, "Test User", "4111111111111111" /* Visa */, "11", "2017");
+  SetCreditCardInfo(&credit_card, "Test User", "4111111111111111" /* Visa */,
+                    "11", "2022", "1");
   return credit_card;
 }
 
 CreditCard GetCreditCard2() {
   CreditCard credit_card(base::GenerateGUID(), "https://www.example.com");
-  SetCreditCardInfo(
-      &credit_card, "Someone Else", "378282246310005" /* AmEx */, "07", "2019");
+  SetCreditCardInfo(&credit_card, "Someone Else", "378282246310005" /* AmEx */,
+                    "07", "2022", "1");
   return credit_card;
 }
 
@@ -253,16 +273,16 @@ CreditCard GetVerifiedCreditCard2() {
 CreditCard GetMaskedServerCard() {
   CreditCard credit_card(CreditCard::MASKED_SERVER_CARD, "a123");
   test::SetCreditCardInfo(&credit_card, "Bonnie Parker",
-                          "2109" /* Mastercard */, "12", "2012");
-  credit_card.SetTypeForMaskedCard(kMasterCard);
+                          "2109" /* Mastercard */, "12", "2020", "1");
+  credit_card.SetNetworkForMaskedCard(kMasterCard);
   return credit_card;
 }
 
 CreditCard GetMaskedServerCardAmex() {
   CreditCard credit_card(CreditCard::MASKED_SERVER_CARD, "b456");
-  test::SetCreditCardInfo(&credit_card, "Justin Thyme",
-                          "8431" /* Amex */, "9", "2020");
-  credit_card.SetTypeForMaskedCard(kAmericanExpressCard);
+  test::SetCreditCardInfo(&credit_card, "Justin Thyme", "8431" /* Amex */, "9",
+                          "2020", "1");
+  credit_card.SetNetworkForMaskedCard(kAmericanExpressCard);
   return credit_card;
 }
 
@@ -300,12 +320,16 @@ void SetProfileInfoWithGuid(AutofillProfile* profile,
 }
 
 void SetCreditCardInfo(CreditCard* credit_card,
-    const char* name_on_card, const char* card_number,
-    const char* expiration_month, const char* expiration_year) {
+                       const char* name_on_card,
+                       const char* card_number,
+                       const char* expiration_month,
+                       const char* expiration_year,
+                       const std::string& billing_address_id) {
   check_and_set(credit_card, CREDIT_CARD_NAME_FULL, name_on_card);
   check_and_set(credit_card, CREDIT_CARD_NUMBER, card_number);
   check_and_set(credit_card, CREDIT_CARD_EXP_MONTH, expiration_month);
   check_and_set(credit_card, CREDIT_CARD_EXP_4_DIGIT_YEAR, expiration_year);
+  credit_card->set_billing_address_id(billing_address_id);
 }
 
 void DisableSystemServices(PrefService* prefs) {
@@ -322,9 +346,8 @@ void SetServerCreditCards(AutofillTable* table,
   std::vector<CreditCard> as_masked_cards = cards;
   for (CreditCard& card : as_masked_cards) {
     card.set_record_type(CreditCard::MASKED_SERVER_CARD);
-    std::string type = card.type();
     card.SetNumber(card.LastFourDigits());
-    card.SetTypeForMaskedCard(type.c_str());
+    card.SetNetworkForMaskedCard(card.network());
   }
   table->SetServerCreditCards(as_masked_cards);
 

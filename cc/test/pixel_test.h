@@ -34,6 +34,10 @@ class PixelTest : public testing::Test {
                     const base::FilePath& ref_file,
                     const PixelComparator& comparator);
 
+  bool RunPixelTest(RenderPassList* pass_list,
+                    std::vector<SkColor>* ref_pixels,
+                    const PixelComparator& comparator);
+
   bool RunPixelTestWithReadbackTarget(
       RenderPassList* pass_list,
       RenderPass* target,
@@ -46,11 +50,12 @@ class PixelTest : public testing::Test {
                                              const PixelComparator& comparator,
                                              const gfx::Rect* copy_rect);
 
-  ContextProvider* context_provider() const {
+  viz::ContextProvider* context_provider() const {
     return output_surface_->context_provider();
   }
 
   LayerTreeSettings settings_;
+  viz::RendererSettings renderer_settings_;
   gfx::Size device_viewport_size_;
   bool disable_picture_quad_image_filtering_;
   std::unique_ptr<FakeOutputSurfaceClient> output_surface_client_;
@@ -94,21 +99,19 @@ class RendererPixelTest : public PixelTest {
 // have an externally determined size and offset.
 class GLRendererWithExpandedViewport : public GLRenderer {
  public:
-  GLRendererWithExpandedViewport(const RendererSettings* settings,
+  GLRendererWithExpandedViewport(const viz::RendererSettings* settings,
                                  OutputSurface* output_surface,
                                  ResourceProvider* resource_provider,
-                                 TextureMailboxDeleter* texture_mailbox_deleter,
-                                 int highp_threshold_min)
+                                 TextureMailboxDeleter* texture_mailbox_deleter)
       : GLRenderer(settings,
                    output_surface,
                    resource_provider,
-                   texture_mailbox_deleter,
-                   highp_threshold_min) {}
+                   texture_mailbox_deleter) {}
 };
 
 class SoftwareRendererWithExpandedViewport : public SoftwareRenderer {
  public:
-  SoftwareRendererWithExpandedViewport(const RendererSettings* settings,
+  SoftwareRendererWithExpandedViewport(const viz::RendererSettings* settings,
                                        OutputSurface* output_surface,
                                        ResourceProvider* resource_provider)
       : SoftwareRenderer(settings, output_surface, resource_provider) {}
@@ -116,16 +119,14 @@ class SoftwareRendererWithExpandedViewport : public SoftwareRenderer {
 
 class GLRendererWithFlippedSurface : public GLRenderer {
  public:
-  GLRendererWithFlippedSurface(const RendererSettings* settings,
+  GLRendererWithFlippedSurface(const viz::RendererSettings* settings,
                                OutputSurface* output_surface,
                                ResourceProvider* resource_provider,
-                               TextureMailboxDeleter* texture_mailbox_deleter,
-                               int highp_threshold_min)
+                               TextureMailboxDeleter* texture_mailbox_deleter)
       : GLRenderer(settings,
                    output_surface,
                    resource_provider,
-                   texture_mailbox_deleter,
-                   highp_threshold_min) {}
+                   texture_mailbox_deleter) {}
 };
 
 template<>

@@ -6,10 +6,8 @@
 
 #include <vector>
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
-#include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,7 +16,6 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/browser/web_contents.h"
 #include "jni/ChromeApplication_jni.h"
 #include "net/cookies/cookie_store.h"
 #include "net/url_request/url_request_context.h"
@@ -93,41 +90,3 @@ static void RemoveSessionCookies(JNIEnv* env, const JavaParamRef<jclass>& obj) {
   std::for_each(loaded_profiles.begin(), loaded_profiles.end(),
                 RemoveSessionCookiesForProfile);
 }
-
-namespace chrome {
-namespace android {
-
-// static
-bool ChromeApplication::RegisterBindings(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
-
-void ChromeApplication::ShowAutofillSettings() {
-  Java_ChromeApplication_showAutofillSettings(
-      base::android::AttachCurrentThread(),
-      base::android::GetApplicationContext());
-}
-
-void ChromeApplication::ShowPasswordSettings() {
-  Java_ChromeApplication_showPasswordSettings(
-      base::android::AttachCurrentThread(),
-      base::android::GetApplicationContext());
-}
-
-void ChromeApplication::OpenClearBrowsingData(
-    content::WebContents* web_contents) {
-  TabAndroid* tab = TabAndroid::FromWebContents(web_contents);
-  DCHECK(tab);
-  Java_ChromeApplication_openClearBrowsingData(
-      base::android::AttachCurrentThread(),
-      base::android::GetApplicationContext(), tab->GetJavaObject());
-}
-
-bool ChromeApplication::AreParentalControlsEnabled() {
-  return Java_ChromeApplication_areParentalControlsEnabled(
-      base::android::AttachCurrentThread(),
-      base::android::GetApplicationContext());
-}
-
-}  // namespace android
-}  // namespace chrome

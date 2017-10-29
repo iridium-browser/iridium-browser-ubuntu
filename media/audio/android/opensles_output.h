@@ -16,10 +16,29 @@
 #include "base/macros.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
+#include "media/audio/android/muteable_audio_output_stream.h"
 #include "media/audio/android/opensles_util.h"
-#include "media/audio/audio_io.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/audio_timestamp_helper.h"
+
+// On L+, we want to use floating point output for better fidelity.
+#if __ANDROID_API__ < 21
+#define SL_ANDROID_PCM_REPRESENTATION_SIGNED_INT ((SLuint32)0x00000001)
+#define SL_ANDROID_PCM_REPRESENTATION_UNSIGNED_INT ((SLuint32)0x00000002)
+#define SL_ANDROID_PCM_REPRESENTATION_FLOAT ((SLuint32)0x00000003)
+#define SL_ANDROID_DATAFORMAT_PCM_EX ((SLuint32)0x00000004)
+
+typedef struct SLAndroidDataFormat_PCM_EX_ {
+  SLuint32 formatType;
+  SLuint32 numChannels;
+  SLuint32 sampleRate;
+  SLuint32 bitsPerSample;
+  SLuint32 containerSize;
+  SLuint32 channelMask;
+  SLuint32 endianness;
+  SLuint32 representation;
+} SLAndroidDataFormat_PCM_EX;
+#endif
 
 namespace media {
 
@@ -29,7 +48,7 @@ class AudioManagerAndroid;
 // This class is created and lives on the Audio Manager thread but recorded
 // audio buffers are given to us from an internal OpenSLES audio thread.
 // All public methods should be called on the Audio Manager thread.
-class OpenSLESOutputStream : public AudioOutputStream {
+class OpenSLESOutputStream : public MuteableAudioOutputStream {
  public:
   static const int kMaxNumOfBuffersInQueue = 2;
 
@@ -39,7 +58,7 @@ class OpenSLESOutputStream : public AudioOutputStream {
 
   ~OpenSLESOutputStream() override;
 
-  // Implementation of AudioOutputStream.
+  // Implementation of MuteableAudioOutputStream.
   bool Open() override;
   void Close() override;
   void Start(AudioSourceCallback* callback) override;
@@ -49,7 +68,7 @@ class OpenSLESOutputStream : public AudioOutputStream {
 
   // Set the value of |muted_|. It does not affect |volume_| which can be
   // got by calling GetVolume(). See comments for |muted_| below.
-  void SetMute(bool muted);
+  void SetMute(bool muted) override;
 
  private:
   bool CreatePlayer();
@@ -101,14 +120,13 @@ class OpenSLESOutputStream : public AudioOutputStream {
   SLAndroidSimpleBufferQueueItf simple_buffer_queue_;
 
   SLDataFormat_PCM format_;
+  SLAndroidDataFormat_PCM_EX float_format_;
 
   // Audio buffers that are allocated during Open() based on parameters given
   // during construction.
   uint8_t* audio_data_[kMaxNumOfBuffersInQueue];
 
   int active_buffer_index_;
-  int bytes_per_frame_;
-  size_t buffer_size_bytes_;
 
   bool started_;
 
@@ -122,6 +140,12 @@ class OpenSLESOutputStream : public AudioOutputStream {
   float volume_;
 
   int samples_per_second_;
+
+  // On Android 5.0+ we can output directly to float instead of in integer.
+  bool have_float_output_;
+
+  int bytes_per_frame_;
+  size_t buffer_size_bytes_;
 
   // Used to calculate the delay value for each OnMoreData() call.
   AudioTimestampHelper delay_calculator_;

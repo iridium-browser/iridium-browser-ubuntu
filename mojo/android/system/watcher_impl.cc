@@ -7,7 +7,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/android/base_jni_registrar.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
 #include "base/android/library_loader/library_loader_hooks.h"
@@ -15,7 +14,7 @@
 #include "base/bind.h"
 #include "jni/WatcherImpl_jni.h"
 #include "mojo/public/cpp/system/handle.h"
-#include "mojo/public/cpp/system/watcher.h"
+#include "mojo/public/cpp/system/simple_watcher.h"
 
 namespace mojo {
 namespace android {
@@ -26,7 +25,7 @@ namespace {
 
 class WatcherImpl {
  public:
-  WatcherImpl() : watcher_(FROM_HERE) {}
+  WatcherImpl() : watcher_(FROM_HERE, SimpleWatcher::ArmingPolicy::AUTOMATIC) {}
 
   ~WatcherImpl() = default;
 
@@ -40,9 +39,8 @@ class WatcherImpl {
         base::Bind(&WatcherImpl::OnHandleReady, base::Unretained(this));
 
     MojoResult result =
-        watcher_.Start(mojo::Handle(static_cast<MojoHandle>(mojo_handle)),
+        watcher_.Watch(mojo::Handle(static_cast<MojoHandle>(mojo_handle)),
                        static_cast<MojoHandleSignals>(signals), ready_callback);
-
     if (result != MOJO_RESULT_OK)
       java_watcher_.Reset();
 
@@ -68,7 +66,7 @@ class WatcherImpl {
         result);
   }
 
-  Watcher watcher_;
+  SimpleWatcher watcher_;
   base::android::ScopedJavaGlobalRef<jobject> java_watcher_;
 
   DISALLOW_COPY_AND_ASSIGN(WatcherImpl);

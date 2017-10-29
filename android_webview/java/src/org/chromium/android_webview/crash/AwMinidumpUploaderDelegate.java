@@ -6,16 +6,18 @@ package org.chromium.android_webview.crash;
 
 import android.content.Context;
 import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
 import android.webkit.ValueCallback;
 
 import org.chromium.android_webview.PlatformServiceBridge;
 import org.chromium.android_webview.command_line.CommandLineUtil;
 import org.chromium.base.CommandLine;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.components.minidump_uploader.CrashFileManager;
 import org.chromium.components.minidump_uploader.MinidumpUploaderDelegate;
 import org.chromium.components.minidump_uploader.util.CrashReportingPermissionManager;
+import org.chromium.components.minidump_uploader.util.NetworkPermissionUtil;
 
 import java.io.File;
 
@@ -23,21 +25,20 @@ import java.io.File;
  * Android Webview-specific implementations for minidump uploading logic.
  */
 public class AwMinidumpUploaderDelegate implements MinidumpUploaderDelegate {
-    private final Context mContext;
     private final ConnectivityManager mConnectivityManager;
 
     private boolean mPermittedByUser = false;
 
     @VisibleForTesting
-    public AwMinidumpUploaderDelegate(Context context) {
-        mContext = context;
+    public AwMinidumpUploaderDelegate() {
         mConnectivityManager =
-                (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+                (ConnectivityManager) ContextUtils.getApplicationContext().getSystemService(
+                        Context.CONNECTIVITY_SERVICE);
     }
 
     @Override
     public File getCrashParentDir() {
-        return CrashReceiverService.createWebViewCrashDir(mContext);
+        return CrashReceiverService.getWebViewCrashDir();
     }
 
     @Override
@@ -54,26 +55,10 @@ public class AwMinidumpUploaderDelegate implements MinidumpUploaderDelegate {
             }
             @Override
             public boolean isNetworkAvailableForCrashUploads() {
-                // JobScheduler will call onStopJob causing our upload to be interrupted when our
-                // network requirements no longer hold.
-                // TODO(isherman): This code should really be shared with Chrome. Chrome currently
-                // checks only whether the network is WiFi (or ethernet) vs. cellular. Most likely,
-                // Chrome should instead check whether the network is metered, as is done here.
-                NetworkInfo networkInfo = mConnectivityManager.getActiveNetworkInfo();
-                if (networkInfo == null || !networkInfo.isConnected()) return false;
-                return !mConnectivityManager.isActiveNetworkMetered();
-            }
-            @Override
-            public boolean isCrashUploadDisabledByCommandLine() {
-                return false;
-            }
-            /**
-             * This method is already represented by isClientInMetricsSample() and
-             * isNetworkAvailableForCrashUploads().
-             */
-            @Override
-            public boolean isMetricsUploadPermitted() {
-                return true;
+                // Note that this is the same critierion that the JobScheduler uses to schedule the
+                // job. JobScheduler will call onStopJob causing our upload to be interrupted when
+                // our network requirements no longer hold.
+                return NetworkPermissionUtil.isNetworkUnmetered(mConnectivityManager);
             }
             @Override
             public boolean isUsageAndCrashReportingPermittedByUser() {
@@ -92,7 +77,7 @@ public class AwMinidumpUploaderDelegate implements MinidumpUploaderDelegate {
 
     @Override
     public void prepareToUploadMinidumps(final Runnable startUploads) {
-        createPlatformServiceBridge().queryMetricsSetting(new ValueCallback<Boolean>() {
+        PlatformServiceBridge.getInstance().queryMetricsSetting(new ValueCallback<Boolean>() {
             public void onReceiveValue(Boolean enabled) {
                 ThreadUtils.assertOnUiThread();
                 mPermittedByUser = enabled;
@@ -107,12 +92,11 @@ public class AwMinidumpUploaderDelegate implements MinidumpUploaderDelegate {
     @Override
     public void recordUploadFailure(File minidump) {}
 
-    /**
-     * Utility method to allow us to test the logic of this class by injecting
-     * a test-specific PlatformServiceBridge.
-     */
-    @VisibleForTesting
-    public PlatformServiceBridge createPlatformServiceBridge() {
-        return PlatformServiceBridge.getInstance(mContext);
+    @Override
+    public void migrateMinidumpFilenamesIfNeeded(CrashFileManager crashFileManager) {
+        File[] minidumpFilesUsingOldNamingScheme = crashFileManager.getMinidumpsSansLogcat();
+        for (File minidump : minidumpFilesUsingOldNamingScheme) {
+            CrashFileManager.trySetReadyForUpload(minidump);
+        }
     }
 }

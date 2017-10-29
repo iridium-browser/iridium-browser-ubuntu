@@ -8,6 +8,7 @@
 #include "platform/heap/Handle.h"
 #include "public/platform/WebContentDecryptionModuleException.h"
 #include "public/platform/WebContentDecryptionModuleResult.h"
+#include "public/platform/WebEncryptedMediaKeyInformation.h"
 
 namespace blink {
 
@@ -20,16 +21,18 @@ class ContentDecryptionModuleResult
  public:
   virtual ~ContentDecryptionModuleResult() {}
 
-  virtual void complete() = 0;
-  virtual void completeWithContentDecryptionModule(
+  virtual void Complete() = 0;
+  virtual void CompleteWithContentDecryptionModule(
       WebContentDecryptionModule*) = 0;
-  virtual void completeWithSession(
+  virtual void CompleteWithSession(
       WebContentDecryptionModuleResult::SessionStatus) = 0;
-  virtual void completeWithError(WebContentDecryptionModuleException,
-                                 unsigned long systemCode,
+  virtual void CompleteWithKeyStatus(
+      WebEncryptedMediaKeyInformation::KeyStatus) = 0;
+  virtual void CompleteWithError(WebContentDecryptionModuleException,
+                                 unsigned long system_code,
                                  const WebString&) = 0;
 
-  WebContentDecryptionModuleResult result() {
+  WebContentDecryptionModuleResult Result() {
     return WebContentDecryptionModuleResult(this);
   }
 

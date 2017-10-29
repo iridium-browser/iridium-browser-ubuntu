@@ -60,7 +60,7 @@ class Nigori {
   bool Decrypt(const std::string& value, std::string* decrypted) const;
 
   // Exports the raw derived keys.
-  bool ExportKeys(std::string* user_key,
+  void ExportKeys(std::string* user_key,
                   std::string* encryption_key,
                   std::string* mac_key) const;
 
@@ -76,6 +76,10 @@ class Nigori {
   static const size_t kSigningIterations = 1004;
 
  private:
+  // user_key isn't used any more, but legacy clients will fail to import a
+  // nigori node without one. We preserve it for the sake of those clients, but
+  // it should be removed once enough clients have upgraded to code that doesn't
+  // enforce its presence.
   std::unique_ptr<crypto::SymmetricKey> user_key_;
   std::unique_ptr<crypto::SymmetricKey> encryption_key_;
   std::unique_ptr<crypto::SymmetricKey> mac_key_;

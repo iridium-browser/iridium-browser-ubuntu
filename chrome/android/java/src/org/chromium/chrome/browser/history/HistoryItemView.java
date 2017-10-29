@@ -21,9 +21,7 @@ import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.widget.RoundedIconGenerator;
 import org.chromium.chrome.browser.widget.TintedImageButton;
-import org.chromium.chrome.browser.widget.displaystyle.MarginResizer;
 import org.chromium.chrome.browser.widget.selection.SelectableItemView;
-import org.chromium.chrome.browser.widget.selection.SelectableListLayout;
 
 /**
  * The SelectableItemView for items displayed in the browsing history UI.
@@ -125,10 +123,6 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
 
         mHistoryManager = manager;
         if (!getItem().wasBlockedVisit()) requestIcon();
-
-        MarginResizer.createWithViewAdapter(this,
-                mHistoryManager.getSelectableListLayout().getUiConfig(),
-                SelectableListLayout.getDefaultListItemLateralMarginPx(getResources()), 0);
     }
 
     /**
@@ -184,6 +178,8 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
     }
 
     private void requestIcon() {
+        if (mHistoryManager == null || mHistoryManager.getLargeIconBridge() == null) return;
+
         mHistoryManager.getLargeIconBridge().getLargeIconForUrl(
                 getItem().getUrl(), mMinIconSize, this);
     }
@@ -204,6 +200,8 @@ public class HistoryItemView extends SelectableItemView<HistoryItem> implements 
      * Sets the background resource for this view using the item's positioning in its group.
      */
     public void setBackgroundResourceForGroupPosition() {
+        if (getItem() == null) return;
+
         setBackgroundResourceForGroupPosition(
                 getItem().isFirstInGroup(), getItem().isLastInGroup());
     }

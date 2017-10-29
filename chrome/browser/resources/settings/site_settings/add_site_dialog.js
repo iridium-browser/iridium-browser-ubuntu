@@ -21,9 +21,12 @@ Polymer({
 
     /**
      * Whether this is about an Allow, Block, SessionOnly, or other.
-     * @type {settings.PermissionValues}
+     * @type {settings.ContentSetting}
      */
     contentSetting: String,
+
+    /** @private */
+    showIncognitoSessionOnly_: Boolean,
 
     /**
      * The site to add an exception for.
@@ -38,14 +41,14 @@ Polymer({
     assert(this.contentSetting);
   },
 
-  /**
-   * Opens the dialog.
-   * @param {string} type Whether this was launched from an Allow list or a
-   *     Block list.
-   */
-  open: function(type) {
-    this.addWebUIListener('onIncognitoStatusChanged',
-        this.onIncognitoStatusChanged_.bind(this));
+  /** Open the dialog. */
+  open: function() {
+    this.addWebUIListener('onIncognitoStatusChanged', function(hasIncognito) {
+      this.$.incognito.checked = false;
+      this.showIncognitoSessionOnly_ = hasIncognito &&
+          !loadTimeData.getBoolean('isGuest') &&
+          this.contentSetting != settings.ContentSetting.SESSION_ONLY;
+    }.bind(this));
     this.browserProxy.updateIncognitoStatus();
     this.$.dialog.showModal();
   },
@@ -55,7 +58,16 @@ Polymer({
    * @private
    */
   validate_: function() {
+    // If input is empty, disable the action button, but don't show the red
+    // invalid message.
+    if (this.$.site.value.trim() == '') {
+      this.$.site.invalid = false;
+      this.$.add.disabled = true;
+      return;
+    }
+
     this.browserProxy.isPatternValid(this.site_).then(function(isValid) {
+      this.$.site.invalid = !isValid;
       this.$.add.disabled = !isValid;
     }.bind(this));
   },
@@ -63,19 +75,6 @@ Polymer({
   /** @private */
   onCancelTap_: function() {
     this.$.dialog.cancel();
-  },
-
-  /**
-   * A handler for when we get notified of the current profile creating or
-   * destroying their incognito counterpart.
-   * @param {boolean} incognitoEnabled Whether the current profile has an
-   *     incognito profile.
-   * @private
-   */
-  onIncognitoStatusChanged_: function(incognitoEnabled) {
-    this.$.incognito.disabled = !incognitoEnabled;
-    if (!incognitoEnabled)
-      this.$.incognito.checked = false;
   },
 
   /**

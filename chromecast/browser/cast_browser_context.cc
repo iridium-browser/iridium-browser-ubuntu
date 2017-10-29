@@ -81,11 +81,13 @@ void CastBrowserContext::InitWhileIOAllowed() {
   BrowserContext::Initialize(this, path_);
 }
 
+#if !defined(OS_ANDROID)
 std::unique_ptr<content::ZoomLevelDelegate>
 CastBrowserContext::CreateZoomLevelDelegate(
     const base::FilePath& partition_path) {
   return nullptr;
 }
+#endif  // !defined(OS_ANDROID)
 
 base::FilePath CastBrowserContext::GetPath() const {
   return path_;
@@ -132,6 +134,11 @@ content::PermissionManager* CastBrowserContext::GetPermissionManager() {
 
 content::BackgroundSyncController*
 CastBrowserContext::GetBackgroundSyncController() {
+  return nullptr;
+}
+
+content::BrowsingDataRemoverDelegate*
+CastBrowserContext::GetBrowsingDataRemoverDelegate() {
   return nullptr;
 }
 

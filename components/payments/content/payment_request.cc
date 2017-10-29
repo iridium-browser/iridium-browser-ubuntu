@@ -4,64 +4,111 @@
 
 #include "components/payments/content/payment_request.h"
 
-#include <algorithm>
-#include <unordered_map>
+#include <string>
 #include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "components/autofill/core/browser/autofill_data_util.h"
-#include "components/autofill/core/browser/field_types.h"
-#include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/payments/content/can_make_payment_query_factory.h"
+#include "components/payments/content/origin_security_checker.h"
 #include "components/payments/content/payment_details_validation.h"
 #include "components/payments/content/payment_request_web_contents_manager.h"
-#include "components/payments/core/currency_formatter.h"
+#include "components/payments/core/can_make_payment_query.h"
+#include "components/payments/core/payment_prefs.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 
 namespace payments {
 
 PaymentRequest::PaymentRequest(
+    content::RenderFrameHost* render_frame_host,
     content::WebContents* web_contents,
     std::unique_ptr<PaymentRequestDelegate> delegate,
     PaymentRequestWebContentsManager* manager,
-    mojo::InterfaceRequest<payments::mojom::PaymentRequest> request)
+    mojo::InterfaceRequest<mojom::PaymentRequest> request,
+    ObserverForTest* observer_for_testing)
     : web_contents_(web_contents),
       delegate_(std::move(delegate)),
       manager_(manager),
       binding_(this, std::move(request)),
-      is_ready_to_pay_(false),
-      selected_shipping_profile_(nullptr),
-      selected_contact_profile_(nullptr),
-      selected_credit_card_(nullptr) {
+      frame_origin_(GURL(render_frame_host->GetLastCommittedURL()).GetOrigin()),
+      observer_for_testing_(observer_for_testing),
+      journey_logger_(delegate_->IsIncognito(),
+                      web_contents_->GetLastCommittedURL(),
+                      delegate_->GetUkmRecorder()),
+      weak_ptr_factory_(this) {
   // OnConnectionTerminated will be called when the Mojo pipe is closed. This
   // will happen as a result of many renderer-side events (both successful and
   // erroneous in nature).
   // TODO(crbug.com/683636): Investigate using
   // set_connection_error_with_reason_handler with Binding::CloseWithReason.
   binding_.set_connection_error_handler(base::Bind(
-      &PaymentRequest::OnConnectionTerminated, base::Unretained(this)));
+      &PaymentRequest::OnConnectionTerminated, weak_ptr_factory_.GetWeakPtr()));
 }
 
 PaymentRequest::~PaymentRequest() {}
 
-void PaymentRequest::Init(
-    payments::mojom::PaymentRequestClientPtr client,
-    std::vector<payments::mojom::PaymentMethodDataPtr> method_data,
-    payments::mojom::PaymentDetailsPtr details,
-    payments::mojom::PaymentOptionsPtr options) {
+void PaymentRequest::Init(mojom::PaymentRequestClientPtr client,
+                          std::vector<mojom::PaymentMethodDataPtr> method_data,
+                          mojom::PaymentDetailsPtr details,
+                          mojom::PaymentOptionsPtr options) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  client_ = std::move(client);
+
+  const GURL last_committed_url = delegate_->GetLastCommittedURL();
+  if (!OriginSecurityChecker::IsOriginSecure(last_committed_url)) {
+    LOG(ERROR) << "Not in a secure origin";
+    OnConnectionTerminated();
+    return;
+  }
+
+  bool allowed_origin =
+      OriginSecurityChecker::IsSchemeCryptographic(last_committed_url) ||
+      OriginSecurityChecker::IsOriginLocalhostOrFile(last_committed_url);
+  if (!allowed_origin) {
+    LOG(ERROR) << "Only localhost, file://, and cryptographic scheme origins "
+                  "allowed";
+  }
+
+  bool invalid_ssl =
+      OriginSecurityChecker::IsSchemeCryptographic(last_committed_url) &&
+      !delegate_->IsSslCertificateValid();
+  if (invalid_ssl)
+    LOG(ERROR) << "SSL certificate is not valid";
+
+  if (!allowed_origin || invalid_ssl) {
+    // Don't show UI. Resolve .canMakepayment() with "false". Reject .show()
+    // with "NotSupportedError".
+    spec_ = base::MakeUnique<PaymentRequestSpec>(
+        mojom::PaymentOptions::New(), mojom::PaymentDetails::New(),
+        std::vector<mojom::PaymentMethodDataPtr>(), this,
+        delegate_->GetApplicationLocale());
+    state_ = base::MakeUnique<PaymentRequestState>(
+        spec_.get(), this, delegate_->GetApplicationLocale(),
+        delegate_->GetPersonalDataManager(), delegate_.get(), &journey_logger_);
+    return;
+  }
+
   std::string error;
-  if (!payments::validatePaymentDetails(details, &error)) {
+  if (!validatePaymentDetails(details, &error)) {
     LOG(ERROR) << error;
     OnConnectionTerminated();
     return;
   }
-  client_ = std::move(client);
-  details_ = std::move(details);
-  options_ = std::move(options);
-  PopulateValidatedMethodData(method_data);
-  PopulateProfileCache();
-  SetDefaultProfileSelections();
+
+  if (!details->total) {
+    LOG(ERROR) << "Missing total";
+    OnConnectionTerminated();
+    return;
+  }
+
+  spec_ = base::MakeUnique<PaymentRequestSpec>(
+      std::move(options), std::move(details), std::move(method_data), this,
+      delegate_->GetApplicationLocale());
+  state_ = base::MakeUnique<PaymentRequestState>(
+      spec_.get(), this, delegate_->GetApplicationLocale(),
+      delegate_->GetPersonalDataManager(), delegate_.get(), &journey_logger_);
 }
 
 void PaymentRequest::Show() {
@@ -70,15 +117,140 @@ void PaymentRequest::Show() {
     OnConnectionTerminated();
     return;
   }
+
+  // A tab can display only one PaymentRequest UI at a time.
+  if (!manager_->CanShow(this)) {
+    LOG(ERROR) << "A PaymentRequest UI is already showing";
+    journey_logger_.SetNotShown(
+        JourneyLogger::NOT_SHOWN_REASON_CONCURRENT_REQUESTS);
+    has_recorded_completion_ = true;
+    client_->OnError(mojom::PaymentErrorReason::USER_CANCEL);
+    OnConnectionTerminated();
+    return;
+  }
+
+  if (!state_->AreRequestedMethodsSupported()) {
+    journey_logger_.SetNotShown(
+        JourneyLogger::NOT_SHOWN_REASON_NO_SUPPORTED_PAYMENT_METHOD);
+    has_recorded_completion_ = true;
+    client_->OnError(mojom::PaymentErrorReason::NOT_SUPPORTED);
+    if (observer_for_testing_)
+      observer_for_testing_->OnNotSupportedError();
+    OnConnectionTerminated();
+    return;
+  }
+
+  journey_logger_.SetShowCalled();
+  journey_logger_.SetEventOccurred(JourneyLogger::EVENT_SHOWN);
+  journey_logger_.SetRequestedInformation(
+      spec_->request_shipping(), spec_->request_payer_email(),
+      spec_->request_payer_phone(), spec_->request_payer_name());
+
   delegate_->ShowDialog(this);
 }
 
+void PaymentRequest::UpdateWith(mojom::PaymentDetailsPtr details) {
+  std::string error;
+  if (!validatePaymentDetails(details, &error)) {
+    LOG(ERROR) << error;
+    OnConnectionTerminated();
+    return;
+  }
+
+  if (!details->total) {
+    LOG(ERROR) << "Missing total";
+    OnConnectionTerminated();
+    return;
+  }
+
+  spec_->UpdateWith(std::move(details));
+}
+
 void PaymentRequest::Abort() {
-  // The API user has decided to abort. We return a successful abort message to
-  // the renderer, which closes the Mojo message pipe, which triggers
+  // The API user has decided to abort. If a successful abort message is
+  // returned to the renderer, the Mojo message pipe is closed, which triggers
   // PaymentRequest::OnConnectionTerminated, which destroys this object.
+  // Otherwise, the abort promise is rejected and the pipe is not closed.
+  // The abort is only successful if the payment app wasn't yet invoked.
+  // TODO(crbug.com/716546): Add a merchant abort metric
+
+  bool accepting_abort = !state_->IsPaymentAppInvoked();
+  if (accepting_abort)
+    RecordFirstAbortReason(JourneyLogger::ABORT_REASON_ABORTED_BY_MERCHANT);
+
   if (client_.is_bound())
-    client_->OnAbort(true /* aborted_successfully */);
+    client_->OnAbort(accepting_abort);
+
+  if (observer_for_testing_)
+    observer_for_testing_->OnAbortCalled();
+}
+
+void PaymentRequest::Complete(mojom::PaymentComplete result) {
+  if (!client_.is_bound())
+    return;
+
+  // Failed transactions show an error. Successful and unknown-state
+  // transactions don't show an error.
+  if (result == mojom::PaymentComplete::FAIL) {
+    delegate_->ShowErrorMessage();
+  } else {
+    DCHECK(!has_recorded_completion_);
+    journey_logger_.SetCompleted();
+    has_recorded_completion_ = true;
+
+    delegate_->GetPrefService()->SetBoolean(kPaymentsFirstTransactionCompleted,
+                                            true);
+    // When the renderer closes the connection,
+    // PaymentRequest::OnConnectionTerminated will be called.
+    client_->OnComplete();
+    state_->RecordUseStats();
+  }
+}
+
+void PaymentRequest::CanMakePayment() {
+  bool can_make_payment = state()->CanMakePayment();
+  if (delegate_->IsIncognito()) {
+    client_->OnCanMakePayment(
+        mojom::CanMakePaymentQueryResult::CAN_MAKE_PAYMENT);
+    journey_logger_.SetCanMakePaymentValue(true);
+  } else if (CanMakePaymentQueryFactory::GetInstance()
+                 ->GetForContext(web_contents_->GetBrowserContext())
+                 ->CanQuery(frame_origin_, spec()->stringified_method_data())) {
+    client_->OnCanMakePayment(
+        can_make_payment
+            ? mojom::CanMakePaymentQueryResult::CAN_MAKE_PAYMENT
+            : mojom::CanMakePaymentQueryResult::CANNOT_MAKE_PAYMENT);
+    journey_logger_.SetCanMakePaymentValue(can_make_payment);
+  } else if (OriginSecurityChecker::IsOriginLocalhostOrFile(frame_origin_)) {
+    client_->OnCanMakePayment(
+        can_make_payment
+            ? mojom::CanMakePaymentQueryResult::WARNING_CAN_MAKE_PAYMENT
+            : mojom::CanMakePaymentQueryResult::WARNING_CANNOT_MAKE_PAYMENT);
+    journey_logger_.SetCanMakePaymentValue(can_make_payment);
+  } else {
+    client_->OnCanMakePayment(
+        mojom::CanMakePaymentQueryResult::QUERY_QUOTA_EXCEEDED);
+  }
+
+  if (observer_for_testing_)
+    observer_for_testing_->OnCanMakePaymentCalled();
+}
+
+void PaymentRequest::OnPaymentResponseAvailable(
+    mojom::PaymentResponsePtr response) {
+  journey_logger_.SetEventOccurred(
+      JourneyLogger::EVENT_RECEIVED_INSTRUMENT_DETAILS);
+  client_->OnPaymentResponse(std::move(response));
+}
+
+void PaymentRequest::OnShippingOptionIdSelected(
+    std::string shipping_option_id) {
+  client_->OnShippingOptionChange(shipping_option_id);
+}
+
+void PaymentRequest::OnShippingAddressSelected(
+    mojom::PaymentAddressPtr address) {
+  client_->OnShippingAddressChange(std::move(address));
 }
 
 void PaymentRequest::UserCancelled() {
@@ -87,13 +259,23 @@ void PaymentRequest::UserCancelled() {
   if (!client_.is_bound())
     return;
 
+  RecordFirstAbortReason(JourneyLogger::ABORT_REASON_ABORTED_BY_USER);
+
   // This sends an error to the renderer, which informs the API user.
-  client_->OnError(payments::mojom::PaymentErrorReason::USER_CANCEL);
+  client_->OnError(mojom::PaymentErrorReason::USER_CANCEL);
 
   // We close all bindings and ask to be destroyed.
   client_.reset();
   binding_.Close();
+  if (observer_for_testing_)
+    observer_for_testing_->OnConnectionTerminated();
   manager_->DestroyRequest(this);
+}
+
+void PaymentRequest::DidStartNavigation(bool is_user_initiated) {
+  RecordFirstAbortReason(is_user_initiated
+                             ? JourneyLogger::ABORT_REASON_USER_NAVIGATION
+                             : JourneyLogger::ABORT_REASON_MERCHANT_NAVIGATION);
 }
 
 void PaymentRequest::OnConnectionTerminated() {
@@ -105,229 +287,26 @@ void PaymentRequest::OnConnectionTerminated() {
   client_.reset();
   binding_.Close();
   delegate_->CloseDialog();
+  if (observer_for_testing_)
+    observer_for_testing_->OnConnectionTerminated();
+
+  RecordFirstAbortReason(JourneyLogger::ABORT_REASON_MOJO_CONNECTION_ERROR);
   manager_->DestroyRequest(this);
 }
 
 void PaymentRequest::Pay() {
-  DCHECK(is_ready_to_pay_);
-
-  // TODO(mathp): Return the PaymentResponse to the |client_|.
-  OnConnectionTerminated();
+  journey_logger_.SetEventOccurred(JourneyLogger::EVENT_PAY_CLICKED);
+  journey_logger_.SetSelectedPaymentMethod(
+      JourneyLogger::SELECTED_PAYMENT_METHOD_CREDIT_CARD);
+  state_->GeneratePaymentResponse();
 }
 
-void PaymentRequest::AddObserver(Observer* observer) {
-  CHECK(observer);
-  observers_.AddObserver(observer);
-}
-
-void PaymentRequest::RemoveObserver(Observer* observer) {
-  observers_.RemoveObserver(observer);
-}
-
-CurrencyFormatter* PaymentRequest::GetOrCreateCurrencyFormatter(
-    const std::string& currency_code,
-    const std::string& currency_system,
-    const std::string& locale_name) {
-  if (!currency_formatter_) {
-    currency_formatter_.reset(
-        new CurrencyFormatter(currency_code, currency_system, locale_name));
+void PaymentRequest::RecordFirstAbortReason(
+    JourneyLogger::AbortReason abort_reason) {
+  if (!has_recorded_completion_) {
+    has_recorded_completion_ = true;
+    journey_logger_.SetAborted(abort_reason);
   }
-  return currency_formatter_.get();
-}
-
-void PaymentRequest::SetSelectedShippingProfile(
-    autofill::AutofillProfile* profile) {
-  selected_shipping_profile_ = profile;
-  UpdateIsReadyToPayAndNotifyObservers();
-}
-
-void PaymentRequest::SetSelectedContactProfile(
-    autofill::AutofillProfile* profile) {
-  selected_contact_profile_ = profile;
-  UpdateIsReadyToPayAndNotifyObservers();
-}
-
-void PaymentRequest::SetSelectedCreditCard(autofill::CreditCard* card) {
-  selected_credit_card_ = card;
-  UpdateIsReadyToPayAndNotifyObservers();
-}
-
-void PaymentRequest::PopulateProfileCache() {
-  std::vector<autofill::AutofillProfile*> profiles =
-      personal_data_manager()->GetProfilesToSuggest();
-
-  // PaymentRequest may outlive the Profiles returned by the Data Manager.
-  // Thus, we store copies, and return a vector of pointers to these copies
-  // whenever Profiles are requested. The same is true for credit cards.
-  for (size_t i = 0; i < profiles.size(); i++) {
-    profile_cache_.push_back(
-        base::MakeUnique<autofill::AutofillProfile>(*profiles[i]));
-
-    // TODO(tmartino): Implement deduplication rules specific to shipping and
-    // contact profiles.
-    shipping_profiles_.push_back(profile_cache_[i].get());
-    contact_profiles_.push_back(profile_cache_[i].get());
-  }
-
-  const std::vector<autofill::CreditCard*>& cards =
-      personal_data_manager()->GetCreditCardsToSuggest();
-  for (autofill::CreditCard* card : cards) {
-    card_cache_.push_back(base::MakeUnique<autofill::CreditCard>(*card));
-    credit_cards_.push_back(card_cache_.back().get());
-  }
-}
-
-void PaymentRequest::SetDefaultProfileSelections() {
-  if (!shipping_profiles().empty())
-    selected_shipping_profile_ = shipping_profiles()[0];
-
-  if (!contact_profiles().empty())
-    selected_contact_profile_ = contact_profiles()[0];
-
-  // TODO(anthonyvd): Change this code to prioritize server cards and implement
-  // a way to modify this function's return value.
-  const std::vector<autofill::CreditCard*> cards = credit_cards();
-  auto first_complete_card =
-      std::find_if(cards.begin(), cards.end(),
-                   [](autofill::CreditCard* card) { return card->IsValid(); });
-
-  selected_credit_card_ =
-      first_complete_card == cards.end() ? nullptr : *first_complete_card;
-
-  UpdateIsReadyToPayAndNotifyObservers();
-}
-
-void PaymentRequest::PopulateValidatedMethodData(
-    const std::vector<payments::mojom::PaymentMethodDataPtr>& method_data) {
-  if (method_data.empty()) {
-    LOG(ERROR) << "Invalid payment methods or data";
-    OnConnectionTerminated();
-    return;
-  }
-
-  // Identifier for the basic card payment method in the PaymentMethodData.
-  const char* const kBasicCardMethodName = "basic-card";
-  std::set<std::string> card_networks{"amex",     "diners",     "discover",
-                                      "jcb",      "mastercard", "mir",
-                                      "unionpay", "visa"};
-  for (const payments::mojom::PaymentMethodDataPtr& method_data_entry :
-       method_data) {
-    std::vector<std::string> supported_methods =
-        method_data_entry->supported_methods;
-    if (supported_methods.empty()) {
-      LOG(ERROR) << "Invalid payment methods or data";
-      OnConnectionTerminated();
-      return;
-    }
-
-    for (const std::string& method : supported_methods) {
-      if (method.empty())
-        continue;
-
-      // If a card network is specified right in "supportedMethods", add it.
-      auto card_it = card_networks.find(method);
-      if (card_it != card_networks.end()) {
-        supported_card_networks_.push_back(method);
-        // |method| removed from |card_networks| so that it is not doubly added
-        // to |supported_card_networks_| if "basic-card" is specified with no
-        // supported networks.
-        card_networks.erase(card_it);
-      } else if (method == kBasicCardMethodName) {
-        // For the "basic-card" method, check "supportedNetworks".
-        if (method_data_entry->supported_networks.empty()) {
-          // Empty |supported_networks| means all networks are supported.
-          supported_card_networks_.insert(supported_card_networks_.end(),
-                                          card_networks.begin(),
-                                          card_networks.end());
-          // Clear the set so that no further networks are added to
-          // |supported_card_networks_|.
-          card_networks.clear();
-        } else {
-          // The merchant has specified a few basic card supported networks. Use
-          // the mapping to transform to known basic-card types.
-          using ::payments::mojom::BasicCardNetwork;
-          std::unordered_map<BasicCardNetwork, std::string> networks = {
-              {BasicCardNetwork::AMEX, "amex"},
-              {BasicCardNetwork::DINERS, "diners"},
-              {BasicCardNetwork::DISCOVER, "discover"},
-              {BasicCardNetwork::JCB, "jcb"},
-              {BasicCardNetwork::MASTERCARD, "mastercard"},
-              {BasicCardNetwork::MIR, "mir"},
-              {BasicCardNetwork::UNIONPAY, "unionpay"},
-              {BasicCardNetwork::VISA, "visa"}};
-          for (const BasicCardNetwork& supported_network :
-               method_data_entry->supported_networks) {
-            // Make sure that the network was not already added to
-            // |supported_card_networks_|.
-            auto card_it = card_networks.find(networks[supported_network]);
-            if (card_it != card_networks.end()) {
-              supported_card_networks_.push_back(networks[supported_network]);
-              card_networks.erase(card_it);
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-void PaymentRequest::UpdateIsReadyToPayAndNotifyObservers() {
-  is_ready_to_pay_ =
-      ArePaymentDetailsSatisfied() && ArePaymentOptionsSatisfied();
-  NotifyOnSelectedInformationChanged();
-}
-
-void PaymentRequest::NotifyOnSelectedInformationChanged() {
-  for (auto& observer : observers_)
-    observer.OnSelectedInformationChanged();
-}
-
-bool PaymentRequest::ArePaymentDetailsSatisfied() {
-  // TODO(mathp): A masked card may not satisfy IsValid().
-  if (selected_credit_card_ == nullptr || !selected_credit_card_->IsValid())
-    return false;
-
-  const std::string basic_card_payment_type =
-      autofill::data_util::GetPaymentRequestData(selected_credit_card_->type())
-          .basic_card_payment_type;
-  return !supported_card_networks_.empty() &&
-         std::find(supported_card_networks_.begin(),
-                   supported_card_networks_.end(),
-                   basic_card_payment_type) != supported_card_networks_.end();
-}
-
-bool PaymentRequest::ArePaymentOptionsSatisfied() {
-  // TODO(mathp): Have a measure of shipping address completeness.
-  if (request_shipping() && selected_shipping_profile_ == nullptr)
-    return false;
-
-  // TODO(mathp): Make an encompassing class to validate contact info.
-  const std::string& app_locale = delegate_->GetApplicationLocale();
-  if (request_payer_name() &&
-      (selected_contact_profile_ == nullptr ||
-       selected_contact_profile_
-           ->GetInfo(autofill::AutofillType(autofill::NAME_FULL), app_locale)
-           .empty())) {
-    return false;
-  }
-  if (request_payer_email() &&
-      (selected_contact_profile_ == nullptr ||
-       selected_contact_profile_
-           ->GetInfo(autofill::AutofillType(autofill::EMAIL_ADDRESS),
-                     app_locale)
-           .empty())) {
-    return false;
-  }
-  if (request_payer_phone() &&
-      (selected_contact_profile_ == nullptr ||
-       selected_contact_profile_
-           ->GetInfo(autofill::AutofillType(autofill::PHONE_HOME_WHOLE_NUMBER),
-                     app_locale)
-           .empty())) {
-    return false;
-  }
-
-  return true;
 }
 
 }  // namespace payments

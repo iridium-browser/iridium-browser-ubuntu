@@ -282,15 +282,11 @@ void SkNWayCanvas::onDrawPicture(const SkPicture* picture, const SkMatrix* matri
     }
 }
 
-void SkNWayCanvas::onDrawVertices(VertexMode vmode, int vertexCount,
-                                  const SkPoint vertices[], const SkPoint texs[],
-                                  const SkColor colors[], SkBlendMode bmode,
-                                  const uint16_t indices[], int indexCount,
-                                  const SkPaint& paint) {
+void SkNWayCanvas::onDrawVerticesObject(const SkVertices* vertices, SkBlendMode bmode,
+                                        const SkPaint& paint) {
     Iter iter(fList);
     while (iter.next()) {
-        iter->drawVertices(vmode, vertexCount, vertices, texs, colors, bmode,
-                           indices, indexCount, paint);
+        iter->drawVertices(vertices, bmode, paint);
     }
 }
 
@@ -300,6 +296,13 @@ void SkNWayCanvas::onDrawPatch(const SkPoint cubics[12], const SkColor colors[4]
     Iter iter(fList);
     while (iter.next()) {
         iter->drawPatch(cubics, colors, texCoords, bmode, paint);
+    }
+}
+
+void SkNWayCanvas::onDrawShadowRec(const SkPath& path, const SkDrawShadowRec& rec) {
+    Iter iter(fList);
+    while (iter.next()) {
+        iter->private_draw_shadow_rec(path, rec);
     }
 }
 

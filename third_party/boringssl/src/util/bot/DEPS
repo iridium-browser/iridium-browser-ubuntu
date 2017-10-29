@@ -18,13 +18,17 @@ vars = {
 
 deps = {
   'boringssl/util/bot/gyp':
-    Var('chromium_git') + '/external/gyp.git' + '@' + 'e7079f0e0e14108ab0dba58728ff219637458563',
+    Var('chromium_git') + '/external/gyp.git' + '@' + 'eb296f67da078ec01f5e3a9ea9cdc6d26d680161',
 }
 
 deps_os = {
   'android': {
     'boringssl/util/bot/android_tools':
-      Var('chromium_git') + '/android_tools.git' + '@' + 'c02a002b48d6637714ef98f0e4bf6952b9c4cf10',
+      Var('chromium_git') + '/android_tools.git' + '@' + 'e9d4018e149d50172ed462a7c21137aa915940ec',
+  },
+  'unix': {
+    'boringssl/util/bot/libFuzzer':
+      Var('chromium_git') + '/chromium/llvm-project/llvm/lib/Fuzzer.git' + '@' + '16f5f743c188c836d32cdaf349d5d3effb8a3518',
   },
 }
 

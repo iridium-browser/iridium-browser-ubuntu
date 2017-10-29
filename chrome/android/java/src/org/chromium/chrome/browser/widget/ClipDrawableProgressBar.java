@@ -39,24 +39,14 @@ public class ClipDrawableProgressBar extends ImageView {
     private final ColorDrawable mForegroundDrawable;
     private int mBackgroundColor = Color.TRANSPARENT;
     private float mProgress;
-    private int mProgressUpdateCount;
     private int mDesiredVisibility;
 
     /**
-     * Interface for listening to drawing invalidation.
+     * Create the progress bar with a custom height.
+     * @param context An Android context.
+     * @param height The height in px of the progress bar.
      */
-    public interface InvalidationListener {
-        /**
-         * Called on drawing invalidation.
-         * @param dirtyRect Invalidated area.
-         */
-        void onInvalidation(Rect dirtyRect);
-    }
-
-    /**
-     * Constructor for dynamic inflation.
-     */
-    public ClipDrawableProgressBar(Context context) {
+    public ClipDrawableProgressBar(Context context, int height) {
         super(context);
 
         mDesiredVisibility = getVisibility();
@@ -71,7 +61,6 @@ public class ClipDrawableProgressBar extends ImageView {
                 new ClipDrawable(mForegroundDrawable, Gravity.START, ClipDrawable.HORIZONTAL));
         setBackgroundColor(mBackgroundColor);
 
-        int height = getResources().getDimensionPixelSize(R.dimen.toolbar_progress_bar_height);
         setLayoutParams(new LayoutParams(LayoutParams.MATCH_PARENT, height));
     }
 
@@ -94,15 +83,7 @@ public class ClipDrawableProgressBar extends ImageView {
         if (mProgress == progress) return;
 
         mProgress = progress;
-        mProgressUpdateCount += 1;
         getDrawable().setLevel(Math.round(progress * CLIP_DRAWABLE_MAX));
-    }
-
-    /**
-     * @return Background color of this progress bar.
-     */
-    public int getProgressBarBackgroundColor() {
-        return mBackgroundColor;
     }
 
     /**
@@ -145,20 +126,6 @@ public class ClipDrawableProgressBar extends ImageView {
                     drawingInfoOut.progressBarRect.left,
                     getBottom());
         }
-    }
-
-    /**
-     * Resets progress update count to 0.
-     */
-    public void resetProgressUpdateCount() {
-        mProgressUpdateCount = 0;
-    }
-
-    /**
-     * @return Progress update count since reset.
-     */
-    public int getProgressUpdateCount() {
-        return mProgressUpdateCount;
     }
 
     private void updateInternalVisibility() {

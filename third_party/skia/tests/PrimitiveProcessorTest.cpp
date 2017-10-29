@@ -17,7 +17,6 @@
 #include "GrOpFlushState.h"
 #include "GrRenderTargetContext.h"
 #include "GrRenderTargetContextPriv.h"
-#include "GrTextureProvider.h"
 #include "SkString.h"
 #include "glsl/GrGLSLFragmentShaderBuilder.h"
 #include "glsl/GrGLSLGeometryProcessor.h"
@@ -35,18 +34,21 @@ public:
         return std::unique_ptr<GrDrawOp>(new Op(numAttribs));
     }
 
+    FixedFunctionFlags fixedFunctionFlags() const override {
+        return FixedFunctionFlags::kNone;
+    }
+
+    RequiresDstTexture finalize(const GrCaps& caps, const GrAppliedClip* clip) override {
+        return RequiresDstTexture::kNo;
+    }
+
 private:
     Op(int numAttribs) : INHERITED(ClassID()), fNumAttribs(numAttribs) {
         this->setBounds(SkRect::MakeWH(1.f, 1.f), HasAABloat::kNo, IsZeroArea::kNo);
     }
 
-    void getFragmentProcessorAnalysisInputs(FragmentProcessorAnalysisInputs* input) const override {
-        input->colorInput()->setToUnknown();
-        input->coverageInput()->setToUnknown();
-    }
-
-    void applyPipelineOptimizations(const GrPipelineOptimizations&) override {}
     bool onCombineIfPossible(GrOp*, const GrCaps&) override { return false; }
+
     void onPrepareDraws(Target* target) const override {
         class GP : public GrGeometryProcessor {
         public:
@@ -68,7 +70,7 @@ private:
                     void onEmitCode(EmitArgs& args, GrGPArgs* gpArgs) override {
                         const GP& gp = args.fGP.cast<GP>();
                         args.fVaryingHandler->emitAttributes(gp);
-                        this->setupPosition(args.fVertBuilder, gpArgs, gp.fAttribs[0].fName);
+                        this->setupPosition(args.fVertBuilder, gpArgs, gp.getAttrib(0).fName);
                         GrGLSLPPFragmentBuilder* fragBuilder = args.fFragBuilder;
                         fragBuilder->codeAppendf("%s = vec4(1);", args.fOutputColor);
                         fragBuilder->codeAppendf("%s = vec4(1);", args.fOutputCoverage);
@@ -92,7 +94,7 @@ private:
         size_t vertexStride = gp->getVertexStride();
         SkPoint* vertices = reinterpret_cast<SkPoint*>(helper.init(target, vertexStride, 1));
         vertices->setRectFan(0.f, 0.f, 1.f, 1.f, vertexStride);
-        helper.recordDraw(target, gp.get());
+        helper.recordDraw(target, gp.get(), target->makePipeline(0, &GrProcessorSet::EmptySet()));
     }
 
     int fNumAttribs;
@@ -104,7 +106,7 @@ private:
 DEF_GPUTEST_FOR_ALL_CONTEXTS(VertexAttributeCount, reporter, ctxInfo) {
     GrContext* context = ctxInfo.grContext();
 
-    sk_sp<GrRenderTargetContext> renderTargetContext(context->makeRenderTargetContext(
+    sk_sp<GrRenderTargetContext> renderTargetContext(context->makeDeferredRenderTargetContext(
                                                                      SkBackingFit::kApprox,
                                                                      1, 1, kRGBA_8888_GrPixelConfig,
                                                                      nullptr));
@@ -125,16 +127,14 @@ DEF_GPUTEST_FOR_ALL_CONTEXTS(VertexAttributeCount, reporter, ctxInfo) {
 #endif
     GrPaint grPaint;
     // This one should succeed.
-    renderTargetContext->priv().testingOnly_addDrawOp(GrPaint(grPaint), GrAAType::kNone,
-                                                      Op::Make(attribCnt));
+    renderTargetContext->priv().testingOnly_addDrawOp(Op::Make(attribCnt));
     context->flush();
 #if GR_GPU_STATS
     REPORTER_ASSERT(reporter, context->getGpu()->stats()->numDraws() == 1);
     REPORTER_ASSERT(reporter, context->getGpu()->stats()->numFailedDraws() == 0);
 #endif
     context->resetGpuStats();
-    renderTargetContext->priv().testingOnly_addDrawOp(std::move(grPaint), GrAAType::kNone,
-                                                      Op::Make(attribCnt + 1));
+    renderTargetContext->priv().testingOnly_addDrawOp(Op::Make(attribCnt + 1));
     context->flush();
 #if GR_GPU_STATS
     REPORTER_ASSERT(reporter, context->getGpu()->stats()->numDraws() == 0);

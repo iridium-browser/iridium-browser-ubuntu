@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_DATA_USE_MEASUREMENT_CORE_DATA_USE_USER_DATA_H_
 #define COMPONENTS_DATA_USE_MEASUREMENT_CORE_DATA_USE_USER_DATA_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -22,7 +23,8 @@ class DataUseUserData : public base::SupportsUserData::Data {
  public:
   // This enum should be synced with DataUseServices enum in histograms.xml.
   // Please keep them synced after any updates. Also add service name to
-  // GetServiceNameAsString function.
+  // GetServiceNameAsString function and the same service name to
+  // DataUse.Service.Types histogram suffixes in histograms.xml
   enum ServiceName {
     NOT_TAGGED,
     SUGGESTIONS,
@@ -63,6 +65,9 @@ class DataUseUserData : public base::SupportsUserData::Data {
     NTP_SNIPPETS_THUMBNAILS,
     DOODLE,
     UKM,
+    PAYMENTS,
+    LARGE_ICON_SERVICE,
+    MACHINE_INTELLIGENCE,
   };
 
   // Data use broken by content type. This enum must remain synchronized
@@ -93,9 +98,8 @@ class DataUseUserData : public base::SupportsUserData::Data {
   DataUseUserData(ServiceName service_name, AppState app_state);
   ~DataUseUserData() override;
 
-  // Helper function to create DataUseUserData. The caller takes the ownership
-  // of the returned object.
-  static base::SupportsUserData::Data* Create(
+  // Helper function to create DataUseUserData.
+  static std::unique_ptr<base::SupportsUserData::Data> Create(
       DataUseUserData::ServiceName service);
 
   // Return the service name of the ServiceName enum.

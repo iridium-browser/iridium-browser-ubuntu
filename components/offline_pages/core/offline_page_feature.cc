@@ -22,10 +22,10 @@ const char kOfflinePagesUseTestingSnapshotDelay[] =
 namespace offline_pages {
 
 const base::Feature kOfflineBookmarksFeature{"OfflineBookmarks",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kOffliningRecentPagesFeature{
-    "OfflineRecentPages", base::FEATURE_DISABLED_BY_DEFAULT};
+    "OfflineRecentPages", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kOfflinePagesCTFeature{"OfflinePagesCT",
                                            base::FEATURE_ENABLED_BY_DEFAULT};
@@ -36,15 +36,27 @@ const base::Feature kOfflinePagesSharingFeature{
 const base::Feature kOfflinePagesSvelteConcurrentLoadingFeature{
     "OfflinePagesSvelteConcurrentLoading", base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kOfflinePagesLoadSignalCollectingFeature{
+    "OfflinePagesLoadSignalCollecting", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kOfflinePagesRenovationsFeature{
+    "OfflinePagesRenovations", base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kBackgroundLoaderForDownloadsFeature{
     "BackgroundLoadingForDownloads", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kOfflinePagesAsyncDownloadFeature{
     "OfflinePagesAsyncDownload", base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kPrefetchingOfflinePagesFeature{
+    "OfflinePagesPrefetching", base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kNewBackgroundLoaderFeature {
     "BackgroundLoader", base::FEATURE_DISABLED_BY_DEFAULT
 };
+
+const base::Feature kOfflinePagesCTV2Feature{"OfflinePagesCTV2",
+                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
 bool IsOfflineBookmarksEnabled() {
   return base::FeatureList::IsEnabled(kOfflineBookmarksFeature);
@@ -75,6 +87,18 @@ bool IsOfflinePagesAsyncDownloadEnabled() {
   return base::FeatureList::IsEnabled(kOfflinePagesAsyncDownloadFeature);
 }
 
+bool IsPrefetchingOfflinePagesEnabled() {
+  return base::FeatureList::IsEnabled(kPrefetchingOfflinePagesFeature);
+}
+
+bool IsOfflinePagesLoadSignalCollectingEnabled() {
+  return base::FeatureList::IsEnabled(kOfflinePagesLoadSignalCollectingFeature);
+}
+
+bool IsOfflinePagesRenovationsEnabled() {
+  return base::FeatureList::IsEnabled(kOfflinePagesRenovationsFeature);
+}
+
 bool ShouldUseNewBackgroundLoader() {
   return base::FeatureList::IsEnabled(kNewBackgroundLoaderFeature);
 }
@@ -82,6 +106,10 @@ bool ShouldUseNewBackgroundLoader() {
 bool ShouldUseTestingSnapshotDelay() {
   base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   return cl->HasSwitch(switches::kOfflinePagesUseTestingSnapshotDelay);
+}
+
+bool IsOfflinePagesCTV2Enabled() {
+  return base::FeatureList::IsEnabled(kOfflinePagesCTV2Feature);
 }
 
 }  // namespace offline_pages

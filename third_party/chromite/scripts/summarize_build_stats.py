@@ -9,6 +9,7 @@ from __future__ import print_function
 import datetime
 import itertools
 import numpy
+import operator
 import re
 import sys
 
@@ -16,6 +17,7 @@ from chromite.lib import constants
 from chromite.lib import cidb
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
+from chromite.cli.cros import cros_cidbcreds  # TODO: Move into lib???
 from chromite.lib import cros_logging as logging
 
 
@@ -260,8 +262,8 @@ class CLStatsEngine(object):
     """
     if self.builds:
       logging.info('%d total runs included, from build %d to %d.',
-                   len(self.builds), self.builds[-1]['build_number'],
-                   self.builds[0]['build_number'])
+                   len(self.builds), self.builds[0]['build_number'],
+                   self.builds[-1]['build_number'])
       total_passed = len([b for b in self.builds
                           if b['status'] == constants.BUILDER_STATUS_PASSED])
       logging.info('%d of %d runs passed.', total_passed, len(self.builds))
@@ -306,6 +308,11 @@ class CLStatsEngine(object):
             patch_reason_counts[x] = patch_reason_counts.get(x, 0) + 1
           for x in blames:
             patch_blame_counts[x] = patch_blame_counts.get(x, 0) + 1
+
+    patch_reason_html = ''
+    for k, v in reversed(sorted(patch_reason_counts.iteritems(),
+                                key=operator.itemgetter(1))):
+      patch_reason_html += '<tr><td>%s</td><td>%d</td></tr>\n' % (k, v)
 
     good_patch_count = len(self.claction_history.GetSubmittedPatches(False))
     false_rejection_count = {}
@@ -401,6 +408,7 @@ class CLStatsEngine(object):
         'false_rejection_cq': false_rejection_count[constants.CQ],
         'build_blame_counts': build_blame_counts,
         'patch_blame_counts': patch_blame_counts,
+        'patch_reason_html': patch_reason_html,
     }
 
     s = summary
@@ -540,8 +548,8 @@ class CLStatsEngine(object):
     """
     if self.builds:
       logging.info('%d total runs included, from build %d to %d.',
-                   len(self.builds), self.builds[-1]['build_number'],
-                   self.builds[0]['build_number'])
+                   len(self.builds), self.builds[0]['build_number'],
+                   self.builds[-1]['build_number'])
       total_passed = len([b for b in self.builds
                           if b['status'] == constants.BUILDER_STATUS_PASSED])
       logging.info('%d of %d runs passed.', total_passed, len(self.builds))
@@ -593,7 +601,7 @@ Instruction text in italic green. Places to replace are in <replace>bold red</re
   <li>Follow instructions in italic green</li>
   <li>Delete any green text</li>
   <li>Insure that all <replace>REPLACE</replace> text is replaced</li>
-  <li>Email to <a href="mailto:chromeos-infra-discuss@google.com">chromeos-infra-discuss@google.com</a>
+  <li>Email to <a href="mailto:chromeos-infra-discuss@google.com">chromeos-infra-discuss@google.com</a> and <a href="mailto:infra-product-taskforce@google.com">infra-product-taskforce@google.com</a>.
 </ol>
 </p>
 
@@ -610,14 +618,17 @@ The CQ <b>correctly rejected {unique_blames_change_count} unique changes</b> thi
 The pre-CQ <b>rejected {bad_cl_precq_rejected} changes this week</b>, which would otherwise have broken a CQ run and affected other developers.<br>
 </p>
 
+<h2>CL handling times</h2>
 <p>
-The CL handling time was <b>{cl_handling_time_50:.2f} hours</b> 50%ile <b>{cl_handling_time_90:.2f} hours</b> 90%ile.<br>
-Time spent in the CQ was <b>{cq_time_50:.2f} hours</b> 50%ile <b>{cq_time_90:.2f} hours</b> 90%ile.<br>
-Time spent waiting was <b>{wait_time_50:.2f} hours</b> 50%ile <b>{wait_time_90:.2f} hours</b> 90%ile.<br>
-CQ run time was <b>{cq_run_time_50:.2f} hours</b> 50%ile <b>{cq_run_time_90:.2f} hours</b> 90%ile.<br>
+The CL handling time was <b>{cl_handling_time_50:.2f} hours</b> 50%ile <b>{cl_handling_time_90:.2f} hours</b> 90%ile <a href="http://shortn/_bBdiNj0d83">history</a>.<br>
+Time spent in the CQ was <b>{cq_time_50:.2f} hours</b> 50%ile <b>{cq_time_90:.2f} hours</b> 90%ile <a href="http://shortn/_tuzlLWNWGy">history</a>.<br>
+Time spent waiting was <b>{wait_time_50:.2f} hours</b> 50%ile <b>{wait_time_90:.2f} hours</b> 90%ile <a href="http://shortn/_SzdPv7k7Ka">history</a>.<br>
+CQ run time was <b>{cq_run_time_50:.2f} hours</b> 50%ile <b>{cq_run_time_90:.2f} hours</b> 90%ile <a href="http://shortn/_aKsMeOcmJW">history</a>.<br>
+Pre-cq times available on <a href="http://shortn/_XK6xDPTof1">monarch history</a>.<br>
 </p>
 
 <h2>Slowest Passing Slaves</h2>
+(this determination based on last-to-complete in otherwise passing builds)
 <table>
   <tr>
     <th>Slave</th>
@@ -629,54 +640,20 @@ CQ run time was <b>{cq_run_time_50:.2f} hours</b> 50%ile <b>{cq_run_time_90:.2f}
 </table>
 </p>
 
-The tree <b>was:</b><br>
-<p id="note">
-Get this value from <a href="https://chromiumos-status.appspot.com/status_viewer?curView=stats&startTime=TODAY&numDays=7">here</a> (subtract 100% - %open - %throttled)
-</p>
-<b>
-<table>
-  <tr>
-    <td>Open</td>
-    <td>_<replace>REPLACE</replace>_</td>
-  </tr>
-  <tr>
-    <td>Throttle</td>
-    <td>_<replace>REPLACE</replace>_</td>
-  </tr>
-  <tr>
-    <td>Close</td>
-    <td>_<replace>REPLACE</replace>_</td>
-  </tr>
-</table>
-</b>
+A more accurate determination (which accounts for CQ self-destruct, relevance detection, and history-aware-submit logic) is available as a <A href="http://shortn/_RBQNer8DDk">monarch history</A>.
 
+
+<h2>False rejections</h2>
 <p>
 The pre-CQ + CQ <b>incorrectly rejected [{patch_flake_rejections}] unique changes a total of [{false_rejection_total}] times</b> this week. (Pre-CQ:[{false_rejection_pre_cq}]; CQ: [{false_rejection_cq}])<br>
 The probability of a good patch being incorrectly rejected by the CQ or Pre-CQ is [{false_rejection_rate[combined]:.2f}]%. (Pre-CQ:[{false_rejection_rate[pre-cq]:.2f}]%; CQ: [{false_rejection_rate[cq]:.2f}])<br>
+
+
 </p>
 
 <h2>Top reasons that good changes were rejected</h2>
 <table>
-  <tr>
-    <th><b>Number of rejections</b></th>
-    <th><b>Explanation</b></th>
-  </tr>
- <tr>
-   <td>[_<replace>X</replace>_]</td>
-   <td>_<replace>REPLACE</replace>_</td>
- </tr>
- <tr>
-   <td>[_<replace>X</replace>_]</td>
-   <td>_<replace>REPLACE</replace>_</td>
- </tr>
- <tr>
-   <td>[_<replace>X</replace>_]</td>
-   <td>_<replace>REPLACE</replace>_</td>
- </tr>
- <tr>
-   <td>[_<replace>X</replace>_]</td>
-   <td>_<replace>REPLACE</replace>_</td>
- </tr>
+{patch_reason_html}
 </table>
 
 <h2>Which issues or CLs caused the most false rejections this week?</h2>
@@ -691,11 +668,6 @@ The probability of a good patch being incorrectly rejected by the CQ or Pre-CQ i
 <ul>
 {build_failures_html}
 </ul>
-
-<h2>What was the patch turnaround time?</h2>
-<p id="note"> Copy/Paste in the histogram from the top of <a href="https://chromiumos-build-annotator.googleplex.com/build_annotations/builds_list/master-paladin/?num_builds={total_builds}&latest_build_id={last_build_id}">the completed build annotation page.</a>
-_<replace>IMAGE PLACEHOLDER</replace>_<br>
-<br>
 
 <i>Generated on {datetime}</i>
 </body>
@@ -768,7 +740,7 @@ def GetParser():
   ex_group.add_argument('--past-day', action='store_true', default=False,
                         help='Limit scope to the past day up to now.')
 
-  parser.add_argument('--cred-dir', action='store', required=True,
+  parser.add_argument('--cred-dir', action='store',
                       metavar='CIDB_CREDENTIALS_DIR',
                       help='Database credentials directory with certificates '
                            'and other connection information. Obtain your '
@@ -801,7 +773,11 @@ def main(argv):
   if not _CheckOptions(options):
     sys.exit(1)
 
-  db = cidb.CIDBConnection(options.cred_dir)
+  credentials = options.cred_dir
+  if not credentials:
+    credentials = cros_cidbcreds.CheckAndGetCIDBCreds()
+
+  db = cidb.CIDBConnection(credentials)
 
   if options.end_date:
     end_date = options.end_date
@@ -813,12 +789,18 @@ def main(argv):
     start_date = options.start_date
   else:
     assert options.past_month or options.past_week or options.past_day
+    # Database search results will include both the starting and ending
+    # days.  So, the number of days to subtract is one less than the
+    # length of the search period.
+    #
+    # For instance, the starting day for the week ending 2014-04-21
+    # should be 2017-04-15 (date - 6 days).
     if options.past_month:
-      start_date = end_date - datetime.timedelta(days=30)
+      start_date = end_date - datetime.timedelta(days=29)
     elif options.past_week:
-      start_date = end_date - datetime.timedelta(days=7)
+      start_date = end_date - datetime.timedelta(days=6)
     else:
-      start_date = end_date - datetime.timedelta(days=1)
+      start_date = end_date
 
   if options.build_type == 'cq':
     master_config = constants.CQ_MASTER

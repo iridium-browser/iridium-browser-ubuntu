@@ -26,6 +26,10 @@
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 
 struct PromoStringToIdsMapEntry {
@@ -35,20 +39,18 @@ struct PromoStringToIdsMapEntry {
 
 // A mapping from a string to a l10n message id.
 const PromoStringToIdsMapEntry kPromoStringToIdsMap[] = {
-    {"IDS_IOS_APP_RATING_PROMO_STRING", IDS_IOS_APP_RATING_PROMO_STRING},
-    {"IDS_IOS_MOVE_TO_DOCK_FASTER_ACCESS", IDS_IOS_MOVE_TO_DOCK_FASTER_ACCESS},
-    {"IDS_IOS_MOVE_TO_DOCK_LOVE_CHROME", IDS_IOS_MOVE_TO_DOCK_LOVE_CHROME},
-    {"IDS_IOS_MOVE_TO_DOCK_TIP", IDS_IOS_MOVE_TO_DOCK_TIP},
+    {"appRatingPromo", IDS_IOS_APP_RATING_PROMO_STRING},
+    {"moveToDockTip", IDS_IOS_MOVE_TO_DOCK_TIP},
 };
 
 // Returns a localized version of |promo_text| if it has an entry in the
-// |kPromoStringToIdsMap|. If there is no entry, |promo_text| is returned.
+// |kPromoStringToIdsMap|. If there is no entry, an empty string is returned.
 std::string GetLocalizedPromoText(const std::string& promo_text) {
   for (size_t i = 0; i < arraysize(kPromoStringToIdsMap); ++i) {
     if (kPromoStringToIdsMap[i].promo_text_str == promo_text)
       return l10n_util::GetStringUTF8(kPromoStringToIdsMap[i].message_id);
   }
-  return promo_text;
+  return std::string();
 }
 
 }  // namespace
@@ -69,23 +71,11 @@ bool NotificationPromoWhatsNew::Init() {
   if (forceEnabled != experimental_flags::WHATS_NEW_DEFAULT) {
     switch (forceEnabled) {
       case experimental_flags::WHATS_NEW_APP_RATING:
-        InjectFakePromo("1", "IDS_IOS_APP_RATING_PROMO_STRING",
-                        "chrome_command", "ratethisapp", "", "RateThisAppPromo",
-                        "logo");
-        break;
-      case experimental_flags::WHATS_NEW_MOVE_TO_DOCK_FASTER:
-        InjectFakePromo("2", "IDS_IOS_MOVE_TO_DOCK_FASTER_ACCESS", "url", "",
-                        "https://support.google.com/chrome/?p=iphone_dock",
-                        "MoveToDockFasterAccessPromo",
-                        "logoWithRoundedRectangle");
-        break;
-      case experimental_flags::WHATS_NEW_MOVE_TO_DOCK_LOVE:
-        InjectFakePromo("3", "IDS_IOS_MOVE_TO_DOCK_LOVE_CHROME", "url", "",
-                        "https://support.google.com/chrome/?p=iphone_dock",
-                        "MoveToDockLovePromo", "logoWithRoundedRectangle");
+        InjectFakePromo("1", "appRatingPromo", "chrome_command", "ratethisapp",
+                        "", "RateThisAppPromo", "logo");
         break;
       case experimental_flags::WHATS_NEW_MOVE_TO_DOCK_TIP:
-        InjectFakePromo("4", "IDS_IOS_MOVE_TO_DOCK_TIP", "url", "",
+        InjectFakePromo("2", "moveToDockTip", "url", "",
                         "https://support.google.com/chrome/?p=iphone_dock",
                         "MoveToDockTipPromo", "logoWithRoundedRectangle");
         break;
@@ -95,8 +85,7 @@ bool NotificationPromoWhatsNew::Init() {
     }
   }
 
-  notification_promo_.InitFromPrefs(
-      ios::NotificationPromo::MOBILE_NTP_WHATS_NEW_PROMO);
+  notification_promo_.InitFromPrefs();
   return InitFromNotificationPromo();
 }
 
@@ -105,8 +94,7 @@ bool NotificationPromoWhatsNew::ClearAndInitFromJson(
   // This clears away old promos.
   notification_promo_.MigrateUserPrefs(local_state_);
 
-  notification_promo_.InitFromJson(
-      json, ios::NotificationPromo::MOBILE_NTP_WHATS_NEW_PROMO);
+  notification_promo_.InitFromJson(json);
   return InitFromNotificationPromo();
 }
 
@@ -139,12 +127,6 @@ bool NotificationPromoWhatsNew::CanShow() const {
     if (last_view_time < base::Time::Now()) {
       return false;
     }
-  }
-
-  if (promo_name_ == "WKWVGotFasterPromo") {
-    // Promo is not relevant anymore: It was shown during the migration to the
-    // WKWebview.
-    return false;
   }
 
   return true;
@@ -195,21 +177,23 @@ WhatsNewIcon NotificationPromoWhatsNew::ParseIconName(
 bool NotificationPromoWhatsNew::InitFromNotificationPromo() {
   valid_ = false;
 
-  notification_promo_.promo_payload()->GetString("promo_type", &promo_type_);
-  notification_promo_.promo_payload()->GetString("metric_name", &metric_name_);
   promo_text_ = GetLocalizedPromoText(notification_promo_.promo_text());
+  if (promo_text_.empty())
+    return valid_;
 
+  notification_promo_.promo_payload()->GetString("metric_name", &metric_name_);
+  if (metric_name_.empty())
+    return valid_;
+
+  notification_promo_.promo_payload()->GetString("promo_type", &promo_type_);
   if (IsURLPromo()) {
     std::string url_text;
     notification_promo_.promo_payload()->GetString("url", &url_text);
     url_ = GURL(url_text);
     if (url_.is_empty() || !url_.is_valid()) {
-      valid_ = false;
       return valid_;
     }
-  }
-
-  if (IsChromeCommand()) {
+  } else if (IsChromeCommand()) {
     std::string command;
     notification_promo_.promo_payload()->GetString("command", &command);
     if (command == "bookmark") {
@@ -217,20 +201,19 @@ bool NotificationPromoWhatsNew::InitFromNotificationPromo() {
     } else if (command == "ratethisapp") {
       command_id_ = IDC_RATE_THIS_APP;
     } else {
-      valid_ = false;
       return valid_;
     }
+  } else {  // If |promo_type_| is not set to URL or Command, return early.
+    return valid_;
   }
 
-  valid_ =
-      !metric_name_.empty() && !promo_type_.empty() && !promo_text_.empty();
+  valid_ = true;
 
-  notification_promo_.promo_payload()->GetString("promo_name", &promo_name_);
+  // Optional values don't need validation.
   std::string icon_name;
   notification_promo_.promo_payload()->GetString("icon", &icon_name);
   icon_ = ParseIconName(icon_name);
 
-  // Optional values don't need validation.
   seconds_since_install_ = 0;
   notification_promo_.promo_payload()->GetInteger("seconds_since_install",
                                                   &seconds_since_install_);
@@ -281,7 +264,6 @@ void NotificationPromoWhatsNew::InjectFakePromo(const std::string& promo_id,
       base::JSONReader::Read(promo_json_filled_in));
   base::DictionaryValue* dict = NULL;
   if (value->GetAsDictionary(&dict)) {
-    notification_promo_.InitFromJson(
-        *dict, ios::NotificationPromo::MOBILE_NTP_WHATS_NEW_PROMO);
+    notification_promo_.InitFromJson(*dict);
   }
 }

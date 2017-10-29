@@ -84,8 +84,7 @@ public class BookmarkWidgetService extends RemoteViewsService {
     // TODO(crbug.com/635567): Fix this properly.
     @SuppressLint("DefaultLocale")
     static SharedPreferences getWidgetState(Context context, int widgetId) {
-        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        StrictMode.allowThreadDiskWrites();
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
         try {
             return context.getSharedPreferences(
                     String.format("widgetState-%d", widgetId),
@@ -416,6 +415,12 @@ public class BookmarkWidgetService extends RemoteViewsService {
                 if (position == 0) return mCurrentFolder.folder;
                 position--;
             }
+
+            // This is necessary because when Chrome is cleared from Application settings, Bookmark
+            // widget will not be notified and it causes inconsistency between model and widget.
+            // Then if the widget is quickly scrolled down, this has an IndexOutOfBound error.
+            if (mCurrentFolder.children.size() <= position) return null;
+
             return mCurrentFolder.children.get(position);
         }
 
@@ -454,7 +459,9 @@ public class BookmarkWidgetService extends RemoteViewsService {
         @BinderThread
         @Override
         public long getItemId(int position) {
-            return getBookmarkForPosition(position).id.getId();
+            Bookmark bookmark = getBookmarkForPosition(position);
+            if (bookmark == null) return BookmarkId.INVALID_FOLDER_ID;
+            return bookmark.id.getId();
         }
 
         @BinderThread

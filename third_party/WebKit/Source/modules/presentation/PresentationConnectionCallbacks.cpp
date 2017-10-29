@@ -4,49 +4,59 @@
 
 #include "modules/presentation/PresentationConnectionCallbacks.h"
 
+#include <memory>
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
 #include "modules/presentation/PresentationConnection.h"
 #include "modules/presentation/PresentationError.h"
 #include "modules/presentation/PresentationRequest.h"
+#include "platform/wtf/PtrUtil.h"
 #include "public/platform/modules/presentation/WebPresentationError.h"
-#include "wtf/PtrUtil.h"
-#include <memory>
 
 namespace blink {
 
 PresentationConnectionCallbacks::PresentationConnectionCallbacks(
     ScriptPromiseResolver* resolver,
     PresentationRequest* request)
-    : m_resolver(resolver), m_request(request), m_connection(nullptr) {
-  ASSERT(m_resolver);
-  ASSERT(m_request);
+    : resolver_(resolver), request_(request), connection_(nullptr) {
+  DCHECK(resolver_);
+  DCHECK(request_);
 }
 
-void PresentationConnectionCallbacks::onSuccess(
-    const WebPresentationSessionInfo& sessionInfo) {
-  if (!m_resolver->getExecutionContext() ||
-      m_resolver->getExecutionContext()->isContextDestroyed()) {
+PresentationConnectionCallbacks::PresentationConnectionCallbacks(
+    ScriptPromiseResolver* resolver,
+    PresentationConnection* connection)
+    : resolver_(resolver), request_(nullptr), connection_(connection) {
+  DCHECK(resolver_);
+  DCHECK(connection_);
+}
+
+void PresentationConnectionCallbacks::OnSuccess(
+    const WebPresentationInfo& presentation_info) {
+  if (!resolver_->GetExecutionContext() ||
+      resolver_->GetExecutionContext()->IsContextDestroyed()) {
     return;
   }
 
-  m_connection =
-      PresentationConnection::take(m_resolver.get(), sessionInfo, m_request);
-  m_resolver->resolve(m_connection);
+  if (!connection_ && request_) {
+    connection_ = PresentationConnection::Take(resolver_.Get(),
+                                               presentation_info, request_);
+  }
+  resolver_->Resolve(connection_);
 }
 
-void PresentationConnectionCallbacks::onError(
+void PresentationConnectionCallbacks::OnError(
     const WebPresentationError& error) {
-  if (!m_resolver->getExecutionContext() ||
-      m_resolver->getExecutionContext()->isContextDestroyed()) {
+  if (!resolver_->GetExecutionContext() ||
+      resolver_->GetExecutionContext()->IsContextDestroyed()) {
     return;
   }
-  m_resolver->reject(PresentationError::take(error));
-  m_connection = nullptr;
+  resolver_->Reject(PresentationError::Take(error));
+  connection_ = nullptr;
 }
 
-WebPresentationConnection* PresentationConnectionCallbacks::getConnection() {
-  return m_connection ? m_connection.get() : nullptr;
+WebPresentationConnection* PresentationConnectionCallbacks::GetConnection() {
+  return connection_ ? connection_.Get() : nullptr;
 }
 
 }  // namespace blink

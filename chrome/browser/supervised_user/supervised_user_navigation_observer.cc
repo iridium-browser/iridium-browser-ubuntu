@@ -37,39 +37,33 @@ SupervisedUserNavigationObserver::SupervisedUserNavigationObserver(
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   supervised_user_service_ =
       SupervisedUserServiceFactory::GetForProfile(profile);
-  url_filter_ = supervised_user_service_->GetURLFilterForUIThread();
+  url_filter_ = supervised_user_service_->GetURLFilter();
   supervised_user_service_->AddObserver(this);
 }
 
 // static
 void SupervisedUserNavigationObserver::OnRequestBlocked(
-    const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
+    content::WebContents* web_contents,
     const GURL& url,
     supervised_user_error_page::FilteringBehaviorReason reason,
     const base::Callback<void(bool)>& callback) {
-  content::WebContents* web_contents = web_contents_getter.Run();
-  if (!web_contents) {
-    content::BrowserThread::PostTask(
-        content::BrowserThread::IO, FROM_HERE, base::Bind(callback, false));
+  SupervisedUserNavigationObserver* navigation_observer =
+      SupervisedUserNavigationObserver::FromWebContents(web_contents);
+
+  // Cancel the navigation if there is no navigation observer.
+  if (!navigation_observer) {
+    callback.Run(false);
     return;
   }
 
-  SupervisedUserNavigationObserver* navigation_observer =
-      SupervisedUserNavigationObserver::FromWebContents(web_contents);
-  if (navigation_observer)
-    navigation_observer->OnRequestBlockedInternal(url);
-
-  // Show the interstitial.
-  const bool initial_page_load = true;
-  SupervisedUserInterstitial::Show(web_contents, url, reason, initial_page_load,
-                                   callback);
+  navigation_observer->OnRequestBlockedInternal(url, reason, callback);
 }
 
 void SupervisedUserNavigationObserver::DidFinishNavigation(
       content::NavigationHandle* navigation_handle) {
   // Only filter same page navigations (eg. pushState/popState); others will
-  // have been filtered by the ResourceThrottle.
-  if (!navigation_handle->IsSamePage())
+  // have been filtered by the NavigationThrottle.
+  if (!navigation_handle->IsSameDocument())
     return;
 
   if (!navigation_handle->IsInMainFrame())
@@ -91,7 +85,9 @@ void SupervisedUserNavigationObserver::OnURLFilterChanged() {
 }
 
 void SupervisedUserNavigationObserver::OnRequestBlockedInternal(
-    const GURL& url) {
+    const GURL& url,
+    supervised_user_error_page::FilteringBehaviorReason reason,
+    const base::Callback<void(bool)>& callback) {
   Time timestamp = Time::Now();  // TODO(bauerb): Use SaneTime when available.
   // Create a history entry for the attempt and mark it as such.
   history::HistoryAddPageArgs add_page_args(
@@ -118,6 +114,10 @@ void SupervisedUserNavigationObserver::OnRequestBlockedInternal(
           blocked_navigations_.size(), *entry));
   blocked_navigations_.push_back(std::move(serialized_entry));
   supervised_user_service_->DidBlockNavigation(web_contents());
+
+  // Show the interstitial.
+  const bool initial_page_load = true;
+  MaybeShowInterstitial(url, reason, initial_page_load, callback);
 }
 
 void SupervisedUserNavigationObserver::URLFilterCheckCallback(
@@ -129,10 +129,33 @@ void SupervisedUserNavigationObserver::URLFilterCheckCallback(
   if (url != web_contents()->GetLastCommittedURL())
     return;
 
-  const bool initial_page_load = false;
   if (behavior == SupervisedUserURLFilter::FilteringBehavior::BLOCK) {
-    SupervisedUserInterstitial::Show(web_contents(), url, reason,
-                                     initial_page_load,
-                                     base::Callback<void(bool)>());
+    const bool initial_page_load = false;
+    MaybeShowInterstitial(url, reason, initial_page_load,
+                          base::Callback<void(bool)>());
   }
+}
+
+void SupervisedUserNavigationObserver::MaybeShowInterstitial(
+    const GURL& url,
+    supervised_user_error_page::FilteringBehaviorReason reason,
+    bool initial_page_load,
+    const base::Callback<void(bool)>& callback) {
+  if (is_showing_interstitial_)
+    return;
+
+  is_showing_interstitial_ = true;
+  base::Callback<void(bool)> wrapped_callback =
+      base::Bind(&SupervisedUserNavigationObserver::OnInterstitialResult,
+                 weak_ptr_factory_.GetWeakPtr(), callback);
+  SupervisedUserInterstitial::Show(web_contents(), url, reason,
+                                   initial_page_load, wrapped_callback);
+}
+
+void SupervisedUserNavigationObserver::OnInterstitialResult(
+    const base::Callback<void(bool)>& callback,
+    bool result) {
+  is_showing_interstitial_ = false;
+  if (callback)
+    callback.Run(result);
 }

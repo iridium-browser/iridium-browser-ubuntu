@@ -18,6 +18,7 @@
 #include "media/base/stream_parser.h"
 #include "media/base/stream_parser_buffer.h"
 #include "media/base/video_codecs.h"
+#include "media/filters/source_buffer_parse_warnings.h"
 
 namespace media {
 
@@ -39,7 +40,7 @@ class MEDIA_EXPORT SourceBufferState {
   SourceBufferState(std::unique_ptr<StreamParser> stream_parser,
                     std::unique_ptr<FrameProcessor> frame_processor,
                     const CreateDemuxerStreamCB& create_demuxer_stream_cb,
-                    const scoped_refptr<MediaLog>& media_log);
+                    MediaLog* media_log);
 
   ~SourceBufferState();
 
@@ -74,7 +75,7 @@ class MEDIA_EXPORT SourceBufferState {
   // the "Coded Frame Eviction Algorithm" in the Media Source Extensions Spec.
   // Returns false iff buffer is still full after running eviction.
   // https://w3c.github.io/media-source/#sourcebuffer-coded-frame-eviction
-  bool EvictCodedFrames(DecodeTimestamp media_time, size_t newDataSize);
+  bool EvictCodedFrames(base::TimeDelta media_time, size_t newDataSize);
 
   // Gets invoked when the system is experiencing memory pressure, i.e. there's
   // not enough free memory. The |media_time| is the media playback position at
@@ -133,6 +134,9 @@ class MEDIA_EXPORT SourceBufferState {
       bool ended);
 
   void SetTracksWatcher(const Demuxer::MediaTracksUpdatedCB& tracks_updated_cb);
+
+  void SetParseWarningCallback(
+      const SourceBufferParseWarningCB& parse_warning_cb);
 
  private:
   // State advances through this list. The intent is to ensure at least one
@@ -209,7 +213,7 @@ class MEDIA_EXPORT SourceBufferState {
   DemuxerStreamMap text_streams_;
 
   std::unique_ptr<FrameProcessor> frame_processor_;
-  scoped_refptr<MediaLog> media_log_;
+  MediaLog* media_log_;
   StreamParser::InitCB init_cb_;
 
   State state_;

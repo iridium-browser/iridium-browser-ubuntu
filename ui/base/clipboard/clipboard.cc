@@ -4,7 +4,6 @@
 
 #include "ui/base/clipboard/clipboard.h"
 
-#include <algorithm>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -12,15 +11,16 @@
 #include "base/debug/dump_without_crashing.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace ui {
 
-base::LazyInstance<Clipboard::AllowedThreadsVector>
+base::LazyInstance<Clipboard::AllowedThreadsVector>::DestructorAtExit
     Clipboard::allowed_threads_ = LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<Clipboard::ClipboardMap> Clipboard::clipboard_map_ =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<Clipboard::ClipboardMap>::DestructorAtExit
+    Clipboard::clipboard_map_ = LAZY_INSTANCE_INITIALIZER;
 base::LazyInstance<base::Lock>::Leaky Clipboard::clipboard_map_lock_ =
     LAZY_INSTANCE_INITIALIZER;
 
@@ -85,6 +85,12 @@ void Clipboard::DestroyClipboardForCurrentThread() {
   if (it != clipboard_map->end())
     clipboard_map->erase(it);
 }
+
+base::Time Clipboard::GetLastModifiedTime() const {
+  return base::Time();
+}
+
+void Clipboard::ClearLastModifiedTime() {}
 
 void Clipboard::DispatchObject(ObjectType type, const ObjectMapParams& params) {
   // Ignore writes with empty parameters.
@@ -153,9 +159,7 @@ base::PlatformThreadId Clipboard::GetAndValidateThreadID() {
   // TODO(fdoray): Surround this block with #if DCHECK_IS_ON() and remove the
   // DumpWithoutCrashing() call once https://crbug.com/662055 is resolved.
   AllowedThreadsVector* allowed_threads = allowed_threads_.Pointer();
-  if (!allowed_threads->empty() &&
-      std::find(allowed_threads->begin(), allowed_threads->end(), id) ==
-          allowed_threads->end()) {
+  if (!allowed_threads->empty() && !base::ContainsValue(*allowed_threads, id)) {
     NOTREACHED();
     base::debug::DumpWithoutCrashing();
   }

@@ -31,6 +31,15 @@
 
 namespace content {
 
+class WidgetImpl : public mojom::Widget {
+ public:
+  explicit WidgetImpl(mojo::InterfaceRequest<mojom::Widget> request)
+      : binding_(this, std::move(request)) {}
+
+ private:
+  mojo::Binding<mojom::Widget> binding_;
+};
+
 class RenderViewHostTestBrowserClient : public TestContentBrowserClient {
  public:
   RenderViewHostTestBrowserClient() {}
@@ -79,7 +88,11 @@ TEST_F(RenderViewHostTest, FilterAbout) {
 // Create a full screen popup RenderWidgetHost and View.
 TEST_F(RenderViewHostTest, CreateFullscreenWidget) {
   int32_t routing_id = process()->GetNextRoutingID();
-  test_rvh()->CreateNewFullscreenWidget(routing_id);
+
+  mojom::WidgetPtr widget;
+  std::unique_ptr<WidgetImpl> widget_impl =
+      base::MakeUnique<WidgetImpl>(mojo::MakeRequest(&widget));
+  test_rvh()->CreateNewFullscreenWidget(routing_id, std::move(widget));
 }
 
 // Ensure we do not grant bindings to a process shared with unprivileged views.
@@ -105,10 +118,6 @@ class MockDraggingRenderViewHostDelegateView
     drag_url_ = drop_data.url;
     html_base_url_ = drop_data.html_base_url;
   }
-  void UpdateDragCursor(blink::WebDragOperation operation) override {}
-  void GotFocus() override {}
-  void TakeFocus(bool reverse) override {}
-  virtual void UpdatePreferredSize(const gfx::Size& pref_size) {}
 
   GURL drag_url() {
     return drag_url_;
@@ -177,8 +186,9 @@ TEST_F(RenderViewHostTest, DragEnteredFileURLsStillBlocked) {
   // TODO(paulmeyer): These will need to target the correct specific
   // RenderWidgetHost to work with OOPIFs. See crbug.com/647249.
   rvh()->GetWidget()->FilterDropData(&dropped_data);
-  rvh()->GetWidget()->DragTargetDragEnter(
-      dropped_data, client_point, screen_point, blink::WebDragOperationNone, 0);
+  rvh()->GetWidget()->DragTargetDragEnter(dropped_data, client_point,
+                                          screen_point,
+                                          blink::kWebDragOperationNone, 0);
 
   int id = process()->GetID();
   ChildProcessSecurityPolicyImpl* policy =

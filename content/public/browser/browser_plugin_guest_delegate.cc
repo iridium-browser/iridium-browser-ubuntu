@@ -6,10 +6,6 @@
 
 namespace content {
 
-bool BrowserPluginGuestDelegate::CanRunInDetachedState() const {
-  return false;
-}
-
 WebContents* BrowserPluginGuestDelegate::CreateNewGuestWindow(
     const WebContents::CreateParams& create_params) {
   NOTREACHED();
@@ -18,18 +14,6 @@ WebContents* BrowserPluginGuestDelegate::CreateNewGuestWindow(
 
 WebContents* BrowserPluginGuestDelegate::GetOwnerWebContents() const {
   return nullptr;
-}
-
-bool BrowserPluginGuestDelegate::HandleFindForEmbedder(
-    int request_id,
-    const base::string16& search_text,
-    const blink::WebFindOptions& options) {
-  return false;
-}
-
-bool BrowserPluginGuestDelegate::HandleStopFindingForEmbedder(
-    StopFindAction action) {
-  return false;
 }
 
 bool BrowserPluginGuestDelegate::CanUseCrossProcessFrames() {

@@ -6,6 +6,7 @@
  */
 
 #include "SkPictureRecord.h"
+#include "SkDrawShadowRec.h"
 #include "SkImage_Base.h"
 #include "SkPatchUtils.h"
 #include "SkPixelRef.h"
@@ -36,6 +37,7 @@ SkPictureRecord::~SkPictureRecord() {
     fPictureRefs.unrefAll();
     fDrawableRefs.unrefAll();
     fTextBlobRefs.unrefAll();
+    fVerticesRefs.unrefAll();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -97,6 +99,14 @@ void SkPictureRecord::recordSaveLayer(const SaveLayerRec& rec) {
         flatFlags |= SAVELAYERREC_HAS_FLAGS;
         size += sizeof(uint32_t);
     }
+    if (rec.fClipMask) {
+        flatFlags |= SAVELAYERREC_HAS_CLIPMASK;
+        size += sizeof(uint32_t); // clip image index
+    }
+    if (rec.fClipMatrix) {
+        flatFlags |= SAVELAYERREC_HAS_CLIPMATRIX;
+        size += rec.fClipMatrix->writeToMemory(nullptr);
+    }
 
     const size_t initialOffset = this->addDraw(SAVE_LAYER_SAVELAYERREC, &size);
     this->addInt(flatFlags);
@@ -114,6 +124,12 @@ void SkPictureRecord::recordSaveLayer(const SaveLayerRec& rec) {
     }
     if (flatFlags & SAVELAYERREC_HAS_FLAGS) {
         this->addInt(rec.fSaveLayerFlags);
+    }
+    if (flatFlags & SAVELAYERREC_HAS_CLIPMASK) {
+        this->addImage(rec.fClipMask);
+    }
+    if (flatFlags & SAVELAYERREC_HAS_CLIPMATRIX) {
+        this->addMatrix(*rec.fClipMatrix);
     }
     this->validate(initialOffset, size);
 }
@@ -217,18 +233,6 @@ void SkPictureRecord::didSetMatrix(const SkMatrix& matrix) {
     this->addMatrix(matrix);
     this->validate(initialOffset, size);
     this->INHERITED::didSetMatrix(matrix);
-}
-
-void SkPictureRecord::didTranslateZ(SkScalar z) {
-#ifdef SK_EXPERIMENTAL_SHADOWING
-    this->validate(fWriter.bytesWritten(), 0);
-    // op + scalar
-    size_t size = 1 * kUInt32Size + 1 * sizeof(SkScalar);
-    size_t initialOffset = this->addDraw(TRANSLATE_Z, &size);
-    this->addScalar(z);
-    this->validate(initialOffset, size);
-    this->INHERITED::didTranslateZ(z);
-#endif
 }
 
 static bool clipOpExpands(SkClipOp op) {
@@ -681,29 +685,6 @@ void SkPictureRecord::onDrawPicture(const SkPicture* picture, const SkMatrix* ma
     this->validate(initialOffset, size);
 }
 
-void SkPictureRecord::onDrawShadowedPicture(const SkPicture* picture,
-                                            const SkMatrix* matrix,
-                                            const SkPaint* paint,
-                                            const SkShadowParams& params) {
-    // op + picture index
-    size_t size = 2 * kUInt32Size;
-    size_t initialOffset;
-
-    // TODO: handle recording params.
-    if (nullptr == matrix && nullptr == paint) {
-        initialOffset = this->addDraw(DRAW_PICTURE, &size);
-        this->addPicture(picture);
-    } else {
-        const SkMatrix& m = matrix ? *matrix : SkMatrix::I();
-        size += m.writeToMemory(nullptr) + kUInt32Size;    // matrix + paint
-        initialOffset = this->addDraw(DRAW_PICTURE_MATRIX_PAINT, &size);
-        this->addPaintPtr(paint);
-        this->addMatrix(m);
-        this->addPicture(picture);
-    }
-    this->validate(initialOffset, size);
-}
-
 void SkPictureRecord::onDrawDrawable(SkDrawable* drawable, const SkMatrix* matrix) {
     // op + drawable index
     size_t size = 2 * kUInt32Size;
@@ -721,60 +702,16 @@ void SkPictureRecord::onDrawDrawable(SkDrawable* drawable, const SkMatrix* matri
     this->validate(initialOffset, size);
 }
 
-void SkPictureRecord::onDrawVertices(VertexMode vmode, int vertexCount,
-                                     const SkPoint vertices[], const SkPoint texs[],
-                                     const SkColor colors[], SkBlendMode bmode,
-                                     const uint16_t indices[], int indexCount,
-                                     const SkPaint& paint) {
-    uint32_t flags = 0;
-    if (texs) {
-        flags |= DRAW_VERTICES_HAS_TEXS;
-    }
-    if (colors) {
-        flags |= DRAW_VERTICES_HAS_COLORS;
-    }
-    if (indexCount > 0) {
-        flags |= DRAW_VERTICES_HAS_INDICES;
-    }
-    if (SkBlendMode::kModulate != bmode) {
-        flags |= DRAW_VERTICES_HAS_XFER;
-    }
+void SkPictureRecord::onDrawVerticesObject(const SkVertices* vertices, SkBlendMode mode,
+                                           const SkPaint& paint) {
+    // op + paint index + vertices index + mode
+    size_t size = 4 * kUInt32Size;
+    size_t initialOffset = this->addDraw(DRAW_VERTICES_OBJECT, &size);
 
-    // op + paint index + flags + vmode + vCount + vertices
-    size_t size = 5 * kUInt32Size + vertexCount * sizeof(SkPoint);
-    if (flags & DRAW_VERTICES_HAS_TEXS) {
-        size += vertexCount * sizeof(SkPoint);  // + uvs
-    }
-    if (flags & DRAW_VERTICES_HAS_COLORS) {
-        size += vertexCount * sizeof(SkColor);  // + vert colors
-    }
-    if (flags & DRAW_VERTICES_HAS_INDICES) {
-        // + num indices + indices
-        size += 1 * kUInt32Size + SkAlign4(indexCount * sizeof(uint16_t));
-    }
-    if (flags & DRAW_VERTICES_HAS_XFER) {
-        size += kUInt32Size;    // mode enum
-    }
-
-    size_t initialOffset = this->addDraw(DRAW_VERTICES, &size);
     this->addPaint(paint);
-    this->addInt(flags);
-    this->addInt(vmode);
-    this->addInt(vertexCount);
-    this->addPoints(vertices, vertexCount);
-    if (flags & DRAW_VERTICES_HAS_TEXS) {
-        this->addPoints(texs, vertexCount);
-    }
-    if (flags & DRAW_VERTICES_HAS_COLORS) {
-        fWriter.writeMul4(colors, vertexCount * sizeof(SkColor));
-    }
-    if (flags & DRAW_VERTICES_HAS_INDICES) {
-        this->addInt(indexCount);
-        fWriter.writePad(indices, indexCount * sizeof(uint16_t));
-    }
-    if (flags & DRAW_VERTICES_HAS_XFER) {
-        this->addInt((int)bmode);
-    }
+    this->addVertices(vertices);
+    this->addInt(static_cast<uint32_t>(mode));
+
     this->validate(initialOffset, size);
 }
 
@@ -847,6 +784,24 @@ void SkPictureRecord::onDrawAtlas(const SkImage* atlas, const SkRSXform xform[],
     if (cull) {
         fWriter.write(cull, sizeof(SkRect));
     }
+    this->validate(initialOffset, size);
+}
+
+void SkPictureRecord::onDrawShadowRec(const SkPath& path, const SkDrawShadowRec& rec) {
+    // op + path index + zParams + lightPos + lightRadius + spot/ambient alphas + color + flags
+    size_t size = 2 * kUInt32Size + 2 * sizeof(SkPoint3) + 3 * sizeof(SkScalar) + 2 * kUInt32Size;
+    size_t initialOffset = this->addDraw(DRAW_SHADOW_REC, &size);
+
+    this->addPath(path);
+
+    fWriter.writePoint3(rec.fZPlaneParams);
+    fWriter.writePoint3(rec.fLightPos);
+    fWriter.writeScalar(rec.fLightRadius);
+    fWriter.writeScalar(rec.fAmbientAlpha);
+    fWriter.writeScalar(rec.fSpotAlpha);
+    fWriter.write32(rec.fColor);
+    fWriter.write32(rec.fFlags);
+
     this->validate(initialOffset, size);
 }
 
@@ -982,6 +937,11 @@ void SkPictureRecord::addText(const void* text, size_t byteLength) {
 void SkPictureRecord::addTextBlob(const SkTextBlob* blob) {
     // follow the convention of recording a 1-based index
     this->addInt(find_or_append_uniqueID(fTextBlobRefs, blob) + 1);
+}
+
+void SkPictureRecord::addVertices(const SkVertices* vertices) {
+    // follow the convention of recording a 1-based index
+    this->addInt(find_or_append_uniqueID(fVerticesRefs, vertices) + 1);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -14,6 +14,8 @@
 #include "build/build_config.h"
 #include "extensions/browser/api/messaging/native_message_host.h"
 #include "remoting/host/it2me/it2me_host.h"
+#include "remoting/protocol/errors.h"
+#include "remoting/signaling/delegating_signal_strategy.h"
 
 #if !defined(OS_CHROMEOS)
 #include "remoting/host/native_messaging/log_message_handler.h"
@@ -28,7 +30,6 @@ class SingleThreadTaskRunner;
 namespace remoting {
 
 class ChromotingHostContext;
-class DelegatingSignalStrategy;
 class ElevatedNativeMessagingHost;
 class PolicyWatcher;
 
@@ -37,7 +38,7 @@ class It2MeNativeMessagingHost : public It2MeHost::Observer,
                                  public extensions::NativeMessageHost {
  public:
   It2MeNativeMessagingHost(bool needs_elevation,
-                           policy::PolicyService* policy_service,
+                           std::unique_ptr<PolicyWatcher> policy_watcher,
                            std::unique_ptr<ChromotingHostContext> host_context,
                            std::unique_ptr<It2MeHostFactory> host_factory);
   ~It2MeNativeMessagingHost() override;
@@ -54,7 +55,11 @@ class It2MeNativeMessagingHost : public It2MeHost::Observer,
                                  base::TimeDelta access_code_lifetime) override;
   void OnNatPolicyChanged(bool nat_traversal_enabled) override;
   void OnStateChanged(It2MeHostState state,
-                      const std::string& error_message) override;
+                      protocol::ErrorCode error_code) override;
+
+  // Set a callback to be called when a policy error notification has been
+  // processed.
+  void SetPolicyErrorClosureForTesting(const base::Closure& closure);
 
   static std::string HostStateToString(It2MeHostState host_state);
 
@@ -71,14 +76,18 @@ class It2MeNativeMessagingHost : public It2MeHost::Observer,
   void ProcessIncomingIq(std::unique_ptr<base::DictionaryValue> message,
                          std::unique_ptr<base::DictionaryValue> response);
   void SendErrorAndExit(std::unique_ptr<base::DictionaryValue> response,
-                        const std::string& description) const;
+                        const protocol::ErrorCode error_code) const;
+  void SendPolicyErrorAndExit() const;
   void SendMessageToClient(std::unique_ptr<base::Value> message) const;
 
   // Callback for DelegatingSignalStrategy.
   void SendOutgoingIq(const std::string& iq);
 
-  // Called when initial policies are read.
+  // Called when initial policies are read and when they change.
   void OnPolicyUpdate(std::unique_ptr<base::DictionaryValue> policies);
+
+  // Called when malformed policies are detected.
+  void OnPolicyError();
 
   // Returns whether the request was successfully sent to the elevated host.
   bool DelegateToElevatedHost(std::unique_ptr<base::DictionaryValue> message);
@@ -94,7 +103,7 @@ class It2MeNativeMessagingHost : public It2MeHost::Observer,
 #endif  // defined(OS_WIN)
 
   Client* client_ = nullptr;
-  DelegatingSignalStrategy* delegating_signal_strategy_ = nullptr;
+  DelegatingSignalStrategy::IqCallback incoming_message_callback_;
   std::unique_ptr<ChromotingHostContext> host_context_;
   std::unique_ptr<It2MeHostFactory> factory_;
   scoped_refptr<It2MeHost> it2me_host_;
@@ -116,8 +125,6 @@ class It2MeNativeMessagingHost : public It2MeHost::Observer,
   // queried our policy restrictions.
   bool policy_received_ = false;
 
-  policy::PolicyService* policy_service_ = nullptr;
-
   // Used to retrieve Chrome policies set for the local machine.
   std::unique_ptr<PolicyWatcher> policy_watcher_;
 
@@ -126,6 +133,8 @@ class It2MeNativeMessagingHost : public It2MeHost::Observer,
   // it can be executed after at least one successful policy read. This
   // variable contains the thunk if it is necessary.
   base::Closure pending_connect_;
+
+  base::Closure policy_error_closure_for_testing_;
 
   base::WeakPtr<It2MeNativeMessagingHost> weak_ptr_;
   base::WeakPtrFactory<It2MeNativeMessagingHost> weak_factory_;

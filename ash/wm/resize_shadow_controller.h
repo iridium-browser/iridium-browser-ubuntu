@@ -36,10 +36,8 @@ class ASH_EXPORT ResizeShadowController : public aura::WindowObserver {
   ResizeShadow* GetShadowForWindowForTest(aura::Window* window);
 
   // aura::WindowObserver overrides:
-  void OnWindowBoundsChanged(aura::Window* window,
-                             const gfx::Rect& old_bounds,
-                             const gfx::Rect& new_bounds) override;
-  void OnWindowDestroyed(aura::Window* window) override;
+  void OnWindowDestroying(aura::Window* window) override;
+  void OnWindowVisibilityChanging(aura::Window* window, bool visible) override;
 
  private:
   // Creates a shadow for a given window and returns it.  |window_shadows_|

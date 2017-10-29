@@ -21,95 +21,74 @@ namespace tether {
 
 namespace {
 
-// Minimum RSSI value to use for discovery. The -90 value was determined
-// empirically and is borrowed from
-// |proximity_auth::BluetoothLowEnergyConnectionFinder|.
-const int kMinDiscoveryRSSI = -90;
-
 // Valid service data must include at least 4 bytes: 2 bytes associated with the
 // scanning device (used as a scan filter) and 2 bytes which identify the
 // advertising device to the scanning device.
 const size_t kMinNumBytesInServiceData = 4;
 
-// Returns out |string|s data as a hex string.
-std::string StringToHexOfContents(const std::string& string) {
-  std::stringstream ss;
-  ss << "0x" << std::hex;
-
-  for (size_t i = 0; i < string.size(); i++) {
-    ss << static_cast<int>(string.data()[i]);
-  }
-
-  return ss.str();
-}
-
 }  // namespace
 
-BleScanner::DelegateImpl::DelegateImpl() {}
+BleScanner::ServiceDataProviderImpl::ServiceDataProviderImpl() {}
 
-BleScanner::DelegateImpl::~DelegateImpl() {}
+BleScanner::ServiceDataProviderImpl::~ServiceDataProviderImpl() {}
 
-bool BleScanner::DelegateImpl::IsBluetoothAdapterAvailable() const {
-  return device::BluetoothAdapterFactory::IsBluetoothAdapterAvailable();
-}
-
-void BleScanner::DelegateImpl::GetAdapter(
-    const device::BluetoothAdapterFactory::AdapterCallback& callback) {
-  device::BluetoothAdapterFactory::GetAdapter(callback);
-}
-
-const std::vector<uint8_t>* BleScanner::DelegateImpl::GetServiceDataForUUID(
-    const device::BluetoothUUID& service_uuid,
+const std::vector<uint8_t>*
+BleScanner::ServiceDataProviderImpl::GetServiceDataForUUID(
     device::BluetoothDevice* bluetooth_device) {
-  return bluetooth_device->GetServiceDataForUUID(service_uuid);
+  return bluetooth_device->GetServiceDataForUUID(
+      device::BluetoothUUID(kAdvertisingServiceUuid));
 }
 
 BleScanner::BleScanner(
-    const LocalDeviceDataProvider* local_device_data_provider)
-    : BleScanner(base::MakeUnique<DelegateImpl>(),
-                 cryptauth::EidGenerator::GetInstance(),
+    scoped_refptr<device::BluetoothAdapter> adapter,
+    const cryptauth::LocalDeviceDataProvider* local_device_data_provider)
+    : BleScanner(base::MakeUnique<ServiceDataProviderImpl>(),
+                 adapter,
+                 base::WrapUnique(new cryptauth::ForegroundEidGenerator()),
                  local_device_data_provider) {}
 
-BleScanner::~BleScanner() {}
-
 BleScanner::BleScanner(
-    std::unique_ptr<Delegate> delegate,
-    const cryptauth::EidGenerator* eid_generator,
-    const LocalDeviceDataProvider* local_device_data_provider)
-    : delegate_(std::move(delegate)),
-      eid_generator_(eid_generator),
+    std::unique_ptr<ServiceDataProvider> service_data_provider,
+    scoped_refptr<device::BluetoothAdapter> adapter,
+    std::unique_ptr<cryptauth::ForegroundEidGenerator> eid_generator,
+    const cryptauth::LocalDeviceDataProvider* local_device_data_provider)
+    : service_data_provider_(std::move(service_data_provider)),
+      adapter_(adapter),
+      eid_generator_(std::move(eid_generator)),
       local_device_data_provider_(local_device_data_provider),
-      is_initializing_adapter_(false),
-      is_initializing_discovery_session_(false),
       discovery_session_(nullptr),
-      weak_ptr_factory_(this) {}
+      weak_ptr_factory_(this) {
+  adapter_->AddObserver(this);
+}
+
+BleScanner::~BleScanner() {
+  adapter_->RemoveObserver(this);
+}
 
 bool BleScanner::RegisterScanFilterForDevice(
     const cryptauth::RemoteDevice& remote_device) {
-  if (!delegate_->IsBluetoothAdapterAvailable()) {
-    PA_LOG(ERROR) << "Bluetooth is not supported on this platform.";
-    return false;
-  }
-
   if (registered_remote_devices_.size() >= kMaxConcurrentAdvertisements) {
     // Each scan filter corresponds to an advertisement. Thus, the number of
     // concurrent advertisements cannot exceed the maximum number of concurrent
     // advertisements.
+    PA_LOG(WARNING) << "Attempted to start a scan for a new device when the "
+                    << "maximum number of devices have already been "
+                    << "registered.";
     return false;
   }
 
   std::vector<cryptauth::BeaconSeed> local_device_beacon_seeds;
   if (!local_device_data_provider_->GetLocalDeviceData(
           nullptr, &local_device_beacon_seeds)) {
-    // If the local device's beacon seeds could not be fetched, a scan filter
-    // cannot be generated.
+    PA_LOG(WARNING) << "Error fetching the local device's beacon seeds. Cannot "
+                    << "generate scan without beacon seeds.";
     return false;
   }
 
-  std::unique_ptr<cryptauth::EidGenerator::EidData> scan_filters =
+  std::unique_ptr<cryptauth::ForegroundEidGenerator::EidData> scan_filters =
       eid_generator_->GenerateBackgroundScanFilter(local_device_beacon_seeds);
   if (!scan_filters) {
-    // If a background scan filter cannot be generated, give up.
+    PA_LOG(WARNING) << "Error generating background scan filters. Cannot scan";
     return false;
   }
 
@@ -128,6 +107,20 @@ bool BleScanner::UnregisterScanFilterForDevice(
       UpdateDiscoveryStatus();
       return true;
     }
+  }
+
+  return false;
+}
+
+bool BleScanner::ShouldDiscoverySessionBeActive() {
+  return !registered_remote_devices_.empty();
+}
+
+bool BleScanner::IsDiscoverySessionActive() {
+  if (discovery_session_) {
+    // Once the session is stopped, the pointer is cleared.
+    DCHECK(discovery_session_->IsActive());
+    return true;
   }
 
   return false;
@@ -152,13 +145,6 @@ void BleScanner::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
-void BleScanner::AdapterPoweredChanged(device::BluetoothAdapter* adapter,
-                                       bool powered) {
-  DCHECK_EQ(adapter_.get(), adapter);
-  PA_LOG(INFO) << "Adapter power changed. Powered = " << powered;
-  UpdateDiscoveryStatus();
-}
-
 void BleScanner::DeviceAdded(device::BluetoothAdapter* adapter,
                              device::BluetoothDevice* bluetooth_device) {
   DCHECK_EQ(adapter_.get(), adapter);
@@ -171,99 +157,99 @@ void BleScanner::DeviceChanged(device::BluetoothAdapter* adapter,
   HandleDeviceUpdated(bluetooth_device);
 }
 
+void BleScanner::NotifyReceivedAdvertisementFromDevice(
+    const std::string& device_address,
+    const cryptauth::RemoteDevice& remote_device) {
+  for (auto& observer : observer_list_)
+    observer.OnReceivedAdvertisementFromDevice(device_address, remote_device);
+}
+
+void BleScanner::NotifyDiscoverySessionStateChanged(
+    bool discovery_session_active) {
+  for (auto& observer : observer_list_)
+    observer.OnDiscoverySessionStateChanged(discovery_session_active);
+}
+
 void BleScanner::UpdateDiscoveryStatus() {
-  if (registered_remote_devices_.empty()) {
-    StopDiscoverySession();
-    return;
-  }
-
-  if (is_initializing_adapter_) {
-    return;
-  } else if (!adapter_) {
-    InitializeBluetoothAdapter();
-    return;
-  }
-
-  if (!adapter_->IsPowered()) {
-    // If the adapter has powered off, no devices can be discovered.
-    StopDiscoverySession();
-    return;
-  }
-
-  if (is_initializing_discovery_session_) {
-    return;
-  } else if (!discovery_session_ ||
-             (discovery_session_ && !discovery_session_->IsActive())) {
-    StartDiscoverySession();
-  }
+  if (ShouldDiscoverySessionBeActive())
+    EnsureDiscoverySessionActive();
+  else
+    EnsureDiscoverySessionNotActive();
 }
 
-void BleScanner::InitializeBluetoothAdapter() {
-  PA_LOG(INFO) << "Initializing Bluetooth adapter.";
-  is_initializing_adapter_ = true;
-  delegate_->GetAdapter(base::Bind(&BleScanner::OnAdapterInitialized,
-                                   weak_ptr_factory_.GetWeakPtr()));
-}
-
-void BleScanner::OnAdapterInitialized(
-    scoped_refptr<device::BluetoothAdapter> adapter) {
-  DCHECK(is_initializing_adapter_ && !discovery_session_ &&
-         !is_initializing_discovery_session_);
-  PA_LOG(INFO) << "Bluetooth adapter initialized.";
-  is_initializing_adapter_ = false;
-
-  adapter_ = adapter;
-  adapter_->AddObserver(this);
-
-  UpdateDiscoveryStatus();
-}
-
-void BleScanner::StartDiscoverySession() {
+void BleScanner::EnsureDiscoverySessionActive() {
   DCHECK(adapter_);
-  PA_LOG(INFO) << "Starting discovery session.";
+
+  // If the session is active or is in the process of becoming active, there is
+  // nothing to do.
+  if (IsDiscoverySessionActive() || is_initializing_discovery_session_)
+    return;
+
   is_initializing_discovery_session_ = true;
 
-  // Discover only low energy (LE) devices with strong enough signal.
-  std::unique_ptr<device::BluetoothDiscoveryFilter> filter =
-      base::MakeUnique<device::BluetoothDiscoveryFilter>(
-          device::BLUETOOTH_TRANSPORT_LE);
-  filter->SetRSSI(kMinDiscoveryRSSI);
-
-  adapter_->StartDiscoverySessionWithFilter(
-      std::move(filter), base::Bind(&BleScanner::OnDiscoverySessionStarted,
-                                    weak_ptr_factory_.GetWeakPtr()),
+  // Note: Ideally, we would use a filter for only LE devices here. However,
+  // using a filter here triggers a bug in some kernel implementations which
+  // causes LE scanning to toggle rapidly on and off. This can cause race
+  // conditions which result in Bluetooth bugs. See crbug.com/759090.
+  // TODO(mcchou): Once these issues have been resolved, add the filter back.
+  // See crbug.com/759091.
+  adapter_->StartDiscoverySession(
+      base::Bind(&BleScanner::OnDiscoverySessionStarted,
+                 weak_ptr_factory_.GetWeakPtr()),
       base::Bind(&BleScanner::OnStartDiscoverySessionError,
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
 void BleScanner::OnDiscoverySessionStarted(
     std::unique_ptr<device::BluetoothDiscoverySession> discovery_session) {
-  PA_LOG(INFO) << "Discovery session started. Scanning fully initialized.";
   is_initializing_discovery_session_ = false;
   discovery_session_ = std::move(discovery_session);
+
+  NotifyDiscoverySessionStateChanged(true /* discovery_session_active */);
+
+  UpdateDiscoveryStatus();
 }
 
 void BleScanner::OnStartDiscoverySessionError() {
   PA_LOG(WARNING) << "Error starting discovery session. Initialization failed.";
   is_initializing_discovery_session_ = false;
+  UpdateDiscoveryStatus();
 }
 
-void BleScanner::StopDiscoverySession() {
-  if (!discovery_session_) {
-    // If there is no discovery session to stop, return early.
+void BleScanner::EnsureDiscoverySessionNotActive() {
+  // If there is no session, there is nothing to do.
+  if (!IsDiscoverySessionActive() || is_stopping_discovery_session_)
     return;
-  }
 
-  PA_LOG(WARNING) << "Stopping discovery session.";
+  is_stopping_discovery_session_ = true;
+
+  discovery_session_->Stop(base::Bind(&BleScanner::OnDiscoverySessionStopped,
+                                      weak_ptr_factory_.GetWeakPtr()),
+                           base::Bind(&BleScanner::OnStopDiscoverySessionError,
+                                      weak_ptr_factory_.GetWeakPtr()));
+}
+
+void BleScanner::OnDiscoverySessionStopped() {
+  is_stopping_discovery_session_ = false;
   discovery_session_.reset();
+
+  NotifyDiscoverySessionStateChanged(false /* discovery_session_active */);
+
+  UpdateDiscoveryStatus();
+}
+
+void BleScanner::OnStopDiscoverySessionError() {
+  PA_LOG(WARNING) << "Error stopping discovery session.";
+  is_stopping_discovery_session_ = false;
+  UpdateDiscoveryStatus();
 }
 
 void BleScanner::HandleDeviceUpdated(
     device::BluetoothDevice* bluetooth_device) {
   DCHECK(bluetooth_device);
 
-  const std::vector<uint8_t>* service_data = delegate_->GetServiceDataForUUID(
-      device::BluetoothUUID(kAdvertisingServiceUuid), bluetooth_device);
+  const std::vector<uint8_t>* service_data =
+      service_data_provider_->GetServiceDataForUUID(bluetooth_device);
   if (!service_data || service_data->size() < kMinNumBytesInServiceData) {
     // If there is no service data or the service data is of insufficient
     // length, there is not enough information to create a connection.
@@ -274,7 +260,7 @@ void BleScanner::HandleDeviceUpdated(
   std::string service_data_str;
   char* string_contents_ptr =
       base::WriteInto(&service_data_str, service_data->size() + 1);
-  memcpy(string_contents_ptr, service_data->data(), service_data->size() + 1);
+  memcpy(string_contents_ptr, service_data->data(), service_data->size());
 
   CheckForMatchingScanFilters(bluetooth_device, service_data_str);
 }
@@ -293,18 +279,16 @@ void BleScanner::CheckForMatchingScanFilters(
       eid_generator_->IdentifyRemoteDeviceByAdvertisement(
           service_data, registered_remote_devices_, beacon_seeds);
 
-  if (identified_device) {
-    PA_LOG(INFO) << "Received advertisement from remote device with ID "
-                 << identified_device->GetTruncatedDeviceIdForLogs() << ".";
-    for (auto& observer : observer_list_) {
-      observer.OnReceivedAdvertisementFromDevice(bluetooth_device->GetAddress(),
-                                                 *identified_device);
-    }
-  } else {
-    PA_LOG(INFO) << "Received advertisement remote device, but could not "
-                 << "identify the device. Service data: "
-                 << StringToHexOfContents(service_data) << ".";
-  }
+  // If the service data does not correspond to an advertisement from a device
+  // on this account, ignore it.
+  if (!identified_device)
+    return;
+
+  // Make a copy before notifying observers. Since |identified_device| refers
+  // to an instance variable, it is possible that an observer could unregister
+  // that device, which would change the value of that pointer.
+  const cryptauth::RemoteDevice copy = *identified_device;
+  NotifyReceivedAdvertisementFromDevice(bluetooth_device->GetAddress(), copy);
 }
 
 }  // namespace tether

@@ -5,6 +5,7 @@
  * found in the LICENSE file.
  */
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkCanvas.h"
 #include "SkPath.h"
 
@@ -102,8 +103,7 @@ protected:
                                                    doAAB ? "A" : "B",
                                                    doInvB ? "I" : "N");
 
-                        canvas->drawText(str.c_str(), strlen(str.c_str()), txtX, SkIntToScalar(130),
-                                         paint);
+                        canvas->drawString(str.c_str(), txtX, SkIntToScalar(130), paint);
                         if (doInvB) {
                             canvas->translate(SkIntToScalar(150),0);
                         } else {

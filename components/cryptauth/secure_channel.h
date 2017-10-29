@@ -5,7 +5,7 @@
 #ifndef COMPONENTS_CRYPTAUTH_SECURE_CHANNEL_H_
 #define COMPONENTS_CRYPTAUTH_SECURE_CHANNEL_H_
 
-#include <deque>
+#include <queue>
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -18,6 +18,8 @@
 #include "components/cryptauth/secure_message_delegate.h"
 
 namespace cryptauth {
+
+class CryptAuthService;
 
 // An authenticated bi-directional channel for exchanging messages with remote
 // devices. |SecureChannel| manages a |Connection| by initializing it and
@@ -57,28 +59,25 @@ class SecureChannel : public ConnectionObserver {
         SecureChannel* secure_channel,
         const std::string& feature,
         const std::string& payload) = 0;
-  };
 
-  class Delegate {
-   public:
-    virtual ~Delegate();
-
-    virtual std::unique_ptr<SecureMessageDelegate>
-    CreateSecureMessageDelegate() = 0;
+    // Called when a message has been sent successfully; |sequence_number|
+    // corresponds to the value returned by an earlier call to SendMessage().
+    virtual void OnMessageSent(SecureChannel* secure_channel,
+                               int sequence_number) {}
   };
 
   class Factory {
    public:
     static std::unique_ptr<SecureChannel> NewInstance(
         std::unique_ptr<Connection> connection,
-        std::unique_ptr<Delegate> delegate);
+        CryptAuthService* cryptauth_service);
 
     static void SetInstanceForTesting(Factory* factory);
 
    protected:
     virtual std::unique_ptr<SecureChannel> BuildInstance(
         std::unique_ptr<Connection> connection,
-        std::unique_ptr<Delegate> delegate);
+        CryptAuthService* cryptauth_service);
 
    private:
     static Factory* factory_instance_;
@@ -88,8 +87,11 @@ class SecureChannel : public ConnectionObserver {
 
   virtual void Initialize();
 
-  virtual void SendMessage(const std::string& feature,
-                           const std::string& payload);
+  // Sends a message over the connection and returns a sequence number. If the
+  // message is successfully sent, observers will be notified that the message
+  // has been sent and will be provided this sequence number.
+  virtual int SendMessage(const std::string& feature,
+                          const std::string& payload);
 
   virtual void Disconnect();
 
@@ -112,28 +114,33 @@ class SecureChannel : public ConnectionObserver {
 
  protected:
   SecureChannel(std::unique_ptr<Connection> connection,
-                std::unique_ptr<Delegate> delegate);
+                CryptAuthService* cryptauth_service);
 
   Status status_;
 
  private:
+  friend class CryptAuthSecureChannelTest;
+
   // Message waiting to be sent. Note that this is *not* the message that will
   // end up being sent over the wire; before that can be done, the payload must
   // be encrypted.
   struct PendingMessage {
-    PendingMessage();
-    PendingMessage(const std::string& feature, const std::string& payload);
+    PendingMessage(const std::string& feature,
+                   const std::string& payload,
+                   int sequence_number);
     virtual ~PendingMessage();
 
     const std::string feature;
     const std::string payload;
+    const int sequence_number;
   };
 
   void TransitionToStatus(const Status& new_status);
   void Authenticate();
   void ProcessMessageQueue();
-  void OnMessageEncoded(
-      const std::string& feature, const std::string& encoded_message);
+  void OnMessageEncoded(const std::string& feature,
+                        int sequence_number,
+                        const std::string& encoded_message);
   void OnMessageDecoded(
       const std::string& feature, const std::string& decoded_message);
   void OnAuthenticationResult(
@@ -141,11 +148,12 @@ class SecureChannel : public ConnectionObserver {
       std::unique_ptr<SecureContext> secure_context);
 
   std::unique_ptr<Connection> connection_;
-  std::unique_ptr<Delegate> delegate_;
+  CryptAuthService* cryptauth_service_;  // Outlives this instance.
   std::unique_ptr<Authenticator> authenticator_;
   std::unique_ptr<SecureContext> secure_context_;
-  std::deque<PendingMessage> queued_messages_;
+  std::queue<std::unique_ptr<PendingMessage>> queued_messages_;
   std::unique_ptr<PendingMessage> pending_message_;
+  int next_sequence_number_ = 0;
   base::ObserverList<Observer> observer_list_;
   base::WeakPtrFactory<SecureChannel> weak_ptr_factory_;
 

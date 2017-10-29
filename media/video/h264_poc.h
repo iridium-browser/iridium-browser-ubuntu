@@ -19,12 +19,18 @@ class MEDIA_EXPORT H264POC {
   H264POC();
   ~H264POC();
 
-  // Compute the picture order count for a slice, storing the result into
-  // |*pic_order_cnt|.
-  bool ComputePicOrderCnt(
-      const H264SPS* sps,
-      const H264SliceHeader& slice_hdr,
-      int32_t* pic_order_cnt);
+  // Returns the picture order count for a slice.
+  base::Optional<int32_t> ComputePicOrderCnt(const H264SPS* sps,
+                                             const H264SliceHeader& slice_hdr);
+
+  // As specified, the POC of a frame with MMCO5 changes (to zero) after
+  // decoding. We instead return 0 immediately, and flag that this has occurred
+  // by returning true here until ComputePicOrderCnt() is called again.
+  //
+  // Frames with MMCO5 do not reorder relative to frames earlier in decode
+  // order, but may reorder relative to frames later in decode order (just like
+  // IDRs).
+  bool IsPendingMMCO5() { return pending_mmco5_; }
 
   // Reset computation state. It's best (although not strictly required) to call
   // this after a seek.
@@ -35,6 +41,7 @@ class MEDIA_EXPORT H264POC {
   int32_t ref_pic_order_cnt_lsb_;
   int32_t prev_frame_num_;
   int32_t prev_frame_num_offset_;
+  bool pending_mmco5_;
 
   DISALLOW_COPY_AND_ASSIGN(H264POC);
 };

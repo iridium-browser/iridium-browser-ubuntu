@@ -39,6 +39,7 @@ import traceback
 
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_event
+from chromite.lib import portage_util
 from chromite.lib import process_util
 from chromite.lib import proctitle
 
@@ -276,7 +277,9 @@ class DepGraphGenerator(object):
         self.unpack_only = True
       elif arg.startswith("--eventlogfile="):
         log_file_name = arg.replace("--eventlogfile=", "")
-        cros_event.setEventLogger(cros_event.getEventFileLogger(log_file_name))
+        event_logger = cros_event.getEventFileLogger(log_file_name)
+        event_logger.setKind('ParallelEmerge')
+        cros_event.setEventLogger(event_logger)
       else:
         # Not one of our options, so pass through to emerge.
         emerge_args.append(arg)
@@ -469,7 +472,7 @@ class DepGraphGenerator(object):
     if "--quiet" not in emerge.opts:
       print("Calculating deps...")
 
-    with cros_event.newEvent(kind="GenerateDepTree"):
+    with cros_event.newEvent(task_name="GenerateDepTree"):
       self.CreateDepgraph(emerge, packages)
       depgraph = emerge.depgraph
 
@@ -848,10 +851,10 @@ class EmergeJobState(object):
 
   __slots__ = ["done", "filename", "last_notify_timestamp", "last_output_seek",
                "last_output_timestamp", "pkgname", "retcode", "start_timestamp",
-               "target", "fetch_only", "unpack_only"]
+               "target", "try_count", "fetch_only", "unpack_only"]
 
   def __init__(self, target, pkgname, done, filename, start_timestamp,
-               retcode=None, fetch_only=False, unpack_only=False):
+               retcode=None, fetch_only=False, try_count=0, unpack_only=False):
 
     # The full name of the target we're building (e.g.
     # virtual/target-os-1-r60)
@@ -882,6 +885,9 @@ class EmergeJobState(object):
 
     # The return code of our job, if the job is actually finished.
     self.retcode = retcode
+
+    # Number of tries for this job
+    self.try_count = try_count
 
     # Was this just a fetch job?
     self.fetch_only = fetch_only
@@ -915,19 +921,30 @@ def SetupWorkerSignals():
   signal.signal(signal.SIGTERM, ExitHandler)
 
 
-def EmergeProcess(output, target, *args, **kwargs):
+def EmergeProcess(output, job_state, *args, **kwargs):
   """Merge a package in a subprocess.
 
   Args:
     output: Temporary file to write output.
-    target: The package we'll be processing (for display purposes).
+    job_state: Stored state of package
     *args: Arguments to pass to Scheduler constructor.
     **kwargs: Keyword arguments to pass to Scheduler constructor.
 
   Returns:
     The exit code returned by the subprocess.
   """
-  event = cros_event.newEvent(kind="EmergePackage", package=target)
+
+  target = job_state.target
+
+  job_state.try_count += 1
+
+  cpv = portage_util.SplitCPV(target)
+
+  event = cros_event.newEvent(task_name="EmergePackage",
+                              name=cpv.package,
+                              category=cpv.category,
+                              version=cpv.version,
+                              try_count=job_state.try_count)
   pid = os.fork()
   if pid == 0:
     try:
@@ -965,8 +982,8 @@ def EmergeProcess(output, target, *args, **kwargs):
 
       # Actually do the merge.
       with event:
-        retval = scheduler.merge()
-        if retval != 0:
+        job_state.retcode = scheduler.merge()
+        if job_state.retcode != 0:
           event.fail(message="non-zero value returned")
 
     # We catch all exceptions here (including SystemExit, KeyboardInterrupt,
@@ -975,12 +992,12 @@ def EmergeProcess(output, target, *args, **kwargs):
     # pylint: disable=W0702
     except:
       traceback.print_exc(file=output)
-      retval = 1
+      job_state.retcode = 1
     sys.stdout.flush()
     sys.stderr.flush()
     output.flush()
     # pylint: disable=W0212
-    os._exit(retval)
+    os._exit(job_state.retcode)
   else:
     # Return the exit code of the subprocess.
     return os.waitpid(pid, 0)[1]
@@ -1005,7 +1022,7 @@ def UnpackPackage(pkg_state):
     cmd.append("--ignore-trailing-garbage=1")
   cmd.append(path)
 
-  with cros_event.newEvent(step="unpack package", **pkg_state) as event:
+  with cros_event.newEvent(task_name="UnpackPackage", **pkg_state) as event:
     result = cros_build_lib.RunCommand(cmd, cwd=root, stdout_to_pipe=True,
                                        print_cmd=False, error_code_ok=True)
 
@@ -1104,27 +1121,28 @@ def EmergeWorker(task_queue, job_queue, emerge, package_db, fetch_only=False,
                          fetch_only=fetch_only, unpack_only=unpack_only)
     job_queue.put(job)
     if "--pretend" in opts:
-      retcode = 0
+      job.retcode = 0
     else:
       try:
         emerge.scheduler_graph.mergelist = install_list
         if unpack_only:
-          retcode = UnpackPackage(pkg_state)
+          job.retcode = UnpackPackage(pkg_state)
         else:
-          retcode = EmergeProcess(output, target, settings, trees, mtimedb,
-                                  opts, spinner, favorites=emerge.favorites,
-                                  graph_config=emerge.scheduler_graph)
+          job.retcode = EmergeProcess(output, job, settings, trees, mtimedb,
+                                      opts, spinner,
+                                      favorites=emerge.favorites,
+                                      graph_config=emerge.scheduler_graph)
       except Exception:
         traceback.print_exc(file=output)
-        retcode = 1
+        job.retcode = 1
       output.close()
 
     if KILLED.is_set():
       return
 
     job = EmergeJobState(target, pkgname, True, output.name, start_timestamp,
-                         retcode, fetch_only=fetch_only,
-                         unpack_only=unpack_only)
+                         job.retcode, fetch_only=fetch_only,
+                         try_count=job.try_count, unpack_only=unpack_only)
     job_queue.put(job)
 
     # Set the title back to idle as the multiprocess pool won't destroy us;

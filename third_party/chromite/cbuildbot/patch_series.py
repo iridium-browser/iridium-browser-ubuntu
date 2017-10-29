@@ -312,21 +312,24 @@ class PatchSeries(object):
     return f
 
   @_ManifestDecorator
-  def GetGitRepoForChange(self, change, strict=False):
+  def GetGitRepoForChange(self, change, strict=False, manifest=None):
     """Get the project path associated with the specified change.
 
     Args:
       change: The change to operate on.
       strict: If True, throw ChangeNotInManifest rather than returning
         None. Default: False.
+      manifest: A ManifestCheckout instance representing what we're working on.
 
     Returns:
       The project path if found in the manifest. Otherwise returns
       None (if strict=False).
     """
     project_dir = None
-    if self.manifest:
-      checkout = change.GetCheckout(self.manifest, strict=strict)
+    if manifest is None:
+      manifest = self.manifest
+    if manifest:
+      checkout = change.GetCheckout(manifest, strict=strict)
       if checkout is not None:
         project_dir = checkout.GetPath(absolute=True)
 
@@ -528,7 +531,7 @@ class PatchSeries(object):
       ordered_plan, seen = [], set()
       for change in unordered_plan:
         # Iterate over the required CLs, adding them to our plan in order.
-        new_changes = list(dep_change for dep_change in deps[change]
+        new_changes = list(dep_change for dep_change in deps.get(change, [])
                            if dep_change not in seen)
         new_plan_size = len(ordered_plan) + len(new_changes)
         if not max_txn_length or new_plan_size <= max_txn_length:
@@ -683,10 +686,14 @@ class PatchSeries(object):
     """
     self._lookup_cache.Inject(*changes)
 
-  def FetchChanges(self, changes):
+  def FetchChanges(self, changes, manifest=None):
     """Fetch the specified changes, if needed.
 
     If we're an external builder, internal changes are filtered out.
+
+    Args:
+      changes: A list of changes to fetch.
+      manifest: A ManifestCheckout instance representing what we're working on.
 
     Returns:
       A list of the filtered changes and a list of
@@ -705,7 +712,7 @@ class PatchSeries(object):
 
       repo = None
       try:
-        repo = self.GetGitRepoForChange(change, strict=True)
+        repo = self.GetGitRepoForChange(change, strict=True, manifest=manifest)
       except cros_patch.ChangeNotInManifest as e:
         logging.info('Skipping patch %s as it\'s not in manifest.', change)
         not_in_manifest.append(e)

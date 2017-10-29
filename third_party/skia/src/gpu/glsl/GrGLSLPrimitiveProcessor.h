@@ -29,6 +29,7 @@ public:
 
     using UniformHandle      = GrGLSLProgramDataManager::UniformHandle;
     using SamplerHandle      = GrGLSLUniformHandler::SamplerHandle;
+    using TexelBufferHandle  = GrGLSLUniformHandler::TexelBufferHandle;
     using ImageStorageHandle = GrGLSLUniformHandler::ImageStorageHandle;
 
     /**
@@ -74,10 +75,9 @@ public:
                  const GrPrimitiveProcessor& gp,
                  const char* outputColor,
                  const char* outputCoverage,
-                 const char* distanceVectorName,
                  const char* rtAdjustName,
                  const SamplerHandle* texSamplers,
-                 const SamplerHandle* bufferSamplers,
+                 const TexelBufferHandle* texelBuffers,
                  const ImageStorageHandle* imageStorages,
                  FPCoordTransformHandler* transformHandler)
             : fVertBuilder(vertBuilder)
@@ -89,10 +89,9 @@ public:
             , fGP(gp)
             , fOutputColor(outputColor)
             , fOutputCoverage(outputCoverage)
-            , fDistanceVectorName(distanceVectorName)
             , fRTAdjustName(rtAdjustName)
             , fTexSamplers(texSamplers)
-            , fBufferSamplers(bufferSamplers)
+            , fTexelBuffers(texelBuffers)
             , fImageStorages(imageStorages)
             , fFPCoordTransformHandler(transformHandler) {}
         GrGLSLVertexBuilder* fVertBuilder;
@@ -104,10 +103,9 @@ public:
         const GrPrimitiveProcessor& fGP;
         const char* fOutputColor;
         const char* fOutputCoverage;
-        const char* fDistanceVectorName;
         const char* fRTAdjustName;
         const SamplerHandle* fTexSamplers;
-        const SamplerHandle* fBufferSamplers;
+        const TexelBufferHandle* fTexelBuffers;
         const ImageStorageHandle* fImageStorages;
         FPCoordTransformHandler* fFPCoordTransformHandler;
     };

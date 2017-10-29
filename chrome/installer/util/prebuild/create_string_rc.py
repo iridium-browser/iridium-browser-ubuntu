@@ -30,6 +30,7 @@ IDS_L10N_OFFSET_* for the language we are interested in.
 """
 
 import argparse
+import exceptions
 import glob
 import io
 import os
@@ -43,33 +44,112 @@ sys.path.append(os.path.join(BASEDIR, '../../../../tools/python'))
 from grit.extern import tclib
 
 # The IDs of strings we want to import from the .grd files and include in
-# setup.exe's resources.
+# setup.exe's resources. These strings are universal for all brands.
 STRING_IDS = [
-  'IDS_PRODUCT_NAME',
-  'IDS_SXS_SHORTCUT_NAME',
-  'IDS_PRODUCT_DESCRIPTION',
   'IDS_ABOUT_VERSION_COMPANY_NAME',
-  'IDS_INSTALL_HIGHER_VERSION',
+  'IDS_APP_SHORTCUTS_SUBDIR_NAME',
+  'IDS_INBOUND_MDNS_RULE_DESCRIPTION',
+  'IDS_INBOUND_MDNS_RULE_NAME',
+  'IDS_INSTALL_EXISTING_VERSION_LAUNCHED',
   'IDS_INSTALL_FAILED',
-  'IDS_SAME_VERSION_REPAIR_FAILED',
-  'IDS_SETUP_PATCH_FAILED',
-  'IDS_INSTALL_OS_NOT_SUPPORTED',
+  'IDS_INSTALL_HIGHER_VERSION',
+  'IDS_INSTALL_INSUFFICIENT_RIGHTS',
+  'IDS_INSTALL_INVALID_ARCHIVE',
   'IDS_INSTALL_OS_ERROR',
+  'IDS_INSTALL_OS_NOT_SUPPORTED',
   'IDS_INSTALL_SINGLETON_ACQUISITION_FAILED',
   'IDS_INSTALL_TEMP_DIR_FAILED',
   'IDS_INSTALL_UNCOMPRESSION_FAILED',
-  'IDS_INSTALL_INVALID_ARCHIVE',
-  'IDS_INSTALL_INSUFFICIENT_RIGHTS',
-  'IDS_SHORTCUT_TOOLTIP',
+  'IDS_PRODUCT_DESCRIPTION',
+  'IDS_PRODUCT_NAME',
+  'IDS_SAME_VERSION_REPAIR_FAILED',
+  'IDS_SETUP_PATCH_FAILED',
   'IDS_SHORTCUT_NEW_WINDOW',
-  'IDS_APP_SHORTCUTS_SUBDIR_NAME',
-  'IDS_APP_SHORTCUTS_SUBDIR_NAME_CANARY',
-  'IDS_INBOUND_MDNS_RULE_NAME',
-  'IDS_INBOUND_MDNS_RULE_NAME_CANARY',
-  'IDS_INBOUND_MDNS_RULE_DESCRIPTION',
-  'IDS_INBOUND_MDNS_RULE_DESCRIPTION_CANARY',
-  'IDS_INSTALL_EXISTING_VERSION_LAUNCHED',
+  'IDS_SHORTCUT_TOOLTIP',
 ]
+
+# Certain strings are conditional on a brand's install mode (see
+# chrome/install_static/install_modes.h for details). This allows
+# installer::GetLocalizedString to return a resource specific to the current
+# install mode at runtime (e.g., "Google Chrome SxS" as IDS_SHORTCUT_NAME for
+# the localized shortcut name for Google Chrome's canary channel).
+# l10n_util::GetStringUTF16 (used within the rest of Chrome) is unaffected, and
+# will always return the requested string.
+#
+# This mapping provides brand- and mode-specific string ids for a given input id
+# as described here:
+# {
+#   resource_id_1: {  # A resource ID for use with GetLocalizedString.
+#     brand_1: [  # 'google_chrome', for example.
+#       string_id_1,  # Strings listed in order of the brand's modes, as
+#       string_id_2,  # specified in install_static::InstallConstantIndex.
+#       ...
+#       string_id_N,
+#     ],
+#     brand_2: [  # 'chromium', for example.
+#       ...
+#     ],
+#   },
+#   resource_id_2:  ...
+# }
+# 'resource_id_1' names an existing string ID. All calls to
+# installer::GetLocalizedString with this string ID will map to the
+# mode-specific string.
+#
+# Note: Update the test expectations in GetBaseMessageIdForMode.GoogleStringIds
+# when adding to/modifying this structure.
+MODE_SPECIFIC_STRINGS = {
+  'IDS_APP_SHORTCUTS_SUBDIR_NAME': {
+    'google_chrome': [
+      'IDS_APP_SHORTCUTS_SUBDIR_NAME',
+      'IDS_APP_SHORTCUTS_SUBDIR_NAME_BETA',
+      'IDS_APP_SHORTCUTS_SUBDIR_NAME_DEV',
+      'IDS_APP_SHORTCUTS_SUBDIR_NAME_CANARY',
+    ],
+    'chromium': [
+      'IDS_APP_SHORTCUTS_SUBDIR_NAME',
+    ],
+  },
+  'IDS_INBOUND_MDNS_RULE_DESCRIPTION': {
+    'google_chrome': [
+      'IDS_INBOUND_MDNS_RULE_DESCRIPTION',
+      'IDS_INBOUND_MDNS_RULE_DESCRIPTION_BETA',
+      'IDS_INBOUND_MDNS_RULE_DESCRIPTION_DEV',
+      'IDS_INBOUND_MDNS_RULE_DESCRIPTION_CANARY',
+    ],
+    'chromium': [
+      'IDS_INBOUND_MDNS_RULE_DESCRIPTION',
+    ],
+  },
+  'IDS_INBOUND_MDNS_RULE_NAME': {
+    'google_chrome': [
+      'IDS_INBOUND_MDNS_RULE_NAME',
+      'IDS_INBOUND_MDNS_RULE_NAME_BETA',
+      'IDS_INBOUND_MDNS_RULE_NAME_DEV',
+      'IDS_INBOUND_MDNS_RULE_NAME_CANARY',
+    ],
+    'chromium': [
+      'IDS_INBOUND_MDNS_RULE_NAME',
+    ],
+  },
+  # In contrast to the strings above, this one (IDS_PRODUCT_NAME) is used
+  # throughout Chrome in mode-independent contexts. Within the installer (the
+  # place where this mapping matters), it is only used for mode-specific strings
+  # such as the name of Chrome's shortcut.
+  'IDS_PRODUCT_NAME': {
+    'google_chrome': [
+      'IDS_PRODUCT_NAME',
+      'IDS_SHORTCUT_NAME_BETA',
+      'IDS_SHORTCUT_NAME_DEV',
+      'IDS_SXS_SHORTCUT_NAME',
+    ],
+    'chromium': [
+      'IDS_PRODUCT_NAME',
+    ],
+  },
+}
+# Note: Update the test expectations in GetBaseMessageIdForMode.GoogleStringIds
+# when adding to/modifying the above structure.
 
 # The ID of the first resource string.
 FIRST_RESOURCE_ID = 1600
@@ -81,17 +161,17 @@ class GrdHandler(sax.handler.ContentHandler):
   Attributes:
     messages: A dict mapping string identifiers to their corresponding messages.
   """
-  def __init__(self, string_ids):
+  def __init__(self, string_id_set):
     """Constructs a handler that reads selected strings from a .grd file.
 
     The dict attribute |messages| is populated with the strings that are read.
 
     Args:
-      string_ids: A list of message identifiers to extract.
+      string_id_set: A set of message identifiers to extract.
     """
     sax.handler.ContentHandler.__init__(self)
     self.messages = {}
-    self.__id_set = set(string_ids)
+    self.__id_set = string_id_set
     self.__message_name = None
     self.__element_stack = []
     self.__text_scraps = []
@@ -215,7 +295,7 @@ class XtbHandler(sax.handler.ContentHandler):
 
 class StringRcMaker(object):
   """Makes .h and .rc files containing strings and translations."""
-  def __init__(self, name, inputs, outdir):
+  def __init__(self, name, inputs, outdir, brand):
     """Constructs a maker.
 
     Args:
@@ -227,11 +307,13 @@ class StringRcMaker(object):
     self.name = name
     self.inputs = inputs
     self.outdir = outdir
+    self.brand = brand
 
   def MakeFiles(self):
-    translated_strings = self.__ReadSourceAndTranslatedStrings()
+    string_id_set = self.__BuildStringIds()
+    translated_strings = self.__ReadSourceAndTranslatedStrings(string_id_set)
     self.__WriteRCFile(translated_strings)
-    self.__WriteHeaderFile(translated_strings)
+    self.__WriteHeaderFile(string_id_set, translated_strings)
 
   class __TranslationData(object):
     """A container of information about a single translation."""
@@ -245,7 +327,21 @@ class StringRcMaker(object):
       id_result = cmp(self.resource_id_str, other.resource_id_str)
       return cmp(self.language, other.language) if id_result == 0 else id_result
 
-  def __ReadSourceAndTranslatedStrings(self):
+  def __BuildStringIds(self):
+    """Returns the set of string IDs to extract from the grd and xtb files."""
+    # Start with the strings that apply to all brands.
+    string_id_set = set(STRING_IDS)
+    # Add in the strings for the current brand.
+    for string_id, brands in MODE_SPECIFIC_STRINGS.iteritems():
+      brand_strings = brands.get(self.brand)
+      if not brand_strings:
+        raise exceptions.RuntimeError(
+          'No strings declared for brand \'%s\' in MODE_SPECIFIC_STRINGS for '
+          'message %s' % (self.brand, string_id))
+      string_id_set.update(brand_strings)
+    return string_id_set
+
+  def __ReadSourceAndTranslatedStrings(self, string_id_set):
     """Reads the source strings and translations from all inputs."""
     translated_strings = []
     for grd_file, xtb_dir in self.inputs:
@@ -255,18 +351,20 @@ class StringRcMaker(object):
       xtb_pattern = os.path.join(os.path.dirname(grd_file), xtb_dir,
                                  '%s*.xtb' % source_name)
       translated_strings.extend(
-        self.__ReadSourceAndTranslationsFrom(grd_file, glob.glob(xtb_pattern)))
+        self.__ReadSourceAndTranslationsFrom(string_id_set, grd_file,
+                                             glob.glob(xtb_pattern)))
     translated_strings.sort()
     return translated_strings
 
-  def __ReadSourceAndTranslationsFrom(self, grd_file, xtb_files):
+  def __ReadSourceAndTranslationsFrom(self, string_id_set, grd_file, xtb_files):
     """Reads source strings and translations for a .grd file.
 
     Reads the source strings and all available translations for the messages
-    identified by STRING_IDS. The source string is used where translations are
-    missing.
+    identified by string_id_set. The source string is used where translations
+    are missing.
 
     Args:
+      string_id_set: The identifiers of the strings to read.
       grd_file: Path to a .grd file.
       xtb_files: List of paths to .xtb files.
 
@@ -276,7 +374,7 @@ class StringRcMaker(object):
     sax_parser = sax.make_parser()
 
     # Read the source (en-US) string from the .grd file.
-    grd_handler = GrdHandler(STRING_IDS)
+    grd_handler = GrdHandler(string_id_set)
     sax_parser.setContentHandler(grd_handler)
     sax_parser.parse(grd_file)
     source_strings = grd_handler.messages
@@ -340,13 +438,14 @@ class StringRcMaker(object):
                        escaped_text))
       outfile.write(FOOTER_TEXT)
 
-  def __WriteHeaderFile(self, translated_strings):
+  def __WriteHeaderFile(self, string_id_set, translated_strings):
     """Writes a .h file with resource ids."""
     # TODO(grt): Stream the lines to the file rather than building this giant
     # list of lines first.
     lines = []
     do_languages_lines = ['\n#define DO_LANGUAGES']
     installer_string_mapping_lines = ['\n#define DO_INSTALLER_STRING_MAPPING']
+    do_mode_strings_lines = ['\n#define DO_MODE_STRINGS']
 
     # Write the values for how the languages ids are offset.
     seen_languages = set()
@@ -370,8 +469,20 @@ class StringRcMaker(object):
                                       resource_id))
       resource_id += 1
 
+    # Handle mode-specific strings.
+    for string_id, brands in MODE_SPECIFIC_STRINGS.iteritems():
+      # Populate the DO_MODE_STRINGS macro.
+      brand_strings = brands.get(self.brand)
+      if not brand_strings:
+        raise exceptions.RuntimeError(
+          'No strings declared for brand \'%s\' in MODE_SPECIFIC_STRINGS for '
+          'message %s' % (self.brand, string_id))
+      do_mode_strings_lines.append(
+        '  HANDLE_MODE_STRING(%s_BASE, %s)'
+        % (string_id, ', '.join([ ('%s_BASE' % s) for s in brand_strings])))
+
     # Write out base ID values.
-    for string_id in STRING_IDS:
+    for string_id in sorted(string_id_set):
       lines.append('#define %s_BASE %s_%s' % (string_id,
                                               string_id,
                                               translated_strings[0].language))
@@ -383,6 +494,7 @@ class StringRcMaker(object):
       outfile.write('\n#ifndef RC_INVOKED')
       outfile.write(' \\\n'.join(do_languages_lines))
       outfile.write(' \\\n'.join(installer_string_mapping_lines))
+      outfile.write(' \\\n'.join(do_mode_strings_lines))
       # .rc files must end in a new line
       outfile.write('\n#endif  // ndef RC_INVOKED\n')
 
@@ -398,6 +510,12 @@ def ParseCommandLine():
 
   parser = argparse.ArgumentParser(
     description='Generate .h and .rc files for installer strings.')
+  brands = [b for b in MODE_SPECIFIC_STRINGS.itervalues().next().iterkeys()]
+  parser.add_argument('-b',
+                      choices=brands,
+                      required=True,
+                      help='identifier of the browser brand (e.g., chromium).',
+                      dest='brand')
   parser.add_argument('-i', action='append',
                       type=GrdPathAndXtbDirPair,
                       required=True,
@@ -417,7 +535,7 @@ def ParseCommandLine():
 
 def main():
   args = ParseCommandLine()
-  StringRcMaker(args.name, args.inputs, args.outdir).MakeFiles()
+  StringRcMaker(args.name, args.inputs, args.outdir, args.brand).MakeFiles()
   return 0
 
 

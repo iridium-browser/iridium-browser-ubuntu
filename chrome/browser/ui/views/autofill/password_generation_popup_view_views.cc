@@ -13,6 +13,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/background.h"
@@ -45,20 +46,21 @@ class PasswordTextBox : public views::View {
             const base::string16& generated_password,
             const gfx::FontList& font_list) {
     views::BoxLayout* box_layout = new views::BoxLayout(
-        views::BoxLayout::kVertical, 0, 12, 5);
+        views::BoxLayout::kVertical, gfx::Insets(12, 0), 5);
     box_layout->set_main_axis_alignment(
         views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
     SetLayoutManager(box_layout);
 
     views::Label* suggestion_label = new views::Label(
-        suggestion_text, font_list.DeriveWithWeight(gfx::Font::Weight::BOLD));
+        suggestion_text, views::Label::CustomFont{font_list.DeriveWithWeight(
+                             gfx::Font::Weight::BOLD)});
     suggestion_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     suggestion_label->SetEnabledColor(
         PasswordGenerationPopupView::kPasswordTextColor);
     AddChildView(suggestion_label);
 
     views::Label* password_label =
-        new views::Label(generated_password, font_list);
+        new views::Label(generated_password, {font_list});
     password_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     password_label->SetEnabledColor(
         PasswordGenerationPopupView::kPasswordTextColor);
@@ -92,7 +94,7 @@ class PasswordGenerationPopupViewViews::PasswordBox : public views::View {
             const gfx::FontList& font_list) {
     views::BoxLayout* box_layout = new views::BoxLayout(
         views::BoxLayout::kHorizontal,
-        PasswordGenerationPopupController::kHorizontalPadding, 0,
+        gfx::Insets(0, PasswordGenerationPopupController::kHorizontalPadding),
         PasswordGenerationPopupController::kHorizontalPadding);
     box_layout->set_main_axis_alignment(
         views::BoxLayout::MAIN_AXIS_ALIGNMENT_START);
@@ -142,9 +144,8 @@ PasswordGenerationPopupViewViews::PasswordGenerationPopupViewViews(
   link_style.disable_line_wrapping = false;
   help_label_->AddStyleRange(controller_->HelpTextLinkRange(), link_style);
 
-  help_label_->set_background(
-      views::Background::CreateSolidBackground(
-          kExplanatoryTextBackgroundColor));
+  help_label_->SetBackground(
+      views::CreateSolidBackground(kExplanatoryTextBackgroundColor));
   help_label_->SetBorder(views::CreateEmptyBorder(
       PasswordGenerationPopupController::kHelpVerticalPadding -
           kHelpVerticalOffset,
@@ -154,9 +155,8 @@ PasswordGenerationPopupViewViews::PasswordGenerationPopupViewViews(
       PasswordGenerationPopupController::kHorizontalPadding));
   AddChildView(help_label_);
 
-  set_background(views::Background::CreateSolidBackground(
-      GetNativeTheme()->GetSystemColor(
-          ui::NativeTheme::kColorId_ResultsTableNormalBackground)));
+  SetBackground(views::CreateThemedSolidBackground(
+      this, ui::NativeTheme::kColorId_ResultsTableNormalBackground));
 }
 
 PasswordGenerationPopupViewViews::~PasswordGenerationPopupViewViews() {}
@@ -169,23 +169,22 @@ void PasswordGenerationPopupViewViews::CreatePasswordView() {
   password_view_->Init(controller_->password(),
                        controller_->SuggestedText(),
                        font_list_);
-  password_view_->SetPosition(gfx::Point(kPopupBorderThickness,
-                                         kPopupBorderThickness));
+  password_view_->SetPosition(gfx::Point());
   password_view_->SizeToPreferredSize();
   AddChildView(password_view_);
 }
 
 gfx::Size PasswordGenerationPopupViewViews::GetPreferredSizeOfPasswordView() {
-  int height = kPopupBorderThickness;
+  int width = controller_->GetMinimumWidth();
+  if (password_view_)
+    width = std::max(width, password_view_->GetMinimumSize().width());
+  int height = help_label_->GetHeightForWidth(width);
   if (controller_->display_password()) {
     // Add divider height as well.
     height +=
         PasswordGenerationPopupController::kPopupPasswordSectionHeight + 1;
   }
-  int width = controller_->GetMinimumWidth();
-  int popup_width = width - 2 * kPopupBorderThickness;
-  height += help_label_->GetHeightForWidth(popup_width);
-  return gfx::Size(width, height + kPopupBorderThickness);
+  return gfx::Size(width, height);
 }
 
 void PasswordGenerationPopupViewViews::Show() {
@@ -210,35 +209,31 @@ void PasswordGenerationPopupViewViews::PasswordSelectionUpdated() {
   if (controller_->password_selected())
     NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
 
-  password_view_->set_background(
-      views::Background::CreateSolidBackground(
-          GetNativeTheme()->GetSystemColor(
-              controller_->password_selected() ?
-                  ui::NativeTheme::kColorId_ResultsTableHoveredBackground :
-                  ui::NativeTheme::kColorId_ResultsTableNormalBackground)));
+  password_view_->SetBackground(views::CreateThemedSolidBackground(
+      password_view_,
+      controller_->password_selected()
+          ? ui::NativeTheme::kColorId_ResultsTableHoveredBackground
+          : ui::NativeTheme::kColorId_ResultsTableNormalBackground));
 }
 
 void PasswordGenerationPopupViewViews::Layout() {
   // Need to leave room for the border.
-  int y = kPopupBorderThickness;
-  int popup_width = bounds().width() - 2 * kPopupBorderThickness;
+  int y = 0;
+  int popup_width = bounds().width();
   if (controller_->display_password()) {
     // Currently the UI can change from not offering a password to offering
     // a password (e.g. the user is editing a generated password and deletes
     // it), but it can't change the other way around.
     CreatePasswordView();
     password_view_->SetBounds(
-        kPopupBorderThickness,
-        y,
-        popup_width,
+        0, 0, popup_width,
         PasswordGenerationPopupController::kPopupPasswordSectionHeight);
     divider_bounds_ =
-        gfx::Rect(kPopupBorderThickness, password_view_->bounds().bottom(),
-                  popup_width, 1);
+        gfx::Rect(0, password_view_->bounds().bottom(), popup_width, 1);
     y = divider_bounds_.bottom();
   }
 
-  help_label_->SetBounds(kPopupBorderThickness, y, popup_width,
+  help_label_->SetBounds(0, y, popup_width,
                          help_label_->GetHeightForWidth(popup_width));
 }
 

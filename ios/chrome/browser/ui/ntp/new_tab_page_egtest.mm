@@ -16,7 +16,6 @@
 #import "ios/chrome/test/earl_grey/accessibility_util.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/testing/earl_grey/disabled_test_macros.h"
 #import "ios/testing/wait_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -24,13 +23,7 @@
 #error "This file requires ARC support."
 #endif
 
-@implementation NewTabPageController (ExposedForTesting)
-- (GoogleLandingController*)googleLandingController {
-  return googleLandingController_;
-}
-@end
-
-@interface GoogleLandingController (ExposedForTesting)
+@interface GoogleLandingViewController (ExposedForTesting)
 - (BOOL)scrolledToTop;
 - (BOOL)animateHeader;
 @end
@@ -89,15 +82,16 @@ void AssertNTPScrolledToTop(bool scrolledToTop) {
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
   NewTabPageController* ntp_controller =
       chrome_test_util::GetCurrentNewTabPageController();
-  GoogleLandingController* google_landing_controller =
+  GoogleLandingViewController* google_landing_view_controller =
       [ntp_controller googleLandingController];
   [[GREYCondition
       conditionWithName:@"Wait for end of animation."
                   block:^BOOL {
-                    return ![google_landing_controller animateHeader];
+                    return ![google_landing_view_controller animateHeader];
                   }] waitWithTimeout:testing::kWaitForUIElementTimeout];
-  GREYAssertTrue([google_landing_controller scrolledToTop] == scrolledToTop,
-                 @"scrolledToTop_ does not match expected value");
+  GREYAssertTrue(
+      [google_landing_view_controller scrolledToTop] == scrolledToTop,
+      @"scrolledToTop_ does not match expected value");
 }
 
 }  // namespace
@@ -113,7 +107,7 @@ void AssertNTPScrolledToTop(bool scrolledToTop) {
 
 // Tests that all items are accessible on the most visited page.
 - (void)testAccessibilityOnMostVisited {
-  SelectNewTabPagePanel(NewTabPage::kMostVisitedPanel);
+  SelectNewTabPagePanel(NewTabPage::kHomePanel);
   chrome_test_util::VerifyAccessibilityForCurrentScreen();
 }
 
@@ -151,7 +145,7 @@ void AssertNTPScrolledToTop(bool scrolledToTop) {
 
   NSString* ntpOmniboxLabel = l10n_util::GetNSString(IDS_OMNIBOX_EMPTY_HINT);
   NSString* focusedOmniboxLabel = l10n_util::GetNSString(IDS_ACCNAME_LOCATION);
-  SelectNewTabPagePanel(NewTabPage::kMostVisitedPanel);
+  SelectNewTabPagePanel(NewTabPage::kHomePanel);
   AssertNTPScrolledToTop(NO);
 
   if (IsIPadIdiom()) {
@@ -227,7 +221,7 @@ void AssertNTPScrolledToTop(bool scrolledToTop) {
   NSString* omniboxLabel = l10n_util::GetNSString(IDS_OMNIBOX_EMPTY_HINT);
   NSString* cancelLabel = l10n_util::GetNSString(IDS_CANCEL);
   if (IsIPadIdiom()) {
-    SelectNewTabPagePanel(NewTabPage::kMostVisitedPanel);
+    SelectNewTabPagePanel(NewTabPage::kHomePanel);
   }
 
   // Check that the NTP is in its normal state.
@@ -288,12 +282,10 @@ void AssertNTPScrolledToTop(bool scrolledToTop) {
     EARL_GREY_TEST_SKIPPED(@"Skipped for iPad (no hidden toolbar in tablet)");
   }
 
-  NSString* tabSwitcherLabel =
-      l10n_util::GetNSString(IDS_IOS_TOOLBAR_SHOW_TABS);
   NSString* toolsMenuLabel = l10n_util::GetNSString(IDS_IOS_TOOLBAR_SETTINGS);
 
   // Check that the toolbar's tab switcher and tools menu buttons are visible.
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(tabSwitcherLabel)]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::ShowTabsButton()]
       assertWithMatcher:grey_sufficientlyVisible()];
   [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(toolsMenuLabel)]
       assertWithMatcher:grey_sufficientlyVisible()];
@@ -306,7 +298,7 @@ void AssertNTPScrolledToTop(bool scrolledToTop) {
   AssertNTPScrolledToTop(YES);
 
   // Check that tab switcher and tools menu buttons are not on screen.
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(tabSwitcherLabel)]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::ShowTabsButton()]
       assertWithMatcher:grey_notVisible()];
   [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(toolsMenuLabel)]
       assertWithMatcher:grey_notVisible()];

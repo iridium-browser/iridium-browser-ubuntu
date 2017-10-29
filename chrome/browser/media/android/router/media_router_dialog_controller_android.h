@@ -5,8 +5,6 @@
 #ifndef CHROME_BROWSER_MEDIA_ANDROID_ROUTER_MEDIA_ROUTER_DIALOG_CONTROLLER_ANDROID_H_
 #define CHROME_BROWSER_MEDIA_ANDROID_ROUTER_MEDIA_ROUTER_DIALOG_CONTROLLER_ANDROID_H_
 
-#include <jni.h>
-
 #include <memory>
 
 #include "base/android/scoped_java_ref.h"
@@ -23,16 +21,16 @@ class MediaRouterDialogControllerAndroid
  public:
   ~MediaRouterDialogControllerAndroid() override;
 
-  static bool Register(JNIEnv* env);
-
   static MediaRouterDialogControllerAndroid* GetOrCreateForWebContents(
       content::WebContents* web_contents);
 
   // The methods called by the Java counterpart.
 
-  // Notifies the controller that user has selected a sink with |jsink_id|.
+  // Notifies the controller that user has selected a sink with |jsink_id| for
+  // |source_id|.
   void OnSinkSelected(JNIEnv* env,
                       const base::android::JavaParamRef<jobject>& obj,
+                      const base::android::JavaParamRef<jstring>& source_id,
                       const base::android::JavaParamRef<jstring>& jsink_id);
   // Notifies the controller that user chose to close the route.
   void OnRouteClosed(
@@ -43,6 +41,11 @@ class MediaRouterDialogControllerAndroid
   // taking any action (e.g. closing the route or selecting a sink).
   void OnDialogCancelled(JNIEnv* env,
                          const base::android::JavaParamRef<jobject>& obj);
+  // Notifies the controller the media source URN is not supported so it could
+  // properly reject the request.
+  void OnMediaSourceNotSupported(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
 
  private:
   friend class content::WebContentsUserData<MediaRouterDialogControllerAndroid>;

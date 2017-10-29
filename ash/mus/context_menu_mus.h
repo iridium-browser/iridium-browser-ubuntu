@@ -5,20 +5,20 @@
 #ifndef ASH_MUS_CONTEXT_MENU_MUS_H_
 #define ASH_MUS_CONTEXT_MENU_MUS_H_
 
-#include "ash/common/shelf/shelf_alignment_menu.h"
+#include "ash/shelf/shelf_alignment_menu.h"
 #include "base/macros.h"
 #include "ui/base/models/simple_menu_model.h"
 
 namespace ash {
 
-class WmShelf;
+class Shelf;
 
 // Context menu for mash.
 // TODO: Mimic logic in LauncherContextMenu. http://crbug.com/640693
 class ContextMenuMus : public ui::SimpleMenuModel,
                        public ui::SimpleMenuModel::Delegate {
  public:
-  explicit ContextMenuMus(WmShelf* wm_shelf);
+  explicit ContextMenuMus(Shelf* shelf);
   ~ContextMenuMus() override;
 
   // ui::SimpleMenuModel::Delegate overrides:
@@ -33,7 +33,7 @@ class ContextMenuMus : public ui::SimpleMenuModel,
     MENU_CHANGE_WALLPAPER,
   };
 
-  WmShelf* wm_shelf_;
+  Shelf* shelf_;
   ShelfAlignmentMenu alignment_menu_;
 
   DISALLOW_COPY_AND_ASSIGN(ContextMenuMus);

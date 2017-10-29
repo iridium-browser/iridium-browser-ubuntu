@@ -11,7 +11,7 @@
 #ifndef WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_GEOMETRY_H_
 #define WEBRTC_MODULES_DESKTOP_CAPTURE_DESKTOP_GEOMETRY_H_
 
-#include "webrtc/base/constructormagic.h"
+#include "webrtc/rtc_base/constructormagic.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
@@ -123,6 +123,10 @@ class DesktopRect {
 
   // Finds intersection with |rect|.
   void IntersectWith(const DesktopRect& rect);
+
+  // Extends the rectangle to cover |rect|. If |this| is empty, replaces |this|
+  // with |rect|; if |rect| is empty, this function takes no effect.
+  void UnionWith(const DesktopRect& rect);
 
   // Adds (dx, dy) to the position of the rectangle.
   void Translate(int32_t dx, int32_t dy);

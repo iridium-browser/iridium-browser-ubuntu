@@ -5,23 +5,23 @@
 #ifndef PromiseRejectionEvent_h
 #define PromiseRejectionEvent_h
 
-#include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
-#include "bindings/core/v8/TraceWrapperV8Reference.h"
 #include "core/CoreExport.h"
 #include "core/events/Event.h"
 #include "core/events/PromiseRejectionEventInit.h"
+#include "platform/bindings/DOMWrapperWorld.h"
+#include "platform/bindings/ScriptState.h"
+#include "platform/bindings/TraceWrapperV8Reference.h"
 
 namespace blink {
 
 class CORE_EXPORT PromiseRejectionEvent final : public Event {
   DEFINE_WRAPPERTYPEINFO();
-  USING_PRE_FINALIZER(PromiseRejectionEvent, dispose);
+  USING_PRE_FINALIZER(PromiseRejectionEvent, Dispose);
 
  public:
-  static PromiseRejectionEvent* create(
+  static PromiseRejectionEvent* Create(
       ScriptState* state,
       const AtomicString& type,
       const PromiseRejectionEventInit& initializer) {
@@ -31,11 +31,11 @@ class CORE_EXPORT PromiseRejectionEvent final : public Event {
   ScriptValue reason(ScriptState*) const;
   ScriptPromise promise(ScriptState*) const;
 
-  const AtomicString& interfaceName() const override;
+  const AtomicString& InterfaceName() const override;
 
   // PromiseRejectionEvents are similar to ErrorEvents in that they can't be
   // observed across different worlds.
-  bool canBeDispatchedInWorld(const DOMWrapperWorld&) const override;
+  bool CanBeDispatchedInWorld(const DOMWrapperWorld&) const override;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -46,11 +46,11 @@ class CORE_EXPORT PromiseRejectionEvent final : public Event {
                         const AtomicString&,
                         const PromiseRejectionEventInit&);
   ~PromiseRejectionEvent() override;
-  void dispose();
+  void Dispose();
 
-  RefPtr<DOMWrapperWorld> m_world;
-  TraceWrapperV8Reference<v8::Value> m_promise;
-  TraceWrapperV8Reference<v8::Value> m_reason;
+  RefPtr<DOMWrapperWorld> world_;
+  TraceWrapperV8Reference<v8::Value> promise_;
+  TraceWrapperV8Reference<v8::Value> reason_;
 };
 
 }  // namespace blink

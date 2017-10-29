@@ -33,25 +33,26 @@
 
 #include "SkPaint.h"
 #include "SkTypeface.h"
+#include "build/build_config.h"
 #include "platform/PlatformExport.h"
-#include "platform/SharedBuffer.h"
 #include "platform/fonts/FontDescription.h"
 #include "platform/fonts/FontOrientation.h"
 #include "platform/fonts/SmallCapsIterator.h"
 #include "platform/fonts/opentype/OpenTypeVerticalData.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Forward.h"
+#include "platform/wtf/HashTableDeletedValueType.h"
+#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/Vector.h"
+#include "platform/wtf/text/CString.h"
+#include "platform/wtf/text/StringImpl.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-#include "wtf/Allocator.h"
-#include "wtf/Forward.h"
-#include "wtf/HashTableDeletedValueType.h"
-#include "wtf/RefPtr.h"
-#include "wtf/text/CString.h"
-#include "wtf/text/StringImpl.h"
 
-#if OS(LINUX) || OS(ANDROID)
+#if defined(OS_LINUX) || defined(OS_ANDROID)
 #include "platform/fonts/linux/FontRenderStyle.h"
-#endif  // OS(LINUX) || OS(ANDROID)
+#endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
-#if OS(MACOSX)
+#if defined(OS_MACOSX)
 OBJC_CLASS NSFont;
 
 typedef struct CGFont* CGFontRef;
@@ -65,7 +66,7 @@ inline CTFontRef toCTFontRef(NSFont* nsFont) {
 inline NSFont* toNSFont(CTFontRef ctFontRef) {
   return const_cast<NSFont*>(reinterpret_cast<const NSFont*>(ctFontRef));
 }
-#endif  // OS(MACOSX)
+#endif  // defined(OS_MACOSX)
 
 class SkTypeface;
 typedef uint32_t SkFontID;
@@ -89,106 +90,106 @@ class PLATFORM_EXPORT FontPlatformData {
   FontPlatformData();
   FontPlatformData(const FontPlatformData&);
   FontPlatformData(float size,
-                   bool syntheticBold,
-                   bool syntheticItalic,
-                   FontOrientation = FontOrientation::Horizontal);
-  FontPlatformData(const FontPlatformData& src, float textSize);
-#if OS(MACOSX)
+                   bool synthetic_bold,
+                   bool synthetic_italic,
+                   FontOrientation = FontOrientation::kHorizontal);
+  FontPlatformData(const FontPlatformData& src, float text_size);
+#if defined(OS_MACOSX)
   FontPlatformData(NSFont*,
                    float size,
-                   bool syntheticBold,
-                   bool syntheticItalic,
+                   bool synthetic_bold,
+                   bool synthetic_italic,
                    FontOrientation,
                    FontVariationSettings*);
 #endif
   FontPlatformData(sk_sp<SkTypeface>,
                    const char* name,
-                   float textSize,
-                   bool syntheticBold,
-                   bool syntheticItalic,
-                   FontOrientation = FontOrientation::Horizontal);
+                   float text_size,
+                   bool synthetic_bold,
+                   bool synthetic_italic,
+                   FontOrientation = FontOrientation::kHorizontal);
   ~FontPlatformData();
 
-#if OS(MACOSX)
-  CTFontRef ctFont() const;
-  CGFontRef cgFont() const;
+#if defined(OS_MACOSX)
+  // These methods return a nullptr for FreeType backed SkTypefaces, compare
+  // FontCustomPlatformData, which are used for variable fonts on Mac OS <
+  // 10.12. They should not return nullptr otherwise. So they allow
+  // distinguishing which backend the SkTypeface is using.
+  CTFontRef CtFont() const;
+  CGFontRef CgFont() const;
 #endif
 
-  String fontFamilyName() const;
-  float size() const { return m_textSize; }
-  bool syntheticBold() const { return m_syntheticBold; }
-  bool syntheticItalic() const { return m_syntheticItalic; }
+  String FontFamilyName() const;
+  float size() const { return text_size_; }
+  bool SyntheticBold() const { return synthetic_bold_; }
+  bool SyntheticItalic() const { return synthetic_italic_; }
 
-  SkTypeface* typeface() const;
-  HarfBuzzFace* harfBuzzFace() const;
-  bool hasSpaceInLigaturesOrKerning(TypesettingFeatures) const;
-  SkFontID uniqueID() const;
-  unsigned hash() const;
+  SkTypeface* Typeface() const;
+  HarfBuzzFace* GetHarfBuzzFace() const;
+  bool HasSpaceInLigaturesOrKerning(TypesettingFeatures) const;
+  SkFontID UniqueID() const;
+  unsigned GetHash() const;
 
-  FontOrientation orientation() const { return m_orientation; }
-  bool isVerticalAnyUpright() const {
-    return blink::isVerticalAnyUpright(m_orientation);
+  FontOrientation Orientation() const { return orientation_; }
+  bool IsVerticalAnyUpright() const {
+    return blink::IsVerticalAnyUpright(orientation_);
   }
-  void setOrientation(FontOrientation orientation) {
-    m_orientation = orientation;
+  void SetOrientation(FontOrientation orientation) {
+    orientation_ = orientation;
   }
-  void setSyntheticBold(bool syntheticBold) { m_syntheticBold = syntheticBold; }
-  void setSyntheticItalic(bool syntheticItalic) {
-    m_syntheticItalic = syntheticItalic;
+  void SetSyntheticBold(bool synthetic_bold) {
+    synthetic_bold_ = synthetic_bold;
+  }
+  void SetSyntheticItalic(bool synthetic_italic) {
+    synthetic_italic_ = synthetic_italic;
   }
   bool operator==(const FontPlatformData&) const;
   const FontPlatformData& operator=(const FontPlatformData&);
 
-  bool isHashTableDeletedValue() const { return m_isHashTableDeletedValue; }
-#if OS(WIN)
-  void setMinSizeForAntiAlias(unsigned size) { m_minSizeForAntiAlias = size; }
-  unsigned minSizeForAntiAlias() const { return m_minSizeForAntiAlias; }
-  void setMinSizeForSubpixel(float size) { m_minSizeForSubpixel = size; }
-  float minSizeForSubpixel() const { return m_minSizeForSubpixel; }
-#endif
-  bool fontContainsCharacter(UChar32 character);
+  bool IsHashTableDeletedValue() const { return is_hash_table_deleted_value_; }
+  bool FontContainsCharacter(UChar32 character);
 
-  PassRefPtr<OpenTypeVerticalData> verticalData() const;
-  PassRefPtr<SharedBuffer> openTypeTable(SkFontTableTag) const;
+  PassRefPtr<OpenTypeVerticalData> VerticalData() const;
+  Vector<char> OpenTypeTable(SkFontTableTag) const;
 
-#if OS(LINUX) || OS(ANDROID)
+#if defined(OS_LINUX) || defined(OS_ANDROID)
   // The returned styles are all actual styles without
   // FontRenderStyle::NoPreference.
-  const FontRenderStyle& getFontRenderStyle() const { return m_style; }
+  const FontRenderStyle& GetFontRenderStyle() const { return style_; }
 #endif
-  void setupPaint(SkPaint*, float deviceScaleFactor = 1, const Font* = 0) const;
+  void SetupPaint(SkPaint*,
+                  float device_scale_factor = 1,
+                  const Font* = 0) const;
 
-#if OS(WIN)
-  int paintTextFlags() const { return m_paintTextFlags; }
+#if defined(OS_WIN)
+  int PaintTextFlags() const { return paint_text_flags_; }
 #endif
 
  private:
-#if OS(WIN)
-  void querySystemForRenderStyle();
+#if defined(OS_WIN)
+  void QuerySystemForRenderStyle();
 #endif
 
-  sk_sp<SkTypeface> m_typeface;
-#if !OS(WIN)
-  CString m_family;
+  sk_sp<SkTypeface> typeface_;
+#if !defined(OS_WIN)
+  CString family_;
 #endif
 
  public:
-  float m_textSize;
-  bool m_syntheticBold;
-  bool m_syntheticItalic;
-  FontOrientation m_orientation;
+  float text_size_;
+  bool synthetic_bold_;
+  bool synthetic_italic_;
+  FontOrientation orientation_;
 
  private:
-#if OS(LINUX) || OS(ANDROID)
-  FontRenderStyle m_style;
+#if defined(OS_LINUX) || defined(OS_ANDROID)
+  FontRenderStyle style_;
 #endif
 
-  mutable RefPtr<HarfBuzzFace> m_harfBuzzFace;
-  bool m_isHashTableDeletedValue;
-#if OS(WIN)
-  int m_paintTextFlags;
-  unsigned m_minSizeForAntiAlias;
-  float m_minSizeForSubpixel;
+  mutable RefPtr<HarfBuzzFace> harf_buzz_face_;
+  bool is_hash_table_deleted_value_;
+#if defined(OS_WIN)
+  int paint_text_flags_;
 #endif
 };
 

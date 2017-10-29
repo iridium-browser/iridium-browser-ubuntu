@@ -7,6 +7,7 @@
 #include "core/dom/Document.h"
 #include "core/testing/DummyPageHolder.h"
 #include "platform/testing/TestingPlatformSupport.h"
+#include "platform/wtf/PtrUtil.h"
 #include "public/platform/WebAudioDevice.h"
 #include "public/platform/WebAudioLatencyHint.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -15,90 +16,131 @@ namespace blink {
 
 namespace {
 
-class MockWebAudioDevice : public WebAudioDevice {
+class MockWebAudioDeviceForAudioContext : public WebAudioDevice {
  public:
-  explicit MockWebAudioDevice(double sampleRate, int framesPerBuffer)
-      : m_sampleRate(sampleRate), m_framesPerBuffer(framesPerBuffer) {}
-  ~MockWebAudioDevice() override = default;
+  explicit MockWebAudioDeviceForAudioContext(double sample_rate,
+                                             int frames_per_buffer)
+      : sample_rate_(sample_rate), frames_per_buffer_(frames_per_buffer) {}
+  ~MockWebAudioDeviceForAudioContext() override = default;
 
-  void start() override {}
-  void stop() override {}
-  double sampleRate() override { return m_sampleRate; }
-  int framesPerBuffer() override { return m_framesPerBuffer; }
+  void Start() override {}
+  void Stop() override {}
+  double SampleRate() override { return sample_rate_; }
+  int FramesPerBuffer() override { return frames_per_buffer_; }
 
  private:
-  double m_sampleRate;
-  int m_framesPerBuffer;
+  double sample_rate_;
+  int frames_per_buffer_;
 };
 
 class AudioContextTestPlatform : public TestingPlatformSupport {
  public:
-  WebAudioDevice* createAudioDevice(unsigned numberOfInputChannels,
-                                    unsigned numberOfChannels,
-                                    const WebAudioLatencyHint& latencyHint,
-                                    WebAudioDevice::RenderCallback*,
-                                    const WebString& deviceId,
-                                    const WebSecurityOrigin&) override {
-    double bufferSize = 0;
-    switch (latencyHint.category()) {
+  std::unique_ptr<WebAudioDevice> CreateAudioDevice(
+      unsigned number_of_input_channels,
+      unsigned number_of_channels,
+      const WebAudioLatencyHint& latency_hint,
+      WebAudioDevice::RenderCallback*,
+      const WebString& device_id,
+      const WebSecurityOrigin&) override {
+    double buffer_size = 0;
+    const double interactive_size = AudioHardwareBufferSize();
+    const double balanced_size = AudioHardwareBufferSize() * 2;
+    const double playback_size = AudioHardwareBufferSize() * 4;
+    switch (latency_hint.Category()) {
       case WebAudioLatencyHint::kCategoryInteractive:
-        bufferSize = audioHardwareBufferSize();
+        buffer_size = interactive_size;
         break;
       case WebAudioLatencyHint::kCategoryBalanced:
-        bufferSize = audioHardwareBufferSize() * 2;
+        buffer_size = balanced_size;
         break;
       case WebAudioLatencyHint::kCategoryPlayback:
-        bufferSize = audioHardwareBufferSize() * 4;
+        buffer_size = playback_size;
+        break;
+      case WebAudioLatencyHint::kCategoryExact:
+        buffer_size =
+            clampTo(latency_hint.Seconds() * AudioHardwareSampleRate(),
+                    static_cast<double>(AudioHardwareBufferSize()),
+                    static_cast<double>(playback_size));
         break;
       default:
         NOTREACHED();
         break;
     }
 
-    return new MockWebAudioDevice(audioHardwareSampleRate(), bufferSize);
+    return WTF::MakeUnique<MockWebAudioDeviceForAudioContext>(
+        AudioHardwareSampleRate(), buffer_size);
   }
 
-  double audioHardwareSampleRate() override { return 44100; }
-  size_t audioHardwareBufferSize() override { return 128; }
+  double AudioHardwareSampleRate() override { return 44100; }
+  size_t AudioHardwareBufferSize() override { return 128; }
 };
 
 }  // anonymous namespace
 
 class AudioContextTest : public ::testing::Test {
  protected:
-  void SetUp() override { m_dummyPageHolder = DummyPageHolder::create(); }
+  void SetUp() override { dummy_page_holder_ = DummyPageHolder::Create(); }
 
-  Document& document() { return m_dummyPageHolder->document(); }
+  Document& GetDocument() { return dummy_page_holder_->GetDocument(); }
 
  private:
-  std::unique_ptr<DummyPageHolder> m_dummyPageHolder;
+  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
 };
 
 TEST_F(AudioContextTest, AudioContextOptions_WebAudioLatencyHint) {
   ScopedTestingPlatformSupport<AudioContextTestPlatform> platform;
 
-  AudioContextOptions interactiveOptions;
-  interactiveOptions.setLatencyHint(
+  AudioContextOptions interactive_options;
+  interactive_options.setLatencyHint(
       AudioContextLatencyCategoryOrDouble::fromAudioContextLatencyCategory(
           "interactive"));
-  AudioContext* interactiveContext =
-      AudioContext::create(document(), interactiveOptions, ASSERT_NO_EXCEPTION);
+  AudioContext* interactive_context = AudioContext::Create(
+      GetDocument(), interactive_options, ASSERT_NO_EXCEPTION);
 
-  AudioContextOptions balancedOptions;
-  balancedOptions.setLatencyHint(
+  AudioContextOptions balanced_options;
+  balanced_options.setLatencyHint(
       AudioContextLatencyCategoryOrDouble::fromAudioContextLatencyCategory(
           "balanced"));
-  AudioContext* balancedContext =
-      AudioContext::create(document(), balancedOptions, ASSERT_NO_EXCEPTION);
-  EXPECT_GT(balancedContext->baseLatency(), interactiveContext->baseLatency());
+  AudioContext* balanced_context = AudioContext::Create(
+      GetDocument(), balanced_options, ASSERT_NO_EXCEPTION);
+  EXPECT_GT(balanced_context->baseLatency(),
+            interactive_context->baseLatency());
 
-  AudioContextOptions playbackOptions;
-  playbackOptions.setLatencyHint(
+  AudioContextOptions playback_options;
+  playback_options.setLatencyHint(
       AudioContextLatencyCategoryOrDouble::fromAudioContextLatencyCategory(
           "playback"));
-  AudioContext* playbackContext =
-      AudioContext::create(document(), playbackOptions, ASSERT_NO_EXCEPTION);
-  EXPECT_GT(playbackContext->baseLatency(), balancedContext->baseLatency());
+  AudioContext* playback_context = AudioContext::Create(
+      GetDocument(), playback_options, ASSERT_NO_EXCEPTION);
+  EXPECT_GT(playback_context->baseLatency(), balanced_context->baseLatency());
+
+  AudioContextOptions exact_too_small_options;
+  exact_too_small_options.setLatencyHint(
+      AudioContextLatencyCategoryOrDouble::fromDouble(
+          interactive_context->baseLatency() / 2));
+  AudioContext* exact_too_small_context = AudioContext::Create(
+      GetDocument(), exact_too_small_options, ASSERT_NO_EXCEPTION);
+  EXPECT_EQ(exact_too_small_context->baseLatency(),
+            interactive_context->baseLatency());
+
+  const double exact_latency_sec =
+      (interactive_context->baseLatency() + playback_context->baseLatency()) /
+      2;
+  AudioContextOptions exact_ok_options;
+  exact_ok_options.setLatencyHint(
+      AudioContextLatencyCategoryOrDouble::fromDouble(exact_latency_sec));
+  AudioContext* exact_ok_context = AudioContext::Create(
+      GetDocument(), exact_ok_options, ASSERT_NO_EXCEPTION);
+  EXPECT_EQ(exact_ok_context->baseLatency(), exact_latency_sec);
+
+  AudioContextOptions exact_too_big_options;
+  exact_too_big_options.setLatencyHint(
+      AudioContextLatencyCategoryOrDouble::fromDouble(
+          playback_context->baseLatency() * 2));
+  AudioContext* exact_too_big_context = AudioContext::Create(
+      GetDocument(), exact_too_big_options, ASSERT_NO_EXCEPTION);
+  EXPECT_EQ(exact_too_big_context->baseLatency(),
+            playback_context->baseLatency());
 }
 
 }  // namespace blink

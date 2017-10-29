@@ -118,18 +118,18 @@ class ConstrainedWebDialogDelegateViewMac :
   void OnDialogCloseFromWebUI() override {
     return impl_->OnDialogCloseFromWebUI();
   }
-  void ReleaseWebContentsOnDialogClose() override {
-    return impl_->ReleaseWebContentsOnDialogClose();
+  std::unique_ptr<content::WebContents> ReleaseWebContents() override {
+    return impl_->ReleaseWebContents();
   }
   gfx::NativeWindow GetNativeDialog() override { return window_; }
   WebContents* GetWebContents() override { return impl_->GetWebContents(); }
-  gfx::Size GetMinimumSize() const override {
+  gfx::Size GetConstrainedWebDialogMinimumSize() const override {
     return min_size_;
   }
-  gfx::Size GetMaximumSize() const override {
+  gfx::Size GetConstrainedWebDialogMaximumSize() const override {
     return max_size_;
   }
-  gfx::Size GetPreferredSize() const override {
+  gfx::Size GetConstrainedWebDialogPreferredSize() const override {
     gfx::Size size;
     if (!impl_->closed_via_webui()) {
       NSRect frame = [window_ frame];

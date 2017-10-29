@@ -5,17 +5,18 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_WEBSHARE_WEBSHARE_TARGET_PICKER_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_WEBSHARE_WEBSHARE_TARGET_PICKER_VIEW_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/webshare/webshare_target.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/views/controls/table/table_view_observer.h"
 #include "ui/views/window/dialog_delegate.h"
 
-class GURL;
 class TargetPickerTableModel;
 class WebShareTargetPickerViewTest;
 
@@ -36,14 +37,12 @@ class WebShareTargetPickerView : public views::DialogDelegateView,
   // in a list. If the user picks a target, this calls |callback| with the
   // manifest URL of the chosen target, or returns null if the user cancelled
   // the share.
-  WebShareTargetPickerView(
-      const std::vector<std::pair<base::string16, GURL>>& targets,
-      const base::Callback<void(base::Optional<std::string>)>&
-          close_callback);
+  WebShareTargetPickerView(std::vector<WebShareTarget> targets,
+                           chrome::WebShareTargetPickerCallback close_callback);
   ~WebShareTargetPickerView() override;
 
   // views::View overrides:
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
 
   // views::WidgetDelegate overrides:
   ui::ModalType GetModalType() const override;
@@ -65,10 +64,10 @@ class WebShareTargetPickerView : public views::DialogDelegateView,
 
   views::TableView* table_ = nullptr;
 
-  const std::vector<std::pair<base::string16, GURL>> targets_;
+  const std::vector<WebShareTarget> targets_;
   std::unique_ptr<TargetPickerTableModel> table_model_;
 
-  base::Callback<void(base::Optional<std::string>)> close_callback_;
+  chrome::WebShareTargetPickerCallback close_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(WebShareTargetPickerView);
 };

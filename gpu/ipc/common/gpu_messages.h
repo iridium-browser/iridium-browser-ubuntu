@@ -27,14 +27,14 @@
 #include "gpu/ipc/common/surface_handle.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
-#include "ui/events/ipc/latency_info_param_traits.h"
-#include "ui/events/latency_info.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/ipc/geometry/gfx_param_traits.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/swap_result.h"
+#include "ui/latency/ipc/latency_info_param_traits.h"
+#include "ui/latency/latency_info.h"
 #include "url/ipc/url_param_traits.h"
 
 #if defined(OS_MACOSX)
@@ -56,7 +56,7 @@ IPC_STRUCT_BEGIN(GPUCreateCommandBufferConfig)
   IPC_STRUCT_MEMBER(gpu::SurfaceHandle, surface_handle)
   IPC_STRUCT_MEMBER(int32_t, share_group_id)
   IPC_STRUCT_MEMBER(int32_t, stream_id)
-  IPC_STRUCT_MEMBER(gpu::GpuStreamPriority, stream_priority)
+  IPC_STRUCT_MEMBER(gpu::SchedulingPriority, stream_priority)
   IPC_STRUCT_MEMBER(gpu::gles2::ContextCreationAttribHelper, attribs)
   IPC_STRUCT_MEMBER(GURL, active_url)
 IPC_STRUCT_END()
@@ -145,8 +145,7 @@ IPC_MESSAGE_ROUTED0(GpuStreamTextureMsg_FrameAvailable)
 // a single OpenGL context.
 
 // Sets the shared memory buffer used for commands.
-IPC_SYNC_MESSAGE_ROUTED1_0(GpuCommandBufferMsg_SetGetBuffer,
-                           int32_t /* shm_id */)
+IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_SetGetBuffer, int32_t /* shm_id */)
 
 // Takes the front buffer into a mailbox. This allows another context to draw
 // the output of this context.
@@ -166,7 +165,8 @@ IPC_SYNC_MESSAGE_ROUTED2_1(GpuCommandBufferMsg_WaitForTokenInRange,
                            gpu::CommandBuffer::State /* state */)
 
 // Wait until the get offset is in a specific range, inclusive.
-IPC_SYNC_MESSAGE_ROUTED2_1(GpuCommandBufferMsg_WaitForGetOffsetInRange,
+IPC_SYNC_MESSAGE_ROUTED3_1(GpuCommandBufferMsg_WaitForGetOffsetInRange,
+                           uint32_t /* set_get_buffer_count */,
                            int32_t /* start */,
                            int32_t /* end */,
                            gpu::CommandBuffer::State /* state */)
@@ -175,10 +175,11 @@ IPC_SYNC_MESSAGE_ROUTED2_1(GpuCommandBufferMsg_WaitForGetOffsetInRange,
 // Caller passes its current put offset. Current state (including get offset)
 // is returned in shared memory. The input latency info for the current
 // frame is also sent to the GPU process.
-IPC_MESSAGE_ROUTED3(GpuCommandBufferMsg_AsyncFlush,
+IPC_MESSAGE_ROUTED4(GpuCommandBufferMsg_AsyncFlush,
                     int32_t /* put_offset */,
                     uint32_t /* flush_count */,
-                    std::vector<ui::LatencyInfo> /* latency_info */)
+                    std::vector<ui::LatencyInfo> /* latency_info */,
+                    std::vector<gpu::SyncToken> /* sync_token_fences */)
 
 // Sent by the GPU process to display messages in the console.
 IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_ConsoleMsg,

@@ -7,16 +7,14 @@
 #include <stddef.h>
 
 #include "chromeos/network/network_event_log.h"
+#include "chromeos/network/tether_constants.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
 
-const char kTypeTether[] = "wifi-tether";
-
 namespace {
 
 const char kPatternDefault[] = "PatternDefault";
-const char kPatternEthernet[] = "PatternEthernet";
 const char kPatternWireless[] = "PatternWireless";
 const char kPatternMobile[] = "PatternMobile";
 const char kPatternNonVirtual[] = "PatternNonVirtual";
@@ -64,17 +62,18 @@ NetworkTypePattern NetworkTypePattern::Default() {
 // static
 NetworkTypePattern NetworkTypePattern::Wireless() {
   return NetworkTypePattern(kNetworkTypeWifi | kNetworkTypeWimax |
-                            kNetworkTypeCellular);
+                            kNetworkTypeCellular | kNetworkTypeTether);
 }
 
 // static
 NetworkTypePattern NetworkTypePattern::Mobile() {
-  return NetworkTypePattern(kNetworkTypeCellular | kNetworkTypeWimax);
+  return NetworkTypePattern(kNetworkTypeCellular | kNetworkTypeWimax |
+                            kNetworkTypeTether);
 }
 
 // static
 NetworkTypePattern NetworkTypePattern::NonVirtual() {
-  return NetworkTypePattern(~(kNetworkTypeVPN | kNetworkTypeTether));
+  return NetworkTypePattern(~(kNetworkTypeVPN));
 }
 
 // static
@@ -133,8 +132,6 @@ bool NetworkTypePattern::MatchesPattern(
 std::string NetworkTypePattern::ToDebugString() const {
   if (Equals(Default()))
     return kPatternDefault;
-  if (Equals(Ethernet()))
-    return kPatternEthernet;
   if (Equals(Wireless()))
     return kPatternWireless;
   if (Equals(Mobile()))
@@ -142,6 +139,7 @@ std::string NetworkTypePattern::ToDebugString() const {
   if (Equals(NonVirtual()))
     return kPatternNonVirtual;
 
+  // Note: shill_type_to_flag includes kTypeTether.
   std::string str;
   for (size_t i = 0; i < arraysize(shill_type_to_flag); ++i) {
     if (!(pattern_ & shill_type_to_flag[i].bit_flag))

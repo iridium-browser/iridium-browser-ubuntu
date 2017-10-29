@@ -40,10 +40,10 @@ class AURA_EXPORT CursorClient {
   virtual void HideCursor() = 0;
 
   // Sets the type of the mouse cursor icon.
-  virtual void SetCursorSet(ui::CursorSetType cursor_set) = 0;
+  virtual void SetCursorSize(ui::CursorSize cursor_size) = 0;
 
   // Gets the type of the mouse cursor icon.
-  virtual ui::CursorSetType GetCursorSet() const = 0;
+  virtual ui::CursorSize GetCursorSize() const = 0;
 
   // Gets whether the cursor is visible.
   virtual bool IsCursorVisible() const = 0;
@@ -60,6 +60,9 @@ class AURA_EXPORT CursorClient {
 
   // Sets the display for the cursor.
   virtual void SetDisplay(const display::Display& display) = 0;
+
+  // Returns the display where the cursor is located.
+  virtual const display::Display& GetDisplay() const = 0;
 
   // Locks the cursor change. The cursor type, cursor visibility, and mouse
   // events enable state never change as long as lock is held by anyone.

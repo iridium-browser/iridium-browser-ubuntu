@@ -20,6 +20,7 @@ class RenderFrameHost;
 namespace autofill {
 
 class ContentAutofillDriver;
+class AutofillProvider;
 
 // Manages lifetime of ContentAutofillDriver. One Factory per WebContents
 // creates one Driver per RenderFrame.
@@ -34,10 +35,19 @@ class ContentAutofillDriverFactory : public AutofillDriverFactory,
       AutofillClient* client,
       const std::string& app_locale,
       AutofillManager::AutofillDownloadManagerState enable_download_manager);
+
+  static void CreateForWebContentsAndDelegate(
+      content::WebContents* contents,
+      AutofillClient* client,
+      const std::string& app_locale,
+      AutofillManager::AutofillDownloadManagerState enable_download_manager,
+      AutofillProvider* provider);
+
   static ContentAutofillDriverFactory* FromWebContents(
       content::WebContents* contents);
-  static void BindAutofillDriver(content::RenderFrameHost* render_frame_host,
-                                 mojom::AutofillDriverRequest request);
+  static void BindAutofillDriver(
+      mojom::AutofillDriverRequest request,
+      content::RenderFrameHost* render_frame_host);
 
   // Gets the |ContentAutofillDriver| associated with |render_frame_host|.
   // |render_frame_host| must be owned by |web_contents()|.
@@ -58,10 +68,12 @@ class ContentAutofillDriverFactory : public AutofillDriverFactory,
       content::WebContents* web_contents,
       AutofillClient* client,
       const std::string& app_locale,
-      AutofillManager::AutofillDownloadManagerState enable_download_manager);
+      AutofillManager::AutofillDownloadManagerState enable_download_manager,
+      AutofillProvider* provider);
 
   std::string app_locale_;
   AutofillManager::AutofillDownloadManagerState enable_download_manager_;
+  AutofillProvider* provider_;
 };
 
 }  // namespace autofill

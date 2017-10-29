@@ -21,10 +21,7 @@ class PDFiumEngine;
 // Wrapper around a page from the document.
 class PDFiumPage {
  public:
-  PDFiumPage(PDFiumEngine* engine,
-             int i,
-             const pp::Rect& r,
-             bool available);
+  PDFiumPage(PDFiumEngine* engine, int i, const pp::Rect& r, bool available);
   PDFiumPage(const PDFiumPage& that);
   ~PDFiumPage();
 
@@ -54,9 +51,13 @@ class PDFiumPage {
 
   enum Area {
     NONSELECTABLE_AREA,
-    TEXT_AREA,
-    WEBLINK_AREA,  // Area is a hyperlink.
-    DOCLINK_AREA,  // Area is a link to a different part of the same document.
+    TEXT_AREA,       // Area contains regular, selectable text not
+                     // within form fields.
+    WEBLINK_AREA,    // Area is a hyperlink.
+    DOCLINK_AREA,    // Area is a link to a different part of the same
+                     // document.
+    FORM_TEXT_AREA,  // Area is a form text field or form combobox text
+                     // field.
   };
 
   struct LinkTarget {
@@ -70,8 +71,14 @@ class PDFiumPage {
   // index if it's near a character, and also the type of text.
   // Target is optional. It will be filled in for WEBLINK_AREA or
   // DOCLINK_AREA only.
-  Area GetCharIndex(const pp::Point& point, int rotation, int* char_index,
-                    int* form_type, LinkTarget* target);
+  Area GetCharIndex(const pp::Point& point,
+                    int rotation,
+                    int* char_index,
+                    int* form_type,
+                    LinkTarget* target);
+
+  // Converts a form type to its corresponding Area.
+  static Area FormTypeToArea(int form_type);
 
   // Gets the character at the given index.
   base::char16 GetCharAtIndex(int index);
@@ -94,7 +101,7 @@ class PDFiumPage {
   bool available() const { return available_; }
   void set_available(bool available) { available_ = available; }
   void set_calculated_links(bool calculated_links) {
-     calculated_links_ = calculated_links;
+    calculated_links_ = calculated_links;
   }
 
  private:
@@ -112,6 +119,8 @@ class PDFiumPage {
   Area GetLinkTarget(FPDF_LINK link, LinkTarget* target) const;
   // Returns target associated with a destination.
   Area GetDestinationTarget(FPDF_DEST destination, LinkTarget* target) const;
+  // Returns target associated with a URI action.
+  Area GetURITarget(FPDF_ACTION uri_action, LinkTarget* target) const;
 
   class ScopedLoadCounter {
    public:

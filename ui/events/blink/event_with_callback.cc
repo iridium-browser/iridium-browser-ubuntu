@@ -18,12 +18,12 @@ EventWithCallback::EventWithCallback(
     WebScopedInputEvent event,
     const LatencyInfo& latency,
     base::TimeTicks timestamp_now,
-    const InputHandlerProxy::EventDispositionCallback& callback)
+    InputHandlerProxy::EventDispositionCallback callback)
     : event_(WebInputEventTraits::Clone(*event)),
       latency_(latency),
       creation_timestamp_(timestamp_now),
       last_coalesced_timestamp_(timestamp_now) {
-  original_events_.emplace_back(std::move(event), callback);
+  original_events_.emplace_back(std::move(event), std::move(callback));
 }
 
 EventWithCallback::EventWithCallback(
@@ -54,9 +54,9 @@ void EventWithCallback::CoalesceWith(EventWithCallback* other,
 
   // New events get coalesced into older events, and the newer timestamp
   // should always be preserved.
-  const double time_stamp_seconds = other->event().timeStampSeconds();
+  const double time_stamp_seconds = other->event().TimeStampSeconds();
   Coalesce(other->event(), event_.get());
-  event_->setTimeStampSeconds(time_stamp_seconds);
+  event_->SetTimeStampSeconds(time_stamp_seconds);
 
   // When coalescing two input events, we keep the oldest LatencyInfo
   // since it will represent the longest latency.
@@ -78,15 +78,16 @@ void EventWithCallback::RunCallbacks(
       did_overscroll_params_copy =
           base::MakeUnique<DidOverscrollParams>(*did_overscroll_params);
     }
-    original_event.callback_.Run(disposition, std::move(original_event.event_),
-                                 latency, std::move(did_overscroll_params));
+    std::move(original_event.callback_)
+        .Run(disposition, std::move(original_event.event_), latency,
+             std::move(did_overscroll_params));
   }
 }
 
 EventWithCallback::OriginalEventWithCallback::OriginalEventWithCallback(
     WebScopedInputEvent event,
-    const InputHandlerProxy::EventDispositionCallback& callback)
-    : event_(std::move(event)), callback_(callback) {}
+    InputHandlerProxy::EventDispositionCallback callback)
+    : event_(std::move(event)), callback_(std::move(callback)) {}
 
 EventWithCallback::OriginalEventWithCallback::~OriginalEventWithCallback() {}
 

@@ -135,8 +135,7 @@ int RunUnitTestsUsingBaseTestSuite(int argc, char **argv) {
                          Bind(&TestSuite::Run, Unretained(&test_suite)));
 }
 
-TestSuite::TestSuite(int argc, char** argv)
-    : initialized_command_line_(false), created_feature_list_(false) {
+TestSuite::TestSuite(int argc, char** argv) : initialized_command_line_(false) {
   PreInitialize();
   InitializeFromCommandLine(argc, argv);
   // Logging must be initialized before any thread has a chance to call logging
@@ -146,7 +145,7 @@ TestSuite::TestSuite(int argc, char** argv)
 
 #if defined(OS_WIN)
 TestSuite::TestSuite(int argc, wchar_t** argv)
-    : initialized_command_line_(false), created_feature_list_(false) {
+    : initialized_command_line_(false) {
   PreInitialize();
   InitializeFromCommandLine(argc, argv);
   // Logging must be initialized before any thread has a chance to call logging
@@ -238,11 +237,11 @@ void TestSuite::AddTestLauncherResultPrinter() {
     return;
   }
 
-  XmlUnitTestResultPrinter* printer = new XmlUnitTestResultPrinter;
-  CHECK(printer->Initialize(output_path));
+  printer_ = new XmlUnitTestResultPrinter;
+  CHECK(printer_->Initialize(output_path));
   testing::TestEventListeners& listeners =
       testing::UnitTest::GetInstance()->listeners();
-  listeners.Append(printer);
+  listeners.Append(printer_);
 }
 
 // Don't add additional code to this method.  Instead add it to
@@ -282,8 +281,10 @@ int TestSuite::Run() {
   return result;
 }
 
-// static
-void TestSuite::UnitTestAssertHandler(const std::string& str) {
+void TestSuite::UnitTestAssertHandler(const char* file,
+                                      int line,
+                                      const base::StringPiece summary,
+                                      const base::StringPiece stack_trace) {
 #if defined(OS_ANDROID)
   // Correlating test stdio with logcat can be difficult, so we emit this
   // helpful little hint about what was running.  Only do this for Android
@@ -297,6 +298,16 @@ void TestSuite::UnitTestAssertHandler(const std::string& str) {
     fflush(stderr);
   }
 #endif  // defined(OS_ANDROID)
+
+  // XmlUnitTestResultPrinter inherits gtest format, where assert has summary
+  // and message. In GTest, summary is just a logged text, and message is a
+  // logged text, concatenated with stack trace of assert.
+  // Concatenate summary and stack_trace here, to pass it as a message.
+  if (printer_) {
+    const std::string summary_str = summary.as_string();
+    const std::string stack_trace_str = summary_str + stack_trace.as_string();
+    printer_->OnAssert(file, line, summary_str, stack_trace_str);
+  }
 
   // The logging system actually prints the message before calling the assert
   // handler. Just exit now to avoid printing too many stack traces.
@@ -330,13 +341,10 @@ void TestSuite::Initialize() {
     debug::WaitForDebugger(60, true);
   }
 #endif
-
   // Set up a FeatureList instance, so that code using that API will not hit a
-  // an error that it's not set. If a FeatureList was created in this way (i.e.
-  // one didn't exist previously), it will be cleared in Shutdown() via
-  // ClearInstanceForTesting().
-  created_feature_list_ =
-      FeatureList::InitializeInstance(std::string(), std::string());
+  // an error that it's not set. It will be cleared automatically.
+  // TODO(chaopeng) Should load the actually features in command line here.
+  scoped_feature_list_.InitFromCommandLine(std::string(), std::string());
 
 #if defined(OS_IOS)
   InitIOSTestMessageLoop();
@@ -359,7 +367,8 @@ void TestSuite::Initialize() {
       !CommandLine::ForCurrentProcess()->HasSwitch("show-error-dialogs")) {
     SuppressErrorDialogs();
     debug::SetSuppressDebugUI(true);
-    logging::SetLogAssertHandler(UnitTestAssertHandler);
+    assert_handler_ = base::MakeUnique<logging::ScopedLogAssertHandler>(
+        base::Bind(&TestSuite::UnitTestAssertHandler, base::Unretained(this)));
   }
 
   base::test::InitializeICUForTesting();
@@ -399,10 +408,6 @@ void TestSuite::Initialize() {
 
 void TestSuite::Shutdown() {
   base::debug::StopProfiling();
-
-  // Clear the FeatureList that was created by Initialize().
-  if (created_feature_list_)
-    FeatureList::ClearInstanceForTesting();
 }
 
 }  // namespace base

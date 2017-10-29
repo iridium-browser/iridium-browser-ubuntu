@@ -6,24 +6,33 @@
 
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "components/dom_distiller/core/url_constants.h"
 #include "url/gurl.h"
 
 namespace {
 
-// This enum is used in building the histogram. So, this is append only,
-// any new scheme should be added at the end, before SCHEME_MAX
+// These values are written to logs. New enum values can be added, but existing
+// enums must never be renumbered or deleted and reused. Any new scheme should
+// be added at the end, before SCHEME_MAX.
 enum Scheme {
-  SCHEME_UNKNOWN,
-  SCHEME_HTTP,
-  SCHEME_HTTPS,
-  SCHEME_FILE,
-  SCHEME_FTP,
-  SCHEME_DATA,
-  SCHEME_JAVASCRIPT,
-  SCHEME_ABOUT,
-  SCHEME_CHROME,
-  SCHEME_BLOB,
-  SCHEME_FILESYSTEM,
+  SCHEME_UNKNOWN = 0,
+  SCHEME_HTTP = 1,
+  SCHEME_HTTPS = 2,
+  SCHEME_FILE = 3,
+  SCHEME_FTP = 4,
+  SCHEME_DATA = 5,
+  SCHEME_JAVASCRIPT = 6,
+  SCHEME_ABOUT = 7,
+  SCHEME_CHROME = 8,
+  SCHEME_BLOB = 9,
+  SCHEME_FILESYSTEM = 10,
+  SCHEME_CHROME_NATIVE = 11,
+  SCHEME_CHROME_SEARCH = 12,
+  SCHEME_CHROME_DISTILLER = 13,
+  SCHEME_CHROME_DEVTOOLS = 14,
+  SCHEME_CHROME_EXTENSION = 15,
+  SCHEME_VIEW_SOURCE = 16,
+  SCHEME_EXTERNALFILE = 17,
   SCHEME_MAX,
 };
 
@@ -39,20 +48,25 @@ const char* const kSchemeNames[] = {
     "chrome",
     url::kBlobScheme,
     url::kFileSystemScheme,
-    "max",
+    "chrome-native",
+    "chrome-search",
+    dom_distiller::kDomDistillerScheme,
+    "chrome-devtools",
+    "chrome-extension",
+    "view-source",
+    "externalfile",
 };
 
-static_assert(arraysize(kSchemeNames) == SCHEME_MAX + 1,
-              "kSchemeNames should have SCHEME_MAX + 1 elements");
+static_assert(arraysize(kSchemeNames) == SCHEME_MAX,
+              "kSchemeNames should have SCHEME_MAX elements");
 
 }  // namespace
 
 namespace navigation_metrics {
 
 void RecordMainFrameNavigation(const GURL& url,
-                               bool is_in_page,
-                               bool is_off_the_record,
-                               bool have_already_seen_origin) {
+                               bool is_same_document,
+                               bool is_off_the_record) {
   Scheme scheme = SCHEME_UNKNOWN;
   for (int i = 1; i < SCHEME_MAX; ++i) {
     if (url.SchemeIs(kSchemeNames[i])) {
@@ -61,20 +75,19 @@ void RecordMainFrameNavigation(const GURL& url,
     }
   }
 
-  if (!have_already_seen_origin) {
-    if (is_off_the_record) {
-      UMA_HISTOGRAM_ENUMERATION("Navigation.SchemePerUniqueOriginOTR", scheme,
-                                SCHEME_MAX);
-    } else {
-      UMA_HISTOGRAM_ENUMERATION("Navigation.SchemePerUniqueOrigin", scheme,
-                                SCHEME_MAX);
-    }
-  }
-
   UMA_HISTOGRAM_ENUMERATION("Navigation.MainFrameScheme", scheme, SCHEME_MAX);
-  if (!is_in_page) {
+  if (!is_same_document) {
     UMA_HISTOGRAM_ENUMERATION("Navigation.MainFrameSchemeDifferentPage", scheme,
                               SCHEME_MAX);
+  }
+
+  if (is_off_the_record) {
+    UMA_HISTOGRAM_ENUMERATION("Navigation.MainFrameSchemeOTR", scheme,
+                              SCHEME_MAX);
+    if (!is_same_document) {
+      UMA_HISTOGRAM_ENUMERATION("Navigation.MainFrameSchemeDifferentPageOTR",
+                                scheme, SCHEME_MAX);
+    }
   }
 }
 

@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -14,6 +13,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -35,7 +35,6 @@
 using base::CaseInsensitiveCompareASCII;
 using base::DictionaryValue;
 using base::ListValue;
-using base::StringValue;
 using base::Value;
 
 namespace helpers = extension_web_request_api_helpers;
@@ -183,7 +182,7 @@ bool WebRequestConditionAttributeResourceType::IsFulfilled(
   if (!(request_data.stage & GetStages()))
     return false;
   const auto resource_type = GetWebRequestResourceType(request_data.request);
-  return std::find(types_.begin(), types_.end(), resource_type) != types_.end();
+  return base::ContainsValue(types_, resource_type);
 }
 
 WebRequestConditionAttribute::Type
@@ -236,7 +235,7 @@ WebRequestConditionAttributeContentType::Create(
   for (base::ListValue::const_iterator it = value_as_list->begin();
        it != value_as_list->end(); ++it) {
     std::string content_type;
-    if (!(*it)->GetAsString(&content_type)) {
+    if (!it->GetAsString(&content_type)) {
       *error = ErrorUtils::FormatErrorMessage(kInvalidValue, name);
       return scoped_refptr<const WebRequestConditionAttribute>(NULL);
     }
@@ -267,11 +266,9 @@ bool WebRequestConditionAttributeContentType::IsFulfilled(
       content_type, &mime_type, &charset, &had_charset, NULL);
 
   if (inclusive_) {
-    return std::find(content_types_.begin(), content_types_.end(),
-                     mime_type) != content_types_.end();
+    return base::ContainsValue(content_types_, mime_type);
   } else {
-    return std::find(content_types_.begin(), content_types_.end(),
-                     mime_type) == content_types_.end();
+    return !base::ContainsValue(content_types_, mime_type);
   }
 }
 
@@ -385,7 +382,7 @@ std::unique_ptr<const HeaderMatcher> HeaderMatcher::Create(
   for (base::ListValue::const_iterator it = tests->begin();
        it != tests->end(); ++it) {
     const base::DictionaryValue* tests = NULL;
-    if (!(*it)->GetAsDictionary(&tests))
+    if (!it->GetAsDictionary(&tests))
       return std::unique_ptr<const HeaderMatcher>();
 
     std::unique_ptr<const HeaderMatchTest> header_test(
@@ -510,7 +507,7 @@ HeaderMatcher::HeaderMatchTest::Create(const base::DictionaryValue* tests) {
         const base::ListValue* list = NULL;
         CHECK(content->GetAsList(&list));
         for (const auto& it : *list) {
-          tests->push_back(StringMatchTest::Create(*it, match_type, !is_name));
+          tests->push_back(StringMatchTest::Create(it, match_type, !is_name));
         }
         break;
       }
@@ -811,7 +808,7 @@ bool ParseListOfStages(const base::Value& value, int* out_stages) {
   std::string stage_name;
   for (base::ListValue::const_iterator it = list->begin();
        it != list->end(); ++it) {
-    if (!((*it)->GetAsString(&stage_name)))
+    if (!(it->GetAsString(&stage_name)))
       return false;
     if (stage_name == keys::kOnBeforeRequestEnum) {
       stages |= ON_BEFORE_REQUEST;

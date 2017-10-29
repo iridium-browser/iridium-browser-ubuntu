@@ -6,40 +6,41 @@
 
 #include "core/html/parser/TextResourceDecoder.h"
 #include "platform/SharedBuffer.h"
-#include "wtf/text/StringBuilder.h"
+#include "platform/loader/fetch/TextResourceDecoderOptions.h"
+#include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
 
-TextResource::TextResource(const ResourceRequest& resourceRequest,
+TextResource::TextResource(const ResourceRequest& resource_request,
                            Resource::Type type,
                            const ResourceLoaderOptions& options,
-                           const String& mimeType,
-                           const String& charset)
-    : Resource(resourceRequest, type, options),
-      m_decoder(TextResourceDecoder::create(mimeType, charset)) {}
+                           const TextResourceDecoderOptions& decoder_options)
+    : Resource(resource_request, type, options),
+      decoder_(TextResourceDecoder::Create(decoder_options)) {}
 
 TextResource::~TextResource() {}
 
-void TextResource::setEncoding(const String& chs) {
-  m_decoder->setEncoding(chs, TextResourceDecoder::EncodingFromHTTPHeader);
+void TextResource::SetEncoding(const String& chs) {
+  decoder_->SetEncoding(WTF::TextEncoding(chs),
+                        TextResourceDecoder::kEncodingFromHTTPHeader);
 }
 
-String TextResource::encoding() const {
-  return m_decoder->encoding().name();
+WTF::TextEncoding TextResource::Encoding() const {
+  return decoder_->Encoding();
 }
 
-String TextResource::decodedText() const {
-  DCHECK(data());
+String TextResource::DecodedText() const {
+  DCHECK(Data());
 
   StringBuilder builder;
   const char* segment;
   size_t position = 0;
-  while (size_t length = data()->getSomeData(segment, position)) {
-    builder.append(m_decoder->decode(segment, length));
+  while (size_t length = Data()->GetSomeData(segment, position)) {
+    builder.Append(decoder_->Decode(segment, length));
     position += length;
   }
-  builder.append(m_decoder->flush());
-  return builder.toString();
+  builder.Append(decoder_->Flush());
+  return builder.ToString();
 }
 
 }  // namespace blink

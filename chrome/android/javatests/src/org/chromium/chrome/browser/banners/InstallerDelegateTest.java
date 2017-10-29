@@ -7,9 +7,15 @@ package org.chromium.chrome.browser.banners;
 import android.content.pm.PackageInfo;
 import android.os.HandlerThread;
 import android.support.test.filters.SmallTest;
-import android.test.InstrumentationTestCase;
 import android.test.mock.MockPackageManager;
 
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
+import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -18,8 +24,8 @@ import org.chromium.content.browser.test.util.CriteriaHelper;
  * Tests the InstallerDelegate to make sure that it functions correctly and responds to changes
  * in the PackageManager.
  */
-public class InstallerDelegateTest extends InstrumentationTestCase
-        implements InstallerDelegate.Observer{
+@RunWith(BaseJUnit4ClassRunner.class)
+public class InstallerDelegateTest implements InstallerDelegate.Observer {
     private static final String MOCK_PACKAGE_NAME = "mock.package.name";
 
     /**
@@ -51,25 +57,31 @@ public class InstallerDelegateTest extends InstrumentationTestCase
     private boolean mInstallStarted;
 
     @Override
+    public void onInstallIntentCompleted(InstallerDelegate delegate, boolean isInstalling) {
+        Assert.assertTrue(isInstalling);
+    }
+
+    @Override
     public void onInstallFinished(InstallerDelegate delegate, boolean success) {
         mResultDelegate = delegate;
         mResultSuccess = success;
         mResultFinished = true;
-        assertTrue(mInstallStarted);
+        Assert.assertTrue(mInstallStarted);
     }
 
     @Override
-    public void setUp() throws Exception {
-        super.setUp();
+    public void onApplicationStateChanged(InstallerDelegate delegate, int newState) {}
 
+    @Before
+    public void setUp() throws Exception {
         mPackageManager = new TestPackageManager();
+        InstallerDelegate.setPackageManagerForTesting(mPackageManager);
 
         // Create a thread for the InstallerDelegate to run on.  We need this thread because the
         // InstallerDelegate's handler fails to be processed otherwise.
         mThread = new HandlerThread("InstallerDelegateTest thread");
         mThread.start();
-        mTestDelegate = new InstallerDelegate(
-                mThread.getLooper(), mPackageManager, this, MOCK_PACKAGE_NAME);
+        mTestDelegate = new InstallerDelegate(mThread.getLooper(), this);
 
         // Clear out the results from last time.
         mResultDelegate = null;
@@ -77,14 +89,13 @@ public class InstallerDelegateTest extends InstrumentationTestCase
         mResultFinished = false;
     }
 
-    @Override
+    @After
     public void tearDown() throws Exception {
         mThread.quit();
-        super.tearDown();
     }
 
     private void startMonitoring() {
-        mTestDelegate.start();
+        mTestDelegate.startMonitoring(MOCK_PACKAGE_NAME);
         mInstallStarted = true;
     }
 
@@ -96,22 +107,23 @@ public class InstallerDelegateTest extends InstrumentationTestCase
             }
         });
 
-        assertEquals(expectedResult, mResultSuccess);
-        assertEquals(mTestDelegate, mResultDelegate);
+        Assert.assertEquals(expectedResult, mResultSuccess);
+        Assert.assertEquals(mTestDelegate, mResultDelegate);
     }
 
     /**
      * Tests what happens when the InstallerDelegate detects that the package has successfully
      * been installed.
      */
+    @Test
     @SmallTest
     public void testInstallSuccessful() {
         mTestDelegate.setTimingForTests(1, 5000);
         startMonitoring();
 
-        assertFalse(mResultSuccess);
-        assertNull(mResultDelegate);
-        assertFalse(mResultFinished);
+        Assert.assertFalse(mResultSuccess);
+        Assert.assertNull(mResultDelegate);
+        Assert.assertFalse(mResultFinished);
 
         mPackageManager.isInstalled = true;
         checkResults(true);
@@ -120,14 +132,15 @@ public class InstallerDelegateTest extends InstrumentationTestCase
     /**
      * Tests what happens when the InstallerDelegate task is canceled.
      */
+    @Test
     @SmallTest
     public void testInstallWaitUntilCancel() {
         mTestDelegate.setTimingForTests(1, 5000);
         startMonitoring();
 
-        assertFalse(mResultSuccess);
-        assertNull(mResultDelegate);
-        assertFalse(mResultFinished);
+        Assert.assertFalse(mResultSuccess);
+        Assert.assertNull(mResultDelegate);
+        Assert.assertFalse(mResultFinished);
 
         mTestDelegate.cancel();
         checkResults(false);
@@ -136,6 +149,7 @@ public class InstallerDelegateTest extends InstrumentationTestCase
     /**
      * Tests what happens when the InstallerDelegate times out.
      */
+    @Test
     @SmallTest
     public void testInstallTimeout() {
         mTestDelegate.setTimingForTests(1, 50);
@@ -146,6 +160,7 @@ public class InstallerDelegateTest extends InstrumentationTestCase
     /**
      * Makes sure that the runnable isn't called until returning from start().
      */
+    @Test
     @SmallTest
     @RetryOnFailure
     public void testRunnableRaceCondition() {

@@ -18,7 +18,6 @@
 #include "ui/display/display_switches.h"
 #include "ui/display/manager/chromeos/apply_content_protection_task.h"
 #include "ui/display/manager/chromeos/display_layout_manager.h"
-#include "ui/display/manager/chromeos/display_snapshot_virtual.h"
 #include "ui/display/manager/chromeos/display_util.h"
 #include "ui/display/manager/chromeos/update_display_configuration_task.h"
 #include "ui/display/types/display_mode.h"
@@ -31,9 +30,6 @@ namespace display {
 namespace {
 
 typedef std::vector<const DisplayMode*> DisplayModeList;
-
-// The EDID specification marks the top bit of the manufacturer id as reserved.
-const int16_t kReservedManufacturerID = static_cast<int16_t>(1 << 15);
 
 struct DisplayState {
   DisplaySnapshot* display = nullptr;  // Not owned.
@@ -369,6 +365,13 @@ bool DisplayConfigurator::DisplayLayoutManagerImpl::FindMirrorMode(
     DisplayState* external_display,
     bool try_panel_fitting,
     bool preserve_aspect) const {
+  if (internal_display->display->sys_path() !=
+      external_display->display->sys_path()) {
+    // Hardware mirroring doesn't work between displays on different devices. In
+    // this case we revert to software mirroring.
+    return false;
+  }
+
   const DisplayMode* internal_native_info =
       internal_display->display->native_mode();
   const DisplayMode* external_native_info =
@@ -531,26 +534,25 @@ void DisplayConfigurator::Init(
   native_display_delegate_->AddObserver(this);
 }
 
-void DisplayConfigurator::TakeControl(const DisplayControlCallback& callback) {
+void DisplayConfigurator::TakeControl(DisplayControlCallback callback) {
   if (display_control_changing_) {
-    callback.Run(false);
+    std::move(callback).Run(false);
     return;
   }
 
   if (!display_externally_controlled_) {
-    callback.Run(true);
+    std::move(callback).Run(true);
     return;
   }
 
   display_control_changing_ = true;
   native_display_delegate_->TakeDisplayControl(
       base::Bind(&DisplayConfigurator::OnDisplayControlTaken,
-                 weak_ptr_factory_.GetWeakPtr(), callback));
+                 weak_ptr_factory_.GetWeakPtr(), base::Passed(&callback)));
 }
 
-void DisplayConfigurator::OnDisplayControlTaken(
-    const DisplayControlCallback& callback,
-    bool success) {
+void DisplayConfigurator::OnDisplayControlTaken(DisplayControlCallback callback,
+                                                bool success) {
   display_control_changing_ = false;
   display_externally_controlled_ = !success;
   if (success) {
@@ -561,24 +563,23 @@ void DisplayConfigurator::OnDisplayControlTaken(
                     base::Bind(&DoNothing));
   }
 
-  callback.Run(success);
+  std::move(callback).Run(success);
 }
 
-void DisplayConfigurator::RelinquishControl(
-    const DisplayControlCallback& callback) {
+void DisplayConfigurator::RelinquishControl(DisplayControlCallback callback) {
   if (display_control_changing_) {
-    callback.Run(false);
+    std::move(callback).Run(false);
     return;
   }
 
   if (display_externally_controlled_) {
-    callback.Run(true);
+    std::move(callback).Run(true);
     return;
   }
 
   // For simplicity, just fail if in the middle of a display configuration.
   if (configuration_task_) {
-    callback.Run(false);
+    std::move(callback).Run(false);
     return;
   }
 
@@ -589,11 +590,11 @@ void DisplayConfigurator::RelinquishControl(
   SetDisplayPowerInternal(
       chromeos::DISPLAY_POWER_ALL_OFF, kSetDisplayPowerNoFlags,
       base::Bind(&DisplayConfigurator::SendRelinquishDisplayControl,
-                 weak_ptr_factory_.GetWeakPtr(), callback));
+                 weak_ptr_factory_.GetWeakPtr(), base::Passed(&callback)));
 }
 
 void DisplayConfigurator::SendRelinquishDisplayControl(
-    const DisplayControlCallback& callback,
+    DisplayControlCallback callback,
     bool success) {
   if (success) {
     // Set the flag early such that an incoming configuration event won't start
@@ -601,15 +602,15 @@ void DisplayConfigurator::SendRelinquishDisplayControl(
     display_externally_controlled_ = true;
     native_display_delegate_->RelinquishDisplayControl(
         base::Bind(&DisplayConfigurator::OnDisplayControlRelinquished,
-                   weak_ptr_factory_.GetWeakPtr(), callback));
+                   weak_ptr_factory_.GetWeakPtr(), base::Passed(&callback)));
   } else {
     display_control_changing_ = false;
-    callback.Run(false);
+    std::move(callback).Run(false);
   }
 }
 
 void DisplayConfigurator::OnDisplayControlRelinquished(
-    const DisplayControlCallback& callback,
+    DisplayControlCallback callback,
     bool success) {
   display_control_changing_ = false;
   display_externally_controlled_ = success;
@@ -618,7 +619,7 @@ void DisplayConfigurator::OnDisplayControlRelinquished(
     RunPendingConfiguration();
   }
 
-  callback.Run(success);
+  std::move(callback).Run(success);
 }
 
 void DisplayConfigurator::ForceInitialConfigure(
@@ -1037,7 +1038,6 @@ void DisplayConfigurator::RunPendingConfiguration() {
       requested_display_state_, pending_power_state_, pending_power_flags_, 0,
       force_configure_, base::Bind(&DisplayConfigurator::OnConfigured,
                                    weak_ptr_factory_.GetWeakPtr())));
-  configuration_task_->SetVirtualDisplaySnapshots(virtual_display_snapshots_);
 
   // Reset the flags before running the task; otherwise it may end up scheduling
   // another configuration.
@@ -1152,44 +1152,6 @@ void DisplayConfigurator::NotifyDisplayStateObservers(
 void DisplayConfigurator::NotifyPowerStateObservers() {
   for (Observer& observer : observers_)
     observer.OnPowerStateChanged(current_power_state_);
-}
-
-int64_t DisplayConfigurator::AddVirtualDisplay(const gfx::Size& display_size) {
-  if (last_virtual_display_id_ == 0xff) {
-    LOG(WARNING) << "Exceeded virtual display id limit";
-    return kInvalidDisplayId;
-  }
-
-  int64_t display_id = GenerateDisplayID(kReservedManufacturerID, 0x0,
-                                         ++last_virtual_display_id_);
-  virtual_display_snapshots_.push_back(
-      base::MakeUnique<DisplaySnapshotVirtual>(display_id, display_size));
-  ConfigureDisplays();
-
-  return display_id;
-}
-
-bool DisplayConfigurator::RemoveVirtualDisplay(int64_t display_id) {
-  bool display_found = false;
-  for (auto it = virtual_display_snapshots_.begin();
-       it != virtual_display_snapshots_.end(); ++it) {
-    if ((*it)->display_id() == display_id) {
-      virtual_display_snapshots_.erase(it);
-      ConfigureDisplays();
-      display_found = true;
-      break;
-    }
-  }
-
-  if (!display_found)
-    return false;
-
-  int64_t max_display_id = 0;
-  for (const auto& display : virtual_display_snapshots_)
-    max_display_id = std::max(max_display_id, display->display_id());
-  last_virtual_display_id_ = max_display_id & 0xff;
-
-  return true;
 }
 
 bool DisplayConfigurator::IsDisplayOn() const {

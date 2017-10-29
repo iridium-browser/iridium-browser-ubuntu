@@ -26,8 +26,8 @@
 #ifndef DeviceAcceleration_h
 #define DeviceAcceleration_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/device_orientation/DeviceMotionData.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -37,20 +37,20 @@ class DeviceAcceleration final : public GarbageCollected<DeviceAcceleration>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static DeviceAcceleration* create(
+  static DeviceAcceleration* Create(
       DeviceMotionData::Acceleration* acceleration) {
     return new DeviceAcceleration(acceleration);
   }
   DECLARE_TRACE();
 
-  double x(bool& isNull) const;
-  double y(bool& isNull) const;
-  double z(bool& isNull) const;
+  double x(bool& is_null) const;
+  double y(bool& is_null) const;
+  double z(bool& is_null) const;
 
  private:
   explicit DeviceAcceleration(DeviceMotionData::Acceleration*);
 
-  Member<DeviceMotionData::Acceleration> m_acceleration;
+  Member<DeviceMotionData::Acceleration> acceleration_;
 };
 
 }  // namespace blink

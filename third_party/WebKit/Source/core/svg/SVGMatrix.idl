@@ -23,9 +23,10 @@
 // http://www.w3.org/TR/SVG11/coords.html#InterfaceSVGMatrix
 
 // TODO(foolip): SVGMatrix is gone from SVG 2, replaced by DOMMatrix.
+// https://crbug.com/709001
 [
     DependentLifetime,
-    ImplementedAs=SVGMatrixTearOff,
+    ImplementedAs=SVGMatrixTearOff
 ] interface SVGMatrix {
     // FIXME: these attributes should all be floats but since we implement
     // AffineTransform with doubles setting these as doubles makes more sense.

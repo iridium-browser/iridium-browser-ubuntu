@@ -18,6 +18,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
@@ -53,6 +54,8 @@ namespace {
 
 class TabCloser : public content::WebContentsUserData<TabCloser> {
  public:
+  ~TabCloser() override {}
+
   static void MaybeClose(WebContents* web_contents) {
     DCHECK(web_contents);
 
@@ -75,7 +78,6 @@ class TabCloser : public content::WebContentsUserData<TabCloser> {
         FROM_HERE,
         base::Bind(&TabCloser::CloseTabImpl, weak_ptr_factory_.GetWeakPtr()));
   }
-  ~TabCloser() override {}
 
   void CloseTabImpl() {
     // On Android, FindBrowserWithWebContents and TabStripModel don't exist.
@@ -118,10 +120,8 @@ void SupervisedUserInterstitial::Show(
   SupervisedUserInterstitial* interstitial = new SupervisedUserInterstitial(
       web_contents, url, reason, initial_page_load, callback);
 
-  // If Init() does not complete fully, immediately delete the interstitial.
-  if (!interstitial->Init())
-    delete interstitial;
-  // Otherwise |interstitial_page_| is responsible for deleting it.
+  // |interstitial_page_| is responsible for deleting the interstitial.
+  interstitial->Init();
 }
 
 SupervisedUserInterstitial::SupervisedUserInterstitial(
@@ -143,21 +143,15 @@ SupervisedUserInterstitial::~SupervisedUserInterstitial() {
   DCHECK(!web_contents_);
 }
 
-bool SupervisedUserInterstitial::Init() {
-  if (ShouldProceed()) {
-    // It can happen that the site was only allowed very recently and the URL
-    // filter on the IO thread had not been updated yet. Proceed with the
-    // request without showing the interstitial.
-    DispatchContinueRequest(true);
-    return false;
-  }
+void SupervisedUserInterstitial::Init() {
+  DCHECK(!ShouldProceed());
 
   InfoBarService* service = InfoBarService::FromWebContents(web_contents_);
   if (service) {
     // Remove all the infobars which are attached to |web_contents_| and for
     // which ShouldExpire() returns true.
     content::LoadCommittedDetails details;
-    // |details.is_in_page| is default false, and |details.is_main_frame| is
+    // |details.is_same_page| is default false, and |details.is_main_frame| is
     // default true. This results in is_navigation_to_different_page() returning
     // true.
     DCHECK(details.is_navigation_to_different_page());
@@ -185,8 +179,6 @@ bool SupervisedUserInterstitial::Init() {
   interstitial_page_ = content::InterstitialPage::Create(
       web_contents_, initial_page_load_, url_, this);
   interstitial_page_->Show();
-
-  return true;
 }
 
 // static
@@ -194,6 +186,10 @@ std::string SupervisedUserInterstitial::GetHTMLContents(
     Profile* profile,
     supervised_user_error_page::FilteringBehaviorReason reason) {
   bool is_child_account = profile->IsChild();
+
+  bool is_deprecated =
+      !is_child_account &&
+      !base::FeatureList::IsEnabled(features::kSupervisedUserCreation);
 
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile);
@@ -215,7 +211,8 @@ std::string SupervisedUserInterstitial::GetHTMLContents(
   return supervised_user_error_page::BuildHtml(
       allow_access_requests, profile_image_url, profile_image_url2, custodian,
       custodian_email, second_custodian, second_custodian_email,
-      is_child_account, reason, g_browser_process->GetApplicationLocale());
+      is_child_account, is_deprecated, reason,
+      g_browser_process->GetApplicationLocale());
 }
 
 std::string SupervisedUserInterstitial::GetHTMLContents() {
@@ -237,7 +234,6 @@ void SupervisedUserInterstitial::CommandReceived(const std::string& command) {
                               BACK,
                               HISTOGRAM_BOUNDING_VALUE);
 
-    DCHECK(web_contents_->GetController().GetTransientEntry());
     interstitial_page_->DontProceed();
     return;
   }
@@ -261,17 +257,20 @@ void SupervisedUserInterstitial::CommandReceived(const std::string& command) {
       base::UTF8ToUTF16(supervised_user_service->GetSecondCustodianName());
 
   if (command == "\"feedback\"") {
+    bool is_child_account = profile_->IsChild();
     base::string16 reason =
         l10n_util::GetStringUTF16(supervised_user_error_page::GetBlockMessageID(
-            reason_, true, second_custodian.empty()));
+            reason_, is_child_account, second_custodian.empty()));
     std::string message = l10n_util::GetStringFUTF8(
         IDS_BLOCK_INTERSTITIAL_DEFAULT_FEEDBACK_TEXT, reason);
 #if defined(OS_ANDROID)
-    DCHECK(profile_->IsChild());
+    DCHECK(is_child_account);
     ReportChildAccountFeedback(web_contents_, message, url_);
 #else
     chrome::ShowFeedbackPage(chrome::FindBrowserWithWebContents(web_contents_),
-                             message, std::string());
+                             chrome::kFeedbackSourceSupervisedUserInterstitial,
+                             message, std::string() /* category_tag */,
+                             std::string() /* extra_diagnostics */);
 #endif
     return;
   }
@@ -310,8 +309,8 @@ void SupervisedUserInterstitial::OnAccessRequestAdded(bool success) {
 bool SupervisedUserInterstitial::ShouldProceed() {
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile_);
-  SupervisedUserURLFilter* url_filter =
-      supervised_user_service->GetURLFilterForUIThread();
+  const SupervisedUserURLFilter* url_filter =
+      supervised_user_service->GetURLFilter();
   SupervisedUserURLFilter::FilteringBehavior behavior;
   if (url_filter->HasAsyncURLChecker()) {
     if (!url_filter->GetManualFilteringBehaviorForURL(url_, &behavior))
@@ -323,6 +322,11 @@ bool SupervisedUserInterstitial::ShouldProceed() {
 }
 
 void SupervisedUserInterstitial::MoveAwayFromCurrentPage() {
+  // No need to do anything if the WebContents is in the process of being
+  // destroyed anyway.
+  if (web_contents_->IsBeingDestroyed())
+    return;
+
   // If the interstitial was shown during a page load and there is no history
   // entry to go back to, attempt to close the tab.
   if (initial_page_load_) {
@@ -347,8 +351,7 @@ void SupervisedUserInterstitial::DispatchContinueRequest(
       SupervisedUserServiceFactory::GetForProfile(profile_);
   supervised_user_service->RemoveObserver(this);
 
-  if (!callback_.is_null())
-    callback_.Run(continue_request);
+  callback_.Run(continue_request);
 
   // After this, the WebContents may be destroyed. Make sure we don't try to use
   // it again.

@@ -9,7 +9,6 @@
 
 #include "core/fxcrt/fx_basic.h"
 #include "testing/embedder_test.h"
-#include "testing/fx_string_testhelpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/test_support.h"
 
@@ -76,7 +75,7 @@ TEST_F(FPDFParserDecodeEmbeddertest, FlateDecode) {
     unsigned char* result = nullptr;
     unsigned int result_size;
     EXPECT_EQ(data.processed_size,
-              FlateDecode(data.input, data.input_size, result, result_size))
+              FlateDecode(data.input, data.input_size, &result, &result_size))
         << " for case " << i;
     ASSERT_TRUE(result);
     EXPECT_EQ(std::string((const char*)data.expected, data.expected_size),
@@ -115,10 +114,11 @@ TEST_F(FPDFParserDecodeEmbeddertest, Bug_455199) {
   FPDF_PAGE page = LoadPage(0);
   FPDF_BITMAP bitmap = RenderPage(page);
 #if _FXM_PLATFORM_ == _FXM_PLATFORM_APPLE_
-  // Rendering on Mac is inconsistent, so skip this check.
-  const char* const kExpectedMd5sum = nullptr;
+  const char kExpectedMd5sum[] = "b90475ca64d1348c3bf5e2b77ad9187a";
+#elif _FXM_PLATFORM_ == _FXM_PLATFORM_WINDOWS_
+  const char kExpectedMd5sum[] = "9a2637b73fd5265309bfddd9c69476cd";
 #else
-  const char kExpectedMd5sum[] = "6f9f0fd903da177babb24dd50a806a56";
+  const char kExpectedMd5sum[] = "f7e129d97c58e91adeace32a4327b925";
 #endif
   CompareBitmap(bitmap, 200, 200, kExpectedMd5sum);
   FPDFBitmap_Destroy(bitmap);

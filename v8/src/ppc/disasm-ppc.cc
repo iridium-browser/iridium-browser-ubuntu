@@ -166,7 +166,6 @@ int Decoder::FormatRegister(Instruction* instr, const char* format) {
   }
 
   UNREACHABLE();
-  return -1;
 }
 
 
@@ -325,7 +324,6 @@ int Decoder::FormatOption(Instruction* instr, const char* format) {
   }
 
   UNREACHABLE();
-  return -1;
 }
 
 
@@ -562,6 +560,10 @@ void Decoder::DecodeExt2(Instruction* instr) {
       return;
     }
 #endif
+    case SYNC: {
+      Format(instr, "sync");
+      return;
+    }
     case MODSW: {
       Format(instr, "modsw  'rt, 'ra, 'rb");
       return;
@@ -645,6 +647,21 @@ void Decoder::DecodeExt2(Instruction* instr) {
   switch (EXT2 | (instr->BitField(10, 2))) {
     case SRADIX: {
       Format(instr, "sradi'.  'ra,'rs,'sh");
+      return;
+    }
+  }
+
+  switch (EXT2 | (instr->BitField(10, 0))) {
+    case STBCX: {
+      Format(instr, "stbcx   'rs, 'ra, 'rb");
+      return;
+    }
+    case STHCX: {
+      Format(instr, "sthcx   'rs, 'ra, 'rb");
+      return;
+    }
+    case STWCX: {
+      Format(instr, "stwcx   'rs, 'ra, 'rb");
       return;
     }
   }
@@ -857,6 +874,18 @@ void Decoder::DecodeExt2(Instruction* instr) {
     }
     case LHAX: {
       Format(instr, "lhax    'rt, 'ra, 'rb");
+      return;
+    }
+    case LBARX: {
+      Format(instr, "lbarx   'rt, 'ra, 'rb");
+      return;
+    }
+    case LHARX: {
+      Format(instr, "lharx   'rt, 'ra, 'rb");
+      return;
+    }
+    case LWARX: {
+      Format(instr, "lwarx   'rt, 'ra, 'rb");
       return;
     }
 #if V8_TARGET_ARCH_PPC64

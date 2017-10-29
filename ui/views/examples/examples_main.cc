@@ -16,7 +16,7 @@
 #include "base/run_loop.h"
 #include "base/test/test_discardable_memory_allocator.h"
 #include "build/build_config.h"
-#include "cc/surfaces/surface_manager.h"
+#include "components/viz/host/host_frame_sink_manager.h"
 #include "ui/base/ime/input_method_initializer.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -46,7 +46,7 @@
 #include "ui/gfx/x/x11_connection.h"  // nogncheck
 #endif
 
-base::LazyInstance<base::TestDiscardableMemoryAllocator>
+base::LazyInstance<base::TestDiscardableMemoryAllocator>::DestructorAtExit
     g_discardable_memory_allocator = LAZY_INSTANCE_INITIALIZER;
 
 int main(int argc, char** argv) {
@@ -67,11 +67,10 @@ int main(int argc, char** argv) {
   gl::init::InitializeGLOneOff();
 
   // The ContextFactory must exist before any Compositors are created.
-  bool context_factory_for_test = false;
-  cc::SurfaceManager surface_manager;
-  std::unique_ptr<ui::InProcessContextFactory> context_factory(
-      new ui::InProcessContextFactory(context_factory_for_test,
-                                      &surface_manager));
+  viz::HostFrameSinkManager host_frame_sink_manager_;
+  viz::FrameSinkManagerImpl frame_sink_manager_;
+  auto context_factory = base::MakeUnique<ui::InProcessContextFactory>(
+      &host_frame_sink_manager_, &frame_sink_manager_);
   context_factory->set_use_test_surface(false);
 
   base::MessageLoopForUI message_loop;

@@ -14,7 +14,7 @@ cr.define('print_preview', function() {
    */
   function DpiSettings(ticketItem) {
     print_preview.SettingsSectionSelect.call(this, ticketItem);
-  };
+  }
 
   DpiSettings.prototype = {
     __proto__: print_preview.SettingsSectionSelect.prototype,
@@ -24,17 +24,15 @@ cr.define('print_preview', function() {
       var hDpi = option.horizontal_dpi || 0;
       var vDpi = option.vertical_dpi || 0;
       if (hDpi > 0 && vDpi > 0 && hDpi != vDpi) {
-        return loadTimeData.getStringF('nonIsotropicDpiItemLabel',
-                                       hDpi.toLocaleString(),
-                                       vDpi.toLocaleString());
+        return loadTimeData.getStringF(
+            'nonIsotropicDpiItemLabel', hDpi.toLocaleString(),
+            vDpi.toLocaleString());
       }
-      return loadTimeData.getStringF('dpiItemLabel',
-                                     (hDpi || vDpi).toLocaleString());
+      return loadTimeData.getStringF(
+          'dpiItemLabel', (hDpi || vDpi).toLocaleString());
     }
   };
 
   // Export
-  return {
-    DpiSettings: DpiSettings
-  };
+  return {DpiSettings: DpiSettings};
 });

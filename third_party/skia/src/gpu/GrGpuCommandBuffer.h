@@ -9,6 +9,7 @@
 #define GrGpuCommandBuffer_DEFINED
 
 #include "GrColor.h"
+#include "GrPipeline.h"
 #include "ops/GrDrawOp.h"
 
 class GrOpFlushState;
@@ -68,12 +69,14 @@ public:
     // number of vertex attributes is too large).
     bool draw(const GrPipeline&,
               const GrPrimitiveProcessor&,
-              const GrMesh*,
+              const GrMesh[],
+              const GrPipeline::DynamicState[],
               int meshCount,
               const SkRect& bounds);
 
     // Performs an upload of vertex data in the middle of a set of a set of draws
-    virtual void inlineUpload(GrOpFlushState* state, GrDrawOp::DeferredUploadFn& upload) = 0;
+    virtual void inlineUpload(GrOpFlushState* state, GrDrawOp::DeferredUploadFn& upload,
+                              GrRenderTarget* rt) = 0;
 
     /**
      * Clear the passed in render target. Ignores the draw state and clip.
@@ -98,7 +101,8 @@ private:
     // overridden by backend-specific derived class to perform the draw call.
     virtual void onDraw(const GrPipeline&,
                         const GrPrimitiveProcessor&,
-                        const GrMesh*,
+                        const GrMesh[],
+                        const GrPipeline::DynamicState[],
                         int meshCount,
                         const SkRect& bounds) = 0;
 

@@ -5,11 +5,12 @@
 #ifndef StylePath_h
 #define StylePath_h
 
-#include "platform/heap/Handle.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
-#include "wtf/RefPtr.h"
 #include <memory>
+#include "core/style/BasicShapes.h"
+#include "platform/heap/Handle.h"
+#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/RefCounted.h"
+#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -17,30 +18,36 @@ class CSSValue;
 class Path;
 class SVGPathByteStream;
 
-class StylePath : public RefCounted<StylePath> {
+class StylePath final : public BasicShape {
  public:
-  static PassRefPtr<StylePath> create(std::unique_ptr<SVGPathByteStream>);
+  static PassRefPtr<StylePath> Create(std::unique_ptr<SVGPathByteStream>);
   ~StylePath();
 
-  static StylePath* emptyPath();
+  static StylePath* EmptyPath();
 
-  const Path& path() const;
+  const Path& GetPath() const;
   float length() const;
-  bool isClosed() const;
+  bool IsClosed() const;
 
-  const SVGPathByteStream& byteStream() const { return *m_byteStream; }
+  const SVGPathByteStream& ByteStream() const { return *byte_stream_; }
 
-  CSSValue* computedCSSValue() const;
+  CSSValue* ComputedCSSValue() const;
 
-  bool operator==(const StylePath&) const;
+  void GetPath(Path&, const FloatRect&) override;
+  PassRefPtr<BasicShape> Blend(const BasicShape*, double) const override;
+  bool operator==(const BasicShape&) const override;
+
+  ShapeType GetType() const override { return kStylePathType; }
 
  private:
   explicit StylePath(std::unique_ptr<SVGPathByteStream>);
 
-  std::unique_ptr<SVGPathByteStream> m_byteStream;
-  mutable std::unique_ptr<Path> m_path;
-  mutable float m_pathLength;
+  std::unique_ptr<SVGPathByteStream> byte_stream_;
+  mutable std::unique_ptr<Path> path_;
+  mutable float path_length_;
 };
+
+DEFINE_BASICSHAPE_TYPE_CASTS(StylePath);
 
 }  // namespace blink
 

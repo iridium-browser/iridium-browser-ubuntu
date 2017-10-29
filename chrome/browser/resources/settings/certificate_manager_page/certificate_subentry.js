@@ -51,6 +51,7 @@ Polymer({
           action: action,
           subnode: this.model,
           certificateType: this.certificateType,
+          anchor: this.$.dots,
         }));
   },
 
@@ -69,7 +70,7 @@ Polymer({
 
     // Otherwise propagate the error to the parents, such that a dialog
     // displaying the error will be shown.
-    this.fire('certificates-error', error);
+    this.fire('certificates-error', {error: error, anchor: this.$.dots});
   },
 
   /**
@@ -106,12 +107,11 @@ Polymer({
   onExportTap_: function(event) {
     this.closePopupMenu_();
     if (this.certificateType == CertificateType.PERSONAL) {
-      this.browserProxy_.exportPersonalCertificate(this.model.id).then(
-          function() {
+      this.browserProxy_.exportPersonalCertificate(this.model.id)
+          .then(function() {
             this.dispatchCertificateActionEvent_(
                 CertificateAction.EXPORT_PERSONAL);
-          }.bind(this),
-          this.onRejected_.bind(this));
+          }.bind(this), this.onRejected_.bind(this));
     } else {
       this.browserProxy_.exportCertificate(this.model.id);
     }
@@ -156,8 +156,7 @@ Polymer({
 
   /** @private */
   onDotsTap_: function() {
-    var actionMenu = /** @type {!CrActionMenuElement} */(
-        this.$.menu.get());
-    actionMenu.showAt(assert(this.$$('paper-icon-button')));
+    var actionMenu = /** @type {!CrActionMenuElement} */ (this.$.menu.get());
+    actionMenu.showAt(this.$.dots);
   },
 });

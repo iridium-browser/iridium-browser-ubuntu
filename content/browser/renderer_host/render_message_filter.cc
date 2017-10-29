@@ -18,8 +18,8 @@
 #include "base/numerics/safe_math.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread.h"
-#include "base/threading/worker_pool.h"
 #include "build/build_config.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/browser_main_loop.h"
@@ -51,7 +51,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_context.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/url_constants.h"
@@ -69,10 +68,6 @@
 #include "url/gurl.h"
 #include "url/origin.h"
 
-#if defined(OS_MACOSX)
-#include "content/common/mac/font_descriptor.h"
-#endif
-
 #if defined(OS_WIN)
 #include "content/common/font_cache_dispatcher_win.h"
 #endif
@@ -81,11 +76,8 @@
 #include "base/file_descriptor_posix.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "content/browser/media/android/media_throttler.h"
-#endif
-
 #if defined(OS_MACOSX)
+#include "content/common/mac/font_loader.h"
 #include "ui/accelerated_widget_mac/window_resize_helper_mac.h"
 #endif
 
@@ -136,7 +128,6 @@ RenderMessageFilter::RenderMessageFilter(
                            arraysize(kFilteredMessageClasses)),
       BrowserAssociatedInterface<mojom::RenderMessageFilter>(this, this),
       resource_dispatcher_host_(ResourceDispatcherHostImpl::Get()),
-      bitmap_manager_client_(HostSharedBitmapManager::current()),
       request_context_(request_context),
       resource_context_(browser_context->GetResourceContext()),
       render_widget_helper_(render_widget_helper),
@@ -160,17 +151,10 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderMessageFilter, message)
 #if defined(OS_MACOSX)
-    // On Mac, the IPCs ViewHostMsg_SwapCompositorFrame, ViewHostMsg_UpdateRect,
-    // and GpuCommandBufferMsg_SwapBuffersCompleted need to be handled in a
-    // nested message loop during resize.
-    IPC_MESSAGE_HANDLER_GENERIC(
-        ViewHostMsg_SwapCompositorFrame,
-        ResizeHelperPostMsgToUIThread(render_process_id_, message))
+    // On Mac, ViewHostMsg_UpdateRect needs to be handled in a nested message
+    // loop during resize.
     IPC_MESSAGE_HANDLER_GENERIC(
         ViewHostMsg_UpdateRect,
-        ResizeHelperPostMsgToUIThread(render_process_id_, message))
-    IPC_MESSAGE_HANDLER_GENERIC(
-        ViewHostMsg_SetNeedsBeginFrames,
         ResizeHelperPostMsgToUIThread(render_process_id_, message))
 #endif
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ChildProcessHostMsg_HasGpuProcess,
@@ -206,105 +190,49 @@ void RenderMessageFilter::OverrideThreadForMessage(const IPC::Message& message,
 }
 
 void RenderMessageFilter::GenerateRoutingID(
-    const GenerateRoutingIDCallback& callback) {
-  callback.Run(render_widget_helper_->GetNextRoutingID());
+    GenerateRoutingIDCallback callback) {
+  std::move(callback).Run(render_widget_helper_->GetNextRoutingID());
 }
 
-void RenderMessageFilter::CreateNewWindow(
-    mojom::CreateNewWindowParamsPtr params,
-    const CreateNewWindowCallback& callback) {
-  bool no_javascript_access;
-  bool can_create_window = GetContentClient()->browser()->CanCreateWindow(
-      render_process_id_, params->opener_render_frame_id, params->opener_url,
-      params->opener_top_level_frame_url, params->opener_security_origin,
-      params->window_container_type, params->target_url, params->referrer,
-      params->frame_name, params->disposition, *params->features,
-      params->user_gesture, params->opener_suppressed, resource_context_,
-      &no_javascript_access);
-
-  mojom::CreateNewWindowReplyPtr reply = mojom::CreateNewWindowReply::New();
-  if (!can_create_window) {
-    reply->route_id = MSG_ROUTING_NONE;
-    reply->main_frame_route_id = MSG_ROUTING_NONE;
-    reply->main_frame_widget_route_id = MSG_ROUTING_NONE;
-    reply->cloned_session_storage_namespace_id = 0;
-    return callback.Run(std::move(reply));
-  }
-
-  // This will clone the sessionStorage for namespace_id_to_clone.
-  scoped_refptr<SessionStorageNamespaceImpl> cloned_namespace =
-      new SessionStorageNamespaceImpl(dom_storage_context_.get(),
-                                      params->session_storage_namespace_id);
-  reply->cloned_session_storage_namespace_id = cloned_namespace->id();
-
-  render_widget_helper_->CreateNewWindow(
-      std::move(params), no_javascript_access, &reply->route_id,
-      &reply->main_frame_route_id, &reply->main_frame_widget_route_id,
-      cloned_namespace.get());
-  callback.Run(std::move(reply));
-}
-
-void RenderMessageFilter::CreateNewWidget(
-    int32_t opener_id,
-    blink::WebPopupType popup_type,
-    const CreateNewWidgetCallback& callback) {
+void RenderMessageFilter::CreateNewWidget(int32_t opener_id,
+                                          blink::WebPopupType popup_type,
+                                          mojom::WidgetPtr widget,
+                                          CreateNewWidgetCallback callback) {
   int route_id = MSG_ROUTING_NONE;
-  render_widget_helper_->CreateNewWidget(opener_id, popup_type, &route_id);
-  callback.Run(route_id);
+  render_widget_helper_->CreateNewWidget(opener_id, popup_type,
+                                         std::move(widget), &route_id);
+  std::move(callback).Run(route_id);
 }
 
 void RenderMessageFilter::CreateFullscreenWidget(
     int opener_id,
-    const CreateFullscreenWidgetCallback& callback) {
+    mojom::WidgetPtr widget,
+    CreateFullscreenWidgetCallback callback) {
   int route_id = 0;
-  render_widget_helper_->CreateNewFullscreenWidget(opener_id, &route_id);
-  callback.Run(route_id);
+  render_widget_helper_->CreateNewFullscreenWidget(opener_id, std::move(widget),
+                                                   &route_id);
+  std::move(callback).Run(route_id);
 }
 
 #if defined(OS_MACOSX)
 
 void RenderMessageFilter::OnLoadFont(const FontDescriptor& font,
-                                          IPC::Message* reply_msg) {
-  FontLoader::Result* result = new FontLoader::Result;
-
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&FontLoader::LoadFont, font, result),
-      base::Bind(&RenderMessageFilter::SendLoadFontReply, this, reply_msg,
-                 base::Owned(result)));
+                                     IPC::Message* reply_msg) {
+  FontLoader::LoadFont(
+      font,
+      base::BindOnce(&RenderMessageFilter::SendLoadFontReply, this, reply_msg));
 }
 
 void RenderMessageFilter::SendLoadFontReply(IPC::Message* reply,
-                                                 FontLoader::Result* result) {
-  base::SharedMemoryHandle handle;
-  if (result->font_data_size == 0 || result->font_id == 0) {
-    result->font_data_size = 0;
-    result->font_id = 0;
-    handle = base::SharedMemory::NULLHandle();
-  } else {
-    result->font_data.GiveToProcess(base::GetCurrentProcessHandle(), &handle);
-  }
-  RenderProcessHostMsg_LoadFont::WriteReplyParams(
-      reply, result->font_data_size, handle, result->font_id);
+                                            uint32_t data_size,
+                                            base::SharedMemoryHandle handle,
+                                            uint32_t font_id) {
+  RenderProcessHostMsg_LoadFont::WriteReplyParams(reply, data_size, handle,
+                                                  font_id);
   Send(reply);
 }
 
 #endif  // defined(OS_MACOSX)
-
-void RenderMessageFilter::AllocatedSharedBitmap(
-    mojo::ScopedSharedBufferHandle buffer,
-    const cc::SharedBitmapId& id) {
-  base::SharedMemoryHandle memory_handle;
-  size_t size;
-  MojoResult result = mojo::UnwrapSharedMemoryHandle(
-      std::move(buffer), &memory_handle, &size, NULL);
-  DCHECK_EQ(result, MOJO_RESULT_OK);
-  bitmap_manager_client_.ChildAllocatedSharedBitmap(size, memory_handle, id);
-}
-
-void RenderMessageFilter::DeletedSharedBitmap(const cc::SharedBitmapId& id) {
-  bitmap_manager_client_.ChildDeletedSharedBitmap(id);
-}
 
 #if defined(OS_LINUX)
 void RenderMessageFilter::SetThreadPriorityOnFileThread(
@@ -328,10 +256,13 @@ void RenderMessageFilter::SetThreadPriorityOnFileThread(
 
 void RenderMessageFilter::OnSetThreadPriority(base::PlatformThreadId ns_tid,
                                               base::ThreadPriority priority) {
-  BrowserThread::PostTask(
-      BrowserThread::FILE_USER_BLOCKING, FROM_HERE,
-      base::Bind(&RenderMessageFilter::SetThreadPriorityOnFileThread, this,
-                 ns_tid, priority));
+  constexpr base::TaskTraits kTraits = {
+      base::MayBlock(), base::TaskPriority::USER_BLOCKING,
+      base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN};
+  base::PostTaskWithTraits(
+      FROM_HERE, kTraits,
+      base::BindOnce(&RenderMessageFilter::SetThreadPriorityOnFileThread, this,
+                     ns_tid, priority));
 }
 #endif
 
@@ -402,17 +333,15 @@ void RenderMessageFilter::OnMediaLogEvents(
 
 void RenderMessageFilter::OnHasGpuProcess(IPC::Message* reply_ptr) {
   std::unique_ptr<IPC::Message> reply(reply_ptr);
-  GpuProcessHost::GetProcessHandles(
-      base::Bind(&RenderMessageFilter::GetGpuProcessHandlesCallback,
+  GpuProcessHost::GetHasGpuProcess(
+      base::Bind(&RenderMessageFilter::GetHasGpuProcessCallback,
                  weak_ptr_factory_.GetWeakPtr(), base::Passed(&reply)));
 }
 
-void RenderMessageFilter::GetGpuProcessHandlesCallback(
+void RenderMessageFilter::GetHasGpuProcessCallback(
     std::unique_ptr<IPC::Message> reply,
-    const std::list<base::ProcessHandle>& handles) {
-  bool has_gpu_process = handles.size() > 0;
-  ChildProcessHostMsg_HasGpuProcess::WriteReplyParams(reply.get(),
-                                                      has_gpu_process);
+    bool has_gpu) {
+  ChildProcessHostMsg_HasGpuProcess::WriteReplyParams(reply.get(), has_gpu);
   Send(reply.release());
 }
 

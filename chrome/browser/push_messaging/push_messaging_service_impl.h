@@ -22,13 +22,15 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/gcm_driver/common/gcm_messages.h"
+#include "components/gcm_driver/crypto/gcm_encryption_provider.h"
 #include "components/gcm_driver/gcm_app_handler.h"
 #include "components/gcm_driver/gcm_client.h"
 #include "components/gcm_driver/instance_id/instance_id.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/push_messaging_service.h"
 #include "content/public/common/push_event_payload.h"
-#include "content/public/common/push_messaging_status.h"
 #include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 #include "third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h"
 
@@ -38,6 +40,13 @@ class PushMessagingServiceObserver;
 class PushMessagingServiceTest;
 class ScopedKeepAlive;
 struct PushSubscriptionOptions;
+
+namespace content {
+namespace mojom {
+enum class PushDeliveryStatus;
+enum class PushRegistrationStatus;
+}  // namespace mojom
+}  // namespace content
 
 namespace gcm {
 class GCMDriver;
@@ -50,7 +59,8 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
                                  public gcm::GCMAppHandler,
                                  public content_settings::Observer,
                                  public KeyedService,
-                                 public BackgroundTrigger {
+                                 public BackgroundTrigger,
+                                 public content::NotificationObserver {
  public:
   // If any Service Workers are using push, starts GCM and adds an app handler.
   static void InitializeForProfile(Profile* profile);
@@ -78,16 +88,19 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
                              int renderer_id,
                              int render_frame_id,
                              const content::PushSubscriptionOptions& options,
+                             bool user_gesture,
                              const RegisterCallback& callback) override;
   void SubscribeFromWorker(const GURL& requesting_origin,
                            int64_t service_worker_registration_id,
                            const content::PushSubscriptionOptions& options,
                            const RegisterCallback& callback) override;
-  void GetEncryptionInfo(const GURL& origin,
-                         int64_t service_worker_registration_id,
-                         const std::string& sender_id,
-                         const EncryptionInfoCallback& callback) override;
-  void Unsubscribe(const GURL& requesting_origin,
+  void GetSubscriptionInfo(const GURL& origin,
+                           int64_t service_worker_registration_id,
+                           const std::string& sender_id,
+                           const std::string& subscription_id,
+                           const SubscriptionInfoCallback& callback) override;
+  void Unsubscribe(content::mojom::PushUnregistrationReason reason,
+                   const GURL& requesting_origin,
                    int64_t service_worker_registration_id,
                    const std::string& sender_id,
                    const UnregisterCallback&) override;
@@ -98,6 +111,7 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
   void DidDeleteServiceWorkerRegistration(
       const GURL& origin,
       int64_t service_worker_registration_id) override;
+  void DidDeleteServiceWorkerDatabase() override;
 
   // content_settings::Observer implementation.
   void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
@@ -113,11 +127,18 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
   gfx::ImageSkia* GetIcon() override;
   void OnMenuClick() override;
 
+  // content::NotificationObserver:
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
+
   void SetMessageCallbackForTesting(const base::Closure& callback);
   void SetUnsubscribeCallbackForTesting(const base::Closure& callback);
   void SetContentSettingChangedCallbackForTesting(
       const base::Closure& callback);
   void SetServiceWorkerUnregisteredCallbackForTesting(
+      const base::Closure& callback);
+  void SetServiceWorkerDatabaseWipedCallbackForTesting(
       const base::Closure& callback);
 
  private:
@@ -136,7 +157,7 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
                               int64_t service_worker_registration_id,
                               const gcm::IncomingMessage& message,
                               const base::Closure& message_handled_closure,
-                              content::PushDeliveryStatus status);
+                              content::mojom::PushDeliveryStatus status);
 
   void DidHandleMessage(const std::string& app_id,
                         const base::Closure& completion_closure);
@@ -152,10 +173,10 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
                     const std::string& subscription_id,
                     const std::vector<uint8_t>& p256dh,
                     const std::vector<uint8_t>& auth,
-                    content::PushRegistrationStatus status);
+                    content::mojom::PushRegistrationStatus status);
 
   void SubscribeEndWithError(const RegisterCallback& callback,
-                             content::PushRegistrationStatus status);
+                             content::mojom::PushRegistrationStatus status);
 
   void DidSubscribe(const PushMessagingAppIdentifier& app_identifier,
                     const std::string& sender_id,
@@ -170,9 +191,14 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
       const std::string& p256dh,
       const std::string& auth_secret);
 
-  // GetEncryptionInfo method --------------------------------------------------
+  // GetSubscriptionInfo methods -----------------------------------------------
 
-  void DidGetEncryptionInfo(const EncryptionInfoCallback& callback,
+  void DidValidateSubscription(const std::string& app_id,
+                               const std::string& sender_id,
+                               const SubscriptionInfoCallback& callback,
+                               bool is_valid);
+
+  void DidGetEncryptionInfo(const SubscriptionInfoCallback& callback,
                             const std::string& p256dh,
                             const std::string& auth_secret) const;
 
@@ -182,17 +208,18 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
   // whenever they can be obtained. It's valid for |origin| to be empty and
   // |service_worker_registration_id| to be kInvalidServiceWorkerRegistrationId,
   // or for app_id to be empty, but not both at once.
-  void UnsubscribeInternal(content::PushUnregistrationReason reason,
+  void UnsubscribeInternal(content::mojom::PushUnregistrationReason reason,
                            const GURL& origin,
                            int64_t service_worker_registration_id,
                            const std::string& app_id,
                            const std::string& sender_id,
                            const UnregisterCallback& callback);
 
-  void DidClearPushSubscriptionId(content::PushUnregistrationReason reason,
-                                  const std::string& app_id,
-                                  const std::string& sender_id,
-                                  const UnregisterCallback& callback);
+  void DidClearPushSubscriptionId(
+      content::mojom::PushUnregistrationReason reason,
+      const std::string& app_id,
+      const std::string& sender_id,
+      const UnregisterCallback& callback);
 
   void DidUnregister(bool was_subscribed, gcm::GCMClient::Result result);
   void DidDeleteID(const std::string& app_id,
@@ -254,6 +281,7 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
   base::Closure unsubscribe_callback_for_testing_;
   base::Closure content_setting_changed_callback_for_testing_;
   base::Closure service_worker_unregistered_callback_for_testing_;
+  base::Closure service_worker_database_wiped_callback_for_testing_;
 
   PushMessagingNotificationManager notification_manager_;
 
@@ -271,6 +299,12 @@ class PushMessagingServiceImpl : public content::PushMessagingService,
   // we can finish processing them without being interrupted.
   std::unique_ptr<ScopedKeepAlive> in_flight_keep_alive_;
 #endif
+
+  content::NotificationRegistrar registrar_;
+
+  // True when shutdown has started. Do not allow processing of incoming
+  // messages when this is true.
+  bool shutdown_started_ = false;
 
   base::WeakPtrFactory<PushMessagingServiceImpl> weak_factory_;
 

@@ -12,6 +12,8 @@
 
 #if defined(OS_ANDROID)
 #include <jni.h>
+#elif defined(OS_MACOSX)
+#include <objc/objc.h>
 #endif
 
 // This file provides cross platform typedefs for native widget types.
@@ -44,6 +46,7 @@ class Window;
 }
 namespace ui {
 class Cursor;
+enum class CursorType;
 class Event;
 }
 #endif  // defined(USE_AURA)
@@ -130,6 +133,12 @@ typedef void* NativeCursor;
 typedef ui::ViewAndroid* NativeView;
 typedef ui::WindowAndroid* NativeWindow;
 typedef jobject NativeEvent;
+#elif defined(OS_FUCHSIA)
+// TODO(fuchsia): Update when we have a plan for UI on Fuchsia.
+typedef void* NativeCursor;
+typedef void* NativeView;
+typedef void* NativeWindow;
+typedef void* NativeEvent;
 #else
 #error Unknown build environment.
 #endif
@@ -139,18 +148,10 @@ typedef HFONT NativeFont;
 typedef IAccessible* NativeViewAccessible;
 #elif defined(OS_IOS)
 typedef UIFont* NativeFont;
-#ifdef __OBJC__
 typedef id NativeViewAccessible;
-#else
-typedef void* NativeViewAccessible;
-#endif  // __OBJC__
 #elif defined(OS_MACOSX)
 typedef NSFont* NativeFont;
-#ifdef __OBJC__
 typedef id NativeViewAccessible;
-#else
-typedef void* NativeViewAccessible;
-#endif  // __OBJC__
 #else  // Android, Linux, Chrome OS, etc.
 // Linux doesn't have a native font type.
 #if defined(USE_X11) && !defined(OS_CHROMEOS)
@@ -162,7 +163,7 @@ typedef void* NativeViewAccessible;
 
 // A constant value to indicate that gfx::NativeCursor refers to no cursor.
 #if defined(USE_AURA)
-const int kNullCursor = 0;
+const ui::CursorType kNullCursor = static_cast<ui::CursorType>(0);
 #else
 const gfx::NativeCursor kNullCursor = static_cast<gfx::NativeCursor>(NULL);
 #endif
@@ -201,6 +202,10 @@ typedef ANativeWindow* AcceleratedWidget;
 constexpr AcceleratedWidget kNullAcceleratedWidget = 0;
 #elif defined(USE_OZONE)
 typedef int32_t AcceleratedWidget;
+constexpr AcceleratedWidget kNullAcceleratedWidget = 0;
+#elif defined(OS_FUCHSIA)
+// TODO(fuchsia): Update when we have a plan for UI on Fuchsia.
+typedef void* AcceleratedWidget;
 constexpr AcceleratedWidget kNullAcceleratedWidget = 0;
 #else
 #error unknown platform

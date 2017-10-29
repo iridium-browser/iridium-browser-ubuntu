@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #include "base/threading/thread_local.h"
 #include "base/trace_event/trace_event.h"
-#include "third_party/webrtc/base/nullsocketserver.h"
+#include "third_party/webrtc/rtc_base/nullsocketserver.h"
 
 namespace jingle_glue {
 
@@ -31,8 +31,8 @@ struct JingleThreadWrapper::PendingSend {
   base::WaitableEvent done_event;
 };
 
-base::LazyInstance<base::ThreadLocalPointer<JingleThreadWrapper> >
-    g_jingle_thread_wrapper = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::ThreadLocalPointer<JingleThreadWrapper>>::
+    DestructorAtExit g_jingle_thread_wrapper = LAZY_INSTANCE_INITIALIZER;
 
 // static
 void JingleThreadWrapper::EnsureForCurrentMessageLoop() {

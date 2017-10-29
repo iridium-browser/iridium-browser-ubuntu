@@ -12,6 +12,8 @@
 #include "GrOp.h"
 #include "GrPipeline.h"
 
+class GrAppliedClip;
+
 /**
  * GrDrawOps are flushed in two phases (preDraw, and draw). In preDraw uploads to GrGpuResources
  * and draws are determined and scheduled. They are issued in the draw phase. GrDrawOpUploadToken is
@@ -56,108 +58,47 @@ public:
 
     GrDrawOp(uint32_t classID) : INHERITED(classID) {}
 
-    void initPipeline(const GrPipeline::InitArgs& args) {
-        this->applyPipelineOptimizations(fPipeline.init(args));
-    }
-
     /**
-     * Performs analysis of the fragment processors in GrProcessorSet and GrAppliedClip using the
-     * initial color and coverage from this op's geometry processor.
+     * This information is required to determine how to compute a GrAppliedClip from a GrClip for
+     * this op.
      */
-    void analyzeProcessors(GrProcessorSet::FragmentProcessorAnalysis* analysis,
-                           const GrProcessorSet& processors,
-                           const GrAppliedClip& appliedClip,
-                           const GrCaps& caps) const {
-        FragmentProcessorAnalysisInputs input;
-        this->getFragmentProcessorAnalysisInputs(&input);
-        analysis->reset(*input.colorInput(), *input.coverageInput(), processors,
-                        input.usesPLSDstRead(), appliedClip, caps);
-    }
-
-protected:
-    static SkString DumpPipelineInfo(const GrPipeline& pipeline) {
-        SkString string;
-        string.appendf("RT: %d\n", pipeline.getRenderTarget()->uniqueID().asUInt());
-        string.append("ColorStages:\n");
-        for (int i = 0; i < pipeline.numColorFragmentProcessors(); i++) {
-            string.appendf("\t\t%s\n\t\t%s\n",
-                           pipeline.getColorFragmentProcessor(i).name(),
-                           pipeline.getColorFragmentProcessor(i).dumpInfo().c_str());
-        }
-        string.append("CoverageStages:\n");
-        for (int i = 0; i < pipeline.numCoverageFragmentProcessors(); i++) {
-            string.appendf("\t\t%s\n\t\t%s\n",
-                           pipeline.getCoverageFragmentProcessor(i).name(),
-                           pipeline.getCoverageFragmentProcessor(i).dumpInfo().c_str());
-        }
-        string.appendf("XP: %s\n", pipeline.getXferProcessor().name());
-
-        bool scissorEnabled = pipeline.getScissorState().enabled();
-        string.appendf("Scissor: ");
-        if (scissorEnabled) {
-            string.appendf("[L: %d, T: %d, R: %d, B: %d]\n",
-                           pipeline.getScissorState().rect().fLeft,
-                           pipeline.getScissorState().rect().fTop,
-                           pipeline.getScissorState().rect().fRight,
-                           pipeline.getScissorState().rect().fBottom);
-        } else {
-            string.appendf("<disabled>\n");
-        }
-        return string;
-    }
-
-    const GrPipeline* pipeline() const {
-        SkASSERT(fPipeline.isInitialized());
-        return &fPipeline;
-    }
-
-    /**
-     * This describes aspects of the GrPrimitiveProcessor produced by a GrDrawOp that are used in
-     * pipeline analysis.
-     */
-    class FragmentProcessorAnalysisInputs {
-    public:
-        FragmentProcessorAnalysisInputs() = default;
-        GrPipelineInput* colorInput() { return &fColorInput; }
-        GrPipelineInput* coverageInput() { return &fCoverageInput; }
-
-        void setUsesPLSDstRead() { fUsesPLSDstRead = true; }
-
-        bool usesPLSDstRead() const { return fUsesPLSDstRead; }
-
-    private:
-        GrPipelineInput fColorInput;
-        GrPipelineInput fCoverageInput;
-        bool fUsesPLSDstRead = false;
+    enum class FixedFunctionFlags : uint32_t {
+        kNone = 0x0,
+        /** Indices that the op will enable MSAA or mixed samples rendering. */
+        kUsesHWAA = 0x1,
+        /** Indices that the op reads and/or writes the stencil buffer */
+        kUsesStencil = 0x2,
     };
+    GR_DECL_BITFIELD_CLASS_OPS_FRIENDS(FixedFunctionFlags);
+    virtual FixedFunctionFlags fixedFunctionFlags() const = 0;
 
-private:
+    enum class RequiresDstTexture : bool { kNo = false, kYes = true };
     /**
-     * Provides information about the GrPrimitiveProccesor color and coverage outputs which become
-     * inputs to the first color and coverage fragment processors.
+     * This is called after the GrAppliedClip has been computed and just prior to recording the op
+     * or combining it with a previously recorded op. The op should convert any proxies or resources
+     * it owns to "pending io" status so that resource allocation can be more optimal. Additionally,
+     * at this time the op must report whether a copy of the destination (or destination texture
+     * itself) needs to be provided to the GrXferProcessor when this op executes.
      */
-    virtual void getFragmentProcessorAnalysisInputs(FragmentProcessorAnalysisInputs*) const = 0;
-
-    /**
-     * After GrPipeline analysis is complete this is called so that the op can use the analysis
-     * results when constructing its GrPrimitiveProcessor.
-     */
-    virtual void applyPipelineOptimizations(const GrPipelineOptimizations&) = 0;
+    virtual RequiresDstTexture finalize(const GrCaps&, const GrAppliedClip*) = 0;
 
 protected:
+    static SkString DumpPipelineInfo(const GrPipeline& pipeline);
+
     struct QueuedUpload {
         QueuedUpload(DeferredUploadFn&& upload, GrDrawOpUploadToken token)
             : fUpload(std::move(upload))
             , fUploadBeforeToken(token) {}
-        DeferredUploadFn    fUpload;
+        DeferredUploadFn fUpload;
         GrDrawOpUploadToken fUploadBeforeToken;
     };
 
-    SkTArray<QueuedUpload>                          fInlineUploads;
+    SkTArray<QueuedUpload> fInlineUploads;
 
 private:
-    GrPipeline fPipeline;
     typedef GrOp INHERITED;
 };
+
+GR_MAKE_BITFIELD_CLASS_OPS(GrDrawOp::FixedFunctionFlags);
 
 #endif

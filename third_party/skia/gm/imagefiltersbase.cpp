@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkCanvas.h"
 #include "SkColorFilter.h"
 #include "SkColorPriv.h"
@@ -38,6 +39,9 @@ protected:
 
     sk_sp<SkSpecialImage> onFilterImage(SkSpecialImage* source, const Context&,
                                         SkIPoint* offset) const override {
+        return nullptr;
+    }
+    sk_sp<SkImageFilter> onMakeColorSpace(SkColorSpaceXformer*) const override {
         return nullptr;
     }
 
@@ -81,6 +85,9 @@ protected:
                                         SkIPoint* offset) const override {
         offset->set(0, 0);
         return sk_ref_sp<SkSpecialImage>(source);
+    }
+    sk_sp<SkImageFilter> onMakeColorSpace(SkColorSpaceXformer*) const override {
+        return sk_ref_sp(const_cast<IdentityImageFilter*>(this));
     }
 
 private:
@@ -148,7 +155,7 @@ static void draw_text(SkCanvas* canvas, const SkRect& r, sk_sp<SkImageFilter> im
     sk_tool_utils::set_portable_typeface(&paint);
     paint.setTextSize(r.height()/2);
     paint.setTextAlign(SkPaint::kCenter_Align);
-    canvas->drawText("Text", 4, r.centerX(), r.centerY(), paint);
+    canvas->drawString("Text", r.centerX(), r.centerY(), paint);
 }
 
 static void draw_bitmap(SkCanvas* canvas, const SkRect& r, sk_sp<SkImageFilter> imf) {
@@ -264,7 +271,7 @@ protected:
         SkAutoCanvasRestore acr(canvas, true);
         for (size_t i = 0; i < SK_ARRAY_COUNT(flags); ++i) {
             paint.setFlags(flags[i]);
-            canvas->drawText("Hamburgefons", 11, 0, 0, paint);
+            canvas->drawString("Hamburgefon", 0, 0, paint);
             canvas->translate(0, 40);
         }
     }

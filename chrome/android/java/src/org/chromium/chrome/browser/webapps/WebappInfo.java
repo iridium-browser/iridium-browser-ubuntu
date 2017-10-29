@@ -76,8 +76,12 @@ public class WebappInfo {
     }
 
     protected static int sourceFromIntent(Intent intent) {
-        return IntentUtils.safeGetIntExtra(
+        int source = IntentUtils.safeGetIntExtra(
                 intent, ShortcutHelper.EXTRA_SOURCE, ShortcutSource.UNKNOWN);
+        if (source >= ShortcutSource.COUNT) {
+            source = ShortcutSource.UNKNOWN;
+        }
+        return source;
     }
 
     private static String titleFromIntent(Intent intent) {
@@ -108,7 +112,7 @@ public class WebappInfo {
         String url = urlFromIntent(intent);
         String scope = IntentUtils.safeGetStringExtra(intent, ShortcutHelper.EXTRA_SCOPE);
         int displayMode = IntentUtils.safeGetIntExtra(
-                intent, ShortcutHelper.EXTRA_DISPLAY_MODE, WebDisplayMode.Standalone);
+                intent, ShortcutHelper.EXTRA_DISPLAY_MODE, WebDisplayMode.STANDALONE);
         int orientation = IntentUtils.safeGetIntExtra(
                 intent, ShortcutHelper.EXTRA_ORIENTATION, ScreenOrientationValues.DEFAULT);
         int source = sourceFromIntent(intent);
@@ -194,6 +198,14 @@ public class WebappInfo {
         return mUri;
     }
 
+    /**
+     * Whether the webapp should be navigated to {@link uri()} if the webapp is already open when
+     * Chrome receives a ACTION_START_WEBAPP intent.
+     */
+    public boolean shouldForceNavigation() {
+        return false;
+    }
+
     public Uri scopeUri() {
         return mScopeUri;
     }
@@ -271,7 +283,7 @@ public class WebappInfo {
     }
 
     /**
-     * Returns the icon in Bitmap form.  Caches the result for future retrievals.
+     * Returns the icon in Bitmap form.
      */
     public Bitmap icon() {
         return (mIcon == null) ? null : mIcon.decoded();
@@ -302,9 +314,6 @@ public class WebappInfo {
         intent.putExtra(ShortcutHelper.EXTRA_THEME_COLOR, themeColor());
         intent.putExtra(ShortcutHelper.EXTRA_BACKGROUND_COLOR, backgroundColor());
         intent.putExtra(ShortcutHelper.EXTRA_IS_ICON_GENERATED, isIconGenerated());
-        if (webApkPackageName() != null) {
-            intent.putExtra(ShortcutHelper.EXTRA_WEBAPK_PACKAGE_NAME, webApkPackageName());
-        }
     }
 
     /**
@@ -312,6 +321,7 @@ public class WebappInfo {
      * opposed to an intent from a push notification or other internal source).
      */
     public boolean isLaunchedFromHomescreen() {
-        return source() != ShortcutSource.NOTIFICATION;
+        int source = source();
+        return source != ShortcutSource.NOTIFICATION && source != ShortcutSource.EXTERNAL_INTENT;
     }
 }

@@ -7,13 +7,13 @@
 
 #include <stddef.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/callback_forward.h"
-#include "base/containers/hash_tables.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -239,7 +239,7 @@ class DataUseTabModel {
   FRIEND_TEST_ALL_PREFIXES(ExternalDataUseObserverTest,
                            MatchingRuleFetchOnControlAppInstall);
 
-  typedef base::hash_map<SessionID::id_type, TabDataUseEntry> TabEntryMap;
+  using TabEntryMap = std::map<SessionID::id_type, TabDataUseEntry>;
 
   // Gets the current label of a tab, and the new label if a navigation event
   // occurs in the tab. |tab_id| is the source tab of the generated event,
@@ -266,12 +266,13 @@ class DataUseTabModel {
   // Initiates a new tracking session with the |label| for tab with id |tab_id|.
   // |is_custom_tab_package_match| is true if |tab_id| is a custom tab and
   // started tracking due to package name match.
-  void StartTrackingDataUse(SessionID::id_type tab_id,
+  void StartTrackingDataUse(TransitionType transition,
+                            SessionID::id_type tab_id,
                             const std::string& label,
                             bool is_custom_tab_package_match);
 
   // Ends the current tracking session for tab with id |tab_id|.
-  void EndTrackingDataUse(SessionID::id_type tab_id);
+  void EndTrackingDataUse(TransitionType transition, SessionID::id_type tab_id);
 
   // Compacts the tab entry map |active_tabs_| by removing expired tab entries.
   // After removing expired tab entries, if the size of |active_tabs_| exceeds

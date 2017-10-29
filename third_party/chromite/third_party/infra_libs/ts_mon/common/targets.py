@@ -22,8 +22,8 @@ class Target(object):
     # Subclasses should list the updatable target fields here.
     self._fields = tuple()
 
-  def _populate_target_pb(self, metric):
-    """Populate the 'target' embedded message field of a metric protobuf."""
+  def populate_target_pb(self, collection_pb):
+    """Populate the 'target' into a MetricsCollection."""
     raise NotImplementedError()
 
   def to_dict(self):
@@ -39,6 +39,18 @@ class Target(object):
       getattr(self, field)
       setattr(self, field, value)
 
+  def __eq__(self, other):
+    if type(self) != type(other):
+      return False
+
+    for field in self._fields:
+      if getattr(self, field) != getattr(other,field):
+        return False
+
+    return True
+
+  def __hash__(self):
+    return hash(tuple(sorted(self.to_dict())))
 
 class DeviceTarget(Target):
   """Monitoring interface class for monitoring specific hosts or devices."""
@@ -61,19 +73,19 @@ class DeviceTarget(Target):
     self.alertable = True
     self._fields = ('region', 'role', 'network', 'hostname')
 
-  def _populate_target_pb(self, metric):
-    """Populate the 'network_device' embedded message of a metric protobuf.
+  def populate_target_pb(self, collection):
+    """Populate the 'network_device' target into metrics_pb2.MetricsCollection.
 
     Args:
-      metric (metrics_pb2.MetricsData): the metric proto to be populated.
+      collection (metrics_pb2.MetricsCollection): the collection proto to be
+          populated.
     """
-    # Note that this disregards the pop, asn, role, and vendor fields.
-    metric.network_device.metro = self.region
-    metric.network_device.role = self.role
-    metric.network_device.hostgroup = self.network
-    metric.network_device.hostname = self.hostname
-    metric.network_device.realm = self.realm
-    metric.network_device.alertable = self.alertable
+    collection.network_device.metro = self.region
+    collection.network_device.role = self.role
+    collection.network_device.hostgroup = self.network
+    collection.network_device.hostname = self.hostname
+    collection.network_device.realm = self.realm
+    collection.network_device.alertable = self.alertable
 
 
 class TaskTarget(Target):
@@ -98,14 +110,16 @@ class TaskTarget(Target):
     self._fields = ('service_name', 'job_name', 'region',
                     'hostname', 'task_num')
 
-  def _populate_target_pb(self, metric):
-    """Populate the 'task' embedded message field of a metric protobuf.
+  def populate_target_pb(self, collection):
+    """Populate the 'task' target into metrics_pb2.MetricsCollection.
 
     Args:
-      metric (metrics_pb2.MetricsData): the metric proto to be populated.
+      collection (metrics_pb2.MetricsCollection): the collection proto to be
+          populated.
     """
-    metric.task.service_name = self.service_name
-    metric.task.job_name = self.job_name
-    metric.task.data_center = self.region
-    metric.task.host_name = self.hostname
-    metric.task.task_num = self.task_num
+    collection.task.service_name = self.service_name
+    collection.task.job_name = self.job_name
+    collection.task.data_center = self.region
+    collection.task.host_name = self.hostname
+    collection.task.task_num = self.task_num
+

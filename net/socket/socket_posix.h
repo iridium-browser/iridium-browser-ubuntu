@@ -31,9 +31,17 @@ class NET_EXPORT_PRIVATE SocketPosix : public base::MessageLoopForIO::Watcher {
   // Opens a socket and returns net::OK if |address_family| is AF_INET, AF_INET6
   // or AF_UNIX. Otherwise, it does DCHECK() and returns a net error.
   int Open(int address_family);
-  // Takes ownership of |socket|.
+
+  // Takes ownership of |socket|, which is known to already be connected to the
+  // given peer address.
   int AdoptConnectedSocket(SocketDescriptor socket,
                            const SockaddrStorage& peer_address);
+  // Takes ownership of |socket|, which may or may not be open, bound, or
+  // listening. The caller must determine the state of the socket based on its
+  // provenance and act accordingly. The socket may have connections waiting
+  // to be accepted, but must not be actually connected.
+  int AdoptUnconnectedSocket(SocketDescriptor socket);
+
   // Releases ownership of |socket_fd_| to caller.
   SocketDescriptor ReleaseConnectedSocket();
 
@@ -59,6 +67,14 @@ class NET_EXPORT_PRIVATE SocketPosix : public base::MessageLoopForIO::Watcher {
   // errno, though errno is set if read or write events happen with error.
   // TODO(byungchul): Need more robust way to pass system errno.
   int Read(IOBuffer* buf, int buf_len, const CompletionCallback& callback);
+
+  // Reads up to |buf_len| bytes into |buf| without blocking. If read is to
+  // be retried later, |callback| will be invoked when data is ready for
+  // reading. This method doesn't hold on to |buf|.
+  // See socket.h for more information.
+  int ReadIfReady(IOBuffer* buf,
+                  int buf_len,
+                  const CompletionCallback& callback);
   int Write(IOBuffer* buf, int buf_len, const CompletionCallback& callback);
 
   // Waits for next write event. This is called by TCPSocketPosix for TCP
@@ -95,6 +111,7 @@ class NET_EXPORT_PRIVATE SocketPosix : public base::MessageLoopForIO::Watcher {
   void ConnectCompleted();
 
   int DoRead(IOBuffer* buf, int buf_len);
+  void RetryRead(int rv);
   void ReadCompleted();
 
   int DoWrite(IOBuffer* buf, int buf_len);
@@ -109,10 +126,14 @@ class NET_EXPORT_PRIVATE SocketPosix : public base::MessageLoopForIO::Watcher {
   CompletionCallback accept_callback_;
 
   base::MessageLoopForIO::FileDescriptorWatcher read_socket_watcher_;
+
+  // Non-null when a Read() is in progress.
   scoped_refptr<IOBuffer> read_buf_;
   int read_buf_len_;
-  // External callback; called when read is complete.
   CompletionCallback read_callback_;
+
+  // Non-null when a ReadIfReady() is in progress.
+  CompletionCallback read_if_ready_callback_;
 
   base::MessageLoopForIO::FileDescriptorWatcher write_socket_watcher_;
   scoped_refptr<IOBuffer> write_buf_;

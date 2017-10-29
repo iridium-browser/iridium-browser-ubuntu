@@ -5,68 +5,66 @@
 #ifndef CSSRotation_h
 #define CSSRotation_h
 
-#include "core/css/cssom/CSSAngleValue.h"
-#include "core/css/cssom/CSSMatrixComponent.h"
+#include "core/css/cssom/CSSNumericValue.h"
 #include "core/css/cssom/CSSTransformComponent.h"
 
 namespace blink {
 
+class DOMMatrix;
+class ExceptionState;
+
+// Represents a rotation value in a CSSTransformValue used for properties like
+// "transform".
+// See CSSRotation.idl for more information about this class.
 class CORE_EXPORT CSSRotation final : public CSSTransformComponent {
   WTF_MAKE_NONCOPYABLE(CSSRotation);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static CSSRotation* create(const CSSAngleValue* angleValue) {
-    return new CSSRotation(angleValue);
-  }
-
-  static CSSRotation* create(double x,
+  // Constructors defined in the IDL.
+  static CSSRotation* Create(CSSNumericValue* angle, ExceptionState&);
+  static CSSRotation* Create(double x,
                              double y,
                              double z,
-                             const CSSAngleValue* angleValue) {
-    return new CSSRotation(x, y, z, angleValue);
-  }
+                             CSSNumericValue* angle,
+                             ExceptionState&);
 
-  static CSSRotation* fromCSSValue(const CSSFunctionValue&);
+  // Blink-internal ways of creating CSSRotations.
+  static CSSRotation* Create(CSSNumericValue* angle);
+  static CSSRotation* Create(double x,
+                             double y,
+                             double z,
+                             CSSNumericValue* angle);
+  static CSSRotation* FromCSSValue(const CSSFunctionValue&);
 
-  // Bindings requires returning non-const pointers. This is safe because
-  // CSSAngleValues are immutable.
-  CSSAngleValue* angle() const {
-    return const_cast<CSSAngleValue*>(m_angle.get());
-  }
-  double x() const { return m_x; }
-  double y() const { return m_y; }
-  double z() const { return m_z; }
+  // Getters and setters for attributes defined in the IDL.
+  CSSNumericValue* angle() { return angle_.Get(); }
+  double x() const { return x_; }
+  double y() const { return y_; }
+  double z() const { return z_; }
+  void setAngle(CSSNumericValue* angle, ExceptionState&);
+  void setX(double x) { x_ = x; }
+  void setY(double y) { y_ = y; }
+  void setZ(double z) { z_ = z; }
 
-  TransformComponentType type() const override {
-    return m_is2D ? RotationType : Rotation3DType;
-  }
-
-  CSSMatrixComponent* asMatrix() const override {
-    return m_is2D ? CSSMatrixComponent::rotate(m_angle->degrees())
-                  : CSSMatrixComponent::rotate3d(m_angle->degrees(), m_x, m_y,
-                                                 m_z);
-  }
-
-  CSSFunctionValue* toCSSValue() const override;
+  // Internal methods - from CSSTransformComponent.
+  TransformComponentType GetType() const final { return kRotationType; }
+  const DOMMatrix* AsMatrix() const final;
+  CSSFunctionValue* ToCSSValue() const final;
 
   DEFINE_INLINE_VIRTUAL_TRACE() {
-    visitor->trace(m_angle);
-    CSSTransformComponent::trace(visitor);
+    visitor->Trace(angle_);
+    CSSTransformComponent::Trace(visitor);
   }
 
  private:
-  CSSRotation(const CSSAngleValue* angle)
-      : m_angle(angle), m_x(0), m_y(0), m_z(1), m_is2D(true) {}
+  CSSRotation(double x, double y, double z, CSSNumericValue* angle, bool is2D)
+      : CSSTransformComponent(is2D), angle_(angle), x_(x), y_(y), z_(z) {}
 
-  CSSRotation(double x, double y, double z, const CSSAngleValue* angle)
-      : m_angle(angle), m_x(x), m_y(y), m_z(z), m_is2D(false) {}
-
-  Member<const CSSAngleValue> m_angle;
-  double m_x;
-  double m_y;
-  double m_z;
-  bool m_is2D;
+  Member<CSSNumericValue> angle_;
+  double x_;
+  double y_;
+  double z_;
 };
 
 }  // namespace blink

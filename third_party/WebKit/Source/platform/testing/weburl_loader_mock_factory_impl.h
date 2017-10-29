@@ -11,13 +11,13 @@
 #include "base/macros.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/KURLHash.h"
+#include "platform/wtf/HashMap.h"
+#include "platform/wtf/WeakPtr.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebURLResponse.h"
-#include "wtf/HashMap.h"
-#include "wtf/WeakPtr.h"
 
 namespace blink {
 
@@ -36,17 +36,22 @@ class WebURLLoaderMockFactoryImpl : public WebURLLoaderMockFactory {
   ~WebURLLoaderMockFactoryImpl() override;
 
   // WebURLLoaderMockFactory:
-  WebURLLoader* createURLLoader(WebURLLoader* default_loader) override;
-  void registerURL(const WebURL& url,
+  std::unique_ptr<WebURLLoader> CreateURLLoader(
+      std::unique_ptr<WebURLLoader> default_loader) override;
+  void RegisterURL(const WebURL& url,
                    const WebURLResponse& response,
-                   const WebString& filePath = WebString()) override;
-  void registerErrorURL(const WebURL& url,
+                   const WebString& file_path = WebString()) override;
+  void RegisterErrorURL(const WebURL& url,
                         const WebURLResponse& response,
                         const WebURLError& error) override;
-  void unregisterURL(const WebURL& url) override;
-  void unregisterAllURLsAndClearMemoryCache() override;
-  void serveAsynchronousRequests() override;
-  void setLoaderDelegate(WebURLLoaderTestDelegate* delegate) override {
+  void UnregisterURL(const WebURL& url) override;
+  void RegisterURLProtocol(const WebString& protocol,
+                           const WebURLResponse& response,
+                           const WebString& file_path) override;
+  void UnregisterURLProtocol(const WebString& protocol) override;
+  void UnregisterAllURLsAndClearMemoryCache() override;
+  void ServeAsynchronousRequests() override;
+  void SetLoaderDelegate(WebURLLoaderTestDelegate* delegate) override {
     delegate_ = delegate;
   }
 
@@ -83,6 +88,13 @@ class WebURLLoaderMockFactoryImpl : public WebURLLoaderMockFactory {
   // Checks if the loader is pending. Otherwise, it may have been deleted.
   bool IsPending(WeakPtr<WebURLLoaderMock> loader);
 
+  // Looks up an URL in the mock URL table.
+  //
+  // If the URL is found, returns true and sets |error| and |response_info|.
+  bool LookupURL(const WebURL& url,
+                 WebURLError* error,
+                 ResponseInfo* response_info);
+
   // Reads |m_filePath| and puts its content in |data|.
   // Returns true if it successfully read the file.
   static bool ReadFile(const base::FilePath& file_path, WebData* data);
@@ -100,7 +112,12 @@ class WebURLLoaderMockFactoryImpl : public WebURLLoaderMockFactory {
   using URLToResponseMap = HashMap<KURL, ResponseInfo>;
   URLToResponseMap url_to_response_info_;
 
-  TestingPlatformSupport* m_platform;
+  // Table of the registered URL protocols and the responses that they should
+  // receive.
+  using ProtocolToResponseMap = HashMap<String, ResponseInfo>;
+  ProtocolToResponseMap protocol_to_response_info_;
+
+  TestingPlatformSupport* platform_;
 
   DISALLOW_COPY_AND_ASSIGN(WebURLLoaderMockFactoryImpl);
 };

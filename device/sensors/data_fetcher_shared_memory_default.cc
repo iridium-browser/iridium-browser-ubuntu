@@ -13,7 +13,7 @@ bool SetMotionBuffer(device::DeviceMotionHardwareBuffer* buffer, bool enabled) {
   if (!buffer)
     return false;
   buffer->seqlock.WriteBegin();
-  buffer->data.allAvailableSensorsAreActive = enabled;
+  buffer->data.all_available_sensors_are_active = enabled;
   buffer->seqlock.WriteEnd();
   return true;
 }
@@ -23,16 +23,7 @@ bool SetOrientationBuffer(device::DeviceOrientationHardwareBuffer* buffer,
   if (!buffer)
     return false;
   buffer->seqlock.WriteBegin();
-  buffer->data.allAvailableSensorsAreActive = enabled;
-  buffer->seqlock.WriteEnd();
-  return true;
-}
-
-bool SetLightBuffer(device::DeviceLightHardwareBuffer* buffer, double lux) {
-  if (!buffer)
-    return false;
-  buffer->seqlock.WriteBegin();
-  buffer->data.value = lux;
+  buffer->data.all_available_sensors_are_active = enabled;
   buffer->seqlock.WriteEnd();
   return true;
 }
@@ -63,10 +54,6 @@ bool DataFetcherSharedMemory::Start(ConsumerType consumer_type, void* buffer) {
       orientation_absolute_buffer_ =
           static_cast<DeviceOrientationHardwareBuffer*>(buffer);
       return SetOrientationBuffer(orientation_absolute_buffer_, true);
-    case CONSUMER_TYPE_LIGHT:
-      light_buffer_ = static_cast<DeviceLightHardwareBuffer*>(buffer);
-      return SetLightBuffer(light_buffer_,
-                            std::numeric_limits<double>::infinity());
     default:
       NOTREACHED();
   }
@@ -81,8 +68,6 @@ bool DataFetcherSharedMemory::Stop(ConsumerType consumer_type) {
       return SetOrientationBuffer(orientation_buffer_, false);
     case CONSUMER_TYPE_ORIENTATION_ABSOLUTE:
       return SetOrientationBuffer(orientation_absolute_buffer_, false);
-    case CONSUMER_TYPE_LIGHT:
-      return SetLightBuffer(light_buffer_, -1);
     default:
       NOTREACHED();
   }

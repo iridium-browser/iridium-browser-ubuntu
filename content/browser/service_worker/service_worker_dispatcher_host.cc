@@ -80,27 +80,6 @@ WebContents* GetWebContents(int render_process_id, int render_frame_id) {
   return WebContents::FromRenderFrameHost(rfh);
 }
 
-std::string GetNavigationPreloadDisabledErrorMessage(
-    ServiceWorkerVersion::NavigationPreloadSupportStatus support_status) {
-  switch (support_status) {
-    case ServiceWorkerVersion::NavigationPreloadSupportStatus::SUPPORTED:
-      NOTREACHED();
-      break;
-    case ServiceWorkerVersion::NavigationPreloadSupportStatus::
-        NOT_SUPPORTED_FIELD_TRIAL_STOPPED:
-      return "The Navigation Preload Origin Trial has ended.";
-    case ServiceWorkerVersion::NavigationPreloadSupportStatus::
-        NOT_SUPPORTED_DISABLED_BY_COMMAND_LINE:
-      return "Navigation Preload is disabled by command line flag.";
-    case ServiceWorkerVersion::NavigationPreloadSupportStatus::
-        NOT_SUPPORTED_NO_VALID_ORIGIN_TRIAL_TOKEN:
-      return "The service worker script does not have a valid Navigation "
-             "Preload Origin Trial token.";
-  }
-  NOTREACHED();
-  return "";
-}
-
 }  // namespace
 
 ServiceWorkerDispatcherHost::ServiceWorkerDispatcherHost(
@@ -108,17 +87,15 @@ ServiceWorkerDispatcherHost::ServiceWorkerDispatcherHost(
     ResourceContext* resource_context)
     : BrowserMessageFilter(kFilteredMessageClasses,
                            arraysize(kFilteredMessageClasses)),
+      BrowserAssociatedInterface<mojom::ServiceWorkerDispatcherHost>(this,
+                                                                     this),
       render_process_id_(render_process_id),
       resource_context_(resource_context),
-      channel_ready_(false),
-      weak_factory_(this) {
-  AddAssociatedInterface(
-      mojom::ServiceWorkerDispatcherHost::Name_,
-      base::Bind(&ServiceWorkerDispatcherHost::AddMojoBinding,
-                 base::Unretained(this)));
-}
+      channel_ready_(false) {}
 
 ServiceWorkerDispatcherHost::~ServiceWorkerDispatcherHost() {
+  // Temporary CHECK for debugging https://crbug.com/736203.
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (GetContext())
     GetContext()->RemoveDispatcherHost(render_process_id_);
 }
@@ -141,6 +118,8 @@ void ServiceWorkerDispatcherHost::Init(
 void ServiceWorkerDispatcherHost::OnFilterAdded(IPC::Channel* channel) {
   TRACE_EVENT0("ServiceWorker",
                "ServiceWorkerDispatcherHost::OnFilterAdded");
+  // Temporary CHECK for debugging https://crbug.com/736203.
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   channel_ready_ = true;
   std::vector<std::unique_ptr<IPC::Message>> messages;
   messages.swap(pending_messages_);
@@ -150,6 +129,8 @@ void ServiceWorkerDispatcherHost::OnFilterAdded(IPC::Channel* channel) {
 }
 
 void ServiceWorkerDispatcherHost::OnFilterRemoved() {
+  // Temporary CHECK for debugging https://crbug.com/736203.
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // Don't wait until the destructor to teardown since a new dispatcher host
   // for this process might be created before then.
   if (GetContext())
@@ -159,6 +140,8 @@ void ServiceWorkerDispatcherHost::OnFilterRemoved() {
 }
 
 void ServiceWorkerDispatcherHost::OnDestruct() const {
+  // Destruct on the IO thread since |context_wrapper_| should only be accessed
+  // on the IO thread.
   BrowserThread::DeleteOnIOThread::Destruct(this);
 }
 
@@ -180,25 +163,7 @@ bool ServiceWorkerDispatcherHost::OnMessageReceived(
                         OnGetRegistrationForReady)
     IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_PostMessageToWorker,
                         OnPostMessageToWorker)
-    IPC_MESSAGE_HANDLER(EmbeddedWorkerHostMsg_WorkerReadyForInspection,
-                        OnWorkerReadyForInspection)
-    IPC_MESSAGE_HANDLER(EmbeddedWorkerHostMsg_WorkerScriptLoaded,
-                        OnWorkerScriptLoaded)
-    IPC_MESSAGE_HANDLER(EmbeddedWorkerHostMsg_WorkerThreadStarted,
-                        OnWorkerThreadStarted)
-    IPC_MESSAGE_HANDLER(EmbeddedWorkerHostMsg_WorkerScriptLoadFailed,
-                        OnWorkerScriptLoadFailed)
-    IPC_MESSAGE_HANDLER(EmbeddedWorkerHostMsg_WorkerScriptEvaluated,
-                        OnWorkerScriptEvaluated)
-    IPC_MESSAGE_HANDLER(EmbeddedWorkerHostMsg_WorkerStarted,
-                        OnWorkerStarted)
-    IPC_MESSAGE_HANDLER(EmbeddedWorkerHostMsg_WorkerStopped,
-                        OnWorkerStopped)
     IPC_MESSAGE_HANDLER(EmbeddedWorkerHostMsg_CountFeature, OnCountFeature)
-    IPC_MESSAGE_HANDLER(EmbeddedWorkerHostMsg_ReportException,
-                        OnReportException)
-    IPC_MESSAGE_HANDLER(EmbeddedWorkerHostMsg_ReportConsoleMessage,
-                        OnReportConsoleMessage)
     IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_IncrementServiceWorkerRefCount,
                         OnIncrementServiceWorkerRefCount)
     IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_DecrementServiceWorkerRefCount,
@@ -225,13 +190,6 @@ bool ServiceWorkerDispatcherHost::OnMessageReceived(
   }
 
   return handled;
-}
-
-void ServiceWorkerDispatcherHost::AddMojoBinding(
-    mojo::ScopedInterfaceEndpointHandle handle) {
-  bindings_.AddBinding(
-      this, mojo::MakeAssociatedRequest<mojom::ServiceWorkerDispatcherHost>(
-                std::move(handle)));
 }
 
 bool ServiceWorkerDispatcherHost::Send(IPC::Message* message) {
@@ -297,8 +255,8 @@ void ServiceWorkerDispatcherHost::OnRegisterServiceWorker(
     int thread_id,
     int request_id,
     int provider_id,
-    const GURL& pattern,
-    const GURL& script_url) {
+    const GURL& script_url,
+    const ServiceWorkerRegistrationOptions& options) {
   TRACE_EVENT0("ServiceWorker",
                "ServiceWorkerDispatcherHost::OnRegisterServiceWorker");
   ProviderStatus provider_status;
@@ -308,7 +266,7 @@ void ServiceWorkerDispatcherHost::OnRegisterServiceWorker(
     case ProviderStatus::NO_CONTEXT:  // fallthrough
     case ProviderStatus::DEAD_HOST:
       Send(new ServiceWorkerMsg_ServiceWorkerRegistrationError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeAbort,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeAbort,
           base::ASCIIToUTF16(kServiceWorkerRegisterErrorPrefix) +
               base::ASCIIToUTF16(kShutdownErrorMessage)));
       return;
@@ -317,7 +275,7 @@ void ServiceWorkerDispatcherHost::OnRegisterServiceWorker(
       return;
     case ProviderStatus::NO_URL:
       Send(new ServiceWorkerMsg_ServiceWorkerRegistrationError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeSecurity,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeSecurity,
           base::ASCIIToUTF16(kServiceWorkerRegisterErrorPrefix) +
               base::ASCIIToUTF16(kNoDocumentURLErrorMessage)));
       return;
@@ -325,47 +283,44 @@ void ServiceWorkerDispatcherHost::OnRegisterServiceWorker(
       break;
   }
 
-  if (!pattern.is_valid() || !script_url.is_valid()) {
+  if (!options.scope.is_valid() || !script_url.is_valid()) {
     bad_message::ReceivedBadMessage(this, bad_message::SWDH_REGISTER_BAD_URL);
     return;
   }
 
   std::string error_message;
-  if (ServiceWorkerUtils::ContainsDisallowedCharacter(pattern, script_url,
+  if (ServiceWorkerUtils::ContainsDisallowedCharacter(options.scope, script_url,
                                                       &error_message)) {
     bad_message::ReceivedBadMessage(this, bad_message::SWDH_REGISTER_CANNOT);
     return;
   }
 
-  std::vector<GURL> urls = {provider_host->document_url(), pattern, script_url};
+  std::vector<GURL> urls = {provider_host->document_url(), options.scope,
+                            script_url};
   if (!ServiceWorkerUtils::AllOriginsMatchAndCanAccessServiceWorkers(urls)) {
     bad_message::ReceivedBadMessage(this, bad_message::SWDH_REGISTER_CANNOT);
     return;
   }
 
   if (!GetContentClient()->browser()->AllowServiceWorker(
-          pattern, provider_host->topmost_frame_url(), resource_context_,
+          options.scope, provider_host->topmost_frame_url(), resource_context_,
           base::Bind(&GetWebContents, render_process_id_,
                      provider_host->frame_id()))) {
     Send(new ServiceWorkerMsg_ServiceWorkerRegistrationError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeDisabled,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeDisabled,
         base::ASCIIToUTF16(kServiceWorkerRegisterErrorPrefix) +
             base::ASCIIToUTF16(kUserDeniedPermissionMessage)));
     return;
   }
 
-  TRACE_EVENT_ASYNC_BEGIN2(
-      "ServiceWorker", "ServiceWorkerDispatcherHost::RegisterServiceWorker",
-      request_id, "Scope", pattern.spec(), "Script URL", script_url.spec());
+  TRACE_EVENT_ASYNC_BEGIN2("ServiceWorker",
+                           "ServiceWorkerDispatcherHost::RegisterServiceWorker",
+                           request_id, "Scope", options.scope.spec(),
+                           "Script URL", script_url.spec());
   GetContext()->RegisterServiceWorker(
-      pattern,
-      script_url,
-      provider_host,
-      base::Bind(&ServiceWorkerDispatcherHost::RegistrationComplete,
-                 this,
-                 thread_id,
-                 provider_id,
-                 request_id));
+      script_url, options, provider_host,
+      base::Bind(&ServiceWorkerDispatcherHost::RegistrationComplete, this,
+                 thread_id, provider_id, request_id));
 }
 
 void ServiceWorkerDispatcherHost::OnUpdateServiceWorker(
@@ -382,7 +337,7 @@ void ServiceWorkerDispatcherHost::OnUpdateServiceWorker(
     case ProviderStatus::NO_CONTEXT:  // fallthrough
     case ProviderStatus::DEAD_HOST:
       Send(new ServiceWorkerMsg_ServiceWorkerUpdateError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeAbort,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeAbort,
           base::ASCIIToUTF16(kServiceWorkerUpdateErrorPrefix) +
               base::ASCIIToUTF16(kShutdownErrorMessage)));
       return;
@@ -391,7 +346,7 @@ void ServiceWorkerDispatcherHost::OnUpdateServiceWorker(
       return;
     case ProviderStatus::NO_URL:
       Send(new ServiceWorkerMsg_ServiceWorkerUpdateError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeSecurity,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeSecurity,
           base::ASCIIToUTF16(kServiceWorkerUpdateErrorPrefix) +
               base::ASCIIToUTF16(kNoDocumentURLErrorMessage)));
       return;
@@ -421,7 +376,7 @@ void ServiceWorkerDispatcherHost::OnUpdateServiceWorker(
           resource_context_, base::Bind(&GetWebContents, render_process_id_,
                                         provider_host->frame_id()))) {
     Send(new ServiceWorkerMsg_ServiceWorkerUpdateError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeDisabled,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeDisabled,
         base::ASCIIToUTF16(kServiceWorkerUpdateErrorPrefix) +
             base::ASCIIToUTF16(kUserDeniedPermissionMessage)));
     return;
@@ -431,7 +386,7 @@ void ServiceWorkerDispatcherHost::OnUpdateServiceWorker(
     // This can happen if update() is called during initial script evaluation.
     // Abort the following steps according to the spec.
     Send(new ServiceWorkerMsg_ServiceWorkerUpdateError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeState,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeState,
         base::ASCIIToUTF16(kServiceWorkerUpdateErrorPrefix) +
             base::ASCIIToUTF16(kInvalidStateErrorMessage)));
     return;
@@ -461,7 +416,7 @@ void ServiceWorkerDispatcherHost::OnUnregisterServiceWorker(
     case ProviderStatus::NO_CONTEXT:  // fallthrough
     case ProviderStatus::DEAD_HOST:
       Send(new ServiceWorkerMsg_ServiceWorkerUnregistrationError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeAbort,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeAbort,
           base::ASCIIToUTF16(kServiceWorkerUpdateErrorPrefix) +
               base::ASCIIToUTF16(kShutdownErrorMessage)));
       return;
@@ -471,7 +426,7 @@ void ServiceWorkerDispatcherHost::OnUnregisterServiceWorker(
       return;
     case ProviderStatus::NO_URL:
       Send(new ServiceWorkerMsg_ServiceWorkerUnregistrationError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeSecurity,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeSecurity,
           base::ASCIIToUTF16(kServiceWorkerUnregisterErrorPrefix) +
               base::ASCIIToUTF16(kNoDocumentURLErrorMessage)));
       return;
@@ -501,7 +456,7 @@ void ServiceWorkerDispatcherHost::OnUnregisterServiceWorker(
           resource_context_, base::Bind(&GetWebContents, render_process_id_,
                                         provider_host->frame_id()))) {
     Send(new ServiceWorkerMsg_ServiceWorkerUnregistrationError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeDisabled,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeDisabled,
         base::ASCIIToUTF16(kUserDeniedPermissionMessage)));
     return;
   }
@@ -531,7 +486,7 @@ void ServiceWorkerDispatcherHost::OnGetRegistration(
     case ProviderStatus::NO_CONTEXT:  // fallthrough
     case ProviderStatus::DEAD_HOST:
       Send(new ServiceWorkerMsg_ServiceWorkerGetRegistrationError(
-          thread_id, request_id, blink::WebServiceWorkerError::ErrorTypeAbort,
+          thread_id, request_id, blink::WebServiceWorkerError::kErrorTypeAbort,
           base::ASCIIToUTF16(kServiceWorkerGetRegistrationErrorPrefix) +
               base::ASCIIToUTF16(kShutdownErrorMessage)));
       return;
@@ -541,7 +496,7 @@ void ServiceWorkerDispatcherHost::OnGetRegistration(
       return;
     case ProviderStatus::NO_URL:
       Send(new ServiceWorkerMsg_ServiceWorkerGetRegistrationError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeSecurity,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeSecurity,
           base::ASCIIToUTF16(kServiceWorkerGetRegistrationErrorPrefix) +
               base::ASCIIToUTF16(kNoDocumentURLErrorMessage)));
       return;
@@ -567,7 +522,7 @@ void ServiceWorkerDispatcherHost::OnGetRegistration(
           resource_context_, base::Bind(&GetWebContents, render_process_id_,
                                         provider_host->frame_id()))) {
     Send(new ServiceWorkerMsg_ServiceWorkerGetRegistrationError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeDisabled,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeDisabled,
         base::ASCIIToUTF16(kServiceWorkerGetRegistrationErrorPrefix) +
             base::ASCIIToUTF16(kUserDeniedPermissionMessage)));
     return;
@@ -599,7 +554,7 @@ void ServiceWorkerDispatcherHost::OnGetRegistrations(int thread_id,
     case ProviderStatus::NO_CONTEXT:  // fallthrough
     case ProviderStatus::DEAD_HOST:
       Send(new ServiceWorkerMsg_ServiceWorkerGetRegistrationsError(
-          thread_id, request_id, blink::WebServiceWorkerError::ErrorTypeAbort,
+          thread_id, request_id, blink::WebServiceWorkerError::kErrorTypeAbort,
           base::ASCIIToUTF16(kServiceWorkerGetRegistrationsErrorPrefix) +
               base::ASCIIToUTF16(kShutdownErrorMessage)));
       return;
@@ -609,7 +564,7 @@ void ServiceWorkerDispatcherHost::OnGetRegistrations(int thread_id,
       return;
     case ProviderStatus::NO_URL:
       Send(new ServiceWorkerMsg_ServiceWorkerGetRegistrationsError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeSecurity,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeSecurity,
           base::ASCIIToUTF16(kServiceWorkerGetRegistrationsErrorPrefix) +
               base::ASCIIToUTF16(kNoDocumentURLErrorMessage)));
       return;
@@ -628,7 +583,7 @@ void ServiceWorkerDispatcherHost::OnGetRegistrations(int thread_id,
           resource_context_, base::Bind(&GetWebContents, render_process_id_,
                                         provider_host->frame_id()))) {
     Send(new ServiceWorkerMsg_ServiceWorkerGetRegistrationsError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeDisabled,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeDisabled,
         base::ASCIIToUTF16(kServiceWorkerGetRegistrationsErrorPrefix) +
             base::ASCIIToUTF16(kUserDeniedPermissionMessage)));
     return;
@@ -685,7 +640,7 @@ void ServiceWorkerDispatcherHost::OnEnableNavigationPreload(
     case ProviderStatus::NO_CONTEXT:  // fallthrough
     case ProviderStatus::DEAD_HOST:
       Send(new ServiceWorkerMsg_EnableNavigationPreloadError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeAbort,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeAbort,
           std::string(kEnableNavigationPreloadErrorPrefix) +
               std::string(kShutdownErrorMessage)));
       return;
@@ -695,7 +650,7 @@ void ServiceWorkerDispatcherHost::OnEnableNavigationPreload(
       return;
     case ProviderStatus::NO_URL:
       Send(new ServiceWorkerMsg_EnableNavigationPreloadError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeSecurity,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeSecurity,
           std::string(kEnableNavigationPreloadErrorPrefix) +
               std::string(kNoDocumentURLErrorMessage)));
       return;
@@ -717,20 +672,9 @@ void ServiceWorkerDispatcherHost::OnEnableNavigationPreload(
   // TODO(falken): Remove this comment when the spec is updated.
   if (!registration->active_version()) {
     Send(new ServiceWorkerMsg_EnableNavigationPreloadError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeState,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeState,
         std::string(kEnableNavigationPreloadErrorPrefix) +
             std::string(kNoActiveWorkerErrorMessage)));
-    return;
-  }
-
-  ServiceWorkerVersion::NavigationPreloadSupportStatus support_status =
-      registration->active_version()->GetNavigationPreloadSupportStatus();
-  if (support_status !=
-      ServiceWorkerVersion::NavigationPreloadSupportStatus::SUPPORTED) {
-    Send(new ServiceWorkerMsg_EnableNavigationPreloadError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeAbort,
-        std::string(kEnableNavigationPreloadErrorPrefix) +
-            GetNavigationPreloadDisabledErrorMessage(support_status)));
     return;
   }
 
@@ -747,7 +691,7 @@ void ServiceWorkerDispatcherHost::OnEnableNavigationPreload(
           resource_context_, base::Bind(&GetWebContents, render_process_id_,
                                         provider_host->frame_id()))) {
     Send(new ServiceWorkerMsg_EnableNavigationPreloadError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeDisabled,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeDisabled,
         std::string(kEnableNavigationPreloadErrorPrefix) +
             std::string(kUserDeniedPermissionMessage)));
     return;
@@ -772,7 +716,7 @@ void ServiceWorkerDispatcherHost::OnGetNavigationPreloadState(
     case ProviderStatus::NO_CONTEXT:  // fallthrough
     case ProviderStatus::DEAD_HOST:
       Send(new ServiceWorkerMsg_GetNavigationPreloadStateError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeAbort,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeAbort,
           std::string(kGetNavigationPreloadStateErrorPrefix) +
               std::string(kShutdownErrorMessage)));
       return;
@@ -782,7 +726,7 @@ void ServiceWorkerDispatcherHost::OnGetNavigationPreloadState(
       return;
     case ProviderStatus::NO_URL:
       Send(new ServiceWorkerMsg_GetNavigationPreloadStateError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeSecurity,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeSecurity,
           std::string(kGetNavigationPreloadStateErrorPrefix) +
               std::string(kNoDocumentURLErrorMessage)));
       return;
@@ -814,7 +758,7 @@ void ServiceWorkerDispatcherHost::OnGetNavigationPreloadState(
           resource_context_, base::Bind(&GetWebContents, render_process_id_,
                                         provider_host->frame_id()))) {
     Send(new ServiceWorkerMsg_GetNavigationPreloadStateError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeDisabled,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeDisabled,
         std::string(kGetNavigationPreloadStateErrorPrefix) +
             std::string(kUserDeniedPermissionMessage)));
     return;
@@ -837,7 +781,7 @@ void ServiceWorkerDispatcherHost::OnSetNavigationPreloadHeader(
     case ProviderStatus::NO_CONTEXT:  // fallthrough
     case ProviderStatus::DEAD_HOST:
       Send(new ServiceWorkerMsg_SetNavigationPreloadHeaderError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeAbort,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeAbort,
           std::string(kSetNavigationPreloadHeaderErrorPrefix) +
               std::string(kShutdownErrorMessage)));
       return;
@@ -847,7 +791,7 @@ void ServiceWorkerDispatcherHost::OnSetNavigationPreloadHeader(
       return;
     case ProviderStatus::NO_URL:
       Send(new ServiceWorkerMsg_SetNavigationPreloadHeaderError(
-          thread_id, request_id, WebServiceWorkerError::ErrorTypeSecurity,
+          thread_id, request_id, WebServiceWorkerError::kErrorTypeSecurity,
           std::string(kSetNavigationPreloadHeaderErrorPrefix) +
               std::string(kNoDocumentURLErrorMessage)));
       return;
@@ -870,22 +814,12 @@ void ServiceWorkerDispatcherHost::OnSetNavigationPreloadHeader(
   // TODO(falken): Remove this comment when the spec is updated.
   if (!registration->active_version()) {
     Send(new ServiceWorkerMsg_SetNavigationPreloadHeaderError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeState,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeState,
         std::string(kSetNavigationPreloadHeaderErrorPrefix) +
             std::string(kNoActiveWorkerErrorMessage)));
     return;
   }
 
-  ServiceWorkerVersion::NavigationPreloadSupportStatus support_status =
-      registration->active_version()->GetNavigationPreloadSupportStatus();
-  if (support_status !=
-      ServiceWorkerVersion::NavigationPreloadSupportStatus::SUPPORTED) {
-    Send(new ServiceWorkerMsg_SetNavigationPreloadHeaderError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeAbort,
-        std::string(kSetNavigationPreloadHeaderErrorPrefix) +
-            GetNavigationPreloadDisabledErrorMessage(support_status)));
-    return;
-  }
   std::vector<GURL> urls = {provider_host->document_url(),
                             registration->pattern()};
   if (!ServiceWorkerUtils::AllOriginsMatchAndCanAccessServiceWorkers(urls)) {
@@ -907,7 +841,7 @@ void ServiceWorkerDispatcherHost::OnSetNavigationPreloadHeader(
           resource_context_, base::Bind(&GetWebContents, render_process_id_,
                                         provider_host->frame_id()))) {
     Send(new ServiceWorkerMsg_SetNavigationPreloadHeaderError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeDisabled,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeDisabled,
         std::string(kSetNavigationPreloadHeaderErrorPrefix) +
             std::string(kUserDeniedPermissionMessage)));
     return;
@@ -1001,8 +935,8 @@ void ServiceWorkerDispatcherHost::OnProviderCreated(
   if (!GetContext())
     return;
   if (GetContext()->GetProviderHost(render_process_id_, info.provider_id)) {
-    bad_message::ReceivedBadMessage(this,
-                                    bad_message::SWDH_PROVIDER_CREATED_NO_HOST);
+    bad_message::ReceivedBadMessage(
+        this, bad_message::SWDH_PROVIDER_CREATED_DUPLICATE_ID);
     return;
   }
 
@@ -1016,18 +950,27 @@ void ServiceWorkerDispatcherHost::OnProviderCreated(
     if (navigation_handle_core != nullptr)
       provider_host = navigation_handle_core->RetrievePreCreatedHost();
 
-    // If no host is found, the navigation has been cancelled in the meantime.
-    // Just return as the navigation will be stopped in the renderer as well.
-    if (provider_host == nullptr)
+    // If no host is found, create one.
+    if (provider_host == nullptr) {
+      GetContext()->AddProviderHost(
+          ServiceWorkerProviderHost::Create(render_process_id_, std::move(info),
+                                            GetContext()->AsWeakPtr(), this));
       return;
-    DCHECK_EQ(SERVICE_WORKER_PROVIDER_FOR_WINDOW, info.type);
+    }
+
+    // Otherwise, completed the initialization of the pre-created host.
+    if (info.type != SERVICE_WORKER_PROVIDER_FOR_WINDOW) {
+      bad_message::ReceivedBadMessage(
+          this, bad_message::SWDH_PROVIDER_CREATED_ILLEGAL_TYPE_NOT_WINDOW);
+      return;
+    }
     provider_host->CompleteNavigationInitialized(render_process_id_,
-                                                 info.route_id, this);
+                                                 std::move(info), this);
     GetContext()->AddProviderHost(std::move(provider_host));
   } else {
     if (ServiceWorkerUtils::IsBrowserAssignedProviderId(info.provider_id)) {
       bad_message::ReceivedBadMessage(
-          this, bad_message::SWDH_PROVIDER_CREATED_NO_HOST);
+          this, bad_message::SWDH_PROVIDER_CREATED_BAD_ID);
       return;
     }
     GetContext()->AddProviderHost(ServiceWorkerProviderHost::Create(
@@ -1035,29 +978,11 @@ void ServiceWorkerDispatcherHost::OnProviderCreated(
   }
 }
 
-void ServiceWorkerDispatcherHost::OnProviderDestroyed(int provider_id) {
-  TRACE_EVENT0("ServiceWorker",
-               "ServiceWorkerDispatcherHost::OnProviderDestroyed");
-  if (!GetContext())
-    return;
-  if (!GetContext()->GetProviderHost(render_process_id_, provider_id)) {
-    // PlzNavigate: in some cancellation of navigation cases, it is possible
-    // for the pre-created hoist to have been destroyed before being claimed by
-    // the renderer. The provider is then destroyed in the renderer, and no
-    // matching host will be found.
-    if (!IsBrowserSideNavigationEnabled() ||
-        !ServiceWorkerUtils::IsBrowserAssignedProviderId(provider_id)) {
-      bad_message::ReceivedBadMessage(
-          this, bad_message::SWDH_PROVIDER_DESTROYED_NO_HOST);
-    }
-    return;
-  }
-  GetContext()->RemoveProviderHost(render_process_id_, provider_id);
-}
-
-void ServiceWorkerDispatcherHost::OnSetHostedVersionId(int provider_id,
-                                                       int64_t version_id,
-                                                       int embedded_worker_id) {
+void ServiceWorkerDispatcherHost::OnSetHostedVersionId(
+    int provider_id,
+    int64_t version_id,
+    int embedded_worker_id,
+    mojom::URLLoaderFactoryAssociatedRequest request) {
   TRACE_EVENT0("ServiceWorker",
                "ServiceWorkerDispatcherHost::OnSetHostedVersionId");
   if (!GetContext())
@@ -1102,12 +1027,6 @@ void ServiceWorkerDispatcherHost::OnSetHostedVersionId(int provider_id,
     base::debug::ScopedCrashKey scope_provider_host_pid(
         "swdh_set_hosted_version_host_pid",
         base::IntToString(provider_host->process_id()));
-    if (version->embedded_worker()->process_id() !=
-        ChildProcessHost::kInvalidUniqueID) {
-      base::debug::ScopedCrashKey scope_is_new_process(
-          "swdh_set_hosted_version_is_new_process",
-          version->embedded_worker()->is_new_process() ? "true" : "false");
-    }
     base::debug::ScopedCrashKey scope_worker_restart_count(
         "swdh_set_hosted_version_restart_count",
         base::IntToString(version->embedded_worker()->restart_count()));
@@ -1117,6 +1036,9 @@ void ServiceWorkerDispatcherHost::OnSetHostedVersionId(int provider_id,
   }
 
   provider_host->SetHostedVersion(version);
+
+  if (ServiceWorkerUtils::IsServicificationEnabled())
+    provider_host->CreateScriptURLLoaderFactory(std::move(request));
 
   // Retrieve the registration associated with |version|. The registration
   // must be alive because the version keeps it during starting worker.
@@ -1130,8 +1052,8 @@ void ServiceWorkerDispatcherHost::OnSetHostedVersionId(int provider_id,
 
   ServiceWorkerRegistrationObjectInfo info;
   ServiceWorkerVersionAttributes attrs;
-  GetRegistrationObjectInfoAndVersionAttributes(
-      provider_host->AsWeakPtr(), registration, &info, &attrs);
+  GetRegistrationObjectInfoAndVersionAttributes(provider_host->AsWeakPtr(),
+                                                registration, &info, &attrs);
 
   Send(new ServiceWorkerMsg_AssociateRegistration(kDocumentMainThreadId,
                                                   provider_id, info, attrs));
@@ -1350,103 +1272,6 @@ void ServiceWorkerDispatcherHost::UpdateComplete(
   Send(new ServiceWorkerMsg_ServiceWorkerUpdated(thread_id, request_id));
 }
 
-void ServiceWorkerDispatcherHost::OnWorkerReadyForInspection(
-    int embedded_worker_id) {
-  TRACE_EVENT0("ServiceWorker",
-               "ServiceWorkerDispatcherHost::OnWorkerReadyForInspection");
-  if (!GetContext())
-    return;
-  EmbeddedWorkerRegistry* registry = GetContext()->embedded_worker_registry();
-  if (!registry->CanHandle(embedded_worker_id))
-    return;
-  registry->OnWorkerReadyForInspection(render_process_id_, embedded_worker_id);
-}
-
-void ServiceWorkerDispatcherHost::OnWorkerScriptLoaded(int embedded_worker_id) {
-  TRACE_EVENT0("ServiceWorker",
-               "ServiceWorkerDispatcherHost::OnWorkerScriptLoaded");
-  if (!GetContext())
-    return;
-
-  EmbeddedWorkerRegistry* registry = GetContext()->embedded_worker_registry();
-  if (!registry->CanHandle(embedded_worker_id))
-    return;
-  registry->OnWorkerScriptLoaded(render_process_id_, embedded_worker_id);
-}
-
-void ServiceWorkerDispatcherHost::OnWorkerThreadStarted(int embedded_worker_id,
-                                                        int thread_id,
-                                                        int provider_id) {
-  TRACE_EVENT0("ServiceWorker",
-               "ServiceWorkerDispatcherHost::OnWorkerThreadStarted");
-  if (!GetContext())
-    return;
-
-  ServiceWorkerProviderHost* provider_host =
-      GetContext()->GetProviderHost(render_process_id_, provider_id);
-  if (!provider_host) {
-    bad_message::ReceivedBadMessage(
-        this, bad_message::SWDH_WORKER_SCRIPT_LOAD_NO_HOST);
-    return;
-  }
-
-  provider_host->SetReadyToSendMessagesToWorker(thread_id);
-
-  EmbeddedWorkerRegistry* registry = GetContext()->embedded_worker_registry();
-  if (!registry->CanHandle(embedded_worker_id))
-    return;
-  registry->OnWorkerThreadStarted(render_process_id_, thread_id,
-                                  embedded_worker_id);
-}
-
-void ServiceWorkerDispatcherHost::OnWorkerScriptLoadFailed(
-    int embedded_worker_id) {
-  TRACE_EVENT0("ServiceWorker",
-               "ServiceWorkerDispatcherHost::OnWorkerScriptLoadFailed");
-  if (!GetContext())
-    return;
-  EmbeddedWorkerRegistry* registry = GetContext()->embedded_worker_registry();
-  if (!registry->CanHandle(embedded_worker_id))
-    return;
-  registry->OnWorkerScriptLoadFailed(render_process_id_, embedded_worker_id);
-}
-
-void ServiceWorkerDispatcherHost::OnWorkerScriptEvaluated(
-    int embedded_worker_id,
-    bool success) {
-  TRACE_EVENT0("ServiceWorker",
-               "ServiceWorkerDispatcherHost::OnWorkerScriptEvaluated");
-  if (!GetContext())
-    return;
-  EmbeddedWorkerRegistry* registry = GetContext()->embedded_worker_registry();
-  if (!registry->CanHandle(embedded_worker_id))
-    return;
-  registry->OnWorkerScriptEvaluated(
-      render_process_id_, embedded_worker_id, success);
-}
-
-void ServiceWorkerDispatcherHost::OnWorkerStarted(int embedded_worker_id) {
-  TRACE_EVENT0("ServiceWorker",
-               "ServiceWorkerDispatcherHost::OnWorkerStarted");
-  if (!GetContext())
-    return;
-  EmbeddedWorkerRegistry* registry = GetContext()->embedded_worker_registry();
-  if (!registry->CanHandle(embedded_worker_id))
-    return;
-  registry->OnWorkerStarted(render_process_id_, embedded_worker_id);
-}
-
-void ServiceWorkerDispatcherHost::OnWorkerStopped(int embedded_worker_id) {
-  TRACE_EVENT0("ServiceWorker",
-               "ServiceWorkerDispatcherHost::OnWorkerStopped");
-  if (!GetContext())
-    return;
-  EmbeddedWorkerRegistry* registry = GetContext()->embedded_worker_registry();
-  if (!registry->CanHandle(embedded_worker_id))
-    return;
-  registry->OnWorkerStopped(render_process_id_, embedded_worker_id);
-}
-
 void ServiceWorkerDispatcherHost::OnCountFeature(int64_t version_id,
                                                  uint32_t feature) {
   if (!GetContext())
@@ -1455,44 +1280,6 @@ void ServiceWorkerDispatcherHost::OnCountFeature(int64_t version_id,
   if (!version)
     return;
   version->CountFeature(feature);
-}
-
-void ServiceWorkerDispatcherHost::OnReportException(
-    int embedded_worker_id,
-    const base::string16& error_message,
-    int line_number,
-    int column_number,
-    const GURL& source_url) {
-  TRACE_EVENT0("ServiceWorker",
-               "ServiceWorkerDispatcherHost::OnReportException");
-  if (!GetContext())
-    return;
-  EmbeddedWorkerRegistry* registry = GetContext()->embedded_worker_registry();
-  if (!registry->CanHandle(embedded_worker_id))
-    return;
-  registry->OnReportException(embedded_worker_id,
-                              error_message,
-                              line_number,
-                              column_number,
-                              source_url);
-}
-
-void ServiceWorkerDispatcherHost::OnReportConsoleMessage(
-    int embedded_worker_id,
-    const EmbeddedWorkerHostMsg_ReportConsoleMessage_Params& params) {
-  TRACE_EVENT0("ServiceWorker",
-               "ServiceWorkerDispatcherHost::OnReportConsoleMessage");
-  if (!GetContext())
-    return;
-  EmbeddedWorkerRegistry* registry = GetContext()->embedded_worker_registry();
-  if (!registry->CanHandle(embedded_worker_id))
-    return;
-  registry->OnReportConsoleMessage(embedded_worker_id,
-                                   params.source_identifier,
-                                   params.message_level,
-                                   params.message,
-                                   params.line_number,
-                                   params.source_url);
 }
 
 void ServiceWorkerDispatcherHost::OnIncrementServiceWorkerRefCount(
@@ -1694,6 +1481,8 @@ void ServiceWorkerDispatcherHost::GetRegistrationForReadyComplete(
 }
 
 ServiceWorkerContextCore* ServiceWorkerDispatcherHost::GetContext() {
+  // Temporary CHECK for debugging https://crbug.com/736203.
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!context_wrapper_.get())
     return nullptr;
   return context_wrapper_->context();
@@ -1737,11 +1526,13 @@ void ServiceWorkerDispatcherHost::DidUpdateNavigationPreloadEnabled(
     ServiceWorkerStatusCode status) {
   if (status != SERVICE_WORKER_OK) {
     Send(new ServiceWorkerMsg_EnableNavigationPreloadError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeUnknown,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeUnknown,
         std::string(kEnableNavigationPreloadErrorPrefix) +
             std::string(kDatabaseErrorMessage)));
     return;
   }
+  if (!GetContext())
+    return;
   ServiceWorkerRegistration* registration =
       GetContext()->GetLiveRegistration(registration_id);
   if (registration)
@@ -1757,11 +1548,13 @@ void ServiceWorkerDispatcherHost::DidUpdateNavigationPreloadHeader(
     ServiceWorkerStatusCode status) {
   if (status != SERVICE_WORKER_OK) {
     Send(new ServiceWorkerMsg_SetNavigationPreloadHeaderError(
-        thread_id, request_id, WebServiceWorkerError::ErrorTypeUnknown,
+        thread_id, request_id, WebServiceWorkerError::kErrorTypeUnknown,
         std::string(kSetNavigationPreloadHeaderErrorPrefix) +
             std::string(kDatabaseErrorMessage)));
     return;
   }
+  if (!GetContext())
+    return;
   ServiceWorkerRegistration* registration =
       GetContext()->GetLiveRegistration(registration_id);
   if (registration)

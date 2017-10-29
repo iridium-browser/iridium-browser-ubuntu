@@ -9,6 +9,7 @@
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/common/service_worker/service_worker_messages.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "content/public/common/service_worker_modes.h"
 
 namespace content {
 
@@ -19,20 +20,20 @@ GetWebServiceWorkerState(ServiceWorkerVersion* version) {
   DCHECK(version);
   switch (version->status()) {
     case ServiceWorkerVersion::NEW:
-      return blink::WebServiceWorkerStateUnknown;
+      return blink::kWebServiceWorkerStateUnknown;
     case ServiceWorkerVersion::INSTALLING:
-      return blink::WebServiceWorkerStateInstalling;
+      return blink::kWebServiceWorkerStateInstalling;
     case ServiceWorkerVersion::INSTALLED:
-      return blink::WebServiceWorkerStateInstalled;
+      return blink::kWebServiceWorkerStateInstalled;
     case ServiceWorkerVersion::ACTIVATING:
-      return blink::WebServiceWorkerStateActivating;
+      return blink::kWebServiceWorkerStateActivating;
     case ServiceWorkerVersion::ACTIVATED:
-      return blink::WebServiceWorkerStateActivated;
+      return blink::kWebServiceWorkerStateActivated;
     case ServiceWorkerVersion::REDUNDANT:
-      return blink::WebServiceWorkerStateRedundant;
+      return blink::kWebServiceWorkerStateRedundant;
   }
   NOTREACHED() << version->status();
-  return blink::WebServiceWorkerStateUnknown;
+  return blink::kWebServiceWorkerStateUnknown;
 }
 
 }  // namespace

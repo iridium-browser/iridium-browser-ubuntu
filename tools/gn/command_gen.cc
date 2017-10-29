@@ -36,6 +36,8 @@ const char kSwitchIdeValueQtCreator[] = "qtcreator";
 const char kSwitchIdeValueVs[] = "vs";
 const char kSwitchIdeValueVs2013[] = "vs2013";
 const char kSwitchIdeValueVs2015[] = "vs2015";
+const char kSwitchIdeValueVs2017[] = "vs2017";
+const char kSwitchIdeValueWinSdk[] = "winsdk";
 const char kSwitchIdeValueXcode[] = "xcode";
 const char kSwitchIdeValueJson[] = "json";
 const char kSwitchNinjaExtraArgs[] = "ninja-extra-args";
@@ -193,19 +195,26 @@ bool RunIdeWriter(const std::string& ide,
     }
     return res;
   } else if (ide == kSwitchIdeValueVs || ide == kSwitchIdeValueVs2013 ||
-             ide == kSwitchIdeValueVs2015) {
-    VisualStudioWriter::Version version =
-        ide == kSwitchIdeValueVs2013 ? VisualStudioWriter::Version::Vs2013
-                                     : VisualStudioWriter::Version::Vs2015;
+             ide == kSwitchIdeValueVs2015 || ide == kSwitchIdeValueVs2017) {
+    VisualStudioWriter::Version version = VisualStudioWriter::Version::Vs2015;
+    if (ide == kSwitchIdeValueVs2013)
+      version = VisualStudioWriter::Version::Vs2013;
+    else if (ide == kSwitchIdeValueVs2017)
+      version = VisualStudioWriter::Version::Vs2017;
+
     std::string sln_name;
     if (command_line->HasSwitch(kSwitchSln))
       sln_name = command_line->GetSwitchValueASCII(kSwitchSln);
     std::string filters;
     if (command_line->HasSwitch(kSwitchFilters))
       filters = command_line->GetSwitchValueASCII(kSwitchFilters);
+    std::string win_kit;
+    if (command_line->HasSwitch(kSwitchIdeValueWinSdk))
+      win_kit = command_line->GetSwitchValueASCII(kSwitchIdeValueWinSdk);
     bool no_deps = command_line->HasSwitch(kSwitchNoDeps);
-    bool res = VisualStudioWriter::RunAndWriteFiles(
-        build_settings, builder, version, sln_name, filters, no_deps, err);
+    bool res = VisualStudioWriter::RunAndWriteFiles(build_settings, builder,
+                                                    version, sln_name, filters,
+                                                    win_kit, no_deps, err);
     if (res && !quiet) {
       OutputString("Generating Visual Studio projects took " +
                    base::Int64ToString(timer.Elapsed().InMilliseconds()) +
@@ -270,7 +279,7 @@ const char kGen_HelpShort[] = "gen: Generate ninja files.";
 const char kGen_Help[] =
     R"(gn gen: Generate ninja files.
 
-  gn gen [<ide options>] <out_dir>
+  gn gen [--check] [<ide options>] <out_dir>
 
   Generates ninja files from the current tree and puts them in the given output
   directory.
@@ -279,6 +288,9 @@ const char kGen_Help[] =
       //out/foo
   Or it can be a directory relative to the current directory such as:
       out/foo
+
+  "gn gen --check" is the same as running "gn check". See "gn help check"
+  for documentation on that mode.
 
   See "gn help switches" for the common command-line switches.
 
@@ -293,6 +305,7 @@ IDE options
              (default Visual Studio version: 2015)
       "vs2013" - Visual Studio 2013 project/solution files.
       "vs2015" - Visual Studio 2015 project/solution files.
+      "vs2017" - Visual Studio 2017 project/solution files.
       "xcode" - Xcode workspace/solution files.
       "qtcreator" - QtCreator project files.
       "json" - JSON file containing target information
@@ -312,6 +325,11 @@ Visual Studio Flags
   --no-deps
       Don't include targets dependencies to the solution. Changes the way how
       --filters option works. Only directly matching targets are included.
+
+  --winsdk=<sdk_version>
+      Use the specified Windows 10 SDK version to generate project files.
+      As an example, "10.0.15063.0" can be specified to use Creators Update SDK
+      instead of the default one.
 
 Xcode Flags
 
@@ -348,9 +366,10 @@ Eclipse IDE Support
 
 Generic JSON Output
 
-  Dumps target information to JSON file and optionally invokes python script on
-  generated file. See comments at the beginning of json_project_writer.cc and
-  desc_builder.cc for overview of JSON file format.
+  Dumps target information to a JSON file and optionally invokes a
+  python script on the generated file. See the comments at the beginning
+  of json_project_writer.cc and desc_builder.cc for an overview of the JSON
+  file format.
 
   --json-file-name=<json_file_name>
       Overrides default file name (project.json) of generated JSON file.

@@ -45,20 +45,21 @@
 #include "ui/gfx/geometry/rect.h"
 
 struct BrowserPluginHostMsg_Attach_Params;
+struct BrowserPluginHostMsg_SetComposition_Params;
 
 #if defined(OS_MACOSX)
 struct FrameHostMsg_ShowPopup_Params;
 #endif
 
-namespace cc {
-class SurfaceId;
-class SurfaceInfo;
-struct SurfaceSequence;
-}  // namespace cc
-
 namespace gfx {
 class Range;
 }  // namespace gfx
+
+namespace viz {
+class SurfaceId;
+class SurfaceInfo;
+struct SurfaceSequence;
+}  // namespace viz
 
 namespace content {
 
@@ -237,15 +238,8 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   void PointerLockPermissionResponse(bool allow);
 
   // The next function is virtual for test purposes.
-  virtual void SetChildFrameSurface(const cc::SurfaceInfo& surface_info,
-                                    const cc::SurfaceSequence& sequence);
-
-  // Find the given |search_text| in the page. Returns true if the find request
-  // is handled by this browser plugin guest.
-  bool HandleFindForEmbedder(int request_id,
-                             const base::string16& search_text,
-                             const blink::WebFindOptions& options);
-  bool HandleStopFindingForEmbedder(StopFindAction action);
+  virtual void SetChildFrameSurface(const viz::SurfaceInfo& surface_info,
+                                    const viz::SurfaceSequence& sequence);
 
   void ResendEventToEmbedder(const blink::WebInputEvent& event);
 
@@ -284,10 +278,10 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   void InitInternal(const BrowserPluginHostMsg_Attach_Params& params,
                     WebContentsImpl* owner_web_contents);
 
-  void OnSatisfySequence(int instance_id, const cc::SurfaceSequence& sequence);
+  void OnSatisfySequence(int instance_id, const viz::SurfaceSequence& sequence);
   void OnRequireSequence(int instance_id,
-                         const cc::SurfaceId& id,
-                         const cc::SurfaceSequence& sequence);
+                         const viz::SurfaceId& id,
+                         const viz::SurfaceSequence& sequence);
   // Message handlers for messages from embedder.
   void OnDetach(int instance_id);
   // Handles drag events from the embedder.
@@ -305,7 +299,6 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
                             const std::string& command);
 
   void OnLockMouse(bool user_gesture,
-                   bool last_unlocked_by_target,
                    bool privileged);
   void OnLockMouseAck(int instance_id, bool succeeded);
   // Resizes the guest's web contents.
@@ -342,16 +335,14 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   void OnTextInputStateChanged(const TextInputState& params);
   void OnImeSetComposition(
       int instance_id,
-      const std::string& text,
-      const std::vector<blink::WebCompositionUnderline>& underlines,
-      int selection_start,
-      int selection_end);
+      const BrowserPluginHostMsg_SetComposition_Params& params);
   void OnImeCommitText(
       int instance_id,
-      const std::string& text,
+      const base::string16& text,
       const std::vector<blink::WebCompositionUnderline>& underlines,
+      const gfx::Range& replacement_range,
       int relative_cursor_pos);
-  void OnImeFinishComposingText(bool keep_selection);
+  void OnImeFinishComposingText(int instance_id, bool keep_selection);
   void OnExtendSelectionAndDelete(int instance_id, int before, int after);
   void OnImeCancelComposition();
 #if defined(OS_MACOSX) || defined(USE_AURA)

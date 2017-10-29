@@ -27,14 +27,15 @@ class VideoFrame;
 }
 
 namespace ui {
-class TextInputClient;
 class AcceleratedWidgetMac;
+class TextInputClient;
 }
 
 namespace content {
 
 class RenderWidgetHost;
 class RenderWidgetHostViewFrameSubscriber;
+class TouchSelectionControllerClientManager;
 
 // RenderWidgetHostView is an interface implemented by an object that acts as
 // the "View" portion of a RenderWidgetHost. The RenderWidgetHost and its
@@ -122,23 +123,25 @@ class CONTENT_EXPORT RenderWidgetHostView {
   // Retrieve the bounds of the View, in screen coordinates.
   virtual gfx::Rect GetViewBounds() const = 0;
 
-  // Returns true if the View's context menu is showing.
-  virtual bool IsShowingContextMenu() const = 0;
-
-  // Tells the View whether the context menu is showing.
-  virtual void SetShowingContextMenu(bool showing) = 0;
-
   // Returns the currently selected text.
   virtual base::string16 GetSelectedText() = 0;
 
+  // This only returns non-null on platforms that implement touch
+  // selection editing (TSE), currently Aura and (soon) Android.
+  // TODO(wjmaclean): update this comment when OOPIF TSE is implemented on
+  // Android. https://crbug.com/470662.
+  virtual TouchSelectionControllerClientManager*
+  GetTouchSelectionControllerClientManager() = 0;
+
   // Subclasses should override this method to set the background color. |color|
-  // could be transparent or opaque.
+  // has to be either SK_ColorTRANSPARENT or opaque. If set to
+  // SK_ColorTRANSPARENT, the renderer's background color will be overridden to
+  // be fully transparent.
   virtual void SetBackgroundColor(SkColor color) = 0;
+  virtual SkColor background_color() const = 0;
   // Convenience method to fill the background layer with the default color by
   // calling |SetBackgroundColor|.
-  virtual SkColor background_color() = 0;
   virtual void SetBackgroundColorToDefault() = 0;
-  virtual bool GetBackgroundOpaque() = 0;
 
   // Return value indicates whether the mouse is locked successfully or not.
   virtual bool LockMouse() = 0;

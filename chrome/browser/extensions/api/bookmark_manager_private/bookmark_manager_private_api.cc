@@ -269,8 +269,8 @@ void BookmarkManagerPrivateAPI::Shutdown() {
 }
 
 static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<BookmarkManagerPrivateAPI> > g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+    BrowserContextKeyedAPIFactory<BookmarkManagerPrivateAPI>>::DestructorAtExit
+    g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<BookmarkManagerPrivateAPI>*
@@ -793,12 +793,6 @@ bool BookmarkManagerPrivateUpdateMetaInfoFunction::RunOnReady() {
   }
   model->SetNodeMetaInfoMap(node, new_meta_info);
 
-  return true;
-}
-
-bool BookmarkManagerPrivateCanOpenNewWindowsFunction::RunOnReady() {
-  bool can_open_new_windows = true;
-  SetResult(base::MakeUnique<base::Value>(can_open_new_windows));
   return true;
 }
 

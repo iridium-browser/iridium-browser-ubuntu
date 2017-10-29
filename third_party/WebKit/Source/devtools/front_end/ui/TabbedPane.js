@@ -43,6 +43,7 @@ UI.TabbedPane = class extends UI.VBox {
     this._tabSlider = createElementWithClass('div', 'tabbed-pane-tab-slider');
     this._tabsElement = this._headerContentsElement.createChild('div', 'tabbed-pane-header-tabs');
     this._tabsElement.setAttribute('role', 'tablist');
+    this._tabsElement.addEventListener('keydown', this._keyDown.bind(this), false);
     this._contentElement = this.contentElement.createChild('div', 'tabbed-pane-content');
     this._contentElement.setAttribute('role', 'tabpanel');
     this._contentElement.createChild('content');
@@ -217,6 +218,7 @@ UI.TabbedPane = class extends UI.VBox {
     this.closeTabs([id], userGesture);
   }
 
+
   /**
    * @param {!Array.<string>} ids
    * @param {boolean=} userGesture
@@ -306,6 +308,12 @@ UI.TabbedPane = class extends UI.VBox {
     });
   }
 
+  _viewHasFocus() {
+    if (this.visibleView)
+      return this.visibleView.hasFocus();
+    return this.contentElement === this.contentElement.getComponentRoot().activeElement;
+  }
+
   /**
    * @param {string} id
    * @param {boolean=} userGesture
@@ -314,7 +322,7 @@ UI.TabbedPane = class extends UI.VBox {
   selectTab(id, userGesture) {
     if (this._currentTabLocked)
       return false;
-    var focused = this.hasFocus();
+    var focused = this._viewHasFocus();
     var tab = this._tabsById.get(id);
     if (!tab)
       return false;
@@ -489,10 +497,15 @@ UI.TabbedPane = class extends UI.VBox {
   }
 
   /**
-   * @param {string} text
+   * @param {!Element} element
    */
-  setPlaceholderText(text) {
-    this._noTabsMessage = text;
+  setPlaceholderElement(element) {
+    this._placeholderElement = element;
+
+    if (this._placeholderContainerElement) {
+      this._placeholderContainerElement.removeChildren();
+      this._placeholderContainerElement.appendChild(element);
+    }
   }
 
   _innerUpdateTabElements() {
@@ -501,15 +514,15 @@ UI.TabbedPane = class extends UI.VBox {
 
     if (!this._tabs.length) {
       this._contentElement.classList.add('has-no-tabs');
-      if (this._noTabsMessage && !this._noTabsMessageElement) {
-        this._noTabsMessageElement = this._contentElement.createChild('div', 'tabbed-pane-placeholder fill');
-        this._noTabsMessageElement.textContent = this._noTabsMessage;
+      if (this._placeholderElement && !this._placeholderContainerElement) {
+        this._placeholderContainerElement = this._contentElement.createChild('div', 'tabbed-pane-placeholder fill');
+        this._placeholderContainerElement.appendChild(this._placeholderElement);
       }
     } else {
       this._contentElement.classList.remove('has-no-tabs');
-      if (this._noTabsMessageElement) {
-        this._noTabsMessageElement.remove();
-        delete this._noTabsMessageElement;
+      if (this._placeholderContainerElement) {
+        this._placeholderContainerElement.remove();
+        delete this._placeholderContainerElement;
       }
     }
 
@@ -543,19 +556,34 @@ UI.TabbedPane = class extends UI.VBox {
     var dropDownContainer = createElementWithClass('div', 'tabbed-pane-header-tabs-drop-down-container');
     var chevronIcon = UI.Icon.create('largeicon-chevron', 'chevron-icon');
     dropDownContainer.appendChild(chevronIcon);
-    this._dropDownMenu = new UI.DropDownMenu(dropDownContainer);
-    this._dropDownMenu.addEventListener(UI.DropDownMenu.Events.ItemSelected, this._dropDownMenuItemSelected, this);
-
+    dropDownContainer.addEventListener('click', this._onDropDownMouseDown.bind(this));
+    dropDownContainer.addEventListener('mousedown', this._onDropDownMouseDown.bind(this));
     return dropDownContainer;
   }
 
   /**
-   * @param {!Common.Event} event
+   * @param {!Event} event
    */
-  _dropDownMenuItemSelected(event) {
-    var tabId = /** @type {string} */ (event.data);
-    this._lastSelectedOverflowTab = this._tabsById.get(tabId);
-    this.selectTab(tabId, true);
+  _onDropDownMouseDown(event) {
+    if (event.which !== 1)
+      return;
+    var rect = this._dropDownButton.getBoundingClientRect();
+    var menu = new UI.ContextMenu(event, false, rect.left, rect.bottom);
+    for (var i = 0; i < this._tabs.length; ++i) {
+      var tab = this._tabs[i];
+      if (tab._shown)
+        continue;
+      menu.appendCheckboxItem(tab.title, this._dropDownMenuItemSelected.bind(this, tab), this._tabsHistory[0] === tab);
+    }
+    menu.show();
+  }
+
+  /**
+   * @param {!UI.TabbedPaneTab} tab
+   */
+  _dropDownMenuItemSelected(tab) {
+    this._lastSelectedOverflowTab = tab;
+    this.selectTab(tab.id, true);
   }
 
   _totalWidth() {
@@ -598,32 +626,17 @@ UI.TabbedPane = class extends UI.VBox {
     }
 
     if (!this._overflowDisabled)
-      this._populateDropDownFromIndex();
+      this._maybeShowDropDown(tabsToShowIndexes.length !== this._tabs.length);
   }
 
-  _populateDropDownFromIndex() {
-    if (this._dropDownButton.parentElement)
-      this._headerContentsElement.removeChild(this._dropDownButton);
-
-    this._dropDownMenu.clear();
-
-    var tabsToShow = [];
-    for (var i = 0; i < this._tabs.length; ++i) {
-      if (!this._tabs[i]._shown)
-        tabsToShow.push(this._tabs[i]);
-    }
-
-    var selectedId = null;
-    for (var i = 0; i < tabsToShow.length; ++i) {
-      var tab = tabsToShow[i];
-      this._dropDownMenu.addItem(tab.id, tab.title);
-      if (this._tabsHistory[0] === tab)
-        selectedId = tab.id;
-    }
-    if (tabsToShow.length) {
+  /**
+   * @param {boolean} hasMoreTabs
+   */
+  _maybeShowDropDown(hasMoreTabs) {
+    if (hasMoreTabs && !this._dropDownButton.parentElement)
       this._headerContentsElement.appendChild(this._dropDownButton);
-      this._dropDownMenu.selectItem(selectedId);
-    }
+    else if (!hasMoreTabs && this._dropDownButton.parentElement)
+      this._headerContentsElement.removeChild(this._dropDownButton);
   }
 
   _measureDropDownButton() {
@@ -758,6 +771,7 @@ UI.TabbedPane = class extends UI.VBox {
    * @param {!UI.TabbedPaneTab} tab
    */
   _showTab(tab) {
+    tab.tabElement.tabIndex = 0;
     tab.tabElement.classList.add('selected');
     UI.ARIAUtils.setSelected(tab.tabElement, true);
     tab.view.show(this.element);
@@ -783,6 +797,7 @@ UI.TabbedPane = class extends UI.VBox {
    * @param {!UI.TabbedPaneTab} tab
    */
   _hideTab(tab) {
+    tab.tabElement.removeAttribute('tabIndex');
     tab.tabElement.classList.remove('selected');
     tab.tabElement.setAttribute('aria-selected', 'false');
     tab.view.detach();
@@ -801,7 +816,7 @@ UI.TabbedPane = class extends UI.VBox {
    * @param {number} index
    */
   _insertBefore(tab, index) {
-    this._tabsElement.insertBefore(tab._tabElement || null, this._tabsElement.childNodes[index]);
+    this._tabsElement.insertBefore(tab.tabElement, this._tabsElement.childNodes[index]);
     var oldIndex = this._tabs.indexOf(tab);
     this._tabs.splice(oldIndex, 1);
     if (oldIndex < index)
@@ -843,6 +858,42 @@ UI.TabbedPane = class extends UI.VBox {
   setAllowTabReorder(allow, automatic) {
     this._allowTabReorder = allow;
     this._automaticReorder = automatic;
+  }
+
+  /**
+   * @param {!Event} event
+   */
+  _keyDown(event) {
+    if (!this._currentTab)
+      return;
+    var nextTabElement = null;
+    switch (event.key) {
+      case 'ArrowUp':
+      case 'ArrowLeft':
+        nextTabElement = this._currentTab.tabElement.previousElementSibling;
+        if (!nextTabElement && !this._dropDownButton.parentElement)
+          nextTabElement = this._currentTab.tabElement.parentElement.lastElementChild;
+        break;
+      case 'ArrowDown':
+      case 'ArrowRight':
+        nextTabElement = this._currentTab.tabElement.nextElementSibling;
+        if (!nextTabElement && !this._dropDownButton.parentElement)
+          nextTabElement = this._currentTab.tabElement.parentElement.firstElementChild;
+        break;
+      case 'Enter':
+      case 'Space':
+        this._currentTab.view.focus();
+        return;
+      default:
+        return;
+    }
+    if (!nextTabElement) {
+      this._dropDownButton.click();
+      return;
+    }
+    var tab = this._tabs.find(tab => tab.tabElement === nextTabElement);
+    this.selectTab(tab.id, true);
+    nextTabElement.focus();
   }
 };
 
@@ -1028,10 +1079,8 @@ UI.TabbedPaneTab = class {
   _createTabElement(measuring) {
     var tabElement = createElementWithClass('div', 'tabbed-pane-header-tab');
     tabElement.id = 'tab-' + this._id;
-    tabElement.tabIndex = -1;
     UI.ARIAUtils.markAsTab(tabElement);
     UI.ARIAUtils.setSelected(tabElement, false);
-    tabElement.selectTabForTest = this._tabbedPane.selectTab.bind(this._tabbedPane, this.id, true);
 
     var titleElement = tabElement.createChild('span', 'tabbed-pane-header-tab-title');
     titleElement.textContent = this.title;
@@ -1136,10 +1185,10 @@ UI.TabbedPaneTab = class {
 
     var contextMenu = new UI.ContextMenu(event);
     if (this._closeable) {
-      contextMenu.appendItem(Common.UIString.capitalize('Close'), close.bind(this));
-      contextMenu.appendItem(Common.UIString.capitalize('Close ^others'), closeOthers.bind(this));
-      contextMenu.appendItem(Common.UIString.capitalize('Close ^tabs to the ^right'), closeToTheRight.bind(this));
-      contextMenu.appendItem(Common.UIString.capitalize('Close ^all'), closeAll.bind(this));
+      contextMenu.appendItem(Common.UIString('Close'), close.bind(this));
+      contextMenu.appendItem(Common.UIString('Close others'), closeOthers.bind(this));
+      contextMenu.appendItem(Common.UIString('Close tabs to the right'), closeToTheRight.bind(this));
+      contextMenu.appendItem(Common.UIString('Close all'), closeAll.bind(this));
     }
     if (this._delegate)
       this._delegate.onContextMenu(this.id, contextMenu);

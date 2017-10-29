@@ -47,8 +47,8 @@ void ImageController::StopWorkerTasks() {
   // "flush" any scheduled tasks (they will abort).
   CompletionEvent completion_event;
   worker_task_runner_->PostTask(
-      FROM_HERE, base::Bind([](CompletionEvent* event) { event->Signal(); },
-                            base::Unretained(&completion_event)));
+      FROM_HERE, base::BindOnce([](CompletionEvent* event) { event->Signal(); },
+                                base::Unretained(&completion_event)));
   completion_event.Wait();
 
   // Reset the abort flag so that new tasks can be scheduled.
@@ -81,8 +81,10 @@ void ImageController::StopWorkerTasks() {
     // The task (if one exists) would have run already, we just need to make
     // sure it was completed. Multiple requests for the same image use the same
     // task so it could have already been completed.
-    if (request.task && !request.task->HasCompleted())
+    if (request.task && !request.task->HasCompleted()) {
+      request.task->OnTaskCompleted();
       request.task->DidComplete();
+    }
 
     if (request.need_unref)
       cache_->UnrefImage(request.draw_image);
@@ -107,8 +109,10 @@ void ImageController::StopWorkerTasks() {
       if (request.task->state().IsNew())
         request.task->state().DidCancel();
 
-      if (!request.task->HasCompleted())
+      if (!request.task->HasCompleted()) {
+        request.task->OnTaskCompleted();
         request.task->DidComplete();
+      }
     }
     cache_->UnrefImage(request.draw_image);
 
@@ -127,12 +131,15 @@ void ImageController::SetImageDecodeCache(ImageDecodeCache* cache) {
     SetPredecodeImages(std::vector<DrawImage>(),
                        ImageDecodeCache::TracingInfo());
     StopWorkerTasks();
+    image_cache_max_limit_bytes_ = 0u;
   }
 
   cache_ = cache;
 
-  if (cache_)
+  if (cache_) {
+    image_cache_max_limit_bytes_ = cache_->GetMaximumMemoryLimitBytes();
     GenerateTasksForOrphanedRequests();
+  }
 }
 
 void ImageController::GetTasksForImagesAndRef(
@@ -175,7 +182,7 @@ std::vector<scoped_refptr<TileTask>> ImageController::SetPredecodeImages(
 }
 
 ImageController::ImageDecodeRequestId ImageController::QueueImageDecode(
-    sk_sp<const SkImage> image,
+    const DrawImage& draw_image,
     const ImageDecodedCallback& callback) {
   // We must not receive any image requests if we have no worker.
   CHECK(worker_task_runner_);
@@ -183,11 +190,8 @@ ImageController::ImageDecodeRequestId ImageController::QueueImageDecode(
   // Generate the next id.
   ImageDecodeRequestId id = s_next_image_decode_queue_id_++;
 
-  DCHECK(image);
-  bool is_image_lazy = image->isLazyGenerated();
-  auto image_bounds = image->bounds();
-  DrawImage draw_image(std::move(image), image_bounds, kNone_SkFilterQuality,
-                       SkMatrix::I());
+  DCHECK(draw_image.image());
+  bool is_image_lazy = draw_image.image()->isLazyGenerated();
 
   // Get the tasks for this decode.
   scoped_refptr<TileTask> task;
@@ -210,8 +214,8 @@ ImageController::ImageDecodeRequestId ImageController::QueueImageDecode(
     // Post a worker task.
     worker_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&ImageController::ProcessNextImageDecodeOnWorkerThread,
-                   base::Unretained(this)));
+        base::BindOnce(&ImageController::ProcessNextImageDecodeOnWorkerThread,
+                       base::Unretained(this)));
   }
 
   return id;
@@ -266,8 +270,8 @@ void ImageController::ProcessNextImageDecodeOnWorkerThread() {
     decode.task->state().DidFinish();
   }
   origin_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ImageController::ImageDecodeCompleted,
-                            weak_ptr_factory_.GetWeakPtr(), decode.id));
+      FROM_HERE, base::BindOnce(&ImageController::ImageDecodeCompleted,
+                                weak_ptr_factory_.GetWeakPtr(), decode.id));
 }
 
 void ImageController::ImageDecodeCompleted(ImageDecodeRequestId id) {
@@ -314,8 +318,8 @@ void ImageController::ImageDecodeCompleted(ImageDecodeRequestId id) {
   // Post another task to run.
   worker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&ImageController::ProcessNextImageDecodeOnWorkerThread,
-                 base::Unretained(this)));
+      base::BindOnce(&ImageController::ProcessNextImageDecodeOnWorkerThread,
+                     base::Unretained(this)));
 
   // Finally run the requested callback.
   callback.Run(id, result);
@@ -343,8 +347,8 @@ void ImageController::GenerateTasksForOrphanedRequests() {
     // Post a worker task.
     worker_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&ImageController::ProcessNextImageDecodeOnWorkerThread,
-                   base::Unretained(this)));
+        base::BindOnce(&ImageController::ProcessNextImageDecodeOnWorkerThread,
+                       base::Unretained(this)));
   }
 }
 

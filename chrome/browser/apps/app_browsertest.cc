@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
@@ -601,6 +602,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
 // a handler accepts "".
 IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
                        LaunchWithFileEmptyExtension) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath test_file;
@@ -615,6 +617,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
 // a handler accepts *.
 IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest,
                        LaunchWithFileEmptyExtensionAcceptAny) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath test_file;
@@ -723,6 +726,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest, GetDisplayPath) {
 // Tests that the file is created if the file does not exist and the app has the
 // fileSystem.write permission.
 IN_PROC_BROWSER_TEST_F(PlatformAppWithFileBrowserTest, LaunchNewFile) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   ASSERT_TRUE(RunPlatformAppTestWithFile(
@@ -933,11 +937,28 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, ReloadRelaunches) {
   ASSERT_TRUE(extension);
   ASSERT_TRUE(GetFirstAppWindow());
 
-  // Now tell the app to reload itself
+  // Now tell the app to reload itself.
   ExtensionTestMessageListener launched_listener2("Launched", false);
   launched_listener.Reply("reload");
   ASSERT_TRUE(launched_listener2.WaitUntilSatisfied());
   ASSERT_TRUE(GetFirstAppWindow());
+}
+
+// Tests that reloading a component app loads its (lazy) background page.
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
+                       ComponentReloadLoadsLazyBackgroundPage) {
+  ExtensionTestMessageListener launched_listener("Launched", true);
+  const Extension* component_app = LoadExtensionAsComponentWithManifest(
+      test_data_dir_.AppendASCII("platform_apps")
+          .AppendASCII("component_reload"),
+      FILE_PATH_LITERAL("manifest.json"));
+  ASSERT_TRUE(component_app);
+  ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
+
+  // Now tell the app to reload itself.
+  ExtensionTestMessageListener launched_listener2("Launched", false);
+  launched_listener.Reply("reload");
+  ASSERT_TRUE(launched_listener2.WaitUntilSatisfied());
 }
 
 namespace {
@@ -1033,7 +1054,7 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
 
   // Clear the registered events to ensure they are updated.
   extensions::EventRouter::Get(browser()->profile())
-      ->SetRegisteredEvents(extension->id(), std::set<std::string>());
+      ->ClearRegisteredEventsForTest(extension->id());
 
   DictionaryPrefUpdate update(extension_prefs->pref_service(),
                               extensions::pref_names::kExtensions);
@@ -1131,10 +1152,8 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, DISABLED_WebContentsHasFocus) {
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
-// Disabled due to flakiness. See crbug.com/693305.
-// TODO(rbpotter): Investigate and re-enable this test.
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
-                       DISABLED_WindowDotPrintShouldBringUpPrintPreview) {
+                       WindowDotPrintShouldBringUpPrintPreview) {
   ScopedPreviewTestingDelegate preview_delegate;
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/print_api")) << message_;
   preview_delegate.WaitUntilPreviewIsReady();
@@ -1362,12 +1381,9 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppsIgnoreDefaultZoom) {
   EXPECT_EQ(0, app_host_zoom_map->GetZoomLevel(web_contents));
 }
 
-// This test will flake until we fix the underlying issue:
-// https://crbug.com/620194.
-#define MAYBE_AppWindowIframe DISABLED_AppWindowIframe
 // Sends chrome.test.sendMessage from chrome.app.window.create's callback.
 // The app window also adds an <iframe> to the page during window.onload.
-IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, MAYBE_AppWindowIframe) {
+IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, AppWindowIframe) {
   LoadAndLaunchPlatformApp("app_window_send_message",
                            "APP_WINDOW_CREATE_CALLBACK");
 }

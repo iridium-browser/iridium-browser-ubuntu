@@ -4,20 +4,29 @@
 
 package org.chromium.chrome.browser.media.remote;
 
+import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.media.AudioManager;
 
+import org.chromium.base.ApplicationStatus;
+import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.media.remote.RemoteVideoInfo.PlayerState;
 import org.chromium.chrome.browser.media.ui.MediaNotificationInfo;
 import org.chromium.chrome.browser.media.ui.MediaNotificationListener;
 import org.chromium.chrome.browser.media.ui.MediaNotificationManager;
 import org.chromium.chrome.browser.metrics.MediaNotificationUma;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.content_public.common.MediaMetadata;
+
+import java.net.URI;
+import java.net.URISyntaxException;
 
 import javax.annotation.Nullable;
 
@@ -27,7 +36,9 @@ import javax.annotation.Nullable;
  */
 public class CastNotificationControl implements MediaRouteController.UiListener,
         MediaNotificationListener, AudioManager.OnAudioFocusChangeListener {
+    private static final String TAG = "MediaFling";
 
+    @SuppressLint("StaticFieldLeak")
     private static CastNotificationControl sInstance;
 
     private Bitmap mPosterBitmap;
@@ -37,6 +48,14 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
     private PlayerState mState;
     private String mTitle = "";
     private AudioManager mAudioManager;
+
+    /**
+     * Contains the origin of the tab containing the video when it's cast. The origin is formatted
+     * to be presented better from the security POV if the URL is parseable. Otherwise it's just the
+     * URL of the tab if the tab exists. Can be null.
+     */
+    @Nullable
+    private String mTabOrigin;
 
     private boolean mIsShowing;
 
@@ -83,6 +102,8 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
         }
         mPosterBitmap = posterBitmap;
         if (mNotificationBuilder == null || mMediaRouteController == null) return;
+
+        updateNotificationBuilderIfPosterIsGoodEnough();
         mNotificationBuilder.setNotificationLargeIcon(mMediaRouteController.getPoster());
         updateNotification();
     }
@@ -108,11 +129,13 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
                 .setPrivate(false)
                 .setNotificationSmallIcon(R.drawable.ic_notification_media_route)
                 .setContentIntent(contentIntent)
-                .setNotificationLargeIcon(mMediaRouteController.getPoster())
                 .setDefaultNotificationLargeIcon(R.drawable.cast_playing_square)
                 .setId(R.id.remote_notification)
                 .setListener(this);
+
+        updateNotificationBuilderIfPosterIsGoodEnough();
         mState = initialState;
+
         updateNotification();
         mIsShowing = true;
     }
@@ -128,14 +151,16 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
         if (mNotificationBuilder == null) return;
 
         mNotificationBuilder.setMetadata(new MediaMetadata(mTitle, "", ""));
+        if (mTabOrigin != null) mNotificationBuilder.setOrigin(mTabOrigin);
+
         if (mState == PlayerState.PAUSED || mState == PlayerState.PLAYING) {
             mNotificationBuilder.setPaused(mState != PlayerState.PLAYING);
             mNotificationBuilder.setActions(MediaNotificationInfo.ACTION_STOP
                     | MediaNotificationInfo.ACTION_PLAY_PAUSE);
-            MediaNotificationManager.show(mContext, mNotificationBuilder.build());
+            MediaNotificationManager.show(mNotificationBuilder.build());
         } else if (mState == PlayerState.LOADING) {
             mNotificationBuilder.setActions(MediaNotificationInfo.ACTION_STOP);
-            MediaNotificationManager.show(mContext, mNotificationBuilder.build());
+            MediaNotificationManager.show(mNotificationBuilder.build());
         } else {
             hide();
         }
@@ -145,7 +170,7 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
     // poster changes.
     public void onPosterBitmapChanged() {
         if (mNotificationBuilder == null || mMediaRouteController == null) return;
-        mNotificationBuilder.setNotificationLargeIcon(mMediaRouteController.getPoster());
+        updateNotificationBuilderIfPosterIsGoodEnough();
         updateNotification();
     }
 
@@ -170,6 +195,9 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
 
     @Override
     public void onRouteSelected(String name, MediaRouteController mediaRouteController) {
+        // The notification will be shown/updated later so don't update it in case it's still
+        // showing for the previous video.
+        mTabOrigin = getCurrentTabOrigin();
     }
 
     @Override
@@ -234,5 +262,32 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
     @VisibleForTesting
     boolean isShowingForTests() {
         return mIsShowing;
+    }
+
+    private void updateNotificationBuilderIfPosterIsGoodEnough() {
+        Bitmap poster = mMediaRouteController.getPoster();
+        if (MediaNotificationManager.isBitmapSuitableAsMediaImage(poster)) {
+            mNotificationBuilder.setNotificationLargeIcon(poster);
+            mNotificationBuilder.setMediaSessionImage(poster);
+        }
+    }
+
+    private String getCurrentTabOrigin() {
+        Activity activity = ApplicationStatus.getLastTrackedFocusedActivity();
+
+        if (!(activity instanceof ChromeTabbedActivity)) return null;
+
+        Tab tab = ((ChromeTabbedActivity) activity).getActivityTab();
+        if (tab == null || !tab.isInitialized()) return null;
+
+        String url = tab.getUrl();
+        try {
+            return UrlFormatter.formatUrlForSecurityDisplay(new URI(url), true);
+        } catch (URISyntaxException | UnsatisfiedLinkError e) {
+            // UnstatisfiedLinkError can only happen in tests as the natives are not initialized
+            // yet.
+            Log.e(TAG, "Unable to parse the origin from the URL. Using the full URL instead.");
+            return url;
+        }
     }
 }

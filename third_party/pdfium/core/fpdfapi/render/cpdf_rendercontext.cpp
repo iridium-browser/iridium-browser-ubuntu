@@ -20,8 +20,8 @@
 #include "core/fxge/fx_dib.h"
 
 CPDF_RenderContext::CPDF_RenderContext(CPDF_Page* pPage)
-    : m_pDocument(pPage->m_pDocument),
-      m_pPageResources(pPage->m_pPageResources),
+    : m_pDocument(pPage->m_pDocument.Get()),
+      m_pPageResources(pPage->m_pPageResources.Get()),
       m_pPageCache(pPage->GetRenderCache()) {}
 
 CPDF_RenderContext::CPDF_RenderContext(CPDF_Document* pDoc,
@@ -30,11 +30,12 @@ CPDF_RenderContext::CPDF_RenderContext(CPDF_Document* pDoc,
 
 CPDF_RenderContext::~CPDF_RenderContext() {}
 
-void CPDF_RenderContext::GetBackground(CFX_DIBitmap* pBuffer,
-                                       const CPDF_PageObject* pObj,
-                                       const CPDF_RenderOptions* pOptions,
-                                       CFX_Matrix* pFinalMatrix) {
-  CFX_FxgeDevice device;
+void CPDF_RenderContext::GetBackground(
+    const CFX_RetainPtr<CFX_DIBitmap>& pBuffer,
+    const CPDF_PageObject* pObj,
+    const CPDF_RenderOptions* pOptions,
+    CFX_Matrix* pFinalMatrix) {
+  CFX_DefaultRenderDevice device;
   device.Attach(pBuffer, false, nullptr, false);
 
   FX_RECT rect(0, 0, device.GetWidth(), device.GetHeight());
@@ -63,34 +64,30 @@ void CPDF_RenderContext::Render(CFX_RenderDevice* pDevice,
                                 const CPDF_RenderOptions* pOptions,
                                 const CFX_Matrix* pLastMatrix) {
   for (auto& layer : m_Layers) {
-    pDevice->SaveState();
+    CFX_RenderDevice::StateRestorer restorer(pDevice);
+    CPDF_RenderStatus status;
     if (pLastMatrix) {
       CFX_Matrix FinalMatrix = layer.m_Matrix;
       FinalMatrix.Concat(*pLastMatrix);
-      CPDF_RenderStatus status;
       status.Initialize(this, pDevice, pLastMatrix, pStopObj, nullptr, nullptr,
                         pOptions, layer.m_pObjectHolder->m_Transparency, false,
                         nullptr);
-      status.RenderObjectList(layer.m_pObjectHolder, &FinalMatrix);
-      if (status.m_Options.m_Flags & RENDER_LIMITEDIMAGECACHE)
-        m_pPageCache->CacheOptimization(status.m_Options.m_dwLimitCacheSize);
-      if (status.m_bStopped) {
-        pDevice->RestoreState(false);
-        break;
-      }
+      status.RenderObjectList(layer.m_pObjectHolder.Get(), &FinalMatrix);
     } else {
-      CPDF_RenderStatus status;
       status.Initialize(this, pDevice, nullptr, pStopObj, nullptr, nullptr,
                         pOptions, layer.m_pObjectHolder->m_Transparency, false,
                         nullptr);
-      status.RenderObjectList(layer.m_pObjectHolder, &layer.m_Matrix);
-      if (status.m_Options.m_Flags & RENDER_LIMITEDIMAGECACHE)
-        m_pPageCache->CacheOptimization(status.m_Options.m_dwLimitCacheSize);
-      if (status.m_bStopped) {
-        pDevice->RestoreState(false);
-        break;
-      }
+      status.RenderObjectList(layer.m_pObjectHolder.Get(), &layer.m_Matrix);
     }
-    pDevice->RestoreState(false);
+    if (status.m_Options.m_Flags & RENDER_LIMITEDIMAGECACHE)
+      m_pPageCache->CacheOptimization(status.m_Options.m_dwLimitCacheSize);
+    if (status.m_bStopped)
+      break;
   }
 }
+
+CPDF_RenderContext::Layer::Layer() {}
+
+CPDF_RenderContext::Layer::Layer(const Layer& that) = default;
+
+CPDF_RenderContext::Layer::~Layer() {}

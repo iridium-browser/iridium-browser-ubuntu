@@ -18,11 +18,11 @@
 #include "base/strings/stringprintf.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/platform_thread.h"
+#include "base/timer/hi_res_timer_manager.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "content/child/child_process.h"
 #include "content/common/content_constants_internal.h"
-#include "content/common/gpu_host_messages.h"
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_process.h"
 #include "content/public/common/content_client.h"
@@ -37,7 +37,6 @@
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "gpu/ipc/service/gpu_config.h"
 #include "gpu/ipc/service/gpu_init.h"
-#include "gpu/ipc/service/gpu_memory_buffer_factory.h"
 #include "gpu/ipc/service/gpu_watchdog_thread.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/switches.h"
@@ -89,11 +88,6 @@
 #include "media/gpu/vaapi_wrapper.h"
 #endif
 
-#if defined(SANITIZER_COVERAGE)
-#include <sanitizer/common_interface_defs.h>
-#include <sanitizer/coverage_interface.h>
-#endif
-
 namespace content {
 
 namespace {
@@ -104,8 +98,8 @@ bool StartSandboxLinux(gpu::GpuWatchdogThread*);
 bool StartSandboxWindows(const sandbox::SandboxInterfaceInfo*);
 #endif
 
-base::LazyInstance<GpuChildThread::DeferredMessages> deferred_messages =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<GpuChildThread::DeferredMessages>::DestructorAtExit
+    deferred_messages = LAZY_INSTANCE_INITIALIZER;
 
 bool GpuProcessLogMessageHandler(int severity,
                                  const char* file, int line,
@@ -115,7 +109,7 @@ bool GpuProcessLogMessageHandler(int severity,
   log.severity = severity;
   log.header = str.substr(0, message_start);
   log.message = str.substr(message_start);
-  deferred_messages.Get().push(std::move(log));
+  deferred_messages.Get().push_back(std::move(log));
   return false;
 }
 
@@ -193,9 +187,12 @@ int GpuMain(const MainFunctionParams& parameters) {
       SEM_FAILCRITICALERRORS |
       SEM_NOGPFAULTERRORBOX |
       SEM_NOOPENFILEERRORBOX);
-#elif defined(USE_X11)
-  ui::SetDefaultX11ErrorHandlers();
 
+  // COM is used by some Windows Media Foundation calls made on this thread and
+  // must be MTA so we don't have to worry about pumping messages to handle
+  // COM callbacks.
+  base::win::ScopedCOMInitializer com_initializer(
+      base::win::ScopedCOMInitializer::kMTA);
 #endif
 
   logging::SetLogMessageHandler(GpuProcessLogMessageHandler);
@@ -213,13 +210,16 @@ int GpuMain(const MainFunctionParams& parameters) {
         new base::MessageLoop(base::MessageLoop::TYPE_DEFAULT));
   } else {
 #if defined(OS_WIN)
-    // OK to use default non-UI message loop because all GPU windows run on
-    // dedicated thread.
+    // The GpuMain thread should not be pumping Windows messages because no UI
+    // is expected to run on this thread.
     main_message_loop.reset(
         new base::MessageLoop(base::MessageLoop::TYPE_DEFAULT));
 #elif defined(USE_X11)
     // We need a UI loop so that we can grab the Expose events. See GLSurfaceGLX
     // and https://crbug.com/326995.
+    ui::SetDefaultX11ErrorHandlers();
+    if (!gfx::GetXDisplay())
+      return RESULT_CODE_GPU_DEAD_ON_ARRIVAL;
     main_message_loop.reset(new base::MessageLoop(base::MessageLoop::TYPE_UI));
     event_source = ui::PlatformEventSource::CreateDefault();
 #elif defined(USE_OZONE)
@@ -272,11 +272,6 @@ int GpuMain(const MainFunctionParams& parameters) {
   logging::SetLogMessageHandler(NULL);
   GetContentClient()->SetGpuInfo(gpu_init.gpu_info());
 
-  std::unique_ptr<gpu::GpuMemoryBufferFactory> gpu_memory_buffer_factory;
-  if (init_success &&
-      gpu::GetNativeGpuMemoryBufferType() != gfx::EMPTY_BUFFER)
-    gpu_memory_buffer_factory = gpu::GpuMemoryBufferFactory::CreateNativeType();
-
   base::ThreadPriority io_thread_priority = base::ThreadPriority::NORMAL;
 #if defined(OS_ANDROID) || defined(OS_CHROMEOS)
   io_thread_priority = base::ThreadPriority::DISPLAY;
@@ -285,23 +280,20 @@ int GpuMain(const MainFunctionParams& parameters) {
   GpuProcess gpu_process(io_thread_priority);
   GpuChildThread* child_thread = new GpuChildThread(
       gpu_init.TakeWatchdogThread(), dead_on_arrival, gpu_init.gpu_info(),
-      gpu_init.gpu_feature_info(), deferred_messages.Get(),
-      gpu_memory_buffer_factory.get());
-  while (!deferred_messages.Get().empty())
-    deferred_messages.Get().pop();
+      gpu_init.gpu_feature_info(), std::move(deferred_messages.Get()));
+  deferred_messages.Get().clear();
 
   child_thread->Init(start_time);
 
   gpu_process.set_main_thread(child_thread);
-
-  if (child_thread->watchdog_thread())
-    child_thread->watchdog_thread()->AddPowerObserver();
 
 #if defined(OS_ANDROID)
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       tracing::GraphicsMemoryDumpProvider::GetInstance(), "AndroidGraphics",
       nullptr);
 #endif
+
+  base::HighResolutionTimerManager hi_res_timer_manager;
 
   {
     TRACE_EVENT0("gpu", "Run Message Loop");
@@ -324,16 +316,6 @@ bool StartSandboxLinux(gpu::GpuWatchdogThread* watchdog_thread) {
     // has really been stopped.
     LinuxSandbox::StopThread(watchdog_thread);
   }
-
-#if defined(SANITIZER_COVERAGE)
-  const std::string sancov_file_name =
-      "gpu." + base::Uint64ToString(base::RandUint64());
-  LinuxSandbox* linux_sandbox = LinuxSandbox::GetInstance();
-  linux_sandbox->sanitizer_args()->coverage_sandboxed = 1;
-  linux_sandbox->sanitizer_args()->coverage_fd =
-      __sanitizer_maybe_open_cov_file(sancov_file_name.c_str());
-  linux_sandbox->sanitizer_args()->coverage_max_block_size = 0;
-#endif
 
   // LinuxSandbox::InitializeSandbox() must always be called
   // with only one thread.

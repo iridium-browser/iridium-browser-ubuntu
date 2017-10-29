@@ -13,11 +13,11 @@
 #include "base/i18n/streaming_utf8_validator.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "chrome/common/safe_browsing/archive_analyzer_results.h"
 #include "chrome/common/safe_browsing/binary_feature_extractor.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/download_protection_util.h"
 #include "chrome/common/safe_browsing/file_type_policies.h"
-#include "chrome/common/safe_browsing/zip_analyzer_results.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "crypto/secure_hash.h"
 #include "crypto/sha2.h"
 #include "third_party/zlib/google/zip_reader.h"
@@ -65,7 +65,7 @@ void AnalyzeContainedFile(
     const base::FilePath& file_path,
     zip::ZipReader* reader,
     base::File* temp_file,
-    ClientDownloadRequest_ArchivedBinary* archived_binary) {
+    ClientDownloadRequest::ArchivedBinary* archived_binary) {
   std::string file_basename(file_path.BaseName().AsUTF8Unsafe());
   if (base::StreamingUtf8Validator::Validate(file_basename))
     archived_binary->set_file_basename(file_basename);
@@ -96,7 +96,7 @@ void AnalyzeContainedFile(
 
 void AnalyzeZipFile(base::File zip_file,
                     base::File temp_file,
-                    Results* results) {
+                    ArchiveAnalyzerResults* results) {
   std::set<base::FilePath> archived_archive_filenames;
   scoped_refptr<BinaryFeatureExtractor> binary_feature_extractor(
       new BinaryFeatureExtractor());
@@ -121,6 +121,13 @@ void AnalyzeZipFile(base::File zip_file,
       DVLOG(2) << "Downloaded a zipped archive: " << file.value();
       results->has_archive = true;
       archived_archive_filenames.insert(file.BaseName());
+      ClientDownloadRequest::ArchivedBinary* archived_archive =
+          results->archived_binary.Add();
+      std::string file_basename_utf8(file.BaseName().AsUTF8Unsafe());
+      if (base::StreamingUtf8Validator::Validate(file_basename_utf8))
+        archived_archive->set_file_basename(file_basename_utf8);
+      archived_archive->set_download_type(
+          ClientDownloadRequest::ZIPPED_ARCHIVE);
     } else if (FileTypePolicies::GetInstance()->IsCheckedBinaryFile(file)) {
       DVLOG(2) << "Downloaded a zipped executable: " << file.value();
       results->has_executable = true;

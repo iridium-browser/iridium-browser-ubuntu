@@ -19,6 +19,7 @@
             '<(angle_path)/src/tests/perf_tests/ANGLEPerfTest.h',
             '<(angle_path)/src/tests/perf_tests/BlitFramebufferPerf.cpp',
             '<(angle_path)/src/tests/perf_tests/BindingPerf.cpp',
+            '<(angle_path)/src/tests/perf_tests/BitSetIteratorPerf.cpp',
             '<(angle_path)/src/tests/perf_tests/BufferSubData.cpp',
             '<(angle_path)/src/tests/perf_tests/DrawCallPerf.cpp',
             '<(angle_path)/src/tests/perf_tests/DrawCallPerfParams.cpp',
@@ -53,6 +54,7 @@
     'dependencies':
     [
         '<(angle_path)/src/angle.gyp:angle_common',
+        '<(angle_path)/src/angle.gyp:libANGLE',
         '<(angle_path)/src/angle.gyp:libGLESv2_static',
         '<(angle_path)/src/angle.gyp:libEGL_static',
         '<(angle_path)/src/tests/tests.gyp:angle_test_support',

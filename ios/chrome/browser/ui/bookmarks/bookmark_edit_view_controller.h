@@ -43,7 +43,7 @@ class ChromeBrowserState;
 // changes underneath it.
 @interface BookmarkEditViewController : CollectionViewController
 
-@property(nonatomic, assign) id<BookmarkEditViewControllerDelegate> delegate;
+@property(nonatomic, weak) id<BookmarkEditViewControllerDelegate> delegate;
 
 // Designated initializer.
 // |bookmark|: mustn't be NULL at initialization time. It also mustn't be a
@@ -51,7 +51,8 @@ class ChromeBrowserState;
 - (instancetype)initWithBookmark:(const bookmarks::BookmarkNode*)bookmark
                     browserState:(ios::ChromeBrowserState*)browserState
     NS_DESIGNATED_INITIALIZER;
-- (instancetype)initWithStyle:(CollectionViewControllerStyle)style
+- (instancetype)initWithLayout:(UICollectionViewLayout*)layout
+                         style:(CollectionViewControllerStyle)style
     NS_UNAVAILABLE;
 
 // Closes the edit view as if close button was pressed.

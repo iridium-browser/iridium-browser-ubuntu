@@ -28,12 +28,6 @@ class SavePageRequest {
                   const ClientId& client_id,
                   const base::Time& creation_time,
                   const bool user_requested);
-  SavePageRequest(int64_t request_id,
-                  const GURL& url,
-                  const ClientId& client_id,
-                  const base::Time& creation_time,
-                  const base::Time& activation_time,
-                  const bool user_requested);
   SavePageRequest(const SavePageRequest& other);
   ~SavePageRequest();
 
@@ -64,8 +58,6 @@ class SavePageRequest {
 
   const base::Time& creation_time() const { return creation_time_; }
 
-  const base::Time& activation_time() const { return activation_time_; }
-
   int64_t started_attempt_count() const { return started_attempt_count_; }
   void set_started_attempt_count(int64_t started_attempt_count) {
     started_attempt_count_ = started_attempt_count;
@@ -82,7 +74,6 @@ class SavePageRequest {
   }
 
   bool user_requested() const { return user_requested_; }
-
   void set_user_requested(bool user_requested) {
     user_requested_ = user_requested;
   }
@@ -90,6 +81,11 @@ class SavePageRequest {
   const GURL& original_url() const { return original_url_; }
   void set_original_url(const GURL& original_url) {
     original_url_ = original_url;
+  }
+
+  const std::string& request_origin() const { return request_origin_; }
+  void set_request_origin(const std::string& request_origin) {
+    request_origin_ = request_origin;
   }
 
  private:
@@ -105,9 +101,6 @@ class SavePageRequest {
 
   // Time when this request was created. (Alternative 2).
   base::Time creation_time_;
-
-  // Time when this request will become active.
-  base::Time activation_time_;
 
   // Number of attempts started to get the page.  This may be different than the
   // number of attempts completed because we could crash.
@@ -128,6 +121,10 @@ class SavePageRequest {
 
   // The original URL of the page to be offlined. Empty if no redirect occurs.
   GURL original_url_;
+
+  // The app package origin of this save page request. Empty if cannot be
+  // determined or Chrome.
+  std::string request_origin_;
 };
 
 }  // namespace offline_pages

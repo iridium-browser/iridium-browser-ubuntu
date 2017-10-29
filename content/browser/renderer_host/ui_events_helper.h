@@ -5,9 +5,12 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_UI_EVENTS_HELPER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_UI_EVENTS_HELPER_H_
 
-#include "base/memory/scoped_vector.h"
+#include <memory>
+#include <vector>
+
 #include "content/browser/renderer_host/event_with_latency_info.h"
 #include "content/common/content_export.h"
+#include "content/common/input/input_event_ack_state.h"
 
 namespace ui {
 class TouchEvent;
@@ -32,8 +35,12 @@ enum TouchEventCoordinateSystem {
 // the Aura EventDispatcher co-ordinate system).
 CONTENT_EXPORT bool MakeUITouchEventsFromWebTouchEvents(
     const TouchEventWithLatencyInfo& touch,
-    ScopedVector<ui::TouchEvent>* list,
+    std::vector<std::unique_ptr<ui::TouchEvent>>* list,
     TouchEventCoordinateSystem coordinate_system);
+
+// Utility to map the event ack state from the renderer, returns true if the
+// event could be handled non-blocking.
+bool InputEventAckStateIsSetNonBlocking(InputEventAckState);
 
 }  // namespace content
 

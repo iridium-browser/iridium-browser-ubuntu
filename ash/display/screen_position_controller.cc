@@ -4,13 +4,11 @@
 
 #include "ash/display/screen_position_controller.h"
 
-#include "ash/common/wm/window_positioning_utils.h"
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
+#include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_properties.h"
+#include "ash/wm/window_state.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/compositor/dip_util.h"
@@ -103,9 +101,8 @@ void ScreenPositionController::ConvertHostPointToScreen(
     gfx::Point* point) {
   aura::Window* root = root_window->GetRootWindow();
   aura::Window* target_root = nullptr;
-  ConvertHostPointToRelativeToRootWindow(
-      root, WmWindow::ToAuraWindows(WmShell::Get()->GetAllRootWindows()), point,
-      &target_root);
+  ConvertHostPointToRelativeToRootWindow(root, Shell::GetAllRootWindows(),
+                                         point, &target_root);
   ConvertPointToScreen(target_root, point);
 }
 
@@ -117,7 +114,7 @@ void ScreenPositionController::SetBounds(aura::Window* window,
     return;
   }
 
-  wm::SetBoundsInScreen(WmWindow::Get(window), bounds, display);
+  wm::SetBoundsInScreen(window, bounds, display);
 }
 
 }  // namespace ash

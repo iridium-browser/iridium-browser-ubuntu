@@ -52,6 +52,9 @@ bool StubNotificationUIManager::SilentDismissById(
 
 void StubNotificationUIManager::Add(const Notification& notification,
                                     Profile* profile) {
+  if (is_shutdown_started_)
+    return;
+
   notifications_.push_back(std::make_pair(
       notification, NotificationUIManager::GetProfileID(profile)));
 
@@ -139,8 +142,8 @@ std::set<std::string> StubNotificationUIManager::GetAllIdsByProfile(
 
 bool StubNotificationUIManager::CancelAllBySourceOrigin(
     const GURL& source_origin) {
-  NOTIMPLEMENTED();
-  return false;
+  last_canceled_source_ = source_origin;
+  return true;
 }
 
 bool StubNotificationUIManager::CancelAllByProfile(ProfileID profile_id) {
@@ -152,6 +155,11 @@ void StubNotificationUIManager::CancelAll() {
   for (const auto& pair : notifications_)
     pair.first.delegate()->Close(false /* by_user */);
   notifications_.clear();
+}
+
+void StubNotificationUIManager::StartShutdown() {
+  is_shutdown_started_ = true;
+  CancelAll();
 }
 
 FullscreenStateWaiter::FullscreenStateWaiter(

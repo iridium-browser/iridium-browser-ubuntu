@@ -14,98 +14,47 @@ Polymer({
 
   properties: {
     /** Preferences state. */
-    prefs: Object,
+    prefs: {
+      type: Object,
+      notify: true,
+    },
 
-    /** @private {!AndroidAppsInfo|undefined} */
-    androidAppsInfo_: Object,
-  },
+    havePlayStoreApp: Boolean,
 
-  /** @private {?settings.AndroidAppsBrowserProxy} */
-  browserProxy_: null,
+    androidAppsInfo: Object,
 
-  /** @override */
-  created: function() {
-    this.browserProxy_ = settings.AndroidAppsBrowserProxyImpl.getInstance();
-  },
-
-  /** @override */
-  ready: function() {
-    cr.addWebUIListener(
-        'android-apps-info-update', this.androidAppsInfoUpdate_.bind(this));
-    this.browserProxy_.requestAndroidAppsInfo();
-  },
-
-  /**
-   * @param {AndroidAppsInfo} info
-   * @private
-   */
-  androidAppsInfoUpdate_: function(info) {
-    this.androidAppsInfo_ = info;
+    /** @private {!Map<string, string>} */
+    focusConfig_: {
+      type: Object,
+      value: function() {
+        var map = new Map();
+        if (settings.routes.ANDROID_APPS_DETAILS) {
+          map.set(
+              settings.routes.ANDROID_APPS_DETAILS.path,
+              '#android-apps .subpage-arrow');
+        }
+        return map;
+      },
+    },
   },
 
   /**
-   * @param {Event} event
+   * @param {!Event} event
    * @private
    */
-  onManageAndroidAppsKeydown_: function(event) {
-    if (event.key != 'Enter' && event.key != ' ')
-      return;
-    this.browserProxy_.showAndroidAppsSettings(true  /** keyboardAction */);
+  onEnableTap_: function(event) {
+    this.setPrefValue('arc.enabled', true);
     event.stopPropagation();
   },
 
+  /** @return {boolean} */
+  isEnforced_: function(pref) {
+    return pref.enforcement == chrome.settingsPrivate.Enforcement.ENFORCED;
+  },
+
   /** @private */
-  onManageAndroidAppsTap_: function(event) {
-    this.browserProxy_.showAndroidAppsSettings(false /** keyboardAction */);
-  },
-
-  /**
-   * @return {string}
-   * @private
-   */
-  getDialogBody_: function() {
-    return this.i18nAdvanced(
-        'androidAppsDisableDialogMessage', {substitutions: [], tags: ['br']});
-  },
-
-  /**
-   * Handles the change event for the arc.enabled checkbox. Shows a
-   * confirmation dialog when disabling the preference.
-   * @param {Event} event
-   * @private
-   */
-  onArcEnabledChange_: function(event) {
-    if (event.target.checked) {
-      /** @type {!SettingsCheckboxElement} */ (event.target).sendPrefChange();
-      return;
-    }
-    this.$.confirmDisableDialog.showModal();
-  },
-
-  /**
-   * Handles the shared proxy confirmation dialog 'Confirm' button.
-   * @private
-   */
-  onConfirmDisableDialogConfirm_: function() {
-    /** @type {!SettingsCheckboxElement} */ (this.$.enabled).sendPrefChange();
-    this.$.confirmDisableDialog.close();
-  },
-
-  /**
-   * Handles the shared proxy confirmation dialog 'Cancel' button or a cancel
-   * event.
-   * @private
-   */
-  onConfirmDisableDialogCancel_: function() {
-    /** @type {!SettingsCheckboxElement} */ (this.$.enabled).resetToPrefValue();
-    this.$.confirmDisableDialog.close();
-  },
-
-  /**
-   * @param {!Event} e
-   * @private
-   */
-  stopPropagation_: function(e) {
-    e.stopPropagation();
+  onSubpageTap_: function() {
+    if (this.androidAppsInfo.playStoreEnabled)
+      settings.navigateTo(settings.routes.ANDROID_APPS_DETAILS);
   },
 });

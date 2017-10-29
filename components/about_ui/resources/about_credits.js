@@ -2,25 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/* eslint-disable no-restricted-properties */
 function $(id) { return document.getElementById(id); }
-
-function toggle(o) {
-  var licence = o.nextSibling;
-
-  while (licence.className != 'licence') {
-    if (!licence) return false;
-    licence = licence.nextSibling;
-  }
-
-  if (licence.style && licence.style.display == 'block') {
-    licence.style.display = 'none';
-    o.textContent = 'show license';
-  } else {
-    licence.style.display = 'block';
-    o.textContent = 'hide license';
-  }
-  return false;
-}
+/* eslint-enable no-restricted-properties */
 
 document.addEventListener('DOMContentLoaded', function() {
   if (cr.isChromeOS) {
@@ -29,13 +13,15 @@ document.addEventListener('DOMContentLoaded', function() {
     document.body.appendChild(keyboardUtils);
   }
 
-  var links = document.querySelectorAll('a.show');
-  for (var i = 0; i < links.length; ++i) {
-    links[i].onclick = function() { return toggle(this); };
-  }
-
+  $('print-link').hidden = false;
   $('print-link').onclick = function() {
     window.print();
     return false;
   };
+
+  document.addEventListener('keypress', function(e) {
+    // Make the license show/hide toggle when the Enter is pressed.
+    if (e.keyCode == 0x0d && e.target.tagName == 'LABEL')
+      e.target.previousElementSibling.click();
+  });
 });

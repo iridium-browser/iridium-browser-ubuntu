@@ -10,8 +10,13 @@
 #include <map>
 #include <memory>
 
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxge/fx_font.h"
 #include "core/fxge/fx_freetype.h"
+
+#if defined _SKIA_SUPPORT_ || _SKIA_SUPPORT_PATHS_
+#include "third_party/skia/include/core/SkTypeface.h"
+#endif
 
 class CFX_FaceCache {
  public:
@@ -33,17 +38,18 @@ class CFX_FaceCache {
 #endif
 
  private:
-  CFX_GlyphBitmap* RenderGlyph(const CFX_Font* pFont,
-                               uint32_t glyph_index,
-                               bool bFontStyle,
-                               const CFX_Matrix* pMatrix,
-                               int dest_width,
-                               int anti_alias);
-  CFX_GlyphBitmap* RenderGlyph_Nativetext(const CFX_Font* pFont,
-                                          uint32_t glyph_index,
-                                          const CFX_Matrix* pMatrix,
-                                          int dest_width,
-                                          int anti_alias);
+  std::unique_ptr<CFX_GlyphBitmap> RenderGlyph(const CFX_Font* pFont,
+                                               uint32_t glyph_index,
+                                               bool bFontStyle,
+                                               const CFX_Matrix* pMatrix,
+                                               int dest_width,
+                                               int anti_alias);
+  std::unique_ptr<CFX_GlyphBitmap> RenderGlyph_Nativetext(
+      const CFX_Font* pFont,
+      uint32_t glyph_index,
+      const CFX_Matrix* pMatrix,
+      int dest_width,
+      int anti_alias);
   CFX_GlyphBitmap* LookUpGlyphBitmap(const CFX_Font* pFont,
                                      const CFX_Matrix* pMatrix,
                                      const CFX_ByteString& FaceGlyphsKey,
@@ -58,7 +64,7 @@ class CFX_FaceCache {
   std::map<CFX_ByteString, std::unique_ptr<CFX_SizeGlyphCache>> m_SizeMap;
   std::map<uint32_t, std::unique_ptr<CFX_PathData>> m_PathMap;
 #if defined _SKIA_SUPPORT_ || _SKIA_SUPPORT_PATHS_
-  CFX_TypeFace* m_pTypeface;
+  sk_sp<SkTypeface> m_pTypeface;
 #endif
 };
 

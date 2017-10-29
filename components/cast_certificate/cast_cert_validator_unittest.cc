@@ -95,15 +95,11 @@ void RunTest(TestResult expected_result,
 
       if (trust_store_dependency == TRUST_STORE_FROM_TEST_FILE_UNCONSTRAINED) {
         // This is a test-only mode where anchor constraints are not enforced.
-        trust_store->AddTrustAnchor(
-            net::TrustAnchor::CreateFromCertificateNoConstraints(
-                std::move(root)));
+        trust_store->AddTrustAnchor(std::move(root));
       } else {
-        // This is the regular mode used by the TrustAnchors for the built-in
-        // Cast store.
-        trust_store->AddTrustAnchor(
-            net::TrustAnchor::CreateFromCertificateWithConstraints(
-                std::move(root)));
+        // Add a trust anchor and enforce constraints on it (regular mode for
+        // built-in Cast roots).
+        trust_store->AddTrustAnchorWithConstraints(std::move(root));
       }
     }
   }
@@ -417,6 +413,138 @@ TEST(VerifyCastDeviceCertTest, ViolatesPathlenTrustAnchorConstraint) {
   // with pathlen constraint.
   RunTest(RESULT_FAIL, "Target", CastDeviceCertPolicy::NONE,
           "certificates/violates_root_pathlen_constraint.pem", AprilFirst2016(),
+          TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Tests verifying a certificate chain with the policies:
+//
+//  Root:           policies={}
+//  Intermediate:   policies={anyPolicy}
+//  Leaf:           policies={anyPolicy}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaAnypolicyLeafAnypolicy) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::NONE,
+          "certificates/policies_ica_anypolicy_leaf_anypolicy.pem",
+          AprilFirst2016(), TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={anyPolicy}
+//   Leaf:           policies={audioOnly}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaAnypolicyLeafAudioonly) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::AUDIO_ONLY,
+          "certificates/policies_ica_anypolicy_leaf_audioonly.pem",
+          AprilFirst2016(), TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={anyPolicy}
+//   Leaf:           policies={foo}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaAnypolicyLeafFoo) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::NONE,
+          "certificates/policies_ica_anypolicy_leaf_foo.pem", AprilFirst2016(),
+          TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={anyPolicy}
+//   Leaf:           policies={}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaAnypolicyLeafNone) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::NONE,
+          "certificates/policies_ica_anypolicy_leaf_none.pem", AprilFirst2016(),
+          TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={audioOnly}
+//   Leaf:           policies={anyPolicy}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaAudioonlyLeafAnypolicy) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::AUDIO_ONLY,
+          "certificates/policies_ica_audioonly_leaf_anypolicy.pem",
+          AprilFirst2016(), TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={audioOnly}
+//   Leaf:           policies={audioOnly}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaAudioonlyLeafAudioonly) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::AUDIO_ONLY,
+          "certificates/policies_ica_audioonly_leaf_audioonly.pem",
+          AprilFirst2016(), TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={audioOnly}
+//   Leaf:           policies={foo}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaAudioonlyLeafFoo) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::AUDIO_ONLY,
+          "certificates/policies_ica_audioonly_leaf_foo.pem", AprilFirst2016(),
+          TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={audioOnly}
+//   Leaf:           policies={}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaAudioonlyLeafNone) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::AUDIO_ONLY,
+          "certificates/policies_ica_audioonly_leaf_none.pem", AprilFirst2016(),
+          TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={}
+//   Leaf:           policies={anyPolicy}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaNoneLeafAnypolicy) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::NONE,
+          "certificates/policies_ica_none_leaf_anypolicy.pem", AprilFirst2016(),
+          TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={}
+//   Leaf:           policies={audioOnly}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaNoneLeafAudioonly) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::AUDIO_ONLY,
+          "certificates/policies_ica_none_leaf_audioonly.pem", AprilFirst2016(),
+          TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={}
+//   Leaf:           policies={foo}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaNoneLeafFoo) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::NONE,
+          "certificates/policies_ica_none_leaf_foo.pem", AprilFirst2016(),
+          TRUST_STORE_FROM_TEST_FILE, "");
+}
+
+// Test verifying a certificate chain with the policies:
+//
+//   Root:           policies={}
+//   Intermediate:   policies={}
+//   Leaf:           policies={}
+TEST(VerifyCastDeviceCertTest, PoliciesIcaNoneLeafNone) {
+  RunTest(RESULT_SUCCESS, "Leaf", CastDeviceCertPolicy::NONE,
+          "certificates/policies_ica_none_leaf_none.pem", AprilFirst2016(),
           TRUST_STORE_FROM_TEST_FILE, "");
 }
 

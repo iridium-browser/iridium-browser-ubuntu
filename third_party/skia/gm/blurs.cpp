@@ -6,8 +6,11 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
+#include "Resources.h"
 #include "SkBlurMask.h"
 #include "SkBlurMaskFilter.h"
+#include "SkImage.h"
 #include "SkPath.h"
 
 DEF_SIMPLE_GM_BG(blurs, canvas, 700, 500, sk_tool_utils::color_to_565(0xFFDDDDDD)) {
@@ -54,14 +57,14 @@ DEF_SIMPLE_GM_BG(blurs, canvas, 700, 500, sk_tool_utils::color_to_565(0xFFDDDDDD
                 SkScalar x = SkIntToScalar(70);
                 SkScalar y = SkIntToScalar(400);
                 paint.setColor(SK_ColorBLACK);
-                canvas->drawText("Hamburgefons Style", 18, x, y, paint);
-                canvas->drawText("Hamburgefons Style", 18,
+                canvas->drawString("Hamburgefons Style", x, y, paint);
+                canvas->drawString("Hamburgefons Style",
                                  x, y + SkIntToScalar(50), paint);
                 paint.setMaskFilter(nullptr);
                 paint.setColor(SK_ColorWHITE);
                 x -= SkIntToScalar(2);
                 y -= SkIntToScalar(2);
-                canvas->drawText("Hamburgefons Style", 18, x, y, paint);
+                canvas->drawString("Hamburgefons Style", x, y, paint);
             }
             canvas->restore();
             flags = SkBlurMaskFilter::kHighQuality_BlurFlag;
@@ -115,4 +118,14 @@ DEF_SIMPLE_GM(blur2rectsnonninepatch, canvas, 700, 500) {
         canvas->translate(-dx, 0);
         canvas->translate(-30, -150);
         canvas->drawPath(path, paint);
+}
+
+DEF_SIMPLE_GM(BlurDrawImage, canvas, 256, 256) {
+    SkPaint paint;
+    paint.setMaskFilter(SkBlurMaskFilter::Make(kNormal_SkBlurStyle, 10, 0));
+    canvas->clear(0xFF88FF88);
+    if (auto image = GetResourceAsImage("mandrill_512_q075.jpg")) {
+        canvas->scale(0.25, 0.25);
+        canvas->drawImage(image, 256, 256, &paint);
+    }
 }

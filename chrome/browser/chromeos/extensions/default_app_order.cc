@@ -45,7 +45,6 @@ const char* const kDefaultAppOrder[] = {
     extension_misc::kYoutubeAppId,
     extension_misc::kGmailAppId,
     "ejjicmeblgpmajnghnpcppodonldlgfn",  // Calendar
-    "kjebfhglflhjjjiceimfkgicifkhjlnm",  // Scratchpad
     "lneaknkopdijkpnocmklfnjbeapigfbh",  // Google Maps
     "apdfllckaahabafndbhieahigkjlhalf",  // Drive
     extension_misc::kGoogleDocAppId,
@@ -55,12 +54,11 @@ const char* const kDefaultAppOrder[] = {
     "hcglmfcclpfgljeaiahehebeoaiicbko",  // Google Photos
     "hhaomjibdihmijegdhdafkllkbggdgoj",  // Files
     extension_misc::kGooglePlayMusicAppId,
-    "mmimngoggfoobjdlefbcabngfnmieonb",  // Play Books
-    "gdijeikdkaembjbdobgfkoidjkpbmlkd",  // Play Movies & TV
-    "fobcpibfeplaikcclojfdhfdmbbeofai",  // Games
-    "joodangkbfjnajiiifokapkpmhfnpleo",  // Calculator
-    "hfhhnacclhffhdffklopdkcgdhifgngh",  // Camera
-    "gbchcmhmhahfdphkhkmpfmihenigjmpp",  // Chrome Remote Desktop
+    extension_misc::kGooglePlayBooksAppId,   // Play Books
+    extension_misc::kGooglePlayMoviesAppId,  // Play Movies & TV
+    "joodangkbfjnajiiifokapkpmhfnpleo",      // Calculator
+    "hfhhnacclhffhdffklopdkcgdhifgngh",      // Camera
+    "gbchcmhmhahfdphkhkmpfmihenigjmpp",      // Chrome Remote Desktop
 };
 
 // Reads external ordinal json file and returned the parsed value. Returns NULL
@@ -133,9 +131,8 @@ ExternalLoader::ExternalLoader(bool async)
 
   if (async) {
     base::PostTaskWithTraits(
-        FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                       base::TaskPriority::USER_VISIBLE),
-        base::Bind(&ExternalLoader::Load, base::Unretained(this)));
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+        base::BindOnce(&ExternalLoader::Load, base::Unretained(this)));
   } else {
     Load();
   }

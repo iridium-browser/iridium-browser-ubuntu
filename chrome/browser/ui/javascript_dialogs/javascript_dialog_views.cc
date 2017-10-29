@@ -5,11 +5,11 @@
 #include "chrome/browser/ui/javascript_dialogs/javascript_dialog_views.h"
 
 #include "base/memory/ptr_util.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/message_box_view.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/layout/layout_constants.h"
 
 JavaScriptDialogViews::~JavaScriptDialogViews() = default;
 
@@ -32,6 +32,10 @@ base::WeakPtr<JavaScriptDialogViews> JavaScriptDialogViews::Create(
 void JavaScriptDialogViews::CloseDialogWithoutCallback() {
   dialog_callback_.Reset();
   GetWidget()->Close();
+}
+
+base::string16 JavaScriptDialogViews::GetUserInput() {
+  return message_box_view_->GetInputText();
 }
 
 int JavaScriptDialogViews::GetDefaultDialogButton() const {
@@ -117,4 +121,5 @@ JavaScriptDialogViews::JavaScriptDialogViews(
   DCHECK(message_box_view_);
 
   constrained_window::ShowWebModalDialogViews(this, parent_web_contents);
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::JAVA_SCRIPT);
 }

@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_service.h"
@@ -97,7 +98,7 @@ class HQPPerfTestOnePopularURL : public testing::Test {
  private:
   base::TimeDelta RunTest(const base::string16& text);
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<FakeAutocompleteProviderClient> client_;
 
   scoped_refptr<HistoryQuickProvider> provider_;
@@ -161,6 +162,7 @@ void HQPPerfTestOnePopularURL::PrintMeasurements(
 base::TimeDelta HQPPerfTestOnePopularURL::RunTest(const base::string16& text) {
   base::RunLoop().RunUntilIdle();
   AutocompleteInput input(text, base::string16::npos, std::string(), GURL(),
+                          base::string16(),
                           metrics::OmniboxEventProto::INVALID_SPEC, false,
                           false, true, true, false, TestSchemeClassifier());
 

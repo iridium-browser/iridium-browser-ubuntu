@@ -11,6 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "content/browser/media/capture/cursor_renderer_aura.h"
 #include "media/capture/content/screen_capture_device_core.h"
+#include "services/device/public/interfaces/wake_lock.mojom.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/cursor/cursors_aura.h"
@@ -21,20 +22,16 @@ namespace cc {
 class CopyOutputResult;
 }  // namespace cc
 
-namespace device {
-class PowerSaveBlocker;
-}  // namespace device
-
-namespace display_compositor {
+namespace viz {
 class ReadbackYUVInterface;
 }
 
 namespace content {
 
-class AuraWindowCaptureMachine
-    : public media::VideoCaptureMachine,
-      public aura::WindowObserver,
-      public ui::CompositorAnimationObserver {
+class AuraWindowCaptureMachine : public media::VideoCaptureMachine,
+                                 public aura::WindowObserver,
+                                 public ui::ContextFactoryObserver,
+                                 public ui::CompositorAnimationObserver {
  public:
   AuraWindowCaptureMachine();
   ~AuraWindowCaptureMachine() override;
@@ -98,6 +95,9 @@ class AuraWindowCaptureMachine
                                  const CaptureFrameCallback& capture_frame_cb,
                                  std::unique_ptr<cc::CopyOutputResult> result);
 
+  // ui::ContextFactoryObserver implementation.
+  void OnLostResources() override;
+
   // Renders the cursor if needed and then delivers the captured frame.
   static void CopyOutputFinishedForVideo(
       base::WeakPtr<AuraWindowCaptureMachine> machine,
@@ -120,15 +120,14 @@ class AuraWindowCaptureMachine
   media::VideoCaptureParams capture_params_;
 
   // YUV readback pipeline.
-  std::unique_ptr<display_compositor::ReadbackYUVInterface>
-      yuv_readback_pipeline_;
+  std::unique_ptr<viz::ReadbackYUVInterface> yuv_readback_pipeline_;
 
   // Renders mouse cursor on frame.
   std::unique_ptr<content::CursorRendererAura> cursor_renderer_;
 
-  // TODO(jiayl): Remove power_save_blocker_ when there is an API to keep the
+  // TODO(jiayl): Remove wake_lock_ when there is an API to keep the
   // screen from sleeping for the drive-by web.
-  std::unique_ptr<device::PowerSaveBlocker> power_save_blocker_;
+  device::mojom::WakeLockPtr wake_lock_;
 
   // False while frame capture has been suspended. All other aspects of the
   // machine are maintained.

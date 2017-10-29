@@ -14,23 +14,23 @@ found in the LICENSE file.
 'use strict';
 
 tr.b.unittest.testSuite(function() {
-  var testOptions = {
-    tearDown: function() {
+  const testOptions = {
+    tearDown() {
       testing_common.clearXhrMock();
     }
   };
 
   test('instantiate basic', function() {
-    var quickLog = document.createElement('quick-log');
+    const quickLog = document.createElement('quick-log');
     this.addHTMLOutput(quickLog);
 
-    var params = {
+    const params = {
       'namespace': 'test_namespace',
       'name': 'test_name',
       'size': 100,
       'xsrf_token': 'undefined'
     };
-    var mockResponse = [
+    const mockResponse = [
       {
         'message': 'Second sample message.',
         'id': 'abc-124',
@@ -42,21 +42,21 @@ tr.b.unittest.testSuite(function() {
         'timestamp': 1454030605,
       }
     ];
-    var query = ('/get_logs?' + testing_common.paramString(params));
+    const query = ('/get_logs?' + testing_common.paramString(params));
     testing_common.addXhrMock(query, JSON.stringify(mockResponse));
     quickLog.initialize('A label', 'test_namespace', 'test_name');
   }, testOptions);
 
   test('logs added on initializing.', function() {
-    var quickLog = document.createElement('quick-log');
+    const quickLog = document.createElement('quick-log');
     testing_common.addToFixture(quickLog);
-    var params = {
+    const params = {
       'namespace': 'test_namespace',
       'name': 'test_name',
       'size': 100,
       'xsrf_token': 'undefined'
     };
-    var mockResponse = [
+    const mockResponse = [
       {
         'message': 'Second sample message.',
         'id': 'abc-124',
@@ -68,13 +68,13 @@ tr.b.unittest.testSuite(function() {
         'timestamp': 1454030605,
       }
     ];
-    var query = ('/get_logs?' + testing_common.paramString(params));
+    const query = ('/get_logs?' + testing_common.paramString(params));
     testing_common.addXhrMock(query, JSON.stringify(mockResponse));
     quickLog.initialize('A label', 'test_namespace', 'test_name');
 
     return new Promise(function(resolve) {
       function check() {
-        assert.equal(2, quickLog.logList.length);
+        assert.strictEqual(2, quickLog.logList.length);
         resolve();
       }
       setTimeout(check, 10);
@@ -82,18 +82,18 @@ tr.b.unittest.testSuite(function() {
   }, testOptions);
 
   test('new logs are added and duplicates are removed.', function() {
-    var quickLog = document.createElement('quick-log');
+    const quickLog = document.createElement('quick-log');
     testing_common.addToFixture(quickLog);
     quickLog.initialize('A label', 'test_namespace', 'test_name');
 
-    var params = {
+    const params = {
       'namespace': 'test_namespace',
       'name': 'test_name',
       'size': 100,
       'xsrf_token': 'undefined',
       'after_timestamp': '1454030606'
     };
-    var sampleLogs = [
+    const sampleLogs = [
       {
         'message': 'Second message.',
         'id': 'abc-124',
@@ -107,7 +107,7 @@ tr.b.unittest.testSuite(function() {
     ];
     quickLog.updateLogs(sampleLogs);
 
-    var newSampleLogs = [
+    const newSampleLogs = [
       {
         'message': 'Updated first message.',
         'id': 'abc-123',
@@ -119,16 +119,17 @@ tr.b.unittest.testSuite(function() {
         'timestamp': 1454030607,
       },
     ];
-    var query = ('/get_logs?' + testing_common.paramString(params));
+    const query = ('/get_logs?' + testing_common.paramString(params));
     testing_common.addXhrMock(query, JSON.stringify(newSampleLogs));
     quickLog.getLogs();
 
     return new Promise(function(resolve) {
       function check() {
-        assert.equal(3, quickLog.logList.length);
-        assert.equal('Updated first message.', quickLog.logList[0].message);
-        assert.equal('Third message.', quickLog.logList[1].message);
-        assert.equal('Second message.', quickLog.logList[2].message);
+        assert.strictEqual(3, quickLog.logList.length);
+        assert.strictEqual(
+            'Updated first message.', quickLog.logList[0].message);
+        assert.strictEqual('Third message.', quickLog.logList[1].message);
+        assert.strictEqual('Second message.', quickLog.logList[2].message);
         resolve();
       }
       setTimeout(check, 10);

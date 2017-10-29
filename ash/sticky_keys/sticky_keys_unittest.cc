@@ -32,12 +32,12 @@ const unsigned int kTouchPadDeviceId = 1;
 
 }  // namespace
 
-class StickyKeysTest : public test::AshTestBase {
+class StickyKeysTest : public AshTestBase {
  protected:
   StickyKeysTest() : target_(NULL), root_window_(NULL) {}
 
   void SetUp() override {
-    test::AshTestBase::SetUp();
+    AshTestBase::SetUp();
 
     // |target_| owned by root window of shell. It is still safe to delete
     // it ourselves.
@@ -49,7 +49,7 @@ class StickyKeysTest : public test::AshTestBase {
 #endif
   }
 
-  void TearDown() override { test::AshTestBase::TearDown(); }
+  void TearDown() override { AshTestBase::TearDown(); }
 
   virtual void OnShortcutPressed() {
     if (target_) {
@@ -205,23 +205,23 @@ class StickyKeysTest : public test::AshTestBase {
     int down_flags = 0;
     std::unique_ptr<ui::KeyEvent> ev;
     ev.reset(GenerateKey(ui::ET_KEY_PRESSED, key_code));
-    handler->HandleKeyEvent(*ev.get(), key_code, &down_flags, &released);
+    handler->HandleKeyEvent(*ev.get(), &down_flags, &released);
     ev.reset(GenerateKey(ui::ET_KEY_RELEASED, key_code));
-    handler->HandleKeyEvent(*ev.get(), key_code, &down_flags, &released);
+    handler->HandleKeyEvent(*ev.get(), &down_flags, &released);
   }
 
   bool HandleKeyEvent(const ui::KeyEvent& key_event,
                       StickyKeysHandler* handler,
                       int* down,
                       bool* up) {
-    return handler->HandleKeyEvent(key_event, key_event.key_code(), down, up);
+    return handler->HandleKeyEvent(key_event, down, up);
   }
 
   int HandleKeyEventForDownFlags(const ui::KeyEvent& key_event,
                                  StickyKeysHandler* handler) {
     bool released = false;
     int down = 0;
-    handler->HandleKeyEvent(key_event, key_event.key_code(), &down, &released);
+    handler->HandleKeyEvent(key_event, &down, &released);
     return down;
   }
 

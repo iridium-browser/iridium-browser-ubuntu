@@ -54,6 +54,11 @@ enum GrGLRenderer {
     kAdreno4xx_GrGLRenderer,
     kAdreno5xx_GrGLRenderer,
     kOSMesa_GrGLRenderer,
+    /** Either HD 6xxx or Iris 6xxx */
+    kIntel6xxx_GrGLRenderer,
+    /** T-6xx, T-7xx, or T-8xx */
+    kMaliT_GrGLRenderer,
+    kANGLE_GrGLRenderer,
     kOther_GrGLRenderer
 };
 
@@ -63,6 +68,7 @@ enum GrGLDriver {
     kNVIDIA_GrGLDriver,
     kIntel_GrGLDriver,
     kANGLE_GrGLDriver,
+    kQualcomm_GrGLDriver,
     kUnknown_GrGLDriver
 };
 
@@ -82,6 +88,12 @@ enum GrGLDriver {
     do {                                                                       \
         *(p) = GR_GL_INIT_ZERO;                                                \
         GR_GL_CALL(gl, GetFramebufferAttachmentParameteriv(t, a, pname, p));   \
+    } while (0)
+
+#define GR_GL_GetInternalformativ(gl, t, f, n, s, p)                           \
+    do {                                                                       \
+        *(p) = GR_GL_INIT_ZERO;                                                \
+        GR_GL_CALL(gl, GetInternalformativ(t, f, n, s, p));                    \
     } while (0)
 
 #define GR_GL_GetNamedFramebufferAttachmentParameteriv(gl, fb, a, pname, p)          \

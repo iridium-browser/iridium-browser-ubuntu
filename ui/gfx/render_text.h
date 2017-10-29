@@ -37,7 +37,6 @@
 
 class SkDrawLooper;
 struct SkPoint;
-class SkShader;
 class SkTypeface;
 
 namespace gfx {
@@ -63,57 +62,20 @@ class GFX_EXPORT SkiaTextRenderer {
   void SetTypeface(sk_sp<SkTypeface> typeface);
   void SetTextSize(SkScalar size);
   void SetForegroundColor(SkColor foreground);
-  void SetShader(sk_sp<SkShader> shader);
-  void SetHaloEffect();
-  // Sets underline metrics to use if the text will be drawn with an underline.
-  // If not set, default values based on the size of the text will be used. The
-  // two metrics must be set together.
-  void SetUnderlineMetrics(SkScalar thickness, SkScalar position);
+  void SetShader(sk_sp<cc::PaintShader> shader);
   void DrawSelection(const std::vector<Rect>& selection, SkColor color);
   virtual void DrawPosText(const SkPoint* pos,
                            const uint16_t* glyphs,
                            size_t glyph_count);
-  // Draw underline and strike-through text decorations.
-  // Based on |SkCanvas::DrawTextDecorations()| and constants from:
-  //   third_party/skia/src/core/SkTextFormatParams.h
-  virtual void DrawDecorations(int x, int y, int width, bool underline,
-                               bool strike, bool diagonal_strike);
-  // Finishes any ongoing diagonal strike run.
-  void EndDiagonalStrike();
   void DrawUnderline(int x, int y, int width);
-  void DrawStrike(int x, int y, int width) const;
+  void DrawStrike(int x, int y, int width, SkScalar thickness_factor);
 
  private:
   friend class test::RenderTextTestApi;
 
-  // Helper class to draw a diagonal line with multiple pieces of different
-  // lengths and colors; to support text selection appearances.
-  class DiagonalStrike {
-   public:
-    DiagonalStrike(Canvas* canvas, Point start, const cc::PaintFlags& flags);
-    ~DiagonalStrike();
-
-    void AddPiece(int length, SkColor color);
-    void Draw();
-
-   private:
-    typedef std::pair<int, SkColor> Piece;
-
-    Canvas* canvas_;
-    const Point start_;
-    cc::PaintFlags flags_;
-    int total_length_;
-    std::vector<Piece> pieces_;
-
-    DISALLOW_COPY_AND_ASSIGN(DiagonalStrike);
-  };
-
   Canvas* canvas_;
   cc::PaintCanvas* canvas_skia_;
   cc::PaintFlags flags_;
-  SkScalar underline_thickness_;
-  SkScalar underline_position_;
-  std::unique_ptr<DiagonalStrike> diagonal_;
 
   DISALLOW_COPY_AND_ASSIGN(SkiaTextRenderer);
 };
@@ -323,9 +285,6 @@ class GFX_EXPORT RenderText {
     subpixel_rendering_suppressed_ = suppressed;
   }
 
-  bool halo_effect() const { return halo_effect_; }
-  void set_halo_effect(bool halo_effect) { halo_effect_ = halo_effect; }
-
   const SelectionModel& selection_model() const { return selection_model_; }
 
   const Range& selection() const { return selection_model_.selection(); }
@@ -527,6 +486,8 @@ class GFX_EXPORT RenderText {
   // Retrieves the text in the given |range|.
   base::string16 GetTextFromRange(const Range& range) const;
 
+  void set_strike_thickness_factor(SkScalar f) { strike_thickness_factor_ = f; }
+
  protected:
   RenderText();
 
@@ -540,6 +501,7 @@ class GFX_EXPORT RenderText {
   const BreakList<BaselineStyle>& baselines() const { return baselines_; }
   const BreakList<Font::Weight>& weights() const { return weights_; }
   const std::vector<BreakList<bool> >& styles() const { return styles_; }
+  SkScalar strike_thickness_factor() const { return strike_thickness_factor_; }
 
   const std::vector<internal::Line>& lines() const { return lines_; }
   void set_lines(std::vector<internal::Line>* lines) { lines_.swap(*lines); }
@@ -683,6 +645,10 @@ class GFX_EXPORT RenderText {
   static bool RangeContainsCaret(const Range& range,
                                  size_t caret_pos,
                                  LogicalCursorDirection caret_affinity);
+
+  // Returns the baseline, with which the text best appears vertically centered.
+  static int DetermineBaselineCenteringText(const int display_height,
+                                            const FontList& font_list);
 
  private:
   friend class test::RenderTextTestApi;
@@ -854,12 +820,12 @@ class GFX_EXPORT RenderText {
   // A list of valid display text line break positions.
   BreakList<size_t> line_breaks_;
 
-  // Draw text with 1px border.
-  bool halo_effect_ = false;
-
   // Lines computed by EnsureLayout. These should be invalidated upon
   // OnLayoutTextAttributeChanged and OnDisplayTextAttributeChanged calls.
   std::vector<internal::Line> lines_;
+
+  // The ratio of strike-through line thickness to text height.
+  SkScalar strike_thickness_factor_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderText);
 };

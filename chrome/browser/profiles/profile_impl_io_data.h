@@ -15,8 +15,6 @@
 #include "components/prefs/pref_store.h"
 #include "content/public/browser/cookie_store_factory.h"
 
-class JsonPrefStore;
-
 namespace chrome_browser_net {
 class Predictor;
 }  // namespace chrome_browser_net
@@ -28,12 +26,7 @@ class DomainReliabilityMonitor;
 namespace net {
 class CookieStore;
 class HttpServerPropertiesManager;
-class SdchOwner;
 }  // namespace net
-
-namespace previews {
-class PreviewsIOData;
-}
 
 namespace storage {
 class SpecialStoragePolicy;
@@ -163,8 +156,12 @@ class ProfileImplIOData : public ProfileIOData {
   ProfileImplIOData();
   ~ProfileImplIOData() override;
 
+  std::unique_ptr<net::NetworkDelegate> ConfigureNetworkDelegate(
+      IOThread* io_thread,
+      std::unique_ptr<ChromeNetworkDelegate> chrome_network_delegate)
+      const override;
+
   void InitializeInternal(
-      std::unique_ptr<ChromeNetworkDelegate> chrome_network_delegate,
       ProfileParams* profile_params,
       content::ProtocolHandlerMap* protocol_handlers,
       content::URLRequestInterceptorScopedVector request_interceptors)
@@ -182,7 +179,7 @@ class ProfileImplIOData : public ProfileIOData {
   net::URLRequestContext* InitializeMediaRequestContext(
       net::URLRequestContext* original_context,
       const StoragePartitionDescriptor& partition_descriptor,
-      const std::string& name) const override;
+      const char* name) const override;
   net::URLRequestContext* AcquireMediaRequestContext() const override;
   net::URLRequestContext* AcquireIsolatedAppRequestContext(
       net::URLRequestContext* main_context,
@@ -197,6 +194,9 @@ class ProfileImplIOData : public ProfileIOData {
       const StoragePartitionDescriptor& partition_descriptor) const override;
   chrome_browser_net::Predictor* GetPredictor() override;
 
+  std::unique_ptr<net::ReportingService> MaybeCreateReportingService(
+      net::URLRequestContext* url_request_context) const;
+
   // Deletes all network related data since |time|. It deletes transport
   // security state since |time| and also deletes HttpServerProperties data.
   // Works asynchronously, however if the |completion| callback is non-null,
@@ -206,8 +206,6 @@ class ProfileImplIOData : public ProfileIOData {
 
   // Lazy initialization params.
   mutable std::unique_ptr<LazyParams> lazy_params_;
-
-  mutable scoped_refptr<JsonPrefStore> network_json_store_;
 
   // Owned by URLRequestContextStorage, reference here to can be shut down on
   // the UI thread.
@@ -219,15 +217,9 @@ class ProfileImplIOData : public ProfileIOData {
 
   mutable std::unique_ptr<net::URLRequestContext> media_request_context_;
 
-  mutable std::unique_ptr<net::URLRequestJobFactory> extensions_job_factory_;
-
   // Owned by ChromeNetworkDelegate (which is owned by |network_delegate_|).
   mutable domain_reliability::DomainReliabilityMonitor*
       domain_reliability_monitor_;
-
-  mutable std::unique_ptr<net::SdchOwner> sdch_policy_;
-
-  mutable std::unique_ptr<previews::PreviewsIOData> previews_io_data_;
 
   // Parameters needed for isolated apps.
   base::FilePath profile_path_;

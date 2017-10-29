@@ -59,10 +59,6 @@ namespace {
 static const base::FilePath::CharType kTestSyncDir[] =
     FILE_PATH_LITERAL("sync-test");
 
-ACTION_P(Signal, event) {
-  event->Signal();
-}
-
 void EmptyNetworkTimeUpdate(const base::Time&,
                             const base::TimeDelta&,
                             const base::TimeDelta&) {}
@@ -352,7 +348,6 @@ TEST_F(SyncEngineTest, FirstTimeSync) {
 // downloaded or cleaned.
 TEST_F(SyncEngineTest, Restart) {
   sync_prefs_->SetFirstSetupComplete();
-  ModelTypeSet all_but_nigori = enabled_types_;
   fake_manager_factory_->set_progress_marker_types(enabled_types_);
   fake_manager_factory_->set_initial_sync_ended_types(enabled_types_);
   InitializeBackend(true);

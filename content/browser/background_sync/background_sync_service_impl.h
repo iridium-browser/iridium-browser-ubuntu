@@ -7,10 +7,12 @@
 
 #include <stdint.h>
 
+#include <memory>
+#include <vector>
+
 #include "base/id_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "content/browser/background_sync/background_sync_manager.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/WebKit/public/platform/modules/background_sync/background_sync.mojom.h"
@@ -34,17 +36,17 @@ class CONTENT_EXPORT BackgroundSyncServiceImpl
   // blink::mojom::BackgroundSyncService methods:
   void Register(blink::mojom::SyncRegistrationPtr options,
                 int64_t sw_registration_id,
-                const RegisterCallback& callback) override;
+                RegisterCallback callback) override;
   void GetRegistrations(int64_t sw_registration_id,
-                        const GetRegistrationsCallback& callback) override;
+                        GetRegistrationsCallback callback) override;
 
-  void OnRegisterResult(const RegisterCallback& callback,
+  void OnRegisterResult(RegisterCallback callback,
                         BackgroundSyncStatus status,
                         std::unique_ptr<BackgroundSyncRegistration> result);
   void OnGetRegistrationsResult(
-      const GetRegistrationsCallback& callback,
+      GetRegistrationsCallback callback,
       BackgroundSyncStatus status,
-      std::unique_ptr<ScopedVector<BackgroundSyncRegistration>> result);
+      std::vector<std::unique_ptr<BackgroundSyncRegistration>> result);
 
   // Called when an error is detected on binding_.
   void OnConnectionError();

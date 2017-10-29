@@ -6,7 +6,7 @@
 // https://github.com/WICG/get-installed-related-apps/blob/master/EXPLAINER.md
 
 [
-    RuntimeEnabled=InstalledApp,
+    OriginTrialEnabled=InstalledApp
 ] partial interface Navigator {
-    [CallWith=ScriptState] Promise<RelatedApplication> getInstalledRelatedApps();
+    [CallWith=ScriptState, Measure, SecureContext] Promise<RelatedApplication> getInstalledRelatedApps();
 };

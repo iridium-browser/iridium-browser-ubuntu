@@ -5,6 +5,7 @@
 #include "ppapi/proxy/plugin_globals.h"
 
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/task_runner.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -64,9 +65,6 @@ PluginGlobals::PluginGlobals(
       resource_reply_thread_registrar_(
           new ResourceReplyThreadRegistrar(GetMainThreadMessageLoop())),
       udp_socket_filter_(new UDPSocketFilter()),
-      plugin_recently_active_(false),
-      keepalive_throttle_interval_milliseconds_(
-          ppapi::kKeepaliveThrottleIntervalDefaultMilliseconds),
       weak_factory_(this) {
   DCHECK(!plugin_globals_);
   plugin_globals_ = this;
@@ -88,9 +86,6 @@ PluginGlobals::PluginGlobals(
       ipc_task_runner_(ipc_task_runner),
       resource_reply_thread_registrar_(
           new ResourceReplyThreadRegistrar(GetMainThreadMessageLoop())),
-      plugin_recently_active_(false),
-      keepalive_throttle_interval_milliseconds_(
-          kKeepaliveThrottleIntervalDefaultMilliseconds),
       weak_factory_(this) {
   DCHECK(!plugin_globals_);
 }
@@ -185,22 +180,6 @@ base::TaskRunner* PluginGlobals::GetFileTaskRunner() {
   return file_thread_->task_runner().get();
 }
 
-void PluginGlobals::MarkPluginIsActive() {
-  if (!plugin_recently_active_) {
-    plugin_recently_active_ = true;
-    if (!GetBrowserSender() || !base::ThreadTaskRunnerHandle::IsSet())
-      return;
-    GetBrowserSender()->Send(new PpapiHostMsg_Keepalive());
-    DCHECK(keepalive_throttle_interval_milliseconds_);
-    GetMainThreadMessageLoop()->PostDelayedTask(
-        FROM_HERE,
-        RunWhileLocked(base::Bind(&PluginGlobals::OnReleaseKeepaliveThrottle,
-                                  weak_factory_.GetWeakPtr())),
-        base::TimeDelta::FromMilliseconds(
-            keepalive_throttle_interval_milliseconds_));
-  }
-}
-
 IPC::Sender* PluginGlobals::GetBrowserSender() {
   // CAUTION: This function is called without the ProxyLock. See also
   // InterfaceList::GetInterfaceForPPB.
@@ -251,17 +230,8 @@ void PluginGlobals::RegisterResourceMessageFilters(
   plugin_filter->AddResourceMessageFilter(udp_socket_filter_.get());
 }
 
-void PluginGlobals::set_keepalive_throttle_interval_milliseconds(unsigned i) {
-  keepalive_throttle_interval_milliseconds_ = i;
-}
-
 bool PluginGlobals::IsPluginGlobals() const {
   return true;
-}
-
-void PluginGlobals::OnReleaseKeepaliveThrottle() {
-  ppapi::ProxyLock::AssertAcquiredDebugOnly();
-  plugin_recently_active_ = false;
 }
 
 }  // namespace proxy

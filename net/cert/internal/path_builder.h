@@ -13,6 +13,7 @@
 #include "net/cert/internal/cert_errors.h"
 #include "net/cert/internal/parsed_certificate.h"
 #include "net/cert/internal/trust_store.h"
+#include "net/cert/internal/verify_certificate_chain.h"
 #include "net/der/input.h"
 #include "net/der/parse_values.h"
 
@@ -31,21 +32,29 @@ class SignaturePolicy;
 // By convention:
 //   certs[0] is the target certificate
 //   certs[i] was issued by certs[i+1]
-//   certs.back() was issued by trust_anchor
+//   certs.back() is the root certificate.
+//
+// Note that the final certificate may or may not be a trust achor -- inspect
+// |last_cert_trust| to determine it (or use GetTrustedCert())
 struct NET_EXPORT CertPath {
   CertPath();
   ~CertPath();
 
-  scoped_refptr<TrustAnchor> trust_anchor;
+  // Contains information on whether certs.back() is trusted.
+  CertificateTrust last_cert_trust;
 
-  // Path in the forward direction (path[0] is the target cert).
+  // Path in the forward direction (see class description).
   ParsedCertificateList certs;
 
   // Resets the path to empty path (same as if default constructed).
   void Clear();
 
-  // Returns true if the path is empty.
+  // TODO(eroman): Can we remove this? Unclear on how this relates to validity.
   bool IsEmpty() const;
+
+  // Returns the chain's root certificate or nullptr if the chain doesn't chain
+  // to a trust anchor.
+  const ParsedCertificate* GetTrustedCert() const;
 };
 
 // Checks whether a certificate is trusted by building candidate paths to trust
@@ -61,19 +70,21 @@ class NET_EXPORT CertPathBuilder {
     ResultPath();
     ~ResultPath();
 
+    // Returns true if the candidate path is valid, false otherwise.
+    bool IsValid() const;
+
     // The (possibly partial) certificate path. Consumers must always test
-    // |valid| before using |path|. When |!valid| path.trust_anchor may be
-    // nullptr, and the path may be otherwise incomplete/invalid.
+    // |errors.IsValid()| before using |path|. When invalid,
+    // |path.trust_anchor| may be null, and the path may be incomplete.
     CertPath path;
 
-    // The errors/warnings from this path. Note that the list of errors is
-    // independent of whether the path was |valid| (a valid path may
-    // contain errors/warnings, and vice versa an invalid path may not have
-    // logged any errors).
-    CertErrors errors;
+    // The set of policies that the certificate is valid for (of the
+    // subset of policies user requested during verification).
+    std::set<der::Input> user_constrained_policy_set;
 
-    // True if |path| is a correct verified certificate chain.
-    bool valid = false;
+    // The errors/warnings from this path. Use |IsValid()| to determine if the
+    // path is valid.
+    CertPathErrors errors;
   };
 
   // Provides the overall result of path building. This includes the paths that
@@ -88,6 +99,9 @@ class NET_EXPORT CertPathBuilder {
     // Returns the ResultPath for the best valid path, or nullptr if there
     // was none.
     const ResultPath* GetBestValidPath() const;
+
+    // Resets to the initial value.
+    void Clear();
 
     // List of paths that were attempted and the result for each.
     std::vector<std::unique_ptr<ResultPath>> paths;
@@ -104,19 +118,24 @@ class NET_EXPORT CertPathBuilder {
   // TODO(mattm): allow caller specified hook/callback to extend path
   // verification.
   //
-  // TODO(eroman): The assumption is that |result| is default initialized. Can
-  // probably just internalize |result| into CertPathBuilder.
-  //
   // Creates a CertPathBuilder that attempts to find a path from |cert| to a
   // trust anchor in |trust_store|, which satisfies |signature_policy| and is
   // valid at |time|.  Details of attempted path(s) are stored in |*result|.
   //
   // The caller must keep |trust_store|, |signature_policy|, and |*result| valid
   // for the lifetime of the CertPathBuilder.
+  //
+  // See VerifyCertificateChain() for a more detailed explanation of the
+  // same-named parameters.
   CertPathBuilder(scoped_refptr<ParsedCertificate> cert,
-                  const TrustStore* trust_store,
+                  TrustStore* trust_store,
                   const SignaturePolicy* signature_policy,
                   const der::GeneralizedTime& time,
+                  KeyPurpose key_purpose,
+                  InitialExplicitPolicy initial_explicit_policy,
+                  const std::set<der::Input>& user_initial_policy_set,
+                  InitialPolicyMappingInhibit initial_policy_mapping_inhibit,
+                  InitialAnyPolicyInhibit initial_any_policy_inhibit,
                   Result* result);
   ~CertPathBuilder();
 
@@ -151,6 +170,11 @@ class NET_EXPORT CertPathBuilder {
   std::unique_ptr<CertPathIter> cert_path_iter_;
   const SignaturePolicy* signature_policy_;
   const der::GeneralizedTime time_;
+  const KeyPurpose key_purpose_;
+  const InitialExplicitPolicy initial_explicit_policy_;
+  const std::set<der::Input> user_initial_policy_set_;
+  const InitialPolicyMappingInhibit initial_policy_mapping_inhibit_;
+  const InitialAnyPolicyInhibit initial_any_policy_inhibit_;
 
   // Stores the next complete path to attempt verification on. This is filled in
   // by |cert_path_iter_| during the STATE_GET_NEXT_PATH step, and thus should

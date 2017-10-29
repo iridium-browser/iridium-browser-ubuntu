@@ -29,7 +29,34 @@ Polymer({
       type: Boolean,
       value: false,
     },
+
+    /**
+     * True if the dialog should ignore 'Enter' keypresses.
+     */
+    ignoreEnterKey: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
+     * True if the dialog should not be able to be cancelled, which will hide
+     * the 'x' button and prevent 'Escape' key presses from closing the dialog.
+     */
+    noCancel: {
+      type: Boolean,
+      value: false,
+    },
   },
+
+  listeners: {
+    'pointerdown': 'onPointerdown_',
+  },
+
+  /** @private {?IntersectionObserver} */
+  intersectionObserver_: null,
+
+  /** @private {?MutationObserver} */
+  mutationObserver_: null,
 
   /** @override */
   ready: function() {
@@ -39,6 +66,84 @@ Polymer({
       if (!this.ignorePopstate && this.open)
         this.cancel();
     }.bind(this));
+
+    if (!this.ignoreEnterKey)
+      this.addEventListener('keypress', this.onKeypress_.bind(this));
+
+    if (this.noCancel)
+      this.addEventListener('cancel', this.onCancel_.bind(this));
+  },
+
+  /** @override */
+  attached: function() {
+    var mutationObserverCallback = function() {
+      if (this.open)
+        this.addIntersectionObserver_();
+      else
+        this.removeIntersectionObserver_();
+    }.bind(this);
+
+    this.mutationObserver_ = new MutationObserver(mutationObserverCallback);
+
+    this.mutationObserver_.observe(this, {
+      attributes: true,
+      attributeFilter: ['open'],
+    });
+
+    // In some cases dialog already has the 'open' attribute by this point.
+    mutationObserverCallback();
+  },
+
+  /** @override */
+  detached: function() {
+    this.removeIntersectionObserver_();
+    if (this.mutationObserver_) {
+      this.mutationObserver_.disconnect();
+      this.mutationObserver_ = null;
+    }
+  },
+
+  /** @private */
+  addIntersectionObserver_: function() {
+    if (this.intersectionObserver_)
+      return;
+
+    var bodyContainer = this.$$('.body-container');
+
+    var bottomMarker = this.$.bodyBottomMarker;
+    var topMarker = this.$.bodyTopMarker;
+
+    var callback = function(entries) {
+      // In some rare cases, there could be more than one entry per observed
+      // element, in which case the last entry's result stands.
+      for (var i = 0; i < entries.length; i++) {
+        var target = entries[i].target;
+        assert(target == bottomMarker || target == topMarker);
+
+        var classToToggle =
+            target == bottomMarker ? 'bottom-scrollable' : 'top-scrollable';
+
+        bodyContainer.classList.toggle(
+            classToToggle, entries[i].intersectionRatio == 0);
+      }
+    };
+
+    this.intersectionObserver_ = new IntersectionObserver(
+        callback,
+        /** @type {IntersectionObserverInit} */ ({
+          root: bodyContainer,
+          threshold: 0,
+        }));
+    this.intersectionObserver_.observe(bottomMarker);
+    this.intersectionObserver_.observe(topMarker);
+  },
+
+  /** @private */
+  removeIntersectionObserver_: function() {
+    if (this.intersectionObserver_) {
+      this.intersectionObserver_.disconnect();
+      this.intersectionObserver_ = null;
+    }
   },
 
   cancel: function() {
@@ -54,8 +159,72 @@ Polymer({
     HTMLDialogElement.prototype.close.call(this, 'success');
   },
 
+  /**
+   * @private
+   * @param {Event} e
+   */
+  onCloseKeypress_: function(e) {
+    // Because the dialog may have a default Enter key handler, prevent
+    // keypress events from bubbling up from this element.
+    e.stopPropagation();
+  },
+
   /** @return {!PaperIconButtonElement} */
   getCloseButton: function() {
     return this.$.close;
+  },
+
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onKeypress_: function(e) {
+    if (e.key != 'Enter')
+      return;
+
+    // Accept Enter keys from either the dialog, or a child paper-input element.
+    if (e.target != this && e.target.tagName != 'PAPER-INPUT')
+      return;
+
+    var actionButton =
+        this.querySelector('.action-button:not([disabled]):not([hidden])');
+    if (actionButton) {
+      actionButton.click();
+      e.preventDefault();
+    }
+  },
+
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onCancel_: function(e) {
+    if (this.noCancel)
+      e.preventDefault();
+  },
+
+  /** @param {!PointerEvent} e */
+  onPointerdown_: function(e) {
+    // Only show pulse animation if user left-clicked outside of the dialog
+    // contents.
+    if (e.button != 0 || e.composedPath()[0].tagName !== 'DIALOG')
+      return;
+
+    this.animate(
+        [
+          {transform: 'scale(1)', offset: 0},
+          {transform: 'scale(1.02)', offset: 0.4},
+          {transform: 'scale(1.02)', offset: 0.6},
+          {transform: 'scale(1)', offset: 1},
+        ],
+        /** @type {!KeyframeEffectOptions} */ ({
+          duration: 180,
+          easing: 'ease-in-out',
+          iterations: 1,
+        }));
+
+    // Prevent any text from being selected within the dialog when clicking in
+    // the backdrop area.
+    e.preventDefault();
   },
 });

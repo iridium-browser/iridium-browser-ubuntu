@@ -86,6 +86,11 @@ Host.UserMetrics.Action = {
   CpuThrottlingEnabled: 21,
   CpuProfileNodeFocused: 22,
   CpuProfileNodeExcluded: 23,
+  SelectFileFromFilePicker: 24,
+  SelectCommandFromCommandMenu: 25,
+  ChangeInspectedNodeInElementsPanel: 26,
+  StyleRuleCopied: 27,
+  CoverageStarted: 28,
 };
 
 Host.UserMetrics._PanelCodes = {
@@ -105,7 +110,8 @@ Host.UserMetrics._PanelCodes = {
   'drawer-sensors': 14,
   'drawer-sources.search': 15,
   security: 16,
-  js_profiler: 17
+  js_profiler: 17,
+  audits2: 18,
 };
 
 /** @type {!Host.UserMetrics} */

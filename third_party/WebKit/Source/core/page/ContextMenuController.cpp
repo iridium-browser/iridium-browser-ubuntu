@@ -26,162 +26,131 @@
 
 #include "core/page/ContextMenuController.h"
 
+#include <memory>
 #include "core/dom/Document.h"
 #include "core/dom/Node.h"
-#include "core/events/Event.h"
 #include "core/events/MouseEvent.h"
-#include "core/events/RelatedEvent.h"
 #include "core/frame/LocalFrame.h"
-#include "core/html/HTMLMenuElement.h"
 #include "core/input/EventHandler.h"
 #include "core/page/ContextMenuClient.h"
 #include "core/page/ContextMenuProvider.h"
-#include "core/page/CustomContextMenuProvider.h"
 #include "platform/ContextMenu.h"
 #include "platform/ContextMenuItem.h"
-#include "wtf/PtrUtil.h"
-#include <memory>
+#include "platform/wtf/PtrUtil.h"
+#include "public/platform/WebMenuSourceType.h"
 
 namespace blink {
 
-using namespace HTMLNames;
-
 ContextMenuController::ContextMenuController(Page*, ContextMenuClient* client)
-    : m_client(client) {
+    : client_(client) {
   DCHECK(client);
 }
 
 ContextMenuController::~ContextMenuController() {}
 
-ContextMenuController* ContextMenuController::create(
+ContextMenuController* ContextMenuController::Create(
     Page* page,
     ContextMenuClient* client) {
   return new ContextMenuController(page, client);
 }
 
 DEFINE_TRACE(ContextMenuController) {
-  visitor->trace(m_menuProvider);
-  visitor->trace(m_hitTestResult);
+  visitor->Trace(menu_provider_);
+  visitor->Trace(hit_test_result_);
 }
 
-void ContextMenuController::clearContextMenu() {
-  m_contextMenu.reset();
-  if (m_menuProvider)
-    m_menuProvider->contextMenuCleared();
-  m_menuProvider = nullptr;
-  m_client->clearContextMenu();
-  m_hitTestResult = HitTestResult();
+void ContextMenuController::ClearContextMenu() {
+  context_menu_.reset();
+  if (menu_provider_)
+    menu_provider_->ContextMenuCleared();
+  menu_provider_ = nullptr;
+  client_->ClearContextMenu();
+  hit_test_result_ = HitTestResult();
 }
 
-void ContextMenuController::documentDetached(Document* document) {
-  if (Node* innerNode = m_hitTestResult.innerNode()) {
+void ContextMenuController::DocumentDetached(Document* document) {
+  if (Node* inner_node = hit_test_result_.InnerNode()) {
     // Invalidate the context menu info if its target document is detached.
-    if (innerNode->document() == document)
-      clearContextMenu();
+    if (inner_node->GetDocument() == document)
+      ClearContextMenu();
   }
 }
 
-void ContextMenuController::populateCustomContextMenu(const Event& event) {
-  if (!RuntimeEnabledFeatures::contextMenuEnabled())
+void ContextMenuController::HandleContextMenuEvent(MouseEvent* mouse_event) {
+  context_menu_ = CreateContextMenu(mouse_event);
+  if (!context_menu_)
     return;
 
-  Node* node = event.target()->toNode();
-  if (!node || !node->isHTMLElement())
-    return;
-
-  HTMLElement& element = toHTMLElement(*node);
-  HTMLMenuElement* menuElement = element.assignedContextMenu();
-  if (!menuElement ||
-      !equalIgnoringCase(menuElement->fastGetAttribute(typeAttr), "context"))
-    return;
-  RelatedEvent* relatedEvent =
-      RelatedEvent::create(EventTypeNames::show, true, true, node);
-  if (menuElement->dispatchEvent(relatedEvent) !=
-      DispatchEventResult::NotCanceled)
-    return;
-  if (menuElement != element.assignedContextMenu())
-    return;
-  m_menuProvider = CustomContextMenuProvider::create(*menuElement, element);
-  m_menuProvider->populateContextMenu(m_contextMenu.get());
+  ShowContextMenu(mouse_event);
 }
 
-void ContextMenuController::handleContextMenuEvent(Event* event) {
-  m_contextMenu = createContextMenu(event);
-  if (!m_contextMenu)
-    return;
-  populateCustomContextMenu(*event);
-  showContextMenu(event);
-}
-
-void ContextMenuController::showContextMenuAtPoint(
+void ContextMenuController::ShowContextMenuAtPoint(
     LocalFrame* frame,
     float x,
     float y,
-    ContextMenuProvider* menuProvider) {
-  m_menuProvider = menuProvider;
+    ContextMenuProvider* menu_provider) {
+  menu_provider_ = menu_provider;
 
   LayoutPoint location(x, y);
-  m_contextMenu = createContextMenu(frame, location);
-  if (!m_contextMenu) {
-    clearContextMenu();
+  context_menu_ = CreateContextMenu(frame, location);
+  if (!context_menu_) {
+    ClearContextMenu();
     return;
   }
 
-  m_menuProvider->populateContextMenu(m_contextMenu.get());
-  showContextMenu(nullptr);
+  menu_provider_->PopulateContextMenu(context_menu_.get());
+  ShowContextMenu(nullptr);
 }
 
-std::unique_ptr<ContextMenu> ContextMenuController::createContextMenu(
-    Event* event) {
-  ASSERT(event);
+std::unique_ptr<ContextMenu> ContextMenuController::CreateContextMenu(
+    MouseEvent* mouse_event) {
+  DCHECK(mouse_event);
 
-  if (!event->isMouseEvent())
-    return nullptr;
-
-  MouseEvent* mouseEvent = toMouseEvent(event);
-  return createContextMenu(event->target()->toNode()->document().frame(),
-                           LayoutPoint(mouseEvent->absoluteLocation()));
+  return CreateContextMenu(
+      mouse_event->target()->ToNode()->GetDocument().GetFrame(),
+      LayoutPoint(mouse_event->AbsoluteLocation()));
 }
 
-std::unique_ptr<ContextMenu> ContextMenuController::createContextMenu(
+std::unique_ptr<ContextMenu> ContextMenuController::CreateContextMenu(
     LocalFrame* frame,
     const LayoutPoint& location) {
   HitTestRequest::HitTestRequestType type =
-      HitTestRequest::ReadOnly | HitTestRequest::Active;
+      HitTestRequest::kReadOnly | HitTestRequest::kActive;
   HitTestResult result(type, location);
 
   if (frame)
-    result = frame->eventHandler().hitTestResultAtPoint(location, type);
+    result = frame->GetEventHandler().HitTestResultAtPoint(location, type);
 
-  if (!result.innerNodeOrImageMapImage())
+  if (!result.InnerNodeOrImageMapImage())
     return nullptr;
 
-  m_hitTestResult = result;
+  hit_test_result_ = result;
 
-  return WTF::wrapUnique(new ContextMenu);
+  return WTF::WrapUnique(new ContextMenu);
 }
 
-void ContextMenuController::showContextMenu(Event* event) {
-  bool fromTouch = false;
-  if (event && event->isMouseEvent()) {
-    MouseEvent* mouseEvent = static_cast<MouseEvent*>(event);
-    fromTouch = mouseEvent->fromTouch();
+void ContextMenuController::ShowContextMenu(MouseEvent* mouse_event) {
+  WebMenuSourceType source_type = kMenuSourceNone;
+  if (mouse_event) {
+    DCHECK(mouse_event->type() == EventTypeNames::contextmenu);
+    source_type = mouse_event->GetMenuSourceType();
   }
 
-  if (m_client->showContextMenu(m_contextMenu.get(), fromTouch) && event)
-    event->setDefaultHandled();
+  if (client_->ShowContextMenu(context_menu_.get(), source_type) && mouse_event)
+    mouse_event->SetDefaultHandled();
 }
 
-void ContextMenuController::contextMenuItemSelected(
+void ContextMenuController::ContextMenuItemSelected(
     const ContextMenuItem* item) {
-  ASSERT(item->type() == ActionType || item->type() == CheckableActionType);
+  DCHECK(item->GetType() == kActionType ||
+         item->GetType() == kCheckableActionType);
 
-  if (item->action() < ContextMenuItemBaseCustomTag ||
-      item->action() > ContextMenuItemLastCustomTag)
+  if (item->Action() < kContextMenuItemBaseCustomTag ||
+      item->Action() > kContextMenuItemLastCustomTag)
     return;
 
-  ASSERT(m_menuProvider);
-  m_menuProvider->contextMenuItemSelected(item);
+  DCHECK(menu_provider_);
+  menu_provider_->ContextMenuItemSelected(item);
 }
 
 }  // namespace blink

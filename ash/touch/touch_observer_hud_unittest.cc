@@ -4,7 +4,7 @@
 
 #include "ash/touch/touch_observer_hud.h"
 
-#include "ash/common/ash_switches.h"
+#include "ash/ash_switches.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -21,19 +21,19 @@
 
 namespace ash {
 
-class TouchHudTestBase : public test::AshTestBase {
+class TouchHudTestBase : public AshTestBase {
  public:
   TouchHudTestBase() {}
   ~TouchHudTestBase() override {}
 
   void SetUp() override {
-    test::AshTestBase::SetUp();
+    AshTestBase::SetUp();
 
     // Initialize display infos. They should be initialized after Ash
-    // environment is set up, i.e., after test::AshTestBase::SetUp().
-    internal_display_id_ = display::test::DisplayManagerTestApi(
-                               Shell::GetInstance()->display_manager())
-                               .SetFirstDisplayAsInternalDisplay();
+    // environment is set up, i.e., after AshTestBase::SetUp().
+    internal_display_id_ =
+        display::test::DisplayManagerTestApi(Shell::Get()->display_manager())
+            .SetFirstDisplayAsInternalDisplay();
     external_display_id_ = 10;
     mirrored_display_id_ = 11;
 
@@ -118,7 +118,7 @@ class TouchHudTestBase : public test::AshTestBase {
  protected:
 
   WindowTreeHostManager* GetWindowTreeHostManager() {
-    return Shell::GetInstance()->window_tree_host_manager();
+    return Shell::Get()->window_tree_host_manager();
   }
 
   const display::Display& GetInternalDisplay() {
@@ -130,43 +130,41 @@ class TouchHudTestBase : public test::AshTestBase {
   }
 
   aura::Window* GetInternalRootWindow() {
-    return GetWindowTreeHostManager()->GetRootWindowForDisplayId(
-        internal_display_id_);
+    return Shell::GetRootWindowForDisplayId(internal_display_id_);
   }
 
   aura::Window* GetExternalRootWindow() {
-    return GetWindowTreeHostManager()->GetRootWindowForDisplayId(
-        external_display_id_);
+    return Shell::GetRootWindowForDisplayId(external_display_id_);
   }
 
   aura::Window* GetPrimaryRootWindow() {
     const display::Display& display = GetPrimaryDisplay();
-    return GetWindowTreeHostManager()->GetRootWindowForDisplayId(display.id());
+    return Shell::GetRootWindowForDisplayId(display.id());
   }
 
   aura::Window* GetSecondaryRootWindow() {
     const display::Display& display = display_manager()->GetSecondaryDisplay();
-    return GetWindowTreeHostManager()->GetRootWindowForDisplayId(display.id());
+    return Shell::GetRootWindowForDisplayId(display.id());
   }
 
   RootWindowController* GetInternalRootController() {
     aura::Window* root = GetInternalRootWindow();
-    return GetRootWindowController(root);
+    return RootWindowController::ForWindow(root);
   }
 
   RootWindowController* GetExternalRootController() {
     aura::Window* root = GetExternalRootWindow();
-    return GetRootWindowController(root);
+    return RootWindowController::ForWindow(root);
   }
 
   RootWindowController* GetPrimaryRootController() {
     aura::Window* root = GetPrimaryRootWindow();
-    return GetRootWindowController(root);
+    return RootWindowController::ForWindow(root);
   }
 
   RootWindowController* GetSecondaryRootController() {
     aura::Window* root = GetSecondaryRootWindow();
-    return GetRootWindowController(root);
+    return RootWindowController::ForWindow(root);
   }
 
   display::ManagedDisplayInfo CreateDisplayInfo(int64_t id,
@@ -267,11 +265,11 @@ class TouchHudProjectionTest : public TouchHudTestBase {
   ~TouchHudProjectionTest() override {}
 
   void EnableTouchHudProjection() {
-    Shell::GetInstance()->SetTouchHudProjectionEnabled(true);
+    Shell::Get()->SetTouchHudProjectionEnabled(true);
   }
 
   void DisableTouchHudProjection() {
-    Shell::GetInstance()->SetTouchHudProjectionEnabled(false);
+    Shell::Get()->SetTouchHudProjectionEnabled(false);
   }
 
   TouchHudProjection* GetInternalTouchHudProjection() {
@@ -285,7 +283,9 @@ class TouchHudProjectionTest : public TouchHudTestBase {
   void SendTouchEventToInternalHud(ui::EventType type,
                                    const gfx::Point& location,
                                    int touch_id) {
-    ui::TouchEvent event(type, location, touch_id, event_time);
+    ui::TouchEvent event(
+        type, location, event_time,
+        ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, touch_id));
     GetInternalTouchHudProjection()->OnTouchEvent(&event);
 
     // Advance time for next event.

@@ -11,42 +11,42 @@
 
 namespace blink {
 
-class FrameView;
-class GeometryMapper;
 class LayoutObject;
+class LocalFrameView;
 struct PrePaintTreeWalkContext;
 
-// This class walks the whole layout tree, beginning from the root FrameView,
-// across frame boundaries. Helper classes are called for each tree node to
-// perform actual actions.  It expects to be invoked in InPrePaint phase.
-class PrePaintTreeWalk {
+// This class walks the whole layout tree, beginning from the root
+// LocalFrameView, across frame boundaries. Helper classes are called for each
+// tree node to perform actual actions.  It expects to be invoked in InPrePaint
+// phase.
+class CORE_EXPORT PrePaintTreeWalk {
  public:
-  PrePaintTreeWalk(GeometryMapper& geometryMapper)
-      : m_paintInvalidator(geometryMapper), m_geometryMapper(geometryMapper) {}
-  void walk(FrameView& rootFrame);
+  PrePaintTreeWalk() {}
+  void Walk(LocalFrameView& root_frame);
 
  private:
-  void walk(FrameView&, const PrePaintTreeWalkContext&);
-  void walk(const LayoutObject&, const PrePaintTreeWalkContext&);
+  void Walk(LocalFrameView&, const PrePaintTreeWalkContext&);
+  void Walk(const LayoutObject&, const PrePaintTreeWalkContext&);
 
   // Invalidates paint-layer painting optimizations, such as subsequence caching
   // and empty paint phase optimizations if clips from the context have changed.
-  void invalidatePaintLayerOptimizationsIfNeeded(const LayoutObject&,
-                                                 PrePaintTreeWalkContext&);
+  ALWAYS_INLINE void InvalidatePaintLayerOptimizationsIfNeeded(
+      const LayoutObject&,
+      PrePaintTreeWalkContext&);
 
-  // Returns the clip applied to children for the given
-  // contaiing block context + effect, in the space of ancestorState adjusted
-  // by ancestorPaintOffset. Sets hasClip to true if a clip was applied.
-  FloatClipRect clipRectForContext(
-      const PaintPropertyTreeBuilderContext::ContainingBlockContext&,
-      const EffectPaintPropertyNode*,
-      const PropertyTreeState& ancestorState,
-      const LayoutPoint& ancestorPaintOffset,
-      bool& hasClip);
+  bool ALWAYS_INLINE
+  NeedsTreeBuilderContextUpdate(const LocalFrameView&,
+                                const PrePaintTreeWalkContext&);
+  bool ALWAYS_INLINE
+  NeedsTreeBuilderContextUpdate(const LayoutObject&,
+                                const PrePaintTreeWalkContext&);
 
-  PaintPropertyTreeBuilder m_propertyTreeBuilder;
-  PaintInvalidator m_paintInvalidator;
-  GeometryMapper& m_geometryMapper;
+  static void ClearPreviousClipRectsForTesting(const LayoutObject&);
+
+  PaintPropertyTreeBuilder property_tree_builder_;
+  PaintInvalidator paint_invalidator_;
+
+  FRIEND_TEST_ALL_PREFIXES(PrePaintTreeWalkTest, ClipRects);
 };
 
 }  // namespace blink

@@ -5,39 +5,31 @@
 package org.chromium.testing.local;
 
 import org.junit.runners.model.InitializationError;
-
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
-import org.robolectric.manifest.AndroidManifest;
+import org.robolectric.internal.ManifestFactory;
 
 /**
- * A custom Robolectric Junit4 Test Runner. This test runner will ignore the
- * API level written in the AndroidManifest as that can cause issues if
- * Robolectric does not support that API level. The API level will be grabbed
- * from the robolectric Config annotation, or just be
- * |DEFAULT_ANDROID_API_LEVEL|
+ * A custom Robolectric Junit4 Test Runner with Chromium specific settings.
  */
 public class LocalRobolectricTestRunner extends RobolectricTestRunner {
-
-    private static final int DEFAULT_ANDROID_API_LEVEL = 21;
+    private static final int DEFAULT_SDK = 25;
+    private static final String DEFAULT_PACKAGE_NAME = "org.robolectric.default";
 
     public LocalRobolectricTestRunner(Class<?> testClass) throws InitializationError {
         super(testClass);
     }
 
     @Override
-    protected int pickSdkVersion(Config config, AndroidManifest appManifest) {
-        // Pulling from the manifest is dangerous as the apk might target a version of
-        // android that robolectric does not yet support. We still allow the API level to
-        // be overridden with the Config annotation.
-        if (config != null) {
-            if (config.sdk().length > 1) {
-                throw new IllegalArgumentException(
-                        "RobolectricTestRunner does not support multiple values for @Config.sdk");
-            } else if (config.sdk().length == 1) {
-                return config.sdk()[0];
-            }
-        }
-        return DEFAULT_ANDROID_API_LEVEL;
+    protected Config buildGlobalConfig() {
+        String packageName =
+                System.getProperty("chromium.robolectric.package.name", DEFAULT_PACKAGE_NAME);
+
+        return new Config.Builder().setSdk(DEFAULT_SDK).setPackageName(packageName).build();
+    }
+
+    @Override
+    protected ManifestFactory getManifestFactory(Config config) {
+        return new GNManifestFactory();
     }
 }

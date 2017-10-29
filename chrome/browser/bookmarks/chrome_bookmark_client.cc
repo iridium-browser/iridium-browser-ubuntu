@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/user_metrics.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -17,10 +18,10 @@
 #include "components/favicon/core/favicon_util.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/url_database.h"
-#include "content/public/browser/user_metrics.h"
+#include "components/offline_pages/features/features.h"
 
-#if defined(OS_ANDROID)
-#include "chrome/browser/android/offline_pages/offline_page_bookmark_observer.h"
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+#include "chrome/browser/offline_pages/offline_page_bookmark_observer.h"
 #endif
 
 ChromeBookmarkClient::ChromeBookmarkClient(
@@ -35,7 +36,7 @@ void ChromeBookmarkClient::Init(bookmarks::BookmarkModel* model) {
   if (managed_bookmark_service_)
     managed_bookmark_service_->BookmarkModelCreated(model);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
   offline_page_observer_ =
       base::MakeUnique<offline_pages::OfflinePageBookmarkObserver>(profile_);
   model->AddObserver(offline_page_observer_.get());
@@ -97,7 +98,7 @@ bool ChromeBookmarkClient::IsPermanentNodeVisible(
 }
 
 void ChromeBookmarkClient::RecordAction(const base::UserMetricsAction& action) {
-  content::RecordAction(action);
+  base::RecordAction(action);
 }
 
 bookmarks::LoadExtraCallback ChromeBookmarkClient::GetLoadExtraNodesCallback() {

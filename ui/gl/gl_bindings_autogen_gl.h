@@ -154,6 +154,16 @@ typedef void(GL_BINDING_CALL* glCompressedTexImage2DProc)(GLenum target,
                                                           GLint border,
                                                           GLsizei imageSize,
                                                           const void* data);
+typedef void(GL_BINDING_CALL* glCompressedTexImage2DRobustANGLEProc)(
+    GLenum target,
+    GLint level,
+    GLenum internalformat,
+    GLsizei width,
+    GLsizei height,
+    GLint border,
+    GLsizei imageSize,
+    GLsizei dataSize,
+    const void* data);
 typedef void(GL_BINDING_CALL* glCompressedTexImage3DProc)(GLenum target,
                                                           GLint level,
                                                           GLenum internalformat,
@@ -163,6 +173,17 @@ typedef void(GL_BINDING_CALL* glCompressedTexImage3DProc)(GLenum target,
                                                           GLint border,
                                                           GLsizei imageSize,
                                                           const void* data);
+typedef void(GL_BINDING_CALL* glCompressedTexImage3DRobustANGLEProc)(
+    GLenum target,
+    GLint level,
+    GLenum internalformat,
+    GLsizei width,
+    GLsizei height,
+    GLsizei depth,
+    GLint border,
+    GLsizei imageSize,
+    GLsizei dataSize,
+    const void* data);
 typedef void(GL_BINDING_CALL* glCompressedTexSubImage2DProc)(GLenum target,
                                                              GLint level,
                                                              GLint xoffset,
@@ -172,6 +193,17 @@ typedef void(GL_BINDING_CALL* glCompressedTexSubImage2DProc)(GLenum target,
                                                              GLenum format,
                                                              GLsizei imageSize,
                                                              const void* data);
+typedef void(GL_BINDING_CALL* glCompressedTexSubImage2DRobustANGLEProc)(
+    GLenum target,
+    GLint level,
+    GLint xoffset,
+    GLint yoffset,
+    GLsizei width,
+    GLsizei height,
+    GLenum format,
+    GLsizei imageSize,
+    GLsizei dataSize,
+    const void* data);
 typedef void(GL_BINDING_CALL* glCompressedTexSubImage3DProc)(GLenum target,
                                                              GLint level,
                                                              GLint xoffset,
@@ -183,6 +215,19 @@ typedef void(GL_BINDING_CALL* glCompressedTexSubImage3DProc)(GLenum target,
                                                              GLenum format,
                                                              GLsizei imageSize,
                                                              const void* data);
+typedef void(GL_BINDING_CALL* glCompressedTexSubImage3DRobustANGLEProc)(
+    GLenum target,
+    GLint level,
+    GLint xoffset,
+    GLint yoffset,
+    GLint zoffset,
+    GLsizei width,
+    GLsizei height,
+    GLsizei depth,
+    GLenum format,
+    GLsizei imageSize,
+    GLsizei dataSize,
+    const void* data);
 typedef void(GL_BINDING_CALL* glCopyBufferSubDataProc)(GLenum readTarget,
                                                        GLenum writeTarget,
                                                        GLintptr readOffset,
@@ -190,7 +235,10 @@ typedef void(GL_BINDING_CALL* glCopyBufferSubDataProc)(GLenum readTarget,
                                                        GLsizeiptr size);
 typedef void(GL_BINDING_CALL* glCopySubTextureCHROMIUMProc)(
     GLuint sourceId,
+    GLint sourceLevel,
+    GLenum destTarget,
     GLuint destId,
+    GLint destLevel,
     GLint xoffset,
     GLint yoffset,
     GLint x,
@@ -227,7 +275,10 @@ typedef void(GL_BINDING_CALL* glCopyTexSubImage3DProc)(GLenum target,
                                                        GLsizei height);
 typedef void(GL_BINDING_CALL* glCopyTextureCHROMIUMProc)(
     GLuint sourceId,
+    GLint sourceLevel,
+    GLenum destTarget,
     GLuint destId,
+    GLint destLevel,
     GLint internalFormat,
     GLenum destType,
     GLboolean unpackFlipY,
@@ -997,6 +1048,8 @@ typedef void(GL_BINDING_CALL* glReadnPixelsRobustANGLEProc)(GLint x,
                                                             GLenum type,
                                                             GLsizei bufSize,
                                                             GLsizei* length,
+                                                            GLsizei* columns,
+                                                            GLsizei* rows,
                                                             void* data);
 typedef void(GL_BINDING_CALL* glReadPixelsProc)(GLint x,
                                                 GLint y,
@@ -1013,6 +1066,8 @@ typedef void(GL_BINDING_CALL* glReadPixelsRobustANGLEProc)(GLint x,
                                                            GLenum type,
                                                            GLsizei bufSize,
                                                            GLsizei* length,
+                                                           GLsizei* columns,
+                                                           GLsizei* rows,
                                                            void* pixels);
 typedef void(GL_BINDING_CALL* glReleaseShaderCompilerProc)(void);
 typedef void(GL_BINDING_CALL* glRenderbufferStorageEXTProc)(
@@ -1044,6 +1099,7 @@ typedef void(GL_BINDING_CALL* glRenderbufferStorageMultisampleIMGProc)(
     GLenum internalformat,
     GLsizei width,
     GLsizei height);
+typedef void(GL_BINDING_CALL* glRequestExtensionANGLEProc)(const char* name);
 typedef void(GL_BINDING_CALL* glResumeTransformFeedbackProc)(void);
 typedef void(GL_BINDING_CALL* glSampleCoverageProc)(GLclampf value,
                                                     GLboolean invert);
@@ -1477,6 +1533,7 @@ struct ExtensionsGL {
   bool b_GL_ANGLE_framebuffer_blit;
   bool b_GL_ANGLE_framebuffer_multisample;
   bool b_GL_ANGLE_instanced_arrays;
+  bool b_GL_ANGLE_request_extension;
   bool b_GL_ANGLE_robust_client_memory;
   bool b_GL_ANGLE_translated_shader_source;
   bool b_GL_APPLE_fence;
@@ -1584,9 +1641,15 @@ struct ProcsGL {
   glCompileShaderProc glCompileShaderFn;
   glCompressedCopyTextureCHROMIUMProc glCompressedCopyTextureCHROMIUMFn;
   glCompressedTexImage2DProc glCompressedTexImage2DFn;
+  glCompressedTexImage2DRobustANGLEProc glCompressedTexImage2DRobustANGLEFn;
   glCompressedTexImage3DProc glCompressedTexImage3DFn;
+  glCompressedTexImage3DRobustANGLEProc glCompressedTexImage3DRobustANGLEFn;
   glCompressedTexSubImage2DProc glCompressedTexSubImage2DFn;
+  glCompressedTexSubImage2DRobustANGLEProc
+      glCompressedTexSubImage2DRobustANGLEFn;
   glCompressedTexSubImage3DProc glCompressedTexSubImage3DFn;
+  glCompressedTexSubImage3DRobustANGLEProc
+      glCompressedTexSubImage3DRobustANGLEFn;
   glCopyBufferSubDataProc glCopyBufferSubDataFn;
   glCopySubTextureCHROMIUMProc glCopySubTextureCHROMIUMFn;
   glCopyTexImage2DProc glCopyTexImage2DFn;
@@ -1837,6 +1900,7 @@ struct ProcsGL {
       glRenderbufferStorageMultisampleANGLEFn;
   glRenderbufferStorageMultisampleEXTProc glRenderbufferStorageMultisampleEXTFn;
   glRenderbufferStorageMultisampleIMGProc glRenderbufferStorageMultisampleIMGFn;
+  glRequestExtensionANGLEProc glRequestExtensionANGLEFn;
   glResumeTransformFeedbackProc glResumeTransformFeedbackFn;
   glSampleCoverageProc glSampleCoverageFn;
   glSamplerParameterfProc glSamplerParameterfFn;
@@ -2080,6 +2144,15 @@ class GL_EXPORT GLApi {
                                         GLint border,
                                         GLsizei imageSize,
                                         const void* data) = 0;
+  virtual void glCompressedTexImage2DRobustANGLEFn(GLenum target,
+                                                   GLint level,
+                                                   GLenum internalformat,
+                                                   GLsizei width,
+                                                   GLsizei height,
+                                                   GLint border,
+                                                   GLsizei imageSize,
+                                                   GLsizei dataSize,
+                                                   const void* data) = 0;
   virtual void glCompressedTexImage3DFn(GLenum target,
                                         GLint level,
                                         GLenum internalformat,
@@ -2089,6 +2162,16 @@ class GL_EXPORT GLApi {
                                         GLint border,
                                         GLsizei imageSize,
                                         const void* data) = 0;
+  virtual void glCompressedTexImage3DRobustANGLEFn(GLenum target,
+                                                   GLint level,
+                                                   GLenum internalformat,
+                                                   GLsizei width,
+                                                   GLsizei height,
+                                                   GLsizei depth,
+                                                   GLint border,
+                                                   GLsizei imageSize,
+                                                   GLsizei dataSize,
+                                                   const void* data) = 0;
   virtual void glCompressedTexSubImage2DFn(GLenum target,
                                            GLint level,
                                            GLint xoffset,
@@ -2098,6 +2181,16 @@ class GL_EXPORT GLApi {
                                            GLenum format,
                                            GLsizei imageSize,
                                            const void* data) = 0;
+  virtual void glCompressedTexSubImage2DRobustANGLEFn(GLenum target,
+                                                      GLint level,
+                                                      GLint xoffset,
+                                                      GLint yoffset,
+                                                      GLsizei width,
+                                                      GLsizei height,
+                                                      GLenum format,
+                                                      GLsizei imageSize,
+                                                      GLsizei dataSize,
+                                                      const void* data) = 0;
   virtual void glCompressedTexSubImage3DFn(GLenum target,
                                            GLint level,
                                            GLint xoffset,
@@ -2109,13 +2202,28 @@ class GL_EXPORT GLApi {
                                            GLenum format,
                                            GLsizei imageSize,
                                            const void* data) = 0;
+  virtual void glCompressedTexSubImage3DRobustANGLEFn(GLenum target,
+                                                      GLint level,
+                                                      GLint xoffset,
+                                                      GLint yoffset,
+                                                      GLint zoffset,
+                                                      GLsizei width,
+                                                      GLsizei height,
+                                                      GLsizei depth,
+                                                      GLenum format,
+                                                      GLsizei imageSize,
+                                                      GLsizei dataSize,
+                                                      const void* data) = 0;
   virtual void glCopyBufferSubDataFn(GLenum readTarget,
                                      GLenum writeTarget,
                                      GLintptr readOffset,
                                      GLintptr writeOffset,
                                      GLsizeiptr size) = 0;
   virtual void glCopySubTextureCHROMIUMFn(GLuint sourceId,
+                                          GLint sourceLevel,
+                                          GLenum destTarget,
                                           GLuint destId,
+                                          GLint destLevel,
                                           GLint xoffset,
                                           GLint yoffset,
                                           GLint x,
@@ -2151,7 +2259,10 @@ class GL_EXPORT GLApi {
                                      GLsizei width,
                                      GLsizei height) = 0;
   virtual void glCopyTextureCHROMIUMFn(GLuint sourceId,
+                                       GLint sourceLevel,
+                                       GLenum destTarget,
                                        GLuint destId,
+                                       GLint destLevel,
                                        GLint internalFormat,
                                        GLenum destType,
                                        GLboolean unpackFlipY,
@@ -2816,6 +2927,8 @@ class GL_EXPORT GLApi {
                                           GLenum type,
                                           GLsizei bufSize,
                                           GLsizei* length,
+                                          GLsizei* columns,
+                                          GLsizei* rows,
                                           void* data) = 0;
   virtual void glReadPixelsFn(GLint x,
                               GLint y,
@@ -2832,6 +2945,8 @@ class GL_EXPORT GLApi {
                                          GLenum type,
                                          GLsizei bufSize,
                                          GLsizei* length,
+                                         GLsizei* columns,
+                                         GLsizei* rows,
                                          void* pixels) = 0;
   virtual void glReleaseShaderCompilerFn(void) = 0;
   virtual void glRenderbufferStorageEXTFn(GLenum target,
@@ -2858,6 +2973,7 @@ class GL_EXPORT GLApi {
                                                      GLenum internalformat,
                                                      GLsizei width,
                                                      GLsizei height) = 0;
+  virtual void glRequestExtensionANGLEFn(const char* name) = 0;
   virtual void glResumeTransformFeedbackFn(void) = 0;
   virtual void glSampleCoverageFn(GLclampf value, GLboolean invert) = 0;
   virtual void glSamplerParameterfFn(GLuint sampler,
@@ -3305,12 +3421,20 @@ class GL_EXPORT GLApi {
   ::gl::g_current_gl_context->glCompressedCopyTextureCHROMIUMFn
 #define glCompressedTexImage2D \
   ::gl::g_current_gl_context->glCompressedTexImage2DFn
+#define glCompressedTexImage2DRobustANGLE \
+  ::gl::g_current_gl_context->glCompressedTexImage2DRobustANGLEFn
 #define glCompressedTexImage3D \
   ::gl::g_current_gl_context->glCompressedTexImage3DFn
+#define glCompressedTexImage3DRobustANGLE \
+  ::gl::g_current_gl_context->glCompressedTexImage3DRobustANGLEFn
 #define glCompressedTexSubImage2D \
   ::gl::g_current_gl_context->glCompressedTexSubImage2DFn
+#define glCompressedTexSubImage2DRobustANGLE \
+  ::gl::g_current_gl_context->glCompressedTexSubImage2DRobustANGLEFn
 #define glCompressedTexSubImage3D \
   ::gl::g_current_gl_context->glCompressedTexSubImage3DFn
+#define glCompressedTexSubImage3DRobustANGLE \
+  ::gl::g_current_gl_context->glCompressedTexSubImage3DRobustANGLEFn
 #define glCopyBufferSubData ::gl::g_current_gl_context->glCopyBufferSubDataFn
 #define glCopySubTextureCHROMIUM \
   ::gl::g_current_gl_context->glCopySubTextureCHROMIUMFn
@@ -3662,6 +3786,8 @@ class GL_EXPORT GLApi {
   ::gl::g_current_gl_context->glRenderbufferStorageMultisampleEXTFn
 #define glRenderbufferStorageMultisampleIMG \
   ::gl::g_current_gl_context->glRenderbufferStorageMultisampleIMGFn
+#define glRequestExtensionANGLE \
+  ::gl::g_current_gl_context->glRequestExtensionANGLEFn
 #define glResumeTransformFeedback \
   ::gl::g_current_gl_context->glResumeTransformFeedbackFn
 #define glSampleCoverage ::gl::g_current_gl_context->glSampleCoverageFn

@@ -11,11 +11,13 @@
 #include "core/loader/resource/StyleSheetResource.h"
 #include "core/loader/resource/StyleSheetResourceClient.h"
 #include "platform/loader/fetch/ResourceOwner.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
 class HTMLLinkElement;
-//
+class KURL;
+
 // LinkStyle handles dynamically change-able link resources, which is
 // typically @rel="stylesheet".
 //
@@ -23,75 +25,75 @@ class HTMLLinkElement;
 // types might better be handled by a separate class, but dynamically
 // changing @rel makes it harder to move such a design so we are
 // sticking current way so far.
-//
 class LinkStyle final : public LinkResource, ResourceOwner<StyleSheetResource> {
   USING_GARBAGE_COLLECTED_MIXIN(LinkStyle);
 
  public:
-  static LinkStyle* create(HTMLLinkElement* owner);
+  static LinkStyle* Create(HTMLLinkElement* owner);
 
   explicit LinkStyle(HTMLLinkElement* owner);
   ~LinkStyle() override;
 
-  LinkResourceType type() const override { return Style; }
-  void process() override;
-  void ownerRemoved() override;
-  bool hasLoaded() const override { return m_loadedSheet; }
+  LinkResourceType GetType() const override { return kStyle; }
+  void Process() override;
+  void OwnerRemoved() override;
+  bool HasLoaded() const override { return loaded_sheet_; }
   DECLARE_VIRTUAL_TRACE();
 
-  void startLoadingDynamicSheet();
-  void notifyLoadedSheetAndAllCriticalSubresources(
+  void StartLoadingDynamicSheet();
+  void NotifyLoadedSheetAndAllCriticalSubresources(
       Node::LoadedSheetErrorStatus);
-  bool sheetLoaded();
+  bool SheetLoaded();
 
-  void setDisabledState(bool);
-  void setSheetTitle(const String&);
+  void SetDisabledState(bool);
+  void SetSheetTitle(const String&);
 
-  bool styleSheetIsLoading() const;
-  bool hasSheet() const { return m_sheet; }
-  bool isDisabled() const { return m_disabledState == Disabled; }
-  bool isEnabledViaScript() const {
-    return m_disabledState == EnabledViaScript;
+  bool StyleSheetIsLoading() const;
+  bool HasSheet() const { return sheet_; }
+  bool IsDisabled() const { return disabled_state_ == kDisabled; }
+  bool IsEnabledViaScript() const {
+    return disabled_state_ == kEnabledViaScript;
   }
-  bool isUnset() const { return m_disabledState == Unset; }
+  bool IsUnset() const { return disabled_state_ == kUnset; }
 
-  CSSStyleSheet* sheet() const { return m_sheet.get(); }
+  CSSStyleSheet* Sheet() const { return sheet_.Get(); }
 
  private:
   // From StyleSheetResourceClient
-  void setCSSStyleSheet(const String& href,
-                        const KURL& baseURL,
-                        const String& charset,
+  void SetCSSStyleSheet(const String& href,
+                        const KURL& base_url,
+                        ReferrerPolicy,
+                        const WTF::TextEncoding&,
                         const CSSStyleSheetResource*) override;
-  String debugName() const override { return "LinkStyle"; }
-  enum LoadReturnValue { Loaded, NotNeeded, Bail };
-  LoadReturnValue loadStylesheetIfNeeded(const LinkRequestBuilder&,
+  String DebugName() const override { return "LinkStyle"; }
+  enum LoadReturnValue { kLoaded, kNotNeeded, kBail };
+  LoadReturnValue LoadStylesheetIfNeeded(const KURL&,
+                                         const WTF::TextEncoding&,
                                          const String& type);
 
-  enum DisabledState { Unset, EnabledViaScript, Disabled };
+  enum DisabledState { kUnset, kEnabledViaScript, kDisabled };
 
-  enum PendingSheetType { None, NonBlocking, Blocking };
+  enum PendingSheetType { kNone, kNonBlocking, kBlocking };
 
-  void clearSheet();
-  void addPendingSheet(PendingSheetType);
-  void removePendingSheet();
-  Document& document();
+  void ClearSheet();
+  void AddPendingSheet(PendingSheetType);
+  void RemovePendingSheet();
 
-  void setCrossOriginStylesheetStatus(CSSStyleSheet*);
-  void setFetchFollowingCORS() {
-    DCHECK(!m_fetchFollowingCORS);
-    m_fetchFollowingCORS = true;
+  void SetCrossOriginStylesheetStatus(CSSStyleSheet*);
+  void SetFetchFollowingCORS() {
+    DCHECK(!fetch_following_cors_);
+    fetch_following_cors_ = true;
   }
-  void clearFetchFollowingCORS() { m_fetchFollowingCORS = false; }
+  void ClearFetchFollowingCORS() { fetch_following_cors_ = false; }
 
-  Member<CSSStyleSheet> m_sheet;
-  DisabledState m_disabledState;
-  PendingSheetType m_pendingSheetType;
-  StyleEngineContext m_styleEngineContext;
-  bool m_loading;
-  bool m_firedLoad;
-  bool m_loadedSheet;
-  bool m_fetchFollowingCORS;
+  Member<CSSStyleSheet> sheet_;
+  DisabledState disabled_state_;
+  PendingSheetType pending_sheet_type_;
+  StyleEngineContext style_engine_context_;
+  bool loading_;
+  bool fired_load_;
+  bool loaded_sheet_;
+  bool fetch_following_cors_;
 };
 
 }  // namespace blink

@@ -36,8 +36,8 @@ class ShaderTranslatorInitializer {
   }
 };
 
-base::LazyInstance<ShaderTranslatorInitializer> g_translator_initializer =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<ShaderTranslatorInitializer>::DestructorAtExit
+    g_translator_initializer = LAZY_INSTANCE_INITIALIZER;
 
 void GetAttributes(ShHandle compiler, AttributeMap* var_map) {
   if (!var_map)
@@ -87,23 +87,6 @@ void GetInterfaceBlocks(ShHandle compiler, InterfaceBlockMap* var_map) {
     for (const auto& block : *interface_blocks) {
       (*var_map)[block.mappedName] = block;
     }
-  }
-}
-
-void GetNameHashingInfo(ShHandle compiler, NameMap* name_map) {
-  if (!name_map)
-    return;
-  name_map->clear();
-
-  typedef std::map<std::string, std::string> NameMapANGLE;
-  const NameMapANGLE* angle_map = sh::GetNameHashingMap(compiler);
-  DCHECK(angle_map);
-
-  for (NameMapANGLE::const_iterator iter = angle_map->begin();
-       iter != angle_map->end(); ++iter) {
-    // Note that in ANGLE, the map is (original_name, hash);
-    // here, we want (hash, original_name).
-    (*name_map)[iter->second] = iter->first;
   }
 }
 
@@ -209,16 +192,16 @@ ShCompileOptions ShaderTranslator::GetCompileOptions() const {
   return compile_options_;
 }
 
-bool ShaderTranslator::Translate(const std::string& shader_source,
-                                 std::string* info_log,
-                                 std::string* translated_source,
-                                 int* shader_version,
-                                 AttributeMap* attrib_map,
-                                 UniformMap* uniform_map,
-                                 VaryingMap* varying_map,
-                                 InterfaceBlockMap* interface_block_map,
-                                 OutputVariableList* output_variable_list,
-                                 NameMap* name_map) const {
+bool ShaderTranslator::Translate(
+    const std::string& shader_source,
+    std::string* info_log,
+    std::string* translated_source,
+    int* shader_version,
+    AttributeMap* attrib_map,
+    UniformMap* uniform_map,
+    VaryingMap* varying_map,
+    InterfaceBlockMap* interface_block_map,
+    OutputVariableList* output_variable_list) const {
   // Make sure this instance is initialized.
   DCHECK(compiler_ != NULL);
 
@@ -241,8 +224,6 @@ bool ShaderTranslator::Translate(const std::string& shader_source,
     GetVaryings(compiler_, varying_map);
     GetInterfaceBlocks(compiler_, interface_block_map);
     GetOutputVariables(compiler_, output_variable_list);
-    // Get info for name hashing.
-    GetNameHashingInfo(compiler_, name_map);
   }
 
   // Get info log.

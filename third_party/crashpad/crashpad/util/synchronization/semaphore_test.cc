@@ -43,6 +43,18 @@ TEST(Semaphore, TimedWaitTimeout) {
   EXPECT_FALSE(semaphore.TimedWait(0.01));  // 10ms
 }
 
+TEST(Semaphore, TimedWaitInfinite_0) {
+  Semaphore semaphore(0);
+  semaphore.Signal();
+  EXPECT_TRUE(semaphore.TimedWait(std::numeric_limits<double>::infinity()));
+}
+
+TEST(Semaphore, TimedWaitInfinite_1) {
+  Semaphore semaphore(1);
+  EXPECT_TRUE(semaphore.TimedWait(std::numeric_limits<double>::infinity()));
+  semaphore.Signal();
+}
+
 struct ThreadMainInfo {
 #if defined(OS_POSIX)
   pthread_t pthread;
@@ -73,20 +85,20 @@ ThreadMain(void* argument) {
 void StartThread(ThreadMainInfo* info) {
 #if defined(OS_POSIX)
   int rv = pthread_create(&info->pthread, nullptr, ThreadMain, info);
-  ASSERT_EQ(0, rv) << "pthread_create";
+  ASSERT_EQ(rv, 0) << "pthread_create";
 #elif defined(OS_WIN)
   info->thread = CreateThread(nullptr, 0, ThreadMain, info, 0, nullptr);
-  ASSERT_NE(nullptr, info->thread) << "CreateThread";
+  ASSERT_NE(info->thread, nullptr) << "CreateThread";
 #endif  // OS_POSIX
 }
 
 void JoinThread(ThreadMainInfo* info) {
 #if defined(OS_POSIX)
   int rv = pthread_join(info->pthread, nullptr);
-  EXPECT_EQ(0, rv) << "pthread_join";
+  EXPECT_EQ(rv, 0) << "pthread_join";
 #elif defined(OS_WIN)
   DWORD result = WaitForSingleObject(info->thread, INFINITE);
-  EXPECT_EQ(WAIT_OBJECT_0, result) << "WaitForSingleObject";
+  EXPECT_EQ(result, WAIT_OBJECT_0) << "WaitForSingleObject";
 #endif  // OS_POSIX
 }
 

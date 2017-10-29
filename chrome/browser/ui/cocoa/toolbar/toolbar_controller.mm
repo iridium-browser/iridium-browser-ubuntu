@@ -25,7 +25,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/recovery/recovery_install_global_error_factory.h"
 #include "chrome/browser/search/search.h"
-#include "chrome/browser/sync/sync_global_error_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -58,7 +57,6 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
@@ -238,7 +236,6 @@ class NotificationBridge : public AppMenuIconController::Delegate {
     // Browser), so |commands_| may not be valid any more.
 
     // Start global error services now so we badge the menu correctly.
-    SyncGlobalErrorFactory::GetForProfile(profile);
     RecoveryInstallGlobalErrorFactory::GetForProfile(profile);
   }
   return self;
@@ -251,10 +248,14 @@ class NotificationBridge : public AppMenuIconController::Delegate {
 // reason is not guaranteed to be called (http://crbug.com/526276), so implement
 // both.
 - (void)awakeFromNib {
-  [self viewDidLoad];
+  [self viewDidLoadImpl];
 }
 
 - (void)viewDidLoad {
+  [self viewDidLoadImpl];
+}
+
+- (void)viewDidLoadImpl {
   // Temporary: collect information about a potentially missing or inaccessible
   // nib (https://crbug.com/685985)
   NSString* nibPath = [self.nibBundle pathForResource:@"Toolbar" ofType:@"nib"];
@@ -596,6 +597,10 @@ class NotificationBridge : public AppMenuIconController::Delegate {
   // Allow the |locationBarView_| to update itself to match the browser window
   // theme.
   locationBarView_->OnAddedToWindow();
+}
+
+- (BOOL)locationBarHasFocus {
+  return [autocompleteTextFieldEditor_ window] != nil;
 }
 
 - (void)focusLocationBar:(BOOL)selectAll {

@@ -7,11 +7,14 @@
 #include <stddef.h>
 #include <algorithm>
 
+#include "base/i18n/case_conversion.h"
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_country.h"
+#include "components/autofill/core/browser/autofill_data_util.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/autofill_profile_comparator.h"
@@ -134,8 +137,8 @@ void Address::SetRawInfo(ServerFieldType type, const base::string16& value) {
 
     case ADDRESS_HOME_COUNTRY:
       DCHECK(value.empty() ||
-             (value.length() == 2u && base::IsStringASCII(value)));
-      country_code_ = base::UTF16ToASCII(value);
+             data_util::IsValidCountryCode(base::i18n::ToUpper(value)));
+      country_code_ = base::ToUpperASCII(base::UTF16ToASCII(value));
       break;
 
     case ADDRESS_HOME_ZIP:
@@ -173,7 +176,7 @@ bool Address::SetInfo(const AutofillType& type,
                       const base::string16& value,
                       const std::string& app_locale) {
   if (type.html_type() == HTML_TYPE_COUNTRY_CODE) {
-    if (!value.empty() && (value.size() != 2u || !base::IsStringASCII(value))) {
+    if (!data_util::IsValidCountryCode(base::i18n::ToUpper(value))) {
       country_code_ = std::string();
       return false;
     }
@@ -197,8 +200,7 @@ bool Address::SetInfo(const AutofillType& type,
   // There's a good chance that this formatting is not intentional, but it's
   // also not obviously safe to just strip the newlines.
   if (storable_type == ADDRESS_HOME_STREET_ADDRESS &&
-      std::find(street_address_.begin(), street_address_.end(),
-                base::string16()) != street_address_.end()) {
+      base::ContainsValue(street_address_, base::string16())) {
     street_address_.clear();
     return false;
   }

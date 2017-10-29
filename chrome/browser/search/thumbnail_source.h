@@ -5,27 +5,20 @@
 #ifndef CHROME_BROWSER_SEARCH_THUMBNAIL_SOURCE_H_
 #define CHROME_BROWSER_SEARCH_THUMBNAIL_SOURCE_H_
 
-#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
+#include "components/image_fetcher/core/image_data_fetcher.h"
 #include "content/public/browser/url_data_source.h"
-#include "url/gurl.h"
 
+class GURL;
 class Profile;
 
-namespace base {
-class RefCountedMemory;
-}
-
-namespace gfx {
-class Image;
-}
-
 namespace image_fetcher {
-class ImageFetcher;
+struct RequestMetadata;
 }
 
 namespace thumbnails {
@@ -49,7 +42,9 @@ class ThumbnailSource : public content::URLDataSource {
   scoped_refptr<base::SingleThreadTaskRunner> TaskRunnerForRequestPath(
       const std::string& path) const override;
   bool AllowCaching() const override;
-  bool ShouldServiceRequest(const net::URLRequest* request) const override;
+  bool ShouldServiceRequest(const GURL& url,
+                            content::ResourceContext* resource_context,
+                            int render_process_id) const override;
 
   // Extracts the |page_url| (e.g. cnn.com) and the |fallback_thumbnail_url|
   // fetchable from the server, if present, from the |path|. Visible for
@@ -59,22 +54,12 @@ class ThumbnailSource : public content::URLDataSource {
                                    GURL* fallback_thumbnail_url);
 
  private:
-  // Returns a JPEG-encoded |bitmap| to the |callback| if valid, or the default
-  // thumbnail.
   void SendFetchedUrlImage(
       const content::URLDataSource::GotDataCallback& callback,
-      const std::string& url,
-      const gfx::Image& image);
+      const std::string& image_data,
+      const image_fetcher::RequestMetadata& metadata);
 
-  // Raw PNG representation of the thumbnail to show when the thumbnail
-  // database doesn't have a thumbnail for a webpage.
-  scoped_refptr<base::RefCountedMemory> default_thumbnail_;
-
-  // ThumbnailService.
   scoped_refptr<thumbnails::ThumbnailService> thumbnail_service_;
-
-  // ImageFetcher.
-  std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher_;
 
   // Indicate that, when a URL for which we don't have a thumbnail is requested
   // from this source, then Chrome should capture a thumbnail next time it
@@ -85,6 +70,8 @@ class ThumbnailSource : public content::URLDataSource {
   // existing thumbnails in the database that contain a URL matching the prefix
   // of the requested URL.
   const bool capture_thumbnails_;
+
+  image_fetcher::ImageDataFetcher image_data_fetcher_;
 
   base::WeakPtrFactory<ThumbnailSource> weak_ptr_factory_;
 

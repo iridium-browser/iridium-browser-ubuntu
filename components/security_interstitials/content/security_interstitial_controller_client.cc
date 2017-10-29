@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/security_interstitials/core/metrics_helper.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/web_contents.h"
@@ -46,6 +46,10 @@ void SecurityInterstitialControllerClient::GoBack() {
   interstitial_page_->DontProceed();
 }
 
+bool SecurityInterstitialControllerClient::CanGoBack() {
+  return web_contents_->GetController().CanGoBack();
+}
+
 void SecurityInterstitialControllerClient::GoBackAfterNavigationCommitted() {
   // If the offending entry has committed, go back or to a safe page without
   // closing the error page. This error page will be closed when the new page
@@ -71,6 +75,14 @@ void SecurityInterstitialControllerClient::OpenUrlInCurrentTab(
     const GURL& url) {
   content::OpenURLParams params(url, Referrer(),
                                 WindowOpenDisposition::CURRENT_TAB,
+                                ui::PAGE_TRANSITION_LINK, false);
+  web_contents_->OpenURL(params);
+}
+
+void SecurityInterstitialControllerClient::OpenUrlInNewForegroundTab(
+    const GURL& url) {
+  content::OpenURLParams params(url, Referrer(),
+                                WindowOpenDisposition::NEW_FOREGROUND_TAB,
                                 ui::PAGE_TRANSITION_LINK, false);
   web_contents_->OpenURL(params);
 }

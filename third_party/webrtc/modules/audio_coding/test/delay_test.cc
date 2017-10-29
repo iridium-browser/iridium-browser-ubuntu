@@ -16,7 +16,6 @@
 
 #include "gflags/gflags.h"
 #include "webrtc/common_types.h"
-#include "webrtc/modules/audio_coding/acm2/acm_common_defs.h"
 #include "webrtc/modules/audio_coding/codecs/audio_format_conversion.h"
 #include "webrtc/modules/audio_coding/include/audio_coding_module.h"
 #include "webrtc/modules/audio_coding/include/audio_coding_module_typedefs.h"
@@ -210,7 +209,7 @@ class DelayTest {
                 acm_b_->PlayoutData10Ms(out_freq_hz_b, &audio_frame, &muted));
       RTC_DCHECK(!muted);
       out_file_b_.Write10MsData(
-          audio_frame.data_,
+          audio_frame.data(),
           audio_frame.samples_per_channel_ * audio_frame.num_channels_);
       received_ts = channel_a2b_->LastInTimestamp();
       rtc::Optional<uint32_t> playout_timestamp = acm_b_->PlayoutTimestamp();

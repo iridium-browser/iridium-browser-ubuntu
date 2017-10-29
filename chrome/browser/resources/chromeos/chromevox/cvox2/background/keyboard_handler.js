@@ -39,7 +39,6 @@ BackgroundKeyboardHandler.prototype = {
       return false;
 
     if (ChromeVoxState.instance.mode != ChromeVoxMode.CLASSIC &&
-        ChromeVoxState.instance.mode != ChromeVoxMode.NEXT_COMPAT &&
         !cvox.ChromeVoxKbHandler.basicKeyDownActionsListener(evt)) {
       evt.preventDefault();
       evt.stopPropagation();
@@ -81,8 +80,7 @@ BackgroundKeyboardHandler.prototype = {
    * @param {ChromeVoxMode?} oldMode
    */
   onModeChanged: function(newMode, oldMode) {
-    if (newMode == ChromeVoxMode.CLASSIC ||
-        newMode == ChromeVoxMode.NEXT_COMPAT) {
+    if (newMode == ChromeVoxMode.CLASSIC) {
       chrome.accessibilityPrivate.setKeyboardListener(false, false);
     } else {
       chrome.accessibilityPrivate.setKeyboardListener(
@@ -90,13 +88,12 @@ BackgroundKeyboardHandler.prototype = {
     }
 
     if (newMode === ChromeVoxMode.NEXT ||
-        newMode === ChromeVoxMode.FORCE_NEXT ||
-        newMode === ChromeVoxMode.NEXT_COMPAT) {
+        newMode === ChromeVoxMode.FORCE_NEXT) {
       // Switching out of classic, classic compat, or uninitialized
       // (on startup).
       window['prefs'].switchToKeyMap('keymap_next');
-    } else if (oldMode &&
-        oldMode != ChromeVoxMode.CLASSIC &&
+    } else if (
+        oldMode && oldMode != ChromeVoxMode.CLASSIC &&
         oldMode != ChromeVoxMode.CLASSIC_COMPAT) {
       // Switching out of next. Intentionally do nothing when switching out of
       // an uninitialized |oldMode|.

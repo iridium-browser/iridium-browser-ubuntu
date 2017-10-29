@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/toolbar/app_menu_icon_controller.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/browser/upgrade_observer.h"
 #include "components/prefs/pref_member.h"
 #include "components/translate/core/browser/translate_step.h"
 #include "components/translate/core/common/translate_errors.h"
@@ -23,7 +24,6 @@
 #include "ui/views/view.h"
 
 class AppMenuButton;
-class BackButton;
 class Browser;
 class BrowserActionsContainer;
 class HomeButton;
@@ -44,10 +44,10 @@ class ToolbarView : public views::AccessiblePaneView,
                     public views::MenuButtonListener,
                     public ui::AcceleratorProvider,
                     public LocationBarView::Delegate,
-                    public content::NotificationObserver,
                     public CommandObserver,
                     public views::ButtonListener,
-                    public AppMenuIconController::Delegate {
+                    public AppMenuIconController::Delegate,
+                    public UpgradeObserver {
  public:
   // The view class name.
   static const char kViewClassName[];
@@ -121,12 +121,9 @@ class ToolbarView : public views::AccessiblePaneView,
   content::WebContents* GetWebContents() override;
   ToolbarModel* GetToolbarModel() override;
   const ToolbarModel* GetToolbarModel() const override;
-  PageActionImageView* CreatePageActionImageView(
-      LocationBarView* owner,
-      ExtensionAction* action) override;
   ContentSettingBubbleModelDelegate* GetContentSettingBubbleModelDelegate()
       override;
-  void ShowWebsiteSettings(content::WebContents* web_contents) override;
+  void ShowPageInfo(content::WebContents* web_contents) override;
 
   // CommandObserver:
   void EnabledStateChangedForCommand(int id, bool enabled) override;
@@ -134,17 +131,17 @@ class ToolbarView : public views::AccessiblePaneView,
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
-  // content::NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // UpgradeObserver implementation.
+  void OnOutdatedInstall() override;
+  void OnOutdatedInstallNoAutoUpdate() override;
+  void OnCriticalUpgradeInstalled() override;
 
   // ui::AcceleratorProvider:
   bool GetAcceleratorForCommandId(int command_id,
                                   ui::Accelerator* accelerator) const override;
 
   // views::View:
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
   gfx::Size GetMinimumSize() const override;
   void Layout() override;
   void OnThemeChanged() override;
@@ -170,9 +167,9 @@ class ToolbarView : public views::AccessiblePaneView,
                       bool animate) override;
 
   // Used to avoid duplicating the near-identical logic of
-  // ToolbarView::GetPreferredSize() and ToolbarView::GetMinimumSize(). These
-  // two functions call through to GetSizeInternal(), passing themselves as the
-  // function pointer |View::*get_size|.
+  // ToolbarView::CalculatePreferredSize() and ToolbarView::GetMinimumSize().
+  // These two functions call through to GetSizeInternal(), passing themselves
+  // as the function pointer |View::*get_size|.
   gfx::Size GetSizeInternal(gfx::Size (View::*get_size)() const) const;
 
   // Given toolbar contents of size |size|, returns the total toolbar size.
@@ -196,7 +193,7 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // Controls. Most of these can be null, e.g. in popup windows. Only
   // |location_bar_| is guaranteed to exist.
-  BackButton* back_;
+  ToolbarButton* back_;
   ToolbarButton* forward_;
   ReloadButton* reload_;
   HomeButton* home_;
@@ -213,8 +210,6 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // The display mode used when laying out the toolbar.
   const DisplayMode display_mode_;
-
-  content::NotificationRegistrar registrar_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ToolbarView);
 };

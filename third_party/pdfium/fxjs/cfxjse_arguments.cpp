@@ -8,20 +8,23 @@
 
 #include "fxjs/cfxjse_context.h"
 #include "fxjs/cfxjse_value.h"
+#include "third_party/base/ptr_util.h"
 
-v8::Isolate* CFXJSE_Arguments::GetRuntime() const {
-  return m_pRetValue->GetIsolate();
-}
+CFXJSE_Arguments::CFXJSE_Arguments(
+    const v8::FunctionCallbackInfo<v8::Value>* pInfo,
+    CFXJSE_Value* pRetValue)
+    : m_pInfo(pInfo), m_pRetValue(pRetValue) {}
+
+CFXJSE_Arguments::~CFXJSE_Arguments() {}
 
 int32_t CFXJSE_Arguments::GetLength() const {
   return m_pInfo->Length();
 }
 
 std::unique_ptr<CFXJSE_Value> CFXJSE_Arguments::GetValue(int32_t index) const {
-  std::unique_ptr<CFXJSE_Value> lpArgValue(
-      new CFXJSE_Value(v8::Isolate::GetCurrent()));
-  lpArgValue->ForceSetValue((*m_pInfo)[index]);
-  return lpArgValue;
+  auto pArgValue = pdfium::MakeUnique<CFXJSE_Value>(v8::Isolate::GetCurrent());
+  pArgValue->ForceSetValue((*m_pInfo)[index]);
+  return pArgValue;
 }
 
 bool CFXJSE_Arguments::GetBoolean(int32_t index) const {
@@ -32,8 +35,8 @@ int32_t CFXJSE_Arguments::GetInt32(int32_t index) const {
   return static_cast<int32_t>((*m_pInfo)[index]->NumberValue());
 }
 
-FX_FLOAT CFXJSE_Arguments::GetFloat(int32_t index) const {
-  return static_cast<FX_FLOAT>((*m_pInfo)[index]->NumberValue());
+float CFXJSE_Arguments::GetFloat(int32_t index) const {
+  return static_cast<float>((*m_pInfo)[index]->NumberValue());
 }
 
 CFX_ByteString CFXJSE_Arguments::GetUTF8String(int32_t index) const {
@@ -51,6 +54,6 @@ CFXJSE_HostObject* CFXJSE_Arguments::GetObject(int32_t index,
   return FXJSE_RetrieveObjectBinding(hValue.As<v8::Object>(), pClass);
 }
 
-CFXJSE_Value* CFXJSE_Arguments::GetReturnValue() {
-  return m_pRetValue;
+CFXJSE_Value* CFXJSE_Arguments::GetReturnValue() const {
+  return m_pRetValue.Get();
 }

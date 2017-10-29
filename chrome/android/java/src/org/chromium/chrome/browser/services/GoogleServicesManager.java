@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.services;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.util.Log;
 
@@ -37,6 +38,7 @@ public class GoogleServicesManager implements ApplicationStateListener {
     @VisibleForTesting
     public static final String SESSION_TAG_PREFIX = "session_sync";
 
+    @SuppressLint("StaticFieldLeak")
     private static GoogleServicesManager sGoogleServicesManager;
 
     @VisibleForTesting
@@ -70,7 +72,7 @@ public class GoogleServicesManager implements ApplicationStateListener {
             // us.
             mContext = context.getApplicationContext();
 
-            mChromeSigninController = ChromeSigninController.get(mContext);
+            mChromeSigninController = ChromeSigninController.get();
             mSigninHelper = SigninHelper.get(mContext);
 
             // The sign out flow starts by clearing the signed in user in the ChromeSigninController

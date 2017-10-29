@@ -22,14 +22,11 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/cache_storage/cache_storage_cache_handle.h"
-#include "content/browser/fileapi/mock_url_request_delegate.h"
-#include "content/browser/quota/mock_quota_manager_proxy.h"
 #include "content/common/cache_storage/cache_storage_types.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/referrer.h"
-#include "content/public/test/mock_special_storage_policy.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/test_completion_callback.h"
@@ -42,6 +39,8 @@
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/blob/blob_url_request_job_factory.h"
 #include "storage/browser/quota/quota_manager_proxy.h"
+#include "storage/browser/test/mock_quota_manager_proxy.h"
+#include "storage/browser/test/mock_special_storage_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
@@ -55,10 +54,8 @@ const char kCacheName[] = "test_cache";
 // the memory.
 std::unique_ptr<storage::BlobProtocolHandler> CreateMockBlobProtocolHandler(
     storage::BlobStorageContext* blob_storage_context) {
-  // The FileSystemContext and thread task runner are not actually used but a
-  // task runner is needed to avoid a DCHECK in BlobURLRequestJob ctor.
-  return base::WrapUnique(new storage::BlobProtocolHandler(
-      blob_storage_context, NULL, base::ThreadTaskRunnerHandle::Get().get()));
+  return base::WrapUnique(
+      new storage::BlobProtocolHandler(blob_storage_context, nullptr));
 }
 
 // A disk_cache::Backend wrapper that can delay operations.
@@ -86,8 +83,9 @@ class DelayableBackend : public disk_cache::Backend {
   int DoomEntry(const std::string& key,
                 const CompletionCallback& callback) override {
     if (delay_doom_) {
-      doom_entry_callback_ = base::Bind(&DelayableBackend::DoomEntryDelayedImpl,
-                                        base::Unretained(this), key, callback);
+      doom_entry_callback_ =
+          base::BindOnce(&DelayableBackend::DoomEntryDelayedImpl,
+                         base::Unretained(this), key, callback);
       return net::ERR_IO_PENDING;
     }
 
@@ -118,15 +116,18 @@ class DelayableBackend : public disk_cache::Backend {
   void OnExternalCacheHit(const std::string& key) override {
     return backend_->OnExternalCacheHit(key);
   }
-  size_t EstimateMemoryUsage() const override {
+
+  size_t DumpMemoryStats(
+      base::trace_event::ProcessMemoryDump* pmd,
+      const std::string& parent_absolute_name) const override {
     NOTREACHED();
-    return 0;
+    return 0u;
   }
 
   // Call to continue a delayed doom.
   void DoomEntryContinue() {
     EXPECT_FALSE(doom_entry_callback_.is_null());
-    doom_entry_callback_.Run();
+    std::move(doom_entry_callback_).Run();
   }
 
   void set_delay_doom(bool value) { delay_doom_ = value; }
@@ -141,7 +142,7 @@ class DelayableBackend : public disk_cache::Backend {
 
   std::unique_ptr<disk_cache::Backend> backend_;
   bool delay_doom_;
-  base::Closure doom_entry_callback_;
+  base::OnceClosure doom_entry_callback_;
 };
 
 void CopyBody(const storage::BlobDataHandle& blob_handle, std::string* output) {
@@ -291,15 +292,15 @@ class TestCacheStorageCache : public CacheStorageCache {
                           0 /* cache_size */),
         delay_backend_creation_(false) {}
 
-  void CreateBackend(const ErrorCallback& callback) override {
-    backend_creation_callback_ = callback;
+  void CreateBackend(ErrorCallback callback) override {
+    backend_creation_callback_ = std::move(callback);
     if (delay_backend_creation_)
       return;
     ContinueCreateBackend();
   }
 
   void ContinueCreateBackend() {
-    CacheStorageCache::CreateBackend(backend_creation_callback_);
+    CacheStorageCache::CreateBackend(std::move(backend_creation_callback_));
   }
 
   void set_delay_backend_creation(bool delay) {
@@ -442,10 +443,9 @@ class CacheStorageCacheTest : public testing::Test {
       std::unique_ptr<ServiceWorkerHeaderList> cors_exposed_header_names) {
     return ServiceWorkerResponse(
         base::MakeUnique<std::vector<GURL>>(1, GURL(url)), 200, "OK",
-        blink::WebServiceWorkerResponseTypeDefault, std::move(headers),
-        blob_uuid, blob_size, GURL() /* stream_url */,
-        blink::WebServiceWorkerResponseErrorUnknown, base::Time::Now(),
-        false /* is_in_cache_storage */,
+        blink::kWebServiceWorkerResponseTypeDefault, std::move(headers),
+        blob_uuid, blob_size, blink::kWebServiceWorkerResponseErrorUnknown,
+        base::Time::Now(), false /* is_in_cache_storage */,
         std::string() /* cache_storage_cache_name */,
         std::move(cors_exposed_header_names));
   }
@@ -463,8 +463,8 @@ class CacheStorageCacheTest : public testing::Test {
 
     cache_->BatchOperation(
         operations,
-        base::Bind(&CacheStorageCacheTest::ErrorTypeCallback,
-                   base::Unretained(this), base::Unretained(loop.get())));
+        base::BindOnce(&CacheStorageCacheTest::ErrorTypeCallback,
+                       base::Unretained(this), base::Unretained(loop.get())));
     // TODO(jkarlin): These functions should use base::RunLoop().RunUntilIdle()
     // once the cache uses a passed in task runner instead of the CACHE thread.
     loop->Run();
@@ -491,8 +491,8 @@ class CacheStorageCacheTest : public testing::Test {
 
     cache_->Match(
         CopyFetchRequest(request), match_params,
-        base::Bind(&CacheStorageCacheTest::ResponseAndErrorCallback,
-                   base::Unretained(this), base::Unretained(loop.get())));
+        base::BindOnce(&CacheStorageCacheTest::ResponseAndErrorCallback,
+                       base::Unretained(this), base::Unretained(loop.get())));
     loop->Run();
 
     return callback_error_ == CACHE_STORAGE_OK;
@@ -506,9 +506,9 @@ class CacheStorageCacheTest : public testing::Test {
     base::RunLoop loop;
     cache_->MatchAll(
         CopyFetchRequest(request), match_params,
-        base::Bind(&CacheStorageCacheTest::ResponsesAndErrorCallback,
-                   base::Unretained(this), loop.QuitClosure(), responses,
-                   body_handles));
+        base::BindOnce(&CacheStorageCacheTest::ResponsesAndErrorCallback,
+                       base::Unretained(this), loop.QuitClosure(), responses,
+                       body_handles));
     loop.Run();
     return callback_error_ == CACHE_STORAGE_OK;
   }
@@ -541,8 +541,8 @@ class CacheStorageCacheTest : public testing::Test {
 
     cache_->Keys(
         CopyFetchRequest(request), match_params,
-        base::Bind(&CacheStorageCacheTest::RequestsCallback,
-                   base::Unretained(this), base::Unretained(loop.get())));
+        base::BindOnce(&CacheStorageCacheTest::RequestsCallback,
+                       base::Unretained(this), base::Unretained(loop.get())));
     loop->Run();
 
     return callback_error_ == CACHE_STORAGE_OK;
@@ -551,9 +551,9 @@ class CacheStorageCacheTest : public testing::Test {
   bool Close() {
     std::unique_ptr<base::RunLoop> loop(new base::RunLoop());
 
-    cache_->Close(base::Bind(&CacheStorageCacheTest::CloseCallback,
-                             base::Unretained(this),
-                             base::Unretained(loop.get())));
+    cache_->Close(base::BindOnce(&CacheStorageCacheTest::CloseCallback,
+                                 base::Unretained(this),
+                                 base::Unretained(loop.get())));
     loop->Run();
     return callback_closed_;
   }
@@ -564,8 +564,8 @@ class CacheStorageCacheTest : public testing::Test {
                      int buf_len) {
     base::RunLoop run_loop;
     cache_->WriteSideData(
-        base::Bind(&CacheStorageCacheTest::ErrorTypeCallback,
-                   base::Unretained(this), base::Unretained(&run_loop)),
+        base::BindOnce(&CacheStorageCacheTest::ErrorTypeCallback,
+                       base::Unretained(this), base::Unretained(&run_loop)),
         url, expected_response_time, buffer, buf_len);
     run_loop.Run();
 
@@ -579,9 +579,9 @@ class CacheStorageCacheTest : public testing::Test {
 
     base::RunLoop run_loop;
     bool callback_called = false;
-    cache_->Size(base::Bind(&CacheStorageCacheTest::SizeCallback,
-                            base::Unretained(this), &run_loop,
-                            &callback_called));
+    cache_->Size(base::BindOnce(&CacheStorageCacheTest::SizeCallback,
+                                base::Unretained(this), &run_loop,
+                                &callback_called));
     run_loop.Run();
     EXPECT_TRUE(callback_called);
     return callback_size_;
@@ -590,9 +590,9 @@ class CacheStorageCacheTest : public testing::Test {
   int64_t GetSizeThenClose() {
     base::RunLoop run_loop;
     bool callback_called = false;
-    cache_->GetSizeThenClose(base::Bind(&CacheStorageCacheTest::SizeCallback,
-                                        base::Unretained(this), &run_loop,
-                                        &callback_called));
+    cache_->GetSizeThenClose(
+        base::BindOnce(&CacheStorageCacheTest::SizeCallback,
+                       base::Unretained(this), &run_loop, &callback_called));
     run_loop.Run();
     EXPECT_TRUE(callback_called);
     return callback_size_;
@@ -643,7 +643,7 @@ class CacheStorageCacheTest : public testing::Test {
   }
 
   void ResponsesAndErrorCallback(
-      const base::Closure& quit_closure,
+      base::OnceClosure quit_closure,
       std::unique_ptr<CacheStorageCache::Responses>* responses_out,
       std::unique_ptr<CacheStorageCache::BlobDataHandles>* body_handles_out,
       CacheStorageError error,
@@ -652,7 +652,7 @@ class CacheStorageCacheTest : public testing::Test {
     callback_error_ = error;
     responses_out->swap(responses);
     body_handles_out->swap(body_handles);
-    quit_closure.Run();
+    std::move(quit_closure).Run();
   }
 
   void CloseCallback(base::RunLoop* run_loop) {
@@ -865,8 +865,8 @@ TEST_F(CacheStorageCacheTest, PutBodyDropBlobRef) {
   std::unique_ptr<base::RunLoop> loop(new base::RunLoop());
   cache_->BatchOperation(
       std::vector<CacheStorageBatchOperation>(1, operation),
-      base::Bind(&CacheStorageCacheTestP::ErrorTypeCallback,
-                 base::Unretained(this), base::Unretained(loop.get())));
+      base::BindOnce(&CacheStorageCacheTestP::ErrorTypeCallback,
+                     base::Unretained(this), base::Unretained(loop.get())));
   // The handle should be held by the cache now so the deref here should be
   // okay.
   blob_handle_.reset();
@@ -1408,11 +1408,11 @@ TEST_P(CacheStorageCacheTestP, QuickStressBody) {
 }
 
 TEST_P(CacheStorageCacheTestP, PutResponseType) {
-  EXPECT_TRUE(TestResponseType(blink::WebServiceWorkerResponseTypeBasic));
-  EXPECT_TRUE(TestResponseType(blink::WebServiceWorkerResponseTypeCORS));
-  EXPECT_TRUE(TestResponseType(blink::WebServiceWorkerResponseTypeDefault));
-  EXPECT_TRUE(TestResponseType(blink::WebServiceWorkerResponseTypeError));
-  EXPECT_TRUE(TestResponseType(blink::WebServiceWorkerResponseTypeOpaque));
+  EXPECT_TRUE(TestResponseType(blink::kWebServiceWorkerResponseTypeBasic));
+  EXPECT_TRUE(TestResponseType(blink::kWebServiceWorkerResponseTypeCORS));
+  EXPECT_TRUE(TestResponseType(blink::kWebServiceWorkerResponseTypeDefault));
+  EXPECT_TRUE(TestResponseType(blink::kWebServiceWorkerResponseTypeError));
+  EXPECT_TRUE(TestResponseType(blink::kWebServiceWorkerResponseTypeOpaque));
 }
 
 TEST_P(CacheStorageCacheTestP, WriteSideData) {
@@ -1517,9 +1517,9 @@ TEST_F(CacheStorageCacheTest, CaselessServiceWorkerResponseHeaders) {
   // headers so that it can quickly lookup vary headers.
   ServiceWorkerResponse response(
       base::MakeUnique<std::vector<GURL>>(), 200, "OK",
-      blink::WebServiceWorkerResponseTypeDefault,
-      base::MakeUnique<ServiceWorkerHeaderMap>(), "", 0, GURL(),
-      blink::WebServiceWorkerResponseErrorUnknown, base::Time(),
+      blink::kWebServiceWorkerResponseTypeDefault,
+      base::MakeUnique<ServiceWorkerHeaderMap>(), "", 0,
+      blink::kWebServiceWorkerResponseErrorUnknown, base::Time(),
       false /* is_in_cache_storage */,
       std::string() /* cache_storage_cache_name */,
       base::MakeUnique<
@@ -1624,8 +1624,9 @@ TEST_P(CacheStorageCacheTestP, VerifySerialScheduling) {
   std::unique_ptr<base::RunLoop> close_loop1(new base::RunLoop());
   cache_->BatchOperation(
       std::vector<CacheStorageBatchOperation>(1, operation1),
-      base::Bind(&CacheStorageCacheTest::SequenceCallback,
-                 base::Unretained(this), 1, &sequence_out, close_loop1.get()));
+      base::BindOnce(&CacheStorageCacheTest::SequenceCallback,
+                     base::Unretained(this), 1, &sequence_out,
+                     close_loop1.get()));
 
   // Blocks on creating the cache entry.
   base::RunLoop().RunUntilIdle();
@@ -1639,8 +1640,9 @@ TEST_P(CacheStorageCacheTestP, VerifySerialScheduling) {
   std::unique_ptr<base::RunLoop> close_loop2(new base::RunLoop());
   cache_->BatchOperation(
       std::vector<CacheStorageBatchOperation>(1, operation2),
-      base::Bind(&CacheStorageCacheTest::SequenceCallback,
-                 base::Unretained(this), 2, &sequence_out, close_loop2.get()));
+      base::BindOnce(&CacheStorageCacheTest::SequenceCallback,
+                     base::Unretained(this), 2, &sequence_out,
+                     close_loop2.get()));
 
   // The second put operation should wait for the first to complete.
   base::RunLoop().RunUntilIdle();

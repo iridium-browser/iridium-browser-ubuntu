@@ -11,7 +11,9 @@
 // clang-format off
 #include "BooleanOrString.h"
 
-#include "bindings/core/v8/ToV8.h"
+#include "bindings/core/v8/IDLTypes.h"
+#include "bindings/core/v8/NativeValueTraitsImpl.h"
+#include "bindings/core/v8/ToV8ForCore.h"
 
 namespace blink {
 
@@ -34,18 +36,18 @@ BooleanOrString BooleanOrString::fromBoolean(bool value) {
   return container;
 }
 
-String BooleanOrString::getAsString() const {
+const String& BooleanOrString::getAsString() const {
   DCHECK(isString());
   return m_string;
 }
 
-void BooleanOrString::setString(String value) {
+void BooleanOrString::setString(const String& value) {
   DCHECK(isNull());
   m_string = value;
   m_type = SpecificTypeString;
 }
 
-BooleanOrString BooleanOrString::fromString(String value) {
+BooleanOrString BooleanOrString::fromString(const String& value) {
   BooleanOrString container;
   container.setString(value);
   return container;
@@ -62,7 +64,7 @@ void V8BooleanOrString::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Valu
   if (v8Value.IsEmpty())
     return;
 
-  if (conversionMode == UnionTypeConversionMode::Nullable && isUndefinedOrNull(v8Value))
+  if (conversionMode == UnionTypeConversionMode::kNullable && IsUndefinedOrNull(v8Value))
     return;
 
   if (v8Value->IsBoolean()) {
@@ -72,7 +74,7 @@ void V8BooleanOrString::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Valu
 
   {
     V8StringResource<> cppValue = v8Value;
-    if (!cppValue.prepare(exceptionState))
+    if (!cppValue.Prepare(exceptionState))
       return;
     impl.setString(cppValue);
     return;
@@ -84,18 +86,18 @@ v8::Local<v8::Value> ToV8(const BooleanOrString& impl, v8::Local<v8::Object> cre
     case BooleanOrString::SpecificTypeNone:
       return v8::Null(isolate);
     case BooleanOrString::SpecificTypeBoolean:
-      return v8Boolean(impl.getAsBoolean(), isolate);
+      return v8::Boolean::New(isolate, impl.getAsBoolean());
     case BooleanOrString::SpecificTypeString:
-      return v8String(isolate, impl.getAsString());
+      return V8String(isolate, impl.getAsString());
     default:
       NOTREACHED();
   }
   return v8::Local<v8::Value>();
 }
 
-BooleanOrString NativeValueTraits<BooleanOrString>::nativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState) {
+BooleanOrString NativeValueTraits<BooleanOrString>::NativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState) {
   BooleanOrString impl;
-  V8BooleanOrString::toImpl(isolate, value, impl, UnionTypeConversionMode::NotNullable, exceptionState);
+  V8BooleanOrString::toImpl(isolate, value, impl, UnionTypeConversionMode::kNotNullable, exceptionState);
   return impl;
 }
 

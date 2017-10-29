@@ -13,10 +13,11 @@
 #include <algorithm>
 #include <memory>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/helpers.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/base/stringencode.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/helpers.h"
+#include "webrtc/rtc_base/logging.h"
+#include "webrtc/rtc_base/ptr_util.h"
+#include "webrtc/rtc_base/stringencode.h"
 
 namespace cricket {
 
@@ -189,8 +190,8 @@ StunRequest::~StunRequest() {
 void StunRequest::Construct() {
   if (msg_->type() == 0) {
     if (!origin_.empty()) {
-      msg_->AddAttribute(new StunByteStringAttribute(STUN_ATTR_ORIGIN,
-          origin_));
+      msg_->AddAttribute(
+          rtc::MakeUnique<StunByteStringAttribute>(STUN_ATTR_ORIGIN, origin_));
     }
     Prepare(msg_);
     RTC_DCHECK(msg_->type() != 0);

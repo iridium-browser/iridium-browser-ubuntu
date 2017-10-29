@@ -39,21 +39,21 @@ class SettingsResetPromptDialog : public views::DialogDelegateView {
   bool ShouldShowWindowIcon() const override;
   base::string16 GetWindowTitle() const override;
 
-  // ui::DialogModel overrides.
-  bool ShouldDefaultButtonBeBlue() const override;
-
   // views::DialogDelegate overrides.
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   bool Accept() override;
   bool Cancel() override;
+  // We override |Close()| because we want to distinguish in our metrics between
+  // users clicking the cancel button versus dismissing the dialog in other
+  // ways.
+  bool Close() override;
 
   // views::View overrides.
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
 
  private:
   Browser* browser_;
   safe_browsing::SettingsResetPromptController* controller_;
-  bool interaction_done_;
 
   DISALLOW_COPY_AND_ASSIGN(SettingsResetPromptDialog);
 };

@@ -9,11 +9,11 @@
 
 #include "base/task_scheduler/post_task.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/base/ime/chromeos/input_method_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/platform_font_linux.h"
 
@@ -124,9 +124,7 @@ void SwitchLanguage(const std::string& locale,
   base::Closure reloader(
       base::Bind(&SwitchLanguageDoReloadLocale, base::Unretained(data.get())));
   base::PostTaskWithTraitsAndReply(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
-      reloader,
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND}, reloader,
       base::Bind(&FinishSwitchLanguage, base::Passed(std::move(data))));
 }
 

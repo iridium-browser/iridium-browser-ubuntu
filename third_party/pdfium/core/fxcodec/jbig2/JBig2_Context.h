@@ -40,10 +40,9 @@ using CJBig2_CachePair =
 
 class CJBig2_Context {
  public:
-  CJBig2_Context(CPDF_StreamAcc* pGlobalStream,
-                 CPDF_StreamAcc* pSrcStream,
+  CJBig2_Context(const CFX_RetainPtr<CPDF_StreamAcc>& pGlobalStream,
+                 const CFX_RetainPtr<CPDF_StreamAcc>& pSrcStream,
                  std::list<CJBig2_CachePair>* pSymbolDictCache,
-                 IFX_Pause* pPause,
                  bool bIsGlobal);
   ~CJBig2_Context();
 
@@ -54,7 +53,7 @@ class CJBig2_Context {
                        IFX_Pause* pPause);
 
   int32_t Continue(IFX_Pause* pPause);
-  FXCODEC_STATUS GetProcessingStatus() { return m_ProcessingStatus; }
+  FXCODEC_STATUS GetProcessingStatus() const { return m_ProcessingStatus; }
 
  private:
   int32_t decode_SquentialOrgnazation(IFX_Pause* pPause);
@@ -71,7 +70,7 @@ class CJBig2_Context {
   int32_t parseSegmentData(CJBig2_Segment* pSegment, IFX_Pause* pPause);
   int32_t ProcessingParseSegmentData(CJBig2_Segment* pSegment,
                                      IFX_Pause* pPause);
-  int32_t parseSymbolDict(CJBig2_Segment* pSegment, IFX_Pause* pPause);
+  int32_t parseSymbolDict(CJBig2_Segment* pSegment);
   int32_t parseTextRegion(CJBig2_Segment* pSegment);
   int32_t parsePatternDict(CJBig2_Segment* pSegment, IFX_Pause* pPause);
   int32_t parseHalftoneRegion(CJBig2_Segment* pSegment, IFX_Pause* pPause);
@@ -80,10 +79,10 @@ class CJBig2_Context {
   int32_t parseTable(CJBig2_Segment* pSegment);
   int32_t parseRegionInfo(JBig2RegionInfo* pRI);
 
-  JBig2HuffmanCode* decodeSymbolIDHuffmanTable(CJBig2_BitStream* pStream,
-                                               uint32_t SBNUMSYMS);
+  std::vector<JBig2HuffmanCode> decodeSymbolIDHuffmanTable(
+      CJBig2_BitStream* pStream,
+      uint32_t SBNUMSYMS);
 
-  void huffman_assign_code(int* CODES, int* PREFLEN, int NTEMP);
   void huffman_assign_code(JBig2HuffmanCode* SBSYMCODES, int NTEMP);
 
   std::unique_ptr<CJBig2_Context> m_pGlobalContext;
@@ -95,7 +94,6 @@ class CJBig2_Context {
   bool m_bInPage;
   bool m_bBufSpecified;
   int32_t m_PauseStep;
-  IFX_Pause* const m_pPause;
   FXCODEC_STATUS m_ProcessingStatus;
   std::vector<JBig2ArithCtx> m_gbContext;
   std::unique_ptr<CJBig2_ArithDecoder> m_pArithDecoder;

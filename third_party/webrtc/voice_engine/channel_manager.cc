@@ -10,7 +10,7 @@
 
 #include "webrtc/voice_engine/channel_manager.h"
 
-#include "webrtc/base/timeutils.h"
+#include "webrtc/rtc_base/timeutils.h"
 #include "webrtc/voice_engine/channel.h"
 
 namespace webrtc {
@@ -106,6 +106,12 @@ void ChannelManager::DestroyChannel(int32_t channel_id) {
       channels_.erase(to_delete);
     }
   }
+  if (reference.channel()) {
+    // Ensure the channel is torn down now, on this thread, since a reference
+    // may still be held on a different thread (e.g. in the audio capture
+    // thread).
+    reference.channel()->Terminate();
+  }
 }
 
 void ChannelManager::DestroyAllChannels() {
@@ -116,6 +122,10 @@ void ChannelManager::DestroyAllChannels() {
     rtc::CritScope crit(&lock_);
     references = channels_;
     channels_.clear();
+  }
+  for (auto& owner : references) {
+    if (owner.channel())
+      owner.channel()->Terminate();
   }
 }
 

@@ -13,6 +13,8 @@ import android.widget.TextView;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ntp.ContextMenuManager;
+import org.chromium.chrome.browser.suggestions.SuggestionsMetrics;
+import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
 import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
 
 /**
@@ -23,8 +25,8 @@ public class StatusCardViewHolder extends CardViewHolder {
     private final TextView mBodyView;
     private final Button mActionView;
 
-    public StatusCardViewHolder(
-            NewTabPageRecyclerView parent, ContextMenuManager contextMenuManager, UiConfig config) {
+    public StatusCardViewHolder(SuggestionsRecyclerView parent,
+            ContextMenuManager contextMenuManager, UiConfig config) {
         super(R.layout.new_tab_page_status_card, parent, config, contextMenuManager);
         mTitleView = (TextView) itemView.findViewById(R.id.status_title);
         mBodyView = (TextView) itemView.findViewById(R.id.status_body);
@@ -74,6 +76,7 @@ public class StatusCardViewHolder extends CardViewHolder {
 
                 @Override
                 public void onClick(View v) {
+                    SuggestionsMetrics.recordCardActionTapped();
                     item.performAction(v.getContext());
                 }
             });

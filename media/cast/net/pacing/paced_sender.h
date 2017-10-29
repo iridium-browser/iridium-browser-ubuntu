@@ -16,7 +16,6 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
-#include "base/threading/non_thread_safe.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
@@ -96,9 +95,7 @@ class PacedPacketSender {
   virtual ~PacedPacketSender() {}
 };
 
-class PacedSender : public PacedPacketSender,
-                    public base::NonThreadSafe,
-                    public base::SupportsWeakPtr<PacedSender> {
+class PacedSender : public PacedPacketSender {
  public:
   // |recent_packet_events| is an externally-owned vector where PacedSender will
   // add PacketEvents related to sending, retransmission, and rejection.  The

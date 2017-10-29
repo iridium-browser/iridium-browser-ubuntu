@@ -40,23 +40,13 @@ SDK.Script = class {
    * @param {string} hash
    * @param {boolean} isContentScript
    * @param {boolean} isLiveEdit
-   * @param {string=} sourceMapURL
-   * @param {boolean=} hasSourceURL
+   * @param {string|undefined} sourceMapURL
+   * @param {boolean} hasSourceURL
+   * @param {number} length
    */
   constructor(
-      debuggerModel,
-      scriptId,
-      sourceURL,
-      startLine,
-      startColumn,
-      endLine,
-      endColumn,
-      executionContextId,
-      hash,
-      isContentScript,
-      isLiveEdit,
-      sourceMapURL,
-      hasSourceURL) {
+      debuggerModel, scriptId, sourceURL, startLine, startColumn, endLine, endColumn, executionContextId, hash,
+      isContentScript, isLiveEdit, sourceMapURL, hasSourceURL, length) {
     this.debuggerModel = debuggerModel;
     this.scriptId = scriptId;
     this.sourceURL = sourceURL;
@@ -65,12 +55,13 @@ SDK.Script = class {
     this.endLine = endLine;
     this.endColumn = endColumn;
 
-    this._executionContextId = executionContextId;
+    this.executionContextId = executionContextId;
     this.hash = hash;
     this._isContentScript = isContentScript;
     this._isLiveEdit = isLiveEdit;
     this.sourceMapURL = sourceMapURL;
     this.hasSourceURL = hasSourceURL;
+    this.contentLength = length;
     this._originalContentProvider = null;
     this._originalSource = null;
   }
@@ -96,35 +87,6 @@ SDK.Script = class {
   }
 
   /**
-   * @param {!SDK.Script} script
-   * @param {string} source
-   */
-  static _reportDeprecatedCommentIfNeeded(script, source) {
-    var consoleModel = script.debuggerModel.target().consoleModel;
-    if (!consoleModel)
-      return;
-    var linesToCheck = 5;
-    var offset = source.lastIndexOf('\n');
-    while (linesToCheck && offset !== -1) {
-      offset = source.lastIndexOf('\n', offset - 1);
-      --linesToCheck;
-    }
-    offset = offset !== -1 ? offset : 0;
-    var sourceTail = source.substr(offset);
-    if (sourceTail.length > 5000)
-      return;
-    if (sourceTail.search(/^[\040\t]*\/\/@ source(mapping)?url=/mi) === -1)
-      return;
-    var text = Common.UIString(
-        '\'//@ sourceURL\' and \'//@ sourceMappingURL\' are deprecated, please use \'//# sourceURL=\' and \'//# sourceMappingURL=\' instead.');
-    var msg = new SDK.ConsoleMessage(
-        script.debuggerModel.target(), SDK.ConsoleMessage.MessageSource.JS, SDK.ConsoleMessage.MessageLevel.Warning,
-        text, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-        script.scriptId);
-    consoleModel.addMessage(msg);
-  }
-
-  /**
    * @return {boolean}
    */
   isContentScript() {
@@ -135,7 +97,7 @@ SDK.Script = class {
    * @return {?SDK.ExecutionContext}
    */
   executionContext() {
-    return this.debuggerModel.target().runtimeModel.executionContext(this._executionContextId);
+    return this.debuggerModel.runtimeModel().executionContext(this.executionContextId);
   }
 
   /**
@@ -165,33 +127,16 @@ SDK.Script = class {
    * @override
    * @return {!Promise<?string>}
    */
-  requestContent() {
+  async requestContent() {
     if (this._source)
-      return Promise.resolve(this._source);
+      return this._source;
     if (!this.scriptId)
-      return Promise.resolve(/** @type {?string} */ (''));
-
-    var callback;
-    var promise = new Promise(fulfill => callback = fulfill);
-    this.debuggerModel.target().debuggerAgent().getScriptSource(this.scriptId, didGetScriptSource.bind(this));
-    return promise;
-
-    /**
-     * @this {SDK.Script}
-     * @param {?Protocol.Error} error
-     * @param {string} source
-     */
-    function didGetScriptSource(error, source) {
-      if (!error) {
-        SDK.Script._reportDeprecatedCommentIfNeeded(this, source);
-        this._source = SDK.Script._trimSourceURLComment(source);
-      } else {
-        this._source = '';
-      }
-      if (this._originalSource === null)
-        this._originalSource = this._source;
-      callback(this._source);
-    }
+      return '';
+    var source = await this.debuggerModel.target().debuggerAgent().getScriptSource(this.scriptId);
+    this._source = source ? SDK.Script._trimSourceURLComment(source) : '';
+    if (this._originalSource === null)
+      this._originalSource = this._source;
+    return this._source;
   }
 
   /**
@@ -211,35 +156,15 @@ SDK.Script = class {
    * @param {string} query
    * @param {boolean} caseSensitive
    * @param {boolean} isRegex
-   * @param {function(!Array.<!Protocol.Debugger.SearchMatch>)} callback
+   * @return {!Promise<!Array<!Common.ContentProvider.SearchMatch>>}
    */
-  searchInContent(query, caseSensitive, isRegex, callback) {
-    /**
-     * @param {?Protocol.Error} error
-     * @param {!Array.<!Protocol.Debugger.SearchMatch>} searchMatches
-     */
-    function innerCallback(error, searchMatches) {
-      if (error) {
-        console.error(error);
-        callback([]);
-        return;
-      }
-      var result = [];
-      for (var i = 0; i < searchMatches.length; ++i) {
-        var searchMatch =
-            new Common.ContentProvider.SearchMatch(searchMatches[i].lineNumber, searchMatches[i].lineContent);
-        result.push(searchMatch);
-      }
-      callback(result || []);
-    }
+  async searchInContent(query, caseSensitive, isRegex) {
+    if (!this.scriptId)
+      return [];
 
-    if (this.scriptId) {
-      // Script failed to parse.
-      this.debuggerModel.target().debuggerAgent().searchInContent(
-          this.scriptId, query, caseSensitive, isRegex, innerCallback);
-    } else {
-      callback([]);
-    }
+    var matches =
+        await this.debuggerModel.target().debuggerAgent().searchInContent(this.scriptId, query, caseSensitive, isRegex);
+    return (matches || []).map(match => new Common.ContentProvider.SearchMatch(match.lineNumber, match.lineContent));
   }
 
   /**
@@ -256,33 +181,27 @@ SDK.Script = class {
    * @param {string} newSource
    * @param {function(?Protocol.Error, !Protocol.Runtime.ExceptionDetails=, !Array.<!Protocol.Debugger.CallFrame>=, !Protocol.Runtime.StackTrace=, boolean=)} callback
    */
-  editSource(newSource, callback) {
-    /**
-     * @this {SDK.Script}
-     * @param {?Protocol.Error} error
-     * @param {!Array.<!Protocol.Debugger.CallFrame>=} callFrames
-     * @param {boolean=} stackChanged
-     * @param {!Protocol.Runtime.StackTrace=} asyncStackTrace
-     * @param {!Protocol.Runtime.ExceptionDetails=} exceptionDetails
-     */
-    function didEditScriptSource(error, callFrames, stackChanged, asyncStackTrace, exceptionDetails) {
-      if (!error && !exceptionDetails)
-        this._source = newSource;
-      var needsStepIn = !!stackChanged;
-      callback(error, exceptionDetails, callFrames, asyncStackTrace, needsStepIn);
-    }
-
+  async editSource(newSource, callback) {
     newSource = SDK.Script._trimSourceURLComment(newSource);
     // We append correct sourceURL to script for consistency only. It's not actually needed for things to work correctly.
     newSource = this._appendSourceURLCommentIfNeeded(newSource);
 
-    if (this.scriptId) {
-      this.requestContent().then(
-          () => this.debuggerModel.target().debuggerAgent().setScriptSource(
-              this.scriptId, newSource, undefined, didEditScriptSource.bind(this)));
-    } else {
+    if (!this.scriptId) {
       callback('Script failed to parse');
+      return;
     }
+
+    await this.requestContent();
+    var response = await this.debuggerModel.target().debuggerAgent().invoke_setScriptSource(
+        {scriptId: this.scriptId, scriptSource: newSource});
+
+    if (!response[Protocol.Error] && !response.exceptionDetails)
+      this._source = newSource;
+
+    var needsStepIn = !!response.stackChanged;
+    callback(
+        response[Protocol.Error], response.exceptionDetails, response.callFrames, response.asyncStackTrace,
+        needsStepIn);
   }
 
   /**
@@ -303,16 +222,6 @@ SDK.Script = class {
   }
 
   /**
-   * @param {string} sourceMapURL
-   */
-  addSourceMapURL(sourceMapURL) {
-    if (this.sourceMapURL)
-      return;
-    this.sourceMapURL = sourceMapURL;
-    this.debuggerModel.dispatchEventToListeners(SDK.DebuggerModel.Events.SourceMapURLAdded, this);
-  }
-
-  /**
    * @return {boolean}
    */
   isAnonymousScript() {
@@ -330,25 +239,13 @@ SDK.Script = class {
    * @param {!Array<!Protocol.Debugger.ScriptPosition>} positions
    * @return {!Promise<boolean>}
    */
-  setBlackboxedRanges(positions) {
-    return new Promise(setBlackboxedRanges.bind(this));
-
-    /**
-     * @param {function(?)} fulfill
-     * @param {function(*)} reject
-     * @this {SDK.Script}
-     */
-    function setBlackboxedRanges(fulfill, reject) {
-      this.debuggerModel.target().debuggerAgent().setBlackboxedRanges(this.scriptId, positions, callback);
-      /**
-       * @param {?Protocol.Error} error
-       */
-      function callback(error) {
-        if (error)
-          console.error(error);
-        fulfill(!error);
-      }
-    }
+  async setBlackboxedRanges(positions) {
+    var response = await this.debuggerModel.target().debuggerAgent().invoke_setBlackboxedRanges(
+        {scriptId: this.scriptId, positions});
+    var error = response[Protocol.Error];
+    if (error)
+      console.error(error);
+    return !error;
   }
 };
 

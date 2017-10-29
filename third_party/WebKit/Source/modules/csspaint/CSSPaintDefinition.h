@@ -5,10 +5,12 @@
 #ifndef CSSPaintDefinition_h
 #define CSSPaintDefinition_h
 
-#include "bindings/core/v8/ScopedPersistent.h"
 #include "core/CSSPropertyNames.h"
 #include "core/css/CSSSyntaxDescriptor.h"
 #include "core/css/cssom/CSSStyleValue.h"
+#include "platform/bindings/ScriptWrappable.h"
+#include "platform/bindings/TraceWrapperMember.h"
+#include "platform/bindings/TraceWrapperV8Reference.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/heap/Handle.h"
 #include "v8/include/v8.h"
@@ -16,23 +18,24 @@
 namespace blink {
 
 class Image;
-class LayoutObject;
 class ScriptState;
+class ImageResourceObserver;
 
 // Represents a javascript class registered on the PaintWorkletGlobalScope by
 // the author. It will store the properties for invalidation and input argument
 // types as well.
 class CSSPaintDefinition final
-    : public GarbageCollectedFinalized<CSSPaintDefinition> {
+    : public GarbageCollectedFinalized<CSSPaintDefinition>,
+      public TraceWrapperBase {
  public:
-  static CSSPaintDefinition* create(
+  static CSSPaintDefinition* Create(
       ScriptState*,
       v8::Local<v8::Function> constructor,
       v8::Local<v8::Function> paint,
       Vector<CSSPropertyID>&,
-      Vector<AtomicString>& customInvalidationProperties,
-      Vector<CSSSyntaxDescriptor>& inputArgumentTypes,
-      bool hasAlpha);
+      Vector<AtomicString>& custom_invalidation_properties,
+      Vector<CSSSyntaxDescriptor>& input_argument_types,
+      bool has_alpha);
   virtual ~CSSPaintDefinition();
 
   // Invokes the javascript 'paint' callback on an instance of the javascript
@@ -41,58 +44,58 @@ class CSSPaintDefinition final
   //
   // This may return a nullptr (representing an invalid image) if javascript
   // throws an error.
-  PassRefPtr<Image> paint(const LayoutObject&,
+  PassRefPtr<Image> Paint(const ImageResourceObserver&,
                           const IntSize&,
-                          float zoom,
                           const CSSStyleValueVector*);
-  const Vector<CSSPropertyID>& nativeInvalidationProperties() const {
-    return m_nativeInvalidationProperties;
+  const Vector<CSSPropertyID>& NativeInvalidationProperties() const {
+    return native_invalidation_properties_;
   }
-  const Vector<AtomicString>& customInvalidationProperties() const {
-    return m_customInvalidationProperties;
+  const Vector<AtomicString>& CustomInvalidationProperties() const {
+    return custom_invalidation_properties_;
   }
-  const Vector<CSSSyntaxDescriptor>& inputArgumentTypes() const {
-    return m_inputArgumentTypes;
+  const Vector<CSSSyntaxDescriptor>& InputArgumentTypes() const {
+    return input_argument_types_;
   }
-  bool hasAlpha() const { return m_hasAlpha; }
+  bool HasAlpha() const { return has_alpha_; }
 
-  ScriptState* getScriptState() const { return m_scriptState.get(); }
+  ScriptState* GetScriptState() const { return script_state_.Get(); }
 
-  v8::Local<v8::Function> paintFunctionForTesting(v8::Isolate* isolate) {
-    return m_paint.newLocal(isolate);
+  v8::Local<v8::Function> PaintFunctionForTesting(v8::Isolate* isolate) {
+    return paint_.NewLocal(isolate);
   }
 
   DEFINE_INLINE_TRACE(){};
+  DECLARE_TRACE_WRAPPERS();
 
  private:
   CSSPaintDefinition(ScriptState*,
                      v8::Local<v8::Function> constructor,
                      v8::Local<v8::Function> paint,
-                     Vector<CSSPropertyID>& nativeInvalidationProperties,
-                     Vector<AtomicString>& customInvalidationProperties,
-                     Vector<CSSSyntaxDescriptor>& inputArgumentTypes,
-                     bool hasAlpha);
+                     Vector<CSSPropertyID>& native_invalidation_properties,
+                     Vector<AtomicString>& custom_invalidation_properties,
+                     Vector<CSSSyntaxDescriptor>& input_argument_types,
+                     bool has_alpha);
 
-  void maybeCreatePaintInstance();
+  void MaybeCreatePaintInstance();
 
-  RefPtr<ScriptState> m_scriptState;
+  RefPtr<ScriptState> script_state_;
 
   // This object keeps the class instance object, constructor function and
-  // paint function alive. This object needs to be destroyed to break a
-  // reference cycle between it and the PaintWorkletGlobalScope.
-  ScopedPersistent<v8::Function> m_constructor;
-  ScopedPersistent<v8::Function> m_paint;
+  // paint function alive. It participates in wrapper tracing as it holds onto
+  // V8 wrappers.
+  TraceWrapperV8Reference<v8::Function> constructor_;
+  TraceWrapperV8Reference<v8::Function> paint_;
 
   // At the moment there is only ever one instance of a paint class per type.
-  ScopedPersistent<v8::Object> m_instance;
+  TraceWrapperV8Reference<v8::Object> instance_;
 
-  bool m_didCallConstructor;
+  bool did_call_constructor_;
 
-  Vector<CSSPropertyID> m_nativeInvalidationProperties;
-  Vector<AtomicString> m_customInvalidationProperties;
+  Vector<CSSPropertyID> native_invalidation_properties_;
+  Vector<AtomicString> custom_invalidation_properties_;
   // Input argument types, if applicable.
-  Vector<CSSSyntaxDescriptor> m_inputArgumentTypes;
-  bool m_hasAlpha;
+  Vector<CSSSyntaxDescriptor> input_argument_types_;
+  bool has_alpha_;
 };
 
 }  // namespace blink

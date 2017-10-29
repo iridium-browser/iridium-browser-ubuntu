@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
+#import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/ui/image_util.h"
 #import "ios/chrome/browser/ui/rtl_geometry.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
@@ -14,6 +14,10 @@
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 // Amount by which to inset the button's content.
@@ -32,10 +36,6 @@ const NSTimeInterval kNewTabButtonTransitionDuration =
   if (self = [super initWithFrame:frame]) {
     self.incognito = NO;
 
-    [self addTarget:self
-                  action:@selector(chromeExecuteCommand:)
-        forControlEvents:UIControlEventTouchUpInside];
-
     [self
         setContentEdgeInsets:UIEdgeInsetsMakeDirected(0, kContentInset, 0, 0)];
     [self setContentHorizontalAlignment:
@@ -46,7 +46,6 @@ const NSTimeInterval kNewTabButtonTransitionDuration =
 }
 
 - (void)setIncognito:(BOOL)incognito {
-  self.tag = incognito ? IDC_NEW_INCOGNITO_TAB : IDC_NEW_TAB;
   NSString* normalImageName = @"toolbar_dark_newtab";
   NSString* activeImageName = @"toolbar_dark_newtab_active";
   if (incognito) {

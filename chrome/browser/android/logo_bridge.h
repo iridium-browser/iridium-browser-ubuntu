@@ -7,6 +7,8 @@
 
 #include <jni.h>
 
+#include <memory>
+
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -20,8 +22,13 @@ class LogoBridge {
   explicit LogoBridge(jobject j_profile);
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
 
+  // TODO(treib): Double-check the observer contract (esp. for LogoTracker).
   // Gets the current non-animated logo (downloading it if necessary) and passes
   // it to the observer.
+  // The observer's |onLogoAvailable| is guaranteed to be called at least once:
+  // a) A cached doodle is available.
+  // b) A new doodle is available.
+  // c) Not having a doodle was revalidated.
   void GetCurrentLogo(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
@@ -39,7 +46,7 @@ class LogoBridge {
  private:
   class AnimatedLogoFetcher;
 
-  ~LogoBridge();
+  virtual ~LogoBridge();
 
   LogoService* logo_service_;
 
@@ -49,7 +56,5 @@ class LogoBridge {
 
   DISALLOW_COPY_AND_ASSIGN(LogoBridge);
 };
-
-bool RegisterLogoBridge(JNIEnv* env);
 
 #endif  // CHROME_BROWSER_ANDROID_LOGO_BRIDGE_H_

@@ -15,7 +15,6 @@
 
 namespace blink {
 class WebDataSource;
-enum class WebCachePolicy;
 }
 
 namespace content {
@@ -26,6 +25,7 @@ class DocumentState;
 class InternalDocumentStateData : public base::SupportsUserData::Data {
  public:
   InternalDocumentStateData();
+  ~InternalDocumentStateData() override;
 
   static InternalDocumentStateData* FromDataSource(blink::WebDataSource* ds);
   static InternalDocumentStateData* FromDocumentState(DocumentState* ds);
@@ -71,14 +71,11 @@ class InternalDocumentStateData : public base::SupportsUserData::Data {
   }
   void clear_cache_policy_override() {
     cache_policy_override_set_ = false;
-    cache_policy_override_ = blink::WebCachePolicy::UseProtocolCachePolicy;
+    cache_policy_override_ = blink::WebCachePolicy::kUseProtocolCachePolicy;
   }
   bool is_cache_policy_override_set() const {
     return cache_policy_override_set_;
   }
-
- protected:
-  ~InternalDocumentStateData() override;
 
  private:
   int http_status_code_;

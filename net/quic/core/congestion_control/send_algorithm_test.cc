@@ -12,6 +12,7 @@
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/quic_config_peer.h"
 #include "net/quic/test_tools/quic_connection_peer.h"
@@ -20,7 +21,6 @@
 #include "net/quic/test_tools/simulator/quic_endpoint.h"
 #include "net/quic/test_tools/simulator/simulator.h"
 #include "net/quic/test_tools/simulator/switch.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 using std::string;
 
@@ -98,6 +98,10 @@ const QuicByteCount kCellularQueue = 3 * 1024 * 1024;
 const QuicTime::Delta kTestCellularPropagationDelay =
     QuicTime::Delta::FromMilliseconds(40);
 
+// Small RTT scenario, below the per-ack-update threshold of 30ms.
+const QuicTime::Delta kTestLinkSmallRTTDelay =
+    QuicTime::Delta::FromMilliseconds(10);
+
 const char* CongestionControlTypeToString(CongestionControlType cc_type) {
   switch (cc_type) {
     case kCubic:
@@ -110,6 +114,8 @@ const char* CongestionControlTypeToString(CongestionControlType cc_type) {
       return "RENO_BYTES";
     case kBBR:
       return "BBR";
+    case kPCC:
+      return "PCC";
     default:
       QUIC_DLOG(FATAL) << "Unexpected CongestionControlType";
       return nullptr;
@@ -120,11 +126,13 @@ struct TestParams {
   explicit TestParams(CongestionControlType congestion_control_type,
                       bool fix_convex_mode,
                       bool fix_cubic_quantization,
-                      bool fix_beta_last_max)
+                      bool fix_beta_last_max,
+                      bool allow_per_ack_updates)
       : congestion_control_type(congestion_control_type),
         fix_convex_mode(fix_convex_mode),
         fix_cubic_quantization(fix_cubic_quantization),
-        fix_beta_last_max(fix_beta_last_max) {}
+        fix_beta_last_max(fix_beta_last_max),
+        allow_per_ack_updates(allow_per_ack_updates) {}
 
   friend std::ostream& operator<<(std::ostream& os, const TestParams& p) {
     os << "{ congestion_control_type: "
@@ -132,6 +140,7 @@ struct TestParams {
     os << "  fix_convex_mode: " << p.fix_convex_mode
        << "  fix_cubic_quantization: " << p.fix_cubic_quantization
        << "  fix_beta_last_max: " << p.fix_beta_last_max;
+    os << "  allow_per_ack_updates: " << p.allow_per_ack_updates;
     os << " }";
     return os;
   }
@@ -140,6 +149,7 @@ struct TestParams {
   bool fix_convex_mode;
   bool fix_cubic_quantization;
   bool fix_beta_last_max;
+  bool allow_per_ack_updates;
 };
 
 string TestParamToString(const testing::TestParamInfo<TestParams>& params) {
@@ -147,48 +157,30 @@ string TestParamToString(const testing::TestParamInfo<TestParams>& params) {
       CongestionControlTypeToString(params.param.congestion_control_type), "_",
       "convex_mode_", params.param.fix_convex_mode, "_", "cubic_quantization_",
       params.param.fix_cubic_quantization, "_", "beta_last_max_",
-      params.param.fix_beta_last_max);
+      params.param.fix_beta_last_max, "_", "allow_per_ack_updates_",
+      params.param.allow_per_ack_updates);
 }
 
 // Constructs various test permutations.
 std::vector<TestParams> GetTestParams() {
   std::vector<TestParams> params;
   for (const CongestionControlType congestion_control_type :
-       {kBBR, kCubic, kCubicBytes, kReno, kRenoBytes}) {
+       {kBBR, kCubic, kCubicBytes, kReno, kRenoBytes, kPCC}) {
+    params.push_back(
+        TestParams(congestion_control_type, false, false, false, false));
     if (congestion_control_type != kCubic &&
         congestion_control_type != kCubicBytes) {
-      params.push_back(
-          TestParams(congestion_control_type, false, false, false));
       continue;
     }
-    for (bool fix_convex_mode : {true, false}) {
-      for (bool fix_cubic_quantization : {true, false}) {
-        for (bool fix_beta_last_max : {true, false}) {
-          if (!FLAGS_quic_reloadable_flag_quic_fix_cubic_convex_mode &&
-              fix_convex_mode) {
-            continue;
-          }
-          if (!FLAGS_quic_reloadable_flag_quic_fix_cubic_bytes_quantization &&
-              fix_cubic_quantization) {
-            continue;
-          }
-          if (!FLAGS_quic_reloadable_flag_quic_fix_beta_last_max &&
-              fix_beta_last_max) {
-            continue;
-          }
-          TestParams param(congestion_control_type, fix_convex_mode,
-                           fix_cubic_quantization, fix_beta_last_max);
-          params.push_back(param);
-        }
-      }
-    }
+    params.push_back(
+        TestParams(congestion_control_type, true, true, true, true));
   }
   return params;
 }
 
 }  // namespace
 
-class SendAlgorithmTest : public ::testing::TestWithParam<TestParams> {
+class SendAlgorithmTest : public QuicTestWithParam<TestParams> {
  protected:
   SendAlgorithmTest()
       : simulator_(),
@@ -214,7 +206,13 @@ class SendAlgorithmTest : public ::testing::TestWithParam<TestParams> {
     SetExperimentalOptionsInServerConfig();
 
     QuicConnectionPeer::SetSendAlgorithm(quic_sender_.connection(), sender_);
-
+    // TODO(jokulik):  Remove once b/38032710 is fixed.
+    // Disable pacing for PCC.
+    if (sender_->GetCongestionControlType() == kPCC) {
+      QuicSentPacketManagerPeer::SetUsingPacing(
+          QuicConnectionPeer::GetSentPacketManager(quic_sender_.connection()),
+          false);
+    }
     clock_ = simulator_.GetClock();
     simulator_.set_random_generator(&random_);
 
@@ -234,9 +232,11 @@ class SendAlgorithmTest : public ::testing::TestWithParam<TestParams> {
     if (GetParam().fix_cubic_quantization) {
       options.push_back(kCBQT);
     }
-
     if (GetParam().fix_beta_last_max) {
       options.push_back(kBLMX);
+    }
+    if (GetParam().allow_per_ack_updates) {
+      options.push_back(kCPAU);
     }
 
     if (!options.empty()) {
@@ -412,6 +412,18 @@ TEST_P(SendAlgorithmTest, 3GNetworkTransfer) {
   const QuicTime::Delta maximum_elapsed_time =
       EstimatedElapsedTime(kTransferSizeBytes, kTestLink3GBandwidth,
                            kTestCellularPropagationDelay) *
+      1.2;
+  DoSimpleTransfer(kTransferSizeBytes, maximum_elapsed_time);
+  PrintTransferStats();
+}
+
+TEST_P(SendAlgorithmTest, LowRTTTransfer) {
+  CreateSetup(kTestLinkWiredBandwidth, kTestLinkSmallRTTDelay, kCellularQueue);
+
+  const QuicByteCount kTransferSizeBytes = 12 * 1024 * 1024;
+  const QuicTime::Delta maximum_elapsed_time =
+      EstimatedElapsedTime(kTransferSizeBytes, kTestLinkWiredBandwidth,
+                           kTestLinkSmallRTTDelay) *
       1.2;
   DoSimpleTransfer(kTransferSizeBytes, maximum_elapsed_time);
   PrintTransferStats();

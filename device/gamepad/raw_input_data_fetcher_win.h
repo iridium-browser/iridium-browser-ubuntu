@@ -18,13 +18,12 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/scoped_native_library.h"
 #include "base/win/message_window.h"
 #include "build/build_config.h"
 #include "device/gamepad/gamepad_data_fetcher.h"
 #include "device/gamepad/gamepad_standard_mappings.h"
-#include "third_party/WebKit/public/platform/WebGamepads.h"
+#include "device/gamepad/public/cpp/gamepad.h"
 
 namespace device {
 
@@ -49,18 +48,17 @@ struct RawGamepadInfo {
   uint32_t vendor_id;
   uint32_t product_id;
 
-  wchar_t id[blink::WebGamepad::idLengthCap];
+  wchar_t id[Gamepad::kIdLengthCap];
 
   uint32_t buttons_length;
-  bool buttons[blink::WebGamepad::buttonsLengthCap];
+  bool buttons[Gamepad::kButtonsLengthCap];
 
   uint32_t axes_length;
-  RawGamepadAxis axes[blink::WebGamepad::axesLengthCap];
+  RawGamepadAxis axes[Gamepad::kAxesLengthCap];
 };
 
 class RawInputDataFetcher : public GamepadDataFetcher,
-                            public base::SupportsWeakPtr<RawInputDataFetcher>,
-                            public base::MessageLoop::DestructionObserver {
+                            public base::SupportsWeakPtr<RawInputDataFetcher> {
  public:
   typedef GamepadDataFetcherFactoryImpl<RawInputDataFetcher,
                                         GAMEPAD_SOURCE_WIN_RAW>
@@ -70,9 +68,6 @@ class RawInputDataFetcher : public GamepadDataFetcher,
   ~RawInputDataFetcher() override;
 
   GamepadSource source() override;
-
-  // DestructionObserver overrides.
-  void WillDestroyCurrentMessageLoop() override;
 
   void GetGamepadData(bool devices_changed_hint) override;
   void PauseHint(bool paused) override;

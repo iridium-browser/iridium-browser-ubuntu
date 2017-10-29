@@ -12,6 +12,7 @@
 #include "base/values.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/common/constants.h"
 #include "ipc/ipc_message.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -29,7 +30,8 @@ std::unique_ptr<EventListener> EventListener::ForExtension(
     content::RenderProcessHost* process,
     std::unique_ptr<base::DictionaryValue> filter) {
   return base::WrapUnique(new EventListener(event_name, extension_id, GURL(),
-                                            process, std::move(filter)));
+                                            process, false, kNonWorkerThreadId,
+                                            std::move(filter)));
 }
 
 // static
@@ -42,9 +44,21 @@ std::unique_ptr<EventListener> EventListener::ForURL(
   // for chrome://settings/accounts, to avoid multiple events being triggered
   // for the same process. See crbug.com/536858 for details. // TODO(devlin): If
   // we dispatched events to processes more intelligently this could be avoided.
-  return base::WrapUnique(new EventListener(event_name, "",
-                                            url::Origin(listener_url).GetURL(),
-                                            process, std::move(filter)));
+  return base::WrapUnique(new EventListener(
+      event_name, ExtensionId(), url::Origin(listener_url).GetURL(), process,
+      false, kNonWorkerThreadId, std::move(filter)));
+}
+
+std::unique_ptr<EventListener> EventListener::ForExtensionServiceWorker(
+    const std::string& event_name,
+    const std::string& extension_id,
+    content::RenderProcessHost* process,
+    const GURL& service_worker_scope,
+    int worker_thread_id,
+    std::unique_ptr<base::DictionaryValue> filter) {
+  return base::WrapUnique(
+      new EventListener(event_name, extension_id, service_worker_scope, process,
+                        true, worker_thread_id, std::move(filter)));
 }
 
 EventListener::~EventListener() {}
@@ -56,6 +70,8 @@ bool EventListener::Equals(const EventListener* other) const {
   return event_name_ == other->event_name_ &&
          extension_id_ == other->extension_id_ &&
          listener_url_ == other->listener_url_ && process_ == other->process_ &&
+         is_for_service_worker_ == other->is_for_service_worker_ &&
+         worker_thread_id_ == other->worker_thread_id_ &&
          ((!!filter_.get()) == (!!other->filter_.get())) &&
          (!filter_.get() || filter_->Equals(other->filter_.get()));
 }
@@ -63,10 +79,10 @@ bool EventListener::Equals(const EventListener* other) const {
 std::unique_ptr<EventListener> EventListener::Copy() const {
   std::unique_ptr<DictionaryValue> filter_copy;
   if (filter_)
-    filter_copy.reset(filter_->DeepCopy());
-  return std::unique_ptr<EventListener>(
-      new EventListener(event_name_, extension_id_, listener_url_, process_,
-                        std::move(filter_copy)));
+    filter_copy = filter_->CreateDeepCopy();
+  return base::WrapUnique(new EventListener(
+      event_name_, extension_id_, listener_url_, process_,
+      is_for_service_worker_, worker_thread_id_, std::move(filter_copy)));
 }
 
 bool EventListener::IsLazy() const {
@@ -74,22 +90,27 @@ bool EventListener::IsLazy() const {
 }
 
 void EventListener::MakeLazy() {
-  process_ = NULL;
+  DCHECK_EQ(worker_thread_id_, kNonWorkerThreadId);
+  process_ = nullptr;
 }
 
 content::BrowserContext* EventListener::GetBrowserContext() const {
-  return process_ ? process_->GetBrowserContext() : NULL;
+  return process_ ? process_->GetBrowserContext() : nullptr;
 }
 
 EventListener::EventListener(const std::string& event_name,
                              const std::string& extension_id,
                              const GURL& listener_url,
                              content::RenderProcessHost* process,
+                             bool is_for_service_worker,
+                             int worker_thread_id,
                              std::unique_ptr<DictionaryValue> filter)
     : event_name_(event_name),
       extension_id_(extension_id),
       listener_url_(listener_url),
       process_(process),
+      is_for_service_worker_(is_for_service_worker),
+      worker_thread_id_(worker_thread_id),
       filter_(std::move(filter)),
       matcher_id_(-1) {}
 
@@ -121,18 +142,17 @@ bool EventListenerMap::AddListener(std::unique_ptr<EventListener> listener) {
 
 std::unique_ptr<EventMatcher> EventListenerMap::ParseEventMatcher(
     DictionaryValue* filter_dict) {
-  return std::unique_ptr<EventMatcher>(new EventMatcher(
-      base::WrapUnique(filter_dict->DeepCopy()), MSG_ROUTING_NONE));
+  return base::MakeUnique<EventMatcher>(filter_dict->CreateDeepCopy(),
+                                        MSG_ROUTING_NONE);
 }
 
 bool EventListenerMap::RemoveListener(const EventListener* listener) {
   ListenerList& listeners = listeners_[listener->event_name()];
-  for (ListenerList::iterator it = listeners.begin(); it != listeners.end();
-       it++) {
-    if ((*it)->Equals(listener)) {
-      CleanupListener(it->get());
+  for (auto& it : listeners) {
+    if (it->Equals(listener)) {
+      CleanupListener(it.get());
       // Popping from the back should be cheaper than erase(it).
-      std::swap(*it, listeners.back());
+      std::swap(it, listeners.back());
       listeners.pop_back();
       delegate_->OnListenerRemoved(listener);
       return true;
@@ -141,48 +161,49 @@ bool EventListenerMap::RemoveListener(const EventListener* listener) {
   return false;
 }
 
-bool EventListenerMap::HasListenerForEvent(const std::string& event_name) {
-  ListenerMap::iterator it = listeners_.find(event_name);
+bool EventListenerMap::HasListenerForEvent(
+    const std::string& event_name) const {
+  ListenerMap::const_iterator it = listeners_.find(event_name);
   return it != listeners_.end() && !it->second.empty();
 }
 
 bool EventListenerMap::HasListenerForExtension(
     const std::string& extension_id,
-    const std::string& event_name) {
-  ListenerMap::iterator it = listeners_.find(event_name);
+    const std::string& event_name) const {
+  auto it = listeners_.find(event_name);
   if (it == listeners_.end())
     return false;
 
-  for (ListenerList::iterator it2 = it->second.begin();
-       it2 != it->second.end(); it2++) {
-    if ((*it2)->extension_id() == extension_id)
+  for (const auto& listener_to_search : it->second) {
+    if (listener_to_search->extension_id() == extension_id)
       return true;
   }
   return false;
 }
 
-bool EventListenerMap::HasListener(const EventListener* listener) {
-  ListenerMap::iterator it = listeners_.find(listener->event_name());
+bool EventListenerMap::HasListener(const EventListener* listener) const {
+  auto it = listeners_.find(listener->event_name());
   if (it == listeners_.end())
     return false;
-  for (ListenerList::iterator it2 = it->second.begin();
-       it2 != it->second.end(); it2++) {
-    if ((*it2)->Equals(listener)) {
+
+  for (const auto& listener_to_search : it->second) {
+    if (listener_to_search->Equals(listener))
       return true;
-    }
   }
   return false;
 }
 
-bool EventListenerMap::HasProcessListener(content::RenderProcessHost* process,
-                                          const std::string& extension_id) {
-  for (ListenerMap::iterator it = listeners_.begin(); it != listeners_.end();
-       it++) {
-    for (ListenerList::iterator it2 = it->second.begin();
-         it2 != it->second.end(); it2++) {
-      if ((*it2)->process() == process &&
-          (*it2)->extension_id() == extension_id)
+bool EventListenerMap::HasProcessListener(
+    content::RenderProcessHost* process,
+    int worker_thread_id,
+    const std::string& extension_id) const {
+  for (const auto& it : listeners_) {
+    for (const auto& listener : it.second) {
+      if (listener->process() == process &&
+          listener->extension_id() == extension_id &&
+          listener->worker_thread_id() == worker_thread_id) {
         return true;
+      }
     }
   }
   return false;
@@ -190,17 +211,17 @@ bool EventListenerMap::HasProcessListener(content::RenderProcessHost* process,
 
 void EventListenerMap::RemoveListenersForExtension(
     const std::string& extension_id) {
-  for (ListenerMap::iterator it = listeners_.begin(); it != listeners_.end();
-       it++) {
-    for (ListenerList::iterator it2 = it->second.begin();
-         it2 != it->second.end();) {
+  for (auto& it : listeners_) {
+    auto& listener_map = it.second;
+    for (ListenerList::iterator it2 = listener_map.begin();
+         it2 != listener_map.end();) {
       if ((*it2)->extension_id() == extension_id) {
         std::unique_ptr<EventListener> listener_removed = std::move(*it2);
         CleanupListener(listener_removed.get());
-        it2 = it->second.erase(it2);
+        it2 = listener_map.erase(it2);
         delegate_->OnListenerRemoved(listener_removed.get());
       } else {
-        it2++;
+        ++it2;
       }
     }
   }
@@ -209,10 +230,9 @@ void EventListenerMap::RemoveListenersForExtension(
 void EventListenerMap::LoadUnfilteredLazyListeners(
     const std::string& extension_id,
     const std::set<std::string>& event_names) {
-  for (std::set<std::string>::const_iterator it = event_names.begin();
-       it != event_names.end(); ++it) {
+  for (const auto& name : event_names) {
     AddListener(EventListener::ForExtension(
-        *it, extension_id, NULL, std::unique_ptr<DictionaryValue>()));
+        name, extension_id, nullptr, std::unique_ptr<DictionaryValue>()));
   }
 }
 
@@ -221,15 +241,18 @@ void EventListenerMap::LoadFilteredLazyListeners(
     const DictionaryValue& filtered) {
   for (DictionaryValue::Iterator it(filtered); !it.IsAtEnd(); it.Advance()) {
     // We skip entries if they are malformed.
-    const base::ListValue* filter_list = NULL;
+    const base::ListValue* filter_list = nullptr;
     if (!it.value().GetAsList(&filter_list))
       continue;
     for (size_t i = 0; i < filter_list->GetSize(); i++) {
-      const DictionaryValue* filter = NULL;
+      const DictionaryValue* filter = nullptr;
       if (!filter_list->GetDictionary(i, &filter))
         continue;
-      AddListener(EventListener::ForExtension(
-          it.key(), extension_id, NULL, base::WrapUnique(filter->DeepCopy())));
+      // Currently this is only used for lazy background page events.
+      // TODO(lazyboy): Add extension SW lazy events.
+      AddListener(
+          EventListener::ForExtension(it.key(), extension_id, nullptr,
+                                      base::WrapUnique(filter->DeepCopy())));
     }
   }
 }
@@ -242,18 +265,14 @@ std::set<const EventListener*> EventListenerMap::GetEventListeners(
     std::set<MatcherID> ids =
         event_filter_.MatchEvent(event.event_name, event.filter_info,
             MSG_ROUTING_NONE);
-    for (std::set<MatcherID>::iterator id = ids.begin(); id != ids.end();
-         id++) {
-      EventListener* listener = listeners_by_matcher_id_[*id];
+    for (const MatcherID& id : ids) {
+      EventListener* listener = listeners_by_matcher_id_[id];
       CHECK(listener);
       interested_listeners.insert(listener);
     }
   } else {
-    ListenerList& listeners = listeners_[event.event_name];
-    for (ListenerList::const_iterator it = listeners.begin();
-         it != listeners.end(); it++) {
-      interested_listeners.insert(it->get());
-    }
+    for (const auto& listener : listeners_[event.event_name])
+      interested_listeners.insert(listener.get());
   }
 
   return interested_listeners;
@@ -262,17 +281,17 @@ std::set<const EventListener*> EventListenerMap::GetEventListeners(
 void EventListenerMap::RemoveListenersForProcess(
     const content::RenderProcessHost* process) {
   CHECK(process);
-  for (ListenerMap::iterator it = listeners_.begin(); it != listeners_.end();
-       it++) {
-    for (ListenerList::iterator it2 = it->second.begin();
-         it2 != it->second.end();) {
+  for (auto& it : listeners_) {
+    auto& listener_map = it.second;
+    for (ListenerList::iterator it2 = listener_map.begin();
+         it2 != listener_map.end();) {
       if ((*it2)->process() == process) {
         std::unique_ptr<EventListener> listener_removed = std::move(*it2);
         CleanupListener(listener_removed.get());
-        it2 = it->second.erase(it2);
+        it2 = listener_map.erase(it2);
         delegate_->OnListenerRemoved(listener_removed.get());
       } else {
-        it2++;
+        ++it2;
       }
     }
   }
@@ -287,7 +306,7 @@ void EventListenerMap::CleanupListener(EventListener* listener) {
 }
 
 bool EventListenerMap::IsFilteredEvent(const Event& event) const {
-  return filtered_events_.count(event.event_name) > 0u;
+  return base::ContainsKey(filtered_events_, event.event_name);
 }
 
 }  // namespace extensions

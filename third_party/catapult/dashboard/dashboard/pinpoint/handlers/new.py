@@ -2,38 +2,63 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import json
 import webapp2
 
+from dashboard.api import api_auth
 from dashboard.pinpoint.models import change
 from dashboard.pinpoint.models import job as job_module
-from dashboard.services import gitiles_service
+
+_ERROR_METRIC_NO_TEST_SUITE = "Specified a metric but there's no test_suite "\
+                              "to run."
+_ERROR_BUG_ID = 'Bug ID must be integer value.'
 
 
-class NewHandler(webapp2.RequestHandler):
+class ParameterValidationError(Exception):
+  pass
+
+
+class New(webapp2.RequestHandler):
   """Handler that cooks up a fresh Pinpoint job."""
 
   def post(self):
-    # TODO(dtu): Read the parameters from the request object.
-    # Not doing it for now because it's easier to run tests this way.
-    configuration = 'Mac Pro 10.11 Perf'
-    test_suite = 'tab_switching.typical_25'
-    test = 'http://www.airbnb.com/'
-    metric = 'asdf'
-    commits = (('chromium/src', '653e80aeeaac895c6f9bfb6181655f15f29cb0be'),)
+    try:
+      self._CreateJob()
+    except (api_auth.ApiAuthException, ParameterValidationError) as e:
+      self._WriteErrorMessage(e.message)
+
+  def _WriteErrorMessage(self, message):
+    self.response.out.write(json.dumps({'error': message}))
+
+  @api_auth.Authorize
+  def _CreateJob(self):
+    """Start a new Pinpoint job."""
+    configuration = self.request.get('configuration')
+    test_suite = self.request.get('test_suite')
+    test = self.request.get('test')
+    metric = self.request.get('metric')
+    auto_explore = self.request.get('auto_explore') == '1'
+    bug_id = self._ValidateBugId(self.request.get('bug_id'))
+
+    change_1 = {
+        'base_commit': {
+            'repository': self.request.get('start_repository'),
+            'git_hash': self.request.get('start_git_hash')
+        }
+    }
+
+    change_2 = {
+        'base_commit': {
+            'repository': self.request.get('end_repository'),
+            'git_hash': self.request.get('end_git_hash')
+        }
+    }
 
     # Validate parameters.
-    if metric and not test_suite:
-      raise ValueError("Specified a metric but there's no test_suite to run.")
-
-    # Validate commit hashes.
-    for repository, git_hash in commits:
-      try:
-        gitiles_service.CommitInfo(repository, git_hash)
-      except gitiles_service.NotFoundError:
-        raise ValueError('Could not find the commit with Gitiles: %s@%s' %
-                         (repository, git_hash))
+    self._ValidateMetric(test_suite, metric)
 
     # Convert parameters to canonical internal representation.
+    changes = self._ValidateChanges(change_1, change_2)
 
     # Create job.
     job = job_module.Job.New(
@@ -41,12 +66,12 @@ class NewHandler(webapp2.RequestHandler):
         test_suite=test_suite,
         test=test,
         metric=metric,
-        auto_explore=True)
+        auto_explore=auto_explore,
+        bug_id=bug_id)
 
     # Add changes.
-    for repository, git_hash in commits:
-      base_commit = change.Dep(repository=repository, git_hash=git_hash)
-      job.AddChange(change.Change(base_commit=base_commit))
+    for c in changes:
+      job.AddChange(c)
 
     # Put job into datastore.
     job_id = job.put().urlsafe()
@@ -55,6 +80,28 @@ class NewHandler(webapp2.RequestHandler):
     job.Start()
     job.put()
 
-    # Show status page.
-    # TODO: Should return a JSON result instead. Use Cloud Endpoints.
-    self.redirect('/job/' + job_id)
+    self.response.out.write(json.dumps({
+        'jobId': job_id
+    }))
+
+  def _ValidateBugId(self, bug_id):
+    if not bug_id:
+      return None
+
+    try:
+      return int(bug_id)
+    except ValueError:
+      raise ParameterValidationError(_ERROR_BUG_ID)
+
+  def _ValidateChanges(self, change_1, change_2):
+    try:
+      changes = (change.Change.FromDict(change_1),
+                 change.Change.FromDict(change_2))
+    except (KeyError, ValueError) as e:
+      raise ParameterValidationError(str(e))
+
+    return changes
+
+  def _ValidateMetric(self, test_suite, metric):
+    if metric and not test_suite:
+      raise ParameterValidationError(_ERROR_METRIC_NO_TEST_SUITE)

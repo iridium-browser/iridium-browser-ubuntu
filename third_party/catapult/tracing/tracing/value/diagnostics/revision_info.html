@@ -26,11 +26,11 @@ tr.exportTo('tr.v.d', function() {
     }
 
     addToHistogram(hist) {
-      hist.diagnostics.set(RevisionInfo.NAME, this);
+      hist.diagnostics.set(tr.v.d.RESERVED_NAMES.REVISIONS, this);
     }
 
     clone() {
-      let clone = new tr.v.d.MergedRevisionInfo();
+      const clone = new tr.v.d.MergedRevisionInfo();
       clone.addDiagnostic(this);
       return clone;
     }
@@ -82,8 +82,6 @@ tr.exportTo('tr.v.d', function() {
       return this.webrtc_;
     }
   }
-
-  RevisionInfo.NAME = 'revisions';
 
   tr.v.d.Diagnostic.register(RevisionInfo, {
     elementName: 'tr-v-ui-revision-info-span'

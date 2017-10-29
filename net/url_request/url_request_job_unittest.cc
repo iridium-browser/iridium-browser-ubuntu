@@ -12,6 +12,7 @@
 #include "net/test/cert_test_util.h"
 #include "net/test/gtest_util.h"
 #include "net/test/test_data_directory.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -92,44 +93,91 @@ void MakeMockReferrerPolicyTransaction(const char* original_url,
   }
   transaction->cert_status = 0;
   transaction->ssl_connection_status = 0;
-  transaction->return_code = OK;
+  transaction->start_return_code = OK;
 }
 
 const MockTransaction kNoFilter_Transaction = {
-    "http://www.google.com/gzyp", "GET", base::Time(), "", LOAD_NORMAL,
+    "http://www.google.com/gzyp",
+    "GET",
+    base::Time(),
+    "",
+    LOAD_NORMAL,
     "HTTP/1.1 200 OK",
     "Cache-Control: max-age=10000\n"
     "Content-Length: 30\n",  // Intentionally wrong.
     base::Time(),
-    "hello", TEST_MODE_NORMAL, nullptr, nullptr, 0, 0, OK,
+    "hello",
+    TEST_MODE_NORMAL,
+    nullptr,
+    nullptr,
+    0,
+    0,
+    OK,
+    OK,
 };
 
 const MockTransaction kGZip_Transaction = {
-    "http://www.google.com/gzyp", "GET", base::Time(), "", LOAD_NORMAL,
+    "http://www.google.com/gzyp",
+    "GET",
+    base::Time(),
+    "",
+    LOAD_NORMAL,
     "HTTP/1.1 200 OK",
     "Cache-Control: max-age=10000\n"
     "Content-Encoding: gzip\n"
     "Content-Length: 30\n",  // Intentionally wrong.
     base::Time(),
-    "", TEST_MODE_NORMAL, &GZipServer, nullptr, nullptr, 0, 0, OK,
+    "",
+    TEST_MODE_NORMAL,
+    &GZipServer,
+    nullptr,
+    nullptr,
+    0,
+    0,
+    OK,
+    OK,
 };
 
 const MockTransaction kGzip_Slow_Transaction = {
-    "http://www.google.com/gzyp", "GET", base::Time(), "", LOAD_NORMAL,
+    "http://www.google.com/gzyp",
+    "GET",
+    base::Time(),
+    "",
+    LOAD_NORMAL,
     "HTTP/1.1 200 OK",
     "Cache-Control: max-age=10000\n"
     "Content-Encoding: gzip\n",
-    base::Time(), "", TEST_MODE_SLOW_READ, &GZipHelloServer, nullptr, nullptr,
-    0, 0, OK,
+    base::Time(),
+    "",
+    TEST_MODE_SLOW_READ,
+    &GZipHelloServer,
+    nullptr,
+    nullptr,
+    0,
+    0,
+    OK,
+    OK,
 };
 
 const MockTransaction kRedirect_Transaction = {
-    "http://www.google.com/redirect", "GET", base::Time(), "", LOAD_NORMAL,
+    "http://www.google.com/redirect",
+    "GET",
+    base::Time(),
+    "",
+    LOAD_NORMAL,
     "HTTP/1.1 302 Found",
     "Cache-Control: max-age=10000\n"
     "Location: http://www.google.com/destination\n"
     "Content-Length: 5\n",
-    base::Time(), "hello", TEST_MODE_NORMAL, nullptr, nullptr, nullptr, 0, 0,
+    base::Time(),
+    "hello",
+    TEST_MODE_NORMAL,
+    nullptr,
+    nullptr,
+    nullptr,
+    0,
+    0,
+    OK,
     OK,
 };
 
@@ -150,24 +198,49 @@ const MockTransaction kEmptyBodyGzip_Transaction = {
     0,
     0,
     OK,
+    OK,
 };
 
 const MockTransaction kInvalidContentGZip_Transaction = {
-    "http://www.google.com/gzyp", "GET", base::Time(), "", LOAD_NORMAL,
+    "http://www.google.com/gzyp",
+    "GET",
+    base::Time(),
+    "",
+    LOAD_NORMAL,
     "HTTP/1.1 200 OK",
     "Content-Encoding: gzip\n"
     "Content-Length: 21\n",
-    base::Time(), "not a valid gzip body", TEST_MODE_NORMAL, nullptr, nullptr,
-    nullptr, 0, 0, OK,
+    base::Time(),
+    "not a valid gzip body",
+    TEST_MODE_NORMAL,
+    nullptr,
+    nullptr,
+    nullptr,
+    0,
+    0,
+    OK,
+    OK,
 };
 
 const MockTransaction kBrotli_Slow_Transaction = {
-    "http://www.google.com/brotli", "GET", base::Time(), "", LOAD_NORMAL,
+    "http://www.google.com/brotli",
+    "GET",
+    base::Time(),
+    "",
+    LOAD_NORMAL,
     "HTTP/1.1 200 OK",
     "Cache-Control: max-age=10000\n"
     "Content-Encoding: br\n",
-    base::Time(), "", TEST_MODE_SLOW_READ, &BrotliHelloServer, nullptr, nullptr,
-    0, 0, OK,
+    base::Time(),
+    "",
+    TEST_MODE_SLOW_READ,
+    &BrotliHelloServer,
+    nullptr,
+    nullptr,
+    0,
+    0,
+    OK,
+    OK,
 };
 
 }  // namespace
@@ -178,8 +251,9 @@ TEST(URLRequestJob, TransactionNoFilter) {
   context.set_http_transaction_factory(&network_layer);
 
   TestDelegate d;
-  std::unique_ptr<URLRequest> req(context.CreateRequest(
-      GURL(kNoFilter_Transaction.url), DEFAULT_PRIORITY, &d));
+  std::unique_ptr<URLRequest> req(
+      context.CreateRequest(GURL(kNoFilter_Transaction.url), DEFAULT_PRIORITY,
+                            &d, TRAFFIC_ANNOTATION_FOR_TESTS));
   AddMockTransaction(&kNoFilter_Transaction);
 
   req->set_method("GET");
@@ -202,7 +276,8 @@ TEST(URLRequestJob, TransactionNotifiedWhenDone) {
 
   TestDelegate d;
   std::unique_ptr<URLRequest> req(
-      context.CreateRequest(GURL(kGZip_Transaction.url), DEFAULT_PRIORITY, &d));
+      context.CreateRequest(GURL(kGZip_Transaction.url), DEFAULT_PRIORITY, &d,
+                            TRAFFIC_ANNOTATION_FOR_TESTS));
   AddMockTransaction(&kGZip_Transaction);
 
   req->set_method("GET");
@@ -226,7 +301,8 @@ TEST(URLRequestJob, SyncTransactionNotifiedWhenDone) {
 
   TestDelegate d;
   std::unique_ptr<URLRequest> req(
-      context.CreateRequest(GURL(kGZip_Transaction.url), DEFAULT_PRIORITY, &d));
+      context.CreateRequest(GURL(kGZip_Transaction.url), DEFAULT_PRIORITY, &d,
+                            TRAFFIC_ANNOTATION_FOR_TESTS));
   MockTransaction transaction(kGZip_Transaction);
   transaction.test_mode = TEST_MODE_SYNC_ALL;
   AddMockTransaction(&transaction);
@@ -253,7 +329,8 @@ TEST(URLRequestJob, SyncSlowTransaction) {
 
   TestDelegate d;
   std::unique_ptr<URLRequest> req(
-      context.CreateRequest(GURL(kGZip_Transaction.url), DEFAULT_PRIORITY, &d));
+      context.CreateRequest(GURL(kGZip_Transaction.url), DEFAULT_PRIORITY, &d,
+                            TRAFFIC_ANNOTATION_FOR_TESTS));
   MockTransaction transaction(kGZip_Transaction);
   transaction.test_mode = TEST_MODE_SYNC_ALL | TEST_MODE_SLOW_READ;
   transaction.handler = &BigGZipServer;
@@ -279,8 +356,9 @@ TEST(URLRequestJob, RedirectTransactionNotifiedWhenDone) {
   context.set_http_transaction_factory(&network_layer);
 
   TestDelegate d;
-  std::unique_ptr<URLRequest> req(context.CreateRequest(
-      GURL(kRedirect_Transaction.url), DEFAULT_PRIORITY, &d));
+  std::unique_ptr<URLRequest> req(
+      context.CreateRequest(GURL(kRedirect_Transaction.url), DEFAULT_PRIORITY,
+                            &d, TRAFFIC_ANNOTATION_FOR_TESTS));
   AddMockTransaction(&kRedirect_Transaction);
 
   req->set_method("GET");
@@ -382,6 +460,97 @@ TEST(URLRequestJob, RedirectTransactionWithReferrerPolicyHeader) {
            ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN /* expected final policy */,
        "https://foo.test/" /* expected final referrer */},
 
+      // If a redirect serves 'Referrer-Policy: same-origin', then the referrer
+      // should be untouched for a same-origin redirect,
+      {"https://foo.test/one" /* original url */,
+       "https://foo.test/referrer" /* original referrer */,
+       "Location: https://foo.test/two\n"
+       "Referrer-Policy: same-origin\n",
+       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       URLRequest::CLEAR_REFERRER_ON_TRANSITION_CROSS_ORIGIN /* final policy */
+       ,
+       "https://foo.test/referrer" /* expected final referrer */},
+
+      // ... but should be cleared for a cross-origin redirect.
+      {"https://foo.test/one" /* original url */,
+       "https://foo.test/referrer" /* original referrer */,
+       "Location: https://bar.test/two\n"
+       "Referrer-Policy: same-origin\n",
+       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       URLRequest::CLEAR_REFERRER_ON_TRANSITION_CROSS_ORIGIN,
+       "" /* expected final referrer */},
+
+      // If a redirect serves 'Referrer-Policy: strict-origin', then the
+      // referrer should be the origin only for a cross-origin non-downgrading
+      // redirect,
+      {"https://foo.test/one" /* original url */,
+       "https://foo.test/referrer" /* original referrer */,
+       "Location: https://bar.test/two\n"
+       "Referrer-Policy: strict-origin\n",
+       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       "https://foo.test/" /* expected final referrer */},
+      {"http://foo.test/one" /* original url */,
+       "http://foo.test/referrer" /* original referrer */,
+       "Location: http://bar.test/two\n"
+       "Referrer-Policy: strict-origin\n",
+       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       "http://foo.test/" /* expected final referrer */},
+
+      // ... but should be cleared for a downgrading redirect.
+      {"https://foo.test/one" /* original url */,
+       "https://foo.test/referrer" /* original referrer */,
+       "Location: http://foo.test/two\n"
+       "Referrer-Policy: strict-origin\n",
+       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       URLRequest::ORIGIN_CLEAR_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+       "" /* expected final referrer */},
+
+      // If a redirect serves 'Referrer-Policy:
+      // strict-origin-when-cross-origin', then the referrer should be preserved
+      // for a same-origin redirect,
+      {"https://foo.test/one" /* original url */,
+       "https://foo.test/referrer" /* original referrer */,
+       "Location: https://foo.test/two\n"
+       "Referrer-Policy: strict-origin-when-cross-origin\n",
+       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+       "https://foo.test/referrer" /* expected final referrer */},
+      {"http://foo.test/one" /* original url */,
+       "http://foo.test/referrer" /* original referrer */,
+       "Location: http://foo.test/two\n"
+       "Referrer-Policy: strict-origin-when-cross-origin\n",
+       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+       "http://foo.test/referrer" /* expected final referrer */},
+
+      // ... but should be stripped to the origin for a cross-origin
+      // non-downgrading redirect,
+      {"https://foo.test/one" /* original url */,
+       "https://foo.test/referrer" /* original referrer */,
+       "Location: https://bar.test/two\n"
+       "Referrer-Policy: strict-origin-when-cross-origin\n",
+       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+       "https://foo.test/" /* expected final referrer */},
+      {"http://foo.test/one" /* original url */,
+       "http://foo.test/referrer" /* original referrer */,
+       "Location: http://bar.test/two\n"
+       "Referrer-Policy: strict-origin-when-cross-origin\n",
+       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+       "http://foo.test/" /* expected final referrer */},
+
+      // ... and should be cleared for a downgrading redirect.
+      {"https://foo.test/one" /* original url */,
+       "https://foo.test/referrer" /* original referrer */,
+       "Location: http://foo.test/two\n"
+       "Referrer-Policy: strict-origin-when-cross-origin\n",
+       URLRequest::NEVER_CLEAR_REFERRER /* original policy */,
+       URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
+       "" /* expected final referrer */},
+
       // If a redirect serves 'Referrer-Policy: unsafe-url', then the
       // referrer should remain, even if originally set to clear on
       // downgrade.
@@ -468,7 +637,8 @@ TEST(URLRequestJob, RedirectTransactionWithReferrerPolicyHeader) {
 
     TestDelegate d;
     std::unique_ptr<URLRequest> req(
-        context.CreateRequest(GURL(transaction.url), DEFAULT_PRIORITY, &d));
+        context.CreateRequest(GURL(transaction.url), DEFAULT_PRIORITY, &d,
+                              TRAFFIC_ANNOTATION_FOR_TESTS));
     AddMockTransaction(&transaction);
 
     req->set_referrer_policy(test.original_referrer_policy);
@@ -500,7 +670,8 @@ TEST(URLRequestJob, TransactionNotCachedWhenNetworkDelegateRedirects) {
 
   TestDelegate d;
   std::unique_ptr<URLRequest> req(
-      context.CreateRequest(GURL(kGZip_Transaction.url), DEFAULT_PRIORITY, &d));
+      context.CreateRequest(GURL(kGZip_Transaction.url), DEFAULT_PRIORITY, &d,
+                            TRAFFIC_ANNOTATION_FOR_TESTS));
   AddMockTransaction(&kGZip_Transaction);
 
   req->set_method("GET");
@@ -523,7 +694,8 @@ TEST(URLRequestJob, EmptyBodySkipFilter) {
 
   TestDelegate d;
   std::unique_ptr<URLRequest> req(context.CreateRequest(
-      GURL(kEmptyBodyGzip_Transaction.url), DEFAULT_PRIORITY, &d));
+      GURL(kEmptyBodyGzip_Transaction.url), DEFAULT_PRIORITY, &d,
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   AddMockTransaction(&kEmptyBodyGzip_Transaction);
 
   req->set_method("GET");
@@ -547,7 +719,8 @@ TEST(URLRequestJob, InvalidContentGZipTransaction) {
 
   TestDelegate d;
   std::unique_ptr<URLRequest> req(context.CreateRequest(
-      GURL(kInvalidContentGZip_Transaction.url), DEFAULT_PRIORITY, &d));
+      GURL(kInvalidContentGZip_Transaction.url), DEFAULT_PRIORITY, &d,
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   AddMockTransaction(&kInvalidContentGZip_Transaction);
 
   req->set_method("GET");
@@ -574,8 +747,9 @@ TEST(URLRequestJob, SlowFilterRead) {
   context.set_http_transaction_factory(&network_layer);
 
   TestDelegate d;
-  std::unique_ptr<URLRequest> req(context.CreateRequest(
-      GURL(kGzip_Slow_Transaction.url), DEFAULT_PRIORITY, &d));
+  std::unique_ptr<URLRequest> req(
+      context.CreateRequest(GURL(kGzip_Slow_Transaction.url), DEFAULT_PRIORITY,
+                            &d, TRAFFIC_ANNOTATION_FOR_TESTS));
   AddMockTransaction(&kGzip_Slow_Transaction);
 
   req->set_method("GET");
@@ -598,7 +772,8 @@ TEST(URLRequestJob, SlowBrotliRead) {
 
   TestDelegate d;
   std::unique_ptr<URLRequest> req(context.CreateRequest(
-      GURL(kBrotli_Slow_Transaction.url), DEFAULT_PRIORITY, &d));
+      GURL(kBrotli_Slow_Transaction.url), DEFAULT_PRIORITY, &d,
+      TRAFFIC_ANNOTATION_FOR_TESTS));
   AddMockTransaction(&kBrotli_Slow_Transaction);
 
   req->set_method("GET");

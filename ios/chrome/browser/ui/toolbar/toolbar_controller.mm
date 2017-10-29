@@ -16,7 +16,7 @@
 #include "base/metrics/user_metrics_action.h"
 #import "ios/chrome/browser/ui/animation_util.h"
 #import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
+#import "ios/chrome/browser/ui/commands/browser_commands.h"
 #include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #import "ios/chrome/browser/ui/fullscreen_controller.h"
 #import "ios/chrome/browser/ui/image_util.h"
@@ -27,13 +27,17 @@
 #include "ios/chrome/browser/ui/toolbar/toolbar_resource_macros.h"
 #import "ios/chrome/browser/ui/toolbar/toolbar_tools_menu_button.h"
 #import "ios/chrome/browser/ui/toolbar/tools_menu_button_observer_bridge.h"
-#import "ios/chrome/browser/ui/tools_menu/tools_menu_context.h"
 #import "ios/chrome/browser/ui/tools_menu/tools_popup_controller.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/common/material_timing.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
-#import "ios/third_party/material_roboto_font_loader_ios/src/src/MaterialRobotoFontLoader.h"
+#import "ios/shared/chrome/browser/ui/tools_menu/tools_menu_configuration.h"
+#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using base::UserMetricsAction;
 using ios::material::TimingFunction;
@@ -200,26 +204,21 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 @end
 
 @interface ToolbarController () {
-  // The top-level toolbar view.
-  base::scoped_nsobject<ToolbarView> view_;
-  // The view for the toolbar background image.
-  base::scoped_nsobject<UIImageView> backgroundView_;
-  base::scoped_nsobject<UIImageView> shadowView_;
-  base::scoped_nsobject<UIImageView> fullBleedShadowView_;
+  // The shadow view. Only used on iPhone.
+  UIImageView* fullBleedShadowView_;
 
   // The backing object for |self.transitionLayers|.
-  base::scoped_nsobject<NSMutableArray> transitionLayers_;
+  NSMutableArray* transitionLayers_;
 
-  base::scoped_nsobject<ToolbarToolsMenuButton> toolsMenuButton_;
-  base::scoped_nsobject<UIButton> stackButton_;
-  base::scoped_nsobject<UIButton> shareButton_;
-  base::scoped_nsobject<NSArray> standardButtons_;
-  base::scoped_nsobject<ToolsMenuButtonObserverBridge>
-      toolsMenuButtonObserverBridge_;
+  ToolbarToolsMenuButton* toolsMenuButton_;
+  UIButton* stackButton_;
+  UIButton* shareButton_;
+  NSArray* standardButtons_;
+  ToolsMenuButtonObserverBridge* toolsMenuButtonObserverBridge_;
   ToolbarControllerStyle style_;
 
   // The following is nil if not visible.
-  base::scoped_nsobject<ToolsPopupController> toolsPopupController_;
+  ToolsPopupController* toolsPopupController_;
 }
 
 // Returns the background image that should be used for |style|.
@@ -245,22 +244,29 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 @implementation ToolbarController
 
 @synthesize readingListModel = readingListModel_;
-
+@synthesize view = view_;
+@synthesize backgroundView = backgroundView_;
+@synthesize shadowView = shadowView_;
+@synthesize toolsPopupController = toolsPopupController_;
 @synthesize style = style_;
+@synthesize dispatcher = dispatcher_;
 
 - (void)setReadingListModel:(ReadingListModel*)readingListModel {
   readingListModel_ = readingListModel;
   if (readingListModel_) {
-    toolsMenuButtonObserverBridge_.reset([[ToolsMenuButtonObserverBridge alloc]
-        initWithModel:readingListModel_
-        toolbarButton:toolsMenuButton_]);
+    toolsMenuButtonObserverBridge_ =
+        [[ToolsMenuButtonObserverBridge alloc] initWithModel:readingListModel_
+                                               toolbarButton:toolsMenuButton_];
   }
 }
 
-- (instancetype)initWithStyle:(ToolbarControllerStyle)style {
+- (instancetype)initWithStyle:(ToolbarControllerStyle)style
+                   dispatcher:
+                       (id<ApplicationCommands, BrowserCommands>)dispatcher {
   self = [super init];
   if (self) {
     style_ = style;
+    dispatcher_ = dispatcher;
     DCHECK_LT(style_, ToolbarControllerStyleMaxStyles);
 
     InterfaceIdiom idiom = IsIPadIdiom() ? IPAD_IDIOM : IPHONE_IDIOM;
@@ -278,12 +284,14 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
       toolsMenuButtonFrame.origin.y += statusBarOffset;
     }
 
-    view_.reset([[ToolbarView alloc] initWithFrame:viewFrame]);
-    backgroundView_.reset([[UIImageView alloc] initWithFrame:backgroundFrame]);
-    toolsMenuButton_.reset([[ToolbarToolsMenuButton alloc]
-        initWithFrame:toolsMenuButtonFrame
-                style:style_]);
-    [toolsMenuButton_ setTag:IDC_SHOW_TOOLS_MENU];
+    view_ = [[ToolbarView alloc] initWithFrame:viewFrame];
+    backgroundView_ = [[UIImageView alloc] initWithFrame:backgroundFrame];
+    toolsMenuButton_ =
+        [[ToolbarToolsMenuButton alloc] initWithFrame:toolsMenuButtonFrame
+                                                style:style_];
+    [toolsMenuButton_ addTarget:self.dispatcher
+                         action:@selector(showToolsMenu)
+               forControlEvents:UIControlEventTouchUpInside];
     [toolsMenuButton_
         setAutoresizingMask:UIViewAutoresizingFlexibleLeadingMargin() |
                             UIViewAutoresizingFlexibleBottomMargin];
@@ -296,8 +304,7 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 
     if (idiom == IPAD_IDIOM) {
       CGRect shareButtonFrame = LayoutRectGetRect(kShareMenuButtonFrame);
-      shareButton_.reset([[UIButton alloc] initWithFrame:shareButtonFrame]);
-      [shareButton_ setTag:IDC_SHARE_PAGE];
+      shareButton_ = [[UIButton alloc] initWithFrame:shareButtonFrame];
       [shareButton_
           setAutoresizingMask:UIViewAutoresizingFlexibleLeadingMargin() |
                               UIViewAutoresizingFlexibleBottomMargin];
@@ -306,6 +313,9 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
            forInitialState:UIControlStateNormal
           hasDisabledImage:YES
              synchronously:NO];
+      [shareButton_ addTarget:self.dispatcher
+                       action:@selector(sharePage)
+             forControlEvents:UIControlEventTouchUpInside];
       SetA11yLabelAndUiAutomationName(shareButton_, IDS_IOS_TOOLS_MENU_SHARE,
                                       kToolbarShareButtonIdentifier);
       [view_ addSubview:shareButton_];
@@ -313,7 +323,7 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 
     CGRect shadowFrame = kShadowViewFrame[idiom];
     shadowFrame.origin.y = CGRectGetMaxY(backgroundFrame);
-    shadowView_.reset([[UIImageView alloc] initWithFrame:shadowFrame]);
+    shadowView_ = [[UIImageView alloc] initWithFrame:shadowFrame];
     [shadowView_ setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
     [shadowView_ setUserInteractionEnabled:NO];
     [view_ addSubview:shadowView_];
@@ -323,8 +333,8 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
       // iPad omnibox does not expand to full bleed.
       CGRect fullBleedShadowFrame = kFullBleedShadowViewFrame;
       fullBleedShadowFrame.origin.y = shadowFrame.origin.y;
-      fullBleedShadowView_.reset(
-          [[UIImageView alloc] initWithFrame:fullBleedShadowFrame]);
+      fullBleedShadowView_ =
+          [[UIImageView alloc] initWithFrame:fullBleedShadowFrame];
       [fullBleedShadowView_
           setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
       [fullBleedShadowView_ setUserInteractionEnabled:NO];
@@ -334,8 +344,8 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
           setImage:NativeImage(IDR_IOS_TOOLBAR_SHADOW_FULL_BLEED)];
     }
 
-    transitionLayers_.reset(
-        [[NSMutableArray alloc] initWithCapacity:kTransitionLayerCapacity]);
+    transitionLayers_ =
+        [[NSMutableArray alloc] initWithCapacity:kTransitionLayerCapacity];
 
     // UIImageViews do not default to userInteractionEnabled:YES.
     [view_ setUserInteractionEnabled:YES];
@@ -346,8 +356,8 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
         setImage:StretchableImageFromUIImage(tile, 0.0, 3.0)];
 
     if (idiom == IPHONE_IDIOM) {
-      stackButton_.reset(
-          [[ToolbarCenteredButton alloc] initWithFrame:stackButtonFrame]);
+      stackButton_ =
+          [[ToolbarCenteredButton alloc] initWithFrame:stackButtonFrame];
       [stackButton_ setTag:IDC_TOGGLE_TAB_SWITCHER];
       [[stackButton_ titleLabel]
           setFont:[self fontForSize:kFontSizeFewerThanTenTabs]];
@@ -401,33 +411,20 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 }
 
 - (UIFont*)fontForSize:(NSInteger)size {
-  return [[MDFRobotoFontLoader sharedInstance] boldFontOfSize:size];
+  return [[MDCTypography fontLoader] boldFontOfSize:size];
 }
 
 - (void)dealloc {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [toolsPopupController_ setDelegate:nil];
-  [super dealloc];
-}
-
-- (UIImageView*)view {
-  return view_.get();
-}
-
-- (UIImageView*)backgroundView {
-  return backgroundView_.get();
 }
 
 - (CGFloat)statusBarOffset {
   return StatusBarHeight();
 }
 
-- (UIImageView*)shadowView {
-  return shadowView_.get();
-}
-
 - (NSMutableArray*)transitionLayers {
-  return transitionLayers_.get();
+  return transitionLayers_;
 }
 
 - (BOOL)imageShouldFlipForRightToLeftLayoutDirection:(int)imageEnum {
@@ -444,22 +441,18 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
     [standardButtons addObject:stackButton_];
   if (shareButtonShouldBeVisible)
     [standardButtons addObject:shareButton_];
-  standardButtons_.reset([standardButtons retain]);
+  standardButtons_ = standardButtons;
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection*)previousTraitCollection {
   [self updateStandardButtons];
 }
 
-- (ToolsPopupController*)toolsPopupController {
-  return toolsPopupController_.get();
-}
-
 - (void)applicationDidEnterBackground:(NSNotification*)notify {
-  if (toolsPopupController_.get()) {
+  if (toolsPopupController_) {
     // Dismiss the tools popup menu without animation.
     [toolsMenuButton_ setToolsMenuIsVisible:NO];
-    toolsPopupController_.reset(nil);
+    toolsPopupController_ = nil;
     [[NSNotificationCenter defaultCenter]
         postNotificationName:kMenuWillHideNotification
                       object:nil];
@@ -490,7 +483,7 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 }
 
 - (int)imageEnumForButton:(UIButton*)button {
-  if (button == stackButton_.get())
+  if (button == stackButton_)
     return ToolbarButtonNameStack;
   return NumberOfToolbarButtonNames;
 }
@@ -563,7 +556,7 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 }
 
 - (void)registerEventsForButton:(UIButton*)button {
-  if (button != toolsMenuButton_.get()) {
+  if (button != toolsMenuButton_) {
     // |target| must be |self| (as opposed to |nil|) because |self| isn't in the
     // responder chain.
     [button addTarget:self
@@ -573,9 +566,12 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
   [button addTarget:self
                 action:@selector(recordUserMetrics:)
       forControlEvents:UIControlEventTouchUpInside];
-  [button addTarget:button
-                action:@selector(chromeExecuteCommand:)
-      forControlEvents:UIControlEventTouchUpInside];
+  // Only register buttons with defined tags for -chromeExecuteCommand:.
+  if (button.tag) {
+    [button addTarget:button
+                  action:@selector(chromeExecuteCommand:)
+        forControlEvents:UIControlEventTouchUpInside];
+  }
 }
 
 - (CGRect)shareButtonAnchorRect {
@@ -585,10 +581,11 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 }
 
 - (UIView*)shareButtonView {
-  return shareButton_.get();
+  return shareButton_;
 }
 
-- (void)showToolsMenuPopupWithContext:(ToolsMenuContext*)context {
+- (void)showToolsMenuPopupWithConfiguration:
+    (ToolsMenuConfiguration*)configuration {
   // Because an animation hides and shows the tools popup menu it is possible to
   // tap the tools button multiple times before the tools menu is shown. Ignore
   // repeated taps between animations.
@@ -600,9 +597,10 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
   // Keep the button pressed.
   [toolsMenuButton_ setToolsMenuIsVisible:YES];
 
-  [context setToolsMenuButton:toolsMenuButton_];
-  toolsPopupController_.reset(
-      [[ToolsPopupController alloc] initWithContext:context]);
+  [configuration setToolsMenuButton:toolsMenuButton_];
+  toolsPopupController_ =
+      [[ToolsPopupController alloc] initWithConfiguration:configuration
+                                               dispatcher:self.dispatcher];
 
   [toolsPopupController_ setDelegate:self];
 
@@ -612,9 +610,9 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 }
 
 - (void)dismissToolsMenuPopup {
-  if (!toolsPopupController_.get())
+  if (!toolsPopupController_)
     return;
-  ToolsPopupController* tempTPC = toolsPopupController_.get();
+  ToolsPopupController* tempTPC = toolsPopupController_;
   [tempTPC containerView].userInteractionEnabled = NO;
   [tempTPC dismissAnimatedWithCompletion:^{
     // Unpress the tools menu button by restoring the normal and
@@ -625,7 +623,7 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
   }];
   // reset tabHistoryPopupController_ to prevent -applicationDidEnterBackground
   // from posting another kMenuWillHideNotification.
-  toolsPopupController_.reset();
+  toolsPopupController_ = nil;
 
   [[NSNotificationCenter defaultCenter]
       postNotificationName:kMenuWillHideNotification
@@ -684,7 +682,7 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
   fadeButtons.fromValue = @1;
   fadeButtons.toValue = @0;
 
-  for (UIButton* button in standardButtons_.get()) {
+  for (UIButton* button in standardButtons_) {
     if (![button isHidden]) {
       [button layer].opacity = 0;
       [[button layer] addAnimation:fadeButtons forKey:@"fade"];
@@ -698,7 +696,7 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
   [CATransaction
       setAnimationTimingFunction:TimingFunction(ios::material::CurveEaseIn)];
 
-  for (UIButton* button in standardButtons_.get()) {
+  for (UIButton* button in standardButtons_) {
     CABasicAnimation* shiftButton =
         [CABasicAnimation animationWithKeyPath:@"position"];
     CGPoint startPosition = [button layer].position;
@@ -720,7 +718,7 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 }
 
 - (void)fadeInStandardControls {
-  for (UIButton* button in standardButtons_.get()) {
+  for (UIButton* button in standardButtons_) {
     [self fadeInView:button
         fromLeadingOffset:10
              withDuration:ios::material::kDuration2
@@ -738,7 +736,7 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 - (void)animationDidStart:(CAAnimation*)anim {
   // Once the buttons start fading in, set their opacity to 1 so there's no
   // flicker at the end of the animation.
-  for (UIButton* button in standardButtons_.get()) {
+  for (UIButton* button in standardButtons_) {
     if (anim == [[button layer] animationForKey:@"fadeIn"]) {
       [button layer].opacity = 1;
       return;
@@ -932,18 +930,18 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 
 - (void)setStandardControlsVisible:(BOOL)visible {
   if (visible) {
-    for (UIButton* button in standardButtons_.get()) {
+    for (UIButton* button in standardButtons_) {
       [button setAlpha:1.0];
     }
   } else {
-    for (UIButton* button in standardButtons_.get()) {
+    for (UIButton* button in standardButtons_) {
       [button setAlpha:0.0];
     }
   }
 }
 
 - (void)setStandardControlsAlpha:(CGFloat)alpha {
-  for (UIButton* button in standardButtons_.get()) {
+  for (UIButton* button in standardButtons_) {
     if (![button isHidden])
       [button setAlpha:alpha];
   }
@@ -955,7 +953,7 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 }
 
 - (void)setStandardControlsTransform:(CGAffineTransform)transform {
-  for (UIButton* button in standardButtons_.get()) {
+  for (UIButton* button in standardButtons_) {
     [button setTransform:transform];
   }
 }
@@ -1013,11 +1011,11 @@ const LayoutOffset kButtonFadeOutXOffset = 10;
 }
 
 - (IBAction)recordUserMetrics:(id)sender {
-  if (sender == toolsMenuButton_.get())
+  if (sender == toolsMenuButton_)
     base::RecordAction(UserMetricsAction("MobileToolbarShowMenu"));
-  else if (sender == stackButton_.get())
+  else if (sender == stackButton_)
     base::RecordAction(UserMetricsAction("MobileToolbarShowStackView"));
-  else if (sender == shareButton_.get())
+  else if (sender == shareButton_)
     base::RecordAction(UserMetricsAction("MobileToolbarShareMenu"));
   else
     NOTREACHED();

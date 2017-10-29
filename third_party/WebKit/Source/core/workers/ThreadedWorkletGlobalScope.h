@@ -15,36 +15,37 @@ class WorkerThread;
 class CORE_EXPORT ThreadedWorkletGlobalScope : public WorkletGlobalScope {
  public:
   ~ThreadedWorkletGlobalScope() override;
-  void dispose() final;
-  void countFeature(UseCounter::Feature) final;
-  void countDeprecation(UseCounter::Feature) final;
+  void Dispose() override;
+  void ReportFeature(WebFeature) override;
+  void ReportDeprecation(WebFeature) override;
 
   // ExecutionContext
-  bool isThreadedWorkletGlobalScope() const final { return true; }
-  bool isContextThread() const final;
-  void addConsoleMessage(ConsoleMessage*) final;
-  void exceptionThrown(ErrorEvent*) final;
+  bool IsThreadedWorkletGlobalScope() const final { return true; }
+  bool IsContextThread() const final;
+  void AddConsoleMessage(ConsoleMessage*) final;
+  void ExceptionThrown(ErrorEvent*) final;
 
-  WorkerThread* thread() const { return m_thread; }
+  WorkerThread* GetThread() const { return thread_; }
 
  protected:
   ThreadedWorkletGlobalScope(const KURL&,
-                             const String& userAgent,
+                             const String& user_agent,
                              PassRefPtr<SecurityOrigin>,
                              v8::Isolate*,
-                             WorkerThread*);
+                             WorkerThread*,
+                             WorkerClients*);
 
  private:
   friend class ThreadedWorkletThreadForTest;
 
-  WorkerThread* m_thread;
+  WorkerThread* thread_;
 };
 
 DEFINE_TYPE_CASTS(ThreadedWorkletGlobalScope,
                   ExecutionContext,
                   context,
-                  context->isThreadedWorkletGlobalScope(),
-                  context.isThreadedWorkletGlobalScope());
+                  context->IsThreadedWorkletGlobalScope(),
+                  context.IsThreadedWorkletGlobalScope());
 
 }  // namespace blink
 

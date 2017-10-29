@@ -18,7 +18,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/sequence_checker.h"
 #include "content/browser/loader/resource_controller.h"
 #include "content/common/content_export.h"
 
@@ -43,8 +43,7 @@ struct ResourceResponse;
 // No ResourceHandler method other than OnWillRead will ever be called
 // synchronously when it calls into the ResourceController passed in to it,
 // either to resume or cancel the request.
-class CONTENT_EXPORT ResourceHandler
-    : public NON_EXPORTED_BASE(base::NonThreadSafe) {
+class CONTENT_EXPORT ResourceHandler {
  public:
   virtual ~ResourceHandler();
 
@@ -106,12 +105,11 @@ class CONTENT_EXPORT ResourceHandler
   // Unlike other methods, may be called synchronously on Resume, for
   // performance reasons.
   //
-  // If the handler returns false, then the request is cancelled.  Otherwise,
-  // once data is available, OnReadCompleted will be called.
-  // TODO(mmenke):  Make this method use a ResourceController, and allow it to
-  // succeed asynchronously.
-  virtual bool OnWillRead(scoped_refptr<net::IOBuffer>* buf,
-                          int* buf_size) = 0;
+  // The request will not continue until one of |controller|'s resume or
+  // cancellation methods is invoked.
+  virtual void OnWillRead(scoped_refptr<net::IOBuffer>* buf,
+                          int* buf_size,
+                          std::unique_ptr<ResourceController> controller) = 0;
 
   // Data (*bytes_read bytes) was written into the buffer provided by
   // OnWillRead.  The request will not continue until one of |controller|'s
@@ -176,6 +174,8 @@ class CONTENT_EXPORT ResourceHandler
   net::URLRequest* request_;
   Delegate* delegate_;
   std::unique_ptr<ResourceController> controller_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(ResourceHandler);
 };

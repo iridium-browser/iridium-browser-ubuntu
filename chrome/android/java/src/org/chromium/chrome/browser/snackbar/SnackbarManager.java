@@ -6,13 +6,16 @@ package org.chromium.chrome.browser.snackbar;
 
 import android.app.Activity;
 import android.os.Handler;
+import android.support.annotation.Nullable;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.chrome.browser.device.DeviceClassManager;
+import org.chromium.chrome.browser.infobar.InfoBar;
+import org.chromium.chrome.browser.infobar.InfoBarContainer;
+import org.chromium.chrome.browser.util.AccessibilityUtil;
 
 /**
  * Manager for the snackbar showing at the bottom of activity. There should be only one
@@ -23,8 +26,7 @@ import org.chromium.chrome.browser.device.DeviceClassManager;
  * during {@link #DEFAULT_SNACKBAR_DURATION_MS} milliseconds, it will call
  * {@link SnackbarController#onDismissNoAction(Object)}.
  */
-public class SnackbarManager implements OnClickListener {
-
+public class SnackbarManager implements OnClickListener, InfoBarContainer.InfoBarContainerObserver {
     /**
      * Interface that shows the ability to provide a snackbar manager. Activities implementing this
      * interface must call {@link SnackbarManager#onStart()} and {@link SnackbarManager#onStop()} in
@@ -68,6 +70,7 @@ public class SnackbarManager implements OnClickListener {
     private SnackbarCollection mSnackbars = new SnackbarCollection();
     private boolean mActivityInForeground;
     private boolean mIsDisabledForTesting;
+    private ViewGroup mSnackbarParentView;
     private final Runnable mHideRunnable = new Runnable() {
         @Override
         public void run() {
@@ -79,10 +82,13 @@ public class SnackbarManager implements OnClickListener {
     /**
      * Constructs a SnackbarManager to show snackbars in the given window.
      * @param activity The embedding activity.
+     * @param snackbarParentView The ViewGroup used to display snackbars. If this is null, the
+     *                           {@link SnackbarView} will determine where to attach the snackbar.
      */
-    public SnackbarManager(Activity activity) {
+    public SnackbarManager(Activity activity, @Nullable ViewGroup snackbarParentView) {
         mActivity = activity;
         mUIThreadHandler = new Handler();
+        mSnackbarParentView = snackbarParentView;
     }
 
     /**
@@ -112,6 +118,14 @@ public class SnackbarManager implements OnClickListener {
         mSnackbars.add(snackbar);
         updateView();
         mView.announceforAccessibility();
+    }
+
+    /** Dismisses all snackbars. */
+    public void dismissAllSnackbars() {
+        if (mSnackbars.isEmpty()) return;
+
+        mSnackbars.clear();
+        updateView();
     }
 
     /**
@@ -145,6 +159,21 @@ public class SnackbarManager implements OnClickListener {
         mSnackbars.removeCurrentDueToAction();
         updateView();
     }
+
+    // InfoBarContainerObserver implementation.
+    @Override
+    public void onAddInfoBar(InfoBarContainer container, InfoBar infoBar, boolean isFirst) {
+        // Bring Snackbars to the foreground so that it's not blocked by infobars.
+        if (isShowing()) {
+            mView.bringToFront();
+        }
+    }
+
+    @Override
+    public void onRemoveInfoBar(InfoBarContainer container, InfoBar infoBar, boolean isLast) {}
+
+    @Override
+    public void onInfoBarContainerAttachedToWindow(boolean hasInfobars) {}
 
     /**
      * Temporarily changes the parent {@link ViewGroup} of the snackbar. If a snackbar is currently
@@ -182,7 +211,7 @@ public class SnackbarManager implements OnClickListener {
         } else {
             boolean viewChanged = true;
             if (mView == null) {
-                mView = new SnackbarView(mActivity, this, currentSnackbar);
+                mView = new SnackbarView(mActivity, this, currentSnackbar, mSnackbarParentView);
                 mView.show();
             } else {
                 viewChanged = mView.update(currentSnackbar);
@@ -201,7 +230,7 @@ public class SnackbarManager implements OnClickListener {
     private int getDuration(Snackbar snackbar) {
         int durationMs = snackbar.getDuration();
         if (durationMs == 0) {
-            durationMs = DeviceClassManager.isAccessibilityModeEnabled(mActivity)
+            durationMs = AccessibilityUtil.isAccessibilityEnabled()
                     ? sAccessibilitySnackbarDurationMs : sSnackbarDurationMs;
         }
         return durationMs;

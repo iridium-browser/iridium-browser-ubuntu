@@ -8,12 +8,14 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "chrome/browser/extensions/chrome_app_icon_delegate.h"
 #include "extensions/components/native_app_window/native_app_window_views.h"
 
 class ExtensionKeybindingRegistryViews;
 
 class ChromeNativeAppWindowViews
-    : public native_app_window::NativeAppWindowViews {
+    : public native_app_window::NativeAppWindowViews,
+      public extensions::ChromeAppIconDelegate {
  public:
   ChromeNativeAppWindowViews();
   ~ChromeNativeAppWindowViews() override;
@@ -29,8 +31,7 @@ class ChromeNativeAppWindowViews
       views::Widget* widget);
   // Called before views::Widget::Init() in InitializeDefaultWindow() to allow
   // subclasses to customize the InitParams that would be passed.
-  virtual void OnBeforePanelWidgetInit(bool use_default_bounds,
-                                       views::Widget::InitParams* init_params,
+  virtual void OnBeforePanelWidgetInit(views::Widget::InitParams* init_params,
                                        views::Widget* widget);
 
   virtual void InitializeDefaultWindow(
@@ -54,7 +55,6 @@ class ChromeNativeAppWindowViews
   void GetWidgetHitTestMask(gfx::Path* mask) const override;
 
   // views::View implementation.
-  gfx::Size GetPreferredSize() const override;
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
 
   // NativeAppWindow implementation.
@@ -71,6 +71,12 @@ class ChromeNativeAppWindowViews
       const extensions::AppWindow::CreateParams& create_params) override;
 
  private:
+  // Ensures that the Chrome app icon is created.
+  void EnsureAppIconCreated();
+
+  // extensions::ChromeAppIconDelegate:
+  void OnIconUpdated(extensions::ChromeAppIcon* icon) override;
+
   // Custom shape of the window. If this is not set then the window has a
   // default shape, usually rectangular.
   std::unique_ptr<SkRegion> shape_;
@@ -78,11 +84,14 @@ class ChromeNativeAppWindowViews
   bool has_frame_color_;
   SkColor active_frame_color_;
   SkColor inactive_frame_color_;
-  gfx::Size preferred_size_;
 
   // The class that registers for keyboard shortcuts for extension commands.
   std::unique_ptr<ExtensionKeybindingRegistryViews>
       extension_keybinding_registry_;
+
+  // Contains the default Chrome app icon. It is used in case the custom icon
+  // for the extension app window is not set, or as a part of composite image.
+  std::unique_ptr<extensions::ChromeAppIcon> app_icon_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeNativeAppWindowViews);
 };

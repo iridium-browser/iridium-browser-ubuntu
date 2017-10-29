@@ -9,15 +9,11 @@
 
 #include "base/macros.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
+#include "components/ukm/ukm_source.h"
 
 namespace content {
 class NavigationHandle;
 class WebContents;
-}
-
-namespace page_load_metrics {
-struct PageLoadExtraInfo;
-struct PageLoadTiming;
 }
 
 namespace previews {
@@ -42,19 +38,20 @@ class PreviewsPageLoadMetricsObserver
   ~PreviewsPageLoadMetricsObserver() override;
 
   // page_load_metrics::PageLoadMetricsObserver:
-  ObservePolicy OnCommit(content::NavigationHandle* navigation_handle) override;
+  ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
+                         ukm::SourceId source_id) override;
   void OnDomContentLoadedEventStart(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info) override;
   void OnLoadEventStart(
-      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnFirstLayout(const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstLayout(const page_load_metrics::mojom::PageLoadTiming& timing,
                      const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnFirstContentfulPaint(
-      const page_load_metrics::PageLoadTiming& timing,
+  void OnFirstContentfulPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& info) override;
-  void OnParseStart(const page_load_metrics::PageLoadTiming& timing,
+  void OnParseStart(const page_load_metrics::mojom::PageLoadTiming& timing,
                     const page_load_metrics::PageLoadExtraInfo& info) override;
   ObservePolicy ShouldObserveMimeType(
       const std::string& mime_type) const override;

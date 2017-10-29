@@ -345,11 +345,6 @@ void AnimationHost::SetAnimationEvents(
           (*iter).second->NotifyAnimationAborted(events->events_[event_index]);
           break;
 
-        case AnimationEvent::PROPERTY_UPDATE:
-          (*iter).second->NotifyAnimationPropertyUpdate(
-              events->events_[event_index]);
-          break;
-
         case AnimationEvent::TAKEOVER:
           (*iter).second->NotifyAnimationTakeover(events->events_[event_index]);
           break;
@@ -528,10 +523,12 @@ void AnimationHost::ImplOnlyScrollAnimationCreate(
     ElementId element_id,
     const gfx::ScrollOffset& target_offset,
     const gfx::ScrollOffset& current_offset,
-    base::TimeDelta delayed_by) {
+    base::TimeDelta delayed_by,
+    base::TimeDelta animation_start_offset) {
   DCHECK(scroll_offset_animations_impl_);
   scroll_offset_animations_impl_->ScrollAnimationCreate(
-      element_id, target_offset, current_offset, delayed_by);
+      element_id, target_offset, current_offset, delayed_by,
+      animation_start_offset);
 }
 
 bool AnimationHost::ImplOnlyScrollAnimationUpdateTarget(

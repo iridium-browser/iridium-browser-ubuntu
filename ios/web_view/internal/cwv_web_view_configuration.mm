@@ -3,39 +3,92 @@
 // found in the LICENSE file.
 
 #import "ios/web_view/public/cwv_web_view_configuration.h"
+#import "ios/web_view/internal/cwv_web_view_configuration_internal.h"
 
-#import "ios/web_view/public/cwv_website_data_store.h"
+#include "base/memory/ptr_util.h"
+#include "base/threading/thread_restrictions.h"
+#include "ios/web_view/internal/app/application_context.h"
+#import "ios/web_view/internal/cwv_preferences_internal.h"
+#import "ios/web_view/internal/cwv_user_content_controller_internal.h"
+#include "ios/web_view/internal/web_view_browser_state.h"
+#include "ios/web_view/internal/web_view_global_state_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-@interface CWVWebViewConfiguration ()
-// Initialize configuration with specified data store.
-- (instancetype)initWithDataStore:(CWVWebsiteDataStore*)dataStore;
+@interface CWVWebViewConfiguration () {
+  // The BrowserState for this configuration.
+  std::unique_ptr<ios_web_view::WebViewBrowserState> _browserState;
+}
+
+// Initializes configuration with the specified browser state mode.
+- (instancetype)initWithBrowserState:
+    (std::unique_ptr<ios_web_view::WebViewBrowserState>)browserState;
 @end
 
 @implementation CWVWebViewConfiguration
 
-@synthesize websiteDataStore = _websiteDataStore;
+@synthesize preferences = _preferences;
+@synthesize userContentController = _userContentController;
 
-- (instancetype)init {
-  return [self initWithDataStore:[CWVWebsiteDataStore defaultDataStore]];
++ (instancetype)defaultConfiguration {
+  static CWVWebViewConfiguration* defaultConfiguration;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    auto browserState =
+        base::MakeUnique<ios_web_view::WebViewBrowserState>(false);
+    defaultConfiguration =
+        [[self alloc] initWithBrowserState:std::move(browserState)];
+  });
+  return defaultConfiguration;
 }
 
-- (instancetype)initWithDataStore:(CWVWebsiteDataStore*)dataStore {
++ (instancetype)incognitoConfiguration {
+  static CWVWebViewConfiguration* incognitoConfiguration;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    auto browserState =
+        base::MakeUnique<ios_web_view::WebViewBrowserState>(true);
+    incognitoConfiguration =
+        [[self alloc] initWithBrowserState:std::move(browserState)];
+  });
+  return incognitoConfiguration;
+}
+
++ (void)initialize {
+  if (self != [CWVWebViewConfiguration class]) {
+    return;
+  }
+
+  ios_web_view::InitializeGlobalState();
+}
+
+- (instancetype)initWithBrowserState:
+    (std::unique_ptr<ios_web_view::WebViewBrowserState>)browserState {
   self = [super init];
   if (self) {
-    _websiteDataStore = dataStore;
+    _browserState = std::move(browserState);
+
+    _preferences =
+        [[CWVPreferences alloc] initWithPrefService:_browserState->GetPrefs()];
+
+    _userContentController =
+        [[CWVUserContentController alloc] initWithConfiguration:self];
   }
   return self;
 }
 
-// NSCopying
+#pragma mark - Public Methods
 
-- (id)copyWithZone:(NSZone*)zone {
-  return
-      [[[self class] allocWithZone:zone] initWithDataStore:_websiteDataStore];
+- (BOOL)isPersistent {
+  return !_browserState->IsOffTheRecord();
+}
+
+#pragma mark - Private Methods
+
+- (ios_web_view::WebViewBrowserState*)browserState {
+  return _browserState.get();
 }
 
 @end

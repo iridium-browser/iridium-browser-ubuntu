@@ -13,17 +13,24 @@
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
 #include "base/files/file_util.h"
+#include "base/format_macros.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/process/process.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
+#endif
+
+#if defined(USE_X11)
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
 #endif
 
 namespace gpu {
@@ -241,11 +248,47 @@ void GpuWatchdogThread::OnCheck(bool after_suspend) {
 
   // Post a task to the watchdog thread to exit if the monitored thread does
   // not respond in time.
-  task_runner()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang,
-                 weak_factory_.GetWeakPtr()),
-      timeout);
+  task_runner()->PostDelayedTask(FROM_HERE,
+                                 base::Bind(&GpuWatchdogThread::OnCheckTimeout,
+                                            weak_factory_.GetWeakPtr()),
+                                 timeout);
+}
+
+void GpuWatchdogThread::OnCheckTimeout() {
+  // Should not get here while the system is suspended.
+  DCHECK(!suspended_);
+
+  // If the watchdog woke up significantly behind schedule, disarm and reset
+  // the watchdog check. This is to prevent the watchdog thread from terminating
+  // when a machine wakes up from sleep or hibernation, which would otherwise
+  // appear to be a hang.
+  if (base::Time::Now() > suspension_timeout_) {
+    armed_ = false;
+    OnCheck(true);
+    return;
+  }
+
+  if (!base::subtle::NoBarrier_Load(&awaiting_acknowledge_)) {
+    // This should be possible only when CheckArmed() has been called but
+    // OnAcknowledge() hasn't.
+    // In this case the watched thread might need more time to finish posting
+    // OnAcknowledge task.
+
+    // Continue with the termination after an additional delay.
+    task_runner()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang,
+                   weak_factory_.GetWeakPtr()),
+        0.5 * timeout_);
+
+    // Post a task that does nothing on the watched thread to bump its priority
+    // and make it more likely to get scheduled.
+    watched_message_loop_->task_runner()->PostTask(
+        FROM_HERE, base::Bind(&base::DoNothing));
+    return;
+  }
+
+  DeliberatelyTerminateToRecoverFromHang();
 }
 
 // Use the --disable-gpu-watchdog command line switch to disable this.
@@ -267,16 +310,6 @@ void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
     return;
   }
 #endif
-
-  // If the watchdog woke up significantly behind schedule, disarm and reset
-  // the watchdog check. This is to prevent the watchdog thread from terminating
-  // when a machine wakes up from sleep or hibernation, which would otherwise
-  // appear to be a hang.
-  if (base::Time::Now() > suspension_timeout_) {
-    armed_ = false;
-    OnCheck(true);
-    return;
-  }
 
 #if defined(USE_X11)
   XWindowAttributes attributes;
@@ -370,8 +403,19 @@ void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
   base::debug::Alias(&current_time);
   base::debug::Alias(&current_timeticks);
 
-  LOG(ERROR) << "The GPU process hung. Terminating after "
-             << timeout_.InMilliseconds() << " ms.";
+  int32_t awaiting_acknowledge =
+      base::subtle::NoBarrier_Load(&awaiting_acknowledge_);
+  base::debug::Alias(&awaiting_acknowledge);
+
+  // Don't log the message to stderr in release builds because the buffer
+  // may be full.
+  std::string message = base::StringPrintf(
+      "The GPU process hung. Terminating after %" PRId64 " ms.",
+      timeout_.InMilliseconds());
+  logging::LogMessageHandlerFunction handler = logging::GetLogMessageHandler();
+  if (handler)
+    handler(logging::LOG_ERROR, __FILE__, __LINE__, 0, message);
+  DLOG(ERROR) << message;
 
   // Deliberately crash the process to create a crash dump.
   *((volatile int*)0) = 0x1337;

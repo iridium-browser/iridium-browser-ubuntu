@@ -26,10 +26,10 @@
 #ifndef WebActiveGestureAnimation_h
 #define WebActiveGestureAnimation_h
 
-#include "platform/PlatformExport.h"
-#include "wtf/Allocator.h"
-#include "wtf/Noncopyable.h"
 #include <memory>
+#include "platform/PlatformExport.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
@@ -46,28 +46,23 @@ class PLATFORM_EXPORT WebActiveGestureAnimation {
   WTF_MAKE_NONCOPYABLE(WebActiveGestureAnimation);
 
  public:
-  static std::unique_ptr<WebActiveGestureAnimation> createAtAnimationStart(
-      std::unique_ptr<WebGestureCurve>,
-      WebGestureCurveTarget*);
-  static std::unique_ptr<WebActiveGestureAnimation> createWithTimeOffset(
+  static std::unique_ptr<WebActiveGestureAnimation> CreateWithTimeOffset(
       std::unique_ptr<WebGestureCurve>,
       WebGestureCurveTarget*,
-      double startTime);
+      double start_time);
   ~WebActiveGestureAnimation();
 
-  bool animate(double time);
+  bool Animate(double time);
 
  private:
   // Assumes a valid WebGestureCurveTarget that outlives the animation.
   WebActiveGestureAnimation(std::unique_ptr<WebGestureCurve>,
                             WebGestureCurveTarget*,
-                            double startTime,
-                            bool waitingForFirstTick);
+                            double start_time);
 
-  double m_startTime;
-  bool m_waitingForFirstTick;
-  std::unique_ptr<WebGestureCurve> m_curve;
-  WebGestureCurveTarget* m_target;
+  double start_time_;
+  std::unique_ptr<WebGestureCurve> curve_;
+  WebGestureCurveTarget* target_;
 };
 
 }  // namespace blink

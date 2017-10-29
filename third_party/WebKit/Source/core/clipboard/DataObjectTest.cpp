@@ -12,77 +12,141 @@ namespace blink {
 
 class DataObjectTest : public ::testing::Test {
  public:
-  DataObjectTest() : m_dataObject(DataObject::create()) {}
+  DataObjectTest() : data_object_(DataObject::Create()) {}
 
  protected:
-  Persistent<DataObject> m_dataObject;
+  Persistent<DataObject> data_object_;
 };
 
+class DataObjectObserver : public GarbageCollected<DataObjectObserver>,
+                           public DataObject::Observer {
+  USING_GARBAGE_COLLECTED_MIXIN(DataObjectObserver);
+
+ public:
+  DataObjectObserver() : call_count_(0) {}
+  void OnItemListChanged() override { call_count_++; }
+  size_t call_count() { return call_count_; }
+
+ private:
+  size_t call_count_;
+};
+
+TEST_F(DataObjectTest, DataObjectObserver) {
+  DataObjectObserver* observer = new DataObjectObserver;
+  data_object_->AddObserver(observer);
+
+  data_object_->ClearAll();
+  EXPECT_EQ(0U, data_object_->length());
+  EXPECT_EQ(0U, observer->call_count());
+
+  data_object_->SetData("text/plain", "foobar");
+  EXPECT_EQ(1U, data_object_->length());
+  EXPECT_EQ(1U, observer->call_count());
+
+  DataObjectItem* item = data_object_->Add("bar quux", "text/plain");
+  EXPECT_EQ(nullptr, item);
+  EXPECT_EQ(1U, data_object_->length());
+  EXPECT_EQ(1U, observer->call_count());
+
+  item = data_object_->Add("bar quux", "application/octet-stream");
+  EXPECT_NE(nullptr, item);
+  EXPECT_EQ(2U, data_object_->length());
+  EXPECT_EQ(2U, observer->call_count());
+
+  data_object_->DeleteItem(42);
+  EXPECT_EQ(2U, data_object_->length());
+  EXPECT_EQ(2U, observer->call_count());
+
+  data_object_->DeleteItem(0);
+  EXPECT_EQ(1U, data_object_->length());
+  EXPECT_EQ(3U, observer->call_count());
+
+  DataObjectObserver* observer2 = new DataObjectObserver;
+  data_object_->AddObserver(observer2);
+
+  String file_path = testing::BlinkRootDir();
+  file_path.append("/Source/core/clipboard/DataObjectTest.cpp");
+  data_object_->AddFilename(file_path, String(), String());
+  EXPECT_EQ(2U, data_object_->length());
+  EXPECT_EQ(4U, observer->call_count());
+  EXPECT_EQ(1U, observer2->call_count());
+
+  data_object_->ClearData("application/octet-stream");
+  EXPECT_EQ(1U, data_object_->length());
+  EXPECT_EQ(5U, observer->call_count());
+  EXPECT_EQ(2U, observer2->call_count());
+
+  data_object_->ClearAll();
+  EXPECT_EQ(0U, data_object_->length());
+  EXPECT_EQ(6U, observer->call_count());
+  EXPECT_EQ(3U, observer2->call_count());
+}
+
 TEST_F(DataObjectTest, addItemWithFilenameAndNoTitle) {
-  String filePath = testing::blinkRootDir();
-  filePath.append("/Source/core/clipboard/DataObjectTest.cpp");
+  String file_path = testing::BlinkRootDir();
+  file_path.append("/Source/core/clipboard/DataObjectTest.cpp");
 
-  m_dataObject->addFilename(filePath, String(), String());
-  EXPECT_EQ(1U, m_dataObject->length());
+  data_object_->AddFilename(file_path, String(), String());
+  EXPECT_EQ(1U, data_object_->length());
 
-  DataObjectItem* item = m_dataObject->item(0);
-  EXPECT_EQ(DataObjectItem::FileKind, item->kind());
+  DataObjectItem* item = data_object_->Item(0);
+  EXPECT_EQ(DataObjectItem::kFileKind, item->Kind());
 
-  Blob* blob = item->getAsFile();
-  ASSERT_TRUE(blob->isFile());
-  File* file = toFile(blob);
-  EXPECT_TRUE(file->hasBackingFile());
-  EXPECT_EQ(File::IsUserVisible, file->getUserVisibility());
-  EXPECT_EQ(filePath, file->path());
+  Blob* blob = item->GetAsFile();
+  ASSERT_TRUE(blob->IsFile());
+  File* file = ToFile(blob);
+  EXPECT_TRUE(file->HasBackingFile());
+  EXPECT_EQ(File::kIsUserVisible, file->GetUserVisibility());
+  EXPECT_EQ(file_path, file->GetPath());
 }
 
 TEST_F(DataObjectTest, addItemWithFilenameAndTitle) {
-  String filePath = testing::blinkRootDir();
-  filePath.append("/Source/core/clipboard/DataObjectTest.cpp");
+  String file_path = testing::BlinkRootDir();
+  file_path.append("/Source/core/clipboard/DataObjectTest.cpp");
 
-  m_dataObject->addFilename(filePath, "name.cpp", String());
-  EXPECT_EQ(1U, m_dataObject->length());
+  data_object_->AddFilename(file_path, "name.cpp", String());
+  EXPECT_EQ(1U, data_object_->length());
 
-  DataObjectItem* item = m_dataObject->item(0);
-  EXPECT_EQ(DataObjectItem::FileKind, item->kind());
+  DataObjectItem* item = data_object_->Item(0);
+  EXPECT_EQ(DataObjectItem::kFileKind, item->Kind());
 
-  Blob* blob = item->getAsFile();
-  ASSERT_TRUE(blob->isFile());
-  File* file = toFile(blob);
-  EXPECT_TRUE(file->hasBackingFile());
-  EXPECT_EQ(File::IsUserVisible, file->getUserVisibility());
-  EXPECT_EQ(filePath, file->path());
+  Blob* blob = item->GetAsFile();
+  ASSERT_TRUE(blob->IsFile());
+  File* file = ToFile(blob);
+  EXPECT_TRUE(file->HasBackingFile());
+  EXPECT_EQ(File::kIsUserVisible, file->GetUserVisibility());
+  EXPECT_EQ(file_path, file->GetPath());
   EXPECT_EQ("name.cpp", file->name());
 }
 
 TEST_F(DataObjectTest, fileSystemId) {
-  String filePath = testing::blinkRootDir();
-  filePath.append("/Source/core/clipboard/DataObjectTest.cpp");
+  String file_path = testing::BlinkRootDir();
+  file_path.append("/Source/core/clipboard/DataObjectTest.cpp");
   KURL url;
 
-  m_dataObject->addFilename(filePath, String(), String());
-  m_dataObject->addFilename(filePath, String(), "fileSystemIdForFilename");
-  m_dataObject->add(
-      File::createForFileSystemFile(url, FileMetadata(), File::IsUserVisible),
+  data_object_->AddFilename(file_path, String(), String());
+  data_object_->AddFilename(file_path, String(), "fileSystemIdForFilename");
+  data_object_->Add(
+      File::CreateForFileSystemFile(url, FileMetadata(), File::kIsUserVisible),
       "fileSystemIdForFileSystemFile");
 
-  ASSERT_EQ(3U, m_dataObject->length());
+  ASSERT_EQ(3U, data_object_->length());
 
   {
-    DataObjectItem* item = m_dataObject->item(0);
-    EXPECT_FALSE(item->hasFileSystemId());
+    DataObjectItem* item = data_object_->Item(0);
+    EXPECT_FALSE(item->HasFileSystemId());
   }
 
   {
-    DataObjectItem* item = m_dataObject->item(1);
-    EXPECT_TRUE(item->hasFileSystemId());
-    EXPECT_EQ("fileSystemIdForFilename", item->fileSystemId());
+    DataObjectItem* item = data_object_->Item(1);
+    EXPECT_TRUE(item->HasFileSystemId());
+    EXPECT_EQ("fileSystemIdForFilename", item->FileSystemId());
   }
 
   {
-    DataObjectItem* item = m_dataObject->item(2);
-    EXPECT_TRUE(item->hasFileSystemId());
-    EXPECT_EQ("fileSystemIdForFileSystemFile", item->fileSystemId());
+    DataObjectItem* item = data_object_->Item(2);
+    EXPECT_TRUE(item->HasFileSystemId());
+    EXPECT_EQ("fileSystemIdForFileSystemFile", item->FileSystemId());
   }
 }
 

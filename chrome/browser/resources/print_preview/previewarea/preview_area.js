@@ -2,6 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+cr.exportPath('print_preview');
+
+/**
+ * Enumeration of IDs shown in the preview area.
+ * @enum {string}
+ * @private
+ */
+print_preview.PreviewAreaMessageId_ = {
+  CUSTOM: 'custom',
+  LOADING: 'loading',
+  PREVIEW_FAILED: 'preview-failed'
+};
+
 /**
  * @typedef {{accessibility: Function,
  *            documentLoadComplete: Function,
@@ -19,10 +32,8 @@
  *            onScroll: Function,
  *            pageXOffset: Function,
  *            pageYOffset: Function,
- *            printPreviewPageCount: Function,
  *            reload: Function,
- *            removePrintButton: Function,
- *            resetPrintPreviewUrl: Function,
+ *            resetPrintPreviewMode: Function,
  *            sendKeyEvent: Function,
  *            setPageNumbers: Function,
  *            setPageXOffset: Function,
@@ -45,14 +56,11 @@ cr.define('print_preview', function() {
    *     currently selected destination.
    * @param {!print_preview.PrintTicketStore} printTicketStore Used to get
    *     information about how the preview should be displayed.
-   * @param {!print_preview.NativeLayer} nativeLayer Needed to communicate with
-   *     Chromium's preview generation system.
    * @param {!print_preview.DocumentInfo} documentInfo Document data model.
    * @constructor
    * @extends {print_preview.Component}
    */
-  function PreviewArea(
-      destinationStore, printTicketStore, nativeLayer, documentInfo) {
+  function PreviewArea(destinationStore, printTicketStore, documentInfo) {
     print_preview.Component.call(this);
     // TODO(rltoscano): Understand the dependencies of printTicketStore needed
     // here, and add only those here (not the entire print ticket store).
@@ -76,7 +84,7 @@ cr.define('print_preview', function() {
      * @type {!print_preview.NativeLayer}
      * @private
      */
-    this.nativeLayer_ = nativeLayer;
+    this.nativeLayer_ = print_preview.NativeLayer.getInstance();
 
     /**
      * Document data model.
@@ -105,8 +113,7 @@ cr.define('print_preview', function() {
      * @private
      */
     this.marginControlContainer_ = new print_preview.MarginControlContainer(
-        this.documentInfo_,
-        this.printTicketStore_.marginsType,
+        this.documentInfo_, this.printTicketStore_.marginsType,
         this.printTicketStore_.customMargins,
         this.printTicketStore_.measurementSystem,
         this.onMarginDragChanged_.bind(this));
@@ -161,7 +168,8 @@ cr.define('print_preview', function() {
      * @private
      */
     this.openSystemDialogButton_ = null;
-  };
+
+  }
 
   /**
    * Event types dispatched by the preview area.
@@ -182,7 +190,10 @@ cr.define('print_preview', function() {
 
     // Dispatched when a new document preview is being generated.
     PREVIEW_GENERATION_IN_PROGRESS:
-        'print_preview.PreviewArea.PREVIEW_GENERATION_IN_PROGRESS'
+        'print_preview.PreviewArea.PREVIEW_GENERATION_IN_PROGRESS',
+
+    // Dispatched when invalid printer settings are detected.
+    SETTINGS_INVALID: 'print_preview.PreviewArea.SETTINGS_INVALID'
   };
 
   /**
@@ -205,27 +216,17 @@ cr.define('print_preview', function() {
   };
 
   /**
-   * Enumeration of IDs shown in the preview area.
-   * @enum {string}
-   * @private
-   */
-  PreviewArea.MessageId_ = {
-    CUSTOM: 'custom',
-    LOADING: 'loading',
-    PREVIEW_FAILED: 'preview-failed'
-  };
-
-  /**
    * Maps message IDs to the CSS class that contains them.
-   * @type {Object<print_preview.PreviewArea.MessageId_, string>}
+   * @type {Object<print_preview.PreviewAreaMessageId_, string>}
    * @private
    */
   PreviewArea.MessageIdClassMap_ = {};
-  PreviewArea.MessageIdClassMap_[PreviewArea.MessageId_.CUSTOM] =
+  PreviewArea.MessageIdClassMap_[print_preview.PreviewAreaMessageId_.CUSTOM] =
       'preview-area-custom-message';
-  PreviewArea.MessageIdClassMap_[PreviewArea.MessageId_.LOADING] =
+  PreviewArea.MessageIdClassMap_[print_preview.PreviewAreaMessageId_.LOADING] =
       'preview-area-loading-message';
-  PreviewArea.MessageIdClassMap_[PreviewArea.MessageId_.PREVIEW_FAILED] =
+  PreviewArea
+      .MessageIdClassMap_[print_preview.PreviewAreaMessageId_.PREVIEW_FAILED] =
       'preview-area-preview-failed-message';
 
   /**
@@ -293,8 +294,8 @@ cr.define('print_preview', function() {
     /**
      * Set a callback that gets called when a key event is received that
      * originates in the plugin.
-     * @param {function(Event)} callback The callback to be called with a key
-     *     event.
+     * @param {function(KeyboardEvent)} callback The callback to be called with
+     *     a key event.
      */
     setPluginKeyEventCallback: function(callback) {
       this.keyEventCallback_ = callback;
@@ -305,7 +306,7 @@ cr.define('print_preview', function() {
      * @param {string} message Custom message to show.
      */
     showCustomMessage: function(message) {
-      this.showMessage_(PreviewArea.MessageId_.CUSTOM, message);
+      this.showMessage_(print_preview.PreviewAreaMessageId_.CUSTOM, message);
     },
 
     /** @override */
@@ -313,46 +314,34 @@ cr.define('print_preview', function() {
       print_preview.Component.prototype.enterDocument.call(this);
 
       this.tracker.add(
-          assert(this.openSystemDialogButton_),
-          'click',
+          assert(this.openSystemDialogButton_), 'click',
           this.onOpenSystemDialogButtonClick_.bind(this));
 
       var TicketStoreEvent = print_preview.PrintTicketStore.EventType;
-      [
-        TicketStoreEvent.INITIALIZE,
-        TicketStoreEvent.TICKET_CHANGE,
-        TicketStoreEvent.CAPABILITIES_CHANGE,
-        TicketStoreEvent.DOCUMENT_CHANGE
-      ].forEach(function(eventType) {
-        this.tracker.add(this.printTicketStore_, eventType,
-            this.onTicketChange_.bind(this));
-      }.bind(this));
+      [TicketStoreEvent.INITIALIZE, TicketStoreEvent.TICKET_CHANGE,
+       TicketStoreEvent.CAPABILITIES_CHANGE, TicketStoreEvent.DOCUMENT_CHANGE]
+          .forEach(function(eventType) {
+            this.tracker.add(
+                this.printTicketStore_, eventType,
+                this.onTicketChange_.bind(this));
+          }.bind(this));
 
-      [
-        this.printTicketStore_.color,
-        this.printTicketStore_.cssBackground,
-        this.printTicketStore_.customMargins,
-        this.printTicketStore_.fitToPage,
-        this.printTicketStore_.headerFooter,
-        this.printTicketStore_.landscape,
-        this.printTicketStore_.marginsType,
-        this.printTicketStore_.pageRange,
-        this.printTicketStore_.rasterize,
-        this.printTicketStore_.selectionOnly,
-        this.printTicketStore_.scaling
-      ].forEach(function(setting) {
-        this.tracker.add(
-            setting,
-            print_preview.ticket_items.TicketItem.EventType.CHANGE,
-            this.onTicketChange_.bind(this));
-      }.bind(this));
+      [this.printTicketStore_.color, this.printTicketStore_.cssBackground,
+       this.printTicketStore_.customMargins, this.printTicketStore_.fitToPage,
+       this.printTicketStore_.headerFooter, this.printTicketStore_.landscape,
+       this.printTicketStore_.marginsType, this.printTicketStore_.pageRange,
+       this.printTicketStore_.rasterize, this.printTicketStore_.selectionOnly,
+       this.printTicketStore_.scaling]
+          .forEach(function(setting) {
+            this.tracker.add(
+                setting, print_preview.ticket_items.TicketItem.EventType.CHANGE,
+                this.onTicketChange_.bind(this));
+          }.bind(this));
 
       if (this.checkPluginCompatibility_()) {
         this.previewGenerator_ = new print_preview.PreviewGenerator(
-            this.destinationStore_,
-            this.printTicketStore_,
-            this.nativeLayer_,
-            this.documentInfo_);
+            this.destinationStore_, this.printTicketStore_, this.nativeLayer_,
+            this.documentInfo_, this.listenerTracker);
         this.tracker.add(
             this.previewGenerator_,
             print_preview.PreviewGenerator.EventType.PREVIEW_START,
@@ -361,10 +350,6 @@ cr.define('print_preview', function() {
             this.previewGenerator_,
             print_preview.PreviewGenerator.EventType.PAGE_READY,
             this.onPagePreviewReady_.bind(this));
-        this.tracker.add(
-            this.previewGenerator_,
-            print_preview.PreviewGenerator.EventType.FAIL,
-            this.onPreviewGenerationFail_.bind(this));
         this.tracker.add(
             this.previewGenerator_,
             print_preview.PreviewGenerator.EventType.DOCUMENT_READY,
@@ -377,9 +362,6 @@ cr.define('print_preview', function() {
     /** @override */
     exitDocument: function() {
       print_preview.Component.prototype.exitDocument.call(this);
-      if (this.previewGenerator_) {
-        this.previewGenerator_.removeEventListeners();
-      }
       this.overlayEl_ = null;
       this.openSystemDialogButton_ = null;
     },
@@ -414,7 +396,7 @@ cr.define('print_preview', function() {
 
     /**
      * Shows a given message on the overlay.
-     * @param {!print_preview.PreviewArea.MessageId_} messageId ID of the
+     * @param {!print_preview.PreviewAreaMessageId_} messageId ID of the
      *     message to show.
      * @param {string=} opt_message Optional message to show that can be used
      *     by some message IDs.
@@ -424,7 +406,7 @@ cr.define('print_preview', function() {
       // Hide all messages.
       var messageEls = this.getElement().getElementsByClassName(
           PreviewArea.Classes_.MESSAGE);
-      for (var i = 0, messageEl; messageEl = messageEls[i]; i++) {
+      for (var i = 0, messageEl; (messageEl = messageEls[i]); i++) {
         setIsVisible(messageEl, false);
       }
       // Disable jumping animation to conserve cycles.
@@ -433,15 +415,15 @@ cr.define('print_preview', function() {
       jumpingDotsEl.classList.remove('jumping-dots');
 
       // Show specific message.
-      if (messageId == PreviewArea.MessageId_.CUSTOM) {
+      if (messageId == print_preview.PreviewAreaMessageId_.CUSTOM) {
         var customMessageTextEl = this.getElement().getElementsByClassName(
             PreviewArea.Classes_.CUSTOM_MESSAGE_TEXT)[0];
         customMessageTextEl.textContent = opt_message;
-      } else if (messageId == PreviewArea.MessageId_.LOADING) {
+      } else if (messageId == print_preview.PreviewAreaMessageId_.LOADING) {
         jumpingDotsEl.classList.add('jumping-dots');
       }
       var messageEl = this.getElement().getElementsByClassName(
-            PreviewArea.MessageIdClassMap_[messageId])[0];
+          PreviewArea.MessageIdClassMap_[messageId])[0];
       setIsVisible(messageEl, true);
 
       this.setOverlayVisible_(true);
@@ -454,8 +436,7 @@ cr.define('print_preview', function() {
      */
     setOverlayVisible_: function(visible) {
       this.overlayEl_.classList.toggle(
-          PreviewArea.Classes_.INVISIBLE,
-          !visible);
+          PreviewArea.Classes_.INVISIBLE, !visible);
       this.overlayEl_.setAttribute('aria-hidden', !visible);
 
       // Hide/show all controls that will overlap when the overlay is visible.
@@ -484,12 +465,8 @@ cr.define('print_preview', function() {
      * @private
      */
     createPlugin_: function(srcUrl) {
-      if (this.plugin_) {
-        console.warn('Pdf preview plugin already created');
-        return;
-      }
-
-      this.plugin_ = /** @type {print_preview.PDFPlugin} */(
+      assert(!this.plugin_);
+      this.plugin_ = /** @type {print_preview.PDFPlugin} */ (
           PDFCreateOutOfProcessPlugin(srcUrl));
       this.plugin_.setKeyEventCallback(this.keyEventCallback_);
 
@@ -500,18 +477,12 @@ cr.define('print_preview', function() {
       // chrome/renderer/printing/print_web_view_helper.cc actually references
       // it.
       this.plugin_.setAttribute('id', 'pdf-viewer');
-      this.getChildElement('.preview-area-plugin-wrapper').
-          appendChild(/** @type {Node} */(this.plugin_));
+      this.getChildElement('.preview-area-plugin-wrapper')
+          .appendChild(/** @type {Node} */ (this.plugin_));
 
-
-      var pageNumbers =
-          this.printTicketStore_.pageRange.getPageNumberSet().asArray();
-      var grayscale = !this.printTicketStore_.color.getValue();
       this.plugin_.setLoadCallback(this.onPluginLoad_.bind(this));
       this.plugin_.setViewportChangedCallback(
           this.onPreviewVisualStateChange_.bind(this));
-      this.plugin_.resetPrintPreviewMode(srcUrl, grayscale, pageNumbers,
-                                         this.documentInfo_.isModifiable);
     },
 
     /**
@@ -546,17 +517,45 @@ cr.define('print_preview', function() {
      * @private
      */
     onTicketChange_: function() {
-      if (this.previewGenerator_ && this.previewGenerator_.requestPreview()) {
-        cr.dispatchSimpleEvent(
-            this, PreviewArea.EventType.PREVIEW_GENERATION_IN_PROGRESS);
-        if (this.loadingTimeout_ == null) {
-          this.loadingTimeout_ = setTimeout(
-              this.showMessage_.bind(this, PreviewArea.MessageId_.LOADING),
-              PreviewArea.LOADING_TIMEOUT_);
-        }
-      } else {
+      if (!this.previewGenerator_)
+        return;
+      var previewRequest = this.previewGenerator_.requestPreview();
+      if (previewRequest.id <= -1) {
         this.marginControlContainer_.showMarginControlsIfNeeded();
+        return;
       }
+
+      cr.dispatchSimpleEvent(
+          this, PreviewArea.EventType.PREVIEW_GENERATION_IN_PROGRESS);
+      if (this.loadingTimeout_ == null) {
+        this.loadingTimeout_ = setTimeout(
+            this.showMessage_.bind(
+                this, print_preview.PreviewAreaMessageId_.LOADING),
+            PreviewArea.LOADING_TIMEOUT_);
+      }
+      previewRequest.request.then(
+          /** @param {number} previewUid The unique id of the preview. */
+          function(previewUid) {
+            this.previewGenerator_.onPreviewGenerationDone(
+                previewRequest.id, previewUid);
+          }.bind(this),
+          /**
+           * @param {*} type The type of print preview failure that
+           *     occurred.
+           */
+          function(type) {
+            if (/** @type{string} */ (type) == 'CANCELLED')
+              return;  // overriden by a new request, do nothing.
+            if (/** @type{string} */ (type) == 'SETTINGS_INVALID') {
+              this.cancelTimeout();
+              this.showCustomMessage(
+                  loadTimeData.getString('invalidPrinterSettings'));
+              cr.dispatchSimpleEvent(
+                  this, PreviewArea.EventType.SETTINGS_INVALID);
+            } else {
+              this.onPreviewGenerationFail_();
+            }
+          }.bind(this));
     },
 
     /**
@@ -569,14 +568,12 @@ cr.define('print_preview', function() {
       this.isPluginReloaded_ = false;
       if (!this.plugin_) {
         this.createPlugin_(event.previewUrl);
-      } else {
-        var grayscale = !this.printTicketStore_.color.getValue();
-        var pageNumbers =
-            this.printTicketStore_.pageRange.getPageNumberSet().asArray();
-        var url = event.previewUrl;
-        this.plugin_.resetPrintPreviewMode(url, grayscale, pageNumbers,
-                                           this.documentInfo_.isModifiable);
       }
+      this.plugin_.resetPrintPreviewMode(
+          event.previewUrl, !this.printTicketStore_.color.getValue(),
+          this.printTicketStore_.pageRange.getPageNumberSet().asArray(),
+          this.documentInfo_.isModifiable);
+
       cr.dispatchSimpleEvent(
           this, PreviewArea.EventType.PREVIEW_GENERATION_IN_PROGRESS);
     },
@@ -602,15 +599,22 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * Called when the generation of a preview fails. Shows an error message.
-     * @private
+     * Cancels the timeout so that an error message can be shown.
      */
-    onPreviewGenerationFail_: function() {
+    cancelTimeout: function() {
       if (this.loadingTimeout_) {
         clearTimeout(this.loadingTimeout_);
         this.loadingTimeout_ = null;
       }
-      this.showMessage_(PreviewArea.MessageId_.PREVIEW_FAILED);
+    },
+
+    /**
+     * Called when the generation of a preview fails. Shows an error message.
+     * @private
+     */
+    onPreviewGenerationFail_: function() {
+      this.cancelTimeout();
+      this.showMessage_(print_preview.PreviewAreaMessageId_.PREVIEW_FAILED);
       cr.dispatchSimpleEvent(
           this, PreviewArea.EventType.PREVIEW_GENERATION_FAIL);
     },
@@ -622,11 +626,7 @@ cr.define('print_preview', function() {
      * @private
      */
     onPluginLoad_: function() {
-      if (this.loadingTimeout_) {
-        clearTimeout(this.loadingTimeout_);
-        this.loadingTimeout_ = null;
-      }
-
+      this.cancelTimeout();
       this.setOverlayVisible_(false);
       this.isPluginReloaded_ = true;
       this.dispatchPreviewGenerationDoneIfReady_();
@@ -638,11 +638,8 @@ cr.define('print_preview', function() {
      * margins component if shown.
      * @private
      */
-    onPreviewVisualStateChange_: function(pageX,
-                                          pageY,
-                                          pageWidth,
-                                          viewportWidth,
-                                          viewportHeight) {
+    onPreviewVisualStateChange_: function(
+        pageX, pageY, pageWidth, viewportWidth, viewportHeight) {
       this.marginControlContainer_.updateTranslationTransform(
           new print_preview.Coordinate2d(pageX, pageY));
       this.marginControlContainer_.updateScaleTransform(
@@ -665,11 +662,9 @@ cr.define('print_preview', function() {
       // we don't want this to happen as it can cause the margin to stop
       // being draggable.
       this.plugin_.style.pointerEvents = isDragging ? 'none' : 'auto';
-    }
+    },
   };
 
   // Export
-  return {
-    PreviewArea: PreviewArea
-  };
+  return {PreviewArea: PreviewArea};
 });

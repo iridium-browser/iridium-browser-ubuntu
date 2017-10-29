@@ -135,6 +135,21 @@ var GetState = requireNative('automationInternal').GetState;
 /**
  * @param {number} axTreeID The id of the accessibility tree.
  * @param {number} nodeID The id of a node.
+ * @return {string} The restriction, one of
+ * "disabled", "readOnly" or undefined if enabled or other object not disabled
+ */
+var GetRestriction = requireNative('automationInternal').GetRestriction;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {string} The checked state, as undefined, "true", "false" or "mixed".
+ */
+var GetChecked = requireNative('automationInternal').GetChecked;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
  * @return {string} The role of the node, or undefined if the tree or
  *     node wasn't found.
  */
@@ -231,6 +246,42 @@ var GetHtmlAttribute = requireNative('automationInternal').GetHtmlAttribute;
  */
 var GetNameFrom = requireNative('automationInternal').GetNameFrom;
 
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {boolean}
+ */
+var GetBold = requireNative('automationInternal').GetBold;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {boolean}
+ */
+var GetItalic = requireNative('automationInternal').GetItalic;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {boolean}
+ */
+var GetUnderline = requireNative('automationInternal').GetUnderline;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {boolean}
+ */
+var GetLineThrough = requireNative('automationInternal').GetLineThrough;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {?Array.<automation.CustomAction>} List of custom actions of the
+ *     node.
+ */
+var GetCustomActions = requireNative('automationInternal').GetCustomActions;
+
 var lastError = require('lastError');
 var logging = requireNative('logging');
 var utils = require('utils');
@@ -281,6 +332,14 @@ AutomationNodeImpl.prototype = {
 
   get role() {
     return GetRole(this.treeID, this.id);
+  },
+
+  get restriction() {
+    return GetRestriction(this.treeID, this.id);
+  },
+
+  get checked() {
+    return GetChecked(this.treeID, this.id);
   },
 
   get location() {
@@ -369,6 +428,26 @@ AutomationNodeImpl.prototype = {
     return GetNameFrom(this.treeID, this.id);
   },
 
+  get bold() {
+    return GetBold(this.treeID, this.id);
+  },
+
+  get italic() {
+    return GetItalic(this.treeID, this.id);
+  },
+
+  get underline() {
+    return GetUnderline(this.treeID, this.id);
+  },
+
+  get lineThrough() {
+    return GetLineThrough(this.treeID, this.id);
+  },
+
+  get customActions() {
+    return GetCustomActions(this.treeID, this.id);
+  },
+
   doDefault: function() {
     this.performAction_('doDefault');
   },
@@ -383,11 +462,24 @@ AutomationNodeImpl.prototype = {
                           maxHeight: maxHeight });
   },
 
+  hitTest: function(x, y, eventToFire) {
+    // Convert from global to tree-relative coordinates.
+    var location = GetLocation(this.treeID, GetRootID(this.treeID));
+    this.performAction_('hitTest',
+                        { x: Math.floor(x - location.left),
+                          y: Math.floor(y - location.top),
+                          eventToFire: eventToFire });
+  },
+
   makeVisible: function() {
     this.performAction_('makeVisible');
   },
 
-    resumeMedia: function() {
+  performCustomAction: function(customActionId) {
+    this.performAction_('customAction', { customActionID: customActionId });
+  },
+
+  resumeMedia: function() {
     this.performAction_('resumeMedia');
   },
 
@@ -684,19 +776,19 @@ var stringAttributes = [
     'containerLiveStatus',
     'description',
     'display',
+    'htmlTag',
     'imageDataUrl',
     'language',
     'liveRelevant',
     'liveStatus',
     'name',
     'placeholder',
+    'roleDescription',
     'textInputType',
     'url',
     'value'];
 
 var boolAttributes = [
-    'ariaReadonly',
-    'buttonMixed',
     'containerLiveAtomic',
     'containerLiveBusy',
     'liveAtomic',
@@ -716,18 +808,23 @@ var intAttributes = [
     'scrollYMin',
     'setSize',
     'tableCellColumnIndex',
+    'ariaCellColumnIndex',
     'tableCellColumnSpan',
     'tableCellRowIndex',
+    'ariaCellRowIndex',
     'tableCellRowSpan',
     'tableColumnCount',
+    'ariaColumnCount',
     'tableColumnIndex',
     'tableRowCount',
+    'ariaRowCount',
     'tableRowIndex',
     'textSelEnd',
     'textSelStart'];
 
 var nodeRefAttributes = [
     ['activedescendantId', 'activeDescendant'],
+    ['inPageLinkTargetId', 'inPageLinkTarget'],
     ['nextOnLineId', 'nextOnLine'],
     ['previousOnLineId', 'previousOnLine'],
     ['tableColumnHeaderId', 'tableColumnHeader'],
@@ -1078,8 +1175,10 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
     'findAll',
     'focus',
     'getImageData',
+    'hitTest',
     'makeVisible',
     'matches',
+    'performCustomAction',
     'resumeMedia',
     'setSelection',
     'setSequentialFocusNavigationStartingPoint',
@@ -1102,6 +1201,8 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
       'nextSibling',
       'isRootNode',
       'role',
+      'checked',
+      'restriction',
       'state',
       'location',
       'indexInParent',
@@ -1109,6 +1210,11 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
       'root',
       'htmlAttributes',
       'nameFrom',
+      'bold',
+      'italic',
+      'underline',
+      'lineThrough',
+      'customActions',
   ]),
 });
 

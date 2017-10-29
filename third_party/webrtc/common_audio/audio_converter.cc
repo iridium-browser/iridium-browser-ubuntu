@@ -15,10 +15,10 @@
 #include <utility>
 #include <vector>
 
-#include "webrtc/base/checks.h"
-#include "webrtc/base/safe_conversions.h"
 #include "webrtc/common_audio/channel_buffer.h"
 #include "webrtc/common_audio/resampler/push_sinc_resampler.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/safe_conversions.h"
 
 using rtc::checked_cast;
 
@@ -107,7 +107,8 @@ class ResampleConverter : public AudioConverter {
 // converters must be provided.
 class CompositionConverter : public AudioConverter {
  public:
-  CompositionConverter(std::vector<std::unique_ptr<AudioConverter>> converters)
+  explicit CompositionConverter(
+    std::vector<std::unique_ptr<AudioConverter>> converters)
       : converters_(std::move(converters)) {
     RTC_CHECK_GE(converters_.size(), 2);
     // We need an intermediate buffer after every converter.

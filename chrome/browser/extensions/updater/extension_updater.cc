@@ -6,7 +6,6 @@
 
 #include <stdint.h>
 
-#include <algorithm>
 #include <set>
 #include <vector>
 
@@ -97,7 +96,8 @@ int CalculateActivePingDays(const Time& last_active_ping_day,
 namespace extensions {
 
 ExtensionUpdater::CheckParams::CheckParams()
-    : install_immediately(false) {}
+    : install_immediately(false),
+      fetch_priority(ManifestFetchData::FetchPriority::BACKGROUND) {}
 
 ExtensionUpdater::CheckParams::~CheckParams() {}
 
@@ -274,10 +274,9 @@ void ExtensionUpdater::CheckSoon() {
   DCHECK(alive_);
   if (will_check_soon_)
     return;
-  if (BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          base::Bind(&ExtensionUpdater::DoCheckSoon,
-                     weak_ptr_factory_.GetWeakPtr()))) {
+  if (BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                              base::BindOnce(&ExtensionUpdater::DoCheckSoon,
+                                             weak_ptr_factory_.GetWeakPtr()))) {
     will_check_soon_ = true;
   } else {
     NOTREACHED();
@@ -306,7 +305,8 @@ void ExtensionUpdater::DoCheckSoon() {
 void ExtensionUpdater::AddToDownloader(
     const ExtensionSet* extensions,
     const std::list<std::string>& pending_ids,
-    int request_id) {
+    int request_id,
+    ManifestFetchData::FetchPriority fetch_priority) {
   InProgressCheck& request = requests_in_progress_[request_id];
   for (ExtensionSet::const_iterator extension_iter = extensions->begin();
        extension_iter != extensions->end(); ++extension_iter) {
@@ -318,11 +318,9 @@ void ExtensionUpdater::AddToDownloader(
     // An extension might be overwritten by policy, and have its update url
     // changed. Make sure existing extensions aren't fetched again, if a
     // pending fetch for an extension with the same id already exists.
-    std::list<std::string>::const_iterator pending_id_iter = std::find(
-        pending_ids.begin(), pending_ids.end(), extension.id());
-    if (pending_id_iter == pending_ids.end()) {
-      if (downloader_->AddExtension(extension, request_id))
-        request.in_progress_ids_.push_back(extension.id());
+    if (!base::ContainsValue(pending_ids, extension.id()) &&
+        downloader_->AddExtension(extension, request_id, fetch_priority)) {
+      request.in_progress_ids_.push_back(extension.id());
     }
   }
 }
@@ -366,18 +364,21 @@ void ExtensionUpdater::CheckNow(const CheckParams& params) {
               *iter, info->update_url(),
               pending_extension_manager->IsPolicyReinstallForCorruptionExpected(
                   *iter),
-              request_id))
+              request_id, params.fetch_priority))
         request.in_progress_ids_.push_back(*iter);
     }
 
     ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
-    AddToDownloader(&registry->enabled_extensions(), pending_ids, request_id);
-    AddToDownloader(&registry->disabled_extensions(), pending_ids, request_id);
+    AddToDownloader(&registry->enabled_extensions(), pending_ids, request_id,
+                    params.fetch_priority);
+    AddToDownloader(&registry->disabled_extensions(), pending_ids, request_id,
+                    params.fetch_priority);
   } else {
     for (std::list<std::string>::const_iterator it = params.ids.begin();
          it != params.ids.end(); ++it) {
       const Extension* extension = service_->GetExtensionById(*it, true);
-      if (extension && downloader_->AddExtension(*extension, request_id))
+      if (extension && downloader_->AddExtension(*extension, request_id,
+                                                 params.fetch_priority))
         request.in_progress_ids_.push_back(extension->id());
     }
   }

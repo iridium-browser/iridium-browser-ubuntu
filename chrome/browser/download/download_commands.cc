@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -23,11 +24,11 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/file_type_policies.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "net/base/url_util.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -49,25 +50,25 @@ const int64_t kMaxImageClipboardSize = 20 * 1024 * 1024;  // 20 MB
 
 class ImageClipboardCopyManager : public ImageDecoder::ImageRequest {
  public:
-  static void Start(const base::FilePath& file_path) {
-    new ImageClipboardCopyManager(file_path);
+  static void Start(const base::FilePath& file_path,
+                    base::SequencedTaskRunner* task_runner) {
+    new ImageClipboardCopyManager(file_path, task_runner);
   }
 
  private:
-  explicit ImageClipboardCopyManager(const base::FilePath& file_path)
+  ImageClipboardCopyManager(const base::FilePath& file_path,
+                            base::SequencedTaskRunner* task_runner)
       : file_path_(file_path) {
     // Constructor must be called in the UI thread.
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-    content::BrowserThread::GetBlockingPool()->PostTask(
-        FROM_HERE,
-        base::Bind(&ImageClipboardCopyManager::StartDecoding,
-                   base::Unretained(this)));
+    task_runner->PostTask(
+        FROM_HERE, base::BindOnce(&ImageClipboardCopyManager::StartDecoding,
+                                  base::Unretained(this)));
   }
 
   void StartDecoding() {
-    DCHECK(content::BrowserThread::GetBlockingPool()->
-        RunsTasksOnCurrentThread());
+    base::ThreadRestrictions::AssertIOAllowed();
 
     // Re-check the filesize since the file may be modified after downloaded.
     int64_t filesize;
@@ -126,6 +127,8 @@ DownloadCommands::DownloadCommands(content::DownloadItem* download_item)
     : download_item_(download_item) {
   DCHECK(download_item);
 }
+
+DownloadCommands::~DownloadCommands() = default;
 
 int DownloadCommands::GetCommandIconId(Command command) const {
   switch (command) {
@@ -398,7 +401,7 @@ bool DownloadCommands::CanOpenPdfInSystemViewer() const {
 #endif
 }
 
-void DownloadCommands::CopyFileAsImageToClipboard() const {
+void DownloadCommands::CopyFileAsImageToClipboard() {
   if (download_item_->GetState() != content::DownloadItem::COMPLETE ||
       download_item_->GetReceivedBytes() > kMaxImageClipboardSize) {
     return;
@@ -408,5 +411,11 @@ void DownloadCommands::CopyFileAsImageToClipboard() const {
     return;
 
   base::FilePath file_path = download_item_->GetFullPath();
-  ImageClipboardCopyManager::Start(file_path);
+
+  if (!task_runner_) {
+    task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+        {base::MayBlock(), base::TaskPriority::BACKGROUND,
+         base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
+  }
+  ImageClipboardCopyManager::Start(file_path, task_runner_.get());
 }

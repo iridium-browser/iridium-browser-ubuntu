@@ -8,7 +8,6 @@
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/process/kill.h"
-#include "base/win/windows_version.h"
 
 namespace {
 
@@ -20,14 +19,13 @@ DWORD kBasicProcessAccess =
 namespace base {
 
 Process::Process(ProcessHandle handle)
-    : is_current_process_(false),
-      process_(handle) {
+    : process_(handle), is_current_process_(false) {
   CHECK_NE(handle, ::GetCurrentProcess());
 }
 
 Process::Process(Process&& other)
-    : is_current_process_(other.is_current_process_),
-      process_(other.process_.Take()) {
+    : process_(other.process_.Take()),
+      is_current_process_(other.is_current_process_) {
   other.Close();
 }
 
@@ -130,6 +128,7 @@ void Process::Close() {
 }
 
 bool Process::Terminate(int exit_code, bool wait) const {
+  // exit_code cannot be implemented.
   DCHECK(IsValid());
   bool result = (::TerminateProcess(Handle(), exit_code) != FALSE);
   if (result && wait) {
@@ -138,6 +137,10 @@ bool Process::Terminate(int exit_code, bool wait) const {
       DPLOG(ERROR) << "Error waiting for process exit";
   } else if (!result) {
     DPLOG(ERROR) << "Unable to terminate process";
+  }
+  if (result) {
+    base::debug::GlobalActivityTracker::RecordProcessExitIfEnabled(Pid(),
+                                                                   exit_code);
   }
   return result;
 }
@@ -162,6 +165,9 @@ bool Process::WaitForExitWithTimeout(TimeDelta timeout, int* exit_code) const {
 
   if (exit_code)
     *exit_code = temp_code;
+
+  base::debug::GlobalActivityTracker::RecordProcessExitIfEnabled(
+      Pid(), static_cast<int>(temp_code));
   return true;
 }
 
@@ -180,7 +186,7 @@ bool Process::SetProcessBackgrounded(bool value) {
   // sets the priority class on the threads but also on the IO generated
   // by it. Unfortunately it can only be set for the calling process.
   DWORD priority;
-  if ((base::win::GetVersion() >= base::win::VERSION_VISTA) && (is_current())) {
+  if (is_current()) {
     priority = value ? PROCESS_MODE_BACKGROUND_BEGIN :
                        PROCESS_MODE_BACKGROUND_END;
   } else {

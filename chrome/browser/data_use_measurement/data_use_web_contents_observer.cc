@@ -4,6 +4,7 @@
 
 #include "chrome/browser/data_use_measurement/data_use_web_contents_observer.h"
 
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/data_use_measurement/chrome_data_use_ascriber_service.h"
 #include "chrome/browser/data_use_measurement/chrome_data_use_ascriber_service_factory.h"
 #include "content/public/browser/navigation_handle.h"
@@ -34,7 +35,8 @@ void DataUseWebContentsObserver::CreateForWebContents(
   // tied to a profile. Since profiles outlive |WebContents|, |service| will
   // outlive |DataUseWebContentsObserver|.
   web_contents->SetUserData(
-      UserDataKey(), new DataUseWebContentsObserver(web_contents, service));
+      UserDataKey(),
+      base::WrapUnique(new DataUseWebContentsObserver(web_contents, service)));
 }
 
 DataUseWebContentsObserver::DataUseWebContentsObserver(
@@ -84,6 +86,11 @@ void DataUseWebContentsObserver::RenderFrameHostChanged(
     content::RenderFrameHost* old_host,
     content::RenderFrameHost* new_host) {
   service_->RenderFrameHostChanged(old_host, new_host);
+}
+
+void DataUseWebContentsObserver::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  service_->DidFinishNavigation(navigation_handle);
 }
 
 }  // namespace data_use_measurement

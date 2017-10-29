@@ -13,8 +13,8 @@
 #include "base/test/multiprocess_test.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_mock_time_task_runner.h"
+#include "content/browser/memory/memory_condition_observer.h"
 #include "content/browser/memory/memory_monitor.h"
-#include "content/browser/memory/memory_state_updater.h"
 #include "content/public/common/content_features.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
@@ -66,12 +66,16 @@ class MockMemoryCoordinatorClient : public base::MemoryCoordinatorClient {
     state_ = state;
   }
 
+  void OnPurgeMemory() override { ++purge_memory_calls_; }
+
   bool did_state_changed() const { return did_state_changed_; }
   base::MemoryState state() const { return state_; }
+  int purge_memory_calls() const { return purge_memory_calls_; }
 
  private:
   bool did_state_changed_ = false;
   base::MemoryState state_ = base::MemoryState::NORMAL;
+  int purge_memory_calls_ = 0;
 };
 
 class MockMemoryMonitor : public MemoryMonitor {
@@ -97,18 +101,41 @@ class TestMemoryCoordinatorDelegate : public MemoryCoordinatorDelegate {
   TestMemoryCoordinatorDelegate() {}
   ~TestMemoryCoordinatorDelegate() override {}
 
-  bool CanSuspendBackgroundedRenderer(int render_process_id) override {
-    return true;
-  }
+  void DiscardTab(bool skip_unload_handlers) override { ++discard_tab_count_; }
 
-  void DiscardTab() override { discard_tab_called_ = true; }
-
-  bool discard_tab_called() const { return discard_tab_called_; }
+  int discard_tab_count() const { return discard_tab_count_; }
 
  private:
-  bool discard_tab_called_ = false;
+  int discard_tab_count_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(TestMemoryCoordinatorDelegate);
+};
+
+class MockMemoryCoordinatorPolicy : public MemoryCoordinatorImpl::Policy {
+ public:
+  explicit MockMemoryCoordinatorPolicy(MemoryCoordinatorImpl* coordinator)
+      : coordinator_(coordinator) {
+    DCHECK(coordinator_);
+  }
+
+  ~MockMemoryCoordinatorPolicy() override = default;
+
+  void OnCriticalCondition() override {
+    coordinator_->DiscardTab(false /* skip_unload_handlers */);
+  }
+
+  void OnConditionChanged(MemoryCondition prev, MemoryCondition next) override {
+    EXPECT_NE(prev, next);
+    last_condition_ = next;
+  }
+
+  MemoryCondition last_condition() const { return last_condition_; }
+
+ private:
+  MemoryCoordinatorImpl* coordinator_ = nullptr;
+  MemoryCondition last_condition_ = MemoryCondition::NORMAL;
+
+  DISALLOW_COPY_AND_ASSIGN(MockMemoryCoordinatorPolicy);
 };
 
 // A MemoryCoordinatorImpl that can be directly constructed.
@@ -130,6 +157,8 @@ class TestMemoryCoordinatorImpl : public MemoryCoordinatorImpl {
       : MemoryCoordinatorImpl(task_runner,
                               base::MakeUnique<MockMemoryMonitor>()) {
     SetDelegateForTesting(base::MakeUnique<TestMemoryCoordinatorDelegate>());
+    SetPolicyForTesting(base::MakeUnique<MockMemoryCoordinatorPolicy>(this));
+    SetTickClockForTesting(task_runner->GetMockTickClock());
   }
 
   ~TestMemoryCoordinatorImpl() override {}
@@ -160,6 +189,10 @@ class TestMemoryCoordinatorImpl : public MemoryCoordinatorImpl {
 
   TestMemoryCoordinatorDelegate* GetDelegate() {
     return static_cast<TestMemoryCoordinatorDelegate*>(delegate());
+  }
+
+  MockMemoryCoordinatorPolicy* GetPolicy() {
+    return static_cast<MockMemoryCoordinatorPolicy*>(policy());
   }
 
   // Wrapper of MemoryCoordinator::SetMemoryState that also calls RunUntilIdle.
@@ -240,13 +273,8 @@ TEST_F(MemoryCoordinatorImplTest, SetMemoryStateDelivered) {
       coordinator_->SetChildMemoryState(1, MemoryState::THROTTLED));
   EXPECT_EQ(1, cmc1->on_state_change_calls());
   EXPECT_EQ(mojom::MemoryState::THROTTLED, cmc1->state());
-
-  EXPECT_TRUE(
-      coordinator_->SetChildMemoryState(2, MemoryState::SUSPENDED));
-  EXPECT_EQ(1, cmc2->on_state_change_calls());
-  // Child processes are considered as visible (foreground) by default,
-  // and visible ones won't be suspended but throttled.
-  EXPECT_EQ(mojom::MemoryState::THROTTLED, cmc2->state());
+  EXPECT_EQ(0, cmc2->on_state_change_calls());
+  EXPECT_EQ(mojom::MemoryState::NORMAL, cmc2->state());
 }
 
 TEST_F(MemoryCoordinatorImplTest, PurgeMemoryChild) {
@@ -272,8 +300,7 @@ TEST_F(MemoryCoordinatorImplTest, SetChildMemoryState) {
   EXPECT_TRUE(
       coordinator_->SetChildMemoryState(1, MemoryState::THROTTLED));
   EXPECT_EQ(mojom::MemoryState::THROTTLED, cmc->state());
-  EXPECT_TRUE(
-      coordinator_->SetChildMemoryState(1, MemoryState::SUSPENDED));
+  EXPECT_TRUE(coordinator_->SetChildMemoryState(1, MemoryState::THROTTLED));
   EXPECT_EQ(mojom::MemoryState::THROTTLED, cmc->state());
 
   // Background
@@ -288,208 +315,120 @@ TEST_F(MemoryCoordinatorImplTest, SetChildMemoryState) {
   EXPECT_TRUE(
       coordinator_->SetChildMemoryState(1, MemoryState::THROTTLED));
   EXPECT_EQ(mojom::MemoryState::THROTTLED, cmc->state());
-  EXPECT_TRUE(
-      coordinator_->SetChildMemoryState(1, MemoryState::SUSPENDED));
-  EXPECT_EQ(mojom::MemoryState::SUSPENDED, cmc->state());
-
-  // Background but there are workers
-  render_process_host->IncrementServiceWorkerRefCount();
-  EXPECT_TRUE(
-      coordinator_->SetChildMemoryState(1, MemoryState::THROTTLED));
-  EXPECT_EQ(mojom::MemoryState::THROTTLED, cmc->state());
-  EXPECT_FALSE(
-      coordinator_->SetChildMemoryState(1, MemoryState::SUSPENDED));
-  EXPECT_EQ(mojom::MemoryState::THROTTLED, cmc->state());
-  render_process_host->DecrementSharedWorkerRefCount();
 }
 
-TEST_F(MemoryCoordinatorImplTest, CalculateNextState) {
-  auto* state_updater = coordinator_->state_updater_.get();
-  state_updater->expected_renderer_size_ = 10;
-  state_updater->new_renderers_until_throttled_ = 4;
-  state_updater->new_renderers_until_suspended_ = 2;
-  state_updater->new_renderers_back_to_normal_ = 5;
-  state_updater->new_renderers_back_to_throttled_ = 3;
-  DCHECK(state_updater->ValidateParameters());
+TEST_F(MemoryCoordinatorImplTest, CalculateNextCondition) {
+  auto* condition_observer = coordinator_->condition_observer_.get();
 
-  // The default state is NORMAL.
-  EXPECT_EQ(base::MemoryState::NORMAL, coordinator_->GetCurrentMemoryState());
-  EXPECT_EQ(base::MemoryState::NORMAL,
-            base::MemoryCoordinatorProxy::GetInstance()->
-                GetCurrentMemoryState());
+  // The default condition is NORMAL.
+  EXPECT_EQ(MemoryCondition::NORMAL, coordinator_->GetMemoryCondition());
 
   // Transitions from NORMAL
-  coordinator_->current_state_ = base::MemoryState::NORMAL;
-  EXPECT_EQ(base::MemoryState::NORMAL, coordinator_->GetCurrentMemoryState());
-  EXPECT_EQ(base::MemoryState::NORMAL,
-            base::MemoryCoordinatorProxy::GetInstance()->
-                GetCurrentMemoryState());
+  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(1000);
+  EXPECT_EQ(MemoryCondition::NORMAL,
+            condition_observer->CalculateNextCondition());
+  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(0);
+  EXPECT_EQ(MemoryCondition::CRITICAL,
+            condition_observer->CalculateNextCondition());
 
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(50);
-  EXPECT_EQ(base::MemoryState::NORMAL, state_updater->CalculateNextState());
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(40);
-  EXPECT_EQ(base::MemoryState::THROTTLED, state_updater->CalculateNextState());
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(20);
-  EXPECT_EQ(base::MemoryState::SUSPENDED, state_updater->CalculateNextState());
-
-  // Transitions from THROTTLED
-  coordinator_->current_state_ = base::MemoryState::THROTTLED;
-  EXPECT_EQ(base::MemoryState::THROTTLED,
-            coordinator_->GetCurrentMemoryState());
-  EXPECT_EQ(base::MemoryState::THROTTLED,
-            base::MemoryCoordinatorProxy::GetInstance()->
-                GetCurrentMemoryState());
-
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(40);
-  EXPECT_EQ(base::MemoryState::THROTTLED, state_updater->CalculateNextState());
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(50);
-  EXPECT_EQ(base::MemoryState::NORMAL, state_updater->CalculateNextState());
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(20);
-  EXPECT_EQ(base::MemoryState::SUSPENDED, state_updater->CalculateNextState());
-
-  // Transitions from SUSPENDED
-  coordinator_->current_state_ = base::MemoryState::SUSPENDED;
-  // GetCurrentMemoryState() returns THROTTLED state for the browser process
-  // when the global state is SUSPENDED.
-  EXPECT_EQ(base::MemoryState::THROTTLED,
-            coordinator_->GetCurrentMemoryState());
-  EXPECT_EQ(base::MemoryState::THROTTLED,
-            base::MemoryCoordinatorProxy::GetInstance()->
-                GetCurrentMemoryState());
-
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(20);
-  EXPECT_EQ(base::MemoryState::SUSPENDED, state_updater->CalculateNextState());
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(30);
-  EXPECT_EQ(base::MemoryState::THROTTLED, state_updater->CalculateNextState());
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(50);
-  EXPECT_EQ(base::MemoryState::NORMAL, state_updater->CalculateNextState());
+  // Transitions from CRITICAL
+  coordinator_->memory_condition_ = MemoryCondition::CRITICAL;
+  EXPECT_EQ(MemoryCondition::CRITICAL, coordinator_->GetMemoryCondition());
+  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(1000);
+  EXPECT_EQ(MemoryCondition::NORMAL,
+            condition_observer->CalculateNextCondition());
 }
 
-TEST_F(MemoryCoordinatorImplTest, UpdateState) {
-  auto* state_updater = coordinator_->state_updater_.get();
-  state_updater->expected_renderer_size_ = 10;
-  state_updater->new_renderers_until_throttled_ = 4;
-  state_updater->new_renderers_until_suspended_ = 2;
-  state_updater->new_renderers_back_to_normal_ = 5;
-  state_updater->new_renderers_back_to_throttled_ = 3;
-  DCHECK(state_updater->ValidateParameters());
+TEST_F(MemoryCoordinatorImplTest, UpdateConditionIfNeeded) {
+  auto* policy = coordinator_->GetPolicy();
 
-  {
-    // Transition happens (NORMAL -> THROTTLED).
-    MockMemoryCoordinatorClient client;
-    base::MemoryCoordinatorClientRegistry::GetInstance()->Register(&client);
-    coordinator_->current_state_ = base::MemoryState::NORMAL;
-    GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(40);
-    state_updater->UpdateState();
-    RunUntilIdle();
-    EXPECT_TRUE(client.did_state_changed());
-    EXPECT_EQ(base::MemoryState::THROTTLED, client.state());
-    base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(&client);
-  }
-
-  {
-    // No transtion (NORMAL -> NORMAL). OnStateChange shouldn't be called.
-    MockMemoryCoordinatorClient client;
-    base::MemoryCoordinatorClientRegistry::GetInstance()->Register(&client);
-    coordinator_->current_state_ = base::MemoryState::NORMAL;
-    GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(50);
-    state_updater->UpdateState();
-    RunUntilIdle();
-    EXPECT_FALSE(client.did_state_changed());
-    EXPECT_EQ(base::MemoryState::NORMAL, client.state());
-    base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(&client);
-  }
-}
-
-TEST_F(MemoryCoordinatorImplTest, SetMemoryStateForTesting) {
-  auto* state_updater = coordinator_->state_updater_.get();
-  state_updater->expected_renderer_size_ = 10;
-  state_updater->new_renderers_until_throttled_ = 4;
-  state_updater->new_renderers_until_suspended_ = 2;
-  state_updater->new_renderers_back_to_normal_ = 5;
-  state_updater->new_renderers_back_to_throttled_ = 3;
-  DCHECK(state_updater->ValidateParameters());
-
-  MockMemoryCoordinatorClient client;
-  base::MemoryCoordinatorClientRegistry::GetInstance()->Register(&client);
-  EXPECT_EQ(base::MemoryState::NORMAL, coordinator_->GetCurrentMemoryState());
-  EXPECT_EQ(base::MemoryState::NORMAL,
-            base::MemoryCoordinatorProxy::GetInstance()->
-                GetCurrentMemoryState());
-  EXPECT_EQ(base::MemoryState::NORMAL, client.state());
-
-  base::MemoryCoordinatorProxy::GetInstance()->SetCurrentMemoryStateForTesting(
-      base::MemoryState::SUSPENDED);
-  // GetCurrentMemoryState() returns THROTTLED state for the browser process
-  // when the global state is SUSPENDED.
-  EXPECT_EQ(base::MemoryState::THROTTLED,
-            coordinator_->GetCurrentMemoryState());
-  EXPECT_EQ(base::MemoryState::THROTTLED,
-            base::MemoryCoordinatorProxy::GetInstance()->
-                GetCurrentMemoryState());
-
-  base::MemoryCoordinatorProxy::GetInstance()->SetCurrentMemoryStateForTesting(
-      base::MemoryState::THROTTLED);
-  EXPECT_EQ(base::MemoryState::THROTTLED,
-            coordinator_->GetCurrentMemoryState());
-  EXPECT_EQ(base::MemoryState::THROTTLED,
-            base::MemoryCoordinatorProxy::GetInstance()->
-            GetCurrentMemoryState());
+  // The initial condition is NORMAL.
+  EXPECT_EQ(MemoryCondition::NORMAL, coordinator_->GetMemoryCondition());
+  coordinator_->UpdateConditionIfNeeded(MemoryCondition::NORMAL);
   RunUntilIdle();
-  EXPECT_TRUE(client.did_state_changed());
-  EXPECT_EQ(base::MemoryState::THROTTLED, client.state());
-  base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(&client);
+  EXPECT_EQ(MemoryCondition::NORMAL, policy->last_condition());
+
+  // Change to CRITICAL condition.
+  coordinator_->UpdateConditionIfNeeded(MemoryCondition::CRITICAL);
+  RunUntilIdle();
+  EXPECT_EQ(MemoryCondition::CRITICAL, policy->last_condition());
+
+  // Make sure that OnConditionChanged() won't get called when the condition is
+  // unchanged. CHECK_NE() in MockMemoryCoordinatorPolicy ensures it.
+  coordinator_->UpdateConditionIfNeeded(MemoryCondition::CRITICAL);
+  RunUntilIdle();
+  EXPECT_EQ(MemoryCondition::CRITICAL, policy->last_condition());
 }
 
-TEST_F(MemoryCoordinatorImplTest, ForceSetGlobalState) {
-  auto* state_updater = coordinator_->state_updater_.get();
-  state_updater->expected_renderer_size_ = 10;
-  state_updater->new_renderers_until_throttled_ = 4;
-  state_updater->new_renderers_until_suspended_ = 2;
-  state_updater->new_renderers_back_to_normal_ = 5;
-  state_updater->new_renderers_back_to_throttled_ = 3;
-  DCHECK(state_updater->ValidateParameters());
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(50);
+// TODO(bashi): Move ForceSetMemoryCondition?
+TEST_F(MemoryCoordinatorImplTest, ForceSetMemoryCondition) {
+  auto* condition_observer = coordinator_->condition_observer_.get();
+  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(1000);
 
   base::TimeDelta interval = base::TimeDelta::FromSeconds(5);
-  base::TimeDelta minimum_transition = base::TimeDelta::FromSeconds(30);
-  state_updater->monitoring_interval_ = interval;
-  state_updater->minimum_transition_period_ = minimum_transition;
+  condition_observer->monitoring_interval_ = interval;
 
-  // Starts updating states. The initial state should be NORMAL with above
-  // configuration.
+  // Starts updating memory condition. The initial condition should be NORMAL
+  // with above configuration.
   coordinator_->Start();
   task_runner_->RunUntilIdle();
-  EXPECT_EQ(base::MemoryState::NORMAL, coordinator_->GetGlobalMemoryState());
+  EXPECT_EQ(MemoryCondition::NORMAL, coordinator_->GetMemoryCondition());
 
   base::TimeDelta force_set_duration = interval * 3;
-  coordinator_->ForceSetGlobalState(base::MemoryState::SUSPENDED,
-                                    force_set_duration);
-  EXPECT_EQ(base::MemoryState::SUSPENDED, coordinator_->GetGlobalMemoryState());
+  coordinator_->ForceSetMemoryCondition(MemoryCondition::CRITICAL,
+                                        force_set_duration);
+  EXPECT_EQ(MemoryCondition::CRITICAL, coordinator_->GetMemoryCondition());
 
-  // The state should remain SUSPENDED even after some monitoring period are
+  // The condition should remain CRITICAL even after some monitoring period are
   // passed.
   task_runner_->FastForwardBy(interval * 2);
   task_runner_->RunUntilIdle();
-  EXPECT_EQ(base::MemoryState::SUSPENDED, coordinator_->GetGlobalMemoryState());
+  EXPECT_EQ(MemoryCondition::CRITICAL, coordinator_->GetMemoryCondition());
 
-  // The state should be updated after |force_set_duration| is passed.
+  // The condition should be updated after |force_set_duration| is passed.
   task_runner_->FastForwardBy(force_set_duration);
   task_runner_->RunUntilIdle();
-  EXPECT_EQ(base::MemoryState::NORMAL, coordinator_->GetGlobalMemoryState());
+  EXPECT_EQ(MemoryCondition::NORMAL, coordinator_->GetMemoryCondition());
 
-  // Also make sure that the state is updated based on free avaiable memory.
-  // Since the global state has changed in the previous task, we have to wait
-  // for |minimum_transition|.
-  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(40);
-  task_runner_->FastForwardBy(minimum_transition);
+  // Also make sure that the condition is updated based on free avaiable memory.
+  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(0);
+  task_runner_->FastForwardBy(interval * 2);
   task_runner_->RunUntilIdle();
-  EXPECT_EQ(base::MemoryState::THROTTLED, coordinator_->GetGlobalMemoryState());
+  EXPECT_EQ(MemoryCondition::CRITICAL, coordinator_->GetMemoryCondition());
 }
 
 TEST_F(MemoryCoordinatorImplTest, DiscardTab) {
-  coordinator_->DiscardTab();
-  EXPECT_TRUE(coordinator_->GetDelegate()->discard_tab_called());
+  coordinator_->DiscardTab(false /* skip_unload_handlers */);
+  EXPECT_EQ(1, coordinator_->GetDelegate()->discard_tab_count());
+}
+
+TEST_F(MemoryCoordinatorImplTest, DiscardTabUnderCritical) {
+  auto* condition_observer = coordinator_->condition_observer_.get();
+  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(1000);
+
+  base::TimeDelta interval = base::TimeDelta::FromSeconds(5);
+  condition_observer->monitoring_interval_ = interval;
+
+  auto* delegate = coordinator_->GetDelegate();
+
+  coordinator_->Start();
+  task_runner_->RunUntilIdle();
+  EXPECT_EQ(MemoryCondition::NORMAL, coordinator_->GetMemoryCondition());
+  EXPECT_EQ(0, delegate->discard_tab_count());
+
+  // Enter CRITICAL condition. Tab discarding should start.
+  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(0);
+  task_runner_->FastForwardBy(interval);
+  EXPECT_EQ(1, delegate->discard_tab_count());
+  task_runner_->FastForwardBy(interval);
+  EXPECT_EQ(2, delegate->discard_tab_count());
+
+  // Back to NORMAL. Tab discarding should stop.
+  GetMockMemoryMonitor()->SetFreeMemoryUntilCriticalMB(1000);
+  task_runner_->FastForwardBy(interval);
+  EXPECT_EQ(2, delegate->discard_tab_count());
+  task_runner_->FastForwardBy(interval);
+  EXPECT_EQ(2, delegate->discard_tab_count());
 }
 
 #if defined(OS_ANDROID)
@@ -506,8 +445,12 @@ TEST_F(MemoryCoordinatorImplTest, MAYBE_GetStateForProcess) {
 
   coordinator_->CreateChildMemoryCoordinator(1);
   coordinator_->CreateChildMemoryCoordinator(2);
-  base::Process process1 = SpawnChild("process1");
-  base::Process process2 = SpawnChild("process2");
+
+  base::SpawnChildResult spawn_result1 = SpawnChild("process1");
+  base::Process& process1 = spawn_result1.process;
+  base::SpawnChildResult spawn_result2 = SpawnChild("process2");
+  base::Process& process2 = spawn_result2.process;
+
   coordinator_->GetMockRenderProcessHost(1)->SetProcessHandle(
       base::MakeUnique<base::ProcessHandle>(process1.Handle()));
   coordinator_->GetMockRenderProcessHost(2)->SetProcessHandle(

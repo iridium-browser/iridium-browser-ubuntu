@@ -57,13 +57,9 @@ InputEventFilter::InputEventFilter(
       main_listener_(main_listener),
       sender_(NULL),
       target_task_runner_(target_task_runner),
-      input_handler_manager_(NULL),
-      renderer_scheduler_(NULL) {
+      input_handler_manager_(NULL) {
   DCHECK(target_task_runner_.get());
   DCHECK(main_task_runner_->BelongsToCurrentThread());
-  RenderThreadImpl* render_thread_impl = RenderThreadImpl::current();
-  renderer_scheduler_ =
-      render_thread_impl ? render_thread_impl->GetRendererScheduler() : nullptr;
 }
 
 void InputEventFilter::SetInputHandlerManager(
@@ -72,17 +68,27 @@ void InputEventFilter::SetInputHandlerManager(
   input_handler_manager_ = input_handler_manager;
 }
 
-void InputEventFilter::RegisterRoutingID(int routing_id) {
+void InputEventFilter::RegisterRoutingID(
+    int routing_id,
+    const scoped_refptr<MainThreadEventQueue>& input_event_queue) {
   base::AutoLock locked(routes_lock_);
   routes_.insert(routing_id);
-  route_queues_[routing_id] = new MainThreadEventQueue(
-      routing_id, this, main_task_runner_, renderer_scheduler_);
+  route_queues_[routing_id] = input_event_queue;
+}
+
+void InputEventFilter::RegisterAssociatedRenderFrameRoutingID(
+    int render_frame_routing_id,
+    int render_view_routing_id) {
+  base::AutoLock locked(routes_lock_);
+  DCHECK(routes_.find(render_view_routing_id) != routes_.end());
+  associated_routes_[render_frame_routing_id] = render_view_routing_id;
 }
 
 void InputEventFilter::UnregisterRoutingID(int routing_id) {
   base::AutoLock locked(routes_lock_);
   routes_.erase(routing_id);
   route_queues_.erase(routing_id);
+  associated_routes_.erase(routing_id);
 }
 
 void InputEventFilter::DidOverscroll(int routing_id,
@@ -95,6 +101,22 @@ void InputEventFilter::DidStopFlinging(int routing_id) {
   SendMessage(base::MakeUnique<InputHostMsg_DidStopFlinging>(routing_id));
 }
 
+void InputEventFilter::QueueClosureForMainThreadEventQueue(
+    int routing_id,
+    const base::Closure& closure) {
+  DCHECK(target_task_runner_->BelongsToCurrentThread());
+  RouteQueueMap::iterator iter = route_queues_.find(routing_id);
+  if (iter != route_queues_.end()) {
+    iter->second->QueueClosure(closure);
+    return;
+  }
+
+  // For some reason we didn't find an event queue for the route.
+  // Don't drop the task on the floor allow it to execute.
+  NOTREACHED();
+  main_task_runner_->PostTask(FROM_HERE, closure);
+}
+
 void InputEventFilter::DispatchNonBlockingEventToMainThread(
     int routing_id,
     ui::WebScopedInputEvent event,
@@ -102,43 +124,16 @@ void InputEventFilter::DispatchNonBlockingEventToMainThread(
   DCHECK(target_task_runner_->BelongsToCurrentThread());
   RouteQueueMap::iterator iter = route_queues_.find(routing_id);
   if (iter != route_queues_.end()) {
-    iter->second->HandleEvent(std::move(event), latency_info,
-                              DISPATCH_TYPE_NON_BLOCKING,
-                              INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING);
+    iter->second->HandleEvent(
+        std::move(event), latency_info, DISPATCH_TYPE_NON_BLOCKING,
+        INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING, HandledEventCallback());
   }
 }
 
-void InputEventFilter::NotifyInputEventHandled(
-    int routing_id,
-    blink::WebInputEvent::Type type,
-    blink::WebInputEventResult result,
-    InputEventAckState ack_result) {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-  scoped_refptr<MainThreadEventQueue> queue;
-  {
-    base::AutoLock locked(routes_lock_);
-    RouteQueueMap::iterator iter = route_queues_.find(routing_id);
-    if (iter == route_queues_.end() || !iter->second)
-      return;
-    queue = iter->second;
-  }
-
-  queue->EventHandled(type, result, ack_result);
-}
-
-void InputEventFilter::ProcessRafAlignedInput(int routing_id,
-                                              base::TimeTicks frame_time) {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-  scoped_refptr<MainThreadEventQueue> queue;
-  {
-    base::AutoLock locked(routes_lock_);
-    RouteQueueMap::iterator iter = route_queues_.find(routing_id);
-    if (iter == route_queues_.end() || !iter->second)
-      return;
-    queue = iter->second;
-  }
-
-  queue->DispatchRafAlignedInput(frame_time);
+void InputEventFilter::SetWhiteListedTouchAction(int routing_id,
+                                                 cc::TouchAction touch_action) {
+  SendMessage(base::MakeUnique<InputHostMsg_SetWhiteListedTouchAction>(
+      routing_id, touch_action));
 }
 
 void InputEventFilter::OnFilterAdded(IPC::Channel* channel) {
@@ -176,22 +171,39 @@ bool InputEventFilter::OnMessageReceived(const IPC::Message& message) {
 
   TRACE_EVENT0("input", "InputEventFilter::OnMessageReceived::InputMessage");
 
+  int routing_id = message.routing_id();
   {
     base::AutoLock locked(routes_lock_);
-    if (routes_.find(message.routing_id()) == routes_.end())
-      return false;
+    if (routes_.find(routing_id) == routes_.end()) {
+      // |routes_| is based on the RenderView routing_id but the routing_id
+      // may be from a RenderFrame. Messages from RenderFrames should be handled
+      // synchronously with the associated RenderView as well.
+      // Use the associated table to see if we have a mapping from
+      // RenderFrame->RenderView if so use the queue for that routing id.
+      // TODO(dtapuska): Input messages should NOT be sent to RenderFrames and
+      // RenderViews; they should only goto one and this code will be
+      // unnecessary as this would break for mojo which doesn't guarantee
+      // ordering on different channels but Chrome IPC does.
+      auto associated_routing_id = associated_routes_.find(routing_id);
+      if (associated_routing_id == associated_routes_.end() ||
+          routes_.find(associated_routing_id->second) == routes_.end()) {
+        return false;
+      }
+      routing_id = associated_routing_id->second;
+    }
   }
 
   bool postedTask = target_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&InputEventFilter::ForwardToHandler, this, message,
-                            received_time));
+      FROM_HERE, base::Bind(&InputEventFilter::ForwardToHandler, this,
+                            routing_id, message, received_time));
   LOG_IF(WARNING, !postedTask) << "PostTask failed";
   return true;
 }
 
 InputEventFilter::~InputEventFilter() {}
 
-void InputEventFilter::ForwardToHandler(const IPC::Message& message,
+void InputEventFilter::ForwardToHandler(int associated_routing_id,
+                                        const IPC::Message& message,
                                         base::TimeTicks received_time) {
   DCHECK(input_handler_manager_);
   DCHECK(target_task_runner_->BelongsToCurrentThread());
@@ -203,13 +215,11 @@ void InputEventFilter::ForwardToHandler(const IPC::Message& message,
         "input",
         "InputEventFilter::ForwardToHandler::ForwardToMainListener",
         TRACE_EVENT_SCOPE_THREAD);
-    CHECK(main_task_runner_->PostTask(FROM_HERE,
-                                      base::Bind(main_listener_, message)))
-        << "PostTask failed";
+    input_handler_manager_->QueueClosureForMainThreadEventQueue(
+        associated_routing_id, base::Bind(main_listener_, message));
     return;
   }
 
-  int routing_id = message.routing_id();
   InputMsg_HandleInputEvent::Param params;
   if (!InputMsg_HandleInputEvent::Read(&message, &params))
     return;
@@ -218,17 +228,20 @@ void InputEventFilter::ForwardToHandler(const IPC::Message& message,
   ui::LatencyInfo latency_info = std::get<2>(params);
   InputEventDispatchType dispatch_type = std::get<3>(params);
 
+  // HandleInputEvent is always sent to the RenderView routing ID
+  // so it should be the same as the message routing ID.
+  DCHECK(associated_routing_id == message.routing_id());
   DCHECK(event);
   DCHECK(dispatch_type == DISPATCH_TYPE_BLOCKING ||
          dispatch_type == DISPATCH_TYPE_NON_BLOCKING);
 
   if (!received_time.is_null())
-    event->setTimeStampSeconds(ui::EventTimeStampToSeconds(received_time));
+    event->SetTimeStampSeconds(ui::EventTimeStampToSeconds(received_time));
 
   input_handler_manager_->HandleInputEvent(
-      routing_id, std::move(event), latency_info,
+      associated_routing_id, std::move(event), latency_info,
       base::Bind(&InputEventFilter::DidForwardToHandlerAndOverscroll, this,
-                 routing_id, dispatch_type));
+                 associated_routing_id, dispatch_type));
 };
 
 void InputEventFilter::DidForwardToHandlerAndOverscroll(
@@ -241,7 +254,12 @@ void InputEventFilter::DidForwardToHandlerAndOverscroll(
   bool send_ack = dispatch_type == DISPATCH_TYPE_BLOCKING;
   uint32_t unique_touch_event_id =
       ui::WebInputEventTraits::GetUniqueTouchEventId(*event);
-  WebInputEvent::Type type = event->type();
+  WebInputEvent::Type type = event->GetType();
+  HandledEventCallback callback;
+  if (send_ack) {
+    callback = base::Bind(&InputEventFilter::SendInputEventAck, this,
+                          routing_id, type, unique_touch_event_id);
+  }
 
   if (ack_state == INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING ||
       ack_state == INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING_DUE_TO_FLING ||
@@ -249,18 +267,30 @@ void InputEventFilter::DidForwardToHandlerAndOverscroll(
     DCHECK(!overscroll_params);
     RouteQueueMap::iterator iter = route_queues_.find(routing_id);
     if (iter != route_queues_.end()) {
-      send_ack &= iter->second->HandleEvent(std::move(event), latency_info,
-                                            dispatch_type, ack_state);
+      iter->second->HandleEvent(std::move(event), latency_info, dispatch_type,
+                                ack_state, std::move(callback));
+      return;
     }
   }
-  event.reset();
+  if (callback) {
+    std::move(callback).Run(ack_state, latency_info,
+                            std::move(overscroll_params));
+  }
+}
 
-  if (!send_ack)
-    return;
+void InputEventFilter::SendInputEventAck(
+    int routing_id,
+    blink::WebInputEvent::Type event_type,
+    int unique_touch_event_id,
+    InputEventAckState ack_state,
+    const ui::LatencyInfo& latency_info,
+    std::unique_ptr<ui::DidOverscrollParams> overscroll_params) {
+  bool main_thread = main_task_runner_->BelongsToCurrentThread();
 
-  InputEventAck ack(InputEventAckSource::COMPOSITOR_THREAD, type, ack_state,
-                    latency_info, std::move(overscroll_params),
-                    unique_touch_event_id);
+  InputEventAck ack(main_thread ? InputEventAckSource::MAIN_THREAD
+                                : InputEventAckSource::COMPOSITOR_THREAD,
+                    event_type, ack_state, latency_info,
+                    std::move(overscroll_params), unique_touch_event_id);
   SendMessage(std::unique_ptr<IPC::Message>(
       new InputHostMsg_HandleInputEvent_ACK(routing_id, ack)));
 }
@@ -286,42 +316,6 @@ void InputEventFilter::SendMessageOnIOThread(
   s_send_failure_count_++;
   base::debug::SetCrashKeyValue("input-event-filter-send-failure",
                                 base::IntToString(s_send_failure_count_));
-}
-
-void InputEventFilter::HandleEventOnMainThread(
-    int routing_id,
-    const blink::WebCoalescedInputEvent* event,
-    const ui::LatencyInfo& latency_info,
-    InputEventDispatchType dispatch_type) {
-  TRACE_EVENT_INSTANT0("input", "InputEventFilter::HandlEventOnMainThread",
-                       TRACE_EVENT_SCOPE_THREAD);
-  IPC::Message new_msg = InputMsg_HandleInputEvent(
-      routing_id, &event->event(), event->getCoalescedEventsPointers(),
-      latency_info, dispatch_type);
-  main_listener_.Run(new_msg);
-}
-
-void InputEventFilter::SendInputEventAck(int routing_id,
-                                         blink::WebInputEvent::Type type,
-                                         InputEventAckState ack_result,
-                                         uint32_t touch_event_id) {
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-  InputEventAck ack(InputEventAckSource::MAIN_THREAD, type, ack_result,
-                    touch_event_id);
-  SendMessage(std::unique_ptr<IPC::Message>(
-      new InputHostMsg_HandleInputEvent_ACK(routing_id, ack)));
-}
-
-void InputEventFilter::NeedsMainFrame(int routing_id) {
-  if (target_task_runner_->BelongsToCurrentThread()) {
-    input_handler_manager_->NeedsMainFrame(routing_id);
-    return;
-  }
-
-  CHECK(target_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&InputEventFilter::NeedsMainFrame, this, routing_id)))
-      << "PostTask failed";
 }
 
 }  // namespace content

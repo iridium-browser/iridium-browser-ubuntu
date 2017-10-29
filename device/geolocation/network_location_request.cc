@@ -9,9 +9,11 @@
 #include <limits>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
@@ -22,6 +24,7 @@
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
@@ -124,8 +127,33 @@ bool NetworkLocationRequest::MakeRequest(const base::string16& access_token,
   wifi_timestamp_ = wifi_timestamp;
 
   GURL request_url = FormRequestURL(url_);
-  url_fetcher_ = net::URLFetcher::Create(url_fetcher_id_for_tests, request_url,
-                                         net::URLFetcher::POST, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("device_geolocation_request", R"(
+        semantics {
+          sender: "Network Location Provider"
+          description:
+            "Obtains geo position based on current IP address."
+          trigger:
+            "Location requests are sent when the page requests them or new "
+            "IP address is available."
+          data: "IP Address."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "Users can control this feature via the Location setting under "
+            "'Privacy', 'Content Settings...'."
+          chrome_policy {
+            DefaultGeolocationSetting {
+              policy_options {mode: MANDATORY}
+              DefaultGeolocationSetting: 2
+            }
+          }
+        })");
+  url_fetcher_ =
+      net::URLFetcher::Create(url_fetcher_id_for_tests, request_url,
+                              net::URLFetcher::POST, this, traffic_annotation);
   url_fetcher_->SetRequestContext(url_context_.get());
   std::string upload_data;
   FormUploadData(wifi_data, wifi_timestamp, access_token, &upload_data);
@@ -248,10 +276,9 @@ void AddWifiData(const WifiData& wifi_data,
   for (const auto& ap_data : wifi_data.access_point_data)
     access_points_by_signal_strength.insert(&ap_data);
 
-  base::ListValue* wifi_access_point_list = new base::ListValue();
+  auto wifi_access_point_list = base::MakeUnique<base::ListValue>();
   for (auto* ap_data : access_points_by_signal_strength) {
-    std::unique_ptr<base::DictionaryValue> wifi_dict(
-        new base::DictionaryValue());
+    auto wifi_dict = base::MakeUnique<base::DictionaryValue>();
     AddString("macAddress", base::UTF16ToUTF8(ap_data->mac_address),
               wifi_dict.get());
     AddInteger("signalStrength", ap_data->radio_signal_strength,
@@ -261,7 +288,7 @@ void AddWifiData(const WifiData& wifi_data,
     AddInteger("signalToNoiseRatio", ap_data->signal_to_noise, wifi_dict.get());
     wifi_access_point_list->Append(std::move(wifi_dict));
   }
-  request->Set("wifiAccessPoints", wifi_access_point_list);
+  request->Set("wifiAccessPoints", std::move(wifi_access_point_list));
 }
 
 void FormatPositionError(const GURL& server_url,

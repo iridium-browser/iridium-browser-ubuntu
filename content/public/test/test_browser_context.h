@@ -19,7 +19,9 @@ namespace content {
 class MockBackgroundSyncController;
 class MockResourceContext;
 class MockSSLHostStateDelegate;
+#if !defined(OS_ANDROID)
 class ZoomLevelDelegate;
+#endif  // !defined(OS_ANDROID)
 
 class TestBrowserContext : public BrowserContext {
  public:
@@ -35,9 +37,17 @@ class TestBrowserContext : public BrowserContext {
       std::unique_ptr<PermissionManager> permission_manager);
   net::URLRequestContextGetter* GetRequestContext();
 
+  // Allow clients to make this an incognito context.
+  void set_is_off_the_record(bool is_off_the_record) {
+    is_off_the_record_ = is_off_the_record;
+  }
+
+  // BrowserContext implementation.
   base::FilePath GetPath() const override;
+#if !defined(OS_ANDROID)
   std::unique_ptr<ZoomLevelDelegate> CreateZoomLevelDelegate(
       const base::FilePath& partition_path) override;
+#endif  // !defined(OS_ANDROID)
   bool IsOffTheRecord() const override;
   DownloadManagerDelegate* GetDownloadManagerDelegate() override;
   ResourceContext* GetResourceContext() override;
@@ -47,6 +57,7 @@ class TestBrowserContext : public BrowserContext {
   SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   PermissionManager* GetPermissionManager() override;
   BackgroundSyncController* GetBackgroundSyncController() override;
+  BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate() override;
   net::URLRequestContextGetter* CreateRequestContext(
       ProtocolHandlerMap* protocol_handlers,
       URLRequestInterceptorScopedVector request_interceptors) override;
@@ -68,6 +79,7 @@ class TestBrowserContext : public BrowserContext {
   std::unique_ptr<MockSSLHostStateDelegate> ssl_host_state_delegate_;
   std::unique_ptr<PermissionManager> permission_manager_;
   std::unique_ptr<MockBackgroundSyncController> background_sync_controller_;
+  bool is_off_the_record_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(TestBrowserContext);
 };

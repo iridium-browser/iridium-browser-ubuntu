@@ -10,8 +10,9 @@
 #include <memory>
 #include <vector>
 
-#include "core/fpdfapi/page/cpdf_countedobject.h"
+#include "core/fpdfapi/page/cpdf_colorspace.h"
 #include "core/fpdfapi/page/cpdf_pattern.h"
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxcrt/fx_system.h"
 
 enum ShadingType {
@@ -53,8 +54,8 @@ class CPDF_ShadingPattern : public CPDF_Pattern {
 
   ShadingType GetShadingType() const { return m_ShadingType; }
   bool IsShadingObject() const { return m_bShadingObj; }
-  CPDF_Object* GetShadingObject() const { return m_pShadingObj; }
-  CPDF_ColorSpace* GetCS() const { return m_pCS; }
+  CPDF_Object* GetShadingObject() const { return m_pShadingObj.Get(); }
+  CPDF_ColorSpace* GetCS() const { return m_pCS.Get(); }
   const std::vector<std::unique_ptr<CPDF_Function>>& GetFuncs() const {
     return m_pFunctions;
   }
@@ -62,13 +63,13 @@ class CPDF_ShadingPattern : public CPDF_Pattern {
  private:
   ShadingType m_ShadingType;
   bool m_bShadingObj;
-  CPDF_Object* m_pShadingObj;
+  CFX_UnownedPtr<CPDF_Object> m_pShadingObj;
 
   // Still keep |m_pCS| as some CPDF_ColorSpace (name object) are not managed
   // as counted objects. Refer to CPDF_DocPageData::GetColorSpace.
-  CPDF_ColorSpace* m_pCS;
+  CFX_UnownedPtr<CPDF_ColorSpace> m_pCS;
 
-  CPDF_CountedColorSpace* m_pCountedCS;
+  CFX_UnownedPtr<CPDF_CountedColorSpace> m_pCountedCS;
   std::vector<std::unique_ptr<CPDF_Function>> m_pFunctions;
 };
 

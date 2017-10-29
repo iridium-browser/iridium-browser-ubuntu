@@ -94,10 +94,10 @@ public class TabUma {
         mTabCreationState = creationState;
 
         mLastTabStateChangeMillis = System.currentTimeMillis();
-        if (mTabCreationState == TabCreationState.LIVE_IN_FOREGROUND
-                || mTabCreationState == TabCreationState.FROZEN_ON_RESTORE) {
+        if (mTabCreationState == TabCreationState.LIVE_IN_FOREGROUND) {
             updateTabState(TAB_STATE_ACTIVE);
         } else if (mTabCreationState == TabCreationState.LIVE_IN_BACKGROUND
+                || mTabCreationState == TabCreationState.FROZEN_ON_RESTORE
                 || mTabCreationState == TabCreationState.FROZEN_FOR_LAZY_LOAD) {
             updateTabState(TAB_STATE_INACTIVE);
         } else if (mTabCreationState == TabCreationState.FROZEN_ON_RESTORE_FAILED) {
@@ -160,10 +160,6 @@ public class TabUma {
             recordLongTimesHistogram100("Tabs.StateTransfer.Time_Active_Inactive", delta);
         } else if (prevState == TAB_STATE_ACTIVE && newState == TAB_STATE_CLOSED) {
             recordLongTimesHistogram100("Tabs.StateTransfer.Time_Active_Closed", delta);
-        } else if (prevState == TAB_STATE_INACTIVE && newState == TAB_STATE_ACTIVE) {
-            recordLongTimesHistogram100("Tabs.StateTransfer.Time_Inactive_Active", delta);
-        } else if (prevState == TAB_STATE_INACTIVE && newState == TAB_STATE_CLOSED) {
-            recordLongTimesHistogram100("Tabs.StateTransfer.Time_Inactive_Close", delta);
         }
 
         if (prevState == TAB_STATE_INITIAL) {
@@ -196,6 +192,9 @@ public class TabUma {
      * @param newState New state of the tab.
      */
     void updateTabState(int newState) {
+        if (mLastTabState == newState) {
+            return;
+        }
         long now = System.currentTimeMillis();
         recordTabStateTransition(mLastTabState, newState, now - mLastTabStateChangeMillis);
         mLastTabStateChangeMillis = now;

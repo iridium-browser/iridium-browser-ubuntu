@@ -42,12 +42,16 @@ namespace visitedlink {
 class VisitedLinkMaster;
 }
 
+namespace safe_browsing {
+class TriggerManager;
+}  // namespace safe_browsing
+
 namespace android_webview {
 
 class AwFormDatabaseService;
 class AwQuotaManagerBridge;
+class AwSafeBrowsingWhitelistManager;
 class AwURLRequestContextGetter;
-class JniDependencyFactory;
 
 namespace prefs {
 
@@ -61,9 +65,7 @@ extern const char kWebRestrictionsAuthority[];
 class AwBrowserContext : public content::BrowserContext,
                          public visitedlink::VisitedLinkDelegate {
  public:
-
-  AwBrowserContext(const base::FilePath path,
-                   JniDependencyFactory* native_factory);
+  AwBrowserContext(const base::FilePath path);
   ~AwBrowserContext() override;
 
   // Currently only one instance per process is supported.
@@ -90,8 +92,6 @@ class AwBrowserContext : public content::BrowserContext,
   web_restrictions::WebRestrictionsClient* GetWebRestrictionProvider();
 
   // content::BrowserContext implementation.
-  std::unique_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
-      const base::FilePath& partition_path) override;
   base::FilePath GetPath() const override;
   bool IsOffTheRecord() const override;
   content::ResourceContext* GetResourceContext() override;
@@ -102,6 +102,8 @@ class AwBrowserContext : public content::BrowserContext,
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   content::PermissionManager* GetPermissionManager() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
+  content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
+      override;
   net::URLRequestContextGetter* CreateRequestContext(
       content::ProtocolHandlerMap* protocol_handlers,
       content::URLRequestInterceptorScopedVector request_interceptors) override;
@@ -118,8 +120,10 @@ class AwBrowserContext : public content::BrowserContext,
   // visitedlink::VisitedLinkDelegate implementation.
   void RebuildTable(const scoped_refptr<URLEnumerator>& enumerator) override;
 
-  AwSafeBrowsingUIManager* GetSafeBrowsingUIManager();
+  AwSafeBrowsingUIManager* GetSafeBrowsingUIManager() const;
   safe_browsing::RemoteSafeBrowsingDatabaseManager* GetSafeBrowsingDBManager();
+  safe_browsing::TriggerManager* GetSafeBrowsingTriggerManager() const;
+  AwSafeBrowsingWhitelistManager* GetSafeBrowsingWhitelistManager() const;
 
  private:
   void InitUserPrefService();
@@ -133,7 +137,6 @@ class AwBrowserContext : public content::BrowserContext,
   // The file path where data for this context is persisted.
   base::FilePath context_storage_path_;
 
-  JniDependencyFactory* native_factory_;
   scoped_refptr<AwURLRequestContextGetter> url_request_context_getter_;
   scoped_refptr<AwQuotaManagerBridge> quota_manager_bridge_;
   std::unique_ptr<AwFormDatabaseService> form_database_service_;
@@ -154,9 +157,13 @@ class AwBrowserContext : public content::BrowserContext,
   PrefChangeRegistrar pref_change_registrar_;
 
   scoped_refptr<AwSafeBrowsingUIManager> safe_browsing_ui_manager_;
+  std::unique_ptr<safe_browsing::TriggerManager> safe_browsing_trigger_manager_;
   scoped_refptr<safe_browsing::RemoteSafeBrowsingDatabaseManager>
       safe_browsing_db_manager_;
   bool safe_browsing_db_manager_started_ = false;
+
+  std::unique_ptr<AwSafeBrowsingWhitelistManager>
+      safe_browsing_whitelist_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(AwBrowserContext);
 };

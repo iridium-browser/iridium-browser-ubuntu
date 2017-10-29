@@ -24,11 +24,14 @@ class TranslatorHLSL : public TCompiler
     const std::map<std::string, unsigned int> *getUniformRegisterMap() const;
 
   protected:
-    void translate(TIntermNode *root, ShCompileOptions compileOptions) override;
+    void translate(TIntermBlock *root, ShCompileOptions compileOptions) override;
     bool shouldFlattenPragmaStdglInvariantAll() override;
 
     // collectVariables needs to be run always so registers can be assigned.
     bool shouldCollectVariables(ShCompileOptions compileOptions) override { return true; }
+
+    // Globals are initialized in output so it is redundant to initialize them in the AST.
+    bool needToInitializeGlobalsInAST() const override { return false; }
 
     std::map<std::string, unsigned int> mInterfaceBlockRegisterMap;
     std::map<std::string, unsigned int> mUniformRegisterMap;

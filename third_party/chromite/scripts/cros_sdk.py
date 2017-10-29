@@ -18,6 +18,7 @@ import glob
 import os
 import pwd
 import re
+import resource
 import sys
 import urlparse
 
@@ -134,8 +135,8 @@ def FetchRemoteTarballs(storage_dir, urls, desc, allow_none=False):
     content_length = 0
     logging.debug('Attempting download from %s', url)
     result = retry_util.RunCurl(
-        ['-I', url], fail=False, capture_output=False, redirect_stdout=True,
-        redirect_stderr=True, print_cmd=False, debug_level=logging.NOTICE)
+        ['-I', url], print_cmd=False, debug_level=logging.NOTICE,
+        capture_output=True)
     successful = False
     for header in result.output.splitlines():
       # We must walk the output to find the 200 code for use cases where
@@ -163,8 +164,8 @@ def FetchRemoteTarballs(storage_dir, urls, desc, allow_none=False):
 
   if current_size < content_length:
     retry_util.RunCurl(
-        ['-L', '-y', '30', '-C', '-', '--output', tarball_dest, url],
-        print_cmd=False, capture_output=False, debug_level=logging.NOTICE)
+        ['--fail', '-L', '-y', '30', '-C', '-', '--output', tarball_dest, url],
+        print_cmd=False, debug_level=logging.NOTICE)
 
   # Cleanup old tarballs now since we've successfull fetched; only cleanup
   # the tarballs for our prefix, or unknown ones. This gets a bit tricky
@@ -217,7 +218,7 @@ def DeleteChroot(chroot_path):
 
 
 def EnterChroot(chroot_path, cache_dir, chrome_root, chrome_root_mount,
-                workspace, additional_args):
+                workspace, goma_dir, goma_client_json, additional_args):
   """Enters an existing SDK chroot"""
   st = os.statvfs(os.path.join(chroot_path, 'usr', 'bin', 'sudo'))
   # The os.ST_NOSUID constant wasn't added until python-3.2.
@@ -231,11 +232,17 @@ def EnterChroot(chroot_path, cache_dir, chrome_root, chrome_root_mount,
     cmd.extend(['--chrome_root_mount', chrome_root_mount])
   if workspace:
     cmd.extend(['--workspace_root', workspace])
+  if goma_dir:
+    cmd.extend(['--goma_dir', goma_dir])
+  if goma_client_json:
+    cmd.extend(['--goma_client_json', goma_client_json])
 
   if len(additional_args) > 0:
     cmd.append('--')
     cmd.extend(additional_args)
 
+  # ThinLTO opens lots of files at the same time.
+  resource.setrlimit(resource.RLIMIT_NOFILE, (32768, 32768))
   ret = cros_build_lib.RunCommand(cmd, print_cmd=False, error_code_ok=True,
                                   mute_output=False)
   # If we were in interactive mode, ignore the exit code; it'll be whatever
@@ -495,6 +502,11 @@ def _CreateParser(sdk_latest_version, bootstrap_latest_version):
                             % (sdk_latest_version, bootstrap_latest_version)))
   parser.add_argument('--workspace',
                       help='Workspace directory to mount into the chroot.')
+  parser.add_argument('--goma_dir', type='path',
+                      help='Goma installed directory to mount into the chroot.')
+  parser.add_argument('--goma_client_json', type='path',
+                      help='Service account json file to use goma on bot. '
+                           'Mounted into the chroot.')
   parser.add_argument('commands', nargs=argparse.REMAINDER)
 
   # SDK overlay tarball options (mutually exclusive).
@@ -576,13 +588,22 @@ def main(argv):
 
   host = os.uname()[4]
   if host != 'x86_64':
-    parser.error(
+    cros_build_lib.Die(
         "cros_sdk is currently only supported on x86_64; you're running"
         " %s.  Please find a x86_64 machine." % (host,))
 
   _ReportMissing(osutils.FindMissingBinaries(NEEDED_TOOLS))
   if options.proxy_sim:
     _ReportMissing(osutils.FindMissingBinaries(PROXY_NEEDED_TOOLS))
+
+  if (sdk_latest_version == '<unknown>' or
+      bootstrap_latest_version == '<unknown>'):
+    cros_build_lib.Die(
+        'No SDK version was found. '
+        'Are you in a Chromium source tree instead of Chromium OS?\n\n'
+        'Please change to a directory inside your Chromium OS source tree\n'
+        'and retry.  If you need to setup a Chromium OS source tree, see\n'
+        '  http://www.chromium.org/chromium-os/developer-guide')
 
   _ReExecuteIfNeeded([sys.argv[0]] + argv)
   if options.ns_pid:
@@ -714,4 +735,5 @@ def main(argv):
         lock.read_lock()
         EnterChroot(options.chroot, options.cache_dir, options.chrome_root,
                     options.chrome_root_mount, options.workspace,
+                    options.goma_dir, options.goma_client_json,
                     chroot_command)

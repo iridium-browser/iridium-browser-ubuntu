@@ -5,11 +5,13 @@
 #ifndef CC_LAYERS_SCROLLBAR_LAYER_IMPL_BASE_H_
 #define CC_LAYERS_SCROLLBAR_LAYER_IMPL_BASE_H_
 
+#include "base/containers/flat_set.h"
 #include "base/macros.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/input/scrollbar.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
+#include "cc/trees/layer_tree_settings.h"
 
 namespace cc {
 
@@ -17,19 +19,20 @@ class LayerTreeImpl;
 
 class CC_EXPORT ScrollbarLayerImplBase : public LayerImpl {
  public:
-  int ScrollLayerId() const { return scroll_layer_id_; }
+  ElementId scroll_element_id() const { return scroll_element_id_; }
+  void SetScrollElementId(ElementId scroll_element_id);
 
-  void SetScrollLayerId(int scroll_layer_id);
-
-  float current_pos() const { return current_pos_; }
+  // The following setters should be called when updating scrollbar geometries
+  // (see: LayerTreeImpl::UpdateScrollbarGeometries).
   bool SetCurrentPos(float current_pos);
-  bool SetClipLayerLength(float clip_layer_length);
-  bool SetScrollLayerLength(float scroll_layer_length);
-  bool SetVerticalAdjust(float vertical_adjust);
+  void SetClipLayerLength(float clip_layer_length);
+  void SetScrollLayerLength(float scroll_layer_length);
+  void SetVerticalAdjust(float vertical_adjust);
 
-  float clip_layer_length() const { return clip_layer_length_; }
-  float scroll_layer_length() const { return scroll_layer_length_; }
-  float vertical_adjust() const { return vertical_adjust_; }
+  float current_pos() const;
+  float clip_layer_length() const;
+  float scroll_layer_length() const;
+  float vertical_adjust() const;
 
   bool is_overlay_scrollbar() const { return is_overlay_scrollbar_; }
   void set_is_overlay_scrollbar(bool is_overlay) {
@@ -47,14 +50,21 @@ class CC_EXPORT ScrollbarLayerImplBase : public LayerImpl {
   ScrollbarLayerImplBase* ToScrollbarLayer() override;
 
   // Thumb quad rect in layer space.
-  virtual gfx::Rect ComputeThumbQuadRect() const;
+  gfx::Rect ComputeThumbQuadRect() const;
+  gfx::Rect ComputeExpandedThumbQuadRect() const;
 
   float thumb_thickness_scale_factor() {
     return thumb_thickness_scale_factor_;
   }
-  bool SetThumbThicknessScaleFactor(float thumb_thickness_scale_factor);
+  void SetThumbThicknessScaleFactor(float thumb_thickness_scale_factor);
 
   virtual int ThumbThickness() const = 0;
+
+  // TODO(crbug.com/702832): No need for this function once there is element id
+  // on overlay scrollbar layers.
+  void SetOverlayScrollbarLayerOpacityAnimated(float opacity);
+
+  virtual LayerTreeSettings::ScrollbarAnimator GetScrollbarAnimator() const;
 
  protected:
   ScrollbarLayerImplBase(LayerTreeImpl* tree_impl,
@@ -72,7 +82,10 @@ class CC_EXPORT ScrollbarLayerImplBase : public LayerImpl {
   virtual bool IsThumbResizable() const = 0;
 
  private:
-  int scroll_layer_id_;
+  gfx::Rect ComputeThumbQuadRectWithThumbThicknessScale(
+      float thumb_thickness_scale_factor) const;
+
+  ElementId scroll_element_id_;
   bool is_overlay_scrollbar_;
 
   float thumb_thickness_scale_factor_;
@@ -89,7 +102,7 @@ class CC_EXPORT ScrollbarLayerImplBase : public LayerImpl {
   DISALLOW_COPY_AND_ASSIGN(ScrollbarLayerImplBase);
 };
 
-typedef std::set<ScrollbarLayerImplBase*> ScrollbarSet;
+using ScrollbarSet = base::flat_set<ScrollbarLayerImplBase*>;
 
 }  // namespace cc
 

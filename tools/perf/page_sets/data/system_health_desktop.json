@@ -37,7 +37,28 @@
             "DEFAULT": "system_health_desktop_039.wpr"
         },
         "browse:social:twitter": {
-            "DEFAULT": "system_health_desktop_019.wpr"
+            "DEFAULT": "system_health_desktop_053.wpr"
+        },
+        "browse:tools:earth": {
+            "DEFAULT": "system_health_desktop_050.wpr"
+        },
+        "browse:tools:maps": {
+            "DEFAULT": "system_health_desktop_052.wpr"
+        },
+        "browse:tech:discourse_infinite_scroll": {
+            "DEFAULT": "system_health_desktop_058.wpr"
+        },
+        "browse:social:facebook_infinite_scroll": {
+            "DEFAULT": "system_health_desktop_055.wpr"
+        },
+        "browse:media:flickr_infinite_scroll": {
+            "DEFAULT": "system_health_desktop_057.wpr"
+        },
+        "browse:social:tumblr_infinite_scroll": {
+            "DEFAULT": "system_health_desktop_056.wpr"
+        },
+        "browse:social:twitter_infinite_scroll": {
+            "DEFAULT": "system_health_desktop_054.wpr"
         },
         "load:games:alphabetty": {
             "DEFAULT": "system_health_desktop_005.wpr"
@@ -170,6 +191,9 @@
         },
         "long_running:tools:gmail-foreground": {
             "DEFAULT": "system_health_desktop_028.wpr"
+        },
+        "multitab:misc:typical24": {
+            "DEFAULT": "system_health_desktop_049.wpr"
         },
         "play:media:google_play_music": {
             "DEFAULT": "system_health_desktop_030.wpr"

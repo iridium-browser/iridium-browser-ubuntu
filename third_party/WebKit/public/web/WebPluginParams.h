@@ -31,18 +31,18 @@
 #ifndef WebPluginParams_h
 #define WebPluginParams_h
 
-#include "../platform/WebString.h"
-#include "../platform/WebURL.h"
-#include "../platform/WebVector.h"
+#include "public/platform/WebString.h"
+#include "public/platform/WebURL.h"
+#include "public/platform/WebVector.h"
 
 namespace blink {
 
 struct WebPluginParams {
   WebURL url;
-  WebString mimeType;
-  WebVector<WebString> attributeNames;
-  WebVector<WebString> attributeValues;
-  bool loadManually;
+  WebString mime_type;
+  WebVector<WebString> attribute_names;
+  WebVector<WebString> attribute_values;
+  bool load_manually;
 };
 
 }  // namespace blink

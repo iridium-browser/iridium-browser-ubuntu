@@ -5,6 +5,7 @@
  * found in the LICENSE file.
  */
 
+#include "GrGpuCommandBuffer.h"
 #include "GrMeshDrawOp.h"
 #include "GrOpFlushState.h"
 #include "GrResourceProvider.h"
@@ -17,17 +18,16 @@ void GrMeshDrawOp::onPrepare(GrOpFlushState* state) {
     this->onPrepareDraws(&target);
 }
 
-void* GrMeshDrawOp::InstancedHelper::init(Target* target, GrPrimitiveType primType,
-                                          size_t vertexStride, const GrBuffer* indexBuffer,
-                                          int verticesPerInstance, int indicesPerInstance,
-                                          int instancesToDraw) {
+void* GrMeshDrawOp::PatternHelper::init(Target* target, size_t vertexStride,
+                                        const GrBuffer* indexBuffer, int verticesPerRepetition,
+                                        int indicesPerRepetition, int repeatCount) {
     SkASSERT(target);
     if (!indexBuffer) {
         return nullptr;
     }
     const GrBuffer* vertexBuffer;
     int firstVertex;
-    int vertexCount = verticesPerInstance * instancesToDraw;
+    int vertexCount = verticesPerRepetition * repeatCount;
     void* vertices =
             target->makeVertexSpace(vertexStride, vertexCount, &vertexBuffer, &firstVertex);
     if (!vertices) {
@@ -36,16 +36,17 @@ void* GrMeshDrawOp::InstancedHelper::init(Target* target, GrPrimitiveType primTy
     }
     SkASSERT(vertexBuffer);
     size_t ibSize = indexBuffer->gpuMemorySize();
-    int maxInstancesPerDraw = static_cast<int>(ibSize / (sizeof(uint16_t) * indicesPerInstance));
+    int maxRepetitions = static_cast<int>(ibSize / (sizeof(uint16_t) * indicesPerRepetition));
 
-    fMesh.initInstanced(primType, vertexBuffer, indexBuffer, firstVertex, verticesPerInstance,
-                        indicesPerInstance, instancesToDraw, maxInstancesPerDraw);
+    fMesh.setIndexedPatterned(indexBuffer, indicesPerRepetition, verticesPerRepetition,
+                              repeatCount, maxRepetitions);
+    fMesh.setVertexData(vertexBuffer, firstVertex);
     return vertices;
 }
 
-void GrMeshDrawOp::InstancedHelper::recordDraw(Target* target, const GrGeometryProcessor* gp) {
-    SkASSERT(fMesh.instanceCount());
-    target->draw(gp, fMesh);
+void GrMeshDrawOp::PatternHelper::recordDraw(Target* target, const GrGeometryProcessor* gp,
+                                             const GrPipeline* pipeline) {
+    target->draw(gp, pipeline, fMesh);
 }
 
 void* GrMeshDrawOp::QuadHelper::init(Target* target, size_t vertexStride, int quadsToDraw) {
@@ -54,12 +55,11 @@ void* GrMeshDrawOp::QuadHelper::init(Target* target, size_t vertexStride, int qu
         SkDebugf("Could not get quad index buffer.");
         return nullptr;
     }
-    return this->INHERITED::init(target, kTriangles_GrPrimitiveType, vertexStride,
-                                 quadIndexBuffer.get(), kVerticesPerQuad, kIndicesPerQuad,
-                                 quadsToDraw);
+    return this->INHERITED::init(target, vertexStride, quadIndexBuffer.get(), kVerticesPerQuad,
+                                 kIndicesPerQuad, quadsToDraw);
 }
 
-void GrMeshDrawOp::onExecute(GrOpFlushState* state, const SkRect& bounds) {
+void GrMeshDrawOp::onExecute(GrOpFlushState* state) {
     int currUploadIdx = 0;
     int currMeshIdx = 0;
 
@@ -69,11 +69,14 @@ void GrMeshDrawOp::onExecute(GrOpFlushState* state, const SkRect& bounds) {
         GrDrawOpUploadToken drawToken = state->nextTokenToFlush();
         while (currUploadIdx < fInlineUploads.count() &&
                fInlineUploads[currUploadIdx].fUploadBeforeToken == drawToken) {
-            state->commandBuffer()->inlineUpload(state, fInlineUploads[currUploadIdx++].fUpload);
+            state->commandBuffer()->inlineUpload(state, fInlineUploads[currUploadIdx++].fUpload,
+                                                 state->drawOpArgs().fRenderTarget);
         }
         const QueuedDraw& draw = fQueuedDraws[currDrawIdx];
-        state->commandBuffer()->draw(*this->pipeline(), *draw.fGeometryProcessor.get(),
-                                     fMeshes.begin() + currMeshIdx, draw.fMeshCnt, bounds);
+        SkASSERT(draw.fPipeline->getRenderTarget() == state->drawOpArgs().fRenderTarget);
+        state->commandBuffer()->draw(*draw.fPipeline, *draw.fGeometryProcessor.get(),
+                                     fMeshes.begin() + currMeshIdx, nullptr, draw.fMeshCnt,
+                                     this->bounds());
         currMeshIdx += draw.fMeshCnt;
         state->flushToken();
     }
@@ -85,14 +88,15 @@ void GrMeshDrawOp::onExecute(GrOpFlushState* state, const SkRect& bounds) {
 
 //////////////////////////////////////////////////////////////////////////////
 
-void GrMeshDrawOp::Target::draw(const GrGeometryProcessor* gp, const GrMesh& mesh) {
+void GrMeshDrawOp::Target::draw(const GrGeometryProcessor* gp, const GrPipeline* pipeline,
+                                const GrMesh& mesh) {
     GrMeshDrawOp* op = this->meshDrawOp();
     op->fMeshes.push_back(mesh);
     if (!op->fQueuedDraws.empty()) {
-        // If the last draw shares a geometry processor and there are no intervening uploads,
-        // add this mesh to it.
+        // If the last draw shares a geometry processor and pipeline and there are no intervening
+        // uploads, add this mesh to it.
         GrMeshDrawOp::QueuedDraw& lastDraw = op->fQueuedDraws.back();
-        if (lastDraw.fGeometryProcessor == gp &&
+        if (lastDraw.fGeometryProcessor == gp && lastDraw.fPipeline == pipeline &&
             (op->fInlineUploads.empty() ||
              op->fInlineUploads.back().fUploadBeforeToken != this->nextDrawToken())) {
             ++lastDraw.fMeshCnt;
@@ -102,6 +106,7 @@ void GrMeshDrawOp::Target::draw(const GrGeometryProcessor* gp, const GrMesh& mes
     GrMeshDrawOp::QueuedDraw& draw = op->fQueuedDraws.push_back();
     GrDrawOpUploadToken token = this->state()->issueDrawToken();
     draw.fGeometryProcessor.reset(gp);
+    draw.fPipeline = pipeline;
     draw.fMeshCnt = 1;
     if (op->fQueuedDraws.count() == 1) {
         op->fBaseDrawToken = token;

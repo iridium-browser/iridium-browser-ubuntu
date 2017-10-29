@@ -60,19 +60,19 @@ Polymer({
   is: 'tr-ui-e-drive-comments-side-panel',
   behaviors: [tr.ui.behaviors.SidePanel],
 
-  ready: function() {
-    this.rangeOfInterest_ = new tr.b.Range();
+  ready() {
+    this.rangeOfInterest_ = new tr.b.math.Range();
     this.selection_ = undefined;
     this.comments_ = [];
     this.annotationFromComment_ = undefined;
     this.textAreaFocused = false;
   },
 
-  setCommentProvider: function(commentProvider) {
+  setCommentProvider(commentProvider) {
     this.commentProvider_ = commentProvider;
   },
 
-  attached: function() {
+  attached() {
     if (this.commentProvider_ === undefined) {
       this.commentProvider_ =
           new tr.ui.e.drive.analysis.DefaultCommentProvider();
@@ -80,38 +80,38 @@ Polymer({
     this.commentProvider_.attachToElement(this);
   },
 
-  detached: function() {
+  detached() {
     this.commentProvider_.detachFromElement();
   },
 
-  commentClick: function(event) {
-    var anchor = event.currentTarget.comment.anchor;
-    if (!anchor)
-      return;
+  commentClick(event) {
+    const anchor = event.currentTarget.comment.anchor;
+    if (!anchor) return;
 
-    var uiState =
+    const uiState =
         JSON.parse(anchor).a[0][tr.ui.e.drive.constants.ANCHOR_NAME];
 
-    var myEvent = new CustomEvent('navigateToUIState', { detail:
+    const myEvent = new CustomEvent('navigateToUIState', { detail:
         new tr.ui.b.UIState(new tr.model.Location(uiState.location.xWorld,
                                               uiState.location.yComponents),
                                               uiState.scaleX)
     });
     document.dispatchEvent(myEvent);
 
-    if (this.annotationFromComment_)
+    if (this.annotationFromComment_) {
       this.model.removeAnnotation(this.annotationFromComment_);
-    var loc = new tr.model.Location(uiState.location.xWorld,
+    }
+    const loc = new tr.model.Location(uiState.location.xWorld,
                                 uiState.location.yComponents);
 
-    var text = sender.comment.author.displayName + ': ' +
+    const text = sender.comment.author.displayName + ': ' +
         sender.comment.content;
     this.annotationFromComment_ =
         new tr.model.CommentBoxAnnotation(loc, text);
     this.model.addAnnotation(this.annotationFromComment_);
   },
 
-  textareaKeypress: function(event) {
+  textareaKeypress(event) {
     // Check for return key.
     if (event.keyCode === 13 && !event.ctrlKey) {
       this.commentProvider_.addComment(this.$.commentinput.value);
@@ -121,11 +121,11 @@ Polymer({
     return true;
   },
 
-  textAreaFocus: function(event) {
+  textAreaFocus(event) {
     this.textAreaFocused = true;
   },
 
-  textAreaBlur: function(event) {
+  textAreaBlur(event) {
     this.textAreaFocused = false;
   },
 
@@ -139,8 +139,9 @@ Polymer({
   },
 
   get currentRangeOfInterest() {
-    if (this.rangeOfInterest_.isEmpty)
+    if (this.rangeOfInterest_.isEmpty) {
       return this.model_.bounds;
+    }
     return this.rangeOfInterest_;
   },
 
@@ -157,11 +158,11 @@ Polymer({
     this.selection_ = selection;
   },
 
-  updateContents_: function() {
+  updateContents_() {
     this.commentProvider_.updateComments();
   },
 
-  supportsModel: function(m) {
+  supportsModel(m) {
     if (m === undefined) {
       return {
         supported: false,

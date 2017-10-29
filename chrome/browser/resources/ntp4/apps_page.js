@@ -21,7 +21,7 @@ cr.define('ntp', function() {
     SAME_APPS_PANE: 0,
     OTHER_APPS_PANE: 1,
     MOST_VISITED_PANE: 2,  // Deprecated.
-    BOOKMARKS_PANE: 3,  // Deprecated.
+    BOOKMARKS_PANE: 3,     // Deprecated.
     OUTSIDE_NTP: 4
   };
   var DRAG_SOURCE_LIMIT = DRAG_SOURCE.OUTSIDE_NTP + 1;
@@ -45,7 +45,7 @@ cr.define('ntp', function() {
       this.menu = menu;
 
       this.launch_ = this.appendMenuItem_();
-      this.launch_.addEventListener('activate', this.onLaunch_.bind(this));
+      this.launch_.addEventListener('activate', this.onActivate_.bind(this));
 
       menu.appendChild(cr.ui.MenuItem.createSeparator());
       this.launchRegularTab_ = this.appendMenuItem_('applaunchtyperegular');
@@ -56,8 +56,8 @@ cr.define('ntp', function() {
 
       var self = this;
       this.forAllLaunchTypes_(function(launchTypeButton, id) {
-        launchTypeButton.addEventListener('activate',
-            self.onLaunchTypeChanged_.bind(self));
+        launchTypeButton.addEventListener(
+            'activate', self.onLaunchTypeChanged_.bind(self));
       });
 
       this.launchTypeMenuSeparator_ = cr.ui.MenuItem.createSeparator();
@@ -67,18 +67,18 @@ cr.define('ntp', function() {
 
       if (loadTimeData.getBoolean('canShowAppInfoDialog')) {
         this.appinfo_ = this.appendMenuItem_('appinfodialog');
-        this.appinfo_.addEventListener('activate',
-                                       this.onShowAppInfo_.bind(this));
+        this.appinfo_.addEventListener(
+            'activate', this.onShowAppInfo_.bind(this));
       } else {
         this.details_ = this.appendMenuItem_('appdetails');
-        this.details_.addEventListener('activate',
-                                       this.onShowDetails_.bind(this));
+        this.details_.addEventListener(
+            'activate', this.onShowDetails_.bind(this));
       }
 
-      this.options_.addEventListener('activate',
-                                     this.onShowOptions_.bind(this));
-      this.uninstall_.addEventListener('activate',
-                                       this.onUninstall_.bind(this));
+      this.options_.addEventListener(
+          'activate', this.onShowOptions_.bind(this));
+      this.uninstall_.addEventListener(
+          'activate', this.onUninstall_.bind(this));
 
       if (!cr.isChromeOS) {
         this.createShortcutSeparator_ =
@@ -95,6 +95,7 @@ cr.define('ntp', function() {
      * Appends a menu item to |this.menu|.
      * @param {string=} opt_textId If defined, the ID for the localized string
      *     that acts as the item's label.
+     * @private
      */
     appendMenuItem_: function(opt_textId) {
       var button = cr.doc.createElement('button');
@@ -110,13 +111,14 @@ cr.define('ntp', function() {
      * @param {function(cr.ui.MenuItem, number)} f The function to call for each
      *     menu item. The parameters to the function include the menu item and
      *     the associated launch ID.
+     * @private
      */
     forAllLaunchTypes_: function(f) {
       // Order matters: index matches launchType id.
-      var launchTypes = [this.launchPinnedTab_,
-                         this.launchRegularTab_,
-                         this.launchFullscreen_,
-                         this.launchNewWindow_];
+      var launchTypes = [
+        this.launchPinnedTab_, this.launchRegularTab_, this.launchFullscreen_,
+        this.launchNewWindow_
+      ];
 
       for (var i = 0; i < launchTypes.length; ++i) {
         if (!launchTypes[i])
@@ -150,7 +152,8 @@ cr.define('ntp', function() {
              launchTypeButton == launchTypeWindow) ||
             (loadTimeData.getBoolean('enableNewBookmarkApps') &&
              launchTypeButton != launchTypeWindow);
-        if (!launchTypeButton.hidden) hasLaunchType = true;
+        if (!launchTypeButton.hidden)
+          hasLaunchType = true;
       });
 
       this.launchTypeMenuSeparator_.hidden =
@@ -170,14 +173,15 @@ cr.define('ntp', function() {
       }
     },
 
-    /**
-     * Handlers for menu item activation.
-     * @param {Event} e The activation event.
-     * @private
-     */
-    onLaunch_: function(e) {
+    /** @private */
+    onActivate_: function() {
       chrome.send('launchApp', [this.app_.appId, APP_LAUNCH.NTP_APPS_MENU]);
     },
+
+    /**
+     * @param {Event} e
+     * @private
+     */
     onLaunchTypeChanged_: function(e) {
       var pressed = e.currentTarget;
       var app = this.app_;
@@ -186,7 +190,8 @@ cr.define('ntp', function() {
       // open as window and open as tab.
       if (loadTimeData.getBoolean('enableNewBookmarkApps')) {
         targetLaunchType = this.launchNewWindow_.checked ?
-            this.launchRegularTab_ : this.launchNewWindow_;
+            this.launchRegularTab_ :
+            this.launchNewWindow_;
       }
       this.forAllLaunchTypes_(function(launchTypeButton, id) {
         if (launchTypeButton == targetLaunchType) {
@@ -197,21 +202,31 @@ cr.define('ntp', function() {
         }
       });
     },
-    onShowOptions_: function(e) {
+
+    /** @private */
+    onShowOptions_: function() {
       window.location = this.app_.appData.optionsUrl;
     },
-    onShowDetails_: function(e) {
+
+    /** @private */
+    onShowDetails_: function() {
       var url = this.app_.appData.detailsUrl;
       url = appendParam(url, 'utm_source', 'chrome-ntp-launcher');
       window.location = url;
     },
-    onUninstall_: function(e) {
+
+    /** @private */
+    onUninstall_: function() {
       chrome.send('uninstallApp', [this.app_.appData.id]);
     },
-    onCreateShortcut_: function(e) {
+
+    /** @private */
+    onCreateShortcut_: function() {
       chrome.send('createAppShortcut', [this.app_.appData.id]);
     },
-    onShowAppInfo_: function(e) {
+
+    /** @private */
+    onShowAppInfo_: function() {
       chrome.send('showAppInfo', [this.app_.appData.id]);
     }
   };
@@ -249,8 +264,8 @@ cr.define('ntp', function() {
       this.appContents_.id = '';
       this.appendChild(this.appContents_);
 
-      this.appImgContainer_ = /** @type {HTMLElement} */(
-          this.querySelector('.app-img-container'));
+      this.appImgContainer_ =
+          /** @type {HTMLElement} */ (this.querySelector('.app-img-container'));
       this.appImg_ = this.appImgContainer_.querySelector('img');
       this.setIcon();
 
@@ -259,7 +274,7 @@ cr.define('ntp', function() {
 
       // The app's full name is shown in the tooltip, whereas the short name
       // is used for the label.
-      var appSpan = /** @type {HTMLElement} */(
+      var appSpan = /** @type {HTMLElement} */ (
           this.appContents_.querySelector('.title'));
       appSpan.textContent = this.appData_.title;
       appSpan.title = this.appData_.full_name;
@@ -276,8 +291,8 @@ cr.define('ntp', function() {
       });
 
       if (!this.appData_.kioskMode) {
-        this.appContents_.addEventListener('contextmenu',
-                                           cr.ui.contextMenuHandler);
+        this.appContents_.addEventListener(
+            'contextmenu', cr.ui.contextMenuHandler);
       }
 
       this.addEventListener('mousedown', this.onMousedown_, true);
@@ -348,7 +363,8 @@ cr.define('ntp', function() {
       this.style.top = toCssPx(y);
     },
 
-    onBlur_: function(e) {
+    /** @private */
+    onBlur_: function() {
       this.classList.remove('click-focus');
       this.appContents_.classList.remove('suppress-active');
     },
@@ -359,12 +375,13 @@ cr.define('ntp', function() {
      * @private
      */
     onClick_: function(e) {
-      if (/** @type {MouseEvent} */(e).button > 1)
+      if (/** @type {MouseEvent} */ (e).button > 1)
         return;
 
-      chrome.send('launchApp',
-                  [this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED, 'chrome-ntp-icon',
-                   e.button, e.altKey, e.ctrlKey, e.metaKey, e.shiftKey]);
+      chrome.send('launchApp', [
+        this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED, 'chrome-ntp-icon', e.button,
+        e.altKey, e.ctrlKey, e.metaKey, e.shiftKey
+      ]);
 
       // Don't allow the click to trigger a link or anything
       e.preventDefault();
@@ -377,9 +394,10 @@ cr.define('ntp', function() {
      */
     onKeydown_: function(e) {
       if (e.key == 'Enter') {
-        chrome.send('launchApp',
-                    [this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED, '',
-                     0, e.altKey, e.ctrlKey, e.metaKey, e.shiftKey]);
+        chrome.send('launchApp', [
+          this.appId, APP_LAUNCH.NTP_APPS_MAXIMIZED, '', 0, e.altKey, e.ctrlKey,
+          e.metaKey, e.shiftKey
+        ]);
         e.preventDefault();
         e.stopPropagation();
       }
@@ -392,6 +410,7 @@ cr.define('ntp', function() {
      * appContents, even a part that is outside the ideally clickable region,
      * will cause the app icon to look active).
      * @param {HTMLElement} node The node that should be clickable.
+     * @private
      */
     addLaunchClickTarget_: function(node) {
       node.classList.add('launch-click-target');
@@ -405,6 +424,7 @@ cr.define('ntp', function() {
      * these occasions). Also, we don't pulse for clicks that aren't within the
      * clickable regions.
      * @param {Event} e The mousedown event.
+     * @private
      */
     onMousedown_: function(e) {
       // If the current platform uses middle click to autoscroll and this
@@ -413,8 +433,8 @@ cr.define('ntp', function() {
         e.preventDefault();
 
       if (e.button == 2 ||
-          !findAncestorByClass(/** @type {Element} */(e.target),
-                               'launch-click-target')) {
+          !findAncestorByClass(
+              /** @type {Element} */ (e.target), 'launch-click-target')) {
         this.appContents_.classList.add('suppress-active');
       } else {
         this.appContents_.classList.remove('suppress-active');
@@ -439,10 +459,17 @@ cr.define('ntp', function() {
      * The data and preferences for this app.
      * @type {Object}
      */
-    set appData(data) { this.appData_ = data; },
-    get appData() { return this.appData_; },
+    set appData(data) {
+      this.appData_ = data;
+    },
+    get appData() {
+      return this.appData_;
+    },
 
-    get appId() { return this.appData_.id; },
+    /** @type {string} */
+    get appId() {
+      return this.appData_.id;
+    },
 
     /**
      * Returns a pointer to the context menu for this app. All apps share the
@@ -461,7 +488,9 @@ cr.define('ntp', function() {
      * the user can drag it onto the trash and expect something to happen).
      * @return {boolean} True if the app can be uninstalled.
      */
-    canBeRemoved: function() { return this.appData_.mayDisable; },
+    canBeRemoved: function() {
+      return this.appData_.mayDisable;
+    },
 
     /**
      * Uninstalls the app after it's been dropped on the trash.
@@ -562,7 +591,7 @@ cr.define('ntp', function() {
      * first time this is called, we load all the app icons.
      * @private
      */
-    onCardSelected_: function(e) {
+    onCardSelected_: function() {
       var apps = this.querySelectorAll('.app.icon-loading');
       for (var i = 0; i < apps.length; i++) {
         apps[i].loadIcon();
@@ -572,6 +601,7 @@ cr.define('ntp', function() {
     /**
      * Handler for tile additions to this page.
      * @param {Event} e The tilePage:tile_added event.
+     * @private
      */
     onTileAdded_: function(e) {
       assert(e.currentTarget == this);
@@ -585,7 +615,7 @@ cr.define('ntp', function() {
      * the bubbles.
      * @private
      */
-    onScroll_: function(e) {
+    onScroll_: function() {
       if (!this.selected)
         return;
       for (var i = 0; i < this.tileElements_.length; i++) {
@@ -612,8 +642,8 @@ cr.define('ntp', function() {
         return true;
       if (!e.dataTransfer || !e.dataTransfer.types)
         return false;
-      return Array.prototype.indexOf.call(e.dataTransfer.types,
-                                          'text/uri-list') != -1;
+      return Array.prototype.indexOf.call(
+                 e.dataTransfer.types, 'text/uri-list') != -1;
     },
 
     /** @override */
@@ -627,8 +657,8 @@ cr.define('ntp', function() {
           var samePageDrag = originalPage == this;
           sourceId = samePageDrag ? DRAG_SOURCE.SAME_APPS_PANE :
                                     DRAG_SOURCE.OTHER_APPS_PANE;
-          this.tileGrid_.insertBefore(currentlyDraggingTile,
-                                      this.tileElements_[index]);
+          this.tileGrid_.insertBefore(
+              currentlyDraggingTile, this.tileElements_[index]);
           this.tileMoved(currentlyDraggingTile);
           if (!samePageDrag) {
             originalPage.fireRemovedEvent(currentlyDraggingTile, index, true);
@@ -641,7 +671,8 @@ cr.define('ntp', function() {
       }
 
       assert(sourceId != -1);
-      chrome.send('metricsHandler:recordInHistogram',
+      chrome.send(
+          'metricsHandler:recordInHistogram',
           ['NewTabPage.AppsPageDragSource', sourceId, DRAG_SOURCE_LIMIT]);
     },
 

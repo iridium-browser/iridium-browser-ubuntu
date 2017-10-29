@@ -24,7 +24,7 @@ void ServiceProcessPrefs::ReadPrefs() {
 }
 
 void ServiceProcessPrefs::WritePrefs() {
-  prefs_->CommitPendingWrite();
+  prefs_->CommitPendingWrite(base::OnceClosure());
 }
 
 std::string ServiceProcessPrefs::GetString(
@@ -40,7 +40,7 @@ std::string ServiceProcessPrefs::GetString(
 
 void ServiceProcessPrefs::SetString(const std::string& key,
                                     const std::string& value) {
-  prefs_->SetValue(key, base::MakeUnique<base::StringValue>(value),
+  prefs_->SetValue(key, base::MakeUnique<base::Value>(value),
                    WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
 }
 

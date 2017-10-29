@@ -10,6 +10,7 @@
 #include "headless/public/util/deterministic_dispatcher.h"
 #include "headless/public/util/generic_url_request_job.h"
 #include "headless/public/util/http_url_fetcher.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 
@@ -22,27 +23,19 @@ class DeterministicHttpProtocolHandler::NopGenericURLRequestJobDelegate
   ~NopGenericURLRequestJobDelegate() override {}
 
   // GenericURLRequestJob::Delegate methods:
-  bool BlockOrRewriteRequest(
-      const GURL& url,
-      const std::string& devtools_id,
-      const std::string& method,
-      const std::string& referrer,
-      GenericURLRequestJob::RewriteCallback callback) override {
-    return false;
+  void OnPendingRequest(PendingRequest* pending_request) override {
+    pending_request->AllowRequest();
   }
 
-  const GenericURLRequestJob::HttpResponse* MaybeMatchResource(
-      const GURL& url,
-      const std::string& devtools_id,
-      const std::string& method,
-      const net::HttpRequestHeaders& request_headers) override {
-    return nullptr;
+  void OnResourceLoadFailed(const Request* request, net::Error error) override {
   }
 
-  void OnResourceLoadComplete(const GURL& final_url,
-                              const std::string& devtools_id,
-                              const std::string& mime_type,
-                              int http_response_code) override {}
+  void OnResourceLoadComplete(
+      const Request* request,
+      const GURL& final_url,
+      scoped_refptr<net::HttpResponseHeaders> response_headers,
+      const char* body,
+      size_t body_size) override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NopGenericURLRequestJobDelegate);
@@ -52,6 +45,7 @@ DeterministicHttpProtocolHandler::DeterministicHttpProtocolHandler(
     DeterministicDispatcher* deterministic_dispatcher,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner)
     : deterministic_dispatcher_(deterministic_dispatcher),
+      headless_browser_context_(nullptr),
       io_task_runner_(io_task_runner),
       nop_delegate_(new NopGenericURLRequestJobDelegate()) {}
 
@@ -77,7 +71,7 @@ net::URLRequestJob* DeterministicHttpProtocolHandler::MaybeCreateJob(
   return new GenericURLRequestJob(
       request, network_delegate, deterministic_dispatcher_,
       base::MakeUnique<HttpURLFetcher>(url_request_context_.get()),
-      nop_delegate_.get());
+      nop_delegate_.get(), headless_browser_context_);
 }
 
 }  // namespace headless

@@ -51,8 +51,8 @@ bool ReadLaunchDimension(const extensions::Manifest* manifest,
   return true;
 }
 
-static base::LazyInstance<AppLaunchInfo> g_empty_app_launch_info =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<AppLaunchInfo>::DestructorAtExit
+    g_empty_app_launch_info = LAZY_INSTANCE_INITIALIZER;
 
 const AppLaunchInfo& GetAppLaunchInfo(const Extension* extension) {
   AppLaunchInfo* info = static_cast<AppLaunchInfo*>(
@@ -213,8 +213,8 @@ bool AppLaunchInfo::LoadLaunchURL(Extension* extension, base::string16* error) {
       OverrideLaunchURL(extension, gallery_url);
     }
   } else if (extension->id() == extension_misc::kCloudPrintAppId) {
-    // In order for the --cloud-print-service switch to work, we must update
-    // the launch URL and web extent.
+    // In order for the --type=service switch to work, we must update the launch
+    // URL and web extent.
     GURL url =
         cloud_devices::GetCloudPrintRelativeURL("enable_chrome_connector");
     if (!url.is_empty()) {

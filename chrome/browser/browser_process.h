@@ -46,7 +46,7 @@ class SafeBrowsingService;
 }
 
 namespace subresource_filter {
-class RulesetService;
+class ContentRulesetService;
 }
 
 namespace variations {
@@ -65,10 +65,6 @@ class EventRouterForwarder;
 
 namespace gcm {
 class GCMDriver;
-}
-
-namespace memory {
-class TabManager;
 }
 
 namespace message_center {
@@ -104,6 +100,10 @@ class BrowserPolicyConnector;
 class PolicyService;
 }
 
+namespace prefs {
+class InProcessPrefServiceFactory;
+}
+
 namespace printing {
 class BackgroundPrintingManager;
 class PrintJobManager;
@@ -114,12 +114,16 @@ namespace rappor {
 class RapporServiceImpl;
 }
 
+namespace resource_coordinator {
+class TabManager;
+}
+
 namespace safe_browsing {
 class ClientSideDetectionService;
 }
 
 namespace ukm {
-class UkmService;
+class UkmRecorder;
 }
 
 // NOT THREAD SAFE, call only from the main thread.
@@ -146,7 +150,7 @@ class BrowserProcess {
   // Services: any of these getters may return NULL
   virtual metrics::MetricsService* metrics_service() = 0;
   virtual rappor::RapporServiceImpl* rappor_service() = 0;
-  virtual ukm::UkmService* ukm_service() = 0;
+  virtual ukm::UkmRecorder* ukm_recorder() = 0;
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
@@ -239,7 +243,7 @@ class BrowserProcess {
 
   // Returns the service providing versioned storage for rules used by the Safe
   // Browsing subresource filter.
-  virtual subresource_filter::RulesetService*
+  virtual subresource_filter::ContentRulesetService*
   subresource_filter_ruleset_service() = 0;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
@@ -278,7 +282,7 @@ class BrowserProcess {
   virtual gcm::GCMDriver* gcm_driver() = 0;
 
   // Returns the tab manager. On non-supported platforms, this returns null.
-  virtual memory::TabManager* GetTabManager() = 0;
+  virtual resource_coordinator::TabManager* GetTabManager() = 0;
 
   // Returns the default web client state of Chrome (i.e., was it the user's
   // default browser) at the time a previous check was made sometime between
@@ -288,6 +292,8 @@ class BrowserProcess {
 
   // Returns the Physical Web data source.
   virtual physical_web::PhysicalWebDataSource* GetPhysicalWebDataSource() = 0;
+
+  virtual prefs::InProcessPrefServiceFactory* pref_service_factory() const = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);

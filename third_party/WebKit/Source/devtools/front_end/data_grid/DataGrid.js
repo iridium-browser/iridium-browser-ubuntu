@@ -125,6 +125,13 @@ DataGrid.DataGrid = class extends Common.Object {
   }
 
   /**
+   * @param {boolean} isStriped
+   */
+  setStriped(isStriped) {
+    this.element.classList.toggle('striped-data-grid', isStriped);
+  }
+
+  /**
    * @return {!Element}
    */
   headerTableBody() {
@@ -838,6 +845,8 @@ DataGrid.DataGrid = class extends Common.Object {
       if (this._editCallback) {
         handled = true;
         this._startEditing(this.selectedNode._element.children[this._nextEditableColumn(-1)]);
+      } else {
+        this.dispatchEventToListeners(DataGrid.DataGrid.Events.OpenedNode, this.selectedNode);
       }
     }
 
@@ -964,6 +973,7 @@ DataGrid.DataGrid = class extends Common.Object {
         gridNode.select();
     } else {
       gridNode.select();
+      this.dispatchEventToListeners(DataGrid.DataGrid.Events.OpenedNode, gridNode);
     }
   }
 
@@ -1001,7 +1011,7 @@ DataGrid.DataGrid = class extends Common.Object {
     if (gridNode && gridNode.selectable && !gridNode.isEventWithinDisclosureTriangle(event)) {
       if (this._editCallback) {
         if (gridNode === this.creationNode) {
-          contextMenu.appendItem(Common.UIString.capitalize('Add ^new'), this._startEditing.bind(this, target));
+          contextMenu.appendItem(Common.UIString('Add new'), this._startEditing.bind(this, target));
         } else {
           var columnId = this.columnIdFromNode(target);
           if (columnId && this._columns[columnId].editable) {
@@ -1011,7 +1021,7 @@ DataGrid.DataGrid = class extends Common.Object {
         }
       }
       if (this._deleteCallback && gridNode !== this.creationNode)
-        contextMenu.appendItem(Common.UIString.capitalize('Delete'), this._deleteCallback.bind(this, gridNode));
+        contextMenu.appendItem(Common.UIString('Delete'), this._deleteCallback.bind(this, gridNode));
       if (this._rowContextMenuCallback)
         this._rowContextMenuCallback(contextMenu, gridNode);
     }
@@ -1186,8 +1196,9 @@ DataGrid.DataGrid.ColumnDescriptor;
 DataGrid.DataGrid.Events = {
   SelectedNode: Symbol('SelectedNode'),
   DeselectedNode: Symbol('DeselectedNode'),
+  OpenedNode: Symbol('OpenedNode'),
   SortingChanged: Symbol('SortingChanged'),
-  PaddingChanged: Symbol('PaddingChanged')
+  PaddingChanged: Symbol('PaddingChanged'),
 };
 
 /** @enum {string} */
@@ -1218,7 +1229,6 @@ DataGrid.DataGrid.ResizeMethod = {
 
 /**
  * @unrestricted
- * @this {NODE_TYPE}
  * @template NODE_TYPE
  */
 DataGrid.DataGridNode = class extends Common.Object {
@@ -1288,7 +1298,7 @@ DataGrid.DataGridNode = class extends Common.Object {
    * @return {!Element}
    */
   createElement() {
-    this._element = createElement('tr');
+    this._element = createElementWithClass('tr', 'data-grid-data-grid-node');
     this._element._dataGridNode = this;
 
     if (this._hasChildren)
@@ -1364,7 +1374,7 @@ DataGrid.DataGridNode = class extends Common.Object {
       currentAncestor = currentAncestor.parent;
     }
 
-    this._revealed = true;
+    this.revealed = true;
     return true;
   }
 
@@ -1597,6 +1607,26 @@ DataGrid.DataGridNode = class extends Common.Object {
   }
 
   /**
+   * @param {boolean=} onlyCaches
+   */
+  resetNode(onlyCaches) {
+    // @TODO(allada) This is a hack to make sure ViewportDataGrid can clean up these caches. Try Not To Use.
+    delete this._depth;
+    delete this._revealed;
+    if (onlyCaches)
+      return;
+    if (this.previousSibling)
+      this.previousSibling.nextSibling = this.nextSibling;
+    if (this.nextSibling)
+      this.nextSibling.previousSibling = this.previousSibling;
+    this.dataGrid = null;
+    this.parent = null;
+    this.nextSibling = null;
+    this.previousSibling = null;
+    this._attached = false;
+  }
+
+  /**
    * @param {!NODE_TYPE} child
    * @param {number} index
    */
@@ -1622,16 +1652,12 @@ DataGrid.DataGridNode = class extends Common.Object {
     child.dataGrid = this.dataGrid;
     child.recalculateSiblings(index);
 
-    child._depth = undefined;
-    child._revealed = undefined;
-    child._attached = false;
     child._shouldRefreshChildren = true;
 
     var current = child.children[0];
     while (current) {
+      current.resetNode(true);
       current.dataGrid = this.dataGrid;
-      current._depth = undefined;
-      current._revealed = undefined;
       current._attached = false;
       current._shouldRefreshChildren = true;
       current = current.traverseNextNode(false, child, true);
@@ -1659,19 +1685,10 @@ DataGrid.DataGridNode = class extends Common.Object {
 
     if (this.dataGrid)
       this.dataGrid.updateSelectionBeforeRemoval(child, false);
+
     child._detach();
-
+    child.resetNode();
     this.children.remove(child, true);
-
-    if (child.previousSibling)
-      child.previousSibling.nextSibling = child.nextSibling;
-    if (child.nextSibling)
-      child.nextSibling.previousSibling = child.previousSibling;
-
-    child.dataGrid = null;
-    child.parent = null;
-    child.nextSibling = null;
-    child.previousSibling = null;
 
     if (this.children.length <= 0)
       this.setHasChildren(false);
@@ -1683,10 +1700,7 @@ DataGrid.DataGridNode = class extends Common.Object {
     for (var i = 0; i < this.children.length; ++i) {
       var child = this.children[i];
       child._detach();
-      child.dataGrid = null;
-      child.parent = null;
-      child.nextSibling = null;
-      child.previousSibling = null;
+      child.resetNode();
     }
 
     this.children = [];
@@ -1945,11 +1959,6 @@ DataGrid.DataGridNode = class extends Common.Object {
 
     for (var i = 0; i < this.children.length; ++i)
       this.children[i]._detach();
-
-    this.wasDetached();
-  }
-
-  wasDetached() {
   }
 
   savePosition() {

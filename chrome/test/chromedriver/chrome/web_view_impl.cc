@@ -11,6 +11,7 @@
 #include "base/files/file_path.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
@@ -205,6 +206,23 @@ Status WebViewImpl::Reload(const Timeout* timeout) {
   return client_->SendCommandWithTimeout("Page.reload", params, timeout);
 }
 
+Status WebViewImpl::SendCommand(const std::string& cmd,
+                                const base::DictionaryValue& params) {
+  return client_->SendCommand(cmd, params);
+}
+
+Status WebViewImpl::SendCommandAndGetResult(
+        const std::string& cmd,
+        const base::DictionaryValue& params,
+        std::unique_ptr<base::Value>* value) {
+  std::unique_ptr<base::DictionaryValue> result;
+  Status status = client_->SendCommandAndGetResult(cmd, params, &result);
+  if (status.IsError())
+    return status;
+  *value = std::move(result);
+  return Status(kOk);
+}
+
 Status WebViewImpl::TraverseHistory(int delta, const Timeout* timeout) {
   base::DictionaryValue params;
   std::unique_ptr<base::DictionaryValue> result;
@@ -370,13 +388,13 @@ Status WebViewImpl::DispatchMouseEvents(const std::list<MouseEvent>& events,
 Status WebViewImpl::DispatchTouchEvent(const TouchEvent& event) {
   base::DictionaryValue params;
   params.SetString("type", GetAsString(event.type));
-  std::unique_ptr<base::ListValue> point_list(new base::ListValue);
-  std::unique_ptr<base::DictionaryValue> point(new base::DictionaryValue);
+  auto point = base::MakeUnique<base::DictionaryValue>();
   point->SetString("state", GetPointStateString(event.type));
   point->SetInteger("x", event.x);
   point->SetInteger("y", event.y);
-  point_list->Set(0, point.release());
-  params.Set("touchPoints", point_list.release());
+  auto point_list = base::MakeUnique<base::ListValue>();
+  point_list->Append(std::move(point));
+  params.Set("touchPoints", std::move(point_list));
   return client_->SendCommand("Input.dispatchTouchEvent", params);
 }
 
@@ -419,13 +437,27 @@ Status WebViewImpl::DispatchKeyEvents(const std::list<KeyEvent>& events) {
   return Status(kOk);
 }
 
-Status WebViewImpl::GetCookies(std::unique_ptr<base::ListValue>* cookies) {
+Status WebViewImpl::GetCookies(std::unique_ptr<base::ListValue>* cookies,
+                               const std::string& current_page_url) {
   base::DictionaryValue params;
   std::unique_ptr<base::DictionaryValue> result;
-  Status status = client_->SendCommandAndGetResult(
-      "Page.getCookies", params, &result);
-  if (status.IsError())
-    return status;
+
+  if (browser_info_->build_no >= 3029 &&
+      browser_info_->browser_name != "webview") {
+    base::ListValue url_list;
+    url_list.AppendString(current_page_url);
+    params.Set("urls", base::MakeUnique<base::Value>(url_list));
+    Status status =
+        client_->SendCommandAndGetResult("Network.getCookies", params, &result);
+    if (status.IsError())
+      return status;
+  } else {
+    Status status =
+        client_->SendCommandAndGetResult("Page.getCookies", params, &result);
+    if (status.IsError())
+      return status;
+  }
+
   base::ListValue* cookies_tmp;
   if (!result->GetList("cookies", &cookies_tmp))
     return Status(kUnknownError, "DevTools didn't return cookies");
@@ -439,6 +471,26 @@ Status WebViewImpl::DeleteCookie(const std::string& name,
   params.SetString("cookieName", name);
   params.SetString("url", url);
   return client_->SendCommand("Page.deleteCookie", params);
+}
+
+Status WebViewImpl::AddCookie(const std::string& name,
+                              const std::string& url,
+                              const std::string& value,
+                              const std::string& domain,
+                              const std::string& path,
+                              bool secure,
+                              bool httpOnly,
+                              double expiry) {
+  base::DictionaryValue params;
+  params.SetString("name", name);
+  params.SetString("url", url);
+  params.SetString("value", value);
+  params.SetString("domain", domain);
+  params.SetString("path", path);
+  params.SetBoolean("secure", secure);
+  params.SetBoolean("httpOnly", httpOnly);
+  params.SetDouble("expirationDate", expiry);
+  return client_->SendCommand("Network.setCookie", params);
 }
 
 Status WebViewImpl::WaitForPendingNavigations(const std::string& frame_id,
@@ -538,7 +590,7 @@ Status WebViewImpl::SetFileInputFiles(
     return Status(kUnknownError, "no node ID for file input");
   base::DictionaryValue params;
   params.SetInteger("nodeId", node_id);
-  params.Set("files", file_list.DeepCopy());
+  params.Set("files", base::MakeUnique<base::Value>(file_list));
   return client_->SendCommand("DOM.setFileInputFiles", params);
 }
 
@@ -753,7 +805,7 @@ Status WebViewImpl::IsNotPendingNavigation(const std::string& frame_id,
   if (status.IsError())
     return status;
   // An alert may block the pending navigation.
-  if (is_pending && dialog_manager_->IsDialogOpen())
+  if (dialog_manager_->IsDialogOpen())
     return Status(kUnexpectedAlertOpen);
 
   *is_not_pending = !is_pending;
@@ -834,7 +886,7 @@ Status EvaluateScriptAndGetValue(DevToolsClient* client,
     return Status(kUnknownError, "Runtime.evaluate missing string 'type'");
 
   if (type == "undefined") {
-    *result = base::Value::CreateNullValue();
+    *result = base::MakeUnique<base::Value>();
   } else {
     base::Value* value;
     if (!temp_result->Get("value", &value))

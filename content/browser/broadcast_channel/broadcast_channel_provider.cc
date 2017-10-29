@@ -66,7 +66,7 @@ void BroadcastChannelProvider::Connection::OnMessage(
 BroadcastChannelProvider::BroadcastChannelProvider() {}
 
 void BroadcastChannelProvider::Connect(
-    mojo::InterfaceRequest<blink::mojom::BroadcastChannelProvider> request) {
+    blink::mojom::BroadcastChannelProviderRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }
 

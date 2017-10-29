@@ -8,12 +8,9 @@
 
 #include "base/feature_list.h"
 #include "base/i18n/icu_util.h"
-#include "content/common/navigation_params.h"
-#include "content/renderer/render_view_impl.h"
-#include "content/test/test_render_frame.h"
+#include "base/memory/ptr_util.h"
 #include "gin/v8_initializer.h"
-#include "third_party/WebKit/public/web/WebLocalFrame.h"
-#include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
+#include "third_party/WebKit/public/platform/WebRuntimeFeatures.h"
 
 namespace content {
 
@@ -26,20 +23,23 @@ Env::Env() {
   base::FeatureList::InitializeInstance(std::string(), std::string());
   base::i18n::InitializeICU();
 
-  blink::WebRuntimeFeatures::enableExperimentalFeatures(true);
-  blink::WebRuntimeFeatures::enableTestOnlyFeatures(true);
+  blink::WebRuntimeFeatures::EnableExperimentalFeatures(true);
+  blink::WebRuntimeFeatures::EnableTestOnlyFeatures(true);
 
+#ifdef V8_USE_EXTERNAL_STARTUP_DATA
   gin::V8Initializer::LoadV8Snapshot();
   gin::V8Initializer::LoadV8Natives();
+#endif
   gin::IsolateHolder::Initialize(gin::IsolateHolder::kStrictMode,
                                  gin::IsolateHolder::kStableV8Extras,
                                  gin::ArrayBufferAllocator::SharedInstance());
 
-  adapter.reset(new RenderViewTestAdapter());
+  adapter = base::MakeUnique<RenderViewTestAdapter>();
   adapter->SetUp();
 }
 
 Env::~Env() {
   LOG(FATAL) << "NOT SUPPORTED";
 }
+
 }  // namespace content

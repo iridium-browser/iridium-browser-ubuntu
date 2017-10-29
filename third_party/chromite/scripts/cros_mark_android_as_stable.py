@@ -8,7 +8,11 @@ After calling, it prints outs ANDROID_VERSION_ATOM=(version atom string).  A
 caller could then use this atom with emerge to build the newly uprevved version
 of Android e.g.
 
-./cros_mark_android_as_stable
+./cros_mark_android_as_stable \
+    --android_package=android-container \
+    --android_build_branch=git_mnc-dr-arc-dev \
+    --android_gts_build_branch=git_mnc-dev
+
 Returns chromeos-base/android-container-2559197
 
 emerge-veyron_minnie-cheets =chromeos-base/android-container-2559197-r1
@@ -320,6 +324,33 @@ def MakeAclDict(package_dir):
   )
 
 
+def MakeBuildTargetDict(build_branch):
+  """Creates a dictionary of build targets.
+
+  Not all targets are common between M and N branches, for example
+  sdk_google_cheets_x86 only exists on N.
+  This generates a dictionary listing the available build targets for a
+  specific branch.
+
+  Args:
+    build_branch: branch of Android builds.
+
+  Returns:
+    Returns build target dictionary.
+
+  Raises:
+    ValueError: if the Android build branch is invalid.
+  """
+  d = constants.ANDROID_COMMON_BUILD_TARGETS.copy()
+  if build_branch == constants.ANDROID_MNC_BUILD_BRANCH:
+    d.update(constants.ANDROID_MNC_BUILD_TARGETS)
+  elif build_branch == constants.ANDROID_NYC_BUILD_BRANCH:
+    d.update(constants.ANDROID_NYC_BUILD_TARGETS)
+  else:
+    raise ValueError('Unknown branch: %s' % build_branch)
+  return d
+
+
 def GetAndroidRevisionListLink(build_branch, old_android, new_android):
   """Returns a link to the list of revisions between two Android versions
 
@@ -335,13 +366,13 @@ def GetAndroidRevisionListLink(build_branch, old_android, new_android):
     The desired URL.
   """
   return _ANDROID_VERSION_URL % {'branch': build_branch,
-                                 'old': old_android.version,
-                                 'new': new_android.version}
+                                 'old': old_android.version_no_rev,
+                                 'new': new_android.version_no_rev}
 
 
 def MarkAndroidEBuildAsStable(stable_candidate, unstable_ebuild,
                               android_package, android_version, package_dir,
-                              build_branch, arc_bucket_url):
+                              build_branch, arc_bucket_url, build_targets):
   r"""Uprevs the Android ebuild.
 
   This is the main function that uprevs from a stable candidate
@@ -357,6 +388,7 @@ def MarkAndroidEBuildAsStable(stable_candidate, unstable_ebuild,
     package_dir: Path to the android-container package dir.
     build_branch: branch of Android builds.
     arc_bucket_url: URL of the target ARC build gs bucket.
+    build_targets: build targets for this particular Android branch.
 
   Returns:
     Full portage version atom (including rc's, etc) that was revved.
@@ -384,7 +416,7 @@ def MarkAndroidEBuildAsStable(stable_candidate, unstable_ebuild,
     new_ebuild_path = os.path.join(package_dir, '%s.ebuild' % pf)
 
   variables = {'BASE_URL': arc_bucket_url}
-  for build, (target, _) in constants.ANDROID_BUILD_TARGETS.iteritems():
+  for build, (target, _) in build_targets.iteritems():
     variables[build + '_TARGET'] = '%s-%s' % (build_branch, target)
 
   portage_util.EBuild.MarkAsStable(
@@ -431,9 +463,12 @@ def GetParser():
                       default=constants.ANDROID_BUCKET_URL,
                       type='gs_path')
   parser.add_argument('--android_build_branch',
-                      default=constants.ANDROID_BUILD_BRANCH)
+                      required=True,
+                      help='Android branch to import from. '
+                           'Ex: git_mnc-dr-arc-dev')
   parser.add_argument('--android_gts_build_branch',
-                      default=constants.ANDROID_GTS_BUILD_BRANCH)
+                      help='Android GTS branch to copy artifacts from. '
+                           'Ex: git_mnc-dev')
   parser.add_argument('--android_package',
                       default=constants.ANDROID_PACKAGE_NAME)
   parser.add_argument('--arc_bucket_url',
@@ -450,6 +485,7 @@ def GetParser():
 
 
 def main(argv):
+  logging.EnableBuildbotMarkers()
   parser = GetParser()
   options = parser.parse_args(argv)
   options.Freeze()
@@ -462,18 +498,20 @@ def main(argv):
 
   (unstable_ebuild, stable_ebuilds) = FindAndroidCandidates(android_package_dir)
   acls = MakeAclDict(android_package_dir)
+  build_targets = MakeBuildTargetDict(options.android_build_branch)
   # Mirror artifacts, i.e., images and some sdk tools (e.g., adb, aapt).
   version_to_uprev = MirrorArtifacts(options.android_bucket_url,
                                      options.android_build_branch,
                                      options.arc_bucket_url, acls,
-                                     constants.ANDROID_BUILD_TARGETS,
+                                     build_targets,
                                      options.force_version)
 
   # Mirror GTS.
-  MirrorArtifacts(options.android_bucket_url,
-                  options.android_gts_build_branch,
-                  options.arc_bucket_url, acls,
-                  constants.ANDROID_GTS_BUILD_TARGETS)
+  if options.android_gts_build_branch:
+    MirrorArtifacts(options.android_bucket_url,
+                    options.android_gts_build_branch,
+                    options.arc_bucket_url, acls,
+                    constants.ANDROID_GTS_BUILD_TARGETS)
 
   stable_candidate = portage_util.BestEBuild(stable_ebuilds)
 
@@ -497,7 +535,7 @@ def main(argv):
   android_version_atom = MarkAndroidEBuildAsStable(
       stable_candidate, unstable_ebuild, options.android_package,
       version_to_uprev, android_package_dir,
-      options.android_build_branch, options.arc_bucket_url)
+      options.android_build_branch, options.arc_bucket_url, build_targets)
   if android_version_atom:
     if options.boards:
       cros_mark_as_stable.CleanStalePackages(options.srcroot,

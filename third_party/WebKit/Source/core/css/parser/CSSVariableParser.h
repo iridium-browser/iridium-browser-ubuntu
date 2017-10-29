@@ -8,29 +8,31 @@
 #include "core/CoreExport.h"
 #include "core/css/parser/CSSParserTokenRange.h"
 #include "platform/heap/Handle.h"
-#include "wtf/RefPtr.h"
-#include "wtf/text/AtomicString.h"
+#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
 
 class CSSCustomPropertyDeclaration;
+class CSSParserContext;
 class CSSVariableReferenceValue;
 
 class CORE_EXPORT CSSVariableParser {
  public:
-  static bool containsValidVariableReferences(CSSParserTokenRange);
+  static bool ContainsValidVariableReferences(CSSParserTokenRange);
 
-  static CSSCustomPropertyDeclaration* parseDeclarationValue(
+  static CSSCustomPropertyDeclaration* ParseDeclarationValue(
       const AtomicString&,
       CSSParserTokenRange,
-      bool isAnimationTainted);
-  static CSSVariableReferenceValue* parseRegisteredPropertyValue(
+      bool is_animation_tainted);
+  static CSSVariableReferenceValue* ParseRegisteredPropertyValue(
       CSSParserTokenRange,
-      bool requireVarReference,
-      bool isAnimationTainted);
+      const CSSParserContext&,
+      bool require_var_reference,
+      bool is_animation_tainted);
 
-  static bool isValidVariableName(const CSSParserToken&);
-  static bool isValidVariableName(const String&);
+  static bool IsValidVariableName(const CSSParserToken&);
+  static bool IsValidVariableName(const String&);
 };
 
 }  // namespace blink

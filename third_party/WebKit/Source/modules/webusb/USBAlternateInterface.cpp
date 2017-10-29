@@ -10,48 +10,49 @@
 
 namespace blink {
 
-USBAlternateInterface* USBAlternateInterface::create(
+USBAlternateInterface* USBAlternateInterface::Create(
     const USBInterface* interface,
-    size_t alternateIndex) {
-  return new USBAlternateInterface(interface, alternateIndex);
+    size_t alternate_index) {
+  return new USBAlternateInterface(interface, alternate_index);
 }
 
-USBAlternateInterface* USBAlternateInterface::create(
+USBAlternateInterface* USBAlternateInterface::Create(
     const USBInterface* interface,
-    size_t alternateSetting,
-    ExceptionState& exceptionState) {
-  const auto& alternates = interface->info().alternates;
+    size_t alternate_setting,
+    ExceptionState& exception_state) {
+  const auto& alternates = interface->Info().alternates;
   for (size_t i = 0; i < alternates.size(); ++i) {
-    if (alternates[i]->alternate_setting == alternateSetting)
-      return USBAlternateInterface::create(interface, i);
+    if (alternates[i]->alternate_setting == alternate_setting)
+      return USBAlternateInterface::Create(interface, i);
   }
-  exceptionState.throwRangeError("Invalid alternate setting.");
+  exception_state.ThrowRangeError("Invalid alternate setting.");
   return nullptr;
 }
 
 USBAlternateInterface::USBAlternateInterface(const USBInterface* interface,
-                                             size_t alternateIndex)
-    : m_interface(interface), m_alternateIndex(alternateIndex) {
-  ASSERT(m_interface);
-  ASSERT(m_alternateIndex < m_interface->info().alternates.size());
+                                             size_t alternate_index)
+    : interface_(interface), alternate_index_(alternate_index) {
+  DCHECK(interface_);
+  DCHECK_LT(alternate_index_, interface_->Info().alternates.size());
 }
 
-const device::usb::blink::AlternateInterfaceInfo& USBAlternateInterface::info()
-    const {
-  const device::usb::blink::InterfaceInfo& interfaceInfo = m_interface->info();
-  ASSERT(m_alternateIndex < interfaceInfo.alternates.size());
-  return *interfaceInfo.alternates[m_alternateIndex];
+const device::mojom::blink::UsbAlternateInterfaceInfo&
+USBAlternateInterface::Info() const {
+  const device::mojom::blink::UsbInterfaceInfo& interface_info =
+      interface_->Info();
+  DCHECK_LT(alternate_index_, interface_info.alternates.size());
+  return *interface_info.alternates[alternate_index_];
 }
 
 HeapVector<Member<USBEndpoint>> USBAlternateInterface::endpoints() const {
   HeapVector<Member<USBEndpoint>> endpoints;
-  for (size_t i = 0; i < info().endpoints.size(); ++i)
-    endpoints.push_back(USBEndpoint::create(this, i));
+  for (size_t i = 0; i < Info().endpoints.size(); ++i)
+    endpoints.push_back(USBEndpoint::Create(this, i));
   return endpoints;
 }
 
 DEFINE_TRACE(USBAlternateInterface) {
-  visitor->trace(m_interface);
+  visitor->Trace(interface_);
 }
 
 }  // namespace blink

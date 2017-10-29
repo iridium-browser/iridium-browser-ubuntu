@@ -12,7 +12,8 @@ COMMON_CFLAGS := \
 	-DGL_GLEXT_PROTOTYPES \
 	-Wno-unused-parameter \
 	-Wno-implicit-exception-spec-mismatch \
-	-Wno-overloaded-virtual
+	-Wno-overloaded-virtual \
+	-DANDROID_PLATFORM_SDK_VERSION=$(PLATFORM_SDK_VERSION)
 
 ifneq (16,${PLATFORM_SDK_VERSION})
 COMMON_CFLAGS += -Xclang -fuse-init-array
@@ -46,22 +47,28 @@ COMMON_C_INCLUDES := \
 	$(LOCAL_PATH)/../../../include \
 	$(LOCAL_PATH)/../ \
 	$(LOCAL_PATH)/../../ \
-	$(LOCAL_PATH)/../../../third_party/LLVM/include-android \
-	$(LOCAL_PATH)/../../../third_party/LLVM/include \
-	$(LOCAL_PATH)/../../../third_party/LLVM/lib/Target/X86 \
 	$(LOCAL_PATH)/../../Renderer/ \
 	$(LOCAL_PATH)/../../Common/ \
 	$(LOCAL_PATH)/../../Shader/ \
 	$(LOCAL_PATH)/../../Main/
 
-COMMON_STATIC_LIBRARIES := \
-	libLLVM_swiftshader
+ifdef use_subzero
+COMMON_STATIC_LIBRARIES := libsubzero
+else
+COMMON_STATIC_LIBRARIES := libLLVM_swiftshader
+endif
 
 COMMON_SHARED_LIBRARIES := \
 	libdl \
 	liblog \
 	libcutils \
 	libhardware
+
+# gralloc1 is introduced from N MR1
+ifeq ($(shell test $(PLATFORM_SDK_VERSION) -ge 25 && echo NMR1),NMR1)
+COMMON_CFLAGS += -DHAVE_GRALLOC1
+COMMON_SHARED_LIBRARIES += libsync
+endif
 
 # Marshmallow does not have stlport, but comes with libc++ by default
 ifeq ($(shell test $(PLATFORM_SDK_VERSION) -lt 23 && echo PreMarshmallow),PreMarshmallow)

@@ -13,25 +13,31 @@
 
 namespace blink {
 
-BoxDecorationData::BoxDecorationData(const LayoutBox& layoutBox) {
-  backgroundColor =
-      layoutBox.style()->visitedDependentColor(CSSPropertyBackgroundColor);
-  hasBackground =
-      backgroundColor.alpha() || layoutBox.style()->hasBackgroundImage();
-  DCHECK(hasBackground == layoutBox.style()->hasBackground());
-  hasBorderDecoration = layoutBox.style()->hasBorderDecoration();
-  hasAppearance = layoutBox.style()->hasAppearance();
-  bleedAvoidance = determineBackgroundBleedAvoidance(layoutBox);
+BoxDecorationData::BoxDecorationData(const LayoutBox& layout_box) {
+  background_color =
+      layout_box.Style()->VisitedDependentColor(CSSPropertyBackgroundColor);
+  has_background =
+      background_color.Alpha() || layout_box.Style()->HasBackgroundImage();
+  DCHECK(has_background == layout_box.Style()->HasBackground());
+  has_border_decoration = layout_box.Style()->HasBorderDecoration();
+  has_appearance = layout_box.Style()->HasAppearance();
+  if (layout_box.IsDocumentElement()) {
+    bleed_avoidance = kBackgroundBleedNone;
+  } else {
+    bleed_avoidance = DetermineBackgroundBleedAvoidance(
+        layout_box.GetDocument(), layout_box.StyleRef(),
+        layout_box.BackgroundShouldAlwaysBeClipped());
+  }
 }
 
 namespace {
 
-bool borderObscuresBackgroundEdge(const ComputedStyle& style) {
+bool BorderObscuresBackgroundEdge(const ComputedStyle& style) {
   BorderEdge edges[4];
-  style.getBorderEdgeInfo(edges);
+  style.GetBorderEdgeInfo(edges);
 
   for (auto& edge : edges) {
-    if (!edge.obscuresBackgroundEdge())
+    if (!edge.ObscuresBackgroundEdge())
       return false;
   }
 
@@ -40,40 +46,38 @@ bool borderObscuresBackgroundEdge(const ComputedStyle& style) {
 
 }  // anonymous namespace
 
-BackgroundBleedAvoidance BoxDecorationData::determineBackgroundBleedAvoidance(
-    const LayoutBox& layoutBox) {
-  if (layoutBox.isDocumentElement())
-    return BackgroundBleedNone;
+BackgroundBleedAvoidance BoxDecorationData::DetermineBackgroundBleedAvoidance(
+    const Document& document,
+    const ComputedStyle& style,
+    bool background_should_always_be_clipped) {
+  if (!has_background)
+    return kBackgroundBleedNone;
 
-  if (!hasBackground)
-    return BackgroundBleedNone;
-
-  const ComputedStyle& boxStyle = layoutBox.styleRef();
-  const bool hasBorderRadius = boxStyle.hasBorderRadius();
-  if (!hasBorderDecoration || !hasBorderRadius ||
-      layoutBox.canRenderBorderImage()) {
-    if (layoutBox.backgroundShouldAlwaysBeClipped())
-      return BackgroundBleedClipOnly;
+  const bool has_border_radius = style.HasBorderRadius();
+  if (!has_border_decoration || !has_border_radius ||
+      style.CanRenderBorderImage()) {
+    if (background_should_always_be_clipped)
+      return kBackgroundBleedClipOnly;
     // Border radius clipping may require layer bleed avoidance if we are going
     // to draw an image over something else, because we do not want the
     // antialiasing to lead to bleeding
-    if (boxStyle.hasBackgroundImage() && hasBorderRadius) {
+    if (style.HasBackgroundImage() && has_border_radius) {
       // But if the top layer is opaque for the purposes of background painting,
       // we do not need the bleed avoidance because we will not paint anything
       // behind the top layer.  But only if we need to draw something
       // underneath.
-      const FillLayer& fillLayer = layoutBox.style()->backgroundLayers();
-      if ((backgroundColor.alpha() || fillLayer.next()) &&
-          !fillLayer.imageOccludesNextLayers(layoutBox))
-        return BackgroundBleedClipLayer;
+      const FillLayer& fill_layer = style.BackgroundLayers();
+      if ((background_color.Alpha() || fill_layer.Next()) &&
+          !fill_layer.ImageOccludesNextLayers(document, style))
+        return kBackgroundBleedClipLayer;
     }
-    return BackgroundBleedNone;
+    return kBackgroundBleedNone;
   }
 
-  if (borderObscuresBackgroundEdge(boxStyle))
-    return BackgroundBleedShrinkBackground;
+  if (BorderObscuresBackgroundEdge(style))
+    return kBackgroundBleedShrinkBackground;
 
-  return BackgroundBleedClipLayer;
+  return kBackgroundBleedClipLayer;
 }
 
 }  // namespace blink

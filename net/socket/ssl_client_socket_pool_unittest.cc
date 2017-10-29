@@ -30,9 +30,9 @@
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/socket_test_util.h"
-#include "net/spdy/spdy_session.h"
-#include "net/spdy/spdy_session_pool.h"
-#include "net/spdy/spdy_test_util_common.h"
+#include "net/spdy/chromium/spdy_session.h"
+#include "net/spdy/chromium/spdy_session_pool.h"
+#include "net/spdy/chromium/spdy_test_util_common.h"
 #include "net/ssl/ssl_config_service_defaults.h"
 #include "net/test/gtest_util.h"
 #include "net/test/test_certificate_data.h"
@@ -127,6 +127,7 @@ class SSLClientSocketPoolTest : public testing::Test {
                                 kMaxSocketsPerGroup,
                                 &transport_socket_pool_,
                                 NULL,
+                                NULL,
                                 NULL) {
     scoped_refptr<SSLConfigService> ssl_config_service(
         new SSLConfigServiceDefaults);
@@ -167,18 +168,20 @@ class SSLClientSocketPoolTest : public testing::Test {
   }
 
   HttpNetworkSession* CreateNetworkSession() {
-    HttpNetworkSession::Params params;
-    params.host_resolver = &host_resolver_;
-    params.cert_verifier = cert_verifier_.get();
-    params.transport_security_state = transport_security_state_.get();
-    params.cert_transparency_verifier = &ct_verifier_;
-    params.ct_policy_enforcer = &ct_policy_enforcer_;
-    params.proxy_service = proxy_service_.get();
-    params.client_socket_factory = &socket_factory_;
-    params.ssl_config_service = ssl_config_service_.get();
-    params.http_auth_handler_factory = http_auth_handler_factory_.get();
-    params.http_server_properties = http_server_properties_.get();
-    return new HttpNetworkSession(params);
+    HttpNetworkSession::Context session_context;
+    session_context.host_resolver = &host_resolver_;
+    session_context.cert_verifier = cert_verifier_.get();
+    session_context.transport_security_state = transport_security_state_.get();
+    session_context.cert_transparency_verifier = &ct_verifier_;
+    session_context.ct_policy_enforcer = &ct_policy_enforcer_;
+    session_context.proxy_service = proxy_service_.get();
+    session_context.client_socket_factory = &socket_factory_;
+    session_context.ssl_config_service = ssl_config_service_.get();
+    session_context.http_auth_handler_factory =
+        http_auth_handler_factory_.get();
+    session_context.http_server_properties = http_server_properties_.get();
+    return new HttpNetworkSession(HttpNetworkSession::Params(),
+                                  session_context);
   }
 
   void TestIPPoolingDisabled(SSLSocketDataProvider* ssl);
@@ -846,12 +849,13 @@ TEST_F(SSLClientSocketPoolTest, IPPooling) {
   SSLSocketDataProvider ssl(ASYNC, OK);
   ssl.cert = X509Certificate::CreateFromBytes(
       reinterpret_cast<const char*>(webkit_der), sizeof(webkit_der));
+  ASSERT_TRUE(ssl.cert);
   ssl.next_proto = kProtoHTTP2;
   socket_factory_.AddSSLSocketDataProvider(&ssl);
 
   CreatePool(true /* tcp pool */, false, false);
-  base::WeakPtr<SpdySession> spdy_session = CreateSecureSpdySession(
-      session_.get(), test_hosts[0].key, NetLogWithSource());
+  base::WeakPtr<SpdySession> spdy_session =
+      CreateSpdySession(session_.get(), test_hosts[0].key, NetLogWithSource());
 
   EXPECT_TRUE(
       HasSpdySession(session_->spdy_session_pool(), test_hosts[0].key));
@@ -905,8 +909,8 @@ void SSLClientSocketPoolTest::TestIPPoolingDisabled(
   socket_factory_.AddSSLSocketDataProvider(ssl);
 
   CreatePool(true /* tcp pool */, false, false);
-  base::WeakPtr<SpdySession> spdy_session = CreateSecureSpdySession(
-      session_.get(), test_hosts[0].key, NetLogWithSource());
+  base::WeakPtr<SpdySession> spdy_session =
+      CreateSpdySession(session_.get(), test_hosts[0].key, NetLogWithSource());
 
   EXPECT_TRUE(
       HasSpdySession(session_->spdy_session_pool(), test_hosts[0].key));
@@ -922,6 +926,7 @@ TEST_F(SSLClientSocketPoolTest, IPPoolingClientCert) {
   SSLSocketDataProvider ssl(ASYNC, OK);
   ssl.cert = X509Certificate::CreateFromBytes(
       reinterpret_cast<const char*>(webkit_der), sizeof(webkit_der));
+  ASSERT_TRUE(ssl.cert);
   ssl.client_cert_sent = true;
   ssl.next_proto = kProtoHTTP2;
   TestIPPoolingDisabled(&ssl);

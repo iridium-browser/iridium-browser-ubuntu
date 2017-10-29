@@ -4,13 +4,28 @@
 
 package org.chromium.chrome.browser.payments;
 
+import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.DECEMBER;
+import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.FIRST_BILLING_ADDRESS;
+import static org.chromium.chrome.browser.payments.PaymentRequestTestRule.NEXT_YEAR;
+
 import android.support.test.filters.MediumTest;
 
+import org.junit.Assert;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
+import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
+import org.chromium.chrome.browser.payments.PaymentRequestTestRule.MainActivityStartCallback;
+import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
@@ -18,8 +33,17 @@ import java.util.concurrent.TimeoutException;
 /**
  * A payment integration test for biling addresses.
  */
-public class PaymentRequestBillingAddressTest extends PaymentRequestTestBase {
-    /*
+@RunWith(ChromeJUnit4ClassRunner.class)
+@CommandLineFlags.Add({
+        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
+})
+public class PaymentRequestBillingAddressTest implements MainActivityStartCallback {
+    @Rule
+    public PaymentRequestTestRule mPaymentRequestTestRule =
+            new PaymentRequestTestRule("payment_request_free_shipping_test.html", this);
+
+    /**
      * The index at which the option to add a billing address is located in the billing address
      * selection dropdown.
      */
@@ -28,40 +52,36 @@ public class PaymentRequestBillingAddressTest extends PaymentRequestTestBase {
     /** The index of the billing address dropdown in the card editor. */
     private static final int BILLING_ADDRESS_DROPDOWN_INDEX = 2;
 
-    public PaymentRequestBillingAddressTest() {
-        super("payment_request_free_shipping_test.html");
-    }
-
     @Override
     public void onMainActivityStarted()
             throws InterruptedException, ExecutionException, TimeoutException {
         AutofillTestHelper helper = new AutofillTestHelper();
         String profile1 = helper.setProfile(new AutofillProfile("", "https://example.com", true,
                 "Jon Doe", "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "", "US",
-                "310-310-6000", "jon.doe@gmail.com", "en-US"));
+                "650-253-0000", "jon.doe@gmail.com", "en-US"));
         helper.setCreditCard(new CreditCard("", "https://example.com", true, true, "Jon Doe",
-                "4111111111111111", "1111", "12", "2050", "visa", R.drawable.pr_visa, profile1,
-                "" /* serverId */));
+                "4111111111111111", "1111", "12", "2050", "visa", R.drawable.visa_card,
+                CardType.UNKNOWN, profile1, "" /* serverId */));
         String profile2 = helper.setProfile(new AutofillProfile("", "https://example.com", true,
                 "Rob Doe", "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "", "US",
-                "310-310-6000", "jon.doe@gmail.com", "en-US"));
+                "650-253-0000", "jon.doe@gmail.com", "en-US"));
         String profile3 = helper.setProfile(new AutofillProfile("", "https://example.com", true,
                 "Tom Doe", "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "", "US",
-                "310-310-6000", "jon.doe@gmail.com", "en-US"));
+                "650-253-0000", "jon.doe@gmail.com", "en-US"));
 
         // Incomplete profile (invalid address).
         String profile4 = helper.setProfile(new AutofillProfile("", "https://example.com", true,
                 "Bart Doe", "Google", "340 Main St", "CA", "", "", "90291", "", "US",
-                "310-310-6000", "jon.doe@gmail.com", "en-US"));
+                "650-253-0000", "jon.doe@gmail.com", "en-US"));
 
         // Incomplete profile (missing phone number)
         String profile5 = helper.setProfile(new AutofillProfile("", "https://example.com", true,
                 "Lisa Doe", "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "", "US", "",
                 "jon.doe@gmail.com", "en-US"));
 
-        // Incomplete profile (missing recipient).
+        // Incomplete profile (missing recipient name).
         String profile6 = helper.setProfile(new AutofillProfile("", "https://example.com", true, "",
-                "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "", "US", "310-310-6000",
+                "Google", "340 Main St", "CA", "Los Angeles", "", "90291", "", "US", "650-253-0000",
                 "jon.doe@gmail.com", "en-US"));
 
         // Incomplete profile (need more information).
@@ -71,12 +91,12 @@ public class PaymentRequestBillingAddressTest extends PaymentRequestTestBase {
         // Profile with empty street address (should not be presented to user).
         String profile8 = helper.setProfile(new AutofillProfile("", "https://example.com", true,
                 "Jerry Doe", "Google", "" /* streetAddress */, "CA", "Los Angeles", "", "90291", "",
-                "US", "310-310-6000", "jerry.doe@gmail.com", "en-US"));
+                "US", "650-253-0000", "jerry.doe@gmail.com", "en-US"));
 
         // This card has no billing address selected.
         helper.setCreditCard(new CreditCard("", "https://example.com", true, true, "Jane Doe",
-                "4242424242424242", "1111", "12", "2050", "visa", R.drawable.pr_visa, profile6,
-                "" /* serverId */));
+                "4242424242424242", "1111", "12", "2050", "visa", R.drawable.visa_card,
+                CardType.UNKNOWN, profile6, "" /* serverId */));
 
         // Assign use stats so that incomplete profiles have the highest frecency, profile2 has the
         // highest frecency and profile3 has the lowest among the complete profiles, and profile8
@@ -92,280 +112,395 @@ public class PaymentRequestBillingAddressTest extends PaymentRequestTestBase {
     }
 
     /** Verifies the format of the billing address suggestions when adding a new credit card. */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testNewCardBillingAddressFormat()
             throws InterruptedException, ExecutionException, TimeoutException {
-        triggerUIAndWait(mReadyToPay);
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickInPaymentMethodAndWait(R.id.payments_add_option_button, mReadyToEdit);
-        setTextInCardEditorAndWait(new String[] {"5454-5454-5454-5454", "Bob"}, mEditorTextUpdate);
-        setSpinnerSelectionsInCardEditorAndWait(
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_add_option_button, mPaymentRequestTestRule.getReadyToEdit());
+        mPaymentRequestTestRule.setTextInCardEditorAndWait(
+                new String[] {"5454-5454-5454-5454", "Bob"},
+                mPaymentRequestTestRule.getEditorTextUpdate());
+        mPaymentRequestTestRule.setSpinnerSelectionsInCardEditorAndWait(
                 new int[] {DECEMBER, NEXT_YEAR, FIRST_BILLING_ADDRESS},
-                mBillingAddressChangeProcessed);
+                mPaymentRequestTestRule.getBillingAddressChangeProcessed());
         // The billing address suggestions should include only the name, address, city, state and
         // zip code of the profile.
-        assertTrue(getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
-                .equals("Rob Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
+                        .equals("Rob Doe, 340 Main St, Los Angeles, CA 90291"));
     }
 
     /**
      * Verifies that the correct number of billing address suggestions are shown when adding a new
      * credit card.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testNumberOfBillingAddressSuggestions()
             throws InterruptedException, ExecutionException, TimeoutException {
-        triggerUIAndWait(mReadyToPay);
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickInPaymentMethodAndWait(R.id.payments_add_option_button, mReadyToEdit);
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_add_option_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // There should only be 8 suggestions, the 7 saved addresses and the option to add a new
         // address.
-        assertEquals(8, getSpinnerItemCountInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX));
+        Assert.assertEquals(8,
+                mPaymentRequestTestRule.getSpinnerItemCountInCardEditor(
+                        BILLING_ADDRESS_DROPDOWN_INDEX));
     }
 
     /**
      * Verifies that the correct number of billing address suggestions are shown when adding a new
      * credit card, even after cancelling out of adding a new billing address.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testNumberOfBillingAddressSuggestions_AfterCancellingNewBillingAddress()
             throws InterruptedException, ExecutionException, TimeoutException {
         // Add a payment method and add a new billing address.
-        triggerUIAndWait(mReadyToPay);
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickInPaymentMethodAndWait(R.id.payments_add_option_button, mReadyToEdit);
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_add_option_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // Select the "+ ADD ADDRESS" option for the billing address.
-        setSpinnerSelectionsInCardEditorAndWait(
-                new int[] {DECEMBER, NEXT_YEAR, ADD_BILLING_ADDRESS}, mReadyToEdit);
+        mPaymentRequestTestRule.setSpinnerSelectionsInCardEditorAndWait(
+                new int[] {DECEMBER, NEXT_YEAR, ADD_BILLING_ADDRESS},
+                mPaymentRequestTestRule.getReadyToEdit());
 
         // Cancel the creation of a new billing address.
-        clickInEditorAndWait(R.id.payments_edit_cancel_button, mReadyToEdit);
+        mPaymentRequestTestRule.clickInEditorAndWait(
+                R.id.payments_edit_cancel_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // There should still only be 8 suggestions, the 7 saved addresses and the option to add a
         // new address.
-        assertEquals(8, getSpinnerItemCountInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX));
+        Assert.assertEquals(8,
+                mPaymentRequestTestRule.getSpinnerItemCountInCardEditor(
+                        BILLING_ADDRESS_DROPDOWN_INDEX));
     }
 
     /**
      * Tests that for a card that already has a billing address, adding a new one and cancelling
      * maintains the previous selection. */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testAddBillingAddressOnCardAndCancel_MaintainsPreviousSelection()
             throws InterruptedException, ExecutionException, TimeoutException {
-        triggerUIAndWait(mReadyToPay);
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         // Edit the only card.
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickInPaymentMethodAndWait(R.id.payments_open_editor_pencil_button, mReadyToEdit);
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_open_editor_pencil_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // Jon Doe is selected as the billing address.
-        assertTrue(getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
-                .equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
+                        .equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
 
         // Select the "+ ADD ADDRESS" option for the billing address.
-        setSpinnerSelectionsInCardEditorAndWait(
-                new int[] {DECEMBER, NEXT_YEAR, ADD_BILLING_ADDRESS}, mReadyToEdit);
+        mPaymentRequestTestRule.setSpinnerSelectionsInCardEditorAndWait(
+                new int[] {DECEMBER, NEXT_YEAR, ADD_BILLING_ADDRESS},
+                mPaymentRequestTestRule.getReadyToEdit());
 
         // Cancel the creation of a new billing address.
-        clickInEditorAndWait(R.id.payments_edit_cancel_button, mReadyToEdit);
+        mPaymentRequestTestRule.clickInEditorAndWait(
+                R.id.payments_edit_cancel_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // Jon Doe is STILL selected as the billing address.
-        assertTrue(getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
-                .equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
+                        .equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
     }
 
     /**
      * Tests that adding a billing address for a card that has none, and cancelling then returns
      * to the proper selection (Select...).
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testAddBillingAddressOnCardWithNoBillingAndCancel_MaintainsPreviousSelection()
             throws InterruptedException, ExecutionException, TimeoutException {
-        triggerUIAndWait(mReadyToPay);
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         // Edit the second card.
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickOnPaymentMethodSuggestionOptionAndWait(1, mReadyToEdit);
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickOnPaymentMethodSuggestionOptionAndWait(
+                1, mPaymentRequestTestRule.getReadyToEdit());
 
         // Now in Card Editor to add a billing address. "Select" is selected in the dropdown.
-        assertTrue(getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
-                .equals("Select"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
+                        .equals("Select"));
 
         // Select the "+ ADD ADDRESS" option for the billing address.
-        setSpinnerSelectionsInCardEditorAndWait(
-                new int[] {DECEMBER, NEXT_YEAR, ADD_BILLING_ADDRESS}, mReadyToEdit);
+        mPaymentRequestTestRule.setSpinnerSelectionsInCardEditorAndWait(
+                new int[] {DECEMBER, NEXT_YEAR, ADD_BILLING_ADDRESS},
+                mPaymentRequestTestRule.getReadyToEdit());
 
         // Cancel the creation of a new billing address.
-        clickInEditorAndWait(R.id.payments_edit_cancel_button, mReadyToEdit);
+        mPaymentRequestTestRule.clickInEditorAndWait(
+                R.id.payments_edit_cancel_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // "Select" is STILL selected as the billing address.
-        assertTrue(getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
-                .equals("Select"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
+                        .equals("Select"));
     }
 
     /**
      * Verifies that the billing address suggestions are ordered by frecency.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testBillingAddressSortedByFrecency()
             throws InterruptedException, ExecutionException, TimeoutException {
         // Add a payment method.
-        triggerUIAndWait(mReadyToPay);
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickInPaymentMethodAndWait(R.id.payments_add_option_button, mReadyToEdit);
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_add_option_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // There should be 8 suggestions, the 7 saved addresses and the option to add a new address.
-        assertEquals(8, getSpinnerItemCountInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX));
+        Assert.assertEquals(8,
+                mPaymentRequestTestRule.getSpinnerItemCountInCardEditor(
+                        BILLING_ADDRESS_DROPDOWN_INDEX));
 
         // The billing address suggestions should be ordered by frecency.
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                0).equals("Rob Doe, 340 Main St, Los Angeles, CA 90291"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                1).equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                2).equals("Tom Doe, 340 Main St, Los Angeles, CA 90291"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                7).equals("Add address"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 0)
+                        .equals("Rob Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 1)
+                        .equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 2)
+                        .equals("Tom Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 7)
+                        .equals("Add address"));
     }
 
     /**
      * Verifies that the billing address suggestions are ordered by frecency, except for a newly
      * created address which should be suggested first.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testBillingAddressSortedByFrecency_AddNewAddress()
             throws InterruptedException, ExecutionException, TimeoutException {
         // Add a payment method.
-        triggerUIAndWait(mReadyToPay);
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickInPaymentMethodAndWait(R.id.payments_add_option_button, mReadyToEdit);
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_add_option_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // Add a new billing address.
-        setSpinnerSelectionsInCardEditorAndWait(
-                new int[] {DECEMBER, NEXT_YEAR, ADD_BILLING_ADDRESS}, mReadyToEdit);
-        setTextInEditorAndWait(new String[] {"Seb Doe", "Google", "340 Main St", "Los Angeles",
-                "CA", "90291", "999-999-9999"}, mEditorTextUpdate);
-        clickInEditorAndWait(R.id.payments_edit_done_button, mReadyToEdit);
+        mPaymentRequestTestRule.setSpinnerSelectionsInCardEditorAndWait(
+                new int[] {DECEMBER, NEXT_YEAR, ADD_BILLING_ADDRESS},
+                mPaymentRequestTestRule.getReadyToEdit());
+        mPaymentRequestTestRule.setTextInEditorAndWait(
+                new String[] {"Seb Doe", "Google", "340 Main St", "Los Angeles", "CA", "90291",
+                        "650-253-0000"},
+                mPaymentRequestTestRule.getEditorTextUpdate());
+        mPaymentRequestTestRule.clickInEditorAndWait(
+                R.id.payments_edit_done_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // There should be 9 suggestions, the 7 initial addresses, the newly added address and the
         // option to add a new address.
-        assertEquals(9, getSpinnerItemCountInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX));
+        Assert.assertEquals(9,
+                mPaymentRequestTestRule.getSpinnerItemCountInCardEditor(
+                        BILLING_ADDRESS_DROPDOWN_INDEX));
 
         // The fist suggestion should be the newly added address.
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                0).equals("Seb Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 0)
+                        .equals("Seb Doe, 340 Main St, Los Angeles, CA 90291"));
 
         // The rest of the billing address suggestions should be ordered by frecency.
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                1).equals("Rob Doe, 340 Main St, Los Angeles, CA 90291"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                2).equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                3).equals("Tom Doe, 340 Main St, Los Angeles, CA 90291"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                8).equals("Add address"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 1)
+                        .equals("Rob Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 2)
+                        .equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 3)
+                        .equals("Tom Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 8)
+                        .equals("Add address"));
     }
 
     /**
      * Verifies that a newly created shipping address is offered as the first billing address
      * suggestion.
      */
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testNewShippingAddressSuggestedFirst()
             throws InterruptedException, ExecutionException, TimeoutException {
-        triggerUIAndWait(mReadyToPay);
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
 
         // Add a shipping address.
-        clickInShippingSummaryAndWait(R.id.payments_section, mReadyForInput);
-        clickInShippingAddressAndWait(R.id.payments_add_option_button, mReadyToEdit);
-        setTextInEditorAndWait(new String[] {"Seb Doe", "Google", "340 Main St", "Los Angeles",
-                "CA", "90291", "999-999-9999"}, mEditorTextUpdate);
-        clickInEditorAndWait(R.id.payments_edit_done_button, mReadyToPay);
+        mPaymentRequestTestRule.clickInShippingAddressAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInShippingAddressAndWait(
+                R.id.payments_add_option_button, mPaymentRequestTestRule.getReadyToEdit());
+        mPaymentRequestTestRule.setTextInEditorAndWait(
+                new String[] {"Seb Doe", "Google", "340 Main St", "Los Angeles", "CA", "90291",
+                        "650-253-0000"},
+                mPaymentRequestTestRule.getEditorTextUpdate());
+        mPaymentRequestTestRule.clickInEditorAndWait(
+                R.id.payments_edit_done_button, mPaymentRequestTestRule.getReadyToPay());
 
         // Navigate to the card editor UI.
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickInPaymentMethodAndWait(R.id.payments_add_option_button, mReadyToEdit);
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_add_option_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // There should be 9 suggestions, the 7 initial addresses, the newly added address and the
         // option to add a new address.
-        assertEquals(9, getSpinnerItemCountInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX));
+        Assert.assertEquals(9,
+                mPaymentRequestTestRule.getSpinnerItemCountInCardEditor(
+                        BILLING_ADDRESS_DROPDOWN_INDEX));
 
         // The new address should be suggested first.
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                0).equals("Seb Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 0)
+                        .equals("Seb Doe, 340 Main St, Los Angeles, CA 90291"));
     }
 
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testSelectIncompleteBillingAddress_EditComplete()
             throws InterruptedException, ExecutionException, TimeoutException {
-        triggerUIAndWait(mReadyToPay);
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         // Edit the second card.
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickOnPaymentMethodSuggestionOptionAndWait(1, mReadyToEdit);
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickOnPaymentMethodSuggestionOptionAndWait(
+                1, mPaymentRequestTestRule.getReadyToEdit());
 
         // Now "Select" is selected in the dropdown.
-        assertTrue(getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
-                .equals("Select"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
+                        .equals("Select"));
 
         // The incomplete addresses in the dropdown contain edit required messages.
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                4).endsWith("Recipient required"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                5).endsWith("More information required"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                6).endsWith("Invalid address"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 4)
+                        .endsWith("Name required"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 5)
+                        .endsWith("More information required"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 6)
+                        .endsWith("Enter a valid address"));
 
-        // Selects the fourth billing addresss that misses recipient brings up the address
+        // Selects the fourth billing addresss that misses recipient name brings up the address
         // editor.
-        setSpinnerSelectionsInCardEditorAndWait(new int[] {DECEMBER, NEXT_YEAR, 4}, mReadyToEdit);
-        setTextInEditorAndWait(new String[] {"Lisa Doh", "Google", "340 Main St", "Los Angeles",
-                "CA", "90291", "999-999-9999"}, mEditorTextUpdate);
-        clickInEditorAndWait(R.id.payments_edit_done_button, mReadyToEdit);
+        mPaymentRequestTestRule.setSpinnerSelectionsInCardEditorAndWait(
+                new int[] {DECEMBER, NEXT_YEAR, 4}, mPaymentRequestTestRule.getReadyToEdit());
+        mPaymentRequestTestRule.setTextInEditorAndWait(
+                new String[] {"Lisa Doh", "Google", "340 Main St", "Los Angeles", "CA", "90291",
+                        "650-253-0000"},
+                mPaymentRequestTestRule.getEditorTextUpdate());
+        mPaymentRequestTestRule.clickInEditorAndWait(
+                R.id.payments_edit_done_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // The newly completed address must be selected and put at the top of the dropdown.
-        assertTrue(getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
-                           .equals("Lisa Doh, 340 Main St, Los Angeles, CA 90291"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                0).equals("Lisa Doh, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
+                        .equals("Lisa Doh, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 0)
+                        .equals("Lisa Doh, 340 Main St, Los Angeles, CA 90291"));
     }
 
+    @Test
     @MediumTest
     @Feature({"Payments"})
     public void testSelectIncompleteBillingAddress_EditCancel()
             throws InterruptedException, ExecutionException, TimeoutException {
-        triggerUIAndWait(mReadyToPay);
+        mPaymentRequestTestRule.triggerUIAndWait(mPaymentRequestTestRule.getReadyToPay());
         // Edit the only complete card.
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickInPaymentMethodAndWait(R.id.payments_open_editor_pencil_button, mReadyToEdit);
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_section, mPaymentRequestTestRule.getReadyForInput());
+        mPaymentRequestTestRule.clickInPaymentMethodAndWait(
+                R.id.payments_open_editor_pencil_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // Jon Doe is selected as the billing address.
-        assertTrue(getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
-                .equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
+                        .equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
 
         // The incomplete addresses in the dropdown contain edit required messages.
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                4).endsWith("Recipient required"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                5).endsWith("More information required"));
-        assertTrue(getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX,
-                6).endsWith("Invalid address"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 4)
+                        .endsWith("Name required"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 5)
+                        .endsWith("More information required"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerTextAtPositionInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX, 6)
+                        .endsWith("Enter a valid address"));
 
         // Selects the fifth billing addresss that misses recipient name brings up the address
         // editor.
-        setSpinnerSelectionsInCardEditorAndWait(new int[] {DECEMBER, NEXT_YEAR, 4}, mReadyToEdit);
-        clickInEditorAndWait(R.id.payments_edit_cancel_button, mReadyToEdit);
+        mPaymentRequestTestRule.setSpinnerSelectionsInCardEditorAndWait(
+                new int[] {DECEMBER, NEXT_YEAR, 4}, mPaymentRequestTestRule.getReadyToEdit());
+        mPaymentRequestTestRule.clickInEditorAndWait(
+                R.id.payments_edit_cancel_button, mPaymentRequestTestRule.getReadyToEdit());
 
         // The previous selected address should be selected after canceling out from edit.
-        assertTrue(getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
-                .equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
+        Assert.assertTrue(
+                mPaymentRequestTestRule
+                        .getSpinnerSelectionTextInCardEditor(BILLING_ADDRESS_DROPDOWN_INDEX)
+                        .equals("Jon Doe, 340 Main St, Los Angeles, CA 90291"));
     }
 }

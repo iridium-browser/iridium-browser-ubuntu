@@ -5,23 +5,21 @@
 #include "ios/web/public/test/fakes/test_web_state_observer.h"
 
 #include "base/memory/ptr_util.h"
-#include "ios/web/public/web_state/navigation_context.h"
+#import "ios/web/public/web_state/navigation_context.h"
 #include "ios/web/public/web_state/web_state.h"
 #include "ios/web/web_state/navigation_context_impl.h"
+#include "net/http/http_response_headers.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 
 TestWebStateObserver::TestWebStateObserver(WebState* web_state)
     : WebStateObserver(web_state) {}
 TestWebStateObserver::~TestWebStateObserver() = default;
-
-void TestWebStateObserver::ProvisionalNavigationStarted(const GURL& url) {
-  start_provisional_navigation_info_ =
-      base::MakeUnique<web::TestStartProvisionalNavigationInfo>();
-  start_provisional_navigation_info_->web_state = web_state();
-  start_provisional_navigation_info_->url = url;
-}
 
 void TestWebStateObserver::NavigationItemCommitted(
     const LoadCommittedDetails& load_details) {
@@ -64,30 +62,49 @@ void TestWebStateObserver::NavigationItemChanged() {
   navigation_item_changed_info_->web_state = web_state();
 }
 
-void TestWebStateObserver::DidFinishNavigation(NavigationContext* context) {
+void TestWebStateObserver::DidStartNavigation(NavigationContext* navigation) {
+  ASSERT_TRUE(!navigation->GetError() || !navigation->IsSameDocument());
+  did_start_navigation_info_ =
+      base::MakeUnique<web::TestDidStartNavigationInfo>();
+  did_start_navigation_info_->web_state = web_state();
+  std::unique_ptr<web::NavigationContextImpl> context =
+      web::NavigationContextImpl::CreateNavigationContext(
+          navigation->GetWebState(), navigation->GetUrl(),
+          navigation->GetPageTransition());
+  context->SetIsSameDocument(navigation->IsSameDocument());
+  context->SetError(navigation->GetError());
+  did_start_navigation_info_->context = std::move(context);
+}
+
+void TestWebStateObserver::DidFinishNavigation(NavigationContext* navigation) {
+  ASSERT_TRUE(!navigation->GetError() || !navigation->IsSameDocument());
   did_finish_navigation_info_ =
       base::MakeUnique<web::TestDidFinishNavigationInfo>();
   did_finish_navigation_info_->web_state = web_state();
-  if (context->IsSamePage()) {
-    ASSERT_FALSE(context->IsErrorPage());
-    did_finish_navigation_info_->context =
-        NavigationContextImpl::CreateSamePageNavigationContext(
-            context->GetWebState(), context->GetUrl());
-  } else if (context->IsErrorPage()) {
-    ASSERT_FALSE(context->IsSamePage());
-    did_finish_navigation_info_->context =
-        NavigationContextImpl::CreateErrorPageNavigationContext(
-            context->GetWebState(), context->GetUrl());
-  } else {
-    did_finish_navigation_info_->context =
-        NavigationContextImpl::CreateNavigationContext(context->GetWebState(),
-                                                       context->GetUrl());
-  }
+  std::unique_ptr<web::NavigationContextImpl> context =
+      web::NavigationContextImpl::CreateNavigationContext(
+          navigation->GetWebState(), navigation->GetUrl(),
+          navigation->GetPageTransition());
+  context->SetIsSameDocument(navigation->IsSameDocument());
+  context->SetError(navigation->GetError());
+  did_finish_navigation_info_->context = std::move(context);
 }
 
 void TestWebStateObserver::TitleWasSet() {
   title_was_set_info_ = base::MakeUnique<web::TestTitleWasSetInfo>();
   title_was_set_info_->web_state = web_state();
+}
+
+void TestWebStateObserver::DidChangeVisibleSecurityState() {
+  did_change_visible_security_state_info_ =
+      base::MakeUnique<web::TestDidChangeVisibleSecurityStateInfo>();
+  did_change_visible_security_state_info_->web_state = web_state();
+}
+
+void TestWebStateObserver::DidSuppressDialog() {
+  did_suppress_dialog_info_ =
+      base::MakeUnique<web::TestDidSuppressDialogInfo>();
+  did_suppress_dialog_info_->web_state = web_state();
 }
 
 void TestWebStateObserver::DocumentSubmitted(const std::string& form_name,

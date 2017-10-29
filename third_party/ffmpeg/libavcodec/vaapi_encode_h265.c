@@ -275,7 +275,7 @@ static void vaapi_encode_h265_write_vps(PutBitContext *pbc,
     VAAPIEncodeH265MiscSequenceParams *mseq = &priv->misc_sequence_params;
     int i, j;
 
-    vaapi_encode_h265_write_nal_unit_header(pbc, NAL_VPS);
+    vaapi_encode_h265_write_nal_unit_header(pbc, HEVC_NAL_VPS);
 
     u(4, mseq->video_parameter_set_id, vps_video_parameter_set_id);
 
@@ -395,7 +395,7 @@ static void vaapi_encode_h265_write_sps(PutBitContext *pbc,
     VAAPIEncodeH265MiscSequenceParams *mseq = &priv->misc_sequence_params;
     int i;
 
-    vaapi_encode_h265_write_nal_unit_header(pbc, NAL_SPS);
+    vaapi_encode_h265_write_nal_unit_header(pbc, HEVC_NAL_SPS);
 
     u(4, mseq->video_parameter_set_id, sps_video_parameter_set_id);
 
@@ -491,7 +491,7 @@ static void vaapi_encode_h265_write_pps(PutBitContext *pbc,
     VAAPIEncodeH265MiscSequenceParams *mseq = &priv->misc_sequence_params;
     int i;
 
-    vaapi_encode_h265_write_nal_unit_header(pbc, NAL_PPS);
+    vaapi_encode_h265_write_nal_unit_header(pbc, HEVC_NAL_PPS);
 
     ue(vpic->slice_pic_parameter_set_id, pps_pic_parameter_set_id);
     ue(mseq->seq_parameter_set_id, pps_seq_parameter_set_id);
@@ -576,7 +576,7 @@ static void vaapi_encode_h265_write_slice_header2(PutBitContext *pbc,
     vaapi_encode_h265_write_nal_unit_header(pbc, vpic->nal_unit_type);
 
     u(1, mslice_var(first_slice_segment_in_pic_flag));
-    if (vpic->nal_unit_type >= NAL_BLA_W_LP &&
+    if (vpic->nal_unit_type >= HEVC_NAL_BLA_W_LP &&
        vpic->nal_unit_type <= 23)
         u(1, mslice_var(no_output_of_prior_pics_flag));
 
@@ -597,8 +597,8 @@ static void vaapi_encode_h265_write_slice_header2(PutBitContext *pbc,
             u(1, 1, pic_output_flag);
         if (vseq->seq_fields.bits.separate_colour_plane_flag)
             u(2, vslice_field(colour_plane_id));
-        if (vpic->nal_unit_type != NAL_IDR_W_RADL &&
-           vpic->nal_unit_type != NAL_IDR_N_LP) {
+        if (vpic->nal_unit_type != HEVC_NAL_IDR_W_RADL &&
+           vpic->nal_unit_type != HEVC_NAL_IDR_N_LP) {
             u(4 + mseq->log2_max_pic_order_cnt_lsb_minus4,
               (pslice->pic_order_cnt &
                ((1 << (mseq->log2_max_pic_order_cnt_lsb_minus4 + 4)) - 1)),
@@ -630,11 +630,11 @@ static void vaapi_encode_h265_write_slice_header2(PutBitContext *pbc,
             }
         }
 
-        if (vslice->slice_type == P_SLICE || vslice->slice_type == B_SLICE) {
+        if (vslice->slice_type == HEVC_SLICE_P || vslice->slice_type == HEVC_SLICE_B) {
             u(1, vslice_field(num_ref_idx_active_override_flag));
             if (vslice->slice_fields.bits.num_ref_idx_active_override_flag) {
                 ue(vslice_var(num_ref_idx_l0_active_minus1));
-                if (vslice->slice_type == B_SLICE) {
+                if (vslice->slice_type == HEVC_SLICE_B) {
                     ue(vslice_var(num_ref_idx_l1_active_minus1));
                 }
             }
@@ -643,21 +643,21 @@ static void vaapi_encode_h265_write_slice_header2(PutBitContext *pbc,
                 av_assert0(0);
                 // ref_pic_lists_modification()
             }
-            if (vslice->slice_type == B_SLICE) {
+            if (vslice->slice_type == HEVC_SLICE_B) {
                 u(1, vslice_field(mvd_l1_zero_flag));
             }
             if (mseq->cabac_init_present_flag) {
                 u(1, vslice_field(cabac_init_flag));
             }
             if (vslice->slice_fields.bits.slice_temporal_mvp_enabled_flag) {
-                if (vslice->slice_type == B_SLICE)
+                if (vslice->slice_type == HEVC_SLICE_B)
                     u(1, vslice_field(collocated_from_l0_flag));
                 ue(vpic->collocated_ref_pic_index, collocated_ref_idx);
             }
             if ((vpic->pic_fields.bits.weighted_pred_flag &&
-                 vslice->slice_type == P_SLICE) ||
+                 vslice->slice_type == HEVC_SLICE_P) ||
                 (vpic->pic_fields.bits.weighted_bipred_flag &&
-                 vslice->slice_type == B_SLICE)) {
+                 vslice->slice_type == HEVC_SLICE_B)) {
                 av_assert0(0);
                 // pred_weight_table()
             }
@@ -803,8 +803,10 @@ static int vaapi_encode_h265_init_sequence_params(AVCodecContext *avctx)
 
         vseq->seq_fields.bits.chroma_format_idc = 1; // 4:2:0.
         vseq->seq_fields.bits.separate_colour_plane_flag = 0;
-        vseq->seq_fields.bits.bit_depth_luma_minus8 = 0; // 8-bit luma.
-        vseq->seq_fields.bits.bit_depth_chroma_minus8 = 0; // 8-bit chroma.
+        vseq->seq_fields.bits.bit_depth_luma_minus8 =
+            avctx->profile == FF_PROFILE_HEVC_MAIN_10 ? 2 : 0;
+        vseq->seq_fields.bits.bit_depth_chroma_minus8 =
+            avctx->profile == FF_PROFILE_HEVC_MAIN_10 ? 2 : 0;
         // Other misc flags all zero.
 
         // These have to come from the capabilities of the encoder.  We have
@@ -823,8 +825,8 @@ static int vaapi_encode_h265_init_sequence_params(AVCodecContext *avctx)
 
         vseq->bits_per_second = avctx->bit_rate;
         if (avctx->framerate.num > 0 && avctx->framerate.den > 0) {
-            vseq->vui_num_units_in_tick = avctx->framerate.num;
-            vseq->vui_time_scale        = avctx->framerate.den;
+            vseq->vui_num_units_in_tick = avctx->framerate.den;
+            vseq->vui_time_scale        = avctx->framerate.num;
         } else {
             vseq->vui_num_units_in_tick = avctx->time_base.num;
             vseq->vui_time_scale        = avctx->time_base.den;
@@ -996,25 +998,25 @@ static int vaapi_encode_h265_init_picture_params(AVCodecContext *avctx,
 
     switch (pic->type) {
     case PICTURE_TYPE_IDR:
-        vpic->nal_unit_type = NAL_IDR_W_RADL;
+        vpic->nal_unit_type = HEVC_NAL_IDR_W_RADL;
         vpic->pic_fields.bits.idr_pic_flag = 1;
         vpic->pic_fields.bits.coding_type  = 1;
         vpic->pic_fields.bits.reference_pic_flag = 1;
         break;
     case PICTURE_TYPE_I:
-        vpic->nal_unit_type = NAL_TRAIL_R;
+        vpic->nal_unit_type = HEVC_NAL_TRAIL_R;
         vpic->pic_fields.bits.idr_pic_flag = 0;
         vpic->pic_fields.bits.coding_type  = 1;
         vpic->pic_fields.bits.reference_pic_flag = 1;
         break;
     case PICTURE_TYPE_P:
-        vpic->nal_unit_type = NAL_TRAIL_R;
+        vpic->nal_unit_type = HEVC_NAL_TRAIL_R;
         vpic->pic_fields.bits.idr_pic_flag = 0;
         vpic->pic_fields.bits.coding_type  = 2;
         vpic->pic_fields.bits.reference_pic_flag = 1;
         break;
     case PICTURE_TYPE_B:
-        vpic->nal_unit_type = NAL_TRAIL_R;
+        vpic->nal_unit_type = HEVC_NAL_TRAIL_R;
         vpic->pic_fields.bits.idr_pic_flag = 0;
         vpic->pic_fields.bits.coding_type  = 3;
         vpic->pic_fields.bits.reference_pic_flag = 0;
@@ -1053,13 +1055,13 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
     switch (pic->type) {
     case PICTURE_TYPE_IDR:
     case PICTURE_TYPE_I:
-        vslice->slice_type = I_SLICE;
+        vslice->slice_type = HEVC_SLICE_I;
         break;
     case PICTURE_TYPE_P:
-        vslice->slice_type = P_SLICE;
+        vslice->slice_type = HEVC_SLICE_P;
         break;
     case PICTURE_TYPE_B:
-        vslice->slice_type = B_SLICE;
+        vslice->slice_type = HEVC_SLICE_B;
         break;
     default:
         av_assert0(0 && "invalid picture type");
@@ -1231,20 +1233,24 @@ static av_cold int vaapi_encode_h265_init(AVCodecContext *avctx)
     case FF_PROFILE_HEVC_MAIN:
     case FF_PROFILE_UNKNOWN:
         ctx->va_profile = VAProfileHEVCMain;
+        ctx->va_rt_format = VA_RT_FORMAT_YUV420;
         break;
     case FF_PROFILE_HEVC_MAIN_10:
-        av_log(avctx, AV_LOG_ERROR, "H.265 main 10-bit profile "
-               "is not supported.\n");
-        return AVERROR_PATCHWELCOME;
+#ifdef VA_RT_FORMAT_YUV420_10BPP
+        ctx->va_profile = VAProfileHEVCMain10;
+        ctx->va_rt_format = VA_RT_FORMAT_YUV420_10BPP;
+        break;
+#else
+        av_log(avctx, AV_LOG_ERROR, "10-bit encoding is not "
+               "supported with this VAAPI version.\n");
+        return AVERROR(ENOSYS);
+#endif
     default:
         av_log(avctx, AV_LOG_ERROR, "Unknown H.265 profile %d.\n",
                avctx->profile);
         return AVERROR(EINVAL);
     }
     ctx->va_entrypoint = VAEntrypointEncSlice;
-
-    // This will be dependent on profile when 10-bit is supported.
-    ctx->va_rt_format = VA_RT_FORMAT_YUV420;
 
     if (avctx->bit_rate > 0)
         ctx->va_rc_mode = VA_RC_CBR;

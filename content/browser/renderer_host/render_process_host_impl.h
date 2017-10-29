@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <queue>
+#include <set>
 #include <string>
 
 #include "base/macros.h"
@@ -20,24 +21,32 @@
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "build/build_config.h"
+#include "components/viz/service/display_embedder/shared_bitmap_allocation_notifier_impl.h"
 #include "content/browser/child_process_launcher.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
-#include "content/browser/renderer_host/offscreen_canvas_compositor_frame_sink_provider_impl.h"
+#include "content/browser/renderer_host/frame_sink_provider_impl.h"
+#include "content/browser/renderer_host/media/renderer_audio_output_stream_factory_context_impl.h"
+#include "content/browser/renderer_host/offscreen_canvas_provider_impl.h"
 #include "content/browser/webrtc/webrtc_eventlog_host.h"
+#include "content/common/associated_interface_registry_impl.h"
 #include "content/common/associated_interfaces.mojom.h"
 #include "content/common/content_export.h"
 #include "content/common/indexed_db/indexed_db.mojom.h"
+#include "content/common/media/renderer_audio_output_stream_factory.mojom.h"
 #include "content/common/renderer.mojom.h"
+#include "content/common/renderer_host.mojom.h"
+#include "content/common/storage_partition_service.mojom.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/service_manager_connection.h"
+#include "content/public/common/url_loader_factory.mojom.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_platform_file.h"
 #include "media/media_features.h"
-#include "mojo/edk/embedder/pending_process_connection.h"
+#include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/bindings/associated_binding_set.h"
 #include "mojo/public/cpp/bindings/interface_ptr.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/interfaces/service.mojom.h"
 #include "services/ui/public/interfaces/gpu.mojom.h"
 #include "ui/gfx/gpu_memory_buffer.h"
@@ -55,7 +64,6 @@ class SharedPersistentMemoryAllocator;
 
 namespace content {
 class AudioInputRendererHost;
-class AudioRendererHost;
 class ChildConnection;
 class GpuClient;
 class IndexedDBDispatcherHost;
@@ -68,15 +76,15 @@ class PermissionServiceContext;
 class PeerConnectionTrackerHost;
 class PushMessagingManager;
 class RenderFrameMessageFilter;
+class RenderProcessHostFactory;
 class RenderWidgetHelper;
 class RenderWidgetHost;
+class RenderWidgetHostImpl;
 class ResourceMessageFilter;
+class SiteInstance;
+class SiteInstanceImpl;
 class StoragePartition;
 class StoragePartitionImpl;
-
-namespace mojom {
-class StoragePartitionService;
-}  // namespace mojom
 
 typedef base::Thread* (*RendererMainThreadFactoryFunction)(
     const InProcessChildThreadParams& params);
@@ -105,11 +113,32 @@ class CONTENT_EXPORT RenderProcessHostImpl
       public ChildProcessLauncher::Client,
       public ui::GpuSwitchingObserver,
       public NON_EXPORTED_BASE(mojom::RouteProvider),
-      public NON_EXPORTED_BASE(mojom::AssociatedInterfaceProvider) {
+      public NON_EXPORTED_BASE(mojom::AssociatedInterfaceProvider),
+      public NON_EXPORTED_BASE(mojom::RendererHost) {
  public:
-  RenderProcessHostImpl(BrowserContext* browser_context,
-                        StoragePartitionImpl* storage_partition_impl,
-                        bool is_for_guests_only);
+  // Use the spare RenderProcessHost if it exists, or create a new one. This
+  // should be the usual way to get a new RenderProcessHost.
+  // If |storage_partition_impl| is null, the default partition from the
+  // browser_context is used, using |site_instance| (for which a null value is
+  // legal).
+  static RenderProcessHost* CreateOrUseSpareRenderProcessHost(
+      BrowserContext* browser_context,
+      StoragePartitionImpl* storage_partition_impl,
+      SiteInstance* site_instance,
+      bool is_for_guests_only);
+
+  // Create a new RenderProcessHost. In most cases
+  // CreateOrUseSpareRenderProcessHost, above, should be used instead.
+  // If |storage_partition_impl| is null, the default partition from the
+  // browser_context is used, using |site_instance| (for which a null value is
+  // legal). |site_instance| is not used if |storage_partition_impl| is not
+  // null.
+  static RenderProcessHost* CreateRenderProcessHost(
+      BrowserContext* browser_context,
+      StoragePartitionImpl* storage_partition_impl,
+      SiteInstance* site_instance,
+      bool is_for_guests_only);
+
   ~RenderProcessHostImpl() override;
 
   // RenderProcessHost implementation (public portion).
@@ -127,7 +156,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
   bool IsForGuestsOnly() const override;
   StoragePartition* GetStoragePartition() const override;
   bool Shutdown(int exit_code, bool wait) override;
-  bool FastShutdownIfPossible() override;
+  bool FastShutdownIfPossible(size_t page_count = 0,
+                              bool skip_unload_handlers = false) override;
   base::ProcessHandle GetHandle() const override;
   bool IsReady() const override;
   BrowserContext* GetBrowserContext() const override;
@@ -139,11 +169,12 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void Cleanup() override;
   void AddPendingView() override;
   void RemovePendingView() override;
+  void AddWidget(RenderWidgetHost* widget) override;
+  void RemoveWidget(RenderWidgetHost* widget) override;
   void SetSuddenTerminationAllowed(bool enabled) override;
   bool SuddenTerminationAllowed() const override;
   IPC::ChannelProxy* GetChannel() override;
   void AddFilter(BrowserMessageFilter* filter) override;
-  bool FastShutdownForPageCount(size_t count) override;
   bool FastShutdownStarted() const override;
   base::TimeDelta GetChildProcessIdleTime() const override;
   void FilterURL(bool empty_allowed, GURL* url) override;
@@ -152,6 +183,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void DisableAudioDebugRecordings() override;
   bool StartWebRTCEventLog(const base::FilePath& file_path) override;
   bool StopWebRTCEventLog() override;
+  void SetEchoCanceller3(bool enable) override;
   void SetWebRtcLogMessageCallback(
       base::Callback<void(const std::string&)> callback) override;
   void ClearWebRtcLogMessageCallback() override;
@@ -161,7 +193,9 @@ class CONTENT_EXPORT RenderProcessHostImpl
       const WebRtcRtpPacketCallback& packet_callback) override;
 #endif
   void ResumeDeferredNavigation(const GlobalRequestID& request_id) override;
-  service_manager::InterfaceProvider* GetRemoteInterfaces() override;
+  void BindInterface(const std::string& interface_name,
+                     mojo::ScopedMessagePipeHandle interface_pipe) override;
+  const service_manager::Identity& GetChildIdentity() const override;
   std::unique_ptr<base::SharedPersistentMemoryAllocator> TakeMetricsAllocator()
       override;
   const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
@@ -176,8 +210,15 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void PurgeAndSuspend() override;
   void Resume() override;
   mojom::Renderer* GetRendererInterface() override;
+  resource_coordinator::ResourceCoordinatorInterface*
+  GetProcessResourceCoordinator() override;
+
   void SetIsNeverSuitableForReuse() override;
   bool MayReuseHost() override;
+  bool IsUnused() override;
+  void SetIsUsed() override;
+
+  bool HostHasNotBeenUsed() override;
 
   mojom::RouteProvider* GetRemoteRouteProvider();
 
@@ -196,8 +237,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // ChildProcessLauncher::Client implementation.
   void OnProcessLaunched() override;
   void OnProcessLaunchFailed(int error_code) override;
-
-  scoped_refptr<AudioRendererHost> audio_renderer_host() const;
 
   // Call this function when it is evident that the child process is actively
   // performing some operation, for example if we just received an IPC message.
@@ -247,6 +286,18 @@ class CONTENT_EXPORT RenderProcessHostImpl
       RenderProcessHost* process,
       const GURL& url);
 
+  // Returns a suitable RenderProcessHost to use for |site_instance|. Depending
+  // on the SiteInstance's ProcessReusePolicy and its url, this may be an
+  // existing RenderProcessHost or a new one.
+  static RenderProcessHost* GetProcessHostForSiteInstance(
+      BrowserContext* browser_context,
+      SiteInstanceImpl* site_instance);
+
+  // Cleanup and remove any spare renderer. This should be used when a
+  // navigation has occurred or will be occurring that will not use the spare
+  // renderer and resources should be cleaned up.
+  static void CleanupSpareRenderProcessHost();
+
   static base::MessageLoop* GetInProcessRendererThreadForTesting();
 
   // This forces a renderer that is running "in process" to shut down.
@@ -273,9 +324,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
     is_for_guests_only_ = is_for_guests_only;
   }
 
-  void GetAudioOutputControllers(
-      const GetAudioOutputControllersCallback& callback) const override;
-
 #if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
   // Launch the zygote early in the browser startup.
   static void EarlyZygoteLaunch();
@@ -283,11 +331,47 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   void RecomputeAndUpdateWebKitPreferences();
 
-  // Called when an audio stream is added or removed and used to determine if
-  // the process should be backgrounded or not.
-  void OnAudioStreamAdded() override;
-  void OnAudioStreamRemoved() override;
-  int get_audio_stream_count_for_testing() const { return audio_stream_count_; }
+  RendererAudioOutputStreamFactoryContext*
+  GetRendererAudioOutputStreamFactoryContext() override;
+
+  // Called when a video capture stream or an audio stream is added or removed
+  // and used to determine if the process should be backgrounded or not.
+  void OnMediaStreamAdded() override;
+  void OnMediaStreamRemoved() override;
+  int get_media_stream_count_for_testing() const { return media_stream_count_; }
+
+  // Sets the global factory used to create new RenderProcessHosts.  It may be
+  // nullptr, in which case the default RenderProcessHost will be created (this
+  // is the behavior if you don't call this function).  The factory must be set
+  // back to nullptr before it's destroyed; ownership is not transferred.
+  static void set_render_process_host_factory(
+      const RenderProcessHostFactory* rph_factory);
+
+  // Tracks which sites frames are hosted in which RenderProcessHosts.
+  static void AddFrameWithSite(BrowserContext* browser_context,
+                               RenderProcessHost* render_process_host,
+                               const GURL& site_url);
+  static void RemoveFrameWithSite(BrowserContext* browser_context,
+                                  RenderProcessHost* render_process_host,
+                                  const GURL& site_url);
+
+  // Tracks which sites navigations are expected to commit in which
+  // RenderProcessHosts.
+  static void AddExpectedNavigationToSite(
+      BrowserContext* browser_context,
+      RenderProcessHost* render_process_host,
+      const GURL& site_url);
+  static void RemoveExpectedNavigationToSite(
+      BrowserContext* browser_context,
+      RenderProcessHost* render_process_host,
+      const GURL& site_url);
+
+  viz::SharedBitmapAllocationNotifierImpl* GetSharedBitmapAllocationNotifier()
+      override;
+
+  // Return the spare RenderProcessHost, if it exists. There is at most one
+  // globally-used spare RenderProcessHost at any time.
+  static RenderProcessHost* GetSpareRenderProcessHostForTesting();
 
  protected:
   // A proxy for our IPC::Channel that lives on the IO thread.
@@ -315,6 +399,12 @@ class CONTENT_EXPORT RenderProcessHostImpl
   class ConnectionFilterController;
   class ConnectionFilterImpl;
 
+  // Use CreateRenderProcessHost() instead of calling this constructor
+  // directly.
+  RenderProcessHostImpl(BrowserContext* browser_context,
+                        StoragePartitionImpl* storage_partition_impl,
+                        bool is_for_guests_only);
+
   // Initializes a new IPC::ChannelProxy in |channel_|, which will be connected
   // to the next child process launched for this host, if any.
   void InitializeChannelProxy();
@@ -339,11 +429,21 @@ class CONTENT_EXPORT RenderProcessHostImpl
       const std::string& name,
       mojom::AssociatedInterfaceAssociatedRequest request) override;
 
+  // mojom::RendererHost
+  void GetBlobURLLoaderFactory(mojom::URLLoaderFactoryRequest request) override;
+
+  void BindRouteProvider(mojom::RouteProviderAssociatedRequest request);
+
   void CreateMusGpuRequest(ui::mojom::GpuRequest request);
-  void CreateOffscreenCanvasCompositorFrameSinkProvider(
-      blink::mojom::OffscreenCanvasCompositorFrameSinkProviderRequest request);
+  void CreateOffscreenCanvasProvider(
+      blink::mojom::OffscreenCanvasProviderRequest request);
+  void BindFrameSinkProvider(mojom::FrameSinkProviderRequest request);
+  void BindSharedBitmapAllocationNotifier(
+      cc::mojom::SharedBitmapAllocationNotifierRequest request);
   void CreateStoragePartitionService(
-      mojo::InterfaceRequest<mojom::StoragePartitionService> request);
+      mojom::StoragePartitionServiceRequest request);
+  void CreateRendererHost(mojom::RendererHostRequest request);
+  void CreateURLLoaderFactory(mojom::URLLoaderFactoryRequest request);
 
   // Control message handlers.
   void OnShutdownRequest();
@@ -379,6 +479,18 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // GpuSwitchingObserver implementation.
   void OnGpuSwitched() override;
 
+  // Returns the default subframe RenderProcessHost to use for |site_instance|.
+  static RenderProcessHost* GetDefaultSubframeProcessHost(
+      BrowserContext* browser_context,
+      SiteInstanceImpl* site_instance,
+      bool is_for_guests_only);
+
+  // Returns a RenderProcessHost that is rendering |site_url| in one of its
+  // frames, or that is expecting a navigation to |site_url|.
+  static RenderProcessHost* FindReusableProcessHostForSite(
+      BrowserContext* browser_context,
+      const GURL& site_url);
+
 #if BUILDFLAG(ENABLE_WEBRTC)
   void OnRegisterAecDumpConsumer(int id);
   void OnUnregisterAecDumpConsumer(int id);
@@ -390,6 +502,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
                                  IPC::PlatformFileForTransit file_for_transit);
   void SendDisableAecDumpToRenderer();
   base::FilePath GetAecDumpFilePathWithExtensions(const base::FilePath& file);
+  base::SequencedTaskRunner& GetAecDumpFileTaskRunner();
 #endif
 
   static void OnMojoError(int render_process_id, const std::string& error);
@@ -417,7 +530,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // the render process currently hosted by the RPHI. Callbacks added by this
   // method will never run beyond the next invocation of Cleanup().
   template <typename CallbackType>
-  void AddUIThreadInterface(service_manager::InterfaceRegistry* registry,
+  void AddUIThreadInterface(service_manager::BinderRegistry* registry,
                             const CallbackType& callback) {
     registry->AddInterface(
         base::Bind(&InterfaceGetter<CallbackType>::GetInterfaceOnUIThread,
@@ -425,7 +538,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
         BrowserThread::GetTaskRunnerForThread(BrowserThread::UI));
   }
 
-  std::unique_ptr<mojo::edk::PendingProcessConnection> pending_connection_;
+  std::unique_ptr<mojo::edk::OutgoingBrokerClientInvitation>
+      broker_client_invitation_;
 
   std::unique_ptr<ChildConnection> child_connection_;
   int connection_filter_id_ =
@@ -452,6 +566,11 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // delete ourselves.
   IDMap<IPC::Listener*> listeners_;
 
+  // Mojo interfaces provided to the child process are registered here if they
+  // need consistent delivery ordering with legacy IPC, and are process-wide in
+  // nature (e.g. metrics, memory usage).
+  std::unique_ptr<AssociatedInterfaceRegistryImpl> associated_interfaces_;
+
   mojo::AssociatedBinding<mojom::RouteProvider> route_provider_binding_;
   mojo::AssociatedBindingSet<mojom::AssociatedInterfaceProvider, int32_t>
       associated_interface_provider_bindings_;
@@ -461,9 +580,16 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // backgrounded.
   int32_t visible_widgets_;
 
+  // The set of widgets in this RenderProcessHostImpl.
+  std::set<RenderWidgetHostImpl*> widgets_;
+
   // Whether this process currently has backgrounded priority. Tracked so that
   // UpdateProcessPriority() can avoid redundantly setting the priority.
   bool is_process_backgrounded_;
+  // Same as |pending_views_| but keep this in sync with value passed to
+  // |child_process_launcher_|, so need a separate state. This is used to
+  // compute process priority on some platforms.
+  bool boost_priority_for_pending_views_;
 
   // Used to allow a RenderWidgetHost to intercept various messages on the
   // IO thread.
@@ -505,7 +631,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // called.
   int instance_id_ = 1;
 
-  BrowserContext* browser_context_;
+  BrowserContext* const browser_context_;
 
   // Owned by |browser_context_|.
   StoragePartitionImpl* storage_partition_impl_;
@@ -532,6 +658,11 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // RenderFrames.
   bool is_for_guests_only_;
 
+  // Indicates whether this RenderProcessHost is unused, meaning that it has
+  // not committed any web content, and it has not been given to a SiteInstance
+  // that has a site assigned.
+  bool is_unused_;
+
   // Prevents the class from being added as a GpuDataManagerImpl observer more
   // than once.
   bool gpu_observer_registered_;
@@ -544,7 +675,9 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // through RenderProcessHostObserver::RenderProcessExited.
   bool within_process_died_observer_;
 
-  scoped_refptr<AudioRendererHost> audio_renderer_host_;
+  std::unique_ptr<RendererAudioOutputStreamFactoryContextImpl,
+                  BrowserThread::DeleteOnIOThread>
+      audio_output_stream_factory_context_;
 
   scoped_refptr<AudioInputRendererHost> audio_input_renderer_host_;
 
@@ -553,10 +686,14 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   // Must be accessed on UI thread.
   std::vector<int> aec_dump_consumers_;
+  base::Optional<bool> override_aec3_;
 
   WebRtcStopRtpDumpCallback stop_rtp_dump_callback_;
 
   WebRTCEventLogHost webrtc_eventlog_host_;
+
+  scoped_refptr<base::SequencedTaskRunner>
+      audio_debug_recordings_file_task_runner_;
 #endif
 
   // Forwards messages between WebRTCInternals in the browser process
@@ -575,7 +712,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // The memory allocator, if any, in which the renderer will write its metrics.
   std::unique_ptr<base::SharedPersistentMemoryAllocator> metrics_allocator_;
 
-  scoped_refptr<IndexedDBDispatcherHost> indexed_db_factory_;
+  std::unique_ptr<IndexedDBDispatcherHost, BrowserThread::DeleteOnIOThread>
+      indexed_db_factory_;
 
   bool channel_connected_;
   bool sent_render_process_ready_;
@@ -594,20 +732,28 @@ class CONTENT_EXPORT RenderProcessHostImpl
   std::unique_ptr<PushMessagingManager, BrowserThread::DeleteOnIOThread>
       push_messaging_manager_;
 
-  std::unique_ptr<OffscreenCanvasCompositorFrameSinkProviderImpl>
-      offscreen_canvas_provider_;
+  std::unique_ptr<OffscreenCanvasProviderImpl> offscreen_canvas_provider_;
 
   mojom::RouteProviderAssociatedPtr remote_route_provider_;
   mojom::RendererAssociatedPtr renderer_interface_;
+  mojo::Binding<mojom::RendererHost> renderer_host_binding_;
 
-  // Tracks active audio streams within the render process; used to determine if
-  // if a process should be backgrounded.
-  int audio_stream_count_ = 0;
+  // Tracks active audio and video streams within the render process; used to
+  // determine if if a process should be backgrounded.
+  int media_stream_count_ = 0;
+
+  std::unique_ptr<resource_coordinator::ResourceCoordinatorInterface>
+      process_resource_coordinator_;
 
   // A WeakPtrFactory which is reset every time Cleanup() runs. Used to vend
   // WeakPtrs which are invalidated any time the RPHI is recycled.
   std::unique_ptr<base::WeakPtrFactory<RenderProcessHostImpl>>
       instance_weak_factory_;
+
+  FrameSinkProviderImpl frame_sink_provider_;
+
+  viz::SharedBitmapAllocationNotifierImpl
+      shared_bitmap_allocation_notifier_impl_;
 
   base::WeakPtrFactory<RenderProcessHostImpl> weak_factory_;
 

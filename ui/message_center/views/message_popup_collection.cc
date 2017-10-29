@@ -173,6 +173,10 @@ void MessagePopupCollection::UpdateWidgets() {
 
   bool top_down = alignment_delegate_->IsTopDown();
   int base = GetBaseLine(toasts_.empty() ? NULL : toasts_.back());
+#if defined(OS_CHROMEOS)
+  bool is_primary_display =
+      alignment_delegate_->IsPrimaryDisplayForNotification();
+#endif
 
   // Iterate in the reverse order to keep the oldest toasts on screen. Newer
   // items may be ignored if there are no room to place them.
@@ -180,6 +184,16 @@ void MessagePopupCollection::UpdateWidgets() {
            popups.rbegin(); iter != popups.rend(); ++iter) {
     if (FindToast((*iter)->id()))
       continue;
+
+#if defined(OS_CHROMEOS)
+    // Disables popup of custom notification on non-primary displays, since
+    // currently custom notification supports only on one display at the same
+    // time.
+    // TODO(yoshiki): Support custom popup notification on multiple display
+    // (crbug.com/715370).
+    if (!is_primary_display && (*iter)->type() == NOTIFICATION_TYPE_CUSTOM)
+      continue;
+#endif
 
     MessageView* view;
     // Create top-level notification.
@@ -196,7 +210,11 @@ void MessagePopupCollection::UpdateWidgets() {
       view = MessageViewFactory::Create(NULL, *(*iter), true);
     }
 
-    view->set_context_menu_controller(context_menu_controller_.get());
+    // TODO(yoshiki): Temporary disable context menu on custom notifications.
+    // See crbug.com/750307 for detail.
+    if ((*iter)->type() != NOTIFICATION_TYPE_CUSTOM)
+      view->set_context_menu_controller(context_menu_controller_.get());
+
     int view_height = ToastContentsView::GetToastSizeForView(view).height();
     int height_available =
         top_down ? alignment_delegate_->GetWorkArea().bottom() - base

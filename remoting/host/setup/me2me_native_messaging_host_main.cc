@@ -39,14 +39,14 @@
 #endif  // defined(OS_MACOSX)
 
 #if defined(OS_WIN)
+#include "base/process/process_info.h"
 #include "base/win/registry.h"
 #include "remoting/host/pairing_registry_delegate_win.h"
-#include "remoting/host/win/elevation_helpers.h"
 #endif  // defined(OS_WIN)
 
-#if defined(OS_LINUX)
+#if defined(USE_GLIB) && !defined(OS_CHROMEOS)
 #include <glib-object.h>
-#endif  // defined(OS_LINUX)
+#endif  // defined(USE_GLIB) && !defined(OS_CHROMEOS)
 
 using remoting::protocol::PairingRegistry;
 
@@ -64,14 +64,14 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
   base::mac::ScopedNSAutoreleasePool pool;
 #endif  // defined(OS_MACOSX)
 
-#if defined(OS_LINUX)
+#if defined(USE_GLIB) && !defined(OS_CHROMEOS)
 // g_type_init will be deprecated in 2.36. 2.35 is the development
 // version for 2.36, hence do not call g_type_init starting 2.35.
 // http://developer.gnome.org/gobject/unstable/gobject-Type-Information.html#g-type-init
 #if !GLIB_CHECK_VERSION(2, 35, 0)
   g_type_init();
 #endif
-#endif  // defined(OS_LINUX)
+#endif  // defined(USE_GLIB) && !defined(OS_CHROMEOS)
 
   // Required to find the ICU data file, used by some file_util routines.
   base::i18n::InitializeICU();
@@ -80,15 +80,12 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
   // Initialize Breakpad as early as possible. On Mac the command-line needs to
   // be initialized first, so that the preference for crash-reporting can be
   // looked up in the config file.
-  // TODO(nicholss): Commenting out Breakpad. See crbug.com/637884
-  // if (IsUsageStatsAllowed()) {
-  //   InitializeCrashReporting();
-  // }
+  if (IsUsageStatsAllowed()) {
+    InitializeCrashReporting();
+  }
 #endif  // defined(REMOTING_ENABLE_BREAKPAD)
 
-  // TODO(sergeyu): Consider adding separate pools for different task classes.
-  const int kMaxBackgroundThreads = 5;
-  base::TaskScheduler::CreateAndSetSimpleTaskScheduler(kMaxBackgroundThreads);
+  base::TaskScheduler::CreateAndStartWithDefaultParams("Me2Me");
 
   // Mac OS X requires that the main thread be a UI message loop in order to
   // receive distributed notifications from the System Preferences pane. An
@@ -126,7 +123,7 @@ int Me2MeNativeMessagingHostMain(int argc, char** argv) {
   bool needs_elevation = false;
 
 #if defined(OS_WIN)
-  needs_elevation = !IsProcessElevated();
+  needs_elevation = !base::IsCurrentProcessElevated();
 
   if (command_line->HasSwitch(kElevateSwitchName)) {
     DCHECK(!needs_elevation);

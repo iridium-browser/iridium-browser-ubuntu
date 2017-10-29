@@ -5,8 +5,10 @@
 #include "content/browser/devtools/protocol/network_handler.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "base/barrier_closure.h"
+#include "base/base64.h"
 #include "base/command_line.h"
 #include "base/containers/hash_tables.h"
 #include "base/process/process_handle.h"
@@ -14,15 +16,15 @@
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "content/browser/devtools/devtools_session.h"
+#include "content/browser/devtools/devtools_url_interceptor_request_job.h"
 #include "content/browser/devtools/protocol/page.h"
 #include "content/browser/devtools/protocol/security.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/common/navigation_params.h"
-#include "content/common/resource_request.h"
-#include "content/common/resource_request_completion_status.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/browsing_data_remover.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_context.h"
@@ -32,8 +34,11 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/resource_devtools_info.h"
+#include "content/public/common/resource_request.h"
+#include "content/public/common/resource_request_completion_status.h"
 #include "content/public/common/resource_response.h"
 #include "net/base/net_errors.h"
+#include "net/base/upload_bytes_element_reader.h"
 #include "net/cookies/cookie_store.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_context.h"
@@ -48,6 +53,8 @@ using GetCookiesCallback = Network::Backend::GetCookiesCallback;
 using GetAllCookiesCallback = Network::Backend::GetAllCookiesCallback;
 using SetCookieCallback = Network::Backend::SetCookieCallback;
 using DeleteCookieCallback = Network::Backend::DeleteCookieCallback;
+using ClearBrowserCookiesCallback =
+    Network::Backend::ClearBrowserCookiesCallback;
 
 net::URLRequestContext* GetRequestContextOnIO(
     ResourceContext* resource_context,
@@ -183,6 +190,24 @@ class CookieRetriever : public base::RefCountedThreadSafe<CookieRetriever> {
     friend class base::RefCountedThreadSafe<CookieRetriever>;
 };
 
+void ClearedCookiesOnIO(std::unique_ptr<ClearBrowserCookiesCallback> callback,
+                        uint32_t num_deleted) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::Bind(&ClearBrowserCookiesCallback::sendSuccess,
+                                     base::Passed(std::move(callback))));
+}
+
+void ClearCookiesOnIO(ResourceContext* resource_context,
+                      net::URLRequestContextGetter* context_getter,
+                      std::unique_ptr<ClearBrowserCookiesCallback> callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  net::URLRequestContext* request_context =
+      context_getter->GetURLRequestContext();
+  request_context->cookie_store()->DeleteAllAsync(
+      base::Bind(&ClearedCookiesOnIO, base::Passed(std::move(callback))));
+}
+
 void DeletedCookieOnIO(std::unique_ptr<DeleteCookieCallback> callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   BrowserThread::PostTask(
@@ -290,27 +315,52 @@ String resourcePriority(net::RequestPriority priority) {
 
 String referrerPolicy(blink::WebReferrerPolicy referrer_policy) {
   switch (referrer_policy) {
-    case blink::WebReferrerPolicyAlways:
+    case blink::kWebReferrerPolicyAlways:
       return Network::Request::ReferrerPolicyEnum::UnsafeUrl;
-    case blink::WebReferrerPolicyDefault:
+    case blink::kWebReferrerPolicyDefault:
       if (base::CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kReducedReferrerGranularity)) {
         return Network::Request::ReferrerPolicyEnum::
-            NoReferrerWhenDowngradeOriginWhenCrossOrigin;
+            StrictOriginWhenCrossOrigin;
       } else {
         return Network::Request::ReferrerPolicyEnum::NoReferrerWhenDowngrade;
       }
-    case blink::WebReferrerPolicyNoReferrerWhenDowngrade:
+    case blink::kWebReferrerPolicyNoReferrerWhenDowngrade:
       return Network::Request::ReferrerPolicyEnum::NoReferrerWhenDowngrade;
-    case blink::WebReferrerPolicyNever:
+    case blink::kWebReferrerPolicyNever:
       return Network::Request::ReferrerPolicyEnum::NoReferrer;
-    case blink::WebReferrerPolicyOrigin:
+    case blink::kWebReferrerPolicyOrigin:
       return Network::Request::ReferrerPolicyEnum::Origin;
-    case blink::WebReferrerPolicyOriginWhenCrossOrigin:
+    case blink::kWebReferrerPolicyOriginWhenCrossOrigin:
       return Network::Request::ReferrerPolicyEnum::OriginWhenCrossOrigin;
-    case blink::WebReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin:
-      return Network::Request::ReferrerPolicyEnum::
-          NoReferrerWhenDowngradeOriginWhenCrossOrigin;
+    case blink::kWebReferrerPolicySameOrigin:
+      return Network::Request::ReferrerPolicyEnum::SameOrigin;
+    case blink::kWebReferrerPolicyStrictOrigin:
+      return Network::Request::ReferrerPolicyEnum::StrictOrigin;
+    case blink::kWebReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin:
+      return Network::Request::ReferrerPolicyEnum::StrictOriginWhenCrossOrigin;
+  }
+  NOTREACHED();
+  return Network::Request::ReferrerPolicyEnum::NoReferrerWhenDowngrade;
+}
+
+String referrerPolicy(net::URLRequest::ReferrerPolicy referrer_policy) {
+  switch (referrer_policy) {
+    case net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE:
+      return Network::Request::ReferrerPolicyEnum::NoReferrerWhenDowngrade;
+    case net::URLRequest::
+        REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN:
+      return Network::Request::ReferrerPolicyEnum::StrictOriginWhenCrossOrigin;
+    case net::URLRequest::ORIGIN_ONLY_ON_TRANSITION_CROSS_ORIGIN:
+      return Network::Request::ReferrerPolicyEnum::OriginWhenCrossOrigin;
+    case net::URLRequest::NEVER_CLEAR_REFERRER:
+      return Network::Request::ReferrerPolicyEnum::Origin;
+    case net::URLRequest::ORIGIN:
+      return Network::Request::ReferrerPolicyEnum::Origin;
+    case net::URLRequest::NO_REFERRER:
+      return Network::Request::ReferrerPolicyEnum::NoReferrer;
+    default:
+      break;
   }
   NOTREACHED();
   return Network::Request::ReferrerPolicyEnum::NoReferrerWhenDowngrade;
@@ -324,6 +374,34 @@ String securityState(const GURL& url, const net::CertStatus& cert_status) {
     return Security::SecurityStateEnum::Insecure;
   }
   return Security::SecurityStateEnum::Secure;
+}
+
+net::Error NetErrorFromString(const std::string& error) {
+  if (error == Network::ErrorReasonEnum::Failed)
+    return net::ERR_FAILED;
+  if (error == Network::ErrorReasonEnum::Aborted)
+    return net::ERR_ABORTED;
+  if (error == Network::ErrorReasonEnum::TimedOut)
+    return net::ERR_TIMED_OUT;
+  if (error == Network::ErrorReasonEnum::AccessDenied)
+    return net::ERR_ACCESS_DENIED;
+  if (error == Network::ErrorReasonEnum::ConnectionClosed)
+    return net::ERR_CONNECTION_CLOSED;
+  if (error == Network::ErrorReasonEnum::ConnectionReset)
+    return net::ERR_CONNECTION_RESET;
+  if (error == Network::ErrorReasonEnum::ConnectionRefused)
+    return net::ERR_CONNECTION_REFUSED;
+  if (error == Network::ErrorReasonEnum::ConnectionAborted)
+    return net::ERR_CONNECTION_ABORTED;
+  if (error == Network::ErrorReasonEnum::ConnectionFailed)
+    return net::ERR_CONNECTION_FAILED;
+  if (error == Network::ErrorReasonEnum::NameNotResolved)
+    return net::ERR_NAME_NOT_RESOLVED;
+  if (error == Network::ErrorReasonEnum::InternetDisconnected)
+    return net::ERR_INTERNET_DISCONNECTED;
+  if (error == Network::ErrorReasonEnum::AddressUnreachable)
+    return net::ERR_ADDRESS_UNREACHABLE;
+  return net::ERR_FAILED;
 }
 
 double timeDelta(base::TimeTicks time,
@@ -399,16 +477,18 @@ String getProtocol(const GURL& url, const ResourceResponseHead& head) {
 NetworkHandler::NetworkHandler()
     : DevToolsDomainHandler(Network::Metainfo::domainName),
       host_(nullptr),
-      enabled_(false) {
-}
+      enabled_(false),
+      interception_enabled_(false),
+      weak_factory_(this) {}
 
 NetworkHandler::~NetworkHandler() {
 }
 
 // static
-NetworkHandler* NetworkHandler::FromSession(DevToolsSession* session) {
-  return static_cast<NetworkHandler*>(
-      session->GetHandlerByName(Network::Metainfo::domainName));
+std::vector<NetworkHandler*> NetworkHandler::ForAgentHost(
+    DevToolsAgentHostImpl* host) {
+  return DevToolsSession::HandlersForAgentHost<NetworkHandler>(
+      host, Network::Metainfo::domainName);
 }
 
 void NetworkHandler::Wire(UberDispatcher* dispatcher) {
@@ -429,19 +509,40 @@ Response NetworkHandler::Enable(Maybe<int> max_total_size,
 Response NetworkHandler::Disable() {
   enabled_ = false;
   user_agent_ = std::string();
+  SetRequestInterceptionEnabled(false);
   return Response::FallThrough();
 }
 
 Response NetworkHandler::ClearBrowserCache() {
-  if (host_)
-    GetContentClient()->browser()->ClearCache(host_);
+  if (host_) {
+    content::BrowsingDataRemover* remover =
+        content::BrowserContext::GetBrowsingDataRemover(
+            host_->GetSiteInstance()->GetProcess()->GetBrowserContext());
+    remover->Remove(base::Time(), base::Time::Max(),
+                    content::BrowsingDataRemover::DATA_TYPE_CACHE,
+                    content::BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB);
+  }
+
   return Response::OK();
 }
 
-Response NetworkHandler::ClearBrowserCookies() {
-  if (host_)
-    GetContentClient()->browser()->ClearCookies(host_);
-  return Response::OK();
+void NetworkHandler::ClearBrowserCookies(
+    std::unique_ptr<ClearBrowserCookiesCallback> callback) {
+  if (!host_) {
+    callback->sendFailure(Response::InternalError());
+    return;
+  }
+
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&ClearCookiesOnIO,
+                 base::Unretained(host_->GetSiteInstance()
+                                      ->GetBrowserContext()
+                                      ->GetResourceContext()),
+                 base::Unretained(host_->GetProcess()
+                                      ->GetStoragePartition()
+                                      ->GetURLRequestContext()),
+                 base::Passed(std::move(callback))));
 }
 
 void NetworkHandler::GetCookies(Maybe<Array<String>> protocol_urls,
@@ -579,8 +680,7 @@ void NetworkHandler::NavigationPreloadRequestSent(
   for (net::HttpRequestHeaders::Iterator it(headers); it.GetNext();)
     headers_dict->setString(it.name(), it.value());
   frontend_->RequestWillBeSent(
-      request_id, version_id /* frameId */, version_id /* loaderId */,
-      "" /* documentURL */,
+      request_id, "" /* loader_id */, request.url.spec(),
       Network::Request::Create()
           .SetUrl(request.url.spec())
           .SetMethod(request.method)
@@ -650,7 +750,7 @@ void NetworkHandler::NavigationPreloadResponseReceived(
   response->SetRemoteIPAddress(head.socket_address.HostForURL());
   response->SetRemotePort(head.socket_address.port());
   frontend_->ResponseReceived(
-      request_id, version_id /* frameId */, version_id /* loaderId */,
+      request_id, "" /* loader_id */,
       base::TimeTicks::Now().ToInternalValue() /
           static_cast<double>(base::Time::kMicrosecondsPerSecond),
       Page::ResourceTypeEnum::Other, std::move(response));
@@ -663,14 +763,17 @@ void NetworkHandler::NavigationPreloadCompleted(
     return;
   if (completion_status.error_code != net::OK) {
     frontend_->LoadingFailed(
-        request_id, base::TimeTicks::Now().ToInternalValue() /
-                        static_cast<double>(base::Time::kMicrosecondsPerSecond),
-        Page::ResourceTypeEnum::Other, "Navigation Preload Error",
+        request_id,
+        base::TimeTicks::Now().ToInternalValue() /
+            static_cast<double>(base::Time::kMicrosecondsPerSecond),
+        Page::ResourceTypeEnum::Other,
+        net::ErrorToString(completion_status.error_code),
         completion_status.error_code == net::Error::ERR_ABORTED);
   }
   frontend_->LoadingFinished(
-      request_id, base::TimeTicks::Now().ToInternalValue() /
-                      static_cast<double>(base::Time::kMicrosecondsPerSecond),
+      request_id,
+      completion_status.completion_time.ToInternalValue() /
+          static_cast<double>(base::Time::kMicrosecondsPerSecond),
       completion_status.encoded_data_length);
 }
 
@@ -693,8 +796,7 @@ void NetworkHandler::NavigationFailed(
   for (net::HttpRequestHeaders::Iterator it(headers); it.GetNext();)
     headers_dict->setString(it.name(), it.value());
   frontend_->RequestWillBeSent(
-      request_id, request_id /* frameId */, request_id /* loaderId */,
-      common_params.url.spec(),
+      request_id, "" /* loader_id */, common_params.url.spec(),
       Network::Request::Create()
           .SetUrl(common_params.url.spec())
           .SetMethod(common_params.method)
@@ -723,6 +825,119 @@ void NetworkHandler::NavigationFailed(
 
 std::string NetworkHandler::UserAgentOverride() const {
   return enabled_ ? user_agent_ : std::string();
+}
+
+DispatchResponse NetworkHandler::SetRequestInterceptionEnabled(bool enabled) {
+  if (interception_enabled_ == enabled)
+    return Response::OK();  // Nothing to do.
+
+  WebContents* web_contents = WebContents::FromRenderFrameHost(host_);
+  if (!web_contents)
+    return Response::OK();
+
+  DevToolsURLRequestInterceptor* devtools_url_request_interceptor =
+      DevToolsURLRequestInterceptor::FromBrowserContext(
+          web_contents->GetBrowserContext());
+  if (!devtools_url_request_interceptor)
+    return Response::OK();
+
+  if (enabled) {
+    devtools_url_request_interceptor->state()->StartInterceptingRequests(
+        web_contents, weak_factory_.GetWeakPtr());
+  } else {
+    devtools_url_request_interceptor->state()->StopInterceptingRequests(
+        web_contents);
+  }
+  interception_enabled_ = enabled;
+  return Response::OK();
+}
+
+namespace {
+bool GetPostData(const net::URLRequest* request, std::string* post_data) {
+  if (!request->has_upload())
+    return false;
+
+  const net::UploadDataStream* stream = request->get_upload();
+  if (!stream->GetElementReaders())
+    return false;
+
+  const auto* element_readers = stream->GetElementReaders();
+  if (element_readers->empty())
+    return false;
+
+  *post_data = "";
+  for (const auto& element_reader : *element_readers) {
+    const net::UploadBytesElementReader* reader =
+        element_reader->AsBytesReader();
+    // TODO(alexclarke): This should really be base64 encoded.
+    *post_data += std::string(reader->bytes(), reader->length());
+  }
+  return true;
+}
+}  // namespace
+
+// TODO(alexclarke): Support structured data as well as |base64_raw_response|.
+void NetworkHandler::ContinueInterceptedRequest(
+    const std::string& interception_id,
+    Maybe<std::string> error_reason,
+    Maybe<std::string> base64_raw_response,
+    Maybe<std::string> url,
+    Maybe<std::string> method,
+    Maybe<std::string> post_data,
+    Maybe<protocol::Network::Headers> headers,
+    Maybe<protocol::Network::AuthChallengeResponse> auth_challenge_response,
+    std::unique_ptr<ContinueInterceptedRequestCallback> callback) {
+  DevToolsURLRequestInterceptor* devtools_url_request_interceptor =
+      DevToolsURLRequestInterceptor::FromBrowserContext(
+          WebContents::FromRenderFrameHost(host_)->GetBrowserContext());
+  if (!devtools_url_request_interceptor) {
+    callback->sendFailure(Response::InternalError());
+    return;
+  }
+
+  base::Optional<net::Error> error;
+  if (error_reason.isJust())
+    error = NetErrorFromString(error_reason.fromJust());
+
+  base::Optional<std::string> raw_response;
+  if (base64_raw_response.isJust()) {
+    std::string decoded;
+    if (!base::Base64Decode(base64_raw_response.fromJust(), &decoded)) {
+      callback->sendFailure(Response::InvalidParams("Invalid rawResponse."));
+      return;
+    }
+    raw_response = decoded;
+  }
+
+  devtools_url_request_interceptor->state()->ContinueInterceptedRequest(
+      interception_id,
+      base::MakeUnique<DevToolsURLRequestInterceptor::Modifications>(
+          std::move(error), std::move(raw_response), std::move(url),
+          std::move(method), std::move(post_data), std::move(headers),
+          std::move(auth_challenge_response)),
+      std::move(callback));
+}
+
+// static
+std::unique_ptr<Network::Request> NetworkHandler::CreateRequestFromURLRequest(
+    const net::URLRequest* request) {
+  std::unique_ptr<DictionaryValue> headers_dict(DictionaryValue::create());
+  for (net::HttpRequestHeaders::Iterator it(request->extra_request_headers());
+       it.GetNext();) {
+    headers_dict->setString(it.name(), it.value());
+  }
+  std::unique_ptr<protocol::Network::Request> request_object =
+      Network::Request::Create()
+          .SetUrl(request->url().spec())
+          .SetMethod(request->method())
+          .SetHeaders(Object::fromValue(headers_dict.get(), nullptr))
+          .SetInitialPriority(resourcePriority(request->priority()))
+          .SetReferrerPolicy(referrerPolicy(request->referrer_policy()))
+          .Build();
+  std::string post_data;
+  if (GetPostData(request, &post_data))
+    request_object->SetPostData(std::move(post_data));
+  return request_object;
 }
 
 }  // namespace protocol

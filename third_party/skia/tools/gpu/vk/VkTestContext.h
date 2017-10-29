@@ -22,7 +22,9 @@ public:
         return reinterpret_cast<GrBackendContext>(fVk.get());
     }
 
-    bool isValid() const override { return NULL != this->vk(); }
+    sk_sp<const GrVkBackendContext> getVkBackendContext() {
+        return fVk;
+    }
 
     const GrVkInterface* vk() const { return fVk->fInterface.get(); }
 
@@ -38,7 +40,7 @@ private:
 /**
  * Creates Vk context object bound to the native Vk library.
  */
-VkTestContext* CreatePlatformVkTestContext();
+VkTestContext* CreatePlatformVkTestContext(VkTestContext*);
 
 }  // namespace sk_gpu_test
 

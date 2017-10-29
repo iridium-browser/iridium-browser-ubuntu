@@ -7,21 +7,21 @@
 #include <memory>
 #include <utility>
 
-#include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shutdown_controller.h"
-#include "ash/common/test/test_session_state_delegate.h"
-#include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
-#include "ash/common/wm_shell.h"
+#include "ash/public/cpp/config.h"
+#include "ash/session/session_controller.h"
+#include "ash/session/test_session_controller_client.h"
 #include "ash/shell.h"
+#include "ash/shutdown_controller.h"
+#include "ash/shutdown_reason.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/lock_state_controller_test_api.h"
-#include "ash/test/test_screenshot_delegate.h"
-#include "ash/test/test_session_state_animator.h"
-#include "ash/test/test_shell_delegate.h"
+#include "ash/test_screenshot_delegate.h"
+#include "ash/test_shell_delegate.h"
+#include "ash/wm/lock_state_controller_test_api.h"
 #include "ash/wm/power_button_controller.h"
 #include "ash/wm/session_state_animator.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "ash/wm/test_session_state_animator.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
@@ -32,11 +32,10 @@
 #include "ui/gfx/geometry/size.h"
 
 namespace ash {
-namespace test {
 namespace {
 
 bool cursor_visible() {
-  return Shell::GetInstance()->cursor_manager()->IsCursorVisible();
+  return Shell::Get()->cursor_manager()->IsCursorVisible();
 }
 
 void CheckCalledCallback(bool* flag) {
@@ -54,7 +53,9 @@ class TestShutdownController : public ShutdownController {
 
  private:
   // ShutdownController:
-  void ShutDownOrReboot() override { num_shutdown_requests_++; }
+  void ShutDownOrReboot(ShutdownReason reason) override {
+    num_shutdown_requests_++;
+  }
 
   int num_shutdown_requests_ = 0;
 
@@ -80,21 +81,24 @@ class LockStateControllerTest : public AshTestBase {
 
     test_animator_ = new TestSessionStateAnimator;
 
-    lock_state_controller_ = Shell::GetInstance()->lock_state_controller();
+    lock_state_controller_ = Shell::Get()->lock_state_controller();
     lock_state_controller_->set_animator_for_test(test_animator_);
 
     test_api_.reset(new LockStateControllerTestApi(lock_state_controller_));
     test_api_->set_shutdown_controller(&test_shutdown_controller_);
 
-    power_button_controller_ = Shell::GetInstance()->power_button_controller();
+    power_button_controller_ = Shell::Get()->power_button_controller();
 
     shell_delegate_ =
-        static_cast<TestShellDelegate*>(WmShell::Get()->delegate());
+        static_cast<TestShellDelegate*>(Shell::Get()->shell_delegate());
   }
 
   void TearDown() override {
+    const bool is_mash = Shell::GetAshConfig() == Config::MASH;
     AshTestBase::TearDown();
-    chromeos::DBusThreadManager::Shutdown();
+    // Mash shuts down DBus during normal destruction.
+    if (!is_mash)
+      chromeos::DBusThreadManager::Shutdown();
   }
 
  protected:
@@ -114,10 +118,7 @@ class LockStateControllerTest : public AshTestBase {
 
   void AdvancePartially(SessionStateAnimator::AnimationSpeed speed,
                         float factor) {
-    base::TimeDelta duration = test_animator_->GetDuration(speed);
-    base::TimeDelta partial_duration =
-        base::TimeDelta::FromInternalValue(duration.ToInternalValue() * factor);
-    test_animator_->Advance(partial_duration);
+    test_animator_->Advance(test_animator_->GetDuration(speed) * factor);
   }
 
   void ExpectPreLockAnimationStarted() {
@@ -127,8 +128,7 @@ class LockStateControllerTest : public AshTestBase {
         SessionStateAnimator::NON_LOCK_SCREEN_CONTAINERS,
         SessionStateAnimator::ANIMATION_LIFT));
     EXPECT_TRUE(test_animator_->AreContainersAnimated(
-        SessionStateAnimator::LAUNCHER,
-        SessionStateAnimator::ANIMATION_FADE_OUT));
+        SessionStateAnimator::SHELF, SessionStateAnimator::ANIMATION_FADE_OUT));
     EXPECT_TRUE(test_animator_->AreContainersAnimated(
         SessionStateAnimator::LOCK_SCREEN_CONTAINERS,
         SessionStateAnimator::ANIMATION_HIDE_IMMEDIATELY));
@@ -142,8 +142,7 @@ class LockStateControllerTest : public AshTestBase {
         SessionStateAnimator::NON_LOCK_SCREEN_CONTAINERS,
         SessionStateAnimator::ANIMATION_LIFT));
     EXPECT_TRUE(test_animator_->AreContainersAnimated(
-        SessionStateAnimator::LAUNCHER,
-        SessionStateAnimator::ANIMATION_FADE_OUT));
+        SessionStateAnimator::SHELF, SessionStateAnimator::ANIMATION_FADE_OUT));
     EXPECT_TRUE(test_api_->is_animating_lock());
   }
 
@@ -154,8 +153,7 @@ class LockStateControllerTest : public AshTestBase {
         SessionStateAnimator::NON_LOCK_SCREEN_CONTAINERS,
         SessionStateAnimator::ANIMATION_UNDO_LIFT));
     EXPECT_TRUE(test_animator_->AreContainersAnimated(
-        SessionStateAnimator::LAUNCHER,
-        SessionStateAnimator::ANIMATION_FADE_IN));
+        SessionStateAnimator::SHELF, SessionStateAnimator::ANIMATION_FADE_IN));
   }
 
   void ExpectPreLockAnimationFinished() {
@@ -164,8 +162,7 @@ class LockStateControllerTest : public AshTestBase {
         SessionStateAnimator::NON_LOCK_SCREEN_CONTAINERS,
         SessionStateAnimator::ANIMATION_LIFT));
     EXPECT_FALSE(test_animator_->AreContainersAnimated(
-        SessionStateAnimator::LAUNCHER,
-        SessionStateAnimator::ANIMATION_FADE_OUT));
+        SessionStateAnimator::SHELF, SessionStateAnimator::ANIMATION_FADE_OUT));
     EXPECT_FALSE(test_animator_->AreContainersAnimated(
         SessionStateAnimator::LOCK_SCREEN_CONTAINERS,
         SessionStateAnimator::ANIMATION_HIDE_IMMEDIATELY));
@@ -208,8 +205,7 @@ class LockStateControllerTest : public AshTestBase {
         SessionStateAnimator::NON_LOCK_SCREEN_CONTAINERS,
         SessionStateAnimator::ANIMATION_DROP));
     EXPECT_TRUE(test_animator_->AreContainersAnimated(
-        SessionStateAnimator::LAUNCHER,
-        SessionStateAnimator::ANIMATION_FADE_IN));
+        SessionStateAnimator::SHELF, SessionStateAnimator::ANIMATION_FADE_IN));
   }
 
   void ExpectUnlockAfterUIDestroyedAnimationFinished() {
@@ -219,8 +215,7 @@ class LockStateControllerTest : public AshTestBase {
         SessionStateAnimator::NON_LOCK_SCREEN_CONTAINERS,
         SessionStateAnimator::ANIMATION_DROP));
     EXPECT_FALSE(test_animator_->AreContainersAnimated(
-        SessionStateAnimator::LAUNCHER,
-        SessionStateAnimator::ANIMATION_FADE_IN));
+        SessionStateAnimator::SHELF, SessionStateAnimator::ANIMATION_FADE_IN));
   }
 
   void ExpectShutdownAnimationStarted() {
@@ -274,13 +269,13 @@ class LockStateControllerTest : public AshTestBase {
   void ExpectUnlockedState() {
     SCOPED_TRACE("Failure in ExpectUnlockedState");
     EXPECT_EQ(0u, test_animator_->GetAnimationCount());
-    EXPECT_FALSE(WmShell::Get()->GetSessionStateDelegate()->IsScreenLocked());
+    EXPECT_FALSE(Shell::Get()->session_controller()->IsScreenLocked());
   }
 
   void ExpectLockedState() {
     SCOPED_TRACE("Failure in ExpectLockedState");
     EXPECT_EQ(0u, test_animator_->GetAnimationCount());
-    EXPECT_TRUE(WmShell::Get()->GetSessionStateDelegate()->IsScreenLocked());
+    EXPECT_TRUE(Shell::Get()->session_controller()->IsScreenLocked());
   }
 
   void HideWallpaper() { test_animator_->HideWallpaper(); }
@@ -311,7 +306,7 @@ class LockStateControllerTest : public AshTestBase {
 
   void SystemLocks() {
     lock_state_controller_->OnLockStateChanged(true);
-    WmShell::Get()->GetSessionStateDelegate()->LockScreen();
+    Shell::Get()->session_controller()->LockScreenAndFlushForTest();
   }
 
   void SuccessfulAuthentication(bool* call_flag) {
@@ -321,22 +316,20 @@ class LockStateControllerTest : public AshTestBase {
 
   void SystemUnlocks() {
     lock_state_controller_->OnLockStateChanged(false);
-    WmShell::Get()->GetSessionStateDelegate()->UnlockScreen();
+    GetSessionControllerClient()->UnlockScreen();
   }
 
-  void EnableMaximizeMode(bool enable) {
-    WmShell::Get()->maximize_mode_controller()->EnableMaximizeModeWindowManager(
+  void EnableTabletMode(bool enable) {
+    Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(
         enable);
   }
 
   void Initialize(bool legacy_button, LoginStatus status) {
     power_button_controller_->set_has_legacy_power_button_for_test(
         legacy_button);
-    lock_state_controller_->OnLoginStateChanged(status);
     SetUserLoggedIn(status != LoginStatus::NOT_LOGGED_IN);
     if (status == LoginStatus::GUEST)
-      TestSessionStateDelegate::SetCanLockScreen(false);
-    lock_state_controller_->OnLockStateChanged(false);
+      SetCanLockScreen(false);
   }
 
   PowerButtonController* power_button_controller_;  // not owned
@@ -397,7 +390,9 @@ TEST_F(LockStateControllerTest, LegacyLockAndShutDown) {
   EXPECT_EQ(0, NumShutdownRequests());
   // Make sure a mouse move event won't show the cursor.
   GenerateMouseMoveEvent();
-  EXPECT_FALSE(cursor_visible());
+  // TODO: CursorManager not created in mash. http://crbug.com/631103.
+  if (Shell::GetAshConfig() != Config::MASH)
+    EXPECT_FALSE(cursor_visible());
 
   EXPECT_TRUE(test_api_->real_shutdown_timer_is_running());
   test_api_->trigger_real_shutdown_timeout();
@@ -800,13 +795,15 @@ TEST_F(LockStateControllerTest, LockWithoutButton) {
 // display an animation, we should just blank the screen.
 TEST_F(LockStateControllerTest, ShutdownWithoutButton) {
   Initialize(false, LoginStatus::USER);
-  lock_state_controller_->OnAppTerminating();
+  lock_state_controller_->OnChromeTerminating();
 
   EXPECT_TRUE(test_animator_->AreContainersAnimated(
       SessionStateAnimator::kAllNonRootContainersMask,
       SessionStateAnimator::ANIMATION_HIDE_IMMEDIATELY));
   GenerateMouseMoveEvent();
-  EXPECT_FALSE(cursor_visible());
+  // TODO: CursorManager not created in mash. http://crbug.com/631103.
+  if (Shell::GetAshConfig() != Config::MASH)
+    EXPECT_FALSE(cursor_visible());
 }
 
 // Test that we display the fast-close animation and shut down when we get an
@@ -814,13 +811,16 @@ TEST_F(LockStateControllerTest, ShutdownWithoutButton) {
 TEST_F(LockStateControllerTest, RequestShutdownFromLoginScreen) {
   Initialize(false, LoginStatus::NOT_LOGGED_IN);
 
-  lock_state_controller_->RequestShutdown();
+  lock_state_controller_->RequestShutdown(
+      ShutdownReason::LOGIN_SHUT_DOWN_BUTTON);
 
   ExpectShutdownAnimationStarted();
   Advance(SessionStateAnimator::ANIMATION_SPEED_SHUTDOWN);
 
   GenerateMouseMoveEvent();
-  EXPECT_FALSE(cursor_visible());
+  // TODO: CursorManager not created in mash. http://crbug.com/631103.
+  if (Shell::GetAshConfig() != Config::MASH)
+    EXPECT_FALSE(cursor_visible());
 
   EXPECT_EQ(0, NumShutdownRequests());
   EXPECT_TRUE(test_api_->real_shutdown_timer_is_running());
@@ -836,13 +836,16 @@ TEST_F(LockStateControllerTest, RequestShutdownFromLockScreen) {
   Advance(SessionStateAnimator::ANIMATION_SPEED_SHUTDOWN);
   ExpectPostLockAnimationFinished();
 
-  lock_state_controller_->RequestShutdown();
+  lock_state_controller_->RequestShutdown(
+      ShutdownReason::LOGIN_SHUT_DOWN_BUTTON);
 
   ExpectShutdownAnimationStarted();
   Advance(SessionStateAnimator::ANIMATION_SPEED_SHUTDOWN);
 
   GenerateMouseMoveEvent();
-  EXPECT_FALSE(cursor_visible());
+  // TODO: CursorManager not created in mash. http://crbug.com/631103.
+  if (Shell::GetAshConfig() != Config::MASH)
+    EXPECT_FALSE(cursor_visible());
 
   EXPECT_EQ(0, NumShutdownRequests());
   EXPECT_TRUE(test_api_->real_shutdown_timer_is_running());
@@ -1019,12 +1022,16 @@ TEST_F(LockStateControllerTest, TestHiddenWallpaperLockUnlock) {
 }
 
 TEST_F(LockStateControllerTest, Screenshot) {
-  test::TestScreenshotDelegate* delegate = GetScreenshotDelegate();
+  // TODO: fails because of no screenshot in mash. http://crbug.com/698033.
+  if (Shell::GetAshConfig() == Config::MASH)
+    return;
+
+  TestScreenshotDelegate* delegate = GetScreenshotDelegate();
   delegate->set_can_take_screenshot(true);
 
-  EnableMaximizeMode(false);
+  EnableTabletMode(false);
 
-  // Screenshot handling should not be active when not in maximize mode.
+  // Screenshot handling should not be active when not in tablet mode.
   ASSERT_EQ(0, delegate->handle_take_screenshot_count());
   PressVolumeDown();
   PressPowerButton();
@@ -1032,7 +1039,7 @@ TEST_F(LockStateControllerTest, Screenshot) {
   ReleaseVolumeDown();
   EXPECT_EQ(0, delegate->handle_take_screenshot_count());
 
-  EnableMaximizeMode(true);
+  EnableTabletMode(true);
 
   // Pressing power alone does not take a screenshot.
   PressPowerButton();
@@ -1064,5 +1071,4 @@ TEST_F(LockStateControllerTest, Screenshot) {
   EXPECT_EQ(1, delegate->handle_take_screenshot_count());
 }
 
-}  // namespace test
 }  // namespace ash

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/ui/webui/chromeos/first_run/first_run_ui.h"
 
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/wm_shell.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/browser_process.h"
@@ -44,13 +44,8 @@ void SetLocalizedStrings(base::DictionaryValue* localized_strings) {
       "trayText", l10n_util::GetStringUTF16(IDS_FIRST_RUN_TRAY_STEP_TEXT));
   localized_strings->SetString(
       "helpHeader", l10n_util::GetStringUTF16(IDS_FIRST_RUN_HELP_STEP_HEADER));
-  base::string16 product_name =
-      l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
   localized_strings->SetString(
-      "helpText1", l10n_util::GetStringFUTF16(IDS_FIRST_RUN_HELP_STEP_TEXT_1,
-                                              product_name));
-  localized_strings->SetString(
-      "helpText2", l10n_util::GetStringUTF16(IDS_FIRST_RUN_HELP_STEP_TEXT_2));
+      "helpText", l10n_util::GetStringUTF16(IDS_FIRST_RUN_HELP_STEP_TEXT));
   localized_strings->SetString(
       "helpKeepExploringButton",
       l10n_util::GetStringUTF16(IDS_FIRST_RUN_HELP_STEP_KEEP_EXPLORING_BUTTON));
@@ -63,8 +58,10 @@ void SetLocalizedStrings(base::DictionaryValue* localized_strings) {
       "transitionsEnabled",
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kEnableFirstRunUITransitions));
-  ash::WmShelf* shelf =
-      ash::WmShelf::ForWindow(ash::WmShell::Get()->GetPrimaryRootWindow());
+  localized_strings->SetString(
+      "accessibleTitle",
+      l10n_util::GetStringUTF16(IDS_FIRST_RUN_STEP_ACCESSIBLE_TITLE));
+  ash::Shelf* shelf = ash::Shelf::ForWindow(ash::Shell::GetPrimaryRootWindow());
   std::string shelf_alignment;
   switch (shelf->alignment()) {
     case ash::SHELF_ALIGNMENT_BOTTOM:
@@ -109,4 +106,3 @@ FirstRunUI::FirstRunUI(content::WebUI* web_ui)
 }
 
 }  // namespace chromeos
-

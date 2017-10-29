@@ -51,6 +51,8 @@ class UnexpectedAlertOpen(ChromeDriverException):
   pass
 class NoAlertOpen(ChromeDriverException):
   pass
+class NoSuchCookie(ChromeDriverException):
+  pass
 
 def _ExceptionForLegacyResponse(response):
   exception_class_map = {
@@ -71,7 +73,8 @@ def _ExceptionForLegacyResponse(response):
     27: NoAlertOpen,
     28: ScriptTimeout,
     32: InvalidSelector,
-    33: SessionNotCreatedException
+    33: SessionNotCreatedException,
+    105: NoSuchCookie
   }
   status = response['status']
   msg = response['value']['message']
@@ -96,7 +99,8 @@ def _ExceptionForStandardResponse(response):
     'no alert open': NoAlertOpen,
     'asynchronous script timeout': ScriptTimeout,
     'invalid selector': InvalidSelector,
-    'session not created exception': SessionNotCreatedException
+    'session not created exception': SessionNotCreatedException,
+    'no such cookie': NoSuchCookie
   }
 
   error = response['error']
@@ -114,7 +118,8 @@ class ChromeDriver(object):
                mobile_emulation=None, experimental_options=None,
                download_dir=None, network_connection=None,
                send_w3c_capability=None, send_w3c_request=None,
-               page_load_strategy=None, unexpected_alert_behaviour=None):
+               page_load_strategy=None, unexpected_alert_behaviour=None,
+               devtools_events_to_log=None):
     self._executor = command_executor.CommandExecutor(server_url)
 
     options = {}
@@ -164,13 +169,18 @@ class ChromeDriver(object):
 
     if logging_prefs:
       assert type(logging_prefs) is dict
-      log_types = ['client', 'driver', 'browser', 'server', 'performance']
+      log_types = ['client', 'driver', 'browser', 'server', 'performance',
+        'devtools']
       log_levels = ['ALL', 'DEBUG', 'INFO', 'WARNING', 'SEVERE', 'OFF']
       for log_type, log_level in logging_prefs.iteritems():
         assert log_type in log_types
         assert log_level in log_levels
     else:
       logging_prefs = {}
+
+    if devtools_events_to_log:
+      assert type(devtools_events_to_log) is list
+      options['devToolsEventsToLog'] = devtools_events_to_log
 
     download_prefs = {}
     if download_dir:
@@ -184,27 +194,25 @@ class ChromeDriver(object):
       options['w3c'] = send_w3c_capability
 
     params = {
-      'desiredCapabilities': {
         'chromeOptions': options,
         'loggingPrefs': logging_prefs
-      }
     }
 
     if page_load_strategy:
       assert type(page_load_strategy) is str
-      params['desiredCapabilities']['pageLoadStrategy'] = page_load_strategy
+      params['pageLoadStrategy'] = page_load_strategy
 
     if unexpected_alert_behaviour:
       assert type(unexpected_alert_behaviour) is str
-      params['desiredCapabilities']['unexpectedAlertBehaviour'] = (
-          unexpected_alert_behaviour)
+      params['unexpectedAlertBehaviour'] = unexpected_alert_behaviour
 
     if network_connection:
-      params['desiredCapabilities']['networkConnectionEnabled'] = (
-          network_connection)
+      params['networkConnectionEnabled'] = network_connection
 
     if send_w3c_request:
-      params = {'capabilities': params}
+      params = {'capabilities': {'alwaysMatch': params}}
+    else:
+      params = {'desiredCapabilities': params}
 
     response = self._ExecuteCommand(Command.NEW_SESSION, params)
     if isinstance(response['status'], basestring):
@@ -395,6 +403,9 @@ class ChromeDriver(object):
   def GetCookies(self):
     return self.ExecuteCommand(Command.GET_COOKIES)
 
+  def GetNamedCookie(self, name):
+    return self.ExecuteCommand(Command.GET_NAMED_COOKIE, {'name': name})
+
   def AddCookie(self, cookie):
     self.ExecuteCommand(Command.ADD_COOKIE, {'cookie': cookie})
 
@@ -496,6 +507,14 @@ class ChromeDriver(object):
   def SetNetworkConnection(self, connection_type):
     params = {'parameters': {'type': connection_type}}
     return self.ExecuteCommand(Command.SET_NETWORK_CONNECTION, params)
+
+  def SendCommand(self, cmd, cmd_params):
+    params = {'parameters': {'cmd': cmd, 'params': cmd_params}};
+    return self.ExecuteCommand(Command.SEND_COMMAND, params)
+
+  def SendCommandAndGetResult(self, cmd, cmd_params):
+    params = {'cmd': cmd, 'params': cmd_params};
+    return self.ExecuteCommand(Command.SEND_COMMAND_AND_GET_RESULT, params)
 
   def GetScreenOrientation(self):
     screen_orientation = self.ExecuteCommand(Command.GET_SCREEN_ORIENTATION)

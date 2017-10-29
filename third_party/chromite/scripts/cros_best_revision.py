@@ -13,17 +13,21 @@ import distutils.version
 import os
 
 from chromite.cbuildbot import archive_lib
+from chromite.cli.cros import cros_cidbcreds
+from chromite.lib import builder_status_lib
+from chromite.lib import cidb
 from chromite.lib import config_lib
 from chromite.lib import constants
-from chromite.cbuildbot import manifest_version
-from chromite.cbuildbot import tree_status
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import gclient
+from chromite.lib import git
 from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import retry_util
+from chromite.lib import tree_status
 
 
 class LKGMNotFound(Exception):
@@ -37,20 +41,22 @@ class LKGMNotCommitted(Exception):
 class ChromeCommitter(object):
   """Committer object responsible for obtaining a new LKGM and committing it."""
 
-  _COMMIT_MSG = ('Automated Commit: Committing new LKGM version %(version)s '
-                 'for chromeos.')
+  _COMMIT_MSG_TEMPLATE = ('Automated Commit: Committing new LKGM version '
+                          '%(version)s for chromeos.')
   _CANDIDATES_TO_CONSIDER = 10
 
   _SLEEP_TIMEOUT = 30
   _TREE_TIMEOUT = 7200
 
-  def __init__(self, checkout_dir, dryrun):
+  def __init__(self, checkout_dir, db, dryrun):
     self._checkout_dir = checkout_dir
+    self._db = db
     self._dryrun = dryrun
     self._lkgm = None
+    self._commit_msg = ''
     self._old_lkgm = None
     self.site_config = config_lib.GetConfig()
-
+    self.builder = 'master-release'
 
   def CheckoutChromeLKGM(self):
     """Checkout chromeos LKGM file for chrome into tmp checkout dir."""
@@ -75,13 +81,16 @@ class ChromeCommitter(object):
         os.path.join(self._checkout_dir, constants.PATH_TO_CHROME_LKGM))
 
   @cros_build_lib.MemoizedSingleCall
-  def _GetLatestCanaryVersions(self):
-    """Returns the latest CANDIDATES_TO_CONSIDER canary versions."""
-    gs_handle = gs.GSContext()
-    version_paths = gs_handle.LS(manifest_version.BUILD_STATUS_URL)
+  def _GetLatestCanaryVersionsFromCIDB(self):
+    """Returns the latest CANDIDATES_TO_CONSIDER canary versions from CIDB."""
+    old_builds = self._db.GetBuildHistory(
+        self.builder, 1, platform_version=self._old_lkgm)
+    if not old_builds:
+      raise LKGMNotFound('The old LKGM was not configured correctly.')
+    old_milestone_version = old_builds[0]['milestone_version']
 
-    # Strip gs://<path> prefix and trailing /'s.
-    versions = [os.path.basename(v.rstrip('/')) for v in version_paths]
+    versions = self._db.GetPlatformVersions(
+        self.builder, starting_milestone_version=old_milestone_version)
 
     lv = distutils.version.LooseVersion
     # We only care about canary versions which always end in 0.0.
@@ -103,7 +112,8 @@ class ChromeCommitter(object):
 
   def FindNewLKGM(self):
     """Finds a new LKGM for chrome from previous chromeos releases."""
-    versions = self._GetLatestCanaryVersions()
+    versions = self._GetLatestCanaryVersionsFromCIDB()
+
     if not versions:
       raise LKGMNotFound('No valid LKGM found newer than the old LKGM.')
 
@@ -118,8 +128,9 @@ class ChromeCommitter(object):
       version_scores[version] = 0
       failed_builders = []
       for builder in canaries:
-        status = manifest_version.BuildSpecsManager.GetBuildStatus(
-            builder, version, retries=0)
+        status = (
+            builder_status_lib.BuilderStatusManager.GetBuilderStatusFromCIDB(
+                self._db, builder, version))
         if status:
           if status.Passed():
             if version_scores[version] != -1:
@@ -147,36 +158,57 @@ class ChromeCommitter(object):
     lv = distutils.version.LooseVersion
     if not self._lkgm and not lv(self._lkgm) < lv(self._old_lkgm):
       raise LKGMNotFound('No valid LKGM found. Did you run FindNewLKGM?')
-    commit_msg = self._COMMIT_MSG % dict(version=self._lkgm)
+    self._commit_msg = self._COMMIT_MSG_TEMPLATE % dict(version=self._lkgm)
 
     try:
       # Add the new versioned file.
-      osutils.WriteFile(
-          os.path.join(self._checkout_dir, constants.PATH_TO_CHROME_LKGM),
-          self._lkgm)
-      cros_build_lib.RunCommand(
-          ['git', 'add', constants.PATH_TO_CHROME_LKGM], cwd=self._checkout_dir)
+      file_path = os.path.join(
+          self._checkout_dir, constants.PATH_TO_CHROME_LKGM)
+      osutils.WriteFile(file_path, self._lkgm)
+      git.AddPath(file_path)
 
       # Commit it!
-      cros_build_lib.RunCommand(
-          ['git', 'commit', '-m', commit_msg],
-          cwd=self._checkout_dir)
+      git.RunGit(self._checkout_dir, ['commit', '-m', self._commit_msg])
     except cros_build_lib.RunCommandError as e:
       raise LKGMNotCommitted(
           'Could not create git commit with new LKGM: %r' % e)
 
+  def _TryPushNewLKGM(self):
+    """Fetches latest, rebases the CL, and lands the rebased CL."""
+    git.RunGit(self._checkout_dir, ['fetch', 'origin', 'master'])
+
+    try:
+      git.RunGit(self._checkout_dir, ['rebase'], retry=False)
+    except cros_build_lib.RunCommandError as e:
+      # A rebase failure was unexpected, so raise a custom LKGMNotCommitted
+      # error to avoid further retries.
+      git.RunGit(self._checkout_dir, ['rebase', '--abort'])
+      raise LKGMNotCommitted('Could not submit LKGM: rebase failed: %r' % e)
+
+    if self._dryrun:
+      return
+    else:
+      git.RunGit(
+          self._checkout_dir,
+          ['cl', 'land', '-f', '--bypass-hooks', '-m', self._commit_msg])
+
+  def PushNewLKGM(self, max_retry=10):
+    """Lands the change after fetching and rebasing."""
     if not tree_status.IsTreeOpen(status_url=gclient.STATUS_URL,
                                   period=self._SLEEP_TIMEOUT,
                                   timeout=self._TREE_TIMEOUT):
       raise LKGMNotCommitted('Chromium Tree is closed')
 
-    if not self._dryrun:
-      try:
-        cros_build_lib.RunCommand(
-            ['git', 'cl', 'land', '-f', '--bypass-hooks', '-m', commit_msg],
-            cwd=self._checkout_dir)
-      except cros_build_lib.RunCommandError as e:
-        raise LKGMNotCommitted('Could not submit LKGM: %r' % e)
+    # git cl land refuses to land a change that isn't relative to ToT, so any
+    # new commits since the last fetch will cause this to fail. Retries should
+    # make this edge case ultimately unlikely.
+    try:
+      retry_util.RetryCommand(self._TryPushNewLKGM,
+                              max_retry,
+                              sleep=self._SLEEP_TIMEOUT,
+                              log_all_retries=True)
+    except cros_build_lib.RunCommandError as e:
+      raise LKGMNotCommitted('Could not submit LKGM: %r' % e)
 
   def UpdateLatestFilesForBot(self, config, versions):
     """Update the LATEST files, for a given bot, in Google Storage.
@@ -210,7 +242,7 @@ class ChromeCommitter(object):
   def UpdateLatestFiles(self):
     """Update the LATEST files since LKGM, in Google Storage."""
     ext_cfgs, int_cfgs = self.site_config.FindFullConfigsForBoard(board=None)
-    versions = self._GetLatestCanaryVersions() + [self._old_lkgm]
+    versions = self._GetLatestCanaryVersionsFromCIDB() + [self._old_lkgm]
     tasks = [[cfg, versions] for cfg in ext_cfgs + int_cfgs]
     parallel.RunTasksInProcessPool(self.UpdateLatestFilesForBot, tasks,
                                    processes=100)
@@ -224,17 +256,48 @@ def _GetParser():
   parser.add_argument('--workdir', default=os.path.join(os.getcwd(), 'src'),
                       help=('Path to a checkout of chromium/src. '
                             'Defaults to PWD/src'))
+  parser.add_argument('--cred-dir', action='store',
+                      metavar='CIDB_CREDENTIALS_DIR',
+                      help=('Database credentials directory with '
+                            'certificates and other connection '
+                            'information. Obtain your credentials '
+                            'at go/cros-cidb-admin.'))
 
   return parser
 
+def GetCidbCreds(cred_dir):
+  """Get cidb credentials.
+
+  Args:
+    cred_dir: The path to get the cidb credentials.
+
+  Returns:
+    The valid path which contains the cidb credentials.
+  """
+  cidb_creds = cred_dir
+  if cidb_creds is None:
+    try:
+      cidb_creds = cros_cidbcreds.CheckAndGetCIDBCreds()
+    except:
+      logging.error('Failed to download CIDB creds from gs.\n'
+                    'Can try obtaining your credentials at '
+                    'go/cros-cidb-admin and manually passing it in '
+                    'with --cred-dir.')
+      raise
+
+  return cidb_creds
 
 def main(argv):
   parser = _GetParser()
   args = parser.parse_args(argv)
+  cidb_creds = GetCidbCreds(args.cred_dir)
+  db = cidb.CIDBConnection(cidb_creds)
 
-  committer = ChromeCommitter(args.workdir, dryrun=args.dryrun)
+  committer = ChromeCommitter(args.workdir, db, dryrun=args.dryrun)
   committer.CheckoutChromeLKGM()
   committer.UpdateLatestFiles()
   committer.FindNewLKGM()
   committer.CommitNewLKGM()
+  committer.PushNewLKGM()
+
   return 0

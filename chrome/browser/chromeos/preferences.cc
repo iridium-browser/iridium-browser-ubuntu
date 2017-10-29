@@ -6,10 +6,9 @@
 
 #include <vector>
 
+#include "ash/accessibility_types.h"
+#include "ash/ash_constants.h"
 #include "ash/autoclick/autoclick_controller.h"
-#include "ash/common/accessibility_types.h"
-#include "ash/common/ash_constants.h"
-#include "ash/common/wm_shell.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
@@ -20,6 +19,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
+#include "chrome/browser/chromeos/ash_config.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_syncer.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
@@ -29,6 +29,8 @@
 #include "chrome/browser/chromeos/system/timezone_resolver_manager.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
+#include "chrome/browser/ui/ash/ash_util.h"
+#include "chrome/browser/ui/ash/system_tray_client.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
@@ -51,6 +53,7 @@
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/chromeos/events/pref_names.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_utils.h"
@@ -80,8 +83,8 @@ Preferences::Preferences()
       user_is_primary_(false) {
   // Do not observe shell, if there is no shell instance; e.g., in some unit
   // tests.
-  if (ash::WmShell::HasInstance())
-    ash::WmShell::Get()->AddShellObserver(this);
+  if (ash::Shell::HasInstance())
+    ash::Shell::Get()->AddShellObserver(this);
 }
 
 Preferences::Preferences(input_method::InputMethodManager* input_method_manager)
@@ -91,8 +94,8 @@ Preferences::Preferences(input_method::InputMethodManager* input_method_manager)
       user_is_primary_(false) {
   // Do not observe shell, if there is no shell instance; e.g., in some unit
   // tests.
-  if (ash::WmShell::HasInstance())
-    ash::WmShell::Get()->AddShellObserver(this);
+  if (ash::Shell::HasInstance())
+    ash::Shell::Get()->AddShellObserver(this);
 }
 
 Preferences::~Preferences() {
@@ -100,8 +103,8 @@ Preferences::~Preferences() {
   user_manager::UserManager::Get()->RemoveSessionStateObserver(this);
   // If shell instance is destoryed before this preferences instance, there is
   // no need to remove this shell observer.
-  if (ash::WmShell::HasInstance())
-    ash::WmShell::Get()->RemoveShellObserver(this);
+  if (ash::Shell::HasInstance())
+    ash::Shell::Get()->RemoveShellObserver(this);
 }
 
 // static
@@ -118,6 +121,9 @@ void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(
       prefs::kSystemTimezoneAutomaticDetectionPolicy,
       enterprise_management::SystemTimezoneProto::USERS_DECIDE);
+  // Register ash prefs.
+  if (!ash_util::IsRunningInMash())
+    ash::Shell::RegisterLocalStatePrefs(registry);
 }
 
 // static
@@ -134,6 +140,10 @@ void Preferences::RegisterProfilePrefs(
   } else {
     hardware_keyboard_id = "xkb:us::eng";  // only for testing.
   }
+
+  // Register ash prefs.
+  if (!ash_util::IsRunningInMash())
+    ash::Shell::RegisterProfilePrefs(registry);
 
   registry->RegisterBooleanPref(prefs::kPerformanceTracingEnabled, false);
 
@@ -194,8 +204,8 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterIntegerPref(
       prefs::kAccessibilityAutoclickDelayMs,
-      int{ash::AutoclickController::GetDefaultAutoclickDelay()
-              .InMilliseconds()},
+      static_cast<int>(ash::AutoclickController::GetDefaultAutoclickDelay()
+                           .InMilliseconds()),
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kAccessibilityVirtualKeyboardEnabled,
@@ -305,6 +315,10 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   // Don't sync the note-taking app; it may not be installed on other devices.
   registry->RegisterStringPref(prefs::kNoteTakingAppId, std::string());
+  registry->RegisterBooleanPref(prefs::kNoteTakingAppEnabledOnLockScreen,
+                                false);
+  registry->RegisterListPref(prefs::kNoteTakingAppsLockScreenWhitelist);
+  registry->RegisterBooleanPref(prefs::kRestoreLastLockScreenNote, true);
 
   // We don't sync wake-on-wifi related prefs because they are device specific.
   registry->RegisterBooleanPref(prefs::kWakeOnWifiDarkConnect, true);
@@ -355,8 +369,10 @@ void Preferences::RegisterProfilePrefs(
 
   registry->RegisterBooleanPref(prefs::kHatsDeviceIsSelected, false);
 
-  registry->RegisterBooleanPref(prefs::kQuickUnlockFeatureNotificationShown,
+  registry->RegisterBooleanPref(prefs::kPinUnlockFeatureNotificationShown,
                                 false);
+  registry->RegisterBooleanPref(
+      prefs::kFingerprintUnlockFeatureNotificationShown, false);
 
   // We don't sync EOL related prefs because they are device specific.
   registry->RegisterBooleanPref(prefs::kEolNotificationDismissed, false);
@@ -506,6 +522,7 @@ void Preferences::ApplyPreferences(ApplyReason reason,
       tracing_manager_ = TracingManager::Create();
     else
       tracing_manager_.reset();
+    SystemTrayClient::Get()->SetPerformanceTracingIconVisible(enabled);
   }
   if (reason != REASON_PREF_CHANGED || pref_name == prefs::kTapToClickEnabled) {
     const bool enabled = tap_to_click_enabled_.GetValue();
@@ -546,9 +563,10 @@ void Preferences::ApplyPreferences(ApplyReason reason,
   if (reason != REASON_PREF_CHANGED ||
       pref_name == prefs::kUnifiedDesktopEnabledByDefault) {
     const bool enabled = unified_desktop_enabled_by_default_.GetValue();
-    if (ash::Shell::HasInstance()) {
-      ash::Shell::GetInstance()->display_manager()
-          ->SetUnifiedDesktopEnabled(enabled);
+    // TODO: this needs to work in Config::MUS. http://crbug.com/705591.
+    if (ash::Shell::HasInstance() &&
+        chromeos::GetAshConfig() == ash::Config::CLASSIC) {
+      ash::Shell::Get()->display_manager()->SetUnifiedDesktopEnabled(enabled);
     }
   }
   if (reason != REASON_PREF_CHANGED || pref_name == prefs::kNaturalScroll) {
@@ -629,7 +647,7 @@ void Preferences::ApplyPreferences(ApplyReason reason,
       const bool enabled = touch_hud_projection_enabled_.GetValue();
       // There may not be a shell, e.g., in some unit tests.
       if (ash::Shell::HasInstance())
-        ash::Shell::GetInstance()->SetTouchHudProjectionEnabled(enabled);
+        ash::Shell::Get()->SetTouchHudProjectionEnabled(enabled);
     }
   }
 

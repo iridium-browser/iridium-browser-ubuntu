@@ -11,20 +11,23 @@
 </head>
 <body onload="generateTOC(document.getElementById('toc'))">
     <!--begin-logo-->
-    <div class=head>
-        <p>
-            <a href="http://khronos.org/">
-                <img alt=Khronos height=60 src="../../../resources/KhronosGroup-3D.png" width=220>
-            </a>
-        </p>
+    <div class="head">
+        <div class="left">
+            <p>
+                <a href="http://webgl.org/">
+                    <img alt="WebGL" width="240" height="100" src="../../../resources/WebGL-Logo.png"/>
+                </a>
+            </p>
+        </div>
+        <div class="right">
+            <p>
+                <a href="http://khronos.org/">
+                    <img alt=Khronos height=60 src="../../../resources/KhronosGroup-3D.png" width=220>
+                </a>
+            </p>
+        </div>
     </div>
-    <div class=head>
-        <p>
-            <a href="http://webgl.org/">
-                <img alt=WebGL height=72 src="../../../resources/WebGL-Logo.png" width=156>
-            </a>
-        </p>
-    </div>
+    <div style="clear: both;"></div>
     <!--end-logo-->
 
     <h1>WebGL Specification</h1>
@@ -463,13 +466,12 @@ gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
         textures, buffers (i.e., VBOs), framebuffers, renderbuffers, shaders and
         programs. The WebGLRenderingContext interface has a method to create a
         WebGLObject subclass for each type. Data from the underlying graphics library are
-        stored in these objects and are fully managed by them. The resources represented
-        by these objects are guaranteed to exist as long as the object exists.
-        Furthermore, the DOM object is guaranteed to exist as long as the author has an explicit
-        valid reference to it <b>or</b> as long as it is bound by the underlying graphics library.
-        When none of these conditions exist the user agent can, at any point, delete the object
-        using the equivalent of a delete call (e.g., deleteTexture). If authors wish to control
-        when the underlying resource is released then the delete call can be made explicitly.
+        stored in these objects and are fully managed by them.
+        The DOM object will stay alive not only as long as the author retains an explicit reference
+        to it, but also as long as it is in use by the underlying graphics library.
+        When the DOM object is destroyed, it marks its resources for deletion.
+        If authors wish to mark an object for deletion prior to the DOM object being destroyed,
+        they may explicitly call the respective delete function. (e.g. deleteTexture)
     </p>
 
 <!-- ======================================================================================================= -->
@@ -910,7 +912,7 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGenBuffers.xml">man page</a>)</span>
         , bound as if by calling glBindBuffer
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBindBuffer.xml">man page</a>)</span>
-        and destroyed as if by calling glDeleteBuffers
+        and marked for deletion as if by calling glDeleteBuffers
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteBuffers.xml">man page</a>)</span>
         .
     </p>
@@ -927,7 +929,7 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.1">OpenGL ES 2.0 &sect;4.4.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGenFramebuffers.xml">man page</a>)</span>
         , bound as if by calling glBindFramebuffer
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.1">OpenGL ES 2.0 &sect;4.4.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBindFramebuffer.xml">man page</a>)</span>
-        and destroyed as if by calling glDeleteFramebuffers
+        and marked for deletion as if by calling glDeleteFramebuffers
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.1">OpenGL ES 2.0 &sect;4.4.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteFramebuffers.xml">man page</a>)</span>
         .
     </p>
@@ -944,7 +946,7 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glCreateProgram.xml">man page</a>)</span>
         , used as if by calling glUseProgram
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glUseProgram.xml">man page</a>)</span>
-        and destroyed as if by calling glDeleteProgram
+        and marked for deletion as if by calling glDeleteProgram
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteProgram.xml">man page</a>)</span>
         .
     </p>
@@ -961,7 +963,7 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.3">OpenGL ES 2.0 &sect;4.4.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGenRenderbuffers.xml">man page</a>)</span>
         , bound as if by calling glBindRenderbuffer
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.3">OpenGL ES 2.0 &sect;4.4.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBindRenderbuffer.xml">man page</a>)</span>
-        and destroyed as if by calling glDeleteRenderbuffers
+        and marked for deletion as if by calling glDeleteRenderbuffers
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.3">OpenGL ES 2.0 &sect;4.4.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteRenderbuffers.xml">man page</a>)</span>
         .
     </p>
@@ -978,7 +980,7 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.1">OpenGL ES 2.0 &sect;2.10.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glCreateShader.xml">man page</a>)</span>
         , attached to a Program as if by calling glAttachShader
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glAttachShader.xml">man page</a>)</span>
-        and destroyed as if by calling glDeleteShader
+        and marked for deletion as if by calling glDeleteShader
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.1">OpenGL ES 2.0 &sect;2.10.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteShader.xml">man page</a>)</span>
         .
     </p>
@@ -995,7 +997,7 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.13">OpenGL ES 2.0 &sect;3.7.13</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGenTextures.xml">man page</a>)</span>
         , bound as if by calling glBindTexture
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.13">OpenGL ES 2.0 &sect;3.7.13</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBindTexture.xml">man page</a>)</span>
-        and destroyed as if by calling glDeleteTextures
+        and marked for deletion as if by calling glDeleteTextures
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.13">OpenGL ES 2.0 &sect;3.7.13</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteTextures.xml">man page</a>)</span>
         .
     </p>
@@ -1229,15 +1231,14 @@ for (var i = 0; i < numVertices; i++) {
     See <a href="#CONTEXT_LOST">the context lost event</a> for further details.
     </p>
     <pre class="idl">
-typedef (ArrayBuffer or ArrayBufferView) BufferDataSource;
 typedef (ImageBitmap or
          ImageData or
          HTMLImageElement or
          HTMLCanvasElement or
          HTMLVideoElement) TexImageSource;
 
-typedef (Float32Array or sequence<GLfloat>) Float32List;
-typedef (Int32Array or sequence<GLint>) Int32List;
+typedef ([AllowShared] Float32Array or sequence&lt;GLfloat&gt;) Float32List;
+typedef ([AllowShared] Int32Array or sequence&lt;GLint&gt;) Int32List;
 
 [NoInterfaceObject]
 interface <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</dfn>
@@ -1617,7 +1618,6 @@ interface <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</dfn>
     const GLenum RGB5_A1                        = 0x8057;
     const GLenum RGB565                         = 0x8D62;
     const GLenum DEPTH_COMPONENT16              = 0x81A5;
-    const GLenum STENCIL_INDEX                  = 0x1901;
     const GLenum STENCIL_INDEX8                 = 0x8D48;
     const GLenum DEPTH_STENCIL                  = 0x84F9;
 
@@ -1687,9 +1687,8 @@ interface <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</dfn>
                            GLenum srcAlpha, GLenum dstAlpha);
 
     void bufferData(GLenum target, GLsizeiptr size, GLenum usage);
-    void bufferData(GLenum target, ArrayBuffer? data, GLenum usage);
-    void bufferData(GLenum target, ArrayBufferView data, GLenum usage);
-    void bufferSubData(GLenum target, GLintptr offset, BufferDataSource data);
+    void bufferData(GLenum target, [AllowShared] BufferSource? data, GLenum usage);
+    void bufferSubData(GLenum target, GLintptr offset, [AllowShared] BufferSource data);
 
     [WebGLHandlesContextLoss] GLenum checkFramebufferStatus(GLenum target);
     void clear(GLbitfield mask);
@@ -1701,11 +1700,11 @@ interface <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</dfn>
 
     void compressedTexImage2D(GLenum target, GLint level, GLenum internalformat,
                               GLsizei width, GLsizei height, GLint border,
-                              ArrayBufferView data);
+                              [AllowShared] ArrayBufferView data);
     void compressedTexSubImage2D(GLenum target, GLint level,
                                  GLint xoffset, GLint yoffset,
                                  GLsizei width, GLsizei height, GLenum format,
-                                 ArrayBufferView data);
+                                 [AllowShared] ArrayBufferView data);
 
     void copyTexImage2D(GLenum target, GLint level, GLenum internalformat,
                         GLint x, GLint y, GLsizei width, GLsizei height,
@@ -1797,7 +1796,7 @@ interface <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</dfn>
     void polygonOffset(GLfloat factor, GLfloat units);
 
     void readPixels(GLint x, GLint y, GLsizei width, GLsizei height,
-                    GLenum format, GLenum type, ArrayBufferView? pixels);
+                    GLenum format, GLenum type, [AllowShared] ArrayBufferView? pixels);
 
     void renderbufferStorage(GLenum target, GLenum internalformat,
                              GLsizei width, GLsizei height);
@@ -1815,7 +1814,7 @@ interface <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</dfn>
 
     void texImage2D(GLenum target, GLint level, GLint internalformat,
                     GLsizei width, GLsizei height, GLint border, GLenum format,
-                    GLenum type, ArrayBufferView? pixels);
+                    GLenum type, [AllowShared] ArrayBufferView? pixels);
     void texImage2D(GLenum target, GLint level, GLint internalformat,
                     GLenum format, GLenum type, TexImageSource source); // May throw DOMException
 
@@ -1824,7 +1823,7 @@ interface <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</dfn>
 
     void texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
                        GLsizei width, GLsizei height,
-                       GLenum format, GLenum type, ArrayBufferView? pixels);
+                       GLenum format, GLenum type, [AllowShared] ArrayBufferView? pixels);
     void texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
                        GLenum format, GLenum type, TexImageSource source); // May throw DOMException
 
@@ -2054,7 +2053,9 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
                 <tr><td>RED_BITS</td><td>GLint</td></tr>
                 <tr><td>RENDERBUFFER_BINDING</td><td>WebGLRenderbuffer</td></tr>
                 <tr><td>RENDERER</td><td>DOMString</td></tr>
+                <tr><td>SAMPLE_ALPHA_TO_COVERAGE</td><td>GLboolean</td></tr>
                 <tr><td>SAMPLE_BUFFERS</td><td>GLint</td></tr>
+                <tr><td>SAMPLE_COVERAGE</td><td>GLboolean</td></tr>
                 <tr><td>SAMPLE_COVERAGE_INVERT</td><td>GLboolean</td></tr>
                 <tr><td>SAMPLE_COVERAGE_VALUE</td><td>GLfloat</td></tr>
                 <tr><td>SAMPLES</td><td>GLint</td></tr>
@@ -2120,6 +2121,9 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
         <dt class="idl-code">[WebGLHandlesContextLoss] GLboolean isEnabled(GLenum cap)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.1">OpenGL ES 2.0 &sect;6.1.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glIsEnabled.xml">man page</a>)</span>
         <dd>
+            For any <code>isEnabled</code> query, the same boolean value can be obtained via
+            <code>getParameter</code>.
+            <br><br>
             Returns false if the context's <a href="#webgl-context-lost-flag">webgl context lost
             flag</a> is set.
         <dt class="idl-code">void lineWidth(GLfloat width)
@@ -2206,7 +2210,8 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
             bound to this target is unbound. A given WebGLBuffer object may only be bound to one of
             the ARRAY_BUFFER or ELEMENT_ARRAY_BUFFER target in its lifetime. An attempt to bind a
             buffer object to the other target will generate an <code>INVALID_OPERATION</code> error, and the
-            current binding will remain untouched. An attempt to bind a deleted buffer will generate an
+            current binding will remain untouched.
+            An attempt to bind an object marked for deletion will generate an
             <code>INVALID_OPERATION</code> error, and the current binding will remain untouched.
 
         <dt class="idl-code">void bufferData(GLenum target, GLsizeiptr size, GLenum usage)
@@ -2215,16 +2220,14 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
             Set the size of the currently bound WebGLBuffer object for the passed target. The
             buffer is initialized to 0.
 
-        <dt><p class="idl-code">void bufferData(GLenum target, ArrayBuffer? data, GLenum usage)
-            <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBufferData.xml">man page</a>)</span></p>
-            <p class="idl-code">void bufferData(GLenum target, ArrayBufferView data, GLenum usage)
-            <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBufferData.xml">man page</a>)</span></p>
+        <dt class="idl-code">void bufferData(GLenum target, [AllowShared] BufferSource? data, GLenum usage)
+            <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBufferData.xml">man page</a>)</span>
         <dd>
             Set the size of the currently bound WebGLBuffer object for the passed target to the
             size of the passed data, then write the contents of data to the buffer object.
             <br><br>
             If the passed data is null then an <code>INVALID_VALUE</code> error is generated.
-        <dt><p class="idl-code">void bufferSubData(GLenum target, GLintptr offset, BufferDataSource data)
+        <dt><p class="idl-code">void bufferSubData(GLenum target, GLintptr offset, [AllowShared] BufferSource data)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBufferSubData.xml">man page</a>)</span></p>
         <dd>
             For the WebGLBuffer object bound to the passed target write the passed data starting at
@@ -2241,11 +2244,11 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
         <dt class="idl-code">void deleteBuffer(WebGLBuffer? buffer)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteBuffers.xml">glDeleteBuffers</a>)</span>
         <dd>
-            Delete the buffer object contained in the passed WebGLBuffer as if by calling
-            glDeleteBuffers. If the buffer has already been deleted the call has no effect.
-            Note that the buffer object will be deleted when the WebGLBuffer object is destroyed.
-            This method merely gives the author greater control over when the buffer object is
-            destroyed.
+            Mark for deletion the buffer object contained in the passed WebGLBuffer, as if by
+            calling glDeleteBuffers.
+            If the object has already been marked for deletion, the call has no effect. Note that
+            underlying GL object will be automatically marked for deletion when the JS object is
+            destroyed, however this method allows authors to mark an object for deletion early.
 
         <dt class="idl-code">any getBufferParameter(GLenum target, GLenum pname)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.3">OpenGL ES 2.0 &sect;6.1.3</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetBufferParameteriv.xml">glGetBufferParameteriv</a>)</span>
@@ -2286,9 +2289,9 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
             (<code class="param">target</code>), which must be <code class="enum">FRAMEBUFFER</code>.
             If <code class="param">framebuffer</code> is null, the default framebuffer provided by the context
             is bound and attempts to modify or query state on <code class="param">target</code> <code class="enum">FRAMEBUFFER</code>
-            will generate an <code class="error">INVALID_OPERATION</code> error. An attempt to bind a deleted framebuffer will generate an
+            will generate an <code class="error">INVALID_OPERATION</code> error.
+            An attempt to bind an object marked for deletion will generate an
             <code>INVALID_OPERATION</code> error, and the current binding will remain untouched.
-
 
         <dt class="idl-code"><a name="CHECK_FRAMEBUFFER_STATUS">[WebGLHandlesContextLoss] GLenum checkFramebufferStatus</a>(GLenum target)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.5">OpenGL ES 2.0 &sect;4.4.5</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glCheckFramebufferStatus.xml">man page</a>)</span>
@@ -2305,11 +2308,11 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
         <dt class="idl-code">void deleteFramebuffer(WebGLFramebuffer? buffer)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.1">OpenGL ES 2.0 &sect;4.4.1</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteFramebuffers.xml">glDeleteFramebuffers</a>)</span>
         <dd>
-            Delete the framebuffer object contained in the passed WebGLFramebuffer as if by calling
-            glDeleteFramebuffers. If the framebuffer has already been deleted the call has no effect.
-            Note that the framebuffer object will be deleted when the WebGLFramebuffer object is destroyed.
-            This method merely gives the author greater control over when the framebuffer object is
-            destroyed.
+            Mark for deletion the framebuffer object contained in the passed WebGLFramebuffer, as if
+            by calling glDeleteFramebuffers.
+            If the object has already been marked for deletion, the call has no effect. Note that
+            underlying GL object will be automatically marked for deletion when the JS object is
+            destroyed, however this method allows authors to mark an object for deletion early.
 
         <dt class="idl-code">void framebufferRenderbuffer(GLenum target, GLenum attachment,
                                  GLenum renderbuffertarget,
@@ -2358,8 +2361,9 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
             Bind the given <code class="interface">WebGLRenderbuffer</code> object to the given binding point
             (<code class="param">target</code>), which must be <code class="enum">RENDERBUFFER</code>.
             If <code class="param">renderbuffer</code> is null the renderbuffer object currently bound to
-            this <code class="param">target</code> is unbound. An attempt to bind a deleted renderbuffer will
-            generate an <code>INVALID_OPERATION</code> error, and the current binding will remain untouched.
+            this <code class="param">target</code> is unbound.
+            An attempt to bind an object marked for deletion will generate an
+            <code>INVALID_OPERATION</code> error, and the current binding will remain untouched.
 
         <dt class="idl-code">WebGLRenderbuffer? createRenderbuffer()
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.3">OpenGL ES 2.0 &sect;4.4.3</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGenRenderbuffers.xml">glGenRenderbuffers</a>)</span>
@@ -2370,11 +2374,12 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
         <dt class="idl-code">void deleteRenderbuffer(WebGLRenderbuffer? renderbuffer)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.3">OpenGL ES 2.0 &sect;4.4.3</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteRenderbuffers.xml">glDeleteRenderbuffers</a>)</span>
         <dd>
-            Delete the renderbuffer object contained in the passed WebGLRenderbuffer as if by calling
-            glDeleteRenderbuffers. If the renderbuffer has already been deleted the call has no effect.
-            Note that the renderbuffer object will be deleted when the WebGLRenderbuffer object is destroyed.
-            This method merely gives the author greater control over when the renderbuffer object is
-            destroyed.
+            Mark for deletion the renderbuffer object contained in the passed WebGLRenderbuffer, as
+            if by calling glDeleteRenderbuffers.
+            If the object has already been marked for deletion, the call has no effect. Note that
+            underlying GL object will be automatically marked for deletion when the JS object is
+            destroyed, however this method allows authors to mark an object for deletion early.
+
         <dt class="idl-code">any getRenderbufferParameter(GLenum target, GLenum pname)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.3">OpenGL ES 2.0 &sect;6.1.3</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetRenderbufferParameteriv.xml">glGetRenderbufferParameteriv</a>)</span>
         <dd>
@@ -2420,14 +2425,14 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
         <dt class="idl-code">void bindTexture(GLenum target, WebGLTexture? texture)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.13">OpenGL ES 2.0 &sect;3.7.13</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBindTexture.xml">man page</a>)</span>
         <dd>
-            An attempt to bind a deleted texture will generate an <code>INVALID_OPERATION</code> error, and
-            the current binding will remain untouched.
+            An attempt to bind an object marked for deletion will generate an
+            <code>INVALID_OPERATION</code> error, and the current binding will remain untouched.
 
         <dt><p class="idl-code"><a name="COMPRESSEDTEXIMAGE2D">void compressedTexImage2D</a>(GLenum target, GLint level, GLenum internalformat,
-                    GLsizei width, GLsizei height, GLint border, ArrayBufferView pixels)
+                    GLsizei width, GLsizei height, GLint border, [AllowShared] ArrayBufferView pixels)
                 <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.3">OpenGL ES 2.0 &sect;3.7.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glCompressedTexImage2D.xml">man page</a>)</span></p>
             <p class="idl-code"><a name="COMPRESSEDTEXSUBIMAGE2D">void compressedTexSubImage2D</a>(GLenum target, GLint level,
-                    GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, ArrayBufferView pixels)
+                    GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, [AllowShared] ArrayBufferView pixels)
                 <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.3">OpenGL ES 2.0 &sect;3.7.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glCompressedTexSubImage2D.xml">man page</a>)</span></p>
         <dd>
             If an attempt is made to call these functions with no WebGLTexture bound (see above), an
@@ -2474,11 +2479,12 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
         <dt class="idl-code">void deleteTexture(WebGLTexture? texture)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.13">OpenGL ES 2.0 &sect;3.7.13</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteTextures.xml">man page</a>)</span>
         <dd>
-            Delete the texture object contained in the passed WebGLTexture as if by calling
-            glDeleteTextures. If the texture has already been deleted the call has no effect.
-            Note that the texture object will be deleted when the WebGLTexture object is destroyed.
-            This method merely gives the author greater control over when the texture object is
-            destroyed.
+            Mark for deletion the texture object contained in the passed WebGLTexture, as if by
+            calling glDeleteTextures.
+            If the object has already been marked for deletion, the call has no effect. Note that
+            underlying GL object will be automatically marked for deletion when the JS object is
+            destroyed, however this method allows authors to mark an object for deletion early.
+
         <dt class="idl-code">void generateMipmap(GLenum target)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.11">OpenGL ES 2.0 &sect;3.7.11</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGenerateMipmap.xml">man page</a>)</span>
         <dd>
@@ -2509,7 +2515,7 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
             flag</a> is set.
         <dt class="idl-code"><a name="TEXIMAGE2D">void texImage2D</a>(GLenum target, GLint level, GLint internalformat,
                     GLsizei width, GLsizei height, GLint border, GLenum format,
-                    GLenum type, ArrayBufferView? pixels)
+                    GLenum type, [AllowShared] ArrayBufferView? pixels)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.1">OpenGL ES 2.0 &sect;3.7.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glTexImage2D.xml">man page</a>)</span>
         <dd>
             If <code>pixels</code> is null, a buffer of sufficient size initialized to 0 is
@@ -2605,7 +2611,7 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
             <code>INVALID_OPERATION</code> error is generated.
         <dt class="idl-code"><a name="TEXSUBIMAGE2D">void texSubImage2D</a>(GLenum target, GLint level, GLint xoffset, GLint yoffset,
                        GLsizei width, GLsizei height,
-                       GLenum format, GLenum type, ArrayBufferView? pixels)
+                       GLenum format, GLenum type, [AllowShared] ArrayBufferView? pixels)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.2">OpenGL ES 2.0 &sect;3.7.2</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glTexSubImage2D.xml">man page</a>)</span>
         <dd>
             See <a href="#TEXIMAGE2D">texImage2D</a> for restrictions on the <em>format</em>
@@ -2722,19 +2728,21 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
         <dt class="idl-code">void deleteProgram(WebGLProgram? program)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteProgram.xml">man page</a>)</span>
         <dd>
-            Delete the program object contained in the passed WebGLProgram as if by calling
-            glDeleteProgram. If the program has already been deleted the call has no effect.
-            Note that the program object will be deleted when the WebGLProgram object is destroyed.
-            This method merely gives the author greater control over when the program object is
-            destroyed.
+            Mark for deletion the program object contained in the passed WebGLProgram, as if by
+            calling glDeleteProgram.
+            If the object has already been marked for deletion, the call has no effect. Note that
+            underlying GL object will be automatically marked for deletion when the JS object is
+            destroyed, however this method allows authors to mark an object for deletion early.
+
         <dt class="idl-code">void deleteShader(WebGLShader? shader)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.1">OpenGL ES 2.0 &sect;2.10.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteShader.xml">man page</a>)</span>
         <dd>
-            Delete the shader object contained in the passed WebGLShader as if by calling
-            glDeleteShader. If the shader has already been deleted the call has no effect.
-            Note that the shader object will be deleted when the WebGLShader object is destroyed.
-            This method merely gives the author greater control over when the shader object is
-            destroyed.
+            Mark for deletion the shader object contained in the passed WebGLShader, as if by
+            calling glDeleteShader.
+            If the object has already been marked for deletion, the call has no effect. Note that
+            underlying GL object will be automatically marked for deletion when the JS object is
+            destroyed, however this method allows authors to mark an object for deletion early.
+
         <dt class="idl-code">void detachShader(WebGLProgram program, WebGLShader shader)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDetachShader.xml">man page</a>)</span>
         <dt class="idl-code">sequence&lt;WebGLShader&gt;? getAttachedShaders(WebGLProgram program)
@@ -3043,10 +3051,11 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
         <dd>
             Draw using the currently bound element array buffer.  The given offset is in bytes, and
             must be a valid multiple of the size of the given type or an <code>INVALID_OPERATION</code>
-            error will be generated; see <a href="#BUFFER_OFFSET_AND_STRIDE">Buffer Offset and Stride
-            Requirements</a>. If <code>count</code> is greater than zero, then a non-null
-            <code>WebGLBuffer</code> must be bound to the <code>ELEMENT_ARRAY_BUFFER</code> binding
-            point or an <code>INVALID_OPERATION</code> error will be generated.<br><br>
+            error will be generated; in addition the offset must be non-negative or an
+            <code>INVALID_VALUE</code> error will be generated; see <a href="#BUFFER_OFFSET_AND_STRIDE">
+            Buffer Offset and Stride Requirements</a>. If <code>count</code> is greater than zero,
+            then a non-null <code>WebGLBuffer</code> must be bound to the <code>ELEMENT_ARRAY_BUFFER</code>
+            binding point or an <code>INVALID_OPERATION</code> error will be generated.<br><br>
             If the CURRENT_PROGRAM is null, an <code>INVALID_OPERATION</code> error will be generated.
 
             WebGL performs additional error checking beyond that specified in OpenGL ES 2.0 during
@@ -3069,7 +3078,7 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
 
     <dl class="methods">
         <dt class="idl-code">void readPixels(GLint x, GLint y, GLsizei width, GLsizei height,
-                           GLenum format, GLenum type, ArrayBufferView? pixels)
+                           GLenum format, GLenum type, [AllowShared] ArrayBufferView? pixels)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.3.1">OpenGL ES 2.0 &sect;4.3.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glReadPixels.xml">man page</a>)</span>
         <dd>
             Fills <code>pixels</code> with the pixel data in the specified rectangle of the frame
@@ -3477,6 +3486,22 @@ bound in order for texture-related operations and queries to succeed.
 
 </p>
 
+    <h3>No Shader Binaries</h3>
+
+<p>
+
+Accessing binary representations of compiled shaders is not supported in the WebGL API. This
+includes the OpenGL ES 2.0 <code>ShaderBinary</code> entry point. In addition, querying shader
+binary formats and the availability of a shader compiler via <code>getParameter</code> is not
+supported in the WebGL API.
+
+</p>
+<p>
+
+All WebGL implementations must implicitly support an on-line shader compiler.
+
+</p>
+
     <h3><a name="BUFFER_OFFSET_AND_STRIDE">Buffer Offset and Stride Requirements</a></h3>
 
 <p>
@@ -3499,6 +3524,13 @@ size of the data type passed to the call, or an <code>INVALID_OPERATION</code> e
         <code>N</code>."
     </p>
 </div>
+
+<p>
+
+In addition the <code>offset</code> argument to <code>drawElements</code> must be non-negative or
+an <code>INVALID_VALUE</code> error is generated.
+
+</p>
 
     <h3><a name="ATTRIBS_AND_RANGE_CHECKING">Enabled Vertex Attributes and Range Checking</a></h3>
 
@@ -3949,8 +3981,8 @@ extensions.
     initializer expressions, which are defined as one of:
 </p>
 <ul>
-<li>a literal value</li>
-<li>a global variable</li>
+<li>a constant expression</li>
+<li>a user-defined global variable</li>
 <li>a uniform</li>
 <li>
     an expression formed by an operator on operands that are global initializer expressions,
@@ -3969,6 +4001,7 @@ extensions.
 <ul>
 <li>User-defined functions</li>
 <li>Attributes and varyings</li>
+<li>Built-in variables with the exception of constant expressions</li>
 <li>Global variables as l-values in an assignment or other operation</li>
 </ul>
 
@@ -4061,11 +4094,19 @@ extensions.
     the values of the fragment colors following shader execution are untouched.
 </p>
 
+<h3>Initial values for GLSL local and global variables</h3>
+
+<p>
+    The GLSL ES <a href="#refsGLES20GLSL">[GLES20GLSL]</a> spec leaves the value of
+    local and global variables as undefined unless they are initialized by the
+    shader. WebGL guarantees that such variables are initialized to zero:
+    <code>0.0</code>, <code>vec4(0.0)</code>, <code>0</code>, <code>false</code>, etc.
+</p>
+
 <!-- ======================================================================================================= -->
 
     <h2>References</h2>
 
-    <h3>Normative references</h3>
     <dl>
 
         <dt id="refsCANVAS">[CANVAS]</dt>
@@ -4090,7 +4131,7 @@ extensions.
             A. Munshi, J. Leech, November 2010.
         </dd>
         <dt id="refsGLES20GLSL">[GLES20GLSL]</dt>
-        <dd><cite><a href="http://www.khronos.org/registry/gles/specs/2.0/GLSL_ES_Specification_1.0.17.pdf">
+        <dd><cite><a href="https://www.khronos.org/registry/OpenGL/specs/es/2.0/GLSL_ES_Specification_1.00.pdf">
             The OpenGL&reg; ES Shading Language Version 1.00</a></cite>,
             R. Simpson, May 2009.
         </dd>
@@ -4129,9 +4170,9 @@ extensions.
             I. Hickson, June 2011.
         </dd>
         <dt id="refsWEBIDL">[WEBIDL]</dt>
-        <dd><cite><a href="http://dev.w3.org/2006/webapi/WebIDL/">
+        <dd><cite><a href="https://heycam.github.io/webidl/">
             Web IDL: W3C Editor’s Draft</a></cite>,
-            C. McCormack.
+            C. McCormack, B. Zbarsky, T. Langel.
         </dd>
         <dt id="refsASCII">[ASCII]</dt>
         <dd><cite>International Standard ISO/IEC 646:1991. Information technology -
@@ -4148,8 +4189,6 @@ extensions.
             Leech, J. and Daniell, P., August, 2014.
         </dd>
     </dl>
-
-    <h3>Other references</h3>
 
 <!-- ======================================================================================================= -->
 

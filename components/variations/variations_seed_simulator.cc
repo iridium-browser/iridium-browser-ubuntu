@@ -9,6 +9,7 @@
 #include <map>
 
 #include "base/metrics/field_trial.h"
+#include "components/variations/client_filterable_state.h"
 #include "components/variations/processed_study.h"
 #include "components/variations/proto/study.pb.h"
 #include "components/variations/study_filtering.h"
@@ -43,7 +44,7 @@ std::string SimulateGroupAssignment(
   scoped_refptr<base::FieldTrial> trial(
       base::FieldTrial::CreateSimulatedFieldTrial(
           study.name(), processed_study.total_probability(),
-          study.default_experiment_name(), entropy_value));
+          processed_study.GetDefaultExperimentName(), entropy_value));
 
   for (int i = 0; i < study.experiment_size(); ++i) {
     const Study_Experiment& experiment = study.experiment(i);
@@ -114,19 +115,9 @@ VariationsSeedSimulator::~VariationsSeedSimulator() {
 
 VariationsSeedSimulator::Result VariationsSeedSimulator::SimulateSeedStudies(
     const VariationsSeed& seed,
-    const std::string& locale,
-    const base::Time& reference_date,
-    const base::Version& version,
-    Study_Channel channel,
-    Study_FormFactor form_factor,
-    const std::string& hardware_class,
-    const std::string& session_consistency_country,
-    const std::string& permanent_consistency_country) {
+    const ClientFilterableState& client_state) {
   std::vector<ProcessedStudy> filtered_studies;
-  FilterAndValidateStudies(seed, locale, reference_date, version, channel,
-                           form_factor, hardware_class,
-                           session_consistency_country,
-                           permanent_consistency_country, &filtered_studies);
+  FilterAndValidateStudies(seed, client_state, &filtered_studies);
 
   return ComputeDifferences(filtered_studies);
 }

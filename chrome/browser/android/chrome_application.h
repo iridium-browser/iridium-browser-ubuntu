@@ -9,10 +9,6 @@
 
 #include "base/macros.h"
 
-namespace content {
-class WebContents;
-}
-
 namespace chrome {
 namespace android {
 
@@ -20,21 +16,6 @@ namespace android {
 // provides functions to request browser side actions, such as opening a
 // settings page.
 class ChromeApplication {
- public:
-  static bool RegisterBindings(JNIEnv* env);
-
-  // Opens the autofill settings page.
-  static void ShowAutofillSettings();
-
-  // Opens the password settings page.
-  static void ShowPasswordSettings();
-
-  // Open the clear browsing data UI.
-  static void OpenClearBrowsingData(content::WebContents* web_contents);
-
-  // Determines whether parental controls are enabled.
-  static bool AreParentalControlsEnabled();
-
  private:
   ChromeApplication() {}
   ~ChromeApplication() {}

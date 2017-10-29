@@ -8,15 +8,22 @@
 #include <memory>
 
 #include "ash/ash_export.h"
-#include "ash/common/system/accessibility_observer.h"
+#include "ash/shell_observer.h"
+#include "ash/system/accessibility_observer.h"
 #include "base/macros.h"
+#include "base/scoped_observer.h"
 #include "ui/chromeos/touch_accessibility_enabler.h"
 #include "ui/chromeos/touch_exploration_controller.h"
 #include "ui/display/display_observer.h"
+#include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/wm/public/activation_change_observer.h"
 
 namespace chromeos {
 class CrasAudioHandler;
+}
+
+namespace keyboard {
+class KeyboardController;
 }
 
 namespace ash {
@@ -31,7 +38,9 @@ class ASH_EXPORT AshTouchExplorationManager
       public ui::TouchExplorationControllerDelegate,
       public ui::TouchAccessibilityEnablerDelegate,
       public display::DisplayObserver,
-      public aura::client::ActivationChangeObserver {
+      public ::wm::ActivationChangeObserver,
+      public keyboard::KeyboardControllerObserver,
+      public ShellObserver {
  public:
   explicit AshTouchExplorationManager(
       RootWindowController* root_window_controller);
@@ -55,12 +64,14 @@ class ASH_EXPORT AshTouchExplorationManager
                                uint32_t changed_metrics) override;
 
   // TouchAccessibilityEnablerDelegate overrides:
+  void OnTwoFingerTouchStart() override;
+  void OnTwoFingerTouchStop() override;
   void PlaySpokenFeedbackToggleCountdown(int tick_count) override;
   void ToggleSpokenFeedback() override;
 
-  // aura::client::ActivationChangeObserver overrides:
+  // wm::ActivationChangeObserver overrides:
   void OnWindowActivated(
-      aura::client::ActivationChangeObserver::ActivationReason reason,
+      ::wm::ActivationChangeObserver::ActivationReason reason,
       aura::Window* gained_active,
       aura::Window* lost_active) override;
 
@@ -69,6 +80,14 @@ class ASH_EXPORT AshTouchExplorationManager
   void SetTouchAccessibilityAnchorPoint(const gfx::Point& anchor_point);
 
  private:
+  // keyboard::KeyboardControllerObserver overrides:
+  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
+  void OnKeyboardClosed() override;
+
+  // ShellObserver overrides:
+  void OnVirtualKeyboardStateChanged(bool activated,
+                                     aura::Window* root_window) override;
+
   void UpdateTouchExplorationState();
   bool VolumeAdjustSoundEnabled();
 
@@ -76,6 +95,10 @@ class ASH_EXPORT AshTouchExplorationManager
   std::unique_ptr<ui::TouchAccessibilityEnabler> touch_accessibility_enabler_;
   RootWindowController* root_window_controller_;
   chromeos::CrasAudioHandler* audio_handler_;
+  const bool enable_chromevox_arc_support_;
+  ScopedObserver<keyboard::KeyboardController,
+                 keyboard::KeyboardControllerObserver>
+      keyboard_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(AshTouchExplorationManager);
 };

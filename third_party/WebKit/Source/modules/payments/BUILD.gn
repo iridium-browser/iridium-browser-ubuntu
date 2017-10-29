@@ -6,22 +6,34 @@ import("//third_party/WebKit/Source/modules/modules.gni")
 
 blink_modules_sources("payments") {
   sources = [
+    "AbortPaymentEvent.cpp",
+    "AbortPaymentEvent.h",
+    "CanMakePaymentEvent.cpp",
+    "CanMakePaymentEvent.h",
+    "CanMakePaymentRespondWithObserver.cpp",
+    "CanMakePaymentRespondWithObserver.h",
     "HTMLIFrameElementPayments.cpp",
     "HTMLIFrameElementPayments.h",
     "PaymentAddress.cpp",
     "PaymentAddress.h",
-    "PaymentAppManager.cpp",
-    "PaymentAppManager.h",
-    "PaymentAppRequestConversion.cpp",
-    "PaymentAppRequestConversion.h",
     "PaymentAppServiceWorkerGlobalScope.h",
     "PaymentAppServiceWorkerRegistration.cpp",
     "PaymentAppServiceWorkerRegistration.h",
     "PaymentCompleter.h",
+    "PaymentEventDataConversion.cpp",
+    "PaymentEventDataConversion.h",
+    "PaymentHandlerUtils.cpp",
+    "PaymentHandlerUtils.h",
+    "PaymentInstruments.cpp",
+    "PaymentInstruments.h",
+    "PaymentManager.cpp",
+    "PaymentManager.h",
     "PaymentRequest.cpp",
     "PaymentRequest.h",
     "PaymentRequestEvent.cpp",
     "PaymentRequestEvent.h",
+    "PaymentRequestRespondWithObserver.cpp",
+    "PaymentRequestRespondWithObserver.h",
     "PaymentRequestUpdateEvent.cpp",
     "PaymentRequestUpdateEvent.h",
     "PaymentResponse.cpp",
@@ -29,9 +41,5 @@ blink_modules_sources("payments") {
     "PaymentUpdater.h",
     "PaymentsValidators.cpp",
     "PaymentsValidators.h",
-  ]
-  deps = [
-    "//components/payments/content:payment_app_blink",
-    "//components/payments/content:payment_request_blink",
   ]
 }

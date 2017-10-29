@@ -30,20 +30,36 @@
 
 #include "modules/peerconnection/RTCCertificate.h"
 
-#include "wtf/PtrUtil.h"
+#include "platform/bindings/ToV8.h"
+#include "platform/bindings/V8Binding.h"
+#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
 RTCCertificate::RTCCertificate(std::unique_ptr<WebRTCCertificate> certificate)
-    : m_certificate(WTF::wrapUnique(certificate.release())) {}
+    : certificate_(WTF::WrapUnique(certificate.release())) {}
 
-std::unique_ptr<WebRTCCertificate> RTCCertificate::certificateShallowCopy()
+std::unique_ptr<WebRTCCertificate> RTCCertificate::CertificateShallowCopy()
     const {
-  return m_certificate->shallowCopy();
+  return certificate_->ShallowCopy();
 }
 
 DOMTimeStamp RTCCertificate::expires() const {
-  return static_cast<DOMTimeStamp>(m_certificate->expires());
+  return static_cast<DOMTimeStamp>(certificate_->Expires());
+}
+
+HeapVector<RTCDtlsFingerprint> RTCCertificate::getFingerprints() {
+  WebVector<WebRTCDtlsFingerprint> web_fingerprints =
+      certificate_->GetFingerprints();
+  DCHECK(!web_fingerprints.IsEmpty());
+  HeapVector<RTCDtlsFingerprint> fingerprints(web_fingerprints.size());
+  for (size_t i = 0; i < fingerprints.size(); ++i) {
+    DCHECK(!web_fingerprints[i].Algorithm().IsEmpty());
+    DCHECK(!web_fingerprints[i].Value().IsEmpty());
+    fingerprints[i].setAlgorithm(web_fingerprints[i].Algorithm());
+    fingerprints[i].setValue(web_fingerprints[i].Value());
+  }
+  return fingerprints;
 }
 
 }  // namespace blink

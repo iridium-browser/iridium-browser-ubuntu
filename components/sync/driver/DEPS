@@ -1,6 +1,7 @@
 include_rules = [
   "+components/data_use_measurement/core",
   "+components/invalidation",
+  "+components/keyed_service/core",
   "+components/os_crypt",
   "+components/policy",
   "+components/pref_registry",
@@ -15,9 +16,7 @@ include_rules = [
   "+components/sync/syncable",
   "+components/sync/test",
   "+components/sync_preferences",
-  "+components/version_info",
   "+google/cacheinvalidation",
-  "+google_apis",
   "+net",
   "+policy",
 ]

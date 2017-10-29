@@ -1,54 +1,54 @@
 vars = {
   'angle_revision':
-    '461d9a3060e315706c74d1203ed945a600a1a241',
+    '0d2ecb4ea992ee0b58c3730e826516c28c055882',
   'boringssl_git':
     'https://boringssl.googlesource.com',
   'boringssl_revision':
-    'be2ee342d3781ddb954f91f8a7e660c6f59e87e5',
+    '0e4a448ab8aa66a38593f68d19fa0a2e340833e4',
   'buildspec_platforms':
-    'all',
+    'win, linux64, mac64, win64',
   'buildtools_revision':
-    'b3771b1935ea74c388b6fb1750e83f5d83b39dec',
+    'd511e4d53d6fc8037badbdf4b225c137e94b52fb',
   'catapult_revision':
-    '7ef761733d291aabe77a456fe91083a966aa3caa',
+    'd8bc21bf34bf8b80c606fa21dc8de9caa2911f89',
   'chromium_git':
     'https://chromium.googlesource.com',
   'devtools_node_modules_revision':
     '6226d6cd80aaf2e5295ed460cf73ef6a582e4d78',
-  'freetype_android_revision':
-    '66725768cdf758cfb3f9abf03cbf5e5a77f42088',
+  'freetype_revision':
+    '38bdf22bfe68432aebdd33c198a0bd11b4ebb96f',
   'google_toolbox_for_mac_revision':
-    '038a2399b20e67ab17685e23ee873a66811fa107',
+    'ec72a2bc500a716369c383837bffdc7d2a22855b',
   'libfuzzer_revision':
-    '5bcbfc5bcc468328ac18b6ca42d603fc6c744a7d',
+    '16f5f743c188c836d32cdaf349d5d3effb8a3518',
+  'libprotobuf-mutator':
+    'b2c4fb59135711122b800376d8dc46af2fc9d060',
   'lighttpd_revision':
     '9dfa55d15937a688a92cbf2b7a8621b0927d06eb',
   'lss_revision':
-    '3f6478ac95edf86cd3da300c2c0d34a438f5dbeb',
+    '63f24c8221a229f677d26ebe8f3d1528a9d787ac',
   'nacl_revision':
-    'c948e9b82582e695d16ee6696a484f82239a86d7',
+    '01a28a6069a98718184e31c10c5880496a1a9d95',
   'openmax_dl_revision':
     '7acede9c039ea5d14cf326f44aad1245b9e674a7',
   'pdfium_git':
     'https://pdfium.googlesource.com',
   'pdfium_revision':
-    '2079dce2ca47f3866f1dd5d51849c53362727f7b',
-  'scanbuild_revision':
-    '15bd7ca2934162c51654ddffc52933e45f95e7ef',
+    '3f753f20e9c51f7170a616a355b3f9578505c0ee',
   'sfntly_revision':
-    '64f78562d2003eb7cacaaa86a398cbd41881ba6f',
+    '2439bd08ff93d4dce761dd6b825917938bd35a4f',
   'skia_git':
     'https://skia.googlesource.com',
   'skia_revision':
-    '9c10df3b60f4a7d50c1070a5d8c4aaadb79ba9b7',
+    'af1813e3bf617edc663bef2e5bb07d3f5eb4da2e',
   'swarming_revision':
-    '11e31afa5d330756ff87aa12064bb5d032896cb5',
+    'a56c2b39ca23bdf41458421a7f825ddbf3f43f28',
   'swiftshader_git':
     'https://swiftshader.googlesource.com',
   'swiftshader_revision':
-    '91da6b00584afd7dcaed66da88e2b617429b3950',
+    '010a464878f32daed863edee3fc6ad21920d605b',
   'v8_revision':
-    'c9b4087f4a00632b7133c491addac7272d45cbef'
+    '1bf2e10ddb194d4c2871a87a4732613419de892d'
 }
 
 allowed_hosts = [
@@ -62,75 +62,79 @@ allowed_hosts = [
 
 deps = {
   'src/breakpad/src':
-    (Var("chromium_git")) + '/breakpad/breakpad/src.git@32f4ba2a1f6c23343870ee4a852df67d900dafe4',
+    (Var("chromium_git")) + '/breakpad/breakpad/src.git@7a65a47345a86c9e9a3fbc2e92a756a429a0c82f',
   'src/buildtools':
-    (Var("chromium_git")) + '/chromium/buildtools.git@b3771b1935ea74c388b6fb1750e83f5d83b39dec',
+    (Var("chromium_git")) + '/chromium/buildtools.git@d511e4d53d6fc8037badbdf4b225c137e94b52fb',
   'src/chrome/test/data/perf/canvas_bench':
     (Var("chromium_git")) + '/chromium/canvas_bench.git@a7b40ea5ae0239517d78845a5fc9b12976bfc732',
   'src/chrome/test/data/perf/frame_rate/content':
     (Var("chromium_git")) + '/chromium/frame_rate/content.git@c10272c88463efeef6bb19c9ec07c42bc8fe22b9',
   'src/media/cdm/api':
-    (Var("chromium_git")) + '/chromium/cdm.git@46eebfa522b06c1f0b52b4233caa56793badf112',
+    (Var("chromium_git")) + '/chromium/cdm.git@6e4c388c0117fe408b66fbede91081fb1018c5fe',
   'src/native_client':
-    (Var("chromium_git")) + '/native_client/src/native_client.git@c948e9b82582e695d16ee6696a484f82239a86d7',
+    (Var("chromium_git")) + '/native_client/src/native_client.git@01a28a6069a98718184e31c10c5880496a1a9d95',
   'src/sdch/open-vcdiff':
     (Var("chromium_git")) + '/external/github.com/google/open-vcdiff.git@2b9bd1fe548520e9355e457a134bab7e2f9c56c0',
-  'src/testing/gmock':
-    (Var("chromium_git")) + '/external/googlemock.git@0421b6f358139f02e102c9c332ce19a33faf75be',
-  'src/testing/gtest':
-    (Var("chromium_git")) + '/external/github.com/google/googletest.git@6f8a66431cb592dad629028a50b3dd418a408c87',
   'src/third_party/SPIRV-Tools/src':
     (Var("chromium_git")) + '/external/github.com/KhronosGroup/SPIRV-Tools.git@9166854ac93ef81b026e943ccd230fed6c8b8d3c',
   'src/third_party/angle':
-    (Var("chromium_git")) + '/angle/angle.git@461d9a3060e315706c74d1203ed945a600a1a241',
+    (Var("chromium_git")) + '/angle/angle.git@0d2ecb4ea992ee0b58c3730e826516c28c055882',
   'src/third_party/bidichecker':
     (Var("chromium_git")) + '/external/bidichecker/lib.git@97f2aa645b74c28c57eca56992235c79850fa9e0',
   'src/third_party/boringssl/src':
-    (Var("boringssl_git")) + '/boringssl.git@be2ee342d3781ddb954f91f8a7e660c6f59e87e5',
+    (Var("boringssl_git")) + '/boringssl.git@0e4a448ab8aa66a38593f68d19fa0a2e340833e4',
   'src/third_party/catapult':
-    (Var("chromium_git")) + '/external/github.com/catapult-project/catapult.git@7ef761733d291aabe77a456fe91083a966aa3caa',
+    (Var("chromium_git")) + '/external/github.com/catapult-project/catapult.git@d8bc21bf34bf8b80c606fa21dc8de9caa2911f89',
   'src/third_party/ced/src':
-    (Var("chromium_git")) + '/external/github.com/google/compact_enc_det.git@368a9cc09ad868a3d28f0b5ad4a733f263c46409',
+    (Var("chromium_git")) + '/external/github.com/google/compact_enc_det.git@910cca22d881b02cbc8950fa02ccbcdcfb782456',
   'src/third_party/cld_2/src':
     (Var("chromium_git")) + '/external/github.com/CLD2Owners/cld2.git@84b58a5d7690ebf05a91406f371ce00c3daf31c0',
   'src/third_party/cld_3/src':
     (Var("chromium_git")) + '/external/github.com/google/cld_3.git@ae02d6b8a2af41e87c956c7c7d3f651a8b7b9e79',
   'src/third_party/colorama/src':
     (Var("chromium_git")) + '/external/colorama.git@799604a1041e9b3bc5d2789ecbd7e8db2e18e6b8',
+  'src/third_party/depot_tools':
+    (Var("chromium_git")) + '/chromium/tools/depot_tools.git@6d0d04458d9c345bc7d77681996d89d6e5fc742c',
   'src/third_party/dom_distiller_js/dist':
-    (Var("chromium_git")) + '/external/github.com/chromium/dom-distiller-dist.git@cfd68cb97b3050fd35f53c5231128f723d6dae08',
+    (Var("chromium_git")) + '/external/github.com/chromium/dom-distiller-dist.git@232c293a4d3ebcbc4320f642af017ee054b3be93',
   'src/third_party/ffmpeg':
-    (Var("chromium_git")) + '/chromium/third_party/ffmpeg.git@3f3ad2ea90df08f5907bd997e1ce22e1c19ce215',
+    (Var("chromium_git")) + '/chromium/third_party/ffmpeg.git@dbbdb1680bd8e77ea72f8e5a79a09101bd7a9bdd',
   'src/third_party/flac':
-    (Var("chromium_git")) + '/chromium/deps/flac.git@d0c35f878ec26f969c1631350b1d36fbd88ad8bb',
+    (Var("chromium_git")) + '/chromium/deps/flac.git@7d0f5b3a173ffe98db08057d1f52b7787569e0a6',
   'src/third_party/flatbuffers/src':
-    (Var("chromium_git")) + '/external/github.com/google/flatbuffers.git@e92ae5199d52fd59540a800bec7eef46cd778257',
+    (Var("chromium_git")) + '/external/github.com/google/flatbuffers.git@01c50d57a67a52ee3cddd81b54d4647e9123a290',
+  'src/third_party/freetype/src':
+    (Var("chromium_git")) + '/chromium/src/third_party/freetype2.git@38bdf22bfe68432aebdd33c198a0bd11b4ebb96f',
   'src/third_party/glslang/src':
     (Var("chromium_git")) + '/external/github.com/google/glslang.git@210c6bf4d8119dc5f8ac21da2d4c87184f7015e0',
+  'src/third_party/googletest/src':
+    (Var("chromium_git")) + '/external/github.com/google/googletest.git@42bc671f47b122fad36db5eccbc06868afdf7862',
   'src/third_party/hunspell_dictionaries':
     (Var("chromium_git")) + '/chromium/deps/hunspell_dictionaries.git@dc6e7c25bf47cbfb466e0701fd2728b4a12e79d5',
   'src/third_party/icu':
-    (Var("chromium_git")) + '/chromium/deps/icu.git@450be73c9ee8ae29d43d4fdc82febb2a5f62bfb5',
+    (Var("chromium_git")) + '/chromium/deps/icu.git@1fec0c83e9ad7f5a075ae0b50af9a3889f54be0e',
   'src/third_party/jsoncpp/source':
     (Var("chromium_git")) + '/external/github.com/open-source-parsers/jsoncpp.git@f572e8e42e22cfcf5ab0aea26574f408943edfa4',
   'src/third_party/leveldatabase/src':
-    (Var("chromium_git")) + '/external/leveldb.git@a53934a3ae1244679f812d998a4f16f2c7f309a6',
+    (Var("chromium_git")) + '/external/leveldb.git@8415f00eeedd96934d3578572d3802900e61a556',
   'src/third_party/libFuzzer/src':
-    (Var("chromium_git")) + '/chromium/llvm-project/llvm/lib/Fuzzer.git@5bcbfc5bcc468328ac18b6ca42d603fc6c744a7d',
+    (Var("chromium_git")) + '/chromium/llvm-project/llvm/lib/Fuzzer.git@16f5f743c188c836d32cdaf349d5d3effb8a3518',
   'src/third_party/libaddressinput/src':
     (Var("chromium_git")) + '/external/libaddressinput.git@4d18a0d4be9add0dc479e7b939ed8d39f6ec0d73',
   'src/third_party/libjpeg_turbo':
-    (Var("chromium_git")) + '/chromium/deps/libjpeg_turbo.git@7260e4d8b8e1e40b17f03fafdf1cd83296900f76',
+    (Var("chromium_git")) + '/chromium/deps/libjpeg_turbo.git@a1750dbc79a8792dde3d3f7d7d8ac28ba01ac9dd',
   'src/third_party/libphonenumber/dist':
     (Var("chromium_git")) + '/external/libphonenumber.git@a4da30df63a097d67e3c429ead6790ad91d36cf4',
+  'src/third_party/libprotobuf-mutator/src':
+    (Var("chromium_git")) + '/external/github.com/google/libprotobuf-mutator.git@b2c4fb59135711122b800376d8dc46af2fc9d060',
   'src/third_party/libsrtp':
-    (Var("chromium_git")) + '/chromium/deps/libsrtp.git@0e0936f3013fe5884eac82f95e370c8d460a179f',
+    (Var("chromium_git")) + '/chromium/deps/libsrtp.git@1d45b8e599dc2db6ea3ae22dbc94a8c504652423',
   'src/third_party/libvpx/source/libvpx':
-    (Var("chromium_git")) + '/webm/libvpx.git@8121f85473b28183c93fdcef290ed6f74b0b52db',
+    (Var("chromium_git")) + '/webm/libvpx.git@b578d59623ddb0f3f76efe5e160aff253b40d19b',
   'src/third_party/libwebm/source':
     (Var("chromium_git")) + '/webm/libwebm.git@4956b2dec65352af32dc71bab553acb631c64177',
   'src/third_party/libyuv':
-    (Var("chromium_git")) + '/libyuv/libyuv.git@0741a3d70400dc96e59726674b0acf3bca02d710',
+    (Var("chromium_git")) + '/libyuv/libyuv.git@7bffe5e1c54bc22daebd57003735e61693719ac6',
   'src/third_party/mesa/src':
     (Var("chromium_git")) + '/chromium/deps/mesa.git@ef811c6bd4de74e13e7035ca882cc77f85793fef',
   'src/third_party/openh264/src':
@@ -138,75 +142,69 @@ deps = {
   'src/third_party/openmax_dl':
     (Var("chromium_git")) + '/external/webrtc/deps/third_party/openmax.git@7acede9c039ea5d14cf326f44aad1245b9e674a7',
   'src/third_party/pdfium':
-    (Var("pdfium_git")) + '/pdfium.git@35e70fb57f9e4093e759d0d35b6d9b8e7800a1a3',
-  'src/third_party/py_trace_event/src':
-    (Var("chromium_git")) + '/external/py_trace_event.git@dd463ea9e2c430de2b9e53dea57a77b4c3ac9b30',
+    (Var("pdfium_git")) + '/pdfium.git@0a49b11d0215c386cafe739c552780542cbe5824',
   'src/third_party/pyftpdlib/src':
     (Var("chromium_git")) + '/external/pyftpdlib.git@2be6d65e31c7ee6320d059f581f05ae8d89d7e45',
   'src/third_party/pywebsocket/src':
     (Var("chromium_git")) + '/external/github.com/google/pywebsocket.git@2d7b73c3acbd0f41dcab487ae5c97c6feae06ce2',
   'src/third_party/re2/src':
-    (Var("chromium_git")) + '/external/github.com/google/re2.git@db20d46c05900a12539225fe800dd860b14e0061',
-  'src/third_party/scan-build/src':
-    (Var("chromium_git")) + '/chromium/llvm-project/cfe/tools/scan-build.git@15bd7ca2934162c51654ddffc52933e45f95e7ef',
+    (Var("chromium_git")) + '/external/github.com/google/re2.git@ae9cb49a2e2ba95de4f0c6ec5a8afd039996d2c7',
   'src/third_party/scons-2.0.1':
     (Var("chromium_git")) + '/native_client/src/third_party/scons-2.0.1.git@1c1550e17fc26355d08627fbdec13d8291227067',
   'src/third_party/sfntly/src':
-    (Var("chromium_git")) + '/external/github.com/googlei18n/sfntly.git@64f78562d2003eb7cacaaa86a398cbd41881ba6f',
+    (Var("chromium_git")) + '/external/github.com/googlei18n/sfntly.git@2439bd08ff93d4dce761dd6b825917938bd35a4f',
   'src/third_party/shaderc/src':
     (Var("chromium_git")) + '/external/github.com/google/shaderc.git@cd8793c34907073025af2622c28bcee64e9879a4',
   'src/third_party/skia':
-    (Var("skia_git")) + '/skia.git@4c81ba6ba3a3270db809bf7d4c3bc782694a56a4',
+    (Var("skia_git")) + '/skia.git@0eefc0552cfb5ac077560b7c2630c5bd475ea585',
   'src/third_party/smhasher/src':
     (Var("chromium_git")) + '/external/smhasher.git@e87738e57558e0ec472b2fc3a643b838e5b6e88f',
   'src/third_party/snappy/src':
-    (Var("chromium_git")) + '/external/snappy.git@f6a298d7c7ddcfdae824649a61408bcf6b334d92',
+    (Var("chromium_git")) + '/external/github.com/google/snappy.git@513df5fb5a2d51146f409141f9eb8736935cc486',
   'src/third_party/swiftshader':
-    (Var("swiftshader_git")) + '/SwiftShader.git@91da6b00584afd7dcaed66da88e2b617429b3950',
+    (Var("swiftshader_git")) + '/SwiftShader.git@010a464878f32daed863edee3fc6ad21920d605b',
   'src/third_party/usrsctp/usrsctplib':
-    (Var("chromium_git")) + '/external/github.com/sctplab/usrsctp@8679f2b0bf063ac894dc473debefd61dbbebf622',
+    (Var("chromium_git")) + '/external/github.com/sctplab/usrsctp@2f6478eb8d40f1766a96b5b033ed26c0c2244589',
   'src/third_party/visualmetrics/src':
     (Var("chromium_git")) + '/external/github.com/WPO-Foundation/visualmetrics.git@1edde9d2fe203229c895b648fdec355917200ad6',
   'src/third_party/webdriver/pylib':
     (Var("chromium_git")) + '/external/selenium/py.git@5fd78261a75fe08d27ca4835fb6c5ce4b42275bd',
   'src/third_party/webgl/src':
-    (Var("chromium_git")) + '/external/khronosgroup/webgl.git@d0783b85bd445f700576dba25bf452d58c112d33',
+    (Var("chromium_git")) + '/external/khronosgroup/webgl.git@72eda82d069da578af04e5c4e8e411ae006b6a18',
   'src/third_party/webpagereplay':
     (Var("chromium_git")) + '/external/github.com/chromium/web-page-replay.git@3cd3a3f6f06a1b87b14b9162c7eb16d23d141241',
   'src/third_party/webrtc':
-    (Var("chromium_git")) + '/external/webrtc/trunk/webrtc.git@1093cc8bc07afe0c6881bb762e0b30fcc729edea',
+    (Var("chromium_git")) + '/external/webrtc/trunk/webrtc.git@a7461e3086866272cb69fbfa23c7fc8b0321a425',
   'src/third_party/yasm/source/patched-yasm':
     (Var("chromium_git")) + '/chromium/deps/yasm/patched-yasm.git@7da28c6c7c6a1387217352ce02b31754deb54d2a',
   'src/tools/gyp':
-    (Var("chromium_git")) + '/external/gyp.git@e7079f0e0e14108ab0dba58728ff219637458563',
+    (Var("chromium_git")) + '/external/gyp.git@eb296f67da078ec01f5e3a9ea9cdc6d26d680161',
   'src/tools/page_cycler/acid3':
     (Var("chromium_git")) + '/chromium/deps/acid3.git@6be0a66a1ebd7ebc5abc1b2f405a945f6d871521',
   'src/tools/swarming_client':
-    (Var("chromium_git")) + '/external/swarming.client.git@11e31afa5d330756ff87aa12064bb5d032896cb5',
+    (Var("chromium_git")) + '/external/swarming.client.git@a56c2b39ca23bdf41458421a7f825ddbf3f43f28',
   'src/v8':
-    (Var("chromium_git")) + '/v8/v8.git@ef3437f1c30743c8cdabe1431d0a92eaceacfe45'
+    (Var("chromium_git")) + '/v8/v8.git@f29d55e61904333f3ccc792021885dfa8dc980e2'
 }
 
 deps_os = {
   'android': {
     'src/third_party/android_protobuf/src':
-      (Var("chromium_git")) + '/external/android_protobuf.git@999188d0dc72e97f7fe08bb756958a2cf090f4e7',
+      (Var("chromium_git")) + '/external/android_protobuf.git@7fca48d8ce97f7ba3ab8eea5c472f1ad3711762f',
     'src/third_party/android_tools':
-      (Var("chromium_git")) + '/android_tools.git@b43a6a289a7588b1769814f04dd6c7d7176974cc',
+      (Var("chromium_git")) + '/android_tools.git@e9d4018e149d50172ed462a7c21137aa915940ec',
     'src/third_party/apache-portable-runtime/src':
       (Var("chromium_git")) + '/external/apache-portable-runtime.git@c76a8c4277e09a82eaa229e35246edea1ee0a6a1',
     'src/third_party/custom_tabs_client/src':
-      (Var("chromium_git")) + '/external/github.com/GoogleChrome/custom-tabs-client.git@3c95e2dda9b292653ff13454f093e5ff136814d2',
+      (Var("chromium_git")) + '/external/github.com/GoogleChrome/custom-tabs-client.git@bbdd5c4537fd4372d4339984fadc4791055bc182',
     'src/third_party/elfutils/src':
       (Var("chromium_git")) + '/external/elfutils.git@249673729a7e5dbd5de4f3760bdcaa3d23d154d7',
     'src/third_party/errorprone/lib':
       (Var("chromium_git")) + '/chromium/third_party/errorprone.git@0eea83b66343133b9c76b7d3288c30321818ebcf',
     'src/third_party/findbugs':
       (Var("chromium_git")) + '/chromium/deps/findbugs.git@57f05238d3ac77ea0a194813d3065dd780c6e566',
-    'src/third_party/freetype-android/src':
-      (Var("chromium_git")) + '/chromium/src/third_party/freetype2.git@66725768cdf758cfb3f9abf03cbf5e5a77f42088',
     'src/third_party/gvr-android-sdk/src':
-      (Var("chromium_git")) + '/external/github.com/googlevr/gvr-android-sdk.git@8d1395957283ee13ebe2bc672ba24e5ca4ec343f',
+      (Var("chromium_git")) + '/external/github.com/googlevr/gvr-android-sdk.git@a27f768b13682189c23eed69656319db5ef7cbfc',
     'src/third_party/jsr-305/src':
       (Var("chromium_git")) + '/external/jsr-305.git@642c508235471f7220af6d5df2d3210e3bfc0919',
     'src/third_party/junit/src':
@@ -214,47 +212,49 @@ deps_os = {
     'src/third_party/leakcanary/src':
       (Var("chromium_git")) + '/external/github.com/square/leakcanary.git@608ded739e036a3aa69db47ac43777dcee506f8e',
     'src/third_party/lss':
-      (Var("chromium_git")) + '/linux-syscall-support.git@3f6478ac95edf86cd3da300c2c0d34a438f5dbeb',
+      (Var("chromium_git")) + '/linux-syscall-support.git@63f24c8221a229f677d26ebe8f3d1528a9d787ac',
     'src/third_party/mockito/src':
       (Var("chromium_git")) + '/external/mockito/mockito.git@de83ad4598ad4cf5ea53c69a8a8053780b04b850',
     'src/third_party/netty-tcnative/src':
-      (Var("chromium_git")) + '/external/netty-tcnative.git@2e0f9503f3d4efe6fc3f70077f22471e83ffb446',
+      (Var("chromium_git")) + '/external/netty-tcnative.git@5b46a8ef4a39c39c576fcdaaf718b585d75df463',
     'src/third_party/netty4/src':
-      (Var("chromium_git")) + '/external/netty4.git@e0f26303b4ce635365be19414d0ac81f2ef6ba3c',
+      (Var("chromium_git")) + '/external/netty4.git@cc4420b13bb4eeea5b1cf4f93b2755644cd3b120',
     'src/third_party/requests/src':
       (Var("chromium_git")) + '/external/github.com/kennethreitz/requests.git@f172b30356d821d180fa4ecfa3e71c7274a32de4',
     'src/third_party/robolectric/robolectric':
-      (Var("chromium_git")) + '/external/robolectric.git@e38b49a12fdfa17a94f0382cc8ffaf69132fd09b',
+      (Var("chromium_git")) + '/external/robolectric.git@2a0b6ba221c14f3371813a676ce06143353e448d',
     'src/third_party/ub-uiautomator/lib':
       (Var("chromium_git")) + '/chromium/third_party/ub-uiautomator.git@00270549ce3161ae72ceb24712618ea28b4f9434'
   },
   'ios': {
     'src/ios/third_party/earl_grey/src':
-      (Var("chromium_git")) + '/external/github.com/google/EarlGrey.git@c5c89d810a8e76547ed0506e85c1a80f3a10bc48',
+      (Var("chromium_git")) + '/external/github.com/google/EarlGrey.git@83e8379d838e4ee4777aa803ed8615965e1cd3e7',
     'src/ios/third_party/fishhook/src':
       (Var("chromium_git")) + '/external/github.com/facebook/fishhook.git@d172d5247aa590c25d0b1885448bae76036ea22c',
     'src/ios/third_party/gcdwebserver/src':
       (Var("chromium_git")) + '/external/github.com/swisspol/GCDWebServer.git@43555c66627f6ed44817855a0f6d465f559d30e0',
     'src/ios/third_party/material_components_ios/src':
-      (Var("chromium_git")) + '/external/github.com/material-components/material-components-ios.git@08c090470652228cdaf05eceee44d8b2a424c4ed',
+      (Var("chromium_git")) + '/external/github.com/material-components/material-components-ios.git@cb191e7c014cc871b5351a3911a1d0bc71b71699',
     'src/ios/third_party/material_font_disk_loader_ios/src':
       (Var("chromium_git")) + '/external/github.com/material-foundation/material-font-disk-loader-ios.git@8e30188777b016182658fbaa0a4a020a48183224',
     'src/ios/third_party/material_roboto_font_loader_ios/src':
-      (Var("chromium_git")) + '/external/github.com/material-foundation/material-roboto-font-loader-ios.git@2e25f314512e71d3413315a20e62a4d0126671f5',
+      (Var("chromium_git")) + '/external/github.com/material-foundation/material-roboto-font-loader-ios.git@4aa51e906e5671c71d24e991f1f10d782a58409f',
     'src/ios/third_party/material_sprited_animation_view_ios/src':
       (Var("chromium_git")) + '/external/github.com/material-foundation/material-sprited-animation-view-ios.git@c6e16d06bdafd95540c62b3402d9414692fbca81',
     'src/ios/third_party/material_text_accessibility_ios/src':
-      (Var("chromium_git")) + '/external/github.com/material-foundation/material-text-accessibility-ios.git@318d5100f2976e59c94643e5dcab69e7a830ee43',
+      (Var("chromium_git")) + '/external/github.com/material-foundation/material-text-accessibility-ios.git@7340b22cc589101ba0b11516afe4f3a733041951',
     'src/ios/third_party/ochamcrest/src':
       (Var("chromium_git")) + '/external/github.com/hamcrest/OCHamcrest.git@d7ee4ecfb6bd13c3c8d364682b6228ccd86e1e1a',
     'src/third_party/google_toolbox_for_mac/src':
-      (Var("chromium_git")) + '/external/github.com/google/google-toolbox-for-mac.git@038a2399b20e67ab17685e23ee873a66811fa107'
+      (Var("chromium_git")) + '/external/github.com/google/google-toolbox-for-mac.git@ec72a2bc500a716369c383837bffdc7d2a22855b',
+    'src/third_party/material_design_icons/src':
+      (Var("chromium_git")) + '/external/github.com/google/material-design-icons.git@5ab428852e35dc177a8c37a2df9dc9ccf768c65a'
   },
   'mac': {
     'src/chrome/installer/mac/third_party/xz/xz':
       (Var("chromium_git")) + '/chromium/deps/xz.git@eecaf55632ca72e90eb2641376bce7cdbc7284f7',
     'src/third_party/google_toolbox_for_mac/src':
-      (Var("chromium_git")) + '/external/github.com/google/google-toolbox-for-mac.git@038a2399b20e67ab17685e23ee873a66811fa107',
+      (Var("chromium_git")) + '/external/github.com/google/google-toolbox-for-mac.git@ec72a2bc500a716369c383837bffdc7d2a22855b',
     'src/third_party/lighttpd':
       (Var("chromium_git")) + '/chromium/deps/lighttpd.git@9dfa55d15937a688a92cbf2b7a8621b0927d06eb'
   },
@@ -262,13 +262,11 @@ deps_os = {
     'src/third_party/WebKit/Source/devtools/devtools-node-modules':
       (Var("chromium_git")) + '/external/github.com/ChromeDevTools/devtools-node-modules@6226d6cd80aaf2e5295ed460cf73ef6a582e4d78',
     'src/third_party/chromite':
-      (Var("chromium_git")) + '/chromiumos/chromite.git@59fb3e8e603b6b2b781da58f9408dde5c53fbbd6',
+      (Var("chromium_git")) + '/chromiumos/chromite.git@80232cab3e7df136f6f2b10cc015fe2120694c73',
     'src/third_party/cros_system_api':
-      (Var("chromium_git")) + '/chromiumos/platform/system_api.git@c08ae470458b06cf23c1907817490d2fc917ac29',
+      (Var("chromium_git")) + '/chromiumos/platform/system_api.git@8a400ce97612e4264a8e4c6098701547a9d906ef',
     'src/third_party/fontconfig/src':
       (Var("chromium_git")) + '/external/fontconfig.git@f16c3118e25546c1b749f9823c51827a60aeb5c1',
-    'src/third_party/freetype-android/src':
-      (Var("chromium_git")) + '/chromium/src/third_party/freetype2.git@66725768cdf758cfb3f9abf03cbf5e5a77f42088',
     'src/third_party/gestures/gestures':
       (Var("chromium_git")) + '/chromiumos/platform/gestures.git@5a656849c7d2b0d0ddbe0ac6d300c1e2fada0bb4',
     'src/third_party/libdrm/src':
@@ -277,16 +275,20 @@ deps_os = {
       (Var("chromium_git")) + '/chromiumos/platform/libevdev.git@9f7a1961eb4726211e18abd147d5a11a4ea86744',
     'src/third_party/liblouis/src':
       (Var("chromium_git")) + '/external/liblouis-github.git@5f9c03f2a3478561deb6ae4798175094be8a26c2',
+    'src/third_party/libsync/src':
+      (Var("chromium_git")) + '/aosp/platform/system/core/libsync.git@aa6cda6f638bd57d3a024f0d201f723a5c3bb875',
     'src/third_party/lss':
-      (Var("chromium_git")) + '/linux-syscall-support.git@3f6478ac95edf86cd3da300c2c0d34a438f5dbeb',
+      (Var("chromium_git")) + '/linux-syscall-support.git@63f24c8221a229f677d26ebe8f3d1528a9d787ac',
     'src/third_party/minigbm/src':
-      (Var("chromium_git")) + '/chromiumos/platform/minigbm.git@878fed4088662309dc57689650fa4648cc4b480b',
+      (Var("chromium_git")) + '/chromiumos/platform/minigbm.git@3909dc011bf32c13858fb80c33a3cce68769cb26',
+    'src/third_party/minizip/src':
+      (Var("chromium_git")) + '/external/github.com/nmoinvaz/minizip@dc3ad01e3d5928e9105f770b7e896a8e9fe0d3b4',
     'src/third_party/pyelftools':
       (Var("chromium_git")) + '/chromiumos/third_party/pyelftools.git@19b3e610c86fcadb837d252c794cb5e8008826ae',
     'src/third_party/wayland-protocols/src':
-      (Var("chromium_git")) + '/external/anongit.freedesktop.org/git/wayland/wayland-protocols.git@2e541a36deff5f2e16e25e27f7f93d26822eecc2',
+      (Var("chromium_git")) + '/external/anongit.freedesktop.org/git/wayland/wayland-protocols.git@26c99346ab5f2273fe5581bc4f6397bbb834f747',
     'src/third_party/wayland/src':
-      (Var("chromium_git")) + '/external/anongit.freedesktop.org/git/wayland/wayland.git@6a18a87727c64719c68168568b9ab1e4d7c2d9c1',
+      (Var("chromium_git")) + '/external/anongit.freedesktop.org/git/wayland/wayland.git@1361da9cd5a719b32d978485a29920429a31ed25',
     'src/third_party/wds/src':
       (Var("chromium_git")) + '/external/github.com/01org/wds@ac3d8210d95f3000bf5c8e16a79dbbbf22d554a5',
     'src/third_party/xdg-utils':
@@ -332,6 +334,17 @@ hooks = [
   {
     'action': [
       'python',
+      'src/third_party/depot_tools/update_depot_tools_toggle.py',
+      '--disable'
+    ],
+    'pattern':
+      '.',
+    'name':
+      'disable_depot_tools_selfupdate'
+  },
+  {
+    'action': [
+      'python',
       'src/tools/remove_stale_pyc_files.py',
       'src/android_webview/tools',
       'src/build/android',
@@ -352,291 +365,6 @@ hooks = [
   {
     'action': [
       'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-intellij',
-      '-l',
-      'third_party/intellij'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'intellij'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-javax-inject',
-      '-l',
-      'third_party/javax_inject'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'javax_inject'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-hamcrest',
-      '-l',
-      'third_party/hamcrest'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'hamcrest'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-guava',
-      '-l',
-      'third_party/guava'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'guava'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-android-support-test-runner',
-      '-l',
-      'third_party/android_support_test_runner'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'android_support_test_runner'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-byte-buddy',
-      '-l',
-      'third_party/byte_buddy'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'byte_buddy'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-espresso',
-      '-l',
-      'third_party/espresso'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'espresso'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-robolectric',
-      '-l',
-      'third_party/robolectric'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'robolectric_libs'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-apache-velocity',
-      '-l',
-      'third_party/apache_velocity'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'apache_velocity'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-ow2-asm',
-      '-l',
-      'third_party/ow2_asm'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'ow2_asm'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-android-tools/retrolambda',
-      '-l',
-      'third_party/retrolambda'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'retrolambda'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-icu4j',
-      '-l',
-      'third_party/icu4j'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'icu4j'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-accessibility-test-framework',
-      '-l',
-      'third_party/accessibility_test_framework'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'accessibility_test_framework'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-bouncycastle',
-      '-l',
-      'third_party/bouncycastle'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'bouncycastle'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-sqlite4java',
-      '-l',
-      'third_party/sqlite4java'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'sqlite4java'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-objenesis',
-      '-l',
-      'third_party/objenesis'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'objenesis'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chromium-robolectric',
-      '-l',
-      'third_party/xstream'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'xstream'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chrome-vr-test-apks/vr_services',
-      '-l',
-      'third_party/gvr-android-sdk/test-apks/vr_services'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'vr_services_apks'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/android/update_deps/update_third_party_deps.py',
-      'download',
-      '-b',
-      'chrome-vr-test-apks/daydream_home',
-      '-l',
-      'third_party/gvr-android-sdk/test-apks/daydream_home'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'daydream_home_apks'
-  },
-  {
-    'action': [
-      'python',
       'src/build/util/lastchange.py',
       '-o',
       'src/build/util/LASTCHANGE'
@@ -645,21 +373,6 @@ hooks = [
       '.',
     'name':
       'lastchange'
-  },
-  {
-    'action': [
-      'python',
-      'src/build/util/lastchange.py',
-      '--git-hash-only',
-      '-s',
-      'src/third_party/WebKit',
-      '-o',
-      'src/build/util/LASTCHANGE.blink'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'lastchange_blink'
   },
   {
     'action': [
@@ -680,16 +393,7 @@ hooks = [
   {
     'action': [
       'python',
-      'src/build/android/download_doclava.py'
-    ],
-    'pattern':
-      '.',
-    'name':
-      'doclava'
-  },
-  {
-    'action': [
-      'download_from_google_storage',
+      'src/third_party/depot_tools/download_from_google_storage.py',
       '--no_resume',
       '--extract',
       '--no_auth',
@@ -702,8 +406,439 @@ hooks = [
       '.',
     'name':
       'webui_node_modules'
+  },
+  {
+    'action': [
+      'python',
+      'src/tools/perf/conditionally_execute',
+      '--gyp-condition',
+      'fetch_telemetry_dependencies=1',
+      'src/third_party/catapult/telemetry/bin/fetch_telemetry_binary_dependencies'
+    ],
+    'pattern':
+      '.',
+    'name':
+      'fetch_telemetry_binary_dependencies'
+  },
+  {
+    'action': [
+      'python',
+      'src/third_party/depot_tools/download_from_google_storage.py',
+      '--no_resume',
+      '--no_auth',
+      '--bucket',
+      'chromium-android-tools/checkstyle',
+      '-s',
+      'src/third_party/checkstyle/checkstyle-8.0-all.jar.sha1'
+    ],
+    'pattern':
+      '.',
+    'name':
+      'checkstyle'
   }
 ]
+
+hooks_os = {
+  'android': [
+    {
+      'action': [
+        'python',
+        'src/build/android/play_services/update.py',
+        'download'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'sdkextras'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'android_system_stubs',
+        '-l',
+        'third_party/android_system_sdk'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'android_system_sdk'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-intellij',
+        '-l',
+        'third_party/intellij'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'intellij'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-javax-inject',
+        '-l',
+        'third_party/javax_inject'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'javax_inject'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-hamcrest',
+        '-l',
+        'third_party/hamcrest'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'hamcrest'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-guava',
+        '-l',
+        'third_party/guava'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'guava'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-android-support-test-runner',
+        '-l',
+        'third_party/android_support_test_runner'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'android_support_test_runner'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-byte-buddy',
+        '-l',
+        'third_party/byte_buddy'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'byte_buddy'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-espresso',
+        '-l',
+        'third_party/espresso'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'espresso'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-robolectric',
+        '-l',
+        'third_party/robolectric'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'robolectric_libs'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-apache-velocity',
+        '-l',
+        'third_party/apache_velocity'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'apache_velocity'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-ow2-asm',
+        '-l',
+        'third_party/ow2_asm'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'ow2_asm'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-android-tools/retrolambda',
+        '-l',
+        'third_party/retrolambda'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'retrolambda'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-android-tools/apk-patch-size-estimator',
+        '-l',
+        'third_party/apk-patch-size-estimator/lib'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'apk-patch-size-estimator'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-icu4j',
+        '-l',
+        'third_party/icu4j'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'icu4j'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-accessibility-test-framework',
+        '-l',
+        'third_party/accessibility_test_framework'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'accessibility_test_framework'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-bouncycastle',
+        '-l',
+        'third_party/bouncycastle'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'bouncycastle'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-sqlite4java',
+        '-l',
+        'third_party/sqlite4java'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'sqlite4java'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-objenesis',
+        '-l',
+        'third_party/objenesis'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'objenesis'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/update_deps/update_third_party_deps.py',
+        'download',
+        '-b',
+        'chromium-robolectric',
+        '-l',
+        'third_party/xstream'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'xstream'
+    },
+    {
+      'action': [
+        'python',
+        'src/third_party/depot_tools/download_from_google_storage.py',
+        '--no_resume',
+        '--platform=linux*',
+        '--no_auth',
+        '--bucket',
+        'chromium-gvr-static-shim',
+        '-s',
+        'src/third_party/gvr-android-sdk/libgvr_shim_static_arm.a.sha1'
+      ],
+      'pattern':
+        '\\.sha1',
+      'name':
+        'gvr_static_shim_android_arm'
+    },
+    {
+      'action': [
+        'python',
+        'src/third_party/depot_tools/download_from_google_storage.py',
+        '--no_resume',
+        '--platform=linux*',
+        '--no_auth',
+        '--bucket',
+        'chromium-gvr-static-shim',
+        '-s',
+        'src/third_party/gvr-android-sdk/libgvr_shim_static_arm64.a.sha1'
+      ],
+      'pattern':
+        '\\.sha1',
+      'name':
+        'gvr_static_shim_android_arm64'
+    },
+    {
+      'action': [
+        'python',
+        'src/third_party/depot_tools/download_from_google_storage.py',
+        '--no_resume',
+        '--platform=linux*',
+        '--no_auth',
+        '--bucket',
+        'chromium-gvr-static-shim',
+        '-s',
+        'src/third_party/gvr-android-sdk/common_library.aar.sha1'
+      ],
+      'pattern':
+        '\\.sha1',
+      'name':
+        'gvr_common_aar'
+    },
+    {
+      'action': [
+        'python',
+        'src/third_party/depot_tools/download_from_google_storage.py',
+        '--no_resume',
+        '--platform=linux*',
+        '--no_auth',
+        '--bucket',
+        'chromium-gvr-static-shim/controller_test_api',
+        '-s',
+        'src/third_party/gvr-android-sdk/test-libraries/controller_test_api.aar.sha1'
+      ],
+      'pattern':
+        '\\.sha1',
+      'name':
+        'vr_controller_test_api'
+    },
+    {
+      'action': [
+        'python',
+        'src/third_party/gvr-android-sdk/test-apks/update.py'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'vr_test_apks'
+    },
+    {
+      'action': [
+        'python',
+        'src/build/android/download_doclava.py'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'doclava'
+    }
+  ],
+  'fuchsia': [
+    {
+      'action': [
+        'python',
+        'src/build/fuchsia/update_sdk.py',
+        '06ab789730c8f0749bda7eb4fd1e7988eccc38e0'
+      ],
+      'pattern':
+        '.',
+      'name':
+        'fuchsia_sdk'
+    }
+  ]
+}
 
 include_rules = [
   '+base',
@@ -720,12 +855,8 @@ recursedeps = [
   'src/buildtools',
   'src/third_party/android_tools',
   [
-    'DEPS.chromium',
-    'src/third_party/angle'
-  ],
-  [
-    'DEPS',
-    'src/third_party/swiftshader'
+    'src/third_party/angle',
+    'DEPS.chromium'
   ]
 ]
 

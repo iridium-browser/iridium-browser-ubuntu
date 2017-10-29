@@ -10,16 +10,17 @@
 #include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/autotest_private.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
 #include "extensions/common/permissions/api_permission_set.h"
@@ -27,11 +28,12 @@
 #include "extensions/common/permissions/permissions_data.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
-#include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/notification.h"
@@ -40,13 +42,14 @@
 namespace extensions {
 namespace {
 
-base::ListValue* GetHostPermissions(const Extension* ext, bool effective_perm) {
+std::unique_ptr<base::ListValue> GetHostPermissions(const Extension* ext,
+                                                    bool effective_perm) {
   const PermissionsData* permissions_data = ext->permissions_data();
   const URLPatternSet& pattern_set =
       effective_perm ? permissions_data->GetEffectiveHostPermissions()
                      : permissions_data->active_permissions().explicit_hosts();
 
-  base::ListValue* permissions = new base::ListValue;
+  auto permissions = base::MakeUnique<base::ListValue>();
   for (URLPatternSet::const_iterator perm = pattern_set.begin();
        perm != pattern_set.end();
        ++perm) {
@@ -56,13 +59,13 @@ base::ListValue* GetHostPermissions(const Extension* ext, bool effective_perm) {
   return permissions;
 }
 
-base::ListValue* GetAPIPermissions(const Extension* ext) {
-  base::ListValue* permissions = new base::ListValue;
+std::unique_ptr<base::ListValue> GetAPIPermissions(const Extension* ext) {
+  auto permissions = base::MakeUnique<base::ListValue>();
   std::set<std::string> perm_list =
       ext->permissions_data()->active_permissions().GetAPIsAsStrings();
   for (std::set<std::string>::const_iterator perm = perm_list.begin();
        perm != perm_list.end(); ++perm) {
-    permissions->AppendString(perm->c_str());
+    permissions->AppendString(*perm);
   }
   return permissions;
 }
@@ -166,7 +169,7 @@ AutotestPrivateGetExtensionsInfoFunction::Run() {
   ExtensionActionManager* extension_action_manager =
       ExtensionActionManager::Get(browser_context());
 
-  base::ListValue* extensions_values = new base::ListValue;
+  auto extensions_values = base::MakeUnique<base::ListValue>();
   ExtensionList all;
   all.insert(all.end(), extensions.begin(), extensions.end());
   all.insert(all.end(), disabled_extensions.begin(), disabled_extensions.end());
@@ -212,7 +215,7 @@ AutotestPrivateGetExtensionsInfoFunction::Run() {
 
   std::unique_ptr<base::DictionaryValue> return_value(
       new base::DictionaryValue);
-  return_value->Set("extensions", extensions_values);
+  return_value->Set("extensions", std::move(extensions_values));
   return RespondNow(OneArgument(std::move(return_value)));
 }
 
@@ -378,8 +381,47 @@ AutotestPrivateGetVisibleNotificationsFunction::Run() {
   return RespondNow(OneArgument(std::move(values)));
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<AutotestPrivateAPI> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+ExtensionFunction::ResponseAction
+AutotestPrivateGetPlayStoreStateFunction::Run() {
+  DVLOG(1) << "AutotestPrivateGetPlayStoreStateFunction";
+  api::autotest_private::PlayStoreState play_store_state;
+  play_store_state.allowed = false;
+#if defined(OS_CHROMEOS)
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  if (arc::IsArcAllowedForProfile(profile)) {
+    play_store_state.allowed = true;
+    play_store_state.enabled =
+        base::MakeUnique<bool>(arc::IsArcPlayStoreEnabledForProfile(profile));
+    play_store_state.managed = base::MakeUnique<bool>(
+        arc::IsArcPlayStoreEnabledPreferenceManagedForProfile(profile));
+  }
+#endif
+  return RespondNow(OneArgument(play_store_state.ToValue()));
+}
+
+ExtensionFunction::ResponseAction
+AutotestPrivateSetPlayStoreEnabledFunction::Run() {
+  DVLOG(1) << "AutotestPrivateSetPlayStoreEnabledFunction";
+  std::unique_ptr<api::autotest_private::SetPlayStoreEnabled::Params> params(
+      api::autotest_private::SetPlayStoreEnabled::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+#if defined(OS_CHROMEOS)
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  if (arc::IsArcAllowedForProfile(profile)) {
+    if (!arc::SetArcPlayStoreEnabledForProfile(profile, params->enabled)) {
+      return RespondNow(
+          Error("ARC enabled state cannot be changed for the current user"));
+    }
+    return RespondNow(NoArguments());
+  } else {
+    return RespondNow(Error("ARC is not available for the current user"));
+  }
+#endif
+  return RespondNow(Error("ARC is not available for the current platform"));
+}
+
+static base::LazyInstance<BrowserContextKeyedAPIFactory<AutotestPrivateAPI>>::
+    DestructorAtExit g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<AutotestPrivateAPI>*

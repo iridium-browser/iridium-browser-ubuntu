@@ -16,7 +16,7 @@
 #include "xfa/fwl/cfwl_event.h"
 #include "xfa/fwl/cfwl_scrollbar.h"
 #include "xfa/fwl/cfwl_widget.h"
-#include "xfa/fxgraphics/cfx_path.h"
+#include "xfa/fxgraphics/cxfa_path.h"
 
 #define FWL_STYLEEXT_EDT_ReadOnly (1L << 0)
 #define FWL_STYLEEXT_EDT_MultiLine (1L << 1)
@@ -61,11 +61,11 @@ class CFWL_Edit : public CFWL_Widget {
   void Update() override;
   FWL_WidgetHit HitTest(const CFX_PointF& point) override;
   void SetStates(uint32_t dwStates) override;
-  void DrawWidget(CFX_Graphics* pGraphics, const CFX_Matrix* pMatrix) override;
+  void DrawWidget(CXFA_Graphics* pGraphics, const CFX_Matrix* pMatrix) override;
   void SetThemeProvider(IFWL_ThemeProvider* pThemeProvider) override;
   void OnProcessMessage(CFWL_Message* pMessage) override;
   void OnProcessEvent(CFWL_Event* pEvent) override;
-  void OnDrawWidget(CFX_Graphics* pGraphics,
+  void OnDrawWidget(CXFA_Graphics* pGraphics,
                     const CFX_Matrix* pMatrix) override;
 
   virtual void SetText(const CFX_WideString& wsText);
@@ -80,7 +80,7 @@ class CFWL_Edit : public CFWL_Widget {
   void ClearSelections();
   int32_t GetLimit() const;
   void SetLimit(int32_t nLimit);
-  void SetAliasChar(FX_WCHAR wAlias);
+  void SetAliasChar(wchar_t wAlias);
   bool Copy(CFX_WideString& wsCopy);
   bool Cut(CFX_WideString& wsCut);
   bool Paste(const CFX_WideString& wsPaste);
@@ -100,7 +100,7 @@ class CFWL_Edit : public CFWL_Widget {
   bool OnPageUnload(int32_t nPageIndex);
   void OnAddDoRecord(std::unique_ptr<IFDE_TxtEdtDoRecord> pRecord);
   bool OnValidate(const CFX_WideString& wsText);
-  void SetScrollOffset(FX_FLOAT fScrollOffset);
+  void SetScrollOffset(float fScrollOffset);
 
  protected:
   void ShowCaret(CFX_RectF* pRect);
@@ -109,19 +109,19 @@ class CFWL_Edit : public CFWL_Widget {
   CFDE_TxtEdtEngine* GetTxtEdtEngine() { return &m_EdtEngine; }
 
  private:
-  void DrawTextBk(CFX_Graphics* pGraphics,
+  void DrawTextBk(CXFA_Graphics* pGraphics,
                   IFWL_ThemeProvider* pTheme,
                   const CFX_Matrix* pMatrix);
-  void DrawContent(CFX_Graphics* pGraphics,
+  void DrawContent(CXFA_Graphics* pGraphics,
                    IFWL_ThemeProvider* pTheme,
                    const CFX_Matrix* pMatrix);
-  void DrawSpellCheck(CFX_Graphics* pGraphics, const CFX_Matrix* pMatrix);
+  void DrawSpellCheck(CXFA_Graphics* pGraphics, const CFX_Matrix* pMatrix);
 
   void UpdateEditEngine();
   void UpdateEditParams();
   void UpdateEditLayout();
   bool UpdateOffset();
-  bool UpdateOffset(CFWL_ScrollBar* pScrollBar, FX_FLOAT fPosChanged);
+  bool UpdateOffset(CFWL_ScrollBar* pScrollBar, float fPosChanged);
   void UpdateVAlignment();
   void UpdateCaret();
   CFWL_ScrollBar* UpdateScroll();
@@ -132,17 +132,17 @@ class CFWL_Edit : public CFWL_Widget {
   void InitHorizontalScrollBar();
   void InitEngine();
   void InitCaret();
-  bool ValidateNumberChar(FX_WCHAR cNum);
+  bool ValidateNumberChar(wchar_t cNum);
   void ClearRecord();
   bool IsShowScrollBar(bool bVert);
   bool IsContentHeightOverflow();
   int32_t AddDoRecord(std::unique_ptr<IFDE_TxtEdtDoRecord> pRecord);
   void ProcessInsertError(int32_t iError);
-  void AddSpellCheckObj(CFX_Path& PathData,
+  void AddSpellCheckObj(CXFA_Path& PathData,
                         int32_t nStart,
                         int32_t nCount,
-                        FX_FLOAT fOffSetX,
-                        FX_FLOAT fOffSetY);
+                        float fOffSetX,
+                        float fOffSetY);
 
   void DoButtonDown(CFWL_MessageMouse* pMsg);
   void OnFocusChanged(CFWL_Message* pMsg, bool bSet);
@@ -154,19 +154,19 @@ class CFWL_Edit : public CFWL_Widget {
   void OnChar(CFWL_MessageKey* pMsg);
   bool OnScroll(CFWL_ScrollBar* pScrollBar,
                 CFWL_EventScroll::Code dwCode,
-                FX_FLOAT fPos);
+                float fPos);
 
   CFX_RectF m_rtClient;
   CFX_RectF m_rtEngine;
   CFX_RectF m_rtStatic;
-  FX_FLOAT m_fVAlignOffset;
-  FX_FLOAT m_fScrollOffsetX;
-  FX_FLOAT m_fScrollOffsetY;
+  float m_fVAlignOffset;
+  float m_fScrollOffsetX;
+  float m_fScrollOffsetY;
   CFDE_TxtEdtEngine m_EdtEngine;
   bool m_bLButtonDown;
   int32_t m_nSelStart;
   int32_t m_nLimit;
-  FX_FLOAT m_fFontSize;
+  float m_fFontSize;
   bool m_bSetRange;
   int32_t m_iMax;
   std::unique_ptr<CFWL_ScrollBar> m_pVertScrollBar;

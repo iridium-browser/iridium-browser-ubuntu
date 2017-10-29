@@ -112,6 +112,9 @@ void TouchSelectionControllerClientAura::EnvPreTargetHandler::OnScrollEvent(
 TouchSelectionControllerClientAura::TouchSelectionControllerClientAura(
     RenderWidgetHostViewAura* rwhva)
     : rwhva_(rwhva),
+      internal_client_(rwhva),
+      active_client_(&internal_client_),
+      active_menu_client_(this),
       quick_menu_timer_(
           FROM_HERE,
           base::TimeDelta::FromMilliseconds(kQuickMenuDelayInMs),
@@ -121,11 +124,14 @@ TouchSelectionControllerClientAura::TouchSelectionControllerClientAura(
       quick_menu_requested_(false),
       touch_down_(false),
       scroll_in_progress_(false),
-      handle_drag_in_progress_(false) {
+      handle_drag_in_progress_(false),
+      show_quick_menu_immediately_for_test_(false) {
   DCHECK(rwhva_);
 }
 
 TouchSelectionControllerClientAura::~TouchSelectionControllerClientAura() {
+  for (auto& observer : observers_)
+    observer.OnManagerWillDestroy(this);
 }
 
 void TouchSelectionControllerClientAura::OnWindowMoved() {
@@ -164,13 +170,73 @@ bool TouchSelectionControllerClientAura::HandleContextMenu(
     UpdateQuickMenu();
     return true;
   }
+
+  const bool from_touch = params.source_type == ui::MENU_SOURCE_LONG_PRESS ||
+                          params.source_type == ui::MENU_SOURCE_TOUCH;
+  if (from_touch && !params.selection_text.empty())
+    return true;
+
   rwhva_->selection_controller()->HideAndDisallowShowingAutomatically();
   return false;
 }
 
+void TouchSelectionControllerClientAura::UpdateClientSelectionBounds(
+    const gfx::SelectionBound& start,
+    const gfx::SelectionBound& end) {
+  UpdateClientSelectionBounds(start, end, &internal_client_, this);
+}
+
+void TouchSelectionControllerClientAura::UpdateClientSelectionBounds(
+    const gfx::SelectionBound& start,
+    const gfx::SelectionBound& end,
+    ui::TouchSelectionControllerClient* client,
+    ui::TouchSelectionMenuClient* menu_client) {
+  if (client != active_client_ &&
+      (start.type() == gfx::SelectionBound::EMPTY || !start.visible()) &&
+      (end.type() == gfx::SelectionBound::EMPTY || !end.visible()) &&
+      (manager_selection_start_.type() != gfx::SelectionBound::EMPTY ||
+       manager_selection_end_.type() != gfx::SelectionBound::EMPTY)) {
+    return;
+  }
+
+  active_client_ = client;
+  active_menu_client_ = menu_client;
+  manager_selection_start_ = start;
+  manager_selection_end_ = end;
+  // Notify TouchSelectionController if anything should change here. Only
+  // update if the client is different and not making a change to empty, or
+  // is the same client.
+  GetTouchSelectionController()->OnSelectionBoundsChanged(start, end);
+}
+
+void TouchSelectionControllerClientAura::InvalidateClient(
+    ui::TouchSelectionControllerClient* client) {
+  DCHECK(client != &internal_client_);
+  if (client == active_client_) {
+    active_client_ = &internal_client_;
+    active_menu_client_ = this;
+  }
+}
+
+ui::TouchSelectionController*
+TouchSelectionControllerClientAura::GetTouchSelectionController() {
+  return rwhva_->selection_controller();
+}
+
+void TouchSelectionControllerClientAura::AddObserver(
+    TouchSelectionControllerClientManager::Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void TouchSelectionControllerClientAura::RemoveObserver(
+    TouchSelectionControllerClientManager::Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
 bool TouchSelectionControllerClientAura::IsQuickMenuAvailable() const {
   return ui::TouchSelectionMenuRunner::GetInstance() &&
-         ui::TouchSelectionMenuRunner::GetInstance()->IsMenuAvailable(this);
+         ui::TouchSelectionMenuRunner::GetInstance()->IsMenuAvailable(
+             active_menu_client_);
 }
 
 void TouchSelectionControllerClientAura::ShowQuickMenu() {
@@ -201,7 +267,7 @@ void TouchSelectionControllerClientAura::ShowQuickMenu() {
 
   aura::Window* parent = rwhva_->GetNativeView();
   ui::TouchSelectionMenuRunner::GetInstance()->OpenMenu(
-      this, ConvertRectToScreen(parent, anchor_rect),
+      active_menu_client_, ConvertRectToScreen(parent, anchor_rect),
       gfx::ToRoundedSize(max_handle_size), parent->GetToplevelWindow());
 }
 
@@ -231,6 +297,14 @@ void TouchSelectionControllerClientAura::UpdateQuickMenu() {
 }
 
 bool TouchSelectionControllerClientAura::SupportsAnimation() const {
+  // We don't pass this to the active client, since it is assumed it will have
+  // the same behaviour as the Aura client.
+  return false;
+}
+
+bool TouchSelectionControllerClientAura::InternalClient::SupportsAnimation()
+    const {
+  NOTREACHED();
   return false;
 }
 
@@ -238,15 +312,30 @@ void TouchSelectionControllerClientAura::SetNeedsAnimate() {
   NOTREACHED();
 }
 
+void TouchSelectionControllerClientAura::InternalClient::SetNeedsAnimate() {
+  NOTREACHED();
+}
+
 void TouchSelectionControllerClientAura::MoveCaret(
     const gfx::PointF& position) {
-  RenderWidgetHostImpl* host =
-      RenderWidgetHostImpl::From(rwhva_->GetRenderWidgetHost());
-  host->MoveCaret(gfx::ToRoundedPoint(position));
+  active_client_->MoveCaret(position);
+}
+
+void TouchSelectionControllerClientAura::InternalClient::MoveCaret(
+    const gfx::PointF& position) {
+  RenderWidgetHostDelegate* host_delegate =
+      RenderWidgetHostImpl::From(rwhva_->GetRenderWidgetHost())->delegate();
+  if (host_delegate)
+    host_delegate->MoveCaret(gfx::ToRoundedPoint(position));
 }
 
 void TouchSelectionControllerClientAura::MoveRangeSelectionExtent(
     const gfx::PointF& extent) {
+  active_client_->MoveRangeSelectionExtent(extent);
+}
+
+void TouchSelectionControllerClientAura::InternalClient::
+    MoveRangeSelectionExtent(const gfx::PointF& extent) {
   RenderWidgetHostDelegate* host_delegate =
       RenderWidgetHostImpl::From(rwhva_->GetRenderWidgetHost())->delegate();
   if (host_delegate)
@@ -256,6 +345,12 @@ void TouchSelectionControllerClientAura::MoveRangeSelectionExtent(
 void TouchSelectionControllerClientAura::SelectBetweenCoordinates(
     const gfx::PointF& base,
     const gfx::PointF& extent) {
+  active_client_->SelectBetweenCoordinates(base, extent);
+}
+
+void TouchSelectionControllerClientAura::InternalClient::
+    SelectBetweenCoordinates(const gfx::PointF& base,
+                             const gfx::PointF& extent) {
   RenderWidgetHostDelegate* host_delegate =
       RenderWidgetHostImpl::From(rwhva_->GetRenderWidgetHost())->delegate();
   if (host_delegate) {
@@ -266,6 +361,8 @@ void TouchSelectionControllerClientAura::SelectBetweenCoordinates(
 
 void TouchSelectionControllerClientAura::OnSelectionEvent(
     ui::SelectionEventType event) {
+  // This function (implicitly) uses active_menu_client_, so we don't go to the
+  // active view for this.
   switch (event) {
     case ui::SELECTION_HANDLES_SHOWN:
       quick_menu_requested_ = true;
@@ -302,10 +399,24 @@ void TouchSelectionControllerClientAura::OnSelectionEvent(
   };
 }
 
+void TouchSelectionControllerClientAura::InternalClient::OnSelectionEvent(
+    ui::SelectionEventType event) {
+  NOTREACHED();
+}
+
 std::unique_ptr<ui::TouchHandleDrawable>
 TouchSelectionControllerClientAura::CreateDrawable() {
+  // This function is purely related to the top-level view's window, so it
+  // is always handled here and never in
+  // TouchSelectionControllerClientChildFrame.
   return std::unique_ptr<ui::TouchHandleDrawable>(
       new ui::TouchHandleDrawableAura(rwhva_->GetNativeView()));
+}
+
+std::unique_ptr<ui::TouchHandleDrawable>
+TouchSelectionControllerClientAura::InternalClient::CreateDrawable() {
+  NOTREACHED();
+  return nullptr;
 }
 
 bool TouchSelectionControllerClientAura::IsCommandIdEnabled(
@@ -362,9 +473,8 @@ void TouchSelectionControllerClientAura::RunContextMenu() {
       gfx::PointF(anchor_rect.CenterPoint().x(), anchor_rect.y());
   RenderWidgetHostImpl* host =
       RenderWidgetHostImpl::From(rwhva_->GetRenderWidgetHost());
-  host->Send(new ViewMsg_ShowContextMenu(host->GetRoutingID(),
-                                         ui::MENU_SOURCE_TOUCH_EDIT_MENU,
-                                         gfx::ToRoundedPoint(anchor_point)));
+  host->ShowContextMenuAtPoint(gfx::ToRoundedPoint(anchor_point),
+                               ui::MENU_SOURCE_TOUCH_EDIT_MENU);
 
   // Hide selection handles after getting rect-between-bounds from touch
   // selection controller; otherwise, rect would be empty and the above

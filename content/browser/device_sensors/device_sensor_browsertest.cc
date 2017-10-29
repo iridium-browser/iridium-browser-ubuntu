@@ -4,6 +4,7 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
@@ -18,7 +19,6 @@
 #include "content/shell/browser/shell_javascript_dialog_manager.h"
 #include "device/sensors/data_fetcher_shared_memory.h"
 #include "device/sensors/device_sensor_service.h"
-#include "device/sensors/public/cpp/device_light_hardware_buffer.h"
 #include "device/sensors/public/cpp/device_motion_hardware_buffer.h"
 #include "device/sensors/public/cpp/device_orientation_hardware_buffer.h"
 
@@ -39,14 +39,6 @@ class FakeDataFetcher : public device::DataFetcherSharedMemory {
     motion_stopped_callback_ = motion_stopped_callback;
   }
 
-  void SetLightStartedCallback(base::Closure light_started_callback) {
-    light_started_callback_ = light_started_callback;
-  }
-
-  void SetLightStoppedCallback(base::Closure light_stopped_callback) {
-    light_stopped_callback_ = light_stopped_callback;
-  }
-
   void SetOrientationStartedCallback(
       base::Closure orientation_started_callback) {
     orientation_started_callback_ = orientation_started_callback;
@@ -55,6 +47,18 @@ class FakeDataFetcher : public device::DataFetcherSharedMemory {
   void SetOrientationStoppedCallback(
       base::Closure orientation_stopped_callback) {
     orientation_stopped_callback_ = orientation_stopped_callback;
+  }
+
+  void SetOrientationAbsoluteStartedCallback(
+      base::Closure orientation_absolute_started_callback) {
+    orientation_absolute_started_callback_ =
+        orientation_absolute_started_callback;
+  }
+
+  void SetOrientationAbsoluteStoppedCallback(
+      base::Closure orientation_absolute_stopped_callback) {
+    orientation_absolute_stopped_callback_ =
+        orientation_absolute_stopped_callback;
   }
 
   bool Start(device::ConsumerType consumer_type, void* buffer) override {
@@ -79,15 +83,14 @@ class FakeDataFetcher : public device::DataFetcherSharedMemory {
         BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                                 orientation_started_callback_);
       } break;
-      case device::CONSUMER_TYPE_LIGHT: {
-        device::DeviceLightHardwareBuffer* light_buffer =
-            static_cast<device::DeviceLightHardwareBuffer*>(buffer);
-        UpdateLight(light_buffer,
-                    sensor_data_available_
-                        ? 100
-                        : std::numeric_limits<double>::infinity());
+      case device::CONSUMER_TYPE_ORIENTATION_ABSOLUTE: {
+        device::DeviceOrientationHardwareBuffer* orientation_buffer =
+            static_cast<device::DeviceOrientationHardwareBuffer*>(buffer);
+        if (sensor_data_available_)
+          UpdateOrientationAbsolute(orientation_buffer);
+        SetOrientationBufferReady(orientation_buffer);
         BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                                light_started_callback_);
+                                orientation_absolute_started_callback_);
       } break;
       default:
         return false;
@@ -105,9 +108,9 @@ class FakeDataFetcher : public device::DataFetcherSharedMemory {
         BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                                 orientation_stopped_callback_);
         break;
-      case device::CONSUMER_TYPE_LIGHT:
+      case device::CONSUMER_TYPE_ORIENTATION_ABSOLUTE:
         BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                                light_stopped_callback_);
+                                orientation_absolute_stopped_callback_);
         break;
       default:
         return false;
@@ -127,70 +130,78 @@ class FakeDataFetcher : public device::DataFetcherSharedMemory {
 
   void SetMotionBufferReady(device::DeviceMotionHardwareBuffer* buffer) {
     buffer->seqlock.WriteBegin();
-    buffer->data.allAvailableSensorsAreActive = true;
+    buffer->data.all_available_sensors_are_active = true;
     buffer->seqlock.WriteEnd();
   }
 
   void SetOrientationBufferReady(
       device::DeviceOrientationHardwareBuffer* buffer) {
     buffer->seqlock.WriteBegin();
-    buffer->data.allAvailableSensorsAreActive = true;
+    buffer->data.all_available_sensors_are_active = true;
     buffer->seqlock.WriteEnd();
   }
 
   void UpdateMotion(device::DeviceMotionHardwareBuffer* buffer) {
     buffer->seqlock.WriteBegin();
-    buffer->data.accelerationX = 1;
-    buffer->data.hasAccelerationX = true;
-    buffer->data.accelerationY = 2;
-    buffer->data.hasAccelerationY = true;
-    buffer->data.accelerationZ = 3;
-    buffer->data.hasAccelerationZ = true;
+    buffer->data.acceleration_x = 1;
+    buffer->data.has_acceleration_x = true;
+    buffer->data.acceleration_y = 2;
+    buffer->data.has_acceleration_y = true;
+    buffer->data.acceleration_z = 3;
+    buffer->data.has_acceleration_z = true;
 
-    buffer->data.accelerationIncludingGravityX = 4;
-    buffer->data.hasAccelerationIncludingGravityX = true;
-    buffer->data.accelerationIncludingGravityY = 5;
-    buffer->data.hasAccelerationIncludingGravityY = true;
-    buffer->data.accelerationIncludingGravityZ = 6;
-    buffer->data.hasAccelerationIncludingGravityZ = true;
+    buffer->data.acceleration_including_gravity_x = 4;
+    buffer->data.has_acceleration_including_gravity_x = true;
+    buffer->data.acceleration_including_gravity_y = 5;
+    buffer->data.has_acceleration_including_gravity_y = true;
+    buffer->data.acceleration_including_gravity_z = 6;
+    buffer->data.has_acceleration_including_gravity_z = true;
 
-    buffer->data.rotationRateAlpha = 7;
-    buffer->data.hasRotationRateAlpha = true;
-    buffer->data.rotationRateBeta = 8;
-    buffer->data.hasRotationRateBeta = true;
-    buffer->data.rotationRateGamma = 9;
-    buffer->data.hasRotationRateGamma = true;
+    buffer->data.rotation_rate_alpha = 7;
+    buffer->data.has_rotation_rate_alpha = true;
+    buffer->data.rotation_rate_beta = 8;
+    buffer->data.has_rotation_rate_beta = true;
+    buffer->data.rotation_rate_gamma = 9;
+    buffer->data.has_rotation_rate_gamma = true;
 
     buffer->data.interval = 100;
-    buffer->data.allAvailableSensorsAreActive = true;
+    buffer->data.all_available_sensors_are_active = true;
     buffer->seqlock.WriteEnd();
   }
 
   void UpdateOrientation(device::DeviceOrientationHardwareBuffer* buffer) {
     buffer->seqlock.WriteBegin();
     buffer->data.alpha = 1;
-    buffer->data.hasAlpha = true;
+    buffer->data.has_alpha = true;
     buffer->data.beta = 2;
-    buffer->data.hasBeta = true;
+    buffer->data.has_beta = true;
     buffer->data.gamma = 3;
-    buffer->data.hasGamma = true;
-    buffer->data.allAvailableSensorsAreActive = true;
+    buffer->data.has_gamma = true;
+    buffer->data.all_available_sensors_are_active = true;
     buffer->seqlock.WriteEnd();
   }
 
-  void UpdateLight(device::DeviceLightHardwareBuffer* buffer, double lux) {
+  void UpdateOrientationAbsolute(
+      device::DeviceOrientationHardwareBuffer* buffer) {
     buffer->seqlock.WriteBegin();
-    buffer->data.value = lux;
+    buffer->data.alpha = 4;
+    buffer->data.has_alpha = true;
+    buffer->data.beta = 5;
+    buffer->data.has_beta = true;
+    buffer->data.gamma = 6;
+    buffer->data.has_gamma = true;
+    buffer->data.absolute = true;
+    buffer->data.all_available_sensors_are_active = true;
     buffer->seqlock.WriteEnd();
   }
 
   // The below callbacks should be run on the UI thread.
   base::Closure motion_started_callback_;
   base::Closure orientation_started_callback_;
-  base::Closure light_started_callback_;
+  base::Closure orientation_absolute_started_callback_;
   base::Closure motion_stopped_callback_;
   base::Closure orientation_stopped_callback_;
-  base::Closure light_stopped_callback_;
+  base::Closure orientation_absolute_stopped_callback_;
   bool sensor_data_available_;
 
  private:
@@ -207,12 +218,12 @@ class DeviceSensorBrowserTest : public ContentBrowserTest {
 
   void SetUpOnMainThread() override {
     // Initialize the RunLoops now that the main thread has been created.
-    light_started_runloop_.reset(new base::RunLoop());
-    light_stopped_runloop_.reset(new base::RunLoop());
     motion_started_runloop_.reset(new base::RunLoop());
     motion_stopped_runloop_.reset(new base::RunLoop());
     orientation_started_runloop_.reset(new base::RunLoop());
     orientation_stopped_runloop_.reset(new base::RunLoop());
+    orientation_absolute_started_runloop_.reset(new base::RunLoop());
+    orientation_absolute_stopped_runloop_.reset(new base::RunLoop());
 #if defined(OS_ANDROID)
     // On Android, the DeviceSensorService lives on the UI thread.
     SetUpFetcher();
@@ -228,14 +239,16 @@ class DeviceSensorBrowserTest : public ContentBrowserTest {
 
   void SetUpFetcher() {
     fetcher_ = new FakeDataFetcher();
-    fetcher_->SetLightStartedCallback(light_started_runloop_->QuitClosure());
-    fetcher_->SetLightStoppedCallback(light_stopped_runloop_->QuitClosure());
     fetcher_->SetMotionStartedCallback(motion_started_runloop_->QuitClosure());
     fetcher_->SetMotionStoppedCallback(motion_stopped_runloop_->QuitClosure());
     fetcher_->SetOrientationStartedCallback(
         orientation_started_runloop_->QuitClosure());
     fetcher_->SetOrientationStoppedCallback(
         orientation_stopped_runloop_->QuitClosure());
+    fetcher_->SetOrientationAbsoluteStartedCallback(
+        orientation_absolute_started_runloop_->QuitClosure());
+    fetcher_->SetOrientationAbsoluteStoppedCallback(
+        orientation_absolute_stopped_runloop_->QuitClosure());
     device::DeviceSensorService::GetInstance()->SetDataFetcherForTesting(
         fetcher_);
   }
@@ -262,23 +275,16 @@ class DeviceSensorBrowserTest : public ContentBrowserTest {
     runner->Run();
   }
 
-  void EnableExperimentalFeatures() {
-    // TODO(riju): remove when the DeviceLight feature goes stable.
-    base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
-    if (!cmd_line->HasSwitch(switches::kEnableExperimentalWebPlatformFeatures))
-      cmd_line->AppendSwitch(switches::kEnableExperimentalWebPlatformFeatures);
-  }
-
   FakeDataFetcher* fetcher_;
 
   // NOTE: These can only be initialized once the main thread has been created
   // and so must be pointers instead of plain objects.
-  std::unique_ptr<base::RunLoop> light_started_runloop_;
-  std::unique_ptr<base::RunLoop> light_stopped_runloop_;
   std::unique_ptr<base::RunLoop> motion_started_runloop_;
   std::unique_ptr<base::RunLoop> motion_stopped_runloop_;
   std::unique_ptr<base::RunLoop> orientation_started_runloop_;
   std::unique_ptr<base::RunLoop> orientation_stopped_runloop_;
+  std::unique_ptr<base::RunLoop> orientation_absolute_started_runloop_;
+  std::unique_ptr<base::RunLoop> orientation_absolute_stopped_runloop_;
 
  private:
   base::WaitableEvent io_loop_finished_event_;
@@ -296,17 +302,17 @@ IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, OrientationTest) {
   orientation_stopped_runloop_->Run();
 }
 
-IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, LightTest) {
-  // The test page will register an event handler for light events,
-  // expects to get an event with fake values, then removes the event
+IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, OrientationAbsoluteTest) {
+  // The test page will register an event handler for absolute orientation
+  // events, expects to get an event with fake values, then removes the event
   // handler and navigates to #pass.
-  EnableExperimentalFeatures();
-  GURL test_url = GetTestUrl("device_sensors", "device_light_test.html");
+  GURL test_url =
+      GetTestUrl("device_sensors", "device_orientation_absolute_test.html");
   NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 2);
 
   EXPECT_EQ("pass", shell()->web_contents()->GetLastCommittedURL().ref());
-  light_started_runloop_->Run();
-  light_stopped_runloop_->Run();
+  orientation_absolute_started_runloop_->Run();
+  orientation_absolute_stopped_runloop_->Run();
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, MotionTest) {
@@ -321,21 +327,6 @@ IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, MotionTest) {
   motion_stopped_runloop_->Run();
 }
 
-IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, LightOneOffInfintyTest) {
-  // The test page registers an event handler for light events and expects
-  // to get an event with value equal to infinity, because no sensor data can
-  // be provided.
-  EnableExperimentalFeatures();
-  fetcher_->SetSensorDataAvailable(false);
-  GURL test_url =
-      GetTestUrl("device_sensors", "device_light_infinity_test.html");
-  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 2);
-
-  EXPECT_EQ("pass", shell()->web_contents()->GetLastCommittedURL().ref());
-  light_started_runloop_->Run();
-  light_stopped_runloop_->Run();
-}
-
 IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, OrientationNullTest) {
   // The test page registers an event handler for orientation events and
   // expects to get an event with null values, because no sensor data can be
@@ -348,6 +339,20 @@ IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, OrientationNullTest) {
   EXPECT_EQ("pass", shell()->web_contents()->GetLastCommittedURL().ref());
   orientation_started_runloop_->Run();
   orientation_stopped_runloop_->Run();
+}
+
+IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, OrientationAbsoluteNullTest) {
+  // The test page registers an event handler for absolute orientation events
+  // and expects to get an event with null values, because no sensor data can be
+  // provided.
+  fetcher_->SetSensorDataAvailable(false);
+  GURL test_url = GetTestUrl("device_sensors",
+                             "device_orientation_absolute_null_test.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 2);
+
+  EXPECT_EQ("pass", shell()->web_contents()->GetLastCommittedURL().ref());
+  orientation_absolute_started_runloop_->Run();
+  orientation_absolute_stopped_runloop_->Run();
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceSensorBrowserTest, MotionNullTest) {

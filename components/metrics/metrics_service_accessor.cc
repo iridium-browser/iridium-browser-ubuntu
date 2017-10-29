@@ -32,8 +32,8 @@ bool MetricsServiceAccessor::IsMetricsReportingEnabled(
 // static
 bool MetricsServiceAccessor::RegisterSyntheticFieldTrial(
     MetricsService* metrics_service,
-    const std::string& trial_name,
-    const std::string& group_name) {
+    base::StringPiece trial_name,
+    base::StringPiece group_name) {
   return RegisterSyntheticFieldTrialWithNameAndGroupHash(
       metrics_service, HashName(trial_name), HashName(group_name));
 }
@@ -41,13 +41,14 @@ bool MetricsServiceAccessor::RegisterSyntheticFieldTrial(
 // static
 bool MetricsServiceAccessor::RegisterSyntheticMultiGroupFieldTrial(
     MetricsService* metrics_service,
-    const std::string& trial_name,
+    base::StringPiece trial_name,
     const std::vector<uint32_t>& group_name_hashes) {
   if (!metrics_service)
     return false;
 
-  metrics_service->RegisterSyntheticMultiGroupFieldTrial(HashName(trial_name),
-                                                         group_name_hashes);
+  metrics_service->synthetic_trial_registry()
+      ->RegisterSyntheticMultiGroupFieldTrial(HashName(trial_name),
+                                              group_name_hashes);
   return true;
 }
 
@@ -55,7 +56,7 @@ bool MetricsServiceAccessor::RegisterSyntheticMultiGroupFieldTrial(
 bool MetricsServiceAccessor::RegisterSyntheticFieldTrialWithNameHash(
     MetricsService* metrics_service,
     uint32_t trial_name_hash,
-    const std::string& group_name) {
+    base::StringPiece group_name) {
   return RegisterSyntheticFieldTrialWithNameAndGroupHash(
       metrics_service, trial_name_hash, HashName(group_name));
 }
@@ -69,7 +70,8 @@ bool MetricsServiceAccessor::RegisterSyntheticFieldTrialWithNameAndGroupHash(
     return false;
 
   variations::SyntheticTrialGroup trial_group(trial_name_hash, group_name_hash);
-  metrics_service->RegisterSyntheticFieldTrial(trial_group);
+  metrics_service->synthetic_trial_registry()->RegisterSyntheticFieldTrial(
+      trial_group);
   return true;
 }
 

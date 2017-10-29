@@ -12,7 +12,6 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "build/build_config.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -22,14 +21,6 @@
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/common/content_features.h"
 #include "extensions/features/features.h"
-
-#if !defined(OS_ANDROID)
-#include "chrome/browser/ui/webui/md_history_ui.h"
-#endif
-
-#if defined(OS_ANDROID)
-#include "chrome/browser/android/chrome_feature_list.h"
-#endif
 
 bool FixupBrowserAboutURL(GURL* url,
                           content::BrowserContext* browser_context) {
@@ -57,77 +48,43 @@ bool WillHandleBrowserAboutURL(GURL* url,
 
   std::string host(url->host());
   std::string path;
+
+  // Handle chrome://settings.
+  if (host == chrome::kChromeUISettingsHost)
+    return true;  // Prevent further rewriting - this is a valid URL.
+
+  // Do not handle chrome://help.
+  if (host == chrome::kChromeUIHelpHost)
+    return false;  // Handled in the HandleWebUI handler.
+
   // Replace about with chrome-urls.
   if (host == chrome::kChromeUIAboutHost)
     host = chrome::kChromeUIChromeURLsHost;
+
+  // Legacy redirect from chrome://history-frame to chrome://history.
+  if (host == chrome::kDeprecatedChromeUIHistoryFrameHost)
+    host = chrome::kChromeUIHistoryHost;
+
   // Replace cache with view-http-cache.
   if (host == chrome::kChromeUICacheHost) {
     host = content::kChromeUINetworkViewCacheHost;
   // Replace sync with sync-internals (for legacy reasons).
   } else if (host == chrome::kChromeUISyncHost) {
     host = chrome::kChromeUISyncInternalsHost;
-  // Redirect chrome://extensions.
+// Redirect chrome://extensions, chrome://extensions-frame, and
+// chrome://settings/extensions all to chrome://extensions and forward path.
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  } else if (host == chrome::kChromeUIExtensionsHost) {
-    // If the material design extensions page is enabled, it gets its own host.
-    // Otherwise, it's handled by the uber settings page.
-    if (base::FeatureList::IsEnabled(features::kMaterialDesignExtensions)) {
-      host = chrome::kChromeUIExtensionsHost;
-      path = url->path();
-    } else {
-      host = chrome::kChromeUIUberHost;
-      path = chrome::kChromeUIExtensionsHost + url->path();
-    }
-  // Redirect chrome://settings/extensions (legacy URL).
-  } else if (host == chrome::kChromeUISettingsHost &&
-             url->path() ==
-                 std::string("/") + chrome::kDeprecatedExtensionsSubPage) {
-    host = chrome::kChromeUIUberHost;
-    path = chrome::kChromeUIExtensionsHost;
+  } else if (host == chrome::kChromeUIExtensionsHost ||
+             host == chrome::kChromeUIExtensionsFrameHost ||
+             (host == chrome::kChromeUISettingsHost &&
+              url->path() ==
+                  std::string("/") + chrome::kDeprecatedExtensionsSubPage)) {
+    host = chrome::kChromeUIExtensionsHost;
+    path = url->path();
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
-  // Redirect chrome://history.
   } else if (host == chrome::kChromeUIHistoryHost) {
-#if defined(OS_ANDROID)
-    // TODO(twellington): remove this after native Android history launches.
-    // See http://crbug.com/654071.
-    if (!base::FeatureList::IsEnabled(features::kNativeAndroidHistoryManager)) {
-      // On Android, redirect directly to chrome://history-frame since
-      // uber page is unsupported.
-      host = chrome::kChromeUIHistoryFrameHost;
-    }
-#else
-    // Material design history is handled on the top-level chrome://history
-    // host.
-    if (base::FeatureList::IsEnabled(features::kMaterialDesignHistory)) {
-      host = chrome::kChromeUIHistoryHost;
-      path = url->path();
-    } else {
-      host = chrome::kChromeUIUberHost;
-      path = chrome::kChromeUIHistoryHost + url->path();
-    }
-#endif
-  // Redirect chrome://settings, unless MD settings is enabled.
-  } else if (host == chrome::kChromeUISettingsHost) {
-    if (base::FeatureList::IsEnabled(features::kMaterialDesignSettings)) {
-      return true;  // Prevent further rewriting - this is a valid URL.
-    } else if (::switches::SettingsWindowEnabled()) {
-      host = chrome::kChromeUISettingsFrameHost;
-    } else {
-      host = chrome::kChromeUIUberHost;
-      path = chrome::kChromeUISettingsHost + url->path();
-    }
-  // Redirect chrome://help, unless MD settings is enabled.
-  } else if (host == chrome::kChromeUIHelpHost) {
-    if (base::FeatureList::IsEnabled(features::kMaterialDesignSettings)) {
-      return false;  // Handled in the HandleWebUI handler.
-    } else if (::switches::SettingsWindowEnabled()) {
-      host = chrome::kChromeUISettingsFrameHost;
-      if (url->path().empty() || url->path() == "/")
-        path = chrome::kChromeUIHelpHost;
-    } else {
-      host = chrome::kChromeUIUberHost;
-      path = chrome::kChromeUIHelpHost + url->path();
-    }
+    // Redirect chrome://history.
+    path = url->path();
   }
 
   GURL::Replacements replacements;
@@ -147,11 +104,12 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
     // Call AttemptRestart after chrome::Navigate() completes to avoid access of
     // gtk objects after they are destroyed by BrowserWindowGtk::Close().
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&chrome::AttemptRestart));
+        FROM_HERE, base::BindOnce(&chrome::AttemptRestart));
     return true;
-  } else if (base::LowerCaseEqualsASCII(spec, chrome::kChromeUIQuitURL)) {
+  }
+  if (base::LowerCaseEqualsASCII(spec, chrome::kChromeUIQuitURL)) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&chrome::AttemptExit));
+        FROM_HERE, base::BindOnce(&chrome::AttemptExit));
     return true;
   }
 

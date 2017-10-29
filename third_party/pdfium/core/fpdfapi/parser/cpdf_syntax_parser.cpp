@@ -7,6 +7,7 @@
 #include "core/fpdfapi/parser/cpdf_syntax_parser.h"
 
 #include <algorithm>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -23,7 +24,7 @@
 #include "core/fpdfapi/parser/cpdf_string.h"
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
 #include "core/fpdfapi/parser/fpdf_parser_utility.h"
-#include "core/fxcrt/fx_ext.h"
+#include "core/fxcrt/fx_extension.h"
 #include "third_party/base/numerics/safe_math.h"
 #include "third_party/base/ptr_util.h"
 
@@ -90,7 +91,7 @@ bool CPDF_SyntaxParser::GetNextChar(uint8_t& ch) {
   return true;
 }
 
-bool CPDF_SyntaxParser::GetCharAtBackward(FX_FILESIZE pos, uint8_t& ch) {
+bool CPDF_SyntaxParser::GetCharAtBackward(FX_FILESIZE pos, uint8_t* ch) {
   pos += m_HeaderOffset;
   if (pos >= m_FileLen)
     return false;
@@ -105,7 +106,7 @@ bool CPDF_SyntaxParser::GetCharAtBackward(FX_FILESIZE pos, uint8_t& ch) {
     if (!ReadChar(read_pos, read_size))
       return false;
   }
-  ch = m_pFileBuf[pos - m_BufOffset];
+  *ch = m_pFileBuf[pos - m_BufOffset];
   return true;
 }
 
@@ -204,7 +205,7 @@ CFX_ByteString CPDF_SyntaxParser::ReadString() {
   if (!GetNextChar(ch))
     return CFX_ByteString();
 
-  CFX_ByteTextBuf buf;
+  std::ostringstream buf;
   int32_t parlevel = 0;
   ReadStatus status = ReadStatus::Normal;
   int32_t iEscCode = 0;
@@ -213,7 +214,7 @@ CFX_ByteString CPDF_SyntaxParser::ReadString() {
       case ReadStatus::Normal:
         if (ch == ')') {
           if (parlevel == 0)
-            return buf.MakeString();
+            return CFX_ByteString(buf);
           parlevel--;
         } else if (ch == '(') {
           parlevel++;
@@ -221,40 +222,40 @@ CFX_ByteString CPDF_SyntaxParser::ReadString() {
         if (ch == '\\')
           status = ReadStatus::Backslash;
         else
-          buf.AppendChar(ch);
+          buf << static_cast<char>(ch);
         break;
       case ReadStatus::Backslash:
         if (ch >= '0' && ch <= '7') {
-          iEscCode = FXSYS_toDecimalDigit(static_cast<FX_WCHAR>(ch));
+          iEscCode = FXSYS_DecimalCharToInt(static_cast<wchar_t>(ch));
           status = ReadStatus::Octal;
           break;
         }
 
         if (ch == 'n') {
-          buf.AppendChar('\n');
+          buf << '\n';
         } else if (ch == 'r') {
-          buf.AppendChar('\r');
+          buf << '\r';
         } else if (ch == 't') {
-          buf.AppendChar('\t');
+          buf << '\t';
         } else if (ch == 'b') {
-          buf.AppendChar('\b');
+          buf << '\b';
         } else if (ch == 'f') {
-          buf.AppendChar('\f');
+          buf << '\f';
         } else if (ch == '\r') {
           status = ReadStatus::CarriageReturn;
           break;
         } else if (ch != '\n') {
-          buf.AppendChar(ch);
+          buf << static_cast<char>(ch);
         }
         status = ReadStatus::Normal;
         break;
       case ReadStatus::Octal:
         if (ch >= '0' && ch <= '7') {
           iEscCode =
-              iEscCode * 8 + FXSYS_toDecimalDigit(static_cast<FX_WCHAR>(ch));
+              iEscCode * 8 + FXSYS_DecimalCharToInt(static_cast<wchar_t>(ch));
           status = ReadStatus::FinishOctal;
         } else {
-          buf.AppendChar(iEscCode);
+          buf << static_cast<char>(iEscCode);
           status = ReadStatus::Normal;
           continue;
         }
@@ -263,10 +264,10 @@ CFX_ByteString CPDF_SyntaxParser::ReadString() {
         status = ReadStatus::Normal;
         if (ch >= '0' && ch <= '7') {
           iEscCode =
-              iEscCode * 8 + FXSYS_toDecimalDigit(static_cast<FX_WCHAR>(ch));
-          buf.AppendChar(iEscCode);
+              iEscCode * 8 + FXSYS_DecimalCharToInt(static_cast<wchar_t>(ch));
+          buf << static_cast<char>(iEscCode);
         } else {
-          buf.AppendChar(iEscCode);
+          buf << static_cast<char>(iEscCode);
           continue;
         }
         break;
@@ -282,7 +283,7 @@ CFX_ByteString CPDF_SyntaxParser::ReadString() {
   }
 
   GetNextChar(ch);
-  return buf.MakeString();
+  return CFX_ByteString(buf);
 }
 
 CFX_ByteString CPDF_SyntaxParser::ReadHexString() {
@@ -290,7 +291,7 @@ CFX_ByteString CPDF_SyntaxParser::ReadHexString() {
   if (!GetNextChar(ch))
     return CFX_ByteString();
 
-  CFX_ByteTextBuf buf;
+  std::ostringstream buf;
   bool bFirst = true;
   uint8_t code = 0;
   while (1) {
@@ -298,12 +299,12 @@ CFX_ByteString CPDF_SyntaxParser::ReadHexString() {
       break;
 
     if (std::isxdigit(ch)) {
-      int val = FXSYS_toHexDigit(ch);
+      int val = FXSYS_HexCharToInt(ch);
       if (bFirst) {
         code = val * 16;
       } else {
         code += val;
-        buf.AppendByte(code);
+        buf << static_cast<char>(code);
       }
       bFirst = !bFirst;
     }
@@ -312,9 +313,9 @@ CFX_ByteString CPDF_SyntaxParser::ReadHexString() {
       break;
   }
   if (!bFirst)
-    buf.AppendByte(code);
+    buf << static_cast<char>(code);
 
-  return buf.MakeString();
+  return CFX_ByteString(buf);
 }
 
 void CPDF_SyntaxParser::ToNextLine() {
@@ -358,7 +359,7 @@ void CPDF_SyntaxParser::ToNextWord() {
 
 CFX_ByteString CPDF_SyntaxParser::GetNextWord(bool* bIsNumber) {
   GetNextWordInternal(bIsNumber);
-  return CFX_ByteString((const FX_CHAR*)m_WordBuffer, m_WordSize);
+  return CFX_ByteString((const char*)m_WordBuffer, m_WordSize);
 }
 
 CFX_ByteString CPDF_SyntaxParser::GetKeyword() {
@@ -386,10 +387,10 @@ std::unique_ptr<CPDF_Object> CPDF_SyntaxParser::GetObject(
     if (bIsNumber) {
       CFX_ByteString nextword2 = GetNextWord(nullptr);
       if (nextword2 == "R") {
-        uint32_t objnum = FXSYS_atoui(word.c_str());
-        if (objnum == CPDF_Object::kInvalidObjNum)
+        uint32_t refnum = FXSYS_atoui(word.c_str());
+        if (refnum == CPDF_Object::kInvalidObjNum)
           return nullptr;
-        return pdfium::MakeUnique<CPDF_Reference>(pObjList, objnum);
+        return pdfium::MakeUnique<CPDF_Reference>(pObjList, refnum);
       }
     }
     m_Pos = SavedPos;
@@ -405,13 +406,13 @@ std::unique_ptr<CPDF_Object> CPDF_SyntaxParser::GetObject(
   if (word == "(") {
     CFX_ByteString str = ReadString();
     if (m_pCryptoHandler && bDecrypt)
-      m_pCryptoHandler->Decrypt(objnum, gennum, str);
+      str = m_pCryptoHandler->Decrypt(objnum, gennum, str);
     return pdfium::MakeUnique<CPDF_String>(m_pPool, str, false);
   }
   if (word == "<") {
     CFX_ByteString str = ReadHexString();
     if (m_pCryptoHandler && bDecrypt)
-      m_pCryptoHandler->Decrypt(objnum, gennum, str);
+      str = m_pCryptoHandler->Decrypt(objnum, gennum, str);
     return pdfium::MakeUnique<CPDF_String>(m_pPool, str, true);
   }
   if (word == "[") {
@@ -507,10 +508,10 @@ std::unique_ptr<CPDF_Object> CPDF_SyntaxParser::GetObjectForStrict(
     if (bIsNumber) {
       CFX_ByteString nextword2 = GetNextWord(nullptr);
       if (nextword2 == "R") {
-        uint32_t objnum = FXSYS_atoui(word.c_str());
-        if (objnum == CPDF_Object::kInvalidObjNum)
+        uint32_t refnum = FXSYS_atoui(word.c_str());
+        if (refnum == CPDF_Object::kInvalidObjNum)
           return nullptr;
-        return pdfium::MakeUnique<CPDF_Reference>(pObjList, objnum);
+        return pdfium::MakeUnique<CPDF_Reference>(pObjList, refnum);
       }
     }
     m_Pos = SavedPos;
@@ -526,17 +527,17 @@ std::unique_ptr<CPDF_Object> CPDF_SyntaxParser::GetObjectForStrict(
   if (word == "(") {
     CFX_ByteString str = ReadString();
     if (m_pCryptoHandler)
-      m_pCryptoHandler->Decrypt(objnum, gennum, str);
+      str = m_pCryptoHandler->Decrypt(objnum, gennum, str);
     return pdfium::MakeUnique<CPDF_String>(m_pPool, str, false);
   }
   if (word == "<") {
     CFX_ByteString str = ReadHexString();
     if (m_pCryptoHandler)
-      m_pCryptoHandler->Decrypt(objnum, gennum, str);
+      str = m_pCryptoHandler->Decrypt(objnum, gennum, str);
     return pdfium::MakeUnique<CPDF_String>(m_pPool, str, true);
   }
   if (word == "[") {
-    std::unique_ptr<CPDF_Array> pArray = pdfium::MakeUnique<CPDF_Array>();
+    auto pArray = pdfium::MakeUnique<CPDF_Array>();
     while (std::unique_ptr<CPDF_Object> pObj =
                GetObject(pObjList, objnum, gennum, true)) {
       pArray->Add(std::move(pObj));
@@ -635,7 +636,7 @@ std::unique_ptr<CPDF_Stream> CPDF_SyntaxParser::ReadStream(
   const CFX_ByteStringC kEndObjStr("endobj");
 
   CPDF_CryptoHandler* pCryptoHandler =
-      objnum == m_MetadataObjnum ? nullptr : m_pCryptoHandler.get();
+      objnum == m_MetadataObjnum ? nullptr : m_pCryptoHandler.Get();
   if (!pCryptoHandler) {
     bool bSearchForKeyword = true;
     if (len >= 0) {
@@ -645,13 +646,13 @@ std::unique_ptr<CPDF_Stream> CPDF_SyntaxParser::ReadStream(
         m_Pos = pos.ValueOrDie();
 
       m_Pos += ReadEOLMarkers(m_Pos);
-      FXSYS_memset(m_WordBuffer, 0, kEndStreamStr.GetLength() + 1);
+      memset(m_WordBuffer, 0, kEndStreamStr.GetLength() + 1);
       GetNextWordInternal(nullptr);
       // Earlier version of PDF specification doesn't require EOL marker before
       // 'endstream' keyword. If keyword 'endstream' follows the bytes in
       // specified length, it signals the end of stream.
-      if (FXSYS_memcmp(m_WordBuffer, kEndStreamStr.raw_str(),
-                       kEndStreamStr.GetLength()) == 0) {
+      if (memcmp(m_WordBuffer, kEndStreamStr.raw_str(),
+                 kEndStreamStr.GetLength()) == 0) {
         bSearchForKeyword = false;
       }
     }
@@ -724,6 +725,10 @@ std::unique_ptr<CPDF_Stream> CPDF_SyntaxParser::ReadStream(
     }
     m_Pos = streamStartPos;
   }
+  // Read up to the end of the buffer. Note, we allow zero length streams as
+  // we need to pass them through when we are importing pages into a new
+  // document.
+  len = std::min(len, m_FileLen - m_Pos - m_HeaderOffset);
   if (len < 0)
     return nullptr;
 
@@ -742,18 +747,16 @@ std::unique_ptr<CPDF_Stream> CPDF_SyntaxParser::ReadStream(
       pData = dest_buf.DetachBuffer();
     }
   }
-
   auto pStream =
       pdfium::MakeUnique<CPDF_Stream>(std::move(pData), len, std::move(pDict));
   streamStartPos = m_Pos;
-  FXSYS_memset(m_WordBuffer, 0, kEndObjStr.GetLength() + 1);
+  memset(m_WordBuffer, 0, kEndObjStr.GetLength() + 1);
   GetNextWordInternal(nullptr);
 
   int numMarkers = ReadEOLMarkers(m_Pos);
   if (m_WordSize == static_cast<unsigned int>(kEndObjStr.GetLength()) &&
       numMarkers != 0 &&
-      FXSYS_memcmp(m_WordBuffer, kEndObjStr.raw_str(),
-                   kEndObjStr.GetLength()) == 0) {
+      memcmp(m_WordBuffer, kEndObjStr.raw_str(), kEndObjStr.GetLength()) == 0) {
     m_Pos = streamStartPos;
   }
   return pStream;
@@ -781,7 +784,7 @@ uint32_t CPDF_SyntaxParser::GetDirectNum() {
     return 0;
 
   m_WordBuffer[m_WordSize] = 0;
-  return FXSYS_atoui(reinterpret_cast<const FX_CHAR*>(m_WordBuffer));
+  return FXSYS_atoui(reinterpret_cast<const char*>(m_WordBuffer));
 }
 
 bool CPDF_SyntaxParser::IsWholeWord(FX_FILESIZE startpos,
@@ -812,74 +815,38 @@ bool CPDF_SyntaxParser::IsWholeWord(FX_FILESIZE startpos,
   return true;
 }
 
-// TODO(dsinclair): Split into a SearchWordForward and SearchWordBackwards
-// and drop the bool.
-bool CPDF_SyntaxParser::SearchWord(const CFX_ByteStringC& tag,
-                                   bool bWholeWord,
-                                   bool bForward,
-                                   FX_FILESIZE limit) {
+bool CPDF_SyntaxParser::BackwardsSearchToWord(const CFX_ByteStringC& tag,
+                                              FX_FILESIZE limit) {
   int32_t taglen = tag.GetLength();
   if (taglen == 0)
     return false;
 
   FX_FILESIZE pos = m_Pos;
-  int32_t offset = 0;
-  if (!bForward)
-    offset = taglen - 1;
-
-  const uint8_t* tag_data = tag.raw_str();
-  uint8_t byte;
+  int32_t offset = taglen - 1;
   while (1) {
-    if (bForward) {
-      if (limit && pos >= m_Pos + limit)
-        return false;
+    if (limit && pos <= m_Pos - limit)
+      return false;
 
-      if (!GetCharAt(pos, byte))
-        return false;
+    uint8_t byte;
+    if (!GetCharAtBackward(pos, &byte))
+      return false;
 
-    } else {
-      if (limit && pos <= m_Pos - limit)
-        return false;
-
-      if (!GetCharAtBackward(pos, byte))
-        return false;
-    }
-
-    if (byte == tag_data[offset]) {
-      if (bForward) {
-        offset++;
-        if (offset < taglen) {
-          pos++;
-          continue;
-        }
-      } else {
-        offset--;
-        if (offset >= 0) {
-          pos--;
-          continue;
-        }
+    if (byte == tag[offset]) {
+      offset--;
+      if (offset >= 0) {
+        pos--;
+        continue;
       }
-
-      FX_FILESIZE startpos = bForward ? pos - taglen + 1 : pos;
-      if (!bWholeWord || IsWholeWord(startpos, limit, tag, false)) {
-        m_Pos = startpos;
+      if (IsWholeWord(pos, limit, tag, false)) {
+        m_Pos = pos;
         return true;
       }
     }
-
-    if (bForward) {
-      offset = byte == tag_data[0] ? 1 : 0;
-      pos++;
-    } else {
-      offset = byte == tag_data[taglen - 1] ? taglen - 2 : taglen - 1;
-      pos--;
-    }
-
+    offset = byte == tag[taglen - 1] ? taglen - 2 : taglen - 1;
+    pos--;
     if (pos < 0)
       return false;
   }
-
-  return false;
 }
 
 FX_FILESIZE CPDF_SyntaxParser::FindTag(const CFX_ByteStringC& tag,
@@ -909,6 +876,6 @@ FX_FILESIZE CPDF_SyntaxParser::FindTag(const CFX_ByteStringC& tag,
 }
 
 void CPDF_SyntaxParser::SetEncrypt(
-    std::unique_ptr<CPDF_CryptoHandler> pCryptoHandler) {
-  m_pCryptoHandler = std::move(pCryptoHandler);
+    const CFX_RetainPtr<CPDF_CryptoHandler>& pCryptoHandler) {
+  m_pCryptoHandler = pCryptoHandler;
 }

@@ -55,35 +55,6 @@ int GetSanitizedArg(const std::string& switch_name) {
   return int_value;
 }
 
-// Returns whether the auto-enrollment check is required. When
-// kCheckEnrollmentKey VPD entry is present, it is explicitly stating whether
-// the forced re-enrollment is required or not. Otherwise, for backward
-// compatibility with devices upgrading from an older version of Chrome OS, the
-// kActivateDateKey VPD entry is queried. If it's missing, FRE is not required.
-// This enables factories to start full guest sessions for testing, see
-// http://crbug.com/397354 for more context. The requirement for the machine
-// serial number to be present is a sanity-check to ensure that the VPD has
-// actually been read successfully. If VPD read failed, the FRE check is
-// required.
-AutoEnrollmentController::FRERequirement GetFRERequirement() {
-  std::string check_enrollment_value;
-  system::StatisticsProvider* provider =
-      system::StatisticsProvider::GetInstance();
-  bool fre_flag_found = provider->GetMachineStatistic(
-      system::kCheckEnrollmentKey, &check_enrollment_value);
-
-  if (fre_flag_found) {
-    if (check_enrollment_value == "0")
-      return AutoEnrollmentController::EXPLICITLY_NOT_REQUIRED;
-    if (check_enrollment_value == "1")
-      return AutoEnrollmentController::EXPLICITLY_REQUIRED;
-  }
-  if (!provider->GetMachineStatistic(system::kActivateDateKey, nullptr) &&
-      !provider->GetEnterpriseMachineID().empty())
-    return AutoEnrollmentController::NOT_REQUIRED;
-  return AutoEnrollmentController::REQUIRED;
-}
-
 std::string FRERequirementToString(
     AutoEnrollmentController::FRERequirement requirement) {
   switch (requirement) {
@@ -108,6 +79,7 @@ const char AutoEnrollmentController::kForcedReEnrollmentNever[] = "never";
 const char AutoEnrollmentController::kForcedReEnrollmentOfficialBuild[] =
     "official";
 
+// static
 AutoEnrollmentController::Mode AutoEnrollmentController::GetMode() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
@@ -135,14 +107,48 @@ AutoEnrollmentController::Mode AutoEnrollmentController::GetMode() {
   return MODE_NONE;
 }
 
+// static
+AutoEnrollmentController::FRERequirement
+AutoEnrollmentController::GetFRERequirement() {
+  std::string check_enrollment_value;
+  system::StatisticsProvider* provider =
+      system::StatisticsProvider::GetInstance();
+  bool fre_flag_found = provider->GetMachineStatistic(
+      system::kCheckEnrollmentKey, &check_enrollment_value);
+
+  if (fre_flag_found) {
+    if (check_enrollment_value == "0")
+      return AutoEnrollmentController::EXPLICITLY_NOT_REQUIRED;
+    if (check_enrollment_value == "1")
+      return AutoEnrollmentController::EXPLICITLY_REQUIRED;
+  }
+  if (!provider->GetMachineStatistic(system::kActivateDateKey, nullptr) &&
+      !provider->GetEnterpriseMachineID().empty()) {
+    return AutoEnrollmentController::NOT_REQUIRED;
+  }
+  return AutoEnrollmentController::REQUIRED;
+}
+
 AutoEnrollmentController::AutoEnrollmentController() {}
 
 AutoEnrollmentController::~AutoEnrollmentController() {}
 
 void AutoEnrollmentController::Start() {
-  // This method is called at the point in the OOBE/login flow at which the
-  // auto-enrollment check can start. This happens either after the EULA is
-  // accepted, or right after a reboot if the EULA has already been accepted.
+  switch (state_) {
+    case policy::AUTO_ENROLLMENT_STATE_PENDING:
+      // Abort re-start if the check is still running.
+      return;
+    case policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT:
+    case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT:
+      // Abort re-start when there's already a final decision.
+      return;
+
+    case policy::AUTO_ENROLLMENT_STATE_IDLE:
+    case policy::AUTO_ENROLLMENT_STATE_CONNECTION_ERROR:
+    case policy::AUTO_ENROLLMENT_STATE_SERVER_ERROR:
+      // Continue (re-)start.
+      break;
+  }
 
   // Skip if GAIA is disabled or modulus configuration is not present.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -190,19 +196,6 @@ void AutoEnrollmentController::Start() {
                  client_start_weak_factory_.GetWeakPtr()));
 }
 
-void AutoEnrollmentController::Cancel() {
-  if (client_) {
-    // Cancelling the |client_| allows it to determine whether
-    // its protocol finished before login was complete.
-    client_.release()->CancelAndDeleteSoon();
-  }
-
-  // Make sure to nuke pending |client_| start sequences.
-  client_start_weak_factory_.InvalidateWeakPtrs();
-
-  safeguard_timer_.Stop();
-}
-
 void AutoEnrollmentController::Retry() {
   if (client_)
     client_->Retry();
@@ -219,25 +212,22 @@ AutoEnrollmentController::RegisterProgressCallback(
 void AutoEnrollmentController::OnOwnershipStatusCheckDone(
     DeviceSettingsService::OwnershipStatus status) {
   switch (status) {
-    case DeviceSettingsService::OWNERSHIP_NONE: {
+    case DeviceSettingsService::OWNERSHIP_NONE:
       g_browser_process->platform_part()
           ->browser_policy_connector_chromeos()
           ->GetStateKeysBroker()
           ->RequestStateKeys(
               base::Bind(&AutoEnrollmentController::StartClient,
                          client_start_weak_factory_.GetWeakPtr()));
-      break;
-    }
-    case DeviceSettingsService::OWNERSHIP_TAKEN: {
+      return;
+    case DeviceSettingsService::OWNERSHIP_TAKEN:
       VLOG(1) << "Device already owned, skipping auto-enrollment check.";
       UpdateState(policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT);
-      break;
-    }
-    case DeviceSettingsService::OWNERSHIP_UNKNOWN: {
+      return;
+    case DeviceSettingsService::OWNERSHIP_UNKNOWN:
       LOG(ERROR) << "Ownership unknown, skipping auto-enrollment check.";
       UpdateState(policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT);
-      break;
-    }
+      return;
   }
 }
 
@@ -327,6 +317,12 @@ void AutoEnrollmentController::OnFirmwareManagementParametersRemoved(
 }
 
 void AutoEnrollmentController::Timeout() {
+  // When tightening the FRE flows, as a cautionary measure (to prevent
+  // interference with consumer devices) timeout was chosen to only enforce FRE
+  // for EXPLICTLY_REQUIRED.
+  // TODO(igorcov): Investigate the remaining causes of hitting timeout and
+  // potentially either remove the timeout altogether or enforce FRE in the
+  // REQUIRED case as well.
   // TODO(mnissler): Add UMA to track results of auto-enrollment checks.
   if (client_start_weak_factory_.HasWeakPtrs() &&
       fre_requirement_ != EXPLICITLY_REQUIRED) {
@@ -344,7 +340,14 @@ void AutoEnrollmentController::Timeout() {
   }
 
   // Reset state.
-  Cancel();
+  if (client_) {
+    // Cancelling the |client_| allows it to determine whether
+    // its protocol finished before login was complete.
+    client_.release()->CancelAndDeleteSoon();
+  }
+
+  // Make sure to nuke pending |client_| start sequences.
+  client_start_weak_factory_.InvalidateWeakPtrs();
 }
 
 }  // namespace chromeos

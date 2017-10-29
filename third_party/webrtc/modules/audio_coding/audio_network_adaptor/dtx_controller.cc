@@ -9,7 +9,7 @@
  */
 
 #include "webrtc/modules/audio_coding/audio_network_adaptor/dtx_controller.h"
-#include "webrtc/base/checks.h"
+#include "webrtc/rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -31,8 +31,7 @@ void DtxController::UpdateNetworkMetrics(
     uplink_bandwidth_bps_ = network_metrics.uplink_bandwidth_bps;
 }
 
-void DtxController::MakeDecision(
-    AudioNetworkAdaptor::EncoderRuntimeConfig* config) {
+void DtxController::MakeDecision(AudioEncoderRuntimeConfig* config) {
   // Decision on |enable_dtx| should not have been made.
   RTC_DCHECK(!config->enable_dtx);
 

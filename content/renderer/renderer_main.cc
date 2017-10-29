@@ -40,6 +40,12 @@
 #include "base/android/library_loader/library_loader_hooks.h"
 #endif  // OS_ANDROID
 
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#include "content/common/font_config_ipc_linux.h"
+#include "content/common/sandbox_linux/sandbox_linux.h"
+#include "third_party/skia/include/ports/SkFontConfigInterface.h"
+#endif
+
 #if defined(OS_MACOSX)
 #include <Carbon/Carbon.h>
 #include <signal.h>
@@ -55,11 +61,11 @@
 #endif
 
 #if BUILDFLAG(ENABLE_WEBRTC)
-#include "third_party/webrtc_overrides/init_webrtc.h"
+#include "third_party/webrtc_overrides/init_webrtc.h"  // nogncheck
 #endif
 
 #if defined(USE_OZONE)
-#include "ui/ozone/public/client_native_pixmap_factory.h"
+#include "ui/ozone/public/client_native_pixmap_factory_ozone.h"
 #endif
 
 namespace content {
@@ -76,8 +82,8 @@ static void HandleRendererErrorTestParameters(
 }
 
 #if defined(USE_OZONE)
-base::LazyInstance<std::unique_ptr<ui::ClientNativePixmapFactory>>
-    g_pixmap_factory = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<std::unique_ptr<gfx::ClientNativePixmapFactory>>::
+    DestructorAtExit g_pixmap_factory = LAZY_INSTANCE_INITIALIZER;
 #endif
 
 }  // namespace
@@ -110,7 +116,20 @@ int RendererMain(const MainFunctionParams& parameters) {
   }
 #endif
 
-  SkGraphics::Init();
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+  // This call could already have been made from zygote_main_linux.cc. However
+  // we need to do it here if Zygote is disabled.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoZygote)) {
+    SkFontConfigInterface::SetGlobal(new FontConfigIPC(GetSandboxFD()))
+        ->unref();
+  }
+#endif
+
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableSkiaRuntimeOpts)) {
+    SkGraphics::Init();
+  }
+
 #if defined(OS_ANDROID)
   const int kMB = 1024 * 1024;
   size_t font_cache_limit =
@@ -119,8 +138,8 @@ int RendererMain(const MainFunctionParams& parameters) {
 #endif
 
 #if defined(USE_OZONE)
-  g_pixmap_factory.Get() = ui::ClientNativePixmapFactory::Create();
-  ui::ClientNativePixmapFactory::SetInstance(g_pixmap_factory.Get().get());
+  g_pixmap_factory.Get() = ui::CreateClientNativePixmapFactoryOzone();
+  gfx::ClientNativePixmapFactory::SetInstance(g_pixmap_factory.Get().get());
 #endif
 
   // This function allows pausing execution using the --renderer-startup-dialog

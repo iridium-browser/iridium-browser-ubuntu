@@ -16,8 +16,9 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/media/webrtc/desktop_media_list_observer.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capturer.h"
@@ -161,39 +162,19 @@ ACTION_P2(CheckListSize, model, expected_list_size) {
   EXPECT_EQ(expected_list_size, model->GetSourceCount());
 }
 
-ACTION_P(QuitMessageLoop, message_loop) {
-  message_loop->task_runner()->PostTask(
-      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+ACTION_P2(QuitRunLoop, task_runner, run_loop) {
+  task_runner->PostTask(FROM_HERE, run_loop->QuitWhenIdleClosure());
 }
 
 class NativeDesktopMediaListTest : public views::ViewsTestBase {
  public:
-  NativeDesktopMediaListTest()
-      : ui_thread_(content::BrowserThread::UI, message_loop()) {}
+  NativeDesktopMediaListTest() = default;
 
   void TearDown() override {
     for (size_t i = 0; i < desktop_widgets_.size(); i++)
       desktop_widgets_[i].reset();
 
     ViewsTestBase::TearDown();
-  }
-
-  void CreateWithCapturers(bool screen, bool window) {
-    webrtc::DesktopCapturer* screen_capturer = nullptr;
-    if (screen)
-      screen_capturer = new FakeScreenCapturer();
-
-    if (window)
-      window_capturer_ = new FakeWindowCapturer();
-    else
-      window_capturer_ = nullptr;
-
-    model_.reset(new NativeDesktopMediaList(
-        std::unique_ptr<webrtc::DesktopCapturer>(screen_capturer),
-        std::unique_ptr<webrtc::DesktopCapturer>(window_capturer_)));
-
-    // Set update period to reduce the time it takes to run tests.
-    model_->SetUpdatePeriod(base::TimeDelta::FromMilliseconds(20));
   }
 
   void AddNativeWindow(int id) {
@@ -266,27 +247,19 @@ class NativeDesktopMediaListTest : public views::ViewsTestBase {
 
 #endif  // defined(USE_AURA)
 
-  void AddWindowsAndVerify(bool screen,
-                           size_t window_count,
-                           size_t aura_count,
-                           bool has_view_dialog) {
-    // Create model_.
-    CreateWithCapturers(screen, window_count > 0);
+  void AddWindowsAndVerify(bool has_view_dialog) {
+    window_capturer_ = new FakeWindowCapturer();
+    model_ = base::MakeUnique<NativeDesktopMediaList>(
+        DesktopMediaID::TYPE_WINDOW, base::WrapUnique(window_capturer_));
 
-#if !defined(USE_AURA)
-    aura_count = 0;
-#endif
-    if (aura_count >= window_count)
-      aura_count = window_count - 1;
-
-    if (window_count == 0)
-      has_view_dialog = false;
+    // Set update period to reduce the time it takes to run tests.
+    model_->SetUpdatePeriod(base::TimeDelta::FromMilliseconds(20));
 
     // Set up widows.
-    size_t aura_window_first_index = window_count - aura_count;
-    for (size_t i = 0; i < window_count; ++i) {
+    size_t aura_window_first_index = kDefaultWindowCount - kDefaultAuraCount;
+    for (size_t i = 0; i < kDefaultWindowCount; ++i) {
       if (i < aura_window_first_index) {
-        AddNativeWindow(i + 1);
+        AddNativeWindow(i);
       } else {
 #if defined(USE_AURA)
         AddAuraWindow();
@@ -297,6 +270,8 @@ class NativeDesktopMediaListTest : public views::ViewsTestBase {
     if (window_capturer_)
       window_capturer_->SetWindowList(window_list_);
 
+    size_t window_count = kDefaultWindowCount;
+
     // Set view dialog window ID as the first window id.
     if (has_view_dialog) {
       DesktopMediaID dialog_window_id(DesktopMediaID::TYPE_WINDOW,
@@ -306,40 +281,34 @@ class NativeDesktopMediaListTest : public views::ViewsTestBase {
       aura_window_first_index--;
     }
 
+    base::RunLoop run_loop;
+
     {
       testing::InSequence dummy;
-      size_t source_count = screen ? window_count + 1 : window_count;
-      for (size_t i = 0; i < source_count; ++i) {
+      for (size_t i = 0; i < window_count; ++i) {
         EXPECT_CALL(observer_, OnSourceAdded(model_.get(), i))
             .WillOnce(CheckListSize(model_.get(), static_cast<int>(i + 1)));
       }
-      for (size_t i = 0; i < source_count - 1; ++i) {
+      for (size_t i = 0; i < window_count - 1; ++i) {
         EXPECT_CALL(observer_, OnSourceThumbnailChanged(model_.get(), i));
       }
       EXPECT_CALL(observer_,
-                  OnSourceThumbnailChanged(model_.get(), source_count - 1))
-          .WillOnce(QuitMessageLoop(message_loop()));
+                  OnSourceThumbnailChanged(model_.get(), window_count - 1))
+          .WillOnce(
+              QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop));
     }
     model_->StartUpdating(&observer_);
-    base::RunLoop().Run();
-
-    if (screen) {
-      EXPECT_EQ(model_->GetSource(0).id.type, DesktopMediaID::TYPE_SCREEN);
-      EXPECT_EQ(model_->GetSource(0).id.id, 0);
-    }
+    run_loop.Run();
 
     for (size_t i = 0; i < window_count; ++i) {
-      size_t source_index = screen ? i + 1 : i;
-      EXPECT_EQ(model_->GetSource(source_index).id.type,
-                DesktopMediaID::TYPE_WINDOW);
-      EXPECT_EQ(model_->GetSource(source_index).name,
-                base::UTF8ToUTF16("Test window"));
+      EXPECT_EQ(model_->GetSource(i).id.type, DesktopMediaID::TYPE_WINDOW);
+      EXPECT_EQ(model_->GetSource(i).name, base::UTF8ToUTF16("Test window"));
       int index = has_view_dialog ? i + 1 : i;
       int native_id = window_list_[index].id;
-      EXPECT_EQ(model_->GetSource(source_index).id.id, native_id);
+      EXPECT_EQ(model_->GetSource(i).id.id, native_id);
 #if defined(USE_AURA)
       if (i >= aura_window_first_index)
-        EXPECT_EQ(model_->GetSource(source_index).id.aura_id,
+        EXPECT_EQ(model_->GetSource(i).id.aura_id,
                   native_aura_id_map_[native_id]);
 #endif
     }
@@ -347,6 +316,8 @@ class NativeDesktopMediaListTest : public views::ViewsTestBase {
   }
 
  protected:
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+
   // Must be listed before |model_|, so it's destroyed last.
   MockObserver observer_;
 
@@ -358,37 +329,57 @@ class NativeDesktopMediaListTest : public views::ViewsTestBase {
   std::map<DesktopMediaID::Id, DesktopMediaID::Id> native_aura_id_map_;
   std::unique_ptr<NativeDesktopMediaList> model_;
 
-  content::TestBrowserThread ui_thread_;
-
   DISALLOW_COPY_AND_ASSIGN(NativeDesktopMediaListTest);
 };
 
-TEST_F(NativeDesktopMediaListTest, WindowsOnly) {
-  AddWindowsAndVerify(false, kDefaultWindowCount, kDefaultAuraCount, false);
+TEST_F(NativeDesktopMediaListTest, Windows) {
+  AddWindowsAndVerify(false);
 }
 
 TEST_F(NativeDesktopMediaListTest, ScreenOnly) {
-  AddWindowsAndVerify(true, 0, 0, false);
+  model_ = base::MakeUnique<NativeDesktopMediaList>(
+      DesktopMediaID::TYPE_SCREEN, base::MakeUnique<FakeScreenCapturer>());
+
+  // Set update period to reduce the time it takes to run tests.
+  model_->SetUpdatePeriod(base::TimeDelta::FromMilliseconds(20));
+
+  base::RunLoop run_loop;
+
+  {
+    testing::InSequence dummy;
+    EXPECT_CALL(observer_, OnSourceAdded(model_.get(), 0))
+        .WillOnce(CheckListSize(model_.get(), 1));
+    EXPECT_CALL(observer_, OnSourceThumbnailChanged(model_.get(), 0))
+        .WillOnce(QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop));
+  }
+  model_->StartUpdating(&observer_);
+  run_loop.Run();
+
+  EXPECT_EQ(model_->GetSource(0).id.type, DesktopMediaID::TYPE_SCREEN);
+  EXPECT_EQ(model_->GetSource(0).id.id, 0);
 }
 
 // Verifies that the window specified with SetViewDialogWindowId() is filtered
 // from the results.
-TEST_F(NativeDesktopMediaListTest, Filtering) {
-  AddWindowsAndVerify(true, kDefaultWindowCount, kDefaultAuraCount, true);
+TEST_F(NativeDesktopMediaListTest, WindowFiltering) {
+  AddWindowsAndVerify(true);
 }
 
 TEST_F(NativeDesktopMediaListTest, AddNativeWindow) {
-  AddWindowsAndVerify(true, kDefaultWindowCount, kDefaultAuraCount, false);
+  AddWindowsAndVerify(false);
 
-  const int index = kDefaultWindowCount + 1;
+  base::RunLoop run_loop;
+
+  const int index = kDefaultWindowCount;
   EXPECT_CALL(observer_, OnSourceAdded(model_.get(), index))
-      .WillOnce(DoAll(CheckListSize(model_.get(), index + 1),
-                      QuitMessageLoop(message_loop())));
+      .WillOnce(
+          DoAll(CheckListSize(model_.get(), kDefaultWindowCount + 1),
+                QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop)));
 
   AddNativeWindow(index);
   window_capturer_->SetWindowList(window_list_);
 
-  base::RunLoop().Run();
+  run_loop.Run();
 
   EXPECT_EQ(model_->GetSource(index).id.type, DesktopMediaID::TYPE_WINDOW);
   EXPECT_EQ(model_->GetSource(index).id.id, index);
@@ -396,17 +387,20 @@ TEST_F(NativeDesktopMediaListTest, AddNativeWindow) {
 
 #if defined(ENABLE_AURA_WINDOW_TESTS)
 TEST_F(NativeDesktopMediaListTest, AddAuraWindow) {
-  AddWindowsAndVerify(true, kDefaultWindowCount, kDefaultAuraCount, false);
+  AddWindowsAndVerify(false);
 
-  const int index = kDefaultWindowCount + 1;
+  base::RunLoop run_loop;
+
+  const int index = kDefaultWindowCount;
   EXPECT_CALL(observer_, OnSourceAdded(model_.get(), index))
-      .WillOnce(DoAll(CheckListSize(model_.get(), index + 1),
-                      QuitMessageLoop(message_loop())));
+      .WillOnce(
+          DoAll(CheckListSize(model_.get(), kDefaultWindowCount + 1),
+                QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop)));
 
   AddAuraWindow();
   window_capturer_->SetWindowList(window_list_);
 
-  base::RunLoop().Run();
+  run_loop.Run();
 
   int native_id = window_list_.back().id;
   EXPECT_EQ(model_->GetSource(index).id.type, DesktopMediaID::TYPE_WINDOW);
@@ -417,95 +411,111 @@ TEST_F(NativeDesktopMediaListTest, AddAuraWindow) {
 #endif  // defined(ENABLE_AURA_WINDOW_TESTS)
 
 TEST_F(NativeDesktopMediaListTest, RemoveNativeWindow) {
-  AddWindowsAndVerify(true, kDefaultWindowCount, kDefaultAuraCount, false);
+  AddWindowsAndVerify(false);
 
-  EXPECT_CALL(observer_, OnSourceRemoved(model_.get(), 1))
-      .WillOnce(DoAll(CheckListSize(model_.get(), kDefaultWindowCount),
-                      QuitMessageLoop(message_loop())));
+  base::RunLoop run_loop;
+
+  EXPECT_CALL(observer_, OnSourceRemoved(model_.get(), 0))
+      .WillOnce(
+          DoAll(CheckListSize(model_.get(), kDefaultWindowCount - 1),
+                QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop)));
 
   window_list_.erase(window_list_.begin());
   window_capturer_->SetWindowList(window_list_);
 
-  base::RunLoop().Run();
+  run_loop.Run();
 }
 
 #if defined(ENABLE_AURA_WINDOW_TESTS)
 TEST_F(NativeDesktopMediaListTest, RemoveAuraWindow) {
-  AddWindowsAndVerify(true, kDefaultWindowCount, kDefaultAuraCount, false);
+  AddWindowsAndVerify(false);
 
-  int aura_window_start_index = kDefaultWindowCount - kDefaultAuraCount + 1;
+  base::RunLoop run_loop;
+
+  int aura_window_start_index = kDefaultWindowCount - kDefaultAuraCount;
   EXPECT_CALL(observer_, OnSourceRemoved(model_.get(), aura_window_start_index))
-      .WillOnce(DoAll(CheckListSize(model_.get(), kDefaultWindowCount),
-                      QuitMessageLoop(message_loop())));
+      .WillOnce(
+          DoAll(CheckListSize(model_.get(), kDefaultWindowCount - 1),
+                QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop)));
 
   RemoveAuraWindow(0);
   window_capturer_->SetWindowList(window_list_);
 
-  base::RunLoop().Run();
+  run_loop.Run();
 }
 #endif  // defined(ENABLE_AURA_WINDOW_TESTS)
 
 TEST_F(NativeDesktopMediaListTest, RemoveAllWindows) {
-  AddWindowsAndVerify(true, kDefaultWindowCount, kDefaultAuraCount, false);
+  AddWindowsAndVerify(false);
+
+  base::RunLoop run_loop;
 
   testing::InSequence seq;
   for (int i = 0; i < kDefaultWindowCount - 1; i++) {
-    EXPECT_CALL(observer_, OnSourceRemoved(model_.get(), 1))
-        .WillOnce(CheckListSize(model_.get(), kDefaultWindowCount - i));
+    EXPECT_CALL(observer_, OnSourceRemoved(model_.get(), 0))
+        .WillOnce(CheckListSize(model_.get(), kDefaultWindowCount - i - 1));
   }
-  EXPECT_CALL(observer_, OnSourceRemoved(model_.get(), 1))
-      .WillOnce(DoAll(CheckListSize(model_.get(), 1),
-                      QuitMessageLoop(message_loop())));
+  EXPECT_CALL(observer_, OnSourceRemoved(model_.get(), 0))
+      .WillOnce(
+          DoAll(CheckListSize(model_.get(), 0),
+                QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop)));
 
   window_list_.clear();
   window_capturer_->SetWindowList(window_list_);
 
-  base::RunLoop().Run();
+  run_loop.Run();
 }
 
 TEST_F(NativeDesktopMediaListTest, UpdateTitle) {
-  AddWindowsAndVerify(true, kDefaultWindowCount, kDefaultAuraCount, false);
+  AddWindowsAndVerify(false);
 
-  EXPECT_CALL(observer_, OnSourceNameChanged(model_.get(), 1))
-      .WillOnce(QuitMessageLoop(message_loop()));
+  base::RunLoop run_loop;
+
+  EXPECT_CALL(observer_, OnSourceNameChanged(model_.get(), 0))
+      .WillOnce(QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop));
 
   const std::string kTestTitle = "New Title";
   window_list_[0].title = kTestTitle;
   window_capturer_->SetWindowList(window_list_);
 
-  base::RunLoop().Run();
+  run_loop.Run();
 
-  EXPECT_EQ(model_->GetSource(1).name, base::UTF8ToUTF16(kTestTitle));
+  EXPECT_EQ(model_->GetSource(0).name, base::UTF8ToUTF16(kTestTitle));
 }
 
 TEST_F(NativeDesktopMediaListTest, UpdateThumbnail) {
-  AddWindowsAndVerify(true, kDefaultWindowCount, kDefaultAuraCount, false);
+  AddWindowsAndVerify(false);
 
   // Aura windows' thumbnails may unpredictably change over time.
   for (size_t i = kDefaultWindowCount - kDefaultAuraCount;
        i < kDefaultWindowCount; ++i) {
-    EXPECT_CALL(observer_, OnSourceThumbnailChanged(model_.get(), i + 1))
+    EXPECT_CALL(observer_, OnSourceThumbnailChanged(model_.get(), i))
         .Times(testing::AnyNumber());
   }
 
-  EXPECT_CALL(observer_, OnSourceThumbnailChanged(model_.get(), 1))
-      .WillOnce(QuitMessageLoop(message_loop()));
+  base::RunLoop run_loop;
+
+  EXPECT_CALL(observer_, OnSourceThumbnailChanged(model_.get(), 0))
+      .WillOnce(QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop));
 
   // Update frame for the window and verify that we get notification about it.
-  window_capturer_->SetNextFrameValue(1, 10);
+  window_capturer_->SetNextFrameValue(0, 10);
 
-  base::RunLoop().Run();
+  run_loop.Run();
 }
 
 TEST_F(NativeDesktopMediaListTest, MoveWindow) {
-  AddWindowsAndVerify(true, kDefaultWindowCount, kDefaultAuraCount, false);
+  AddWindowsAndVerify(false);
 
-  EXPECT_CALL(observer_, OnSourceMoved(model_.get(), 2, 1))
-      .WillOnce(DoAll(CheckListSize(model_.get(), kDefaultWindowCount + 1),
-                      QuitMessageLoop(message_loop())));
+  base::RunLoop run_loop;
+
+  EXPECT_CALL(observer_, OnSourceMoved(model_.get(), 1, 0))
+      .WillOnce(
+          DoAll(CheckListSize(model_.get(), kDefaultWindowCount),
+                QuitRunLoop(base::ThreadTaskRunnerHandle::Get(), &run_loop)));
 
   std::swap(window_list_[0], window_list_[1]);
   window_capturer_->SetWindowList(window_list_);
 
-  base::RunLoop().Run();
+  run_loop.Run();
 }

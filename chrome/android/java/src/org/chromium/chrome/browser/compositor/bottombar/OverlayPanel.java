@@ -17,12 +17,11 @@ import org.chromium.chrome.browser.compositor.LayerTitleCache;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager.PanelPriority;
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
 import org.chromium.chrome.browser.compositor.layouts.components.VirtualView;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeEventFilter.ScrollDirection;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeHandler;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilter;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilterHost;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.GestureHandler;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.OverlayPanelEventFilter;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.ScrollDirection;
 import org.chromium.chrome.browser.compositor.overlays.SceneOverlay;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneOverlayLayer;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
@@ -55,7 +54,6 @@ public class OverlayPanel extends OverlayPanelAnimation implements ActivityState
 
     /**
      * The reason for a change in the Overlay Panel's state.
-     * TODO(mdjones): Separate generic reasons from Contextual Search reasons.
      */
     public enum StateChangeReason {
         UNKNOWN,
@@ -77,15 +75,7 @@ public class OverlayPanel extends OverlayPanelAnimation implements ActivityState
         OPTOUT,
         CLOSE_BUTTON,
         SUPPRESS,
-        UNSUPPRESS,
-        FULLSCREEN_ENTERED,
-        FULLSCREEN_EXITED,
-        INFOBAR_SHOWN,
-        INFOBAR_HIDDEN,
-        CONTENT_CHANGED,
-        KEYBOARD_SHOWN,
-        KEYBOARD_HIDDEN,
-        TAB_NAVIGATION
+        UNSUPPRESS
     }
 
     /** The activity this panel is in. */
@@ -138,14 +128,14 @@ public class OverlayPanel extends OverlayPanelAnimation implements ActivityState
      * @param eventHost The {@link EventFilterHost} used to propagate events.
      * @param panelManager The {@link OverlayPanelManager} responsible for showing panels.
      */
-    public OverlayPanel(Context context, LayoutUpdateHost updateHost, EventFilterHost eventHost,
-                OverlayPanelManager panelManager) {
+    public OverlayPanel(
+            Context context, LayoutUpdateHost updateHost, OverlayPanelManager panelManager) {
         super(context, updateHost);
         mContentFactory = this;
 
         mPanelManager = panelManager;
         mPanelManager.registerPanel(this);
-        mEventFilter = new OverlayPanelEventFilter(mContext, eventHost, this);
+        mEventFilter = new OverlayPanelEventFilter(mContext, this);
     }
 
     /**
@@ -812,12 +802,10 @@ public class OverlayPanel extends OverlayPanelAnimation implements ActivityState
      */
     protected void resizePanelContentViewCore(float width, float height) {
         if (!isShowing()) return;
-        ContentViewCore panelContent = getContentViewCore();
-        if (panelContent != null) {
-            panelContent.onSizeChanged((int) (width / mPxToDp),
-                    (int) (height / mPxToDp), panelContent.getViewportWidthPix(),
-                    panelContent.getViewportHeightPix());
-            panelContent.onPhysicalBackingSizeChanged(
+        if (getContentViewCore() != null) {
+            getOverlayPanelContent().onSizeChanged(
+                    (int) (width / mPxToDp), (int) (height / mPxToDp));
+            getOverlayPanelContent().onPhysicalBackingSizeChanged(
                     (int) (width / mPxToDp), (int) (height / mPxToDp));
         }
     }

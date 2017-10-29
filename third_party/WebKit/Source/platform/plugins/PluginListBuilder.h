@@ -32,28 +32,29 @@
 #define PluginListBuilder_h
 
 #include "platform/plugins/PluginData.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Vector.h"
 #include "public/platform/WebPluginListBuilder.h"
-#include "wtf/Allocator.h"
-#include "wtf/Vector.h"
 
 namespace blink {
 
 class PluginListBuilder final : public WebPluginListBuilder {
-  DISALLOW_NEW();
+  STACK_ALLOCATED();
 
  public:
-  PluginListBuilder(Vector<PluginInfo>* results) : m_results(results) {}
+  PluginListBuilder(HeapVector<Member<PluginInfo>>* results)
+      : results_(results) {}
 
   // WebPluginListBuilder methods:
-  void addPlugin(const WebString& name,
+  void AddPlugin(const WebString& name,
                  const WebString& description,
-                 const WebString& fileName) override;
-  void addMediaTypeToLastPlugin(const WebString& name,
+                 const WebString& file_name) override;
+  void AddMediaTypeToLastPlugin(const WebString& name,
                                 const WebString& description) override;
-  void addFileExtensionToLastMediaType(const WebString& extension) override;
+  void AddFileExtensionToLastMediaType(const WebString& extension) override;
 
  private:
-  Vector<PluginInfo>* m_results;
+  Member<HeapVector<Member<PluginInfo>>> results_;
 };
 
 }  // namespace blink

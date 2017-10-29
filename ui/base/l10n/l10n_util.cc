@@ -49,152 +49,162 @@
 namespace {
 
 static const char* const kAcceptLanguageList[] = {
-  "af",     // Afrikaans
-  "am",     // Amharic
-  "an",     // Aragonese
-  "ar",     // Arabic
-  "ast",    // Asturian
-  "az",     // Azerbaijani
-  "be",     // Belarusian
-  "bg",     // Bulgarian
-  "bh",     // Bihari
-  "bn",     // Bengali
-  "br",     // Breton
-  "bs",     // Bosnian
-  "ca",     // Catalan
-  "ckb",    // Kurdish (Arabci),  Sorani
-  "co",     // Corsican
-  "cs",     // Czech
-  "cy",     // Welsh
-  "da",     // Danish
-  "de",     // German
-  "de-AT",  // German (Austria)
-  "de-CH",  // German (Switzerland)
-  "de-DE",  // German (Germany)
-  "de-LI",  // German (Liechtenstein)
-  "el",     // Greek
-  "en",     // English
-  "en-AU",  // English (Australia)
-  "en-CA",  // English (Canada)
-  "en-GB",  // English (UK)
-  "en-IN",  // English (India)
-  "en-NZ",  // English (New Zealand)
-  "en-US",  // English (US)
-  "en-ZA",  // English (South Africa)
-  "eo",     // Esperanto
-  // TODO(jungshik) : Do we want to list all es-Foo for Latin-American
-  // Spanish speaking countries?
-  "es",     // Spanish
-  "es-419", // Spanish (Latin America)
-  "es-AR",  // Spanish (Argentina)
-  "es-ES",  // Spanish (Spain)
-  "es-MX",  // Spanish (Mexico)
-  "es-US",  // Spanish (US)
-  "et",     // Estonian
-  "eu",     // Basque
-  "fa",     // Persian
-  "fi",     // Finnish
-  "fil",    // Filipino
-  "fo",     // Faroese
-  "fr",     // French
-  "fr-CA",  // French (Canada)
-  "fr-CH",  // French (Switzerland)
-  "fr-FR",  // French (France)
-  "fy",     // Frisian
-  "ga",     // Irish
-  "gd",     // Scots Gaelic
-  "gl",     // Galician
-  "gn",     // Guarani
-  "gu",     // Gujarati
-  "ha",     // Hausa
-  "haw",    // Hawaiian
-  "he",     // Hebrew
-  "hi",     // Hindi
-  "hr",     // Croatian
-  "hu",     // Hungarian
-  "hy",     // Armenian
-  "ia",     // Interlingua
-  "id",     // Indonesian
-  "is",     // Icelandic
-  "it",     // Italian
-  "it-CH",  // Italian (Switzerland)
-  "it-IT",  // Italian (Italy)
-  "ja",     // Japanese
-  "jw",     // Javanese
-  "ka",     // Georgian
-  "kk",     // Kazakh
-  "km",     // Cambodian
-  "kn",     // Kannada
-  "ko",     // Korean
-  "ku",     // Kurdish
-  "ky",     // Kyrgyz
-  "la",     // Latin
-  "ln",     // Lingala
-  "lo",     // Laothian
-  "lt",     // Lithuanian
-  "lv",     // Latvian
-  "mk",     // Macedonian
-  "ml",     // Malayalam
-  "mn",     // Mongolian
-  "mo",     // Moldavian
-  "mr",     // Marathi
-  "ms",     // Malay
-  "mt",     // Maltese
-  "nb",     // Norwegian (Bokmal)
-  "ne",     // Nepali
-  "nl",     // Dutch
-  "nn",     // Norwegian (Nynorsk)
-  "no",     // Norwegian
-  "oc",     // Occitan
-  "om",     // Oromo
-  "or",     // Oriya
-  "pa",     // Punjabi
-  "pl",     // Polish
-  "ps",     // Pashto
-  "pt",     // Portuguese
-  "pt-BR",  // Portuguese (Brazil)
-  "pt-PT",  // Portuguese (Portugal)
-  "qu",     // Quechua
-  "rm",     // Romansh
-  "ro",     // Romanian
-  "ru",     // Russian
-  "sd",     // Sindhi
-  "sh",     // Serbo-Croatian
-  "si",     // Sinhalese
-  "sk",     // Slovak
-  "sl",     // Slovenian
-  "sn",     // Shona
-  "so",     // Somali
-  "sq",     // Albanian
-  "sr",     // Serbian
-  "st",     // Sesotho
-  "su",     // Sundanese
-  "sv",     // Swedish
-  "sw",     // Swahili
-  "ta",     // Tamil
-  "te",     // Telugu
-  "tg",     // Tajik
-  "th",     // Thai
-  "ti",     // Tigrinya
-  "tk",     // Turkmen
-  "to",     // Tonga
-  "tr",     // Turkish
-  "tt",     // Tatar
-  "tw",     // Twi
-  "ug",     // Uighur
-  "uk",     // Ukrainian
-  "ur",     // Urdu
-  "uz",     // Uzbek
-  "vi",     // Vietnamese
-  "wa",     // Walloon
-  "xh",     // Xhosa
-  "yi",     // Yiddish
-  "yo",     // Yoruba
-  "zh",     // Chinese
-  "zh-CN",  // Chinese (China)
-  "zh-HK",  // Chinese (Hong Kong)
-  "zh-TW",  // Chinese (Taiwan)
-  "zu",     // Zulu
+    "af",     // Afrikaans
+    "am",     // Amharic
+    "an",     // Aragonese
+    "ar",     // Arabic
+    "ast",    // Asturian
+    "az",     // Azerbaijani
+    "be",     // Belarusian
+    "bg",     // Bulgarian
+    "bh",     // Bihari
+    "bn",     // Bengali
+    "br",     // Breton
+    "bs",     // Bosnian
+    "ca",     // Catalan
+    "ckb",    // Kurdish (Arabci),  Sorani
+    "co",     // Corsican
+    "cs",     // Czech
+    "cy",     // Welsh
+    "da",     // Danish
+    "de",     // German
+    "de-AT",  // German (Austria)
+    "de-CH",  // German (Switzerland)
+    "de-DE",  // German (Germany)
+    "de-LI",  // German (Liechtenstein)
+    "el",     // Greek
+    "en",     // English
+    "en-AU",  // English (Australia)
+    "en-CA",  // English (Canada)
+    "en-GB",  // English (UK)
+    "en-IN",  // English (India)
+    "en-NZ",  // English (New Zealand)
+    "en-US",  // English (US)
+    "en-ZA",  // English (South Africa)
+    "eo",     // Esperanto
+    // TODO(jungshik) : Do we want to list all es-Foo for Latin-American
+    // Spanish speaking countries?
+    "es",      // Spanish
+    "es-419",  // Spanish (Latin America)
+    "es-AR",   // Spanish (Argentina)
+    "es-CL",   // Spanish (Chile)
+    "es-CO",   // Spanish (Colombia)
+    "es-CR",   // Spanish (Costa Rica)
+    "es-ES",   // Spanish (Spain)
+    "es-HN",   // Spanish (Honduras)
+    "es-MX",   // Spanish (Mexico)
+    "es-PE",   // Spanish (Peru)
+    "es-US",   // Spanish (US)
+    "es-UY",   // Spanish (Uruguay)
+    "es-VE",   // Spanish (Venezuela)
+    "et",      // Estonian
+    "eu",      // Basque
+    "fa",      // Persian
+    "fi",      // Finnish
+    "fil",     // Filipino
+    "fo",      // Faroese
+    "fr",      // French
+    "fr-CA",   // French (Canada)
+    "fr-CH",   // French (Switzerland)
+    "fr-FR",   // French (France)
+    "fy",      // Frisian
+    "ga",      // Irish
+    "gd",      // Scots Gaelic
+    "gl",      // Galician
+    "gn",      // Guarani
+    "gu",      // Gujarati
+    "ha",      // Hausa
+    "haw",     // Hawaiian
+    "he",      // Hebrew
+    "hi",      // Hindi
+    "hmn",     // Hmong
+    "hr",      // Croatian
+    "hu",      // Hungarian
+    "hy",      // Armenian
+    "ia",      // Interlingua
+    "id",      // Indonesian
+    "is",      // Icelandic
+    "it",      // Italian
+    "it-CH",   // Italian (Switzerland)
+    "it-IT",   // Italian (Italy)
+    "ja",      // Japanese
+    "jv",      // Javanese
+    "ka",      // Georgian
+    "kk",      // Kazakh
+    "km",      // Cambodian
+    "kn",      // Kannada
+    "ko",      // Korean
+    "ku",      // Kurdish
+    "ky",      // Kyrgyz
+    "la",      // Latin
+    "lb",      // Luxembourgish
+    "ln",      // Lingala
+    "lo",      // Laothian
+    "lt",      // Lithuanian
+    "lv",      // Latvian
+    "mk",      // Macedonian
+    "ml",      // Malayalam
+    "mn",      // Mongolian
+    "mo",      // Moldavian
+    "mr",      // Marathi
+    "ms",      // Malay
+    "mt",      // Maltese
+    "nb",      // Norwegian (Bokmal)
+    "ne",      // Nepali
+    "nl",      // Dutch
+    "nn",      // Norwegian (Nynorsk)
+    "no",      // Norwegian
+    "oc",      // Occitan
+    "om",      // Oromo
+    "or",      // Oriya
+    "pa",      // Punjabi
+    "pl",      // Polish
+    "ps",      // Pashto
+    "pt",      // Portuguese
+    "pt-BR",   // Portuguese (Brazil)
+    "pt-PT",   // Portuguese (Portugal)
+    "qu",      // Quechua
+    "rm",      // Romansh
+    "ro",      // Romanian
+    "ru",      // Russian
+    "sd",      // Sindhi
+    "sh",      // Serbo-Croatian
+    "si",      // Sinhalese
+    "sk",      // Slovak
+    "sl",      // Slovenian
+    "sm",      // Samoan
+    "sn",      // Shona
+    "so",      // Somali
+    "sq",      // Albanian
+    "sr",      // Serbian
+    "st",      // Sesotho
+    "su",      // Sundanese
+    "sv",      // Swedish
+    "sw",      // Swahili
+    "ta",      // Tamil
+    "te",      // Telugu
+    "tg",      // Tajik
+    "th",      // Thai
+    "ti",      // Tigrinya
+    "tk",      // Turkmen
+    "to",      // Tonga
+    "tr",      // Turkish
+    "tt",      // Tatar
+    "tw",      // Twi
+    "ug",      // Uighur
+    "uk",      // Ukrainian
+    "ur",      // Urdu
+    "uz",      // Uzbek
+    "vi",      // Vietnamese
+    "wa",      // Walloon
+    "xh",      // Xhosa
+    "yi",      // Yiddish
+    "yo",      // Yoruba
+    "zh",      // Chinese
+    "zh-CN",   // Chinese (China)
+    "zh-HK",   // Chinese (Hong Kong)
+    "zh-TW",   // Chinese (Taiwan)
+    "zu",      // Zulu
 };
 
 // Returns true if |locale_name| has an alias in the ICU data file.
@@ -277,11 +287,12 @@ void AdjustParagraphDirectionality(base::string16* paragraph) {
 }
 
 struct AvailableLocalesTraits
-    : base::DefaultLazyInstanceTraits<std::vector<std::string> > {
+    : base::internal::DestructorAtExitLazyInstanceTraits<
+          std::vector<std::string>> {
   static std::vector<std::string>* New(void* instance) {
     std::vector<std::string>* locales =
-        base::DefaultLazyInstanceTraits<std::vector<std::string> >::New(
-            instance);
+        base::internal::DestructorAtExitLazyInstanceTraits<
+            std::vector<std::string>>::New(instance);
     int num_locales = uloc_countAvailable();
     for (int i = 0; i < num_locales; ++i) {
       std::string locale_name = uloc_getAvailable(i);
@@ -549,6 +560,11 @@ base::string16 GetDisplayNameForLocale(const std::string& locale,
     locale_code = "ro-MD";
 
   base::string16 display_name;
+#if defined(OS_IOS)
+  // Use the Foundation API to get the localized display name, removing the need
+  // for the ICU data file to include this data.
+  display_name = GetDisplayNameForLocale(locale_code, display_locale);
+#else
 #if defined(OS_ANDROID)
   // Use Java API to get locale display name so that we can remove most of
   // the lang data from icu data to reduce binary size, except for zh-Hans and
@@ -558,7 +574,7 @@ base::string16 GetDisplayNameForLocale(const std::string& locale,
   if (!base::StartsWith(locale_code, "zh-Han", base::CompareCase::SENSITIVE)) {
     display_name = GetDisplayNameForLocale(locale_code, display_locale);
   } else
-#endif
+#endif  // defined(OS_ANDROID)
   {
     UErrorCode error = U_ZERO_ERROR;
     const int kBufferSize = 1024;
@@ -569,6 +585,7 @@ base::string16 GetDisplayNameForLocale(const std::string& locale,
     DCHECK(U_SUCCESS(error));
     display_name.resize(actual_size);
   }
+#endif
 
   // Add directional markup so parentheses are properly placed.
   if (is_for_ui && base::i18n::IsRTL())

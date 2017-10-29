@@ -31,7 +31,7 @@
 #ifndef WebSelector_h
 #define WebSelector_h
 
-#include "../platform/WebCommon.h"
+#include "public/platform/WebCommon.h"
 
 namespace blink {
 
@@ -39,8 +39,8 @@ class WebString;
 
 // Terminology from http://dev.w3.org/csswg/selectors4/#structure.
 enum WebSelectorType {
-  WebSelectorTypeComplex,
-  WebSelectorTypeCompound,
+  kWebSelectorTypeComplex,
+  kWebSelectorTypeCompound,
   // Not yet implemented:
   // SelectorTypeSimple,
 };
@@ -53,8 +53,8 @@ enum WebSelectorType {
 // restrictions.
 // The canonical form is not guaranteed to stay the same over time.
 BLINK_EXPORT WebString
-canonicalizeSelector(WebString selector,
-                     WebSelectorType restriction = WebSelectorTypeComplex);
+CanonicalizeSelector(WebString selector,
+                     WebSelectorType restriction = kWebSelectorTypeComplex);
 
 }  // namespace blink
 

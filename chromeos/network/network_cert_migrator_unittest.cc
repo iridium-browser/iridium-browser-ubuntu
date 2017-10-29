@@ -10,8 +10,10 @@
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/scoped_task_scheduler.h"
 #include "chromeos/cert_loader.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_profile_client.h"
@@ -39,7 +41,8 @@ const char* kProfile = "/profile/profile1";
 
 class NetworkCertMigratorTest : public testing::Test {
  public:
-  NetworkCertMigratorTest() : service_test_(nullptr) {}
+  NetworkCertMigratorTest()
+      : service_test_(nullptr), scoped_task_scheduler_(&message_loop_) {}
   ~NetworkCertMigratorTest() override {}
 
   void SetUp() override {
@@ -63,7 +66,7 @@ class NetworkCertMigratorTest : public testing::Test {
 
     CertLoader::Initialize();
     CertLoader* cert_loader_ = CertLoader::Get();
-    cert_loader_->StartWithNSSDB(test_nsscertdb_.get());
+    cert_loader_->SetUserNSSDB(test_nsscertdb_.get());
   }
 
   void TearDown() override {
@@ -107,24 +110,22 @@ class NetworkCertMigratorTest : public testing::Test {
 
     // Ensure that the service appears as 'configured', i.e. is associated to a
     // Shill profile.
-    service_test_->SetServiceProperty(
-        network_id, shill::kProfileProperty, base::StringValue(kProfile));
+    service_test_->SetServiceProperty(network_id, shill::kProfileProperty,
+                                      base::Value(kProfile));
   }
 
   void SetupNetworkWithEapCertId(bool wifi, const std::string& cert_id) {
     std::string type = wifi ? shill::kTypeWifi: shill::kTypeEthernetEap;
     std::string name = wifi ? kWifiStub : kEthernetEapStub;
     AddService(name, type, shill::kStateOnline);
-    service_test_->SetServiceProperty(
-        name, shill::kEapCertIdProperty, base::StringValue(cert_id));
-    service_test_->SetServiceProperty(
-        name, shill::kEapKeyIdProperty, base::StringValue(cert_id));
+    service_test_->SetServiceProperty(name, shill::kEapCertIdProperty,
+                                      base::Value(cert_id));
+    service_test_->SetServiceProperty(name, shill::kEapKeyIdProperty,
+                                      base::Value(cert_id));
 
     if (wifi) {
-      service_test_->SetServiceProperty(
-          name,
-          shill::kSecurityClassProperty,
-          base::StringValue(shill::kSecurity8021x));
+      service_test_->SetServiceProperty(name, shill::kSecurityClassProperty,
+                                        base::Value(shill::kSecurity8021x));
     }
   }
 
@@ -192,6 +193,7 @@ class NetworkCertMigratorTest : public testing::Test {
   base::MessageLoop message_loop_;
 
  private:
+  base::test::ScopedTaskScheduler scoped_task_scheduler_;
   std::unique_ptr<NetworkStateHandler> network_state_handler_;
   std::unique_ptr<NetworkCertMigrator> network_cert_migrator_;
   crypto::ScopedTestNSSDB test_nssdb_;

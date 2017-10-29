@@ -8,6 +8,7 @@
 #include <alsa/asoundlib.h>
 #include <stdint.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -16,10 +17,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread.h"
 #include "base/timer/timer.h"
-#include "chromecast/media/cma/backend/alsa/audio_filter_interface.h"
 #include "chromecast/media/cma/backend/alsa/media_pipeline_backend_alsa.h"
 #include "chromecast/media/cma/backend/alsa/stream_mixer_alsa_input.h"
 #include "chromecast/public/cast_media_shlib.h"
+#include "chromecast/public/volume_control.h"
 
 namespace media {
 class AudioBus;
@@ -29,6 +30,7 @@ namespace chromecast {
 namespace media {
 class AlsaWrapper;
 class FilterGroup;
+class PostProcessingPipelineParser;
 
 // Mixer implementation. The mixer has one or more input queues; these can be
 // added/removed at any time. When an input source pushes frames to an input
@@ -72,6 +74,9 @@ class StreamMixerAlsa {
     // Should be from chromecast/media/base/audio_device_ids.h
     // or media/audio/audio_device_description.h
     virtual std::string device_id() const = 0;
+
+    // Returns the content type for volume control.
+    virtual AudioContentType content_type() const = 0;
 
     // Returns true if PrepareToDelete() has been called.
     virtual bool IsDeleting() const = 0;
@@ -129,6 +134,18 @@ class StreamMixerAlsa {
     // Once the input is ready to be removed, it should call the supplied
     // |delete_cb|; this should only happen once per input.
     virtual void PrepareToDelete(const OnReadyToDeleteCb& delete_cb) = 0;
+
+    // Sets the multiplier based on this stream's content type. The resulting
+    // output volume should be the content type volume * the per-stream volume
+    // multiplier. If |fade_ms| is >= 0, the volume change should be faded over
+    // that many milliseconds; otherwise, the default fade time should be used.
+    virtual void SetContentTypeVolume(float volume, int fade_ms) = 0;
+
+    // Sets whether or not this stream should be muted.
+    virtual void SetMuted(bool muted) = 0;
+
+    // Returns the volume multiplier of the stream.
+    virtual float EffectiveVolume() = 0;
   };
 
   enum State {
@@ -159,6 +176,7 @@ class StreamMixerAlsa {
   // mixer thread.
   void OnFramesQueued();
 
+  void ResetPostProcessorsForTest(const std::string& pipeline_json);
   void SetAlsaWrapperForTest(std::unique_ptr<AlsaWrapper> alsa_wrapper);
   void WriteFramesForTest();  // Can be called on any thread.
   void ClearInputsForTest();  // Removes all inputs.
@@ -169,15 +187,38 @@ class StreamMixerAlsa {
   void RemoveLoopbackAudioObserver(
       CastMediaShlib::LoopbackAudioObserver* observer);
 
+  // Sets the volume multiplier for the given content |type|.
+  void SetVolume(AudioContentType type, float level);
+
+  // Sets the mute state for the given content |type|.
+  void SetMuted(AudioContentType type, bool muted);
+
+  // Sets the volume multiplier limit for the given content |type|.
+  void SetOutputLimit(AudioContentType type, float limit);
+
+  // Sends configuration string |config| to processor |name|.
+  void SetPostProcessorConfig(const std::string& name,
+                              const std::string& config);
+
  protected:
   StreamMixerAlsa();
   virtual ~StreamMixerAlsa();
 
  private:
+  // Contains volume control information for an audio content type.
+  struct VolumeInfo {
+    float GetEffectiveVolume();
+
+    float volume = 0.0f;
+    float limit = 1.0f;
+    bool muted = false;
+  };
+
   void ResetTaskRunnerForTest();
   void FinalizeOnMixerThread();
   void FinishFinalize();
 
+  void CreatePostProcessors(PostProcessingPipelineParser* pipeline_parser);
   // Reads the buffer size, period size, start threshold, and avail min value
   // from the provided command line flags or uses default values if no flags are
   // provided.
@@ -207,7 +248,7 @@ class StreamMixerAlsa {
 
   void WriteFrames();
   bool TryWriteFrames();
-  void WriteMixedPcm(std::vector<uint8_t>* interleaved, int frames);
+  void WriteMixedPcm(int frames);
   void UpdateRenderingDelay(int newly_pushed_frames);
   size_t InterleavedSize(int frames);
   ssize_t BytesPerOutputFormatSample();
@@ -220,6 +261,7 @@ class StreamMixerAlsa {
   scoped_refptr<base::SingleThreadTaskRunner> mixer_task_runner_;
 
   unsigned int fixed_output_samples_per_second_;
+  int num_output_channels_;
   unsigned int low_sample_rate_cutoff_;
   int requested_output_samples_per_second_;
   int output_samples_per_second_;
@@ -232,7 +274,6 @@ class StreamMixerAlsa {
   // only has to interact with the command line parameters once.
   std::string alsa_device_name_;
   snd_pcm_uframes_t alsa_buffer_size_;
-  bool alsa_period_explicitly_set;
   snd_pcm_uframes_t alsa_period_size_;
   snd_pcm_uframes_t alsa_start_threshold_;
   snd_pcm_uframes_t alsa_avail_min_;
@@ -241,7 +282,7 @@ class StreamMixerAlsa {
 
   std::vector<std::unique_ptr<InputQueue>> inputs_;
   std::vector<std::unique_ptr<InputQueue>> ignored_inputs_;
-  MediaPipelineBackendAlsa::RenderingDelay rendering_delay_;
+  MediaPipelineBackendAlsa::RenderingDelay alsa_rendering_delay_;
 
   std::unique_ptr<base::Timer> retry_write_frames_timer_;
 
@@ -249,7 +290,14 @@ class StreamMixerAlsa {
   std::unique_ptr<base::Timer> check_close_timer_;
 
   std::vector<std::unique_ptr<FilterGroup>> filter_groups_;
+  FilterGroup* default_filter_;
+  FilterGroup* mix_filter_;
+  FilterGroup* linearize_filter_;
+  std::vector<uint8_t> interleaved_;
+
   std::vector<CastMediaShlib::LoopbackAudioObserver*> loopback_observers_;
+
+  std::map<AudioContentType, VolumeInfo> volume_info_;
 
   DISALLOW_COPY_AND_ASSIGN(StreamMixerAlsa);
 };

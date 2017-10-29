@@ -32,6 +32,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
@@ -109,13 +110,15 @@ class NavigationURLLoaderTest : public testing::Test {
     BeginNavigationParams begin_params(
         std::string(), net::LOAD_NORMAL, false, false,
         REQUEST_CONTEXT_TYPE_LOCATION,
-        blink::WebMixedContentContextType::Blockable, url::Origin(url));
+        blink::WebMixedContentContextType::kBlockable,
+        false,  // is_form_submission
+        url::Origin(url));
     CommonNavigationParams common_params;
     common_params.url = url;
     std::unique_ptr<NavigationRequestInfo> request_info(
         new NavigationRequestInfo(common_params, begin_params, url, true, false,
                                   false, -1, false, false,
-                                  blink::WebPageVisibilityStateVisible));
+                                  blink::kWebPageVisibilityStateVisible));
     return NavigationURLLoader::Create(
         browser_context_->GetResourceContext(),
         BrowserContext::GetDefaultStoragePartition(browser_context_.get()),
@@ -127,8 +130,8 @@ class NavigationURLLoaderTest : public testing::Test {
     net::TestDelegate delegate;
     net::URLRequestContext* request_context =
         browser_context_->GetResourceContext()->GetRequestContext();
-    std::unique_ptr<net::URLRequest> request(
-        request_context->CreateRequest(url, net::DEFAULT_PRIORITY, &delegate));
+    std::unique_ptr<net::URLRequest> request(request_context->CreateRequest(
+        url, net::DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
     request->Start();
     base::RunLoop().Run();
 

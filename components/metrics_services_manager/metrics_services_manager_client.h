@@ -48,23 +48,18 @@ class MetricsServicesManagerClient {
   // operate.
   virtual net::URLRequestContextGetter* GetURLRequestContext() = 0;
 
-  // Returns whether safe browsing is enabled. If relevant in the embedder's
-  // context, |on_update_callback| will be set up to be called when the state of
-  // safe browsing changes. |on_update_callback| is guaranteed to be valid for
-  // the lifetime of this client instance, but should not be used beyond this
-  // instance being destroyed.
-  virtual bool IsSafeBrowsingEnabled(
-      const base::Closure& on_update_callback) = 0;
-
   // Returns whether metrics reporting is enabled.
   virtual bool IsMetricsReportingEnabled() = 0;
 
-  // Whether the metrics services should record but not report metrics.
-  virtual bool OnlyDoMetricsRecording() = 0;
+  // Returns whether there are any Incognito browsers/tabs open.
+  virtual bool IsIncognitoSessionActive() = 0;
 
   // Update the running state of metrics services managed by the embedder, for
   // example, crash reporting.
   virtual void UpdateRunningServices(bool may_record, bool may_upload) {}
+
+  // If the user has forced metrics collection on via the override flag.
+  virtual bool IsMetricsReportingForceEnabled();
 };
 
 }  // namespace metrics_services_manager

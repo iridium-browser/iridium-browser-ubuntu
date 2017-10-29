@@ -33,8 +33,7 @@ class NetworkingPrivateLinux : public NetworkingPrivateDelegate {
 
   typedef std::vector<std::string> GuidList;
 
-  explicit NetworkingPrivateLinux(
-      std::unique_ptr<VerifyDelegate> verify_delegate);
+  NetworkingPrivateLinux();
 
   // NetworkingPrivateDelegate
   void GetProperties(const std::string& guid,
@@ -48,6 +47,7 @@ class NetworkingPrivateLinux : public NetworkingPrivateDelegate {
                 const FailureCallback& failure_callback) override;
   void SetProperties(const std::string& guid,
                      std::unique_ptr<base::DictionaryValue> properties,
+                     bool allow_set_shared_config,
                      const VoidCallback& success_callback,
                      const FailureCallback& failure_callback) override;
   void CreateNetwork(bool shared,
@@ -55,6 +55,7 @@ class NetworkingPrivateLinux : public NetworkingPrivateDelegate {
                      const StringCallback& success_callback,
                      const FailureCallback& failure_callback) override;
   void ForgetNetwork(const std::string& guid,
+                     bool allow_forget_shared_config,
                      const VoidCallback& success_callback,
                      const FailureCallback& failure_callback) override;
   void GetNetworks(const std::string& network_type,
@@ -94,6 +95,7 @@ class NetworkingPrivateLinux : public NetworkingPrivateDelegate {
   std::unique_ptr<base::ListValue> GetEnabledNetworkTypes() override;
   std::unique_ptr<DeviceStateList> GetDeviceStateList() override;
   std::unique_ptr<base::DictionaryValue> GetGlobalPolicy() override;
+  std::unique_ptr<base::DictionaryValue> GetCertificateLists() override;
   bool EnableNetworkType(const std::string& type) override;
   bool DisableNetworkType(const std::string& type) override;
   bool RequestScan() override;

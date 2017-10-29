@@ -17,6 +17,7 @@
 #include "content/public/browser/bluetooth_chooser.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/common/media_stream_request.h"
+#include "content/public/common/previews_state.h"
 #include "content/public/common/window_container_type.mojom.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
@@ -78,6 +79,8 @@ namespace content {
 
 struct OpenURLParams;
 struct WebContentsUnresponsiveState;
+
+enum class KeyboardEventProcessingResult;
 
 // Objects implement this interface to get notified about changes in the
 // WebContents and to provide necessary functionality.
@@ -259,12 +262,10 @@ class CONTENT_EXPORT WebContentsDelegate {
                                   const PageState& page_state);
 
   // Allows delegates to handle keyboard events before sending to the renderer.
-  // Returns true if the |event| was handled. Otherwise, if the |event| would be
-  // handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
-  // |*is_keyboard_shortcut| should be set to true.
-  virtual bool PreHandleKeyboardEvent(WebContents* source,
-                                      const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
+  // See enum for description of return values.
+  virtual KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      WebContents* source,
+      const NativeWebKeyboardEvent& event);
 
   // Allows delegates to handle unhandled keyboard messages coming back from
   // the renderer.
@@ -318,6 +319,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   //       RenderViewHost in |source_site_instance| with |route_id|.
   virtual bool ShouldCreateWebContents(
       WebContents* web_contents,
+      RenderFrameHost* opener,
       SiteInstance* source_site_instance,
       int32_t route_id,
       int32_t main_frame_route_id,
@@ -490,12 +492,6 @@ class CONTENT_EXPORT WebContentsDelegate {
                                               MediaStreamType type);
 
 #if defined(OS_ANDROID)
-  // Asks permission to decode media stream. After permission is determined,
-  // |callback| will be called with the result.
-  virtual void RequestMediaDecodePermission(
-      WebContents* web_contents,
-      const base::Callback<void(bool)>& callback);
-
   // Creates a view embedding the video view.
   virtual base::android::ScopedJavaLocalRef<jobject>
       GetContentVideoViewEmbedder();
@@ -568,6 +564,10 @@ class CONTENT_EXPORT WebContentsDelegate {
                                                  bool allowed_per_prefs,
                                                  const url::Origin& origin,
                                                  const GURL& resource_url);
+
+  // Give WebContentsDelegates the opportunity to adjust the previews state.
+  virtual void AdjustPreviewsStateForNavigation(PreviewsState* previews_state) {
+  }
 
  protected:
   virtual ~WebContentsDelegate();

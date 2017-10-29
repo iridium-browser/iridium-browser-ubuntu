@@ -21,7 +21,7 @@ import java.util.List;
  * device::BluetoothRemoteGattCharacteristicAndroid.
  */
 @JNINamespace("device")
-@TargetApi(Build.VERSION_CODES.LOLLIPOP)
+@TargetApi(Build.VERSION_CODES.M)
 final class ChromeBluetoothRemoteGattCharacteristic {
     private static final String TAG = "Bluetooth";
 
@@ -58,11 +58,10 @@ final class ChromeBluetoothRemoteGattCharacteristic {
         mChromeDevice.mWrapperToChromeCharacteristicsMap.remove(mCharacteristic);
     }
 
-    void onCharacteristicChanged() {
+    void onCharacteristicChanged(byte[] value) {
         Log.i(TAG, "onCharacteristicChanged");
         if (mNativeBluetoothRemoteGattCharacteristicAndroid != 0) {
-            nativeOnChanged(
-                    mNativeBluetoothRemoteGattCharacteristicAndroid, mCharacteristic.getValue());
+            nativeOnChanged(mNativeBluetoothRemoteGattCharacteristicAndroid, value);
         }
     }
 

@@ -27,7 +27,7 @@ public abstract class StatusItem extends OptionalLeaf implements StatusCardViewH
         @Override
         @StringRes
         public int getHeader() {
-            return R.string.ntp_status_card_title_no_suggestions;
+            return R.string.ntp_title_no_suggestions;
         }
 
         @Override
@@ -45,6 +45,11 @@ public abstract class StatusItem extends OptionalLeaf implements StatusCardViewH
         public void performAction(Context context) {
             assert false;
         }
+
+        @Override
+        protected void visitOptionalItem(NodeVisitor visitor) {
+            visitor.visitNoSuggestionsItem();
+        }
     }
 
     @Override
@@ -57,5 +62,9 @@ public abstract class StatusItem extends OptionalLeaf implements StatusCardViewH
     protected void onBindViewHolder(NewTabPageViewHolder holder) {
         assert holder instanceof StatusCardViewHolder;
         ((StatusCardViewHolder) holder).onBindViewHolder(this);
+    }
+
+    public void setVisible(boolean visible) {
+        setVisibilityInternal(visible);
     }
 }

@@ -4,8 +4,10 @@
 
 #include "chrome/browser/predictors/resource_prefetch_predictor_tab_helper.h"
 
-#include "chrome/browser/predictors/resource_prefetch_predictor.h"
-#include "chrome/browser/predictors/resource_prefetch_predictor_factory.h"
+#include <string>
+
+#include "chrome/browser/predictors/loading_predictor.h"
+#include "chrome/browser/predictors/loading_predictor_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -27,14 +29,14 @@ ResourcePrefetchPredictorTabHelper::~ResourcePrefetchPredictorTabHelper() {
 void ResourcePrefetchPredictorTabHelper::DocumentOnLoadCompletedInMainFrame() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  ResourcePrefetchPredictor* predictor =
-      ResourcePrefetchPredictorFactory::GetForProfile(
-          web_contents()->GetBrowserContext());
-  if (!predictor)
+  auto* loading_predictor = LoadingPredictorFactory::GetForProfile(
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
+  if (!loading_predictor)
     return;
 
+  auto* collector = loading_predictor->loading_data_collector();
   NavigationID navigation_id(web_contents());
-  predictor->RecordMainFrameLoadComplete(navigation_id);
+  collector->RecordMainFrameLoadComplete(navigation_id);
 }
 
 void ResourcePrefetchPredictorTabHelper::DidLoadResourceFromMemoryCache(
@@ -43,21 +45,21 @@ void ResourcePrefetchPredictorTabHelper::DidLoadResourceFromMemoryCache(
     content::ResourceType resource_type) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  ResourcePrefetchPredictor* predictor =
-      ResourcePrefetchPredictorFactory::GetForProfile(
-          web_contents()->GetBrowserContext());
-  if (!predictor)
+  auto* loading_predictor = LoadingPredictorFactory::GetForProfile(
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
+  if (!loading_predictor)
     return;
 
-  ResourcePrefetchPredictor::URLRequestSummary summary;
+  URLRequestSummary summary;
   summary.navigation_id = NavigationID(web_contents());
   summary.resource_url = url;
+  summary.request_url = url;
   summary.mime_type = mime_type;
-  summary.resource_type =
-      ResourcePrefetchPredictor::GetResourceTypeFromMimeType(
-          mime_type, resource_type);
+  summary.resource_type = LoadingDataCollector::GetResourceTypeFromMimeType(
+      mime_type, resource_type);
   summary.was_cached = true;
-  predictor->RecordURLResponse(summary);
+  auto* collector = loading_predictor->loading_data_collector();
+  collector->RecordURLResponse(summary);
 }
 
 }  // namespace predictors

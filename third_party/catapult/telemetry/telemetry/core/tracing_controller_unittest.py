@@ -11,7 +11,7 @@ from telemetry.testing import browser_test_case
 from telemetry.testing import tab_test_case
 from telemetry.timeline import model as model_module
 from telemetry.timeline import tracing_config
-from telemetry.timeline import trace_data as trace_data_module
+from tracing.trace_data import trace_data as trace_data_module
 
 
 class TracingControllerTest(tab_test_case.TabTestCase):
@@ -30,13 +30,12 @@ class TracingControllerTest(tab_test_case.TabTestCase):
       raise Exception('Intentional Tracing Exception')
 
     self._tab._inspector_backend._devtools_client.StopChromeTracing = (
-      _FakeStopChromeTracing)
+        _FakeStopChromeTracing)
     with self.assertRaisesRegexp(Exception, 'Intentional Tracing Exception'):
       tracing_controller.StopTracing()
 
     # Tracing is stopped even if there is exception.
     self.assertFalse(tracing_controller.is_tracing_running)
-
 
   @decorators.Isolated
   def testGotTrace(self):
@@ -70,6 +69,7 @@ class TracingControllerTest(tab_test_case.TabTestCase):
     SUBTRACE_COUNT = 5
 
     tab = self._browser.tabs[0]
+
     def InjectMarker(index):
       marker = 'test-marker-%d' % index
       tab.EvaluateJavaScript('console.time({{ marker }});', marker=marker)
@@ -101,13 +101,17 @@ class TracingControllerTest(tab_test_case.TabTestCase):
 
     # Check that the markers 'test-marker-0', 'flush-tracing', 'test-marker-1',
     # ..., 'flush-tracing', 'test-marker-|SUBTRACE_COUNT - 1|' are monotonic.
-    custom_markers = [marker for i in xrange(SUBTRACE_COUNT)
-                      for marker in model.FindTimelineMarkers(
-                          'test-marker-%d' % i)]
-    flush_markers = model.FindTimelineMarkers(
-        ['flush-tracing'] * (SUBTRACE_COUNT - 1))
-    markers = [marker for group in zip(custom_markers, flush_markers)
-               for marker in group] + custom_markers[-1:]
+    custom_markers = [
+        marker
+        for i in xrange(SUBTRACE_COUNT)
+        for marker in model.FindTimelineMarkers('test-marker-%d' % i)
+    ]
+    flush_markers = model.FindTimelineMarkers(['flush-tracing'] *
+                                              (SUBTRACE_COUNT - 1))
+    markers = [
+        marker for group in zip(custom_markers, flush_markers)
+        for marker in group
+    ] + custom_markers[-1:]
 
     self.assertEquals(len(custom_markers), SUBTRACE_COUNT)
     self.assertEquals(len(flush_markers), SUBTRACE_COUNT - 1)
@@ -171,9 +175,9 @@ class TracingControllerTest(tab_test_case.TabTestCase):
     test_platform = self._browser.platform.GetOSName()
     device = (self._browser.platform._platform_backend.device
               if test_platform == 'android' else None)
-    if (not battor_wrapper.IsBattOrConnected(test_platform,
-                                             android_device=device)):
-      return # Do not run the test if no BattOr is connected.
+    if (not battor_wrapper.IsBattOrConnected(
+        test_platform, android_device=device)):
+      return  # Do not run the test if no BattOr is connected.
 
     tracing_controller = self._browser.platform.tracing_controller
     config = tracing_config.TracingConfig()

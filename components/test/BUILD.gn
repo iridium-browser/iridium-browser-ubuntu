@@ -14,6 +14,7 @@ source_set("test_support") {
     "//components/content_settings/core/common",
     "//components/gcm_driver:gcm_driver",
     "//components/signin/core/browser",
+    "//mojo/edk/system",
     "//net",
     "//testing/gtest",
     "//ui/base",
@@ -34,4 +35,17 @@ source_set("test_support") {
 
     public_deps += [ "//content/test:test_support" ]
   }
+}
+
+# Defines a main() function that uses components_test_suite.h
+source_set("run_all_unittests") {
+  testonly = true
+
+  sources = [
+    "run_all_unittests.cc",
+  ]
+
+  deps = [
+    ":test_support",
+  ]
 }

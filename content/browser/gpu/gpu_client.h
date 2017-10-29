@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_GPU_GPU_CLIENT_H_
 
 #include "base/memory/weak_ptr.h"
+#include "content/browser/gpu/gpu_process_host.h"
 #include "ipc/ipc_channel_handle.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/ui/public/interfaces/gpu.mojom.h"
@@ -23,13 +24,18 @@ class GpuClient : public ui::mojom::Gpu {
   void OnError();
   void OnEstablishGpuChannel(const EstablishGpuChannelCallback& callback,
                              const IPC::ChannelHandle& channel,
-                             const gpu::GPUInfo& gpu_info);
+                             const gpu::GPUInfo& gpu_info,
+                             GpuProcessHost::EstablishChannelStatus status);
   void OnCreateGpuMemoryBuffer(const CreateGpuMemoryBufferCallback& callback,
                                const gfx::GpuMemoryBufferHandle& handle);
 
   // ui::mojom::Gpu overrides:
   void EstablishGpuChannel(
       const EstablishGpuChannelCallback& callback) override;
+  void CreateJpegDecodeAccelerator(
+      media::mojom::GpuJpegDecodeAcceleratorRequest jda_request) override;
+  void CreateVideoEncodeAccelerator(
+      media::mojom::VideoEncodeAcceleratorRequest vea_request) override;
   void CreateGpuMemoryBuffer(
       gfx::GpuMemoryBufferId id,
       const gfx::Size& size,

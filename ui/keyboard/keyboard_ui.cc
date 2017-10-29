@@ -4,9 +4,11 @@
 
 #include "ui/keyboard/keyboard_ui.h"
 
+#include "base/command_line.h"
 #include "ui/aura/window.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/text_input_client.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/keyboard/keyboard_controller.h"
 
 namespace keyboard {
@@ -15,24 +17,48 @@ KeyboardUI::KeyboardUI() : keyboard_controller_(nullptr) {}
 KeyboardUI::~KeyboardUI() {}
 
 void KeyboardUI::ShowKeyboardContainer(aura::Window* container) {
-  if (HasKeyboardWindow()) {
-    GetKeyboardWindow()->Show();
-    container->Show();
+  if (HasContentsWindow()) {
+    {
+      TRACE_EVENT0("vk", "ShowKeyboardContainerWindow");
+      GetContentsWindow()->Show();
+    }
+    {
+      TRACE_EVENT0("vk", "ShowKeyboardContainer");
+      container->Show();
+    }
   }
 }
 
 void KeyboardUI::HideKeyboardContainer(aura::Window* container) {
-  if (HasKeyboardWindow()) {
+  if (HasContentsWindow()) {
     container->Hide();
-    GetKeyboardWindow()->Hide();
+    GetContentsWindow()->Hide();
   }
 }
 
 void KeyboardUI::EnsureCaretInWorkArea() {
-  if (GetInputMethod()->GetTextInputClient()) {
-    aura::Window* keyboard_window = GetKeyboardWindow();
+  if (!GetInputMethod())
+    return;
+
+  TRACE_EVENT0("vk", "EnsureCaretInWorkArea");
+
+  const aura::Window* contents_window = GetContentsWindow();
+  const gfx::Rect keyboard_bounds_in_screen =
+      contents_window->IsVisible() ? contents_window->GetBoundsInScreen()
+                                   : gfx::Rect();
+
+  // Use new virtual keyboard behavior only if the flag enabled and in
+  // non-sticky mode.
+  const bool new_vk_behavior =
+      (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+           ::switches::kDisableNewVirtualKeyboardBehavior) &&
+       !keyboard_controller_->keyboard_locked());
+
+  if (new_vk_behavior) {
+    GetInputMethod()->SetOnScreenKeyboardBounds(keyboard_bounds_in_screen);
+  } else if (GetInputMethod()->GetTextInputClient()) {
     GetInputMethod()->GetTextInputClient()->EnsureCaretNotInRect(
-        keyboard_window->GetBoundsInScreen());
+        keyboard_bounds_in_screen);
   }
 }
 

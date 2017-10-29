@@ -6,19 +6,42 @@
 
 namespace ntp_snippets {
 
-// Also defined in SnippetArticleViewHolder.java
-const char kStudyName[] = "NTPSnippets";
-
 const base::FilePath::CharType kDatabaseFolder[] =
     FILE_PATH_LITERAL("NTPSnippets");
 
-const char kChromeReaderServer[] =
-    "https://chromereader-pa.googleapis.com/v1/fetch";
+const base::FilePath::CharType kBreakingNewsDatabaseFolder[] =
+    FILE_PATH_LITERAL("NTPBreakingNews");
+
+const char kContentSuggestionsApiScope[] =
+    "https://www.googleapis.com/auth/chrome-content-suggestions";
+
 const char kContentSuggestionsServer[] =
     "https://chromecontentsuggestions-pa.googleapis.com/v1/suggestions/fetch";
 const char kContentSuggestionsStagingServer[] =
-    "https://staging-chromecontentsuggestions-pa.googleapis.com/v1/suggestions/fetch";
+    "https://staging-chromecontentsuggestions-pa.googleapis.com/v1/suggestions/"
+    "fetch";
 const char kContentSuggestionsAlphaServer[] =
-    "https://alpha-chromecontentsuggestions-pa.sandbox.googleapis.com/v1/suggestions/fetch";
+    "https://alpha-chromecontentsuggestions-pa.sandbox.googleapis.com/v1/"
+    "suggestions/fetch";
+
+const char kPushUpdatesSubscriptionServer[] =
+    "https://chromecontentsuggestions-pa.googleapis.com/v1/suggestions/"
+    "subscribe";
+const char kPushUpdatesSubscriptionStagingServer[] =
+    "https://staging-chromecontentsuggestions-pa.googleapis.com/v1/suggestions/"
+    "subscribe";
+const char kPushUpdatesSubscriptionAlphaServer[] =
+    "https://alpha-chromecontentsuggestions-pa.sandbox.googleapis.com/v1/"
+    "suggestions/subscribe";
+
+const char kPushUpdatesUnsubscriptionServer[] =
+    "https://chromecontentsuggestions-pa.googleapis.com/v1/suggestions/"
+    "unsubscribe";
+const char kPushUpdatesUnsubscriptionStagingServer[] =
+    "https://staging-chromecontentsuggestions-pa.googleapis.com/v1/suggestions/"
+    "unsubscribe";
+const char kPushUpdatesUnsubscriptionAlphaServer[] =
+    "https://alpha-chromecontentsuggestions-pa.sandbox.googleapis.com/v1/"
+    "suggestions/unsubscribe";
 
 }  // namespace ntp_snippets

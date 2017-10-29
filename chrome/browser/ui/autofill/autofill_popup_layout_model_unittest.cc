@@ -35,7 +35,7 @@ class TestAutofillPopupViewDelegate : public AutofillPopupViewDelegate {
         container_view_(web_contents->GetNativeView()) {}
 
   void Hide() override {}
-  void ViewDestroyed() override{};
+  void ViewDestroyed() override {}
   void SetSelectionAtPoint(const gfx::Point& point) override {}
   bool AcceptSelectedLine() override { return true; }
   void SelectionCleared() override {}
@@ -59,8 +59,8 @@ class TestAutofillPopupViewDelegate : public AutofillPopupViewDelegate {
     return suggestions;
   }
 #if !defined(OS_ANDROID)
-  int GetElidedValueWidthForRow(size_t row) override { return 0; }
-  int GetElidedLabelWidthForRow(size_t row) override { return 0; }
+  int GetElidedValueWidthForRow(int row) override { return 0; }
+  int GetElidedLabelWidthForRow(int row) override { return 0; }
 #endif
 
  private:

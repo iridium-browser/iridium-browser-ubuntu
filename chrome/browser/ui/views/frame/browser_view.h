@@ -19,11 +19,11 @@
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_commands_global_registry.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
+#include "chrome/browser/metrics/browser_window_histogram_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/infobar_container_delegate.h"
-#include "chrome/browser/ui/signin_view_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/views/exclusive_access_bubble_views_context.h"
 #include "chrome/browser/ui/views/extensions/extension_keybinding_registry_views.h"
@@ -54,6 +54,7 @@ class BrowserViewLayout;
 class ContentsLayoutManager;
 class DownloadShelfView;
 class ExclusiveAccessBubbleViews;
+class FullscreenControlHost;
 class InfoBarContainerView;
 class LocationBarView;
 class NewBackShortcutBubble;
@@ -62,10 +63,6 @@ class TabStrip;
 class ToolbarView;
 class TopContainerView;
 class WebContentsCloseHandler;
-
-#if defined(OS_WIN)
-class JumpList;
-#endif
 
 namespace extensions {
 class ActiveTabPermissionGranter;
@@ -312,11 +309,9 @@ class BrowserView : public BrowserWindow,
   bool IsBookmarkBarAnimating() const override;
   bool IsTabStripEditable() const override;
   bool IsToolbarVisible() const override;
+  bool IsToolbarShowing() const override;
   void ShowUpdateChromeDialog() override;
   void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) override;
-  void ShowBookmarkAppBubble(
-      const WebApplicationInfo& web_app_info,
-      const ShowBookmarkAppBubbleCallback& callback) override;
   autofill::SaveCardBubbleView* ShowSaveCreditCardBubble(
       content::WebContents* contents,
       autofill::SaveCardBubbleController* controller,
@@ -341,14 +336,13 @@ class BrowserView : public BrowserWindow,
       bool app_modal,
       const base::Callback<void(bool)>& callback) override;
   void UserChangedTheme() override;
-  void ShowWebsiteSettings(
-      Profile* profile,
-      content::WebContents* web_contents,
-      const GURL& virtual_url,
-      const security_state::SecurityInfo& security_info) override;
+  void ShowPageInfo(Profile* profile,
+                    content::WebContents* web_contents,
+                    const GURL& virtual_url,
+                    const security_state::SecurityInfo& security_info) override;
   void ShowAppMenu() override;
-  bool PreHandleKeyboardEvent(const content::NativeWebKeyboardEvent& event,
-                              bool* is_keyboard_shortcut) override;
+  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event) override;
   void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) override;
   void CutCopyPaste(int command_id) override;
@@ -439,6 +433,7 @@ class BrowserView : public BrowserWindow,
   void OnGestureEvent(ui::GestureEvent* event) override;
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
+  void PaintChildren(const ui::PaintContext& context) override;
   void ChildPreferredSizeChanged(View* child) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   void OnThemeChanged() override;
@@ -464,6 +459,7 @@ class BrowserView : public BrowserWindow,
   gfx::Rect GetClientAreaBoundsInScreen() const override;
   bool IsImmersiveModeEnabled() override;
   gfx::Rect GetTopContainerBoundsInScreen() override;
+  void DestroyAnyExclusiveAccessBubble() override;
 
   // extension::ExtensionKeybindingRegistry::Delegate overrides
   extensions::ActiveTabPermissionGranter* GetActiveTabPermissionGranter()
@@ -482,6 +478,10 @@ class BrowserView : public BrowserWindow,
   // Called by BrowserFrame during theme changes.
   void NativeThemeUpdated(const ui::NativeTheme* theme);
 
+  // Gets the FullscreenControlHost for this BrowserView, creating it if it does
+  // not yet exist.
+  FullscreenControlHost* GetFullscreenControlHost();
+
  private:
   // Do not friend BrowserViewLayout. Use the BrowserViewLayoutDelegate
   // interface to keep these two classes decoupled and testable.
@@ -498,8 +498,8 @@ class BrowserView : public BrowserWindow,
   // Callback for the loading animation(s) associated with this view.
   void LoadingAnimationCallback();
 
-  // LoadCompleteListener::Delegate implementation. Creates and initializes the
-  // |jumplist_| after the first page load.
+  // LoadCompleteListener::Delegate implementation. Creates the JumpList after
+  // the first page load.
   void OnLoadCompleted() override;
 
   // Returns the BrowserViewLayout.
@@ -585,11 +585,8 @@ class BrowserView : public BrowserWindow,
   // Returns the max top arrow height for infobar.
   int GetMaxTopInfoBarArrowHeight();
 
-  // Last focused view that issued a tab traversal.
-  int last_focused_view_storage_id_;
-
   // The BrowserFrame that hosts this view.
-  BrowserFrame* frame_;
+  BrowserFrame* frame_ = nullptr;
 
   // The Browser object we are associated with.
   std::unique_ptr<Browser> browser_;
@@ -627,13 +624,13 @@ class BrowserView : public BrowserWindow,
   // The view that manages the tab strip, toolbar, and sometimes the bookmark
   // bar. Stacked top in the view hiearachy so it can be used to slide out
   // the top views in immersive fullscreen.
-  TopContainerView* top_container_;
+  TopContainerView* top_container_ = nullptr;
 
   // The TabStrip.
-  TabStrip* tabstrip_;
+  TabStrip* tabstrip_ = nullptr;
 
   // The Toolbar containing the navigation buttons, menus and the address bar.
-  ToolbarView* toolbar_;
+  ToolbarView* toolbar_ = nullptr;
 
   // The Bookmark Bar View for this window. Lazily created. May be null for
   // non-tabbed browsers like popups. May not be visible.
@@ -642,23 +639,23 @@ class BrowserView : public BrowserWindow,
   // The do-nothing view which controls the z-order of the find bar widget
   // relative to views which paint into layers and views with an associated
   // NativeView.
-  View* find_bar_host_view_;
+  View* find_bar_host_view_ = nullptr;
 
   // The download shelf view (view at the bottom of the page).
   std::unique_ptr<DownloadShelfView> download_shelf_;
 
   // The InfoBarContainerView that contains InfoBars for the current tab.
-  InfoBarContainerView* infobar_container_;
+  InfoBarContainerView* infobar_container_ = nullptr;
 
   // The view that contains the selected WebContents.
-  ContentsWebView* contents_web_view_;
+  ContentsWebView* contents_web_view_ = nullptr;
 
   // The view that contains devtools window for the selected WebContents.
-  views::WebView* devtools_web_view_;
+  views::WebView* devtools_web_view_ = nullptr;
 
   // The view managing the devtools and contents positions.
   // Handled by ContentsLayoutManager.
-  views::View* contents_container_;
+  views::View* contents_container_ = nullptr;
 
   // Tracks and stores the last focused view which is not the
   // devtools_web_view_ or any of its children. Used to restore focus once
@@ -672,16 +669,16 @@ class BrowserView : public BrowserWindow,
   std::map<ui::Accelerator, int> accelerator_table_;
 
   // True if we have already been initialized.
-  bool initialized_;
+  bool initialized_ = false;
 
   // True if we're currently handling a theme change (i.e. inside
   // OnThemeChanged()).
-  bool handling_theme_changed_;
+  bool handling_theme_changed_ = false;
 
   // True when in ProcessFullscreen(). The flag is used to avoid reentrance and
   // to ignore requests to layout while in ProcessFullscreen() to reduce
   // jankiness.
-  bool in_process_fullscreen_;
+  bool in_process_fullscreen_ = false;
 
   std::unique_ptr<ExclusiveAccessBubbleViews> exclusive_access_bubble_;
 
@@ -691,9 +688,6 @@ class BrowserView : public BrowserWindow,
 #if defined(OS_WIN)
   // Helper class to listen for completion of first page load.
   std::unique_ptr<LoadCompleteListener> load_complete_listener_;
-
-  // The custom JumpList for Windows 7.
-  scoped_refptr<JumpList> jumplist_;
 #endif
 
   // The timer used to update frames for the Loading Animation.
@@ -703,19 +697,22 @@ class BrowserView : public BrowserWindow,
 
   // If this flag is set then SetFocusToLocationBar() will set focus to the
   // location bar even if the browser window is not active.
-  bool force_location_bar_focus_;
+  bool force_location_bar_focus_ = false;
 
   std::unique_ptr<ImmersiveModeController> immersive_mode_controller_;
 
   std::unique_ptr<WebContentsCloseHandler> web_contents_close_handler_;
 
-  SigninViewController signin_view_controller_;
-
   // The class that registers for keyboard shortcuts for extension commands.
   std::unique_ptr<ExtensionKeybindingRegistryViews>
       extension_keybinding_registry_;
 
-  mutable base::WeakPtrFactory<BrowserView> activate_modal_dialog_factory_;
+  std::unique_ptr<BrowserWindowHistogramHelper> histogram_helper_;
+
+  std::unique_ptr<FullscreenControlHost> fullscreen_control_host_;
+
+  mutable base::WeakPtrFactory<BrowserView> activate_modal_dialog_factory_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(BrowserView);
 };

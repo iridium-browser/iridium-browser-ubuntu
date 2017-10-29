@@ -5,8 +5,8 @@
 #ifndef BluetoothRemoteGATTUtils_h
 #define BluetoothRemoteGATTUtils_h
 
-#include "core/dom/DOMDataView.h"
-#include "wtf/Vector.h"
+#include "core/typed_arrays/DOMDataView.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 

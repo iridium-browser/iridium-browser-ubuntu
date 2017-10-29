@@ -78,6 +78,7 @@ chrome.automation.RoleType = {
   ABBR: 'abbr',
   ALERT_DIALOG: 'alertDialog',
   ALERT: 'alert',
+  ANCHOR: 'anchor',
   ANNOTATION: 'annotation',
   APPLICATION: 'application',
   ARTICLE: 'article',
@@ -89,6 +90,7 @@ chrome.automation.RoleType = {
   BUTTON_DROP_DOWN: 'buttonDropDown',
   CANVAS: 'canvas',
   CAPTION: 'caption',
+  CARET: 'caret',
   CELL: 'cell',
   CHECK_BOX: 'checkBox',
   CLIENT: 'client',
@@ -109,7 +111,6 @@ chrome.automation.RoleType = {
   DIALOG: 'dialog',
   DIRECTORY: 'directory',
   DISCLOSURE_TRIANGLE: 'disclosureTriangle',
-  DIV: 'div',
   DOCUMENT: 'document',
   EMBEDDED_OBJECT: 'embeddedObject',
   FEED: 'feed',
@@ -117,6 +118,7 @@ chrome.automation.RoleType = {
   FIGURE: 'figure',
   FOOTER: 'footer',
   FORM: 'form',
+  GENERIC_CONTAINER: 'genericContainer',
   GRID: 'grid',
   GROUP: 'group',
   HEADING: 'heading',
@@ -213,10 +215,8 @@ chrome.automation.RoleType = {
  */
 chrome.automation.StateType = {
   BUSY: 'busy',
-  CHECKED: 'checked',
   COLLAPSED: 'collapsed',
   DEFAULT: 'default',
-  DISABLED: 'disabled',
   EDITABLE: 'editable',
   EXPANDED: 'expanded',
   FOCUSABLE: 'focusable',
@@ -229,9 +229,7 @@ chrome.automation.StateType = {
   MULTILINE: 'multiline',
   MULTISELECTABLE: 'multiselectable',
   OFFSCREEN: 'offscreen',
-  PRESSED: 'pressed',
   PROTECTED: 'protected',
-  READ_ONLY: 'readOnly',
   REQUIRED: 'required',
   RICHLY_EDITABLE: 'richlyEditable',
   SELECTABLE: 'selectable',
@@ -259,10 +257,20 @@ chrome.automation.TreeChangeType = {
 chrome.automation.NameFromType = {
   UNINITIALIZED: 'uninitialized',
   ATTRIBUTE: 'attribute',
+  ATTRIBUTE_EXPLICITLY_EMPTY: 'attributeExplicitlyEmpty',
   CONTENTS: 'contents',
   PLACEHOLDER: 'placeholder',
-  RELATED_ELEMENT: 'related_element',
+  RELATED_ELEMENT: 'relatedElement',
   VALUE: 'value',
+};
+
+/**
+ * @enum {string}
+ * @see https://developer.chrome.com/extensions/automation#type-Restriction
+ */
+chrome.automation.Restriction = {
+  DISABLED: 'disabled',
+  READ_ONLY: 'readOnly',
 };
 
 /**
@@ -366,6 +374,15 @@ chrome.automation.TreeChangeObserverFilter = {
 };
 
 /**
+ * @typedef {{
+ *   id: number,
+ *   description: string
+ * }}
+ * @see https://developer.chrome.com/extensions/automation#type-CustomAction
+ */
+chrome.automation.CustomAction;
+
+/**
  * @constructor
  * @private
  * @see https://developer.chrome.com/extensions/automation#type-AutomationNode
@@ -432,6 +449,13 @@ chrome.automation.AutomationNode.prototype.description;
  * @see https://developer.chrome.com/extensions/automation#type-placeholder
  */
 chrome.automation.AutomationNode.prototype.placeholder;
+
+/**
+ * The role description for this node.
+ * @type {(string|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-roleDescription
+ */
+chrome.automation.AutomationNode.prototype.roleDescription;
 
 /**
  * The accessible name for this node, via the <a href="http://www.w3.org/TR/wai-aria/roles#namecalculation"> Accessible Name Calculation</a> process.
@@ -515,6 +539,20 @@ chrome.automation.AutomationNode.prototype.labelledBy;
  * @see https://developer.chrome.com/extensions/automation#type-activeDescendant
  */
 chrome.automation.AutomationNode.prototype.activeDescendant;
+
+/**
+ * The target of an in-page link.
+ * @type {(!chrome.automation.AutomationNode|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-inPageLinkTarget
+ */
+chrome.automation.AutomationNode.prototype.inPageLinkTarget;
+
+/**
+ * An array of custom actions.
+ * @type {(!Array<!chrome.automation.CustomAction>|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-customActions
+ */
+chrome.automation.AutomationNode.prototype.customActions;
 
 /**
  * The URL that this link will navigate to.
@@ -715,25 +753,46 @@ chrome.automation.AutomationNode.prototype.posInSet;
 chrome.automation.AutomationNode.prototype.setSize;
 
 /**
- * The number of rows in this table.
+ * The number of rows in this table as specified in the DOM.
  * @type {(number|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-tableRowCount
  */
 chrome.automation.AutomationNode.prototype.tableRowCount;
 
 /**
- * The number of columns in this table.
+ * The number of rows in this table as specified by the page author.
+ * @type {(number|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-ariaRowCount
+ */
+chrome.automation.AutomationNode.prototype.ariaRowCount;
+
+/**
+ * The number of columns in this table as specified in the DOM.
  * @type {(number|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-tableColumnCount
  */
 chrome.automation.AutomationNode.prototype.tableColumnCount;
 
 /**
- * The zero-based index of the column that this cell is in.
+ * The number of columns in this table as specified by the page author.
+ * @type {(number|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-ariaColumnCount
+ */
+chrome.automation.AutomationNode.prototype.ariaColumnCount;
+
+/**
+ * The zero-based index of the column that this cell is in as specified in the DOM.
  * @type {(number|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-tableCellColumnIndex
  */
 chrome.automation.AutomationNode.prototype.tableCellColumnIndex;
+
+/**
+ * The ARIA column index as specified by the page author.
+ * @type {(number|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-ariaCellColumnIndex
+ */
+chrome.automation.AutomationNode.prototype.ariaCellColumnIndex;
 
 /**
  * The number of columns that this cell spans (default is 1).
@@ -743,11 +802,18 @@ chrome.automation.AutomationNode.prototype.tableCellColumnIndex;
 chrome.automation.AutomationNode.prototype.tableCellColumnSpan;
 
 /**
- * The zero-based index of the row that this cell is in.
+ * The zero-based index of the row that this cell is in as specified in the DOM.
  * @type {(number|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-tableCellRowIndex
  */
 chrome.automation.AutomationNode.prototype.tableCellRowIndex;
+
+/**
+ * The ARIA row index as specified by the page author.
+ * @type {(number|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-ariaCellRowIndex
+ */
+chrome.automation.AutomationNode.prototype.ariaCellRowIndex;
 
 /**
  * The number of rows that this cell spans (default is 1).
@@ -855,13 +921,6 @@ chrome.automation.AutomationNode.prototype.accessKey;
 chrome.automation.AutomationNode.prototype.ariaInvalidValue;
 
 /**
- * The value of the aria-readonly attribute, if applicable.
- * @type {(boolean|undefined)}
- * @see https://developer.chrome.com/extensions/automation#type-ariaReadonly
- */
-chrome.automation.AutomationNode.prototype.ariaReadonly;
-
-/**
  * The CSS display attribute for this node, if applicable.
  * @type {(string|undefined)}
  * @see https://developer.chrome.com/extensions/automation#type-display
@@ -883,11 +942,18 @@ chrome.automation.AutomationNode.prototype.imageDataUrl;
 chrome.automation.AutomationNode.prototype.language;
 
 /**
- * If a checkbox or toggle button is in the mixed state.
- * @type {(boolean|undefined)}
- * @see https://developer.chrome.com/extensions/automation#type-buttonMixed
+ * State describing input restriction associated with an object: undefined - enabled control or other object that is not disabled  'disabled' - a control or group of controls that does not take input 'readOnly' - an edit field that allows focus and selection but not input
+ * @type {(string|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-restriction
  */
-chrome.automation.AutomationNode.prototype.buttonMixed;
+chrome.automation.AutomationNode.prototype.restriction;
+
+/**
+ * Tri-state describing checkbox or radio button: 'false' | 'true' | 'mixed'
+ * @type {(string|undefined)}
+ * @see https://developer.chrome.com/extensions/automation#type-checked
+ */
+chrome.automation.AutomationNode.prototype.checked;
 
 /**
  * The RGBA foreground color of this subtree, as an integer.
@@ -909,6 +975,34 @@ chrome.automation.AutomationNode.prototype.backgroundColor;
  * @see https://developer.chrome.com/extensions/automation#type-colorValue
  */
 chrome.automation.AutomationNode.prototype.colorValue;
+
+/**
+ * Indicates node text is bold.
+ * @type {boolean}
+ * @see https://developer.chrome.com/extensions/automation#type-bold
+ */
+chrome.automation.AutomationNode.prototype.bold;
+
+/**
+ * Indicates node text is italic.
+ * @type {boolean}
+ * @see https://developer.chrome.com/extensions/automation#type-italic
+ */
+chrome.automation.AutomationNode.prototype.italic;
+
+/**
+ * Indicates node text is underline.
+ * @type {boolean}
+ * @see https://developer.chrome.com/extensions/automation#type-underline
+ */
+chrome.automation.AutomationNode.prototype.underline;
+
+/**
+ * Indicates node text is line through.
+ * @type {boolean}
+ * @see https://developer.chrome.com/extensions/automation#type-lineThrough
+ */
+chrome.automation.AutomationNode.prototype.lineThrough;
 
 /**
  * Walking the tree.
@@ -990,10 +1084,27 @@ chrome.automation.AutomationNode.prototype.focus = function() {};
 chrome.automation.AutomationNode.prototype.getImageData = function(maxWidth, maxHeight) {};
 
 /**
+ * Does a hit test of the given global screen coordinates, and fires eventToFire
+ * on the resulting object.
+ * @param {number} x
+ * @param {number} y
+ * @param {!chrome.automation.EventType} eventToFire
+ * @see https://developer.chrome.com/extensions/automation#method-hitTest
+ */
+chrome.automation.AutomationNode.prototype.hitTest = function(x, y, eventToFire) {};
+
+/**
  * Scrolls this node to make it visible.
  * @see https://developer.chrome.com/extensions/automation#method-makeVisible
  */
 chrome.automation.AutomationNode.prototype.makeVisible = function() {};
+
+/**
+ * Performs custom action.
+ * @param {number} customActionId
+ * @see https://developer.chrome.com/extensions/automation#method-performCustomAction
+ */
+chrome.automation.AutomationNode.prototype.performCustomAction = function(customActionId) {};
 
 /**
  * Sets selection within a text field.
@@ -1111,8 +1222,8 @@ chrome.automation.AutomationNode.prototype.matches = function(params) {};
  * placeholder root node; listen for the "loadComplete" event to get a
  * notification that the tree has fully loaded (the previous root node reference
  * will stop working at or before this point).
- * @param {number} tabId
- * @param {function(!chrome.automation.AutomationNode):void} callback Called
+ * @param {number=} tabId
+ * @param {function(!chrome.automation.AutomationNode):void=} callback Called
  *     when the <code>AutomationNode</code> for the page is available.
  * @see https://developer.chrome.com/extensions/automation#method-getTree
  */

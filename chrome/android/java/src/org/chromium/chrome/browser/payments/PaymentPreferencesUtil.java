@@ -15,9 +15,6 @@ public class PaymentPreferencesUtil {
     /** Preference to indicate whether payment request has been completed successfully once.*/
     private static final String PAYMENT_COMPLETE_ONCE = "payment_complete_once";
 
-    /** Prefix of the preferences to persist Android payment apps' status. */
-    public static final String PAYMENT_ANDROID_APP_ENABLED_ = "payment_android_app_enabled_";
-
     /** Prefix of the preferences to persist use count of the payment instruments. */
     public static final String PAYMENT_INSTRUMENT_USE_COUNT_ = "payment_instrument_use_count_";
 
@@ -39,28 +36,6 @@ public class PaymentPreferencesUtil {
                 .edit()
                 .putBoolean(PAYMENT_COMPLETE_ONCE, true)
                 .apply();
-    }
-
-    /**
-     * Checks whether the Android payment app is enabled by user from the settings. The default
-     * status is enabled.
-     *
-     * @param packageName The package name of the Android payment app.
-     * @return True If the Android payment app is enabled by user.
-     */
-    public static boolean isAndroidPaymentAppEnabled(String packageName) {
-        return ContextUtils.getAppSharedPreferences().getBoolean(
-                getAndroidPaymentAppEnabledPreferenceKey(packageName), true);
-    }
-
-    /**
-     * Gets preference key for status of the Android payment app.
-     *
-     * @param packageName The packageName of the Android payment app.
-     * @return The preference key.
-     */
-    public static String getAndroidPaymentAppEnabledPreferenceKey(String packageName) {
-        return PAYMENT_ANDROID_APP_ENABLED_ + packageName;
     }
 
     /**

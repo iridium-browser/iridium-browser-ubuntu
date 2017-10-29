@@ -11,12 +11,12 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "components/prefs/pref_member.h"
-#include "components/translate/core/common/translate_pref_names.h"
+#include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/language_detection/language_detection_util.h"
 #import "components/translate/ios/browser/js_language_detection_manager.h"
 #include "components/translate/ios/browser/string_clipping_util.h"
 #import "ios/web/public/url_scheme_util.h"
-#include "ios/web/public/web_state/navigation_context.h"
+#import "ios/web/public/web_state/navigation_context.h"
 #include "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -51,6 +51,14 @@ LanguageDetectionController::LanguageDetectionController(
 
 LanguageDetectionController::~LanguageDetectionController() {
 }
+
+LanguageDetectionController::DetectionDetails::DetectionDetails()
+    : is_cld_reliable(false) {}
+
+LanguageDetectionController::DetectionDetails::DetectionDetails(
+    const DetectionDetails& other) = default;
+
+LanguageDetectionController::DetectionDetails::~DetectionDetails() = default;
 
 std::unique_ptr<LanguageDetectionController::CallbackList::Subscription>
 LanguageDetectionController::RegisterLanguageDetectionCallback(
@@ -115,11 +123,13 @@ void LanguageDetectionController::OnTextRetrieved(
     const std::string& http_content_language,
     const std::string& html_lang,
     const base::string16& text_content) {
+  std::string cld_language;
+  bool is_cld_reliable;
   std::string language = translate::DeterminePageLanguage(
       http_content_language, html_lang,
       GetStringByClippingLastWord(text_content,
                                   language_detection::kMaxIndexChars),
-      nullptr /* cld_language */, nullptr /* is_cld_reliable */);
+      &cld_language, &is_cld_reliable);
   if (language.empty())
     return;  // No language detected.
 
@@ -127,6 +137,8 @@ void LanguageDetectionController::OnTextRetrieved(
   details.content_language = http_content_language;
   details.html_root_language = html_lang;
   details.adopted_language = language;
+  details.cld_language = cld_language;
+  details.is_cld_reliable = is_cld_reliable;
   language_detection_callbacks_.Notify(details);
 }
 
@@ -140,7 +152,7 @@ void LanguageDetectionController::PageLoaded(
 
 void LanguageDetectionController::DidFinishNavigation(
     web::NavigationContext* navigation_context) {
-  if (navigation_context->IsSamePage())
+  if (navigation_context->IsSameDocument())
     StartLanguageDetection();
 }
 

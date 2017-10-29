@@ -14,6 +14,7 @@ UI.ListWidget = class extends UI.VBox {
     this._delegate = delegate;
 
     this._list = this.contentElement.createChild('div', 'list');
+    this.element.tabIndex = -1;
 
     /** @type {?UI.ListWidget.Editor} */
     this._editor = null;
@@ -144,6 +145,7 @@ UI.ListWidget = class extends UI.VBox {
      */
     function onRemoveClicked() {
       var index = this._elements.indexOf(element);
+      this.element.focus();
       this._delegate.removeItemRequested(this._items[index], index);
     }
   }
@@ -176,6 +178,7 @@ UI.ListWidget = class extends UI.VBox {
       return;
 
     this._stopEditing();
+    this._focusRestorer = new UI.ElementFocusRestorer(this.element);
 
     this._list.classList.add('list-editing');
     this._editItem = item;
@@ -202,6 +205,8 @@ UI.ListWidget = class extends UI.VBox {
 
   _stopEditing() {
     this._list.classList.remove('list-editing');
+    if (this._focusRestorer)
+      this._focusRestorer.restore();
     if (this._editElement)
       this._editElement.classList.remove('hidden');
     if (this._editor && this._editor.element.parentElement)
@@ -259,7 +264,7 @@ UI.ListWidget.Editor = class {
     this._contentElement = this.element.createChild('div', 'editor-content');
 
     var buttonsRow = this.element.createChild('div', 'editor-buttons');
-    this._commitButton = UI.createTextButton('', this._commitClicked.bind(this));
+    this._commitButton = UI.createTextButton('', this._commitClicked.bind(this), '', true /* primary */);
     buttonsRow.appendChild(this._commitButton);
     this._cancelButton = UI.createTextButton(Common.UIString('Cancel'), this._cancelClicked.bind(this));
     this._cancelButton.addEventListener(
@@ -310,8 +315,7 @@ UI.ListWidget.Editor = class {
    * @return {!HTMLInputElement}
    */
   createInput(name, type, title, validator) {
-    var input = /** @type {!HTMLInputElement} */ (createElement('input'));
-    input.type = type;
+    var input = /** @type {!HTMLInputElement} */ (UI.createInput('', type));
     input.placeholder = title;
     input.addEventListener('input', this._validateControls.bind(this, false), false);
     input.addEventListener('blur', this._validateControls.bind(this, false), false);

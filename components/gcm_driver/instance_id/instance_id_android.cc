@@ -8,7 +8,6 @@
 
 #include <memory>
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
@@ -40,11 +39,6 @@ InstanceIDAndroid::ScopedBlockOnAsyncTasksForTesting::
 }
 
 // static
-bool InstanceIDAndroid::RegisterJni(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
-
-// static
 std::unique_ptr<InstanceID> InstanceID::CreateInternal(
     const std::string& app_id,
     gcm::GCMDriver* gcm_driver) {
@@ -65,7 +59,6 @@ InstanceIDAndroid::InstanceIDAndroid(const std::string& app_id,
   JNIEnv* env = AttachCurrentThread();
   java_ref_.Reset(
       Java_InstanceIDBridge_create(env, reinterpret_cast<intptr_t>(this),
-                                   base::android::GetApplicationContext(),
                                    ConvertUTF8ToJavaString(env, subtype)));
 }
 
@@ -119,6 +112,15 @@ void InstanceIDAndroid::GetToken(
       ConvertUTF8ToJavaString(env, authorized_entity),
       ConvertUTF8ToJavaString(env, scope),
       base::android::ToJavaArrayOfStrings(env, options_strings));
+}
+
+void InstanceIDAndroid::ValidateToken(const std::string& authorized_entity,
+                                      const std::string& scope,
+                                      const std::string& token,
+                                      const ValidateTokenCallback& callback) {
+  // gcm_driver doesn't store tokens on Android, so assume it's valid.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(callback, true /* is_valid */));
 }
 
 void InstanceIDAndroid::DeleteTokenImpl(const std::string& authorized_entity,

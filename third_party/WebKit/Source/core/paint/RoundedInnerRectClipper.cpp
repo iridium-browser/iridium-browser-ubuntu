@@ -4,87 +4,94 @@
 
 #include "core/paint/RoundedInnerRectClipper.h"
 
-#include "core/layout/LayoutObject.h"
 #include "core/paint/PaintInfo.h"
 #include "platform/graphics/paint/ClipDisplayItem.h"
+#include "platform/graphics/paint/DisplayItemClient.h"
 #include "platform/graphics/paint/PaintController.h"
 
 namespace blink {
 
 RoundedInnerRectClipper::RoundedInnerRectClipper(
-    const LayoutObject& layoutObject,
-    const PaintInfo& paintInfo,
+    const DisplayItemClient& display_item,
+    const PaintInfo& paint_info,
     const LayoutRect& rect,
-    const FloatRoundedRect& clipRect,
+    const FloatRoundedRect& clip_rect,
     RoundedInnerRectClipperBehavior behavior)
-    : m_layoutObject(layoutObject),
-      m_paintInfo(paintInfo),
-      m_usePaintController(behavior == ApplyToDisplayList),
-      m_clipType(m_usePaintController ? m_paintInfo.displayItemTypeForClipping()
-                                      : DisplayItem::kClipBoxPaintPhaseFirst) {
-  Vector<FloatRoundedRect> roundedRectClips;
-  if (clipRect.isRenderable()) {
-    roundedRectClips.push_back(clipRect);
+    : display_item_(display_item),
+      paint_info_(paint_info),
+      use_paint_controller_(behavior == kApplyToDisplayList),
+      clip_type_(use_paint_controller_
+                     ? paint_info_.DisplayItemTypeForClipping()
+                     : DisplayItem::kClipBoxPaintPhaseFirst) {
+  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled() && use_paint_controller_)
+    return;
+
+  Vector<FloatRoundedRect> rounded_rect_clips;
+  if (clip_rect.IsRenderable()) {
+    rounded_rect_clips.push_back(clip_rect);
   } else {
     // We create a rounded rect for each of the corners and clip it, while
     // making sure we clip opposing corners together.
-    if (!clipRect.getRadii().topLeft().isEmpty() ||
-        !clipRect.getRadii().bottomRight().isEmpty()) {
-      FloatRect topCorner(clipRect.rect().x(), clipRect.rect().y(),
-                          rect.maxX() - clipRect.rect().x(),
-                          rect.maxY() - clipRect.rect().y());
-      FloatRoundedRect::Radii topCornerRadii;
-      topCornerRadii.setTopLeft(clipRect.getRadii().topLeft());
-      roundedRectClips.push_back(FloatRoundedRect(topCorner, topCornerRadii));
+    if (!clip_rect.GetRadii().TopLeft().IsEmpty() ||
+        !clip_rect.GetRadii().BottomRight().IsEmpty()) {
+      FloatRect top_corner(clip_rect.Rect().X(), clip_rect.Rect().Y(),
+                           rect.MaxX() - clip_rect.Rect().X(),
+                           rect.MaxY() - clip_rect.Rect().Y());
+      FloatRoundedRect::Radii top_corner_radii;
+      top_corner_radii.SetTopLeft(clip_rect.GetRadii().TopLeft());
+      rounded_rect_clips.push_back(
+          FloatRoundedRect(top_corner, top_corner_radii));
 
-      FloatRect bottomCorner(rect.x().toFloat(), rect.y().toFloat(),
-                             clipRect.rect().maxX() - rect.x().toFloat(),
-                             clipRect.rect().maxY() - rect.y().toFloat());
-      FloatRoundedRect::Radii bottomCornerRadii;
-      bottomCornerRadii.setBottomRight(clipRect.getRadii().bottomRight());
-      roundedRectClips.push_back(
-          FloatRoundedRect(bottomCorner, bottomCornerRadii));
+      FloatRect bottom_corner(rect.X().ToFloat(), rect.Y().ToFloat(),
+                              clip_rect.Rect().MaxX() - rect.X().ToFloat(),
+                              clip_rect.Rect().MaxY() - rect.Y().ToFloat());
+      FloatRoundedRect::Radii bottom_corner_radii;
+      bottom_corner_radii.SetBottomRight(clip_rect.GetRadii().BottomRight());
+      rounded_rect_clips.push_back(
+          FloatRoundedRect(bottom_corner, bottom_corner_radii));
     }
 
-    if (!clipRect.getRadii().topRight().isEmpty() ||
-        !clipRect.getRadii().bottomLeft().isEmpty()) {
-      FloatRect topCorner(rect.x().toFloat(), clipRect.rect().y(),
-                          clipRect.rect().maxX() - rect.x().toFloat(),
-                          rect.maxY() - clipRect.rect().y());
-      FloatRoundedRect::Radii topCornerRadii;
-      topCornerRadii.setTopRight(clipRect.getRadii().topRight());
-      roundedRectClips.push_back(FloatRoundedRect(topCorner, topCornerRadii));
+    if (!clip_rect.GetRadii().TopRight().IsEmpty() ||
+        !clip_rect.GetRadii().BottomLeft().IsEmpty()) {
+      FloatRect top_corner(rect.X().ToFloat(), clip_rect.Rect().Y(),
+                           clip_rect.Rect().MaxX() - rect.X().ToFloat(),
+                           rect.MaxY() - clip_rect.Rect().Y());
+      FloatRoundedRect::Radii top_corner_radii;
+      top_corner_radii.SetTopRight(clip_rect.GetRadii().TopRight());
+      rounded_rect_clips.push_back(
+          FloatRoundedRect(top_corner, top_corner_radii));
 
-      FloatRect bottomCorner(clipRect.rect().x(), rect.y().toFloat(),
-                             rect.maxX() - clipRect.rect().x(),
-                             clipRect.rect().maxY() - rect.y().toFloat());
-      FloatRoundedRect::Radii bottomCornerRadii;
-      bottomCornerRadii.setBottomLeft(clipRect.getRadii().bottomLeft());
-      roundedRectClips.push_back(
-          FloatRoundedRect(bottomCorner, bottomCornerRadii));
+      FloatRect bottom_corner(clip_rect.Rect().X(), rect.Y().ToFloat(),
+                              rect.MaxX() - clip_rect.Rect().X(),
+                              clip_rect.Rect().MaxY() - rect.Y().ToFloat());
+      FloatRoundedRect::Radii bottom_corner_radii;
+      bottom_corner_radii.SetBottomLeft(clip_rect.GetRadii().BottomLeft());
+      rounded_rect_clips.push_back(
+          FloatRoundedRect(bottom_corner, bottom_corner_radii));
     }
   }
 
-  if (m_usePaintController) {
-    m_paintInfo.context.getPaintController().createAndAppend<ClipDisplayItem>(
-        layoutObject, m_clipType, LayoutRect::infiniteIntRect(),
-        roundedRectClips);
+  if (use_paint_controller_) {
+    paint_info_.context.GetPaintController().CreateAndAppend<ClipDisplayItem>(
+        display_item, clip_type_, LayoutRect::InfiniteIntRect(),
+        rounded_rect_clips);
   } else {
-    ClipDisplayItem clipDisplayItem(layoutObject, m_clipType,
-                                    LayoutRect::infiniteIntRect(),
-                                    roundedRectClips);
-    clipDisplayItem.replay(paintInfo.context);
+    paint_info.context.Save();
+    for (const auto& rrect : rounded_rect_clips)
+      paint_info.context.ClipRoundedRect(rrect);
   }
 }
 
 RoundedInnerRectClipper::~RoundedInnerRectClipper() {
-  DisplayItem::Type endType = DisplayItem::clipTypeToEndClipType(m_clipType);
-  if (m_usePaintController) {
-    m_paintInfo.context.getPaintController().endItem<EndClipDisplayItem>(
-        m_layoutObject, endType);
+  if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled() && use_paint_controller_)
+    return;
+
+  DisplayItem::Type end_type = DisplayItem::ClipTypeToEndClipType(clip_type_);
+  if (use_paint_controller_) {
+    paint_info_.context.GetPaintController().EndItem<EndClipDisplayItem>(
+        display_item_, end_type);
   } else {
-    EndClipDisplayItem endClipDisplayItem(m_layoutObject, endType);
-    endClipDisplayItem.replay(m_paintInfo.context);
+    paint_info_.context.Restore();
   }
 }
 

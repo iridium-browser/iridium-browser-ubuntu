@@ -11,9 +11,11 @@
 #include "base/bind.h"
 #include "base/containers/hash_tables.h"
 #include "base/memory/ptr_util.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "extensions/browser/api/dns/host_resolver_wrapper.h"
@@ -34,10 +36,6 @@
 #include "net/log/net_log_with_source.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-
-#if defined(OS_CHROMEOS)
-#include "content/public/browser/browser_thread.h"
-#endif  // OS_CHROMEOS
 
 namespace extensions {
 
@@ -362,7 +360,7 @@ void SocketDisconnectFunction::Work() {
     socket->Disconnect(false /* socket_destroying */);
   else
     error_ = kSocketNotFoundError;
-  SetResult(base::Value::CreateNullValue());
+  SetResult(base::MakeUnique<base::Value>());
 }
 
 bool SocketBindFunction::Prepare() {
@@ -519,11 +517,11 @@ void SocketReadFunction::OnCompleted(int bytes_read,
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->SetInteger(kResultCodeKey, bytes_read);
   if (bytes_read > 0) {
-    result->Set(kDataKey,
-                base::BinaryValue::CreateWithCopiedBuffer(io_buffer->data(),
-                                                          bytes_read));
+    result->Set(kDataKey, base::Value::CreateWithCopiedBuffer(io_buffer->data(),
+                                                              bytes_read));
   } else {
-    result->Set(kDataKey, new base::Value(base::Value::Type::BINARY));
+    result->Set(kDataKey,
+                base::MakeUnique<base::Value>(base::Value::Type::BINARY));
   }
   SetResult(std::move(result));
 
@@ -537,11 +535,11 @@ SocketWriteFunction::~SocketWriteFunction() {}
 
 bool SocketWriteFunction::Prepare() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
-  base::BinaryValue* data = NULL;
+  base::Value* data = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetBinary(1, &data));
 
-  io_buffer_size_ = data->GetSize();
-  io_buffer_ = new net::WrappedIOBuffer(data->GetBuffer());
+  io_buffer_size_ = data->GetBlob().size();
+  io_buffer_ = new net::WrappedIOBuffer(data->GetBlob().data());
   return true;
 }
 
@@ -597,11 +595,11 @@ void SocketRecvFromFunction::OnCompleted(int bytes_read,
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->SetInteger(kResultCodeKey, bytes_read);
   if (bytes_read > 0) {
-    result->Set(kDataKey,
-                base::BinaryValue::CreateWithCopiedBuffer(io_buffer->data(),
-                                                          bytes_read));
+    result->Set(kDataKey, base::Value::CreateWithCopiedBuffer(io_buffer->data(),
+                                                              bytes_read));
   } else {
-    result->Set(kDataKey, new base::Value(base::Value::Type::BINARY));
+    result->Set(kDataKey,
+                base::MakeUnique<base::Value>(base::Value::Type::BINARY));
   }
   result->SetString(kAddressKey, address);
   result->SetInteger(kPortKey, port);
@@ -618,7 +616,7 @@ SocketSendToFunction::~SocketSendToFunction() {}
 
 bool SocketSendToFunction::Prepare() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
-  base::BinaryValue* data = NULL;
+  base::Value* data = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetBinary(1, &data));
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(2, &hostname_));
   int port;
@@ -629,8 +627,8 @@ bool SocketSendToFunction::Prepare() {
   }
   port_ = static_cast<uint16_t>(port);
 
-  io_buffer_size_ = data->GetSize();
-  io_buffer_ = new net::WrappedIOBuffer(data->GetBuffer());
+  io_buffer_size_ = data->GetBlob().size();
+  io_buffer_ = new net::WrappedIOBuffer(data->GetBlob().data());
   return true;
 }
 
@@ -780,8 +778,10 @@ void SocketGetInfoFunction::Work() {
 }
 
 bool SocketGetNetworkListFunction::RunAsync() {
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&SocketGetNetworkListFunction::GetNetworkListOnFileThread,
                  this));
   return true;

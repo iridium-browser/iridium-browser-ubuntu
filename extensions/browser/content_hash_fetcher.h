@@ -38,7 +38,7 @@ class ContentHashFetcher {
   // -whether we were successful or not (have verified_contents.json and
   // -computed_hashes.json files)
   // -was it a forced check?
-  // -a set of paths whose contents didn't match expected values
+  // -a set of unix style paths whose contents didn't match expected values
   typedef base::Callback<
       void(const std::string&, bool, bool, const std::set<base::FilePath>&)>
       FetchCallback;
@@ -61,7 +61,7 @@ class ContentHashFetcher {
 
  private:
   // Callback for when a job getting content hashes has completed.
-  void JobFinished(ContentHashFetcherJob* job);
+  void JobFinished(scoped_refptr<ContentHashFetcherJob> job);
 
   net::URLRequestContextGetter* context_getter_;
   ContentVerifierDelegate* delegate_;

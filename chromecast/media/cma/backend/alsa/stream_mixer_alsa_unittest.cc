@@ -7,16 +7,20 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_map>
 #include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/values.h"
 #include "chromecast/media/cma/backend/alsa/mock_alsa_wrapper.h"
+#include "chromecast/media/cma/backend/alsa/post_processing_pipeline.h"
 #include "media/audio/audio_device_description.h"
 #include "media/base/audio_bus.h"
+#include "media/base/audio_sample_types.h"
 #include "media/base/vector_math.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -28,6 +32,8 @@ namespace media {
 
 namespace {
 
+using FloatType = ::media::Float32SampleTypeTraits;
+
 // Testing constants that are common to multiple test cases.
 const size_t kBytesPerSample = sizeof(int32_t);
 const int kNumChannels = 2;
@@ -35,7 +41,11 @@ const int kTestMaxReadSize = 4096;
 
 // kTestSamplesPerSecond needs to be higher than kLowSampleRateCutoff for the
 // mixer to use it.
-const int kTestSamplesPerSecond = 54321;
+const int kTestSamplesPerSecond = 48000;
+
+// Stream mixer alsa will never pull more than this many frames at a time.
+const int kMaxWriteSizeMs = 20;
+const int kMaxChunkSize = kTestSamplesPerSecond * kMaxWriteSizeMs / 1000;
 
 // This array holds |NUM_DATA_SETS| sets of arbitrary interleaved float data.
 // Each set holds |NUM_SAMPLES| / kNumChannels frames of data.
@@ -116,6 +126,53 @@ const int32_t kTestData[NUM_DATA_SETS][NUM_SAMPLES] = {
   }
 };
 
+// Compensate for integer arithmatic errors.
+const int kMaxDelayErrorUs = 2;
+
+const char kDelayModuleSolib[] = "delay.so";
+
+// Should match # of "processors" blocks below.
+const int kNumPostProcessors = 5;
+const char kTestPipelineJsonTemplate[] = R"json(
+{
+  "postprocessors": {
+    "output_streams": [{
+      "streams": [ "default" ],
+      "processors": [{
+        "processor": "%s",
+        "config": { "delay": %d }
+      }]
+    }, {
+      "streams": [ "assistant-tts" ],
+      "processors": [{
+        "processor": "%s",
+        "config": { "delay": %d }
+      }]
+    }, {
+      "streams": [ "communications" ],
+      "processors": []
+    }],
+    "mix": {
+      "processors": [{
+        "processor": "%s",
+        "config": { "delay": %d }
+       }]
+    },
+    "linearize": {
+      "processors": [{
+        "processor": "%s",
+        "config": { "delay": %d }
+      }]
+    }
+  }
+}
+)json";
+
+const int kDefaultProcessorDelay = 10;
+const int kTtsProcessorDelay = 100;
+const int kMixProcessorDelay = 1000;
+const int kLinearizeProcessorDelay = 10000;
+
 // Return a scoped pointer filled with the data laid out at |index| above.
 std::unique_ptr<::media::AudioBus> GetTestData(size_t index) {
   CHECK_LT(index, NUM_DATA_SETS);
@@ -127,9 +184,9 @@ std::unique_ptr<::media::AudioBus> GetTestData(size_t index) {
 
 class MockInputQueue : public StreamMixerAlsa::InputQueue {
  public:
-  explicit MockInputQueue(int samples_per_second,
-                          const std::string& device_id =
-                              ::media::AudioDeviceDescription::kDefaultDeviceId)
+  MockInputQueue(int samples_per_second,
+                 const std::string& device_id =
+                     ::media::AudioDeviceDescription::kDefaultDeviceId)
       : paused_(true),
         samples_per_second_(samples_per_second),
         max_read_size_(kTestMaxReadSize),
@@ -157,6 +214,9 @@ class MockInputQueue : public StreamMixerAlsa::InputQueue {
                void(const MediaPipelineBackendAlsa::RenderingDelay&
                         mixer_rendering_delay));
   std::string device_id() const override { return device_id_; }
+  AudioContentType content_type() const override {
+    return AudioContentType::kMedia;
+  }
   void set_filter_group(FilterGroup* group) override { filter_group_ = group; }
   FilterGroup* filter_group() override { return filter_group_; }
   int MaxReadSize() override { return max_read_size_; }
@@ -170,6 +230,10 @@ class MockInputQueue : public StreamMixerAlsa::InputQueue {
                         mixer_rendering_delay));
   MOCK_METHOD1(SignalError, void(StreamMixerAlsaInput::MixerError error));
   MOCK_METHOD1(PrepareToDelete, void(const OnReadyToDeleteCb& delete_cb));
+
+  void SetContentTypeVolume(float volume, int fade_ms) override {}
+  void SetMuted(bool muted) override {}
+  float EffectiveVolume() override { return multiplier_; }
 
   // Setters and getters for test control.
   void SetPaused(bool paused) { paused_ = paused; }
@@ -230,6 +294,76 @@ class MockInputQueue : public StreamMixerAlsa::InputQueue {
   DISALLOW_COPY_AND_ASSIGN(MockInputQueue);
 };
 
+class MockPostProcessor : public PostProcessingPipeline {
+ public:
+  MockPostProcessor(const std::string& name,
+                    const base::ListValue* filter_description_list,
+                    int channels)
+      : name_(name) {
+    CHECK(instances_.insert({name_, this}).second);
+
+    if (!filter_description_list) {
+      // This happens for PostProcessingPipeline with no post-processors.
+      return;
+    }
+
+    // Parse |filter_description_list| for parameters.
+    for (size_t i = 0; i < filter_description_list->GetSize(); ++i) {
+      const base::DictionaryValue* description_dict;
+      CHECK(filter_description_list->GetDictionary(i, &description_dict));
+      std::string solib;
+      CHECK(description_dict->GetString("processor", &solib));
+      // This will initially be called with the actual pipeline on creation.
+      // Ignore and wait for the call to ResetPostProcessorsForTest.
+      if (solib == kDelayModuleSolib) {
+        const base::DictionaryValue* processor_config_dict;
+        CHECK(
+            description_dict->GetDictionary("config", &processor_config_dict));
+        int module_delay;
+        CHECK(processor_config_dict->GetInteger("delay", &module_delay));
+        rendering_delay_ += module_delay;
+        processor_config_dict->GetBoolean("ringing", &ringing_);
+      }
+    }
+    ON_CALL(*this, ProcessFrames(_, _, _, _))
+        .WillByDefault(
+            testing::Invoke(this, &MockPostProcessor::DoProcessFrames));
+  }
+  ~MockPostProcessor() override { instances_.erase(name_); }
+  MOCK_METHOD4(
+      ProcessFrames,
+      int(float* data, int num_frames, float current_volume, bool is_silence));
+  bool SetSampleRate(int sample_rate) override { return false; }
+  bool IsRinging() override { return ringing_; }
+  int delay() { return rendering_delay_; }
+  std::string name() const { return name_; }
+
+  MOCK_METHOD2(SetPostProcessorConfig,
+               void(const std::string& name, const std::string& config));
+
+  static std::unordered_map<std::string, MockPostProcessor*>* instances() {
+    return &instances_;
+  }
+
+ private:
+  int DoProcessFrames(float* data,
+                      int num_frames,
+                      float current_volume,
+                      bool is_sience) {
+    return rendering_delay_;
+  }
+
+  static std::unordered_map<std::string, MockPostProcessor*> instances_;
+  std::string name_;
+  int rendering_delay_ = 0;
+  bool ringing_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(MockPostProcessor);
+};
+
+std::unordered_map<std::string, MockPostProcessor*>
+    MockPostProcessor::instances_;
+
 // Given |inputs|, returns mixed audio data according to the mixing method used
 // by the mixer.
 std::unique_ptr<::media::AudioBus> GetMixedAudioData(
@@ -273,6 +407,15 @@ std::unique_ptr<::media::AudioBus> GetMixedAudioData(
       std::vector<testing::StrictMock<MockInputQueue>*>(1, input));
 }
 
+void ToPlanar(const uint8_t* interleaved,
+              int num_frames,
+              ::media::AudioBus* planar) {
+  ASSERT_GE(planar->frames(), num_frames);
+
+  planar->FromInterleaved<FloatType>(
+      reinterpret_cast<const float*>(interleaved), num_frames);
+}
+
 // Asserts that |expected| matches |actual| exactly.
 void CompareAudioData(const ::media::AudioBus& expected,
                       const ::media::AudioBus& actual) {
@@ -286,7 +429,31 @@ void CompareAudioData(const ::media::AudioBus& expected,
   }
 }
 
+// Check that MediaPipelineBackendAlsa::RenderingDelay.delay_microseconds is
+// within kMaxDelayErrorUs of |delay|
+MATCHER_P2(MatchDelay, delay, id, "") {
+  bool result = std::abs(arg.delay_microseconds - delay) < kMaxDelayErrorUs;
+  if (!result) {
+    LOG(ERROR) << "Expected delay_microseconds for " << id << " to be " << delay
+               << " but got " << arg.delay_microseconds;
+  }
+  return result;
+}
+
+// Convert a number of frames at kTestSamplesPerSecond to microseconds
+int64_t FramesToDelayUs(int64_t frames) {
+  return frames * base::Time::kMicrosecondsPerSecond / kTestSamplesPerSecond;
+}
+
 }  // namespace
+
+std::unique_ptr<PostProcessingPipeline> PostProcessingPipeline::Create(
+    const std::string& name,
+    const base::ListValue* filter_description_list,
+    int channels) {
+  return base::MakeUnique<testing::NiceMock<MockPostProcessor>>(
+      name, filter_description_list, channels);
+}
 
 class StreamMixerAlsaTest : public testing::Test {
  protected:
@@ -294,6 +461,13 @@ class StreamMixerAlsaTest : public testing::Test {
       : message_loop_(new base::MessageLoop()),
         mock_alsa_(new testing::NiceMock<MockAlsaWrapper>()) {
     StreamMixerAlsa::MakeSingleThreadedForTest();
+    std::string test_pipeline_json = base::StringPrintf(
+        kTestPipelineJsonTemplate, kDelayModuleSolib, kDefaultProcessorDelay,
+        kDelayModuleSolib, kTtsProcessorDelay, kDelayModuleSolib,
+        kMixProcessorDelay, kDelayModuleSolib, kLinearizeProcessorDelay);
+    StreamMixerAlsa::Get()->ResetPostProcessorsForTest(test_pipeline_json);
+    CHECK_EQ(MockPostProcessor::instances()->size(),
+             static_cast<size_t>(kNumPostProcessors));
     StreamMixerAlsa::Get()->SetAlsaWrapperForTest(base::WrapUnique(mock_alsa_));
   }
 
@@ -386,18 +560,18 @@ TEST_F(StreamMixerAlsaTest, WriteFrames) {
   // MaxReadSize provided by any of the channels.
   // TODO(slan): Check that the proper number of frames is pulled.
   ASSERT_EQ(3u, inputs.size());
-  inputs[0]->SetMaxReadSize(1024);
-  inputs[1]->SetMaxReadSize(512);
-  inputs[2]->SetMaxReadSize(2048);
+  inputs[0]->SetMaxReadSize(kMaxChunkSize + 1);
+  inputs[1]->SetMaxReadSize(kMaxChunkSize - 1);
+  inputs[2]->SetMaxReadSize(kMaxChunkSize * 2);
   for (auto* input : inputs) {
-    EXPECT_CALL(*input, GetResampledData(_, 512)).Times(1);
-    EXPECT_CALL(*input, VolumeScaleAccumulate(_, _, 512, _))
+    EXPECT_CALL(*input, GetResampledData(_, kMaxChunkSize - 1)).Times(1);
+    EXPECT_CALL(*input, VolumeScaleAccumulate(_, _, kMaxChunkSize - 1, _))
         .Times(kNumChannels);
     EXPECT_CALL(*input, AfterWriteFrames(_)).Times(1);
   }
 
   // TODO(slan): Verify that the data is mixed properly with math.
-  EXPECT_CALL(*mock_alsa(), PcmWritei(_, _, 512)).Times(1);
+  EXPECT_CALL(*mock_alsa(), PcmWritei(_, _, kMaxChunkSize - 1)).Times(1);
   mixer->WriteFramesForTest();
 
   // Make two of these streams non-primary, and exhaust a non-primary stream.
@@ -409,14 +583,14 @@ TEST_F(StreamMixerAlsaTest, WriteFrames) {
   inputs[2]->SetPrimary(false);
   for (auto* input : inputs) {
     if (input != inputs[1]) {
-      EXPECT_CALL(*input, GetResampledData(_, 1024)).Times(1);
-      EXPECT_CALL(*input, VolumeScaleAccumulate(_, _, 1024, _))
+      EXPECT_CALL(*input, GetResampledData(_, kMaxChunkSize)).Times(1);
+      EXPECT_CALL(*input, VolumeScaleAccumulate(_, _, kMaxChunkSize, _))
           .Times(kNumChannels);
     }
     EXPECT_CALL(*input, AfterWriteFrames(_)).Times(1);
   }
   // Note that the new smallest stream shall dictate the length of the write.
-  EXPECT_CALL(*mock_alsa(), PcmWritei(_, _, 1024)).Times(1);
+  EXPECT_CALL(*mock_alsa(), PcmWritei(_, _, kMaxChunkSize)).Times(1);
   mixer->WriteFramesForTest();
 
   // Exhaust a primary stream. No streams shall be polled for data, and no
@@ -452,8 +626,7 @@ TEST_F(StreamMixerAlsaTest, OneStreamMixesProperly) {
   // expected stream. The stream should match exactly.
   auto actual = ::media::AudioBus::Create(kNumChannels, kNumFrames);
   ASSERT_GT(mock_alsa()->data().size(), 0u);
-  actual->FromInterleaved(
-      &(mock_alsa()->data()[0]), kNumFrames, kBytesPerSample);
+  ToPlanar(&(mock_alsa()->data()[0]), kNumFrames, actual.get());
   CompareAudioData(input->data(), *actual);
 }
 
@@ -484,8 +657,7 @@ TEST_F(StreamMixerAlsaTest, OneStreamIsScaledDownProperly) {
 
   // Check that the retrieved stream is scaled correctly.
   auto actual = ::media::AudioBus::Create(kNumChannels, kNumFrames);
-  actual->FromInterleaved(
-      &(mock_alsa()->data()[0]), kNumFrames, kBytesPerSample);
+  ToPlanar(&(mock_alsa()->data()[0]), kNumFrames, actual.get());
   auto expected = GetMixedAudioData(input);
   CompareAudioData(*expected, *actual);
 }
@@ -525,8 +697,7 @@ TEST_F(StreamMixerAlsaTest, TwoUnscaledStreamsMixProperly) {
   // Get the actual stream rendered to ALSA, and compare it against the
   // expected stream. The stream should match exactly.
   auto actual = ::media::AudioBus::Create(kNumChannels, kNumFrames);
-  actual->FromInterleaved(&(mock_alsa()->data()[0]), kNumFrames,
-                          kBytesPerSample);
+  ToPlanar(&(mock_alsa()->data()[0]), kNumFrames, actual.get());
   CompareAudioData(*expected, *actual);
 }
 
@@ -567,8 +738,7 @@ TEST_F(StreamMixerAlsaTest, TwoUnscaledStreamsWithDifferentIdsMixProperly) {
   // Get the actual stream rendered to ALSA, and compare it against the
   // expected stream. The stream should match exactly.
   auto actual = ::media::AudioBus::Create(kNumChannels, kNumFrames);
-  actual->FromInterleaved(
-      &(mock_alsa()->data()[0]), kNumFrames, kBytesPerSample);
+  ToPlanar(&(mock_alsa()->data()[0]), kNumFrames, actual.get());
   CompareAudioData(*expected, *actual);
 }
 
@@ -642,8 +812,7 @@ TEST_F(StreamMixerAlsaTest, TwoUnscaledStreamsMixProperlyWithEdgeCases) {
   // Get the actual stream rendered to ALSA, and compare it against the
   // expected stream. The stream should match exactly.
   auto actual = ::media::AudioBus::Create(kNumChannels, kNumFrames);
-  actual->FromInterleaved(
-      &(mock_alsa()->data()[0]), kNumFrames, kBytesPerSample);
+  ToPlanar(&(mock_alsa()->data()[0]), kNumFrames, actual.get());
   CompareAudioData(*expected, *actual);
 }
 
@@ -678,11 +847,12 @@ TEST_F(StreamMixerAlsaTest, WriteBuffersOfVaryingLength) {
   EXPECT_CALL(*mock_alsa(), PcmWritei(_, _, 32)).Times(1);
   mixer->WriteFramesForTest();
 
-  input->SetMaxReadSize(1024);
-  EXPECT_CALL(*input, GetResampledData(_, 1024));
-  EXPECT_CALL(*input, VolumeScaleAccumulate(_, _, 1024, _)).Times(kNumChannels);
+  input->SetMaxReadSize(kMaxChunkSize + 1);
+  EXPECT_CALL(*input, GetResampledData(_, kMaxChunkSize));
+  EXPECT_CALL(*input, VolumeScaleAccumulate(_, _, kMaxChunkSize, _))
+      .Times(kNumChannels);
   EXPECT_CALL(*input, AfterWriteFrames(_));
-  EXPECT_CALL(*mock_alsa(), PcmWritei(_, _, 1024)).Times(1);
+  EXPECT_CALL(*mock_alsa(), PcmWritei(_, _, kMaxChunkSize)).Times(1);
   mixer->WriteFramesForTest();
 }
 
@@ -788,6 +958,268 @@ TEST_F(StreamMixerAlsaTest, StuckStreamWithLowBuffer) {
 
   EXPECT_CALL(*mock_alsa(), PcmWritei(_, _, kNumFrames)).Times(1);
   mixer->WriteFramesForTest();
+}
+
+#define EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(map, name, times, frames, \
+                                                silence)                  \
+  do {                                                                    \
+    auto itr = map->find(name);                                           \
+    CHECK(itr != map->end()) << "Could not find processor for " << name;  \
+    EXPECT_CALL(*(itr->second), ProcessFrames(_, frames, _, silence))     \
+        .Times(times);                                                    \
+  } while (0);
+
+TEST_F(StreamMixerAlsaTest, PostProcessorDelayListedDeviceId) {
+  int common_delay = kMixProcessorDelay + kLinearizeProcessorDelay;
+  std::vector<testing::StrictMock<MockInputQueue>*> inputs;
+  std::vector<int64_t> delays;
+  inputs.push_back(new testing::StrictMock<MockInputQueue>(
+      kTestSamplesPerSecond, "default"));
+  delays.push_back(common_delay + kDefaultProcessorDelay);
+
+  inputs.push_back(new testing::StrictMock<MockInputQueue>(
+      kTestSamplesPerSecond, "communications"));
+  delays.push_back(common_delay);
+
+  inputs.push_back(new testing::StrictMock<MockInputQueue>(
+      kTestSamplesPerSecond, "assistant-tts"));
+  delays.push_back(common_delay + kTtsProcessorDelay);
+
+  // Convert delay from frames to microseconds.
+  std::transform(delays.begin(), delays.end(), delays.begin(),
+                 &FramesToDelayUs);
+
+  const int kNumFrames = 10;
+  for (auto* input : inputs) {
+    input->SetMaxReadSize(kNumFrames);
+    input->SetPaused(false);
+  }
+
+  StreamMixerAlsa* mixer = StreamMixerAlsa::Get();
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    EXPECT_CALL(*inputs[i], Initialize(_)).Times(1);
+    mixer->AddInput(base::WrapUnique(inputs[i]));
+  }
+
+  mock_alsa()->set_avail(4086);
+
+  auto* post_processors = MockPostProcessor::instances();
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "default", 1,
+                                          kNumFrames, false);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "mix", 1, kNumFrames,
+                                          false);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "linearize", 1,
+                                          kNumFrames, false);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "communications", 1,
+                                          kNumFrames, false);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "assistant-tts", 1,
+                                          kNumFrames, false);
+
+  // Poll the inputs for data. Each input will get a different
+  // rendering delay based on their device type.
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    EXPECT_CALL(*inputs[i], GetResampledData(_, kNumFrames));
+    EXPECT_CALL(*inputs[i], VolumeScaleAccumulate(_, _, kNumFrames, _))
+        .Times(kNumChannels);
+    EXPECT_CALL(*inputs[i], AfterWriteFrames(
+                                MatchDelay(delays[i], inputs[i]->device_id())));
+  }
+  mixer->WriteFramesForTest();
+}
+
+TEST_F(StreamMixerAlsaTest, PostProcessorDelayUnlistedDevice) {
+  const std::string device_id = "not-a-device-id";
+  testing::StrictMock<MockInputQueue>* input =
+      new testing::StrictMock<MockInputQueue>(kTestSamplesPerSecond, device_id);
+
+  // Delay should be based on default processor
+  int64_t delay = FramesToDelayUs(
+      kDefaultProcessorDelay + kLinearizeProcessorDelay + kMixProcessorDelay);
+  const int kNumFrames = 10;
+  input->SetMaxReadSize(kNumFrames);
+  input->SetPaused(false);
+
+  auto* post_processors = MockPostProcessor::instances();
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "default", 1,
+                                          kNumFrames, false);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "mix", 1, kNumFrames,
+                                          false);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "linearize", 1,
+                                          kNumFrames, false);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "communications", 0,
+                                          _, _);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "assistant-tts", 0,
+                                          _, _);
+
+  StreamMixerAlsa* mixer = StreamMixerAlsa::Get();
+  EXPECT_CALL(*input, Initialize(_));
+  mixer->AddInput(base::WrapUnique(input));
+
+  EXPECT_CALL(*input, GetResampledData(_, kNumFrames));
+  EXPECT_CALL(*input, VolumeScaleAccumulate(_, _, kNumFrames, _))
+      .Times(kNumChannels);
+  EXPECT_CALL(*input, AfterWriteFrames(MatchDelay(delay, device_id)));
+  mixer->WriteFramesForTest();
+}
+
+TEST_F(StreamMixerAlsaTest, PostProcessorRingingWithoutInput) {
+  const char kTestPipelineJson[] = R"json(
+{
+  "postprocessors": {
+    "output_streams": [{
+      "streams": [ "default" ],
+      "processors": [{
+        "processor": "%s",
+        "config": { "delay": 0, "ringing": true}
+      }]
+    }, {
+      "streams": [ "assistant-tts" ],
+      "processors": [{
+        "processor": "%s",
+        "config": { "delay": 0, "ringing": true}
+      }]
+    }]
+  }
+}
+)json";
+
+  const int kNumFrames = 32;
+  testing::NiceMock<MockInputQueue>* input =
+      new testing::NiceMock<MockInputQueue>(kTestSamplesPerSecond, "default");
+  input->SetMaxReadSize(kNumFrames);
+  input->SetPaused(false);
+
+  StreamMixerAlsa* mixer = StreamMixerAlsa::Get();
+  std::string test_pipeline_json = base::StringPrintf(
+      kTestPipelineJson, kDelayModuleSolib, kDelayModuleSolib);
+  mixer->ResetPostProcessorsForTest(test_pipeline_json);
+  mixer->AddInput(base::WrapUnique(input));
+
+  // "mix" + "linearize" should be automatic
+  CHECK_EQ(MockPostProcessor::instances()->size(), 4u);
+
+  mock_alsa()->set_avail(4086);
+
+  auto* post_processors = MockPostProcessor::instances();
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "default", 1,
+                                          kNumFrames, false);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "mix", 1, kNumFrames,
+                                          false);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "linearize", 1,
+                                          kNumFrames, false);
+  EXPECT_POSTPROCESSOR_CALL_PROCESSFRAMES(post_processors, "assistant-tts", 1,
+                                          kNumFrames, true);
+
+  mixer->WriteFramesForTest();
+}
+
+TEST_F(StreamMixerAlsaTest, PostProcessorProvidesDefaultPipeline) {
+  StreamMixerAlsa* mixer = StreamMixerAlsa::Get();
+  mixer->ResetPostProcessorsForTest("{}");
+
+  auto* instances = MockPostProcessor::instances();
+  CHECK(instances->find("default") != instances->end());
+  CHECK(instances->find("mix") != instances->end());
+  CHECK(instances->find("linearize") != instances->end());
+  CHECK_EQ(MockPostProcessor::instances()->size(), 3u);
+}
+
+TEST_F(StreamMixerAlsaTest, InvalidStreamTypeCrashes) {
+  const char json[] = R"json(
+{
+  "postprocessors": {
+    "output_streams": [{
+      "streams": [ "foobar" ],
+      "processors": [{
+        "processor": "dont_care.so",
+        "config": { "delay": 0 }
+      }]
+    }]
+  }
+}
+)json";
+
+// String arguments aren't passed to CHECK() in official builds.
+#if defined(OFFICIAL_BUILD) && defined(NDEBUG)
+  EXPECT_DEATH(StreamMixerAlsa::Get()->ResetPostProcessorsForTest(json), "");
+#else
+  EXPECT_DEATH(StreamMixerAlsa::Get()->ResetPostProcessorsForTest(json),
+               "foobar is not a stream type");
+#endif
+}
+
+TEST_F(StreamMixerAlsaTest, BadJsonCrashes) {
+  const std::string json("{{");
+// String arguments aren't passed to CHECK() in official builds.
+#if defined(OFFICIAL_BUILD) && defined(NDEBUG)
+  EXPECT_DEATH(StreamMixerAlsa::Get()->ResetPostProcessorsForTest(json), "");
+#else
+  EXPECT_DEATH(StreamMixerAlsa::Get()->ResetPostProcessorsForTest(json),
+               "Invalid JSON");
+#endif
+}
+
+TEST_F(StreamMixerAlsaTest, MultiplePostProcessorsInOneStream) {
+  const char kJsonTemplate[] = R"json(
+{
+  "postprocessors": {
+    "output_streams": [{
+      "streams": [ "default" ],
+      "processors": [{
+        "processor": "%s",
+        "name": "%s",
+        "config": { "delay": 10 }
+      }, {
+        "processor": "%s",
+        "name": "%s",
+        "config": { "delay": 100 }
+      }]
+    }],
+    "mix": {
+      "processors": [{
+        "processor": "%s",
+        "name": "%s",
+        "config": { "delay": 1000 }
+      }, {
+        "processor": "%s",
+        "config": { "delay": 10000 }
+      }]
+    }
+  }
+}
+)json";
+
+  std::string json = base::StringPrintf(
+      kJsonTemplate, kDelayModuleSolib, "delayer_1",  // unique processor name
+      kDelayModuleSolib, "delayer_2",  // non-unique processor names
+      kDelayModuleSolib, "delayer_2",
+      kDelayModuleSolib  // intentionally omitted processor name
+      );
+
+  StreamMixerAlsa* mixer = StreamMixerAlsa::Get();
+  mixer->ResetPostProcessorsForTest(json);
+
+  // "mix" + "linearize" + "default"
+  CHECK_EQ(MockPostProcessor::instances()->size(), 3u);
+
+  auto* post_processors = MockPostProcessor::instances();
+  CHECK_EQ(post_processors->find("default")->second->delay(), 110);
+  CHECK_EQ(post_processors->find("mix")->second->delay(), 11000);
+  CHECK_EQ(post_processors->find("linearize")->second->delay(), 0);
+  mixer->WriteFramesForTest();
+}
+
+TEST_F(StreamMixerAlsaTest, SetPostProcessorConfig) {
+  std::string name = "ThisIsMyName";
+  std::string config = "ThisIsMyConfig";
+  StreamMixerAlsa* mixer = StreamMixerAlsa::Get();
+  auto* post_processors = MockPostProcessor::instances();
+
+  for (auto const& x : *post_processors) {
+    EXPECT_CALL(*(x.second), SetPostProcessorConfig(name, config));
+  }
+
+  mixer->SetPostProcessorConfig(name, config);
 }
 
 }  // namespace media

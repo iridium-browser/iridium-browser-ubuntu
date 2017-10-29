@@ -13,6 +13,7 @@
 #include "base/pickle.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/appcache/appcache_response.h"
 #include "content/browser/appcache/appcache_service_impl.h"
@@ -182,13 +183,11 @@ class AppCacheServiceImplTest : public testing::Test {
   const GURL kOrigin;
   const GURL kManifestUrl;
 
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<AppCacheServiceImpl> service_;
   int delete_result_;
   int delete_completion_count_;
   net::CompletionCallback deletion_callback_;
-
- private:
-  base::MessageLoop message_loop_;
 };
 
 TEST_F(AppCacheServiceImplTest, DeleteAppCachesForOrigin) {

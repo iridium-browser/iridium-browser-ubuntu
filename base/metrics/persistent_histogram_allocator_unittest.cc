@@ -4,6 +4,8 @@
 
 #include "base/metrics/persistent_histogram_allocator.h"
 
+#include "base/files/file.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -52,7 +54,7 @@ class PersistentHistogramAllocatorTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(PersistentHistogramAllocatorTest);
 };
 
-TEST_F(PersistentHistogramAllocatorTest, CreateAndIterateTest) {
+TEST_F(PersistentHistogramAllocatorTest, CreateAndIterate) {
   PersistentMemoryAllocator::MemoryInfo meminfo0;
   allocator_->GetMemoryInfo(&meminfo0);
 
@@ -126,7 +128,7 @@ TEST_F(PersistentHistogramAllocatorTest, CreateAndIterateTest) {
   EXPECT_FALSE(recovered);
 }
 
-TEST_F(PersistentHistogramAllocatorTest, CreateWithFileTest) {
+TEST_F(PersistentHistogramAllocatorTest, CreateWithFile) {
   const char temp_name[] = "CreateWithFileTest";
   ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
@@ -155,7 +157,29 @@ TEST_F(PersistentHistogramAllocatorTest, CreateWithFileTest) {
   GlobalHistogramAllocator::ReleaseForTesting();
 }
 
-TEST_F(PersistentHistogramAllocatorTest, StatisticsRecorderMergeTest) {
+TEST_F(PersistentHistogramAllocatorTest, CreateSpareFile) {
+  const char temp_name[] = "CreateSpareFileTest.pma";
+  ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  FilePath temp_file = temp_dir.GetPath().AppendASCII(temp_name);
+  const size_t temp_size = 64 << 10;  // 64 KiB
+
+  ASSERT_TRUE(GlobalHistogramAllocator::CreateSpareFile(temp_file, temp_size));
+
+  File file(temp_file, File::FLAG_OPEN | File::FLAG_READ);
+  ASSERT_TRUE(file.IsValid());
+  EXPECT_EQ(static_cast<int64_t>(temp_size), file.GetLength());
+
+  char buffer[256];
+  for (size_t pos = 0; pos < temp_size; pos += sizeof(buffer)) {
+    ASSERT_EQ(static_cast<int>(sizeof(buffer)),
+              file.ReadAtCurrentPos(buffer, sizeof(buffer)));
+    for (size_t i = 0; i < sizeof(buffer); ++i)
+      EXPECT_EQ(0, buffer[i]);
+  }
+}
+
+TEST_F(PersistentHistogramAllocatorTest, StatisticsRecorderMerge) {
   const char LinearHistogramName[] = "SRTLinearHistogram";
   const char SparseHistogramName[] = "SRTSparseHistogram";
   const size_t starting_sr_count = StatisticsRecorder::GetHistogramCount();
@@ -279,6 +303,43 @@ TEST_F(PersistentHistogramAllocatorTest, StatisticsRecorderMergeTest) {
   EXPECT_EQ(1, snapshot->GetCount(4));
   EXPECT_EQ(1, snapshot->GetCount(6));
   EXPECT_EQ(1, snapshot->GetCount(7));
+}
+
+TEST_F(PersistentHistogramAllocatorTest, RangesDeDuplication) {
+  // This corresponds to the "ranges_ref" field of the PersistentHistogramData
+  // structure defined (privately) inside persistent_histogram_allocator.cc.
+  const int kRangesRefIndex = 5;
+
+  // Create two histograms with the same ranges.
+  HistogramBase* histogram1 =
+      Histogram::FactoryGet("TestHistogram1", 1, 1000, 10, 0);
+  HistogramBase* histogram2 =
+      Histogram::FactoryGet("TestHistogram2", 1, 1000, 10, 0);
+  const uint32_t ranges_ref = static_cast<Histogram*>(histogram1)
+                                  ->bucket_ranges()
+                                  ->persistent_reference();
+  ASSERT_NE(0U, ranges_ref);
+  EXPECT_EQ(ranges_ref, static_cast<Histogram*>(histogram2)
+                            ->bucket_ranges()
+                            ->persistent_reference());
+
+  // Make sure that the persistent data record is also correct. Two histograms
+  // will be fetched; other allocations are not "iterable".
+  PersistentMemoryAllocator::Iterator iter(allocator_);
+  uint32_t type;
+  uint32_t ref1 = iter.GetNext(&type);
+  uint32_t ref2 = iter.GetNext(&type);
+  EXPECT_EQ(0U, iter.GetNext(&type));
+  EXPECT_NE(0U, ref1);
+  EXPECT_NE(0U, ref2);
+  EXPECT_NE(ref1, ref2);
+
+  uint32_t* data1 =
+      allocator_->GetAsArray<uint32_t>(ref1, 0, kRangesRefIndex + 1);
+  uint32_t* data2 =
+      allocator_->GetAsArray<uint32_t>(ref2, 0, kRangesRefIndex + 1);
+  EXPECT_EQ(ranges_ref, data1[kRangesRefIndex]);
+  EXPECT_EQ(ranges_ref, data2[kRangesRefIndex]);
 }
 
 }  // namespace base

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/ash/launcher/multi_profile_app_window_launcher_controller.h"
 
+#include "ash/public/cpp/shelf_types.h"
+#include "ash/public/cpp/window_properties.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
@@ -28,10 +30,8 @@ MultiProfileAppWindowLauncherController::
 MultiProfileAppWindowLauncherController::
     ~MultiProfileAppWindowLauncherController() {
   // We need to remove all Registry observers for added users.
-  for (AppWindowRegistryList::iterator it = multi_user_registry_.begin();
-       it != multi_user_registry_.end();
-       ++it)
-    (*it)->RemoveObserver(this);
+  for (extensions::AppWindowRegistry* registry : multi_user_registry_)
+    registry->RemoveObserver(this);
 }
 
 void MultiProfileAppWindowLauncherController::ActiveUserChanged(
@@ -40,27 +40,27 @@ void MultiProfileAppWindowLauncherController::ActiveUserChanged(
   // show / hide them one by one. To avoid that a user dependent state
   // "survives" in a launcher item, we first delete all items making sure that
   // nothing remains and then re-create them again.
-  for (AppWindowList::iterator it = app_window_list_.begin();
-       it != app_window_list_.end();
-       ++it) {
-    extensions::AppWindow* app_window = *it;
+  for (extensions::AppWindow* app_window : app_window_list_) {
     Profile* profile =
         Profile::FromBrowserContext(app_window->browser_context());
-    if (!multi_user_util::IsProfileFromActiveUser(profile) &&
-        IsRegisteredApp(app_window->GetNativeWindow()))
-      UnregisterApp(app_window->GetNativeWindow());
+    if (!multi_user_util::IsProfileFromActiveUser(profile)) {
+      if (IsRegisteredApp(app_window->GetNativeWindow())) {
+        UnregisterApp(app_window->GetNativeWindow());
+      } else if (app_window->window_type_is_panel()) {
+        // Panels are not registered; hide by clearing the shelf item type.
+        app_window->GetNativeWindow()->SetProperty<int>(ash::kShelfItemTypeKey,
+                                                        ash::TYPE_UNDEFINED);
+      }
+    }
   }
-  for (AppWindowList::iterator it = app_window_list_.begin();
-       it != app_window_list_.end();
-       ++it) {
-    extensions::AppWindow* app_window = *it;
+  for (extensions::AppWindow* app_window : app_window_list_) {
     Profile* profile =
         Profile::FromBrowserContext(app_window->browser_context());
     if (multi_user_util::IsProfileFromActiveUser(profile) &&
         !IsRegisteredApp(app_window->GetNativeWindow()) &&
         (app_window->GetBaseWindow()->IsMinimized() ||
          app_window->GetNativeWindow()->IsVisible()))
-      RegisterApp(*it);
+      RegisterApp(app_window);
   }
 }
 
@@ -78,12 +78,19 @@ void MultiProfileAppWindowLauncherController::OnAppWindowAdded(
     extensions::AppWindow* app_window) {
   app_window_list_.push_back(app_window);
   Profile* profile = Profile::FromBrowserContext(app_window->browser_context());
-  // If the window got created for a non active user but the user allowed to
-  // teleport to the current user's desktop, we teleport it now.
+  // If the window was created for an inactive user, but the user allowed the
+  // app to teleport to the current user's desktop, teleport this window now.
   if (!multi_user_util::IsProfileFromActiveUser(profile) &&
       UserHasAppOnActiveDesktop(app_window)) {
     chrome::MultiUserWindowManager::GetInstance()->ShowWindowForUser(
         app_window->GetNativeWindow(), multi_user_util::GetCurrentAccountId());
+  }
+
+  // If the window was created for the active user or it has been teleported to
+  // the current user's desktop, register it to show an item on the shelf.
+  if (multi_user_util::IsProfileFromActiveUser(profile) ||
+      UserHasAppOnActiveDesktop(app_window)) {
+    RegisterApp(app_window);
   }
 }
 
@@ -102,7 +109,8 @@ void MultiProfileAppWindowLauncherController::OnAppWindowShown(
   // Since this window did never had an anchor, it would stay hidden. We
   // therefore make it visible now.
   if (UserHasAppOnActiveDesktop(app_window) &&
-      app_window->GetNativeWindow()->type() == ui::wm::WINDOW_TYPE_PANEL &&
+      app_window->GetNativeWindow()->type() ==
+          aura::client::WINDOW_TYPE_PANEL &&
       !app_window->GetNativeWindow()->layer()->GetTargetOpacity()) {
     app_window->GetNativeWindow()->layer()->SetOpacity(1.0f);
   }
@@ -138,10 +146,7 @@ bool MultiProfileAppWindowLauncherController::UserHasAppOnActiveDesktop(
   const AccountId current_account_id = multi_user_util::GetCurrentAccountId();
   chrome::MultiUserWindowManager* manager =
       chrome::MultiUserWindowManager::GetInstance();
-  for (AppWindowList::iterator it = app_window_list_.begin();
-       it != app_window_list_.end();
-       ++it) {
-    extensions::AppWindow* other_window = *it;
+  for (extensions::AppWindow* other_window : app_window_list_) {
     DCHECK(!other_window->browser_context()->IsOffTheRecord());
     if (manager->IsWindowOnDesktopOfUser(other_window->GetNativeWindow(),
                                          current_account_id) &&

@@ -20,8 +20,9 @@
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_features.h"
 #include "media/audio/audio_device_description.h"
-#include "media/audio/audio_manager.h"
+#include "media/audio/audio_system.h"
 #include "media/base/media_switches.h"
 
 #if defined(OS_MACOSX)
@@ -47,24 +48,6 @@ std::string GetLogMessageString(MediaDeviceType device_type,
   for (const auto& device_info : device_infos)
     output_string += "  " + device_info.label + "\n";
   return output_string;
-}
-
-MediaDeviceInfoArray EnumerateAudioDevicesOnDeviceThread(
-    media::AudioManager* audio_manager,
-    bool is_input) {
-  DCHECK(audio_manager->GetTaskRunner()->BelongsToCurrentThread());
-
-  MediaDeviceInfoArray snapshot;
-  media::AudioDeviceDescriptions device_descriptions;
-  if (is_input)
-    audio_manager->GetAudioInputDeviceDescriptions(&device_descriptions);
-  else
-    audio_manager->GetAudioOutputDeviceDescriptions(&device_descriptions);
-
-  for (const media::AudioDeviceDescription& description : device_descriptions)
-    snapshot.emplace_back(description);
-
-  return snapshot;
 }
 
 MediaDeviceInfoArray GetFakeAudioDevices(bool is_input) {
@@ -164,19 +147,19 @@ class MediaDevicesManager::CacheInfo {
 };
 
 MediaDevicesManager::MediaDevicesManager(
-    media::AudioManager* audio_manager,
+    media::AudioSystem* audio_system,
     const scoped_refptr<VideoCaptureManager>& video_capture_manager,
     MediaStreamManager* media_stream_manager)
     : use_fake_devices_(base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kUseFakeDeviceForMediaStream)),
-      audio_manager_(audio_manager),
+      audio_system_(audio_system),
       video_capture_manager_(video_capture_manager),
       media_stream_manager_(media_stream_manager),
       cache_infos_(NUM_MEDIA_DEVICE_TYPES),
       monitoring_started_(false),
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(audio_manager_);
+  DCHECK(audio_system_);
   DCHECK(video_capture_manager_.get());
   cache_policies_.fill(CachePolicy::NO_CACHE);
   has_seen_result_.fill(false);
@@ -250,6 +233,11 @@ void MediaDevicesManager::StartMonitoring() {
   if (!base::SystemMonitor::Get())
     return;
 
+#if defined(OS_MACOSX)
+  if (!base::FeatureList::IsEnabled(features::kDeviceMonitorMac))
+    return;
+#endif
+
   monitoring_started_ = true;
   base::SystemMonitor::Get()->AddDevicesChangedObserver(this);
 
@@ -289,7 +277,7 @@ void MediaDevicesManager::StartMonitoringOnUIThread() {
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "458404 MediaDevicesManager::GetTaskRunner"));
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-      audio_manager_->GetTaskRunner();
+      audio_system_->GetTaskRunner();
   // TODO(erikchen): Remove ScopedTracker below once crbug.com/458404 is
   // fixed.
   tracked_objects::ScopedTracker tracking_profile3(
@@ -372,12 +360,11 @@ void MediaDevicesManager::EnumerateAudioDevices(bool is_input) {
                               GetFakeAudioDevices(is_input)));
     return;
   }
-  base::PostTaskAndReplyWithResult(
-      audio_manager_->GetTaskRunner(), FROM_HERE,
-      base::Bind(&EnumerateAudioDevicesOnDeviceThread, audio_manager_,
-                 is_input),
-      base::Bind(&MediaDevicesManager::DevicesEnumerated,
-                 weak_factory_.GetWeakPtr(), type));
+
+  audio_system_->GetDeviceDescriptions(
+      base::Bind(&MediaDevicesManager::AudioDevicesEnumerated,
+                 weak_factory_.GetWeakPtr(), type),
+      is_input);
 }
 
 void MediaDevicesManager::VideoInputDevicesEnumerated(
@@ -388,6 +375,18 @@ void MediaDevicesManager::VideoInputDevicesEnumerated(
     snapshot.emplace_back(descriptor);
   }
   DevicesEnumerated(MEDIA_DEVICE_TYPE_VIDEO_INPUT, snapshot);
+}
+
+void MediaDevicesManager::AudioDevicesEnumerated(
+    MediaDeviceType type,
+    media::AudioDeviceDescriptions device_descriptions) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  MediaDeviceInfoArray snapshot;
+  for (const media::AudioDeviceDescription& description : device_descriptions) {
+    snapshot.emplace_back(description);
+  }
+  DevicesEnumerated(type, snapshot);
 }
 
 void MediaDevicesManager::DevicesEnumerated(

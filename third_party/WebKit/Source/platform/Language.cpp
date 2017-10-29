@@ -25,88 +25,123 @@
 
 #include "platform/Language.h"
 
+#include "platform/text/PlatformLocale.h"
+#include "platform/wtf/text/WTFString.h"
 #include "public/platform/Platform.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
-static String canonicalizeLanguageIdentifier(const String& languageCode) {
-  String copiedCode = languageCode;
+namespace {
+
+static String CanonicalizeLanguageIdentifier(const String& language_code) {
+  String copied_code = language_code;
   // Platform::defaultLocale() might provide a language code with '_'.
-  copiedCode.replace('_', '-');
-  return copiedCode;
+  copied_code.Replace('_', '-');
+  return copied_code;
 }
 
-static const AtomicString& platformLanguage() {
-  DEFINE_STATIC_LOCAL(AtomicString, computedDefaultLanguage, ());
-  if (computedDefaultLanguage.isEmpty()) {
-    computedDefaultLanguage = AtomicString(
-        canonicalizeLanguageIdentifier(Platform::current()->defaultLocale()));
-    ASSERT(!computedDefaultLanguage.isEmpty());
-  }
-  return computedDefaultLanguage;
+// Main thread static AtomicString. This can be safely shared across threads.
+const AtomicString* g_platform_language = nullptr;
+
+const AtomicString& PlatformLanguage() {
+  DCHECK(g_platform_language->Impl()->IsStatic())
+      << "global language string is used from multiple threads, and must be "
+         "static";
+  return *g_platform_language;
 }
 
-static Vector<AtomicString>& preferredLanguagesOverride() {
-  DEFINE_STATIC_LOCAL(Vector<AtomicString>, override, ());
-  return override;
+Vector<AtomicString>& PreferredLanguagesOverride() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadSpecific<Vector<AtomicString>>,
+                                  thread_specific_languages, ());
+  return *thread_specific_languages;
 }
 
-void overrideUserPreferredLanguages(const Vector<AtomicString>& override) {
-  Vector<AtomicString>& canonicalized = preferredLanguagesOverride();
+}  // namespace
+
+void InitializePlatformLanguage() {
+  DCHECK(IsMainThread());
+  DEFINE_STATIC_LOCAL(
+      // We add the platform language as a static string for two reasons:
+      // 1. it can be shared across threads.
+      // 2. since this is done very early on, we don't want to accidentally
+      //    collide with a hard coded static string (like "fr" on SVG).
+      const AtomicString, platform_language, (([]() {
+        String canonicalized = CanonicalizeLanguageIdentifier(
+            Platform::Current()->DefaultLocale());
+        if (!canonicalized.IsEmpty()) {
+          StringImpl* impl = StringImpl::CreateStatic(
+              reinterpret_cast<const char*>(canonicalized.Characters8()),
+              canonicalized.length(),
+              StringHasher::ComputeHashAndMaskTop8Bits(
+                  canonicalized.Characters8(), canonicalized.length()));
+
+          return AtomicString(impl);
+        }
+        return AtomicString();
+      })()));
+
+  g_platform_language = &platform_language;
+}
+
+void OverrideUserPreferredLanguagesForTesting(
+    const Vector<AtomicString>& override) {
+  Vector<AtomicString>& canonicalized = PreferredLanguagesOverride();
   canonicalized.resize(0);
-  canonicalized.reserveCapacity(override.size());
+  canonicalized.ReserveCapacity(override.size());
   for (const auto& lang : override)
-    canonicalized.push_back(canonicalizeLanguageIdentifier(lang));
+    canonicalized.push_back(CanonicalizeLanguageIdentifier(lang));
+  Locale::ResetDefautlLocale();
 }
 
-AtomicString defaultLanguage() {
-  Vector<AtomicString>& override = preferredLanguagesOverride();
-  if (!override.isEmpty())
+AtomicString DefaultLanguage() {
+  Vector<AtomicString>& override = PreferredLanguagesOverride();
+  if (!override.IsEmpty())
     return override[0];
-  return platformLanguage();
+  return PlatformLanguage();
 }
 
-Vector<AtomicString> userPreferredLanguages() {
-  Vector<AtomicString>& override = preferredLanguagesOverride();
-  if (!override.isEmpty())
+Vector<AtomicString> UserPreferredLanguages() {
+  Vector<AtomicString>& override = PreferredLanguagesOverride();
+  if (!override.IsEmpty())
     return override;
 
   Vector<AtomicString> languages;
-  languages.reserveInitialCapacity(1);
-  languages.push_back(platformLanguage());
+  languages.ReserveInitialCapacity(1);
+  languages.push_back(PlatformLanguage());
   return languages;
 }
 
-size_t indexOfBestMatchingLanguageInList(
+size_t IndexOfBestMatchingLanguageInList(
     const AtomicString& language,
-    const Vector<AtomicString>& languageList) {
-  AtomicString languageWithoutLocaleMatch;
-  AtomicString languageMatchButNotLocale;
-  size_t languageWithoutLocaleMatchIndex = 0;
-  size_t languageMatchButNotLocaleMatchIndex = 0;
-  bool canMatchLanguageOnly = (language.length() == 2 ||
-                               (language.length() >= 3 && language[2] == '-'));
+    const Vector<AtomicString>& language_list) {
+  AtomicString language_without_locale_match;
+  AtomicString language_match_but_not_locale;
+  size_t language_without_locale_match_index = 0;
+  size_t language_match_but_not_locale_match_index = 0;
+  bool can_match_language_only =
+      (language.length() == 2 ||
+       (language.length() >= 3 && language[2] == '-'));
 
-  for (size_t i = 0; i < languageList.size(); ++i) {
-    String canonicalizedLanguageFromList =
-        canonicalizeLanguageIdentifier(languageList[i]);
+  for (size_t i = 0; i < language_list.size(); ++i) {
+    String canonicalized_language_from_list =
+        CanonicalizeLanguageIdentifier(language_list[i]);
 
-    if (language == canonicalizedLanguageFromList)
+    if (language == canonicalized_language_from_list)
       return i;
 
-    if (canMatchLanguageOnly && canonicalizedLanguageFromList.length() >= 2) {
-      if (language[0] == canonicalizedLanguageFromList[0] &&
-          language[1] == canonicalizedLanguageFromList[1]) {
-        if (!languageWithoutLocaleMatch.length() &&
-            canonicalizedLanguageFromList.length() == 2) {
-          languageWithoutLocaleMatch = languageList[i];
-          languageWithoutLocaleMatchIndex = i;
+    if (can_match_language_only &&
+        canonicalized_language_from_list.length() >= 2) {
+      if (language[0] == canonicalized_language_from_list[0] &&
+          language[1] == canonicalized_language_from_list[1]) {
+        if (!language_without_locale_match.length() &&
+            canonicalized_language_from_list.length() == 2) {
+          language_without_locale_match = language_list[i];
+          language_without_locale_match_index = i;
         }
-        if (!languageMatchButNotLocale.length() &&
-            canonicalizedLanguageFromList.length() >= 3) {
-          languageMatchButNotLocale = languageList[i];
-          languageMatchButNotLocaleMatchIndex = i;
+        if (!language_match_but_not_locale.length() &&
+            canonicalized_language_from_list.length() >= 3) {
+          language_match_but_not_locale = language_list[i];
+          language_match_but_not_locale_match_index = i;
         }
       }
     }
@@ -116,13 +151,13 @@ size_t indexOfBestMatchingLanguageInList(
   // return the languge-only match as is considered a "better" match. For
   // example, if the list provided has both "en-GB" and "en" and the user
   // prefers "en-US" we will return "en".
-  if (languageWithoutLocaleMatch.length())
-    return languageWithoutLocaleMatchIndex;
+  if (language_without_locale_match.length())
+    return language_without_locale_match_index;
 
-  if (languageMatchButNotLocale.length())
-    return languageMatchButNotLocaleMatchIndex;
+  if (language_match_but_not_locale.length())
+    return language_match_but_not_locale_match_index;
 
-  return languageList.size();
+  return language_list.size();
 }
 
 }  // namespace blink

@@ -47,39 +47,36 @@ class PaymentAppContentUnitTestBase::PaymentAppForWorkerTestHelper
  public:
   PaymentAppForWorkerTestHelper()
       : EmbeddedWorkerTestHelper(base::FilePath()),
-        was_dispatched_(false),
         last_sw_registration_id_(kInvalidServiceWorkerRegistrationId) {}
   ~PaymentAppForWorkerTestHelper() override {}
 
-  void OnStartWorker(
-      int embedded_worker_id,
-      int64_t service_worker_version_id,
-      const GURL& scope,
-      const GURL& script_url,
-      bool pause_after_download,
-      mojom::ServiceWorkerEventDispatcherRequest request) override {
+  void OnStartWorker(int embedded_worker_id,
+                     int64_t service_worker_version_id,
+                     const GURL& scope,
+                     const GURL& script_url,
+                     bool pause_after_download,
+                     mojom::ServiceWorkerEventDispatcherRequest request,
+                     mojom::EmbeddedWorkerInstanceHostAssociatedPtrInfo
+                         instance_host) override {
     ServiceWorkerVersion* version =
         context()->GetLiveVersion(service_worker_version_id);
-    version->SetMainScriptHttpResponseInfo(
-        EmbeddedWorkerTestHelper::CreateHttpResponseInfo());
     last_sw_registration_id_ = version->registration_id();
     last_sw_scope_ = scope;
     EmbeddedWorkerTestHelper::OnStartWorker(
         embedded_worker_id, service_worker_version_id, scope, script_url,
-        pause_after_download, std::move(request));
+        pause_after_download, std::move(request), std::move(instance_host));
   }
 
   void OnPaymentRequestEvent(
-      payments::mojom::PaymentAppRequestPtr app_request,
-      const mojom::ServiceWorkerEventDispatcher::
-          DispatchPaymentRequestEventCallback& callback) override {
-    ASSERT_FALSE(was_dispatched_);
-    EmbeddedWorkerTestHelper::OnPaymentRequestEvent(std::move(app_request),
-                                                    callback);
-    was_dispatched_ = true;
+      payments::mojom::PaymentRequestEventDataPtr event_data,
+      payments::mojom::PaymentHandlerResponseCallbackPtr response_callback,
+      mojom::ServiceWorkerEventDispatcher::DispatchPaymentRequestEventCallback
+          callback) override {
+    EmbeddedWorkerTestHelper::OnPaymentRequestEvent(
+        std::move(event_data), std::move(response_callback),
+        std::move(callback));
   }
 
-  bool was_dispatched_;
   int64_t last_sw_registration_id_;
   GURL last_sw_scope_;
 
@@ -108,41 +105,41 @@ BrowserContext* PaymentAppContentUnitTestBase::browser_context() {
   return worker_helper_->browser_context();
 }
 
-PaymentAppManager* PaymentAppContentUnitTestBase::CreatePaymentAppManager(
+PaymentManager* PaymentAppContentUnitTestBase::CreatePaymentManager(
     const GURL& scope_url,
     const GURL& sw_script_url) {
-  // Register service worker for payment app manager.
+  // Register service worker for payment manager.
   bool called = false;
   worker_helper_->context()->RegisterServiceWorker(
-      scope_url, sw_script_url, nullptr,
+      sw_script_url, ServiceWorkerRegistrationOptions(scope_url), nullptr,
       base::Bind(&RegisterServiceWorkerCallback, &called));
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(called);
 
-  // This function should eventually return created payment app manager
-  // but there is no way to get last created payment app manager from
-  // payment_app_context()->payment_app_managers_ because its type is std::map
+  // This function should eventually return created payment manager
+  // but there is no way to get last created payment manager from
+  // payment_app_context()->payment_managers_ because its type is std::map
   // and can not ensure its order. So, just make a set of existing payment app
   // managers before creating a new manager and then check what is a new thing.
-  std::set<PaymentAppManager*> existing_managers;
+  std::set<PaymentManager*> existing_managers;
   for (const auto& existing_manager :
-       payment_app_context()->payment_app_managers_) {
+       payment_app_context()->payment_managers_) {
     existing_managers.insert(existing_manager.first);
   }
 
-  // Create a new payment app manager.
-  payments::mojom::PaymentAppManagerPtr manager;
-  mojo::InterfaceRequest<payments::mojom::PaymentAppManager> request =
+  // Create a new payment manager.
+  payments::mojom::PaymentManagerPtr manager;
+  mojo::InterfaceRequest<payments::mojom::PaymentManager> request =
       mojo::MakeRequest(&manager);
-  payment_app_managers_.push_back(std::move(manager));
-  payment_app_context()->CreatePaymentAppManager(std::move(request));
+  payment_managers_.push_back(std::move(manager));
+  payment_app_context()->CreatePaymentManager(std::move(request));
   base::RunLoop().RunUntilIdle();
 
-  // Find a last registered payment app manager.
+  // Find a last registered payment manager.
   for (const auto& candidate_manager :
-       payment_app_context()->payment_app_managers_) {
+       payment_app_context()->payment_managers_) {
     if (!base::ContainsKey(existing_managers, candidate_manager.first)) {
-      candidate_manager.first->Init(scope_url.spec());
+      candidate_manager.first->Init(sw_script_url.spec(), scope_url.spec());
       base::RunLoop().RunUntilIdle();
       return candidate_manager.first;
     }
@@ -150,42 +147,6 @@ PaymentAppManager* PaymentAppContentUnitTestBase::CreatePaymentAppManager(
 
   NOTREACHED();
   return nullptr;
-}
-
-void PaymentAppContentUnitTestBase::SetManifest(
-    PaymentAppManager* manager,
-    payments::mojom::PaymentAppManifestPtr manifest,
-    const PaymentAppManager::SetManifestCallback& callback) {
-  ASSERT_NE(nullptr, manager);
-  manager->SetManifest(std::move(manifest), callback);
-  base::RunLoop().RunUntilIdle();
-}
-
-void PaymentAppContentUnitTestBase::GetManifest(
-    PaymentAppManager* manager,
-    const PaymentAppManager::GetManifestCallback& callback) {
-  ASSERT_NE(nullptr, manager);
-  manager->GetManifest(callback);
-  base::RunLoop().RunUntilIdle();
-}
-
-payments::mojom::PaymentAppManifestPtr
-PaymentAppContentUnitTestBase::CreatePaymentAppManifestForTest(
-    const std::string& name) {
-  payments::mojom::PaymentAppOptionPtr option =
-      payments::mojom::PaymentAppOption::New();
-  option->name = "Visa ****";
-  option->id = "payment-app-id";
-  option->icon = std::string("payment-app-icon");
-  option->enabled_methods.push_back("visa");
-
-  payments::mojom::PaymentAppManifestPtr manifest =
-      payments::mojom::PaymentAppManifest::New();
-  manifest->icon = std::string("payment-app-icon");
-  manifest->name = name;
-  manifest->options.push_back(std::move(option));
-
-  return manifest;
 }
 
 void PaymentAppContentUnitTestBase::UnregisterServiceWorker(
@@ -196,14 +157,6 @@ void PaymentAppContentUnitTestBase::UnregisterServiceWorker(
       scope_url, base::Bind(&UnregisterServiceWorkerCallback, &called));
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(called);
-}
-
-void PaymentAppContentUnitTestBase::ResetPaymentAppInvoked() const {
-  worker_helper_->was_dispatched_ = false;
-}
-
-bool PaymentAppContentUnitTestBase::payment_app_invoked() const {
-  return worker_helper_->was_dispatched_;
 }
 
 int64_t PaymentAppContentUnitTestBase::last_sw_registration_id() const {

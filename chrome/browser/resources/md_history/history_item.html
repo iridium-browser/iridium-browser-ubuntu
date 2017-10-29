@@ -217,7 +217,7 @@
             aria-label$="[[getEntrySummary_(item)]]">
           <div id="checkmark"></div>
         </button>
-        <span id="time-accessed" on-mouseover="addTimeTitle_">
+        <span id="time-accessed">
           [[item.readableTimestamp]]
         </span>
         <div class="website-icon" id="icon"></div>
@@ -231,7 +231,7 @@
           <span id="domain">[[item.domain]]</span>
         </div>
         <div id="star-container">
-          <template is="dom-if" if="[[item.starred]]">
+          <template is="dom-if" if="[[item.starred]]" notify-dom-change>
             <button is="paper-icon-button-light" id="bookmark-star"
                 title="$i18n{removeBookmark}" on-click="onRemoveBookmarkTap_">
               <iron-icon icon="cr:star"></iron-icon>

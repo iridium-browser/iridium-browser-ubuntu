@@ -29,35 +29,35 @@
 
 namespace blink {
 
-LayoutIFrame::LayoutIFrame(Element* element) : LayoutPart(element) {}
+LayoutIFrame::LayoutIFrame(Element* element) : LayoutEmbeddedContent(element) {}
 
-bool LayoutIFrame::shouldComputeSizeAsReplaced() const {
+bool LayoutIFrame::ShouldComputeSizeAsReplaced() const {
   return true;
 }
 
-bool LayoutIFrame::isInlineBlockOrInlineTable() const {
-  return isInline();
+bool LayoutIFrame::IsInlineBlockOrInlineTable() const {
+  return IsInline();
 }
 
-PaintLayerType LayoutIFrame::layerTypeRequired() const {
-  if (style()->resize() != RESIZE_NONE)
-    return NormalPaintLayer;
-  return LayoutPart::layerTypeRequired();
+PaintLayerType LayoutIFrame::LayerTypeRequired() const {
+  if (Style()->Resize() != EResize::kNone)
+    return kNormalPaintLayer;
+  return LayoutEmbeddedContent::LayerTypeRequired();
 }
 
-void LayoutIFrame::layout() {
-  ASSERT(needsLayout());
+void LayoutIFrame::UpdateLayout() {
+  DCHECK(NeedsLayout());
   LayoutAnalyzer::Scope analyzer(*this);
 
-  updateLogicalWidth();
+  UpdateLogicalWidth();
   // No kids to layout as a replaced element.
-  updateLogicalHeight();
+  UpdateLogicalHeight();
 
-  m_overflow.reset();
-  addVisualEffectOverflow();
-  updateLayerTransformAfterLayout();
+  overflow_.reset();
+  AddVisualEffectOverflow();
+  UpdateAfterLayout();
 
-  clearNeedsLayout();
+  ClearNeedsLayout();
 }
 
 }  // namespace blink

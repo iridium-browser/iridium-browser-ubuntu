@@ -28,19 +28,16 @@ void FakeSignalStrategy::Connect(FakeSignalStrategy* peer1,
   peer2->ConnectTo(peer1);
 }
 
-FakeSignalStrategy::FakeSignalStrategy(const std::string& jid)
+FakeSignalStrategy::FakeSignalStrategy(const SignalingAddress& address)
     : main_thread_(base::ThreadTaskRunnerHandle::Get()),
-      jid_(jid),
+      address_(address),
       last_id_(0),
       weak_factory_(this) {
-  DetachFromThread();
+  DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
 FakeSignalStrategy::~FakeSignalStrategy() {
-  while (!received_messages_.empty()) {
-    delete received_messages_.front();
-    received_messages_.pop_front();
-  }
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
 void FakeSignalStrategy::ConnectTo(FakeSignalStrategy* peer) {
@@ -52,62 +49,62 @@ void FakeSignalStrategy::ConnectTo(FakeSignalStrategy* peer) {
     peer->SetPeerCallback(peer_callback);
   } else {
     peer->main_thread_->PostTask(
-        FROM_HERE,
-        base::Bind(&FakeSignalStrategy::SetPeerCallback,
-                   base::Unretained(peer),
-                   peer_callback));
+        FROM_HERE, base::Bind(&FakeSignalStrategy::SetPeerCallback,
+                              base::Unretained(peer), peer_callback));
   }
 }
 
-void FakeSignalStrategy::SetLocalJid(const std::string& jid) {
-  DCHECK(CalledOnValidThread());
-  jid_ = jid;
+void FakeSignalStrategy::SetLocalAddress(const SignalingAddress& address) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  address_ = address;
 }
 
 void FakeSignalStrategy::SimulateMessageReordering() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   simulate_reorder_ = true;
 }
 
 void FakeSignalStrategy::Connect() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  state_ = CONNECTED;
   for (auto& observer : listeners_)
     observer.OnSignalStrategyStateChange(CONNECTED);
 }
 
 void FakeSignalStrategy::Disconnect() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  state_ = DISCONNECTED;
   for (auto& observer : listeners_)
     observer.OnSignalStrategyStateChange(DISCONNECTED);
 }
 
 SignalStrategy::State FakeSignalStrategy::GetState() const {
-  return CONNECTED;
+  return state_;
 }
 
 SignalStrategy::Error FakeSignalStrategy::GetError() const {
   return OK;
 }
 
-std::string FakeSignalStrategy::GetLocalJid() const {
-  DCHECK(CalledOnValidThread());
-  return jid_;
+const SignalingAddress& FakeSignalStrategy::GetLocalAddress() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return address_;
 }
 
 void FakeSignalStrategy::AddListener(Listener* listener) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   listeners_.AddObserver(listener);
 }
 
 void FakeSignalStrategy::RemoveListener(Listener* listener) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   listeners_.RemoveObserver(listener);
 }
 
 bool FakeSignalStrategy::SendStanza(std::unique_ptr<buzz::XmlElement> stanza) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  stanza->SetAttr(buzz::QN_FROM, jid_);
+  address_.SetInMessage(stanza.get(), SignalingAddress::FROM);
 
   if (peer_callback_.is_null())
     return false;
@@ -139,7 +136,7 @@ void FakeSignalStrategy::DeliverMessageOnThread(
 
 void FakeSignalStrategy::OnIncomingMessage(
     std::unique_ptr<buzz::XmlElement> stanza) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (!simulate_reorder_) {
     NotifyListeners(std::move(stanza));
@@ -159,15 +156,17 @@ void FakeSignalStrategy::OnIncomingMessage(
 
 void FakeSignalStrategy::NotifyListeners(
     std::unique_ptr<buzz::XmlElement> stanza) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   buzz::XmlElement* stanza_ptr = stanza.get();
-  received_messages_.push_back(stanza.release());
+  received_messages_.push_back(std::move(stanza));
 
-  const std::string& to_field = stanza_ptr->Attr(buzz::QN_TO);
-  if (NormalizeJid(to_field) != NormalizeJid(jid_)) {
-    LOG(WARNING) << "Dropping stanza that is addressed to " << to_field
-                 << ". Local jid: " << jid_
+  std::string to_error;
+  SignalingAddress to =
+      SignalingAddress::Parse(stanza_ptr, SignalingAddress::TO, &to_error);
+  if (to != address_) {
+    LOG(WARNING) << "Dropping stanza that is addressed to " << to.id()
+                 << ". Local address: " << address_.id()
                  << ". Message content: " << stanza_ptr->Str();
     return;
   }

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <memory>
+#include <utility>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -47,13 +48,13 @@ class UsbChooserControllerTest : public ChromeRenderViewHostTestHarness {
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
 
-    std::vector<device::UsbDeviceFilter> device_filters;
-    device::usb::ChooserService::GetPermissionCallback callback;
+    std::vector<device::mojom::UsbDeviceFilterPtr> device_filters;
+    device::mojom::UsbChooserService::GetPermissionCallback callback;
     content::WebContentsTester* web_contents_tester =
         content::WebContentsTester::For(web_contents());
     web_contents_tester->NavigateAndCommit(GURL(kDefaultTestUrl));
-    usb_chooser_controller_.reset(
-        new UsbChooserController(main_rfh(), device_filters, callback));
+    usb_chooser_controller_.reset(new UsbChooserController(
+        main_rfh(), std::move(device_filters), callback));
     mock_usb_chooser_view_.reset(new MockUsbChooserView());
     usb_chooser_controller_->set_view(mock_usb_chooser_view_.get());
   }
@@ -64,10 +65,6 @@ class UsbChooserControllerTest : public ChromeRenderViewHostTestHarness {
       const std::string& serial_number) {
     scoped_refptr<device::MockUsbDevice> device(new device::MockUsbDevice(
         0, 1, "Google", product_string, serial_number));
-    std::unique_ptr<device::WebUsbAllowedOrigins> webusb_allowed_origins(
-        new device::WebUsbAllowedOrigins());
-    webusb_allowed_origins->origins.push_back(GURL(kDefaultTestUrl));
-    device->set_webusb_allowed_origins(std::move(webusb_allowed_origins));
     return device;
   }
 

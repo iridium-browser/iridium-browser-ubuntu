@@ -18,6 +18,7 @@
 namespace dbus {
 
 class MockBus;
+class ObjectPath;
 
 }  // namespace dbus
 
@@ -40,7 +41,10 @@ class ServiceProviderTestHelper {
   ~ServiceProviderTestHelper();
 
   // Sets up helper. Should be called before |CallMethod()|.
-  void SetUp(const std::string& exported_method_name,
+  void SetUp(const std::string& service_name,
+             const dbus::ObjectPath& service_path,
+             const std::string& interface_name,
+             const std::string& exported_method_name,
              CrosDBusService::ServiceProviderInterface* service_provider);
 
   // Setups return signal callback. It's optional and don't need to be called
@@ -66,7 +70,7 @@ class ServiceProviderTestHelper {
       dbus::ExportedObject::OnExportedCallback on_exported_callback);
 
   // Calls exported method and waits for a response for |mock_object_proxy_|.
-  dbus::Response* MockCallMethodAndBlock(
+  std::unique_ptr<dbus::Response> CallMethodAndBlock(
       dbus::MethodCall* method_call,
       ::testing::Unused);
 
@@ -81,7 +85,8 @@ class ServiceProviderTestHelper {
   void MockSendSignal(dbus::Signal* signal);
 
   // Receives a response and makes it available to MockCallMethodAndBlock().
-  void OnResponse(std::unique_ptr<dbus::Response> response);
+  void OnResponse(std::unique_ptr<dbus::Response>* out_response,
+                  std::unique_ptr<dbus::Response> response);
 
   scoped_refptr<dbus::MockBus> mock_bus_;
   scoped_refptr<dbus::MockExportedObject> mock_exported_object_;
@@ -89,8 +94,6 @@ class ServiceProviderTestHelper {
   dbus::ExportedObject::MethodCallCallback method_callback_;
   dbus::ObjectProxy::SignalCallback on_signal_callback_;
   std::unique_ptr<base::MessageLoop> message_loop_;
-  bool response_received_;
-  std::unique_ptr<dbus::Response> response_;
 };
 
 }  // namespace chromeos

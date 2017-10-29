@@ -45,6 +45,8 @@ false { return SkSL::Token::FALSE_LITERAL; }
 
 if { return SkSL::Token::IF; }
 
+@if { return SkSL::Token::STATIC_IF; }
+
 else { return SkSL::Token::ELSE; }
 
 for { return SkSL::Token::FOR; }
@@ -54,6 +56,8 @@ while { return SkSL::Token::WHILE; }
 do { return SkSL::Token::DO; }
 
 switch { return SkSL::Token::SWITCH; }
+
+@switch { return SkSL::Token::STATIC_SWITCH; }
 
 case { return SkSL::Token::CASE; }
 
@@ -97,6 +101,10 @@ volatile { return SkSL::Token::VOLATILE; }
 
 restrict { return SkSL::Token::RESTRICT; }
 
+buffer { return SkSL::Token::BUFFER; }
+
+sk_has_side_effects { return SkSL::Token::HASSIDEEFFECTS; }
+
 struct { return SkSL::Token::STRUCT; }
 
 layout { return SkSL::Token::LAYOUT; }
@@ -106,6 +114,8 @@ precision { return SkSL::Token::PRECISION; }
 {LETTER}({DIGIT}|{LETTER})* { return SkSL::Token::IDENTIFIER; }
 
 "#"{LETTER}({DIGIT}|{LETTER})* { return SkSL::Token::DIRECTIVE; }
+
+"@"{LETTER}({DIGIT}|{LETTER})* { return SkSL::Token::SECTION; }
 
 "(" { return SkSL::Token::LPAREN; }
 
@@ -203,11 +213,15 @@ precision { return SkSL::Token::PRECISION; }
 
 ";" { return SkSL::Token::SEMICOLON; }
 
+"->" { return SkSL::Token::ARROW; }
+
+"::" { return SkSL::Token::COLONCOLON; }
+
+[ \t\r\n]+ { return SkSL::Token::WHITESPACE; }
+
 "//".* /* line comment */
 
 "/*"([^*]|"*"[^/])*"*/" /* block comment */
-
-[ \t\r\n]+  /* whitespace */
 
 .    { return SkSL::Token::INVALID_TOKEN; }
 

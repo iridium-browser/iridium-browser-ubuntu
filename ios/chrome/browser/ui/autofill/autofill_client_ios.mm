@@ -80,8 +80,12 @@ rappor::RapporServiceImpl* AutofillClientIOS::GetRapporServiceImpl() {
   return GetApplicationContext()->GetRapporServiceImpl();
 }
 
-ukm::UkmService* AutofillClientIOS::GetUkmService() {
-  return GetApplicationContext()->GetUkmService();
+ukm::UkmRecorder* AutofillClientIOS::GetUkmRecorder() {
+  return GetApplicationContext()->GetUkmRecorder();
+}
+
+SaveCardBubbleController* AutofillClientIOS::GetSaveCardBubbleController() {
+  return nullptr;
 }
 
 void AutofillClientIOS::ShowAutofillSettings() {
@@ -114,16 +118,17 @@ void AutofillClientIOS::ConfirmSaveCreditCardLocally(
   infobar_manager_->AddInfoBar(CreateSaveCardInfoBarMobile(
       base::MakeUnique<AutofillSaveCardInfoBarDelegateMobile>(
           false, card, std::unique_ptr<base::DictionaryValue>(nullptr),
-          callback)));
+          callback, GetPrefs())));
 }
 
 void AutofillClientIOS::ConfirmSaveCreditCardToCloud(
     const CreditCard& card,
     std::unique_ptr<base::DictionaryValue> legal_message,
+    bool should_cvc_be_requested,
     const base::Closure& callback) {
   infobar_manager_->AddInfoBar(CreateSaveCardInfoBarMobile(
       base::MakeUnique<AutofillSaveCardInfoBarDelegateMobile>(
-          true, card, std::move(legal_message), callback)));
+          true, card, std::move(legal_message), callback, GetPrefs())));
 }
 
 void AutofillClientIOS::ConfirmCreditCardFillAssist(
@@ -209,12 +214,6 @@ bool AutofillClientIOS::IsContextSecure() {
           net::IsCertStatusMinorError(ssl.cert_status));
 }
 
-void AutofillClientIOS::OnFirstUserGestureObserved() {
-  // TODO(gcasto): [Merge 306796] http://crbug.com/439425 Verify if this method
-  // needs a real implementation or not.
-  NOTIMPLEMENTED();
-}
-
 bool AutofillClientIOS::ShouldShowSigninPromo() {
   return false;
 }
@@ -225,6 +224,10 @@ void AutofillClientIOS::StartSigninFlow() {
 
 void AutofillClientIOS::ShowHttpNotSecureExplanation() {
   NOTIMPLEMENTED();
+}
+
+bool AutofillClientIOS::IsAutofillSupported() {
+  return true;
 }
 
 }  // namespace autofill

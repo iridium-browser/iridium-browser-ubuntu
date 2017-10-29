@@ -6,6 +6,7 @@
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/file_manager_browsertest_base.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -83,13 +84,14 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE, "searchNotFound")));
 
 // Fails on official build. http://crbug.com/429294
+// Disabled due to flakiness. https://crbug.com/701451
 #if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_OpenVideoFiles DISABLED_OpenVideoFiles
 #else
 #define MAYBE_OpenVideoFiles OpenVideoFiles
 #endif
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    MAYBE_OpenVideoFiles,
+    DISABLED_OpenVideoFiles,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(IN_GUEST_MODE, "videoOpenDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "videoOpenDownloads"),
@@ -112,40 +114,31 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "audioRepeatAllModeSingleFileDrive"),
         TestParameter(NOT_IN_GUEST_MODE, "audioNoRepeatModeSingleFileDrive"),
         TestParameter(NOT_IN_GUEST_MODE, "audioRepeatOneModeSingleFileDrive"),
-        TestParameter(NOT_IN_GUEST_MODE, "audioRepeatAllModeMultipleFileDrive"),
+        // TODO(crbug.com/701922) Revive this flaky test.
+        // TestParameter(NOT_IN_GUEST_MODE,
+        //               "audioRepeatAllModeMultipleFileDrive"),
         TestParameter(NOT_IN_GUEST_MODE, "audioNoRepeatModeMultipleFileDrive"),
         TestParameter(NOT_IN_GUEST_MODE,
                       "audioRepeatOneModeMultipleFileDrive")));
 
 // Fails on official build. http://crbug.com/429294
-#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
-#define MAYBE_OpenImageFiles DISABLED_OpenImageFiles
-#else
-#define MAYBE_OpenImageFiles OpenImageFiles
-#endif
+// Flaky: http://crbug.com/711290
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    MAYBE_OpenImageFiles,
+    DISABLED_OpenImageFiles,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(IN_GUEST_MODE, "imageOpenDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "imageOpenDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "imageOpenDrive")));
 
-#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
-#define MAYBE_CreateNewFolder DISABLED_CreateNewFolder
-#else
-#define MAYBE_CreateNewFolder CreateNewFolder
-#endif
+// Flaky: crbug.com/715963
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    MAYBE_CreateNewFolder,
+    CreateNewFolder,
     FileManagerBrowserTest,
-    ::testing::Values(TestParameter(NOT_IN_GUEST_MODE,
-                                    "createNewFolderAfterSelectFile"),
-                      TestParameter(IN_GUEST_MODE,
-                                    "createNewFolderDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE,
-                                    "createNewFolderDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE,
-                                    "createNewFolderDrive")));
+    ::testing::Values(
+        TestParameter(NOT_IN_GUEST_MODE, "createNewFolderAfterSelectFile"),
+        TestParameter(IN_GUEST_MODE, "createNewFolderDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "createNewFolderDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "createNewFolderDrive")));
 
 // Fails on official build. http://crbug.com/429294
 #if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
@@ -156,22 +149,19 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 WRAPPED_INSTANTIATE_TEST_CASE_P(
     MAYBE_KeyboardOperations,
     FileManagerBrowserTest,
-    ::testing::Values(TestParameter(IN_GUEST_MODE, "keyboardDeleteDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE,
-                                    "keyboardDeleteDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE, "keyboardDeleteDrive"),
-                      TestParameter(IN_GUEST_MODE, "keyboardCopyDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE, "keyboardCopyDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE, "keyboardCopyDrive"),
-                      TestParameter(IN_GUEST_MODE, "renameFileDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE, "renameFileDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE, "renameFileDrive"),
-                      TestParameter(IN_GUEST_MODE,
-                                    "renameNewDirectoryDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE,
-                                    "renameNewDirectoryDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE,
-                                    "renameNewDirectoryDrive")));
+    ::testing::Values(
+        TestParameter(IN_GUEST_MODE, "keyboardDeleteDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "keyboardDeleteDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "keyboardDeleteDrive"),
+        TestParameter(IN_GUEST_MODE, "keyboardCopyDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "keyboardCopyDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "keyboardCopyDrive"),
+        TestParameter(IN_GUEST_MODE, "renameFileDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "renameFileDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "renameFileDrive"),
+        TestParameter(IN_GUEST_MODE, "renameNewDirectoryDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "renameNewDirectoryDownloads"),
+        TestParameter(NOT_IN_GUEST_MODE, "renameNewDirectoryDrive")));
 
 #if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_Delete DISABLED_Delete
@@ -187,9 +177,10 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "deleteOneItemFromToolbar")));
 
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    DISABLED_QuickView,
+    QuickView,
     FileManagerBrowserTest,
-    ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "openQuickView")));
+    ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "openQuickView"),
+                      TestParameter(NOT_IN_GUEST_MODE, "closeQuickView")));
 
 #if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_DirectoryTreeContextMenu DISABLED_DirectoryTreeContextMenu
@@ -261,7 +252,6 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     MAYBE_DriveSpecific,
     FileManagerBrowserTest,
     ::testing::Values(
-        TestParameter(NOT_IN_GUEST_MODE, "openSidebarRecent"),
         TestParameter(NOT_IN_GUEST_MODE, "openSidebarOffline"),
         TestParameter(NOT_IN_GUEST_MODE, "openSidebarSharedWithMe"),
         TestParameter(NOT_IN_GUEST_MODE, "autocomplete"),
@@ -283,19 +273,18 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "transferFromDownloadsToDrive"),
         TestParameter(NOT_IN_GUEST_MODE, "transferFromSharedToDownloads"),
         TestParameter(NOT_IN_GUEST_MODE, "transferFromSharedToDrive"),
-        TestParameter(NOT_IN_GUEST_MODE, "transferFromRecentToDownloads"),
-        TestParameter(NOT_IN_GUEST_MODE, "transferFromRecentToDrive"),
         TestParameter(NOT_IN_GUEST_MODE, "transferFromOfflineToDownloads"),
         TestParameter(NOT_IN_GUEST_MODE, "transferFromOfflineToDrive")));
 
 // Fails on official build. http://crbug.com/429294
+// Disabled due to flakiness. https://crbug.com/701924
 #if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_RestorePrefs DISABLED_RestorePrefs
 #else
 #define MAYBE_RestorePrefs RestorePrefs
 #endif
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    MAYBE_RestorePrefs,
+    DISABLED_RestorePrefs,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(IN_GUEST_MODE, "restoreSortColumn"),
                       TestParameter(NOT_IN_GUEST_MODE, "restoreSortColumn"),
@@ -308,7 +297,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 #define MAYBE_ShareDialog ShareDialog
 #endif
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    MAYBE_ShareDialog,
+    DISABLED_ShareDialog,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "shareFile"),
                       TestParameter(NOT_IN_GUEST_MODE, "shareDirectory")));
@@ -344,7 +333,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 #define MAYBE_SuggestAppDialog SuggestAppDialog
 #endif
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    MAYBE_SuggestAppDialog,
+    DISABLED_SuggestAppDialog,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "suggestAppDialog")));
 
@@ -471,7 +460,6 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 #else
 #define MAYBE_TabindexOpenDialog TabindexOpenDialog
 #endif
-// Flaky: crbug.com/615259
 WRAPPED_INSTANTIATE_TEST_CASE_P(
     DISABLED_TabindexOpenDialog,
     FileManagerBrowserTest,
@@ -486,7 +474,6 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 #else
 #define MAYBE_TabindexSaveFileDialog TabindexSaveFileDialog
 #endif
-// Flaky: crbug.com/615259
 WRAPPED_INSTANTIATE_TEST_CASE_P(
     DISABLED_TabindexSaveFileDialog,
     FileManagerBrowserTest,
@@ -626,8 +613,9 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
 
   // Returns primary profile (if it is already created.)
   Profile* profile() override {
-    Profile* const profile = chromeos::ProfileHelper::GetProfileByUserIdHash(
-        kTestAccounts[PRIMARY_ACCOUNT_INDEX].hash);
+    Profile* const profile =
+        chromeos::ProfileHelper::GetProfileByUserIdHashForTest(
+            kTestAccounts[PRIMARY_ACCOUNT_INDEX].hash);
     return profile ? profile : FileManagerBrowserTestBase::profile();
   }
 
@@ -636,6 +624,7 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
 
   // Adds a new user for testing to the current session.
   void AddUser(const TestAccountInfo& info, bool log_in) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     const AccountId account_id(AccountId::FromUserEmail(info.email));
     if (log_in) {
       session_manager::SessionManager::Get()->CreateSession(account_id,
@@ -644,7 +633,7 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
     user_manager::UserManager::Get()->SaveUserDisplayName(
         account_id, base::UTF8ToUTF16(info.display_name));
     SigninManagerFactory::GetForProfile(
-        chromeos::ProfileHelper::GetProfileByUserIdHash(info.hash))
+        chromeos::ProfileHelper::GetProfileByUserIdHashForTest(info.hash))
         ->SetAuthenticatedAccountInfo(info.gaia_id, info.email);
   }
 
@@ -682,19 +671,19 @@ IN_PROC_BROWSER_TEST_F(MultiProfileFileManagerBrowserTest,
   StartTest();
 }
 
-// Fails on official build. http://crbug.com/429294
-#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
-#define MAYBE_PRE_BasicDrive DISABLED_PRE_BasicDrive
-#define MAYBE_BasicDrive DISABLED_BasicDrive
-#else
-#define MAYBE_PRE_BasicDrive PRE_BasicDrive
-#define MAYBE_BasicDrive BasicDrive
-#endif
-IN_PROC_BROWSER_TEST_F(MultiProfileFileManagerBrowserTest,
-                       MAYBE_PRE_BasicDrive) {
+// Flaky: crbug.com/715961.
+// Previously it was disabled via DISABLE_SLOW_FILESAPP_TESTS and in
+// OFFICIAL_BUILD, see http://crbug.com/429294.
+IN_PROC_BROWSER_TEST_F(MultiProfileFileManagerBrowserTest, PRE_BasicDrive) {
   AddAllUsers();
 }
 
+// Fails on official build. http://crbug.com/429294
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
+#define MAYBE_BasicDrive DISABLED_BasicDrive
+#else
+#define MAYBE_BasicDrive BasicDrive
+#endif
 IN_PROC_BROWSER_TEST_F(MultiProfileFileManagerBrowserTest, MAYBE_BasicDrive) {
   AddAllUsers();
 

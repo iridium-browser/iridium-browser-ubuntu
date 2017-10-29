@@ -1,11 +1,13 @@
-{% from "macros.tmpl" import license %}
+{% from "templates/macros.tmpl" import license, source_files_for_generated_file %}
 {{ license() }}
+
+{{source_files_for_generated_file(template_file, input_files)}}
 
 #include "{{namespace}}ElementTypeHelpers.h"
 
 #include "core/dom/Document.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "wtf/HashMap.h"
+#include "platform/wtf/HashMap.h"
 
 namespace blink {
 {% if namespace == "HTML" %}
@@ -17,13 +19,13 @@ void createHTMLTypeMap() {
   DCHECK(!html_type_map);
   html_type_map = new HTMLTypeMap;
   {% for tag in tags|sort %}
-  html_type_map->set(AtomicString("{{tag.name}}"), HTMLElementType::k{{tag.interface}});
+  html_type_map->Set(AtomicString("{{tag.name}}"), HTMLElementType::k{{tag.interface}});
   {% endfor %}
 }
 
 HTMLElementType htmlElementTypeForTag(const AtomicString& tagName) {
   if (!html_type_map) createHTMLTypeMap();
-  if (html_type_map->contains(tagName)) {
+  if (html_type_map->Contains(tagName)) {
     {% for tag in tags|sort %}
     {% if tag.runtimeEnabled %}
     if (tagName == "{{tag.name}}") {

@@ -5,22 +5,20 @@
 #include "chrome/browser/ui/views/apps/chrome_native_app_window_views_aura_ash.h"
 
 #include "apps/ui/views/app_window_frame_view.h"
-#include "ash/common/ash_constants.h"
-#include "ash/common/ash_switches.h"
-#include "ash/common/frame/custom_frame_view_ash.h"
-#include "ash/common/shelf/shelf_item_types.h"
-#include "ash/common/wm/panels/panel_frame_view.h"
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm/window_state_delegate.h"
-#include "ash/common/wm/window_state_observer.h"
-#include "ash/common/wm_window.h"
+#include "ash/ash_constants.h"
+#include "ash/ash_switches.h"
+#include "ash/frame/custom_frame_view_ash.h"
+#include "ash/public/cpp/app_types.h"
+#include "ash/public/cpp/immersive/immersive_fullscreen_controller.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
-#include "ash/shared/app_types.h"
-#include "ash/shared/immersive_fullscreen_controller.h"
 #include "ash/shell.h"
+#include "ash/wm/panels/panel_frame_view.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_properties.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/window_state.h"
+#include "ash/wm/window_state_delegate.h"
+#include "ash/wm/window_state_observer.h"
 #include "chrome/browser/chromeos/note_taking_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/ash_util.h"
@@ -61,13 +59,12 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
     // control.
     // TODO(pkotwicz): This is a hack. Remove ASAP. http://crbug.com/319048
     window_state_->AddObserver(this);
-    ash::WmWindow::GetAuraWindow(window_state_->window())->AddObserver(this);
+    window_state_->window()->AddObserver(this);
   }
   ~NativeAppWindowStateDelegate() override {
     if (window_state_) {
       window_state_->RemoveObserver(this);
-      ash::WmWindow::GetAuraWindow(window_state_->window())
-          ->RemoveObserver(this);
+      window_state_->window()->RemoveObserver(this);
     }
   }
 
@@ -109,8 +106,8 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
   // Overridden from aura::WindowObserver:
   void OnWindowDestroying(aura::Window* window) override {
     window_state_->RemoveObserver(this);
-    ash::WmWindow::GetAuraWindow(window_state_->window())->RemoveObserver(this);
-    window_state_ = NULL;
+    window_state_->window()->RemoveObserver(this);
+    window_state_ = nullptr;
   }
 
   // Not owned.
@@ -122,9 +119,24 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
 
 }  // namespace
 
-ChromeNativeAppWindowViewsAuraAsh::ChromeNativeAppWindowViewsAuraAsh() {}
+ChromeNativeAppWindowViewsAuraAsh::ChromeNativeAppWindowViewsAuraAsh() {
+  // TODO(crbug.com/756046): Remove this check once this class uses
+  // TouchViewObserver.
+  if (!ash_util::IsRunningInMash()) {
+    DCHECK(ash::Shell::HasInstance());
+    ash::Shell::Get()->tablet_mode_controller()->AddObserver(this);
+  }
+}
 
-ChromeNativeAppWindowViewsAuraAsh::~ChromeNativeAppWindowViewsAuraAsh() {}
+ChromeNativeAppWindowViewsAuraAsh::~ChromeNativeAppWindowViewsAuraAsh() {
+  // TODO(crbug.com/756046): Remove this check once this class uses
+  // TouchViewObserver.
+  if (!ash_util::IsRunningInMash()) {
+    DCHECK(ash::Shell::HasInstance());
+    if (ash::Shell::Get()->tablet_mode_controller())
+      ash::Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
+  }
+}
 
 void ChromeNativeAppWindowViewsAuraAsh::InitializeWindow(
     AppWindow* app_window,
@@ -132,22 +144,7 @@ void ChromeNativeAppWindowViewsAuraAsh::InitializeWindow(
   ChromeNativeAppWindowViewsAura::InitializeWindow(app_window, create_params);
   aura::Window* window = widget()->GetNativeWindow();
 
-  // TODO(afakhry): Remove Docked Windows in M58.
-  // Restore docked state on ash desktop if the docked windows flag is enabled.
-  if (create_params.state == ui::SHOW_STATE_DOCKED &&
-      ash::switches::DockedWindowsEnabled()) {
-    window->SetProperty(aura::client::kShowStateKey, create_params.state);
-  }
-
-  window->SetProperty(aura::client::kAppIdKey,
-                      new std::string(app_window->extension_id()));
-
-  if (app_window->window_type_is_panel()) {
-    // Ash's ShelfWindowWatcher handles app panel windows once this type is set.
-    // The type should have been initialized for mash below, via mus_properties.
-    if (!ash_util::IsRunningInMash())
-      window->SetProperty<int>(ash::kShelfItemTypeKey, ash::TYPE_APP_PANEL);
-  } else {
+  if (!app_window->window_type_is_panel()) {
     window->SetProperty(aura::client::kAppType,
                         static_cast<int>(ash::AppType::CHROME_APP));
   }
@@ -159,9 +156,12 @@ void ChromeNativeAppWindowViewsAuraAsh::OnBeforeWidgetInit(
     views::Widget* widget) {
   ChromeNativeAppWindowViewsAura::OnBeforeWidgetInit(create_params, init_params,
                                                      widget);
-  if (create_params.is_ime_window) {
-    // Put ime windows into the ime window container on the primary display.
-    int container_id = ash::kShellWindowId_ImeWindowParentContainer;
+  if (create_params.is_ime_window || create_params.show_on_lock_screen) {
+    // Put ime windows and lock screen windows into their respective window
+    // containers on the primary display.
+    int container_id = create_params.is_ime_window
+                           ? ash::kShellWindowId_ImeWindowParentContainer
+                           : ash::kShellWindowId_LockActionHandlerContainer;
     if (ash_util::IsRunningInMash()) {
       init_params->mus_properties
           [ui::mojom::WindowManager::kContainerId_InitProperty] =
@@ -176,32 +176,21 @@ void ChromeNativeAppWindowViewsAuraAsh::OnBeforeWidgetInit(
     }
   }
   DCHECK_NE(AppWindow::WINDOW_TYPE_PANEL, create_params.window_type);
-  DCHECK_NE(AppWindow::WINDOW_TYPE_V1_PANEL, create_params.window_type);
   init_params->mus_properties
       [ui::mojom::WindowManager::kRemoveStandardFrame_InitProperty] =
       mojo::ConvertTo<std::vector<uint8_t>>(init_params->remove_standard_frame);
 }
 
 void ChromeNativeAppWindowViewsAuraAsh::OnBeforePanelWidgetInit(
-    bool use_default_bounds,
     views::Widget::InitParams* init_params,
     views::Widget* widget) {
-  ChromeNativeAppWindowViewsAura::OnBeforePanelWidgetInit(use_default_bounds,
-                                                          init_params,
-                                                          widget);
+  ChromeNativeAppWindowViewsAura::OnBeforePanelWidgetInit(init_params, widget);
 
-  if (ash_util::IsRunningInMash()) {
-    // Ash's ShelfWindowWatcher handles app panel windows once this type is set.
-    init_params
-        ->mus_properties[ui::mojom::WindowManager::kShelfItemType_Property] =
-        mojo::ConvertTo<std::vector<uint8_t>>(
-            static_cast<aura::PropertyConverter::PrimitiveType>(
-                ash::TYPE_APP_PANEL));
-  } else if (ash::Shell::HasInstance() && use_default_bounds) {
+  if (!ash_util::IsRunningInMash() && ash::Shell::HasInstance()) {
     // Open a new panel on the target root.
-    init_params->context = ash::Shell::GetTargetRootWindow();
+    init_params->context = ash::Shell::GetRootWindowForNewWindows();
     init_params->bounds = gfx::Rect(GetPreferredSize());
-    wm::ConvertRectToScreen(ash::Shell::GetTargetRootWindow(),
+    wm::ConvertRectToScreen(ash::Shell::GetRootWindowForNewWindows(),
                             &init_params->bounds);
   }
 }
@@ -212,8 +201,8 @@ ChromeNativeAppWindowViewsAuraAsh::CreateNonStandardAppFrame() {
       HasFrameColor(), ActiveFrameColor(), InactiveFrameColor());
   frame->Init();
 
-// For Aura windows on the Ash desktop the sizes are different and the user
-// can resize the window from slightly outside the bounds as well.
+  // For Aura windows on the Ash desktop the sizes are different and the user
+  // can resize the window from slightly outside the bounds as well.
   frame->SetResizeSizes(ash::kResizeInsideBoundsSize,
                         ash::kResizeOutsideBoundsSize,
                         ash::kResizeAreaCornerSize);
@@ -254,16 +243,6 @@ ChromeNativeAppWindowViewsAuraAsh::GetRestoredState() const {
       }
       return ui::SHOW_STATE_FULLSCREEN;
     }
-
-    // TODO(afakhry): Remove Docked Windows in M58.
-    if (ash::switches::DockedWindowsEnabled() &&
-        (widget()->GetNativeWindow()->GetProperty(
-             aura::client::kShowStateKey) == ui::SHOW_STATE_DOCKED ||
-         widget()->GetNativeWindow()->GetProperty(
-             aura::client::kPreMinimizedShowStateKey) ==
-             ui::SHOW_STATE_DOCKED)) {
-      return ui::SHOW_STATE_DOCKED;
-    }
   }
 
   return GetRestorableState(restore_state);
@@ -295,9 +274,8 @@ void ChromeNativeAppWindowViewsAuraAsh::ShowContextMenuForView(
         base::Bind(&ChromeNativeAppWindowViewsAuraAsh::OnMenuClosed,
                    base::Unretained(this))));
     menu_runner_.reset(new views::MenuRunner(
-        menu_model_adapter_->CreateMenu(), views::MenuRunner::HAS_MNEMONICS |
-                                               views::MenuRunner::CONTEXT_MENU |
-                                               views::MenuRunner::ASYNC));
+        menu_model_adapter_->CreateMenu(),
+        views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU));
     menu_runner_->RunMenuAt(source->GetWidget(), NULL,
                             gfx::Rect(p, gfx::Size(0, 0)),
                             views::MENU_ANCHOR_TOPLEFT, source_type);
@@ -339,6 +317,16 @@ ChromeNativeAppWindowViewsAuraAsh::CreateNonClientFrameView(
       immersive_fullscreen_controller_.get());
   custom_frame_view->GetHeaderView()->set_context_menu_controller(this);
 
+  // Enter immersive mode if the app is opened in tablet mode with the hide
+  // titlebars feature enabled.
+  if (!ash_util::IsRunningInMash()) {
+    DCHECK(ash::Shell::HasInstance());
+    if (CanAutohideTitlebarsInTabletMode()) {
+      immersive_fullscreen_controller_->SetEnabled(
+          ash::ImmersiveFullscreenController::WINDOW_TYPE_PACKAGED_APP, true);
+    }
+  }
+
   if (HasFrameColor()) {
     custom_frame_view->SetFrameColors(ActiveFrameColor(),
                                       InactiveFrameColor());
@@ -351,11 +339,20 @@ void ChromeNativeAppWindowViewsAuraAsh::SetFullscreen(int fullscreen_types) {
   ChromeNativeAppWindowViewsAura::SetFullscreen(fullscreen_types);
 
   if (immersive_fullscreen_controller_.get()) {
-    // |immersive_fullscreen_controller_| should only be set if immersive
-    // fullscreen is the fullscreen type used by the OS.
-    immersive_fullscreen_controller_->SetEnabled(
-        ash::ImmersiveFullscreenController::WINDOW_TYPE_PACKAGED_APP,
-        (fullscreen_types & AppWindow::FULLSCREEN_TYPE_OS) != 0);
+    // Immersive mode should not change if we set fullscreen on a maximizable
+    // app in tablet mode when the hide titlebars feature is enabled.
+    bool autohide_titlebars_enabled = false;
+    if (!ash_util::IsRunningInMash())
+      autohide_titlebars_enabled = CanAutohideTitlebarsInTabletMode();
+
+    if (!autohide_titlebars_enabled) {
+      // |immersive_fullscreen_controller_| should only be set if immersive
+      // fullscreen is the fullscreen type used by the OS.
+      immersive_fullscreen_controller_->SetEnabled(
+          ash::ImmersiveFullscreenController::WINDOW_TYPE_PACKAGED_APP,
+          (fullscreen_types & AppWindow::FULLSCREEN_TYPE_OS) != 0);
+    }
+
     // Autohide the shelf instead of hiding the shelf completely when only in
     // OS fullscreen.
     ash::wm::WindowState* window_state =
@@ -364,7 +361,7 @@ void ChromeNativeAppWindowViewsAuraAsh::SetFullscreen(int fullscreen_types) {
                                                  AppWindow::FULLSCREEN_TYPE_OS);
     if (!ash_util::IsRunningInMash()) {
       DCHECK(ash::Shell::HasInstance());
-      ash::Shell::GetInstance()->UpdateShelfVisibility();
+      ash::Shell::Get()->UpdateShelfVisibility();
     }
   }
 }
@@ -396,8 +393,41 @@ void ChromeNativeAppWindowViewsAuraAsh::UpdateDraggableRegions(
   }
 }
 
+void ChromeNativeAppWindowViewsAuraAsh::SetActivateOnPointer(
+    bool activate_on_pointer) {
+  widget()->GetNativeWindow()->SetProperty(aura::client::kActivateOnPointerKey,
+                                           activate_on_pointer);
+}
+
+void ChromeNativeAppWindowViewsAuraAsh::OnTabletModeStarted() {
+  // Enter immersive mode if the widget can maximize and the hide titlebars
+  // in tablet mode feature is enabled.
+  if (immersive_fullscreen_controller_.get() &&
+      CanAutohideTitlebarsInTabletMode()) {
+    immersive_fullscreen_controller_->SetEnabled(
+        ash::ImmersiveFullscreenController::WINDOW_TYPE_PACKAGED_APP, true);
+  }
+}
+
+void ChromeNativeAppWindowViewsAuraAsh::OnTabletModeEnded() {
+  // Exit immersive mode if the widget is not in fullscreen and can maximize.
+  if (immersive_fullscreen_controller_.get() && !widget()->IsFullscreen() &&
+      CanMaximize()) {
+    immersive_fullscreen_controller_->SetEnabled(
+        ash::ImmersiveFullscreenController::WINDOW_TYPE_PACKAGED_APP, false);
+  }
+}
+
 void ChromeNativeAppWindowViewsAuraAsh::OnMenuClosed() {
   menu_runner_.reset();
   menu_model_adapter_.reset();
   menu_model_.reset();
+}
+
+bool ChromeNativeAppWindowViewsAuraAsh::CanAutohideTitlebarsInTabletMode()
+    const {
+  return ash::Shell::Get()
+             ->tablet_mode_controller()
+             ->ShouldAutoHideTitlebars() &&
+         CanMaximize();
 }

@@ -177,9 +177,6 @@ UI_BASE_X_EXPORT bool SetStringProperty(XID window,
                                         XAtom type,
                                         const std::string& value);
 
-// Gets the X atom for default display corresponding to atom_name.
-UI_BASE_X_EXPORT XAtom GetAtom(const char* atom_name);
-
 // Sets the WM_CLASS attribute for a given X11 window.
 UI_BASE_X_EXPORT void SetWindowClassHint(XDisplay* display,
                                          XID window,
@@ -273,6 +270,9 @@ UI_BASE_X_EXPORT WindowManagerName GuessWindowManager();
 // The same as GuessWindowManager(), but returns the raw string.  If we
 // can't determine it, return "Unknown".
 UI_BASE_X_EXPORT std::string GuessWindowManagerName();
+
+// Returns true if a compositing manager is present.
+UI_BASE_X_EXPORT bool IsCompositingManagerPresent();
 
 // Enable the default X error handlers. These will log the error and abort
 // the process if called. Use SetX11ErrorHandlers() from x11_util_internal.h

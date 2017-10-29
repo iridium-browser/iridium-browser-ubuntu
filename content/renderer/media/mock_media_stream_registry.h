@@ -7,13 +7,12 @@
 
 #include <string>
 
+#include "base/optional.h"
 #include "content/renderer/media/media_stream_registry_interface.h"
 
-namespace blink {
-class WebMediaConstraints;
-}
-
 namespace content {
+
+struct VideoTrackAdapterSettings;
 
 // This class encapsulates creation of a Blink MediaStream having inside the
 // necessary Blink and Chromium, track and source. The Chrome Video source is
@@ -24,16 +23,17 @@ class MockMediaStreamRegistry final : public MediaStreamRegistryInterface {
 
   void Init(const std::string& stream_url);
   void AddVideoTrack(const std::string& track_id,
-                     const blink::WebMediaConstraints& constraints);
+                     const VideoTrackAdapterSettings& adapter_settings,
+                     const base::Optional<bool>& noise_reduction,
+                     bool is_screen_cast,
+                     double min_frame_rate);
   void AddVideoTrack(const std::string& track_id);
   void AddAudioTrack(const std::string& track_id);
   blink::WebMediaStream GetMediaStream(const std::string& url) override;
 
   const blink::WebMediaStream test_stream() const { return test_stream_; }
 
-  void reset() {
-    test_stream_.reset();
-  }
+  void reset() { test_stream_.Reset(); }
 
  private:
   blink::WebMediaStream test_stream_;

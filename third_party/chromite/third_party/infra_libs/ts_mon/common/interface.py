@@ -36,6 +36,7 @@ import logging
 import random
 import threading
 import time
+import traceback
 
 from infra_libs.ts_mon.common import errors
 from infra_libs.ts_mon.common import metric_store
@@ -43,7 +44,7 @@ from infra_libs.ts_mon.protos import metrics_pb2
 
 # The maximum number of MetricsData messages to include in each HTTP request.
 # MetricsCollections larger than this will be split into multiple requests.
-METRICS_DATA_LENGTH_LIMIT = 1000
+METRICS_DATA_LENGTH_LIMIT = 500
 
 
 class State(object):
@@ -79,9 +80,20 @@ class State(object):
     self.last_flushed = datetime.datetime.utcfromtimestamp(0)
     # Metric name prefix
     self.metric_name_prefix = '/chrome/infra/'
+    # Metrics registered with register_global_metrics.  Keyed by metric name.
+    self.global_metrics = {}
+    # Callbacks registered with register_global_metrics_callback.  Keyed by the
+    # arbitrary string provided by the user.  Called before each flush.
+    self.global_metrics_callbacks = {}
+    # Whether to call invoke_global_callbacks() on every flush().  Set to False
+    # on Appengine because it does its own thing.
+    self.invoke_global_callbacks_on_flush = True
 
   def reset_for_unittest(self):
     self.metrics = {}
+    self.global_metrics = {}
+    self.global_metrics_callbacks = {}
+    self.invoke_global_callbacks_on_flush = True
     self.last_flushed = datetime.datetime.utcfromtimestamp(0)
     self.store.reset_for_unittest()
 
@@ -90,7 +102,6 @@ state = State()
 
 def flush():
   """Send all metrics that are registered in the application."""
-
   if not state.flush_enabled_fn():
     logging.debug('ts_mon: sending metrics is disabled.')
     return
@@ -98,18 +109,63 @@ def flush():
   if not state.global_monitor or not state.target:
     raise errors.MonitoringNoConfiguredMonitorError(None)
 
-  proto = metrics_pb2.MetricsCollection()
+  if state.invoke_global_callbacks_on_flush:
+    invoke_global_callbacks()
 
-  for target, metric, start_time, fields_values in state.store.get_all():
-    for fields, value in fields_values.iteritems():
-      if len(proto.data) >= METRICS_DATA_LENGTH_LIMIT:
-        state.global_monitor.send(proto)
-        del proto.data[:]
-
-      metric.serialize_to(proto, start_time, fields, value, target)
-
-  state.global_monitor.send(proto)
+  rpcs = []
+  for proto in _generate_proto():
+    rpcs.append(state.global_monitor.send(proto))
+  for rpc in rpcs:
+    if rpc is not None:
+      state.global_monitor.wait(rpc)
   state.last_flushed = datetime.datetime.utcnow()
+
+
+def _generate_proto():
+  """Generate MetricsPayload for global_monitor.send()."""
+  proto = metrics_pb2.MetricsPayload()
+
+  # Key: Target, value: MetricsCollection.
+  collections = {}
+
+  # Key: (Target, metric name) tuple, value: MetricsDataSet.
+  data_sets = {}
+
+  count = 0
+  for (target, metric, start_time, end_time, fields_values
+       ) in state.store.get_all():
+    for fields, value in fields_values.iteritems():
+      if count >= METRICS_DATA_LENGTH_LIMIT:
+        yield proto
+        proto = metrics_pb2.MetricsPayload()
+        collections.clear()
+        data_sets.clear()
+        count = 0
+
+      if target not in collections:
+        collections[target] = proto.metrics_collection.add()
+        target.populate_target_pb(collections[target])
+      collection = collections[target]
+
+      key = (target, metric.name)
+      new_data_set = None
+      if key not in data_sets:
+        new_data_set = metrics_pb2.MetricsDataSet()
+        metric.populate_data_set(new_data_set)
+
+      data = metrics_pb2.MetricsData()
+      metric.populate_data(data, start_time, end_time, fields, value)
+
+      # All required data protos have been successfully populated. Now we can
+      # insert them in serialized proto and bookeeping data structures.
+      if new_data_set is not None:
+        collection.metrics_data_set.add().CopyFrom(new_data_set)
+        data_sets[key] = collection.metrics_data_set[-1]
+      data_sets[key].data.add().CopyFrom(data)
+      count += 1
+
+  if count > 0:
+    yield proto
 
 
 def register(metric):
@@ -142,8 +198,56 @@ def close():
 
 def reset_for_unittest(disable=False):
   state.reset_for_unittest()
-  if disable:
-    state.flush_enabled_fn = lambda: False
+  state.flush_enabled_fn = lambda: not disable
+
+
+def register_global_metrics(metrics):
+  """Declare metrics as global.
+
+  Outside Appengine this has no effect.
+
+  On Appengine, registering a metric as "global" simply means it will be reset
+  every time the metric is sent. This allows any instance to send such a metric
+  to a shared stream, e.g. by overriding target fields like task_num (instance
+  ID), host_name (version) or job_name (module name).
+
+  There is no "unregister". Multiple calls add up. It only needs to be called
+  once, similar to gae_ts_mon.initialize().
+
+  Args:
+    metrics (iterable): a collection of Metric objects.
+  """
+  state.global_metrics.update({m.name: m for m in metrics})
+
+
+def register_global_metrics_callback(name, callback):
+  """Register a named function to compute global metrics values.
+
+  There can only be one callback for a given name. Setting another callback with
+  the same name will override the previous one. To disable a callback, set its
+  function to None.
+
+  Args:
+    name (string): name of the callback.
+    callback (function): this function will be called without arguments every
+      minute.  On Appengine it is called once for the whole application from the
+      gae_ts_mon cron job. It is intended to set the values of the global
+      metrics.
+  """
+  if not callback:
+    if name in state.global_metrics_callbacks:
+      del state.global_metrics_callbacks[name]
+  else:
+    state.global_metrics_callbacks[name] = callback
+
+
+def invoke_global_callbacks():
+  for name, callback in state.global_metrics_callbacks.iteritems():
+    logging.debug('Invoking callback %s', name)
+    try:
+      callback()
+    except Exception:
+      logging.exception('Monitoring global callback "%s" failed', name)
 
 
 class _FlushThread(threading.Thread):
@@ -172,7 +276,6 @@ class _FlushThread(threading.Thread):
 
     while True:
       if self.stop_event.wait(next_timeout):
-        self._flush_and_log_exceptions()
         return
 
       # Try to flush every N seconds exactly so rate calculations are more

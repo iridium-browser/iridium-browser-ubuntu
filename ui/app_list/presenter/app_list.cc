@@ -4,6 +4,8 @@
 
 #include "ui/app_list/presenter/app_list.h"
 
+#include <utility>
+
 #include "ui/app_list/presenter/app_list_delegate.h"
 
 namespace app_list {
@@ -25,6 +27,15 @@ void AppList::Show(int64_t display_id) {
     presenter_->Show(display_id);
 }
 
+void AppList::UpdateYPositionAndOpacity(int y_position_in_screen,
+                                        float background_opacity,
+                                        bool is_end_gesture) {
+  if (presenter_) {
+    presenter_->UpdateYPositionAndOpacity(y_position_in_screen,
+                                          background_opacity, is_end_gesture);
+  }
+}
+
 void AppList::Dismiss() {
   if (presenter_)
     presenter_->Dismiss();
@@ -33,6 +44,16 @@ void AppList::Dismiss() {
 void AppList::ToggleAppList(int64_t display_id) {
   if (presenter_)
     presenter_->ToggleAppList(display_id);
+}
+
+void AppList::StartVoiceInteractionSession() {
+  if (presenter_)
+    presenter_->StartVoiceInteractionSession();
+}
+
+void AppList::ToggleVoiceInteractionSession() {
+  if (presenter_)
+    presenter_->ToggleVoiceInteractionSession();
 }
 
 bool AppList::IsVisible() const {

@@ -16,7 +16,7 @@
 #include "remoting/protocol/message_reader.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/webrtc/base/byteorder.h"
+#include "third_party/webrtc/rtc_base/byteorder.h"
 
 using testing::_;
 using testing::DoAll;
@@ -149,13 +149,25 @@ TEST_F(MessageReaderTest, TwoMessages_Separately) {
 
 // Read() returns error.
 TEST_F(MessageReaderTest, ReadError) {
-  socket_.AppendReadError(net::ERR_FAILED);
+  socket_.SetReadError(net::ERR_FAILED);
 
   EXPECT_CALL(callback_, OnMessage()).Times(0);
 
   InitReader();
 
   EXPECT_EQ(net::ERR_FAILED, read_error_);
+  EXPECT_FALSE(reader_);
+}
+
+// Read() returns 0 (end of stream).
+TEST_F(MessageReaderTest, EndOfStream) {
+  socket_.SetReadError(0);
+
+  EXPECT_CALL(callback_, OnMessage()).Times(0);
+
+  InitReader();
+
+  EXPECT_EQ(0, read_error_);
   EXPECT_FALSE(reader_);
 }
 

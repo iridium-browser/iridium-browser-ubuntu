@@ -30,9 +30,9 @@
 #include "core/editing/EditingStrategy.h"
 #include "core/editing/serializers/MarkupFormatter.h"
 #include "core/editing/serializers/Serialization.h"
-#include "wtf/HashMap.h"
-#include "wtf/Vector.h"
-#include "wtf/text/StringBuilder.h"
+#include "platform/wtf/HashMap.h"
+#include "platform/wtf/Vector.h"
+#include "platform/wtf/text/StringBuilder.h"
 
 namespace blink {
 
@@ -46,44 +46,53 @@ class MarkupAccumulator {
 
  public:
   MarkupAccumulator(EAbsoluteURLs,
-                    SerializationType = SerializationType::AsOwnerDocument);
+                    SerializationType = SerializationType::kAsOwnerDocument);
   virtual ~MarkupAccumulator();
 
-  void appendString(const String&);
-  virtual void appendStartTag(Node&, Namespaces* = nullptr);
-  virtual void appendEndTag(const Element&);
-  void appendStartMarkup(StringBuilder&, Node&, Namespaces*);
-  void appendEndMarkup(StringBuilder&, const Element&);
+  void AppendString(const String&);
+  virtual void AppendStartTag(Node&, Namespaces* = nullptr);
+  virtual void AppendEndTag(const Element&);
+  void AppendStartMarkup(StringBuilder&, Node&, Namespaces*);
+  void AppendEndMarkup(StringBuilder&, const Element&);
 
-  bool serializeAsHTMLDocument(const Node&) const;
-  String toString() { return m_markup.toString(); }
+  bool SerializeAsHTMLDocument(const Node&) const;
+  String ToString() { return markup_.ToString(); }
 
-  virtual void appendCustomAttributes(StringBuilder&,
+  virtual void AppendCustomAttributes(StringBuilder&,
                                       const Element&,
                                       Namespaces*);
 
-  virtual void appendText(StringBuilder&, Text&);
-  virtual bool shouldIgnoreAttribute(const Element&, const Attribute&) const;
-  virtual bool shouldIgnoreElement(const Element&) const;
-  virtual void appendElement(StringBuilder&, const Element&, Namespaces*);
-  void appendOpenTag(StringBuilder&, const Element&, Namespaces*);
-  void appendCloseTag(StringBuilder&, const Element&);
-  virtual void appendAttribute(StringBuilder&,
+  virtual void AppendText(StringBuilder&, Text&);
+  virtual bool ShouldIgnoreAttribute(const Element&, const Attribute&) const;
+  virtual bool ShouldIgnoreElement(const Element&) const;
+  virtual void AppendElement(StringBuilder&, const Element&, Namespaces*);
+  void AppendOpenTag(StringBuilder&, const Element&, Namespaces*);
+  void AppendCloseTag(StringBuilder&, const Element&);
+  virtual void AppendAttribute(StringBuilder&,
                                const Element&,
                                const Attribute&,
                                Namespaces*);
 
-  EntityMask entityMaskForText(const Text&) const;
+  EntityMask EntityMaskForText(const Text&) const;
+
+  // Returns an auxiliary DOM tree, i.e. shadow tree, that needs also to be
+  // serialized. The root of auxiliary DOM tree is returned as an 1st element
+  // in the pair. It can be null if no auxiliary DOM tree exists. An additional
+  // element used to enclose the serialized content of auxiliary DOM tree
+  // can be returned as 2nd element in the pair. It can be null if this is not
+  // needed. For shadow tree, a <template> element is needed to wrap the shadow
+  // tree content.
+  virtual std::pair<Node*, Element*> GetAuxiliaryDOMTree(const Element&) const;
 
  private:
-  MarkupFormatter m_formatter;
-  StringBuilder m_markup;
+  MarkupFormatter formatter_;
+  StringBuilder markup_;
 };
 
 template <typename Strategy>
-String serializeNodes(MarkupAccumulator&, Node&, EChildrenOnly);
+String SerializeNodes(MarkupAccumulator&, Node&, EChildrenOnly);
 
-extern template String serializeNodes<EditingStrategy>(MarkupAccumulator&,
+extern template String SerializeNodes<EditingStrategy>(MarkupAccumulator&,
                                                        Node&,
                                                        EChildrenOnly);
 

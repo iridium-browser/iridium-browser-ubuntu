@@ -69,6 +69,7 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
   // |is_user_gesture| is true when the bubble is shown on the user's deliberate
   // action.
   static views::Widget* ShowBubble(views::View* anchor_view,
+                                   const gfx::Point& anchor_point,
                                    content::WebContents* web_contents,
                                    translate::TranslateStep step,
                                    translate::TranslateErrors::Type error_type,
@@ -83,16 +84,18 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
   TranslateBubbleModel* model() { return model_.get(); }
 
   // views::BubbleDialogDelegateView methods.
+  int GetDialogButtons() const override;
   void Init() override;
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::WidgetDelegate methods.
+  View* GetInitiallyFocusedView() override;
   bool ShouldShowCloseButton() const override;
   void WindowClosing() override;
 
   // views::View methods.
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
 
   // views::ComboboxListener methods.
   void OnPerformAction(views::Combobox* combobox) override;
@@ -172,6 +175,7 @@ class TranslateBubbleView : public LocationBarBubbleDelegateView,
   FRIEND_TEST_ALL_PREFIXES(TranslateBubbleViewTest, CancelButtonReturningError);
 
   TranslateBubbleView(views::View* anchor_view,
+                      const gfx::Point& anchor_point,
                       std::unique_ptr<TranslateBubbleModel> model,
                       translate::TranslateErrors::Type error_type,
                       content::WebContents* web_contents);

@@ -7,6 +7,7 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/service_context.h"
@@ -53,7 +54,7 @@ class AutoclickUI : public views::WidgetDelegateView,
   // Overridden from views::PointerWatcher:
   void OnPointerEventObserved(const ui::PointerEvent& event,
                               const gfx::Point& location_in_screen,
-                              views::Widget* target) override {
+                              gfx::NativeView target) override {
     // AutoclickControllerCommon won't work correctly with a target.
     DCHECK(!event.target());
     if (event.IsTouchPointerEvent()) {
@@ -78,24 +79,33 @@ class AutoclickUI : public views::WidgetDelegateView,
 };
 
 AutoclickApplication::AutoclickApplication()
-    : launchable_binding_(this), autoclick_binding_(this) {}
+    : launchable_binding_(this), autoclick_binding_(this) {
+  registry_.AddInterface<mash::mojom::Launchable>(base::Bind(
+      &AutoclickApplication::BindLaunchableRequest, base::Unretained(this)));
+  registry_.AddInterface<mojom::AutoclickController>(
+      base::Bind(&AutoclickApplication::BindAutoclickControllerRequest,
+                 base::Unretained(this)));
+}
 
 AutoclickApplication::~AutoclickApplication() {}
 
 void AutoclickApplication::OnStart() {
-  aura_init_ = base::MakeUnique<views::AuraInit>(
+  aura_init_ = views::AuraInit::Create(
       context()->connector(), context()->identity(), "views_mus_resources.pak",
       std::string(), nullptr, views::AuraInit::Mode::AURA_MUS);
+  if (!aura_init_) {
+    context()->QuitNow();
+    return;
+  }
   autoclick_controller_common_.reset(new AutoclickControllerCommon(
       base::TimeDelta::FromMilliseconds(kDefaultAutoclickDelayMs), this));
 }
 
-bool AutoclickApplication::OnConnect(
-    const service_manager::ServiceInfo& remote_info,
-    service_manager::InterfaceRegistry* registry) {
-  registry->AddInterface<mash::mojom::Launchable>(this);
-  registry->AddInterface<mojom::AutoclickController>(this);
-  return true;
+void AutoclickApplication::OnBindInterface(
+    const service_manager::BindSourceInfo& remote_info,
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle interface_pipe) {
+  registry_.BindInterface(interface_name, std::move(interface_pipe));
 }
 
 void AutoclickApplication::Launch(uint32_t what, mash::mojom::LaunchMode how) {
@@ -111,7 +121,7 @@ void AutoclickApplication::Launch(uint32_t what, mash::mojom::LaunchMode how) {
 
     params.mus_properties[ui::mojom::WindowManager::kContainerId_InitProperty] =
         mojo::ConvertTo<std::vector<uint8_t>>(
-            ash::kShellWindowId_OverlayContainer);
+            static_cast<int32_t>(ash::kShellWindowId_OverlayContainer));
     params.show_state = ui::SHOW_STATE_FULLSCREEN;
     widget_->Init(params);
   } else {
@@ -125,15 +135,13 @@ void AutoclickApplication::SetAutoclickDelay(uint32_t delay_in_milliseconds) {
       base::TimeDelta::FromMilliseconds(delay_in_milliseconds));
 }
 
-void AutoclickApplication::Create(
-    const service_manager::Identity& remote_identity,
+void AutoclickApplication::BindLaunchableRequest(
     mash::mojom::LaunchableRequest request) {
   launchable_binding_.Close();
   launchable_binding_.Bind(std::move(request));
 }
 
-void AutoclickApplication::Create(
-    const service_manager::Identity& remote_identity,
+void AutoclickApplication::BindAutoclickControllerRequest(
     mojom::AutoclickControllerRequest request) {
   autoclick_binding_.Close();
   autoclick_binding_.Bind(std::move(request));

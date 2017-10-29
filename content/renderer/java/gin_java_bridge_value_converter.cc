@@ -19,7 +19,7 @@
 namespace content {
 
 GinJavaBridgeValueConverter::GinJavaBridgeValueConverter()
-    : converter_(V8ValueConverter::create()) {
+    : converter_(V8ValueConverter::Create()) {
   converter_->SetDateAllowed(false);
   converter_->SetRegExpAllowed(false);
   converter_->SetFunctionAllowed(true);
@@ -85,8 +85,7 @@ class TypedArraySerializerImpl : public TypedArraySerializer {
                      *end = element + typed_array_->Length();
          element != end;
          ++element) {
-      const ListType list_value = *element;
-      out->Append(new base::Value(list_value));
+      out->Append(base::MakeUnique<base::Value>(ListType(*element)));
     }
   }
 

@@ -4,28 +4,34 @@
 
 #import "ios/chrome/browser/ui/settings/autofill_profile_edit_collection_view_controller.h"
 
-#import "base/ios/weak_nsobject.h"
 #include "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/payments/payments_service_url.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "ios/chrome/browser/application_context.h"
+#import "ios/chrome/browser/ui/autofill/autofill_ui_type.h"
+#import "ios/chrome/browser/ui/autofill/autofill_ui_type_util.h"
+#import "ios/chrome/browser/ui/autofill/cells/autofill_edit_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 #import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
 #include "ios/chrome/browser/ui/commands/ios_command_ids.h"
 #import "ios/chrome/browser/ui/commands/open_url_command.h"
-#import "ios/chrome/browser/ui/settings/cells/autofill_edit_item.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 NSString* const kAutofillProfileEditCollectionViewId =
     @"kAutofillProfileEditCollectionViewId";
 
 namespace {
+using ::AutofillTypeFromAutofillUIType;
+using ::AutofillUITypeFromAutofillType;
 
 typedef NS_ENUM(NSInteger, SectionIdentifier) {
   SectionIdentifierFields = kSectionIdentifierEnumZero,
@@ -57,7 +63,7 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
     {autofill::ADDRESS_HOME_STATE, IDS_IOS_AUTOFILL_STATE, UIReturnKeyNext,
      UIKeyboardTypeDefault, UITextAutocapitalizationTypeSentences},
     {autofill::ADDRESS_HOME_ZIP, IDS_IOS_AUTOFILL_ZIP, UIReturnKeyNext,
-     UIKeyboardTypeNumberPad, UITextAutocapitalizationTypeSentences},
+     UIKeyboardTypeDefault, UITextAutocapitalizationTypeAllCharacters},
     {autofill::ADDRESS_HOME_COUNTRY, IDS_IOS_AUTOFILL_COUNTRY, UIReturnKeyNext,
      UIKeyboardTypeDefault, UITextAutocapitalizationTypeSentences},
     {autofill::PHONE_HOME_WHOLE_NUMBER, IDS_IOS_AUTOFILL_PHONE, UIReturnKeyNext,
@@ -88,7 +94,9 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
             personalDataManager:(autofill::PersonalDataManager*)dataManager {
   DCHECK(dataManager);
 
-  self = [super initWithStyle:CollectionViewControllerStyleAppBar];
+  UICollectionViewLayout* layout = [[MDCCollectionViewFlowLayout alloc] init];
+  self =
+      [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
   if (self) {
     _personalDataManager = dataManager;
     _autofillProfile = profile;
@@ -105,8 +113,7 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
 + (instancetype)controllerWithProfile:(const autofill::AutofillProfile&)profile
                   personalDataManager:
                       (autofill::PersonalDataManager*)dataManager {
-  return [[[self alloc] initWithProfile:profile personalDataManager:dataManager]
-      autorelease];
+  return [[self alloc] initWithProfile:profile personalDataManager:dataManager];
 }
 
 #pragma mark - SettingsRootCollectionViewController
@@ -116,8 +123,8 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
   if (_autofillProfile.record_type() ==
       autofill::AutofillProfile::SERVER_PROFILE) {
     GURL paymentsURL = autofill::payments::GetManageAddressesUrl(0);
-    base::scoped_nsobject<OpenUrlCommand> command(
-        [[OpenUrlCommand alloc] initWithURLFromChrome:paymentsURL]);
+    OpenUrlCommand* command =
+        [[OpenUrlCommand alloc] initWithURLFromChrome:paymentsURL];
     [command setTag:IDC_CLOSE_SETTINGS_AND_OPEN_URL];
     [self chromeExecuteCommand:command];
 
@@ -143,8 +150,9 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
           [NSIndexPath indexPathForItem:itemIndex inSection:section];
       AutofillEditItem* item = base::mac::ObjCCastStrict<AutofillEditItem>(
           [model itemAtIndexPath:path]);
-      autofill::ServerFieldType serverFieldType = item.autofillType;
-      if (serverFieldType == autofill::ADDRESS_HOME_COUNTRY) {
+      autofill::ServerFieldType serverFieldType =
+          AutofillTypeFromAutofillUIType(item.autofillUIType);
+      if (item.autofillUIType == AutofillUITypeProfileHomeAddressCountry) {
         _autofillProfile.SetInfo(
             autofill::AutofillType(serverFieldType),
             base::SysNSStringToUTF16(item.textFieldValue),
@@ -163,8 +171,7 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
   // Update the cells.
   [self reconfigureCellsForItems:
             [self.collectionViewModel
-                itemsInSectionWithIdentifier:SectionIdentifierFields]
-         inSectionWithIdentifier:SectionIdentifierFields];
+                itemsInSectionWithIdentifier:SectionIdentifierFields]];
 }
 
 - (void)loadModel {
@@ -176,12 +183,15 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
   for (size_t i = 0; i < arraysize(kFieldsToDisplay); ++i) {
     const AutofillFieldDisplayInfo& field = kFieldsToDisplay[i];
     AutofillEditItem* item =
-        [[[AutofillEditItem alloc] initWithType:ItemTypeField] autorelease];
+        [[AutofillEditItem alloc] initWithType:ItemTypeField];
     item.textFieldName = l10n_util::GetNSString(field.displayStringID);
     item.textFieldValue = base::SysUTF16ToNSString(_autofillProfile.GetInfo(
         autofill::AutofillType(field.autofillType), locale));
-    item.autofillType = field.autofillType;
+    item.autofillUIType = AutofillUITypeFromAutofillType(field.autofillType);
     item.textFieldEnabled = self.editor.editing;
+    item.autoCapitalizationType = field.autoCapitalizationType;
+    item.returnKeyType = field.returnKeyType;
+    item.keyboardType = field.keyboardType;
     [model addItem:item toSectionWithIdentifier:SectionIdentifierFields];
   }
 }
@@ -210,13 +220,7 @@ static const AutofillFieldDisplayInfo kFieldsToDisplay[] = {
 
   AutofillEditCell* textFieldCell =
       base::mac::ObjCCastStrict<AutofillEditCell>(cell);
-  NSUInteger index =
-      [self.collectionViewModel indexInItemTypeForIndexPath:indexPath];
-  const AutofillFieldDisplayInfo& field = kFieldsToDisplay[index];
   textFieldCell.accessibilityIdentifier = textFieldCell.textLabel.text;
-  textFieldCell.textField.autocapitalizationType = field.autoCapitalizationType;
-  textFieldCell.textField.returnKeyType = field.returnKeyType;
-  textFieldCell.textField.keyboardType = field.keyboardType;
   textFieldCell.textField.delegate = self;
   return textFieldCell;
 }

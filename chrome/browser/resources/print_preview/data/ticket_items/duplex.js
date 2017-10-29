@@ -17,11 +17,9 @@ cr.define('print_preview.ticket_items', function() {
    */
   function Duplex(appState, destinationStore) {
     print_preview.ticket_items.TicketItem.call(
-        this,
-        appState,
-        print_preview.AppState.Field.IS_DUPLEX_ENABLED,
+        this, appState, print_preview.AppStateField.IS_DUPLEX_ENABLED,
         destinationStore);
-  };
+  }
 
   Duplex.prototype = {
     __proto__: print_preview.ticket_items.TicketItem.prototype,
@@ -67,16 +65,12 @@ cr.define('print_preview.ticket_items', function() {
      */
     getDuplexCapability_: function() {
       var dest = this.getSelectedDestInternal();
-      return (dest &&
-              dest.capabilities &&
-              dest.capabilities.printer &&
+      return (dest && dest.capabilities && dest.capabilities.printer &&
               dest.capabilities.printer.duplex) ||
-             null;
+          null;
     }
   };
 
   // Export
-  return {
-    Duplex: Duplex
-  };
+  return {Duplex: Duplex};
 });

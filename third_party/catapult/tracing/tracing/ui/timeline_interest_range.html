@@ -5,7 +5,7 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<link rel="import" href="/tracing/base/range.html">
+<link rel="import" href="/tracing/base/math/range.html">
 
 <script>
 'use strict';
@@ -27,7 +27,7 @@ tr.exportTo('tr.ui', function() {
   function TimelineInterestRange(vp) {
     this.viewport_ = vp;
 
-    this.range_ = new tr.b.Range();
+    this.range_ = new tr.b.math.Range();
 
     this.leftSelected_ = false;
     this.rightSelected_ = false;
@@ -41,7 +41,7 @@ tr.exportTo('tr.ui', function() {
       return this.range_.isEmpty;
     },
 
-    reset: function() {
+    reset() {
       this.range_.reset();
       this.leftSelected_ = false;
       this.rightSelected_ = false;
@@ -68,13 +68,13 @@ tr.exportTo('tr.ui', function() {
       this.viewport_.dispatchChangeEvent();
     },
 
-    set: function(range) {
+    set(range) {
       this.range_.reset();
       this.range_.addRange(range);
       this.viewport_.dispatchChangeEvent();
     },
 
-    setMinAndMax: function(min, max) {
+    setMinAndMax(min, max) {
       this.range_.min = min;
       this.range_.max = max;
       this.viewport_.dispatchChangeEvent();
@@ -84,8 +84,8 @@ tr.exportTo('tr.ui', function() {
       return this.range_.range;
     },
 
-    asRangeObject: function() {
-      var range = new tr.b.Range();
+    asRangeObject() {
+      const range = new tr.b.math.Range();
       range.addRange(this.range_);
       return range;
     },
@@ -95,8 +95,8 @@ tr.exportTo('tr.ui', function() {
     },
 
     set leftSelected(leftSelected) {
-      if (this.leftSelected_ === leftSelected)
-        return;
+      if (this.leftSelected_ === leftSelected) return;
+
       this.leftSelected_ = leftSelected;
       this.viewport_.dispatchChangeEvent();
     },
@@ -106,8 +106,8 @@ tr.exportTo('tr.ui', function() {
     },
 
     set rightSelected(rightSelected) {
-      if (this.rightSelected_ === rightSelected)
-        return;
+      if (this.rightSelected_ === rightSelected) return;
+
       this.rightSelected_ = rightSelected;
       this.viewport_.dispatchChangeEvent();
     },
@@ -130,16 +130,16 @@ tr.exportTo('tr.ui', function() {
       this.viewport_.dispatchChangeEvent();
     },
 
-    draw: function(ctx, viewLWorld, viewRWorld) {
-      if (this.range_.isEmpty)
-        return;
-      var dt = this.viewport_.currentDisplayTransform;
+    draw(ctx, viewLWorld, viewRWorld) {
+      if (this.range_.isEmpty) return;
 
-      var markerLWorld = this.min;
-      var markerRWorld = this.max;
+      const dt = this.viewport_.currentDisplayTransform;
 
-      var markerLView = Math.round(dt.xWorldToView(markerLWorld));
-      var markerRView = Math.round(dt.xWorldToView(markerRWorld));
+      const markerLWorld = this.min;
+      const markerRWorld = this.max;
+
+      const markerLView = Math.round(dt.xWorldToView(markerLWorld));
+      const markerRView = Math.round(dt.xWorldToView(markerRWorld));
 
       ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
       if (markerLWorld > viewLWorld) {
@@ -152,7 +152,7 @@ tr.exportTo('tr.ui', function() {
             dt.xWorldToView(viewRWorld), ctx.canvas.height);
       }
 
-      var pixelRatio = window.devicePixelRatio || 1;
+      const pixelRatio = window.devicePixelRatio || 1;
       ctx.lineWidth = Math.round(pixelRatio);
       if (this.range_.range > 0) {
         this.drawLine_(ctx, viewLWorld, viewRWorld,
@@ -167,12 +167,11 @@ tr.exportTo('tr.ui', function() {
       ctx.lineWidth = 1;
     },
 
-    drawLine_: function(ctx, viewLWorld, viewRWorld, height, ts, selected) {
-      if (ts < viewLWorld || ts >= viewRWorld)
-        return;
+    drawLine_(ctx, viewLWorld, viewRWorld, height, ts, selected) {
+      if (ts < viewLWorld || ts >= viewRWorld) return;
 
-      var dt = this.viewport_.currentDisplayTransform;
-      var viewX = Math.round(dt.xWorldToView(ts));
+      const dt = this.viewport_.currentDisplayTransform;
+      const viewX = Math.round(dt.xWorldToView(ts));
 
       // Apply subpixel translate to get crisp lines.
       // http://www.mobtowers.com/html5-canvas-crisp-lines-every-time/
@@ -181,16 +180,17 @@ tr.exportTo('tr.ui', function() {
 
       ctx.beginPath();
       tr.ui.b.drawLine(ctx, viewX, 0, viewX, height);
-      if (selected)
+      if (selected) {
         ctx.strokeStyle = 'rgb(255, 0, 0)';
-      else
+      } else {
         ctx.strokeStyle = 'rgb(0, 0, 0)';
+      }
       ctx.stroke();
 
       ctx.restore();
     },
 
-    drawIndicators: function(ctx, viewLWorld, viewRWorld) {
+    drawIndicators(ctx, viewLWorld, viewRWorld) {
       if (this.leftSnapIndicator_) {
         this.drawIndicator_(ctx, viewLWorld, viewRWorld,
             this.range_.min,
@@ -205,26 +205,27 @@ tr.exportTo('tr.ui', function() {
       }
     },
 
-    drawIndicator_: function(ctx, viewLWorld, viewRWorld,
+    drawIndicator_(ctx, viewLWorld, viewRWorld,
         xWorld, si, selected) {
-      var dt = this.viewport_.currentDisplayTransform;
+      const dt = this.viewport_.currentDisplayTransform;
 
-      var viewX = Math.round(dt.xWorldToView(xWorld));
+      const viewX = Math.round(dt.xWorldToView(xWorld));
 
       // Apply subpixel translate to get crisp lines.
       // http://www.mobtowers.com/html5-canvas-crisp-lines-every-time/
       ctx.save();
       ctx.translate((Math.round(ctx.lineWidth) % 2) / 2, 0);
 
-      var pixelRatio = window.devicePixelRatio || 1;
-      var viewY = si.y * devicePixelRatio;
-      var viewHeight = si.height * devicePixelRatio;
-      var arrowSize = 4 * pixelRatio;
+      const pixelRatio = window.devicePixelRatio || 1;
+      const viewY = si.y * devicePixelRatio;
+      const viewHeight = si.height * devicePixelRatio;
+      const arrowSize = 4 * pixelRatio;
 
-      if (selected)
+      if (selected) {
         ctx.fillStyle = 'rgb(255, 0, 0)';
-      else
+      } else {
         ctx.fillStyle = 'rgb(0, 0, 0)';
+      }
       tr.ui.b.drawTriangle(ctx,
           viewX - arrowSize * 0.75, viewY,
           viewX + arrowSize * 0.75, viewY,

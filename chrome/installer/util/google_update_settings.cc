@@ -17,11 +17,13 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task_scheduler/lazy_task_runner.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/win/registry.h"
 #include "base/win/win_util.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/install_static/install_modes.h"
 #include "chrome/install_static/install_util.h"
 #include "chrome/installer/util/app_registration_data.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -55,6 +57,11 @@ GoogleUpdateSettings::kDefaultUpdatePolicy =
 #endif
 
 namespace {
+
+base::LazySequencedTaskRunner g_collect_stats_consent_task_runner =
+    LAZY_SEQUENCED_TASK_RUNNER_INITIALIZER(
+        base::TaskTraits(base::TaskPriority::USER_VISIBLE,
+                         base::TaskShutdownBehavior::BLOCK_SHUTDOWN));
 
 bool ReadGoogleUpdateStrKey(const wchar_t* const name, base::string16* value) {
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
@@ -192,6 +199,13 @@ bool GetUpdatePolicyFromDword(
 // TODO(grt): Remove this now that it has no added value.
 bool GoogleUpdateSettings::IsSystemInstall() {
   return !InstallUtil::IsPerUserInstall();
+}
+
+base::SequencedTaskRunner*
+GoogleUpdateSettings::CollectStatsConsentTaskRunner() {
+  // TODO(fdoray): Use LazySequencedTaskRunner::GetRaw() here instead of
+  // .Get().get() when it's added to the API, http://crbug.com/730170.
+  return g_collect_stats_consent_task_runner.Get().get();
 }
 
 bool GoogleUpdateSettings::GetCollectStatsConsent() {
@@ -851,27 +865,25 @@ bool GoogleUpdateSettings::SetExperimentLabels(
     bool system_install,
     const base::string16& experiment_labels) {
   HKEY reg_root = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-
   // Use the browser distribution and install level to write to the correct
   // client state/app guid key.
   bool success = false;
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  if (dist->ShouldSetExperimentLabels()) {
-    base::string16 client_state_path(
-        system_install ? dist->GetStateMediumKey() : dist->GetStateKey());
-    RegKey client_state(
-        reg_root, client_state_path.c_str(), KEY_SET_VALUE | KEY_WOW64_32KEY);
-    // It is possible that the registry keys do not yet exist or have not yet
-    // been ACLed by Google Update to be user writable.
-    if (!client_state.Valid())
-      return false;
-    if (experiment_labels.empty()) {
-      success = client_state.DeleteValue(google_update::kExperimentLabels)
-          == ERROR_SUCCESS;
-    } else {
-      success = client_state.WriteValue(google_update::kExperimentLabels,
-          experiment_labels.c_str()) == ERROR_SUCCESS;
-    }
+  base::string16 client_state_path(system_install ? dist->GetStateMediumKey()
+                                                  : dist->GetStateKey());
+  RegKey client_state(reg_root, client_state_path.c_str(),
+                      KEY_SET_VALUE | KEY_WOW64_32KEY);
+  // It is possible that the registry keys do not yet exist or have not yet
+  // been ACLed by Google Update to be user writable.
+  if (!client_state.Valid())
+    return false;
+  if (experiment_labels.empty()) {
+    success = client_state.DeleteValue(google_update::kExperimentLabels) ==
+              ERROR_SUCCESS;
+  } else {
+    success =
+        client_state.WriteValue(google_update::kExperimentLabels,
+                                experiment_labels.c_str()) == ERROR_SUCCESS;
   }
 
   return success;
@@ -881,13 +893,7 @@ bool GoogleUpdateSettings::ReadExperimentLabels(
     bool system_install,
     base::string16* experiment_labels) {
   HKEY reg_root = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-
-  // If this distribution does not set the experiment labels, don't bother
-  // reading.
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  if (!dist->ShouldSetExperimentLabels())
-    return false;
-
   base::string16 client_state_path(
       system_install ? dist->GetStateMediumKey() : dist->GetStateKey());
 

@@ -6,6 +6,7 @@
 
 #include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "core/fpdfapi/parser/cpdf_document.h"
@@ -20,13 +21,14 @@
 #include "public/fpdf_formfill.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
+#include "xfa/fxfa/cxfa_deffontmgr.h"
 #include "xfa/fxfa/cxfa_eventparam.h"
-#include "xfa/fxfa/xfa_ffapp.h"
-#include "xfa/fxfa/xfa_ffdoc.h"
-#include "xfa/fxfa/xfa_ffdocview.h"
-#include "xfa/fxfa/xfa_ffpageview.h"
-#include "xfa/fxfa/xfa_ffwidgethandler.h"
-#include "xfa/fxfa/xfa_fontmgr.h"
+#include "xfa/fxfa/cxfa_ffapp.h"
+#include "xfa/fxfa/cxfa_ffdoc.h"
+#include "xfa/fxfa/cxfa_ffdocview.h"
+#include "xfa/fxfa/cxfa_ffpageview.h"
+#include "xfa/fxfa/cxfa_ffwidgethandler.h"
+#include "xfa/fxfa/cxfa_fontmgr.h"
 
 #ifndef _WIN32
 extern void SetLastError(int err);
@@ -34,7 +36,7 @@ extern int GetLastError();
 #endif
 
 CPDFXFA_Context::CPDFXFA_Context(std::unique_ptr<CPDF_Document> pPDFDoc)
-    : m_iDocType(DOCTYPE_PDF),
+    : m_iDocType(XFA_DocType::PDF),
       m_pPDFDoc(std::move(pPDFDoc)),
       m_pFormFillEnv(nullptr),
       m_pXFADocView(nullptr),
@@ -56,7 +58,7 @@ CPDFXFA_Context::~CPDFXFA_Context() {
     // Once we're deleted the FormFillEnvironment will point at a bad underlying
     // doc so we need to reset it ...
     m_pFormFillEnv->ResetXFADocument();
-    m_pFormFillEnv = nullptr;
+    m_pFormFillEnv.Reset();
   }
 
   m_nLoadStatus = FXFA_LOADSTATUS_CLOSED;
@@ -65,9 +67,10 @@ CPDFXFA_Context::~CPDFXFA_Context() {
 void CPDFXFA_Context::CloseXFADoc() {
   if (!m_pXFADoc)
     return;
+
+  m_pXFADocView = nullptr;
   m_pXFADoc->CloseDoc();
   m_pXFADoc.reset();
-  m_pXFADocView = nullptr;
 }
 
 void CPDFXFA_Context::SetFormFillEnv(
@@ -78,7 +81,7 @@ void CPDFXFA_Context::SetFormFillEnv(
   if (m_pXFADoc && m_pXFADoc->GetXFADoc())
     m_pXFADoc->GetXFADoc()->ClearLayoutData();
 
-  m_pFormFillEnv = pFormFillEnv;
+  m_pFormFillEnv.Reset(pFormFillEnv);
 }
 
 bool CPDFXFA_Context::LoadXFADoc() {
@@ -105,7 +108,7 @@ bool CPDFXFA_Context::LoadXFADoc() {
   }
 
   m_pXFADoc->StartLoad();
-  int iStatus = m_pXFADoc->DoLoad(nullptr);
+  int iStatus = m_pXFADoc->DoLoad();
   if (iStatus != XFA_PARSESTATUS_Done) {
     CloseXFADoc();
     SetLastError(FPDF_ERR_XFALOAD);
@@ -114,19 +117,19 @@ bool CPDFXFA_Context::LoadXFADoc() {
   m_pXFADoc->StopLoad();
   m_pXFADoc->GetXFADoc()->InitScriptContext(GetJSERuntime());
 
-  if (m_pXFADoc->GetDocType() == XFA_DOCTYPE_Dynamic)
-    m_iDocType = DOCTYPE_DYNAMIC_XFA;
+  if (m_pXFADoc->GetDocType() == XFA_DocType::Dynamic)
+    m_iDocType = XFA_DocType::Dynamic;
   else
-    m_iDocType = DOCTYPE_STATIC_XFA;
+    m_iDocType = XFA_DocType::Static;
 
-  m_pXFADocView = m_pXFADoc->CreateDocView(XFA_DOCVIEW_View);
+  m_pXFADocView = m_pXFADoc->CreateDocView();
   if (m_pXFADocView->StartLayout() < 0) {
     CloseXFADoc();
     SetLastError(FPDF_ERR_XFALAYOUT);
     return false;
   }
 
-  m_pXFADocView->DoLayout(nullptr);
+  m_pXFADocView->DoLayout();
   m_pXFADocView->StopLayout();
   m_nLoadStatus = FXFA_LOADSTATUS_LOADED;
 
@@ -138,11 +141,11 @@ int CPDFXFA_Context::GetPageCount() const {
     return 0;
 
   switch (m_iDocType) {
-    case DOCTYPE_PDF:
-    case DOCTYPE_STATIC_XFA:
+    case XFA_DocType::PDF:
+    case XFA_DocType::Static:
       if (m_pPDFDoc)
         return m_pPDFDoc->GetPageCount();
-    case DOCTYPE_DYNAMIC_XFA:
+    case XFA_DocType::Dynamic:
       if (m_pXFADoc)
         return m_pXFADocView->CountPageViews();
     default:
@@ -150,46 +153,40 @@ int CPDFXFA_Context::GetPageCount() const {
   }
 }
 
-CPDFXFA_Page* CPDFXFA_Context::GetXFAPage(int page_index) {
+CFX_RetainPtr<CPDFXFA_Page> CPDFXFA_Context::GetXFAPage(int page_index) {
   if (page_index < 0)
     return nullptr;
 
-  CPDFXFA_Page* pPage = nullptr;
-  int nCount = pdfium::CollectionSize<int>(m_XFAPageList);
-  if (nCount > 0 && page_index < nCount) {
-    pPage = m_XFAPageList[page_index];
-    if (pPage) {
-      pPage->Retain();
-      return pPage;
-    }
+  if (pdfium::IndexInBounds(m_XFAPageList, page_index)) {
+    if (m_XFAPageList[page_index])
+      return m_XFAPageList[page_index];
   } else {
     m_nPageCount = GetPageCount();
     m_XFAPageList.resize(m_nPageCount);
   }
 
-  pPage = new CPDFXFA_Page(this, page_index);
-  if (!pPage->LoadPage()) {
-    pPage->Release();
+  auto pPage = pdfium::MakeRetain<CPDFXFA_Page>(this, page_index);
+  if (!pPage->LoadPage())
     return nullptr;
-  }
-  if (page_index >= 0 &&
-      page_index < pdfium::CollectionSize<int>(m_XFAPageList)) {
+
+  if (pdfium::IndexInBounds(m_XFAPageList, page_index))
     m_XFAPageList[page_index] = pPage;
-  }
+
   return pPage;
 }
 
-CPDFXFA_Page* CPDFXFA_Context::GetXFAPage(CXFA_FFPageView* pPage) const {
+CFX_RetainPtr<CPDFXFA_Page> CPDFXFA_Context::GetXFAPage(
+    CXFA_FFPageView* pPage) const {
   if (!pPage)
     return nullptr;
 
   if (!m_pXFADoc)
     return nullptr;
 
-  if (m_iDocType != DOCTYPE_DYNAMIC_XFA)
+  if (m_iDocType != XFA_DocType::Dynamic)
     return nullptr;
 
-  for (CPDFXFA_Page* pTempPage : m_XFAPageList) {
+  for (auto& pTempPage : m_XFAPageList) {
     if (pTempPage && pTempPage->GetXFAPageView() == pPage)
       return pTempPage;
   }
@@ -203,20 +200,8 @@ void CPDFXFA_Context::DeletePage(int page_index) {
   if (m_pPDFDoc)
     m_pPDFDoc->DeletePage(page_index);
 
-  if (page_index < 0 ||
-      page_index >= pdfium::CollectionSize<int>(m_XFAPageList)) {
-    return;
-  }
-  if (CPDFXFA_Page* pPage = m_XFAPageList[page_index])
-    pPage->Release();
-}
-
-void CPDFXFA_Context::RemovePage(CPDFXFA_Page* page) {
-  int page_index = page->GetPageIndex();
-  if (page_index >= 0 &&
-      page_index < pdfium::CollectionSize<int>(m_XFAPageList)) {
-    m_XFAPageList[page_index] = nullptr;
-  }
+  if (pdfium::IndexInBounds(m_XFAPageList, page_index))
+    m_XFAPageList[page_index].Reset();
 }
 
 void CPDFXFA_Context::ClearChangeMark() {
@@ -311,25 +296,22 @@ CFX_WideString CPDFXFA_Context::Response(const CFX_WideString& wsQuestion,
                                          const CFX_WideString& wsTitle,
                                          const CFX_WideString& wsDefaultAnswer,
                                          bool bMark) {
-  CFX_WideString wsAnswer;
   if (!m_pFormFillEnv)
-    return wsAnswer;
+    return CFX_WideString();
 
   int nLength = 2048;
-  char* pBuff = new char[nLength];
+  std::vector<uint8_t> pBuff(nLength);
   nLength = m_pFormFillEnv->JS_appResponse(wsQuestion.c_str(), wsTitle.c_str(),
                                            wsDefaultAnswer.c_str(), nullptr,
-                                           bMark, pBuff, nLength);
-  if (nLength > 0) {
-    nLength = nLength > 2046 ? 2046 : nLength;
-    pBuff[nLength] = 0;
-    pBuff[nLength + 1] = 0;
-    wsAnswer = CFX_WideString::FromUTF16LE(
-        reinterpret_cast<const unsigned short*>(pBuff),
-        nLength / sizeof(unsigned short));
-  }
-  delete[] pBuff;
-  return wsAnswer;
+                                           bMark, pBuff.data(), nLength);
+  if (nLength <= 0)
+    return CFX_WideString();
+
+  nLength = std::min(2046, nLength);
+  pBuff[nLength] = 0;
+  pBuff[nLength + 1] = 0;
+  return CFX_WideString::FromUTF16LE(reinterpret_cast<uint16_t*>(pBuff.data()),
+                                     nLength / sizeof(uint16_t));
 }
 
 CFX_RetainPtr<IFX_SeekableReadStream> CPDFXFA_Context::DownloadURL(
@@ -364,6 +346,6 @@ bool CPDFXFA_Context::PutRequestURL(const CFX_WideString& wsURL,
 IFWL_AdapterTimerMgr* CPDFXFA_Context::GetTimerMgr() {
   CXFA_FWLAdapterTimerMgr* pAdapter = nullptr;
   if (m_pFormFillEnv)
-    pAdapter = new CXFA_FWLAdapterTimerMgr(m_pFormFillEnv);
+    pAdapter = new CXFA_FWLAdapterTimerMgr(m_pFormFillEnv.Get());
   return pAdapter;
 }

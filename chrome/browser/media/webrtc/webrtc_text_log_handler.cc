@@ -15,6 +15,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/time/time.h"
 #include "chrome/browser/media/webrtc/webrtc_log_uploader.h"
 #include "chrome/common/channel_info.h"
@@ -77,10 +78,9 @@ std::string IPAddressToSensitiveString(const net::IPAddress& address) {
     case net::IPAddress::kIPv6AddressSize: {
       // TODO(grunell): Create a string of format "1:2:3:x:x:x:x:x" to clarify
       // that the end has been stripped out.
-      std::vector<uint8_t> bytes = address.bytes();
-      std::fill(bytes.begin() + 6, bytes.end(), 0);
-      net::IPAddress stripped_address(bytes);
-      sensitive_address = stripped_address.ToString();
+      net::IPAddressBytes stripped = address.bytes();
+      std::fill(stripped.begin() + 6, stripped.end(), 0);
+      sensitive_address = net::IPAddress(stripped).ToString();
       break;
     }
     default: { break; }
@@ -197,10 +197,10 @@ bool WebRtcTextLogHandler::StartLogging(WebRtcLogUploader* log_uploader,
   if (!meta_data_)
     meta_data_.reset(new MetaDataMap());
 
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&WebRtcTextLogHandler::LogInitialInfoOnFileThread, this,
-                 callback));
+  base::PostTaskWithTraits(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::BindOnce(&WebRtcTextLogHandler::LogInitialInfoOnFileThread, this,
+                     callback));
   return true;
 }
 
@@ -241,8 +241,8 @@ bool WebRtcTextLogHandler::StopLogging(const GenericDoneCallback& callback) {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&WebRtcTextLogHandler::DisableBrowserProcessLoggingOnUIThread,
-                 this));
+      base::BindOnce(
+          &WebRtcTextLogHandler::DisableBrowserProcessLoggingOnUIThread, this));
   return true;
 }
 
@@ -268,7 +268,7 @@ void WebRtcTextLogHandler::ChannelClosing() {
     logging_state_ = LoggingState::CHANNEL_CLOSING;
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(
+        base::BindOnce(
             &WebRtcTextLogHandler::DisableBrowserProcessLoggingOnUIThread,
             this));
   } else {
@@ -343,7 +343,7 @@ void WebRtcTextLogHandler::FireGenericDoneCallback(
   if (error_message.empty()) {
     DCHECK(success);
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::Bind(callback, success, error_message));
+                            base::BindOnce(callback, success, error_message));
     return;
   }
 
@@ -374,21 +374,19 @@ void WebRtcTextLogHandler::FireGenericDoneCallback(
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(callback, success, error_message_with_state));
+      base::BindOnce(callback, success, error_message_with_state));
 }
 
 void WebRtcTextLogHandler::LogInitialInfoOnFileThread(
     const GenericDoneCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
-
   net::NetworkInterfaceList network_list;
   net::GetNetworkList(&network_list,
                       net::EXCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES);
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&WebRtcTextLogHandler::LogInitialInfoOnIOThread, this,
-                 network_list, callback));
+      base::BindOnce(&WebRtcTextLogHandler::LogInitialInfoOnIOThread, this,
+                     network_list, callback));
 }
 
 void WebRtcTextLogHandler::LogInitialInfoOnIOThread(
@@ -408,8 +406,8 @@ void WebRtcTextLogHandler::LogInitialInfoOnIOThread(
   // that IPC message.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&WebRtcTextLogHandler::EnableBrowserProcessLoggingOnUIThread,
-                 this));
+      base::BindOnce(
+          &WebRtcTextLogHandler::EnableBrowserProcessLoggingOnUIThread, this));
 
   // Log start time (current time). We don't use base/i18n/time_formatting.h
   // here because we don't want the format of the current locale.

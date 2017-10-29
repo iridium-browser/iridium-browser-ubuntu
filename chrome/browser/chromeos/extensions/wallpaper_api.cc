@@ -13,7 +13,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/stringprintf.h"
-#include "base/threading/worker_pool.h"
+#include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
@@ -26,7 +26,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
-#include "components/wallpaper/wallpaper_layout.h"
+#include "components/wallpaper/wallpaper_info.h"
 #include "extensions/browser/event_router.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
@@ -34,7 +34,7 @@
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
 
-using base::BinaryValue;
+using base::Value;
 using content::BrowserThread;
 
 typedef base::Callback<void(bool success, const std::string&)> FetchCallback;
@@ -92,7 +92,7 @@ class WallpaperFetcher : public net::URLFetcherDelegate {
   FetchCallback callback_;
 };
 
-base::LazyInstance<WallpaperFetcher> g_wallpaper_fetcher =
+base::LazyInstance<WallpaperFetcher>::DestructorAtExit g_wallpaper_fetcher =
     LAZY_INSTANCE_INITIALIZER;
 
 // Gets the |User| for a given |BrowserContext|. The function will only return
@@ -169,7 +169,7 @@ void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
       user_manager::UserManager::Get()->GetActiveUser()->GetAccountId();
   wallpaper_manager->SetCustomWallpaper(
       account_id_, wallpaper_files_id_, params_->details.filename, layout,
-      user_manager::User::CUSTOMIZED, image, update_wallpaper);
+      wallpaper::CUSTOMIZED, image, update_wallpaper);
   unsafe_wallpaper_decoder_ = NULL;
 
   // Save current extension name. It will be displayed in the component
@@ -197,8 +197,8 @@ void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
   // request thumbnail in the javascript callback.
   task_runner->PostTask(
       FROM_HERE,
-      base::Bind(&WallpaperSetWallpaperFunction::GenerateThumbnail, this,
-                 thumbnail_path, base::Passed(std::move(deep_copy))));
+      base::BindOnce(&WallpaperSetWallpaperFunction::GenerateThumbnail, this,
+                     thumbnail_path, std::move(deep_copy)));
 }
 
 void WallpaperSetWallpaperFunction::GenerateThumbnail(
@@ -219,22 +219,20 @@ void WallpaperSetWallpaperFunction::GenerateThumbnail(
       &thumbnail_data, NULL);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&WallpaperSetWallpaperFunction::ThumbnailGenerated, this,
-                 base::RetainedRef(original_data),
-                 base::RetainedRef(thumbnail_data)));
+      base::BindOnce(&WallpaperSetWallpaperFunction::ThumbnailGenerated, this,
+                     base::RetainedRef(original_data),
+                     base::RetainedRef(thumbnail_data)));
 }
 
 void WallpaperSetWallpaperFunction::ThumbnailGenerated(
     base::RefCountedBytes* original_data,
     base::RefCountedBytes* thumbnail_data) {
-  std::unique_ptr<BinaryValue> original_result =
-      BinaryValue::CreateWithCopiedBuffer(
-          reinterpret_cast<const char*>(original_data->front()),
-          original_data->size());
-  std::unique_ptr<BinaryValue> thumbnail_result =
-      BinaryValue::CreateWithCopiedBuffer(
-          reinterpret_cast<const char*>(thumbnail_data->front()),
-          thumbnail_data->size());
+  std::unique_ptr<Value> original_result = Value::CreateWithCopiedBuffer(
+      reinterpret_cast<const char*>(original_data->front()),
+      original_data->size());
+  std::unique_ptr<Value> thumbnail_result = Value::CreateWithCopiedBuffer(
+      reinterpret_cast<const char*>(thumbnail_data->front()),
+      thumbnail_data->size());
 
   if (params_->details.thumbnail) {
     SetResult(thumbnail_result->CreateDeepCopy());

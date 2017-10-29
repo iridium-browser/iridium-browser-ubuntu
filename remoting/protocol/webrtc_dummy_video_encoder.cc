@@ -20,10 +20,14 @@ namespace protocol {
 
 WebrtcDummyVideoEncoder::WebrtcDummyVideoEncoder(
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
-    base::WeakPtr<VideoChannelStateObserver> video_channel_state_observer)
+    base::WeakPtr<VideoChannelStateObserver> video_channel_state_observer,
+    webrtc::VideoCodecType type)
     : main_task_runner_(main_task_runner),
       state_(kUninitialized),
-      video_channel_state_observer_(video_channel_state_observer) {}
+      codec_type_(type),
+      video_channel_state_observer_(video_channel_state_observer) {
+  DCHECK(type == webrtc::kVideoCodecVP8 || type == webrtc::kVideoCodecVP9);
+}
 
 WebrtcDummyVideoEncoder::~WebrtcDummyVideoEncoder() {}
 
@@ -49,7 +53,6 @@ int32_t WebrtcDummyVideoEncoder::InitEncode(
 
 int32_t WebrtcDummyVideoEncoder::RegisterEncodeCompleteCallback(
     webrtc::EncodedImageCallback* callback) {
-  DCHECK(callback);
   base::AutoLock lock(lock_);
   encoded_callback_ = callback;
   return WEBRTC_VIDEO_CODEC_OK;
@@ -121,15 +124,37 @@ webrtc::EncodedImageCallback::Result WebrtcDummyVideoEncoder::SendEncodedFrame(
 
   webrtc::CodecSpecificInfo codec_specific_info;
   memset(&codec_specific_info, 0, sizeof(codec_specific_info));
-  codec_specific_info.codecType = webrtc::kVideoCodecVP8;
+  codec_specific_info.codecType = codec_type_;
+
+  if (codec_type_ == webrtc::kVideoCodecVP8) {
+    webrtc::CodecSpecificInfoVP8* vp8_info =
+        &codec_specific_info.codecSpecific.VP8;
+    vp8_info->simulcastIdx = 0;
+    vp8_info->temporalIdx = webrtc::kNoTemporalIdx;
+    vp8_info->tl0PicIdx = webrtc::kNoTl0PicIdx;
+    vp8_info->pictureId = webrtc::kNoPictureId;
+  } else if (codec_type_ == webrtc::kVideoCodecVP9) {
+    webrtc::CodecSpecificInfoVP9* vp9_info =
+        &codec_specific_info.codecSpecific.VP9;
+    vp9_info->inter_pic_predicted = !frame.key_frame;
+    vp9_info->ss_data_available = frame.key_frame;
+    vp9_info->spatial_layer_resolution_present = frame.key_frame;
+    if (frame.key_frame) {
+      vp9_info->width[0] = frame.size.width();
+      vp9_info->height[0] = frame.size.height();
+    }
+    vp9_info->num_spatial_layers = 1;
+    vp9_info->gof_idx = webrtc::kNoGofIdx;
+    vp9_info->temporal_idx = webrtc::kNoTemporalIdx;
+    vp9_info->spatial_idx = webrtc::kNoSpatialIdx;
+    vp9_info->tl0_pic_idx = webrtc::kNoTl0PicIdx;
+    vp9_info->picture_id = webrtc::kNoPictureId;
+  } else {
+    NOTREACHED();
+  }
 
   webrtc::RTPFragmentationHeader header;
   memset(&header, 0, sizeof(header));
-
-  codec_specific_info.codecSpecific.VP8.simulcastIdx = 0;
-  codec_specific_info.codecSpecific.VP8.temporalIdx = webrtc::kNoTemporalIdx;
-  codec_specific_info.codecSpecific.VP8.tl0PicIdx = webrtc::kNoTl0PicIdx;
-  codec_specific_info.codecSpecific.VP8.pictureId = webrtc::kNoPictureId;
 
   header.VerifyAndAllocateFragmentationHeader(1);
   header.fragmentationOffset[0] = 0;
@@ -137,6 +162,7 @@ webrtc::EncodedImageCallback::Result WebrtcDummyVideoEncoder::SendEncodedFrame(
   header.fragmentationPlType[0] = 0;
   header.fragmentationTimeDiff[0] = 0;
 
+  DCHECK(encoded_callback_);
   return encoded_callback_->OnEncodedImage(encoded_image, &codec_specific_info,
                                            &header);
 }
@@ -145,8 +171,8 @@ WebrtcDummyVideoEncoderFactory::WebrtcDummyVideoEncoderFactory()
     : main_task_runner_(base::ThreadTaskRunnerHandle::Get()) {
   // TODO(isheriff): These do not really affect anything internally
   // in webrtc.
-  codecs_.push_back(cricket::WebRtcVideoEncoderFactory::VideoCodec(
-      webrtc::kVideoCodecVP8, "VP8", 1280, 720, 30));
+  codecs_.push_back(cricket::VideoCodec("VP8"));
+  codecs_.push_back(cricket::VideoCodec("VP9"));
 }
 
 WebrtcDummyVideoEncoderFactory::~WebrtcDummyVideoEncoderFactory() {
@@ -154,17 +180,22 @@ WebrtcDummyVideoEncoderFactory::~WebrtcDummyVideoEncoderFactory() {
 }
 
 webrtc::VideoEncoder* WebrtcDummyVideoEncoderFactory::CreateVideoEncoder(
-    webrtc::VideoCodecType type) {
-  DCHECK_EQ(type, webrtc::kVideoCodecVP8);
+    const cricket::VideoCodec& codec) {
+  webrtc::VideoCodecType type = webrtc::PayloadNameToCodecType(codec.name)
+                                    .value_or(webrtc::kVideoCodecUnknown);
   WebrtcDummyVideoEncoder* encoder = new WebrtcDummyVideoEncoder(
-      main_task_runner_, video_channel_state_observer_);
+      main_task_runner_, video_channel_state_observer_, type);
   base::AutoLock lock(lock_);
   encoders_.push_back(base::WrapUnique(encoder));
+  if (encoder_created_callback_) {
+    main_task_runner_->PostTask(FROM_HERE,
+                                base::Bind(encoder_created_callback_, type));
+  }
   return encoder;
 }
 
-const std::vector<cricket::WebRtcVideoEncoderFactory::VideoCodec>&
-WebrtcDummyVideoEncoderFactory::codecs() const {
+const std::vector<cricket::VideoCodec>&
+WebrtcDummyVideoEncoderFactory::supported_codecs() const {
   return codecs_;
 }
 
@@ -202,6 +233,11 @@ WebrtcDummyVideoEncoderFactory::SendEncodedFrame(
         webrtc::EncodedImageCallback::Result::ERROR_SEND_FAILED);
   }
   return encoders_.front()->SendEncodedFrame(frame, capture_time);
+}
+
+void WebrtcDummyVideoEncoderFactory::RegisterEncoderSelectedCallback(
+    const base::Callback<void(webrtc::VideoCodecType)>& callback) {
+  encoder_created_callback_ = callback;
 }
 
 void WebrtcDummyVideoEncoderFactory::SetVideoChannelStateObserver(

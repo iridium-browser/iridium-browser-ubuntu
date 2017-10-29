@@ -15,7 +15,9 @@
 #import "chrome/browser/themes/theme_properties.h"
 #import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
+#import "chrome/browser/ui/cocoa/web_textfield_touch_bar_controller.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/grit/theme_resources.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -23,6 +25,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/cocoa/animation_utils.h"
+#import "ui/base/cocoa/touch_bar_forward_declarations.h"
 #include "ui/gfx/geometry/rect.h"
 
 using content::WebContents;
@@ -90,7 +93,7 @@ class FullscreenObserver : public WebContentsObserver {
   TabContentsController* delegate_;  // weak
 }
 
-- (void)updateBackgroundColor;
+- (void)updateBackgroundColorFromWindowTheme:(NSWindow*)window;
 @end
 
 @implementation TabContentsContainerView
@@ -102,7 +105,6 @@ class FullscreenObserver : public WebContentsObserver {
     base::scoped_nsobject<CALayer> layer([[CALayer alloc] init]);
     [self setLayer:layer];
     [self setWantsLayer:YES];
-    [self updateBackgroundColor];
   }
   return self;
 }
@@ -135,17 +137,27 @@ class FullscreenObserver : public WebContentsObserver {
 // Update the background layer's color whenever the view needs to repaint.
 - (void)setNeedsDisplayInRect:(NSRect)rect {
   [super setNeedsDisplayInRect:rect];
-  [self updateBackgroundColor];
+  [self updateBackgroundColorFromWindowTheme:[self window]];
 }
 
-- (void)updateBackgroundColor {
+- (void)updateBackgroundColorFromWindowTheme:(NSWindow*)window {
   // This view is sometimes flashed into visibility (e.g, when closing
   // windows or opening new tabs), so ensure that the flash be the theme
   // background color in those cases.
-  SkColor skBackgroundColor = SK_ColorWHITE;
-  const ThemeProvider* theme = [[self window] themeProvider];
-  if (theme)
-    skBackgroundColor = theme->GetColor(ThemeProperties::COLOR_NTP_BACKGROUND);
+  const ThemeProvider* theme = [window themeProvider];
+  ThemedWindowStyle windowStyle = [window themedWindowStyle];
+  if (!theme)
+    return;
+
+  // This logic and hard-coded color value are duplicated from the function
+  // NTPResourceCache::CreateNewTabIncognitoCSS. This logic should exist in only
+  // one location.
+  // https://crbug.com/719236
+  SkColor skBackgroundColor =
+      theme->GetColor(ThemeProperties::COLOR_NTP_BACKGROUND);
+  bool incognito = windowStyle & THEMED_INCOGNITO;
+  if (incognito && !theme->HasCustomImage(IDR_THEME_NTP_BACKGROUND))
+    skBackgroundColor = SkColorSetRGB(0x32, 0x32, 0x32);
 
   // If the page is in fullscreen tab capture mode, change the background color
   // to be a dark tint of the new tab page's background color.
@@ -162,6 +174,10 @@ class FullscreenObserver : public WebContentsObserver {
   base::ScopedCFTypeRef<CGColorRef> cgBackgroundColor(
       skia::CGColorCreateFromSkColor(skBackgroundColor));
   [[self layer] setBackgroundColor:cgBackgroundColor];
+}
+
+- (void)viewWillMoveToWindow:(NSWindow*)newWindow {
+  [self updateBackgroundColorFromWindowTheme:newWindow];
 }
 
 - (ViewID)viewID {
@@ -197,6 +213,8 @@ class FullscreenObserver : public WebContentsObserver {
     fullscreenObserver_.reset(new FullscreenObserver(self));
     [self changeWebContents:contents];
     isPopup_ = popup;
+    touchBarController_.reset([[WebTextfieldTouchBarController alloc]
+        initWithTabContentsController:self]);
   }
   return self;
 }
@@ -214,6 +232,13 @@ class FullscreenObserver : public WebContentsObserver {
       [[TabContentsContainerView alloc] initWithDelegate:self]);
   [view setAutoresizingMask:NSViewHeightSizable|NSViewWidthSizable];
   [self setView:view];
+}
+
+- (NSTouchBar*)makeTouchBar {
+  if (@available(macOS 10.12.2, *))
+    return [touchBarController_ makeTouchBar];
+
+  return nil;
 }
 
 - (void)ensureContentsVisibleInSuperview:(NSView*)superview {
@@ -251,17 +276,6 @@ class FullscreenObserver : public WebContentsObserver {
                                           NSViewHeightSizable];
 
   [contentsContainer setNeedsDisplay:YES];
-
-  // Push the background color down to the RenderWidgetHostView, so that if
-  // there is a flash between contents appearing, it will be the theme's color,
-  // not white.
-  SkColor skBackgroundColor = SK_ColorWHITE;
-  const ThemeProvider* theme = [[[self view] window] themeProvider];
-  if (theme)
-    skBackgroundColor = theme->GetColor(ThemeProperties::COLOR_NTP_BACKGROUND);
-  content::RenderWidgetHostView* rwhv = contents_->GetRenderWidgetHostView();
-  if (rwhv)
-    rwhv->SetBackgroundColor(skBackgroundColor);
 }
 
 - (void)updateFullscreenWidgetFrame {
@@ -393,6 +407,10 @@ class FullscreenObserver : public WebContentsObserver {
 
 - (BOOL)isPopup {
   return isPopup_;
+}
+
+- (WebTextfieldTouchBarController*)webTextfieldTouchBarController {
+  return touchBarController_.get();
 }
 
 @end

@@ -32,6 +32,10 @@ namespace media {
 
 const int64_t kStartPlayingTimeInMs = 100;
 
+ACTION_P2(SetBool, var, value) {
+  *var = value;
+}
+
 ACTION_P2(SetBufferingState, renderer_client, buffering_state) {
   (*renderer_client)->OnBufferingStateChange(buffering_state);
 }
@@ -132,6 +136,25 @@ class RendererImplTest : public ::testing::Test {
                                base::Bind(&CallbackHelper::OnInitialize,
                                           base::Unretained(&callbacks_)));
     base::RunLoop().RunUntilIdle();
+
+    if (start_status == PIPELINE_OK && audio_stream_) {
+      ON_CALL(*audio_renderer_, Flush(_))
+          .WillByDefault(DoAll(SetBufferingState(&audio_renderer_client_,
+                                                 BUFFERING_HAVE_NOTHING),
+                               RunClosure<0>()));
+      ON_CALL(*audio_renderer_, StartPlaying())
+          .WillByDefault(SetBufferingState(&audio_renderer_client_,
+                                           BUFFERING_HAVE_ENOUGH));
+    }
+    if (start_status == PIPELINE_OK && video_stream_) {
+      ON_CALL(*video_renderer_, Flush(_))
+          .WillByDefault(DoAll(SetBufferingState(&video_renderer_client_,
+                                                 BUFFERING_HAVE_NOTHING),
+                               RunClosure<0>()));
+      ON_CALL(*video_renderer_, StartPlayingFrom(_))
+          .WillByDefault(SetBufferingState(&video_renderer_client_,
+                                           BUFFERING_HAVE_ENOUGH));
+    }
   }
 
   void CreateAudioStream() {
@@ -211,39 +234,30 @@ class RendererImplTest : public ::testing::Test {
     EXPECT_CALL(time_source_, StartTicking());
 
     if (audio_stream_) {
-      EXPECT_CALL(*audio_renderer_, StartPlaying())
-          .WillOnce(SetBufferingState(&audio_renderer_client_,
-                                      BUFFERING_HAVE_ENOUGH));
+      EXPECT_CALL(*audio_renderer_, StartPlaying());
     }
 
     if (video_stream_) {
-      EXPECT_CALL(*video_renderer_, StartPlayingFrom(start_time))
-          .WillOnce(SetBufferingState(&video_renderer_client_,
-                                      BUFFERING_HAVE_ENOUGH));
+      EXPECT_CALL(*video_renderer_, StartPlayingFrom(start_time));
     }
 
     renderer_impl_->StartPlayingFrom(start_time);
     base::RunLoop().RunUntilIdle();
   }
 
+  void SetFlushExpectationsForAVRenderers() {
+    if (audio_stream_)
+      EXPECT_CALL(*audio_renderer_, Flush(_));
+
+    if (video_stream_)
+      EXPECT_CALL(*video_renderer_, Flush(_));
+  }
+
   void Flush(bool underflowed) {
     if (!underflowed)
       EXPECT_CALL(time_source_, StopTicking());
 
-    if (audio_stream_) {
-      EXPECT_CALL(*audio_renderer_, Flush(_))
-          .WillOnce(DoAll(SetBufferingState(&audio_renderer_client_,
-                                            BUFFERING_HAVE_NOTHING),
-                          RunClosure<0>()));
-    }
-
-    if (video_stream_) {
-      EXPECT_CALL(*video_renderer_, Flush(_))
-          .WillOnce(DoAll(SetBufferingState(&video_renderer_client_,
-                                            BUFFERING_HAVE_NOTHING),
-                          RunClosure<0>()));
-    }
-
+    SetFlushExpectationsForAVRenderers();
     EXPECT_CALL(callbacks_, OnFlushed());
 
     renderer_impl_->Flush(
@@ -358,7 +372,7 @@ TEST_F(RendererImplTest, Destroy_PendingInitializeAfterSetCdm) {
 
   // SetCdm() will trigger the initialization to start. But it will not complete
   // because the |video_renderer_| is not returning the initialization callback.
-  SetCdmAndExpect(false);
+  SetCdmAndExpect(true);
   EXPECT_EQ(PIPELINE_OK, initialization_status_);
 
   Destroy();
@@ -441,7 +455,7 @@ TEST_F(RendererImplTest, SetCdmAfterInitialize_EncryptedStream_Failure) {
   // Initialization is pending until CDM is set.
   EXPECT_EQ(PIPELINE_OK, initialization_status_);
 
-  SetCdmAndExpect(false);
+  SetCdmAndExpect(true);
   EXPECT_EQ(PIPELINE_ERROR_INITIALIZATION_FAILED, initialization_status_);
 }
 
@@ -492,7 +506,10 @@ TEST_F(RendererImplTest, StartPlayingFromWithPlaybackRate) {
 
 TEST_F(RendererImplTest, FlushAfterInitialization) {
   InitializeWithAudioAndVideo();
-  Flush(true);
+  EXPECT_CALL(callbacks_, OnFlushed());
+  renderer_impl_->Flush(
+      base::Bind(&CallbackHelper::OnFlushed, base::Unretained(&callbacks_)));
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(RendererImplTest, FlushAfterPlay) {
@@ -741,10 +758,10 @@ TEST_F(RendererImplTest, VideoUnderflowWithAudioFlush) {
   // the video renderer (which simulates spool up time for the video renderer).
   const base::TimeDelta kStartTime;
   EXPECT_CALL(time_source_, SetMediaTime(kStartTime));
-  EXPECT_CALL(*audio_renderer_, StartPlaying())
-      .WillOnce(
-          SetBufferingState(&audio_renderer_client_, BUFFERING_HAVE_ENOUGH));
+  EXPECT_CALL(time_source_, StartTicking());
+  EXPECT_CALL(*audio_renderer_, StartPlaying());
   EXPECT_CALL(*video_renderer_, StartPlayingFrom(kStartTime));
+  EXPECT_CALL(callbacks_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
   renderer_impl_->StartPlayingFrom(kStartTime);
 
   // Nothing else should primed on the message loop.
@@ -762,25 +779,20 @@ TEST_F(RendererImplTest, StreamStatusNotificationHandling) {
   InitializeAndExpect(PIPELINE_OK);
   Play();
 
+  EXPECT_CALL(callbacks_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
+
   // Verify that DemuxerStream status changes cause the corresponding
   // audio/video renderer to be flushed and restarted.
   EXPECT_CALL(time_source_, StopTicking());
-  EXPECT_CALL(*audio_renderer_, Flush(_)).WillOnce(RunClosure<0>());
-  EXPECT_CALL(*audio_renderer_, StartPlaying())
-      .Times(1)
-      .WillOnce(
-          SetBufferingState(&audio_renderer_client_, BUFFERING_HAVE_ENOUGH));
+  EXPECT_CALL(*audio_renderer_, Flush(_));
+  EXPECT_CALL(*audio_renderer_, StartPlaying());
+  EXPECT_CALL(time_source_, StartTicking());
   stream_status_change_cb.Run(audio_stream_.get(), false, base::TimeDelta());
 
-  EXPECT_CALL(*video_renderer_, Flush(_)).WillOnce(RunClosure<0>());
-  EXPECT_CALL(*video_renderer_, StartPlayingFrom(_))
-      .Times(1)
-      .WillOnce(DoAll(
-          SetBufferingState(&video_renderer_client_, BUFFERING_HAVE_ENOUGH),
-          PostQuitWhenIdle()));
-
+  EXPECT_CALL(*video_renderer_, Flush(_));
+  EXPECT_CALL(*video_renderer_, StartPlayingFrom(_));
   stream_status_change_cb.Run(video_stream_.get(), false, base::TimeDelta());
-  base::RunLoop().Run();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Stream status changes are handled asynchronously by the renderer and may take
@@ -805,18 +817,8 @@ TEST_F(RendererImplTest, PostponedStreamStatusNotificationHandling) {
 
   EXPECT_CALL(time_source_, StopTicking()).Times(2);
   EXPECT_CALL(time_source_, StartTicking()).Times(2);
-  EXPECT_CALL(*audio_renderer_, Flush(_))
-      .Times(2)
-      .WillRepeatedly(DoAll(
-          SetBufferingState(&audio_renderer_client_, BUFFERING_HAVE_NOTHING),
-          WithArg<0>(PostCallback())));
-  EXPECT_CALL(*audio_renderer_, StartPlaying())
-      .Times(2)
-      .WillOnce(
-          SetBufferingState(&audio_renderer_client_, BUFFERING_HAVE_ENOUGH))
-      .WillOnce(DoAll(
-          SetBufferingState(&audio_renderer_client_, BUFFERING_HAVE_ENOUGH),
-          PostQuitWhenIdle()));
+  EXPECT_CALL(*audio_renderer_, Flush(_)).Times(2);
+  EXPECT_CALL(*audio_renderer_, StartPlaying()).Times(2);
   // The first stream status change will be processed immediately. Each status
   // change processing involves Flush + StartPlaying when the Flush is done. The
   // Flush operation is async in this case, so the second status change will be
@@ -824,20 +826,10 @@ TEST_F(RendererImplTest, PostponedStreamStatusNotificationHandling) {
   // we must still get two pairs of Flush/StartPlaying calls eventually.
   stream_status_change_cb.Run(audio_stream_.get(), false, base::TimeDelta());
   stream_status_change_cb.Run(audio_stream_.get(), true, base::TimeDelta());
-  base::RunLoop().Run();
+  base::RunLoop().RunUntilIdle();
 
-  EXPECT_CALL(*video_renderer_, Flush(_))
-      .Times(2)
-      .WillRepeatedly(DoAll(
-          SetBufferingState(&video_renderer_client_, BUFFERING_HAVE_NOTHING),
-          WithArg<0>(PostCallback())));
-  EXPECT_CALL(*video_renderer_, StartPlayingFrom(base::TimeDelta()))
-      .Times(2)
-      .WillOnce(
-          SetBufferingState(&video_renderer_client_, BUFFERING_HAVE_ENOUGH))
-      .WillOnce(DoAll(
-          SetBufferingState(&video_renderer_client_, BUFFERING_HAVE_ENOUGH),
-          PostQuitWhenIdle()));
+  EXPECT_CALL(*video_renderer_, Flush(_)).Times(2);
+  EXPECT_CALL(*video_renderer_, StartPlayingFrom(base::TimeDelta())).Times(2);
   // The first stream status change will be processed immediately. Each status
   // change processing involves Flush + StartPlaying when the Flush is done. The
   // Flush operation is async in this case, so the second status change will be
@@ -845,7 +837,200 @@ TEST_F(RendererImplTest, PostponedStreamStatusNotificationHandling) {
   // we must still get two pairs of Flush/StartPlaying calls eventually.
   stream_status_change_cb.Run(video_stream_.get(), false, base::TimeDelta());
   stream_status_change_cb.Run(video_stream_.get(), true, base::TimeDelta());
-  base::RunLoop().Run();
+  base::RunLoop().RunUntilIdle();
+}
+
+// Verify that a RendererImpl::Flush gets postponed until after stream status
+// change handling is completed.
+TEST_F(RendererImplTest, FlushDuringAudioReinit) {
+  CreateAudioAndVideoStream();
+
+  StreamStatusChangeCB stream_status_change_cb;
+  EXPECT_CALL(*demuxer_, SetStreamStatusChangeCB(_))
+      .WillOnce(SaveArg<0>(&stream_status_change_cb));
+  SetAudioRendererInitializeExpectations(PIPELINE_OK);
+  SetVideoRendererInitializeExpectations(PIPELINE_OK);
+  InitializeAndExpect(PIPELINE_OK);
+  Play();
+
+  EXPECT_CALL(time_source_, StopTicking()).Times(testing::AnyNumber());
+  base::Closure audio_renderer_flush_cb;
+  EXPECT_CALL(*audio_renderer_, Flush(_))
+      .WillOnce(SaveArg<0>(&audio_renderer_flush_cb));
+  EXPECT_CALL(*audio_renderer_, StartPlaying());
+
+  // This should start flushing the audio renderer (due to audio stream status
+  // change) and should populate the |audio_renderer_flush_cb|.
+  stream_status_change_cb.Run(audio_stream_.get(), false, base::TimeDelta());
+  EXPECT_TRUE(audio_renderer_flush_cb);
+  base::RunLoop().RunUntilIdle();
+
+  bool flush_done = false;
+
+  // Now that audio stream change is being handled the RendererImpl::Flush
+  // should be postponed, instead of being executed immediately.
+  EXPECT_CALL(callbacks_, OnFlushed()).WillOnce(SetBool(&flush_done, true));
+  renderer_impl_->Flush(
+      base::Bind(&CallbackHelper::OnFlushed, base::Unretained(&callbacks_)));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(flush_done);
+
+  // The renderer_impl_->Flush invoked above should proceed after the first
+  // audio renderer flush (initiated by the stream status change) completes.
+  SetFlushExpectationsForAVRenderers();
+  audio_renderer_flush_cb.Run();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(flush_done);
+}
+
+TEST_F(RendererImplTest, FlushDuringVideoReinit) {
+  CreateAudioAndVideoStream();
+
+  StreamStatusChangeCB stream_status_change_cb;
+  EXPECT_CALL(*demuxer_, SetStreamStatusChangeCB(_))
+      .WillOnce(SaveArg<0>(&stream_status_change_cb));
+  SetAudioRendererInitializeExpectations(PIPELINE_OK);
+  SetVideoRendererInitializeExpectations(PIPELINE_OK);
+  InitializeAndExpect(PIPELINE_OK);
+  Play();
+
+  EXPECT_CALL(time_source_, StopTicking()).Times(testing::AnyNumber());
+  base::Closure video_renderer_flush_cb;
+  EXPECT_CALL(*video_renderer_, Flush(_))
+      .WillOnce(SaveArg<0>(&video_renderer_flush_cb));
+  EXPECT_CALL(*video_renderer_, StartPlayingFrom(_));
+
+  // This should start flushing the video renderer (due to video stream status
+  // change) and should populate the |video_renderer_flush_cb|.
+  stream_status_change_cb.Run(video_stream_.get(), false, base::TimeDelta());
+  EXPECT_TRUE(video_renderer_flush_cb);
+  base::RunLoop().RunUntilIdle();
+
+  bool flush_done = false;
+
+  // Now that video stream change is being handled the RendererImpl::Flush
+  // should be postponed, instead of being executed immediately.
+  EXPECT_CALL(callbacks_, OnFlushed()).WillOnce(SetBool(&flush_done, true));
+  renderer_impl_->Flush(
+      base::Bind(&CallbackHelper::OnFlushed, base::Unretained(&callbacks_)));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(flush_done);
+
+  // The renderer_impl_->Flush invoked above should proceed after the first
+  // video renderer flush (initiated by the stream status change) completes.
+  SetFlushExpectationsForAVRenderers();
+  video_renderer_flush_cb.Run();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(flush_done);
+}
+
+// Test audio track switching when the RendererImpl is in STATE_FLUSHING/FLUSHED
+TEST_F(RendererImplTest, AudioTrackSwitchDuringFlush) {
+  CreateAudioAndVideoStream();
+  std::unique_ptr<StrictMock<MockDemuxerStream>> primary_audio_stream =
+      std::move(audio_stream_);
+  CreateAudioStream();
+  std::unique_ptr<StrictMock<MockDemuxerStream>> secondary_audio_stream =
+      std::move(audio_stream_);
+  audio_stream_ = std::move(primary_audio_stream);
+
+  StreamStatusChangeCB stream_status_change_cb;
+  EXPECT_CALL(*demuxer_, SetStreamStatusChangeCB(_))
+      .WillOnce(SaveArg<0>(&stream_status_change_cb));
+  SetAudioRendererInitializeExpectations(PIPELINE_OK);
+  SetVideoRendererInitializeExpectations(PIPELINE_OK);
+  InitializeAndExpect(PIPELINE_OK);
+  Play();
+
+  EXPECT_CALL(time_source_, StopTicking()).Times(testing::AnyNumber());
+  EXPECT_CALL(*video_renderer_, Flush(_));
+
+  // Initiate RendererImpl::Flush, but postpone its completion by not calling
+  // audio renderer flush callback right away, i.e. pretending audio renderer
+  // flush takes a while.
+  base::Closure audio_renderer_flush_cb;
+  EXPECT_CALL(*audio_renderer_, Flush(_))
+      .WillOnce(SaveArg<0>(&audio_renderer_flush_cb));
+  EXPECT_CALL(callbacks_, OnFlushed());
+  renderer_impl_->Flush(
+      base::Bind(&CallbackHelper::OnFlushed, base::Unretained(&callbacks_)));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(audio_renderer_flush_cb);
+
+  // Now, while the RendererImpl::Flush is pending, perform an audio track
+  // switch. The handling of the track switch will be postponed until after
+  // RendererImpl::Flush completes.
+  stream_status_change_cb.Run(audio_stream_.get(), false, base::TimeDelta());
+  stream_status_change_cb.Run(secondary_audio_stream.get(), true,
+                              base::TimeDelta());
+
+  // Ensure that audio track switch occurs after Flush by verifying that the
+  // audio renderer is reinitialized with the secondary audio stream.
+  EXPECT_CALL(*audio_renderer_,
+              Initialize(secondary_audio_stream.get(), _, _, _));
+
+  // Complete the audio renderer flush, thus completing the renderer_impl_ Flush
+  // initiated above. This will transition the RendererImpl into the FLUSHED
+  // state and will process pending track switch, which should result in the
+  // reinitialization of the audio renderer for the secondary audio stream.
+  audio_renderer_client_->OnBufferingStateChange(BUFFERING_HAVE_NOTHING);
+  audio_renderer_flush_cb.Run();
+  base::RunLoop().RunUntilIdle();
+}
+
+// Test video track switching when the RendererImpl is in STATE_FLUSHING/FLUSHED
+TEST_F(RendererImplTest, VideoTrackSwitchDuringFlush) {
+  CreateAudioAndVideoStream();
+  std::unique_ptr<StrictMock<MockDemuxerStream>> primary_video_stream =
+      std::move(video_stream_);
+  CreateVideoStream();
+  std::unique_ptr<StrictMock<MockDemuxerStream>> secondary_video_stream =
+      std::move(video_stream_);
+  video_stream_ = std::move(primary_video_stream);
+
+  StreamStatusChangeCB stream_status_change_cb;
+  EXPECT_CALL(*demuxer_, SetStreamStatusChangeCB(_))
+      .WillOnce(SaveArg<0>(&stream_status_change_cb));
+  SetAudioRendererInitializeExpectations(PIPELINE_OK);
+  SetVideoRendererInitializeExpectations(PIPELINE_OK);
+  InitializeAndExpect(PIPELINE_OK);
+  Play();
+
+  EXPECT_CALL(time_source_, StopTicking()).Times(testing::AnyNumber());
+  EXPECT_CALL(*video_renderer_, OnTimeStopped()).Times(testing::AnyNumber());
+  EXPECT_CALL(*audio_renderer_, Flush(_));
+
+  // Initiate RendererImpl::Flush, but postpone its completion by not calling
+  // video renderer flush callback right away, i.e. pretending video renderer
+  // flush takes a while.
+  base::Closure video_renderer_flush_cb;
+  EXPECT_CALL(*video_renderer_, Flush(_))
+      .WillOnce(SaveArg<0>(&video_renderer_flush_cb));
+  EXPECT_CALL(callbacks_, OnFlushed());
+  renderer_impl_->Flush(
+      base::Bind(&CallbackHelper::OnFlushed, base::Unretained(&callbacks_)));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(video_renderer_flush_cb);
+
+  // Now, while the RendererImpl::Flush is pending, perform a video track
+  // switch. The handling of the track switch will be postponed until after
+  // RendererImpl::Flush completes.
+  stream_status_change_cb.Run(video_stream_.get(), false, base::TimeDelta());
+  stream_status_change_cb.Run(secondary_video_stream.get(), true,
+                              base::TimeDelta());
+
+  // Ensure that video track switch occurs after Flush by verifying that the
+  // video renderer is reinitialized with the secondary video stream.
+  EXPECT_CALL(*video_renderer_,
+              Initialize(secondary_video_stream.get(), _, _, _, _));
+
+  // Complete the video renderer flush, thus completing the renderer_impl_ Flush
+  // initiated above. This will transition the RendererImpl into the FLUSHED
+  // state and will process pending track switch, which should result in the
+  // reinitialization of the video renderer for the secondary video stream.
+  video_renderer_client_->OnBufferingStateChange(BUFFERING_HAVE_NOTHING);
+  video_renderer_flush_cb.Run();
+  base::RunLoop().RunUntilIdle();
 }
 
 }  // namespace media

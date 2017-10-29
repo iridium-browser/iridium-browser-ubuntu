@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -55,40 +56,28 @@ NSEvent* CmdDeadKeyEvent(NSEventType type, unsigned short code) {
 // Test that cmd-up/down scrolls the page exactly if it is not intercepted by
 // javascript.
 TEST_F(RenderViewTest, MacTestCmdUp) {
-  // Some preprocessor trickery so that we can have literal html in our source,
-  // makes it easier to copy html to and from an html file for testing (the
-  // preprocessor will remove the newlines at the line ends, turning this into
-  // a single long line).
-  #define HTML(s) #s
-  const char* kRawHtml = HTML(
-  <!DOCTYPE html>
-  <style>
-    /* Add a vertical scrollbar */
-    body { height: 10128px; }
-  </style>
-  <div id='keydown'></div>
-  <div id='scroll'></div>
-  <script>
-    var allowKeyEvents = true;
-    var scroll = document.getElementById('scroll');
-    var result = document.getElementById('keydown');
-    onkeydown = function(event) {
-      result.textContent =
-        event.keyCode + ',' +
-        event.shiftKey + ',' +
-        event.ctrlKey + ',' +
-        event.metaKey + ',' +
-        event.altKey;
-      return allowKeyEvents;
-    }
-  </script>
-  <!--
-    TODO(esprehn): For some strange reason we need a non-empty document for
-    scrolling to work. This is not the case in a real browser only in the test.
-  -->
-  <p>p1
-  );
-  #undef HTML
+  const char* kRawHtml =
+      "<!DOCTYPE html>"
+      "<style>"
+      "  /* Add a vertical scrollbar */"
+      "  body { height: 10128px; }"
+      "</style>"
+      "<div id='keydown'></div>"
+      "<div id='scroll'></div>"
+      "<script>"
+      "  var allowKeyEvents = true;"
+      "  var scroll = document.getElementById('scroll');"
+      "  var result = document.getElementById('keydown');"
+      "  onkeydown = function(event) {"
+      "    result.textContent ="
+      "      event.keyCode + ',' +"
+      "      event.shiftKey + ',' +"
+      "      event.ctrlKey + ',' +"
+      "      event.metaKey + ',' +"
+      "      event.altKey;"
+      "    return allowKeyEvents;"
+      "  }"
+      "</script>";
 
   WebPreferences prefs;
   prefs.enable_scroll_animator = false;
@@ -107,26 +96,26 @@ TEST_F(RenderViewTest, MacTestCmdUp) {
   LoadHTML(kRawHtml);
   render_thread_->sink().ClearMessages();
 
-  const char* kArrowDownScrollDown = "40,false,false,true,false\n10144\np1";
+  const char* kArrowDownScrollDown = "40,false,false,true,false\n9844";
   view->OnSetEditCommandsForNextKeyEvent(
       EditCommands(1, EditCommand("moveToEndOfDocument", "")));
   SendNativeKeyEvent(NativeWebKeyboardEvent(arrowDownKeyDown));
-  ProcessPendingMessages();
+  base::RunLoop().RunUntilIdle();
   ExecuteJavaScriptForTests("scroll.textContent = window.pageYOffset");
-  output = WebFrameContentDumper::dumpWebViewAsText(view->GetWebView(),
+  output = WebFrameContentDumper::DumpWebViewAsText(view->GetWebView(),
                                                     kMaxOutputCharacters)
-               .ascii();
+               .Ascii();
   EXPECT_EQ(kArrowDownScrollDown, output);
 
-  const char* kArrowUpScrollUp = "38,false,false,true,false\n0\np1";
+  const char* kArrowUpScrollUp = "38,false,false,true,false\n0";
   view->OnSetEditCommandsForNextKeyEvent(
       EditCommands(1, EditCommand("moveToBeginningOfDocument", "")));
   SendNativeKeyEvent(NativeWebKeyboardEvent(arrowUpKeyDown));
-  ProcessPendingMessages();
+  base::RunLoop().RunUntilIdle();
   ExecuteJavaScriptForTests("scroll.textContent = window.pageYOffset");
-  output = WebFrameContentDumper::dumpWebViewAsText(view->GetWebView(),
+  output = WebFrameContentDumper::DumpWebViewAsText(view->GetWebView(),
                                                     kMaxOutputCharacters)
-               .ascii();
+               .Ascii();
   EXPECT_EQ(kArrowUpScrollUp, output);
 
   // Now let javascript eat the key events -- no scrolling should happen.
@@ -134,26 +123,26 @@ TEST_F(RenderViewTest, MacTestCmdUp) {
   // move.
   ExecuteJavaScriptForTests("allowKeyEvents = false; window.scrollTo(0, 100)");
 
-  const char* kArrowDownNoScroll = "40,false,false,true,false\n100\np1";
+  const char* kArrowDownNoScroll = "40,false,false,true,false\n100";
   view->OnSetEditCommandsForNextKeyEvent(
       EditCommands(1, EditCommand("moveToEndOfDocument", "")));
   SendNativeKeyEvent(NativeWebKeyboardEvent(arrowDownKeyDown));
-  ProcessPendingMessages();
+  base::RunLoop().RunUntilIdle();
   ExecuteJavaScriptForTests("scroll.textContent = window.pageYOffset");
-  output = WebFrameContentDumper::dumpWebViewAsText(view->GetWebView(),
+  output = WebFrameContentDumper::DumpWebViewAsText(view->GetWebView(),
                                                     kMaxOutputCharacters)
-               .ascii();
+               .Ascii();
   EXPECT_EQ(kArrowDownNoScroll, output);
 
-  const char* kArrowUpNoScroll = "38,false,false,true,false\n100\np1";
+  const char* kArrowUpNoScroll = "38,false,false,true,false\n100";
   view->OnSetEditCommandsForNextKeyEvent(
       EditCommands(1, EditCommand("moveToBeginningOfDocument", "")));
   SendNativeKeyEvent(NativeWebKeyboardEvent(arrowUpKeyDown));
-  ProcessPendingMessages();
+  base::RunLoop().RunUntilIdle();
   ExecuteJavaScriptForTests("scroll.textContent = window.pageYOffset");
-  output = WebFrameContentDumper::dumpWebViewAsText(view->GetWebView(),
+  output = WebFrameContentDumper::DumpWebViewAsText(view->GetWebView(),
                                                     kMaxOutputCharacters)
-               .ascii();
+               .Ascii();
   EXPECT_EQ(kArrowUpNoScroll, output);
 }
 
@@ -166,7 +155,7 @@ TEST_F(RenderViewTest, HandleIPCsInSwappedOutState) {
   LoadHTML("<input/>");
 
   // Normally, we have a WebFrameWidget.
-  EXPECT_TRUE(GetWebWidget()->isWebFrameWidget());
+  EXPECT_TRUE(GetWebWidget()->IsWebFrameWidget());
 
   // Swap out the main frame so that the frame widget is destroyed.
   auto* view = static_cast<RenderViewImpl*>(view_);
@@ -175,7 +164,7 @@ TEST_F(RenderViewTest, HandleIPCsInSwappedOutState) {
       main_frame->GetRoutingID(), 123, true, FrameReplicationState()));
 
   // We no longer have a frame widget.
-  EXPECT_FALSE(GetWebWidget()->isWebFrameWidget());
+  EXPECT_FALSE(GetWebWidget()->IsWebFrameWidget());
 
   int routing_id = view->GetRoutingID();
   // Now simulate some TextInputClientMac IPCs. These will be handled by

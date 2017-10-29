@@ -6,14 +6,14 @@
 
 import webapp2
 
+from dashboard import add_histograms
+from dashboard import add_histograms_queue
 from dashboard import add_point
 from dashboard import add_point_queue
 from dashboard import alerts
 from dashboard import associate_alerts
-from dashboard import auto_bisect
 from dashboard import auto_triage
 from dashboard import bad_bisect
-from dashboard import benchmark_health_report
 from dashboard import bisect_stats
 from dashboard import bisect_fyi
 from dashboard import bug_details
@@ -22,6 +22,7 @@ from dashboard import change_internal_only
 from dashboard import create_health_report
 from dashboard import debug_alert
 from dashboard import delete_test_data
+from dashboard import deprecate_tests
 from dashboard import dump_graph_json
 from dashboard import edit_anomalies
 from dashboard import edit_anomaly_configs
@@ -31,6 +32,7 @@ from dashboard import edit_site_config
 from dashboard import email_summary
 from dashboard import file_bug
 from dashboard import get_logs
+from dashboard import get_histogram
 from dashboard import graph_csv
 from dashboard import graph_json
 from dashboard import graph_revisions
@@ -42,34 +44,38 @@ from dashboard import load_from_prod
 from dashboard import main
 from dashboard import memory_report
 from dashboard import migrate_test_names
-from dashboard import mr
 from dashboard import navbar
 from dashboard import new_points
 from dashboard import oauth2_decorator
 from dashboard import post_bisect_results
 from dashboard import put_entities_task
 from dashboard import report
-from dashboard import send_stoppage_alert_emails
 from dashboard import set_warning_message
 from dashboard import short_uri
 from dashboard import speed_releasing
 from dashboard import start_try_job
-from dashboard import stoppage_alert_debugging_info
 from dashboard import test_buildbucket
 from dashboard import update_bug_with_results
 from dashboard import update_test_suites
+from dashboard.api import alerts as api_alerts
+from dashboard.api import bugs
+from dashboard.api import list_timeseries
+from dashboard.api import timeseries
 
 
 _URL_MAPPING = [
+    ('/add_histograms', add_histograms.AddHistogramsHandler),
+    ('/add_histograms_queue', add_histograms_queue.AddHistogramsQueueHandler),
     ('/add_point', add_point.AddPointHandler),
     ('/add_point_queue', add_point_queue.AddPointQueueHandler),
     ('/alerts', alerts.AlertsHandler),
+    (r'/api/alerts/(.*)', api_alerts.AlertsHandler),
+    (r'/api/bugs/(.*)', bugs.BugsHandler),
+    (r'/api/list_timeseries/(.*)', list_timeseries.ListTimeseriesHandler),
+    (r'/api/timeseries/(.*)', timeseries.TimeseriesHandler),
     ('/associate_alerts', associate_alerts.AssociateAlertsHandler),
-    ('/auto_bisect', auto_bisect.AutoBisectHandler),
     ('/auto_triage', auto_triage.AutoTriageHandler),
     ('/bad_bisect', bad_bisect.BadBisectHandler),
-    ('/benchmark_health_report',
-     benchmark_health_report.BenchmarkHealthReportHandler),
     ('/bisect_fyi', bisect_fyi.BisectFYIHandler),
     ('/bisect_stats', bisect_stats.BisectStatsHandler),
     ('/bug_details', bug_details.BugDetailsHandler),
@@ -88,6 +94,7 @@ _URL_MAPPING = [
     ('/edit_site_config', edit_site_config.EditSiteConfigHandler),
     ('/email_summary', email_summary.EmailSummaryHandler),
     ('/file_bug', file_bug.FileBugHandler),
+    ('/get_histogram', get_histogram.GetHistogramHandler),
     ('/get_logs', get_logs.GetLogsHandler),
     ('/graph_csv', graph_csv.GraphCsvHandler),
     ('/graph_json', graph_json.GraphJsonHandler),
@@ -99,22 +106,18 @@ _URL_MAPPING = [
     ('/', main.MainHandler),
     ('/memory_report', memory_report.MemoryReportHandler),
     ('/migrate_test_names', migrate_test_names.MigrateTestNamesHandler),
-    ('/mr_deprecate_tests', mr.MRDeprecateTestsHandler),
+    ('/deprecate_tests', deprecate_tests.DeprecateTestsHandler),
     ('/navbar', navbar.NavbarHandler),
     ('/new_points', new_points.NewPointsHandler),
     ('/post_bisect_results', post_bisect_results.PostBisectResultsHandler),
     ('/put_entities_task', put_entities_task.PutEntitiesTaskHandler),
     ('/report', report.ReportHandler),
-    ('/send_stoppage_alert_emails',
-     send_stoppage_alert_emails.SendStoppageAlertEmailsHandler),
     ('/set_warning_message', set_warning_message.SetWarningMessageHandler),
     ('/short_uri', short_uri.ShortUriHandler),
     (r'/speed_releasing/(.*)',
      speed_releasing.SpeedReleasingHandler),
     ('/speed_releasing', speed_releasing.SpeedReleasingHandler),
     ('/start_try_job', start_try_job.StartBisectHandler),
-    ('/stoppage_alert_debugging_info',
-     stoppage_alert_debugging_info.StoppageAlertDebuggingInfoHandler),
     ('/test_buildbucket', test_buildbucket.TestBuildbucketHandler),
     ('/update_bug_with_results',
      update_bug_with_results.UpdateBugWithResultsHandler),

@@ -6,12 +6,12 @@
 [
     ActiveScriptWrappable,
     DependentLifetime,
-    Exposed=(Window,Worker),
+    Exposed=(Window,Worker)
 ] interface ServiceWorkerRegistration : EventTarget {
     readonly attribute ServiceWorker? installing;
     readonly attribute ServiceWorker? waiting;
     readonly attribute ServiceWorker? active;
-    [OriginTrialEnabled=ServiceWorkerNavigationPreload] readonly attribute NavigationPreloadManager navigationPreload;
+    [RuntimeEnabled=ServiceWorkerNavigationPreload] readonly attribute NavigationPreloadManager navigationPreload;
 
     readonly attribute USVString scope;
 

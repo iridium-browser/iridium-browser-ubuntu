@@ -31,50 +31,54 @@
 #ifndef BMPImageDecoder_h
 #define BMPImageDecoder_h
 
-#include "platform/image-decoders/bmp/BMPImageReader.h"
 #include <memory>
+#include "platform/image-decoders/ImageDecoder.h"
 
 namespace blink {
+
+class BMPImageReader;
 
 // This class decodes the BMP image format.
 class PLATFORM_EXPORT BMPImageDecoder final : public ImageDecoder {
  public:
-  BMPImageDecoder(AlphaOption, const ColorBehavior&, size_t maxDecodedBytes);
+  BMPImageDecoder(AlphaOption, const ColorBehavior&, size_t max_decoded_bytes);
+
+  ~BMPImageDecoder() override;
 
   // ImageDecoder:
-  String filenameExtension() const override { return "bmp"; }
-  void onSetData(SegmentReader*) override;
-  // CAUTION: setFailed() deletes |m_reader|.  Be careful to avoid
+  String FilenameExtension() const override { return "bmp"; }
+  void OnSetData(SegmentReader*) override;
+  // CAUTION: SetFailed() deletes |reader_|.  Be careful to avoid
   // accessing deleted memory, especially when calling this from inside
   // BMPImageReader!
-  bool setFailed() override;
+  bool SetFailed() override;
 
  private:
   // ImageDecoder:
-  void decodeSize() override { decode(true); }
-  void decode(size_t) override { decode(false); }
+  void DecodeSize() override { Decode(true); }
+  void Decode(size_t) override { Decode(false); }
 
-  // Decodes the image.  If |onlySize| is true, stops decoding after
+  // Decodes the image.  If |only_size| is true, stops decoding after
   // calculating the image size. If decoding fails but there is no more
   // data coming, sets the "decode failure" flag.
-  void decode(bool onlySize);
+  void Decode(bool only_size);
 
-  // Decodes the image.  If |onlySize| is true, stops decoding after
+  // Decodes the image.  If |only_size| is true, stops decoding after
   // calculating the image size. Returns whether decoding succeeded.
-  bool decodeHelper(bool onlySize);
+  bool DecodeHelper(bool only_size);
 
   // Processes the file header at the beginning of the data.  Sets
-  // |imgDataOffset| based on the header contents. Returns true if the
+  // |img_data_offset| based on the header contents. Returns true if the
   // file header could be decoded.
-  bool processFileHeader(size_t& imgDataOffset);
+  bool ProcessFileHeader(size_t& img_data_offset);
 
-  // An index into |m_data| representing how much we've already decoded.
+  // An index into |data_| representing how much we've already decoded.
   // Note that this only tracks data _this_ class decodes; once the
   // BMPImageReader takes over this will not be updated further.
-  size_t m_decodedOffset;
+  size_t decoded_offset_;
 
   // The reader used to do most of the BMP decoding.
-  std::unique_ptr<BMPImageReader> m_reader;
+  std::unique_ptr<BMPImageReader> reader_;
 };
 
 }  // namespace blink

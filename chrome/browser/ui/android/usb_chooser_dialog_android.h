@@ -23,7 +23,6 @@ class RenderFrameHost;
 
 namespace device {
 class UsbDevice;
-struct UsbDeviceFilter;
 }
 
 // Represents a way to ask the user to select a USB device from a list of
@@ -31,9 +30,9 @@ struct UsbDeviceFilter;
 class UsbChooserDialogAndroid : public device::UsbService::Observer {
  public:
   UsbChooserDialogAndroid(
-      const std::vector<device::UsbDeviceFilter>& filters,
+      std::vector<device::mojom::UsbDeviceFilterPtr> filters,
       content::RenderFrameHost* render_frame_host,
-      const device::usb::ChooserService::GetPermissionCallback& callback);
+      const device::mojom::UsbChooserService::GetPermissionCallback& callback);
   ~UsbChooserDialogAndroid() override;
 
   // device::UsbService::Observer:
@@ -49,8 +48,6 @@ class UsbChooserDialogAndroid : public device::UsbService::Observer {
 
   void LoadUsbHelpPage(JNIEnv* env,
                        const base::android::JavaParamRef<jobject>& obj);
-
-  static bool Register(JNIEnv* env);
 
  private:
   void GotUsbDeviceList(
@@ -71,10 +68,10 @@ class UsbChooserDialogAndroid : public device::UsbService::Observer {
   bool DisplayDevice(scoped_refptr<device::UsbDevice> device) const;
 
   content::RenderFrameHost* const render_frame_host_;
-  device::usb::ChooserService::GetPermissionCallback callback_;
+  device::mojom::UsbChooserService::GetPermissionCallback callback_;
   ScopedObserver<device::UsbService, device::UsbService::Observer>
       usb_service_observer_;
-  std::vector<device::UsbDeviceFilter> filters_;
+  std::vector<device::mojom::UsbDeviceFilterPtr> filters_;
 
   std::vector<scoped_refptr<device::UsbDevice>> devices_;
 

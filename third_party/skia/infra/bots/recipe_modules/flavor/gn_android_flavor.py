@@ -23,20 +23,14 @@ class GNAndroidFlavorUtils(default_flavor.DefaultFlavorUtils):
         svg_dir       = self.m.vars.android_data_dir + 'svgs',
         tmp_dir       = self.m.vars.android_data_dir)
 
-  def _strip_environment(self):
-    self.m.vars.default_env = {k: v for (k,v)
-                               in self.m.vars.default_env.iteritems()
-                               if k in ['PATH']}
-
   def _run(self, title, *cmd, **kwargs):
-    self._strip_environment()
-    return self.m.run(self.m.step, title, cmd=list(cmd),
-                      cwd=self.m.vars.skia_dir, **kwargs)
+    with self.m.context(cwd=self.m.vars.skia_dir):
+      return self.m.run(self.m.step, title, cmd=list(cmd), **kwargs)
 
   def _py(self, title, script, infra_step=True):
-    self._strip_environment()
-    return self.m.run(self.m.python, title, script=script,
-                      cwd=self.m.vars.skia_dir, env=None, infra_step=infra_step)
+    with self.m.context(cwd=self.m.vars.skia_dir):
+      return self.m.run(self.m.python, title, script=script,
+                        infra_step=infra_step)
 
   def _adb(self, title, *cmd, **kwargs):
     self._ever_ran_adb = True
@@ -45,43 +39,7 @@ class GNAndroidFlavorUtils(default_flavor.DefaultFlavorUtils):
       kwargs['infra_step'] = True
     return self._run(title, 'adb', *cmd, **kwargs)
 
-  # Waits for an android device to be available
-  def _wait_for_device(self):
-    self.m.run(self.m.python.inline, 'wait for device', program="""
-      import subprocess
-      import sys
-      import time
-
-      kicks = 0
-      while True:
-
-        times = 0
-        while times < 30:
-          print 'Waiting for the device to be connected and ready.'
-          try:
-            times += 1
-            output = subprocess.check_output(['adb', 'shell',
-                                              'getprop', 'sys.boot_completed'])
-            if '1' in output:
-              print 'Connected'
-              sys.exit(0)
-          except subprocess.CalledProcessError:
-            # no device connected/authorized yet
-            pass
-          time.sleep(5)
-        if kicks >= 3:
-          break
-        print 'Giving the device a "kick" by trying to reboot it.'
-        kicks += 1
-        print subprocess.check_output(['adb', 'reboot'])
-
-      print 'Timed out waiting for device'
-      sys.exit(1)
-      """,
-      infra_step=True)
-
-
-  def compile(self, unused_target, **kwargs):
+  def compile(self, unused_target):
     compiler      = self.m.vars.builder_cfg.get('compiler')
     configuration = self.m.vars.builder_cfg.get('configuration')
     extra_config  = self.m.vars.builder_cfg.get('extra_config', '')
@@ -111,8 +69,6 @@ class GNAndroidFlavorUtils(default_flavor.DefaultFlavorUtils):
     if 'Vulkan' in extra_config:
       args['ndk_api'] = 24
       args['skia_enable_vulkan_debug_layers'] = 'false'
-    if 'FrameworkDefs' in extra_config:
-      args['skia_enable_android_framework_defines'] = 'true'
     if extra_cflags:
       args['extra_cflags'] = repr(extra_cflags).replace("'", '"')
 
@@ -127,9 +83,6 @@ class GNAndroidFlavorUtils(default_flavor.DefaultFlavorUtils):
     self._run('ninja', ninja, '-C', self.out_dir)
 
   def install(self):
-    if 'NexusPlayer' == self.m.vars.builder_cfg.get('model'):
-      self._adb('rebooting device', 'reboot')
-      self._wait_for_device()
     self._adb('mkdir ' + self.device_dirs.resource_dir,
               'shell', 'mkdir', '-p', self.device_dirs.resource_dir)
 
@@ -137,23 +90,24 @@ class GNAndroidFlavorUtils(default_flavor.DefaultFlavorUtils):
   def cleanup_steps(self):
     if self._ever_ran_adb:
       self.m.run(self.m.python.inline, 'dump log', program="""
-      import os
-      import subprocess
-      import sys
-      out = sys.argv[1]
-      log = subprocess.check_output(['adb', 'logcat', '-d'])
-      for line in log.split('\\n'):
-        tokens = line.split()
-        if len(tokens) == 11 and tokens[-7] == 'F' and tokens[-3] == 'pc':
-          addr, path = tokens[-2:]
-          local = os.path.join(out, os.path.basename(path))
-          if os.path.exists(local):
-            sym = subprocess.check_output(['addr2line', '-Cfpe', local, addr])
-            line = line.replace(addr, addr + ' ' + sym.strip())
-        print line
-      """,
-      args=[self.m.vars.skia_out.join(self.m.vars.configuration)],
-      infra_step=True)
+          import os
+          import subprocess
+          import sys
+          out = sys.argv[1]
+          log = subprocess.check_output(['adb', 'logcat', '-d'])
+          for line in log.split('\\n'):
+            tokens = line.split()
+            if len(tokens) == 11 and tokens[-7] == 'F' and tokens[-3] == 'pc':
+              addr, path = tokens[-2:]
+              local = os.path.join(out, os.path.basename(path))
+              if os.path.exists(local):
+                sym = subprocess.check_output(['addr2line', '-Cfpe', local, addr])
+                line = line.replace(addr, addr + ' ' + sym.strip())
+            print line
+          """,
+          args=[self.m.vars.skia_out.join(self.m.vars.configuration)],
+          infra_step=True,
+          abort_on_failure=False)
 
     # Only shutdown the device and quarantine the bot if the first failed step
     # is an infra step. If, instead, we did this for any infra failures, we
@@ -168,7 +122,7 @@ class GNAndroidFlavorUtils(default_flavor.DefaultFlavorUtils):
     if self._ever_ran_adb:
       self._adb('kill adb server', 'kill-server')
 
-  def step(self, name, cmd, env=None, **kwargs):
+  def step(self, name, cmd, **kwargs):
     app = self.m.vars.skia_out.join(self.m.vars.configuration, cmd[0])
     self._adb('push %s' % cmd[0],
               'push', app, self.m.vars.android_bin_dir)
@@ -217,14 +171,16 @@ class GNAndroidFlavorUtils(default_flavor.DefaultFlavorUtils):
         subprocess.check_call(['adb', 'push',
                                os.path.realpath(os.path.join(host, p, f)),
                                os.path.join(device, p, f)])
-    """, args=[host, device], cwd=self.m.vars.skia_dir, infra_step=True)
+    """, args=[host, device], infra_step=True)
 
   def copy_directory_contents_to_host(self, device, host):
     self._adb('pull %s %s' % (device, host), 'pull', device, host)
 
-  def read_file_on_device(self, path):
-    return self._adb('read %s' % path,
-                     'shell', 'cat', path, stdout=self.m.raw_io.output()).stdout
+  def read_file_on_device(self, path, **kwargs):
+    rv = self._adb('read %s' % path,
+                   'shell', 'cat', path, stdout=self.m.raw_io.output(),
+                   **kwargs)
+    return rv.stdout.rstrip() if rv and rv.stdout else None
 
   def remove_file_on_device(self, path):
     self._adb('rm %s' % path, 'shell', 'rm', '-f', path)

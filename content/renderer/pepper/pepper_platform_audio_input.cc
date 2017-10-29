@@ -19,7 +19,6 @@
 #include "content/renderer/render_view_impl.h"
 #include "media/audio/audio_device_description.h"
 #include "ppapi/shared_impl/ppb_audio_config_shared.h"
-#include "url/gurl.h"
 
 namespace content {
 
@@ -27,7 +26,6 @@ namespace content {
 PepperPlatformAudioInput* PepperPlatformAudioInput::Create(
     int render_frame_id,
     const std::string& device_id,
-    const GURL& document_url,
     int sample_rate,
     int frames_per_buffer,
     PepperAudioInputHost* client) {
@@ -35,7 +33,6 @@ PepperPlatformAudioInput* PepperPlatformAudioInput::Create(
       new PepperPlatformAudioInput());
   if (audio_input->Initialize(render_frame_id,
                               device_id,
-                              document_url,
                               sample_rate,
                               frames_per_buffer,
                               client)) {
@@ -82,7 +79,8 @@ void PepperPlatformAudioInput::OnStreamCreated(
     base::SharedMemoryHandle handle,
     base::SyncSocket::Handle socket_handle,
     int length,
-    int total_segments) {
+    int total_segments,
+    bool initially_muted) {
 #if defined(OS_WIN)
   DCHECK(handle.IsValid());
   DCHECK(socket_handle);
@@ -98,8 +96,9 @@ void PepperPlatformAudioInput::OnStreamCreated(
     // If shutdown has occurred, |client_| will be NULL and the handles will be
     // cleaned up on the main thread.
     main_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&PepperPlatformAudioInput::OnStreamCreated, this,
-                              handle, socket_handle, length, total_segments));
+        FROM_HERE,
+        base::Bind(&PepperPlatformAudioInput::OnStreamCreated, this, handle,
+                   socket_handle, length, total_segments, initially_muted));
   } else {
     // Must dereference the client only on the main thread. Shutdown may have
     // occurred while the request was in-flight, so we need to NULL check.
@@ -114,6 +113,8 @@ void PepperPlatformAudioInput::OnStreamCreated(
 }
 
 void PepperPlatformAudioInput::OnError() {}
+
+void PepperPlatformAudioInput::OnMuted(bool is_muted) {}
 
 void PepperPlatformAudioInput::OnIPCClosed() { ipc_.reset(); }
 
@@ -142,7 +143,6 @@ PepperPlatformAudioInput::PepperPlatformAudioInput()
 bool PepperPlatformAudioInput::Initialize(
     int render_frame_id,
     const std::string& device_id,
-    const GURL& document_url,
     int sample_rate,
     int frames_per_buffer,
     PepperAudioInputHost* client) {
@@ -175,7 +175,7 @@ bool PepperPlatformAudioInput::Initialize(
       PP_DEVICETYPE_DEV_AUDIOCAPTURE,
       device_id.empty() ? media::AudioDeviceDescription::kDefaultDeviceId
                         : device_id,
-      document_url,
+      client->pp_instance(),
       base::Bind(&PepperPlatformAudioInput::OnDeviceOpened, this));
   pending_open_device_ = true;
 

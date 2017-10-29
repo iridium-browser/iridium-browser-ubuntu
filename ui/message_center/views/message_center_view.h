@@ -76,7 +76,7 @@ class MESSAGE_CENTER_EXPORT MessageCenterView
 
   // Overridden from views::View:
   void Layout() override;
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
   int GetHeightForWidth(int width) const override;
   bool OnMouseWheel(const ui::MouseWheelEvent& event) override;
   void OnMouseExited(const ui::MouseEvent& event) override;
@@ -122,6 +122,7 @@ class MESSAGE_CENTER_EXPORT MessageCenterView
   void UpdateButtonBarStatus();
   void EnableCloseAllIfAppropriate();
   void SetNotificationViewForTest(MessageView* view);
+  void UpdateNotification(const std::string& notification_id);
 
   MessageCenter* message_center_;  // Weak reference.
   MessageCenterTray* tray_;  // Weak reference.
@@ -155,7 +156,7 @@ class MESSAGE_CENTER_EXPORT MessageCenterView
   // ignored.
   bool is_closing_;
 
-  bool is_clearing_ = false;
+  bool is_clearing_all_notifications_ = false;
   bool is_locked_ = false;
 
   // Current view mode. During animation, it is the target mode.

@@ -30,7 +30,9 @@ import os.path
 import re
 
 
+# Acronyms are kept as all caps.
 ACRONYMS = [
+    '3D',
     'CSSOM',
     'CSS',
     'DNS',
@@ -38,6 +40,7 @@ ACRONYMS = [
     'FTP',
     'HTML',
     'JS',
+    'SMIL',
     'SVG',
     'URL',
     'WOFF',
@@ -69,19 +72,18 @@ def upper_first(name):
     return upper_first_letter(name)
 
 
+def lower_first_letter(name):
+    """Return name with first letter lowercased."""
+    if not name:
+        return ''
+    return name[0].lower() + name[1:]
+
+
 def upper_first_letter(name):
     """Return name with first letter uppercased."""
     if not name:
         return ''
     return name[0].upper() + name[1:]
-
-
-def camel_case(css_name):
-    """Convert hyphen-separated-name to UpperCamelCase.
-
-    E.g., '-foo-bar' becomes 'FooBar'.
-    """
-    return ''.join(upper_first_letter(word) for word in css_name.split('-'))
 
 
 def to_macro_style(name):
@@ -108,12 +110,90 @@ def cpp_name(entry):
 
 
 def enum_for_css_keyword(keyword):
-    return 'CSSValue' + ''.join(camel_case(keyword))
+    return 'CSSValue' + upper_camel_case(keyword)
 
 
 def enum_for_css_property(property_name):
-    return 'CSSProperty' + ''.join(camel_case(property_name))
+    return 'CSSProperty' + upper_camel_case(property_name)
 
 
 def enum_for_css_property_alias(property_name):
-    return 'CSSPropertyAlias' + camel_case(property_name)
+    return 'CSSPropertyAlias' + upper_camel_case(property_name)
+
+# TODO(shend): Merge these with the above methods.
+# and update all the generators to use these ones.
+# TODO(shend): Switch external callers of these methods to use the high level
+# API below instead.
+
+
+def split_name(name):
+    """Splits a name in some format to a list of words"""
+    return re.findall('|'.join(ACRONYMS) + r'|(?:[A-Z][a-z]*)|[a-z]+|(?:\d+[a-z]*)',
+                      upper_first_letter(name))
+
+
+def join_names(*names):
+    """Given a list of names, join them into a single space-separated name."""
+    result = []
+    for name in names:
+        result.extend(split_name(name))
+    return ' '.join(result)
+
+
+def naming_style(f):
+    """Decorator for name utility functions.
+
+    Wraps a name utility function in a function that takes one or more names,
+    splits them into a list of words, and passes the list to the utility function.
+    """
+    def inner(name_or_names):
+        names = name_or_names if isinstance(name_or_names, list) else [name_or_names]
+        words = []
+        for name in names:
+            words.extend(split_name(name))
+        return f(words)
+    return inner
+
+
+@naming_style
+def upper_camel_case(words):
+    return ''.join(upper_first_letter(word) for word in words)
+
+
+@naming_style
+def lower_camel_case(words):
+    return lower_first_letter(upper_camel_case(words))
+
+
+@naming_style
+def snake_case(words):
+    return '_'.join(word.lower() for word in words)
+
+
+# Use these high level naming functions which describe the semantics of the name,
+# rather than a particular style.
+
+
+@naming_style
+def enum_type_name(words):
+    return upper_camel_case(words)
+
+
+@naming_style
+def enum_value_name(words):
+    return 'k' + upper_camel_case(words)
+
+
+@naming_style
+def class_name(words):
+    return upper_camel_case(words)
+
+
+@naming_style
+def class_member_name(words):
+    return snake_case(words) + "_"
+
+
+@naming_style
+def method_name(words):
+    return upper_camel_case(words)

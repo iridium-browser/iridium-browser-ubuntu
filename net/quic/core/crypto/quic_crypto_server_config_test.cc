@@ -16,18 +16,19 @@
 #include "net/quic/core/crypto/quic_random.h"
 #include "net/quic/core/quic_time.h"
 #include "net/quic/platform/api/quic_socket_address.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/quic_crypto_server_config_peer.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace net {
 namespace test {
 
-TEST(QuicCryptoServerConfigTest, ServerConfig) {
+class QuicCryptoServerConfigTest : public QuicTest {};
+
+TEST_F(QuicCryptoServerConfigTest, ServerConfig) {
   QuicRandom* rand = QuicRandom::GetInstance();
   QuicCryptoServerConfig server(QuicCryptoServerConfig::TESTING, rand,
                                 crypto_test_utils::ProofSourceForTesting());
@@ -38,15 +39,13 @@ TEST(QuicCryptoServerConfigTest, ServerConfig) {
 
   // The default configuration should have AES-GCM and at least one ChaCha20
   // cipher.
-  const QuicTag* aead_tags;
-  size_t aead_len;
-  ASSERT_EQ(QUIC_NO_ERROR, message->GetTaglist(kAEAD, &aead_tags, &aead_len));
-  std::vector<QuicTag> aead(aead_tags, aead_tags + aead_len);
+  QuicTagVector aead;
+  ASSERT_EQ(QUIC_NO_ERROR, message->GetTaglist(kAEAD, &aead));
   EXPECT_THAT(aead, ::testing::Contains(kAESG));
   EXPECT_LE(1u, aead.size());
 }
 
-TEST(QuicCryptoServerConfigTest, CompressCerts) {
+TEST_F(QuicCryptoServerConfigTest, CompressCerts) {
   QuicCompressedCertsCache compressed_certs_cache(
       QuicCompressedCertsCache::kQuicCompressedCertsCacheSize);
 
@@ -65,7 +64,7 @@ TEST(QuicCryptoServerConfigTest, CompressCerts) {
   EXPECT_EQ(compressed_certs_cache.Size(), 1u);
 }
 
-TEST(QuicCryptoServerConfigTest, CompressSameCertsTwice) {
+TEST_F(QuicCryptoServerConfigTest, CompressSameCertsTwice) {
   QuicCompressedCertsCache compressed_certs_cache(
       QuicCompressedCertsCache::kQuicCompressedCertsCacheSize);
 
@@ -92,7 +91,7 @@ TEST(QuicCryptoServerConfigTest, CompressSameCertsTwice) {
   EXPECT_EQ(compressed_certs_cache.Size(), 1u);
 }
 
-TEST(QuicCryptoServerConfigTest, CompressDifferentCerts) {
+TEST_F(QuicCryptoServerConfigTest, CompressDifferentCerts) {
   // This test compresses a set of similar but not identical certs. Cache if
   // used should return cache miss and add all the compressed certs.
   QuicCompressedCertsCache compressed_certs_cache(
@@ -125,15 +124,15 @@ TEST(QuicCryptoServerConfigTest, CompressDifferentCerts) {
   static const uint64_t set_hash = 42;
   std::unique_ptr<CommonCertSets> common_sets(
       crypto_test_utils::MockCommonCertSets(certs[0], set_hash, 1));
-  StringPiece different_common_certs(reinterpret_cast<const char*>(&set_hash),
-                                     sizeof(set_hash));
+  QuicStringPiece different_common_certs(
+      reinterpret_cast<const char*>(&set_hash), sizeof(set_hash));
   string compressed3 = QuicCryptoServerConfigPeer::CompressChain(
       &compressed_certs_cache, chain, different_common_certs.as_string(),
       cached_certs, common_sets.get());
   EXPECT_EQ(compressed_certs_cache.Size(), 3u);
 }
 
-class SourceAddressTokenTest : public ::testing::Test {
+class SourceAddressTokenTest : public QuicTest {
  public:
   SourceAddressTokenTest()
       : ip4_(QuicIpAddress::Loopback4()),
@@ -173,14 +172,14 @@ class SourceAddressTokenTest : public ::testing::Test {
   }
 
   HandshakeFailureReason ValidateSourceAddressTokens(string config_id,
-                                                     StringPiece srct,
+                                                     QuicStringPiece srct,
                                                      const QuicIpAddress& ip) {
     return ValidateSourceAddressTokens(config_id, srct, ip, nullptr);
   }
 
   HandshakeFailureReason ValidateSourceAddressTokens(
       string config_id,
-      StringPiece srct,
+      QuicStringPiece srct,
       const QuicIpAddress& ip,
       CachedNetworkParameters* cached_network_params) {
     return peer_.ValidateSourceAddressTokens(
@@ -275,7 +274,7 @@ TEST_F(SourceAddressTokenTest, SourceAddressTokenMultipleAddresses) {
             ValidateSourceAddressTokens(kPrimary, token4or6, ip6_));
 }
 
-class CryptoServerConfigsTest : public ::testing::Test {
+class CryptoServerConfigsTest : public QuicTest {
  public:
   CryptoServerConfigsTest()
       : rand_(QuicRandom::GetInstance()),

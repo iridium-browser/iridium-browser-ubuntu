@@ -9,6 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -256,7 +257,6 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowWebUIBrowserTest,
   base::RunLoop run_loop;
   profiles::CreateSystemProfileForUserManager(
       browser()->profile()->GetPath(),
-      profiles::USER_MANAGER_NO_TUTORIAL,
       profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION,
       base::Bind(&ProfileWindowWebUIBrowserTest::OnSystemProfileCreated,
                  base::Unretained(this),
@@ -280,7 +280,6 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowWebUIBrowserTest,
   base::RunLoop run_loop;
   profiles::CreateSystemProfileForUserManager(
       expected_path,
-      profiles::USER_MANAGER_NO_TUTORIAL,
       profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION,
       base::Bind(&ProfileWindowWebUIBrowserTest::OnSystemProfileCreated,
                  base::Unretained(this),
@@ -289,8 +288,8 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowWebUIBrowserTest,
   run_loop.Run();
 
   ui_test_utils::NavigateToURL(browser(), GURL(url_to_test));
-  EXPECT_TRUE(RunJavascriptTest(
-      "testPodFocused", new base::StringValue(expected_path.AsUTF8Unsafe())));
+  EXPECT_TRUE(RunJavascriptTest("testPodFocused",
+                                base::Value(expected_path.AsUTF8Unsafe())));
 }
 
 #endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)

@@ -16,6 +16,7 @@
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
+#include "core/fpdfapi/parser/fpdf_parser_decode.h"
 #include "third_party/base/logging.h"
 #include "third_party/base/stl_util.h"
 
@@ -68,8 +69,9 @@ std::unique_ptr<CPDF_Object> CPDF_Dictionary::CloneNonCyclic(
   auto pCopy = pdfium::MakeUnique<CPDF_Dictionary>(m_pPool);
   for (const auto& it : *this) {
     if (!pdfium::ContainsKey(*pVisited, it.second.get())) {
-      pCopy->m_Map.insert(std::make_pair(
-          it.first, it.second->CloneNonCyclic(bDirect, pVisited)));
+      std::set<const CPDF_Object*> visited(*pVisited);
+      if (auto obj = it.second->CloneNonCyclic(bDirect, &visited))
+        pCopy->m_Map.insert(std::make_pair(it.first, std::move(obj)));
     }
   }
   return std::move(pCopy);
@@ -115,7 +117,7 @@ int CPDF_Dictionary::GetIntegerFor(const CFX_ByteString& key, int def) const {
   return p ? p->GetInteger() : def;
 }
 
-FX_FLOAT CPDF_Dictionary::GetNumberFor(const CFX_ByteString& key) const {
+float CPDF_Dictionary::GetNumberFor(const CFX_ByteString& key) const {
   CPDF_Object* p = GetObjectFor(key);
   return p ? p->GetNumber() : 0;
 }
@@ -235,4 +237,29 @@ void CPDF_Dictionary::SetMatrixFor(const CFX_ByteString& key,
 
 CFX_ByteString CPDF_Dictionary::MaybeIntern(const CFX_ByteString& str) {
   return m_pPool ? m_pPool->Intern(str) : str;
+}
+
+bool CPDF_Dictionary::WriteTo(IFX_ArchiveStream* archive) const {
+  if (!archive->WriteString("<<"))
+    return false;
+
+  for (const auto& it : *this) {
+    const CFX_ByteString& key = it.first;
+    CPDF_Object* pValue = it.second.get();
+    if (!archive->WriteString("/") ||
+        !archive->WriteString(PDF_NameEncode(key).AsStringC())) {
+      return false;
+    }
+
+    if (!pValue->IsInline()) {
+      if (!archive->WriteString(" ") ||
+          !archive->WriteDWord(pValue->GetObjNum()) ||
+          !archive->WriteString(" 0 R")) {
+        return false;
+      }
+    } else if (!pValue->WriteTo(archive)) {
+      return false;
+    }
+  }
+  return archive->WriteString(">>");
 }

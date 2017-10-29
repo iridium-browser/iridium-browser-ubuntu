@@ -9,10 +9,11 @@
 #include <time.h>
 
 #include <algorithm>
+#include <cwctype>
 #include <string>
 #include <vector>
 
-#include "core/fxcrt/fx_ext.h"
+#include "core/fxcrt/fx_extension.h"
 #include "fpdfsdk/javascript/JS_Define.h"
 #include "fpdfsdk/javascript/JS_EventHandler.h"
 #include "fpdfsdk/javascript/JS_Object.h"
@@ -37,23 +38,19 @@ JSMethodSpec CJS_Util::MethodSpecs[] = {
 
 IMPLEMENT_JS_CLASS(CJS_Util, util)
 
-#define UTIL_INT 0
-#define UTIL_DOUBLE 1
-#define UTIL_STRING 2
-
 namespace {
 
 // Map PDF-style directives to equivalent wcsftime directives. Not
 // all have direct equivalents, though.
 struct TbConvert {
-  const FX_WCHAR* lpszJSMark;
-  const FX_WCHAR* lpszCppMark;
+  const wchar_t* lpszJSMark;
+  const wchar_t* lpszCppMark;
 };
 
 // Map PDF-style directives lacking direct wcsftime directives to
 // the value with which they will be replaced.
 struct TbConvertAdditional {
-  const FX_WCHAR* lpszJSMark;
+  const wchar_t* lpszJSMark;
   int iValue;
 };
 
@@ -69,40 +66,6 @@ const TbConvert TbConvertTable[] = {
 #endif
 };
 
-int ParseDataType(std::wstring* sFormat) {
-  bool bPercent = false;
-  for (size_t i = 0; i < sFormat->length(); ++i) {
-    wchar_t c = (*sFormat)[i];
-    if (c == L'%') {
-      bPercent = true;
-      continue;
-    }
-
-    if (bPercent) {
-      if (c == L'c' || c == L'C' || c == L'd' || c == L'i' || c == L'o' ||
-          c == L'u' || c == L'x' || c == L'X') {
-        return UTIL_INT;
-      }
-      if (c == L'e' || c == L'E' || c == L'f' || c == L'g' || c == L'G') {
-        return UTIL_DOUBLE;
-      }
-      if (c == L's' || c == L'S') {
-        // Map s to S since we always deal internally
-        // with wchar_t strings.
-        (*sFormat)[i] = L'S';
-        return UTIL_STRING;
-      }
-      if (c == L'.' || c == L'+' || c == L'-' || c == L'#' || c == L' ' ||
-          FXSYS_iswdigit(c)) {
-        continue;
-      }
-      break;
-    }
-  }
-
-  return -1;
-}
-
 }  // namespace
 
 util::util(CJS_Object* pJSObject) : CJS_EmbedObj(pJSObject) {}
@@ -113,40 +76,41 @@ bool util::printf(CJS_Runtime* pRuntime,
                   const std::vector<CJS_Value>& params,
                   CJS_Value& vRet,
                   CFX_WideString& sError) {
-  int iSize = params.size();
+  const size_t iSize = params.size();
   if (iSize < 1)
     return false;
-  std::wstring c_ConvChar(params[0].ToCFXWideString(pRuntime).c_str());
-  std::vector<std::wstring> c_strConvers;
+
+  std::wstring unsafe_fmt_string(params[0].ToCFXWideString(pRuntime).c_str());
+  std::vector<std::wstring> unsafe_conversion_specifiers;
   int iOffset = 0;
   int iOffend = 0;
-  c_ConvChar.insert(c_ConvChar.begin(), L'S');
+  unsafe_fmt_string.insert(unsafe_fmt_string.begin(), L'S');
   while (iOffset != -1) {
-    iOffend = c_ConvChar.find(L"%", iOffset + 1);
+    iOffend = unsafe_fmt_string.find(L"%", iOffset + 1);
     std::wstring strSub;
     if (iOffend == -1)
-      strSub = c_ConvChar.substr(iOffset);
+      strSub = unsafe_fmt_string.substr(iOffset);
     else
-      strSub = c_ConvChar.substr(iOffset, iOffend - iOffset);
-    c_strConvers.push_back(strSub);
+      strSub = unsafe_fmt_string.substr(iOffset, iOffend - iOffset);
+    unsafe_conversion_specifiers.push_back(strSub);
     iOffset = iOffend;
   }
 
   std::wstring c_strResult;
-  std::wstring c_strFormat;
-  for (int iIndex = 0; iIndex < (int)c_strConvers.size(); iIndex++) {
-    c_strFormat = c_strConvers[iIndex];
+  for (size_t iIndex = 0; iIndex < unsafe_conversion_specifiers.size();
+       ++iIndex) {
+    std::wstring c_strFormat = unsafe_conversion_specifiers[iIndex];
     if (iIndex == 0) {
       c_strResult = c_strFormat;
       continue;
     }
 
-    CFX_WideString strSegment;
     if (iIndex >= iSize) {
       c_strResult += c_strFormat;
       continue;
     }
 
+    CFX_WideString strSegment;
     switch (ParseDataType(&c_strFormat)) {
       case UTIL_INT:
         strSegment.Format(c_strFormat.c_str(), params[iIndex].ToInt(pRuntime));
@@ -160,10 +124,10 @@ bool util::printf(CJS_Runtime* pRuntime,
                           params[iIndex].ToCFXWideString(pRuntime).c_str());
         break;
       default:
-        strSegment.Format(L"%S", c_strFormat.c_str());
+        strSegment.Format(L"%ls", c_strFormat.c_str());
         break;
     }
-    c_strResult += strSegment.GetBuffer(strSegment.GetLength() + 1);
+    c_strResult += strSegment.c_str();
   }
 
   c_strResult.erase(c_strResult.begin());
@@ -175,12 +139,12 @@ bool util::printd(CJS_Runtime* pRuntime,
                   const std::vector<CJS_Value>& params,
                   CJS_Value& vRet,
                   CFX_WideString& sError) {
-  int iSize = params.size();
+  const size_t iSize = params.size();
   if (iSize < 2)
     return false;
 
-  CJS_Value p1 = params[0];
-  CJS_Value p2 = params[1];
+  const CJS_Value& p1 = params[0];
+  const CJS_Value& p2 = params[1];
   CJS_Date jsDate;
   if (!p2.ConvertToDate(pRuntime, jsDate)) {
     sError = JSGetStringFromID(IDS_STRING_JSPRINT1);
@@ -248,24 +212,26 @@ bool util::printd(CJS_Runtime* pRuntime,
     }
 
     int iYear = jsDate.GetYear(pRuntime);
+    if (iYear < 0) {
+      sError = JSGetStringFromID(IDS_STRING_JSVALUEERROR);
+      return false;
+    }
+
     int iMonth = jsDate.GetMonth(pRuntime);
     int iDay = jsDate.GetDay(pRuntime);
     int iHour = jsDate.GetHours(pRuntime);
     int iMin = jsDate.GetMinutes(pRuntime);
     int iSec = jsDate.GetSeconds(pRuntime);
 
-    TbConvertAdditional cTableAd[] = {
+    static const TbConvertAdditional cTableAd[] = {
         {L"m", iMonth + 1}, {L"d", iDay},
         {L"H", iHour},      {L"h", iHour > 12 ? iHour - 12 : iHour},
         {L"M", iMin},       {L"s", iSec},
     };
 
     for (size_t i = 0; i < FX_ArraySize(cTableAd); ++i) {
-      wchar_t tszValue[16];
       CFX_WideString sValue;
       sValue.Format(L"%d", cTableAd[i].iValue);
-      memcpy(tszValue, (wchar_t*)sValue.GetBuffer(sValue.GetLength() + 1),
-             (sValue.GetLength() + 1) * sizeof(wchar_t));
 
       int iStart = 0;
       int iEnd;
@@ -276,7 +242,8 @@ bool util::printd(CJS_Runtime* pRuntime,
             continue;
           }
         }
-        cFormat.replace(iEnd, FXSYS_wcslen(cTableAd[i].lpszJSMark), tszValue);
+        cFormat.replace(iEnd, FXSYS_wcslen(cTableAd[i].lpszJSMark),
+                        sValue.c_str());
         iStart = iEnd;
       }
     }
@@ -290,7 +257,7 @@ bool util::printd(CJS_Runtime* pRuntime,
     time.tm_sec = iSec;
 
     wchar_t buf[64] = {};
-    wcsftime(buf, 64, cFormat.c_str(), &time);
+    FXSYS_wcsftime(buf, 64, cFormat.c_str(), &time);
     cFormat = buf;
     vRet = CJS_Value(pRuntime, cFormat.c_str());
     return true;
@@ -318,10 +285,10 @@ bool util::printx(CJS_Runtime* pRuntime,
 
 enum CaseMode { kPreserveCase, kUpperCase, kLowerCase };
 
-static FX_WCHAR TranslateCase(FX_WCHAR input, CaseMode eMode) {
-  if (eMode == kLowerCase && input >= 'A' && input <= 'Z')
+static wchar_t TranslateCase(wchar_t input, CaseMode eMode) {
+  if (eMode == kLowerCase && FXSYS_isupper(input))
     return input | 0x20;
-  if (eMode == kUpperCase && input >= 'a' && input <= 'z')
+  if (eMode == kUpperCase && FXSYS_islower(input))
     return input & ~0x20;
   return input;
 }
@@ -366,9 +333,7 @@ CFX_WideString util::printx(const CFX_WideString& wsFormat,
       } break;
       case 'X': {
         if (iSourceIdx < wsSource.GetLength()) {
-          if ((wsSource[iSourceIdx] >= '0' && wsSource[iSourceIdx] <= '9') ||
-              (wsSource[iSourceIdx] >= 'a' && wsSource[iSourceIdx] <= 'z') ||
-              (wsSource[iSourceIdx] >= 'A' && wsSource[iSourceIdx] <= 'Z')) {
+          if (FXSYS_iswalnum(wsSource[iSourceIdx])) {
             wsResult += TranslateCase(wsSource[iSourceIdx], eCaseMode);
             ++iFormatIdx;
           }
@@ -379,8 +344,7 @@ CFX_WideString util::printx(const CFX_WideString& wsFormat,
       } break;
       case 'A': {
         if (iSourceIdx < wsSource.GetLength()) {
-          if ((wsSource[iSourceIdx] >= 'a' && wsSource[iSourceIdx] <= 'z') ||
-              (wsSource[iSourceIdx] >= 'A' && wsSource[iSourceIdx] <= 'Z')) {
+          if (FXSYS_iswalpha(wsSource[iSourceIdx])) {
             wsResult += TranslateCase(wsSource[iSourceIdx], eCaseMode);
             ++iFormatIdx;
           }
@@ -391,7 +355,7 @@ CFX_WideString util::printx(const CFX_WideString& wsFormat,
       } break;
       case '9': {
         if (iSourceIdx < wsSource.GetLength()) {
-          if (wsSource[iSourceIdx] >= '0' && wsSource[iSourceIdx] <= '9') {
+          if (std::iswdigit(wsSource[iSourceIdx])) {
             wsResult += wsSource[iSourceIdx];
             ++iFormatIdx;
           }
@@ -421,8 +385,7 @@ bool util::scand(CJS_Runtime* pRuntime,
                  const std::vector<CJS_Value>& params,
                  CJS_Value& vRet,
                  CFX_WideString& sError) {
-  int iSize = params.size();
-  if (iSize < 2)
+  if (params.size() < 2)
     return false;
 
   CFX_WideString sFormat = params[0].ToCFXWideString(pRuntime);
@@ -456,7 +419,89 @@ bool util::byteToChar(CJS_Runtime* pRuntime,
     return false;
   }
 
-  CFX_WideString wStr(static_cast<FX_WCHAR>(arg));
+  CFX_WideString wStr(static_cast<wchar_t>(arg));
   vRet = CJS_Value(pRuntime, wStr.c_str());
   return true;
+}
+
+// Ensure that sFormat contains at most one well-understood printf formatting
+// directive which is safe to use with a single argument, and return the type
+// of argument expected, or -1 otherwise. If -1 is returned, it is NOT safe
+// to use sFormat with printf() and it must be copied byte-by-byte.
+int util::ParseDataType(std::wstring* sFormat) {
+  enum State { BEFORE, FLAGS, WIDTH, PRECISION, SPECIFIER, AFTER };
+
+  int result = -1;
+  State state = BEFORE;
+  size_t precision_digits = 0;
+  size_t i = 0;
+  while (i < sFormat->length()) {
+    wchar_t c = (*sFormat)[i];
+    switch (state) {
+      case BEFORE:
+        if (c == L'%')
+          state = FLAGS;
+        break;
+      case FLAGS:
+        if (c == L'+' || c == L'-' || c == L'#' || c == L' ') {
+          // Stay in same state.
+        } else {
+          state = WIDTH;
+          continue;  // Re-process same character.
+        }
+        break;
+      case WIDTH:
+        if (c == L'*')
+          return -1;
+        if (std::iswdigit(c)) {
+          // Stay in same state.
+        } else if (c == L'.') {
+          state = PRECISION;
+        } else {
+          state = SPECIFIER;
+          continue;  // Re-process same character.
+        }
+        break;
+      case PRECISION:
+        if (c == L'*')
+          return -1;
+        if (std::iswdigit(c)) {
+          // Stay in same state.
+          ++precision_digits;
+        } else {
+          state = SPECIFIER;
+          continue;  // Re-process same character.
+        }
+        break;
+      case SPECIFIER:
+        if (c == L'c' || c == L'C' || c == L'd' || c == L'i' || c == L'o' ||
+            c == L'u' || c == L'x' || c == L'X') {
+          result = UTIL_INT;
+        } else if (c == L'e' || c == L'E' || c == L'f' || c == L'g' ||
+                   c == L'G') {
+          result = UTIL_DOUBLE;
+        } else if (c == L's' || c == L'S') {
+          // Map s to S since we always deal internally with wchar_t strings.
+          // TODO(tsepez): Probably 100% borked. %S is not a standard
+          // conversion.
+          (*sFormat)[i] = L'S';
+          result = UTIL_STRING;
+        } else {
+          return -1;
+        }
+        state = AFTER;
+        break;
+      case AFTER:
+        if (c == L'%')
+          return -1;
+        // Stay in same state until string exhausted.
+        break;
+    }
+    ++i;
+  }
+  // See https://crbug.com/740166
+  if (result == UTIL_INT && precision_digits > 2)
+    return -1;
+
+  return result;
 }

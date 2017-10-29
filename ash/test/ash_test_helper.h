@@ -8,24 +8,35 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
+#include "ash/session/test_session_controller_client.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/test/scoped_command_line.h"
 #include "ui/aura/test/mus/test_window_tree_client_setup.h"
 
 namespace aura {
 class Window;
 class WindowTreeClientPrivate;
-}  // namespace aura
+}
 
 namespace display {
 class Display;
 }
 
+namespace mash {
+namespace test {
+class MashTestSuite;
+}
+}
+
 namespace ui {
 class ScopedAnimationDurationScaleMode;
-}  // namespace ui
+class InputDeviceClient;
+}
 
 namespace wm {
 class WMState;
@@ -33,19 +44,18 @@ class WMState;
 
 namespace ash {
 
+class AshTestEnvironment;
+class AshTestViewsDelegate;
 class RootWindowController;
+class TestScreenshotDelegate;
+class TestShellDelegate;
+class TestSessionControllerClient;
+
+enum class Config;
 
 namespace mus {
 class WindowManagerApplication;
 }
-
-namespace test {
-
-class AshTestEnvironment;
-class AshTestViewsDelegate;
-class TestScreenshotDelegate;
-class TestShellDelegate;
-class TestSessionStateDelegate;
 
 // A helper class that does common initialization required for Ash. Creates a
 // root window and an ash::Shell instance with a test delegate.
@@ -53,6 +63,10 @@ class AshTestHelper {
  public:
   explicit AshTestHelper(AshTestEnvironment* ash_test_environment);
   ~AshTestHelper();
+
+  // Returns the configuration that tests are run in. See ash::Config enum for
+  // details.
+  static Config config() { return config_; }
 
   // Creates the ash::Shell and performs associated initialization.  Set
   // |start_session| to true if the user should log in before the test is run.
@@ -68,8 +82,6 @@ class AshTestHelper {
 
   void RunAllPendingInMessageLoop();
 
-  static TestSessionStateDelegate* GetTestSessionStateDelegate();
-
   TestShellDelegate* test_shell_delegate() { return test_shell_delegate_; }
   void set_test_shell_delegate(TestShellDelegate* test_shell_delegate) {
     test_shell_delegate_ = test_shell_delegate;
@@ -77,12 +89,11 @@ class AshTestHelper {
   TestScreenshotDelegate* test_screenshot_delegate() {
     return test_screenshot_delegate_;
   }
-  AshTestViewsDelegate* views_delegate() { return views_delegate_.get(); }
+  AshTestViewsDelegate* test_views_delegate() {
+    return test_views_delegate_.get();
+  }
 
   AshTestEnvironment* ash_test_environment() { return ash_test_environment_; }
-
-  // Version of DisplayManagerTestApi::UpdateDisplay() for mash.
-  void UpdateDisplayForMash(const std::string& display_spec);
 
   display::Display GetSecondaryDisplay();
 
@@ -90,8 +101,25 @@ class AshTestHelper {
   mus::WindowManagerApplication* window_manager_app() {
     return window_manager_app_.get();
   }
+  aura::TestWindowTreeClientSetup* window_tree_client_setup() {
+    return &window_tree_client_setup_;
+  }
+
+  TestSessionControllerClient* test_session_controller_client() {
+    return session_controller_client_.get();
+  }
+  void set_test_session_controller_client(
+      std::unique_ptr<TestSessionControllerClient> session_controller_client) {
+    session_controller_client_ = std::move(session_controller_client);
+  }
+
+  void reset_commandline() { command_line_.reset(); }
 
  private:
+  // These TestSuites need to manipulate |config_|.
+  friend class AshTestSuite;
+  friend class mash::test::MashTestSuite;
+
   // Called when running in mash to create the WindowManager.
   void CreateMashWindowManager();
 
@@ -104,22 +132,17 @@ class AshTestHelper {
       const std::string& display_spec,
       int* next_x);
 
-  // Updates an existing display based on |display_spec|.
-  void UpdateDisplay(RootWindowController* root_window_controller,
-                     const std::string& display_spec,
-                     int* next_x);
-
-  std::vector<RootWindowController*> GetRootsOrderedByDisplayId();
+  static Config config_;
 
   AshTestEnvironment* ash_test_environment_;  // Not owned.
   TestShellDelegate* test_shell_delegate_;  // Owned by ash::Shell.
   std::unique_ptr<ui::ScopedAnimationDurationScaleMode> zero_duration_mode_;
 
-  // Owned by ash::AcceleratorController
+  // Owned by ash::AcceleratorController.
   TestScreenshotDelegate* test_screenshot_delegate_;
 
   std::unique_ptr<::wm::WMState> wm_state_;
-  std::unique_ptr<AshTestViewsDelegate> views_delegate_;
+  std::unique_ptr<AshTestViewsDelegate> test_views_delegate_;
 
   // Check if DBus Thread Manager was initialized here.
   bool dbus_thread_manager_initialized_;
@@ -132,10 +155,15 @@ class AshTestHelper {
   // Id for the next Display created by CreateRootWindowController().
   int64_t next_display_id_ = 1;
 
+  std::unique_ptr<TestSessionControllerClient> session_controller_client_;
+
+  std::unique_ptr<ui::InputDeviceClient> input_device_client_;
+
+  std::unique_ptr<base::test::ScopedCommandLine> command_line_;
+
   DISALLOW_COPY_AND_ASSIGN(AshTestHelper);
 };
 
-}  // namespace test
 }  // namespace ash
 
 #endif  // ASH_TEST_ASH_TEST_HELPER_H_

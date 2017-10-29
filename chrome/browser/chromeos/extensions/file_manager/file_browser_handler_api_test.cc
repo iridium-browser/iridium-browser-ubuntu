@@ -13,6 +13,7 @@
 #include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -23,6 +24,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/api_test_utils.h"
+#include "extensions/browser/extension_function_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/test/result_catcher.h"
 #include "storage/browser/fileapi/external_mount_points.h"
@@ -69,6 +71,12 @@ void ExpectFileContentEquals(const base::FilePath& selected_path,
   EXPECT_EQ(expected_contents, test_file_contents);
 }
 
+bool OverrideFunction(const std::string& name,
+                      extensions::ExtensionFunctionFactory factory) {
+  return ExtensionFunctionRegistry::GetInstance()->OverrideFunctionForTesting(
+      name, factory);
+}
+
 // Mocks FileSelector used by FileBrowserHandlerInternalSelectFileFunction.
 // When |SelectFile| is called, it will check that file name suggestion is as
 // expected, and respond to the extension function with specified selection
@@ -107,7 +115,7 @@ class MockFileSelector : public file_manager::FileSelector {
     // The callback will take a reference to the function and keep it alive.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(
+        base::BindOnce(
             &FileBrowserHandlerInternalSelectFileFunction::OnFilePathSelected,
             function, success_, selected_path_));
     delete this;
@@ -267,7 +275,7 @@ IN_PROC_BROWSER_TEST_F(FileBrowserHandlerExtensionTest, EndToEnd) {
   SetTestCases(&test_cases);
 
   // Override extension function that will be used during the test.
-  ASSERT_TRUE(extensions::ExtensionFunctionDispatcher::OverrideFunction(
+  ASSERT_TRUE(OverrideFunction(
       "fileBrowserHandlerInternal.selectFile",
       FileBrowserHandlerExtensionTest::TestSelectFileFunctionFactory));
 
@@ -293,8 +301,10 @@ IN_PROC_BROWSER_TEST_F(FileBrowserHandlerExtensionTest, EndToEnd) {
 
   // Let's check that the file has the expected content.
   const std::string expected_contents = "hello from test extension.";
-  content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&ExpectFileContentEquals, selected_path, expected_contents));
+  base::PostTaskWithTraits(FROM_HERE,
+                           {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+                           base::BindOnce(&ExpectFileContentEquals,
+                                          selected_path, expected_contents));
 
   // Make sure test doesn't finish until we check on file thread that the
   // selected file's content is as expected.

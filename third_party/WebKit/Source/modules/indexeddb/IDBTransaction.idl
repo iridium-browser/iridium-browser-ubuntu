@@ -37,13 +37,13 @@ enum IDBTransactionMode {
 [
     ActiveScriptWrappable,
     DependentLifetime,
-    Exposed=(Window,Worker),
+    Exposed=(Window,Worker)
 ] interface IDBTransaction : EventTarget {
 
     // Properties
     readonly attribute DOMStringList objectStoreNames;
     readonly attribute IDBTransactionMode mode;
-    readonly attribute IDBDatabase db;
+    [SameObject] readonly attribute IDBDatabase db;
     readonly attribute DOMException error;
 
     // Methods

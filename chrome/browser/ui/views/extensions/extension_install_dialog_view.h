@@ -50,9 +50,11 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
   // the contents of the DialogView.
   const views::ScrollView* scroll_view() const { return scroll_view_; }
 
+  static void SetInstallButtonDelayForTesting(int timeout_in_ms);
+
  private:
   // views::View:
-  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
+  void VisibilityChanged(views::View* starting_from, bool is_visible) override;
 
   // views::DialogDelegateView:
   int GetDialogButtons() const override;
@@ -62,14 +64,17 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
   bool Accept() override;
   ui::ModalType GetModalType() const override;
   void Layout() override;
-  gfx::Size GetPreferredSize() const override;
   views::View* CreateExtraView() override;
+  bool IsDialogButtonEnabled(ui::DialogButton button) const override;
 
   // views::LinkListener:
   void LinkClicked(views::Link* source, int event_flags) override;
 
   // Initializes the dialog view, adding in permissions if they exist.
   void InitView();
+
+  // Enables the install button and updates the dialog buttons.
+  void EnableInstallButton();
 
   // Adds permissions of |perm_type| to the dialog view if they exist.
   bool AddPermissions(views::GridLayout* layout,
@@ -102,15 +107,18 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
   // collapsible/expandable sections).
   views::ScrollView* scroll_view_;
 
-  // The preferred size of the dialog.
-  gfx::Size dialog_size_;
-
   // ExperienceSampling: Track this UI event.
   std::unique_ptr<extensions::ExperienceSamplingEvent> sampling_event_;
 
   // Set to true once the user's selection has been received and the callback
   // has been run.
   bool handled_result_;
+
+  // Used to delay the activation of the install button.
+  base::OneShotTimer timer_;
+
+  // Used to determine whether the install button should be enabled.
+  bool install_button_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionInstallDialogView);
 };
@@ -156,7 +164,7 @@ class ExpandableContainerView : public views::View,
     ~DetailsView() override {}
 
     // views::View:
-    gfx::Size GetPreferredSize() const override;
+    gfx::Size CalculatePreferredSize() const override;
 
     void AddDetail(const base::string16& detail);
 

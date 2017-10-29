@@ -9,6 +9,7 @@
 #include <limits>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "base/base64.h"
 #include "base/location.h"
@@ -17,6 +18,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -37,8 +39,63 @@ using std::string;
 namespace syncer {
 namespace syncable {
 
+// Must be in exact same order as fields in entry_kernel.h.
+const ColumnSpec g_metas_columns[] = {
+    //////////////////////////////////////
+    // int64s
+    {"metahandle", "bigint primary key ON CONFLICT FAIL"},
+    {"base_version", "bigint default " CHANGES_VERSION_STRING},
+    {"server_version", "bigint default 0"},
+    // This is the item ID that we store for the embedding application.
+    {"local_external_id", "bigint default 0"},
+    {"transaction_version", "bigint default 0"},
+    // These timestamps are kept in the same format as that of the
+    // protocol (ms since Unix epoch).
+    {"mtime", "bigint default 0"},
+    {"server_mtime", "bigint default 0"},
+    {"ctime", "bigint default 0"},
+    {"server_ctime", "bigint default 0"},
+    //////////////////////////////////////
+    // Ids
+    {"id", "varchar(255) default \"r\""},
+    {"parent_id", "varchar(255) default \"r\""},
+    {"server_parent_id", "varchar(255) default \"r\""},
+    //////////////////////////////////////
+    // bits
+    {"is_unsynced", "bit default 0"},
+    {"is_unapplied_update", "bit default 0"},
+    {"is_del", "bit default 0"},
+    {"is_dir", "bit default 0"},
+    {"server_is_dir", "bit default 0"},
+    {"server_is_del", "bit default 0"},
+    //////////////////////////////////////
+    // Strings
+    {"non_unique_name", "varchar"},
+    {"server_non_unique_name", "varchar(255)"},
+    {"unique_server_tag", "varchar"},
+    {"unique_client_tag", "varchar"},
+    {"unique_bookmark_tag", "varchar"},
+    //////////////////////////////////////
+    // Blobs (serialized protos).
+    {"specifics", "blob"},
+    {"server_specifics", "blob"},
+    {"base_server_specifics", "blob"},
+    //////////////////////////////////////
+    // Blobs (positions).
+    {"server_unique_position", "blob"},
+    {"unique_position", "blob"},
+    //////////////////////////////////////
+    // AttachmentMetadata is a proto that contains all the metadata associated
+    // with an entry's attachments.  Each entry has only one AttachmentMetadata
+    // proto.  We store a single proto per entry (as opposed to one for each
+    // attachment) because it simplifies the database schema and implementation
+    // of
+    // DirectoryBackingStore.
+    {"attachment_metadata", "blob"},
+    {"server_attachment_metadata", "blob"}};
+
 // Increment this version whenever updating DB tables.
-const int32_t kCurrentDBVersion = 90;
+const int32_t kCurrentDBVersion = 91;
 
 // The current database page size in Kilobytes.
 const int32_t kCurrentPageSizeKB = 32768;
@@ -203,6 +260,8 @@ void OnSqliteError(const base::Closure& catastrophic_error_handler,
 string ComposeCreateTableColumnSpecs() {
   const ColumnSpec* begin = g_metas_columns;
   const ColumnSpec* end = g_metas_columns + arraysize(g_metas_columns);
+  // Verify that the array was fully initialized.
+  DCHECK(g_metas_columns[arraysize(g_metas_columns) - 1].name != nullptr);
   string query;
   query.reserve(kUpdateStatementBufferSize);
   char separator = '(';
@@ -281,6 +340,7 @@ DirectoryBackingStore::DirectoryBackingStore(const string& dir_name,
 }
 
 DirectoryBackingStore::~DirectoryBackingStore() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
 bool DirectoryBackingStore::DeleteEntries(EntryTable from,
@@ -314,7 +374,7 @@ bool DirectoryBackingStore::DeleteEntries(EntryTable from,
 
 bool DirectoryBackingStore::SaveChanges(
     const Directory::SaveChangesSnapshot& snapshot) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(db_->is_open());
 
   // Back out early if there is nothing to write.
@@ -573,6 +633,11 @@ bool DirectoryBackingStore::InitializeTables() {
       version_on_disk = 90;
   }
 
+  if (version_on_disk == 90) {
+    if (MigrateVersion90To91())
+      version_on_disk = 91;
+  }
+
   // If one of the migrations requested it, drop columns that aren't current.
   // It's only safe to do this after migrating all the way to the current
   // version.
@@ -710,13 +775,11 @@ bool DirectoryBackingStore::LoadDeleteJournals(JournalIndex* delete_journals) {
 
   while (s.Step()) {
     int total_entry_copies;
-    std::unique_ptr<EntryKernel> kernel_ptr =
-        UnpackEntry(&s, &total_entry_copies);
+    std::unique_ptr<EntryKernel> kernel = UnpackEntry(&s, &total_entry_copies);
     // A null kernel is evidence of external data corruption.
-    if (!kernel_ptr)
+    if (!kernel)
       return false;
-    EntryKernel* kernel = kernel_ptr.get();
-    (*delete_journals)[kernel] = std::move(kernel_ptr);
+    DeleteJournal::AddEntryToJournalIndex(delete_journals, std::move(kernel));
   }
   return s.Succeeded();
 }
@@ -1472,6 +1535,42 @@ bool DirectoryBackingStore::MigrateVersion89To90() {
   return true;
 }
 
+bool DirectoryBackingStore::MigrateVersion90To91() {
+  // This change cleared the parent_id field for non-hierarchy datatypes.
+  // These datatypes have implicit roots, so storing the parent is a waste of
+  // storage and memory space. There was no schema change, just a cleanup.
+  sql::Statement get(
+      db_->GetUniqueStatement("SELECT "
+                              "  metahandle, "
+                              "  specifics, "
+                              "  is_dir "
+                              "FROM metas WHERE parent_id IS NOT NULL"));
+
+  sql::Statement clear_parent_id(db_->GetUniqueStatement(
+      "UPDATE metas SET parent_id = NULL WHERE metahandle = ?"));
+
+  while (get.Step()) {
+    sync_pb::EntitySpecifics specifics;
+    specifics.ParseFromArray(get.ColumnBlob(1), get.ColumnByteLength(1));
+
+    ModelType model_type =
+        ModelIdToModelTypeEnum(get.ColumnBlob(1), get.ColumnByteLength(1));
+    bool is_dir = get.ColumnBool(2);
+
+    if (model_type != UNSPECIFIED && !TypeSupportsHierarchy(model_type) &&
+        !is_dir) {
+      clear_parent_id.BindInt64(0, get.ColumnInt64(0));
+
+      if (!clear_parent_id.Run())
+        return false;
+      clear_parent_id.Reset(true);
+    }
+  }
+
+  SetVersion(91);
+  return true;
+}
+
 bool DirectoryBackingStore::CreateTables() {
   DVLOG(1) << "First run, creating tables";
 
@@ -1763,7 +1862,7 @@ void DirectoryBackingStore::ResetAndCreateConnection() {
 
 void DirectoryBackingStore::SetCatastrophicErrorHandler(
     const base::Closure& catastrophic_error_handler) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!catastrophic_error_handler.is_null());
   catastrophic_error_handler_ = catastrophic_error_handler;
   sql::Connection::ErrorCallback error_callback =

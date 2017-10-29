@@ -4,6 +4,7 @@
 
 """Prod host metrics"""
 
+from __future__ import absolute_import
 from __future__ import print_function
 
 import collections
@@ -75,7 +76,8 @@ class _AtestSource(object):
     server_dicts = json.loads(self._query_atest_for_servers())
     for server in server_dicts:
       yield Server(
-          hostname=server['hostname'],
+          hostname=_get_hostname(server),
+          data_center=_get_data_center(server),
           status=server['status'],
           roles=tuple(server['roles']),
           created=server['date_created'],
@@ -83,8 +85,31 @@ class _AtestSource(object):
           note=server['note'])
 
 
+def _get_hostname(server):
+    """Get server hostname from an atest dict.
+
+    >>> server = {'hostname': 'foo.example.com'}  # from atest
+    >>> _get_hostname(server)
+    'foo'
+    """
+    return server['hostname'].partition('.')[0]
+
+
+def _get_data_center(server):
+    """Get server data center from an atest dict.
+
+    >>> server = {'hostname': 'foo.mtv.example.com'}  # from atest
+    >>> _get_data_center(server)
+    'mtv'
+    """
+    try:
+      return server['hostname'].split('.')[1]
+    except IndexError:
+      raise ValueError('%r hostname is invalid' % server)
+
+
 Server = collections.namedtuple(
-    'Server', 'hostname,status,roles,created,modified,note')
+    'Server', 'hostname,data_center,status,roles,created,modified,note')
 
 
 class _TsMonSink(object):
@@ -110,6 +135,7 @@ class _TsMonSink(object):
     for server in servers:
       fields = {
           'target_hostname': server.hostname,
+          'target_data_center': server.data_center,
       }
       self._presence_metric.set(True, fields)
       self._roles_metric.set(self._format_roles(server.roles), fields)
@@ -139,6 +165,6 @@ class _LoggingSink(object):
       logger.debug('Server: %r', server)
 
 
-get_prod_hosts = _ProdHostReporter(
+collect_prod_hosts = _ProdHostReporter(
     source=_AtestSource(_ATEST_PROGRAM),
     sinks=(_TsMonSink(_METRIC_ROOT_PATH), _LoggingSink()))

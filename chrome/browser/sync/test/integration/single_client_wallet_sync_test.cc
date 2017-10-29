@@ -19,8 +19,7 @@
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/test/fake_server/fake_server_entity.h"
-#include "components/sync/test/fake_server/unique_client_entity.h"
+#include "components/sync/test/fake_server/fake_server.h"
 #include "content/public/browser/notification_service.h"
 
 using autofill_helper::GetPersonalDataManager;
@@ -52,9 +51,9 @@ void AddDefaultCard(fake_server::FakeServer* server) {
   credit_card->set_status(sync_pb::WalletMaskedCreditCard::VALID);
   credit_card->set_type(kDefaultCardType);
 
-  server->InjectEntity(fake_server::UniqueClientEntity::CreateForInjection(
-      kDefaultCardID,
-      specifics));
+  server->InjectEntity(
+      syncer::PersistentUniqueClientEntity::CreateFromEntitySpecifics(
+          kDefaultCardID, specifics));
 }
 
 }  // namespace
@@ -127,7 +126,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientWalletSyncTest, Download) {
   ASSERT_EQ(autofill::CreditCard::MASKED_SERVER_CARD, card->record_type());
   ASSERT_EQ(kDefaultCardID, card->server_id());
   ASSERT_EQ(base::UTF8ToUTF16(kDefaultCardLastFour), card->LastFourDigits());
-  ASSERT_EQ(autofill::kAmericanExpressCard, card->type());
+  ASSERT_EQ(autofill::kAmericanExpressCard, card->network());
   ASSERT_EQ(kDefaultCardExpMonth, card->expiration_month());
   ASSERT_EQ(kDefaultCardExpYear, card->expiration_year());
   ASSERT_EQ(base::UTF8ToUTF16(kDefaultCardName),

@@ -11,13 +11,20 @@ var startSessionPromise = null;
 var startedConnection = null;
 var reconnectedSession = null;
 var presentationUrl = null;
-if (window.location.href.indexOf('__is_android__=true') >= 0) {
+let params = (new URL(window.location.href)).searchParams;
+
+if (params.get('__is_android__') == 'true') {
   // For android, "google.com/cast" is required in presentation URL.
   // TODO(zqzhang): this requirement may be removed in the future.
   presentationUrl = "https://google.com/cast#__castAppId__=CCCCCCCC/";
+} else if (params.get('__oneUA__') == 'true') {
+  presentationUrl = "presentation_receiver.html";
+} else if (params.get('__oneUANoReceiver__') == 'true') {
+  presentationUrl = "https://www.google.com";
 } else {
-  presentationUrl = "http://www.google.com/#__testprovider__=true";
+  presentationUrl = "test://test";
 }
+
 var startSessionRequest = new PresentationRequest([presentationUrl]);
 var defaultRequestSessionId = null;
 var lastExecutionResult = null;
@@ -115,13 +122,13 @@ function checkStartFailed(expectedErrorName, expectedErrorMessageSubstring) {
     }).catch(function(e) {
       if (expectedErrorName != e.name) {
         sendResult(false, 'Got unexpected error: ' + e.name);
-      }
-      if (e.message.indexOf(expectedErrorMessageSubstring) == -1) {
+      } else if (e.message.indexOf(expectedErrorMessageSubstring) == -1) {
         sendResult(false,
-          'Error message is not correct, it should contain "' +
-          expectedErrorMessageSubstring + '"');
+            'Error message is not correct, it should contain "' +
+            expectedErrorMessageSubstring + '"');
+      } else {
+        sendResult(true, '');
       }
-      sendResult(true, '');
     })
   }
 }
@@ -147,6 +154,7 @@ function closeConnectionAndWaitForStateChange() {
   if (startedConnection) {
     if (startedConnection.state == 'closed') {
       sendResult(false, 'startedConnection is unexpectedly closed.');
+      return;
     }
     startedConnection.onclose = function() {
       sendResult(true, '');
@@ -223,6 +231,26 @@ function sendMessageAndExpectResponse(message) {
     sendResult(true, '');
   };
   startedConnection.send(message);
+}
+
+/**
+ * Sends 'close' to receiver page, and expects receiver page closing
+ * the connection.
+ */
+function initiateCloseFromReceiverPage() {
+  if (!startedConnection) {
+    sendResult(false, 'startedConnection does not exist.');
+    return;
+  }
+  startedConnection.onclose = (event) => {
+    const reason = event.reason;
+    if (reason != 'closed') {
+      sendResult(false, 'Unexpected close reason: ' + reason);
+      return;
+    }
+    sendResult(true, '');
+  };
+  startedConnection.send('close');
 }
 
 /**

@@ -13,6 +13,7 @@
 #include "libANGLE/Buffer.h"
 #include "libANGLE/Config.h"
 #include "libANGLE/Context.h"
+#include "libANGLE/Fence.h"
 #include "libANGLE/Framebuffer.h"
 #include "libANGLE/Program.h"
 #include "libANGLE/Renderbuffer.h"
@@ -181,7 +182,7 @@ void QueryTexParameterBase(const Texture *texture, GLenum pname, ParamType *para
 }
 
 template <typename ParamType>
-void SetTexParameterBase(Texture *texture, GLenum pname, const ParamType *params)
+void SetTexParameterBase(Context *context, Texture *texture, GLenum pname, const ParamType *params)
 {
     ASSERT(texture != nullptr);
 
@@ -227,8 +228,10 @@ void SetTexParameterBase(Texture *texture, GLenum pname, const ParamType *params
             texture->setSwizzleAlpha(ConvertToGLenum(params[0]));
             break;
         case GL_TEXTURE_BASE_LEVEL:
-            texture->setBaseLevel(ConvertToGLuint(params[0]));
+        {
+            context->handleError(texture->setBaseLevel(context, ConvertToGLuint(params[0])));
             break;
+        }
         case GL_TEXTURE_MAX_LEVEL:
             texture->setMaxLevel(ConvertToGLuint(params[0]));
             break;
@@ -382,13 +385,19 @@ void QueryVertexAttribBase(const VertexAttribute &attrib,
             *params = ConvertFromGLboolean<ParamType>(attrib.normalized);
             break;
         case GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING:
-            *params = ConvertFromGLuint<ParamType>(binding.buffer.id());
+            *params = ConvertFromGLuint<ParamType>(binding.getBuffer().id());
             break;
         case GL_VERTEX_ATTRIB_ARRAY_DIVISOR:
-            *params = ConvertFromGLuint<ParamType>(binding.divisor);
+            *params = ConvertFromGLuint<ParamType>(binding.getDivisor());
             break;
         case GL_VERTEX_ATTRIB_ARRAY_INTEGER:
             *params = ConvertFromGLboolean<ParamType>(attrib.pureInteger);
+            break;
+        case GL_VERTEX_ATTRIB_BINDING:
+            *params = ConvertFromGLuint<ParamType>(attrib.bindingIndex);
+            break;
+        case GL_VERTEX_ATTRIB_RELATIVE_OFFSET:
+            *params = ConvertFromGLuint<ParamType>(attrib.relativeOffset);
             break;
         default:
             UNREACHABLE();
@@ -521,6 +530,29 @@ void QueryFramebufferAttachmentParameteriv(const Framebuffer *framebuffer,
             *params = attachmentObject->layer();
             break;
 
+        case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_NUM_VIEWS_ANGLE:
+            *params = attachmentObject->getNumViews();
+            break;
+
+        case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_MULTIVIEW_LAYOUT_ANGLE:
+            *params = static_cast<GLint>(attachmentObject->getMultiviewLayout());
+            break;
+
+        case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_BASE_VIEW_INDEX_ANGLE:
+            *params = attachmentObject->getBaseViewIndex();
+            break;
+
+        case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_VIEWPORT_OFFSETS_ANGLE:
+        {
+            const std::vector<Offset> &offsets = attachmentObject->getMultiviewViewportOffsets();
+            for (size_t i = 0u; i < offsets.size(); ++i)
+            {
+                params[i * 2u]      = offsets[i].x;
+                params[i * 2u + 1u] = offsets[i].y;
+            }
+        }
+        break;
+
         default:
             UNREACHABLE();
             break;
@@ -551,7 +583,7 @@ void QueryBufferPointerv(const Buffer *buffer, GLenum pname, void **params)
     }
 }
 
-void QueryProgramiv(const Program *program, GLenum pname, GLint *params)
+void QueryProgramiv(const Context *context, const Program *program, GLenum pname, GLint *params)
 {
     ASSERT(program != nullptr);
 
@@ -585,7 +617,7 @@ void QueryProgramiv(const Program *program, GLenum pname, GLint *params)
             *params = program->getActiveUniformMaxLength();
             return;
         case GL_PROGRAM_BINARY_LENGTH_OES:
-            *params = program->getBinaryLength();
+            *params = program->getBinaryLength(context);
             return;
         case GL_ACTIVE_UNIFORM_BLOCKS:
             *params = program->getActiveUniformBlockCount();
@@ -604,6 +636,9 @@ void QueryProgramiv(const Program *program, GLenum pname, GLint *params)
             break;
         case GL_PROGRAM_BINARY_RETRIEVABLE_HINT:
             *params = program->getBinaryRetrievableHint();
+            break;
+        case GL_PROGRAM_SEPARABLE:
+            *params = program->isSeparable();
             break;
         default:
             UNREACHABLE();
@@ -665,7 +700,7 @@ void QueryRenderbufferiv(const Context *context,
     }
 }
 
-void QueryShaderiv(const Shader *shader, GLenum pname, GLint *params)
+void QueryShaderiv(const Context *context, Shader *shader, GLenum pname, GLint *params)
 {
     ASSERT(shader != nullptr);
 
@@ -678,16 +713,16 @@ void QueryShaderiv(const Shader *shader, GLenum pname, GLint *params)
             *params = shader->isFlaggedForDeletion();
             return;
         case GL_COMPILE_STATUS:
-            *params = shader->isCompiled() ? GL_TRUE : GL_FALSE;
+            *params = shader->isCompiled(context) ? GL_TRUE : GL_FALSE;
             return;
         case GL_INFO_LOG_LENGTH:
-            *params = shader->getInfoLogLength();
+            *params = shader->getInfoLogLength(context);
             return;
         case GL_SHADER_SOURCE_LENGTH:
             *params = shader->getSourceLength();
             return;
         case GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE:
-            *params = shader->getTranslatedSourceWithDebugInfoLength();
+            *params = shader->getTranslatedSourceWithDebugInfoLength(context);
             return;
         default:
             UNREACHABLE();
@@ -751,12 +786,12 @@ void QueryVertexAttribiv(const VertexAttribute &attrib,
     QueryVertexAttribBase(attrib, binding, currentValueData.FloatValues, pname, params);
 }
 
-void QueryVertexAttribPointerv(const VertexAttribute &attrib, GLenum pname, GLvoid **pointer)
+void QueryVertexAttribPointerv(const VertexAttribute &attrib, GLenum pname, void **pointer)
 {
     switch (pname)
     {
         case GL_VERTEX_ATTRIB_ARRAY_POINTER:
-            *pointer = const_cast<GLvoid *>(attrib.pointer);
+            *pointer = const_cast<void *>(attrib.pointer);
             break;
 
         default:
@@ -801,14 +836,14 @@ void QueryActiveUniformBlockiv(const Program *program,
             *params = ConvertToGLint(uniformBlock.nameWithArrayIndex().size() + 1);
             break;
         case GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS:
-            *params = ConvertToGLint(uniformBlock.memberUniformIndexes.size());
+            *params = ConvertToGLint(uniformBlock.memberIndexes.size());
             break;
         case GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES:
-            for (size_t blockMemberIndex = 0;
-                 blockMemberIndex < uniformBlock.memberUniformIndexes.size(); blockMemberIndex++)
+            for (size_t blockMemberIndex = 0; blockMemberIndex < uniformBlock.memberIndexes.size();
+                 blockMemberIndex++)
             {
                 params[blockMemberIndex] =
-                    ConvertToGLint(uniformBlock.memberUniformIndexes[blockMemberIndex]);
+                    ConvertToGLint(uniformBlock.memberIndexes[blockMemberIndex]);
             }
             break;
         case GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER:
@@ -875,24 +910,70 @@ void QueryFramebufferParameteriv(const Framebuffer *framebuffer, GLenum pname, G
     }
 }
 
-void SetTexParameterf(Texture *texture, GLenum pname, GLfloat param)
+Error QuerySynciv(const FenceSync *sync,
+                  GLenum pname,
+                  GLsizei bufSize,
+                  GLsizei *length,
+                  GLint *values)
 {
-    SetTexParameterBase(texture, pname, &param);
+    ASSERT(sync);
+
+    // All queries return one value, exit early if the buffer can't fit anything.
+    if (bufSize < 1)
+    {
+        if (length != nullptr)
+        {
+            *length = 0;
+        }
+        return NoError();
+    }
+
+    switch (pname)
+    {
+        case GL_OBJECT_TYPE:
+            *values = ConvertToGLint(GL_SYNC_FENCE);
+            break;
+        case GL_SYNC_CONDITION:
+            *values = ConvertToGLint(sync->getCondition());
+            break;
+        case GL_SYNC_FLAGS:
+            *values = ConvertToGLint(sync->getFlags());
+            break;
+        case GL_SYNC_STATUS:
+            ANGLE_TRY(sync->getStatus(values));
+            break;
+
+        default:
+            UNREACHABLE();
+            break;
+    }
+
+    if (length != nullptr)
+    {
+        *length = 1;
+    }
+
+    return NoError();
 }
 
-void SetTexParameterfv(Texture *texture, GLenum pname, const GLfloat *params)
+void SetTexParameterf(Context *context, Texture *texture, GLenum pname, GLfloat param)
 {
-    SetTexParameterBase(texture, pname, params);
+    SetTexParameterBase(context, texture, pname, &param);
 }
 
-void SetTexParameteri(Texture *texture, GLenum pname, GLint param)
+void SetTexParameterfv(Context *context, Texture *texture, GLenum pname, const GLfloat *params)
 {
-    SetTexParameterBase(texture, pname, &param);
+    SetTexParameterBase(context, texture, pname, params);
 }
 
-void SetTexParameteriv(Texture *texture, GLenum pname, const GLint *params)
+void SetTexParameteri(Context *context, Texture *texture, GLenum pname, GLint param)
 {
-    SetTexParameterBase(texture, pname, params);
+    SetTexParameterBase(context, texture, pname, &param);
+}
+
+void SetTexParameteriv(Context *context, Texture *texture, GLenum pname, const GLint *params)
+{
+    SetTexParameterBase(context, texture, pname, params);
 }
 
 void SetSamplerParameterf(Sampler *sampler, GLenum pname, GLfloat param)
@@ -936,6 +1017,109 @@ void SetFramebufferParameteri(Framebuffer *framebuffer, GLenum pname, GLint para
         default:
             UNREACHABLE();
             break;
+    }
+}
+
+void SetProgramParameteri(Program *program, GLenum pname, GLint value)
+{
+    ASSERT(program);
+
+    switch (pname)
+    {
+        case GL_PROGRAM_BINARY_RETRIEVABLE_HINT:
+            program->setBinaryRetrievableHint(value != GL_FALSE);
+            break;
+        case GL_PROGRAM_SEPARABLE:
+            program->setSeparable(value != GL_FALSE);
+            break;
+        default:
+            UNREACHABLE();
+            break;
+    }
+}
+
+GLuint QueryProgramResourceIndex(const Program *program,
+                                 GLenum programInterface,
+                                 const GLchar *name)
+{
+    switch (programInterface)
+    {
+        case GL_PROGRAM_INPUT:
+            return program->getInputResourceIndex(name);
+
+        case GL_PROGRAM_OUTPUT:
+            return program->getOutputResourceIndex(name);
+
+        // TODO(jie.a.chen@intel.com): more interfaces.
+        case GL_UNIFORM:
+        case GL_UNIFORM_BLOCK:
+        case GL_TRANSFORM_FEEDBACK_VARYING:
+        case GL_BUFFER_VARIABLE:
+        case GL_SHADER_STORAGE_BLOCK:
+            UNIMPLEMENTED();
+            return GL_INVALID_INDEX;
+
+        default:
+            UNREACHABLE();
+            return GL_INVALID_INDEX;
+    }
+}
+
+void QueryProgramResourceName(const Program *program,
+                              GLenum programInterface,
+                              GLuint index,
+                              GLsizei bufSize,
+                              GLsizei *length,
+                              GLchar *name)
+{
+    switch (programInterface)
+    {
+        case GL_PROGRAM_INPUT:
+            program->getInputResourceName(index, bufSize, length, name);
+            break;
+
+        case GL_PROGRAM_OUTPUT:
+            program->getOutputResourceName(index, bufSize, length, name);
+            break;
+
+        // TODO(jie.a.chen@intel.com): more interfaces.
+        case GL_UNIFORM:
+        case GL_UNIFORM_BLOCK:
+        case GL_TRANSFORM_FEEDBACK_VARYING:
+        case GL_BUFFER_VARIABLE:
+        case GL_SHADER_STORAGE_BLOCK:
+            UNIMPLEMENTED();
+            break;
+
+        default:
+            UNREACHABLE();
+    }
+}
+
+GLint QueryProgramResourceLocation(const Program *program,
+                                   GLenum programInterface,
+                                   const GLchar *name)
+{
+    switch (programInterface)
+    {
+        case GL_PROGRAM_INPUT:
+            return program->getAttributeLocation(name);
+
+        case GL_PROGRAM_OUTPUT:
+            return program->getFragDataLocation(name);
+
+        // TODO(jie.a.chen@intel.com): more interfaces.
+        case GL_UNIFORM:
+        case GL_UNIFORM_BLOCK:
+        case GL_TRANSFORM_FEEDBACK_VARYING:
+        case GL_BUFFER_VARIABLE:
+        case GL_SHADER_STORAGE_BLOCK:
+            UNIMPLEMENTED();
+            return -1;
+
+        default:
+            UNREACHABLE();
+            return -1;
     }
 }
 

@@ -4,7 +4,7 @@
 
 #include "chrome/browser/android/history/browsing_history_bridge.h"
 
-#include <jni.h>
+#include <utility>
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
@@ -12,18 +12,20 @@
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/browser/profiles/profile_android.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "components/url_formatter/url_formatter.h"
 #include "jni/BrowsingHistoryBridge_jni.h"
 
 const int kMaxQueryCount = 150;
 
-BrowsingHistoryBridge::BrowsingHistoryBridge(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
-    jobject j_profile) {
-  Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
-  browsing_history_service_.reset(new BrowsingHistoryService(profile, this));
+BrowsingHistoryBridge::BrowsingHistoryBridge(JNIEnv* env,
+                                             const JavaParamRef<jobject>& obj,
+                                             bool is_incognito) {
+  Profile* profile = ProfileManager::GetLastUsedProfile();
+  browsing_history_service_.reset(new BrowsingHistoryService(
+      is_incognito ? profile->GetOffTheRecordProfile()
+                   : profile->GetOriginalProfile(),
+      this));
   j_history_service_obj_.Reset(env, obj);
 }
 
@@ -61,32 +63,30 @@ void BrowsingHistoryBridge::OnQueryComplete(
 
   JNIEnv* env = base::android::AttachCurrentThread();
 
-  for (auto it = results->begin(); it != results->end(); ++it) {
-
+  for (const BrowsingHistoryService::HistoryEntry& entry : *results) {
     // TODO(twellington): move the domain logic to BrowsingHistoryServce so it
     // can be shared with BrowsingHistoryHandler.
-    base::string16 domain = url_formatter::IDNToUnicode(it->url.host());
+    base::string16 domain = url_formatter::IDNToUnicode(entry.url.host());
     // When the domain is empty, use the scheme instead. This allows for a
     // sensible treatment of e.g. file: URLs when group by domain is on.
     if (domain.empty())
-      domain = base::UTF8ToUTF16(it->url.scheme() + ":");
+      domain = base::UTF8ToUTF16(entry.url.scheme() + ":");
 
-    std::vector<int64_t> timestamps;
-    for (auto timestampIt = it->all_timestamps.begin();
-         timestampIt != it->all_timestamps.end(); ++timestampIt) {
-      timestamps.push_back(
-          base::Time::FromInternalValue(*timestampIt).ToJavaTime());
-    }
+    // This relies on |all_timestamps| being a sorted data structure.
+    int64_t most_recent_java_timestamp =
+        base::Time::FromInternalValue(*entry.all_timestamps.rbegin())
+            .ToJavaTime();
+    std::vector<int64_t> native_timestamps(entry.all_timestamps.begin(),
+                                           entry.all_timestamps.end());
 
     Java_BrowsingHistoryBridge_createHistoryItemAndAddToList(
         env, j_query_result_obj_.obj(),
-        base::android::ConvertUTF8ToJavaString(env, it->url.spec()),
+        base::android::ConvertUTF8ToJavaString(env, entry.url.spec()),
         base::android::ConvertUTF16ToJavaString(env, domain),
-        base::android::ConvertUTF16ToJavaString(env, it->title),
-        base::android::ToJavaLongArray(env, timestamps),
-        it->blocked_visit);
-
-    timestamps.clear();
+        base::android::ConvertUTF16ToJavaString(env, entry.title),
+        most_recent_java_timestamp,
+        base::android::ToJavaLongArray(env, native_timestamps),
+        entry.blocked_visit);
   }
 
   Java_BrowsingHistoryBridge_onQueryHistoryComplete(
@@ -100,21 +100,17 @@ void BrowsingHistoryBridge::MarkItemForRemoval(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     jstring j_url,
-    const JavaParamRef<jlongArray>& j_timestamps) {
+    const JavaParamRef<jlongArray>& j_native_timestamps) {
   std::unique_ptr<BrowsingHistoryService::HistoryEntry> entry(
       new BrowsingHistoryService::HistoryEntry());
   entry->url = GURL(base::android::ConvertJavaStringToUTF16(env, j_url));
 
   std::vector<int64_t> timestamps;
-  base::android::JavaLongArrayToInt64Vector(env, j_timestamps.obj(),
+  base::android::JavaLongArrayToInt64Vector(env, j_native_timestamps.obj(),
                                             &timestamps);
-  for (auto it = timestamps.begin(); it != timestamps.end(); ++it) {
-    base::Time visit_time = base::Time::FromJavaTime(*it);
-    entry->all_timestamps.insert(visit_time.ToInternalValue());
-  }
+  entry->all_timestamps.insert(timestamps.begin(), timestamps.end());
 
   items_to_remove_.push_back(std::move(entry));
-  timestamps.clear();
 }
 
 void BrowsingHistoryBridge::RemoveItems(JNIEnv* env,
@@ -147,14 +143,10 @@ void BrowsingHistoryBridge::HasOtherFormsOfBrowsingHistory(
       env, j_history_service_obj_.obj(), has_other_forms, has_synced_results);
 }
 
-bool RegisterBrowsingHistoryBridge(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
-
 static jlong Init(JNIEnv* env,
                   const JavaParamRef<jobject>& obj,
-                  const JavaParamRef<jobject>& j_profile) {
+                  jboolean is_incognito) {
   BrowsingHistoryBridge* bridge =
-      new BrowsingHistoryBridge(env, obj, j_profile);
+      new BrowsingHistoryBridge(env, obj, is_incognito);
   return reinterpret_cast<intptr_t>(bridge);
 }

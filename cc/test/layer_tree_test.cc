@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -18,12 +19,10 @@
 #include "cc/input/input_handler.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
-#include "cc/output/buffer_to_texture_target_map.h"
 #include "cc/test/animation_test_common.h"
 #include "cc/test/begin_frame_args_test.h"
 #include "cc/test/fake_layer_tree_host_client.h"
 #include "cc/test/fake_output_surface.h"
-#include "cc/test/test_compositor_frame_sink.h"
 #include "cc/test/test_context_provider.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/trees/layer_tree_host_client.h"
@@ -33,6 +32,8 @@
 #include "cc/trees/proxy_impl.h"
 #include "cc/trees/proxy_main.h"
 #include "cc/trees/single_thread_proxy.h"
+#include "components/viz/common/resources/buffer_to_texture_target_map.h"
+#include "components/viz/test/test_layer_tree_frame_sink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/gfx/geometry/size_conversions.h"
 
@@ -56,19 +57,27 @@ void CreateVirtualViewportLayers(Layer* root_layer,
   inner_viewport_scroll_layer->AddChild(outer_viewport_container_layer);
   outer_viewport_container_layer->AddChild(outer_scroll_layer);
 
-  inner_viewport_scroll_layer->SetScrollClipLayerId(
-      inner_viewport_container_layer->id());
-  outer_scroll_layer->SetScrollClipLayerId(
-      outer_viewport_container_layer->id());
+  inner_viewport_scroll_layer->SetElementId(
+      LayerIdToElementIdForTesting(inner_viewport_scroll_layer->id()));
+  outer_scroll_layer->SetElementId(
+      LayerIdToElementIdForTesting(outer_scroll_layer->id()));
 
   inner_viewport_container_layer->SetBounds(inner_bounds);
+  inner_viewport_scroll_layer->SetScrollable(inner_bounds);
   inner_viewport_scroll_layer->SetBounds(outer_bounds);
   outer_viewport_container_layer->SetBounds(outer_bounds);
+  outer_scroll_layer->SetScrollable(outer_bounds);
 
   inner_viewport_scroll_layer->SetIsContainerForFixedPositionLayers(true);
   outer_scroll_layer->SetIsContainerForFixedPositionLayers(true);
-  host->RegisterViewportLayers(overscroll_elasticity_layer, page_scale_layer,
-                               inner_viewport_scroll_layer, outer_scroll_layer);
+  LayerTreeHost::ViewportLayers viewport_layers;
+  viewport_layers.overscroll_elasticity = overscroll_elasticity_layer;
+  viewport_layers.page_scale = page_scale_layer;
+  viewport_layers.inner_viewport_container = inner_viewport_container_layer;
+  viewport_layers.outer_viewport_container = outer_viewport_container_layer;
+  viewport_layers.inner_viewport_scroll = inner_viewport_scroll_layer;
+  viewport_layers.outer_viewport_scroll = outer_scroll_layer;
+  host->RegisterViewportLayers(viewport_layers);
 }
 
 void CreateVirtualViewportLayers(Layer* root_layer,
@@ -186,6 +195,7 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     if (block_notify_ready_to_activate_for_testing_) {
       notify_ready_to_activate_was_blocked_ = true;
     } else {
+      test_hooks_->WillNotifyReadyToActivateOnThread(this);
       LayerTreeHostImpl::NotifyReadyToActivate();
       test_hooks_->NotifyReadyToActivateOnThread(this);
     }
@@ -208,8 +218,8 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     if (!block && notify_ready_to_activate_was_blocked_) {
       task_runner_provider_->ImplThreadTaskRunner()->PostTask(
           FROM_HERE,
-          base::Bind(&LayerTreeHostImplForTesting::NotifyReadyToActivate,
-                     base::Unretained(this)));
+          base::BindOnce(&LayerTreeHostImplForTesting::NotifyReadyToActivate,
+                         base::Unretained(this)));
       notify_ready_to_activate_was_blocked_ = false;
     }
   }
@@ -218,6 +228,7 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     block_impl_side_invalidation_ = block;
     if (!block_impl_side_invalidation_ && impl_side_invalidation_was_blocked_) {
       RequestImplSideInvalidation();
+      impl_side_invalidation_was_blocked_ = false;
     }
   }
 
@@ -228,8 +239,8 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     test_hooks_->DidActivateTreeOnThread(this);
   }
 
-  bool InitializeRenderer(CompositorFrameSink* compositor_frame_sink) override {
-    bool success = LayerTreeHostImpl::InitializeRenderer(compositor_frame_sink);
+  bool InitializeRenderer(LayerTreeFrameSink* layer_tree_frame_sink) override {
+    bool success = LayerTreeHostImpl::InitializeRenderer(layer_tree_frame_sink);
     test_hooks_->InitializedRendererOnThread(this, success);
     return success;
   }
@@ -269,6 +280,7 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
   }
 
   void RequestImplSideInvalidation() override {
+    test_hooks_->DidReceiveImplSideInvalidationRequest(this);
     if (block_impl_side_invalidation_) {
       impl_side_invalidation_was_blocked_ = true;
       return;
@@ -277,6 +289,12 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     impl_side_invalidation_was_blocked_ = false;
     LayerTreeHostImpl::RequestImplSideInvalidation();
     test_hooks_->DidRequestImplSideInvalidation(this);
+  }
+
+  void DidReceiveCompositorFrameAck() override {
+    test_hooks_->WillReceiveCompositorFrameAckOnThread(this);
+    LayerTreeHostImpl::DidReceiveCompositorFrameAck();
+    test_hooks_->DidReceiveCompositorFrameAckOnThread(this);
   }
 
   AnimationHost* animation_host() const {
@@ -322,17 +340,20 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
                                      top_controls_delta);
   }
 
-  void RequestNewCompositorFrameSink() override {
-    test_hooks_->RequestNewCompositorFrameSink();
+  void RecordWheelAndTouchScrollingCount(bool has_scrolled_by_wheel,
+                                         bool has_scrolled_by_touch) override {}
+
+  void RequestNewLayerTreeFrameSink() override {
+    test_hooks_->RequestNewLayerTreeFrameSink();
   }
 
-  void DidInitializeCompositorFrameSink() override {
-    test_hooks_->DidInitializeCompositorFrameSink();
+  void DidInitializeLayerTreeFrameSink() override {
+    test_hooks_->DidInitializeLayerTreeFrameSink();
   }
 
-  void DidFailToInitializeCompositorFrameSink() override {
-    test_hooks_->DidFailToInitializeCompositorFrameSink();
-    RequestNewCompositorFrameSink();
+  void DidFailToInitializeLayerTreeFrameSink() override {
+    test_hooks_->DidFailToInitializeLayerTreeFrameSink();
+    RequestNewLayerTreeFrameSink();
   }
 
   void WillCommit() override { test_hooks_->WillCommit(); }
@@ -348,12 +369,15 @@ class LayerTreeHostClientForTesting : public LayerTreeHostClient,
   }
 
   void DidSubmitCompositorFrame() override {}
-  void DidLoseCompositorFrameSink() override {}
+  void DidLoseLayerTreeFrameSink() override {}
   void RequestScheduleComposite() override { test_hooks_->ScheduleComposite(); }
   void DidCompletePageScaleAnimation() override {}
   void BeginMainFrameNotExpectedSoon() override {
     test_hooks_->BeginMainFrameNotExpectedSoon();
   }
+  void BeginMainFrameNotExpectedUntil(base::TimeTicks time) override {}
+
+  bool IsForSubframe() override { return false; }
 
  private:
   explicit LayerTreeHostClientForTesting(TestHooks* test_hooks)
@@ -442,17 +466,22 @@ class LayerTreeHostForTesting : public LayerTreeHost {
   bool test_started_;
 };
 
-class LayerTreeTestCompositorFrameSinkClient
-    : public TestCompositorFrameSinkClient {
+class LayerTreeTestLayerTreeFrameSinkClient
+    : public viz::TestLayerTreeFrameSinkClient {
  public:
-  explicit LayerTreeTestCompositorFrameSinkClient(TestHooks* hooks)
+  explicit LayerTreeTestLayerTreeFrameSinkClient(TestHooks* hooks)
       : hooks_(hooks) {}
 
-  // TestCompositorFrameSinkClient implementation.
+  // viz::TestLayerTreeFrameSinkClient implementation.
   std::unique_ptr<OutputSurface> CreateDisplayOutputSurface(
-      scoped_refptr<ContextProvider> compositor_context_provider) override {
+      scoped_refptr<viz::ContextProvider> compositor_context_provider)
+      override {
     return hooks_->CreateDisplayOutputSurfaceOnThread(
         std::move(compositor_context_provider));
+  }
+  void DisplayReceivedLocalSurfaceId(
+      const viz::LocalSurfaceId& local_surface_id) override {
+    hooks_->DisplayReceivedLocalSurfaceIdOnThread(local_surface_id);
   }
   void DisplayReceivedCompositorFrame(const CompositorFrame& frame) override {
     hooks_->DisplayReceivedCompositorFrameOnThread(frame);
@@ -470,8 +499,8 @@ class LayerTreeTestCompositorFrameSinkClient
 };
 
 LayerTreeTest::LayerTreeTest()
-    : compositor_frame_sink_client_(
-          new LayerTreeTestCompositorFrameSinkClient(this)),
+    : layer_tree_frame_sink_client_(
+          new LayerTreeTestLayerTreeFrameSinkClient(this)),
       weak_factory_(this) {
   main_thread_weak_ptr_ = weak_factory_.GetWeakPtr();
 
@@ -490,10 +519,10 @@ LayerTreeTest::~LayerTreeTest() {
 }
 
 gfx::Vector2dF LayerTreeTest::ScrollDelta(LayerImpl* layer_impl) {
-  gfx::ScrollOffset delta =
-      layer_impl->layer_tree_impl()
-          ->property_trees()
-          ->scroll_tree.GetScrollOffsetDeltaForTesting(layer_impl->id());
+  gfx::ScrollOffset delta = layer_impl->layer_tree_impl()
+                                ->property_trees()
+                                ->scroll_tree.GetScrollOffsetDeltaForTesting(
+                                    layer_impl->element_id());
   return gfx::Vector2dF(delta.x(), delta.y());
 }
 
@@ -509,13 +538,13 @@ void LayerTreeTest::EndTest() {
   } else {
     main_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&LayerTreeTest::RealEndTest, main_thread_weak_ptr_));
+        base::BindOnce(&LayerTreeTest::RealEndTest, main_thread_weak_ptr_));
   }
 }
 
 void LayerTreeTest::EndTestAfterDelayMs(int delay_milliseconds) {
   main_task_runner_->PostDelayedTask(
-      FROM_HERE, base::Bind(&LayerTreeTest::EndTest, main_thread_weak_ptr_),
+      FROM_HERE, base::BindOnce(&LayerTreeTest::EndTest, main_thread_weak_ptr_),
       base::TimeDelta::FromMilliseconds(delay_milliseconds));
 }
 
@@ -523,88 +552,96 @@ void LayerTreeTest::PostAddAnimationToMainThreadPlayer(
     AnimationPlayer* player_to_receive_animation) {
   main_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&LayerTreeTest::DispatchAddAnimationToPlayer,
-                 main_thread_weak_ptr_,
-                 base::Unretained(player_to_receive_animation), 0.000004));
+      base::BindOnce(&LayerTreeTest::DispatchAddAnimationToPlayer,
+                     main_thread_weak_ptr_,
+                     base::Unretained(player_to_receive_animation), 0.000004));
 }
 
 void LayerTreeTest::PostAddInstantAnimationToMainThreadPlayer(
     AnimationPlayer* player_to_receive_animation) {
   main_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&LayerTreeTest::DispatchAddAnimationToPlayer,
-                 main_thread_weak_ptr_,
-                 base::Unretained(player_to_receive_animation), 0.0));
+      base::BindOnce(&LayerTreeTest::DispatchAddAnimationToPlayer,
+                     main_thread_weak_ptr_,
+                     base::Unretained(player_to_receive_animation), 0.0));
 }
 
 void LayerTreeTest::PostAddLongAnimationToMainThreadPlayer(
     AnimationPlayer* player_to_receive_animation) {
   main_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&LayerTreeTest::DispatchAddAnimationToPlayer,
-                 main_thread_weak_ptr_,
-                 base::Unretained(player_to_receive_animation), 1.0));
+      base::BindOnce(&LayerTreeTest::DispatchAddAnimationToPlayer,
+                     main_thread_weak_ptr_,
+                     base::Unretained(player_to_receive_animation), 1.0));
+}
+
+void LayerTreeTest::PostSetLocalSurfaceIdToMainThread(
+    const viz::LocalSurfaceId& local_surface_id) {
+  main_task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&LayerTreeTest::DispatchSetLocalSurfaceId,
+                                main_thread_weak_ptr_, local_surface_id));
 }
 
 void LayerTreeTest::PostSetDeferCommitsToMainThread(bool defer_commits) {
   main_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&LayerTreeTest::DispatchSetDeferCommits,
-                            main_thread_weak_ptr_, defer_commits));
+      FROM_HERE, base::BindOnce(&LayerTreeTest::DispatchSetDeferCommits,
+                                main_thread_weak_ptr_, defer_commits));
 }
 
 void LayerTreeTest::PostSetNeedsCommitToMainThread() {
-  main_task_runner_->PostTask(FROM_HERE,
-                              base::Bind(&LayerTreeTest::DispatchSetNeedsCommit,
-                                         main_thread_weak_ptr_));
+  main_task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&LayerTreeTest::DispatchSetNeedsCommit,
+                                main_thread_weak_ptr_));
 }
 
 void LayerTreeTest::PostSetNeedsUpdateLayersToMainThread() {
   main_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&LayerTreeTest::DispatchSetNeedsUpdateLayers,
-                            main_thread_weak_ptr_));
+      FROM_HERE, base::BindOnce(&LayerTreeTest::DispatchSetNeedsUpdateLayers,
+                                main_thread_weak_ptr_));
 }
 
 void LayerTreeTest::PostSetNeedsRedrawToMainThread() {
-  main_task_runner_->PostTask(FROM_HERE,
-                              base::Bind(&LayerTreeTest::DispatchSetNeedsRedraw,
-                                         main_thread_weak_ptr_));
+  main_task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&LayerTreeTest::DispatchSetNeedsRedraw,
+                                main_thread_weak_ptr_));
 }
 
 void LayerTreeTest::PostSetNeedsRedrawRectToMainThread(
     const gfx::Rect& damage_rect) {
   main_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&LayerTreeTest::DispatchSetNeedsRedrawRect,
-                            main_thread_weak_ptr_, damage_rect));
+      FROM_HERE, base::BindOnce(&LayerTreeTest::DispatchSetNeedsRedrawRect,
+                                main_thread_weak_ptr_, damage_rect));
 }
 
 void LayerTreeTest::PostSetVisibleToMainThread(bool visible) {
   main_task_runner_->PostTask(FROM_HERE,
-                              base::Bind(&LayerTreeTest::DispatchSetVisible,
-                                         main_thread_weak_ptr_, visible));
+                              base::BindOnce(&LayerTreeTest::DispatchSetVisible,
+                                             main_thread_weak_ptr_, visible));
 }
 
-void LayerTreeTest::PostSetNextCommitForcesRedrawToMainThread() {
+void LayerTreeTest::PostSetNeedsCommitWithForcedRedrawToMainThread() {
   main_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&LayerTreeTest::DispatchSetNextCommitForcesRedraw,
-                            main_thread_weak_ptr_));
+      FROM_HERE,
+      base::BindOnce(&LayerTreeTest::DispatchSetNeedsCommitWithForcedRedraw,
+                     main_thread_weak_ptr_));
 }
 
 void LayerTreeTest::PostCompositeImmediatelyToMainThread() {
   main_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&LayerTreeTest::DispatchCompositeImmediately,
-                            main_thread_weak_ptr_));
+      FROM_HERE, base::BindOnce(&LayerTreeTest::DispatchCompositeImmediately,
+                                main_thread_weak_ptr_));
 }
 
 void LayerTreeTest::PostNextCommitWaitsForActivationToMainThread() {
   main_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&LayerTreeTest::DispatchNextCommitWaitsForActivation,
-                 main_thread_weak_ptr_));
+      base::BindOnce(&LayerTreeTest::DispatchNextCommitWaitsForActivation,
+                     main_thread_weak_ptr_));
 }
 
-std::unique_ptr<CompositorFrameSink>
-LayerTreeTest::ReleaseCompositorFrameSinkOnLayerTreeHost() {
-  return layer_tree_host_->ReleaseCompositorFrameSink();
+std::unique_ptr<LayerTreeFrameSink>
+LayerTreeTest::ReleaseLayerTreeFrameSinkOnLayerTreeHost() {
+  return layer_tree_host_->ReleaseLayerTreeFrameSink();
 }
 
 void LayerTreeTest::SetVisibleOnLayerTreeHost(bool visible) {
@@ -679,6 +716,7 @@ void LayerTreeTest::SetupTree() {
       root_bounds, layer_tree_host()->device_scale_factor());
   layer_tree_host()->SetViewportSize(device_root_bounds);
   layer_tree_host()->root_layer()->SetIsDrawable(true);
+  layer_tree_host()->SetElementIdsForTesting();
 }
 
 void LayerTreeTest::Timeout() {
@@ -696,7 +734,7 @@ void LayerTreeTest::RealEndTest() {
   if (main_frame_will_happen && !timed_out_) {
     main_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&LayerTreeTest::RealEndTest, main_thread_weak_ptr_));
+        base::BindOnce(&LayerTreeTest::RealEndTest, main_thread_weak_ptr_));
     return;
   }
 
@@ -712,6 +750,13 @@ void LayerTreeTest::DispatchAddAnimationToPlayer(
     AddOpacityTransitionToPlayer(player_to_receive_animation,
                                  animation_duration, 0, 0.5, true);
   }
+}
+
+void LayerTreeTest::DispatchSetLocalSurfaceId(
+    const viz::LocalSurfaceId& local_surface_id) {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+  if (layer_tree_host_)
+    layer_tree_host_->SetLocalSurfaceId(local_surface_id);
 }
 
 void LayerTreeTest::DispatchSetDeferCommits(bool defer_commits) {
@@ -751,10 +796,10 @@ void LayerTreeTest::DispatchSetVisible(bool visible) {
     SetVisibleOnLayerTreeHost(visible);
 }
 
-void LayerTreeTest::DispatchSetNextCommitForcesRedraw() {
+void LayerTreeTest::DispatchSetNeedsCommitWithForcedRedraw() {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   if (layer_tree_host_)
-    layer_tree_host_->SetNextCommitForcesRedraw();
+    layer_tree_host_->SetNeedsCommitWithForcedRedraw();
 }
 
 void LayerTreeTest::DispatchCompositeImmediately() {
@@ -785,19 +830,17 @@ void LayerTreeTest::RunTest(CompositorMode mode) {
 
   // Spend less time waiting for BeginFrame because the output is
   // mocked out.
-  settings_.renderer_settings.refresh_rate = 200.0;
   settings_.background_animation_rate = 200.0;
   // Disable latency recovery to make the scheduler more predictable in its
   // actions and less dependent on timings to make decisions.
   settings_.enable_latency_recovery = false;
-  settings_.verify_clip_tree_calculations = true;
-  settings_.renderer_settings.buffer_to_texture_target_map =
-      DefaultBufferToTextureTargetMapForTesting();
+  settings_.resource_settings.buffer_to_texture_target_map =
+      viz::DefaultBufferToTextureTargetMapForTesting();
   InitializeSettings(&settings_);
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&LayerTreeTest::DoBeginTest, base::Unretained(this)));
+      base::BindOnce(&LayerTreeTest::DoBeginTest, base::Unretained(this)));
 
   base::RunLoop().Run();
   DestroyLayerTreeHost();
@@ -813,38 +856,45 @@ void LayerTreeTest::RunTest(CompositorMode mode) {
   AfterTest();
 }
 
-void LayerTreeTest::RequestNewCompositorFrameSink() {
+void LayerTreeTest::RequestNewLayerTreeFrameSink() {
   scoped_refptr<TestContextProvider> shared_context_provider =
       TestContextProvider::Create();
   scoped_refptr<TestContextProvider> worker_context_provider =
       TestContextProvider::CreateWorker();
 
-  auto compositor_frame_sink = CreateCompositorFrameSink(
-      std::move(shared_context_provider), std::move(worker_context_provider));
-  compositor_frame_sink->SetClient(compositor_frame_sink_client_.get());
-  layer_tree_host_->SetCompositorFrameSink(std::move(compositor_frame_sink));
+  viz::RendererSettings renderer_settings;
+  // Spend less time waiting for BeginFrame because the output is
+  // mocked out.
+  constexpr double refresh_rate = 200.0;
+  renderer_settings.resource_settings.buffer_to_texture_target_map =
+      viz::DefaultBufferToTextureTargetMapForTesting();
+  auto layer_tree_frame_sink = CreateLayerTreeFrameSink(
+      renderer_settings, refresh_rate, std::move(shared_context_provider),
+      std::move(worker_context_provider));
+  layer_tree_frame_sink->SetClient(layer_tree_frame_sink_client_.get());
+  layer_tree_host_->SetLayerTreeFrameSink(std::move(layer_tree_frame_sink));
 }
 
-std::unique_ptr<TestCompositorFrameSink>
-LayerTreeTest::CreateCompositorFrameSink(
-    scoped_refptr<ContextProvider> compositor_context_provider,
-    scoped_refptr<ContextProvider> worker_context_provider) {
+std::unique_ptr<viz::TestLayerTreeFrameSink>
+LayerTreeTest::CreateLayerTreeFrameSink(
+    const viz::RendererSettings& renderer_settings,
+    double refresh_rate,
+    scoped_refptr<viz::ContextProvider> compositor_context_provider,
+    scoped_refptr<viz::ContextProvider> worker_context_provider) {
+  constexpr bool disable_display_vsync = false;
   bool synchronous_composite =
       !HasImplThread() &&
       !layer_tree_host()->GetSettings().single_thread_proxy_scheduler;
-  // Disable reclaim resources by default to act like the Display lives
-  // out-of-process.
-  bool force_disable_reclaim_resources = true;
-  return base::MakeUnique<TestCompositorFrameSink>(
+  return base::MakeUnique<viz::TestLayerTreeFrameSink>(
       compositor_context_provider, std::move(worker_context_provider),
-      shared_bitmap_manager(), gpu_memory_buffer_manager(),
-      layer_tree_host()->GetSettings().renderer_settings, impl_task_runner_,
-      synchronous_composite, force_disable_reclaim_resources);
+      shared_bitmap_manager(), gpu_memory_buffer_manager(), renderer_settings,
+      impl_task_runner_, synchronous_composite, disable_display_vsync,
+      refresh_rate);
 }
 
 std::unique_ptr<OutputSurface>
 LayerTreeTest::CreateDisplayOutputSurfaceOnThread(
-    scoped_refptr<ContextProvider> compositor_context_provider) {
+    scoped_refptr<viz::ContextProvider> compositor_context_provider) {
   // By default the Display shares a context with the LayerTreeHostImpl.
   return FakeOutputSurface::Create3d(std::move(compositor_context_provider));
 }

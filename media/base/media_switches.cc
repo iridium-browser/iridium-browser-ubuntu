@@ -2,14 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "build/build_config.h"
 #include "media/base/media_switches.h"
+#include "base/command_line.h"
+#include "build/build_config.h"
 #include "ppapi/features/features.h"
 
 namespace switches {
 
 // Allow users to specify a custom buffer size for debugging purpose.
 const char kAudioBufferSize[] = "audio-buffer-size";
+
+// Command line flag name to set the autoplay policy.
+const char kAutoplayPolicy[] = "autoplay-policy";
 
 // Set number of threads to use for video decoding.
 const char kVideoThreads[] = "video-threads";
@@ -61,18 +65,29 @@ const char kWaveOutBuffers[] = "waveout-buffers";
 const char kUseCras[] = "use-cras";
 #endif
 
+// For automated testing of protected content, this switch allows specific
+// domains (e.g. example.com) to skip asking the user for permission to share
+// their personal identifier. In this context, domain does not include the
+// port number. This flag will have no effect if user-data-dir is not set and
+// will not affect the user's content settings.
+// Reference: http://crbug.com/718608
+// Example:
+// --unsafely-allow-protected-media-identifier-for-domain=a.com,b.ca
+// --user-data-dir=/test/only/profile/dir
+const char kUnsafelyAllowProtectedMediaIdentifierForDomain[] =
+    "unsafely-allow-protected-media-identifier-for-domain";
+
 #if !defined(OS_ANDROID) || BUILDFLAG(ENABLE_PLUGINS)
-// Use a media session for each tabs in a way that two tabs can't play on top of
-// each other. This is different from the Media Session API as it is enabling a
-// default behaviour for the browser. The allowed values are: "" (empty),
-// |kEnableDefaultMediaSessionDuckFlash|.
-const char kEnableDefaultMediaSession[] = "enable-default-media-session";
+// Enable a internal audio focus management between tabs in such a way that two
+// tabs can't  play on top of each other.
+// The allowed values are: "" (empty) or |kEnableAudioFocusDuckFlash|.
+const char kEnableAudioFocus[] = "enable-audio-focus";
 #endif  // !defined(OS_ANDROID) || BUILDFLAG(ENABLE_PLUGINS)
 
 #if BUILDFLAG(ENABLE_PLUGINS)
-// This value is used as an option for |kEnableDefaultMediaSession|. Flash will
+// This value is used as an option for |kEnableAudioFocus|. Flash will
 // be ducked when losing audio focus.
-const char kEnableDefaultMediaSessionDuckFlash[] = "duck-flash";
+const char kEnableAudioFocusDuckFlash[] = "duck-flash";
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 
 #if BUILDFLAG(ENABLE_RUNTIME_MEDIA_RENDERER_SELECTION)
@@ -97,6 +112,11 @@ const char kUseFileForFakeVideoCapture[] = "use-file-for-fake-video-capture";
 // or <path>%noloop to stop after playing the file to completion.
 const char kUseFileForFakeAudioCapture[] = "use-file-for-fake-audio-capture";
 
+// Use fake device for accelerated decoding of JPEG. This allows, for example,
+// testing of the communication to the GPU service without requiring actual
+// accelerator hardware to be present.
+const char kUseFakeJpegDecodeAccelerator[] = "use-fake-jpeg-decode-accelerator";
+
 // Enables support for inband text tracks in media content.
 const char kEnableInbandTextTracks[] = "enable-inband-text-tracks";
 
@@ -115,10 +135,6 @@ const char kVideoUnderflowThresholdMs[] = "video-underflow-threshold-ms";
 const char kDisableRTCSmoothnessAlgorithm[] =
     "disable-rtc-smoothness-algorithm";
 
-// Enables demuxing of vp9 in mp4. Note that this flag will not have any effect
-// if MP4 demuxing is not enabled in the build.
-const char kEnableVp9InMp4[] = "enable-vp9-in-mp4";
-
 // Force media player using SurfaceView instead of SurfaceTexture on Android.
 const char kForceVideoOverlays[] = "force-video-overlays";
 
@@ -127,25 +143,40 @@ const char kForceVideoOverlays[] = "force-video-overlays";
 const char kMSEAudioBufferSizeLimit[] = "mse-audio-buffer-size-limit";
 const char kMSEVideoBufferSizeLimit[] = "mse-video-buffer-size-limit";
 
-// By default, if any CDM host (including signature) file is missing, the CDM
-// will not be called to verify the host. Enable this switch to ignore missing
-// CDM host files. This can be used in tests.
-const char kIgnoreMissingCdmHostFile[] = "ignore-missing-cdm-host-file";
+// Ignores all autoplay restrictions. It will ignore the current autoplay policy
+// and all restrictions such as playback in a background tab. It should only be
+// enabled for testing.
+const char kIgnoreAutoplayRestrictionsForTests[] =
+    "ignore-autoplay-restrictions";
+
+#if !defined(OS_ANDROID)
+// Turns on the internal media session backend. This should be used by embedders
+// that want to control the media playback with the media session interfaces.
+const char kEnableInternalMediaSession[] = "enable-internal-media-session";
+#endif  // !defined(OS_ANDROID)
+
+namespace autoplay {
+
+// Autoplay policy that requires a document user activation.
+const char kDocumentUserActivationRequiredPolicy[] =
+    "document-user-activation-required";
+
+// Autoplay policy that does not require any user gesture.
+const char kNoUserGestureRequiredPolicy[] = "no-user-gesture-required";
+
+// Autoplay policy to require a user gesture in order to play.
+const char kUserGestureRequiredPolicy[] = "user-gesture-required";
+
+// Autoplay policy to require a user gesture in ordor to play for cross origin
+// iframes.
+const char kUserGestureRequiredForCrossOriginPolicy[] =
+    "user-gesture-required-for-cross-origin";
+
+}  // namespace autoplay
 
 }  // namespace switches
 
 namespace media {
-
-#if defined(OS_WIN)
-// Enables video decode acceleration using the D3D11 video decoder api.
-// This is completely insecure - DO NOT USE except for testing.
-const base::Feature kD3D11VideoDecoding{"D3D11VideoDecoding",
-                                        base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables H264 HW encode acceleration using Media Foundation for Windows.
-const base::Feature kMediaFoundationH264Encoding{
-    "MediaFoundationH264Encoding", base::FEATURE_ENABLED_BY_DEFAULT};
-#endif  // defined(OS_WIN)
 
 // Use new audio rendering mixer.
 const base::Feature kNewAudioRenderingMixingStrategy{
@@ -166,15 +197,43 @@ const base::Feature kResumeBackgroundVideo {
 #endif
 };
 
+// Display the Cast overlay button on the media controls.
+const base::Feature kMediaCastOverlayButton{"MediaCastOverlayButton",
+                                            base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Use AndroidOverlay rather than ContentVideoView in clank?
+const base::Feature kUseAndroidOverlay{"use-android_overlay",
+                                       base::FEATURE_DISABLED_BY_DEFAULT};
+
 // Let video track be unselected when video is playing in the background.
 const base::Feature kBackgroundVideoTrackOptimization{
     "BackgroundVideoTrackOptimization", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Let video without audio be paused when it is playing in the background.
+const base::Feature kBackgroundVideoPauseOptimization{
+    "BackgroundVideoPauseOptimization", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kComplexityBasedVideoBuffering{
+    "ComplexityBasedVideoBuffering", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Make MSE garbage collection algorithm more aggressive when we are under
 // moderate or critical memory pressure. This will relieve memory pressure by
 // releasing stale data from MSE buffers.
 const base::Feature kMemoryPressureBasedSourceBufferGC{
     "MemoryPressureBasedSourceBufferGC", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// On systems where pepper CDMs are enabled, use mojo CDM instead of PPAPI CDM.
+// Note that mojo CDM support is still under development. Some features are
+// still missing and this feature should only be enabled for testing.
+const base::Feature kMojoCdm{"MojoCdm", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Use the new Remote Playback / media flinging pipeline.
+const base::Feature kNewRemotePlaybackPipeline{
+    "NewRemotePlaybackPipeline", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// CanPlayThrough issued according to standard.
+const base::Feature kSpecCompliantCanPlayThrough{
+    "SpecCompliantCanPlayThrough", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // Use shared block-based buffering for media.
 const base::Feature kUseNewMediaCache{"use-new-media-cache",
@@ -183,6 +242,10 @@ const base::Feature kUseNewMediaCache{"use-new-media-cache",
 // Correct video colors based on output display?
 const base::Feature kVideoColorManagement{"video-color-management",
                                           base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Use SurfaceLayer instead of VideoLayer.
+const base::Feature kUseSurfaceLayerForVideo{"UseSurfaceLayerForVideo",
+                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Inform video blitter of video color space.
 const base::Feature kVideoBlitColorAccuracy{"video-blit-color-accuracy",
@@ -194,10 +257,27 @@ const base::Feature kVideoBlitColorAccuracy{"video-blit-color-accuracy",
 const base::Feature kExternalClearKeyForTesting{
     "external-clear-key-for-testing", base::FEATURE_DISABLED_BY_DEFAULT};
 
+const base::Feature kSupportExperimentalCdmInterface{
+    "SupportExperimentalCdmInterface", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables low-delay video rendering in media pipeline on "live" stream.
+const base::Feature kLowDelayVideoRenderingOnLiveStream{
+    "low-delay-video-rendering-on-live-stream",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Enables Media Engagement Index recording. The data from which will
+// be used to bypass autoplay policies.
+const base::Feature kRecordMediaEngagementScores{
+    "RecordMediaEngagementScores", base::FEATURE_DISABLED_BY_DEFAULT};
+
 #if defined(OS_ANDROID)
 // Lock the screen orientation when a video goes fullscreen.
 const base::Feature kVideoFullscreenOrientationLock{
     "VideoFullscreenOrientationLock", base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Enter/exit fullscreen when device is rotated to/from the video orientation.
+const base::Feature kVideoRotateToFullscreen{"VideoRotateToFullscreen",
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
 
 // An experimental feature to enable persistent-license type support in MediaDrm
 // when using Encrypted Media Extensions (EME) API.
@@ -206,5 +286,38 @@ const base::Feature kMediaDrmPersistentLicense{
     "MediaDrmPersistentLicense", base::FEATURE_DISABLED_BY_DEFAULT};
 
 #endif
+
+#if defined(OS_WIN)
+// Enables video decode acceleration using the D3D11 video decoder api.
+// This is completely insecure - DO NOT USE except for testing.
+const base::Feature kD3D11VideoDecoding{"D3D11VideoDecoding",
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Does NV12->NV12 video copy on the main thread right before the texture's
+// used by GL.
+const base::Feature kDelayCopyNV12Textures{"DelayCopyNV12Textures",
+                                           base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Enables H264 HW encode acceleration using Media Foundation for Windows.
+const base::Feature kMediaFoundationH264Encoding{
+    "MediaFoundationH264Encoding", base::FEATURE_ENABLED_BY_DEFAULT};
+#endif  // defined(OS_WIN)
+
+std::string GetEffectiveAutoplayPolicy(const base::CommandLine& command_line) {
+  // |kIgnoreAutoplayRestrictionsForTests| overrides all other settings.
+  if (command_line.HasSwitch(switches::kIgnoreAutoplayRestrictionsForTests))
+    return switches::autoplay::kNoUserGestureRequiredPolicy;
+
+  // Return the autoplay policy set in the command line, if any.
+  if (command_line.HasSwitch(switches::kAutoplayPolicy))
+    return command_line.GetSwitchValueASCII(switches::kAutoplayPolicy);
+
+// The default value is platform dependent.
+#if defined(OS_ANDROID)
+  return switches::autoplay::kUserGestureRequiredPolicy;
+#else
+  return switches::autoplay::kNoUserGestureRequiredPolicy;
+#endif
+}
 
 }  // namespace media

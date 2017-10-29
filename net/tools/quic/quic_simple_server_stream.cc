@@ -7,18 +7,17 @@
 #include <list>
 #include <utility>
 
-#include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_spdy_stream.h"
 #include "net/quic/core/spdy_utils.h"
 #include "net/quic/platform/api/quic_bug_tracker.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_map_util.h"
 #include "net/quic/platform/api/quic_text_utils.h"
-#include "net/spdy/spdy_protocol.h"
+#include "net/spdy/core/spdy_protocol.h"
 #include "net/tools/quic/quic_http_response_cache.h"
 #include "net/tools/quic/quic_simple_server_session.h"
 
-using base::StringPiece;
 using std::string;
 
 namespace net {
@@ -223,19 +222,15 @@ void QuicSimpleServerStream::SendErrorResponse() {
 
 void QuicSimpleServerStream::SendHeadersAndBody(
     SpdyHeaderBlock response_headers,
-    StringPiece body) {
+    QuicStringPiece body) {
   SendHeadersAndBodyAndTrailers(std::move(response_headers), body,
                                 SpdyHeaderBlock());
 }
 
 void QuicSimpleServerStream::SendHeadersAndBodyAndTrailers(
     SpdyHeaderBlock response_headers,
-    StringPiece body,
+    QuicStringPiece body,
     SpdyHeaderBlock response_trailers) {
-  if (!allow_bidirectional_data() && !reading_stopped()) {
-    StopReading();
-  }
-
   // Send the headers, with a FIN if there's nothing else to send.
   bool send_fin = (body.empty() && response_trailers.empty());
   QUIC_DLOG(INFO) << "Stream " << id() << " writing headers (fin = " << send_fin

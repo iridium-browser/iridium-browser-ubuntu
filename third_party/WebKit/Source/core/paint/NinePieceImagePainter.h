@@ -12,24 +12,27 @@ namespace blink {
 
 class ComputedStyle;
 class GraphicsContext;
-class LayoutBoxModelObject;
+class ImageResourceObserver;
+class Node;
 class LayoutRect;
 class NinePieceImage;
+class Document;
 
 class NinePieceImagePainter {
   STACK_ALLOCATED();
 
  public:
-  NinePieceImagePainter(const LayoutBoxModelObject&);
-
-  bool paint(GraphicsContext&,
-             const LayoutRect&,
-             const ComputedStyle&,
-             const NinePieceImage&,
-             SkBlendMode) const;
+  static bool Paint(GraphicsContext&,
+                    const ImageResourceObserver&,
+                    const Document&,
+                    Node*,
+                    const LayoutRect&,
+                    const ComputedStyle&,
+                    const NinePieceImage&,
+                    SkBlendMode = SkBlendMode::kSrcOver);
 
  private:
-  const LayoutBoxModelObject& m_layoutObject;
+  NinePieceImagePainter() {}
 };
 
 }  // namespace blink

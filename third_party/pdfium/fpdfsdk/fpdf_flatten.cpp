@@ -29,29 +29,25 @@ enum FPDF_VALUE { TOP, LEFT, RIGHT, BOTTOM };
 
 namespace {
 
-bool IsValiableRect(CFX_FloatRect rect, CFX_FloatRect rcPage) {
-  if (rect.left - rect.right > 0.000001f || rect.bottom - rect.top > 0.000001f)
+bool IsValidRect(const CFX_FloatRect& rect, const CFX_FloatRect& rcPage) {
+  constexpr float kMinSize = 0.000001f;
+  if (rect.IsEmpty() || rect.Width() < kMinSize || rect.Height() < kMinSize)
     return false;
 
-  if (rect.left == 0.0f && rect.top == 0.0f && rect.right == 0.0f &&
-      rect.bottom == 0.0f)
-    return false;
+  if (rcPage.IsEmpty())
+    return true;
 
-  if (!rcPage.IsEmpty()) {
-    if (rect.left - rcPage.left < -10.000001f ||
-        rect.right - rcPage.right > 10.000001f ||
-        rect.top - rcPage.top > 10.000001f ||
-        rect.bottom - rcPage.bottom < -10.000001f)
-      return false;
-  }
-
-  return true;
+  constexpr float kMinBorderSize = 10.000001f;
+  return rect.left - rcPage.left >= -kMinBorderSize &&
+         rect.right - rcPage.right <= kMinBorderSize &&
+         rect.top - rcPage.top <= kMinBorderSize &&
+         rect.bottom - rcPage.bottom >= -kMinBorderSize;
 }
 
 void GetContentsRect(CPDF_Document* pDoc,
                      CPDF_Dictionary* pDict,
                      std::vector<CFX_FloatRect>* pRectArray) {
-  std::unique_ptr<CPDF_Page> pPDFPage(new CPDF_Page(pDoc, pDict, false));
+  auto pPDFPage = pdfium::MakeUnique<CPDF_Page>(pDoc, pDict, false);
   pPDFPage->ParseContent();
 
   for (const auto& pPageObject : *pPDFPage->GetPageObjectList()) {
@@ -60,7 +56,7 @@ void GetContentsRect(CPDF_Document* pDoc,
     rc.right = pPageObject->m_Right;
     rc.bottom = pPageObject->m_Bottom;
     rc.top = pPageObject->m_Top;
-    if (IsValiableRect(rc, pDict->GetRectFor("MediaBox")))
+    if (IsValidRect(rc, pDict->GetRectFor("MediaBox")))
       pRectArray->push_back(rc);
   }
 }
@@ -77,7 +73,7 @@ void ParserStream(CPDF_Dictionary* pPageDic,
   else if (pStream->KeyExist("BBox"))
     rect = pStream->GetRectFor("BBox");
 
-  if (IsValiableRect(rect, pPageDic->GetRectFor("MediaBox")))
+  if (IsValidRect(rect, pPageDic->GetRectFor("MediaBox")))
     pRectArray->push_back(rect);
 
   pObjectArray->push_back(pStream);
@@ -96,9 +92,8 @@ int ParserAnnots(CPDF_Document* pSourceDoc,
   if (!pAnnots)
     return FLATTEN_NOTHINGTODO;
 
-  uint32_t dwSize = pAnnots->GetCount();
-  for (int i = 0; i < (int)dwSize; i++) {
-    CPDF_Dictionary* pAnnotDic = ToDictionary(pAnnots->GetDirectObjectAt(i));
+  for (const auto& pAnnot : *pAnnots) {
+    CPDF_Dictionary* pAnnotDic = ToDictionary(pAnnot->GetDirect());
     if (!pAnnotDic)
       continue;
 
@@ -110,27 +105,25 @@ int ParserAnnots(CPDF_Document* pSourceDoc,
     if (nAnnotFlag & ANNOTFLAG_HIDDEN)
       continue;
 
-    if (nUsage == FLAT_NORMALDISPLAY) {
-      if (nAnnotFlag & ANNOTFLAG_INVISIBLE)
-        continue;
-
+    bool bParseStream;
+    if (nUsage == FLAT_NORMALDISPLAY)
+      bParseStream = !(nAnnotFlag & ANNOTFLAG_INVISIBLE);
+    else
+      bParseStream = !!(nAnnotFlag & ANNOTFLAG_PRINT);
+    if (bParseStream)
       ParserStream(pPageDic, pAnnotDic, pRectArray, pObjectArray);
-    } else {
-      if (nAnnotFlag & ANNOTFLAG_PRINT)
-        ParserStream(pPageDic, pAnnotDic, pRectArray, pObjectArray);
-    }
   }
   return FLATTEN_SUCCESS;
 }
 
-FX_FLOAT GetMinMaxValue(const std::vector<CFX_FloatRect>& array,
-                        FPDF_TYPE type,
-                        FPDF_VALUE value) {
-  size_t nRects = array.size();
-  if (nRects <= 0)
+float GetMinMaxValue(const std::vector<CFX_FloatRect>& array,
+                     FPDF_TYPE type,
+                     FPDF_VALUE value) {
+  if (array.empty())
     return 0.0f;
 
-  std::vector<FX_FLOAT> pArray(nRects);
+  size_t nRects = array.size();
+  std::vector<float> pArray(nRects);
   switch (value) {
     case LEFT:
       for (size_t i = 0; i < nRects; i++)
@@ -149,11 +142,11 @@ FX_FLOAT GetMinMaxValue(const std::vector<CFX_FloatRect>& array,
         pArray[i] = array[i].bottom;
       break;
     default:
-      // Not reachable.
+      NOTREACHED();
       return 0.0f;
   }
 
-  FX_FLOAT fRet = pArray[0];
+  float fRet = pArray[0];
   if (type == MAX) {
     for (size_t i = 1; i < nRects; i++)
       fRet = std::max(fRet, pArray[i]);
@@ -204,11 +197,11 @@ void SetPageContents(const CFX_ByteString& key,
   pPage->ConvertToIndirectObjectFor("Contents", pDocument);
   if (!pContentsArray) {
     pContentsArray = pDocument->NewIndirect<CPDF_Array>();
-    CPDF_StreamAcc acc;
-    acc.LoadAllData(pContentsStream);
+    auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(pContentsStream);
+    pAcc->LoadAllData();
     CFX_ByteString sStream = "q\n";
     CFX_ByteString sBody =
-        CFX_ByteString((const FX_CHAR*)acc.GetData(), acc.GetSize());
+        CFX_ByteString((const char*)pAcc->GetData(), pAcc->GetSize());
     sStream = sStream + sBody + "\nQ";
     pContentsStream->SetData(sStream.raw_str(), sStream.GetLength());
     pContentsArray->AddNew<CPDF_Reference>(pDocument,
@@ -231,11 +224,11 @@ CFX_Matrix GetMatrix(CFX_FloatRect rcAnnot,
   matrix.TransformRect(rcStream);
   rcStream.Normalize();
 
-  FX_FLOAT a = rcAnnot.Width() / rcStream.Width();
-  FX_FLOAT d = rcAnnot.Height() / rcStream.Height();
+  float a = rcAnnot.Width() / rcStream.Width();
+  float d = rcAnnot.Height() / rcStream.Height();
 
-  FX_FLOAT e = rcAnnot.left - rcStream.left * a;
-  FX_FLOAT f = rcAnnot.bottom - rcStream.bottom * d;
+  float e = rcAnnot.left - rcStream.left * a;
+  float f = rcAnnot.bottom - rcStream.bottom * d;
   return CFX_Matrix(a, 0, 0, d, e, f);
 }
 
@@ -246,8 +239,8 @@ DLLEXPORT int STDCALL FPDFPage_Flatten(FPDF_PAGE page, int nFlag) {
   if (!page)
     return FLATTEN_FAIL;
 
-  CPDF_Document* pDocument = pPage->m_pDocument;
-  CPDF_Dictionary* pPageDict = pPage->m_pFormDict;
+  CPDF_Document* pDocument = pPage->m_pDocument.Get();
+  CPDF_Dictionary* pPageDict = pPage->m_pFormDict.Get();
   if (!pDocument || !pPageDict)
     return FLATTEN_FAIL;
 
@@ -305,15 +298,18 @@ DLLEXPORT int STDCALL FPDFPage_Flatten(FPDF_PAGE page, int nFlag) {
   if (!pPageXObject)
     pPageXObject = pRes->SetNewFor<CPDF_Dictionary>("XObject");
 
-  CFX_ByteString key = "";
+  CFX_ByteString key;
   int nStreams = pdfium::CollectionSize<int>(ObjectArray);
   if (nStreams > 0) {
-    for (int iKey = 0; /*iKey < 100*/; iKey++) {
-      char sExtend[5] = {};
-      FXSYS_itoa(iKey, sExtend, 10);
-      key = CFX_ByteString("FFT") + CFX_ByteString(sExtend);
-      if (!pPageXObject->KeyExist(key))
+    CFX_ByteString sKey;
+    int i = 0;
+    while (i < INT_MAX) {
+      sKey.Format("FFT%d", i);
+      if (!pPageXObject->KeyExist(sKey)) {
+        key = sKey;
         break;
+      }
+      ++i;
     }
   }
 
@@ -327,7 +323,6 @@ DLLEXPORT int STDCALL FPDFPage_Flatten(FPDF_PAGE page, int nFlag) {
     pNewOXbjectDic->SetNewFor<CPDF_Name>("Type", "XObject");
     pNewOXbjectDic->SetNewFor<CPDF_Name>("Subtype", "Form");
     pNewOXbjectDic->SetNewFor<CPDF_Number>("FormType", 1);
-    pNewOXbjectDic->SetNewFor<CPDF_Name>("Name", "FRM");
     CFX_FloatRect rcBBox = pPageDict->GetRectFor("ArtBox");
     pNewOXbjectDic->SetRectFor("BBox", rcBBox);
   }
@@ -354,9 +349,8 @@ DLLEXPORT int STDCALL FPDFPage_Flatten(FPDF_PAGE page, int nFlag) {
       if (!sAnnotState.IsEmpty()) {
         pAPStream = pAPDic->GetStreamFor(sAnnotState);
       } else {
-        auto it = pAPDic->begin();
-        if (it != pAPDic->end()) {
-          CPDF_Object* pFirstObj = it->second.get();
+        if (pAPDic->GetCount() > 0) {
+          CPDF_Object* pFirstObj = pAPDic->begin()->second.get();
           if (pFirstObj) {
             if (pFirstObj->IsReference())
               pFirstObj = pFirstObj->GetDirect();
@@ -402,23 +396,12 @@ DLLEXPORT int STDCALL FPDFPage_Flatten(FPDF_PAGE page, int nFlag) {
     pXObject->SetNewFor<CPDF_Reference>(sFormName, pDocument,
                                         pObj->GetObjNum());
 
-    CPDF_StreamAcc acc;
-    acc.LoadAllData(pNewXObject);
-
-    const uint8_t* pData = acc.GetData();
-    CFX_ByteString sStream(pData, acc.GetSize());
+    auto pAcc = pdfium::MakeRetain<CPDF_StreamAcc>(pNewXObject);
+    pAcc->LoadAllData();
+    CFX_ByteString sStream(pAcc->GetData(), pAcc->GetSize());
     CFX_Matrix matrix = pAPDic->GetMatrixFor("Matrix");
-    if (matrix.IsIdentity()) {
-      matrix.a = 1.0f;
-      matrix.b = 0.0f;
-      matrix.c = 0.0f;
-      matrix.d = 1.0f;
-      matrix.e = 0.0f;
-      matrix.f = 0.0f;
-    }
-
-    CFX_ByteString sTemp;
     CFX_Matrix m = GetMatrix(rcAnnot, rcStream, matrix);
+    CFX_ByteString sTemp;
     sTemp.Format("q %f 0 0 %f %f %f cm /%s Do Q\n", m.a, m.d, m.e, m.f,
                  sFormName.c_str());
     sStream += sTemp;

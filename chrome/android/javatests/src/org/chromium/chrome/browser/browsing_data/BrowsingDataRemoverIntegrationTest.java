@@ -5,18 +5,26 @@
 package org.chromium.chrome.browser.browsing_data;
 
 import android.content.Intent;
-import android.os.AsyncTask;
 import android.support.test.filters.MediumTest;
 
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ShortcutHelper;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge;
-import org.chromium.chrome.browser.preferences.PrefServiceBridge.OnClearBrowsingDataListener;
+import org.chromium.chrome.browser.preferences.privacy.BrowsingDataBridge;
+import org.chromium.chrome.browser.preferences.privacy.BrowsingDataBridge.OnClearBrowsingDataListener;
 import org.chromium.chrome.browser.webapps.TestFetchStorageCallback;
 import org.chromium.chrome.browser.webapps.WebappRegistry;
-import org.chromium.chrome.test.ChromeActivityTestCaseBase;
+import org.chromium.chrome.test.ChromeActivityTestRule;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 
@@ -32,7 +40,14 @@ import java.util.Map;
  * those backends that live in the Java code, it is not possible to test whether deletions were
  * successful in its own unit tests. This test can do so.
  */
-public class BrowsingDataRemoverIntegrationTest extends ChromeActivityTestCaseBase<ChromeActivity> {
+@RunWith(ChromeJUnit4ClassRunner.class)
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
+        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+public class BrowsingDataRemoverIntegrationTest {
+    @Rule
+    public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
+            new ChromeActivityTestRule<>(ChromeActivity.class);
+
     private boolean mCallbackCalled;
 
     private class CallbackCriteria extends Criteria {
@@ -50,24 +65,14 @@ public class BrowsingDataRemoverIntegrationTest extends ChromeActivityTestCaseBa
         }
     }
 
-    public BrowsingDataRemoverIntegrationTest() {
-        super(ChromeActivity.class);
-    }
-
-    @Override
-    public void startMainActivity() throws InterruptedException {
-        startMainActivityOnBlankPage();
+    @Before
+    public void setUp() throws InterruptedException {
+        mActivityTestRule.startMainActivityOnBlankPage();
     }
 
     private void registerWebapp(final String webappId, final String webappUrl) throws Exception {
-        AsyncTask<Void, Void, Intent> shortcutIntentTask = new AsyncTask<Void, Void, Intent>() {
-            @Override
-            protected Intent doInBackground(Void... nothing) {
-                return ShortcutHelper.createWebappShortcutIntentForTesting(webappId, webappUrl);
-            }
-        };
-
-        final Intent shortcutIntent = shortcutIntentTask.execute().get();
+        Intent shortcutIntent =
+                ShortcutHelper.createWebappShortcutIntentForTesting(webappId, webappUrl);
         TestFetchStorageCallback callback = new TestFetchStorageCallback();
         WebappRegistry.getInstance().register(webappId, callback);
         callback.waitForCallback(0);
@@ -79,6 +84,7 @@ public class BrowsingDataRemoverIntegrationTest extends ChromeActivityTestCaseBa
      * TODO(msramek): Expose more granular datatypes to the Java code, so we can directly test
      * BrowsingDataRemover::RemoveDataMask::REMOVE_WEBAPP_DATA instead of BrowsingDataType.COOKIES.
      */
+    @Test
     @MediumTest
     @RetryOnFailure
     public void testUnregisteringWebapps() throws Exception {
@@ -91,13 +97,13 @@ public class BrowsingDataRemoverIntegrationTest extends ChromeActivityTestCaseBa
         for (final Map.Entry<String, String> app : apps.entrySet()) {
             registerWebapp(app.getKey(), app.getValue());
         }
-        assertEquals(apps.keySet(), WebappRegistry.getRegisteredWebappIdsForTesting());
+        Assert.assertEquals(apps.keySet(), WebappRegistry.getRegisteredWebappIdsForTesting());
 
         // Clear cookies and site data excluding the registrable domain "google.com".
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                PrefServiceBridge.getInstance().clearBrowsingDataExcludingDomains(
+                BrowsingDataBridge.getInstance().clearBrowsingDataExcludingDomains(
                         new OnClearBrowsingDataListener() {
                             @Override
                             public void onBrowsingDataCleared() {
@@ -115,14 +121,14 @@ public class BrowsingDataRemoverIntegrationTest extends ChromeActivityTestCaseBa
         CriteriaHelper.pollUiThread(new CallbackCriteria());
 
         // The last two webapps should have been unregistered.
-        assertEquals(new HashSet<String>(Arrays.asList("webapp1")),
+        Assert.assertEquals(new HashSet<String>(Arrays.asList("webapp1")),
                 WebappRegistry.getRegisteredWebappIdsForTesting());
 
         // Clear cookies and site data with no url filter.
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                PrefServiceBridge.getInstance().clearBrowsingData(
+                BrowsingDataBridge.getInstance().clearBrowsingData(
                         new OnClearBrowsingDataListener() {
                             @Override
                             public void onBrowsingDataCleared() {
@@ -136,6 +142,6 @@ public class BrowsingDataRemoverIntegrationTest extends ChromeActivityTestCaseBa
         CriteriaHelper.pollUiThread(new CallbackCriteria());
 
         // All webapps should have been unregistered.
-        assertTrue(WebappRegistry.getRegisteredWebappIdsForTesting().isEmpty());
+        Assert.assertTrue(WebappRegistry.getRegisteredWebappIdsForTesting().isEmpty());
     }
 }

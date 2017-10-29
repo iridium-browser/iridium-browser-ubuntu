@@ -13,20 +13,21 @@
 
 namespace blink {
 
-CSSPaintImageGenerator* CSSPaintImageGeneratorImpl::create(const String& name,
-                                                           Document& document,
-                                                           Observer* observer) {
-  LocalDOMWindow* domWindow = document.domWindow();
-  PaintWorklet* paintWorklet =
-      WindowPaintWorklet::from(*domWindow).paintWorklet();
+CSSPaintImageGenerator* CSSPaintImageGeneratorImpl::Create(
+    const String& name,
+    const Document& document,
+    Observer* observer) {
+  LocalDOMWindow* dom_window = document.domWindow();
+  PaintWorklet* paint_worklet =
+      WindowPaintWorklet::From(*dom_window).paintWorklet();
 
-  CSSPaintDefinition* paintDefinition = paintWorklet->findDefinition(name);
+  CSSPaintDefinition* paint_definition = paint_worklet->FindDefinition(name);
   CSSPaintImageGeneratorImpl* generator;
-  if (!paintDefinition) {
+  if (!paint_definition) {
     generator = new CSSPaintImageGeneratorImpl(observer);
-    paintWorklet->addPendingGenerator(name, generator);
+    paint_worklet->AddPendingGenerator(name, generator);
   } else {
-    generator = new CSSPaintImageGeneratorImpl(paintDefinition);
+    generator = new CSSPaintImageGeneratorImpl(paint_definition);
   }
 
   return generator;
@@ -34,62 +35,60 @@ CSSPaintImageGenerator* CSSPaintImageGeneratorImpl::create(const String& name,
 
 CSSPaintImageGeneratorImpl::CSSPaintImageGeneratorImpl(
     CSSPaintDefinition* definition)
-    : m_definition(definition) {}
+    : definition_(definition) {}
 
 CSSPaintImageGeneratorImpl::CSSPaintImageGeneratorImpl(Observer* observer)
-    : m_observer(observer) {}
+    : observer_(observer) {}
 
 CSSPaintImageGeneratorImpl::~CSSPaintImageGeneratorImpl() {}
 
-void CSSPaintImageGeneratorImpl::setDefinition(CSSPaintDefinition* definition) {
-  ASSERT(!m_definition);
-  m_definition = definition;
+void CSSPaintImageGeneratorImpl::SetDefinition(CSSPaintDefinition* definition) {
+  DCHECK(!definition_);
+  definition_ = definition;
 
-  ASSERT(m_observer);
-  m_observer->paintImageGeneratorReady();
+  DCHECK(observer_);
+  observer_->PaintImageGeneratorReady();
 }
 
-PassRefPtr<Image> CSSPaintImageGeneratorImpl::paint(
-    const LayoutObject& layoutObject,
+PassRefPtr<Image> CSSPaintImageGeneratorImpl::Paint(
+    const ImageResourceObserver& observer,
     const IntSize& size,
-    float zoom,
     const CSSStyleValueVector* data) {
-  return m_definition ? m_definition->paint(layoutObject, size, zoom, data)
-                      : nullptr;
+  return definition_ ? definition_->Paint(observer, size, data) : nullptr;
 }
 
 const Vector<CSSPropertyID>&
-CSSPaintImageGeneratorImpl::nativeInvalidationProperties() const {
-  DEFINE_STATIC_LOCAL(Vector<CSSPropertyID>, emptyVector, ());
-  return m_definition ? m_definition->nativeInvalidationProperties()
-                      : emptyVector;
+CSSPaintImageGeneratorImpl::NativeInvalidationProperties() const {
+  DEFINE_STATIC_LOCAL(Vector<CSSPropertyID>, empty_vector, ());
+  return definition_ ? definition_->NativeInvalidationProperties()
+                     : empty_vector;
 }
 
 const Vector<AtomicString>&
-CSSPaintImageGeneratorImpl::customInvalidationProperties() const {
-  DEFINE_STATIC_LOCAL(Vector<AtomicString>, emptyVector, ());
-  return m_definition ? m_definition->customInvalidationProperties()
-                      : emptyVector;
+CSSPaintImageGeneratorImpl::CustomInvalidationProperties() const {
+  DEFINE_STATIC_LOCAL(Vector<AtomicString>, empty_vector, ());
+  return definition_ ? definition_->CustomInvalidationProperties()
+                     : empty_vector;
 }
 
-bool CSSPaintImageGeneratorImpl::hasAlpha() const {
-  return m_definition && m_definition->hasAlpha();
+bool CSSPaintImageGeneratorImpl::HasAlpha() const {
+  return definition_ && definition_->HasAlpha();
 }
 
 const Vector<CSSSyntaxDescriptor>&
-CSSPaintImageGeneratorImpl::inputArgumentTypes() const {
-  DEFINE_STATIC_LOCAL(Vector<CSSSyntaxDescriptor>, emptyVector, ());
-  return m_definition ? m_definition->inputArgumentTypes() : emptyVector;
+CSSPaintImageGeneratorImpl::InputArgumentTypes() const {
+  DEFINE_STATIC_LOCAL(Vector<CSSSyntaxDescriptor>, empty_vector, ());
+  return definition_ ? definition_->InputArgumentTypes() : empty_vector;
 }
 
-bool CSSPaintImageGeneratorImpl::isImageGeneratorReady() const {
-  return m_definition;
+bool CSSPaintImageGeneratorImpl::IsImageGeneratorReady() const {
+  return definition_;
 }
 
 DEFINE_TRACE(CSSPaintImageGeneratorImpl) {
-  visitor->trace(m_definition);
-  visitor->trace(m_observer);
-  CSSPaintImageGenerator::trace(visitor);
+  visitor->Trace(definition_);
+  visitor->Trace(observer_);
+  CSSPaintImageGenerator::Trace(visitor);
 }
 
 }  // namespace blink

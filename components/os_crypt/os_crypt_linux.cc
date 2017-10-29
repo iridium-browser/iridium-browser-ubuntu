@@ -8,13 +8,14 @@
 
 #include <algorithm>
 #include <iterator>
-#include <memory>
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
+#include "components/os_crypt/key_storage_config_linux.h"
 #include "components/os_crypt/key_storage_linux.h"
 #include "crypto/encryptor.h"
 #include "crypto/symmetric_key.h"
@@ -55,6 +56,7 @@ struct Cache {
   std::unique_ptr<std::string> password_v11_cache;
   bool is_key_storage_cached;
   bool is_password_v11_cached;
+  std::unique_ptr<os_crypt::Config> config;
   // Guards access to |g_cache|, making lazy initialization of individual parts
   // thread safe.
   base::Lock lock;
@@ -66,8 +68,10 @@ base::LazyInstance<Cache>::Leaky g_cache = LAZY_INSTANCE_INITIALIZER;
 // found.
 KeyStorageLinux* GetKeyStorage() {
   if (!g_cache.Get().is_key_storage_cached) {
+    DCHECK(g_cache.Get().config);
     g_cache.Get().is_key_storage_cached = true;
-    g_cache.Get().key_storage_cache = KeyStorageLinux::CreateService();
+    g_cache.Get().key_storage_cache =
+        KeyStorageLinux::CreateService(*g_cache.Get().config);
   }
   return g_cache.Get().key_storage_cache.get();
 }
@@ -224,28 +228,23 @@ bool OSCrypt::DecryptString(const std::string& ciphertext,
 }
 
 // static
-void OSCrypt::SetStore(const std::string& store_type) {
-  // Changing the targeted password store makes no sense after initializing.
+void OSCrypt::SetConfig(std::unique_ptr<os_crypt::Config> config) {
+  // Setting initialisation parameters makes no sense after initializing.
   DCHECK(!g_cache.Get().is_key_storage_cached);
-
-  KeyStorageLinux::SetStore(store_type);
+  g_cache.Get().config = std::move(config);
 }
 
 // static
-void OSCrypt::SetProductName(const std::string& product_name) {
-  // Setting the product name makes no sense after initializing.
-  DCHECK(!g_cache.Get().is_key_storage_cached);
-
-  KeyStorageLinux::SetProductName(product_name);
+bool OSCrypt::IsEncryptionAvailable() {
+  return g_get_password[Version::V11]();
 }
 
-// static
-void OSCrypt::SetMainThreadRunner(
-    scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner) {
-  // Setting the task runner makes no sense after initializing.
-  DCHECK(!g_cache.Get().is_key_storage_cached);
-
-  KeyStorageLinux::SetMainThreadRunner(main_thread_runner);
+void ClearCacheForTesting() {
+  g_cache.Get().key_storage_cache.reset();
+  g_cache.Get().password_v10_cache.reset();
+  g_cache.Get().password_v11_cache.reset();
+  g_cache.Get().is_key_storage_cached = false;
+  g_cache.Get().is_password_v11_cached = false;
 }
 
 void UseMockKeyStorageForTesting(KeyStorageLinux* (*get_key_storage_mock)(),
@@ -259,7 +258,7 @@ void UseMockKeyStorageForTesting(KeyStorageLinux* (*get_key_storage_mock)(),
     is_get_password_saved = true;
   }
 
-  if (get_key_storage_mock && get_password_v11_mock) {
+  if (get_key_storage_mock || get_password_v11_mock) {
     // Bypass calling KeyStorage::CreateService and caching of the key for V11
     if (get_password_v11_mock)
       g_get_password[Version::V11] = get_password_v11_mock;

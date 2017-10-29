@@ -120,6 +120,7 @@ public:
     virtual GrGLvoid* mapTexSubImage2D(GrGLenum target, GrGLint level, GrGLint xoffset, GrGLint yoffset, GrGLsizei width, GrGLsizei height, GrGLenum format, GrGLenum type, GrGLenum access) { return nullptr; }
     virtual GrGLvoid minSampleShading(GrGLfloat value) {}
     virtual GrGLvoid pixelStorei(GrGLenum pname, GrGLint param) {}
+    virtual GrGLvoid polygonMode(GrGLenum face, GrGLenum mode) {}
     virtual GrGLvoid popGroupMarker() {}
     virtual GrGLvoid pushGroupMarker(GrGLsizei length, const char* marker) {}
     virtual GrGLvoid queryCounter(GrGLuint id, GrGLenum target) {}
@@ -328,6 +329,7 @@ public:
     virtual GrGLvoid pushDebugGroup(GrGLenum source, GrGLuint id, GrGLsizei length,  const GrGLchar * message) {}
     virtual GrGLvoid popDebugGroup() {}
     virtual GrGLvoid objectLabel(GrGLenum identifier, GrGLuint name, GrGLsizei length, const GrGLchar *label) {}
+    virtual GrGLvoid getInternalformativ(GrGLenum target, GrGLenum internalformat, GrGLenum pname, GrGLsizei bufSize, GrGLint *params) {}
 
 protected:
     // This must be called by leaf class

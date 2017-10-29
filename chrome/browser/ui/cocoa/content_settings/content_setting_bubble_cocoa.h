@@ -2,14 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef CHROME_BROWSER_UI_COCOA_CONTENT_SETTINGS_CONTENT_SETTING_BUBBLE_COCOA_H_
+#define CHROME_BROWSER_UI_COCOA_CONTENT_SETTINGS_CONTENT_SETTING_BUBBLE_COCOA_H_
+
 #import <Cocoa/Cocoa.h>
 
 #include <map>
 #include <memory>
 
+#include "base/mac/availability.h"
 #include "base/macros.h"
 #import "chrome/browser/ui/cocoa/omnibox_decoration_bubble_controller.h"
 #include "content/public/common/media_stream_request.h"
+#import "ui/base/cocoa/touch_bar_forward_declarations.h"
 
 class ContentSettingBubbleModel;
 class ContentSettingBubbleWebContentsObserverBridge;
@@ -51,8 +56,9 @@ using MediaMenuPartsMap =
 }  // namespace content_setting_bubble
 
 // Manages a "content blocked" bubble.
-@interface ContentSettingBubbleController : OmniboxDecorationBubbleController {
- @private
+@interface ContentSettingBubbleController
+    : OmniboxDecorationBubbleController<NSTouchBarDelegate> {
+ @protected
   IBOutlet NSTextField* titleLabel_;
   IBOutlet NSTextField* messageLabel_;
   IBOutlet NSMatrix* allowBlockRadioGroup_;
@@ -60,13 +66,16 @@ using MediaMenuPartsMap =
   IBOutlet NSButton* manageButton_;
   IBOutlet NSButton* doneButton_;
   IBOutlet NSButton* loadButton_;
+  IBOutlet NSButton* infoButton_;
 
+  std::unique_ptr<ContentSettingBubbleModel> contentSettingBubbleModel_;
+
+ @private
   // The container for the bubble contents of the geolocation bubble.
   IBOutlet NSView* contentsContainer_;
 
   IBOutlet NSTextField* blockedResourcesField_;
 
-  std::unique_ptr<ContentSettingBubbleModel> contentSettingBubbleModel_;
   std::unique_ptr<ContentSettingBubbleWebContentsObserverBridge>
       observerBridge_;
   content_setting_bubble::PopupLinks popupLinks_;
@@ -76,6 +85,17 @@ using MediaMenuPartsMap =
   ContentSettingDecoration* decoration_;  // weak
 }
 
+// Initializes the controller using the model. Takes ownership of
+// |settingsBubbleModel| but not of the other objects. This is intended to be
+// invoked by subclasses and most callers should invoke the showForModel
+// convenience constructor.
+- (id)initWithModel:(ContentSettingBubbleModel*)settingsBubbleModel
+        webContents:(content::WebContents*)webContents
+             window:(NSWindow*)window
+       parentWindow:(NSWindow*)parentWindow
+         decoration:(ContentSettingDecoration*)decoration
+         anchoredAt:(NSPoint)anchoredAt;
+
 // Creates and shows a content blocked bubble. Takes ownership of
 // |contentSettingBubbleModel| but not of the other objects.
 + (ContentSettingBubbleController*)
@@ -84,6 +104,12 @@ showForModel:(ContentSettingBubbleModel*)contentSettingBubbleModel
 parentWindow:(NSWindow*)parentWindow
   decoration:(ContentSettingDecoration*)decoration
   anchoredAt:(NSPoint)anchoredAt;
+
+// Override to customize the touch bar.
+- (NSTouchBar*)makeTouchBar API_AVAILABLE(macos(10.12.2));
+
+// Initializes the layout of all the UI elements.
+- (void)layoutView;
 
 // Callback for the "don't block / continue blocking" radio group.
 - (IBAction)allowBlockToggled:(id)sender;
@@ -114,3 +140,5 @@ parentWindow:(NSWindow*)parentWindow
 - (content_setting_bubble::MediaMenuPartsMap*)mediaMenus;
 
 @end
+
+#endif  // CHROME_BROWSER_UI_COCOA_CONTENT_SETTINGS_CONTENT_SETTING_BUBBLE_COCOA_H_

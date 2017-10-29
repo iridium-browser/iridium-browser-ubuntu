@@ -10,14 +10,18 @@ import("//media/media_options.gni")
 if (is_android) {
   import("//build/config/android/rules.gni")
 
-  # APK targets that depend on this, either directly or indirectly, should also
+  # This is bundled into //media, so all dependencies should be on //media.
+  # APK targets that depend on this indirectly, should also
   # depend on :media_java to get the corresponding Java classes.
   source_set("android") {
+    visibility = [ "//media/base:base" ]
     sources = [
       "android_cdm_factory.cc",
       "android_cdm_factory.h",
-      "media_client_android.cc",
-      "media_client_android.h",
+      "android_overlay.cc",
+      "android_overlay.h",
+      "android_util.cc",
+      "android_util.h",
       "media_codec_bridge.h",
       "media_codec_bridge_impl.cc",
       "media_codec_bridge_impl.h",
@@ -30,8 +34,14 @@ if (is_android) {
       "media_drm_bridge.h",
       "media_drm_bridge_cdm_context.cc",
       "media_drm_bridge_cdm_context.h",
+      "media_drm_bridge_client.cc",
+      "media_drm_bridge_client.h",
       "media_drm_bridge_delegate.cc",
       "media_drm_bridge_delegate.h",
+      "media_drm_storage.cc",
+      "media_drm_storage.h",
+      "media_drm_storage_bridge.cc",
+      "media_drm_storage_bridge.h",
       "media_jni_registrar.cc",
       "media_jni_registrar.h",
       "media_player_android.cc",
@@ -48,6 +58,7 @@ if (is_android) {
       "media_service_throttler.cc",
       "media_service_throttler.h",
       "media_url_interceptor.h",
+      "routing_token_callback.h",
       "stream_texture_wrapper.h",
     ]
     configs += [
@@ -66,6 +77,7 @@ if (is_android) {
 
   source_set("unit_tests") {
     testonly = true
+    visibility = [ "//media/base:unit_tests" ]
     sources = [
       "media_codec_bridge_impl_unittest.cc",
       "media_codec_loop_unittest.cc",
@@ -73,19 +85,36 @@ if (is_android) {
       "media_drm_bridge_unittest.cc",
       "media_player_bridge_unittest.cc",
       "media_service_throttler_unittest.cc",
-      "mock_media_codec_bridge.cc",
-      "mock_media_codec_bridge.h",
     ]
 
     deps = [
-      ":android",
+      "//media",
       "//media/base:test_support",
+      "//media/base/android:test_support",
       "//testing/gmock",
       "//testing/gtest",
       "//third_party/widevine/cdm:headers",
       "//ui/gfx:color_space",
     ]
     configs += [ "//media:media_config" ]
+  }
+
+  source_set("test_support") {
+    testonly = true
+    sources = [
+      "mock_android_overlay.cc",
+      "mock_android_overlay.h",
+      "mock_media_codec_bridge.cc",
+      "mock_media_codec_bridge.h",
+      "test_destruction_observable.cc",
+      "test_destruction_observable.h",
+    ]
+    deps = [
+      "//media",
+      "//media/base:test_support",
+      "//testing/gmock",
+      "//testing/gtest",
+    ]
   }
 
   generate_jni("media_jni_headers") {
@@ -96,6 +125,7 @@ if (is_android) {
       "java/src/org/chromium/media/MediaCodecBridge.java",
       "java/src/org/chromium/media/MediaCodecUtil.java",
       "java/src/org/chromium/media/MediaDrmBridge.java",
+      "java/src/org/chromium/media/MediaDrmStorageBridge.java",
       "java/src/org/chromium/media/MediaPlayerBridge.java",
       "java/src/org/chromium/media/MediaPlayerListener.java",
       "java/src/org/chromium/media/MediaServerCrashListener.java",
@@ -106,14 +136,20 @@ if (is_android) {
   java_cpp_enum("java_enums") {
     sources = [
       "media_codec_bridge.h",
+      "media_codec_bridge_impl.h",
       "media_codec_direction.h",
     ]
   }
 
+  android_resources("media_java_resources") {
+    custom_package = "org.chromium.media"
+    resource_dirs = [ "java/res" ]
+  }
+
   android_library("media_java") {
     deps = [
+      ":media_java_resources",
       "//base:base_java",
-      "//content/public/android:content_java_resources",
       "//third_party/android_tools:android_support_annotations_java",
     ]
     srcjar_deps = [
@@ -127,9 +163,12 @@ if (is_android) {
       "java/src/org/chromium/media/MediaCodecBridge.java",
       "java/src/org/chromium/media/MediaCodecUtil.java",
       "java/src/org/chromium/media/MediaDrmBridge.java",
+      "java/src/org/chromium/media/MediaDrmSessionManager.java",
+      "java/src/org/chromium/media/MediaDrmStorageBridge.java",
       "java/src/org/chromium/media/MediaPlayerBridge.java",
       "java/src/org/chromium/media/MediaPlayerListener.java",
       "java/src/org/chromium/media/MediaServerCrashListener.java",
+      "java/src/org/chromium/media/MediaSwitches.java",
     ]
   }
 }

@@ -21,17 +21,20 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/process/kill.h"
 #include "base/process/launch.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringize_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/sys_info.h"
 #include "base/test/gtest_util.h"
 #include "base/test/launcher/test_launcher_tracer.h"
 #include "base/test/launcher/test_results_tracker.h"
@@ -97,14 +100,26 @@ const size_t kOutputSnippetBytesLimit = 300 * 1024;
 
 // Set of live launch test processes with corresponding lock (it is allowed
 // for callers to launch processes on different threads).
-LazyInstance<std::map<ProcessHandle, CommandLine> > g_live_processes
-    = LAZY_INSTANCE_INITIALIZER;
-LazyInstance<Lock> g_live_processes_lock = LAZY_INSTANCE_INITIALIZER;
+Lock* GetLiveProcessesLock() {
+  static auto* lock = new Lock;
+  return lock;
+}
+
+std::map<ProcessHandle, CommandLine>* GetLiveProcesses() {
+  static auto* map = new std::map<ProcessHandle, CommandLine>;
+  return map;
+}
 
 // Performance trace generator.
-LazyInstance<TestLauncherTracer> g_tracer = LAZY_INSTANCE_INITIALIZER;
+TestLauncherTracer* GetTestLauncherTracer() {
+  static auto* tracer = new TestLauncherTracer;
+  return tracer;
+}
 
-#if defined(OS_POSIX)
+// TODO(fuchsia): Fuchsia does not have POSIX signals, but equivalent
+// functionality will probably be necessary eventually. See
+// https://crbug.com/706592.
+#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
 // Self-pipe that makes it possible to do complex shutdown handling
 // outside of the signal handler.
 int g_shutdown_pipe[2] = { -1, -1 };
@@ -116,19 +131,15 @@ void ShutdownPipeSignalHandler(int signal) {
 void KillSpawnedTestProcesses() {
   // Keep the lock until exiting the process to prevent further processes
   // from being spawned.
-  AutoLock lock(g_live_processes_lock.Get());
+  AutoLock lock(*GetLiveProcessesLock());
 
-  fprintf(stdout,
-          "Sending SIGTERM to %" PRIuS " child processes... ",
-          g_live_processes.Get().size());
+  fprintf(stdout, "Sending SIGTERM to %" PRIuS " child processes... ",
+          GetLiveProcesses()->size());
   fflush(stdout);
 
-  for (std::map<ProcessHandle, CommandLine>::iterator i =
-           g_live_processes.Get().begin();
-       i != g_live_processes.Get().end();
-       ++i) {
+  for (const auto& pair : *GetLiveProcesses()) {
     // Send the signal to entire process group.
-    kill((-1) * (i->first), SIGTERM);
+    kill((-1) * (pair.first), SIGTERM);
   }
 
   fprintf(stdout,
@@ -140,35 +151,19 @@ void KillSpawnedTestProcesses() {
   fprintf(stdout, "done.\n");
   fflush(stdout);
 
-  fprintf(stdout,
-          "Sending SIGKILL to %" PRIuS " child processes... ",
-          g_live_processes.Get().size());
+  fprintf(stdout, "Sending SIGKILL to %" PRIuS " child processes... ",
+          GetLiveProcesses()->size());
   fflush(stdout);
 
-  for (std::map<ProcessHandle, CommandLine>::iterator i =
-           g_live_processes.Get().begin();
-       i != g_live_processes.Get().end();
-       ++i) {
+  for (const auto& pair : *GetLiveProcesses()) {
     // Send the signal to entire process group.
-    kill((-1) * (i->first), SIGKILL);
+    kill((-1) * (pair.first), SIGKILL);
   }
 
   fprintf(stdout, "done.\n");
   fflush(stdout);
 }
-
-// I/O watcher for the reading end of the self-pipe above.
-// Terminates any launched child processes and exits the process.
-void OnShutdownPipeReadable() {
-  fprintf(stdout, "\nCaught signal. Killing spawned test processes...\n");
-  fflush(stdout);
-
-  KillSpawnedTestProcesses();
-
-  // The signal would normally kill the process, so exit now.
-  _exit(1);
-}
-#endif  // defined(OS_POSIX)
+#endif  // defined(OS_POSIX) && !defined(OS_FUCHSIA)
 
 // Parses the environment variable var as an Int32.  If it is unset, returns
 // true.  If it is set, unsets it then converts it to Int32 before
@@ -307,11 +302,11 @@ int LaunchChildTestProcessWithOptions(
     // Note how we grab the lock before the process possibly gets created.
     // This ensures that when the lock is held, ALL the processes are registered
     // in the set.
-    AutoLock lock(g_live_processes_lock.Get());
+    AutoLock lock(*GetLiveProcessesLock());
 
 #if defined(OS_WIN)
     // Allow the handle used to capture stdio and stdout to be inherited by the
-    // child. Note that this is done under g_live_processes_lock to ensure that
+    // child. Note that this is done under GetLiveProcessesLock() to ensure that
     // only the desired child receives the handle.
     if (new_options.stdout_handle) {
       ::SetHandleInformation(new_options.stdout_handle, HANDLE_FLAG_INHERIT,
@@ -323,7 +318,7 @@ int LaunchChildTestProcessWithOptions(
 
 #if defined(OS_WIN)
     // Revoke inheritance so that the handle isn't leaked into other children.
-    // Note that this is done under g_live_processes_lock to ensure that only
+    // Note that this is done under GetLiveProcessesLock() to ensure that only
     // the desired child receives the handle.
     if (new_options.stdout_handle)
       ::SetHandleInformation(new_options.stdout_handle, HANDLE_FLAG_INHERIT, 0);
@@ -333,8 +328,7 @@ int LaunchChildTestProcessWithOptions(
       return -1;
 
     // TODO(rvargas) crbug.com/417532: Don't store process handles.
-    g_live_processes.Get().insert(std::make_pair(process.Handle(),
-                                                 command_line));
+    GetLiveProcesses()->insert(std::make_pair(process.Handle(), command_line));
   }
 
   if (!launched_callback.is_null())
@@ -353,7 +347,7 @@ int LaunchChildTestProcessWithOptions(
     // Note how we grab the log before issuing a possibly broad process kill.
     // Other code parts that grab the log kill processes, so avoid trying
     // to do that twice and trigger all kinds of log messages.
-    AutoLock lock(g_live_processes_lock.Get());
+    AutoLock lock(*GetLiveProcessesLock());
 
 #if defined(OS_POSIX)
     if (exit_code != 0) {
@@ -365,11 +359,11 @@ int LaunchChildTestProcessWithOptions(
     }
 #endif
 
-    g_live_processes.Get().erase(process.Handle());
+    GetLiveProcesses()->erase(process.Handle());
   }
 
-  g_tracer.Get().RecordProcessExecution(start_time,
-                                        TimeTicks::Now() - start_time);
+  GetTestLauncherTracer()->RecordProcessExecution(
+      start_time, TimeTicks::Now() - start_time);
 
   return exit_code;
 }
@@ -471,10 +465,10 @@ void DoLaunchChildTestProcess(
 
   // Run target callback on the thread it was originating from, not on
   // a worker pool thread.
-  task_runner->PostTask(
-      FROM_HERE,
-      Bind(&RunCallback, completed_callback, exit_code,
-           TimeTicks::Now() - start_time, was_timeout, output_file_contents));
+  task_runner->PostTask(FROM_HERE,
+                        BindOnce(&RunCallback, completed_callback, exit_code,
+                                 TimeTicks::Now() - start_time, was_timeout,
+                                 output_file_contents));
 }
 
 }  // namespace
@@ -488,8 +482,7 @@ const char kGTestRepeatFlag[] = "gtest_repeat";
 const char kGTestRunDisabledTestsFlag[] = "gtest_also_run_disabled_tests";
 const char kGTestOutputFlag[] = "gtest_output";
 
-TestLauncherDelegate::~TestLauncherDelegate() {
-}
+TestLauncherDelegate::~TestLauncherDelegate() {}
 
 TestLauncher::TestLauncher(TestLauncherDelegate* launcher_delegate,
                            size_t parallel_jobs)
@@ -510,8 +503,7 @@ TestLauncher::TestLauncher(TestLauncherDelegate* launcher_delegate,
                       TimeDelta::FromSeconds(kOutputTimeoutSeconds),
                       this,
                       &TestLauncher::OnOutputTimeout),
-      parallel_jobs_(parallel_jobs) {
-}
+      parallel_jobs_(parallel_jobs) {}
 
 TestLauncher::~TestLauncher() {}
 
@@ -523,7 +515,9 @@ bool TestLauncher::Run() {
   // original value.
   int requested_cycles = cycles_;
 
-#if defined(OS_POSIX)
+// TODO(fuchsia): Fuchsia does not have POSIX signals. Something similiar to
+// this will likely need to be implemented. See https://crbug.com/706592.
+#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
   CHECK_EQ(0, pipe(g_shutdown_pipe));
 
   struct sigaction action;
@@ -536,14 +530,15 @@ bool TestLauncher::Run() {
   CHECK_EQ(0, sigaction(SIGTERM, &action, NULL));
 
   auto controller = base::FileDescriptorWatcher::WatchReadable(
-      g_shutdown_pipe[0], base::Bind(&OnShutdownPipeReadable));
-#endif  // defined(OS_POSIX)
+      g_shutdown_pipe[0],
+      base::Bind(&TestLauncher::OnShutdownPipeReadable, Unretained(this)));
+#endif  // defined(OS_POSIX) && !defined(OS_FUCHSIA)
 
   // Start the watchdog timer.
   watchdog_timer_.Reset();
 
   ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, Bind(&TestLauncher::RunTestIteration, Unretained(this)));
+      FROM_HERE, BindOnce(&TestLauncher::RunTestIteration, Unretained(this)));
 
   RunLoop().Run();
 
@@ -575,11 +570,11 @@ void TestLauncher::LaunchChildGTestProcess(
 
   GetTaskRunner()->PostTask(
       FROM_HERE,
-      Bind(&DoLaunchChildTestProcess, new_command_line, timeout, options,
-           redirect_stdio, RetainedRef(ThreadTaskRunnerHandle::Get()),
-           Bind(&TestLauncher::OnLaunchTestProcessFinished, Unretained(this),
-                completed_callback),
-           launched_callback));
+      BindOnce(&DoLaunchChildTestProcess, new_command_line, timeout, options,
+               redirect_stdio, RetainedRef(ThreadTaskRunnerHandle::Get()),
+               Bind(&TestLauncher::OnLaunchTestProcessFinished,
+                    Unretained(this), completed_callback),
+               launched_callback));
 }
 
 void TestLauncher::OnTestFinished(const TestResult& original_result) {
@@ -615,9 +610,9 @@ void TestLauncher::OnTestFinished(const TestResult& original_result) {
                  << ": " << print_test_stdio;
   }
   if (print_snippet) {
-    std::vector<std::string> snippet_lines = SplitString(
-        result.output_snippet, "\n", base::KEEP_WHITESPACE,
-        base::SPLIT_WANT_ALL);
+    std::vector<base::StringPiece> snippet_lines =
+        SplitStringPiece(result.output_snippet, "\n", base::KEEP_WHITESPACE,
+                         base::SPLIT_WANT_ALL);
     if (snippet_lines.size() > kOutputSnippetLinesLimit) {
       size_t truncated_size = snippet_lines.size() - kOutputSnippetLinesLimit;
       snippet_lines.erase(
@@ -678,9 +673,9 @@ void TestLauncher::OnTestFinished(const TestResult& original_result) {
             test_broken_count_);
     fflush(stdout);
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
     KillSpawnedTestProcesses();
-#endif  // defined(OS_POSIX)
+#endif  // defined(OS_POSIX) && !defined(OS_FUCHSIA)
 
     MaybeSaveSummaryAsJSON({"BROKEN_TEST_EARLY_EXIT", kUnreliableResultsTag});
 
@@ -810,22 +805,6 @@ bool TestLauncher::Init() {
   if (command_line->HasSwitch(switches::kTestLauncherForceRunBrokenTests))
     force_run_broken_tests_ = true;
 
-  if (command_line->HasSwitch(switches::kTestLauncherJobs)) {
-    size_t jobs = 0U;
-    if (!StringToSizeT(command_line->GetSwitchValueASCII(
-                         switches::kTestLauncherJobs), &jobs) ||
-        !jobs) {
-      LOG(ERROR) << "Invalid value for " << switches::kTestLauncherJobs;
-      return false;
-    }
-
-    parallel_jobs_ = jobs;
-  } else if (command_line->HasSwitch(kGTestFilterFlag) && !BotModeEnabled()) {
-    // Do not run jobs in parallel by default if we are running a subset of
-    // the tests and if bot mode is off.
-    parallel_jobs_ = 1U;
-  }
-
   fprintf(stdout, "Using %" PRIuS " parallel jobs.\n", parallel_jobs_);
   fflush(stdout);
   if (parallel_jobs_ > 1U) {
@@ -921,6 +900,10 @@ bool TestLauncher::Init() {
   results_tracker_.AddGlobalTag("OS_FREEBSD");
 #endif
 
+#if defined(OS_FUCHSIA)
+  results_tracker_.AddGlobalTag("OS_FUCHSIA");
+#endif
+
 #if defined(OS_IOS)
   results_tracker_.AddGlobalTag("OS_IOS");
 #endif
@@ -1003,7 +986,7 @@ void TestLauncher::RunTests() {
     std::string test_name =
         FormatFullTestName(tests_[i].test_case_name, tests_[i].test_name);
 
-    results_tracker_.AddTest(test_name, tests_[i].file, tests_[i].line);
+    results_tracker_.AddTest(test_name);
 
     const CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (test_name.find("DISABLED") != std::string::npos) {
@@ -1056,6 +1039,10 @@ void TestLauncher::RunTests() {
     if (Hash(test_name) % total_shards_ != static_cast<uint32_t>(shard_index_))
       continue;
 
+    // Report test locations after applying all filters, so that we report test
+    // locations only for those tests that were run as part of this shard.
+    results_tracker_.AddTestLocation(test_name, tests_[i].file, tests_[i].line);
+
     test_names.push_back(test_name);
   }
 
@@ -1070,7 +1057,7 @@ void TestLauncher::RunTests() {
 
     // No tests have actually been started, so kick off the next iteration.
     ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, Bind(&TestLauncher::RunTestIteration, Unretained(this)));
+        FROM_HERE, BindOnce(&TestLauncher::RunTestIteration, Unretained(this)));
   }
 }
 
@@ -1096,8 +1083,24 @@ void TestLauncher::RunTestIteration() {
   results_tracker_.OnTestIterationStarting();
 
   ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, Bind(&TestLauncher::RunTests, Unretained(this)));
+      FROM_HERE, BindOnce(&TestLauncher::RunTests, Unretained(this)));
 }
+
+#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
+// I/O watcher for the reading end of the self-pipe above.
+// Terminates any launched child processes and exits the process.
+void TestLauncher::OnShutdownPipeReadable() {
+  fprintf(stdout, "\nCaught signal. Killing spawned test processes...\n");
+  fflush(stdout);
+
+  KillSpawnedTestProcesses();
+
+  MaybeSaveSummaryAsJSON({"CAUGHT_TERMINATION_SIGNAL", kUnreliableResultsTag});
+
+  // The signal would normally kill the process, so exit now.
+  _exit(1);
+}
+#endif  // defined(OS_POSIX)
 
 void TestLauncher::MaybeSaveSummaryAsJSON(
     const std::vector<std::string>& additional_tags) {
@@ -1112,7 +1115,7 @@ void TestLauncher::MaybeSaveSummaryAsJSON(
   if (command_line->HasSwitch(switches::kTestLauncherTrace)) {
     FilePath trace_path(
         command_line->GetSwitchValuePath(switches::kTestLauncherTrace));
-    if (!g_tracer.Get().Dump(trace_path)) {
+    if (!GetTestLauncherTracer()->Dump(trace_path)) {
       LOG(ERROR) << "Failed to save test launcher trace.";
     }
   }
@@ -1151,24 +1154,21 @@ void TestLauncher::OnTestIterationFinished() {
 
   // Kick off the next iteration.
   ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, Bind(&TestLauncher::RunTestIteration, Unretained(this)));
+      FROM_HERE, BindOnce(&TestLauncher::RunTestIteration, Unretained(this)));
 }
 
 void TestLauncher::OnOutputTimeout() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  AutoLock lock(g_live_processes_lock.Get());
+  AutoLock lock(*GetLiveProcessesLock());
 
   fprintf(stdout, "Still waiting for the following processes to finish:\n");
 
-  for (std::map<ProcessHandle, CommandLine>::iterator i =
-           g_live_processes.Get().begin();
-       i != g_live_processes.Get().end();
-       ++i) {
+  for (const auto& pair : *GetLiveProcesses()) {
 #if defined(OS_WIN)
-    fwprintf(stdout, L"\t%s\n", i->second.GetCommandLineString().c_str());
+    fwprintf(stdout, L"\t%s\n", pair.second.GetCommandLineString().c_str());
 #else
-    fprintf(stdout, "\t%s\n", i->second.GetCommandLineString().c_str());
+    fprintf(stdout, "\t%s\n", pair.second.GetCommandLineString().c_str());
 #endif
   }
 
@@ -1187,6 +1187,32 @@ scoped_refptr<TaskRunner> TestLauncher::GetTaskRunner() {
     return worker_pool_owner_->pool();
   DCHECK(worker_thread_->IsRunning());
   return worker_thread_->task_runner();
+}
+
+size_t NumParallelJobs() {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  CommandLine::SwitchMap switches = command_line->GetSwitches();
+
+  if (command_line->HasSwitch(switches::kTestLauncherJobs)) {
+    // If the number of test launcher jobs was specified, return that number.
+    size_t jobs = 0U;
+
+    if (!StringToSizeT(
+            command_line->GetSwitchValueASCII(switches::kTestLauncherJobs),
+            &jobs) ||
+        !jobs) {
+      LOG(ERROR) << "Invalid value for " << switches::kTestLauncherJobs;
+      return 0U;
+    }
+    return jobs;
+  } else if (command_line->HasSwitch(kGTestFilterFlag) && !BotModeEnabled()) {
+    // Do not run jobs in parallel by default if we are running a subset of
+    // the tests and if bot mode is off.
+    return 1U;
+  }
+
+  // Default to the number of processor cores.
+  return base::checked_cast<size_t>(SysInfo::NumberOfProcessors());
 }
 
 std::string GetTestOutputSnippet(const TestResult& result,

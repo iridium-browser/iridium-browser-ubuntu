@@ -9,19 +9,42 @@
 Polymer({
   is: 'settings-search-engines-list',
 
-  behaviors: [settings.GlobalScrollTargetBehavior],
-
   properties: {
     /** @type {!Array<!SearchEngine>} */
     engines: Array,
 
-    /** @override */
-    subpageRoute: {
-      type: Object,
-      value: settings.Route.SEARCH_ENGINES,
-    },
-
     /** Whether column headers should be displayed */
     hideHeaders: Boolean,
+
+    /**
+     * The scroll target that this list should use.
+     * @type {?HTMLElement}
+     */
+    scrollTarget: {
+      type: Element,
+      value: null,  // Required to populate class.
+    },
+
+    /** Used to fix scrolling glitch when list is not top most element. */
+    scrollOffset: Number,
+
+    /** @private {Object}*/
+    lastFocused_: Object,
+  },
+
+  /**
+   * Fix height of list if no scrollTarget is present.
+   * @return {string}
+   */
+  getHeightClass: function() {
+    return this.scrollTarget ? '' : 'fixed-height-container';
+  },
+
+  /**
+   * Only scroll when no target is set.
+   * @return {boolean}
+   */
+  isScrollable: function() {
+    return !this.scrollTarget;
   },
 });

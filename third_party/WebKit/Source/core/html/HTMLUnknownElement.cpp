@@ -8,15 +8,13 @@
 
 namespace blink {
 
-HTMLUnknownElement::HTMLUnknownElement(const QualifiedName& tagName,
+HTMLUnknownElement::HTMLUnknownElement(const QualifiedName& tag_name,
                                        Document& document)
-    : HTMLElement(tagName, document) {
-  if (tagName.localName() == "data")
-    UseCounter::count(document, UseCounter::DataElement);
-  else if (tagName.localName() == "time")
-    UseCounter::count(document, UseCounter::TimeElement);
-  else if (tagName.localName() == "menuitem")
-    UseCounter::count(document, UseCounter::MenuItemElement);
+    : HTMLElement(tag_name, document) {
+  if (tag_name.LocalName() == "data")
+    UseCounter::Count(document, WebFeature::kDataElement);
+  else if (tag_name.LocalName() == "time")
+    UseCounter::Count(document, WebFeature::kTimeElement);
 }
 
 }  // namespace blink

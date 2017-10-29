@@ -6,6 +6,7 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/base/base64.html">
+<link rel="import" href="/tracing/base/trace_stream.html">
 <link rel="import" href="/tracing/importer/importer.html">
 <link rel="import" href="/tracing/importer/simple_line_reader.html">
 <link rel="import" href="/tracing/model/model.html">
@@ -24,43 +25,42 @@ tr.exportTo('tr.e.importer', function() {
     // Clear the array before pushing data to it.
     Trace2HTMLImporter.subtraces_ = [];
 
-    var r = new tr.importer.SimpleLineReader(text);
+    const r = new tr.importer.SimpleLineReader(text);
 
     // Try to find viewer-data...
     while (true) {
       if (!r.advanceToLineMatching(
           new RegExp('^<\s*script id="viewer-data" ' +
-                     'type="(application\/json|text\/plain)">$')))
+                     'type="(application\/json|text\/plain)">$'))) {
         break;
+      }
 
       r.beginSavingLines();
-      if (!r.advanceToLineMatching(/^<\/\s*script>$/))
-        return;
+      if (!r.advanceToLineMatching(/^<\/\s*script>$/)) return;
 
-      var rawEvents = r.endSavingLinesAndGetResult();
+      let rawEvents = r.endSavingLinesAndGetResult();
 
       // Drop off first and last event as it contains the end script tag.
       rawEvents = rawEvents.slice(1, rawEvents.length - 1);
-      var data64 = rawEvents.join('\n');
-      var buffer = new ArrayBuffer(
+      const data64 = rawEvents.join('\n');
+      const buffer = new ArrayBuffer(
           tr.b.Base64.getDecodedBufferLength(data64));
-      var len = tr.b.Base64.DecodeToTypedArray(data64, new DataView(buffer));
+      const len = tr.b.Base64.DecodeToTypedArray(data64, new DataView(buffer));
       Trace2HTMLImporter.subtraces_.push(buffer.slice(0, len));
     }
   }
 
   function _canImportFromHTML(text) {
-    if (!/^<!DOCTYPE html>/.test(text))
-      return false;
+    if (!/^<!DOCTYPE html>/.test(text)) return false;
 
     // Try to find viewer-data...
     _extractEventsFromHTML(text);
-    if (Trace2HTMLImporter.subtraces_.length === 0)
-      return false;
+    if (Trace2HTMLImporter.subtraces_.length === 0) return false;
     return true;
   }
 
   Trace2HTMLImporter.canImport = function(events) {
+    if (events instanceof tr.b.TraceStream) return false;
     return _canImportFromHTML(events);
   };
 
@@ -71,15 +71,15 @@ tr.exportTo('tr.e.importer', function() {
       return 'Trace2HTMLImporter';
     },
 
-    isTraceDataContainer: function() {
+    isTraceDataContainer() {
       return true;
     },
 
-    extractSubtraces: function() {
+    extractSubtraces() {
       return Trace2HTMLImporter.subtraces_;
     },
 
-    importEvents: function() {
+    importEvents() {
     }
   };
 

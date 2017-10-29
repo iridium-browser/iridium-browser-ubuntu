@@ -7,7 +7,9 @@
 #include "base/macros.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/pref_names.h"
@@ -24,7 +26,6 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 
 namespace {
@@ -68,7 +69,9 @@ InvertBubbleView::InvertBubbleView(Browser* browser, views::View* anchor_view)
       high_contrast_(NULL),
       dark_theme_(NULL),
       learn_more_(NULL),
-      close_(NULL) {}
+      close_(NULL) {
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::INVERT);
+}
 
 InvertBubbleView::~InvertBubbleView() {
 }
@@ -82,9 +85,10 @@ void InvertBubbleView::Init() {
   const gfx::FontList& original_font_list =
       rb.GetFontList(ui::ResourceBundle::MediumFont);
 
+  // TODO(tapted): This should be using WidgetDelegate::GetWindowTitle().
   views::Label* title = new views::Label(
-      base::string16(),
-      original_font_list.Derive(2, gfx::Font::NORMAL, gfx::Font::Weight::BOLD));
+      base::string16(), views::Label::CustomFont{original_font_list.Derive(
+                            2, gfx::Font::NORMAL, gfx::Font::Weight::BOLD)});
   title->SetMultiLine(true);
 
   learn_more_ = new views::Link(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
@@ -105,7 +109,6 @@ void InvertBubbleView::Init() {
   close_->set_listener(this);
 
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
-  SetLayoutManager(layout);
 
   views::ColumnSet* columns = layout->AddColumnSet(0);
   for (int i = 0; i < 4; i++) {
@@ -117,7 +120,8 @@ void InvertBubbleView::Init() {
   layout->StartRow(0, 0);
   layout->AddView(title, 4, 1);
   layout->StartRowWithPadding(0, 0, 0,
-                              views::kRelatedControlSmallVerticalSpacing);
+                              ChromeLayoutProvider::Get()->GetDistanceMetric(
+                                  DISTANCE_RELATED_CONTROL_VERTICAL_SMALL));
   layout->AddView(high_contrast_);
   layout->AddView(dark_theme_);
   layout->AddView(learn_more_);
@@ -172,9 +176,13 @@ void MaybeShowInvertBubbleView(BrowserView* browser_view) {
   if (color_utils::IsInvertedColorScheme() && anchor && anchor->GetWidget() &&
       !pref_service->GetBoolean(prefs::kInvertNotificationShown)) {
     pref_service->SetBoolean(prefs::kInvertNotificationShown, true);
-    InvertBubbleView* delegate = new InvertBubbleView(browser, anchor);
-    views::BubbleDialogDelegateView::CreateBubble(delegate)->Show();
+    ShowInvertBubbleView(browser, anchor);
   }
+}
+
+void ShowInvertBubbleView(Browser* browser, views::View* anchor) {
+  InvertBubbleView* delegate = new InvertBubbleView(browser, anchor);
+  views::BubbleDialogDelegateView::CreateBubble(delegate)->Show();
 }
 
 }  // namespace chrome

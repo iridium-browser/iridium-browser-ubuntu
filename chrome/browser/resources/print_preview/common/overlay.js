@@ -7,25 +7,15 @@ cr.define('print_preview', function() {
 
   /**
    * Modal dialog base component.
-   * @param {!print_preview.MetricsContext} metricsContext Metrics
-   *     context to record usage statistics.
    * @constructor
    * @extends {print_preview.Component}
    */
-  function Overlay(metricsContext) {
+  function Overlay() {
     print_preview.Component.call(this);
-
-    /** @private {!print_preview.MetricsContext} */
-    this.metricsContext_ = metricsContext;
-  };
+  }
 
   Overlay.prototype = {
     __proto__: print_preview.Component.prototype,
-
-    /** @return {!print_preview.MetricsContext} */
-    get metricsContext() {
-      return this.metricsContext_;
-    },
 
     /** @override */
     enterDocument: function() {
@@ -47,7 +37,8 @@ cr.define('print_preview', function() {
             this.cancel();
           } else if (e.keyCode == 13) {
             var activeElementTag = document.activeElement ?
-                document.activeElement.tagName.toUpperCase() : '';
+                document.activeElement.tagName.toUpperCase() :
+                '';
             if (activeElementTag != 'BUTTON' && activeElementTag != 'SELECT') {
               if (this.onEnterPressedInternal()) {
                 e.stopPropagation();
@@ -59,15 +50,13 @@ cr.define('print_preview', function() {
       }.bind(this));
 
       this.tracker.add(
-          this.getChildElement('.page > .close-button'),
-          'click',
+          this.getChildElement('.page > .close-button'), 'click',
           this.cancel.bind(this));
 
       this.tracker.add(
           this.getElement(), 'click', this.onOverlayClick_.bind(this));
       this.tracker.add(
-          this.getChildElement('.page'),
-          'animationend',
+          this.getChildElement('.page'), 'animationend',
           this.onAnimationEnd_.bind(this));
     },
 
@@ -136,7 +125,5 @@ cr.define('print_preview', function() {
   };
 
   // Export
-  return {
-    Overlay: Overlay
-  };
+  return {Overlay: Overlay};
 });

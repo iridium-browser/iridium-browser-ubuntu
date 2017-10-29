@@ -5,6 +5,8 @@
 #ifndef NET_HTTP_HTTP_PROXY_CLIENT_SOCKET_POOL_H_
 #define NET_HTTP_HTTP_PROXY_CLIENT_SOCKET_POOL_H_
 
+#include <stdint.h>
+
 #include <memory>
 #include <string>
 
@@ -20,7 +22,7 @@
 #include "net/socket/client_socket_pool.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/ssl_client_socket.h"
-#include "net/spdy/spdy_session.h"
+#include "net/spdy/chromium/spdy_session.h"
 
 namespace net {
 
@@ -28,6 +30,7 @@ class HttpAuthCache;
 class HttpAuthHandlerFactory;
 class HttpProxyClientSocketWrapper;
 class NetLog;
+class NetworkQualityProvider;
 class ProxyDelegate;
 class SSLClientSocketPool;
 class SSLSocketParams;
@@ -143,6 +146,7 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool
                             int max_sockets_per_group,
                             TransportClientSocketPool* transport_pool,
                             SSLClientSocketPool* ssl_pool,
+                            NetworkQualityProvider* network_quality_provider,
                             NetLog* net_log);
 
   ~HttpProxyClientSocketPool() override;
@@ -176,6 +180,8 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool
 
   void CloseIdleSockets() override;
 
+  void CloseIdleSocketsInGroup(const std::string& group_name) override;
+
   int IdleSocketCount() const override;
 
   int IdleSocketCountInGroup(const std::string& group_name) const override;
@@ -207,6 +213,7 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool
    public:
     HttpProxyConnectJobFactory(TransportClientSocketPool* transport_pool,
                                SSLClientSocketPool* ssl_pool,
+                               NetworkQualityProvider* network_quality_provider,
                                NetLog* net_log);
 
     // ClientSocketPoolBase::ConnectJobFactory methods.
@@ -220,8 +227,11 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketPool
    private:
     TransportClientSocketPool* const transport_pool_;
     SSLClientSocketPool* const ssl_pool_;
+    NetworkQualityProvider* network_quality_provider_;
+    const int32_t transport_rtt_multiplier_;
+    const base::TimeDelta min_proxy_connection_timeout_;
+    const base::TimeDelta max_proxy_connection_timeout_;
     NetLog* net_log_;
-    base::TimeDelta timeout_;
 
     DISALLOW_COPY_AND_ASSIGN(HttpProxyConnectJobFactory);
   };

@@ -15,6 +15,12 @@ from chromite.lib import metrics
 from chromite.lib import parallel
 from chromite.lib import ts_mon_config
 
+from infra_libs import ts_mon
+
+
+class FakeException(Exception):
+  """FakeException to raise during tests."""
+
 
 class TestIndirectMetrics(cros_test_lib.MockTestCase):
   """Tests the behavior of _Indirect metrics."""
@@ -28,14 +34,18 @@ class TestIndirectMetrics(cros_test_lib.MockTestCase):
       self.PatchObject(metrics, 'MESSAGE_QUEUE', q)
 
       proxy_metric = metric('foo')
-      proxy_metric.example('arg1', 'arg2')
+      proxy_metric.example('arg1', {'field_name': 'value'})
 
       message = q.get(timeout=10)
 
+    expected_metric_kwargs = {
+        'field_spec': [ts_mon.StringField('field_name')],
+        'description': 'No description.',
+    }
     self.assertEqual(
         message,
-        metrics.MetricCall(metric.__name__, ('foo',),
-                           {}, 'example', ('arg1', 'arg2'), {},
+        metrics.MetricCall(metric.__name__, ('foo',), expected_metric_kwargs,
+                           'example', ('arg1', {'field_name': 'value'}), {},
                            False))
 
   def patchTime(self):
@@ -81,27 +91,48 @@ class TestIndirectMetrics(cros_test_lib.MockTestCase):
         for i in range(7):
           # any extra streams with different fields and reset_after=False
           # will be cleared only if the below metric is cleared.
-          metrics.Boolean(MetricName(i, True), reset_after=False).set(
-              True, fields={'original': False})
+          metrics.Boolean(
+              MetricName(i, True), reset_after=False).set(
+                  True, fields={'original': False})
 
-          metrics.Boolean(MetricName(i, True), reset_after=True).set(
-              True, fields={'original': True})
+          metrics.Boolean(
+              MetricName(i, True), reset_after=True).set(
+                  True, fields={'original': True})
 
         for i in range(7):
-          metrics.Boolean(MetricName(i, False), reset_after=False).set(True)
+          metrics.Boolean(
+              MetricName(i, False),
+              reset_after=False).set(True)
 
 
       # By leaving the context, we .join() the flushing process.
       with open(out.name, 'r') as fh:
         content = fh.read()
 
-      # The flushed metrics should be sent only three times, because:
+      # The reset metrics should be sent only three times, because:
       # * original=False is sent twice
       # * original=True is sent once.
+      # The second flush() only results in one occurance of the string
+      # MetricName(i, True) because both data points are in a "metrics_data_set"
+      # block, like so:
+      # metrics_collection {
+      #   ... etc ...
+      #   metrics_data_set {
+      #     metric_name: "/chrome/infra/test/metric/name/0/True"
+      #     data {
+      #       bool_value: true
+      #       field {
+      #         name: "original"
+      #         bool_value: false
+      #       }
+      #     }
+      #     data {
+      #       bool_value: true
+      #       ... etc ...
       for i in range(7):
-        self.assertEqual(content.count(MetricName(i, True)), 3)
+        self.assertEqual(content.count(MetricName(i, True)), 2)
 
-      # The nonflushed metrics are sent once-per-flush.
+      # The non-reset metrics are sent once-per-flush.
       # There are 7 of these metrics,
       # * The 0th is sent 7 times,
       # * The 1st is sent 6 times,
@@ -156,6 +187,113 @@ class TestSecondsTimer(cros_test_lib.MockTestCase):
       c['qux'] = 'qwert'
     self._mockMetric.add.assert_called_with(mock.ANY, fields={'foo': 'bar'})
 
+  def testContextManagerWithException(self):
+    """Tests that we emit metrics if the timed method raised something."""
+    with self.assertRaises(AssertionError):
+      with metrics.SecondsTimer('fooname', fields={'foo': 'bar'}):
+        assert False
+
+    self._mockMetric.add.assert_called_with(mock.ANY, fields={'foo': 'bar'})
+
+class TestSuccessCounter(cros_test_lib.MockTestCase):
+  """Tests the behavior of SecondsTimer."""
+
+  def setUp(self):
+    self._mockMetric = mock.MagicMock()
+    self.PatchObject(metrics, 'Counter',
+                     return_value=self._mockMetric)
+
+  def testContextManager(self):
+    """Test that timing context manager emits a metric."""
+    with metrics.SuccessCounter('fooname'):
+      pass
+    self._mockMetric.increment.assert_called_with(
+        fields={'success': True})
+    self.assertEqual(self._mockMetric.increment.call_count, 1)
+
+  def testContextManagerFailedException(self):
+    """Test that we fail when an exception is raised."""
+    with self.assertRaises(FakeException):
+      with metrics.SuccessCounter('fooname'):
+        raise FakeException
+
+    self._mockMetric.increment.assert_called_with(
+        fields={'success': False})
+
+  def testContextManagerFailedExplicit(self):
+    """Test that we fail when an exception is raised."""
+    with metrics.SuccessCounter('fooname') as s:
+      s['success'] = False
+
+    self._mockMetric.increment.assert_called_with(
+        fields={'success': False})
+
+  def testContextManagerWithUpdate(self):
+    """Tests that context manager with a field update emits metric."""
+    with metrics.SuccessCounter('fooname', fields={'foo': 'bar'}) as c:
+      c['foo'] = 'qux'
+    self._mockMetric.increment.assert_called_with(
+        fields={'foo': 'qux', 'success': True})
+
+  def testContextManagerWithoutUpdate(self):
+    """Tests that the default value for fields is used when not updated."""
+    # pylint: disable=unused-variable
+    with metrics.SuccessCounter('fooname', fields={'foo': 'bar'}) as c:
+      pass
+    self._mockMetric.increment.assert_called_with(
+        fields={'foo': 'bar', 'success': True})
+
+  def testContextManagerIgnoresInvalidField(self):
+    """Test that we ignore fields that are set with no default."""
+    with metrics.SuccessCounter('fooname', fields={'foo': 'bar'}) as c:
+      c['qux'] = 'qwert'
+
+    self._mockMetric.increment.assert_called_with(
+        fields={'foo': 'bar', 'success': True})
+
+
+class TestPresence(cros_test_lib.MockTestCase):
+  """Tests the behavior of SecondsTimer."""
+
+  def setUp(self):
+    self._mockMetric = mock.MagicMock()
+    self.PatchObject(metrics, 'Boolean',
+                     return_value=self._mockMetric)
+
+  def testContextManager(self):
+    """Test that timing context manager emits a metric."""
+    with metrics.Presence('fooname'):
+      self.assertEquals(self._mockMetric.mock_calls, [
+          mock.call.set(True, fields=None),
+      ])
+
+    self.assertEquals(self._mockMetric.mock_calls, [
+        mock.call.set(True, fields=None),
+        mock.call.set(False, fields=None),
+    ])
+
+  def testContextManagerException(self):
+    """Test that we fail when an exception is raised."""
+    with self.assertRaises(FakeException):
+      with metrics.Presence('fooname'):
+        raise FakeException
+
+    self.assertEquals(self._mockMetric.mock_calls, [
+        mock.call.set(True, fields=None),
+        mock.call.set(False, fields=None),
+    ])
+
+  def testContextManagerFields(self):
+    """Test that we fail when an exception is raised."""
+    with metrics.Presence('fooname', {'foo': 'bar', 'c': 3}):
+      pass
+
+    self.assertEquals(self._mockMetric.mock_calls, [
+        mock.call.set(True, fields={'c': 3, 'foo': 'bar'}),
+        mock.call.set(False, fields={'c': 3, 'foo': 'bar'}),
+    ])
+
+
 class ClientException(Exception):
   """An exception that client of the metrics module raises."""
 
@@ -174,10 +312,11 @@ class TestRuntimeBreakdownTimer(cros_test_lib.MockTestCase):
     metric_mock = self.PatchObject(metrics, 'SecondsDistribution',
                                    autospec=True)
     self._mockSecondsDistribution = metric_mock.return_value
-
     metric_mock = self.PatchObject(metrics, 'PercentageDistribution',
                                    autospec=True)
     self._mockPercentageDistribution = metric_mock.return_value
+    metric_mock = self.PatchObject(metrics, 'Float', autospec=True)
+    self._mockFloat = metric_mock.return_value
 
     metric_mock = self.PatchObject(metrics, 'CumulativeMetric', autospec=True)
     self._mockCumulativeMetric = metric_mock.return_value
@@ -210,6 +349,16 @@ class TestRuntimeBreakdownTimer(cros_test_lib.MockTestCase):
     self.assertEqual(metrics.CumulativeMetric.call_count, 1)
     self.assertEqual(metrics.CumulativeMetric.call_args[0][0],
                      'fubar/bucketing_loss')
+
+    self.assertEqual(metrics.Float.call_count, 2)
+    for call_args in metrics.Float.call_args_list:
+      self.assertEqual(call_args[0][0], 'fubar/duration_breakdown')
+    self.assertEqual(self._mockFloat.set.call_count, 2)
+    step_names = [x[1]['fields']['step_name']
+                  for x  in self._mockFloat.set.call_args_list]
+    step_ratios = [x[0][0] for x  in self._mockFloat.set.call_args_list]
+    self.assertEqual(set(step_names), {'step1', 'step2'})
+    self.assertEqual(set(step_ratios), {0.4, 0.1})
 
   def testBucketingLossApproximately(self):
     """Tests that we report the bucketing loss correctly."""
@@ -251,6 +400,12 @@ class TestRuntimeBreakdownTimer(cros_test_lib.MockTestCase):
     self.assertEqual(set(breakdown_names),
                      {'fubar/breakdown/step1', 'fubar/breakdown_unaccounted'})
 
+    self.assertEqual(metrics.Float.call_count, 1)
+    self.assertEqual(metrics.Float.call_args[0][0], 'fubar/duration_breakdown')
+    self.assertEqual(self._mockFloat.set.call_count, 1)
+    self.assertEqual(self._mockFloat.set.call_args[1]['fields']['step_name'],
+                     'step1')
+
   def testNestedStepIgnored(self):
     """Tests that trying to enter nested .Step contexts raises."""
     with metrics.RuntimeBreakdownTimer('fubar') as runtime:
@@ -263,6 +418,12 @@ class TestRuntimeBreakdownTimer(cros_test_lib.MockTestCase):
                        metrics.PercentageDistribution.call_args_list]
     self.assertEqual(set(breakdown_names),
                      {'fubar/breakdown/step1', 'fubar/breakdown_unaccounted'})
+
+    self.assertEqual(metrics.Float.call_count, 1)
+    self.assertEqual(metrics.Float.call_args[0][0], 'fubar/duration_breakdown')
+    self.assertEqual(self._mockFloat.set.call_count, 1)
+    self.assertEqual(self._mockFloat.set.call_args[1]['fields']['step_name'],
+                     'step1')
 
   def testNestedStepsWithClientCodeException(self):
     """Test that breakdown is reported correctly when client code raises."""
@@ -278,6 +439,12 @@ class TestRuntimeBreakdownTimer(cros_test_lib.MockTestCase):
                        metrics.PercentageDistribution.call_args_list]
     self.assertEqual(set(breakdown_names),
                      {'fubar/breakdown/step1', 'fubar/breakdown_unaccounted'})
+
+    self.assertEqual(metrics.Float.call_count, 1)
+    self.assertEqual(metrics.Float.call_args[0][0], 'fubar/duration_breakdown')
+    self.assertEqual(self._mockFloat.set.call_count, 1)
+    self.assertEqual(self._mockFloat.set.call_args[1]['fields']['step_name'],
+                     'step1')
 
   def _GetFakeTime(self):
     return self._fake_time

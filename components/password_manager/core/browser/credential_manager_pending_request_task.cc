@@ -11,8 +11,9 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/metrics/user_metrics.h"
+#include "base/stl_util.h"
 #include "components/autofill/core/common/password_form.h"
-#include "components/password_manager/core/browser/affiliated_match_helper.h"
+#include "components/password_manager/core/browser/android_affiliation/affiliated_match_helper.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
@@ -95,15 +96,14 @@ void FilterDuplicatesAndEmptyUsername(
     bool* has_empty_username,
     bool* has_duplicates) {
   // Remove empty usernames from the list.
-  auto begin_empty =
-      std::remove_if(forms->begin(), forms->end(),
-                     [](const std::unique_ptr<autofill::PasswordForm>& form) {
-                       return form->username_value.empty();
-                     });
-  *has_empty_username = (begin_empty != forms->end());
-  forms->erase(begin_empty, forms->end());
+  size_t size_before = forms->size();
+  base::EraseIf(*forms,
+                [](const std::unique_ptr<autofill::PasswordForm>& form) {
+                  return form->username_value.empty();
+                });
+  *has_empty_username = (size_before != forms->size());
 
-  const size_t size_before = forms->size();
+  size_before = forms->size();
   FilterDuplicates(forms);
   *has_duplicates = (size_before != forms->size());
 }
@@ -113,12 +113,12 @@ void FilterDuplicatesAndEmptyUsername(
 CredentialManagerPendingRequestTask::CredentialManagerPendingRequestTask(
     CredentialManagerPendingRequestTaskDelegate* delegate,
     const SendCredentialCallback& callback,
-    bool request_zero_click_only,
+    CredentialMediationRequirement mediation,
     bool include_passwords,
     const std::vector<GURL>& request_federations)
     : delegate_(delegate),
       send_callback_(callback),
-      zero_click_only_(request_zero_click_only),
+      mediation_(mediation),
       origin_(delegate_->GetOrigin()),
       include_passwords_(include_passwords) {
   CHECK(!delegate_->client()->DidLastPageLoadEncounterSSLErrors());
@@ -131,11 +131,11 @@ CredentialManagerPendingRequestTask::~CredentialManagerPendingRequestTask() =
 
 void CredentialManagerPendingRequestTask::OnGetPasswordStoreResults(
     std::vector<std::unique_ptr<autofill::PasswordForm>> results) {
-  if (results.empty()) {
+  // localhost is a secure origin but not https.
+  if (results.empty() && origin_.SchemeIs(url::kHttpsScheme)) {
     // Try to migrate the HTTP passwords and process them later.
-    http_migrator_ = base::MakeUnique<HttpPasswordMigrator>(
-        origin_, HttpPasswordMigrator::MigrationMode::COPY,
-        delegate_->client()->GetPasswordStore(), this);
+    http_migrator_ = base::MakeUnique<HttpPasswordStoreMigrator>(
+        origin_, delegate_->client(), this);
     return;
   }
   ProcessForms(std::move(results));
@@ -149,12 +149,9 @@ void CredentialManagerPendingRequestTask::ProcessMigratedForms(
 void CredentialManagerPendingRequestTask::ProcessForms(
     std::vector<std::unique_ptr<autofill::PasswordForm>> results) {
   using metrics_util::LogCredentialManagerGetResult;
-  metrics_util::CredentialManagerGetMediation mediation_status =
-      zero_click_only_ ? metrics_util::CREDENTIAL_MANAGER_GET_UNMEDIATED
-                       : metrics_util::CREDENTIAL_MANAGER_GET_MEDIATED;
   if (delegate_->GetOrigin() != origin_) {
     LogCredentialManagerGetResult(metrics_util::CREDENTIAL_MANAGER_GET_NONE,
-                                  mediation_status);
+                                  mediation_);
     delegate_->SendCredential(send_callback_, CredentialInfo());
     return;
   }
@@ -187,13 +184,15 @@ void CredentialManagerPendingRequestTask::ProcessForms(
   FilterDuplicatesAndEmptyUsername(&local_results, &has_empty_username,
                                    &has_duplicates);
 
-  // We only perform zero-click sign-in when the result is completely
-  // unambigious. If there is one and only one entry, and zero-click is
+  // We only perform zero-click sign-in when it is not forbidden via the
+  // mediation requirement and the result is completely unambigious.
+  // If there is one and only one entry, and zero-click is
   // enabled for that entry, return it.
   //
   // Moreover, we only return such a credential if the user has opted-in via the
   // first-run experience.
   const bool can_use_autosignin =
+      mediation_ != CredentialMediationRequirement::kRequired &&
       local_results.size() == 1u && delegate_->IsZeroClickAllowed();
   if (can_use_autosignin && !local_results[0]->skip_zero_click &&
       !password_bubble_experiment::ShouldShowAutoSignInPromptFirstRunExperience(
@@ -206,12 +205,12 @@ void CredentialManagerPendingRequestTask::ProcessForms(
                                               origin_);
     base::RecordAction(base::UserMetricsAction("CredentialManager_Autosignin"));
     LogCredentialManagerGetResult(
-        metrics_util::CREDENTIAL_MANAGER_GET_AUTOSIGNIN, mediation_status);
+        metrics_util::CREDENTIAL_MANAGER_GET_AUTOSIGNIN, mediation_);
     delegate_->SendCredential(send_callback_, info);
     return;
   }
 
-  if (zero_click_only_) {
+  if (mediation_ == CredentialMediationRequirement::kSilent) {
     metrics_util::CredentialManagerGetResult get_result;
     if (local_results.empty())
       get_result = metrics_util::CREDENTIAL_MANAGER_GET_NONE_EMPTY_STORE;
@@ -231,7 +230,7 @@ void CredentialManagerPendingRequestTask::ProcessForms(
           std::move(local_results[0]));
     }
 
-    LogCredentialManagerGetResult(get_result, mediation_status);
+    LogCredentialManagerGetResult(get_result, mediation_);
     delegate_->SendCredential(send_callback_, CredentialInfo());
     return;
   }
@@ -246,8 +245,7 @@ void CredentialManagerPendingRequestTask::ProcessForms(
 
   if (local_results.empty()) {
     LogCredentialManagerGetResult(
-        metrics_util::CREDENTIAL_MANAGER_GET_NONE_EMPTY_STORE,
-        mediation_status);
+        metrics_util::CREDENTIAL_MANAGER_GET_NONE_EMPTY_STORE, mediation_);
     delegate_->SendCredential(send_callback_, CredentialInfo());
     return;
   }
@@ -258,9 +256,9 @@ void CredentialManagerPendingRequestTask::ProcessForms(
           std::move(local_results), origin_,
           base::Bind(
               &CredentialManagerPendingRequestTaskDelegate::SendPasswordForm,
-              base::Unretained(delegate_), send_callback_))) {
+              base::Unretained(delegate_), send_callback_, mediation_))) {
     LogCredentialManagerGetResult(metrics_util::CREDENTIAL_MANAGER_GET_NONE,
-                                  mediation_status);
+                                  mediation_);
     delegate_->SendCredential(send_callback_, CredentialInfo());
   }
 }

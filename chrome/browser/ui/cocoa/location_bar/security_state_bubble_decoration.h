@@ -73,10 +73,10 @@ class SecurityStateBubbleDecoration : public BubbleDecoration,
   bool AcceptsMousePress() override;
   NSPoint GetBubblePointInFrame(NSRect frame) override;
   NSString* GetToolTip() override;
+  NSRect GetRealFocusRingBounds(NSRect apparent_frame) const override;
 
   // BubbleDecoration:
   NSColor* GetBackgroundBorderColor() override;
-  ui::NinePartImageIds GetBubbleImageIds() override;
 
   // gfx::AnimationDelegate:
   void AnimationProgressed(const gfx::Animation* animation) override;
@@ -111,6 +111,11 @@ class SecurityStateBubbleDecoration : public BubbleDecoration,
   gfx::SlideAnimation animation_;
 
   LocationBarViewMac* owner_;  // weak
+
+  // Distance in points to inset the right edge of the focus ring by. This is
+  // used by |GetRealFocusRingBounds| to prevent the focus ring from including
+  // the divider bar. This is recomputed every time this object is drawn.
+  int focus_ring_right_inset_ = 0;
 
   // Used to disable find bar animations when testing.
   bool disable_animations_during_testing_;

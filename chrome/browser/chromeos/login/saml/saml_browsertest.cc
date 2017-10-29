@@ -42,7 +42,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/media/webrtc/media_permission.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/policy/test/local_policy_test_server.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
@@ -358,16 +358,15 @@ class SamlTest : public OobeBaseTest {
   }
 
   void SetupAuthFlowChangeListener() {
-    ASSERT_TRUE(content::ExecuteScript(
+    content::ExecuteScriptAsync(
         GetLoginUI()->GetWebContents(),
         "$('gaia-signin').gaiaAuthHost_.addEventListener('authFlowChange',"
-            "function f() {"
-              "$('gaia-signin').gaiaAuthHost_.removeEventListener("
-                  "'authFlowChange', f);"
-              "window.domAutomationController.setAutomationId(0);"
-              "window.domAutomationController.send("
-                  "$('gaia-signin').isSAML() ? 'SamlLoaded' : 'GaiaLoaded');"
-            "});"));
+        "    function f() {"
+        "      $('gaia-signin').gaiaAuthHost_.removeEventListener("
+        "          'authFlowChange', f);"
+        "      window.domAutomationController.send("
+        "          $('gaia-signin').isSAML() ? 'SamlLoaded' : 'GaiaLoaded');"
+        "    });");
   }
 
   virtual void StartSamlAndWaitForIdpPageLoad(const std::string& gaia_email) {
@@ -463,9 +462,8 @@ IN_PROC_BROWSER_TEST_F(SamlTest, MAYBE_SamlUI) {
 
   // Click on 'cancel'.
   content::DOMMessageQueue message_queue;  // Observe before 'cancel'.
-  ASSERT_TRUE(
-      content::ExecuteScript(GetLoginUI()->GetWebContents(),
-                             "$('gaia-navigation').$.closeButton.click();"));
+  content::ExecuteScriptAsync(GetLoginUI()->GetWebContents(),
+                              "$('gaia-navigation').$.closeButton.click();");
 
   // Auth flow should change back to Gaia.
   std::string message;
@@ -524,7 +522,6 @@ IN_PROC_BROWSER_TEST_F(SamlTest, ScrapedSingle) {
       "$('gaia-signin').gaiaAuthHost_.addEventListener('authCompleted',"
       "    function(e) {"
       "      var password = e.detail.password;"
-      "      window.domAutomationController.setAutomationId(0);"
       "      window.domAutomationController.send(password);"
       "    });"));
 
@@ -1122,7 +1119,6 @@ void SAMLPolicyTest::ShowGAIALoginForm() {
   ASSERT_TRUE(content::ExecuteScript(
       GetLoginUI()->GetWebContents(),
       "$('gaia-signin').gaiaAuthHost_.addEventListener('ready', function() {"
-      "  window.domAutomationController.setAutomationId(0);"
       "  window.domAutomationController.send('ready');"
       "});"
       "$('add-user-button').click();"));
@@ -1139,7 +1135,6 @@ void SAMLPolicyTest::ShowSAMLInterstitial() {
       "$('saml-interstitial').addEventListener("
       "    'samlInterstitialPageReady',"
       "    function() {"
-      "        window.domAutomationController.setAutomationId(0);"
       "        window.domAutomationController.send("
       "            'samlInterstitialPageReady');"
       "    });"
@@ -1172,7 +1167,6 @@ void SAMLPolicyTest::ClickChangeAccountOnSAMLInterstitialPage() {
   ASSERT_TRUE(content::ExecuteScript(
       GetLoginUI()->GetWebContents(),
       "$('gaia-signin').gaiaAuthHost_.addEventListener('ready', function() {"
-      "  window.domAutomationController.setAutomationId(0);"
       "  window.domAutomationController.send('ready');"
       "});"
       "$('saml-interstitial').changeAccountLink.click();"));
@@ -1217,13 +1211,12 @@ void SAMLPolicyTest::GetCookies() {
   ASSERT_TRUE(profile);
   base::RunLoop run_loop;
   content::BrowserThread::PostTask(
-      content::BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&SAMLPolicyTest::GetCookiesOnIOThread,
-                 base::Unretained(this),
-                 scoped_refptr<net::URLRequestContextGetter>(
-                     profile->GetRequestContext()),
-                 run_loop.QuitClosure()));
+      content::BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&SAMLPolicyTest::GetCookiesOnIOThread,
+                     base::Unretained(this),
+                     scoped_refptr<net::URLRequestContextGetter>(
+                         profile->GetRequestContext()),
+                     run_loop.QuitClosure()));
   run_loop.Run();
 }
 
@@ -1231,8 +1224,8 @@ void SAMLPolicyTest::GetCookiesOnIOThread(
     const scoped_refptr<net::URLRequestContextGetter>& request_context,
     const base::Closure& callback) {
   request_context->GetURLRequestContext()->cookie_store()->GetAllCookiesAsync(
-      base::Bind(&SAMLPolicyTest::StoreCookieList, base::Unretained(this),
-                 callback));
+      base::BindOnce(&SAMLPolicyTest::StoreCookieList, base::Unretained(this),
+                     callback));
 }
 
 void SAMLPolicyTest::StoreCookieList(
@@ -1346,9 +1339,19 @@ IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, TransferCookiesAffiliated) {
   EXPECT_EQ(kSAMLIdPCookieValue2, GetCookieValue(kSAMLIdPCookieName));
 }
 
-// Flaky on Debug, ASan and MSan bots: crbug.com/683161.
-IN_PROC_BROWSER_TEST_F(SAMLPolicyTest,
-                       DISABLED_PRE_TransferCookiesUnaffiliated) {
+// PRE_TransferCookiesUnaffiliated and TransferCookiesUnaffiliated are flaky on
+// MSAN, ASAN, Debug due to time out - most likely, because of the general
+// slowness of the test. See crbug.com/683161, crbug.com/714167.
+#if defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER) || !defined(NDEBUG)
+#define MAYBE_PRE_TransferCookiesUnaffiliated \
+  DISABLED_PRE_TransferCookiesUnaffiliated
+#define MAYBE_TransferCookiesUnaffiliated DISABLED_TransferCookiesUnaffiliated
+#else
+#define MAYBE_PRE_TransferCookiesUnaffiliated PRE_TransferCookiesUnaffiliated
+#define MAYBE_TransferCookiesUnaffiliated TransferCookiesUnaffiliated
+#endif
+
+IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, MAYBE_PRE_TransferCookiesUnaffiliated) {
   fake_saml_idp()->SetCookieValue(kSAMLIdPCookieValue1);
   LogInWithSAML(kDifferentDomainSAMLUserEmail,
                 kTestAuthSIDCookie1,
@@ -1364,8 +1367,7 @@ IN_PROC_BROWSER_TEST_F(SAMLPolicyTest,
 // IdP are not transferred to a user's profile on subsequent login if the user
 // does not belong to the domain that the device is enrolled into. Also verifies
 // that GAIA cookies are not transferred.
-// Flaky on Debug, ASan and MSan bots: crbug.com/683161.
-IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, DISABLED_TransferCookiesUnaffiliated) {
+IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, MAYBE_TransferCookiesUnaffiliated) {
   fake_saml_idp()->SetCookieValue(kSAMLIdPCookieValue2);
   fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
   ShowGAIALoginForm();
@@ -1407,7 +1409,8 @@ IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, SAMLInterstitialChangeAccount) {
 // Tests that clicking "Next" in the SAML interstitial page successfully
 // triggers a SAML redirect request, and the SAML IdP authentication page is
 // loaded and authenticaing there is successful.
-IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, SAMLInterstitialNext) {
+// Disabled due to flakiness, see crbug.com/699228
+IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, DISABLED_SAMLInterstitialNext) {
   fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
   fake_gaia_->SetFakeMergeSessionParams(
       kFirstSAMLUserEmail, kTestAuthSIDCookie1, kTestAuthLSIDCookie1);
@@ -1441,48 +1444,37 @@ IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, TestLoginMediaPermission) {
   WaitForSigninScreen();
 
   content::WebContents* web_contents = GetLoginUI()->GetWebContents();
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  content::MediaStreamRequestResult reason;
 
   // Mic should always be blocked.
-  {
-    MediaPermission permission(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, url1,
-                               url1, profile, web_contents);
-    EXPECT_EQ(CONTENT_SETTING_BLOCK, permission.GetPermissionStatus(&reason));
-  }
+  EXPECT_FALSE(
+      MediaCaptureDevicesDispatcher::GetInstance()->CheckMediaAccessPermission(
+          web_contents, url1, content::MEDIA_DEVICE_AUDIO_CAPTURE));
 
   // Camera should be allowed if allowed by the whitelist, otherwise blocked.
-  {
-    MediaPermission permission(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, url1,
-                               url1, profile, web_contents);
-    EXPECT_EQ(CONTENT_SETTING_ALLOW, permission.GetPermissionStatus(&reason));
-  }
+  EXPECT_TRUE(
+      MediaCaptureDevicesDispatcher::GetInstance()->CheckMediaAccessPermission(
+          web_contents, url1, content::MEDIA_DEVICE_VIDEO_CAPTURE));
 
-  {
-    MediaPermission permission(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, url2,
-                               url2, profile, web_contents);
-    EXPECT_EQ(CONTENT_SETTING_ALLOW, permission.GetPermissionStatus(&reason));
-  }
+  EXPECT_TRUE(
+      MediaCaptureDevicesDispatcher::GetInstance()->CheckMediaAccessPermission(
+          web_contents, url2, content::MEDIA_DEVICE_VIDEO_CAPTURE));
 
-  {
-    MediaPermission permission(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, url3,
-                               url3, profile, web_contents);
-    EXPECT_EQ(CONTENT_SETTING_BLOCK, permission.GetPermissionStatus(&reason));
-  }
+  EXPECT_FALSE(
+      MediaCaptureDevicesDispatcher::GetInstance()->CheckMediaAccessPermission(
+          web_contents, url3, content::MEDIA_DEVICE_VIDEO_CAPTURE));
 
   // Camera should be blocked in the login screen, even if it's allowed via
   // content setting.
-  {
-    HostContentSettingsMapFactory::GetForProfile(profile)
-        ->SetContentSettingDefaultScope(
-            url3, url3, CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string(),
-            CONTENT_SETTING_ALLOW);
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  HostContentSettingsMapFactory::GetForProfile(profile)
+      ->SetContentSettingDefaultScope(url3, url3,
+                                      CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+                                      std::string(), CONTENT_SETTING_ALLOW);
 
-    MediaPermission permission(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, url3,
-                               url3, profile, web_contents);
-    EXPECT_EQ(CONTENT_SETTING_BLOCK, permission.GetPermissionStatus(&reason));
-  }
+  EXPECT_FALSE(
+      MediaCaptureDevicesDispatcher::GetInstance()->CheckMediaAccessPermission(
+          web_contents, url3, content::MEDIA_DEVICE_VIDEO_CAPTURE));
 }
 
 }  // namespace chromeos

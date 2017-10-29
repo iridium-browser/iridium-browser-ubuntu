@@ -31,7 +31,9 @@
 #ifndef KeyboardCodes_h
 #define KeyboardCodes_h
 
-#if OS(WIN)
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
 #include <windows.h>
 #endif
 

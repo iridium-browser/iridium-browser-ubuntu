@@ -5,21 +5,16 @@
 #import "ios/chrome/browser/ui/ntp/new_tab_page_view.h"
 
 #include "base/logging.h"
-#include "base/mac/objc_property_releaser.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_bar.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_bar_item.h"
 #import "ios/chrome/browser/ui/rtl_geometry.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 
-@implementation NewTabPageView {
- @private
-  // The objects pointed to by |tabBar_| and |scrollView_| are owned as
-  // subviews already.
-  __unsafe_unretained NewTabPageBar* tabBar_;     // weak
-  __unsafe_unretained UIScrollView* scrollView_;  // weak
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
-  base::mac::ObjCPropertyReleaser propertyReleaser_NewTabPageView_;
-}
+@implementation NewTabPageView
 
 @synthesize scrollView = scrollView_;
 @synthesize tabBar = tabBar_;
@@ -29,7 +24,6 @@
                     andTabBar:(NewTabPageBar*)tabBar {
   self = [super initWithFrame:frame];
   if (self) {
-    propertyReleaser_NewTabPageView_.Init(self, [NewTabPageView class]);
     [self addSubview:scrollView];
     [self addSubview:tabBar];
     scrollView_ = scrollView;
@@ -80,11 +74,15 @@
     [self.scrollView setContentOffset:point animated:NO];
   }
 
-  // Trigger a layout.  The |-layoutIfNeeded| call is required because sometimes
-  // |-layoutSubviews| is not successfully triggered when |-setNeedsLayout| is
-  // called after frame changes due to autoresizing masks.
-  [self setNeedsLayout];
-  [self layoutIfNeeded];
+  // This should never be needed in autolayout.
+  if (self.translatesAutoresizingMaskIntoConstraints) {
+    // Trigger a layout.  The |-layoutIfNeeded| call is required because
+    // sometimes  |-layoutSubviews| is not successfully triggered when
+    // |-setNeedsLayout| is called after frame changes due to autoresizing
+    // masks.
+    [self setNeedsLayout];
+    [self layoutIfNeeded];
+  }
 }
 
 - (void)layoutSubviews {
@@ -101,6 +99,14 @@
     self.scrollView.frame = CGRectMake(
         CGRectGetMinX(self.bounds), CGRectGetMinY(self.bounds),
         CGRectGetWidth(self.bounds), CGRectGetMinY(self.tabBar.frame));
+  }
+
+  // When using a new_tab_page_view in autolayout -setFrame is never called,
+  // which means all the logic to keep the selected scroll index set is never
+  // called.  Rather than refactor away all of this to support ios/clean, just
+  // make sure -setFrame is called when loaded in autolayout.
+  if (!self.translatesAutoresizingMaskIntoConstraints) {
+    [self setFrame:self.frame];
   }
 }
 

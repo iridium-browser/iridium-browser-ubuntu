@@ -25,13 +25,13 @@ class AppContextMenu : public ui::SimpleMenuModel::Delegate {
   enum CommandId {
     LAUNCH_NEW = 100,
     TOGGLE_PIN,
-    CREATE_SHORTCUTS,
     SHOW_APP_INFO,
     OPTIONS,
     UNINSTALL,
     REMOVE_FROM_FOLDER,
     MENU_NEW_WINDOW,
     MENU_NEW_INCOGNITO_WINDOW,
+    INSTALL,
     // Order matters in USE_LAUNCH_TYPE_* and must match the LaunchType enum.
     USE_LAUNCH_TYPE_COMMAND_START = 200,
     USE_LAUNCH_TYPE_PINNED = USE_LAUNCH_TYPE_COMMAND_START,

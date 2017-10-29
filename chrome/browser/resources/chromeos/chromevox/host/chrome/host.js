@@ -11,7 +11,6 @@
 goog.provide('cvox.ChromeHost');
 
 goog.require('cvox.AbstractHost');
-goog.require('cvox.ApiImplementation');
 goog.require('cvox.BrailleOverlayWidget');
 goog.require('cvox.ChromeVox');
 goog.require('cvox.ChromeVoxEventWatcher');
@@ -62,7 +61,7 @@ cvox.ChromeHost.prototype.init = function() {
       cvox.ChromeVox.version = prefs['version'];
 
       cvox.ChromeVox.typingEcho =
-          /** @type {number} */(JSON.parse(prefs['typingEcho']));
+          /** @type {number} */ (JSON.parse(prefs['typingEcho']));
 
       if (prefs['position']) {
         cvox.ChromeVox.position =
@@ -91,20 +90,6 @@ cvox.ChromeHost.prototype.init = function() {
         cvox.ChromeVox.modKeyStr = prefs['cvoxKey'];
       }
 
-      var apiPrefsChanged = (
-          prefs['siteSpecificScriptLoader'] !=
-              cvox.ApiImplementation.siteSpecificScriptLoader ||
-                  prefs['siteSpecificScriptBase'] !=
-                      cvox.ApiImplementation.siteSpecificScriptBase);
-      cvox.ApiImplementation.siteSpecificScriptLoader =
-          prefs['siteSpecificScriptLoader'];
-      cvox.ApiImplementation.siteSpecificScriptBase =
-          prefs['siteSpecificScriptBase'];
-      if (apiPrefsChanged) {
-        var searchInit = prefs['siteSpecificEnhancements'] === 'true' ?
-            cvox.SearchLoader.init : undefined;
-        cvox.ApiImplementation.init(searchInit);
-      }
       cvox.BrailleOverlayWidget.getInstance().setActive(
           prefs['brailleCaptions'] == 'true');
     }
@@ -115,7 +100,8 @@ cvox.ChromeHost.prototype.init = function() {
     if (msg['message'] == 'DOMAINS_STYLES') {
       cvox.TraverseMath.getInstance().addDomainsAndStyles(
           msg['domains'], msg['styles']);
-    }});
+    }
+  });
 
   cvox.ExtensionBridge.addMessageListener(function(msg, port) {
     var message = msg['message'];
@@ -136,15 +122,9 @@ cvox.ChromeHost.prototype.init = function() {
     }
   }.bind(this));
 
-  cvox.ExtensionBridge.send({
-      'target': 'Prefs',
-      'action': 'getPrefs'
-    });
+  cvox.ExtensionBridge.send({'target': 'Prefs', 'action': 'getPrefs'});
 
-  cvox.ExtensionBridge.send({
-      'target': 'Data',
-      'action': 'getHistory'
-    });
+  cvox.ExtensionBridge.send({'target': 'Data', 'action': 'getHistory'});
 };
 
 

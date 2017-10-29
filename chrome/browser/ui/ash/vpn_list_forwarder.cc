@@ -80,7 +80,7 @@ void VpnListForwarder::OnExtensionLoaded(
 void VpnListForwarder::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension,
-    extensions::UnloadedExtensionInfo::Reason reason) {
+    extensions::UnloadedExtensionReason reason) {
   if (IsVPNProvider(extension))
     UpdateVPNProviders();
 }
@@ -110,8 +110,8 @@ void VpnListForwarder::Observe(int type,
   registrar_.RemoveAll();
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&VpnListForwarder::AttachToPrimaryUserExtensionRegistry,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&VpnListForwarder::AttachToPrimaryUserExtensionRegistry,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void VpnListForwarder::UpdateVPNProviders() {

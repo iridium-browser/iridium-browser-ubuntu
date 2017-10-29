@@ -7,9 +7,9 @@
 
 #include <memory>
 
-#include "ash/common/wm/window_state_observer.h"
-#include "ash/shared/immersive_fullscreen_controller.h"
-#include "ash/shared/immersive_fullscreen_controller_delegate.h"
+#include "ash/public/cpp/immersive/immersive_fullscreen_controller.h"
+#include "ash/public/cpp/immersive/immersive_fullscreen_controller_delegate.h"
+#include "ash/wm/window_state_observer.h"
 #include "base/macros.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "content/public/browser/notification_observer.h"
@@ -47,7 +47,9 @@ class ImmersiveModeControllerAsh
       WARN_UNUSED_RESULT;
   void OnFindBarVisibleBoundsChanged(
       const gfx::Rect& new_visible_bounds_in_screen) override;
+  bool ShouldStayImmersiveAfterExitingFullscreen() override;
   views::Widget* GetRevealWidget() override;
+  void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
 
  private:
   // Enables or disables observers for window restore and entering / exiting

@@ -71,7 +71,7 @@ Host.fontFamily = function() {
     return Host._fontFamily;
   switch (Host.platform()) {
     case 'linux':
-      Host._fontFamily = 'Ubuntu, Arial, sans-serif';
+      Host._fontFamily = 'Roboto, Ubuntu, Arial, sans-serif';
       break;
     case 'mac':
       Host._fontFamily = '\'Lucida Grande\', sans-serif';
@@ -81,24 +81,4 @@ Host.fontFamily = function() {
       break;
   }
   return Host._fontFamily;
-};
-
-/**
- * @return {string}
- */
-Host.monospaceFontFamily = function() {
-  if (Host._monospaceFontFamily)
-    return Host._monospaceFontFamily;
-  switch (Host.platform()) {
-    case 'linux':
-      Host._monospaceFontFamily = 'dejavu sans mono, monospace';
-      break;
-    case 'mac':
-      Host._monospaceFontFamily = 'Menlo, monospace';
-      break;
-    case 'windows':
-      Host._monospaceFontFamily = 'Consolas, monospace';
-      break;
-  }
-  return Host._monospaceFontFamily;
 };

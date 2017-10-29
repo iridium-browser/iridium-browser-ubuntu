@@ -7,6 +7,7 @@
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -18,7 +19,9 @@
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/trace_event/memory_usage_estimator.h"
+#include "base/trace_event/memory_allocator_dump.h"
+#include "base/trace_event/process_memory_dump.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "net/base/cache_type.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -60,7 +63,7 @@ const char kExistingEntryKey[] = "existing entry key";
 
 std::unique_ptr<disk_cache::BackendImpl> CreateExistingEntryCache(
     const base::Thread& cache_thread,
-    base::FilePath& cache_path) {
+    const base::FilePath& cache_path) {
   net::TestCompletionCallback cb;
 
   std::unique_ptr<disk_cache::BackendImpl> cache(new disk_cache::BackendImpl(
@@ -324,9 +327,6 @@ void DiskCacheBackendTest::BackendBasics() {
   ASSERT_TRUE(NULL != entry1);
   entry1->Close();
   entry1 = NULL;
-  // base::trace_event::EstimateMemoryUsage(cache_) is added to make sure
-  // tracking memory doesn't introduce crashes.
-  EXPECT_LT(0u, base::trace_event::EstimateMemoryUsage(cache_));
 
   ASSERT_THAT(OpenEntry("the first key", &entry1), IsOk());
   ASSERT_TRUE(NULL != entry1);
@@ -340,20 +340,17 @@ void DiskCacheBackendTest::BackendBasics() {
   ASSERT_TRUE(NULL != entry1);
   ASSERT_TRUE(NULL != entry2);
   EXPECT_EQ(2, cache_->GetEntryCount());
-  EXPECT_LT(0u, base::trace_event::EstimateMemoryUsage(cache_));
 
   disk_cache::Entry* entry3 = NULL;
   ASSERT_THAT(OpenEntry("some other key", &entry3), IsOk());
   ASSERT_TRUE(NULL != entry3);
   EXPECT_TRUE(entry2 == entry3);
-  EXPECT_LT(0u, base::trace_event::EstimateMemoryUsage(cache_));
 
   EXPECT_THAT(DoomEntry("some other key"), IsOk());
   EXPECT_EQ(1, cache_->GetEntryCount());
   entry1->Close();
   entry2->Close();
   entry3->Close();
-  EXPECT_LT(0u, base::trace_event::EstimateMemoryUsage(cache_));
 
   EXPECT_THAT(DoomEntry("the first key"), IsOk());
   EXPECT_EQ(0, cache_->GetEntryCount());
@@ -365,7 +362,6 @@ void DiskCacheBackendTest::BackendBasics() {
   EXPECT_THAT(DoomEntry("some other key"), IsOk());
   EXPECT_EQ(0, cache_->GetEntryCount());
   entry2->Close();
-  EXPECT_LT(0u, base::trace_event::EstimateMemoryUsage(cache_));
 }
 
 TEST_F(DiskCacheBackendTest, Basics) {
@@ -518,6 +514,74 @@ TEST_F(DiskCacheBackendTest, CreateBackend_MissingFile) {
 
   cache.reset();
   DisableIntegrityCheck();
+}
+
+TEST_F(DiskCacheBackendTest, MemCacheMemoryDump) {
+  SetMemoryOnlyMode();
+  BackendBasics();
+  base::trace_event::MemoryDumpArgs args = {
+      base::trace_event::MemoryDumpLevelOfDetail::BACKGROUND};
+  base::trace_event::ProcessMemoryDump pmd(nullptr, args);
+  base::trace_event::MemoryAllocatorDump* parent =
+      pmd.CreateAllocatorDump("net/url_request_context/main/0x123/http_cache");
+
+  ASSERT_LT(0u, cache_->DumpMemoryStats(&pmd, parent->absolute_name()));
+  EXPECT_EQ(2u, pmd.allocator_dumps().size());
+  const base::trace_event::MemoryAllocatorDump* sub_dump =
+      pmd.GetAllocatorDump(parent->absolute_name() + "/memory_backend");
+  ASSERT_NE(nullptr, sub_dump);
+
+  // Verify that the appropriate attributes were set.
+  std::unique_ptr<base::Value> raw_attrs =
+      sub_dump->attributes_for_testing()->ToBaseValue();
+  base::DictionaryValue* attrs;
+  ASSERT_TRUE(raw_attrs->GetAsDictionary(&attrs));
+  EXPECT_EQ(3u, attrs->size());
+  base::DictionaryValue* size_attrs;
+  ASSERT_TRUE(attrs->GetDictionary(
+      base::trace_event::MemoryAllocatorDump::kNameSize, &size_attrs));
+  ASSERT_TRUE(attrs->GetDictionary("mem_backend_size", &size_attrs));
+  ASSERT_TRUE(attrs->GetDictionary("mem_backend_max_size", &size_attrs));
+}
+
+TEST_F(DiskCacheBackendTest, SimpleCacheMemoryDump) {
+  simple_cache_mode_ = true;
+  BackendBasics();
+  base::trace_event::MemoryDumpArgs args = {
+      base::trace_event::MemoryDumpLevelOfDetail::BACKGROUND};
+  base::trace_event::ProcessMemoryDump pmd(nullptr, args);
+  base::trace_event::MemoryAllocatorDump* parent =
+      pmd.CreateAllocatorDump("net/url_request_context/main/0x123/http_cache");
+
+  ASSERT_LT(0u, cache_->DumpMemoryStats(&pmd, parent->absolute_name()));
+  EXPECT_EQ(2u, pmd.allocator_dumps().size());
+  const base::trace_event::MemoryAllocatorDump* sub_dump =
+      pmd.GetAllocatorDump(parent->absolute_name() + "/simple_backend");
+  ASSERT_NE(nullptr, sub_dump);
+
+  // Verify that the appropriate attributes were set.
+  std::unique_ptr<base::Value> raw_attrs =
+      sub_dump->attributes_for_testing()->ToBaseValue();
+  base::DictionaryValue* attrs;
+  ASSERT_TRUE(raw_attrs->GetAsDictionary(&attrs));
+  EXPECT_EQ(1u, attrs->size());
+  base::DictionaryValue* size_attrs;
+  ASSERT_TRUE(attrs->GetDictionary(
+      base::trace_event::MemoryAllocatorDump::kNameSize, &size_attrs));
+}
+
+TEST_F(DiskCacheBackendTest, BlockFileCacheMemoryDump) {
+  // TODO(jkarlin): If the blockfile cache gets memory dump support, update
+  // this test.
+  BackendBasics();
+  base::trace_event::MemoryDumpArgs args = {
+      base::trace_event::MemoryDumpLevelOfDetail::BACKGROUND};
+  base::trace_event::ProcessMemoryDump pmd(nullptr, args);
+  base::trace_event::MemoryAllocatorDump* parent =
+      pmd.CreateAllocatorDump("net/url_request_context/main/0x123/http_cache");
+
+  ASSERT_EQ(0u, cache_->DumpMemoryStats(&pmd, parent->absolute_name()));
+  EXPECT_EQ(1u, pmd.allocator_dumps().size());
 }
 
 TEST_F(DiskCacheBackendTest, ExternalFiles) {
@@ -3117,15 +3181,54 @@ TEST_F(DiskCacheBackendTest, MemoryOnlyUseAfterFree) {
   std::string key_prefix("prefix");
   for (int i = 0; i < kTooManyEntriesCount; ++i) {
     ASSERT_THAT(CreateEntry(key_prefix + base::IntToString(i), &entry), IsOk());
-    EXPECT_EQ(kWriteSize,
-              WriteData(entry, 1, 0, buffer.get(), kWriteSize, false));
+    // Not checking the result because it will start to fail once the max size
+    // is reached.
+    WriteData(entry, 1, 0, buffer.get(), kWriteSize, false);
     open_entries.push_back(disk_cache::ScopedEntryPtr(entry));
   }
-  EXPECT_LT(kMaxSize, CalculateSizeOfAllEntries());
 
-  // Writing this sparse data should not crash.
-  EXPECT_EQ(1024, first_parent->WriteSparseData(32768, buffer.get(), 1024,
-                                                net::CompletionCallback()));
+  // Writing this sparse data should not crash. Ignoring the result because
+  // we're only concerned with not crashing in this particular test.
+  first_parent->WriteSparseData(32768, buffer.get(), 1024,
+                                net::CompletionCallback());
+}
+
+TEST_F(DiskCacheBackendTest, MemoryCapsWritesToMaxSize) {
+  // Verify that the memory backend won't grow beyond its max size if lots of
+  // open entries (each smaller than the max entry size) are trying to write
+  // beyond the max size.
+  SetMemoryOnlyMode();
+
+  const int kMaxSize = 100 * 1024;       // 100KB cache
+  const int kNumEntries = 20;            // 20 entries to write
+  const int kWriteSize = kMaxSize / 10;  // Each entry writes 1/10th the max
+
+  SetMaxSize(kMaxSize);
+  InitCache();
+
+  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kWriteSize));
+  CacheTestFillBuffer(buffer->data(), kWriteSize, false);
+
+  // Create an entry to be the final entry that gets written later.
+  disk_cache::Entry* entry;
+  ASSERT_THAT(CreateEntry("final", &entry), IsOk());
+  disk_cache::ScopedEntryPtr final_entry(entry);
+
+  // Create a ton of entries, write to the cache, and keep the entries open.
+  // They should start failing writes once the cache fills.
+  std::list<disk_cache::ScopedEntryPtr> open_entries;
+  std::string key_prefix("prefix");
+  for (int i = 0; i < kNumEntries; ++i) {
+    ASSERT_THAT(CreateEntry(key_prefix + base::IntToString(i), &entry), IsOk());
+    WriteData(entry, 1, 0, buffer.get(), kWriteSize, false);
+    open_entries.push_back(disk_cache::ScopedEntryPtr(entry));
+  }
+  EXPECT_GE(kMaxSize, CalculateSizeOfAllEntries());
+
+  // Any more writing at this point should cause an error.
+  EXPECT_THAT(
+      WriteData(final_entry.get(), 1, 0, buffer.get(), kWriteSize, false),
+      IsError(net::ERR_INSUFFICIENT_RESOURCES));
 }
 
 TEST_F(DiskCacheTest, Backend_UsageStatsTimer) {
@@ -3934,4 +4037,58 @@ TEST_F(DiskCacheBackendTest, SimpleCacheLateDoom) {
   InitCache();
   EXPECT_EQ(disk_cache::SimpleIndex::INITIALIZE_METHOD_LOADED,
             simple_cache_impl_->index()->init_method());
+}
+
+TEST_F(DiskCacheBackendTest, SimpleLastModified) {
+  // Simple cache used to incorrectly set LastModified on entries based on
+  // timestamp of the cache directory, and not the entries' file
+  // (https://crbug.com/714143). So this test arranges for a situation
+  // where this would occur by doing:
+  // 1) Write entry 1
+  // 2) Delay
+  // 3) Write entry 2. This sets directory time stamp to be different from
+  //    timestamp of entry 1 (due to the delay)
+  // It then checks whether the entry 1 got the proper timestamp or not.
+
+  SetSimpleCacheMode();
+  InitCache();
+  std::string key1 = GenerateKey(true);
+  std::string key2 = GenerateKey(true);
+
+  disk_cache::Entry* entry1;
+  ASSERT_THAT(CreateEntry(key1, &entry1), IsOk());
+
+  // Make the Create complete --- SimpleCache can handle it optimistically,
+  // and if we let it go fully async then trying to flush the Close might just
+  // flush the Create.
+  disk_cache::SimpleBackendImpl::FlushWorkerPoolForTesting();
+  base::RunLoop().RunUntilIdle();
+
+  entry1->Close();
+
+  // Make the ::Close actually complete, since it is asynchronous.
+  disk_cache::SimpleBackendImpl::FlushWorkerPoolForTesting();
+  base::RunLoop().RunUntilIdle();
+
+  Time entry1_timestamp = Time::NowFromSystemTime();
+
+  // Don't want AddDelay since it sleep 1s(!) for SimpleCache, and we don't
+  // care about reduced precision in index here.
+  while (base::Time::NowFromSystemTime() <=
+         (entry1_timestamp + base::TimeDelta::FromMilliseconds(10))) {
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1));
+  }
+
+  disk_cache::Entry* entry2;
+  ASSERT_THAT(CreateEntry(key2, &entry2), IsOk());
+  entry2->Close();
+  disk_cache::SimpleBackendImpl::FlushWorkerPoolForTesting();
+  base::RunLoop().RunUntilIdle();
+
+  disk_cache::Entry* reopen_entry1;
+  ASSERT_THAT(OpenEntry(key1, &reopen_entry1), IsOk());
+
+  // This shouldn't pick up entry2's write time incorrectly.
+  EXPECT_LE(reopen_entry1->GetLastModified(), entry1_timestamp);
+  reopen_entry1->Close();
 }

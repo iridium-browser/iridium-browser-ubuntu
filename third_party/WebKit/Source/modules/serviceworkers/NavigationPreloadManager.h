@@ -6,7 +6,7 @@
 #define NavigationPreloadManager_h
 
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/ScriptWrappable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -19,7 +19,7 @@ class NavigationPreloadManager final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static NavigationPreloadManager* create(
+  static NavigationPreloadManager* Create(
       ServiceWorkerRegistration* registration) {
     return new NavigationPreloadManager(registration);
   }
@@ -34,9 +34,9 @@ class NavigationPreloadManager final
  private:
   explicit NavigationPreloadManager(ServiceWorkerRegistration*);
 
-  ScriptPromise setEnabled(bool enable, ScriptState*);
+  ScriptPromise SetEnabled(bool enable, ScriptState*);
 
-  Member<ServiceWorkerRegistration> m_registration;
+  Member<ServiceWorkerRegistration> registration_;
 };
 
 }  // namespace blink

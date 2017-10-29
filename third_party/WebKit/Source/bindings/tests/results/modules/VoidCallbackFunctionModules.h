@@ -13,11 +13,12 @@
 #ifndef VoidCallbackFunctionModules_h
 #define VoidCallbackFunctionModules_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/core/v8/TraceWrapperV8Reference.h"
+#include "bindings/core/v8/NativeValueTraits.h"
 #include "modules/ModulesExport.h"
+#include "platform/bindings/ScriptWrappable.h"
+#include "platform/bindings/TraceWrapperV8Reference.h"
 #include "platform/heap/Handle.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -25,24 +26,29 @@ class ScriptState;
 
 class MODULES_EXPORT VoidCallbackFunctionModules final : public GarbageCollectedFinalized<VoidCallbackFunctionModules>, public TraceWrapperBase {
  public:
-  static VoidCallbackFunctionModules* create(ScriptState* scriptState, v8::Local<v8::Value> callback);
+  static VoidCallbackFunctionModules* Create(ScriptState*, v8::Local<v8::Value> callback);
 
   ~VoidCallbackFunctionModules() = default;
 
-  DECLARE_TRACE();
+  DEFINE_INLINE_TRACE() {}
   DECLARE_TRACE_WRAPPERS();
 
   bool call(ScriptWrappable* scriptWrappable);
 
   v8::Local<v8::Function> v8Value(v8::Isolate* isolate) {
-    return m_callback.newLocal(isolate);
+    return callback_.NewLocal(isolate);
   }
 
  private:
   VoidCallbackFunctionModules(ScriptState*, v8::Local<v8::Function>);
 
-  RefPtr<ScriptState> m_scriptState;
-  TraceWrapperV8Reference<v8::Function> m_callback;
+  RefPtr<ScriptState> script_state_;
+  TraceWrapperV8Reference<v8::Function> callback_;
+};
+
+template <>
+struct NativeValueTraits<VoidCallbackFunctionModules> : public NativeValueTraitsBase<VoidCallbackFunctionModules> {
+  MODULES_EXPORT static VoidCallbackFunctionModules* NativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 }  // namespace blink

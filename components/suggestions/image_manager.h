@@ -18,7 +18,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/task_runner.h"
 #include "base/threading/thread_checker.h"
-#include "components/image_fetcher/image_fetcher_delegate.h"
+#include "components/image_fetcher/core/image_fetcher_delegate.h"
 #include "components/leveldb_proto/proto_database.h"
 #include "components/suggestions/proto/suggestions.pb.h"
 #include "ui/gfx/image/image_skia.h"
@@ -47,8 +47,7 @@ class ImageManager : public image_fetcher::ImageFetcherDelegate {
   ImageManager(
       std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
       std::unique_ptr<leveldb_proto::ProtoDatabase<ImageData>> database,
-      const base::FilePath& database_dir,
-      scoped_refptr<base::TaskRunner> background_task_runner);
+      const base::FilePath& database_dir);
   ~ImageManager() override;
 
   virtual void Initialize(const SuggestionsProfile& suggestions);

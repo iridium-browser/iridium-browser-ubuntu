@@ -2,18 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/**
- * The different pages that can be shown at a time.
- * Note: This must remain in sync with the order in manager.html!
- * @enum {string}
- */
-var Page = {
-  ITEM_LIST: '0',
-  DETAIL_VIEW: '1',
-  KEYBOARD_SHORTCUTS: '2',
-  ERROR_PAGE: '3',
-};
-
 cr.define('extensions', function() {
   'use strict';
 
@@ -37,8 +25,8 @@ cr.define('extensions', function() {
       return 0;
     }
     return compareLocation(a, b) ||
-           compare(a.name.toLowerCase(), b.name.toLowerCase()) ||
-           compare(a.id, b.id);
+        compare(a.name.toLowerCase(), b.name.toLowerCase()) ||
+        compare(a.id, b.id);
   };
 
   var Manager = Polymer({
@@ -50,8 +38,12 @@ cr.define('extensions', function() {
       /** @type {extensions.Sidebar} */
       sidebar: Object,
 
-      /** @type {extensions.ItemDelegate} */
-      itemDelegate: Object,
+      /** @type {extensions.Toolbar} */
+      toolbar: Object,
+
+      // This is not typed because it implements multiple interfaces, and is
+      // passed to different elements as different types.
+      delegate: Object,
 
       inDevMode: {
         type: Boolean,
@@ -80,16 +72,41 @@ cr.define('extensions', function() {
        */
       detailViewItem_: Object,
 
+      /**
+       * The helper object to maintain page state.
+       * @private {!extensions.NavigationHelper}
+       */
+      navigationHelper_: Object,
+
+      /**
+       * The current page being shown.
+       * @private {!PageState}
+       */
+      currentPage_: Object,
+
       /** @type {!Array<!chrome.developerPrivate.ExtensionInfo>} */
       extensions: {
         type: Array,
-        value: function() { return []; },
+        value: function() {
+          return [];
+        },
       },
 
       /** @type {!Array<!chrome.developerPrivate.ExtensionInfo>} */
       apps: {
         type: Array,
-        value: function() { return []; },
+        value: function() {
+          return [];
+        },
+      },
+
+      /**
+       * Prevents page content from showing before data is first loaded.
+       * @private
+       */
+      didInitPage_: {
+        type: Boolean,
+        value: false,
       },
     },
 
@@ -105,10 +122,30 @@ cr.define('extensions', function() {
     ready: function() {
       /** @type {extensions.Sidebar} */
       this.sidebar =
-          /** @type {extensions.Sidebar} */(this.$$('extensions-sidebar'));
+          /** @type {extensions.Sidebar} */ (this.$$('extensions-sidebar'));
+      this.toolbar =
+          /** @type {extensions.Toolbar} */ (this.$$('extensions-toolbar'));
       this.listHelper_ = new ListHelper(this);
       this.sidebar.setListDelegate(this.listHelper_);
       this.readyPromiseResolver.resolve();
+      this.currentPage_ = {page: Page.LIST};
+      this.navigationHelper_ =
+          new extensions.NavigationHelper(function(newPage) {
+            this.changePage(newPage, true);
+          }.bind(this));
+      this.optionsDialog.addEventListener('close', function() {
+        // We update the page when the options dialog closes, but only if we're
+        // still on the details page. We could be on a different page if the
+        // user hit back while the options dialog was visible; in that case, the
+        // new page is already correct.
+        if (this.currentPage_.page == Page.DETAILS) {
+          // This will update the currentPage_ and the NavigationHelper; since
+          // the active page is already the details page, no main page
+          // transition occurs.
+          this.changePage(
+              {page: Page.DETAILS, extensionId: this.currentPage_.extensionId});
+        }
+      }.bind(this));
     },
 
     get keyboardShortcuts() {
@@ -117,6 +154,10 @@ cr.define('extensions', function() {
 
     get packDialog() {
       return this.$['pack-dialog'];
+    },
+
+    get loadError() {
+      return this.$['load-error'];
     },
 
     get optionsDialog() {
@@ -132,9 +173,16 @@ cr.define('extensions', function() {
      * @param {!chrome.developerPrivate.ExtensionInfo} data
      */
     showItemDetails: function(data) {
-      this.$['items-list'].willShowItemSubpage(data.id);
-      this.detailViewItem_ = data;
-      this.changePage(Page.DETAIL_VIEW);
+      this.changePage({page: Page.DETAILS, extensionId: data.id});
+    },
+
+    /**
+     * Initializes the page to reflect what's specified in the url so that if
+     * the user visits chrome://extensions/?id=..., we land on the proper page.
+     */
+    initPage: function() {
+      this.didInitPage_ = true;
+      this.changePage(this.navigationHelper_.getCurrentPage(), true);
     },
 
     /**
@@ -143,6 +191,11 @@ cr.define('extensions', function() {
      */
     onFilterChanged_: function(event) {
       this.filter = /** @type {string} */ (event.detail);
+    },
+
+    /** @private */
+    onMenuButtonTap_: function() {
+      this.$.drawer.toggle();
     },
 
     /**
@@ -185,11 +238,12 @@ cr.define('extensions', function() {
     },
 
     /**
-     * @return {boolean} Whether the list should be visible.
+     * @return {?chrome.developerPrivate.ExtensionInfo}
      * @private
      */
-    computeListHidden_: function() {
-      return this.$['items-list'].items.length == 0;
+    getData_: function(id) {
+      return this.extensions[this.getIndexInList_('extensions', id)] ||
+          this.apps[this.getIndexInList_('apps', id)];
     },
 
     /**
@@ -227,10 +281,11 @@ cr.define('extensions', function() {
       // that the DOM will have stale data, but there's no point in causing the
       // extra work.
       if (this.detailViewItem_ && this.detailViewItem_.id == item.id &&
-          this.$.pages.selected == Page.DETAIL_VIEW) {
+          this.$.pages.selected == Page.DETAILS) {
         this.detailViewItem_ = item;
-      } else if (this.errorPageItem_ && this.errorPageItem_.id == item.id &&
-                 this.$.pages.selected == Page.ERROR_PAGE) {
+      } else if (
+          this.errorPageItem_ && this.errorPageItem_.id == item.id &&
+          this.$.pages.selected == Page.ERRORS) {
         this.errorPageItem_ = item;
       }
     },
@@ -256,13 +311,13 @@ cr.define('extensions', function() {
      */
     getPage_: function(page) {
       switch (page) {
-        case Page.ITEM_LIST:
+        case Page.LIST:
           return this.$['items-list'];
-        case Page.DETAIL_VIEW:
+        case Page.DETAILS:
           return this.$['details-view'];
-        case Page.KEYBOARD_SHORTCUTS:
+        case Page.SHORTCUTS:
           return this.$['keyboard-shortcuts'];
-        case Page.ERROR_PAGE:
+        case Page.ERRORS:
           return this.$['error-page'];
       }
       assertNotReached();
@@ -270,30 +325,66 @@ cr.define('extensions', function() {
 
     /**
      * Changes the active page selection.
-     * @param {Page} toPage
+     * @param {PageState} newPage
+     * @param {boolean=} isSilent If true, does not notify the navigation helper
+     *     of the change.
      */
-    changePage: function(toPage) {
-      var fromPage = this.$.pages.selected;
-      if (fromPage == toPage)
+    changePage: function(newPage, isSilent) {
+      if (this.currentPage_.page == newPage.page &&
+          this.currentPage_.subpage == newPage.subpage &&
+          this.currentPage_.extensionId == newPage.extensionId) {
         return;
-      var entry;
-      var exit;
-      if (fromPage == Page.ITEM_LIST && (toPage == Page.DETAIL_VIEW ||
-                                         toPage == Page.ERROR_PAGE)) {
-        entry = extensions.Animation.HERO;
-        exit = extensions.Animation.HERO;
-      } else if (toPage == Page.ITEM_LIST) {
-        entry = extensions.Animation.FADE_IN;
-        exit = extensions.Animation.SCALE_DOWN;
-      } else {
-        assert(toPage == Page.DETAIL_VIEW ||
-               toPage == Page.KEYBOARD_SHORTCUTS);
-        entry = extensions.Animation.FADE_IN;
-        exit = extensions.Animation.FADE_OUT;
       }
-      this.getPage_(fromPage).animationHelper.setExitAnimation(exit);
-      this.getPage_(toPage).animationHelper.setEntryAnimation(entry);
-      this.$.pages.selected = toPage;
+
+      this.$.drawer.closeDrawer();
+      if (this.optionsDialog.open)
+        this.optionsDialog.close();
+
+      var fromPage = this.$.pages.selected;
+      var toPage = newPage.page;
+      var data;
+      if (newPage.extensionId)
+        data = assert(this.getData_(newPage.extensionId));
+
+      if (toPage == Page.DETAILS)
+        this.detailViewItem_ = assert(data);
+      else if (toPage == Page.ERRORS)
+        this.errorPageItem_ = assert(data);
+
+      if (fromPage != toPage) {
+        var entry;
+        var exit;
+        if (fromPage == Page.LIST &&
+            (toPage == Page.DETAILS || toPage == Page.ERRORS)) {
+          this.$['items-list'].willShowItemSubpage(data.id);
+          entry = [extensions.Animation.HERO];
+          // The item grid can be larger than the detail view that we're
+          // hero'ing into, so we want to also fade out to avoid any jarring.
+          exit = [extensions.Animation.HERO, extensions.Animation.FADE_OUT];
+        } else if (toPage == Page.LIST) {
+          entry = [extensions.Animation.FADE_IN];
+          exit = [extensions.Animation.SCALE_DOWN];
+        } else {
+          assert(toPage == Page.DETAILS || toPage == Page.SHORTCUTS);
+          entry = [extensions.Animation.FADE_IN];
+          exit = [extensions.Animation.FADE_OUT];
+        }
+
+        this.getPage_(fromPage).animationHelper.setExitAnimations(exit);
+        this.getPage_(toPage).animationHelper.setEntryAnimations(entry);
+        this.$.pages.selected = toPage;
+      }
+
+      if (newPage.subpage) {
+        assert(newPage.subpage == Dialog.OPTIONS);
+        assert(newPage.extensionId);
+        this.optionsDialog.show(data);
+      }
+
+      this.currentPage_ = newPage;
+
+      if (!isSilent)
+        this.navigationHelper_.updateHistory(newPage);
     },
 
     /**
@@ -311,39 +402,38 @@ cr.define('extensions', function() {
      * @private
      */
     onShouldShowItemErrors_: function(e) {
-      var data = e.detail.data;
-      this.$['items-list'].willShowItemSubpage(data.id);
-      this.errorPageItem_ = data;
-      this.changePage(Page.ERROR_PAGE);
+      this.changePage({page: Page.ERRORS, id: e.detail.data.id});
     },
 
     /** @private */
     onDetailsViewClose_: function() {
       // Note: we don't reset detailViewItem_ here because doing so just causes
       // extra work for the data-bound details view.
-      this.changePage(Page.ITEM_LIST);
+      this.changePage({page: Page.LIST});
     },
 
     /** @private */
     onErrorPageClose_: function() {
       // Note: we don't reset errorPageItem_ here because doing so just causes
       // extra work for the data-bound error page.
-      this.changePage(Page.ITEM_LIST);
+      this.changePage({page: Page.LIST});
+    },
+
+    /** @private */
+    onPackTap_: function() {
+      this.$['pack-dialog'].show();
     }
   });
 
-  /**
-   * @param {extensions.Manager} manager
-   * @constructor
-   * @implements {extensions.SidebarListDelegate}
-   */
-  function ListHelper(manager) {
-    this.manager_ = manager;
-  }
+  /** @implements {extensions.SidebarListDelegate} */
+  class ListHelper {
+    /** @param {extensions.Manager} manager */
+    constructor(manager) {
+      this.manager_ = manager;
+    }
 
-  ListHelper.prototype = {
     /** @override */
-    showType: function(type) {
+    showType(type) {
       var items;
       switch (type) {
         case extensions.ShowingType.EXTENSIONS:
@@ -354,20 +444,15 @@ cr.define('extensions', function() {
           break;
       }
 
-      this.manager_.$/* hack */ ['items-list'].set('items', assert(items));
-      this.manager_.changePage(Page.ITEM_LIST);
-    },
-
-    /** @override */
-    showKeyboardShortcuts: function() {
-      this.manager_.changePage(Page.KEYBOARD_SHORTCUTS);
-    },
-
-    /** @override */
-    showPackDialog: function() {
-      this.manager_.packDialog.show();
+      this.manager_.$ /* hack */['items-list'].set('items', assert(items));
+      this.manager_.changePage({page: Page.LIST});
     }
-  };
+
+    /** @override */
+    showKeyboardShortcuts() {
+      this.manager_.changePage({page: Page.SHORTCUTS});
+    }
+  }
 
   return {Manager: Manager};
 });

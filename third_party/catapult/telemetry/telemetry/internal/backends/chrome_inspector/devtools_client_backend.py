@@ -14,12 +14,13 @@ from telemetry.internal.backends.chrome_inspector import devtools_http
 from telemetry.internal.backends.chrome_inspector import inspector_backend
 from telemetry.internal.backends.chrome_inspector import inspector_websocket
 from telemetry.internal.backends.chrome_inspector import memory_backend
+from telemetry.internal.backends.chrome_inspector import system_info_backend
 from telemetry.internal.backends.chrome_inspector import tracing_backend
 from telemetry.internal.backends.chrome_inspector import websocket
 from telemetry.internal.platform.tracing_agent import chrome_tracing_agent
 from telemetry.internal.platform.tracing_agent import (
     chrome_tracing_devtools_manager)
-from telemetry.timeline import trace_data as trace_data_module
+from tracing.trace_data import trace_data as trace_data_module
 
 
 BROWSER_INSPECTOR_WEBSOCKET_URL = 'ws://127.0.0.1:%i/devtools/browser'
@@ -51,14 +52,14 @@ def _IsInspectorWebsocketAvailable(inspector_websocket_instance, port):
   try:
     inspector_websocket_instance.Connect(
         BROWSER_INSPECTOR_WEBSOCKET_URL % port, timeout=10)
-  except websocket.WebSocketException:
+  except (websocket.WebSocketException, socket.error) as exc:
+    logging.info(
+        'Websocket at port %i not yet available: %s', port, exc)
     return False
-  except socket.error:
-    return False
-  except Exception as e:
-    sys.stderr.write('Unidentified exception while checking if wesocket is'
-                     'available on port %i. Exception message: %s\n' %
-                     (port, e.message))
+  except Exception as exc:
+    logging.exception(
+        'Unidentified exception while checking if websocket at port %i is '
+        'available.', port)
     return False
   else:
     return True
@@ -69,7 +70,8 @@ def _IsInspectorWebsocketAvailable(inspector_websocket_instance, port):
 def _IsDevToolsAgentAvailable(devtools_http_instance):
   try:
     devtools_http_instance.Request('')
-  except devtools_http.DevToolsClientConnectionError:
+  except devtools_http.DevToolsClientConnectionError as exc:
+    logging.info('Devtools client not yet ready: %s', exc)
     return False
   else:
     return True
@@ -100,6 +102,7 @@ class DevToolsClientBackend(object):
     self._browser_inspector_websocket = None
     self._tracing_backend = None
     self._memory_backend = None
+    self._system_info_backend = None
     self._app_backend = app_backend
     self._devtools_context_map_backend = _DevToolsContextMapBackend(
         self._app_backend, self)
@@ -183,6 +186,9 @@ class DevToolsClientBackend(object):
     if self._memory_backend:
       self._memory_backend.Close()
       self._memory_backend = None
+    if self._system_info_backend:
+      self._system_info_backend.Close()
+      self._system_info_backend = None
 
     if self._devtools_context_map_backend:
       self._devtools_context_map_backend.Clear()
@@ -314,6 +320,12 @@ class DevToolsClientBackend(object):
       self._memory_backend = memory_backend.MemoryBackend(
           self._browser_inspector_websocket)
 
+  def _CreateSystemInfoBackendIfNeeded(self):
+    if not self._system_info_backend:
+      self._CreateAndConnectBrowserInspectorWebsocketIfNeeded()
+      self._system_info_backend = system_info_backend.SystemInfoBackend(
+          self._devtools_port)
+
   def _CreateAndConnectBrowserInspectorWebsocketIfNeeded(self):
     if not self._browser_inspector_websocket:
       self._browser_inspector_websocket = (
@@ -361,7 +373,7 @@ class DevToolsClientBackend(object):
     finally:
       self._tracing_backend.StopTracing()
 
-  def CollectChromeTracingData(self, trace_data_builder, timeout=30):
+  def CollectChromeTracingData(self, trace_data_builder, timeout=60):
     try:
       trace_data_builder.AddTraceFor(
           trace_data_module.TAB_ID_PART, self._tab_ids[:])
@@ -369,7 +381,11 @@ class DevToolsClientBackend(object):
     finally:
       self._tracing_backend.CollectTraceData(trace_data_builder, timeout)
 
-  def DumpMemory(self, timeout=30):
+  def GetSystemInfo(self, timeout):
+    self._CreateSystemInfoBackendIfNeeded()
+    return self._system_info_backend.GetSystemInfo(timeout)
+
+  def DumpMemory(self, timeout=None):
     """Dumps memory.
 
     Returns:
@@ -383,7 +399,7 @@ class DevToolsClientBackend(object):
       or does not contain the expected result.
     """
     self._CreateTracingBackendIfNeeded()
-    return self._tracing_backend.DumpMemory(timeout)
+    return self._tracing_backend.DumpMemory(timeout=timeout)
 
   def SetMemoryPressureNotificationsSuppressed(self, suppressed, timeout=30):
     """Enable/disable suppressing memory pressure notifications.

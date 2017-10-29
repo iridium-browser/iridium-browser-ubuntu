@@ -31,7 +31,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/test_browser_thread_bundle.h"
-#include "content/public/test/test_file_system_options.h"
+#include "content/public/test/test_service_manager_context.h"
 #include "google_apis/drive/test_util.h"
 #include "net/base/request_priority.h"
 #include "net/base/test_completion_callback.h"
@@ -42,6 +42,7 @@
 #include "net/url_request/url_request_test_util.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 #include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/test/test_file_system_options.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -81,10 +82,6 @@ class TestURLRequestJobFactory : public net::URLRequestJobFactory {
 
   bool IsHandledProtocol(const std::string& scheme) const override {
     return scheme == content::kExternalFileScheme;
-  }
-
-  bool IsHandledURL(const GURL& url) const override {
-    return url.is_valid() && IsHandledProtocol(url.scheme());
   }
 
   bool IsSafeRedirectTarget(const GURL& location) const override {
@@ -224,6 +221,7 @@ class ExternalFileURLRequestJobTest : public testing::Test {
   drive::FileSystemInterface* GetFileSystem() { return fake_file_system_; }
 
   content::TestBrowserThreadBundle thread_bundle_;
+  content::TestServiceManagerContext context_;
   drive::DriveIntegrationServiceFactory::FactoryCallback
       integration_service_factory_callback_;
   std::unique_ptr<drive::DriveIntegrationServiceFactory::ScopedFactoryForTest>

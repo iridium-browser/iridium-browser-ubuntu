@@ -5,11 +5,11 @@
 #ifndef PasswordCredential_h
 #define PasswordCredential_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/core/v8/SerializedScriptValue.h"
+#include "bindings/core/v8/serialization/SerializedScriptValue.h"
 #include "bindings/modules/v8/FormDataOrURLSearchParams.h"
 #include "modules/ModulesExport.h"
-#include "modules/credentialmanager/SiteBoundCredential.h"
+#include "modules/credentialmanager/Credential.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "platform/network/EncodedFormData.h"
 #include "platform/weborigin/KURL.h"
@@ -22,32 +22,35 @@ class WebPasswordCredential;
 
 using CredentialPostBodyType = FormDataOrURLSearchParams;
 
-class MODULES_EXPORT PasswordCredential final : public SiteBoundCredential {
+class MODULES_EXPORT PasswordCredential final : public Credential {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static PasswordCredential* create(const PasswordCredentialData&,
+  static PasswordCredential* Create(const PasswordCredentialData&,
                                     ExceptionState&);
-  static PasswordCredential* create(HTMLFormElement*, ExceptionState&);
-  static PasswordCredential* create(WebPasswordCredential*);
+  static PasswordCredential* Create(HTMLFormElement*, ExceptionState&);
+  static PasswordCredential* Create(WebPasswordCredential*);
 
   // PasswordCredential.idl
-  void setIdName(const String& name) { m_idName = name; }
-  const String& idName() const { return m_idName; }
+  void setIdName(const String& name) { id_name_ = name; }
+  const String& idName() const { return id_name_; }
 
-  void setPasswordName(const String& name) { m_passwordName = name; }
-  const String& passwordName() const { return m_passwordName; }
+  void setPasswordName(const String& name) { password_name_ = name; }
+  const String& passwordName() const { return password_name_; }
 
   void setAdditionalData(const CredentialPostBodyType& data) {
-    m_additionalData = data;
+    additional_data_ = data;
   }
   void additionalData(CredentialPostBodyType& out) const {
-    out = m_additionalData;
+    out = additional_data_;
   }
 
-  // Internal methods
-  PassRefPtr<EncodedFormData> encodeFormData(String& contentType) const;
   const String& password() const;
+  const String& name() const;
+  const KURL& iconURL() const;
+
+  // Internal methods
+  PassRefPtr<EncodedFormData> EncodeFormData(String& content_type) const;
   DECLARE_VIRTUAL_TRACE();
 
  private:
@@ -57,9 +60,9 @@ class MODULES_EXPORT PasswordCredential final : public SiteBoundCredential {
                      const String& name,
                      const KURL& icon);
 
-  String m_idName;
-  String m_passwordName;
-  CredentialPostBodyType m_additionalData;
+  String id_name_;
+  String password_name_;
+  CredentialPostBodyType additional_data_;
 };
 
 }  // namespace blink

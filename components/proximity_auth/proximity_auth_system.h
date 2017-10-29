@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/clock.h"
 #include "components/cryptauth/remote_device.h"
 #include "components/proximity_auth/remote_device_life_cycle.h"
 #include "components/proximity_auth/screenlock_bridge.h"
@@ -18,6 +19,7 @@
 namespace proximity_auth {
 
 class ProximityAuthClient;
+class ProximityAuthPrefManager;
 class RemoteDeviceLifeCycle;
 class UnlockManager;
 
@@ -64,7 +66,20 @@ class ProximityAuthSystem : public RemoteDeviceLifeCycle::Observer,
   // Called when the system wakes up from a suspended state.
   void OnSuspendDone();
 
- private:
+ protected:
+  // Constructor which allows passing in a custom |unlock_manager_|.
+  // Exposed for testing.
+  ProximityAuthSystem(ScreenlockType screenlock_type,
+                      ProximityAuthClient* proximity_auth_client,
+                      std::unique_ptr<UnlockManager> unlock_manager,
+                      std::unique_ptr<base::Clock> clock,
+                      ProximityAuthPrefManager* pref_manager);
+
+  // Creates the RemoteDeviceLifeCycle for |remote_device|.
+  // Exposed for testing.
+  virtual std::unique_ptr<RemoteDeviceLifeCycle> CreateRemoteDeviceLifeCycle(
+      const cryptauth::RemoteDevice& remote_device);
+
   // RemoteDeviceLifeCycle::Observer:
   void OnLifeCycleStateChanged(RemoteDeviceLifeCycle::State old_state,
                                RemoteDeviceLifeCycle::State new_state) override;
@@ -76,9 +91,17 @@ class ProximityAuthSystem : public RemoteDeviceLifeCycle::Observer,
       ScreenlockBridge::LockHandler::ScreenType screen_type) override;
   void OnFocusedUserChanged(const AccountId& account_id) override;
 
+ private:
   // Resumes |remote_device_life_cycle_| after device wakes up and waits a
   // timeout.
   void ResumeAfterWakeUpTimeout();
+
+  // Returns true if the user should be forced to use a password to authenticate
+  // rather than EasyUnlock.
+  bool ShouldForcePassword();
+
+  // The type of the screenlock (i.e. login or unlock).
+  ScreenlockType screenlock_type_;
 
   // Lists of remote devices, keyed by user account id.
   std::map<AccountId, cryptauth::RemoteDeviceList> remote_devices_map_;
@@ -89,6 +112,12 @@ class ProximityAuthSystem : public RemoteDeviceLifeCycle::Observer,
   // Responsible for the life cycle of connecting and authenticating to
   // the RemoteDevice of the currently focused user.
   std::unique_ptr<RemoteDeviceLifeCycle> remote_device_life_cycle_;
+
+  // Used to get the current timestamp.
+  std::unique_ptr<base::Clock> clock_;
+
+  // Fetches EasyUnlock preferences. Must outlive this instance.
+  ProximityAuthPrefManager* pref_manager_;
 
   // Handles the interaction with the lock screen UI.
   std::unique_ptr<UnlockManager> unlock_manager_;

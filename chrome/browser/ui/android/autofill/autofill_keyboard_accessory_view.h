@@ -20,11 +20,12 @@ class AutofillPopupController;
 
 // A suggestion view that acts as an alternative to the field-attached popup
 // window. This view appears above the keyboard and spans the width of the
-// screen, condensing rather than overlaying the content area. Enable via
-// --enable-autofill-keyboard-accessory-view.
+// screen, condensing rather than overlaying the content area.
 class AutofillKeyboardAccessoryView : public AutofillPopupView {
  public:
-  explicit AutofillKeyboardAccessoryView(AutofillPopupController* controller);
+  AutofillKeyboardAccessoryView(AutofillPopupController* controller,
+                                unsigned int animation_duration_millis,
+                                bool should_limit_label_width);
 
   // --------------------------------------------------------------------------
   // Methods called from Java via JNI
@@ -44,19 +45,24 @@ class AutofillKeyboardAccessoryView : public AutofillPopupView {
   void ViewDismissed(JNIEnv* env,
                      const base::android::JavaParamRef<jobject>& obj);
 
-  static bool RegisterAutofillKeyboardAccessoryView(JNIEnv* env);
-
  protected:
   // AutofillPopupView implementation.
   void Show() override;
   void Hide() override;
-  void InvalidateRow(size_t row) override;
-  void UpdateBoundsAndRedrawPopup() override;
+  void OnSelectedRowChanged(base::Optional<int> previous_row_selection,
+                            base::Optional<int> current_row_selection) override;
+  void OnSuggestionsChanged() override;
 
  private:
   ~AutofillKeyboardAccessoryView() override;
 
   AutofillPopupController* controller_;  // weak.
+
+  // If 0, don't animate suggestion view.
+  const unsigned int animation_duration_millis_;
+
+  // If true, limits label width to 1/2 device's width.
+  const bool should_limit_label_width_;
 
   // The index of the last item the user long-pressed (they will be shown a
   // confirmation dialog).

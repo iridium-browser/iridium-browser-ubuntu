@@ -25,6 +25,7 @@
 #include "content/browser/indexed_db/indexed_db_blob_info.h"
 #include "content/browser/indexed_db/indexed_db_class_factory.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
+#include "content/browser/indexed_db/indexed_db_data_format_version.h"
 #include "content/browser/indexed_db/indexed_db_database_error.h"
 #include "content/browser/indexed_db/indexed_db_leveldb_coding.h"
 #include "content/browser/indexed_db/indexed_db_tracing.h"
@@ -38,6 +39,8 @@
 #include "content/common/indexed_db/indexed_db_key_path.h"
 #include "content/common/indexed_db/indexed_db_key_range.h"
 #include "content/public/browser/browser_thread.h"
+#include "net/base/load_flags.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request_context.h"
 #include "storage/browser/blob/blob_data_handle.h"
 #include "storage/browser/fileapi/file_stream_writer.h"
@@ -46,7 +49,6 @@
 #include "storage/common/database/database_identifier.h"
 #include "storage/common/fileapi/file_system_mount_option.h"
 #include "third_party/WebKit/public/platform/modules/indexeddb/WebIDBTypes.h"
-#include "third_party/WebKit/public/web/WebSerializedScriptValueVersion.h"
 #include "third_party/leveldatabase/env_chromium.h"
 
 using base::FilePath;
@@ -335,24 +337,19 @@ WARN_UNUSED_RESULT bool IsSchemaKnown(LevelDBDatabase* db, bool* known) {
     return true;
   }
 
-  const uint32_t latest_known_data_version =
-      blink::kSerializedScriptValueVersion;
-  int64_t db_data_version = 0;
-  s = GetInt(db, DataVersionKey::Encode(), &db_data_version, &found);
+  int64_t raw_db_data_version = 0;
+  s = GetInt(db, DataVersionKey::Encode(), &raw_db_data_version, &found);
   if (!s.ok())
     return false;
   if (!found) {
     *known = true;
     return true;
   }
-  if (db_data_version < 0)
+  if (raw_db_data_version < 0)
     return false;  // Only corruption should cause this.
-  if (db_data_version > latest_known_data_version) {
-    *known = false;
-    return true;
-  }
 
-  *known = true;
+  *known = IndexedDBDataFormatVersion::GetCurrent().IsAtLeast(
+      IndexedDBDataFormatVersion::Decode(raw_db_data_version));
   return true;
 }
 
@@ -929,11 +926,11 @@ bool ObjectStoreCursorOptions(
   bool lower_bound = range.lower().IsValid();
   bool upper_bound = range.upper().IsValid();
   cursor_options->forward =
-      (direction == blink::WebIDBCursorDirectionNextNoDuplicate ||
-       direction == blink::WebIDBCursorDirectionNext);
+      (direction == blink::kWebIDBCursorDirectionNextNoDuplicate ||
+       direction == blink::kWebIDBCursorDirectionNext);
   cursor_options->unique =
-      (direction == blink::WebIDBCursorDirectionNextNoDuplicate ||
-       direction == blink::WebIDBCursorDirectionPrevNoDuplicate);
+      (direction == blink::kWebIDBCursorDirectionNextNoDuplicate ||
+       direction == blink::kWebIDBCursorDirectionPrevNoDuplicate);
 
   if (!lower_bound) {
     cursor_options->low_key =
@@ -992,6 +989,7 @@ bool IndexCursorOptions(
     blink::WebIDBCursorDirection direction,
     IndexedDBBackingStore::Cursor::CursorOptions* cursor_options,
     Status* status) {
+  IDB_TRACE("IndexedDBBackingStore::IndexCursorOptions");
   DCHECK(transaction);
   if (!KeyPrefix::ValidIds(database_id, object_store_id, index_id))
     return false;
@@ -1003,11 +1001,11 @@ bool IndexCursorOptions(
   bool lower_bound = range.lower().IsValid();
   bool upper_bound = range.upper().IsValid();
   cursor_options->forward =
-      (direction == blink::WebIDBCursorDirectionNextNoDuplicate ||
-       direction == blink::WebIDBCursorDirectionNext);
+      (direction == blink::kWebIDBCursorDirectionNextNoDuplicate ||
+       direction == blink::kWebIDBCursorDirectionNext);
   cursor_options->unique =
-      (direction == blink::WebIDBCursorDirectionNextNoDuplicate ||
-       direction == blink::WebIDBCursorDirectionPrevNoDuplicate);
+      (direction == blink::kWebIDBCursorDirectionNextNoDuplicate ||
+       direction == blink::kWebIDBCursorDirectionPrevNoDuplicate);
 
   if (!lower_bound) {
     cursor_options->low_key =
@@ -1063,7 +1061,9 @@ class DefaultLevelDBFactory : public LevelDBFactory {
                      const LevelDBComparator* comparator,
                      std::unique_ptr<LevelDBDatabase>* db,
                      bool* is_disk_full) override {
-    return LevelDBDatabase::Open(file_name, comparator, db, is_disk_full);
+    return LevelDBDatabase::Open(
+        file_name, comparator,
+        LevelDBDatabase::kDefaultMaxOpenIteratorsPerDatabase, db, is_disk_full);
   }
   Status DestroyLevelDB(const FilePath& file_name) override {
     return LevelDBDatabase::Destroy(file_name);
@@ -1140,8 +1140,8 @@ Status IndexedDBBackingStore::DestroyBackingStore(const FilePath& path_base,
 }
 
 WARN_UNUSED_RESULT Status IndexedDBBackingStore::SetUpMetadata() {
-  const uint32_t latest_known_data_version =
-      blink::kSerializedScriptValueVersion;
+  const IndexedDBDataFormatVersion latest_known_data_version =
+      IndexedDBDataFormatVersion::GetCurrent();
   const std::string schema_version_key = SchemaVersionKey::Encode();
   const std::string data_version_key = DataVersionKey::Encode();
 
@@ -1149,7 +1149,7 @@ WARN_UNUSED_RESULT Status IndexedDBBackingStore::SetUpMetadata() {
       IndexedDBClassFactory::Get()->CreateLevelDBTransaction(db_.get());
 
   int64_t db_schema_version = 0;
-  int64_t db_data_version = 0;
+  IndexedDBDataFormatVersion db_data_version;
   bool found = false;
   Status s =
       GetInt(transaction.get(), schema_version_key, &db_schema_version, &found);
@@ -1162,7 +1162,7 @@ WARN_UNUSED_RESULT Status IndexedDBBackingStore::SetUpMetadata() {
     db_schema_version = kLatestKnownSchemaVersion;
     PutInt(transaction.get(), schema_version_key, db_schema_version);
     db_data_version = latest_known_data_version;
-    PutInt(transaction.get(), data_version_key, db_data_version);
+    PutInt(transaction.get(), data_version_key, db_data_version.Encode());
     // If a blob directory already exists for this database, blow it away.  It's
     // leftover from a partially-purged previous generation of data.
     if (!base::DeleteFile(blob_path_, true)) {
@@ -1203,8 +1203,8 @@ WARN_UNUSED_RESULT Status IndexedDBBackingStore::SetUpMetadata() {
     if (s.ok() && db_schema_version < 2) {
       db_schema_version = 2;
       PutInt(transaction.get(), schema_version_key, db_schema_version);
-      db_data_version = blink::kSerializedScriptValueVersion;
-      PutInt(transaction.get(), data_version_key, db_data_version);
+      db_data_version = latest_known_data_version;
+      PutInt(transaction.get(), data_version_key, db_data_version.Encode());
     }
     if (db_schema_version < 3) {
       db_schema_version = 3;
@@ -1222,7 +1222,8 @@ WARN_UNUSED_RESULT Status IndexedDBBackingStore::SetUpMetadata() {
 
   // All new values will be written using this serialization version.
   found = false;
-  s = GetInt(transaction.get(), data_version_key, &db_data_version, &found);
+  int64_t raw_db_data_version = 0;
+  s = GetInt(transaction.get(), data_version_key, &raw_db_data_version, &found);
   if (!s.ok()) {
     INTERNAL_READ_ERROR_UNTESTED(SET_UP_METADATA);
     return s;
@@ -1231,13 +1232,20 @@ WARN_UNUSED_RESULT Status IndexedDBBackingStore::SetUpMetadata() {
     INTERNAL_CONSISTENCY_ERROR_UNTESTED(SET_UP_METADATA);
     return InternalInconsistencyStatus();
   }
-  if (db_data_version < latest_known_data_version) {
+  db_data_version = IndexedDBDataFormatVersion::Decode(raw_db_data_version);
+  if (latest_known_data_version == db_data_version) {
+    // Up to date. Nothing to do.
+  } else if (latest_known_data_version.IsAtLeast(db_data_version)) {
     db_data_version = latest_known_data_version;
-    PutInt(transaction.get(), data_version_key, db_data_version);
+    PutInt(transaction.get(), data_version_key, db_data_version.Encode());
+  } else {
+    // |db_data_version| is in the future according to at least one component.
+    INTERNAL_CONSISTENCY_ERROR(SET_UP_METADATA);
+    return InternalInconsistencyStatus();
   }
 
   DCHECK_EQ(db_schema_version, kLatestKnownSchemaVersion);
-  DCHECK_EQ(db_data_version, latest_known_data_version);
+  DCHECK(db_data_version == latest_known_data_version);
 
   s = transaction->Commit();
   if (!s.ok())
@@ -1320,7 +1328,7 @@ scoped_refptr<IndexedDBBackingStore> IndexedDBBackingStore::Open(
   DCHECK(!path_base.empty());
   *is_disk_full = false;
 
-  data_loss_info->status = blink::WebIDBDataLossNone;
+  data_loss_info->status = blink::kWebIDBDataLossNone;
   *status = Status::OK();
 
   std::unique_ptr<LevelDBComparator> comparator(base::MakeUnique<Comparator>());
@@ -1357,7 +1365,7 @@ scoped_refptr<IndexedDBBackingStore> IndexedDBBackingStore::Open(
     if (leveldb_env::IndicatesDiskFull(*status)) {
       *is_disk_full = true;
     } else if (status->IsCorruption()) {
-      data_loss_info->status = blink::WebIDBDataLossTotal;
+      data_loss_info->status = blink::kWebIDBDataLossTotal;
       data_loss_info->message = leveldb_env::GetCorruptionMessage(*status);
     }
   }
@@ -1371,7 +1379,7 @@ scoped_refptr<IndexedDBBackingStore> IndexedDBBackingStore::Open(
       HistogramOpenStatus(INDEXED_DB_BACKING_STORE_OPEN_FAILED_PRIOR_CORRUPTION,
                           origin);
       db.reset();
-      data_loss_info->status = blink::WebIDBDataLossTotal;
+      data_loss_info->status = blink::kWebIDBDataLossTotal;
       data_loss_info->message =
           "IndexedDB (database was corrupt): " + corruption_message;
     } else if (!IsSchemaKnown(db.get(), &is_schema_known)) {
@@ -1381,7 +1389,7 @@ scoped_refptr<IndexedDBBackingStore> IndexedDBBackingStore::Open(
           INDEXED_DB_BACKING_STORE_OPEN_FAILED_IO_ERROR_CHECKING_SCHEMA,
           origin);
       db.reset();
-      data_loss_info->status = blink::WebIDBDataLossTotal;
+      data_loss_info->status = blink::kWebIDBDataLossTotal;
       data_loss_info->message = "I/O error checking schema";
     } else if (!is_schema_known) {
       LOG(ERROR) << "IndexedDB backing store had unknown schema, treating it "
@@ -1389,7 +1397,7 @@ scoped_refptr<IndexedDBBackingStore> IndexedDBBackingStore::Open(
       HistogramOpenStatus(INDEXED_DB_BACKING_STORE_OPEN_FAILED_UNKNOWN_SCHEMA,
                           origin);
       db.reset();
-      data_loss_info->status = blink::WebIDBDataLossTotal;
+      data_loss_info->status = blink::kWebIDBDataLossTotal;
       data_loss_info->message = "Unknown schema";
     }
   }
@@ -1878,7 +1886,7 @@ Status IndexedDBBackingStore::GetObjectStores(
       // (2) Later, null vs. string vs. array was stored in the key_path itself.
       // So this check is only relevant for string-type key_paths.
       if (!has_key_path &&
-          (key_path.type() == blink::WebIDBKeyPathTypeString &&
+          (key_path.type() == blink::kWebIDBKeyPathTypeString &&
            !key_path.string().empty())) {
         INTERNAL_CONSISTENCY_ERROR_UNTESTED(GET_OBJECT_STORES);
         break;
@@ -2215,14 +2223,14 @@ Status IndexedDBBackingStore::DeleteRange(
   Status s;
   std::unique_ptr<IndexedDBBackingStore::Cursor> start_cursor =
       OpenObjectStoreCursor(transaction, database_id, object_store_id,
-                            key_range, blink::WebIDBCursorDirectionNext, &s);
+                            key_range, blink::kWebIDBCursorDirectionNext, &s);
   if (!s.ok())
     return s;
   if (!start_cursor)
     return Status::OK();  // Empty range == delete success.
   std::unique_ptr<IndexedDBBackingStore::Cursor> end_cursor =
       OpenObjectStoreCursor(transaction, database_id, object_store_id,
-                            key_range, blink::WebIDBCursorDirectionPrev, &s);
+                            key_range, blink::kWebIDBCursorDirectionPrev, &s);
 
   if (!s.ok())
     return s;
@@ -2317,7 +2325,7 @@ Status IndexedDBBackingStore::GetKeyGeneratorCurrentNumber(
       return InternalInconsistencyStatus();
     }
     std::unique_ptr<IndexedDBKey> user_key = data_key.user_key();
-    if (user_key->type() == blink::WebIDBKeyTypeNumber) {
+    if (user_key->type() == blink::kWebIDBKeyTypeNumber) {
       int64_t n = static_cast<int64_t>(user_key->number());
       if (n > max_numeric_key)
         max_numeric_key = n;
@@ -2416,7 +2424,7 @@ class IndexedDBBackingStore::Transaction::ChainedBlobWriterImpl
     blobs_.swap(*blobs);
     iter_ = blobs_.begin();
     backing_store->task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChainedBlobWriterImpl::WriteNextFile, this));
+        FROM_HERE, base::BindOnce(&ChainedBlobWriterImpl::WriteNextFile, this));
   }
 
   void set_delegate(std::unique_ptr<FileWriterDelegate> delegate) override {
@@ -2518,18 +2526,16 @@ class LocalWriteClosure : public FileWriterDelegate::DelegateWriteCallback,
       // LocalFileStreamWriter only creates a file if data is actually written.
       // If none was then create one now.
       task_runner_->PostTask(
-          FROM_HERE, base::Bind(&LocalWriteClosure::CreateEmptyFile, this));
+          FROM_HERE, base::BindOnce(&LocalWriteClosure::CreateEmptyFile, this));
     } else if (success && !last_modified_.is_null()) {
       task_runner_->PostTask(
-          FROM_HERE, base::Bind(&LocalWriteClosure::UpdateTimeStamp, this));
+          FROM_HERE, base::BindOnce(&LocalWriteClosure::UpdateTimeStamp, this));
     } else {
       task_runner_->PostTask(
           FROM_HERE,
-          base::Bind(&IndexedDBBackingStore::Transaction::ChainedBlobWriter::
-                     ReportWriteCompletion,
-                     chained_blob_writer_,
-                     success,
-                     bytes_written_));
+          base::BindOnce(&IndexedDBBackingStore::Transaction::
+                             ChainedBlobWriter::ReportWriteCompletion,
+                         chained_blob_writer_, success, bytes_written_));
     }
   }
 
@@ -2550,10 +2556,36 @@ class LocalWriteClosure : public FileWriterDelegate::DelegateWriteCallback,
     DCHECK(blob_url.is_valid());
     net::URLRequestContext* request_context =
         request_context_getter->GetURLRequestContext();
+    net::NetworkTrafficAnnotationTag traffic_annotation =
+        net::DefineNetworkTrafficAnnotation("persist_blob_to_indexed_db", R"(
+        semantics {
+          sender: "Indexed DB"
+          description:
+            "A web page's script has created a Blob (or File) object (either "
+            "directly via constructors, or by using file upload to a form, or "
+            "via a fetch()). The script has then made a request to store data "
+            "including the Blob via the Indexed DB API. As part of committing "
+            "the database transaction, the content of the Blob is being copied "
+            "into a file in the database's directory."
+          trigger:
+            "The script has made a request to store data including a Blob via "
+            "the Indexed DB API."
+          data:
+            "A Blob or File object referenced by script, either created "
+            "directly via constructors, or by using file upload to a form, or "
+            "drag/drop, or via a fetch() or other APIs that produce Blobs."
+          destination: LOCAL
+        }
+        policy {
+          cookies_allowed: false
+          setting: "This feature cannot be disabled by settings."
+          policy_exception_justification: "Not implemented."
+        })");
     std::unique_ptr<net::URLRequest> blob_request(
         request_context->CreateRequest(blob_url, net::DEFAULT_PRIORITY,
-                                       delegate.get()));
-
+                                       delegate.get(), traffic_annotation));
+    blob_request->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
+                               net::LOAD_DO_NOT_SEND_COOKIES);
     this->file_path_ = file_path;
     this->last_modified_ = last_modified;
 
@@ -2565,8 +2597,8 @@ class LocalWriteClosure : public FileWriterDelegate::DelegateWriteCallback,
  private:
   virtual ~LocalWriteClosure() {
     // Make sure the last reference to a ChainedBlobWriter is released (and
-    // deleted) on the IDB thread since it owns a transaction which has thread
-    // affinity.
+    // deleted) on the IDB sequence since it owns a transaction which has
+    // sequence affinity.
     IndexedDBBackingStore::Transaction::ChainedBlobWriter* raw_tmp =
         chained_blob_writer_.get();
     raw_tmp->AddRef();
@@ -2578,7 +2610,7 @@ class LocalWriteClosure : public FileWriterDelegate::DelegateWriteCallback,
   // If necessary, update the timestamps on the file as a final
   // step before reporting success.
   void UpdateTimeStamp() {
-    DCHECK(task_runner_->RunsTasksOnCurrentThread());
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
     if (!base::TouchFile(file_path_, last_modified_, last_modified_)) {
       // TODO(ericu): Complain quietly; timestamp's probably not vital.
     }
@@ -2587,7 +2619,7 @@ class LocalWriteClosure : public FileWriterDelegate::DelegateWriteCallback,
 
   // Create an empty file.
   void CreateEmptyFile() {
-    DCHECK(task_runner_->RunsTasksOnCurrentThread());
+    DCHECK(task_runner_->RunsTasksInCurrentSequence());
     base::File file(file_path_,
                     base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
     bool success = file.created();
@@ -2643,19 +2675,17 @@ bool IndexedDBBackingStore::WriteBlobFile(
 
     task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&Transaction::ChainedBlobWriter::ReportWriteCompletion,
-                   chained_blob_writer,
-                   true,
-                   info.size));
+        base::BindOnce(&Transaction::ChainedBlobWriter::ReportWriteCompletion,
+                       chained_blob_writer, true, info.size));
   } else {
     DCHECK(descriptor.url().is_valid());
     scoped_refptr<LocalWriteClosure> write_closure(
         new LocalWriteClosure(chained_blob_writer, task_runner_.get()));
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
-        base::Bind(&LocalWriteClosure::WriteBlobToFileOnIOThread,
-                   write_closure, path, descriptor.url(),
-                   descriptor.last_modified(), request_context_getter_));
+        base::BindOnce(&LocalWriteClosure::WriteBlobToFileOnIOThread,
+                       write_closure, path, descriptor.url(),
+                       descriptor.last_modified(), request_context_getter_));
   }
   return true;
 }
@@ -3233,13 +3263,15 @@ IndexedDBBackingStore::Cursor::~Cursor() {}
 
 bool IndexedDBBackingStore::Cursor::FirstSeek(Status* s) {
   iterator_ = transaction_->transaction()->CreateIterator();
-  if (cursor_options_.forward)
-    *s = iterator_->Seek(cursor_options_.low_key);
-  else
-    *s = iterator_->Seek(cursor_options_.high_key);
-  if (!s->ok())
-    return false;
-
+  {
+    IDB_TRACE("IndexedDBBackingStore::Cursor::FirstSeek::Seek");
+    if (cursor_options_.forward)
+      *s = iterator_->Seek(cursor_options_.low_key);
+    else
+      *s = iterator_->Seek(cursor_options_.high_key);
+    if (!s->ok())
+      return false;
+  }
   return Continue(0, READY, s);
 }
 
@@ -3256,6 +3288,7 @@ bool IndexedDBBackingStore::Cursor::Continue(const IndexedDBKey* key,
                                              const IndexedDBKey* primary_key,
                                              IteratorState next_state,
                                              Status* s) {
+  IDB_TRACE("IndexedDBBackingStore::Cursor::Continue");
   DCHECK(!key || next_state == SEEK);
 
   if (cursor_options_.forward)
@@ -4116,7 +4149,7 @@ Status IndexedDBBackingStore::Transaction::CommitPhaseOne(
     scoped_refptr<BlobWriteCallback> callback) {
   IDB_TRACE("IndexedDBBackingStore::Transaction::CommitPhaseOne");
   DCHECK(transaction_.get());
-  DCHECK(backing_store_->task_runner()->RunsTasksOnCurrentThread());
+  DCHECK(backing_store_->task_runner()->RunsTasksInCurrentSequence());
 
   Status s;
 
@@ -4325,6 +4358,11 @@ void IndexedDBBackingStore::Transaction::Rollback() {
     return;
   transaction_->Rollback();
   transaction_ = NULL;
+}
+
+uint64_t IndexedDBBackingStore::Transaction::GetTransactionSize() {
+  DCHECK(transaction_);
+  return transaction_->GetTransactionSize();
 }
 
 IndexedDBBackingStore::BlobChangeRecord::BlobChangeRecord(

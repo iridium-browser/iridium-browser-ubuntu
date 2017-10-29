@@ -4,8 +4,8 @@
 
 #include "net/http/http_stream_factory_impl.h"
 
-#include <string>
 #include <tuple>
+#include <utility>
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -24,132 +24,81 @@
 #include "net/http/transport_security_state.h"
 #include "net/proxy/proxy_info.h"
 #include "net/quic/core/quic_server_id.h"
-#include "net/spdy/bidirectional_stream_spdy_impl.h"
-#include "net/spdy/spdy_http_stream.h"
+#include "net/spdy/chromium/bidirectional_stream_spdy_impl.h"
+#include "net/spdy/chromium/spdy_http_stream.h"
 #include "url/gurl.h"
 #include "url/scheme_host_port.h"
 #include "url/url_constants.h"
 
 namespace net {
 
-namespace {
-// Default JobFactory for creating HttpStreamFactoryImpl::Jobs.
-class DefaultJobFactory : public HttpStreamFactoryImpl::JobFactory {
- public:
-  DefaultJobFactory() {}
-
-  ~DefaultJobFactory() override {}
-
-  HttpStreamFactoryImpl::Job* CreateJob(
-      HttpStreamFactoryImpl::Job::Delegate* delegate,
-      HttpStreamFactoryImpl::JobType job_type,
-      HttpNetworkSession* session,
-      const HttpRequestInfo& request_info,
-      RequestPriority priority,
-      const SSLConfig& server_ssl_config,
-      const SSLConfig& proxy_ssl_config,
-      HostPortPair destination,
-      GURL origin_url,
-      NetLog* net_log) override {
-    return new HttpStreamFactoryImpl::Job(
-        delegate, job_type, session, request_info, priority, server_ssl_config,
-        proxy_ssl_config, destination, origin_url, net_log);
-  }
-
-  HttpStreamFactoryImpl::Job* CreateJob(
-      HttpStreamFactoryImpl::Job::Delegate* delegate,
-      HttpStreamFactoryImpl::JobType job_type,
-      HttpNetworkSession* session,
-      const HttpRequestInfo& request_info,
-      RequestPriority priority,
-      const SSLConfig& server_ssl_config,
-      const SSLConfig& proxy_ssl_config,
-      HostPortPair destination,
-      GURL origin_url,
-      AlternativeService alternative_service,
-      NetLog* net_log) override {
-    return new HttpStreamFactoryImpl::Job(
-        delegate, job_type, session, request_info, priority, server_ssl_config,
-        proxy_ssl_config, destination, origin_url, alternative_service,
-        ProxyServer(), net_log);
-  }
-
-  HttpStreamFactoryImpl::Job* CreateJob(
-      HttpStreamFactoryImpl::Job::Delegate* delegate,
-      HttpStreamFactoryImpl::JobType job_type,
-      HttpNetworkSession* session,
-      const HttpRequestInfo& request_info,
-      RequestPriority priority,
-      const SSLConfig& server_ssl_config,
-      const SSLConfig& proxy_ssl_config,
-      HostPortPair destination,
-      GURL origin_url,
-      const ProxyServer& alternative_proxy_server,
-      NetLog* net_log) override {
-    return new HttpStreamFactoryImpl::Job(
-        delegate, job_type, session, request_info, priority, server_ssl_config,
-        proxy_ssl_config, destination, origin_url, AlternativeService(),
-        alternative_proxy_server, net_log);
-  }
-};
-
-}  // anonymous namespace
-
 HttpStreamFactoryImpl::HttpStreamFactoryImpl(HttpNetworkSession* session,
                                              bool for_websockets)
     : session_(session),
-      job_factory_(new DefaultJobFactory()),
-      for_websockets_(for_websockets) {}
+      job_factory_(new JobFactory()),
+      for_websockets_(for_websockets),
+      last_logged_job_controller_count_(0) {}
 
 HttpStreamFactoryImpl::~HttpStreamFactoryImpl() {
-  DCHECK(request_map_.empty());
-  DCHECK(spdy_session_request_map_.empty());
+  UMA_HISTOGRAM_COUNTS_1M("Net.JobControllerSet.CountOfJobControllerAtShutDown",
+                          job_controller_set_.size());
 }
 
-HttpStreamRequest* HttpStreamFactoryImpl::RequestStream(
+std::unique_ptr<HttpStreamRequest> HttpStreamFactoryImpl::RequestStream(
     const HttpRequestInfo& request_info,
     RequestPriority priority,
     const SSLConfig& server_ssl_config,
     const SSLConfig& proxy_ssl_config,
     HttpStreamRequest::Delegate* delegate,
+    bool enable_ip_based_pooling,
+    bool enable_alternative_services,
     const NetLogWithSource& net_log) {
   DCHECK(!for_websockets_);
-  return RequestStreamInternal(request_info, priority, server_ssl_config,
-                               proxy_ssl_config, delegate, nullptr,
-                               HttpStreamRequest::HTTP_STREAM, net_log);
+  return RequestStreamInternal(
+      request_info, priority, server_ssl_config, proxy_ssl_config, delegate,
+      nullptr, HttpStreamRequest::HTTP_STREAM, enable_ip_based_pooling,
+      enable_alternative_services, net_log);
 }
 
-HttpStreamRequest* HttpStreamFactoryImpl::RequestWebSocketHandshakeStream(
+std::unique_ptr<HttpStreamRequest>
+HttpStreamFactoryImpl::RequestWebSocketHandshakeStream(
     const HttpRequestInfo& request_info,
     RequestPriority priority,
     const SSLConfig& server_ssl_config,
     const SSLConfig& proxy_ssl_config,
     HttpStreamRequest::Delegate* delegate,
     WebSocketHandshakeStreamBase::CreateHelper* create_helper,
+    bool enable_ip_based_pooling,
+    bool enable_alternative_services,
     const NetLogWithSource& net_log) {
   DCHECK(for_websockets_);
   DCHECK(create_helper);
-  return RequestStreamInternal(request_info, priority, server_ssl_config,
-                               proxy_ssl_config, delegate, create_helper,
-                               HttpStreamRequest::HTTP_STREAM, net_log);
+  return RequestStreamInternal(
+      request_info, priority, server_ssl_config, proxy_ssl_config, delegate,
+      create_helper, HttpStreamRequest::HTTP_STREAM, enable_ip_based_pooling,
+      enable_alternative_services, net_log);
 }
 
-HttpStreamRequest* HttpStreamFactoryImpl::RequestBidirectionalStreamImpl(
+std::unique_ptr<HttpStreamRequest>
+HttpStreamFactoryImpl::RequestBidirectionalStreamImpl(
     const HttpRequestInfo& request_info,
     RequestPriority priority,
     const SSLConfig& server_ssl_config,
     const SSLConfig& proxy_ssl_config,
     HttpStreamRequest::Delegate* delegate,
+    bool enable_ip_based_pooling,
+    bool enable_alternative_services,
     const NetLogWithSource& net_log) {
   DCHECK(!for_websockets_);
   DCHECK(request_info.url.SchemeIs(url::kHttpsScheme));
 
   return RequestStreamInternal(
       request_info, priority, server_ssl_config, proxy_ssl_config, delegate,
-      nullptr, HttpStreamRequest::BIDIRECTIONAL_STREAM, net_log);
+      nullptr, HttpStreamRequest::BIDIRECTIONAL_STREAM, enable_ip_based_pooling,
+      enable_alternative_services, net_log);
 }
 
-HttpStreamRequest* HttpStreamFactoryImpl::RequestStreamInternal(
+std::unique_ptr<HttpStreamRequest> HttpStreamFactoryImpl::RequestStreamInternal(
     const HttpRequestInfo& request_info,
     RequestPriority priority,
     const SSLConfig& server_ssl_config,
@@ -158,22 +107,29 @@ HttpStreamRequest* HttpStreamFactoryImpl::RequestStreamInternal(
     WebSocketHandshakeStreamBase::CreateHelper*
         websocket_handshake_stream_create_helper,
     HttpStreamRequest::StreamType stream_type,
+    bool enable_ip_based_pooling,
+    bool enable_alternative_services,
     const NetLogWithSource& net_log) {
+  AddJobControllerCountToHistograms();
+
   auto job_controller = base::MakeUnique<JobController>(
       this, delegate, session_, job_factory_.get(), request_info,
-      /*is_preconnect=*/false);
+      /* is_preconnect = */ false, enable_ip_based_pooling,
+      enable_alternative_services, server_ssl_config, proxy_ssl_config);
   JobController* job_controller_raw_ptr = job_controller.get();
   job_controller_set_.insert(std::move(job_controller));
-  Request* request = job_controller_raw_ptr->Start(
-      request_info, delegate, websocket_handshake_stream_create_helper, net_log,
-      stream_type, priority, server_ssl_config, proxy_ssl_config);
-
-  return request;
+  return job_controller_raw_ptr->Start(delegate,
+                                       websocket_handshake_stream_create_helper,
+                                       net_log, stream_type, priority);
 }
 
 void HttpStreamFactoryImpl::PreconnectStreams(
     int num_streams,
     const HttpRequestInfo& request_info) {
+  DCHECK(request_info.url.is_valid());
+
+  AddJobControllerCountToHistograms();
+
   SSLConfig server_ssl_config;
   SSLConfig proxy_ssl_config;
   session_->GetSSLConfig(request_info, &server_ssl_config, &proxy_ssl_config);
@@ -185,58 +141,17 @@ void HttpStreamFactoryImpl::PreconnectStreams(
 
   auto job_controller = base::MakeUnique<JobController>(
       this, nullptr, session_, job_factory_.get(), request_info,
-      /*is_preconnect=*/true);
+      /* is_preconnect = */ true,
+      /* enable_ip_based_pooling = */ true,
+      /* enable_alternative_services = */ true, server_ssl_config,
+      proxy_ssl_config);
   JobController* job_controller_raw_ptr = job_controller.get();
   job_controller_set_.insert(std::move(job_controller));
-  job_controller_raw_ptr->Preconnect(num_streams, request_info,
-                                     server_ssl_config, proxy_ssl_config);
+  job_controller_raw_ptr->Preconnect(num_streams);
 }
 
 const HostMappingRules* HttpStreamFactoryImpl::GetHostMappingRules() const {
-  return session_->params().host_mapping_rules;
-}
-
-void HttpStreamFactoryImpl::OnNewSpdySessionReady(
-    const base::WeakPtr<SpdySession>& spdy_session,
-    bool direct,
-    const SSLConfig& used_ssl_config,
-    const ProxyInfo& used_proxy_info,
-    bool was_alpn_negotiated,
-    NextProto negotiated_protocol,
-    bool using_spdy) {
-  while (true) {
-    if (!spdy_session)
-      break;
-    const SpdySessionKey& spdy_session_key = spdy_session->spdy_session_key();
-    // Each iteration may empty out the RequestSet for |spdy_session_key| in
-    // |spdy_session_request_map_|. So each time, check for RequestSet and use
-    // the first one.
-    //
-    // TODO(willchan): If it's important, switch RequestSet out for a FIFO
-    // queue (Order by priority first, then FIFO within same priority). Unclear
-    // that it matters here.
-    if (!base::ContainsKey(spdy_session_request_map_, spdy_session_key))
-      break;
-    Request* request = *spdy_session_request_map_[spdy_session_key].begin();
-    request->Complete(was_alpn_negotiated, negotiated_protocol, using_spdy);
-    if (for_websockets_) {
-      // TODO(ricea): Restore this code path when WebSocket over SPDY
-      // implementation is ready.
-      NOTREACHED();
-    } else if (request->stream_type() ==
-               HttpStreamRequest::BIDIRECTIONAL_STREAM) {
-      request->OnBidirectionalStreamImplReady(
-          used_ssl_config, used_proxy_info,
-          new BidirectionalStreamSpdyImpl(spdy_session));
-    } else {
-      bool use_relative_url =
-          direct || request->url().SchemeIs(url::kHttpsScheme);
-      request->OnStreamReady(
-          used_ssl_config, used_proxy_info,
-          new SpdyHttpStream(spdy_session, use_relative_url));
-    }
-  }
-  // TODO(mbelshe): Alert other valid requests.
+  return &session_->params().host_mapping_rules;
 }
 
 void HttpStreamFactoryImpl::OnJobControllerComplete(JobController* controller) {
@@ -275,10 +190,8 @@ bool HttpStreamFactoryImpl::OnInitConnection(const JobController& controller,
     return false;
   }
 
-  if (!session_->params().restrict_to_one_preconnect_for_proxies ||
-      !ProxyServerSupportsPriorities(proxy_info)) {
+  if (!ProxyServerSupportsPriorities(proxy_info))
     return false;
-  }
 
   PreconnectingProxyServer preconnecting_proxy_server(proxy_info.proxy_server(),
                                                       privacy_mode);
@@ -287,7 +200,7 @@ bool HttpStreamFactoryImpl::OnInitConnection(const JobController& controller,
                         preconnecting_proxy_server)) {
     UMA_HISTOGRAM_EXACT_LINEAR("Net.PreconnectSkippedToProxyServers", 1, 2);
     // Skip preconnect to the proxy server since we are already preconnecting
-    // (probably via some other job).
+    // (probably via some other job). See crbug.com/682041 for details.
     return true;
   }
 
@@ -332,6 +245,61 @@ bool HttpStreamFactoryImpl::ProxyServerSupportsPriorities(
       scheme_host_port);
 }
 
+void HttpStreamFactoryImpl::AddJobControllerCountToHistograms() {
+  // Only log the count of JobControllers when the count is hitting one of the
+  // boundaries for the first time which is a multiple of 100: 100, 200, 300,
+  // etc.
+  if (job_controller_set_.size() % 100 != 0 ||
+      job_controller_set_.size() <= last_logged_job_controller_count_) {
+    return;
+  }
+  last_logged_job_controller_count_ = job_controller_set_.size();
+
+  UMA_HISTOGRAM_COUNTS_1M("Net.JobControllerSet.CountOfJobController",
+                          job_controller_set_.size());
+
+  int alt_job_count = 0;
+  int main_job_count = 0;
+  size_t num_controllers_with_request = 0;
+  size_t num_controllers_for_preconnect = 0;
+  for (const auto& job_controller : job_controller_set_) {
+    DCHECK(job_controller->HasPendingAltJob() ||
+           job_controller->HasPendingMainJob());
+    // Additionally logs the states of the jobs if there are at least 500
+    // controllers, which suggests that there might be a leak.
+    if (job_controller_set_.size() >= 500)
+      job_controller->LogHistograms();
+    // For a preconnect controller, it should have exactly the main job.
+    if (job_controller->is_preconnect()) {
+      num_controllers_for_preconnect++;
+      continue;
+    }
+    // For non-preconnects.
+    if (job_controller->HasPendingRequest())
+      num_controllers_with_request++;
+    if (job_controller->HasPendingAltJob())
+      alt_job_count++;
+    if (job_controller->HasPendingMainJob())
+      main_job_count++;
+  }
+  UMA_HISTOGRAM_COUNTS_1M(
+      "Net.JobControllerSet.CountOfJobController.Preconnect",
+      num_controllers_for_preconnect);
+  UMA_HISTOGRAM_COUNTS_1M(
+      "Net.JobControllerSet.CountOfJobController.NonPreconnect.PendingRequest",
+      num_controllers_with_request);
+
+  UMA_HISTOGRAM_COUNTS_1M(
+      "Net.JobControllerSet.CountOfJobController.NonPreconnect.RequestGone",
+      job_controller_set_.size() - num_controllers_for_preconnect -
+          num_controllers_with_request);
+
+  UMA_HISTOGRAM_COUNTS_1M("Net.JobControllerSet.CountOfNonPreconnectAltJob",
+                          alt_job_count);
+  UMA_HISTOGRAM_COUNTS_1M("Net.JobControllerSet.CountOfNonPreconnectMainJob",
+                          main_job_count);
+}
+
 void HttpStreamFactoryImpl::DumpMemoryStats(
     base::trace_event::ProcessMemoryDump* pmd,
     const std::string& parent_absolute_name) const {
@@ -343,11 +311,11 @@ void HttpStreamFactoryImpl::DumpMemoryStats(
       pmd->CreateAllocatorDump(name);
   size_t alt_job_count = 0;
   size_t main_job_count = 0;
-  size_t preconnect_controller_count = 0;
+  size_t num_controllers_for_preconnect = 0;
   for (const auto& it : job_controller_set_) {
     // For a preconnect controller, it should have exactly the main job.
     if (it->is_preconnect()) {
-      preconnect_controller_count++;
+      num_controllers_for_preconnect++;
       continue;
     }
     // For non-preconnects.
@@ -375,7 +343,7 @@ void HttpStreamFactoryImpl::DumpMemoryStats(
   // The number of preconnect controllers.
   factory_dump->AddScalar("preconnect_count",
                           base::trace_event::MemoryAllocatorDump::kUnitsObjects,
-                          preconnect_controller_count);
+                          num_controllers_for_preconnect);
 }
 
 }  // namespace net

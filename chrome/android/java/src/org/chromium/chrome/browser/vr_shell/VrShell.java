@@ -16,7 +16,8 @@ public interface VrShell {
     /**
      * Performs native VrShell initialization.
      */
-    void initializeNative(Tab currentTab, boolean forWebVR);
+    void initializeNative(
+            Tab currentTab, boolean forWebVr, boolean webVrAutopresentationExpected, boolean inCct);
 
     /**
      * Pauses VrShell.
@@ -36,10 +37,37 @@ public interface VrShell {
     /**
      * Sets whether we're presenting WebVR content or not.
      */
-    void setWebVrModeEnabled(boolean enabled);
+    // TODO: Refactor needed. See crbug.com/735169.
+    void setWebVrModeEnabled(boolean enabled, boolean showToast);
+
+    /**
+     * Returns true if we're presenting WebVR content.
+     */
+    boolean getWebVrModeEnabled();
+
+    /**
+     * Returns true if our URL bar is showing a string.
+     */
+    boolean isDisplayingUrlForTesting();
 
     /**
      * Returns the GVRLayout as a FrameLayout.
      */
     FrameLayout getContainer();
+
+    /**
+     * Returns whether the back button is enabled.
+     */
+    Boolean isBackButtonEnabled();
+
+    /**
+     * Requests to exit VR.
+     */
+    void requestToExitVr(@UiUnsupportedMode int reason);
+
+    /**
+     * Gives VrShell a chance to clean up any view-dependent state before removing
+     * VrShell from the view hierarchy.
+     */
+    void onBeforeWindowDetached();
 }

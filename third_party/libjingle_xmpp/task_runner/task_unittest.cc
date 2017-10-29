@@ -17,17 +17,17 @@
 #include <iostream>
 
 #if defined(WEBRTC_WIN)
-#include "third_party/webrtc/base/win32.h"
+#include "third_party/webrtc/rtc_base/win32.h"
 #endif  // WEBRTC_WIN
 
 #include "third_party/libjingle_xmpp/task_runner/task.h"
 #include "third_party/libjingle_xmpp/task_runner/taskrunner.h"
-#include "third_party/webrtc/base/arraysize.h"
-#include "third_party/webrtc/base/constructormagic.h"
-#include "third_party/webrtc/base/gunit.h"
-#include "third_party/webrtc/base/thread.h"
-#include "third_party/webrtc/base/timeutils.h"
-#include "third_party/webrtc_overrides/webrtc/base/logging.h"
+#include "third_party/webrtc/rtc_base/arraysize.h"
+#include "third_party/webrtc/rtc_base/constructormagic.h"
+#include "third_party/webrtc/rtc_base/gunit.h"
+#include "third_party/webrtc/rtc_base/thread.h"
+#include "third_party/webrtc/rtc_base/timeutils.h"
+#include "third_party/webrtc_overrides/webrtc/rtc_base/logging.h"
 
 namespace rtc {
 
@@ -97,6 +97,9 @@ class HappyTask : public IdTimeoutTask {
 
 class MyTaskRunner : public TaskRunner {
  public:
+  MyTaskRunner() { ThreadManager::Instance()->WrapCurrentThread(); }
+  ~MyTaskRunner() { ThreadManager::Instance()->UnwrapCurrentThread(); }
+
   virtual void WakeTasks() { RunTasks(); }
   virtual int64_t CurrentTime() { return GetCurrentTime(); }
 

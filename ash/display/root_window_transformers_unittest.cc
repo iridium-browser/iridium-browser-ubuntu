@@ -6,19 +6,21 @@
 
 #include <memory>
 
-#include "ash/common/shelf/shelf_widget.h"
 #include "ash/display/display_util.h"
+#include "ash/display/mirror_window_test_api.h"
 #include "ash/host/root_window_transformer.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/screen_util.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/cursor_manager_test_api.h"
-#include "ash/test/mirror_window_test_api.h"
+#include "ash/wm/cursor_manager_test_api.h"
 #include "base/synchronization/waitable_event.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tracker.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/display/display.h"
 #include "ui/display/display_layout.h"
 #include "ui/display/manager/display_manager.h"
@@ -111,14 +113,14 @@ class TestEventHandler : public ui::EventHandler {
   DISALLOW_COPY_AND_ASSIGN(TestEventHandler);
 };
 
-class RootWindowTransformersTest : public test::AshTestBase {
+class RootWindowTransformersTest : public AshTestBase {
  public:
-  RootWindowTransformersTest(){};
-  ~RootWindowTransformersTest() override{};
+  RootWindowTransformersTest() {}
+  ~RootWindowTransformersTest() override {}
 
   float GetStoredUIScale(int64_t id) {
     return display_manager()->GetDisplayInfo(id).GetEffectiveUIScale();
-  };
+  }
 
   std::unique_ptr<RootWindowTransformer>
   CreateCurrentRootWindowTransformerForMirroring() {
@@ -132,33 +134,18 @@ class RootWindowTransformersTest : public test::AshTestBase {
     return std::unique_ptr<RootWindowTransformer>(
         CreateRootWindowTransformerForMirroredDisplay(source_display_info,
                                                       mirror_display_info));
-  };
+  }
 
   DISALLOW_COPY_AND_ASSIGN(RootWindowTransformersTest);
 };
 
 }  // namespace
 
-// using RootWindowTransformersTest = test::AshTestBase;
-
-#if defined(OS_WIN)
-// TODO(scottmg): RootWindow doesn't get resized on Windows
-// Ash. http://crbug.com/247916.
-#define MAYBE_RotateAndMagnify DISABLED_RotateAndMagniy
-#define MAYBE_TouchScaleAndMagnify DISABLED_TouchScaleAndMagnify
-#define MAYBE_ConvertHostToRootCoords DISABLED_ConvertHostToRootCoords
-#else
-#define MAYBE_RotateAndMagnify RotateAndMagniy
-#define MAYBE_TouchScaleAndMagnify TouchScaleAndMagnify
-#define MAYBE_ConvertHostToRootCoords ConvertHostToRootCoords
-#endif
-
-TEST_F(RootWindowTransformersTest, MAYBE_RotateAndMagnify) {
-  MagnificationController* magnifier =
-      Shell::GetInstance()->magnification_controller();
+TEST_F(RootWindowTransformersTest, RotateAndMagnify) {
+  MagnificationController* magnifier = Shell::Get()->magnification_controller();
 
   TestEventHandler event_handler;
-  Shell::GetInstance()->AddPreTargetHandler(&event_handler);
+  Shell::Get()->AddPreTargetHandler(&event_handler);
 
   UpdateDisplay("120x200,300x400*2");
   display::Display display1 = display::Screen::GetScreen()->GetPrimaryDisplay();
@@ -251,12 +238,12 @@ TEST_F(RootWindowTransformersTest, MAYBE_RotateAndMagnify) {
             GetActiveDisplayRotation(display2_id));
   magnifier->SetEnabled(false);
 
-  Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
+  Shell::Get()->RemovePreTargetHandler(&event_handler);
 }
 
 TEST_F(RootWindowTransformersTest, ScaleAndMagnify) {
   TestEventHandler event_handler;
-  Shell::GetInstance()->AddPreTargetHandler(&event_handler);
+  Shell::Get()->AddPreTargetHandler(&event_handler);
 
   UpdateDisplay("600x400*2@1.5,500x300");
 
@@ -265,8 +252,7 @@ TEST_F(RootWindowTransformersTest, ScaleAndMagnify) {
                                                          display1.id());
   display::Display display2 = display_manager()->GetSecondaryDisplay();
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  MagnificationController* magnifier =
-      Shell::GetInstance()->magnification_controller();
+  MagnificationController* magnifier = Shell::Get()->magnification_controller();
 
   magnifier->SetEnabled(true);
   EXPECT_EQ(2.0f, magnifier->GetScale());
@@ -294,20 +280,19 @@ TEST_F(RootWindowTransformersTest, ScaleAndMagnify) {
   EXPECT_EQ(1.0f, GetStoredUIScale(display2.id()));
   magnifier->SetEnabled(false);
 
-  Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
+  Shell::Get()->RemovePreTargetHandler(&event_handler);
 }
 
-TEST_F(RootWindowTransformersTest, MAYBE_TouchScaleAndMagnify) {
+TEST_F(RootWindowTransformersTest, TouchScaleAndMagnify) {
   TestEventHandler event_handler;
-  Shell::GetInstance()->AddPreTargetHandler(&event_handler);
+  Shell::Get()->AddPreTargetHandler(&event_handler);
 
   UpdateDisplay("200x200*2");
   display::Display display = display::Screen::GetScreen()->GetPrimaryDisplay();
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   aura::Window* root_window = root_windows[0];
   ui::test::EventGenerator generator(root_window);
-  MagnificationController* magnifier =
-      Shell::GetInstance()->magnification_controller();
+  MagnificationController* magnifier = Shell::Get()->magnification_controller();
 
   magnifier->SetEnabled(true);
   EXPECT_FLOAT_EQ(2.0f, magnifier->GetScale());
@@ -330,14 +315,13 @@ TEST_F(RootWindowTransformersTest, MAYBE_TouchScaleAndMagnify) {
                   event_handler.scroll_y_offset_ordinal());
   magnifier->SetEnabled(false);
 
-  Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
+  Shell::Get()->RemovePreTargetHandler(&event_handler);
 }
 
-TEST_F(RootWindowTransformersTest, MAYBE_ConvertHostToRootCoords) {
+TEST_F(RootWindowTransformersTest, ConvertHostToRootCoords) {
   TestEventHandler event_handler;
-  Shell::GetInstance()->AddPreTargetHandler(&event_handler);
-  MagnificationController* magnifier =
-      Shell::GetInstance()->magnification_controller();
+  Shell::Get()->AddPreTargetHandler(&event_handler);
+  MagnificationController* magnifier = Shell::Get()->magnification_controller();
 
   // Test 1
   UpdateDisplay("600x400*2/r@1.5");
@@ -351,17 +335,17 @@ TEST_F(RootWindowTransformersTest, MAYBE_ConvertHostToRootCoords) {
   ui::test::EventGenerator generator(root_windows[0]);
   generator.MoveMouseToInHost(300, 200);
   magnifier->SetEnabled(true);
-  EXPECT_EQ("150,224", event_handler.GetLocationAndReset());
+  EXPECT_EQ("150,225", event_handler.GetLocationAndReset());
   EXPECT_FLOAT_EQ(2.0f, magnifier->GetScale());
 
   generator.MoveMouseToInHost(300, 200);
   EXPECT_EQ("150,224", event_handler.GetLocationAndReset());
   generator.MoveMouseToInHost(200, 300);
-  EXPECT_EQ("187,261", event_handler.GetLocationAndReset());
+  EXPECT_EQ("187,262", event_handler.GetLocationAndReset());
   generator.MoveMouseToInHost(100, 400);
   EXPECT_EQ("237,299", event_handler.GetLocationAndReset());
   generator.MoveMouseToInHost(0, 0);
-  EXPECT_EQ("137,348", event_handler.GetLocationAndReset());
+  EXPECT_EQ("137,349", event_handler.GetLocationAndReset());
 
   magnifier->SetEnabled(false);
   EXPECT_FLOAT_EQ(1.0f, magnifier->GetScale());
@@ -376,17 +360,17 @@ TEST_F(RootWindowTransformersTest, MAYBE_ConvertHostToRootCoords) {
 
   generator.MoveMouseToInHost(300, 200);
   magnifier->SetEnabled(true);
-  EXPECT_EQ("224,149", event_handler.GetLocationAndReset());
+  EXPECT_EQ("225,150", event_handler.GetLocationAndReset());
   EXPECT_FLOAT_EQ(2.0f, magnifier->GetScale());
 
   generator.MoveMouseToInHost(300, 200);
-  EXPECT_EQ("224,148", event_handler.GetLocationAndReset());
+  EXPECT_EQ("224,150", event_handler.GetLocationAndReset());
   generator.MoveMouseToInHost(200, 300);
-  EXPECT_EQ("261,111", event_handler.GetLocationAndReset());
+  EXPECT_EQ("262,112", event_handler.GetLocationAndReset());
   generator.MoveMouseToInHost(100, 400);
-  EXPECT_EQ("299,60", event_handler.GetLocationAndReset());
+  EXPECT_EQ("299,62", event_handler.GetLocationAndReset());
   generator.MoveMouseToInHost(0, 0);
-  EXPECT_EQ("348,159", event_handler.GetLocationAndReset());
+  EXPECT_EQ("349,162", event_handler.GetLocationAndReset());
 
   magnifier->SetEnabled(false);
   EXPECT_FLOAT_EQ(1.0f, magnifier->GetScale());
@@ -401,26 +385,26 @@ TEST_F(RootWindowTransformersTest, MAYBE_ConvertHostToRootCoords) {
 
   generator.MoveMouseToInHost(300, 200);
   magnifier->SetEnabled(true);
-  EXPECT_EQ("149,225", event_handler.GetLocationAndReset());
+  EXPECT_EQ("150,225", event_handler.GetLocationAndReset());
   EXPECT_FLOAT_EQ(2.0f, magnifier->GetScale());
 
   generator.MoveMouseToInHost(300, 200);
-  EXPECT_EQ("148,224", event_handler.GetLocationAndReset());
+  EXPECT_EQ("150,224", event_handler.GetLocationAndReset());
   generator.MoveMouseToInHost(200, 300);
-  EXPECT_EQ("111,187", event_handler.GetLocationAndReset());
+  EXPECT_EQ("112,187", event_handler.GetLocationAndReset());
   generator.MoveMouseToInHost(100, 400);
-  EXPECT_EQ("60,149", event_handler.GetLocationAndReset());
+  EXPECT_EQ("61,149", event_handler.GetLocationAndReset());
   generator.MoveMouseToInHost(0, 0);
-  EXPECT_EQ("159,99", event_handler.GetLocationAndReset());
+  EXPECT_EQ("161,99", event_handler.GetLocationAndReset());
 
   magnifier->SetEnabled(false);
   EXPECT_FLOAT_EQ(1.0f, magnifier->GetScale());
 
-  Shell::GetInstance()->RemovePreTargetHandler(&event_handler);
+  Shell::Get()->RemovePreTargetHandler(&event_handler);
 }
 
 TEST_F(RootWindowTransformersTest, LetterBoxPillarBox) {
-  test::MirrorWindowTestApi test_api;
+  MirrorWindowTestApi test_api;
   display_manager()->SetMultiDisplayMode(display::DisplayManager::MIRRORING);
   UpdateDisplay("400x200,500x500");
   std::unique_ptr<RootWindowTransformer> transformer(
@@ -432,6 +416,95 @@ TEST_F(RootWindowTransformersTest, LetterBoxPillarBox) {
   // The aspect ratio is flipped, so X margin is now 125.
   transformer = CreateCurrentRootWindowTransformerForMirroring();
   EXPECT_EQ("125,0,125,0", transformer->GetHostInsets().ToString());
+}
+
+TEST_F(RootWindowTransformersTest, ShouldSetWindowSize) {
+  UpdateDisplay("800x600");
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+  aura::Window* root_window = root_windows[0];
+
+  // Rotate screen 90 degrees to "right".
+  // Will triger window_tree_host->SetRootWindowTransformer().
+  // The window size will be updated because there is no ongoing transform
+  // animation.
+  UpdateDisplay("800x600/r");
+  EXPECT_EQ(root_window->GetTargetBounds(), gfx::Rect(0, 0, 600, 800));
+}
+
+TEST_F(RootWindowTransformersTest,
+       ShouldNotSetWindowSizeWithEnqueuedTransformAnimation) {
+  UpdateDisplay("800x600");
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+  aura::Window* root_window = root_windows[0];
+
+  ui::ScopedAnimationDurationScaleMode test_duration(
+      ui::ScopedAnimationDurationScaleMode::SLOW_DURATION);
+  ui::Layer* layer = root_window->layer();
+  {
+    ui::ScopedLayerAnimationSettings settings(layer->GetAnimator());
+    settings.SetTransitionDuration(base::TimeDelta::FromMilliseconds(100));
+    gfx::Transform transform;
+    transform.Translate(100, 200);
+    layer->SetTransform(transform);
+  }
+  layer->GetAnimator()->set_preemption_strategy(
+      ui::LayerAnimator::ENQUEUE_NEW_ANIMATION);
+
+  // Rotate screen 90 degrees to "right".
+  // Will triger window_tree_host->SetRootWindowTransformer().
+  // The window size will not be updated because there is ongoing transform
+  // animation.
+  UpdateDisplay("800x600/r");
+  EXPECT_NE(root_window->GetTargetBounds(), gfx::Rect(0, 0, 600, 800));
+}
+
+TEST_F(RootWindowTransformersTest,
+       ShouldSetWindowSizeWithStoppedTransformAnimation) {
+  UpdateDisplay("800x600");
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+  aura::Window* root_window = root_windows[0];
+
+  ui::ScopedAnimationDurationScaleMode test_duration(
+      ui::ScopedAnimationDurationScaleMode::SLOW_DURATION);
+  ui::Layer* layer = root_window->layer();
+  {
+    ui::ScopedLayerAnimationSettings settings(layer->GetAnimator());
+    settings.SetTransitionDuration(base::TimeDelta::FromMilliseconds(100));
+    gfx::Transform transform;
+    transform.Translate(100, 200);
+    layer->SetTransform(transform);
+  }
+  layer->GetAnimator()->set_preemption_strategy(
+      ui::LayerAnimator::IMMEDIATELY_SET_NEW_TARGET);
+
+  // Rotate screen 90 degrees to "right".
+  // Will triger window_tree_host->SetRootWindowTransformer().
+  // The window size will be updated because there is no ongoing transform
+  // animation.
+  UpdateDisplay("800x600/r");
+  EXPECT_EQ(root_window->GetTargetBounds(), gfx::Rect(0, 0, 600, 800));
+}
+
+TEST_F(RootWindowTransformersTest, ShouldSetWindowSizeDuringOpacityAnimation) {
+  UpdateDisplay("800x600");
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
+  aura::Window* root_window = root_windows[0];
+
+  ui::ScopedAnimationDurationScaleMode test_duration(
+      ui::ScopedAnimationDurationScaleMode::SLOW_DURATION);
+  {
+    ui::Layer* layer = root_window->layer();
+    ui::ScopedLayerAnimationSettings settings(layer->GetAnimator());
+    settings.SetTransitionDuration(base::TimeDelta::FromMilliseconds(100));
+    layer->SetOpacity(0.1f);
+  }
+
+  // Rotate screen 90 degrees to "right".
+  // Will triger window_tree_host->SetRootWindowTransformer().
+  // The window size will be updated because there is no ongoing transform
+  // animation, even there is an opacity animation.
+  UpdateDisplay("800x600/r");
+  EXPECT_EQ(root_window->GetTargetBounds(), gfx::Rect(0, 0, 600, 800));
 }
 
 }  // namespace ash

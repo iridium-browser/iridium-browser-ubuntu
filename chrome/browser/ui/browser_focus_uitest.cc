@@ -14,6 +14,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -47,10 +48,6 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
 
 using content::RenderViewHost;
 using content::WebContents;
@@ -92,10 +89,6 @@ class BrowserFocusTest : public InProcessBrowserTest {
 #if defined(OS_MACOSX)
     // TODO(msw): Mac requires ui::VKEY_BACKTAB for reverse cycling. Sigh...
     key = reverse ? ui::VKEY_BACKTAB : ui::VKEY_TAB;
-#elif defined(OS_WIN)
-    // This loop times out on Windows XP with no output. http://crbug.com/376635
-    if (base::win::GetVersion() < base::win::VERSION_VISTA)
-      return;
 #endif
 
     // Loop through the focus chain twice for good measure.
@@ -179,6 +172,7 @@ class BrowserFocusTest : public InProcessBrowserTest {
 class TestInterstitialPage : public content::InterstitialPageDelegate {
  public:
   explicit TestInterstitialPage(WebContents* tab) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     base::FilePath file_path;
     bool success = PathService::Get(chrome::DIR_TEST_DATA, &file_path);
     EXPECT_TRUE(success);

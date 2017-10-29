@@ -12,8 +12,9 @@ with the prefix "UserAct".
 from __future__ import print_function
 
 import inspect
-import pprint
+import json
 import re
+import sys
 
 from chromite.lib import config_lib
 from chromite.lib import constants
@@ -111,7 +112,7 @@ def GetApprovalSummary(_opts, cls):
       if not cat in approvs:
         # Ignore the extended categories in the summary view.
         continue
-      elif approvs[cat] is '':
+      elif approvs[cat] == '':
         approvs[cat] = val
       elif val < 0:
         approvs[cat] = min(approvs[cat], val)
@@ -120,24 +121,16 @@ def GetApprovalSummary(_opts, cls):
   return approvs
 
 
-def PrintCl(opts, cls, lims, show_approvals=True):
+def PrettyPrintCl(opts, cl, lims=None, show_approvals=True):
   """Pretty print a single result"""
-  if opts.raw:
-    # Special case internal Chrome GoB as that is what most devs use.
-    # They can always redirect the list elsewhere via the -g option.
-    if opts.gob == site_config.params.INTERNAL_GOB_INSTANCE:
-      print(site_config.params.INTERNAL_CHANGE_PREFIX, end='')
-    print(cls['number'])
-    return
-
-  if not lims:
+  if lims is None:
     lims = {'url': 0, 'project': 0}
 
   status = ''
   if show_approvals and not opts.verbose:
-    approvs = GetApprovalSummary(opts, cls)
+    approvs = GetApprovalSummary(opts, cl)
     for cat in GERRIT_SUMMARY_CATS:
-      if approvs[cat] is '':
+      if approvs[cat] in ('', 0):
         functor = lambda x: x
       elif approvs[cat] < 0:
         functor = red
@@ -145,16 +138,38 @@ def PrintCl(opts, cls, lims, show_approvals=True):
         functor = green
       status += functor('%s:%2s ' % (cat, approvs[cat]))
 
-  print('%s %s%-*s %s' % (blue('%-*s' % (lims['url'], cls['url'])), status,
-                          lims['project'], cls['project'], cls['subject']))
+  print('%s %s%-*s %s' % (blue('%-*s' % (lims['url'], cl['url'])), status,
+                          lims['project'], cl['project'], cl['subject']))
 
   if show_approvals and opts.verbose:
-    for approver in cls['currentPatchSet'].get('approvals', []):
+    for approver in cl['currentPatchSet'].get('approvals', []):
       functor = red if int(approver['value']) < 0 else green
       n = functor('%2s' % approver['value'])
       t = GERRIT_APPROVAL_MAP.get(approver['type'], [approver['type'],
                                                      approver['type']])[1]
       print('      %s %s %s' % (n, t, approver['by']['email']))
+
+
+def PrintCls(opts, cls, lims=None, show_approvals=True):
+  """Print all results based on the requested format."""
+  if opts.raw:
+    pfx = ''
+    # Special case internal Chrome GoB as that is what most devs use.
+    # They can always redirect the list elsewhere via the -g option.
+    if opts.gob == site_config.params.INTERNAL_GOB_INSTANCE:
+      pfx = site_config.params.INTERNAL_CHANGE_PREFIX
+    for cl in cls:
+      print('%s%s' % (pfx, cl['number']))
+
+  elif opts.json:
+    json.dump(cls, sys.stdout)
+
+  else:
+    if lims is None:
+      lims = limits(cls)
+
+    for cl in cls:
+      PrettyPrintCl(opts, cl, lims=lims, show_approvals=show_approvals)
 
 
 def _MyUserInfo():
@@ -188,13 +203,15 @@ def FilteredQuery(opts, query):
     # Strip off common leading names since the result is still
     # unique over the whole tree.
     if not opts.verbose:
-      for pfx in ('chromeos', 'chromiumos', 'overlays', 'platform',
+      for pfx in ('chromeos', 'chromiumos', 'external', 'overlays', 'platform',
                   'third_party'):
         if cl['project'].startswith('%s/' % pfx):
           cl['project'] = cl['project'][len(pfx) + 1:]
 
     ret.append(cl)
 
+  if opts.sort == 'unsorted':
+    return ret
   if opts.sort == 'number':
     key = lambda x: int(x[opts.sort])
   else:
@@ -227,17 +244,13 @@ def UserActTodo(opts):
   emails = _MyUserInfo()
   cls = FilteredQuery(opts, 'reviewer:self status:open NOT owner:self')
   cls = [x for x in cls if not IsApprover(x, emails)]
-  lims = limits(cls)
-  for cl in cls:
-    PrintCl(opts, cl, lims)
+  PrintCls(opts, cls)
 
 
 def UserActSearch(opts, query):
   """List CLs matching the Gerrit <search query>"""
   cls = FilteredQuery(opts, query)
-  lims = limits(cls)
-  for cl in cls:
-    PrintCl(opts, cl, lims)
+  PrintCls(opts, cls)
 
 
 def UserActMine(opts):
@@ -297,19 +310,19 @@ def UserActDeps(opts, query):
       visited_key=lambda cl: cl.gerrit_number)
 
   transitives_raw = [cl.patch_dict for cl in transitives]
-  lims = limits(transitives_raw)
-  for cl in transitives_raw:
-    PrintCl(opts, cl, lims)
+  PrintCls(opts, transitives_raw)
 
 
 def UserActInspect(opts, *args):
   """Inspect CL number <n> [n ...]"""
+  cls = []
   for arg in args:
     cl = FilteredQuery(opts, arg)
     if cl:
-      PrintCl(opts, cl[0], None)
+      cls.extend(cl)
     else:
-      print('no results found for CL %s' % arg)
+      logging.warning('no results found for CL %s', arg)
+  PrintCls(opts, cls)
 
 
 def UserActReview(opts, *args):
@@ -331,7 +344,7 @@ UserActVerify.arg_min = 2
 
 
 def UserActReady(opts, *args):
-  """Mark CL <n> [n ...] with ready status <0,1,2>"""
+  """Mark CL <n> [n ...] with ready status <0,1>"""
   num = args[-1]
   for arg in args[:-1]:
     helper, cl = GetGerrit(opts, arg)
@@ -394,6 +407,12 @@ def UserActReviewers(opts, cl, *args):
                         dryrun=opts.dryrun)
 
 
+def UserActAssign(opts, cl, assignee):
+  """Set assignee for CL <n>"""
+  helper, cl = GetGerrit(opts, cl)
+  helper.SetAssignee(cl, assignee, dryrun=opts.dryrun)
+
+
 def UserActMessage(opts, cl, message):
   """Add a message to CL <n>"""
   helper, cl = GetGerrit(opts, cl)
@@ -407,6 +426,20 @@ def UserActTopic(opts, topic, *args):
     helper.SetTopic(arg, topic, dryrun=opts.dryrun)
 
 
+def UserActSethashtags(opts, cl, *args):
+  """Add/remove hashtags for CL <n> (prepend with '~' to remove)"""
+  hashtags = args
+  add = []
+  remove = []
+  for hashtag in hashtags:
+    if hashtag.startswith('~'):
+      remove.append(hashtag[1:])
+    else:
+      add.append(hashtag)
+  helper, cl = GetGerrit(opts, cl)
+  helper.SetHashtags(cl, add, remove, dryrun=opts.dryrun)
+
+
 def UserActDeletedraft(opts, *args):
   """Delete draft CL <n> [n ...]"""
   for arg in args:
@@ -417,7 +450,12 @@ def UserActDeletedraft(opts, *args):
 def UserActAccount(opts):
   """Get user account information."""
   helper, _ = GetGerrit(opts)
-  pprint.PrettyPrinter().pprint(helper.GetAccount())
+  acct = helper.GetAccount()
+  if opts.json:
+    json.dump(acct, sys.stdout)
+  else:
+    print('account_id:%i  %s <%s>' %
+          (acct['_account_id'], acct['name'], acct['email']))
 
 
 def main(argv):
@@ -447,6 +485,7 @@ Scripting:
 ready.
   $ gerrit ready `gerrit --raw -i mine` 1   # Mark *ALL* of your internal CLs \
 ready.
+  $ gerrit --json search 'assignee:self'    # Dump all pending CLs in JSON.
 
 Actions:"""
   indent = max([len(x) - len(act_pfx) for x in actions])
@@ -468,9 +507,12 @@ Actions:"""
                       help=('Gerrit (on borg) instance to query (default: %s)' %
                             (site_config.params.EXTERNAL_GOB_INSTANCE)))
   parser.add_argument('--sort', default='number',
-                      help='Key to sort on (number, project)')
+                      help='Key to sort on (number, project); use "unsorted" '
+                           'to disable')
   parser.add_argument('--raw', default=False, action='store_true',
                       help='Return raw results (suitable for scripting)')
+  parser.add_argument('--json', default=False, action='store_true',
+                      help='Return results in JSON (suitable for scripting)')
   parser.add_argument('-n', '--dry-run', default=False, action='store_true',
                       dest='dryrun',
                       help='Show what would be done, but do not make changes')

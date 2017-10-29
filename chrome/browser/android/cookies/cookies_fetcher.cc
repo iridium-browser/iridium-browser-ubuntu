@@ -151,17 +151,16 @@ static void RestoreCookies(JNIEnv* env,
   scoped_refptr<net::URLRequestContextGetter> getter(
       profile->GetRequestContext());
 
-  net::CanonicalCookie cookie(*net::CanonicalCookie::Create(
+  net::CanonicalCookie cookie(
       base::android::ConvertJavaStringToUTF8(env, name),
       base::android::ConvertJavaStringToUTF8(env, value),
       base::android::ConvertJavaStringToUTF8(env, domain),
       base::android::ConvertJavaStringToUTF8(env, path),
       base::Time::FromInternalValue(creation),
       base::Time::FromInternalValue(expiration),
-      base::Time::FromInternalValue(last_access),
-      secure, httponly,
+      base::Time::FromInternalValue(last_access), secure, httponly,
       static_cast<net::CookieSameSite>(same_site),
-      static_cast<net::CookiePriority>(priority)));
+      static_cast<net::CookiePriority>(priority));
 
   // The rest must be done from the IO thread.
   content::BrowserThread::PostTask(
@@ -173,9 +172,4 @@ static void RestoreCookies(JNIEnv* env,
 // JNI functions
 static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   return reinterpret_cast<intptr_t>(new CookiesFetcher(env, obj, 0));
-}
-
-// Register native methods
-bool RegisterCookiesFetcher(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }

@@ -4,8 +4,8 @@
 
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 
-#include "ash/common/system/tray/system_tray.h"
 #include "ash/shell.h"
+#include "ash/system/tray/system_tray.h"
 #include "base/bind.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
@@ -50,9 +50,8 @@ void UserAddingScreenImpl::Start() {
   CHECK(!IsRunning());
   gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size()));
   display_host_ = new chromeos::LoginDisplayHostImpl(screen_bounds);
-  display_host_->StartUserAdding(
-      base::Bind(&UserAddingScreenImpl::OnDisplayHostCompletion,
-                 base::Unretained(this)));
+  display_host_->StartUserAdding(base::BindOnce(
+      &UserAddingScreenImpl::OnDisplayHostCompletion, base::Unretained(this)));
 
   session_manager::SessionManager::Get()->SetSessionState(
       session_manager::SessionState::LOGIN_SECONDARY);
@@ -64,7 +63,7 @@ void UserAddingScreenImpl::Cancel() {
   CHECK(IsRunning());
 
   // Make sure that system tray is enabled after this flow.
-  ash::Shell::GetInstance()->GetPrimarySystemTray()->SetEnabled(true);
+  ash::Shell::Get()->GetPrimarySystemTray()->SetEnabled(true);
   display_host_->CancelUserAdding();
 
   // Reset wallpaper if cancel adding user from multiple user sign in page.

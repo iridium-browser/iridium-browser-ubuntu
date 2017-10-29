@@ -9,12 +9,14 @@
 #include "base/base64url.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_challenge_wrapper.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager.h"
@@ -22,11 +24,15 @@
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/signin/easy_unlock_app_manager.h"
 #include "chrome/browser/signin/easy_unlock_metrics.h"
+#include "chrome/common/pref_names.h"
 #include "chromeos/login/auth/user_context.h"
 #include "chromeos/tpm/tpm_token_loader.h"
 #include "components/cryptauth/remote_device.h"
 #include "components/proximity_auth/logging/logging.h"
+#include "components/proximity_auth/proximity_auth_local_state_pref_manager.h"
 #include "components/proximity_auth/switches.h"
+
+using proximity_auth::ScreenlockState;
 
 namespace {
 
@@ -75,7 +81,7 @@ void RetryDataLoadOnError(
 
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&LoadDataForUser, account_id, next_backoff_ms, callback),
+      base::BindOnce(&LoadDataForUser, account_id, next_backoff_ms, callback),
       base::TimeDelta::FromMilliseconds(next_backoff_ms));
 }
 
@@ -91,6 +97,60 @@ void LoadDataForUser(
   key_manager->GetDeviceDataList(
       chromeos::UserContext(account_id),
       base::Bind(&RetryDataLoadOnError, account_id, backoff_ms, callback));
+}
+
+// Deserializes a vector of BeaconSeeds. If an error occurs, an empty vector
+// will be returned. Note: The logic to serialize BeaconSeeds lives in
+// EasyUnlockServiceRegular.
+// Note: The serialization of device data inside a user session is different
+// than outside the user session (sign-in). RemoteDevices are serialized as
+// protocol buffers inside the user session, but we have a custom serialization
+// scheme for sign-in due to slightly different data requirements.
+std::vector<cryptauth::BeaconSeed> DeserializeBeaconSeeds(
+    const std::string& serialized_beacon_seeds) {
+  std::vector<cryptauth::BeaconSeed> beacon_seeds;
+
+  JSONStringValueDeserializer deserializer(serialized_beacon_seeds);
+  std::string error;
+  std::unique_ptr<base::Value> deserialized_value =
+      deserializer.Deserialize(nullptr, &error);
+  if (!deserialized_value) {
+    PA_LOG(ERROR) << "Unable to deserialize BeaconSeeds: " << error;
+    return beacon_seeds;
+  }
+
+  base::ListValue* beacon_seed_list;
+  if (!deserialized_value->GetAsList(&beacon_seed_list)) {
+    PA_LOG(ERROR) << "Deserialized BeaconSeeds value is not list.";
+    return beacon_seeds;
+  }
+
+  for (size_t i = 0; i < beacon_seed_list->GetSize(); ++i) {
+    std::string b64_beacon_seed;
+    if (!beacon_seed_list->GetString(i, &b64_beacon_seed)) {
+      PA_LOG(ERROR) << "Expected Base64 BeaconSeed.";
+      continue;
+    }
+
+    std::string proto_serialized_beacon_seed;
+    if (!base::Base64UrlDecode(b64_beacon_seed,
+                               base::Base64UrlDecodePolicy::REQUIRE_PADDING,
+                               &proto_serialized_beacon_seed)) {
+      PA_LOG(ERROR) << "Unable to decode BeaconSeed.";
+      continue;
+    }
+
+    cryptauth::BeaconSeed beacon_seed;
+    if (!beacon_seed.ParseFromString(proto_serialized_beacon_seed)) {
+      PA_LOG(ERROR) << "Unable to parse BeaconSeed proto.";
+      continue;
+    }
+
+    beacon_seeds.push_back(beacon_seed);
+  }
+
+  PA_LOG(INFO) << "Deserialized " << beacon_seeds.size() << " BeaconSeeds.";
+  return beacon_seeds;
 }
 
 }  // namespace
@@ -145,6 +205,11 @@ void EasyUnlockServiceSignin::WrapChallengeForUserAndDevice(
   PA_LOG(ERROR) << "Unable to find device record for "
                 << account_id.Serialize();
   callback.Run(std::string());
+}
+
+proximity_auth::ProximityAuthPrefManager*
+EasyUnlockServiceSignin::GetProximityAuthPrefManager() {
+  return pref_manager_.get();
 }
 
 EasyUnlockService::Type EasyUnlockServiceSignin::GetType() const {
@@ -268,6 +333,9 @@ void EasyUnlockServiceSignin::InitializeInternal() {
 
   service_active_ = true;
 
+  pref_manager_.reset(new proximity_auth::ProximityAuthLocalStatePrefManager(
+      g_browser_process->local_state()));
+
   chromeos::LoginState::Get()->AddObserver(this);
   proximity_auth::ScreenlockBridge* screenlock_bridge =
       proximity_auth::ScreenlockBridge::Get();
@@ -289,7 +357,24 @@ void EasyUnlockServiceSignin::ShutdownInternal() {
 
 bool EasyUnlockServiceSignin::IsAllowedInternal() const {
   return service_active_ && account_id_.is_valid() &&
-         !chromeos::LoginState::Get()->IsUserLoggedIn();
+         !chromeos::LoginState::Get()->IsUserLoggedIn() &&
+         (pref_manager_ && pref_manager_->IsEasyUnlockAllowed());
+}
+
+bool EasyUnlockServiceSignin::IsEnabled() const {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          proximity_auth::switches::kDisableBluetoothLowEnergyDiscovery)) {
+    // In EasyUnlock v1, we used the presence of the hardlock state as an
+    // indicator of whether EasyUnlock is enabled.
+    EasyUnlockScreenlockStateHandler::HardlockState hardlock_state;
+    return GetPersistedHardlockState(&hardlock_state);
+  }
+
+  return pref_manager_->IsEasyUnlockEnabled();
+}
+
+bool EasyUnlockServiceSignin::IsChromeOSLoginEnabled() const {
+  return pref_manager_ && pref_manager_->IsChromeOSLoginEnabled();
 }
 
 void EasyUnlockServiceSignin::OnWillFinalizeUnlock(bool success) {
@@ -302,6 +387,16 @@ void EasyUnlockServiceSignin::OnSuspendDoneInternal() {
   // Ignored.
 }
 
+void EasyUnlockServiceSignin::OnBluetoothAdapterPresentChanged() {
+  // Because the BluetoothAdapter state change may change whether EasyUnlock is
+  // allowed, we want to treat the user pod as though it were focused for the
+  // first time. This allows the correct flow (loading cryptohome keys,
+  // initializing ProximityAuthSystem, etc.) to take place.
+  AccountId current_account_id = account_id_;
+  account_id_ = AccountId();
+  OnFocusedUserChanged(current_account_id);
+}
+
 void EasyUnlockServiceSignin::OnScreenDidLock(
     proximity_auth::ScreenlockBridge::LockHandler::ScreenType screen_type) {
   // In production code, the screen type should always be the signin screen; but
@@ -311,7 +406,7 @@ void EasyUnlockServiceSignin::OnScreenDidLock(
     return;
 
   // Update initial UI is when the account picker on login screen is ready.
-  ShowInitialUserState();
+  ShowInitialUserPodState();
   user_pod_last_focused_timestamp_ = base::TimeTicks::Now();
 }
 
@@ -334,15 +429,28 @@ void EasyUnlockServiceSignin::OnFocusedUserChanged(
     return;
 
   // Setting or clearing the account_id may changed |IsAllowed| value, so in
-  // these
-  // cases update the app state. Otherwise, it's enough to notify the app the
-  // user data has been updated.
+  // these cases update the app state. Otherwise, it's enough to notify the app
+  // the user data has been updated.
   const bool should_update_app_state = (account_id_ != account_id);
   account_id_ = account_id;
+  pref_manager_->SetActiveUser(account_id);
   user_pod_last_focused_timestamp_ = base::TimeTicks::Now();
-
+  SetProximityAuthDevices(account_id_, cryptauth::RemoteDeviceList());
   ResetScreenlockState();
-  ShowInitialUserState();
+
+  pref_manager_->SetActiveUser(account_id);
+  if (!IsAllowed() || !IsEnabled())
+    return;
+
+  ShowInitialUserPodState();
+
+  // If there is a hardlock, then there is no point in loading the devices.
+  EasyUnlockScreenlockStateHandler::HardlockState hardlock_state;
+  if (GetPersistedHardlockState(&hardlock_state) &&
+      hardlock_state != EasyUnlockScreenlockStateHandler::NO_HARDLOCK) {
+    PA_LOG(INFO) << "Hardlock present, skipping remaining login flow.";
+    return;
+  }
 
   if (should_update_app_state) {
     UpdateAppState();
@@ -355,11 +463,7 @@ void EasyUnlockServiceSignin::OnFocusedUserChanged(
   // Start loading TPM system token.
   // The system token will be needed to sign a nonce using TPM private key
   // during the sign-in protocol.
-  EasyUnlockScreenlockStateHandler::HardlockState hardlock_state;
-  if (GetPersistedHardlockState(&hardlock_state) &&
-      hardlock_state != EasyUnlockScreenlockStateHandler::NO_PAIRING) {
-    chromeos::TPMTokenLoader::Get()->EnsureStarted();
-  }
+  chromeos::TPMTokenLoader::Get()->EnsureStarted();
 }
 
 void EasyUnlockServiceSignin::LoggedInStateChanged() {
@@ -383,7 +487,7 @@ void EasyUnlockServiceSignin::LoadCurrentUserDataIfNeeded() {
 
   UserData* data = user_data_[account_id_].get();
 
-  if (data->state != USER_DATA_STATE_INITIAL)
+  if (data->state == USER_DATA_STATE_LOADING)
     return;
   data->state = USER_DATA_STATE_LOADING;
 
@@ -425,6 +529,12 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
   if (account_id == account_id_)
     NotifyUserUpdated();
 
+  // The code below delegates EasyUnlock processing to the native
+  // implementation. Skip if the app is used instead.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          proximity_auth::switches::kDisableBluetoothLowEnergyDiscovery))
+    return;
+
   if (devices.empty())
     return;
 
@@ -436,17 +546,25 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
                                &decoded_public_key) ||
         !base::Base64UrlDecode(device.psk,
                                base::Base64UrlDecodePolicy::REQUIRE_PADDING,
-                               &decoded_psk) ||
-        !base::Base64UrlDecode(device.challenge,
-                               base::Base64UrlDecodePolicy::REQUIRE_PADDING,
-                               &decoded_challenge)) {
-      PA_LOG(ERROR) << "Unable base64url decode stored remote device: "
-                    << device.public_key;
+                               &decoded_psk)) {
+      PA_LOG(ERROR) << "Unable to decode stored remote device:\n"
+                    << "  public_key: " << device.public_key << "\n"
+                    << "  psk: " << device.psk;
       continue;
     }
     cryptauth::RemoteDevice remote_device(
         account_id.GetUserEmail(), std::string(), decoded_public_key,
         device.bluetooth_address, decoded_psk, decoded_challenge);
+
+    if (!device.serialized_beacon_seeds.empty()) {
+      PA_LOG(INFO) << "Deserializing BeaconSeeds: "
+                   << device.serialized_beacon_seeds;
+      remote_device.LoadBeaconSeeds(
+          DeserializeBeaconSeeds(device.serialized_beacon_seeds));
+    } else {
+      PA_LOG(WARNING) << "No BeaconSeeds were loaded.";
+    }
+
     remote_devices.push_back(remote_device);
     PA_LOG(INFO) << "Loaded Remote Device:\n"
                  << "  user id: " << remote_device.user_id << "\n"
@@ -469,4 +587,23 @@ const EasyUnlockServiceSignin::UserData*
   if (it->second->state != USER_DATA_STATE_LOADED)
     return nullptr;
   return it->second.get();
+}
+
+void EasyUnlockServiceSignin::ShowInitialUserPodState() {
+  if (!IsAllowed() || !IsEnabled())
+    return;
+
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          proximity_auth::switches::kDisableBluetoothLowEnergyDiscovery) &&
+      !pref_manager_->IsChromeOSLoginEnabled()) {
+    // Show a hardlock state if the user has not enabled the login flow.
+    SetHardlockStateForUser(
+        account_id_,
+        EasyUnlockScreenlockStateHandler::PASSWORD_REQUIRED_FOR_LOGIN);
+  } else {
+    // This UI is simply a placeholder until the RemoteDevices are loaded from
+    // cryptohome and the ProximityAuthSystem is started. Hardlock states are
+    // automatically taken into account.
+    UpdateScreenlockState(ScreenlockState::BLUETOOTH_CONNECTING);
+  }
 }

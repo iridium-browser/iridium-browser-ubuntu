@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
@@ -44,7 +45,7 @@ void URLListToPref(const base::ListValue* url_list, SessionStartupPref* pref) {
 // static
 void SessionStartupPref::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-#if defined(OS_IOS) || defined(OS_ANDROID)
+#if defined(OS_ANDROID)
   uint32_t flags = PrefRegistry::NO_REGISTRATION_FLAGS;
 #else
   uint32_t flags = user_prefs::PrefRegistrySyncable::SYNCABLE_PREF;
@@ -90,7 +91,7 @@ void SessionStartupPref::SetStartupPref(PrefService* prefs,
     url_pref_list->Clear();
     for (size_t i = 0; i < pref.urls.size(); ++i) {
       url_pref_list->Set(static_cast<int>(i),
-                         new base::StringValue(pref.urls[i].spec()));
+                         base::MakeUnique<base::Value>(pref.urls[i].spec()));
     }
   }
 }
@@ -98,7 +99,12 @@ void SessionStartupPref::SetStartupPref(PrefService* prefs,
 // static
 SessionStartupPref SessionStartupPref::GetStartupPref(Profile* profile) {
   DCHECK(profile);
-  return GetStartupPref(profile->GetPrefs());
+
+  // Guest sessions should not store any state, therefore they should never
+  // trigger a restore during startup.
+  return profile->IsGuestSession()
+             ? SessionStartupPref(SessionStartupPref::DEFAULT)
+             : GetStartupPref(profile->GetPrefs());
 }
 
 // static

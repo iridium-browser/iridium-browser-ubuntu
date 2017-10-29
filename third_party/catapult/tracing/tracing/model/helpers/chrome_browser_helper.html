@@ -18,8 +18,9 @@ tr.exportTo('tr.model.helpers', function() {
   function ChromeBrowserHelper(modelHelper, process) {
     tr.model.helpers.ChromeProcessHelper.call(this, modelHelper, process);
     this.mainThread_ = process.findAtMostOneThreadNamed('CrBrowserMain');
-    if (!process.name)
+    if (!process.name) {
       process.name = ChromeBrowserHelper.PROCESS_NAME;
+    }
   }
 
   ChromeBrowserHelper.PROCESS_NAME = 'Browser';
@@ -34,7 +35,7 @@ tr.exportTo('tr.model.helpers', function() {
     // TODO(petrcermak): Pass browser name in a metadata event (see
     // crbug.com/605088).
     get browserName() {
-      var hasInProcessRendererThread = this.process.findAllThreadsNamed(
+      const hasInProcessRendererThread = this.process.findAllThreadsNamed(
           'Chrome_InProcRendererThread').length > 0;
       return hasInProcessRendererThread ? 'webview' : 'chrome';
     },
@@ -47,7 +48,7 @@ tr.exportTo('tr.model.helpers', function() {
       return this.modelHelper.rendererHelpers;
     },
 
-    getLoadingEventsInRange: function(rangeOfInterest) {
+    getLoadingEventsInRange(rangeOfInterest) {
       return this.getAllAsyncSlicesMatching(function(slice) {
         return slice.title.indexOf('WebContentsImpl Loading') === 0 &&
             rangeOfInterest.intersectsExplicitRangeInclusive(
@@ -55,7 +56,7 @@ tr.exportTo('tr.model.helpers', function() {
       });
     },
 
-    getCommitProvisionalLoadEventsInRange: function(rangeOfInterest) {
+    getCommitProvisionalLoadEventsInRange(rangeOfInterest) {
       return this.getAllAsyncSlicesMatching(function(slice) {
         return slice.title === 'RenderFrameImpl::didCommitProvisionalLoad' &&
             rangeOfInterest.intersectsExplicitRangeInclusive(
@@ -64,19 +65,20 @@ tr.exportTo('tr.model.helpers', function() {
     },
 
     get hasLatencyEvents() {
-      var hasLatency = false;
-      for (var thread of this.modelHelper.model.getAllThreads())
-        for (var event of thread.getDescendantEvents()) {
-          if (!event.isTopLevel)
+      let hasLatency = false;
+      for (const thread of this.modelHelper.model.getAllThreads()) {
+        for (const event of thread.getDescendantEvents()) {
+          if (!event.isTopLevel) continue;
+          if (!(event instanceof tr.e.cc.InputLatencyAsyncSlice)) {
             continue;
-          if (!(event instanceof tr.e.cc.InputLatencyAsyncSlice))
-            continue;
+          }
           hasLatency = true;
         }
+      }
       return hasLatency;
     },
 
-    getLatencyEventsInRange: function(rangeOfInterest) {
+    getLatencyEventsInRange(rangeOfInterest) {
       return this.getAllAsyncSlicesMatching(function(slice) {
         return (slice.title.indexOf('InputLatency') === 0) &&
             rangeOfInterest.intersectsExplicitRangeInclusive(
@@ -84,46 +86,26 @@ tr.exportTo('tr.model.helpers', function() {
       });
     },
 
-    getAllAsyncSlicesMatching: function(pred, opt_this) {
-      var events = [];
+    getAllAsyncSlicesMatching(pred, opt_this) {
+      const events = [];
       this.iterAllThreads(function(thread) {
-        for (var slice of thread.getDescendantEvents())
-          if (pred.call(opt_this, slice))
+        for (const slice of thread.getDescendantEvents()) {
+          if (pred.call(opt_this, slice)) {
             events.push(slice);
+          }
+        }
       });
       return events;
     },
 
-    getAllNetworkEventsInRange: function(rangeOfInterest) {
-      var networkEvents = [];
-      this.modelHelper.model.getAllThreads().forEach(function(thread) {
-        thread.asyncSliceGroup.slices.forEach(function(slice) {
-          var match = false;
-          if (slice.category === 'net' ||  // old-style URLRequest/Resource
-              slice.category === 'disabled-by-default-netlog' ||
-              slice.category === 'netlog') {
-            match = true;
-          }
-
-          if (!match)
-            return;
-
-          if (rangeOfInterest.intersectsExplicitRangeInclusive(
-              slice.start, slice.end))
-            networkEvents.push(slice);
-        });
-      });
-      return networkEvents;
-    },
-
-    iterAllThreads: function(func, opt_this) {
-      for (var thread of Object.values(this.process.threads)) {
+    iterAllThreads(func, opt_this) {
+      for (const thread of Object.values(this.process.threads)) {
         func.call(opt_this, thread);
       }
 
-      for (var rendererHelper of Object.values(this.rendererHelpers)) {
-        var rendererProcess = rendererHelper.process;
-        for (var thread of Object.values(rendererProcess.threads)) {
+      for (const rendererHelper of Object.values(this.rendererHelpers)) {
+        const rendererProcess = rendererHelper.process;
+        for (const thread of Object.values(rendererProcess.threads)) {
           func.call(opt_this, thread);
         }
       }

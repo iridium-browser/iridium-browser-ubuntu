@@ -15,6 +15,7 @@ extern "C" {
 #include "base/logging.h"
 #include "base/process/kill.h"
 #include "content/common/sandbox_mac.h"
+#include "content/public/common/sandbox_type.h"
 #include "content/test/test_content_client.h"
 #include "testing/multiprocess_func_list.h"
 
@@ -56,15 +57,17 @@ bool MacSandboxTest::RunTestInAllSandboxTypes(const char* test_name,
   for(int i = static_cast<int>(SANDBOX_TYPE_FIRST_TYPE);
       i < SANDBOX_TYPE_AFTER_LAST_TYPE;
       ++i) {
-    if (!RunTestInSandbox(static_cast<SandboxType>(i),
-            test_name, test_data)) {
-      LOG(ERROR) << "Sandboxed test (" << test_name << ")" <<
-          "Failed in sandbox type " << i <<
-          "user data: (" << test_data << ")";
+    if (IsUnsandboxedSandboxType(static_cast<SandboxType>(i)))
+      continue;
+
+    if (!RunTestInSandbox(static_cast<SandboxType>(i), test_name, test_data)) {
+      LOG(ERROR) << "Sandboxed test (" << test_name << ")"
+                 << "Failed in sandbox type " << i << "user data: ("
+                 << test_data << ")";
       return false;
     }
   }
- return true;
+  return true;
 }
 
 bool MacSandboxTest::RunTestInSandbox(SandboxType sandbox_type,
@@ -77,13 +80,13 @@ bool MacSandboxTest::RunTestInSandbox(SandboxType sandbox_type,
   if (test_data)
     setenv(kTestDataKey, test_data, 1);
 
-  base::Process child_process = SpawnChild("mac_sandbox_test_runner");
-  if (!child_process.IsValid()) {
+  base::SpawnChildResult spawn_child = SpawnChild("mac_sandbox_test_runner");
+  if (!spawn_child.process.IsValid()) {
     LOG(WARNING) << "SpawnChild failed";
     return false;
   }
   int code = -1;
-  if (!child_process.WaitForExit(&code)) {
+  if (!spawn_child.process.WaitForExit(&code)) {
     LOG(WARNING) << "Process::WaitForExit failed";
     return false;
   }

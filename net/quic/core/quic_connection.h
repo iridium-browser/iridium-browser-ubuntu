@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/strings/string_piece.h"
 #include "net/quic/core/crypto/quic_decrypter.h"
 #include "net/quic/core/quic_alarm.h"
 #include "net/quic/core/quic_alarm_factory.h"
@@ -45,6 +44,7 @@
 #include "net/quic/core/quic_types.h"
 #include "net/quic/platform/api/quic_export.h"
 #include "net/quic/platform/api/quic_socket_address.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
 
@@ -141,6 +141,12 @@ class QUIC_EXPORT_PRIVATE QuicConnectionVisitorInterface {
   // been done.
   virtual void PostProcessAfterData() = 0;
 
+  // Called when the connection sends ack after
+  // kMaxConsecutiveNonRetransmittablePackets consecutive not retransmittable
+  // packets sent. To instigate an ack from peer, a retransmittable frame needs
+  // to be added.
+  virtual void OnAckNeedsRetransmittableFrame() = 0;
+
   // Called to ask if the visitor wants to schedule write resumption as it both
   // has pending data to write, and is able to write (e.g. based on flow control
   // limits).
@@ -228,9 +234,6 @@ class QUIC_EXPORT_PRIVATE QuicConnectionDebugVisitor
 
   // Called when a BlockedFrame has been parsed.
   virtual void OnBlockedFrame(const QuicBlockedFrame& frame) {}
-
-  // Called when a PathCloseFrame has been parsed.
-  virtual void OnPathCloseFrame(const QuicPathCloseFrame& frame) {}
 
   // Called when a public reset packet has been received.
   virtual void OnPublicResetPacket(const QuicPublicResetPacket& packet) {}
@@ -348,7 +351,7 @@ class QUIC_EXPORT_PRIVATE QuicConnection
       QuicStreamId id,
       QuicIOVector iov,
       QuicStreamOffset offset,
-      bool fin,
+      StreamSendingState state,
       QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
 
   // Send a RST_STREAM frame to the peer.
@@ -361,9 +364,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
 
   // Send a WINDOW_UPDATE frame to the peer.
   virtual void SendWindowUpdate(QuicStreamId id, QuicStreamOffset byte_offset);
-
-  // Send a PATH_CLOSE frame to the peer.
-  virtual void SendPathClose(QuicPathId path_id);
 
   // Closes the connection.
   // |connection_close_behavior| determines whether or not a connection close
@@ -448,7 +448,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   bool OnGoAwayFrame(const QuicGoAwayFrame& frame) override;
   bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
   bool OnBlockedFrame(const QuicBlockedFrame& frame) override;
-  bool OnPathCloseFrame(const QuicPathCloseFrame& frame) override;
   void OnPacketComplete() override;
 
   // QuicConnectionCloseDelegateInterface
@@ -660,6 +659,12 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // the MTU discovery alarm.
   void DiscoverMtu();
 
+  // Sets the stream notifer on the SentPacketManager.
+  void SetStreamNotifier(StreamNotifierInterface* stream_notifier);
+
+  // Set data producer in framer.
+  void SetDataProducer(QuicStreamFrameDataProducer* data_producer);
+
   // Return the name of the cipher of the primary decrypter of the framer.
   const char* cipher_name() const { return framer_.decrypter()->cipher_name(); }
   // Return the id of the cipher of the primary decrypter of the framer.
@@ -676,7 +681,7 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   QuicConnectionHelperInterface* helper() { return helper_; }
   QuicAlarmFactory* alarm_factory() { return alarm_factory_; }
 
-  base::StringPiece GetCurrentPacket();
+  QuicStringPiece GetCurrentPacket();
 
   const QuicPacketGenerator& packet_generator() const {
     return packet_generator_;
@@ -740,6 +745,12 @@ class QUIC_EXPORT_PRIVATE QuicConnection
 
   // Returns true if the packet should be discarded and not sent.
   virtual bool ShouldDiscardPacket(const SerializedPacket& packet);
+
+  // Returns true if this connection allows self address change.
+  virtual bool AllowSelfAddressChange() const;
+
+  // Called when a self address change is observed.
+  virtual void OnSelfAddressChange() {}
 
  private:
   friend class test::QuicConnectionPeer;
@@ -925,6 +936,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // When true, close the QUIC connection after 5 RTOs.  Due to the min rto of
   // 200ms, this is over 5 seconds.
   bool close_connection_after_five_rtos_;
+  // When true, close the QUIC connection when there are no open streams after
+  // 3 consecutive RTOs.
+  bool close_connection_after_three_rtos_;
 
   QuicReceivedPacketManager received_packet_manager_;
 
@@ -1076,12 +1090,15 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // Whether a GoAway has been received.
   bool goaway_received_;
 
-  // If true, multipath is enabled for this connection.
-  bool multipath_enabled_;
-
   // Indicates whether a write error is encountered currently. This is used to
   // avoid infinite write errors.
   bool write_error_occured_;
+
+  // Indicates not to send or process stop waiting frames.
+  bool no_stop_waiting_frames_;
+
+  // Consecutive number of sent packets which have no retransmittable frames.
+  size_t consecutive_num_packets_with_no_retransmittable_frames_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnection);
 };

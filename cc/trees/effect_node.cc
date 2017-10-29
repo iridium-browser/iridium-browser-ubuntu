@@ -12,12 +12,12 @@ namespace cc {
 EffectNode::EffectNode()
     : id(EffectTree::kInvalidNodeId),
       parent_id(EffectTree::kInvalidNodeId),
-      owning_layer_id(Layer::INVALID_ID),
+      stable_id(INVALID_STABLE_ID),
       opacity(1.f),
       screen_space_opacity(1.f),
       blend_mode(SkBlendMode::kSrcOver),
       has_render_surface(false),
-      surface_is_clipped(false),
+      cache_render_surface(false),
       has_copy_request(false),
       hidden_by_backface_visibility(false),
       double_sided(false),
@@ -28,21 +28,22 @@ EffectNode::EffectNode()
       is_currently_animating_filter(false),
       is_currently_animating_opacity(false),
       effect_changed(false),
-      num_copy_requests_in_subtree(0),
-      has_unclipped_descendants(false),
+      subtree_has_copy_request(false),
       transform_id(0),
       clip_id(0),
       target_id(1),
-      mask_layer_id(-1) {}
+      mask_layer_id(Layer::INVALID_ID),
+      closest_ancestor_with_cached_render_surface_id(-1),
+      closest_ancestor_with_copy_request_id(-1) {}
 
 EffectNode::EffectNode(const EffectNode& other) = default;
 
 bool EffectNode::operator==(const EffectNode& other) const {
   return id == other.id && parent_id == other.parent_id &&
-         owning_layer_id == other.owning_layer_id && opacity == other.opacity &&
+         stable_id == other.stable_id && opacity == other.opacity &&
          screen_space_opacity == other.screen_space_opacity &&
          has_render_surface == other.has_render_surface &&
-         surface_is_clipped == other.surface_is_clipped &&
+         cache_render_surface == other.cache_render_surface &&
          has_copy_request == other.has_copy_request &&
          filters == other.filters &&
          background_filters == other.background_filters &&
@@ -61,18 +62,22 @@ bool EffectNode::operator==(const EffectNode& other) const {
          is_currently_animating_opacity ==
              other.is_currently_animating_opacity &&
          effect_changed == other.effect_changed &&
-         num_copy_requests_in_subtree == other.num_copy_requests_in_subtree &&
+         subtree_has_copy_request == other.subtree_has_copy_request &&
          transform_id == other.transform_id && clip_id == other.clip_id &&
-         target_id == other.target_id && mask_layer_id == other.mask_layer_id;
+         target_id == other.target_id && mask_layer_id == other.mask_layer_id &&
+         closest_ancestor_with_cached_render_surface_id ==
+             other.closest_ancestor_with_cached_render_surface_id &&
+         closest_ancestor_with_copy_request_id ==
+             other.closest_ancestor_with_copy_request_id;
 }
 
 void EffectNode::AsValueInto(base::trace_event::TracedValue* value) const {
   value->SetInteger("id", id);
   value->SetInteger("parent_id", parent_id);
-  value->SetInteger("owning_layer_id", owning_layer_id);
+  value->SetInteger("stable_id", stable_id);
   value->SetDouble("opacity", opacity);
   value->SetBoolean("has_render_surface", has_render_surface);
-  value->SetBoolean("surface_is_clipped", surface_is_clipped);
+  value->SetBoolean("cache_render_surface", cache_render_surface);
   value->SetBoolean("has_copy_request", has_copy_request);
   value->SetBoolean("double_sided", double_sided);
   value->SetBoolean("is_drawn", is_drawn);
@@ -81,12 +86,15 @@ void EffectNode::AsValueInto(base::trace_event::TracedValue* value) const {
   value->SetBoolean("has_potential_opacity_animation",
                     has_potential_opacity_animation);
   value->SetBoolean("effect_changed", effect_changed);
-  value->SetInteger("num_copy_requests_in_subtree",
-                    num_copy_requests_in_subtree);
+  value->SetInteger("subtree_has_copy_request", subtree_has_copy_request);
   value->SetInteger("transform_id", transform_id);
   value->SetInteger("clip_id", clip_id);
   value->SetInteger("target_id", target_id);
   value->SetInteger("mask_layer_id", mask_layer_id);
+  value->SetInteger("closest_ancestor_with_cached_render_surface_id",
+                    closest_ancestor_with_cached_render_surface_id);
+  value->SetInteger("closest_ancestor_with_copy_request_id",
+                    closest_ancestor_with_copy_request_id);
 }
 
 }  // namespace cc

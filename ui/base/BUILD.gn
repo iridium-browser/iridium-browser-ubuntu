@@ -6,6 +6,7 @@ import("//build/buildflag_header.gni")
 import("//build/config/compiler/compiler.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
+import("//build/util/branding.gni")
 import("//testing/test.gni")
 import("//ui/base/ui_features.gni")
 import("//ui/ozone/ozone.gni")
@@ -53,6 +54,7 @@ buildflag_header("ui_features") {
     "ENABLE_HIDPI=$enable_hidpi",
     "USE_XKBCOMMON=$use_xkbcommon",
     "MAC_VIEWS_BROWSER=$mac_views_browser",
+    "HAS_NATIVE_ACCESSIBILITY=$has_native_accessibility",
   ]
 }
 
@@ -96,6 +98,8 @@ component("base") {
     "cocoa/constrained_window/constrained_window_animation.mm",
     "cocoa/controls/blue_label_button.h",
     "cocoa/controls/blue_label_button.mm",
+    "cocoa/controls/button_utils.h",
+    "cocoa/controls/button_utils.mm",
     "cocoa/controls/hover_image_menu_button.h",
     "cocoa/controls/hover_image_menu_button.mm",
     "cocoa/controls/hover_image_menu_button_cell.h",
@@ -104,6 +108,8 @@ component("base") {
     "cocoa/controls/hyperlink_button_cell.mm",
     "cocoa/controls/hyperlink_text_view.h",
     "cocoa/controls/hyperlink_text_view.mm",
+    "cocoa/controls/textfield_utils.h",
+    "cocoa/controls/textfield_utils.mm",
     "cocoa/defaults_utils.h",
     "cocoa/defaults_utils.mm",
     "cocoa/find_pasteboard.h",
@@ -137,6 +143,9 @@ component("base") {
     "cocoa/tool_tip_base_view.h",
     "cocoa/tool_tip_base_view.mm",
     "cocoa/touch_bar_forward_declarations.h",
+    "cocoa/touch_bar_forward_declarations.mm",
+    "cocoa/touch_bar_util.h",
+    "cocoa/touch_bar_util.mm",
     "cocoa/tracking_area.h",
     "cocoa/tracking_area.mm",
     "cocoa/underlay_opengl_hosting_window.h",
@@ -149,7 +158,10 @@ component("base") {
     "cursor/cursor.cc",
     "cursor/cursor.h",
     "cursor/cursor_android.cc",
+    "cursor/cursor_data.cc",
+    "cursor/cursor_data.h",
     "cursor/cursor_loader.h",
+    "cursor/cursor_type.h",
     "cursor/cursor_win.cc",
     "default_style.h",
     "default_theme_provider_mac.mm",
@@ -157,12 +169,12 @@ component("base") {
     "device_form_factor_android.cc",
     "device_form_factor_desktop.cc",
     "device_form_factor_ios.mm",
+    "dragdrop/download_file_interface.h",
     "dragdrop/drag_drop_types.h",
     "dragdrop/drag_drop_types_mac.mm",
     "dragdrop/drag_drop_types_win.cc",
     "dragdrop/drag_source_win.cc",
     "dragdrop/drag_source_win.h",
-    "dragdrop/drag_utils_win.cc",
     "dragdrop/drop_target_event.cc",
     "dragdrop/drop_target_event.h",
     "dragdrop/drop_target_win.cc",
@@ -235,6 +247,7 @@ component("base") {
     "resource/resource_bundle.cc",
     "resource/resource_bundle.h",
     "resource/resource_bundle_android.cc",
+    "resource/resource_bundle_android.h",
     "resource/resource_bundle_auralinux.cc",
     "resource/resource_bundle_ios.mm",
     "resource/resource_bundle_mac.mm",
@@ -247,6 +260,7 @@ component("base") {
     "theme_provider.cc",
     "theme_provider.h",
     "touch/touch_device.h",
+    "touch/touch_device_util.cc",
     "touch/touch_editing_controller.cc",
     "touch/touch_editing_controller.h",
     "ui_base_export.h",
@@ -335,8 +349,6 @@ component("base") {
       "default_theme_provider.h",
       "dragdrop/cocoa_dnd_util.h",
       "dragdrop/cocoa_dnd_util.mm",
-      "dragdrop/drag_utils.cc",
-      "dragdrop/drag_utils.h",
       "dragdrop/file_info.cc",
       "dragdrop/file_info.h",
       "idle/idle.cc",
@@ -362,6 +374,15 @@ component("base") {
   } else {
     # Empty implementation for all other cases.
     sources += [ "touch/touch_device.cc" ]
+    sources -= [ "touch/touch_device_util.cc" ]
+  }
+
+  if (is_fuchsia) {
+    sources += [
+      "clipboard/clipboard_fuchsia.cc",
+      "clipboard/clipboard_fuchsia.h",
+      "resource/resource_bundle_fuchsia.cc",
+    ]
   }
 
   # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -472,20 +493,16 @@ component("base") {
   }
 
   if (is_linux) {
-    deps += [ "//build/linux:fontconfig" ]
+    deps += [ "//third_party/fontconfig" ]
   }
 
   if (use_glib) {
     configs += [ "//build/config/linux:glib" ]
-  }
-
-  if (is_linux) {
-    if (!toolkit_views && !use_aura) {
-      sources -= [
-        "dragdrop/drag_utils.cc",
-        "dragdrop/drag_utils.h",
-      ]
-    }
+    sources += [
+      "glib/glib_integers.h",
+      "glib/glib_signal.h",
+      "glib/scoped_gobject.h",
+    ]
   }
 
   if (is_chromeos) {
@@ -562,6 +579,8 @@ component("base") {
       "cursor/cursor_ozone.cc",
       "cursor/ozone/bitmap_cursor_factory_ozone.cc",
       "cursor/ozone/bitmap_cursor_factory_ozone.h",
+      "cursor/ozone/cursor_data_factory_ozone.cc",
+      "cursor/ozone/cursor_data_factory_ozone.h",
     ]
 
     deps += [
@@ -597,8 +616,6 @@ component("base") {
       "cursor/image_cursors.cc",
       "cursor/image_cursors.h",
       "default_theme_provider.cc",
-      "dragdrop/drag_utils.cc",
-      "dragdrop/drag_utils.h",
       "idle/idle.cc",
       "idle/idle.h",
       "idle/idle_android.cc",
@@ -639,6 +656,7 @@ static_library("test_support") {
     "test/material_design_controller_test_api.h",
     "test/ui_controls.h",
     "test/ui_controls_aura.cc",
+    "test/ui_controls_aura.h",
     "test/ui_controls_internal_win.cc",
     "test/ui_controls_internal_win.h",
     "test/ui_controls_mac.mm",
@@ -680,13 +698,6 @@ static_library("test_support") {
     sources += [ "test/user_interactive_test_case.cc" ]
   }
 
-  if (is_chromeos) {
-    sources += [
-      "ime/chromeos/mock_input_method_manager.cc",
-      "ime/chromeos/mock_input_method_manager.h",
-    ]
-  }
-
   public_deps = [
     ":base",
   ]
@@ -716,8 +727,24 @@ static_library("test_support") {
     ]
   }
 
+  if (is_chromeos) {
+    sources += [
+      "ime/chromeos/input_method_whitelist.cc",
+      "ime/chromeos/input_method_whitelist.h",
+      "ime/chromeos/mock_input_method_manager.cc",
+      "ime/chromeos/mock_input_method_manager.h",
+    ]
+    deps += [
+      # Generates a header used by input_method_whitelist.cc
+      "//chromeos/ime:gencode",
+    ]
+  }
+
   if (!use_aura) {
-    sources -= [ "test/ui_controls_aura.cc" ]
+    sources -= [
+      "test/ui_controls_aura.cc",
+      "test/ui_controls_aura.h",
+    ]
   } else if (is_win) {
     sources -= [ "test/ui_controls_win.cc" ]
   }
@@ -793,6 +820,7 @@ test("ui_base_unittests") {
     set_sources_assignment_filter(sources_assignment_filter)
   } else {  # !is_ios
     sources += [
+      "accelerators/accelerator_history_unittest.cc",
       "accelerators/accelerator_manager_unittest.cc",
       "accelerators/accelerator_unittest.cc",
       "accelerators/menu_label_accelerator_util_linux_unittest.cc",
@@ -811,6 +839,7 @@ test("ui_base_unittests") {
       "cocoa/nsgraphics_context_additions_unittest.mm",
       "cocoa/nsview_additions_unittest.mm",
       "cocoa/three_part_image_unittest.mm",
+      "cocoa/touch_bar_util_unittest.mm",
       "cocoa/tracking_area_unittest.mm",
       "models/list_model_unittest.cc",
       "models/list_selection_model_unittest.cc",
@@ -825,6 +854,8 @@ test("ui_base_unittests") {
     sources += [
       "ime/candidate_window_unittest.cc",
       "ime/chromeos/character_composer_unittest.cc",
+      "ime/chromeos/ime_keyboard_unittest.cc",
+      "ime/chromeos/input_method_util_unittest.cc",
       "ime/composition_text_unittest.cc",
       "ime/input_method_base_unittest.cc",
       "ime/input_method_chromeos_unittest.cc",
@@ -874,6 +905,8 @@ test("ui_base_unittests") {
 
   if (is_ios) {
     deps += [ "//ui/resources:ui_test_pak_bundle_data" ]
+  } else {
+    deps += [ "//ui/base/accelerators/mojo:unittests" ]
   }
 
   if (is_win) {
@@ -952,7 +985,7 @@ test("ui_base_unittests") {
     ]
   }
 
-  if (is_android || is_linux || is_mac || is_win) {
+  if (is_android || is_linux || is_mac || is_win || is_fuchsia) {
     # TODO(brettw): We should be able to depend on //ui/resources:ui_test_pak
     # instead of depending directly on the non-test .pak files, but depending
     # on ui_test_pak seems to have no effect.
@@ -965,7 +998,7 @@ test("ui_base_unittests") {
       "//third_party/mesa:osmesa",
     ]
   }
-  if (is_linux || is_win) {
+  if (is_linux || is_win || is_fuchsia) {
     data += [
       # TODO(brettw): Remove these two lines.
       "$root_out_dir/ui/en-US.pak",
@@ -989,6 +1022,19 @@ if (is_mac) {
       "//ui/resources:ui_test_pak_bundle_data",
     ]
     info_plist = "test/framework-Info.plist"
+    extra_substitutions = [ "CHROMIUM_BUNDLE_ID=$chrome_mac_bundle_id" ]
     output_name = "ui_unittests Framework"
+  }
+}
+
+if (is_win) {
+  # This source set is used by both //chrome/browser and
+  # //chrome/installer/setup.  It must have minimal dependencies for the latter
+  # (e.g., no skia).
+  source_set("fullscreen_win") {
+    sources = [
+      "fullscreen_win.cc",
+      "fullscreen_win.h",
+    ]
   }
 }

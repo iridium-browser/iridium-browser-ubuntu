@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "base/i18n/case_conversion.h"
+#include "base/i18n/unicodestring.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_offset_string_conversions.h"
@@ -42,8 +43,7 @@ base::string16 Normalize(const base::string16& text) {
     LOG(ERROR) << "normalization failed: " << u_errorName(status);
     return text;
   }
-  return base::string16(unicode_normalized_text.getBuffer(),
-                        unicode_normalized_text.length());
+  return base::i18n::UnicodeStringToString16(unicode_normalized_text);
 }
 
 }  // namespace
@@ -207,16 +207,10 @@ bool TitledUrlIndex::GetResultsMatchingTerm(
     while (i != index_.end() &&
            i->first.size() >= term.size() &&
            term.compare(0, term.size(), i->first, 0, term.size()) == 0) {
-#if !defined(OS_ANDROID)
-      prefix_matches->insert(i->second.begin(), i->second.end());
-#else
-      // Work around a bug in the implementation of std::set::insert in the STL
-      // used on android (http://crbug.com/367050).
       for (TitledUrlNodeSet::const_iterator n = i->second.begin();
-           n != i->second.end();
-           ++n)
+           n != i->second.end(); ++n) {
         prefix_matches->insert(prefix_matches->end(), *n);
-#endif
+      }
       ++i;
     }
     if (!first_term) {

@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Controller (MVC) for the bookmark menu.
-// All bookmark menu item commands get directed here.
-// Unfortunately there is already a C++ class named BookmarkMenuController.
-
 #ifndef CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_MENU_COCOA_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_BOOKMARKS_BOOKMARK_MENU_COCOA_CONTROLLER_H_
 
@@ -20,6 +16,9 @@ namespace bookmarks {
 class BookmarkNode;
 }
 
+// Controller (MVC) for the bookmark menu.
+// All bookmark menu item commands get directed here.
+// Unfortunately there is already a C++ class named BookmarkMenuController.
 @interface BookmarkMenuCocoaController : NSObject<NSMenuDelegate> {
  @private
   BookmarkMenuBridge* bridge_;  // weak; owns me
@@ -42,9 +41,6 @@ class BookmarkNode;
 // Called by any Bookmark menu item.
 // The menu item's tag is the bookmark ID.
 - (IBAction)openBookmarkMenuItem:(id)sender;
-- (IBAction)openAllBookmarks:(id)sender;
-- (IBAction)openAllBookmarksNewWindow:(id)sender;
-- (IBAction)openAllBookmarksIncognitoWindow:(id)sender;
 
 @end  // BookmarkMenuCocoaController
 

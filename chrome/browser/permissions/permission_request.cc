@@ -4,16 +4,11 @@
 
 #include "chrome/browser/permissions/permission_request.h"
 
-#include "ui/gfx/vector_icons_public.h"
 
 PermissionRequest::PermissionRequest() : persist_(true) {}
 
 bool PermissionRequest::ShouldShowPersistenceToggle() const {
   return false;
-}
-
-PermissionRequestType PermissionRequest::GetPermissionRequestType() const {
-  return PermissionRequestType::UNKNOWN;
 }
 
 PermissionRequestGestureType PermissionRequest::GetGestureType() const {

@@ -6,6 +6,7 @@ import("//build/config/clang/clang.gni")
 import("//build/config/compiler/compiler.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/win/visual_studio_version.gni")
+import("//build/toolchain/clang_static_analyzer.gni")
 import("//build/toolchain/goma.gni")
 import("//build/toolchain/toolchain.gni")
 
@@ -95,6 +96,14 @@ template("msvc_toolchain") {
       cl = invoker.cl
     }
 
+    if (toolchain_uses_clang && use_clang_static_analyzer) {
+      analyzer_prefix =
+          "$python_path " +
+          rebase_path("//build/toolchain/clang_static_analyzer_wrapper.py",
+                      root_build_dir) + " --mode=cl"
+      cl = "${analyzer_prefix} ${cl}"
+    }
+
     if (use_lld) {
       if (host_os == "win") {
         lld_link = "lld-link.exe"
@@ -126,6 +135,13 @@ template("msvc_toolchain") {
       sys_include_flags = ""
     }
 
+    clflags = ""
+
+    # Pass /FC flag to the compiler if needed.
+    if (msvc_use_absolute_paths) {
+      clflags += "/FC "
+    }
+
     tool("cc") {
       rspfile = "{{output}}.rsp"
       precompiled_header_type = "msvc"
@@ -134,7 +150,7 @@ template("msvc_toolchain") {
       # Label names may have spaces in them so the pdbname must be quoted. The
       # source and output don't need to be quoted because GN knows they're a
       # full file name and will quote automatically when necessary.
-      command = "$env_wrapper$cl /nologo /showIncludes /FC @$rspfile /c {{source}} /Fo{{output}} /Fd\"$pdbname\""
+      command = "$env_wrapper$cl /nologo /showIncludes ${clflags} @$rspfile /c {{source}} /Fo{{output}} /Fd\"$pdbname\""
       depsformat = "msvc"
       description = "CC {{output}}"
       outputs = [
@@ -151,7 +167,7 @@ template("msvc_toolchain") {
       pdbname = "{{target_out_dir}}/{{label_name}}_cc.pdb"
 
       # See comment in CC tool about quoting.
-      command = "$env_wrapper$cl /nologo /showIncludes /FC @$rspfile /c {{source}} /Fo{{output}} /Fd\"$pdbname\""
+      command = "$env_wrapper$cl /nologo /showIncludes ${clflags} @$rspfile /c {{source}} /Fo{{output}} /Fd\"$pdbname\""
       depsformat = "msvc"
       description = "CXX {{output}}"
       outputs = [

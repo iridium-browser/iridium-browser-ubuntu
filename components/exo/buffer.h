@@ -26,7 +26,7 @@ class GpuMemoryBuffer;
 
 namespace exo {
 
-class CompositorFrameSinkHolder;
+class LayerTreeFrameSinkHolder;
 
 // This class provides the content for a Surface. The mechanism by which a
 // client provides and updates the contents is the responsibility of the client
@@ -53,7 +53,7 @@ class Buffer : public base::SupportsWeakPtr<Buffer> {
   // be called before a new texture mailbox can be acquired unless
   // |non_client_usage| is true.
   bool ProduceTransferableResource(
-      CompositorFrameSinkHolder* compositor_frame_sink_holder,
+      LayerTreeFrameSinkHolder* layer_tree_frame_sink_holder,
       cc::ResourceId resource_id,
       bool secure_output_only,
       bool client_usage,
@@ -123,11 +123,6 @@ class Buffer : public base::SupportsWeakPtr<Buffer> {
 
   // The client release callback.
   base::Closure release_callback_;
-
-  // CompositorFrameSinkHolder instance that needs to be kept alive to receive
-  // a release callback when the last produced transferable resource is no
-  // longer in use.
-  scoped_refptr<CompositorFrameSinkHolder> compositor_frame_sink_holder_;
 
   // Cancelable release contents callback. This is set when a release callback
   // is pending.

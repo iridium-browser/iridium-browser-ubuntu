@@ -321,10 +321,13 @@ void V8ConsoleMessage::reportToFrontend(protocol::Runtime::Frontend* frontend,
         arguments->addItem(std::move(messageArg));
       }
     }
+    Maybe<String16> consoleContext;
+    if (!m_consoleContext.isEmpty()) consoleContext = m_consoleContext;
     frontend->consoleAPICalled(
         consoleAPITypeValue(m_type), std::move(arguments), m_contextId,
         m_timestamp,
-        m_stackTrace ? m_stackTrace->buildInspectorObjectImpl() : nullptr);
+        m_stackTrace ? m_stackTrace->buildInspectorObjectImpl() : nullptr,
+        std::move(consoleContext));
     return;
   }
   UNREACHABLE();
@@ -353,15 +356,12 @@ ConsoleAPIType V8ConsoleMessage::type() const { return m_type; }
 
 // static
 std::unique_ptr<V8ConsoleMessage> V8ConsoleMessage::createForConsoleAPI(
-    double timestamp, ConsoleAPIType type,
+    v8::Local<v8::Context> v8Context, int contextId, int groupId,
+    V8InspectorImpl* inspector, double timestamp, ConsoleAPIType type,
     const std::vector<v8::Local<v8::Value>>& arguments,
-    std::unique_ptr<V8StackTraceImpl> stackTrace,
-    InspectedContext* inspectedContext) {
-  v8::Isolate* isolate = inspectedContext->isolate();
-  int contextId = inspectedContext->contextId();
-  int contextGroupId = inspectedContext->contextGroupId();
-  V8InspectorImpl* inspector = inspectedContext->inspector();
-  v8::Local<v8::Context> context = inspectedContext->context();
+    const String16& consoleContext,
+    std::unique_ptr<V8StackTraceImpl> stackTrace) {
+  v8::Isolate* isolate = v8Context->GetIsolate();
 
   std::unique_ptr<V8ConsoleMessage> message(
       new V8ConsoleMessage(V8MessageOrigin::kConsole, timestamp, String16()));
@@ -371,6 +371,7 @@ std::unique_ptr<V8ConsoleMessage> V8ConsoleMessage::createForConsoleAPI(
     message->m_columnNumber = stackTrace->topColumnNumber();
   }
   message->m_stackTrace = std::move(stackTrace);
+  message->m_consoleContext = consoleContext;
   message->m_type = type;
   message->m_contextId = contextId;
   for (size_t i = 0; i < arguments.size(); ++i) {
@@ -380,7 +381,8 @@ std::unique_ptr<V8ConsoleMessage> V8ConsoleMessage::createForConsoleAPI(
         v8::debug::EstimatedValueSize(isolate, arguments.at(i));
   }
   if (arguments.size())
-    message->m_message = V8ValueStringBuilder::toString(arguments[0], context);
+    message->m_message =
+        V8ValueStringBuilder::toString(arguments[0], v8Context);
 
   v8::Isolate::MessageErrorLevel clientLevel = v8::Isolate::kMessageInfo;
   if (type == ConsoleAPIType::kDebug || type == ConsoleAPIType::kCount ||
@@ -397,7 +399,7 @@ std::unique_ptr<V8ConsoleMessage> V8ConsoleMessage::createForConsoleAPI(
 
   if (type != ConsoleAPIType::kClear) {
     inspector->client()->consoleAPIMessage(
-        contextGroupId, clientLevel, toStringView(message->m_message),
+        groupId, clientLevel, toStringView(message->m_message),
         toStringView(message->m_url), message->m_lineNumber,
         message->m_columnNumber, message->m_stackTrace.get());
   }
@@ -462,13 +464,12 @@ void V8ConsoleMessageStorage::addMessage(
   V8InspectorImpl* inspector = m_inspector;
   if (message->type() == ConsoleAPIType::kClear) clear();
 
-  V8InspectorSessionImpl* session =
-      inspector->sessionForContextGroup(contextGroupId);
-  if (session) {
-    if (message->origin() == V8MessageOrigin::kConsole)
-      session->consoleAgent()->messageAdded(message.get());
-    session->runtimeAgent()->messageAdded(message.get());
-  }
+  inspector->forEachSession(
+      contextGroupId, [&message](V8InspectorSessionImpl* session) {
+        if (message->origin() == V8MessageOrigin::kConsole)
+          session->consoleAgent()->messageAdded(message.get());
+        session->runtimeAgent()->messageAdded(message.get());
+      });
   if (!inspector->hasConsoleMessageStorage(contextGroupId)) return;
 
   DCHECK(m_messages.size() <= maxConsoleMessageCount);
@@ -489,9 +490,38 @@ void V8ConsoleMessageStorage::addMessage(
 void V8ConsoleMessageStorage::clear() {
   m_messages.clear();
   m_estimatedSize = 0;
-  if (V8InspectorSessionImpl* session =
-          m_inspector->sessionForContextGroup(m_contextGroupId))
-    session->releaseObjectGroup("console");
+  m_inspector->forEachSession(m_contextGroupId,
+                              [](V8InspectorSessionImpl* session) {
+                                session->releaseObjectGroup("console");
+                              });
+  m_data.clear();
+}
+
+bool V8ConsoleMessageStorage::shouldReportDeprecationMessage(
+    int contextId, const String16& method) {
+  std::set<String16>& reportedDeprecationMessages =
+      m_data[contextId].m_reportedDeprecationMessages;
+  auto it = reportedDeprecationMessages.find(method);
+  if (it != reportedDeprecationMessages.end()) return false;
+  reportedDeprecationMessages.insert(it, method);
+  return true;
+}
+
+int V8ConsoleMessageStorage::count(int contextId, const String16& id) {
+  return ++m_data[contextId].m_count[id];
+}
+
+void V8ConsoleMessageStorage::time(int contextId, const String16& id) {
+  m_data[contextId].m_time[id] = m_inspector->client()->currentTimeMS();
+}
+
+double V8ConsoleMessageStorage::timeEnd(int contextId, const String16& id) {
+  std::map<String16, double>& time = m_data[contextId].m_time;
+  auto it = time.find(id);
+  if (it == time.end()) return 0.0;
+  double elapsed = m_inspector->client()->currentTimeMS() - it->second;
+  time.erase(it);
+  return elapsed;
 }
 
 void V8ConsoleMessageStorage::contextDestroyed(int contextId) {
@@ -500,6 +530,8 @@ void V8ConsoleMessageStorage::contextDestroyed(int contextId) {
     m_messages[i]->contextDestroyed(contextId);
     m_estimatedSize += m_messages[i]->estimatedSize();
   }
+  auto it = m_data.find(contextId);
+  if (it != m_data.end()) m_data.erase(contextId);
 }
 
 }  // namespace v8_inspector

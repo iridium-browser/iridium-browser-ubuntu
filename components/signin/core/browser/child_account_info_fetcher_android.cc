@@ -29,6 +29,11 @@ std::unique_ptr<ChildAccountInfoFetcher> ChildAccountInfoFetcherAndroid::Create(
       new ChildAccountInfoFetcherAndroid(service, account_id, account_name));
 }
 
+void ChildAccountInfoFetcherAndroid::InitializeForTests() {
+  Java_ChildAccountInfoFetcher_initializeForTests(
+      base::android::AttachCurrentThread());
+}
+
 ChildAccountInfoFetcherAndroid::ChildAccountInfoFetcherAndroid(
     AccountFetcherService* service,
     const std::string& account_id,
@@ -43,11 +48,6 @@ ChildAccountInfoFetcherAndroid::ChildAccountInfoFetcherAndroid(
 ChildAccountInfoFetcherAndroid::~ChildAccountInfoFetcherAndroid() {
   Java_ChildAccountInfoFetcher_destroy(base::android::AttachCurrentThread(),
                                        j_child_account_info_fetcher_.obj());
-}
-
-// static
-bool ChildAccountInfoFetcherAndroid::Register(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 void SetIsChildAccount(JNIEnv* env,

@@ -21,6 +21,8 @@ class SkString;
     SkMatrix does not have a constructor, so it must be explicitly initialized
     using either reset() - to construct an identity matrix, or one of the set
     functions (e.g. setTranslate, setRotate, etc.).
+
+    SkMatrix is not thread safe unless you've first called SkMatrix::getType().
 */
 SK_BEGIN_REQUIRE_DENSE
 class SK_API SkMatrix {
@@ -619,6 +621,7 @@ public:
         return 0 == memcmp(fMat, m.fMat, sizeof(fMat));
     }
 
+    // mac chromium dbg requires SK_API to make operator== visible
     friend SK_API bool operator==(const SkMatrix& a, const SkMatrix& b);
     friend SK_API bool operator!=(const SkMatrix& a, const SkMatrix& b) {
         return !(a == b);
@@ -812,6 +815,14 @@ private:
             return false;
         }
         return ((fTypeMask & 0xF) == 0);
+    }
+
+    inline void updateTranslateMask() {
+        if ((fMat[kMTransX] != 0) | (fMat[kMTransY] != 0)) {
+            fTypeMask |= kTranslate_Mask;
+        } else {
+            fTypeMask &= ~kTranslate_Mask;
+        }
     }
 
     bool SK_WARN_UNUSED_RESULT invertNonIdentity(SkMatrix* inverse) const;

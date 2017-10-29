@@ -4,24 +4,28 @@
 
 #import "ios/web_view/internal/web_view_web_main_delegate.h"
 
-#include "base/memory/ptr_util.h"
-#import "ios/web_view/internal/web_view_web_client.h"
-#import "ios/web_view/public/cwv_delegate.h"
+#import "base/mac/bundle_locations.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
+// Dummy class used to locate the containing NSBundle.
+@interface CWVBundleLocator : NSObject
+@end
+
+@implementation CWVBundleLocator
+@end
+
 namespace ios_web_view {
 
-WebViewWebMainDelegate::WebViewWebMainDelegate(id<CWVDelegate> delegate)
-    : delegate_(delegate) {}
+WebViewWebMainDelegate::WebViewWebMainDelegate() {}
 
 WebViewWebMainDelegate::~WebViewWebMainDelegate() = default;
 
 void WebViewWebMainDelegate::BasicStartupComplete() {
-  web_client_ = base::MakeUnique<WebViewWebClient>(delegate_);
-  web::SetWebClient(web_client_.get());
+  base::mac::SetOverrideFrameworkBundle(
+      [NSBundle bundleForClass:[CWVBundleLocator class]]);
 }
 
 }  // namespace ios_web_view

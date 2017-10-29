@@ -103,13 +103,8 @@ scoped_refptr<GLSurface> CreateNativeViewGLSurfaceEGL(
   DCHECK_EQ(kGLImplementationEGLGLES2, GetGLImplementation());
   DCHECK(window != gfx::kNullAcceleratedWidget);
 
-  scoped_refptr<NativeViewGLSurfaceEGL> surface(
-      new NativeViewGLSurfaceEGL(window));
-
-  if (!surface->Initialize(std::move(sync_provider)))
-    return nullptr;
-
-  return surface;
+  return InitializeGLSurface(
+      new NativeViewGLSurfaceEGL(window, std::move(sync_provider)));
 }
 
 scoped_refptr<GLSurface> CreateOffscreenGLSurfaceWithFormat(
@@ -122,8 +117,13 @@ scoped_refptr<GLSurface> CreateOffscreenGLSurfaceWithFormat(
           new GLSurfaceOSMesa(format, size), format);
     case kGLImplementationSwiftShaderGL:
     case kGLImplementationEGLGLES2:
-      return InitializeGLSurfaceWithFormat(
-          new PbufferGLSurfaceEGL(size), format);
+      if (GLSurfaceEGL::IsEGLSurfacelessContextSupported() &&
+          size.width() == 0 && size.height() == 0) {
+        return InitializeGLSurfaceWithFormat(new SurfacelessEGL(size), format);
+      } else {
+        return InitializeGLSurfaceWithFormat(new PbufferGLSurfaceEGL(size),
+                                             format);
+      }
     case kGLImplementationDesktopGL:
       return InitializeGLSurfaceWithFormat(
           new PbufferGLSurfaceWGL(size), format);

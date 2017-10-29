@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "core/fpdfdoc/ipvt_fontmap.h"
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxcrt/fx_string.h"
 
 class CPDF_Document;
@@ -33,17 +34,16 @@ class CPVT_FontMap : public IPVT_FontMap {
   int32_t CharCodeFromUnicode(int32_t nFontIndex, uint16_t word) override;
   int32_t CharSetFromUnicode(uint16_t word, int32_t nOldCharset) override;
 
-  static void GetAnnotSysPDFFont(CPDF_Document* pDoc,
-                                 const CPDF_Dictionary* pResDict,
-                                 CPDF_Font*& pSysFont,
-                                 CFX_ByteString& sSysFontAlias);
+  static CPDF_Font* GetAnnotSysPDFFont(CPDF_Document* pDoc,
+                                       const CPDF_Dictionary* pResDict,
+                                       CFX_ByteString* sSysFontAlias);
 
  private:
-  CPDF_Document* const m_pDocument;
-  const CPDF_Dictionary* const m_pResDict;
-  CPDF_Font* const m_pDefFont;
+  CFX_UnownedPtr<CPDF_Document> const m_pDocument;
+  CFX_UnownedPtr<CPDF_Dictionary> const m_pResDict;
+  CFX_UnownedPtr<CPDF_Font> const m_pDefFont;
+  CFX_UnownedPtr<CPDF_Font> m_pSysFont;
   const CFX_ByteString m_sDefFontAlias;
-  CPDF_Font* m_pSysFont;
   CFX_ByteString m_sSysFontAlias;
 };
 

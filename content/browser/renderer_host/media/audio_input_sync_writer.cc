@@ -5,8 +5,10 @@
 #include "content/browser/renderer_host/media/audio_input_sync_writer.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "base/format_macros.h"
+#include "base/memory/shared_memory.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
@@ -32,40 +34,39 @@ enum AudioGlitchResult {
 
 }  // namespace
 
-AudioInputSyncWriter::AudioInputSyncWriter(void* shared_memory,
-                                           size_t shared_memory_size,
-                                           int shared_memory_segment_count,
-                                           const media::AudioParameters& params)
-    : shared_memory_(static_cast<uint8_t*>(shared_memory)),
-      shared_memory_segment_count_(shared_memory_segment_count),
-      current_segment_id_(0),
+AudioInputSyncWriter::AudioInputSyncWriter(
+    std::unique_ptr<base::SharedMemory> shared_memory,
+    std::unique_ptr<base::CancelableSyncSocket> socket,
+    uint32_t shared_memory_segment_count,
+    const media::AudioParameters& params)
+    : socket_(std::move(socket)),
+      shared_memory_(std::move(shared_memory)),
+      shared_memory_segment_size_(
+          (CHECK(shared_memory_segment_count > 0),
+           shared_memory_->requested_size() / shared_memory_segment_count)),
       creation_time_(base::Time::Now()),
-      audio_bus_memory_size_(AudioBus::CalculateMemorySize(params)),
-      next_buffer_id_(0),
-      next_read_buffer_index_(0),
-      number_of_filled_segments_(0),
-      write_count_(0),
-      write_to_fifo_count_(0),
-      write_error_count_(0),
-      trailing_write_to_fifo_count_(0),
-      trailing_write_error_count_(0) {
-  DCHECK_GT(shared_memory_segment_count, 0);
-  DCHECK_EQ(shared_memory_size % shared_memory_segment_count, 0u);
-  shared_memory_segment_size_ =
-      shared_memory_size / shared_memory_segment_count;
-  DVLOG(1) << "shared_memory_size: " << shared_memory_size;
-  DVLOG(1) << "shared_memory_segment_count: " << shared_memory_segment_count;
-  DVLOG(1) << "audio_bus_memory_size: " << audio_bus_memory_size_;
+      audio_bus_memory_size_(AudioBus::CalculateMemorySize(params)) {
+  // We use CHECKs since this class is used for IPC.
+  CHECK(socket_);
+  CHECK(shared_memory_);
+  CHECK_EQ(shared_memory_segment_size_ * shared_memory_segment_count,
+           shared_memory_->requested_size());
+  CHECK_EQ(shared_memory_segment_size_,
+           audio_bus_memory_size_ + sizeof(AudioInputBufferParameters));
+  DVLOG(1) << "shared memory size: " << shared_memory_->requested_size();
+  DVLOG(1) << "shared memory segment count: " << shared_memory_segment_count;
+  DVLOG(1) << "audio bus memory size: " << audio_bus_memory_size_;
+
+  audio_buses_.resize(shared_memory_segment_count);
 
   // Create vector of audio buses by wrapping existing blocks of memory.
-  uint8_t* ptr = shared_memory_;
-  for (int i = 0; i < shared_memory_segment_count; ++i) {
+  uint8_t* ptr = static_cast<uint8_t*>(shared_memory_->memory());
+  CHECK(ptr);
+  for (auto& bus : audio_buses_) {
     CHECK_EQ(0U, reinterpret_cast<uintptr_t>(ptr) &
-        (AudioBus::kChannelAlignment - 1));
+                     (AudioBus::kChannelAlignment - 1));
     AudioInputBuffer* buffer = reinterpret_cast<AudioInputBuffer*>(ptr);
-    std::unique_ptr<AudioBus> audio_bus =
-        AudioBus::WrapMemory(params, buffer->audio);
-    audio_buses_.push_back(std::move(audio_bus));
+    bus = AudioBus::WrapMemory(params, buffer->audio);
     ptr += shared_memory_segment_size_;
   }
 }
@@ -116,6 +117,39 @@ AudioInputSyncWriter::~AudioInputSyncWriter() {
   DVLOG(1) << log_string;
 }
 
+// static
+std::unique_ptr<AudioInputSyncWriter> AudioInputSyncWriter::Create(
+    uint32_t shared_memory_segment_count,
+    const media::AudioParameters& params,
+    base::CancelableSyncSocket* foreign_socket) {
+  // Having no shared memory doesn't make sense, so fail creation in that case.
+  if (shared_memory_segment_count == 0)
+    return nullptr;
+
+  base::CheckedNumeric<size_t> segment_size =
+      sizeof(media::AudioInputBufferParameters);
+  segment_size += media::AudioBus::CalculateMemorySize(params);
+
+  base::CheckedNumeric<size_t> requested_memory_size =
+      segment_size * shared_memory_segment_count;
+
+  auto shared_memory = base::MakeUnique<base::SharedMemory>();
+  if (!requested_memory_size.IsValid() ||
+      !shared_memory->CreateAndMapAnonymous(
+          requested_memory_size.ValueOrDie())) {
+    return nullptr;
+  }
+
+  auto socket = base::MakeUnique<base::CancelableSyncSocket>();
+  if (!base::CancelableSyncSocket::CreatePair(socket.get(), foreign_socket)) {
+    return nullptr;
+  }
+
+  return base::MakeUnique<AudioInputSyncWriter>(
+      std::move(shared_memory), std::move(socket), shared_memory_segment_count,
+      params);
+}
+
 void AudioInputSyncWriter::Write(const AudioBus* data,
                                  double volume,
                                  bool key_pressed,
@@ -130,17 +164,16 @@ void AudioInputSyncWriter::Write(const AudioBus* data,
   // writing. We verify that each buffer index is in sequence.
   size_t number_of_indices_available = socket_->Peek() / sizeof(uint32_t);
   if (number_of_indices_available > 0) {
-    std::unique_ptr<uint32_t[]> indices(
-        new uint32_t[number_of_indices_available]);
+    auto indices = base::MakeUnique<uint32_t[]>(number_of_indices_available);
     size_t bytes_received = socket_->Receive(
         &indices[0],
         number_of_indices_available * sizeof(indices[0]));
-    DCHECK_EQ(number_of_indices_available * sizeof(indices[0]), bytes_received);
+    CHECK_EQ(number_of_indices_available * sizeof(indices[0]), bytes_received);
     for (size_t i = 0; i < number_of_indices_available; ++i) {
       ++next_read_buffer_index_;
       CHECK_EQ(indices[i], next_read_buffer_index_);
+      CHECK_GT(number_of_filled_segments_, 0u);
       --number_of_filled_segments_;
-      CHECK_GE(number_of_filled_segments_, 0);
     }
   }
 
@@ -148,13 +181,11 @@ void AudioInputSyncWriter::Write(const AudioBus* data,
 
   // Write the current data to the shared memory if there is room, otherwise
   // put it in the fifo.
-  if (number_of_filled_segments_ <
-      static_cast<int>(shared_memory_segment_count_)) {
+  if (number_of_filled_segments_ < audio_buses_.size()) {
     WriteParametersToCurrentSegment(volume, key_pressed, hardware_delay_bytes);
 
     // Copy data into shared memory using pre-allocated audio buses.
-    AudioBus* audio_bus = audio_buses_[current_segment_id_];
-    data->CopyTo(audio_bus);
+    data->CopyTo(audio_buses_[current_segment_id_].get());
 
     if (!SignalDataWrittenAndUpdateCounters())
       write_error = true;
@@ -184,18 +215,6 @@ void AudioInputSyncWriter::Close() {
   socket_->Close();
 }
 
-bool AudioInputSyncWriter::Init() {
-  socket_.reset(new base::CancelableSyncSocket());
-  foreign_socket_.reset(new base::CancelableSyncSocket());
-  return base::CancelableSyncSocket::CreatePair(socket_.get(),
-                                                foreign_socket_.get());
-}
-
-bool AudioInputSyncWriter::PrepareForeignSocket(
-    base::ProcessHandle process_handle,
-    base::SyncSocket::TransitDescriptor* descriptor) {
-  return foreign_socket_->PrepareTransitDescriptor(process_handle, descriptor);
-}
 
 void AudioInputSyncWriter::CheckTimeSinceLastWrite() {
 #if !defined(OS_ANDROID)
@@ -215,9 +234,10 @@ void AudioInputSyncWriter::CheckTimeSinceLastWrite() {
           << interval.InMilliseconds() << "ms";
     }
   }
-  if (!oss.str().empty()) {
-    AddToNativeLog(oss.str());
-    DVLOG(1) << oss.str();
+  const std::string log_message = oss.str();
+  if (!log_message.empty()) {
+    AddToNativeLog(log_message);
+    DVLOG(1) << log_message;
   }
 
   last_write_time_ = base::Time::Now();
@@ -276,7 +296,7 @@ bool AudioInputSyncWriter::WriteDataFromFifoToSharedMemory() {
   if (overflow_buses_.empty())
     return true;
 
-  const int segment_count = static_cast<int>(shared_memory_segment_count_);
+  const size_t segment_count = audio_buses_.size();
   bool write_error = false;
   auto params_it = overflow_params_.begin();
   auto audio_bus_it = overflow_buses_.begin();
@@ -291,7 +311,7 @@ bool AudioInputSyncWriter::WriteDataFromFifoToSharedMemory() {
 
     // Copy data from the fifo into shared memory using pre-allocated audio
     // buses.
-    (*audio_bus_it)->CopyTo(audio_buses_[current_segment_id_]);
+    (*audio_bus_it)->CopyTo(audio_buses_[current_segment_id_].get());
 
     if (!SignalDataWrittenAndUpdateCounters())
       write_error = true;
@@ -318,7 +338,8 @@ void AudioInputSyncWriter::WriteParametersToCurrentSegment(
     double volume,
     bool key_pressed,
     uint32_t hardware_delay_bytes) {
-  uint8_t* ptr = shared_memory_;
+  uint8_t* ptr = static_cast<uint8_t*>(shared_memory_->memory());
+  CHECK_LT(current_segment_id_, audio_buses_.size());
   ptr += current_segment_id_ * shared_memory_segment_size_;
   AudioInputBuffer* buffer = reinterpret_cast<AudioInputBuffer*>(ptr);
   buffer->params.volume = volume;
@@ -331,20 +352,26 @@ void AudioInputSyncWriter::WriteParametersToCurrentSegment(
 bool AudioInputSyncWriter::SignalDataWrittenAndUpdateCounters() {
   if (socket_->Send(&current_segment_id_, sizeof(current_segment_id_)) !=
       sizeof(current_segment_id_)) {
-    const std::string error_message = "AISW: No room in socket buffer.";
-    LOG(WARNING) << error_message;
-    AddToNativeLog(error_message);
-    TRACE_EVENT_INSTANT0("audio",
-                         "AudioInputSyncWriter: No room in socket buffer",
-                         TRACE_EVENT_SCOPE_THREAD);
+    // Ensure we don't log consecutive errors as this can lead to a large
+    // amount of logs.
+    if (!had_socket_error_) {
+      had_socket_error_ = true;
+      const std::string error_message = "AISW: No room in socket buffer.";
+      PLOG(WARNING) << error_message;
+      AddToNativeLog(error_message);
+      TRACE_EVENT_INSTANT0("audio",
+                           "AudioInputSyncWriter: No room in socket buffer",
+                           TRACE_EVENT_SCOPE_THREAD);
+    }
     return false;
+  } else {
+    had_socket_error_ = false;
   }
 
-  if (++current_segment_id_ >= shared_memory_segment_count_)
+  if (++current_segment_id_ >= audio_buses_.size())
     current_segment_id_ = 0;
   ++number_of_filled_segments_;
-  CHECK_LE(number_of_filled_segments_,
-           static_cast<int>(shared_memory_segment_count_));
+  CHECK_LE(number_of_filled_segments_, audio_buses_.size());
   ++next_buffer_id_;
 
   return true;

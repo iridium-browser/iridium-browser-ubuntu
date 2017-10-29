@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/password_generator.h"
@@ -37,7 +36,7 @@
 #include "ui/gfx/text_utils.h"
 
 #if defined(OS_ANDROID)
-#include "chrome/browser/android/chrome_application.h"
+#include "chrome/browser/android/preferences/preferences_launcher.h"
 #endif
 
 namespace autofill {
@@ -63,9 +62,9 @@ PasswordGenerationPopupControllerImpl::GetOrCreate(
     previous->Hide();
 
   PasswordGenerationPopupControllerImpl* controller =
-      new PasswordGenerationPopupControllerImpl(
-          bounds, form, max_length, password_manager, driver, observer,
-          web_contents, container_view);
+      new PasswordGenerationPopupControllerImpl(bounds, form, max_length,
+                                                driver, observer, web_contents,
+                                                container_view);
   return controller->GetWeakPtr();
 }
 
@@ -73,14 +72,12 @@ PasswordGenerationPopupControllerImpl::PasswordGenerationPopupControllerImpl(
     const gfx::RectF& bounds,
     const PasswordForm& form,
     int max_length,
-    password_manager::PasswordManager* password_manager,
     password_manager::PasswordManagerDriver* driver,
     PasswordGenerationPopupObserver* observer,
     content::WebContents* web_contents,
     gfx::NativeView container_view)
     : view_(NULL),
       form_(form),
-      password_manager_(password_manager),
       driver_(driver),
       observer_(observer),
       generator_(new PasswordGenerator(max_length)),
@@ -108,7 +105,7 @@ PasswordGenerationPopupControllerImpl::GetWeakPtr() {
 
 bool PasswordGenerationPopupControllerImpl::HandleKeyPressEvent(
     const content::NativeWebKeyboardEvent& event) {
-  switch (event.windowsKeyCode) {
+  switch (event.windows_key_code) {
     case ui::VKEY_UP:
     case ui::VKEY_DOWN:
       PasswordSelected(true);
@@ -149,7 +146,6 @@ void PasswordGenerationPopupControllerImpl::PasswordAccepted() {
     return;
 
   driver_->GeneratedPasswordAccepted(current_password_);
-  password_manager_->SetHasGeneratedPasswordForForm(driver_, form_, true);
   Hide();
 }
 
@@ -225,7 +221,7 @@ void PasswordGenerationPopupControllerImpl::ViewDestroyed() {
 
 void PasswordGenerationPopupControllerImpl::OnSavedPasswordsLinkClicked() {
 #if defined(OS_ANDROID)
-  chrome::android::ChromeApplication::ShowPasswordSettings();
+  chrome::android::PreferencesLauncher::ShowPasswordSettings();
 #else
   chrome::NavigateParams params(
       chrome::FindBrowserWithWebContents(web_contents_),
@@ -276,13 +272,11 @@ PasswordGenerationPopupControllerImpl::GetSuggestions() {
 }
 
 #if !defined(OS_ANDROID)
-int PasswordGenerationPopupControllerImpl::GetElidedValueWidthForRow(
-    size_t row) {
+int PasswordGenerationPopupControllerImpl::GetElidedValueWidthForRow(int row) {
   return 0;
 }
 
-int PasswordGenerationPopupControllerImpl::GetElidedLabelWidthForRow(
-    size_t row) {
+int PasswordGenerationPopupControllerImpl::GetElidedLabelWidthForRow(int row) {
   return 0;
 }
 #endif

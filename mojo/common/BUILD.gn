@@ -16,6 +16,8 @@ mojom("common_custom_types") {
   sources = [
     "file.mojom",
     "file_path.mojom",
+    "memory_allocator_dump_cross_process_uid.mojom",
+    "process_id.mojom",
     "string16.mojom",
     "text_direction.mojom",
     "time.mojom",
@@ -23,6 +25,9 @@ mojom("common_custom_types") {
     "values.mojom",
     "version.mojom",
   ]
+
+  # TODO(crbug.com/699569): Convert to use the new JS bindings.
+  js_bindings_mode = "both"
 }
 
 component("common_base") {
@@ -89,5 +94,17 @@ source_set("struct_traits") {
   ]
   public_deps = [
     "//base:i18n",
+  ]
+}
+
+source_set("values_struct_traits") {
+  sources = [
+    "values_struct_traits.cc",
+    "values_struct_traits.h",
+  ]
+  public_deps = [
+    ":common_custom_types_shared_cpp_sources",
+    "//base",
+    "//mojo/public/cpp/bindings:bindings",
   ]
 }

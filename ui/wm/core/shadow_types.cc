@@ -6,7 +6,7 @@
 
 #include "ui/base/class_property.h"
 
-DECLARE_EXPORTED_UI_CLASS_PROPERTY_TYPE(WM_EXPORT, ::wm::ShadowElevation);
+DECLARE_EXPORTED_UI_CLASS_PROPERTY_TYPE(WM_CORE_EXPORT, ::wm::ShadowElevation);
 
 namespace wm {
 
@@ -19,11 +19,16 @@ void SetShadowElevation(aura::Window* window, ShadowElevation elevation) {
 }
 
 bool IsValidShadowElevation(int64_t value) {
-  return value == int64_t(ShadowElevation::DEFAULT) ||
-         value == int64_t(ShadowElevation::NONE) ||
-         value == int64_t(ShadowElevation::SMALL) ||
-         value == int64_t(ShadowElevation::MEDIUM) ||
-         value == int64_t(ShadowElevation::LARGE);
+  switch (static_cast<ShadowElevation>(value)) {
+    case ShadowElevation::DEFAULT:
+    case ShadowElevation::NONE:
+    case ShadowElevation::TINY:
+    case ShadowElevation::SMALL:
+    case ShadowElevation::MEDIUM:
+    case ShadowElevation::LARGE:
+      return true;
+  }
+  return false;
 }
 
 }  // namespace wm

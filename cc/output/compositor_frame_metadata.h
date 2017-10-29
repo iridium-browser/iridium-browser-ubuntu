@@ -9,14 +9,15 @@
 
 #include <vector>
 
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/input/selection.h"
-#include "cc/surfaces/surface_id.h"
+#include "cc/output/begin_frame_args.h"
+#include "components/viz/common/surfaces/surface_id.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/events/latency_info.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/selection_bound.h"
+#include "ui/latency/latency_info.h"
 
 namespace cc {
 
@@ -76,7 +77,26 @@ class CC_EXPORT CompositorFrameMetadata {
   std::vector<ui::LatencyInfo> latency_info;
 
   // This is the set of Surfaces that are referenced by this frame.
-  std::vector<SurfaceId> referenced_surfaces;
+  // Note: this includes occluded and clipped surfaces and surfaces that may
+  // be accessed by this CompositorFrame in the future.
+  // TODO(fsamuel): In the future, a generalized frame eviction system will
+  // determine which surfaces to retain and which to evict. It will likely
+  // be unnecessary for the embedder to explicitly specify which surfaces to
+  // retain. Thus, this field will likely go away.
+  std::vector<viz::SurfaceId> referenced_surfaces;
+
+  // This is the set of dependent SurfaceIds that should be active in the
+  // display compositor before this CompositorFrame can be activated. Note
+  // that if |can_activate_before_dependencies| then the display compositor
+  // can choose to activate a CompositorFrame before all dependencies are
+  // available.
+  // Note: |activation_dependencies| and |referenced_surfaces| are disjoint
+  //       sets of surface IDs. If a surface ID is known to exist and can be
+  //       used without additional synchronization, then it is placed in
+  //       |referenced_surfaces|. |activation_dependencies| is the set of
+  //       surface IDs that this frame would like to block on until they
+  //       become available or a deadline hits.
+  std::vector<viz::SurfaceId> activation_dependencies;
 
   // This indicates whether this CompositorFrame can be activated before
   // dependencies have been resolved.
@@ -87,6 +107,14 @@ class CC_EXPORT CompositorFrameMetadata {
   // TODO(kenrb, fsamuel): This should eventually by SurfaceID, when they
   // become available in all renderer processes. See https://crbug.com/695579.
   uint32_t content_source_id = 0;
+
+  // BeginFrameAck for the BeginFrame that this CompositorFrame answers.
+  BeginFrameAck begin_frame_ack;
+
+  // Once the display compositor processes a frame containing a non-zero frame
+  // token, the token is sent to embedder of the frame. This is helpful when
+  // the embedder wants to do something after a particular frame is processed.
+  uint32_t frame_token = 0;
 
  private:
   CompositorFrameMetadata(const CompositorFrameMetadata& other);

@@ -25,11 +25,14 @@ const char kHistogramClientName[] = "client";
 const char kHistogramServerName[] = "server";
 const char kHistogramPopularName[] = "popular";
 const char kHistogramWhitelistName[] = "whitelist";
+const char kHistogramHomepageName[] = "homepage";
 
 // Suffixes for the various icon types.
-const char kIconTypeSuffixColor[] = "IconsColor";
-const char kIconTypeSuffixGray[] = "IconsGray";
-const char kIconTypeSuffixReal[] = "IconsReal";
+const char kTileTypeSuffixIconColor[] = "IconsColor";
+const char kTileTypeSuffixIconGray[] = "IconsGray";
+const char kTileTypeSuffixIconReal[] = "IconsReal";
+const char kTileTypeSuffixThumbnail[] = "Thumbnail";
+const char kTileTypeSuffixThumbnailFailed[] = "ThumbnailFailed";
 
 // Log an event for a given |histogram| at a given element |position|. This
 // routine exists because regular histogram macros are cached thus can't be used
@@ -44,33 +47,37 @@ void LogHistogramEvent(const std::string& histogram,
     counter->Add(position);
 }
 
-std::string GetSourceHistogramName(NTPTileSource source) {
+std::string GetSourceHistogramName(TileSource source) {
   switch (source) {
-    case NTPTileSource::TOP_SITES:
+    case TileSource::TOP_SITES:
       return kHistogramClientName;
-    case NTPTileSource::POPULAR:
+    case TileSource::POPULAR:
       return kHistogramPopularName;
-    case NTPTileSource::WHITELIST:
+    case TileSource::WHITELIST:
       return kHistogramWhitelistName;
-    case NTPTileSource::SUGGESTIONS_SERVICE:
+    case TileSource::SUGGESTIONS_SERVICE:
       return kHistogramServerName;
+    case TileSource::HOMEPAGE:
+      return kHistogramHomepageName;
   }
   NOTREACHED();
   return std::string();
 }
 
-const char* GetIconTypeSuffix(MostVisitedTileType type) {
+const char* GetTileTypeSuffix(TileVisualType type) {
   switch (type) {
-    case ICON_COLOR:
-      return kIconTypeSuffixColor;
-    case ICON_DEFAULT:
-      return kIconTypeSuffixGray;
-    case ICON_REAL:
-      return kIconTypeSuffixReal;
-    case NONE:                     // Fall through.
-    case NUM_RECORDED_TILE_TYPES:  // Fall through.
-    case THUMBNAIL:                // Fall through.
-    case UNKNOWN_TILE_TYPE:
+    case TileVisualType::ICON_COLOR:
+      return kTileTypeSuffixIconColor;
+    case TileVisualType::ICON_DEFAULT:
+      return kTileTypeSuffixIconGray;
+    case TileVisualType::ICON_REAL:
+      return kTileTypeSuffixIconReal;
+    case THUMBNAIL:
+      return kTileTypeSuffixThumbnail;
+    case THUMBNAIL_FAILED:
+      return kTileTypeSuffixThumbnailFailed;
+    case TileVisualType::NONE:                     // Fall through.
+    case TileVisualType::UNKNOWN_TILE_TYPE:
       break;
   }
   return nullptr;
@@ -78,86 +85,70 @@ const char* GetIconTypeSuffix(MostVisitedTileType type) {
 
 }  // namespace
 
-void RecordPageImpression(const std::vector<TileImpression>& tiles,
+void RecordPageImpression(int number_of_tiles) {
+  UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.NumberOfTiles", number_of_tiles);
+}
+
+void RecordTileImpression(int index,
+                          TileSource source,
+                          TileVisualType type,
+                          const GURL& url,
                           rappor::RapporService* rappor_service) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.NumberOfTiles", tiles.size());
+  UMA_HISTOGRAM_ENUMERATION("NewTabPage.SuggestionsImpression", index,
+                            kMaxNumTiles);
 
-  int counts_per_type[NUM_RECORDED_TILE_TYPES] = {0};
-  bool have_tile_types = false;
-  for (int index = 0; index < static_cast<int>(tiles.size()); index++) {
-    NTPTileSource source = tiles[index].source;
-    MostVisitedTileType tile_type = tiles[index].type;
-    const GURL& url = tiles[index].url;
+  std::string source_name = GetSourceHistogramName(source);
+  std::string impression_histogram = base::StringPrintf(
+      "NewTabPage.SuggestionsImpression.%s", source_name.c_str());
+  LogHistogramEvent(impression_histogram, index, kMaxNumTiles);
 
-    UMA_HISTOGRAM_ENUMERATION("NewTabPage.SuggestionsImpression", index,
-                              kMaxNumTiles);
-
-    std::string source_name = GetSourceHistogramName(source);
-    std::string impression_histogram = base::StringPrintf(
-        "NewTabPage.SuggestionsImpression.%s", source_name.c_str());
-    LogHistogramEvent(impression_histogram, index, kMaxNumTiles);
-
-    if (tile_type >= NUM_RECORDED_TILE_TYPES) {
-      continue;
-    }
-
-    have_tile_types = true;
-    ++counts_per_type[tile_type];
-
-    UMA_HISTOGRAM_ENUMERATION("NewTabPage.TileType", tile_type,
-                              NUM_RECORDED_TILE_TYPES);
-
-    std::string tile_type_histogram =
-        base::StringPrintf("NewTabPage.TileType.%s", source_name.c_str());
-    LogHistogramEvent(tile_type_histogram, tile_type, NUM_RECORDED_TILE_TYPES);
-
-    const char* icon_type_suffix = GetIconTypeSuffix(tile_type);
-    if (icon_type_suffix) {
-      rappor::SampleDomainAndRegistryFromGURL(
-          rappor_service,
-          base::StringPrintf("NTP.SuggestionsImpressions.%s", icon_type_suffix),
-          url);
-
-      std::string icon_impression_histogram = base::StringPrintf(
-          "NewTabPage.SuggestionsImpression.%s", icon_type_suffix);
-      LogHistogramEvent(icon_impression_histogram, index, kMaxNumTiles);
-    }
+  if (type > LAST_RECORDED_TILE_TYPE) {
+    return;
   }
 
-  if (have_tile_types) {
-    UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.IconsReal",
-                                counts_per_type[ICON_REAL]);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.IconsColor",
-                                counts_per_type[ICON_COLOR]);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("NewTabPage.IconsGray",
-                                counts_per_type[ICON_DEFAULT]);
+  UMA_HISTOGRAM_ENUMERATION("NewTabPage.TileType", type,
+                            LAST_RECORDED_TILE_TYPE + 1);
+
+  std::string tile_type_histogram =
+      base::StringPrintf("NewTabPage.TileType.%s", source_name.c_str());
+  LogHistogramEvent(tile_type_histogram, type, LAST_RECORDED_TILE_TYPE + 1);
+
+  const char* tile_type_suffix = GetTileTypeSuffix(type);
+  if (tile_type_suffix) {
+    // Note: This handles a null |rappor_service|.
+    rappor::SampleDomainAndRegistryFromGURL(
+        rappor_service,
+        base::StringPrintf("NTP.SuggestionsImpressions.%s", tile_type_suffix),
+        url);
+
+    std::string icon_impression_histogram = base::StringPrintf(
+        "NewTabPage.SuggestionsImpression.%s", tile_type_suffix);
+    LogHistogramEvent(icon_impression_histogram, index, kMaxNumTiles);
   }
 }
 
-void RecordTileClick(int index,
-                     NTPTileSource source,
-                     MostVisitedTileType tile_type) {
+void RecordTileClick(int index, TileSource source, TileVisualType tile_type) {
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.MostVisited", index, kMaxNumTiles);
 
   std::string histogram = base::StringPrintf(
       "NewTabPage.MostVisited.%s", GetSourceHistogramName(source).c_str());
   LogHistogramEvent(histogram, index, kMaxNumTiles);
 
-  const char* icon_type_suffix = GetIconTypeSuffix(tile_type);
-  if (icon_type_suffix) {
-    std::string icon_histogram =
-        base::StringPrintf("NewTabPage.MostVisited.%s", icon_type_suffix);
-    LogHistogramEvent(icon_histogram, index, kMaxNumTiles);
+  const char* tile_type_suffix = GetTileTypeSuffix(tile_type);
+  if (tile_type_suffix) {
+    std::string tile_type_histogram =
+        base::StringPrintf("NewTabPage.MostVisited.%s", tile_type_suffix);
+    LogHistogramEvent(tile_type_histogram, index, kMaxNumTiles);
   }
 
-  if (tile_type < NUM_RECORDED_TILE_TYPES) {
+  if (tile_type <= LAST_RECORDED_TILE_TYPE) {
     UMA_HISTOGRAM_ENUMERATION("NewTabPage.TileTypeClicked", tile_type,
-                              NUM_RECORDED_TILE_TYPES);
+                              LAST_RECORDED_TILE_TYPE + 1);
 
     std::string histogram =
         base::StringPrintf("NewTabPage.TileTypeClicked.%s",
                            GetSourceHistogramName(source).c_str());
-    LogHistogramEvent(histogram, tile_type, NUM_RECORDED_TILE_TYPES);
+    LogHistogramEvent(histogram, tile_type, LAST_RECORDED_TILE_TYPE + 1);
   }
 }
 

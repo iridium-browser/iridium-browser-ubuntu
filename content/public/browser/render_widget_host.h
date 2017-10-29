@@ -25,8 +25,13 @@ class WebMouseEvent;
 class WebMouseWheelEvent;
 }
 
+namespace ui {
+class LatencyInfo;
+}
+
 namespace content {
 
+struct CursorInfo;
 class RenderProcessHost;
 class RenderWidgetHostIterator;
 class RenderWidgetHostView;
@@ -165,6 +170,9 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
       const blink::WebMouseWheelEvent& wheel_event) = 0;
   virtual void ForwardKeyboardEvent(
       const NativeWebKeyboardEvent& key_event) = 0;
+  virtual void ForwardKeyboardEventWithLatencyInfo(
+      const NativeWebKeyboardEvent& key_event,
+      const ui::LatencyInfo& latency_info) = 0;
   virtual void ForwardGestureEvent(
       const blink::WebGestureEvent& gesture_event) = 0;
 
@@ -188,11 +196,6 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   // to give the tab a chance to become active and we don't want to display a
   // warning too soon.
   virtual void RestartHangMonitorTimeoutIfNecessary() = 0;
-
-  // Stops and disables hang monitor. This avoids flakiness in tests that need
-  // to observe things like beforeunload dialogs, which could fail if the
-  // timeout skips the dialog.
-  virtual void DisableHangMonitorForTesting() = 0;
 
   virtual void SetIgnoreInputEvents(bool ignore_input_events) = 0;
 
@@ -268,6 +271,9 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
 
   // Filters drop data before it is passed to RenderWidgetHost.
   virtual void FilterDropData(DropData* drop_data) {}
+
+  // Sets cursor to a specified one when it is over this widget.
+  virtual void SetCursor(const CursorInfo& cursor_info) {}
 };
 
 }  // namespace content

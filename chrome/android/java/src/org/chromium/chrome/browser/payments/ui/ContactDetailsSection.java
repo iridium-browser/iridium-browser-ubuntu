@@ -11,8 +11,9 @@ import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.payments.AutofillAddress;
 import org.chromium.chrome.browser.payments.AutofillContact;
 import org.chromium.chrome.browser.payments.ContactEditor;
+import org.chromium.chrome.browser.payments.JourneyLogger;
 import org.chromium.chrome.browser.payments.PaymentRequestImpl;
-import org.chromium.chrome.browser.payments.PaymentRequestJourneyLogger;
+import org.chromium.chrome.browser.payments.Section;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,7 +29,6 @@ import javax.annotation.Nullable;
 public class ContactDetailsSection extends SectionInformation {
     private final Context mContext;
     private final ContactEditor mContactEditor;
-    private final PaymentRequestJourneyLogger mJourneyLogger = new PaymentRequestJourneyLogger();
 
     private List<AutofillProfile> mProfiles;
 
@@ -37,10 +37,11 @@ public class ContactDetailsSection extends SectionInformation {
      *
      * @param context               Context
      * @param unmodifiableProfiles  The list of profiles to build from.
-     * @param mContactEditor        The Contact Editor associated with this flow.
+     * @param contactEditor         The Contact Editor associated with this flow.
+     * @param journeyLogger         The JourneyLogger for the current Payment Request.
      */
     public ContactDetailsSection(Context context, Collection<AutofillProfile> unmodifiableProfiles,
-            ContactEditor contactEditor) {
+            ContactEditor contactEditor, JourneyLogger journeyLogger) {
         // Initially no items are selected, but they are updated later in the constructor.
         super(PaymentRequestUI.TYPE_CONTACT_DETAILS, null);
 
@@ -50,7 +51,7 @@ public class ContactDetailsSection extends SectionInformation {
         mProfiles = new ArrayList<AutofillProfile>(unmodifiableProfiles);
 
         // Refresh the contact section items and selection.
-        createContactListFromAutofillProfiles();
+        createContactListFromAutofillProfiles(journeyLogger);
     }
 
     /**
@@ -62,9 +63,13 @@ public class ContactDetailsSection extends SectionInformation {
         if (editedAddress == null) return;
 
         // If the profile is currently being displayed, update the items in anticipation of the
-        // contacts section refresh.
-        AutofillContact updatedContact =
+        // contacts section refresh. The updatedContact can be null when user has added a new
+        // shipping address without an email, but the contact info section requires only email
+        // address. Null updatedContact should not be added to the mItems list.
+        @Nullable AutofillContact updatedContact =
                 createAutofillContactFromProfile(editedAddress.getProfile());
+        if (null == updatedContact) return;
+
         if (mItems != null) {
             for (int i = 0; i < mItems.size(); i++) {
                 AutofillContact existingContact = (AutofillContact) mItems.get(i);
@@ -86,7 +91,7 @@ public class ContactDetailsSection extends SectionInformation {
     }
 
     /** Recomputes the list of displayed contacts and possibly updates the selection. */
-    private void createContactListFromAutofillProfiles() {
+    private void createContactListFromAutofillProfiles(JourneyLogger journeyLogger) {
         List<AutofillContact> contacts = new ArrayList<>();
         List<AutofillContact> uniqueContacts = new ArrayList<>();
 
@@ -135,14 +140,17 @@ public class ContactDetailsSection extends SectionInformation {
             if (uniqueContacts.size() == PaymentRequestImpl.SUGGESTIONS_LIMIT) break;
         }
 
-        // Log the number of suggested contact infos.
-        mJourneyLogger.setNumberOfSuggestionsShown(
-                PaymentRequestJourneyLogger.SECTION_CONTACT_INFO, uniqueContacts.size());
-
         // Automatically select the first address if it is complete.
         int firstCompleteContactIndex = SectionInformation.NO_SELECTION;
         if (!uniqueContacts.isEmpty() && uniqueContacts.get(0).isComplete()) {
             firstCompleteContactIndex = 0;
+        }
+
+        // TODO(crbug.com/746062): Remove this once a journeyLogger is passed in tests.
+        if (journeyLogger != null) {
+            // Log the number of suggested contact info.
+            journeyLogger.setNumberOfSuggestionsShown(Section.CONTACT_INFO, uniqueContacts.size(),
+                    firstCompleteContactIndex != SectionInformation.NO_SELECTION);
         }
 
         updateItemsWithCollection(firstCompleteContactIndex, uniqueContacts);

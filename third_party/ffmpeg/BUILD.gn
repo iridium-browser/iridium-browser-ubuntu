@@ -5,6 +5,8 @@
 import("ffmpeg_options.gni")
 import("ffmpeg_generated.gni")
 
+import("//build/buildflag_header.gni")
+
 # Path to platform configuration files.
 platform_config_root =
     "chromium/config/$ffmpeg_branding/$os_config/$ffmpeg_arch"
@@ -129,6 +131,10 @@ config("ffmpegsumo_warnings") {
       # autorename_libavformat_utils.c
       "-Wno-sometimes-uninitialized",
 
+      # clock_gettime is marked as 10.12+ in the 10.12 SDK, but ffmpeg does
+      # correctly check for that before calling.
+      "-Wno-unguarded-availability",
+
       # ffmpeg contains static functions in header files, which lead
       # to unused function warnings. There are a few legit unused
       # functions too.
@@ -142,6 +148,13 @@ config("ffmpegsumo_warnings") {
       cflags += [ "-Wno-inconsistent-dllimport" ]
     }
   }
+}
+
+buildflag_header("ffmpeg_features") {
+  header = "ffmpeg_features.h"
+  flags = [
+    "USE_SYSTEM_FFMPEG=false",
+  ]
 }
 
 if (is_component_ffmpeg) {
@@ -180,7 +193,6 @@ target(link_target_type, "ffmpeg_internal") {
     # with it disabled (in the case of av_dup_packet()), and has no FF_API*
     # gate for avcodec_encode_{audio,video}2() or AVStream.codec.  In the
     # meantime, we directly disable those warnings locally in the C files.
-
   ]
 
   # So we can append below and assume they're defined.
@@ -188,6 +200,7 @@ target(link_target_type, "ffmpeg_internal") {
   ldflags = []
   libs = []
   deps = [
+    ":ffmpeg_features",
     "//third_party/opus",
   ]
 
@@ -221,6 +234,14 @@ target(link_target_type, "ffmpeg_internal") {
     configs += [ "//build/config/compiler:optimize_no_wpo" ]
   } else {
     configs += [ "//build/config/compiler:optimize_max" ]
+  }
+
+  if (ffmpeg_use_atomics_fallback) {
+    if (is_posix) {
+      include_dirs += [ "compat/atomics/gcc" ]
+    } else if (is_win) {
+      include_dirs += [ "compat/atomics/win32" ]
+    }
   }
 
   if (is_posix) {
@@ -288,7 +309,7 @@ target(link_target_type, "ffmpeg_internal") {
       "-L",
       rebase_path(target_gen_dir, root_build_dir),
     ]
-    if (!is_android) {
+    if (!is_android && !is_fuchsia) {
       # OS=android requires that both -lz and -lm occur after
       # -lc++_shared on the link command line. Android link rules
       # already include -lm, and we get -lz as a transitive dependency

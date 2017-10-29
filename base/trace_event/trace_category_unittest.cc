@@ -118,7 +118,7 @@ TEST_F(TraceCategoryTest, Basic) {
 }
 
 // Tries to cover the case of multiple threads creating the same category
-// simultaeously. Should never end up with distinct entries with the same name.
+// simultaneously. Should never end up with distinct entries with the same name.
 TEST_F(TraceCategoryTest, ThreadRaces) {
   const int kNumThreads = 32;
   std::unique_ptr<Thread> threads[kNumThreads];
@@ -130,7 +130,7 @@ TEST_F(TraceCategoryTest, ThreadRaces) {
                            WaitableEvent::InitialState::NOT_SIGNALED);
   for (int i = 0; i < kNumThreads; i++) {
     threads[i]->task_runner()->PostTask(
-        FROM_HERE, Bind(&TestRaceThreadMain, Unretained(&sync_event)));
+        FROM_HERE, BindOnce(&TestRaceThreadMain, Unretained(&sync_event)));
   }
   sync_event.Signal();
   for (int i = 0; i < kNumThreads; i++)

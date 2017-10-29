@@ -14,6 +14,8 @@
 #include "components/autofill/core/browser/legal_message_line.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 
+class PrefService;
+
 namespace base {
 class DictionaryValue;
 }
@@ -30,7 +32,8 @@ class AutofillSaveCardInfoBarDelegateMobile : public ConfirmInfoBarDelegate {
       bool upload,
       const CreditCard& card,
       std::unique_ptr<base::DictionaryValue> legal_message,
-      const base::Closure& save_card_callback);
+      const base::Closure& save_card_callback,
+      PrefService* pref_service);
 
   ~AutofillSaveCardInfoBarDelegateMobile() override;
 
@@ -41,6 +44,10 @@ class AutofillSaveCardInfoBarDelegateMobile : public ConfirmInfoBarDelegate {
 
   // Called when a link in the legal message text was clicked.
   void OnLegalMessageLinkClicked(GURL url);
+
+  // Ensures the InfoBar is not shown if legal messages failed to parse.
+  // Legal messages are only specified for the upload case, not for local save.
+  bool LegalMessagesParsedSuccessfully();
 
   // ConfirmInfoBarDelegate:
   int GetIconId() const override;
@@ -63,6 +70,9 @@ class AutofillSaveCardInfoBarDelegateMobile : public ConfirmInfoBarDelegate {
 
   // The callback to save credit card if the user accepts the infobar.
   base::Closure save_card_callback_;
+
+  // Weak reference to read & write |kAutofillAcceptSaveCreditCardPromptState|,
+  PrefService* pref_service_;
 
   // Did the user ever explicitly accept or dismiss this infobar?
   bool had_user_interaction_;

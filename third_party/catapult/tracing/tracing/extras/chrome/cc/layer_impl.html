@@ -5,7 +5,7 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<link rel="import" href="/tracing/base/rect.html">
+<link rel="import" href="/tracing/base/math/rect.html">
 <link rel="import" href="/tracing/extras/chrome/cc/constants.html">
 <link rel="import" href="/tracing/extras/chrome/cc/region.html">
 <link rel="import" href="/tracing/extras/chrome/cc/tile_coverage_rect.html">
@@ -15,8 +15,8 @@ found in the LICENSE file.
 'use strict';
 
 tr.exportTo('tr.e.cc', function() {
-  var constants = tr.e.cc.constants;
-  var ObjectSnapshot = tr.model.ObjectSnapshot;
+  const constants = tr.e.cc.constants;
+  const ObjectSnapshot = tr.model.ObjectSnapshot;
 
   /**
    * @constructor
@@ -28,14 +28,14 @@ tr.exportTo('tr.e.cc', function() {
   LayerImplSnapshot.prototype = {
     __proto__: ObjectSnapshot.prototype,
 
-    preInitialize: function() {
+    preInitialize() {
       tr.e.cc.preInitializeObject(this);
 
       this.layerTreeImpl_ = undefined;
       this.parentLayer = undefined;
     },
 
-    initialize: function() {
+    initialize() {
       // Defaults.
       this.invalidation = new tr.e.cc.Region();
       this.annotatedInvalidation = new tr.e.cc.Region();
@@ -54,13 +54,13 @@ tr.exportTo('tr.e.cc', function() {
       this.gpuMemoryUsageInBytes = this.args.gpuMemoryUsage;
 
       // Leave bounds in both places.
-      this.bounds = tr.b.Rect.fromXYWH(
+      this.bounds = tr.b.math.Rect.fromXYWH(
           0, 0,
           this.args.bounds.width, this.args.bounds.height);
 
       if (this.args.animationBounds) {
         // AnimationBounds[2] and [5] are the Z-component of the box.
-        this.animationBoundsRect = tr.b.Rect.fromXYWH(
+        this.animationBoundsRect = tr.b.math.Rect.fromXYWH(
             this.args.animationBounds[0], this.args.animationBounds[1],
             this.args.animationBounds[3], this.args.animationBounds[4]);
       }
@@ -70,17 +70,22 @@ tr.exportTo('tr.e.cc', function() {
       // data comes from the new version of cc, otherwise we set the
       // parentLayer as we did before SPv2.
       if (this.children) {
-        for (var i = 0; i < this.children.length; i++)
+        for (let i = 0; i < this.children.length; i++) {
           this.children[i].parentLayer = this;
+        }
       }
-      if (this.maskLayer)
+      if (this.maskLayer) {
         this.maskLayer.parentLayer = this;
-      if (this.replicaLayer)
+      }
+      if (this.replicaLayer) {
         this.replicaLayer.parentLayer = this;
-      if (!this.geometryContentsScale)
+      }
+      if (!this.geometryContentsScale) {
         this.geometryContentsScale = 1.0;
-      if (!this.idealContentsScale)
+      }
+      if (!this.idealContentsScale) {
         this.idealContentsScale = 1.0;
+      }
 
       this.touchEventHandlerRegion = tr.e.cc.Region.fromArrayOrUndefined(
           this.args.touchEventHandlerRegion);
@@ -91,10 +96,12 @@ tr.exportTo('tr.e.cc', function() {
     },
 
     get layerTreeImpl() {
-      if (this.layerTreeImpl_)
+      if (this.layerTreeImpl_) {
         return this.layerTreeImpl_;
-      if (this.parentLayer)
+      }
+      if (this.parentLayer) {
         return this.parentLayer.layerTreeImpl;
+      }
       return undefined;
     },
     set layerTreeImpl(layerTreeImpl) {
@@ -102,16 +109,18 @@ tr.exportTo('tr.e.cc', function() {
     },
 
     get activeLayer() {
-      if (this.layerTreeImpl.whichTree === constants.ACTIVE_TREE)
+      if (this.layerTreeImpl.whichTree === constants.ACTIVE_TREE) {
         return this;
-      var activeTree = this.layerTreeImpl.layerTreeHostImpl.activeTree;
+      }
+      const activeTree = this.layerTreeImpl.layerTreeHostImpl.activeTree;
       return activeTree.findLayerWithId(this.layerId);
     },
 
     get pendingLayer() {
-      if (this.layerTreeImpl.whichTree === constants.PENDING_TREE)
+      if (this.layerTreeImpl.whichTree === constants.PENDING_TREE) {
         return this;
-      var pendingTree = this.layerTreeImpl.layerTreeHostImpl.pendingTree;
+      }
+      const pendingTree = this.layerTreeImpl.layerTreeHostImpl.pendingTree;
       return pendingTree.findLayerWithId(this.layerId);
     }
   };
@@ -126,7 +135,7 @@ tr.exportTo('tr.e.cc', function() {
   PictureLayerImplSnapshot.prototype = {
     __proto__: LayerImplSnapshot.prototype,
 
-    initialize: function() {
+    initialize() {
       LayerImplSnapshot.prototype.initialize.call(this);
 
       if (this.args.invalidation) {
@@ -135,9 +144,9 @@ tr.exportTo('tr.e.cc', function() {
       }
       if (this.args.annotatedInvalidationRects) {
         this.annotatedInvalidation = new tr.e.cc.Region();
-        for (var i = 0; i < this.args.annotatedInvalidationRects.length; ++i) {
-          var annotatedRect = this.args.annotatedInvalidationRects[i];
-          var rect = annotatedRect.geometryRect;
+        for (let i = 0; i < this.args.annotatedInvalidationRects.length; ++i) {
+          const annotatedRect = this.args.annotatedInvalidationRects[i];
+          const rect = annotatedRect.geometryRect;
           rect.reason = annotatedRect.reason;
           this.annotatedInvalidation.addRect(rect);
         }
@@ -159,10 +168,10 @@ tr.exportTo('tr.e.cc', function() {
 
       this.tileCoverageRects = [];
       if (this.args.coverageTiles) {
-        for (var i = 0; i < this.args.coverageTiles.length; ++i) {
-          var rect = this.args.coverageTiles[i].geometryRect.scale(
+        for (let i = 0; i < this.args.coverageTiles.length; ++i) {
+          const rect = this.args.coverageTiles[i].geometryRect.scale(
               this.idealContentsScale);
-          var tile = this.args.coverageTiles[i].tile;
+          const tile = this.args.coverageTiles[i].tile;
           this.tileCoverageRects.push(new tr.e.cc.TileCoverageRect(rect, tile));
         }
         delete this.args.coverageTiles;

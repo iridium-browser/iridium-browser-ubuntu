@@ -1,4 +1,5 @@
 <link rel="import" href="chrome://resources/html/polymer.html">
+
 <link rel="import" href="chrome://resources/html/web_ui_listener_behavior.html">
 <link rel="import" href="default_browser_browser_proxy.html">
 <link rel="import" href="../icons.html">
@@ -7,10 +8,6 @@
 <dom-module id="settings-default-browser-page">
   <template>
     <style include="settings-shared">
-      .solo-secondary {
-        @apply(--settings-secondary);
-        margin: 0;
-      }
     </style>
     <template is="dom-if" if="[[maySetDefaultBrowser_]]">
       <div class="settings-box first two-line">
@@ -18,26 +15,23 @@
           <div id="canBeDefaultBrowser">$i18n{defaultBrowser}</div>
           <div class="secondary">$i18n{defaultBrowserMakeDefault}</div>
         </div>
-        <div class="secondary-action">
-          <paper-button class="secondary-button"
-              on-tap="onSetDefaultBrowserTap_">
-            $i18n{defaultBrowserMakeDefaultButton}
-          </paper-button>
-        </div>
+        <div class="separator"></div>
+        <paper-button class="secondary-button"
+            on-tap="onSetDefaultBrowserTap_">
+          $i18n{defaultBrowserMakeDefaultButton}
+        </paper-button>
       </div>
     </template>
     <template is="dom-if" if="[[!maySetDefaultBrowser_]]">
       <div class="settings-box first">
-        <div class="solo-secondary start" hidden$="[[!isDefault_]]"
-            id="isDefault">
+        <div class="start" hidden$="[[!isDefault_]]" id="isDefault">
           $i18n{defaultBrowserDefault}
         </div>
-        <div class="solo-secondary start" hidden$="[[!isSecondaryInstall_]]"
-          id="isSecondaryInstall">
+        <div class="start" hidden$="[[!isSecondaryInstall_]]"
+            id="isSecondaryInstall">
           $i18n{defaultBrowserSecondary}
         </div>
-        <div class="solo-secondary start" hidden$="[[!isUnknownError_]]"
-          id="isUnknownError">
+        <div class="start" hidden$="[[!isUnknownError_]]" id="isUnknownError">
           $i18n{defaultBrowserError}
         </div>
       </div>

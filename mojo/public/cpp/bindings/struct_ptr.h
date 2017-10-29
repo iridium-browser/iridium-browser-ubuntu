@@ -81,7 +81,8 @@ class StructPtr {
   StructPtr Clone() const { return is_null() ? StructPtr() : ptr_->Clone(); }
 
   // Compares the pointees (which might both be null).
-  // TODO(tibell): Get rid of Equals in favor of the operator. Same for Hash.
+  // TODO(crbug.com/735302): Get rid of Equals in favor of the operator. Same
+  // for Hash.
   bool Equals(const StructPtr& other) const {
     if (is_null() || other.is_null())
       return is_null() && other.is_null();
@@ -228,7 +229,7 @@ template <typename Struct>
 class StructPtrWTFHelper {
  public:
   static bool IsHashTableDeletedValue(const StructPtr<Struct>& value) {
-    return value.ptr_ == reinterpret_cast<Struct*>(1u);
+    return value.ptr_.get() == reinterpret_cast<Struct*>(1u);
   }
 
   static void ConstructDeletedValue(mojo::StructPtr<Struct>& slot) {
@@ -239,7 +240,7 @@ class StructPtrWTFHelper {
     // Dirty trick: implant an invalid pointer in |ptr_|. Destructor isn't
     // called for deleted buckets, so this is okay.
     new (&slot) StructPtr<Struct>();
-    slot.ptr_ = reinterpret_cast<Struct*>(1u);
+    slot.ptr_.reset(reinterpret_cast<Struct*>(1u));
   }
 };
 

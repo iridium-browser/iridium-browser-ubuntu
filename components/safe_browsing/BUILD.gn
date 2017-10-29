@@ -2,6 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//third_party/protobuf/proto_library.gni")
+
+proto_library("csd_proto") {
+  sources = [
+    "csd.proto",
+  ]
+}
+
 source_set("safe_browsing") {
   sources = [
     "base_blocking_page.cc",
@@ -11,16 +19,18 @@ source_set("safe_browsing") {
     "base_ui_manager.cc",
     "base_ui_manager.h",
   ]
-
+  public_deps = [
+    "//components/security_interstitials/content:security_interstitial_page",
+  ]
   deps = [
     ":base_ping_manager",
+    ":features",
     "//base:base",
     "//base:i18n",
+    "//components/safe_browsing/common:safe_browsing_prefs",
+    "//components/safe_browsing/web_ui:constants",
     "//components/safe_browsing_db:database_manager",
-    "//components/safe_browsing_db:safe_browsing_prefs",
-    "//components/security_interstitials/content:security_interstitial_page",
     "//components/security_interstitials/core:core",
-    "//components/subresource_filter/content/browser:browser",
     "//content/public/browser:browser",
     "//content/public/common:common",
     "//net:net",
@@ -59,5 +69,16 @@ source_set("base_ping_manager_unittest") {
     "//net:net",
     "//net:test_support",
     "//testing/gtest",
+  ]
+}
+
+static_library("features") {
+  sources = [
+    "features.cc",
+    "features.h",
+  ]
+
+  deps = [
+    "//base:base",
   ]
 }

@@ -11,6 +11,7 @@
 #include "../private/SkAtomics.h"
 #include "GrGpuResource.h"
 #include "GrNonAtomicRef.h"
+#include "GrXferProcessor.h"
 #include "SkMatrix.h"
 #include "SkRect.h"
 #include "SkString.h"
@@ -20,6 +21,7 @@
 class GrCaps;
 class GrGpuCommandBuffer;
 class GrOpFlushState;
+class GrRenderTargetOpList;
 
 /**
  * GrOp is the base class for all Ganesh deferred GPU operations. To facilitate reordering and to
@@ -76,6 +78,12 @@ public:
         return fBounds;
     }
 
+    void setClippedBounds(const SkRect& clippedBounds) {
+        fBounds = clippedBounds;
+        // The clipped bounds already incorporate any effect of the bounds flags.
+        fBoundsFlags = 0;
+    }
+
     bool hasAABloat() const {
         SkASSERT(fBoundsFlags != kUninitialized_BoundsFlag);
         return SkToBool(fBoundsFlags & kAABloat_BoundsFlag);
@@ -118,7 +126,14 @@ public:
         }
         return fUniqueID;
     }
-    SkDEBUGCODE(bool isUsed() const { return fUsed; })
+
+    /**
+     * This is called to notify the op that it has been recorded into a GrOpList. Ops can use this
+     * to begin preparations for the flush of the op list. Note that the op still may either be
+     * combined into another op or have another op combined into it via combineIfPossible() after
+     * this call is made.
+     */
+    virtual void wasRecorded(GrRenderTargetOpList*) {}
 
     /**
      * Called prior to executing. The op should perform any resource creation or data transfers
@@ -127,7 +142,7 @@ public:
     void prepare(GrOpFlushState* state) { this->onPrepare(state); }
 
     /** Issues the op's commands to GrGpu. */
-    void execute(GrOpFlushState* state, const SkRect& bounds) { this->onExecute(state, bounds); }
+    void execute(GrOpFlushState* state) { this->onExecute(state); }
 
     /** Used for spewing information about ops when debugging. */
     virtual SkString dumpInfo() const {
@@ -136,6 +151,8 @@ public:
                        fBounds.fLeft, fBounds.fTop, fBounds.fRight, fBounds.fBottom);
         return string;
     }
+
+    virtual bool needsCommandBufferIsolation() const { return false; }
 
 protected:
     /**
@@ -186,7 +203,7 @@ private:
     virtual bool onCombineIfPossible(GrOp*, const GrCaps& caps) = 0;
 
     virtual void onPrepare(GrOpFlushState*) = 0;
-    virtual void onExecute(GrOpFlushState*, const SkRect& bounds) = 0;
+    virtual void onExecute(GrOpFlushState*) = 0;
 
     static uint32_t GenID(int32_t* idCounter) {
         // The atomic inc returns the old value not the incremented value. So we add
@@ -215,7 +232,6 @@ private:
         SkDEBUGCODE(kUninitialized_BoundsFlag   = 0x4)
     };
 
-    SkDEBUGCODE(bool                    fUsed;)
     const uint16_t                      fClassID;
     uint16_t                            fBoundsFlags;
 

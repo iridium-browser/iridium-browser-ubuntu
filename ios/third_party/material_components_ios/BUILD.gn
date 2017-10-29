@@ -27,12 +27,6 @@ config("config") {
     "src/components/Snackbar/src",
     "src/components/Typography/src",
   ]
-
-  cflags_objc = [
-    # Do not consider use of deprecated API as errors when building third-party
-    # libraries.
-    "-Wno-error=deprecated-declarations",
-  ]
 }
 
 _icon_names = [
@@ -51,6 +45,9 @@ source_set("material_components_ios") {
     "src/components/ActivityIndicator/src/MaterialActivityIndicator.h",
     "src/components/AnimationTiming/src/CAMediaTimingFunction+MDCAnimationTiming.h",
     "src/components/AnimationTiming/src/CAMediaTimingFunction+MDCAnimationTiming.m",
+    "src/components/AnimationTiming/src/MaterialAnimationTiming.h",
+    "src/components/AnimationTiming/src/UIView+MDCTimingFunction.h",
+    "src/components/AnimationTiming/src/UIView+MDCTimingFunction.m",
     "src/components/AppBar/src/MDCAppBar.h",
     "src/components/AppBar/src/MDCAppBar.m",
     "src/components/AppBar/src/MDCAppBarContainerViewController.h",
@@ -166,6 +163,8 @@ source_set("material_components_ios") {
     "src/components/Typography/src/MDCTypography.h",
     "src/components/Typography/src/MDCTypography.m",
     "src/components/Typography/src/MaterialTypography.h",
+    "src/components/Typography/src/private/UIFont+MaterialTypographyPrivate.h",
+    "src/components/Typography/src/private/UIFont+MaterialTypographyPrivate.m",
     "src/components/private/Application/src/MaterialApplication.h",
     "src/components/private/Application/src/UIApplication+AppExtensions.h",
     "src/components/private/Application/src/UIApplication+AppExtensions.m",
@@ -189,11 +188,13 @@ source_set("material_components_ios") {
     "src/components/private/Icons/src/MaterialIcons.h",
     "src/components/private/KeyboardWatcher/src/MDCKeyboardWatcher.h",
     "src/components/private/KeyboardWatcher/src/MDCKeyboardWatcher.m",
+    "src/components/private/Math/src/MDCMath.h",
+    "src/components/private/Math/src/MaterialMath.h",
     "src/components/private/Overlay/src/MDCOverlayImplementor.h",
     "src/components/private/Overlay/src/MDCOverlayObserver.h",
     "src/components/private/Overlay/src/MDCOverlayObserver.m",
     "src/components/private/Overlay/src/MDCOverlayTransitioning.h",
-    "src/components/private/Overlay/src/MaterialOverlays.h",
+    "src/components/private/Overlay/src/MaterialOverlay.h",
     "src/components/private/Overlay/src/private/MDCOverlayAnimationObserver.h",
     "src/components/private/Overlay/src/private/MDCOverlayAnimationObserver.m",
     "src/components/private/Overlay/src/private/MDCOverlayObserverOverlay.h",
@@ -224,6 +225,7 @@ source_set("material_components_ios") {
     "src/components/ButtonBar/src",
     "src/components/NavigationBar/src",
     "src/components/OverlayWindow/src",
+    "src/components/private/Math/src",
     "src/components/private/Application/src",
     "src/components/private/Color/src",
     "src/components/private/Icons/src",
@@ -248,6 +250,7 @@ source_set("material_components_ios") {
   ]
 
   deps = [
+    ":material_collection_cells_bundle",
     ":material_collections_bundle",
     ":material_component_ic_arrow_back_bundle",
     "//ios/third_party/material_text_accessibility_ios",
@@ -267,14 +270,46 @@ source_set("material_components_ios") {
   ]
 }
 
-bundle_data("material_collections_bundle") {
+_locales = [ "en" ]
+
+foreach(locale, _locales) {
+  bundle_data("material_collections_bundle_$locale") {
+    visibility = [ ":material_collections_bundle" ]
+    sources = [
+      "src/components/Collections/src/MaterialCollections.bundle/Resources/$locale.lproj/MaterialCollections.strings",
+    ]
+    outputs = [
+      "{{bundle_root_dir}}/MaterialCollections.bundle/Resources/$locale.lproj/{{source_file_part}}",
+    ]
+  }
+
+  bundle_data("material_collection_cells_bundle_$locale") {
+    visibility = [ ":material_collection_cells_bundle" ]
+    sources = [
+      "src/components/CollectionCells/src/MaterialCollectionCells.bundle/Resources/$locale.lproj/MaterialCollectionCells.strings",
+    ]
+    outputs = [
+      "{{bundle_resources_dir}}/MaterialCollectionCells.bundle/Resources/$locale.lproj/{{source_file_part}}",
+    ]
+  }
+}
+
+group("material_collections_bundle") {
   visibility = [ ":material_components_ios" ]
-  sources = [
-    "src/components/Collections/src/MaterialCollections.bundle/Resources/en.lproj/MaterialCollections.strings",
-  ]
-  outputs = [
-    "{{bundle_root_dir}}/MaterialCollections.bundle/Resources/en.lproj/{{source_file_part}}",
-  ]
+
+  deps = []
+  foreach(locale, _locales) {
+    deps += [ ":material_collections_bundle_$locale" ]
+  }
+}
+
+group("material_collection_cells_bundle") {
+  visibility = [ ":material_components_ios" ]
+
+  deps = []
+  foreach(locale, _locales) {
+    deps += [ ":material_collection_cells_bundle_$locale" ]
+  }
 }
 
 # TODO(crbug.com/662421): Move back to _icon_names when there is just one

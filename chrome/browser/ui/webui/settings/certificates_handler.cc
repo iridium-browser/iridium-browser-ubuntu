@@ -19,7 +19,6 @@
 #include "base/id_map.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/posix/safe_strerror.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -35,7 +34,6 @@
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
-#include "net/base/crypto_module.h"
 #include "net/base/net_errors.h"
 #include "net/cert/x509_certificate.h"
 #include "net/der/input.h"
@@ -87,15 +85,14 @@ struct DictionaryIdComparator {
   explicit DictionaryIdComparator(icu::Collator* collator)
       : collator_(collator) {}
 
-  bool operator()(const std::unique_ptr<base::Value>& a,
-                  const std::unique_ptr<base::Value>& b) const {
-    DCHECK(a->GetType() == base::Value::Type::DICTIONARY);
-    DCHECK(b->GetType() == base::Value::Type::DICTIONARY);
+  bool operator()(const base::Value& a, const base::Value& b) const {
+    DCHECK(a.GetType() == base::Value::Type::DICTIONARY);
+    DCHECK(b.GetType() == base::Value::Type::DICTIONARY);
     const base::DictionaryValue* a_dict;
-    bool a_is_dictionary = a->GetAsDictionary(&a_dict);
+    bool a_is_dictionary = a.GetAsDictionary(&a_dict);
     DCHECK(a_is_dictionary);
     const base::DictionaryValue* b_dict;
-    bool b_is_dictionary = b->GetAsDictionary(&b_dict);
+    bool b_is_dictionary = b.GetAsDictionary(&b_dict);
     DCHECK(b_is_dictionary);
     base::string16 a_str;
     base::string16 b_str;
@@ -301,8 +298,9 @@ base::CancelableTaskTracker::TaskId FileAccessProvider::StartRead(
   return tracker->PostTaskAndReply(
       BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE).get(),
       FROM_HERE,
-      base::Bind(&FileAccessProvider::DoRead, this, path, saved_errno, data),
-      base::Bind(callback, base::Owned(saved_errno), base::Owned(data)));
+      base::BindOnce(&FileAccessProvider::DoRead, this, path, saved_errno,
+                     data),
+      base::BindOnce(callback, base::Owned(saved_errno), base::Owned(data)));
 }
 
 base::CancelableTaskTracker::TaskId FileAccessProvider::StartWrite(
@@ -317,10 +315,11 @@ base::CancelableTaskTracker::TaskId FileAccessProvider::StartWrite(
   // Post task to file thread to write file.
   return tracker->PostTaskAndReply(
       BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE).get(),
-      FROM_HERE, base::Bind(&FileAccessProvider::DoWrite, this, path, data,
-                            saved_errno, bytes_written),
-      base::Bind(callback, base::Owned(saved_errno),
-                 base::Owned(bytes_written)));
+      FROM_HERE,
+      base::BindOnce(&FileAccessProvider::DoWrite, this, path, data,
+                     saved_errno, bytes_written),
+      base::BindOnce(callback, base::Owned(saved_errno),
+                     base::Owned(bytes_written)));
 }
 
 void FileAccessProvider::DoRead(const base::FilePath& path,
@@ -460,7 +459,7 @@ void CertificatesHandler::FileSelectionCanceled(void* params) {
     case IMPORT_SERVER_FILE_SELECTED:
     case IMPORT_CA_FILE_SELECTED:
       ImportExportCleanup();
-      RejectCallback(*base::Value::CreateNullValue());
+      RejectCallback(base::Value());
       break;
     default:
       NOTREACHED();
@@ -543,7 +542,7 @@ void CertificatesHandler::HandleEditCATrust(const base::ListValue* args) {
         l10n_util::GetStringUTF8(
             IDS_SETTINGS_CERTIFICATE_MANAGER_UNKNOWN_ERROR));
   } else {
-    ResolveCallback(*base::Value::CreateNullValue());
+    ResolveCallback(base::Value());
   }
 }
 
@@ -575,7 +574,7 @@ void CertificatesHandler::HandleExportPersonal(const base::ListValue* args) {
 void CertificatesHandler::ExportPersonalFileSelected(
     const base::FilePath& path) {
   file_path_ = path;
-  ResolveCallback(*base::Value::CreateNullValue());
+  ResolveCallback(base::Value());
 }
 
 void CertificatesHandler::HandleExportPersonalPasswordSelected(
@@ -629,7 +628,7 @@ void CertificatesHandler::ExportPersonalFileWritten(const int* write_errno,
             IDS_SETTINGS_CERTIFICATE_MANAGER_WRITE_ERROR_FORMAT,
             UTF8ToUTF16(base::safe_strerror(*write_errno))));
   } else {
-    ResolveCallback(*base::Value::CreateNullValue());
+    ResolveCallback(base::Value());
   }
 }
 
@@ -745,7 +744,7 @@ void CertificatesHandler::ImportPersonalSlotUnlocked() {
   int string_id;
   switch (result) {
     case net::OK:
-      ResolveCallback(*base::Value::CreateNullValue());
+      ResolveCallback(base::Value());
       return;
     case net::ERR_PKCS12_IMPORT_BAD_PASSWORD:
       // TODO(mattm): if the error was a bad password, we should reshow the
@@ -852,7 +851,7 @@ void CertificatesHandler::ImportServerFileRead(const int* read_errno,
             IDS_SETTINGS_CERTIFICATE_MANAGER_SERVER_IMPORT_ERROR_TITLE),
         not_imported);
   } else {
-    ResolveCallback(*base::Value::CreateNullValue());
+    ResolveCallback(base::Value());
   }
   ImportExportCleanup();
 }
@@ -907,7 +906,7 @@ void CertificatesHandler::ImportCAFileRead(const int* read_errno,
 
   // TODO(mattm): check here if root_cert is not a CA cert and show error.
 
-  base::StringValue cert_name(root_cert->subject().GetDisplayName());
+  base::Value cert_name(root_cert->subject().GetDisplayName());
   ResolveCallback(cert_name);
 }
 
@@ -944,7 +943,7 @@ void CertificatesHandler::HandleImportCATrustSelected(
             IDS_SETTINGS_CERTIFICATE_MANAGER_CA_IMPORT_ERROR_TITLE),
         not_imported);
   } else {
-    ResolveCallback(*base::Value::CreateNullValue());
+    ResolveCallback(base::Value());
   }
   ImportExportCleanup();
 }
@@ -974,7 +973,7 @@ void CertificatesHandler::HandleDeleteCertificate(const base::ListValue* args) {
         l10n_util::GetStringUTF8(
             IDS_SETTINGS_CERTIFICATE_MANAGER_UNKNOWN_ERROR));
   } else {
-    ResolveCallback(*base::Value::CreateNullValue());
+    ResolveCallback(base::Value());
   }
 }
 
@@ -989,9 +988,8 @@ void CertificatesHandler::CertificateManagerModelReady() {
       certificate_manager_model_->is_user_db_available());
   base::Value tpm_available_value(
       certificate_manager_model_->is_tpm_available());
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("certificates-model-ready"),
-                         user_db_available_value, tpm_available_value);
+  FireWebUIListener("certificates-model-ready", user_db_available_value,
+                    tpm_available_value);
   certificate_manager_model_->Refresh();
 }
 
@@ -1046,7 +1044,7 @@ void CertificatesHandler::PopulateTree(
       dict->SetString(kNameField, i->first);
 
       // Populate second level (certs).
-      base::ListValue* subnodes = new base::ListValue;
+      auto subnodes = base::MakeUnique<base::ListValue>();
       for (net::CertificateList::const_iterator org_cert_it = i->second.begin();
            org_cert_it != i->second.end(); ++org_cert_it) {
         std::unique_ptr<base::DictionaryValue> cert_dict(
@@ -1078,26 +1076,24 @@ void CertificatesHandler::PopulateTree(
       }
       std::sort(subnodes->begin(), subnodes->end(), comparator);
 
-      dict->Set(kSubnodesField, subnodes);
+      dict->Set(kSubnodesField, std::move(subnodes));
       nodes->Append(std::move(dict));
     }
     std::sort(nodes->begin(), nodes->end(), comparator);
 
-    CallJavascriptFunction("cr.webUIListenerCallback",
-                           base::StringValue("certificates-changed"),
-                           base::StringValue(tab_name), *nodes);
+    FireWebUIListener("certificates-changed", base::Value(tab_name), *nodes);
   }
 }
 
 void CertificatesHandler::ResolveCallback(const base::Value& response) {
   DCHECK(!webui_callback_id_.empty());
-  ResolveJavascriptCallback(base::StringValue(webui_callback_id_), response);
+  ResolveJavascriptCallback(base::Value(webui_callback_id_), response);
   webui_callback_id_.clear();
 }
 
 void CertificatesHandler::RejectCallback(const base::Value& response) {
   DCHECK(!webui_callback_id_.empty());
-  RejectJavascriptCallback(base::StringValue(webui_callback_id_), response);
+  RejectJavascriptCallback(base::Value(webui_callback_id_), response);
   webui_callback_id_.clear();
 }
 
@@ -1137,8 +1133,7 @@ void CertificatesHandler::RejectCallbackWithImportError(
   std::unique_ptr<base::DictionaryValue> error_info(new base::DictionaryValue);
   error_info->SetString(kErrorTitle, title);
   error_info->SetString(kErrorDescription, error);
-  error_info->Set(kCertificateErrors,
-                  base::WrapUnique(cert_error_list.release()));
+  error_info->Set(kCertificateErrors, std::move(cert_error_list));
   RejectCallback(*error_info);
 }
 

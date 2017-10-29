@@ -28,7 +28,9 @@
         },
         {
             "type": "@Common.Revealer",
-            "contextTypes": ["Common.Setting"],
+            "contextTypes": [
+                "Common.Setting"
+            ],
             "className": "Settings.SettingsScreen.Revealer"
         },
         {
@@ -48,23 +50,15 @@
             "location": "settings-view",
             "id": "preferences",
             "title": "Preferences",
-            "order": "0",
+            "order": 0,
             "className": "Settings.GenericSettingsTab"
-        },
-        {
-            "type": "view",
-            "location": "settings-view",
-            "id": "workspace",
-            "title": "Workspace",
-            "order": "1",
-            "className": "Settings.WorkspaceSettingsTab"
         },
         {
             "type": "view",
             "location": "settings-view",
             "id": "experiments",
             "title": "Experiments",
-            "order": "2",
+            "order": 2,
             "experiment": "*",
             "className": "Settings.ExperimentsSettingsTab"
         },
@@ -73,12 +67,13 @@
             "location": "settings-view",
             "id": "blackbox",
             "title": "Blackboxing",
-            "order": "3",
+            "order": 3,
             "className": "Settings.FrameworkBlackboxSettingsTab"
         },
         {
             "type": "@UI.ViewLocationResolver",
             "name": "settings-view",
+            "category": "Settings",
             "className": "Settings.SettingsScreen"
         }
     ],
@@ -86,12 +81,10 @@
         "components"
     ],
     "scripts": [
-        "EditFileSystemView.js",
         "SettingsScreen.js",
         "FrameworkBlackboxSettingsTab.js"
     ],
     "resources": [
-        "editFileSystemView.css",
         "frameworkBlackboxSettingsTab.css",
         "settingsScreen.css"
     ]

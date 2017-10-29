@@ -6,174 +6,204 @@
 
 #include "bindings/core/v8/SourceLocation.h"
 #include "core/dom/Document.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/frame/Deprecation.h"
+#include "core/frame/WebLocalFrameBase.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/ThreadableLoadingContext.h"
+#include "core/loader/WorkerFetchContext.h"
+#include "core/workers/GlobalScopeCreationParams.h"
 #include "core/workers/WorkerInspectorProxy.h"
-#include "core/workers/WorkerThreadStartupData.h"
-#include "wtf/CurrentTime.h"
+#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/loader/fetch/ResourceFetcher.h"
+#include "platform/wtf/CurrentTime.h"
+#include "public/platform/WebWorkerFetchContext.h"
+#include "public/web/WebFrameClient.h"
 
 namespace blink {
 
 namespace {
 
-static int s_liveMessagingProxyCount = 0;
+static int g_live_messaging_proxy_count = 0;
 
 }  // namespace
 
 ThreadedMessagingProxyBase::ThreadedMessagingProxyBase(
-    ExecutionContext* executionContext)
-    : m_executionContext(executionContext),
-      m_workerInspectorProxy(WorkerInspectorProxy::create()),
-      m_parentFrameTaskRunners(ParentFrameTaskRunners::create(
-          toDocument(m_executionContext.get())->frame())),
-      m_mayBeDestroyed(false),
-      m_askedToTerminate(false) {
-  DCHECK(isParentContextThread());
-  s_liveMessagingProxyCount++;
+    ExecutionContext* execution_context,
+    WorkerClients* worker_clients)
+    : execution_context_(execution_context),
+      worker_clients_(worker_clients),
+      worker_inspector_proxy_(WorkerInspectorProxy::Create()),
+      parent_frame_task_runners_(ParentFrameTaskRunners::Create(
+          *ToDocument(execution_context_.Get())->GetFrame())),
+      asked_to_terminate_(false),
+      keep_alive_(this) {
+  DCHECK(IsParentContextThread());
+  g_live_messaging_proxy_count++;
+
+  if (RuntimeEnabledFeatures::OffMainThreadFetchEnabled()) {
+    Document* document = ToDocument(execution_context_);
+    WebLocalFrameBase* web_frame =
+        WebLocalFrameBase::FromFrame(document->GetFrame());
+    std::unique_ptr<WebWorkerFetchContext> web_worker_fetch_context =
+        web_frame->Client()->CreateWorkerFetchContext();
+    DCHECK(web_worker_fetch_context);
+    web_worker_fetch_context->SetApplicationCacheHostID(
+        document->Fetcher()->Context().ApplicationCacheHostID());
+    web_worker_fetch_context->SetDataSaverEnabled(
+        document->GetFrame()->GetSettings()->GetDataSaverEnabled());
+    ProvideWorkerFetchContextToWorker(worker_clients,
+                                      std::move(web_worker_fetch_context));
+  }
 }
 
 ThreadedMessagingProxyBase::~ThreadedMessagingProxyBase() {
-  DCHECK(isParentContextThread());
-  if (m_loaderProxy)
-    m_loaderProxy->detachProvider(this);
-  s_liveMessagingProxyCount--;
+  g_live_messaging_proxy_count--;
 }
 
-int ThreadedMessagingProxyBase::proxyCount() {
-  DCHECK(isMainThread());
-  return s_liveMessagingProxyCount;
+int ThreadedMessagingProxyBase::ProxyCount() {
+  DCHECK(IsMainThread());
+  return g_live_messaging_proxy_count;
 }
 
-void ThreadedMessagingProxyBase::initializeWorkerThread(
-    std::unique_ptr<WorkerThreadStartupData> startupData) {
-  DCHECK(isParentContextThread());
-
-  Document* document = toDocument(getExecutionContext());
-  double originTime =
-      document->loader() ? document->loader()->timing().referenceMonotonicTime()
-                         : monotonicallyIncreasingTime();
-
-  m_loaderProxy = WorkerLoaderProxy::create(this);
-  m_workerThread = createWorkerThread(originTime);
-  m_workerThread->start(std::move(startupData), getParentFrameTaskRunners());
-  workerThreadCreated();
+DEFINE_TRACE(ThreadedMessagingProxyBase) {
+  visitor->Trace(execution_context_);
+  visitor->Trace(worker_clients_);
+  visitor->Trace(worker_inspector_proxy_);
 }
 
-void ThreadedMessagingProxyBase::postTaskToWorkerGlobalScope(
-    const WebTraceLocation& location,
-    std::unique_ptr<WTF::CrossThreadClosure> task) {
-  if (m_askedToTerminate)
-    return;
+void ThreadedMessagingProxyBase::InitializeWorkerThread(
+    std::unique_ptr<GlobalScopeCreationParams> global_scope_creation_params,
+    const WTF::Optional<WorkerBackingThreadStartupData>& thread_startup_data,
+    const KURL& script_url) {
+  DCHECK(IsParentContextThread());
 
-  DCHECK(m_workerThread);
-  m_workerThread->postTask(location, std::move(task));
+  Document* document = ToDocument(GetExecutionContext());
+
+  worker_thread_ = CreateWorkerThread();
+  worker_thread_->Start(std::move(global_scope_creation_params),
+                        thread_startup_data, GetParentFrameTaskRunners());
+  WorkerThreadCreated();
+  GetWorkerInspectorProxy()->WorkerThreadCreated(document, GetWorkerThread(),
+                                                 script_url);
 }
 
-void ThreadedMessagingProxyBase::postTaskToLoader(
-    const WebTraceLocation& location,
-    std::unique_ptr<WTF::CrossThreadClosure> task) {
-  m_parentFrameTaskRunners->get(TaskType::Networking)
-      ->postTask(BLINK_FROM_HERE, std::move(task));
+void ThreadedMessagingProxyBase::CountFeature(WebFeature feature) {
+  DCHECK(IsParentContextThread());
+  UseCounter::Count(execution_context_, feature);
 }
 
-ThreadableLoadingContext*
-ThreadedMessagingProxyBase::getThreadableLoadingContext() {
-  DCHECK(isParentContextThread());
-  if (!m_loadingContext) {
-    m_loadingContext =
-        ThreadableLoadingContext::create(*toDocument(m_executionContext));
-  }
-  return m_loadingContext;
+void ThreadedMessagingProxyBase::CountDeprecation(WebFeature feature) {
+  DCHECK(IsParentContextThread());
+  Deprecation::CountDeprecation(execution_context_, feature);
 }
 
-void ThreadedMessagingProxyBase::countFeature(UseCounter::Feature feature) {
-  DCHECK(isParentContextThread());
-  UseCounter::count(m_executionContext, feature);
-}
-
-void ThreadedMessagingProxyBase::countDeprecation(UseCounter::Feature feature) {
-  DCHECK(isParentContextThread());
-  Deprecation::countDeprecation(m_executionContext, feature);
-}
-
-void ThreadedMessagingProxyBase::reportConsoleMessage(
+void ThreadedMessagingProxyBase::ReportConsoleMessage(
     MessageSource source,
     MessageLevel level,
     const String& message,
     std::unique_ptr<SourceLocation> location) {
-  DCHECK(isParentContextThread());
-  if (m_askedToTerminate)
+  DCHECK(IsParentContextThread());
+  if (asked_to_terminate_)
     return;
-  if (m_workerInspectorProxy)
-    m_workerInspectorProxy->addConsoleMessageFromWorker(level, message,
-                                                        std::move(location));
+  if (worker_inspector_proxy_)
+    worker_inspector_proxy_->AddConsoleMessageFromWorker(level, message,
+                                                         std::move(location));
 }
 
-void ThreadedMessagingProxyBase::workerThreadCreated() {
-  DCHECK(isParentContextThread());
-  DCHECK(!m_askedToTerminate);
-  DCHECK(m_workerThread);
+void ThreadedMessagingProxyBase::WorkerThreadCreated() {
+  DCHECK(IsParentContextThread());
+  DCHECK(!asked_to_terminate_);
+  DCHECK(worker_thread_);
 }
 
-void ThreadedMessagingProxyBase::parentObjectDestroyed() {
-  DCHECK(isParentContextThread());
-
-  getParentFrameTaskRunners()
-      ->get(TaskType::UnspecedTimer)
-      ->postTask(
-          BLINK_FROM_HERE,
-          WTF::bind(&ThreadedMessagingProxyBase::parentObjectDestroyedInternal,
-                    WTF::unretained(this)));
+void ThreadedMessagingProxyBase::ParentObjectDestroyed() {
+  DCHECK(IsParentContextThread());
+  if (worker_thread_) {
+    // Request to terminate the global scope. This will eventually call
+    // WorkerThreadTerminated().
+    TerminateGlobalScope();
+  } else {
+    WorkerThreadTerminated();
+  }
 }
 
-void ThreadedMessagingProxyBase::parentObjectDestroyedInternal() {
-  DCHECK(isParentContextThread());
-  m_mayBeDestroyed = true;
-  if (m_workerThread)
-    terminateGlobalScope();
-  else
-    workerThreadTerminated();
-}
-
-void ThreadedMessagingProxyBase::workerThreadTerminated() {
-  DCHECK(isParentContextThread());
+void ThreadedMessagingProxyBase::WorkerThreadTerminated() {
+  DCHECK(IsParentContextThread());
 
   // This method is always the last to be performed, so the proxy is not
-  // needed for communication in either side any more. However, the Worker
-  // object may still exist, and it assumes that the proxy exists, too.
-  m_askedToTerminate = true;
-  m_workerThread = nullptr;
-  m_workerInspectorProxy->workerThreadTerminated();
-  if (m_mayBeDestroyed)
-    delete this;
+  // needed for communication in either side any more. However, the parent
+  // Worker/Worklet object may still exist, and it assumes that the proxy
+  // exists, too.
+  asked_to_terminate_ = true;
+  worker_thread_ = nullptr;
+  worker_inspector_proxy_->WorkerThreadTerminated();
+
+  // If the parent Worker/Worklet object was already destroyed, this will
+  // destroy |this|.
+  keep_alive_.Clear();
 }
 
-void ThreadedMessagingProxyBase::terminateGlobalScope() {
-  DCHECK(isParentContextThread());
+void ThreadedMessagingProxyBase::TerminateGlobalScope() {
+  DCHECK(IsParentContextThread());
 
-  if (m_askedToTerminate)
+  if (asked_to_terminate_)
     return;
-  m_askedToTerminate = true;
+  asked_to_terminate_ = true;
 
-  if (m_workerThread)
-    m_workerThread->terminate();
+  if (worker_thread_)
+    worker_thread_->Terminate();
 
-  m_workerInspectorProxy->workerThreadTerminated();
+  worker_inspector_proxy_->WorkerThreadTerminated();
 }
 
-void ThreadedMessagingProxyBase::postMessageToPageInspector(
+void ThreadedMessagingProxyBase::PostMessageToPageInspector(
+    int session_id,
     const String& message) {
-  DCHECK(isParentContextThread());
-  if (m_workerInspectorProxy)
-    m_workerInspectorProxy->dispatchMessageFromWorker(message);
+  DCHECK(IsParentContextThread());
+  if (worker_inspector_proxy_)
+    worker_inspector_proxy_->DispatchMessageFromWorker(session_id, message);
 }
 
-bool ThreadedMessagingProxyBase::isParentContextThread() const {
+ThreadableLoadingContext*
+ThreadedMessagingProxyBase::CreateThreadableLoadingContext() const {
+  DCHECK(IsParentContextThread());
+  return ThreadableLoadingContext::Create(*ToDocument(execution_context_));
+}
+
+ExecutionContext* ThreadedMessagingProxyBase::GetExecutionContext() const {
+  DCHECK(IsParentContextThread());
+  return execution_context_;
+}
+
+ParentFrameTaskRunners* ThreadedMessagingProxyBase::GetParentFrameTaskRunners()
+    const {
+  DCHECK(IsParentContextThread());
+  return parent_frame_task_runners_;
+}
+
+WorkerInspectorProxy* ThreadedMessagingProxyBase::GetWorkerInspectorProxy()
+    const {
+  DCHECK(IsParentContextThread());
+  return worker_inspector_proxy_;
+}
+
+WorkerThread* ThreadedMessagingProxyBase::GetWorkerThread() const {
+  DCHECK(IsParentContextThread());
+  return worker_thread_.get();
+}
+
+WorkerClients* ThreadedMessagingProxyBase::ReleaseWorkerClients() {
+  DCHECK(IsParentContextThread());
+  DCHECK(worker_clients_);
+  return worker_clients_.Release();
+}
+
+bool ThreadedMessagingProxyBase::IsParentContextThread() const {
   // TODO(nhiroki): Nested worker is not supported yet, so the parent context
   // thread should be equal to the main thread (http://crbug.com/31666).
-  DCHECK(m_executionContext->isDocument());
-  return isMainThread();
+  DCHECK(execution_context_->IsDocument());
+  return IsMainThread();
 }
 
 }  // namespace blink

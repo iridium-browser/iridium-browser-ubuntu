@@ -74,10 +74,8 @@ HardwareDisplayController* DrmWindow::GetController() {
 void DrmWindow::SetBounds(const gfx::Rect& bounds) {
   TRACE_EVENT2("drm", "DrmWindow::SetBounds", "widget", widget_, "bounds",
                bounds.ToString());
-  if (bounds_.size() != bounds.size()) {
+  if (bounds_.size() != bounds.size())
     last_submitted_planes_.clear();
-    overlay_validator_->ClearCache();
-  }
 
   bounds_ = bounds;
   screen_manager_->UpdateControllerToWindowMapping();
@@ -117,7 +115,7 @@ void DrmWindow::MoveCursor(const gfx::Point& location) {
 }
 
 void DrmWindow::SchedulePageFlip(const std::vector<OverlayPlane>& planes,
-                                 const SwapCompletionCallback& callback) {
+                                 SwapCompletionOnceCallback callback) {
   if (controller_) {
     const DrmDevice* drm = controller_->GetAllocationDrmDevice().get();
     for (const auto& plane : planes) {
@@ -132,22 +130,21 @@ void DrmWindow::SchedulePageFlip(const std::vector<OverlayPlane>& planes,
 
   if (force_buffer_reallocation_) {
     force_buffer_reallocation_ = false;
-    callback.Run(gfx::SwapResult::SWAP_NAK_RECREATE_BUFFERS);
+    std::move(callback).Run(gfx::SwapResult::SWAP_NAK_RECREATE_BUFFERS);
     return;
   }
 
-  last_submitted_planes_ =
-      overlay_validator_->PrepareBuffersForPageFlip(planes);
+  last_submitted_planes_ = planes;
 
   if (!controller_) {
-    callback.Run(gfx::SwapResult::SWAP_ACK);
+    std::move(callback).Run(gfx::SwapResult::SWAP_ACK);
     return;
   }
 
-  controller_->SchedulePageFlip(last_submitted_planes_, callback);
+  controller_->SchedulePageFlip(last_submitted_planes_, std::move(callback));
 }
 
-std::vector<OverlayCheck_Params> DrmWindow::TestPageFlip(
+std::vector<OverlayCheckReturn_Params> DrmWindow::TestPageFlip(
     const std::vector<OverlayCheck_Params>& overlay_params) {
   return overlay_validator_->TestPageFlip(overlay_params,
                                           last_submitted_planes_);
@@ -223,8 +220,6 @@ void DrmWindow::SetController(HardwareDisplayController* controller) {
   UpdateCursorBuffers();
   // We changed displays, so we want to update the cursor as well.
   ResetCursor(false /* bitmap_only */);
-  // Reset any cache in Validator.
-  overlay_validator_->ClearCache();
 }
 
 void DrmWindow::UpdateCursorBuffers() {

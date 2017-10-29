@@ -37,7 +37,7 @@
 #include "chromecast/browser/url_request_context_factory.h"
 #include "chromecast/common/global_descriptors.h"
 #include "chromecast/media/audio/cast_audio_manager.h"
-#include "chromecast/media/cma/backend/media_pipeline_backend_factory.h"
+#include "chromecast/media/cma/backend/media_pipeline_backend_factory_impl.h"
 #include "chromecast/media/cma/backend/media_pipeline_backend_manager.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
 #include "components/crash/content/app/breakpad_linux.h"
@@ -55,30 +55,41 @@
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/web_preferences.h"
+#include "media/audio/audio_thread_impl.h"
+#include "media/mojo/features.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gl/gl_switches.h"
 
-#if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
+#if BUILDFLAG(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
 #include "chromecast/media/service/cast_mojo_media_client.h"
-#include "media/mojo/services/media_service.h"  // nogncheck
+#include "media/mojo/interfaces/constants.mojom.h"  // nogncheck
+#include "media/mojo/services/media_service.h"      // nogncheck
 #endif  // ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS
 
 #if defined(OS_ANDROID)
+#include "components/cdm/browser/cdm_message_filter_android.h"
 #include "components/crash/content/browser/crash_dump_manager_android.h"
 #else
-#include "chromecast/media/cdm/cast_cdm_factory.h"
+#include "chromecast/browser/memory_pressure_controller_impl.h"
 #endif  // defined(OS_ANDROID)
+
+#if BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
+#include "chromecast/media/cdm/cast_cdm_factory.h"
+#endif  // BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
+
+#if defined(USE_ALSA)
+#include "chromecast/media/audio/cast_audio_manager_alsa.h"  // nogncheck
+#endif  // defined(USE_ALSA)
 
 namespace chromecast {
 namespace shell {
 
 namespace {
-#if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
+#if BUILDFLAG(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
 static std::unique_ptr<service_manager::Service> CreateMediaService(
     CastContentBrowserClient* browser_client) {
   std::unique_ptr<media::CastMojoMediaClient> mojo_media_client(
@@ -92,7 +103,7 @@ static std::unique_ptr<service_manager::Service> CreateMediaService(
   return std::unique_ptr<service_manager::Service>(
       new ::media::MediaService(std::move(mojo_media_client)));
 }
-#endif  // defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
+#endif  // BUILDFLAG(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
 
 }  // namespace
 
@@ -109,6 +120,7 @@ CastContentBrowserClient::~CastContentBrowserClient() {
 
 void CastContentBrowserClient::AppendExtraCommandLineSwitches(
     base::CommandLine* command_line) {
+#if defined(USE_AURA)
   std::string process_type =
       command_line->GetSwitchValueNative(switches::kProcessType);
   if (process_type == switches::kGpuProcess) {
@@ -122,7 +134,17 @@ void CastContentBrowserClient::AppendExtraCommandLineSwitches(
       command_line->AppendSwitchASCII(switches::kCastInitialScreenHeight,
                                       base::IntToString(res.height()));
     }
+    base::CommandLine* browser_command_line =
+        base::CommandLine::ForCurrentProcess();
+    for (auto* const switch_name : {switches::kUseDoubleBuffering}) {
+      if (browser_command_line->HasSwitch(switch_name)) {
+        command_line->AppendSwitchASCII(
+            switch_name,
+            browser_command_line->GetSwitchValueASCII(switch_name));
+      }
+    }
   }
+#endif  // defined(USE_AURA)
 }
 
 void CastContentBrowserClient::PreCreateThreads() {
@@ -132,7 +154,6 @@ std::unique_ptr<CastService> CastContentBrowserClient::CreateCastService(
     content::BrowserContext* browser_context,
     PrefService* pref_service,
     net::URLRequestContextGetter* request_context_getter,
-    DisableQuicClosure disable_quic_closure,
     media::VideoPlaneController* video_plane_controller,
     CastWindowManager* window_manager) {
   return base::MakeUnique<CastServiceSimple>(browser_context, pref_service,
@@ -143,7 +164,7 @@ media::VideoModeSwitcher* CastContentBrowserClient::GetVideoModeSwitcher() {
   return nullptr;
 }
 
-#if !defined(OS_ANDROID)
+#if BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
 media::VideoResolutionPolicy*
 CastContentBrowserClient::GetVideoResolutionPolicy() {
   return nullptr;
@@ -160,7 +181,7 @@ CastContentBrowserClient::GetMediaPipelineBackendFactory() {
   DCHECK(GetMediaTaskRunner()->BelongsToCurrentThread());
   if (!media_pipeline_backend_factory_) {
     media_pipeline_backend_factory_.reset(
-        new media::MediaPipelineBackendFactory(
+        new media::MediaPipelineBackendFactoryImpl(
             media_pipeline_backend_manager()));
   }
   return media_pipeline_backend_factory_.get();
@@ -177,22 +198,37 @@ CastContentBrowserClient::media_pipeline_backend_manager() {
   return cast_browser_main_parts_->media_pipeline_backend_manager();
 }
 
-::media::ScopedAudioManagerPtr CastContentBrowserClient::CreateAudioManager(
+std::unique_ptr<::media::AudioManager>
+CastContentBrowserClient::CreateAudioManager(
     ::media::AudioLogFactory* audio_log_factory) {
-  return ::media::ScopedAudioManagerPtr(new media::CastAudioManager(
-      GetMediaTaskRunner(), GetMediaTaskRunner(), audio_log_factory,
-      media_pipeline_backend_manager()));
+  // TODO(alokp): Consider switching off the mixer on audio platforms
+  // because we already have a mixer in the audio pipeline downstream of
+  // CastAudioManager.
+  bool use_mixer = true;
+#if defined(USE_ALSA)
+  return base::MakeUnique<media::CastAudioManagerAlsa>(
+      base::MakeUnique<::media::AudioThreadImpl>(), audio_log_factory,
+      base::MakeUnique<media::MediaPipelineBackendFactoryImpl>(
+          media_pipeline_backend_manager()),
+      GetMediaTaskRunner(), use_mixer);
+#else
+  return base::MakeUnique<media::CastAudioManager>(
+      base::MakeUnique<::media::AudioThreadImpl>(), audio_log_factory,
+      base::MakeUnique<media::MediaPipelineBackendFactoryImpl>(
+          media_pipeline_backend_manager()),
+      GetMediaTaskRunner(), use_mixer);
+#endif  // defined(USE_ALSA)
 }
 
 std::unique_ptr<::media::CdmFactory>
 CastContentBrowserClient::CreateCdmFactory() {
-#if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
+#if BUILDFLAG(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
   return base::MakeUnique<media::CastCdmFactory>(GetMediaTaskRunner(),
                                                  media_resource_tracker());
-#endif  // defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
+#endif  // BUILDFLAG(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
   return nullptr;
 }
-#endif  // !defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
 
 media::MediaCapsImpl* CastContentBrowserClient::media_caps() {
   DCHECK(cast_browser_main_parts_);
@@ -231,6 +267,15 @@ void CastContentBrowserClient::RenderProcessWillLaunch(
                     url_request_context_factory_->GetSystemGetter())),
       base::Bind(&CastContentBrowserClient::AddNetworkHintsMessageFilter,
                  base::Unretained(this), host->GetID()));
+
+#if defined(OS_ANDROID)
+  // Cast on Android build always uses kForceVideoOverlays command line switch
+  // such that secure codecs can always be rendered.
+  // TODO(yucliu): On Clank, secure codecs support is tied to AndroidOverlay.
+  // Remove kForceVideoOverlays and swtich to the Clank model for secure codecs
+  // support.
+  host->AddFilter(new cdm::CdmMessageFilterAndroid(true));
+#endif  // defined(OS_ANDROID)
 }
 
 void CastContentBrowserClient::AddNetworkHintsMessageFilter(
@@ -290,12 +335,18 @@ void CastContentBrowserClient::AppendExtraCommandLineSwitches(
     command_line->AppendSwitch(switches::kEnableCrashReporter);
   }
 
-  // Renderer process command-line
+  // Command-line for different processes.
   if (process_type == switches::kRendererProcess) {
     // Any browser command-line switches that should be propagated to
     // the renderer go here.
     if (browser_command_line->HasSwitch(switches::kAllowHiddenMediaPlayback))
       command_line->AppendSwitch(switches::kAllowHiddenMediaPlayback);
+  } else if (process_type == switches::kUtilityProcess) {
+    if (browser_command_line->HasSwitch(switches::kAudioOutputChannels)) {
+      command_line->AppendSwitchASCII(switches::kAudioOutputChannels,
+                                      browser_command_line->GetSwitchValueASCII(
+                                          switches::kAudioOutputChannels));
+    }
   }
 
 #if defined(OS_LINUX)
@@ -354,13 +405,11 @@ CastContentBrowserClient::CreateQuotaPermissionContext() {
 void CastContentBrowserClient::GetQuotaSettings(
     content::BrowserContext* context,
     content::StoragePartition* partition,
-    const storage::OptionalQuotaSettingsCallback& callback) {
-  content::BrowserThread::PostTaskAndReplyWithResult(
-      content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&storage::CalculateNominalDynamicSettings,
-                 partition->GetPath(), context->IsOffTheRecord()),
-      callback);
+    storage::OptionalQuotaSettingsCallback callback) {
+  storage::GetNominalDynamicSettings(
+      partition->GetPath(), context->IsOffTheRecord(), std::move(callback));
 }
+
 void CastContentBrowserClient::AllowCertificateError(
     content::WebContents* web_contents,
     int cert_error,
@@ -383,17 +432,18 @@ void CastContentBrowserClient::AllowCertificateError(
 void CastContentBrowserClient::SelectClientCertificate(
     content::WebContents* web_contents,
     net::SSLCertRequestInfo* cert_request_info,
+    net::ClientCertIdentityList client_certs,
     std::unique_ptr<content::ClientCertificateDelegate> delegate) {
   GURL requesting_url("https://" + cert_request_info->host_and_port.ToString());
 
   if (!requesting_url.is_valid()) {
     LOG(ERROR) << "Invalid URL string: "
                << requesting_url.possibly_invalid_spec();
-    delegate->ContinueWithCertificate(nullptr);
+    delegate->ContinueWithCertificate(nullptr, nullptr);
     return;
   }
 
-  // In our case there are no relevant certs in the cert_request_info. The cert
+  // In our case there are no relevant certs in |client_certs|. The cert
   // we need to return (if permitted) is the Cast device cert, which we can
   // access directly through the ClientAuthSigner instance. However, we need to
   // be on the IO thread to determine whether the app is whitelisted to return
@@ -403,37 +453,47 @@ void CastContentBrowserClient::SelectClientCertificate(
   //
   // TODO(davidben): Stop using child ID to identify an app.
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  content::BrowserThread::PostTaskAndReplyWithResult(
+  content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&CastContentBrowserClient::SelectClientCertificateOnIOThread,
-                 base::Unretained(this), requesting_url,
-                 web_contents->GetRenderProcessHost()->GetID()),
-      base::Bind(&content::ClientCertificateDelegate::ContinueWithCertificate,
-                 base::Owned(delegate.release())));
+      base::BindOnce(
+          &CastContentBrowserClient::SelectClientCertificateOnIOThread,
+          base::Unretained(this), requesting_url,
+          web_contents->GetRenderProcessHost()->GetID(),
+          base::SequencedTaskRunnerHandle::Get(),
+          base::Bind(
+              &content::ClientCertificateDelegate::ContinueWithCertificate,
+              base::Owned(delegate.release()))));
 }
 
-net::X509Certificate*
-CastContentBrowserClient::SelectClientCertificateOnIOThread(
+void CastContentBrowserClient::SelectClientCertificateOnIOThread(
     GURL requesting_url,
-    int render_process_id) {
+    int render_process_id,
+    scoped_refptr<base::SequencedTaskRunner> original_runner,
+    const base::Callback<void(scoped_refptr<net::X509Certificate>,
+                              scoped_refptr<net::SSLPrivateKey>)>&
+        continue_callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   CastNetworkDelegate* network_delegate =
       url_request_context_factory_->app_network_delegate();
   if (network_delegate->IsWhitelisted(requesting_url,
                                       render_process_id, false)) {
-    return CastNetworkDelegate::DeviceCert();
+    original_runner->PostTask(
+        FROM_HERE,
+        base::Bind(continue_callback, CastNetworkDelegate::DeviceCert(),
+                   CastNetworkDelegate::DeviceKey()));
+    return;
   } else {
     LOG(ERROR) << "Invalid host for client certificate request: "
                << requesting_url.host()
                << " with render_process_id: "
                << render_process_id;
-    return NULL;
   }
+  original_runner->PostTask(FROM_HERE,
+                            base::Bind(continue_callback, nullptr, nullptr));
 }
 
 bool CastContentBrowserClient::CanCreateWindow(
-    int opener_render_process_id,
-    int opener_render_frame_id,
+    content::RenderFrameHost* opener,
     const GURL& opener_url,
     const GURL& opener_top_level_frame_url,
     const GURL& source_origin,
@@ -445,28 +505,39 @@ bool CastContentBrowserClient::CanCreateWindow(
     const blink::mojom::WindowFeatures& features,
     bool user_gesture,
     bool opener_suppressed,
-    content::ResourceContext* context,
     bool* no_javascript_access) {
   *no_javascript_access = true;
   return false;
 }
 
 void CastContentBrowserClient::ExposeInterfacesToRenderer(
-    service_manager::InterfaceRegistry* registry,
+    service_manager::BinderRegistry* registry,
+    content::AssociatedInterfaceRegistry* associated_registry,
     content::RenderProcessHost* render_process_host) {
   registry->AddInterface(
       base::Bind(&media::MediaCapsImpl::AddBinding,
                  base::Unretained(cast_browser_main_parts_->media_caps())),
       base::ThreadTaskRunnerHandle::Get());
+
+#if !defined(OS_ANDROID)
+  if (!memory_pressure_controller_) {
+    memory_pressure_controller_.reset(new MemoryPressureControllerImpl());
+  }
+
+  registry->AddInterface(
+      base::Bind(&MemoryPressureControllerImpl::AddBinding,
+                 base::Unretained(memory_pressure_controller_.get())),
+      base::ThreadTaskRunnerHandle::Get());
+#endif  // !defined(OS_ANDROID)
 }
 
 void CastContentBrowserClient::RegisterInProcessServices(
     StaticServiceMap* services) {
-#if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-  content::ServiceInfo info;
+#if BUILDFLAG(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
+  service_manager::EmbeddedServiceInfo info;
   info.factory = base::Bind(&CreateMediaService, base::Unretained(this));
   info.task_runner = GetMediaTaskRunner();
-  services->insert(std::make_pair("media", info));
+  services->insert(std::make_pair(::media::mojom::kMediaServiceName, info));
 #endif
 }
 
@@ -474,11 +545,15 @@ std::unique_ptr<base::Value>
 CastContentBrowserClient::GetServiceManifestOverlay(
     base::StringPiece service_name) {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  if (service_name != content::mojom::kBrowserServiceName)
+  int id = -1;
+  if (service_name == content::mojom::kBrowserServiceName)
+    id = IDR_CAST_CONTENT_BROWSER_MANIFEST_OVERLAY;
+  else if (service_name == content::mojom::kPackagedServicesServiceName)
+    id = IDR_CAST_CONTENT_PACKAGED_SERVICES_MANIFEST_OVERLAY;
+  else
     return nullptr;
   base::StringPiece manifest_contents =
-      rb.GetRawDataResourceForScale(IDR_CAST_CONTENT_BROWSER_MANIFEST_OVERLAY,
-                                    ui::ScaleFactor::SCALE_FACTOR_NONE);
+      rb.GetRawDataResourceForScale(id, ui::ScaleFactor::SCALE_FACTOR_NONE);
   return base::JSONReader::Read(manifest_contents);
 }
 

@@ -38,8 +38,8 @@ class DisplayD3D : public DisplayImpl
                                      NativePixmapType nativePixmap,
                                      const egl::AttributeMap &attribs) override;
 
-    ImageImpl *createImage(EGLenum target,
-                           egl::ImageSibling *buffer,
+    ImageImpl *createImage(const egl::ImageState &state,
+                           EGLenum target,
                            const egl::AttributeMap &attribs) override;
 
     ContextImpl *createContext(const gl::ContextState &state) override;
@@ -53,7 +53,7 @@ class DisplayD3D : public DisplayImpl
     egl::ConfigSet generateConfigs() override;
 
     bool testDeviceLost() override;
-    egl::Error restoreLostDevice() override;
+    egl::Error restoreLostDevice(const egl::Display *display) override;
 
     bool isValidNativeWindow(EGLNativeWindowType window) const override;
     egl::Error validateClientBuffer(const egl::Config *configuration,
@@ -65,10 +65,8 @@ class DisplayD3D : public DisplayImpl
 
     std::string getVendorString() const override;
 
-    egl::Error waitClient() const override;
-    egl::Error waitNative(EGLint engine,
-                          egl::Surface *drawSurface,
-                          egl::Surface *readSurface) const override;
+    egl::Error waitClient(const gl::Context *context) const override;
+    egl::Error waitNative(const gl::Context *context, EGLint engine) const override;
     gl::Version getMaxSupportedESVersion() const override;
 
   private:

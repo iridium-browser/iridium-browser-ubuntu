@@ -20,56 +20,50 @@
 #include "modules/plugins/DOMPlugin.h"
 
 #include "platform/plugins/PluginData.h"
-#include "wtf/text/AtomicString.h"
+#include "platform/wtf/text/AtomicString.h"
 
 namespace blink {
 
-DOMPlugin::DOMPlugin(PluginData* pluginData, LocalFrame* frame, unsigned index)
-    : ContextClient(frame), m_pluginData(pluginData), m_index(index) {}
-
-DOMPlugin::~DOMPlugin() {}
+DOMPlugin::DOMPlugin(LocalFrame* frame, const PluginInfo& plugin_info)
+    : ContextClient(frame), plugin_info_(&plugin_info) {}
 
 DEFINE_TRACE(DOMPlugin) {
-  ContextClient::trace(visitor);
+  ContextClient::Trace(visitor);
+  visitor->Trace(plugin_info_);
 }
 
 String DOMPlugin::name() const {
-  return pluginInfo().name;
+  return plugin_info_->Name();
 }
 
 String DOMPlugin::filename() const {
-  return pluginInfo().file;
+  return plugin_info_->Filename();
 }
 
 String DOMPlugin::description() const {
-  return pluginInfo().desc;
+  return plugin_info_->Description();
 }
 
 unsigned DOMPlugin::length() const {
-  return pluginInfo().mimes.size();
+  return plugin_info_->GetMimeClassInfoSize();
 }
 
 DOMMimeType* DOMPlugin::item(unsigned index) {
-  if (index >= pluginInfo().mimes.size())
+  const MimeClassInfo* mime = plugin_info_->GetMimeClassInfo(index);
+
+  if (!mime)
     return nullptr;
 
-  const MimeClassInfo& mime = pluginInfo().mimes[index];
-
-  const Vector<MimeClassInfo>& mimes = m_pluginData->mimes();
-  for (unsigned i = 0; i < mimes.size(); ++i) {
-    if (mimes[i] == mime && m_pluginData->mimePluginIndices()[i] == m_index)
-      return DOMMimeType::create(m_pluginData.get(), frame(), i);
-  }
-  return nullptr;
+  return DOMMimeType::Create(GetFrame(), *mime);
 }
 
-DOMMimeType* DOMPlugin::namedItem(const AtomicString& propertyName) {
-  const Vector<MimeClassInfo>& mimes = m_pluginData->mimes();
-  for (unsigned i = 0; i < mimes.size(); ++i) {
-    if (mimes[i].type == propertyName)
-      return DOMMimeType::create(m_pluginData.get(), frame(), i);
-  }
-  return nullptr;
+DOMMimeType* DOMPlugin::namedItem(const AtomicString& property_name) {
+  const MimeClassInfo* mime = plugin_info_->GetMimeClassInfo(property_name);
+
+  if (!mime)
+    return nullptr;
+
+  return DOMMimeType::Create(GetFrame(), *mime);
 }
 
 }  // namespace blink

@@ -4,7 +4,6 @@
 
 #include "ash/content/screen_orientation_delegate_chromeos.h"
 
-#include "ash/common/wm_window.h"
 #include "ash/display/screen_orientation_controller_chromeos.h"
 #include "ash/shell.h"
 #include "content/public/browser/web_contents.h"
@@ -27,25 +26,21 @@ bool ScreenOrientationDelegateChromeos::FullScreenRequired(
 void ScreenOrientationDelegateChromeos::Lock(
     content::WebContents* web_contents,
     blink::WebScreenOrientationLockType lock_orientation) {
-  Shell::GetInstance()
-      ->screen_orientation_controller()
-      ->LockOrientationForWindow(
-          WmWindow::Get(web_contents->GetNativeView()), lock_orientation,
-          ScreenOrientationController::LockCompletionBehavior::None);
+  Shell::Get()->screen_orientation_controller()->LockOrientationForWindow(
+      web_contents->GetNativeView(), lock_orientation,
+      ScreenOrientationController::LockCompletionBehavior::None);
 }
 
 bool ScreenOrientationDelegateChromeos::ScreenOrientationProviderSupported() {
-  return Shell::GetInstance()
+  return Shell::Get()
       ->screen_orientation_controller()
       ->ScreenOrientationProviderSupported();
 }
 
 void ScreenOrientationDelegateChromeos::Unlock(
     content::WebContents* web_contents) {
-  Shell::GetInstance()
-      ->screen_orientation_controller()
-      ->UnlockOrientationForWindow(
-          WmWindow::Get(web_contents->GetNativeView()));
+  Shell::Get()->screen_orientation_controller()->UnlockOrientationForWindow(
+      web_contents->GetNativeView());
 }
 
 }  // namespace ash

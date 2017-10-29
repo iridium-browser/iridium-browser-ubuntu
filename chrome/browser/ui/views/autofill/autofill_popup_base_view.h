@@ -35,8 +35,8 @@ class AutofillPopupBaseView : public views::WidgetDelegateView,
   // Hide the widget and delete |this|.
   void DoHide();
 
-  // Update size of popup and paint.
-  void DoUpdateBoundsAndRedrawPopup();
+  // Update size of popup and paint (virtual for testing).
+  virtual void DoUpdateBoundsAndRedrawPopup();
 
  private:
   friend class AutofillPopupBaseViewTest;
@@ -77,6 +77,8 @@ class AutofillPopupBaseView : public views::WidgetDelegateView,
 
   // The widget of the window that triggered this popup. Weak reference.
   views::Widget* parent_widget_;
+
+  views::ScrollView* scroll_view_;
 
   // The time when the popup was shown.
   base::Time show_time_;

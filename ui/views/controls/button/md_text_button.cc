@@ -19,32 +19,32 @@
 #include "ui/views/border.h"
 #include "ui/views/controls/button/blue_button.h"
 #include "ui/views/controls/focus_ring.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/painter.h"
 #include "ui/views/style/platform_style.h"
-#include "ui/views/views_delegate.h"
+#include "ui/views/style/typography.h"
 
 namespace views {
 
 namespace {
 
+bool UseMaterialSecondaryButtons() {
+#if defined(OS_MACOSX)
+  return true;
+#else
+  return ui::MaterialDesignController::IsSecondaryUiMaterial();
+#endif  // defined(OS_MACOSX)
+}
+
 LabelButton* CreateButton(ButtonListener* listener,
                           const base::string16& text,
                           bool md) {
   if (md)
-    return MdTextButton::Create(listener, text);
+    return MdTextButton::Create(listener, text, style::CONTEXT_BUTTON_MD);
 
-  LabelButton* button = new LabelButton(listener, text);
-  button->SetStyle(CustomButton::STYLE_BUTTON);
+  LabelButton* button = new LabelButton(listener, text, style::CONTEXT_BUTTON);
+  button->SetStyleDeprecated(CustomButton::STYLE_BUTTON);
   return button;
-}
-
-const gfx::FontList& GetMdFontList() {
-  static base::LazyInstance<gfx::FontList>::Leaky font_list =
-      LAZY_INSTANCE_INITIALIZER;
-  const gfx::Font::Weight min_weight = gfx::Font::Weight::MEDIUM;
-  if (font_list.Get().GetFontWeight() < min_weight)
-    font_list.Get() = font_list.Get().DeriveWithWeight(min_weight);
-  return font_list.Get();
 }
 
 }  // namespace
@@ -52,16 +52,16 @@ const gfx::FontList& GetMdFontList() {
 // static
 LabelButton* MdTextButton::CreateSecondaryUiButton(ButtonListener* listener,
                                                    const base::string16& text) {
-  return CreateButton(listener, text,
-                      ui::MaterialDesignController::IsSecondaryUiMaterial());
+  return CreateButton(listener, text, UseMaterialSecondaryButtons());
 }
 
 // static
 LabelButton* MdTextButton::CreateSecondaryUiBlueButton(
     ButtonListener* listener,
     const base::string16& text) {
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
-    MdTextButton* md_button = MdTextButton::Create(listener, text);
+  if (UseMaterialSecondaryButtons()) {
+    MdTextButton* md_button =
+        MdTextButton::Create(listener, text, style::CONTEXT_BUTTON_MD);
     md_button->SetProminent(true);
     return md_button;
   }
@@ -71,8 +71,9 @@ LabelButton* MdTextButton::CreateSecondaryUiBlueButton(
 
 // static
 MdTextButton* MdTextButton::Create(ButtonListener* listener,
-                                   const base::string16& text) {
-  MdTextButton* button = new MdTextButton(listener);
+                                   const base::string16& text,
+                                   int button_context) {
+  MdTextButton* button = new MdTextButton(listener, button_context);
   button->SetText(text);
   button->SetFocusForPlatform();
   return button;
@@ -170,36 +171,24 @@ void MdTextButton::SetText(const base::string16& text) {
   UpdatePadding();
 }
 
-void MdTextButton::AdjustFontSize(int size_delta) {
-  LabelButton::AdjustFontSize(size_delta);
-  UpdatePadding();
-}
-
 void MdTextButton::UpdateStyleToIndicateDefaultStatus() {
   is_prominent_ = is_prominent_ || is_default();
   UpdateColors();
 }
 
-void MdTextButton::SetFontList(const gfx::FontList& font_list) {
-  NOTREACHED()
-      << "Don't call MdTextButton::SetFontList (it will soon be protected)";
-}
-
-MdTextButton::MdTextButton(ButtonListener* listener)
-    : LabelButton(listener, base::string16()),
+MdTextButton::MdTextButton(ButtonListener* listener, int button_context)
+    : LabelButton(listener, base::string16(), button_context),
       is_prominent_(false) {
-  SetInkDropMode(PlatformStyle::kUseRipples ? InkDropMode::ON
-                                            : InkDropMode::OFF);
+  SetInkDropMode(InkDropMode::ON);
   set_has_ink_drop_action_on_click(true);
   SetHorizontalAlignment(gfx::ALIGN_CENTER);
   SetFocusForPlatform();
-  const int minimum_width =
-      ViewsDelegate::GetInstance()->GetButtonMinimumWidth();
+  const int minimum_width = LayoutProvider::Get()->GetDistanceMetric(
+      DISTANCE_DIALOG_BUTTON_MINIMUM_WIDTH);
   SetMinSize(gfx::Size(minimum_width, 0));
   SetFocusPainter(nullptr);
   label()->SetAutoColorReadabilityEnabled(false);
   set_request_focus_on_press(false);
-  LabelButton::SetFontList(GetMdFontList());
 
   set_animate_on_state_change(true);
 
@@ -228,7 +217,13 @@ void MdTextButton::UpdatePadding() {
   // * Linux user sets base system font size to 17dp. For a normal button, the
   // |size_delta| will be zero, so to adjust upwards we double 17 to get 34.
   int size_delta =
-      label()->font_list().GetFontSize() - GetMdFontList().GetFontSize();
+      label()->font_list().GetFontSize() -
+      style::GetFont(style::CONTEXT_BUTTON_MD, style::STYLE_PRIMARY)
+          .GetFontSize();
+  // TODO(tapted): This should get |target_height| using LayoutProvider::
+  // GetControlHeightForFont(). It can't because that only returns a correct
+  // result with --secondary-ui-md, and MdTextButtons appear in top chrome
+  // without that.
   const int kBaseHeight = 28;
   int target_height = std::max(kBaseHeight + size_delta * 2,
                                label()->font_list().GetFontSize() * 2);
@@ -240,28 +235,28 @@ void MdTextButton::UpdatePadding() {
 
   // TODO(estade): can we get rid of the platform style border hoopla if
   // we apply the MD treatment to all buttons, even GTK buttons?
-  const int horizontal_padding =
-      ViewsDelegate::GetInstance()->GetButtonHorizontalPadding();
+  const int horizontal_padding = LayoutProvider::Get()->GetDistanceMetric(
+      DISTANCE_BUTTON_HORIZONTAL_PADDING);
   SetBorder(CreateEmptyBorder(top_padding, horizontal_padding, bottom_padding,
                               horizontal_padding));
 }
 
 void MdTextButton::UpdateColors() {
-  ui::NativeTheme::ColorId fg_color_id =
-      is_prominent_ ? ui::NativeTheme::kColorId_TextOnProminentButtonColor
-                    : ui::NativeTheme::kColorId_ButtonEnabledColor;
-
   ui::NativeTheme* theme = GetNativeTheme();
+  SkColor enabled_text_color = style::GetColor(
+      label()->text_context(),
+      is_prominent_ ? style::STYLE_DIALOG_BUTTON_DEFAULT : style::STYLE_PRIMARY,
+      theme);
   if (!explicitly_set_normal_color()) {
     const auto colors = explicitly_set_colors();
-    LabelButton::SetEnabledTextColors(theme->GetSystemColor(fg_color_id));
+    LabelButton::SetEnabledTextColors(enabled_text_color);
     set_explicitly_set_colors(colors);
   }
 
   // Prominent buttons keep their enabled text color; disabled state is conveyed
   // by shading the background instead.
   if (is_prominent_)
-    SetTextColor(STATE_DISABLED, theme->GetSystemColor(fg_color_id));
+    SetTextColor(STATE_DISABLED, enabled_text_color);
 
   SkColor text_color = label()->enabled_color();
   SkColor bg_color =
@@ -299,9 +294,10 @@ void MdTextButton::UpdateColors() {
   }
 
   DCHECK_EQ(SK_AlphaOPAQUE, static_cast<int>(SkColorGetA(bg_color)));
-  set_background(Background::CreateBackgroundPainter(
-      Painter::CreateRoundRectWith1PxBorderPainter(bg_color, stroke_color,
-                                                   kInkDropSmallCornerRadius)));
+  SetBackground(
+      CreateBackgroundFromPainter(Painter::CreateRoundRectWith1PxBorderPainter(
+          bg_color, stroke_color, kInkDropSmallCornerRadius)));
+  SchedulePaint();
 }
 
 }  // namespace views

@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkBlurMaskFilter.h"
 #include "SkCanvas.h"
 #include "SkPath.h"
@@ -110,7 +111,7 @@ protected:
 
         canvas->clipPath(path, true); // AA is on
 
-        canvas->drawText("M", 1,
+        canvas->drawString("M",
                          SkIntToScalar(100), SkIntToScalar(100),
                          paint);
 
@@ -125,7 +126,7 @@ protected:
         paint2.setStyle(SkPaint::kStroke_Style);
         paint2.setStrokeWidth(1);
         sk_tool_utils::set_portable_typeface(&paint2);
-        canvas->drawText("M", 1,
+        canvas->drawString("M",
                          SkIntToScalar(100), SkIntToScalar(100),
                          paint2);
 

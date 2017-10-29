@@ -49,7 +49,7 @@ private:
 
     typedef GrFragmentProcessor INHERITED;
 
-    GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
+    GR_DECLARE_FRAGMENT_PROCESSOR_TEST
 
 };
 
@@ -85,7 +85,7 @@ public:
     static inline void GenKey(const GrProcessor&, const GrShaderCaps&, GrProcessorKeyBuilder*);
 
 protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
+    void onSetData(const GrGLSLProgramDataManager&, const GrFragmentProcessor&) override;
 
 private:
     GrGLSLProgramDataManager::UniformHandle fRectUniform;
@@ -132,12 +132,11 @@ void GLAARectEffect::emitCode(EmitArgs& args) {
     if (GrProcessorEdgeTypeIsInverseFill(aare.getEdgeType())) {
         fragBuilder->codeAppend("\t\talpha = 1.0 - alpha;\n");
     }
-    fragBuilder->codeAppendf("\t\t%s = %s;\n", args.fOutputColor,
-                             (GrGLSLExpr4(args.fInputColor) * GrGLSLExpr1("alpha")).c_str());
+    fragBuilder->codeAppendf("\t\t%s = %s * alpha;\n", args.fOutputColor, args.fInputColor);
 }
 
 void GLAARectEffect::onSetData(const GrGLSLProgramDataManager& pdman,
-                               const GrProcessor& processor) {
+                               const GrFragmentProcessor& processor) {
     const AARectEffect& aare = processor.cast<AARectEffect>();
     const SkRect& rect = aare.getRect();
     if (rect != fPrevRect) {
@@ -166,7 +165,9 @@ GrGLSLFragmentProcessor* AARectEffect::onCreateGLSLInstance() const  {
 class GrGLConvexPolyEffect : public GrGLSLFragmentProcessor {
 public:
     GrGLConvexPolyEffect() {
-        fPrevEdges[0] = SK_ScalarNaN;
+        for (size_t i = 0; i < SK_ARRAY_COUNT(fPrevEdges); ++i) {
+            fPrevEdges[i] = SK_ScalarNaN;
+        }
     }
 
     void emitCode(EmitArgs&) override;
@@ -174,7 +175,7 @@ public:
     static inline void GenKey(const GrProcessor&, const GrShaderCaps&, GrProcessorKeyBuilder*);
 
 protected:
-    void onSetData(const GrGLSLProgramDataManager&, const GrProcessor&) override;
+    void onSetData(const GrGLSLProgramDataManager&, const GrFragmentProcessor&) override;
 
 private:
     GrGLSLProgramDataManager::UniformHandle fEdgeUniform;
@@ -210,12 +211,11 @@ void GrGLConvexPolyEffect::emitCode(EmitArgs& args) {
     if (GrProcessorEdgeTypeIsInverseFill(cpe.getEdgeType())) {
         fragBuilder->codeAppend("\talpha = 1.0 - alpha;\n");
     }
-    fragBuilder->codeAppendf("\t%s = %s;\n", args.fOutputColor,
-                             (GrGLSLExpr4(args.fInputColor) * GrGLSLExpr1("alpha")).c_str());
+    fragBuilder->codeAppendf("\t%s = %s * alpha;\n", args.fOutputColor, args.fInputColor);
 }
 
 void GrGLConvexPolyEffect::onSetData(const GrGLSLProgramDataManager& pdman,
-                                     const GrProcessor& effect) {
+                                     const GrFragmentProcessor& effect) {
     const GrConvexPolyEffect& cpe = effect.cast<GrConvexPolyEffect>();
     size_t byteSize = 3 * cpe.getEdgeCount() * sizeof(SkScalar);
     if (0 != memcmp(fPrevEdges, cpe.getEdges(), byteSize)) {
@@ -234,8 +234,7 @@ void GrGLConvexPolyEffect::GenKey(const GrProcessor& processor, const GrShaderCa
 
 //////////////////////////////////////////////////////////////////////////////
 
-sk_sp<GrFragmentProcessor> GrConvexPolyEffect::Make(GrPrimitiveEdgeType type, const SkPath& path,
-                                                    const SkVector* offset) {
+sk_sp<GrFragmentProcessor> GrConvexPolyEffect::Make(GrPrimitiveEdgeType type, const SkPath& path) {
     if (kHairlineAA_GrProcessorEdgeType == type) {
         return nullptr;
     }
@@ -259,13 +258,6 @@ sk_sp<GrFragmentProcessor> GrConvexPolyEffect::Make(GrPrimitiveEdgeType type, co
         // the print.
         return GrConstColorProcessor::Make(GrColor4f::TransparentBlack(),
                                            GrConstColorProcessor::kModulateRGBA_InputMode);
-    }
-
-    SkVector t;
-    if (nullptr == offset) {
-        t.set(0, 0);
-    } else {
-        t = *offset;
     }
 
     SkScalar        edges[3 * kMaxEdges];
@@ -297,8 +289,7 @@ sk_sp<GrFragmentProcessor> GrConvexPolyEffect::Make(GrPrimitiveEdgeType type, co
                     edges[3 * n] = -v.fY;
                     edges[3 * n + 1] = v.fX;
                 }
-                SkPoint p = pts[1] + t;
-                edges[3 * n + 2] = -(edges[3 * n] * p.fX + edges[3 * n + 1] * p.fY);
+                edges[3 * n + 2] = -(edges[3 * n] * pts[1].fX + edges[3 * n + 1] * pts[1].fY);
                 ++n;
                 break;
             }

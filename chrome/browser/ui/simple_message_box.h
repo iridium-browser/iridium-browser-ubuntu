@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_SIMPLE_MESSAGE_BOX_H_
 #define CHROME_BROWSER_UI_SIMPLE_MESSAGE_BOX_H_
 
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/strings/string16.h"
 #include "ui/gfx/native_widget_types.h"
@@ -18,6 +19,10 @@ enum MessageBoxResult {
 
   // User chose YES or OK. If there's a checkbox, then the checkbox was checked.
   MESSAGE_BOX_RESULT_YES = 1,
+
+  // Message box was displayed asynchronously and is pending a real result,
+  // which will be delivered via callback.
+  MESSAGE_BOX_RESULT_DEFERRED = 2,
 };
 
 enum MessageBoxType {
@@ -36,12 +41,15 @@ void ShowWarningMessageBox(gfx::NativeWindow parent,
                            const base::string16& title,
                            const base::string16& message);
 
-// As above, but with a checkbox. Returns true if the checkbox was checked when
-// the dialog was dismissed, false otherwise.
-bool ShowWarningMessageBoxWithCheckbox(gfx::NativeWindow parent,
-                                       const base::string16& title,
-                                       const base::string16& message,
-                                       const base::string16& checkbox_text);
+// As above, but shows the dialog box asynchronously with a checkbox.
+// |callback| will be invoked after the dialog is dismissed. It is invoked with
+// true if the checkbox is checked and false otherwise.
+void ShowWarningMessageBoxWithCheckbox(
+    gfx::NativeWindow parent,
+    const base::string16& title,
+    const base::string16& message,
+    const base::string16& checkbox_text,
+    base::OnceCallback<void(bool checked)> callback);
 
 // As above, but two buttons are displayed and the return value indicates which
 // is chosen.

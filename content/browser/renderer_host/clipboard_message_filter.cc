@@ -12,7 +12,7 @@
 #include "base/macros.h"
 #include "base/pickle.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
@@ -180,12 +180,12 @@ void ClipboardMessageFilter::OnReadImage(ui::ClipboardType type,
                                          IPC::Message* reply_msg) {
   SkBitmap bitmap = GetClipboard()->ReadImage(type);
 
-  BrowserThread::GetBlockingPool()
-      ->GetTaskRunnerWithShutdownBehavior(
-          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)
-      ->PostTask(FROM_HERE,
-                 base::Bind(&ClipboardMessageFilter::ReadAndEncodeImage, this,
-                            bitmap, reply_msg));
+  base::PostTaskWithTraits(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      base::BindOnce(&ClipboardMessageFilter::ReadAndEncodeImage, this, bitmap,
+                     reply_msg));
 }
 
 void ClipboardMessageFilter::ReadAndEncodeImage(const SkBitmap& bitmap,
@@ -299,7 +299,7 @@ void ClipboardMessageFilter::OnWriteImage(ui::ClipboardType clipboard_type,
     return;
 
   if (!bitmap.installPixels(bitmap.info(), bitmap_buffer->memory(),
-                            bitmap.rowBytes(), NULL, &ReleaseSharedMemoryPixels,
+                            bitmap.rowBytes(), &ReleaseSharedMemoryPixels,
                             bitmap_buffer.get()))
     return;
 

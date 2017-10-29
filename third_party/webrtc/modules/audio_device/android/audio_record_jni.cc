@@ -14,10 +14,10 @@
 
 #include <android/log.h>
 
-#include "webrtc/base/arraysize.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/base/format_macros.h"
 #include "webrtc/modules/audio_device/android/audio_common.h"
+#include "webrtc/rtc_base/arraysize.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/format_macros.h"
 
 #define TAG "AudioRecordJni"
 #define ALOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, TAG, __VA_ARGS__)
@@ -90,11 +90,10 @@ AudioRecordJni::AudioRecordJni(AudioManager* audio_manager)
   j_native_registration_ = j_environment_->RegisterNatives(
       "org/webrtc/voiceengine/WebRtcAudioRecord", native_methods,
       arraysize(native_methods));
-  j_audio_record_.reset(new JavaAudioRecord(
-      j_native_registration_.get(),
-      j_native_registration_->NewObject(
-          "<init>", "(Landroid/content/Context;J)V",
-          JVM::GetInstance()->context(), PointerTojlong(this))));
+  j_audio_record_.reset(
+      new JavaAudioRecord(j_native_registration_.get(),
+                          j_native_registration_->NewObject(
+                              "<init>", "(J)V", PointerTojlong(this))));
   // Detach from this thread since we want to use the checker to verify calls
   // from the Java based audio thread.
   thread_checker_java_.DetachFromThread();

@@ -6,6 +6,7 @@
 
 #include <memory>
 #include "core/StylePropertyShorthand.h"
+#include "core/animation/CSSInterpolationEnvironment.h"
 #include "core/animation/StringKeyframe.h"
 #include "core/css/CSSCustomPropertyDeclaration.h"
 #include "core/css/CSSValue.h"
@@ -18,304 +19,303 @@
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/style/DataEquivalency.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "wtf/PtrUtil.h"
+#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
-class ResolvedVariableChecker : public InterpolationType::ConversionChecker {
+class ResolvedVariableChecker
+    : public CSSInterpolationType::CSSConversionChecker {
  public:
-  static std::unique_ptr<ResolvedVariableChecker> create(
+  static std::unique_ptr<ResolvedVariableChecker> Create(
       CSSPropertyID property,
-      const CSSValue* variableReference,
-      const CSSValue* resolvedValue) {
-    return WTF::wrapUnique(new ResolvedVariableChecker(
-        property, variableReference, resolvedValue));
+      const CSSValue* variable_reference,
+      const CSSValue* resolved_value) {
+    return WTF::WrapUnique(new ResolvedVariableChecker(
+        property, variable_reference, resolved_value));
   }
 
  private:
   ResolvedVariableChecker(CSSPropertyID property,
-                          const CSSValue* variableReference,
-                          const CSSValue* resolvedValue)
-      : m_property(property),
-        m_variableReference(variableReference),
-        m_resolvedValue(resolvedValue) {}
+                          const CSSValue* variable_reference,
+                          const CSSValue* resolved_value)
+      : property_(property),
+        variable_reference_(variable_reference),
+        resolved_value_(resolved_value) {}
 
-  bool isValid(const InterpolationEnvironment& environment,
+  bool IsValid(const StyleResolverState& state,
                const InterpolationValue& underlying) const final {
     // TODO(alancutter): Just check the variables referenced instead of doing a
     // full CSSValue resolve.
-    bool omitAnimationTainted = false;
-    const CSSValue* resolvedValue =
-        CSSVariableResolver::resolveVariableReferences(
-            environment.state(), m_property, *m_variableReference,
-            omitAnimationTainted);
-    return m_resolvedValue->equals(*resolvedValue);
+    bool omit_animation_tainted = false;
+    const CSSValue* resolved_value =
+        CSSVariableResolver(state).ResolveVariableReferences(
+            property_, *variable_reference_, omit_animation_tainted);
+    return DataEquivalent(resolved_value_.Get(), resolved_value);
   }
 
-  CSSPropertyID m_property;
-  Persistent<const CSSValue> m_variableReference;
-  Persistent<const CSSValue> m_resolvedValue;
+  CSSPropertyID property_;
+  Persistent<const CSSValue> variable_reference_;
+  Persistent<const CSSValue> resolved_value_;
 };
 
 class InheritedCustomPropertyChecker
-    : public InterpolationType::ConversionChecker {
+    : public CSSInterpolationType::CSSConversionChecker {
  public:
-  static std::unique_ptr<InheritedCustomPropertyChecker> create(
+  static std::unique_ptr<InheritedCustomPropertyChecker> Create(
       const AtomicString& property,
-      bool isInheritedProperty,
-      const CSSValue* inheritedValue,
-      const CSSValue* initialValue) {
-    return WTF::wrapUnique(new InheritedCustomPropertyChecker(
-        property, isInheritedProperty, inheritedValue, initialValue));
+      bool is_inherited_property,
+      const CSSValue* inherited_value,
+      const CSSValue* initial_value) {
+    return WTF::WrapUnique(new InheritedCustomPropertyChecker(
+        property, is_inherited_property, inherited_value, initial_value));
   }
 
  private:
   InheritedCustomPropertyChecker(const AtomicString& name,
-                                 bool isInheritedProperty,
-                                 const CSSValue* inheritedValue,
-                                 const CSSValue* initialValue)
-      : m_name(name),
-        m_isInheritedProperty(isInheritedProperty),
-        m_inheritedValue(inheritedValue),
-        m_initialValue(initialValue) {}
+                                 bool is_inherited_property,
+                                 const CSSValue* inherited_value,
+                                 const CSSValue* initial_value)
+      : name_(name),
+        is_inherited_property_(is_inherited_property),
+        inherited_value_(inherited_value),
+        initial_value_(initial_value) {}
 
-  bool isValid(const InterpolationEnvironment& environment,
+  bool IsValid(const StyleResolverState& state,
                const InterpolationValue&) const final {
-    const CSSValue* inheritedValue =
-        environment.state().parentStyle()->getRegisteredVariable(
-            m_name, m_isInheritedProperty);
-    if (!inheritedValue) {
-      inheritedValue = m_initialValue.get();
+    const CSSValue* inherited_value =
+        state.ParentStyle()->GetRegisteredVariable(name_,
+                                                   is_inherited_property_);
+    if (!inherited_value) {
+      inherited_value = initial_value_.Get();
     }
-    if (inheritedValue == m_inheritedValue.get()) {
-      return true;
-    }
-    if (!inheritedValue || !m_inheritedValue) {
-      return false;
-    }
-    return m_inheritedValue->equals(*inheritedValue);
+    return DataEquivalent(inherited_value_.Get(), inherited_value);
   }
 
-  const AtomicString& m_name;
-  const bool m_isInheritedProperty;
-  Persistent<const CSSValue> m_inheritedValue;
-  Persistent<const CSSValue> m_initialValue;
+  const AtomicString& name_;
+  const bool is_inherited_property_;
+  Persistent<const CSSValue> inherited_value_;
+  Persistent<const CSSValue> initial_value_;
 };
 
-CSSInterpolationType::CSSInterpolationType(PropertyHandle property)
-    : InterpolationType(property) {
-  DCHECK(!isShorthandProperty(cssProperty()));
+class ResolvedRegisteredCustomPropertyChecker
+    : public InterpolationType::ConversionChecker {
+ public:
+  static std::unique_ptr<ResolvedRegisteredCustomPropertyChecker> Create(
+      const CSSCustomPropertyDeclaration& declaration,
+      RefPtr<CSSVariableData> resolved_tokens) {
+    return WTF::WrapUnique(new ResolvedRegisteredCustomPropertyChecker(
+        declaration, std::move(resolved_tokens)));
+  }
+
+ private:
+  ResolvedRegisteredCustomPropertyChecker(
+      const CSSCustomPropertyDeclaration& declaration,
+      RefPtr<CSSVariableData> resolved_tokens)
+      : declaration_(declaration),
+        resolved_tokens_(std::move(resolved_tokens)) {}
+
+  bool IsValid(const InterpolationEnvironment& environment,
+               const InterpolationValue&) const final {
+    DCHECK(ToCSSInterpolationEnvironment(environment).HasVariableResolver());
+    bool cycle_detected;
+    RefPtr<CSSVariableData> resolved_tokens =
+        ToCSSInterpolationEnvironment(environment)
+            .VariableResolver()
+            .ResolveCustomPropertyAnimationKeyframe(*declaration_,
+                                                    cycle_detected);
+    DCHECK(!cycle_detected);
+    return DataEquivalent(resolved_tokens, resolved_tokens_);
+  }
+
+  Persistent<const CSSCustomPropertyDeclaration> declaration_;
+  RefPtr<CSSVariableData> resolved_tokens_;
+};
+
+CSSInterpolationType::CSSInterpolationType(
+    PropertyHandle property,
+    const PropertyRegistration* registration)
+    : InterpolationType(property), registration_(registration) {
+  DCHECK(!GetProperty().IsCSSCustomProperty() || registration);
+  DCHECK(!isShorthandProperty(CssProperty()));
 }
 
-void CSSInterpolationType::setCustomPropertyRegistration(
-    const PropertyRegistration& registration) {
-  DCHECK(getProperty().isCSSCustomProperty());
-  DCHECK(!m_registration);
-  m_registration = &registration;
-}
-
-InterpolationValue CSSInterpolationType::maybeConvertSingle(
+InterpolationValue CSSInterpolationType::MaybeConvertSingle(
     const PropertySpecificKeyframe& keyframe,
     const InterpolationEnvironment& environment,
     const InterpolationValue& underlying,
-    ConversionCheckers& conversionCheckers) const {
-  InterpolationValue result = maybeConvertSingleInternal(
-      keyframe, environment, underlying, conversionCheckers);
-  if (result &&
-      keyframe.composite() !=
-          EffectModel::CompositeOperation::CompositeReplace) {
-    additiveKeyframeHook(result);
+    ConversionCheckers& conversion_checkers) const {
+  InterpolationValue result = MaybeConvertSingleInternal(
+      keyframe, environment, underlying, conversion_checkers);
+  if (result && keyframe.Composite() !=
+                    EffectModel::CompositeOperation::kCompositeReplace) {
+    AdditiveKeyframeHook(result);
   }
   return result;
 }
 
-InterpolationValue CSSInterpolationType::maybeConvertSingleInternal(
+InterpolationValue CSSInterpolationType::MaybeConvertSingleInternal(
     const PropertySpecificKeyframe& keyframe,
     const InterpolationEnvironment& environment,
     const InterpolationValue& underlying,
-    ConversionCheckers& conversionCheckers) const {
-  const CSSValue* value = toCSSPropertySpecificKeyframe(keyframe).value();
-  const StyleResolverState& state = environment.state();
+    ConversionCheckers& conversion_checkers) const {
+  const CSSValue* value = ToCSSPropertySpecificKeyframe(keyframe).Value();
+  const CSSInterpolationEnvironment& css_environment =
+      ToCSSInterpolationEnvironment(environment);
+  const StyleResolverState& state = css_environment.GetState();
 
   if (!value)
-    return maybeConvertNeutral(underlying, conversionCheckers);
+    return MaybeConvertNeutral(underlying, conversion_checkers);
 
-  if (getProperty().isCSSCustomProperty()) {
-    return maybeConvertCustomPropertyDeclaration(
-        toCSSCustomPropertyDeclaration(*value), state, conversionCheckers);
+  if (GetProperty().IsCSSCustomProperty()) {
+    DCHECK(css_environment.HasVariableResolver());
+    return MaybeConvertCustomPropertyDeclaration(
+        ToCSSCustomPropertyDeclaration(*value), state,
+        css_environment.VariableResolver(), conversion_checkers);
   }
 
-  if (value->isVariableReferenceValue() ||
-      value->isPendingSubstitutionValue()) {
-    bool omitAnimationTainted = false;
-    const CSSValue* resolvedValue =
-        CSSVariableResolver::resolveVariableReferences(
-            state, cssProperty(), *value, omitAnimationTainted);
-    conversionCheckers.push_back(
-        ResolvedVariableChecker::create(cssProperty(), value, resolvedValue));
-    value = resolvedValue;
+  if (value->IsVariableReferenceValue() ||
+      value->IsPendingSubstitutionValue()) {
+    bool omit_animation_tainted = false;
+    const CSSValue* resolved_value =
+        CSSVariableResolver(state).ResolveVariableReferences(
+            CssProperty(), *value, omit_animation_tainted);
+    conversion_checkers.push_back(
+        ResolvedVariableChecker::Create(CssProperty(), value, resolved_value));
+    value = resolved_value;
   }
 
-  if (value->isInitialValue() ||
-      (value->isUnsetValue() &&
-       !CSSPropertyMetadata::isInheritedProperty(cssProperty()))) {
-    return maybeConvertInitial(state, conversionCheckers);
+  if (value->IsInitialValue() ||
+      (value->IsUnsetValue() &&
+       !CSSPropertyMetadata::IsInheritedProperty(CssProperty()))) {
+    return MaybeConvertInitial(state, conversion_checkers);
   }
 
-  if (value->isInheritedValue() ||
-      (value->isUnsetValue() &&
-       CSSPropertyMetadata::isInheritedProperty(cssProperty()))) {
-    return maybeConvertInherit(state, conversionCheckers);
+  if (value->IsInheritedValue() ||
+      (value->IsUnsetValue() &&
+       CSSPropertyMetadata::IsInheritedProperty(CssProperty()))) {
+    return MaybeConvertInherit(state, conversion_checkers);
   }
 
-  return maybeConvertValue(*value, &state, conversionCheckers);
+  return MaybeConvertValue(*value, &state, conversion_checkers);
 }
 
-InterpolationValue CSSInterpolationType::maybeConvertCustomPropertyDeclaration(
+InterpolationValue CSSInterpolationType::MaybeConvertCustomPropertyDeclaration(
     const CSSCustomPropertyDeclaration& declaration,
     const StyleResolverState& state,
-    ConversionCheckers& conversionCheckers) const {
-  InterpolationValue result = maybeConvertCustomPropertyDeclarationInternal(
-      declaration, state, conversionCheckers);
-  if (result) {
-    return result;
-  }
+    CSSVariableResolver& variable_resolver,
+    ConversionCheckers& conversion_checkers) const {
+  const AtomicString& name = declaration.GetName();
+  DCHECK_EQ(GetProperty().CustomPropertyName(), name);
 
-  // TODO(alancutter): Make explicit and assert in code that this falls back to
-  // the default CSSValueInterpolationType handler.
-  // This might involve making the "catch-all" InterpolationType explicit
-  // e.g. add bool InterpolationType::isCatchAll().
-  return maybeConvertValue(declaration, &state, conversionCheckers);
-}
-
-InterpolationValue
-CSSInterpolationType::maybeConvertCustomPropertyDeclarationInternal(
-    const CSSCustomPropertyDeclaration& declaration,
-    const StyleResolverState& state,
-    ConversionCheckers& conversionCheckers) const {
-  const AtomicString& name = declaration.name();
-  DCHECK_EQ(getProperty().customPropertyName(), name);
-
-  if (!declaration.value()) {
-    // Unregistered custom properties inherit:
-    // https://www.w3.org/TR/css-variables-1/#defining-variables
-    bool isInheritedProperty =
-        m_registration ? m_registration->inherits() : true;
-    DCHECK(declaration.isInitial(isInheritedProperty) ||
-           declaration.isInherit(isInheritedProperty));
-
-    if (!m_registration) {
-      return nullptr;
-    }
+  if (!declaration.Value()) {
+    bool is_inherited_property = Registration().Inherits();
+    DCHECK(declaration.IsInitial(is_inherited_property) ||
+           declaration.IsInherit(is_inherited_property));
 
     const CSSValue* value = nullptr;
-    if (declaration.isInitial(isInheritedProperty)) {
-      value = m_registration->initial();
+    if (declaration.IsInitial(is_inherited_property)) {
+      value = Registration().Initial();
     } else {
-      value =
-          state.parentStyle()->getRegisteredVariable(name, isInheritedProperty);
+      value = state.ParentStyle()->GetRegisteredVariable(name,
+                                                         is_inherited_property);
       if (!value) {
-        value = m_registration->initial();
+        value = Registration().Initial();
       }
-      conversionCheckers.push_back(InheritedCustomPropertyChecker::create(
-          name, isInheritedProperty, value, m_registration->initial()));
+      conversion_checkers.push_back(InheritedCustomPropertyChecker::Create(
+          name, is_inherited_property, value, Registration().Initial()));
     }
     if (!value) {
       return nullptr;
     }
 
-    return maybeConvertValue(*value, &state, conversionCheckers);
+    return MaybeConvertValue(*value, &state, conversion_checkers);
   }
 
-  if (declaration.value()->needsVariableResolution()) {
-    // TODO(alancutter): Support smooth interpolation with var() values for
-    // registered custom properties. This requires integrating animated custom
-    // property value application with the CSSVariableResolver to apply them in
-    // the appropriate order defined by the chain of var() dependencies.
-    // All CSSInterpolationTypes should fail convertion here except for
-    // CSSValueInterpolationType.
+  RefPtr<CSSVariableData> resolved_tokens;
+  if (declaration.Value()->NeedsVariableResolution()) {
+    bool cycle_detected;
+    resolved_tokens = variable_resolver.ResolveCustomPropertyAnimationKeyframe(
+        declaration, cycle_detected);
+    DCHECK(!cycle_detected);
+    conversion_checkers.push_back(
+        ResolvedRegisteredCustomPropertyChecker::Create(declaration,
+                                                        resolved_tokens));
+  } else {
+    resolved_tokens = declaration.Value();
+  }
+  const CSSValue* resolved_value =
+      resolved_tokens ? resolved_tokens->ParseForSyntax(registration_->Syntax())
+                      : nullptr;
+  if (!resolved_value) {
     return nullptr;
   }
-
-  if (m_registration) {
-    const CSSValue* parsedValue =
-        declaration.value()->parseForSyntax(m_registration->syntax());
-    if (parsedValue) {
-      return maybeConvertValue(*parsedValue, &state, conversionCheckers);
-    }
-  }
-
-  return nullptr;
+  return MaybeConvertValue(*resolved_value, &state, conversion_checkers);
 }
 
-InterpolationValue CSSInterpolationType::maybeConvertUnderlyingValue(
+InterpolationValue CSSInterpolationType::MaybeConvertUnderlyingValue(
     const InterpolationEnvironment& environment) const {
-  const ComputedStyle& style = environment.style();
-  if (!getProperty().isCSSCustomProperty()) {
-    return maybeConvertStandardPropertyUnderlyingValue(style);
+  const ComputedStyle& style =
+      ToCSSInterpolationEnvironment(environment).Style();
+  if (!GetProperty().IsCSSCustomProperty()) {
+    return MaybeConvertStandardPropertyUnderlyingValue(style);
   }
 
-  const PropertyHandle property = getProperty();
-  const AtomicString& name = property.customPropertyName();
-  if (!m_registration) {
-    return nullptr;
+  const PropertyHandle property = GetProperty();
+  const AtomicString& name = property.CustomPropertyName();
+  const CSSValue* underlying_value =
+      style.GetRegisteredVariable(name, Registration().Inherits());
+  if (!underlying_value) {
+    underlying_value = Registration().Initial();
   }
-  const CSSValue* underlyingValue =
-      style.getRegisteredVariable(name, m_registration->inherits());
-  if (!underlyingValue) {
-    underlyingValue = m_registration->initial();
-  }
-  if (!underlyingValue) {
+  if (!underlying_value) {
     return nullptr;
   }
   // TODO(alancutter): Remove the need for passing in conversion checkers.
-  ConversionCheckers dummyConversionCheckers;
-  return maybeConvertValue(*underlyingValue, nullptr, dummyConversionCheckers);
+  ConversionCheckers dummy_conversion_checkers;
+  return MaybeConvertValue(*underlying_value, nullptr,
+                           dummy_conversion_checkers);
 }
 
-void CSSInterpolationType::apply(
-    const InterpolableValue& interpolableValue,
-    const NonInterpolableValue* nonInterpolableValue,
+void CSSInterpolationType::Apply(
+    const InterpolableValue& interpolable_value,
+    const NonInterpolableValue* non_interpolable_value,
     InterpolationEnvironment& environment) const {
-  StyleResolverState& state = environment.state();
+  StyleResolverState& state =
+      ToCSSInterpolationEnvironment(environment).GetState();
 
-  if (getProperty().isCSSCustomProperty()) {
-    applyCustomPropertyValue(interpolableValue, nonInterpolableValue, state);
+  if (GetProperty().IsCSSCustomProperty()) {
+    ApplyCustomPropertyValue(interpolable_value, non_interpolable_value, state);
     return;
   }
-  applyStandardPropertyValue(interpolableValue, nonInterpolableValue, state);
+  ApplyStandardPropertyValue(interpolable_value, non_interpolable_value, state);
 }
 
-void CSSInterpolationType::applyCustomPropertyValue(
-    const InterpolableValue& interpolableValue,
-    const NonInterpolableValue* nonInterpolableValue,
+void CSSInterpolationType::ApplyCustomPropertyValue(
+    const InterpolableValue& interpolable_value,
+    const NonInterpolableValue* non_interpolable_value,
     StyleResolverState& state) const {
-  DCHECK(getProperty().isCSSCustomProperty());
+  DCHECK(GetProperty().IsCSSCustomProperty());
 
-  const CSSValue* cssValue =
-      createCSSValue(interpolableValue, nonInterpolableValue, state);
-  if (cssValue->isCustomPropertyDeclaration()) {
-    StyleBuilder::applyProperty(cssProperty(), state, *cssValue);
-    return;
-  }
+  const CSSValue* css_value =
+      CreateCSSValue(interpolable_value, non_interpolable_value, state);
+  DCHECK(!css_value->IsCustomPropertyDeclaration());
 
   // TODO(alancutter): Defer tokenization of the CSSValue until it is needed.
-  String stringValue = cssValue->cssText();
-  CSSTokenizer tokenizer(stringValue);
-  bool isAnimationTainted = true;
-  bool needsVariableResolution = false;
-  RefPtr<CSSVariableData> variableData = CSSVariableData::create(
-      tokenizer.tokenRange(), isAnimationTainted, needsVariableResolution);
-  ComputedStyle& style = *state.style();
-  const PropertyHandle property = getProperty();
-  const AtomicString& propertyName = property.customPropertyName();
-  DCHECK(m_registration);
-  if (m_registration->inherits()) {
-    style.setResolvedInheritedVariable(propertyName, variableData.release(),
-                                       cssValue);
+  String string_value = css_value->CssText();
+  CSSTokenizer tokenizer(string_value);
+  bool is_animation_tainted = true;
+  bool needs_variable_resolution = false;
+  RefPtr<CSSVariableData> variable_data = CSSVariableData::Create(
+      tokenizer.TokenRange(), is_animation_tainted, needs_variable_resolution);
+  ComputedStyle& style = *state.Style();
+  const PropertyHandle property = GetProperty();
+  const AtomicString& property_name = property.CustomPropertyName();
+  if (Registration().Inherits()) {
+    style.SetResolvedInheritedVariable(property_name, std::move(variable_data),
+                                       css_value);
   } else {
-    style.setResolvedNonInheritedVariable(propertyName, variableData.release(),
-                                          cssValue);
+    style.SetResolvedNonInheritedVariable(property_name,
+                                          std::move(variable_data), css_value);
   }
 }
 

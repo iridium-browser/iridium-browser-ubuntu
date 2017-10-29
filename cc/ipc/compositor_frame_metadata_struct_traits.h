@@ -101,9 +101,14 @@ struct StructTraits<cc::mojom::CompositorFrameMetadataDataView,
     return metadata.latency_info;
   }
 
-  static const std::vector<cc::SurfaceId>& referenced_surfaces(
+  static const std::vector<viz::SurfaceId>& referenced_surfaces(
       const cc::CompositorFrameMetadata& metadata) {
     return metadata.referenced_surfaces;
+  }
+
+  static const std::vector<viz::SurfaceId>& activation_dependencies(
+      const cc::CompositorFrameMetadata& metadata) {
+    return metadata.activation_dependencies;
   }
 
   static bool can_activate_before_dependencies(
@@ -114,6 +119,15 @@ struct StructTraits<cc::mojom::CompositorFrameMetadataDataView,
   static uint32_t content_source_id(
       const cc::CompositorFrameMetadata& metadata) {
     return metadata.content_source_id;
+  }
+
+  static const cc::BeginFrameAck& begin_frame_ack(
+      const cc::CompositorFrameMetadata& metadata) {
+    return metadata.begin_frame_ack;
+  }
+
+  static uint32_t frame_token(const cc::CompositorFrameMetadata& metadata) {
+    return metadata.frame_token;
   }
 
   static bool Read(cc::mojom::CompositorFrameMetadataDataView data,

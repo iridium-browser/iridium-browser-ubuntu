@@ -20,7 +20,7 @@ namespace gl {
 // This class serves as a bridge for native code to call java functions inside
 // android SurfaceTexture class.
 class GL_EXPORT SurfaceTexture
-    : public base::RefCountedThreadSafe<SurfaceTexture>{
+    : public base::RefCountedThreadSafe<SurfaceTexture> {
  public:
   static scoped_refptr<SurfaceTexture> Create(int texture_id);
 
@@ -58,9 +58,10 @@ class GL_EXPORT SurfaceTexture
   ANativeWindow* CreateSurface();
 
   // Release the SurfaceTexture back buffers.  The SurfaceTexture is no longer
-  // usable after calling this.  Note that this is not called 'Release', like
-  // the android API, because scoped_refptr<> calls that quite a bit.
-  void ReleaseSurfaceTexture();
+  // usable after calling this but the front buffer is still valid. Note that
+  // this is not called 'Release', like the Android API, because scoped_refptr
+  // calls that quite a bit.
+  void ReleaseBackBuffers();
 
   // Set the default buffer size for the surface texture.
   void SetDefaultBufferSize(int width, int height);
@@ -75,7 +76,7 @@ class GL_EXPORT SurfaceTexture
 
  private:
   friend class base::RefCountedThreadSafe<SurfaceTexture>;
-  ~SurfaceTexture();
+  virtual ~SurfaceTexture();
 
   // Java SurfaceTexture instance.
   base::android::ScopedJavaGlobalRef<jobject> j_surface_texture_;

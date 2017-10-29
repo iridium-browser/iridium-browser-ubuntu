@@ -26,5 +26,6 @@ include_rules = [
   "+third_party/skia",
   "+ui/base",
   "+ui/gfx",
+  "+components/vector_icons",
   "+url",
 ]

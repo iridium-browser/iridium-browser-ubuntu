@@ -28,7 +28,6 @@
 #include "content/public/browser/web_ui_message_handler.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/chromeos/strings/grit/ui_chromeos_strings.h"
 
 namespace chromeos {
 
@@ -64,10 +63,10 @@ void SetDeviceProperties(base::DictionaryValue* dictionary) {
       ip_configs->Append(iter.value().CreateDeepCopy());
     }
     device_dictionary->SetWithoutPathExpansion(shill::kIPConfigsProperty,
-                                               ip_configs.release());
+                                               std::move(ip_configs));
   }
   if (!device_dictionary->empty())
-    dictionary->Set(shill::kDeviceProperty, device_dictionary.release());
+    dictionary->Set(shill::kDeviceProperty, std::move(device_dictionary));
 }
 
 class NetworkConfigMessageHandler : public content::WebUIMessageHandler {
@@ -145,8 +144,7 @@ class NetworkConfigMessageHandler : public content::WebUIMessageHandler {
     std::string shill_type = (onc_type == ::onc::network_type::kVPN)
                                  ? shill::kTypeVPN
                                  : shill::kTypeWifi;
-    NetworkConfigView::ShowForType(
-        shill_type, web_ui()->GetWebContents()->GetTopLevelNativeWindow());
+    NetworkConfigView::ShowForType(shill_type);
   }
 
   base::WeakPtrFactory<NetworkConfigMessageHandler> weak_ptr_factory_;

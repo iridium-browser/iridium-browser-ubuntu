@@ -20,23 +20,23 @@
 #ifndef Navigator_h
 #define Navigator_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "core/frame/NavigatorCPU.h"
+#include "core/frame/NavigatorConcurrentHardware.h"
 #include "core/frame/NavigatorID.h"
 #include "core/frame/NavigatorLanguage.h"
 #include "core/frame/NavigatorOnLine.h"
 #include "platform/Supplementable.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
 class LocalFrame;
 
 class CORE_EXPORT Navigator final : public GarbageCollected<Navigator>,
-                                    public NavigatorCPU,
+                                    public NavigatorConcurrentHardware,
                                     public NavigatorID,
                                     public NavigatorLanguage,
                                     public NavigatorOnLine,
@@ -47,8 +47,9 @@ class CORE_EXPORT Navigator final : public GarbageCollected<Navigator>,
   USING_GARBAGE_COLLECTED_MIXIN(Navigator);
 
  public:
-  static Navigator* create(LocalFrame* frame) { return new Navigator(frame); }
+  static Navigator* Create(LocalFrame* frame) { return new Navigator(frame); }
 
+  // NavigatorCookies
   bool cookieEnabled() const;
 
   String productSub() const;

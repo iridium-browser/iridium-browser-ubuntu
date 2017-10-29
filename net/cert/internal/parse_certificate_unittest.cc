@@ -62,8 +62,7 @@ void RunCertificateTest(const std::string& file_name) {
                        &signature_algorithm_tlv, &signature_value, &errors);
 
   EXPECT_EQ(expected_result, actual_result);
-  EXPECT_EQ(expected_errors, errors.ToDebugString()) << "Test file: "
-                                                     << test_file_path;
+  VerifyCertErrors(expected_errors, errors, test_file_path);
 
   // Ensure that the parsed certificate matches expectations.
   if (expected_result && actual_result) {
@@ -166,8 +165,7 @@ void RunTbsCertificateTestGivenVersion(const std::string& file_name,
       ParseTbsCertificate(der::Input(&data), {}, &parsed, &errors);
 
   EXPECT_EQ(expected_result, actual_result);
-  EXPECT_EQ(expected_errors, errors.ToDebugString()) << "Test file: "
-                                                     << test_file_path;
+  VerifyCertErrors(expected_errors, errors, test_file_path);
 
   if (!expected_result || !actual_result)
     return;
@@ -212,27 +210,6 @@ TEST(ParseTbsCertificateTest, Version3NoOptionals) {
 // Tests parsing a TBSCertificate for v3 that contains extensions.
 TEST(ParseTbsCertificateTest, Version3WithExtensions) {
   RunTbsCertificateTest("tbs_v3_extensions.pem");
-}
-
-// Tests parsing a TBSCertificate for v3 that contains no optional fields, and
-// has a negative serial number.
-//
-// CAs are not supposed to include negative serial numbers, however RFC 5280
-// expects consumers to deal with it anyway).
-TEST(ParseTbsCertificateTest, NegativeSerialNumber) {
-  RunTbsCertificateTest("tbs_negative_serial_number.pem");
-}
-
-// Tests parsing a TBSCertificate with a serial number that is 21 octets long
-// (and the first byte is 0).
-TEST(ParseTbCertificateTest, SerialNumber21OctetsLeading0) {
-  RunTbsCertificateTest("tbs_serial_number_21_octets_leading_0.pem");
-}
-
-// Tests parsing a TBSCertificate with a serial number that is 26 octets long
-// (and does not contain a leading 0).
-TEST(ParseTbsCertificateTest, SerialNumber26Octets) {
-  RunTbsCertificateTest("tbs_serial_number_26_octets.pem");
 }
 
 // Tests parsing a TBSCertificate which lacks a version number (causing it to

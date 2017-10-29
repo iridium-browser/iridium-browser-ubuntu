@@ -16,7 +16,6 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/webui/options/font_settings_utils.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/font_list_async.h"
@@ -24,6 +23,10 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension_urls.h"
+
+#if defined(OS_MACOSX)
+#include "chrome/browser/ui/webui/settings_utils.h"
+#endif
 
 namespace {
 
@@ -38,8 +41,10 @@ FontHandler::FontHandler(content::WebUI* webui)
     : extension_registry_observer_(this),
       profile_(Profile::FromWebUI(webui)),
       weak_ptr_factory_(this) {
+#if defined(OS_MACOSX)
   // Perform validation for saved fonts.
-  options::FontSettingsUtilities::ValidateSavedFonts(profile_->GetPrefs());
+  settings_utils::ValidateSavedFonts(profile_->GetPrefs());
+#endif
 }
 
 FontHandler::~FontHandler() {}
@@ -104,7 +109,7 @@ const extensions::Extension* FontHandler::GetAdvancedFontSettingsExtension() {
 void FontHandler::NotifyAdvancedFontSettingsAvailability() {
   CallJavascriptFunction(
       "cr.webUIListenerCallback",
-      base::StringValue("advanced-font-settings-installed"),
+      base::Value("advanced-font-settings-installed"),
       base::Value(GetAdvancedFontSettingsExtension() != nullptr));
 }
 
@@ -113,10 +118,9 @@ void FontHandler::OnExtensionLoaded(content::BrowserContext*,
   NotifyAdvancedFontSettingsAvailability();
 }
 
-void FontHandler::OnExtensionUnloaded(
-    content::BrowserContext*,
-    const extensions::Extension*,
-    extensions::UnloadedExtensionInfo::Reason) {
+void FontHandler::OnExtensionUnloaded(content::BrowserContext*,
+                                      const extensions::Extension*,
+                                      extensions::UnloadedExtensionReason) {
   NotifyAdvancedFontSettingsAvailability();
 }
 
@@ -144,7 +148,7 @@ void FontHandler::FontListHasLoaded(std::string callback_id,
       "extensionUrl",
       extension_url.Resolve(kAdvancedFontSettingsExtensionId).spec());
 
-  ResolveJavascriptCallback(base::StringValue(callback_id), response);
+  ResolveJavascriptCallback(base::Value(callback_id), response);
 }
 
 }  // namespace settings

@@ -19,8 +19,8 @@
 #include "mojo/edk/system/core.h"
 #include "mojo/edk/system/data_pipe_control_message.h"
 #include "mojo/edk/system/node_controller.h"
-#include "mojo/edk/system/ports_message.h"
 #include "mojo/edk/system/request_context.h"
+#include "mojo/edk/system/user_message_impl.h"
 #include "mojo/public/c/system/data_pipe.h"
 
 namespace mojo {
@@ -38,6 +38,8 @@ struct SerializedState {
   uint32_t write_offset;
   uint32_t available_capacity;
   uint8_t flags;
+  uint64_t buffer_guid_high;
+  uint64_t buffer_guid_low;
   char padding[7];
 };
 
@@ -68,23 +70,20 @@ class DataPipeProducerDispatcher::PortObserverThunk
   DISALLOW_COPY_AND_ASSIGN(PortObserverThunk);
 };
 
-DataPipeProducerDispatcher::DataPipeProducerDispatcher(
+// static
+scoped_refptr<DataPipeProducerDispatcher> DataPipeProducerDispatcher::Create(
     NodeController* node_controller,
     const ports::PortRef& control_port,
     scoped_refptr<PlatformSharedBuffer> shared_ring_buffer,
     const MojoCreateDataPipeOptions& options,
-    bool initialized,
-    uint64_t pipe_id)
-    : options_(options),
-      node_controller_(node_controller),
-      control_port_(control_port),
-      pipe_id_(pipe_id),
-      shared_ring_buffer_(shared_ring_buffer),
-      available_capacity_(options_.capacity_num_bytes) {
-  if (initialized) {
-    base::AutoLock lock(lock_);
-    InitializeNoLock();
-  }
+    uint64_t pipe_id) {
+  scoped_refptr<DataPipeProducerDispatcher> producer =
+      new DataPipeProducerDispatcher(node_controller, control_port,
+                                     shared_ring_buffer, options, pipe_id);
+  base::AutoLock lock(producer->lock_);
+  if (!producer->InitializeNoLock())
+    return nullptr;
+  return producer;
 }
 
 Dispatcher::Type DataPipeProducerDispatcher::GetType() const {
@@ -95,28 +94,6 @@ MojoResult DataPipeProducerDispatcher::Close() {
   base::AutoLock lock(lock_);
   DVLOG(1) << "Closing data pipe producer " << pipe_id_;
   return CloseNoLock();
-}
-
-MojoResult DataPipeProducerDispatcher::Watch(
-    MojoHandleSignals signals,
-    const Watcher::WatchCallback& callback,
-    uintptr_t context) {
-  base::AutoLock lock(lock_);
-
-  if (is_closed_ || in_transit_)
-    return MOJO_RESULT_INVALID_ARGUMENT;
-
-  return awakable_list_.AddWatcher(
-      signals, callback, context, GetHandleSignalsStateNoLock());
-}
-
-MojoResult DataPipeProducerDispatcher::CancelWatch(uintptr_t context) {
-  base::AutoLock lock(lock_);
-
-  if (is_closed_ || in_transit_)
-    return MOJO_RESULT_INVALID_ARGUMENT;
-
-  return awakable_list_.RemoveWatcher(context);
 }
 
 MojoResult DataPipeProducerDispatcher::WriteData(const void* elements,
@@ -149,8 +126,6 @@ MojoResult DataPipeProducerDispatcher::WriteData(const void* elements,
   if (num_bytes_to_write == 0)
     return MOJO_RESULT_SHOULD_WAIT;
 
-  HandleSignalsState old_state = GetHandleSignalsStateNoLock();
-
   *num_bytes = num_bytes_to_write;
 
   CHECK(ring_buffer_mapping_);
@@ -162,8 +137,7 @@ MojoResult DataPipeProducerDispatcher::WriteData(const void* elements,
 
   DCHECK_LE(write_offset_, options_.capacity_num_bytes);
   uint32_t tail_bytes_to_write =
-      std::min(options_.capacity_num_bytes - write_offset_,
-               num_bytes_to_write);
+      std::min(options_.capacity_num_bytes - write_offset_, num_bytes_to_write);
   uint32_t head_bytes_to_write = num_bytes_to_write - tail_bytes_to_write;
 
   DCHECK_GT(tail_bytes_to_write, 0u);
@@ -173,12 +147,10 @@ MojoResult DataPipeProducerDispatcher::WriteData(const void* elements,
 
   DCHECK_LE(num_bytes_to_write, available_capacity_);
   available_capacity_ -= num_bytes_to_write;
-  write_offset_ = (write_offset_ + num_bytes_to_write) %
-      options_.capacity_num_bytes;
+  write_offset_ =
+      (write_offset_ + num_bytes_to_write) % options_.capacity_num_bytes;
 
-  HandleSignalsState new_state = GetHandleSignalsStateNoLock();
-  if (!new_state.equals(old_state))
-    awakable_list_.AwakeForStateChange(new_state);
+  watchers_.NotifyState(GetHandleSignalsStateNoLock());
 
   base::AutoUnlock unlock(lock_);
   NotifyWrite(num_bytes_to_write);
@@ -193,6 +165,11 @@ MojoResult DataPipeProducerDispatcher::BeginWriteData(
   base::AutoLock lock(lock_);
   if (!shared_ring_buffer_ || in_transit_)
     return MOJO_RESULT_INVALID_ARGUMENT;
+
+  // These flags may not be used in two-phase mode.
+  if (flags & MOJO_WRITE_DATA_FLAG_ALL_OR_NONE)
+    return MOJO_RESULT_INVALID_ARGUMENT;
+
   if (in_two_phase_write_)
     return MOJO_RESULT_BUSY;
   if (peer_closed_)
@@ -237,8 +214,8 @@ MojoResult DataPipeProducerDispatcher::EndWriteData(
   } else {
     DCHECK_LE(num_bytes_written + write_offset_, options_.capacity_num_bytes);
     available_capacity_ -= num_bytes_written;
-    write_offset_ = (write_offset_ + num_bytes_written) %
-        options_.capacity_num_bytes;
+    write_offset_ =
+        (write_offset_ + num_bytes_written) % options_.capacity_num_bytes;
 
     base::AutoUnlock unlock(lock_);
     NotifyWrite(num_bytes_written);
@@ -247,10 +224,8 @@ MojoResult DataPipeProducerDispatcher::EndWriteData(
   in_two_phase_write_ = false;
 
   // If we're now writable, we *became* writable (since we weren't writable
-  // during the two-phase write), so awake producer awakables.
-  HandleSignalsState new_state = GetHandleSignalsStateNoLock();
-  if (new_state.satisfies(MOJO_HANDLE_SIGNAL_WRITABLE))
-    awakable_list_.AwakeForStateChange(new_state);
+  // during the two-phase write), so notify watchers.
+  watchers_.NotifyState(GetHandleSignalsStateNoLock());
 
   return rv;
 }
@@ -260,43 +235,22 @@ HandleSignalsState DataPipeProducerDispatcher::GetHandleSignalsState() const {
   return GetHandleSignalsStateNoLock();
 }
 
-MojoResult DataPipeProducerDispatcher::AddAwakable(
-    Awakable* awakable,
-    MojoHandleSignals signals,
-    uintptr_t context,
-    HandleSignalsState* signals_state) {
+MojoResult DataPipeProducerDispatcher::AddWatcherRef(
+    const scoped_refptr<WatcherDispatcher>& watcher,
+    uintptr_t context) {
   base::AutoLock lock(lock_);
-  if (!shared_ring_buffer_ || in_transit_) {
-    if (signals_state)
-      *signals_state = HandleSignalsState();
+  if (is_closed_ || in_transit_)
     return MOJO_RESULT_INVALID_ARGUMENT;
-  }
-  UpdateSignalsStateNoLock();
-  HandleSignalsState state = GetHandleSignalsStateNoLock();
-  if (state.satisfies(signals)) {
-    if (signals_state)
-      *signals_state = state;
-    return MOJO_RESULT_ALREADY_EXISTS;
-  }
-  if (!state.can_satisfy(signals)) {
-    if (signals_state)
-      *signals_state = state;
-    return MOJO_RESULT_FAILED_PRECONDITION;
-  }
-
-  awakable_list_.Add(awakable, signals, context);
-  return MOJO_RESULT_OK;
+  return watchers_.Add(watcher, context, GetHandleSignalsStateNoLock());
 }
 
-void DataPipeProducerDispatcher::RemoveAwakable(
-    Awakable* awakable,
-    HandleSignalsState* signals_state) {
+MojoResult DataPipeProducerDispatcher::RemoveWatcherRef(
+    WatcherDispatcher* watcher,
+    uintptr_t context) {
   base::AutoLock lock(lock_);
-  if ((!shared_ring_buffer_ || in_transit_) && signals_state)
-    *signals_state = HandleSignalsState();
-  else if (signals_state)
-    *signals_state = GetHandleSignalsStateNoLock();
-  awakable_list_.Remove(awakable);
+  if (is_closed_ || in_transit_)
+    return MOJO_RESULT_INVALID_ARGUMENT;
+  return watchers_.Remove(watcher, context);
 }
 
 void DataPipeProducerDispatcher::StartSerialize(uint32_t* num_bytes,
@@ -324,11 +278,17 @@ bool DataPipeProducerDispatcher::EndSerialize(
   state->available_capacity = available_capacity_;
   state->flags = peer_closed_ ? kFlagPeerClosed : 0;
 
+  base::UnguessableToken guid = shared_ring_buffer_->GetGUID();
+  state->buffer_guid_high = guid.GetHighForSerialization();
+  state->buffer_guid_low = guid.GetLowForSerialization();
+
   ports[0] = control_port_.name();
 
   buffer_handle_for_transit_ = shared_ring_buffer_->DuplicatePlatformHandle();
-  platform_handles[0] = buffer_handle_for_transit_.get();
+  if (!buffer_handle_for_transit_.is_valid())
+    return false;
 
+  platform_handles[0] = buffer_handle_for_transit_.get();
   return true;
 }
 
@@ -356,7 +316,9 @@ void DataPipeProducerDispatcher::CancelTransit() {
   DCHECK(in_transit_);
   in_transit_ = false;
   buffer_handle_for_transit_.reset();
-  awakable_list_.AwakeForStateChange(GetHandleSignalsStateNoLock());
+
+  HandleSignalsState state = GetHandleSignalsStateNoLock();
+  watchers_.NotifyState(state);
 }
 
 // static
@@ -379,12 +341,13 @@ DataPipeProducerDispatcher::Deserialize(const void* data,
   if (node_controller->node()->GetPort(ports[0], &port) != ports::OK)
     return nullptr;
 
+  base::UnguessableToken guid = base::UnguessableToken::Deserialize(
+      state->buffer_guid_high, state->buffer_guid_low);
   PlatformHandle buffer_handle;
   std::swap(buffer_handle, handles[0]);
   scoped_refptr<PlatformSharedBuffer> ring_buffer =
       PlatformSharedBuffer::CreateFromPlatformHandle(
-          state->options.capacity_num_bytes,
-          false /* read_only */,
+          state->options.capacity_num_bytes, false /* read_only */, guid,
           ScopedPlatformHandle(buffer_handle));
   if (!ring_buffer) {
     DLOG(ERROR) << "Failed to deserialize shared buffer handle.";
@@ -393,42 +356,59 @@ DataPipeProducerDispatcher::Deserialize(const void* data,
 
   scoped_refptr<DataPipeProducerDispatcher> dispatcher =
       new DataPipeProducerDispatcher(node_controller, port, ring_buffer,
-                                     state->options, false /* initialized */,
-                                     state->pipe_id);
+                                     state->options, state->pipe_id);
 
   {
     base::AutoLock lock(dispatcher->lock_);
     dispatcher->write_offset_ = state->write_offset;
     dispatcher->available_capacity_ = state->available_capacity;
     dispatcher->peer_closed_ = state->flags & kFlagPeerClosed;
-    dispatcher->InitializeNoLock();
+    if (!dispatcher->InitializeNoLock())
+      return nullptr;
     dispatcher->UpdateSignalsStateNoLock();
   }
 
   return dispatcher;
 }
 
+DataPipeProducerDispatcher::DataPipeProducerDispatcher(
+    NodeController* node_controller,
+    const ports::PortRef& control_port,
+    scoped_refptr<PlatformSharedBuffer> shared_ring_buffer,
+    const MojoCreateDataPipeOptions& options,
+    uint64_t pipe_id)
+    : options_(options),
+      node_controller_(node_controller),
+      control_port_(control_port),
+      pipe_id_(pipe_id),
+      watchers_(this),
+      shared_ring_buffer_(shared_ring_buffer),
+      available_capacity_(options_.capacity_num_bytes) {}
+
 DataPipeProducerDispatcher::~DataPipeProducerDispatcher() {
   DCHECK(is_closed_ && !in_transit_ && !shared_ring_buffer_ &&
          !ring_buffer_mapping_);
 }
 
-void DataPipeProducerDispatcher::InitializeNoLock() {
+bool DataPipeProducerDispatcher::InitializeNoLock() {
   lock_.AssertAcquired();
+  if (!shared_ring_buffer_)
+    return false;
 
-  if (shared_ring_buffer_) {
-    ring_buffer_mapping_ =
-        shared_ring_buffer_->Map(0, options_.capacity_num_bytes);
-    if (!ring_buffer_mapping_) {
-      DLOG(ERROR) << "Failed to map shared buffer.";
-      shared_ring_buffer_ = nullptr;
-    }
+  DCHECK(!ring_buffer_mapping_);
+  ring_buffer_mapping_ =
+      shared_ring_buffer_->Map(0, options_.capacity_num_bytes);
+  if (!ring_buffer_mapping_) {
+    DLOG(ERROR) << "Failed to map shared buffer.";
+    shared_ring_buffer_ = nullptr;
+    return false;
   }
 
   base::AutoUnlock unlock(lock_);
   node_controller_->SetPortObserver(
-      control_port_,
-      make_scoped_refptr(new PortObserverThunk(this)));
+      control_port_, make_scoped_refptr(new PortObserverThunk(this)));
+
+  return true;
 }
 
 MojoResult DataPipeProducerDispatcher::CloseNoLock() {
@@ -439,7 +419,7 @@ MojoResult DataPipeProducerDispatcher::CloseNoLock() {
   ring_buffer_mapping_.reset();
   shared_ring_buffer_ = nullptr;
 
-  awakable_list_.CancelAll();
+  watchers_.NotifyClosed();
   if (!transferred_) {
     base::AutoUnlock unlock(lock_);
     node_controller_->ClosePort(control_port_);
@@ -453,10 +433,12 @@ HandleSignalsState DataPipeProducerDispatcher::GetHandleSignalsStateNoLock()
   lock_.AssertAcquired();
   HandleSignalsState rv;
   if (!peer_closed_) {
-    if (!in_two_phase_write_ && shared_ring_buffer_ &&
-        available_capacity_ > 0)
+    if (!in_two_phase_write_ && shared_ring_buffer_ && available_capacity_ > 0)
       rv.satisfied_signals |= MOJO_HANDLE_SIGNAL_WRITABLE;
-    rv.satisfiable_signals |= MOJO_HANDLE_SIGNAL_WRITABLE;
+    if (peer_remote_)
+      rv.satisfied_signals |= MOJO_HANDLE_SIGNAL_PEER_REMOTE;
+    rv.satisfiable_signals |=
+        MOJO_HANDLE_SIGNAL_WRITABLE | MOJO_HANDLE_SIGNAL_PEER_REMOTE;
   } else {
     rv.satisfied_signals |= MOJO_HANDLE_SIGNAL_PEER_CLOSED;
   }
@@ -465,9 +447,9 @@ HandleSignalsState DataPipeProducerDispatcher::GetHandleSignalsStateNoLock()
 }
 
 void DataPipeProducerDispatcher::NotifyWrite(uint32_t num_bytes) {
-  DVLOG(1) << "Data pipe producer " << pipe_id_ << " notifying peer: "
-           << num_bytes << " bytes written. [control_port="
-           << control_port_.name() << "]";
+  DVLOG(1) << "Data pipe producer " << pipe_id_
+           << " notifying peer: " << num_bytes
+           << " bytes written. [control_port=" << control_port_.name() << "]";
 
   SendDataPipeControlMessage(node_controller_, control_port_,
                              DataPipeCommand::DATA_WAS_WRITTEN, num_bytes);
@@ -492,31 +474,33 @@ void DataPipeProducerDispatcher::OnPortStatusChanged() {
 void DataPipeProducerDispatcher::UpdateSignalsStateNoLock() {
   lock_.AssertAcquired();
 
-  bool was_peer_closed = peer_closed_;
+  const bool was_peer_closed = peer_closed_;
+  const bool was_peer_remote = peer_remote_;
   size_t previous_capacity = available_capacity_;
 
   ports::PortStatus port_status;
   int rv = node_controller_->node()->GetStatus(control_port_, &port_status);
+  peer_remote_ = rv == ports::OK && port_status.peer_remote;
   if (rv != ports::OK || !port_status.receiving_messages) {
     DVLOG(1) << "Data pipe producer " << pipe_id_ << " is aware of peer closure"
              << " [control_port=" << control_port_.name() << "]";
     peer_closed_ = true;
   } else if (rv == ports::OK && port_status.has_messages && !in_transit_) {
-    ports::ScopedMessage message;
+    std::unique_ptr<ports::UserMessageEvent> message_event;
     do {
-      int rv = node_controller_->node()->GetMessage(
-          control_port_, &message, nullptr);
+      int rv = node_controller_->node()->GetMessage(control_port_,
+                                                    &message_event, nullptr);
       if (rv != ports::OK)
         peer_closed_ = true;
-      if (message) {
-        if (message->num_payload_bytes() < sizeof(DataPipeControlMessage)) {
+      if (message_event) {
+        auto* message = message_event->GetMessage<UserMessageImpl>();
+        if (message->user_payload_size() < sizeof(DataPipeControlMessage)) {
           peer_closed_ = true;
           break;
         }
 
         const DataPipeControlMessage* m =
-            static_cast<const DataPipeControlMessage*>(
-                message->payload_bytes());
+            static_cast<const DataPipeControlMessage*>(message->user_payload());
 
         if (m->command != DataPipeCommand::DATA_WAS_READ) {
           DLOG(ERROR) << "Unexpected message from consumer.";
@@ -525,23 +509,25 @@ void DataPipeProducerDispatcher::UpdateSignalsStateNoLock() {
         }
 
         if (static_cast<size_t>(available_capacity_) + m->num_bytes >
-              options_.capacity_num_bytes) {
+            options_.capacity_num_bytes) {
           DLOG(ERROR) << "Consumer claims to have read too many bytes.";
           break;
         }
 
         DVLOG(1) << "Data pipe producer " << pipe_id_ << " is aware that "
-                 << m->num_bytes << " bytes were read. [control_port="
-                 << control_port_.name() << "]";
+                 << m->num_bytes
+                 << " bytes were read. [control_port=" << control_port_.name()
+                 << "]";
 
         available_capacity_ += m->num_bytes;
       }
-    } while (message);
+    } while (message_event);
   }
 
   if (peer_closed_ != was_peer_closed ||
-      available_capacity_ != previous_capacity) {
-    awakable_list_.AwakeForStateChange(GetHandleSignalsStateNoLock());
+      available_capacity_ != previous_capacity ||
+      was_peer_remote != peer_remote_) {
+    watchers_.NotifyState(GetHandleSignalsStateNoLock());
   }
 }
 

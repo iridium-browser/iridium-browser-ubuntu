@@ -8,16 +8,28 @@
 
 #import "base/ios/weak_nsobject.h"
 #include "base/mac/scoped_nsobject.h"
+#include "base/memory/ptr_util.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/tabs/legacy_tab_helper.h"
 #import "ios/chrome/browser/tabs/tab.h"
+#import "ios/chrome/browser/tabs/tab_helper_util.h"
+#import "ios/chrome/browser/tabs/tab_private.h"
 #import "ios/chrome/browser/ui/contextual_search/contextual_search_metrics.h"
 #import "ios/chrome/browser/ui/contextual_search/contextual_search_panel_view.h"
 #import "ios/chrome/browser/ui/contextual_search/contextual_search_web_state_observer.h"
+#import "ios/chrome/browser/web_state_list/web_state_opener.h"
 #import "ios/chrome/common/material_timing.h"
 #include "ios/web/public/load_committed_details.h"
-#import "ios/web/public/web_state/crw_web_view_proxy.h"
-#import "ios/web/public/web_state/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/serializable_user_data_manager.h"
 #import "ios/web/public/web_state/ui/crw_native_content_provider.h"
+#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
+#import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/web_state/web_state.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 enum SearchResultsViewVisibility { OFFSCREEN, PRELOAD, VISIBLE };
@@ -31,15 +43,14 @@ enum SearchResultsViewVisibility { OFFSCREEN, PRELOAD, VISIBLE };
 @end
 
 @implementation ContextualSearchResultsView {
-  base::WeakNSProtocol<id<ContextualSearchTabPromoter>> _promoter;
-  base::WeakNSProtocol<id<ContextualSearchPreloadChecker>> _preloadChecker;
   std::unique_ptr<ContextualSearchWebStateObserver> _webStateObserver;
 
-  // Tab that loads the search results.
-  base::scoped_nsobject<Tab> _tab;
+  // WebState that loads the search results.
+  std::unique_ptr<web::WebState> _webState;
+  std::unique_ptr<WebStateOpener> _webStateOpener;
 
   // Access to the search tab's web view proxy.
-  base::scoped_nsprotocol<id<CRWWebViewProxy>> _webViewProxy;
+  id<CRWWebViewProxy> _webViewProxy;
 
   BOOL _loaded;
   BOOL _displayed;
@@ -58,6 +69,8 @@ enum SearchResultsViewVisibility { OFFSCREEN, PRELOAD, VISIBLE };
 
 @synthesize active = _active;
 @synthesize opener = _opener;
+@synthesize promoter = _promoter;
+@synthesize preloadChecker = _preloadChecker;
 
 - (instancetype)initWithFrame:(CGRect)frame {
   if ((self = [super initWithFrame:frame])) {
@@ -89,7 +102,7 @@ enum SearchResultsViewVisibility { OFFSCREEN, PRELOAD, VISIBLE };
 }
 
 - (void)setPromoter:(id<ContextualSearchTabPromoter>)promoter {
-  _promoter.reset(promoter);
+  _promoter = promoter;
 }
 
 - (id<ContextualSearchPreloadChecker>)preloadChecker {
@@ -97,7 +110,7 @@ enum SearchResultsViewVisibility { OFFSCREEN, PRELOAD, VISIBLE };
 }
 
 - (void)setPreloadChecker:(id<ContextualSearchPreloadChecker>)preloadChecker {
-  _preloadChecker.reset(preloadChecker);
+  _preloadChecker = preloadChecker;
 }
 
 - (BOOL)contentVisible {
@@ -106,15 +119,19 @@ enum SearchResultsViewVisibility { OFFSCREEN, PRELOAD, VISIBLE };
 
 - (void)setActive:(BOOL)active {
   if (active) {
-    // Start watching the embedded Tab's web activity.
-    _webStateObserver->ObserveWebState([_tab webState]);
-    [[_tab webController] setShouldSuppressDialogs:NO];
-    _webViewProxy.reset([[[_tab webController] webViewProxy] retain]);
-    [[_webViewProxy scrollViewProxy] setBounces:NO];
+    if (_webState) {
+      Tab* tab = LegacyTabHelper::GetTabForWebState(_webState.get());
+      // Start watching the embedded Tab's web activity.
+      _webStateObserver->ObserveWebState(_webState.get());
+      _webState->SetShouldSuppressDialogs(false);
+
+      _webViewProxy = [[tab webController] webViewProxy];
+      [[_webViewProxy scrollViewProxy] setBounces:NO];
+    }
   } else {
     // Stop watching the embedded Tab's web activity.
     _webStateObserver->ObserveWebState(nullptr);
-    _webViewProxy.reset(nil);
+    _webViewProxy = nil;
   }
 
   _active = active;
@@ -131,35 +148,44 @@ enum SearchResultsViewVisibility { OFFSCREEN, PRELOAD, VISIBLE };
 
 - (void)createTabForSearch:(GURL)url preloadEnabled:(BOOL)preloadEnabled {
   DCHECK(self.opener);
-  if (_tab)
+  if (_webState)
     [self cancelLoad];
 
-  void (^searchTabConfiguration)(Tab*) = ^(Tab* tab) {
-    [tab setIsLinkLoadingPrerenderTab:YES];
-    [[tab webController] setDelegate:tab];
-  };
+  _webStateOpener = base::MakeUnique<WebStateOpener>(self.opener.webState);
+  web::WebState::CreateParams createParams(self.opener.browserState);
+  _webState = web::WebState::Create(createParams);
 
-  ui::PageTransition transition = ui::PAGE_TRANSITION_FROM_ADDRESS_BAR;
-  Tab* tab = [Tab newPreloadingTabWithBrowserState:self.opener.browserState
-                                               url:url
-                                          referrer:web::Referrer()
-                                        transition:transition
-                                          provider:self
-                                            opener:self.opener
-                                  desktopUserAgent:false
-                                     configuration:searchTabConfiguration];
-  _tab.reset([tab retain]);
+  AttachTabHelpers(_webState.get());
+  Tab* tab = LegacyTabHelper::GetTabForWebState(_webState.get());
+  DCHECK(tab);
+
+  [[tab webController] setNativeProvider:self];
+  _webState->SetWebUsageEnabled(true);
+  [tab setIsLinkLoadingPrerenderTab:YES];
+
+  web::NavigationManager::WebLoadParams loadParams(url);
+  loadParams.transition_type = ui::PAGE_TRANSITION_FROM_ADDRESS_BAR;
+  _webState->GetNavigationManager()->LoadURLWithParams(loadParams);
+
   // Don't actually start the page load yet -- that happens in -loadTab
 
   _preloadEnabled = preloadEnabled;
   [self loadPendingSearchIfPossible];
 }
 
-- (Tab*)releaseTab {
+- (std::unique_ptr<web::WebState>)releaseWebState {
   [self disconnectTab];
   // Allow the search tab to be sized by autoresizing mask again.
-  [[_tab view] setTranslatesAutoresizingMaskIntoConstraints:YES];
-  return [_tab.release() autorelease];
+  if (_webState) {
+    Tab* tab = LegacyTabHelper::GetTabForWebState(_webState.get());
+    [[tab view] setTranslatesAutoresizingMaskIntoConstraints:YES];
+  }
+  return std::move(_webState);
+}
+
+- (WebStateOpener)webStateOpener {
+  DCHECK(_webStateOpener);
+  return *_webStateOpener;
 }
 
 - (void)recordFinishedSearchChained:(BOOL)chained {
@@ -170,23 +196,25 @@ enum SearchResultsViewVisibility { OFFSCREEN, PRELOAD, VISIBLE };
 #pragma mark - private methods
 
 - (void)disconnectTab {
-  [[_tab view] removeFromSuperview];
-  [[_tab webController] setNativeProvider:nil];
+  if (_webState) {
+    Tab* tab = LegacyTabHelper::GetTabForWebState(_webState.get());
+    [[tab view] removeFromSuperview];
+    [[tab webController] setNativeProvider:nil];
+  }
   self.active = NO;
-  _webViewProxy.reset();
+  _webViewProxy = nil;
 }
 
 - (void)cancelLoad {
   [self disconnectTab];
   _loadInProgress = NO;
   _loaded = NO;
-  [_tab close];
-  _tab.reset();
+  _webState.reset();
 }
 
 - (void)loadPendingSearchIfPossible {
   // If the search tab hasn't been created, or if it's already loaded, no-op.
-  if (!_tab.get() || _loadInProgress || self.active || _visibility == OFFSCREEN)
+  if (!_webState || _loadInProgress || self.active || _visibility == OFFSCREEN)
     return;
 
   // If this view is in a position where loading would be "preloading", check
@@ -199,7 +227,7 @@ enum SearchResultsViewVisibility { OFFSCREEN, PRELOAD, VISIBLE };
 }
 
 - (void)loadTab {
-  DCHECK(_tab.get());
+  DCHECK(_webState);
   // Start observing the search tab.
   self.active = YES;
   // TODO(crbug.com/546223): See if |_waitingForInitialSearchTabLoad| and
@@ -208,17 +236,20 @@ enum SearchResultsViewVisibility { OFFSCREEN, PRELOAD, VISIBLE };
   // Mark the start of the time for the search.
   _loadStartTime = base::Time::Now();
   // Start the load by asking for the tab's view, but making it hidden.
-  [_tab view].hidden = YES;
-  [self addSubview:[_tab view]];
+  Tab* tab = LegacyTabHelper::GetTabForWebState(_webState.get());
+  [tab view].hidden = YES;
+  [self addSubview:[tab view]];
   _loadInProgress = YES;
 }
 
 - (void)displayTab {
-  [_tab view].frame = self.bounds;
+  DCHECK(_webState);
+  Tab* tab = LegacyTabHelper::GetTabForWebState(_webState.get());
+  [tab view].frame = self.bounds;
   _loadInProgress = NO;
 
   void (^insertTab)(void) = ^{
-    [_tab view].hidden = NO;
+    [tab view].hidden = NO;
     self.scrollEnabled = _shouldScroll;
   };
 

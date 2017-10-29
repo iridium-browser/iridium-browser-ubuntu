@@ -23,6 +23,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/search/instant_search_prerenderer.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
@@ -81,11 +82,7 @@ enum NewTabURLState {
   NEW_TAB_URL_MAX
 };
 
-base::Feature kUseGoogleLocalNtp {
-  "UseGoogleLocalNtp", base::FEATURE_DISABLED_BY_DEFAULT
-};
-
-TemplateURL* GetDefaultSearchProviderTemplateURL(Profile* profile) {
+const TemplateURL* GetDefaultSearchProviderTemplateURL(Profile* profile) {
   if (profile) {
     TemplateURLService* template_url_service =
         TemplateURLServiceFactory::GetForProfile(profile);
@@ -93,20 +90,6 @@ TemplateURL* GetDefaultSearchProviderTemplateURL(Profile* profile) {
       return template_url_service->GetDefaultSearchProvider();
   }
   return NULL;
-}
-
-bool DefaultSearchProviderIsGoogle(Profile* profile) {
-  TemplateURLService* template_url_service =
-      TemplateURLServiceFactory::GetForProfile(profile);
-  if (!template_url_service)
-    return false;
-  const TemplateURL* default_provider =
-      template_url_service->GetDefaultSearchProvider();
-  if (!default_provider)
-    return false;
-  return default_provider->GetEngineType(
-             template_url_service->search_terms_data()) ==
-         SearchEngineType::SEARCH_ENGINE_GOOGLE;
 }
 
 GURL TemplateURLRefToGURL(const TemplateURLRef& ref,
@@ -138,10 +121,13 @@ bool IsInstantURL(const GURL& url, Profile* profile) {
     return false;
 
   const GURL new_tab_url(GetNewTabPageURL(profile));
-  if (new_tab_url.is_valid() && MatchesOriginAndPath(url, new_tab_url))
+  if (new_tab_url.is_valid() && (MatchesOriginAndPath(url, new_tab_url) ||
+                                 IsMatchingServiceWorker(url, new_tab_url))) {
     return true;
+  }
 
-  TemplateURL* template_url = GetDefaultSearchProviderTemplateURL(profile);
+  const TemplateURL* template_url =
+      GetDefaultSearchProviderTemplateURL(profile);
   if (!template_url)
     return false;
 
@@ -162,8 +148,7 @@ bool IsURLAllowedForSupervisedUser(const GURL& url, Profile* profile) {
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile);
-  SupervisedUserURLFilter* url_filter =
-      supervised_user_service->GetURLFilterForUIThread();
+  SupervisedUserURLFilter* url_filter = supervised_user_service->GetURLFilter();
   if (url_filter->GetFilteringBehaviorForURL(url) ==
           SupervisedUserURLFilter::BLOCK) {
     return false;
@@ -200,7 +185,7 @@ bool ShouldShowLocalNewTab(const GURL& url, Profile* profile) {
 #endif  // defined(OS_CHROMEOS)
 
   if (!profile->IsOffTheRecord() &&
-      base::FeatureList::IsEnabled(kUseGoogleLocalNtp) &&
+      base::FeatureList::IsEnabled(features::kUseGoogleLocalNtp) &&
       DefaultSearchProviderIsGoogle(profile)) {
     return true;
   }
@@ -224,7 +209,8 @@ struct NewTabURLDetails {
     if (command_line->HasSwitch(switches::kForceLocalNtp))
       return NewTabURLDetails(local_url, NEW_TAB_URL_VALID);
 
-    TemplateURL* template_url = GetDefaultSearchProviderTemplateURL(profile);
+    const TemplateURL* template_url =
+        GetDefaultSearchProviderTemplateURL(profile);
     if (!profile || !template_url)
       return NewTabURLDetails(local_url, NEW_TAB_URL_BAD);
 
@@ -268,7 +254,8 @@ base::string16 ExtractSearchTermsFromURL(Profile* profile, const GURL& url) {
     return prerenderer->get_last_query();
   }
 
-  TemplateURL* template_url = GetDefaultSearchProviderTemplateURL(profile);
+  const TemplateURL* template_url =
+      GetDefaultSearchProviderTemplateURL(profile);
   base::string16 search_terms;
   if (template_url)
     template_url->ExtractSearchTermsFromURL(
@@ -303,6 +290,24 @@ bool ShouldUseProcessPerSiteForInstantURL(const GURL& url, Profile* profile) {
   return ShouldAssignURLToInstantRenderer(url, profile) &&
          (url.host_piece() == chrome::kChromeSearchLocalNtpHost ||
           url.host_piece() == chrome::kChromeSearchRemoteNtpHost);
+}
+
+bool DefaultSearchProviderIsGoogle(Profile* profile) {
+  return DefaultSearchProviderIsGoogle(
+      TemplateURLServiceFactory::GetForProfile(profile));
+}
+
+bool DefaultSearchProviderIsGoogle(
+    const TemplateURLService* template_url_service) {
+  if (!template_url_service)
+    return false;
+  const TemplateURL* default_provider =
+      template_url_service->GetDefaultSearchProvider();
+  if (!default_provider)
+    return false;
+  return default_provider->GetEngineType(
+             template_url_service->search_terms_data()) ==
+         SearchEngineType::SEARCH_ENGINE_GOOGLE;
 }
 
 bool IsNTPURL(const GURL& url, Profile* profile) {
@@ -357,7 +362,8 @@ GURL GetInstantURL(Profile* profile, bool force_instant_results) {
   if (!IsInstantExtendedAPIEnabled() || !IsSuggestPrefEnabled(profile))
     return GURL();
 
-  TemplateURL* template_url = GetDefaultSearchProviderTemplateURL(profile);
+  const TemplateURL* template_url =
+      GetDefaultSearchProviderTemplateURL(profile);
   if (!template_url)
     return GURL();
 
@@ -387,7 +393,8 @@ GURL GetInstantURL(Profile* profile, bool force_instant_results) {
 // Returns URLs associated with the default search engine for |profile|.
 std::vector<GURL> GetSearchURLs(Profile* profile) {
   std::vector<GURL> result;
-  TemplateURL* template_url = GetDefaultSearchProviderTemplateURL(profile);
+  const TemplateURL* template_url =
+      GetDefaultSearchProviderTemplateURL(profile);
   if (!template_url)
     return result;
   for (const TemplateURLRef& ref : template_url->url_refs()) {
@@ -425,7 +432,8 @@ GURL GetEffectiveURLForInstant(const GURL& url, Profile* profile) {
   std::string remote_ntp_host(chrome::kChromeSearchRemoteNtpHost);
   NewTabURLDetails details = NewTabURLDetails::ForProfile(profile);
   if (details.state == NEW_TAB_URL_VALID &&
-      MatchesOriginAndPath(url, details.url)) {
+      (MatchesOriginAndPath(url, details.url) ||
+       IsMatchingServiceWorker(url, details.url))) {
     replacements.SetHost(remote_ntp_host.c_str(),
                          url::Component(0, remote_ntp_host.length()));
   }

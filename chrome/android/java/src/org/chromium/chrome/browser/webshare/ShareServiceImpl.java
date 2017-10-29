@@ -10,11 +10,12 @@ import android.support.annotation.Nullable;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.share.ShareHelper;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.chrome.browser.share.ShareParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.mojo.system.MojoException;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.url.mojom.Url;
+import org.chromium.webshare.mojom.ShareError;
 import org.chromium.webshare.mojom.ShareService;
 
 /**
@@ -56,35 +57,38 @@ public class ShareServiceImpl implements ShareService {
         if (mActivity == null) {
             RecordHistogram.recordEnumeratedHistogram("WebShare.ShareOutcome",
                     WEBSHARE_OUTCOME_UNKNOWN_FAILURE, WEBSHARE_OUTCOME_COUNT);
-            callback.call("Share failed");
+            callback.call(ShareError.INTERNAL_ERROR);
             return;
         }
 
         ShareHelper.TargetChosenCallback innerCallback = new ShareHelper.TargetChosenCallback() {
+            @Override
             public void onTargetChosen(ComponentName chosenComponent) {
                 RecordHistogram.recordEnumeratedHistogram("WebShare.ShareOutcome",
                         WEBSHARE_OUTCOME_SUCCESS, WEBSHARE_OUTCOME_COUNT);
-                callback.call(null);
+                callback.call(ShareError.OK);
             }
 
+            @Override
             public void onCancel() {
                 RecordHistogram.recordEnumeratedHistogram("WebShare.ShareOutcome",
                         WEBSHARE_OUTCOME_CANCELED, WEBSHARE_OUTCOME_COUNT);
-                callback.call("Share canceled");
+                callback.call(ShareError.CANCELED);
             }
         };
 
-        ShareHelper.share(false, false, mActivity, title, text, url.url, null, null, innerCallback);
+        ShareParams params = new ShareParams.Builder(mActivity, title, url.url)
+                                     .setText(text)
+                                     .setCallback(innerCallback)
+                                     .build();
+        ShareHelper.share(params);
     }
 
     @Nullable
     private static Activity activityFromWebContents(@Nullable WebContents webContents) {
         if (webContents == null) return null;
 
-        ContentViewCore contentViewCore = ContentViewCore.fromWebContents(webContents);
-        if (contentViewCore == null) return null;
-
-        WindowAndroid window = contentViewCore.getWindowAndroid();
+        WindowAndroid window = webContents.getTopLevelNativeWindow();
         if (window == null) return null;
 
         return window.getActivity().get();

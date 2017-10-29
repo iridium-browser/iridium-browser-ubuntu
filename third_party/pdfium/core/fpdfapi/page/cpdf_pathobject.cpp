@@ -17,6 +17,7 @@ CPDF_PageObject::Type CPDF_PathObject::GetType() const {
 void CPDF_PathObject::Transform(const CFX_Matrix& matrix) {
   m_Matrix.Concat(matrix);
   CalcBoundingBox();
+  SetDirty(true);
 }
 
 bool CPDF_PathObject::IsPath() const {
@@ -32,10 +33,10 @@ const CPDF_PathObject* CPDF_PathObject::AsPath() const {
 }
 
 void CPDF_PathObject::CalcBoundingBox() {
-  if (!m_Path)
+  if (!m_Path.HasRef())
     return;
   CFX_FloatRect rect;
-  FX_FLOAT width = m_GraphState.GetLineWidth();
+  float width = m_GraphState.GetLineWidth();
   if (m_bStroke && width != 0) {
     rect = m_Path.GetBoundingBox(width, m_GraphState.GetMiterLimit());
   } else {

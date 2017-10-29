@@ -12,9 +12,7 @@
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
 #include "base/trace_event/process_memory_dump.h"
-#include "net/cert/x509_util_openssl.h"
 #include "third_party/boringssl/src/include/openssl/ssl.h"
-#include "third_party/boringssl/src/include/openssl/x509.h"
 
 namespace net {
 
@@ -106,8 +104,11 @@ void SSLClientSessionCache::SetClockForTesting(
 }
 
 bool SSLClientSessionCache::IsExpired(SSL_SESSION* session, time_t now) {
-  return now < SSL_SESSION_get_time(session) ||
-         now >=
+  if (now < 0)
+    return true;
+  uint64_t now_u64 = static_cast<uint64_t>(now);
+  return now_u64 < SSL_SESSION_get_time(session) ||
+         now_u64 >=
              SSL_SESSION_get_time(session) + SSL_SESSION_get_timeout(session);
 }
 
@@ -139,15 +140,11 @@ void SSLClientSessionCache::DumpMemoryStats(
     size_t pair_cert_count = sk_CRYPTO_BUFFER_num(session->certs);
     for (size_t i = 0; i < pair_cert_count; ++i) {
       const CRYPTO_BUFFER* cert = sk_CRYPTO_BUFFER_value(session->certs, i);
-      // TODO(xunjieli): The multipler is added to account for the difference
-      // between the serialized form and real cert allocation. Remove after
-      // crbug.com/671420 is done.
-      size_t individual_cert_size = 4 * CRYPTO_BUFFER_len(cert);
-      undeduped_cert_size += individual_cert_size;
+      undeduped_cert_size += CRYPTO_BUFFER_len(cert);
       auto result = crypto_buffer_set.insert(cert);
       if (!result.second)
         continue;
-      cert_size += individual_cert_size;
+      cert_size += CRYPTO_BUFFER_len(cert);
       cert_count++;
     }
   }

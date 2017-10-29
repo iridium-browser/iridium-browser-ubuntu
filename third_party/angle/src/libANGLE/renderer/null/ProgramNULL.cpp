@@ -22,25 +22,28 @@ ProgramNULL::~ProgramNULL()
 {
 }
 
-LinkResult ProgramNULL::load(const ContextImpl *contextImpl,
-                             gl::InfoLog &infoLog,
-                             gl::BinaryInputStream *stream)
+gl::LinkResult ProgramNULL::load(const gl::Context *contextImpl,
+                                 gl::InfoLog &infoLog,
+                                 gl::BinaryInputStream *stream)
 {
     return true;
 }
 
-gl::Error ProgramNULL::save(gl::BinaryOutputStream *stream)
+void ProgramNULL::save(const gl::Context *context, gl::BinaryOutputStream *stream)
 {
-    return gl::NoError();
 }
 
 void ProgramNULL::setBinaryRetrievableHint(bool retrievable)
 {
 }
 
-LinkResult ProgramNULL::link(ContextImpl *contextImpl,
-                             const gl::VaryingPacking &packing,
-                             gl::InfoLog &infoLog)
+void ProgramNULL::setSeparable(bool separable)
+{
+}
+
+gl::LinkResult ProgramNULL::link(const gl::Context *contextImpl,
+                                 const gl::VaryingPacking &packing,
+                                 gl::InfoLog &infoLog)
 {
     return true;
 }

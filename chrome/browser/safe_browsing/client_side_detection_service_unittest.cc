@@ -22,7 +22,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "chrome/common/safe_browsing/client_model.pb.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/test/test_browser_thread.h"
 #include "crypto/sha2.h"
@@ -70,8 +70,6 @@ class MockClientSideDetectionService : public ClientSideDetectionService {
 class ClientSideDetectionServiceTest : public testing::Test {
  protected:
   void SetUp() override {
-    file_thread_.reset(new content::TestBrowserThread(BrowserThread::FILE,
-                                                      &msg_loop_));
     factory_.reset(new net::FakeURLFetcherFactory(NULL));
     browser_thread_.reset(new content::TestBrowserThread(BrowserThread::UI,
                                                          &msg_loop_));
@@ -80,7 +78,6 @@ class ClientSideDetectionServiceTest : public testing::Test {
   void TearDown() override {
     base::RunLoop().RunUntilIdle();
     csd_service_.reset();
-    file_thread_.reset();
     browser_thread_.reset();
   }
 
@@ -252,7 +249,6 @@ class ClientSideDetectionServiceTest : public testing::Test {
   }
 
   std::unique_ptr<content::TestBrowserThread> browser_thread_;
-  std::unique_ptr<content::TestBrowserThread> file_thread_;
   std::unique_ptr<base::FieldTrialList> field_trials_;
 
   GURL phishing_url_;

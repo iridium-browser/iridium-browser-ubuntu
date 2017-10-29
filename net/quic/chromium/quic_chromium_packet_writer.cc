@@ -18,7 +18,7 @@ namespace net {
 
 QuicChromiumPacketWriter::QuicChromiumPacketWriter() : weak_factory_(this) {}
 
-QuicChromiumPacketWriter::QuicChromiumPacketWriter(Socket* socket)
+QuicChromiumPacketWriter::QuicChromiumPacketWriter(DatagramClientSocket* socket)
     : socket_(socket),
       delegate_(nullptr),
       packet_(nullptr),
@@ -61,7 +61,7 @@ WriteResult QuicChromiumPacketWriter::WritePacketToSocket(
     } else {
       status = WRITE_STATUS_BLOCKED;
       write_blocked_ = true;
-      packet_ = packet;
+      packet_ = std::move(packet);
     }
   }
 

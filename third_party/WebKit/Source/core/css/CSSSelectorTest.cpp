@@ -12,7 +12,7 @@ namespace blink {
 TEST(CSSSelector, Representations) {
   CSSTestHelper helper;
 
-  const char* cssRules =
+  const char* css_rules =
       "summary::-webkit-details-marker { }"
       "* {}"
       "div {}"
@@ -46,11 +46,34 @@ TEST(CSSSelector, Representations) {
 
       ".a.b .c {}";
 
-  helper.addCSSRules(cssRules);
-  EXPECT_EQ(30u, helper.ruleSet().ruleCount());  // .a, .b counts as two rules.
+  helper.AddCSSRules(css_rules);
+  EXPECT_EQ(30u,
+            helper.GetRuleSet().RuleCount());  // .a, .b counts as two rules.
 #ifndef NDEBUG
-  helper.ruleSet().show();
+  helper.GetRuleSet().Show();
 #endif
+}
+
+TEST(CSSSelector, OverflowRareDataMatchNth) {
+  int max_int = std::numeric_limits<int>::max();
+  int min_int = std::numeric_limits<int>::min();
+  CSSSelector selector;
+
+  // Overflow count - b (max_int - -1 = max_int + 1)
+  selector.SetNth(1, -1);
+  EXPECT_FALSE(selector.MatchNth(max_int));
+  // 0 - (min_int) = max_int + 1
+  selector.SetNth(1, min_int);
+  EXPECT_FALSE(selector.MatchNth(0));
+
+  // min_int - 1
+  selector.SetNth(-1, min_int);
+  EXPECT_FALSE(selector.MatchNth(1));
+
+  // a shouldn't negate to itself (and min_int negates to itself).
+  // Note: This test can only fail when using ubsan.
+  selector.SetNth(min_int, 10);
+  EXPECT_FALSE(selector.MatchNth(2));
 }
 
 }  // namespace blink

@@ -10,8 +10,10 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/task_runner_util.h"
-#include "components/image_fetcher/image_fetcher.h"
+#include "base/task_scheduler/post_task.h"
+#include "components/image_fetcher/core/image_fetcher.h"
 #include "components/suggestions/image_encoder.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "ui/gfx/image/image.h"
 
 using leveldb_proto::ProtoDatabase;
@@ -34,9 +36,43 @@ std::unique_ptr<SkBitmap> DecodeImage(
 void WrapCallback(
     const suggestions::ImageManager::ImageCallback& wrapped_callback,
     const std::string& url,
-    const gfx::Image& image) {
+    const gfx::Image& image,
+    const image_fetcher::RequestMetadata& metadata) {
   wrapped_callback.Run(GURL(url), image);
 }
+
+constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
+    net::DefineNetworkTrafficAnnotation("suggestions_image_manager", R"(
+        semantics {
+          sender: "Suggestions Service Thumbnail Fetch"
+          description:
+            "Retrieves thumbnails for site suggestions based on the user's "
+            "synced browsing history, for use e.g. on the New Tab page."
+          trigger:
+            "Triggered when a thumbnail for a suggestion is required, and no "
+            "local thumbnail is available."
+          data: "The URL for which to retrieve a thumbnail."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "Users can disable this feature by signing out of Chrome, or "
+            "disabling Sync or History Sync in Chrome settings under 'Advanced "
+            "sync settings...'. The feature is enabled by default."
+        chrome_policy {
+          SyncDisabled {
+            policy_options {mode: MANDATORY}
+            SyncDisabled: true
+          }
+        }
+        chrome_policy {
+          SigninAllowed {
+            policy_options {mode: MANDATORY}
+            SigninAllowed: false
+          }
+        }
+      })");
 
 }  // namespace
 
@@ -47,11 +83,11 @@ ImageManager::ImageManager() : weak_ptr_factory_(this) {}
 ImageManager::ImageManager(
     std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
     std::unique_ptr<ProtoDatabase<ImageData>> database,
-    const base::FilePath& database_dir,
-    scoped_refptr<base::TaskRunner> background_task_runner)
+    const base::FilePath& database_dir)
     : image_fetcher_(std::move(image_fetcher)),
       database_(std::move(database)),
-      background_task_runner_(background_task_runner),
+      background_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+          {base::TaskPriority::USER_VISIBLE})),
       database_ready_(false),
       weak_ptr_factory_(this) {
   image_fetcher_->SetImageFetcherDelegate(this);
@@ -145,7 +181,8 @@ void ImageManager::OnCacheImageDecoded(
     callback.Run(url, gfx::Image::CreateFrom1xBitmap(*bitmap));
   } else {
     image_fetcher_->StartOrQueueNetworkRequest(
-        url.spec(), image_url, base::Bind(&WrapCallback, callback));
+        url.spec(), image_url, base::Bind(&WrapCallback, callback),
+        kTrafficAnnotation);
   }
 }
 
@@ -172,13 +209,16 @@ void ImageManager::ServeFromCacheOrNetwork(
                    weak_ptr_factory_.GetWeakPtr(), url, image_url, callback));
   } else {
     image_fetcher_->StartOrQueueNetworkRequest(
-        url.spec(), image_url, base::Bind(&WrapCallback, callback));
+        url.spec(), image_url, base::Bind(&WrapCallback, callback),
+        kTrafficAnnotation);
   }
 }
 
 void ImageManager::SaveImage(const std::string& url, const SkBitmap& bitmap) {
   scoped_refptr<base::RefCountedBytes> encoded_data(
       new base::RefCountedBytes());
+  // TODO(treib): Should encoding happen on the |background_task_runner_|?
+  // *De*coding happens there.
   if (!EncodeSkBitmapToJPEG(bitmap, &encoded_data->data())) {
     return;
   }

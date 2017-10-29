@@ -5,8 +5,10 @@
  * found in the LICENSE file.
  */
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkCanvas.h"
 #include "SkData.h"
+#include "SkImage.h"
 #include "SkImageEncoder.h"
 #include "Resources.h"
 

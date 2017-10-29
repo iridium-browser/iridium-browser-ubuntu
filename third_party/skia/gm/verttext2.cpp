@@ -10,6 +10,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkCanvas.h"
 #include "SkTypeface.h"
 
@@ -75,7 +76,7 @@ protected:
         paint.setTypeface(std::move(family));
         paint.setTextSize(textHeight);
 
-        canvas->drawText(string.c_str(), string.size(), y,
+        canvas->drawString(string, y,
                 SkIntToScalar(alignment == SkPaint::kLeft_Align ? 10 : 240),
                 paint);
         y += textHeight;

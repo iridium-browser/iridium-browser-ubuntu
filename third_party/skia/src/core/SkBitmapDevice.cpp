@@ -20,6 +20,8 @@
 #include "SkShader.h"
 #include "SkSpecialImage.h"
 #include "SkSurface.h"
+#include "SkTLazy.h"
+#include "SkVertices.h"
 
 class SkColorTable;
 
@@ -35,14 +37,6 @@ static bool valid_for_bitmap_device(const SkImageInfo& info,
             *newAlphaType = kUnknown_SkAlphaType;
         }
         return true;
-    }
-
-    switch (info.alphaType()) {
-        case kPremul_SkAlphaType:
-        case kOpaque_SkAlphaType:
-            break;
-        default:
-            return false;
     }
 
     SkAlphaType canonicalAlphaType = info.alphaType();
@@ -73,7 +67,6 @@ SkBitmapDevice::SkBitmapDevice(const SkBitmap& bitmap)
     , fRCStack(bitmap.width(), bitmap.height())
 {
     SkASSERT(valid_for_bitmap_device(bitmap.info(), nullptr));
-    fBitmap.lockPixels();
 }
 
 SkBitmapDevice* SkBitmapDevice::Create(const SkImageInfo& info) {
@@ -88,7 +81,6 @@ SkBitmapDevice::SkBitmapDevice(const SkBitmap& bitmap, const SkSurfaceProps& sur
     , fRCStack(bitmap.width(), bitmap.height())
 {
     SkASSERT(valid_for_bitmap_device(bitmap.info(), nullptr));
-    fBitmap.lockPixels();
 }
 
 SkBitmapDevice* SkBitmapDevice::Create(const SkImageInfo& origInfo,
@@ -120,9 +112,8 @@ SkBitmapDevice* SkBitmapDevice::Create(const SkImageInfo& origInfo,
         }
     } else {
         // This bitmap has transparency, so we'll zero the pixels (to transparent).
-        // We use a ZeroedPRFactory as a faster alloc-then-eraseColor(SK_ColorTRANSPARENT).
-        SkMallocPixelRef::ZeroedPRFactory factory;
-        if (!bitmap.tryAllocPixels(info, &factory, nullptr/*color table*/)) {
+        // We use the flag as a faster alloc-then-eraseColor(SK_ColorTRANSPARENT).
+        if (!bitmap.tryAllocPixelsFlags(info, SkBitmap::kZeroPixels_AllocFlag)) {
             return nullptr;
         }
     }
@@ -130,19 +121,10 @@ SkBitmapDevice* SkBitmapDevice::Create(const SkImageInfo& origInfo,
     return new SkBitmapDevice(bitmap, surfaceProps, hndl);
 }
 
-void SkBitmapDevice::setNewSize(const SkISize& size) {
-    SkASSERT(!fBitmap.pixelRef());
-    fBitmap.setInfo(fBitmap.info().makeWH(size.fWidth, size.fHeight));
-    this->privateResize(fBitmap.info().width(), fBitmap.info().height());
-
-    fRCStack.setNewSize(size.fWidth, size.fHeight);
-}
-
 void SkBitmapDevice::replaceBitmapBackendForRasterSurface(const SkBitmap& bm) {
     SkASSERT(bm.width() == fBitmap.width());
     SkASSERT(bm.height() == fBitmap.height());
     fBitmap = bm;   // intent is to use bm's pixelRef (and rowbytes/config)
-    fBitmap.lockPixels();
     this->privateResize(fBitmap.info().width(), fBitmap.info().height());
 }
 
@@ -162,8 +144,7 @@ bool SkBitmapDevice::onAccessPixels(SkPixmap* pmap) {
 bool SkBitmapDevice::onPeekPixels(SkPixmap* pmap) {
     const SkImageInfo info = fBitmap.info();
     if (fBitmap.getPixels() && (kUnknown_SkColorType != info.colorType())) {
-        SkColorTable* ctable = nullptr;
-        pmap->reset(fBitmap.info(), fBitmap.getPixels(), fBitmap.rowBytes(), ctable);
+        pmap->reset(fBitmap.info(), fBitmap.getPixels(), fBitmap.rowBytes());
         return true;
     }
     return false;
@@ -190,63 +171,64 @@ bool SkBitmapDevice::onReadPixels(const SkImageInfo& dstInfo, void* dstPixels, s
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#ifdef SK_USE_DEVICE_CLIPPING
-class ModifiedDraw : public SkDraw {
+class SkBitmapDevice::BDDraw : public SkDraw {
 public:
-    ModifiedDraw(const SkMatrix& cmt, const SkRasterClip& rc, const SkDraw& draw) : SkDraw(draw) {
-        SkASSERT(cmt == *draw.fMatrix);
-        fRC = &rc;
+    BDDraw(SkBitmapDevice* dev) {
+        // we need fDst to be set, and if we're actually drawing, to dirty the genID
+        if (!dev->accessPixels(&fDst)) {
+            // NoDrawDevice uses us (why?) so we have to catch this case w/ no pixels
+            fDst.reset(dev->imageInfo(), nullptr, 0);
+        }
+        fMatrix = &dev->ctm();
+        fRC = &dev->fRCStack.rc();
     }
 };
-#define PREPARE_DRAW(draw)  ModifiedDraw(this->ctm(), fRCStack.rc(), draw)
-#else
-#define PREPARE_DRAW(draw)  draw
-#endif
 
-void SkBitmapDevice::drawPaint(const SkDraw& draw, const SkPaint& paint) {
-    PREPARE_DRAW(draw).drawPaint(paint);
+void SkBitmapDevice::drawPaint(const SkPaint& paint) {
+    BDDraw(this).drawPaint(paint);
 }
 
-void SkBitmapDevice::drawPoints(const SkDraw& draw, SkCanvas::PointMode mode, size_t count,
+void SkBitmapDevice::drawPoints(SkCanvas::PointMode mode, size_t count,
                                 const SkPoint pts[], const SkPaint& paint) {
-    PREPARE_DRAW(draw).drawPoints(mode, count, pts, paint, nullptr);
+    BDDraw(this).drawPoints(mode, count, pts, paint, nullptr);
 }
 
-void SkBitmapDevice::drawRect(const SkDraw& draw, const SkRect& r, const SkPaint& paint) {
-    PREPARE_DRAW(draw).drawRect(r, paint);
+void SkBitmapDevice::drawRect(const SkRect& r, const SkPaint& paint) {
+    BDDraw(this).drawRect(r, paint);
 }
 
-void SkBitmapDevice::drawOval(const SkDraw& draw, const SkRect& oval, const SkPaint& paint) {
+void SkBitmapDevice::drawOval(const SkRect& oval, const SkPaint& paint) {
     SkPath path;
     path.addOval(oval);
     // call the VIRTUAL version, so any subclasses who do handle drawPath aren't
     // required to override drawOval.
-    this->drawPath(draw, path, paint, nullptr, true);
+    this->drawPath(path, paint, nullptr, true);
 }
 
-void SkBitmapDevice::drawRRect(const SkDraw& draw, const SkRRect& rrect, const SkPaint& paint) {
+void SkBitmapDevice::drawRRect(const SkRRect& rrect, const SkPaint& paint) {
 #ifdef SK_IGNORE_BLURRED_RRECT_OPT
     SkPath  path;
 
     path.addRRect(rrect);
     // call the VIRTUAL version, so any subclasses who do handle drawPath aren't
     // required to override drawRRect.
-    this->drawPath(draw, path, paint, nullptr, true);
+    this->drawPath(path, paint, nullptr, true);
 #else
-    PREPARE_DRAW(draw).drawRRect(rrect, paint);
+    BDDraw(this).drawRRect(rrect, paint);
 #endif
 }
 
-void SkBitmapDevice::drawPath(const SkDraw& draw, const SkPath& path,
+void SkBitmapDevice::drawPath(const SkPath& path,
                               const SkPaint& paint, const SkMatrix* prePathMatrix,
                               bool pathIsMutable) {
-    PREPARE_DRAW(draw).drawPath(path, paint, prePathMatrix, pathIsMutable);
+    BDDraw(this).drawPath(path, paint, prePathMatrix, pathIsMutable);
 }
 
-void SkBitmapDevice::drawBitmap(const SkDraw& draw, const SkBitmap& bitmap,
-                                const SkMatrix& matrix, const SkPaint& paint) {
-    LogDrawScaleFactor(SkMatrix::Concat(*draw.fMatrix, matrix), paint.getFilterQuality());
-    PREPARE_DRAW(draw).drawBitmap(bitmap, matrix, nullptr, paint);
+void SkBitmapDevice::drawBitmap(const SkBitmap& bitmap, SkScalar x, SkScalar y,
+                                const SkPaint& paint) {
+    SkMatrix matrix = SkMatrix::MakeTrans(x, y);
+    LogDrawScaleFactor(SkMatrix::Concat(this->ctm(), matrix), paint.getFilterQuality());
+    BDDraw(this).drawBitmap(bitmap, matrix, nullptr, paint);
 }
 
 static inline bool CanApplyDstMatrixAsCTM(const SkMatrix& m, const SkPaint& paint) {
@@ -258,7 +240,7 @@ static inline bool CanApplyDstMatrixAsCTM(const SkMatrix& m, const SkPaint& pain
     return m.getType() <= SkMatrix::kTranslate_Mask;
 }
 
-void SkBitmapDevice::drawBitmapRect(const SkDraw& draw, const SkBitmap& bitmap,
+void SkBitmapDevice::drawBitmapRect(const SkBitmap& bitmap,
                                     const SkRect* src, const SkRect& dst,
                                     const SkPaint& paint, SkCanvas::SrcRectConstraint constraint) {
     SkMatrix    matrix;
@@ -275,7 +257,7 @@ void SkBitmapDevice::drawBitmapRect(const SkDraw& draw, const SkBitmap& bitmap,
     }
     matrix.setRectToRect(tmpSrc, dst, SkMatrix::kFill_ScaleToFit);
 
-    LogDrawScaleFactor(SkMatrix::Concat(*draw.fMatrix, matrix), paint.getFilterQuality());
+    LogDrawScaleFactor(SkMatrix::Concat(this->ctm(), matrix), paint.getFilterQuality());
 
     const SkRect* dstPtr = &dst;
     const SkBitmap* bitmapPtr = &bitmap;
@@ -323,8 +305,14 @@ void SkBitmapDevice::drawBitmapRect(const SkDraw& draw, const SkBitmap& bitmap,
             matrix.preTranslate(dx, dy);
         }
 
+#ifdef SK_DRAWBITMAPRECT_FAST_OFFSET
+        SkRect extractedBitmapBounds = SkRect::MakeXYWH(dx, dy,
+                                                        SkIntToScalar(bitmapPtr->width()),
+                                                        SkIntToScalar(bitmapPtr->height()));
+#else
         SkRect extractedBitmapBounds;
         extractedBitmapBounds.isetWH(bitmapPtr->width(), bitmapPtr->height());
+#endif
         if (extractedBitmapBounds == tmpSrc) {
             // no fractional part in src, we can just call drawBitmap
             goto USE_DRAWBITMAP;
@@ -335,7 +323,7 @@ void SkBitmapDevice::drawBitmapRect(const SkDraw& draw, const SkBitmap& bitmap,
         // matrix with the CTM, and try to call drawSprite if it can. If not,
         // it will make a shader and call drawRect, as we do below.
         if (CanApplyDstMatrixAsCTM(matrix, paint)) {
-            PREPARE_DRAW(draw).drawBitmap(*bitmapPtr, matrix, dstPtr, paint);
+            BDDraw(this).drawBitmap(*bitmapPtr, matrix, dstPtr, paint);
             return;
         }
     }
@@ -360,73 +348,148 @@ void SkBitmapDevice::drawBitmapRect(const SkDraw& draw, const SkBitmap& bitmap,
 
     // Call ourself, in case the subclass wanted to share this setup code
     // but handle the drawRect code themselves.
-    this->drawRect(draw, *dstPtr, paintWithShader);
+    this->drawRect(*dstPtr, paintWithShader);
 }
 
-void SkBitmapDevice::drawSprite(const SkDraw& draw, const SkBitmap& bitmap,
-                                int x, int y, const SkPaint& paint) {
-    PREPARE_DRAW(draw).drawSprite(bitmap, x, y, paint);
+void SkBitmapDevice::drawSprite(const SkBitmap& bitmap, int x, int y, const SkPaint& paint) {
+    BDDraw(this).drawSprite(bitmap, x, y, paint);
 }
 
-void SkBitmapDevice::drawText(const SkDraw& draw, const void* text, size_t len,
+void SkBitmapDevice::drawText(const void* text, size_t len,
                               SkScalar x, SkScalar y, const SkPaint& paint) {
-    PREPARE_DRAW(draw).drawText((const char*)text, len, x, y, paint, &fSurfaceProps);
+    BDDraw(this).drawText((const char*)text, len, x, y, paint, &fSurfaceProps);
 }
 
-void SkBitmapDevice::drawPosText(const SkDraw& draw, const void* text, size_t len,
-                                 const SkScalar xpos[], int scalarsPerPos,
-                                 const SkPoint& offset, const SkPaint& paint) {
-    PREPARE_DRAW(draw).drawPosText((const char*)text, len, xpos, scalarsPerPos, offset,
-                                   paint, &fSurfaceProps);
+void SkBitmapDevice::drawPosText(const void* text, size_t len, const SkScalar xpos[],
+                                 int scalarsPerPos, const SkPoint& offset, const SkPaint& paint) {
+    BDDraw(this).drawPosText((const char*)text, len, xpos, scalarsPerPos, offset, paint,
+                             &fSurfaceProps);
 }
 
-void SkBitmapDevice::drawVertices(const SkDraw& draw, SkCanvas::VertexMode vmode,
-                                  int vertexCount,
-                                  const SkPoint verts[], const SkPoint textures[],
-                                  const SkColor colors[], SkBlendMode bmode,
-                                  const uint16_t indices[], int indexCount,
+void SkBitmapDevice::drawVertices(const SkVertices* vertices, SkBlendMode bmode,
                                   const SkPaint& paint) {
-    PREPARE_DRAW(draw).drawVertices(vmode, vertexCount, verts, textures, colors, bmode,
-                      indices, indexCount, paint);
+    BDDraw(this).drawVertices(vertices->mode(), vertices->vertexCount(), vertices->positions(),
+                              vertices->texCoords(), vertices->colors(), bmode,
+                              vertices->indices(), vertices->indexCount(), paint);
 }
 
-void SkBitmapDevice::drawDevice(const SkDraw& draw, SkBaseDevice* device,
-                                int x, int y, const SkPaint& paint) {
+void SkBitmapDevice::drawDevice(SkBaseDevice* device, int x, int y, const SkPaint& paint) {
     SkASSERT(!paint.getImageFilter());
-    PREPARE_DRAW(draw).drawSprite(static_cast<SkBitmapDevice*>(device)->fBitmap, x, y, paint);
+    BDDraw(this).drawSprite(static_cast<SkBitmapDevice*>(device)->fBitmap, x, y, paint);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void SkBitmapDevice::drawSpecial(const SkDraw& draw, SkSpecialImage* srcImg, int x, int y,
-                                 const SkPaint& paint) {
-    SkASSERT(!srcImg->isTextureBacked());
+namespace {
 
-    SkBitmap resultBM;
+class SkAutoDeviceClipRestore {
+public:
+    SkAutoDeviceClipRestore(SkBaseDevice* device, const SkIRect& clip)
+        : fDevice(device)
+        , fPrevCTM(device->ctm()) {
+        fDevice->save();
+        fDevice->setCTM(SkMatrix::I());
+        fDevice->clipRect(SkRect::Make(clip), SkClipOp::kIntersect, false);
+        fDevice->setCTM(fPrevCTM);
+    }
 
-    SkImageFilter* filter = paint.getImageFilter();
-    if (filter) {
+    ~SkAutoDeviceClipRestore() {
+        fDevice->restore(fPrevCTM);
+    }
+
+private:
+    SkBaseDevice*  fDevice;
+    const SkMatrix fPrevCTM;
+};
+
+}  // anonymous ns
+
+void SkBitmapDevice::drawSpecial(SkSpecialImage* src, int x, int y, const SkPaint& origPaint,
+                                 SkImage* clipImage, const SkMatrix& clipMatrix) {
+    SkASSERT(!src->isTextureBacked());
+
+    sk_sp<SkSpecialImage> filteredImage;
+    SkTCopyOnFirstWrite<SkPaint> paint(origPaint);
+
+    if (SkImageFilter* filter = paint->getImageFilter()) {
         SkIPoint offset = SkIPoint::Make(0, 0);
-        SkMatrix matrix = *draw.fMatrix;
-        matrix.postTranslate(SkIntToScalar(-x), SkIntToScalar(-y));
-        const SkIRect clipBounds = draw.fRC->getBounds().makeOffset(-x, -y);
+        const SkMatrix matrix = SkMatrix::Concat(
+            SkMatrix::MakeTrans(SkIntToScalar(-x), SkIntToScalar(-y)), this->ctm());
+        const SkIRect clipBounds = fRCStack.rc().getBounds().makeOffset(-x, -y);
         sk_sp<SkImageFilterCache> cache(this->getImageFilterCache());
         SkImageFilter::OutputProperties outputProperties(fBitmap.colorSpace());
         SkImageFilter::Context ctx(matrix, clipBounds, cache.get(), outputProperties);
 
-        sk_sp<SkSpecialImage> resultImg(filter->filterImage(srcImg, ctx, &offset));
-        if (resultImg) {
-            SkPaint tmpUnfiltered(paint);
-            tmpUnfiltered.setImageFilter(nullptr);
-            if (resultImg->getROPixels(&resultBM)) {
-                this->drawSprite(draw, resultBM, x + offset.x(), y + offset.y(), tmpUnfiltered);
-            }
+        filteredImage = filter->filterImage(src, ctx, &offset);
+        if (!filteredImage) {
+            return;
         }
-    } else {
-        if (srcImg->getROPixels(&resultBM)) {
-            this->drawSprite(draw, resultBM, x, y, paint);
-        }
+
+        src = filteredImage.get();
+        paint.writable()->setImageFilter(nullptr);
+        x += offset.x();
+        y += offset.y();
     }
+
+    if (!clipImage) {
+        SkBitmap resultBM;
+        if (src->getROPixels(&resultBM)) {
+            this->drawSprite(resultBM, x, y, *paint);
+        }
+        return;
+    }
+
+    // Clip image case.
+    sk_sp<SkImage> srcImage(src->asImage());
+    if (!srcImage) {
+        return;
+    }
+
+    const SkMatrix totalMatrix = SkMatrix::Concat(this->ctm(), clipMatrix);
+    SkRect clipBounds;
+    totalMatrix.mapRect(&clipBounds, SkRect::Make(clipImage->bounds()));
+    const SkIRect srcBounds = srcImage->bounds().makeOffset(x, y);
+
+    SkIRect maskBounds = fRCStack.rc().getBounds();
+    if (!maskBounds.intersect(clipBounds.roundOut()) || !maskBounds.intersect(srcBounds)) {
+        return;
+    }
+
+    sk_sp<SkImage> mask;
+    SkMatrix maskMatrix, shaderMatrix;
+    SkTLazy<SkAutoDeviceClipRestore> autoClipRestore;
+
+    SkMatrix totalInverse;
+    if (clipImage->isAlphaOnly() && totalMatrix.invert(&totalInverse)) {
+        // If the mask is already in A8 format, we can draw it directly
+        // (while compensating in the shader matrix).
+        mask = sk_ref_sp(clipImage);
+        maskMatrix = totalMatrix;
+        shaderMatrix = SkMatrix::Concat(totalInverse, SkMatrix::MakeTrans(x, y));
+
+        // If the mask is not fully contained within the src layer, we must clip.
+        if (!srcBounds.contains(clipBounds)) {
+            autoClipRestore.init(this, srcBounds);
+        }
+
+        maskBounds.offsetTo(0, 0);
+    } else {
+        // Otherwise, we convert the mask to A8 explicitly.
+        sk_sp<SkSurface> surf = SkSurface::MakeRaster(SkImageInfo::MakeA8(maskBounds.width(),
+                                                                          maskBounds.height()));
+        SkCanvas* canvas = surf->getCanvas();
+        canvas->translate(-maskBounds.x(), -maskBounds.y());
+        canvas->concat(totalMatrix);
+        canvas->drawImage(clipImage, 0, 0);
+
+        mask = surf->makeImageSnapshot();
+        maskMatrix = SkMatrix::I();
+        shaderMatrix = SkMatrix::MakeTrans(x - maskBounds.x(), y - maskBounds.y());
+    }
+
+    SkAutoDeviceCTMRestore adctmr(this, maskMatrix);
+    paint.writable()->setShader(srcImage->makeShader(&shaderMatrix));
+    this->drawImage(mask.get(), maskBounds.x(), maskBounds.y(), *paint);
 }
 
 sk_sp<SkSpecialImage> SkBitmapDevice::makeSpecial(const SkBitmap& bitmap) {
@@ -511,9 +574,34 @@ void SkBitmapDevice::onSetDeviceClipRestriction(SkIRect* mutableClipRestriction)
     }
 }
 
+bool SkBitmapDevice::onClipIsAA() const {
+    const SkRasterClip& rc = fRCStack.rc();
+    return !rc.isEmpty() && rc.isAA();
+}
+
+void SkBitmapDevice::onAsRgnClip(SkRegion* rgn) const {
+    const SkRasterClip& rc = fRCStack.rc();
+    if (rc.isAA()) {
+        rgn->setRect(rc.getBounds());
+    } else {
+        *rgn = rc.bwRgn();
+    }
+}
+
 void SkBitmapDevice::validateDevBounds(const SkIRect& drawClipBounds) {
 #ifdef SK_DEBUG
     const SkIRect& stackBounds = fRCStack.rc().getBounds();
     SkASSERT(drawClipBounds == stackBounds);
 #endif
+}
+
+SkBaseDevice::ClipType SkBitmapDevice::onGetClipType() const {
+    const SkRasterClip& rc = fRCStack.rc();
+    if (rc.isEmpty()) {
+        return kEmpty_ClipType;
+    } else if (rc.isRect()) {
+        return kRect_ClipType;
+    } else {
+        return kComplex_ClipType;
+    }
 }

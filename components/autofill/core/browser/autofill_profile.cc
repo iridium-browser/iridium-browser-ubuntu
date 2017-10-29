@@ -48,8 +48,8 @@
 
 using base::ASCIIToUTF16;
 using base::UTF16ToUTF8;
-using i18n::addressinput::AddressData;
-using i18n::addressinput::AddressField;
+using ::i18n::addressinput::AddressData;
+using ::i18n::addressinput::AddressField;
 
 namespace autofill {
 namespace {
@@ -195,23 +195,23 @@ void GetFieldsForDistinguishingProfiles(
 AutofillProfile::AutofillProfile(const std::string& guid,
                                  const std::string& origin)
     : AutofillDataModel(guid, origin),
-      record_type_(LOCAL_PROFILE),
       phone_number_(this),
+      record_type_(LOCAL_PROFILE),
       has_converted_(false) {}
 
 AutofillProfile::AutofillProfile(RecordType type, const std::string& server_id)
     : AutofillDataModel(base::GenerateGUID(), std::string()),
-      record_type_(type),
       phone_number_(this),
       server_id_(server_id),
+      record_type_(type),
       has_converted_(false) {
   DCHECK(type == SERVER_PROFILE);
 }
 
 AutofillProfile::AutofillProfile()
     : AutofillDataModel(base::GenerateGUID(), std::string()),
-      record_type_(LOCAL_PROFILE),
       phone_number_(this),
+      record_type_(LOCAL_PROFILE),
       has_converted_(false) {}
 
 AutofillProfile::AutofillProfile(const AutofillProfile& profile)
@@ -225,6 +225,7 @@ AutofillProfile::~AutofillProfile() {
 AutofillProfile& AutofillProfile::operator=(const AutofillProfile& profile) {
   set_use_count(profile.use_count());
   set_use_date(profile.use_date());
+  set_previous_use_date(profile.previous_use_date());
   set_modification_date(profile.modification_date());
 
   if (this == &profile)
@@ -306,6 +307,14 @@ bool AutofillProfile::SetInfo(const AutofillType& type,
   base::string16 trimmed_value;
   base::TrimWhitespace(value, base::TRIM_ALL, &trimmed_value);
   return form_group->SetInfo(type, trimmed_value, app_locale);
+}
+
+void AutofillProfile::GetSupportedTypes(
+    ServerFieldTypeSet* supported_types) const {
+  FormGroupList info = FormGroups();
+  for (const auto* form_group : info) {
+    form_group->GetSupportedTypes(supported_types);
+  }
 }
 
 bool AutofillProfile::IsEmpty(const std::string& app_locale) const {
@@ -702,17 +711,10 @@ void AutofillProfile::GenerateServerProfileIdentifier() {
 }
 
 void AutofillProfile::RecordAndLogUse() {
+  previous_use_date_ = use_date();
   UMA_HISTOGRAM_COUNTS_1000("Autofill.DaysSinceLastUse.Profile",
                             (AutofillClock::Now() - use_date()).InDays());
   RecordUse();
-}
-
-void AutofillProfile::GetSupportedTypes(
-    ServerFieldTypeSet* supported_types) const {
-  FormGroupList info = FormGroups();
-  for (const auto* form_group : info) {
-    form_group->GetSupportedTypes(supported_types);
-  }
 }
 
 // static

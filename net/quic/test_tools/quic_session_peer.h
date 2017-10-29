@@ -13,6 +13,7 @@
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_session.h"
 #include "net/quic/core/quic_write_blocked_list.h"
+#include "net/quic/platform/api/quic_containers.h"
 
 namespace net {
 
@@ -30,7 +31,7 @@ class QuicSessionPeer {
                                         uint32_t max_streams);
   static void SetMaxOpenOutgoingStreams(QuicSession* session,
                                         uint32_t max_streams);
-  static QuicCryptoStream* GetCryptoStream(QuicSession* session);
+  static QuicCryptoStream* GetMutableCryptoStream(QuicSession* session);
   static QuicWriteBlockedList* GetWriteBlockedStreams(QuicSession* session);
   static QuicStream* GetOrCreateDynamicStream(QuicSession* session,
                                               QuicStreamId stream_id);
@@ -38,7 +39,10 @@ class QuicSessionPeer {
   GetLocallyClosedStreamsHighestOffset(QuicSession* session);
   static QuicSession::StaticStreamMap& static_streams(QuicSession* session);
   static QuicSession::DynamicStreamMap& dynamic_streams(QuicSession* session);
-  static std::unordered_set<QuicStreamId>* GetDrainingStreams(
+  static const QuicSession::ClosedStreams& closed_streams(QuicSession* session);
+  static const QuicSession::ZombieStreamMap& zombie_streams(
+      QuicSession* session);
+  static QuicUnorderedSet<QuicStreamId>* GetDrainingStreams(
       QuicSession* session);
   static void ActivateStream(QuicSession* session,
                              std::unique_ptr<QuicStream> stream);

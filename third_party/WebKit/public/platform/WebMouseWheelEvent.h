@@ -17,84 +17,96 @@ namespace blink {
 class WebMouseWheelEvent : public WebMouseEvent {
  public:
   enum Phase {
-    PhaseNone = 0,
-    PhaseBegan = 1 << 0,
-    PhaseStationary = 1 << 1,
-    PhaseChanged = 1 << 2,
-    PhaseEnded = 1 << 3,
-    PhaseCancelled = 1 << 4,
-    PhaseMayBegin = 1 << 5,
+    // No phase information is avaiable.
+    kPhaseNone = 0,
+    // This wheel event is the beginning of a scrolling sequence.
+    kPhaseBegan = 1 << 0,
+    // Shows that scrolling is ongoing but the scroll delta for this wheel event
+    // is zero.
+    kPhaseStationary = 1 << 1,
+    // Shows that a scroll is ongoing and the scroll delta for this wheel event
+    // is non-zero.
+    kPhaseChanged = 1 << 2,
+    // This wheel event is the last event of a scrolling sequence.
+    kPhaseEnded = 1 << 3,
+    // A wheel event with phase cancelled shows that the scrolling sequence is
+    // cancelled.
+    kPhaseCancelled = 1 << 4,
+    // A wheel event with phase may begin shows that a scrolling sequence may
+    // start.
+    kPhaseMayBegin = 1 << 5,
   };
 
-  float deltaX;
-  float deltaY;
-  float wheelTicksX;
-  float wheelTicksY;
+  float delta_x;
+  float delta_y;
+  float wheel_ticks_x;
+  float wheel_ticks_y;
 
-  float accelerationRatioX;
-  float accelerationRatioY;
+  float acceleration_ratio_x;
+  float acceleration_ratio_y;
 
   // This field exists to allow BrowserPlugin to mark MouseWheel events as
   // 'resent' to handle the case where an event is not consumed when first
   // encountered; it should be handled differently by the plugin when it is
   // sent for thesecond time. No code within Blink touches this, other than to
   // plumb it through event conversions.
-  int resendingPluginId;
+  int resending_plugin_id;
 
   Phase phase;
-  Phase momentumPhase;
+  Phase momentum_phase;
 
-  bool scrollByPage;
-  bool hasPreciseScrollingDeltas;
+  bool scroll_by_page;
+  bool has_precise_scrolling_deltas;
 
-  RailsMode railsMode;
+  RailsMode rails_mode;
 
   // Whether the event is blocking, non-blocking, all event
   // listeners were passive or was forced to be non-blocking.
-  DispatchType dispatchType;
+  DispatchType dispatch_type;
 
-  WebMouseWheelEvent(Type type, int modifiers, double timeStampSeconds)
+  WebMouseWheelEvent(Type type, int modifiers, double time_stamp_seconds)
       : WebMouseEvent(sizeof(WebMouseWheelEvent),
                       type,
                       modifiers,
-                      timeStampSeconds),
-        deltaX(0.0f),
-        deltaY(0.0f),
-        wheelTicksX(0.0f),
-        wheelTicksY(0.0f),
-        accelerationRatioX(1.0f),
-        accelerationRatioY(1.0f),
-        resendingPluginId(-1),
-        phase(PhaseNone),
-        momentumPhase(PhaseNone),
-        scrollByPage(false),
-        hasPreciseScrollingDeltas(false),
-        railsMode(RailsModeFree),
-        dispatchType(Blocking) {}
+                      time_stamp_seconds,
+                      kMousePointerId),
+        delta_x(0.0f),
+        delta_y(0.0f),
+        wheel_ticks_x(0.0f),
+        wheel_ticks_y(0.0f),
+        acceleration_ratio_x(1.0f),
+        acceleration_ratio_y(1.0f),
+        resending_plugin_id(-1),
+        phase(kPhaseNone),
+        momentum_phase(kPhaseNone),
+        scroll_by_page(false),
+        has_precise_scrolling_deltas(false),
+        rails_mode(kRailsModeFree),
+        dispatch_type(kBlocking) {}
 
   WebMouseWheelEvent()
-      : WebMouseEvent(sizeof(WebMouseWheelEvent)),
-        deltaX(0.0f),
-        deltaY(0.0f),
-        wheelTicksX(0.0f),
-        wheelTicksY(0.0f),
-        accelerationRatioX(1.0f),
-        accelerationRatioY(1.0f),
-        resendingPluginId(-1),
-        phase(PhaseNone),
-        momentumPhase(PhaseNone),
-        railsMode(RailsModeFree),
-        dispatchType(Blocking) {}
+      : WebMouseEvent(sizeof(WebMouseWheelEvent), kMousePointerId),
+        delta_x(0.0f),
+        delta_y(0.0f),
+        wheel_ticks_x(0.0f),
+        wheel_ticks_y(0.0f),
+        acceleration_ratio_x(1.0f),
+        acceleration_ratio_y(1.0f),
+        resending_plugin_id(-1),
+        phase(kPhaseNone),
+        momentum_phase(kPhaseNone),
+        rails_mode(kRailsModeFree),
+        dispatch_type(kBlocking) {}
 
 #if INSIDE_BLINK
-  BLINK_PLATFORM_EXPORT float deltaXInRootFrame() const;
-  BLINK_PLATFORM_EXPORT float deltaYInRootFrame() const;
+  BLINK_PLATFORM_EXPORT float DeltaXInRootFrame() const;
+  BLINK_PLATFORM_EXPORT float DeltaYInRootFrame() const;
 
   // Sets any scaled values to be their computed values and sets |frameScale|
   // back to 1 and |translateX|, |translateY| back to 0.
-  BLINK_PLATFORM_EXPORT WebMouseWheelEvent flattenTransform() const;
+  BLINK_PLATFORM_EXPORT WebMouseWheelEvent FlattenTransform() const;
 
-  bool isCancelable() const { return dispatchType == Blocking; }
+  bool IsCancelable() const { return dispatch_type == kBlocking; }
 #endif
 };
 #pragma pack(pop)

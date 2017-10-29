@@ -6,50 +6,119 @@
 #define SERVICES_DEVICE_DEVICE_SERVICE_H_
 
 #include "base/memory/ref_counted.h"
+#include "device/screen_orientation/public/interfaces/screen_orientation.mojom.h"
+#include "device/sensors/public/interfaces/motion.mojom.h"
+#include "device/sensors/public/interfaces/orientation.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
+#include "services/device/public/interfaces/battery_monitor.mojom.h"
 #include "services/device/public/interfaces/fingerprint.mojom.h"
+#include "services/device/public/interfaces/nfc_provider.mojom.h"
 #include "services/device/public/interfaces/power_monitor.mojom.h"
+#include "services/device/public/interfaces/sensor_provider.mojom.h"
 #include "services/device/public/interfaces/time_zone_monitor.mojom.h"
-#include "services/service_manager/public/cpp/interface_factory.h"
+#include "services/device/public/interfaces/vibration_manager.mojom.h"
+#include "services/device/public/interfaces/wake_lock_provider.mojom.h"
+#include "services/device/wake_lock/wake_lock_context.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "services/service_manager/public/cpp/service.h"
+
+#if defined(OS_ANDROID)
+#include "base/android/scoped_java_ref.h"
+#endif
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace device {
 
+class PowerMonitorMessageBroadcaster;
 class TimeZoneMonitor;
 
+#if defined(OS_ANDROID)
+// NOTE: See the comments on the definitions of |WakeLockContextCallback|
+// and NFCDelegate.java to understand the semantics and usage of these
+// parameters.
 std::unique_ptr<service_manager::Service> CreateDeviceService(
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner);
+    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+    const WakeLockContextCallback& wake_lock_context_callback,
+    const base::android::JavaRef<jobject>& java_nfc_delegate);
+#else
+std::unique_ptr<service_manager::Service> CreateDeviceService(
+    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner);
+#endif
 
-class DeviceService
-    : public service_manager::Service,
-      public service_manager::InterfaceFactory<mojom::Fingerprint>,
-      public service_manager::InterfaceFactory<mojom::PowerMonitor>,
-      public service_manager::InterfaceFactory<mojom::TimeZoneMonitor> {
+class DeviceService : public service_manager::Service {
  public:
-  DeviceService(scoped_refptr<base::SingleThreadTaskRunner> file_task_runner);
+#if defined(OS_ANDROID)
+  DeviceService(scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
+                scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+                const WakeLockContextCallback& wake_lock_context_callback,
+                const base::android::JavaRef<jobject>& java_nfc_delegate);
+#else
+  DeviceService(scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
+                scoped_refptr<base::SingleThreadTaskRunner> io_task_runner);
+#endif
   ~DeviceService() override;
 
  private:
   // service_manager::Service:
   void OnStart() override;
-  bool OnConnect(const service_manager::ServiceInfo& remote_info,
-                 service_manager::InterfaceRegistry* registry) override;
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle interface_pipe) override;
 
-  // InterfaceFactory<mojom::Fingerprint>:
-  void Create(const service_manager::Identity& remote_identity,
-              mojom::FingerprintRequest request) override;
+  void BindFingerprintRequest(mojom::FingerprintRequest request);
 
-  // InterfaceFactory<mojom::PowerMonitor>:
-  void Create(const service_manager::Identity& remote_identity,
-              mojom::PowerMonitorRequest request) override;
+  void BindMotionSensorRequest(mojom::MotionSensorRequest request);
 
-  // InterfaceFactory<mojom::TimeZoneMonitor>:
-  void Create(const service_manager::Identity& remote_identity,
-              mojom::TimeZoneMonitorRequest request) override;
+  void BindOrientationSensorRequest(mojom::OrientationSensorRequest request);
 
-  std::unique_ptr<device::TimeZoneMonitor> time_zone_monitor_;
+  void BindOrientationAbsoluteSensorRequest(
+      mojom::OrientationAbsoluteSensorRequest request);
 
+#if !defined(OS_ANDROID)
+  void BindBatteryMonitorRequest(mojom::BatteryMonitorRequest request);
+  void BindNFCProviderRequest(mojom::NFCProviderRequest request);
+  void BindVibrationManagerRequest(mojom::VibrationManagerRequest request);
+#endif
+
+  void BindPowerMonitorRequest(mojom::PowerMonitorRequest request);
+
+  void BindScreenOrientationListenerRequest(
+      mojom::ScreenOrientationListenerRequest request);
+
+  void BindSensorProviderRequest(mojom::SensorProviderRequest request);
+
+  void BindTimeZoneMonitorRequest(mojom::TimeZoneMonitorRequest request);
+
+  void BindWakeLockProviderRequest(mojom::WakeLockProviderRequest request);
+
+  std::unique_ptr<PowerMonitorMessageBroadcaster>
+      power_monitor_message_broadcaster_;
+  std::unique_ptr<TimeZoneMonitor> time_zone_monitor_;
   scoped_refptr<base::SingleThreadTaskRunner> file_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+
+  WakeLockContextCallback wake_lock_context_callback_;
+
+#if defined(OS_ANDROID)
+  // Binds |java_interface_provider_| to an interface registry that exposes
+  // factories for the interfaces that are provided via Java on Android.
+  service_manager::InterfaceProvider* GetJavaInterfaceProvider();
+
+  // InterfaceProvider that is bound to the Java-side interface registry.
+  service_manager::InterfaceProvider java_interface_provider_;
+
+  bool java_interface_provider_initialized_;
+
+  base::android::ScopedJavaGlobalRef<jobject> java_nfc_delegate_;
+#endif
+
+  service_manager::BinderRegistry registry_;
 
   DISALLOW_COPY_AND_ASSIGN(DeviceService);
 };

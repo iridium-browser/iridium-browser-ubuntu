@@ -28,6 +28,7 @@
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -160,6 +161,22 @@ std::unique_ptr<base::DictionaryValue> BuildAddressDictionary(
   return address;
 }
 
+// Populates the list of active experiments that affect either the data sent in
+// payments RPCs or whether the RPCs are sent or not.
+void SetActiveExperiments(const std::vector<const char*>& active_experiments,
+                          base::DictionaryValue* request_dict) {
+  if (active_experiments.empty())
+    return;
+
+  std::unique_ptr<base::ListValue> active_chrome_experiments(
+      base::MakeUnique<base::ListValue>());
+  for (const char* it : active_experiments)
+    active_chrome_experiments->AppendString(it);
+
+  request_dict->Set("active_chrome_experiments",
+                    std::move(active_chrome_experiments));
+}
+
 class UnmaskCardRequest : public PaymentsRequest {
  public:
   UnmaskCardRequest(const PaymentsClient::UnmaskRequestDetails& request_details)
@@ -221,8 +238,11 @@ class UnmaskCardRequest : public PaymentsRequest {
 class GetUploadDetailsRequest : public PaymentsRequest {
  public:
   GetUploadDetailsRequest(const std::vector<AutofillProfile>& addresses,
+                          const std::vector<const char*>& active_experiments,
                           const std::string& app_locale)
-      : addresses_(addresses), app_locale_(app_locale) {}
+      : addresses_(addresses),
+        active_experiments_(active_experiments),
+        app_locale_(app_locale) {}
   ~GetUploadDetailsRequest() override {}
 
   std::string GetRequestUrlPath() override {
@@ -249,6 +269,8 @@ class GetUploadDetailsRequest : public PaymentsRequest {
     }
     request_dict.Set("address", std::move(addresses));
 
+    SetActiveExperiments(active_experiments_, &request_dict);
+
     std::string request_content;
     base::JSONWriter::Write(request_dict, &request_content);
     VLOG(3) << "getdetailsforsavecard request body: " << request_content;
@@ -273,7 +295,8 @@ class GetUploadDetailsRequest : public PaymentsRequest {
   }
 
  private:
-  std::vector<AutofillProfile> addresses_;
+  const std::vector<AutofillProfile> addresses_;
+  const std::vector<const char*> active_experiments_;
   std::string app_locale_;
   base::string16 context_token_;
   std::unique_ptr<base::DictionaryValue> legal_message_;
@@ -324,6 +347,8 @@ class UploadCardRequest : public PaymentsRequest {
     if (base::StringToInt(exp_year, &value))
       request_dict.SetInteger("expiration_year", value);
 
+    SetActiveExperiments(request_details_.active_experiments, &request_dict);
+
     const base::string16 pan = request_details_.card.GetInfo(
         AutofillType(CREDIT_CARD_NUMBER), app_locale);
     std::string json_request;
@@ -340,17 +365,19 @@ class UploadCardRequest : public PaymentsRequest {
   }
 
   void ParseResponse(std::unique_ptr<base::DictionaryValue> response) override {
+    response->GetString("credit_card_id", &server_id_);
   }
 
   bool IsResponseComplete() override { return true; }
 
   void RespondToDelegate(PaymentsClientDelegate* delegate,
                          AutofillClient::PaymentsRpcResult result) override {
-    delegate->OnDidUploadCard(result);
+    delegate->OnDidUploadCard(result, server_id_);
   }
 
  private:
-  PaymentsClient::UploadRequestDetails request_details_;
+  const PaymentsClient::UploadRequestDetails request_details_;
+  std::string server_id_;
 };
 
 }  // namespace
@@ -390,8 +417,10 @@ void PaymentsClient::UnmaskCard(
 
 void PaymentsClient::GetUploadDetails(
     const std::vector<AutofillProfile>& addresses,
+    const std::vector<const char*>& active_experiments,
     const std::string& app_locale) {
-  IssueRequest(base::MakeUnique<GetUploadDetailsRequest>(addresses, app_locale),
+  IssueRequest(base::MakeUnique<GetUploadDetailsRequest>(
+                   addresses, active_experiments, app_locale),
                false);
 }
 
@@ -415,9 +444,44 @@ void PaymentsClient::IssueRequest(std::unique_ptr<PaymentsRequest> request,
 }
 
 void PaymentsClient::InitializeUrlFetcher() {
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("payments_sync_cards", R"(
+        semantics {
+          sender: "Payments"
+          description:
+            "This service communicates with Google Payments servers to upload "
+            "(save) or receive the user's credit card info."
+          trigger:
+            "Requests are triggered by a user action, such as selecting a "
+            "masked server card from Chromium's credit card autofill dropdown, "
+            "submitting a form which has credit card information, or accepting "
+            "the prompt to save a credit card to Payments servers."
+          data:
+            "In case of save, a protocol buffer containing relevant address "
+            "and credit card information which should be saved in Google "
+            "Payments servers, along with user credentials. In case of load, a "
+            "protocol buffer containing the id of the credit card to unmask, "
+            "an encrypted cvc value, an optional updated card expiration date, "
+            "and user credentials."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "Users can enable or disable this feature in Chromium settings by "
+            "toggling 'Credit cards and addresses using Google Payments', "
+            "under 'Advanced sync settings...'. This feature is enabled by "
+            "default."
+          chrome_policy {
+            AutoFillEnabled {
+              policy_options {mode: MANDATORY}
+              AutoFillEnabled: false
+            }
+          }
+        })");
   url_fetcher_ =
       net::URLFetcher::Create(0, GetRequestUrl(request_->GetRequestUrlPath()),
-                              net::URLFetcher::POST, this);
+                              net::URLFetcher::POST, this, traffic_annotation);
 
   data_use_measurement::DataUseUserData::AttachToFetcher(
       url_fetcher_.get(), data_use_measurement::DataUseUserData::AUTOFILL);

@@ -35,6 +35,7 @@
             ['OS=="linux" and use_x11==1 and chromeos==0',
             {
                 'angle_enable_gl%': 1,
+                'angle_enable_vulkan%': 1,
             }],
             ['OS=="mac"',
             {
@@ -69,7 +70,7 @@
             [
                 '.',
                 '../include',
-                'common/third_party/numerics',
+                'common/third_party/base',
             ],
             'dependencies':
             [
@@ -81,7 +82,7 @@
                 [
                     '<(angle_path)/include',
                     '<(angle_path)/src',
-                    '<(angle_path)/src/common/third_party/numerics',
+                    '<(angle_path)/src/common/third_party/base',
                 ],
                 'conditions':
                 [
@@ -224,6 +225,52 @@
             },
             'conditions':
             [
+                ['OS=="win"',
+                {
+                    'sources':
+                    [
+                        '<@(libangle_gpu_info_util_win_sources)',
+                    ],
+                }],
+                ['OS=="win" and angle_build_winrt==0',
+                {
+                    'link_settings':
+                    {
+                        'msvs_settings':
+                        {
+                            'VCLinkerTool':
+                            {
+                                'AdditionalDependencies':
+                                [
+                                    'setupapi.lib'
+                                ]
+                            }
+                        }
+                    },
+                    'defines':
+                    [
+                        'GPU_INFO_USE_SETUPAPI',
+                    ],
+                },
+                {
+                    'link_settings':
+                    {
+                        'msvs_settings':
+                        {
+                            'VCLinkerTool':
+                            {
+                                'AdditionalDependencies':
+                                [
+                                    'dxgi.lib'
+                                ]
+                            }
+                        }
+                    },
+                    'defines':
+                    [
+                        'GPU_INFO_USE_DXGI',
+                    ],
+                }],
                 ['OS=="linux"',
                 {
                     'sources':

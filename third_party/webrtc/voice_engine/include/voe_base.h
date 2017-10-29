@@ -35,9 +35,9 @@
 #define WEBRTC_VOICE_ENGINE_VOE_BASE_H
 
 #include "webrtc/api/audio_codecs/audio_decoder_factory.h"
-#include "webrtc/base/scoped_ref_ptr.h"
 #include "webrtc/common_types.h"
 #include "webrtc/modules/audio_coding/include/audio_coding_module.h"
+#include "webrtc/rtc_base/scoped_ref_ptr.h"
 
 namespace webrtc {
 
@@ -85,10 +85,6 @@ class WEBRTC_DLLEXPORT VoiceEngine {
   // receives callbacks for generated trace messages.
   static int SetTraceCallback(TraceCallback* callback);
 
-#if !defined(WEBRTC_CHROMIUM_BUILD)
-  static int SetAndroidObjects(void* javaVM, void* context);
-#endif
-
   static std::string GetVersionString();
 
  protected:
@@ -128,20 +124,15 @@ class WEBRTC_DLLEXPORT VoEBase {
   // modules:
   // - The Audio Device Module (ADM) which implements all the audio layer
   // functionality in a separate (reference counted) module.
-  // - The AudioProcessing module handles capture-side processing. VoiceEngine
-  // takes ownership of this object.
+  // - The AudioProcessing module handles capture-side processing.
   // - An AudioDecoderFactory - used to create audio decoders.
-  // If NULL is passed for any of these, VoiceEngine will create its own.
-  // Returns -1 in case of an error, 0 otherwise.
+  // If NULL is passed for either of ADM or AudioDecoderFactory, VoiceEngine
+  // will create its own. Returns -1 in case of an error, 0 otherwise.
   // TODO(ajm): Remove default NULLs.
   virtual int Init(AudioDeviceModule* external_adm = NULL,
-                   AudioProcessing* audioproc = NULL,
+                   AudioProcessing* external_apm = nullptr,
                    const rtc::scoped_refptr<AudioDecoderFactory>&
                        decoder_factory = nullptr) = 0;
-
-  // Returns NULL before Init() is called.
-  virtual AudioProcessing* audio_processing() = 0;
-
   // This method is WIP - DO NOT USE!
   // Returns NULL before Init() is called.
   virtual AudioDeviceModule* audio_device_module() = 0;

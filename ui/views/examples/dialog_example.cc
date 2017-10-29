@@ -15,8 +15,7 @@
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/layout/layout_constants.h"
-#include "ui/views/views_delegate.h"
+#include "ui/views/layout/layout_provider.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_client_view.h"
 
@@ -43,7 +42,7 @@ class DialogExample::Delegate : public virtual DialogType {
     Label* body = new Label(parent_->body_->text());
     body->SetMultiLine(true);
     body->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    body->set_background(Background::CreateSolidBackground(0, 255, 255));
+    body->SetBackground(CreateSolidBackground(SkColorSetRGB(0, 255, 255)));
     this->AddChildView(body);
 
     // Give the example code a way to change the body text.
@@ -131,8 +130,9 @@ void DialogExample::CreateExampleView(View* container) {
   const float kFixed = 0.f;
   const float kStretchy = 1.f;
 
+  views::LayoutProvider* provider = views::LayoutProvider::Get();
   const int horizontal_spacing =
-      ViewsDelegate::GetInstance()->GetDialogRelatedButtonHorizontalSpacing();
+      provider->GetDistanceMetric(views::DISTANCE_RELATED_BUTTON_HORIZONTAL);
   GridLayout* layout = GridLayout::CreatePanel(container);
   container->SetLayoutManager(layout);
   ColumnSet* column_set = layout->AddColumnSet(kFieldsColumnId);
@@ -171,8 +171,9 @@ void DialogExample::CreateExampleView(View* container) {
   column_set = layout->AddColumnSet(kButtonsColumnId);
   column_set->AddColumn(GridLayout::CENTER, GridLayout::CENTER, kStretchy,
                         GridLayout::USE_PREF, 0, 0);
-  layout->StartRowWithPadding(kFixed, kButtonsColumnId, kFixed,
-                              kUnrelatedControlVerticalSpacing);
+  layout->StartRowWithPadding(
+      kFixed, kButtonsColumnId, kFixed,
+      provider->GetDistanceMetric(views::DISTANCE_UNRELATED_CONTROL_VERTICAL));
   show_ =
       MdTextButton::CreateSecondaryUiButton(this, base::ASCIIToUTF16("Show"));
   layout->AddView(show_);
@@ -185,9 +186,10 @@ void DialogExample::CreateExampleView(View* container) {
 
 void DialogExample::StartRowWithLabel(GridLayout* layout, const char* label) {
   const float kFixedVerticalResize = 0.f;
-  layout->StartRowWithPadding(
-      kFixedVerticalResize, kFieldsColumnId, kFixedVerticalResize,
-      ViewsDelegate::GetInstance()->GetDialogRelatedControlVerticalSpacing());
+  layout->StartRowWithPadding(kFixedVerticalResize, kFieldsColumnId,
+                              kFixedVerticalResize,
+                              views::LayoutProvider::Get()->GetDistanceMetric(
+                                  views::DISTANCE_RELATED_CONTROL_VERTICAL));
   layout->AddView(new Label(base::ASCIIToUTF16(label)));
 }
 
@@ -245,6 +247,10 @@ void DialogExample::ResizeDialog() {
   // Q: Do we need NonClientFrameView::GetWindowBoundsForClientBounds() here?
   // A: When DialogCientView properly feeds back sizes, we do not.
   widget->SetBoundsConstrained(preferred_bounds);
+
+  // For user-resizable dialogs, ensure the window manager enforces any new
+  // minimum size.
+  widget->OnSizeConstraintsChanged();
 }
 
 void DialogExample::ButtonPressed(Button* sender, const ui::Event& event) {

@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "device/gamepad/gamepad_consumer.h"
 #include "device/gamepad/gamepad_test_helpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -17,21 +18,17 @@
 namespace device {
 
 namespace {
-static const int kNumberOfGamepads = blink::WebGamepads::itemsLengthCap;
+static const int kNumberOfGamepads = Gamepads::kItemsLengthCap;
 }
-
-using blink::WebGamepads;
 
 class ConnectionListener : public device::GamepadConsumer {
  public:
   ConnectionListener() { ClearCounters(); }
 
-  void OnGamepadConnected(unsigned index,
-                          const blink::WebGamepad& gamepad) override {
+  void OnGamepadConnected(unsigned index, const Gamepad& gamepad) override {
     connected_counter_++;
   }
-  void OnGamepadDisconnected(unsigned index,
-                             const blink::WebGamepad& gamepad) override {
+  void OnGamepadDisconnected(unsigned index, const Gamepad& gamepad) override {
     disconnected_counter_++;
   }
 
@@ -66,11 +63,11 @@ class GamepadServiceTest : public testing::Test {
   void SetUp() override;
 
  private:
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   device::MockGamepadDataFetcher* fetcher_;
   GamepadService* service_;
   std::unique_ptr<ConnectionListener> connection_listener_;
-  WebGamepads test_data_;
+  Gamepads test_data_;
 
   DISALLOW_COPY_AND_ASSIGN(GamepadServiceTest);
 };
@@ -79,7 +76,7 @@ GamepadServiceTest::GamepadServiceTest() {
   memset(&test_data_, 0, sizeof(test_data_));
 
   // Set it so that we have user gesture.
-  test_data_.items[0].buttonsLength = 1;
+  test_data_.items[0].buttons_length = 1;
   test_data_.items[0].buttons[0].value = 1.f;
   test_data_.items[0].buttons[0].pressed = true;
 }

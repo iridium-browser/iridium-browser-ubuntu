@@ -20,6 +20,7 @@
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_save_info.h"
 #include "content/public/browser/download_url_parameters.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace content {
 
@@ -63,22 +64,44 @@ class DragDownloadFile::DragDownloadFileUI : public DownloadItem::Observer {
   void InitiateDownload(base::File file,
                         const base::FilePath& file_path) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    DownloadManager* download_manager =
-        BrowserContext::GetDownloadManager(web_contents_->GetBrowserContext());
 
     RecordDownloadSource(INITIATED_BY_DRAG_N_DROP);
     // TODO(https://crbug.com/614134) This should use the frame actually
     // containing the link being dragged rather than the main frame of the tab.
+    net::NetworkTrafficAnnotationTag traffic_annotation =
+        net::DefineNetworkTrafficAnnotation("drag_download_file", R"(
+        semantics {
+          sender: "Drag To Download"
+          description:
+            "Users can download files by dragging them out of browser and into "
+            "a disk related area."
+          trigger: "When user drags a file from the browser."
+          data: "None."
+          destination: WEBSITE
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store: "user"
+          setting:
+            "This feature cannot be disabled in settings, but it is only "
+            "activated by direct user action."
+          chrome_policy {
+            DownloadRestrictions {
+              DownloadRestrictions: 3
+            }
+          }
+        })");
     std::unique_ptr<content::DownloadUrlParameters> params(
         DownloadUrlParameters::CreateForWebContentsMainFrame(
-            web_contents_, url_));
+            web_contents_, url_, traffic_annotation));
     params->set_referrer(referrer_);
     params->set_referrer_encoding(referrer_encoding_);
     params->set_callback(base::Bind(&DragDownloadFileUI::OnDownloadStarted,
                                     weak_ptr_factory_.GetWeakPtr()));
     params->set_file_path(file_path);
     params->set_file(std::move(file));  // Nulls file.
-    download_manager->DownloadUrl(std::move(params));
+    BrowserContext::GetDownloadManager(web_contents_->GetBrowserContext())
+        ->DownloadUrl(std::move(params));
   }
 
   void Cancel() {

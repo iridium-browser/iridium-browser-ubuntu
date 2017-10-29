@@ -20,7 +20,7 @@ namespace content_settings {
 
 namespace {
 
-base::LazyInstance<ContentSettingsRegistry> g_instance =
+base::LazyInstance<ContentSettingsRegistry>::DestructorAtExit g_instance =
     LAZY_INSTANCE_INITIALIZER;
 
 // TODO(raymes): These overloaded functions make the registration code clearer.
@@ -250,7 +250,8 @@ void ContentSettingsRegistry::Init() {
   Register(CONTENT_SETTINGS_TYPE_DURABLE_STORAGE, "durable-storage",
            CONTENT_SETTING_ASK, WebsiteSettingsInfo::UNSYNCABLE,
            WhitelistedSchemes(),
-           ValidSettings(CONTENT_SETTING_ALLOW, CONTENT_SETTING_BLOCK),
+           ValidSettings(CONTENT_SETTING_ALLOW, CONTENT_SETTING_BLOCK,
+                         CONTENT_SETTING_ASK),
            WebsiteSettingsInfo::REQUESTING_ORIGIN_ONLY_SCOPE,
            WebsiteSettingsRegistry::DESKTOP |
                WebsiteSettingsRegistry::PLATFORM_ANDROID,
@@ -273,9 +274,17 @@ void ContentSettingsRegistry::Init() {
                WebsiteSettingsRegistry::PLATFORM_ANDROID,
            ContentSettingsInfo::INHERIT_IF_LESS_PERMISSIVE);
 
-  Register(CONTENT_SETTINGS_TYPE_SUBRESOURCE_FILTER, "subresource-filter",
-           CONTENT_SETTING_ALLOW,
+  Register(CONTENT_SETTINGS_TYPE_SOUND, "sound", CONTENT_SETTING_ALLOW,
            WebsiteSettingsInfo::UNSYNCABLE, WhitelistedSchemes(),
+           ValidSettings(CONTENT_SETTING_ALLOW, CONTENT_SETTING_BLOCK),
+           WebsiteSettingsInfo::REQUESTING_ORIGIN_ONLY_SCOPE,
+           WebsiteSettingsRegistry::DESKTOP |
+               WebsiteSettingsRegistry::PLATFORM_ANDROID,
+           ContentSettingsInfo::INHERIT_IF_LESS_PERMISSIVE);
+
+  Register(CONTENT_SETTINGS_TYPE_ADS, "subresource-filter",
+           CONTENT_SETTING_BLOCK, WebsiteSettingsInfo::UNSYNCABLE,
+           WhitelistedSchemes(),
            ValidSettings(CONTENT_SETTING_ALLOW, CONTENT_SETTING_BLOCK),
            WebsiteSettingsInfo::REQUESTING_ORIGIN_ONLY_SCOPE,
            WebsiteSettingsRegistry::DESKTOP |

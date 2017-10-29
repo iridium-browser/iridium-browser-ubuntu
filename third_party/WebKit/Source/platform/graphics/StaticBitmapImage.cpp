@@ -8,35 +8,36 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/ImageObserver.h"
 #include "platform/graphics/UnacceleratedStaticBitmapImage.h"
+#include "platform/graphics/paint/PaintImage.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkPaint.h"
 
 namespace blink {
 
-PassRefPtr<StaticBitmapImage> StaticBitmapImage::create(sk_sp<SkImage> image) {
+PassRefPtr<StaticBitmapImage> StaticBitmapImage::Create(sk_sp<SkImage> image) {
   if (!image)
     return nullptr;
   if (image->isTextureBacked())
-    return AcceleratedStaticBitmapImage::createFromSharedContextImage(
+    return AcceleratedStaticBitmapImage::CreateFromSharedContextImage(
         std::move(image));
-  return UnacceleratedStaticBitmapImage::create(std::move(image));
+  return UnacceleratedStaticBitmapImage::Create(std::move(image));
 }
 
-void StaticBitmapImage::drawHelper(PaintCanvas* canvas,
+void StaticBitmapImage::DrawHelper(PaintCanvas* canvas,
                                    const PaintFlags& flags,
-                                   const FloatRect& dstRect,
-                                   const FloatRect& srcRect,
-                                   ImageClampingMode clampMode,
-                                   sk_sp<SkImage> image) {
-  FloatRect adjustedSrcRect = srcRect;
-  adjustedSrcRect.intersect(SkRect::Make(image->bounds()));
+                                   const FloatRect& dst_rect,
+                                   const FloatRect& src_rect,
+                                   ImageClampingMode clamp_mode,
+                                   const PaintImage& image) {
+  FloatRect adjusted_src_rect = src_rect;
+  adjusted_src_rect.Intersect(SkRect::Make(image.sk_image()->bounds()));
 
-  if (dstRect.isEmpty() || adjustedSrcRect.isEmpty())
+  if (dst_rect.IsEmpty() || adjusted_src_rect.IsEmpty())
     return;  // Nothing to draw.
 
-  canvas->drawImageRect(image.get(), adjustedSrcRect, dstRect, &flags,
-                        WebCoreClampingModeToSkiaRectConstraint(clampMode));
+  canvas->drawImageRect(image, adjusted_src_rect, dst_rect, &flags,
+                        WebCoreClampingModeToSkiaRectConstraint(clamp_mode));
 }
 
 }  // namespace blink

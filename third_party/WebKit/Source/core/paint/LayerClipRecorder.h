@@ -10,21 +10,20 @@
 #include "core/paint/PaintPhase.h"
 #include "platform/graphics/paint/ClipDisplayItem.h"
 #include "platform/graphics/paint/DisplayItem.h"
-#include "wtf/Vector.h"
+#include "platform/wtf/Vector.h"
 
 namespace blink {
 
 class ClipRect;
 class GraphicsContext;
-class LayoutBoxModelObject;
 
 class CORE_EXPORT LayerClipRecorder {
   USING_FAST_MALLOC(LayerClipRecorder);
 
  public:
   enum BorderRadiusClippingRule {
-    IncludeSelfForBorderRadius,
-    DoNotIncludeSelfForBorderRadius
+    kIncludeSelfForBorderRadius,
+    kDoNotIncludeSelfForBorderRadius
   };
 
   // Set rounded clip rectangles defined by border radii all the way from the
@@ -43,28 +42,39 @@ class CORE_EXPORT LayerClipRecorder {
   // Would be nice to clean up this.
   explicit LayerClipRecorder(
       GraphicsContext&,
-      const LayoutBoxModelObject&,
+      const PaintLayer&,
       DisplayItem::Type,
       const ClipRect&,
-      const PaintLayer* clipRoot,
-      const LayoutPoint& fragmentOffset,
+      const PaintLayer* clip_root,
+      const LayoutPoint& fragment_offset,
       PaintLayerFlags,
-      BorderRadiusClippingRule = IncludeSelfForBorderRadius);
+      const DisplayItemClient&,
+      BorderRadiusClippingRule = kIncludeSelfForBorderRadius);
 
   ~LayerClipRecorder();
 
- private:
-  void collectRoundedRectClips(PaintLayer&,
-                               const PaintLayer* clipRoot,
-                               GraphicsContext&,
-                               const LayoutPoint& fragmentOffset,
-                               PaintLayerFlags,
-                               BorderRadiusClippingRule,
-                               Vector<FloatRoundedRect>& roundedRectClips);
+  // Build a vector of the border radius clips that should be applied to
+  // the given PaintLayer, walking up the paint layer tree to the clip_root.
+  // The offset_within_layer is an offset to apply to the clip to position it
+  // in the required clipping coordinates (for cases when the painting
+  // coordinate system is offset from the layer coordinate system).
+  // cross_composited_scrollers should be true when the search for clips should
+  // continue even if the clipping layer is painting into a composited scrolling
+  // layer, as when painting a mask for a child of the scroller.
+  // The BorderRadiusClippingRule defines whether clips on the PaintLayer itself
+  // are included. Output is appended to rounded_rect_clips.
+  static void CollectRoundedRectClips(
+      const PaintLayer&,
+      const PaintLayer* clip_root,
+      const LayoutPoint& offset_within_layer,
+      bool cross_composited_scrollers,
+      BorderRadiusClippingRule,
+      Vector<FloatRoundedRect>& rounded_rect_clips);
 
-  GraphicsContext& m_graphicsContext;
-  const LayoutBoxModelObject& m_layoutObject;
-  DisplayItem::Type m_clipType;
+ private:
+  GraphicsContext& graphics_context_;
+  const DisplayItemClient& client_;
+  DisplayItem::Type clip_type_;
 };
 
 }  // namespace blink

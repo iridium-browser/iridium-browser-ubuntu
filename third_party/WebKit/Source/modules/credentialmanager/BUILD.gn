@@ -18,7 +18,5 @@ blink_modules_sources("credentialmanager") {
     "NavigatorCredentials.h",
     "PasswordCredential.cpp",
     "PasswordCredential.h",
-    "SiteBoundCredential.cpp",
-    "SiteBoundCredential.h",
   ]
 }

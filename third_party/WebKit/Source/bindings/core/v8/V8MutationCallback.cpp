@@ -26,63 +26,71 @@
 #include "bindings/core/v8/V8MutationCallback.h"
 
 #include "bindings/core/v8/ScriptController.h"
-#include "bindings/core/v8/ScriptState.h"
-#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/core/v8/V8MutationObserver.h"
 #include "bindings/core/v8/V8MutationRecord.h"
-#include "bindings/core/v8/V8PrivateProperty.h"
 #include "core/dom/ExecutionContext.h"
-#include "wtf/Assertions.h"
+#include "platform/bindings/ScriptState.h"
+#include "platform/bindings/V8PrivateProperty.h"
+#include "platform/wtf/Assertions.h"
 
 namespace blink {
 
 V8MutationCallback::V8MutationCallback(v8::Local<v8::Function> callback,
                                        v8::Local<v8::Object> owner,
-                                       ScriptState* scriptState)
-    : m_callback(scriptState->isolate(), callback), m_scriptState(scriptState) {
-  V8PrivateProperty::getMutationObserverCallback(scriptState->isolate())
-      .set(scriptState->context(), owner, callback);
-  m_callback.setPhantom();
+                                       ScriptState* script_state)
+    : callback_(script_state->GetIsolate(), this, callback),
+      script_state_(script_state) {
+  V8PrivateProperty::GetMutationObserverCallback(script_state->GetIsolate())
+      .Set(owner, callback);
 }
 
 V8MutationCallback::~V8MutationCallback() {}
 
-void V8MutationCallback::call(
+void V8MutationCallback::Call(
     const HeapVector<Member<MutationRecord>>& mutations,
     MutationObserver* observer) {
-  v8::Isolate* isolate = m_scriptState->isolate();
-  ExecutionContext* executionContext = m_scriptState->getExecutionContext();
-  if (!executionContext || executionContext->isContextSuspended() ||
-      executionContext->isContextDestroyed())
-    return;
-  if (!m_scriptState->contextIsValid())
-    return;
-  ScriptState::Scope scope(m_scriptState.get());
-
-  if (m_callback.isEmpty())
-    return;
-  v8::Local<v8::Value> observerHandle =
-      ToV8(observer, m_scriptState->context()->Global(), isolate);
-  if (!observerHandle->IsObject())
+  if (callback_.IsEmpty())
     return;
 
-  v8::Local<v8::Object> thisObject =
-      v8::Local<v8::Object>::Cast(observerHandle);
-  v8::Local<v8::Value> v8Mutations =
-      ToV8(mutations, m_scriptState->context()->Global(), isolate);
-  if (v8Mutations.IsEmpty())
+  if (!script_state_->ContextIsValid())
     return;
-  v8::Local<v8::Value> argv[] = {v8Mutations, observerHandle};
 
-  v8::TryCatch exceptionCatcher(isolate);
-  exceptionCatcher.SetVerbose(true);
-  V8ScriptRunner::callFunction(m_callback.newLocal(isolate),
-                               getExecutionContext(), thisObject,
+  v8::Isolate* isolate = script_state_->GetIsolate();
+  ExecutionContext* execution_context =
+      ExecutionContext::From(script_state_.Get());
+  if (!execution_context || execution_context->IsContextSuspended() ||
+      execution_context->IsContextDestroyed())
+    return;
+  ScriptState::Scope scope(script_state_.Get());
+
+  v8::Local<v8::Value> observer_handle =
+      ToV8(observer, script_state_->GetContext()->Global(), isolate);
+  if (!observer_handle->IsObject())
+    return;
+
+  v8::Local<v8::Object> this_object =
+      v8::Local<v8::Object>::Cast(observer_handle);
+  v8::Local<v8::Value> v8_mutations =
+      ToV8(mutations, script_state_->GetContext()->Global(), isolate);
+  if (v8_mutations.IsEmpty())
+    return;
+  v8::Local<v8::Value> argv[] = {v8_mutations, observer_handle};
+
+  v8::TryCatch exception_catcher(isolate);
+  exception_catcher.SetVerbose(true);
+  V8ScriptRunner::CallFunction(callback_.NewLocal(isolate),
+                               GetExecutionContext(), this_object,
                                WTF_ARRAY_LENGTH(argv), argv, isolate);
 }
 
 DEFINE_TRACE(V8MutationCallback) {
-  MutationCallback::trace(visitor);
+  MutationCallback::Trace(visitor);
+}
+
+DEFINE_TRACE_WRAPPERS(V8MutationCallback) {
+  visitor->TraceWrappers(callback_.Cast<v8::Value>());
+  MutationCallback::TraceWrappers(visitor);
 }
 
 }  // namespace blink

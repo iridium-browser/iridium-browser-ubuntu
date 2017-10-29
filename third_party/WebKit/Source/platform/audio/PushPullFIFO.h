@@ -6,26 +6,37 @@
 #define PushPullFIFO_h
 
 #include "platform/audio/AudioBus.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Functional.h"
+#include "platform/wtf/Threading.h"
+#include "platform/wtf/ThreadingPrimitives.h"
 #include "public/platform/WebCommon.h"
-#include "wtf/Allocator.h"
 
 namespace blink {
 
 // A configuration data container for PushPullFIFO unit test.
 struct PushPullFIFOStateForTest {
-  const size_t fifoLength;
-  const unsigned numberOfChannels;
-  const size_t framesAvailable;
-  const size_t indexRead;
-  const size_t indexWrite;
-  const unsigned overflowCount;
-  const unsigned underflowCount;
+  const size_t fifo_length;
+  const unsigned number_of_channels;
+  const size_t frames_available;
+  const size_t index_read;
+  const size_t index_write;
+  const unsigned overflow_count;
+  const unsigned underflow_count;
 };
 
 // PushPullFIFO class is an intermediate audio sample storage between
 // Blink-WebAudio and the renderer. The renderer's hardware callback buffer size
 // varies on the platform, but the WebAudio always renders 128 frames (render
 // quantum, RQ) thus FIFO is needed to handle the general case.
+//
+// Note that this object is concurrently accessed by two threads; WebAudio
+// rendering thread (WebThread) in Blink and the audio device thread
+// (AudioDeviceThread) from the media renderer. The push/pull operations touch
+// most of variables in the class (index_write_, index_read_, frames_available_,
+// and fifo_Bus_) so the thread safety must be handled with care.
+//
+// TODO(hongchan): add a unit test for multi-thread access.
 class BLINK_PLATFORM_EXPORT PushPullFIFO {
   USING_FAST_MALLOC(PushPullFIFO);
   WTF_MAKE_NONCOPYABLE(PushPullFIFO);
@@ -34,50 +45,55 @@ class BLINK_PLATFORM_EXPORT PushPullFIFO {
   // Maximum FIFO length. (512 render quanta)
   static const size_t kMaxFIFOLength;
 
-  // |fifoLength| cannot exceed |kMaxFIFOLength|. Otherwise it crashes.
-  explicit PushPullFIFO(unsigned numberOfChannels, size_t fifoLength);
+  // |fifo_length| cannot exceed |kMaxFIFOLength|. Otherwise it crashes.
+  explicit PushPullFIFO(unsigned number_of_channels, size_t fifo_length);
   ~PushPullFIFO();
 
   // Pushes the rendered frames by WebAudio engine.
-  //  - The |inputBus| length is 128 frames (1 render quantum), fixed.
+  //  - The |input_bus| length is 128 frames (1 render quantum), fixed.
   //  - In case of overflow (FIFO full while push), the existing frames in FIFO
-  //    will be overwritten and |indexRead| will be forcibly moved to
-  //    |indexWrite| to avoid reading overwritten frames.
-  void push(const AudioBus* inputBus);
+  //    will be overwritten and |index_read_| will be forcibly moved to
+  //    |index_write_| to avoid reading overwritten frames.
+  void Push(const AudioBus* input_bus);
 
-  // Pulling |framesRequested| by the audio device thread.
-  //  - If |framesRequested| is bigger than the length of |outputBus|, it
+  // Pulls |frames_requested| by the audio device thread and returns the actual
+  // number of frames to be rendered by the source. (i.e. WebAudio graph)
+  //  - If |frames_requested| is bigger than the length of |output_bus|, it
   //    violates SECURITY_CHECK().
-  //  - If |framesRequested| is bigger than FIFO length, it violates
+  //  - If |frames_requested| is bigger than FIFO length, it violates
   //    SECURITY_CHECK().
   //  - In case of underflow (FIFO empty while pull), the remaining space in the
   //    requested output bus will be filled with silence. Thus it will fulfill
   //    the request from the consumer without causing error, but with a glitch.
-  void pull(AudioBus* outputBus, size_t framesRequested);
+  size_t Pull(AudioBus* output_bus, size_t frames_requested);
 
-  size_t framesAvailable() const { return m_framesAvailable; }
-  size_t length() const { return m_fifoLength; }
-  unsigned numberOfChannels() const { return m_fifoBus->numberOfChannels(); }
-  AudioBus* bus() const { return m_fifoBus.get(); }
+  size_t length() const { return fifo_length_; }
+  unsigned NumberOfChannels() const { return fifo_bus_->NumberOfChannels(); }
 
-  // For unit test. Get the current configuration that consists of FIFO length,
-  // number of channels, read/write index position and under/overflow count.
-  const PushPullFIFOStateForTest getStateForTest() const;
+  // TODO(hongchan): For single thread unit test only. Consider refactoring.
+  AudioBus* GetFIFOBusForTest() const { return fifo_bus_.Get(); }
+
+  // For single thread unit test only. Get the current configuration that
+  // consists of FIFO length, number of channels, read/write index position and
+  // under/overflow count.
+  const PushPullFIFOStateForTest GetStateForTest() const;
 
  private:
   // The size of the FIFO.
-  const size_t m_fifoLength = 0;
+  const size_t fifo_length_ = 0;
 
-  RefPtr<AudioBus> m_fifoBus;
+  // For UMA reporting purpose.
+  unsigned pull_count_ = 0;
+  unsigned overflow_count_ = 0;
+  unsigned underflow_count_ = 0;
 
+  // This lock protects variables below.
+  Mutex lock_;
   // The number of frames in the FIFO actually available for pulling.
-  size_t m_framesAvailable;
-
-  size_t m_indexRead;
-  size_t m_indexWrite;
-
-  unsigned m_overflowCount;
-  unsigned m_underflowCount;
+  size_t frames_available_ = 0;
+  size_t index_read_ = 0;
+  size_t index_write_ = 0;
+  RefPtr<AudioBus> fifo_bus_;
 };
 
 }  // namespace blink

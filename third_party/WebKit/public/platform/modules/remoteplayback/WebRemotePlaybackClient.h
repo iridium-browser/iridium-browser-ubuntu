@@ -9,6 +9,7 @@ namespace blink {
 
 enum class WebRemotePlaybackAvailability;
 enum class WebRemotePlaybackState;
+class WebURL;
 
 // The interface between the HTMLMediaElement and its
 // HTMLMediaElementRemotePlayback supplement.
@@ -17,16 +18,19 @@ class WebRemotePlaybackClient {
   virtual ~WebRemotePlaybackClient() = default;
 
   // Notifies the client that the media element state has changed.
-  virtual void stateChanged(WebRemotePlaybackState) = 0;
+  virtual void StateChanged(WebRemotePlaybackState) = 0;
 
   // Notifies the client of the remote playback device availability change.
-  virtual void availabilityChanged(WebRemotePlaybackAvailability) = 0;
+  virtual void AvailabilityChanged(WebRemotePlaybackAvailability) = 0;
 
   // Notifies the client that the user cancelled the prompt shown via the API.
-  virtual void promptCancelled() = 0;
+  virtual void PromptCancelled() = 0;
 
   // Returns if the remote playback available for this media element.
-  virtual bool remotePlaybackAvailable() const = 0;
+  virtual bool RemotePlaybackAvailable() const = 0;
+
+  // Notifies the client that the source of the HTMLMediaElement has changed.
+  virtual void SourceChanged(const WebURL&) = 0;
 };
 
 }  // namespace blink

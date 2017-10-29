@@ -53,21 +53,11 @@ CPDF_LinkList* GetLinkList(CPDF_Page* page) {
   if (!page)
     return nullptr;
 
-  CPDF_Document* pDoc = page->m_pDocument;
+  CPDF_Document* pDoc = page->m_pDocument.Get();
   std::unique_ptr<CPDF_LinkList>* pHolder = pDoc->LinksContext();
   if (!pHolder->get())
     *pHolder = pdfium::MakeUnique<CPDF_LinkList>();
   return pHolder->get();
-}
-
-unsigned long Utf16EncodeMaybeCopyAndReturnLength(const CFX_WideString& text,
-                                                  void* buffer,
-                                                  unsigned long buflen) {
-  CFX_ByteString encodedText = text.UTF16LE_Encode();
-  unsigned long len = encodedText.GetLength();
-  if (buffer && len <= buflen)
-    FXSYS_memcpy(buffer, encodedText.c_str(), len);
-  return len;
 }
 
 }  // namespace
@@ -188,7 +178,7 @@ DLLEXPORT unsigned long STDCALL FPDFAction_GetFilePath(FPDF_ACTION pDict,
   CFX_ByteString path = action.GetFilePath().UTF8Encode();
   unsigned long len = path.GetLength() + 1;
   if (buffer && len <= buflen)
-    FXSYS_memcpy(buffer, path.c_str(), len);
+    memcpy(buffer, path.c_str(), len);
   return len;
 }
 
@@ -205,7 +195,7 @@ DLLEXPORT unsigned long STDCALL FPDFAction_GetURIPath(FPDF_DOCUMENT document,
   CFX_ByteString path = action.GetURI(pDoc);
   unsigned long len = path.GetLength() + 1;
   if (buffer && len <= buflen)
-    FXSYS_memcpy(buffer, path.c_str(), len);
+    memcpy(buffer, path.c_str(), len);
   return len;
 }
 
@@ -230,8 +220,7 @@ DLLEXPORT FPDF_BOOL STDCALL FPDFDest_GetLocationInPage(FPDF_DEST pDict,
   if (!pDict)
     return false;
 
-  std::unique_ptr<CPDF_Dest> dest(
-      new CPDF_Dest(static_cast<CPDF_Object*>(pDict)));
+  auto dest = pdfium::MakeUnique<CPDF_Dest>(static_cast<CPDF_Object*>(pDict));
 
   // FPDF_BOOL is an int, GetXYZ expects bools.
   bool bHasX;
@@ -258,9 +247,9 @@ DLLEXPORT FPDF_LINK STDCALL FPDFLink_GetLinkAtPoint(FPDF_PAGE page,
     return nullptr;
 
   return pLinkList
-      ->GetLinkAtPoint(
-          pPage, CFX_PointF(static_cast<FX_FLOAT>(x), static_cast<FX_FLOAT>(y)),
-          nullptr)
+      ->GetLinkAtPoint(pPage,
+                       CFX_PointF(static_cast<float>(x), static_cast<float>(y)),
+                       nullptr)
       .GetDict();
 }
 
@@ -277,7 +266,7 @@ DLLEXPORT int STDCALL FPDFLink_GetLinkZOrderAtPoint(FPDF_PAGE page,
 
   int z_order = -1;
   pLinkList->GetLinkAtPoint(
-      pPage, CFX_PointF(static_cast<FX_FLOAT>(x), static_cast<FX_FLOAT>(y)),
+      pPage, CFX_PointF(static_cast<float>(x), static_cast<float>(y)),
       &z_order);
   return z_order;
 }
@@ -395,6 +384,7 @@ DLLEXPORT unsigned long STDCALL FPDF_GetMetaText(FPDF_DOCUMENT document,
   CPDF_Document* pDoc = CPDFDocumentFromFPDFDocument(document);
   if (!pDoc)
     return 0;
+  pDoc->LoadDocumentInfo();
   CPDF_Dictionary* pInfo = pDoc->GetInfo();
   if (!pInfo)
     return 0;

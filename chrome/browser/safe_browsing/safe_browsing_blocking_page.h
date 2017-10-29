@@ -44,6 +44,8 @@ class ThreatDetails;
 
 class SafeBrowsingBlockingPage : public BaseBlockingPage {
  public:
+  typedef security_interstitials::BaseSafeBrowsingErrorUI
+      BaseSafeBrowsingErrorUI;
   // Interstitial type, used in tests.
   static content::InterstitialPageDelegate::TypeID kTypeForTesting;
 
@@ -75,12 +77,12 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
   void OverrideRendererPrefs(content::RendererPreferences* prefs) override;
   content::InterstitialPageDelegate::TypeID GetTypeForTesting() const override;
 
-  // Checks the threat type to decide if we should report ThreatDetails.
-  static bool ShouldReportThreatDetails(SBThreatType threat_type);
-
  protected:
   friend class SafeBrowsingBlockingPageFactoryImpl;
   friend class SafeBrowsingBlockingPageTest;
+  friend class SafeBrowsingBlockingPageBrowserTest;
+  friend class SafeBrowsingBlockingQuietPageFactoryImpl;
+  friend class SafeBrowsingBlockingQuietPageTest;
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingBlockingPageTest,
                            ProceedThenDontProceed);
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingBlockingPageTest,
@@ -104,7 +106,7 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
       content::WebContents* web_contents,
       const GURL& main_frame_url,
       const UnsafeResourceList& unsafe_resources,
-      const SafeBrowsingErrorUI::SBErrorDisplayOptions& display_options);
+      const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& display_options);
 
   // Called after the user clicks OnProceed(). If the page has malicious
   // subresources, then we show another interstitial.
@@ -118,10 +120,9 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
                            bool did_proceed,
                            int num_visits) override;
 
-  // A ThreatDetails object that we start generating when the
-  // blocking page is shown. The object will be sent when the warning
-  // is gone (if the user enables the feature).
-  scoped_refptr<ThreatDetails> threat_details_;
+  // Whether ThreatDetails collection is in progress as part of this
+  // interstitial.
+  bool threat_details_in_progress_;
 
   // The factory used to instantiate SafeBrowsingBlockingPage objects.
   // Useful for tests, so they can provide their own implementation of
@@ -129,7 +130,7 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
   static SafeBrowsingBlockingPageFactory* factory_;
  private:
   static std::string GetSamplingEventName(
-      SafeBrowsingErrorUI::SBInterstitialReason interstitial_reason);
+      BaseSafeBrowsingErrorUI::SBInterstitialReason interstitial_reason);
 
   static std::unique_ptr<
       security_interstitials::SecurityInterstitialControllerClient>

@@ -2,43 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-bundle_data("resources") {
-  sources = [
-    "resources/collapse.png",
-    "resources/collapse@2x.png",
-    "resources/collapse@3x.png",
-    "resources/collapse_incognito.png",
-    "resources/collapse_incognito@2x.png",
-    "resources/collapse_incognito@3x.png",
-    "resources/collapse_pressed.png",
-    "resources/collapse_pressed@2x.png",
-    "resources/collapse_pressed@3x.png",
-    "resources/collapse_pressed_incognito.png",
-    "resources/collapse_pressed_incognito@2x.png",
-    "resources/collapse_pressed_incognito@3x.png",
-    "resources/incognito_marker_typing.png",
-    "resources/incognito_marker_typing@2x.png",
-    "resources/incognito_marker_typing@3x.png",
-    "resources/toolbar_dark_newtab.png",
-    "resources/toolbar_dark_newtab@2x.png",
-    "resources/toolbar_dark_newtab@3x.png",
-    "resources/toolbar_dark_newtab_active.png",
-    "resources/toolbar_dark_newtab_active@2x.png",
-    "resources/toolbar_dark_newtab_active@3x.png",
-    "resources/toolbar_dark_newtab_incognito.png",
-    "resources/toolbar_dark_newtab_incognito@2x.png",
-    "resources/toolbar_dark_newtab_incognito@3x.png",
-    "resources/toolbar_dark_newtab_incognito_active.png",
-    "resources/toolbar_dark_newtab_incognito_active@2x.png",
-    "resources/toolbar_dark_newtab_incognito_active@3x.png",
-  ]
-  outputs = [
-    "{{bundle_resources_dir}}/{{source_file_part}}",
-  ]
-}
-
 source_set("toolbar") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
+    "keyboard_accessory_view_delegate.h",
+    "keyboard_assist/toolbar_assistive_keyboard_views.h",
+    "keyboard_assist/toolbar_assistive_keyboard_views.mm",
+    "new_keyboard_accessory_view.h",
+    "new_keyboard_accessory_view.mm",
     "new_tab_button.h",
     "new_tab_button.mm",
     "toolbar_button_tints.h",
@@ -62,7 +33,17 @@ source_set("toolbar") {
   ]
   deps = [
     ":resource_macros",
-    ":resources",
+    "resources:collapse",
+    "resources:collapse_incognito",
+    "resources:collapse_pressed",
+    "resources:collapse_pressed_incognito",
+    "resources:incognito_marker_typing",
+    "resources:keyboard_accessory_qr_scanner",
+    "resources:keyboard_accessory_voice_search",
+    "resources:toolbar_dark_newtab",
+    "resources:toolbar_dark_newtab_active",
+    "resources:toolbar_dark_newtab_incognito",
+    "resources:toolbar_dark_newtab_incognito_active",
     "//base",
     "//base:i18n",
     "//components/bookmarks/browser",
@@ -90,14 +71,18 @@ source_set("toolbar") {
     "//ios/chrome/browser/ui/fancy_ui",
     "//ios/chrome/browser/ui/history",
     "//ios/chrome/browser/ui/keyboard",
+    "//ios/chrome/browser/ui/popup_menu",
     "//ios/chrome/browser/ui/qr_scanner",
     "//ios/chrome/browser/ui/tools_menu",
     "//ios/chrome/browser/ui/util",
     "//ios/chrome/browser/ui/voice",
+    "//ios/chrome/browser/web_state_list",
     "//ios/chrome/common",
     "//ios/public/provider/chrome/browser",
     "//ios/public/provider/chrome/browser/images",
     "//ios/public/provider/chrome/browser/voice",
+    "//ios/shared/chrome/browser/ui/omnibox",
+    "//ios/shared/chrome/browser/ui/tools_menu",
     "//ios/third_party/material_components_ios",
     "//ios/third_party/material_roboto_font_loader_ios",
     "//ios/web",
@@ -132,6 +117,7 @@ source_set("resource_macros") {
 }
 
 source_set("test_support") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "test_toolbar_model_ios.h",
@@ -148,6 +134,7 @@ source_set("test_support") {
 }
 
 source_set("unit_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
     "toolbar_controller_unittest.mm",
@@ -166,9 +153,13 @@ source_set("unit_tests") {
     "//ios/chrome/browser/browser_state:test_support",
     "//ios/chrome/browser/tabs",
     "//ios/chrome/browser/ui",
+    "//ios/chrome/browser/web_state_list",
+    "//ios/chrome/browser/web_state_list:test_support",
     "//ios/chrome/test:test_support",
+    "//ios/shared/chrome/browser/ui/toolbar:test_support",
     "//ios/testing:ocmock_support",
-    "//ios/web:test_support",
+    "//ios/web/public/test",
+    "//ios/web/public/test/fakes",
     "//testing/gtest",
     "//third_party/ocmock",
   ]
@@ -188,6 +179,7 @@ source_set("eg_tests") {
     "//ios/chrome/app/strings",
     "//ios/chrome/browser/ui",
     "//ios/chrome/browser/ui/commands",
+    "//ios/chrome/browser/ui/ntp:ntp_controller",
     "//ios/chrome/browser/ui/ntp:ntp_internal",
     "//ios/chrome/browser/ui/omnibox:omnibox_internal",
     "//ios/chrome/browser/ui/tools_menu",
@@ -195,7 +187,7 @@ source_set("eg_tests") {
     "//ios/chrome/test/earl_grey:test_support",
     "//ios/testing/earl_grey:earl_grey_support",
     "//ios/third_party/earl_grey",
-    "//ios/web:test_support",
+    "//ios/web/public/test/http_server",
     "//ui/base",
   ]
   libs = [ "XCTest.framework" ]

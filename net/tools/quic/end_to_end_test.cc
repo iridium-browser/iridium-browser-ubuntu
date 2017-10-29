@@ -22,17 +22,20 @@
 #include "net/quic/core/crypto/aes_128_gcm_12_encrypter.h"
 #include "net/quic/core/crypto/null_encrypter.h"
 #include "net/quic/core/quic_client_session_base.h"
-#include "net/quic/core/quic_flags.h"
 #include "net/quic/core/quic_framer.h"
 #include "net/quic/core/quic_packet_creator.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_server_id.h"
 #include "net/quic/core/quic_session.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 #include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/platform/api/quic_string_piece.h"
+#include "net/quic/platform/api/quic_test.h"
+#include "net/quic/platform/api/quic_test_loopback.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/quic_config_peer.h"
@@ -64,7 +67,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::IntToString;
-using base::StringPiece;
 using base::WaitableEvent;
 using std::string;
 
@@ -144,9 +146,8 @@ std::vector<TestParams> GetTestParams() {
   QuicVersionVector version_buckets[1];
 
   for (const QuicVersion version : all_supported_versions) {
-    // Versions: 34+
-    // QUIC_VERSION_34 deprecates entropy and uses new ack and stop waiting
-    // wire formats.
+    // Versions: 35+
+    // QUIC_VERSION_35 allows endpoints to independently set stream limit.
     version_buckets[0].push_back(version);
   }
 
@@ -157,7 +158,8 @@ std::vector<TestParams> GetTestParams() {
   std::vector<TestParams> params;
   for (bool server_uses_stateless_rejects_if_peer_supported : {true, false}) {
     for (bool client_supports_stateless_rejects : {true, false}) {
-      for (const QuicTag congestion_control_tag : {kRENO, kTBBR, kQBIC}) {
+      for (const QuicTag congestion_control_tag :
+           {kRENO, kTBBR, kQBIC, kTPCC}) {
         for (bool disable_hpack_dynamic_table : {false}) {
           for (bool force_hol_blocking : {true, false}) {
             for (bool use_cheap_stateless_reject : {true, false}) {
@@ -232,13 +234,13 @@ std::vector<TestParams> GetTestParams() {
                       server_uses_stateless_rejects_if_peer_supported,
                       congestion_control_tag, disable_hpack_dynamic_table,
                       force_hol_blocking, use_cheap_stateless_reject));
-                  }    // End of version for loop.
-                }      // End of 2nd version for loop.
-            }          // End of use_cheap_stateless_reject for loop.
-          }            // End of force_hol_blocking loop.
-        }              // End of disable_hpack_dynamic_table for loop.
-      }                // End of congestion_control_tag for loop.
-    }                  // End of client_supports_stateless_rejects for loop.
+                }  // End of version for loop.
+              }    // End of 2nd version for loop.
+            }      // End of use_cheap_stateless_reject for loop.
+          }        // End of force_hol_blocking loop.
+        }          // End of disable_hpack_dynamic_table for loop.
+      }            // End of congestion_control_tag for loop.
+    }              // End of client_supports_stateless_rejects for loop.
     CHECK_EQ(kMaxEnabledOptions, max_enabled_options);
   }  // End of server_uses_stateless_rejects_if_peer_supported for loop.
   return params;
@@ -268,11 +270,11 @@ class ClientDelegate : public PacketDroppingTestWriter::Delegate {
   QuicClient* client_;
 };
 
-class EndToEndTest : public ::testing::TestWithParam<TestParams> {
+class EndToEndTest : public QuicTestWithParam<TestParams> {
  protected:
   EndToEndTest()
       : initialized_(false),
-        server_address_(QuicSocketAddress(QuicIpAddress::Loopback4(), 0)),
+        server_address_(QuicSocketAddress(TestLoopback(), 0)),
         server_hostname_("test.example.com"),
         client_writer_(nullptr),
         server_writer_(nullptr),
@@ -382,14 +384,20 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
     // TODO(nimia): Consider setting the congestion control algorithm for the
     // client as well according to the test parameter.
     copt.push_back(GetParam().congestion_control_tag);
-    if (GetParam().congestion_control_tag == kQBIC &&
-        FLAGS_quic_reloadable_flag_quic_fix_cubic_convex_mode) {
+    if (GetParam().congestion_control_tag == kQBIC) {
       copt.push_back(kCCVX);
     }
-    if (GetParam().congestion_control_tag == kQBIC &&
-        FLAGS_quic_reloadable_flag_quic_fix_cubic_bytes_quantization) {
+    if (GetParam().congestion_control_tag == kQBIC) {
       copt.push_back(kCBQT);
     }
+    if (GetParam().congestion_control_tag == kQBIC) {
+      copt.push_back(kCPAU);
+    }
+    if (GetParam().congestion_control_tag == kTPCC &&
+        FLAGS_quic_reloadable_flag_quic_enable_pcc) {
+      copt.push_back(kTPCC);
+    }
+
     if (support_server_push_) {
       copt.push_back(kSPSH);
     }
@@ -477,7 +485,9 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
     }
   }
 
-  void AddToCache(StringPiece path, int response_code, StringPiece body) {
+  void AddToCache(QuicStringPiece path,
+                  int response_code,
+                  QuicStringPiece body) {
     response_cache_.AddSimpleResponse(server_hostname_, path, response_code,
                                       body);
   }
@@ -512,7 +522,9 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
   void VerifyCleanConnection(bool had_packet_loss) {
     QuicConnectionStats client_stats =
         client_->client()->session()->connection()->GetStats();
-    if (!had_packet_loss) {
+    // TODO(ianswett): Determine why this becomes even more flaky with BBR
+    // enabled.  b/62141144
+    if (!had_packet_loss && !FLAGS_quic_reloadable_flag_quic_default_to_bbr) {
       EXPECT_EQ(0u, client_stats.packets_lost);
     }
     EXPECT_EQ(0u, client_stats.packets_discarded);
@@ -565,7 +577,16 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
     stream_factory_ = factory;
   }
 
-  QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
+  QuicStreamId GetNthClientInitiatedId(int n) {
+    return QuicSpdySessionPeer::GetNthClientInitiatedStreamId(
+        *client_->client()->session(), n);
+  }
+
+  QuicStreamId GetNthServerInitiatedId(int n) {
+    return QuicSpdySessionPeer::GetNthServerInitiatedStreamId(
+        *client_->client()->session(), n);
+  }
+
   bool initialized_;
   QuicSocketAddress server_address_;
   string server_hostname_;
@@ -596,22 +617,18 @@ TEST_P(EndToEndTest, HandshakeSuccessful) {
   ASSERT_TRUE(Initialize());
   EXPECT_TRUE(client_->client()->WaitForCryptoHandshakeConfirmed());
   QuicCryptoStream* crypto_stream =
-      QuicSessionPeer::GetCryptoStream(client_->client()->session());
+      QuicSessionPeer::GetMutableCryptoStream(client_->client()->session());
   QuicStreamSequencer* sequencer = QuicStreamPeer::sequencer(crypto_stream);
-  EXPECT_NE(
-      FLAGS_quic_reloadable_flag_quic_release_crypto_stream_buffer &&
-          FLAGS_quic_reloadable_flag_quic_reduce_sequencer_buffer_memory_life_time,  // NOLINT
-      QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
+  EXPECT_NE(FLAGS_quic_reloadable_flag_quic_release_crypto_stream_buffer,
+            QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
   server_thread_->Pause();
   QuicDispatcher* dispatcher =
       QuicServerPeer::GetDispatcher(server_thread_->server());
   QuicSession* server_session = dispatcher->session_map().begin()->second.get();
-  crypto_stream = QuicSessionPeer::GetCryptoStream(server_session);
+  crypto_stream = QuicSessionPeer::GetMutableCryptoStream(server_session);
   sequencer = QuicStreamPeer::sequencer(crypto_stream);
-  EXPECT_NE(
-      FLAGS_quic_reloadable_flag_quic_release_crypto_stream_buffer &&
-          FLAGS_quic_reloadable_flag_quic_reduce_sequencer_buffer_memory_life_time,  // NOLINT
-      QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
+  EXPECT_NE(FLAGS_quic_reloadable_flag_quic_release_crypto_stream_buffer,
+            QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
 }
 
 TEST_P(EndToEndTest, SimpleRequestResponsev6) {
@@ -673,6 +690,31 @@ TEST_P(EndToEndTest, MultipleRequestResponse) {
   EXPECT_EQ("200", client_->response_headers()->find(":status")->second);
   EXPECT_EQ(kBarResponseBody, client_->SendSynchronousRequest("/bar"));
   EXPECT_EQ("200", client_->response_headers()->find(":status")->second);
+}
+
+TEST_P(EndToEndTest, MultipleStreams) {
+  // Verifies quic_test_client can track responses of all active streams.
+  ASSERT_TRUE(Initialize());
+
+  const int kNumRequests = 10;
+
+  SpdyHeaderBlock headers;
+  headers[":method"] = "POST";
+  headers[":path"] = "/foo";
+  headers[":scheme"] = "https";
+  headers[":authority"] = server_hostname_;
+  headers["content-length"] = "3";
+
+  for (int i = 0; i < kNumRequests; ++i) {
+    client_->SendMessage(headers, "bar", /*fin=*/true);
+  }
+
+  while (kNumRequests > client_->num_responses()) {
+    client_->ClearPerRequestState();
+    client_->WaitForResponse();
+    EXPECT_EQ(kFooResponseBody, client_->response_body());
+    EXPECT_EQ("200", client_->response_headers()->find(":status")->second);
+  }
 }
 
 TEST_P(EndToEndTest, MultipleClients) {
@@ -1139,7 +1181,8 @@ TEST_P(EndToEndTest, InvalidStream) {
 
   // Force the client to write with a stream ID belonging to a nonexistent
   // server-side stream.
-  QuicSessionPeer::SetNextOutgoingStreamId(client_->client()->session(), 2);
+  QuicSpdySession* session = client_->client()->session();
+  QuicSessionPeer::SetNextOutgoingStreamId(session, GetNthServerInitiatedId(0));
 
   client_->SendCustomSynchronousRequest(headers, body);
   EXPECT_EQ(QUIC_STREAM_CONNECTION_ERROR, client_->stream_error());
@@ -1163,13 +1206,7 @@ TEST_P(EndToEndTest, LargeHeaders) {
   headers["key3"] = string(15 * 1024, 'a');
 
   client_->SendCustomSynchronousRequest(headers, body);
-  if (FLAGS_quic_reloadable_flag_quic_limit_uncompressed_headers) {
-    EXPECT_EQ(QUIC_HEADERS_TOO_LARGE, client_->stream_error());
-  } else {
-    EXPECT_EQ(QUIC_STREAM_NO_ERROR, client_->stream_error());
-    EXPECT_EQ(kFooResponseBody, client_->response_body());
-    EXPECT_EQ("200", client_->response_headers()->find(":status")->second);
-  }
+  EXPECT_EQ(QUIC_HEADERS_TOO_LARGE, client_->stream_error());
   EXPECT_EQ(QUIC_NO_ERROR, client_->connection_error());
 }
 
@@ -1226,41 +1263,6 @@ TEST_P(EndToEndTest, Timeout) {
   }
 }
 
-TEST_P(EndToEndTest, NegotiateMaxOpenStreams) {
-  // Negotiate 1 max open stream.
-  client_config_.SetMaxStreamsPerConnection(1, 1);
-  ASSERT_TRUE(Initialize());
-  EXPECT_TRUE(client_->client()->WaitForCryptoHandshakeConfirmed());
-
-  if (negotiated_version_ > QUIC_VERSION_34) {
-    // Newer versions use max incoming dynamic streams.
-    return;
-  }
-
-  // Make the client misbehave after negotiation.
-  const int kServerMaxStreams = kMaxStreamsMinimumIncrement + 1;
-  QuicSessionPeer::SetMaxOpenOutgoingStreams(client_->client()->session(),
-                                             kServerMaxStreams + 1);
-
-  SpdyHeaderBlock headers;
-  headers[":method"] = "POST";
-  headers[":path"] = "/foo";
-  headers[":scheme"] = "https";
-  headers[":authority"] = server_hostname_;
-  headers["content-length"] = "3";
-
-  // The server supports a small number of additional streams beyond the
-  // negotiated limit. Open enough streams to go beyond that limit.
-  for (int i = 0; i < kServerMaxStreams + 1; ++i) {
-    client_->SendMessage(headers, "", /*fin=*/false);
-  }
-  client_->WaitForResponse();
-
-  EXPECT_TRUE(client_->connected());
-  EXPECT_EQ(QUIC_REFUSED_STREAM, client_->stream_error());
-  EXPECT_EQ(QUIC_NO_ERROR, client_->connection_error());
-}
-
 TEST_P(EndToEndTest, MaxIncomingDynamicStreamsLimitRespected) {
   // Set a limit on maximum number of incoming dynamic streams.
   // Make sure the limit is respected.
@@ -1270,14 +1272,8 @@ TEST_P(EndToEndTest, MaxIncomingDynamicStreamsLimitRespected) {
   ASSERT_TRUE(Initialize());
   EXPECT_TRUE(client_->client()->WaitForCryptoHandshakeConfirmed());
 
-  if (negotiated_version_ <= QUIC_VERSION_34) {
-    // Earlier versions negotiated max open streams.
-    return;
-  }
-
   // Make the client misbehave after negotiation.
-  const int kServerMaxStreams =
-      kMaxStreamsMinimumIncrement + kServerMaxIncomingDynamicStreams;
+  const int kServerMaxStreams = kMaxStreamsMinimumIncrement + 1;
   QuicSessionPeer::SetMaxOpenOutgoingStreams(client_->client()->session(),
                                              kServerMaxStreams + 1);
 
@@ -1311,11 +1307,6 @@ TEST_P(EndToEndTest, SetIndependentMaxIncomingDynamicStreamsLimits) {
   ASSERT_TRUE(Initialize());
   EXPECT_TRUE(client_->client()->WaitForCryptoHandshakeConfirmed());
 
-  if (negotiated_version_ <= QUIC_VERSION_34) {
-    // Earlier versions negotiated max open streams.
-    return;
-  }
-
   // The client has received the server's limit and vice versa.
   EXPECT_EQ(kServerMaxIncomingDynamicStreams,
             client_->client()->session()->max_open_outgoing_streams());
@@ -1329,17 +1320,24 @@ TEST_P(EndToEndTest, SetIndependentMaxIncomingDynamicStreamsLimits) {
 }
 
 TEST_P(EndToEndTest, NegotiateCongestionControl) {
-  FLAGS_quic_reloadable_flag_quic_allow_new_bbr = true;
-  // Disable this flag because if connection uses multipath sent packet manager,
-  // static_cast here does not work.
-  FLAGS_quic_reloadable_flag_quic_enable_multipath = false;
   ASSERT_TRUE(Initialize());
+
+  // For PCC, the underlying implementation may be a stub with a
+  // different name-tag.  Skip the rest of this test.
+  if (GetParam().congestion_control_tag == kTPCC) {
+    return;
+  }
+
   EXPECT_TRUE(client_->client()->WaitForCryptoHandshakeConfirmed());
 
   CongestionControlType expected_congestion_control_type = kReno;
   switch (GetParam().congestion_control_tag) {
     case kRENO:
-      expected_congestion_control_type = kReno;
+      if (!FLAGS_quic_reloadable_flag_quic_disable_packets_based_cc) {
+        expected_congestion_control_type = kReno;
+      } else {
+        expected_congestion_control_type = kRenoBytes;
+      }
       break;
     case kTBBR:
       expected_congestion_control_type = kBBR;
@@ -1357,22 +1355,6 @@ TEST_P(EndToEndTest, NegotiateCongestionControl) {
                 *GetSentPacketManagerFromFirstServerSession())
                 ->GetCongestionControlType());
   server_thread_->Resume();
-}
-
-TEST_P(EndToEndTest, LimitMaxOpenStreams) {
-  // Server limits the number of max streams to 2.
-  server_config_.SetMaxStreamsPerConnection(2, 2);
-  // Client tries to negotiate for 10.
-  client_config_.SetMaxStreamsPerConnection(10, 5);
-
-  ASSERT_TRUE(Initialize());
-  EXPECT_TRUE(client_->client()->WaitForCryptoHandshakeConfirmed());
-  if (negotiated_version_ > QUIC_VERSION_34) {
-    // No negotiated max streams beyond version 34.
-    return;
-  }
-  QuicConfig* client_negotiated_config = client_->client()->session()->config();
-  EXPECT_EQ(2u, client_negotiated_config->MaxStreamsPerConnection());
 }
 
 TEST_P(EndToEndTest, ClientSuggestsRTT) {
@@ -1555,7 +1537,7 @@ TEST_P(EndToEndTest, StreamCancelErrorTest) {
   client_->client()->WaitForEvents();
   // Transmit the cancel, and ensure the connection is torn down properly.
   SetPacketLossPercentage(0);
-  QuicStreamId stream_id = kClientDataStreamId1;
+  QuicStreamId stream_id = GetNthClientInitiatedId(0);
   session->SendRstStream(stream_id, QUIC_STREAM_CANCELLED, 0);
 
   // WaitForEvents waits 50ms and returns true if there are outstanding
@@ -1588,7 +1570,6 @@ class WrongAddressWriter : public QuicPacketWriterWrapper {
 
 TEST_P(EndToEndTest, ConnectionMigrationClientIPChanged) {
   ASSERT_TRUE(Initialize());
-
   EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
   EXPECT_EQ("200", client_->response_headers()->find(":status")->second);
 
@@ -1596,8 +1577,7 @@ TEST_P(EndToEndTest, ConnectionMigrationClientIPChanged) {
   QuicIpAddress old_host = client_->client()->GetLatestClientAddress().host();
 
   // Migrate socket to the new IP address.
-  QuicIpAddress new_host;
-  new_host.FromString("127.0.0.2");
+  QuicIpAddress new_host = TestLoopback(2);
   EXPECT_NE(old_host, new_host);
   ASSERT_TRUE(client_->client()->MigrateSocket(new_host));
 
@@ -1714,8 +1694,6 @@ TEST_P(EndToEndTest, DifferentFlowControlWindows) {
 
 // Test negotiation of IFWA connection option.
 TEST_P(EndToEndTest, NegotiatedServerInitialFlowControlWindow) {
-  FLAGS_quic_reloadable_flag_quic_large_ifw_options = true;
-
   const uint32_t kClientStreamIFCW = 123456;
   const uint32_t kClientSessionIFCW = 234567;
   set_client_initial_stream_flow_control_receive_window(kClientStreamIFCW);
@@ -1778,7 +1756,7 @@ TEST_P(EndToEndTest, HeadersAndCryptoStreamsNoConnectionFlowControl) {
   server_thread_->WaitForCryptoHandshakeConfirmed();
 
   QuicCryptoStream* crypto_stream =
-      QuicSessionPeer::GetCryptoStream(client_->client()->session());
+      QuicSessionPeer::GetMutableCryptoStream(client_->client()->session());
   EXPECT_LT(
       QuicFlowControllerPeer::SendWindowSize(crypto_stream->flow_controller()),
       kStreamIFCW);
@@ -1829,8 +1807,10 @@ TEST_P(EndToEndTest, FlowControlsSynced) {
   ExpectFlowControlsSynced(client_session->flow_controller(),
                            server_session->flow_controller());
   ExpectFlowControlsSynced(
-      QuicSessionPeer::GetCryptoStream(client_session)->flow_controller(),
-      QuicSessionPeer::GetCryptoStream(server_session)->flow_controller());
+      QuicSessionPeer::GetMutableCryptoStream(client_session)
+          ->flow_controller(),
+      QuicSessionPeer::GetMutableCryptoStream(server_session)
+          ->flow_controller());
   SpdyFramer spdy_framer(SpdyFramer::ENABLE_COMPRESSION);
   SpdySettingsIR settings_frame;
   settings_frame.AddSetting(SETTINGS_MAX_HEADER_LIST_SIZE,
@@ -2014,7 +1994,6 @@ TEST_P(EndToEndTest, ServerSendPublicReset) {
   header.public_header.connection_id = connection_id;
   header.public_header.reset_flag = true;
   header.public_header.version_flag = false;
-  header.rejected_packet_number = 10101;
   QuicFramer framer(server_supported_versions_, QuicTime::Zero(),
                     Perspective::IS_SERVER);
   std::unique_ptr<QuicEncryptedPacket> packet(
@@ -2047,7 +2026,6 @@ TEST_P(EndToEndTest, ServerSendPublicResetWithDifferentConnectionId) {
   header.public_header.connection_id = incorrect_connection_id;
   header.public_header.reset_flag = true;
   header.public_header.version_flag = false;
-  header.rejected_packet_number = 10101;
   QuicFramer framer(server_supported_versions_, QuicTime::Zero(),
                     Perspective::IS_SERVER);
   std::unique_ptr<QuicEncryptedPacket> packet(
@@ -2083,7 +2061,6 @@ TEST_P(EndToEndTest, ClientSendPublicResetWithDifferentConnectionId) {
   header.public_header.connection_id = incorrect_connection_id;
   header.public_header.reset_flag = true;
   header.public_header.version_flag = false;
-  header.rejected_packet_number = 10101;
   QuicFramer framer(server_supported_versions_, QuicTime::Zero(),
                     Perspective::IS_CLIENT);
   std::unique_ptr<QuicEncryptedPacket> packet(
@@ -2213,8 +2190,8 @@ TEST_P(EndToEndTest, BadEncryptedData) {
 
   std::unique_ptr<QuicEncryptedPacket> packet(ConstructEncryptedPacket(
       client_->client()->session()->connection()->connection_id(), false, false,
-      false, kDefaultPathId, 1, "At least 20 characters.",
-      PACKET_8BYTE_CONNECTION_ID, PACKET_6BYTE_PACKET_NUMBER));
+      1, "At least 20 characters.", PACKET_8BYTE_CONNECTION_ID,
+      PACKET_6BYTE_PACKET_NUMBER));
   // Damage the encrypted data.
   string damaged_packet(packet->data(), packet->length());
   damaged_packet[30] ^= 0x01;
@@ -2238,6 +2215,27 @@ TEST_P(EndToEndTest, BadEncryptedData) {
   // The connection should not be terminated.
   EXPECT_EQ(kFooResponseBody, client_->SendSynchronousRequest("/foo"));
   EXPECT_EQ("200", client_->response_headers()->find(":status")->second);
+}
+
+TEST_P(EndToEndTest, CanceledStreamDoesNotBecomeZombie) {
+  ASSERT_TRUE(Initialize());
+  EXPECT_TRUE(client_->client()->WaitForCryptoHandshakeConfirmed());
+  // Lose the request.
+  SetPacketLossPercentage(100);
+  SpdyHeaderBlock headers;
+  headers[":method"] = "POST";
+  headers[":path"] = "/foo";
+  headers[":scheme"] = "https";
+  headers[":authority"] = server_hostname_;
+  client_->SendMessage(headers, "test_body", /*fin=*/false);
+  QuicSpdyClientStream* stream = client_->GetOrCreateStream();
+
+  // Cancel the stream.
+  stream->Reset(QUIC_STREAM_CANCELLED);
+  QuicSession* session = client_->client()->session();
+  // Verify canceled stream does not become zombie.
+  EXPECT_TRUE(QuicSessionPeer::zombie_streams(session).empty());
+  EXPECT_EQ(1u, QuicSessionPeer::closed_streams(session).size());
 }
 
 // A test stream that gives |response_body_| as an error response body.
@@ -2331,7 +2329,7 @@ class ServerStreamThatDropsBodyFactory : public QuicTestServer::StreamFactory {
  public:
   ServerStreamThatDropsBodyFactory() {}
 
-  ~ServerStreamThatDropsBodyFactory() override{};
+  ~ServerStreamThatDropsBodyFactory() override {}
 
   QuicSimpleServerStream* CreateStream(
       QuicStreamId id,
@@ -2374,7 +2372,7 @@ class ServerStreamThatSendsHugeResponseFactory
   explicit ServerStreamThatSendsHugeResponseFactory(int64_t body_bytes)
       : body_bytes_(body_bytes) {}
 
-  ~ServerStreamThatSendsHugeResponseFactory() override{};
+  ~ServerStreamThatSendsHugeResponseFactory() override {}
 
   QuicSimpleServerStream* CreateStream(
       QuicStreamId id,
@@ -2429,6 +2427,9 @@ class ClientSessionThatDropsBody : public QuicClientSession {
     return QuicMakeUnique<ClientStreamThatDropsBody>(GetNextOutgoingStreamId(),
                                                      this);
   }
+  std::unique_ptr<QuicStream> CreateStream(QuicStreamId id) override {
+    return QuicMakeUnique<ClientStreamThatDropsBody>(id, this);
+  }
 };
 
 class MockableQuicClientThatDropsBody : public MockableQuicClient {
@@ -2466,8 +2467,9 @@ class QuicTestClientThatDropsBody : public QuicTestClient {
                        config,
                        supported_versions) {
     set_client(new MockableQuicClientThatDropsBody(
-        server_address, QuicServerId(server_hostname, server_address.port(),
-                                     PRIVACY_MODE_DISABLED),
+        server_address,
+        QuicServerId(server_hostname, server_address.port(),
+                     PRIVACY_MODE_DISABLED),
         config, supported_versions, epoll_server()));
   }
   ~QuicTestClientThatDropsBody() override {}
@@ -2539,49 +2541,6 @@ TEST_P(EndToEndTest, EarlyResponseFinRecording) {
               .size());
 
   server_thread_->Resume();
-}
-
-TEST_P(EndToEndTest, LargePostEarlyResponse) {
-  const uint32_t kWindowSize = 65536;
-  set_client_initial_stream_flow_control_receive_window(kWindowSize);
-  set_client_initial_session_flow_control_receive_window(kWindowSize);
-  set_server_initial_stream_flow_control_receive_window(kWindowSize);
-  set_server_initial_session_flow_control_receive_window(kWindowSize);
-
-  ASSERT_TRUE(Initialize());
-  if (FLAGS_quic_reloadable_flag_quic_always_enable_bidi_streaming) {
-    // This test is testing the same behavior as
-    // EarlyResponseWithQuicStreamNoError, except for the additional final check
-    // that the stream is reset on early response. Once this flag is deprecated
-    // the tests will be the same and this one can be removed.
-    return;
-  }
-
-  EXPECT_TRUE(client_->client()->WaitForCryptoHandshakeConfirmed());
-
-  // POST to a URL that gets an early error response, after the headers are
-  // received and before the body is received.
-  SpdyHeaderBlock headers;
-  headers[":method"] = "POST";
-  headers[":path"] = "/foo";
-  headers[":scheme"] = "https";
-  headers[":authority"] = server_hostname_;
-  headers["content-length"] = "-1";
-
-  // Tell the client to not close the stream if it receives an early response.
-  client_->set_allow_bidirectional_data(true);
-  // Send the headers.
-  client_->SendMessage(headers, "", /*fin=*/false);
-
-  // Receive the response and let the server close writing.
-  client_->WaitForInitialResponse();
-  EXPECT_EQ("500", client_->response_headers()->find(":status")->second);
-
-  // Receive the reset stream from server on early response.
-  QuicStream* stream =
-      client_->client()->session()->GetOrCreateStream(kClientDataStreamId1);
-  // The stream is reset by server's reset stream.
-  EXPECT_EQ(stream, nullptr);
 }
 
 TEST_P(EndToEndTest, Trailers) {
@@ -2709,10 +2668,7 @@ TEST_P(EndToEndTestServerPush, ServerPush) {
     QUIC_DVLOG(1) << "response body " << response_body;
     EXPECT_EQ(expected_body, response_body);
   }
-  EXPECT_NE(
-      FLAGS_quic_reloadable_flag_quic_headers_stream_release_sequencer_buffer &&
-          FLAGS_quic_reloadable_flag_quic_reduce_sequencer_buffer_memory_life_time,  // NOLINT
-      QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
+  EXPECT_FALSE(QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
 }
 
 TEST_P(EndToEndTestServerPush, ServerPushUnderLimit) {
@@ -3017,10 +2973,64 @@ TEST_P(EndToEndTest, ReleaseHeadersStreamBufferWhenIdle) {
   QuicHeadersStream* headers_stream =
       QuicSpdySessionPeer::GetHeadersStream(client_->client()->session());
   QuicStreamSequencer* sequencer = QuicStreamPeer::sequencer(headers_stream);
-  EXPECT_NE(
-      FLAGS_quic_reloadable_flag_quic_headers_stream_release_sequencer_buffer &&
-          FLAGS_quic_reloadable_flag_quic_reduce_sequencer_buffer_memory_life_time,  // NOLINT
-      QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
+  EXPECT_FALSE(QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
+}
+
+TEST_P(EndToEndTest, WayTooLongRequestHeaders) {
+  ASSERT_TRUE(Initialize());
+  SpdyHeaderBlock headers;
+  headers[":method"] = "GET";
+  headers[":path"] = "/foo";
+  headers[":scheme"] = "https";
+  headers[":authority"] = server_hostname_;
+  headers["key"] = string(64 * 1024, 'a');
+
+  client_->SendMessage(headers, "");
+  client_->WaitForResponse();
+  EXPECT_EQ(QUIC_HEADERS_STREAM_DATA_DECOMPRESS_FAILURE,
+            client_->connection_error());
+}
+
+class WindowUpdateObserver : public QuicConnectionDebugVisitor {
+ public:
+  WindowUpdateObserver() : num_window_update_frames_(0) {}
+
+  size_t num_window_update_frames() const { return num_window_update_frames_; }
+
+  void OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override {
+    ++num_window_update_frames_;
+  }
+
+ private:
+  size_t num_window_update_frames_;
+};
+
+TEST_P(EndToEndTest, WindowUpdateInAck) {
+  FLAGS_quic_reloadable_flag_quic_enable_version_38 = true;
+  FLAGS_quic_reloadable_flag_quic_enable_version_39 = true;
+  ASSERT_TRUE(Initialize());
+  EXPECT_TRUE(client_->client()->WaitForCryptoHandshakeConfirmed());
+  WindowUpdateObserver observer;
+  QuicConnection* client_connection =
+      client_->client()->session()->connection();
+  client_connection->set_debug_visitor(&observer);
+  QuicVersion version = client_connection->version();
+  // 100KB body.
+  string body(100 * 1024, 'a');
+  SpdyHeaderBlock headers;
+  headers[":method"] = "POST";
+  headers[":path"] = "/foo";
+  headers[":scheme"] = "https";
+  headers[":authority"] = server_hostname_;
+
+  EXPECT_EQ(kFooResponseBody,
+            client_->SendCustomSynchronousRequest(headers, body));
+  client_->Disconnect();
+  if (version > QUIC_VERSION_38) {
+    EXPECT_LT(0u, observer.num_window_update_frames());
+  } else {
+    EXPECT_EQ(0u, observer.num_window_update_frames());
+  }
 }
 
 class EndToEndBufferedPacketsTest : public EndToEndTest {

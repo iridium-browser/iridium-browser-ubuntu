@@ -27,6 +27,7 @@ class FileSystemInstance;
 class ImeInstance;
 class IntentHelperInstance;
 class KioskInstance;
+class LockScreenInstance;
 class MetricsInstance;
 class NetInstance;
 class NotificationsInstance;
@@ -36,8 +37,12 @@ class PowerInstance;
 class PrintInstance;
 class ProcessInstance;
 class StorageManagerInstance;
+class TracingInstance;
 class TtsInstance;
 class VideoInstance;
+class VoiceInteractionArcHomeInstance;
+class VoiceInteractionFrameworkInstance;
+class VolumeMounterInstance;
 class WallpaperInstance;
 
 }  // namespace mojom
@@ -74,6 +79,9 @@ class ArcBridgeService {
     return &intent_helper_;
   }
   InstanceHolder<mojom::KioskInstance>* kiosk() { return &kiosk_; }
+  InstanceHolder<mojom::LockScreenInstance>* lock_screen() {
+    return &lock_screen_;
+  }
   InstanceHolder<mojom::MetricsInstance>* metrics() { return &metrics_; }
   InstanceHolder<mojom::NetInstance>* net() { return &net_; }
   InstanceHolder<mojom::NotificationsInstance>* notifications() {
@@ -89,8 +97,20 @@ class ArcBridgeService {
   InstanceHolder<mojom::StorageManagerInstance>* storage_manager() {
     return &storage_manager_;
   }
+  InstanceHolder<mojom::TracingInstance>* tracing() { return &tracing_; }
   InstanceHolder<mojom::TtsInstance>* tts() { return &tts_; }
   InstanceHolder<mojom::VideoInstance>* video() { return &video_; }
+  InstanceHolder<mojom::VoiceInteractionArcHomeInstance>*
+  voice_interaction_arc_home() {
+    return &voice_interaction_arc_home_;
+  }
+  InstanceHolder<mojom::VoiceInteractionFrameworkInstance>*
+  voice_interaction_framework() {
+    return &voice_interaction_framework_;
+  }
+  InstanceHolder<mojom::VolumeMounterInstance>* volume_mounter() {
+    return &volume_mounter_;
+  }
   InstanceHolder<mojom::WallpaperInstance>* wallpaper() { return &wallpaper_; }
 
  private:
@@ -107,6 +127,7 @@ class ArcBridgeService {
   InstanceHolder<mojom::ImeInstance> ime_;
   InstanceHolder<mojom::IntentHelperInstance> intent_helper_;
   InstanceHolder<mojom::KioskInstance> kiosk_;
+  InstanceHolder<mojom::LockScreenInstance> lock_screen_;
   InstanceHolder<mojom::MetricsInstance> metrics_;
   InstanceHolder<mojom::NetInstance> net_;
   InstanceHolder<mojom::NotificationsInstance> notifications_;
@@ -116,8 +137,14 @@ class ArcBridgeService {
   InstanceHolder<mojom::PrintInstance> print_;
   InstanceHolder<mojom::ProcessInstance> process_;
   InstanceHolder<mojom::StorageManagerInstance> storage_manager_;
+  InstanceHolder<mojom::TracingInstance> tracing_;
   InstanceHolder<mojom::TtsInstance> tts_;
   InstanceHolder<mojom::VideoInstance> video_;
+  InstanceHolder<mojom::VoiceInteractionArcHomeInstance>
+      voice_interaction_arc_home_;
+  InstanceHolder<mojom::VoiceInteractionFrameworkInstance>
+      voice_interaction_framework_;
+  InstanceHolder<mojom::VolumeMounterInstance> volume_mounter_;
   InstanceHolder<mojom::WallpaperInstance> wallpaper_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcBridgeService);

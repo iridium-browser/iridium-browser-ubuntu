@@ -51,48 +51,48 @@ class HTMLLinkElement;
 class HTMLImportChild final : public HTMLImport {
  public:
   HTMLImportChild(const KURL&, HTMLImportLoader*, SyncMode);
-  ~HTMLImportChild() override;
-  void dispose();
+  ~HTMLImportChild() final;
+  void Dispose();
 
-  HTMLLinkElement* link() const;
-  const KURL& url() const { return m_url; }
+  HTMLLinkElement* Link() const;
+  const KURL& Url() const { return url_; }
 
-  void ownerInserted();
-  void didShareLoader();
-  void didStartLoading();
+  void OwnerInserted();
+  void DidShareLoader();
+  void DidStartLoading();
 
   // HTMLImport
-  Document* document() const override;
-  bool hasFinishedLoading() const override;
-  HTMLImportLoader* loader() const override;
-  void stateWillChange() override;
-  void stateDidChange() override;
+  Document* GetDocument() const final;
+  bool HasFinishedLoading() const final;
+  HTMLImportLoader* Loader() const final;
+  void StateWillChange() final;
+  void StateDidChange() final;
   DECLARE_VIRTUAL_TRACE();
 
 #if !defined(NDEBUG)
-  void showThis() override;
+  void ShowThis() final;
 #endif
 
-  void setClient(HTMLImportChildClient*);
+  void SetClient(HTMLImportChildClient*);
 
-  void didFinishLoading();
-  void didFinishUpgradingCustomElements();
-  void normalize();
+  void DidFinishLoading();
+  void DidFinishUpgradingCustomElements();
+  void Normalize();
 
  private:
-  void didFinish();
-  void shareLoader();
-  void createCustomElementMicrotaskStepIfNeeded();
-  void invalidateCustomElementMicrotaskStep();
+  void DidFinish();
+  void ShareLoader();
+  void CreateCustomElementMicrotaskStepIfNeeded();
+  void InvalidateCustomElementMicrotaskStep();
 
-  KURL m_url;
-  WeakMember<V0CustomElementMicrotaskImportStep> m_customElementMicrotaskStep;
-  Member<HTMLImportLoader> m_loader;
-  Member<HTMLImportChildClient> m_client;
+  KURL url_;
+  WeakMember<V0CustomElementMicrotaskImportStep> custom_element_microtask_step_;
+  Member<HTMLImportLoader> loader_;
+  Member<HTMLImportChildClient> client_;
 };
 
-inline HTMLImportChild* toHTMLImportChild(HTMLImport* import) {
-  DCHECK(!import || !import->isRoot());
+inline HTMLImportChild* ToHTMLImportChild(HTMLImport* import) {
+  DCHECK(!import || !import->IsRoot());
   return static_cast<HTMLImportChild*>(import);
 }
 

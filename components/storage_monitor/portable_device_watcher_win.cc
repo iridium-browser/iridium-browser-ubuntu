@@ -9,6 +9,7 @@
 #include "components/storage_monitor/portable_device_watcher_win.h"
 
 #include <dbt.h>
+#include <objbase.h>
 #include <portabledevice.h>
 
 #include "base/files/file_path.h"
@@ -16,11 +17,11 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_propvariant.h"
-#include "components/storage_monitor/media_storage_util.h"
 #include "components/storage_monitor/removable_device_constants.h"
 #include "components/storage_monitor/storage_info.h"
 #include "content/public/browser/browser_thread.h"
@@ -31,9 +32,6 @@ namespace {
 
 // Name of the client application that communicates with the MTP device.
 const base::char16 kClientName[] = L"Chromium";
-
-// Name of the sequenced task runner.
-const char kMediaTaskRunnerName[] = "media-task-runner";
 
 // Returns true if |data| represents a class of portable devices.
 bool IsPortableDeviceStructure(LPARAM data) {
@@ -123,8 +121,9 @@ bool GetDeviceDescription(const base::string16& pnp_device_id,
 // application that communicates with the device.
 bool GetClientInformation(
     base::win::ScopedComPtr<IPortableDeviceValues>* client_info) {
-  HRESULT hr = client_info->CreateInstance(__uuidof(PortableDeviceValues),
-                                           NULL, CLSCTX_INPROC_SERVER);
+  HRESULT hr = ::CoCreateInstance(__uuidof(PortableDeviceValues), NULL,
+                                  CLSCTX_INPROC_SERVER,
+                                  IID_PPV_ARGS(client_info->GetAddressOf()));
   if (FAILED(hr)) {
     DPLOG(ERROR) << "Failed to create an instance of IPortableDeviceValues";
     return false;
@@ -151,14 +150,15 @@ bool SetUp(const base::string16& pnp_device_id,
   if (!GetClientInformation(&client_info))
     return false;
 
-  HRESULT hr = device->CreateInstance(__uuidof(PortableDevice), NULL,
-                                      CLSCTX_INPROC_SERVER);
+  HRESULT hr =
+      ::CoCreateInstance(__uuidof(PortableDevice), NULL, CLSCTX_INPROC_SERVER,
+                         IID_PPV_ARGS(device->GetAddressOf()));
   if (FAILED(hr)) {
     DPLOG(ERROR) << "Failed to create an instance of IPortableDevice";
     return false;
   }
 
-  hr = (*device)->Open(pnp_device_id.c_str(), client_info.get());
+  hr = (*device)->Open(pnp_device_id.c_str(), client_info.Get());
   if (SUCCEEDED(hr))
     return true;
 
@@ -179,8 +179,9 @@ REFPROPERTYKEY GetUniqueIdPropertyKey(const base::string16& object_id) {
 bool PopulatePropertyKeyCollection(
     const base::string16& object_id,
     base::win::ScopedComPtr<IPortableDeviceKeyCollection>* properties_to_read) {
-  HRESULT hr = properties_to_read->CreateInstance(
-      __uuidof(PortableDeviceKeyCollection), NULL, CLSCTX_INPROC_SERVER);
+  HRESULT hr = ::CoCreateInstance(
+      __uuidof(PortableDeviceKeyCollection), NULL, CLSCTX_INPROC_SERVER,
+      IID_PPV_ARGS(properties_to_read->GetAddressOf()));
   if (FAILED(hr)) {
     DPLOG(ERROR) << "Failed to create IPortableDeviceKeyCollection instance";
     return false;
@@ -212,14 +213,14 @@ bool GetObjectUniqueId(IPortableDevice* device,
   DCHECK(device);
   DCHECK(unique_id);
   base::win::ScopedComPtr<IPortableDeviceContent> content;
-  HRESULT hr = device->Content(content.Receive());
+  HRESULT hr = device->Content(content.GetAddressOf());
   if (FAILED(hr)) {
     DPLOG(ERROR) << "Failed to get IPortableDeviceContent interface";
     return false;
   }
 
   base::win::ScopedComPtr<IPortableDeviceProperties> properties;
-  hr = content->Properties(properties.Receive());
+  hr = content->Properties(properties.GetAddressOf());
   if (FAILED(hr)) {
     DPLOG(ERROR) << "Failed to get IPortableDeviceProperties interface";
     return false;
@@ -230,14 +231,13 @@ bool GetObjectUniqueId(IPortableDevice* device,
     return false;
 
   base::win::ScopedComPtr<IPortableDeviceValues> properties_values;
-  if (FAILED(properties->GetValues(object_id.c_str(),
-                                   properties_to_read.get(),
-                                   properties_values.Receive()))) {
+  if (FAILED(properties->GetValues(object_id.c_str(), properties_to_read.Get(),
+                                   properties_values.GetAddressOf()))) {
     return false;
   }
 
   REFPROPERTYKEY key = GetUniqueIdPropertyKey(object_id);
-  return GetStringPropertyValue(properties_values.get(), key, unique_id);
+  return GetStringPropertyValue(properties_values.Get(), key, unique_id);
 }
 
 // Constructs the device storage unique identifier using |device_serial_num| and
@@ -263,7 +263,7 @@ bool GetRemovableStorageObjectIds(
   DCHECK(device);
   DCHECK(storage_object_ids);
   base::win::ScopedComPtr<IPortableDeviceCapabilities> capabilities;
-  HRESULT hr = device->Capabilities(capabilities.Receive());
+  HRESULT hr = device->Capabilities(capabilities.GetAddressOf());
   if (FAILED(hr)) {
     DPLOG(ERROR) << "Failed to get IPortableDeviceCapabilities interface";
     return false;
@@ -271,7 +271,7 @@ bool GetRemovableStorageObjectIds(
 
   base::win::ScopedComPtr<IPortableDevicePropVariantCollection> storage_ids;
   hr = capabilities->GetFunctionalObjects(WPD_FUNCTIONAL_CATEGORY_STORAGE,
-                                          storage_ids.Receive());
+                                          storage_ids.GetAddressOf());
   if (FAILED(hr)) {
     DPLOG(ERROR) << "Failed to get IPortableDevicePropVariantCollection";
     return false;
@@ -315,8 +315,8 @@ bool IsMassStoragePortableDevice(const base::string16& pnp_device_id,
 base::string16 GetDeviceNameOnBlockingThread(
     IPortableDeviceManager* portable_device_manager,
     const base::string16& pnp_device_id) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   DCHECK(portable_device_manager);
+  base::ThreadRestrictions::AssertIOAllowed();
   base::string16 name;
   GetFriendlyName(pnp_device_id, portable_device_manager, &name) ||
       GetDeviceDescription(pnp_device_id, portable_device_manager, &name) ||
@@ -329,25 +329,25 @@ base::string16 GetDeviceNameOnBlockingThread(
 bool GetDeviceStorageObjectsOnBlockingThread(
     const base::string16& pnp_device_id,
     PortableDeviceWatcherWin::StorageObjects* storage_objects) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   DCHECK(storage_objects);
+  base::ThreadRestrictions::AssertIOAllowed();
   base::win::ScopedComPtr<IPortableDevice> device;
   if (!SetUp(pnp_device_id, &device))
     return false;
 
   base::string16 device_serial_num;
-  if (!GetObjectUniqueId(device.get(), WPD_DEVICE_OBJECT_ID,
+  if (!GetObjectUniqueId(device.Get(), WPD_DEVICE_OBJECT_ID,
                          &device_serial_num)) {
     return false;
   }
 
   PortableDeviceWatcherWin::StorageObjectIDs storage_obj_ids;
-  if (!GetRemovableStorageObjectIds(device.get(), &storage_obj_ids))
+  if (!GetRemovableStorageObjectIds(device.Get(), &storage_obj_ids))
     return false;
   for (PortableDeviceWatcherWin::StorageObjectIDs::const_iterator id_iter =
        storage_obj_ids.begin(); id_iter != storage_obj_ids.end(); ++id_iter) {
     base::string16 storage_persistent_id;
-    if (!GetObjectUniqueId(device.get(), *id_iter, &storage_persistent_id))
+    if (!GetObjectUniqueId(device.Get(), *id_iter, &storage_persistent_id))
       continue;
 
     std::string device_storage_id;
@@ -367,10 +367,10 @@ bool GetDeviceInfoOnBlockingThread(
     IPortableDeviceManager* portable_device_manager,
     const base::string16& pnp_device_id,
     PortableDeviceWatcherWin::DeviceDetails* device_details) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   DCHECK(portable_device_manager);
   DCHECK(device_details);
   DCHECK(!pnp_device_id.empty());
+  base::ThreadRestrictions::AssertIOAllowed();
   device_details->name = GetDeviceNameOnBlockingThread(portable_device_manager,
                                                        pnp_device_id);
   if (IsMassStoragePortableDevice(pnp_device_id, device_details->name))
@@ -386,9 +386,10 @@ bool GetDeviceInfoOnBlockingThread(
 // returns true and fills in |portable_device_mgr|. On failure, returns false.
 bool GetPortableDeviceManager(
   base::win::ScopedComPtr<IPortableDeviceManager>* portable_device_mgr) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
-  HRESULT hr = portable_device_mgr->CreateInstance(
-      __uuidof(PortableDeviceManager), NULL, CLSCTX_INPROC_SERVER);
+  base::ThreadRestrictions::AssertIOAllowed();
+  HRESULT hr = ::CoCreateInstance(
+      __uuidof(PortableDeviceManager), NULL, CLSCTX_INPROC_SERVER,
+      IID_PPV_ARGS(portable_device_mgr->GetAddressOf()));
   if (SUCCEEDED(hr))
     return true;
 
@@ -403,8 +404,8 @@ bool GetPortableDeviceManager(
 // false.
 bool EnumerateAttachedDevicesOnBlockingThread(
     PortableDeviceWatcherWin::Devices* devices) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   DCHECK(devices);
+  base::ThreadRestrictions::AssertIOAllowed();
   base::win::ScopedComPtr<IPortableDeviceManager> portable_device_mgr;
   if (!GetPortableDeviceManager(&portable_device_mgr))
     return false;
@@ -423,7 +424,7 @@ bool EnumerateAttachedDevicesOnBlockingThread(
 
   for (DWORD index = 0; index < pnp_device_count; ++index) {
     PortableDeviceWatcherWin::DeviceDetails device_details;
-    if (GetDeviceInfoOnBlockingThread(portable_device_mgr.get(),
+    if (GetDeviceInfoOnBlockingThread(portable_device_mgr.Get(),
                                       pnp_device_ids[index], &device_details))
       devices->push_back(device_details);
     CoTaskMemFree(pnp_device_ids[index]);
@@ -438,15 +439,15 @@ bool EnumerateAttachedDevicesOnBlockingThread(
 bool HandleDeviceAttachedEventOnBlockingThread(
     const base::string16& pnp_device_id,
     PortableDeviceWatcherWin::DeviceDetails* device_details) {
-  DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   DCHECK(device_details);
+  base::ThreadRestrictions::AssertIOAllowed();
   base::win::ScopedComPtr<IPortableDeviceManager> portable_device_mgr;
   if (!GetPortableDeviceManager(&portable_device_mgr))
     return false;
   // Sometimes, portable device manager doesn't have the new device details.
   // Refresh the manager device list to update its details.
   portable_device_mgr->RefreshDeviceList();
-  return GetDeviceInfoOnBlockingThread(portable_device_mgr.get(), pnp_device_id,
+  return GetDeviceInfoOnBlockingThread(portable_device_mgr.Get(), pnp_device_id,
                                        device_details);
 }
 
@@ -500,10 +501,9 @@ PortableDeviceWatcherWin::~PortableDeviceWatcherWin() {
 void PortableDeviceWatcherWin::Init(HWND hwnd) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   notifications_ = RegisterPortableDeviceNotification(hwnd);
-  base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
-  media_task_runner_ = pool->GetSequencedTaskRunnerWithShutdownBehavior(
-      pool->GetNamedSequenceToken(kMediaTaskRunnerName),
-      base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
+  media_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
   EnumerateAttachedDevices();
 }
 
@@ -632,9 +632,6 @@ void PortableDeviceWatcherWin::OnDidHandleDeviceAttachEvent(
     const std::string& storage_id = storage_iter->object_persistent_id;
     DCHECK(!base::ContainsKey(storage_map_, storage_id));
 
-    // Keep track of storage id and storage name to see how often we receive
-    // empty values.
-    MediaStorageUtil::RecordDeviceInfoHistogram(false, storage_id, name);
     if (storage_id.empty() || name.empty())
       return;
 

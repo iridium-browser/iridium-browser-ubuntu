@@ -67,6 +67,9 @@ class APP_LIST_EXPORT SearchResultContainerView : public views::View,
   // Returns whether an update is currently scheduled for this container.
   bool UpdateScheduled();
 
+  // Overridden from views::View:
+  const char* GetClassName() const override;
+
   // Overridden from ui::ListModelObserver:
   void ListItemsAdded(size_t start, size_t count) override;
   void ListItemsRemoved(size_t start, size_t count) override;
@@ -80,6 +83,9 @@ class APP_LIST_EXPORT SearchResultContainerView : public views::View,
   // Tab).
   virtual void OnContainerSelected(bool from_bottom,
                                    bool directional_movement) = 0;
+
+  // Returns selected view in this container view.
+  virtual views::View* GetSelectedView() const = 0;
 
  private:
   // Schedules an Update call using |update_factory_|. Do nothing if there is a

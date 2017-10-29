@@ -93,8 +93,7 @@ void CheckWillStartRequestOnUIThread(
     int render_process_id,
     int render_frame_host_id,
     const std::string& method,
-    const scoped_refptr<content::ResourceRequestBodyImpl>&
-        resource_request_body,
+    const scoped_refptr<content::ResourceRequestBody>& resource_request_body,
     const Referrer& sanitized_referrer,
     bool has_user_gesture,
     ui::PageTransition transition,
@@ -135,7 +134,7 @@ void CheckWillRedirectRequestOnUIThread(
       ->FilterURL(false, &new_validated_url);
   navigation_handle->WillRedirectRequest(
       new_validated_url, new_method, new_referrer_url, new_is_external_protocol,
-      headers, connection_info,
+      headers, connection_info, nullptr,
       base::Bind(&SendCheckResultToIOThread, callback));
 }
 
@@ -204,8 +203,11 @@ void NavigationResourceThrottle::WillStartRequest(bool* defer) {
     return;
 
   bool is_external_protocol =
-      !info->GetContext()->GetRequestContext()->job_factory()->IsHandledURL(
-          request_->url());
+      request_->url().is_valid() &&
+      !info->GetContext()
+           ->GetRequestContext()
+           ->job_factory()
+           ->IsHandledProtocol(request_->url().scheme());
   UIChecksPerformedCallback callback =
       base::Bind(&NavigationResourceThrottle::OnUIChecksPerformed,
                  weak_ptr_factory_.GetWeakPtr());
@@ -239,8 +241,11 @@ void NavigationResourceThrottle::WillRedirectRequest(
     return;
 
   bool new_is_external_protocol =
-      !info->GetContext()->GetRequestContext()->job_factory()->IsHandledURL(
-          request_->url());
+      request_->url().is_valid() &&
+      !info->GetContext()
+           ->GetRequestContext()
+           ->job_factory()
+           ->IsHandledProtocol(request_->url().scheme());
   DCHECK(redirect_info.new_method == "POST" ||
          redirect_info.new_method == "GET");
   UIChecksPerformedCallback callback =
@@ -305,8 +310,8 @@ void NavigationResourceThrottle::WillProcessResponse(bool* defer) {
 
   SSLStatus ssl_status;
   if (request_->ssl_info().cert.get()) {
-    NavigationResourceHandler::GetSSLStatusForRequest(
-        request_->url(), request_->ssl_info(), info->GetChildID(), &ssl_status);
+    NavigationResourceHandler::GetSSLStatusForRequest(request_->ssl_info(),
+                                                      &ssl_status);
   }
 
   BrowserThread::PostTask(
@@ -348,7 +353,8 @@ void NavigationResourceThrottle::OnUIChecksPerformed(
     CancelAndIgnore();
   } else if (result == NavigationThrottle::CANCEL) {
     Cancel();
-  } else if (result == NavigationThrottle::BLOCK_REQUEST) {
+  } else if (result == NavigationThrottle::BLOCK_REQUEST ||
+             result == NavigationThrottle::BLOCK_REQUEST_AND_COLLAPSE) {
     CancelWithError(net::ERR_BLOCKED_BY_CLIENT);
   } else if (result == NavigationThrottle::BLOCK_RESPONSE) {
     // TODO(mkwst): If we cancel the main frame request with anything other than

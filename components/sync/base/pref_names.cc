@@ -63,6 +63,7 @@ const char kSyncSyncedNotifications[] = "sync.synced_notifications";
 const char kSyncTabs[] = "sync.tabs";
 const char kSyncThemes[] = "sync.themes";
 const char kSyncTypedUrls[] = "sync.typed_urls";
+const char kSyncUserEvents[] = "sync.user_events";
 const char kSyncWifiCredentials[] = "sync.wifi_credentials";
 
 // Boolean used by enterprise configuration management in order to lock down
@@ -70,7 +71,7 @@ const char kSyncWifiCredentials[] = "sync.wifi_credentials";
 const char kSyncManaged[] = "sync.managed";
 
 // Boolean to prevent sync from automatically starting up.  This is
-// used when sync is disabled by the user via the privacy dashboard.
+// used when sync is disabled by the user in sync settings.
 const char kSyncSuppressStart[] = "sync.suppress_start";
 
 // A string that can be used to restore sync encryption infrastructure on

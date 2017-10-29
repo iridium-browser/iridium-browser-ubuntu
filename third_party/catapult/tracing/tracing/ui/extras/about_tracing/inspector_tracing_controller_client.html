@@ -14,25 +14,29 @@ found in the LICENSE file.
 
 tr.exportTo('tr.ui.e.about_tracing', function() {
   function createResolvedPromise(data) {
-    var promise = new Promise(function(resolve, reject) {
-      if (data)
+    const promise = new Promise(function(resolve, reject) {
+      if (data) {
         resolve(data);
-      else
+      } else {
         resolve();
+      }
     });
     return promise;
   }
 
   function appendTraceChunksTo(chunks, messageString) {
-    if (typeof messageString !== 'string')
+    if (typeof messageString !== 'string') {
       throw new Error('Invalid data');
-    var re = /"params":\s*\{\s*"value":\s*\[([^]+)\]\s*\}\s*\}/;
-    var m = re.exec(messageString);
-    if (!m)
+    }
+    const re = /"params":\s*\{\s*"value":\s*\[([^]+)\]\s*\}\s*\}/;
+    const m = re.exec(messageString);
+    if (!m) {
       throw new Error('Malformed response');
+    }
 
-    if (chunks.length > 1)
+    if (chunks.length > 1) {
       chunks.push(',');
+    }
     chunks.push(m[1]);
   }
 
@@ -51,19 +55,19 @@ tr.exportTo('tr.ui.e.about_tracing', function() {
   InspectorTracingControllerClient.prototype = {
     __proto__: tr.ui.e.about_tracing.TracingControllerClient.prototype,
 
-    beginMonitoring: function(monitoringOptions) {
+    beginMonitoring(monitoringOptions) {
       throw new Error('Not implemented');
     },
 
-    endMonitoring: function() {
+    endMonitoring() {
       throw new Error('Not implemented');
     },
 
-    captureMonitoring: function() {
+    captureMonitoring() {
       throw new Error('Not implemented');
     },
 
-    getMonitoringStatus: function() {
+    getMonitoringStatus() {
       return createResolvedPromise({
         isMonitoring: false,
         categoryFilter: '',
@@ -73,8 +77,8 @@ tr.exportTo('tr.ui.e.about_tracing', function() {
       });
     },
 
-    getCategories: function() {
-      var res = this.conn_.req('Tracing.getCategories', {});
+    getCategories() {
+      const res = this.conn_.req('Tracing.getCategories', {});
       return res.then(function(result) {
         return result.categories;
       }, function(err) {
@@ -82,18 +86,41 @@ tr.exportTo('tr.ui.e.about_tracing', function() {
       });
     },
 
-    beginRecording: function(recordingOptions) {
-      if (this.recording_)
+    beginRecording(recordingOptions) {
+      if (this.recording_) {
         throw new Error('Already recording');
+      }
       this.recording_ = 'starting';
-      var res = this.conn_.req(
+
+      // The devtools and tracing endpoints have slightly different parameter
+      // configurations. Noteably, recordMode has different spelling
+      // requirements.
+      function RewriteRecordMode(recordMode) {
+        if (recordMode === 'record-until-full') {
+          return 'recordUntilFull';
+        }
+        if (recordMode === 'record-continuously') {
+          return 'recordContinuously';
+        }
+        if (recordMode === 'record-as-much-as-possible') {
+          return 'recordAsMuchAsPossible';
+        }
+        return 'unsupported record mode';
+      }
+
+      const traceConfigStr = {
+        includedCategories: recordingOptions.included_categories,
+        excludedCategories: recordingOptions.excluded_categories,
+        recordMode: RewriteRecordMode(recordingOptions.record_mode),
+        enableSystrace: recordingOptions.enable_systrace
+      };
+      if ('memory_dump_config' in recordingOptions) {
+        traceConfigStr.memoryDumpConfig = recordingOptions.memory_dump_config;
+      }
+      let res = this.conn_.req(
           'Tracing.start',
           {
-            categories: recordingOptions.categoryFilter,
-            options:
-                [recordingOptions.tracingRecordMode,
-                  (recordingOptions.useSampling ? 'enable-sampling' : '')
-                ].join(','),
+            traceConfig: traceConfigStr,
             bufferUsageReportingInterval: 1000
           });
       res = res.then(
@@ -109,35 +136,32 @@ tr.exportTo('tr.ui.e.about_tracing', function() {
       return res;
     },
 
-    onBufferUsageUpdateFromInspector_: function(params) {
+    onBufferUsageUpdateFromInspector_(params) {
       this.bufferUsage_ = params.value || params.percentFull;
     },
 
-    beginGetBufferPercentFull: function() {
-      var that = this;
-      return new Promise(function(resolve, reject) {
-        setTimeout(function() {
-          resolve(that.bufferUsage_);
-        }, 100);
-      });
+    beginGetBufferPercentFull() {
+      return tr.b.timeout(100).then(() => this.bufferUsage_());
     },
 
-    onDataCollected_: function(messageString) {
+    onDataCollected_(messageString) {
       appendTraceChunksTo(this.currentTraceTextChunks_, messageString);
     },
 
-    endRecording: function() {
-      if (this.recording_ === false)
+    endRecording() {
+      if (this.recording_ === false) {
         return createResolvedPromise();
+      }
 
-      if (this.recording_ !== true)
+      if (this.recording_ !== true) {
         throw new Error('Cannot end');
+      }
 
       this.currentTraceTextChunks_ = ['['];
       this.conn_.setNotificationListener(
           'Tracing.dataCollected', this.onDataCollected_.bind(this));
 
-      var clearListeners = function() {
+      const clearListeners = function() {
         this.conn_.setNotificationListener(
             'Tracing.bufferUsage', undefined);
         this.conn_.setNotificationListener(
@@ -152,7 +176,7 @@ tr.exportTo('tr.ui.e.about_tracing', function() {
           clearListeners();
           this.recording_ = false;
           this.currentTraceTextChunks_.push(']');
-          var traceText = this.currentTraceTextChunks_.join('');
+          const traceText = this.currentTraceTextChunks_.join('');
           this.currentTraceTextChunks_ = undefined;
           resolve(traceText);
         }
@@ -174,7 +198,7 @@ tr.exportTo('tr.ui.e.about_tracing', function() {
       }.bind(this));
     },
 
-    defaultTraceName: function() {
+    defaultTraceName() {
       return 'trace.json';
     }
   };

@@ -9,38 +9,27 @@
 #define SkImageEncoderPriv_DEFINED
 
 #include "SkImageEncoder.h"
+#include "SkImageInfoPriv.h"
 
-struct SkEncodeOptions {
-    enum class PremulBehavior {
-         // Convert to a linear space before premultiplying or unpremultiplying.
-        kGammaCorrect,
+static inline bool SkPixmapIsValid(const SkPixmap& src,
+                                   SkTransferFunctionBehavior unpremulBehavior)
+{
+    if (SkTransferFunctionBehavior::kRespect == unpremulBehavior) {
+        if (!SkImageInfoIsValidRenderingCS(src.info())) {
+            return false;
+        }
+    } else {
+        if (!SkImageInfoIsValidAllowNumericalCS(src.info())) {
+            return false;
+        }
+    }
 
-        // Ignore the transfer function when premultiplying or unpremultiplying.
-        kLegacy,
-    };
+    if (!src.addr() || src.rowBytes() < src.info().minRowBytes()) {
+        return false;
+    }
 
-    PremulBehavior fPremulBehavior = PremulBehavior::kLegacy;
-};
-
-#ifdef SK_HAS_JPEG_LIBRARY
-    bool SkEncodeImageAsJPEG(SkWStream*, const SkPixmap&, const SkEncodeOptions&);
-    bool SkEncodeImageAsJPEG(SkWStream*, const SkPixmap&, int quality);
-#else
-    #define SkEncodeImageAsJPEG(...) false
-#endif
-
-#ifdef SK_HAS_PNG_LIBRARY
-    bool SkEncodeImageAsPNG(SkWStream*, const SkPixmap&, const SkEncodeOptions&);
-#else
-    #define SkEncodeImageAsPNG(...) false
-#endif
-
-#ifdef SK_HAS_WEBP_LIBRARY
-    bool SkEncodeImageAsWEBP(SkWStream*, const SkPixmap&, const SkEncodeOptions&);
-    bool SkEncodeImageAsWEBP(SkWStream*, const SkPixmap&, int quality);
-#else
-    #define SkEncodeImageAsWEBP(...) false
-#endif
+    return true;
+}
 
 #if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
     bool SkEncodeImageWithCG(SkWStream*, const SkPixmap&, SkEncodedImageFormat);

@@ -11,9 +11,7 @@
 #include "base/files/file_util.h"
 #include "base/memory/ptr_util.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
 #include "services/service_manager/public/cpp/service_context.h"
 
 #if defined(OS_WIN)
@@ -39,26 +37,29 @@ const char kUserDataDir[] = "user-data-dir";
 
 }  // namespace filesystem
 
-FileSystemApp::FileSystemApp() : lock_table_(new LockTable) {}
+FileSystemApp::FileSystemApp() : lock_table_(new LockTable) {
+  registry_.AddInterface<mojom::FileSystem>(
+      base::Bind(&FileSystemApp::Create, base::Unretained(this)));
+}
 
 FileSystemApp::~FileSystemApp() {}
 
-void FileSystemApp::OnStart() {
-  tracing_.Initialize(context()->connector(), context()->identity().name());
+void FileSystemApp::OnStart() {}
+
+void FileSystemApp::OnBindInterface(
+    const service_manager::BindSourceInfo& source_info,
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle interface_pipe) {
+  registry_.BindInterface(interface_name, std::move(interface_pipe),
+                          source_info);
 }
 
-bool FileSystemApp::OnConnect(const service_manager::ServiceInfo& remote_info,
-                              service_manager::InterfaceRegistry* registry) {
-  registry->AddInterface<mojom::FileSystem>(this);
-  return true;
-}
-
-// |InterfaceFactory<Files>| implementation:
-void FileSystemApp::Create(const service_manager::Identity& remote_identity,
-                           mojom::FileSystemRequest request) {
-  mojo::MakeStrongBinding(base::MakeUnique<FileSystemImpl>(
-                              remote_identity, GetUserDataDir(), lock_table_),
-                          std::move(request));
+void FileSystemApp::Create(mojom::FileSystemRequest request,
+                           const service_manager::BindSourceInfo& source_info) {
+  mojo::MakeStrongBinding(
+      base::MakeUnique<FileSystemImpl>(source_info.identity, GetUserDataDir(),
+                                       lock_table_),
+      std::move(request));
 }
 
 //static

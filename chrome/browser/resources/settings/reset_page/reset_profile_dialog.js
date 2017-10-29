@@ -50,8 +50,8 @@ Polymer({
    */
   getExplanationText_: function() {
     if (this.isTriggered_) {
-      return loadTimeData.getStringF('triggeredResetPageExplanation',
-                                     this.triggeredResetToolName_);
+      return loadTimeData.getStringF(
+          'triggeredResetPageExplanation', this.triggeredResetToolName_);
     }
     return loadTimeData.getStringF('resetPageExplanation');
   },
@@ -62,8 +62,8 @@ Polymer({
    */
   getPageTitle_: function() {
     if (this.isTriggered_) {
-      return loadTimeData.getStringF('triggeredResetPageTitle',
-                                     this.triggeredResetToolName_);
+      return loadTimeData.getStringF(
+          'triggeredResetPageTitle', this.triggeredResetToolName_);
     }
     return loadTimeData.getStringF('resetPageTitle');
   },
@@ -75,6 +75,14 @@ Polymer({
     this.addEventListener('cancel', function() {
       this.browserProxy_.onHideResetProfileDialog();
     }.bind(this));
+
+    this.$$('paper-checkbox a')
+        .addEventListener('tap', this.onShowReportedSettingsTap_.bind(this));
+    // Prevent toggling of the checkbox when hitting the "Enter" key on the
+    // link.
+    this.$$('paper-checkbox a').addEventListener('keydown', function(e) {
+      e.stopPropagation();
+    });
   },
 
   /** @private */
@@ -86,7 +94,7 @@ Polymer({
   /** @override */
   attached: function() {
     this.isTriggered_ =
-        settings.getCurrentRoute() == settings.Route.TRIGGERED_RESET_DIALOG;
+        settings.getCurrentRoute() == settings.routes.TRIGGERED_RESET_DIALOG;
     if (this.isTriggered_) {
       this.browserProxy_.getTriggeredResetToolName().then(function(name) {
         this.resetRequestOrigin_ = 'triggeredreset';
@@ -98,7 +106,8 @@ Polymer({
       // reset request came from the Chrome Cleanup Tool by launching Chrome
       // with the startup URL chrome://settings/resetProfileSettings#cct.
       var origin = window.location.hash.slice(1).toLowerCase() == 'cct' ?
-          'cct' : settings.getQueryParameters().get('origin');
+          'cct' :
+          settings.getQueryParameters().get('origin');
       this.resetRequestOrigin_ = origin || '';
       this.showDialog_();
     }
@@ -112,20 +121,24 @@ Polymer({
   /** @private */
   onResetTap_: function() {
     this.clearingInProgress_ = true;
-    this.browserProxy_.performResetProfileSettings(
-        this.$.sendSettings.checked, this.resetRequestOrigin_).then(function() {
-      this.clearingInProgress_ = false;
-      if (this.$.dialog.open)
-        this.$.dialog.close();
-      this.fire('reset-done');
-    }.bind(this));
+    this.browserProxy_
+        .performResetProfileSettings(
+            this.$.sendSettings.checked, this.resetRequestOrigin_)
+        .then(function() {
+          this.clearingInProgress_ = false;
+          if (this.$.dialog.open)
+            this.$.dialog.close();
+          this.fire('reset-done');
+        }.bind(this));
   },
 
   /**
    * Displays the settings that will be reported in a new tab.
+   * @param {!Event} e
    * @private
    */
-  onShowReportedSettingsTap_: function() {
+  onShowReportedSettingsTap_: function(e) {
     this.browserProxy_.showReportedSettings();
+    e.stopPropagation();
   },
 });

@@ -12,8 +12,15 @@ group("all") {
     ":service_manager",
     "//services/service_manager/background",
     "//services/service_manager/standalone",
-    "//services/service_manager/tests",
   ]
+
+  if (!is_ios) {
+    deps += [
+      # These tests heavily rely on service binaries, which are not supported on
+      # iOS.
+      "//services/service_manager/tests",
+    ]
+  }
 }
 
 source_set("service_manager") {
@@ -31,20 +38,17 @@ source_set("service_manager") {
   ]
 
   deps = [
-    "//base",
     "//base/third_party/dynamic_annotations",
-    "//mojo/common",
-    "//mojo/public/cpp/bindings",
-    "//services/catalog/public/interfaces:constants",
-    "//services/service_manager/public/cpp:sources",
-    "//services/service_manager/public/interfaces",
-    "//services/service_manager/runner/host:lib",
-    "//services/tracing/public/interfaces:constants",
   ]
 
   public_deps = [
-    # ApplicationManager exposes and uses PackageManager types in its header.
+    "//base",
+    "//mojo/public/cpp/bindings",
     "//services/catalog:lib",
+    "//services/catalog/public/interfaces:constants",
+    "//services/service_manager/public/cpp",
+    "//services/service_manager/public/interfaces",
+    "//services/service_manager/runner/host:lib",
   ]
 }
 

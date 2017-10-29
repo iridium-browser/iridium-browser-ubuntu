@@ -11,8 +11,10 @@ from dashboard import speed_releasing
 from dashboard.common import datastore_hooks
 from dashboard.common import testing_common
 from dashboard.common import utils
-from dashboard.models import table_config
+from dashboard.models import anomaly
 from dashboard.models import graph_data
+from dashboard.models import sheriff
+from dashboard.models import table_config
 
 _SAMPLE_BOTS = ['ChromiumPerf/win', 'ChromiumPerf/linux']
 _DOWNSTREAM_BOTS = ['ClankInternal/win', 'ClankInternal/linux']
@@ -20,6 +22,11 @@ _SAMPLE_TESTS = ['my_test_suite/my_test', 'my_test_suite/my_other_test']
 _SAMPLE_LAYOUT = ('{ "my_test_suite/my_test": ["Foreground", '
                   '"Pretty Name 1"],"my_test_suite/my_other_test": '
                   ' ["Foreground", "Pretty Name 2"]}')
+
+
+RECENT_REV = speed_releasing.CHROMIUM_MILESTONES[
+    speed_releasing.CURRENT_MILESTONE][0] + 42
+
 
 class SpeedReleasingTest(testing_common.TestCase):
 
@@ -64,8 +71,15 @@ class SpeedReleasingTest(testing_common.TestCase):
         name=name, bots=_SAMPLE_BOTS if not is_downstream else _DOWNSTREAM_BOTS,
         tests=_SAMPLE_TESTS,
         layout=_SAMPLE_LAYOUT,
-        username='internal@chromium.org')
+        username='internal@chromium.org',
+        override=0)
     return keys
+
+  def _AddSheriffToDatastore(self):
+    sheriff_key = sheriff.Sheriff(
+        id='Chromium Perf Sheriff', email='internal@chromium.org')
+    sheriff_key.patterns = ['*/*/my_test_suite/*']
+    sheriff_key.put()
 
   def _AddTests(self, is_downstream):
     master = 'ClankInternal' if is_downstream else 'ChromiumPerf'
@@ -73,7 +87,7 @@ class SpeedReleasingTest(testing_common.TestCase):
         'my_test_suite': {
             'my_test': {},
             'my_other_test': {},
-        }
+        },
     })
     keys = [
         utils.TestKey(master + '/win/my_test_suite/my_test'),
@@ -87,9 +101,51 @@ class SpeedReleasingTest(testing_common.TestCase):
       test.put()
     return keys
 
+  def _AddAlertsWithDifferentMasterAndBenchmark(self):
+    """Adds 10 alerts with different benchmark/master."""
+    sheriff_key = sheriff.Sheriff(
+        id='Fake Sheriff', email='internal@chromium.org')
+    sheriff_key.patterns = ['*/*/my_fake_suite/*']
+    sheriff_key.put()
+    master = 'FakeMaster'
+    testing_common.AddTests([master], ['win'], {
+        'my_fake_suite': {
+            'my_fake_test': {},
+        },
+    })
+    keys = [
+        utils.TestKey(master + '/win/my_fake_suite/my_fake_test'),
+    ]
+    self._AddRows(keys)
+    self._AddAlertsToDataStore(keys)
+
+  def _AddAlertsToDataStore(self, test_keys):
+    """Adds sample data, including triaged and non-triaged alerts."""
+    key_map = {}
+    sheriff_key = ndb.Key('Sheriff', 'Chromium Perf Sheriff')
+    for test_key in test_keys:
+      test = test_key.get()
+      test.improvement_direction = anomaly.DOWN
+      test.put()
+
+    # Add some (10 * len(keys)) non-triaged alerts.
+    for end_rev in xrange(420500, 421500, 100):
+      for test_key in test_keys:
+        ref_test_key = utils.TestKey('%s_ref' % utils.TestPath(test_key))
+        anomaly_entity = anomaly.Anomaly(
+            start_revision=end_rev - 5, end_revision=end_rev, test=test_key,
+            median_before_anomaly=100, median_after_anomaly=200,
+            ref_test=ref_test_key, sheriff=sheriff_key)
+        anomaly_entity.SetIsImprovement()
+        anomaly_key = anomaly_entity.put()
+        key_map[end_rev] = anomaly_key
+
+    return key_map
+
+
   def _AddRows(self, keys):
     for key in keys:
-      testing_common.AddRows(utils.TestPath(key), [1, 2, 3, 445588])
+      testing_common.AddRows(utils.TestPath(key), [1, 2, 3, RECENT_REV])
 
   def _AddDownstreamRows(self, keys):
     revisions = [1, 2, 1485025126, 1485099999]
@@ -190,12 +246,26 @@ class SpeedReleasingTest(testing_common.TestCase):
     self._AddRows(keys)
     response = self.testapp.post('/speed_releasing/BestTable?m=56')
     self.assertIn('"revisions": [445288, 433400]', response)
+    self.assertIn('"display_milestones": [56, 56]', response)
+    self.assertIn('"navigation_milestones": [55, 57]', response)
 
   def testPost_TableWithNewestMilestoneParam(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
     self._AddRows(keys)
-    response = self.testapp.post('/speed_releasing/BestTable?m=57')
-    self.assertIn('"revisions": [445588, 445288]', response)
+    current_milestone = speed_releasing.CURRENT_MILESTONE
+    response = self.testapp.post('/speed_releasing/BestTable?m=%s' %
+                                 current_milestone)
+    current_milestone_start_rev = speed_releasing.CHROMIUM_MILESTONES[
+        current_milestone][0]
+    self.assertIn(
+        '"revisions": [%s, %s]' % (
+            RECENT_REV, current_milestone_start_rev), response)
+    self.assertIn(
+        '"display_milestones": [%s, %s]' % (
+            current_milestone, current_milestone), response)
+    self.assertIn(
+        '"navigation_milestones": [%s, null]' % (
+            current_milestone - 1), response)
 
   def testPost_TableWithHighMilestoneParam(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
@@ -213,7 +283,11 @@ class SpeedReleasingTest(testing_common.TestCase):
     keys = self._AddTableConfigDataStore('BestTable', True)
     self._AddRows(keys)
     response = self.testapp.post('/speed_releasing/BestTable')
-    self.assertIn('"revisions": [445588, 445288]', response)
+    current_milestone_start_rev = speed_releasing.CHROMIUM_MILESTONES[
+        speed_releasing.CURRENT_MILESTONE][0]
+    self.assertIn(
+        '"revisions": [%s, %s]' % (
+            RECENT_REV, current_milestone_start_rev), response)
 
   def testPost_TableWithRevParamEndRevAlsoStartRev(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
@@ -224,32 +298,40 @@ class SpeedReleasingTest(testing_common.TestCase):
   def testPost_TableWithOneRevParamUniqueEndRev(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
     self._AddRows(keys)
-    response = self.testapp.post('/speed_releasing/BestTable?revB=423768')
+    response = self.testapp.post('/speed_releasing/BestTable?revA=423768')
     self.assertIn('"revisions": [423768, 416640]', response)
+    self.assertIn('"display_milestones": [54, 54]', response)
+    self.assertIn('"navigation_milestones": [null, 55]', response)
 
   def testPost_TableWithOneRevParamBetweenMilestones(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
     self._AddRows(keys)
-    response = self.testapp.post('/speed_releasing/BestTable?revB=425000')
-    self.assertIn('"revisions": [445588, 425000]', response)
+    response = self.testapp.post('/speed_releasing/BestTable?revB=455000')
+    self.assertIn('"revisions": [463842, 455000]', response)
+    self.assertIn('"display_milestones": [58, 58]', response)
 
   def testPost_TableWithRevParamMiddleRev(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
     self._AddRows(keys)
     response = self.testapp.post('/speed_releasing/BestTable?revB=444000')
     self.assertIn('"revisions": [445288, 444000]', response)
+    self.assertIn('"display_milestones": [56, 56]', response)
 
   def testPost_TableWithRevParamHighRev(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
     self._AddRows(keys)
     response = self.testapp.post('/speed_releasing/BestTable?revB=50000000')
-    self.assertIn('"revisions": [50000000, 445588]', response)
+    self.assertIn('"revisions": [50000000, %s]' % RECENT_REV, response)
+    self.assertIn('"display_milestones": [%s, %s]' % ((
+        speed_releasing.CURRENT_MILESTONE,)*2), response)
 
   def testPost_TableWithRevParamLowRev(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
     self._AddRows(keys)
     response = self.testapp.post('/speed_releasing/BestTable?revB=1')
-    self.assertIn('"revisions": [445588, 1]', response)
+    self.assertIn('"revisions": [%s, 1]' % RECENT_REV, response)
+    self.assertIn('"display_milestones": [%s, %s]' % ((
+        speed_releasing.CURRENT_MILESTONE,)*2), response)
 
   def testPost_TableWithRevsParamTwoMilestones(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
@@ -257,6 +339,8 @@ class SpeedReleasingTest(testing_common.TestCase):
     response = self.testapp.post('/speed_releasing/BestTable?'
                                  'revA=417000&revB=440000')
     self.assertIn('"revisions": [440000, 417000]', response)
+    self.assertIn('"display_milestones": [54, 56]', response)
+    self.assertIn('"navigation_milestones": [null, 56]', response)
 
   def testPost_TableWithRevsParamHigh(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
@@ -264,6 +348,8 @@ class SpeedReleasingTest(testing_common.TestCase):
     response = self.testapp.post('/speed_releasing/BestTable?'
                                  'revA=50000000&revB=60000000')
     self.assertIn('"revisions": [60000000, 50000000]', response)
+    self.assertIn('"display_milestones": [%s, %s]' % ((
+        speed_releasing.CURRENT_MILESTONE,)*2), response)
 
   def testPost_TableWithRevsParamSelfContained(self):
     keys = self._AddTableConfigDataStore('BestTable', True)
@@ -271,3 +357,29 @@ class SpeedReleasingTest(testing_common.TestCase):
     response = self.testapp.post('/speed_releasing/BestTable?'
                                  'revB=420000&revA=421000')
     self.assertIn('"revisions": [421000, 420000]', response)
+    self.assertIn('"display_milestones": [54, 54]', response)
+
+  def testPost_ReleaseNotes(self):
+    keys = self._AddTableConfigDataStore('BestTable', True, False)
+    self._AddSheriffToDatastore()
+    self._AddRows(keys)
+    self._AddAlertsToDataStore(keys)
+    self._AddAlertsWithDifferentMasterAndBenchmark()
+    response = self.testapp.post('/speed_releasing/BestTable?'
+                                 'revB=420000&revA=421000&anomalies=true')
+    self.assertIn('"revisions": [421000, 420000]', response)
+    # Make sure we aren't getting a table here instead of Release Notes.
+    self.assertNotIn('"display_revisions"', response)
+
+    # There are 50 anomalies total (5 tests on 10 revisions). 1 test does not
+    # have the correct master/benchmark, so 4 valid tests. Further, the
+    # revisions are [420500:421500:100] meaning that there are 6 revisions in
+    # the url param's range. 6*4 = 24 anomalies that should be returned.
+    anomaly_list = self.GetJsonValue(response, 'anomalies')
+    self.assertEqual(len(anomaly.Anomaly.query().fetch()), 50)
+    self.assertEqual(len(anomaly_list), 24)
+    for alert in anomaly_list:
+      self.assertEqual(alert['master'], 'ChromiumPerf')
+      self.assertIn(alert['test'], ['my_test', 'my_other_test'])
+      self.assertGreaterEqual(alert['end_revision'], 420000)
+      self.assertLessEqual(alert['end_revision'], 421000)

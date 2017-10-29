@@ -10,10 +10,13 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/safe_browsing/two_phase_uploader.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_utils.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -75,7 +78,8 @@ class FakeUploaderFactory : public TwoPhaseUploaderFactory {
       const std::string& metadata,
       const base::FilePath& file_path,
       const TwoPhaseUploader::ProgressCallback& progress_callback,
-      const TwoPhaseUploader::FinishCallback& finish_callback) override;
+      const TwoPhaseUploader::FinishCallback& finish_callback,
+      const net::NetworkTrafficAnnotationTag& traffic_annotation) override;
 
   FakeUploader* uploader_;
 };
@@ -87,7 +91,8 @@ std::unique_ptr<TwoPhaseUploader> FakeUploaderFactory::CreateTwoPhaseUploader(
     const std::string& metadata,
     const base::FilePath& file_path,
     const TwoPhaseUploader::ProgressCallback& progress_callback,
-    const TwoPhaseUploader::FinishCallback& finish_callback) {
+    const TwoPhaseUploader::FinishCallback& finish_callback,
+    const net::NetworkTrafficAnnotationTag& traffic_annotation) {
   EXPECT_FALSE(uploader_);
 
   uploader_ = new FakeUploader(url_request_context_getter, file_task_runner,
@@ -101,8 +106,8 @@ std::unique_ptr<TwoPhaseUploader> FakeUploaderFactory::CreateTwoPhaseUploader(
 class DownloadFeedbackTest : public testing::Test {
  public:
   DownloadFeedbackTest()
-      : file_task_runner_(content::BrowserThread::GetTaskRunnerForThread(
-            content::BrowserThread::FILE)),
+      : file_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+            {base::MayBlock(), base::TaskPriority::BACKGROUND})),
         io_task_runner_(content::BrowserThread::GetTaskRunnerForThread(
             content::BrowserThread::IO)),
         url_request_context_getter_(
@@ -137,7 +142,7 @@ class DownloadFeedbackTest : public testing::Test {
   base::FilePath upload_file_path_;
   std::string upload_file_data_;
   content::TestBrowserThreadBundle thread_bundle_;
-  scoped_refptr<base::SingleThreadTaskRunner> file_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   FakeUploaderFactory two_phase_uploader_factory_;
   scoped_refptr<net::TestURLRequestContextGetter> url_request_context_getter_;
@@ -184,7 +189,7 @@ TEST_F(DownloadFeedbackTest, CompleteUpload) {
       TwoPhaseUploader::STATE_SUCCESS, net::OK, 0, "");
   EXPECT_TRUE(feedback_finish_called_);
   feedback.reset();
-  base::RunLoop().RunUntilIdle();
+  content::RunAllBlockingPoolTasksUntilIdle();
   EXPECT_FALSE(base::PathExists(upload_file_path_));
 }
 
@@ -216,7 +221,7 @@ TEST_F(DownloadFeedbackTest, CancelUpload) {
   feedback.reset();
   EXPECT_FALSE(feedback_finish_called_);
 
-  base::RunLoop().RunUntilIdle();
+  content::RunAllBlockingPoolTasksUntilIdle();
   EXPECT_FALSE(base::PathExists(upload_file_path_));
 }
 

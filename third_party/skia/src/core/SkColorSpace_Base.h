@@ -110,7 +110,7 @@ struct SkGammas : SkRefCnt {
         SkASSERT(i >= 0 && i < fChannels);
         return fType[i];
     }
-    
+
     uint8_t channels() const { return fChannels; }
 
     SkGammas(uint8_t channels)
@@ -171,17 +171,14 @@ public:
      *  For color spaces whose gamut can not be described in terms of XYZ D50, returns
      *  linear sRGB.
      */
-    virtual sk_sp<SkColorSpace> makeLinearGamma() = 0;
+    virtual sk_sp<SkColorSpace> makeLinearGamma() const = 0;
 
     /**
      *  Returns a color space with the same gamut as this one, with with the sRGB transfer
      *  function. For color spaces whose gamut can not be described in terms of XYZ D50, returns
      *  sRGB.
      */
-    virtual sk_sp<SkColorSpace> makeSRGBGamma() = 0;
-
-    sk_sp<SkColorSpace> makeWithoutFlags();
-    sk_sp<SkColorSpace> makeWithNonLinearBlending();
+    virtual sk_sp<SkColorSpace> makeSRGBGamma() const = 0;
 
     enum class Type : uint8_t {
         kXYZ,
@@ -189,7 +186,6 @@ public:
     };
 
     virtual Type type() const = 0;
-    bool nonLinearBlending() const { return SkToBool(fFlags & kNonLinearBlending_ColorSpaceFlag); }
 
     typedef uint8_t ICCTypeFlag;
     static constexpr ICCTypeFlag kRGB_ICCTypeFlag  = 1 << 0;
@@ -198,8 +194,7 @@ public:
 
     static sk_sp<SkColorSpace> MakeICC(const void* input, size_t len, ICCTypeFlag type);
 
-    static sk_sp<SkColorSpace> MakeRGB(SkGammaNamed gammaNamed, const SkMatrix44& toXYZD50,
-                                       uint32_t flags);
+    static sk_sp<SkColorSpace> MakeRGB(SkGammaNamed gammaNamed, const SkMatrix44& toXYZD50);
 
     enum Named : uint8_t {
         kSRGB_Named,
@@ -210,14 +205,11 @@ public:
 
     static sk_sp<SkColorSpace> MakeNamed(Named);
 
-    static bool EqualsIgnoreFlags(SkColorSpace* src, SkColorSpace* dst);
-
 protected:
-    SkColorSpace_Base(sk_sp<SkData> profileData, uint32_t flags);
+    SkColorSpace_Base(sk_sp<SkData> profileData);
 
 private:
     sk_sp<SkData> fProfileData;
-    uint32_t fFlags;
 
     friend class SkColorSpace;
     friend class SkColorSpace_XYZ;

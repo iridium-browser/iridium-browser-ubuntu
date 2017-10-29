@@ -58,9 +58,8 @@ void IC::SetTargetAtAddress(Address address, Code* target,
                             Address constant_pool) {
   if (AddressIsDeoptimizedCode(target->GetIsolate(), address)) return;
 
-  // Only these three old-style ICs still do code patching.
-  DCHECK(target->is_binary_op_stub() || target->is_compare_ic_stub() ||
-         target->is_to_boolean_ic_stub());
+  // Only one old-style ICs still does code patching.
+  DCHECK(target->is_compare_ic_stub());
 
   Heap* heap = target->GetHeap();
   Code* old_target = GetTargetAtAddress(address, constant_pool);
@@ -86,43 +85,9 @@ Code* IC::target() const {
 
 bool IC::IsHandler(Object* object) {
   return (object->IsSmi() && (object != nullptr)) || object->IsTuple2() ||
-         object->IsTuple3() || object->IsFixedArray() ||
+         object->IsTuple3() || object->IsFixedArray() || object->IsWeakCell() ||
          (object->IsCode() && Code::cast(object)->is_handler());
 }
-
-Handle<Map> IC::GetHandlerCacheHolder(Handle<Map> receiver_map,
-                                      bool receiver_is_holder, Isolate* isolate,
-                                      CacheHolderFlag* flag) {
-  if (receiver_is_holder) {
-    *flag = kCacheOnReceiver;
-    return receiver_map;
-  }
-  Handle<JSFunction> builtin_ctor;
-  if (Map::GetConstructorFunction(receiver_map, isolate->native_context())
-          .ToHandle(&builtin_ctor)) {
-    *flag = kCacheOnPrototypeReceiverIsPrimitive;
-    return handle(HeapObject::cast(builtin_ctor->instance_prototype())->map());
-  }
-  *flag = receiver_map->is_dictionary_map()
-              ? kCacheOnPrototypeReceiverIsDictionary
-              : kCacheOnPrototype;
-  // Callers must ensure that the prototype is non-null.
-  return handle(JSObject::cast(receiver_map->prototype())->map());
-}
-
-
-Handle<Map> IC::GetICCacheHolder(Handle<Map> map, Isolate* isolate,
-                                 CacheHolderFlag* flag) {
-  Handle<JSFunction> builtin_ctor;
-  if (Map::GetConstructorFunction(map, isolate->native_context())
-          .ToHandle(&builtin_ctor)) {
-    *flag = kCacheOnPrototype;
-    return handle(builtin_ctor->initial_map());
-  }
-  *flag = kCacheOnReceiver;
-  return map;
-}
-
 
 bool IC::AddressIsDeoptimizedCode() const {
   return AddressIsDeoptimizedCode(isolate(), address());

@@ -4,6 +4,7 @@
 
 #include "chrome/utility/shell_handler_impl_win.h"
 
+#include <objbase.h>
 #include <shldisp.h>
 
 #include "base/files/file_enumerator.h"
@@ -11,14 +12,17 @@
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
+#include "base/strings/string16.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_variant.h"
 #include "base/win/shortcut.h"
+#include "base/win/win_util.h"
 #include "chrome/installer/util/install_util.h"
 #include "content/public/utility/utility_thread.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
+#include "ui/base/win/open_file_name_win.h"
 
 namespace {
 
@@ -88,7 +92,8 @@ bool IsPinnedToTaskbarHelper::ShortcutHasUnpinToTaskbarVerb(
 
   base::win::ScopedComPtr<IShellDispatch> shell_dispatch;
   HRESULT hresult =
-      shell_dispatch.CreateInstance(CLSID_Shell, nullptr, CLSCTX_INPROC_SERVER);
+      ::CoCreateInstance(CLSID_Shell, nullptr, CLSCTX_INPROC_SERVER,
+                         IID_PPV_ARGS(&shell_dispatch));
   if (FAILED(hresult) || !shell_dispatch) {
     error_occured_ = true;
     return false;
@@ -97,7 +102,7 @@ bool IsPinnedToTaskbarHelper::ShortcutHasUnpinToTaskbarVerb(
   base::win::ScopedComPtr<Folder> folder;
   hresult = shell_dispatch->NameSpace(
       base::win::ScopedVariant(shortcut.DirName().value().c_str()),
-      folder.Receive());
+      folder.GetAddressOf());
   if (FAILED(hresult) || !folder) {
     error_occured_ = true;
     return false;
@@ -106,14 +111,14 @@ bool IsPinnedToTaskbarHelper::ShortcutHasUnpinToTaskbarVerb(
   base::win::ScopedComPtr<FolderItem> item;
   hresult = folder->ParseName(
       base::win::ScopedBstr(shortcut.BaseName().value().c_str()),
-      item.Receive());
+      item.GetAddressOf());
   if (FAILED(hresult) || !item) {
     error_occured_ = true;
     return false;
   }
 
   base::win::ScopedComPtr<FolderItemVerbs> verbs;
-  hresult = item->Verbs(verbs.Receive());
+  hresult = item->Verbs(verbs.GetAddressOf());
   if (FAILED(hresult) || !verbs) {
     error_occured_ = true;
     return false;
@@ -129,7 +134,8 @@ bool IsPinnedToTaskbarHelper::ShortcutHasUnpinToTaskbarVerb(
   long error_count = 0;
   for (long i = 0; i < verb_count; ++i) {
     base::win::ScopedComPtr<FolderItemVerb> verb;
-    hresult = verbs->Item(base::win::ScopedVariant(i, VT_I4), verb.Receive());
+    hresult =
+        verbs->Item(base::win::ScopedVariant(i, VT_I4), verb.GetAddressOf());
     if (FAILED(hresult) || !verb) {
       error_count++;
       continue;
@@ -214,7 +220,8 @@ ShellHandlerImpl::ShellHandlerImpl() = default;
 ShellHandlerImpl::~ShellHandlerImpl() = default;
 
 // static
-void ShellHandlerImpl::Create(chrome::mojom::ShellHandlerRequest request) {
+void ShellHandlerImpl::Create(
+    chrome::mojom::ShellHandlerRequest request) {
   mojo::MakeStrongBinding(base::MakeUnique<ShellHandlerImpl>(),
                           std::move(request));
 }
@@ -224,4 +231,59 @@ void ShellHandlerImpl::IsPinnedToTaskbar(
   IsPinnedToTaskbarHelper helper;
   bool is_pinned_to_taskbar = helper.GetResult();
   callback.Run(!helper.error_occured(), is_pinned_to_taskbar);
+}
+
+void ShellHandlerImpl::CallGetOpenFileName(
+    uint32_t owner,
+    uint32_t flags,
+    const std::vector<std::tuple<base::string16, base::string16>>& filters,
+    const base::FilePath& initial_directory,
+    const base::FilePath& initial_filename,
+    const CallGetOpenFileNameCallback& callback) {
+  ui::win::OpenFileName open_file_name(
+      reinterpret_cast<HWND>(base::win::Uint32ToHandle(owner)), flags);
+
+  open_file_name.SetInitialSelection(initial_directory, initial_filename);
+  open_file_name.SetFilters(filters);
+
+  base::FilePath directory;
+  std::vector<base::FilePath> files;
+  if (::GetOpenFileName(open_file_name.GetOPENFILENAME()))
+    open_file_name.GetResult(&directory, &files);
+
+  if (!files.empty()) {
+    callback.Run(directory, files);
+  } else {
+    callback.Run(base::FilePath(), std::vector<base::FilePath>());
+  }
+}
+
+void ShellHandlerImpl::CallGetSaveFileName(
+    uint32_t owner,
+    uint32_t flags,
+    const std::vector<std::tuple<base::string16, base::string16>>& filters,
+    uint32_t one_based_filter_index,
+    const base::FilePath& initial_directory,
+    const base::FilePath& suggested_filename,
+    const base::string16& default_extension,
+    const CallGetSaveFileNameCallback& callback) {
+  ui::win::OpenFileName open_file_name(
+      reinterpret_cast<HWND>(base::win::Uint32ToHandle(owner)), flags);
+
+  open_file_name.SetInitialSelection(initial_directory, suggested_filename);
+  open_file_name.SetFilters(filters);
+  open_file_name.GetOPENFILENAME()->nFilterIndex = one_based_filter_index;
+  open_file_name.GetOPENFILENAME()->lpstrDefExt = default_extension.c_str();
+
+  if (::GetSaveFileName(open_file_name.GetOPENFILENAME())) {
+    callback.Run(base::FilePath(open_file_name.GetOPENFILENAME()->lpstrFile),
+                 open_file_name.GetOPENFILENAME()->nFilterIndex);
+    return;
+  }
+
+  // Error code 0 means the dialog was closed, otherwise there was an error.
+  if (DWORD error_code = ::CommDlgExtendedError())
+    NOTREACHED() << "::GetSaveFileName() failed: error code " << error_code;
+
+  callback.Run(base::FilePath(), 0);
 }

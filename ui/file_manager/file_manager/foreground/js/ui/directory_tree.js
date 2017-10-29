@@ -122,7 +122,6 @@ function DirectoryItem(label, tree) {
   item.hasChildren = false;
 
   item.label = label;
-  item.setAttribute('aria-label', label);
 
   return item;
 }
@@ -657,7 +656,7 @@ VolumeItem.prototype.setupIcon_ = function(icon, volumeInfo) {
  * @private
  */
 VolumeItem.prototype.setupEjectButton_ = function(rowElement) {
-  var ejectButton = cr.doc.createElement('div');
+  var ejectButton = cr.doc.createElement('button');
   // Block other mouse handlers.
   ejectButton.addEventListener(
       'mouseup', function(event) { event.stopPropagation() });
@@ -665,6 +664,7 @@ VolumeItem.prototype.setupEjectButton_ = function(rowElement) {
       'mousedown', function(event) { event.stopPropagation() });
   ejectButton.className = 'root-eject';
   ejectButton.setAttribute('aria-label', str('UNMOUNT_DEVICE_BUTTON_LABEL'));
+  ejectButton.setAttribute('tabindex', '0');
   ejectButton.addEventListener('click', function(event) {
     event.stopPropagation();
     var unmountCommand = cr.doc.querySelector('command#unmount');
@@ -740,24 +740,49 @@ DriveVolumeItem.prototype.handleClick = function(e) {
 };
 
 /**
+ * Checks whether the Team Drives grand root should be shown.
+ * @param {function(boolean)} callback to receive the result. The paramter is
+ *     true if the Files app. should show the Team Drives grand root and its
+ *     subtree.
+ * @private
+ */
+DriveVolumeItem.prototype.shouldShowTeamDrives_ = function(callback) {
+  var teamDriveEntry = this.volumeInfo_.teamDriveDisplayRoot;
+  if (!teamDriveEntry) {
+    callback(false);
+  } else {
+    var reader = teamDriveEntry.createReader();
+    reader.readEntries(function(results) {
+      callback(results.length > 0);
+    });
+  }
+};
+
+/**
  * Retrieves the latest subdirectories and update them on the tree.
  * @param {boolean} recursive True if the update is recursively.
  * @override
  */
 DriveVolumeItem.prototype.updateSubDirectories = function(recursive) {
-  // Drive volume has children including fake entries (offline, recent, etc...).
-  if (this.entry && !this.hasChildren) {
+  if (!this.entry || this.hasChildren)
+    return;
+  this.shouldShowTeamDrives_(function(shouldShowTeamDrives) {
     var entries = [this.entry];
+    if (shouldShowTeamDrives)
+      entries.push(this.volumeInfo_.teamDriveDisplayRoot);
+    // Drive volume has children including fake entries (offline, recent, ...)
+    var fakeEntries = [];
     if (this.parentTree_.fakeEntriesVisible_) {
       for (var key in this.volumeInfo_.fakeEntries)
-        entries.push(this.volumeInfo_.fakeEntries[key]);
+        fakeEntries.push(this.volumeInfo_.fakeEntries[key]);
+      // This list is sorted by URL on purpose.
+      fakeEntries.sort(function(a, b) {
+        if (a.toURL() === b.toURL())
+          return 0;
+        return b.toURL() > a.toURL() ? 1 : -1;
+      });
+      entries = entries.concat(fakeEntries);
     }
-    // This list is sorted by URL on purpose.
-    entries.sort(function(a, b) {
-      if (a.toURL() === b.toURL())
-        return 0;
-      return b.toURL() > a.toURL() ? 1 : -1;
-    });
 
     for (var i = 0; i < entries.length; i++) {
       var item = new SubDirectoryItem(
@@ -769,7 +794,7 @@ DriveVolumeItem.prototype.updateSubDirectories = function(recursive) {
       item.updateSubDirectories(false);
     }
     this.expanded = true;
-  }
+  }.bind(this));
 };
 
 /**
@@ -781,7 +806,10 @@ DriveVolumeItem.prototype.updateSubDirectories = function(recursive) {
  * @override
  */
 DriveVolumeItem.prototype.updateItemByEntry = function(changedDirectoryEntry) {
-  this.items[0].updateItemByEntry(changedDirectoryEntry);
+  // The first item is My Drive, and the second item is Team Drives.
+  // Keep in sync with |fixedEntries| in |updateSubDirectories|.
+  var index = util.isTeamDriveEntry(changedDirectoryEntry) ? 1 : 0;
+  this.items[index].updateItemByEntry(changedDirectoryEntry);
 };
 
 /**
@@ -988,12 +1016,82 @@ MenuItem.prototype.selectByEntry = function(entry) {
  */
 MenuItem.prototype.activate = function() {
   // Dispatch an event to update the menu (if updatable).
-  var updateEvent = new Event('update');
+  var updateEvent = /** @type {MenuItemUpdateEvent} */ (new Event('update'));
   updateEvent.menuButton = this.menuButton_;
   this.menuButton_.menu.dispatchEvent(updateEvent);
 
   this.menuButton_.showMenu();
 };
+
+////////////////////////////////////////////////////////////////////////////////
+// RecentItem
+
+/**
+ * @param {!NavigationModelRecentItem} modelItem
+ * @param {!DirectoryTree} tree Current tree, which contains this item.
+ * @extends {cr.ui.TreeItem}
+ * @constructor
+ */
+function RecentItem(modelItem, tree) {
+  var item = new cr.ui.TreeItem();
+  item.__proto__ = RecentItem.prototype;
+
+  item.parentTree_ = tree;
+  item.modelItem_ = modelItem;
+  item.dirEntry_ = modelItem.entry;
+  item.innerHTML = TREE_ITEM_INNER_HTML;
+  item.label = modelItem.label;
+
+  var icon = queryRequiredElement('.icon', item);
+  icon.classList.add('item-icon');
+  icon.setAttribute('root-type-icon', 'recent');
+
+  return item;
+}
+
+RecentItem.prototype = {
+  __proto__: cr.ui.TreeItem.prototype,
+  get entry() {
+    return this.dirEntry_;
+  },
+  get modelItem() {
+    return this.modelItem_;
+  },
+  get labelElement() {
+    return this.firstElementChild.querySelector('.label');
+  }
+};
+
+/**
+ * @param {!DirectoryEntry|!FakeEntry} entry
+ * @return {boolean} True if the parent item is found.
+ */
+RecentItem.prototype.searchAndSelectByEntry = function(entry) {
+  return false;
+};
+
+/**
+ * @override
+ */
+RecentItem.prototype.handleClick = function(e) {
+  this.activate();
+};
+
+/**
+ * @param {!DirectoryEntry} entry
+ */
+RecentItem.prototype.selectByEntry = function(entry) {
+  if (util.isSameEntry(entry, this.entry))
+    this.selected = true;
+};
+
+/**
+ * Executes the command.
+ */
+RecentItem.prototype.activate = function() {
+  this.parentTree_.directoryModel.activateDirectoryEntry(this.entry);
+};
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // DirectoryTree
@@ -1180,6 +1278,9 @@ DirectoryTree.prototype.updateSubElementsFromList = function(recursive) {
         case NavigationModelItemType.MENU:
           this.addAt(new MenuItem(modelItem, this), itemIndex);
           break;
+        case NavigationModelItemType.RECENT:
+          this.addAt(new RecentItem(modelItem, this), itemIndex);
+          break;
       }
     }
     itemIndex++;
@@ -1253,9 +1354,6 @@ DirectoryTree.prototype.decorateDirectoryTree = function(
       this.onDirectoryContentChanged_.bind(this);
   chrome.fileManagerPrivate.onDirectoryChanged.addListener(
       this.privateOnDirectoryChangedBound_);
-
-  this.scrollBar_ = new ScrollBar();
-  this.scrollBar_.initialize(this.parentElement, this);
 
   /**
    * Flag to show fake entries in the tree.
@@ -1371,14 +1469,14 @@ DirectoryTree.prototype.onFilterChanged_ = function() {
 
 /**
  * Invoked when a directory is changed.
- * @param {!Event} event Event.
+ * @param {!FileWatchEvent} event Event.
  * @private
  */
 DirectoryTree.prototype.onDirectoryContentChanged_ = function(event) {
   if (event.eventType !== 'changed' || !event.entry)
     return;
 
-  this.updateTreeByEntry_(event.entry);
+  this.updateTreeByEntry_(/** @type{!Entry} */ (event.entry));
 };
 
 /**

@@ -10,7 +10,23 @@ SDK.HeapProfilerModel = class extends SDK.SDKModel {
     target.registerHeapProfilerDispatcher(new SDK.HeapProfilerDispatcher(this));
     this._enabled = false;
     this._heapProfilerAgent = target.heapProfilerAgent();
+    this._runtimeModel = /** @type {!SDK.RuntimeModel} */ (target.model(SDK.RuntimeModel));
   }
+
+  /**
+   * @return {!SDK.DebuggerModel}
+   */
+  debuggerModel() {
+    return this._runtimeModel.debuggerModel();
+  }
+
+  /**
+   * @return {!SDK.RuntimeModel}
+   */
+  runtimeModel() {
+    return this._runtimeModel;
+  }
+
   enable() {
     if (this._enabled)
       return;
@@ -25,11 +41,11 @@ SDK.HeapProfilerModel = class extends SDK.SDKModel {
   }
 
   /**
-   * @return {!Promise.<?Protocol.HeapProfiler.SamplingHeapProfile>}
+   * @return {!Promise<?Protocol.HeapProfiler.SamplingHeapProfile>}
    */
   stopSampling() {
     this._isRecording = false;
-    return this._heapProfilerAgent.stopSampling((error, profile) => error ? null : profile);
+    return this._heapProfilerAgent.stopSampling();
   }
 
   /**
@@ -44,7 +60,7 @@ SDK.HeapProfilerModel = class extends SDK.SDKModel {
    * @return {!Promise<?string>}
    */
   snapshotObjectIdForObjectId(objectId) {
-    return this._heapProfilerAgent.getHeapObjectId(objectId, (error, result) => error ? null : result);
+    return this._heapProfilerAgent.getHeapObjectId(objectId);
   }
 
   /**
@@ -53,11 +69,8 @@ SDK.HeapProfilerModel = class extends SDK.SDKModel {
    * @return {!Promise<?SDK.RemoteObject>}
    */
   objectForSnapshotObjectId(snapshotObjectId, objectGroupName) {
-    return this._heapProfilerAgent.getObjectByHeapObjectId(snapshotObjectId, objectGroupName, (error, result) => {
-      if (error || !result.type)
-        return null;
-      return this.target().runtimeModel.createRemoteObject(result);
-    });
+    return this._heapProfilerAgent.getObjectByHeapObjectId(snapshotObjectId, objectGroupName)
+        .then(result => result && result.type ? this._runtimeModel.createRemoteObject(result) : null);
   }
 
   /**
@@ -70,10 +83,10 @@ SDK.HeapProfilerModel = class extends SDK.SDKModel {
 
   /**
    * @param {boolean} reportProgress
-   * @return {!Promise<boolean>}
+   * @return {!Promise}
    */
   takeHeapSnapshot(reportProgress) {
-    return this._heapProfilerAgent.takeHeapSnapshot(reportProgress, error => !error);
+    return this._heapProfilerAgent.takeHeapSnapshot(reportProgress);
   }
 
   /**
@@ -86,14 +99,14 @@ SDK.HeapProfilerModel = class extends SDK.SDKModel {
 
   /**
    * @param {boolean} reportProgress
-   * @return {!Promise<boolean>}
+   * @return {!Promise}
    */
   stopTrackingHeapObjects(reportProgress) {
-    return this._heapProfilerAgent.stopTrackingHeapObjects(reportProgress, error => !error);
+    return this._heapProfilerAgent.stopTrackingHeapObjects(reportProgress);
   }
 
   /**
-   * @param {!Array.<number>} samples
+   * @param {!Array<number>} samples
    */
   heapStatsUpdate(samples) {
     this.dispatchEventToListeners(SDK.HeapProfilerModel.Events.HeapStatsUpdate, samples);
@@ -130,7 +143,7 @@ SDK.HeapProfilerModel = class extends SDK.SDKModel {
   }
 };
 
-SDK.SDKModel.register(SDK.HeapProfilerModel, SDK.Target.Capability.JS);
+SDK.SDKModel.register(SDK.HeapProfilerModel, SDK.Target.Capability.JS, false);
 
 /** @enum {symbol} */
 SDK.HeapProfilerModel.Events = {

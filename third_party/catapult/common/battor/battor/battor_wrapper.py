@@ -27,7 +27,20 @@ from serial.tools import list_ports
 DEFAULT_SHELL_CLOSE_TIMEOUT_S = 60
 
 
-def IsBattOrConnected(test_platform, android_device=None,
+def IsBattOrConnected(*args, **kwargs):
+  """Returns True if BattOr is detected.
+
+  See _IsBattOrConnected below for arguments.
+  """
+  is_connected = _IsBattOrConnected(*args, **kwargs)
+  if is_connected:
+    logging.info('BattOr power monitor is connected.')
+  else:
+    logging.info('BattOr power monitor is not connected.')
+  return is_connected
+
+
+def _IsBattOrConnected(test_platform, android_device=None,
                       android_device_map=None, android_device_file=None):
   """Returns True if BattOr is detected."""
   if test_platform == 'android':
@@ -37,6 +50,9 @@ def IsBattOrConnected(test_platform, android_device=None,
 
     if not android_device_map:
       device_tree = find_usb_devices.GetBusNumberToDeviceTreeMap()
+      if device_tree:
+        for _, node in sorted(device_tree.iteritems()):
+          node.Display()
       if len(battor_device_mapping.GetBattOrList(device_tree)) == 1:
         return True
       if android_device_file:
@@ -46,6 +62,7 @@ def IsBattOrConnected(test_platform, android_device=None,
         try:
           android_device_map = battor_device_mapping.GenerateSerialMap()
         except battor_error.BattOrError:
+          logging.exception('Error generating serial map')
           return False
 
     # If neither if statement above is triggered, it means that an
@@ -83,7 +100,6 @@ class BattOrWrapper(object):
   _RECORD_CLOCKSYNC_CMD = 'RecordClockSyncMarker'
   _SUPPORTED_PLATFORMS = ['android', 'chromeos', 'linux', 'mac', 'win']
 
-  _SUPPORTED_AUTOFLASHING_PLATFORMS = ['linux', 'mac', 'win']
   _BATTOR_PARTNO = 'x192a3u'
   _BATTOR_PROGRAMMER = 'avr109'
   _BATTOR_BAUDRATE = '115200'
@@ -157,10 +173,17 @@ class BattOrWrapper(object):
     except ValueError:
       logging.exception('Git hash returned from BattOr was not as expected: %s'
                         % self._git_hash)
-      self._UploadSerialLogToCloudStorage()
-      self._serial_log_file = None
+      self.StopShell()
+
     finally:
       if not self._battor_shell:
+        # TODO(charliea): Once we understand why BattOrs are crashing, remove
+        # this log.
+        # http://crbug.com/699581
+        logging.info('_FlashBattOr serial log:')
+        self._UploadSerialLogToCloudStorage()
+        self._serial_log_file = None
+
         self.StartShell()
 
   def KillBattOrShell(self):
@@ -235,9 +258,13 @@ class BattOrWrapper(object):
     # The BattOr shell terminates after returning the results.
     if timeout is None:
       timeout = self._stop_tracing_time - self._start_tracing_time
+    py_utils.WaitFor(lambda: self.GetShellReturnCode() != None, timeout)
 
-    if self.GetShellReturnCode() == 1:
-      self._UploadSerialLogToCloudStorage()
+    # TODO(charliea): Once we understand why BattOrs are crashing, only do
+    # this on failure.
+    # http://crbug.com/699581
+    logging.info('CollectTraceData serial log:')
+    self._UploadSerialLogToCloudStorage()
 
     with open(self._trace_results_path) as results:
       self._trace_results = results.read()
@@ -278,7 +305,6 @@ class BattOrWrapper(object):
           return port
 
     if target_platform in ['android', 'linux']:
-      device_tree = find_usb_devices.GetBusNumberToDeviceTreeMap(fast=True)
       if battor_path:
         if not isinstance(battor_path, basestring):
           raise battor_error.BattOrError(
@@ -298,6 +324,7 @@ class BattOrWrapper(object):
             serial_map=battor_map)
 
       # Not Android and no explicitly passed BattOr.
+      device_tree = find_usb_devices.GetBusNumberToDeviceTreeMap(fast=True)
       battors = battor_device_mapping.GetBattOrList(device_tree)
       if len(battors) != 1:
         raise battor_error.BattOrError(
@@ -370,9 +397,6 @@ class BattOrWrapper(object):
        firmware at hex_path.
     """
     assert not self._battor_shell, 'Cannot flash BattOr with open shell'
-    if self._target_platform not in self._SUPPORTED_AUTOFLASHING_PLATFORMS:
-      logging.critical('Flashing firmware on this platform is not supported.')
-      return False
 
     avrdude_binary = self._dm.FetchPath(
         'avrdude_binary', '%s_%s' % (sys.platform, platform.machine()))

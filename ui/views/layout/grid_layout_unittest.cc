@@ -5,7 +5,10 @@
 #include "ui/views/layout/grid_layout.h"
 
 #include "base/compiler_specific.h"
+#include "base/test/gtest_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/views/border.h"
+#include "ui/views/test/platform_test_helper.h"
 #include "ui/views/view.h"
 
 namespace views {
@@ -18,16 +21,40 @@ void ExpectViewBoundsEquals(int x, int y, int w, int h,
   EXPECT_EQ(h, view->height());
 }
 
-class SettableSizeView : public View {
+View* CreateSizedView(const gfx::Size& size) {
+  auto* view = new View();
+  view->SetPreferredSize(size);
+  return view;
+}
+
+// A test view that wants to alter its preferred size and re-layout when it gets
+// added to the View hierarchy.
+class LayoutOnAddView : public View {
  public:
-  explicit SettableSizeView(const gfx::Size& pref) {
-    pref_ = pref;
+  LayoutOnAddView() { SetPreferredSize(gfx::Size(10, 10)); }
+
+  void set_target_size(const gfx::Size& target_size) {
+    target_size_ = target_size;
   }
 
-  gfx::Size GetPreferredSize() const override { return pref_; }
+  // View:
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override {
+    if (GetPreferredSize() == target_size_)
+      return;
+
+    // Contrive a realistic thing that a View might what to do, but which would
+    // break the layout machinery. Note an override of OnNativeThemeChanged()
+    // would be more compelling, but there is no Widget in this test harness.
+    SetPreferredSize(target_size_);
+    PreferredSizeChanged();
+    parent()->Layout();
+  }
 
  private:
-   gfx::Size pref_;
+  gfx::Size target_size_;
+
+  DISALLOW_COPY_AND_ASSIGN(LayoutOnAddView);
 };
 
 // A view with fixed circumference that trades height for width.
@@ -37,7 +64,7 @@ class FlexibleView : public View {
     circumference_ = circumference;
   }
 
-  gfx::Size GetPreferredSize() const override {
+  gfx::Size CalculatePreferredSize() const override {
     return gfx::Size(0, circumference_ / 2);
   }
 
@@ -70,9 +97,9 @@ class GridLayoutTest : public testing::Test {
 
 class GridLayoutAlignmentTest : public testing::Test {
  public:
-   GridLayoutAlignmentTest()
-       : v1(gfx::Size(10, 20)),
-         layout(&host) {}
+  GridLayoutAlignmentTest() : layout(&host) {
+    v1.SetPreferredSize(gfx::Size(10, 20));
+  }
 
   void RemoveAll() {
     for (int i = host.child_count() - 1; i >= 0; i--)
@@ -93,7 +120,7 @@ class GridLayoutAlignmentTest : public testing::Test {
   }
 
   View host;
-  SettableSizeView v1;
+  View v1;
   GridLayout layout;
 };
 
@@ -122,8 +149,10 @@ TEST_F(GridLayoutAlignmentTest, Trailing) {
 }
 
 TEST_F(GridLayoutTest, TwoColumns) {
-  SettableSizeView v1(gfx::Size(10, 20));
-  SettableSizeView v2(gfx::Size(20, 20));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(10, 20));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(20, 20));
   ColumnSet* c1 = layout.AddColumnSet(0);
   c1->AddColumn(GridLayout::LEADING, GridLayout::LEADING,
                 0, GridLayout::USE_PREF, 0, 0);
@@ -144,9 +173,83 @@ TEST_F(GridLayoutTest, TwoColumns) {
   RemoveAll();
 }
 
+// Test linked column sizes, and the column size limit.
+TEST_F(GridLayoutTest, LinkedSizes) {
+  View v1;
+  v1.SetPreferredSize(gfx::Size(10, 20));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(20, 20));
+  View v3;
+  v3.SetPreferredSize(gfx::Size(0, 20));
+  ColumnSet* c1 = layout.AddColumnSet(0);
+
+  // Fill widths.
+  c1->AddColumn(GridLayout::FILL, GridLayout::LEADING, 0, GridLayout::USE_PREF,
+                0, 0);
+  c1->AddColumn(GridLayout::FILL, GridLayout::LEADING, 0, GridLayout::USE_PREF,
+                0, 0);
+  c1->AddColumn(GridLayout::FILL, GridLayout::LEADING, 0, GridLayout::USE_PREF,
+                0, 0);
+
+  layout.StartRow(0, 0);
+  layout.AddView(&v1);
+  layout.AddView(&v2);
+  layout.AddView(&v3);
+
+  // Link all the columns.
+  c1->LinkColumnSizes(0, 1, 2, -1);
+  GetPreferredSize();
+
+  // |v1| and |v3| should obtain the same width as |v2|, since |v2| is largest.
+  EXPECT_EQ(gfx::Size(20 + 20 + 20, 20), pref);
+  host.SetBounds(0, 0, pref.width(), pref.height());
+  layout.Layout(&host);
+  ExpectViewBoundsEquals(0, 0, 20, 20, &v1);
+  ExpectViewBoundsEquals(20, 0, 20, 20, &v2);
+  ExpectViewBoundsEquals(40, 0, 20, 20, &v3);
+
+  // If the limit is zero, behaves as though the columns are not linked.
+  c1->set_linked_column_size_limit(0);
+  GetPreferredSize();
+  EXPECT_EQ(gfx::Size(10 + 20 + 0, 20), pref);
+  host.SetBounds(0, 0, pref.width(), pref.height());
+  layout.Layout(&host);
+  ExpectViewBoundsEquals(0, 0, 10, 20, &v1);
+  ExpectViewBoundsEquals(10, 0, 20, 20, &v2);
+  ExpectViewBoundsEquals(30, 0, 0, 20, &v3);
+
+  // Set a size limit.
+  c1->set_linked_column_size_limit(40);
+  v1.SetPreferredSize(gfx::Size(35, 20));
+  GetPreferredSize();
+
+  // |v1| now dominates, but it is still below the limit.
+  EXPECT_EQ(gfx::Size(35 + 35 + 35, 20), pref);
+  host.SetBounds(0, 0, pref.width(), pref.height());
+  layout.Layout(&host);
+  ExpectViewBoundsEquals(0, 0, 35, 20, &v1);
+  ExpectViewBoundsEquals(35, 0, 35, 20, &v2);
+  ExpectViewBoundsEquals(70, 0, 35, 20, &v3);
+
+  // Go over the limit. |v1| shouldn't influence size at all, but the others
+  // should still be linked to the next largest width.
+  v1.SetPreferredSize(gfx::Size(45, 20));
+  GetPreferredSize();
+  EXPECT_EQ(gfx::Size(45 + 20 + 20, 20), pref);
+  host.SetBounds(0, 0, pref.width(), pref.height());
+  layout.Layout(&host);
+  ExpectViewBoundsEquals(0, 0, 45, 20, &v1);
+  ExpectViewBoundsEquals(45, 0, 20, 20, &v2);
+  ExpectViewBoundsEquals(65, 0, 20, 20, &v3);
+
+  RemoveAll();
+}
+
 TEST_F(GridLayoutTest, ColSpan1) {
-  SettableSizeView v1(gfx::Size(100, 20));
-  SettableSizeView v2(gfx::Size(10, 40));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(100, 20));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(10, 40));
   ColumnSet* c1 = layout.AddColumnSet(0);
   c1->AddColumn(GridLayout::LEADING, GridLayout::LEADING,
                 0, GridLayout::USE_PREF, 0, 0);
@@ -169,8 +272,10 @@ TEST_F(GridLayoutTest, ColSpan1) {
 }
 
 TEST_F(GridLayoutTest, ColSpan2) {
-  SettableSizeView v1(gfx::Size(100, 20));
-  SettableSizeView v2(gfx::Size(10, 20));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(100, 20));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(10, 20));
   ColumnSet* c1 = layout.AddColumnSet(0);
   c1->AddColumn(GridLayout::LEADING, GridLayout::LEADING,
                 1, GridLayout::USE_PREF, 0, 0);
@@ -194,9 +299,12 @@ TEST_F(GridLayoutTest, ColSpan2) {
 }
 
 TEST_F(GridLayoutTest, ColSpan3) {
-  SettableSizeView v1(gfx::Size(100, 20));
-  SettableSizeView v2(gfx::Size(10, 20));
-  SettableSizeView v3(gfx::Size(10, 20));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(100, 20));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(10, 20));
+  View v3;
+  v3.SetPreferredSize(gfx::Size(10, 20));
   ColumnSet* c1 = layout.AddColumnSet(0);
   c1->AddColumn(GridLayout::LEADING, GridLayout::LEADING,
                 0, GridLayout::USE_PREF, 0, 0);
@@ -229,9 +337,12 @@ TEST_F(GridLayoutTest, ColSpan4) {
   set->AddColumn(GridLayout::LEADING, GridLayout::LEADING, 0,
                  GridLayout::USE_PREF, 0, 0);
 
-  SettableSizeView v1(gfx::Size(10, 10));
-  SettableSizeView v2(gfx::Size(10, 10));
-  SettableSizeView v3(gfx::Size(25, 20));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(10, 10));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(10, 10));
+  View v3;
+  v3.SetPreferredSize(gfx::Size(25, 20));
   layout.StartRow(0, 0);
   layout.AddView(&v1);
   layout.AddView(&v2);
@@ -262,8 +373,10 @@ TEST_F(GridLayoutTest, ColSpanStartSecondColumn) {
   set->AddColumn(GridLayout::FILL, GridLayout::FILL, 0,
                  GridLayout::FIXED, 10, 0);
 
-  SettableSizeView v1(gfx::Size(10, 10));
-  SettableSizeView v2(gfx::Size(20, 10));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(10, 10));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(20, 10));
 
   layout.StartRow(0, 0);
   layout.AddView(&v1);
@@ -281,8 +394,10 @@ TEST_F(GridLayoutTest, ColSpanStartSecondColumn) {
 }
 
 TEST_F(GridLayoutTest, SameSizeColumns) {
-  SettableSizeView v1(gfx::Size(50, 20));
-  SettableSizeView v2(gfx::Size(10, 10));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(50, 20));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(10, 10));
   ColumnSet* c1 = layout.AddColumnSet(0);
   c1->AddColumn(GridLayout::LEADING, GridLayout::LEADING,
                 0, GridLayout::USE_PREF, 0, 0);
@@ -305,8 +420,10 @@ TEST_F(GridLayoutTest, SameSizeColumns) {
 }
 
 TEST_F(GridLayoutTest, HorizontalResizeTest1) {
-  SettableSizeView v1(gfx::Size(50, 20));
-  SettableSizeView v2(gfx::Size(10, 10));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(50, 20));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(10, 10));
   ColumnSet* c1 = layout.AddColumnSet(0);
   c1->AddColumn(GridLayout::FILL, GridLayout::LEADING,
                 1, GridLayout::USE_PREF, 0, 0);
@@ -325,8 +442,10 @@ TEST_F(GridLayoutTest, HorizontalResizeTest1) {
 }
 
 TEST_F(GridLayoutTest, HorizontalResizeTest2) {
-  SettableSizeView v1(gfx::Size(50, 20));
-  SettableSizeView v2(gfx::Size(10, 10));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(50, 20));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(10, 10));
   ColumnSet* c1 = layout.AddColumnSet(0);
   c1->AddColumn(GridLayout::FILL, GridLayout::LEADING,
                 1, GridLayout::USE_PREF, 0, 0);
@@ -347,9 +466,12 @@ TEST_F(GridLayoutTest, HorizontalResizeTest2) {
 // Tests that space leftover due to rounding is distributed to the last
 // resizable column.
 TEST_F(GridLayoutTest, HorizontalResizeTest3) {
-  SettableSizeView v1(gfx::Size(10, 10));
-  SettableSizeView v2(gfx::Size(10, 10));
-  SettableSizeView v3(gfx::Size(10, 10));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(10, 10));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(10, 10));
+  View v3;
+  v3.SetPreferredSize(gfx::Size(10, 10));
   ColumnSet* c1 = layout.AddColumnSet(0);
   c1->AddColumn(GridLayout::FILL, GridLayout::LEADING,
                 1, GridLayout::USE_PREF, 0, 0);
@@ -372,8 +494,10 @@ TEST_F(GridLayoutTest, HorizontalResizeTest3) {
 }
 
 TEST_F(GridLayoutTest, TestVerticalResize1) {
-  SettableSizeView v1(gfx::Size(50, 20));
-  SettableSizeView v2(gfx::Size(10, 10));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(50, 20));
+  View v2;
+  v2.SetPreferredSize(gfx::Size(10, 10));
   ColumnSet* c1 = layout.AddColumnSet(0);
   c1->AddColumn(GridLayout::FILL, GridLayout::FILL,
                 1, GridLayout::USE_PREF, 0, 0);
@@ -393,10 +517,11 @@ TEST_F(GridLayoutTest, TestVerticalResize1) {
   RemoveAll();
 }
 
-TEST_F(GridLayoutTest, Insets) {
-  SettableSizeView v1(gfx::Size(10, 20));
+TEST_F(GridLayoutTest, Border) {
+  host.SetBorder(CreateEmptyBorder(1, 2, 3, 4));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(10, 20));
   ColumnSet* c1 = layout.AddColumnSet(0);
-  layout.SetInsets(1, 2, 3, 4);
   c1->AddColumn(GridLayout::LEADING, GridLayout::LEADING,
                 0, GridLayout::USE_PREF, 0, 0);
   layout.StartRow(0, 0);
@@ -413,7 +538,7 @@ TEST_F(GridLayoutTest, Insets) {
 }
 
 TEST_F(GridLayoutTest, FixedSize) {
-  layout.SetInsets(2, 2, 2, 2);
+  host.SetBorder(CreateEmptyBorder(2, 2, 2, 2));
 
   ColumnSet* set = layout.AddColumnSet(0);
 
@@ -435,7 +560,7 @@ TEST_F(GridLayoutTest, FixedSize) {
   for (int row = 0; row < row_count; ++row) {
     layout.StartRow(0, 0);
     for (int col = 0; col < column_count; ++col) {
-      layout.AddView(new SettableSizeView(gfx::Size(pref_width, pref_height)));
+      layout.AddView(CreateSizedView(gfx::Size(pref_width, pref_height)));
     }
   }
 
@@ -468,7 +593,7 @@ TEST_F(GridLayoutTest, RowSpanWithPaddingRow) {
                  10);
 
   layout.StartRow(0, 0);
-  layout.AddView(new SettableSizeView(gfx::Size(10, 10)), 1, 2);
+  layout.AddView(CreateSizedView(gfx::Size(10, 10)), 1, 2);
   layout.AddPaddingRow(0, 10);
 }
 
@@ -489,10 +614,10 @@ TEST_F(GridLayoutTest, RowSpan) {
                  0);
 
   layout.StartRow(0, 0);
-  layout.AddView(new SettableSizeView(gfx::Size(20, 10)));
-  layout.AddView(new SettableSizeView(gfx::Size(20, 40)), 1, 2);
+  layout.AddView(CreateSizedView(gfx::Size(20, 10)));
+  layout.AddView(CreateSizedView(gfx::Size(20, 40)), 1, 2);
   layout.StartRow(1, 0);
-  View* s3 = new SettableSizeView(gfx::Size(20, 10));
+  View* s3 = CreateSizedView(gfx::Size(20, 10));
   layout.AddView(s3);
 
   GetPreferredSize();
@@ -512,14 +637,14 @@ TEST_F(GridLayoutTest, RowSpan2) {
                  0,GridLayout::USE_PREF, 0, 0);
 
   layout.StartRow(0, 0);
-  layout.AddView(new SettableSizeView(gfx::Size(20, 20)));
-  View* s3 = new SettableSizeView(gfx::Size(64, 64));
+  layout.AddView(CreateSizedView(gfx::Size(20, 20)));
+  View* s3 = CreateSizedView(gfx::Size(64, 64));
   layout.AddView(s3, 1, 3);
 
   layout.AddPaddingRow(0, 10);
 
   layout.StartRow(0, 0);
-  layout.AddView(new SettableSizeView(gfx::Size(10, 20)));
+  layout.AddView(CreateSizedView(gfx::Size(10, 20)));
 
   GetPreferredSize();
   EXPECT_EQ(gfx::Size(84, 64), pref);
@@ -538,7 +663,7 @@ TEST_F(GridLayoutTest, FixedViewWidth) {
                  0,GridLayout::USE_PREF, 0, 0);
 
   layout.StartRow(0, 0);
-  View* view = new SettableSizeView(gfx::Size(30, 40));
+  View* view = CreateSizedView(gfx::Size(30, 40));
   layout.AddView(view, 1, 1, GridLayout::LEADING, GridLayout::LEADING, 10, 0);
 
   GetPreferredSize();
@@ -559,7 +684,7 @@ TEST_F(GridLayoutTest, FixedViewHeight) {
                  0,GridLayout::USE_PREF, 0, 0);
 
   layout.StartRow(0, 0);
-  View* view = new SettableSizeView(gfx::Size(30, 40));
+  View* view = CreateSizedView(gfx::Size(30, 40));
   layout.AddView(view, 1, 1, GridLayout::LEADING, GridLayout::LEADING, 0, 10);
 
   GetPreferredSize();
@@ -583,12 +708,12 @@ TEST_F(GridLayoutTest, ColumnSpanResizing) {
 
   layout.StartRow(0, 0);
   // span_view spans two columns and is twice as big the views added below.
-  View* span_view = new SettableSizeView(gfx::Size(12, 40));
+  View* span_view = CreateSizedView(gfx::Size(12, 40));
   layout.AddView(span_view, 2, 1, GridLayout::LEADING, GridLayout::LEADING);
 
   layout.StartRow(0, 0);
-  View* view1 = new SettableSizeView(gfx::Size(2, 40));
-  View* view2 = new SettableSizeView(gfx::Size(4, 40));
+  View* view1 = CreateSizedView(gfx::Size(2, 40));
+  View* view2 = CreateSizedView(gfx::Size(4, 40));
   layout.AddView(view1);
   layout.AddView(view2);
 
@@ -631,7 +756,7 @@ TEST_F(GridLayoutTest, ColumnResizingOnGetPreferredSize) {
   // The second row contains a view of fixed size that will enforce a column
   // width of 20 pixels.
   layout.StartRow(0, 1);
-  View* view2 = new SettableSizeView(gfx::Size(20, 20));
+  View* view2 = CreateSizedView(gfx::Size(20, 20));
   layout.AddView(view2, 1, 1, GridLayout::FILL, GridLayout::LEADING);
 
   // Add another flexible view in row three in order to ensure column set
@@ -647,7 +772,8 @@ TEST_F(GridLayoutTest, ColumnResizingOnGetPreferredSize) {
 }
 
 TEST_F(GridLayoutTest, MinimumPreferredSize) {
-  SettableSizeView v1(gfx::Size(10, 20));
+  View v1;
+  v1.SetPreferredSize(gfx::Size(10, 20));
   ColumnSet* set = layout.AddColumnSet(0);
   set->AddColumn(GridLayout::FILL, GridLayout::FILL,
                  0, GridLayout::USE_PREF, 0, 0);
@@ -660,6 +786,38 @@ TEST_F(GridLayoutTest, MinimumPreferredSize) {
   layout.set_minimum_size(gfx::Size(40, 40));
   GetPreferredSize();
   EXPECT_EQ(gfx::Size(40, 40), pref);
+
+  RemoveAll();
+}
+
+// Test that attempting a Layout() while nested in AddView() causes a DCHECK.
+// GridLayout must guard against this as it hasn't yet updated the internal
+// structures it uses to calculate Layout, so will give bogus results.
+TEST_F(GridLayoutTest, LayoutOnAddDeath) {
+  // gtest death tests, such as EXPECT_DCHECK_DEATH(), can not work in the
+  // presence of fork() and other process launching. In views-mus, we have
+  // already launched additional processes for our service manager. Performing
+  // this test under mus is impossible.
+  if (PlatformTestHelper::IsMus())
+    return;
+
+  // Don't use the |layout| data member from the test harness, otherwise
+  // SetLayoutManager() can take not take ownership.
+  GridLayout* grid_layout = new GridLayout(&host);
+  host.SetLayoutManager(grid_layout);
+  ColumnSet* set = grid_layout->AddColumnSet(0);
+  set->AddColumn(GridLayout::FILL, GridLayout::FILL, 0, GridLayout::USE_PREF, 0,
+                 0);
+  grid_layout->StartRow(0, 0);
+  LayoutOnAddView view;
+  EXPECT_DCHECK_DEATH(grid_layout->AddView(&view));
+  // Death tests use fork(), so nothing should be added here.
+  EXPECT_FALSE(view.parent());
+
+  // If the View has nothing to change, adding should succeed.
+  view.set_target_size(view.GetPreferredSize());
+  grid_layout->AddView(&view);
+  EXPECT_TRUE(view.parent());
 
   RemoveAll();
 }

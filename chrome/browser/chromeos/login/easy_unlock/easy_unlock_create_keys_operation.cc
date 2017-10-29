@@ -291,17 +291,10 @@ void EasyUnlockCreateKeysOperation::CreateKeyForDeviceAtIndex(size_t index) {
     return;
   }
 
-  std::string raw_session_key;
-  session_key->GetRawKey(&raw_session_key);
-
   challenge_creator_.reset(new ChallengeCreator(
-      user_key,
-      raw_session_key,
-      tpm_public_key_,
-      device,
+      user_key, session_key->key(), tpm_public_key_, device,
       base::Bind(&EasyUnlockCreateKeysOperation::OnChallengeCreated,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 index)));
+                 weak_ptr_factory_.GetWeakPtr(), index)));
   challenge_creator_->Start();
 }
 
@@ -353,6 +346,9 @@ void EasyUnlockCreateKeysOperation::OnGetSystemSalt(
       kEasyUnlockKeyMetaNameChallenge, device->challenge));
   key_def.provider_data.push_back(cryptohome::KeyDefinition::ProviderData(
       kEasyUnlockKeyMetaNameWrappedSecret, device->wrapped_secret));
+  key_def.provider_data.push_back(cryptohome::KeyDefinition::ProviderData(
+      kEasyUnlockKeyMetaNameSerializedBeaconSeeds,
+      device->serialized_beacon_seeds));
 
   // Add cryptohome key.
   const cryptohome::Identification id(user_context_.GetAccountId());

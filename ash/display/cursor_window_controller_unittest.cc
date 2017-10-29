@@ -19,18 +19,20 @@
 
 namespace ash {
 
-class CursorWindowControllerTest : public test::AshTestBase {
+class CursorWindowControllerTest : public AshTestBase {
  public:
   CursorWindowControllerTest() {}
   ~CursorWindowControllerTest() override {}
 
-  // test::AshTestBase:
+  // AshTestBase:
   void SetUp() override {
     AshTestBase::SetUp();
     SetCursorCompositionEnabled(true);
   }
 
-  int GetCursorType() const { return cursor_window_controller_->cursor_type_; }
+  ui::CursorType GetCursorType() const {
+    return cursor_window_controller_->cursor_type_;
+  }
 
   const gfx::Point& GetCursorHotPoint() const {
     return cursor_window_controller_->hot_point_;
@@ -49,9 +51,8 @@ class CursorWindowControllerTest : public test::AshTestBase {
   }
 
   void SetCursorCompositionEnabled(bool enabled) {
-    cursor_window_controller_ = Shell::GetInstance()
-                                    ->window_tree_host_manager()
-                                    ->cursor_window_controller();
+    cursor_window_controller_ =
+        Shell::Get()->window_tree_host_manager()->cursor_window_controller();
     cursor_window_controller_->SetCursorCompositingEnabled(enabled);
   }
 
@@ -68,7 +69,7 @@ TEST_F(CursorWindowControllerTest, MoveToDifferentDisplay) {
   UpdateDisplay("200x200,200x200*2/r");
 
   WindowTreeHostManager* window_tree_host_manager =
-      Shell::GetInstance()->window_tree_host_manager();
+      Shell::Get()->window_tree_host_manager();
   int64_t primary_display_id = window_tree_host_manager->GetPrimaryDisplayId();
   int64_t secondary_display_id = display_manager()->GetSecondaryDisplay().id();
   aura::Window* primary_root =
@@ -81,7 +82,7 @@ TEST_F(CursorWindowControllerTest, MoveToDifferentDisplay) {
 
   EXPECT_TRUE(primary_root->Contains(GetCursorWindow()));
   EXPECT_EQ(primary_display_id, GetCursorDisplayId());
-  EXPECT_EQ(ui::kCursorNull, GetCursorType());
+  EXPECT_EQ(ui::CursorType::kNull, GetCursorType());
   gfx::Point hot_point = GetCursorHotPoint();
   EXPECT_EQ("4,4", hot_point.ToString());
   gfx::Rect cursor_bounds = GetCursorWindow()->GetBoundsInScreen();
@@ -105,7 +106,7 @@ TEST_F(CursorWindowControllerTest, MoveToDifferentDisplay) {
 
   EXPECT_TRUE(secondary_root->Contains(GetCursorWindow()));
   EXPECT_EQ(secondary_display_id, GetCursorDisplayId());
-  EXPECT_EQ(ui::kCursorNull, GetCursorType());
+  EXPECT_EQ(ui::CursorType::kNull, GetCursorType());
   hot_point = GetCursorHotPoint();
   EXPECT_EQ("3,3", hot_point.ToString());
   cursor_bounds = GetCursorWindow()->GetBoundsInScreen();
@@ -119,7 +120,7 @@ TEST_F(CursorWindowControllerTest, MoveToDifferentDisplay) {
 TEST_F(CursorWindowControllerTest, VisibilityTest) {
   ASSERT_TRUE(GetCursorWindow());
   EXPECT_TRUE(GetCursorWindow()->IsVisible());
-  aura::client::CursorClient* client = Shell::GetInstance()->cursor_manager();
+  aura::client::CursorClient* client = Shell::Get()->cursor_manager();
   client->HideCursor();
   ASSERT_TRUE(GetCursorWindow());
   EXPECT_FALSE(GetCursorWindow()->IsVisible());

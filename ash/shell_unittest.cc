@@ -7,22 +7,28 @@
 #include <algorithm>
 #include <vector>
 
-#include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shelf/shelf_layout_manager.h"
-#include "ash/common/shelf/shelf_widget.h"
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/wallpaper/wallpaper_widget_controller.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
 #include "ash/display/mouse_cursor_event_filter.h"
 #include "ash/drag_drop/drag_drop_controller.h"
+#include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
+#include "ash/session/session_controller.h"
+#include "ash/session/test_session_controller_client.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_widget.h"
+#include "ash/shell_test_api.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/shell_test_api.h"
+#include "ash/test/ash_test_helper.h"
+#include "ash/test_shell_delegate.h"
+#include "ash/wallpaper/wallpaper_widget_controller.h"
 #include "ash/wm/window_util.h"
+#include "base/command_line.h"
+#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "components/prefs/testing_pref_service.h"
+#include "components/signin/core/account_id/account_id.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -32,6 +38,9 @@
 #include "ui/events/test/events_test_utils.h"
 #include "ui/events/test/test_event_handler.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/keyboard/keyboard_controller.h"
+#include "ui/keyboard/keyboard_switches.h"
+#include "ui/keyboard/keyboard_util.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/widget/widget.h"
@@ -56,6 +65,12 @@ aura::Window* GetAlwaysOnTopContainer() {
 
 // Expect ALL the containers!
 void ExpectAllContainers() {
+  // Validate no duplicate container IDs.
+  const size_t all_shell_container_ids_size = arraysize(kAllShellContainerIds);
+  std::set<int32_t> container_ids;
+  for (size_t i = 0; i < all_shell_container_ids_size; ++i)
+    EXPECT_TRUE(container_ids.insert(kAllShellContainerIds[i]).second);
+
   aura::Window* root_window = Shell::GetPrimaryRootWindow();
   EXPECT_TRUE(
       Shell::GetContainer(root_window, kShellWindowId_WallpaperContainer));
@@ -118,9 +133,42 @@ class SimpleMenuDelegate : public ui::SimpleMenuModel::Delegate {
   DISALLOW_COPY_AND_ASSIGN(SimpleMenuDelegate);
 };
 
+class TestShellObserver : public ShellObserver {
+ public:
+  TestShellObserver() = default;
+  ~TestShellObserver() override = default;
+
+  // ShellObserver:
+  void OnActiveUserPrefServiceChanged(PrefService* pref_service) override {
+    last_pref_service_ = pref_service;
+  }
+
+  PrefService* last_pref_service_ = nullptr;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestShellObserver);
+};
+
+// Test support for M61 hack. See SessionObserver comment.
+class TestSessionObserver : public SessionObserver {
+ public:
+  TestSessionObserver() = default;
+  ~TestSessionObserver() override = default;
+
+  // SessionObserver:
+  void OnActiveUserPrefServiceChanged(PrefService* pref_service) override {
+    last_pref_service_ = pref_service;
+  }
+
+  PrefService* last_pref_service_ = nullptr;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestSessionObserver);
+};
+
 }  // namespace
 
-class ShellTest : public test::AshTestBase {
+class ShellTest : public AshTestBase {
  public:
   views::Widget* CreateTestWindow(views::Widget::InitParams params) {
     views::Widget* widget = new views::Widget;
@@ -156,24 +204,24 @@ class ShellTest : public test::AshTestBase {
     // Create a LockScreen window.
     views::Widget::InitParams widget_params(
         views::Widget::InitParams::TYPE_WINDOW);
-    SessionStateDelegate* delegate = WmShell::Get()->GetSessionStateDelegate();
-    delegate->LockScreen();
     views::Widget* lock_widget = CreateTestWindow(widget_params);
     Shell::GetContainer(Shell::GetPrimaryRootWindow(),
                         kShellWindowId_LockScreenContainer)
         ->AddChild(lock_widget->GetNativeView());
     lock_widget->Show();
-    EXPECT_TRUE(delegate->IsScreenLocked());
+
+    // Simulate real screen locker to change session state to LOCKED
+    // when it is shown.
+    SessionController* controller = Shell::Get()->session_controller();
+    controller->LockScreenAndFlushForTest();
+
+    EXPECT_TRUE(controller->IsScreenLocked());
     EXPECT_TRUE(lock_widget->GetNativeView()->HasFocus());
 
     // Verify menu is closed.
-    EXPECT_NE(views::MenuController::EXIT_NONE, menu_controller->exit_type());
+    EXPECT_EQ(nullptr, views::MenuController::GetActiveInstance());
     lock_widget->Close();
-    delegate->UnlockScreen();
-
-    // In case the menu wasn't closed, cancel the menu to exit the nested menu
-    // run loop so that the test will not time out.
-    menu_controller->CancelAll();
+    GetSessionControllerClient()->UnlockScreen();
   }
 };
 
@@ -274,7 +322,7 @@ TEST_F(ShellTest, CreateLockScreenModalWindow) {
   EXPECT_TRUE(
       GetDefaultContainer()->Contains(widget->GetNativeWindow()->parent()));
 
-  WmShell::Get()->GetSessionStateDelegate()->LockScreen();
+  Shell::Get()->session_controller()->LockScreenAndFlushForTest();
   // Create a LockScreen window.
   views::Widget* lock_widget = CreateTestWindow(widget_params);
   Shell::GetContainer(Shell::GetPrimaryRootWindow(),
@@ -331,11 +379,11 @@ TEST_F(ShellTest, CreateLockScreenModalWindow) {
 }
 
 TEST_F(ShellTest, IsScreenLocked) {
-  SessionStateDelegate* delegate = WmShell::Get()->GetSessionStateDelegate();
-  delegate->LockScreen();
-  EXPECT_TRUE(delegate->IsScreenLocked());
-  delegate->UnlockScreen();
-  EXPECT_FALSE(delegate->IsScreenLocked());
+  SessionController* controller = Shell::Get()->session_controller();
+  controller->LockScreenAndFlushForTest();
+  EXPECT_TRUE(controller->IsScreenLocked());
+  GetSessionControllerClient()->UnlockScreen();
+  EXPECT_FALSE(controller->IsScreenLocked());
 }
 
 TEST_F(ShellTest, LockScreenClosesActiveMenu) {
@@ -343,25 +391,15 @@ TEST_F(ShellTest, LockScreenClosesActiveMenu) {
   std::unique_ptr<ui::SimpleMenuModel> menu_model(
       new ui::SimpleMenuModel(&menu_delegate));
   menu_model->AddItem(0, base::ASCIIToUTF16("Menu item"));
-  views::Widget* widget = WmShell::Get()
-                              ->GetPrimaryRootWindow()
-                              ->GetRootWindowController()
+  views::Widget* widget = Shell::GetPrimaryRootWindowController()
                               ->wallpaper_widget_controller()
                               ->widget();
   std::unique_ptr<views::MenuRunner> menu_runner(
       new views::MenuRunner(menu_model.get(), views::MenuRunner::CONTEXT_MENU));
 
-  // When MenuRunner runs a nested loop the LockScreenAndVerifyMenuClosed
-  // command will fire, check the menu state and ensure the nested menu loop
-  // is exited so that the test will terminate.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ShellTest::LockScreenAndVerifyMenuClosed,
-                            base::Unretained(this)));
-
-  EXPECT_EQ(views::MenuRunner::NORMAL_EXIT,
-            menu_runner->RunMenuAt(widget, NULL, gfx::Rect(),
-                                   views::MENU_ANCHOR_TOPLEFT,
-                                   ui::MENU_SOURCE_MOUSE));
+  menu_runner->RunMenuAt(widget, NULL, gfx::Rect(), views::MENU_ANCHOR_TOPLEFT,
+                         ui::MENU_SOURCE_MOUSE);
+  LockScreenAndVerifyMenuClosed();
 }
 
 TEST_F(ShellTest, ManagedWindowModeBasics) {
@@ -433,13 +471,13 @@ TEST_F(ShellTest, FullscreenWindowHidesShelf) {
 TEST_F(ShellTest, ToggleAutoHide) {
   std::unique_ptr<aura::Window> window(new aura::Window(NULL));
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
-  window->SetType(ui::wm::WINDOW_TYPE_NORMAL);
+  window->SetType(aura::client::WINDOW_TYPE_NORMAL);
   window->Init(ui::LAYER_TEXTURED);
   ParentWindowInPrimaryRootWindow(window.get());
   window->Show();
   wm::ActivateWindow(window.get());
 
-  WmShelf* shelf = GetPrimaryShelf();
+  Shelf* shelf = GetPrimaryShelf();
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
 
@@ -460,12 +498,12 @@ TEST_F(ShellTest, ToggleAutoHide) {
 // pre-target list.
 TEST_F(ShellTest, TestPreTargetHandlerOrder) {
   // TODO: investigate failure in mash, http://crbug.com/695758.
-  if (WmShell::Get()->IsRunningInMash())
+  if (Shell::GetAshConfig() == Config::MASH)
     return;
 
-  Shell* shell = Shell::GetInstance();
+  Shell* shell = Shell::Get();
   ui::EventTargetTestApi test_api(shell);
-  test::ShellTestApi shell_test_api(shell);
+  ShellTestApi shell_test_api(shell);
 
   const ui::EventHandlerList& handlers = test_api.pre_target_handlers();
   ui::EventHandlerList::const_iterator cursor_filter =
@@ -487,6 +525,23 @@ TEST_F(ShellTest, EnvPreTargetHandler) {
   aura::Env::GetInstance()->RemovePreTargetHandler(&event_handler);
 }
 
+// Verifies keyboard is re-created on proper timing.
+TEST_F(ShellTest, KeyboardCreation) {
+  if (Shell::GetAshConfig() == Config::MASH)
+    return;
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      keyboard::switches::kEnableVirtualKeyboard);
+
+  ASSERT_TRUE(keyboard::IsKeyboardEnabled());
+
+  SessionObserver* shell = Shell::Get();
+  EXPECT_FALSE(keyboard::KeyboardController::GetInstance());
+  shell->OnSessionStateChanged(
+      session_manager::SessionState::LOGGED_IN_NOT_ACTIVE);
+
+  EXPECT_TRUE(keyboard::KeyboardController::GetInstance());
+}
+
 // This verifies WindowObservers are removed when a window is destroyed after
 // the Shell is destroyed. This scenario (aura::Windows being deleted after the
 // Shell) occurs if someone is holding a reference to an unparented Window, as
@@ -494,7 +549,7 @@ TEST_F(ShellTest, EnvPreTargetHandler) {
 // everything is ok, we won't crash. If there is a bug, window's destructor will
 // notify some deleted object (say VideoDetector or ActivationController) and
 // this will crash.
-class ShellTest2 : public test::AshTestBase {
+class ShellTest2 : public AshTestBase {
  public:
   ShellTest2() {}
   ~ShellTest2() override {}
@@ -507,15 +562,78 @@ class ShellTest2 : public test::AshTestBase {
 };
 
 TEST_F(ShellTest2, DontCrashWhenWindowDeleted) {
-  // TODO: delete this test when conversion to mash is done. This test isn't
-  // applicable to mash as all windows must be destroyed before ash, that isn't
-  // the case with classic-ash where embedders can separately create
-  // aura::Windows.
-  if (WmShell::Get()->IsRunningInMash())
-    return;
-
   window_.reset(new aura::Window(NULL));
   window_->Init(ui::LAYER_NOT_DRAWN);
+}
+
+class ShellPrefsTest : public NoSessionAshTestBase {
+ public:
+  ShellPrefsTest() = default;
+  ~ShellPrefsTest() override = default;
+
+  // testing::Test:
+  void SetUp() override {
+    NoSessionAshTestBase::SetUp();
+    Shell::RegisterProfilePrefs(pref_service1_.registry());
+    Shell::RegisterProfilePrefs(pref_service2_.registry());
+  }
+
+  // Must outlive Shell.
+  TestingPrefServiceSimple pref_service1_;
+  TestingPrefServiceSimple pref_service2_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ShellPrefsTest);
+};
+
+// Verifies that ShellObserver is notified for PrefService changes.
+TEST_F(ShellPrefsTest, Observer) {
+  TestShellObserver observer;
+  Shell::Get()->AddShellObserver(&observer);
+
+  // Setup 2 users.
+  TestSessionControllerClient* session = GetSessionControllerClient();
+  session->AddUserSession("user1@test.com");
+  session->AddUserSession("user2@test.com");
+
+  // Login notifies observers of the user pref service.
+  ash_test_helper()->test_shell_delegate()->set_active_user_pref_service(
+      &pref_service1_);
+  session->SwitchActiveUser(AccountId::FromUserEmail("user1@test.com"));
+  EXPECT_EQ(&pref_service1_, observer.last_pref_service_);
+
+  // Switching users notifies observers of the new user pref service.
+  ash_test_helper()->test_shell_delegate()->set_active_user_pref_service(
+      &pref_service2_);
+  session->SwitchActiveUser(AccountId::FromUserEmail("user2@test.com"));
+  EXPECT_EQ(&pref_service2_, observer.last_pref_service_);
+
+  Shell::Get()->RemoveShellObserver(&observer);
+}
+
+// Test for M61 hack. See SessionObserver comment.
+TEST_F(ShellPrefsTest, SessionObserverHack) {
+  TestSessionObserver observer;
+  Shell::Get()->session_controller()->AddObserver(&observer);
+
+  // Setup 2 users.
+  TestSessionControllerClient* session = GetSessionControllerClient();
+  session->AddUserSession("user1@test.com");
+  session->AddUserSession("user2@test.com");
+
+  // Login notifies observers of the user pref service.
+  ash_test_helper()->test_shell_delegate()->set_active_user_pref_service(
+      &pref_service1_);
+  session->SwitchActiveUser(AccountId::FromUserEmail("user1@test.com"));
+  EXPECT_EQ(&pref_service1_, observer.last_pref_service_);
+
+  // Switching users notifies observers of the new user pref service.
+  ash_test_helper()->test_shell_delegate()->set_active_user_pref_service(
+      &pref_service2_);
+  session->SwitchActiveUser(AccountId::FromUserEmail("user2@test.com"));
+  EXPECT_EQ(&pref_service2_, observer.last_pref_service_);
+
+  Shell::Get()->session_controller()->RemoveObserver(&observer);
 }
 
 }  // namespace ash

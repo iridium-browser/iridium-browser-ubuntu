@@ -15,9 +15,9 @@
 #include "base/process/process.h"
 #include "base/run_loop.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
-#include "services/service_manager/public/cpp/connection.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/interfaces/connector.mojom.h"
 #include "services/service_manager/public/interfaces/service_factory.mojom.h"
@@ -28,13 +28,17 @@ namespace test {
 
 namespace {
 
-void QuitLoop(base::RunLoop* loop) {
+void GrabConnectResult(base::RunLoop* loop,
+                       mojom::ConnectResult* out_result,
+                       mojom::ConnectResult result,
+                       const Identity& resolved_identity) {
   loop->Quit();
+  *out_result = result;
 }
 
 }  // namespace
 
-std::unique_ptr<Connection> LaunchAndConnectToProcess(
+mojom::ConnectResult LaunchAndConnectToProcess(
     const std::string& target_exe_name,
     const Identity& target,
     service_manager::Connector* connector,
@@ -47,8 +51,8 @@ std::unique_ptr<Connection> LaunchAndConnectToProcess(
   // Forward the wait-for-debugger flag but nothing else - we don't want to
   // stamp on the platform-channel flag.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kWaitForDebugger)) {
-    child_command_line.AppendSwitch(switches::kWaitForDebugger);
+          ::switches::kWaitForDebugger)) {
+    child_command_line.AppendSwitch(::switches::kWaitForDebugger);
   }
 
   // Create the channel to be shared with the target process. Pass one end
@@ -58,11 +62,10 @@ std::unique_ptr<Connection> LaunchAndConnectToProcess(
   platform_channel_pair.PrepareToPassClientHandleToChildProcess(
       &child_command_line, &handle_passing_info);
 
-  mojo::edk::PendingProcessConnection pending_process;
-  std::string token;
-  mojo::ScopedMessagePipeHandle pipe =
-      pending_process.CreateMessagePipe(&token);
-  child_command_line.AppendSwitchASCII(switches::kPrimordialPipeToken, token);
+  mojo::edk::OutgoingBrokerClientInvitation invitation;
+  std::string token = mojo::edk::GenerateRandomToken();
+  mojo::ScopedMessagePipeHandle pipe = invitation.AttachMessagePipe(token);
+  child_command_line.AppendSwitchASCII(switches::kServicePipeToken, token);
 
   service_manager::mojom::ServicePtr client;
   client.Bind(mojo::InterfacePtrInfo<service_manager::mojom::Service>(
@@ -70,11 +73,12 @@ std::unique_ptr<Connection> LaunchAndConnectToProcess(
   service_manager::mojom::PIDReceiverPtr receiver;
 
   connector->StartService(target, std::move(client), MakeRequest(&receiver));
-  std::unique_ptr<service_manager::Connection> connection =
-      connector->Connect(target);
+  mojom::ConnectResult result;
   {
     base::RunLoop loop;
-    connection->AddConnectionCompletedClosure(base::Bind(&QuitLoop, &loop));
+    Connector::TestApi test_api(connector);
+    test_api.SetStartServiceCallback(
+        base::Bind(&GrabConnectResult, &loop, &result));
     base::MessageLoop::ScopedNestableTaskAllower allow(
         base::MessageLoop::current());
     loop.Run();
@@ -89,9 +93,11 @@ std::unique_ptr<Connection> LaunchAndConnectToProcess(
   *process = base::LaunchProcess(child_command_line, options);
   DCHECK(process->IsValid());
   receiver->SetPID(process->Pid());
-  pending_process.Connect(process->Handle(),
-                          platform_channel_pair.PassServerHandle());
-  return connection;
+  invitation.Send(
+      process->Handle(),
+      mojo::edk::ConnectionParams(mojo::edk::TransportProtocol::kLegacy,
+                                  platform_channel_pair.PassServerHandle()));
+  return result;
 }
 
 }  // namespace test

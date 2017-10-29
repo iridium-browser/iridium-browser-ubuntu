@@ -12,11 +12,12 @@
 #include "core/fpdfdoc/cpdf_aaction.h"
 #include "core/fpdfdoc/cpdf_action.h"
 #include "core/fpdfdoc/cpdf_annot.h"
+#include "core/fxcrt/cfx_unowned_ptr.h"
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/fx_string.h"
+#include "core/fxge/cfx_color.h"
 #include "fpdfsdk/cpdfsdk_baannot.h"
 #include "fpdfsdk/pdfsdk_fieldaction.h"
-#include "fpdfsdk/pdfwindow/cpwl_color.h"
 
 class CFX_RenderDevice;
 class CPDF_Annot;
@@ -77,7 +78,7 @@ class CPDFSDK_Widget : public CPDFSDK_BAAnnot {
   bool GetFillColor(FX_COLORREF& color) const;
   bool GetBorderColor(FX_COLORREF& color) const;
   bool GetTextColor(FX_COLORREF& color) const;
-  FX_FLOAT GetFontSize() const;
+  float GetFontSize() const;
 
   int GetSelectedIndex(int nIndex) const;
 #ifndef PDF_ENABLE_XFA
@@ -117,7 +118,7 @@ class CPDFSDK_Widget : public CPDFSDK_BAAnnot {
                  PDFSDK_FieldAction& data,
                  CPDFSDK_PageView* pPageView);
 
-  CPDFSDK_InterForm* GetInterForm() const { return m_pInterForm; }
+  CPDFSDK_InterForm* GetInterForm() const { return m_pInterForm.Get(); }
   CPDF_FormField* GetFormField() const;
   CPDF_FormControl* GetFormControl() const;
   static CPDF_FormControl* GetFormControl(CPDF_InterForm* pInterForm,
@@ -138,36 +139,22 @@ class CPDFSDK_Widget : public CPDFSDK_BAAnnot {
                       CPDF_Annot::AppearanceMode mode,
                       const CPDF_RenderOptions* pOptions) override;
 
- private:
-  void ResetAppearance_PushButton();
-  void ResetAppearance_CheckBox();
-  void ResetAppearance_RadioButton();
-  void ResetAppearance_ComboBox(const CFX_WideString* sValue);
-  void ResetAppearance_ListBox();
-  void ResetAppearance_TextField(const CFX_WideString* sValue);
-
+  CFX_Matrix GetMatrix() const;
   CFX_FloatRect GetClientRect() const;
   CFX_FloatRect GetRotatedRect() const;
+  CFX_Color GetTextPWLColor() const;
+  CFX_Color GetBorderPWLColor() const;
+  CFX_Color GetFillPWLColor() const;
 
-  CFX_ByteString GetBackgroundAppStream() const;
-  CFX_ByteString GetBorderAppStream() const;
-  CFX_Matrix GetMatrix() const;
-
-  CPWL_Color GetTextPWLColor() const;
-  CPWL_Color GetBorderPWLColor() const;
-  CPWL_Color GetFillPWLColor() const;
-
-  void AddImageToAppearance(const CFX_ByteString& sAPType, CPDF_Stream* pImage);
-  void RemoveAppearance(const CFX_ByteString& sAPType);
-
-  CPDFSDK_InterForm* const m_pInterForm;
+ private:
+  CFX_UnownedPtr<CPDFSDK_InterForm> const m_pInterForm;
   bool m_bAppModified;
   int32_t m_nAppAge;
   int32_t m_nValueAge;
 
 #ifdef PDF_ENABLE_XFA
-  mutable CXFA_FFWidget* m_hMixXFAWidget;
-  mutable CXFA_FFWidgetHandler* m_pWidgetHandler;
+  mutable CFX_UnownedPtr<CXFA_FFWidget> m_hMixXFAWidget;
+  mutable CFX_UnownedPtr<CXFA_FFWidgetHandler> m_pWidgetHandler;
 #endif  // PDF_ENABLE_XFA
 };
 

@@ -7,21 +7,21 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <algorithm>
 #include <string>
 
 #include "base/base_paths.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
+#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
 #include "chrome/browser/safe_browsing/incident_reporting/module_integrity_unittest_util_win.h"
 #include "chrome/browser/safe_browsing/incident_reporting/module_integrity_verifier_win.h"
 #include "chrome/browser/safe_browsing/path_sanitizer.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome_elf/chrome_elf_constants.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "net/base/winsock_init.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -51,14 +51,13 @@ bool DllEntryContainsLspFeature(
     const std::string& dll_path) {
   for (const auto& dll : process_report.dll()) {
     if (dll.path() == dll_path &&
-        std::find(dll.feature().begin(), dll.feature().end(),
-                  ClientIncidentReport_EnvironmentData_Process_Dll::LSP) !=
-        dll.feature().end()) {
+        base::ContainsValue(
+            dll.feature(),
+            ClientIncidentReport_EnvironmentData_Process_Dll::LSP)) {
       // LSP feature found.
       return true;
     }
   }
-
   return false;
 }
 

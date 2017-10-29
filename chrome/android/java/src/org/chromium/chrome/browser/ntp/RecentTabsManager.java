@@ -11,6 +11,7 @@ import android.graphics.Bitmap;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.favicon.FaviconHelper;
 import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
@@ -355,6 +356,22 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
         }
     }
 
+    void recordRecentTabMetrics() {
+        RecordHistogram.recordCountHistogram(
+                "Android.RecentTabsManager.RecentlyClosedTabs", mRecentlyClosedTabs.size());
+        RecordHistogram.recordCountHistogram(
+                "Android.RecentTabsManager.OtherDevices", mForeignSessions.size());
+
+        int totalCount = mRecentlyClosedTabs.size();
+        for (int i = 0; i < mForeignSessions.size(); i++) {
+            ForeignSession foreignSession = mForeignSessions.get(i);
+            for (int j = 0; j < foreignSession.windows.size(); j++) {
+                totalCount += foreignSession.windows.get(j).tabs.size();
+            }
+        }
+        RecordHistogram.recordCountHistogram("Android.RecentTabsManager.TotalTabs", totalCount);
+    }
+
     // SignInStateObserver
     @Override
     public void onSignedIn() {
@@ -380,7 +397,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     }
 
     public boolean isSignedIn() {
-        return ChromeSigninController.get(mContext).isSignedIn();
+        return ChromeSigninController.get().isSignedIn();
     }
 
     @VisibleForTesting

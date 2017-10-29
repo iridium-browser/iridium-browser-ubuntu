@@ -14,6 +14,12 @@
 #include "chrome/browser/memory/memory_kills_monitor.h"
 #include "chromeos/system/version_loader.h"
 
+class NightLightClient;
+
+namespace lock_screen_apps {
+class StateController;
+}
+
 namespace session_manager {
 class SessionManager;
 }
@@ -27,13 +33,13 @@ namespace chromeos {
 class ArcKioskAppManager;
 class DataPromoNotification;
 class EventRewriterController;
+class EventRewriterDelegateImpl;
 class ExtensionVolumeObserver;
 class IdleActionWarningObserver;
-class LoginLockStateNotifier;
 class LowDiskNotification;
 class NetworkPrefStateObserver;
 class NetworkThrottlingObserver;
-class PeripheralBatteryObserver;
+class PeripheralBatteryNotifier;
 class PowerPrefs;
 class RendererFreezer;
 class ShutdownPolicyForwarder;
@@ -45,6 +51,7 @@ class ExternalLoader;
 
 namespace internal {
 class DBusServices;
+class SystemTokenCertDBInitializer;
 }
 
 class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
@@ -57,6 +64,8 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   void PreEarlyInitialization() override;
   void PreMainMessageLoopStart() override;
   void PostMainMessageLoopStart() override;
+  void ServiceManagerConnectionStarted(
+      content::ServiceManagerConnection* connection) override;
   void PreMainMessageLoopRun() override;
 
   // Stages called from PreMainMessageLoopRun.
@@ -72,9 +81,8 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   std::unique_ptr<default_app_order::ExternalLoader> app_order_loader_;
   std::unique_ptr<NetworkPrefStateObserver> network_pref_state_observer_;
   std::unique_ptr<ExtensionVolumeObserver> extension_volume_observer_;
-  std::unique_ptr<PeripheralBatteryObserver> peripheral_battery_observer_;
+  std::unique_ptr<PeripheralBatteryNotifier> peripheral_battery_notifier_;
   std::unique_ptr<PowerPrefs> power_prefs_;
-  std::unique_ptr<LoginLockStateNotifier> login_lock_state_notifier_;
   std::unique_ptr<IdleActionWarningObserver> idle_action_warning_observer_;
   std::unique_ptr<DataPromoNotification> data_promo_notification_;
   std::unique_ptr<RendererFreezer> renderer_freezer_;
@@ -83,10 +91,14 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   std::unique_ptr<internal::DBusServices> dbus_services_;
 
+  std::unique_ptr<internal::SystemTokenCertDBInitializer>
+      system_token_certdb_initializer_;
+
   std::unique_ptr<session_manager::SessionManager> session_manager_;
 
   std::unique_ptr<ShutdownPolicyForwarder> shutdown_policy_forwarder_;
 
+  std::unique_ptr<EventRewriterDelegateImpl> event_rewriter_delegate_;
   std::unique_ptr<EventRewriterController> keyboard_event_rewriters_;
 
   scoped_refptr<chromeos::ExternalMetrics> external_metrics_;
@@ -97,6 +109,11 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   std::unique_ptr<ArcKioskAppManager> arc_kiosk_app_manager_;
 
   std::unique_ptr<memory::MemoryKillsMonitor::Handle> memory_kills_monitor_;
+
+  std::unique_ptr<lock_screen_apps::StateController>
+      lock_screen_apps_state_controller_;
+
+  std::unique_ptr<NightLightClient> night_light_client_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsChromeos);
 };

@@ -81,8 +81,8 @@ class FaviconServiceImpl : public FaviconService {
       base::CancelableTaskTracker* tracker) override;
   base::CancelableTaskTracker::TaskId UpdateFaviconMappingsAndFetch(
       const GURL& page_url,
-      const std::vector<GURL>& icon_urls,
-      int icon_types,
+      const GURL& icon_url,
+      favicon_base::IconType icon_type,
       int desired_size_in_dip,
       const favicon_base::FaviconResultsCallback& callback,
       base::CancelableTaskTracker* tracker) override;
@@ -91,6 +91,7 @@ class FaviconServiceImpl : public FaviconService {
       const favicon_base::FaviconRawBitmapCallback& callback,
       base::CancelableTaskTracker* tracker) override;
   void SetFaviconOutOfDateForPage(const GURL& page_url) override;
+  void TouchOnDemandFavicon(const GURL& icon_url) override;
   void SetImportedFavicons(
       const favicon_base::FaviconUsageDataList& favicon_usage) override;
   void MergeFavicon(const GURL& page_url,
@@ -102,6 +103,11 @@ class FaviconServiceImpl : public FaviconService {
                    const GURL& icon_url,
                    favicon_base::IconType icon_type,
                    const gfx::Image& image) override;
+  void SetOnDemandFavicons(const GURL& page_url,
+                           const GURL& icon_url,
+                           favicon_base::IconType icon_type,
+                           const gfx::Image& image,
+                           base::Callback<void(bool)> callback) override;
   void UnableToDownloadFavicon(const GURL& icon_url) override;
   bool WasUnableToDownloadFavicon(const GURL& icon_url) const override;
   void ClearUnableToDownloadFavicons() override;

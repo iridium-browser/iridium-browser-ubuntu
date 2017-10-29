@@ -12,6 +12,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.IBinder;
 import android.os.SystemClock;
+import android.support.annotation.NonNull;
 import android.support.customtabs.CustomTabsCallback;
 import android.support.customtabs.CustomTabsService;
 import android.support.customtabs.CustomTabsSessionToken;
@@ -128,9 +129,11 @@ class ClientManager {
         private boolean mShouldHideDomain;
         private boolean mShouldPrerenderOnCellular;
         private boolean mShouldSendNavigationInfo;
+        private boolean mShouldSendBottomBarScrollState;
         private KeepAliveServiceConnection mKeepAliveConnection;
         private String mPredictedUrl;
         private long mLastMayLaunchUrlTimestamp;
+        private int mSpeculationMode;
 
         public SessionParams(Context context, int uid, DisconnectCallback callback,
                 PostMessageHandler postMessageHandler) {
@@ -138,6 +141,8 @@ class ClientManager {
             packageName = getPackageName(context, uid);
             disconnectCallback = callback;
             this.postMessageHandler = postMessageHandler;
+            if (postMessageHandler != null) this.postMessageHandler.setPackageName(packageName);
+            this.mSpeculationMode = CustomTabsConnection.SpeculationParams.PRERENDER;
         }
 
         private static String getPackageName(Context context, int uid) {
@@ -209,7 +214,7 @@ class ClientManager {
      * @return true for success.
      */
     public boolean newSession(CustomTabsSessionToken session, int uid,
-            DisconnectCallback onDisconnect, PostMessageHandler postMessageHandler) {
+            DisconnectCallback onDisconnect, @NonNull PostMessageHandler postMessageHandler) {
         if (session == null) return false;
         SessionParams params = new SessionParams(mContext, uid, onDisconnect, postMessageHandler);
         synchronized (this) {
@@ -339,6 +344,26 @@ class ClientManager {
     }
 
     /**
+     * See {@link PostMessageHandler#verifyAndInitializeWithOrigin(Uri)}.
+     */
+    public synchronized void verifyAndInitializeWithPostMessageOriginForSession(
+            CustomTabsSessionToken session, Uri origin) {
+        SessionParams params = mSessionParams.get(session);
+        if (params == null) return;
+        params.postMessageHandler.verifyAndInitializeWithOrigin(origin);
+    }
+
+    /**
+     * @return The postMessage origin for the given session.
+     */
+    @VisibleForTesting
+    synchronized Uri getPostMessageOriginForSessionForTesting(CustomTabsSessionToken session) {
+        SessionParams params = mSessionParams.get(session);
+        if (params == null) return null;
+        return params.postMessageHandler.getOriginForTesting();
+    }
+
+    /**
      * See {@link PostMessageHandler#reset(WebContents)}.
      */
     public synchronized void resetPostMessageHandlerForSession(
@@ -388,6 +413,24 @@ class ClientManager {
     public synchronized void setHideDomainForSession(CustomTabsSessionToken session, boolean hide) {
         SessionParams params = mSessionParams.get(session);
         if (params != null) params.mShouldHideDomain = hide;
+    }
+
+    /**
+     * @return Whether bottom bar scrolling state should be recorded and shared for the session.
+     */
+    public synchronized boolean shouldSendBottomBarScrollStateForSession(
+            CustomTabsSessionToken session) {
+        SessionParams params = mSessionParams.get(session);
+        return params != null ? params.mShouldSendBottomBarScrollState : false;
+    }
+
+    /**
+     * Sets whether bottom bar scrolling state should be recorded and shared for the session.
+     */
+    public synchronized void setSendBottomBarScrollingStateForSessionn(
+            CustomTabsSessionToken session, boolean send) {
+        SessionParams params = mSessionParams.get(session);
+        if (params != null) params.mShouldSendBottomBarScrollState = send;
     }
 
     /**
@@ -448,6 +491,39 @@ class ClientManager {
             CustomTabsSessionToken session, boolean prerender) {
         SessionParams params = mSessionParams.get(session);
         if (params != null) params.mShouldPrerenderOnCellular = prerender;
+    }
+
+    /**
+     * Sets the speculation mode to be used by default for given session.
+     */
+    public synchronized void setSpeculationModeForSession(
+            CustomTabsSessionToken session, int speculationMode) {
+        SessionParams params = mSessionParams.get(session);
+        if (params != null) params.mSpeculationMode = speculationMode;
+    }
+
+    /**
+     * Get the speculation mode to be used by default for the given session.
+     * If no value has been set will default to PRERENDER mode.
+     */
+    public synchronized int getSpeculationModeForSession(CustomTabsSessionToken session) {
+        SessionParams params = mSessionParams.get(session);
+        return params == null ? CustomTabsConnection.SpeculationParams.PRERENDER
+                              : params.mSpeculationMode;
+    }
+
+    /**
+     * Returns whether an origin is first-party with respect to a session, that is if the
+     * application linked to the session has a relation with the provided origin. This does not
+     * calls OriginVerifier, but only checks the cached relations.
+     *
+     * @param session The session.
+     * @param origin Origin to verify
+     */
+    public synchronized boolean isFirstPartyOriginForSession(
+            CustomTabsSessionToken session, Uri origin) {
+        SessionParams params = mSessionParams.get(session);
+        return params == null ? false : OriginVerifier.isValidOrigin(params.packageName, origin);
     }
 
     /** Tries to bind to a client to keep it alive, and returns true for success. */
@@ -522,7 +598,7 @@ class ClientManager {
         if (params == null) return;
         mSessionParams.remove(session);
         if (params.postMessageHandler != null) {
-            params.postMessageHandler.unbindFromContext(mContext);
+            params.postMessageHandler.cleanup(mContext);
         }
         if (params.disconnectCallback != null) params.disconnectCallback.run(session);
         mUidHasCalledWarmup.delete(params.uid);

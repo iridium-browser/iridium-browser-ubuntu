@@ -30,96 +30,115 @@
 
 #include "core/inspector/WorkerInspectorController.h"
 
-#include "core/InstrumentingAgents.h"
-#include "core/inspector/InspectorInstrumentation.h"
+#include "core/CoreProbeSink.h"
 #include "core/inspector/InspectorLogAgent.h"
+#include "core/inspector/InspectorNetworkAgent.h"
+#include "core/inspector/InspectorTraceEvents.h"
 #include "core/inspector/WorkerThreadDebugger.h"
 #include "core/inspector/protocol/Protocol.h"
+#include "core/loader/WorkerFetchContext.h"
+#include "core/probe/CoreProbes.h"
 #include "core/workers/WorkerBackingThread.h"
+#include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerReportingProxy.h"
 #include "core/workers/WorkerThread.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/WebThreadSupportingGC.h"
 
 namespace blink {
 
-WorkerInspectorController* WorkerInspectorController::create(
+WorkerInspectorController* WorkerInspectorController::Create(
     WorkerThread* thread) {
   WorkerThreadDebugger* debugger =
-      WorkerThreadDebugger::from(thread->isolate());
+      WorkerThreadDebugger::From(thread->GetIsolate());
   return debugger ? new WorkerInspectorController(thread, debugger) : nullptr;
 }
 
 WorkerInspectorController::WorkerInspectorController(
     WorkerThread* thread,
     WorkerThreadDebugger* debugger)
-    : m_debugger(debugger),
-      m_thread(thread),
-      m_instrumentingAgents(new InstrumentingAgents()) {}
+    : debugger_(debugger), thread_(thread), probe_sink_(new CoreProbeSink()) {
+  probe_sink_->addInspectorTraceEvents(new InspectorTraceEvents());
+}
 
 WorkerInspectorController::~WorkerInspectorController() {
-  DCHECK(!m_thread);
+  DCHECK(!thread_);
 }
 
-void WorkerInspectorController::connectFrontend() {
-  if (m_session)
+void WorkerInspectorController::ConnectFrontend(int session_id) {
+  if (sessions_.find(session_id) != sessions_.end())
     return;
 
-  // sessionId will be overwritten by WebDevToolsAgent::sendProtocolNotification
-  // call.
-  m_session = new InspectorSession(
-      this, m_instrumentingAgents.get(), 0, m_debugger->v8Inspector(),
-      m_debugger->contextGroupId(m_thread), nullptr);
-  m_session->append(
-      new InspectorLogAgent(m_thread->consoleMessageStorage(), nullptr));
-  m_thread->workerBackingThread().backingThread().addTaskObserver(this);
+  InspectorSession* session = new InspectorSession(
+      this, probe_sink_.Get(), session_id, debugger_->GetV8Inspector(),
+      debugger_->ContextGroupId(thread_), nullptr);
+  session->Append(
+      new InspectorLogAgent(thread_->GetConsoleMessageStorage(), nullptr));
+  if (thread_->GlobalScope()->IsWorkerGlobalScope() &&
+      RuntimeEnabledFeatures::OffMainThreadFetchEnabled()) {
+    DCHECK(ToWorkerGlobalScope(thread_->GlobalScope())->GetResourceFetcher());
+    session->Append(InspectorNetworkAgent::CreateForWorker(
+        ToWorkerGlobalScope(thread_->GlobalScope())));
+  }
+  if (sessions_.IsEmpty())
+    thread_->GetWorkerBackingThread().BackingThread().AddTaskObserver(this);
+  sessions_.insert(session_id, session);
 }
 
-void WorkerInspectorController::disconnectFrontend() {
-  if (!m_session)
+void WorkerInspectorController::DisconnectFrontend(int session_id) {
+  auto it = sessions_.find(session_id);
+  if (it == sessions_.end())
     return;
-  m_session->dispose();
-  m_session.clear();
-  m_thread->workerBackingThread().backingThread().removeTaskObserver(this);
+  it->value->Dispose();
+  sessions_.erase(it);
+  if (sessions_.IsEmpty())
+    thread_->GetWorkerBackingThread().BackingThread().RemoveTaskObserver(this);
 }
 
-void WorkerInspectorController::dispatchMessageFromFrontend(
+void WorkerInspectorController::DispatchMessageFromFrontend(
+    int session_id,
     const String& message) {
-  if (!m_session)
+  auto it = sessions_.find(session_id);
+  if (it == sessions_.end())
     return;
   String method;
   if (!protocol::DispatcherBase::getCommandName(message, &method))
     return;
-  m_session->dispatchProtocolMessage(method, message);
+  it->value->DispatchProtocolMessage(method, message);
 }
 
-void WorkerInspectorController::dispose() {
-  disconnectFrontend();
-  m_thread = nullptr;
+void WorkerInspectorController::Dispose() {
+  Vector<int> ids;
+  CopyKeysToVector(sessions_, ids);
+  for (int session_id : ids)
+    DisconnectFrontend(session_id);
+  thread_ = nullptr;
 }
 
-void WorkerInspectorController::flushProtocolNotifications() {
-  if (m_session)
-    m_session->flushProtocolNotifications();
+void WorkerInspectorController::FlushProtocolNotifications() {
+  for (auto& it : sessions_)
+    it.value->flushProtocolNotifications();
 }
 
-void WorkerInspectorController::sendProtocolMessage(int sessionId,
-                                                    int callId,
+void WorkerInspectorController::SendProtocolMessage(int session_id,
+                                                    int call_id,
                                                     const String& response,
                                                     const String& state) {
   // Worker messages are wrapped, no need to handle callId or state.
-  m_thread->workerReportingProxy().postMessageToPageInspector(response);
+  thread_->GetWorkerReportingProxy().PostMessageToPageInspector(session_id,
+                                                                response);
 }
 
-void WorkerInspectorController::willProcessTask() {}
+void WorkerInspectorController::WillProcessTask() {}
 
-void WorkerInspectorController::didProcessTask() {
-  if (m_session)
-    m_session->flushProtocolNotifications();
+void WorkerInspectorController::DidProcessTask() {
+  for (auto& it : sessions_)
+    it.value->flushProtocolNotifications();
 }
 
 DEFINE_TRACE(WorkerInspectorController) {
-  visitor->trace(m_instrumentingAgents);
-  visitor->trace(m_session);
+  visitor->Trace(probe_sink_);
+  visitor->Trace(sessions_);
 }
 
 }  // namespace blink

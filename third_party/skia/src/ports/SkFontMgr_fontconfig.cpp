@@ -489,12 +489,9 @@ public:
         this->INHERITED::onFilterRec(rec);
     }
 
-    SkAdvancedTypefaceMetrics* onGetAdvancedTypefaceMetrics(PerGlyphInfo perGlyphInfo,
-                                                            const uint32_t* glyphIDs,
-                                                            uint32_t glyphIDsCount) const override
-    {
-        SkAdvancedTypefaceMetrics* info =
-            this->INHERITED::onGetAdvancedTypefaceMetrics(perGlyphInfo, glyphIDs, glyphIDsCount);
+    std::unique_ptr<SkAdvancedTypefaceMetrics> onGetAdvancedMetrics() const override {
+        std::unique_ptr<SkAdvancedTypefaceMetrics> info =
+            this->INHERITED::onGetAdvancedMetrics();
 
         // Simulated fonts shouldn't be considered to be of the type of their data.
         if (get_matrix(fPattern, FC_MATRIX) || get_bool(fPattern, FC_EMBOLDEN)) {
@@ -503,7 +500,7 @@ public:
         return info;
     }
 
-    virtual ~SkTypeface_fontconfig() {
+    ~SkTypeface_fontconfig() override {
         // Hold the lock while unrefing the pattern.
         FCLocker lock;
         fPattern.reset();
@@ -534,7 +531,7 @@ class SkFontMgr_fontconfig : public SkFontMgr {
             : fFontMgr(SkRef(parent)), fFontSet(fontSet)
         { }
 
-        virtual ~StyleSet() {
+        ~StyleSet() override {
             // Hold the lock while unrefing the font set.
             FCLocker lock;
             fFontSet.reset();
@@ -667,7 +664,7 @@ public:
         : fFC(config ? config : FcInitLoadConfigAndFonts())
         , fFamilyNames(GetFamilyNames(fFC)) { }
 
-    virtual ~SkFontMgr_fontconfig() {
+    ~SkFontMgr_fontconfig() override {
         // Hold the lock while unrefing the config.
         FCLocker lock;
         fFC.reset();
@@ -752,6 +749,9 @@ protected:
     }
 
     SkFontStyleSet* onMatchFamily(const char familyName[]) const override {
+        if (!familyName) {
+            return nullptr;
+        }
         FCLocker lock;
 
         SkAutoFcPattern pattern;

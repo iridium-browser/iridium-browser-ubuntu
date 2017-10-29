@@ -36,14 +36,57 @@ GbmBuffer::GbmBuffer(const scoped_refptr<GbmDevice>& gbm,
                      const gfx::Size& size,
 
                      const std::vector<gfx::NativePixmapPlane>&& planes)
-    : GbmBufferBase(gbm, bo, format, flags, modifier, addfb_flags),
+    : drm_(gbm),
+      bo_(bo),
       format_(format),
       flags_(flags),
       fds_(std::move(fds)),
       size_(size),
-      planes_(std::move(planes)) {}
+      planes_(std::move(planes)) {
+  if (flags & GBM_BO_USE_SCANOUT) {
+    DCHECK(bo_);
+    framebuffer_pixel_format_ = format;
+    opaque_framebuffer_pixel_format_ = GetFourCCFormatForOpaqueFramebuffer(
+        GetBufferFormatFromFourCCFormat(format));
+    format_modifier_ = modifier;
+
+    uint32_t handles[4] = {0};
+    uint32_t strides[4] = {0};
+    uint32_t offsets[4] = {0};
+    uint64_t modifiers[4] = {0};
+
+    for (size_t i = 0; i < gbm_bo_get_num_planes(bo); ++i) {
+      handles[i] = gbm_bo_get_plane_handle(bo, i).u32;
+      strides[i] = gbm_bo_get_plane_stride(bo, i);
+      offsets[i] = gbm_bo_get_plane_offset(bo, i);
+      modifiers[i] = modifier;
+    }
+
+    // AddFramebuffer2 only considers the modifiers if addfb_flags has
+    // DRM_MODE_FB_MODIFIERS set. We only set that when we've created
+    // a bo with modifiers, otherwise, we rely on the "no modifiers"
+    // behavior doing the right thing.
+    bool ret = drm_->AddFramebuffer2(
+        gbm_bo_get_width(bo), gbm_bo_get_height(bo), framebuffer_pixel_format_,
+        handles, strides, offsets, modifiers, &framebuffer_, addfb_flags);
+    PLOG_IF(ERROR, !ret) << "AddFramebuffer2 failed";
+    DCHECK(ret);
+    if (opaque_framebuffer_pixel_format_ != framebuffer_pixel_format_) {
+      ret = drm_->AddFramebuffer2(gbm_bo_get_width(bo), gbm_bo_get_height(bo),
+                                  opaque_framebuffer_pixel_format_, handles,
+                                  strides, offsets, modifiers,
+                                  &opaque_framebuffer_, addfb_flags);
+      PLOG_IF(ERROR, !ret) << "AddFramebuffer2 failed";
+      DCHECK(ret);
+    }
+  }
+}
 
 GbmBuffer::~GbmBuffer() {
+  if (framebuffer_)
+    drm_->RemoveFramebuffer(framebuffer_);
+  if (opaque_framebuffer_)
+    drm_->RemoveFramebuffer(opaque_framebuffer_);
   if (bo())
     gbm_bo_destroy(bo());
 }
@@ -83,15 +126,44 @@ size_t GbmBuffer::GetSize(size_t index) const {
   return planes_[index].size;
 }
 
-uint64_t GbmBuffer::GetFormatModifier(size_t index) const {
-  DCHECK_LT(index, planes_.size());
-  return planes_[index].modifier;
+uint32_t GbmBuffer::GetFramebufferId() const {
+  return framebuffer_;
+}
+
+uint32_t GbmBuffer::GetOpaqueFramebufferId() const {
+  return opaque_framebuffer_ ? opaque_framebuffer_ : framebuffer_;
+}
+
+uint32_t GbmBuffer::GetHandle() const {
+  return gbm_bo_get_handle(bo_).u32;
 }
 
 // TODO(reveman): This should not be needed once crbug.com/597932 is fixed,
 // as the size would be queried directly from the underlying bo.
 gfx::Size GbmBuffer::GetSize() const {
   return size_;
+}
+
+uint32_t GbmBuffer::GetFramebufferPixelFormat() const {
+  DCHECK(framebuffer_);
+  return framebuffer_pixel_format_;
+}
+
+uint32_t GbmBuffer::GetOpaqueFramebufferPixelFormat() const {
+  DCHECK(framebuffer_);
+  return opaque_framebuffer_pixel_format_;
+}
+
+uint64_t GbmBuffer::GetFormatModifier() const {
+  return format_modifier_;
+}
+
+const DrmDevice* GbmBuffer::GetDrmDevice() const {
+  return drm_.get();
+}
+
+bool GbmBuffer::RequiresGlFinish() const {
+  return !drm_->is_primary_device();
 }
 
 scoped_refptr<GbmBuffer> GbmBuffer::CreateBufferForBO(
@@ -102,9 +174,7 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBufferForBO(
     uint32_t flags,
     uint64_t modifier,
     uint32_t addfb_flags) {
-  if (!bo)
-    return nullptr;
-
+  DCHECK(bo);
   std::vector<base::ScopedFD> fds;
   std::vector<gfx::NativePixmapPlane> planes;
 
@@ -150,6 +220,8 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBufferWithModifiers(
   gbm_bo* bo =
       gbm_bo_create_with_modifiers(gbm->device(), size.width(), size.height(),
                                    format, modifiers.data(), modifiers.size());
+  if (!bo)
+    return nullptr;
 
   return CreateBufferForBO(gbm, bo, format, size, flags,
                            gbm_bo_get_format_modifier(bo),
@@ -167,8 +239,11 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBuffer(
 
   gbm_bo* bo =
       gbm_bo_create(gbm->device(), size.width(), size.height(), format, flags);
+  if (!bo)
+    return nullptr;
 
-  return CreateBufferForBO(gbm, bo, format, size, flags, 0, 0);
+  return CreateBufferForBO(gbm, bo, format, size, flags,
+                           gbm_bo_get_format_modifier(bo), 0);
 }
 
 // static
@@ -184,23 +259,27 @@ scoped_refptr<GbmBuffer> GbmBuffer::CreateBufferFromFds(
   DCHECK_EQ(planes[0].offset, 0);
 
   // Try to use scanout if supported.
-  bool try_scanout =
-      gbm_device_is_format_supported(
-          gbm->device(), format, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING) &&
-      (planes.size() == 1);
+  bool try_scanout = gbm_device_is_format_supported(
+      gbm->device(), format, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
 
   gbm_bo* bo = nullptr;
   if (try_scanout) {
-    struct gbm_import_fd_data fd_data;
-    fd_data.fd = fds[0].get();
+    struct gbm_import_fd_planar_data fd_data;
     fd_data.width = size.width();
     fd_data.height = size.height();
-    fd_data.stride = planes[0].stride;
     fd_data.format = format;
+
+    DCHECK_LE(planes.size(), 3u);
+    for (size_t i = 0; i < planes.size(); ++i) {
+      fd_data.fds[i] = fds[i < fds.size() ? i : 0].get();
+      fd_data.strides[i] = planes[i].stride;
+      fd_data.offsets[i] = planes[i].offset;
+      fd_data.format_modifiers[i] = planes[i].modifier;
+    }
 
     // The fd passed to gbm_bo_import is not ref-counted and need to be
     // kept open for the lifetime of the buffer.
-    bo = gbm_bo_import(gbm->device(), GBM_BO_IMPORT_FD, &fd_data,
+    bo = gbm_bo_import(gbm->device(), GBM_BO_IMPORT_FD_PLANAR, &fd_data,
                        GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
     if (!bo) {
       LOG(ERROR) << "nullptr returned from gbm_bo_import";
@@ -221,12 +300,6 @@ GbmPixmap::GbmPixmap(GbmSurfaceFactory* surface_manager,
                      const scoped_refptr<GbmBuffer>& buffer)
     : surface_manager_(surface_manager), buffer_(buffer) {}
 
-void GbmPixmap::SetProcessingCallback(
-    const ProcessingCallback& processing_callback) {
-  DCHECK(processing_callback_.is_null());
-  processing_callback_ = processing_callback;
-}
-
 gfx::NativePixmapHandle GbmPixmap::ExportHandle() {
   gfx::NativePixmapHandle handle;
   gfx::BufferFormat format =
@@ -246,7 +319,7 @@ gfx::NativePixmapHandle GbmPixmap::ExportHandle() {
     }
     handle.planes.emplace_back(buffer_->GetStride(i), buffer_->GetOffset(i),
                                buffer_->GetSize(i),
-                               buffer_->GetFormatModifier(i));
+                               buffer_->GetFormatModifier());
   }
   return handle;
 }
@@ -279,7 +352,7 @@ int GbmPixmap::GetDmaBufOffset(size_t plane) const {
 }
 
 uint64_t GbmPixmap::GetDmaBufModifier(size_t plane) const {
-  return buffer_->GetFormatModifier(plane);
+  return buffer_->GetFormatModifier();
 }
 
 gfx::BufferFormat GbmPixmap::GetBufferFormat() const {
@@ -296,44 +369,10 @@ bool GbmPixmap::ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
                                      const gfx::Rect& display_bounds,
                                      const gfx::RectF& crop_rect) {
   DCHECK(buffer_->GetFlags() & GBM_BO_USE_SCANOUT);
-  OverlayPlane::ProcessBufferCallback processing_callback;
-  if (!processing_callback_.is_null())
-    processing_callback = base::Bind(&GbmPixmap::ProcessBuffer, this);
-
-  surface_manager_->GetSurface(widget)->QueueOverlayPlane(
-      OverlayPlane(buffer_, plane_z_order, plane_transform, display_bounds,
-                   crop_rect, processing_callback));
+  surface_manager_->GetSurface(widget)->QueueOverlayPlane(OverlayPlane(
+      buffer_, plane_z_order, plane_transform, display_bounds, crop_rect));
 
   return true;
-}
-
-scoped_refptr<ScanoutBuffer> GbmPixmap::ProcessBuffer(const gfx::Size& size,
-                                                      uint32_t format) {
-  DCHECK(GetBufferSize() != size ||
-         buffer_->GetFramebufferPixelFormat() != format);
-
-  if (!processed_pixmap_ || size != processed_pixmap_->GetBufferSize() ||
-      format != processed_pixmap_->buffer()->GetFramebufferPixelFormat()) {
-    // Release any old processed pixmap.
-    processed_pixmap_ = nullptr;
-    scoped_refptr<GbmBuffer> buffer = GbmBuffer::CreateBuffer(
-        buffer_->drm().get(), format, size, buffer_->GetFlags());
-    if (!buffer)
-      return nullptr;
-
-    // ProcessBuffer is called on DrmThread. We could have used
-    // CreateNativePixmap to initialize the pixmap, however it posts a
-    // synchronous task to DrmThread resulting in a deadlock.
-    processed_pixmap_ = new GbmPixmap(surface_manager_, buffer);
-  }
-
-  DCHECK(!processing_callback_.is_null());
-  if (!processing_callback_.Run(this, processed_pixmap_)) {
-    LOG(ERROR) << "Failed processing NativePixmap";
-    return nullptr;
-  }
-
-  return processed_pixmap_->buffer();
 }
 
 }  // namespace ui

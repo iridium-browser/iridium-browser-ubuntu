@@ -40,11 +40,13 @@ std::unique_ptr<webrtc::DesktopFrame> ConvertYuvToRgb(
   auto yuv_to_rgb_function = (pixel_format == FrameConsumer::FORMAT_BGRA)
                                  ? &libyuv::I420ToARGB
                                  : &libyuv::I420ToABGR;
-  yuv_to_rgb_function(yuv_frame->DataY(), yuv_frame->StrideY(),
-                      yuv_frame->DataU(), yuv_frame->StrideU(),
-                      yuv_frame->DataV(), yuv_frame->StrideV(),
+  rtc::scoped_refptr<const webrtc::I420BufferInterface> i420_frame =
+      yuv_frame->ToI420();
+  yuv_to_rgb_function(i420_frame->DataY(), i420_frame->StrideY(),
+                      i420_frame->DataU(), i420_frame->StrideU(),
+                      i420_frame->DataV(), i420_frame->StrideV(),
                       rgb_frame->data(), rgb_frame->stride(),
-                      yuv_frame->width(), yuv_frame->height());
+                      i420_frame->width(), i420_frame->height());
 
   rgb_frame->mutable_updated_region()->AddRect(
       webrtc::DesktopRect::MakeSize(rgb_frame->size()));
@@ -95,10 +97,10 @@ void WebrtcVideoRendererAdapter::SetVideoStatsChannel(
 }
 
 void WebrtcVideoRendererAdapter::OnFrame(const webrtc::VideoFrame& frame) {
-  if (frame.timestamp_us() >= rtc::TimeMicros()) {
+  if (frame.timestamp_us() > rtc::TimeMicros()) {
     // The host sets playout delay to 0, so all incoming frames are expected to
     // be rendered as so as they are received.
-    LOG(WARNING) << "Received frame with playout delay greater than 0.";
+    NOTREACHED() << "Received frame with playout delay greater than 0.";
   }
 
   task_runner_->PostTask(
@@ -175,8 +177,7 @@ void WebrtcVideoRendererAdapter::HandleFrameOnMainThread(
           webrtc::DesktopSize(frame->width(), frame->height()));
 
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, base::TaskTraits().WithShutdownBehavior(
-                     base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
+      FROM_HERE, {base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&ConvertYuvToRgb, base::Passed(&frame),
                  base::Passed(&rgb_frame),
                  video_renderer_->GetFrameConsumer()->GetPixelFormat()),

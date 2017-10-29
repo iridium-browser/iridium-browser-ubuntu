@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/media_router/media_router_webui_message_handler.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -14,13 +15,13 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/media/router/issue.h"
 #include "chrome/browser/media/router/media_router_metrics.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/webui/media_router/media_cast_mode.h"
 #include "chrome/browser/ui/webui/media_router/media_router_ui.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/browser_sync/profile_sync_service.h"
@@ -29,7 +30,6 @@
 #include "content/public/browser/web_ui.h"
 #include "extensions/common/constants.h"
 #include "ui/base/l10n/l10n_util.h"
-
 
 namespace media_router {
 
@@ -60,13 +60,25 @@ const char kReportSelectedCastMode[] = "reportSelectedCastMode";
 const char kReportSinkCount[] = "reportSinkCount";
 const char kReportTimeToClickSink[] = "reportTimeToClickSink";
 const char kReportTimeToInitialActionClose[] = "reportTimeToInitialActionClose";
+const char kReportWebUIRouteControllerLoaded[] =
+    "reportWebUIRouteControllerLoaded";
 const char kSearchSinksAndCreateRoute[] = "searchSinksAndCreateRoute";
 const char kOnInitialDataReceived[] = "onInitialDataReceived";
+const char kOnMediaControllerAvailable[] = "onMediaControllerAvailable";
+const char kOnMediaControllerClosed[] = "onMediaControllerClosed";
+const char kPauseCurrentMedia[] = "pauseCurrentMedia";
+const char kPlayCurrentMedia[] = "playCurrentMedia";
+const char kSeekCurrentMedia[] = "seekCurrentMedia";
+const char kSelectLocalMediaFile[] = "selectLocalMediaFile";
+const char kSetCurrentMediaMute[] = "setCurrentMediaMute";
+const char kSetCurrentMediaVolume[] = "setCurrentMediaVolume";
 
 // JS function names.
 const char kSetInitialData[] = "media_router.ui.setInitialData";
 const char kOnCreateRouteResponseReceived[] =
     "media_router.ui.onCreateRouteResponseReceived";
+const char kOnRouteControllerInvalidated[] =
+    "media_router.ui.onRouteControllerInvalidated";
 const char kReceiveSearchResult[] = "media_router.ui.receiveSearchResult";
 const char kSetFirstRunFlowData[] = "media_router.ui.setFirstRunFlowData";
 const char kSetIssue[] = "media_router.ui.setIssue";
@@ -74,13 +86,15 @@ const char kSetSinkListAndIdentity[] = "media_router.ui.setSinkListAndIdentity";
 const char kSetRouteList[] = "media_router.ui.setRouteList";
 const char kSetCastModeList[] = "media_router.ui.setCastModeList";
 const char kUpdateMaxHeight[] = "media_router.ui.updateMaxHeight";
+const char kUpdateRouteStatus[] = "media_router.ui.updateRouteStatus";
+const char kUserSelectedLocalMediaFile[] =
+    "media_router.ui.userSelectedLocalMediaFile";
 const char kWindowOpen[] = "window.open";
 
 std::unique_ptr<base::DictionaryValue> SinksAndIdentityToValue(
     const std::vector<MediaSinkWithCastModes>& sinks,
     const AccountInfo& account_info) {
-  std::unique_ptr<base::DictionaryValue> sink_list_and_identity(
-      new base::DictionaryValue);
+  auto sink_list_and_identity = base::MakeUnique<base::DictionaryValue>();
   bool show_email = false;
   bool show_domain = false;
   std::string user_domain;
@@ -89,10 +103,10 @@ std::unique_ptr<base::DictionaryValue> SinksAndIdentityToValue(
     sink_list_and_identity->SetString("userEmail", account_info.email);
   }
 
-  std::unique_ptr<base::ListValue> sinks_val(new base::ListValue);
+  auto sinks_val = base::MakeUnique<base::ListValue>();
 
   for (const MediaSinkWithCastModes& sink_with_cast_modes : sinks) {
-    std::unique_ptr<base::DictionaryValue> sink_val(new base::DictionaryValue);
+    auto sink_val = base::MakeUnique<base::DictionaryValue>();
 
     const MediaSink& sink = sink_with_cast_modes.sink;
     sink_val->SetString("id", sink.id());
@@ -131,7 +145,7 @@ std::unique_ptr<base::DictionaryValue> SinksAndIdentityToValue(
     sinks_val->Append(std::move(sink_val));
   }
 
-  sink_list_and_identity->Set("sinks", sinks_val.release());
+  sink_list_and_identity->Set("sinks", std::move(sinks_val));
   sink_list_and_identity->SetBoolean("showEmail", show_email);
   sink_list_and_identity->SetBoolean("showDomain", show_domain);
   return sink_list_and_identity;
@@ -142,12 +156,16 @@ std::unique_ptr<base::DictionaryValue> RouteToValue(
     bool can_join,
     const std::string& extension_id,
     bool incognito,
-    int current_cast_mode) {
-  std::unique_ptr<base::DictionaryValue> dictionary(new base::DictionaryValue);
+    int current_cast_mode,
+    bool is_web_ui_route_controller_available) {
+  auto dictionary = base::MakeUnique<base::DictionaryValue>();
   dictionary->SetString("id", route.media_route_id());
   dictionary->SetString("sinkId", route.media_sink_id());
   dictionary->SetString("description", route.description());
   dictionary->SetBoolean("isLocal", route.is_local());
+  dictionary->SetBoolean("supportsWebUiController",
+                         is_web_ui_route_controller_available &&
+                             route.supports_media_route_controller());
   dictionary->SetBoolean("canJoin", can_join);
   if (current_cast_mode > 0) {
     dictionary->SetInteger("currentCastMode", current_cast_mode);
@@ -155,12 +173,11 @@ std::unique_ptr<base::DictionaryValue> RouteToValue(
 
   const std::string& custom_path = route.custom_controller_path();
   if (!incognito && !custom_path.empty()) {
-    std::string full_custom_controller_path = base::StringPrintf("%s://%s/%s",
-        extensions::kExtensionScheme, extension_id.c_str(),
-            custom_path.c_str());
+    std::string full_custom_controller_path =
+        base::StringPrintf("%s://%s/%s", extensions::kExtensionScheme,
+                           extension_id.c_str(), custom_path.c_str());
     DCHECK(GURL(full_custom_controller_path).is_valid());
-    dictionary->SetString("customControllerPath",
-                          full_custom_controller_path);
+    dictionary->SetString("customControllerPath", full_custom_controller_path);
   }
 
   return dictionary;
@@ -168,16 +185,18 @@ std::unique_ptr<base::DictionaryValue> RouteToValue(
 
 std::unique_ptr<base::ListValue> CastModesToValue(
     const CastModeSet& cast_modes,
-    const std::string& source_host) {
-  std::unique_ptr<base::ListValue> value(new base::ListValue);
+    const std::string& source_host,
+    base::Optional<MediaCastMode> forced_cast_mode) {
+  auto value = base::MakeUnique<base::ListValue>();
 
   for (const MediaCastMode& cast_mode : cast_modes) {
-    std::unique_ptr<base::DictionaryValue> cast_mode_val(
-        new base::DictionaryValue);
+    auto cast_mode_val = base::MakeUnique<base::DictionaryValue>();
     cast_mode_val->SetInteger("type", cast_mode);
     cast_mode_val->SetString(
         "description", MediaCastModeToDescription(cast_mode, source_host));
     cast_mode_val->SetString("host", source_host);
+    cast_mode_val->SetBoolean(
+        "isForced", forced_cast_mode && forced_cast_mode == cast_mode);
     value->Append(std::move(cast_mode_val));
   }
 
@@ -187,7 +206,7 @@ std::unique_ptr<base::ListValue> CastModesToValue(
 // Returns an Issue dictionary created from |issue| that can be used in WebUI.
 std::unique_ptr<base::DictionaryValue> IssueToValue(const Issue& issue) {
   const IssueInfo& issue_info = issue.info();
-  std::unique_ptr<base::DictionaryValue> dictionary(new base::DictionaryValue);
+  auto dictionary = base::MakeUnique<base::DictionaryValue>();
   dictionary->SetInteger("id", issue.id());
   dictionary->SetString("title", issue_info.title);
   dictionary->SetString("message", issue_info.message);
@@ -239,10 +258,11 @@ MediaRouterWebUIMessageHandler::MediaRouterWebUIMessageHandler(
     : incognito_(
           Profile::FromWebUI(media_router_ui->web_ui())->IsOffTheRecord()),
       dialog_closing_(false),
+      is_web_ui_route_controller_available_(base::FeatureList::IsEnabled(
+          features::kMediaRouterUIRouteController)),
       media_router_ui_(media_router_ui) {}
 
-MediaRouterWebUIMessageHandler::~MediaRouterWebUIMessageHandler() {
-}
+MediaRouterWebUIMessageHandler::~MediaRouterWebUIMessageHandler() {}
 
 void MediaRouterWebUIMessageHandler::UpdateSinks(
     const std::vector<MediaSinkWithCastModes>& sinks) {
@@ -265,10 +285,11 @@ void MediaRouterWebUIMessageHandler::UpdateRoutes(
 
 void MediaRouterWebUIMessageHandler::UpdateCastModes(
     const CastModeSet& cast_modes,
-    const std::string& source_host) {
+    const std::string& source_host,
+    base::Optional<MediaCastMode> forced_cast_mode) {
   DVLOG(2) << "UpdateCastModes";
   std::unique_ptr<base::ListValue> cast_modes_val(
-      CastModesToValue(cast_modes, source_host));
+      CastModesToValue(cast_modes, source_host, forced_cast_mode));
   web_ui()->CallJavascriptFunctionUnsafe(kSetCastModeList, *cast_modes_val);
 }
 
@@ -281,14 +302,14 @@ void MediaRouterWebUIMessageHandler::OnCreateRouteResponseReceived(
         route->media_route_id(), media_router_ui_->routes_and_cast_modes());
     std::unique_ptr<base::DictionaryValue> route_value(RouteToValue(
         *route, false, media_router_ui_->GetRouteProviderExtensionId(),
-        incognito_, current_cast_mode));
-    web_ui()->CallJavascriptFunctionUnsafe(
-        kOnCreateRouteResponseReceived, base::StringValue(sink_id),
-        *route_value, base::Value(route->for_display()));
+        incognito_, current_cast_mode, is_web_ui_route_controller_available_));
+    web_ui()->CallJavascriptFunctionUnsafe(kOnCreateRouteResponseReceived,
+                                           base::Value(sink_id), *route_value,
+                                           base::Value(route->for_display()));
   } else {
-    web_ui()->CallJavascriptFunctionUnsafe(
-        kOnCreateRouteResponseReceived, base::StringValue(sink_id),
-        *base::Value::CreateNullValue(), base::Value(false));
+    web_ui()->CallJavascriptFunctionUnsafe(kOnCreateRouteResponseReceived,
+                                           base::Value(sink_id), base::Value(),
+                                           base::Value(false));
   }
 }
 
@@ -296,7 +317,7 @@ void MediaRouterWebUIMessageHandler::ReturnSearchResult(
     const std::string& sink_id) {
   DVLOG(2) << "ReturnSearchResult";
   web_ui()->CallJavascriptFunctionUnsafe(kReceiveSearchResult,
-                                         base::StringValue(sink_id));
+                                         base::Value(sink_id));
 }
 
 void MediaRouterWebUIMessageHandler::UpdateIssue(const Issue& issue) {
@@ -306,13 +327,43 @@ void MediaRouterWebUIMessageHandler::UpdateIssue(const Issue& issue) {
 
 void MediaRouterWebUIMessageHandler::ClearIssue() {
   DVLOG(2) << "ClearIssue";
-  web_ui()->CallJavascriptFunctionUnsafe(kSetIssue,
-                                         *base::Value::CreateNullValue());
+  web_ui()->CallJavascriptFunctionUnsafe(kSetIssue, base::Value());
 }
 
 void MediaRouterWebUIMessageHandler::UpdateMaxDialogHeight(int height) {
   DVLOG(2) << "UpdateMaxDialogHeight";
   web_ui()->CallJavascriptFunctionUnsafe(kUpdateMaxHeight, base::Value(height));
+}
+
+void MediaRouterWebUIMessageHandler::UpdateMediaRouteStatus(
+    const MediaStatus& status) {
+  current_media_status_ = base::make_optional<MediaStatus>(MediaStatus(status));
+
+  base::DictionaryValue status_value;
+  status_value.SetString("title", status.title);
+  status_value.SetString("description", status.description);
+  status_value.SetBoolean("canPlayPause", status.can_play_pause);
+  status_value.SetBoolean("canMute", status.can_mute);
+  status_value.SetBoolean("canSetVolume", status.can_set_volume);
+  status_value.SetBoolean("canSeek", status.can_seek);
+  status_value.SetInteger("playState", static_cast<int>(status.play_state));
+  status_value.SetBoolean("isMuted", status.is_muted);
+  status_value.SetInteger("duration", status.duration.InSeconds());
+  status_value.SetInteger("currentTime", status.current_time.InSeconds());
+  status_value.SetDouble("volume", status.volume);
+  web_ui()->CallJavascriptFunctionUnsafe(kUpdateRouteStatus,
+                                         std::move(status_value));
+}
+
+void MediaRouterWebUIMessageHandler::OnRouteControllerInvalidated() {
+  web_ui()->CallJavascriptFunctionUnsafe(kOnRouteControllerInvalidated);
+}
+
+void MediaRouterWebUIMessageHandler::UserSelectedLocalMediaFile(
+    base::FilePath::StringType file_name) {
+  DVLOG(2) << "UserSelectedLocalMediaFile";
+  web_ui()->CallJavascriptFunctionUnsafe(kUserSelectedLocalMediaFile,
+                                         base::Value(file_name));
 }
 
 void MediaRouterWebUIMessageHandler::RegisterMessages() {
@@ -321,41 +372,34 @@ void MediaRouterWebUIMessageHandler::RegisterMessages() {
       base::Bind(&MediaRouterWebUIMessageHandler::OnRequestInitialData,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      kCreateRoute,
-      base::Bind(&MediaRouterWebUIMessageHandler::OnCreateRoute,
-                 base::Unretained(this)));
+      kCreateRoute, base::Bind(&MediaRouterWebUIMessageHandler::OnCreateRoute,
+                               base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       kAcknowledgeFirstRunFlow,
       base::Bind(&MediaRouterWebUIMessageHandler::OnAcknowledgeFirstRunFlow,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      kActOnIssue,
-      base::Bind(&MediaRouterWebUIMessageHandler::OnActOnIssue,
-                 base::Unretained(this)));
+      kActOnIssue, base::Bind(&MediaRouterWebUIMessageHandler::OnActOnIssue,
+                              base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      kCloseRoute,
-      base::Bind(&MediaRouterWebUIMessageHandler::OnCloseRoute,
-                 base::Unretained(this)));
+      kCloseRoute, base::Bind(&MediaRouterWebUIMessageHandler::OnCloseRoute,
+                              base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      kJoinRoute,
-      base::Bind(&MediaRouterWebUIMessageHandler::OnJoinRoute,
-                 base::Unretained(this)));
+      kJoinRoute, base::Bind(&MediaRouterWebUIMessageHandler::OnJoinRoute,
+                             base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      kCloseDialog,
-      base::Bind(&MediaRouterWebUIMessageHandler::OnCloseDialog,
-                 base::Unretained(this)));
+      kCloseDialog, base::Bind(&MediaRouterWebUIMessageHandler::OnCloseDialog,
+                               base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      kReportBlur,
-      base::Bind(&MediaRouterWebUIMessageHandler::OnReportBlur,
-                 base::Unretained(this)));
+      kReportBlur, base::Bind(&MediaRouterWebUIMessageHandler::OnReportBlur,
+                              base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       kReportClickedSinkIndex,
       base::Bind(&MediaRouterWebUIMessageHandler::OnReportClickedSinkIndex,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
-      kReportFilter,
-      base::Bind(&MediaRouterWebUIMessageHandler::OnReportFilter,
-                 base::Unretained(this)));
+      kReportFilter, base::Bind(&MediaRouterWebUIMessageHandler::OnReportFilter,
+                                base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       kReportInitialState,
       base::Bind(&MediaRouterWebUIMessageHandler::OnReportInitialState,
@@ -394,12 +438,49 @@ void MediaRouterWebUIMessageHandler::RegisterMessages() {
           &MediaRouterWebUIMessageHandler::OnReportTimeToInitialActionClose,
           base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
+      kReportWebUIRouteControllerLoaded,
+      base::Bind(
+          &MediaRouterWebUIMessageHandler::OnReportWebUIRouteControllerLoaded,
+          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
       kSearchSinksAndCreateRoute,
       base::Bind(&MediaRouterWebUIMessageHandler::OnSearchSinksAndCreateRoute,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       kOnInitialDataReceived,
       base::Bind(&MediaRouterWebUIMessageHandler::OnInitialDataReceived,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kOnMediaControllerAvailable,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnMediaControllerAvailable,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kOnMediaControllerClosed,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnMediaControllerClosed,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kPauseCurrentMedia,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnPauseCurrentMedia,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kPlayCurrentMedia,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnPlayCurrentMedia,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kSeekCurrentMedia,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnSeekCurrentMedia,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kSelectLocalMediaFile,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnSelectLocalMediaFile,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kSetCurrentMediaMute,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnSetCurrentMediaMute,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kSetCurrentMediaVolume,
+      base::Bind(&MediaRouterWebUIMessageHandler::OnSetCurrentMediaVolume,
                  base::Unretained(this)));
 }
 
@@ -411,21 +492,22 @@ void MediaRouterWebUIMessageHandler::OnRequestInitialData(
 
   // "No Cast devices found?" Chromecast help center page.
   initial_data.SetString("deviceMissingUrl",
-      base::StringPrintf(kHelpPageUrlPrefix, 3249268));
+                         base::StringPrintf(kHelpPageUrlPrefix, 3249268));
 
   std::unique_ptr<base::DictionaryValue> sinks_and_identity(
       SinksAndIdentityToValue(media_router_ui_->sinks(), GetAccountInfo()));
-  initial_data.Set("sinksAndIdentity", sinks_and_identity.release());
+  initial_data.Set("sinksAndIdentity", std::move(sinks_and_identity));
 
   std::unique_ptr<base::ListValue> routes(RoutesToValue(
       media_router_ui_->routes(), media_router_ui_->joinable_route_ids(),
       media_router_ui_->routes_and_cast_modes()));
-  initial_data.Set("routes", routes.release());
+  initial_data.Set("routes", std::move(routes));
 
   const std::set<MediaCastMode> cast_modes = media_router_ui_->cast_modes();
   std::unique_ptr<base::ListValue> cast_modes_list(CastModesToValue(
-      cast_modes, media_router_ui_->GetPresentationRequestSourceName()));
-  initial_data.Set("castModes", cast_modes_list.release());
+      cast_modes, media_router_ui_->GetPresentationRequestSourceName(),
+      media_router_ui_->forced_cast_mode()));
+  initial_data.Set("castModes", std::move(cast_modes_list));
 
   // If the cast mode last chosen for the current origin is tab mirroring,
   // that should be the cast mode initially selected in the dialog. Otherwise
@@ -506,8 +588,7 @@ void MediaRouterWebUIMessageHandler::OnAcknowledgeFirstRunFlow(
   pref_service->SetBoolean(prefs::kMediaRouterCloudServicesPrefSet, true);
 }
 
-void MediaRouterWebUIMessageHandler::OnActOnIssue(
-    const base::ListValue* args) {
+void MediaRouterWebUIMessageHandler::OnActOnIssue(const base::ListValue* args) {
   DVLOG(1) << "OnActOnIssue";
   const base::DictionaryValue* args_dict = nullptr;
   Issue::Id issue_id;
@@ -597,16 +678,15 @@ void MediaRouterWebUIMessageHandler::OnCloseDialog(
   }
 
   if (used_esc_to_close_dialog) {
-    base::RecordAction(base::UserMetricsAction(
-        "MediaRouter_Ui_Dialog_ESCToClose"));
+    base::RecordAction(
+        base::UserMetricsAction("MediaRouter_Ui_Dialog_ESCToClose"));
   }
 
   dialog_closing_ = true;
   media_router_ui_->Close();
 }
 
-void MediaRouterWebUIMessageHandler::OnReportBlur(
-    const base::ListValue* args) {
+void MediaRouterWebUIMessageHandler::OnReportBlur(const base::ListValue* args) {
   DVLOG(1) << "OnReportBlur";
   base::RecordAction(base::UserMetricsAction("MediaRouter_Ui_Dialog_Blur"));
 }
@@ -629,7 +709,7 @@ void MediaRouterWebUIMessageHandler::OnReportFilter(const base::ListValue*) {
 }
 
 void MediaRouterWebUIMessageHandler::OnReportInitialAction(
-  const base::ListValue* args) {
+    const base::ListValue* args) {
   DVLOG(1) << "OnReportInitialAction";
   int action;
   if (!args->GetInteger(0, &action)) {
@@ -654,7 +734,7 @@ void MediaRouterWebUIMessageHandler::OnReportInitialState(
 }
 
 void MediaRouterWebUIMessageHandler::OnReportNavigateToView(
-  const base::ListValue* args) {
+    const base::ListValue* args) {
   DVLOG(1) << "OnReportNavigateToView";
   std::string view;
   if (!args->GetString(0, &view)) {
@@ -663,8 +743,8 @@ void MediaRouterWebUIMessageHandler::OnReportNavigateToView(
   }
 
   if (view == "cast-mode-list") {
-    base::RecordAction(base::UserMetricsAction(
-        "MediaRouter_Ui_Navigate_SinkListToSource"));
+    base::RecordAction(
+        base::UserMetricsAction("MediaRouter_Ui_Navigate_SinkListToSource"));
   } else if (view == "route-details") {
     base::RecordAction(base::UserMetricsAction(
         "MediaRouter_Ui_Navigate_SinkListToRouteDetails"));
@@ -738,6 +818,18 @@ void MediaRouterWebUIMessageHandler::OnReportTimeToClickSink(
                       base::TimeDelta::FromMillisecondsD(time_to_click));
 }
 
+void MediaRouterWebUIMessageHandler::OnReportWebUIRouteControllerLoaded(
+    const base::ListValue* args) {
+  DVLOG(1) << "OnReportWebUIRouteControllerLoaded";
+  double load_time;
+  if (!args->GetDouble(0, &load_time)) {
+    DVLOG(1) << "Unable to extract args.";
+    return;
+  }
+  UMA_HISTOGRAM_TIMES("MediaRouter.Ui.Dialog.LoadedWebUiRouteController",
+                      base::TimeDelta::FromMillisecondsD(load_time));
+}
+
 void MediaRouterWebUIMessageHandler::OnReportTimeToInitialActionClose(
     const base::ListValue* args) {
   DVLOG(1) << "OnReportTimeToInitialActionClose";
@@ -783,11 +875,99 @@ void MediaRouterWebUIMessageHandler::OnSearchSinksAndCreateRoute(
       static_cast<MediaCastMode>(cast_mode_num));
 }
 
+void MediaRouterWebUIMessageHandler::OnSelectLocalMediaFile(
+    const base::ListValue* args) {
+  media_router_ui_->OpenFileDialog();
+}
+
 void MediaRouterWebUIMessageHandler::OnInitialDataReceived(
     const base::ListValue* args) {
   DVLOG(1) << "OnInitialDataReceived";
   media_router_ui_->OnUIInitialDataReceived();
   MaybeUpdateFirstRunFlowData();
+}
+
+void MediaRouterWebUIMessageHandler::OnMediaControllerAvailable(
+    const base::ListValue* args) {
+  const base::DictionaryValue* args_dict = nullptr;
+  std::string route_id;
+  if (!args->GetDictionary(0, &args_dict) ||
+      !args_dict->GetString("routeId", &route_id)) {
+    DVLOG(1) << "Unable to extract media route ID";
+    return;
+  }
+  media_router_ui_->OnMediaControllerUIAvailable(route_id);
+}
+
+void MediaRouterWebUIMessageHandler::OnMediaControllerClosed(
+    const base::ListValue* args) {
+  current_media_status_.reset();
+  media_router_ui_->OnMediaControllerUIClosed();
+}
+
+void MediaRouterWebUIMessageHandler::OnPauseCurrentMedia(
+    const base::ListValue* args) {
+  const MediaRouteController* route_controller =
+      media_router_ui_->GetMediaRouteController();
+  if (route_controller)
+    route_controller->Pause();
+}
+
+void MediaRouterWebUIMessageHandler::OnPlayCurrentMedia(
+    const base::ListValue* args) {
+  const MediaRouteController* route_controller =
+      media_router_ui_->GetMediaRouteController();
+  if (route_controller)
+    route_controller->Play();
+}
+
+void MediaRouterWebUIMessageHandler::OnSeekCurrentMedia(
+    const base::ListValue* args) {
+  const base::DictionaryValue* args_dict = nullptr;
+  int time;
+  if (!args->GetDictionary(0, &args_dict) ||
+      !args_dict->GetInteger("time", &time)) {
+    DVLOG(1) << "Unable to extract time";
+    return;
+  }
+  base::TimeDelta time_delta = base::TimeDelta::FromSeconds(time);
+  const MediaRouteController* route_controller =
+      media_router_ui_->GetMediaRouteController();
+  if (route_controller && current_media_status_ &&
+      time_delta >= base::TimeDelta() &&
+      time_delta <= current_media_status_->duration) {
+    route_controller->Seek(time_delta);
+  }
+}
+
+void MediaRouterWebUIMessageHandler::OnSetCurrentMediaMute(
+    const base::ListValue* args) {
+  const base::DictionaryValue* args_dict = nullptr;
+  bool mute;
+  if (!args->GetDictionary(0, &args_dict) ||
+      !args_dict->GetBoolean("mute", &mute)) {
+    DVLOG(1) << "Unable to extract mute";
+    return;
+  }
+  const MediaRouteController* route_controller =
+      media_router_ui_->GetMediaRouteController();
+  if (route_controller)
+    route_controller->SetMute(mute);
+}
+
+void MediaRouterWebUIMessageHandler::OnSetCurrentMediaVolume(
+    const base::ListValue* args) {
+  const base::DictionaryValue* args_dict = nullptr;
+  double volume;
+  if (!args->GetDictionary(0, &args_dict) ||
+      !args_dict->GetDouble("volume", &volume)) {
+    DVLOG(1) << "Unable to extract volume";
+    return;
+  }
+  const MediaRouteController* route_controller =
+      media_router_ui_->GetMediaRouteController();
+  if (route_controller && volume >= 0 && volume <= 1)
+    route_controller->SetVolume(volume);
 }
 
 bool MediaRouterWebUIMessageHandler::ActOnIssueType(
@@ -797,7 +977,7 @@ bool MediaRouterWebUIMessageHandler::ActOnIssueType(
     std::string learn_more_url = GetLearnMoreUrl(args);
     if (learn_more_url.empty())
       return false;
-    std::unique_ptr<base::ListValue> open_args(new base::ListValue);
+    auto open_args = base::MakeUnique<base::ListValue>();
     open_args->AppendString(learn_more_url);
     web_ui()->CallJavascriptFunctionUnsafe(kWindowOpen, *open_args);
     return true;
@@ -830,15 +1010,15 @@ void MediaRouterWebUIMessageHandler::MaybeUpdateFirstRunFlowData() {
       if (first_run_flow_acknowledged &&
           ProfileSyncServiceFactory::GetForProfile(profile)->IsSyncActive()) {
         pref_service->SetBoolean(prefs::kMediaRouterEnableCloudServices, true);
-        pref_service->SetBoolean(prefs::kMediaRouterCloudServicesPrefSet,
-                                 true);
+        pref_service->SetBoolean(prefs::kMediaRouterCloudServicesPrefSet, true);
         // Return early since the first run flow won't be surfaced.
         return;
       }
 
       show_cloud_pref = true;
       // "Casting to a Hangout from Chrome" Chromecast help center page.
-      first_run_flow_data.SetString("firstRunFlowCloudPrefLearnMoreUrl",
+      first_run_flow_data.SetString(
+          "firstRunFlowCloudPrefLearnMoreUrl",
           base::StringPrintf(kHelpPageUrlPrefix, 6320939));
     }
   }
@@ -880,17 +1060,18 @@ std::unique_ptr<base::ListValue> MediaRouterWebUIMessageHandler::RoutesToValue(
     const std::vector<MediaRoute::Id>& joinable_route_ids,
     const std::unordered_map<MediaRoute::Id, MediaCastMode>& current_cast_modes)
     const {
-  std::unique_ptr<base::ListValue> value(new base::ListValue);
+  auto value = base::MakeUnique<base::ListValue>();
   const std::string& extension_id =
       media_router_ui_->GetRouteProviderExtensionId();
 
   for (const MediaRoute& route : routes) {
     bool can_join =
         base::ContainsValue(joinable_route_ids, route.media_route_id());
-    int current_cast_mode = CurrentCastModeForRouteId(route.media_route_id(),
-                                                      current_cast_modes);
-    std::unique_ptr<base::DictionaryValue> route_val(RouteToValue(
-        route, can_join, extension_id, incognito_, current_cast_mode));
+    int current_cast_mode =
+        CurrentCastModeForRouteId(route.media_route_id(), current_cast_modes);
+    std::unique_ptr<base::DictionaryValue> route_val(
+        RouteToValue(route, can_join, extension_id, incognito_,
+                     current_cast_mode, is_web_ui_route_controller_available_));
     value->Append(std::move(route_val));
   }
 

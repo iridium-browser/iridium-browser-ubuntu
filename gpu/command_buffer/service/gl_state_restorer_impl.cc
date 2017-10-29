@@ -31,9 +31,14 @@ void GLStateRestorerImpl::RestoreState(const gl::GLStateRestorer* prev_state) {
       restorer_impl ? restorer_impl->GetContextState() : NULL);
 }
 
-void GLStateRestorerImpl::RestoreAllTextureUnitBindings() {
+void GLStateRestorerImpl::RestoreAllTextureUnitAndSamplerBindings() {
   DCHECK(decoder_.get());
-  decoder_->RestoreAllTextureUnitBindings(NULL);
+  decoder_->RestoreAllTextureUnitAndSamplerBindings(NULL);
+}
+
+void GLStateRestorerImpl::RestoreActiveTexture() {
+  DCHECK(decoder_.get());
+  decoder_->RestoreActiveTexture();
 }
 
 void GLStateRestorerImpl::RestoreActiveTextureUnitBinding(unsigned int target) {
@@ -49,6 +54,21 @@ void GLStateRestorerImpl::RestoreAllExternalTextureBindingsIfNeeded() {
 void GLStateRestorerImpl::RestoreFramebufferBindings() {
   DCHECK(decoder_.get());
   decoder_->RestoreFramebufferBindings();
+}
+
+void GLStateRestorerImpl::RestoreProgramBindings() {
+  DCHECK(decoder_.get());
+  decoder_->RestoreProgramBindings();
+}
+
+void GLStateRestorerImpl::RestoreBufferBinding(unsigned int target) {
+  DCHECK(decoder_.get());
+  decoder_->RestoreBufferBinding(target);
+}
+
+void GLStateRestorerImpl::RestoreVertexAttribArray(unsigned int index) {
+  DCHECK(decoder_.get());
+  decoder_->RestoreVertexAttribArray(index);
 }
 
 void GLStateRestorerImpl::PauseQueries() {

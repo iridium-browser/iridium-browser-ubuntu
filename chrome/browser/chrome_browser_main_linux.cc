@@ -6,8 +6,12 @@
 
 #include <fontconfig/fontconfig.h>
 
+#include <memory>
 #include <string>
+#include <utility>
 
+#include "base/files/file_path.h"
+#include "base/single_thread_task_runner.h"
 #include "base/task_scheduler/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -22,7 +26,9 @@
 #if !defined(OS_CHROMEOS)
 #include "base/command_line.h"
 #include "base/linux_util.h"
+#include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/os_crypt/key_storage_config_linux.h"
 #include "components/os_crypt/os_crypt.h"
 #include "content/public/browser/browser_thread.h"
 #endif
@@ -50,25 +56,28 @@ void ChromeBrowserMainPartsLinux::PreProfileInit() {
   // g_browser_process.  This happens in PreCreateThreads.
   // base::GetLinuxDistro() will initialize its value if needed.
   base::PostTaskWithTraits(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
-      base::Bind(base::IgnoreResult(&base::GetLinuxDistro)));
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::BindOnce(base::IgnoreResult(&base::GetLinuxDistro)));
 #endif
 
   media::AudioManager::SetGlobalAppName(
       l10n_util::GetStringUTF8(IDS_SHORT_PRODUCT_NAME));
 
 #if !defined(OS_CHROMEOS)
+  std::unique_ptr<os_crypt::Config> config(new os_crypt::Config());
   // Forward to os_crypt the flag to use a specific password store.
-  OSCrypt::SetStore(
-      parsed_command_line().GetSwitchValueASCII(switches::kPasswordStore));
+  config->store =
+      parsed_command_line().GetSwitchValueASCII(switches::kPasswordStore);
   // Forward the product name
-  OSCrypt::SetProductName(l10n_util::GetStringUTF8(IDS_PRODUCT_NAME));
+  config->product_name = l10n_util::GetStringUTF8(IDS_PRODUCT_NAME);
   // OSCrypt may target keyring, which requires calls from the main thread.
-  scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner(
-      content::BrowserThread::GetTaskRunnerForThread(
-          content::BrowserThread::UI));
-  OSCrypt::SetMainThreadRunner(main_thread_runner);
+  config->main_thread_runner = content::BrowserThread::GetTaskRunnerForThread(
+      content::BrowserThread::UI);
+  // OSCrypt can be disabled in a special settings file.
+  config->should_use_preference =
+      parsed_command_line().HasSwitch(switches::kEnableEncryptionSelection);
+  chrome::GetDefaultUserDataDirectory(&config->user_data_path);
+  OSCrypt::SetConfig(std::move(config));
 #endif
 
   ChromeBrowserMainPartsPosix::PreProfileInit();

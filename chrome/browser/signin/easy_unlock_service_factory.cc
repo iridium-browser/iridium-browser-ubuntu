@@ -7,17 +7,16 @@
 #include "base/command_line.h"
 #include "base/memory/singleton.h"
 #include "build/build_config.h"
-#include "chrome/browser/gcm/gcm_profile_service_factory.h"
+#include "chrome/browser/cryptauth/chrome_cryptauth_service_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_app_manager.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/signin/easy_unlock_service_regular.h"
-#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/browser_resources.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/pref_registry/pref_registry_syncable.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_system_provider.h"
 #include "extensions/browser/extensions_browser_client.h"
@@ -68,11 +67,9 @@ EasyUnlockServiceFactory::EasyUnlockServiceFactory()
     : BrowserContextKeyedServiceFactory(
           "EasyUnlockService",
           BrowserContextDependencyManager::GetInstance()) {
+  DependsOn(ChromeCryptAuthServiceFactory::GetInstance());
   DependsOn(
       extensions::ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
-  DependsOn(ProfileOAuth2TokenServiceFactory::GetInstance());
-  DependsOn(SigninManagerFactory::GetInstance());
-  DependsOn(gcm::GCMProfileServiceFactory::GetInstance());
 #if defined(OS_CHROMEOS)
   DependsOn(EasyUnlockTpmKeyManagerFactory::GetInstance());
 #endif
@@ -87,6 +84,10 @@ KeyedService* EasyUnlockServiceFactory::BuildServiceInstanceFor(
   int manifest_id = 0;
 
 #if defined(OS_CHROMEOS)
+  if (chromeos::ProfileHelper::IsLockScreenAppProfile(
+          Profile::FromBrowserContext(context))) {
+    return nullptr;
+  }
   if (chromeos::ProfileHelper::IsSigninProfile(
           Profile::FromBrowserContext(context))) {
     if (!context->IsOffTheRecord())
@@ -110,6 +111,13 @@ KeyedService* EasyUnlockServiceFactory::BuildServiceInstanceFor(
   service->Initialize(EasyUnlockAppManager::Create(
       extensions::ExtensionSystem::Get(context), manifest_id, app_path));
   return service;
+}
+
+void EasyUnlockServiceFactory::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  EasyUnlockService::RegisterProfilePrefs(registry);
+#endif
 }
 
 content::BrowserContext* EasyUnlockServiceFactory::GetBrowserContextToUse(

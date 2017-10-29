@@ -42,6 +42,7 @@
 #include "net/cert/x509_certificate.h"
 #include "net/nqe/effective_connection_type.h"
 #include "net/nqe/network_quality_estimator_test_util.h"
+#include "net/ssl/client_cert_identity_test_util.h"
 #include "net/ssl/client_cert_store.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_private_key.h"
@@ -49,6 +50,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/test_data_directory.h"
 #include "net/test/url_request/url_request_failed_job.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_interceptor.h"
@@ -78,7 +80,7 @@ class ClientCertStoreStub : public net::ClientCertStore {
   ClientCertStoreStub(const net::CertificateList& response,
                       int* request_count,
                       std::vector<std::string>* requested_authorities)
-      : response_(response),
+      : response_(std::move(response)),
         requested_authorities_(requested_authorities),
         request_count_(request_count) {
     requested_authorities_->clear();
@@ -89,13 +91,11 @@ class ClientCertStoreStub : public net::ClientCertStore {
 
   // net::ClientCertStore:
   void GetClientCerts(const net::SSLCertRequestInfo& cert_request_info,
-                      net::CertificateList* selected_certs,
-                      const base::Closure& callback) override {
+                      const ClientCertListCallback& callback) override {
     *requested_authorities_ = cert_request_info.cert_authorities;
     ++(*request_count_);
 
-    *selected_certs = response_;
-    callback.Run();
+    callback.Run(net::FakeClientCertIdentityListFromCertificateList(response_));
   }
 
  private:
@@ -117,14 +117,13 @@ class LoaderDestroyingCertStore : public net::ClientCertStore {
         on_loader_deleted_callback_(on_loader_deleted_callback) {}
 
   // net::ClientCertStore:
-  void GetClientCerts(const net::SSLCertRequestInfo& cert_request_info,
-                      net::CertificateList* selected_certs,
-                      const base::Closure& cert_selected_callback) override {
+  void GetClientCerts(
+      const net::SSLCertRequestInfo& cert_request_info,
+      const ClientCertListCallback& cert_selected_callback) override {
     // Don't destroy |loader_| while it's on the stack.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(&LoaderDestroyingCertStore::DoCallback,
-                              base::Unretained(loader_),
-                              cert_selected_callback,
+                              base::Unretained(loader_), cert_selected_callback,
                               on_loader_deleted_callback_));
   }
 
@@ -133,10 +132,10 @@ class LoaderDestroyingCertStore : public net::ClientCertStore {
   // LoaderDestroyingCertStore (ClientCertStores are actually handles, and not
   // global cert stores).
   static void DoCallback(std::unique_ptr<ResourceLoader>* loader,
-                         const base::Closure& cert_selected_callback,
+                         const ClientCertListCallback& cert_selected_callback,
                          const base::Closure& on_loader_deleted_callback) {
     loader->reset();
-    cert_selected_callback.Run();
+    cert_selected_callback.Run(net::ClientCertIdentityList());
     on_loader_deleted_callback.Run();
   }
 
@@ -170,8 +169,9 @@ class MockClientCertURLRequestJob : public net::URLRequestTestJob {
                    base::RetainedRef(cert_request_info)));
   }
 
-  void ContinueWithCertificate(net::X509Certificate* cert,
-                               net::SSLPrivateKey* private_key) override {
+  void ContinueWithCertificate(
+      scoped_refptr<net::X509Certificate> cert,
+      scoped_refptr<net::SSLPrivateKey> private_key) override {
     net::URLRequestTestJob::Start();
   }
 
@@ -196,11 +196,6 @@ class MockClientCertJobProtocolHandler
 
 // Set up dummy values to use in test HTTPS requests.
 
-scoped_refptr<net::X509Certificate> GetTestCert() {
-  return net::ImportCertFromFile(net::GetTestCertsDirectory(),
-                                 "test_mail_google_com.pem");
-}
-
 const net::CertStatus kTestCertError = net::CERT_STATUS_DATE_INVALID;
 const int kTestSecurityBits = 256;
 // SSL3 TLS_DHE_RSA_WITH_AES_256_CBC_SHA
@@ -224,7 +219,8 @@ class MockHTTPSURLRequestJob : public net::URLRequestTestJob {
   void GetResponseInfo(net::HttpResponseInfo* info) override {
     // Get the original response info, but override the SSL info.
     net::URLRequestJob::GetResponseInfo(info);
-    info->ssl_info.cert = GetTestCert();
+    info->ssl_info.cert =
+        net::ImportCertFromFile(net::GetTestCertsDirectory(), "ok_cert.pem");
     info->ssl_info.cert_status = kTestCertError;
     info->ssl_info.security_bits = kTestSecurityBits;
     info->ssl_info.connection_status = kTestConnectionStatus;
@@ -279,27 +275,31 @@ class SelectCertificateBrowserClient : public TestContentBrowserClient {
   void SelectClientCertificate(
       WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
+      net::ClientCertIdentityList client_certs,
       std::unique_ptr<ClientCertificateDelegate> delegate) override {
     EXPECT_FALSE(delegate_.get());
 
     ++call_count_;
-    passed_certs_ = cert_request_info->client_certs;
+    passed_identities_ = std::move(client_certs);
     delegate_ = std::move(delegate);
     select_certificate_run_loop_.Quit();
   }
 
   int call_count() { return call_count_; }
-  net::CertificateList passed_certs() { return passed_certs_; }
+  const net::ClientCertIdentityList& passed_identities() {
+    return passed_identities_;
+  }
 
-  void ContinueWithCertificate(net::X509Certificate* cert) {
-    delegate_->ContinueWithCertificate(cert);
+  void ContinueWithCertificate(scoped_refptr<net::X509Certificate> cert,
+                               scoped_refptr<net::SSLPrivateKey> private_key) {
+    delegate_->ContinueWithCertificate(std::move(cert), std::move(private_key));
     delegate_.reset();
   }
 
   void CancelCertificateSelection() { delegate_.reset(); }
 
  private:
-  net::CertificateList passed_certs_;
+  net::ClientCertIdentityList passed_identities_;
   int call_count_;
   std::unique_ptr<ClientCertificateDelegate> delegate_;
 
@@ -423,7 +423,8 @@ class ResourceLoaderTest : public testing::Test,
   void SetUpResourceLoaderForUrl(const GURL& test_url) {
     std::unique_ptr<net::URLRequest> request(
         resource_context_.GetRequestContext()->CreateRequest(
-            test_url, net::DEFAULT_PRIORITY, nullptr /* delegate */));
+            test_url, net::DEFAULT_PRIORITY, nullptr /* delegate */,
+            TRAFFIC_ANNOTATION_FOR_TESTS));
     SetUpResourceLoader(std::move(request), RESOURCE_TYPE_MAIN_FRAME, true);
   }
 
@@ -492,7 +493,8 @@ class ResourceLoaderTest : public testing::Test,
     EXPECT_EQ(1, did_start_request_);
     ++did_received_redirect_;
   }
-  void DidReceiveResponse(ResourceLoader* loader) override {
+  void DidReceiveResponse(ResourceLoader* loader,
+                          ResourceResponse* response) override {
     EXPECT_EQ(loader, loader_.get());
     EXPECT_EQ(0, did_finish_loading_);
     EXPECT_EQ(0, did_receive_response_);
@@ -598,7 +600,10 @@ TEST_F(ClientCertResourceLoaderTest, WithStoreLookup) {
   // Set up the test client cert store.
   int store_request_count;
   std::vector<std::string> store_requested_authorities;
-  net::CertificateList dummy_certs(1, GetTestCert());
+  scoped_refptr<net::X509Certificate> test_cert =
+      net::ImportCertFromFile(net::GetTestCertsDirectory(), "ok_cert.pem");
+  ASSERT_TRUE(test_cert);
+  net::CertificateList dummy_certs(1, test_cert);
   std::unique_ptr<ClientCertStoreStub> test_store(new ClientCertStoreStub(
       dummy_certs, &store_request_count, &store_requested_authorities));
   SetClientCertStore(std::move(test_store));
@@ -621,10 +626,11 @@ TEST_F(ClientCertResourceLoaderTest, WithStoreLookup) {
   // Check if the retrieved certificates were passed to the content browser
   // client.
   EXPECT_EQ(1, test_client.call_count());
-  EXPECT_EQ(dummy_certs, test_client.passed_certs());
+  EXPECT_EQ(1U, test_client.passed_identities().size());
+  EXPECT_EQ(test_cert.get(), test_client.passed_identities()[0]->certificate());
 
   // Continue the request.
-  test_client.ContinueWithCertificate(nullptr);
+  test_client.ContinueWithCertificate(nullptr, nullptr);
   raw_ptr_resource_handler_->WaitUntilResponseComplete();
   EXPECT_EQ(net::OK, raw_ptr_resource_handler_->final_status().error());
 
@@ -646,10 +652,10 @@ TEST_F(ClientCertResourceLoaderTest, WithNullStore) {
   // Check if the SelectClientCertificate was called on the content browser
   // client.
   EXPECT_EQ(1, test_client.call_count());
-  EXPECT_EQ(net::CertificateList(), test_client.passed_certs());
+  EXPECT_EQ(net::ClientCertIdentityList(), test_client.passed_identities());
 
   // Continue the request.
-  test_client.ContinueWithCertificate(nullptr);
+  test_client.ContinueWithCertificate(nullptr, nullptr);
   raw_ptr_resource_handler_->WaitUntilResponseComplete();
   EXPECT_EQ(net::OK, raw_ptr_resource_handler_->final_status().error());
 
@@ -670,7 +676,7 @@ TEST_F(ClientCertResourceLoaderTest, CancelSelection) {
   // Check if the SelectClientCertificate was called on the content browser
   // client.
   EXPECT_EQ(1, test_client.call_count());
-  EXPECT_EQ(net::CertificateList(), test_client.passed_certs());
+  EXPECT_EQ(net::ClientCertIdentityList(), test_client.passed_identities());
 
   // Cancel the request.
   test_client.CancelCertificateSelection();
@@ -798,6 +804,7 @@ TEST_F(ResourceLoaderTest, AsyncResourceHandler) {
   raw_ptr_resource_handler_->set_defer_on_will_start(true);
   raw_ptr_resource_handler_->set_defer_on_request_redirected(true);
   raw_ptr_resource_handler_->set_defer_on_response_started(true);
+  raw_ptr_resource_handler_->set_defer_on_will_read(true);
   raw_ptr_resource_handler_->set_defer_on_read_completed(true);
   raw_ptr_resource_handler_->set_defer_on_read_eof(true);
   raw_ptr_resource_handler_->set_defer_on_response_completed(true);
@@ -844,6 +851,18 @@ TEST_F(ResourceLoaderTest, AsyncResourceHandler) {
   EXPECT_EQ(0, raw_ptr_resource_handler_->on_will_read_called());
   EXPECT_EQ(0, raw_ptr_resource_handler_->on_response_completed_called());
 
+  // Resume and run until OnWillRead.
+  raw_ptr_resource_handler_->Resume();
+  raw_ptr_resource_handler_->WaitUntilDeferred();
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_will_read_called());
+
+  // Spinning the message loop should not advance the state further.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_will_read_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_completed_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_response_completed_called());
+
   // Resume and run until OnReadCompleted.
   raw_ptr_resource_handler_->Resume();
   raw_ptr_resource_handler_->WaitUntilDeferred();
@@ -853,17 +872,32 @@ TEST_F(ResourceLoaderTest, AsyncResourceHandler) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_will_read_called());
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_completed_called());
-  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_response_completed_called());
+
+  // Defer on the next OnWillRead call, for the EOF.
+  raw_ptr_resource_handler_->set_defer_on_will_read(true);
+
+  // Resume and run until the next OnWillRead call.
+  raw_ptr_resource_handler_->Resume();
+  raw_ptr_resource_handler_->WaitUntilDeferred();
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_completed_called());
+
+  // Spinning the message loop should not advance the state further.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(2, raw_ptr_resource_handler_->on_will_read_called());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_completed_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(0, raw_ptr_resource_handler_->on_response_completed_called());
 
   // Resume and run until the final 0-byte read, signaling EOF.
   raw_ptr_resource_handler_->Resume();
   raw_ptr_resource_handler_->WaitUntilDeferred();
-  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof_called());
 
   // Spinning the message loop should not advance the state further.
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(0, raw_ptr_resource_handler_->on_response_completed_called());
   EXPECT_EQ(test_data(), raw_ptr_resource_handler_->body());
 
@@ -895,6 +929,7 @@ TEST_F(ResourceLoaderTest, AsyncResourceHandlerAsyncReads) {
 
   raw_ptr_resource_handler_->set_defer_on_will_start(true);
   raw_ptr_resource_handler_->set_defer_on_response_started(true);
+  raw_ptr_resource_handler_->set_defer_on_will_read(true);
   raw_ptr_resource_handler_->set_defer_on_read_completed(true);
   raw_ptr_resource_handler_->set_defer_on_read_eof(true);
   raw_ptr_resource_handler_->set_defer_on_response_completed(true);
@@ -926,6 +961,18 @@ TEST_F(ResourceLoaderTest, AsyncResourceHandlerAsyncReads) {
   EXPECT_EQ(0, raw_ptr_resource_handler_->on_will_read_called());
   EXPECT_EQ(0, raw_ptr_resource_handler_->on_response_completed_called());
 
+  // Resume and run until OnWillRead.
+  raw_ptr_resource_handler_->Resume();
+  raw_ptr_resource_handler_->WaitUntilDeferred();
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_will_read_called());
+
+  // Spinning the message loop should not advance the state further.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_will_read_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_completed_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_response_completed_called());
+
   // Resume and run until OnReadCompleted.
   raw_ptr_resource_handler_->Resume();
   raw_ptr_resource_handler_->WaitUntilDeferred();
@@ -935,17 +982,32 @@ TEST_F(ResourceLoaderTest, AsyncResourceHandlerAsyncReads) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_will_read_called());
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_completed_called());
-  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_response_completed_called());
+
+  // Defer on the next OnWillRead call, for the EOF.
+  raw_ptr_resource_handler_->set_defer_on_will_read(true);
+
+  // Resume and run until the next OnWillRead.
+  raw_ptr_resource_handler_->Resume();
+  raw_ptr_resource_handler_->WaitUntilDeferred();
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_completed_called());
+
+  // Spinning the message loop should not advance the state further.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(2, raw_ptr_resource_handler_->on_will_read_called());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_completed_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(0, raw_ptr_resource_handler_->on_response_completed_called());
 
   // Resume and run until the final 0-byte read, signalling EOF.
   raw_ptr_resource_handler_->Resume();
   raw_ptr_resource_handler_->WaitUntilDeferred();
-  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof_called());
 
   // Spinning the message loop should not advance the state further.
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(0, raw_ptr_resource_handler_->on_response_completed_called());
   EXPECT_EQ(test_data(), raw_ptr_resource_handler_->body());
 
@@ -1054,7 +1116,7 @@ TEST_F(ResourceLoaderTest, SyncCancelOnReadCompleted) {
   EXPECT_EQ(1, did_receive_response_);
   EXPECT_EQ(1, did_finish_loading_);
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_completed_called());
-  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_response_completed_called());
 
   EXPECT_EQ(net::ERR_ABORTED,
@@ -1070,7 +1132,7 @@ TEST_F(ResourceLoaderTest, SyncCancelOnReceivedEof) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, did_receive_response_);
   EXPECT_EQ(1, did_finish_loading_);
-  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_response_completed_called());
 
   EXPECT_EQ(net::ERR_ABORTED,
@@ -1088,7 +1150,7 @@ TEST_F(ResourceLoaderTest, SyncCancelOnAsyncReadCompleted) {
   EXPECT_EQ(1, did_receive_response_);
   EXPECT_EQ(1, did_finish_loading_);
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_completed_called());
-  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_response_completed_called());
 
   EXPECT_EQ(net::ERR_ABORTED,
@@ -1105,7 +1167,7 @@ TEST_F(ResourceLoaderTest, SyncCancelOnAsyncReceivedEof) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, did_receive_response_);
   EXPECT_EQ(1, did_finish_loading_);
-  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_response_completed_called());
 
   EXPECT_EQ(net::ERR_ABORTED,
@@ -1170,6 +1232,23 @@ TEST_F(ResourceLoaderTest, AsyncCancelOnResponseStarted) {
   EXPECT_EQ("", raw_ptr_resource_handler_->body());
 }
 
+TEST_F(ResourceLoaderTest, AsyncCancelOnWillRead) {
+  raw_ptr_resource_handler_->set_defer_on_will_read(true);
+
+  loader_->StartRequest();
+  raw_ptr_resource_handler_->WaitUntilDeferred();
+  raw_ptr_resource_handler_->CancelWithError(net::ERR_FAILED);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, did_receive_response_);
+  EXPECT_EQ(1, did_finish_loading_);
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_will_read_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_completed_called());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_response_completed_called());
+
+  EXPECT_EQ(net::ERR_FAILED, raw_ptr_resource_handler_->final_status().error());
+}
+
 TEST_F(ResourceLoaderTest, AsyncCancelOnReadCompleted) {
   raw_ptr_resource_handler_->set_defer_on_read_completed(true);
 
@@ -1180,7 +1259,7 @@ TEST_F(ResourceLoaderTest, AsyncCancelOnReadCompleted) {
   EXPECT_EQ(1, did_receive_response_);
   EXPECT_EQ(1, did_finish_loading_);
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_completed_called());
-  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_response_completed_called());
 
   EXPECT_EQ(net::ERR_FAILED, raw_ptr_resource_handler_->final_status().error());
@@ -1196,7 +1275,7 @@ TEST_F(ResourceLoaderTest, AsyncCancelOnReceivedEof) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, did_receive_response_);
   EXPECT_EQ(1, did_finish_loading_);
-  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_response_completed_called());
 
   EXPECT_EQ(net::ERR_FAILED, raw_ptr_resource_handler_->final_status().error());
@@ -1214,7 +1293,7 @@ TEST_F(ResourceLoaderTest, AsyncCancelOnAsyncReadCompleted) {
   EXPECT_EQ(1, did_receive_response_);
   EXPECT_EQ(1, did_finish_loading_);
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_completed_called());
-  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(0, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_response_completed_called());
 
   EXPECT_EQ(net::ERR_FAILED, raw_ptr_resource_handler_->final_status().error());
@@ -1231,7 +1310,7 @@ TEST_F(ResourceLoaderTest, AsyncCancelOnAsyncReceivedEof) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, did_receive_response_);
   EXPECT_EQ(1, did_finish_loading_);
-  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof());
+  EXPECT_EQ(1, raw_ptr_resource_handler_->on_read_eof_called());
   EXPECT_EQ(1, raw_ptr_resource_handler_->on_response_completed_called());
 
   EXPECT_EQ(net::ERR_FAILED, raw_ptr_resource_handler_->final_status().error());
@@ -1443,8 +1522,8 @@ class EffectiveConnectionTypeResourceLoaderTest : public ResourceLoaderTest {
     // Start the request and wait for it to finish.
     std::unique_ptr<net::URLRequest> request(
         resource_context_.GetRequestContext()->CreateRequest(
-            test_redirect_url(), net::DEFAULT_PRIORITY,
-            nullptr /* delegate */));
+            test_redirect_url(), net::DEFAULT_PRIORITY, nullptr /* delegate */,
+            TRAFFIC_ANNOTATION_FOR_TESTS));
     SetUpResourceLoader(std::move(request), resource_type,
                         belongs_to_main_frame);
 

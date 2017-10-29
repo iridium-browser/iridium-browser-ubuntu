@@ -8,12 +8,12 @@
 
 #include "base/command_line.h"
 #include "base/i18n/number_formatting.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/vector_icons/vector_icons.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -35,30 +35,25 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
-#include "chrome/browser/ui/views/location_bar/page_action_with_badge_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/outdated_upgrade_bubble_view.h"
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
-#include "chrome/browser/ui/views/toolbar/back_button.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/home_button.h"
 #include "chrome/browser/ui/views/toolbar/reload_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 #include "chrome/browser/ui/views/translate/translate_bubble_view.h"
 #include "chrome/browser/ui/views/translate/translate_icon_view.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/theme_resources.h"
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/browser_accessibility_state.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -71,8 +66,6 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/native_theme/native_theme_aura.h"
-#include "ui/vector_icons/vector_icons.h"
-#include "ui/views/focus/view_storage.h"
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
@@ -85,7 +78,6 @@
 
 #if !defined(OS_CHROMEOS)
 #include "chrome/browser/signin/signin_global_error_factory.h"
-#include "chrome/browser/sync/sync_global_error_factory.h"
 #endif
 
 #if defined(USE_ASH)
@@ -141,19 +133,12 @@ ToolbarView::ToolbarView(Browser* browser)
   chrome::AddCommandObserver(browser_, IDC_HOME, this);
   chrome::AddCommandObserver(browser_, IDC_LOAD_NEW_TAB_PAGE, this);
 
-  if (OutdatedUpgradeBubbleView::IsAvailable()) {
-    registrar_.Add(this, chrome::NOTIFICATION_OUTDATED_INSTALL,
-                   content::NotificationService::AllSources());
-    registrar_.Add(this, chrome::NOTIFICATION_OUTDATED_INSTALL_NO_AU,
-                   content::NotificationService::AllSources());
-  }
-#if defined(OS_WIN)
-  registrar_.Add(this, chrome::NOTIFICATION_CRITICAL_UPGRADE_INSTALLED,
-                 content::NotificationService::AllSources());
-#endif
+  UpgradeDetector::GetInstance()->AddObserver(this);
 }
 
 ToolbarView::~ToolbarView() {
+  UpgradeDetector::GetInstance()->RemoveObserver(this);
+
   // NOTE: Don't remove the command observers here.  This object gets destroyed
   // after the Browser (which owns the CommandUpdater), so the CommandUpdater is
   // already gone.
@@ -171,7 +156,7 @@ void ToolbarView::Init() {
     return;
   }
 
-  back_ = new BackButton(
+  back_ = new ToolbarButton(
       browser_->profile(), this,
       new BackForwardMenuModel(browser_, BackForwardMenuModel::BACKWARD_MENU));
   back_->set_hide_ink_drop_when_showing_context_menu(false);
@@ -240,9 +225,6 @@ void ToolbarView::Init() {
 #if !defined(OS_CHROMEOS)
   if (!HasAshShell()) {
     SigninGlobalErrorFactory::GetForProfile(browser_->profile());
-#if !defined(OS_ANDROID)
-    SyncGlobalErrorFactory::GetForProfile(browser_->profile());
-#endif
   }
 
 #if defined(OS_WIN)
@@ -354,9 +336,9 @@ void ToolbarView::ShowTranslateBubble(
   }
 
   views::Widget* bubble_widget = TranslateBubbleView::ShowBubble(
-      anchor_view, web_contents, step,
-      error_type, is_user_gesture ? TranslateBubbleView::USER_GESTURE
-                                  : TranslateBubbleView::AUTOMATIC);
+      anchor_view, gfx::Point(), web_contents, step, error_type,
+      is_user_gesture ? TranslateBubbleView::USER_GESTURE
+                      : TranslateBubbleView::AUTOMATIC);
   if (bubble_widget && translate_icon_view)
     bubble_widget->AddObserver(translate_icon_view);
 }
@@ -423,13 +405,8 @@ ToolbarView::GetContentSettingBubbleModelDelegate() {
   return browser_->content_setting_bubble_model_delegate();
 }
 
-void ToolbarView::ShowWebsiteSettings(content::WebContents* web_contents) {
-  chrome::ShowWebsiteSettings(browser_, web_contents);
-}
-
-PageActionImageView* ToolbarView::CreatePageActionImageView(
-    LocationBarView* owner, ExtensionAction* action) {
-  return new PageActionImageView(owner, action, browser_);
+void ToolbarView::ShowPageInfo(content::WebContents* web_contents) {
+  chrome::ShowPageInfo(browser_, web_contents);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -465,26 +442,21 @@ void ToolbarView::ButtonPressed(views::Button* sender,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ToolbarView, content::NotificationObserver implementation:
+// ToolbarView, UpgradeObserver implementation:
+void ToolbarView::OnOutdatedInstall() {
+  if (OutdatedUpgradeBubbleView::IsAvailable())
+    ShowOutdatedInstallNotification(true);
+}
 
-void ToolbarView::Observe(int type,
-                          const content::NotificationSource& source,
-                          const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_OUTDATED_INSTALL:
-      ShowOutdatedInstallNotification(true);
-      break;
-    case chrome::NOTIFICATION_OUTDATED_INSTALL_NO_AU:
-      ShowOutdatedInstallNotification(false);
-      break;
+void ToolbarView::OnOutdatedInstallNoAutoUpdate() {
+  if (OutdatedUpgradeBubbleView::IsAvailable())
+    ShowOutdatedInstallNotification(false);
+}
+
+void ToolbarView::OnCriticalUpgradeInstalled() {
 #if defined(OS_WIN)
-    case chrome::NOTIFICATION_CRITICAL_UPGRADE_INSTALLED:
-      ShowCriticalNotification();
-      break;
+  ShowCriticalNotification();
 #endif
-    default:
-      NOTREACHED();
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -498,7 +470,7 @@ bool ToolbarView::GetAcceleratorForCommandId(int command_id,
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, views::View overrides:
 
-gfx::Size ToolbarView::GetPreferredSize() const {
+gfx::Size ToolbarView::CalculatePreferredSize() const {
   return GetSizeInternal(&View::GetPreferredSize);
 }
 
@@ -532,16 +504,11 @@ void ToolbarView::Layout() {
   //                http://crbug.com/5540
   const bool maximized =
       browser_->window() && browser_->window()->IsMaximized();
-  const int back_width = back_->GetPreferredSize().width();
   // The padding at either end of the toolbar.
   const int end_padding = GetToolbarHorizontalPadding();
-  if (maximized) {
-    back_->SetBounds(0, child_y, back_width + end_padding, child_height);
-    back_->SetLeadingMargin(end_padding);
-  } else {
-    back_->SetBounds(end_padding, child_y, back_width, child_height);
-    back_->SetLeadingMargin(0);
-  }
+  back_->SetLeadingMargin(maximized ? end_padding : 0);
+  back_->SetBounds(maximized ? 0 : end_padding, child_y,
+                   back_->GetPreferredSize().width(), child_height);
   const int element_padding = GetLayoutConstant(TOOLBAR_ELEMENT_PADDING);
   int next_element_x = back_->bounds().right() + element_padding;
 
@@ -607,7 +574,7 @@ void ToolbarView::Layout() {
   //                required.
   browser_actions_->Layout();
 
-  // Extend the app menu to the screen's right edge in maximized mode just like
+  // Extend the app menu to the screen's right edge in tablet mode just like
   // we extend the back button to the left edge.
   if (maximized)
     app_menu_width += end_padding;
@@ -689,7 +656,7 @@ void ToolbarView::UpdateSeverity(AppMenuIconController::IconType type,
 
   if (type == AppMenuIconController::IconType::INCOMPATIBILITY_WARNING) {
     if (!was_showing) {
-      content::RecordAction(UserMetricsAction("ConflictBadge"));
+      base::RecordAction(UserMetricsAction("ConflictBadge"));
 #if defined(OS_WIN)
       ConflictingModuleView::MaybeShow(browser_, app_menu_button_);
 #endif
@@ -743,19 +710,21 @@ void ToolbarView::LoadImages() {
   const SkColor disabled_color =
       tp->GetColor(ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON_INACTIVE);
 
-  back_->SetImage(views::Button::STATE_NORMAL,
-                  gfx::CreateVectorIcon(ui::kBackArrowIcon, normal_color));
-  back_->SetImage(views::Button::STATE_DISABLED,
-                  gfx::CreateVectorIcon(ui::kBackArrowIcon, disabled_color));
+  back_->SetImage(
+      views::Button::STATE_NORMAL,
+      gfx::CreateVectorIcon(vector_icons::kBackArrowIcon, normal_color));
+  back_->SetImage(
+      views::Button::STATE_DISABLED,
+      gfx::CreateVectorIcon(vector_icons::kBackArrowIcon, disabled_color));
   forward_->SetImage(
       views::Button::STATE_NORMAL,
-      gfx::CreateVectorIcon(ui::kForwardArrowIcon, normal_color));
+      gfx::CreateVectorIcon(vector_icons::kForwardArrowIcon, normal_color));
   forward_->SetImage(
       views::Button::STATE_DISABLED,
-      gfx::CreateVectorIcon(ui::kForwardArrowIcon, disabled_color));
+      gfx::CreateVectorIcon(vector_icons::kForwardArrowIcon, disabled_color));
   home_->SetImage(views::Button::STATE_NORMAL,
                   gfx::CreateVectorIcon(kNavigateHomeIcon, normal_color));
-  app_menu_button_->UpdateIcon();
+  app_menu_button_->UpdateIcon(false);
 
   back_->set_ink_drop_base_color(normal_color);
   forward_->set_ink_drop_base_color(normal_color);

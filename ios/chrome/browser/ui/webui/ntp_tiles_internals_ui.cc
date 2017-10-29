@@ -6,12 +6,14 @@
 
 #include "base/memory/ptr_util.h"
 #include "components/grit/components_resources.h"
+#include "components/keyed_service/core/service_access_type.h"
 #include "components/ntp_tiles/field_trial.h"
 #include "components/ntp_tiles/most_visited_sites.h"
 #include "components/ntp_tiles/webui/ntp_tiles_internals_message_handler.h"
 #include "components/ntp_tiles/webui/ntp_tiles_internals_message_handler_client.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
+#include "ios/chrome/browser/favicon/favicon_service_factory.h"
 #include "ios/chrome/browser/ntp_tiles/ios_most_visited_sites_factory.h"
 #include "ios/chrome/browser/ntp_tiles/ios_popular_sites_factory.h"
 #include "ios/web/public/web_thread.h"
@@ -26,7 +28,10 @@ class IOSNTPTilesInternalsMessageHandlerBridge
     : public web::WebUIIOSMessageHandler,
       public ntp_tiles::NTPTilesInternalsMessageHandlerClient {
  public:
-  IOSNTPTilesInternalsMessageHandlerBridge() {}
+  // |favicon_service| must not be null and must outlive this object.
+  explicit IOSNTPTilesInternalsMessageHandlerBridge(
+      favicon::FaviconService* favicon_service)
+      : handler_(favicon_service) {}
 
  private:
   // web::WebUIIOSMessageHandler:
@@ -34,7 +39,7 @@ class IOSNTPTilesInternalsMessageHandlerBridge
 
   // ntp_tiles::NTPTilesInternalsMessageHandlerClient
   bool SupportsNTPTiles() override;
-  bool DoesSourceExist(ntp_tiles::NTPTileSource source) override;
+  bool DoesSourceExist(ntp_tiles::TileSource source) override;
   std::unique_ptr<ntp_tiles::MostVisitedSites> MakeMostVisitedSites() override;
   PrefService* GetPrefs() override;
   void RegisterMessageCallback(
@@ -54,18 +59,18 @@ void IOSNTPTilesInternalsMessageHandlerBridge::RegisterMessages() {
 }
 
 bool IOSNTPTilesInternalsMessageHandlerBridge::SupportsNTPTiles() {
-  auto* state = ios::ChromeBrowserState::FromWebUIIOS(web_ui());
-  return state == state->GetOriginalChromeBrowserState();
+  return !ios::ChromeBrowserState::FromWebUIIOS(web_ui())->IsOffTheRecord();
 }
 
 bool IOSNTPTilesInternalsMessageHandlerBridge::DoesSourceExist(
-    ntp_tiles::NTPTileSource source) {
+    ntp_tiles::TileSource source) {
   switch (source) {
-    case ntp_tiles::NTPTileSource::TOP_SITES:
-    case ntp_tiles::NTPTileSource::SUGGESTIONS_SERVICE:
-    case ntp_tiles::NTPTileSource::POPULAR:
+    case ntp_tiles::TileSource::TOP_SITES:
+    case ntp_tiles::TileSource::SUGGESTIONS_SERVICE:
+    case ntp_tiles::TileSource::POPULAR:
+    case ntp_tiles::TileSource::HOMEPAGE:
       return true;
-    case ntp_tiles::NTPTileSource::WHITELIST:
+    case ntp_tiles::TileSource::WHITELIST:
       return false;
   }
   NOTREACHED();
@@ -109,10 +114,14 @@ web::WebUIIOSDataSource* CreateNTPTilesInternalsHTMLSource() {
 
 NTPTilesInternalsUI::NTPTilesInternalsUI(web::WebUIIOS* web_ui)
     : web::WebUIIOSController(web_ui) {
-  web::WebUIIOSDataSource::Add(ios::ChromeBrowserState::FromWebUIIOS(web_ui),
+  ios::ChromeBrowserState* browser_state =
+      ios::ChromeBrowserState::FromWebUIIOS(web_ui);
+  web::WebUIIOSDataSource::Add(browser_state,
                                CreateNTPTilesInternalsHTMLSource());
   web_ui->AddMessageHandler(
-      base::MakeUnique<IOSNTPTilesInternalsMessageHandlerBridge>());
+      base::MakeUnique<IOSNTPTilesInternalsMessageHandlerBridge>(
+          ios::FaviconServiceFactory::GetForBrowserState(
+              browser_state, ServiceAccessType::EXPLICIT_ACCESS)));
 }
 
 NTPTilesInternalsUI::~NTPTilesInternalsUI() {}

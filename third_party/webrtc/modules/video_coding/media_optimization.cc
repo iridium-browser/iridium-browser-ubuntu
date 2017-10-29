@@ -10,12 +10,16 @@
 
 #include "webrtc/modules/video_coding/media_optimization.h"
 
-#include "webrtc/base/logging.h"
+#include <limits>
+
 #include "webrtc/modules/video_coding/utility/frame_dropper.h"
+#include "webrtc/rtc_base/logging.h"
 #include "webrtc/system_wrappers/include/clock.h"
 
 namespace webrtc {
 namespace media_optimization {
+const int kMsPerSec = 1000;
+const int kBitsPerByte = 8;
 
 struct MediaOptimization::EncodedFrameSample {
   EncodedFrameSample(size_t size_bytes,
@@ -31,8 +35,7 @@ struct MediaOptimization::EncodedFrameSample {
 };
 
 MediaOptimization::MediaOptimization(Clock* clock)
-    : crit_sect_(CriticalSectionWrapper::CreateCriticalSection()),
-      clock_(clock),
+    : clock_(clock),
       max_bit_rate_(0),
       codec_width_(0),
       codec_height_(0),
@@ -43,7 +46,6 @@ MediaOptimization::MediaOptimization(Clock* clock)
       video_target_bitrate_(0),
       incoming_frame_rate_(0),
       encoded_frame_samples_(),
-      avg_sent_bit_rate_bps_(0),
       avg_sent_framerate_(0),
       num_layers_(0) {
   memset(send_statistics_, 0, sizeof(send_statistics_));
@@ -54,7 +56,7 @@ MediaOptimization::~MediaOptimization(void) {
 }
 
 void MediaOptimization::Reset() {
-  CriticalSectionScoped lock(crit_sect_.get());
+  rtc::CritScope lock(&crit_sect_);
   SetEncodingDataInternal(0, 0, 0, 0, 0, 0, max_payload_size_);
   memset(incoming_frame_times_, -1, sizeof(incoming_frame_times_));
   incoming_frame_rate_ = 0.0;
@@ -66,7 +68,6 @@ void MediaOptimization::Reset() {
   codec_height_ = 0;
   user_frame_rate_ = 0;
   encoded_frame_samples_.clear();
-  avg_sent_bit_rate_bps_ = 0;
   num_layers_ = 1;
 }
 
@@ -77,7 +78,7 @@ void MediaOptimization::SetEncodingData(int32_t max_bit_rate,
                                         uint32_t frame_rate,
                                         int num_layers,
                                         int32_t mtu) {
-  CriticalSectionScoped lock(crit_sect_.get());
+  rtc::CritScope lock(&crit_sect_);
   SetEncodingDataInternal(max_bit_rate, frame_rate, target_bitrate, width,
                           height, num_layers, mtu);
 }
@@ -105,7 +106,7 @@ void MediaOptimization::SetEncodingDataInternal(int32_t max_bit_rate,
 }
 
 uint32_t MediaOptimization::SetTargetRates(uint32_t target_bitrate) {
-  CriticalSectionScoped lock(crit_sect_.get());
+  rtc::CritScope lock(&crit_sect_);
 
   video_target_bitrate_ = target_bitrate;
 
@@ -117,47 +118,57 @@ uint32_t MediaOptimization::SetTargetRates(uint32_t target_bitrate) {
   // Update encoding rates following protection settings.
   float target_video_bitrate_kbps =
       static_cast<float>(video_target_bitrate_) / 1000.0f;
-  frame_dropper_->SetRates(target_video_bitrate_kbps, incoming_frame_rate_);
+  float framerate = incoming_frame_rate_;
+  if (framerate == 0.0) {
+    // No framerate estimate available, use configured max framerate instead.
+    framerate = user_frame_rate_;
+  }
+
+  frame_dropper_->SetRates(target_video_bitrate_kbps, framerate);
 
   return video_target_bitrate_;
 }
 
 uint32_t MediaOptimization::InputFrameRate() {
-  CriticalSectionScoped lock(crit_sect_.get());
+  rtc::CritScope lock(&crit_sect_);
   return InputFrameRateInternal();
 }
 
 uint32_t MediaOptimization::InputFrameRateInternal() {
   ProcessIncomingFrameRate(clock_->TimeInMilliseconds());
-  return uint32_t(incoming_frame_rate_ + 0.5f);
+  uint32_t framerate = static_cast<uint32_t>(std::min<float>(
+      std::numeric_limits<uint32_t>::max(), incoming_frame_rate_ + 0.5f));
+  return framerate;
 }
 
 uint32_t MediaOptimization::SentFrameRate() {
-  CriticalSectionScoped lock(crit_sect_.get());
+  rtc::CritScope lock(&crit_sect_);
   return SentFrameRateInternal();
 }
 
 uint32_t MediaOptimization::SentFrameRateInternal() {
-  PurgeOldFrameSamples(clock_->TimeInMilliseconds());
+  PurgeOldFrameSamples(clock_->TimeInMilliseconds() - kBitrateAverageWinMs);
   UpdateSentFramerate();
   return avg_sent_framerate_;
 }
 
 uint32_t MediaOptimization::SentBitRate() {
-  CriticalSectionScoped lock(crit_sect_.get());
-  const int64_t now_ms = clock_->TimeInMilliseconds();
-  PurgeOldFrameSamples(now_ms);
-  UpdateSentBitrate(now_ms);
-  return avg_sent_bit_rate_bps_;
+  rtc::CritScope lock(&crit_sect_);
+  PurgeOldFrameSamples(clock_->TimeInMilliseconds() - kBitrateAverageWinMs);
+  size_t sent_bytes = 0;
+  for (auto& frame_sample : encoded_frame_samples_) {
+    sent_bytes += frame_sample.size_bytes;
+  }
+  return sent_bytes * kBitsPerByte * kMsPerSec / kBitrateAverageWinMs;
 }
 
 int32_t MediaOptimization::UpdateWithEncodedData(
     const EncodedImage& encoded_image) {
   size_t encoded_length = encoded_image._length;
   uint32_t timestamp = encoded_image._timeStamp;
-  CriticalSectionScoped lock(crit_sect_.get());
+  rtc::CritScope lock(&crit_sect_);
   const int64_t now_ms = clock_->TimeInMilliseconds();
-  PurgeOldFrameSamples(now_ms);
+  PurgeOldFrameSamples(now_ms - kBitrateAverageWinMs);
   if (encoded_frame_samples_.size() > 0 &&
       encoded_frame_samples_.back().timestamp == timestamp) {
     // Frames having the same timestamp are generated from the same input
@@ -169,7 +180,6 @@ int32_t MediaOptimization::UpdateWithEncodedData(
     encoded_frame_samples_.push_back(
         EncodedFrameSample(encoded_length, timestamp, now_ms));
   }
-  UpdateSentBitrate(now_ms);
   UpdateSentFramerate();
   if (encoded_length > 0) {
     const bool delta_frame = encoded_image._frameType != kVideoFrameKey;
@@ -180,12 +190,12 @@ int32_t MediaOptimization::UpdateWithEncodedData(
 }
 
 void MediaOptimization::EnableFrameDropper(bool enable) {
-  CriticalSectionScoped lock(crit_sect_.get());
+  rtc::CritScope lock(&crit_sect_);
   frame_dropper_->Enable(enable);
 }
 
 bool MediaOptimization::DropFrame() {
-  CriticalSectionScoped lock(crit_sect_.get());
+  rtc::CritScope lock(&crit_sect_);
   UpdateIncomingFrameRate();
   // Leak appropriate number of bytes.
   frame_dropper_->Leak((uint32_t)(InputFrameRateInternal() + 0.5f));
@@ -206,34 +216,13 @@ void MediaOptimization::UpdateIncomingFrameRate() {
   ProcessIncomingFrameRate(now);
 }
 
-void MediaOptimization::PurgeOldFrameSamples(int64_t now_ms) {
+void MediaOptimization::PurgeOldFrameSamples(int64_t threshold_ms) {
   while (!encoded_frame_samples_.empty()) {
-    if (now_ms - encoded_frame_samples_.front().time_complete_ms >
-        kBitrateAverageWinMs) {
+    if (encoded_frame_samples_.front().time_complete_ms < threshold_ms) {
       encoded_frame_samples_.pop_front();
     } else {
       break;
     }
-  }
-}
-
-void MediaOptimization::UpdateSentBitrate(int64_t now_ms) {
-  if (encoded_frame_samples_.empty()) {
-    avg_sent_bit_rate_bps_ = 0;
-    return;
-  }
-  size_t framesize_sum = 0;
-  for (FrameSampleList::iterator it = encoded_frame_samples_.begin();
-       it != encoded_frame_samples_.end(); ++it) {
-    framesize_sum += it->size_bytes;
-  }
-  float denom = static_cast<float>(
-      now_ms - encoded_frame_samples_.front().time_complete_ms);
-  if (denom >= 1.0f) {
-    avg_sent_bit_rate_bps_ =
-        static_cast<uint32_t>(framesize_sum * 8.0f * 1000.0f / denom + 0.5f);
-  } else {
-    avg_sent_bit_rate_bps_ = framesize_sum * 8;
   }
 }
 

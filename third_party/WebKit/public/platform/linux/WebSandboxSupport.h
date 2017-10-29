@@ -31,9 +31,9 @@
 #ifndef WebSandboxSupport_h
 #define WebSandboxSupport_h
 
-#include "../WebCommon.h"
-#include "../WebString.h"
 #include "WebFallbackFont.h"
+#include "public/platform/WebCommon.h"
+#include "public/platform/WebString.h"
 
 namespace blink {
 
@@ -52,8 +52,8 @@ class WebSandboxSupport {
   //
   // Returns a WebFallbackFont instance with the font name and filename.
   // The instance has empty font name if the request cannot be satisfied.
-  virtual void getFallbackFontForCharacter(WebUChar32,
-                                           const char* preferredLocale,
+  virtual void GetFallbackFontForCharacter(WebUChar32,
+                                           const char* preferred_locale,
                                            WebFallbackFont*) = 0;
 
   // Fill out the given WebFontRenderStyle with the user's preferences for
@@ -68,8 +68,8 @@ class WebSandboxSupport {
   //     I: italic flag
   //     B: bold flag
   // TODO(derat): Use separate parameters for the size and the style.
-  virtual void getWebFontRenderStyleForStrike(const char* family,
-                                              int sizeAndStyle,
+  virtual void GetWebFontRenderStyleForStrike(const char* family,
+                                              int size_and_style,
                                               WebFontRenderStyle*) = 0;
 };
 

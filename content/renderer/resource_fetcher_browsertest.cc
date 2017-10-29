@@ -26,7 +26,6 @@
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
-using blink::WebFrame;
 using blink::WebURLRequest;
 using blink::WebURLResponse;
 
@@ -149,46 +148,46 @@ class ResourceFetcherTests : public ContentBrowserTest {
   }
 
   void ResourceFetcherDownloadOnRenderer(const GURL& url) {
-    WebFrame* frame = GetRenderView()->GetWebView()->mainFrame();
+    blink::WebLocalFrame* frame =
+        GetRenderView()->GetWebView()->MainFrame()->ToWebLocalFrame();
 
     std::unique_ptr<FetcherDelegate> delegate(new FetcherDelegate);
     std::unique_ptr<ResourceFetcher> fetcher(ResourceFetcher::Create(url));
-    fetcher->Start(frame,
-                   WebURLRequest::RequestContextInternal,
+    fetcher->Start(frame, WebURLRequest::kRequestContextInternal,
                    delegate->NewCallback());
 
     delegate->WaitForResponse();
 
     ASSERT_TRUE(delegate->completed());
-    EXPECT_EQ(delegate->response().httpStatusCode(), 200);
+    EXPECT_EQ(delegate->response().HttpStatusCode(), 200);
     std::string text = delegate->data();
     EXPECT_TRUE(text.find("Basic html test.") != std::string::npos);
   }
 
   void ResourceFetcher404OnRenderer(const GURL& url) {
-    WebFrame* frame = GetRenderView()->GetWebView()->mainFrame();
+    blink::WebLocalFrame* frame =
+        GetRenderView()->GetWebView()->MainFrame()->ToWebLocalFrame();
 
     std::unique_ptr<FetcherDelegate> delegate(new FetcherDelegate);
     std::unique_ptr<ResourceFetcher> fetcher(ResourceFetcher::Create(url));
-    fetcher->Start(frame,
-                   WebURLRequest::RequestContextInternal,
+    fetcher->Start(frame, WebURLRequest::kRequestContextInternal,
                    delegate->NewCallback());
 
     delegate->WaitForResponse();
 
     ASSERT_TRUE(delegate->completed());
-    EXPECT_EQ(delegate->response().httpStatusCode(), 404);
+    EXPECT_EQ(delegate->response().HttpStatusCode(), 404);
   }
 
   void ResourceFetcherDidFailOnRenderer() {
-    WebFrame* frame = GetRenderView()->GetWebView()->mainFrame();
+    blink::WebLocalFrame* frame =
+        GetRenderView()->GetWebView()->MainFrame()->ToWebLocalFrame();
 
     // Try to fetch a page on a site that doesn't exist.
     GURL url("http://localhost:1339/doesnotexist");
     std::unique_ptr<FetcherDelegate> delegate(new FetcherDelegate);
     std::unique_ptr<ResourceFetcher> fetcher(ResourceFetcher::Create(url));
-    fetcher->Start(frame,
-                   WebURLRequest::RequestContextInternal,
+    fetcher->Start(frame, WebURLRequest::kRequestContextInternal,
                    delegate->NewCallback());
 
     delegate->WaitForResponse();
@@ -196,18 +195,18 @@ class ResourceFetcherTests : public ContentBrowserTest {
     // When we fail, we still call the Delegate callback but we pass in empty
     // values.
     EXPECT_TRUE(delegate->completed());
-    EXPECT_TRUE(delegate->response().isNull());
+    EXPECT_TRUE(delegate->response().IsNull());
     EXPECT_EQ(delegate->data(), std::string());
     EXPECT_FALSE(delegate->timed_out());
   }
 
   void ResourceFetcherTimeoutOnRenderer(const GURL& url) {
-    WebFrame* frame = GetRenderView()->GetWebView()->mainFrame();
+    blink::WebLocalFrame* frame =
+        GetRenderView()->GetWebView()->MainFrame()->ToWebLocalFrame();
 
     std::unique_ptr<FetcherDelegate> delegate(new FetcherDelegate);
     std::unique_ptr<ResourceFetcher> fetcher(ResourceFetcher::Create(url));
-    fetcher->Start(frame,
-                   WebURLRequest::RequestContextInternal,
+    fetcher->Start(frame, WebURLRequest::kRequestContextInternal,
                    delegate->NewCallback());
     fetcher->SetTimeout(base::TimeDelta());
 
@@ -216,18 +215,18 @@ class ResourceFetcherTests : public ContentBrowserTest {
     // When we timeout, we still call the Delegate callback but we pass in empty
     // values.
     EXPECT_TRUE(delegate->completed());
-    EXPECT_TRUE(delegate->response().isNull());
+    EXPECT_TRUE(delegate->response().IsNull());
     EXPECT_EQ(delegate->data(), std::string());
     EXPECT_FALSE(delegate->timed_out());
   }
 
   void ResourceFetcherDeletedInCallbackOnRenderer(const GURL& url) {
-    WebFrame* frame = GetRenderView()->GetWebView()->mainFrame();
+    blink::WebLocalFrame* frame =
+        GetRenderView()->GetWebView()->MainFrame()->ToWebLocalFrame();
 
     std::unique_ptr<EvilFetcherDelegate> delegate(new EvilFetcherDelegate);
     std::unique_ptr<ResourceFetcher> fetcher(ResourceFetcher::Create(url));
-    fetcher->Start(frame,
-                   WebURLRequest::RequestContextInternal,
+    fetcher->Start(frame, WebURLRequest::kRequestContextInternal,
                    delegate->NewCallback());
     fetcher->SetTimeout(base::TimeDelta());
     delegate->SetFetcher(fetcher.release());
@@ -239,37 +238,37 @@ class ResourceFetcherTests : public ContentBrowserTest {
   void ResourceFetcherPost(const GURL& url) {
     const char* kBody = "Really nifty POST body!";
 
-    WebFrame* frame = GetRenderView()->GetWebView()->mainFrame();
+    blink::WebLocalFrame* frame =
+        GetRenderView()->GetWebView()->MainFrame()->ToWebLocalFrame();
 
     std::unique_ptr<FetcherDelegate> delegate(new FetcherDelegate);
     std::unique_ptr<ResourceFetcher> fetcher(ResourceFetcher::Create(url));
     fetcher->SetMethod("POST");
     fetcher->SetBody(kBody);
-    fetcher->Start(frame,
-                   WebURLRequest::RequestContextInternal,
+    fetcher->Start(frame, WebURLRequest::kRequestContextInternal,
                    delegate->NewCallback());
 
     delegate->WaitForResponse();
     ASSERT_TRUE(delegate->completed());
-    EXPECT_EQ(delegate->response().httpStatusCode(), 200);
+    EXPECT_EQ(delegate->response().HttpStatusCode(), 200);
     EXPECT_EQ(kBody, delegate->data());
   }
 
   void ResourceFetcherSetHeader(const GURL& url) {
     const char* kHeader = "Rather boring header.";
 
-    WebFrame* frame = GetRenderView()->GetWebView()->mainFrame();
+    blink::WebLocalFrame* frame =
+        GetRenderView()->GetWebView()->MainFrame()->ToWebLocalFrame();
 
     std::unique_ptr<FetcherDelegate> delegate(new FetcherDelegate);
     std::unique_ptr<ResourceFetcher> fetcher(ResourceFetcher::Create(url));
     fetcher->SetHeader("header", kHeader);
-    fetcher->Start(frame,
-                   WebURLRequest::RequestContextInternal,
+    fetcher->Start(frame, WebURLRequest::kRequestContextInternal,
                    delegate->NewCallback());
 
     delegate->WaitForResponse();
     ASSERT_TRUE(delegate->completed());
-    EXPECT_EQ(delegate->response().httpStatusCode(), 200);
+    EXPECT_EQ(delegate->response().HttpStatusCode(), 200);
     EXPECT_EQ(kHeader, delegate->data());
   }
 

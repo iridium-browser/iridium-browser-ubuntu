@@ -7,11 +7,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+#include <vector>
+
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/i18n/string_search.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
@@ -37,11 +40,12 @@ bool FindAndHighlightWrapper(
     const std::string& text,
     const std::string& query_text,
     std::string* highlighted_text) {
-  ScopedVector<base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>
+  std::vector<std::unique_ptr<
+      base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>>
       queries;
-  queries.push_back(
-      new base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents(
-          base::UTF8ToUTF16(query_text)));
+  queries.push_back(base::MakeUnique<
+                    base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>(
+      base::UTF8ToUTF16(query_text)));
   return FindAndHighlight(text, queries, highlighted_text);
 }
 
@@ -88,45 +92,56 @@ class SearchMetadataTest : public testing::Test {
     // drive/root/Directory-1
     EXPECT_EQ(FILE_ERROR_OK,
               resource_metadata_->AddEntry(
-                  GetDirectoryEntry("Directory-1", "dir1", 1, root_local_id),
+                  GetDirectoryEntry("Directory-1", "dir1", 1, 1, root_local_id),
                   &local_id));
     const std::string dir1_local_id = local_id;
 
     // drive/root/Directory-1/SubDirectory File 1.txt
-    EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(GetFileEntry(
-        "SubDirectory File 1.txt", "file1a", 2, dir1_local_id), &local_id));
+    EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(
+                                 GetFileEntry("SubDirectory File 1.txt",
+                                              "file1a", 2, 99, dir1_local_id),
+                                 &local_id));
     EXPECT_EQ(FILE_ERROR_OK, cache_->Store(
         local_id, temp_file_md5, temp_file, FileCache::FILE_OPERATION_COPY));
 
     // drive/root/Directory-1/Shared To The Account Owner.txt
-    entry = GetFileEntry(
-        "Shared To The Account Owner.txt", "file1b", 3, dir1_local_id);
+    entry = GetFileEntry("Shared To The Account Owner.txt", "file1b", 3, 3,
+                         dir1_local_id);
     entry.set_shared_with_me(true);
     EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(entry, &local_id));
 
     // drive/root/Directory 2 excludeDir-test
-    EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(GetDirectoryEntry(
-        "Directory 2 excludeDir-test", "dir2", 4, root_local_id), &local_id));
+    EXPECT_EQ(FILE_ERROR_OK,
+              resource_metadata_->AddEntry(
+                  GetDirectoryEntry("Directory 2 excludeDir-test", "dir2", 4, 4,
+                                    root_local_id),
+                  &local_id));
 
     // drive/root/Slash \xE2\x88\x95 in directory
-    EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(
-        GetDirectoryEntry("Slash \xE2\x88\x95 in directory", "dir3", 5,
-                          root_local_id), &local_id));
+    EXPECT_EQ(FILE_ERROR_OK,
+              resource_metadata_->AddEntry(
+                  GetDirectoryEntry("Slash \xE2\x88\x95 in directory", "dir3",
+                                    5, 5, root_local_id),
+                  &local_id));
     const std::string dir3_local_id = local_id;
 
     // drive/root/Slash \xE2\x88\x95 in directory/Slash SubDir File.txt
-    EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(GetFileEntry(
-        "Slash SubDir File.txt", "file3a", 6, dir3_local_id), &local_id));
+    EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(
+                                 GetFileEntry("Slash SubDir File.txt", "file3a",
+                                              6, 6, dir3_local_id),
+                                 &local_id));
 
     // drive/root/File 2.txt
-    EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(GetFileEntry(
-        "File 2.txt", "file2", 7, root_local_id), &local_id));
+    EXPECT_EQ(FILE_ERROR_OK,
+              resource_metadata_->AddEntry(
+                  GetFileEntry("File 2.txt", "file2", 7, 7, root_local_id),
+                  &local_id));
     EXPECT_EQ(FILE_ERROR_OK, cache_->Store(
         local_id, temp_file_md5, temp_file, FileCache::FILE_OPERATION_COPY));
 
     // drive/root/Document 1 excludeDir-test
-    entry = GetFileEntry(
-        "Document 1 excludeDir-test", "doc1", 8, root_local_id);
+    entry =
+        GetFileEntry("Document 1 excludeDir-test", "doc1", 8, 8, root_local_id);
     entry.mutable_file_specific_info()->set_is_hosted_document(true);
     entry.mutable_file_specific_info()->set_document_extension(".gdoc");
     entry.mutable_file_specific_info()->set_content_mime_type(
@@ -137,24 +152,28 @@ class SearchMetadataTest : public testing::Test {
   ResourceEntry GetFileEntry(const std::string& name,
                              const std::string& resource_id,
                              int64_t last_accessed,
+                             int64_t last_modified,
                              const std::string& parent_local_id) {
     ResourceEntry entry;
     entry.set_title(name);
     entry.set_resource_id(resource_id);
     entry.set_parent_local_id(parent_local_id);
     entry.mutable_file_info()->set_last_accessed(last_accessed);
+    entry.mutable_file_info()->set_last_modified(last_modified);
     return entry;
   }
 
   ResourceEntry GetDirectoryEntry(const std::string& name,
                                   const std::string& resource_id,
                                   int64_t last_accessed,
+                                  int64_t last_modified,
                                   const std::string& parent_local_id) {
     ResourceEntry entry;
     entry.set_title(name);
     entry.set_resource_id(resource_id);
     entry.set_parent_local_id(parent_local_id);
     entry.mutable_file_info()->set_last_accessed(last_accessed);
+    entry.mutable_file_info()->set_last_modified(last_modified);
     entry.mutable_file_info()->set_is_directory(true);
     return entry;
   }
@@ -176,7 +195,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_ZeroMatches) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(),
       "NonExistent", base::Bind(&MatchesType, SEARCH_METADATA_ALL),
-      kDefaultAtMostNumMatches,
+      kDefaultAtMostNumMatches, MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
@@ -191,7 +210,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_RegularFile) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(),
       "SubDirectory File 1.txt", base::Bind(&MatchesType, SEARCH_METADATA_ALL),
-      kDefaultAtMostNumMatches,
+      kDefaultAtMostNumMatches, MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
@@ -211,7 +230,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_CaseInsensitiveSearch) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(),
       "subdirectory file 1.txt", base::Bind(&MatchesType, SEARCH_METADATA_ALL),
-      kDefaultAtMostNumMatches,
+      kDefaultAtMostNumMatches, MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
@@ -228,6 +247,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_RegularFiles) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(), "SubDir",
       base::Bind(&MatchesType, SEARCH_METADATA_ALL), kDefaultAtMostNumMatches,
+      MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
@@ -242,22 +262,43 @@ TEST_F(SearchMetadataTest, SearchMetadata_RegularFiles) {
             result->at(1).path.AsUTF8Unsafe());
 }
 
-TEST_F(SearchMetadataTest, SearchMetadata_AtMostOneFile) {
+TEST_F(SearchMetadataTest, SearchMetadata_AtMostOneFile_LastAccessed) {
   FileError error = FILE_ERROR_FAILED;
   std::unique_ptr<MetadataSearchResultVector> result;
 
   // There are two files matching "SubDir" but only one file should be
-  // returned.
+  // returned. Results are ordered by last accessed time.
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(), "SubDir",
       base::Bind(&MatchesType, SEARCH_METADATA_ALL),
       1,  // at_most_num_matches
+      MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
   ASSERT_TRUE(result);
   ASSERT_EQ(1U, result->size());
   EXPECT_EQ("drive/root/Slash \xE2\x88\x95 in directory/Slash SubDir File.txt",
+            result->at(0).path.AsUTF8Unsafe());
+}
+
+TEST_F(SearchMetadataTest, SearchMetadata_AtMostOneFile_LastModified) {
+  FileError error = FILE_ERROR_FAILED;
+  std::unique_ptr<MetadataSearchResultVector> result;
+
+  // There are two files matching "SubDir" but only one file should be
+  // returned. Results are ordered by last modified time.
+  SearchMetadata(
+      base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(), "SubDir",
+      base::Bind(&MatchesType, SEARCH_METADATA_ALL),
+      1,  // at_most_num_matches
+      MetadataSearchOrder::LAST_MODIFIED,
+      google_apis::test_util::CreateCopyResultCallback(&error, &result));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(FILE_ERROR_OK, error);
+  ASSERT_TRUE(result);
+  ASSERT_EQ(1U, result->size());
+  EXPECT_EQ("drive/root/Directory-1/SubDirectory File 1.txt",
             result->at(0).path.AsUTF8Unsafe());
 }
 
@@ -268,7 +309,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_Directory) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(),
       "Directory-1", base::Bind(&MatchesType, SEARCH_METADATA_ALL),
-      kDefaultAtMostNumMatches,
+      kDefaultAtMostNumMatches, MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
@@ -284,6 +325,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_HostedDocument) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(), "Document",
       base::Bind(&MatchesType, SEARCH_METADATA_ALL), kDefaultAtMostNumMatches,
+      MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
@@ -301,7 +343,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_ExcludeHostedDocument) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(), "Document",
       base::Bind(&MatchesType, SEARCH_METADATA_EXCLUDE_HOSTED_DOCUMENTS),
-      kDefaultAtMostNumMatches,
+      kDefaultAtMostNumMatches, MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
@@ -316,7 +358,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_SharedWithMe) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(), "",
       base::Bind(&MatchesType, SEARCH_METADATA_SHARED_WITH_ME),
-      kDefaultAtMostNumMatches,
+      kDefaultAtMostNumMatches, MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
@@ -333,7 +375,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_FileAndDirectory) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(),
       "excludeDir-test", base::Bind(&MatchesType, SEARCH_METADATA_ALL),
-      kDefaultAtMostNumMatches,
+      kDefaultAtMostNumMatches, MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
 
   base::RunLoop().RunUntilIdle();
@@ -355,7 +397,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_ExcludeDirectory) {
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(),
       "excludeDir-test",
       base::Bind(&MatchesType, SEARCH_METADATA_EXCLUDE_DIRECTORIES),
-      kDefaultAtMostNumMatches,
+      kDefaultAtMostNumMatches, MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
 
   base::RunLoop().RunUntilIdle();
@@ -378,6 +420,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_ExcludeSpecialDirectories) {
     SearchMetadata(
         base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(), query,
         base::Bind(&MatchesType, SEARCH_METADATA_ALL), kDefaultAtMostNumMatches,
+        MetadataSearchOrder::LAST_ACCESSED,
         google_apis::test_util::CreateCopyResultCallback(&error, &result));
 
     base::RunLoop().RunUntilIdle();
@@ -394,7 +437,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_Offline) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(), "",
       base::Bind(&MatchesType, SEARCH_METADATA_OFFLINE),
-      kDefaultAtMostNumMatches,
+      kDefaultAtMostNumMatches, MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(FILE_ERROR_OK, error);
@@ -417,7 +460,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_MultipleKeywords) {
   SearchMetadata(
       base::ThreadTaskRunnerHandle::Get(), resource_metadata_.get(),
       "Directory 1", base::Bind(&MatchesType, SEARCH_METADATA_ALL),
-      kDefaultAtMostNumMatches,
+      kDefaultAtMostNumMatches, MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
 
   base::RunLoop().RunUntilIdle();
@@ -441,6 +484,7 @@ TEST_F(SearchMetadataTest,
       "Directory\xE3\x80\x80"
       "1",
       base::Bind(&MatchesType, SEARCH_METADATA_ALL), kDefaultAtMostNumMatches,
+      MetadataSearchOrder::LAST_ACCESSED,
       google_apis::test_util::CreateCopyResultCallback(&error, &result));
 
   base::RunLoop().RunUntilIdle();
@@ -464,7 +508,8 @@ TEST(SearchMetadataSimpleTest, FindAndHighlight_EmptyText) {
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_EmptyQuery) {
-  ScopedVector<base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>
+  std::vector<std::unique_ptr<
+      base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>>
       queries;
 
   std::string highlighted_text;
@@ -535,11 +580,12 @@ TEST(SearchMetadataSimpleTest, FindAndHighlight_IgnoreCaseNonASCII) {
 }
 
 TEST(SearchMetadataSimpleTest, MultiTextBySingleQuery) {
-  ScopedVector<base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>
+  std::vector<std::unique_ptr<
+      base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>>
       queries;
-  queries.push_back(
-      new base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents(
-          base::UTF8ToUTF16("hello")));
+  queries.push_back(base::MakeUnique<
+                    base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>(
+      base::UTF8ToUTF16("hello")));
 
   std::string highlighted_text;
   EXPECT_TRUE(FindAndHighlight("hello", queries, &highlighted_text));
@@ -570,14 +616,15 @@ TEST(SearchMetadataSimpleTest, FindAndHighlight_SurrogatePair) {
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_MultipleQueries) {
-  ScopedVector<base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>
+  std::vector<std::unique_ptr<
+      base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>>
       queries;
-  queries.push_back(
-      new base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents(
-          base::UTF8ToUTF16("hello")));
-  queries.push_back(
-      new base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents(
-          base::UTF8ToUTF16("good")));
+  queries.push_back(base::MakeUnique<
+                    base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>(
+      base::UTF8ToUTF16("hello")));
+  queries.push_back(base::MakeUnique<
+                    base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>(
+      base::UTF8ToUTF16("good")));
 
   std::string highlighted_text;
   EXPECT_TRUE(
@@ -586,14 +633,15 @@ TEST(SearchMetadataSimpleTest, FindAndHighlight_MultipleQueries) {
 }
 
 TEST(SearchMetadataSimpleTest, FindAndHighlight_OverlappingHighlights) {
-  ScopedVector<base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>
+  std::vector<std::unique_ptr<
+      base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>>
       queries;
-  queries.push_back(
-      new base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents(
-          base::UTF8ToUTF16("morning")));
-  queries.push_back(
-      new base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents(
-          base::UTF8ToUTF16("ing,")));
+  queries.push_back(base::MakeUnique<
+                    base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>(
+      base::UTF8ToUTF16("morning")));
+  queries.push_back(base::MakeUnique<
+                    base::i18n::FixedPatternStringSearchIgnoringCaseAndAccents>(
+      base::UTF8ToUTF16("ing,")));
 
   std::string highlighted_text;
   EXPECT_TRUE(

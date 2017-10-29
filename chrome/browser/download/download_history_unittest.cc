@@ -21,7 +21,7 @@
 #include "components/history/core/browser/history_service.h"
 #include "content/public/test/mock_download_item.h"
 #include "content/public/test/mock_download_manager.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/features/features.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -58,9 +58,10 @@ class FakeHistoryAdapter : public DownloadHistory::HistoryAdapter {
   void QueryDownloads(
       const history::HistoryService::DownloadQueryCallback& callback) override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&FakeHistoryAdapter::QueryDownloadsDone,
-            base::Unretained(this), callback));
+    content::BrowserThread::PostTask(
+        content::BrowserThread::UI, FROM_HERE,
+        base::BindOnce(&FakeHistoryAdapter::QueryDownloadsDone,
+                       base::Unretained(this), callback));
   }
 
   void QueryDownloadsDone(
@@ -195,8 +196,7 @@ class DownloadHistoryTest : public testing::Test {
   typedef base::Callback<void(content::MockDownloadItem*)> DownloadItemCallback;
 
   DownloadHistoryTest()
-      : ui_thread_(content::BrowserThread::UI, &loop_),
-        manager_(new content::MockDownloadManager()),
+      : manager_(new content::MockDownloadManager()),
         history_(NULL),
         manager_observer_(NULL),
         download_created_index_(0) {}
@@ -235,7 +235,7 @@ class DownloadHistoryTest : public testing::Test {
           history::ToContentDownloadState(row.state),
           history::ToContentDownloadDangerType(row.danger_type),
           history::ToContentDownloadInterruptReason(row.interrupt_reason),
-          row.opened,
+          row.opened, row.last_access_time, row.transient,
           history::ToContentReceivedSlices(row.download_slice_info));
       EXPECT_CALL(manager(), MockCreateDownloadItem(adapter))
         .WillOnce(DoAll(
@@ -347,37 +347,39 @@ class DownloadHistoryTest : public testing::Test {
              (base::Time::Now() - base::TimeDelta::FromMinutes(1)), "Etag",
              "abc", 100, 100, state,
              content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-             content::DOWNLOAD_INTERRUPT_REASON_NONE, false, std::string(),
-             std::string(), std::vector<content::DownloadItem::ReceivedSlice>(),
-             info);
+             content::DOWNLOAD_INTERRUPT_REASON_NONE, false, base::Time::Now(),
+             false, std::string(), std::string(),
+             std::vector<content::DownloadItem::ReceivedSlice>(), info);
   }
 
-  void InitItem(const std::string& guid,
-                uint32_t id,
-                const base::FilePath& current_path,
-                const base::FilePath& target_path,
-                const std::vector<GURL>& url_chain,
-                const GURL& referrer,
-                const GURL& site_url,
-                const GURL& tab_url,
-                const GURL& tab_referrer_url,
-                const std::string& mime_type,
-                const std::string& original_mime_type,
-                const base::Time& start_time,
-                const base::Time& end_time,
-                const std::string& etag,
-                const std::string& last_modified,
-                int64_t received_bytes,
-                int64_t total_bytes,
-                content::DownloadItem::DownloadState state,
-                content::DownloadDangerType danger_type,
-                content::DownloadInterruptReason interrupt_reason,
-                bool opened,
-                const std::string& by_extension_id,
-                const std::string& by_extension_name,
-                const std::vector<content::DownloadItem::ReceivedSlice>&
-                    received_slices,
-                history::DownloadRow* info) {
+  void InitItem(
+      const std::string& guid,
+      uint32_t id,
+      const base::FilePath& current_path,
+      const base::FilePath& target_path,
+      const std::vector<GURL>& url_chain,
+      const GURL& referrer,
+      const GURL& site_url,
+      const GURL& tab_url,
+      const GURL& tab_referrer_url,
+      const std::string& mime_type,
+      const std::string& original_mime_type,
+      base::Time start_time,
+      base::Time end_time,
+      const std::string& etag,
+      const std::string& last_modified,
+      int64_t received_bytes,
+      int64_t total_bytes,
+      content::DownloadItem::DownloadState state,
+      content::DownloadDangerType danger_type,
+      content::DownloadInterruptReason interrupt_reason,
+      bool opened,
+      base::Time last_access_time,
+      bool transient,
+      const std::string& by_extension_id,
+      const std::string& by_extension_name,
+      const std::vector<content::DownloadItem::ReceivedSlice>& received_slices,
+      history::DownloadRow* info) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
     size_t index = items_.size();
@@ -405,6 +407,8 @@ class DownloadHistoryTest : public testing::Test {
     info->id = history::ToHistoryDownloadId(id);
     info->guid = guid;
     info->opened = opened;
+    info->last_access_time = last_access_time;
+    info->transient = transient;
     info->by_ext_id = by_extension_id;
     info->by_ext_name = by_extension_name;
 
@@ -447,6 +451,9 @@ class DownloadHistoryTest : public testing::Test {
     EXPECT_CALL(item(index), GetLastReason())
         .WillRepeatedly(Return(interrupt_reason));
     EXPECT_CALL(item(index), GetOpened()).WillRepeatedly(Return(opened));
+    EXPECT_CALL(item(index), GetLastAccessTime())
+        .WillRepeatedly(Return(last_access_time));
+    EXPECT_CALL(item(index), IsTransient()).WillRepeatedly(Return(transient));
     EXPECT_CALL(item(index), GetTargetDisposition())
         .WillRepeatedly(
             Return(content::DownloadItem::TARGET_DISPOSITION_OVERWRITE));
@@ -476,8 +483,7 @@ class DownloadHistoryTest : public testing::Test {
     EXPECT_EQ(expected_value, download_history_->WasRestoredFromHistory(item));
   }
 
-  base::MessageLoopForUI loop_;
-  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
   std::vector<std::unique_ptr<StrictMockDownloadItem>> items_;
   std::unique_ptr<content::MockDownloadManager> manager_;
   FakeHistoryAdapter* history_;

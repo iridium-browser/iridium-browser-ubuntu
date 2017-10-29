@@ -113,7 +113,7 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
  private:
   // Initialize the UI control contained in shell window
   void InitShellWindow() {
-    set_background(views::Background::CreateStandardPanelBackground());
+    SetBackground(views::CreateStandardPanelBackground());
 
     views::GridLayout* layout = new views::GridLayout(this);
     SetLayoutManager(layout);
@@ -174,6 +174,7 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
       // URL entry
       url_entry_ = new views::Textfield();
       url_entry_->set_controller(this);
+      url_entry_->SetTextInputType(ui::TextInputType::TEXT_INPUT_TYPE_URL);
       toolbar_column_set->AddColumn(views::GridLayout::FILL,
                                     views::GridLayout::FILL, 1,
                                     views::GridLayout::USE_PREF, 0, 0);
@@ -403,7 +404,7 @@ void Shell::PlatformCreateWindow(int width, int height) {
 #if defined(OS_CHROMEOS)
   window_widget_ = views::Widget::CreateWindowWithContextAndBounds(
       new ShellWindowDelegateView(this),
-      wm_test_helper_->GetDefaultParent(NULL, NULL, gfx::Rect()),
+      wm_test_helper_->GetDefaultParent(nullptr, gfx::Rect()),
       gfx::Rect(0, 0, width, height));
 #else
   window_widget_ = new views::Widget;

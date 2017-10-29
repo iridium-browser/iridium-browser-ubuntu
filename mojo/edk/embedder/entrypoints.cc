@@ -13,7 +13,6 @@
 #include "mojo/public/c/system/functions.h"
 #include "mojo/public/c/system/message_pipe.h"
 #include "mojo/public/c/system/platform_handle.h"
-#include "mojo/public/c/system/wait_set.h"
 
 using mojo::edk::internal::g_core;
 
@@ -28,72 +27,91 @@ MojoResult MojoCloseImpl(MojoHandle handle) {
   return g_core->Close(handle);
 }
 
-MojoResult MojoWaitImpl(MojoHandle handle,
-                        MojoHandleSignals signals,
-                        MojoDeadline deadline,
-                        MojoHandleSignalsState* signals_state) {
-  return g_core->Wait(handle, signals, deadline, signals_state);
+MojoResult MojoQueryHandleSignalsStateImpl(
+    MojoHandle handle,
+    MojoHandleSignalsState* signals_state) {
+  return g_core->QueryHandleSignalsState(handle, signals_state);
 }
 
-MojoResult MojoWaitManyImpl(const MojoHandle* handles,
-                            const MojoHandleSignals* signals,
-                            uint32_t num_handles,
-                            MojoDeadline deadline,
-                            uint32_t* result_index,
-                            MojoHandleSignalsState* signals_states) {
-  return g_core->WaitMany(handles, signals, num_handles, deadline, result_index,
-                          signals_states);
+MojoResult MojoCreateWatcherImpl(MojoWatcherCallback callback,
+                                 MojoHandle* watcher_handle) {
+  return g_core->CreateWatcher(callback, watcher_handle);
 }
 
-MojoResult MojoWatchImpl(MojoHandle handle,
+MojoResult MojoArmWatcherImpl(MojoHandle watcher_handle,
+                              uint32_t* num_ready_contexts,
+                              uintptr_t* ready_contexts,
+                              MojoResult* ready_results,
+                              MojoHandleSignalsState* ready_signals_states) {
+  return g_core->ArmWatcher(watcher_handle, num_ready_contexts, ready_contexts,
+                            ready_results, ready_signals_states);
+}
+
+MojoResult MojoWatchImpl(MojoHandle watcher_handle,
+                         MojoHandle handle,
                          MojoHandleSignals signals,
-                         MojoWatchCallback callback,
+                         MojoWatchCondition condition,
                          uintptr_t context) {
-  return g_core->Watch(handle, signals, callback, context);
+  return g_core->Watch(watcher_handle, handle, signals, condition, context);
 }
 
-MojoResult MojoCancelWatchImpl(MojoHandle handle, uintptr_t context) {
-  return g_core->CancelWatch(handle, context);
+MojoResult MojoCancelWatchImpl(MojoHandle watcher_handle, uintptr_t context) {
+  return g_core->CancelWatch(watcher_handle, context);
 }
 
-MojoResult MojoAllocMessageImpl(uint32_t num_bytes,
-                                const MojoHandle* handles,
-                                uint32_t num_handles,
-                                MojoAllocMessageFlags flags,
-                                MojoMessageHandle* message) {
-  return g_core->AllocMessage(num_bytes, handles, num_handles, flags, message);
+MojoResult MojoCreateMessageImpl(MojoMessageHandle* message) {
+  return g_core->CreateMessage(message);
 }
 
-MojoResult MojoFreeMessageImpl(MojoMessageHandle message) {
-  return g_core->FreeMessage(message);
+MojoResult MojoDestroyMessageImpl(MojoMessageHandle message) {
+  return g_core->DestroyMessage(message);
 }
 
-MojoResult MojoGetMessageBufferImpl(MojoMessageHandle message, void** buffer) {
-  return g_core->GetMessageBuffer(message, buffer);
+MojoResult MojoSerializeMessageImpl(MojoMessageHandle message) {
+  return g_core->SerializeMessage(message);
 }
 
-MojoResult MojoCreateWaitSetImpl(MojoHandle* wait_set_handle) {
-  return g_core->CreateWaitSet(wait_set_handle);
+MojoResult MojoAttachSerializedMessageBufferImpl(MojoMessageHandle message,
+                                                 uint32_t payload_size,
+                                                 const MojoHandle* handles,
+                                                 uint32_t num_handles,
+                                                 void** buffer,
+                                                 uint32_t* buffer_size) {
+  return g_core->AttachSerializedMessageBuffer(
+      message, payload_size, handles, num_handles, buffer, buffer_size);
 }
 
-MojoResult MojoAddHandleImpl(MojoHandle wait_set_handle,
-                             MojoHandle handle,
-                             MojoHandleSignals signals) {
-  return g_core->AddHandle(wait_set_handle, handle, signals);
+MojoResult MojoExtendSerializedMessagePayloadImpl(MojoMessageHandle message,
+                                                  uint32_t new_payload_size,
+                                                  void** new_buffer,
+                                                  uint32_t* new_buffer_size) {
+  return g_core->ExtendSerializedMessagePayload(message, new_payload_size,
+                                                new_buffer, new_buffer_size);
 }
 
-MojoResult MojoRemoveHandleImpl(MojoHandle wait_set_handle, MojoHandle handle) {
-  return g_core->RemoveHandle(wait_set_handle, handle);
-}
-
-MojoResult MojoGetReadyHandlesImpl(
-    MojoHandle wait_set_handle,
-    uint32_t* count,
+MojoResult MojoGetSerializedMessageContentsImpl(
+    MojoMessageHandle message,
+    void** buffer,
+    uint32_t* num_bytes,
     MojoHandle* handles,
-    MojoResult* results,
-    struct MojoHandleSignalsState* signals_states) {
-  return g_core->GetReadyHandles(wait_set_handle, count, handles, results,
-                                 signals_states);
+    uint32_t* num_handles,
+    MojoGetSerializedMessageContentsFlags flags) {
+  return g_core->GetSerializedMessageContents(message, buffer, num_bytes,
+                                              handles, num_handles, flags);
+}
+
+MojoResult MojoAttachMessageContextImpl(
+    MojoMessageHandle message,
+    uintptr_t context,
+    MojoMessageContextSerializer serializer,
+    MojoMessageContextDestructor destructor) {
+  return g_core->AttachMessageContext(message, context, serializer, destructor);
+}
+
+MojoResult MojoGetMessageContextImpl(MojoMessageHandle message,
+                                     uintptr_t* context,
+                                     MojoGetMessageContextFlags flags) {
+  return g_core->GetMessageContext(message, context, flags);
 }
 
 MojoResult MojoCreateMessagePipeImpl(
@@ -105,39 +123,15 @@ MojoResult MojoCreateMessagePipeImpl(
 }
 
 MojoResult MojoWriteMessageImpl(MojoHandle message_pipe_handle,
-                                const void* bytes,
-                                uint32_t num_bytes,
-                                const MojoHandle* handles,
-                                uint32_t num_handles,
+                                MojoMessageHandle message,
                                 MojoWriteMessageFlags flags) {
-  return g_core->WriteMessage(message_pipe_handle, bytes, num_bytes, handles,
-                              num_handles, flags);
-}
-
-MojoResult MojoWriteMessageNewImpl(MojoHandle message_pipe_handle,
-                                   MojoMessageHandle message,
-                                   MojoWriteMessageFlags flags) {
-  return g_core->WriteMessageNew(message_pipe_handle, message, flags);
+  return g_core->WriteMessage(message_pipe_handle, message, flags);
 }
 
 MojoResult MojoReadMessageImpl(MojoHandle message_pipe_handle,
-                               void* bytes,
-                               uint32_t* num_bytes,
-                               MojoHandle* handles,
-                               uint32_t* num_handles,
+                               MojoMessageHandle* message,
                                MojoReadMessageFlags flags) {
-  return g_core->ReadMessage(
-      message_pipe_handle, bytes, num_bytes, handles, num_handles, flags);
-}
-
-MojoResult MojoReadMessageNewImpl(MojoHandle message_pipe_handle,
-                                  MojoMessageHandle* message,
-                                  uint32_t* num_bytes,
-                                  MojoHandle* handles,
-                                  uint32_t* num_handles,
-                                  MojoReadMessageFlags flags) {
-  return g_core->ReadMessageNew(
-      message_pipe_handle, message, num_bytes, handles, num_handles, flags);
+  return g_core->ReadMessage(message_pipe_handle, message, flags);
 }
 
 MojoResult MojoFuseMessagePipesImpl(MojoHandle handle0, MojoHandle handle1) {
@@ -233,19 +227,21 @@ MojoResult MojoUnwrapPlatformHandleImpl(MojoHandle mojo_handle,
 MojoResult MojoWrapPlatformSharedBufferHandleImpl(
     const MojoPlatformHandle* platform_handle,
     size_t num_bytes,
+    const MojoSharedBufferGuid* guid,
     MojoPlatformSharedBufferHandleFlags flags,
     MojoHandle* mojo_handle) {
   return g_core->WrapPlatformSharedBufferHandle(platform_handle, num_bytes,
-                                                flags, mojo_handle);
+                                                guid, flags, mojo_handle);
 }
 
 MojoResult MojoUnwrapPlatformSharedBufferHandleImpl(
     MojoHandle mojo_handle,
     MojoPlatformHandle* platform_handle,
     size_t* num_bytes,
+    MojoSharedBufferGuid* guid,
     MojoPlatformSharedBufferHandleFlags* flags) {
   return g_core->UnwrapPlatformSharedBufferHandle(mojo_handle, platform_handle,
-                                                  num_bytes, flags);
+                                                  num_bytes, guid, flags);
 }
 
 MojoResult MojoNotifyBadMessageImpl(MojoMessageHandle message,
@@ -267,8 +263,7 @@ MojoSystemThunks MakeSystemThunks() {
   MojoSystemThunks system_thunks = {sizeof(MojoSystemThunks),
                                     MojoGetTimeTicksNowImpl,
                                     MojoCloseImpl,
-                                    MojoWaitImpl,
-                                    MojoWaitManyImpl,
+                                    MojoQueryHandleSignalsStateImpl,
                                     MojoCreateMessagePipeImpl,
                                     MojoWriteMessageImpl,
                                     MojoReadMessageImpl,
@@ -283,18 +278,19 @@ MojoSystemThunks MakeSystemThunks() {
                                     MojoDuplicateBufferHandleImpl,
                                     MojoMapBufferImpl,
                                     MojoUnmapBufferImpl,
-                                    MojoCreateWaitSetImpl,
-                                    MojoAddHandleImpl,
-                                    MojoRemoveHandleImpl,
-                                    MojoGetReadyHandlesImpl,
+                                    MojoCreateWatcherImpl,
                                     MojoWatchImpl,
                                     MojoCancelWatchImpl,
+                                    MojoArmWatcherImpl,
                                     MojoFuseMessagePipesImpl,
-                                    MojoWriteMessageNewImpl,
-                                    MojoReadMessageNewImpl,
-                                    MojoAllocMessageImpl,
-                                    MojoFreeMessageImpl,
-                                    MojoGetMessageBufferImpl,
+                                    MojoCreateMessageImpl,
+                                    MojoDestroyMessageImpl,
+                                    MojoSerializeMessageImpl,
+                                    MojoAttachSerializedMessageBufferImpl,
+                                    MojoExtendSerializedMessagePayloadImpl,
+                                    MojoGetSerializedMessageContentsImpl,
+                                    MojoAttachMessageContextImpl,
+                                    MojoGetMessageContextImpl,
                                     MojoWrapPlatformHandleImpl,
                                     MojoUnwrapPlatformHandleImpl,
                                     MojoWrapPlatformSharedBufferHandleImpl,

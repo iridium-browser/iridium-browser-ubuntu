@@ -89,9 +89,8 @@ cr.define('login', function() {
    * @const
    */
   var UserPodTabOrder = {
-    POD_INPUT: 1,        // Password input field, Action box menu button, submit
-                         // button next to password input field and the pod
-                         // itself.
+    POD_INPUT: 1,        // Password input field, Action box menu button and
+                         // the pod itself.
     PIN_KEYBOARD: 2,     // Pin keyboard below the password input field.
     POD_CUSTOM_ICON: 3,  // Pod custom icon next to password input field.
     HEADER_BAR: 4,       // Buttons on the header bar (Shutdown, Add User).
@@ -100,7 +99,7 @@ cr.define('login', function() {
 
   /**
    * Supported authentication types. Keep in sync with the enum in
-   * chrome/browser/signin/screenlock_bridge.h
+   * components/proximity_auth/public/interfaces/auth_type.mojom
    * @enum {number}
    * @const
    */
@@ -123,6 +122,41 @@ cr.define('login', function() {
     3: 'userClick',
     4: 'expandThenUserClick',
     5: 'forceOfflinePassword'
+  };
+
+  /**
+   * Supported fingerprint unlock states.
+   * @enum {number}
+   * @const
+   */
+  var FINGERPRINT_STATES = {
+    HIDDEN: 0,
+    DEFAULT: 1,
+    SIGNIN: 2,
+    FAILED: 3,
+  };
+
+  /**
+   * The fingerprint states to classes mapping.
+   * {@code state} properties indicate current fingerprint unlock state.
+   * {@code class} properties are CSS classes used to set the icons' background
+   * and password placeholder color.
+   * @const {Array<{type: !number, class: !string}>}
+   */
+  var FINGERPRINT_STATES_MAPPING = [
+    {state: FINGERPRINT_STATES.HIDDEN, class: 'hidden'},
+    {state: FINGERPRINT_STATES.DEFAULT, class: 'default'},
+    {state: FINGERPRINT_STATES.SIGNIN, class: 'signin'},
+    {state: FINGERPRINT_STATES.FAILED, class: 'failed'}
+  ];
+
+  // Supported multi-profile user behavior values.
+  // Keep in sync with the enum in login_user_info.mojom
+  var MULTI_PROFILE_USER_BEHAVIOR = {
+    UNRESTRICTED: 0,
+    PRIMARY_ONLY: 1,
+    NOT_ALLOWED: 2,
+    OWNER_PRIMARY_ONLY: 3
   };
 
   // Focus and tab order are organized as follows:
@@ -711,6 +745,20 @@ cr.define('login', function() {
      */
     userClickAuthAllowed_: false,
 
+    /**
+     * Whether the user has recently authenticated with fingerprint.
+     * @type {boolean}
+     * @private
+     */
+    fingerprintAuthenticated_: false,
+
+    /**
+     * True iff the pod can display the pin keyboard. The pin keyboard may not
+     * always be displayed even if this is true, ie, if the virtual keyboard is
+     * also being displayed.
+     */
+    pinEnabled: false,
+
     /** @override */
     decorate: function() {
       this.tabIndex = UserPodTabOrder.POD_INPUT;
@@ -750,6 +798,15 @@ cr.define('login', function() {
       this.actionBoxRemoveUserWarningButtonElement.addEventListener('keydown',
           this.handleRemoveUserConfirmationKeyDown_.bind(this));
 
+      if (this.fingerprintIconElement) {
+        this.fingerprintIconElement.addEventListener(
+            'mouseover', this.handleFingerprintIconMouseOver_.bind(this));
+        this.fingerprintIconElement.addEventListener(
+            'mouseout', this.handleFingerprintIconMouseOut_.bind(this));
+        this.fingerprintIconElement.addEventListener(
+            'mousedown', stopEventPropagation);
+      }
+
       var customIcon = this.customIconElement;
       customIcon.parentNode.replaceChild(new UserPodCustomIcon(), customIcon);
     },
@@ -764,13 +821,10 @@ cr.define('login', function() {
           this.handlePasswordKeyPress_.bind(this));
       this.passwordElement.addEventListener('input',
           this.handleInputChanged_.bind(this));
-      this.passwordElement.addEventListener('mouseup',
-          this.handleInputMouseUp_.bind(this));
 
       if (this.submitButton) {
         this.submitButton.addEventListener('click',
             this.handleSubmitButtonClick_.bind(this));
-        this.submitButton.tabIndex = UserPodTabOrder.POD_INPUT;
       }
 
       this.imageElement.addEventListener('load',
@@ -894,6 +948,14 @@ cr.define('login', function() {
      */
     get imageElement() {
       return this.querySelector('.user-image');
+    },
+
+    /**
+     * Gets animated image element.
+     * @type {!HTMLImageElement}
+     */
+    get animatedImageElement() {
+      return this.querySelector('.user-image.animated-image');
     },
 
     /**
@@ -1090,17 +1152,27 @@ cr.define('login', function() {
               this.querySelector('.action-box-remove-user-warning-passwords'),
           'Bookmarks':
               this.querySelector('.action-box-remove-user-warning-bookmarks'),
-          'Settings':
-              this.querySelector('.action-box-remove-user-warning-settings')
+          'Autofill':
+              this.querySelector('.action-box-remove-user-warning-autofill')
       }
+    },
+
+    /**
+     * Gets the fingerprint icon area.
+     * @type {!HTMLDivElement}
+     */
+    get fingerprintIconElement() {
+      return this.querySelector('.fingerprint-icon-container');
     },
 
     /**
      * Updates the user pod element.
      */
     update: function() {
-      this.imageElement.src = 'chrome://userimage/' + this.user.username +
+      var animatedImageSrc = 'chrome://userimage/' + this.user.username +
           '?id=' + UserPod.userImageSalt_[this.user.username];
+      this.imageElement.src = animatedImageSrc + '&frame=0';
+      this.animatedImageElement.src = animatedImageSrc;
 
       this.nameElement.textContent = this.user_.displayName;
       this.reauthNameHintElement.textContent = this.user_.displayName;
@@ -1155,12 +1227,15 @@ cr.define('login', function() {
         this.classList.add('multiprofiles-policy-applied');
         this.setUserPodIconType('policy');
 
-        if (this.user.multiProfilesPolicy == 'primary-only')
+        if (this.user.multiProfilesPolicy ==
+            MULTI_PROFILE_USER_BEHAVIOR.PRIMARY_ONLY) {
           this.querySelector('.mp-policy-primary-only-msg').hidden = false;
-        else if (this.user.multiProfilesPolicy == 'owner-primary-only')
+        } else if (this.user.multiProfilesPolicy ==
+            MULTI_PROFILE_USER_BEHAVIOR.OWNER_PRIMARY_ONLY) {
           this.querySelector('.mp-owner-primary-only-msg').hidden = false;
-        else
+        } else {
           this.querySelector('.mp-policy-not-allowed-msg').hidden = false;
+        }
       } else if (this.user_.isApp) {
         this.setUserPodIconType('app');
       }
@@ -1173,10 +1248,6 @@ cr.define('login', function() {
     set showError(visible) {
       if (this.submitButton)
         this.submitButton.classList.toggle('error-shown', visible);
-    },
-
-    toggleTransitions: function(enable) {
-      this.classList.toggle('flying-pin-pod', enable);
     },
 
     updatePinClass_: function(element, enable) {
@@ -1192,6 +1263,10 @@ cr.define('login', function() {
       if (visible && Oobe.getInstance().virtualKeyboardShown)
         return;
 
+      // Do not show pin keyboard if the pod does not have pin enabled.
+      if (visible && !this.pinEnabled)
+        return;
+
       var elements = this.getElementsByClassName('pin-tag');
       for (var i = 0; i < elements.length; ++i)
         this.updatePinClass_(elements[i], visible);
@@ -1203,8 +1278,6 @@ cr.define('login', function() {
       // Change the password placeholder based on pin keyboard visibility.
       this.passwordElement.placeholder = loadTimeData.getString(visible ?
           'pinKeyboardPlaceholderPinPassword' : 'passwordHint');
-
-      chrome.send('setForceDisableVirtualKeyboard', [visible]);
     },
 
     isPinShown: function() {
@@ -1214,6 +1287,10 @@ cr.define('login', function() {
     setUserPodIconType: function(userTypeClass) {
       this.userTypeIconAreaElement.classList.add(userTypeClass);
       this.userTypeIconAreaElement.hidden = false;
+    },
+
+    isFingerprintIconShown: function() {
+      return this.fingerprintIconElement && !this.fingerprintIconElement.hidden;
     },
 
     /**
@@ -1412,6 +1489,10 @@ cr.define('login', function() {
         this.classList.toggle('signing-in', true);
         chrome.send('attemptUnlock', [this.user.username]);
       } else if (this.isAuthTypePassword) {
+        if (this.fingerprintAuthenticated_) {
+          this.fingerprintAuthenticated_ = false;
+          return true;
+        }
         var pinValue = this.pinKeyboard ? this.pinKeyboard.value : '';
         var password = this.passwordElement.value || pinValue;
         if (!password)
@@ -1644,11 +1725,14 @@ cr.define('login', function() {
         // Show extra statistics information for desktop users
         this.querySelector(
           '.action-box-remove-non-owner-user-warning-text').hidden = true;
-        this.RemoveWarningDialogSetMessage_(true, false);
+        this.RemoveWarningDialogSetMessage_();
         // set a global handler for the callback
         window.updateRemoveWarningDialog =
             this.updateRemoveWarningDialog_.bind(this);
-        chrome.send('removeUserWarningLoadStats', [this.user.profilePath]);
+        var is_synced_user = this.user.emailAddress !== "";
+        if (!is_synced_user) {
+          chrome.send('removeUserWarningLoadStats', [this.user.profilePath]);
+        }
       }
       chrome.send('logRemoveUserWarningShown');
     },
@@ -1664,83 +1748,23 @@ cr.define('login', function() {
 
       var stats_elements = this.statsMapElements;
       // Update individual statistics
-      var hasErrors = false;
       for (var key in profileStats) {
         if (stats_elements.hasOwnProperty(key)) {
-          if (profileStats[key].success) {
-            this.user.statistics[key] = profileStats[key];
-          } else if (!this.user.statistics[key].success) {
-            hasErrors = true;
-            stats_elements[key].textContent = '';
-          }
+          stats_elements[key].textContent = profileStats[key].count;
         }
       }
-
-      this.RemoveWarningDialogSetMessage_(false, hasErrors);
     },
 
     /**
      * Set the new message in the dialog.
-     * @param {boolean} Whether this is the first output, that requires setting
-     * a in-progress message.
-     * @param {boolean} Whether any actual query to the statistics have failed.
-     * Should be true only if there is an error and the corresponding statistic
-     * is also unavailable in ProfileAttributesStorage.
      */
-    RemoveWarningDialogSetMessage_: function(isInitial, hasErrors) {
-      var stats_elements = this.statsMapElements;
-      var total_count = 0;
-      var num_stats_loaded = 0;
-      for (var key in stats_elements) {
-        if (this.user.statistics[key].success) {
-          var count = this.user.statistics[key].count;
-          stats_elements[key].textContent = count;
-          total_count += count;
-          num_stats_loaded++;
-        }
-      }
-
-      // this.classList is used for selecting the appropriate dialog.
-      if (total_count)
-        this.classList.remove('has-no-stats');
-
+    RemoveWarningDialogSetMessage_: function() {
       var is_synced_user = this.user.emailAddress !== "";
-      // Write total number if all statistics are loaded.
-      if (num_stats_loaded === Object.keys(stats_elements).length) {
-        if (!total_count) {
-          this.classList.add('has-no-stats');
-          var message = loadTimeData.getString(
-              is_synced_user ? 'removeUserWarningTextSyncNoStats' :
-                               'removeUserWarningTextNonSyncNoStats');
-          this.updateRemoveWarningDialogSetMessage_(this.user.profilePath,
-                                                    message);
-        } else {
-          window.updateRemoveWarningDialogSetMessage =
-              this.updateRemoveWarningDialogSetMessage_.bind(this);
-          chrome.send('getRemoveWarningDialogMessage',[{
-              profilePath: this.user.profilePath,
-              isSyncedUser: is_synced_user,
-              hasErrors: hasErrors,
-              totalCount: total_count
-          }]);
-        }
-      } else if (isInitial) {
-        if (!this.user.isProfileLoaded) {
-          message = loadTimeData.getString(
-              is_synced_user ? 'removeUserWarningTextSyncNoStats' :
-                               'removeUserWarningTextNonSyncNoStats');
-          this.updateRemoveWarningDialogSetMessage_(this.user.profilePath,
-                                                    message);
-        } else {
-          message = loadTimeData.getString(
-              is_synced_user ? 'removeUserWarningTextSyncCalculating' :
-                               'removeUserWarningTextNonSyncCalculating');
-          substitute = loadTimeData.getString(
-              'removeUserWarningTextCalculating');
-          this.updateRemoveWarningDialogSetMessage_(this.user.profilePath,
-                                                    message, substitute);
-        }
-      }
+      message = loadTimeData.getString(
+          is_synced_user ? 'removeUserWarningTextSync' :
+                           'removeUserWarningTextNonSync');
+      this.updateRemoveWarningDialogSetMessage_(this.user.profilePath,
+                                                message);
     },
 
     /**
@@ -1822,6 +1846,50 @@ cr.define('login', function() {
     },
 
     /**
+     * Handles mouseover event on fingerprint icon.
+     * @param {Event} e MouseOver event.
+     */
+    handleFingerprintIconMouseOver_: function(e) {
+      var bubbleContent = document.createElement('div');
+      bubbleContent.textContent =
+          loadTimeData.getString('fingerprintIconMessage');
+      this.passwordElement.placeholder =
+          loadTimeData.getString('fingerprintHint');
+
+      /** @const */ var BUBBLE_OFFSET = 25;
+      /** @const */ var BUBBLE_PADDING = -8;
+      var attachment = this.isPinShown() ? cr.ui.Bubble.Attachment.RIGHT :
+                                           cr.ui.Bubble.Attachment.BOTTOM;
+      var bubbleAnchor = this.getBubbleAnchorForFingerprintIcon_();
+      $('bubble').showContentForElement(
+          bubbleAnchor, attachment, bubbleContent, BUBBLE_OFFSET,
+          BUBBLE_PADDING, true);
+    },
+
+    /**
+     * Handles mouseout event on fingerprint icon.
+     * @param {Event} e MouseOut event.
+     */
+    handleFingerprintIconMouseOut_: function(e) {
+      var bubbleAnchor = this.getBubbleAnchorForFingerprintIcon_();
+      $('bubble').hideForElement(bubbleAnchor);
+      this.passwordElement.placeholder = loadTimeData.getString(
+          this.isPinShown() ? 'pinKeyboardPlaceholderPinPassword' :
+                              'passwordHint');
+    },
+
+    /**
+     * Returns bubble anchor of the fingerprint icon.
+     * @return {!HTMLElement} Anchor element of the bubble.
+     */
+    getBubbleAnchorForFingerprintIcon_: function() {
+      var bubbleAnchor = this;
+      if (this.isPinShown())
+        bubbleAnchor = (this.getElementsByClassName('auth-container'))[0];
+      return bubbleAnchor;
+    },
+
+    /**
      * Handles a keydown event on remove user confirmation button.
      * @param {Event} e KeyDown event.
      */
@@ -1899,8 +1967,14 @@ cr.define('login', function() {
      * button color and state and hides the error popup bubble.
      */
     updateInput_: function() {
-      if (this.submitButton)
-        this.submitButton.disabled = this.passwordElement.value.length <= 0;
+      if (this.submitButton) {
+        this.submitButton.disabled = this.passwordElement.value.length == 0;
+        if (this.isFingerprintIconShown()) {
+          this.submitButton.hidden = this.passwordElement.value.length == 0;
+        } else {
+          this.submitButton.hidden = false;
+        }
+      }
       this.showError = false;
       $('bubble').hide();
     },
@@ -1911,19 +1985,6 @@ cr.define('login', function() {
      */
     handleInputChanged_: function(e) {
       this.updateInput_();
-    },
-
-    /**
-     * Handles mouse up event on the password element.
-     * @param {Event} e Mouse up event.
-     */
-    handleInputMouseUp_: function(e) {
-      // If the PIN keyboard is shown and the user clicks on the password
-      // element, the virtual keyboard should pop up if it is enabled, so we
-      // must disable the virtual keyboard override.
-      if (this.isPinShown()) {
-        chrome.send('setForceDisableVirtualKeyboard', [false]);
-      }
     },
 
     /**
@@ -2150,7 +2211,7 @@ cr.define('login', function() {
           this.user_.displayName;
       this.querySelector('.info').textContent =
           loadTimeData.getStringF('publicAccountInfoFormat',
-                                  this.user_.enterpriseDomain);
+                                  this.user_.enterpriseDisplayDomain);
     },
 
     /** @override */
@@ -2416,6 +2477,7 @@ cr.define('login', function() {
     /** @override */
     update: function() {
       this.imageElement.src = this.user.userImage;
+      this.animatedImageElement.src = this.user.userImage;
       this.nameElement.textContent = this.user.displayName;
       this.reauthNameHintElement.textContent = this.user.displayName;
 
@@ -2428,8 +2490,6 @@ cr.define('login', function() {
       this.classList.toggle('legacy-supervised', isLegacySupervisedUser);
       this.classList.toggle('child', isChildUser);
       this.classList.toggle('synced', isSyncedUser);
-      this.classList.toggle('has-no-stats',
-          !isProfileLoaded && !this.user.statistics.length);
 
       if (this.isAuthTypeUserClick)
         this.passwordLabelElement.textContent = this.authValue;
@@ -2502,6 +2562,9 @@ cr.define('login', function() {
       this.imageElement.src = this.user.iconUrl;
       this.imageElement.alt = this.user.label;
       this.imageElement.title = this.user.label;
+      this.animatedImageElement.src = this.user.iconUrl;
+      this.animatedImageElement.alt = this.user.label;
+      this.animatedImageElement.title = this.user.label;
       this.passwordEntryContainerElement.hidden = true;
       this.launchAppButtonContainerElement.hidden = false;
       this.nameElement.textContent = this.user.label;
@@ -2742,15 +2805,6 @@ cr.define('login', function() {
     },
 
     /**
-     * Enables or disables transitions on every pod instance.
-     * @param {boolean} enable
-     */
-    toggleTransitions: function(enable) {
-      for (var i = 0; i < this.pods.length; ++i)
-        this.pods[i].toggleTransitions(enable);
-    },
-
-    /**
      * Performs visual changes on the user pod if there is an error.
      * @param {boolean} visible Whether to show or hide the display.
      */
@@ -2764,7 +2818,7 @@ cr.define('login', function() {
      * @param {boolean} visible
      */
     setFocusedPodPinVisibility: function(visible) {
-      if (this.focusedPod_ && this.focusedPod_.user.showPin)
+      if (this.focusedPod_)
         this.focusedPod_.setPinVisibility(visible);
     },
 
@@ -2786,21 +2840,60 @@ cr.define('login', function() {
     },
 
     /**
-     * Remove the pin keyboard from the pod with the given |username|.
+     * Enables or disables the pin keyboard for the given user. A disabled pin
+     * keyboard will never be displayed.
+     *
+     * If the user's pod is focused, then enabling the pin keyboard will display
+     * it; disabling the pin keyboard will hide it.
+     * @param {!string} username
+     * @param {boolean} enabled
+     */
+    setPinEnabled: function(username, enabled) {
+      var pod = this.getPodWithUsername_(username);
+      if (!pod) {
+        console.error('Attempt to enable/disable pin keyboard of missing pod.');
+        return;
+      }
+
+      // Make sure to set |pinEnabled| before toggling visiblity to avoid
+      // validation errors.
+      pod.pinEnabled = enabled;
+
+      if (this.focusedPod_ == pod) {
+        if (enabled) {
+          ensurePinKeyboardLoaded(
+              this.setPinVisibility.bind(this, username, true));
+        } else {
+          this.setPinVisibility(username, false);
+        }
+      }
+    },
+
+    /**
+     * Shows or hides the pin keyboard from the pod with the given |username|.
+     * This is only a visibility change; the pin keyboard can be reshown.
+     *
+     * Use setPinEnabled if the pin keyboard should be disabled for the given
+     * user.
      * @param {!user} username
      * @param {boolean} visible
      */
-    removePinKeyboard: function(username) {
+    setPinVisibility: function(username, visible) {
       var pod = this.getPodWithUsername_(username);
       if (!pod) {
-        console.warn('Attempt to remove pin keyboard of missing pod.');
+        console.error('Attempt to show/hide pin keyboard of missing pod.');
         return;
       }
-      // Remove the child, so that the virtual keyboard cannot bring it up
-      // again after three tries.
-      if (pod.pinContainer)
-        pod.removeChild(pod.pinContainer);
-      pod.setPinVisibility(false);
+      if (visible && pod.pinEnabled === false) {
+        console.error('Attempt to show disabled pin keyboard');
+        return;
+      }
+      if (visible && this.focusedPod_ != pod) {
+        console.error('Attempt to show pin keyboard on non-focused pod');
+        return;
+      }
+
+      pod.setPinVisibility(visible);
     },
 
     /**
@@ -3001,6 +3094,9 @@ cr.define('login', function() {
       // immediatelly.
       pod.customIconElement.setTooltip(
           icon.tooltip || {text: '', autoshow: false});
+
+      // Hide fingerprint icon when custom icon is shown.
+      this.setUserPodFingerprintIcon(username, FINGERPRINT_STATES.HIDDEN);
     },
 
     /**
@@ -3037,6 +3133,100 @@ cr.define('login', function() {
 
       // TODO(tengs): Allow option for a fading transition.
       pod.customIconElement.hide();
+
+      // Show fingerprint icon if applicable.
+      this.setUserPodFingerprintIcon(username, FINGERPRINT_STATES.DEFAULT);
+    },
+
+    /**
+     * Set a fingerprint icon in the user pod of |username|.
+     * @param {string} username Username of the selected user
+     * @param {number} state Fingerprint unlock state
+     */
+    setUserPodFingerprintIcon: function(username, state) {
+      var pod = this.getPodWithUsername_(username);
+      if (pod == null) {
+        console.error(
+            'Unable to set user pod fingerprint icon: user pod not found.');
+        return;
+      }
+      pod.fingerprintAuthenticated_ = false;
+      if (!pod.fingerprintIconElement)
+        return;
+      if (!pod.user.allowFingerprint || state == FINGERPRINT_STATES.HIDDEN ||
+          !pod.customIconElement.hidden) {
+        pod.fingerprintIconElement.hidden = true;
+        pod.submitButton.hidden = false;
+        return;
+      }
+
+      FINGERPRINT_STATES_MAPPING.forEach(function(icon) {
+          pod.fingerprintIconElement.classList.toggle(
+              icon.class, state == icon.state);
+      });
+      pod.fingerprintIconElement.hidden = false;
+      pod.submitButton.hidden = pod.passwordElement.value.length == 0;
+      this.updatePasswordField_(pod, state);
+      if (state == FINGERPRINT_STATES.DEFAULT)
+        return;
+
+      pod.fingerprintAuthenticated_ = true;
+      this.setActivatedPod(pod);
+      if (state == FINGERPRINT_STATES.FAILED) {
+        /** @const */ var RESET_ICON_TIMEOUT_MS = 500;
+        setTimeout(
+            this.resetIconAndPasswordField_.bind(this, pod),
+            RESET_ICON_TIMEOUT_MS);
+      }
+    },
+
+    /**
+     * Reset the fingerprint icon and password field.
+     * @param {UserPod} pod Pod to reset.
+     */
+    resetIconAndPasswordField_: function(pod) {
+      if (!pod.fingerprintIconElement)
+        return;
+      this.setUserPodFingerprintIcon(
+          pod.user.username, FINGERPRINT_STATES.DEFAULT);
+    },
+
+    /**
+     * Remove the fingerprint icon in the user pod.
+     * @param {string} username Username of the selected user
+     */
+    removeUserPodFingerprintIcon: function(username) {
+      var pod = this.getPodWithUsername_(username);
+      if (pod == null) {
+        console.error('No user pod found (when removing fingerprint icon).');
+        return;
+      }
+      this.resetIconAndPasswordField_(pod);
+      if (pod.fingerprintIconElement) {
+        pod.fingerprintIconElement.parentNode.removeChild(
+            pod.fingerprintIconElement);
+      }
+      pod.submitButton.hidden = false;
+    },
+
+    /**
+     * Updates the password field in the user pod.
+     * @param {UserPod} pod Pod to update.
+     * @param {number} state Fingerprint unlock state
+     */
+    updatePasswordField_: function(pod, state) {
+      FINGERPRINT_STATES_MAPPING.forEach(function(item) {
+        pod.passwordElement.classList.toggle(item.class, state == item.state);
+      });
+      var placeholderStr = loadTimeData.getString(
+          pod.isPinShown() ? 'pinKeyboardPlaceholderPinPassword' :
+                             'passwordHint');
+      if (state == FINGERPRINT_STATES.SIGNIN) {
+        placeholderStr = loadTimeData.getString('fingerprintSigningin');
+      } else if (state == FINGERPRINT_STATES.FAILED) {
+        placeholderStr = loadTimeData.getString('fingerprintSigninFailed');
+      }
+      pod.passwordElement.placeholder = placeholderStr;
     },
 
     /**
@@ -3308,6 +3498,8 @@ cr.define('login', function() {
           pod.isActionBoxMenuHovered = false;
           pod.classList.remove('focused');
           pod.setPinVisibility(false);
+          this.setUserPodFingerprintIcon(
+              pod.user.username, FINGERPRINT_STATES.HIDDEN);
           // On Desktop, the faded style is not set correctly, so we should
           // manually fade out non-focused pods if there is a focused pod.
           if (pod.user.isDesktopUser && podToFocus)
@@ -3341,24 +3533,19 @@ cr.define('login', function() {
           podToFocus.focus();
         }
 
-        // focusPod() automatically loads wallpaper
         if (!podToFocus.user.isApp)
-          chrome.send('focusPod', [podToFocus.user.username]);
+          chrome.send(
+              'focusPod',
+              [podToFocus.user.username, true /* loads wallpaper */]);
         this.firstShown_ = false;
         this.lastFocusedPod_ = podToFocus;
         this.scrollFocusedPodIntoView();
+        this.setUserPodFingerprintIcon(
+            podToFocus.user.username, FINGERPRINT_STATES.DEFAULT);
       } else {
         chrome.send('noPodFocused');
       }
       this.insideFocusPod_ = false;
-    },
-
-    /**
-     * Resets wallpaper to the last active user's wallpaper, if any.
-     */
-    loadLastWallpaper: function() {
-      if (this.lastFocusedPod_ && !this.lastFocusedPod_.user.isApp)
-        chrome.send('loadWallpaper', [this.lastFocusedPod_.user.username]);
     },
 
     /**

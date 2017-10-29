@@ -5,29 +5,27 @@
 #ifndef AnimationWorkletMessagingProxy_h
 #define AnimationWorkletMessagingProxy_h
 
+#include <memory>
 #include "core/dom/AnimationWorkletProxyClient.h"
 #include "core/workers/ThreadedWorkletMessagingProxy.h"
-#include "wtf/Allocator.h"
-#include <memory>
 
 namespace blink {
 
 class ExecutionContext;
+class WorkerClients;
 class WorkerThread;
 
 class AnimationWorkletMessagingProxy final
     : public ThreadedWorkletMessagingProxy {
-  USING_FAST_MALLOC(AnimationWorkletMessagingProxy);
-
  public:
-  AnimationWorkletMessagingProxy(ExecutionContext*,
-                                 AnimationWorkletProxyClient*);
+  AnimationWorkletMessagingProxy(ExecutionContext*, WorkerClients*);
 
- protected:
+  DECLARE_VIRTUAL_TRACE();
+
+ private:
   ~AnimationWorkletMessagingProxy() override;
 
-  std::unique_ptr<WorkerThread> createWorkerThread(double originTime) override;
-  Persistent<AnimationWorkletProxyClient> m_proxyClient;
+  std::unique_ptr<WorkerThread> CreateWorkerThread() override;
 };
 
 }  // namespace blink

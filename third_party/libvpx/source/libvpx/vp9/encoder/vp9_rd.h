@@ -38,6 +38,7 @@ extern "C" {
 #define MAX_MODES 30
 #define MAX_REFS 6
 
+#define RD_THRESH_INIT_FACT 32
 #define RD_THRESH_MAX_FACT 64
 #define RD_THRESH_INC 1
 
@@ -140,6 +141,11 @@ void vp9_initialize_me_consts(struct VP9_COMP *cpi, MACROBLOCK *x, int qindex);
 void vp9_model_rd_from_var_lapndz(unsigned int var, unsigned int n,
                                   unsigned int qstep, int *rate, int64_t *dist);
 
+void vp9_model_rd_from_var_lapndz_vec(unsigned int var[MAX_MB_PLANE],
+                                      unsigned int n_log2[MAX_MB_PLANE],
+                                      unsigned int qstep[MAX_MB_PLANE],
+                                      int64_t *rate_sum, int64_t *dist_sum);
+
 int vp9_get_switchable_rate(const struct VP9_COMP *cpi,
                             const MACROBLOCKD *const xd);
 
@@ -164,32 +170,11 @@ void vp9_set_rd_speed_thresholds(struct VP9_COMP *cpi);
 void vp9_set_rd_speed_thresholds_sub8x8(struct VP9_COMP *cpi);
 
 void vp9_update_rd_thresh_fact(int (*fact)[MAX_MODES], int rd_thresh, int bsize,
-#if CONFIG_MULTITHREAD
-                               pthread_mutex_t *enc_row_mt_mutex,
-#endif
                                int best_mode_index);
 
 static INLINE int rd_less_than_thresh(int64_t best_rd, int thresh,
-#if CONFIG_MULTITHREAD
-                                      pthread_mutex_t *enc_row_mt_mutex,
-#endif
                                       const int *const thresh_fact) {
-  int is_rd_less_than_thresh;
-
-#if CONFIG_MULTITHREAD
-  // Synchronize to ensure data coherency as thresh_freq_fact is maintained at
-  // tile level and not thread-safe with row based multi-threading
-  if (NULL != enc_row_mt_mutex) pthread_mutex_lock(enc_row_mt_mutex);
-#endif
-
-  is_rd_less_than_thresh =
-      best_rd < ((int64_t)thresh * (*thresh_fact) >> 5) || thresh == INT_MAX;
-
-#if CONFIG_MULTITHREAD
-  if (NULL != enc_row_mt_mutex) pthread_mutex_unlock(enc_row_mt_mutex);
-#endif
-
-  return is_rd_less_than_thresh;
+  return best_rd < ((int64_t)thresh * (*thresh_fact) >> 5) || thresh == INT_MAX;
 }
 
 static INLINE void set_error_per_bit(MACROBLOCK *x, int rdmult) {

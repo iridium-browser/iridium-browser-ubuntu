@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 #import "base/mac/foundation_util.h"
-#import "base/mac/scoped_nsobject.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_text_item.h"
@@ -15,6 +14,10 @@
 #import "ios/third_party/material_components_ios/src/components/CollectionCells/src/MaterialCollectionCells.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -50,7 +53,9 @@ typedef NS_ENUM(NSInteger, ItemType) {
                      basePref:(const char*)basePreference
                      wifiPref:(const char*)wifiPreference
                         title:(NSString*)title {
-  self = [super initWithStyle:CollectionViewControllerStyleAppBar];
+  UICollectionViewLayout* layout = [[MDCCollectionViewFlowLayout alloc] init];
+  self =
+      [super initWithLayout:layout style:CollectionViewControllerStyleAppBar];
   if (self) {
     self.title = title;
     basePreference_.Init(basePreference, prefs);
@@ -60,31 +65,26 @@ typedef NS_ENUM(NSInteger, ItemType) {
   return self;
 }
 
-- (instancetype)initWithStyle:(CollectionViewControllerStyle)style {
-  NOTREACHED();
-  return nil;
-}
-
 - (void)loadModel {
   [super loadModel];
   CollectionViewModel* model = self.collectionViewModel;
 
   [model addSectionWithIdentifier:SectionIdentifierOptions];
 
-  base::scoped_nsobject<CollectionViewTextItem> always(
-      [[CollectionViewTextItem alloc] initWithType:ItemTypeOptionsAlways]);
+  CollectionViewTextItem* always =
+      [[CollectionViewTextItem alloc] initWithType:ItemTypeOptionsAlways];
   [always setText:l10n_util::GetNSString(IDS_IOS_OPTIONS_DATA_USAGE_ALWAYS)];
   [always setAccessibilityTraits:UIAccessibilityTraitButton];
   [model addItem:always toSectionWithIdentifier:SectionIdentifierOptions];
 
-  base::scoped_nsobject<CollectionViewTextItem> wifi(
-      [[CollectionViewTextItem alloc] initWithType:ItemTypeOptionsOnlyOnWiFi]);
+  CollectionViewTextItem* wifi =
+      [[CollectionViewTextItem alloc] initWithType:ItemTypeOptionsOnlyOnWiFi];
   [wifi setText:l10n_util::GetNSString(IDS_IOS_OPTIONS_DATA_USAGE_ONLY_WIFI)];
   [wifi setAccessibilityTraits:UIAccessibilityTraitButton];
   [model addItem:wifi toSectionWithIdentifier:SectionIdentifierOptions];
 
-  base::scoped_nsobject<CollectionViewTextItem> never(
-      [[CollectionViewTextItem alloc] initWithType:ItemTypeOptionsNever]);
+  CollectionViewTextItem* never =
+      [[CollectionViewTextItem alloc] initWithType:ItemTypeOptionsNever];
   [never setText:l10n_util::GetNSString(IDS_IOS_OPTIONS_DATA_USAGE_NEVER)];
   [never setAccessibilityTraits:UIAccessibilityTraitButton];
   [model addItem:never toSectionWithIdentifier:SectionIdentifierOptions];
@@ -118,8 +118,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
     }
   }
 
-  [self reconfigureCellsForItems:modifiedItems
-         inSectionWithIdentifier:SectionIdentifierOptions];
+  [self reconfigureCellsForItems:modifiedItems];
 }
 
 - (void)updateBasePref:(BOOL)basePref wifiPref:(BOOL)wifiPref {

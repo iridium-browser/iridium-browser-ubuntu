@@ -16,10 +16,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/resources/release_callback_impl.h"
-#include "cc/resources/resource_format.h"
-#include "cc/resources/texture_mailbox.h"
+#include "components/viz/common/quads/resource_format.h"
+#include "components/viz/common/quads/texture_mailbox.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace media {
@@ -27,8 +27,11 @@ class SkCanvasVideoRenderer;
 class VideoFrame;
 }
 
-namespace cc {
+namespace viz {
 class ContextProvider;
+}
+
+namespace cc {
 class ResourceProvider;
 
 class CC_EXPORT VideoFrameExternalResources {
@@ -49,7 +52,7 @@ class CC_EXPORT VideoFrameExternalResources {
   };
 
   ResourceType type;
-  std::vector<TextureMailbox> mailboxes;
+  std::vector<viz::TextureMailbox> mailboxes;
   std::vector<ReleaseCallbackImpl> release_callbacks;
   bool read_lock_fences_enabled;
 
@@ -70,45 +73,22 @@ class CC_EXPORT VideoFrameExternalResources {
 
 // VideoResourceUpdater is used by the video system to produce frame content as
 // resources consumable by the compositor.
-class CC_EXPORT VideoResourceUpdater
-    : public base::SupportsWeakPtr<VideoResourceUpdater> {
+class CC_EXPORT VideoResourceUpdater {
  public:
-  VideoResourceUpdater(ContextProvider* context_provider,
-                       ResourceProvider* resource_provider);
+  VideoResourceUpdater(viz::ContextProvider* context_provider,
+                       ResourceProvider* resource_provider,
+                       bool use_stream_video_draw_quad);
   ~VideoResourceUpdater();
 
   VideoFrameExternalResources CreateExternalResourcesFromVideoFrame(
       scoped_refptr<media::VideoFrame> video_frame);
-
-  // Base class for converting short integers to half-floats.
-  // TODO(hubbe): Move this to media/.
-  class HalfFloatMaker {
-   public:
-    // Convert an array of short integers into an array of half-floats.
-    // |src| is an array of integers in range 0 .. 2^{bits_per_channel} - 1
-    // |num| is number of entries in input and output array.
-    // The numbers stored in |dst| will be half floats in range 0.0..1.0
-    virtual void MakeHalfFloats(const uint16_t* src,
-                                size_t num,
-                                uint16_t* dst) = 0;
-    // The half-floats made needs by this class will be in the range
-    // [Offset() .. Offset() + 1.0/Multiplier]. So if you want results
-    // in the 0-1 range, you need to do:
-    //   (half_float - Offset()) * Multiplier()
-    // to each returned value.
-    virtual float Offset() const = 0;
-    virtual float Multiplier() const = 0;
-  };
-
-  static std::unique_ptr<HalfFloatMaker> NewHalfFloatMaker(
-      int bits_per_channel);
 
  private:
   class PlaneResource {
    public:
     PlaneResource(unsigned resource_id,
                   const gfx::Size& resource_size,
-                  ResourceFormat resource_format,
+                  viz::ResourceFormat resource_format,
                   gpu::Mailbox mailbox);
     PlaneResource(const PlaneResource& other);
 
@@ -123,7 +103,7 @@ class CC_EXPORT VideoResourceUpdater
     // Accessors for resource identifiers provided at construction time.
     unsigned resource_id() const { return resource_id_; }
     const gfx::Size& resource_size() const { return resource_size_; }
-    ResourceFormat resource_format() const { return resource_format_; }
+    viz::ResourceFormat resource_format() const { return resource_format_; }
     const gpu::Mailbox& mailbox() const { return mailbox_; }
 
     // Various methods for managing references. See |ref_count_| for details.
@@ -146,7 +126,7 @@ class CC_EXPORT VideoResourceUpdater
 
     const unsigned resource_id_;
     const gfx::Size resource_size_;
-    const ResourceFormat resource_format_;
+    const viz::ResourceFormat resource_format_;
     const gpu::Mailbox mailbox_;
   };
 
@@ -164,19 +144,20 @@ class CC_EXPORT VideoResourceUpdater
   // resources.
   ResourceList::iterator RecycleOrAllocateResource(
       const gfx::Size& resource_size,
-      ResourceFormat resource_format,
+      viz::ResourceFormat resource_format,
       const gfx::ColorSpace& color_space,
       bool software_resource,
       bool immutable_hint,
       int unique_id,
       int plane_index);
   ResourceList::iterator AllocateResource(const gfx::Size& plane_size,
-                                          ResourceFormat format,
+                                          viz::ResourceFormat format,
                                           const gfx::ColorSpace& color_space,
                                           bool has_mailbox,
                                           bool immutable_hint);
   void DeleteResource(ResourceList::iterator resource_it);
   void CopyPlaneTexture(media::VideoFrame* video_frame,
+                        const gfx::ColorSpace& resource_color_space,
                         const gpu::MailboxHolder& mailbox_holder,
                         VideoFrameExternalResources* external_resources);
   VideoFrameExternalResources CreateForHardwarePlanes(
@@ -195,14 +176,17 @@ class CC_EXPORT VideoResourceUpdater
                             bool lost_resource,
                             BlockingTaskRunner* main_thread_task_runner);
 
-  ContextProvider* context_provider_;
+  viz::ContextProvider* context_provider_;
   ResourceProvider* resource_provider_;
+  const bool use_stream_video_draw_quad_;
   std::unique_ptr<media::SkCanvasVideoRenderer> video_renderer_;
   std::vector<uint8_t> upload_pixels_;
 
   // Recycle resources so that we can reduce the number of allocations and
   // data transfers.
   ResourceList all_resources_;
+
+  base::WeakPtrFactory<VideoResourceUpdater> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoResourceUpdater);
 };

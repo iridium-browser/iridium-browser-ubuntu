@@ -4,6 +4,9 @@
 
 #include "chrome/browser/ui/app_list/search/extension_app_result.h"
 
+#include "base/metrics/user_metrics.h"
+#include "chrome/browser/extensions/chrome_app_icon.h"
+#include "chrome/browser/extensions/chrome_app_icon_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
@@ -11,7 +14,6 @@
 #include "chrome/browser/ui/app_list/search/search_util.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow.h"
 #include "chrome/common/extensions/extension_metrics.h"
-#include "content/public/browser/user_metrics.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system_provider.h"
 #include "extensions/browser/extensions_browser_client.h"
@@ -21,12 +23,6 @@
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/events/event_constants.h"
-#include "ui/gfx/color_utils.h"
-#include "ui/gfx/image/image_skia_operations.h"
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/extensions/gfx_utils.h"
-#endif
 
 namespace app_list {
 
@@ -43,15 +39,8 @@ ExtensionAppResult::ExtensionAppResult(Profile* profile,
   DCHECK(extension);
 
   is_platform_app_ = extension->is_platform_app();
-
-  icon_.reset(
-      new extensions::IconImage(profile,
-                                extension,
-                                extensions::IconsInfo::GetIcons(extension),
-                                GetPreferredIconDimension(),
-                                extensions::util::GetDefaultAppIcon(),
-                                this));
-  UpdateIcon();
+  icon_ = extensions::ChromeAppIconService::Get(profile)->CreateIcon(
+      this, app_id, GetPreferredIconDimension());
 
   StartObservingExtensionRegistry();
 }
@@ -78,8 +67,7 @@ void ExtensionAppResult::Open(int event_flags) {
 
   if (display_type() != DISPLAY_RECOMMENDATION) {
     extensions::RecordAppListSearchLaunch(extension);
-    content::RecordAction(
-        base::UserMetricsAction("AppList_ClickOnAppFromSearch"));
+    base::RecordAction(base::UserMetricsAction("AppList_ClickOnAppFromSearch"));
   }
 
   controller()->ActivateApp(
@@ -138,30 +126,8 @@ bool ExtensionAppResult::RunExtensionEnableFlow() {
   return true;
 }
 
-void ExtensionAppResult::UpdateIcon() {
-  gfx::ImageSkia icon = icon_->image_skia();
-
-#if defined(OS_CHROMEOS)
-  extensions::util::MaybeApplyChromeBadge(profile(), app_id(), &icon);
-#endif
-
-  if (!extensions::util::IsAppLaunchable(app_id(), profile())) {
-    const color_utils::HSL shift = {-1, 0, 0.6};
-    icon = gfx::ImageSkiaOperations::CreateHSLShiftedImage(icon, shift);
-  }
-
-  SetIcon(icon);
-}
-
-void ExtensionAppResult::OnExtensionIconImageChanged(
-    extensions::IconImage* image) {
-  DCHECK_EQ(icon_.get(), image);
-  UpdateIcon();
-}
-
-void ExtensionAppResult::OnExtensionIconImageDestroyed(
-    extensions::IconImage* image) {
-  SetIcon(gfx::ImageSkia());
+void ExtensionAppResult::OnIconUpdated(extensions::ChromeAppIcon* icon) {
+  SetIcon(icon->image_skia());
 }
 
 void ExtensionAppResult::ExecuteLaunchCommand(int event_flags) {
@@ -184,7 +150,10 @@ void ExtensionAppResult::ExtensionEnableFlowAborted(bool user_initiated) {
 void ExtensionAppResult::OnExtensionLoaded(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension) {
-  UpdateIcon();
+  // Old |icon_| might be invalidated for forever in case extension gets
+  // updated. In this case we need re-create icon again.
+  if (!icon_->IsValid())
+    icon_->Reload();
 }
 
 void ExtensionAppResult::OnShutdown(extensions::ExtensionRegistry* registry) {

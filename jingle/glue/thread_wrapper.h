@@ -14,9 +14,10 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
-#include "third_party/webrtc/base/thread.h"
+#include "third_party/webrtc/rtc_base/thread.h"
 
 namespace jingle_glue {
 

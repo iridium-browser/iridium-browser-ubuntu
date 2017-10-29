@@ -15,7 +15,6 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/strings/string_piece.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/http/http_response_headers.h"
@@ -51,8 +50,8 @@ class QuicSimpleClient : public QuicClientBase,
   // QuicChromiumPacketReader::Visitor
   void OnReadError(int result, const DatagramClientSocket* socket) override;
   bool OnPacket(const QuicReceivedPacket& packet,
-                IPEndPoint local_address,
-                IPEndPoint peer_address) override;
+                const QuicSocketAddress& local_address,
+                const QuicSocketAddress& peer_address) override;
 
   // From QuicClientBase
   QuicSocketAddress GetLatestClientAddress() const override;

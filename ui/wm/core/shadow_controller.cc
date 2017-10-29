@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/scoped_observer.h"
+#include "base/stl_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/env_observer.h"
@@ -19,7 +20,6 @@
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer.h"
 #include "ui/wm/core/shadow.h"
-#include "ui/wm/core/shadow_types.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
 
@@ -32,18 +32,17 @@ namespace wm {
 
 namespace {
 
-constexpr ShadowElevation kActiveNormalShadowElevation = ShadowElevation::LARGE;
 constexpr ShadowElevation kInactiveNormalShadowElevation =
     ShadowElevation::MEDIUM;
 
 ShadowElevation GetDefaultShadowElevationForWindow(aura::Window* window) {
   switch (window->type()) {
-    case ui::wm::WINDOW_TYPE_NORMAL:
-    case ui::wm::WINDOW_TYPE_PANEL:
+    case aura::client::WINDOW_TYPE_NORMAL:
+    case aura::client::WINDOW_TYPE_PANEL:
       return kInactiveNormalShadowElevation;
 
-    case ui::wm::WINDOW_TYPE_MENU:
-    case ui::wm::WINDOW_TYPE_TOOLTIP:
+    case aura::client::WINDOW_TYPE_MENU:
+    case aura::client::WINDOW_TYPE_TOOLTIP:
       return ShadowElevation::SMALL;
 
     default:
@@ -62,10 +61,14 @@ ShadowElevation GetShadowElevationConvertDefault(aura::Window* window) {
 }
 
 ShadowElevation GetShadowElevationForActiveState(aura::Window* window) {
-  if (IsActiveWindow(window))
-    return kActiveNormalShadowElevation;
+  ShadowElevation elevation = window->GetProperty(kShadowElevationKey);
+  if (elevation != ShadowElevation::DEFAULT)
+    return elevation;
 
-  return GetShadowElevationConvertDefault(window);
+  if (IsActiveWindow(window))
+    return ShadowController::kActiveNormalShadowElevation;
+
+  return GetDefaultShadowElevationForWindow(window);
 }
 
 // Returns the shadow style to be applied to |losing_active| when it is losing
@@ -74,13 +77,10 @@ ShadowElevation GetShadowElevationForActiveState(aura::Window* window) {
 ShadowElevation GetShadowElevationForWindowLosingActive(
     aura::Window* losing_active,
     aura::Window* gaining_active) {
-  if (gaining_active && aura::client::GetHideOnDeactivate(gaining_active)) {
-    aura::Window::Windows::const_iterator it =
-        std::find(GetTransientChildren(losing_active).begin(),
-                  GetTransientChildren(losing_active).end(),
-                  gaining_active);
-    if (it != GetTransientChildren(losing_active).end())
-      return kActiveNormalShadowElevation;
+  if (gaining_active && GetHideOnDeactivate(gaining_active)) {
+    if (base::ContainsValue(GetTransientChildren(losing_active),
+                            gaining_active))
+      return ShadowController::kActiveNormalShadowElevation;
   }
   return kInactiveNormalShadowElevation;
 }
@@ -264,10 +264,8 @@ Shadow* ShadowController::GetShadowForWindow(aura::Window* window) {
   return window->GetProperty(kShadowLayerKey);
 }
 
-ShadowController::ShadowController(
-    aura::client::ActivationClient* activation_client)
-    : activation_client_(activation_client),
-      impl_(Impl::GetInstance()) {
+ShadowController::ShadowController(ActivationClient* activation_client)
+    : activation_client_(activation_client), impl_(Impl::GetInstance()) {
   // Watch for window activation changes.
   activation_client_->AddObserver(this);
 }

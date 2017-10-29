@@ -79,7 +79,7 @@ class SpotlightBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
   explicit SpotlightBookmarkModelBridge(BookmarksSpotlightManager* owner)
       : owner_(owner){};
 
-  ~SpotlightBookmarkModelBridge() override{};
+  ~SpotlightBookmarkModelBridge() override {}
 
   void BookmarkNodeRemoved(bookmarks::BookmarkModel* model,
                            const bookmarks::BookmarkNode* parent,
@@ -133,7 +133,7 @@ class SpotlightBookmarkModelBridge : public bookmarks::BookmarkModelObserver {
 
   void BookmarkNodeChildrenReordered(
       bookmarks::BookmarkModel* model,
-      const bookmarks::BookmarkNode* node) override{};
+      const bookmarks::BookmarkNode* node) override {}
 
   void BookmarkNodeMoved(bookmarks::BookmarkModel* model,
                          const bookmarks::BookmarkNode* old_parent,
@@ -169,10 +169,6 @@ initWithLargeIconService:(favicon::LargeIconService*)largeIconService
     bookmarkModel->AddObserver(_bookmarkModelBridge.get());
   }
   return self;
-}
-
-- (void)dealloc {
-  [self detachBookmarkModel];
 }
 
 - (void)detachBookmarkModel {
@@ -281,6 +277,11 @@ initWithLargeIconService:(favicon::LargeIconService*)largeIconService
   for (int child = 0; child < childCount; child++) {
     [self refreshNodeInIndex:node->GetChild(child) initial:initial];
   }
+}
+
+- (void)shutdown {
+  [self detachBookmarkModel];
+  [super shutdown];
 }
 
 - (NSArray*)spotlightItemsWithURL:(const GURL&)URL

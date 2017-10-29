@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/format_macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -20,8 +21,7 @@
 #include "net/socket/server_socket.h"
 #include "net/socket/tcp_server_socket.h"
 
-namespace ui {
-namespace devtools {
+namespace ui_devtools {
 
 namespace {
 const char kChromeDeveloperToolsPrefix[] =
@@ -33,6 +33,7 @@ bool IsUiDevToolsEnabled() {
 
 int GetUiDevToolsPort() {
   DCHECK(IsUiDevToolsEnabled());
+  // This value is duplicated in the chrome://flags description.
   constexpr int kDefaultPort = 9223;
   int port;
   if (!base::StringToInt(
@@ -64,6 +65,10 @@ UiDevToolsServer::UiDevToolsServer(
 }
 
 UiDevToolsServer::~UiDevToolsServer() {
+  if (io_thread_task_runner_)
+    io_thread_task_runner_->DeleteSoon(FROM_HERE, server_.release());
+  if (thread_ && thread_->IsRunning())
+    thread_->Stop();
   devtools_server_ = nullptr;
 }
 
@@ -74,7 +79,7 @@ std::unique_ptr<UiDevToolsServer> UiDevToolsServer::Create(
   if (IsUiDevToolsEnabled() && !devtools_server_) {
     // TODO(mhashmi): Change port if more than one inspectable clients
     server.reset(new UiDevToolsServer(io_thread_task_runner));
-    server->Start("127.0.0.1", GetUiDevToolsPort());
+    server->Start("0.0.0.0", GetUiDevToolsPort());
   }
   return server;
 }
@@ -90,9 +95,8 @@ UiDevToolsServer::GetClientNamesAndUrls() {
        i++) {
     pairs.push_back(std::pair<std::string, std::string>(
         devtools_server_->clients_[i]->name(),
-        base::StringPrintf("%slocalhost:%d/%" PRIuS,
-                           kChromeDeveloperToolsPrefix, GetUiDevToolsPort(),
-                           i)));
+        base::StringPrintf("%s0.0.0.0:%d/%" PRIuS, kChromeDeveloperToolsPrefix,
+                           GetUiDevToolsPort(), i)));
   }
   return pairs;
 }
@@ -181,5 +185,4 @@ void UiDevToolsServer::OnClose(int connection_id) {
   connections_.erase(it);
 }
 
-}  // namespace devtools
-}  // namespace ui
+}  // namespace ui_devtools

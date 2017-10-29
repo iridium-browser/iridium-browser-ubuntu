@@ -7,12 +7,19 @@
 #import <EarlGrey/EarlGrey.h>
 
 #import "base/logging.h"
+#import "base/mac/foundation_util.h"
+#import "ios/showcase/core/app_delegate.h"
+#include "testing/coverage_util_ios.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 @implementation ShowcaseTestCase
+
++ (void)setUp {
+  coverage_util::ConfigureCoverageReportPath();
+}
 
 // Overrides testInvocations so the set of tests run can be modified, as
 // necessary.
@@ -26,6 +33,12 @@
     return @[];
   }
   return [super testInvocations];
+}
+
+- (void)setUp {
+  AppDelegate* delegate = base::mac::ObjCCastStrict<AppDelegate>(
+      [UIApplication sharedApplication].delegate);
+  [delegate setupUI];
 }
 
 @end

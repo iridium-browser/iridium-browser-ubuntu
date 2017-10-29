@@ -11,7 +11,6 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "chrome/browser/ui/cocoa/location_bar/location_bar_decoration.h"
-#import "ui/base/cocoa/appkit_utils.h"
 
 // Draws an outlined rounded rect, with an optional image to the left
 // and an optional text label to the right.
@@ -29,7 +28,6 @@ class BubbleDecoration : public LocationBarDecoration {
   void SetTextColor(NSColor* text_color);
   void SetFont(NSFont* font);
   void SetRetinaBaselineOffset(CGFloat offset);
-  virtual ui::NinePartImageIds GetBubbleImageIds() = 0;
 
   // Implement |LocationBarDecoration|.
   CGFloat GetWidthForSpace(CGFloat width) override;
@@ -38,10 +36,6 @@ class BubbleDecoration : public LocationBarDecoration {
   NSFont* GetFont() const override;
 
  protected:
-  // Returns the amount of padding between the divider and the omnibox text.
-  // Returns 0 in non-MD since there's no divider.
-  CGFloat DividerPadding() const;
-
   // Helper returning bubble width for the given |image| and |label|
   // assuming |font_| (for sizing text).  Arguments can be nil.
   CGFloat GetWidthForImageAndLabel(NSImage* image, NSString* label);

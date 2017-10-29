@@ -106,7 +106,7 @@ void DeleteOnUIThread(
 DownloadResourceHandler::DownloadResourceHandler(net::URLRequest* request)
     : ResourceHandler(request),
       tab_info_(new DownloadTabInfo()),
-      core_(request, this) {
+      core_(request, this, false) {
   // Do UI thread initialization for tab_info_ asap after
   // DownloadResourceHandler creation since the tab could be navigated
   // before StartOnUIThread gets called.  This is safe because deletion
@@ -171,9 +171,16 @@ void DownloadResourceHandler::OnWillStart(
 
 // Create a new buffer, which will be handed to the download thread for file
 // writing and deletion.
-bool DownloadResourceHandler::OnWillRead(scoped_refptr<net::IOBuffer>* buf,
-                                         int* buf_size) {
-  return core_.OnWillRead(buf, buf_size);
+void DownloadResourceHandler::OnWillRead(
+    scoped_refptr<net::IOBuffer>* buf,
+    int* buf_size,
+    std::unique_ptr<ResourceController> controller) {
+  if (!core_.OnWillRead(buf, buf_size)) {
+    controller->Cancel();
+    return;
+  }
+
+  controller->Resume();
 }
 
 // Pass the buffer to the download file writer.

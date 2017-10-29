@@ -790,8 +790,11 @@ TEST_F(BookmarkBarFolderControllerMenuTest, DragMoveBarBookmarkToFolder) {
       "4f2f1b 4f2f2b 4f2f3b ] 4f3f:[ 4f3f1b 4f3f2b 4f3f3b ] ] 5b ");
   EXPECT_EQ(expected_string, bookmarks::test::ModelStringFromNode(root));
 
-  // Verify the window still appears by looking for its controller.
+  // Reopen the window.
+  [[toFolder target] performSelector:@selector(openBookmarkFolderFromButton:)
+                          withObject:toFolder];
   EXPECT_TRUE([bar_ folderController]);
+  folderController = [bar_ folderController];
 
   // Gather the new frames.
   NSRect newToFolderFrame = [toFolder frame];
@@ -1391,6 +1394,31 @@ TEST_F(BookmarkBarFolderControllerMenuTest, HoverThenDeleteBookmark) {
   model->Remove(folder->GetChild(3));
   buttonThatMouseIsIn = [bbfc buttonThatMouseIsIn];
   EXPECT_FALSE(buttonThatMouseIsIn);
+}
+
+// Tests that sending keyboard events to the (empty) button in an empty
+// folder menu does not crash. https://crbug.com/690424
+TEST_F(BookmarkBarFolderControllerMenuTest, ActOnEmptyMenu) {
+  BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(profile());
+  const BookmarkNode* root = model->bookmark_bar_node();
+  const BookmarkNode* folder =
+      model->AddFolder(root, root->child_count(), ASCIIToUTF16("empty"));
+  ASSERT_TRUE(folder);
+
+  BookmarkButton* button = [bar_ buttonWithTitleEqualTo:@"empty"];
+  [[button target] performSelector:@selector(openBookmarkFolderFromButton:)
+                        withObject:button];
+
+  BookmarkBarFolderController* bbfc = [bar_ folderController];
+  NSArray* buttons = [bbfc buttons];
+  ASSERT_EQ(1u, [buttons count]);
+
+  button = [buttons objectAtIndex:0];
+  EXPECT_TRUE([button isEmpty]);
+
+  [bbfc mouseEnteredButton:button event:nil];
+
+  EXPECT_TRUE([bbfc handleInputText:@" "]);
 }
 
 // Just like a BookmarkBarFolderController but intercedes when providing

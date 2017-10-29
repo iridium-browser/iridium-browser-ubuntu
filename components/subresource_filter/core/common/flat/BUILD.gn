@@ -4,8 +4,11 @@
 
 import("//third_party/flatbuffers/flatbuffer.gni")
 
-flatbuffer("flatbuffer") {
+flatbuffer("indexed_ruleset") {
   sources = [
-    "rules.fbs",
+    "indexed_ruleset.fbs",
+  ]
+  public_deps = [
+    "//components/url_pattern_index/flat:url_pattern_index",
   ]
 }

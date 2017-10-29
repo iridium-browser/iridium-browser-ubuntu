@@ -9,8 +9,8 @@
 #include "core/dom/Document.h"
 #include "core/html/canvas/CanvasContextCreationAttributes.h"
 #include "core/html/canvas/CanvasRenderingContext.h"
-#include "wtf/Allocator.h"
-#include "wtf/PassRefPtr.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/PassRefPtr.h"
 
 namespace blink {
 
@@ -25,20 +25,13 @@ class CORE_EXPORT CanvasRenderingContextFactory {
   CanvasRenderingContextFactory() = default;
   virtual ~CanvasRenderingContextFactory() {}
 
-  virtual CanvasRenderingContext* create(HTMLCanvasElement*,
-                                         const CanvasContextCreationAttributes&,
-                                         Document&) {
-    return nullptr;
-  }
-  virtual CanvasRenderingContext* create(
-      ScriptState*,
-      OffscreenCanvas*,
-      const CanvasContextCreationAttributes&) {
-    return nullptr;
-  }
-  virtual CanvasRenderingContext::ContextType getContextType() const = 0;
-  virtual void onError(HTMLCanvasElement*, const String& error){};
-  virtual void onError(OffscreenCanvas*, const String& error){};
+  virtual CanvasRenderingContext* Create(
+      CanvasRenderingContextHost*,
+      const CanvasContextCreationAttributes&) = 0;
+
+  virtual CanvasRenderingContext::ContextType GetContextType() const = 0;
+  virtual void OnError(HTMLCanvasElement*, const String& error){};
+  virtual void OnError(OffscreenCanvas*, const String& error){};
 };
 
 }  // namespace blink

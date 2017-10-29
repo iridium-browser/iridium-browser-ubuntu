@@ -13,7 +13,6 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
-#include "media/audio/audio_manager.h"
 #include "media/base/media_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
@@ -44,7 +43,7 @@ class MAYBE_WebRtcAudioBrowserTest : public WebRtcContentBrowserTestBase {
   // has some special prerequisites, such that there needs to be an audio output
   // device on the executing machine).
   void MakeAudioDetectingPeerConnectionCall(const std::string& javascript) {
-    if (!media::AudioManager::Get()->HasAudioOutputDevices()) {
+    if (!HasAudioOutputDevices()) {
       // Bots with no output devices will force the audio code into a state
       // where it doesn't manage to set either the low or high latency path.
       // This test will compute useless values in that case, so skip running on
@@ -62,8 +61,16 @@ class MAYBE_WebRtcAudioBrowserTest : public WebRtcContentBrowserTestBase {
   }
 };
 
+// Flaky on Linux. http://crbug.com/733551
+#if defined(OS_LINUX)
+#define MAYBE_CanMakeVideoCallAndThenRenegotiateToAudio \
+  DISABLED_CanMakeVideoCallAndThenRenegotiateToAudio
+#else
+#define MAYBE_CanMakeVideoCallAndThenRenegotiateToAudio \
+  CanMakeVideoCallAndThenRenegotiateToAudio
+#endif
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioBrowserTest,
-                       CanMakeVideoCallAndThenRenegotiateToAudio) {
+                       MAYBE_CanMakeVideoCallAndThenRenegotiateToAudio) {
   MakeAudioDetectingPeerConnectionCall(
       "callAndRenegotiateToAudio({audio: true, video:true}, {audio: true});");
 }

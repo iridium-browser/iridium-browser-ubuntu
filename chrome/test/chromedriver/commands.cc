@@ -45,8 +45,8 @@ void ExecuteGetStatus(
   os.SetString("arch", base::SysInfo::OperatingSystemArchitecture());
 
   base::DictionaryValue info;
-  info.Set("build", build.DeepCopy());
-  info.Set("os", os.DeepCopy());
+  info.Set("build", base::MakeUnique<base::Value>(build));
+  info.Set("os", base::MakeUnique<base::Value>(os));
   callback.Run(Status(kOk), std::unique_ptr<base::Value>(info.DeepCopy()),
                std::string(), false);
 }
@@ -71,7 +71,8 @@ void ExecuteCreateSession(
   }
 
   thread->task_runner()->PostTask(
-      FROM_HERE, base::Bind(&SetThreadLocalSession, base::Passed(&session)));
+      FROM_HERE,
+      base::BindOnce(&SetThreadLocalSession, base::Passed(&session)));
   session_thread_map
       ->insert(std::make_pair(new_id, make_linked_ptr(thread.release())));
   init_session_cmd.Run(params, new_id, callback);
@@ -92,8 +93,8 @@ void OnGetSession(const base::WeakPtr<size_t>& session_remaining_count,
   (*session_remaining_count)--;
 
   std::unique_ptr<base::DictionaryValue> session(new base::DictionaryValue());
-  session->Set("id", new base::StringValue(session_id));
-  session->Set("capabilities", value->DeepCopy());
+  session->SetString("id", session_id);
+  session->Set("capabilities", base::MakeUnique<base::Value>(*value));
   session_list->Append(std::move(session));
 
   if (!*session_remaining_count) {
@@ -209,11 +210,10 @@ void ExecuteSessionCommandOnSessionThread(
   if (!session) {
     cmd_task_runner->PostTask(
         FROM_HERE,
-        base::Bind(callback_on_cmd,
-                   Status(return_ok_without_session ? kOk : kNoSuchSession),
-                   base::Passed(std::unique_ptr<base::Value>()),
-                   std::string(),
-                   false));
+        base::BindOnce(callback_on_cmd,
+                       Status(return_ok_without_session ? kOk : kNoSuchSession),
+                       base::Passed(std::unique_ptr<base::Value>()),
+                       std::string(), false));
     return;
   }
 
@@ -289,9 +289,8 @@ void ExecuteSessionCommandOnSessionThread(
   }
 
   cmd_task_runner->PostTask(
-      FROM_HERE,
-      base::Bind(callback_on_cmd, status, base::Passed(&value), session->id,
-                 session->w3c_compliant));
+      FROM_HERE, base::BindOnce(callback_on_cmd, status, base::Passed(&value),
+                                session->id, session->w3c_compliant));
 
   if (session->quit) {
     SetThreadLocalSession(std::unique_ptr<Session>());
@@ -316,12 +315,13 @@ void ExecuteSessionCommand(
     callback.Run(status, std::unique_ptr<base::Value>(), session_id, false);
   } else {
     iter->second->task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ExecuteSessionCommandOnSessionThread,
-                              command_name, command, return_ok_without_session,
-                              base::Passed(base::WrapUnique(params.DeepCopy())),
-                              base::ThreadTaskRunnerHandle::Get(), callback,
-                              base::Bind(&TerminateSessionThreadOnCommandThread,
-                                         session_thread_map, session_id)));
+        FROM_HERE,
+        base::BindOnce(&ExecuteSessionCommandOnSessionThread, command_name,
+                       command, return_ok_without_session,
+                       base::Passed(base::WrapUnique(params.DeepCopy())),
+                       base::ThreadTaskRunnerHandle::Get(), callback,
+                       base::Bind(&TerminateSessionThreadOnCommandThread,
+                                  session_thread_map, session_id)));
   }
 }
 

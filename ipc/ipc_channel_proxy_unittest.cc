@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <memory>
 
+#include "base/message_loop/message_loop.h"
 #include "base/pickle.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
@@ -89,7 +90,7 @@ class ChannelReflectorListener : public IPC::Listener {
     IPC_BEGIN_MESSAGE_MAP(ChannelReflectorListener, message)
       IPC_MESSAGE_HANDLER(TestMsg_Bounce, OnTestBounce)
       IPC_MESSAGE_HANDLER(TestMsg_SendBadMessage, OnSendBadMessage)
-      IPC_MESSAGE_HANDLER(UtilityMsg_Bounce, OnUtilityBounce)
+      IPC_MESSAGE_HANDLER(AutomationMsg_Bounce, OnAutomationBounce)
       IPC_MESSAGE_HANDLER(WorkerMsg_Bounce, OnBounce)
       IPC_MESSAGE_HANDLER(WorkerMsg_Quit, OnQuit)
     IPC_END_MESSAGE_MAP()
@@ -104,9 +105,7 @@ class ChannelReflectorListener : public IPC::Listener {
     channel_->Send(new TestMsg_BadMessage(BadType()));
   }
 
-  void OnUtilityBounce() {
-    channel_->Send(new UtilityMsg_Bounce());
-  }
+  void OnAutomationBounce() { channel_->Send(new AutomationMsg_Bounce()); }
 
   void OnBounce() {
     channel_->Send(new WorkerMsg_Bounce());
@@ -281,17 +280,17 @@ class IPCChannelProxyTest : public IPCChannelMojoTestBase {
 
 TEST_F(IPCChannelProxyTest, MessageClassFilters) {
   // Construct a filter per message class.
-  std::vector<scoped_refptr<MessageCountFilter> > class_filters;
-  class_filters.push_back(make_scoped_refptr(
-      new MessageCountFilter(TestMsgStart)));
-  class_filters.push_back(make_scoped_refptr(
-      new MessageCountFilter(UtilityMsgStart)));
+  std::vector<scoped_refptr<MessageCountFilter>> class_filters;
+  class_filters.push_back(
+      make_scoped_refptr(new MessageCountFilter(TestMsgStart)));
+  class_filters.push_back(
+      make_scoped_refptr(new MessageCountFilter(AutomationMsgStart)));
   for (size_t i = 0; i < class_filters.size(); ++i)
     channel_proxy()->AddFilter(class_filters[i].get());
 
   // Send a message for each class; each filter should receive just one message.
-  sender()->Send(new TestMsg_Bounce());
-  sender()->Send(new UtilityMsg_Bounce());
+  sender()->Send(new TestMsg_Bounce);
+  sender()->Send(new AutomationMsg_Bounce);
 
   // Send some messages not assigned to a specific or valid message class.
   sender()->Send(new WorkerMsg_Bounce);
@@ -319,7 +318,7 @@ TEST_F(IPCChannelProxyTest, GlobalAndMessageClassFilters) {
   sender()->Send(new TestMsg_Bounce);
 
   // A message of a different class should be seen only by the global filter.
-  sender()->Send(new UtilityMsg_Bounce);
+  sender()->Send(new AutomationMsg_Bounce);
 
   // Flush all messages.
   SendQuitMessageAndWaitForIdle();
@@ -346,7 +345,7 @@ TEST_F(IPCChannelProxyTest, FilterRemoval) {
 
   // Send some messages; they should not be seen by either filter.
   sender()->Send(new TestMsg_Bounce);
-  sender()->Send(new UtilityMsg_Bounce);
+  sender()->Send(new AutomationMsg_Bounce);
 
   // Ensure that the filters were removed and did not receive any messages.
   SendQuitMessageAndWaitForIdle();

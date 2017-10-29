@@ -43,8 +43,6 @@ base::string16 ShellContentClient::GetLocalizedString(int message_id) const {
         return base::ASCIIToUTF16("<<OtherDateLabel>>");
       case IDS_FORM_OTHER_MONTH_LABEL:
         return base::ASCIIToUTF16("<<OtherMonthLabel>>");
-      case IDS_FORM_OTHER_TIME_LABEL:
-        return base::ASCIIToUTF16("<<OtherTimeLabel>>");
       case IDS_FORM_OTHER_WEEK_LABEL:
         return base::ASCIIToUTF16("<<OtherWeekLabel>>");
       case IDS_FORM_CALENDAR_CLEAR:
@@ -71,10 +69,6 @@ base::StringPiece ShellContentClient::GetDataResource(
 #else
         resource_id = IDR_CONTENT_SHELL_MISSING_IMAGE_GIF;
 #endif
-        break;
-
-      case IDR_TEXTAREA_RESIZER:
-        resource_id = IDR_CONTENT_SHELL_TEXT_AREA_RESIZE_CORNER_PNG;
         break;
     }
   }

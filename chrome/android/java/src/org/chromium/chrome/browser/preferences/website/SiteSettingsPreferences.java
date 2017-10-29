@@ -34,6 +34,7 @@ public class SiteSettingsPreferences extends PreferenceFragment
         implements OnPreferenceClickListener {
     // The keys for each category shown on the Site Settings page.
     static final String ALL_SITES_KEY = "all_sites";
+    static final String ADS_KEY = "ads";
     static final String AUTOPLAY_KEY = "autoplay";
     static final String BACKGROUND_SYNC_KEY = "background_sync";
     static final String CAMERA_KEY = "camera";
@@ -77,7 +78,9 @@ public class SiteSettingsPreferences extends PreferenceFragment
     }
 
     private int keyToContentSettingsType(String key) {
-        if (AUTOPLAY_KEY.equals(key)) {
+        if (ADS_KEY.equals(key)) {
+            return ContentSettingsType.CONTENT_SETTINGS_TYPE_ADS;
+        } else if (AUTOPLAY_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_AUTOPLAY;
         } else if (BACKGROUND_SYNC_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC;
@@ -106,6 +109,7 @@ public class SiteSettingsPreferences extends PreferenceFragment
             // The Media sub-menu only contains Protected Content and Autoplay, so remove all other
             // menus.
             getPreferenceScreen().removePreference(findPreference(ALL_SITES_KEY));
+            getPreferenceScreen().removePreference(findPreference(ADS_KEY));
             getPreferenceScreen().removePreference(findPreference(BACKGROUND_SYNC_KEY));
             getPreferenceScreen().removePreference(findPreference(CAMERA_KEY));
             getPreferenceScreen().removePreference(findPreference(COOKIES_KEY));
@@ -129,6 +133,11 @@ public class SiteSettingsPreferences extends PreferenceFragment
                 getPreferenceScreen().removePreference(findPreference(AUTOPLAY_KEY));
                 getPreferenceScreen().removePreference(findPreference(PROTECTED_CONTENT_KEY));
             }
+            // TODO(csharrison): Remove this condition once the experimental UI lands. It is not
+            // great to dynamically remove the preference in this way.
+            if (!SiteSettingsCategory.adsCategoryEnabled()) {
+                getPreferenceScreen().removePreference(findPreference(ADS_KEY));
+            }
         }
     }
 
@@ -147,6 +156,9 @@ public class SiteSettingsPreferences extends PreferenceFragment
             websitePrefs.add(PROTECTED_CONTENT_KEY);
             websitePrefs.add(AUTOPLAY_KEY);
         } else {
+            if (SiteSettingsCategory.adsCategoryEnabled()) {
+                websitePrefs.add(ADS_KEY);
+            }
             // When showing the main menu, if Protected Content is not available, only Autoplay
             // will be visible.
             if (!mProtectedContentMenuAvailable) websitePrefs.add(AUTOPLAY_KEY);
@@ -165,7 +177,9 @@ public class SiteSettingsPreferences extends PreferenceFragment
         for (String prefName : websitePrefs) {
             Preference p = findPreference(prefName);
             boolean checked = false;
-            if (AUTOPLAY_KEY.equals(prefName)) {
+            if (ADS_KEY.equals(prefName)) {
+                checked = PrefServiceBridge.getInstance().adsEnabled();
+            } else if (AUTOPLAY_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isAutoplayEnabled();
             } else if (BACKGROUND_SYNC_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isBackgroundSyncAllowed();
@@ -202,6 +216,8 @@ public class SiteSettingsPreferences extends PreferenceFragment
             } else if (LOCATION_KEY.equals(prefName) && checked
                     && prefServiceBridge.isLocationAllowedByPolicy()) {
                 p.setSummary(ContentSettingsResources.getGeolocationAllowedSummary());
+            } else if (ADS_KEY.equals(prefName) && !checked) {
+                p.setSummary(ContentSettingsResources.getAdsBlockedListSummary());
             } else {
                 p.setSummary(ContentSettingsResources.getCategorySummary(contentType, checked));
             }

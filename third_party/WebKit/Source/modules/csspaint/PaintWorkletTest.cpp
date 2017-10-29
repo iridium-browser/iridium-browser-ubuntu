@@ -4,6 +4,7 @@
 
 #include "modules/csspaint/PaintWorklet.h"
 
+#include <memory>
 #include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/V8GCController.h"
 #include "bindings/core/v8/WorkerOrWorkletScriptController.h"
@@ -11,60 +12,72 @@
 #include "core/testing/DummyPageHolder.h"
 #include "modules/csspaint/CSSPaintDefinition.h"
 #include "modules/csspaint/PaintWorkletGlobalScope.h"
+#include "modules/csspaint/PaintWorkletGlobalScopeProxy.h"
 #include "modules/csspaint/WindowPaintWorklet.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include <memory>
 
 namespace blink {
 
-class PaintWorkletTest : public testing::Test {
+class PaintWorkletTest : public ::testing::Test {
  public:
-  PaintWorkletTest() : m_page(DummyPageHolder::create()) {}
+  PaintWorkletTest() : page_(DummyPageHolder::Create()) {}
 
-  PaintWorklet* paintWorklet() {
-    return WindowPaintWorklet::from(*m_page->frame().domWindow())
+  void SetUp() override { proxy_ = GetPaintWorklet()->CreateGlobalScope(); }
+
+  PaintWorklet* GetPaintWorklet() {
+    return WindowPaintWorklet::From(*page_->GetFrame().DomWindow())
         .paintWorklet();
   }
 
- protected:
-  std::unique_ptr<DummyPageHolder> m_page;
+  PaintWorkletGlobalScopeProxy* GetProxy() {
+    return PaintWorkletGlobalScopeProxy::From(proxy_.Get());
+  }
+
+  void Terminate() {
+    page_.reset();
+    proxy_->TerminateWorkletGlobalScope();
+    proxy_ = nullptr;
+  }
+
+ private:
+  std::unique_ptr<DummyPageHolder> page_;
+  Persistent<WorkletGlobalScopeProxy> proxy_;
 };
 
 TEST_F(PaintWorkletTest, GarbageCollectionOfCSSPaintDefinition) {
-  PaintWorkletGlobalScope* globalScope =
-      paintWorklet()->workletGlobalScopeProxy();
-  globalScope->scriptController()->evaluate(
+  PaintWorkletGlobalScope* global_scope = GetProxy()->global_scope();
+  global_scope->ScriptController()->Evaluate(
       ScriptSourceCode("registerPaint('foo', class { paint() { } });"));
 
-  CSSPaintDefinition* definition = globalScope->findDefinition("foo");
-  ASSERT(definition);
+  CSSPaintDefinition* definition = global_scope->FindDefinition("foo");
+  DCHECK(definition);
 
   v8::Isolate* isolate =
-      globalScope->scriptController()->getScriptState()->isolate();
-  ASSERT(isolate);
+      global_scope->ScriptController()->GetScriptState()->GetIsolate();
+  DCHECK(isolate);
 
   // Set our ScopedPersistent to the paint function, and make weak.
   ScopedPersistent<v8::Function> handle;
   {
-    v8::HandleScope handleScope(isolate);
-    handle.set(isolate, definition->paintFunctionForTesting(isolate));
-    handle.setPhantom();
+    v8::HandleScope handle_scope(isolate);
+    handle.Set(isolate, definition->PaintFunctionForTesting(isolate));
+    handle.SetPhantom();
   }
-  ASSERT(!handle.isEmpty());
-  ASSERT(handle.isWeak());
+  DCHECK(!handle.IsEmpty());
+  DCHECK(handle.IsWeak());
 
   // Run a GC, persistent shouldn't have been collected yet.
-  ThreadState::current()->collectAllGarbage();
-  V8GCController::collectAllGarbageForTesting(isolate);
-  ASSERT(!handle.isEmpty());
+  ThreadState::Current()->CollectAllGarbage();
+  V8GCController::CollectAllGarbageForTesting(isolate);
+  DCHECK(!handle.IsEmpty());
 
   // Delete the page & associated objects.
-  m_page.reset();
+  Terminate();
 
   // Run a GC, the persistent should have been collected.
-  ThreadState::current()->collectAllGarbage();
-  V8GCController::collectAllGarbageForTesting(isolate);
-  ASSERT(handle.isEmpty());
+  ThreadState::Current()->CollectAllGarbage();
+  V8GCController::CollectAllGarbageForTesting(isolate);
+  DCHECK(handle.IsEmpty());
 }
 
 }  // namespace blink

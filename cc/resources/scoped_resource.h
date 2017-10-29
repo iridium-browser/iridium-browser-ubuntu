@@ -10,7 +10,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 #include "cc/resources/resource.h"
 
 #if DCHECK_IS_ON()
@@ -26,10 +26,10 @@ class CC_EXPORT ScopedResource : public Resource {
 
   void Allocate(const gfx::Size& size,
                 ResourceProvider::TextureHint hint,
-                ResourceFormat format,
+                viz::ResourceFormat format,
                 const gfx::ColorSpace& color_space);
   void AllocateWithGpuMemoryBuffer(const gfx::Size& size,
-                                   ResourceFormat format,
+                                   viz::ResourceFormat format,
                                    gfx::BufferUsage usage,
                                    const gfx::ColorSpace& color_space);
   void Free();

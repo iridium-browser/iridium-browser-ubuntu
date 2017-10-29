@@ -12,12 +12,13 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner_helpers.h"
+#include "base/single_thread_task_runner.h"
 #include "content/common/content_export.h"
-#include "content/common/url_loader_factory.mojom.h"
 #include "content/public/browser/browser_associated_interface.h"
 #include "content/public/browser/browser_message_filter.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/common/resource_type.h"
+#include "content/public/common/url_loader_factory.mojom.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace storage {
 class FileSystemContext;
@@ -53,12 +54,14 @@ class CONTENT_EXPORT ResourceMessageFilter
   // |service_worker_context| may be nullptr in unittests.
   // InitializeForTest() needs to be manually called for unittests where
   // OnFilterAdded() would not otherwise be called.
-  ResourceMessageFilter(int child_id,
-                        ChromeAppCacheService* appcache_service,
-                        ChromeBlobStorageContext* blob_storage_context,
-                        storage::FileSystemContext* file_system_context,
-                        ServiceWorkerContextWrapper* service_worker_context,
-                        const GetContextsCallback& get_contexts_callback);
+  ResourceMessageFilter(
+      int child_id,
+      ChromeAppCacheService* appcache_service,
+      ChromeBlobStorageContext* blob_storage_context,
+      storage::FileSystemContext* file_system_context,
+      ServiceWorkerContextWrapper* service_worker_context,
+      const GetContextsCallback& get_contexts_callback,
+      const scoped_refptr<base::SingleThreadTaskRunner>& io_thread_runner);
 
   // BrowserMessageFilter implementation.
   void OnFilterAdded(IPC::Channel* channel) override;
@@ -71,12 +74,16 @@ class CONTENT_EXPORT ResourceMessageFilter
   void CreateLoaderAndStart(mojom::URLLoaderAssociatedRequest request,
                             int32_t routing_id,
                             int32_t request_id,
+                            uint32_t options,
                             const ResourceRequest& url_request,
-                            mojom::URLLoaderClientPtr client) override;
+                            mojom::URLLoaderClientPtr client,
+                            const net::MutableNetworkTrafficAnnotationTag&
+                                traffic_annotation) override;
+
   void SyncLoad(int32_t routing_id,
                 int32_t request_id,
                 const ResourceRequest& request,
-                const SyncLoadCallback& callback) override;
+                SyncLoadCallback callback) override;
   int child_id() const;
 
   ResourceRequesterInfo* requester_info_for_test() {
@@ -89,7 +96,6 @@ class CONTENT_EXPORT ResourceMessageFilter
   ~ResourceMessageFilter() override;
 
  private:
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::IO>;
   friend class base::DeleteHelper<ResourceMessageFilter>;
 
   // Initializes the weak pointer of this filter in |requester_info_|.
@@ -97,6 +103,9 @@ class CONTENT_EXPORT ResourceMessageFilter
 
   bool is_channel_closed_;
   scoped_refptr<ResourceRequesterInfo> requester_info_;
+
+  // Task runner for the IO thead.
+  scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner_;
 
   // This must come last to make sure weak pointers are invalidated first.
   base::WeakPtrFactory<ResourceMessageFilter> weak_ptr_factory_;

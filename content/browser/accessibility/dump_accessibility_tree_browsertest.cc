@@ -21,6 +21,7 @@
 #include "content/browser/accessibility/dump_accessibility_browsertest_base.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -54,13 +55,11 @@ typedef AccessibilityTreeFormatter::Filter Filter;
 //    exactly match.
 class DumpAccessibilityTreeTest : public DumpAccessibilityTestBase {
  public:
-  void AddDefaultFilters(std::vector<Filter>* filters) override {
-    filters->push_back(Filter(base::ASCIIToUTF16("FOCUSABLE"), Filter::ALLOW));
-    filters->push_back(Filter(base::ASCIIToUTF16("READONLY"), Filter::ALLOW));
-    filters->push_back(Filter(base::ASCIIToUTF16("name=*"), Filter::ALLOW));
-    filters->push_back(Filter(base::ASCIIToUTF16("roleDescription=*"),
-                              Filter::ALLOW));
-    filters->push_back(Filter(base::ASCIIToUTF16("*=''"), Filter::DENY));
+  void AddDefaultFilters(std::vector<Filter>* filters) override;
+  void AddFilter(std::vector<Filter>* filters,
+                 std::string filter,
+                 Filter::Type type = Filter::ALLOW) {
+    filters->push_back(Filter(base::ASCIIToUTF16(filter), type));
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -68,6 +67,9 @@ class DumpAccessibilityTreeTest : public DumpAccessibilityTestBase {
     // Enable <dialog>, which is used in some tests.
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableExperimentalWebPlatformFeatures);
+    // Enable accessibility object model, used in other tests.
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kEnableBlinkFeatures, "AccessibilityObjectModel");
   }
 
   void RunAriaTest(const base::FilePath::CharType* file_path) {
@@ -79,6 +81,17 @@ class DumpAccessibilityTreeTest : public DumpAccessibilityTestBase {
     base::FilePath aria_file = test_path.Append(base::FilePath(file_path));
 
     RunTest(aria_file, "accessibility/aria");
+  }
+
+  void RunAomTest(const base::FilePath::CharType* file_path) {
+    base::FilePath test_path = GetTestFilePath("accessibility", "aom");
+    {
+      base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_setup;
+      ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
+    }
+    base::FilePath aom_file = test_path.Append(base::FilePath(file_path));
+
+    RunTest(aom_file, "accessibility/aom");
   }
 
   void RunCSSTest(const base::FilePath::CharType* file_path) {
@@ -120,6 +133,110 @@ class DumpAccessibilityTreeTest : public DumpAccessibilityTestBase {
   }
 };
 
+void DumpAccessibilityTreeTest::AddDefaultFilters(
+    std::vector<Filter>* filters) {
+  // TODO(aleventhal) Each platform deserves separate default filters.
+
+  //
+  // Windows
+  //
+
+  // Too noisy: HOTTRACKED, LINKED, SELECTABLE, IA2_STATE_EDITABLE,
+  //            IA2_STATE_OPAQUE, IA2_STATE_SELECTAbLE_TEXT,
+  //            IA2_STATE_SINGLE_LINE, IA2_STATE_VERTICAL.
+  // Too unpredictible: OFFSCREEN
+  // Windows states to log by default:
+  AddFilter(filters, "ALERT*");
+  AddFilter(filters, "ANIMATED*");
+  AddFilter(filters, "BUSY");
+  AddFilter(filters, "CHECKED");
+  AddFilter(filters, "COLLAPSED");
+  AddFilter(filters, "DEFAULT");
+  AddFilter(filters, "EXPANDED");
+  AddFilter(filters, "FLOATING");
+  AddFilter(filters, "FOCUS*");
+  AddFilter(filters, "HASPOPUP");
+  AddFilter(filters, "INVISIBLE");
+  AddFilter(filters, "MARQUEED");
+  AddFilter(filters, "MIXED");
+  AddFilter(filters, "MOVEABLE");
+  AddFilter(filters, "MULTISELECTABLE");
+  AddFilter(filters, "PRESSED");
+  AddFilter(filters, "PROTECTED");
+  AddFilter(filters, "READONLY");
+  AddFilter(filters, "SELECTED");
+  AddFilter(filters, "SIZEABLE");
+  AddFilter(filters, "TRAVERSED");
+  AddFilter(filters, "UNAVAILABLE");
+  AddFilter(filters, "IA2_STATE_ACTIVE");
+  AddFilter(filters, "IA2_STATE_ARMED");
+  AddFilter(filters, "IA2_STATE_CHECKABLE");
+  AddFilter(filters, "IA2_STATE_DEFUNCT");
+  AddFilter(filters, "IA2_STATE_HORIZONTAL");
+  AddFilter(filters, "IA2_STATE_ICONIFIED");
+  AddFilter(filters, "IA2_STATE_INVALID_ENTRY");
+  AddFilter(filters, "IA2_STATE_MODAL");
+  AddFilter(filters, "IA2_STATE_MULTI_LINE");
+  AddFilter(filters, "IA2_STATE_PINNED");
+  AddFilter(filters, "IA2_STATE_REQUIRED");
+  AddFilter(filters, "IA2_STATE_STALE");
+  AddFilter(filters, "IA2_STATE_TRANSIENT");
+
+  //
+  // Blink
+  //
+
+  // Noisy, perhaps add later:
+  //   editable, focus*, horizontal, linked, richlyEditable, vertical
+  // Too flaky: hovered, offscreen
+  // States
+  AddFilter(filters, "check*");
+  AddFilter(filters, "descript*");
+  AddFilter(filters, "busy");
+  AddFilter(filters, "collapsed");
+  AddFilter(filters, "default");
+  AddFilter(filters, "haspopup");
+  AddFilter(filters, "horizontal");
+  AddFilter(filters, "invisible");
+  AddFilter(filters, "multiline");
+  AddFilter(filters, "multiselectable");
+  AddFilter(filters, "protected");
+  AddFilter(filters, "required");
+  AddFilter(filters, "select*");
+  AddFilter(filters, "visited");
+  // Other attributes
+  AddFilter(filters, "valueForRange*");
+  AddFilter(filters, "minValueForRange*");
+  AddFilter(filters, "maxValueForRange*");
+  AddFilter(filters, "hierarchicalLevel*");
+  AddFilter(filters, "aria*");  // ariaCurrentState, ariaInvalidValue, etc.
+  AddFilter(filters, "autoComplete*");
+  AddFilter(filters, "restriction*");
+  AddFilter(filters, "keyShortcuts*");
+  AddFilter(filters, "activedescendantId*");
+  AddFilter(filters, "controlsIds*");
+  AddFilter(filters, "flowtoIds*");
+  AddFilter(filters, "detailsIds*");
+  AddFilter(filters, "invalidState=*");
+  AddFilter(filters, "invalidState=false",
+            Filter::DENY);  // Don't show false value
+
+  //
+  // OS X
+  //
+
+  AddFilter(filters, "roleDescription=*");
+
+  //
+  // General
+  //
+
+  // Deny most empty values
+  AddFilter(filters, "*=''", Filter::DENY);
+  // After denying empty values, because we want to allow name=''
+  AddFilter(filters, "name=*", Filter::ALLOW_EMPTY);
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityCSSColor) {
   RunCSSTest(FILE_PATH_LITERAL("color.html"));
 }
@@ -130,6 +247,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityCSSFontStyle) {
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityCSSFontFamily) {
   RunCSSTest(FILE_PATH_LITERAL("font-family.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityCSSInlinePositionRelative) {
+  RunCSSTest(FILE_PATH_LITERAL("inline-position-relative.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityCSSLanguage) {
@@ -146,6 +268,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAbbr) {
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityActionVerbs) {
   RunHtmlTest(FILE_PATH_LITERAL("action-verbs.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityActions) {
+  RunHtmlTest(FILE_PATH_LITERAL("actions.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAddress) {
@@ -170,6 +296,18 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityANoText) {
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAOnclick) {
   RunHtmlTest(FILE_PATH_LITERAL("a-onclick.html"));
+}
+
+
+#if defined(THREAD_SANITIZER)
+// See (crbug.com/708759).
+#define MAYBE_AccessibilityAomChecked DISABLED_AccessibilityAomChecked
+#else
+#define MAYBE_AccessibilityAomChecked AccessibilityAomChecked
+#endif
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       MAYBE_AccessibilityAomChecked) {
+  RunAomTest(FILE_PATH_LITERAL("aom-checked.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
@@ -706,6 +844,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunAriaTest(FILE_PATH_LITERAL("input-text-aria-placeholder.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityTableColumnHidden) {
+  RunAriaTest(FILE_PATH_LITERAL("table-column-hidden.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityArticle) {
   RunHtmlTest(FILE_PATH_LITERAL("article.html"));
 }
@@ -1017,6 +1160,15 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityImgEmptyAlt) {
   RunHtmlTest(FILE_PATH_LITERAL("img-empty-alt.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityImgLinkEmptyAlt) {
+  RunHtmlTest(FILE_PATH_LITERAL("img-link-empty-alt.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInPageLinks) {
+  RunHtmlTest(FILE_PATH_LITERAL("in-page-links.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputButton) {
   RunHtmlTest(FILE_PATH_LITERAL("input-button.html"));
 }
@@ -1259,24 +1411,19 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunHtmlTest(FILE_PATH_LITERAL("modal-dialog-opened.html"));
 }
 
-// Flaky: crbug.com/593846, crbug.com/596514
+// http://crbug.com/738497
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
                        DISABLED_AccessibilityModalDialogInIframeClosed) {
   RunHtmlTest(FILE_PATH_LITERAL("modal-dialog-in-iframe-closed.html"));
 }
 
-// Flaky on Windows and Mac: crbug.com/593846
-#if defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_AccessibilityModalDialogInIframeOpened \
-    DISABLED_AccessibilityModalDialogInIframeOpened
-#else
-#define MAYBE_AccessibilityModalDialogInIframeOpened \
-    AccessibilityModalDialogInIframeOpened
-#endif
+// Disabled because it is flaky in several platforms
+/*
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       MAYBE_AccessibilityModalDialogInIframeOpened) {
+                       AccessibilityModalDialogInIframeOpened) {
   RunHtmlTest(FILE_PATH_LITERAL("modal-dialog-in-iframe-opened.html"));
 }
+*/
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
                        AccessibilityModalDialogStack) {

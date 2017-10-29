@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_environment.h"
@@ -196,13 +197,21 @@ TEST_F(AppInfoDialogViewsTest, UninstallingOtherAppDoesNotCloseDialog) {
 // Tests that the dialog closes when the current profile is destroyed.
 TEST_F(AppInfoDialogViewsTest, DestroyedProfileClosesDialog) {
   ShowAppInfo(kTestExtensionId);
+
   // First delete the test browser window. This ensures the test harness isn't
   // surprised by it being closed in response to the profile deletion below.
-  // Note the base class doesn't own the profile, so that part is skipped.
-  DestroyBrowserAndProfile();
+  std::unique_ptr<Browser> browser(release_browser());
+  browser->tab_strip_model()->CloseAllTabs();
+  browser.reset();
+  std::unique_ptr<BrowserWindow> browser_window(release_browser_window());
+  browser_window->Close();
+  browser_window.reset();
+
+  // This does not actually destroy the profile; see DestroyProfile above.
+  DestroyProfile(profile());
 
   // The following does nothing: it just ensures the Widget close is being
-  // triggered by the DeleteProfile() call rather than the line above.
+  // triggered by the DeleteProfile() call rather than the code above.
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(widget_);

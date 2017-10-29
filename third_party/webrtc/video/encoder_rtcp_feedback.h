@@ -12,8 +12,8 @@
 
 #include <vector>
 
-#include "webrtc/base/criticalsection.h"
 #include "webrtc/modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "webrtc/rtc_base/criticalsection.h"
 #include "webrtc/system_wrappers/include/clock.h"
 #include "webrtc/typedefs.h"
 
@@ -27,8 +27,6 @@ class EncoderRtcpFeedback : public RtcpIntraFrameObserver {
                        const std::vector<uint32_t>& ssrcs,
                        ViEEncoder* encoder);
   void OnReceivedIntraFrameRequest(uint32_t ssrc) override;
-  void OnReceivedSLI(uint32_t ssrc, uint8_t picture_id) override;
-  void OnReceivedRPSI(uint32_t ssrc, uint64_t picture_id) override;
 
  private:
   bool HasSsrc(uint32_t ssrc);

@@ -1,6 +1,9 @@
 include_rules = [
   "+chrome/grit",
   "+chrome/installer/util",
+  "+components/payments/content/utility",
+  "+components/printing/service/public/cpp",
+  "+components/printing/service/public/interfaces",
   "+components/safe_json",
   "+components/wifi",
   "+content/public/child",
@@ -9,7 +12,7 @@ include_rules = [
   "+extensions/common",
   "+extensions/features",
   "+media",
-  "+services/image_decoder",
+  "+services/service_manager/embedder",
   "+services/service_manager/public/cpp",
   "+skia/ext",
   "+third_party/libxml",

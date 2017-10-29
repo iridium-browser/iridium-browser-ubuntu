@@ -16,6 +16,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/io_thread.h"
@@ -35,16 +36,17 @@
 #include "content/public/browser/web_ui_message_handler.h"
 #include "net/base/address_list.h"
 #include "net/base/net_errors.h"
+#include "net/base/network_change_notifier.h"
 #include "net/dns/host_cache.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_transaction_factory.h"
+#include "net/log/file_net_log_observer.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source_type.h"
 #include "net/log/net_log_with_source.h"
-#include "net/log/write_to_file_net_log_observer.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
 #include "net/url_request/url_request_context.h"
@@ -89,6 +91,11 @@ void AddCacheEntryOnIOThread(net::URLRequestContextGetter* context_getter,
              ttl);
 }
 
+struct WriteNetLogState {
+  base::ScopedTempDir temp_directory;
+  base::FilePath log_path;
+};
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -117,6 +124,9 @@ class NetInternalsTest::MessageHandler : public content::WebUIMessageHandler {
   // must be an empty string.
   void AddCacheEntry(const base::ListValue* list_value);
 
+  // Simulates a network change.
+  void ChangeNetwork(const base::ListValue* list_value);
+
   // Opens the given URL in a new tab.
   void LoadPage(const base::ListValue* list_value);
 
@@ -135,13 +145,16 @@ class NetInternalsTest::MessageHandler : public content::WebUIMessageHandler {
   // Closes an incognito browser created with CreateIncognitoBrowser.
   void CloseIncognitoBrowser(const base::ListValue* list_value);
 
-  // Creates a simple log using WriteToFileNetLogObserver, and returns it to
-  // the Javascript callback.
+  // Creates a simple NetLog and returns it to the Javascript callback.
   void GetNetLogFileContents(const base::ListValue* list_value);
 
   // Changes the data reduction proxy mode. A boolean is assumed to exist at
   // index 0 which enables the proxy is set to true.
   void EnableDataReductionProxy(const base::ListValue* list_value);
+
+  // Called after the NetLog started by GetNetLogFileContents() has been written
+  // to disk. Responds to the Javascript caller with the log contents.
+  void OnFinishedWritingNetLog(std::unique_ptr<WriteNetLogState> state);
 
   Browser* browser() { return net_internals_test_->browser(); }
 
@@ -163,6 +176,10 @@ void NetInternalsTest::MessageHandler::RegisterMessages() {
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("addCacheEntry",
       base::Bind(&NetInternalsTest::MessageHandler::AddCacheEntry,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "changeNetwork",
+      base::Bind(&NetInternalsTest::MessageHandler::ChangeNetwork,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback("loadPage",
       base::Bind(&NetInternalsTest::MessageHandler::LoadPage,
@@ -200,7 +217,7 @@ void NetInternalsTest::MessageHandler::GetTestServerURL(
   std::string path;
   ASSERT_TRUE(list_value->GetString(0, &path));
   GURL url = net_internals_test_->embedded_test_server()->GetURL(path);
-  std::unique_ptr<base::Value> url_value(new base::StringValue(url.spec()));
+  std::unique_ptr<base::Value> url_value(new base::Value(url.spec()));
   RunJavascriptCallback(url_value.get());
 }
 
@@ -218,10 +235,16 @@ void NetInternalsTest::MessageHandler::AddCacheEntry(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&AddCacheEntryOnIOThread,
-                 base::RetainedRef(browser()->profile()->GetRequestContext()),
-                 hostname, ip_literal, static_cast<int>(net_error),
-                 static_cast<int>(expire_days_from_now)));
+      base::BindOnce(
+          &AddCacheEntryOnIOThread,
+          base::RetainedRef(browser()->profile()->GetRequestContext()),
+          hostname, ip_literal, static_cast<int>(net_error),
+          static_cast<int>(expire_days_from_now)));
+}
+
+void NetInternalsTest::MessageHandler::ChangeNetwork(
+    const base::ListValue* list_value) {
+  net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
 }
 
 void NetInternalsTest::MessageHandler::LoadPage(
@@ -261,7 +284,7 @@ void NetInternalsTest::MessageHandler::CreateIncognitoBrowser(
   incognito_browser_ = net_internals_test_->CreateIncognitoBrowser();
 
   // Tell the test harness that creation is complete.
-  base::StringValue command_value("onIncognitoBrowserCreatedForTest");
+  base::Value command_value("onIncognitoBrowserCreatedForTest");
   web_ui()->CallJavascriptFunctionUnsafe("g_browser.receive", command_value);
 }
 
@@ -276,37 +299,38 @@ void NetInternalsTest::MessageHandler::CloseIncognitoBrowser(
 
 void NetInternalsTest::MessageHandler::GetNetLogFileContents(
     const base::ListValue* list_value) {
-  base::ScopedTempDir temp_directory;
-  ASSERT_TRUE(temp_directory.CreateUniqueTempDir());
-  base::FilePath temp_file;
-  ASSERT_TRUE(
-      base::CreateTemporaryFileInDir(temp_directory.GetPath(), &temp_file));
-  base::ScopedFILE temp_file_handle(base::OpenFile(temp_file, "w"));
-  ASSERT_TRUE(temp_file_handle);
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+
+  std::unique_ptr<WriteNetLogState> state =
+      base::MakeUnique<WriteNetLogState>();
+
+  ASSERT_TRUE(state->temp_directory.CreateUniqueTempDir());
+  ASSERT_TRUE(base::CreateTemporaryFileInDir(state->temp_directory.GetPath(),
+                                             &state->log_path));
 
   std::unique_ptr<base::Value> constants(net_log::ChromeNetLog::GetConstants(
       base::CommandLine::ForCurrentProcess()->GetCommandLineString(),
       chrome::GetChannelString()));
-  std::unique_ptr<net::WriteToFileNetLogObserver> net_log_logger(
-      new net::WriteToFileNetLogObserver());
+
+  std::unique_ptr<net::FileNetLogObserver> net_log_logger =
+      net::FileNetLogObserver::CreateUnbounded(state->log_path,
+                                               std::move(constants));
+
   net_log_logger->StartObserving(g_browser_process->net_log(),
-                                 std::move(temp_file_handle), constants.get(),
-                                 nullptr);
+                                 net::NetLogCaptureMode::Default());
+
   g_browser_process->net_log()->AddGlobalEntry(
       net::NetLogEventType::NETWORK_IP_ADDRESSES_CHANGED);
   net::NetLogWithSource net_log_with_source = net::NetLogWithSource::Make(
       g_browser_process->net_log(), net::NetLogSourceType::URL_REQUEST);
   net_log_with_source.BeginEvent(net::NetLogEventType::REQUEST_ALIVE);
-  net_log_logger->StopObserving(nullptr);
-  net_log_logger.reset();
 
-  std::string log_contents;
-  ASSERT_TRUE(base::ReadFileToString(temp_file, &log_contents));
-  ASSERT_GT(log_contents.length(), 0u);
-
-  std::unique_ptr<base::Value> log_contents_value(
-      new base::StringValue(log_contents));
-  RunJavascriptCallback(log_contents_value.get());
+  // Call OnFinishedWritingNetLog() once net_log_logger has completed writing it
+  // to disk.
+  net_log_logger->StopObserving(
+      nullptr,
+      base::Bind(&NetInternalsTest::MessageHandler::OnFinishedWritingNetLog,
+                 base::Unretained(this), base::Passed(std::move(state))));
 }
 
 void NetInternalsTest::MessageHandler::EnableDataReductionProxy(
@@ -315,6 +339,21 @@ void NetInternalsTest::MessageHandler::EnableDataReductionProxy(
   ASSERT_TRUE(list_value->GetBoolean(0, &enable));
   browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kDataSaverEnabled, enable);
+}
+
+void NetInternalsTest::MessageHandler::OnFinishedWritingNetLog(
+    std::unique_ptr<WriteNetLogState> state) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+
+  std::string log_contents;
+  ASSERT_TRUE(base::ReadFileToString(state->log_path, &log_contents));
+  ASSERT_GT(log_contents.length(), 0u);
+
+  std::unique_ptr<base::Value> log_contents_value(
+      new base::Value(log_contents));
+  RunJavascriptCallback(log_contents_value.get());
+
+  state.reset();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -340,6 +379,11 @@ void NetInternalsTest::SetUpOnMainThread() {
   prerender::PrerenderManager* prerender_manager =
       prerender::PrerenderManagerFactory::GetForBrowserContext(profile);
   prerender_manager->mutable_config().max_bytes = 1000 * 1024 * 1024;
+
+  // Sample domain for SDCH-view test. Dictionaries for localhost/127.0.0.1
+  // are forbidden.
+  host_resolver()->AddRule("testdomain.com", "127.0.0.1");
+  host_resolver()->AddRule("sub.testdomain.com", "127.0.0.1");
 }
 
 content::WebUIMessageHandler* NetInternalsTest::GetMockMessageHandler() {
@@ -364,9 +408,5 @@ bool NetInternalsTest::StartTestServer() {
     return true;
   test_server_started_ = embedded_test_server()->Start();
 
-  // Sample domain for SDCH-view test. Dictionaries for localhost/127.0.0.1
-  // are forbidden.
-  host_resolver()->AddRule("testdomain.com", "127.0.0.1");
-  host_resolver()->AddRule("sub.testdomain.com", "127.0.0.1");
   return test_server_started_;
 }

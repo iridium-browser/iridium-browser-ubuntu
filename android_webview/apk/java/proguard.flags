@@ -16,6 +16,10 @@
     public *;
 }
 
+-keep class * implements android.webkit.WebViewFactoryProvider$Statics {
+    *;
+}
+
 -keep class com.android.webview.chromium.ContentSettingsAdapter {
     public *;
 }
@@ -73,12 +77,6 @@
   AwSafeBrowsingApiHandler(...);
 }
 -dontnote com.android.webview.chromium.AwSafeBrowsingApiHandler
-
-#TODO(hush): remove after N release. crbug.com/546762
--keep class com.android.webview.chromium.ContentSettingsAdapter {
-  public void setDisabledActionModeMenuItems(int);
-  public int getDisabledActionModeMenuItems();
-}
 
 # We strip some unused resources when preprocessing the GMS client libs.
 -dontwarn com.google.android.gms.R**

@@ -1,0 +1,27 @@
+Name: FreeType
+URL: http://www.freetype.org/
+Version: VER-2-8-73
+Revision: 38bdf22bfe68432aebdd33c198a0bd11b4ebb96f
+License: Custom license "inspired by the BSD, Artistic, and IJG (Independent
+         JPEG Group) licenses"
+License File: src/docs/FTL.TXT
+Security Critical: yes
+License Android Compatible: yes
+
+Description:
+This package tracks upstream FreeType. It is shipped as part of Chrome on all
+platforms. FreeType is needed on Windows and Mac for PDFium as well for enabling
+font format support for OpenType Variations on older OS versions.
+
+How to update:
+1. Find the desired commit in
+   https://chromium.googlesource.com/chromium/src/third_party/freetype2/ .
+   If such a commit does not yet exist, branch from the appropriate point with
+   a branch name like "chromium/android/VER-X-X-X-updates" depending on the
+   FreeType tag being branched and commit changes there.
+2. Update BUILD.gn to reflect any changes.
+3. Merge the new src/include/freetype/config/ftoption.h into
+   include/freetype-custom-config/ftoption.h .
+4. Update this file.
+5. Commit build changes while rolling Chromium's freetype DEPS to the
+   new commit.

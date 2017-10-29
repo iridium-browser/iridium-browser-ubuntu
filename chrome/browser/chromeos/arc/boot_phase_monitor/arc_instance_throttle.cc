@@ -4,67 +4,35 @@
 
 #include "chrome/browser/chromeos/arc/boot_phase_monitor/arc_instance_throttle.h"
 
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
-#include "ash/shared/app_types.h"
-#include "base/bind.h"
-#include "base/logging.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/session_manager_client.h"
+#include "ash/shell.h"
+#include "ash/wm/window_util.h"
+#include "components/arc/arc_util.h"
+#include "ui/wm/public/activation_client.h"
 
 namespace arc {
 
 namespace {
 
-void OnDBusReply(login_manager::ContainerCpuRestrictionState state,
-                 bool success) {
-  if (success)
-    return;
-  const char* message =
-      (state == login_manager::CONTAINER_CPU_RESTRICTION_BACKGROUND)
-          ? "unprioritize"
-          : "prioritize";
-  LOG(WARNING) << "Failed to " << message << " the instance";
-}
-
-bool IsArcAppWindow(ash::WmWindow* active) {
-  DCHECK(active);
-  return active->GetAppType() == static_cast<int>(ash::AppType::ARC_APP);
-}
-
-void ThrottleInstanceIfNeeded(ash::WmWindow* active) {
-  chromeos::SessionManagerClient* session_manager_client =
-      chromeos::DBusThreadManager::Get()->GetSessionManagerClient();
-  if (!session_manager_client) {
-    LOG(WARNING) << "SessionManagerClient is not available";
-    return;
-  }
-  const login_manager::ContainerCpuRestrictionState state =
-      (!active || !IsArcAppWindow(active))
-          ? login_manager::CONTAINER_CPU_RESTRICTION_BACKGROUND
-          : login_manager::CONTAINER_CPU_RESTRICTION_FOREGROUND;
-  session_manager_client->SetArcCpuRestriction(state,
-                                               base::Bind(OnDBusReply, state));
+void ThrottleInstance(aura::Window* active) {
+  SetArcCpuRestriction(!IsArcAppWindow(active));
 }
 
 }  // namespace
 
 ArcInstanceThrottle::ArcInstanceThrottle() {
-  ash::WmShell* shell = ash::WmShell::Get();
-  DCHECK(shell);
-  shell->AddActivationObserver(this);
-  ThrottleInstanceIfNeeded(shell->GetActiveWindow());
+  ash::Shell::Get()->activation_client()->AddObserver(this);
+  ThrottleInstance(ash::wm::GetActiveWindow());
 }
 
 ArcInstanceThrottle::~ArcInstanceThrottle() {
-  ash::WmShell* shell = ash::WmShell::Get();
-  if (shell)
-    shell->RemoveActivationObserver(this);
+  if (ash::Shell::HasInstance())
+    ash::Shell::Get()->activation_client()->RemoveObserver(this);
 }
 
-void ArcInstanceThrottle::OnWindowActivated(ash::WmWindow* gained_active,
-                                            ash::WmWindow* lost_active) {
-  ThrottleInstanceIfNeeded(gained_active);
+void ArcInstanceThrottle::OnWindowActivated(ActivationReason reason,
+                                            aura::Window* gained_active,
+                                            aura::Window* lost_active) {
+  ThrottleInstance(gained_active);
 }
 
 }  // namespace arc

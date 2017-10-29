@@ -28,10 +28,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://www.khronos.org/registry/webgl/extensions/ANGLE_instanced_arrays/
+
 [
     DependentLifetime,
     DoNotCheckConstants,
-    NoInterfaceObject,
+    NoInterfaceObject
 ] interface ANGLEInstancedArrays {
     const unsigned long VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE = 0x88FE;
 

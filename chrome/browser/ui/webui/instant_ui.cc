@@ -14,6 +14,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -103,10 +104,10 @@ void InstantUIMessageHandler::GetPreferenceValue(const base::ListValue* args) {
   std::string pref_name;
   if (!args->GetString(0, &pref_name)) return;
 
-  base::StringValue pref_name_value(pref_name);
+  base::Value pref_name_value(pref_name);
   if (pref_name == prefs::kInstantUIZeroSuggestUrlPrefix) {
     PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
-    base::StringValue arg(prefs->GetString(pref_name.c_str()));
+    base::Value arg(prefs->GetString(pref_name.c_str()));
     web_ui()->CallJavascriptFunctionUnsafe(
         "instantConfig.getPreferenceValueResult", pref_name_value, arg);
   }
@@ -121,7 +122,7 @@ void InstantUIMessageHandler::SetPreferenceValue(const base::ListValue* args) {
     if (!args->GetString(1, &value))
       return;
     PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
-    prefs->SetString(pref_name.c_str(), value);
+    prefs->SetString(pref_name, value);
   }
 }
 
@@ -140,7 +141,7 @@ void InstantUIMessageHandler::GetDebugInfo(const base::ListValue* args) {
   const std::list<DebugEvent>& events = instant->debug_events();
 
   base::DictionaryValue data;
-  base::ListValue* entries = new base::ListValue();
+  auto entries = base::MakeUnique<base::ListValue>();
   for (std::list<DebugEvent>::const_iterator it = events.begin();
        it != events.end(); ++it) {
     std::unique_ptr<base::DictionaryValue> entry(new base::DictionaryValue());
@@ -148,7 +149,7 @@ void InstantUIMessageHandler::GetDebugInfo(const base::ListValue* args) {
     entry->SetString("text", it->second);
     entries->Append(std::move(entry));
   }
-  data.Set("entries", entries);
+  data.Set("entries", std::move(entries));
 
   web_ui()->CallJavascriptFunctionUnsafe("instantConfig.getDebugInfoResult",
                                          data);

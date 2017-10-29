@@ -133,39 +133,30 @@ class TCompiler : public TShHandleBase
     void setResourceString();
     // Return false if the call depth is exceeded.
     bool checkCallDepth();
-    // Returns true if a program has no conflicting or missing fragment outputs
-    bool validateOutputs(TIntermNode *root);
-    // Returns true if the given shader does not exceed the minimum
-    // functionality mandated in GLSL 1.0 spec Appendix A.
-    bool validateLimitations(TIntermNode *root);
     // Add emulated functions to the built-in function emulator.
     virtual void initBuiltInFunctionEmulator(BuiltInFunctionEmulator *emu,
                                              ShCompileOptions compileOptions){};
     // Translate to object code.
-    virtual void translate(TIntermNode *root, ShCompileOptions compileOptions) = 0;
-    // Returns true if, after applying the packing rules in the GLSL 1.017 spec
-    // Appendix A, section 7, the shader does not use too many uniforms.
-    bool enforcePackingRestrictions();
+    virtual void translate(TIntermBlock *root, ShCompileOptions compileOptions) = 0;
     // Insert statements to reference all members in unused uniform blocks with standard and shared
     // layout. This is to work around a Mac driver that treats unused standard/shared
     // uniform blocks as inactive.
-    void useAllMembersInUnusedStandardAndSharedBlocks(TIntermNode *root);
+    void useAllMembersInUnusedStandardAndSharedBlocks(TIntermBlock *root);
     // Insert statements to initialize output variables in the beginning of main().
     // This is to avoid undefined behaviors.
-    void initializeOutputVariables(TIntermNode *root);
+    void initializeOutputVariables(TIntermBlock *root);
     // Insert gl_Position = vec4(0,0,0,0) to the beginning of main().
     // It is to work around a Linux driver bug where missing this causes compile failure
     // while spec says it is allowed.
     // This function should only be applied to vertex shaders.
-    void initializeGLPosition(TIntermNode *root);
+    void initializeGLPosition(TIntermBlock *root);
     // Return true if the maximum expression complexity is below the limit.
-    bool limitExpressionComplexity(TIntermNode *root);
+    bool limitExpressionComplexity(TIntermBlock *root);
     // Get built-in extensions with default behavior.
     const TExtensionBehavior &getExtensionBehavior() const;
     const char *getSourcePath() const;
     const TPragma &getPragma() const { return mPragma; }
     void writePragma(ShCompileOptions compileOptions);
-    unsigned int *getTemporaryIndex() { return &mTemporaryIndex; }
     // Relies on collectVariables having been called.
     bool isVaryingDefined(const char *varyingName);
 
@@ -175,12 +166,12 @@ class TCompiler : public TShHandleBase
 
     virtual bool shouldFlattenPragmaStdglInvariantAll() = 0;
     virtual bool shouldCollectVariables(ShCompileOptions compileOptions);
+    virtual bool needToInitializeGlobalsInAST() const { return IsWebGLBasedSpec(shaderSpec); }
 
     bool wereVariablesCollected() const;
     std::vector<sh::Attribute> attributes;
     std::vector<sh::OutputVariable> outputVariables;
     std::vector<sh::Uniform> uniforms;
-    std::vector<sh::ShaderVariable> expandedUniforms;
     std::vector<sh::Varying> varyings;
     std::vector<sh::InterfaceBlock> interfaceBlocks;
 
@@ -193,10 +184,9 @@ class TCompiler : public TShHandleBase
 
     void initSamplerDefaultPrecision(TBasicType samplerType);
 
-    // Collect info for all attribs, uniforms, varyings.
-    void collectVariables(TIntermNode *root);
-
     bool variablesCollected;
+
+    bool mGLPositionInitialized;
 
     // Removes unused function declarations and prototypes from the AST
     class UnusedPredicate;
@@ -256,8 +246,6 @@ class TCompiler : public TShHandleBase
     NameMap nameMap;
 
     TPragma mPragma;
-
-    unsigned int mTemporaryIndex;
 };
 
 //

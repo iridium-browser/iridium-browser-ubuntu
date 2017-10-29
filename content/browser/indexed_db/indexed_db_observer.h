@@ -32,7 +32,7 @@ class CONTENT_EXPORT IndexedDBObserver {
     bool no_records;
     bool values;
     // Operation type bits are set corresponding to WebIDBOperationType.
-    std::bitset<blink::WebIDBOperationTypeCount> operation_types;
+    std::bitset<blink::kWebIDBOperationTypeCount> operation_types;
   };
   IndexedDBObserver(int32_t observer_id,
                     std::set<int64_t> object_store_ids,
@@ -49,11 +49,11 @@ class CONTENT_EXPORT IndexedDBObserver {
   }
 
   bool IsRecordingType(blink::WebIDBOperationType type) const {
-    DCHECK_NE(type, blink::WebIDBOperationTypeCount);
+    DCHECK_NE(type, blink::kWebIDBOperationTypeCount);
     return options_.operation_types[type];
   }
   bool IsRecordingObjectStore(int64_t object_store_id) const {
-    return base::ContainsValue(object_store_ids_, object_store_id);
+    return base::ContainsKey(object_store_ids_, object_store_id);
   }
   bool include_transaction() const { return options_.include_transaction; }
   bool no_records() const { return options_.no_records; }

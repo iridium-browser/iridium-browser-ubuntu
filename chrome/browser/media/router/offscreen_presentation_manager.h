@@ -11,12 +11,16 @@
 #include <unordered_map>
 
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/media/router/render_frame_host_id.h"
+#include "chrome/common/media_router/media_route.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/presentation_service_delegate.h"
 
-class GURL;
+namespace content {
+struct PresentationInfo;
+}
 
 namespace media_router {
 // Manages all offscreen presentations started in the associated Profile and
@@ -34,7 +38,7 @@ namespace media_router {
 //   OffscreenPresentationManager* manager =
 //       OffscreenPresentationManagerFactory::GetOrCreateForBrowserContext(
 //           web_contents_->GetBrowserContext());
-//   manager->OnOffscreenPresentationReceiverCreated(presentation_id,
+//   manager->OnOffscreenPresentationReceiverCreated(presentation_info,
 //       base::Bind(&PresentationServiceImpl::OnReceiverConnectionAvailable));
 //
 // Controlling frame establishes connection with the receiver side, resulting
@@ -44,8 +48,9 @@ namespace media_router {
 // PresentationServiceImpl::OnReceiverConnectionAvailable.
 //
 //   manager->RegisterOffscreenPresentationController(
-//       presentation_id, controller_frame_id, controller_connection_ptr,
-//       receiver_connection_request);
+//       presentation_info,
+//       std::move(controller_connection_ptr,
+//       std::move(receiver_connection_request));
 //
 // Invoked on receiver's PresentationServiceImpl when controller connection is
 // established.
@@ -57,11 +62,11 @@ namespace media_router {
 //   |receiver_connection_request|: Mojo InterfaceRequest to be bind to
 //   blink::PresentationConnection object in receiver frame's render process.
 //   void PresentationServiceImpl::OnReceiverConnectionAvailable(
-//       const content::PresentationSessionInfo& session,
+//       const content::PresentationInfo& presentation_info,
 //       PresentationConnectionPtr controller_connection_ptr,
 //       PresentationConnectionRequest receiver_connection_request) {
 //     presentation_receiver_client_->OnReceiverConnectionAvailable(
-//         blink::mojom::PresentationSessionInfo::From(session_info),
+//         blink::mojom::PresentationInfo::From(presentation_info),
 //         std::move(controller_connection_ptr),
 //         std::move(receiver_connection_request));
 //   }
@@ -75,7 +80,9 @@ namespace media_router {
 //   |message|: Text message to be sent.
 //   PresentationConnctionPtr::SendString(
 //       const blink::WebString& message) {
-//     target_connection_->OnSessionMessageReceived(std::move(session_message));
+//     target_connection_->OnMessage(
+//         content::PresentationConnectionMessage(message.Utf8()),
+//         base::Bind(&OnMessageReceived));
 //   }
 //
 // A controller or receiver leaves the offscreen presentation (e.g., due to
@@ -106,11 +113,11 @@ class OffscreenPresentationManager : public KeyedService {
   // this class. Ownership is transferred to presentation receiver via
   // |receiver_callback| passed below.
   virtual void RegisterOffscreenPresentationController(
-      const std::string& presentation_id,
-      const GURL& presentation_url,
+      const content::PresentationInfo& presentation_info,
       const RenderFrameHostId& render_frame_id,
       content::PresentationConnectionPtr controller_connection_ptr,
-      content::PresentationConnectionRequest receiver_connection_request);
+      content::PresentationConnectionRequest receiver_connection_request,
+      const MediaRoute& route);
 
   // Unregisters controller PresentationConnectionPtr to presentation with
   // |presentation_id|, |render_frame_id|. It does nothing if there is no
@@ -121,17 +128,23 @@ class OffscreenPresentationManager : public KeyedService {
       const std::string& presentation_id,
       const RenderFrameHostId& render_frame_id);
 
-  // Registers |receiver_callback| to presentation with |presentation_id| and
-  // |presentation_url|.
+  // Registers |receiver_callback| to presentation with |presentation_info|.
   virtual void OnOffscreenPresentationReceiverCreated(
-      const std::string& presentation_id,
-      const GURL& presentation_url,
+      const content::PresentationInfo& presentation_info,
       const content::ReceiverConnectionAvailableCallback& receiver_callback);
 
   // Unregisters ReceiverConnectionAvailableCallback associated with
   // |presentation_id|.
   virtual void OnOffscreenPresentationReceiverTerminated(
       const std::string& presentation_id);
+
+  // Returns true if this class has an offscreen presentation with
+  // |presentation_id|.
+  virtual bool IsOffscreenPresentation(const std::string& presentation_id);
+
+  // Returns nullptr if |presentation_id| is not associated with an offscreen
+  // presentation.
+  virtual const MediaRoute* GetRoute(const std::string& presentation_id);
 
  private:
   // Represents an offscreen presentation registered with
@@ -141,8 +154,8 @@ class OffscreenPresentationManager : public KeyedService {
   // receiver.
   class OffscreenPresentation {
    public:
-    OffscreenPresentation(const std::string& presentation_id,
-                          const GURL& presentation_url);
+    explicit OffscreenPresentation(
+        const content::PresentationInfo& presentation_info);
     ~OffscreenPresentation();
 
     // Register controller with |render_frame_id|. If |receiver_callback_| has
@@ -154,7 +167,8 @@ class OffscreenPresentationManager : public KeyedService {
     void RegisterController(
         const RenderFrameHostId& render_frame_id,
         content::PresentationConnectionPtr controller_connection_ptr,
-        content::PresentationConnectionRequest receiver_connection_request);
+        content::PresentationConnectionRequest receiver_connection_request,
+        const MediaRoute& route);
 
     // Unregister controller with |render_frame_id|. Do nothing if there is no
     // pending controller with |render_frame_id|.
@@ -175,8 +189,8 @@ class OffscreenPresentationManager : public KeyedService {
     // controllers.
     bool IsValid() const;
 
-    const std::string presentation_id_;
-    const GURL presentation_url_;
+    const content::PresentationInfo presentation_info_;
+    base::Optional<MediaRoute> route_;
 
     // Callback to invoke whenever a receiver connection is available.
     content::ReceiverConnectionAvailableCallback receiver_callback_;
@@ -220,11 +234,9 @@ class OffscreenPresentationManager : public KeyedService {
   using OffscreenPresentationMap =
       std::map<std::string, std::unique_ptr<OffscreenPresentation>>;
 
-  // Creates an offscreen presentation with |presentation_id| and
-  // |presentation_url|.
+  // Creates an offscreen presentation with |presentation_info|.
   OffscreenPresentation* GetOrCreateOffscreenPresentation(
-      const std::string& presentation_id,
-      const GURL& presentation_url);
+      const content::PresentationInfo& presentation_info);
 
   // Maps from presentation ID to OffscreenPresentation.
   OffscreenPresentationMap offscreen_presentations_;

@@ -6,15 +6,26 @@
 
 #include "core/fxcrt/fxcrt_posix.h"
 
+#include <memory>
+
 #include "core/fxcrt/fx_basic.h"
+#include "third_party/base/ptr_util.h"
+
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif  // O_BINARY
+
+#ifndef O_LARGEFILE
+#define O_LARGEFILE 0
+#endif  // O_LARGEFILE
 
 #if _FXM_PLATFORM_ == _FXM_PLATFORM_LINUX_ || \
     _FXM_PLATFORM_ == _FXM_PLATFORM_APPLE_ || \
     _FXM_PLATFORM_ == _FXM_PLATFORM_ANDROID_
 
 // static
-IFXCRT_FileAccess* IFXCRT_FileAccess::Create() {
-  return new CFXCRT_FileAccess_Posix;
+std::unique_ptr<IFXCRT_FileAccess> IFXCRT_FileAccess::Create() {
+  return pdfium::MakeUnique<CFXCRT_FileAccess_Posix>();
 }
 
 void FXCRT_Posix_GetFileMode(uint32_t dwModes,
@@ -45,7 +56,9 @@ bool CFXCRT_FileAccess_Posix::Open(const CFX_ByteStringC& fileName,
   int32_t nFlags;
   int32_t nMasks;
   FXCRT_Posix_GetFileMode(dwMode, nFlags, nMasks);
-  m_nFD = open(fileName.c_str(), nFlags, nMasks);
+
+  // TODO(tsepez): check usage of c_str() below.
+  m_nFD = open(fileName.unterminated_c_str(), nFlags, nMasks);
   return m_nFD > -1;
 }
 
@@ -66,7 +79,7 @@ FX_FILESIZE CFXCRT_FileAccess_Posix::GetSize() const {
     return 0;
   }
   struct stat s;
-  FXSYS_memset(&s, 0, sizeof(s));
+  memset(&s, 0, sizeof(s));
   fstat(m_nFD, &s);
   return s.st_size;
 }

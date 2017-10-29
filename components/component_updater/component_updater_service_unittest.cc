@@ -5,6 +5,7 @@
 #include "components/component_updater/component_updater_service.h"
 
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,8 +18,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/test/histogram_tester.h"
-#include "base/test/sequenced_worker_pool_owner.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "components/component_updater/component_updater_service_internal.h"
@@ -46,9 +48,16 @@ class MockInstaller : public CrxInstaller {
  public:
   MockInstaller();
 
+  // gMock does not support mocking functions with parameters which have
+  // move semantics. This function is a shim to work around it.
+  Result Install(std::unique_ptr<base::DictionaryValue> manifest,
+                 const base::FilePath& unpack_path) {
+    return Install_(manifest, unpack_path);
+  }
+
   MOCK_METHOD1(OnUpdateError, void(int error));
-  MOCK_METHOD2(Install,
-               Result(const base::DictionaryValue& manifest,
+  MOCK_METHOD2(Install_,
+               Result(const std::unique_ptr<base::DictionaryValue>& manifest,
                       const base::FilePath& unpack_path));
   MOCK_METHOD2(GetInstalledFile,
                bool(const std::string& file, base::FilePath* installed_file));
@@ -75,9 +84,11 @@ class MockUpdateClient : public UpdateClient {
                      bool(const std::string& id, CrxUpdateItem* update_item));
   MOCK_CONST_METHOD1(IsUpdating, bool(const std::string& id));
   MOCK_METHOD0(Stop, void());
-  MOCK_METHOD3(
-      SendUninstallPing,
-      void(const std::string& id, const base::Version& version, int reason));
+  MOCK_METHOD4(SendUninstallPing,
+               void(const std::string& id,
+                    const base::Version& version,
+                    int reason,
+                    const Callback& callback));
 
  private:
   ~MockUpdateClient() override;
@@ -113,13 +124,9 @@ class ComponentUpdaterTest : public testing::Test {
   void RunThreads();
 
  private:
-  static const int kNumWorkerThreads_ = 2;
-
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   base::RunLoop runloop_;
   base::Closure quit_closure_;
-
-  std::unique_ptr<base::SequencedWorkerPoolOwner> worker_pool_;
 
   scoped_refptr<TestConfigurator> config_;
   scoped_refptr<MockUpdateClient> update_client_;
@@ -175,14 +182,13 @@ std::unique_ptr<ComponentUpdateService> TestComponentUpdateServiceFactory(
 }
 
 ComponentUpdaterTest::ComponentUpdaterTest()
-    : worker_pool_(
-          new base::SequencedWorkerPoolOwner(kNumWorkerThreads_, "test")) {
+    : scoped_task_environment_(
+          base::test::ScopedTaskEnvironment::MainThreadType::UI) {
   quit_closure_ = runloop_.QuitClosure();
 
-  auto pool = worker_pool_->pool();
   config_ = new TestConfigurator(
-      pool->GetSequencedTaskRunner(pool->GetSequenceToken()),
-      message_loop_.task_runner());
+      base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()}),
+      base::ThreadTaskRunnerHandle::Get());
 
   update_client_ = new MockUpdateClient();
   EXPECT_CALL(update_client(), AddObserver(_)).Times(1);

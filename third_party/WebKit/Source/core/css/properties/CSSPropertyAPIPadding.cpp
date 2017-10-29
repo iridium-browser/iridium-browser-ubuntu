@@ -7,13 +7,16 @@
 #include "core/css/parser/CSSParserContext.h"
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIPadding::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  return consumeLengthOrPercent(range, context->mode(), ValueRangeNonNegative,
-                                CSSPropertyParserHelpers::UnitlessQuirk::Allow);
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  return ConsumeLengthOrPercent(
+      range, context.Mode(), kValueRangeNonNegative,
+      CSSPropertyParserHelpers::UnitlessQuirk::kAllow);
 }
 
 }  // namespace blink

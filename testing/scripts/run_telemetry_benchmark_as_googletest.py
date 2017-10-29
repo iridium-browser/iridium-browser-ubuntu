@@ -66,6 +66,10 @@ def main():
     failures = []
     chartjson_results_present = '--output-format=chartjson' in rest_args
     chartresults = None
+    json_test_results_present = '--output-format=json-test-results' in rest_args
+    json_test_results = None
+
+    results = None
     try:
       rc = common.run_command([sys.executable] + rest_args + [
         '--output-dir', tempfile_dir,
@@ -87,11 +91,24 @@ def main():
           results = json.load(f)
         for value in results['per_page_values']:
           if value['type'] == 'failure':
-            failures.append(results['pages'][str(value['page_id'])]['name'])
+            page_data = results['pages'][str(value['page_id'])]
+            name = page_data.get('name')
+            if not name:
+              name = page_data['url']
+
+            failures.append(name)
         valid = bool(rc == 0 or failures)
+
+      if json_test_results_present:
+        tempfile_name = os.path.join(tempfile_dir, 'test-results.json')
+        with open(tempfile_name) as f:
+          json_test_results = json.load(f)
 
     except Exception:
       traceback.print_exc()
+      if results:
+        print 'results, which possibly caused exception: %s' % json.dumps(
+            results, indent=2)
       valid = False
     finally:
       shutil.rmtree(tempfile_dir)
@@ -106,10 +123,13 @@ def main():
         open(args.isolated_script_test_chartjson_output, 'w')
       json.dump(chartresults, chartjson_output_file)
 
-    json.dump({
-        'valid': valid,
-        'failures': failures
-    }, args.isolated_script_test_output)
+    if not json_test_results_present:
+      json_test_results = {
+          'valid': valid,
+          'failures': failures
+      }
+
+    json.dump(json_test_results, args.isolated_script_test_output)
     return rc
 
   finally:

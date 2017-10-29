@@ -11,6 +11,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/app_list/pagination_model_observer.h"
 
@@ -112,7 +113,9 @@ class TestPaginationModelObserver : public PaginationModelObserver {
 
 class PaginationModelTest : public testing::Test {
  public:
-  PaginationModelTest() {}
+  PaginationModelTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
   ~PaginationModelTest() override {}
 
   // testing::Test overrides:
@@ -144,7 +147,7 @@ class PaginationModelTest : public testing::Test {
   TestPaginationModelObserver observer_;
 
  private:
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
   DISALLOW_COPY_AND_ASSIGN(PaginationModelTest);
 };
@@ -164,6 +167,14 @@ TEST_F(PaginationModelTest, SelectPage) {
   pagination_.SelectPage(1, false /* animate */);
   EXPECT_EQ(4, observer_.selection_count());
   EXPECT_EQ(std::string("2 4 3 1"), observer_.selected_pages());
+}
+
+TEST_F(PaginationModelTest, IsValidPageRelative) {
+  pagination_.SelectPage(0, false /*animate*/);
+  ASSERT_FALSE(pagination_.IsValidPageRelative(-1));
+  ASSERT_FALSE(pagination_.IsValidPageRelative(5));
+  ASSERT_TRUE(pagination_.IsValidPageRelative(1));
+  ASSERT_TRUE(pagination_.IsValidPageRelative(4));
 }
 
 TEST_F(PaginationModelTest, SelectPageAnimated) {

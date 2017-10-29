@@ -5,7 +5,9 @@
 #include "tools/ipc_fuzzer/message_replay/replay_process.h"
 
 #include <limits.h>
+
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -14,11 +16,15 @@
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/common/connection_filter.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/mojo_channel_switches.h"
+#include "content/public/common/service_manager_connection.h"
+#include "ipc/ipc.mojom.h"
 #include "ipc/ipc_channel_mojo.h"
-#include "ipc/ipc_descriptors.h"
+#include "mojo/edk/embedder/configuration.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/incoming_broker_client_invitation.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/embedder/scoped_ipc_support.h"
 
@@ -28,13 +34,42 @@
 #endif
 
 namespace ipc_fuzzer {
+namespace {
+
+class IPCChannelBootstrapper : public content::ConnectionFilter {
+ public:
+  explicit IPCChannelBootstrapper(
+      mojo::ScopedMessagePipeHandle bootstrap_handle)
+      : bootstrap_handle_(std::move(bootstrap_handle)) {}
+
+ private:
+  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
+                       const std::string& interface_name,
+                       mojo::ScopedMessagePipeHandle* interface_pipe,
+                       service_manager::Connector* connector) override {
+    if (interface_name != IPC::mojom::ChannelBootstrap::Name_)
+      return;
+
+    DCHECK(bootstrap_handle_.is_valid());
+    mojo::FuseMessagePipes(std::move(*interface_pipe),
+                           std::move(bootstrap_handle_));
+  }
+
+  mojo::ScopedMessagePipeHandle bootstrap_handle_;
+
+  DISALLOW_COPY_AND_ASSIGN(IPCChannelBootstrapper);
+};
+
+}  // namespace
 
 void InitializeMojo() {
-  mojo::edk::SetMaxMessageSize(64 * 1024 * 1024);
-  mojo::edk::Init();
+  mojo::edk::Configuration config;
+  config.max_message_num_bytes = 64 * 1024 * 1024;
+  mojo::edk::Init(config);
 }
 
-void InitializeMojoIPCChannel() {
+std::unique_ptr<mojo::edk::IncomingBrokerClientInvitation>
+InitializeMojoIPCChannel() {
   mojo::edk::ScopedPlatformHandle platform_channel;
 #if defined(OS_WIN)
   platform_channel =
@@ -45,7 +80,9 @@ void InitializeMojoIPCChannel() {
       base::GlobalDescriptors::GetInstance()->Get(kMojoIPCChannel)));
 #endif
   CHECK(platform_channel.is_valid());
-  mojo::edk::SetParentPipeHandle(std::move(platform_channel));
+  return mojo::edk::IncomingBrokerClientInvitation::Accept(
+      mojo::edk::ConnectionParams(mojo::edk::TransportProtocol::kLegacy,
+                                  std::move(platform_channel)));
 }
 
 ReplayProcess::ReplayProcess()
@@ -95,18 +132,26 @@ bool ReplayProcess::Initialize(int argc, const char** argv) {
   mojo_ipc_support_.reset(new mojo::edk::ScopedIPCSupport(
       io_thread_.task_runner(),
       mojo::edk::ScopedIPCSupport::ShutdownPolicy::FAST));
-  InitializeMojoIPCChannel();
+  broker_client_invitation_ = InitializeMojoIPCChannel();
 
   return true;
 }
 
 void ReplayProcess::OpenChannel() {
-  channel_ = IPC::ChannelProxy::Create(
-      IPC::ChannelMojo::CreateClientFactory(
-          mojo::edk::CreateChildMessagePipe(
+  DCHECK(broker_client_invitation_);
+  service_manager_connection_ = content::ServiceManagerConnection::Create(
+      service_manager::mojom::ServiceRequest(
+          broker_client_invitation_->ExtractMessagePipe(
               base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-                  switches::kMojoChannelToken)),
-          io_thread_.task_runner()),
+                  switches::kServiceRequestChannelToken))),
+      io_thread_.task_runner());
+  mojo::MessagePipe ipc_pipe;
+  service_manager_connection_->AddConnectionFilter(
+      base::MakeUnique<IPCChannelBootstrapper>(std::move(ipc_pipe.handle0)));
+  service_manager_connection_->Start();
+  channel_ = IPC::ChannelProxy::Create(
+      IPC::ChannelMojo::CreateClientFactory(std::move(ipc_pipe.handle1),
+                                            io_thread_.task_runner()),
       this, io_thread_.task_runner());
 }
 
@@ -123,11 +168,10 @@ void ReplayProcess::SendNextMessage() {
     return;
   }
 
-  // Take next message and release it from vector.
-  IPC::Message* message = messages_[message_index_];
-  messages_[message_index_++] = NULL;
+  std::unique_ptr<IPC::Message> message =
+      std::move(messages_[message_index_++]);
 
-  if (!channel_->Send(message)) {
+  if (!channel_->Send(message.release())) {
     LOG(ERROR) << "ChannelProxy::Send() failed after "
                << message_index_ << " messages";
     base::MessageLoop::current()->QuitWhenIdle();

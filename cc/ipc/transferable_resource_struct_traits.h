@@ -7,6 +7,7 @@
 
 #include "cc/ipc/transferable_resource.mojom-shared.h"
 #include "cc/resources/transferable_resource.h"
+#include "ui/gfx/ipc/color/gfx_param_traits.h"
 
 namespace mojo {
 
@@ -20,6 +21,11 @@ struct StructTraits<cc::mojom::TransferableResourceDataView,
   static cc::mojom::ResourceFormat format(
       const cc::TransferableResource& resource) {
     return static_cast<cc::mojom::ResourceFormat>(resource.format);
+  }
+
+  static gfx::mojom::BufferFormat buffer_format(
+      const cc::TransferableResource& resource) {
+    return static_cast<gfx::mojom::BufferFormat>(resource.buffer_format);
   }
 
   static uint32_t filter(const cc::TransferableResource& resource) {
@@ -42,6 +48,11 @@ struct StructTraits<cc::mojom::TransferableResourceDataView,
 
   static bool is_software(const cc::TransferableResource& resource) {
     return resource.is_software;
+  }
+
+  static uint32_t shared_bitmap_sequence_number(
+      const cc::TransferableResource& resource) {
+    return resource.shared_bitmap_sequence_number;
   }
 
   static bool is_overlay_candidate(const cc::TransferableResource& resource) {
@@ -67,6 +78,11 @@ struct StructTraits<cc::mojom::TransferableResourceDataView,
 #else
     return false;
 #endif
+  }
+
+  static const gfx::ColorSpace& color_space(
+      const cc::TransferableResource& resource) {
+    return resource.color_space;
   }
 
   static bool Read(cc::mojom::TransferableResourceDataView data,

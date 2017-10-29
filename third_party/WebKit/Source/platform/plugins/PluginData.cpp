@@ -30,51 +30,96 @@
 
 namespace blink {
 
-PluginData::PluginData(SecurityOrigin* mainFrameOrigin)
-    : m_mainFrameOrigin(mainFrameOrigin) {
-  PluginListBuilder builder(&m_plugins);
-  Platform::current()->getPluginList(
-      false, WebSecurityOrigin(m_mainFrameOrigin), &builder);
+DEFINE_TRACE(MimeClassInfo) {
+  visitor->Trace(plugin_);
+}
 
-  for (unsigned i = 0; i < m_plugins.size(); ++i) {
-    const PluginInfo& plugin = m_plugins[i];
-    for (unsigned j = 0; j < plugin.mimes.size(); ++j) {
-      m_mimes.push_back(plugin.mimes[j]);
-      m_mimePluginIndices.push_back(i);
-    }
+MimeClassInfo::MimeClassInfo(const String& type,
+                             const String& description,
+                             PluginInfo& plugin)
+    : type_(type), description_(description), plugin_(&plugin) {}
+
+DEFINE_TRACE(PluginInfo) {
+  visitor->Trace(mimes_);
+}
+
+PluginInfo::PluginInfo(const String& name,
+                       const String& filename,
+                       const String& description)
+    : name_(name), filename_(filename), description_(description) {}
+
+void PluginInfo::AddMimeType(MimeClassInfo* info) {
+  mimes_.push_back(info);
+}
+
+const MimeClassInfo* PluginInfo::GetMimeClassInfo(size_t index) const {
+  if (index > mimes_.size())
+    return nullptr;
+  return mimes_[index];
+}
+
+const MimeClassInfo* PluginInfo::GetMimeClassInfo(const String& type) const {
+  for (MimeClassInfo* mime : mimes_) {
+    if (mime->Type() == type)
+      return mime;
   }
+
+  return nullptr;
 }
 
-bool PluginData::supportsMimeType(const String& mimeType) const {
-  for (unsigned i = 0; i < m_mimes.size(); ++i)
-    if (m_mimes[i].type == mimeType)
-      return true;
-  return false;
+size_t PluginInfo::GetMimeClassInfoSize() const {
+  return mimes_.size();
 }
 
-const PluginInfo* PluginData::pluginInfoForMimeType(
-    const String& mimeType) const {
-  for (unsigned i = 0; i < m_mimes.size(); ++i) {
-    const MimeClassInfo& info = m_mimes[i];
-
-    if (info.type == mimeType)
-      return &m_plugins[m_mimePluginIndices[i]];
-  }
-
-  return 0;
+DEFINE_TRACE(PluginData) {
+  visitor->Trace(plugins_);
+  visitor->Trace(mimes_);
 }
 
-String PluginData::pluginNameForMimeType(const String& mimeType) const {
-  if (const PluginInfo* info = pluginInfoForMimeType(mimeType))
-    return info->name;
-  return String();
-}
-
-void PluginData::refreshBrowserSidePluginCache() {
-  Vector<PluginInfo> plugins;
-  PluginListBuilder builder(&plugins);
-  Platform::current()->getPluginList(true, WebSecurityOrigin::createUnique(),
+// static
+void PluginData::RefreshBrowserSidePluginCache() {
+  PluginListBuilder builder(nullptr);
+  Platform::Current()->GetPluginList(true, WebSecurityOrigin::CreateUnique(),
                                      &builder);
+}
+
+void PluginData::UpdatePluginList(SecurityOrigin* main_frame_origin) {
+  ResetPluginData();
+  main_frame_origin_ = main_frame_origin;
+  PluginListBuilder builder(&plugins_);
+  Platform::Current()->GetPluginList(
+      false, WebSecurityOrigin(main_frame_origin_), &builder);
+
+  for (PluginInfo* plugin_info : plugins_) {
+    for (MimeClassInfo* mime_class_info : plugin_info->mimes_)
+      mimes_.push_back(mime_class_info);
+  }
+
+  std::sort(
+      plugins_.begin(), plugins_.end(),
+      [](const Member<PluginInfo>& lhs, const Member<PluginInfo>& rhs) -> bool {
+        return WTF::CodePointCompareLessThan(lhs->Name(), rhs->Name());
+      });
+  std::sort(mimes_.begin(), mimes_.end(),
+            [](const Member<MimeClassInfo>& lhs,
+               const Member<MimeClassInfo>& rhs) -> bool {
+              return WTF::CodePointCompareLessThan(lhs->Type(), rhs->Type());
+            });
+}
+
+void PluginData::ResetPluginData() {
+  plugins_.clear();
+  mimes_.clear();
+  main_frame_origin_ = nullptr;
+}
+
+bool PluginData::SupportsMimeType(const String& mime_type) const {
+  for (const MimeClassInfo* info : mimes_) {
+    if (info->type_ == mime_type)
+      return true;
+  }
+
+  return false;
 }
 
 }  // namespace blink

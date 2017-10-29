@@ -47,11 +47,11 @@ class MemoryUsageVisitor {
     memory_usage_ += sizeof(F) + EstimateMemoryUsage(field);
   }
 
-  // Integral types
+  // Arithmetic types
   template <class P, class F>
-  typename std::enable_if<std::is_integral<F>::value>::type
+  typename std::enable_if<std::is_arithmetic<F>::value>::type
   Visit(const P&, const char* field_name, const F& field) {
-    // Integral fields (integers, floats & bool) don't allocate.
+    // Arithmetic fields (integers, floats & bool) don't allocate.
   }
 
   // std::string
@@ -78,15 +78,15 @@ class MemoryUsageVisitor {
     }
   }
 
-  // RepeatedField<integral type>
+  // RepeatedField<arithmetic type>
   template <class P, class F>
-  typename std::enable_if<std::is_integral<F>::value>::type Visit(
+  typename std::enable_if<std::is_arithmetic<F>::value>::type Visit(
       const P&,
       const char* field_name,
       const google::protobuf::RepeatedField<F>& fields) {
     memory_usage_ += fields.SpaceUsedExcludingSelf();
-    // Integral fields (integers, floats & bool) don't allocate, so no
-    // point in iterating over |fields|.
+    // Arithmetic fields (integers, floats & bool) don't allocate, so no point
+    // in iterating over |fields|.
   }
 
   // RepeatedField<std::string>
@@ -121,8 +121,12 @@ size_t EstimateMemoryUsage(const P& proto) {
 #define INSTANTIATE(Proto) \
   template size_t EstimateMemoryUsage<Proto>(const Proto&);
 
-INSTANTIATE(EntitySpecifics)
 INSTANTIATE(AttachmentMetadata)
 INSTANTIATE(DataTypeContext)
+INSTANTIATE(DataTypeProgressMarker)
+INSTANTIATE(EntityMetadata)
+INSTANTIATE(EntitySpecifics)
+INSTANTIATE(ModelTypeState)
+INSTANTIATE(UniquePosition)
 
 }  // namespace sync_pb

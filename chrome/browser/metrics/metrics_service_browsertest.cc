@@ -19,14 +19,15 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/metrics/metrics_pref_names.h"
+#include "components/metrics/metrics_switches.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/filename_util.h"
+#include "services/service_manager/embedder/switches.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
@@ -71,7 +72,7 @@ class MetricsServiceBrowserTest : public InProcessBrowserTest {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     // Enable the metrics service for testing (in recording-only mode).
-    command_line->AppendSwitch(switches::kMetricsRecordingOnly);
+    command_line->AppendSwitch(metrics::switches::kMetricsRecordingOnly);
   }
 
   // Open three tabs then navigate to |crashy_url| and wait for the renderer to
@@ -195,6 +196,11 @@ IN_PROC_BROWSER_TEST_F(MetricsServiceBrowserTest, MAYBE_CheckCrashRenderers) {
 // OOM code only works on Windows.
 #if defined(OS_WIN) && !defined(ADDRESS_SANITIZER)
 IN_PROC_BROWSER_TEST_F(MetricsServiceBrowserTest, OOMRenderers) {
+  // Disable stack traces during this test since DbgHelp is unreliable in
+  // low-memory conditions (see crbug.com/692564).
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      service_manager::switches::kDisableInProcessStackTraces);
+
   base::HistogramTester histogram_tester;
 
   OpenTabsAndNavigateToCrashyUrl(content::kChromeUIMemoryExhaustURL);

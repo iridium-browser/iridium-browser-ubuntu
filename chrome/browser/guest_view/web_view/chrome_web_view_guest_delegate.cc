@@ -16,7 +16,6 @@
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "chrome/browser/ui/pdf/chrome_pdf_web_contents_helper_client.h"
 #include "chrome/common/url_constants.h"
-#include "components/browsing_data/content/storage_partition_http_cache_data_remover.h"
 #include "components/guest_view/browser/guest_view_event.h"
 #include "components/renderer_context_menu/context_menu_delegate.h"
 #include "content/public/browser/render_process_host.h"
@@ -66,7 +65,7 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
   std::unique_ptr<base::DictionaryValue> args(new base::DictionaryValue());
   std::unique_ptr<base::ListValue> items =
       MenuModelToValue(pending_menu_->menu_model());
-  args->Set(webview::kContextMenuItems, items.release());
+  args->Set(webview::kContextMenuItems, std::move(items));
   args->SetInteger(webview::kRequestId, request_id);
   web_view_guest()->DispatchEventToView(base::MakeUnique<GuestViewEvent>(
       webview::kEventContextMenuShow, std::move(args)));

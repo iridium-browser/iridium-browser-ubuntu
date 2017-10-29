@@ -133,6 +133,8 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline {
   void OnAddTextTrack(const TextTrackConfig& config,
                       const AddTextTrackDoneCB& done_cb);
   void OnWaitingForDecryptionKey();
+  void OnAudioConfigChange(const AudioDecoderConfig& config);
+  void OnVideoConfigChange(const VideoDecoderConfig& config);
   void OnVideoNaturalSizeChange(const gfx::Size& size);
   void OnVideoOpacityChange(bool opaque);
   void OnVideoAverageKeyframeDistanceUpdate();
@@ -143,7 +145,7 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline {
 
   // Parameters passed in the constructor.
   const scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
-  const scoped_refptr<MediaLog> media_log_;
+  MediaLog* const media_log_;
 
   // Pipeline client. Valid only while the pipeline is running.
   Client* client_;

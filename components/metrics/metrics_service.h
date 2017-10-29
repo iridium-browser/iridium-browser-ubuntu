@@ -22,19 +22,18 @@
 #include "base/metrics/histogram_flattener.h"
 #include "base/metrics/histogram_snapshot_manager.h"
 #include "base/metrics/user_metrics.h"
-#include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/metrics/clean_exit_beacon.h"
-#include "components/metrics/data_use_tracker.h"
 #include "components/metrics/execution_phase.h"
 #include "components/metrics/metrics_log.h"
 #include "components/metrics/metrics_log_manager.h"
 #include "components/metrics/metrics_log_store.h"
 #include "components/metrics/metrics_provider.h"
+#include "components/metrics/metrics_reporting_service.h"
 #include "components/metrics/net/network_metrics_provider.h"
-#include "components/variations/synthetic_trials.h"
+#include "components/variations/synthetic_trial_registry.h"
 
 class PrefService;
 class PrefRegistrySimple;
@@ -44,16 +43,9 @@ class HistogramSamples;
 class PrefService;
 }
 
-namespace variations {
-struct ActiveGroupId;
-}
-
 namespace metrics {
 
-class MetricsLogUploader;
 class MetricsRotationScheduler;
-class MetricsUploadScheduler;
-class MetricsServiceAccessor;
 class MetricsServiceClient;
 class MetricsStateManager;
 
@@ -110,8 +102,7 @@ class MetricsService : public base::HistogramFlattener {
   // Returns true if the last session exited cleanly.
   bool WasLastShutdownClean() const;
 
-  // At startup, prefs needs to be called with a list of all the pref names and
-  // types we'll be using.
+  // Registers local state prefs used by this class.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // HistogramFlattener:
@@ -159,22 +150,11 @@ class MetricsService : public base::HistogramFlattener {
 
   bool recording_active() const;
   bool reporting_active() const;
+  bool has_unsent_logs() const;
 
   // Redundant test to ensure that we are notified of a clean exit.
   // This value should be true when process has completed shutdown.
   static bool UmaMetricsProperlyShutdown();
-
-  // Public accessor that returns the list of synthetic field trials. It must
-  // only be used for testing.
-  void GetCurrentSyntheticFieldTrialsForTesting(
-      std::vector<variations::ActiveGroupId>* synthetic_trials);
-
-  // Adds an observer to be notified when the synthetic trials list changes.
-  void AddSyntheticTrialObserver(variations::SyntheticTrialObserver* observer);
-
-  // Removes an existing observer of synthetic trials list changes.
-  void RemoveSyntheticTrialObserver(
-      variations::SyntheticTrialObserver* observer);
 
   // Register the specified |provider| to provide additional metrics into the
   // UMA log. Should be called during MetricsService initialization only.
@@ -183,8 +163,7 @@ class MetricsService : public base::HistogramFlattener {
   // Check if this install was cloned or imaged from another machine. If a
   // clone is detected, reset the client id and low entropy source. This
   // should not be called more than once.
-  void CheckForClonedInstall(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+  void CheckForClonedInstall();
 
   // Clears the stability metrics that are saved in local state.
   void ClearSavedStabilityMetrics();
@@ -197,14 +176,18 @@ class MetricsService : public base::HistogramFlattener {
                                int message_size,
                                bool is_cellular);
 
+  variations::SyntheticTrialRegistry* synthetic_trial_registry() {
+    return &synthetic_trial_registry_;
+  }
+
  protected:
   // Exposed for testing.
   MetricsLogManager* log_manager() { return &log_manager_; }
-  MetricsLogStore* log_store() { return &log_store_; }
+  MetricsLogStore* log_store() {
+    return reporting_service_.metrics_log_store();
+  }
 
  private:
-  friend class MetricsServiceAccessor;
-
   // The MetricsService has a lifecycle that is stored as a state.
   // See metrics_service.cc for description of this lifecycle.
   enum State {
@@ -227,27 +210,6 @@ class MetricsService : public base::HistogramFlattener {
     ACTIVE,
     UNSET
   };
-
-  typedef std::vector<variations::SyntheticTrialGroup> SyntheticTrialGroups;
-
-  // Registers a field trial name and group to be used to annotate a UMA report
-  // with a particular Chrome configuration state. A UMA report will be
-  // annotated with this trial group if and only if all events in the report
-  // were created after the trial is registered. Only one group name may be
-  // registered at a time for a given trial_name. Only the last group name that
-  // is registered for a given trial name will be recorded. The values passed
-  // in must not correspond to any real field trial in the code.
-  // Note: Should not be used to replace trials that were registered with
-  // RegisterMultiGroupSyntheticFieldTrial().
-  void RegisterSyntheticFieldTrial(
-      const variations::SyntheticTrialGroup& trial_group);
-
-  // Similar to RegisterSyntheticFieldTrial(), but registers a synthetic trial
-  // that has multiple active groups for a given trial name hash. Any previous
-  // groups registered for |trial_name_hash| will be replaced.
-  void RegisterSyntheticMultiGroupFieldTrial(
-      uint32_t trial_name_hash,
-      const std::vector<uint32_t>& group_name_hashes);
 
   // Calls into the client to initialize some system profile metrics.
   void StartInitTask();
@@ -307,10 +269,6 @@ class MetricsService : public base::HistogramFlattener {
   // complete.
   void OnFinalLogInfoCollectionDone();
 
-  // If recording is enabled, begins uploading the next completed log from
-  // the log manager, staging it if necessary.
-  void SendNextLog();
-
   // Returns true if any of the registered metrics providers have critical
   // stability metrics to report in an initial stability log.
   bool ProvidersHaveInitialStabilityMetrics();
@@ -327,26 +285,12 @@ class MetricsService : public base::HistogramFlattener {
   // profiler data, as well as incremental stability-related metrics.
   void PrepareInitialMetricsLog();
 
-  // Uploads the currently staged log (which must be non-null).
-  void SendStagedLog();
-
-  // Called after transmission completes (either successfully or with failure).
-  void OnLogUploadComplete(int response_code);
-
   // Reads, increments and then sets the specified long preference that is
   // stored as a string.
   void IncrementLongPrefsValue(const char* path);
 
   // Records that the browser was shut down cleanly.
   void LogCleanShutdown(bool end_completed);
-
-  // Notifies observers on a synthetic trial list change.
-  void NotifySyntheticTrialObservers();
-
-  // Returns a list of synthetic field trials that are older than |time|.
-  void GetSyntheticFieldTrialsOlderThan(
-      base::TimeTicks time,
-      std::vector<variations::ActiveGroupId>* synthetic_trials);
 
   // Creates a new MetricsLog instance with the given |log_type|.
   std::unique_ptr<MetricsLog> CreateLog(MetricsLog::LogType log_type);
@@ -362,11 +306,20 @@ class MetricsService : public base::HistogramFlattener {
   // i.e., histograms with the |kUmaStabilityHistogramFlag| flag set.
   void RecordCurrentStabilityHistograms();
 
+  // Record a single independent profile and assocatied histogram from
+  // metrics providers. If this returns true, one was found and there may
+  // be more.
+  bool PrepareProviderMetricsLog();
+
+  // Records one independent histogram log and then reschedules itself to
+  // check for others. The interval is so as to not adversely impact the UI.
+  void PrepareProviderMetricsTask();
+
+  // Sub-service for uploading logs.
+  MetricsReportingService reporting_service_;
+
   // Manager for the various in-flight logs.
   MetricsLogManager log_manager_;
-
-  // Store of logs ready to be uploaded.
-  MetricsLogStore log_store_;
 
   // |histogram_snapshot_manager_| prepares histogram deltas for transmission.
   base::HistogramSnapshotManager histogram_snapshot_manager_;
@@ -384,15 +337,12 @@ class MetricsService : public base::HistogramFlattener {
 
   PrefService* local_state_;
 
-  CleanExitBeacon clean_exit_beacon_;
-
   base::ActionCallback action_callback_;
 
   // Indicate whether recording and reporting are currently happening.
   // These should not be set directly, but by calling SetRecording and
   // SetReporting.
   RecordingState recording_state_;
-  bool reporting_active_;
 
   // Indicate whether test mode is enabled, where the initial log should never
   // be cut, and logs are neither persisted nor uploaded.
@@ -407,12 +357,6 @@ class MetricsService : public base::HistogramFlattener {
   // initial stability log may be sent before this.
   std::unique_ptr<MetricsLog> initial_metrics_log_;
 
-  // Instance of the helper class for uploading logs.
-  std::unique_ptr<MetricsLogUploader> log_uploader_;
-
-  // Whether there is a current log upload in progress.
-  bool log_upload_in_progress_;
-
   // Whether the MetricsService object has received any notifications since
   // the last time a transmission was sent.
   bool idle_since_last_transmission_;
@@ -422,8 +366,6 @@ class MetricsService : public base::HistogramFlattener {
 
   // The scheduler for determining when log rotations should happen.
   std::unique_ptr<MetricsRotationScheduler> rotation_scheduler_;
-  // The scheduler for determining when uploads should happen.
-  std::unique_ptr<MetricsUploadScheduler> upload_scheduler_;
 
   // Stores the time of the first call to |GetUptimes()|.
   base::TimeTicks first_updated_time_;
@@ -431,12 +373,7 @@ class MetricsService : public base::HistogramFlattener {
   // Stores the time of the last call to |GetUptimes()|.
   base::TimeTicks last_updated_time_;
 
-  // Field trial groups that map to Chrome configuration states.
-  SyntheticTrialGroups synthetic_trial_groups_;
-
-  // List of observers of |synthetic_trial_groups_| changes.
-  base::ObserverList<variations::SyntheticTrialObserver>
-      synthetic_trial_observer_list_;
+  variations::SyntheticTrialRegistry synthetic_trial_registry_;
 
   // Redundant marker to check that we completed our shutdown, and set the
   // exited-cleanly bit in the prefs.
@@ -445,12 +382,6 @@ class MetricsService : public base::HistogramFlattener {
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, IsPluginProcess);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest,
                            PermutedEntropyCacheClearedWhenLowEntropyReset);
-  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, RegisterSyntheticTrial);
-  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest,
-                           RegisterSyntheticMultiGroupFieldTrial);
-
-  // Pointer used for obtaining data use pref updater callback on above layers.
-  std::unique_ptr<DataUseTracker> data_use_tracker_;
 
   base::ThreadChecker thread_checker_;
 

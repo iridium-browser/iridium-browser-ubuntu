@@ -15,13 +15,16 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/pdf/pdf_extension_test_util.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_window.h"
@@ -31,33 +34,44 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/thumbnail_capturer.mojom.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/search_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
+#include "components/guest_view/browser/guest_view_manager_delegate.h"
+#include "components/guest_view/browser/test_guest_view_manager.h"
 #include "components/search_engines/template_url_data.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_message_filter.h"
+#include "content/public/browser/browser_plugin_guest_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/api/extensions_api_client.h"
+#include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
+#include "extensions/browser/guest_view/mime_handler_view/test_mime_handler_view_guest.h"
 #include "net/base/load_flags.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_interceptor.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
 #include "ui/base/models/menu_model.h"
 
 using content::WebContents;
+using extensions::MimeHandlerViewGuest;
+using extensions::TestMimeHandlerViewGuest;
 
 namespace {
 
@@ -70,14 +84,14 @@ class ContextMenuBrowserTest : public InProcessBrowserTest {
       const GURL& unfiltered_url,
       const GURL& url) {
     return CreateContextMenu(unfiltered_url, url, base::string16(),
-                             blink::WebContextMenuData::MediaTypeNone,
+                             blink::WebContextMenuData::kMediaTypeNone,
                              ui::MENU_SOURCE_NONE);
   }
 
   std::unique_ptr<TestRenderViewContextMenu> CreateContextMenuMediaTypeImage(
       const GURL& url) {
     return CreateContextMenu(GURL(), url, base::string16(),
-                             blink::WebContextMenuData::MediaTypeImage,
+                             blink::WebContextMenuData::kMediaTypeImage,
                              ui::MENU_SOURCE_NONE);
   }
 
@@ -110,12 +124,82 @@ class ContextMenuBrowserTest : public InProcessBrowserTest {
 
   // Does not work on ChromeOS.
   Profile* CreateSecondaryProfile(int profile_num) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     ProfileManager* profile_manager = g_browser_process->profile_manager();
     base::FilePath profile_path = profile_manager->user_data_dir();
     profile_path = profile_path.AppendASCII(
         base::StringPrintf("New Profile %d", profile_num));
     return profile_manager->GetProfile(profile_path);
   }
+};
+
+class PdfPluginContextMenuBrowserTest : public InProcessBrowserTest {
+ public:
+  PdfPluginContextMenuBrowserTest() {}
+
+  void SetUpOnMainThread() override {
+    guest_view::GuestViewManager::set_factory_for_testing(&factory_);
+    test_guest_view_manager_ = static_cast<guest_view::TestGuestViewManager*>(
+        guest_view::GuestViewManager::CreateWithDelegate(
+            browser()->profile(),
+            extensions::ExtensionsAPIClient::Get()
+                ->CreateGuestViewManagerDelegate(browser()->profile())));
+  }
+
+ protected:
+  guest_view::TestGuestViewManager* test_guest_view_manager() const {
+    return test_guest_view_manager_;
+  }
+
+  // Helper function for testing context menu of a pdf plugin inside a web page.
+  void TestContextMenuOfPdfInsideWebPage(
+      const base::FilePath::CharType* file_name) {
+    // Load a page with pdf file inside.
+    GURL page_url = ui_test_utils::GetTestUrl(
+        base::FilePath(FILE_PATH_LITERAL("pdf")), base::FilePath(file_name));
+    ui_test_utils::NavigateToURL(browser(), page_url);
+
+    WebContents* web_contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
+    // Prepare to load a pdf plugin inside.
+    test_guest_view_manager_->RegisterTestGuestViewType<MimeHandlerViewGuest>(
+        base::Bind(&TestMimeHandlerViewGuest::Create));
+    ASSERT_TRUE(
+        content::ExecuteScript(web_contents,
+                               "var l = document.getElementById('link1');"
+                               "l.click();"));
+
+    // Wait for the guest contents of the PDF plugin is created.
+    WebContents* guest_contents =
+        test_guest_view_manager_->WaitForSingleGuestCreated();
+    TestMimeHandlerViewGuest* guest = static_cast<TestMimeHandlerViewGuest*>(
+        extensions::MimeHandlerViewGuest::FromWebContents(guest_contents));
+    ASSERT_TRUE(guest);
+    // Wait for the guest is attached to the embedder.
+    guest->WaitForGuestAttached();
+    ASSERT_NE(web_contents, guest_contents);
+    // Get the pdf plugin's main frame.
+    content::RenderFrameHost* frame = guest_contents->GetMainFrame();
+    ASSERT_TRUE(frame);
+
+    content::ContextMenuParams params;
+    params.page_url = page_url;
+    params.frame_url = frame->GetLastCommittedURL();
+    params.frame_page_state =
+        content::PageState::CreateFromURL(params.frame_url);
+    params.media_type = blink::WebContextMenuData::kMediaTypePlugin;
+    TestRenderViewContextMenu menu(frame, params);
+    menu.Init();
+
+    // The full page related items such as 'reload' should not be displayed.
+    ASSERT_FALSE(menu.IsItemPresent(IDC_RELOAD));
+  }
+
+ private:
+  guest_view::TestGuestViewManagerFactory factory_;
+  guest_view::TestGuestViewManager* test_guest_view_manager_;
+
+  DISALLOW_COPY_AND_ASSIGN(PdfPluginContextMenuBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
@@ -147,7 +231,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, ContextMenuForCanvas) {
   content::ContextMenuParams params;
-  params.media_type = blink::WebContextMenuData::MediaTypeCanvas;
+  params.media_type = blink::WebContextMenuData::kMediaTypeCanvas;
 
   TestRenderViewContextMenu menu(
       browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame(),
@@ -161,7 +245,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, ContextMenuForCanvas) {
 IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, CopyLinkTextMouse) {
   std::unique_ptr<TestRenderViewContextMenu> menu = CreateContextMenu(
       GURL("http://www.google.com/"), GURL("http://www.google.com/"),
-      base::ASCIIToUTF16("Google"), blink::WebContextMenuData::MediaTypeNone,
+      base::ASCIIToUTF16("Google"), blink::WebContextMenuData::kMediaTypeNone,
       ui::MENU_SOURCE_MOUSE);
 
   ASSERT_FALSE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_COPYLINKTEXT));
@@ -170,7 +254,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, CopyLinkTextMouse) {
 IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, CopyLinkTextTouchNoText) {
   std::unique_ptr<TestRenderViewContextMenu> menu = CreateContextMenu(
       GURL("http://www.google.com/"), GURL("http://www.google.com/"),
-      base::ASCIIToUTF16(""), blink::WebContextMenuData::MediaTypeNone,
+      base::ASCIIToUTF16(""), blink::WebContextMenuData::kMediaTypeNone,
       ui::MENU_SOURCE_TOUCH);
 
   ASSERT_FALSE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_COPYLINKTEXT));
@@ -179,7 +263,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, CopyLinkTextTouchNoText) {
 IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, CopyLinkTextTouchTextOnly) {
   std::unique_ptr<TestRenderViewContextMenu> menu = CreateContextMenu(
       GURL("http://www.google.com/"), GURL("http://www.google.com/"),
-      base::ASCIIToUTF16("Google"), blink::WebContextMenuData::MediaTypeNone,
+      base::ASCIIToUTF16("Google"), blink::WebContextMenuData::kMediaTypeNone,
       ui::MENU_SOURCE_TOUCH);
 
   ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_COPYLINKTEXT));
@@ -188,7 +272,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, CopyLinkTextTouchTextOnly) {
 IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, CopyLinkTextTouchTextImage) {
   std::unique_ptr<TestRenderViewContextMenu> menu = CreateContextMenu(
       GURL("http://www.google.com/"), GURL("http://www.google.com/"),
-      base::ASCIIToUTF16("Google"), blink::WebContextMenuData::MediaTypeImage,
+      base::ASCIIToUTF16("Google"), blink::WebContextMenuData::kMediaTypeImage,
       ui::MENU_SOURCE_TOUCH);
 
   ASSERT_FALSE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_COPYLINKTEXT));
@@ -206,20 +290,18 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, RealMenu) {
       browser(), GURL("data:text/html,<a href='about:blank'>link</a>"));
 
   // Open a context menu.
-  blink::WebMouseEvent mouse_event(blink::WebInputEvent::MouseDown,
-                                   blink::WebInputEvent::NoModifiers,
-                                   blink::WebInputEvent::TimeStampForTesting);
-  mouse_event.button = blink::WebMouseEvent::Button::Right;
-  mouse_event.x = 15;
-  mouse_event.y = 15;
+  blink::WebMouseEvent mouse_event(blink::WebInputEvent::kMouseDown,
+                                   blink::WebInputEvent::kNoModifiers,
+                                   blink::WebInputEvent::kTimeStampForTesting);
+  mouse_event.button = blink::WebMouseEvent::Button::kRight;
+  mouse_event.SetPositionInWidget(15, 15);
   content::WebContents* tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   gfx::Rect offset = tab->GetContainerBounds();
-  mouse_event.globalX = 15 + offset.x();
-  mouse_event.globalY = 15 + offset.y();
-  mouse_event.clickCount = 1;
+  mouse_event.SetPositionInScreen(15 + offset.x(), 15 + offset.y());
+  mouse_event.click_count = 1;
   tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
-  mouse_event.setType(blink::WebInputEvent::MouseUp);
+  mouse_event.SetType(blink::WebInputEvent::kMouseUp);
   tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
 
   // The menu_observer will select "Open in new tab", wait for the new tab to
@@ -348,16 +430,15 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, SuggestedFileName) {
            kSuggestedFilename + "'>link</a>"));
 
   // Open a context menu.
-  blink::WebMouseEvent mouse_event(blink::WebInputEvent::MouseDown,
-                                   blink::WebInputEvent::NoModifiers,
-                                   blink::WebInputEvent::TimeStampForTesting);
-  mouse_event.button = blink::WebMouseEvent::Button::Right;
-  mouse_event.x = 15;
-  mouse_event.y = 15;
+  blink::WebMouseEvent mouse_event(blink::WebInputEvent::kMouseDown,
+                                   blink::WebInputEvent::kNoModifiers,
+                                   blink::WebInputEvent::kTimeStampForTesting);
+  mouse_event.button = blink::WebMouseEvent::Button::kRight;
+  mouse_event.SetPositionInWidget(15, 15);
   content::WebContents* tab =
       browser()->tab_strip_model()->GetActiveWebContents();
   tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
-  mouse_event.setType(blink::WebInputEvent::MouseUp);
+  mouse_event.SetType(blink::WebInputEvent::kMouseUp);
   tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
 
   // Wait for context menu to be visible.
@@ -548,90 +629,6 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, OpenLinkInProfile) {
 }
 #endif  // !defined(OS_CHROMEOS)
 
-class ThumbnailResponseWatcher : public content::NotificationObserver {
- public:
-  enum QuitReason {
-    STILL_RUNNING = 0,
-    THUMBNAIL_RECEIVED,
-    RENDER_PROCESS_GONE,
-  };
-
-  class MessageFilter : public content::BrowserMessageFilter {
-   public:
-    explicit MessageFilter(ThumbnailResponseWatcher* owner)
-        : content::BrowserMessageFilter(ChromeMsgStart), owner_(owner) {}
-
-    bool OnMessageReceived(const IPC::Message& message) override {
-      if (message.type() ==
-          ChromeViewHostMsg_RequestThumbnailForContextNode_ACK::ID) {
-        content::BrowserThread::PostTask(
-            content::BrowserThread::UI, FROM_HERE,
-            base::Bind(&MessageFilter::OnRequestThumbnailForContextNodeACK,
-                       this));
-      }
-      return false;
-    }
-
-    void OnRequestThumbnailForContextNodeACK() {
-      if (owner_)
-        owner_->OnRequestThumbnailForContextNodeACK();
-    }
-
-    void Disown() { owner_ = nullptr; }
-
-   private:
-    ~MessageFilter() override {}
-
-    ThumbnailResponseWatcher* owner_;
-
-    DISALLOW_COPY_AND_ASSIGN(MessageFilter);
-  };
-
-  explicit ThumbnailResponseWatcher(
-      content::RenderProcessHost* render_process_host)
-      : message_loop_runner_(new content::MessageLoopRunner),
-        filter_(new MessageFilter(this)),
-        quit_reason_(STILL_RUNNING) {
-    notification_registrar_.Add(
-        this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
-        content::Source<content::RenderProcessHost>(render_process_host));
-    notification_registrar_.Add(
-        this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-        content::Source<content::RenderProcessHost>(render_process_host));
-    render_process_host->AddFilter(filter_.get());
-  }
-
-  ~ThumbnailResponseWatcher() override { filter_->Disown(); }
-
-  QuitReason Wait() WARN_UNUSED_RESULT {
-    message_loop_runner_->Run();
-    DCHECK_NE(STILL_RUNNING, quit_reason_);
-    return quit_reason_;
-  }
-
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_CLOSED ||
-           type == content::NOTIFICATION_RENDERER_PROCESS_TERMINATED);
-    quit_reason_ = RENDER_PROCESS_GONE;
-    message_loop_runner_->Quit();
-  }
-
-  void OnRequestThumbnailForContextNodeACK() {
-    quit_reason_ = THUMBNAIL_RECEIVED;
-    message_loop_runner_->Quit();
-  }
-
- private:
-  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
-  scoped_refptr<MessageFilter> filter_;
-  content::NotificationRegistrar notification_registrar_;
-  QuitReason quit_reason_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThumbnailResponseWatcher);
-};
-
 // Maintains image search test state. In particular, note that |menu_observer_|
 // must live until the right-click completes asynchronously.
 class SearchByImageBrowserTest : public InProcessBrowserTest {
@@ -650,13 +647,17 @@ class SearchByImageBrowserTest : public InProcessBrowserTest {
   }
 
   void AttemptImageSearch() {
-    // Right-click where the image should be.
     // |menu_observer_| will cause the search-by-image menu item to be clicked.
     menu_observer_.reset(new ContextMenuNotificationObserver(
         IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE));
+    RightClickImage();
+  }
+
+  // Right-click where the image should be.
+  void RightClickImage() {
     content::WebContents* tab =
         browser()->tab_strip_model()->GetActiveWebContents();
-    content::SimulateMouseClickAt(tab, 0, blink::WebMouseEvent::Button::Right,
+    content::SimulateMouseClickAt(tab, 0, blink::WebMouseEvent::Button::kRight,
                                   gfx::Point(15, 15));
   }
 
@@ -716,14 +717,74 @@ IN_PROC_BROWSER_TEST_F(SearchByImageBrowserTest, ImageSearchWithCorruptImage) {
   static const char kCorruptImage[] = "/image_search/corrupt.png";
   SetupAndLoadImagePage(kCorruptImage);
 
-  content::WebContents* tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  ThumbnailResponseWatcher watcher(tab->GetRenderProcessHost());
-  AttemptImageSearch();
+  // Open and close a context menu.
+  ContextMenuWaiter waiter(content::NotificationService::AllSources());
+  RightClickImage();
+  waiter.WaitForMenuOpenAndClose();
+
+  chrome::mojom::ThumbnailCapturerPtr thumbnail_capturer;
+  browser()
+      ->tab_strip_model()
+      ->GetActiveWebContents()
+      ->GetMainFrame()
+      ->GetRemoteInterfaces()
+      ->GetInterface(&thumbnail_capturer);
+
+  auto callback = [](bool* response_received, const base::Closure& quit,
+                     const std::vector<uint8_t>& thumbnail_data,
+                     const gfx::Size& original_size) {
+    *response_received = true;
+    quit.Run();
+  };
+
+  base::RunLoop run_loop;
+  bool response_received = false;
+  thumbnail_capturer->RequestThumbnailForContextNode(
+      0, gfx::Size(2048, 2048), chrome::mojom::ImageFormat::JPEG,
+      base::Bind(callback, &response_received, run_loop.QuitClosure()));
+  run_loop.Run();
 
   // The browser should receive a response from the renderer, because the
   // renderer should not crash.
-  EXPECT_EQ(ThumbnailResponseWatcher::THUMBNAIL_RECEIVED, watcher.Wait());
+  ASSERT_TRUE(response_received);
+}
+
+IN_PROC_BROWSER_TEST_F(PdfPluginContextMenuBrowserTest,
+                       FullPagePdfHasPageItems) {
+  // Load a pdf page.
+  GURL page_url =
+      ui_test_utils::GetTestUrl(base::FilePath(FILE_PATH_LITERAL("pdf")),
+                                base::FilePath(FILE_PATH_LITERAL("test.pdf")));
+  ui_test_utils::NavigateToURL(browser(), page_url);
+
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  // Wait for the PDF plugin is loaded.
+  pdf_extension_test_util::EnsurePDFHasLoaded(web_contents);
+  content::BrowserPluginGuestManager* guest_manager =
+      web_contents->GetBrowserContext()->GetGuestManager();
+  WebContents* guest_contents = guest_manager->GetFullPageGuest(web_contents);
+  ASSERT_TRUE(guest_contents);
+  // Get the pdf plugin's main frame.
+  content::RenderFrameHost* frame = guest_contents->GetMainFrame();
+  ASSERT_TRUE(frame);
+  ASSERT_NE(frame, web_contents->GetMainFrame());
+
+  content::ContextMenuParams params;
+  params.page_url = page_url;
+  params.frame_url = frame->GetLastCommittedURL();
+  params.frame_page_state = content::PageState::CreateFromURL(params.frame_url);
+  params.media_type = blink::WebContextMenuData::kMediaTypePlugin;
+  TestRenderViewContextMenu menu(frame, params);
+  menu.Init();
+
+  // The full page related items such as 'reload' should be there.
+  ASSERT_TRUE(menu.IsItemPresent(IDC_RELOAD));
+}
+
+IN_PROC_BROWSER_TEST_F(PdfPluginContextMenuBrowserTest,
+                       IframedPdfHasNoPageItems) {
+  TestContextMenuOfPdfInsideWebPage(FILE_PATH_LITERAL("test-iframe-pdf.html"));
 }
 
 class LoadImageRequestInterceptor : public net::URLRequestInterceptor {
@@ -743,8 +804,8 @@ class LoadImageRequestInterceptor : public net::URLRequestInterceptor {
     EXPECT_TRUE(request->load_flags() & net::LOAD_BYPASS_CACHE);
     content::BrowserThread::PostTask(
         content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&LoadImageRequestInterceptor::RequestCreated,
-                   weak_factory_.GetWeakPtr()));
+        base::BindOnce(&LoadImageRequestInterceptor::RequestCreated,
+                       weak_factory_.GetWeakPtr()));
     return nullptr;
   }
 
@@ -800,7 +861,10 @@ class LoadImageBrowserTest : public InProcessBrowserTest {
     // Go to a page with an image in it. The test server doesn't serve the image
     // with the right MIME type, so use a data URL to make a page containing it.
     GURL image_url(embedded_test_server()->GetURL(image_path));
-    GURL page("data:text/html,<img src='" + image_url.spec() + "'>");
+    GURL page(
+        "data:text/html,<img width=50 height=50 "
+        "src='" +
+        image_url.spec() + "'>");
     ui_test_utils::NavigateToURL(browser(), page);
   }
 
@@ -809,10 +873,10 @@ class LoadImageBrowserTest : public InProcessBrowserTest {
     std::unique_ptr<net::URLRequestInterceptor> owned_interceptor(interceptor_);
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
-        base::Bind(&LoadImageBrowserTest::AddInterceptorForURL,
-                   base::Unretained(this),
-                   GURL(embedded_test_server()->GetURL(image_path).spec()),
-                   base::Passed(&owned_interceptor)));
+        base::BindOnce(&LoadImageBrowserTest::AddInterceptorForURL,
+                       base::Unretained(this),
+                       GURL(embedded_test_server()->GetURL(image_path).spec()),
+                       base::Passed(&owned_interceptor)));
   }
 
   void AttemptLoadImage() {
@@ -822,7 +886,7 @@ class LoadImageBrowserTest : public InProcessBrowserTest {
         IDC_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE));
     content::WebContents* tab =
         browser()->tab_strip_model()->GetActiveWebContents();
-    content::SimulateMouseClickAt(tab, 0, blink::WebMouseEvent::Button::Right,
+    content::SimulateMouseClickAt(tab, 0, blink::WebMouseEvent::Button::kRight,
                                   gfx::Point(15, 15));
   }
 

@@ -38,7 +38,7 @@
     reset.
   </description>
 
-  <interface name="zcr_remote_shell_v1" version="4">
+  <interface name="zcr_remote_shell_v1" version="7">
     <description summary="remote_shell">
       The global interface that allows clients to turn a wl_surface into a
       "real window" which is remotely managed but can be stacked, activated
@@ -69,8 +69,8 @@
 
     <enum name="error">
       <entry name="role" value="0" summary="given wl_surface has another role"/>
-      <entry name="invalid_notification_id" value="1"
-       summary="invalid notification id"/>
+      <entry name="invalid_notification_key" value="1"
+       summary="invalid notification key"/>
     </enum>
 
     <enum name="layout_mode">
@@ -122,12 +122,12 @@
       </description>
       <arg name="id" type="new_id" interface="zcr_notification_surface_v1"/>
       <arg name="surface" type="object" interface="wl_surface"/>
-      <arg name="notification_id" type="string" />
+      <arg name="notification_key" type="string" />
     </request>
 
     <event name="configuration_changed">
       <description summary="suggests a re-configuration of remote shell">
-	Suggests a re-configuration of remote shell.
+	[Deprecated] Suggests a re-configuration of remote shell.
       </description>
       <arg name="width" type="int"/>
       <arg name="height" type="int"/>
@@ -140,9 +140,38 @@
       <arg name="layout_mode" type="uint"/>
     </event>
 
+    <!-- Version 5 additions -->
+
+    <event name="workspace" since="5">
+      <description summary="area of remote shell">
+	Defines an area of the remote shell used for layout. Each series of
+	"workspace" events must be terminated by a "configure" event.
+      </description>
+      <arg name="id_hi" type="uint"/>
+      <arg name="id_lo" type="uint"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="inset_left" type="int"/>
+      <arg name="inset_top" type="int"/>
+      <arg name="inset_right" type="int"/>
+      <arg name="inset_bottom" type="int"/>
+      <arg name="transform" type="int"/>
+      <arg name="scale_factor" type="fixed"/>
+      <arg name="is_internal" type="uint" summary="1 if screen is built-in"/>
+    </event>
+
+    <event name="configure" since="5">
+      <description summary="suggests configuration of remote shell">
+	Suggests a new configuration of the remote shell. Preceded by a series
+	of "workspace" events.
+      </description>
+      <arg name="layout_mode" type="uint"/>
+    </event>
   </interface>
 
-  <interface name="zcr_remote_surface_v1" version="4">
+  <interface name="zcr_remote_surface_v1" version="7">
     <description summary="A desktop window">
       An interface that may be implemented by a wl_surface, for
       implementations that provide a desktop-style user interface
@@ -165,6 +194,22 @@
       <entry name="visible" value="1" summary="system ui is visible"/>
       <entry name="autohide_non_sticky" value="2" summary="system ui autohides and is not sticky"/>
       <entry name="autohide_sticky" value="3" summary="system ui autohides and is sticky"/>
+    </enum>
+
+    <enum name="orientation">
+      <description summary="window orientation">
+         The orientation of the window.
+      </description>
+      <entry name="portrait" value="1" summary="portrait"/>
+      <entry name="landscape" value="2" summary="landscape"/>
+    </enum>
+
+    <enum name="window_type">
+      <description summary="window type">
+        The type of the window.
+      </description>
+      <entry name="normal" value="1" summary="normal app window"/>
+      <entry name="system_ui" value="2" summary="window is treated as systemui"/>
     </enum>
 
     <request name="destroy" type="destructor">
@@ -420,14 +465,33 @@
 
     <!-- Version 4 additions -->
 
-    <event name="configure" since="4">
+    <request name="set_always_on_top" since="4">
+      <description summary="set always on top">
+	Request that surface is made to be always on top.
+
+	This is only a request that the window should be always on top.
+	The compositor may choose to ignore this request.
+
+      </description>
+    </request>
+
+    <request name="unset_always_on_top" since="4">
+      <description summary="unset always on top">
+	Request that surface is made to be not always on top.
+
+	This is only a request that the window should be not always on top.
+	The compositor may choose to ignore this request.
+      </description>
+    </request>
+
+    <!-- Version 5 additions -->
+
+    <event name="configure" since="5">
       <description summary="suggest a surface change">
 	The configure event asks the client to change surface state.
 
-	The origin arguments specify the position, in the compositor coordinate
-	space, of the virtual display used by the client to simulate multiple
-	displays. The client must offset window positions in set_window_geometry
-	requests by this origin in order to convert between coordinate spaces.
+	The client must apply the origin offset to window positions in
+	set_window_geometry requests.
 
 	The states listed in the event are state_type values, and might change
 	due to a client request or an event directly handled by the compositor.
@@ -439,13 +503,13 @@
 	If the client receives multiple configure events before it can respond
 	to one, it is free to discard all but the last event it received.
       </description>
-      <arg name="origin_x" type="int"/>
-      <arg name="origin_y" type="int"/>
+      <arg name="origin_offset_x" type="int"/>
+      <arg name="origin_offset_y" type="int"/>
       <arg name="states" type="array"/>
       <arg name="serial" type="uint"/>
     </event>
 
-    <request name="ack_configure" since="4">
+    <request name="ack_configure" since="5">
       <description summary="ack a configure event">
 	When a configure event is received, if a client commits the
 	surface in response to the configure event, then the client
@@ -470,7 +534,7 @@
       <arg name="serial" type="uint" summary="the serial from the configure event"/>
     </request>
 
-    <request name="move" since="4">
+    <request name="move" since="5">
       <description summary="start an interactive move">
 	Start an interactive, user-driven move of the surface.
 
@@ -483,6 +547,25 @@
 	The compositor may ignore move requests depending on the state of the
 	surface, e.g. fullscreen or maximized.
       </description>
+    </request>
+
+    <!-- Version 6 additions -->
+
+    <request name="set_orientation" since="6">
+      <description summary="set orientation">
+	Set an orientation for the surface.
+      </description>
+      <arg name="orientation" type="int"/>
+    </request>
+
+    <!-- Version 7 additions -->
+
+    <request name="set_window_type" since="7">
+      <description summary="set the type of the window">
+        Set the type of window. This is only a hint to the compositor and the
+        compositor is free to ignore it.
+      </description>
+      <arg name="type" type="uint" summary="type of the window"/>
     </request>
 
   </interface>

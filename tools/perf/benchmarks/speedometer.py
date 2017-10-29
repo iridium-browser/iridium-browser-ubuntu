@@ -20,8 +20,6 @@ import os
 
 from core import perf_benchmark
 
-from benchmarks import v8_helper
-
 from telemetry import benchmark
 from telemetry import page as page_module
 from telemetry.page import legacy_page_test
@@ -91,6 +89,7 @@ class SpeedometerMeasurement(legacy_page_test.LegacyPageTest):
     keychain_metric.KeychainMetric().AddResults(tab, results)
 
 
+@benchmark.Owner(emails=['bmeurer@chromium.org', 'mvstanton@chromium.org'])
 class Speedometer(perf_benchmark.PerfBenchmark):
   test = SpeedometerMeasurement
 
@@ -105,26 +104,12 @@ class Speedometer(perf_benchmark.PerfBenchmark):
         cloud_storage_bucket=story.PUBLIC_BUCKET)
     ps.AddStory(page_module.Page(
         'http://browserbench.org/Speedometer/', ps, ps.base_dir,
-        make_javascript_deterministic=False))
+        make_javascript_deterministic=False,
+        name='http://browserbench.org/Speedometer/'))
     return ps
 
-
-@benchmark.Disabled('reference')  # crbug.com/579546
-class SpeedometerIgnition(Speedometer):
-  def SetExtraBrowserOptions(self, options):
-    super(SpeedometerIgnition, self).SetExtraBrowserOptions(options)
-    v8_helper.EnableIgnition(options)
-
-  @classmethod
-  def Name(cls):
-    return 'speedometer-ignition'
-
-
-class SpeedometerTurbo(Speedometer):
-  def SetExtraBrowserOptions(self, options):
-    super(SpeedometerTurbo, self).SetExtraBrowserOptions(options)
-    v8_helper.EnableTurbo(options)
-
-  @classmethod
-  def Name(cls):
-    return 'speedometer-turbo'
+  def GetExpectations(self):
+    class StoryExpectations(story.expectations.StoryExpectations):
+      def SetExpectations(self):
+        pass # http://browserbench.org/Speedometer/ not disabled.
+    return StoryExpectations()

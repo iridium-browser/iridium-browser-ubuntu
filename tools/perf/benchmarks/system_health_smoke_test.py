@@ -15,10 +15,11 @@ from core import perf_benchmark
 
 from telemetry import benchmark as benchmark_module
 from telemetry import decorators
-from telemetry.core import discover
 from telemetry.internal.browser import browser_finder
 from telemetry.testing import options_for_unittests
 from telemetry.testing import progress_reporter
+
+from py_utils import discover
 
 from benchmarks import system_health
 
@@ -32,10 +33,12 @@ def GetSystemHealthBenchmarksToSmokeTest():
 
 
 _DISABLED_TESTS = frozenset({
+  # crbug.com/733427
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.browse:news:cnn',  # pylint: disable=line-too-long
+  # cburg.com/721549
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.browse:news:toi',  # pylint: disable=line-too-long
   # crbug.com/637230
   'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.browse:news:cnn',  # pylint: disable=line-too-long
-  # crbug.com/666293
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.browse:media:youtube',  # pylint: disable=line-too-long
   # Permenently disabled from smoke test for being long-running.
   'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.long_running:tools:gmail-foreground',  # pylint: disable=line-too-long
   'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.long_running:tools:gmail-background',  # pylint: disable=line-too-long
@@ -43,11 +46,15 @@ _DISABLED_TESTS = frozenset({
   'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.long_running:tools:gmail-background',  # pylint: disable=line-too-long
 
   # Disable media tests in CQ. crbug.com/649392
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.load:media:soundcloud',  # pylint: disable=line-too-long
   'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.play:media:soundcloud',  # pylint: disable=line-too-long
   'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.play:media:google_play_music',  # pylint: disable=line-too-long
 
   # crbug.com/
   'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.browse:news:nytimes',  # pylint: disable=line-too-long
+
+  # crbug.com/688190
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.browse:news:washingtonpost',  # pylint: disable=line-too-long
 
   # crbug.com/696824
   'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.load:news:qq',  # pylint: disable=line-too-long
@@ -55,6 +62,11 @@ _DISABLED_TESTS = frozenset({
   # crbug.com/698006
   'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.load:tools:drive',  # pylint: disable=line-too-long
   'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.load:tools:gmail',  # pylint: disable=line-too-long
+
+  # crbug.com/699966
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.multitab:misc:typical24', # pylint: disable=line-too-long
+  # crbug.com/725386
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.browse:social:twitter', # pylint: disable=line-too-long
 })
 
 
@@ -89,16 +101,16 @@ def _GenerateSmokeTestCase(benchmark_class, story_to_smoke_test):
       self.skipTest('Benchmark %s is disabled' % SinglePageBenchmark.Name())
 
     if self.id() in _DISABLED_TESTS:
-      self.skipTest('Test is explictly disabled')
+      self.skipTest('Test is explicitly disabled')
 
     self.assertEqual(0, SinglePageBenchmark().Run(options),
                      msg='Failed: %s' % benchmark_class)
 
   # We attach the test method to SystemHealthBenchmarkSmokeTest dynamically
   # so that we can set the test method name to include
-  # '<benchmark class name>.<story display name>'.
+  # '<benchmark class name>.<story name>'.
   test_method_name = '%s.%s' % (
-      benchmark_class.Name(), story_to_smoke_test.display_name)
+      benchmark_class.Name(), story_to_smoke_test.name)
 
   class SystemHealthBenchmarkSmokeTest(unittest.TestCase):
     pass
@@ -147,8 +159,14 @@ def load_tests(loader, standard_tests, pattern):
     # Since none of our system health benchmarks creates stories based on
     # command line options, it should be ok to pass options=None to
     # CreateStorySet.
-    for story_to_smoke_test in (
-        benchmark_class().CreateStorySet(options=None).stories):
+    stories_set = benchmark_class().CreateStorySet(options=None)
+
+    # Prefetch WPR archive needed by the stories set to avoid race condition
+    # when feching them when tests are run in parallel.
+    # See crbug.com/700426 for more details.
+    stories_set.wpr_archive_info.DownloadArchivesIfNeeded()
+
+    for story_to_smoke_test in stories_set.stories:
       suite.addTest(
           _GenerateSmokeTestCase(benchmark_class, story_to_smoke_test))
 

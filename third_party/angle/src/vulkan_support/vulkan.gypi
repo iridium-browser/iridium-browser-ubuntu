@@ -9,6 +9,7 @@
         'spirv_headers_path': '../../third_party/spirv-headers/src',
         'spirv_tools_path': '../../third_party/spirv-tools-angle/src',
         'vulkan_layers_path': '../../third_party/vulkan-validation-layers/src',
+        'vulkan_json': 'angledata',
         'vulkan_loader_sources':
         [
             '<(vulkan_layers_path)/loader/cJSON.c',
@@ -16,14 +17,14 @@
             '<(vulkan_layers_path)/loader/debug_report.c',
             '<(vulkan_layers_path)/loader/debug_report.h',
             '<(vulkan_layers_path)/loader/dev_ext_trampoline.c',
-            '<(vulkan_layers_path)/loader/extensions.c',
-            '<(vulkan_layers_path)/loader/extensions.h',
+            '<(vulkan_layers_path)/loader/extension_manual.c',
+            '<(vulkan_layers_path)/loader/extension_manual.h',
             '<(vulkan_layers_path)/loader/gpa_helper.h',
             '<(vulkan_layers_path)/loader/loader.c',
             '<(vulkan_layers_path)/loader/loader.h',
             '<(vulkan_layers_path)/loader/murmurhash.c',
             '<(vulkan_layers_path)/loader/murmurhash.h',
-            '<(vulkan_layers_path)/loader/table_ops.h',
+            '<(vulkan_layers_path)/loader/phys_dev_ext.c',
             '<(vulkan_layers_path)/loader/trampoline.c',
             '<(vulkan_layers_path)/loader/vk_loader_platform.h',
             '<(vulkan_layers_path)/loader/wsi.c',
@@ -48,8 +49,22 @@
             '/wd4201', # Nonstandard extension used: nameless struct/union
             '/wd4214', # Nonstandard extension used: bit field types other than int
             '/wd4232', # Nonstandard extension used: address of dllimport is not static
+            '/wd4305', # Type cast truncation
             '/wd4706', # Assignment within conditional expression
             '/wd4996', # Unsafe stdlib function
+        ],
+        'vulkan_layer_generated_files':
+        [
+            '<(angle_gen_path)/vulkan/vk_enum_string_helper.h',
+            '<(angle_gen_path)/vulkan/vk_struct_size_helper.h',
+            '<(angle_gen_path)/vulkan/vk_struct_size_helper.c',
+            '<(angle_gen_path)/vulkan/vk_safe_struct.h',
+            '<(angle_gen_path)/vulkan/vk_safe_struct.cpp',
+            '<(angle_gen_path)/vulkan/vk_layer_dispatch_table.h',
+            '<(angle_gen_path)/vulkan/vk_dispatch_table_helper.h',
+            '<(angle_gen_path)/vulkan/vk_loader_extensions.h',
+            '<(angle_gen_path)/vulkan/vk_loader_extensions.c',
+            '<@(vulkan_gen_json_files_outputs)',
         ],
         'glslang_sources':
         [
@@ -247,15 +262,12 @@
             # This file is manually included in the layer
             # '<(angle_gen_path)/vulkan/vk_safe_struct.cpp',
             '<(angle_gen_path)/vulkan/vk_safe_struct.h',
+            '<(vulkan_layers_path)/layers/buffer_validation.cpp',
+            '<(vulkan_layers_path)/layers/buffer_validation.h',
             '<(vulkan_layers_path)/layers/core_validation.cpp',
             '<(vulkan_layers_path)/layers/core_validation.h',
             '<(vulkan_layers_path)/layers/descriptor_sets.cpp',
             '<(vulkan_layers_path)/layers/descriptor_sets.h',
-        ],
-        'VkLayer_image_sources':
-        [
-            '<(vulkan_layers_path)/layers/image.cpp',
-            '<(vulkan_layers_path)/layers/image.h',
         ],
         'VkLayer_swapchain_sources':
         [
@@ -290,22 +302,29 @@
         'vulkan_gen_json_files_sources_win':
         [
             '<(vulkan_layers_path)/layers/windows/VkLayer_core_validation.json',
-            '<(vulkan_layers_path)/layers/windows/VkLayer_image.json',
             '<(vulkan_layers_path)/layers/windows/VkLayer_object_tracker.json',
             '<(vulkan_layers_path)/layers/windows/VkLayer_parameter_validation.json',
             '<(vulkan_layers_path)/layers/windows/VkLayer_swapchain.json',
             '<(vulkan_layers_path)/layers/windows/VkLayer_threading.json',
             '<(vulkan_layers_path)/layers/windows/VkLayer_unique_objects.json',
         ],
+        'vulkan_gen_json_files_sources_linux':
+        [
+            '<(vulkan_layers_path)/layers/linux/VkLayer_core_validation.json',
+            '<(vulkan_layers_path)/layers/linux/VkLayer_object_tracker.json',
+            '<(vulkan_layers_path)/layers/linux/VkLayer_parameter_validation.json',
+            '<(vulkan_layers_path)/layers/linux/VkLayer_swapchain.json',
+            '<(vulkan_layers_path)/layers/linux/VkLayer_threading.json',
+            '<(vulkan_layers_path)/layers/linux/VkLayer_unique_objects.json',
+        ],
         'vulkan_gen_json_files_outputs':
         [
-            '<(angle_gen_path)/vulkan/json/VkLayer_core_validation.json',
-            '<(angle_gen_path)/vulkan/json/VkLayer_image.json',
-            '<(angle_gen_path)/vulkan/json/VkLayer_object_tracker.json',
-            '<(angle_gen_path)/vulkan/json/VkLayer_parameter_validation.json',
-            '<(angle_gen_path)/vulkan/json/VkLayer_swapchain.json',
-            '<(angle_gen_path)/vulkan/json/VkLayer_threading.json',
-            '<(angle_gen_path)/vulkan/json/VkLayer_unique_objects.json',
+            '<(PRODUCT_DIR)/<(vulkan_json)/VkLayer_core_validation.json',
+            '<(PRODUCT_DIR)/<(vulkan_json)/VkLayer_object_tracker.json',
+            '<(PRODUCT_DIR)/<(vulkan_json)/VkLayer_parameter_validation.json',
+            '<(PRODUCT_DIR)/<(vulkan_json)/VkLayer_swapchain.json',
+            '<(PRODUCT_DIR)/<(vulkan_json)/VkLayer_threading.json',
+            '<(PRODUCT_DIR)/<(vulkan_json)/VkLayer_unique_objects.json',
         ],
     },
     'conditions':
@@ -314,110 +333,6 @@
         {
             'targets':
             [
-                {
-                    'target_name': 'vulkan_loader',
-                    'type': 'static_library',
-                    'sources':
-                    [
-                        '<@(vulkan_loader_sources)',
-                    ],
-                    'include_dirs':
-                    [
-                        '<@(vulkan_loader_include_dirs)',
-                        '<(angle_gen_path)',
-                    ],
-                    'defines':
-                    [
-                        'API_NAME="Vulkan"',
-                    ],
-                    'msvs_settings':
-                    {
-                        'VCCLCompilerTool':
-                        {
-                            'AdditionalOptions':
-                            [
-                                # TODO(jmadill): Force include header on other platforms.
-                                '<@(vulkan_loader_cflags_win)',
-                                '/FIvulkan/angle_loader.h'
-                            ],
-                        },
-                        'VCLinkerTool':
-                        {
-                            'AdditionalDependencies':
-                            [
-                                'shlwapi.lib',
-                            ],
-                        },
-                    },
-                    'direct_dependent_settings':
-                    {
-                        'include_dirs':
-                        [
-                            '<@(vulkan_loader_include_dirs)',
-                        ],
-                        'msvs_settings':
-                        {
-                            'VCLinkerTool':
-                            {
-                                'AdditionalDependencies':
-                                [
-                                    'shlwapi.lib',
-                                ],
-                            },
-                        },
-                        'conditions':
-                        [
-                            ['OS=="win"',
-                            {
-                                'defines':
-                                [
-                                    'VK_USE_PLATFORM_WIN32_KHR',
-                                ],
-                            }],
-                        ],
-                    },
-                    'conditions':
-                    [
-                        ['OS=="win"',
-                        {
-                            'sources':
-                            [
-                                '<(angle_gen_path)/vulkan/angle_loader.h',
-                                '<@(vulkan_loader_win_sources)',
-                            ],
-                            'defines':
-                            [
-                                'VK_USE_PLATFORM_WIN32_KHR',
-                            ],
-                        }],
-                    ],
-                    'actions':
-                    [
-                        {
-                            # The loader header is force included into the loader and layers. Because
-                            # of issues with GYP, we can't use a normal header file, we hav to force
-                            # inclue this using compiler-specific flags.
-                            'action_name': 'vulkan_loader_gen_angle_header',
-                            'message': 'generating Vulkan loader ANGLE header',
-                            'msvs_cygwin_shell': 0,
-                            'inputs':
-                            [
-                                '<(angle_path)/scripts/generate_vulkan_header.py',
-                            ],
-                            'outputs':
-                            [
-                                '<(angle_gen_path)/vulkan/angle_loader.h',
-                            ],
-                            'action':
-                            [
-                                # TODO(jmadill): Use correct platform path
-                                'python', '<(angle_path)/scripts/generate_vulkan_header.py', '<(angle_gen_path)/vulkan/json',
-                                '<(angle_gen_path)/vulkan/angle_loader.h', '<(PRODUCT_DIR)',
-                            ],
-                        },
-                    ],
-                },
-
                 {
                     'target_name': 'glslang',
                     'type': 'static_library',
@@ -463,6 +378,13 @@
                             'sources':
                             [
                                 '<@(glslang_win_sources)',
+                            ],
+                        }],
+                        ['OS=="linux"',
+                        {
+                            'sources':
+                            [
+                                '<@(glslang_unix_sources)',
                             ],
                         }],
                     ],
@@ -589,12 +511,14 @@
                 {
                     'target_name': 'vulkan_layer_utils_static',
                     'type': 'static_library',
+                    'msvs_cygwin_shell': 0,
                     'sources':
                     [
                         '<@(vulkan_layer_utils_sources)',
                     ],
                     'include_dirs':
                     [
+                        '<(angle_gen_path)/vulkan',
                         '<@(vulkan_loader_include_dirs)',
                     ],
                     'msvs_settings':
@@ -623,6 +547,15 @@
                                 'WIN32',
                                 'WIN32_LEAN_AND_MEAN',
                                 'VK_USE_PLATFORM_WIN32_KHR',
+                                'VK_USE_PLATFORM_WIN32_KHX',
+                            ],
+                        }],
+                        ['OS=="linux"',
+                        {
+                            'defines':
+                            [
+                                'VK_USE_PLATFORM_XCB_KHR',
+                                'VK_USE_PLATFORM_XCB_KHX',
                             ],
                         }],
                     ],
@@ -652,6 +585,7 @@
                                 'AdditionalOptions':
                                 [
                                     '/wd4100', # Unreferenced local parameter
+                                    '/wd4201', # Nonstandard extension used: nameless struct/union
                                     '/wd4456', # declaration hides previous local declaration
                                     '/wd4505', # Unreferenced local function has been removed
                                     '/wd4996', # Unsafe stdlib function
@@ -666,6 +600,7 @@
                                 [
                                     'WIN32_LEAN_AND_MEAN',
                                     'VK_USE_PLATFORM_WIN32_KHR',
+                                    'VK_USE_PLATFORM_WIN32_KHX',
                                 ],
                                 'configurations':
                                 {
@@ -684,13 +619,16 @@
                                     },
                                 },
                             }],
+                            ['OS=="linux"',
+                            {
+                                'defines':
+                                [
+                                    'VK_USE_PLATFORM_XCB_KHR',
+                                    'VK_USE_PLATFORM_XCB_KHX',
+                                ],
+                            }],
                         ],
                     },
-                },
-                {
-                    'target_name': 'vulkan_generate_layer_helpers',
-                    'type': 'none',
-                    'msvs_cygwin_shell': 0,
 
                     'actions':
                     [
@@ -698,6 +636,7 @@
                         {
                             'action_name': 'vulkan_run_vk_xml_generate_vk_enum_string_helper_h',
                             'message': 'generating vk_enum_string_helper.h',
+                            'msvs_cygwin_shell': 0,
                             'inputs':
                             [
                                 '<(vulkan_layers_path)/scripts/generator.py',
@@ -722,6 +661,7 @@
                         {
                             'action_name': 'vulkan_run_vk_xml_generate_vk_struct_size_helper_h',
                             'message': 'generating vk_struct_size_helper.h',
+                            'msvs_cygwin_shell': 0,
                             'inputs':
                             [
                                 '<(vulkan_layers_path)/scripts/generator.py',
@@ -746,6 +686,7 @@
                         {
                             'action_name': 'vulkan_run_vk_xml_generate_vk_struct_size_helper_c',
                             'message': 'generating vk_struct_size_helper.c',
+                            'msvs_cygwin_shell': 0,
                             'inputs':
                             [
                                 '<(vulkan_layers_path)/scripts/generator.py',
@@ -770,6 +711,7 @@
                         {
                             'action_name': 'vulkan_run_vk_xml_generate_vk_safe_struct_h',
                             'message': 'generating vk_safe_struct.h',
+                            'msvs_cygwin_shell': 0,
                             'inputs':
                             [
                                 '<(vulkan_layers_path)/scripts/generator.py',
@@ -794,6 +736,7 @@
                         {
                             'action_name': 'vulkan_run_vk_xml_generate_vk_safe_struct_cpp',
                             'message': 'generating vk_safe_struct.cpp',
+                            'msvs_cygwin_shell': 0,
                             'inputs':
                             [
                                 '<(vulkan_layers_path)/scripts/generator.py',
@@ -816,11 +759,35 @@
                         },
 
                         {
-                            'action_name': 'vulkan_generate_dispatch_table_helper',
-                            'message': 'generating vk_dispatch_table_helper.h',
+                            'action_name': 'vulkan_run_vk_xml_generate_vk_layer_dispatch_table_h',
+                            'message': 'generating vk_layer_dispatch_table.h',
+                            'msvs_cygwin_shell': 0,
                             'inputs':
                             [
-                                '<(vulkan_layers_path)/scripts/dispatch_table_generator.py',
+                                '<(vulkan_layers_path)/scripts/loader_extension_generator.py',
+                                '<(vulkan_layers_path)/scripts/generator.py',
+                                '<(vulkan_layers_path)/scripts/lvl_genvk.py',
+                                '<(vulkan_layers_path)/scripts/reg.py',
+                                '<(vulkan_layers_path)/scripts/vk.xml',
+                            ],
+                            'outputs':
+                            [
+                                '<(angle_gen_path)/vulkan/vk_layer_dispatch_table.h',
+                            ],
+                            'action':
+                            [
+                                'python', '<(vulkan_layers_path)/scripts/lvl_genvk.py', '-o', '<(angle_gen_path)/vulkan',
+                                '-registry', '<(vulkan_layers_path)/scripts/vk.xml', 'vk_layer_dispatch_table.h', '-quiet',
+                            ],
+                        },
+
+                        {
+                            'action_name': 'vulkan_run_vk_xml_generate_vk_dispatch_table_helper_h',
+                            'message': 'generating vk_dispatch_table_helper.h',
+                            'msvs_cygwin_shell': 0,
+                            'inputs':
+                            [
+                                '<(vulkan_layers_path)/scripts/dispatch_table_helper_generator.py',
                                 '<(vulkan_layers_path)/scripts/generator.py',
                                 '<(vulkan_layers_path)/scripts/lvl_genvk.py',
                                 '<(vulkan_layers_path)/scripts/reg.py',
@@ -834,6 +801,52 @@
                             [
                                 'python', '<(vulkan_layers_path)/scripts/lvl_genvk.py', '-o', '<(angle_gen_path)/vulkan',
                                 '-registry', '<(vulkan_layers_path)/scripts/vk.xml', 'vk_dispatch_table_helper.h', '-quiet',
+                            ],
+                        },
+
+                        {
+                            'action_name': 'vulkan_run_vk_xml_generate_vk_loader_extensions_h',
+                            'message': 'generating vk_loader_extensions.h',
+                            'msvs_cygwin_shell': 0,
+                            'inputs':
+                            [
+                                '<(vulkan_layers_path)/scripts/loader_extension_generator.py',
+                                '<(vulkan_layers_path)/scripts/generator.py',
+                                '<(vulkan_layers_path)/scripts/lvl_genvk.py',
+                                '<(vulkan_layers_path)/scripts/reg.py',
+                                '<(vulkan_layers_path)/scripts/vk.xml',
+                            ],
+                            'outputs':
+                            [
+                                '<(angle_gen_path)/vulkan/vk_loader_extensions.h',
+                            ],
+                            'action':
+                            [
+                                'python', '<(vulkan_layers_path)/scripts/lvl_genvk.py', '-o', '<(angle_gen_path)/vulkan',
+                                '-registry', '<(vulkan_layers_path)/scripts/vk.xml', 'vk_loader_extensions.h', '-quiet',
+                            ],
+                        },
+
+                        {
+                            'action_name': 'vulkan_run_vk_xml_generate_vk_loader_extensions_c',
+                            'message': 'generating vk_loader_extensions.c',
+                            'msvs_cygwin_shell': 0,
+                            'inputs':
+                            [
+                                '<(vulkan_layers_path)/scripts/loader_extension_generator.py',
+                                '<(vulkan_layers_path)/scripts/generator.py',
+                                '<(vulkan_layers_path)/scripts/lvl_genvk.py',
+                                '<(vulkan_layers_path)/scripts/reg.py',
+                                '<(vulkan_layers_path)/scripts/vk.xml',
+                            ],
+                            'outputs':
+                            [
+                                '<(angle_gen_path)/vulkan/vk_loader_extensions.c',
+                            ],
+                            'action':
+                            [
+                                'python', '<(vulkan_layers_path)/scripts/lvl_genvk.py', '-o', '<(angle_gen_path)/vulkan',
+                                '-registry', '<(vulkan_layers_path)/scripts/vk.xml', 'vk_loader_extensions.c', '-quiet',
                             ],
                         },
 
@@ -859,10 +872,160 @@
                                     'action':
                                     [
                                         'python', '<(angle_path)/scripts/generate_vulkan_layers_json.py',
-                                        '<(vulkan_layers_path)/layers/windows', '<(angle_gen_path)/vulkan/json',
+                                        '<(vulkan_layers_path)/layers/windows', '<(PRODUCT_DIR)/<(vulkan_json)',
+                                    ],
+                                }],
+                                ['OS=="linux"',
+                                {
+                                    'inputs':
+                                    [
+                                        '<@(vulkan_gen_json_files_sources_linux)',
+                                    ],
+                                    'action':
+                                    [
+                                        'python', '<(angle_path)/scripts/generate_vulkan_layers_json.py',
+                                        '<(vulkan_layers_path)/layers/linux', '<(PRODUCT_DIR)/<(vulkan_json)',
                                     ],
                                 }],
                             ],
+                        },
+                    ],
+                },
+
+                {
+                    'target_name': 'vulkan_loader',
+                    'type': 'static_library',
+                    'sources':
+                    [
+                        '<@(vulkan_loader_sources)',
+                    ],
+                    'include_dirs':
+                    [
+                        '<@(vulkan_loader_include_dirs)',
+                        '<(angle_gen_path)/vulkan',
+                    ],
+                    'defines':
+                    [
+                        'API_NAME="Vulkan"',
+                        'VULKAN_NON_CMAKE_BUILD',
+                    ],
+                    'msvs_settings':
+                    {
+                        'VCCLCompilerTool':
+                        {
+                            'AdditionalOptions':
+                            [
+                                # TODO(jmadill): Force include header on other platforms.
+                                '<@(vulkan_loader_cflags_win)',
+                                '/FIangle_loader.h'
+                            ],
+                        },
+                        'VCLinkerTool':
+                        {
+                            'AdditionalDependencies':
+                            [
+                                'shlwapi.lib',
+                            ],
+                        },
+                    },
+                    'direct_dependent_settings':
+                    {
+                        'include_dirs':
+                        [
+                            '<@(vulkan_loader_include_dirs)',
+                        ],
+                        'msvs_settings':
+                        {
+                            'VCLinkerTool':
+                            {
+                                'AdditionalDependencies':
+                                [
+                                    'shlwapi.lib',
+                                ],
+                            },
+                        },
+                        'conditions':
+                        [
+                            ['OS=="win"',
+                            {
+                                'defines':
+                                [
+                                    'VK_USE_PLATFORM_WIN32_KHR',
+                                    'VK_USE_PLATFORM_WIN32_KHX',
+                                ],
+                            }],
+                            ['OS=="linux"',
+                            {
+                                'defines':
+                                [
+                                    'VK_USE_PLATFORM_XCB_KHR',
+                                    'VK_USE_PLATFORM_XCB_KHX',
+                                ],
+                            }],
+                        ],
+                    },
+                    'conditions':
+                    [
+                        ['OS=="win"',
+                        {
+                            'sources':
+                            [
+                                '<(angle_gen_path)/vulkan/angle_loader.h',
+                                '<@(vulkan_loader_win_sources)',
+                            ],
+                            'defines':
+                            [
+                                'VK_USE_PLATFORM_WIN32_KHR',
+                                'VK_USE_PLATFORM_WIN32_KHX',
+                            ],
+                        }],
+                        ['OS=="linux"',
+                        {
+                            'defines':
+                            [
+                                'DEFAULT_VK_LAYERS_PATH="."',
+                                'HAVE_SECURE_GETENV',
+                                'LAYERS_SOURCE_PATH="<(vulkan_json)"',
+                                'VK_USE_PLATFORM_XCB_KHR',
+                                'VK_USE_PLATFORM_XCB_KHX',
+                            ],
+                        }],
+                    ],
+                    'actions':
+                    [
+                        {
+                            # The loader header is force included into the loader and layers. Because
+                            # of issues with GYP, we can't use a normal header file, we hav to force
+                            # inclue this using compiler-specific flags.
+                            'action_name': 'vulkan_loader_gen_angle_header',
+                            'message': 'generating Vulkan loader ANGLE header',
+                            'msvs_cygwin_shell': 0,
+                            'inputs':
+                            [
+                                '<(angle_path)/scripts/generate_vulkan_header.py',
+                            ],
+                            'outputs':
+                            [
+                                '<(angle_gen_path)/vulkan/angle_loader.h',
+                            ],
+                            'action':
+                            [
+                                # TODO(jmadill): Use correct platform path
+                                'python', '<(angle_path)/scripts/generate_vulkan_header.py', '<(PRODUCT_DIR)/<(vulkan_json)',
+                                '<(angle_gen_path)/vulkan/angle_loader.h', '<(PRODUCT_DIR)',
+                            ],
+                        },
+                        {
+                            'action_name': 'vulkan_loader_order_deps',
+                            'message': 'stamping for vulkan_loader_order_deps',
+                            'msvs_cygwin_shell': 0,
+                            'inputs': [ '<@(vulkan_layer_generated_files)' ],
+                            'outputs': [ '<(angle_gen_path)/vulkan/vulkan_loader_order_deps.stamp' ],
+                            'action':
+                            [
+                                'python', '<(angle_path)/gyp/touch_stamp.py',
+                                '<(angle_gen_path)/vulkan/vulkan_loader_order_deps.stamp',
+                            ]
                         },
                     ],
                 },
@@ -873,12 +1036,26 @@
                     'dependencies':
                     [
                         'spirv_tools',
-                        'vulkan_generate_layer_helpers',
                         'vulkan_layer_utils_static',
                     ],
                     'sources':
                     [
                         '<@(VkLayer_core_validation_sources)',
+                    ],
+                    'actions':
+                    [
+                        {
+                            'action_name': 'layer_core_validation_order_deps',
+                            'message': 'stamping for layer_core_validation_order_deps',
+                            'msvs_cygwin_shell': 0,
+                            'inputs': [ '<@(vulkan_layer_generated_files)' ],
+                            'outputs': [ '<(angle_gen_path)/vulkan/layer_core_validation_order_deps.stamp' ],
+                            'action':
+                            [
+                                'python', '<(angle_path)/gyp/touch_stamp.py',
+                                '<(angle_gen_path)/vulkan/layer_core_validation_order_deps.stamp',
+                            ]
+                        },
                     ],
                     'conditions':
                     [
@@ -893,40 +1070,30 @@
                 },
 
                 {
-                    'target_name': 'VkLayer_image',
-                    'type': 'shared_library',
-                    'dependencies':
-                    [
-                        'vulkan_generate_layer_helpers',
-                        'vulkan_layer_utils_static',
-                    ],
-                    'sources':
-                    [
-                        '<@(VkLayer_image_sources)',
-                    ],
-                    'conditions':
-                    [
-                        ['OS=="win"',
-                        {
-                            'sources':
-                            [
-                                '<(vulkan_layers_path)/layers/VkLayer_image.def',
-                            ]
-                        }],
-                    ],
-                },
-
-                {
                     'target_name': 'VkLayer_swapchain',
                     'type': 'shared_library',
                     'dependencies':
                     [
-                        'vulkan_generate_layer_helpers',
                         'vulkan_layer_utils_static',
                     ],
                     'sources':
                     [
                         '<@(VkLayer_swapchain_sources)',
+                    ],
+                    'actions':
+                    [
+                        {
+                            'action_name': 'layer_swapchain_order_deps',
+                            'message': 'stamping for layer_swapchain_order_deps',
+                            'msvs_cygwin_shell': 0,
+                            'inputs': [ '<@(vulkan_layer_generated_files)' ],
+                            'outputs': [ '<(angle_gen_path)/vulkan/layer_swapchain_order_deps.stamp' ],
+                            'action':
+                            [
+                                'python', '<(angle_path)/gyp/touch_stamp.py',
+                                '<(angle_gen_path)/vulkan/layer_swapchain_order_deps.stamp',
+                            ]
+                        },
                     ],
                     'conditions':
                     [
@@ -945,12 +1112,26 @@
                     'type': 'shared_library',
                     'dependencies':
                     [
-                        'vulkan_generate_layer_helpers',
                         'vulkan_layer_utils_static',
                     ],
                     'sources':
                     [
                         '<@(VkLayer_object_tracker_sources)',
+                    ],
+                    'actions':
+                    [
+                        {
+                            'action_name': 'layer_object_tracker_order_deps',
+                            'message': 'stamping for layer_object_tracker_order_deps',
+                            'msvs_cygwin_shell': 0,
+                            'inputs': [ '<@(vulkan_layer_generated_files)' ],
+                            'outputs': [ '<(angle_gen_path)/vulkan/layer_object_tracker_order_deps.stamp' ],
+                            'action':
+                            [
+                                'python', '<(angle_path)/gyp/touch_stamp.py',
+                                '<(angle_gen_path)/vulkan/layer_object_tracker_order_deps.stamp',
+                            ]
+                        },
                     ],
                     'conditions':
                     [
@@ -969,7 +1150,6 @@
                     'type': 'shared_library',
                     'dependencies':
                     [
-                        'vulkan_generate_layer_helpers',
                         'vulkan_layer_utils_static',
                     ],
                     'sources':
@@ -989,8 +1169,21 @@
                     'actions':
                     [
                         {
+                            'action_name': 'layer_unique_objects_order_deps',
+                            'message': 'stamping for layer_unique_objects_order_deps',
+                            'msvs_cygwin_shell': 0,
+                            'inputs': [ '<@(vulkan_layer_generated_files)' ],
+                            'outputs': [ '<(angle_gen_path)/vulkan/layer_unique_objects_order_deps.stamp' ],
+                            'action':
+                            [
+                                'python', '<(angle_path)/gyp/touch_stamp.py',
+                                '<(angle_gen_path)/vulkan/layer_unique_objects_order_deps.stamp',
+                            ]
+                        },
+                        {
                             'action_name': 'vulkan_layer_unique_objects_generate',
                             'message': 'generating Vulkan unique_objects helpers',
+                            'msvs_cygwin_shell': 0,
                             'inputs':
                             [
                                 '<(vulkan_layers_path)/scripts/generator.py',
@@ -1017,7 +1210,6 @@
                     'type': 'shared_library',
                     'dependencies':
                     [
-                        'vulkan_generate_layer_helpers',
                         'vulkan_layer_utils_static',
                     ],
                     'sources':
@@ -1037,8 +1229,21 @@
                     'actions':
                     [
                         {
+                            'action_name': 'layer_threading_order_deps',
+                            'message': 'stamping for layer_threading_order_deps',
+                            'msvs_cygwin_shell': 0,
+                            'inputs': [ '<@(vulkan_layer_generated_files)' ],
+                            'outputs': [ '<(angle_gen_path)/vulkan/layer_threading_order_deps.stamp' ],
+                            'action':
+                            [
+                                'python', '<(angle_path)/gyp/touch_stamp.py',
+                                '<(angle_gen_path)/vulkan/layer_threading_order_deps.stamp',
+                            ]
+                        },
+                        {
                             'action_name': 'vulkan_layer_threading_generate',
                             'message': 'generating Vulkan threading header',
+                            'msvs_cygwin_shell': 0,
                             'inputs':
                             [
                                 '<(vulkan_layers_path)/scripts/generator.py',
@@ -1065,7 +1270,6 @@
                     'type': 'shared_library',
                     'dependencies':
                     [
-                        'vulkan_generate_layer_helpers',
                         'vulkan_layer_utils_static',
                     ],
                     'sources':
@@ -1085,8 +1289,21 @@
                     'actions':
                     [
                         {
+                            'action_name': 'layer_parameter_validation_order_deps',
+                            'message': 'stamping for layer_parameter_validation_order_deps',
+                            'msvs_cygwin_shell': 0,
+                            'inputs': [ '<@(vulkan_layer_generated_files)' ],
+                            'outputs': [ '<(angle_gen_path)/vulkan/layer_parameter_validation_order_deps.stamp' ],
+                            'action':
+                            [
+                                'python', '<(angle_path)/gyp/touch_stamp.py',
+                                '<(angle_gen_path)/vulkan/layer_parameter_validation_order_deps.stamp',
+                            ]
+                        },
+                        {
                             'action_name': 'vulkan_layer_parameter_validation_generate',
                             'message': 'generating Vulkan parameter_validation header',
+                            'msvs_cygwin_shell': 0,
                             'inputs':
                             [
                                 '<(vulkan_layers_path)/scripts/generator.py',
@@ -1116,7 +1333,6 @@
                         # Need to disable these to prevent multiply defined symbols with ninja.
                         # TODO(jmadill): Figure out how to implement data_deps in gyp.
                         # 'VkLayer_core_validation',
-                        # 'VkLayer_image',
                         # 'VkLayer_object_tracker',
                         # 'VkLayer_parameter_validation',
                         # 'VkLayer_swapchain',

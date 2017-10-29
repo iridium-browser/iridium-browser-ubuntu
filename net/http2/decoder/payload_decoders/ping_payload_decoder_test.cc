@@ -7,12 +7,12 @@
 #include <stddef.h>
 
 #include "base/logging.h"
-#include "net/http2/decoder/frame_parts.h"
-#include "net/http2/decoder/frame_parts_collector.h"
 #include "net/http2/decoder/http2_frame_decoder_listener.h"
 #include "net/http2/decoder/payload_decoders/payload_decoder_base_test_util.h"
 #include "net/http2/http2_constants.h"
 #include "net/http2/http2_structures_test_util.h"
+#include "net/http2/test_tools/frame_parts.h"
+#include "net/http2/test_tools/frame_parts_collector.h"
 #include "net/http2/tools/http2_frame_builder.h"
 #include "net/http2/tools/http2_random.h"
 #include "net/http2/tools/random_decoder_test.h"
@@ -87,8 +87,7 @@ TEST_F(PingPayloadDecoderTest, Ping) {
     Http2FrameBuilder fb;
     fb.Append(fields);
     Http2FrameHeader header(fb.size(), Http2FrameType::PING,
-                            RandFlags() & ~Http2FrameFlag::FLAG_ACK,
-                            RandStreamId());
+                            RandFlags() & ~Http2FrameFlag::ACK, RandStreamId());
     set_frame_header(header);
     FrameParts expected(header);
     expected.opt_ping = fields;
@@ -103,8 +102,7 @@ TEST_F(PingPayloadDecoderTest, PingAck) {
     Http2FrameBuilder fb;
     fb.Append(fields);
     Http2FrameHeader header(fb.size(), Http2FrameType::PING,
-                            RandFlags() | Http2FrameFlag::FLAG_ACK,
-                            RandStreamId());
+                            RandFlags() | Http2FrameFlag::ACK, RandStreamId());
     set_frame_header(header);
     FrameParts expected(header);
     expected.opt_ping = fields;

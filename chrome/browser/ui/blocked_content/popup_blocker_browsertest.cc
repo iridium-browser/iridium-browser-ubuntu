@@ -10,7 +10,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -117,8 +116,6 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
   ~PopupBlockerBrowserTest() override {}
 
   void SetUpOnMainThread() override {
-    InProcessBrowserTest::SetUpOnMainThread();
-
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(embedded_test_server()->Start());
   }
@@ -176,7 +173,8 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
   WebContents* RunCheckTest(Browser* browser,
                             const std::string& test_name,
                             WhatToExpect what_to_expect,
-                            ShouldCheckTitle check_title) {
+                            ShouldCheckTitle check_title,
+                            const base::string16& expected_title) {
     GURL url(embedded_test_server()->GetURL(test_name));
 
     CountRenderViewHosts counter;
@@ -229,12 +227,19 @@ class PopupBlockerBrowserTest : public InProcessBrowserTest {
 
     if (check_title == CheckTitle) {
       // Check that the check passed.
-      base::string16 expected_title(base::ASCIIToUTF16("PASS"));
       content::TitleWatcher title_watcher(web_contents, expected_title);
       EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
     }
 
     return web_contents;
+  }
+
+  WebContents* RunCheckTest(Browser* browser,
+                            const std::string& test_name,
+                            WhatToExpect what_to_expect,
+                            ShouldCheckTitle check_title) {
+    return RunCheckTest(browser, test_name, what_to_expect, check_title,
+                        base::ASCIIToUTF16("PASS"));
   }
 
  private:
@@ -346,31 +351,30 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
 }
 
 // Verify that when you unblock popup, the popup shows in history and omnibox.
-// TODO(crbug.com/663333) Flaky on Linux.
-#if defined(OS_LINUX)
-#define MAYBE_UnblockedPopupShowsInHistoryAndOmnibox \
-  DISABLED_UnblockedPopupShowsInHistoryAndOmnibox
-#else
-#define MAYBE_UnblockedPopupShowsInHistoryAndOmnibox \
-  UnblockedPopupShowsInHistoryAndOmnibox
-#endif
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
-                       MAYBE_UnblockedPopupShowsInHistoryAndOmnibox) {
+                       UnblockedPopupShowsInHistoryAndOmnibox) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePopupBlocking);
   GURL url(embedded_test_server()->GetURL(
       "/popup_blocker/popup-blocked-to-post-blank.html"));
   NavigateAndCheckPopupShown(url, ExpectTab);
 
+  // Make sure the navigation in the new tab actually finished.
+  WebContents* web_contents = browser()->tab_strip_model()->GetWebContentsAt(1);
+  base::string16 expected_title(base::ASCIIToUTF16("Popup Success!"));
+  content::TitleWatcher title_watcher(web_contents, expected_title);
+  EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
+  WaitForHistoryBackendToRun(browser()->profile());
+
   std::string search_string =
       "data:text/html,<title>Popup Success!</title>you should not see this "
       "message if popup blocker is enabled";
 
-  WaitForHistoryBackendToRun(browser()->profile());
   ui_test_utils::HistoryEnumerator history(browser()->profile());
   std::vector<GURL>& history_urls = history.urls();
   ASSERT_EQ(2u, history_urls.size());
-  ASSERT_EQ(GURL(search_string), history_urls[0]);
+  ASSERT_EQ(embedded_test_server()->GetURL("/popup_blocker/popup-success.html"),
+            history_urls[0]);
   ASSERT_EQ(url, history_urls[1]);
 
   TemplateURLService* service = TemplateURLServiceFactory::GetForProfile(
@@ -472,11 +476,8 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, OpenerSuppressed) {
 }
 
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ShiftClick) {
-  RunCheckTest(
-      browser(),
-      "/popup_blocker/popup-fake-click-on-anchor3.html",
-      ExpectPopup,
-      CheckTitle);
+  RunCheckTest(browser(), "/popup_blocker/popup-fake-click-on-anchor3.html",
+               ExpectPopup, CheckTitle, base::ASCIIToUTF16("Popup Success!"));
 }
 
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, WebUI) {
@@ -519,7 +520,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, Regress427477) {
   ASSERT_EQ(0, GetBlockedContentsCount());
 }
 
-// Verify that app modal prompts can't be used to create pop unders.
+// Verify that JavaScript dialogs can't be used to create pop unders.
 IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ModalPopUnder) {
   WebContents* tab = browser()->tab_strip_model()->GetActiveWebContents();
   GURL url(
@@ -539,20 +540,20 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ModalPopUnder) {
   // https://crbug.com/687732 for details.
   ui_test_utils::BrowserActivationWaiter alert_waiter(browser());
 #endif
+  JavaScriptDialogTabHelper* js_helper =
+      JavaScriptDialogTabHelper::FromWebContents(tab);
+  base::RunLoop dialog_wait;
+  js_helper->SetDialogShownCallbackForTesting(dialog_wait.QuitClosure());
   tab->GetMainFrame()->ExecuteJavaScriptForTests(base::UTF8ToUTF16("alert()"));
-  app_modal::AppModalDialog* dialog = ui_test_utils::WaitForAppModalDialog();
+  dialog_wait.Run();
 #if !defined(OS_MACOSX)
   if (chrome::FindLastActive() != browser())
     alert_waiter.WaitForActivation();
 #endif
 
   // Verify that after the dialog is closed, the popup is in front again.
-  ASSERT_TRUE(dialog->IsJavaScriptModalDialog());
-  app_modal::JavaScriptAppModalDialog* js_dialog =
-      static_cast<app_modal::JavaScriptAppModalDialog*>(dialog);
-
   ui_test_utils::BrowserActivationWaiter waiter(popup_browser);
-  js_dialog->native_dialog()->AcceptAppModalDialog();
+  js_helper->HandleJavaScriptDialog(tab, true, nullptr);
   waiter.WaitForActivation();
   ASSERT_EQ(popup_browser, chrome::FindLastActive());
 }
@@ -583,20 +584,20 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ModalPopUnderWindowOpener) {
   // https://crbug.com/687732 for details.
   ui_test_utils::BrowserActivationWaiter alert_waiter(browser());
 #endif
+  JavaScriptDialogTabHelper* js_helper =
+      JavaScriptDialogTabHelper::FromWebContents(tab);
+  base::RunLoop dialog_wait;
+  js_helper->SetDialogShownCallbackForTesting(dialog_wait.QuitClosure());
   tab->GetMainFrame()->ExecuteJavaScriptForTests(base::UTF8ToUTF16("alert()"));
-  app_modal::AppModalDialog* dialog = ui_test_utils::WaitForAppModalDialog();
+  dialog_wait.Run();
 #if !defined(OS_MACOSX)
   if (chrome::FindLastActive() != browser())
     alert_waiter.WaitForActivation();
 #endif
 
   // Verify that after the dialog is closed, the popup is in front again.
-  ASSERT_TRUE(dialog->IsJavaScriptModalDialog());
-  app_modal::JavaScriptAppModalDialog* js_dialog =
-      static_cast<app_modal::JavaScriptAppModalDialog*>(dialog);
-
   ui_test_utils::BrowserActivationWaiter waiter(popup_browser);
-  js_dialog->native_dialog()->AcceptAppModalDialog();
+  js_helper->HandleJavaScriptDialog(tab, true, nullptr);
   waiter.WaitForActivation();
   ASSERT_EQ(popup_browser, chrome::FindLastActive());
 }
@@ -621,20 +622,20 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ModalPopUnderSubframe) {
   // https://crbug.com/687732 for details.
   ui_test_utils::BrowserActivationWaiter alert_waiter(browser());
 #endif
+  JavaScriptDialogTabHelper* js_helper =
+      JavaScriptDialogTabHelper::FromWebContents(tab);
+  base::RunLoop dialog_wait;
+  js_helper->SetDialogShownCallbackForTesting(dialog_wait.QuitClosure());
   tab->GetMainFrame()->ExecuteJavaScriptForTests(base::UTF8ToUTF16("alert()"));
-  app_modal::AppModalDialog* dialog = ui_test_utils::WaitForAppModalDialog();
+  dialog_wait.Run();
 #if !defined(OS_MACOSX)
   if (chrome::FindLastActive() != browser())
     alert_waiter.WaitForActivation();
 #endif
 
   // Verify that after the dialog is closed, the popup is in front again.
-  ASSERT_TRUE(dialog->IsJavaScriptModalDialog());
-  app_modal::JavaScriptAppModalDialog* js_dialog =
-      static_cast<app_modal::JavaScriptAppModalDialog*>(dialog);
-
   ui_test_utils::BrowserActivationWaiter waiter(popup_browser);
-  js_dialog->native_dialog()->AcceptAppModalDialog();
+  js_helper->HandleJavaScriptDialog(tab, true, nullptr);
   waiter.WaitForActivation();
   ASSERT_EQ(popup_browser, chrome::FindLastActive());
 }
@@ -659,69 +660,12 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, ModalPopUnderNoOpener) {
   // https://crbug.com/687732 for details.
   ui_test_utils::BrowserActivationWaiter alert_waiter(browser());
 #endif
-  tab->GetMainFrame()->ExecuteJavaScriptForTests(base::UTF8ToUTF16("alert()"));
-  app_modal::AppModalDialog* dialog = ui_test_utils::WaitForAppModalDialog();
-#if !defined(OS_MACOSX)
-  if (chrome::FindLastActive() != browser())
-    alert_waiter.WaitForActivation();
-#endif
-
-  // Verify that after the dialog is closed, the popup is in front again.
-  ASSERT_TRUE(dialog->IsJavaScriptModalDialog());
-  app_modal::JavaScriptAppModalDialog* js_dialog =
-      static_cast<app_modal::JavaScriptAppModalDialog*>(dialog);
-
-  ui_test_utils::BrowserActivationWaiter waiter(popup_browser);
-  js_dialog->native_dialog()->AcceptAppModalDialog();
-  waiter.WaitForActivation();
-  ASSERT_EQ(popup_browser, chrome::FindLastActive());
-}
-
-// Verify that app modal prompts can't be used to create pop unders, while the
-// new auto-dismissing JavaScript dialogs are enabled.
-IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
-                       ModalPopUnderAutoDismissingDialogs) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(features::kAutoDismissingDialogs);
-
-  // One tab to test in.
-  TabStripModel* tab_strip = browser()->tab_strip_model();
-  WebContents* tab = tab_strip->GetActiveWebContents();
-  EXPECT_EQ(1, tab_strip->count());
-
-  // One blank tab for later.
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(), GURL(url::kAboutBlankURL),
-      WindowOpenDisposition::NEW_BACKGROUND_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
-  EXPECT_EQ(2, tab_strip->count());
-  ASSERT_EQ(0, tab_strip->GetIndexOfWebContents(tab));
-
-  // Show a popup.
   JavaScriptDialogTabHelper* js_helper =
       JavaScriptDialogTabHelper::FromWebContents(tab);
-  GURL url(
-      embedded_test_server()->GetURL("/popup_blocker/popup-window-open.html"));
-  HostContentSettingsMapFactory::GetForProfile(browser()->profile())
-      ->SetContentSettingDefaultScope(url, GURL(), CONTENT_SETTINGS_TYPE_POPUPS,
-                                      std::string(), CONTENT_SETTING_ALLOW);
-
-  NavigateAndCheckPopupShown(url, ExpectPopup);
-
-  Browser* popup_browser = chrome::FindLastActive();
-  ASSERT_NE(popup_browser, browser());
-
-  // Showing an alert will raise the tab over the popup.
-#if !defined(OS_MACOSX)
-  // Mac doesn't activate the browser during modal dialogs, see
-  // https://crbug.com/687732 for details.
-  ui_test_utils::BrowserActivationWaiter alert_waiter(browser());
-#endif
-  scoped_refptr<content::MessageLoopRunner> runner =
-      new content::MessageLoopRunner;
-  js_helper->SetDialogShownCallbackForTesting(runner->QuitClosure());
+  base::RunLoop dialog_wait;
+  js_helper->SetDialogShownCallbackForTesting(dialog_wait.QuitClosure());
   tab->GetMainFrame()->ExecuteJavaScriptForTests(base::UTF8ToUTF16("alert()"));
-  runner->Run();
+  dialog_wait.Run();
 #if !defined(OS_MACOSX)
   if (chrome::FindLastActive() != browser())
     alert_waiter.WaitForActivation();
@@ -729,7 +673,7 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
 
   // Verify that after the dialog is closed, the popup is in front again.
   ui_test_utils::BrowserActivationWaiter waiter(popup_browser);
-  tab_strip->ActivateTabAt(1, true);
+  js_helper->HandleJavaScriptDialog(tab, true, nullptr);
   waiter.WaitForActivation();
   ASSERT_EQ(popup_browser, chrome::FindLastActive());
 }
@@ -762,19 +706,16 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest,
   tab->GetMainFrame()->ExecuteJavaScriptForTests(
       base::UTF8ToUTF16("var o = document.createElement('object'); o.data = "
                         "'/alert_dialog.pdf'; document.body.appendChild(o);"));
-  app_modal::AppModalDialog* dialog = ui_test_utils::WaitForAppModalDialog();
+  app_modal::JavaScriptAppModalDialog* dialog =
+      ui_test_utils::WaitForAppModalDialog();
 #if !defined(OS_MACOSX)
   if (chrome::FindLastActive() != browser())
     alert_waiter.WaitForActivation();
 #endif
 
   // Verify that after the dialog was closed, the popup is in front again.
-  ASSERT_TRUE(dialog->IsJavaScriptModalDialog());
-  app_modal::JavaScriptAppModalDialog* js_dialog =
-      static_cast<app_modal::JavaScriptAppModalDialog*>(dialog);
-
   ui_test_utils::BrowserActivationWaiter waiter(popup_browser);
-  js_dialog->native_dialog()->AcceptAppModalDialog();
+  dialog->native_dialog()->AcceptAppModalDialog();
   waiter.WaitForActivation();
   ASSERT_EQ(popup_browser, chrome::FindLastActive());
 }
@@ -865,9 +806,9 @@ IN_PROC_BROWSER_TEST_F(PopupBlockerBrowserTest, TapGestureWithCtrlKey) {
       content::NotificationService::AllSources());
 
 #if defined(OS_MACOSX)
-  unsigned modifiers = blink::WebInputEvent::MetaKey;
+  unsigned modifiers = blink::WebInputEvent::kMetaKey;
 #else
-  unsigned modifiers = blink::WebInputEvent::ControlKey;
+  unsigned modifiers = blink::WebInputEvent::kControlKey;
 #endif
   content::SimulateTapWithModifiersAt(tab, modifiers, gfx::Point(350, 250));
 

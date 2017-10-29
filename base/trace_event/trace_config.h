@@ -17,6 +17,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/strings/string_piece.h"
 #include "base/trace_event/memory_dump_request_args.h"
+#include "base/trace_event/trace_config_category_filter.h"
 #include "base/values.h"
 
 namespace base {
@@ -94,26 +95,25 @@ class BASE_EXPORT TraceConfig {
 
     EventFilterConfig& operator=(const EventFilterConfig& rhs);
 
-    void AddIncludedCategory(const std::string& category);
-    void AddExcludedCategory(const std::string& category);
-    void SetArgs(std::unique_ptr<base::DictionaryValue> args);
+    void InitializeFromConfigDict(const base::DictionaryValue* event_filter);
+
+    void SetCategoryFilter(const TraceConfigCategoryFilter& category_filter);
+
+    void ToDict(DictionaryValue* filter_dict) const;
+
     bool GetArgAsSet(const char* key, std::unordered_set<std::string>*) const;
 
-    bool IsCategoryGroupEnabled(const char* category_group_name) const;
+    bool IsCategoryGroupEnabled(const StringPiece& category_group_name) const;
 
     const std::string& predicate_name() const { return predicate_name_; }
     base::DictionaryValue* filter_args() const { return args_.get(); }
-    const StringList& included_categories() const {
-      return included_categories_;
-    }
-    const StringList& excluded_categories() const {
-      return excluded_categories_;
+    const TraceConfigCategoryFilter& category_filter() const {
+      return category_filter_;
     }
 
    private:
     std::string predicate_name_;
-    StringList included_categories_;
-    StringList excluded_categories_;
+    TraceConfigCategoryFilter category_filter_;
     std::unique_ptr<base::DictionaryValue> args_;
   };
   typedef std::vector<EventFilterConfig> EventFilters;
@@ -126,8 +126,6 @@ class BASE_EXPORT TraceConfig {
   // A category can have an optional '-' prefix to make it an excluded category.
   // All the same rules apply above, so for example, having both included and
   // excluded categories in the same list would not be supported.
-  //
-  // Category filters can also be used to configure synthetic delays.
   //
   // |trace_options_string| is a comma-delimited list of trace options.
   // Possible options are: "record-until-full", "record-continuously",
@@ -154,15 +152,6 @@ class BASE_EXPORT TraceConfig {
   //          would disable everything but webkit; and use default options.
   // Example: TraceConfig("-webkit", "");
   //          would enable everything but webkit; and use default options.
-  // Example: TraceConfig("DELAY(gpu.PresentingFrame;16)", "");
-  //          would make swap buffers always take at least 16 ms; and use
-  //          default options.
-  // Example: TraceConfig("DELAY(gpu.PresentingFrame;16;oneshot)", "");
-  //          would make swap buffers take at least 16 ms the first time it is
-  //          called; and use default options.
-  // Example: TraceConfig("DELAY(gpu.PresentingFrame;16;alternating)", "");
-  //          would make swap buffers take at least 16 ms every other time it
-  //          is called; and use default options.
   TraceConfig(StringPiece category_filter_string,
               StringPiece trace_options_string);
 
@@ -182,7 +171,6 @@ class BASE_EXPORT TraceConfig {
   //                             "inc_pattern*",
   //                             "disabled-by-default-memory-infra"],
   //     "excluded_categories": ["excluded", "exc_pattern*"],
-  //     "synthetic_delays": ["test.Delay1;16", "test.Delay2;32"],
   //     "memory_dump_config": {
   //       "triggers": [
   //         {
@@ -207,9 +195,6 @@ class BASE_EXPORT TraceConfig {
 
   TraceConfig& operator=(const TraceConfig& rhs);
 
-  // Return a list of the synthetic delays specified in this category filter.
-  const StringList& GetSyntheticDelayValues() const;
-
   TraceRecordMode GetTraceRecordMode() const { return record_mode_; }
   bool IsSystraceEnabled() const { return enable_systrace_; }
   bool IsArgumentFilterEnabled() const { return enable_argument_filter_; }
@@ -231,7 +216,7 @@ class BASE_EXPORT TraceConfig {
   // Returns true if at least one category in the list is enabled by this
   // trace config. This is used to determine if the category filters are
   // enabled in the TRACE_* macros.
-  bool IsCategoryGroupEnabled(const char* category_group_name) const;
+  bool IsCategoryGroupEnabled(const StringPiece& category_group_name) const;
 
   // Merges config with the current TraceConfig
   void Merge(const TraceConfig& config);
@@ -240,6 +225,10 @@ class BASE_EXPORT TraceConfig {
 
   // Clears and resets the memory dump config.
   void ResetMemoryDumpConfig(const MemoryDumpConfig& memory_dump_config);
+
+  const TraceConfigCategoryFilter& category_filter() const {
+    return category_filter_;
+  }
 
   const MemoryDumpConfig& memory_dump_config() const {
     return memory_dump_config_;
@@ -254,15 +243,6 @@ class BASE_EXPORT TraceConfig {
   FRIEND_TEST_ALL_PREFIXES(TraceConfigTest, TraceConfigFromValidLegacyFormat);
   FRIEND_TEST_ALL_PREFIXES(TraceConfigTest,
                            TraceConfigFromInvalidLegacyStrings);
-  FRIEND_TEST_ALL_PREFIXES(TraceConfigTest, TraceConfigFromValidString);
-  FRIEND_TEST_ALL_PREFIXES(TraceConfigTest, TraceConfigFromInvalidString);
-  FRIEND_TEST_ALL_PREFIXES(TraceConfigTest,
-                           IsEmptyOrContainsLeadingOrTrailingWhitespace);
-  FRIEND_TEST_ALL_PREFIXES(TraceConfigTest, TraceConfigFromMemoryConfigString);
-  FRIEND_TEST_ALL_PREFIXES(TraceConfigTest, LegacyStringToMemoryDumpConfig);
-  FRIEND_TEST_ALL_PREFIXES(TraceConfigTest, EmptyMemoryDumpConfigTest);
-  FRIEND_TEST_ALL_PREFIXES(TraceConfigTest,
-                           EmptyAndAsteriskCategoryFilterString);
 
   // The default trace config, used when none is provided.
   // Allows all non-disabled-by-default categories through, except if they end
@@ -279,13 +259,6 @@ class BASE_EXPORT TraceConfig {
   void InitializeFromStrings(StringPiece category_filter_string,
                              StringPiece trace_options_string);
 
-  void SetCategoriesFromIncludedList(const ListValue& included_list);
-  void SetCategoriesFromExcludedList(const ListValue& excluded_list);
-  void SetSyntheticDelaysFromList(const ListValue& list);
-  void AddCategoryToDict(DictionaryValue* dict,
-                         const char* param,
-                         const StringList& categories) const;
-
   void SetMemoryDumpConfigFromConfigDict(
       const DictionaryValue& memory_dump_config);
   void SetDefaultMemoryDumpConfig();
@@ -295,32 +268,14 @@ class BASE_EXPORT TraceConfig {
 
   std::string ToTraceOptionsString() const;
 
-  void WriteCategoryFilterString(const StringList& values,
-                                 std::string* out,
-                                 bool included) const;
-  void WriteCategoryFilterString(const StringList& delays,
-                                 std::string* out) const;
-
-  // Returns true if the category is enabled according to this trace config.
-  // This tells whether a category is enabled from the TraceConfig's
-  // perspective. Please refer to IsCategoryGroupEnabled() to determine if a
-  // category is enabled from the tracing runtime's perspective.
-  bool IsCategoryEnabled(const char* category_name) const;
-
-  static bool IsEmptyOrContainsLeadingOrTrailingWhitespace(StringPiece str);
-
-  bool HasIncludedPatterns() const;
-
   TraceRecordMode record_mode_;
   bool enable_systrace_ : 1;
   bool enable_argument_filter_ : 1;
 
+  TraceConfigCategoryFilter category_filter_;
+
   MemoryDumpConfig memory_dump_config_;
 
-  StringList included_categories_;
-  StringList disabled_categories_;
-  StringList excluded_categories_;
-  StringList synthetic_delays_;
   EventFilters event_filters_;
 };
 

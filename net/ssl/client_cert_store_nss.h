@@ -33,32 +33,28 @@ class NET_EXPORT ClientCertStoreNSS : public ClientCertStore {
 
   // ClientCertStore:
   void GetClientCerts(const SSLCertRequestInfo& cert_request_info,
-                      CertificateList* selected_certs,
-                      const base::Closure& callback) override;
+                      const ClientCertListCallback& callback) override;
 
-  // Examines the certificates in |certs| to find all certificates that match
-  // the client certificate request in |request|, storing the matching
-  // certificates in |filtered_certs|. Any previous content of |filtered_certs|
-  // will be removed.
+  // Examines the certificates in |identities| to find all certificates that
+  // match the client certificate request in |request|, removing any that don't.
+  // The remaining certs will be updated to include intermediates.
   // Must be called from a worker thread.
-  static void FilterCertsOnWorkerThread(const CertificateList& certs,
-                                        const SSLCertRequestInfo& request,
-                                        CertificateList* filtered_certs);
+  static void FilterCertsOnWorkerThread(ClientCertIdentityList* identities,
+                                        const SSLCertRequestInfo& request);
 
   // Retrieves all client certificates that are stored by NSS and adds them to
-  // |certs|. |password_delegate| is used to unlock slots if required.
+  // |identities|. |password_delegate| is used to unlock slots if required.
   // Must be called from a worker thread.
   static void GetPlatformCertsOnWorkerThread(
-      std::unique_ptr<crypto::CryptoModuleBlockingPasswordDelegate>
+      scoped_refptr<crypto::CryptoModuleBlockingPasswordDelegate>
           password_delegate,
-      net::CertificateList* certs);
+      ClientCertIdentityList* identities);
 
  private:
-  void GetAndFilterCertsOnWorkerThread(
-      std::unique_ptr<crypto::CryptoModuleBlockingPasswordDelegate>
+  ClientCertIdentityList GetAndFilterCertsOnWorkerThread(
+      scoped_refptr<crypto::CryptoModuleBlockingPasswordDelegate>
           password_delegate,
-      const SSLCertRequestInfo* request,
-      CertificateList* selected_certs);
+      const SSLCertRequestInfo* request);
 
   // The factory for creating the delegate for requesting a password to a
   // PKCS#11 token. May be null.

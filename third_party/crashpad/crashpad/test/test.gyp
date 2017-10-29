@@ -22,6 +22,7 @@
       'type': 'static_library',
       'dependencies': [
         '../compat/compat.gyp:crashpad_compat',
+        '../snapshot/snapshot.gyp:crashpad_snapshot',
         '../third_party/gtest/gtest.gyp:gtest',
         '../third_party/mini_chromium/mini_chromium.gyp:base',
         '../util/util.gyp:crashpad_util',
@@ -37,32 +38,41 @@
         'gtest_death_check.h',
         'hex_string.cc',
         'hex_string.h',
+        'mac/dyld.cc',
         'mac/dyld.h',
         'mac/mach_errors.cc',
         'mac/mach_errors.h',
         'mac/mach_multiprocess.cc',
         'mac/mach_multiprocess.h',
+        'main_arguments.cc',
+        'main_arguments.h',
         'multiprocess.h',
         'multiprocess_exec.h',
         'multiprocess_exec_posix.cc',
         'multiprocess_exec_win.cc',
         'multiprocess_posix.cc',
-        'paths.cc',
-        'paths.h',
-        'paths_linux.cc',
-        'paths_mac.cc',
-        'paths_win.cc',
+        'scoped_module_handle.cc',
+        'scoped_module_handle.h',
         'scoped_temp_dir.cc',
         'scoped_temp_dir.h',
         'scoped_temp_dir_posix.cc',
         'scoped_temp_dir_win.cc',
+        'test_paths.cc',
+        'test_paths.h',
         'win/child_launcher.cc',
         'win/child_launcher.h',
         'win/win_child_process.cc',
         'win/win_child_process.h',
         'win/win_multiprocess.cc',
         'win/win_multiprocess.h',
+        'win/win_multiprocess_with_temp_dir.cc',
+        'win/win_multiprocess_with_temp_dir.h',
       ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '..',
+        ],
+      },
       'conditions': [
         ['OS=="mac"', {
           'link_settings': {
@@ -79,12 +89,28 @@
           },
         }],
       ],
-      'target_conditions': [
-        ['OS=="android"', {
-          'sources/': [
-            ['include', '^paths_linux\\.cc$'],
-          ],
-        }],
+    },
+    {
+      'target_name': 'crashpad_gtest_main',
+      'type': 'static_library',
+      'dependencies': [
+        'crashpad_test',
+        '../third_party/gtest/gtest.gyp:gtest',
+      ],
+      'sources': [
+        'gtest_main.cc',
+      ],
+    },
+    {
+      'target_name': 'crashpad_gmock_main',
+      'type': 'static_library',
+      'dependencies': [
+        'crashpad_test',
+        '../third_party/gtest/gmock.gyp:gmock',
+        '../third_party/gtest/gtest.gyp:gtest',
+      ],
+      'sources': [
+        'gmock_main.cc',
       ],
     },
   ],

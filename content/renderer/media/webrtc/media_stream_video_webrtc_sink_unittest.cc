@@ -4,9 +4,11 @@
 
 #include "content/renderer/media/webrtc/media_stream_video_webrtc_sink.h"
 
+#include "base/test/scoped_task_environment.h"
 #include "content/child/child_process.h"
 #include "content/renderer/media/mock_constraint_factory.h"
 #include "content/renderer/media/mock_media_stream_registry.h"
+#include "content/renderer/media/video_track_adapter.h"
 #include "content/renderer/media/webrtc/mock_peer_connection_dependency_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -15,13 +17,26 @@ namespace {
 
 class MediaStreamVideoWebRtcSinkTest : public ::testing::Test {
  public:
-  MediaStreamVideoWebRtcSinkTest() {}
+  MediaStreamVideoWebRtcSinkTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
 
-  void SetVideoTrack(blink::WebMediaConstraints constraints) {
+  void SetVideoTrack() {
     registry_.Init("stream URL");
-    registry_.AddVideoTrack("test video track", constraints);
+    registry_.AddVideoTrack("test video track");
     blink::WebVector<blink::WebMediaStreamTrack> video_tracks;
-    registry_.test_stream().videoTracks(video_tracks);
+    registry_.test_stream().VideoTracks(video_tracks);
+    track_ = video_tracks[0];
+    // TODO(hta): Verify that track_ is valid. When constraints produce
+    // no valid format, using the track will cause a crash.
+  }
+
+  void SetVideoTrack(const base::Optional<bool>& noise_reduction) {
+    registry_.Init("stream URL");
+    registry_.AddVideoTrack("test video track", VideoTrackAdapterSettings(),
+                            noise_reduction, false, 0.0);
+    blink::WebVector<blink::WebMediaStreamTrack> video_tracks;
+    registry_.test_stream().VideoTracks(video_tracks);
     track_ = video_tracks[0];
     // TODO(hta): Verify that track_ is valid. When constraints produce
     // no valid format, using the track will cause a crash.
@@ -35,23 +50,20 @@ class MediaStreamVideoWebRtcSinkTest : public ::testing::Test {
   MockMediaStreamRegistry registry_;
   // A ChildProcess and a MessageLoopForUI are both needed to fool the Tracks
   // and Sources in |registry_| into believing they are on the right threads.
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   const ChildProcess child_process_;
 };
 
 TEST_F(MediaStreamVideoWebRtcSinkTest, NoiseReductionDefaultsToNotSet) {
-  blink::WebMediaConstraints constraints;
-  constraints.initialize();
-  SetVideoTrack(constraints);
+  SetVideoTrack();
   MediaStreamVideoWebRtcSink my_sink(track_, &dependency_factory_);
   EXPECT_TRUE(my_sink.webrtc_video_track());
   EXPECT_FALSE(my_sink.SourceNeedsDenoisingForTesting());
 }
 
+// TODO(guidou): Remove this test. http://crbug.com/706408
 TEST_F(MediaStreamVideoWebRtcSinkTest, NoiseReductionConstraintPassThrough) {
-  MockConstraintFactory factory;
-  factory.basic().googNoiseReduction.setExact(true);
-  SetVideoTrack(factory.CreateWebMediaConstraints());
+  SetVideoTrack(base::Optional<bool>(true));
   MediaStreamVideoWebRtcSink my_sink(track_, &dependency_factory_);
   EXPECT_TRUE(my_sink.SourceNeedsDenoisingForTesting());
   EXPECT_TRUE(*(my_sink.SourceNeedsDenoisingForTesting()));

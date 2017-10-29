@@ -5,6 +5,7 @@
 #ifndef UI_GFX_SKIA_PAINT_UTIL_H_
 #define UI_GFX_SKIA_PAINT_UTIL_H_
 
+#include <memory>
 #include <vector>
 
 #include "cc/paint/paint_shader.h"
@@ -27,13 +28,13 @@ class ImageSkiaRep;
 //
 GFX_EXPORT sk_sp<cc::PaintShader> CreateImageRepShader(
     const gfx::ImageSkiaRep& image_rep,
-    cc::PaintShader::TileMode tile_mode,
+    SkShader::TileMode tile_mode,
     const SkMatrix& local_matrix);
 
 // Creates a bitmap shader for the image rep with the passed in scale factor.
 GFX_EXPORT sk_sp<cc::PaintShader> CreateImageRepShaderForScale(
     const gfx::ImageSkiaRep& image_rep,
-    cc::PaintShader::TileMode tile_mode,
+    SkShader::TileMode tile_mode,
     const SkMatrix& local_matrix,
     SkScalar scale);
 
@@ -47,15 +48,7 @@ GFX_EXPORT sk_sp<cc::PaintShader> CreateGradientShader(int start_point,
 // Creates a draw looper to generate |shadows|. The caller owns the draw looper.
 // NULL is returned if |shadows| is empty since no draw looper is needed in
 // this case.
-// DEPRECATED: See below. TODO(estade): remove this: crbug.com/624175
 GFX_EXPORT sk_sp<SkDrawLooper> CreateShadowDrawLooper(
-    const std::vector<ShadowValue>& shadows);
-
-// Creates a draw looper to generate |shadows|. This creates a looper with the
-// correct amount of blur. Callers of the existing CreateShadowDrawLooper may
-// rely on the wrong amount of blur being applied but new code should use this
-// function.
-GFX_EXPORT sk_sp<SkDrawLooper> CreateShadowDrawLooperCorrectBlur(
     const std::vector<ShadowValue>& shadows);
 
 }  // namespace gfx

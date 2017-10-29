@@ -9,6 +9,7 @@
 #include <cctype>
 #include <string>
 
+#include "base/command_line.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -25,6 +26,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/app_list/app_list_util.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/web_applications/web_app.h"
@@ -39,6 +41,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/image_loader.h"
@@ -66,7 +69,6 @@
 #include "ui/gfx/image/image_family.h"
 
 #if defined(OS_MACOSX)
-#include "base/command_line.h"
 #include "chrome/browser/web_applications/web_app_mac.h"
 #include "chrome/common/chrome_switches.h"
 #endif
@@ -76,8 +78,8 @@
 #endif  // defined(OS_WIN)
 
 #if defined(USE_ASH)
-#include "ash/common/shelf/shelf_delegate.h"  // nogncheck
-#include "ash/common/wm_shell.h"  // nogncheck
+#include "ash/public/cpp/shelf_model.h"  // nogncheck
+#include "ash/shell.h"                   // nogncheck
 #endif
 
 namespace {
@@ -416,7 +418,11 @@ void BookmarkAppHelper::GenerateIcon(
   gfx::ImageSkia icon_image(
       new GeneratedIconImageSource(letter, color, output_size),
       gfx::Size(output_size, output_size));
-  icon_image.bitmap()->deepCopyTo(&(*bitmaps)[output_size].bitmap);
+  SkBitmap& dst = (*bitmaps)[output_size].bitmap;
+  if (dst.tryAllocPixels(icon_image.bitmap()->info())) {
+    icon_image.bitmap()->readPixels(dst.info(), dst.getPixels(), dst.rowBytes(),
+                                    0, 0);
+  }
 }
 
 // static
@@ -585,8 +591,12 @@ void BookmarkAppHelper::OnDidGetManifest(const GURL& manifest_url,
 
   UpdateWebAppInfoFromManifest(manifest, &web_app_info_);
 
-  if (!ChromeOriginTrialPolicy().IsFeatureDisabled("WebShare"))
+  // TODO(mgiuca): Web Share Target should have its own flag, rather than using
+  // the experimental-web-platform-features flag. https://crbug.com/736178.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExperimentalWebPlatformFeatures)) {
     UpdateShareTargetInPrefs(manifest_url, manifest, profile_->GetPrefs());
+  }
 
   // Add urls from the WebApplicationInfo.
   std::vector<GURL> web_app_info_icon_urls;
@@ -663,9 +673,10 @@ void BookmarkAppHelper::OnIconsDownloaded(
     OnBubbleCompleted(true, web_app_info_);
     return;
   }
-  browser->window()->ShowBookmarkAppBubble(
-      web_app_info_, base::Bind(&BookmarkAppHelper::OnBubbleCompleted,
-                                weak_factory_.GetWeakPtr()));
+  chrome::ShowBookmarkAppDialog(
+      browser->window()->GetNativeWindow(), web_app_info_,
+      base::Bind(&BookmarkAppHelper::OnBubbleCompleted,
+                 weak_factory_.GetWeakPtr()));
 }
 
 void BookmarkAppHelper::OnBubbleCompleted(
@@ -732,9 +743,7 @@ void BookmarkAppHelper::FinishInstallation(const Extension* extension) {
   web_app::CreateShortcuts(web_app::SHORTCUT_CREATION_BY_USER,
                            creation_locations, current_profile, extension);
 #else
-  ash::ShelfDelegate* shelf_delegate = ash::WmShell::Get()->shelf_delegate();
-  DCHECK(shelf_delegate);
-  shelf_delegate->PinAppWithID(extension->id());
+  ash::Shell::Get()->shelf_model()->PinAppWithID(extension->id());
 #endif  // !defined(USE_ASH)
 #endif  // !defined(OS_MACOSX)
 

@@ -5,7 +5,6 @@
 #include "device/hid/hid_service_mac.h"
 
 #include <CoreFoundation/CoreFoundation.h>
-#include <IOKit/hid/IOHIDDevice.h>
 #include <stdint.h>
 
 #include <set>
@@ -20,6 +19,7 @@
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/device_event_log/device_event_log.h"
@@ -33,61 +33,65 @@ std::string HexErrorCode(IOReturn error_code) {
   return base::StringPrintf("0x%04x", error_code);
 }
 
-bool TryGetHidIntProperty(IOHIDDeviceRef device,
-                          CFStringRef key,
-                          int32_t* result) {
-  CFNumberRef ref =
-      base::mac::CFCast<CFNumberRef>(IOHIDDeviceGetProperty(device, key));
-  return ref && CFNumberGetValue(ref, kCFNumberSInt32Type, result);
-}
-
-int32_t GetHidIntProperty(IOHIDDeviceRef device, CFStringRef key) {
-  int32_t value;
-  if (TryGetHidIntProperty(device, key, &value))
-    return value;
+int32_t GetIntProperty(io_service_t service, CFStringRef key) {
+  base::ScopedCFTypeRef<CFNumberRef> ref(base::mac::CFCast<CFNumberRef>(
+      IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0)));
+  int32_t result;
+  if (ref && CFNumberGetValue(ref, kCFNumberSInt32Type, &result))
+    return result;
   return 0;
 }
 
-bool TryGetHidStringProperty(IOHIDDeviceRef device,
-                             CFStringRef key,
-                             std::string* result) {
-  CFStringRef ref =
-      base::mac::CFCast<CFStringRef>(IOHIDDeviceGetProperty(device, key));
-  if (!ref) {
-    return false;
-  }
-  *result = base::SysCFStringRefToUTF8(ref);
-  return true;
+std::string GetStringProperty(io_service_t service, CFStringRef key) {
+  base::ScopedCFTypeRef<CFStringRef> ref(base::mac::CFCast<CFStringRef>(
+      IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0)));
+  if (ref)
+    return base::SysCFStringRefToUTF8(ref);
+  return std::string();
 }
 
-std::string GetHidStringProperty(IOHIDDeviceRef device, CFStringRef key) {
-  std::string value;
-  TryGetHidStringProperty(device, key, &value);
-  return value;
-}
-
-bool TryGetHidDataProperty(IOHIDDeviceRef device,
+bool TryGetHidDataProperty(io_service_t service,
                            CFStringRef key,
                            std::vector<uint8_t>* result) {
-  CFDataRef ref =
-      base::mac::CFCast<CFDataRef>(IOHIDDeviceGetProperty(device, key));
-  if (!ref) {
+  base::ScopedCFTypeRef<CFDataRef> ref(base::mac::CFCast<CFDataRef>(
+      IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0)));
+  if (!ref)
     return false;
-  }
+
   base::STLClearObject(result);
   const uint8_t* bytes = CFDataGetBytePtr(ref);
   result->insert(result->begin(), bytes, bytes + CFDataGetLength(ref));
   return true;
 }
 
+scoped_refptr<HidDeviceInfo> CreateDeviceInfo(
+    base::mac::ScopedIOObject<io_service_t> service) {
+  uint64_t entry_id;
+  IOReturn result = IORegistryEntryGetRegistryEntryID(service, &entry_id);
+  if (result != kIOReturnSuccess) {
+    HID_LOG(EVENT) << "Failed to get IORegistryEntry ID: "
+                   << HexErrorCode(result);
+    return nullptr;
+  }
+
+  std::vector<uint8_t> report_descriptor;
+  if (!TryGetHidDataProperty(service, CFSTR(kIOHIDReportDescriptorKey),
+                             &report_descriptor)) {
+    HID_LOG(DEBUG) << "Device report descriptor not available.";
+  }
+
+  return new HidDeviceInfo(
+      entry_id, GetIntProperty(service, CFSTR(kIOHIDVendorIDKey)),
+      GetIntProperty(service, CFSTR(kIOHIDProductIDKey)),
+      GetStringProperty(service, CFSTR(kIOHIDProductKey)),
+      GetStringProperty(service, CFSTR(kIOHIDSerialNumberKey)),
+      kHIDBusTypeUSB,  // TODO(reillyg): Detect Bluetooth. crbug.com/443335
+      report_descriptor);
+}
+
 }  // namespace
 
-HidServiceMac::HidServiceMac(
-    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner)
-    : file_task_runner_(file_task_runner) {
-  task_runner_ = base::ThreadTaskRunnerHandle::Get();
-  DCHECK(task_runner_.get());
-
+HidServiceMac::HidServiceMac() : weak_factory_(this) {
   notify_port_.reset(IONotificationPortCreate(kIOMasterPortDefault));
   CFRunLoopAddSource(CFRunLoopGetMain(),
                      IONotificationPortGetRunLoopSource(notify_port_.get()),
@@ -129,18 +133,27 @@ void HidServiceMac::Connect(const HidDeviceId& device_id,
 
   const auto& map_entry = devices().find(device_id);
   if (map_entry == devices().end()) {
-    task_runner_->PostTask(FROM_HERE, base::Bind(callback, nullptr));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback, nullptr));
     return;
   }
-  scoped_refptr<HidDeviceInfo> device_info = map_entry->second;
 
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, kBlockingTaskTraits,
+      base::Bind(&HidServiceMac::OpenOnBlockingThread, map_entry->second),
+      base::Bind(&HidServiceMac::DeviceOpened, weak_factory_.GetWeakPtr(),
+                 map_entry->second, callback));
+}
+
+// static
+base::ScopedCFTypeRef<IOHIDDeviceRef> HidServiceMac::OpenOnBlockingThread(
+    scoped_refptr<HidDeviceInfo> device_info) {
   base::ScopedCFTypeRef<CFDictionaryRef> matching_dict(
-      IORegistryEntryIDMatching(device_id));
+      IORegistryEntryIDMatching(device_info->device_id()));
   if (!matching_dict.get()) {
     HID_LOG(EVENT) << "Failed to create matching dictionary for ID: "
-                   << device_id;
-    task_runner_->PostTask(FROM_HERE, base::Bind(callback, nullptr));
-    return;
+                   << device_info->device_id();
+    return base::ScopedCFTypeRef<IOHIDDeviceRef>();
   }
 
   // IOServiceGetMatchingService consumes a reference to the matching dictionary
@@ -148,30 +161,37 @@ void HidServiceMac::Connect(const HidDeviceId& device_id,
   base::mac::ScopedIOObject<io_service_t> service(IOServiceGetMatchingService(
       kIOMasterPortDefault, matching_dict.release()));
   if (!service.get()) {
-    HID_LOG(EVENT) << "IOService not found for ID: " << device_id;
-    task_runner_->PostTask(FROM_HERE, base::Bind(callback, nullptr));
-    return;
+    HID_LOG(EVENT) << "IOService not found for ID: "
+                   << device_info->device_id();
+    return base::ScopedCFTypeRef<IOHIDDeviceRef>();
   }
 
   base::ScopedCFTypeRef<IOHIDDeviceRef> hid_device(
       IOHIDDeviceCreate(kCFAllocatorDefault, service));
   if (!hid_device) {
     HID_LOG(EVENT) << "Unable to create IOHIDDevice object.";
-    task_runner_->PostTask(FROM_HERE, base::Bind(callback, nullptr));
-    return;
+    return base::ScopedCFTypeRef<IOHIDDeviceRef>();
   }
 
   IOReturn result = IOHIDDeviceOpen(hid_device, kIOHIDOptionsTypeNone);
   if (result != kIOReturnSuccess) {
     HID_LOG(EVENT) << "Failed to open device: " << HexErrorCode(result);
-    task_runner_->PostTask(FROM_HERE, base::Bind(callback, nullptr));
-    return;
+    return base::ScopedCFTypeRef<IOHIDDeviceRef>();
   }
 
-  task_runner_->PostTask(
-      FROM_HERE, base::Bind(callback, make_scoped_refptr(new HidConnectionMac(
-                                          hid_device.release(), device_info,
-                                          file_task_runner_))));
+  return hid_device;
+}
+
+void HidServiceMac::DeviceOpened(
+    scoped_refptr<HidDeviceInfo> device_info,
+    const ConnectCallback& callback,
+    base::ScopedCFTypeRef<IOHIDDeviceRef> hid_device) {
+  if (hid_device) {
+    callback.Run(base::MakeRefCounted<HidConnectionMac>(
+        std::move(hid_device), std::move(device_info)));
+  } else {
+    callback.Run(nullptr);
+  }
 }
 
 // static
@@ -193,69 +213,25 @@ void HidServiceMac::TerminatedCallback(void* context, io_iterator_t iterator) {
 void HidServiceMac::AddDevices() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  io_service_t device;
-  while ((device = IOIteratorNext(devices_added_iterator_)) != IO_OBJECT_NULL) {
-    scoped_refptr<HidDeviceInfo> device_info = CreateDeviceInfo(device);
-    if (device_info) {
+  base::mac::ScopedIOObject<io_service_t> device;
+  while (device.reset(IOIteratorNext(devices_added_iterator_)), device) {
+    scoped_refptr<HidDeviceInfo> device_info =
+        CreateDeviceInfo(std::move(device));
+    if (device_info)
       AddDevice(device_info);
-      // The reference retained by IOIteratorNext is released below in
-      // RemoveDevices when the device is removed.
-    } else {
-      IOObjectRelease(device);
-    }
   }
 }
 
 void HidServiceMac::RemoveDevices() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  io_service_t device;
-  while ((device = IOIteratorNext(devices_removed_iterator_)) !=
-         IO_OBJECT_NULL) {
+  base::mac::ScopedIOObject<io_service_t> device;
+  while (device.reset(IOIteratorNext(devices_removed_iterator_)), device) {
     uint64_t entry_id;
     IOReturn result = IORegistryEntryGetRegistryEntryID(device, &entry_id);
-    if (result == kIOReturnSuccess) {
+    if (result == kIOReturnSuccess)
       RemoveDevice(entry_id);
-    }
-
-    // Release reference retained by AddDevices above.
-    IOObjectRelease(device);
-    // Release the reference retained by IOIteratorNext.
-    IOObjectRelease(device);
   }
-}
-
-// static
-scoped_refptr<HidDeviceInfo> HidServiceMac::CreateDeviceInfo(
-    io_service_t service) {
-  uint64_t entry_id;
-  IOReturn result = IORegistryEntryGetRegistryEntryID(service, &entry_id);
-  if (result != kIOReturnSuccess) {
-    HID_LOG(EVENT) << "Failed to get IORegistryEntry ID: "
-                   << HexErrorCode(result);
-    return nullptr;
-  }
-
-  base::ScopedCFTypeRef<IOHIDDeviceRef> hid_device(
-      IOHIDDeviceCreate(kCFAllocatorDefault, service));
-  if (!hid_device) {
-    HID_LOG(EVENT) << "Unable to create IOHIDDevice object for new device.";
-    return nullptr;
-  }
-
-  std::vector<uint8_t> report_descriptor;
-  if (!TryGetHidDataProperty(hid_device, CFSTR(kIOHIDReportDescriptorKey),
-                             &report_descriptor)) {
-    HID_LOG(DEBUG) << "Device report descriptor not available.";
-  }
-
-  return new HidDeviceInfo(
-      entry_id, GetHidIntProperty(hid_device, CFSTR(kIOHIDVendorIDKey)),
-      GetHidIntProperty(hid_device, CFSTR(kIOHIDProductIDKey)),
-      GetHidStringProperty(hid_device, CFSTR(kIOHIDProductKey)),
-      GetHidStringProperty(hid_device, CFSTR(kIOHIDSerialNumberKey)),
-      kHIDBusTypeUSB,  // TODO(reillyg): Detect Bluetooth. crbug.com/443335
-      report_descriptor);
 }
 
 }  // namespace device

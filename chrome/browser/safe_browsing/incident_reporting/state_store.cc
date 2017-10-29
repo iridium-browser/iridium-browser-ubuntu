@@ -6,14 +6,15 @@
 
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident.h"
 #include "chrome/browser/safe_browsing/incident_reporting/platform_state_store.h"
-#include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 
 namespace safe_browsing {
 
@@ -42,8 +43,8 @@ void StateStore::Transaction::MarkAsReported(IncidentType type,
   base::DictionaryValue* type_dict = nullptr;
   if (!incidents_sent->GetDictionaryWithoutPathExpansion(type_string,
                                                          &type_dict)) {
-    type_dict = new base::DictionaryValue();
-    incidents_sent->SetWithoutPathExpansion(type_string, type_dict);
+    type_dict = incidents_sent->SetDictionaryWithoutPathExpansion(
+        type_string, base::MakeUnique<base::DictionaryValue>());
   }
   type_dict->SetStringWithoutPathExpansion(key, base::UintToString(digest));
 }

@@ -7,6 +7,7 @@
 
 #include "public/platform/WebCallbacks.h"
 #include "public/platform/WebCredentialManagerError.h"
+#include "public/platform/WebCredentialMediationRequirement.h"
 #include "public/platform/WebVector.h"
 
 #include <memory>
@@ -28,14 +29,17 @@ class WebCredentialManagerClient {
 
   // Ownership of the callback is transferred to the callee for each of
   // the following methods.
-  virtual void dispatchFailedSignIn(const WebCredential&,
+  virtual void DispatchFailedSignIn(const WebCredential&,
                                     NotificationCallbacks*) {}
-  virtual void dispatchStore(const WebCredential&, NotificationCallbacks*) {}
-  virtual void dispatchRequireUserMediation(NotificationCallbacks*) {}
-  virtual void dispatchGet(bool zeroClickOnly,
-                           bool includePasswords,
+  virtual void DispatchStore(const WebCredential&, NotificationCallbacks*) {}
+  virtual void DispatchPreventSilentAccess(NotificationCallbacks*) {}
+  virtual void DispatchGet(WebCredentialMediationRequirement mediation,
+                           bool include_passwords,
                            const WebVector<WebURL>& federations,
                            RequestCallbacks*) {}
+
+ protected:
+  virtual ~WebCredentialManagerClient() {}
 };
 
 }  // namespace blink

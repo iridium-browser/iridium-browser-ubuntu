@@ -105,14 +105,6 @@
         <include name="IDR_FEEDBACK_ICON_32" file="feedback/images/icon32.png" type="BINDATA" />
         <include name="IDR_FEEDBACK_ICON_64" file="feedback/images/icon64.png" type="BINDATA" />
       </if>
-      <if expr="enable_google_now">
-        <include name="IDR_GOOGLE_NOW_BACKGROUND_JS" file="google_now/background.js" type="BINDATA" />
-        <include name="IDR_GOOGLE_NOW_CARDS_JS" file="google_now/cards.js" type="BINDATA" />
-        <include name="IDR_GOOGLE_NOW_UTILITY_JS" file="google_now/utility.js" type="BINDATA" />
-        <include name="IDR_GOOGLE_NOW_ICON_16" file="google_now/images/icon16.png" type="BINDATA" />
-        <include name="IDR_GOOGLE_NOW_ICON_48" file="google_now/images/icon48.png" type="BINDATA" />
-        <include name="IDR_GOOGLE_NOW_ICON_128" file="google_now/images/icon128.png" type="BINDATA" />
-      </if>
       <include name="IDR_IDENTITY_API_SCOPE_APPROVAL_BACKGROUND_JS" file="identity_scope_approval_dialog/background.js" type="BINDATA" />
       <include name="IDR_IDENTITY_API_SCOPE_APPROVAL_DIALOG_CSS" file="identity_scope_approval_dialog/scope_approval_dialog.css" type="BINDATA" />
       <include name="IDR_IDENTITY_API_SCOPE_APPROVAL_DIALOG" file="identity_scope_approval_dialog/scope_approval_dialog.html" type="BINDATA" />
@@ -144,9 +136,12 @@
         <include name="IDR_ARC_SUPPORT_PLAYSTORE_CSS" file="chromeos/arc_support/playstore.css" type="BINDATA" />
         <include name="IDR_ARC_SUPPORT_PLAYSTORE_JS" file="chromeos/arc_support/playstore.js" type="BINDATA" />
         <include name="IDR_ARC_SUPPORT_PLAYSTORE_LOGO" file="chromeos/arc_support/icon/playstore.svg" type="BINDATA" />
+        <include name="IDR_ARC_SUPPORT_PROGRESSBAR_CSS" file="chromeos/arc_support/progressbar.css" type="BINDATA" />
+        <include name="IDR_ARC_SUPPORT_PROGRESSBAR_JS" file="chromeos/arc_support/progressbar.js" type="BINDATA" />
         <include name="IDR_ARC_SUPPORT_MAIN" file="chromeos/arc_support/main.html" allowexternalscript="true" type="BINDATA" />
         <include name="IDR_ARC_SUPPORT_ICON_48" file="chromeos/arc_support/icon/48.png" type="BINDATA" />
         <include name="IDR_ARC_SUPPORT_ICON_96" file="chromeos/arc_support/icon/96.png" type="BINDATA" />
+        <include name="IDR_ARC_SUPPORT_ICON_ERROER_IMAGE" file="chromeos/arc_support/images/error_image.png" type="BINDATA" />
         <include name="IDR_ARC_SUPPORT_ICON_HEADER" file="chromeos/arc_support/images/header.png" type="BINDATA" />
       </if>
       <if expr="enable_plugins">
@@ -165,34 +160,26 @@
         <include name="IDR_PDF_BROWSER_API_JS" file="pdf/browser_api.js" type="BINDATA" />
         <include name="IDR_PDF_CONTENT_SCRIPT_JS" file="pdf/content_script.js" type="BINDATA" />
 
-        <include name="IDR_PDF_SHARED_ICON_STYLE_CSS" file="pdf/elements/shared-icon-style.css" type="BINDATA" />
+        <include name="IDR_PDF_SHARED_VARS_HTML" file="pdf/elements/shared-vars.html" type="BINDATA" />
         <include name="IDR_PDF_ICONS_HTML" file="pdf/elements/icons.html" type="BINDATA" />
-        <include name="IDR_PDF_VIEWER_BOOKMARK_CSS" file="pdf/elements/viewer-bookmark/viewer-bookmark.css" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_BOOKMARK_HTML" file="pdf/elements/viewer-bookmark/viewer-bookmark.html" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_BOOKMARK_JS" file="pdf/elements/viewer-bookmark/viewer-bookmark.js" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_BOOKMARKS_CONTENT_HTML" file="pdf/elements/viewer-bookmarks-content/viewer-bookmarks-content.html" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_BOOKMARKS_CONTENT_JS" file="pdf/elements/viewer-bookmarks-content/viewer-bookmarks-content.js" type="BINDATA" />
-        <include name="IDR_PDF_VIEWER_ERROR_SCREEN_CSS" file="pdf/elements/viewer-error-screen/viewer-error-screen.css" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_ERROR_SCREEN_HTML" file="pdf/elements/viewer-error-screen/viewer-error-screen.html" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_ERROR_SCREEN_JS" file="pdf/elements/viewer-error-screen/viewer-error-screen.js" type="BINDATA" />
-        <include name="IDR_PDF_VIEWER_PAGE_INDICATOR_CSS" file="pdf/elements/viewer-page-indicator/viewer-page-indicator.css" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_PAGE_INDICATOR_HTML" file="pdf/elements/viewer-page-indicator/viewer-page-indicator.html" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_PAGE_INDICATOR_JS" file="pdf/elements/viewer-page-indicator/viewer-page-indicator.js" type="BINDATA" flattenhtml="true" />
-        <include name="IDR_PDF_VIEWER_PAGE_SELECTOR_CSS" file="pdf/elements/viewer-page-selector/viewer-page-selector.css" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_PAGE_SELECTOR_HTML" file="pdf/elements/viewer-page-selector/viewer-page-selector.html" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_PAGE_SELECTOR_JS" file="pdf/elements/viewer-page-selector/viewer-page-selector.js" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_PASSWORD_SCREEN_HTML" file="pdf/elements/viewer-password-screen/viewer-password-screen.html" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_PASSWORD_SCREEN_JS" file="pdf/elements/viewer-password-screen/viewer-password-screen.js" type="BINDATA" />
-        <include name="IDR_PDF_VIEWER_PDF_TOOLBAR_CSS" file="pdf/elements/viewer-pdf-toolbar/viewer-pdf-toolbar.css" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_PDF_TOOLBAR_HTML" file="pdf/elements/viewer-pdf-toolbar/viewer-pdf-toolbar.html" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_PDF_TOOLBAR_JS" file="pdf/elements/viewer-pdf-toolbar/viewer-pdf-toolbar.js" type="BINDATA" />
-        <include name="IDR_PDF_VIEWER_TOOLBAR_DROPDOWN_CSS" file="pdf/elements/viewer-toolbar-dropdown/viewer-toolbar-dropdown.css" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_TOOLBAR_DROPDOWN_HTML" file="pdf/elements/viewer-toolbar-dropdown/viewer-toolbar-dropdown.html" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_TOOLBAR_DROPDOWN_JS" file="pdf/elements/viewer-toolbar-dropdown/viewer-toolbar-dropdown.js" type="BINDATA" />
-        <include name="IDR_PDF_VIEWER_ZOOM_BUTTON_CSS" file="pdf/elements/viewer-zoom-toolbar/viewer-zoom-button.css" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_ZOOM_BUTTON_HTML" file="pdf/elements/viewer-zoom-toolbar/viewer-zoom-button.html" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_ZOOM_BUTTON_JS" file="pdf/elements/viewer-zoom-toolbar/viewer-zoom-button.js" type="BINDATA" />
-        <include name="IDR_PDF_VIEWER_ZOOM_SELECTOR_CSS" file="pdf/elements/viewer-zoom-toolbar/viewer-zoom-toolbar.css" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_ZOOM_SELECTOR_HTML" file="pdf/elements/viewer-zoom-toolbar/viewer-zoom-toolbar.html" type="BINDATA" />
         <include name="IDR_PDF_VIEWER_ZOOM_SELECTOR_JS" file="pdf/elements/viewer-zoom-toolbar/viewer-zoom-toolbar.js" type="BINDATA" />
       </if>

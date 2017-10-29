@@ -12,6 +12,7 @@
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/ui/views/tabs/window_finder.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "ui/display/display.h"
@@ -36,16 +36,15 @@
 #include "ui/events/gestures/gesture_recognizer.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/views/event_monitor.h"
-#include "ui/views/focus/view_storage.h"
+#include "ui/views/view_tracker.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_ASH)
-#include "ash/common/accelerators/accelerator_commands.h"  // nogncheck
-#include "ash/common/wm/maximize_mode/maximize_mode_controller.h"  // nogncheck
-#include "ash/common/wm/window_state.h"  // nogncheck
-#include "ash/common/wm_shell.h"  // nogncheck
-#include "ash/wm/window_state_aura.h"  // nogncheck
+#include "ash/accelerators/accelerator_commands.h"  // nogncheck
+#include "ash/shell.h"                   // nogncheck
+#include "ash/wm/tablet_mode/tablet_mode_controller.h"  // nogncheck
+#include "ash/wm/window_state.h"  // nogncheck
 #include "ui/wm/core/coordinate_conversion.h"  // nogncheck
 #endif
 
@@ -55,7 +54,6 @@
 #include "ui/wm/core/window_modality_controller.h"  // nogncheck
 #endif
 
-using base::UserMetricsAction;
 using content::OpenURLParams;
 using content::WebContents;
 
@@ -76,6 +74,19 @@ const int kMoveAttachedSubsequentDelay = 300;
 
 const int kHorizontalMoveThreshold = 16;  // DIPs.
 
+// The inset within the first dragged tab to use when calculating the "drag
+// insertion point".  If we simply used the x-coordinate of the tab, we'd be
+// calculating based on a point well before where the user considers the tab to
+// "be".  The value here is chosen to "feel good" based on the widths of the tab
+// images and the tab overlap.
+//
+// Note that this must return a value smaller than the midpoint of any tab's
+// width, or else the user won't be able to drag a tab to the left of the first
+// tab in the strip.
+//
+// TODO(pkasting): Maybe this should use Tab::GetOverlap() instead?
+const int kLeadingWidthForDrag = 16;
+
 // Distance from the next/previous stacked before before we consider the tab
 // close enough to trigger moving.
 const int kStackedDistance = 36;
@@ -87,15 +98,15 @@ const int kStackedDistance = 36;
 const int kMaximizedWindowInset = 10;  // DIPs.
 
 #if defined(USE_ASH)
-// Returns true if |tab_strip| browser window is docked.
-bool IsDockedOrSnapped(const TabStrip* tab_strip) {
+// Returns true if |tab_strip| browser window is snapped.
+bool IsSnapped(const TabStrip* tab_strip) {
   DCHECK(tab_strip);
   ash::wm::WindowState* window_state =
       ash::wm::GetWindowState(tab_strip->GetWidget()->GetNativeWindow());
-  return window_state->IsDocked() || window_state->IsSnapped();
+  return window_state->IsSnapped();
 }
 #else
-bool IsDockedOrSnapped(const TabStrip* tab_strip) {
+bool IsSnapped(const TabStrip* tab_strip) {
   return false;
 }
 #endif
@@ -182,8 +193,7 @@ TabDragController::TabDragController()
       attached_tabstrip_(NULL),
       can_release_capture_(true),
       offset_to_width_ratio_(0),
-      old_focused_view_id_(
-          views::ViewStorage::GetInstance()->CreateStorageID()),
+      old_focused_view_tracker_(base::MakeUnique<views::ViewTracker>()),
       last_move_screen_loc_(0),
       started_drag_(false),
       active_(true),
@@ -210,8 +220,6 @@ TabDragController::TabDragController()
 }
 
 TabDragController::~TabDragController() {
-  views::ViewStorage::GetInstance()->RemoveView(old_focused_view_id_);
-
   if (instance_ == this)
     instance_ = NULL;
 
@@ -240,7 +248,7 @@ void TabDragController::Init(
     MoveBehavior move_behavior,
     EventSource event_source) {
   DCHECK(!tabs.empty());
-  DCHECK(std::find(tabs.begin(), tabs.end(), source_tab) != tabs.end());
+  DCHECK(base::ContainsValue(tabs, source_tab));
   source_tabstrip_ = source_tabstrip;
   was_source_maximized_ = source_tabstrip->GetWidget()->IsMaximized();
   was_source_fullscreen_ = source_tabstrip->GetWidget()->IsFullscreen();
@@ -291,10 +299,9 @@ void TabDragController::Init(
     source_tabstrip_->GetWidget()->SetCapture(source_tabstrip_);
 
 #if defined(USE_ASH)
-  if (ash::WmShell::HasInstance() &&
-      ash::WmShell::Get()
-          ->maximize_mode_controller()
-          ->IsMaximizeModeWindowManagerEnabled()) {
+  if (ash::Shell::HasInstance() && ash::Shell::Get()
+                                       ->tablet_mode_controller()
+                                       ->IsTabletModeWindowManagerEnabled()) {
     detach_behavior_ = NOT_DETACHABLE;
   }
 #endif
@@ -468,11 +475,8 @@ gfx::Point TabDragController::GetWindowCreatePoint(
 
 void TabDragController::SaveFocus() {
   DCHECK(source_tabstrip_);
-  views::View* focused_view =
-      source_tabstrip_->GetFocusManager()->GetFocusedView();
-  if (focused_view)
-    views::ViewStorage::GetInstance()->StoreView(old_focused_view_id_,
-                                                 focused_view);
+  old_focused_view_tracker_->SetView(
+      source_tabstrip_->GetFocusManager()->GetFocusedView());
   source_tabstrip_->GetFocusManager()->SetFocusedView(source_tabstrip_);
   // WARNING: we may have been deleted.
 }
@@ -486,8 +490,7 @@ void TabDragController::RestoreFocus() {
     }
     return;
   }
-  views::View* old_focused_view =
-      views::ViewStorage::GetInstance()->RetrieveView(old_focused_view_id_);
+  views::View* old_focused_view = old_focused_view_tracker_->view();
   if (!old_focused_view)
     return;
   old_focused_view->GetFocusManager()->SetFocusedView(old_focused_view);
@@ -1119,7 +1122,7 @@ int TabDragController::GetInsertionIndexFrom(const gfx::Rect& dragged_bounds,
   // Make the actual "drag insertion point" be just after the leading edge of
   // the first dragged tab.  This is closer to where the user thinks of the tab
   // as "starting" than just dragged_bounds.x(), especially with narrow tabs.
-  const int dragged_x = dragged_bounds.x() + Tab::leading_width_for_drag();
+  const int dragged_x = dragged_bounds.x() + kLeadingWidthForDrag;
   if (start < 0 || start > last_tab ||
       dragged_x < attached_tabstrip_->ideal_bounds(start).x())
     return -1;
@@ -1140,7 +1143,7 @@ int TabDragController::GetInsertionIndexFromReversed(
   // Make the actual "drag insertion point" be just after the leading edge of
   // the first dragged tab.  This is closer to where the user thinks of the tab
   // as "starting" than just dragged_bounds.x(), especially with narrow tabs.
-  const int dragged_x = dragged_bounds.x() + Tab::leading_width_for_drag();
+  const int dragged_x = dragged_bounds.x() + kLeadingWidthForDrag;
   if (start < 0 || start >= attached_tabstrip_->tab_count() ||
       dragged_x >= attached_tabstrip_->ideal_bounds(start).right())
     return -1;
@@ -1211,7 +1214,7 @@ bool TabDragController::ShouldDragToNextStackedTab(
   int next_x = attached_tabstrip_->ideal_bounds(index + 1).x();
   int mid_x = std::min(next_x - kStackedDistance,
                        active_x + (next_x - active_x) / 4);
-  // TODO(pkasting): Should this add Tab::leading_width_for_drag() as
+  // TODO(pkasting): Should this add kLeadingWidthForDrag as
   // GetInsertionIndexFrom() does?
   return dragged_bounds.x() >= mid_x;
 }
@@ -1228,7 +1231,7 @@ bool TabDragController::ShouldDragToPreviousStackedTab(
   int previous_x = attached_tabstrip_->ideal_bounds(index - 1).x();
   int mid_x = std::max(previous_x + kStackedDistance,
                        active_x - (active_x - previous_x) / 4);
-  // TODO(pkasting): Should this add Tab::leading_width_for_drag() as
+  // TODO(pkasting): Should this add kLeadingWidthForDrag as
   // GetInsertionIndexFrom() does?
   return dragged_bounds.x() <= mid_x;
 }
@@ -1476,7 +1479,7 @@ void TabDragController::CompleteDrag() {
 
   if (attached_tabstrip_) {
     if (is_dragging_new_browser_ || did_restore_window_) {
-      if (IsDockedOrSnapped(attached_tabstrip_)) {
+      if (IsSnapped(attached_tabstrip_)) {
         was_source_maximized_ = false;
         was_source_fullscreen_ = false;
       }
@@ -1586,7 +1589,7 @@ void TabDragController::BringWindowUnderPointToFront(
       // already topmost and it is safe to return with no stacking change.
       if (*it == browser_window)
         return;
-      if ((*it)->type() != ui::wm::WINDOW_TYPE_POPUP) {
+      if ((*it)->type() != aura::client::WINDOW_TYPE_POPUP) {
         widget_window->StackAbove(*it);
         break;
       }

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/renderer/gpu//compositor_forwarding_message_filter.h"
+#include "content/renderer/gpu/compositor_forwarding_message_filter.h"
 
 #include "base/bind.h"
 #include "base/location.h"
@@ -49,7 +49,6 @@ bool CompositorForwardingMessageFilter::OnMessageReceived(
   switch (message.type()) {
     case ViewMsg_SetBeginFramePaused::ID:
     case ViewMsg_BeginFrame::ID:
-    case ViewMsg_ReclaimCompositorResources::ID:
       break;
     default:
       return false;

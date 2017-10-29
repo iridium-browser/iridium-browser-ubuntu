@@ -32,17 +32,19 @@ if __name__ == '__main__':
                     'https://github.com/GoogleChrome/chromium-dashboard')
   options, args = parser.parse_args()
 
-  source_path = 'third_party/WebKit/Source/core/frame/UseCounter.h'
+  source_path = 'third_party/WebKit/public/platform/web_feature.mojom'
 
-  START_MARKER = '^enum Feature : uint32_t {'
-  END_MARKER = '^NumberOfFeatures'
+  START_MARKER = '^enum WebFeature {'
+  END_MARKER = '^kNumberOfFeatures'
 
   if options.dashboard:
-    enum_dict = ReadHistogramValues(source_path, START_MARKER, END_MARKER)
+    enum_dict, ignored = ReadHistogramValues(source_path, START_MARKER,
+        END_MARKER, strip_k_prefix=True)
     PrintEnumForDashboard(enum_dict)
   else:
     UpdateHistogramEnum(
         histogram_enum_name='FeatureObserver',
         source_enum_path=source_path,
         start_marker=START_MARKER,
-        end_marker=END_MARKER)
+        end_marker=END_MARKER,
+        strip_k_prefix=True)

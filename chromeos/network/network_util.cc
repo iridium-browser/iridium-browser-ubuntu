@@ -12,6 +12,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/device_state.h"
 #include "chromeos/network/managed_network_configuration_handler.h"
@@ -137,7 +138,7 @@ bool ParseCellularScanResults(const base::ListValue& list,
   scan_results->reserve(list.GetSize());
   for (const auto& value : list) {
     const base::DictionaryValue* dict;
-    if (!value->GetAsDictionary(&dict))
+    if (!value.GetAsDictionary(&dict))
       return false;
     CellularScanResult scan_result;
     // If the network id property is not present then this network cannot be
@@ -179,7 +180,7 @@ std::unique_ptr<base::DictionaryValue> TranslateNetworkStateToONC(
           shill::kProviderRequiresRoamingProperty,
           device->provider_requires_roaming());
       shill_dictionary->SetWithoutPathExpansion(shill::kDeviceProperty,
-                                                device_dict.release());
+                                                std::move(device_dict));
     }
   }
 

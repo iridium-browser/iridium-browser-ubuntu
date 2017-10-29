@@ -38,15 +38,6 @@ class CountedBrowserAccessibility : public BrowserAccessibility {
 
   int native_ref_count_;
   static int global_obj_count_;
-
-#if defined(OS_WIN)
-  // Adds some padding to prevent a heap-buffer-overflow when an instance of
-  // this class is casted into a BrowserAccessibilityWin pointer.
-  // http://crbug.com/235508
-  // TODO(dmazzoni): Fix this properly.
-  static const size_t kDataSize = sizeof(int) + sizeof(BrowserAccessibility);
-  uint8_t padding_[sizeof(BrowserAccessibilityWin) - kDataSize];
-#endif
 };
 
 int CountedBrowserAccessibility::global_obj_count_ = 0;
@@ -74,6 +65,7 @@ class TestBrowserAccessibilityDelegate
       const gfx::Rect& bounds) const override {
     return gfx::Point();
   }
+  float AccessibilityGetDeviceScaleFactor() const override { return 1.0f; }
   void AccessibilityFatalError() override { got_fatal_error_ = true; }
   gfx::AcceleratedWidget AccessibilityGetAcceleratedWidget() override {
     return gfx::kNullAcceleratedWidget;
@@ -99,19 +91,16 @@ TEST(BrowserAccessibilityManagerTest, TestNoLeaks) {
   button.id = 2;
   button.SetName("Button");
   button.role = ui::AX_ROLE_BUTTON;
-  button.state = 0;
 
   ui::AXNodeData checkbox;
   checkbox.id = 3;
   checkbox.SetName("Checkbox");
   checkbox.role = ui::AX_ROLE_CHECK_BOX;
-  checkbox.state = 0;
 
   ui::AXNodeData root;
   root.id = 1;
   root.SetName("Document");
   root.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  root.state = 0;
   root.child_ids.push_back(2);
   root.child_ids.push_back(3);
 
@@ -176,25 +165,21 @@ TEST(BrowserAccessibilityManagerTest, TestReuseBrowserAccessibilityObjects) {
   tree1_child1.id = 2;
   tree1_child1.SetName("Child1");
   tree1_child1.role = ui::AX_ROLE_BUTTON;
-  tree1_child1.state = 0;
 
   ui::AXNodeData tree1_child2;
   tree1_child2.id = 3;
   tree1_child2.SetName("Child2");
   tree1_child2.role = ui::AX_ROLE_BUTTON;
-  tree1_child2.state = 0;
 
   ui::AXNodeData tree1_child3;
   tree1_child3.id = 4;
   tree1_child3.SetName("Child3");
   tree1_child3.role = ui::AX_ROLE_BUTTON;
-  tree1_child3.state = 0;
 
   ui::AXNodeData tree1_root;
   tree1_root.id = 1;
   tree1_root.SetName("Document");
   tree1_root.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  tree1_root.state = 0;
   tree1_root.child_ids.push_back(2);
   tree1_root.child_ids.push_back(3);
   tree1_root.child_ids.push_back(4);
@@ -211,13 +196,11 @@ TEST(BrowserAccessibilityManagerTest, TestReuseBrowserAccessibilityObjects) {
   tree2_child0.id = 5;
   tree2_child0.SetName("Child0");
   tree2_child0.role = ui::AX_ROLE_BUTTON;
-  tree2_child0.state = 0;
 
   ui::AXNodeData tree2_root;
   tree2_root.id = 1;
   tree2_root.SetName("DocumentChanged");
   tree2_root.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  tree2_root.state = 0;
   tree2_root.child_ids.push_back(5);
   tree2_root.child_ids.push_back(2);
   tree2_root.child_ids.push_back(3);
@@ -311,46 +294,39 @@ TEST(BrowserAccessibilityManagerTest, TestReuseBrowserAccessibilityObjects2) {
   tree1_grandchild1.id = 4;
   tree1_grandchild1.SetName("GrandChild1");
   tree1_grandchild1.role = ui::AX_ROLE_BUTTON;
-  tree1_grandchild1.state = 0;
 
   ui::AXNodeData tree1_child1;
   tree1_child1.id = 3;
   tree1_child1.SetName("Child1");
   tree1_child1.role = ui::AX_ROLE_BUTTON;
-  tree1_child1.state = 0;
   tree1_child1.child_ids.push_back(4);
 
   ui::AXNodeData tree1_grandchild2;
   tree1_grandchild2.id = 6;
   tree1_grandchild2.SetName("GrandChild1");
   tree1_grandchild2.role = ui::AX_ROLE_BUTTON;
-  tree1_grandchild2.state = 0;
 
   ui::AXNodeData tree1_child2;
   tree1_child2.id = 5;
   tree1_child2.SetName("Child2");
   tree1_child2.role = ui::AX_ROLE_BUTTON;
-  tree1_child2.state = 0;
   tree1_child2.child_ids.push_back(6);
 
   ui::AXNodeData tree1_grandchild3;
   tree1_grandchild3.id = 8;
   tree1_grandchild3.SetName("GrandChild3");
   tree1_grandchild3.role = ui::AX_ROLE_BUTTON;
-  tree1_grandchild3.state = 0;
 
   ui::AXNodeData tree1_child3;
   tree1_child3.id = 7;
   tree1_child3.SetName("Child3");
   tree1_child3.role = ui::AX_ROLE_BUTTON;
-  tree1_child3.state = 0;
   tree1_child3.child_ids.push_back(8);
 
   ui::AXNodeData tree1_container;
   tree1_container.id = 2;
   tree1_container.SetName("Container");
   tree1_container.role = ui::AX_ROLE_GROUP;
-  tree1_container.state = 0;
   tree1_container.child_ids.push_back(3);
   tree1_container.child_ids.push_back(5);
   tree1_container.child_ids.push_back(7);
@@ -359,7 +335,6 @@ TEST(BrowserAccessibilityManagerTest, TestReuseBrowserAccessibilityObjects2) {
   tree1_root.id = 1;
   tree1_root.SetName("Document");
   tree1_root.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  tree1_root.state = 0;
   tree1_root.child_ids.push_back(2);
 
   // Tree 2:
@@ -378,20 +353,17 @@ TEST(BrowserAccessibilityManagerTest, TestReuseBrowserAccessibilityObjects2) {
   tree2_grandchild0.id = 9;
   tree2_grandchild0.SetName("GrandChild0");
   tree2_grandchild0.role = ui::AX_ROLE_BUTTON;
-  tree2_grandchild0.state = 0;
 
   ui::AXNodeData tree2_child0;
   tree2_child0.id = 10;
   tree2_child0.SetName("Child0");
   tree2_child0.role = ui::AX_ROLE_BUTTON;
-  tree2_child0.state = 0;
   tree2_child0.child_ids.push_back(9);
 
   ui::AXNodeData tree2_container;
   tree2_container.id = 2;
   tree2_container.SetName("Container");
   tree2_container.role = ui::AX_ROLE_GROUP;
-  tree2_container.state = 0;
   tree2_container.child_ids.push_back(10);
   tree2_container.child_ids.push_back(3);
   tree2_container.child_ids.push_back(5);
@@ -453,7 +425,7 @@ TEST(BrowserAccessibilityManagerTest, TestReuseBrowserAccessibilityObjects2) {
   EXPECT_FALSE(child3_accessible->instance_active());
 
   // Ensure that we retain the parent of the detached subtree.
-  EXPECT_EQ(root_accessible, container_accessible->GetParent());
+  EXPECT_EQ(root_accessible, container_accessible->PlatformGetParent());
   EXPECT_EQ(0, container_accessible->GetIndexInParent());
 
   // Check that the index in parent has been updated.
@@ -483,21 +455,17 @@ TEST(BrowserAccessibilityManagerTest, TestMoveChildUp) {
 
   ui::AXNodeData tree1_4;
   tree1_4.id = 4;
-  tree1_4.state = 0;
 
   ui::AXNodeData tree1_3;
   tree1_3.id = 3;
-  tree1_3.state = 0;
   tree1_3.child_ids.push_back(4);
 
   ui::AXNodeData tree1_2;
   tree1_2.id = 2;
-  tree1_2.state = 0;
 
   ui::AXNodeData tree1_1;
   tree1_1.id = 1;
   tree1_1.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  tree1_1.state = 0;
   tree1_1.child_ids.push_back(2);
   tree1_1.child_ids.push_back(3);
 
@@ -510,20 +478,16 @@ TEST(BrowserAccessibilityManagerTest, TestMoveChildUp) {
 
   ui::AXNodeData tree2_6;
   tree2_6.id = 6;
-  tree2_6.state = 0;
 
   ui::AXNodeData tree2_5;
   tree2_5.id = 5;
-  tree2_5.state = 0;
 
   ui::AXNodeData tree2_4;
   tree2_4.id = 4;
-  tree2_4.state = 0;
   tree2_4.child_ids.push_back(6);
 
   ui::AXNodeData tree2_1;
   tree2_1.id = 1;
-  tree2_1.state = 0;
   tree2_1.child_ids.push_back(4);
   tree2_1.child_ids.push_back(5);
 
@@ -938,7 +902,7 @@ TEST(BrowserAccessibilityManagerTest, BoundsForRangeOnParentElement) {
 
   ui::AXNodeData div;
   div.id = 2;
-  div.role = ui::AX_ROLE_DIV;
+  div.role = ui::AX_ROLE_GENERIC_CONTAINER;
   div.location = gfx::RectF(100, 100, 100, 20);
   div.child_ids.push_back(3);
   div.child_ids.push_back(4);
@@ -1213,7 +1177,7 @@ TEST(BrowserAccessibilityManagerTest, TestFindIndicesInCommonParent) {
 
   ui::AXNodeData div;
   div.id = 2;
-  div.role = ui::AX_ROLE_DIV;
+  div.role = ui::AX_ROLE_GENERIC_CONTAINER;
   root.child_ids.push_back(div.id);
 
   ui::AXNodeData button;
@@ -1356,7 +1320,7 @@ TEST(BrowserAccessibilityManagerTest, TestGetTextForRange) {
 
   ui::AXNodeData div;
   div.id = 2;
-  div.role = ui::AX_ROLE_DIV;
+  div.role = ui::AX_ROLE_GENERIC_CONTAINER;
   root.child_ids.push_back(div.id);
 
   ui::AXNodeData button;
@@ -1520,7 +1484,6 @@ TEST(BrowserAccessibilityManagerTest, DeletingFocusedNodeDoesNotCrash) {
   ui::AXNodeData root;
   root.id = 1;
   root.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  root.state = 0;
   root.child_ids.push_back(2);
 
   ui::AXNodeData node2;
@@ -1540,7 +1503,6 @@ TEST(BrowserAccessibilityManagerTest, DeletingFocusedNodeDoesNotCrash) {
   ui::AXNodeData root2;
   root2.id = 3;
   root2.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  root2.state = 0;
 
   std::vector<AXEventNotificationDetails> events2;
   events2.push_back(AXEventNotificationDetails());
@@ -1560,7 +1522,6 @@ TEST(BrowserAccessibilityManagerTest, DeletingFocusedNodeDoesNotCrash2) {
   ui::AXNodeData root;
   root.id = 1;
   root.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  root.state = 0;
   root.child_ids.push_back(2);
   root.child_ids.push_back(3);
   root.child_ids.push_back(4);
@@ -1570,11 +1531,9 @@ TEST(BrowserAccessibilityManagerTest, DeletingFocusedNodeDoesNotCrash2) {
 
   ui::AXNodeData node3;
   node3.id = 3;
-  node3.state = 0;
 
   ui::AXNodeData node4;
   node4.id = 4;
-  node4.state = 0;
 
   ui::AXTreeUpdate initial_state = MakeAXTreeUpdate(root, node2, node3, node4);
   initial_state.has_tree_data = true;
@@ -1590,7 +1549,6 @@ TEST(BrowserAccessibilityManagerTest, DeletingFocusedNodeDoesNotCrash2) {
   ui::AXNodeData root2;
   root2.id = 3;
   root2.role = ui::AX_ROLE_ROOT_WEB_AREA;
-  root2.state = 0;
 
   // Make an update the explicitly clears the previous root.
   std::vector<AXEventNotificationDetails> events2;
@@ -1605,53 +1563,6 @@ TEST(BrowserAccessibilityManagerTest, DeletingFocusedNodeDoesNotCrash2) {
   // that this doesn't crash.
   ASSERT_EQ(3, manager->GetRoot()->GetId());
   ASSERT_EQ(3, manager->GetFocus()->GetId());
-}
-
-TEST(BrowserAccessibilityManagerTest, LineStartBoundary) {
-  ui::AXNodeData root;
-  root.id = 1;
-  root.role = ui::AX_ROLE_ROOT_WEB_AREA;
-
-  ui::AXNodeData static_text;
-  static_text.id = 2;
-  static_text.SetName("1-2-3-4");
-  static_text.role = ui::AX_ROLE_STATIC_TEXT;
-  root.child_ids.push_back(2);
-
-  ui::AXNodeData inline_text1;
-  inline_text1.id = 3;
-  inline_text1.SetName("1-2-");
-  inline_text1.role = ui::AX_ROLE_INLINE_TEXT_BOX;
-  static_text.child_ids.push_back(3);
-
-  ui::AXNodeData inline_text2;
-  inline_text2.id = 4;
-  inline_text2.SetName("3-4");
-  inline_text2.role = ui::AX_ROLE_INLINE_TEXT_BOX;
-  static_text.child_ids.push_back(4);
-
-  std::unique_ptr<BrowserAccessibilityManager> manager(
-      BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, static_text, inline_text1, inline_text2),
-          nullptr, new CountedBrowserAccessibilityFactory()));
-
-  BrowserAccessibility* root_accessible = manager->GetRoot();
-  ASSERT_NE(nullptr, root_accessible);
-  BrowserAccessibility* static_text_accessible =
-      root_accessible->PlatformGetChild(0);
-  ASSERT_NE(nullptr, static_text_accessible);
-
-  // If the affinity is downstream, check that we get the second line.
-  ASSERT_EQ(4, static_text_accessible->GetLineStartBoundary(
-      4, ui::BACKWARDS_DIRECTION, ui::AX_TEXT_AFFINITY_DOWNSTREAM));
-  ASSERT_EQ(7, static_text_accessible->GetLineStartBoundary(
-      4, ui::FORWARDS_DIRECTION, ui::AX_TEXT_AFFINITY_DOWNSTREAM));
-
-  // If the affinity is upstream, check that we get the second line.
-  ASSERT_EQ(0, static_text_accessible->GetLineStartBoundary(
-      4, ui::BACKWARDS_DIRECTION, ui::AX_TEXT_AFFINITY_UPSTREAM));
-  ASSERT_EQ(4, static_text_accessible->GetLineStartBoundary(
-      4, ui::FORWARDS_DIRECTION, ui::AX_TEXT_AFFINITY_UPSTREAM));
 }
 
 }  // namespace content

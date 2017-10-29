@@ -282,7 +282,6 @@ class FlashFullscreenInteractiveBrowserTest : public OutOfProcessPPAPITest {
                                       const SkBitmap& bitmap,
                                       content::ReadbackResponse response) {
     if (response == content::READBACK_SUCCESS) {
-      SkAutoLockPixels lock_pixels(bitmap);
       if (bitmap.width() > 0 && bitmap.height() > 0)
         *is_expected_color = (bitmap.getColor(0, 0) == expected_color);
     }
@@ -407,8 +406,14 @@ IN_PROC_BROWSER_TEST_F(FlashFullscreenInteractiveBrowserTest,
 
 // Tests that a fullscreen flash plugin can lock the mouse, and that it'll be
 // unlocked when the plugin exits fullscreen.
+// Flaky on Linux. See https://crbug.com/706148.
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#define MAYBE_Fullscreen_LockMouse DISABLED_Fullscreen_LockMouse
+#else
+#define MAYBE_Fullscreen_LockMouse Fullscreen_LockMouse
+#endif
 IN_PROC_BROWSER_TEST_F(FlashFullscreenInteractiveBrowserTest,
-                       Fullscreen_LockMouse) {
+                       MAYBE_Fullscreen_LockMouse) {
   ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
   StartFakingTabCapture();
   ASSERT_TRUE(LaunchFlashFullscreen());
@@ -422,7 +427,7 @@ IN_PROC_BROWSER_TEST_F(FlashFullscreenInteractiveBrowserTest,
       fullscreen_view->GetRenderWidgetHost();
   content::RenderProcessHost* process = fullscreen_widget->GetProcess();
   content::PwnMessageHelper::LockMouse(
-      process, fullscreen_widget->GetRoutingID(), true, false, true);
+      process, fullscreen_widget->GetRoutingID(), true, true);
 
   // Make sure that the fullscreen widget got the mouse lock.
   EXPECT_TRUE(fullscreen_view->IsMouseLocked());

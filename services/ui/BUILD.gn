@@ -24,8 +24,7 @@ service("ui") {
 
   deps = [
     ":lib",
-    "//services/service_manager/public/cpp:sources",
-    "//services/tracing/public/interfaces",
+    "//services/service_manager/public/cpp",
   ]
 
   data_deps = [
@@ -56,17 +55,15 @@ source_set("lib") {
     "//cc/surfaces",
     "//components/discardable_memory/public/interfaces",
     "//components/discardable_memory/service",
+    "//components/viz/service",
     "//mojo/common:common_base",
     "//services/catalog/public/cpp",
     "//services/catalog/public/interfaces:constants",
     "//services/service_manager/public/cpp",
-    "//services/tracing/public/cpp",
-    "//services/tracing/public/interfaces:constants",
     "//services/ui/clipboard:lib",
     "//services/ui/ime:lib",
     "//services/ui/input_devices",
     "//services/ui/public/interfaces",
-    "//services/ui/surfaces",
     "//services/ui/ws:lib",
     "//services/ui/ws:test_interface",
     "//ui/events",
@@ -83,6 +80,10 @@ source_set("lib") {
 
   if (use_ozone) {
     deps += [ "//ui/ozone:ozone" ]
+  }
+
+  if (use_ozone && is_chromeos) {
+    deps += [ "//services/ui/public/cpp/input_devices:input_device_controller" ]
   }
 }
 

@@ -5,10 +5,10 @@
 #ifndef CHROME_RENDERER_TTS_DISPATCHER_H_
 #define CHROME_RENDERER_TTS_DISPATCHER_H_
 
+#include <map>
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "content/public/renderer/render_thread_observer.h"
 #include "third_party/WebKit/public/platform/WebSpeechSynthesizer.h"
@@ -32,19 +32,18 @@ class TtsDispatcher
       public content::RenderThreadObserver {
  public:
   explicit TtsDispatcher(blink::WebSpeechSynthesizerClient* client);
-
- private:
   ~TtsDispatcher() override;
 
+ private:
   // RenderThreadObserver override.
   bool OnControlMessageReceived(const IPC::Message& message) override;
 
   // blink::WebSpeechSynthesizer implementation.
-  void updateVoiceList() override;
-  void speak(const blink::WebSpeechSynthesisUtterance& utterance) override;
-  void pause() override;
-  void resume() override;
-  void cancel() override;
+  void UpdateVoiceList() override;
+  void Speak(const blink::WebSpeechSynthesisUtterance& utterance) override;
+  void Pause() override;
+  void Resume() override;
+  void Cancel() override;
 
   blink::WebSpeechSynthesisUtterance FindUtterance(int utterance_id);
 
@@ -69,7 +68,7 @@ class TtsDispatcher
   static int next_utterance_id_;
 
   // Map from id to utterance objects.
-  base::hash_map<int, blink::WebSpeechSynthesisUtterance> utterance_id_map_;
+  std::map<int, blink::WebSpeechSynthesisUtterance> utterance_id_map_;
 
   DISALLOW_COPY_AND_ASSIGN(TtsDispatcher);
 };

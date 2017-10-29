@@ -22,7 +22,6 @@
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/paint_throbber.h"
 #include "ui/native_theme/native_theme.h"
-#include "ui/resources/grit/ui_resources.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/win/app_icon.h"
@@ -114,7 +113,7 @@ void TabIconView::PaintFavicon(gfx::Canvas* canvas,
                        dest_h, true);
 }
 
-gfx::Size TabIconView::GetPreferredSize() const {
+gfx::Size TabIconView::CalculatePreferredSize() const {
   return gfx::Size(gfx::kFaviconSize, gfx::kFaviconSize);
 }
 
@@ -122,7 +121,7 @@ const char* TabIconView::GetClassName() const {
   return "TabIconView";
 }
 
-void TabIconView::OnPaint(gfx::Canvas* canvas) {
+void TabIconView::PaintButtonContents(gfx::Canvas* canvas) {
   bool rendered = false;
 
   if (model_->ShouldTabIconViewAnimate()) {

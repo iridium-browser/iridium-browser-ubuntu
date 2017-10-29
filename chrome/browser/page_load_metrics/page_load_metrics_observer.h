@@ -5,12 +5,18 @@
 #ifndef CHROME_BROWSER_PAGE_LOAD_METRICS_PAGE_LOAD_METRICS_OBSERVER_H_
 #define CHROME_BROWSER_PAGE_LOAD_METRICS_PAGE_LOAD_METRICS_OBSERVER_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/optional.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
+#include "components/ukm/ukm_source.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/resource_type.h"
+#include "net/base/host_port_pair.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "url/gurl.h"
 
@@ -118,8 +124,9 @@ struct PageLoadExtraInfo {
       PageEndReason page_end_reason,
       UserInitiatedInfo page_end_user_initiated_info,
       const base::Optional<base::TimeDelta>& page_end_time,
-      const PageLoadMetadata& main_frame_metadata,
-      const PageLoadMetadata& child_frame_metadata);
+      const mojom::PageLoadMetadata& main_frame_metadata,
+      const mojom::PageLoadMetadata& subframe_metadata,
+      ukm::SourceId source_id);
 
   // Simplified version of the constructor, intended for use in tests.
   static PageLoadExtraInfo CreateForTesting(const GURL& url,
@@ -188,22 +195,42 @@ struct PageLoadExtraInfo {
 
   // Extra information supplied to the page load metrics system from the
   // renderer for the main frame.
-  const PageLoadMetadata main_frame_metadata;
+  const mojom::PageLoadMetadata main_frame_metadata;
 
-  // PageLoadMetadata for child frames of the current page load.
-  const PageLoadMetadata child_frame_metadata;
+  // PageLoadMetadata for subframes of the current page load.
+  const mojom::PageLoadMetadata subframe_metadata;
+
+  // UKM SourceId for the current page load.
+  const ukm::SourceId source_id;
 };
 
-// Container for various information about a request within a page load.
-struct ExtraRequestInfo {
-  ExtraRequestInfo(bool was_cached,
-                   int64_t raw_body_bytes,
-                   bool data_reduction_proxy_used,
-                   int64_t original_network_content_length);
+// Container for various information about a completed request within a page
+// load.
+struct ExtraRequestCompleteInfo {
+  ExtraRequestCompleteInfo(
+      const GURL& url,
+      const net::HostPortPair& host_port_pair,
+      int frame_tree_node_id,
+      bool was_cached,
+      int64_t raw_body_bytes,
+      int64_t original_network_content_length,
+      std::unique_ptr<data_reduction_proxy::DataReductionProxyData>
+          data_reduction_proxy_data,
+      content::ResourceType detected_resource_type,
+      int net_error);
 
-  ExtraRequestInfo(const ExtraRequestInfo& other);
+  ExtraRequestCompleteInfo(const ExtraRequestCompleteInfo& other);
 
-  ~ExtraRequestInfo();
+  ~ExtraRequestCompleteInfo();
+
+  // The URL for the request.
+  const GURL url;
+
+  // The host (IP address) and port for the request.
+  const net::HostPortPair host_port_pair;
+
+  // The frame tree node id that initiated the request.
+  const int frame_tree_node_id;
 
   // True if the resource was loaded from cache.
   const bool was_cached;
@@ -211,12 +238,24 @@ struct ExtraRequestInfo {
   // The number of body (not header) prefilter bytes.
   const int64_t raw_body_bytes;
 
-  // Whether this request used Data Reduction Proxy.
-  const bool data_reduction_proxy_used;
-
   // The number of body (not header) bytes that the data reduction proxy saw
   // before it compressed the requests.
   const int64_t original_network_content_length;
+
+  // Data related to data saver.
+  const std::unique_ptr<data_reduction_proxy::DataReductionProxyData>
+      data_reduction_proxy_data;
+
+  // The type of the request as gleaned from the mime type.  This may
+  // be more accurate than the type in the ExtraRequestStartInfo since we can
+  // examine the type headers that arrived with the request.  During XHRs, we
+  // sometimes see resources come back as a different type than we expected.
+  const content::ResourceType resource_type;
+
+  // The network error encountered by the request, as defined by
+  // net/base/net_error_list.h. If no error was encountered, this value will be
+  // 0.
+  const int net_error;
 };
 
 // Interface for PageLoadMetrics observers. All instances of this class are
@@ -234,7 +273,11 @@ class PageLoadMetricsObserver {
     STOP_OBSERVING,
   };
 
+  using FrameTreeNodeId = int;
+
   virtual ~PageLoadMetricsObserver() {}
+
+  static bool IsStandardWebPageMimeType(const std::string& mime_type);
 
   // The page load started, with the given navigation handle.
   // currently_committed_url contains the URL of the committed page load at the
@@ -258,12 +301,29 @@ class PageLoadMetricsObserver {
   // reference to it.
   // Observers that return STOP_OBSERVING will not receive any additional
   // callbacks, and will be deleted after invocation of this method returns.
-  virtual ObservePolicy OnCommit(content::NavigationHandle* navigation_handle);
+  virtual ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
+                                 ukm::SourceId source_id);
+
+  // OnDidFinishSubFrameNavigation is triggered when a sub-frame of the
+  // committed page has finished navigating. It has either committed, aborted,
+  // was a same document navigation, or has been replaced. It is up to the
+  // observer to query |navigation_handle| to determine which happened. Note
+  // that |navigation_handle| will be destroyed soon after this call. Don't
+  // hold a reference to it.
+  virtual void OnDidFinishSubFrameNavigation(
+      content::NavigationHandle* navigation_handle) {}
+
+  // OnCommitSameDocumentNavigation is triggered when a same-document navigation
+  // commits within the main frame of the current page. Note that
+  // |navigation_handle| will be destroyed soon after this call. Don't hold a
+  // reference to it.
+  virtual void OnCommitSameDocumentNavigation(
+      content::NavigationHandle* navigation_handle) {}
 
   // OnHidden is triggered when a page leaves the foreground. It does not fire
   // when a foreground page is permanently closed; for that, listen to
   // OnComplete instead.
-  virtual ObservePolicy OnHidden(const PageLoadTiming& timing,
+  virtual ObservePolicy OnHidden(const mojom::PageLoadTiming& timing,
                                  const PageLoadExtraInfo& extra_info);
 
   // OnShown is triggered when a page is brought to the foreground. It does not
@@ -282,14 +342,18 @@ class PageLoadMetricsObserver {
   // tracked at the time a navigation commits will not receive any of the
   // callbacks below.
 
-  // OnTimingUpdate is triggered when an updated PageLoadTiming is
-  // available. This method may be called multiple times over the course of the
-  // page load. This method is currently only intended for use in testing. Most
-  // implementers should implement one of the On* callbacks, such as
-  // OnFirstContentfulPaint or OnDomContentLoadedEventStart. Please email
-  // loading-dev@chromium.org if you intend to override this method.
-  virtual void OnTimingUpdate(const PageLoadTiming& timing,
+  // OnTimingUpdate is triggered when an updated PageLoadTiming is available at
+  // the page (page is essentially main frame, with merged values across all
+  // frames for some paint timing values) or subframe level. This method may be
+  // called multiple times over the course of the page load. This method is
+  // currently only intended for use in testing. Most implementers should
+  // implement one of the On* callbacks, such as OnFirstContentfulPaint or
+  // OnDomContentLoadedEventStart. Please email loading-dev@chromium.org if you
+  // intend to override this method.
+  virtual void OnTimingUpdate(bool is_subframe,
+                              const mojom::PageLoadTiming& timing,
                               const PageLoadExtraInfo& extra_info) {}
+
   // OnUserInput is triggered when a new user input is passed in to
   // web_contents. Contains a TimeDelta from navigation start.
   virtual void OnUserInput(const blink::WebInputEvent& event) {}
@@ -297,31 +361,50 @@ class PageLoadMetricsObserver {
   // The following methods are invoked at most once, when the timing for the
   // associated event first becomes available.
   virtual void OnDomContentLoadedEventStart(
-      const PageLoadTiming& timing,
+      const mojom::PageLoadTiming& timing,
       const PageLoadExtraInfo& extra_info) {}
-  virtual void OnLoadEventStart(const PageLoadTiming& timing,
+  virtual void OnLoadEventStart(const mojom::PageLoadTiming& timing,
                                 const PageLoadExtraInfo& extra_info) {}
-  virtual void OnFirstLayout(const PageLoadTiming& timing,
+  virtual void OnFirstLayout(const mojom::PageLoadTiming& timing,
                              const PageLoadExtraInfo& extra_info) {}
-  virtual void OnFirstPaint(const PageLoadTiming& timing,
+  virtual void OnParseStart(const mojom::PageLoadTiming& timing,
                             const PageLoadExtraInfo& extra_info) {}
-  virtual void OnFirstTextPaint(const PageLoadTiming& timing,
-                                const PageLoadExtraInfo& extra_info) {}
-  virtual void OnFirstImagePaint(const PageLoadTiming& timing,
-                                 const PageLoadExtraInfo& extra_info) {}
-  virtual void OnFirstContentfulPaint(const PageLoadTiming& timing,
-                                      const PageLoadExtraInfo& extra_info) {}
-  virtual void OnFirstMeaningfulPaint(const PageLoadTiming& timing,
-                                      const PageLoadExtraInfo& extra_info) {}
-  virtual void OnParseStart(const PageLoadTiming& timing,
-                            const PageLoadExtraInfo& extra_info) {}
-  virtual void OnParseStop(const PageLoadTiming& timing,
+  virtual void OnParseStop(const mojom::PageLoadTiming& timing,
                            const PageLoadExtraInfo& extra_info) {}
 
+  // On*PaintInPage(...) are invoked when the first relevant paint in the page,
+  // across all frames, is observed.
+  virtual void OnFirstPaintInPage(const mojom::PageLoadTiming& timing,
+                                  const PageLoadExtraInfo& extra_info) {}
+  virtual void OnFirstTextPaintInPage(const mojom::PageLoadTiming& timing,
+                                      const PageLoadExtraInfo& extra_info) {}
+  virtual void OnFirstImagePaintInPage(const mojom::PageLoadTiming& timing,
+                                       const PageLoadExtraInfo& extra_info) {}
+  virtual void OnFirstContentfulPaintInPage(
+      const mojom::PageLoadTiming& timing,
+      const PageLoadExtraInfo& extra_info) {}
+
+  // Unlike other paint callbacks, OnFirstMeaningfulPaintInMainFrameDocument is
+  // tracked per document, and is reported for the main frame document only.
+  virtual void OnFirstMeaningfulPaintInMainFrameDocument(
+      const mojom::PageLoadTiming& timing,
+      const PageLoadExtraInfo& extra_info) {}
+
   // Invoked when there is a change in either the main_frame_metadata or the
-  // child_frame_metadata's loading behavior_flags.
+  // subframe_metadata's loading behavior_flags.
   virtual void OnLoadingBehaviorObserved(
       const page_load_metrics::PageLoadExtraInfo& extra_info) {}
+
+  // Invoked when a media element starts playing.
+  virtual void MediaStartedPlaying(
+      const content::WebContentsObserver::MediaPlayerInfo& video_type,
+      bool is_in_main_frame) {}
+
+  // Invoked on navigations where a navigation delay was added by the
+  // DelayNavigationThrottle. This is a temporary method that will be removed
+  // once the experiment is complete.
+  virtual void OnNavigationDelayComplete(base::TimeDelta scheduled_delay,
+                                         base::TimeDelta actual_delay) {}
 
   // Invoked when the UMA metrics subsystem is persisting metrics as the
   // application goes into the background, on platforms where the browser
@@ -337,7 +420,7 @@ class PageLoadMetricsObserver {
   //
   // The default implementation does nothing, and returns CONTINUE_OBSERVING.
   virtual ObservePolicy FlushMetricsOnAppEnterBackground(
-      const PageLoadTiming& timing,
+      const mojom::PageLoadTiming& timing,
       const PageLoadExtraInfo& extra_info);
 
   // One of OnComplete or OnFailedProvisionalLoad is invoked for tracked page
@@ -354,7 +437,7 @@ class PageLoadMetricsObserver {
   // also want to implement FlushMetricsOnAppEnterBackground, to avoid loss of
   // data if the application is killed while in the background (this happens
   // frequently on Android).
-  virtual void OnComplete(const PageLoadTiming& timing,
+  virtual void OnComplete(const mojom::PageLoadTiming& timing,
                           const PageLoadExtraInfo& extra_info) {}
 
   // OnFailedProvisionalLoad is invoked for tracked page loads that did not
@@ -363,8 +446,15 @@ class PageLoadMetricsObserver {
       const FailedProvisionalLoadInfo& failed_provisional_load_info,
       const PageLoadExtraInfo& extra_info) {}
 
-  // Called whenever a request is loaded for this page load.
-  virtual void OnLoadedResource(const ExtraRequestInfo& extra_request_info) {}
+  // Called whenever a request is loaded for this page load. This comes
+  // unfiltered from the ResourceDispatcherHost and may include blob requests
+  // and data uris.
+  virtual void OnLoadedResource(
+      const ExtraRequestCompleteInfo& extra_request_complete_info) {}
+
+  // Called when the event corresponding to |event_key| occurs in this page
+  // load.
+  virtual void OnEventOccurred(const void* const event_key) {}
 };
 
 }  // namespace page_load_metrics

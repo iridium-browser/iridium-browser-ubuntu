@@ -12,70 +12,56 @@
  * Interface for all callbacks to the password API.
  * @interface
  */
-function PasswordManager() {}
-
-/** @typedef {chrome.passwordsPrivate.PasswordUiEntry} */
-PasswordManager.PasswordUiEntry;
-
-/** @typedef {chrome.passwordsPrivate.LoginPair} */
-PasswordManager.LoginPair;
-
-/** @typedef {chrome.passwordsPrivate.ExceptionPair} */
-PasswordManager.ExceptionPair;
-
-/** @typedef {chrome.passwordsPrivate.PlaintextPasswordEventParameters} */
-PasswordManager.PlaintextPasswordEvent;
-
-PasswordManager.prototype = {
+class PasswordManager {
   /**
    * Add an observer to the list of saved passwords.
    * @param {function(!Array<!PasswordManager.PasswordUiEntry>):void} listener
    */
-  addSavedPasswordListChangedListener: assertNotReached,
+  addSavedPasswordListChangedListener(listener) {}
 
   /**
    * Remove an observer from the list of saved passwords.
    * @param {function(!Array<!PasswordManager.PasswordUiEntry>):void} listener
    */
-  removeSavedPasswordListChangedListener: assertNotReached,
+  removeSavedPasswordListChangedListener(listener) {}
 
   /**
    * Request the list of saved passwords.
    * @param {function(!Array<!PasswordManager.PasswordUiEntry>):void} callback
    */
-  getSavedPasswordList: assertNotReached,
+  getSavedPasswordList(callback) {}
 
   /**
    * Should remove the saved password and notify that the list has changed.
    * @param {!PasswordManager.LoginPair} loginPair The saved password that
    *     should be removed from the list. No-op if |loginPair| is not found.
    */
-  removeSavedPassword: assertNotReached,
+  removeSavedPassword(loginPair) {}
 
   /**
    * Add an observer to the list of password exceptions.
-   * @param {function(!Array<!PasswordManager.ExceptionPair>):void} listener
+   * @param {function(!Array<!PasswordManager.ExceptionEntry>):void} listener
    */
-  addExceptionListChangedListener: assertNotReached,
+  addExceptionListChangedListener(listener) {}
 
   /**
    * Remove an observer from the list of password exceptions.
-   * @param {function(!Array<!PasswordManager.ExceptionPair>):void} listener
+   * @param {function(!Array<!PasswordManager.ExceptionEntry>):void} listener
    */
-  removeExceptionListChangedListener: assertNotReached,
+  removeExceptionListChangedListener(listener) {}
 
   /**
    * Request the list of password exceptions.
-   * @param {function(!Array<!PasswordManager.ExceptionPair>):void} callback
+   * @param {function(!Array<!PasswordManager.ExceptionEntry>):void} callback
    */
-  getExceptionList: assertNotReached,
+  getExceptionList(callback) {}
 
   /**
    * Should remove the password exception and notify that the list has changed.
    * @param {string} exception The exception that should be removed from the
    *     list. No-op if |exception| is not in the list.
    */
-  removeException: assertNotReached,
+  removeException(exception) {}
 
   /**
    * Gets the saved password for a given login pair.
@@ -83,68 +69,74 @@ PasswordManager.prototype = {
    *     should be retrieved.
    * @param {function(!PasswordManager.PlaintextPasswordEvent):void} callback
    */
-  getPlaintextPassword: assertNotReached,
-};
+  getPlaintextPassword(loginPair, callback) {}
+}
+
+/** @typedef {chrome.passwordsPrivate.PasswordUiEntry} */
+PasswordManager.PasswordUiEntry;
+
+/** @typedef {chrome.passwordsPrivate.LoginPair} */
+PasswordManager.LoginPair;
+
+/** @typedef {chrome.passwordsPrivate.ExceptionEntry} */
+PasswordManager.ExceptionEntry;
+
+/** @typedef {chrome.passwordsPrivate.PlaintextPasswordEventParameters} */
+PasswordManager.PlaintextPasswordEvent;
 
 /**
  * Implementation that accesses the private API.
  * @implements {PasswordManager}
- * @constructor
  */
-function PasswordManagerImpl() {}
-cr.addSingletonGetter(PasswordManagerImpl);
-
-PasswordManagerImpl.prototype = {
-  __proto__: PasswordManager,
-
+class PasswordManagerImpl {
   /** @override */
-  addSavedPasswordListChangedListener: function(listener) {
+  addSavedPasswordListChangedListener(listener) {
     chrome.passwordsPrivate.onSavedPasswordsListChanged.addListener(listener);
-  },
+  }
 
   /** @override */
-  removeSavedPasswordListChangedListener: function(listener) {
+  removeSavedPasswordListChangedListener(listener) {
     chrome.passwordsPrivate.onSavedPasswordsListChanged.removeListener(
         listener);
-  },
+  }
 
   /** @override */
-  getSavedPasswordList: function(callback) {
+  getSavedPasswordList(callback) {
     chrome.passwordsPrivate.getSavedPasswordList(callback);
-  },
+  }
 
   /** @override */
-  removeSavedPassword: function(loginPair) {
+  removeSavedPassword(loginPair) {
     chrome.passwordsPrivate.removeSavedPassword(loginPair);
-  },
+  }
 
   /** @override */
-  addExceptionListChangedListener: function(listener) {
+  addExceptionListChangedListener(listener) {
     chrome.passwordsPrivate.onPasswordExceptionsListChanged.addListener(
         listener);
-  },
+  }
 
   /** @override */
-  removeExceptionListChangedListener: function(listener) {
+  removeExceptionListChangedListener(listener) {
     chrome.passwordsPrivate.onPasswordExceptionsListChanged.removeListener(
         listener);
-  },
+  }
 
   /** @override */
-  getExceptionList: function(callback) {
+  getExceptionList(callback) {
     chrome.passwordsPrivate.getPasswordExceptionList(callback);
-  },
+  }
 
   /** @override */
-  removeException: function(exception) {
+  removeException(exception) {
     chrome.passwordsPrivate.removePasswordException(exception);
-  },
+  }
 
   /** @override */
-  getPlaintextPassword: function(loginPair, callback) {
+  getPlaintextPassword(loginPair, callback) {
     var listener = function(reply) {
       // Only handle the reply for our loginPair request.
-      if (reply.loginPair.originUrl == loginPair.originUrl &&
+      if (reply.loginPair.urls.origin == loginPair.urls.origin &&
           reply.loginPair.username == loginPair.username) {
         chrome.passwordsPrivate.onPlaintextPasswordRetrieved.removeListener(
             listener);
@@ -153,14 +145,16 @@ PasswordManagerImpl.prototype = {
     };
     chrome.passwordsPrivate.onPlaintextPasswordRetrieved.addListener(listener);
     chrome.passwordsPrivate.requestPlaintextPassword(loginPair);
-  },
-};
+  }
+}
+
+cr.addSingletonGetter(PasswordManagerImpl);
 
 /** @typedef {!{model: !{item: !chrome.passwordsPrivate.PasswordUiEntry}}} */
 var PasswordUiEntryEvent;
 
-/** @typedef {!{model: !{item: !chrome.passwordsPrivate.ExceptionPair}}} */
-var ExceptionPairEntryEvent;
+/** @typedef {!{model: !{item: !chrome.passwordsPrivate.ExceptionEntry}}} */
+var ExceptionEntryEntryEvent;
 
 (function() {
 'use strict';
@@ -168,7 +162,7 @@ var ExceptionPairEntryEvent;
 Polymer({
   is: 'passwords-section',
 
-  behaviors: [settings.GlobalScrollTargetBehavior],
+  behaviors: [settings.GlobalScrollTargetBehavior, I18nBehavior],
 
   properties: {
     /** Preferences state. */
@@ -185,14 +179,14 @@ Polymer({
 
     /**
      * An array of sites to display.
-     * @type {!Array<!PasswordManager.ExceptionPair>}
+     * @type {!Array<!PasswordManager.ExceptionEntry>}
      */
     passwordExceptions: Array,
 
     /** @override */
     subpageRoute: {
       type: Object,
-      value: settings.Route.MANAGE_PASSWORDS,
+      value: settings.routes.MANAGE_PASSWORDS,
     },
 
     /**
@@ -209,11 +203,22 @@ Polymer({
       type: String,
       value: '',
     },
+
+    /** @private {!PasswordManager.PasswordUiEntry} */
+    lastFocused_: Object,
   },
 
   listeners: {
     'show-password': 'showPassword_',
+    'password-menu-tap': 'onPasswordMenuTap_',
   },
+
+  /**
+   * The element to return focus to, when the currently active dialog is
+   * closed.
+   * @private {?HTMLElement}
+   */
+  activeDialogAnchor_: null,
 
   /**
    * @type {PasswordManager}
@@ -228,13 +233,13 @@ Polymer({
   setSavedPasswordsListener_: null,
 
   /**
-   * @type {?function(!Array<PasswordManager.ExceptionPair>):void}
+   * @type {?function(!Array<PasswordManager.ExceptionEntry>):void}
    * @private
    */
   setPasswordExceptionsListener_: null,
 
   /** @override */
-  ready: function() {
+  attached: function() {
     // Create listener functions.
     var setSavedPasswordsListener = function(list) {
       this.savedPasswords = list;
@@ -264,11 +269,11 @@ Polymer({
   /** @override */
   detached: function() {
     this.passwordManager_.removeSavedPasswordListChangedListener(
-      /** @type {function(!Array<PasswordManager.PasswordUiEntry>):void} */(
-        this.setSavedPasswordsListener_));
+        /** @type {function(!Array<PasswordManager.PasswordUiEntry>):void} */ (
+            this.setSavedPasswordsListener_));
     this.passwordManager_.removeExceptionListChangedListener(
-      /** @type {function(!Array<PasswordManager.ExceptionPair>):void} */(
-        this.setPasswordExceptionsListener_));
+        /** @type {function(!Array<PasswordManager.ExceptionEntry>):void} */ (
+            this.setPasswordExceptionsListener_));
   },
 
   /**
@@ -278,7 +283,7 @@ Polymer({
    */
   setPassword: function(loginPair, password) {
     if (this.activePassword &&
-        this.activePassword.loginPair.originUrl == loginPair.originUrl &&
+        this.activePassword.loginPair.urls.origin == loginPair.urls.origin &&
         this.activePassword.loginPair.username == loginPair.username) {
       this.$$('password-edit-dialog').password = password;
     }
@@ -291,13 +296,15 @@ Polymer({
    */
   onMenuEditPasswordTap_: function(e) {
     e.preventDefault();
-    /** @type {CrActionMenuElement} */(this.$.menu).close();
+    /** @type {CrActionMenuElement} */ (this.$.menu).close();
     this.showPasswordEditDialog_ = true;
   },
 
   /** @private */
   onPasswordEditDialogClosed_: function() {
     this.showPasswordEditDialog_ = false;
+    cr.ui.focusWithoutInk(assert(this.activeDialogAnchor_));
+    this.activeDialogAnchor_ = null;
   },
 
   /**
@@ -311,19 +318,19 @@ Polymer({
       return savedPasswords;
 
     return savedPasswords.filter(function(password) {
-      return password.loginPair.originUrl.includes(filter) ||
-             password.loginPair.username.includes(filter);
+      return password.loginPair.urls.shown.includes(filter) ||
+          password.loginPair.username.includes(filter);
     });
   },
 
   /**
    * @param {string} filter
-   * @return {function(!chrome.passwordsPrivate.ExceptionPair): boolean}
+   * @return {function(!chrome.passwordsPrivate.ExceptionEntry): boolean}
    * @private
    */
   passwordExceptionFilter_: function(filter) {
     return function(exception) {
-      return exception.exceptionUrl.includes(filter);
+      return exception.urls.shown.includes(filter);
     };
   },
 
@@ -333,39 +340,32 @@ Polymer({
    */
   onMenuRemovePasswordTap_: function() {
     this.passwordManager_.removeSavedPassword(this.activePassword.loginPair);
-    /** @type {CrActionMenuElement} */(this.$.menu).close();
+    /** @type {CrActionMenuElement} */ (this.$.menu).close();
   },
 
   /**
    * Fires an event that should delete the password exception.
-   * @param {!ExceptionPairEntryEvent} e The polymer event.
+   * @param {!ExceptionEntryEntryEvent} e The polymer event.
    * @private
    */
   onRemoveExceptionButtonTap_: function(e) {
-    this.passwordManager_.removeException(e.model.item.exceptionUrl);
+    this.passwordManager_.removeException(e.model.item.urls.origin);
   },
 
   /**
-   * Creates an empty password of specified length.
-   * @param {number} length
-   * @return {string} password
-   * @private
-   */
-  getEmptyPassword_: function(length) { return ' '.repeat(length); },
-
-  /**
    * Opens the password action menu.
+   * @param {!Event} event
    * @private
    */
-  onPasswordMenuTap_: function(e) {
-    var menu = /** @type {!CrActionMenuElement} */(this.$.menu);
-    var target = /** @type {!Element} */(Polymer.dom(e).localTarget);
-    var passwordUiEntryEvent = /** @type {!PasswordUiEntryEvent} */(e);
+  onPasswordMenuTap_: function(event) {
+    var menu = /** @type {!CrActionMenuElement} */ (this.$.menu);
+    var target = /** @type {!HTMLElement} */ (event.detail.target);
 
     this.activePassword =
         /** @type {!chrome.passwordsPrivate.PasswordUiEntry} */ (
-            passwordUiEntryEvent.model.item);
+            event.detail.item);
     menu.showAt(target);
+    this.activeDialogAnchor_ = target;
   },
 
   /**
@@ -385,10 +385,19 @@ Polymer({
    */
   showPassword_: function(event) {
     this.passwordManager_.getPlaintextPassword(
-        /** @type {!PasswordManager.LoginPair} */(event.detail),
+        /** @type {!PasswordManager.LoginPair} */ (event.detail),
         function(item) {
           this.setPassword(item.loginPair, item.plaintextPassword);
         }.bind(this));
   },
+
+  /**
+   * @private
+   * @param {boolean} toggleValue
+   * @return {string}
+   */
+  getOnOffLabel_: function(toggleValue) {
+    return toggleValue ? this.i18n('toggleOn') : this.i18n('toggleOff');
+  }
 });
 })();

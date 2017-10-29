@@ -8,6 +8,24 @@ mojom("interfaces") {
   sources = [
     "uuid.mojom",
   ]
+
+  # TODO(crbug.com/699569): Convert to use the new JS bindings.
+  use_new_js_bindings = false
+}
+
+mojom("fake_bluetooth_interfaces") {
+  sources = [
+    "test/fake_bluetooth.mojom",
+  ]
+
+  public_deps = [
+    ":interfaces",
+  ]
+
+  use_once_callback = true
+
+  # TODO(crbug.com/699569): Convert to use the new JS bindings.
+  use_new_js_bindings = false
 }
 
 mojom("experimental_interfaces") {
@@ -25,4 +43,7 @@ mojom("experimental_interfaces") {
     "//chrome/browser:*",
     "//chrome/browser/ui:*",
   ]
+
+  # TODO(crbug.com/699569): Convert to use the new JS bindings.
+  use_new_js_bindings = false
 }

@@ -1,3 +1,9 @@
+/*
+ * Copyright 2017 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
 .flame-chart-main-pane {
     overflow: hidden;
 }
@@ -13,74 +19,26 @@
 }
 
 .flame-chart-highlight-element {
-    background-color: black;
     position: absolute;
-    opacity: 0.2;
     pointer-events: none;
+    background-color: rgba(56, 121, 217, 0.1);
 }
 
 .flame-chart-selected-element {
     position: absolute;
     pointer-events: none;
-    border-color: rgb(56, 121, 217);
-    border-width: 1px;
-    border-style: solid;
-    background-color: rgba(56, 121, 217, 0.2);
+    outline: 2px solid rgb(56, 121, 217);
+    background-color: rgba(56, 121, 217, 0.1);
 }
 
-.flame-chart-v-scroll {
+.chart-cursor-element {
     position: absolute;
     top: 0;
-    right: 0;
     bottom: 0;
-    overflow-x: hidden;
-    z-index: 200;
-    padding-left: 1px;
-}
-
-.flame-chart-v-scroll.always-show-scrollbar {
-    overflow-y: scroll;
-}
-
-:host-context(.platform-mac) .flame-chart-v-scroll {
-    right: 2px;
-    top: 3px;
-    bottom: 3px;
-}
-
-/* force non-overlay scrollbars */
-:host-context(.platform-mac) ::-webkit-scrollbar {
-    width: 8px;
-}
-
-:host-context(.platform-mac) ::-webkit-scrollbar-thumb {
-    background-color: hsla(0, 0%, 56%, 0.6);
-    border-radius: 50px;
-}
-
-:host-context(.platform-mac) .flame-chart-v-scroll:hover::-webkit-scrollbar-thumb {
-    background-color: hsla(0, 0%, 25%, 0.6);
-}
-
-.flame-chart-selection-overlay {
-    position: absolute;
     z-index: 100;
-    background-color: rgba(56, 121, 217, 0.3);
-    border-color: rgb(16, 81, 177);
-    border-width: 0 1px;
-    border-style: solid;
+    width: 2px;
+    background-color: rgb(56, 121, 217);
     pointer-events: none;
-    top: 0;
-    bottom: 0;
-    text-align: center;
-}
-
-.flame-chart-selection-overlay .time-span {
-    white-space: nowrap;
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
 }
 
 .flame-chart-entry-info:not(:empty) {

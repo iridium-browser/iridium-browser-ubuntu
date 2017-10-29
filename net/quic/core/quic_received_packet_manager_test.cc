@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "net/quic/core/quic_connection_stats.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#include "net/quic/platform/api/quic_test.h"
 
 namespace net {
 namespace test {
@@ -35,8 +35,7 @@ std::vector<TestParams> GetTestParams() {
   return params;
 }
 
-class QuicReceivedPacketManagerTest
-    : public ::testing::TestWithParam<TestParams> {
+class QuicReceivedPacketManagerTest : public QuicTestWithParam<TestParams> {
  protected:
   QuicReceivedPacketManagerTest() : received_manager_(&stats_) {}
 
@@ -122,6 +121,23 @@ TEST_P(QuicReceivedPacketManagerTest, UpdateReceivedConnectionStats) {
   EXPECT_EQ(4u, stats_.max_sequence_reordering);
   EXPECT_EQ(1000, stats_.max_time_reordering_us);
   EXPECT_EQ(1u, stats_.packets_reordered);
+}
+
+TEST_P(QuicReceivedPacketManagerTest, LimitAckRanges) {
+  received_manager_.set_max_ack_ranges(10);
+  EXPECT_FALSE(received_manager_.ack_frame_updated());
+  for (int i = 0; i < 100; ++i) {
+    RecordPacketReceipt(1 + 2 * i);
+    EXPECT_TRUE(received_manager_.ack_frame_updated());
+    received_manager_.GetUpdatedAckFrame(QuicTime::Zero());
+    EXPECT_GE(10u, received_manager_.ack_frame().packets.NumIntervals());
+    EXPECT_EQ(1u + 2 * i, received_manager_.ack_frame().packets.Max());
+    for (int j = 0; j < std::min(10, i + 1); ++j) {
+      EXPECT_TRUE(
+          received_manager_.ack_frame().packets.Contains(1 + (i - j) * 2));
+      EXPECT_FALSE(received_manager_.ack_frame().packets.Contains((i - j) * 2));
+    }
+  }
 }
 
 }  // namespace

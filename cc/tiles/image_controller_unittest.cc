@@ -3,11 +3,15 @@
 // found in the LICENSE file.
 
 #include "cc/tiles/image_controller.h"
+
+#include <utility>
+
 #include "base/bind.h"
 #include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "base/threading/thread_checker_impl.h"
 #include "cc/test/skia_common.h"
 #include "cc/tiles/image_decode_cache.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -22,7 +26,7 @@ class TestWorkerThread : public base::SimpleThread {
 
   void Run() override {
     for (;;) {
-      base::Closure task;
+      base::OnceClosure task;
       {
         base::AutoLock hold(lock_);
         if (shutdown_)
@@ -33,10 +37,10 @@ class TestWorkerThread : public base::SimpleThread {
           continue;
         }
 
-        task = queue_.front();
+        task = std::move(queue_.front());
         queue_.erase(queue_.begin());
       }
-      task.Run();
+      std::move(task).Run();
     }
   }
 
@@ -46,16 +50,16 @@ class TestWorkerThread : public base::SimpleThread {
     condition_.Signal();
   }
 
-  void PostTask(const base::Closure& task) {
+  void PostTask(base::OnceClosure task) {
     base::AutoLock hold(lock_);
-    queue_.push_back(task);
+    queue_.push_back(std::move(task));
     condition_.Signal();
   }
 
  private:
   base::Lock lock_;
   base::ConditionVariable condition_;
-  std::vector<base::Closure> queue_;
+  std::vector<base::OnceClosure> queue_;
   bool shutdown_ = false;
 };
 
@@ -64,19 +68,19 @@ class WorkerTaskRunner : public base::SequencedTaskRunner {
   WorkerTaskRunner() { thread_.Start(); }
 
   bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
-                                  const base::Closure& task,
+                                  base::OnceClosure task,
                                   base::TimeDelta delay) override {
-    return PostDelayedTask(from_here, task, delay);
+    return PostDelayedTask(from_here, std::move(task), delay);
   }
 
   bool PostDelayedTask(const tracked_objects::Location& from_here,
-                       const base::Closure& task,
+                       base::OnceClosure task,
                        base::TimeDelta delay) override {
-    thread_.PostTask(task);
+    thread_.PostTask(std::move(task));
     return true;
   }
 
-  bool RunsTasksOnCurrentThread() const override { return false; }
+  bool RunsTasksInCurrentSequence() const override { return false; }
 
  protected:
   ~WorkerTaskRunner() override {
@@ -124,6 +128,11 @@ class TestableCache : public ImageDecodeCache {
   void ReduceCacheUsage() override {}
   void SetShouldAggressivelyFreeResources(
       bool aggressively_free_resources) override {}
+  void ClearCache() override {}
+  void NotifyImageUnused(uint32_t skimage_id) override {}
+  size_t GetMaximumMemoryLimitBytes() const override {
+    return 256 * 1024 * 1024;
+  }
 
   int number_of_refs() const { return number_of_refs_; }
   void SetTaskToUse(scoped_refptr<TileTask> task) { task_to_use_ = task; }
@@ -137,12 +146,12 @@ class TestableCache : public ImageDecodeCache {
 class DecodeClient {
  public:
   DecodeClient() {}
-  void Callback(const base::Closure& quit_closure,
+  void Callback(base::OnceClosure quit_closure,
                 ImageController::ImageDecodeRequestId id,
                 ImageController::ImageDecodeResult result) {
     id_ = id;
     result_ = result;
-    quit_closure.Run();
+    std::move(quit_closure).Run();
   }
 
   ImageController::ImageDecodeRequestId id() { return id_; }
@@ -212,7 +221,8 @@ class BlockingTask : public TileTask {
  private:
   ~BlockingTask() override = default;
 
-  base::ThreadChecker thread_checker_;
+  // Use ThreadCheckerImpl, so that release builds also get correct behavior.
+  base::ThreadCheckerImpl thread_checker_;
   bool has_run_ = false;
   base::Lock lock_;
   base::ConditionVariable run_cv_;
@@ -222,14 +232,20 @@ class BlockingTask : public TileTask {
 };
 
 // For tests that exercise image controller's thread, this is the timeout value
-// to
-// allow the worker thread to do its work.
+// to allow the worker thread to do its work.
 int kDefaultTimeoutSeconds = 10;
+
+DrawImage CreateDiscardableDrawImage(gfx::Size size) {
+  return DrawImage(
+      PaintImage(PaintImage::kUnknownStableId, CreateDiscardableImage(size)),
+      SkIRect::MakeWH(size.width(), size.height()), kNone_SkFilterQuality,
+      SkMatrix::I(), gfx::ColorSpace());
+}
 
 class ImageControllerTest : public testing::Test {
  public:
   ImageControllerTest() : task_runner_(base::SequencedTaskRunnerHandle::Get()) {
-    image_ = CreateDiscardableImage(gfx::Size(1, 1));
+    image_ = CreateDiscardableDrawImage(gfx::Size(1, 1));
   }
   ~ImageControllerTest() override = default;
 
@@ -249,7 +265,7 @@ class ImageControllerTest : public testing::Test {
   base::SequencedTaskRunner* task_runner() { return task_runner_.get(); }
   ImageController* controller() { return controller_.get(); }
   TestableCache* cache() { return &cache_; }
-  sk_sp<const SkImage> image() const { return image_; }
+  const DrawImage& image() const { return image_; }
 
   // Timeout callback, which errors and exits the runloop.
   static void Timeout(base::RunLoop* run_loop) {
@@ -261,7 +277,8 @@ class ImageControllerTest : public testing::Test {
   void RunOrTimeout(base::RunLoop* run_loop) {
     task_runner_->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&ImageControllerTest::Timeout, base::Unretained(run_loop)),
+        base::BindOnce(&ImageControllerTest::Timeout,
+                       base::Unretained(run_loop)),
         base::TimeDelta::FromSeconds(kDefaultTimeoutSeconds));
     run_loop->Run();
   }
@@ -273,7 +290,7 @@ class ImageControllerTest : public testing::Test {
   scoped_refptr<WorkerTaskRunner> worker_task_runner_;
   TestableCache cache_;
   std::unique_ptr<ImageController> controller_;
-  sk_sp<const SkImage> image_;
+  DrawImage image_;
 };
 
 TEST_F(ImageControllerTest, NullControllerUnrefsImages) {
@@ -293,7 +310,7 @@ TEST_F(ImageControllerTest, NullControllerUnrefsImages) {
 TEST_F(ImageControllerTest, QueueImageDecode) {
   base::RunLoop run_loop;
   DecodeClient decode_client;
-  EXPECT_EQ(image()->bounds().width(), 1);
+  EXPECT_EQ(image().image()->bounds().width(), 1);
   ImageController::ImageDecodeRequestId expected_id =
       controller()->QueueImageDecode(
           image(),
@@ -311,7 +328,10 @@ TEST_F(ImageControllerTest, QueueImageDecodeNonLazy) {
 
   SkBitmap bitmap;
   bitmap.allocN32Pixels(1, 1);
-  sk_sp<const SkImage> image = SkImage::MakeFromBitmap(bitmap);
+  DrawImage image = DrawImage(
+      PaintImage(PaintImage::kUnknownStableId, SkImage::MakeFromBitmap(bitmap)),
+      SkIRect::MakeWH(1, 1), kNone_SkFilterQuality, SkMatrix::I(),
+      gfx::ColorSpace());
 
   ImageController::ImageDecodeRequestId expected_id =
       controller()->QueueImageDecode(
@@ -328,7 +348,7 @@ TEST_F(ImageControllerTest, QueueImageDecodeTooLarge) {
   base::RunLoop run_loop;
   DecodeClient decode_client;
 
-  sk_sp<const SkImage> image = CreateDiscardableImage(gfx::Size(2000, 2000));
+  DrawImage image = CreateDiscardableDrawImage(gfx::Size(2000, 2000));
   ImageController::ImageDecodeRequestId expected_id =
       controller()->QueueImageDecode(
           image,

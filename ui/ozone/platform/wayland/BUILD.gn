@@ -40,6 +40,7 @@ source_set("wayland") {
       "wayland_xkb_keyboard_layout_engine.cc",
       "wayland_xkb_keyboard_layout_engine.h",
     ]
+    configs += [ "//ui/events/ozone:xkbcommon" ]
   }
 
   deps = [
@@ -75,6 +76,7 @@ source_set("wayland_unittests") {
     "fake_server.cc",
     "fake_server.h",
     "mock_platform_window_delegate.cc",
+    "mock_platform_window_delegate.h",
     "wayland_connection_unittest.cc",
     "wayland_keyboard_unittest.cc",
     "wayland_pointer_unittest.cc",

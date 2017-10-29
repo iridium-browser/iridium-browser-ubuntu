@@ -7,6 +7,7 @@
 from __future__ import print_function
 
 import datetime
+import signal
 import time
 
 from chromite.lib import cros_test_lib
@@ -17,7 +18,7 @@ from multiprocessing.pool import ThreadPool
 # pylint: disable=W0212,R0904
 
 
-class TestTimeouts(cros_test_lib.TestCase):
+class TestTimeouts(cros_test_lib.MockTestCase):
   """Tests for timeout_util.Timeout."""
 
   def testTimeout(self):
@@ -43,6 +44,44 @@ class TestTimeouts(cros_test_lib.TestCase):
         pass
       else:
         self.fail('Should have thrown an exception')
+
+  def testFractionTimeout(self):
+    # Capture setitimer arguments.
+    mock_setitimer = self.PatchObject(
+        signal, 'setitimer', autospec=True, return_value=(0, 0))
+    with timeout_util.Timeout(0.5):
+      pass
+
+    # The timeout should be fraction, rather than rounding up to int seconds.
+    self.assertEqual(mock_setitimer.call_args_list,
+                     [((signal.ITIMER_REAL, 0),),
+                      ((signal.ITIMER_REAL, 0.5, 0),),
+                      ((signal.ITIMER_REAL, 0),)])
+
+
+class TestTimeoutDecorator(cros_test_lib.TestCase):
+  """Tests timeout_util.TimeoutDecorator."""
+
+  def testNoTimeout(self):
+    """Test normal class with no timeout."""
+
+    @timeout_util.TimeoutDecorator(10)
+    def timedFunction(a, b):
+      return a + b
+
+    result = timedFunction(1, 2)
+
+    self.assertEqual(result, 3)
+
+  def testTimeout(self):
+    """Test timing out a function."""
+
+    @timeout_util.TimeoutDecorator(1)
+    def timedFunction():
+      time.sleep(10)
+
+    with self.assertRaises(timeout_util.TimeoutError):
+      timedFunction()
 
 
 class TestWaitFors(cros_test_lib.TestCase):

@@ -31,6 +31,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/cursor/cursor.h"
+#include "ui/base/layout.h"
 #include "ui/base/platform_window_defaults.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/view_prop.h"
@@ -50,6 +51,7 @@
 #include "ui/events/platform/platform_event_observer.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/events/platform/x11/x11_event_source.h"
+#include "ui/gfx/x/x11_atom_cache.h"
 
 using std::max;
 using std::min;
@@ -57,13 +59,6 @@ using std::min;
 namespace aura {
 
 namespace {
-
-const char* kAtomsToCache[] = {
-  "WM_DELETE_WINDOW",
-  "_NET_WM_PING",
-  "_NET_WM_PID",
-  NULL
-};
 
 constexpr uint32_t kInputEventMask =
     ButtonPressMask | ButtonReleaseMask | FocusChangeMask | KeyPressMask |
@@ -119,10 +114,9 @@ WindowTreeHostX11::WindowTreeHostX11(const gfx::Rect& bounds)
     : xdisplay_(gfx::GetXDisplay()),
       xwindow_(0),
       x_root_window_(DefaultRootWindow(xdisplay_)),
-      current_cursor_(ui::kCursorNull),
+      current_cursor_(ui::CursorType::kNull),
       window_mapped_(false),
-      bounds_(bounds),
-      atom_cache_(xdisplay_, kAtomsToCache) {
+      bounds_(bounds) {
   XSetWindowAttributes swa;
   memset(&swa, 0, sizeof(swa));
   swa.background_pixmap = None;
@@ -152,8 +146,8 @@ WindowTreeHostX11::WindowTreeHostX11(const gfx::Rect& bounds)
   // should listen for activation events and anything else that GTK+ listens
   // for, and do something useful.
   ::Atom protocols[2];
-  protocols[0] = atom_cache_.GetAtom("WM_DELETE_WINDOW");
-  protocols[1] = atom_cache_.GetAtom("_NET_WM_PING");
+  protocols[0] = gfx::GetAtom("WM_DELETE_WINDOW");
+  protocols[1] = gfx::GetAtom("_NET_WM_PING");
   XSetWMProtocols(xdisplay_, xwindow_, protocols, 2);
 
   // We need a WM_CLIENT_MACHINE and WM_LOCALE_NAME value so we integrate with
@@ -167,16 +161,9 @@ WindowTreeHostX11::WindowTreeHostX11(const gfx::Rect& bounds)
   static_assert(sizeof(long) >= sizeof(pid_t),
                 "pid_t should not be larger than long");
   long pid = getpid();
-  XChangeProperty(xdisplay_,
-                  xwindow_,
-                  atom_cache_.GetAtom("_NET_WM_PID"),
-                  XA_CARDINAL,
-                  32,
-                  PropModeReplace,
-                  reinterpret_cast<unsigned char*>(&pid), 1);
-
-  // Allow subclasses to create and cache additional atoms.
-  atom_cache_.allow_uncached_atoms();
+  XChangeProperty(xdisplay_, xwindow_, gfx::GetAtom("_NET_WM_PID"), XA_CARDINAL,
+                  32, PropModeReplace, reinterpret_cast<unsigned char*>(&pid),
+                  1);
 
   XRRSelectInput(xdisplay_, x_root_window_,
                  RRScreenChangeNotifyMask | RROutputChangeNotifyMask);
@@ -245,7 +232,7 @@ uint32_t WindowTreeHostX11::DispatchEvent(const ui::PlatformEvent& event) {
       case ui::ET_KEY_PRESSED:
       case ui::ET_KEY_RELEASED: {
         ui::KeyEvent keydown_event(xev);
-        SendEventToProcessor(&keydown_event);
+        SendEventToSink(&keydown_event);
         break;
       }
       case ui::ET_MOUSE_MOVED:
@@ -265,9 +252,6 @@ uint32_t WindowTreeHostX11::DispatchEvent(const ui::PlatformEvent& event) {
                     root_window);
             cursor_client->SetDisplay(display);
           }
-          // EnterNotify creates ET_MOUSE_MOVE. Mark as synthesized as this is
-          // not a real mouse move event.
-          mouse_event.set_flags(mouse_event.flags() | ui::EF_IS_SYNTHESIZED);
         }
 
         TranslateAndDispatchLocatedEvent(&mouse_event);
@@ -321,10 +305,10 @@ uint32_t WindowTreeHostX11::DispatchEvent(const ui::PlatformEvent& event) {
       break;
     case ClientMessage: {
       Atom message_type = static_cast<Atom>(xev->xclient.data.l[0]);
-      if (message_type == atom_cache_.GetAtom("WM_DELETE_WINDOW")) {
+      if (message_type == gfx::GetAtom("WM_DELETE_WINDOW")) {
         // We have received a close message from the window manager.
         OnHostCloseRequested();
-      } else if (message_type == atom_cache_.GetAtom("_NET_WM_PING")) {
+      } else if (message_type == gfx::GetAtom("_NET_WM_PING")) {
         XEvent reply_event = *xev;
         reply_event.xclient.window = x_root_window_;
 
@@ -403,9 +387,7 @@ void WindowTreeHostX11::SetBoundsInPixels(const gfx::Rect& bounds) {
   // Even if the host window's size doesn't change, aura's root window
   // size, which is in DIP, changes when the scale changes.
   float current_scale = compositor()->device_scale_factor();
-  float new_scale = display::Screen::GetScreen()
-                        ->GetDisplayNearestWindow(window())
-                        .device_scale_factor();
+  float new_scale = ui::GetScaleFactorForNativeView(window());
   bool origin_changed = bounds_.origin() != bounds.origin();
   bool size_changed = bounds_.size() != bounds.size();
   XWindowChanges changes = {0};
@@ -536,13 +518,13 @@ void WindowTreeHostX11::DispatchXI2Event(const base::NativeEvent& event) {
     case ui::ET_SCROLL_FLING_CANCEL:
     case ui::ET_SCROLL: {
       ui::ScrollEvent scrollev(xev);
-      SendEventToProcessor(&scrollev);
+      SendEventToSink(&scrollev);
       break;
     }
     case ui::ET_KEY_PRESSED:
     case ui::ET_KEY_RELEASED: {
       ui::KeyEvent key_event(xev);
-      SendEventToProcessor(&key_event);
+      SendEventToSink(&key_event);
       break;
     }
     case ui::ET_UMA_DATA:
@@ -566,7 +548,7 @@ void WindowTreeHostX11::OnConfigureNotify() {}
 
 void WindowTreeHostX11::TranslateAndDispatchLocatedEvent(
     ui::LocatedEvent* event) {
-  SendEventToProcessor(event);
+  SendEventToSink(event);
 }
 
 // static

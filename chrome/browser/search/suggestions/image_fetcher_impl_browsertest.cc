@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/image_fetcher/image_fetcher_impl.h"
+#include "components/image_fetcher/core/image_fetcher_impl.h"
 
 #include <memory>
 
@@ -15,8 +15,9 @@
 #include "chrome/browser/search/suggestions/image_decoder_impl.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "components/image_fetcher/image_fetcher_delegate.h"
+#include "components/image_fetcher/core/image_fetcher_delegate.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
@@ -41,7 +42,7 @@ class TestImageFetcherDelegate : public ImageFetcherDelegate {
   TestImageFetcherDelegate()
     : num_delegate_valid_called_(0),
       num_delegate_null_called_(0) {}
-  ~TestImageFetcherDelegate() override{};
+  ~TestImageFetcherDelegate() override {}
 
   // Perform additional tasks when an image has been fetched.
   void OnImageFetched(const std::string& id, const gfx::Image& image) override {
@@ -71,21 +72,20 @@ class ImageFetcherImplBrowserTest : public InProcessBrowserTest {
 
   void SetUpInProcessBrowserTestFixture() override {
     ASSERT_TRUE(test_server_.Start());
-    InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
   }
 
   ImageFetcherImpl* CreateImageFetcher() {
     ImageFetcherImpl* fetcher =
-        new ImageFetcherImpl(
-            base::MakeUnique<suggestions::ImageDecoderImpl>(),
-            browser()->profile()->GetRequestContext());
+        new ImageFetcherImpl(base::MakeUnique<suggestions::ImageDecoderImpl>(),
+                             browser()->profile()->GetRequestContext());
     fetcher->SetImageFetcherDelegate(&delegate_);
     return fetcher;
   }
 
   void OnImageAvailable(base::RunLoop* loop,
                         const std::string& id,
-                        const gfx::Image& image) {
+                        const gfx::Image& image,
+                        const image_fetcher::RequestMetadata& metadata) {
     if (!image.IsEmpty()) {
       num_callback_valid_called_++;
     } else {
@@ -99,10 +99,10 @@ class ImageFetcherImplBrowserTest : public InProcessBrowserTest {
 
     base::RunLoop run_loop;
     image_fetcher_->StartOrQueueNetworkRequest(
-        kTestUrl,
-        image_url,
+        kTestUrl, image_url,
         base::Bind(&ImageFetcherImplBrowserTest::OnImageAvailable,
-                   base::Unretained(this), &run_loop));
+                   base::Unretained(this), &run_loop),
+        TRAFFIC_ANNOTATION_FOR_TESTS);
     run_loop.Run();
   }
 
@@ -112,6 +112,7 @@ class ImageFetcherImplBrowserTest : public InProcessBrowserTest {
   net::EmbeddedTestServer test_server_;
   TestImageFetcherDelegate delegate_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(ImageFetcherImplBrowserTest);
 };
 

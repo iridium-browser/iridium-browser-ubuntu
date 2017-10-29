@@ -87,7 +87,7 @@ std::unique_ptr<BluetoothServiceAttributeValueBlueZ> ReadAttributeValue(
       std::string str;
       if (!struct_reader->PopVariantOfString(&str))
         return nullptr;
-      value = base::MakeUnique<base::StringValue>(str);
+      value = base::MakeUnique<base::Value>(str);
       break;
     }
     case bluez::BluetoothServiceAttributeValueBlueZ::BOOL: {
@@ -428,6 +428,55 @@ class BluetoothDeviceClientImpl : public BluetoothDeviceClient,
     object_proxy->CallMethodWithErrorCallback(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
         base::Bind(&BluetoothDeviceClientImpl::OnGetConnInfoSuccess,
+                   weak_ptr_factory_.GetWeakPtr(), callback),
+        base::Bind(&BluetoothDeviceClientImpl::OnError,
+                   weak_ptr_factory_.GetWeakPtr(), error_callback));
+  }
+
+  void SetLEConnectionParameters(const dbus::ObjectPath& object_path,
+                                 const ConnectionParameters& conn_params,
+                                 const base::Closure& callback,
+                                 const ErrorCallback& error_callback) override {
+    dbus::ObjectProxy* object_proxy =
+        object_manager_->GetObjectProxy(object_path);
+    if (!object_proxy) {
+      error_callback.Run(kUnknownDeviceError, "");
+      return;
+    }
+
+    dbus::MethodCall method_call(
+        bluetooth_plugin_device::kBluetoothPluginInterface,
+        bluetooth_plugin_device::kSetLEConnectionParameters);
+
+    dbus::MessageWriter writer(&method_call);
+    dbus::MessageWriter dict_writer(nullptr);
+    writer.OpenArray("{sq}", &dict_writer);
+
+    {
+      dbus::MessageWriter dict_entry_writer(nullptr);
+      dict_writer.OpenDictEntry(&dict_entry_writer);
+      dict_entry_writer.AppendString(
+          bluetooth_plugin_device::
+              kLEConnectionParameterMinimumConnectionInterval);
+      dict_entry_writer.AppendUint16(conn_params.min_connection_interval);
+      dict_writer.CloseContainer(&dict_entry_writer);
+    }
+
+    {
+      dbus::MessageWriter dict_entry_writer(nullptr);
+      dict_writer.OpenDictEntry(&dict_entry_writer);
+      dict_entry_writer.AppendString(
+          bluetooth_plugin_device::
+              kLEConnectionParameterMaximumConnectionInterval);
+      dict_entry_writer.AppendUint16(conn_params.max_connection_interval);
+      dict_writer.CloseContainer(&dict_entry_writer);
+    }
+
+    writer.CloseContainer(&dict_writer);
+
+    object_proxy->CallMethodWithErrorCallback(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&BluetoothDeviceClientImpl::OnSuccess,
                    weak_ptr_factory_.GetWeakPtr(), callback),
         base::Bind(&BluetoothDeviceClientImpl::OnError,
                    weak_ptr_factory_.GetWeakPtr(), error_callback));

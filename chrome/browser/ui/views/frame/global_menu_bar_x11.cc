@@ -152,10 +152,6 @@ GlobalMenuBarCommand file_menu[] = {
 
   { MENU_SEPARATOR, MENU_SEPARATOR },
 
-  { IDS_CREATE_SHORTCUTS, IDC_CREATE_SHORTCUTS },
-
-  { MENU_SEPARATOR, MENU_SEPARATOR },
-
   { IDS_CLOSE_WINDOW_LINUX, IDC_CLOSE_WINDOW },
   { IDS_CLOSE_TAB_LINUX, IDC_CLOSE_TAB },
   { IDS_SAVE_PAGE, IDC_SAVE_PAGE },
@@ -716,9 +712,10 @@ void GlobalMenuBarX11::OnAvatarMenuChanged(AvatarMenu* avatar_menu) {
 }
 
 void GlobalMenuBarX11::OnBrowserSetLastActive(Browser* browser) {
-  // Rebuild the avatar menu so that the items have the correct active state.
-  avatar_menu_->RebuildMenu();
+  // Notify the avatar menu of the change and rebuild the menu. Note: The
+  // ActiveBrowserChanged() call needs to happen first to update the state.
   avatar_menu_->ActiveBrowserChanged(browser);
+  avatar_menu_->RebuildMenu();
   RebuildProfilesMenu();
 }
 

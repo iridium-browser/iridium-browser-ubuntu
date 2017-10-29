@@ -310,6 +310,8 @@
   GLES2_GET_FUN(CreateAndConsumeTextureCHROMIUM)
 #define glBindUniformLocationCHROMIUM GLES2_GET_FUN(BindUniformLocationCHROMIUM)
 #define glBindTexImage2DCHROMIUM GLES2_GET_FUN(BindTexImage2DCHROMIUM)
+#define glBindTexImage2DWithInternalformatCHROMIUM \
+  GLES2_GET_FUN(BindTexImage2DWithInternalformatCHROMIUM)
 #define glReleaseTexImage2DCHROMIUM GLES2_GET_FUN(ReleaseTexImage2DCHROMIUM)
 #define glTraceBeginCHROMIUM GLES2_GET_FUN(TraceBeginCHROMIUM)
 #define glTraceEndCHROMIUM GLES2_GET_FUN(TraceEndCHROMIUM)
@@ -334,6 +336,9 @@
 #define glSwapInterval GLES2_GET_FUN(SwapInterval)
 #define glFlushDriverCachesCHROMIUM GLES2_GET_FUN(FlushDriverCachesCHROMIUM)
 #define glGetLastFlushIdCHROMIUM GLES2_GET_FUN(GetLastFlushIdCHROMIUM)
+#define glScheduleDCLayerSharedStateCHROMIUM \
+  GLES2_GET_FUN(ScheduleDCLayerSharedStateCHROMIUM)
+#define glScheduleDCLayerCHROMIUM GLES2_GET_FUN(ScheduleDCLayerCHROMIUM)
 #define glMatrixLoadfCHROMIUM GLES2_GET_FUN(MatrixLoadfCHROMIUM)
 #define glMatrixLoadIdentityCHROMIUM GLES2_GET_FUN(MatrixLoadIdentityCHROMIUM)
 #define glGenPathsCHROMIUM GLES2_GET_FUN(GenPathsCHROMIUM)
@@ -385,5 +390,12 @@
 #define glSwapBuffersWithBoundsCHROMIUM \
   GLES2_GET_FUN(SwapBuffersWithBoundsCHROMIUM)
 #define glSetDrawRectangleCHROMIUM GLES2_GET_FUN(SetDrawRectangleCHROMIUM)
+#define glSetEnableDCLayersCHROMIUM GLES2_GET_FUN(SetEnableDCLayersCHROMIUM)
+#define glInitializeDiscardableTextureCHROMIUM \
+  GLES2_GET_FUN(InitializeDiscardableTextureCHROMIUM)
+#define glUnlockDiscardableTextureCHROMIUM \
+  GLES2_GET_FUN(UnlockDiscardableTextureCHROMIUM)
+#define glLockDiscardableTextureCHROMIUM \
+  GLES2_GET_FUN(LockDiscardableTextureCHROMIUM)
 
 #endif  // GPU_GLES2_GL2CHROMIUM_AUTOGEN_H_

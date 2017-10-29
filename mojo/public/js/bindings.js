@@ -4,10 +4,12 @@
 
 define("mojo/public/js/bindings", [
   "mojo/public/js/core",
-  "mojo/public/js/lib/control_message_proxy",
   "mojo/public/js/interface_types",
+  "mojo/public/js/lib/interface_endpoint_client",
   "mojo/public/js/router",
-], function(core, controlMessageProxy, types, router) {
+], function(core, types, interfaceEndpointClient, router) {
+
+  var InterfaceEndpointClient = interfaceEndpointClient.InterfaceEndpointClient;
 
   // ---------------------------------------------------------------------------
 
@@ -27,12 +29,13 @@ define("mojo/public/js/bindings", [
 
     this.interfaceType_ = interfaceType;
     this.router_ = null;
+    this.interfaceEndpointClient_ = null;
     this.proxy_ = null;
 
-    // |router_| is lazily initialized. |handle_| is valid between bind() and
-    // the initialization of |router_|.
+    // |router_| and |interfaceEndpointClient_| are lazily initialized.
+    // |handle_| is valid between bind() and
+    // the initialization of |router_| and |interfaceEndpointClient_|.
     this.handle_ = null;
-    this.controlMessageProxy_ = null;
 
     if (ptrInfoOrHandle)
       this.bind(ptrInfoOrHandle);
@@ -50,13 +53,17 @@ define("mojo/public/js/bindings", [
   };
 
   InterfacePtrController.prototype.isBound = function() {
-    return this.router_ !== null || this.handle_ !== null;
+    return this.interfaceEndpointClient_ !== null || this.handle_ !== null;
   };
 
   // Although users could just discard the object, reset() closes the pipe
   // immediately.
   InterfacePtrController.prototype.reset = function() {
     this.version = 0;
+    if (this.interfaceEndpointClient_) {
+      this.interfaceEndpointClient_.close();
+      this.interfaceEndpointClient_ = null;
+    }
     if (this.router_) {
       this.router_.close();
       this.router_ = null;
@@ -69,13 +76,22 @@ define("mojo/public/js/bindings", [
     }
   };
 
-  InterfacePtrController.prototype.setConnectionErrorHandler
-      = function(callback) {
+  InterfacePtrController.prototype.resetWithReason = function(reason) {
+    if (this.isBound()) {
+      this.configureProxyIfNecessary_();
+      this.interfaceEndpointClient_.close(reason);
+      this.interfaceEndpointClient_ = null;
+    }
+    this.reset();
+  };
+
+  InterfacePtrController.prototype.setConnectionErrorHandler = function(
+      callback) {
     if (!this.isBound())
       throw new Error("Cannot set connection error handler if not bound.");
 
     this.configureProxyIfNecessary_();
-    this.router_.setErrorHandler(callback);
+    this.interfaceEndpointClient_.setConnectionErrorHandler(callback);
   };
 
   InterfacePtrController.prototype.passInterface = function() {
@@ -100,23 +116,25 @@ define("mojo/public/js/bindings", [
     return this.proxy_;
   };
 
-  InterfacePtrController.prototype.enableTestingMode = function() {
+  InterfacePtrController.prototype.waitForNextMessageForTesting = function() {
     this.configureProxyIfNecessary_();
-    return this.router_.enableTestingMode();
+    this.router_.waitForNextMessageForTesting();
   };
 
   InterfacePtrController.prototype.configureProxyIfNecessary_ = function() {
     if (!this.handle_)
       return;
 
-    this.router_ = new router.Router(this.handle_);
+    this.router_ = new router.Router(this.handle_, true);
     this.handle_ = null;
-    this.router_ .setPayloadValidators([this.interfaceType_.validateResponse]);
 
-    this.controlMessageProxy_ = new
-        controlMessageProxy.ControlMessageProxy(this.router_);
+    this.interfaceEndpointClient_ = new InterfaceEndpointClient(
+        this.router_.createLocalEndpointHandle(types.kMasterInterfaceId));
 
-    this.proxy_ = new this.interfaceType_.proxyClass(this.router_);
+    this.interfaceEndpointClient_ .setPayloadValidators([
+        this.interfaceType_.validateResponse]);
+    this.proxy_ = new this.interfaceType_.proxyClass(
+        this.interfaceEndpointClient_);
   };
 
   InterfacePtrController.prototype.queryVersion = function() {
@@ -126,7 +144,7 @@ define("mojo/public/js/bindings", [
     }
 
     this.configureProxyIfNecessary_();
-    return this.controlMessageProxy_.queryVersion().then(
+    return this.interfaceEndpointClient_.queryVersion().then(
       onQueryVersion.bind(this));
   };
 
@@ -137,7 +155,7 @@ define("mojo/public/js/bindings", [
       return;
     }
     this.version = version;
-    this.controlMessageProxy_.requireVersion(version);
+    this.interfaceEndpointClient_.requireVersion(version);
   };
 
   // ---------------------------------------------------------------------------
@@ -159,6 +177,7 @@ define("mojo/public/js/bindings", [
     this.interfaceType_ = interfaceType;
     this.impl_ = impl;
     this.router_ = null;
+    this.interfaceEndpointClient_ = null;
     this.stub_ = null;
 
     if (requestOrHandle)
@@ -174,7 +193,7 @@ define("mojo/public/js/bindings", [
     // TODO(yzshen): Set the version of the interface pointer.
     this.bind(makeRequest(ptr));
     return ptr;
-  }
+  };
 
   Binding.prototype.bind = function(requestOrHandle) {
     this.close();
@@ -184,26 +203,44 @@ define("mojo/public/js/bindings", [
     if (!core.isHandle(handle))
       return;
 
+    this.router_ = new router.Router(handle);
+
     this.stub_ = new this.interfaceType_.stubClass(this.impl_);
-    this.router_ = new router.Router(handle, this.interfaceType_.kVersion);
-    this.router_.setIncomingReceiver(this.stub_);
-    this.router_ .setPayloadValidators([this.interfaceType_.validateRequest]);
+    this.interfaceEndpointClient_ = new InterfaceEndpointClient(
+        this.router_.createLocalEndpointHandle(types.kMasterInterfaceId),
+        this.stub_, this.interfaceType_.kVersion);
+
+    this.interfaceEndpointClient_ .setPayloadValidators([
+        this.interfaceType_.validateRequest]);
   };
 
   Binding.prototype.close = function() {
     if (!this.isBound())
       return;
 
+    if (this.interfaceEndpointClient_) {
+      this.interfaceEndpointClient_.close();
+      this.interfaceEndpointClient_ = null;
+    }
+
     this.router_.close();
     this.router_ = null;
     this.stub_ = null;
   };
 
-  Binding.prototype.setConnectionErrorHandler
-      = function(callback) {
-    if (!this.isBound())
+  Binding.prototype.closeWithReason = function(reason) {
+    if (this.interfaceEndpointClient_) {
+      this.interfaceEndpointClient_.close(reason);
+      this.interfaceEndpointClient_ = null;
+    }
+    this.close();
+  };
+
+  Binding.prototype.setConnectionErrorHandler = function(callback) {
+    if (!this.isBound()) {
       throw new Error("Cannot set connection error handler if not bound.");
-    this.router_.setErrorHandler(callback);
+    }
+    this.interfaceEndpointClient_.setConnectionErrorHandler(callback);
   };
 
   Binding.prototype.unbind = function() {
@@ -216,20 +253,21 @@ define("mojo/public/js/bindings", [
     return result;
   };
 
-  Binding.prototype.enableTestingMode = function() {
-    return this.router_.enableTestingMode();
+  Binding.prototype.waitForNextMessageForTesting = function() {
+    this.router_.waitForNextMessageForTesting();
   };
 
   // ---------------------------------------------------------------------------
 
-  function BindingSetEntry(bindingSet, interfaceType, impl, requestOrHandle,
-                           bindingId) {
+  function BindingSetEntry(bindingSet, interfaceType, bindingType, impl,
+      requestOrHandle, bindingId) {
     this.bindingSet_ = bindingSet;
     this.bindingId_ = bindingId;
-    this.binding_ = new Binding(interfaceType, impl, requestOrHandle);
+    this.binding_ = new bindingType(interfaceType, impl,
+        requestOrHandle);
 
-    this.binding_.setConnectionErrorHandler(function() {
-      this.bindingSet_.onConnectionError(bindingId);
+    this.binding_.setConnectionErrorHandler(function(reason) {
+      this.bindingSet_.onConnectionError(bindingId, reason);
     }.bind(this));
   }
 
@@ -242,6 +280,7 @@ define("mojo/public/js/bindings", [
     this.nextBindingId_ = 0;
     this.bindings_ = new Map();
     this.errorHandler_ = null;
+    this.bindingType_ = Binding;
   }
 
   BindingSet.prototype.isEmpty = function() {
@@ -251,8 +290,8 @@ define("mojo/public/js/bindings", [
   BindingSet.prototype.addBinding = function(impl, requestOrHandle) {
     this.bindings_.set(
         this.nextBindingId_,
-        new BindingSetEntry(this, this.interfaceType_, impl, requestOrHandle,
-                            this.nextBindingId_));
+        new BindingSetEntry(this, this.interfaceType_, this.bindingType_, impl,
+            requestOrHandle, this.nextBindingId_));
     ++this.nextBindingId_;
   };
 
@@ -266,11 +305,11 @@ define("mojo/public/js/bindings", [
     this.errorHandler_ = callback;
   };
 
-  BindingSet.prototype.onConnectionError = function(bindingId) {
+  BindingSet.prototype.onConnectionError = function(bindingId, reason) {
     this.bindings_.delete(bindingId);
 
     if (this.errorHandler_)
-      this.errorHandler_();
+      this.errorHandler_(reason);
   };
 
   var exports = {};

@@ -11,16 +11,33 @@
 namespace blink {
 
 DedicatedWorkerMessagingProxy::DedicatedWorkerMessagingProxy(
-    InProcessWorkerBase* workerObject,
-    WorkerClients* workerClients)
-    : InProcessWorkerMessagingProxy(workerObject, workerClients) {}
+    InProcessWorkerBase* worker_object,
+    WorkerClients* worker_clients)
+    : InProcessWorkerMessagingProxy(worker_object, worker_clients) {}
 
 DedicatedWorkerMessagingProxy::~DedicatedWorkerMessagingProxy() {}
 
-std::unique_ptr<WorkerThread> DedicatedWorkerMessagingProxy::createWorkerThread(
-    double originTime) {
-  return DedicatedWorkerThread::create(loaderProxy(), workerObjectProxy(),
-                                       originTime);
+bool DedicatedWorkerMessagingProxy::IsAtomicsWaitAllowed() {
+  return true;
+}
+
+WTF::Optional<WorkerBackingThreadStartupData>
+DedicatedWorkerMessagingProxy::CreateBackingThreadStartupData(
+    v8::Isolate* isolate) {
+  using HeapLimitMode = WorkerBackingThreadStartupData::HeapLimitMode;
+  using AtomicsWaitMode = WorkerBackingThreadStartupData::AtomicsWaitMode;
+  return WorkerBackingThreadStartupData(
+      isolate->IsHeapLimitIncreasedForDebugging()
+          ? HeapLimitMode::kIncreasedForDebugging
+          : HeapLimitMode::kDefault,
+      IsAtomicsWaitAllowed() ? AtomicsWaitMode::kAllow
+                             : AtomicsWaitMode::kDisallow);
+}
+
+std::unique_ptr<WorkerThread>
+DedicatedWorkerMessagingProxy::CreateWorkerThread() {
+  return DedicatedWorkerThread::Create(CreateThreadableLoadingContext(),
+                                       WorkerObjectProxy());
 }
 
 }  // namespace blink

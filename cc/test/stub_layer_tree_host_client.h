@@ -18,20 +18,25 @@ class StubLayerTreeHostClient : public LayerTreeHostClient {
   void DidBeginMainFrame() override {}
   void BeginMainFrame(const BeginFrameArgs& args) override {}
   void BeginMainFrameNotExpectedSoon() override {}
+  void BeginMainFrameNotExpectedUntil(base::TimeTicks time) override {}
   void UpdateLayerTreeHost() override {}
   void ApplyViewportDeltas(const gfx::Vector2dF& inner_delta,
                            const gfx::Vector2dF& outer_delta,
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override {}
-  void RequestNewCompositorFrameSink() override {}
-  void DidInitializeCompositorFrameSink() override {}
-  void DidFailToInitializeCompositorFrameSink() override {}
+  void RecordWheelAndTouchScrollingCount(bool has_scrolled_by_wheel,
+                                         bool has_scrolled_by_touch) override {}
+  void RequestNewLayerTreeFrameSink() override {}
+  void DidInitializeLayerTreeFrameSink() override {}
+  void DidFailToInitializeLayerTreeFrameSink() override {}
   void WillCommit() override {}
   void DidCommit() override {}
   void DidCommitAndDrawFrame() override {}
   void DidReceiveCompositorFrameAck() override {}
   void DidCompletePageScaleAnimation() override {}
+
+  bool IsForSubframe() override;
 };
 
 }  // namespace cc

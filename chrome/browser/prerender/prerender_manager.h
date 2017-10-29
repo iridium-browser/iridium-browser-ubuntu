@@ -185,23 +185,6 @@ class PrerenderManager : public content::NotificationObserver,
   virtual void MoveEntryToPendingDelete(PrerenderContents* entry,
                                         FinalStatus final_status);
 
-  // Records the page load time for a prerender that wasn't swapped in.
-  void RecordPageLoadTimeNotSwappedIn(Origin origin,
-                                      base::TimeDelta page_load_time,
-                                      const GURL& url);
-
-  // Records the perceived page load time for a page - effectively the time from
-  // when the user navigates to a page to when it finishes loading. The actual
-  // load may have started prior to navigation due to prerender hints.
-  // |fraction_plt_elapsed_at_swap_in| must either be in [0.0, 1.0], or a value
-  // outside that range indicating that it doesn't apply.
-  void RecordPerceivedPageLoadTime(
-      Origin origin,
-      NavigationType navigation_type,
-      base::TimeDelta perceived_page_load_time,
-      double fraction_plt_elapsed_at_swap_in,
-      const GURL& url);
-
   // Called when a NoStatePrefetch request has received a response (including
   // redirects). May be called several times per resource, in case of redirects.
   void RecordPrefetchResponseReceived(Origin origin,
@@ -215,26 +198,29 @@ class PrerenderManager : public content::NotificationObserver,
                                    bool is_main_resource,
                                    int redirect_count);
 
-  // Called when a NoStatePrefetch first contentful paint has fired.
-  void RecordPrefetchFirstContentfulPaint(Origin origin,
-                                          bool is_no_store,
-                                          bool was_hidden,
-                                          base::TimeDelta time,
-                                          base::TimeDelta prefetch_age);
-
-  // Records the time to first contentful paint for loads that previously had a
-  // no state prefetch load.  Must not be called for prefetch loads themselves
-  // (which are never rendered anyway).  |is_no_store| must be true if the main
-  // resource has a "no-store" cache control HTTP header.
+  // Called to record the time to First Contentful Paint for all pages that were
+  // not prerendered.
+  //
+  // As part of recording, determines whether the load had previously matched
+  // the criteria for triggering a NoStatePrefetch. In the prerendering
+  // experimental group such triggering makes the page prerendered, while in the
+  // group doing only 'simple loads' it would have been a noop.
+  //
+  // Must not be called for prefetch loads themselves (which are never painted
+  // anyway). The |is_no_store| must be true iff the main resource has a
+  // "no-store" cache control HTTP header. The |was_hidden| tells whether the
+  // the page was hidden at least once between starting the load and registering
+  // the FCP.
   void RecordNoStateFirstContentfulPaint(const GURL& url,
                                          bool is_no_store,
                                          bool was_hidden,
                                          base::TimeDelta time);
 
-  // Records the perceived first contentful paint time for a prerendered page,
-  // analogous to |RecordPerceivedPageLoadTime|. The FCP ticks is in absolute
-  // time; this has the disadvantage that the histogram will mix browser and
-  // renderer ticks, but there seems to be no way around that.
+  // Records the perceived first contentful paint time for a prerendered page.
+  // The actual load may have started prior to navigation due to prerender
+  // hints. The FCP ticks is in absolute time; this has the disadvantage that
+  // the histogram will mix browser and renderer ticks, but there seems to be no
+  // way around that.
   void RecordPrerenderFirstContentfulPaint(const GURL& url,
                                            content::WebContents* web_contents,
                                            bool is_no_store,
@@ -299,7 +285,7 @@ class PrerenderManager : public content::NotificationObserver,
 
   // Returns a Value object containing the active pages being prerendered, and
   // a history of pages which were prerendered.
-  std::unique_ptr<base::DictionaryValue> GetAsValue() const;
+  std::unique_ptr<base::DictionaryValue> CopyAsValue() const;
 
   // Clears the data indicated by which bits of clear_flags are set.
   //

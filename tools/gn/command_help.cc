@@ -29,39 +29,37 @@ namespace commands {
 namespace {
 
 void PrintToplevelHelp() {
-  OutputString("Commands (type \"gn help <command>\" for more details):\n");
+  PrintSectionHelp("Commands", "<command>", "commands");
   for (const auto& cmd : commands::GetCommands())
     PrintShortHelp(cmd.second.help_short);
 
   // Target declarations.
-  OutputString("\nTarget declarations (type \"gn help <function>\" for more "
-               "details):\n");
+  PrintSectionHelp("Target declarations", "<function>", "targets");
   for (const auto& func : functions::GetFunctions()) {
     if (func.second.is_target)
       PrintShortHelp(func.second.help_short);
   }
 
   // Functions.
-  OutputString("\nBuildfile functions (type \"gn help <function>\" for more "
-               "details):\n");
+  PrintSectionHelp("Buildfile functions", "<function>", "functions");
   for (const auto& func : functions::GetFunctions()) {
     if (!func.second.is_target)
       PrintShortHelp(func.second.help_short);
   }
 
   // Built-in variables.
-  OutputString("\nBuilt-in predefined variables (type \"gn help <variable>\" "
-               "for more details):\n");
+  PrintSectionHelp("Built-in predefined variables", "<variable>",
+                   "predefined_variables");
   for (const auto& builtin : variables::GetBuiltinVariables())
     PrintShortHelp(builtin.second.help_short);
 
   // Target variables.
-  OutputString("\nVariables you set in targets (type \"gn help <variable>\" "
-               "for more details):\n");
+  PrintSectionHelp("Variables you set in targets", "<variable>",
+                   "target_variables");
   for (const auto& target : variables::GetTargetVariables())
     PrintShortHelp(target.second.help_short);
 
-  OutputString("\nOther help topics:\n");
+  PrintSectionHelp("Other help topics", "", "other");
   PrintShortHelp("all: Print all the help at once");
   PrintShortHelp("buildargs: How build arguments work.");
   PrintShortHelp("dotfile: Info about the toplevel .gn file.");
@@ -80,7 +78,7 @@ void PrintToplevelHelp() {
 
 void PrintSwitchHelp() {
   const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
-  bool use_markdown = cmdline->HasSwitch(switches::kMarkdown);
+  bool is_markdown = cmdline->HasSwitch(switches::kMarkdown);
 
   OutputString("Available global switches\n", DECORATION_YELLOW);
   OutputString(
@@ -88,57 +86,87 @@ void PrintSwitchHelp() {
       "  commands may take command-specific switches not listed here. See the\n"
       "  help on your specific command for more.\n\n");
 
-  if (use_markdown)
-    OutputString("```\n\n", DECORATION_NONE);
+  if (is_markdown)
+    OutputString("```\n", DECORATION_NONE);
 
   for (const auto& s : switches::GetSwitches())
     PrintShortHelp(s.second.short_help);
 
-  if (use_markdown)
-    OutputString("\n```\n", DECORATION_NONE);
+  if (is_markdown)
+    OutputString("```\n", DECORATION_NONE);
+
+  OutputString("\n");
 }
 
 void PrintAllHelp() {
   const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
-  if (cmdline->HasSwitch(switches::kMarkdown)) {
-    OutputString("# GN Reference\n\n");
+  bool is_markdown = cmdline->HasSwitch(switches::kMarkdown);
 
-    // TODO: https://code.google.com/p/gitiles/issues/detail?id=75
-    // Gitiles crashes when rendering the table of contents, so we must omit
-    // it until the bug is fixed.
-    // OutputString("[TOC]\n\n");
+  if (is_markdown) {
+    OutputString("# GN Reference\n\n");
     OutputString("*This page is automatically generated from* "
                  "`gn help --markdown all`.\n\n");
-  } else {
-    PrintToplevelHelp();
+
+    // Generate our own table of contents so that we have more control
+    // over what's in and out.
+    OutputString("## Contents\n\n");
   }
 
-  for (const auto& s : switches::GetSwitches())
-    PrintLongHelp(s.second.long_help);
+  PrintToplevelHelp();
 
+  OutputString("\n");
+
+  if (is_markdown)
+    OutputString("## <a name=\"commands\"></a>Commands\n\n");
   for (const auto& c: commands::GetCommands())
     PrintLongHelp(c.second.help);
 
-  for (const auto& f: functions::GetFunctions())
-    PrintLongHelp(f.second.help);
+  if (is_markdown)
+    OutputString("## <a name=\"targets\"></a>Target declarations\n\n");
+  for (const auto& f : functions::GetFunctions()) {
+    if (f.second.is_target)
+      PrintLongHelp(f.second.help);
+  }
 
+  if (is_markdown)
+    OutputString("## <a name=\"functions\"></a>Buildfile functions\n\n");
+  for (const auto& f : functions::GetFunctions()) {
+    if (!f.second.is_target)
+      PrintLongHelp(f.second.help);
+  }
+
+  if (is_markdown) {
+    OutputString(
+        "## <a name=\"predefined_variables\"></a>"
+        "Built-in predefined variables\n\n");
+  }
   for (const auto& v: variables::GetBuiltinVariables())
     PrintLongHelp(v.second.help);
 
+  if (is_markdown) {
+    OutputString(
+        "## <a name=\"target_variables\"></a>"
+        "Variables you set in targets\n\n");
+  }
   for (const auto& v: variables::GetTargetVariables())
     PrintLongHelp(v.second.help);
 
-  PrintLongHelp(kBuildArgs_Help);
-  PrintLongHelp(kDotfile_Help);
-  PrintLongHelp(kExecution_Help);
-  PrintLongHelp(kGrammar_Help);
-  PrintLongHelp(kInputConversion_Help);
-  PrintLongHelp(kLabelPattern_Help);
-  PrintLongHelp(kLabels_Help);
-  PrintLongHelp(kNinjaRules_Help);
-  PrintLongHelp(kNoGnCheck_Help);
-  PrintLongHelp(kRuntimeDeps_Help);
-  PrintLongHelp(kSourceExpansion_Help);
+  if (is_markdown)
+    OutputString("## <a name=\"other\"></a>Other help topics\n\n");
+  PrintLongHelp(kBuildArgs_Help, "buildargs");
+  PrintLongHelp(kDotfile_Help, "dotfile");
+  PrintLongHelp(kExecution_Help, "execution");
+  PrintLongHelp(kGrammar_Help, "grammar");
+  PrintLongHelp(kInputConversion_Help, "input_conversion");
+  PrintLongHelp(kLabelPattern_Help, "label_pattern");
+  PrintLongHelp(kLabels_Help, "labels");
+  PrintLongHelp(kNinjaRules_Help, "ninja_rules");
+  PrintLongHelp(kNoGnCheck_Help, "nogncheck");
+  PrintLongHelp(kRuntimeDeps_Help, "runtime_deps");
+  PrintLongHelp(kSourceExpansion_Help, "source_expansion");
+
+  if (is_markdown)
+    OutputString("## <a name=\"switches\"></a>Command Line Switches\n\n");
   PrintSwitchHelp();
 }
 
@@ -217,10 +245,8 @@ int RunHelp(const std::vector<std::string>& args) {
   // Check functions.
   const functions::FunctionInfoMap& function_map = functions::GetFunctions();
   auto found_function = function_map.find(what);
-  if (found_function != function_map.end()) {
+  if (found_function != function_map.end())
     PrintLongHelp(found_function->second.help);
-    return 0;
-  }
   for (const auto& entry : function_map)
     all_help_topics.push_back(entry.first);
 
@@ -228,10 +254,8 @@ int RunHelp(const std::vector<std::string>& args) {
   const variables::VariableInfoMap& builtin_vars =
       variables::GetBuiltinVariables();
   auto found_builtin_var = builtin_vars.find(what);
-  if (found_builtin_var != builtin_vars.end()) {
+  if (found_builtin_var != builtin_vars.end())
     PrintLongHelp(found_builtin_var->second.help);
-    return 0;
-  }
   for (const auto& entry : builtin_vars)
     all_help_topics.push_back(entry.first);
 
@@ -239,12 +263,15 @@ int RunHelp(const std::vector<std::string>& args) {
   const variables::VariableInfoMap& target_vars =
       variables::GetTargetVariables();
   auto found_target_var = target_vars.find(what);
-  if (found_target_var != target_vars.end()) {
+  if (found_target_var != target_vars.end())
     PrintLongHelp(found_target_var->second.help);
-    return 0;
-  }
   for (const auto& entry : target_vars)
     all_help_topics.push_back(entry.first);
+
+  if (found_function != function_map.end() ||
+      found_builtin_var != builtin_vars.end() ||
+      found_target_var != target_vars.end())
+    return 0;
 
   // Random other topics.
   std::map<std::string, void(*)()> random_topics;

@@ -61,6 +61,20 @@ class ExtensionManagementPrefUpdaterBase {
   void RemoveBlockedPermission(const std::string& prefix,
                                const std::string& permission);
 
+  // Helper function for 'blocked_install_message' manipulation.
+  // |id| is extension ID.
+  void SetBlockedInstallMessage(const ExtensionId& id,
+                                const std::string& custom_error);
+
+  // Helper functions for 'runtime_blocked_hosts' manipulation. |prefix| can be
+  // kWildCard or a valid extension ID.
+  void UnsetRuntimeBlockedHosts(const std::string& prefix);
+  void ClearRuntimeBlockedHosts(const std::string& prefix);
+  void AddRuntimeBlockedHost(const std::string& prefix,
+                             const std::string& host);
+  void RemoveRuntimeBlockedHost(const std::string& prefix,
+                                const std::string& host);
+
   // Helper functions for 'allowed_permissions' manipulation. |id| must be a
   // valid extension ID.
   void UnsetAllowedPermissions(const std::string& id);
@@ -119,8 +133,7 @@ class ExtensionManagementPrefUpdater
   }
 
   virtual ~ExtensionManagementPrefUpdater() {
-    service_->SetManagedPref(pref_names::kExtensionManagement,
-                             TakePref().release());
+    service_->SetManagedPref(pref_names::kExtensionManagement, TakePref());
   }
 
  private:

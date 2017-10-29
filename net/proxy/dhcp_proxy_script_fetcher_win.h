@@ -12,7 +12,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "net/base/net_export.h"
@@ -31,8 +31,7 @@ class URLRequestContext;
 // Windows-specific implementation.
 class NET_EXPORT_PRIVATE DhcpProxyScriptFetcherWin
     : public DhcpProxyScriptFetcher,
-      public base::SupportsWeakPtr<DhcpProxyScriptFetcherWin>,
-      NON_EXPORTED_BASE(public base::NonThreadSafe) {
+      public base::SupportsWeakPtr<DhcpProxyScriptFetcherWin> {
  public:
   // Creates a DhcpProxyScriptFetcherWin that issues requests through
   // |url_request_context|. |url_request_context| must remain valid for
@@ -44,6 +43,7 @@ class NET_EXPORT_PRIVATE DhcpProxyScriptFetcherWin
   int Fetch(base::string16* utf16_text,
             const CompletionCallback& callback) override;
   void Cancel() override;
+  void OnShutdown() override;
   const GURL& GetPacURL() const override;
   std::string GetFetcherName() const override;
 
@@ -165,7 +165,8 @@ class NET_EXPORT_PRIVATE DhcpProxyScriptFetcherWin
 
   base::OneShotTimer wait_timer_;
 
-  URLRequestContext* const url_request_context_;
+  // Set to nullptr on cancellation.
+  URLRequestContext* url_request_context_;
 
   // NULL or the AdapterQuery currently in flight.
   scoped_refptr<AdapterQuery> last_query_;
@@ -175,6 +176,8 @@ class NET_EXPORT_PRIVATE DhcpProxyScriptFetcherWin
 
   // Worker pool we use for all DHCP lookup tasks.
   scoped_refptr<base::SequencedWorkerPool> worker_pool_;
+
+  THREAD_CHECKER(thread_checker_);
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(DhcpProxyScriptFetcherWin);
 };

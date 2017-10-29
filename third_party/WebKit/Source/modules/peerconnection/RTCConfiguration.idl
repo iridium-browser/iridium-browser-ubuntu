@@ -4,10 +4,7 @@
 
 // https://w3c.github.io/webrtc-pc/#rtcicetransportpolicy-enum
 
-// TODO(foolip): The spec does not have the "none" value.
-// https://crbug.com/659134
 enum RTCIceTransportPolicy {
-    "none",
     "relay",
     "all"
 };
@@ -41,5 +38,5 @@ dictionary RTCConfiguration {
     RTCRtcpMuxPolicy rtcpMuxPolicy = "require";
     // TODO(foolip): DOMString peerIdentity;
     sequence<RTCCertificate> certificates;
-    // TODO(foolip): unsigned short iceCandidatePoolSize = 0;
+    [EnforceRange] octet iceCandidatePoolSize = 0;
 };

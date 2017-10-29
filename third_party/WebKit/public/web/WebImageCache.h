@@ -31,7 +31,7 @@
 #ifndef WebImageCache_h
 #define WebImageCache_h
 
-#include "../platform/WebCommon.h"
+#include "public/platform/WebCommon.h"
 
 namespace blink {
 
@@ -44,7 +44,7 @@ class WebImageCache {
  public:
   // Clears the cache (as much as possible; some resources may not be
   // cleared if they are actively referenced).
-  BLINK_EXPORT static void clear();
+  BLINK_EXPORT static void Clear();
 
  private:
   WebImageCache();  // Not intended to be instanced.

@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/wm/window_positioner.h"
+#include "ash/wm/window_positioner.h"
 
 #include <utility>
 
-#include "ash/common/wm/window_resizer.h"
-#include "ash/common/wm_shell.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/window_resizer.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "chrome/browser/ui/browser.h"
@@ -22,7 +21,6 @@
 #include "ui/display/screen.h"
 
 namespace ash {
-namespace test {
 
 // A test class for preparing window positioner tests - it creates a testing
 // base by adding a window and a popup which can be independently
@@ -79,7 +77,7 @@ void WindowPositionerTest::SetUp() {
   // as they need it.
   window()->Hide();
   popup()->Hide();
-  window_positioner_.reset(new WindowPositioner(WmShell::Get()));
+  window_positioner_ = base::MakeUnique<WindowPositioner>();
 }
 
 void WindowPositionerTest::TearDown() {
@@ -226,5 +224,4 @@ TEST_F(WindowPositionerTest, biggerThenBorder) {
                       full);
 }
 
-}  // namespace test
 }  // namespace ash

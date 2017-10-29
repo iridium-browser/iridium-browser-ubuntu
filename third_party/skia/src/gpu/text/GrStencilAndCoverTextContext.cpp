@@ -10,17 +10,15 @@
 #include "GrContext.h"
 #include "GrPath.h"
 #include "GrPathRange.h"
-#include "GrPipelineBuilder.h"
 #include "GrRenderTargetContext.h"
 #include "GrResourceProvider.h"
-#include "GrSurfaceContextPriv.h"
 #include "GrTextUtils.h"
 #include "SkAutoKern.h"
 #include "SkDraw.h"
 #include "SkDrawFilter.h"
 #include "SkDrawProcs.h"
 #include "SkGlyphCache.h"
-#include "SkGrPriv.h"
+#include "SkGr.h"
 #include "SkPath.h"
 #include "SkTextBlobRunIterator.h"
 #include "SkTextFormatParams.h"
@@ -135,7 +133,7 @@ void GrStencilAndCoverTextContext::uncachedDrawTextBlob(GrContext* context,
                                                         SkScalar x, SkScalar y,
                                                         SkDrawFilter* drawFilter,
                                                         const SkIRect& clipBounds) {
-    GrTextUtils::Paint paint(&skPaint);
+    GrTextUtils::Paint paint(&skPaint, rtc->getColorSpace(), rtc->getColorXformFromSRGB());
     GrTextUtils::RunPaint runPaint(&paint, drawFilter, props);
     SkTextBlobRunIterator it(blob);
     for (;!it.done(); it.next()) {
@@ -528,22 +526,25 @@ void GrStencilAndCoverTextContext::TextRun::setPosText(const char text[], size_t
     fFallbackTextBlob = fallback.makeIfNeeded(&fFallbackGlyphCount);
 }
 
-GrPathRange* GrStencilAndCoverTextContext::TextRun::createGlyphs(GrContext* ctx) const {
-    GrPathRange* glyphs = static_cast<GrPathRange*>(
-            ctx->resourceProvider()->findAndRefResourceByUniqueKey(fGlyphPathsKey));
-    if (nullptr == glyphs) {
+sk_sp<GrPathRange> GrStencilAndCoverTextContext::TextRun::createGlyphs(
+                                                    GrResourceProvider* resourceProvider) const {
+    sk_sp<GrPathRange> glyphs;
+
+    glyphs.reset(static_cast<GrPathRange*>(
+            resourceProvider->findAndRefResourceByUniqueKey(fGlyphPathsKey)));
+    if (!glyphs) {
         if (fUsingRawGlyphPaths) {
             SkScalerContextEffects noeffects;
-            glyphs = ctx->resourceProvider()->createGlyphs(fFont.getTypeface(), noeffects,
-                                                           nullptr, fStyle);
+            glyphs = resourceProvider->createGlyphs(fFont.getTypeface(), noeffects,
+                                                    nullptr, fStyle);
         } else {
             SkGlyphCache* cache = this->getGlyphCache();
-            glyphs = ctx->resourceProvider()->createGlyphs(cache->getScalerContext()->getTypeface(),
-                                                           cache->getScalerContext()->getEffects(),
-                                                           &cache->getDescriptor(),
-                                                           fStyle);
+            glyphs = resourceProvider->createGlyphs(cache->getScalerContext()->getTypeface(),
+                                                    cache->getScalerContext()->getEffects(),
+                                                    &cache->getDescriptor(),
+                                                    fStyle);
         }
-        ctx->resourceProvider()->assignUniqueKeyToResource(fGlyphPathsKey, glyphs);
+        resourceProvider->assignUniqueKeyToResource(fGlyphPathsKey, glyphs.get());
     }
     return glyphs;
 }
@@ -570,9 +571,7 @@ void GrStencilAndCoverTextContext::TextRun::draw(GrContext* ctx,
                                                  SkScalar y, const SkIRect& clipBounds,
                                                  GrAtlasTextContext* fallbackTextContext,
                                                  const SkPaint& originalSkPaint) const {
-    GrAA runAA = this->isAntiAlias();
     SkASSERT(fInstanceData);
-    SkASSERT(renderTargetContext->isStencilBufferMultisampled() || GrAA::kNo == runAA);
 
     if (fInstanceData->count()) {
         static constexpr GrUserStencilSettings kCoverPass(
@@ -585,7 +584,7 @@ void GrStencilAndCoverTextContext::TextRun::draw(GrContext* ctx,
                 0xffff>()
         );
 
-        sk_sp<GrPathRange> glyphs(this->createGlyphs(ctx));
+        sk_sp<GrPathRange> glyphs(this->createGlyphs(ctx->resourceProvider()));
         if (fLastDrawnGlyphsID != glyphs->uniqueID()) {
             // Either this is the first draw or the glyphs object was purged since last draw.
             glyphs->loadPathsIfNeeded(fInstanceData->indices(), fInstanceData->count());
@@ -593,9 +592,7 @@ void GrStencilAndCoverTextContext::TextRun::draw(GrContext* ctx,
         }
 
         GrPaint grPaint;
-        GrContext* context = renderTargetContext->surfPriv().getContext();
-        if (!SkPaintToGrPaint(context, renderTargetContext, originalSkPaint, viewMatrix,
-                              &grPaint)) {
+        if (!SkPaintToGrPaint(ctx, renderTargetContext, originalSkPaint, viewMatrix, &grPaint)) {
             return;
         }
 
@@ -607,24 +604,16 @@ void GrStencilAndCoverTextContext::TextRun::draw(GrContext* ctx,
         const SkRect bounds = SkRect::MakeIWH(renderTargetContext->width(),
                                               renderTargetContext->height());
 
+        // The run's "font" overrides the anti-aliasing of the passed in SkPaint!
+        GrAAType aaType = GrChooseAAType(this->aa(), renderTargetContext->fsaaType(),
+                                         GrAllowMixedSamples::kYes, *renderTargetContext->caps());
+
         std::unique_ptr<GrDrawOp> op = GrDrawPathRangeOp::Make(
                 viewMatrix, fTextRatio, fTextInverseRatio * x, fTextInverseRatio * y,
-                grPaint.getColor(), GrPathRendering::kWinding_FillType, glyphs.get(),
+                std::move(grPaint), GrPathRendering::kWinding_FillType, aaType, glyphs.get(),
                 fInstanceData.get(), bounds);
 
-        // The run's "font" overrides the anti-aliasing of the passed in SkPaint!
-        GrAAType aaType = GrAAType::kNone;
-        if (GrAA::kYes == runAA) {
-            if (renderTargetContext->isUnifiedMultisampled()) {
-                aaType = GrAAType::kMSAA;
-            } else if (renderTargetContext->isStencilBufferMultisampled()) {
-                aaType = GrAAType::kMixedSamples;
-            }
-        }
-        GrPipelineBuilder pipelineBuilder(std::move(grPaint), aaType);
-        pipelineBuilder.setUserStencil(&kCoverPass);
-
-        renderTargetContext->addDrawOp(pipelineBuilder, clip, std::move(op));
+        renderTargetContext->addDrawOp(clip, std::move(op));
     }
 
     if (fFallbackTextBlob) {

@@ -29,15 +29,57 @@ using Microsoft::WRL::ComPtr;
 
 class NonCopyable
 {
-  public:
+  protected:
     NonCopyable() = default;
     ~NonCopyable() = default;
-  protected:
+
+  private:
     NonCopyable(const NonCopyable&) = delete;
     void operator=(const NonCopyable&) = delete;
 };
 
 extern const uintptr_t DirtyPointer;
+
+// Helper class for wrapping an onDestroy function.
+template <typename ObjT, typename ContextT>
+class UniqueObjectPointer : angle::NonCopyable
+{
+  public:
+    UniqueObjectPointer(const ContextT *context) : mObject(nullptr), mContext(context) {}
+    UniqueObjectPointer(ObjT *obj, const ContextT *context) : mObject(obj), mContext(context) {}
+    ~UniqueObjectPointer()
+    {
+        if (mObject)
+        {
+            mObject->onDestroy(mContext);
+        }
+    }
+
+    ObjT *operator->() const { return mObject; }
+
+    ObjT *release()
+    {
+        auto obj = mObject;
+        mObject  = nullptr;
+        return obj;
+    }
+
+    ObjT *get() const { return mObject; }
+
+    void reset(ObjT *obj)
+    {
+        if (mObject)
+        {
+            mObject->onDestroy(mContext);
+        }
+        mObject = obj;
+    }
+
+  private:
+    ObjT *mObject;
+    const ContextT *mContext;
+};
+
 }  // namespace angle
 
 template <typename T, size_t N>
@@ -45,6 +87,27 @@ constexpr inline size_t ArraySize(T (&)[N])
 {
     return N;
 }
+
+template <typename T>
+class WrappedArray final : angle::NonCopyable
+{
+  public:
+    template <size_t N>
+    constexpr WrappedArray(const T (&data)[N]) : mArray(&data[0]), mSize(N)
+    {
+    }
+
+    constexpr WrappedArray() : mArray(nullptr), mSize(0) {}
+    constexpr WrappedArray(const T *data, size_t size) : mArray(data), mSize(size) {}
+    ~WrappedArray() {}
+
+    constexpr const T *get() const { return mArray; }
+    constexpr size_t size() const { return mSize; }
+
+  private:
+    const T *mArray;
+    size_t mSize;
+};
 
 template <typename T, unsigned int N>
 void SafeRelease(T (&resourceBlock)[N])
@@ -61,7 +124,7 @@ void SafeRelease(T& resource)
     if (resource)
     {
         resource->Release();
-        resource = NULL;
+        resource = nullptr;
     }
 }
 
@@ -69,7 +132,7 @@ template <typename T>
 void SafeDelete(T *&resource)
 {
     delete resource;
-    resource = NULL;
+    resource = nullptr;
 }
 
 template <typename T>
@@ -86,7 +149,7 @@ template <typename T>
 void SafeDeleteArray(T*& resource)
 {
     delete[] resource;
-    resource = NULL;
+    resource = nullptr;
 }
 
 // Provide a less-than function for comparing structs
@@ -182,10 +245,13 @@ std::string ToString(const T &value)
 // Hidden enum for the NULL D3D device type.
 #define EGL_PLATFORM_ANGLE_DEVICE_TYPE_NULL_ANGLE 0x6AC0
 
-#define ANGLE_TRY_CHECKED_MATH(result)                               \
-    if (!result.IsValid())                                           \
-    {                                                                \
-        return gl::Error(GL_INVALID_OPERATION, "Integer overflow."); \
+// TODO(jmadill): Clean this up at some point.
+#define EGL_PLATFORM_ANGLE_PLATFORM_METHODS_ANGLEX 0x9999
+
+#define ANGLE_TRY_CHECKED_MATH(result)                     \
+    if (!result.IsValid())                                 \
+    {                                                      \
+        return gl::InternalError() << "Integer overflow."; \
     }
 
 #endif // COMMON_ANGLEUTILS_H_

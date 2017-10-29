@@ -13,6 +13,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
+#include "base/stl_util.h"
 #include "components/cast_certificate/cast_crl.h"
 #include "net/cert/internal/cert_issuer_source_static.h"
 #include "net/cert/internal/certificate_policies.h"
@@ -74,27 +75,12 @@ class CastTrustStore {
                                                            &errors);
     CHECK(cert) << errors.ToDebugString();
     // Enforce pathlen constraints and policies defined on the root certificate.
-    scoped_refptr<net::TrustAnchor> anchor =
-        net::TrustAnchor::CreateFromCertificateWithConstraints(std::move(cert));
-    store_.AddTrustAnchor(std::move(anchor));
+    store_.AddTrustAnchorWithConstraints(std::move(cert));
   }
 
   net::TrustStoreInMemory store_;
   DISALLOW_COPY_AND_ASSIGN(CastTrustStore);
 };
-
-using ExtensionsMap = std::map<net::der::Input, net::ParsedExtension>;
-
-// Helper that looks up an extension by OID given a map of extensions.
-bool GetExtensionValue(const ExtensionsMap& extensions,
-                       const net::der::Input& oid,
-                       net::der::Input* value) {
-  auto it = extensions.find(oid);
-  if (it == extensions.end())
-    return false;
-  *value = it->second.value;
-  return true;
-}
 
 // Returns the OID for the Audio-Only Cast policy
 // (1.3.6.1.4.1.11129.2.5.2) in DER form.
@@ -155,9 +141,8 @@ class CertVerificationContextImpl : public CertVerificationContext {
 };
 
 // Helper that extracts the Common Name from a certificate's subject field. On
-// success |common_name| contains the text for the attribute (unescaped, so
-// will depend on the encoding used, but for Cast device certs it should
-// be ASCII).
+// success |common_name| contains the text for the attribute (UTF-8, but for
+// Cast device certs it should be ASCII).
 bool GetCommonNameFromSubject(const net::der::Input& subject_tlv,
                               std::string* common_name) {
   net::RDNSequence rdn_sequence;
@@ -167,32 +152,54 @@ bool GetCommonNameFromSubject(const net::der::Input& subject_tlv,
   for (const net::RelativeDistinguishedName& rdn : rdn_sequence) {
     for (const auto& atv : rdn) {
       if (atv.type == net::TypeCommonNameOid()) {
-        return atv.ValueAsStringUnsafe(common_name);
+        return atv.ValueAsString(common_name);
       }
     }
   }
   return false;
 }
 
-// Returns true if the extended key usage list |ekus| contains client auth.
-bool HasClientAuth(const std::vector<net::der::Input>& ekus) {
-  for (const auto& oid : ekus) {
-    if (oid == net::ClientAuth())
-      return true;
+// Cast device certificates use the policy 1.3.6.1.4.1.11129.2.5.2 to indicate
+// it is *restricted* to an audio-only device whereas the absence of a policy
+// means it is unrestricted.
+//
+// This is somewhat different than RFC 5280's notion of policies, so policies
+// are checked separately outside of path building.
+//
+// See the unit-tests VerifyCastDeviceCertTest.Policies* for some
+// concrete examples of how this works.
+void DetermineDeviceCertificatePolicy(
+    const net::CertPathBuilder::ResultPath* result_path,
+    CastDeviceCertPolicy* policy) {
+  // Iterate over all the certificates, including the root certificate. If any
+  // certificate contains the audio-only policy, the whole chain is considered
+  // constrained to audio-only device certificates.
+  //
+  // Policy mappings are not accounted for. The expectation is that top-level
+  // intermediates issued with audio-only will have no mappings. If subsequent
+  // certificates in the chain do, it won't matter as the chain is already
+  // restricted to being audio-only.
+  bool audio_only = false;
+  for (const auto& cert : result_path->path.certs) {
+    if (cert->has_policy_oids()) {
+      const std::vector<net::der::Input>& policies = cert->policy_oids();
+      if (base::ContainsValue(policies, AudioOnlyPolicyOid())) {
+        audio_only = true;
+        break;
+      }
+    }
   }
-  return false;
+
+  *policy = audio_only ? CastDeviceCertPolicy::AUDIO_ONLY
+                       : CastDeviceCertPolicy::NONE;
 }
 
 // Checks properties on the target certificate.
 //
 //   * The Key Usage must include Digital Signature
-//   * The Extended Key Usage must include TLS Client Auth
-//   * May have the policy 1.3.6.1.4.1.11129.2.5.2 to indicate it
-//     is an audio-only device.
 WARN_UNUSED_RESULT bool CheckTargetCertificate(
     const net::ParsedCertificate* cert,
-    std::unique_ptr<CertVerificationContext>* context,
-    CastDeviceCertPolicy* policy) {
+    std::unique_ptr<CertVerificationContext>* context) {
   // Get the Key Usage extension.
   if (!cert->has_key_usage())
     return false;
@@ -200,35 +207,6 @@ WARN_UNUSED_RESULT bool CheckTargetCertificate(
   // Ensure Key Usage contains digitalSignature.
   if (!cert->key_usage().AssertsBit(net::KEY_USAGE_BIT_DIGITAL_SIGNATURE))
     return false;
-
-  // Get the Extended Key Usage extension.
-  net::der::Input extension_value;
-  if (!GetExtensionValue(cert->unparsed_extensions(), net::ExtKeyUsageOid(),
-                         &extension_value)) {
-    return false;
-  }
-  std::vector<net::der::Input> ekus;
-  if (!net::ParseEKUExtension(extension_value, &ekus))
-    return false;
-
-  // Ensure Extended Key Usage contains client auth.
-  if (!HasClientAuth(ekus))
-    return false;
-
-  // Check for an optional audio-only policy extension.
-  *policy = CastDeviceCertPolicy::NONE;
-  if (GetExtensionValue(cert->unparsed_extensions(),
-                        net::CertificatePoliciesOid(), &extension_value)) {
-    std::vector<net::der::Input> policies;
-    if (!net::ParseCertificatePoliciesExtension(extension_value, &policies))
-      return false;
-
-    // Look for an audio-only policy. Disregard any other policy found.
-    if (std::find(policies.begin(), policies.end(), AudioOnlyPolicyOid()) !=
-        policies.end()) {
-      *policy = CastDeviceCertPolicy::AUDIO_ONLY;
-    }
-  }
 
   // Get the Common Name for the certificate.
   std::string common_name;
@@ -308,9 +286,11 @@ bool VerifyDeviceCertUsingCustomTrustStore(
   if (!net::der::EncodeTimeAsGeneralizedTime(time, &verification_time))
     return false;
   net::CertPathBuilder::Result result;
-  net::CertPathBuilder path_builder(target_cert.get(), trust_store,
-                                    signature_policy.get(), verification_time,
-                                    &result);
+  net::CertPathBuilder path_builder(
+      target_cert.get(), trust_store, signature_policy.get(), verification_time,
+      net::KeyPurpose::CLIENT_AUTH, net::InitialExplicitPolicy::kFalse,
+      {net::AnyPolicy()}, net::InitialPolicyMappingInhibit::kFalse,
+      net::InitialAnyPolicyInhibit::kFalse, &result);
   path_builder.AddCertIssuerSource(&intermediate_cert_issuer_source);
   path_builder.Run();
   if (!result.HasValidPath()) {
@@ -318,9 +298,13 @@ bool VerifyDeviceCertUsingCustomTrustStore(
     return false;
   }
 
-  // Check properties of the leaf certificate (key usage, policy), and construct
-  // a CertVerificationContext that uses its public key.
-  if (!CheckTargetCertificate(target_cert.get(), context, policy))
+  // Determine whether this device certificate is restricted to audio-only.
+  DetermineDeviceCertificatePolicy(result.GetBestValidPath(), policy);
+
+  // Check properties of the leaf certificate not already verified by path
+  // building (key usage), and construct a CertVerificationContext that uses
+  // its public key.
+  if (!CheckTargetCertificate(target_cert.get(), context))
     return false;
 
   // Check if a CRL is available.

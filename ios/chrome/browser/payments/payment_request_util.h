@@ -7,81 +7,78 @@
 
 #import <Foundation/Foundation.h>
 
+#include <vector>
+
 #include "base/strings/string16.h"
+#include "components/payments/core/payment_options_provider.h"
 
 namespace autofill {
 class AutofillProfile;
-class CreditCard;
 }  // namespace autofill
 
-namespace web {
-class BasicCardResponse;
-class PaymentAddress;
-}  // namespace web
-
+namespace payments {
+class PaymentInstrument;
 class PaymentRequest;
+}  // namespace payments
 
 namespace payment_request_util {
 
-// Helper function to get the name label from an autofill profile. Returns nil
-// if the name field is empty.
+// Helper function to create a name label from an autofill profile. Returns nil
+// if the resulting label is empty.
 NSString* GetNameLabelFromAutofillProfile(
     const autofill::AutofillProfile& profile);
 
-// Helper function to get the address label from an autofill profile. Returns
-// nil if the address field is empty.
-NSString* GetAddressLabelFromAutofillProfile(
+// Helper function to create a shipping address label from an autofill profile.
+// Returns nil if the resulting label is empty.
+NSString* GetShippingAddressLabelFromAutofillProfile(
     const autofill::AutofillProfile& profile);
 
-// Helper function to get the phone number label from an autofill profile.
-// Returns nil if the phone number field is empty.
+// Helper function to create a billing address label from an autofill profile.
+// Returns nil if the resulting label is empty.
+NSString* GetBillingAddressLabelFromAutofillProfile(
+    const autofill::AutofillProfile& profile);
+
+// Helper function to create a phone number label from an autofill profile.
+// Returns nil if the resulting label is empty.
 NSString* GetPhoneNumberLabelFromAutofillProfile(
     const autofill::AutofillProfile& profile);
 
-// Helper function to get the email label from an autofill profile. Returns nil
-// if the email field is empty.
+// Helper function to create an email label from an autofill profile. Returns
+// nil if the resulting label is empty.
 NSString* GetEmailLabelFromAutofillProfile(
     const autofill::AutofillProfile& profile);
 
-// Helper function to get an instance of web::PaymentAddress from an autofill
-// profile.
-web::PaymentAddress GetPaymentAddressFromAutofillProfile(
+// Helper function to create a notification label for an address cell from an
+// autofill profile. Returns nil if the resulting label is empty.
+NSString* GetAddressNotificationLabelFromAutofillProfile(
+    const payments::PaymentRequest& payment_request,
     const autofill::AutofillProfile& profile);
 
-// Helper function to get an instance of web::BasicCardResponse from an autofill
-// credit card.
-web::BasicCardResponse GetBasicCardResponseFromAutofillCreditCard(
-    const PaymentRequest& payment_request,
-    const autofill::CreditCard& card,
-    const base::string16& cvc);
+// Helper function to create a notification label for what's missing from a
+// payment method. Returns nil if the resulting label is empty.
+NSString* GetPaymentMethodNotificationLabelFromPaymentMethod(
+    const payments::PaymentInstrument& payment_method,
+    const std::vector<autofill::AutofillProfile*>& billing_profiles);
 
 // Returns the title for the shipping section of the payment summary view given
 // the shipping type specified in |payment_request|.
-NSString* GetShippingSectionTitle(const PaymentRequest& payment_request);
-
-// Returns the title for the shipping address selection view given the shipping
-// type specified in |payment_request|.
-NSString* GetShippingAddressSelectorTitle(
-    const PaymentRequest& payment_request);
-
-// Returns the informational message to be displayed in the shipping address
-// selection view given the shipping type specified in |payment_request|.
-NSString* GetShippingAddressSelectorInfoMessage(
-    const PaymentRequest& payment_request);
+NSString* GetShippingSectionTitle(payments::PaymentShippingType shipping_type);
 
 // Returns the error message to be displayed in the shipping address selection
 // view given the shipping type specified in |payment_request|.
 NSString* GetShippingAddressSelectorErrorMessage(
-    const PaymentRequest& payment_request);
-
-// Returns the title for the shipping option selection view given the shipping
-// type specified in |payment_request|.
-NSString* GetShippingOptionSelectorTitle(const PaymentRequest& payment_request);
+    const payments::PaymentRequest& payment_request);
 
 // Returns the error message to be displayed in the shipping option selection
 // view given the shipping type specified in |payment_request|.
 NSString* GetShippingOptionSelectorErrorMessage(
-    const PaymentRequest& payment_request);
+    const payments::PaymentRequest& payment_request);
+
+// Helper function to create a notification label for a contact info entry from
+// an autofill profile. Returns nil if the resulting label is empty.
+NSString* GetContactNotificationLabelFromAutofillProfile(
+    const payments::PaymentRequest& payment_request,
+    const autofill::AutofillProfile& profile);
 
 }  // namespace payment_request_util
 

@@ -11,6 +11,7 @@
 #include "SkRandom.h"
 #include "SkShader.h"
 #include "SkString.h"
+#include "SkVertices.h"
 
 // This bench simulates the calls Skia sees from various HTML5 canvas
 // game bench marks
@@ -200,8 +201,9 @@ protected:
                         { SkIntToScalar(src.fRight), SkIntToScalar(src.fTop) },
                         { SkIntToScalar(src.fRight), SkIntToScalar(src.fBottom) },
                     };
-                    canvas->drawVertices(SkCanvas::kTriangles_VertexMode,
-                                         4, verts, uvs, nullptr, indices, 6, p2);
+                    canvas->drawVertices(SkVertices::MakeCopy(SkVertices::kTriangles_VertexMode,
+                                                              4, verts, uvs, nullptr, 6, indices),
+                                         SkBlendMode::kModulate, p2);
                 } else {
                     canvas->drawBitmapRect(fAtlas, src, dst, &p,
                                            SkCanvas::kFast_SrcRectConstraint);
@@ -248,7 +250,6 @@ private:
         static int kCheckSize = 16;
 
         fCheckerboard.allocN32Pixels(kCheckerboardWidth, kCheckerboardHeight);
-        SkAutoLockPixels lock(fCheckerboard);
         for (int y = 0; y < kCheckerboardHeight; ++y) {
             int even = (y / kCheckSize) % 2;
 
@@ -281,7 +282,6 @@ private:
         }
 
         fAtlas.allocN32Pixels(kTotAtlasWidth, kTotAtlasHeight);
-        SkAutoLockPixels lock(fAtlas);
 
         for (int y = 0; y < kTotAtlasHeight; ++y) {
             int colorY = y / (kAtlasCellHeight + kAtlasSpacer);

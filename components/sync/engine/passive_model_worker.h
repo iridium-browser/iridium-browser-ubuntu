@@ -6,27 +6,25 @@
 #define COMPONENTS_SYNC_ENGINE_PASSIVE_MODEL_WORKER_H_
 
 #include "base/macros.h"
-#include "components/sync/base/syncer_error.h"
 #include "components/sync/engine/model_safe_worker.h"
 
 namespace syncer {
 
 // Implementation of ModelSafeWorker for passive types.  All work is
-// done on the same thread DoWorkAndWaitUntilDone (i.e., the sync
-// thread).
+// done on the same sequence DoWorkAndWaitUntilDone is called on (i.e. the same
+// sequence Sync runs on).
 class PassiveModelWorker : public ModelSafeWorker {
  public:
   PassiveModelWorker();
 
   // ModelSafeWorker implementation.
   ModelSafeGroup GetModelSafeGroup() override;
-  bool IsOnModelThread() override;
-
- protected:
-  SyncerError DoWorkAndWaitUntilDoneImpl(const WorkCallback& work) override;
+  bool IsOnModelSequence() override;
 
  private:
   ~PassiveModelWorker() override;
+
+  void ScheduleWork(base::OnceClosure work) override;
 
   DISALLOW_COPY_AND_ASSIGN(PassiveModelWorker);
 };

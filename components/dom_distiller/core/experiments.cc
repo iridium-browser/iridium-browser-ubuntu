@@ -21,6 +21,9 @@ DistillerHeuristicsType GetDistillerHeuristicsType() {
     if (switch_value == switches::reader_mode_heuristics::kAdaBoost) {
       return DistillerHeuristicsType::ADABOOST_MODEL;
     }
+    if (switch_value == switches::reader_mode_heuristics::kAllArticles) {
+      return DistillerHeuristicsType::ALL_ARTICLES;
+    }
     if (switch_value == switches::reader_mode_heuristics::kOGArticle) {
       return DistillerHeuristicsType::OG_ARTICLE;
     }
@@ -36,6 +39,10 @@ DistillerHeuristicsType GetDistillerHeuristicsType() {
                          base::CompareCase::INSENSITIVE_ASCII)) {
       return DistillerHeuristicsType::ADABOOST_MODEL;
     }
+    if (base::StartsWith(group_name, "AllArticles",
+                         base::CompareCase::INSENSITIVE_ASCII)) {
+      return DistillerHeuristicsType::ALL_ARTICLES;
+    }
     if (base::StartsWith(group_name, "OGArticle",
                          base::CompareCase::INSENSITIVE_ASCII)) {
       return DistillerHeuristicsType::OG_ARTICLE;
@@ -46,30 +53,5 @@ DistillerHeuristicsType GetDistillerHeuristicsType() {
     }
   }
   return DistillerHeuristicsType::ADABOOST_MODEL;
-}
-
-bool ShouldShowFeedbackForm() {
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("ReaderModeUIFeedback");
-  const std::string switch_value =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kReaderModeFeedback);
-  if (switch_value != "") {
-    if (switch_value == switches::reader_mode_feedback::kOn) {
-      return true;
-    }
-    if (switch_value == switches::reader_mode_feedback::kOff) {
-      return false;
-    }
-    NOTREACHED() << "Invalid value for " << switches::kReaderModeFeedback;
-  } else {
-    if (group_name == "DoNotShow") {
-      return false;
-    }
-    if (group_name == "Show") {
-      return true;
-    }
-  }
-  return false;
 }
 }

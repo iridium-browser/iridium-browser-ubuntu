@@ -129,7 +129,7 @@ TEST(SyncNigoriTest, ExportImport) {
   std::string user_key;
   std::string encryption_key;
   std::string mac_key;
-  EXPECT_TRUE(nigori1.ExportKeys(&user_key, &encryption_key, &mac_key));
+  nigori1.ExportKeys(&user_key, &encryption_key, &mac_key);
 
   Nigori nigori2;
   EXPECT_TRUE(nigori2.InitByImport(user_key, encryption_key, mac_key));
@@ -150,6 +150,40 @@ TEST(SyncNigoriTest, ExportImport) {
   EXPECT_TRUE(nigori1.Permute(Nigori::Password, original, &permuted1));
   EXPECT_TRUE(nigori2.Permute(Nigori::Password, original, &permuted2));
   EXPECT_EQ(permuted1, permuted2);
+}
+
+TEST(SyncNigoriTest, InitByDerivationSetsUserKey) {
+  Nigori nigori;
+  EXPECT_TRUE(nigori.InitByDerivation("example.com", "username", "password"));
+
+  std::string user_key = "";
+  std::string encryption_key;
+  std::string mac_key;
+  nigori.ExportKeys(&user_key, &encryption_key, &mac_key);
+
+  EXPECT_NE(user_key, "");
+}
+
+TEST(SyncNigoriTest, ToleratesEmptyUserKey) {
+  Nigori nigori1;
+  EXPECT_TRUE(nigori1.InitByDerivation("example.com", "username", "password"));
+
+  std::string user_key;
+  std::string encryption_key;
+  std::string mac_key;
+  nigori1.ExportKeys(&user_key, &encryption_key, &mac_key);
+  EXPECT_FALSE(user_key.empty());
+  EXPECT_FALSE(encryption_key.empty());
+  EXPECT_FALSE(mac_key.empty());
+
+  Nigori nigori2;
+  EXPECT_TRUE(nigori2.InitByImport("", encryption_key, mac_key));
+
+  user_key = "non-empty-value";
+  nigori2.ExportKeys(&user_key, &encryption_key, &mac_key);
+  EXPECT_TRUE(user_key.empty());
+  EXPECT_FALSE(encryption_key.empty());
+  EXPECT_FALSE(mac_key.empty());
 }
 
 }  // anonymous namespace

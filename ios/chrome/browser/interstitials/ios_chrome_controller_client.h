@@ -37,10 +37,12 @@ class IOSChromeControllerClient
   bool CanLaunchDateAndTimeSettings() override;
   void LaunchDateAndTimeSettings() override;
   void GoBack() override;
+  bool CanGoBack() override;
   void GoBackAfterNavigationCommitted() override;
   void Proceed() override;
   void Reload() override;
   void OpenUrlInCurrentTab(const GURL& url) override;
+  void OpenUrlInNewForegroundTab(const GURL& url) override;
   const std::string& GetApplicationLocale() const override;
   PrefService* GetPrefService() override;
   const std::string GetExtendedReportingPrefName() const override;

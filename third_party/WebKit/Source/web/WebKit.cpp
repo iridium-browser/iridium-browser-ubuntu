@@ -32,101 +32,59 @@
 
 #include <memory>
 
-#include "bindings/core/v8/Microtask.h"
-#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/core/v8/V8GCController.h"
-#include "bindings/core/v8/V8Initializer.h"
-#include "core/animation/AnimationClock.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/page/Page.h"
 #include "core/workers/WorkerBackingThread.h"
 #include "gin/public/v8_platform.h"
-#include "modules/ModulesInitializer.h"
 #include "platform/LayoutTestSupport.h"
 #include "platform/heap/Heap.h"
-#include "public/platform/Platform.h"
-#include "public/platform/WebThread.h"
-#include "v8/include/v8.h"
-#include "wtf/Assertions.h"
-#include "wtf/PtrUtil.h"
-#include "wtf/WTF.h"
-#include "wtf/allocator/Partitions.h"
-#include "wtf/text/AtomicString.h"
-#include "wtf/text/TextEncoding.h"
+#include "platform/wtf/Assertions.h"
+#include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/WTF.h"
+#include "platform/wtf/allocator/Partitions.h"
+#include "platform/wtf/text/AtomicString.h"
+#include "platform/wtf/text/TextEncoding.h"
 
 namespace blink {
 
-namespace {
-
-class EndOfTaskRunner : public WebThread::TaskObserver {
- public:
-  void willProcessTask() override { AnimationClock::notifyTaskStart(); }
-  void didProcessTask() override {
-    Microtask::performCheckpoint(mainThreadIsolate());
-    V8Initializer::reportRejectedPromisesOnMainThread();
-  }
-};
-
-}  // namespace
-
-static WebThread::TaskObserver* s_endOfTaskRunner = nullptr;
-
-static ModulesInitializer& modulesInitializer() {
-  DEFINE_STATIC_LOCAL(std::unique_ptr<ModulesInitializer>, initializer,
-                      (WTF::wrapUnique(new ModulesInitializer)));
-  return *initializer;
-}
-
-void initialize(Platform* platform) {
-  Platform::initialize(platform);
-
-  V8Initializer::initializeMainThread();
-
-  modulesInitializer().initialize();
-
-  // currentThread is null if we are running on a thread without a message loop.
-  if (WebThread* currentThread = platform->currentThread()) {
-    DCHECK(!s_endOfTaskRunner);
-    s_endOfTaskRunner = new EndOfTaskRunner;
-    currentThread->addTaskObserver(s_endOfTaskRunner);
-  }
-}
-
-v8::Isolate* mainThreadIsolate() {
-  return V8PerIsolateData::mainThreadIsolate();
+v8::Isolate* MainThreadIsolate() {
+  return V8PerIsolateData::MainThreadIsolate();
 }
 
 // TODO(tkent): The following functions to wrap LayoutTestSupport should be
 // moved to public/platform/.
 
-void setLayoutTestMode(bool value) {
-  LayoutTestSupport::setIsRunningLayoutTest(value);
+void SetLayoutTestMode(bool value) {
+  LayoutTestSupport::SetIsRunningLayoutTest(value);
 }
 
-bool layoutTestMode() {
-  return LayoutTestSupport::isRunningLayoutTest();
+bool LayoutTestMode() {
+  return LayoutTestSupport::IsRunningLayoutTest();
 }
 
-void setMockThemeEnabledForTest(bool value) {
-  LayoutTestSupport::setMockThemeEnabledForTest(value);
-  LayoutTheme::theme().didChangeThemeEngine();
+void SetMockThemeEnabledForTest(bool value) {
+  LayoutTestSupport::SetMockThemeEnabledForTest(value);
+  LayoutTheme::GetTheme().DidChangeThemeEngine();
 }
 
-void setFontAntialiasingEnabledForTest(bool value) {
-  LayoutTestSupport::setFontAntialiasingEnabledForTest(value);
+void SetFontAntialiasingEnabledForTest(bool value) {
+  LayoutTestSupport::SetFontAntialiasingEnabledForTest(value);
 }
 
-bool fontAntialiasingEnabledForTest() {
-  return LayoutTestSupport::isFontAntialiasingEnabledForTest();
+bool FontAntialiasingEnabledForTest() {
+  return LayoutTestSupport::IsFontAntialiasingEnabledForTest();
 }
 
-void resetPluginCache(bool reloadPages) {
-  DCHECK(!reloadPages);
-  Page::refreshPlugins();
+void ResetPluginCache(bool reload_pages) {
+  DCHECK(!reload_pages);
+  Page::RefreshPlugins();
+  Page::ResetPluginData();
 }
 
-void decommitFreeableMemory() {
-  WTF::Partitions::decommitFreeableMemory();
+void DecommitFreeableMemory() {
+  WTF::Partitions::DecommitFreeableMemory();
 }
 
 void MemoryPressureNotificationToWorkerThreadIsolates(
@@ -134,8 +92,14 @@ void MemoryPressureNotificationToWorkerThreadIsolates(
   WorkerBackingThread::MemoryPressureNotificationToWorkerThreadIsolates(level);
 }
 
-void setRAILModeOnWorkerThreadIsolates(v8::RAILMode railMode) {
-  WorkerBackingThread::setRAILModeOnWorkerThreadIsolates(railMode);
+void SetRAILModeOnWorkerThreadIsolates(v8::RAILMode rail_mode) {
+  WorkerBackingThread::SetRAILModeOnWorkerThreadIsolates(rail_mode);
+}
+
+void LogRuntimeCallStats() {
+  LOG(INFO)
+      << "\n"
+      << RuntimeCallStats::From(MainThreadIsolate())->ToString().Utf8().data();
 }
 
 }  // namespace blink

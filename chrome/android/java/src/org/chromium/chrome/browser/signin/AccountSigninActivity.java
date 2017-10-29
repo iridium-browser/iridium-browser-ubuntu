@@ -38,7 +38,6 @@ public class AccountSigninActivity extends AppCompatActivity
             "AccountSigninActivity.SigninAccessPoint";
 
     private AccountSigninView mView;
-    private ProfileDataCache mProfileDataCache;
 
     @IntDef({SigninAccessPoint.SETTINGS, SigninAccessPoint.BOOKMARK_MANAGER,
             SigninAccessPoint.RECENT_TABS, SigninAccessPoint.SIGNIN_PROMO,
@@ -104,7 +103,9 @@ public class AccountSigninActivity extends AppCompatActivity
 
         mView = (AccountSigninView) LayoutInflater.from(this).inflate(
                 R.layout.account_signin_view, null);
-        mView.init(getProfileDataCache(), this, this);
+        ProfileDataCache profileDataCache =
+                new ProfileDataCache(this, Profile.getLastUsedProfile());
+        mView.init(profileDataCache, false, null, this, this);
 
         if (getAccessPoint() == SigninAccessPoint.BOOKMARK_MANAGER
                 || getAccessPoint() == SigninAccessPoint.RECENT_TABS) {
@@ -115,23 +116,6 @@ public class AccountSigninActivity extends AppCompatActivity
 
         SigninManager.logSigninStartAccessPoint(getAccessPoint());
         recordSigninStartedUserAction();
-    }
-
-    @Override
-    public void onDestroy() {
-        super.onDestroy();
-
-        if (mProfileDataCache != null) {
-            mProfileDataCache.destroy();
-            mProfileDataCache = null;
-        }
-    }
-
-    private ProfileDataCache getProfileDataCache() {
-        if (mProfileDataCache == null) {
-            mProfileDataCache = new ProfileDataCache(this, Profile.getLastUsedProfile());
-        }
-        return mProfileDataCache;
     }
 
     @AccessPoint private int getAccessPoint() {
@@ -149,10 +133,10 @@ public class AccountSigninActivity extends AppCompatActivity
     }
 
     @Override
-    public void onAccountSelected(final String accountName, final boolean settingsClicked) {
+    public void onAccountSelected(
+            final String accountName, boolean isDefaultAccount, final boolean settingsClicked) {
         final Context context = this;
-        SigninManager.get(this).signIn(accountName, this, new SignInCallback(){
-
+        SigninManager.get(this).signIn(accountName, this, new SignInCallback() {
             @Override
             public void onSignInComplete() {
                 if (settingsClicked) {

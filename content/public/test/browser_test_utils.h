@@ -64,10 +64,12 @@ using test_server::EmbeddedTestServer;
 namespace content {
 
 class BrowserContext;
+class InterstitialPage;
 class MessageLoopRunner;
 class NavigationHandle;
 class RenderViewHost;
 class RenderWidgetHost;
+class RenderWidgetHostView;
 class WebContents;
 
 // Navigate a frame with ID |iframe_id| to |url|, blocking until the navigation
@@ -99,6 +101,10 @@ void WaitForLoadStopWithoutSuccessCheck(WebContents* web_contents);
 // navigations should be refactored to do EXPECT_TRUE(WaitForLoadStop()).
 bool WaitForLoadStop(WebContents* web_contents);
 
+// If a test uses a beforeunload dialog, it must be prepared to avoid flakes.
+// This function collects everything that needs to be done.
+void PrepContentsForBeforeUnloadTest(WebContents* web_contents);
+
 #if defined(USE_AURA) || defined(OS_ANDROID)
 // If WebContent's view is currently being resized, this will wait for the ack
 // from the renderer that the resize is complete and for the
@@ -109,6 +115,11 @@ void WaitForResizeComplete(WebContents* web_contents);
 
 // Causes the specified web_contents to crash. Blocks until it is crashed.
 void CrashTab(WebContents* web_contents);
+
+// Causes the specified web_contents to issue an OnUnresponsiveRenderer event
+// to its observers.
+void SimulateUnresponsiveRenderer(WebContents* web_contents,
+                                  RenderWidgetHost* widget);
 
 // Simulates clicking at the center of the given tab asynchronously; modifiers
 // may contain bits from WebInputEvent::Modifiers.
@@ -195,14 +206,42 @@ RenderFrameHost* ConvertToRenderFrameHost(RenderViewHost* render_view_host);
 RenderFrameHost* ConvertToRenderFrameHost(RenderFrameHost* render_view_host);
 RenderFrameHost* ConvertToRenderFrameHost(WebContents* web_contents);
 
-// Executes the passed |script| in the specified frame. The |script| should not
-// invoke domAutomationController.send(); otherwise, your test will hang or be
-// flaky. If you want to extract a result, use one of the below functions.
-// Returns true on success.
+// Executes the passed |script| in the specified frame with the user gesture.
+//
+// Appends |domAutomationController.send(...)| to the end of |script| and waits
+// until the response comes back (pumping the message loop while waiting).  The
+// |script| itself should not invoke domAutomationController.send(); if you want
+// to call domAutomationController.send(...) yourself and extract the result,
+// then use one of ExecuteScriptAndExtract... functions).
+//
+// Returns true on success (if the renderer responded back with the expected
+// value).  Returns false otherwise (e.g. if the script threw an exception
+// before calling the appended |domAutomationController.send(...)|, or if the
+// renderer died or if the renderer called |domAutomationController.send(...)|
+// with a malformed or unexpected value).
+//
+// See also:
+// - ExecuteScriptAsync
+// - ExecuteScriptAndExtractBool/Int/String/etc.
+// - DOMMessageQueue (to manually wait for domAutomationController.send(...))
 bool ExecuteScript(const ToRenderFrameHost& adapter,
                    const std::string& script) WARN_UNUSED_RESULT;
 
-// The following methods executes the passed |script| in the specified frame and
+// Same as content::ExecuteScript but doesn't send a user gesture to the
+// renderer.
+bool ExecuteScriptWithoutUserGesture(const ToRenderFrameHost& adapter,
+                                     const std::string& script)
+    WARN_UNUSED_RESULT;
+
+// Similar to ExecuteScript above, but
+// - Doesn't modify the |script|.
+// - Kicks off execution of the |script| in the specified frame and returns
+//   immediately (without waiting for a response from the renderer and/or
+//   without checking that the script succeeded).
+void ExecuteScriptAsync(const ToRenderFrameHost& adapter,
+                        const std::string& script);
+
+// The following methods execute the passed |script| in the specified frame and
 // sets |result| to the value passed to "window.domAutomationController.send" by
 // the executed script. They return true on success, false if the script
 // execution failed or did not evaluate to the expected type.
@@ -218,6 +257,24 @@ bool ExecuteScriptAndExtractBool(const ToRenderFrameHost& adapter,
 bool ExecuteScriptAndExtractString(const ToRenderFrameHost& adapter,
                                    const std::string& script,
                                    std::string* result) WARN_UNUSED_RESULT;
+
+// Same as above but the script executed without user gesture.
+bool ExecuteScriptWithoutUserGestureAndExtractDouble(
+    const ToRenderFrameHost& adapter,
+    const std::string& script,
+    double* result) WARN_UNUSED_RESULT;
+bool ExecuteScriptWithoutUserGestureAndExtractInt(
+    const ToRenderFrameHost& adapter,
+    const std::string& script,
+    int* result) WARN_UNUSED_RESULT;
+bool ExecuteScriptWithoutUserGestureAndExtractBool(
+    const ToRenderFrameHost& adapter,
+    const std::string& script,
+    bool* result) WARN_UNUSED_RESULT;
+bool ExecuteScriptWithoutUserGestureAndExtractString(
+    const ToRenderFrameHost& adapter,
+    const std::string& script,
+    std::string* result) WARN_UNUSED_RESULT;
 
 // This function behaves similarly to ExecuteScriptAndExtractBool but runs the
 // the script in the specified isolated world.
@@ -328,6 +385,25 @@ bool IsWebContentsBrowserPluginFocused(content::WebContents* web_contents);
 // Returns the RenderWidgetHost that holds the mouse lock.
 RenderWidgetHost* GetMouseLockWidget(WebContents* web_contents);
 
+// Returns true if inner |interstitial_page| is connected to an outer
+// WebContents.
+bool IsInnerInterstitialPageConnected(InterstitialPage* interstitial_page);
+
+// Returns all the RenderWidgetHostViews inside the |web_contents| that are
+// registered in the RenderWidgetHostInputEventRouter.
+std::vector<RenderWidgetHostView*> GetInputEventRouterRenderWidgetHostViews(
+    WebContents* web_contents);
+
+// Returns the focused RenderWidgetHost.
+RenderWidgetHost* GetFocusedRenderWidgetHost(WebContents* web_contents);
+
+// Returns the focused WebContents.
+WebContents* GetFocusedWebContents(WebContents* web_contents);
+
+// Route the |event| through the RenderWidgetHostInputEventRouter. This allows
+// correct targeting of events to out of process iframes.
+void RouteMouseEvent(WebContents* web_contents, blink::WebMouseEvent* event);
+
 #if defined(USE_AURA)
 // The following two methods allow a test to send a touch tap sequence, and
 // a corresponding gesture tap sequence, by sending it to the top-level
@@ -350,6 +426,12 @@ void SendRoutedGestureTapSequence(content::WebContents* web_contents,
 void WaitForGuestSurfaceReady(content::WebContents* web_contents);
 
 #endif
+
+// Waits until the cc::Surface associated with a cross-process child frame
+// has been drawn for the first time. Once this method returns it should be
+// safe to assume that events sent to the top-level RenderWidgetHostView can
+// be expected to properly hit-test to this surface, if appropriate.
+void WaitForChildFrameSurfaceReady(content::RenderFrameHost* child_frame);
 
 // Watches title changes on a WebContents, blocking until an expected title is
 // set.
@@ -463,6 +545,7 @@ class DOMMessageQueue : public NotificationObserver,
   NotificationRegistrar registrar_;
   std::queue<std::string> message_queue_;
   scoped_refptr<MessageLoopRunner> message_loop_runner_;
+  bool renderer_crashed_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(DOMMessageQueue);
 };
@@ -500,33 +583,34 @@ class WebContentsAddedObserver {
 bool RequestFrame(WebContents* web_contents);
 
 // Watches compositor frame changes, blocking until a frame has been
-// composited. This class is intended to be run on the main thread; to
-// synchronize the main thread against the impl thread.
-class FrameWatcher : public IPC::MessageFilter {
+// composited. This class must run on the UI thread.
+class FrameWatcher : public WebContentsObserver {
  public:
+  // Don't observe any WebContents at construction. Observe() must be called
+  // later on.
   FrameWatcher();
 
-  // Listen for new frames from the |web_contents| renderer process.
-  void AttachTo(WebContents* web_contents);
+  // Listen for new frames from the |web_contents| renderer process. The
+  // WebContents that we observe can be changed by calling Observe().
+  explicit FrameWatcher(WebContents* web_contents);
+
+  ~FrameWatcher() override;
 
   // Wait for |frames_to_wait| swap mesages from the compositor.
   void WaitFrames(int frames_to_wait);
 
-  // Return the meta data received in the last compositor
-  // swap frame.
+  // Return the last received CompositorFrame's metadata.
   const cc::CompositorFrameMetadata& LastMetadata();
 
+  // Call this method to start observing a WebContents for CompositorFrames.
+  using WebContentsObserver::Observe;
+
  private:
-  ~FrameWatcher() override;
+  // WebContentsObserver implementation.
+  void DidReceiveCompositorFrame() override;
 
-  // Overridden BrowserMessageFilter methods.
-  bool OnMessageReceived(const IPC::Message& message) override;
-
-  void ReceivedFrameSwap(cc::CompositorFrameMetadata meta_data);
-
-  int frames_to_wait_;
+  int frames_to_wait_ = 0;
   base::Closure quit_;
-  cc::CompositorFrameMetadata last_metadata_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameWatcher);
 };
@@ -698,6 +782,24 @@ class TestNavigationManager : public WebContentsObserver {
   DISALLOW_COPY_AND_ASSIGN(TestNavigationManager);
 };
 
+class NavigationHandleCommitObserver : public content::WebContentsObserver {
+ public:
+  NavigationHandleCommitObserver(content::WebContents* web_contents,
+                                 const GURL& url);
+
+  bool has_committed() const { return has_committed_; }
+  bool was_same_document() const { return was_same_document_; }
+  bool was_renderer_initiated() const { return was_renderer_initiated_; }
+
+ private:
+  void DidFinishNavigation(content::NavigationHandle* handle) override;
+
+  const GURL url_;
+  bool has_committed_;
+  bool was_same_document_;
+  bool was_renderer_initiated_;
+};
+
 // A WebContentsDelegate that catches messages sent to the console.
 class ConsoleObserverDelegate : public WebContentsDelegate {
  public:
@@ -764,7 +866,6 @@ class PwnMessageHelper {
   static void LockMouse(RenderProcessHost* process,
                         int routing_id,
                         bool user_gesture,
-                        bool last_unlocked_by_target,
                         bool privileged);
 
  private:
@@ -772,6 +873,25 @@ class PwnMessageHelper {
 
   DISALLOW_COPY_AND_ASSIGN(PwnMessageHelper);
 };
+
+#if defined(USE_AURA)
+// Mock of an OverscrollController so we can inspect the scroll events that it
+// receives. Note that this is only a partial mock as the methods of a real
+// OverscrollController are being invoked.
+// TODO(mcnee): Tests needing this are BrowserPlugin specific. Remove after
+// removing BrowserPlugin (crbug.com/533069).
+class MockOverscrollController {
+ public:
+  // Creates a mock and installs it on the given RenderWidgetHostViewAura.
+  // The returned mock is owned by the RWHVA.
+  static MockOverscrollController* Create(RenderWidgetHostView* rwhv);
+
+  virtual ~MockOverscrollController() {}
+
+  // Waits until the mock receives a consumed GestureScrollUpdate.
+  virtual void WaitForConsumedScroll() = 0;
+};
+#endif  // defined(USE_AURA)
 
 }  // namespace content
 

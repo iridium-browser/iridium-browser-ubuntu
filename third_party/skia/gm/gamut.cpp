@@ -6,12 +6,14 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 
 #include "SkColorSpace_Base.h"
 #include "SkGradientShader.h"
 #include "SkImagePriv.h"
 #include "SkPM4fPriv.h"
 #include "SkSurface.h"
+#include "SkVertices.h"
 
 static const int gRectSize = 50;
 static const SkScalar gScalarSize = SkIntToScalar(gRectSize);
@@ -104,8 +106,9 @@ struct VerticesCellRenderer : public CellRenderer {
             SkPoint::Make(gScalarSize, gScalarSize),
             SkPoint::Make(0, gScalarSize)
         };
-        canvas->drawVertices(SkCanvas::kTriangleFan_VertexMode, 4, vertices, nullptr, fColors,
-                             SkBlendMode::kModulate, nullptr, 0, paint);
+        canvas->drawVertices(SkVertices::MakeCopy(SkVertices::kTriangleFan_VertexMode, 4, vertices,
+                                                  nullptr, fColors),
+                             SkBlendMode::kModulate, paint);
     }
     const char* label() override {
         return "Vertices";
@@ -176,8 +179,7 @@ static void draw_gamut_grid(SkCanvas* canvas, SkTArray<std::unique_ptr<CellRende
         wideGamutCanvas->clear(SK_ColorBLACK);
         renderer->draw(wideGamutCanvas);
 
-        canvas->drawText(renderer->label(), strlen(renderer->label()), x, y + textHeight,
-                         textPaint);
+        canvas->drawString(renderer->label(), x, y + textHeight, textPaint);
 
         // Re-interpret the off-screen images, so we can see the raw data (eg, Wide gamut squares
         // will look desaturated, relative to sRGB).

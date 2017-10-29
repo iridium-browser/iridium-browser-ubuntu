@@ -5,18 +5,22 @@
 
 #import <LocalAuthentication/LocalAuthentication.h>
 
-#import "base/ios/weak_nsobject.h"
-#import "base/mac/scoped_nsobject.h"
+#import "base/logging.h"
+#include "base/metrics/histogram_macros.h"
+#include "components/password_manager/core/browser/password_manager_metrics_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 @implementation ReauthenticationModule {
   // Authentication context on which the authentication policy is evaluated.
-  base::scoped_nsobject<LAContext> _context;
+  LAContext* _context;
 
   // Accessor allowing the module to request the update of the time when the
   // successful re-authentication was performed and to get the time of the last
   // successful re-authentication.
-  base::WeakNSProtocol<id<SuccessfulReauthTimeAccessor>>
-      _successfulReauthTimeAccessor;
+  __weak id<SuccessfulReauthTimeAccessor> _successfulReauthTimeAccessor;
 }
 
 - (instancetype)initWithSuccessfulReauthTimeAccessor:
@@ -24,8 +28,8 @@
   DCHECK(successfulReauthTimeAccessor);
   self = [super init];
   if (self) {
-    _context.reset([[LAContext alloc] init]);
-    _successfulReauthTimeAccessor.reset(successfulReauthTimeAccessor);
+    _context = [[LAContext alloc] init];
+    _successfulReauthTimeAccessor = successfulReauthTimeAccessor;
   }
   return self;
 }
@@ -40,26 +44,33 @@
                                  handler:(void (^)(BOOL success))handler {
   if ([self isPreviousAuthValid]) {
     handler(YES);
+    UMA_HISTOGRAM_ENUMERATION(
+        "PasswordManager.ReauthToAccessPasswordInSettings",
+        password_manager::metrics_util::REAUTH_SKIPPED,
+        password_manager::metrics_util::REAUTH_COUNT);
     return;
   }
 
-  _context.reset([[LAContext alloc] init]);
+  _context = [[LAContext alloc] init];
 
   // No fallback option is provided.
-  _context.get().localizedFallbackTitle = @"";
+  _context.localizedFallbackTitle = @"";
 
-  base::WeakNSObject<ReauthenticationModule> weakSelf(self);
+  __weak ReauthenticationModule* weakSelf = self;
   void (^replyBlock)(BOOL, NSError*) = ^(BOOL success, NSError* error) {
     dispatch_async(dispatch_get_main_queue(), ^{
-      base::scoped_nsobject<ReauthenticationModule> strongSelf(
-          [weakSelf retain]);
+      ReauthenticationModule* strongSelf = weakSelf;
       if (!strongSelf)
         return;
       if (success) {
-        [strongSelf.get()
-                ->_successfulReauthTimeAccessor updateSuccessfulReauthTime];
+        [strongSelf->_successfulReauthTimeAccessor updateSuccessfulReauthTime];
       }
       handler(success);
+      UMA_HISTOGRAM_ENUMERATION(
+          "PasswordManager.ReauthToAccessPasswordInSettings",
+          success ? password_manager::metrics_util::REAUTH_SUCCESS
+                  : password_manager::metrics_util::REAUTH_FAILURE,
+          password_manager::metrics_util::REAUTH_COUNT);
     });
   };
 

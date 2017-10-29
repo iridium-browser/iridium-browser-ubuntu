@@ -84,7 +84,6 @@ class PlatformNotificationServiceImpl
       const GURL& origin,
       const content::PlatformNotificationData& notification_data,
       const content::NotificationResources& notification_resources,
-      std::unique_ptr<content::DesktopNotificationDelegate> delegate,
       base::Closure* cancel_callback) override;
   void DisplayPersistentNotification(
       content::BrowserContext* browser_context,
@@ -95,9 +94,9 @@ class PlatformNotificationServiceImpl
       const content::NotificationResources& notification_resources) override;
   void ClosePersistentNotification(content::BrowserContext* browser_context,
                                    const std::string& notification_id) override;
-  bool GetDisplayedNotifications(
+  void GetDisplayedNotifications(
       content::BrowserContext* browser_context,
-      std::set<std::string>* displayed_notifications) override;
+      const DisplayedNotificationsCallback& callback) override;
 
  private:
   friend struct base::DefaultSingletonTraits<PlatformNotificationServiceImpl>;
@@ -143,6 +142,9 @@ class PlatformNotificationServiceImpl
 
   void SetNotificationDisplayServiceForTesting(
       NotificationDisplayService* service);
+
+  void RecordSiteEngagement(content::BrowserContext* browser_context,
+                            const GURL& origin);
 
 #if BUILDFLAG(ENABLE_BACKGROUND)
   // Makes sure we keep the browser alive while the event in being processed.

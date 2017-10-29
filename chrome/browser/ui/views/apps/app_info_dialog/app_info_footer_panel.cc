@@ -6,6 +6,7 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/browser/extension_system.h"
@@ -14,15 +15,15 @@
 #include "extensions/common/extension.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/event.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_ASH)
-#include "ash/common/shelf/shelf_delegate.h"  // nogncheck
-#include "ash/common/wm_shell.h"  // nogncheck
+#include "ash/public/cpp/shelf_model.h"  // nogncheck
+#include "ash/shell.h"                   // nogncheck
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_util.h"  // nogncheck
 #endif
 
@@ -38,10 +39,12 @@ AppInfoFooterPanel::AppInfoFooterPanel(gfx::NativeWindow parent_window,
       weak_ptr_factory_(this) {
   CreateButtons();
 
-  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kHorizontal,
-                                        views::kButtonHEdgeMargin,
-                                        views::kButtonVEdgeMargin,
-                                        views::kRelatedButtonHSpacing));
+  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
+
+  SetLayoutManager(new views::BoxLayout(
+      views::BoxLayout::kHorizontal,
+      provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS),
+      provider->GetDistanceMetric(views::DISTANCE_RELATED_BUTTON_HORIZONTAL)));
 
   LayoutButtons();
 }
@@ -89,8 +92,7 @@ void AppInfoFooterPanel::LayoutButtons() {
 void AppInfoFooterPanel::UpdatePinButtons(bool focus_visible_button) {
 #if defined(USE_ASH)
   if (pin_to_shelf_button_ && unpin_from_shelf_button_) {
-    bool is_pinned =
-        !ash::WmShell::Get()->shelf_delegate()->IsAppPinned(app_->id());
+    bool is_pinned = !ash::Shell::Get()->shelf_model()->IsAppPinned(app_->id());
     pin_to_shelf_button_->SetVisible(is_pinned);
     unpin_from_shelf_button_->SetVisible(!is_pinned);
 
@@ -152,12 +154,12 @@ bool AppInfoFooterPanel::CanCreateShortcuts() const {
 #if defined(USE_ASH)
 void AppInfoFooterPanel::SetPinnedToShelf(bool value) {
   DCHECK(CanSetPinnedToShelf());
-  ash::ShelfDelegate* shelf_delegate = ash::WmShell::Get()->shelf_delegate();
-  DCHECK(shelf_delegate);
+  ash::ShelfModel* shelf_model = ash::Shell::Get()->shelf_model();
+  DCHECK(shelf_model);
   if (value)
-    shelf_delegate->PinAppWithID(app_->id());
+    shelf_model->PinAppWithID(app_->id());
   else
-    shelf_delegate->UnpinAppWithID(app_->id());
+    shelf_model->UnpinAppWithID(app_->id());
 
   UpdatePinButtons(true);
   Layout();
@@ -165,7 +167,7 @@ void AppInfoFooterPanel::SetPinnedToShelf(bool value) {
 
 bool AppInfoFooterPanel::CanSetPinnedToShelf() const {
   // Non-Ash platforms don't have a shelf.
-  if (!ash::WmShell::HasInstance())
+  if (!ash::Shell::HasInstance())
     return false;
 
   // The Chrome app can't be unpinned, and extensions can't be pinned.

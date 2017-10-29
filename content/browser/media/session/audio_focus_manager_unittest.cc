@@ -25,7 +25,7 @@ class MockMediaSessionPlayerObserver : public MediaSessionPlayerObserver {
   void OnResume(int player_id) override {}
   void OnSetVolumeMultiplier(
       int player_id, double volume_multiplier) override {}
-  RenderFrameHost* GetRenderFrameHost() const override { return nullptr; }
+  RenderFrameHost* render_frame_host() const override { return nullptr; }
 };
 
 }  // anonymous namespace
@@ -39,9 +39,9 @@ class AudioFocusManagerTest : public testing::Test {
 
   void SetUp() override {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableDefaultMediaSession);
+        switches::kEnableAudioFocus);
     rph_factory_.reset(new MockRenderProcessHostFactory());
-    SiteInstanceImpl::set_render_process_host_factory(rph_factory_.get());
+    RenderProcessHostImpl::set_render_process_host_factory(rph_factory_.get());
     browser_context_.reset(new TestBrowserContext());
     pepper_observer_.reset(new MockMediaSessionPlayerObserver());
   }
@@ -51,7 +51,7 @@ class AudioFocusManagerTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
 
     browser_context_.reset();
-    SiteInstanceImpl::set_render_process_host_factory(nullptr);
+    RenderProcessHostImpl::set_render_process_host_factory(nullptr);
     rph_factory_.reset();
   }
 
@@ -451,7 +451,7 @@ TEST_F(AudioFocusManagerTest, AbandoningGainFocusRevokesTopMostPepperSession) {
       media_session_3, AudioFocusManager::AudioFocusType::Gain);
 
   ASSERT_EQ(media_session_3, GetAudioFocusedSession());
-  ASSERT_TRUE(media_session_2->IsReallySuspended());
+  ASSERT_TRUE(media_session_2->IsSuspended());
   ASSERT_TRUE(media_session_1->IsActive());
   ASSERT_TRUE(IsSessionDucking(media_session_1));
 

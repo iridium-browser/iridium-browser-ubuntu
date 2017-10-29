@@ -13,7 +13,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "build/build_config.h"
-#include "cc/surfaces/frame_sink_id.h"
+#include "components/viz/common/surfaces/frame_sink_id.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/public/common/web_preferences.h"
@@ -23,6 +23,10 @@
 #include "ui/base/layout.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/geometry/vector2d_f.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/window.h"
+#endif
 
 // This file provides a testing framework for mocking out the RenderProcessHost
 // layer. It allows you to test RenderViewHost, WebContentsImpl,
@@ -61,7 +65,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   explicit TestRenderWidgetHostView(RenderWidgetHost* rwh);
   ~TestRenderWidgetHostView() override;
 
-  // RenderWidgetHostView implementation.
+  // RenderWidgetHostView:
   void InitAsChild(gfx::NativeView parent_view) override {}
   RenderWidgetHost* GetRenderWidgetHost() const override;
   void SetSize(const gfx::Size& size) override {}
@@ -77,6 +81,8 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   void WasUnOccluded() override;
   void WasOccluded() override;
   gfx::Rect GetViewBounds() const override;
+  void SetBackgroundColor(SkColor color) override;
+  SkColor background_color() const override;
 #if defined(OS_MACOSX)
   ui::AcceleratedWidgetMac* GetAcceleratedWidgetMac() const override;
   void SetActive(bool active) override;
@@ -86,12 +92,15 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   bool IsSpeaking() const override;
   void StopSpeaking() override;
 #endif  // defined(OS_MACOSX)
-  void OnSwapCompositorFrame(uint32_t compositor_frame_sink_id,
+  void DidCreateNewRendererCompositorFrameSink(
+      cc::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink)
+      override;
+  void SubmitCompositorFrame(const viz::LocalSurfaceId& local_surface_id,
                              cc::CompositorFrame frame) override;
   void ClearCompositorFrame() override {}
   void SetNeedsBeginFrames(bool needs_begin_frames) override {}
 
-  // RenderWidgetHostViewBase implementation.
+  // RenderWidgetHostViewBase:
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
                    const gfx::Rect& bounds) override {}
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override {}
@@ -106,22 +115,34 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   gfx::Rect GetBoundsInRootWindow() override;
   bool LockMouse() override;
   void UnlockMouse() override;
-  cc::FrameSinkId GetFrameSinkId() override;
+  viz::FrameSinkId GetFrameSinkId() override;
 
   bool is_showing() const { return is_showing_; }
   bool is_occluded() const { return is_occluded_; }
   bool did_swap_compositor_frame() const { return did_swap_compositor_frame_; }
   void reset_did_swap_compositor_frame() { did_swap_compositor_frame_ = false; }
+  bool did_change_compositor_frame_sink() {
+    return did_change_compositor_frame_sink_;
+  }
+  void reset_did_change_compositor_frame_sink() {
+    did_change_compositor_frame_sink_ = false;
+  }
 
  protected:
   RenderWidgetHostImpl* rwh_;
-  cc::FrameSinkId frame_sink_id_;
+  viz::FrameSinkId frame_sink_id_;
 
  private:
   bool is_showing_;
   bool is_occluded_;
   bool did_swap_compositor_frame_;
+  bool did_change_compositor_frame_sink_ = false;
+  SkColor background_color_;
   ui::DummyTextInputClient text_input_client_;
+
+#if defined(USE_AURA)
+  std::unique_ptr<aura::Window> window_;
+#endif
 };
 
 #if defined(COMPILER_MSVC)

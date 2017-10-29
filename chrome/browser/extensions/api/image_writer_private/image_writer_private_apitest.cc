@@ -4,13 +4,13 @@
 
 #include "base/message_loop/message_loop.h"
 #include "build/build_config.h"
-#include "chrome/browser/extensions/api/file_system/file_system_api.h"
 #include "chrome/browser/extensions/api/image_writer_private/operation.h"
 #include "chrome/browser/extensions/api/image_writer_private/removable_storage_provider.h"
 #include "chrome/browser/extensions/api/image_writer_private/test_utils.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/common/extensions/api/image_writer_private.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/api/file_system/file_system_api.h"
 
 namespace extensions {
 
@@ -70,28 +70,21 @@ class ImageWriterPrivateApiTest : public ExtensionApiTest {
 #if !defined(OS_CHROMEOS)
   void ImageWriterUtilityClientCall() {
     content::BrowserThread::PostTask(
-        content::BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&FakeImageWriterClient::Progress,
-                   test_utils_.GetUtilityClient(),
-                   0));
+        content::BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&FakeImageWriterClient::Progress,
+                       test_utils_.GetUtilityClient(), 0));
     content::BrowserThread::PostTask(
-        content::BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&FakeImageWriterClient::Progress,
-                   test_utils_.GetUtilityClient(),
-                   50));
+        content::BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&FakeImageWriterClient::Progress,
+                       test_utils_.GetUtilityClient(), 50));
     content::BrowserThread::PostTask(
-        content::BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&FakeImageWriterClient::Progress,
-                   test_utils_.GetUtilityClient(),
-                   100));
+        content::BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&FakeImageWriterClient::Progress,
+                       test_utils_.GetUtilityClient(), 100));
     content::BrowserThread::PostTask(
-        content::BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&FakeImageWriterClient::Success,
-                   test_utils_.GetUtilityClient()));
+        content::BrowserThread::FILE, FROM_HERE,
+        base::BindOnce(&FakeImageWriterClient::Success,
+                       test_utils_.GetUtilityClient()));
   }
 #endif
 

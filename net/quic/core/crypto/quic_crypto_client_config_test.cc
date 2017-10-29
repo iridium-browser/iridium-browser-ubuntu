@@ -6,10 +6,12 @@
 
 #include "net/quic/core/crypto/proof_verifier.h"
 #include "net/quic/core/quic_server_id.h"
+#include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_endian.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/mock_random.h"
 #include "net/quic/test_tools/quic_test_utils.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 using std::string;
 
@@ -28,7 +30,8 @@ class TestProofVerifyDetails : public ProofVerifyDetails {
 
 class OneServerIdFilter : public QuicCryptoClientConfig::ServerIdFilter {
  public:
-  OneServerIdFilter(const QuicServerId* server_id) : server_id_(*server_id) {}
+  explicit OneServerIdFilter(const QuicServerId* server_id)
+      : server_id_(*server_id) {}
 
   bool Matches(const QuicServerId& server_id) const override {
     return server_id == server_id_;
@@ -45,24 +48,26 @@ class AllServerIdsFilter : public QuicCryptoClientConfig::ServerIdFilter {
 
 }  // namespace
 
-TEST(QuicCryptoClientConfigTest, CachedState_IsEmpty) {
+class QuicCryptoClientConfigTest : public QuicTest {};
+
+TEST_F(QuicCryptoClientConfigTest, CachedState_IsEmpty) {
   QuicCryptoClientConfig::CachedState state;
   EXPECT_TRUE(state.IsEmpty());
 }
 
-TEST(QuicCryptoClientConfigTest, CachedState_IsComplete) {
+TEST_F(QuicCryptoClientConfigTest, CachedState_IsComplete) {
   QuicCryptoClientConfig::CachedState state;
   EXPECT_FALSE(state.IsComplete(QuicWallTime::FromUNIXSeconds(0)));
 }
 
-TEST(QuicCryptoClientConfigTest, CachedState_GenerationCounter) {
+TEST_F(QuicCryptoClientConfigTest, CachedState_GenerationCounter) {
   QuicCryptoClientConfig::CachedState state;
   EXPECT_EQ(0u, state.generation_counter());
   state.SetProofInvalid();
   EXPECT_EQ(1u, state.generation_counter());
 }
 
-TEST(QuicCryptoClientConfigTest, CachedState_SetProofVerifyDetails) {
+TEST_F(QuicCryptoClientConfigTest, CachedState_SetProofVerifyDetails) {
   QuicCryptoClientConfig::CachedState state;
   EXPECT_TRUE(state.proof_verify_details() == nullptr);
   ProofVerifyDetails* details = new TestProofVerifyDetails;
@@ -70,7 +75,7 @@ TEST(QuicCryptoClientConfigTest, CachedState_SetProofVerifyDetails) {
   EXPECT_EQ(details, state.proof_verify_details());
 }
 
-TEST(QuicCryptoClientConfigTest, CachedState_ServerDesignatedConnectionId) {
+TEST_F(QuicCryptoClientConfigTest, CachedState_ServerDesignatedConnectionId) {
   QuicCryptoClientConfig::CachedState state;
   EXPECT_FALSE(state.has_server_designated_connection_id());
 
@@ -101,7 +106,7 @@ TEST(QuicCryptoClientConfigTest, CachedState_ServerDesignatedConnectionId) {
   EXPECT_EQ(second_cid, state.GetNextServerDesignatedConnectionId());
 }
 
-TEST(QuicCryptoClientConfigTest, CachedState_ServerIdConsumedBeforeSet) {
+TEST_F(QuicCryptoClientConfigTest, CachedState_ServerIdConsumedBeforeSet) {
   QuicCryptoClientConfig::CachedState state;
   EXPECT_FALSE(state.has_server_designated_connection_id());
 #if GTEST_HAS_DEATH_TEST && !defined(NDEBUG)
@@ -111,7 +116,7 @@ TEST(QuicCryptoClientConfigTest, CachedState_ServerIdConsumedBeforeSet) {
 #endif  // GTEST_HAS_DEATH_TEST && !defined(NDEBUG)
 }
 
-TEST(QuicCryptoClientConfigTest, CachedState_ServerNonce) {
+TEST_F(QuicCryptoClientConfigTest, CachedState_ServerNonce) {
   QuicCryptoClientConfig::CachedState state;
   EXPECT_FALSE(state.has_server_nonce());
 
@@ -142,7 +147,7 @@ TEST(QuicCryptoClientConfigTest, CachedState_ServerNonce) {
   EXPECT_EQ(second_nonce, state.GetNextServerNonce());
 }
 
-TEST(QuicCryptoClientConfigTest, CachedState_ServerNonceConsumedBeforeSet) {
+TEST_F(QuicCryptoClientConfigTest, CachedState_ServerNonceConsumedBeforeSet) {
   QuicCryptoClientConfig::CachedState state;
   EXPECT_FALSE(state.has_server_nonce());
 #if GTEST_HAS_DEATH_TEST && !defined(NDEBUG)
@@ -152,7 +157,7 @@ TEST(QuicCryptoClientConfigTest, CachedState_ServerNonceConsumedBeforeSet) {
 #endif  // GTEST_HAS_DEATH_TEST && !defined(NDEBUG)
 }
 
-TEST(QuicCryptoClientConfigTest, CachedState_InitializeFrom) {
+TEST_F(QuicCryptoClientConfigTest, CachedState_InitializeFrom) {
   QuicCryptoClientConfig::CachedState state;
   QuicCryptoClientConfig::CachedState other;
   state.set_source_address_token("TOKEN");
@@ -166,9 +171,11 @@ TEST(QuicCryptoClientConfigTest, CachedState_InitializeFrom) {
   EXPECT_FALSE(state.has_server_nonce());
 }
 
-TEST(QuicCryptoClientConfigTest, InchoateChlo) {
+TEST_F(QuicCryptoClientConfigTest, InchoateChlo) {
   QuicCryptoClientConfig::CachedState state;
   QuicCryptoClientConfig config(crypto_test_utils::ProofVerifierForTesting());
+  config.set_user_agent_id("quic-tester");
+  config.set_alpn("hq");
   QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> params(
       new QuicCryptoNegotiatedParameters);
   CryptoHandshakeMessage msg;
@@ -180,12 +187,18 @@ TEST(QuicCryptoClientConfigTest, InchoateChlo) {
   QuicTag cver;
   EXPECT_EQ(QUIC_NO_ERROR, msg.GetUint32(kVER, &cver));
   EXPECT_EQ(QuicVersionToQuicTag(QuicVersionMax()), cver);
-  StringPiece proof_nonce;
+  QuicStringPiece proof_nonce;
   EXPECT_TRUE(msg.GetStringPiece(kNONP, &proof_nonce));
   EXPECT_EQ(string(32, 'r'), proof_nonce);
+  QuicStringPiece user_agent_id;
+  EXPECT_TRUE(msg.GetStringPiece(kUAID, &user_agent_id));
+  EXPECT_EQ("quic-tester", user_agent_id);
+  QuicStringPiece alpn;
+  EXPECT_TRUE(msg.GetStringPiece(kALPN, &alpn));
+  EXPECT_EQ("hq", alpn);
 }
 
-TEST(QuicCryptoClientConfigTest, PreferAesGcm) {
+TEST_F(QuicCryptoClientConfigTest, PreferAesGcm) {
   QuicCryptoClientConfig config(crypto_test_utils::ProofVerifierForTesting());
   if (config.aead.size() > 1)
     EXPECT_NE(kAESG, config.aead[0]);
@@ -193,7 +206,7 @@ TEST(QuicCryptoClientConfigTest, PreferAesGcm) {
   EXPECT_EQ(kAESG, config.aead[0]);
 }
 
-TEST(QuicCryptoClientConfigTest, InchoateChloSecure) {
+TEST_F(QuicCryptoClientConfigTest, InchoateChloSecure) {
   QuicCryptoClientConfig::CachedState state;
   QuicCryptoClientConfig config(crypto_test_utils::ProofVerifierForTesting());
   QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> params(
@@ -207,11 +220,11 @@ TEST(QuicCryptoClientConfigTest, InchoateChloSecure) {
   QuicTag pdmd;
   EXPECT_EQ(QUIC_NO_ERROR, msg.GetUint32(kPDMD, &pdmd));
   EXPECT_EQ(kX509, pdmd);
-  StringPiece scid;
+  QuicStringPiece scid;
   EXPECT_FALSE(msg.GetStringPiece(kSCID, &scid));
 }
 
-TEST(QuicCryptoClientConfigTest, InchoateChloSecureWithSCIDNoEXPY) {
+TEST_F(QuicCryptoClientConfigTest, InchoateChloSecureWithSCIDNoEXPY) {
   // Test that a config with no EXPY is still valid when a non-zero
   // expiry time is passed in.
   QuicCryptoClientConfig::CachedState state;
@@ -221,8 +234,9 @@ TEST(QuicCryptoClientConfigTest, InchoateChloSecureWithSCIDNoEXPY) {
   string details;
   QuicWallTime now = QuicWallTime::FromUNIXSeconds(1);
   QuicWallTime expiry = QuicWallTime::FromUNIXSeconds(2);
-  state.SetServerConfig(scfg.GetSerialized().AsStringPiece(), now, expiry,
-                        &details);
+  state.SetServerConfig(
+      scfg.GetSerialized(Perspective::IS_CLIENT).AsStringPiece(), now, expiry,
+      &details);
 
   QuicCryptoClientConfig config(crypto_test_utils::ProofVerifierForTesting());
   QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> params(
@@ -233,12 +247,12 @@ TEST(QuicCryptoClientConfigTest, InchoateChloSecureWithSCIDNoEXPY) {
   config.FillInchoateClientHello(server_id, QuicVersionMax(), &state, &rand,
                                  /* demand_x509_proof= */ true, params, &msg);
 
-  StringPiece scid;
+  QuicStringPiece scid;
   EXPECT_TRUE(msg.GetStringPiece(kSCID, &scid));
   EXPECT_EQ("12345678", scid);
 }
 
-TEST(QuicCryptoClientConfigTest, InchoateChloSecureWithSCID) {
+TEST_F(QuicCryptoClientConfigTest, InchoateChloSecureWithSCID) {
   QuicCryptoClientConfig::CachedState state;
   CryptoHandshakeMessage scfg;
   scfg.set_tag(kSCFG);
@@ -246,9 +260,10 @@ TEST(QuicCryptoClientConfigTest, InchoateChloSecureWithSCID) {
   scfg.SetValue(kEXPY, future);
   scfg.SetStringPiece(kSCID, "12345678");
   string details;
-  state.SetServerConfig(scfg.GetSerialized().AsStringPiece(),
-                        QuicWallTime::FromUNIXSeconds(1),
-                        QuicWallTime::FromUNIXSeconds(0), &details);
+  state.SetServerConfig(
+      scfg.GetSerialized(Perspective::IS_CLIENT).AsStringPiece(),
+      QuicWallTime::FromUNIXSeconds(1), QuicWallTime::FromUNIXSeconds(0),
+      &details);
 
   QuicCryptoClientConfig config(crypto_test_utils::ProofVerifierForTesting());
   QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> params(
@@ -259,12 +274,12 @@ TEST(QuicCryptoClientConfigTest, InchoateChloSecureWithSCID) {
   config.FillInchoateClientHello(server_id, QuicVersionMax(), &state, &rand,
                                  /* demand_x509_proof= */ true, params, &msg);
 
-  StringPiece scid;
+  QuicStringPiece scid;
   EXPECT_TRUE(msg.GetStringPiece(kSCID, &scid));
   EXPECT_EQ("12345678", scid);
 }
 
-TEST(QuicCryptoClientConfigTest, FillClientHello) {
+TEST_F(QuicCryptoClientConfigTest, FillClientHello) {
   QuicCryptoClientConfig::CachedState state;
   QuicCryptoClientConfig config(crypto_test_utils::ProofVerifierForTesting());
   QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> params(
@@ -285,7 +300,7 @@ TEST(QuicCryptoClientConfigTest, FillClientHello) {
   EXPECT_EQ(QuicVersionToQuicTag(QuicVersionMax()), cver);
 }
 
-TEST(QuicCryptoClientConfigTest, ProcessServerDowngradeAttack) {
+TEST_F(QuicCryptoClientConfigTest, ProcessServerDowngradeAttack) {
   QuicVersionVector supported_versions = AllSupportedVersions();
   if (supported_versions.size() == 1) {
     // No downgrade attack is possible if the client only supports one version.
@@ -312,7 +327,7 @@ TEST(QuicCryptoClientConfigTest, ProcessServerDowngradeAttack) {
   EXPECT_EQ("Downgrade attack detected", error);
 }
 
-TEST(QuicCryptoClientConfigTest, InitializeFrom) {
+TEST_F(QuicCryptoClientConfigTest, InitializeFrom) {
   QuicCryptoClientConfig config(crypto_test_utils::ProofVerifierForTesting());
   QuicServerId canonical_server_id("www.google.com", 443,
                                    PRIVACY_MODE_DISABLED);
@@ -333,7 +348,7 @@ TEST(QuicCryptoClientConfigTest, InitializeFrom) {
   EXPECT_EQ(1u, other->generation_counter());
 }
 
-TEST(QuicCryptoClientConfigTest, Canonical) {
+TEST_F(QuicCryptoClientConfigTest, Canonical) {
   QuicCryptoClientConfig config(crypto_test_utils::ProofVerifierForTesting());
   config.AddCanonicalSuffix(".google.com");
   QuicServerId canonical_id1("www.google.com", 443, PRIVACY_MODE_DISABLED);
@@ -357,7 +372,7 @@ TEST(QuicCryptoClientConfigTest, Canonical) {
   EXPECT_TRUE(config.LookupOrCreate(different_id)->IsEmpty());
 }
 
-TEST(QuicCryptoClientConfigTest, CanonicalNotUsedIfNotValid) {
+TEST_F(QuicCryptoClientConfigTest, CanonicalNotUsedIfNotValid) {
   QuicCryptoClientConfig config(crypto_test_utils::ProofVerifierForTesting());
   config.AddCanonicalSuffix(".google.com");
   QuicServerId canonical_id1("www.google.com", 443, PRIVACY_MODE_DISABLED);
@@ -372,7 +387,7 @@ TEST(QuicCryptoClientConfigTest, CanonicalNotUsedIfNotValid) {
   EXPECT_TRUE(config.LookupOrCreate(canonical_id2)->IsEmpty());
 }
 
-TEST(QuicCryptoClientConfigTest, ClearCachedStates) {
+TEST_F(QuicCryptoClientConfigTest, ClearCachedStates) {
   QuicCryptoClientConfig config(crypto_test_utils::ProofVerifierForTesting());
 
   // Create two states on different origins.
@@ -387,9 +402,10 @@ TEST(QuicCryptoClientConfigTest, ClearCachedStates) {
       scfg.SetValue(kEXPY, future);
       scfg.SetStringPiece(kSCID, "12345678");
       string details;
-      state->SetServerConfig(scfg.GetSerialized().AsStringPiece(),
-                             QuicWallTime::FromUNIXSeconds(0),
-                             QuicWallTime::FromUNIXSeconds(future), &details);
+      state->SetServerConfig(
+          scfg.GetSerialized(Perspective::IS_CLIENT).AsStringPiece(),
+          QuicWallTime::FromUNIXSeconds(0),
+          QuicWallTime::FromUNIXSeconds(future), &details);
 
       std::vector<string> certs(1);
       certs[0] = "Hello Cert for " + host;
@@ -459,7 +475,7 @@ TEST(QuicCryptoClientConfigTest, ClearCachedStates) {
   EXPECT_EQ(3u, cleared_cache->generation_counter());
 }
 
-TEST(QuicCryptoClientConfigTest, ProcessReject) {
+TEST_F(QuicCryptoClientConfigTest, ProcessReject) {
   CryptoHandshakeMessage rej;
   crypto_test_utils::FillInDummyReject(&rej, /* stateless */ false);
 
@@ -477,7 +493,7 @@ TEST(QuicCryptoClientConfigTest, ProcessReject) {
   EXPECT_FALSE(cached.has_server_nonce());
 }
 
-TEST(QuicCryptoClientConfigTest, ProcessRejectWithLongTTL) {
+TEST_F(QuicCryptoClientConfigTest, ProcessRejectWithLongTTL) {
   CryptoHandshakeMessage rej;
   crypto_test_utils::FillInDummyReject(&rej, /* stateless */ false);
   QuicTime::Delta one_week = QuicTime::Delta::FromSeconds(kNumSecondsPerWeek);
@@ -502,7 +518,7 @@ TEST(QuicCryptoClientConfigTest, ProcessRejectWithLongTTL) {
       QuicWallTime::FromUNIXSeconds(one_week.ToSeconds() - 1)));
 }
 
-TEST(QuicCryptoClientConfigTest, ProcessStatelessReject) {
+TEST_F(QuicCryptoClientConfigTest, ProcessStatelessReject) {
   // Create a dummy reject message and mark it as stateless.
   CryptoHandshakeMessage rej;
   crypto_test_utils::FillInDummyReject(&rej, /* stateless */ true);
@@ -522,11 +538,12 @@ TEST(QuicCryptoClientConfigTest, ProcessStatelessReject) {
                                     AllSupportedVersions().front(), "", &cached,
                                     out_params, &error));
   EXPECT_TRUE(cached.has_server_designated_connection_id());
-  EXPECT_EQ(kConnectionId, cached.GetNextServerDesignatedConnectionId());
+  EXPECT_EQ(QuicEndian::NetToHost64(kConnectionId),
+            cached.GetNextServerDesignatedConnectionId());
   EXPECT_EQ(server_nonce, cached.GetNextServerNonce());
 }
 
-TEST(QuicCryptoClientConfigTest, BadlyFormattedStatelessReject) {
+TEST_F(QuicCryptoClientConfigTest, BadlyFormattedStatelessReject) {
   // Create a dummy reject message and mark it as stateless.  Do not
   // add an server-designated connection-id.
   CryptoHandshakeMessage rej;
@@ -546,7 +563,7 @@ TEST(QuicCryptoClientConfigTest, BadlyFormattedStatelessReject) {
   EXPECT_EQ("Missing kRCID", error);
 }
 
-TEST(QuicCryptoClientConfigTest, ServerNonceinSHLO) {
+TEST_F(QuicCryptoClientConfigTest, ServerNonceinSHLO) {
   // Test that the server must include a nonce in the SHLO.
   CryptoHandshakeMessage msg;
   msg.set_tag(kSHLO);

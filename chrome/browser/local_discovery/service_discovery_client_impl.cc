@@ -78,11 +78,9 @@ void ServiceWatcherImpl::Start() {
 ServiceWatcherImpl::~ServiceWatcherImpl() {
 }
 
-void ServiceWatcherImpl::DiscoverNewServices(bool force_update) {
+void ServiceWatcherImpl::DiscoverNewServices() {
   DCHECK(started_);
-  if (force_update)
-    services_.clear();
-  SendQuery(kInitialRequeryTimeSeconds, force_update);
+  SendQuery(kInitialRequeryTimeSeconds);
 }
 
 void ServiceWatcherImpl::SetActivelyRefreshServices(
@@ -96,14 +94,12 @@ void ServiceWatcherImpl::SetActivelyRefreshServices(
 
 void ServiceWatcherImpl::ReadCachedServices() {
   DCHECK(started_);
-  CreateTransaction(false /*network*/, true /*cache*/, false /*force refresh*/,
-                    &transaction_cache_);
+  CreateTransaction(false /*network*/, true /*cache*/, &transaction_cache_);
 }
 
 bool ServiceWatcherImpl::CreateTransaction(
     bool network,
     bool cache,
-    bool force_refresh,
     std::unique_ptr<net::MDnsTransaction>* transaction) {
   int transaction_flags = 0;
   if (network)
@@ -112,7 +108,6 @@ bool ServiceWatcherImpl::CreateTransaction(
   if (cache)
     transaction_flags |= net::MDnsTransaction::QUERY_CACHE;
 
-  // TODO(noamsml): Add flag for force_refresh when supported.
   if (transaction_flags) {
     *transaction = mdns_client_->CreateTransaction(
         net::dns_protocol::kTypePTR, service_type_, transaction_flags,
@@ -264,8 +259,8 @@ void ServiceWatcherImpl::DeferUpdate(ServiceWatcher::UpdateType update_type,
   if (it != services_.end() && !it->second->update_pending()) {
     it->second->set_update_pending(true);
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&ServiceWatcherImpl::DeliverDeferredUpdate,
-                              AsWeakPtr(), update_type, service_name));
+        FROM_HERE, base::BindOnce(&ServiceWatcherImpl::DeliverDeferredUpdate,
+                                  AsWeakPtr(), update_type, service_name));
   }
 }
 
@@ -316,17 +311,15 @@ void ServiceWatcherImpl::OnNsecRecord(const std::string& name,
 void ServiceWatcherImpl::ScheduleQuery(int timeout_seconds) {
   if (timeout_seconds <= kMaxRequeryTimeSeconds) {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, base::Bind(&ServiceWatcherImpl::SendQuery, AsWeakPtr(),
-                              timeout_seconds * 2 /*next_timeout_seconds*/,
-                              false /*force_update*/),
+        FROM_HERE,
+        base::BindOnce(&ServiceWatcherImpl::SendQuery, AsWeakPtr(),
+                       timeout_seconds * 2 /*next_timeout_seconds*/),
         base::TimeDelta::FromSeconds(timeout_seconds));
   }
 }
 
-void ServiceWatcherImpl::SendQuery(int next_timeout_seconds,
-                                   bool force_update) {
-  CreateTransaction(true /*network*/, false /*cache*/, force_update,
-                    &transaction_network_);
+void ServiceWatcherImpl::SendQuery(int next_timeout_seconds) {
+  CreateTransaction(true /*network*/, false /*cache*/, &transaction_network_);
   ScheduleQuery(next_timeout_seconds);
 }
 

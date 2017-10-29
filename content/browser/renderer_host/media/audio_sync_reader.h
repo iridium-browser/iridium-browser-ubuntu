@@ -9,12 +9,14 @@
 #include <stdint.h>
 #include <memory>
 
+#include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/process/process.h"
 #include "base/sync_socket.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "content/common/content_export.h"
 #include "media/audio/audio_output_controller.h"
 #include "media/base/audio_bus.h"
 
@@ -32,17 +34,24 @@ namespace content {
 // is used by AudioOutputController to provide a low latency data source for
 // transmitting audio packets between the browser process and the renderer
 // process.
-class AudioSyncReader : public media::AudioOutputController::SyncReader {
+class CONTENT_EXPORT AudioSyncReader
+    : public NON_EXPORTED_BASE(media::AudioOutputController::SyncReader) {
  public:
+  // Create() automatically initializes the AudioSyncReader correctly,
+  // and should be strongly preferred over calling the constructor directly!
+  AudioSyncReader(const media::AudioParameters& params,
+                  std::unique_ptr<base::SharedMemory> shared_memory,
+                  std::unique_ptr<base::CancelableSyncSocket> socket);
+
   ~AudioSyncReader() override;
 
   // Returns null on failure.
   static std::unique_ptr<AudioSyncReader> Create(
-      const media::AudioParameters& params);
+      const media::AudioParameters& params,
+      base::CancelableSyncSocket* foreign_socket);
 
-  base::SharedMemory* shared_memory() const { return shared_memory_.get(); }
-  base::CancelableSyncSocket* foreign_socket() const {
-    return foreign_socket_.get();
+  const base::SharedMemory* shared_memory() const {
+    return shared_memory_.get();
   }
 
   // media::AudioOutputController::SyncReader implementations.
@@ -53,11 +62,6 @@ class AudioSyncReader : public media::AudioOutputController::SyncReader {
   void Close() override;
 
  private:
-  AudioSyncReader(const media::AudioParameters& params,
-                  std::unique_ptr<base::SharedMemory> shared_memory,
-                  std::unique_ptr<base::CancelableSyncSocket> socket,
-                  std::unique_ptr<base::CancelableSyncSocket> foreign_socket);
-
   // Blocks until data is ready for reading or a timeout expires.  Returns false
   // if an error or timeout occurs.
   bool WaitUntilDataIsReady();
@@ -68,11 +72,12 @@ class AudioSyncReader : public media::AudioOutputController::SyncReader {
   // during automated testing.
   const bool mute_audio_;
 
+  // Denotes that the most recent socket error has been logged. Used to avoid
+  // log spam.
+  bool had_socket_error_;
+
   // Socket for transmitting audio data.
   std::unique_ptr<base::CancelableSyncSocket> socket_;
-
-  // Socket to be used by the renderer.
-  std::unique_ptr<base::CancelableSyncSocket> foreign_socket_;
 
   // Shared memory wrapper used for transferring audio data to Read() callers.
   std::unique_ptr<media::AudioBus> output_bus_;

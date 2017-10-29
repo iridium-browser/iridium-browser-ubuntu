@@ -7,9 +7,9 @@
 #include "chrome/browser/chromeos/arc/intent_helper/arc_external_protocol_dialog.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/text_elider.h"
@@ -111,4 +111,6 @@ ExternalProtocolDialog::ExternalProtocolDialog(WebContents* web_contents,
     parent_window = NULL;
   }
   views::DialogDelegate::CreateDialogWidget(this, NULL, parent_window)->Show();
+  chrome::RecordDialogCreation(
+      chrome::DialogIdentifier::EXTERNAL_PROTOCOL_CHROMEOS);
 }

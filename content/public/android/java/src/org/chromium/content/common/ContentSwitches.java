@@ -42,13 +42,6 @@ public abstract class ContentSwitches {
     // Native switch - chrome_switches::kDisablePopupBlocking
     public static final String DISABLE_POPUP_BLOCKING = "disable-popup-blocking";
 
-    // Native switch kEnableCredentialManagerAPI
-    public static final String ENABLE_CREDENTIAL_MANAGER_API = "enable-credential-manager-api";
-
-    // Native switch kDisableGestureRequirementForMediaPlayback
-    public static final String DISABLE_GESTURE_REQUIREMENT_FOR_MEDIA_PLAYBACK =
-            "disable-gesture-requirement-for-media-playback";
-
     // Native switch kDisableGestureRequirementForPresentation
     public static final String DISABLE_GESTURE_REQUIREMENT_FOR_PRESENTATION =
             "disable-gesture-requirement-for-presentation";
@@ -71,15 +64,9 @@ public abstract class ContentSwitches {
     // Native switch kGPUProcess
     public static final String SWITCH_GPU_PROCESS = "gpu-process";
 
-    // Enable content intent detection in the renderer
-    public static final String ENABLE_CONTENT_INTENT_DETECTION = "enable-content-intent-detection";
-
     // Use fake device for Media Stream to replace actual camera and microphone.
     public static final String USE_FAKE_DEVICE_FOR_MEDIA_STREAM =
             "use-fake-device-for-media-stream";
-
-    // Disable motion event batching through View.requestUnbufferedDispatch().
-    public static final String REQUEST_UNBUFFERED_DISPATCH = "request-unbuffered-dispatch";
 
     // Prevent instantiation.
     private ContentSwitches() {}

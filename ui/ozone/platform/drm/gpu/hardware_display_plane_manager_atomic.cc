@@ -5,6 +5,7 @@
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager_atomic.h"
 
 #include "base/bind.h"
+#include "base/stl_util.h"
 #include "ui/ozone/platform/drm/gpu/crtc_controller.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_atomic.h"
@@ -37,16 +38,14 @@ bool HardwareDisplayPlaneManagerAtomic::Commit(
     HardwareDisplayPlaneList* plane_list,
     bool test_only) {
   for (HardwareDisplayPlane* plane : plane_list->old_plane_list) {
-    bool found =
-        std::find(plane_list->plane_list.begin(), plane_list->plane_list.end(),
-                  plane) != plane_list->plane_list.end();
-    if (!found) {
+    if (!base::ContainsValue(plane_list->plane_list, plane)) {
       // This plane is being released, so we need to zero it.
       plane->set_in_use(false);
       HardwareDisplayPlaneAtomic* atomic_plane =
           static_cast<HardwareDisplayPlaneAtomic*>(plane);
       atomic_plane->SetPlaneData(plane_list->atomic_property_set.get(), 0, 0,
-                                 gfx::Rect(), gfx::Rect());
+                                 gfx::Rect(), gfx::Rect(),
+                                 gfx::OVERLAY_TRANSFORM_NONE);
     }
   }
 
@@ -76,7 +75,8 @@ bool HardwareDisplayPlaneManagerAtomic::Commit(
   if (!drm_->CommitProperties(plane_list->atomic_property_set.get(), flags,
                               crtcs.size(),
                               base::Bind(&AtomicPageFlipCallback, crtcs))) {
-    PLOG(ERROR) << "Failed to commit properties";
+    PLOG(ERROR) << "Failed to commit properties. test_only:" << std::boolalpha
+                << test_only << " error";
     ResetCurrentPlaneList(plane_list);
     return false;
   }
@@ -95,9 +95,12 @@ bool HardwareDisplayPlaneManagerAtomic::SetPlaneData(
     CrtcController* crtc) {
   HardwareDisplayPlaneAtomic* atomic_plane =
       static_cast<HardwareDisplayPlaneAtomic*>(hw_plane);
-  if (!atomic_plane->SetPlaneData(plane_list->atomic_property_set.get(),
-                                  crtc_id, overlay.buffer->GetFramebufferId(),
-                                  overlay.display_bounds, src_rect)) {
+  uint32_t framebuffer_id = overlay.z_order
+                                ? overlay.buffer->GetFramebufferId()
+                                : overlay.buffer->GetOpaqueFramebufferId();
+  if (!atomic_plane->SetPlaneData(
+          plane_list->atomic_property_set.get(), crtc_id, framebuffer_id,
+          overlay.display_bounds, src_rect, overlay.plane_transform)) {
     LOG(ERROR) << "Failed to set plane properties";
     return false;
   }

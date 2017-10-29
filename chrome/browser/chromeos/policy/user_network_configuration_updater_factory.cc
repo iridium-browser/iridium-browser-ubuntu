@@ -60,9 +60,12 @@ bool UserNetworkConfigurationUpdaterFactory::ServiceIsNULLWhileTesting() const {
 
 KeyedService* UserNetworkConfigurationUpdaterFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
+  // On the login/lock screen only device network policies apply.
   Profile* profile = Profile::FromBrowserContext(context);
-  if (chromeos::ProfileHelper::IsSigninProfile(profile))
-    return NULL;  // On the login screen only device network policies apply.
+  if (chromeos::ProfileHelper::IsSigninProfile(profile) ||
+      chromeos::ProfileHelper::IsLockScreenAppProfile(profile)) {
+    return nullptr;
+  }
 
   const user_manager::User* user =
       chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
@@ -70,20 +73,29 @@ KeyedService* UserNetworkConfigurationUpdaterFactory::BuildServiceInstanceFor(
   // Currently, only the network policy of the primary user is supported. See
   // also http://crbug.com/310685 .
   if (user != user_manager::UserManager::Get()->GetPrimaryUser())
-    return NULL;
-
-  const bool allow_trusted_certs_from_policy = user->HasGaiaAccount();
+    return nullptr;
 
   ProfilePolicyConnector* profile_connector =
       ProfilePolicyConnectorFactory::GetForBrowserContext(context);
 
   return UserNetworkConfigurationUpdater::CreateForUserPolicy(
-      profile,
-      allow_trusted_certs_from_policy,
-      *user,
-      profile_connector->policy_service(),
-      chromeos::NetworkHandler::Get()->managed_network_configuration_handler())
+             profile, AllowTrustedCertsFromPolicy(user), *user,
+             profile_connector->policy_service(),
+             chromeos::NetworkHandler::Get()
+                 ->managed_network_configuration_handler())
       .release();
+}
+
+// static
+bool UserNetworkConfigurationUpdaterFactory::AllowTrustedCertsFromPolicy(
+    const user_manager::User* user) {
+  user_manager::UserType user_type = user->GetType();
+
+  // Disallow trusted root certs for public sessions.
+  // Also, guest sessions don't get user policy, but a
+  // UserNetworkCofnigurationUpdater can be created for them anyway.
+  return user_type != user_manager::USER_TYPE_GUEST &&
+         user_type != user_manager::USER_TYPE_PUBLIC_ACCOUNT;
 }
 
 }  // namespace policy

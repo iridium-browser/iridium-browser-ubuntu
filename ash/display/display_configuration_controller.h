@@ -20,11 +20,8 @@ class DisplayManager;
 
 namespace ash {
 
-namespace test {
-class ShellTestApi;
-}  // namespace test
-
 class DisplayAnimator;
+class ScreenRotationAnimator;
 
 // This class controls Display related configuration. Specifically it:
 // * Handles animated transitions where appropriate.
@@ -34,6 +31,15 @@ class DisplayAnimator;
 class ASH_EXPORT DisplayConfigurationController
     : public WindowTreeHostManager::Observer {
  public:
+  // Use SYNC if it is important to rotate immediately after the
+  // |SetDisplayRotation()|. As a side effect, the animation is less smooth.
+  // ASYNC is actually slower because it takes longer to rotate the screen after
+  // a screenshot is taken. http://crbug.com/757851.
+  enum RotationAnimation {
+    ANIMATION_SYNC = 0,
+    ANIMATION_ASYNC,
+  };
+
   DisplayConfigurationController(
       display::DisplayManager* display_manager,
       WindowTreeHostManager* window_tree_host_manager);
@@ -42,26 +48,30 @@ class ASH_EXPORT DisplayConfigurationController
   // Sets the layout for the current displays with a fade in/out
   // animation. Currently |display_id| is assumed to be the secondary
   // display.  TODO(oshima/stevenjb): Support 3+ displays.
-  void SetDisplayLayout(std::unique_ptr<display::DisplayLayout> layout,
-                        bool user_action);
+  void SetDisplayLayout(std::unique_ptr<display::DisplayLayout> layout);
 
   // Sets the mirror mode with a fade-in/fade-out animation. Affects all
   // displays.
-  void SetMirrorMode(bool mirror, bool user_action);
+  void SetMirrorMode(bool mirror);
 
   // Sets the display's rotation with animation if available.
   void SetDisplayRotation(int64_t display_id,
                           display::Display::Rotation rotation,
-                          display::Display::RotationSource source);
+                          display::Display::RotationSource source,
+                          RotationAnimation mode = ANIMATION_ASYNC);
+
+  // Returns the rotation of the display given by |display_id|. This returns
+  // the target rotation when the display is being rotated.
+  display::Display::Rotation GetTargetRotation(int64_t display_id);
 
   // Sets the primary display id.
-  void SetPrimaryDisplayId(int64_t display_id, bool user_action);
+  void SetPrimaryDisplayId(int64_t display_id);
 
   // WindowTreeHostManager::Observer
   void OnDisplayConfigurationChanged() override;
 
  protected:
-  friend class ash::test::ShellTestApi;
+  friend class DisplayConfigurationControllerTestApi;
 
   // Allow tests to skip animations.
   void ResetAnimatorForTest();
@@ -76,6 +86,13 @@ class ASH_EXPORT DisplayConfigurationController
   void SetDisplayLayoutImpl(std::unique_ptr<display::DisplayLayout> layout);
   void SetMirrorModeImpl(bool mirror);
   void SetPrimaryDisplayIdImpl(int64_t display_id);
+
+  // Returns the ScreenRotationAnimator associated with the |display_id|'s
+  // |root_window|. If there is no existing ScreenRotationAnimator for
+  // |root_window|, it will make one and store in the |root_window| property
+  // |kScreenRotationAnimatorKey|.
+  ScreenRotationAnimator* GetScreenRotationAnimatorForDisplay(
+      int64_t display_id);
 
   display::DisplayManager* display_manager_;         // weak ptr
   WindowTreeHostManager* window_tree_host_manager_;  // weak ptr

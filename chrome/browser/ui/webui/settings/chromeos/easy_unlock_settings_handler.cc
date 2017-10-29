@@ -40,11 +40,6 @@ EasyUnlockSettingsHandler* EasyUnlockSettingsHandler::Create(
   if (!allowed)
     return nullptr;
 
-  html_source->AddBoolean(
-      "easyUnlockProximityDetectionAllowed",
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          proximity_auth::switches::kEnableProximityDetection));
-
   return new EasyUnlockSettingsHandler(profile);
 }
 
@@ -86,15 +81,13 @@ void EasyUnlockSettingsHandler::OnJavascriptDisallowed() {
 }
 
 void EasyUnlockSettingsHandler::OnTurnOffOperationStatusChanged() {
-  CallJavascriptFunction("cr.webUIListenerCallback",
-                         base::StringValue("easy-unlock-turn-off-flow-status"),
-                         base::StringValue(GetTurnOffFlowStatus()));
+  FireWebUIListener("easy-unlock-turn-off-flow-status",
+                    base::Value(GetTurnOffFlowStatus()));
 }
 
 void EasyUnlockSettingsHandler::SendEnabledStatus() {
   CallJavascriptFunction(
-      "cr.webUIListenerCallback",
-      base::StringValue("easy-unlock-enabled-status"),
+      "cr.webUIListenerCallback", base::Value("easy-unlock-enabled-status"),
       base::Value(EasyUnlockService::Get(profile_)->IsEnabled()));
 }
 
@@ -145,8 +138,7 @@ void EasyUnlockSettingsHandler::HandleGetTurnOffFlowStatus(
   CHECK_EQ(1U, args->GetSize());
   const base::Value* callback_id;
   CHECK(args->Get(0, &callback_id));
-  ResolveJavascriptCallback(*callback_id,
-                            base::StringValue(GetTurnOffFlowStatus()));
+  ResolveJavascriptCallback(*callback_id, base::Value(GetTurnOffFlowStatus()));
 }
 
 void EasyUnlockSettingsHandler::HandleStartTurnOffFlow(

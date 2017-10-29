@@ -4,7 +4,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
- 
+
 #include "SkSLType.h"
 #include "SkSLContext.h"
 
@@ -22,7 +22,7 @@ bool Type::determineCoercionCost(const Type& other, int* outCost) const {
         return false;
     }
     if (this->kind() == kMatrix_Kind) {
-        if (this->columns() == other.columns() && 
+        if (this->columns() == other.columns() &&
             this->rows() == other.rows()) {
             return this->componentType().determineCoercionCost(other.componentType(), outCost);
         }
@@ -124,6 +124,17 @@ const Type& Type::toCompound(const Context& context, int columns, int rows) cons
                     case 2: return *context.fUVec2_Type;
                     case 3: return *context.fUVec3_Type;
                     case 4: return *context.fUVec4_Type;
+                    default: ABORT("unsupported vector column count (%d)", columns);
+                }
+            default: ABORT("unsupported row count (%d)", rows);
+        }
+    } else if (*this == *context.fBool_Type) {
+        switch (rows) {
+            case 1:
+                switch (columns) {
+                    case 2: return *context.fBVec2_Type;
+                    case 3: return *context.fBVec3_Type;
+                    case 4: return *context.fBVec4_Type;
                     default: ABORT("unsupported vector column count (%d)", columns);
                 }
             default: ABORT("unsupported row count (%d)", rows);

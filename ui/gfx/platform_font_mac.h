@@ -55,8 +55,8 @@ class PlatformFontMac : public PlatformFont {
 
   // The NSFont instance for this object. If this object was constructed from an
   // NSFont instance, this holds that NSFont instance. Otherwise this NSFont
-  // instance is constructed from the name, size, and style, and if there is no
-  // active font that matched those criteria, this object may be nil.
+  // instance is constructed from the name, size, and style. If there is no
+  // active font that matched those criteria a default font is used.
   base::scoped_nsobject<NSFont> native_font_;
 
   // The name/size/style trio that specify the font. Initialized in the
@@ -70,7 +70,9 @@ class PlatformFontMac : public PlatformFont {
   int height_;
   int ascent_;
   int cap_height_;
-  int average_width_;
+
+  // Cached average width, generated in GetExpectedTextWidth().
+  float average_width_ = 0.0;
 
   // Details about how the font should be rendered.
   FontRenderParams render_params_;

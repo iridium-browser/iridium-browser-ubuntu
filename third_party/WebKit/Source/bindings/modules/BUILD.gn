@@ -19,8 +19,11 @@ group("bindings_modules_generated") {
 generate_event_interfaces("modules_bindings_generated_event_interfaces") {
   sources = [
     "//third_party/WebKit/Source/modules/app_banner/BeforeInstallPromptEvent.idl",
+    "//third_party/WebKit/Source/modules/background_fetch/BackgroundFetchClickEvent.idl",
+    "//third_party/WebKit/Source/modules/background_fetch/BackgroundFetchEvent.idl",
+    "//third_party/WebKit/Source/modules/background_fetch/BackgroundFetchFailEvent.idl",
+    "//third_party/WebKit/Source/modules/background_fetch/BackgroundFetchedEvent.idl",
     "//third_party/WebKit/Source/modules/background_sync/SyncEvent.idl",
-    "//third_party/WebKit/Source/modules/device_light/DeviceLightEvent.idl",
     "//third_party/WebKit/Source/modules/device_orientation/DeviceMotionEvent.idl",
     "//third_party/WebKit/Source/modules/device_orientation/DeviceOrientationEvent.idl",
     "//third_party/WebKit/Source/modules/encryptedmedia/MediaEncryptedEvent.idl",
@@ -31,6 +34,8 @@ generate_event_interfaces("modules_bindings_generated_event_interfaces") {
     "//third_party/WebKit/Source/modules/mediastream/MediaStreamEvent.idl",
     "//third_party/WebKit/Source/modules/mediastream/MediaStreamTrackEvent.idl",
     "//third_party/WebKit/Source/modules/notifications/NotificationEvent.idl",
+    "//third_party/WebKit/Source/modules/payments/AbortPaymentEvent.idl",
+    "//third_party/WebKit/Source/modules/payments/CanMakePaymentEvent.idl",
     "//third_party/WebKit/Source/modules/payments/PaymentRequestEvent.idl",
     "//third_party/WebKit/Source/modules/payments/PaymentRequestUpdateEvent.idl",
     "//third_party/WebKit/Source/modules/peerconnection/RTCDTMFToneChangeEvent.idl",
@@ -70,9 +75,9 @@ make_event_factory("event_modules") {
   ]
   deps = make_core_generated_deps + [ "//third_party/WebKit/Source/bindings/modules:modules_bindings_generated_event_interfaces" ]
   deps += [
-    "//device/generic_sensor/public/interfaces:interfaces_blink",
     "//device/vr:mojo_bindings_blink",
     "//media/midi:mojo_blink",
+    "//services/device/public/interfaces:generic_sensor_blink",
   ]
 }
 
@@ -191,7 +196,7 @@ source_set("generated") {
     ":event_modules_names",
     ":event_target_modules_names",
     "//third_party/WebKit/Source/core",
-    "//third_party/WebKit/Source/wtf",
+    "//third_party/WebKit/Source/platform/wtf",
     "//v8",
   ]
 }

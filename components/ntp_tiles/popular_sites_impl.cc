@@ -10,14 +10,11 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
-#include "base/files/file_path.h"
-#include "base/files/file_util.h"
-#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/ntp_tiles/constants.h"
@@ -52,7 +49,8 @@ namespace ntp_tiles {
 namespace {
 
 const char kPopularSitesURLFormat[] =
-    "https://www.gstatic.com/chrome/ntp/suggested_sites_%s_%s.json";
+    "https://www.gstatic.com/%ssuggested_sites_%s_%s.json";
+const char kPopularSitesDefaultDirectory[] = "chrome/ntp/";
 const char kPopularSitesDefaultCountryCode[] = "DEFAULT";
 const char kPopularSitesDefaultVersion[] = "5";
 const int kPopularSitesRedownloadIntervalHours = 24;
@@ -61,14 +59,11 @@ const char kPopularSitesLastDownloadPref[] = "popular_sites_last_download";
 const char kPopularSitesURLPref[] = "popular_sites_url";
 const char kPopularSitesJsonPref[] = "suggested_sites_json";
 
-// TODO(crbug.com/683890): This refers to a local cache stored by older
-// versions of Chrome, no longer used. Remove after M61.
-const char kPopularSitesLocalFilenameToCleanup[] = "suggested_sites.json";
-
-GURL GetPopularSitesURL(const std::string& country,
+GURL GetPopularSitesURL(const std::string& directory,
+                        const std::string& country,
                         const std::string& version) {
-  return GURL(base::StringPrintf(kPopularSitesURLFormat, country.c_str(),
-                                 version.c_str()));
+  return GURL(base::StringPrintf(kPopularSitesURLFormat, directory.c_str(),
+                                 country.c_str(), version.c_str()));
 }
 
 // Extract the country from the default search engine if the default search
@@ -195,32 +190,19 @@ PopularSites::Site::Site(const Site& other) = default;
 PopularSites::Site::~Site() {}
 
 PopularSitesImpl::PopularSitesImpl(
-    const scoped_refptr<base::SequencedWorkerPool>& blocking_pool,
     PrefService* prefs,
     const TemplateURLService* template_url_service,
     VariationsService* variations_service,
     net::URLRequestContextGetter* download_context,
-    const base::FilePath& directory,
     ParseJSONCallback parse_json)
-    : blocking_runner_(blocking_pool->GetTaskRunnerWithShutdownBehavior(
-          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN)),
-      prefs_(prefs),
+    : prefs_(prefs),
       template_url_service_(template_url_service),
       variations_(variations_service),
       download_context_(download_context),
       parse_json_(std::move(parse_json)),
       is_fallback_(false),
       sites_(ParseSiteList(*prefs->GetList(kPopularSitesJsonPref))),
-      weak_ptr_factory_(this) {
-  // If valid path provided, remove local files created by older versions.
-  if (!directory.empty() && blocking_runner_) {
-    blocking_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(base::IgnoreResult(&base::DeleteFile),
-                   directory.AppendASCII(kPopularSitesLocalFilenameToCleanup),
-                   /*recursive=*/false));
-  }
-}
+      weak_ptr_factory_(this) {}
 
 PopularSitesImpl::~PopularSitesImpl() {}
 
@@ -259,13 +241,25 @@ GURL PopularSitesImpl::GetLastURLFetched() const {
 }
 
 GURL PopularSitesImpl::GetURLToFetch() {
+  const std::string directory = GetDirectoryToFetch();
   const std::string country = GetCountryToFetch();
   const std::string version = GetVersionToFetch();
 
   const GURL override_url =
       GURL(prefs_->GetString(ntp_tiles::prefs::kPopularSitesOverrideURL));
-  return override_url.is_valid() ? override_url
-                                 : GetPopularSitesURL(country, version);
+  return override_url.is_valid()
+             ? override_url
+             : GetPopularSitesURL(directory, country, version);
+}
+
+std::string PopularSitesImpl::GetDirectoryToFetch() {
+  std::string directory =
+      prefs_->GetString(ntp_tiles::prefs::kPopularSitesOverrideDirectory);
+
+  if (directory.empty())
+    directory = kPopularSitesDefaultDirectory;
+
+  return directory;
 }
 
 // Determine the country code to use. In order of precedence:
@@ -325,6 +319,8 @@ void PopularSitesImpl::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* user_prefs) {
   user_prefs->RegisterStringPref(ntp_tiles::prefs::kPopularSitesOverrideURL,
                                  std::string());
+  user_prefs->RegisterStringPref(
+      ntp_tiles::prefs::kPopularSitesOverrideDirectory, std::string());
   user_prefs->RegisterStringPref(ntp_tiles::prefs::kPopularSitesOverrideCountry,
                                  std::string());
   user_prefs->RegisterStringPref(ntp_tiles::prefs::kPopularSitesOverrideVersion,
@@ -332,8 +328,7 @@ void PopularSitesImpl::RegisterProfilePrefs(
 
   user_prefs->RegisterInt64Pref(kPopularSitesLastDownloadPref, 0);
   user_prefs->RegisterStringPref(kPopularSitesURLPref, std::string());
-  user_prefs->RegisterListPref(kPopularSitesJsonPref,
-                               DefaultPopularSites().release());
+  user_prefs->RegisterListPref(kPopularSitesJsonPref, DefaultPopularSites());
 }
 
 void PopularSitesImpl::FetchPopularSites() {
@@ -380,8 +375,9 @@ void PopularSitesImpl::OnURLFetchComplete(const net::URLFetcher* source) {
     return;
   }
 
-  parse_json_.Run(json_string, base::Bind(&PopularSitesImpl::OnJsonParsed,
-                                          weak_ptr_factory_.GetWeakPtr()),
+  parse_json_.Run(json_string,
+                  base::Bind(&PopularSitesImpl::OnJsonParsed,
+                             weak_ptr_factory_.GetWeakPtr()),
                   base::Bind(&PopularSitesImpl::OnJsonParseFailed,
                              weak_ptr_factory_.GetWeakPtr()));
 }
@@ -413,7 +409,8 @@ void PopularSitesImpl::OnDownloadFailed() {
   if (!is_fallback_) {
     DLOG(WARNING) << "Download country site list failed";
     is_fallback_ = true;
-    pending_url_ = GetPopularSitesURL(kPopularSitesDefaultCountryCode,
+    pending_url_ = GetPopularSitesURL(kPopularSitesDefaultDirectory,
+                                      kPopularSitesDefaultCountryCode,
                                       kPopularSitesDefaultVersion);
     FetchPopularSites();
   } else {

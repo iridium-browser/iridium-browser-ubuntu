@@ -19,7 +19,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/task_runner_util.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/supervised_user/experimental/supervised_user_blacklist.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/policy/core/browser/url_blacklist_manager.h"
@@ -195,8 +195,7 @@ CreateWhitelistsFromSiteListsForTesting(
   return builder.Build();
 }
 
-std::unique_ptr<SupervisedUserURLFilter::Contents>
-LoadWhitelistsOnBlockingPoolThread(
+std::unique_ptr<SupervisedUserURLFilter::Contents> LoadWhitelistsAsyncThread(
     const std::vector<scoped_refptr<SupervisedUserSiteList>>& site_lists) {
   FilterBuilder builder;
   for (const scoped_refptr<SupervisedUserSiteList>& site_list : site_lists)
@@ -237,21 +236,17 @@ SupervisedUserURLFilter::SupervisedUserURLFilter()
       amp_cache_path_regex_(kAmpCachePathPattern),
       google_amp_viewer_path_regex_(kGoogleAmpViewerPathPattern),
       google_web_cache_query_regex_(kGoogleWebCacheQueryPattern),
-      blocking_task_runner_(
-          BrowserThread::GetBlockingPool()
-              ->GetTaskRunnerWithShutdownBehavior(
-                  base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN)
-              .get()) {
+      blocking_task_runner_(base::CreateTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN})),
+      weak_ptr_factory_(this) {
   DCHECK(amp_cache_path_regex_.ok());
   DCHECK(google_amp_viewer_path_regex_.ok());
   DCHECK(google_web_cache_query_regex_.ok());
-  // Detach from the current thread so we can be constructed on a different
-  // thread than the one where we're used.
-  DetachFromThread();
 }
 
 SupervisedUserURLFilter::~SupervisedUserURLFilter() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
 // static
@@ -341,7 +336,7 @@ SupervisedUserURLFilter::GetFilteringBehaviorForURL(
     const GURL& url,
     bool manual_only,
     supervised_user_error_page::FilteringBehaviorReason* reason) const {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   GURL effective_url = GetEmbeddedURL(url);
   if (!effective_url.is_valid())
@@ -467,7 +462,7 @@ SupervisedUserURLFilter::GetMatchingWhitelistTitles(const GURL& url) const {
 
 void SupervisedUserURLFilter::SetDefaultFilteringBehavior(
     FilteringBehavior behavior) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   default_behavior_ = behavior;
 }
 
@@ -478,13 +473,13 @@ SupervisedUserURLFilter::GetDefaultFilteringBehavior() const {
 
 void SupervisedUserURLFilter::LoadWhitelists(
     const std::vector<scoped_refptr<SupervisedUserSiteList>>& site_lists) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(),
-      FROM_HERE,
-      base::Bind(&LoadWhitelistsOnBlockingPoolThread, site_lists),
-      base::Bind(&SupervisedUserURLFilter::SetContents, this));
+      blocking_task_runner_.get(), FROM_HERE,
+      base::Bind(&LoadWhitelistsAsyncThread, site_lists),
+      base::Bind(&SupervisedUserURLFilter::SetContents,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void SupervisedUserURLFilter::SetBlacklist(
@@ -498,40 +493,62 @@ bool SupervisedUserURLFilter::HasBlacklist() const {
 
 void SupervisedUserURLFilter::SetFromPatternsForTesting(
     const std::vector<std::string>& patterns) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(),
-      FROM_HERE,
+      blocking_task_runner_.get(), FROM_HERE,
       base::Bind(&CreateWhitelistFromPatternsForTesting, patterns),
-      base::Bind(&SupervisedUserURLFilter::SetContents, this));
+      base::Bind(&SupervisedUserURLFilter::SetContents,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void SupervisedUserURLFilter::SetFromSiteListsForTesting(
     const std::vector<scoped_refptr<SupervisedUserSiteList>>& site_lists) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   base::PostTaskAndReplyWithResult(
       blocking_task_runner_.get(), FROM_HERE,
       base::Bind(&CreateWhitelistsFromSiteListsForTesting, site_lists),
-      base::Bind(&SupervisedUserURLFilter::SetContents, this));
+      base::Bind(&SupervisedUserURLFilter::SetContents,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void SupervisedUserURLFilter::SetManualHosts(
-    const std::map<std::string, bool>* host_map) {
-  DCHECK(CalledOnValidThread());
-  host_map_ = *host_map;
+    std::map<std::string, bool> host_map) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  host_map_ = std::move(host_map);
 }
 
-void SupervisedUserURLFilter::SetManualURLs(
-    const std::map<GURL, bool>* url_map) {
-  DCHECK(CalledOnValidThread());
-  url_map_ = *url_map;
+void SupervisedUserURLFilter::SetManualURLs(std::map<GURL, bool> url_map) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  url_map_ = std::move(url_map);
 }
 
 void SupervisedUserURLFilter::InitAsyncURLChecker(
     net::URLRequestContextGetter* context) {
-  async_url_checker_.reset(new SafeSearchURLChecker(context));
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("supervised_user_url_filter", R"(
+        semantics {
+          sender: "Supervised Users"
+          description:
+            "Checks whether a given URL (or set of URLs) is considered safe by "
+            "Google SafeSearch."
+          trigger:
+            "If the parent enabled this feature for the child account, this is "
+            "sent for every navigation."
+          data: "URL(s) to be checked."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting:
+            "This feature is only used in child accounts and cannot be "
+            "disabled by settings. Parent accounts can disable it in the "
+            "family dashboard."
+          policy_exception_justification: "Not implemented."
+        })");
+  async_url_checker_.reset(
+      new SafeSearchURLChecker(context, traffic_annotation));
 }
 
 void SupervisedUserURLFilter::ClearAsyncURLChecker() {
@@ -643,7 +660,7 @@ GURL SupervisedUserURLFilter::GetEmbeddedURL(const GURL& url) const {
 }
 
 void SupervisedUserURLFilter::SetContents(std::unique_ptr<Contents> contents) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   contents_ = std::move(contents);
   for (Observer& observer : observers_)
     observer.OnSiteListUpdated();

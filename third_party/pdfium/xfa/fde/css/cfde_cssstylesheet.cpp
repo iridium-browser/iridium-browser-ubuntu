@@ -8,12 +8,12 @@
 
 #include <utility>
 
+#include "core/fxcrt/fx_codepage.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
 #include "xfa/fde/css/cfde_cssdeclaration.h"
 #include "xfa/fde/css/cfde_cssstylerule.h"
 #include "xfa/fde/css/fde_cssdatatable.h"
-#include "xfa/fgas/crt/fgas_codepage.h"
 
 CFDE_CSSStyleSheet::CFDE_CSSStyleSheet() {}
 
@@ -34,13 +34,11 @@ CFDE_CSSStyleRule* CFDE_CSSStyleSheet::GetRule(int32_t index) const {
   return m_RuleArray[index].get();
 }
 
-bool CFDE_CSSStyleSheet::LoadBuffer(const FX_WCHAR* pBuffer, int32_t iBufSize) {
-  ASSERT(pBuffer && iBufSize > 0);
+bool CFDE_CSSStyleSheet::LoadBuffer(const wchar_t* pBuffer, int32_t iBufSize) {
+  ASSERT(pBuffer);
+  ASSERT(iBufSize > 0);
 
-  auto pSyntax = pdfium::MakeUnique<CFDE_CSSSyntaxParser>();
-  if (!pSyntax->Init(pBuffer, iBufSize))
-    return false;
-
+  auto pSyntax = pdfium::MakeUnique<CFDE_CSSSyntaxParser>(pBuffer, iBufSize);
   Reset();
   FDE_CSSSyntaxStatus eStatus;
   do {
@@ -85,7 +83,7 @@ FDE_CSSSyntaxStatus CFDE_CSSStyleSheet::LoadStyleRule(
       case FDE_CSSSyntaxStatus::PropertyValue: {
         if (propertyTable || iValueLen > 0) {
           CFX_WideStringC strValue = pSyntax->GetCurrentString();
-          auto decl = pStyleRule->GetDeclaration();
+          auto* decl = pStyleRule->GetDeclaration();
           if (!strValue.IsEmpty()) {
             if (propertyTable) {
               decl->AddProperty(propertyTable, strValue);

@@ -16,9 +16,9 @@
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "content/common/content_export.h"
-#include "content/common/url_loader.mojom.h"
+#include "content/public/common/url_loader.mojom.h"
 #include "mojo/public/cpp/system/data_pipe.h"
-#include "mojo/public/cpp/system/watcher.h"
+#include "mojo/public/cpp/system/simple_watcher.h"
 
 namespace content {
 
@@ -51,6 +51,11 @@ class CONTENT_EXPORT URLResponseBodyConsumer final
   void SetDefersLoading();
   void UnsetDefersLoading();
 
+  // Reads data and dispatches messages synchronously.
+  void OnReadable(MojoResult unused);
+
+  void ArmOrNotify();
+
   // The maximal number of bytes consumed in a task. When there are more bytes
   // in the data pipe, they will be consumed in following tasks. Setting a too
   // small number will generate ton of tasks but setting a too large number will
@@ -65,13 +70,12 @@ class CONTENT_EXPORT URLResponseBodyConsumer final
   class ReceivedData;
   void Reclaim(uint32_t size);
 
-  void OnReadable(MojoResult unused);
   void NotifyCompletionIfAppropriate();
 
   const int request_id_;
   ResourceDispatcher* resource_dispatcher_;
   mojo::ScopedDataPipeConsumerHandle handle_;
-  mojo::Watcher handle_watcher_;
+  mojo::SimpleWatcher handle_watcher_;
   ResourceRequestCompletionStatus completion_status_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 

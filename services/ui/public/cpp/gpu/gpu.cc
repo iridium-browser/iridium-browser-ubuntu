@@ -5,8 +5,10 @@
 #include "services/ui/public/cpp/gpu/gpu.h"
 
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "gpu/command_buffer/common/scheduling_priority.h"
 #include "mojo/public/cpp/bindings/sync_call_restrictions.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "services/service_manager/public/cpp/connector.h"
@@ -17,24 +19,27 @@
 
 namespace ui {
 
-Gpu::Gpu(service_manager::Connector* connector,
-         service_manager::InterfaceProvider* provider,
+namespace {
+
+mojom::GpuPtr DefaultFactory(service_manager::Connector* connector,
+                             const std::string& service_name) {
+  mojom::GpuPtr gpu_ptr;
+  connector->BindInterface(service_name, &gpu_ptr);
+  return gpu_ptr;
+}
+
+}  // namespace
+
+Gpu::Gpu(GpuPtrFactory factory,
          scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       io_task_runner_(std::move(task_runner)),
-      connector_(connector),
-      interface_provider_(provider),
+      factory_(std::move(factory)),
       shutdown_event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                       base::WaitableEvent::InitialState::NOT_SIGNALED) {
   DCHECK(main_task_runner_);
-  DCHECK(connector_ || interface_provider_);
-  mojom::GpuPtr gpu_ptr;
-  if (connector_)
-    connector_->BindInterface(ui::mojom::kServiceName, &gpu_ptr);
-  else
-    interface_provider_->GetInterface(&gpu_ptr);
   gpu_memory_buffer_manager_ =
-      base::MakeUnique<ClientGpuMemoryBufferManager>(std::move(gpu_ptr));
+      base::MakeUnique<ClientGpuMemoryBufferManager>(factory_.Run());
   if (!io_task_runner_) {
     io_thread_.reset(new base::Thread("GPUIOThread"));
     base::Thread::Options thread_options(base::MessageLoop::TYPE_IO, 0);
@@ -54,20 +59,21 @@ Gpu::~Gpu() {
 // static
 std::unique_ptr<Gpu> Gpu::Create(
     service_manager::Connector* connector,
+    const std::string& service_name,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  return base::WrapUnique(new Gpu(connector, nullptr, std::move(task_runner)));
+  GpuPtrFactory factory =
+      base::BindRepeating(&DefaultFactory, connector, service_name);
+  return base::WrapUnique(new Gpu(std::move(factory), std::move(task_runner)));
 }
 
-std::unique_ptr<Gpu> Gpu::Create(
-    service_manager::InterfaceProvider* provider,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  return base::WrapUnique(new Gpu(nullptr, provider, std::move(task_runner)));
-}
-
-scoped_refptr<cc::ContextProvider> Gpu::CreateContextProvider(
+scoped_refptr<viz::ContextProvider> Gpu::CreateContextProvider(
     scoped_refptr<gpu::GpuChannelHost> gpu_channel) {
+  int32_t stream_id = 0;
+  gpu::SchedulingPriority stream_priority = gpu::SchedulingPriority::kNormal;
+
   constexpr bool automatic_flushes = false;
   constexpr bool support_locking = false;
+
   gpu::gles2::ContextCreationAttribHelper attributes;
   attributes.alpha_size = -1;
   attributes.depth_size = 0;
@@ -76,13 +82,28 @@ scoped_refptr<cc::ContextProvider> Gpu::CreateContextProvider(
   attributes.sample_buffers = 0;
   attributes.bind_generates_resource = false;
   attributes.lose_context_when_out_of_memory = true;
-  constexpr ui::ContextProviderCommandBuffer* shared_context_provider = nullptr;
+  ui::ContextProviderCommandBuffer* shared_context_provider = nullptr;
   return make_scoped_refptr(new ui::ContextProviderCommandBuffer(
-      std::move(gpu_channel), gpu::GPU_STREAM_DEFAULT,
-      gpu::GpuStreamPriority::NORMAL, gpu::kNullSurfaceHandle,
-      GURL("chrome://gpu/MusContextFactory"), automatic_flushes,
-      support_locking, gpu::SharedMemoryLimits(), attributes,
+      std::move(gpu_channel), stream_id, stream_priority,
+      gpu::kNullSurfaceHandle, GURL("chrome://gpu/MusContextFactory"),
+      automatic_flushes, support_locking, gpu::SharedMemoryLimits(), attributes,
       shared_context_provider, ui::command_buffer_metrics::MUS_CLIENT_CONTEXT));
+}
+
+void Gpu::CreateJpegDecodeAccelerator(
+    media::mojom::GpuJpegDecodeAcceleratorRequest jda_request) {
+  DCHECK(IsMainThread());
+  if (!gpu_ || !gpu_.is_bound())
+    gpu_ = factory_.Run();
+  gpu_->CreateJpegDecodeAccelerator(std::move(jda_request));
+}
+
+void Gpu::CreateVideoEncodeAccelerator(
+    media::mojom::VideoEncodeAcceleratorRequest vea_request) {
+  DCHECK(IsMainThread());
+  if (!gpu_ || !gpu_.is_bound())
+    gpu_ = factory_.Run();
+  gpu_->CreateVideoEncodeAccelerator(std::move(vea_request));
 }
 
 void Gpu::EstablishGpuChannel(
@@ -90,18 +111,18 @@ void Gpu::EstablishGpuChannel(
   DCHECK(IsMainThread());
   scoped_refptr<gpu::GpuChannelHost> channel = GetGpuChannel();
   if (channel) {
-    main_task_runner_->PostTask(FROM_HERE,
-                                base::Bind(callback, std::move(channel)));
+    callback.Run(std::move(channel));
     return;
   }
+
+  const bool gpu_channel_request_ongoing = !establish_callbacks_.empty();
+  // Cache |callback| but don't launch more than one EstablishGpuChannel().
   establish_callbacks_.push_back(callback);
-  if (gpu_)
+  if (gpu_channel_request_ongoing)
     return;
 
-  if (connector_)
-    connector_->BindInterface(ui::mojom::kServiceName, &gpu_);
-  else
-    interface_provider_->GetInterface(&gpu_);
+  if (!gpu_ || !gpu_.is_bound())
+    gpu_ = factory_.Run();
   gpu_->EstablishGpuChannel(
       base::Bind(&Gpu::OnEstablishedGpuChannel, base::Unretained(this)));
 }
@@ -110,22 +131,19 @@ scoped_refptr<gpu::GpuChannelHost> Gpu::EstablishGpuChannelSync() {
   DCHECK(IsMainThread());
   if (GetGpuChannel())
     return gpu_channel_;
+  if (!gpu_ || !gpu_.is_bound())
+    gpu_ = factory_.Run();
 
   int client_id = 0;
   mojo::ScopedMessagePipeHandle channel_handle;
   gpu::GPUInfo gpu_info;
-  if (connector_)
-    connector_->BindInterface(ui::mojom::kServiceName, &gpu_);
-  else
-    interface_provider_->GetInterface(&gpu_);
-
   mojo::SyncCallRestrictions::ScopedAllowSyncCall allow_sync_call;
   if (!gpu_->EstablishGpuChannel(&client_id, &channel_handle, &gpu_info)) {
-    DLOG(WARNING)
-        << "Channel encountered error while establishing gpu channel.";
+    DLOG(WARNING) << "Encountered error while establishing gpu channel.";
     return nullptr;
   }
   OnEstablishedGpuChannel(client_id, std::move(channel_handle), gpu_info);
+
   return gpu_channel_;
 }
 
@@ -155,10 +173,10 @@ void Gpu::OnEstablishedGpuChannel(int client_id,
         &shutdown_event_, gpu_memory_buffer_manager_.get());
   }
 
-  gpu_.reset();
-  for (const auto& i : establish_callbacks_)
-    i.Run(gpu_channel_);
+  auto callbacks = std::move(establish_callbacks_);
   establish_callbacks_.clear();
+  for (const auto& callback : callbacks)
+    callback.Run(gpu_channel_);
 }
 
 bool Gpu::IsMainThread() {

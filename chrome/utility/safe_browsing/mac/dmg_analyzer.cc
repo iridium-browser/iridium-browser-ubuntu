@@ -13,10 +13,10 @@
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/safe_browsing/binary_feature_extractor.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/mach_o_image_reader_mac.h"
 #include "chrome/utility/safe_browsing/mac/dmg_iterator.h"
 #include "chrome/utility/safe_browsing/mac/read_stream.h"
+#include "components/safe_browsing/csd.pb.h"
 #include "crypto/secure_hash.h"
 #include "crypto/sha2.h"
 
@@ -117,8 +117,7 @@ bool MachOFeatureExtractor::HashAndCopyStream(
 
 }  // namespace
 
-void AnalyzeDMGFile(base::File dmg_file,
-                    safe_browsing::zip_analyzer::Results* results) {
+void AnalyzeDMGFile(base::File dmg_file, ArchiveAnalyzerResults* results) {
   MachOFeatureExtractor feature_extractor;
   results->success = false;
 
@@ -126,6 +125,8 @@ void AnalyzeDMGFile(base::File dmg_file,
   DMGIterator iterator(&read_stream);
   if (!iterator.Open())
     return;
+
+  results->signature_blob = iterator.GetCodeSignature();
 
   while (iterator.Next()) {
     std::unique_ptr<ReadStream> stream = iterator.GetReadStream();

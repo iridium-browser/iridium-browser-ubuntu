@@ -32,11 +32,12 @@ DownloadUIAdapter* DownloadUIAdapter::FromOfflinePageModel(
 }
 
 // static
-void DownloadUIAdapter::AttachToOfflinePageModel(DownloadUIAdapter* adapter,
-                                                 OfflinePageModel* model) {
+void DownloadUIAdapter::AttachToOfflinePageModel(
+    std::unique_ptr<DownloadUIAdapter> adapter,
+    OfflinePageModel* model) {
   DCHECK(adapter);
   DCHECK(model);
-  model->SetUserData(kDownloadUIAdapterKey, adapter);
+  model->SetUserData(kDownloadUIAdapterKey, std::move(adapter));
 }
 
 DownloadUIAdapter::ItemInfo::ItemInfo(const OfflinePageItem& page,
@@ -115,11 +116,11 @@ void DownloadUIAdapter::OfflinePageAdded(OfflinePageModel* model,
   AddItemHelper(base::MakeUnique<ItemInfo>(added_page, temporarily_hidden));
 }
 
-void DownloadUIAdapter::OfflinePageDeleted(int64_t offline_id,
-                                           const ClientId& client_id) {
-  if (!delegate_->IsVisibleInUI(client_id))
+void DownloadUIAdapter::OfflinePageDeleted(
+    const OfflinePageModel::DeletedPageInfo& page_info) {
+  if (!delegate_->IsVisibleInUI(page_info.client_id))
     return;
-  DeleteItemHelper(client_id.id);
+  DeleteItemHelper(page_info.client_id.id);
 }
 
 // RequestCoordinator::Observer

@@ -62,9 +62,6 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
       std::unique_ptr<DownloadRequestHandleInterface> request_handle,
       const DownloadItemImplCreated& item_created);
 
-  // Notifies DownloadManager about a successful completion of |download_item|.
-  void OnSavePackageSuccessfullyFinished(DownloadItem* download_item);
-
   // DownloadManager functions.
   void SetDelegate(DownloadManagerDelegate* delegate) override;
   DownloadManagerDelegate* GetDelegate() const override;
@@ -94,8 +91,8 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
       const GURL& tab_refererr_url,
       const std::string& mime_type,
       const std::string& original_mime_type,
-      const base::Time& start_time,
-      const base::Time& end_time,
+      base::Time start_time,
+      base::Time end_time,
       const std::string& etag,
       const std::string& last_modified,
       int64_t received_bytes,
@@ -105,7 +102,11 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
       DownloadDangerType danger_type,
       DownloadInterruptReason interrupt_reason,
       bool opened,
+      base::Time last_access_time,
+      bool transient,
       const std::vector<DownloadItem::ReceivedSlice>& received_slices) override;
+  void PostInitialization() override;
+  bool IsManagerInitialized() const override;
   int InProgressCount() const override;
   int NonMaliciousInProgressCount() const override;
   BrowserContext* GetBrowserContext() const override;
@@ -224,6 +225,9 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
 
   // True if the download manager has been initialized and requires a shutdown.
   bool shutdown_needed_;
+
+  // True if the download manager has been initialized and loaded all the data.
+  bool initialized_;
 
   // Observers that want to be notified of changes to the set of downloads.
   base::ObserverList<Observer> observers_;

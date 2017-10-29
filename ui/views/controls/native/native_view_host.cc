@@ -28,6 +28,9 @@ NativeViewHost::NativeViewHost()
 }
 
 NativeViewHost::~NativeViewHost() {
+  // As part of deleting NativeViewHostWrapper the native view is unparented.
+  // Make sure the FocusManager is updated.
+  ClearFocus();
 }
 
 void NativeViewHost::Attach(gfx::NativeView native_view) {
@@ -60,7 +63,7 @@ void NativeViewHost::NativeViewDestroyed() {
 ////////////////////////////////////////////////////////////////////////////////
 // NativeViewHost, View overrides:
 
-gfx::Size NativeViewHost::GetPreferredSize() const {
+gfx::Size NativeViewHost::CalculatePreferredSize() const {
   return preferred_size_;
 }
 
@@ -167,7 +170,8 @@ const char* NativeViewHost::GetClassName() const {
 }
 
 void NativeViewHost::OnFocus() {
-  native_wrapper_->SetFocus();
+  if (native_view_)
+    native_wrapper_->SetFocus();
   NotifyAccessibilityEvent(ui::AX_EVENT_FOCUS, true);
 }
 

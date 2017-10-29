@@ -9,7 +9,7 @@
 #include "third_party/WebKit/public/platform/WebRTCCertificate.h"
 #include "third_party/WebKit/public/platform/WebRTCCertificateGenerator.h"
 #include "third_party/WebKit/public/platform/WebRTCKeyParams.h"
-#include "third_party/webrtc/base/optional.h"
+#include "third_party/webrtc/rtc_base/optional.h"
 
 namespace content {
 
@@ -22,15 +22,15 @@ class RTCCertificateGenerator : public blink::WebRTCCertificateGenerator {
   ~RTCCertificateGenerator() override {}
 
   // blink::WebRTCCertificateGenerator implementation.
-  void generateCertificate(
+  void GenerateCertificate(
       const blink::WebRTCKeyParams& key_params,
       std::unique_ptr<blink::WebRTCCertificateCallback> observer) override;
-  void generateCertificateWithExpiration(
+  void GenerateCertificateWithExpiration(
       const blink::WebRTCKeyParams& key_params,
       uint64_t expires_ms,
       std::unique_ptr<blink::WebRTCCertificateCallback> observer) override;
-  bool isSupportedKeyParams(const blink::WebRTCKeyParams& key_params) override;
-  std::unique_ptr<blink::WebRTCCertificate> fromPEM(
+  bool IsSupportedKeyParams(const blink::WebRTCKeyParams& key_params) override;
+  std::unique_ptr<blink::WebRTCCertificate> FromPEM(
       blink::WebString pem_private_key,
       blink::WebString pem_certificate) override;
 

@@ -2,14 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Represents a translation value in a CSSTransformValue used for properties
+// like "transform".
+// Spec: https://drafts.css-houdini.org/css-typed-om/#csstranslation
 [
-    Constructor(CSSLengthValue x, CSSLengthValue y),
-    Constructor(CSSLengthValue x, CSSLengthValue y, CSSLengthValue z),
+    Constructor(CSSNumericValue x, CSSNumericValue y),
+    Constructor(CSSNumericValue x, CSSNumericValue y, CSSNumericValue z),
     Exposed=(Window,PaintWorklet),
     RaisesException=Constructor,
     RuntimeEnabled=CSSTypedOM
 ] interface CSSTranslation : CSSTransformComponent {
-    readonly attribute CSSLengthValue x;
-    readonly attribute CSSLengthValue y;
-    readonly attribute CSSLengthValue z;
+    [RaisesException=Setter] attribute CSSNumericValue x;
+    [RaisesException=Setter] attribute CSSNumericValue y;
+    [RaisesException=Setter] attribute CSSNumericValue z;
 };

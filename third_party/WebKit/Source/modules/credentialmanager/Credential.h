@@ -5,8 +5,8 @@
 #ifndef Credential_h
 #define Credential_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/ModulesExport.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/credentialmanager/PlatformCredential.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
@@ -23,26 +23,24 @@ class MODULES_EXPORT Credential : public GarbageCollectedFinalized<Credential>,
   virtual ~Credential();
 
   // Credential.idl
-  const String& id() const { return m_platformCredential->id(); }
-  const String& name() const { return m_platformCredential->name(); }
-  const KURL& iconURL() const { return m_platformCredential->iconURL(); }
-  const String& type() const { return m_platformCredential->type(); }
+  const String& id() const { return platform_credential_->Id(); }
+  const String& type() const { return platform_credential_->GetType(); }
 
   DECLARE_VIRTUAL_TRACE();
 
-  PlatformCredential* getPlatformCredential() const {
-    return m_platformCredential;
+  PlatformCredential* GetPlatformCredential() const {
+    return platform_credential_;
   }
 
  protected:
   Credential(PlatformCredential*);
-  Credential(const String& id, const String& name, const KURL& icon);
+  Credential(const String& id);
 
   // Parses a string as a KURL. Throws an exception via |exceptionState| if an
   // invalid URL is produced.
-  static KURL parseStringAsURL(const String&, ExceptionState&);
+  static KURL ParseStringAsURL(const String&, ExceptionState&);
 
-  Member<PlatformCredential> m_platformCredential;
+  Member<PlatformCredential> platform_credential_;
 };
 
 }  // namespace blink

@@ -30,6 +30,7 @@
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/cookie_options.h"
 #include "net/cookies/cookie_store.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ppapi/features/features.h"
@@ -62,6 +63,7 @@ void CreateChildFrameOnUI(int process_id,
                           const std::string& frame_name,
                           const std::string& frame_unique_name,
                           blink::WebSandboxFlags sandbox_flags,
+                          const ParsedFeaturePolicyHeader& container_policy,
                           const FrameOwnerProperties& frame_owner_properties,
                           int new_routing_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -70,9 +72,9 @@ void CreateChildFrameOnUI(int process_id,
   // Handles the RenderFrameHost being deleted on the UI thread while
   // processing a subframe creation message.
   if (render_frame_host) {
-    render_frame_host->OnCreateChildFrame(new_routing_id, scope, frame_name,
-                                          frame_unique_name, sandbox_flags,
-                                          frame_owner_properties);
+    render_frame_host->OnCreateChildFrame(
+        new_routing_id, scope, frame_name, frame_unique_name, sandbox_flags,
+        container_policy, frame_owner_properties);
   }
 }
 
@@ -273,9 +275,34 @@ void RenderFrameMessageFilter::DownloadUrl(int render_view_id,
   if (!resource_context_)
     return;
 
-  std::unique_ptr<DownloadUrlParameters> parameters(
-      new DownloadUrlParameters(url, render_process_id_, render_view_id,
-                                render_frame_id, request_context_.get()));
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("renderer_initiated_download", R"(
+        semantics {
+          sender: "Download from Renderer"
+          description:
+            "The frame has either navigated to a URL that was determined to be "
+            "a download via one of the renderer's classification mechanisms, "
+            "or WebView has requested a <canvas> or <img> element at a "
+            "specific location be to downloaded."
+          trigger:
+            "The user navigated to a destination that was categorized as a "
+            "download, or WebView triggered saving a <canvas> or <img> tag."
+          data: "Only the URL we are attempting to download."
+          destination: WEBSITE
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store: "user"
+          setting: "This feature cannot be disabled by settings."
+          chrome_policy {
+            DownloadRestrictions {
+              DownloadRestrictions: 3
+            }
+          }
+        })");
+  std::unique_ptr<DownloadUrlParameters> parameters(new DownloadUrlParameters(
+      url, render_process_id_, render_view_id, render_frame_id,
+      request_context_.get(), traffic_annotation));
   parameters->set_content_initiated(true);
   parameters->set_suggested_name(suggested_name);
   parameters->set_prompt(use_prompt);
@@ -305,7 +332,8 @@ void RenderFrameMessageFilter::OnCreateChildFrame(
       base::Bind(&CreateChildFrameOnUI, render_process_id_,
                  params.parent_routing_id, params.scope, params.frame_name,
                  params.frame_unique_name, params.sandbox_flags,
-                 params.frame_owner_properties, *new_routing_id));
+                 params.container_policy, params.frame_owner_properties,
+                 *new_routing_id));
 }
 
 void RenderFrameMessageFilter::OnCookiesEnabled(
@@ -325,7 +353,7 @@ void RenderFrameMessageFilter::CheckPolicyForCookies(
     int render_frame_id,
     const GURL& url,
     const GURL& first_party_for_cookies,
-    const GetCookiesCallback& callback,
+    GetCookiesCallback callback,
     const net::CookieList& cookie_list) {
   net::URLRequestContext* context = GetRequestContextForURL(url);
   // Check the policy for get cookies, and pass cookie_list to the
@@ -334,9 +362,9 @@ void RenderFrameMessageFilter::CheckPolicyForCookies(
       GetContentClient()->browser()->AllowGetCookie(
           url, first_party_for_cookies, cookie_list, resource_context_,
           render_process_id_, render_frame_id)) {
-    callback.Run(net::CookieStore::BuildCookieLine(cookie_list));
+    std::move(callback).Run(net::CookieStore::BuildCookieLine(cookie_list));
   } else {
-    callback.Run(std::string());
+    std::move(callback).Run(std::string());
   }
 }
 
@@ -406,13 +434,13 @@ void RenderFrameMessageFilter::SetCookie(int32_t render_frame_id,
 void RenderFrameMessageFilter::GetCookies(int render_frame_id,
                                           const GURL& url,
                                           const GURL& first_party_for_cookies,
-                                          const GetCookiesCallback& callback) {
+                                          GetCookiesCallback callback) {
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
   if (!policy->CanAccessDataForOrigin(render_process_id_, url)) {
     bad_message::ReceivedBadMessage(this,
                                     bad_message::RFMF_GET_COOKIES_BAD_ORIGIN);
-    callback.Run(std::string());
+    std::move(callback).Run(std::string());
     return;
   }
 
@@ -439,7 +467,8 @@ void RenderFrameMessageFilter::GetCookies(int render_frame_id,
   context->cookie_store()->GetCookieListWithOptionsAsync(
       url, options,
       base::Bind(&RenderFrameMessageFilter::CheckPolicyForCookies, this,
-                 render_frame_id, url, first_party_for_cookies, callback));
+                 render_frame_id, url, first_party_for_cookies,
+                 base::Passed(&callback)));
 }
 
 #if BUILDFLAG(ENABLE_PLUGINS)

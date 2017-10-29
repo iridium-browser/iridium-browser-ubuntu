@@ -22,6 +22,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "components/drive/drive_api_util.h"
@@ -40,16 +41,16 @@ using google_apis::CancelCallback;
 using google_apis::ChangeList;
 using google_apis::ChangeListCallback;
 using google_apis::ChangeResource;
+using google_apis::DRIVE_FILE_ERROR;
+using google_apis::DRIVE_NO_CONNECTION;
+using google_apis::DRIVE_OTHER_ERROR;
 using google_apis::DownloadActionCallback;
+using google_apis::DriveApiErrorCode;
 using google_apis::EntryActionCallback;
 using google_apis::FileList;
 using google_apis::FileListCallback;
 using google_apis::FileResource;
 using google_apis::FileResourceCallback;
-using google_apis::DRIVE_FILE_ERROR;
-using google_apis::DRIVE_NO_CONNECTION;
-using google_apis::DRIVE_OTHER_ERROR;
-using google_apis::DriveApiErrorCode;
 using google_apis::GetContentCallback;
 using google_apis::GetShareUrlCallback;
 using google_apis::HTTP_BAD_REQUEST;
@@ -63,6 +64,9 @@ using google_apis::HTTP_SUCCESS;
 using google_apis::InitiateUploadCallback;
 using google_apis::ParentReference;
 using google_apis::ProgressCallback;
+using google_apis::TeamDriveList;
+using google_apis::TeamDriveListCallback;
+using google_apis::TeamDriveResource;
 using google_apis::UploadRangeResponse;
 using google_apis::drive::UploadRangeCallback;
 namespace test_util = google_apis::test_util;
@@ -237,6 +241,7 @@ FakeDriveService::FakeDriveService()
       next_upload_sequence_number_(0),
       default_max_results_(0),
       resource_id_count_(0),
+      team_drive_list_load_count_(0),
       file_list_load_count_(0),
       change_list_load_count_(0),
       directory_load_count_(0),
@@ -296,6 +301,15 @@ void FakeDriveService::AddApp(const std::string& app_id,
   base::ListValue* item_list;
   CHECK(app_info_value_->GetListWithoutPathExpansion("items", &item_list));
   item_list->Append(std::move(value));
+}
+
+void FakeDriveService::AddTeamDrive(const std::string& id,
+                                    const std::string& name) {
+  std::unique_ptr<TeamDriveResource> team_drive;
+  team_drive.reset(new TeamDriveResource);
+  team_drive->set_id(id);
+  team_drive->set_name(name);
+  team_drive_value_.push_back(std::move(team_drive));
 }
 
 void FakeDriveService::RemoveAppByProductId(const std::string& product_id) {
@@ -381,6 +395,50 @@ void FakeDriveService::ClearRefreshToken() {
 
 std::string FakeDriveService::GetRootResourceId() const {
   return "fake_root";
+}
+
+void FakeDriveService::GetTeamDriveListInternal(
+    int start_offset,
+    int max_results,
+    int* load_counter,
+    const google_apis::TeamDriveListCallback& callback) {
+  if (offline_) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback, DRIVE_NO_CONNECTION,
+                              base::Passed(std::unique_ptr<TeamDriveList>())));
+    return;
+  }
+  if (load_counter)
+    ++*load_counter;
+
+  std::unique_ptr<TeamDriveList> result;
+  result.reset(new TeamDriveList);
+  size_t next_start_offset = start_offset + max_results;
+  if (next_start_offset < team_drive_value_.size()) {
+    // Embed next start offset to next page token to be read in
+    // GetRemainingTeamDriveList next time.
+    result->set_next_page_token(base::SizeTToString(next_start_offset));
+  }
+  for (size_t i = start_offset;
+       i < std::min(next_start_offset, team_drive_value_.size()); ++i) {
+    std::unique_ptr<TeamDriveResource> team_drive(new TeamDriveResource);
+    team_drive->set_id(team_drive_value_[i]->id());
+    team_drive->set_name(team_drive_value_[i]->name());
+    result->mutable_items()->push_back(std::move(team_drive));
+  }
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(callback, HTTP_SUCCESS, base::Passed(&result)));
+}
+
+CancelCallback FakeDriveService::GetAllTeamDriveList(
+    const TeamDriveListCallback& callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(!callback.is_null());
+
+  GetTeamDriveListInternal(0, default_max_results_,
+                           &team_drive_list_load_count_, callback);
+
+  return CancelCallback();
 }
 
 CancelCallback FakeDriveService::GetAllFileList(
@@ -519,6 +577,22 @@ CancelCallback FakeDriveService::GetRemainingChangeList(
 
   GetChangeListInternal(start_changestamp, search_query, directory_resource_id,
                         start_offset, max_results, NULL, callback);
+  return CancelCallback();
+}
+
+CancelCallback FakeDriveService::GetRemainingTeamDriveList(
+    const std::string& page_token,
+    const TeamDriveListCallback& callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(!page_token.empty());
+  DCHECK(!callback.is_null());
+
+  // Next offset index to page token is embedded in the token.
+  size_t start_offset;
+  bool parse_success = base::StringToSizeT(page_token, &start_offset);
+  DCHECK(parse_success);
+  GetTeamDriveListInternal(start_offset, default_max_results_, nullptr,
+                           callback);
   return CancelCallback();
 }
 
@@ -740,6 +814,7 @@ CancelCallback FakeDriveService::DownloadFile(
     const DownloadActionCallback& download_action_callback,
     const GetContentCallback& get_content_callback,
     const ProgressCallback& progress_callback) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!download_action_callback.is_null());
 
@@ -837,6 +912,7 @@ CancelCallback FakeDriveService::CopyResource(
   std::unique_ptr<EntryInfo> copied_entry(new EntryInfo);
   copied_entry->content_data = entry->content_data;
   copied_entry->share_url = entry->share_url;
+  copied_entry->change_resource.set_type(ChangeResource::FILE);
   copied_entry->change_resource.set_file(
       base::MakeUnique<FileResource>(*entry->change_resource.file()));
 
@@ -1596,6 +1672,7 @@ const FakeDriveService::EntryInfo* FakeDriveService::AddNewEntry(
   std::unique_ptr<EntryInfo> new_entry(new EntryInfo);
   ChangeResource* new_change = &new_entry->change_resource;
   FileResource* new_file = new FileResource;
+  new_change->set_type(ChangeResource::FILE);
   new_change->set_file(base::WrapUnique(new_file));
 
   // Set the resource ID and the title
@@ -1716,11 +1793,16 @@ void FakeDriveService::GetChangeListInternal(
 
     if (!should_exclude) {
       std::unique_ptr<ChangeResource> entry_copied(new ChangeResource);
+      entry_copied->set_type(entry.type());
       entry_copied->set_change_id(entry.change_id());
       entry_copied->set_file_id(entry.file_id());
       entry_copied->set_deleted(entry.is_deleted());
-      if (entry.file()) {
+      if (entry.type() == ChangeResource::FILE && entry.file()) {
         entry_copied->set_file(base::MakeUnique<FileResource>(*entry.file()));
+      }
+      if (entry.type() == ChangeResource::TEAM_DRIVE && entry.team_drive()) {
+        entry_copied->set_team_drive(
+            base::MakeUnique<TeamDriveResource>(*entry.team_drive()));
       }
       entry_copied->set_modification_date(entry.modification_date());
       entries.push_back(std::move(entry_copied));

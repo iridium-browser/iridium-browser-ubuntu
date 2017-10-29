@@ -22,33 +22,32 @@ using blink::WebString;
 
 namespace content {
 
-DevToolsClient::DevToolsClient(
-    RenderFrame* main_render_frame,
-    const std::string& compatibility_script)
-    : RenderFrameObserver(main_render_frame),
-      compatibility_script_(compatibility_script),
-      web_tools_frontend_(
-          WebDevToolsFrontend::create(main_render_frame->GetWebFrame(), this)) {
+DevToolsClient::DevToolsClient(RenderFrame* render_frame,
+                               const std::string& api_script)
+    : RenderFrameObserver(render_frame), api_script_(api_script) {
+  if (render_frame->IsMainFrame()) {
+    web_tools_frontend_.reset(
+        WebDevToolsFrontend::Create(render_frame->GetWebFrame(), this));
+  }
 }
 
 DevToolsClient::~DevToolsClient() {
 }
 
 void DevToolsClient::DidClearWindowObject() {
-  if (!compatibility_script_.empty())
-    render_frame()->ExecuteJavaScript(base::UTF8ToUTF16(compatibility_script_));
+  if (!api_script_.empty())
+    render_frame()->ExecuteJavaScript(base::UTF8ToUTF16(api_script_));
 }
 
 void DevToolsClient::OnDestruct() {
   delete this;
 }
 
-void DevToolsClient::sendMessageToEmbedder(const WebString& message) {
-  Send(new DevToolsHostMsg_DispatchOnEmbedder(routing_id(),
-                                              message.utf8()));
+void DevToolsClient::SendMessageToEmbedder(const WebString& message) {
+  Send(new DevToolsHostMsg_DispatchOnEmbedder(routing_id(), message.Utf8()));
 }
 
-bool DevToolsClient::isUnderTest() {
+bool DevToolsClient::IsUnderTest() {
   return RenderThreadImpl::current()->layout_test_mode();
 }
 

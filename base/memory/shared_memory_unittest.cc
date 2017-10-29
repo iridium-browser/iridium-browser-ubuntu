@@ -19,6 +19,7 @@
 #include "base/test/multiprocess_test.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
@@ -36,11 +37,16 @@
 #include "base/win/scoped_handle.h"
 #endif
 
+#if defined(OS_FUCHSIA)
+#include <magenta/process.h>
+#include <magenta/syscalls.h>
+#endif
+
 namespace base {
 
 namespace {
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_FUCHSIA)
 // Each thread will open the shared memory.  Each thread will take a different 4
 // byte int pointer, and keep changing it, with some small pauses in between.
 // Verify that each thread's value in the shared memory is always correct.
@@ -86,13 +92,13 @@ class MultipleThreadMain : public PlatformThread::Delegate {
 
 const char MultipleThreadMain::s_test_name_[] =
     "SharedMemoryOpenThreadTest";
-#endif  // !defined(OS_MACOSX)
+#endif  // !defined(OS_MACOSX) && !defined(OS_FUCHSIA)
 
 }  // namespace
 
-// Android/Mac doesn't support SharedMemory::Open/Delete/
+// Android/Mac/Fuchsia doesn't support SharedMemory::Open/Delete/
 // CreateNamedDeprecated(openExisting=true)
-#if !defined(OS_ANDROID) && !defined(OS_MACOSX)
+#if !defined(OS_ANDROID) && !defined(OS_MACOSX) && !defined(OS_FUCHSIA)
 TEST(SharedMemoryTest, OpenClose) {
   const uint32_t kDataSize = 1024;
   std::string test_name = "SharedMemoryOpenCloseTest";
@@ -206,7 +212,7 @@ TEST(SharedMemoryTest, OpenExclusive) {
   rv = memory1.Delete(test_name);
   EXPECT_TRUE(rv);
 }
-#endif  // !defined(OS_ANDROID) && !defined(OS_MACOSX)
+#endif  // !defined(OS_ANDROID) && !defined(OS_MACOSX) && !defined(OS_FUCHSIA)
 
 // Check that memory is still mapped after its closed.
 TEST(SharedMemoryTest, CloseNoUnmap) {
@@ -221,7 +227,7 @@ TEST(SharedMemoryTest, CloseNoUnmap) {
   memory.Close();
 
   EXPECT_EQ(ptr, memory.memory());
-  EXPECT_EQ(SharedMemory::NULLHandle(), memory.handle());
+  EXPECT_TRUE(!memory.handle().IsValid());
 
   for (size_t i = 0; i < kDataSize; i++) {
     EXPECT_EQ('G', ptr[i]);
@@ -231,7 +237,7 @@ TEST(SharedMemoryTest, CloseNoUnmap) {
   EXPECT_EQ(nullptr, memory.memory());
 }
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_FUCHSIA)
 // Create a set of N threads to each open a shared memory segment and write to
 // it. Verify that they are always reading/writing consistent data.
 TEST(SharedMemoryTest, MultipleThreads) {
@@ -316,7 +322,7 @@ TEST(SharedMemoryTest, AnonymousPrivate) {
   }
 }
 
-TEST(SharedMemoryTest, ShareReadOnly) {
+TEST(SharedMemoryTest, GetReadOnlyHandle) {
   StringPiece contents = "Hello World";
 
   SharedMemory writable_shmem;
@@ -332,9 +338,10 @@ TEST(SharedMemoryTest, ShareReadOnly) {
   memcpy(writable_shmem.memory(), contents.data(), contents.size());
   EXPECT_TRUE(writable_shmem.Unmap());
 
-  SharedMemoryHandle readonly_handle;
-  ASSERT_TRUE(writable_shmem.ShareReadOnlyToProcess(GetCurrentProcessHandle(),
-                                                    &readonly_handle));
+  SharedMemoryHandle readonly_handle = writable_shmem.GetReadOnlyHandle();
+  EXPECT_EQ(writable_shmem.handle().GetGUID(), readonly_handle.GetGUID());
+  EXPECT_EQ(writable_shmem.handle().GetSize(), readonly_handle.GetSize());
+  ASSERT_TRUE(readonly_handle.IsValid());
   SharedMemory readonly_shmem(readonly_handle, /*readonly=*/true);
 
   ASSERT_TRUE(readonly_shmem.Map(contents.size()));
@@ -364,6 +371,21 @@ TEST(SharedMemoryTest, ShareReadOnly) {
   // The "read-only" handle is still writable on Android:
   // http://crbug.com/320865
   (void)handle;
+#elif defined(OS_FUCHSIA)
+  uintptr_t addr;
+  EXPECT_NE(MX_OK, mx_vmar_map(mx_vmar_root_self(), 0, handle.GetHandle(), 0,
+                               contents.size(), MX_VM_FLAG_PERM_WRITE, &addr))
+      << "Shouldn't be able to map as writable.";
+
+  mx_handle_t duped_handle;
+  EXPECT_NE(MX_OK, mx_handle_duplicate(handle.GetHandle(), MX_RIGHT_WRITE,
+                                       &duped_handle))
+      << "Shouldn't be able to duplicate the handle into a writable one.";
+
+  EXPECT_EQ(MX_OK, mx_handle_duplicate(handle.GetHandle(), MX_RIGHT_READ,
+                                       &duped_handle))
+      << "Should be able to duplicate the handle into a readable one.";
+  EXPECT_EQ(MX_OK, mx_handle_close(duped_handle));
 #elif defined(OS_POSIX)
   int handle_fd = SharedMemory::GetFdFromSharedMemoryHandle(handle);
   EXPECT_EQ(O_RDONLY, fcntl(handle_fd, F_GETFL) & O_ACCMODE)
@@ -411,11 +433,11 @@ TEST(SharedMemoryTest, ShareToSelf) {
   memcpy(shmem.memory(), contents.data(), contents.size());
   EXPECT_TRUE(shmem.Unmap());
 
-  SharedMemoryHandle shared_handle;
-  ASSERT_TRUE(shmem.ShareToProcess(GetCurrentProcessHandle(), &shared_handle));
-#if defined(OS_WIN)
-  ASSERT_TRUE(shared_handle.OwnershipPassesToIPC());
-#endif
+  SharedMemoryHandle shared_handle = shmem.handle().Duplicate();
+  ASSERT_TRUE(shared_handle.IsValid());
+  EXPECT_TRUE(shared_handle.OwnershipPassesToIPC());
+  EXPECT_EQ(shared_handle.GetGUID(), shmem.handle().GetGUID());
+  EXPECT_EQ(shared_handle.GetSize(), shmem.handle().GetSize());
   SharedMemory shared(shared_handle, /*readonly=*/false);
 
   ASSERT_TRUE(shared.Map(contents.size()));
@@ -423,11 +445,9 @@ TEST(SharedMemoryTest, ShareToSelf) {
       contents,
       StringPiece(static_cast<const char*>(shared.memory()), contents.size()));
 
-  shared_handle = SharedMemoryHandle();
-  ASSERT_TRUE(shmem.ShareToProcess(GetCurrentProcessHandle(), &shared_handle));
-#if defined(OS_WIN)
+  shared_handle = shmem.handle().Duplicate();
+  ASSERT_TRUE(shared_handle.IsValid());
   ASSERT_TRUE(shared_handle.OwnershipPassesToIPC());
-#endif
   SharedMemory readonly(shared_handle, /*readonly=*/true);
 
   ASSERT_TRUE(readonly.Map(contents.size()));
@@ -501,8 +521,9 @@ TEST(SharedMemoryTest, AnonymousExecutable) {
 
 // Android supports a different permission model than POSIX for its "ashmem"
 // shared memory implementation. So the tests about file permissions are not
-// included on Android.
-#if !defined(OS_ANDROID)
+// included on Android. Fuchsia does not use a file-backed shared memory
+// implementation.
+#if !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
 
 // Set a umask and restore the old mask on destruction.
 class ScopedUmaskSetter {
@@ -567,7 +588,7 @@ TEST(SharedMemoryTest, FilePermissionsNamed) {
   EXPECT_FALSE(shm_stat.st_mode & S_IRWXO);
   EXPECT_FALSE(shm_stat.st_mode & S_IRWXG);
 }
-#endif  // !defined(OS_ANDROID)
+#endif  // !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
 
 #endif  // defined(OS_POSIX)
 
@@ -606,7 +627,8 @@ TEST(SharedMemoryTest, UnsafeImageSection) {
   EXPECT_EQ(nullptr, shared_memory_open.memory());
 
   SharedMemory shared_memory_handle_local(
-      SharedMemoryHandle(section_handle.Take(), ::GetCurrentProcessId()), true);
+      SharedMemoryHandle(section_handle.Take(), 1, UnguessableToken::Create()),
+      true);
   EXPECT_FALSE(shared_memory_handle_local.Map(1));
   EXPECT_EQ(nullptr, shared_memory_handle_local.memory());
 
@@ -621,7 +643,9 @@ TEST(SharedMemoryTest, UnsafeImageSection) {
       ::GetCurrentProcess(), shared_memory_handle_dummy.handle().GetHandle(),
       ::GetCurrentProcess(), &handle_no_query, FILE_MAP_READ, FALSE, 0));
   SharedMemory shared_memory_handle_no_query(
-      SharedMemoryHandle(handle_no_query, ::GetCurrentProcessId()), true);
+      SharedMemoryHandle(handle_no_query, options.size,
+                         UnguessableToken::Create()),
+      true);
   EXPECT_FALSE(shared_memory_handle_no_query.Map(1));
   EXPECT_EQ(nullptr, shared_memory_handle_no_query.memory());
 }
@@ -629,8 +653,10 @@ TEST(SharedMemoryTest, UnsafeImageSection) {
 
 // iOS does not allow multiple processes.
 // Android ashmem does not support named shared memory.
+// Fuchsia SharedMemory does not support named shared memory.
 // Mac SharedMemory does not support named shared memory. crbug.com/345734
-#if !defined(OS_IOS) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
+#if !defined(OS_IOS) && !defined(OS_ANDROID) && !defined(OS_MACOSX) && \
+    !defined(OS_FUCHSIA)
 // On POSIX it is especially important we test shmem across processes,
 // not just across threads.  But the test is enabled on all platforms.
 class SharedMemoryProcessTest : public MultiProcessTest {
@@ -682,16 +708,16 @@ TEST_F(SharedMemoryProcessTest, SharedMemoryAcrossProcesses) {
 
   // Start |kNumTasks| processes, each of which atomically increments the first
   // word by 1.
-  Process processes[kNumTasks];
+  SpawnChildResult children[kNumTasks];
   for (int index = 0; index < kNumTasks; ++index) {
-    processes[index] = SpawnChild("SharedMemoryTestMain");
-    ASSERT_TRUE(processes[index].IsValid());
+    children[index] = SpawnChild("SharedMemoryTestMain");
+    ASSERT_TRUE(children[index].process.IsValid());
   }
 
   // Check that each process exited correctly.
   int exit_code = 0;
   for (int index = 0; index < kNumTasks; ++index) {
-    EXPECT_TRUE(processes[index].WaitForExit(&exit_code));
+    EXPECT_TRUE(children[index].process.WaitForExit(&exit_code));
     EXPECT_EQ(0, exit_code);
   }
 
@@ -705,6 +731,32 @@ TEST_F(SharedMemoryProcessTest, SharedMemoryAcrossProcesses) {
 MULTIPROCESS_TEST_MAIN(SharedMemoryTestMain) {
   return SharedMemoryProcessTest::TaskTestMain();
 }
-#endif  // !defined(OS_IOS) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
+#endif  // !defined(OS_IOS) && !defined(OS_ANDROID) && !defined(OS_MACOSX) &&
+        // !defined(OS_FUCHSIA)
+
+TEST(SharedMemoryTest, MappedId) {
+  const uint32_t kDataSize = 1024;
+  SharedMemory memory;
+  SharedMemoryCreateOptions options;
+  options.size = kDataSize;
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  // The Mach functionality is tested in shared_memory_mac_unittest.cc.
+  options.type = SharedMemoryHandle::POSIX;
+#endif
+
+  EXPECT_TRUE(memory.Create(options));
+  base::UnguessableToken id = memory.handle().GetGUID();
+  EXPECT_FALSE(id.is_empty());
+  EXPECT_TRUE(memory.mapped_id().is_empty());
+
+  EXPECT_TRUE(memory.Map(kDataSize));
+  EXPECT_EQ(id, memory.mapped_id());
+
+  memory.Close();
+  EXPECT_EQ(id, memory.mapped_id());
+
+  memory.Unmap();
+  EXPECT_TRUE(memory.mapped_id().is_empty());
+}
 
 }  // namespace base

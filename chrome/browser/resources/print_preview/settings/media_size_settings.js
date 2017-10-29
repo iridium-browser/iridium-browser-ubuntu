@@ -14,7 +14,7 @@ cr.define('print_preview', function() {
    */
   function MediaSizeSettings(ticketItem) {
     print_preview.SettingsSectionSelect.call(this, ticketItem);
-  };
+  }
 
   MediaSizeSettings.prototype = {
     __proto__: print_preview.SettingsSectionSelect.prototype,
@@ -26,7 +26,5 @@ cr.define('print_preview', function() {
   };
 
   // Export
-  return {
-    MediaSizeSettings: MediaSizeSettings
-  };
+  return {MediaSizeSettings: MediaSizeSettings};
 });

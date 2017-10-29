@@ -9,6 +9,7 @@
 #include "base/time/time.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/window.h"
+#include "ui/chromeos/touch_exploration_controller.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/gestures/gesture_provider_aura.h"
@@ -26,17 +27,25 @@ class MockTouchAccessibilityEnablerDelegate
   MockTouchAccessibilityEnablerDelegate() {}
   ~MockTouchAccessibilityEnablerDelegate() override {}
 
+  void OnTwoFingerTouchStart() override { started_ = true; }
+
+  void OnTwoFingerTouchStop() override { stopped_ = true; }
+
   void PlaySpokenFeedbackToggleCountdown(int tick_count) override {
     ++feedback_progress_sound_count_;
   }
   void ToggleSpokenFeedback() override { toggle_spoken_feedback_ = true; }
 
+  bool started() { return started_; }
+  bool stopped() { return stopped_; }
   size_t feedback_progress_sound_count() const {
     return feedback_progress_sound_count_;
   }
   bool toggle_spoken_feedback() const { return toggle_spoken_feedback_; }
 
  private:
+  bool started_ = false;
+  bool stopped_ = false;
   size_t feedback_progress_sound_count_ = 0;
   bool toggle_spoken_feedback_ = false;
 
@@ -88,6 +97,34 @@ class TouchAccessibilityEnablerTest : public aura::test::AuraTestBase {
 
 }  // namespace
 
+TEST_F(TouchAccessibilityEnablerTest, InteractsWithTouchExplorationController) {
+  // This test ensures that if TouchExplorationController starts and stops,
+  // TouchAccessibilityEnabler continues to work correctly. Because
+  // TouchExplorationController rewrites most touch events, it can screw up
+  // TouchAccessibilityEnabler if they don't explicitly coordinate.
+
+  std::unique_ptr<TouchExplorationController> controller(
+      new TouchExplorationController(root_window(), nullptr,
+                                     enabler_->GetWeakPtr()));
+
+  EXPECT_TRUE(enabler_->IsInNoFingersDownForTesting());
+  generator_->set_current_location(gfx::Point(11, 12));
+  generator_->PressTouchId(1);
+
+  simulated_clock_->Advance(base::TimeDelta::FromMilliseconds(500));
+
+  generator_->set_current_location(gfx::Point(22, 34));
+  generator_->PressTouchId(2);
+
+  EXPECT_TRUE(enabler_->IsInTwoFingersDownForTesting());
+
+  controller.reset();
+
+  generator_->ReleaseTouchId(1);
+  generator_->ReleaseTouchId(2);
+  EXPECT_TRUE(enabler_->IsInNoFingersDownForTesting());
+}
+
 TEST_F(TouchAccessibilityEnablerTest, EntersOneFingerDownMode) {
   EXPECT_TRUE(enabler_->IsInNoFingersDownForTesting());
   EXPECT_FALSE(enabler_->IsInOneFingerDownForTesting());
@@ -138,6 +175,8 @@ TEST_F(TouchAccessibilityEnablerTest, TogglesSpokenFeedback) {
 
   EXPECT_TRUE(enabler_->IsInTwoFingersDownForTesting());
   EXPECT_FALSE(delegate_.toggle_spoken_feedback());
+  EXPECT_TRUE(delegate_.started());
+  EXPECT_FALSE(delegate_.stopped());
 
   enabler_->TriggerOnTimerForTesting();
   EXPECT_FALSE(delegate_.toggle_spoken_feedback());
@@ -145,6 +184,8 @@ TEST_F(TouchAccessibilityEnablerTest, TogglesSpokenFeedback) {
   simulated_clock_->Advance(base::TimeDelta::FromMilliseconds(5000));
   enabler_->TriggerOnTimerForTesting();
   EXPECT_TRUE(delegate_.toggle_spoken_feedback());
+  EXPECT_TRUE(delegate_.started());
+  EXPECT_FALSE(delegate_.stopped());
 }
 
 TEST_F(TouchAccessibilityEnablerTest, ThreeFingersCancelsDetection) {
@@ -156,11 +197,15 @@ TEST_F(TouchAccessibilityEnablerTest, ThreeFingersCancelsDetection) {
   generator_->PressTouchId(2);
 
   EXPECT_TRUE(enabler_->IsInTwoFingersDownForTesting());
+  EXPECT_TRUE(delegate_.started());
+  EXPECT_FALSE(delegate_.stopped());
 
   generator_->set_current_location(gfx::Point(33, 56));
   generator_->PressTouchId(3);
 
   EXPECT_TRUE(enabler_->IsInWaitForNoFingersForTesting());
+  EXPECT_TRUE(delegate_.started());
+  EXPECT_TRUE(delegate_.stopped());
 }
 
 TEST_F(TouchAccessibilityEnablerTest, MovingFingerPastSlopCancelsDetection) {

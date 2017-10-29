@@ -4,7 +4,6 @@
 
 import functools
 import logging
-import os
 import socket
 import sys
 
@@ -135,11 +134,6 @@ class InspectorBackend(object):
   @property
   @decorators.Cache
   def screenshot_supported(self):
-    if (self.app.platform.GetOSName() == 'linux' and (
-        os.getenv('DISPLAY') not in [':0', ':0.0'])):
-      # Displays other than 0 mean we are likely running in something like
-      # xvfb where screenshotting doesn't work.
-      return False
     return True
 
   @_HandleInspectorWebSocketExceptions
@@ -215,7 +209,6 @@ class InspectorBackend(object):
     statement = js_template.Render(statement, **kwargs)
     self._runtime.Execute(statement, context_id, timeout)
 
-  @_HandleInspectorWebSocketExceptions
   def EvaluateJavaScript(self, expression, **kwargs):
     """Returns the result of evaluating a given JavaScript expression.
 
@@ -241,7 +234,7 @@ class InspectorBackend(object):
     timeout = kwargs.pop('timeout', None) or 60
     context_id = kwargs.pop('context_id', None)
     expression = js_template.Render(expression, **kwargs)
-    return self._runtime.Evaluate(expression, context_id, timeout)
+    return self._EvaluateJavaScript(expression, context_id, timeout)
 
   def WaitForJavaScriptCondition(self, condition, **kwargs):
     """Wait for a JavaScript condition to become truthy.
@@ -275,7 +268,7 @@ class InspectorBackend(object):
     condition = js_template.Render(condition, **kwargs)
 
     def IsJavaScriptExpressionTrue():
-      return self._runtime.Evaluate(condition, context_id, timeout)
+      return self._EvaluateJavaScript(condition, context_id, timeout)
 
     try:
       return py_utils.WaitFor(IsJavaScriptExpressionTrue, timeout)
@@ -292,18 +285,6 @@ class InspectorBackend(object):
             repr(e))
       raise py_utils.TimeoutException(
           e.message + '\n' + debug_message)
-
-  def ExecuteJavaScript2(self, *args, **kwargs):
-    """Alias to be removed soon. Do not use in new code."""
-    return self.ExecuteJavaScript(*args, **kwargs)
-
-  def EvaluateJavaScript2(self, *args, **kwargs):
-    """Alias to be removed soon. Do not use in new code."""
-    return self.EvaluateJavaScript(*args, **kwargs)
-
-  def WaitForJavaScriptCondition2(self, *args, **kwargs):
-    """Alias to be removed soon. Do not use in new code."""
-    return self.WaitForJavaScriptCondition(*args, **kwargs)
 
   @_HandleInspectorWebSocketExceptions
   def EnableAllContexts(self):
@@ -514,6 +495,10 @@ class InspectorBackend(object):
       )
     error.AddDebuggingMessage(msg)
     error.AddDebuggingMessage('Debugger url: %s' % self.debugger_url)
+
+  @_HandleInspectorWebSocketExceptions
+  def _EvaluateJavaScript(self, expression, context_id, timeout):
+    return self._runtime.Evaluate(expression, context_id, timeout)
 
   @_HandleInspectorWebSocketExceptions
   def CollectGarbage(self):

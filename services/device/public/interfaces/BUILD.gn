@@ -6,9 +6,31 @@ import("//mojo/public/tools/bindings/mojom.gni")
 
 mojom("interfaces") {
   sources = [
+    "battery_monitor.mojom",
+    "battery_status.mojom",
     "fingerprint.mojom",
+    "nfc.mojom",
+    "nfc_provider.mojom",
     "power_monitor.mojom",
     "time_zone_monitor.mojom",
+    "vibration_manager.mojom",
+    "wake_lock.mojom",
+    "wake_lock_context.mojom",
+    "wake_lock_provider.mojom",
+  ]
+
+  public_deps = [
+    ":constants",
+  ]
+
+  # TODO(crbug.com/699569): Convert to use the new JS bindings.
+  use_new_js_bindings = false
+}
+
+mojom("generic_sensor") {
+  sources = [
+    "sensor.mojom",
+    "sensor_provider.mojom",
   ]
 
   public_deps = [
@@ -20,4 +42,7 @@ mojom("constants") {
   sources = [
     "constants.mojom",
   ]
+
+  # TODO(crbug.com/699569): Convert to use the new JS bindings.
+  js_bindings_mode = "both"
 }

@@ -16,7 +16,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/grit/components_resources.h"
 #include "components/history/core/browser/top_sites.h"
-#include "components/image_fetcher/image_fetcher_impl.h"
+#include "components/image_fetcher/core/image_fetcher_impl.h"
 #include "components/ntp_tiles/field_trial.h"
 #include "components/ntp_tiles/icon_cacher.h"
 #include "components/ntp_tiles/most_visited_sites.h"
@@ -34,7 +34,10 @@ class ChromeNTPTilesInternalsMessageHandlerClient
     : public content::WebUIMessageHandler,
       public ntp_tiles::NTPTilesInternalsMessageHandlerClient {
  public:
-  ChromeNTPTilesInternalsMessageHandlerClient() {}
+  // |favicon_service| must not be null and must outlive this object.
+  explicit ChromeNTPTilesInternalsMessageHandlerClient(
+      favicon::FaviconService* favicon_service)
+      : handler_(favicon_service) {}
 
  private:
   // content::WebUIMessageHandler:
@@ -42,7 +45,7 @@ class ChromeNTPTilesInternalsMessageHandlerClient
 
   // ntp_tiles::NTPTilesInternalsMessageHandlerClient
   bool SupportsNTPTiles() override;
-  bool DoesSourceExist(ntp_tiles::NTPTileSource source) override;
+  bool DoesSourceExist(ntp_tiles::TileSource source) override;
   std::unique_ptr<ntp_tiles::MostVisitedSites> MakeMostVisitedSites() override;
   PrefService* GetPrefs() override;
   void RegisterMessageCallback(
@@ -67,13 +70,14 @@ bool ChromeNTPTilesInternalsMessageHandlerClient::SupportsNTPTiles() {
 }
 
 bool ChromeNTPTilesInternalsMessageHandlerClient::DoesSourceExist(
-    ntp_tiles::NTPTileSource source) {
+    ntp_tiles::TileSource source) {
   switch (source) {
-    case ntp_tiles::NTPTileSource::TOP_SITES:
-    case ntp_tiles::NTPTileSource::SUGGESTIONS_SERVICE:
-    case ntp_tiles::NTPTileSource::WHITELIST:
+    case ntp_tiles::TileSource::TOP_SITES:
+    case ntp_tiles::TileSource::SUGGESTIONS_SERVICE:
+    case ntp_tiles::TileSource::WHITELIST:
+    case ntp_tiles::TileSource::HOMEPAGE:
       return true;
-    case ntp_tiles::NTPTileSource::POPULAR:
+    case ntp_tiles::TileSource::POPULAR:
 #if defined(OS_ANDROID)
       return true;
 #else
@@ -121,10 +125,12 @@ content::WebUIDataSource* CreateNTPTilesInternalsHTMLSource() {
 
 NTPTilesInternalsUI::NTPTilesInternalsUI(content::WebUI* web_ui)
     : WebUIController(web_ui) {
-  content::WebUIDataSource::Add(Profile::FromWebUI(web_ui),
-                                CreateNTPTilesInternalsHTMLSource());
+  Profile* profile = Profile::FromWebUI(web_ui);
+  content::WebUIDataSource::Add(profile, CreateNTPTilesInternalsHTMLSource());
   web_ui->AddMessageHandler(
-      base::MakeUnique<ChromeNTPTilesInternalsMessageHandlerClient>());
+      base::MakeUnique<ChromeNTPTilesInternalsMessageHandlerClient>(
+          FaviconServiceFactory::GetForProfile(
+              profile, ServiceAccessType::EXPLICIT_ACCESS)));
 }
 
 NTPTilesInternalsUI::~NTPTilesInternalsUI() {}

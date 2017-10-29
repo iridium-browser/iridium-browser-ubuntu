@@ -22,12 +22,6 @@ class DistillerJavaScriptServiceImpl
 
   // Mojo mojom::DistillerJavaScriptService implementation.
 
-  // Send UMA feedback and start the external feedback reporter if one exists.
-  void HandleDistillerFeedbackCall(bool good) override;
-
-  // Make a call into Android to close the overlay panel containing reader mode.
-  void HandleDistillerClosePanelCall(bool animate) override;
-
   // Show the Android view containing Reader Mode settings.
   void HandleDistillerOpenSettingsCall() override;
 
@@ -42,7 +36,7 @@ class DistillerJavaScriptServiceImpl
 void CreateDistillerJavaScriptService(
     content::RenderFrameHost* render_frame_host,
     DistillerUIHandle* distiller_ui_handle,
-    mojo::InterfaceRequest<mojom::DistillerJavaScriptService> request);
+    mojom::DistillerJavaScriptServiceRequest request);
 
 }  // namespace dom_distiller
 

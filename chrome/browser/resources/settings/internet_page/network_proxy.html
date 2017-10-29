@@ -1,11 +1,16 @@
+<link rel="import" href="chrome://resources/html/polymer.html">
+
+<link rel="import" href="chrome://resources/cr_elements/chromeos/network/cr_onc_types.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_dialog/cr_dialog.html">
-<link rel="import" href="chrome://resources/cr_elements/network/cr_onc_types.html">
+<link rel="import" href="chrome://resources/cr_elements/hidden_style_css.html">
 <link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_network_behavior.html">
 <link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_network_indicator.html">
+<link rel="import" href="chrome://resources/html/assert.html">
+<link rel="import" href="chrome://resources/html/cr/ui/focus_without_ink.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
 <link rel="import" href="chrome://resources/html/md_select_css.html">
-<link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-a11y-keys/iron-a11y-keys.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-input/paper-input-container.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-input/paper-input.html">
@@ -16,12 +21,12 @@
 <link rel="import" href="../prefs/prefs_behavior.html">
 <link rel="import" href="../settings_vars_css.html">
 <link rel="import" href="internet_shared_css.html">
-<link rel="import" href="network_proxy_exclusions.html">
+link rel="import" href="network_proxy_exclusions.html">
 <link rel="import" href="network_proxy_input.html">
 
 <dom-module id="network-proxy">
   <template>
-    <style include="internet-shared md-select">
+    <style include="internet-shared md-select cr-hidden-style iron-flex iron-flex-alignment">
       cr-policy-network-indicator {
         -webkit-margin-end: 10px;
       }
@@ -35,31 +40,27 @@
         margin-bottom: 10px;
       }
 
-      /* Use .middle spacing but no flex. */
-      .settings-box .middle {
-        flex: none;
-      }
-
-      #exceptionsDiv {
-        padding: 10px 0;
-      }
-
-      #exceptionsDiv network-proxy-exclusions {
+      network-proxy-exclusions {
         margin: 10px 0;
       }
 
-      #proxyDiv paper-toggle-button {
-        padding: 10px 0;
+      .settings-box:first-of-type {
+        border-top: none;
+      }
+
+      #manualProxy {
+        @apply(--settings-list-frame-padding);
       }
     </style>
 
     <!-- Policy indicator. Only one dom-if below will be shown. -->
     <template is="dom-if"
         if="[[shouldShowNetworkPolicyIndicator_(networkProperties)]]">
-      <div class="settings-box continuation single-column">
+      <div class="settings-box">
         <div class="layout horizontal center">
           <cr-policy-network-indicator
-              property="[[networkProperties.ProxySettings.Type]]">
+              property="[[networkProperties.ProxySettings.Type]]"
+              no-extension-indicator>
           </cr-policy-network-indicator>
           <div>$i18n{networkProxyEnforcedPolicy}</div>
         </div>
@@ -67,7 +68,7 @@
     </template>
     <template is="dom-if"
         if="[[shouldShowExtensionIndicator_(networkProperties)]]">
-      <div class="settings-box continuation single-column">
+      <div class="settings-box">
         <extension-controlled-indicator
             extension-id="[[prefs.proxy.extensionId]]"
             extension-name="[[prefs.proxy.controlledByName]]"
@@ -83,7 +84,7 @@
       <settings-toggle-button id="allowShared" class="start"
           pref="{{prefs.settings.use_shared_proxies}}"
           label="$i18n{networkProxyAllowShared}"
-          on-change="onAllowSharedProxiesChange_"
+          on-settings-boolean-control-change="onAllowSharedProxiesChange_"
           no-set-pref>
       </settings-toggle-button>
     </div>
@@ -95,7 +96,8 @@
         <select id="proxyType" class="md-select" on-change="onTypeChange_"
             value="[[proxy_.Type]]"
             disabled="[[!isEditable_('Type', networkProperties, editable,
-                useSharedProxies_)]]">
+                useSharedProxies_)]]"
+            aria-label="$i18n{networkProxyConnectionType}">
           <template is="dom-repeat" items="[[proxyTypes_]]">
             <option value="[[item]]">[[getProxyTypeDesc_(item)]]</option>
           </template>
@@ -105,10 +107,10 @@
     </div>
 
     <!-- Autoconfiguration (PAC) -->
-    <div class="settings-box continuation indent"
+    <div class="settings-box continuation"
         hidden$="[[!matches_(proxy_.Type, ProxySettingsType_.PAC)]]">
       <div>$i18n{networkProxyAutoConfig}</div>
-      <paper-input no-label-float class="middle flex" value="{{proxy_.PAC}}"
+      <paper-input no-label-float class="middle" value="{{proxy_.PAC}}"
           disabled="[[!isEditable_('PAC', networkProperties, editable,
               useSharedProxies_)]]"
           on-change="onPACChange_">
@@ -116,25 +118,27 @@
     </div>
 
     <!-- Web Proxy Auto Discovery (WPAD) -->
-    <div class="settings-box continuation indent"
+    <div class="settings-box continuation"
         hidden$="[[!matches_(proxy_.Type, ProxySettingsType_.WPAD)]]">
       <div>$i18n{networkSectionWpad}</div>
-      <div class="middle flex">[[WPAD_]]</div>
+      <div class="middle">[[WPAD_]]</div>
     </div>
 
     <!-- Manual -->
-    <div id="proxyDiv" class="settings-box continuation single-column indent"
+    <div class="settings-box continuation"
         hidden$="[[!matches_(proxy_.Type, ProxySettingsType_.MANUAL)]]">
-      <div class="flex layout horizontal">
-        <div id="networkProxyToggleLabel" class="flex">
-          $i18n{networkProxyUseSame}
-        </div>
-        <paper-toggle-button checked="{{useSameProxy_}}"
-            disabled="[[!isEditable_('Type', networkProperties, editable,
-                useSharedProxies_)]]"
-            aria-labelledby="networkProxyToggleLabel">
-        </paper-toggle-button>
+      <div id="networkProxyToggleLabel" class="flex">
+        $i18n{networkProxyUseSame}
       </div>
+      <paper-toggle-button checked="{{useSameProxy_}}"
+          disabled="[[!isEditable_('Type', networkProperties, editable,
+              useSharedProxies_)]]"
+          aria-labelledby="networkProxyToggleLabel">
+      </paper-toggle-button>
+    </div>
+
+    <div id="manualProxy" class="layout vertical start"
+        hidden$="[[!matches_(proxy_.Type, ProxySettingsType_.MANUAL)]]">
       <div hidden$="[[!useSameProxy_]]" class="layout vertical">
         <network-proxy-input
             on-proxy-change="onProxyInputChange_"
@@ -175,9 +179,8 @@
         </network-proxy-input>
       </div>
 
-      <div id="exceptionsDiv"
-          hidden="[[!isEditable_('Type', networkProperties, editable,
-              useSharedProxies_)]]">
+      <div hidden="[[!isEditable_('Type', networkProperties, editable,
+          useSharedProxies_)]]">
         <div>$i18n{networkProxyExceptionList}</div>
         <network-proxy-exclusions on-proxy-change="onProxyExclusionsChange_"
             exclusions="{{proxy_.ExcludeDomains}}">
@@ -205,10 +208,15 @@
 
     <!-- Confirm Allow shared proxies dialog -->
     <dialog is="cr-dialog" id="confirmAllowSharedDialog"
-        close-text="$i18n{close}" on-cancel="onAllowSharedDialogCancel_">
-      <div class="title">$i18n{networkProxyAllowSharedWarningTitle}</div>
-      <div class="body">$i18n{networkProxyAllowSharedWarningMessage}</div>
-      <div class="button-container">
+        close-text="$i18n{close}" on-cancel="onAllowSharedDialogCancel_"
+        on-close="onAllowSharedDialogClose_">
+      <div class="title" slot="title">
+        $i18n{networkProxyAllowSharedWarningTitle}
+      </div>
+      <div class="body" slot="body">
+        $i18n{networkProxyAllowSharedWarningMessage}
+      </div>
+      <div class="button-container" slot="button-container">
         <paper-button class="cancel-button"
             on-tap="onAllowSharedDialogCancel_">
           $i18n{cancel}

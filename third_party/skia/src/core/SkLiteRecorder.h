@@ -15,7 +15,7 @@ class SkLiteDL;
 class SkLiteRecorder final : public SkNoDrawCanvas {
 public:
     SkLiteRecorder();
-    void reset(SkLiteDL*);
+    void reset(SkLiteDL*, const SkIRect& bounds);
 
     sk_sp<SkSurface> onNewSurface(const SkImageInfo&, const SkSurfaceProps&) override;
 
@@ -74,20 +74,10 @@ public:
     void onDrawPatch(const SkPoint[12], const SkColor[4],
                      const SkPoint[4], SkBlendMode, const SkPaint&) override;
     void onDrawPoints(PointMode, size_t count, const SkPoint pts[], const SkPaint&) override;
-    void onDrawVertices(VertexMode, int, const SkPoint[], const SkPoint[], const SkColor[],
-                        SkBlendMode, const uint16_t[], int, const SkPaint&) override;
+    void onDrawVerticesObject(const SkVertices*, SkBlendMode, const SkPaint&) override;
     void onDrawAtlas(const SkImage*, const SkRSXform[], const SkRect[], const SkColor[],
                      int, SkBlendMode, const SkRect*, const SkPaint*) override;
-
-#ifdef SK_EXPERIMENTAL_SHADOWING
-    void didTranslateZ(SkScalar) override;
-    void onDrawShadowedPicture(const SkPicture*, const SkMatrix*,
-                               const SkPaint*, const SkShadowParams& params) override;
-#else
-    void didTranslateZ(SkScalar);
-    void onDrawShadowedPicture(const SkPicture*, const SkMatrix*,
-                               const SkPaint*, const SkShadowParams& params);
-#endif
+    void onDrawShadowRec(const SkPath&, const SkDrawShadowRec&) override;
 
 private:
     typedef SkNoDrawCanvas INHERITED;

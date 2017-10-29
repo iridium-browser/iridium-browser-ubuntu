@@ -15,6 +15,7 @@
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "extensions/common/permissions/permissions_data.h"
 
@@ -61,8 +62,7 @@ const char* GetLevelOfControl(
                                  : profile->GetPrefs();
   bool from_incognito = false;
   bool* from_incognito_ptr = incognito ? &from_incognito : NULL;
-  const PrefService::Preference* pref =
-      prefs->FindPreference(browser_pref.c_str());
+  const PrefService::Preference* pref = prefs->FindPreference(browser_pref);
   CHECK(pref);
 
   if (!pref->IsExtensionModifiable())
@@ -128,9 +128,9 @@ void DispatchEventToExtensions(Profile* profile,
       }
 
       std::unique_ptr<base::ListValue> args_copy(args->DeepCopy());
-      std::unique_ptr<Event> event(
-          new Event(histogram_value, event_name, std::move(args_copy)));
-      event->restrict_to_browser_context = restrict_to_profile;
+      auto event =
+          base::MakeUnique<Event>(histogram_value, event_name,
+                                  std::move(args_copy), restrict_to_profile);
       router->DispatchEventToExtension(extension->id(), std::move(event));
     }
   }

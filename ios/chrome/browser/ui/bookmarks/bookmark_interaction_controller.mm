@@ -6,11 +6,8 @@
 
 #include <stdint.h>
 
-#import "base/ios/weak_nsobject.h"
 #include "base/logging.h"
 #include "base/mac/bind_objc_block.h"
-#include "base/mac/objc_property_releaser.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
@@ -27,7 +24,7 @@
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_controller_factory.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_edit_view_controller.h"
-#import "ios/chrome/browser/ui/bookmarks/bookmark_home_view_controller.h"
+#import "ios/chrome/browser/ui/bookmarks/bookmark_home_handset_view_controller.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_navigation_controller.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_utils_ios.h"
 #include "ios/chrome/browser/ui/uikit_ui_util.h"
@@ -36,6 +33,10 @@
 #import "ios/third_party/material_components_ios/src/components/Snackbar/src/MaterialSnackbar.h"
 #include "ios/web/public/referrer.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
@@ -46,7 +47,7 @@ const int64_t kLastUsedFolderNone = -1;
 
 @interface BookmarkInteractionController ()<
     BookmarkEditViewControllerDelegate,
-    BookmarkHomeViewControllerDelegate> {
+    BookmarkHomeHandsetViewControllerDelegate> {
   // The browser state of the current user.
   ios::ChromeBrowserState* _currentBrowserState;  // weak
 
@@ -55,23 +56,20 @@ const int64_t kLastUsedFolderNone = -1;
   ios::ChromeBrowserState* _browserState;  // weak
 
   // The designated url loader.
-  base::WeakNSProtocol<id<UrlLoader>> _loader;
+  __weak id<UrlLoader> _loader;
 
   // The parent controller on top of which the UI needs to be presented.
-  base::WeakNSObject<UIViewController> _parentController;
-
-  base::mac::ObjCPropertyReleaser
-      _propertyReleaser_BookmarkInteractionController;
+  __weak UIViewController* _parentController;
 }
 
 // The bookmark model in use.
 @property(nonatomic, assign) BookmarkModel* bookmarkModel;
 
 // A reference to the potentially presented bookmark browser.
-@property(nonatomic, retain) BookmarkHomeViewController* bookmarkBrowser;
+@property(nonatomic, strong) BookmarkHomeHandsetViewController* bookmarkBrowser;
 
 // A reference to the potentially presented single bookmark editor.
-@property(nonatomic, retain) BookmarkEditViewController* bookmarkEditor;
+@property(nonatomic, strong) BookmarkEditViewController* bookmarkEditor;
 
 // The user wants to bookmark the current tab.
 - (void)addBookmarkForTab:(Tab*)tab;
@@ -88,7 +86,6 @@ const int64_t kLastUsedFolderNone = -1;
 @end
 
 @implementation BookmarkInteractionController
-
 @synthesize bookmarkBrowser = _bookmarkBrowser;
 @synthesize bookmarkEditor = _bookmarkEditor;
 @synthesize bookmarkModel = _bookmarkModel;
@@ -129,14 +126,12 @@ const int64_t kLastUsedFolderNone = -1;
                     parentController:(UIViewController*)parentController {
   self = [super init];
   if (self) {
-    _propertyReleaser_BookmarkInteractionController.Init(
-        self, [BookmarkInteractionController class]);
     // Bookmarks are always opened with the main browser state, even in
     // incognito mode.
     _currentBrowserState = browserState;
     _browserState = browserState->GetOriginalChromeBrowserState();
-    _loader.reset(loader);
-    _parentController.reset(parentController);
+    _loader = loader;
+    _parentController = parentController;
     _bookmarkModel =
         ios::BookmarkModelFactory::GetForBrowserState(_browserState);
     DCHECK(_bookmarkModel);
@@ -148,7 +143,6 @@ const int64_t kLastUsedFolderNone = -1;
 - (void)dealloc {
   _bookmarkBrowser.delegate = nil;
   _bookmarkEditor.delegate = nil;
-  [super dealloc];
 }
 
 - (void)addBookmarkForTab:(Tab*)tab {
@@ -156,15 +150,14 @@ const int64_t kLastUsedFolderNone = -1;
   const BookmarkNode* defaultFolder =
       [[self class] folderForNewBookmarksInBrowserState:_browserState];
   self.bookmarkModel->AddURL(defaultFolder, defaultFolder->child_count(),
-                             base::SysNSStringToUTF16(tab.title), tab.url);
+                             base::SysNSStringToUTF16(tab.title),
+                             tab.lastCommittedURL);
 
-  MDCSnackbarMessageAction* action =
-      [[[MDCSnackbarMessageAction alloc] init] autorelease];
-  base::WeakNSObject<BookmarkInteractionController> weakSelf(self);
-  base::WeakNSObject<Tab> weakTab(tab);
+  MDCSnackbarMessageAction* action = [[MDCSnackbarMessageAction alloc] init];
+  __weak BookmarkInteractionController* weakSelf = self;
+  __weak Tab* weakTab = tab;
   action.handler = ^{
-    base::scoped_nsobject<BookmarkInteractionController> strongSelf(
-        [weakSelf retain]);
+    BookmarkInteractionController* strongSelf = weakSelf;
     if (!strongSelf || !weakTab)
       return;
     [strongSelf presentBookmarkForTab:weakTab];
@@ -192,21 +185,21 @@ const int64_t kLastUsedFolderNone = -1;
   DCHECK(tab);
 
   const BookmarkNode* bookmark =
-      self.bookmarkModel->GetMostRecentlyAddedUserNodeForURL(tab.url);
+      self.bookmarkModel->GetMostRecentlyAddedUserNodeForURL(
+          tab.lastCommittedURL);
   if (!bookmark)
     return;
 
   [self dismissSnackbar];
 
-  base::scoped_nsobject<BookmarkEditViewController> bookmarkEditor(
+  BookmarkEditViewController* bookmarkEditor =
       [[BookmarkEditViewController alloc] initWithBookmark:bookmark
-                                              browserState:_browserState]);
+                                              browserState:_browserState];
   self.bookmarkEditor = bookmarkEditor;
   self.bookmarkEditor.delegate = self;
-  base::scoped_nsobject<UINavigationController> navController(
-      [[BookmarkNavigationController alloc]
-          initWithRootViewController:self.bookmarkEditor]);
-  navController.get().modalPresentationStyle = UIModalPresentationFormSheet;
+  UINavigationController* navController = [[BookmarkNavigationController alloc]
+      initWithRootViewController:self.bookmarkEditor];
+  navController.modalPresentationStyle = UIModalPresentationFormSheet;
   [_parentController presentViewController:navController
                                   animated:YES
                                 completion:nil];
@@ -229,8 +222,8 @@ const int64_t kLastUsedFolderNone = -1;
 
 - (void)presentBookmarks {
   DCHECK(!self.bookmarkBrowser && !self.bookmarkEditor);
-  base::scoped_nsobject<BookmarkControllerFactory> bookmarkControllerFactory(
-      [[BookmarkControllerFactory alloc] init]);
+  BookmarkControllerFactory* bookmarkControllerFactory =
+      [[BookmarkControllerFactory alloc] init];
   self.bookmarkBrowser = [bookmarkControllerFactory
       bookmarkControllerWithBrowserState:_currentBrowserState
                                   loader:_loader];
@@ -286,11 +279,11 @@ const int64_t kLastUsedFolderNone = -1;
   [self dismissBookmarkEditorAnimated:YES];
 }
 
-#pragma mark - BookmarkHomeViewControllerDelegate
+#pragma mark - BookmarkHomeHandsetViewControllerDelegate
 
-- (void)bookmarkHomeViewControllerWantsDismissal:
-            (BookmarkHomeViewController*)controller
-                                 navigationToUrl:(const GURL&)url {
+- (void)bookmarkHomeHandsetViewControllerWantsDismissal:
+            (BookmarkHomeHandsetViewController*)controller
+                                        navigationToUrl:(const GURL&)url {
   [self dismissBookmarkBrowserAnimated:YES];
 
   if (url != GURL()) {

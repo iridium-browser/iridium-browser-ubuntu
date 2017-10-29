@@ -39,6 +39,7 @@
 #include "SkPictureRecorder.h"
 #include "SkPoint3.h"
 #include "SkRandom.h"
+#include "SkRegion.h"
 #include "SkTableColorFilter.h"
 #include "SkTileImageFilter.h"
 #include "SkTypeface.h"
@@ -257,7 +258,7 @@ static void make_g_bitmap(SkBitmap& bitmap) {
     paint.setColor(0xFF884422);
     paint.setTextSize(SkIntToScalar(kBitmapSize/2));
     const char* str = "g";
-    canvas.drawText(str, strlen(str), SkIntToScalar(kBitmapSize/8),
+    canvas.drawString(str, SkIntToScalar(kBitmapSize/8),
                     SkIntToScalar(kBitmapSize/4), paint);
 }
 
@@ -339,7 +340,7 @@ static void drawSomething(SkCanvas* canvas) {
     canvas->drawCircle(SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/3), paint);
     paint.setColor(SK_ColorBLACK);
     paint.setTextSize(SkIntToScalar(kBitmapSize/3));
-    canvas->drawText("Picture", 7, SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/4), paint);
+    canvas->drawString("Picture", SkIntToScalar(kBitmapSize/2), SkIntToScalar(kBitmapSize/4), paint);
 }
 
 static void rand_color_table(uint8_t* table) {
@@ -554,8 +555,7 @@ static sk_sp<SkImageFilter> make_image_filter(bool canBeNull) {
         break;
     case MERGE:
         filter = SkMergeImageFilter::Make(make_image_filter(),
-                                          make_image_filter(),
-                                          make_xfermode());
+                                          make_image_filter());
         break;
     case COLOR: {
         sk_sp<SkColorFilter> cf(make_color_filter());

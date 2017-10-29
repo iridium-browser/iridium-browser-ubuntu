@@ -12,6 +12,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
+#include "base/time/time.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/dbus_client.h"
 #include "chromeos/dbus/dbus_client_implementation_type.h"
@@ -27,6 +28,24 @@ namespace chromeos {
 // SessionManagerClient is used to communicate with the session manager.
 class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
  public:
+  // The result type received from session manager on request to retrieve the
+  // policy. Used to define the buckets for an enumerated UMA histogram.
+  // Hence,
+  //   (a) existing enumerated constants should never be deleted or reordered.
+  //   (b) new constants should be inserted immediately before COUNT.
+  enum class RetrievePolicyResponseType {
+    // Other type of error while retrieving policy data (e.g. D-Bus timeout).
+    OTHER_ERROR = 0,
+    // The policy was retrieved successfully.
+    SUCCESS = 1,
+    // Retrieve policy request issued before session started.
+    SESSION_DOES_NOT_EXIST = 2,
+    // Session manager failed to encode the policy data.
+    POLICY_ENCODE_ERROR = 3,
+    // Has to be the last value of enumeration. Used for UMA.
+    COUNT
+  };
+
   // Interface for observing changes from the session manager.
   class Observer {
    public:
@@ -53,7 +72,10 @@ class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
     // Called when the ARC instance is stopped after it had already started.
     // |clean| is true if the instance was stopped as a result of an explicit
     // request, false if it died unexpectedly.
-    virtual void ArcInstanceStopped(bool clean) {}
+    // |container_instance_id| is the identifier of the container instance.
+    // See details for StartArcInstanceCallback.
+    virtual void ArcInstanceStopped(bool clean,
+                                    const std::string& container_instance_id) {}
   };
 
   // Interface for performing actions on behalf of the stub implementation.
@@ -94,7 +116,7 @@ class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
   // waiting for the result.
   virtual void RestartJob(int socket_fd,
                           const std::vector<std::string>& argv,
-                          const VoidDBusMethodCallback& callback) = 0;
+                          VoidDBusMethodCallback callback) = 0;
 
   // Starts the session for the user.
   virtual void StartSession(
@@ -105,6 +127,9 @@ class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
 
   // Starts the factory reset.
   virtual void StartDeviceWipe() = 0;
+
+  // Triggers a TPM firmware update.
+  virtual void StartTPMFirmwareUpdate(const std::string& update_mode) = 0;
 
   // Locks the screen.
   virtual void RequestLockScreen() = 0;
@@ -142,23 +167,26 @@ class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
 
   // Used for RetrieveDevicePolicy, RetrievePolicyForUser and
   // RetrieveDeviceLocalAccountPolicy. Takes a serialized protocol buffer as
-  // string.  Upon success, we will pass a protobuf to the callback.  On
-  // failure, we will pass "".
+  // string.  Upon success, we will pass a protobuf and SUCCESS |response_type|
+  // to the callback. On failure, we will pass "" and the details of error type
+  // in |response_type|.
   using RetrievePolicyCallback =
-      base::Callback<void(const std::string& protobuf)>;
+      base::Callback<void(const std::string& protobuf,
+                          RetrievePolicyResponseType response_type)>;
 
   // Fetches the device policy blob stored by the session manager.  Upon
   // completion of the retrieve attempt, we will call the provided callback.
   virtual void RetrieveDevicePolicy(const RetrievePolicyCallback& callback) = 0;
 
   // Same as RetrieveDevicePolicy() but blocks until a reply is received, and
-  // returns the policy synchronously. Returns an empty string if the method
-  // call fails.
+  // populates the policy synchronously. Returns SUCCESS when successful, or
+  // the corresponding error from enum in case of a failure.
   // This may only be called in situations where blocking the UI thread is
   // considered acceptable (e.g. restarting the browser after a crash or after
   // a flag change).
   // TODO: Get rid of blocking calls (crbug.com/160522).
-  virtual std::string BlockingRetrieveDevicePolicy() = 0;
+  virtual RetrievePolicyResponseType BlockingRetrieveDevicePolicy(
+      std::string* policy_out) = 0;
 
   // Fetches the user policy blob stored by the session manager for the given
   // |cryptohome_id|. Upon completion of the retrieve attempt, we will call the
@@ -168,14 +196,21 @@ class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
       const RetrievePolicyCallback& callback) = 0;
 
   // Same as RetrievePolicyForUser() but blocks until a reply is received, and
-  // returns the policy synchronously. Returns an empty string if the method
-  // call fails.
+  // populates the policy synchronously. Returns SUCCESS when successful, or
+  // the corresponding error from enum in case of a failure.
   // This may only be called in situations where blocking the UI thread is
   // considered acceptable (e.g. restarting the browser after a crash or after
   // a flag change).
   // TODO: Get rid of blocking calls (crbug.com/160522).
-  virtual std::string BlockingRetrievePolicyForUser(
-      const cryptohome::Identification& cryptohome_id) = 0;
+  virtual RetrievePolicyResponseType BlockingRetrievePolicyForUser(
+      const cryptohome::Identification& cryptohome_id,
+      std::string* policy_out) = 0;
+
+  // Fetches the user policy blob for a hidden user home mount. |callback| is
+  // invoked upon completition.
+  virtual void RetrievePolicyForUserWithoutSession(
+      const cryptohome::Identification& cryptohome_id,
+      const RetrievePolicyCallback& callback) = 0;
 
   // Fetches the policy blob associated with the specified device-local account
   // from session manager.  |callback| is invoked up on completion.
@@ -184,14 +219,15 @@ class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
       const RetrievePolicyCallback& callback) = 0;
 
   // Same as RetrieveDeviceLocalAccountPolicy() but blocks until a reply is
-  // received, and returns the policy synchronously.
-  // Returns an empty string if the method call fails.
+  // received, and populates the policy synchronously. Returns SUCCESS when
+  // successful, or the corresponding error from enum in case of a failure.
   // This may only be called in situations where blocking the UI thread is
   // considered acceptable (e.g. restarting the browser after a crash or after
   // a flag change).
   // TODO: Get rid of blocking calls (crbug.com/160522).
-  virtual std::string BlockingRetrieveDeviceLocalAccountPolicy(
-      const std::string& account_id) = 0;
+  virtual RetrievePolicyResponseType BlockingRetrieveDeviceLocalAccountPolicy(
+      const std::string& account_id,
+      std::string* policy_out) = 0;
 
   // Used for StoreDevicePolicy, StorePolicyForUser and
   // StoreDeviceLocalAccountPolicy. Takes a boolean indicating whether the
@@ -267,9 +303,24 @@ class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
     UNKNOWN_ERROR,
     LOW_FREE_DISK_SPACE,
   };
-  using StartArcInstanceCallback = base::Callback<void(StartArcInstanceResult)>;
-  virtual void StartArcInstance(const cryptohome::Identification& cryptohome_id,
-                                bool disable_boot_completed_broadcast,
+  // When ArcStartupMode is LOGIN_SCREEN, StartArcInstance starts a container
+  // with only a handful of ARC processes for Chrome OS login screen.
+  // |cryptohome_id|, |skip_boot_completed_broadcast|, and
+  // |scan_vendor_priv_app| are ignored when the mode is LOGIN_SCREEN.
+  enum class ArcStartupMode {
+    FULL,
+    LOGIN_SCREEN,
+  };
+  // In case of success, |container_instance_id| will be passed as its second
+  // param. The ID is passed to ArcInstanceStopped() to identify which instance
+  // is stopped.
+  using StartArcInstanceCallback =
+      base::Callback<void(StartArcInstanceResult result,
+                          const std::string& container_instance_id)>;
+  virtual void StartArcInstance(ArcStartupMode startup_mode,
+                                const cryptohome::Identification& cryptohome_id,
+                                bool skip_boot_completed_broadcast,
+                                bool scan_vendor_priv_app,
                                 const StartArcInstanceCallback& callback) = 0;
 
   // Asynchronously stops the ARC instance.  Upon completion, invokes

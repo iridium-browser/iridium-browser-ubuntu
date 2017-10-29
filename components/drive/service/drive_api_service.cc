@@ -17,6 +17,7 @@
 #include "google_apis/drive/base_requests.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/drive_api_requests.h"
+#include "google_apis/drive/drive_switches.h"
 #include "google_apis/drive/files_list_request_runner.h"
 #include "google_apis/drive/request_sender.h"
 #include "google_apis/google_api_keys.h"
@@ -30,15 +31,17 @@ using google_apis::AuthorizeAppCallback;
 using google_apis::CancelCallback;
 using google_apis::ChangeList;
 using google_apis::ChangeListCallback;
+using google_apis::DRIVE_OTHER_ERROR;
+using google_apis::DRIVE_PARSE_ERROR;
 using google_apis::DownloadActionCallback;
+using google_apis::DriveApiErrorCode;
 using google_apis::EntryActionCallback;
 using google_apis::FileList;
 using google_apis::FileListCallback;
 using google_apis::FileResource;
 using google_apis::FileResourceCallback;
-using google_apis::DRIVE_OTHER_ERROR;
-using google_apis::DRIVE_PARSE_ERROR;
-using google_apis::DriveApiErrorCode;
+using google_apis::FilesListCorpora;
+using google_apis::FilesListRequestRunner;
 using google_apis::GetContentCallback;
 using google_apis::GetShareUrlCallback;
 using google_apis::HTTP_NOT_IMPLEMENTED;
@@ -46,27 +49,28 @@ using google_apis::HTTP_SUCCESS;
 using google_apis::InitiateUploadCallback;
 using google_apis::ProgressCallback;
 using google_apis::RequestSender;
-using google_apis::FilesListRequestRunner;
+using google_apis::TeamDriveListCallback;
 using google_apis::UploadRangeResponse;
 using google_apis::drive::AboutGetRequest;
 using google_apis::drive::AppsListRequest;
-using google_apis::drive::ChangesListRequest;
 using google_apis::drive::ChangesListNextPageRequest;
+using google_apis::drive::ChangesListRequest;
 using google_apis::drive::ChildrenDeleteRequest;
 using google_apis::drive::ChildrenInsertRequest;
 using google_apis::drive::DownloadFileRequest;
 using google_apis::drive::FilesCopyRequest;
+using google_apis::drive::FilesDeleteRequest;
 using google_apis::drive::FilesGetRequest;
 using google_apis::drive::FilesInsertRequest;
-using google_apis::drive::FilesPatchRequest;
-using google_apis::drive::FilesListRequest;
 using google_apis::drive::FilesListNextPageRequest;
-using google_apis::drive::FilesDeleteRequest;
+using google_apis::drive::FilesListRequest;
+using google_apis::drive::FilesPatchRequest;
 using google_apis::drive::FilesTrashRequest;
 using google_apis::drive::GetUploadStatusRequest;
 using google_apis::drive::InitiateUploadExistingFileRequest;
 using google_apis::drive::InitiateUploadNewFileRequest;
 using google_apis::drive::ResumeUploadRequest;
+using google_apis::drive::TeamDriveListRequest;
 using google_apis::drive::UploadRangeCallback;
 
 namespace drive {
@@ -82,6 +86,9 @@ const char kDocsListScope[] = "trk:135:https://docs.google.com/feeds/";
 
 // Mime type to create a directory.
 const char kFolderMimeType[] = "application/vnd.google-apps.folder";
+
+// Max number of Team Drive entries to be fetched in a single http request.
+const int kMaxNumTeamDriveResourcePerRequest = 100;
 
 // Max number of file entries to be fetched in a single http request.
 //
@@ -117,13 +124,17 @@ const char kFileListFields[] =
     "parents(id,parentLink),alternateLink,"
     "modifiedDate,lastViewedByMeDate,shared),nextLink";
 const char kChangeListFields[] =
-    "kind,items(file(kind,id,title,createdDate,sharedWithMeDate,"
+    "kind,items(type,file(kind,id,title,createdDate,sharedWithMeDate,"
     "mimeType,md5Checksum,fileSize,labels/trashed,labels/starred,"
     "imageMediaMetadata/width,"
     "imageMediaMetadata/height,imageMediaMetadata/rotation,etag,"
     "parents(id,parentLink),alternateLink,modifiedDate,"
-    "lastViewedByMeDate,shared),deleted,id,fileId,modificationDate),nextLink,"
+    "lastViewedByMeDate,shared),teamDrive(kind,id,name,capabilities),"
+    "teamDriveId,"
+    "deleted,id,fileId,modificationDate),nextLink,"
     "largestChangeId";
+const char kTeamDrivesListFields[] =
+    "nextPageToken,kind,items(kind,id,name,capabilities)";
 
 void ExtractOpenUrlAndRun(const std::string& app_id,
                           const AuthorizeAppCallback& callback,
@@ -180,6 +191,7 @@ BatchRequestConfigurator::BatchRequestConfigurator(
 }
 
 BatchRequestConfigurator::~BatchRequestConfigurator() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // The batch requst has not been committed.
   if (batch_request_)
     cancel_callback_.Run();
@@ -194,7 +206,7 @@ google_apis::CancelCallback BatchRequestConfigurator::MultipartUploadNewFile(
     const UploadNewFileOptions& options,
     const google_apis::FileResourceCallback& callback,
     const google_apis::ProgressCallback& progress_callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!callback.is_null());
 
   std::unique_ptr<google_apis::BatchableDelegate> delegate(
@@ -221,7 +233,7 @@ BatchRequestConfigurator::MultipartUploadExistingFile(
     const UploadExistingFileOptions& options,
     const google_apis::FileResourceCallback& callback,
     const google_apis::ProgressCallback& progress_callback) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!callback.is_null());
 
   std::unique_ptr<google_apis::BatchableDelegate> delegate(
@@ -241,7 +253,7 @@ BatchRequestConfigurator::MultipartUploadExistingFile(
 }
 
 void BatchRequestConfigurator::Commit() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!batch_request_)
     return;
   batch_request_->Commit();
@@ -254,14 +266,16 @@ DriveAPIService::DriveAPIService(
     base::SequencedTaskRunner* blocking_task_runner,
     const GURL& base_url,
     const GURL& base_thumbnail_url,
-    const std::string& custom_user_agent)
+    const std::string& custom_user_agent,
+    const net::NetworkTrafficAnnotationTag& traffic_annotation)
     : oauth2_token_service_(oauth2_token_service),
       url_request_context_getter_(url_request_context_getter),
       blocking_task_runner_(blocking_task_runner),
-      url_generator_(base_url, base_thumbnail_url,
+      url_generator_(base_url,
+                     base_thumbnail_url,
                      google_apis::GetTeamDrivesIntegrationSwitch()),
-      custom_user_agent_(custom_user_agent) {
-}
+      custom_user_agent_(custom_user_agent),
+      traffic_annotation_(traffic_annotation) {}
 
 DriveAPIService::~DriveAPIService() {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -283,13 +297,10 @@ void DriveAPIService::Initialize(const std::string& account_id) {
   scopes.push_back(kDocsListScope);
 
   sender_.reset(new RequestSender(
-      new google_apis::AuthService(oauth2_token_service_,
-                                   account_id,
-                                   url_request_context_getter_.get(),
-                                   scopes),
-      url_request_context_getter_.get(),
-      blocking_task_runner_.get(),
-      custom_user_agent_));
+      new google_apis::AuthService(oauth2_token_service_, account_id,
+                                   url_request_context_getter_.get(), scopes),
+      url_request_context_getter_.get(), blocking_task_runner_.get(),
+      custom_user_agent_, traffic_annotation_));
   sender_->auth_service()->AddObserver(this);
 
   files_list_request_runner_.reset(
@@ -314,6 +325,19 @@ std::string DriveAPIService::GetRootResourceId() const {
   return kDriveApiRootDirectoryResourceId;
 }
 
+CancelCallback DriveAPIService::GetAllTeamDriveList(
+    const TeamDriveListCallback& callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(!callback.is_null());
+
+  std::unique_ptr<TeamDriveListRequest> request =
+      base::MakeUnique<TeamDriveListRequest>(sender_.get(), url_generator_,
+                                             callback);
+  request->set_max_results(kMaxNumTeamDriveResourcePerRequest);
+  request->set_fields(kTeamDrivesListFields);
+  return sender_->StartRequestWithAuthRetry(std::move(request));
+}
+
 CancelCallback DriveAPIService::GetAllFileList(
     const FileListCallback& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -325,6 +349,10 @@ CancelCallback DriveAPIService::GetAllFileList(
   request->set_max_results(kMaxNumFilesResourcePerRequest);
   request->set_q("trashed = false");  // Exclude trashed files.
   request->set_fields(kFileListFields);
+  if (google_apis::GetTeamDrivesIntegrationSwitch() ==
+      google_apis::TEAM_DRIVES_INTEGRATION_ENABLED) {
+    request->set_corpora(google_apis::FilesListCorpora::ALL_TEAM_DRIVES);
+  }
   return sender_->StartRequestWithAuthRetry(std::move(request));
 }
 
@@ -335,6 +363,15 @@ CancelCallback DriveAPIService::GetFileListInDirectory(
   DCHECK(!directory_resource_id.empty());
   DCHECK(!callback.is_null());
 
+  // TODO(yamaguchi): Use FileListScope::CreateForTeamDrive instead of
+  // kAllTeamDrives for efficiency. It'll require to add a new parameter to tell
+  // which team drive the directory resource belongs to.
+  FilesListCorpora corpora =
+      (google_apis::GetTeamDrivesIntegrationSwitch() ==
+       google_apis::TEAM_DRIVES_INTEGRATION_ENABLED)
+          ? google_apis::FilesListCorpora::ALL_TEAM_DRIVES
+          : google_apis::FilesListCorpora::DEFAULT;
+
   // Because children.list method on Drive API v2 returns only the list of
   // children's references, but we need all file resource list.
   // So, here we use files.list method instead, with setting parents query.
@@ -343,7 +380,7 @@ CancelCallback DriveAPIService::GetFileListInDirectory(
   // to client side.
   // We aren't interested in files in trash in this context, neither.
   return files_list_request_runner_->CreateAndStartWithSizeBackoff(
-      kMaxNumFilesResourcePerRequest,
+      kMaxNumFilesResourcePerRequest, corpora, std::string(),
       base::StringPrintf(
           "'%s' in parents and trashed = false",
           util::EscapeQueryStringValue(directory_resource_id).c_str()),
@@ -357,8 +394,14 @@ CancelCallback DriveAPIService::Search(
   DCHECK(!search_query.empty());
   DCHECK(!callback.is_null());
 
+  FilesListCorpora corpora =
+      (google_apis::GetTeamDrivesIntegrationSwitch() ==
+       google_apis::TEAM_DRIVES_INTEGRATION_ENABLED)
+          ? google_apis::FilesListCorpora::ALL_TEAM_DRIVES
+          : google_apis::FilesListCorpora::DEFAULT;
+
   return files_list_request_runner_->CreateAndStartWithSizeBackoff(
-      kMaxNumFilesResourcePerRequestForSearch,
+      kMaxNumFilesResourcePerRequestForSearch, corpora, std::string(),
       util::TranslateQuery(search_query), kFileListFields, callback);
 }
 
@@ -415,6 +458,21 @@ CancelCallback DriveAPIService::GetRemainingChangeList(
       base::MakeUnique<ChangesListNextPageRequest>(sender_.get(), callback);
   request->set_next_link(next_link);
   request->set_fields(kChangeListFields);
+  return sender_->StartRequestWithAuthRetry(std::move(request));
+}
+
+CancelCallback DriveAPIService::GetRemainingTeamDriveList(
+    const std::string& page_token,
+    const TeamDriveListCallback& callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(!page_token.empty());
+  DCHECK(!callback.is_null());
+
+  std::unique_ptr<TeamDriveListRequest> request =
+      base::MakeUnique<TeamDriveListRequest>(sender_.get(), url_generator_,
+                                             callback);
+  request->set_page_token(page_token);
+  request->set_fields(kTeamDrivesListFields);
   return sender_->StartRequestWithAuthRetry(std::move(request));
 }
 

@@ -10,7 +10,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/sequence_checker.h"
 #include "components/policy/core/common/policy_service.h"
 
 namespace base {
@@ -28,8 +28,7 @@ class SchemaRegistry;
 namespace remoting {
 
 // Watches for changes to the managed remote access host policies.
-class PolicyWatcher : public policy::PolicyService::Observer,
-                      public base::NonThreadSafe {
+class PolicyWatcher : public policy::PolicyService::Observer {
  public:
   // Called first with all policies, and subsequently with any changed policies.
   typedef base::Callback<void(std::unique_ptr<base::DictionaryValue>)>
@@ -59,24 +58,38 @@ class PolicyWatcher : public policy::PolicyService::Observer,
       const PolicyUpdatedCallback& policy_updated_callback,
       const PolicyErrorCallback& policy_error_callback);
 
+  // Return the current policies. If the policies have not yet been read, or if
+  // an error occurred, the returned dictionary will be empty.
+  std::unique_ptr<base::DictionaryValue> GetCurrentPolicies();
+
+  // Return the default policies.
+  static std::unique_ptr<base::DictionaryValue> GetDefaultPolicies();
+
   // Specify a |policy_service| to borrow (on Chrome OS, from the browser
-  // process) or specify nullptr to internally construct and use a new
-  // PolicyService (on other OS-es). PolicyWatcher must be used on the thread on
-  // which it is created. |policy_service| is called on the same thread.
+  // process). PolicyWatcher must be used on the thread on which it is created.
+  // |policy_service| is called on the same thread.
   //
-  // When |policy_service| is null, then |file_task_runner| is used for reading
-  // the policy from files / registry / preferences (which are blocking
-  // operations). |file_task_runner| should be of TYPE_IO type.
+  // When |policy_service| is specified then BrowserThread::UI is used for
+  // PolicyUpdatedCallback and PolicyErrorCallback.
+  static std::unique_ptr<PolicyWatcher> CreateWithPolicyService(
+      policy::PolicyService* policy_service);
+
+  // Construct and a new PolicyService for non-ChromeOS platforms.
+  // PolicyWatcher must be used on the thread on which it is created.
   //
-  // When |policy_service| is specified then |file_task_runner| argument is
-  // ignored and 1) BrowserThread::UI is used for PolicyUpdatedCallback and
-  // PolicyErrorCallback and 2) BrowserThread::FILE is used for reading the
-  // policy from files / registry / preferences (although (2) is just an
-  // implementation detail and should likely be ignored outside of
-  // PolicyWatcher).
-  static std::unique_ptr<PolicyWatcher> Create(
-      policy::PolicyService* policy_service,
+  // |file_task_runner| is used for reading the policy from files / registry /
+  // preferences (which are blocking operations). |file_task_runner| should be
+  // of TYPE_IO type.
+  static std::unique_ptr<PolicyWatcher> CreateWithTaskRunner(
       const scoped_refptr<base::SingleThreadTaskRunner>& file_task_runner);
+
+  // Creates a PolicyWatcher from the given loader instead of loading the policy
+  // from the default location.
+  //
+  // This can be used with FakeAsyncPolicyLoader to test policy handling of
+  // other components.
+  static std::unique_ptr<PolicyWatcher> CreateFromPolicyLoaderForTesting(
+      std::unique_ptr<policy::AsyncPolicyLoader> async_policy_loader);
 
  private:
   friend class PolicyWatcherTest;
@@ -84,11 +97,17 @@ class PolicyWatcher : public policy::PolicyService::Observer,
   // Gets Chromoting schema stored inside |owned_schema_registry_|.
   const policy::Schema* GetPolicySchema() const;
 
-  // Simplifying wrapper around Schema::Normalize.
+  // Normalizes policies using Schema::Normalize and converts deprecated
+  // policies.
+  //
   // - Returns false if |dict| is invalid (i.e. contains mistyped policy
   // values).
   // - Returns true if |dict| was valid or got normalized.
   bool NormalizePolicies(base::DictionaryValue* dict);
+
+  // Converts each deprecated policy to its replacement if and only if the
+  // replacement policy is not set, and removes deprecated policied from dict.
+  void HandleDeprecatedPolicies(base::DictionaryValue* dict);
 
   // Stores |new_policies| into |old_policies_|.  Returns dictionary with items
   // from |new_policies| that are different from the old |old_policies_|.
@@ -136,6 +155,8 @@ class PolicyWatcher : public policy::PolicyService::Observer,
   std::unique_ptr<policy::SchemaRegistry> owned_schema_registry_;
   std::unique_ptr<policy::ConfigurationPolicyProvider> owned_policy_provider_;
   std::unique_ptr<policy::PolicyService> owned_policy_service_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(PolicyWatcher);
 };

@@ -2,17 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/system/web_notification/ash_popup_alignment_delegate.h"
+#include "ash/system/web_notification/ash_popup_alignment_delegate.h"
 
 #include <utility>
 #include <vector>
 
-#include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/wm_lookup.h"
-#include "ash/common/wm_window.h"
+#include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
+#include "ash/shelf/shelf.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/command_line.h"
@@ -26,8 +25,7 @@
 
 namespace ash {
 
-// TODO(jamescook): Move this to //ash/common. http://crbug.com/620955
-class AshPopupAlignmentDelegateTest : public test::AshTestBase {
+class AshPopupAlignmentDelegateTest : public AshTestBase {
  public:
   AshPopupAlignmentDelegateTest() {}
   ~AshPopupAlignmentDelegateTest() override {}
@@ -35,14 +33,14 @@ class AshPopupAlignmentDelegateTest : public test::AshTestBase {
   void SetUp() override {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         keyboard::switches::kEnableVirtualKeyboard);
-    test::AshTestBase::SetUp();
+    AshTestBase::SetUp();
     SetAlignmentDelegate(
         base::MakeUnique<AshPopupAlignmentDelegate>(GetPrimaryShelf()));
   }
 
   void TearDown() override {
     alignment_delegate_.reset();
-    test::AshTestBase::TearDown();
+    AshTestBase::TearDown();
   }
 
  protected:
@@ -146,38 +144,10 @@ TEST_F(AshPopupAlignmentDelegateTest, AutoHide) {
   // Create a window, otherwise autohide doesn't work.
   std::unique_ptr<views::Widget> widget = CreateTestWidget(
       nullptr, kShellWindowId_DefaultContainer, gfx::Rect(0, 0, 50, 50));
-  WmShelf* shelf = GetPrimaryShelf();
+  Shelf* shelf = GetPrimaryShelf();
   shelf->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
   EXPECT_EQ(origin_x, alignment_delegate()->GetToastOriginX(toast_size));
   EXPECT_LT(baseline, alignment_delegate()->GetBaseLine());
-}
-
-// Verify that docked window doesn't affect the popup alignment.
-TEST_F(AshPopupAlignmentDelegateTest, DockedWindow) {
-  const gfx::Rect toast_size(0, 0, 10, 10);
-  UpdateDisplay("600x600");
-  int origin_x = alignment_delegate()->GetToastOriginX(toast_size);
-  int baseline = alignment_delegate()->GetBaseLine();
-
-  std::unique_ptr<views::Widget> widget = CreateTestWidget(
-      nullptr, kShellWindowId_DockedContainer, gfx::Rect(0, 0, 50, 50));
-
-  // Left-side dock should not affect popup alignment
-  EXPECT_EQ(origin_x, alignment_delegate()->GetToastOriginX(toast_size));
-  EXPECT_EQ(baseline, alignment_delegate()->GetBaseLine());
-  EXPECT_FALSE(alignment_delegate()->IsTopDown());
-  EXPECT_FALSE(alignment_delegate()->IsFromLeft());
-
-  // Force dock to right-side
-  WmShelf* shelf = GetPrimaryShelf();
-  shelf->SetAlignment(SHELF_ALIGNMENT_LEFT);
-  shelf->SetAlignment(SHELF_ALIGNMENT_BOTTOM);
-
-  // Right-side dock should not affect popup alignment
-  EXPECT_EQ(origin_x, alignment_delegate()->GetToastOriginX(toast_size));
-  EXPECT_EQ(baseline, alignment_delegate()->GetBaseLine());
-  EXPECT_FALSE(alignment_delegate()->IsTopDown());
-  EXPECT_FALSE(alignment_delegate()->IsFromLeft());
 }
 
 TEST_F(AshPopupAlignmentDelegateTest, DisplayResize) {
@@ -196,6 +166,10 @@ TEST_F(AshPopupAlignmentDelegateTest, DisplayResize) {
 }
 
 TEST_F(AshPopupAlignmentDelegateTest, DockedMode) {
+  // TODO: needs unified mode. http://crbug.com/698024.
+  if (Shell::GetAshConfig() == Config::MASH)
+    return;
+
   const gfx::Rect toast_size(0, 0, 10, 10);
   UpdateDisplay("600x600");
   int origin_x = alignment_delegate()->GetToastOriginX(toast_size);
@@ -234,11 +208,9 @@ TEST_F(AshPopupAlignmentDelegateTest, Extended) {
   SetAlignmentDelegate(
       base::MakeUnique<AshPopupAlignmentDelegate>(GetPrimaryShelf()));
 
-  display::Display second_display = display_manager()->GetDisplayAt(1u);
-  WmShelf* second_shelf =
-      WmLookup::Get()
-          ->GetRootWindowControllerWithDisplayId(second_display.id())
-          ->GetShelf();
+  display::Display second_display = GetSecondaryDisplay();
+  Shelf* second_shelf =
+      Shell::GetRootWindowControllerWithDisplayId(second_display.id())->shelf();
   AshPopupAlignmentDelegate for_2nd_display(second_shelf);
   UpdateWorkArea(&for_2nd_display, second_display);
   // Make sure that the toast position on the secondary display is
@@ -248,6 +220,10 @@ TEST_F(AshPopupAlignmentDelegateTest, Extended) {
 }
 
 TEST_F(AshPopupAlignmentDelegateTest, Unified) {
+  // TODO: needs unified mode. http://crbug.com/698024.
+  if (Shell::GetAshConfig() == Config::MASH)
+    return;
+
   display_manager()->SetUnifiedDesktopEnabled(true);
 
   // Reset the delegate as the primary display's shelf will be destroyed during
@@ -271,7 +247,7 @@ TEST_F(AshPopupAlignmentDelegateTest, KeyboardShowing) {
   UpdateDisplay("600x600");
   int baseline = alignment_delegate()->GetBaseLine();
 
-  WmShelf* shelf = GetPrimaryShelf();
+  Shelf* shelf = GetPrimaryShelf();
   gfx::Rect keyboard_bounds(0, 300, 600, 300);
   shelf->SetVirtualKeyboardBoundsForTesting(keyboard_bounds);
   int keyboard_baseline = alignment_delegate()->GetBaseLine();

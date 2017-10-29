@@ -26,12 +26,12 @@ import("//testing/test.gni")
 # with grit pak strings.
 #
 # In both of these cases, link to the ":with_no_strings" variant. However, this
-# is obviously a fragile and confusing situation. In the "I don't use strings
-# at all case", there is no definition of what works and doesn't work, and this
-# may also change over time. As an example at the time of this writing,
-# chrome.exe calls BrowserDistribution::GetRegistryPath. This function doesn't
-# use any strings, but lots of other functions in BrowserDistribution do use
-# localized strings.
+# is obviously a fragile and confusing situation. In the "I don't use strings at
+# all case", there is no definition of what works and doesn't work, and this may
+# also change over time. As an example at the time of this writing, chrome.exe
+# calls GoogleUpdateSettings::UpdateDidRunState. This function doesn't use any
+# strings, but lots of other functions in BrowserDistribution do use localized
+# strings.
 #
 # Ideally, this should be cleaved in two parts: the main "installer util" and
 # some kind of mini installer util that just contains the functions needed by
@@ -55,10 +55,16 @@ static_library("with_no_strings") {
     sources = [
       "chrome_browser_operations.cc",
       "chrome_browser_operations.h",
-      "compat_checks.cc",
-      "compat_checks.h",
       "delete_after_reboot_helper.cc",
       "delete_after_reboot_helper.h",
+      "experiment.cc",
+      "experiment.h",
+      "experiment_labels.cc",
+      "experiment_labels.h",
+      "experiment_metrics.cc",
+      "experiment_metrics.h",
+      "experiment_storage.cc",
+      "experiment_storage.h",
       "google_chrome_distribution.cc",
       "google_chrome_distribution.h",
       "html_dialog.h",
@@ -76,6 +82,8 @@ static_library("with_no_strings") {
       "product_operations.h",
       "registry_entry.cc",
       "registry_entry.h",
+      "scoped_token_privilege.cc",
+      "scoped_token_privilege.h",
       "scoped_user_protocol_entry.cc",
       "scoped_user_protocol_entry.h",
       "self_cleaning_temp_dir.cc",
@@ -158,8 +166,6 @@ static_library("with_no_strings") {
       "duplicate_tree_detector.h",
       "firewall_manager_win.cc",
       "firewall_manager_win.h",
-      "google_chrome_sxs_distribution.cc",
-      "google_chrome_sxs_distribution.h",
       "google_update_constants.cc",
       "google_update_constants.h",
       "google_update_settings.cc",
@@ -176,8 +182,6 @@ static_library("with_no_strings") {
       "l10n_string_util.h",
       "language_selector.cc",
       "language_selector.h",
-      "legacy_firewall_manager_win.cc",
-      "legacy_firewall_manager_win.h",
       "master_preferences_constants.cc",
       "master_preferences_constants.h",
       "move_tree_work_item.cc",
@@ -245,6 +249,8 @@ action("generate_strings") {
   ]
 
   args = [
+    "-b",
+    "$branding_path_component",
     "-i",
     rebase_path(grdfile, root_build_dir) + ":resources",
     "-n",
@@ -277,7 +283,6 @@ if (is_win) {
 
   test("installer_util_unittests") {
     sources = [
-      "../setup/compat_checks_unittest.cc",
       "advanced_firewall_manager_win_unittest.cc",
       "beacons_unittest.cc",
       "callback_work_item_unittest.cc",
@@ -292,12 +297,15 @@ if (is_win) {
       "delete_reg_value_work_item_unittest.cc",
       "delete_tree_work_item_unittest.cc",
       "duplicate_tree_detector_unittest.cc",
+      "experiment_labels_unittest.cc",
+      "experiment_storage_unittest.cc",
+      "experiment_unittest.cc",
       "google_update_settings_unittest.cc",
       "install_util_unittest.cc",
       "installer_util_test_common.cc",
       "installer_util_test_common.h",
+      "l10n_string_util_unittest.cc",
       "language_selector_unittest.cc",
-      "legacy_firewall_manager_win_unittest.cc",
       "logging_installer_unittest.cc",
       "lzma_file_allocator_unittest.cc",
       "lzma_util_unittest.cc",
@@ -309,6 +317,7 @@ if (is_win) {
       "registry_test_data.cc",
       "registry_test_data.h",
       "run_all_unittests.cc",
+      "scoped_token_privilege_unittest.cc",
       "scoped_user_protocol_entry_unittest.cc",
       "self_cleaning_temp_dir_unittest.cc",
       "set_reg_value_work_item_unittest.cc",

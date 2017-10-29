@@ -11,6 +11,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/combobox_model.h"
@@ -18,6 +19,7 @@
 #include "ui/views/background.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/examples/box_layout_example.h"
 #include "ui/views/examples/bubble_example.h"
 #include "ui/views/examples/button_example.h"
 #include "ui/views/examples/button_sticker_sheet.h"
@@ -57,6 +59,7 @@ namespace {
 // Creates the default set of examples.
 ExampleVector CreateExamples() {
   ExampleVector examples;
+  examples.push_back(base::MakeUnique<BoxLayoutExample>());
   examples.push_back(base::MakeUnique<BubbleExample>());
   examples.push_back(base::MakeUnique<ButtonExample>());
   examples.push_back(base::MakeUnique<ButtonStickerSheet>());
@@ -139,7 +142,7 @@ class ExamplesWindowContents : public WidgetDelegateView,
     combobox_model_.SetExamples(std::move(examples));
     combobox_->ModelChanged();
 
-    set_background(Background::CreateStandardPanelBackground());
+    SetBackground(CreateStandardPanelBackground());
     GridLayout* layout = new GridLayout(this);
     SetLayoutManager(layout);
     ColumnSet* column_set = layout->AddColumnSet(0);
@@ -189,7 +192,9 @@ class ExamplesWindowContents : public WidgetDelegateView,
     if (operation_ == QUIT_ON_CLOSE)
       base::MessageLoop::current()->QuitWhenIdle();
   }
-  gfx::Size GetPreferredSize() const override { return gfx::Size(800, 300); }
+  gfx::Size CalculatePreferredSize() const override {
+    return gfx::Size(800, 300);
+  }
 
   // ComboboxListener:
   void OnPerformAction(Combobox* combobox) override {

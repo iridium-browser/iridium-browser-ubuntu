@@ -5,23 +5,21 @@
 #ifndef CompositorWorkerMessagingProxy_h
 #define CompositorWorkerMessagingProxy_h
 
-#include "core/workers/InProcessWorkerMessagingProxy.h"
-#include "wtf/Allocator.h"
 #include <memory>
+#include "core/workers/InProcessWorkerMessagingProxy.h"
 
 namespace blink {
 
 class CompositorWorkerMessagingProxy final
     : public InProcessWorkerMessagingProxy {
-  USING_FAST_MALLOC(CompositorWorkerMessagingProxy);
-
  public:
   CompositorWorkerMessagingProxy(InProcessWorkerBase*, WorkerClients*);
 
- protected:
+ private:
   ~CompositorWorkerMessagingProxy() override;
-
-  std::unique_ptr<WorkerThread> createWorkerThread(double originTime) override;
+  WTF::Optional<WorkerBackingThreadStartupData> CreateBackingThreadStartupData(
+      v8::Isolate*) override;
+  std::unique_ptr<WorkerThread> CreateWorkerThread() override;
 };
 
 }  // namespace blink

@@ -8,7 +8,6 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.StrictMode;
 import android.preference.Preference;
 import android.preference.PreferenceFragment;
 
@@ -23,6 +22,7 @@ import org.chromium.chrome.browser.preferences.datareduction.DataReductionPrefer
 import org.chromium.chrome.browser.preferences.password.SavePasswordsPreferences;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService.LoadListener;
+import org.chromium.chrome.browser.search_engines.TemplateUrlService.TemplateUrl;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
@@ -39,6 +39,7 @@ public class MainPreferences extends PreferenceFragment
     public static final String PREF_SEARCH_ENGINE = "search_engine";
     public static final String PREF_SAVED_PASSWORDS = "saved_passwords";
     public static final String PREF_HOMEPAGE = "homepage";
+    public static final String PREF_SUGGESTIONS = "suggestions";
     public static final String PREF_DATA_REDUCTION = "data_reduction";
 
     public static final String ACCOUNT_PICKER_DIALOG_TAG = "account_picker_dialog_tag";
@@ -97,12 +98,7 @@ public class MainPreferences extends PreferenceFragment
     private void updatePreferences() {
         if (getPreferenceScreen() != null) getPreferenceScreen().removeAll();
 
-        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        try {
-            addPreferencesFromResource(R.xml.main_preferences);
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
-        }
+        PreferenceUtils.addPreferencesFromResource(this, R.xml.main_preferences);
 
         if (TemplateUrlService.getInstance().isLoaded()) {
             updateSummary();
@@ -166,10 +162,14 @@ public class MainPreferences extends PreferenceFragment
     private void updateSummary() {
         ChromeBasePreference searchEnginePref =
                 (ChromeBasePreference) findPreference(PREF_SEARCH_ENGINE);
+        searchEnginePref.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
         searchEnginePref.setEnabled(true);
-        searchEnginePref.setSummary(TemplateUrlService.getInstance()
-                                            .getDefaultSearchEngineTemplateUrl()
-                                            .getShortName());
+
+        String defaultSearchEngineName = null;
+        TemplateUrl dseTemplateUrl =
+                TemplateUrlService.getInstance().getDefaultSearchEngineTemplateUrl();
+        if (dseTemplateUrl != null) defaultSearchEngineName = dseTemplateUrl.getShortName();
+        searchEnginePref.setSummary(defaultSearchEngineName);
     }
 
     private void setOnOffSummary(Preference pref, boolean isOn) {
@@ -179,7 +179,6 @@ public class MainPreferences extends PreferenceFragment
     private void setupSignInPref() {
         mSignInPreference = (SignInPreference) findPreference(PREF_SIGN_IN);
         mSignInPreference.registerForUpdates();
-        mSignInPreference.setEnabled(true);
     }
 
     private void clearSignInPref() {
@@ -208,6 +207,10 @@ public class MainPreferences extends PreferenceFragment
         updatePreferences();
     }
 
+    ManagedPreferenceDelegate getManagedPreferenceDelegateForTest() {
+        return mManagedPreferenceDelegate;
+    }
+
     private ManagedPreferenceDelegate createManagedPreferenceDelegate() {
         return new ManagedPreferenceDelegate() {
             @Override
@@ -220,6 +223,9 @@ public class MainPreferences extends PreferenceFragment
                 }
                 if (PREF_DATA_REDUCTION.equals(preference.getKey())) {
                     return DataReductionProxySettings.getInstance().isDataReductionProxyManaged();
+                }
+                if (PREF_SEARCH_ENGINE.equals(preference.getKey())) {
+                    return TemplateUrlService.getInstance().isDefaultSearchManaged();
                 }
                 return false;
             }
@@ -239,6 +245,9 @@ public class MainPreferences extends PreferenceFragment
                     DataReductionProxySettings settings = DataReductionProxySettings.getInstance();
                     return settings.isDataReductionProxyManaged()
                             && !settings.isDataReductionProxyEnabled();
+                }
+                if (PREF_SEARCH_ENGINE.equals(preference.getKey())) {
+                    return TemplateUrlService.getInstance().isDefaultSearchManaged();
                 }
                 return super.isPreferenceClickDisabledByPolicy(preference);
             }

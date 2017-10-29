@@ -13,6 +13,7 @@ from devil import base_error
 from devil import devil_env
 from devil.android import device_errors
 from devil.android.constants import file_system
+from devil.android.sdk import adb_wrapper
 from devil.android.valgrind_tools import base_tool
 from devil.utils import cmd_helper
 
@@ -45,7 +46,8 @@ def _LogMapFailureDiagnostics(device):
     logger.info('Last 50 lines of logcat:')
     for logcat_line in device.adb.Logcat(dump=True)[-50:]:
       logger.info('    %s', logcat_line)
-  except device_errors.CommandFailedError:
+  except (device_errors.CommandFailedError,
+          device_errors.DeviceUnreachableError):
     # Grabbing the device forwarder log is also best-effort. Ignore all errors.
     logger.warning('Failed to get the contents of the logcat.')
 
@@ -56,7 +58,8 @@ def _LogMapFailureDiagnostics(device):
     for line in ps_out:
       if 'device_forwarder' in line:
         logger.info('    %s', line)
-  except device_errors.CommandFailedError:
+  except (device_errors.CommandFailedError,
+          device_errors.DeviceUnreachableError):
     logger.warning('Failed to list currently running device_forwarder '
                    'instances.')
 
@@ -130,7 +133,7 @@ class Forwarder(object):
 
       device_serial = str(device)
       map_arg_lists = [
-          ['--adb=' + devil_env.config.FetchPath('adb'),
+          ['--adb=' + adb_wrapper.AdbWrapper.GetAdbPath(),
            '--serial-id=' + device_serial,
            '--map', str(device_port), str(host_port)]
           for device_port, host_port in port_pairs]
@@ -153,10 +156,11 @@ class Forwarder(object):
         if exit_code != 0:
           try:
             instance._KillDeviceLocked(device, tool)
-          except device_errors.CommandFailedError:
+          except (device_errors.CommandFailedError,
+                  device_errors.DeviceUnreachableError):
             # We don't want the failure to kill the device forwarder to
             # supersede the original failure to map.
-            logging.warning(
+            logger.warning(
                 'Failed to kill the device forwarder after map failure: %s',
                 str(e))
           _LogMapFailureDiagnostics(device)
@@ -203,7 +207,7 @@ class Forwarder(object):
       instance = Forwarder._GetInstanceLocked(None)
       unmap_all_cmd = [
           instance._host_forwarder_path,
-          '--adb=%s' % devil_env.config.FetchPath('adb'),
+          '--adb=%s' % adb_wrapper.AdbWrapper.GetAdbPath(),
           '--serial-id=%s' % device.serial,
           '--unmap-all'
       ]
@@ -307,7 +311,7 @@ class Forwarder(object):
 
     unmap_cmd = [
         instance._host_forwarder_path,
-        '--adb=%s' % devil_env.config.FetchPath('adb'),
+        '--adb=%s' % adb_wrapper.AdbWrapper.GetAdbPath(),
         '--serial-id=%s' % serial,
         '--unmap', str(device_port)
     ]
@@ -387,7 +391,10 @@ class Forwarder(object):
         forwarder_device_path_on_host,
         forwarder_device_path_on_device)])
 
-    cmd = '%s %s' % (tool.GetUtilWrapper(), Forwarder._DEVICE_FORWARDER_PATH)
+    cmd = [Forwarder._DEVICE_FORWARDER_PATH]
+    wrapper = tool.GetUtilWrapper()
+    if wrapper:
+      cmd.insert(0, wrapper)
     device.RunShellCommand(
         cmd, env={'LD_LIBRARY_PATH': Forwarder._DEVICE_FORWARDER_FOLDER},
         check_return=True)
@@ -451,8 +458,10 @@ class Forwarder(object):
     if not device.FileExists(Forwarder._DEVICE_FORWARDER_PATH):
       return
 
-    cmd = '%s %s --kill-server' % (tool.GetUtilWrapper(),
-                                   Forwarder._DEVICE_FORWARDER_PATH)
+    cmd = [Forwarder._DEVICE_FORWARDER_PATH, '--kill-server']
+    wrapper = tool.GetUtilWrapper()
+    if wrapper:
+      cmd.insert(0, wrapper)
     device.RunShellCommand(
         cmd, env={'LD_LIBRARY_PATH': Forwarder._DEVICE_FORWARDER_FOLDER},
         check_return=True)

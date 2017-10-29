@@ -16,7 +16,8 @@
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/common/search/instant_types.h"
 #include "chrome/common/search/ntp_logging_events.h"
-#include "components/ntp_tiles/ntp_tile_source.h"
+#include "components/ntp_tiles/tile_source.h"
+#include "components/ntp_tiles/tile_visual_type.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
 #include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -33,15 +34,13 @@ class InstantTabTest;
 class OmniboxView;
 class Profile;
 class SearchIPCRouterTest;
-class SearchTabHelperDelegate;
 
 // Per-tab search "helper".  Acts as the owner and controller of the tab's
 // search UI model.
 //
-// When the page is finished loading, SearchTabHelper determines the instant
-// support for the page. When a navigation entry is committed (except for
-// in-page navigations), SearchTabHelper resets the instant support state to
-// INSTANT_SUPPORT_UNKNOWN and cause support to be determined again.
+// When a navigation is committed and when the page is finished loading,
+// SearchTabHelper determines the instant support for the page, i.e. whether
+// the page is rendered in the instant process.
 class SearchTabHelper : public content::WebContentsObserver,
                         public content::WebContentsUserData<SearchTabHelper>,
                         public InstantServiceObserver,
@@ -72,16 +71,13 @@ class SearchTabHelper : public content::WebContentsObserver,
   void SetSuggestionToPrefetch(const InstantSuggestion& suggestion);
 
   // Tells the page that the user pressed Enter in the omnibox.
-  void Submit(const base::string16& text,
-              const EmbeddedSearchRequestParams& params);
+  void Submit(const EmbeddedSearchRequestParams& params);
 
   // Called when the tab corresponding to |this| instance is activated.
   void OnTabActivated();
 
   // Called when the tab corresponding to |this| instance is deactivated.
   void OnTabDeactivated();
-
-  void set_delegate(SearchTabHelperDelegate* delegate) { delegate_ = delegate; }
 
   SearchIPCRouter& ipc_router_for_testing() { return ipc_router_; }
 
@@ -136,18 +132,17 @@ class SearchTabHelper : public content::WebContentsObserver,
       const content::LoadCommittedDetails& load_details) override;
 
   // Overridden from SearchIPCRouter::Delegate:
-  void OnInstantSupportDetermined(bool supports_instant) override;
   void FocusOmnibox(OmniboxFocusState state) override;
   void OnDeleteMostVisitedItem(const GURL& url) override;
   void OnUndoMostVisitedDeletion(const GURL& url) override;
   void OnUndoAllMostVisitedDeletions() override;
   void OnLogEvent(NTPLoggingEventType event, base::TimeDelta time) override;
-  void OnLogMostVisitedImpression(
-      int position,
-      ntp_tiles::NTPTileSource tile_source) override;
-  void OnLogMostVisitedNavigation(
-      int position,
-      ntp_tiles::NTPTileSource tile_source) override;
+  void OnLogMostVisitedImpression(int position,
+                                  ntp_tiles::TileSource tile_source,
+                                  ntp_tiles::TileVisualType tile_type) override;
+  void OnLogMostVisitedNavigation(int position,
+                                  ntp_tiles::TileSource tile_source,
+                                  ntp_tiles::TileVisualType tile_type) override;
   void PasteIntoOmnibox(const base::string16& text) override;
   void OnChromeIdentityCheck(const base::string16& identity) override;
   void OnHistorySyncCheck() override;
@@ -165,19 +160,14 @@ class SearchTabHelper : public content::WebContentsObserver,
   // otherwise keeps the current origin.
   void UpdateMode(bool update_origin);
 
-  // Tells the renderer to determine if the page supports the Instant API, which
-  // results in a call to OnInstantSupportDetermined() when the reply is
-  // received.
-  void DetermineIfPageSupportsInstant();
+  OmniboxView* GetOmniboxView();
+  const OmniboxView* GetOmniboxView() const;
 
   Profile* profile() const;
 
   // Returns whether input is in progress, i.e. if the omnibox has focus and the
   // active tab is in mode SEARCH_SUGGESTIONS.
   bool IsInputInProgress() const;
-
-  // Returns the OmniboxView for |web_contents_| or NULL if not available.
-  OmniboxView* GetOmniboxView() const;
 
   const bool is_search_enabled_;
 
@@ -189,11 +179,6 @@ class SearchTabHelper : public content::WebContentsObserver,
   SearchIPCRouter ipc_router_;
 
   InstantService* instant_service_;
-
-  // Delegate for notifying our owner about the SearchTabHelper state. Not owned
-  // by us.
-  // NULL on iOS and Android because they don't use the Instant framework.
-  SearchTabHelperDelegate* delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchTabHelper);
 };

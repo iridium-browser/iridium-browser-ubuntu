@@ -121,8 +121,7 @@ SpeechView::SpeechView(AppListViewDelegate* delegate)
   // actually has a single child of 'container' which has white background and
   // contains all components.
   views::View* container = new views::View();
-  container->set_background(
-      views::Background::CreateSolidBackground(SK_ColorWHITE));
+  container->SetBackground(views::CreateSolidBackground(SK_ColorWHITE));
 
   const gfx::ImageSkia& logo_image = delegate_->GetSpeechUI()->logo();
   if (!logo_image.isNull()) {
@@ -144,7 +143,7 @@ SpeechView::SpeechView(AppListViewDelegate* delegate)
   // TODO(mukai): use BoundedLabel to cap 2 lines.
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   speech_result_ = new views::Label(
-      base::string16(), bundle.GetFontList(ui::ResourceBundle::LargeFont));
+      base::string16(), {bundle.GetFontList(ui::ResourceBundle::LargeFont)});
   speech_result_->SetMultiLine(true);
   speech_result_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
@@ -197,7 +196,7 @@ void SpeechView::Layout() {
       speech_height);
 }
 
-gfx::Size SpeechView::GetPreferredSize() const {
+gfx::Size SpeechView::CalculatePreferredSize() const {
   return gfx::Size(0, kSpeechViewMaxHeight);
 }
 

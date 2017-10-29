@@ -6,7 +6,7 @@
 
 [
     Exposed=PaintWorklet,
-    RuntimeEnabled=CSSPaintAPI,
+    RuntimeEnabled=CSSPaintAPI
 ] interface PaintRenderingContext2D {
     // state
     void save(); // push state on state stack
@@ -24,6 +24,7 @@
     // compositing
     attribute unrestricted double globalAlpha; // (default 1.0)
     attribute DOMString globalCompositeOperation; // (default source-over)
+    attribute DOMString filter;
 
     // image smoothing
     attribute boolean imageSmoothingEnabled; // (default True)
@@ -47,7 +48,7 @@
     void fillRect(unrestricted double x, unrestricted double y, unrestricted double width, unrestricted double height);
     void strokeRect(unrestricted double x, unrestricted double y, unrestricted double width, unrestricted double height);
 
-    // path API (see also CanvasPathMethods)
+    // path API (see also CanvasPath)
     void beginPath();
     void fill(optional CanvasFillRule winding);
     void fill(Path2D path, optional CanvasFillRule winding);
@@ -78,4 +79,4 @@
     sequence<unrestricted double> getLineDash();
     attribute unrestricted double lineDashOffset;
 };
-PaintRenderingContext2D implements CanvasPathMethods;
+PaintRenderingContext2D implements CanvasPath;

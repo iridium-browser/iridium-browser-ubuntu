@@ -4,18 +4,15 @@
 
 #include "platform/json/JSONParser.h"
 
-#include "platform/json/JSONValues.h"
-#include "platform/testing/BlinkFuzzerTestSupport.h"
-#include "wtf/text/WTFString.h"
 #include <stddef.h>
 #include <stdint.h>
+#include "platform/json/JSONValues.h"
+#include "platform/testing/BlinkFuzzerTestSupport.h"
+#include "platform/wtf/text/WTFString.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  blink::parseJSON(WTF::String(data, size), 500);
-  return 0;
-}
-
-extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
-  blink::InitializeBlinkFuzzTest(argc, argv);
+  static blink::BlinkFuzzerTestSupport test_support =
+      blink::BlinkFuzzerTestSupport();
+  blink::ParseJSON(WTF::String(data, size), 500);
   return 0;
 }

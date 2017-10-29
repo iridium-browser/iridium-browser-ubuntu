@@ -5,8 +5,9 @@
 #ifndef CC_LAYERS_LAYER_STICKY_POSITION_CONSTRAINT_H_
 #define CC_LAYERS_LAYER_STICKY_POSITION_CONSTRAINT_H_
 
-#include "cc/base/cc_export.h"
+#include "cc/cc_export.h"
 
+#include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace cc {
@@ -28,11 +29,6 @@ struct CC_EXPORT LayerStickyPositionConstraint {
   float top_offset;
   float bottom_offset;
 
-  // The layout offset of the sticky box relative to its containing layer.
-  // This is used to detect the sticky offset the main thread has applied
-  // to the layer.
-  gfx::Point parent_relative_sticky_box_offset;
-
   // The rectangle corresponding to original layout position of the sticky box
   // relative to the scroll ancestor. The sticky box is only offset once the
   // scroll has passed its initial position (e.g. top_offset will only push
@@ -43,6 +39,16 @@ struct CC_EXPORT LayerStickyPositionConstraint {
   // scroll ancestor. The sticky box is only moved as far as its containing
   // block boundary.
   gfx::Rect scroll_container_relative_containing_block_rect;
+
+  // The nearest ancestor sticky layer ids that affect the sticky box constraint
+  // rect and the containing block constraint rect respectively. If no such
+  // layer exists, these are set to Layer::INVALID_ID.
+  int nearest_layer_shifting_sticky_box;
+  int nearest_layer_shifting_containing_block;
+
+  // Returns the nearest sticky ancestor layer, or Layer::INVALID_ID if no such
+  // layer exists.
+  int NearestStickyAncestor();
 
   bool operator==(const LayerStickyPositionConstraint&) const;
   bool operator!=(const LayerStickyPositionConstraint&) const;

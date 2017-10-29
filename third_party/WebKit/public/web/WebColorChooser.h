@@ -26,8 +26,8 @@
 #ifndef WebColorChooser_h
 #define WebColorChooser_h
 
-#include "../platform/WebColor.h"
-#include "../platform/WebCommon.h"
+#include "public/platform/WebColor.h"
+#include "public/platform/WebCommon.h"
 
 namespace blink {
 
@@ -37,11 +37,11 @@ class WebColorChooser {
   virtual ~WebColorChooser() {}
 
   // Set selected color in the color chooser.
-  virtual void setSelectedColor(const WebColor color) {}
+  virtual void SetSelectedColor(const WebColor color) {}
 
   // Calling this ends the color chooser and the client won't be recieving
   // didChooseColor callbacks anymore.
-  virtual void endChooser() {}
+  virtual void EndChooser() {}
 };
 }
 

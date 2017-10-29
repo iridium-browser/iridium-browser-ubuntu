@@ -25,12 +25,18 @@
 #import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
 #import "ios/chrome/browser/ui/main/main_view_controller.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_controller.h"
+#import "ios/chrome/browser/ui/tab_switcher/tab_switcher.h"
 #import "ios/web/public/test/native_controller_test_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 // Methods to access private members for testing.
 @interface BreakpadController (Testing)
 - (BOOL)isEnabled;
 - (BOOL)isUploadingEnabled;
+- (dispatch_queue_t)queue;
 @end
 @implementation BreakpadController (Testing)
 - (BOOL)isEnabled {
@@ -38,6 +44,9 @@
 }
 - (BOOL)isUploadingEnabled {
   return enableUploads_;
+}
+- (dispatch_queue_t)queue {
+  return queue_;
 }
 @end
 
@@ -125,6 +134,25 @@ NSUInteger GetRegisteredKeyCommandsCount() {
   return mainBVC.keyCommands.count;
 }
 
+id<BrowserCommands> BrowserCommandDispatcherForMainBVC() {
+  BrowserViewController* mainBVC =
+      GetMainController().browserViewInformation.mainBVC;
+  return mainBVC.dispatcher;
+}
+
+id<BrowserCommands> DispatcherForActiveViewController() {
+  UIViewController* vc = GetActiveViewController();
+  BrowserViewController* bvc = base::mac::ObjCCast<BrowserViewController>(vc);
+  if (bvc)
+    return bvc.dispatcher;
+  if ([vc conformsToProtocol:@protocol(TabSwitcher)]) {
+    UIViewController<TabSwitcher>* tabSwitcher =
+        static_cast<UIViewController<TabSwitcher>*>(vc);
+    return tabSwitcher.dispatcher;
+  }
+  return nil;
+}
+
 void RunCommandWithActiveViewController(GenericChromeCommand* command) {
   [GetActiveViewController() chromeExecuteCommand:command];
 }
@@ -199,6 +227,12 @@ bool IsBreakpadReportingEnabled() {
 
 bool IsFirstLaunchAfterUpgrade() {
   return [chrome_test_util::GetMainController() isFirstLaunchAfterUpgrade];
+}
+
+void WaitForBreakpadQueue() {
+  dispatch_queue_t queue = [[BreakpadController sharedInstance] queue];
+  dispatch_barrier_sync(queue, ^{
+                        });
 }
 
 void OpenChromeFromExternalApp(const GURL& url) {

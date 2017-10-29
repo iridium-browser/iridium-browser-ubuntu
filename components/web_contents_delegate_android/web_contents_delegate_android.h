@@ -81,6 +81,7 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
                           content::WebContents* new_contents) override;
   bool ShouldCreateWebContents(
       content::WebContents* web_contents,
+      content::RenderFrameHost* opener,
       content::SiteInstance* source_site_instance,
       int32_t route_id,
       int32_t main_frame_route_id,
@@ -91,7 +92,6 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
       const GURL& target_url,
       const std::string& partition_id,
       content::SessionStorageNamespace* session_storage_namespace) override;
-  bool OnGoToEntryOffset(int offset) override;
   void CloseContents(content::WebContents* source) override;
   void MoveContents(content::WebContents* source,
                     const gfx::Rect& pos) override;

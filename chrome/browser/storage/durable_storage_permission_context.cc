@@ -29,7 +29,8 @@ using bookmarks::BookmarkModel;
 DurableStoragePermissionContext::DurableStoragePermissionContext(
     Profile* profile)
     : PermissionContextBase(profile,
-                            CONTENT_SETTINGS_TYPE_DURABLE_STORAGE) {}
+                            CONTENT_SETTINGS_TYPE_DURABLE_STORAGE,
+                            blink::WebFeaturePolicyFeature::kNotFound) {}
 
 void DurableStoragePermissionContext::DecidePermission(
     content::WebContents* web_contents,
@@ -39,12 +40,14 @@ void DurableStoragePermissionContext::DecidePermission(
     bool user_gesture,
     const BrowserPermissionCallback& callback) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  DCHECK_NE(
-      CONTENT_SETTING_ALLOW,
-      GetPermissionStatus(requesting_origin, embedding_origin).content_setting);
-  DCHECK_NE(
-      CONTENT_SETTING_BLOCK,
-      GetPermissionStatus(requesting_origin, embedding_origin).content_setting);
+  DCHECK_NE(CONTENT_SETTING_ALLOW,
+            GetPermissionStatus(nullptr /* render_frame_host */,
+                                requesting_origin, embedding_origin)
+                .content_setting);
+  DCHECK_NE(CONTENT_SETTING_BLOCK,
+            GetPermissionStatus(nullptr /* render_frame_host */,
+                                requesting_origin, embedding_origin)
+                .content_setting);
 
   // Durable is only allowed to be granted to the top-level origin. Embedding
   // origin is the last committed navigation origin to the web contents.

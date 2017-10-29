@@ -7,12 +7,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "jni/GCMDriver_jni.h"
 
 using base::android::AppendJavaStringArrayToStringVector;
@@ -30,10 +30,7 @@ namespace gcm {
      : GCMDriver(store_path, blocking_task_runner),
        recorder_(this) {
   JNIEnv* env = AttachCurrentThread();
-  java_ref_.Reset(
-      Java_GCMDriver_create(env,
-                            reinterpret_cast<intptr_t>(this),
-                            base::android::GetApplicationContext()));
+  java_ref_.Reset(Java_GCMDriver_create(env, reinterpret_cast<intptr_t>(this)));
 }
 
 GCMDriverAndroid::~GCMDriverAndroid() {
@@ -112,9 +109,14 @@ void GCMDriverAndroid::OnMessageReceived(
   DispatchMessage(app_id, message);
 }
 
-// static
-bool GCMDriverAndroid::RegisterJni(JNIEnv* env) {
-  return RegisterNativesImpl(env);
+void GCMDriverAndroid::ValidateRegistration(
+    const std::string& app_id,
+    const std::vector<std::string>& sender_ids,
+    const std::string& registration_id,
+    const ValidateRegistrationCallback& callback) {
+  // gcm_driver doesn't store registration IDs on Android, so assume it's valid.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(callback, true /* is_valid */));
 }
 
 void GCMDriverAndroid::OnSignedIn() {
@@ -260,9 +262,8 @@ void GCMDriverAndroid::SendImpl(const std::string& app_id,
   NOTIMPLEMENTED();
 }
 
-void GCMDriverAndroid::RecordDecryptionFailure(
-    const std::string& app_id,
-    GCMEncryptionProvider::DecryptionResult result) {
+void GCMDriverAndroid::RecordDecryptionFailure(const std::string& app_id,
+                                               GCMDecryptionResult result) {
   recorder_.RecordDecryptionFailure(app_id, result);
 }
 

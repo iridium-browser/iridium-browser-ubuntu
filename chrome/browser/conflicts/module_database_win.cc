@@ -8,6 +8,7 @@
 #include <tuple>
 
 #include "base/bind.h"
+#include "chrome/browser/conflicts/module_database_observer_win.h"
 
 namespace {
 
@@ -23,9 +24,26 @@ ModuleDatabase* g_instance = nullptr;
 
 }  // namespace
 
+// static
+constexpr base::TimeDelta ModuleDatabase::kIdleTimeout;
+
 ModuleDatabase::ModuleDatabase(
     scoped_refptr<base::SequencedTaskRunner> task_runner)
-    : task_runner_(std::move(task_runner)), weak_ptr_factory_(this) {}
+    : task_runner_(std::move(task_runner)),
+      shell_extensions_enumerated_(false),
+      ime_enumerated_(false),
+      // ModuleDatabase owns |module_inspector_|, so it is safe to use
+      // base::Unretained().
+      module_inspector_(base::Bind(&ModuleDatabase::OnModuleInspected,
+                                   base::Unretained(this))),
+      third_party_metrics_(this),
+      has_started_processing_(false),
+      idle_timer_(
+          FROM_HERE,
+          kIdleTimeout,
+          base::Bind(&ModuleDatabase::OnDelayExpired, base::Unretained(this)),
+          false),
+      weak_ptr_factory_(this) {}
 
 ModuleDatabase::~ModuleDatabase() {
   if (this == g_instance)
@@ -42,15 +60,64 @@ void ModuleDatabase::SetInstance(
     std::unique_ptr<ModuleDatabase> module_database) {
   DCHECK_EQ(nullptr, g_instance);
   // This is deliberately leaked. It can be cleaned up by manually deleting the
-  // ModuleDatabase
+  // ModuleDatabase.
   g_instance = module_database.release();
+}
+
+bool ModuleDatabase::IsIdle() {
+  return has_started_processing_ && RegisteredModulesEnumerated() &&
+         !idle_timer_.IsRunning() && module_inspector_.IsIdle();
 }
 
 void ModuleDatabase::OnProcessStarted(uint32_t process_id,
                                       uint64_t creation_time,
                                       content::ProcessType process_type) {
-  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
   CreateProcessInfo(process_id, creation_time, process_type);
+}
+
+void ModuleDatabase::OnShellExtensionEnumerated(const base::FilePath& path,
+                                                uint32_t size_of_image,
+                                                uint32_t time_date_stamp) {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+
+  idle_timer_.Reset();
+
+  auto* module_info =
+      FindOrCreateModuleInfo(path, size_of_image, time_date_stamp);
+  module_info->second.module_types |= ModuleInfoData::kTypeShellExtension;
+}
+
+void ModuleDatabase::OnShellExtensionEnumerationFinished() {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  DCHECK(!shell_extensions_enumerated_);
+
+  shell_extensions_enumerated_ = true;
+
+  if (RegisteredModulesEnumerated())
+    OnRegisteredModulesEnumerated();
+}
+
+void ModuleDatabase::OnImeEnumerated(const base::FilePath& path,
+                                     uint32_t size_of_image,
+                                     uint32_t time_date_stamp) {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+
+  idle_timer_.Reset();
+
+  auto* module_info =
+      FindOrCreateModuleInfo(path, size_of_image, time_date_stamp);
+  module_info->second.module_types |= ModuleInfoData::kTypeIme;
+}
+
+void ModuleDatabase::OnImeEnumerationFinished() {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  DCHECK(!ime_enumerated_);
+
+  ime_enumerated_ = true;
+
+  if (RegisteredModulesEnumerated())
+    OnRegisteredModulesEnumerated();
 }
 
 void ModuleDatabase::OnModuleLoad(uint32_t process_id,
@@ -61,7 +128,7 @@ void ModuleDatabase::OnModuleLoad(uint32_t process_id,
                                   uintptr_t module_load_address) {
   // Messages can arrive from any thread (UI thread for calls over IPC, and
   // anywhere at all for calls from ModuleWatcher), so bounce if necessary.
-  if (!task_runner_->RunsTasksOnCurrentThread()) {
+  if (!task_runner_->RunsTasksInCurrentSequence()) {
     task_runner_->PostTask(
         FROM_HERE, base::Bind(&ModuleDatabase::OnModuleLoad,
                               weak_ptr_factory_.GetWeakPtr(), process_id,
@@ -69,6 +136,9 @@ void ModuleDatabase::OnModuleLoad(uint32_t process_id,
                               module_time_date_stamp, module_load_address));
     return;
   }
+
+  has_started_processing_ = true;
+  idle_timer_.Reset();
 
   // In theory this should always succeed. However, it is possible for a client
   // to misbehave and send out-of-order messages. It is easy to be tolerant of
@@ -81,6 +151,8 @@ void ModuleDatabase::OnModuleLoad(uint32_t process_id,
 
   auto* module_info =
       FindOrCreateModuleInfo(module_path, module_size, module_time_date_stamp);
+
+  module_info->second.module_types |= ModuleInfoData::kTypeLoadedModule;
 
   // Update the list of process types that this module has been seen in.
   module_info->second.process_types |=
@@ -98,13 +170,15 @@ void ModuleDatabase::OnModuleUnload(uint32_t process_id,
                                     uintptr_t module_load_address) {
   // Messages can arrive from any thread (UI thread for calls over IPC, and
   // anywhere at all for calls from ModuleWatcher), so bounce if necessary.
-  if (!task_runner_->RunsTasksOnCurrentThread()) {
+  if (!task_runner_->RunsTasksInCurrentSequence()) {
     task_runner_->PostTask(
         FROM_HERE, base::Bind(&ModuleDatabase::OnModuleUnload,
                               weak_ptr_factory_.GetWeakPtr(), process_id,
                               creation_time, module_load_address));
     return;
   }
+
+  idle_timer_.Reset();
 
   // See the long-winded comment in OnModuleLoad about reasons why this can
   // fail (but shouldn't normally).
@@ -136,7 +210,7 @@ void ModuleDatabase::OnProcessEnded(uint32_t process_id,
                                     uint64_t creation_time) {
   // Messages can arrive from any thread (UI thread for calls over IPC, and
   // anywhere at all for calls from ModuleWatcher), so bounce if necessary.
-  if (!task_runner_->RunsTasksOnCurrentThread()) {
+  if (!task_runner_->RunsTasksInCurrentSequence()) {
     task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&ModuleDatabase::OnProcessEnded,
@@ -145,6 +219,28 @@ void ModuleDatabase::OnProcessEnded(uint32_t process_id,
   }
 
   DeleteProcessInfo(process_id, creation_time);
+}
+
+void ModuleDatabase::AddObserver(ModuleDatabaseObserver* observer) {
+  observer_list_.AddObserver(observer);
+
+  // If the registered modules enumeration is not finished yet, the |observer|
+  // will be notified later in OnRegisteredModulesEnumerated().
+  if (!RegisteredModulesEnumerated())
+    return;
+
+  NotifyLoadedModules(observer);
+
+  if (IsIdle())
+    observer->OnModuleDatabaseIdle();
+}
+
+void ModuleDatabase::RemoveObserver(ModuleDatabaseObserver* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
+void ModuleDatabase::IncreaseInspectionPriority() {
+  module_inspector_.IncreaseInspectionPriority();
 }
 
 // static
@@ -294,6 +390,10 @@ ModuleDatabase::ModuleInfo* ModuleDatabase::FindOrCreateModuleInfo(
                             modules_.size()),
       std::forward_as_tuple());
 
+  // New modules must be inspected.
+  if (result.second)
+    module_inspector_.AddModule(result.first->first);
+
   return &(*result.first);
 }
 
@@ -320,6 +420,57 @@ void ModuleDatabase::DeleteProcessInfo(uint32_t process_id,
                                        uint64_t creation_time) {
   ProcessInfoKey key(process_id, creation_time, content::PROCESS_TYPE_UNKNOWN);
   processes_.erase(key);
+}
+
+bool ModuleDatabase::RegisteredModulesEnumerated() {
+  return shell_extensions_enumerated_ && ime_enumerated_;
+}
+
+void ModuleDatabase::OnRegisteredModulesEnumerated() {
+  for (auto& observer : observer_list_)
+    NotifyLoadedModules(&observer);
+
+  if (IsIdle())
+    EnterIdleState();
+}
+
+void ModuleDatabase::OnModuleInspected(
+    const ModuleInfoKey& module_key,
+    std::unique_ptr<ModuleInspectionResult> inspection_result) {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+
+  auto it = modules_.find(module_key);
+  if (it == modules_.end())
+    return;
+
+  it->second.inspection_result = std::move(inspection_result);
+
+  if (RegisteredModulesEnumerated())
+    for (auto& observer : observer_list_)
+      observer.OnNewModuleFound(it->first, it->second);
+
+  // Notify the observers if this was the last outstanding module inspection and
+  // the delay has already expired.
+  if (IsIdle())
+    EnterIdleState();
+}
+
+void ModuleDatabase::OnDelayExpired() {
+  // Notify the observers if there are no outstanding module inspections.
+  if (IsIdle())
+    EnterIdleState();
+}
+
+void ModuleDatabase::EnterIdleState() {
+  for (auto& observer : observer_list_)
+    observer.OnModuleDatabaseIdle();
+}
+
+void ModuleDatabase::NotifyLoadedModules(ModuleDatabaseObserver* observer) {
+  for (const auto& module : modules_) {
+    if (module.second.inspection_result)
+      observer->OnNewModuleFound(module.first, module.second);
+  }
 }
 
 // ModuleDatabase::ProcessInfoKey ----------------------------------------------

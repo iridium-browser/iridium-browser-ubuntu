@@ -25,6 +25,13 @@
       'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
     },
     {
+      'target_name': 'webui_listener_tracker',
+      'dependencies': [
+        'cr',
+      ],
+      'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
+    },
+    {
       'target_name': 'icon',
       'dependencies': [
         'cr',
@@ -36,17 +43,13 @@
       'target_name': 'i18n_template_no_process',
       'dependencies': [
         'load_time_data',
-        '<(EXTERNS_GYP):pending_compiler_externs',
       ],
       'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
     },
     {
       'target_name': 'i18n_template',
       'dependencies': [
-        'load_time_data',
-        # Ideally, <include> would automatically import externs as well, but
-        # it current doesn't and that sounds hard. Let's just kill <include>.
-        '<(EXTERNS_GYP):pending_compiler_externs',
+        'i18n_template_no_process',
       ],
       'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
     },
@@ -60,7 +63,10 @@
     },
     {
       'target_name': 'load_time_data',
-      'dependencies': ['<(DEPTH)/third_party/jstemplate/compiled_resources2.gyp:jstemplate'],
+      'dependencies': [
+        '<(DEPTH)/third_party/jstemplate/compiled_resources2.gyp:jstemplate',
+        'assert'
+      ],
       'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
     },
     {

@@ -93,10 +93,8 @@ class BluetoothAdvertisementBlueZTest : public testing::Test {
     adapter_ = adapter;
     ASSERT_NE(adapter_.get(), nullptr);
     ASSERT_TRUE(adapter_->IsInitialized());
-    if (base::MessageLoop::current() &&
-        base::MessageLoop::current()->is_running()) {
+    if (base::RunLoop::IsRunningOnCurrentThread())
       base::MessageLoop::current()->QuitWhenIdle();
-    }
   }
 
   std::unique_ptr<BluetoothAdvertisement::Data> CreateAdvertisementData() {
@@ -279,6 +277,33 @@ TEST_F(BluetoothAdvertisementBlueZTest, UnregisterAfterAdapterShutdown) {
 
   UnregisterAdvertisement(advertisement);
   ExpectError(BluetoothAdvertisement::ERROR_ADVERTISEMENT_DOES_NOT_EXIST);
+}
+
+TEST_F(BluetoothAdvertisementBlueZTest, ResetAdvertising) {
+  bluez::FakeBluetoothLEAdvertisingManagerClient* adv_client =
+      static_cast<bluez::FakeBluetoothLEAdvertisingManagerClient*>(
+          bluez::BluezDBusManager::Get()
+              ->GetBluetoothLEAdvertisingManagerClient());
+
+  // Creates and registers multiple advertisements.
+  scoped_refptr<BluetoothAdvertisement> advertisement1 = CreateAdvertisement();
+  ExpectSuccess();
+  EXPECT_TRUE(advertisement1);
+  scoped_refptr<BluetoothAdvertisement> advertisement2 = CreateAdvertisement();
+  ExpectSuccess();
+  EXPECT_TRUE(advertisement2);
+  // There should be 2 currently registered advertisements.
+  EXPECT_EQ(2, adv_client->currently_registered());
+
+  adapter_->ResetAdvertising(
+      base::Bind(&BluetoothAdvertisementBlueZTest::Callback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothAdvertisementBlueZTest::AdvertisementErrorCallback,
+                 base::Unretained(this)));
+  ExpectSuccess();
+
+  // Checks that the advertisements have been cleared after ResetAdvertising.
+  EXPECT_EQ(0, adv_client->currently_registered());
 }
 
 }  // namespace bluez

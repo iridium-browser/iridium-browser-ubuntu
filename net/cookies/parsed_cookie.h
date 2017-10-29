@@ -23,8 +23,6 @@ class NET_EXPORT ParsedCookie {
 
   // The maximum length of a cookie string we will try to parse
   static const size_t kMaxCookieSize = 4096;
-  // The maximum number of Token/Value pairs.  Shouldn't have more than 8.
-  static const int kMaxPairs = 16;
 
   // Construct from a cookie string like "BLAH=1; path=/; domain=.google.com"
   // Format is according to RFC 6265. Cookies with both name and value empty
@@ -104,6 +102,9 @@ class NET_EXPORT ParsedCookie {
   // desired token/value and nothing else.
   static std::string ParseTokenString(const std::string& token);
   static std::string ParseValueString(const std::string& value);
+
+  // Is the string valid as the value of a cookie attribute?
+  static bool IsValidCookieAttributeValue(const std::string& value);
 
  private:
   void ParseTokenValuePairs(const std::string& cookie_line);

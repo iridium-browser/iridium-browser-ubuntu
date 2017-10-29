@@ -29,18 +29,6 @@ TransportDIB::~TransportDIB() {
 }
 
 // static
-TransportDIB* TransportDIB::Create(size_t size, uint32_t sequence_num) {
-  TransportDIB* dib = new TransportDIB;
-  if (!dib->shared_memory_.CreateAndMapAnonymous(size)) {
-    delete dib;
-    return NULL;
-  }
-
-  dib->size_ = size;
-  return dib;
-}
-
-// static
 TransportDIB* TransportDIB::Map(Handle handle) {
   std::unique_ptr<TransportDIB> dib(CreateWithHandle(handle));
   if (!dib->Map())
@@ -79,10 +67,8 @@ bool TransportDIB::Map() {
   if (memory())
     return true;
 
-  size_t size;
-  bool success = base::SharedMemory::GetSizeFromSharedMemoryHandle(
-      shared_memory_.handle(), &size);
-  if (!success || !shared_memory_.Map(size))
+  size_t size = shared_memory_.handle().GetSize();
+  if (!shared_memory_.Map(size))
     return false;
 
   size_ = size;

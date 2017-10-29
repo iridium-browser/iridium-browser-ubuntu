@@ -19,6 +19,8 @@
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/common/content_export.h"
 
+class GURL;
+
 namespace content {
 
 class WebContentsImpl;
@@ -39,6 +41,12 @@ class CONTENT_EXPORT WebContentsAndroid
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject();
 
   // Methods called from Java
+  base::android::ScopedJavaLocalRef<jobject> GetTopLevelNativeWindow(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+  base::android::ScopedJavaLocalRef<jobject> GetMainFrame(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj) const;
   base::android::ScopedJavaLocalRef<jstring> GetTitle(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj) const;
@@ -56,6 +64,8 @@ class CONTENT_EXPORT WebContentsAndroid
   void Cut(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   void Copy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   void Paste(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  void PasteAsPlainText(JNIEnv* env,
+                        const base::android::JavaParamRef<jobject>& obj);
   void Replace(JNIEnv* env,
                const base::android::JavaParamRef<jobject>& obj,
                const base::android::JavaParamRef<jstring>& jstr);
@@ -64,9 +74,6 @@ class CONTENT_EXPORT WebContentsAndroid
                          const base::android::JavaParamRef<jobject>& obj);
   jint GetBackgroundColor(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj);
-  base::android::ScopedJavaLocalRef<jstring> GetURL(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>&) const;
   base::android::ScopedJavaLocalRef<jstring> GetLastCommittedURL(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>&) const;
@@ -190,10 +197,22 @@ class CONTENT_EXPORT WebContentsAndroid
                     const base::android::JavaParamRef<jobject>& jcallback);
   void DismissTextHandles(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj);
+  void ShowContextMenuAtTouchHandle(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      int x,
+      int y);
   void SetHasPersistentVideo(JNIEnv* env,
                              const base::android::JavaParamRef<jobject>& obj,
                              jboolean value);
   bool HasActiveEffectivelyFullscreenVideo(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+  base::android::ScopedJavaLocalRef<jobject> GetCurrentlyPlayingVideoSizes(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+
+  base::android::ScopedJavaLocalRef<jobject> GetOrCreateEventForwarder(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 

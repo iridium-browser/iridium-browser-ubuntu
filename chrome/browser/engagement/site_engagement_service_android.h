@@ -5,8 +5,6 @@
 #ifndef CHROME_BROWSER_ENGAGEMENT_SITE_ENGAGEMENT_SERVICE_ANDROID_H_
 #define CHROME_BROWSER_ENGAGEMENT_SITE_ENGAGEMENT_SERVICE_ANDROID_H_
 
-#include <jni.h>
-
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
@@ -20,8 +18,6 @@
 // This class may only be used on the UI thread.
 class SiteEngagementServiceAndroid {
  public:
-  static bool Register(JNIEnv* env);
-
   // Returns the Java-side SiteEngagementService object corresponding to
   // |service|.
   static const base::android::ScopedJavaGlobalRef<jobject>& GetOrCreate(
@@ -36,10 +32,10 @@ class SiteEngagementServiceAndroid {
                   const base::android::JavaParamRef<jobject>& caller,
                   const base::android::JavaParamRef<jstring>& jurl) const;
 
-  void ResetScoreForURL(JNIEnv* env,
-                        const base::android::JavaParamRef<jobject>& caller,
-                        const base::android::JavaParamRef<jstring>& jurl,
-                        double score);
+  void ResetBaseScoreForURL(JNIEnv* env,
+                            const base::android::JavaParamRef<jobject>& caller,
+                            const base::android::JavaParamRef<jstring>& jurl,
+                            double score);
 
  private:
   base::android::ScopedJavaGlobalRef<jobject> java_service_;

@@ -12,14 +12,12 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/i18n/base_i18n_switches.h"
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/synchronization/lock.h"
 #include "build/build_config.h"
 #include "third_party/icu/source/common/unicode/locid.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
@@ -57,6 +55,18 @@ std::string GetLocaleString(const icu::Locale& locale) {
 // directionality, returns UNKNOWN_DIRECTION if it doesn't. Please refer to
 // http://unicode.org/reports/tr9/ for more information.
 base::i18n::TextDirection GetCharacterDirection(UChar32 character) {
+  static bool has_switch = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kForceTextDirection);
+  if (has_switch) {
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+    std::string force_flag =
+        command_line->GetSwitchValueASCII(switches::kForceTextDirection);
+
+    if (force_flag == switches::kForceDirectionRTL)
+      return base::i18n::RIGHT_TO_LEFT;
+    if (force_flag == switches::kForceDirectionLTR)
+      return base::i18n::LEFT_TO_RIGHT;
+  }
   // Now that we have the character, we use ICU in order to query for the
   // appropriate Unicode BiDi character type.
   int32_t property = u_getIntPropertyValue(character, UCHAR_BIDI_CLASS);
@@ -87,10 +97,10 @@ base::i18n::TextDirection GetForcedTextDirection() {
     std::string force_flag =
         command_line->GetSwitchValueASCII(switches::kForceUIDirection);
 
-    if (force_flag == switches::kForceUIDirectionLTR)
+    if (force_flag == switches::kForceDirectionLTR)
       return base::i18n::LEFT_TO_RIGHT;
 
-    if (force_flag == switches::kForceUIDirectionRTL)
+    if (force_flag == switches::kForceDirectionRTL)
       return base::i18n::RIGHT_TO_LEFT;
   }
 
@@ -103,8 +113,6 @@ namespace base {
 namespace i18n {
 
 // Represents the locale-specific ICU text direction.
-static base::LazyInstance<base::Lock>::Leaky g_icu_text_direction_lock =
-    LAZY_INSTANCE_INITIALIZER;
 static TextDirection g_icu_text_direction = UNKNOWN_DIRECTION;
 
 // Convert the ICU default locale to a string.
@@ -148,16 +156,15 @@ std::string ICULocaleName(const std::string& locale_string) {
 void SetICUDefaultLocale(const std::string& locale_string) {
   icu::Locale locale(ICULocaleName(locale_string).c_str());
   UErrorCode error_code = U_ZERO_ERROR;
-  icu::Locale::setDefault(locale, error_code);
-  // This return value is actually bogus because Locale object is
-  // an ID and setDefault seems to always succeed (regardless of the
-  // presence of actual locale data). However,
-  // it does not hurt to have it as a sanity check.
-  DCHECK(U_SUCCESS(error_code));
-  {
-    base::AutoLock lock(g_icu_text_direction_lock.Get());
-    g_icu_text_direction = UNKNOWN_DIRECTION;
+  const char* lang = locale.getLanguage();
+  if (lang != nullptr && *lang != '\0') {
+    icu::Locale::setDefault(locale, error_code);
+  } else {
+    LOG(ERROR) << "Failed to set the ICU default locale to " << locale_string
+               << ". Falling back to en-US.";
+    icu::Locale::setDefault(icu::Locale::getUS(), error_code);
   }
+  g_icu_text_direction = UNKNOWN_DIRECTION;
 }
 
 bool IsRTL() {
@@ -165,7 +172,6 @@ bool IsRTL() {
 }
 
 bool ICUIsRTL() {
-  base::AutoLock lock(g_icu_text_direction_lock.Get());
   if (g_icu_text_direction == UNKNOWN_DIRECTION) {
     const icu::Locale& locale = icu::Locale::getDefault();
     g_icu_text_direction = GetTextDirectionForLocaleInStartUp(locale.getName());

@@ -9,7 +9,7 @@
 #include "cc/animation/animation_curve.h"
 #include "cc/animation/animation_timeline.h"
 #include "cc/animation/transform_operations.h"
-#include "cc/output/filter_operations.h"
+#include "cc/base/filter_operations.h"
 #include "cc/test/geometry_test_utils.h"
 #include "cc/trees/element_id.h"
 
@@ -43,7 +43,7 @@ class FakeTransformTransition : public TransformAnimationCurve {
   ~FakeTransformTransition() override;
 
   base::TimeDelta Duration() const override;
-  gfx::Transform GetValue(base::TimeDelta time) const override;
+  TransformOperations GetValue(base::TimeDelta time) const override;
   bool AnimatedBoundsForBox(const gfx::BoxF& box,
                             gfx::BoxF* bounds) const override;
   bool IsTranslation() const override;

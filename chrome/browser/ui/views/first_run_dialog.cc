@@ -13,10 +13,11 @@
 #include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/locale_settings.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -25,7 +26,6 @@
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/layout/grid_layout.h"
-#include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
@@ -81,9 +81,6 @@ FirstRunDialog::FirstRunDialog(Profile* profile)
       make_default_(NULL),
       report_crashes_(NULL) {
   GridLayout* layout = GridLayout::CreatePanel(this);
-  SetLayoutManager(layout);
-
-  const int related_y = views::kRelatedControlVerticalSpacing;
 
   views::ColumnSet* column_set = layout->AddColumnSet(0);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
@@ -95,12 +92,15 @@ FirstRunDialog::FirstRunDialog(Profile* profile)
   make_default_->SetChecked(true);
   layout->AddView(make_default_);
 
-  layout->StartRowWithPadding(0, 0, 0, related_y);
+  layout->StartRowWithPadding(0, 0, 0,
+                              ChromeLayoutProvider::Get()->GetDistanceMetric(
+                                  views::DISTANCE_RELATED_CONTROL_VERTICAL));
   report_crashes_ = new views::Checkbox(l10n_util::GetStringUTF16(
       IDS_OPTIONS_ENABLE_LOGGING));
   // Having this box checked means the user has to opt-out of metrics recording.
   report_crashes_->SetChecked(!first_run::IsMetricsReportingOptIn());
   layout->AddView(report_crashes_);
+  chrome::RecordDialogCreation(chrome::DialogIdentifier::FIRST_RUN_DIALOG);
 }
 
 FirstRunDialog::~FirstRunDialog() {

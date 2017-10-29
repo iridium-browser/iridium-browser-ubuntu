@@ -21,6 +21,7 @@
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
@@ -130,6 +131,7 @@ GCMNetworkChannel::GCMNetworkChannel(
 }
 
 GCMNetworkChannel::~GCMNetworkChannel() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
 }
 
@@ -141,7 +143,7 @@ void GCMNetworkChannel::Register() {
 void GCMNetworkChannel::OnRegisterComplete(
     const std::string& registration_id,
     gcm::GCMClient::Result result) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (result == gcm::GCMClient::SUCCESS) {
     DCHECK(!registration_id.empty());
     DVLOG(2) << "Got registration_id";
@@ -173,7 +175,7 @@ void GCMNetworkChannel::OnRegisterComplete(
 }
 
 void GCMNetworkChannel::SendMessage(const std::string& message) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!message.empty());
   DVLOG(2) << "SendMessage";
   diagnostic_info_.sent_messages_count_++;
@@ -188,7 +190,7 @@ void GCMNetworkChannel::SendMessage(const std::string& message) {
 }
 
 void GCMNetworkChannel::RequestAccessToken() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   delegate_->RequestToken(base::Bind(&GCMNetworkChannel::OnGetTokenComplete,
                                      weak_factory_.GetWeakPtr()));
 }
@@ -196,7 +198,7 @@ void GCMNetworkChannel::RequestAccessToken() {
 void GCMNetworkChannel::OnGetTokenComplete(
     const GoogleServiceAuthError& error,
     const std::string& token) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (cached_message_.empty() || registration_id_.empty()) {
     // Nothing to do.
     return;
@@ -218,8 +220,45 @@ void GCMNetworkChannel::OnGetTokenComplete(
   access_token_ = token;
 
   DVLOG(2) << "Got access token, sending message";
-  fetcher_ = net::URLFetcher::Create(BuildUrl(registration_id_),
-                                     net::URLFetcher::POST, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("invalidation_service", R"(
+        semantics {
+          sender: "Invalidation service"
+          description:
+            "Chromium uses cacheinvalidation library to receive push "
+            "notifications from the server about sync items (bookmarks, "
+            "passwords, preferences, etc.) modified on other clients. It uses "
+            "GCMClient to receive incoming messages. This request is used for "
+            "client-to-server communications."
+          trigger:
+            "The first message is sent to register client with the server on "
+            "Chromium startup. It is then sent periodically to confirm that "
+            "the client is still online. After receiving notification about "
+            "server changes, the client sends this request to acknowledge that "
+            "the notification is processed."
+          data:
+            "Different in each use case:\n"
+            "- Initial registration: Doesn't contain user data.\n"
+            "- Updating the set of subscriptions: Contains server generated "
+            "client_token and ObjectIds identifying subscriptions. ObjectId "
+            "is not unique to user.\n"
+            "- Invalidation acknowledgement: Contains client_token, ObjectId "
+            "and server version for corresponding subscription. Version is not "
+            "related to sync data, it is an internal concept of invalidations "
+            "protocol."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: false
+          setting: "This feature cannot be disabled."
+          policy_exception_justification:
+            "Not implemented. Disabling InvalidationService might break "
+            "features that depend on it. It makes sense to control top level "
+            "features that use InvalidationService."
+        })");
+  fetcher_ =
+      net::URLFetcher::Create(BuildUrl(registration_id_), net::URLFetcher::POST,
+                              this, traffic_annotation);
   data_use_measurement::DataUseUserData::AttachToFetcher(
       fetcher_.get(), data_use_measurement::DataUseUserData::INVALIDATION);
   fetcher_->SetRequestContext(request_context_getter_.get());
@@ -238,7 +277,7 @@ void GCMNetworkChannel::OnGetTokenComplete(
 }
 
 void GCMNetworkChannel::OnURLFetchComplete(const net::URLFetcher* source) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(fetcher_.get(), source);
   // Free fetcher at the end of function.
   std::unique_ptr<net::URLFetcher> fetcher = std::move(fetcher_);

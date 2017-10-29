@@ -3,10 +3,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
+// ValidateOutputs validates fragment shader outputs. It checks for conflicting locations,
+// out-of-range locations, that locations are specified when using multiple outputs, and YUV output
+// validity.
 
 #include "compiler/translator/ValidateOutputs.h"
+
+#include <set>
+
 #include "compiler/translator/InfoSink.h"
-#include "compiler/translator/InitializeParseContext.h"
+#include "compiler/translator/IntermTraverse.h"
 #include "compiler/translator/ParseContext.h"
 
 namespace sh
@@ -19,17 +25,38 @@ void error(const TIntermSymbol &symbol, const char *reason, TDiagnostics *diagno
     diagnostics->error(symbol.getLine(), reason, symbol.getSymbol().c_str());
 }
 
-}  // namespace
+class ValidateOutputsTraverser : public TIntermTraverser
+{
+  public:
+    ValidateOutputsTraverser(const TExtensionBehavior &extBehavior, int maxDrawBuffers);
 
-ValidateOutputs::ValidateOutputs(const TExtensionBehavior &extBehavior, int maxDrawBuffers)
+    void validate(TDiagnostics *diagnostics) const;
+
+    void visitSymbol(TIntermSymbol *) override;
+
+  private:
+    int mMaxDrawBuffers;
+    bool mAllowUnspecifiedOutputLocationResolution;
+    bool mUsesFragDepth;
+
+    typedef std::vector<TIntermSymbol *> OutputVector;
+    OutputVector mOutputs;
+    OutputVector mUnspecifiedLocationOutputs;
+    OutputVector mYuvOutputs;
+    std::set<std::string> mVisitedSymbols;
+};
+
+ValidateOutputsTraverser::ValidateOutputsTraverser(const TExtensionBehavior &extBehavior,
+                                                   int maxDrawBuffers)
     : TIntermTraverser(true, false, false),
       mMaxDrawBuffers(maxDrawBuffers),
       mAllowUnspecifiedOutputLocationResolution(
-          IsExtensionEnabled(extBehavior, "GL_EXT_blend_func_extended"))
+          IsExtensionEnabled(extBehavior, "GL_EXT_blend_func_extended")),
+      mUsesFragDepth(false)
 {
 }
 
-void ValidateOutputs::visitSymbol(TIntermSymbol *symbol)
+void ValidateOutputsTraverser::visitSymbol(TIntermSymbol *symbol)
 {
     TString name         = symbol->getSymbol();
     TQualifier qualifier = symbol->getQualifier();
@@ -41,18 +68,26 @@ void ValidateOutputs::visitSymbol(TIntermSymbol *symbol)
 
     if (qualifier == EvqFragmentOut)
     {
-        if (symbol->getType().getLayoutQualifier().location == -1)
-        {
-            mUnspecifiedLocationOutputs.push_back(symbol);
-        }
-        else
+        if (symbol->getType().getLayoutQualifier().location != -1)
         {
             mOutputs.push_back(symbol);
         }
+        else if (symbol->getType().getLayoutQualifier().yuv == true)
+        {
+            mYuvOutputs.push_back(symbol);
+        }
+        else
+        {
+            mUnspecifiedLocationOutputs.push_back(symbol);
+        }
+    }
+    else if (qualifier == EvqFragDepth || qualifier == EvqFragDepthEXT)
+    {
+        mUsesFragDepth = true;
     }
 }
 
-void ValidateOutputs::validate(TDiagnostics *diagnostics) const
+void ValidateOutputsTraverser::validate(TDiagnostics *diagnostics) const
 {
     ASSERT(diagnostics);
     OutputVector validOutputs(mMaxDrawBuffers);
@@ -106,6 +141,32 @@ void ValidateOutputs::validate(TDiagnostics *diagnostics) const
                   diagnostics);
         }
     }
+
+    if (!mYuvOutputs.empty() && (mYuvOutputs.size() > 1 || mUsesFragDepth || !mOutputs.empty() ||
+                                 !mUnspecifiedLocationOutputs.empty()))
+    {
+        for (const auto &symbol : mYuvOutputs)
+        {
+            error(*symbol,
+                  "not allowed to specify yuv qualifier when using depth or multiple color "
+                  "fragment outputs",
+                  diagnostics);
+        }
+    }
+}
+
+}  // anonymous namespace
+
+bool ValidateOutputs(TIntermBlock *root,
+                     const TExtensionBehavior &extBehavior,
+                     int maxDrawBuffers,
+                     TDiagnostics *diagnostics)
+{
+    ValidateOutputsTraverser validateOutputs(extBehavior, maxDrawBuffers);
+    root->traverse(&validateOutputs);
+    int numErrorsBefore = diagnostics->numErrors();
+    validateOutputs.validate(diagnostics);
+    return (diagnostics->numErrors() == numErrorsBefore);
 }
 
 }  // namespace sh

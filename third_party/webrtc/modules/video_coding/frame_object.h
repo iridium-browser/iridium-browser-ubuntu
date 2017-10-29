@@ -11,10 +11,10 @@
 #ifndef WEBRTC_MODULES_VIDEO_CODING_FRAME_OBJECT_H_
 #define WEBRTC_MODULES_VIDEO_CODING_FRAME_OBJECT_H_
 
-#include "webrtc/base/optional.h"
 #include "webrtc/common_types.h"
 #include "webrtc/modules/include/module_common_types.h"
 #include "webrtc/modules/video_coding/encoded_frame.h"
+#include "webrtc/rtc_base/optional.h"
 
 namespace webrtc {
 namespace video_coding {
@@ -51,6 +51,8 @@ class FrameObject : public webrtc::VCMEncodedFrame {
   uint8_t spatial_layer;
   uint32_t timestamp;
 
+  // TODO(philipel): Add simple modify/access functions to prevent adding too
+  // many |references|.
   size_t num_references;
   uint16_t references[kMaxFrameReferences];
   bool inter_layer_predicted;

@@ -51,9 +51,6 @@ class BackendIO : public BackgroundIO {
 
   net::CompletionCallback callback() const { return callback_; }
 
-  // Grabs an extra reference of entry_.
-  void ReferenceEntry();
-
   // The operations we proxy:
   void Init();
   void OpenEntry(const std::string& key, Entry** entry);
@@ -222,9 +219,9 @@ class InFlightBackendIO : public InFlightIO {
     return background_thread_;
   }
 
-  // Returns true if the current thread is the background thread.
-  bool BackgroundIsCurrentThread() {
-    return background_thread_->RunsTasksOnCurrentThread();
+  // Returns true if the current sequence is the background thread.
+  bool BackgroundIsCurrentSequence() {
+    return background_thread_->RunsTasksInCurrentSequence();
   }
 
   base::WeakPtr<InFlightBackendIO> GetWeakPtr();

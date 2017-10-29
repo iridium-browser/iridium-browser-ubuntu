@@ -63,7 +63,7 @@ std::string RenderFrameHostDelegate::GetDefaultMediaDeviceID(
 }
 
 AccessibilityMode RenderFrameHostDelegate::GetAccessibilityMode() const {
-  return AccessibilityModeOff;
+  return AccessibilityMode();
 }
 
 RenderFrameHost* RenderFrameHostDelegate::GetGuestByInstanceID(
@@ -72,20 +72,27 @@ RenderFrameHost* RenderFrameHostDelegate::GetGuestByInstanceID(
   return NULL;
 }
 
-device::GeolocationServiceContext*
-RenderFrameHostDelegate::GetGeolocationServiceContext() {
+device::GeolocationContext* RenderFrameHostDelegate::GetGeolocationContext() {
   return nullptr;
 }
 
-device::WakeLockServiceContext*
-RenderFrameHostDelegate::GetWakeLockServiceContext() {
+device::mojom::WakeLock* RenderFrameHostDelegate::GetRendererWakeLock() {
   return nullptr;
 }
+
+#if defined(OS_ANDROID)
+void RenderFrameHostDelegate::GetNFC(device::mojom::NFCRequest request) {}
+#endif
 
 bool RenderFrameHostDelegate::ShouldRouteMessageEvent(
     RenderFrameHost* target_rfh,
     SiteInstance* source_site_instance) const {
   return false;
+}
+
+RenderFrameHost*
+RenderFrameHostDelegate::GetFocusedFrameIncludingInnerWebContents() {
+  return nullptr;
 }
 
 std::unique_ptr<WebUIImpl>
@@ -98,6 +105,17 @@ bool RenderFrameHostDelegate::ShouldAllowRunningInsecureContent(
     bool allowed_per_prefs,
     const url::Origin& origin,
     const GURL& resource_url) {
+  return false;
+}
+
+#if defined(OS_ANDROID)
+base::android::ScopedJavaLocalRef<jobject>
+RenderFrameHostDelegate::GetJavaRenderFrameHostDelegate() {
+  return nullptr;
+}
+#endif
+
+bool RenderFrameHostDelegate::IsBeingDestroyed() const {
   return false;
 }
 

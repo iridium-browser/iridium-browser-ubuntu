@@ -7,9 +7,10 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
-#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 
 using page_load_metrics::PageAbortReason;
 
@@ -95,6 +96,22 @@ const char kHistogramFromGWSAbortBackgroundBeforePaint[] =
 const char kHistogramFromGWSAbortBackgroundBeforeInteraction[] =
     "PageLoad.Clients.FromGoogleSearch.Experimental.AbortTiming.Background."
     "AfterPaint.BeforeInteraction";
+
+const char kHistogramFromGWSForegroundDuration[] =
+    "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration";
+const char kHistogramFromGWSForegroundDurationAfterPaint[] =
+    "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration."
+    "AfterPaint";
+const char kHistogramFromGWSForegroundDurationWithPaint[] =
+    "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration."
+    "WithPaint";
+const char kHistogramFromGWSForegroundDurationWithoutPaint[] =
+    "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration."
+    "WithoutPaint";
+const char kHistogramFromGWSForegroundDurationNoCommit[] =
+    "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration.NoCommit";
+
+const char kUkmFromGoogleSearchName[] = "PageLoad.FromGoogleSearch";
 
 }  // namespace internal
 
@@ -214,6 +231,39 @@ void LogProvisionalAborts(const page_load_metrics::PageAbortInfo& abort_info) {
   }
 }
 
+void LogForegroundDurations(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& info,
+    base::TimeTicks app_background_time) {
+  base::Optional<base::TimeDelta> foreground_duration =
+      GetInitialForegroundDuration(info, app_background_time);
+  if (!foreground_duration)
+    return;
+
+  if (info.did_commit) {
+    PAGE_LOAD_LONG_HISTOGRAM(internal::kHistogramFromGWSForegroundDuration,
+                             foreground_duration.value());
+    if (timing.paint_timing->first_paint &&
+        timing.paint_timing->first_paint < foreground_duration) {
+      PAGE_LOAD_LONG_HISTOGRAM(
+          internal::kHistogramFromGWSForegroundDurationAfterPaint,
+          foreground_duration.value() -
+              timing.paint_timing->first_paint.value());
+      PAGE_LOAD_LONG_HISTOGRAM(
+          internal::kHistogramFromGWSForegroundDurationWithPaint,
+          foreground_duration.value());
+    } else {
+      PAGE_LOAD_LONG_HISTOGRAM(
+          internal::kHistogramFromGWSForegroundDurationWithoutPaint,
+          foreground_duration.value());
+    }
+  } else {
+    PAGE_LOAD_LONG_HISTOGRAM(
+        internal::kHistogramFromGWSForegroundDurationNoCommit,
+        foreground_duration.value());
+  }
+}
+
 bool WasAbortedInForeground(
     const page_load_metrics::PageLoadExtraInfo& info,
     const page_load_metrics::PageAbortInfo& abort_info) {
@@ -270,158 +320,18 @@ bool WasAbortedBeforeInteraction(
 
 }  // namespace
 
-// See
-// https://docs.google.com/document/d/1jNPZ6Aeh0KV6umw1yZrrkfXRfxWNruwu7FELLx_cpOg/edit
-// for additional details.
-
-// static
-bool FromGWSPageLoadMetricsLogger::IsGoogleSearchHostname(
-    base::StringPiece host) {
-  const char kGoogleSearchHostnamePrefix[] = "www.";
-
-  // Hostname must start with 'www.' Hostnames are not case sensitive.
-  if (!base::StartsWith(host, kGoogleSearchHostnamePrefix,
-                        base::CompareCase::INSENSITIVE_ASCII)) {
-    return false;
-  }
-  std::string domain = net::registry_controlled_domains::GetDomainAndRegistry(
-      host,
-      // Do not include private registries, such as appspot.com. We don't want
-      // to match URLs like www.google.appspot.com.
-      net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
-
-  // Domain and registry must start with 'google.' e.g. 'google.com' or
-  // 'google.co.uk'.
-  if (!base::StartsWith(domain, "google.",
-                        base::CompareCase::INSENSITIVE_ASCII)) {
-    return false;
-  }
-
-  // Finally, the length of the URL before the domain and registry must be equal
-  // in length to the search hostname prefix.
-  const size_t url_hostname_prefix_length = host.length() - domain.length();
-  return url_hostname_prefix_length == strlen(kGoogleSearchHostnamePrefix);
-}
-
-// static
-bool FromGWSPageLoadMetricsLogger::IsGoogleSearchResultUrl(const GURL& url) {
-  // NOTE: we do not require 'q=' in the query, as AJAXy search may instead
-  // store the query in the URL fragment.
-  if (!IsGoogleSearchHostname(url.host_piece())) {
-    return false;
-  }
-
-  if (!QueryContainsComponentPrefix(url.query_piece(), "q=") &&
-      !QueryContainsComponentPrefix(url.ref_piece(), "q=")) {
-    return false;
-  }
-
-  const base::StringPiece path = url.path_piece();
-  return path == "/search" || path == "/webhp" || path == "/custom" ||
-         path == "/";
-}
-
-// static
-bool FromGWSPageLoadMetricsLogger::IsGoogleSearchRedirectorUrl(
-    const GURL& url) {
-  if (!IsGoogleSearchHostname(url.host_piece()))
-    return false;
-
-  // The primary search redirector.  Google search result redirects are
-  // differentiated from other general google redirects by 'source=web' in the
-  // query string.
-  if (url.path_piece() == "/url" && url.has_query() &&
-      QueryContainsComponent(url.query_piece(), "source=web")) {
-    return true;
-  }
-
-  // Intent-based navigations from search are redirected through a second
-  // redirector, which receives its redirect URL in the fragment/hash/ref
-  // portion of the URL (the portion after '#'). We don't check for the presence
-  // of certain params in the ref since this redirector is only used for
-  // redirects from search.
-  return url.path_piece() == "/searchurl/r.html" && url.has_ref();
-}
-
-// static
-bool FromGWSPageLoadMetricsLogger::QueryContainsComponent(
-    const base::StringPiece query,
-    const base::StringPiece component) {
-  return QueryContainsComponentHelper(query, component, false);
-}
-
-// static
-bool FromGWSPageLoadMetricsLogger::QueryContainsComponentPrefix(
-    const base::StringPiece query,
-    const base::StringPiece component) {
-  return QueryContainsComponentHelper(query, component, true);
-}
-
-// static
-bool FromGWSPageLoadMetricsLogger::QueryContainsComponentHelper(
-    const base::StringPiece query,
-    const base::StringPiece component,
-    bool component_is_prefix) {
-  if (query.empty() || component.empty() ||
-      component.length() > query.length()) {
-    return false;
-  }
-
-  // Verify that the provided query string does not include the query or
-  // fragment start character, as the logic below depends on this character not
-  // being included.
-  DCHECK(query[0] != '?' && query[0] != '#');
-
-  // We shouldn't try to find matches beyond the point where there aren't enough
-  // characters left in query to fully match the component.
-  const size_t last_search_start = query.length() - component.length();
-
-  // We need to search for matches in a loop, rather than stopping at the first
-  // match, because we may initially match a substring that isn't a full query
-  // string component. Consider, for instance, the query string 'ab=cd&b=c'. If
-  // we search for component 'b=c', the first substring match will be characters
-  // 1-3 (zero-based) in the query string. However, this isn't a full component
-  // (the full component is ab=cd) so the match will fail. Thus, we must
-  // continue our search to find the second substring match, which in the
-  // example is at characters 6-8 (the end of the query string) and is a
-  // successful component match.
-  for (size_t start_offset = 0; start_offset <= last_search_start;
-       start_offset += component.length()) {
-    start_offset = query.find(component, start_offset);
-    if (start_offset == std::string::npos) {
-      // We searched to end of string and did not find a match.
-      return false;
-    }
-    // Verify that the character prior to the component is valid (either we're
-    // at the beginning of the query string, or are preceded by an ampersand).
-    if (start_offset != 0 && query[start_offset - 1] != '&') {
-      continue;
-    }
-    if (!component_is_prefix) {
-      // Verify that the character after the component substring is valid
-      // (either we're at the end of the query string, or are followed by an
-      // ampersand).
-      const size_t after_offset = start_offset + component.length();
-      if (after_offset < query.length() && query[after_offset] != '&') {
-        continue;
-      }
-    }
-    return true;
-  }
-  return false;
-}
-
 FromGWSPageLoadMetricsLogger::FromGWSPageLoadMetricsLogger() {}
 
 void FromGWSPageLoadMetricsLogger::SetPreviouslyCommittedUrl(const GURL& url) {
-  previously_committed_url_is_search_results_ = IsGoogleSearchResultUrl(url);
+  previously_committed_url_is_search_results_ =
+      page_load_metrics::IsGoogleSearchResultUrl(url);
   previously_committed_url_is_search_redirector_ =
-      IsGoogleSearchRedirectorUrl(url);
+      page_load_metrics::IsGoogleSearchRedirectorUrl(url);
 }
 
 void FromGWSPageLoadMetricsLogger::SetProvisionalUrl(const GURL& url) {
   provisional_url_has_search_hostname_ =
-      IsGoogleSearchHostname(url.host_piece());
+      page_load_metrics::IsGoogleSearchHostname(url);
 }
 
 FromGWSPageLoadMetricsObserver::FromGWSPageLoadMetricsObserver() {}
@@ -438,7 +348,8 @@ FromGWSPageLoadMetricsObserver::OnStart(
 
 page_load_metrics::PageLoadMetricsObserver::ObservePolicy
 FromGWSPageLoadMetricsObserver::OnCommit(
-    content::NavigationHandle* navigation_handle) {
+    content::NavigationHandle* navigation_handle,
+    ukm::SourceId source_id) {
   // We'd like to also check navigation_handle->HasUserGesture() here, however
   // this signal is not carried forward for navigations that open links in new
   // tabs, so we look only at PAGE_TRANSITION_LINK. Back/forward navigations
@@ -452,59 +363,68 @@ FromGWSPageLoadMetricsObserver::OnCommit(
           navigation_handle->GetPageTransition()));
 
   logger_.SetNavigationStart(navigation_handle->NavigationStart());
+  logger_.OnCommit(navigation_handle, source_id);
   return CONTINUE_OBSERVING;
 }
 
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+FromGWSPageLoadMetricsObserver::FlushMetricsOnAppEnterBackground(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& extra_info) {
+  logger_.FlushMetricsOnAppEnterBackground(timing, extra_info);
+  return STOP_OBSERVING;
+}
+
 void FromGWSPageLoadMetricsObserver::OnDomContentLoadedEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   logger_.OnDomContentLoadedEventStart(timing, extra_info);
 }
 
 void FromGWSPageLoadMetricsObserver::OnLoadEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   logger_.OnLoadEventStart(timing, extra_info);
 }
 
-void FromGWSPageLoadMetricsObserver::OnFirstPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsObserver::OnFirstPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  logger_.OnFirstPaint(timing, extra_info);
+  logger_.OnFirstPaintInPage(timing, extra_info);
 }
 
-void FromGWSPageLoadMetricsObserver::OnFirstTextPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsObserver::OnFirstTextPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  logger_.OnFirstTextPaint(timing, extra_info);
+  logger_.OnFirstTextPaintInPage(timing, extra_info);
 }
 
-void FromGWSPageLoadMetricsObserver::OnFirstImagePaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsObserver::OnFirstImagePaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  logger_.OnFirstImagePaint(timing, extra_info);
+  logger_.OnFirstImagePaintInPage(timing, extra_info);
 }
 
-void FromGWSPageLoadMetricsObserver::OnFirstContentfulPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  logger_.OnFirstContentfulPaint(timing, extra_info);
+  logger_.OnFirstContentfulPaintInPage(timing, extra_info);
 }
 
 void FromGWSPageLoadMetricsObserver::OnParseStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   logger_.OnParseStart(timing, extra_info);
 }
 
 void FromGWSPageLoadMetricsObserver::OnParseStop(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   logger_.OnParseStop(timing, extra_info);
 }
 
 void FromGWSPageLoadMetricsObserver::OnComplete(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   logger_.OnComplete(timing, extra_info);
 }
@@ -520,8 +440,20 @@ void FromGWSPageLoadMetricsObserver::OnUserInput(
   logger_.OnUserInput(event);
 }
 
+void FromGWSPageLoadMetricsLogger::OnCommit(
+    content::NavigationHandle* navigation_handle,
+    ukm::SourceId source_id) {
+  if (!ShouldLogPostCommitMetrics(navigation_handle->GetURL()))
+    return;
+  ukm::UkmRecorder* ukm_recorder = g_browser_process->ukm_recorder();
+  if (ukm_recorder) {
+    ukm_recorder->GetEntryBuilder(source_id,
+                                  internal::kUkmFromGoogleSearchName);
+  }
+}
+
 void FromGWSPageLoadMetricsLogger::OnComplete(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
   if (!ShouldLogPostCommitMetrics(extra_info.url))
     return;
@@ -537,15 +469,18 @@ void FromGWSPageLoadMetricsLogger::OnComplete(
   // timing IPCs are tracked via the ERR_NO_IPCS_RECEIVED error code in the
   // PageLoad.Events.InternalError histogram, so we can keep track of how often
   // this happens.
-  if (timing.IsEmpty())
+  if (page_load_metrics::IsEmpty(timing))
     return;
 
-  if (!timing.first_paint || timing.first_paint >= abort_info.time_to_abort) {
+  if (!timing.paint_timing->first_paint ||
+      timing.paint_timing->first_paint >= abort_info.time_to_abort) {
     LogCommittedAbortsBeforePaint(abort_info.reason, abort_info.time_to_abort);
   } else if (WasAbortedBeforeInteraction(abort_info,
                                          first_user_interaction_after_paint_)) {
     LogAbortsAfterPaintBeforeInteraction(abort_info);
   }
+
+  LogForegroundDurations(timing, extra_info, base::TimeTicks());
 }
 
 void FromGWSPageLoadMetricsLogger::OnFailedProvisionalLoad(
@@ -559,11 +494,14 @@ void FromGWSPageLoadMetricsLogger::OnFailedProvisionalLoad(
     return;
 
   LogProvisionalAborts(abort_info);
+
+  LogForegroundDurations(page_load_metrics::mojom::PageLoadTiming(), extra_info,
+                         base::TimeTicks());
 }
 
 bool FromGWSPageLoadMetricsLogger::ShouldLogFailedProvisionalLoadMetrics() {
   // See comment in ShouldLogPostCommitMetrics above the call to
-  // IsGoogleSearchHostname for more info on this if test.
+  // page_load_metrics::IsGoogleSearchHostname for more info on this if test.
   if (provisional_url_has_search_hostname_)
     return false;
 
@@ -583,7 +521,7 @@ bool FromGWSPageLoadMetricsLogger::ShouldLogPostCommitMetrics(const GURL& url) {
   // these cases are relatively uncommon, and we run the risk of logging metrics
   // for some search redirector URLs. Thus we choose the more conservative
   // approach of ignoring all urls on known search hostnames.
-  if (IsGoogleSearchHostname(url.host_piece()))
+  if (page_load_metrics::IsGoogleSearchHostname(url))
     return false;
 
   // We're only interested in tracking navigations (e.g. clicks) initiated via
@@ -612,88 +550,94 @@ bool FromGWSPageLoadMetricsLogger::ShouldLogForegroundEventAfterCommit(
 }
 
 void FromGWSPageLoadMetricsLogger::OnDomContentLoadedEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.dom_content_loaded_event_start,
-                                          extra_info)) {
-    PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSDomContentLoaded,
-                        timing.dom_content_loaded_event_start.value());
+  if (ShouldLogForegroundEventAfterCommit(
+          timing.document_timing->dom_content_loaded_event_start, extra_info)) {
+    PAGE_LOAD_HISTOGRAM(
+        internal::kHistogramFromGWSDomContentLoaded,
+        timing.document_timing->dom_content_loaded_event_start.value());
   }
 }
 
 void FromGWSPageLoadMetricsLogger::OnLoadEventStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.load_event_start,
-                                          extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(
+          timing.document_timing->load_event_start, extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSLoad,
-                        timing.load_event_start.value());
+                        timing.document_timing->load_event_start.value());
   }
 }
 
-void FromGWSPageLoadMetricsLogger::OnFirstPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsLogger::OnFirstPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.first_paint, extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(timing.paint_timing->first_paint,
+                                          extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSFirstPaint,
-                        timing.first_paint.value());
+                        timing.paint_timing->first_paint.value());
   }
   first_paint_triggered_ = true;
 }
 
-void FromGWSPageLoadMetricsLogger::OnFirstTextPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsLogger::OnFirstTextPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.first_text_paint,
+  if (ShouldLogForegroundEventAfterCommit(timing.paint_timing->first_text_paint,
                                           extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSFirstTextPaint,
-                        timing.first_text_paint.value());
+                        timing.paint_timing->first_text_paint.value());
   }
 }
 
-void FromGWSPageLoadMetricsLogger::OnFirstImagePaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsLogger::OnFirstImagePaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.first_image_paint,
-                                          extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(
+          timing.paint_timing->first_image_paint, extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSFirstImagePaint,
-                        timing.first_image_paint.value());
+                        timing.paint_timing->first_image_paint.value());
   }
 }
 
-void FromGWSPageLoadMetricsLogger::OnFirstContentfulPaint(
-    const page_load_metrics::PageLoadTiming& timing,
+void FromGWSPageLoadMetricsLogger::OnFirstContentfulPaintInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.first_contentful_paint,
-                                          extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(
+          timing.paint_timing->first_contentful_paint, extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSFirstContentfulPaint,
-                        timing.first_contentful_paint.value());
+                        timing.paint_timing->first_contentful_paint.value());
 
     // If we have a foreground paint, we should have a foreground parse start,
     // since paints can't happen until after parsing starts.
-    DCHECK(WasStartedInForegroundOptionalEventInForeground(timing.parse_start,
-                                                           extra_info));
+    DCHECK(WasStartedInForegroundOptionalEventInForeground(
+        timing.parse_timing->parse_start, extra_info));
     PAGE_LOAD_HISTOGRAM(
         internal::kHistogramFromGWSParseStartToFirstContentfulPaint,
-        timing.first_contentful_paint.value() - timing.parse_start.value());
+        timing.paint_timing->first_contentful_paint.value() -
+            timing.parse_timing->parse_start.value());
   }
 }
 
 void FromGWSPageLoadMetricsLogger::OnParseStart(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.parse_start, extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(timing.parse_timing->parse_start,
+                                          extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSParseStart,
-                        timing.parse_start.value());
+                        timing.parse_timing->parse_start.value());
   }
 }
 
 void FromGWSPageLoadMetricsLogger::OnParseStop(
-    const page_load_metrics::PageLoadTiming& timing,
+    const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
-  if (ShouldLogForegroundEventAfterCommit(timing.parse_stop, extra_info)) {
+  if (ShouldLogForegroundEventAfterCommit(timing.parse_timing->parse_stop,
+                                          extra_info)) {
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSParseDuration,
-                        timing.parse_stop.value() - timing.parse_start.value());
+                        timing.parse_timing->parse_stop.value() -
+                            timing.parse_timing->parse_start.value());
   }
 }
 
@@ -704,4 +648,10 @@ void FromGWSPageLoadMetricsLogger::OnUserInput(
     first_user_interaction_after_paint_ =
         base::TimeTicks::Now() - navigation_start_;
   }
+}
+
+void FromGWSPageLoadMetricsLogger::FlushMetricsOnAppEnterBackground(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& extra_info) {
+  LogForegroundDurations(timing, extra_info, base::TimeTicks::Now());
 }

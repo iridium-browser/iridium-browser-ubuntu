@@ -13,6 +13,21 @@
 
 namespace ntp_snippets {
 
+// Keep sorted, and keep nullptr at the end.
+const base::Feature*(kAllFeatures[]) = {&kArticleSuggestionsFeature,
+                                        &kBookmarkSuggestionsFeature,
+                                        &kCategoryOrder,
+                                        &kCategoryRanker,
+                                        &kBreakingNewsPushFeature,
+                                        &kForeignSessionsSuggestionsFeature,
+                                        &kIncreasedVisibility,
+                                        &kKeepPrefetchedContentSuggestions,
+                                        &kNotificationsFeature,
+                                        &kPhysicalWebPageSuggestionsFeature,
+                                        &kPublisherFaviconsFromNewServerFeature,
+                                        &kRecentOfflineTabSuggestionsFeature,
+                                        nullptr};
+
 const base::Feature kArticleSuggestionsFeature{
     "NTPArticleSuggestions", base::FEATURE_ENABLED_BY_DEFAULT};
 
@@ -22,14 +37,8 @@ const base::Feature kBookmarkSuggestionsFeature{
 const base::Feature kRecentOfflineTabSuggestionsFeature{
     "NTPOfflinePageSuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kSaveToOfflineFeature{
-    "NTPSaveToOffline", base::FEATURE_ENABLED_BY_DEFAULT};
-
-const base::Feature kOfflineBadgeFeature{
-    "NTPOfflineBadge", base::FEATURE_ENABLED_BY_DEFAULT};
-
-const base::Feature kIncreasedVisibility{
-    "NTPSnippetsIncreasedVisibility", base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kIncreasedVisibility{"NTPSnippetsIncreasedVisibility",
+                                         base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kPhysicalWebPageSuggestionsFeature{
     "NTPPhysicalWebPageSuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
@@ -37,11 +46,19 @@ const base::Feature kPhysicalWebPageSuggestionsFeature{
 const base::Feature kForeignSessionsSuggestionsFeature{
     "NTPForeignSessionsSuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kPreferAmpUrlsFeature{"NTPPreferAmpUrls",
-                                          base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kBreakingNewsPushFeature{"BreakingNewsPush",
+                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kCategoryRanker{"ContentSuggestionsCategoryRanker",
                                     base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kPublisherFaviconsFromNewServerFeature{
+    "ContentSuggestionsFaviconsFromNewServer",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kRemoteSuggestionsEmulateM58FetchingSchedule{
+    "RemoteSuggestionsEmulateM58FetchingSchedule",
+    base::FEATURE_DISABLED_BY_DEFAULT};
 
 const char kCategoryRankerParameter[] = "category_ranker";
 const char kCategoryRankerConstantRanker[] = "constant";
@@ -53,6 +70,9 @@ CategoryRankerChoice GetSelectedCategoryRanker() {
                                                   kCategoryRankerParameter);
 
   if (category_ranker_value.empty()) {
+    // TODO(crbug.com/735066): Remove the experiment configurations from
+    // fieldtrial_testing_config.json when enabling ClickBasedRanker by default.
+
     // Default, Enabled or Disabled.
     return CategoryRankerChoice::CONSTANT;
   }
@@ -114,5 +134,22 @@ CategoryOrderChoice GetSelectedCategoryOrder() {
               << category_order_value << "'";
   return CategoryOrderChoice::GENERAL;
 }
+
+const base::Feature kNotificationsFeature = {"ContentSuggestionsNotifications",
+                                             base::FEATURE_DISABLED_BY_DEFAULT};
+
+const char kNotificationsPriorityParam[] = "priority";
+const char kNotificationsTextParam[] = "text";
+const char kNotificationsTextValuePublisher[] = "publisher";
+const char kNotificationsTextValueSnippet[] = "snippet";
+const char kNotificationsTextValueAndMore[] = "and_more";
+const char kNotificationsKeepWhenFrontmostParam[] =
+    "keep_notification_when_frontmost";
+const char kNotificationsOpenToNTPParam[] = "open_to_ntp";
+const char kNotificationsDailyLimit[] = "daily_limit";
+const char kNotificationsIgnoredLimitParam[] = "ignored_limit";
+
+const base::Feature kKeepPrefetchedContentSuggestions{
+    "KeepPrefetchedContentSuggestions", base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace ntp_snippets

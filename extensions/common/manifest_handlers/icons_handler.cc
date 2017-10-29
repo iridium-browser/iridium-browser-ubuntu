@@ -23,11 +23,12 @@ namespace extensions {
 
 namespace keys = manifest_keys;
 
-static base::LazyInstance<ExtensionIconSet> g_empty_icon_set =
+static base::LazyInstance<ExtensionIconSet>::DestructorAtExit g_empty_icon_set =
     LAZY_INSTANCE_INITIALIZER;
 
 // static
 const ExtensionIconSet& IconsInfo::GetIcons(const Extension* extension) {
+  DCHECK(extension);
   IconsInfo* info = static_cast<IconsInfo*>(
       extension->GetManifestData(keys::kIcons));
   return info ? info->icons : g_empty_icon_set.Get();

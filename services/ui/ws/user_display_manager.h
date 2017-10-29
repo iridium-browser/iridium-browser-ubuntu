@@ -29,6 +29,11 @@ class UserDisplayManager : public mojom::DisplayManager {
                      const UserId& user_id);
   ~UserDisplayManager() override;
 
+  void DisableAutomaticNotification();
+
+  // Unconditionally calls OnDisplayChanged() on observers.
+  void CallOnDisplaysChanged();
+
   // Called when the frame decorations for this user change.
   void OnFrameDecorationValuesChanged();
 
@@ -36,10 +41,10 @@ class UserDisplayManager : public mojom::DisplayManager {
       mojo::InterfaceRequest<mojom::DisplayManager> request);
 
   // Called when something about the display (e.g. pixel-ratio, size) changes.
-  void OnDisplayUpdate(const display::Display& display);
+  void OnDisplayUpdated(const display::Display& display);
 
-  // Called when |display_id| is being removed.
-  void OnWillDestroyDisplay(int64_t display_id);
+  // Called when the display with |display_id| was removed.
+  void OnDisplayDestroyed(int64_t display_id);
 
   // Called when the primary display changes.
   void OnPrimaryDisplayChanged(int64_t primary_display_id);
@@ -57,8 +62,13 @@ class UserDisplayManager : public mojom::DisplayManager {
 
   std::vector<mojom::WsDisplayPtr> GetAllDisplays();
 
-  // Calls OnDisplays() on |observer|.
-  void CallOnDisplays(mojom::DisplayManagerObserver* observer);
+  bool ShouldCallOnDisplaysChanged() const;
+
+  // Calls OnDisplaysChanged() on all observers.
+  void CallOnDisplaysChangedIfNecessary();
+
+  // Calls OnDisplaysChanged() on |observer|.
+  void CallOnDisplaysChanged(mojom::DisplayManagerObserver* observer);
 
   UserDisplayManagerDelegate* delegate_;
 
@@ -72,6 +82,12 @@ class UserDisplayManager : public mojom::DisplayManager {
   // WARNING: only use these once |got_valid_frame_decorations_| is true.
   mojo::InterfacePtrSet<mojom::DisplayManagerObserver>
       display_manager_observers_;
+
+  // If true DisplayManagerObservers are notified any time there is a display
+  // change. If false, observers are only notified when CallOnDisplaysChanged()
+  // is explicitly called. This value is true in automatic display creation and
+  // false when in manual mode.
+  bool notify_automatically_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(UserDisplayManager);
 };

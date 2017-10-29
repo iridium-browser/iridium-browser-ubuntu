@@ -26,7 +26,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/locale_settings.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
@@ -324,11 +323,22 @@ MessageType GetStatusInfo(Profile* profile,
                                        link_label, action_type);
       }
     } else if (signin.IsAuthenticated()) {
-      // The user is signed in, but sync has been stopped.
-      result_type = PRE_SYNCED;
-      if (status_label) {
-        status_label->assign(
-            l10n_util::GetStringUTF16(IDS_SIGNED_IN_WITH_SYNC_SUPPRESSED));
+      if (service->IsSyncConfirmationNeeded()) {
+        if (status_label && link_label) {
+          status_label->assign(
+              l10n_util::GetStringUTF16(IDS_SYNC_SETTINGS_NOT_CONFIRMED));
+          link_label->assign(l10n_util::GetStringUTF16(
+              IDS_SYNC_ERROR_USER_MENU_CONFIRM_SYNC_SETTINGS_BUTTON));
+        }
+        *action_type = CONFIRM_SYNC_SETTINGS;
+        result_type = SYNC_ERROR;
+      } else {
+        // The user is signed in, but sync has been stopped.
+        result_type = PRE_SYNCED;
+        if (status_label) {
+          status_label->assign(
+              l10n_util::GetStringUTF16(IDS_SIGNED_IN_WITH_SYNC_SUPPRESSED));
+        }
       }
     }
   }
@@ -402,38 +412,11 @@ MessageType GetStatusLabelsForNewTabPage(Profile* profile,
 }
 
 #if !defined(OS_CHROMEOS)
-void GetStatusLabelsForSyncGlobalError(const ProfileSyncService* service,
-                                       base::string16* menu_label,
-                                       base::string16* bubble_message,
-                                       base::string16* bubble_accept_label) {
-  DCHECK(menu_label);
-  DCHECK(bubble_message);
-  DCHECK(bubble_accept_label);
-  *menu_label = base::string16();
-  *bubble_message = base::string16();
-  *bubble_accept_label = base::string16();
-
-  // Only display an error if we've completed sync setup.
-  if (!service->IsFirstSetupComplete())
-    return;
-
-  // Display a passphrase error if we have one.
-  if (service->IsPassphraseRequired() &&
-      service->IsPassphraseRequiredForDecryption()) {
-    // This is not the first machine so ask user to enter passphrase.
-    *menu_label = l10n_util::GetStringUTF16(
-        IDS_SYNC_PASSPHRASE_ERROR_WRENCH_MENU_ITEM);
-    *bubble_message = l10n_util::GetStringUTF16(
-        IDS_SYNC_PASSPHRASE_ERROR_BUBBLE_VIEW_MESSAGE);
-    *bubble_accept_label = l10n_util::GetStringUTF16(
-        IDS_SYNC_PASSPHRASE_ERROR_BUBBLE_VIEW_ACCEPT);
-    return;
-  }
-}
-
-AvatarSyncErrorType GetMessagesForAvatarSyncError(Profile* profile,
-                                                  int* content_string_id,
-                                                  int* button_string_id) {
+AvatarSyncErrorType GetMessagesForAvatarSyncError(
+    Profile* profile,
+    const SigninManagerBase& signin,
+    int* content_string_id,
+    int* button_string_id) {
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile);
 
@@ -498,6 +481,13 @@ AvatarSyncErrorType GetMessagesForAvatarSyncError(Profile* profile,
       *content_string_id = IDS_SYNC_ERROR_USER_MENU_PASSPHRASE_MESSAGE;
       *button_string_id = IDS_SYNC_ERROR_USER_MENU_PASSPHRASE_BUTTON;
       return PASSPHRASE_ERROR;
+    }
+
+    // Check for a sync confirmation error.
+    if (signin.IsAuthenticated() && service->IsSyncConfirmationNeeded()) {
+      *content_string_id = IDS_SYNC_SETTINGS_NOT_CONFIRMED;
+      *button_string_id = IDS_SYNC_ERROR_USER_MENU_CONFIRM_SYNC_SETTINGS_BUTTON;
+      return SETTINGS_UNCONFIRMED_ERROR;
     }
   }
 

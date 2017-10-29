@@ -54,7 +54,7 @@ const int kWindowCornerRadius = 4;
 // Creates and shows the message widget for |view| with |animation_time_ms|.
 void CreateAndShowWidget(views::WidgetDelegateView* delegate,
                          int animation_time_ms) {
-  aura::Window* root_window = ash::Shell::GetTargetRootWindow();
+  aura::Window* root_window = ash::Shell::GetRootWindowForNewWindows();
   gfx::Size rs = root_window->bounds().size();
   gfx::Size ps = delegate->GetPreferredSize();
   gfx::Rect bounds((rs.width() - ps.width()) / 2,
@@ -191,7 +191,6 @@ class IdleAppNameNotificationDelegateView
     label->SetHorizontalAlignment(gfx::ALIGN_CENTER);
     label->SetFontList(font);
     label->SetEnabledColor(text_color);
-    label->SetDisabledColor(text_color);
     label->SetAutoColorReadabilityEnabled(false);
     AddChildView(label);
   }

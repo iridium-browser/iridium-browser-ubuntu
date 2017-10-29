@@ -10,6 +10,7 @@
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -133,6 +134,27 @@ void AddPattern(URLPatternSet* extent, const std::string& pattern) {
   extent->AddPattern(URLPattern(schemes, pattern));
 }
 
+class PermissionsUpdaterTestDelegate : public PermissionsUpdater::Delegate {
+ public:
+  PermissionsUpdaterTestDelegate() {}
+  ~PermissionsUpdaterTestDelegate() override {}
+
+  // PermissionsUpdater::Delegate
+  void InitializePermissions(
+      const Extension* extension,
+      std::unique_ptr<const PermissionSet>* granted_permissions) override {
+    // Remove the cookie permission.
+    APIPermissionSet api_permission_set((*granted_permissions)->apis());
+    api_permission_set.erase(APIPermission::kCookie);
+    granted_permissions->reset(
+        new PermissionSet(api_permission_set, ManifestPermissionSet(),
+                          URLPatternSet(), URLPatternSet()));
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(PermissionsUpdaterTestDelegate);
+};
+
 }  // namespace
 
 // Test that the PermissionUpdater can correctly add and remove active
@@ -250,6 +272,15 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissions) {
         APIPermissionSet(), ManifestPermissionSet(), set, URLPatternSet());
   };
 
+  auto can_access_page =
+      [](scoped_refptr<const extensions::Extension> extension,
+         const GURL& document_url) -> bool {
+    PermissionsData::AccessType access =
+        extension.get()->permissions_data()->GetPageAccess(
+            extension.get(), document_url, -1, nullptr);
+    return access == PermissionsData::ACCESS_ALLOWED;
+  };
+
   {
     // Test revoking optional permissions.
     ListBuilder optional_permissions;
@@ -325,6 +356,7 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissions) {
     // By default, all-hosts was withheld, so the extension shouldn't have
     // access to any site (like foo.com).
     const GURL kOrigin("http://foo.com");
+
     EXPECT_FALSE(extension->permissions_data()
                      ->active_permissions()
                      .HasExplicitAccessToOrigin(kOrigin));
@@ -360,6 +392,132 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissions) {
                     .HasExplicitAccessToOrigin(kOrigin));
     EXPECT_TRUE(updater.GetRevokablePermissions(extension.get())->IsEmpty());
   }
+
+  {
+    // Make sure policy restriction updates update permission data.
+    URLPatternSet default_policy_blocked_hosts;
+    URLPatternSet default_policy_allowed_hosts;
+    URLPatternSet policy_blocked_hosts;
+    URLPatternSet policy_allowed_hosts;
+    ListBuilder optional_permissions;
+    ListBuilder required_permissions;
+    required_permissions.Append("tabs").Append("http://*/*");
+    scoped_refptr<const Extension> extension =
+        CreateExtensionWithOptionalPermissions(optional_permissions.Build(),
+                                               required_permissions.Build(),
+                                               "ExtensionSettings");
+    AddPattern(&default_policy_blocked_hosts, "http://*.google.com/*");
+    PermissionsUpdater updater(profile());
+    updater.InitializePermissions(extension.get());
+    extension->permissions_data()->SetDefaultPolicyHostRestrictions(
+        default_policy_blocked_hosts, default_policy_allowed_hosts);
+
+    // By default, all subdomains of google.com should be blocked.
+    const GURL kOrigin("http://foo.com");
+    const GURL kGoogle("http://www.google.com");
+    const GURL kExampleGoogle("http://example.google.com");
+    EXPECT_TRUE(
+        extension->permissions_data()->UsesDefaultPolicyHostRestrictions());
+    EXPECT_TRUE(can_access_page(extension, kOrigin));
+    EXPECT_FALSE(can_access_page(extension, kGoogle));
+    EXPECT_FALSE(can_access_page(extension, kExampleGoogle));
+
+    AddPattern(&default_policy_allowed_hosts, "http://example.google.com/*");
+    // Give the extension access to example.google.com. Now the
+    // example.google.com should not be a runtime blocked host.
+    updater.SetDefaultPolicyHostRestrictions(default_policy_blocked_hosts,
+                                             default_policy_allowed_hosts);
+
+    EXPECT_TRUE(
+        extension->permissions_data()->UsesDefaultPolicyHostRestrictions());
+    EXPECT_TRUE(can_access_page(extension, kOrigin));
+    EXPECT_FALSE(can_access_page(extension, kGoogle));
+    EXPECT_TRUE(can_access_page(extension, kExampleGoogle));
+
+    // Revoke extension access to foo.com. Now, foo.com should be a runtime
+    // blocked host.
+    AddPattern(&default_policy_blocked_hosts, "*://*.foo.com/");
+    updater.SetDefaultPolicyHostRestrictions(default_policy_blocked_hosts,
+                                             default_policy_allowed_hosts);
+    EXPECT_TRUE(
+        extension->permissions_data()->UsesDefaultPolicyHostRestrictions());
+    EXPECT_FALSE(can_access_page(extension, kOrigin));
+    EXPECT_FALSE(can_access_page(extension, kGoogle));
+    EXPECT_TRUE(can_access_page(extension, kExampleGoogle));
+
+    // Remove foo.com from blocked hosts. The extension should no longer have
+    // be a runtime blocked host.
+    default_policy_blocked_hosts.ClearPatterns();
+    AddPattern(&default_policy_blocked_hosts, "*://*.foo.com/");
+    updater.SetDefaultPolicyHostRestrictions(default_policy_blocked_hosts,
+                                             default_policy_allowed_hosts);
+    EXPECT_TRUE(
+        extension->permissions_data()->UsesDefaultPolicyHostRestrictions());
+    EXPECT_FALSE(can_access_page(extension, kOrigin));
+    EXPECT_TRUE(can_access_page(extension, kGoogle));
+    EXPECT_TRUE(can_access_page(extension, kExampleGoogle));
+
+    // Set an empty individual policy, should not affect default policy.
+    updater.SetPolicyHostRestrictions(extension.get(), policy_blocked_hosts,
+                                      policy_allowed_hosts);
+    EXPECT_FALSE(
+        extension->permissions_data()->UsesDefaultPolicyHostRestrictions());
+    EXPECT_TRUE(can_access_page(extension, kOrigin));
+    EXPECT_TRUE(can_access_page(extension, kGoogle));
+    EXPECT_TRUE(can_access_page(extension, kExampleGoogle));
+
+    // Block google.com for the Individual scope.
+    // Whitelist example.google.com for the Indiviaul scope.
+    // Leave google.com and example.google.com off both the whitelist and
+    // blacklist for Default scope.
+    AddPattern(&policy_blocked_hosts, "*://*.google.com/*");
+    AddPattern(&policy_allowed_hosts, "*://example.google.com/*");
+    updater.SetPolicyHostRestrictions(extension.get(), policy_blocked_hosts,
+                                      policy_allowed_hosts);
+    EXPECT_FALSE(
+        extension->permissions_data()->UsesDefaultPolicyHostRestrictions());
+    EXPECT_TRUE(can_access_page(extension, kOrigin));
+    EXPECT_FALSE(can_access_page(extension, kGoogle));
+    EXPECT_TRUE(can_access_page(extension, kExampleGoogle));
+
+    // Switch back to default scope for extension.
+    updater.SetUsesDefaultHostRestrictions(extension.get());
+    EXPECT_TRUE(
+        extension->permissions_data()->UsesDefaultPolicyHostRestrictions());
+    default_policy_blocked_hosts.ClearPatterns();
+    default_policy_allowed_hosts.ClearPatterns();
+    updater.SetDefaultPolicyHostRestrictions(default_policy_blocked_hosts,
+                                             default_policy_allowed_hosts);
+  }
+}
+
+// Test that the permissions updater delegate works - in this test it removes
+// the cookies permission.
+TEST_F(PermissionsUpdaterTest, Delegate) {
+  InitializeEmptyExtensionService();
+
+  ListBuilder required_permissions;
+  required_permissions.Append("tabs").Append("management").Append("cookies");
+  scoped_refptr<const Extension> extension =
+      CreateExtensionWithOptionalPermissions(
+          base::MakeUnique<base::ListValue>(),
+          required_permissions.Build(),
+          "My Extension");
+
+  auto test_delegate = base::MakeUnique<PermissionsUpdaterTestDelegate>();
+  PermissionsUpdater::SetPlatformDelegate(test_delegate.get());
+  PermissionsUpdater updater(profile());
+  updater.InitializePermissions(extension.get());
+
+  EXPECT_TRUE(extension->permissions_data()->HasAPIPermission(
+      APIPermission::kTab));
+  EXPECT_TRUE(extension->permissions_data()->HasAPIPermission(
+      APIPermission::kManagement));
+  EXPECT_FALSE(extension->permissions_data()->HasAPIPermission(
+      APIPermission::kCookie));
+
+  // Unset the delegate.
+  PermissionsUpdater::SetPlatformDelegate(nullptr);
 }
 
 }  // namespace extensions

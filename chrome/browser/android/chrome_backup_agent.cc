@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <jni.h>
-
 #include <iterator>
 #include <string>
 #include <vector>
@@ -11,6 +9,7 @@
 #include "base/android/jni_array.h"
 #include "chrome/browser/android/chrome_backup_agent.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/base/pref_names.h"
 #include "jni/ChromeBackupAgent_jni.h"
@@ -18,6 +17,7 @@
 namespace {
 
 const char* backed_up_preferences_[] = {
+    prefs::kDataSaverEnabled,
     syncer::prefs::kSyncFirstSetupComplete,
     syncer::prefs::kSyncKeepEverythingSynced,
     syncer::prefs::kSyncAutofillProfile,
@@ -72,7 +72,8 @@ static void SetBoolBackupPrefs(
     const base::android::JavaParamRef<jbooleanArray>& values) {
   std::vector<std::string> pref_names;
   base::android::AppendJavaStringArrayToStringVector(env, names, &pref_names);
-  jboolean* pref_values = env->GetBooleanArrayElements(values, nullptr);
+  std::vector<bool> pref_values;
+  JavaBooleanArrayToBoolVector(env, values, &pref_values);
   std::unordered_set<std::string> valid_prefs(
       std::begin(backed_up_preferences_), std::end(backed_up_preferences_));
 
@@ -91,10 +92,6 @@ namespace android {
 std::vector<std::string> GetBackupPrefNames() {
   return std::vector<std::string>(std::begin(backed_up_preferences_),
                                   std::end(backed_up_preferences_));
-}
-
-bool RegisterBackupAgent(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 base::android::ScopedJavaLocalRef<jobjectArray> GetBoolBackupNamesForTesting(

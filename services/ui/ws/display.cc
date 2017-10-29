@@ -12,12 +12,12 @@
 #include "base/strings/utf_string_conversions.h"
 #include "services/service_manager/public/interfaces/connector.mojom.h"
 #include "services/ui/common/types.h"
-#include "services/ui/public/interfaces/cursor.mojom.h"
+#include "services/ui/display/viewport_metrics.h"
+#include "services/ui/public/interfaces/cursor/cursor.mojom.h"
 #include "services/ui/ws/display_binding.h"
 #include "services/ui/ws/display_manager.h"
 #include "services/ui/ws/focus_controller.h"
 #include "services/ui/ws/platform_display.h"
-#include "services/ui/ws/platform_display_init_params.h"
 #include "services/ui/ws/user_activity_monitor.h"
 #include "services/ui/ws/window_manager_display_root.h"
 #include "services/ui/ws/window_manager_state.h"
@@ -27,12 +27,16 @@
 #include "services/ui/ws/window_tree.h"
 #include "services/ui/ws/window_tree_binding.h"
 #include "ui/base/cursor/cursor.h"
+#include "ui/display/screen.h"
+
+#if defined(USE_OZONE)
+#include "ui/ozone/public/ozone_platform.h"
+#endif
 
 namespace ui {
 namespace ws {
 
-Display::Display(WindowServer* window_server)
-    : window_server_(window_server), last_cursor_(mojom::Cursor::CURSOR_NULL) {
+Display::Display(WindowServer* window_server) : window_server_(window_server) {
   window_server_->window_manager_window_tree_factory_set()->AddObserver(this);
   window_server_->user_id_tracker()->AddObserver(this);
 }
@@ -60,21 +64,32 @@ Display::~Display() {
   }
 }
 
-void Display::Init(const PlatformDisplayInitParams& init_params,
+void Display::Init(const display::ViewportMetrics& metrics,
                    std::unique_ptr<DisplayBinding> binding) {
   binding_ = std::move(binding);
   display_manager()->AddDisplay(this);
 
-  CreateRootWindow(init_params.metrics.pixel_size);
-  PlatformDisplayInitParams params_copy = init_params;
-  params_copy.root_window = root_.get();
+  CreateRootWindow(metrics.bounds_in_pixels.size());
 
-  platform_display_ = PlatformDisplay::Create(params_copy);
+  platform_display_ = PlatformDisplay::Create(
+      root_.get(), metrics, window_server_->GetThreadedImageCursorsFactory());
   platform_display_->Init(this);
+  UpdateCursorConfig();
 }
 
 int64_t Display::GetId() const {
-  return platform_display_->GetId();
+  // TODO(tonikitoo): Implement a different ID for external window mode.
+  return display_.id();
+}
+
+void Display::SetDisplay(const display::Display& display) {
+  display_ = display;
+
+  UpdateCursorConfig();
+}
+
+const display::Display& Display::GetDisplay() {
+  return display_;
 }
 
 DisplayManager* Display::display_manager() {
@@ -83,22 +98,6 @@ DisplayManager* Display::display_manager() {
 
 const DisplayManager* Display::display_manager() const {
   return window_server_->display_manager();
-}
-
-display::Display Display::ToDisplay() const {
-  display::Display display(GetId());
-
-  const display::ViewportMetrics& metrics =
-      platform_display_->GetViewportMetrics();
-
-  display.set_bounds(metrics.bounds);
-  display.set_work_area(metrics.work_area);
-  display.set_device_scale_factor(metrics.device_scale_factor);
-  display.set_rotation(metrics.rotation);
-  display.set_touch_support(
-      display::Display::TouchSupport::TOUCH_SUPPORT_UNKNOWN);
-
-  return display;
 }
 
 gfx::Size Display::GetSize() const {
@@ -189,11 +188,26 @@ void Display::OnWillDestroyTree(WindowTree* tree) {
   }
 }
 
-void Display::UpdateNativeCursor(mojom::Cursor cursor_id) {
-  if (cursor_id != last_cursor_) {
-    platform_display_->SetCursorById(cursor_id);
-    last_cursor_ = cursor_id;
+void Display::RemoveWindowManagerDisplayRoot(
+    WindowManagerDisplayRoot* display_root) {
+  for (auto it = window_manager_display_root_map_.begin();
+       it != window_manager_display_root_map_.end(); ++it) {
+    if (it->second == display_root) {
+      window_manager_display_root_map_.erase(it);
+      if (window_manager_display_root_map_.empty())
+        display_manager()->DestroyDisplay(this);
+      return;
+    }
   }
+  NOTREACHED();
+}
+
+void Display::SetNativeCursor(const ui::CursorData& cursor) {
+  platform_display_->SetCursor(cursor);
+}
+
+void Display::SetNativeCursorSize(ui::CursorSize cursor_size) {
+  platform_display_->SetCursorSize(cursor_size);
 }
 
 void Display::SetSize(const gfx::Size& size) {
@@ -220,7 +234,7 @@ void Display::InitWindowManagerDisplayRoots() {
   } else {
     CreateWindowManagerDisplayRootsFromFactories();
   }
-  display_manager()->OnDisplayUpdate(this);
+  display_manager()->OnDisplayUpdated(display_);
 }
 
 void Display::CreateWindowManagerDisplayRootsFromFactories() {
@@ -258,37 +272,33 @@ void Display::CreateRootWindow(const gfx::Size& size) {
       ServerWindow::Properties()));
   root_->set_event_targeting_policy(
       mojom::EventTargetingPolicy::DESCENDANTS_ONLY);
-  root_->SetBounds(gfx::Rect(size));
+  root_->SetBounds(gfx::Rect(size), allocator_.GenerateId());
   root_->SetVisible(true);
   focus_controller_ = base::MakeUnique<FocusController>(this, root_.get());
   focus_controller_->AddObserver(this);
 }
 
-display::Display Display::GetDisplay() {
-  return ToDisplay();
+void Display::UpdateCursorConfig() {
+  float scale = display_.device_scale_factor();
+
+  if (!display_manager()->IsInternalDisplay(display_))
+    scale *= ui::mojom::kCursorMultiplierForExternalDisplays;
+
+  if (platform_display_)
+    platform_display_->SetCursorConfig(display_.rotation(), scale);
 }
 
 ServerWindow* Display::GetRootWindow() {
   return root_.get();
 }
 
+EventSink* Display::GetEventSink() {
+  return this;
+}
+
 void Display::OnAcceleratedWidgetAvailable() {
   display_manager()->OnDisplayAcceleratedWidgetAvailable(this);
   InitWindowManagerDisplayRoots();
-}
-
-bool Display::IsInHighContrastMode() {
-  return window_server_->IsActiveUserInHighContrastMode();
-}
-
-void Display::OnEvent(const ui::Event& event) {
-  WindowManagerDisplayRoot* display_root = GetActiveWindowManagerDisplayRoot();
-  if (display_root)
-    display_root->window_manager_state()->ProcessEvent(event, GetId());
-  window_server_
-      ->GetUserActivityMonitorForUser(
-          window_server_->user_id_tracker()->active_id())
-      ->OnUserActivity();
 }
 
 void Display::OnNativeCaptureLost() {
@@ -297,15 +307,29 @@ void Display::OnNativeCaptureLost() {
     display_root->window_manager_state()->SetCapture(nullptr, kInvalidClientId);
 }
 
+OzonePlatform* Display::GetOzonePlatform() {
+#if defined(USE_OZONE)
+  return OzonePlatform::GetInstance();
+#else
+  return nullptr;
+#endif
+}
+
 void Display::OnViewportMetricsChanged(
     const display::ViewportMetrics& metrics) {
-  if (root_->bounds().size() == metrics.pixel_size)
+  platform_display_->UpdateViewportMetrics(metrics);
+
+  SetBoundsInPixels(metrics.bounds_in_pixels);
+}
+
+void Display::SetBoundsInPixels(const gfx::Rect& bounds_in_pixels) {
+  if (root_->bounds().size() == bounds_in_pixels.size())
     return;
 
-  gfx::Rect new_bounds(metrics.pixel_size);
-  root_->SetBounds(new_bounds);
+  gfx::Rect new_bounds(bounds_in_pixels.size());
+  root_->SetBounds(new_bounds, allocator_.GenerateId());
   for (auto& pair : window_manager_display_root_map_)
-    pair.second->root()->SetBounds(new_bounds);
+    pair.second->root()->SetBounds(new_bounds, allocator_.GenerateId());
 }
 
 ServerWindow* Display::GetActiveRootWindow() {
@@ -396,6 +420,20 @@ void Display::OnWindowManagerWindowTreeFactoryReady(
     WindowManagerWindowTreeFactory* factory) {
   if (!binding_)
     CreateWindowManagerDisplayRootFromFactory(factory);
+}
+
+EventDispatchDetails Display::OnEventFromSource(Event* event) {
+  WindowManagerDisplayRoot* display_root = GetActiveWindowManagerDisplayRoot();
+  if (display_root) {
+    WindowManagerState* wm_state = display_root->window_manager_state();
+    wm_state->ProcessEvent(*event, GetId());
+  }
+
+  UserActivityMonitor* activity_monitor =
+      window_server_->GetUserActivityMonitorForUser(
+          window_server_->user_id_tracker()->active_id());
+  activity_monitor->OnUserActivity();
+  return EventDispatchDetails();
 }
 
 }  // namespace ws

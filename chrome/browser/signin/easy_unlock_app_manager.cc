@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/extensions/api/easy_unlock_private.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "components/proximity_auth/logging/logging.h"
 #include "components/proximity_auth/switches.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_system.h"
@@ -84,8 +85,10 @@ void EasyUnlockAppManagerImpl::LaunchSetup() {
 
   const extensions::Extension* extension =
       extension_service->GetExtensionById(app_id_, false);
-  if (!extension)
+  if (!extension) {
+    PA_LOG(WARNING) << "No extension";
     return;
+  }
 
   OpenApplication(AppLaunchParams(extension_service->profile(), extension,
                                   extensions::LAUNCH_CONTAINER_WINDOW,
@@ -185,7 +188,7 @@ bool EasyUnlockAppManagerImpl::SendAuthAttemptEvent() {
       extensions::ScreenlockPrivateEventRouter::GetFactoryInstance()->Get(
           extension_service->profile());
   return screenlock_router->OnAuthAttempted(
-      proximity_auth::ScreenlockBridge::LockHandler::USER_CLICK, std::string());
+      proximity_auth::mojom::AuthType::USER_CLICK, std::string());
 }
 
 }  // namespace

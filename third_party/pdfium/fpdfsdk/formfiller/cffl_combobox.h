@@ -7,6 +7,8 @@
 #ifndef FPDFSDK_FORMFILLER_CFFL_COMBOBOX_H_
 #define FPDFSDK_FORMFILLER_CFFL_COMBOBOX_H_
 
+#include <memory>
+
 #include "core/fxcrt/fx_string.h"
 #include "fpdfsdk/formfiller/cffl_formfiller.h"
 
@@ -21,13 +23,12 @@ struct FFL_ComboBoxState {
 
 class CFFL_ComboBox : public CFFL_FormFiller, public IPWL_FocusHandler {
  public:
-  CFFL_ComboBox(CPDFSDK_FormFillEnvironment* pApp, CPDFSDK_Annot* pWidget);
+  CFFL_ComboBox(CPDFSDK_FormFillEnvironment* pApp, CPDFSDK_Widget* pWidget);
   ~CFFL_ComboBox() override;
 
   // CFFL_FormFiller:
   PWL_CREATEPARAM GetCreateParam() override;
-  CPWL_Wnd* NewPDFWindow(const PWL_CREATEPARAM& cp,
-                         CPDFSDK_PageView* pPageView) override;
+  CPWL_Wnd* NewPDFWindow(const PWL_CREATEPARAM& cp) override;
   bool OnChar(CPDFSDK_Annot* pAnnot, uint32_t nChar, uint32_t nFlags) override;
   bool IsDataChanged(CPDFSDK_PageView* pPageView) override;
   void SaveData(CPDFSDK_PageView* pPageView) override;
@@ -46,7 +47,7 @@ class CFFL_ComboBox : public CFFL_FormFiller, public IPWL_FocusHandler {
                            bool bRestoreValue) override;
 
   // IPWL_FocusHandler:
-  void OnSetFocus(CPWL_Wnd* pWnd) override;
+  void OnSetFocus(CPWL_Edit* pEdit) override;
 
 #ifdef PDF_ENABLE_XFA
   // CFFL_FormFiller:
@@ -56,7 +57,7 @@ class CFFL_ComboBox : public CFFL_FormFiller, public IPWL_FocusHandler {
  private:
   CFX_WideString GetSelectExportText();
 
-  CBA_FontMap* m_pFontMap;
+  std::unique_ptr<CBA_FontMap> m_pFontMap;
   FFL_ComboBoxState m_State;
 };
 

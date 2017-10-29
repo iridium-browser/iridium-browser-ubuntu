@@ -24,113 +24,118 @@ class PaintPropertyTreePrinterTest
   PaintPropertyTreePrinterTest()
       : ScopedSlimmingPaintV2ForTest(true),
         ScopedRootLayerScrollingForTest(GetParam()),
-        RenderingTest(SingleChildLocalFrameClient::create()) {}
+        RenderingTest(SingleChildLocalFrameClient::Create()) {}
 
  private:
   void SetUp() override {
-    Settings::setMockScrollbarsEnabled(true);
+    Settings::SetMockScrollbarsEnabled(true);
 
     RenderingTest::SetUp();
-    enableCompositing();
+    EnableCompositing();
   }
 
   void TearDown() override {
     RenderingTest::TearDown();
 
-    Settings::setMockScrollbarsEnabled(false);
+    Settings::SetMockScrollbarsEnabled(false);
   }
 };
 
 INSTANTIATE_TEST_CASE_P(All, PaintPropertyTreePrinterTest, ::testing::Bool());
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleTransformTree) {
-  setBodyInnerHTML("hello world");
-  String transformTreeAsString =
-      transformPropertyTreeAsString(*document().view());
-  EXPECT_THAT(transformTreeAsString.ascii().data(),
-              testing::MatchesRegex("root .*"
-                                    "  .*Translation \\(.*\\) .*"));
+  SetBodyInnerHTML("hello world");
+  String transform_tree_as_string =
+      transformPropertyTreeAsString(*GetDocument().View());
+  EXPECT_THAT(transform_tree_as_string.Ascii().data(),
+              ::testing::MatchesRegex("root .*"
+                                      "  .*Translation \\(.*\\) .*"));
 }
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleClipTree) {
-  setBodyInnerHTML("hello world");
-  String clipTreeAsString = clipPropertyTreeAsString(*document().view());
-  EXPECT_THAT(clipTreeAsString.ascii().data(),
-              testing::MatchesRegex("root .*"
-                                    "  .*Clip \\(.*\\) .*"));
+  SetBodyInnerHTML("hello world");
+  String clip_tree_as_string = clipPropertyTreeAsString(*GetDocument().View());
+  EXPECT_THAT(clip_tree_as_string.Ascii().data(),
+              ::testing::MatchesRegex("root .*"
+                                      "  .*Clip \\(.*\\) .*"));
 }
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleEffectTree) {
-  setBodyInnerHTML("<div style='opacity: 0.9;'>hello world</div>");
-  String effectTreeAsString = effectPropertyTreeAsString(*document().view());
-  EXPECT_THAT(effectTreeAsString.ascii().data(),
-              testing::MatchesRegex("root .*"
-                                    "  Effect \\(LayoutBlockFlow DIV\\) .*"));
+  SetBodyInnerHTML("<div style='opacity: 0.9;'>hello world</div>");
+  String effect_tree_as_string =
+      effectPropertyTreeAsString(*GetDocument().View());
+  EXPECT_THAT(effect_tree_as_string.Ascii().data(),
+              ::testing::MatchesRegex("root .*"
+                                      "  Effect \\(LayoutBlockFlow DIV\\) .*"));
 }
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleScrollTree) {
-  setBodyInnerHTML("<div style='height: 4000px;'>hello world</div>");
-  String scrollTreeAsString = scrollPropertyTreeAsString(*document().view());
-  EXPECT_THAT(scrollTreeAsString.ascii().data(),
-              testing::MatchesRegex("root .*"
-                                    "  Scroll \\(.*\\) .*"));
+  SetBodyInnerHTML("<div style='height: 4000px;'>hello world</div>");
+  String scroll_tree_as_string =
+      scrollPropertyTreeAsString(*GetDocument().View());
+  EXPECT_THAT(scroll_tree_as_string.Ascii().data(),
+              ::testing::MatchesRegex("root .*"
+                                      "  Scroll \\(.*\\) .*"));
 }
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleTransformTreePath) {
-  setBodyInnerHTML(
+  SetBodyInnerHTML(
       "<div id='transform' style='transform: translate3d(10px, 10px, "
       "0px);'></div>");
-  LayoutObject* transformedObject =
-      document().getElementById("transform")->layoutObject();
-  const auto* transformedObjectProperties =
-      transformedObject->paintProperties();
-  String transformPathAsString =
-      transformedObjectProperties->transform()->toTreeString();
-  EXPECT_THAT(transformPathAsString.ascii().data(),
-              testing::MatchesRegex("root .* transform.*"
-                                    "  .* transform.*"
-                                    "    .* transform.*"
-                                    "       .* transform.*"));
+  LayoutObject* transformed_object =
+      GetDocument().getElementById("transform")->GetLayoutObject();
+  const auto* transformed_object_properties =
+      transformed_object->PaintProperties();
+  String transform_path_as_string =
+      transformed_object_properties->Transform()->ToTreeString();
+  EXPECT_THAT(transform_path_as_string.Ascii().data(),
+              ::testing::MatchesRegex("root .* transform.*"
+                                      "  .* transform.*"
+                                      "    .* transform.*"
+                                      "       .* transform.*"));
 }
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleClipTreePath) {
-  setBodyInnerHTML(
+  SetBodyInnerHTML(
       "<div id='clip' style='position: absolute; clip: rect(10px, 80px, 70px, "
       "40px);'></div>");
-  LayoutObject* clippedObject =
-      document().getElementById("clip")->layoutObject();
-  const auto* clippedObjectProperties = clippedObject->paintProperties();
-  String clipPathAsString = clippedObjectProperties->cssClip()->toTreeString();
-  EXPECT_THAT(clipPathAsString.ascii().data(),
-              testing::MatchesRegex("root .* rect.*"
-                                    "  .* rect.*"
-                                    "    .* rect.*"));
+  LayoutObject* clipped_object =
+      GetDocument().getElementById("clip")->GetLayoutObject();
+  const auto* clipped_object_properties = clipped_object->PaintProperties();
+  String clip_path_as_string =
+      clipped_object_properties->CssClip()->ToTreeString();
+  EXPECT_THAT(clip_path_as_string.Ascii().data(),
+              ::testing::MatchesRegex("root .* rect.*"
+                                      "  .* rect.*"
+                                      "    .* rect.*"));
 }
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleEffectTreePath) {
-  setBodyInnerHTML("<div id='effect' style='opacity: 0.9;'></div>");
-  LayoutObject* effectObject =
-      document().getElementById("effect")->layoutObject();
-  const auto* effectObjectProperties = effectObject->paintProperties();
-  String effectPathAsString = effectObjectProperties->effect()->toTreeString();
-  EXPECT_THAT(effectPathAsString.ascii().data(),
-              testing::MatchesRegex("root .* opacity.*"
-                                    "  .* opacity.*"));
+  SetBodyInnerHTML("<div id='effect' style='opacity: 0.9;'></div>");
+  LayoutObject* effect_object =
+      GetDocument().getElementById("effect")->GetLayoutObject();
+  const auto* effect_object_properties = effect_object->PaintProperties();
+  String effect_path_as_string =
+      effect_object_properties->Effect()->ToTreeString();
+  EXPECT_THAT(effect_path_as_string.Ascii().data(),
+              ::testing::MatchesRegex("root .* opacity.*"
+                                      "  .* opacity.*"));
 }
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleScrollTreePath) {
-  setBodyInnerHTML(
+  SetBodyInnerHTML(
       "<div id='scroll' style='overflow: scroll; height: 100px;'>"
       "  <div id='forceScroll' style='height: 4000px;'></div>"
       "</div>");
-  LayoutObject* scrollObject =
-      document().getElementById("scroll")->layoutObject();
-  const auto* scrollObjectProperties = scrollObject->paintProperties();
-  String scrollPathAsString =
-      scrollObjectProperties->scrollTranslation()->scrollNode()->toTreeString();
-  EXPECT_THAT(scrollPathAsString.ascii().data(),
-              testing::MatchesRegex("root .* parent.*"
-                                    "  .* parent.*"));
+  LayoutObject* scroll_object =
+      GetDocument().getElementById("scroll")->GetLayoutObject();
+  const auto* scroll_object_properties = scroll_object->PaintProperties();
+  String scroll_path_as_string = scroll_object_properties->ScrollTranslation()
+                                     ->ScrollNode()
+                                     ->ToTreeString();
+  EXPECT_THAT(scroll_path_as_string.Ascii().data(),
+              ::testing::MatchesRegex("root .* parent.*"
+                                      "  .* parent.*"));
 }
 
 }  // namespace blink

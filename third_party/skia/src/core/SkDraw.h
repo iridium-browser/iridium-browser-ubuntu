@@ -13,7 +13,9 @@
 #include "SkCanvas.h"
 #include "SkMask.h"
 #include "SkPaint.h"
+#include "SkPixmap.h"
 #include "SkStrokeRec.h"
+#include "SkVertices.h"
 
 class SkBitmap;
 class SkClipStack;
@@ -68,7 +70,7 @@ public:
     void    drawPosText(const char text[], size_t byteLength,
                         const SkScalar pos[], int scalarsPerPosition,
                         const SkPoint& offset, const SkPaint&, const SkSurfaceProps*) const;
-    void    drawVertices(SkCanvas::VertexMode mode, int count,
+    void    drawVertices(SkVertices::VertexMode mode, int count,
                          const SkPoint vertices[], const SkPoint textures[],
                          const SkColor colors[], SkBlendMode bmode,
                          const uint16_t indices[], int ptCount,
@@ -82,7 +84,9 @@ public:
      */
     void drawPathCoverage(const SkPath& src, const SkPaint& paint,
                           SkBlitter* customBlitter = NULL) const {
-        this->drawPath(src, paint, NULL, false, true, customBlitter);
+        bool isHairline = paint.getStyle() == SkPaint::kStroke_Style &&
+                          paint.getStrokeWidth() > 0;
+        this->drawPath(src, paint, NULL, false, !isHairline, customBlitter);
     }
 
     /** Helper function that creates a mask from a path and an optional maskfilter.
@@ -94,6 +98,8 @@ public:
                            const SkMaskFilter*, const SkMatrix* filterMatrix,
                            SkMask* mask, SkMask::CreateMode mode,
                            SkStrokeRec::InitStyle style);
+
+    void drawDevMask(const SkMask& mask, const SkPaint&) const;
 
     enum RectType {
         kHair_RectType,
@@ -121,7 +127,6 @@ public:
                                     const SkPaint&, const SkSurfaceProps*) const;
     static SkScalar ComputeResScaleForStroking(const SkMatrix& );
 private:
-    void    drawDevMask(const SkMask& mask, const SkPaint&) const;
     void    drawBitmapAsMask(const SkBitmap&, const SkPaint&) const;
 
     void    drawPath(const SkPath&, const SkPaint&, const SkMatrix* preMatrix,
@@ -149,7 +154,6 @@ public:
     SkPixmap        fDst;
     const SkMatrix* fMatrix;        // required
     const SkRasterClip* fRC;        // required
-    const SkClipStack* fClipStack;  // optional, may be null
 
 #ifdef SK_DEBUG
     void validate() const;

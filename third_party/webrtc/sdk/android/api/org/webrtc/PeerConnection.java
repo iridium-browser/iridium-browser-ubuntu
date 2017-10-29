@@ -96,10 +96,19 @@ public class PeerConnection {
 
   /** Java version of PeerConnectionInterface.IceServer. */
   public static class IceServer {
+    // List of URIs associated with this server. Valid formats are described
+    // in RFC7064 and RFC7065, and more may be added in the future. The "host"
+    // part of the URI may contain either an IP address or a hostname.
     public final String uri;
     public final String username;
     public final String password;
     public final TlsCertPolicy tlsCertPolicy;
+
+    // If the URIs in |urls| only contain IP addresses, this field can be used
+    // to indicate the hostname, which may be necessary for TLS (using the SNI
+    // extension). If |urls| itself contains the hostname, this isn't
+    // necessary.
+    public final String hostname;
 
     /** Convenience constructor for STUN servers. */
     public IceServer(String uri) {
@@ -111,14 +120,21 @@ public class PeerConnection {
     }
 
     public IceServer(String uri, String username, String password, TlsCertPolicy tlsCertPolicy) {
+      this(uri, username, password, tlsCertPolicy, "");
+    }
+
+    public IceServer(String uri, String username, String password, TlsCertPolicy tlsCertPolicy,
+        String hostname) {
       this.uri = uri;
       this.username = username;
       this.password = password;
       this.tlsCertPolicy = tlsCertPolicy;
+      this.hostname = hostname;
     }
 
     public String toString() {
-      return uri + " [" + username + ":" + password + "] [" + tlsCertPolicy + "]";
+      return uri + " [" + username + ":" + password + "] [" + tlsCertPolicy + "] [" + hostname
+          + "]";
     }
   }
 
@@ -143,6 +159,25 @@ public class PeerConnection {
   /** Java version of PeerConnectionInterface.ContinualGatheringPolicy */
   public enum ContinualGatheringPolicy { GATHER_ONCE, GATHER_CONTINUALLY }
 
+  /** Java version of rtc::IntervalRange */
+  public static class IntervalRange {
+    private final int min;
+    private final int max;
+
+    public IntervalRange(int min, int max) {
+      this.min = min;
+      this.max = max;
+    }
+
+    public int getMin() {
+      return min;
+    }
+
+    public int getMax() {
+      return max;
+    }
+  }
+
   /** Java version of PeerConnectionInterface.RTCConfiguration */
   public static class RTCConfiguration {
     public IceTransportsType iceTransportsType;
@@ -161,6 +196,8 @@ public class PeerConnection {
     public boolean pruneTurnPorts;
     public boolean presumeWritableWhenFullyRelayed;
     public Integer iceCheckMinInterval;
+    public boolean disableIPv6OnWifi;
+    public IntervalRange iceRegatherIntervalRange;
 
     public RTCConfiguration(List<IceServer> iceServers) {
       iceTransportsType = IceTransportsType.ALL;
@@ -179,6 +216,8 @@ public class PeerConnection {
       pruneTurnPorts = false;
       presumeWritableWhenFullyRelayed = false;
       iceCheckMinInterval = null;
+      disableIPv6OnWifi = false;
+      iceRegatherIntervalRange = null;
     }
   };
 
@@ -263,8 +302,16 @@ public class PeerConnection {
     return Collections.unmodifiableList(receivers);
   }
 
+  // Older, non-standard implementation of getStats.
+  @Deprecated
   public boolean getStats(StatsObserver observer, MediaStreamTrack track) {
-    return nativeGetStats(observer, (track == null) ? 0 : track.nativeTrack);
+    return nativeOldGetStats(observer, (track == null) ? 0 : track.nativeTrack);
+  }
+
+  // Gets stats using the new stats collection API, see webrtc/api/stats/. These
+  // will replace old stats collection API when the new API has matured enough.
+  public void getStats(RTCStatsCollectorCallback callback) {
+    nativeNewGetStats(callback);
   }
 
   // Starts recording an RTC event log. Ownership of the file is transfered to
@@ -326,7 +373,9 @@ public class PeerConnection {
 
   private native void nativeRemoveLocalStream(long nativeStream);
 
-  private native boolean nativeGetStats(StatsObserver observer, long nativeTrack);
+  private native boolean nativeOldGetStats(StatsObserver observer, long nativeTrack);
+
+  private native void nativeNewGetStats(RTCStatsCollectorCallback callback);
 
   private native RtpSender nativeCreateSender(String kind, String stream_id);
 

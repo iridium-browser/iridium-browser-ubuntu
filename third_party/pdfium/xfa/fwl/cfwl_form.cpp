@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "third_party/base/ptr_util.h"
-#include "xfa/fde/tto/fde_textout.h"
+#include "xfa/fde/cfde_textout.h"
 #include "xfa/fwl/cfwl_app.h"
 #include "xfa/fwl/cfwl_event.h"
 #include "xfa/fwl/cfwl_formproxy.h"
@@ -75,7 +75,8 @@ FWL_WidgetHit CFWL_Form::HitTest(const CFX_PointF& point) {
                                : FWL_WidgetHit::Client;
 }
 
-void CFWL_Form::DrawWidget(CFX_Graphics* pGraphics, const CFX_Matrix* pMatrix) {
+void CFWL_Form::DrawWidget(CXFA_Graphics* pGraphics,
+                           const CFX_Matrix* pMatrix) {
   if (!pGraphics)
     return;
   if (!m_pProperties->m_pThemeProvider)
@@ -147,7 +148,7 @@ void CFWL_Form::EndDoModal() {
 #endif
 }
 
-void CFWL_Form::DrawBackground(CFX_Graphics* pGraphics,
+void CFWL_Form::DrawBackground(CXFA_Graphics* pGraphics,
                                IFWL_ThemeProvider* pTheme) {
   CFWL_ThemeBackground param;
   param.m_pWidget = this;
@@ -161,8 +162,8 @@ void CFWL_Form::DrawBackground(CFX_Graphics* pGraphics,
 CFX_RectF CFWL_Form::GetEdgeRect() {
   CFX_RectF rtEdge = m_rtRelative;
   if (m_pProperties->m_dwStyles & FWL_WGTSTYLE_Border) {
-    FX_FLOAT fCX = GetBorderSize(true);
-    FX_FLOAT fCY = GetBorderSize(false);
+    float fCX = GetBorderSize(true);
+    float fCY = GetBorderSize(false);
     rtEdge.Deflate(fCX, fCY, fCX, fCY);
   }
   return rtEdge;
@@ -238,7 +239,7 @@ void CFWL_Form::OnProcessMessage(CFWL_Message* pMessage) {
 #endif  // FWL_UseMacSystemBorder
 }
 
-void CFWL_Form::OnDrawWidget(CFX_Graphics* pGraphics,
+void CFWL_Form::OnDrawWidget(CXFA_Graphics* pGraphics,
                              const CFX_Matrix* pMatrix) {
   DrawWidget(pGraphics, pMatrix);
 }

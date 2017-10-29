@@ -12,8 +12,8 @@
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/common/drag_event_source_info.h"
-#include "content/public/browser/renderer_unresponsive_type.h"
 #include "content/public/common/drop_data.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
@@ -33,6 +33,10 @@ namespace rappor {
 class Sample;
 }
 
+namespace ukm {
+class UkmRecorder;
+}
+
 namespace content {
 
 class BrowserAccessibilityManager;
@@ -41,6 +45,7 @@ class RenderWidgetHostInputEventRouter;
 class RenderViewHostDelegateView;
 class TextInputManager;
 class WebContents;
+enum class KeyboardEventProcessingResult;
 struct ScreenInfo;
 struct NativeWebKeyboardEvent;
 
@@ -60,6 +65,10 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // The RenderWidgetHost got the focus.
   virtual void RenderWidgetGotFocus(RenderWidgetHostImpl* render_widget_host) {}
 
+  // The RenderWidgetHost lost the focus.
+  virtual void RenderWidgetLostFocus(
+      RenderWidgetHostImpl* render_widget_host) {}
+
   // The RenderWidget was resized.
   virtual void RenderWidgetWasResized(RenderWidgetHostImpl* render_widget_host,
                                       bool width_changed) {}
@@ -78,12 +87,10 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   virtual void GetScreenInfo(ScreenInfo* web_screen_info);
 
   // Callback to give the browser a chance to handle the specified keyboard
-  // event before sending it to the renderer.
-  // Returns true if the |event| was handled. Otherwise, if the |event| would
-  // be handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
-  // |*is_keyboard_shortcut| should be set to true.
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
+  // event before sending it to the renderer. See enum for details on return
+  // value.
+  virtual KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      const NativeWebKeyboardEvent& event);
 
   // Callback to inform the browser that the renderer did not process the
   // specified events. This gives an opportunity to the browser to process the
@@ -119,6 +126,9 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
       GetOrCreateRootBrowserAccessibilityManager();
 
   // Send OS Cut/Copy/Paste actions to the focused frame.
+  virtual void ExecuteEditCommand(
+      const std::string& command,
+      const base::Optional<base::string16>& value) = 0;
   virtual void Cut() = 0;
   virtual void Copy() = 0;
   virtual void Paste() = 0;
@@ -130,6 +140,9 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // Requests the renderer to select the region between two points in the
   // currently focused frame.
   virtual void SelectRange(const gfx::Point& base, const gfx::Point& extent) {}
+
+  // Request the renderer to Move the caret to the new position.
+  virtual void MoveCaret(const gfx::Point& extent) {}
 
   virtual RenderWidgetHostInputEventRouter* GetInputEventRouter();
 
@@ -151,8 +164,7 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
 
   // Notification that the renderer has become unresponsive. The
   // delegate can use this notification to show a warning to the user.
-  virtual void RendererUnresponsive(RenderWidgetHostImpl* render_widget_host,
-                                    RendererUnresponsiveType type) {}
+  virtual void RendererUnresponsive(RenderWidgetHostImpl* render_widget_host) {}
 
   // Notification that a previously unresponsive renderer has become
   // responsive again. The delegate can use this notification to end the
@@ -196,11 +208,6 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
 
   // Update the renderer's cache of the screen rect of the view and window.
   virtual void SendScreenRects() {}
-
-  // Notifies that the main frame in the renderer has performed the first paint
-  // after a navigation.
-  virtual void OnFirstPaintAfterLoad(RenderWidgetHostImpl* render_widget_host) {
-  }
 
   // Returns the TextInputManager tracking text input state.
   virtual TextInputManager* GetTextInputManager();
@@ -248,6 +255,11 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // if the eTLD+1 is not known for |render_widget_host|.
   virtual bool AddDomainInfoToRapporSample(rappor::Sample* sample);
 
+  // Update UkmRecorder for the given source with the URL. This is used for
+  // URL-keyed metrics to set the url for a report.
+  virtual void UpdateUrlForUkmSource(ukm::UkmRecorder* service,
+                                     ukm::SourceId ukm_source_id);
+
   // Notifies the delegate that a focused editable element has been touched
   // inside this RenderWidgetHost. If |editable| is true then the focused
   // element accepts text input.
@@ -256,6 +268,18 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // Return this object cast to a WebContents, if it is one. If the object is
   // not a WebContents, returns nullptr.
   virtual WebContents* GetAsWebContents();
+
+  // Notifies that a CompositorFrame was received from the renderer.
+  virtual void DidReceiveCompositorFrame() {}
+
+  // Gets the size set by a top-level frame with auto-resize enabled.
+  virtual gfx::Size GetAutoResizeSize();
+
+  // Reset the auto-size value, to indicate that auto-size is no longer active.
+  virtual void ResetAutoResizeSize() {}
+
+  // Returns true if there is context menu shown on page.
+  virtual bool IsShowingContextMenuOnPage() const;
 
  protected:
   virtual ~RenderWidgetHostDelegate() {}

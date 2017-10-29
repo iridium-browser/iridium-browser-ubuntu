@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.omnibox;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.res.Resources;
 import android.content.res.TypedArray;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -35,6 +36,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.omnibox.OmniboxResultsAdapter.OmniboxResultItem;
 import org.chromium.chrome.browser.omnibox.OmniboxResultsAdapter.OmniboxSuggestionDelegate;
 import org.chromium.chrome.browser.omnibox.OmniboxSuggestion.MatchClassification;
+import org.chromium.chrome.browser.util.ViewUtils;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 import org.chromium.ui.base.DeviceFormFactor;
 
@@ -68,10 +70,6 @@ class SuggestionView extends ViewGroup {
 
     private static final long RELAYOUT_DELAY_MS = 20;
 
-    static final int TITLE_COLOR_STANDARD_FONT_DARK = 0xFF333333;
-    private static final int TITLE_COLOR_STANDARD_FONT_LIGHT = 0xFFFFFFFF;
-    private static final int URL_COLOR = 0xFF5595FE;
-
     private static final float ANSWER_IMAGE_SCALING_FACTOR = 1.15f;
 
     private final LocationBar mLocationBar;
@@ -81,6 +79,10 @@ class SuggestionView extends ViewGroup {
     private final int mSuggestionHeight;
     private final int mSuggestionAnswerHeight;
     private int mNumAnswerLines = 1;
+
+    private final int mDarkTitleColorStandardFont;
+    private final int mLightTitleColorStandardFont;
+    private final int mUrlColor;
 
     private OmniboxResultItem mSuggestionItem;
     private OmniboxSuggestion mSuggestion;
@@ -115,6 +117,13 @@ class SuggestionView extends ViewGroup {
         mSuggestionAnswerHeight =
                 context.getResources().getDimensionPixelOffset(
                         R.dimen.omnibox_suggestion_answer_height);
+
+        Resources resources = getResources();
+        mDarkTitleColorStandardFont =
+                ApiCompatibilityUtils.getColor(resources, R.color.url_emphasis_default_text);
+        mLightTitleColorStandardFont =
+                ApiCompatibilityUtils.getColor(resources, R.color.url_emphasis_light_default_text);
+        mUrlColor = ApiCompatibilityUtils.getColor(resources, R.color.suggestion_url);
 
         TypedArray a = getContext().obtainStyledAttributes(
                 new int [] {R.attr.selectableItemBackground});
@@ -371,8 +380,8 @@ class SuggestionView extends ViewGroup {
     }
 
     private int getStandardFontColor() {
-        return (mUseDarkColors == null || mUseDarkColors)
-                ? TITLE_COLOR_STANDARD_FONT_DARK : TITLE_COLOR_STANDARD_FONT_LIGHT;
+        return (mUseDarkColors == null || mUseDarkColors) ? mDarkTitleColorStandardFont
+                                                          : mLightTitleColorStandardFont;
     }
 
     @Override
@@ -454,7 +463,7 @@ class SuggestionView extends ViewGroup {
 
         // Force left-to-right rendering for URLs. See UrlBar constructor for details.
         if (isUrl) {
-            textLine.setTextColor(URL_COLOR);
+            textLine.setTextColor(mUrlColor);
             ApiCompatibilityUtils.setTextDirection(textLine, TEXT_DIRECTION_LTR);
         } else {
             textLine.setTextColor(getStandardFontColor());
@@ -511,7 +520,7 @@ class SuggestionView extends ViewGroup {
                 }
                 classifications.add(0, new MatchClassification(0, MatchClassificationStyle.NONE));
 
-                if (DeviceFormFactor.isTablet(getContext())) {
+                if (DeviceFormFactor.isTablet()) {
                     TextPaint tp = mContentsView.mTextLine1.getPaint();
                     mContentsView.mRequiredWidth =
                             tp.measureText(fillIntoEdit, 0, fillIntoEdit.length());
@@ -580,10 +589,8 @@ class SuggestionView extends ViewGroup {
             mContentsView.mAnswerImageMaxSize = imageSize;
 
             String url = "https:" + secondLine.getImage().replace("\\/", "/");
-            AnswersImage.requestAnswersImage(
-                    mLocationBar.getCurrentTab().getProfile(),
-                    url,
-                    new AnswersImage.AnswersImageObserver() {
+            AnswersImage.requestAnswersImage(mLocationBar.getToolbarDataProvider().getProfile(),
+                    url, new AnswersImage.AnswersImageObserver() {
                         @Override
                         public void onAnswersImageChanged(Bitmap bitmap) {
                             mContentsView.mAnswerImage.setImageBitmap(bitmap);
@@ -735,7 +742,7 @@ class SuggestionView extends ViewGroup {
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
 
-            if (DeviceFormFactor.isTablet(getContext())) {
+            if (DeviceFormFactor.isTablet()) {
                 // Use the same image transform matrix as the navigation icon to ensure the same
                 // scaling, which requires centering vertically based on the height of the
                 // navigation icon view and not the image itself.
@@ -820,10 +827,8 @@ class SuggestionView extends ViewGroup {
             }
 
             // Align the text to be pixel perfectly aligned with the text in the url bar.
-            mTextLeft = getSuggestionTextLeftPosition();
-            mTextRight = getSuggestionTextRightPosition();
             boolean isRTL = ApiCompatibilityUtils.isLayoutRtl(this);
-            if (DeviceFormFactor.isTablet(getContext())) {
+            if (DeviceFormFactor.isTablet()) {
                 int textWidth = isRTL ? mTextRight : (r - l - mTextLeft);
                 final float maxRequiredWidth = mSuggestionDelegate.getMaxRequiredWidth();
                 final float maxMatchContentsWidth = mSuggestionDelegate.getMaxMatchContentsWidth();
@@ -862,7 +867,8 @@ class SuggestionView extends ViewGroup {
 
         private int getUrlBarLeftOffset() {
             if (mLocationBar.mustQueryUrlBarLocationForSuggestions()) {
-                mUrlBar.getLocationInWindow(mViewPositionHolder);
+                View contentView = getRootView().findViewById(android.R.id.content);
+                ViewUtils.getRelativeLayoutPosition(contentView, mUrlBar, mViewPositionHolder);
                 return mViewPositionHolder[0];
             } else {
                 return ApiCompatibilityUtils.isLayoutRtl(this) ? mPhoneUrlBarLeftOffsetRtlPx
@@ -877,7 +883,8 @@ class SuggestionView extends ViewGroup {
             if (mLocationBar == null) return 0;
 
             int leftOffset = getUrlBarLeftOffset();
-            getLocationInWindow(mViewPositionHolder);
+            View contentView = getRootView().findViewById(android.R.id.content);
+            ViewUtils.getRelativeLayoutPosition(contentView, this, mViewPositionHolder);
             return leftOffset + mUrlBar.getPaddingLeft() - mViewPositionHolder[0];
         }
 
@@ -888,7 +895,8 @@ class SuggestionView extends ViewGroup {
             if (mLocationBar == null) return 0;
 
             int leftOffset = getUrlBarLeftOffset();
-            getLocationInWindow(mViewPositionHolder);
+            View contentView = getRootView().findViewById(android.R.id.content);
+            ViewUtils.getRelativeLayoutPosition(contentView, this, mViewPositionHolder);
             return leftOffset + mUrlBar.getWidth() - mUrlBar.getPaddingRight()
                     - mViewPositionHolder[0];
         }
@@ -914,17 +922,20 @@ class SuggestionView extends ViewGroup {
             int width = MeasureSpec.getSize(widthMeasureSpec);
             int height = MeasureSpec.getSize(heightMeasureSpec);
 
+            boolean isRTL = ApiCompatibilityUtils.isLayoutRtl(this);
+            mTextLeft = getSuggestionTextLeftPosition();
+            mTextRight = getSuggestionTextRightPosition();
+
+            int maxWidth = width - (isRTL ? mTextRight : mTextLeft);
             if (mTextLine1.getMeasuredWidth() != width
                     || mTextLine1.getMeasuredHeight() != height) {
-                mTextLine1.measure(
-                        MeasureSpec.makeMeasureSpec(widthMeasureSpec, MeasureSpec.AT_MOST),
+                mTextLine1.measure(MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.AT_MOST),
                         MeasureSpec.makeMeasureSpec(mSuggestionHeight, MeasureSpec.AT_MOST));
             }
 
             if (mTextLine2.getMeasuredWidth() != width
                     || mTextLine2.getMeasuredHeight() != height) {
-                mTextLine2.measure(
-                        MeasureSpec.makeMeasureSpec(widthMeasureSpec, MeasureSpec.AT_MOST),
+                mTextLine2.measure(MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.AT_MOST),
                         MeasureSpec.makeMeasureSpec(mSuggestionHeight, MeasureSpec.AT_MOST));
             }
             if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.AT_MOST) {

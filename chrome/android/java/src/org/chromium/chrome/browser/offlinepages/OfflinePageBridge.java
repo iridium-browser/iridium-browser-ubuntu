@@ -11,6 +11,7 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.components.offlinepages.DeletePageResult;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.ArrayList;
@@ -18,6 +19,8 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import javax.annotation.Nullable;
 
 /**
  * Access gate to C++ side offline pages functionalities.
@@ -30,6 +33,8 @@ public class OfflinePageBridge {
     public static final String BOOKMARK_NAMESPACE = "bookmark";
     public static final String LAST_N_NAMESPACE = "last_n";
     public static final String SHARE_NAMESPACE = "share";
+    public static final String CCT_NAMESPACE = "custom_tabs";
+    public static final String DOWNLOAD_NAMESPACE = "download";
 
     /**
      * Retrieves the OfflinePageBridge for the given profile, creating it the first time
@@ -50,7 +55,6 @@ public class OfflinePageBridge {
 
     /** Whether an offline sub-feature is enabled or not. */
     private static Boolean sOfflineBookmarksEnabled;
-    private static Boolean sBackgroundLoadingEnabled;
     private static Boolean sIsPageSharingEnabled;
 
     /**
@@ -90,7 +94,7 @@ public class OfflinePageBridge {
          * @param offlineId The offline ID of the deleted offline page.
          * @param clientId The client supplied ID of the deleted offline page.
          */
-        public void offlinePageDeleted(long offlineId, ClientId clientId) {}
+        public void offlinePageDeleted(DeletedPageInfo deletedPage) {}
     }
 
     /**
@@ -186,6 +190,19 @@ public class OfflinePageBridge {
 
         List<OfflinePageItem> result = new ArrayList<>();
         nativeGetPagesByClientId(mNativeOfflinePageBridge, result, namespaces, ids, callback);
+    }
+
+    /**
+     * Gets the offline pages associated with the provided namespace.
+     *
+     * @param namespace The string form of the namespace to query.
+     * @return A list of {@link OfflinePageItem} matching the provided namespace, or an empty list
+     * if none exist.
+     */
+    public void getPagesForNamespace(
+            final String namespace, final Callback<List<OfflinePageItem>> callback) {
+        List<OfflinePageItem> result = new ArrayList<>();
+        nativeGetPagesForNamespace(mNativeOfflinePageBridge, result, namespace, callback);
     }
 
     /**
@@ -379,6 +396,29 @@ public class OfflinePageBridge {
     }
 
     /**
+     * Deletes offline pages based on the list of offline IDs. Calls the callback
+     * when operation is complete. Note that offline IDs are not intended to be saved across
+     * restarts of Chrome; they should be obtained by querying the model for the appropriate client
+     * ID.
+     *
+     * @param offlineIds A list of offline IDs of pages that will be deleted.
+     * @param callback A callback that will be called once operation is completed, called with the
+     *     DeletePageResult of the operation..
+     */
+    public void deletePagesByOfflineId(List<Long> offlineIdList, Callback<Integer> callback) {
+        if (offlineIdList == null) {
+            callback.onResult(Integer.valueOf(DeletePageResult.SUCCESS));
+            return;
+        }
+
+        long[] offlineIds = new long[offlineIdList.size()];
+        for (int i = 0; i < offlineIdList.size(); i++) {
+            offlineIds[i] = offlineIdList.get(i).longValue();
+        }
+        nativeDeletePagesByOfflineId(mNativeOfflinePageBridge, offlineIds, callback);
+    }
+
+    /**
      * Whether or not the underlying offline page model is loaded.
      */
     public boolean isOfflinePageModelLoaded() {
@@ -454,6 +494,44 @@ public class OfflinePageBridge {
         nativeUnregisterRecentTab(mNativeOfflinePageBridge, tabId);
     }
 
+    /**
+     * Schedules to download a page from |url| and categorize under |nameSpace|.
+     * The duplicate pages or requests will be checked.
+     *
+     * @param webContents Web contents upon which the infobar is shown.
+     * @param nameSpace Namespace of the page to save.
+     * @param url URL of the page to save.
+     * @param uiAction UI action, like showing infobar or toast on certain case.
+     */
+    public void scheduleDownload(
+            WebContents webContents, String nameSpace, String url, int uiAction) {
+        nativeScheduleDownload(mNativeOfflinePageBridge, webContents, nameSpace, url, uiAction);
+    }
+
+    /**
+     * Checks if an offline page is shown for the webContents.
+     * @param webContents Web contents used to find the offline page.
+     * @return True if the offline page is opened.
+     */
+    public boolean isOfflinePage(WebContents webContents) {
+        return nativeIsOfflinePage(mNativeOfflinePageBridge, webContents);
+    }
+
+    /**
+     * Retrieves the offline page that is shown for the tab.
+     * @param webContents Web contents used to find the offline page.
+     * @return The offline page if tab currently displays it, null otherwise.
+     */
+    @Nullable
+    public OfflinePageItem getOfflinePage(WebContents webContents) {
+        return nativeGetOfflinePage(mNativeOfflinePageBridge, webContents);
+    }
+
+    /**
+     * Allows setting the offline bookmarks feature as enabled or disabled for testing. This is
+     * required for tests that don't load the native binary otherwise UnsatisfiedLinkError sadness
+     * will occur.
+     */
     @VisibleForTesting
     static void setOfflineBookmarksEnabledForTesting(boolean enabled) {
         sOfflineBookmarksEnabled = enabled;
@@ -490,9 +568,9 @@ public class OfflinePageBridge {
     }
 
     @CalledByNative
-    void offlinePageDeleted(long offlineId, ClientId clientId) {
+    void offlinePageDeleted(DeletedPageInfo deletedPage) {
         for (OfflinePageModelObserver observer : mObservers) {
-            observer.offlinePageDeleted(offlineId, clientId);
+            observer.offlinePageDeleted(deletedPage);
         }
     }
 
@@ -517,6 +595,12 @@ public class OfflinePageBridge {
         return new ClientId(clientNamespace, id);
     }
 
+    @CalledByNative
+    private static DeletedPageInfo createDeletedPageInfo(
+            long offlineId, String clientNamespace, String clientId, String requestOrigin) {
+        return new DeletedPageInfo(offlineId, clientNamespace, clientId, requestOrigin);
+    }
+
     private static native boolean nativeIsOfflineBookmarksEnabled();
     private static native boolean nativeIsPageSharingEnabled();
     private static native boolean nativeCanSavePage(String url);
@@ -529,6 +613,7 @@ public class OfflinePageBridge {
     private native void nativeRegisterRecentTab(long nativeOfflinePageBridge, int tabId);
     private native void nativeWillCloseTab(long nativeOfflinePageBridge, WebContents webContents);
     private native void nativeUnregisterRecentTab(long nativeOfflinePageBridge, int tabId);
+
     @VisibleForTesting
     native void nativeGetRequestsInQueue(
             long nativeOfflinePageBridge, Callback<SavePageRequest[]> callback);
@@ -541,9 +626,16 @@ public class OfflinePageBridge {
     @VisibleForTesting
     native void nativeGetPagesByClientId(long nativeOfflinePageBridge, List<OfflinePageItem> result,
             String[] namespaces, String[] ids, Callback<List<OfflinePageItem>> callback);
+    native void nativeGetPagesForNamespace(long nativeOfflinePageBridge,
+            List<OfflinePageItem> result, String nameSpace,
+            Callback<List<OfflinePageItem>> callback);
     @VisibleForTesting
     native void nativeDeletePagesByClientId(long nativeOfflinePageBridge, String[] namespaces,
             String[] ids, Callback<Integer> callback);
+    @VisibleForTesting
+    native void nativeDeletePagesByOfflineId(
+            long nativeOfflinePageBridge, long[] offlineIds, Callback<Integer> callback);
+
     private native void nativeSelectPageForOnlineUrl(
             long nativeOfflinePageBridge, String onlineUrl, int tabId,
             Callback<OfflinePageItem> callback);
@@ -556,5 +648,11 @@ public class OfflinePageBridge {
     private native boolean nativeIsShowingOfflinePreview(
             long nativeOfflinePageBridge, WebContents webContents);
     private native boolean nativeIsShowingDownloadButtonInErrorPage(
+            long nativeOfflinePageBridge, WebContents webContents);
+    private native void nativeScheduleDownload(long nativeOfflinePageBridge,
+            WebContents webContents, String nameSpace, String url, int uiAction);
+    private native boolean nativeIsOfflinePage(
+            long nativeOfflinePageBridge, WebContents webContents);
+    private native OfflinePageItem nativeGetOfflinePage(
             long nativeOfflinePageBridge, WebContents webContents);
 }

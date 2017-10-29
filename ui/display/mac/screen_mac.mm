@@ -11,13 +11,17 @@
 #include <map>
 #include <memory>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/macros.h"
 #include "base/timer/timer.h"
 #include "ui/display/display.h"
 #include "ui/display/display_change_notifier.h"
+#include "ui/gfx/color_space_switches.h"
+#include "ui/gfx/icc_profile.h"
 #include "ui/gfx/mac/coordinate_conversion.h"
 
 extern "C" {
@@ -77,14 +81,18 @@ Display BuildDisplayForScreen(NSScreen* screen) {
 
   display.set_device_scale_factor(scale);
 
-  // On Sierra, we need to operate in a single screen's color space because
-  // IOSurfaces do not opt-out of color correction.
-  // https://crbug.com/654488
-  CGColorSpaceRef color_space = [[screen colorSpace] CGColorSpace];
-  if (base::mac::IsAtLeastOS10_12())
-    color_space = base::mac::GetSystemColorSpace();
-
-  display.set_icc_profile(gfx::ICCProfile::FromCGColorSpace(color_space));
+  if (!Display::HasForceColorProfile()) {
+    // On Sierra, we need to operate in a single screen's color space because
+    // IOSurfaces do not opt-out of color correction.
+    // https://crbug.com/654488
+    CGColorSpaceRef color_space = [[screen colorSpace] CGColorSpace];
+    static bool color_correct_rendering_enabled =
+        base::FeatureList::IsEnabled(features::kColorCorrectRendering);
+    if (base::mac::IsAtLeastOS10_12() && !color_correct_rendering_enabled)
+      color_space = base::mac::GetSystemColorSpace();
+    display.set_color_space(
+        gfx::ICCProfile::FromCGColorSpace(color_space).GetColorSpace());
+  }
   display.set_color_depth(NSBitsPerPixelFromDepth([screen depth]));
   display.set_depth_per_component(NSBitsPerSampleFromDepth([screen depth]));
   display.set_is_monochrome(CGDisplayUsesForceToGray());
@@ -125,9 +133,22 @@ class ScreenMac : public Screen {
     old_displays_ = displays_ = BuildDisplaysFromQuartz();
     CGDisplayRegisterReconfigurationCallback(
         ScreenMac::DisplayReconfigurationCallBack, this);
+
+    NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+    screen_color_change_observer_.reset(
+        [[center addObserverForName:NSScreenColorSpaceDidChangeNotification
+                             object:nil
+                              queue:nil
+                         usingBlock:^(NSNotification* notification) {
+                           configure_timer_.Reset();
+                           displays_require_update_ = true;
+                         }] retain]);
   }
 
   ~ScreenMac() override {
+    NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
+    [center removeObserver:screen_color_change_observer_];
+
     CGDisplayRemoveReconfigurationCallback(
         ScreenMac::DisplayReconfigurationCallBack, this);
   }
@@ -153,16 +174,11 @@ class ScreenMac : public Screen {
     return displays_;
   }
 
-  Display GetDisplayNearestWindow(gfx::NativeView view) const override {
+  Display GetDisplayNearestWindow(gfx::NativeWindow window) const override {
     EnsureDisplaysValid();
     if (displays_.size() == 1)
       return displays_[0];
 
-    NSWindow* window = nil;
-#if !defined(USE_AURA)
-    if (view)
-      window = [view window];
-#endif
     if (!window)
       return GetPrimaryDisplay();
 
@@ -174,6 +190,13 @@ class ScreenMac : public Screen {
     if (!match_screen)
       return GetPrimaryDisplay();
     return GetCachedDisplayForScreen(match_screen);
+  }
+
+  Display GetDisplayNearestView(gfx::NativeView view) const override {
+    NSWindow* window = [view window];
+    if (!window)
+      window = [NSApp keyWindow];
+    return GetDisplayNearestWindow(window);
   }
 
   Display GetDisplayNearestPoint(const gfx::Point& point) const override {
@@ -322,12 +345,24 @@ class ScreenMac : public Screen {
   // The timer to delay configuring outputs and notifying observers.
   base::Timer configure_timer_;
 
+  // The observer notified by NSScreenColorSpaceDidChangeNotification.
+  base::scoped_nsobject<id> screen_color_change_observer_;
+
   DisplayChangeNotifier change_notifier_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenMac);
 };
 
 }  // namespace
+
+// static
+gfx::NativeWindow Screen::GetWindowForView(gfx::NativeView view) {
+  NSWindow* window = nil;
+#if !defined(USE_AURA)
+  window = [view window];
+#endif
+  return window;
+}
 
 #if !defined(USE_AURA)
 Screen* CreateNativeScreen() {

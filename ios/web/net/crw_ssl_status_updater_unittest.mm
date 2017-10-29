@@ -4,24 +4,31 @@
 
 #import "ios/web/net/crw_ssl_status_updater.h"
 
+#include "base/mac/foundation_util.h"
 #include "base/mac/scoped_block.h"
 #include "base/strings/sys_string_conversions.h"
 #import "ios/web/navigation/crw_session_controller+private_constructors.h"
 #import "ios/web/navigation/crw_session_controller.h"
+#import "ios/web/navigation/legacy_navigation_manager_impl.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
 #import "ios/web/public/navigation_item.h"
 #include "ios/web/public/ssl_status.h"
 #include "ios/web/public/test/web_test.h"
 #import "ios/web/web_state/wk_web_view_security_util.h"
+#include "net/cert/x509_util_ios_and_mac.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
 #include "third_party/ocmock/OCMock/OCMock.h"
 #include "third_party/ocmock/gtest_support.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 // Mocks CRWSSLStatusUpdaterTestDataSource.
 @interface CRWSSLStatusUpdaterTestDataSource
     : NSObject<CRWSSLStatusUpdaterDataSource> {
-  base::mac::ScopedBlock<StatusQueryHandler> _verificationCompletionHandler;
+  StatusQueryHandler _verificationCompletionHandler;
 }
 
 // Yes if |SSLStatusUpdater:querySSLStatusForTrust:host:completionHandler| was
@@ -43,7 +50,7 @@
 
 - (void)finishVerificationWithCertStatus:(net::CertStatus)certStatus
                            securityStyle:(web::SecurityStyle)securityStyle {
-  _verificationCompletionHandler.get()(securityStyle, certStatus);
+  _verificationCompletionHandler(securityStyle, certStatus);
 }
 
 #pragma mark CRWSSLStatusUpdaterDataSource
@@ -52,7 +59,7 @@
     querySSLStatusForTrust:(base::ScopedCFTypeRef<SecTrustRef>)trust
                       host:(NSString*)host
          completionHandler:(StatusQueryHandler)completionHandler {
-  _verificationCompletionHandler.reset([completionHandler copy]);
+  _verificationCompletionHandler = [completionHandler copy];
 }
 
 @end
@@ -76,24 +83,28 @@ class CRWSSLStatusUpdaterTest : public web::WebTest {
   void SetUp() override {
     web::WebTest::SetUp();
 
-    data_source_.reset([[CRWSSLStatusUpdaterTestDataSource alloc] init]);
-    delegate_.reset([[OCMockObject
-        mockForProtocol:@protocol(CRWSSLStatusUpdaterDelegate)] retain]);
+    data_source_ = [[CRWSSLStatusUpdaterTestDataSource alloc] init];
+    delegate_ =
+        [OCMockObject mockForProtocol:@protocol(CRWSSLStatusUpdaterDelegate)];
 
-    nav_manager_.reset(new NavigationManagerImpl());
+    nav_manager_.reset(new LegacyNavigationManagerImpl());
     nav_manager_->SetBrowserState(GetBrowserState());
 
-    ssl_status_updater_.reset([[CRWSSLStatusUpdater alloc]
-        initWithDataSource:data_source_
-         navigationManager:nav_manager_.get()]);
+    ssl_status_updater_ =
+        [[CRWSSLStatusUpdater alloc] initWithDataSource:data_source_
+                                      navigationManager:nav_manager_.get()];
     [ssl_status_updater_ setDelegate:delegate_];
 
     // Create test cert chain.
     scoped_refptr<net::X509Certificate> cert =
         net::ImportCertFromFile(net::GetTestCertsDirectory(), kCertFileName);
     ASSERT_TRUE(cert);
-    NSArray* chain = @[ static_cast<id>(cert->os_cert_handle()) ];
-    trust_ = CreateServerTrustFromChain(chain, kHostName);
+    base::ScopedCFTypeRef<CFMutableArrayRef> chain(
+        net::x509_util::CreateSecCertificateArrayForX509Certificate(
+            cert.get()));
+    ASSERT_TRUE(chain);
+    trust_ = CreateServerTrustFromChain(base::mac::CFToNSCast(chain.get()),
+                                        kHostName);
   }
 
   void TearDown() override {
@@ -104,24 +115,26 @@ class CRWSSLStatusUpdaterTest : public web::WebTest {
   // Returns autoreleased session controller with a single committed entry.
   CRWSessionController* SessionControllerWithEntry(std::string item_url_spec) {
     std::vector<std::unique_ptr<web::NavigationItem>> nav_items;
-    base::scoped_nsobject<CRWSessionController> session_controller(
+    CRWSessionController* session_controller =
         [[CRWSessionController alloc] initWithBrowserState:GetBrowserState()
                                            navigationItems:std::move(nav_items)
-                                              currentIndex:0]);
+                                    lastCommittedItemIndex:0];
     [session_controller
-        addPendingItem:GURL(item_url_spec)
-              referrer:Referrer()
-            transition:ui::PAGE_TRANSITION_LINK
-        initiationType:web::NavigationInitiationType::USER_INITIATED];
+                 addPendingItem:GURL(item_url_spec)
+                       referrer:Referrer()
+                     transition:ui::PAGE_TRANSITION_LINK
+                 initiationType:web::NavigationInitiationType::USER_INITIATED
+        userAgentOverrideOption:NavigationManager::UserAgentOverrideOption::
+                                    INHERIT];
     [session_controller commitPendingItem];
 
-    return session_controller.autorelease();
+    return session_controller;
   }
 
-  base::scoped_nsobject<CRWSSLStatusUpdaterTestDataSource> data_source_;
-  base::scoped_nsprotocol<id> delegate_;
+  CRWSSLStatusUpdaterTestDataSource* data_source_;
+  id delegate_;
   std::unique_ptr<web::NavigationManagerImpl> nav_manager_;
-  base::scoped_nsobject<CRWSSLStatusUpdater> ssl_status_updater_;
+  CRWSSLStatusUpdater* ssl_status_updater_;
   base::ScopedCFTypeRef<SecTrustRef> trust_;
 };
 

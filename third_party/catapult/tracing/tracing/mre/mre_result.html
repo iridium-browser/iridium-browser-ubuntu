@@ -12,10 +12,12 @@ found in the LICENSE file.
 tr.exportTo('tr.mre', function() {
   class MreResult {
     constructor(failures, pairs) {
-      if (failures === undefined)
+      if (failures === undefined) {
         failures = [];
-      if (pairs === undefined)
+      }
+      if (pairs === undefined) {
         pairs = {};
+      }
       this.failures = failures;
       this.pairs = pairs;
     }
@@ -25,18 +27,20 @@ tr.exportTo('tr.mre', function() {
     }
 
     addPair(key, value) {
-      if (key in this.pairs)
+      if (key in this.pairs) {
         throw new Error('Key ' + key + ' already exists in result.');
+      }
       this.pairs[key] = value;
     }
 
     asDict() {
-      var d = {
+      const d = {
         pairs: this.pairs
       };
 
-      if (this.failures)
+      if (this.failures) {
         d.failures = this.failures.map(function(f) {return f.asDict();});
+      }
 
       return d;
     }
@@ -46,9 +50,9 @@ tr.exportTo('tr.mre', function() {
     }
 
     static fromDict(resultDict) {
-      if (resultDict.failures !== undefined)
-        var failures = resultDict.failures.map(tr.mre.Failure.fromDict);
-      var pairs = resultDict.pairs;
+      const failures = (resultDict.failures !== undefined) ?
+        resultDict.failures.map(tr.mre.Failure.fromDict) : undefined;
+      const pairs = resultDict.pairs;
       return new MreResult(failures, pairs);
     }
   }

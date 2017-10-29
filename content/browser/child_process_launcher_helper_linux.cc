@@ -17,7 +17,6 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
-#include "gin/v8_initializer.h"
 
 namespace content {
 namespace internal {
@@ -67,23 +66,20 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
     int* launch_result) {
   *is_synchronous_launch = true;
 
-  ZygoteHandle* zygote_handle =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoZygote) ?
-      nullptr : delegate_->GetZygote();
+  ZygoteHandle zygote_handle =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoZygote)
+          ? nullptr
+          : delegate_->GetZygote();
   if (zygote_handle) {
-    // This code runs on the PROCESS_LAUNCHER thread so race conditions are not
-    // an issue with the lazy initialization.
-    if (*zygote_handle == nullptr) {
-      *zygote_handle = CreateZygote();
-    }
-    base::ProcessHandle handle = (*zygote_handle)->ForkRequest(
-        command_line()->argv(),
-        std::move(files_to_register),
-        GetProcessType());
+    // TODO(crbug.com/569191): If chrome supported multiple zygotes they could
+    // be created lazily here, or in the delegate GetZygote() implementations.
+    // Additionally, the delegate could provide a UseGenericZygote() method.
+    base::ProcessHandle handle = zygote_handle->ForkRequest(
+        command_line()->argv(), std::move(files_to_register), GetProcessType());
     *launch_result = LAUNCH_RESULT_SUCCESS;
     Process process;
     process.process = base::Process(handle);
-    process.zygote = *zygote_handle;
+    process.zygote = zygote_handle;
     return process;
   }
 
@@ -100,7 +96,6 @@ void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
   delete options.fds_to_remap;
 }
 
-// static
 base::TerminationStatus ChildProcessLauncherHelper::GetTerminationStatus(
     const ChildProcessLauncherHelper::Process& process,
     bool known_dead,
@@ -136,9 +131,10 @@ void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
   }
 }
 
-// static
-void ChildProcessLauncherHelper::SetProcessBackgroundedOnLauncherThread(
-      base::Process process, bool background) {
+void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
+    base::Process process,
+    bool background,
+    bool boost_for_pending_views) {
   DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
   if (process.CanBackgroundProcesses())
     process.SetProcessBackgrounded(background);
@@ -149,6 +145,11 @@ void ChildProcessLauncherHelper::SetRegisteredFilesForService(
     const std::string& service_name,
     catalog::RequiredFileMap required_files) {
   SetFilesToShareForServicePosix(service_name, std::move(required_files));
+}
+
+// static
+void ChildProcessLauncherHelper::ResetRegisteredFilesForTesting() {
+  ResetFilesToShareForTestingPosix();
 }
 
 // static

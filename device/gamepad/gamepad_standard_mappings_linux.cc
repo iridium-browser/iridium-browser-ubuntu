@@ -11,8 +11,7 @@ namespace device {
 
 namespace {
 
-void MapperXInputStyleGamepad(const blink::WebGamepad& input,
-                              blink::WebGamepad* mapped) {
+void MapperXInputStyleGamepad(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_LEFT_TRIGGER] = AxisToButton(input.axes[2]);
   mapped->buttons[BUTTON_INDEX_RIGHT_TRIGGER] = AxisToButton(input.axes[5]);
@@ -28,12 +27,11 @@ void MapperXInputStyleGamepad(const blink::WebGamepad& input,
   mapped->buttons[BUTTON_INDEX_META] = input.buttons[8];
   mapped->axes[AXIS_INDEX_RIGHT_STICK_X] = input.axes[3];
   mapped->axes[AXIS_INDEX_RIGHT_STICK_Y] = input.axes[4];
-  mapped->buttonsLength = BUTTON_INDEX_COUNT;
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT;
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperXboxOneHidGamepad(const blink::WebGamepad& input,
-                             blink::WebGamepad* mapped) {
+void MapperXboxOneHidGamepad(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
 
   mapped->buttons[BUTTON_INDEX_PRIMARY] = input.buttons[0];
@@ -55,12 +53,11 @@ void MapperXboxOneHidGamepad(const blink::WebGamepad& input,
       AxisPositiveAsButton(input.axes[6]);
   mapped->axes[AXIS_INDEX_RIGHT_STICK_Y] = input.axes[3];
 
-  mapped->buttonsLength = BUTTON_INDEX_COUNT - 1; /* no meta */
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT - 1; /* no meta */
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperLakeviewResearch(const blink::WebGamepad& input,
-                            blink::WebGamepad* mapped) {
+void MapperLakeviewResearch(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_PRIMARY] = input.buttons[2];
   mapped->buttons[BUTTON_INDEX_TERTIARY] = input.buttons[3];
@@ -76,12 +73,11 @@ void MapperLakeviewResearch(const blink::WebGamepad& input,
   mapped->buttons[BUTTON_INDEX_DPAD_LEFT] = AxisNegativeAsButton(input.axes[4]);
   mapped->buttons[BUTTON_INDEX_DPAD_RIGHT] =
       AxisPositiveAsButton(input.axes[4]);
-  mapped->buttonsLength = BUTTON_INDEX_COUNT - 1;  // no Meta on this device
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT - 1;  // no Meta on this device
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperPlaystationSixAxis(const blink::WebGamepad& input,
-                              blink::WebGamepad* mapped) {
+void MapperPlaystationSixAxis(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_PRIMARY] = input.buttons[14];
   mapped->buttons[BUTTON_INDEX_SECONDARY] = input.buttons[13];
@@ -101,12 +97,11 @@ void MapperPlaystationSixAxis(const blink::WebGamepad& input,
   mapped->buttons[BUTTON_INDEX_DPAD_RIGHT] = AxisToButton(input.axes[9]);
   mapped->buttons[BUTTON_INDEX_META] = input.buttons[16];
 
-  mapped->buttonsLength = BUTTON_INDEX_COUNT;
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT;
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperDualshock4(const blink::WebGamepad& input,
-                      blink::WebGamepad* mapped) {
+void MapperDualshock4(const Gamepad& input, Gamepad* mapped) {
   enum Dualshock4Buttons {
     DUALSHOCK_BUTTON_TOUCHPAD = BUTTON_INDEX_COUNT,
     DUALSHOCK_BUTTON_COUNT
@@ -134,11 +129,11 @@ void MapperDualshock4(const blink::WebGamepad& input,
   mapped->buttons[DUALSHOCK_BUTTON_TOUCHPAD] = input.buttons[13];
   mapped->axes[AXIS_INDEX_RIGHT_STICK_Y] = input.axes[5];
 
-  mapped->buttonsLength = DUALSHOCK_BUTTON_COUNT;
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = DUALSHOCK_BUTTON_COUNT;
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperIBuffalo(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
+void MapperIBuffalo(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_PRIMARY] = input.buttons[1];
   mapped->buttons[BUTTON_INDEX_SECONDARY] = input.buttons[0];
@@ -153,11 +148,11 @@ void MapperIBuffalo(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
   mapped->buttons[BUTTON_INDEX_DPAD_LEFT] = AxisNegativeAsButton(input.axes[0]);
   mapped->buttons[BUTTON_INDEX_DPAD_RIGHT] =
       AxisPositiveAsButton(input.axes[0]);
-  mapped->buttonsLength = BUTTON_INDEX_COUNT - 1; /* no meta */
-  mapped->axesLength = 2;
+  mapped->buttons_length = BUTTON_INDEX_COUNT - 1; /* no meta */
+  mapped->axes_length = 2;
 }
 
-void MapperXGEAR(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
+void MapperXGEAR(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_PRIMARY] = input.buttons[2];
   mapped->buttons[BUTTON_INDEX_SECONDARY] = input.buttons[1];
@@ -174,12 +169,11 @@ void MapperXGEAR(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
       AxisPositiveAsButton(input.axes[4]);
   mapped->axes[AXIS_INDEX_RIGHT_STICK_X] = input.axes[3];
   mapped->axes[AXIS_INDEX_RIGHT_STICK_Y] = input.axes[2];
-  mapped->buttonsLength = BUTTON_INDEX_COUNT - 1;  // no Meta on this device
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT - 1;  // no Meta on this device
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperDragonRiseGeneric(const blink::WebGamepad& input,
-                             blink::WebGamepad* mapped) {
+void MapperDragonRiseGeneric(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_DPAD_UP] = AxisNegativeAsButton(input.axes[6]);
   mapped->buttons[BUTTON_INDEX_DPAD_DOWN] = AxisPositiveAsButton(input.axes[6]);
@@ -190,12 +184,11 @@ void MapperDragonRiseGeneric(const blink::WebGamepad& input,
   mapped->axes[AXIS_INDEX_LEFT_STICK_Y] = input.axes[1];
   mapped->axes[AXIS_INDEX_RIGHT_STICK_X] = input.axes[3];
   mapped->axes[AXIS_INDEX_RIGHT_STICK_Y] = input.axes[4];
-  mapped->buttonsLength = BUTTON_INDEX_COUNT - 1;  // no Meta on this device
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT - 1;  // no Meta on this device
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperOnLiveWireless(const blink::WebGamepad& input,
-                          blink::WebGamepad* mapped) {
+void MapperOnLiveWireless(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_LEFT_TRIGGER] = AxisToButton(input.axes[2]);
   mapped->buttons[BUTTON_INDEX_RIGHT_TRIGGER] = AxisToButton(input.axes[5]);
@@ -212,11 +205,11 @@ void MapperOnLiveWireless(const blink::WebGamepad& input,
   mapped->axes[AXIS_INDEX_RIGHT_STICK_X] = input.axes[3];
   mapped->axes[AXIS_INDEX_RIGHT_STICK_Y] = input.axes[4];
 
-  mapped->buttonsLength = BUTTON_INDEX_COUNT;
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT;
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperADT1(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
+void MapperADT1(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_LEFT_TRIGGER] = AxisToButton(input.axes[5]);
   mapped->buttons[BUTTON_INDEX_RIGHT_TRIGGER] = AxisToButton(input.axes[4]);
@@ -231,11 +224,11 @@ void MapperADT1(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
       AxisPositiveAsButton(input.axes[6]);
   mapped->buttons[BUTTON_INDEX_META] = input.buttons[6];
 
-  mapped->buttonsLength = BUTTON_INDEX_COUNT;
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT;
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperNvShield(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
+void MapperNvShield(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_LEFT_TRIGGER] = AxisToButton(input.axes[5]);
   mapped->buttons[BUTTON_INDEX_RIGHT_TRIGGER] = AxisToButton(input.axes[4]);
@@ -250,11 +243,11 @@ void MapperNvShield(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
       AxisPositiveAsButton(input.axes[6]);
   mapped->buttons[BUTTON_INDEX_META] = input.buttons[6];
 
-  mapped->buttonsLength = BUTTON_INDEX_COUNT;
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT;
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperOUYA(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
+void MapperOUYA(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_PRIMARY] = input.buttons[0];
   mapped->buttons[BUTTON_INDEX_SECONDARY] = input.buttons[3];
@@ -276,12 +269,11 @@ void MapperOUYA(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
   mapped->axes[AXIS_INDEX_RIGHT_STICK_X] = input.axes[3];
   mapped->axes[AXIS_INDEX_RIGHT_STICK_Y] = input.axes[4];
 
-  mapped->buttonsLength = BUTTON_INDEX_COUNT;
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT;
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperRazerServal(const blink::WebGamepad& input,
-                       blink::WebGamepad* mapped) {
+void MapperRazerServal(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_LEFT_TRIGGER] = AxisToButton(input.axes[5]);
   mapped->buttons[BUTTON_INDEX_RIGHT_TRIGGER] = AxisToButton(input.axes[4]);
@@ -295,11 +287,11 @@ void MapperRazerServal(const blink::WebGamepad& input,
   mapped->buttons[BUTTON_INDEX_DPAD_RIGHT] =
       AxisPositiveAsButton(input.axes[6]);
 
-  mapped->buttonsLength = BUTTON_INDEX_COUNT - 1; /* no meta */
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT - 1; /* no meta */
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperMogaPro(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
+void MapperMogaPro(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_LEFT_TRIGGER] = AxisToButton(input.axes[5]);
   mapped->buttons[BUTTON_INDEX_RIGHT_TRIGGER] = AxisToButton(input.axes[4]);
@@ -313,12 +305,11 @@ void MapperMogaPro(const blink::WebGamepad& input, blink::WebGamepad* mapped) {
   mapped->buttons[BUTTON_INDEX_DPAD_RIGHT] =
       AxisPositiveAsButton(input.axes[6]);
 
-  mapped->buttonsLength = BUTTON_INDEX_COUNT - 1; /* no meta */
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT - 1; /* no meta */
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
-void MapperSamsung_EI_GP20(const blink::WebGamepad& input,
-                           blink::WebGamepad* mapped) {
+void MapperSamsung_EI_GP20(const Gamepad& input, Gamepad* mapped) {
   *mapped = input;
   mapped->buttons[BUTTON_INDEX_PRIMARY] = input.buttons[0];
   mapped->buttons[BUTTON_INDEX_SECONDARY] = input.buttons[1];
@@ -345,8 +336,8 @@ void MapperSamsung_EI_GP20(const blink::WebGamepad& input,
   mapped->axes[AXIS_INDEX_RIGHT_STICK_X] = input.axes[2];
   mapped->axes[AXIS_INDEX_RIGHT_STICK_Y] = input.axes[3];
 
-  mapped->buttonsLength = BUTTON_INDEX_COUNT;
-  mapped->axesLength = AXIS_INDEX_COUNT;
+  mapped->buttons_length = BUTTON_INDEX_COUNT;
+  mapped->axes_length = AXIS_INDEX_COUNT;
 }
 
 struct MappingData {
@@ -358,6 +349,7 @@ struct MappingData {
     {"0079", "0006", MapperDragonRiseGeneric},   // DragonRise Generic USB
     {"045e", "028e", MapperXInputStyleGamepad},  // Xbox 360 Wired
     {"045e", "028f", MapperXInputStyleGamepad},  // Xbox 360 Wireless
+    {"045e", "02a1", MapperXInputStyleGamepad},  // Xbox 360 Wireless
     {"045e", "02d1", MapperXInputStyleGamepad},  // Xbox One Wired
     {"045e", "02dd", MapperXInputStyleGamepad},  // Xbox One Wired (2015 FW)
     {"045e", "02e3", MapperXInputStyleGamepad},  // Xbox One Elite Wired

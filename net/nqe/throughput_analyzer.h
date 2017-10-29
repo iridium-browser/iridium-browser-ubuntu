@@ -14,6 +14,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "net/base/net_export.h"
+#include "net/log/net_log_with_source.h"
 
 namespace {
 typedef base::Callback<void(int32_t)> ThroughputObservationCallback;
@@ -25,6 +26,7 @@ class SingleThreadTaskRunner;
 
 namespace net {
 
+class NetworkQualityEstimatorParams;
 class URLRequest;
 
 namespace nqe {
@@ -55,10 +57,12 @@ class NET_EXPORT_PRIVATE ThroughputAnalyzer {
   // estimation.
   // Virtualized for testing.
   ThroughputAnalyzer(
+      const NetworkQualityEstimatorParams* params,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       ThroughputObservationCallback throughput_observation_callback,
       bool use_local_host_requests_for_tests,
-      bool use_smaller_responses_for_tests);
+      bool use_smaller_responses_for_tests,
+      const NetLogWithSource& net_log);
   virtual ~ThroughputAnalyzer();
 
   // Notifies |this| that the headers of |request| are about to be sent.
@@ -80,6 +84,10 @@ class NET_EXPORT_PRIVATE ThroughputAnalyzer {
   // |kMinRequestDurationMicroseconds| to be used for network quality
   // estimation.
   void SetUseSmallResponsesForTesting(bool use_small_responses);
+
+  // Returns true if throughput is currently tracked by a throughput
+  // observation window.
+  bool IsCurrentlyTrackingThroughput() const;
 
  protected:
   // Exposed for testing.
@@ -106,7 +114,7 @@ class NET_EXPORT_PRIVATE ThroughputAnalyzer {
   // tracking throughput. A throughput observation can be taken only if the
   // time-window is currently active, and enough bytes have accumulated in
   // that window. |downstream_kbps| should not be null.
-  bool MayBeGetThroughputObservation(int32_t* downstream_kbps);
+  bool MaybeGetThroughputObservation(int32_t* downstream_kbps);
 
   // Starts the throughput observation window that keeps track of network
   // bytes if the following conditions are true:
@@ -120,10 +128,6 @@ class NET_EXPORT_PRIVATE ThroughputAnalyzer {
   // EndThroughputObservationWindow ends the throughput observation window.
   void EndThroughputObservationWindow();
 
-  // Returns true if throughput is currently tracked by a throughput
-  // observation window.
-  bool IsCurrentlyTrackingThroughput() const;
-
   // Returns true if the |request| degrades the accuracy of the throughput
   // observation window. A local request or a request that spans a connection
   // change degrades the accuracy of the throughput computation.
@@ -133,6 +137,7 @@ class NET_EXPORT_PRIVATE ThroughputAnalyzer {
   // do not exceed their capacities.
   void BoundRequestsSize();
 
+  const NetworkQualityEstimatorParams* params_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   // Called every time a new throughput observation is available.
@@ -174,6 +179,8 @@ class NET_EXPORT_PRIVATE ThroughputAnalyzer {
   bool use_small_responses_for_tests_;
 
   base::ThreadChecker thread_checker_;
+
+  NetLogWithSource net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(ThroughputAnalyzer);
 };

@@ -30,249 +30,251 @@
 
 #include "core/fileapi/FileReaderLoader.h"
 
-#include "core/dom/DOMArrayBuffer.h"
+#include <memory>
 #include "core/dom/ExecutionContext.h"
 #include "core/fileapi/Blob.h"
 #include "core/fileapi/FileReaderLoaderClient.h"
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/loader/ThreadableLoader.h"
+#include "core/typed_arrays/DOMArrayBuffer.h"
 #include "platform/blob/BlobRegistry.h"
 #include "platform/blob/BlobURL.h"
 #include "platform/loader/fetch/FetchInitiatorTypeNames.h"
-#include "platform/network/ResourceError.h"
-#include "platform/network/ResourceRequest.h"
-#include "platform/network/ResourceResponse.h"
+#include "platform/loader/fetch/ResourceError.h"
+#include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/ResourceRequest.h"
+#include "platform/loader/fetch/ResourceResponse.h"
+#include "platform/loader/fetch/TextResourceDecoderOptions.h"
+#include "platform/wtf/PassRefPtr.h"
+#include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/RefPtr.h"
+#include "platform/wtf/Vector.h"
+#include "platform/wtf/text/Base64.h"
+#include "platform/wtf/text/StringBuilder.h"
 #include "public/platform/WebURLRequest.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/PtrUtil.h"
-#include "wtf/RefPtr.h"
-#include "wtf/Vector.h"
-#include "wtf/text/Base64.h"
-#include "wtf/text/StringBuilder.h"
-#include <memory>
+#include "v8/include/v8.h"
 
 namespace blink {
 
-FileReaderLoader::FileReaderLoader(ReadType readType,
+FileReaderLoader::FileReaderLoader(ReadType read_type,
                                    FileReaderLoaderClient* client)
-    : m_readType(readType),
-      m_client(client),
-      m_isRawDataConverted(false),
-      m_stringResult(""),
-      m_finishedLoading(false),
-      m_bytesLoaded(0),
-      m_totalBytes(-1),
-      m_hasRange(false),
-      m_rangeStart(0),
-      m_rangeEnd(0),
-      m_errorCode(FileError::kOK) {}
+    : read_type_(read_type), client_(client) {}
 
 FileReaderLoader::~FileReaderLoader() {
-  cleanup();
-  if (!m_urlForReading.isEmpty()) {
-    BlobRegistry::revokePublicBlobURL(m_urlForReading);
+  Cleanup();
+  UnadjustReportedMemoryUsageToV8();
+  if (!url_for_reading_.IsEmpty()) {
+    BlobRegistry::RevokePublicBlobURL(url_for_reading_);
   }
 }
 
-void FileReaderLoader::start(ExecutionContext* executionContext,
-                             PassRefPtr<BlobDataHandle> blobData) {
-  DCHECK(executionContext);
+void FileReaderLoader::Start(ExecutionContext* execution_context,
+                             PassRefPtr<BlobDataHandle> blob_data) {
+  DCHECK(execution_context);
   // The blob is read by routing through the request handling layer given a
   // temporary public url.
-  m_urlForReading =
-      BlobURL::createPublicURL(executionContext->getSecurityOrigin());
-  if (m_urlForReading.isEmpty()) {
-    failed(FileError::kSecurityErr);
+  url_for_reading_ =
+      BlobURL::CreatePublicURL(execution_context->GetSecurityOrigin());
+  if (url_for_reading_.IsEmpty()) {
+    Failed(FileError::kSecurityErr);
     return;
   }
 
-  BlobRegistry::registerPublicBlobURL(executionContext->getSecurityOrigin(),
-                                      m_urlForReading, std::move(blobData));
+  BlobRegistry::RegisterPublicBlobURL(execution_context->GetSecurityOrigin(),
+                                      url_for_reading_, std::move(blob_data));
   // Construct and load the request.
-  ResourceRequest request(m_urlForReading);
-  request.setExternalRequestStateFromRequestorAddressSpace(
-      executionContext->securityContext().addressSpace());
+  ResourceRequest request(url_for_reading_);
+  request.SetExternalRequestStateFromRequestorAddressSpace(
+      execution_context->GetSecurityContext().AddressSpace());
 
   // FIXME: Should this really be 'internal'? Do we know anything about the
   // actual request that generated this fetch?
-  request.setRequestContext(WebURLRequest::RequestContextInternal);
+  request.SetRequestContext(WebURLRequest::kRequestContextInternal);
+  request.SetFetchRequestMode(WebURLRequest::kFetchRequestModeSameOrigin);
 
-  request.setHTTPMethod(HTTPNames::GET);
-  if (m_hasRange)
-    request.setHTTPHeaderField(
-        HTTPNames::Range,
-        AtomicString(String::format("bytes=%d-%d", m_rangeStart, m_rangeEnd)));
+  request.SetHTTPMethod(HTTPNames::GET);
 
   ThreadableLoaderOptions options;
-  options.preflightPolicy = ConsiderPreflight;
-  options.crossOriginRequestPolicy = DenyCrossOriginRequests;
-  // FIXME: Is there a directive to which this load should be subject?
-  options.contentSecurityPolicyEnforcement = DoNotEnforceContentSecurityPolicy;
+
+  ResourceLoaderOptions resource_loader_options;
   // Use special initiator to hide the request from the inspector.
-  options.initiator = FetchInitiatorTypeNames::internal;
+  resource_loader_options.initiator_info.name =
+      FetchInitiatorTypeNames::internal;
 
-  ResourceLoaderOptions resourceLoaderOptions;
-  resourceLoaderOptions.allowCredentials = AllowStoredCredentials;
-
-  if (m_client) {
-    DCHECK(!m_loader);
-    m_loader = ThreadableLoader::create(*executionContext, this, options,
-                                        resourceLoaderOptions);
-    m_loader->start(request);
+  if (client_) {
+    DCHECK(!loader_);
+    loader_ = ThreadableLoader::Create(*execution_context, this, options,
+                                       resource_loader_options);
+    loader_->Start(request);
   } else {
-    ThreadableLoader::loadResourceSynchronously(
-        *executionContext, request, *this, options, resourceLoaderOptions);
+    ThreadableLoader::LoadResourceSynchronously(
+        *execution_context, request, *this, options, resource_loader_options);
   }
 }
 
-void FileReaderLoader::cancel() {
-  m_errorCode = FileError::kAbortErr;
-  cleanup();
+void FileReaderLoader::Cancel() {
+  error_code_ = FileError::kAbortErr;
+  Cleanup();
 }
 
-void FileReaderLoader::cleanup() {
-  if (m_loader) {
-    m_loader->cancel();
-    m_loader = nullptr;
+void FileReaderLoader::Cleanup() {
+  if (loader_) {
+    loader_->Cancel();
+    loader_ = nullptr;
   }
 
   // If we get any error, we do not need to keep a buffer around.
-  if (m_errorCode) {
-    m_rawData.reset();
-    m_stringResult = "";
-    m_isRawDataConverted = true;
-    m_decoder.reset();
+  if (error_code_) {
+    raw_data_.reset();
+    string_result_ = "";
+    is_raw_data_converted_ = true;
+    decoder_.reset();
+    array_buffer_result_ = nullptr;
+    UnadjustReportedMemoryUsageToV8();
   }
 }
 
-void FileReaderLoader::didReceiveResponse(
+void FileReaderLoader::AdjustReportedMemoryUsageToV8(int64_t usage) {
+  if (!usage)
+    return;
+  memory_usage_reported_to_v8_ += usage;
+  v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(usage);
+  DCHECK_GE(memory_usage_reported_to_v8_, 0);
+}
+
+void FileReaderLoader::UnadjustReportedMemoryUsageToV8() {
+  if (!memory_usage_reported_to_v8_)
+    return;
+  v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(
+      -memory_usage_reported_to_v8_);
+  memory_usage_reported_to_v8_ = 0;
+}
+
+void FileReaderLoader::DidReceiveResponse(
     unsigned long,
     const ResourceResponse& response,
     std::unique_ptr<WebDataConsumerHandle> handle) {
   DCHECK(!handle);
-  if (response.httpStatusCode() != 200) {
-    failed(httpStatusCodeToErrorCode(response.httpStatusCode()));
+  if (response.HttpStatusCode() != 200) {
+    Failed(HttpStatusCodeToErrorCode(response.HttpStatusCode()));
     return;
   }
 
   // A negative value means that the content length wasn't specified.
-  m_totalBytes = response.expectedContentLength();
+  total_bytes_ = response.ExpectedContentLength();
 
-  long long initialBufferLength = -1;
+  long long initial_buffer_length = -1;
 
-  if (m_totalBytes >= 0) {
-    initialBufferLength = m_totalBytes;
-  } else if (m_hasRange) {
-    // Set m_totalBytes and allocate a buffer based on the specified range.
-    m_totalBytes = 1LL + m_rangeEnd - m_rangeStart;
-    initialBufferLength = m_totalBytes;
+  if (total_bytes_ >= 0) {
+    initial_buffer_length = total_bytes_;
   } else {
     // Nothing is known about the size of the resource. Normalize
     // m_totalBytes to -1 and initialize the buffer for receiving with the
     // default size.
-    m_totalBytes = -1;
+    total_bytes_ = -1;
   }
 
-  ASSERT(!m_rawData);
+  DCHECK(!raw_data_);
 
-  if (m_readType != ReadByClient) {
+  if (read_type_ != kReadByClient) {
     // Check that we can cast to unsigned since we have to do
     // so to call ArrayBuffer's create function.
     // FIXME: Support reading more than the current size limit of ArrayBuffer.
-    if (initialBufferLength > std::numeric_limits<unsigned>::max()) {
-      failed(FileError::kNotReadableErr);
+    if (initial_buffer_length > std::numeric_limits<unsigned>::max()) {
+      Failed(FileError::kNotReadableErr);
       return;
     }
 
-    if (initialBufferLength < 0)
-      m_rawData = WTF::makeUnique<ArrayBufferBuilder>();
+    if (initial_buffer_length < 0)
+      raw_data_ = WTF::MakeUnique<ArrayBufferBuilder>();
     else
-      m_rawData = WTF::wrapUnique(
-          new ArrayBufferBuilder(static_cast<unsigned>(initialBufferLength)));
+      raw_data_ = WTF::WrapUnique(
+          new ArrayBufferBuilder(static_cast<unsigned>(initial_buffer_length)));
 
-    if (!m_rawData || !m_rawData->isValid()) {
-      failed(FileError::kNotReadableErr);
+    if (!raw_data_ || !raw_data_->IsValid()) {
+      Failed(FileError::kNotReadableErr);
       return;
     }
 
-    if (initialBufferLength >= 0) {
+    if (initial_buffer_length >= 0) {
       // Total size is known. Set m_rawData to ignore overflowed data.
-      m_rawData->setVariableCapacity(false);
+      raw_data_->SetVariableCapacity(false);
     }
   }
 
-  if (m_client)
-    m_client->didStartLoading();
+  if (client_)
+    client_->DidStartLoading();
 }
 
-void FileReaderLoader::didReceiveData(const char* data, unsigned dataLength) {
-  ASSERT(data);
+void FileReaderLoader::DidReceiveData(const char* data, unsigned data_length) {
+  DCHECK(data);
 
   // Bail out if we already encountered an error.
-  if (m_errorCode)
+  if (error_code_)
     return;
 
-  if (m_readType == ReadByClient) {
-    m_bytesLoaded += dataLength;
+  if (read_type_ == kReadByClient) {
+    bytes_loaded_ += data_length;
 
-    if (m_client)
-      m_client->didReceiveDataForClient(data, dataLength);
-    return;
-  }
-
-  unsigned bytesAppended = m_rawData->append(data, dataLength);
-  if (!bytesAppended) {
-    m_rawData.reset();
-    m_bytesLoaded = 0;
-    failed(FileError::kNotReadableErr);
+    if (client_)
+      client_->DidReceiveDataForClient(data, data_length);
     return;
   }
-  m_bytesLoaded += bytesAppended;
-  m_isRawDataConverted = false;
 
-  if (m_client)
-    m_client->didReceiveData();
+  unsigned bytes_appended = raw_data_->Append(data, data_length);
+  if (!bytes_appended) {
+    raw_data_.reset();
+    bytes_loaded_ = 0;
+    Failed(FileError::kNotReadableErr);
+    return;
+  }
+  bytes_loaded_ += bytes_appended;
+  is_raw_data_converted_ = false;
+  AdjustReportedMemoryUsageToV8(bytes_appended);
+
+  if (client_)
+    client_->DidReceiveData();
 }
 
-void FileReaderLoader::didFinishLoading(unsigned long, double) {
-  if (m_readType != ReadByClient && m_rawData) {
-    m_rawData->shrinkToFit();
-    m_isRawDataConverted = false;
+void FileReaderLoader::DidFinishLoading(unsigned long, double) {
+  if (read_type_ != kReadByClient && raw_data_) {
+    raw_data_->ShrinkToFit();
+    is_raw_data_converted_ = false;
   }
 
-  if (m_totalBytes == -1) {
+  if (total_bytes_ == -1) {
     // Update m_totalBytes only when in dynamic buffer grow mode.
-    m_totalBytes = m_bytesLoaded;
+    total_bytes_ = bytes_loaded_;
   }
 
-  m_finishedLoading = true;
+  finished_loading_ = true;
 
-  cleanup();
-  if (m_client)
-    m_client->didFinishLoading();
+  Cleanup();
+  if (client_)
+    client_->DidFinishLoading();
 }
 
-void FileReaderLoader::didFail(const ResourceError& error) {
-  if (error.isCancellation())
+void FileReaderLoader::DidFail(const ResourceError& error) {
+  if (error.IsCancellation())
     return;
   // If we're aborting, do not proceed with normal error handling since it is
   // covered in aborting code.
-  if (m_errorCode == FileError::kAbortErr)
+  if (error_code_ == FileError::kAbortErr)
     return;
 
-  failed(FileError::kNotReadableErr);
+  Failed(FileError::kNotReadableErr);
 }
 
-void FileReaderLoader::failed(FileError::ErrorCode errorCode) {
-  m_errorCode = errorCode;
-  cleanup();
-  if (m_client)
-    m_client->didFail(m_errorCode);
+void FileReaderLoader::Failed(FileError::ErrorCode error_code) {
+  error_code_ = error_code;
+  Cleanup();
+  if (client_)
+    client_->DidFail(error_code_);
 }
 
-FileError::ErrorCode FileReaderLoader::httpStatusCodeToErrorCode(
-    int httpStatusCode) {
-  switch (httpStatusCode) {
+FileError::ErrorCode FileReaderLoader::HttpStatusCodeToErrorCode(
+    int http_status_code) {
+  switch (http_status_code) {
     case 403:
       return FileError::kSecurityErr;
     case 404:
@@ -282,64 +284,71 @@ FileError::ErrorCode FileReaderLoader::httpStatusCodeToErrorCode(
   }
 }
 
-DOMArrayBuffer* FileReaderLoader::arrayBufferResult() {
-  ASSERT(m_readType == ReadAsArrayBuffer);
+DOMArrayBuffer* FileReaderLoader::ArrayBufferResult() {
+  DCHECK_EQ(read_type_, kReadAsArrayBuffer);
+  if (array_buffer_result_)
+    return array_buffer_result_;
 
   // If the loading is not started or an error occurs, return an empty result.
-  if (!m_rawData || m_errorCode)
+  if (!raw_data_ || error_code_)
     return nullptr;
 
-  if (m_arrayBufferResult)
-    return m_arrayBufferResult;
-
-  DOMArrayBuffer* result = DOMArrayBuffer::create(m_rawData->toArrayBuffer());
-  if (m_finishedLoading) {
-    m_arrayBufferResult = result;
+  DOMArrayBuffer* result = DOMArrayBuffer::Create(raw_data_->ToArrayBuffer());
+  if (finished_loading_) {
+    array_buffer_result_ = result;
+    AdjustReportedMemoryUsageToV8(
+        -1 * static_cast<int64_t>(raw_data_->ByteLength()));
+    raw_data_.reset();
   }
   return result;
 }
 
-String FileReaderLoader::stringResult() {
-  ASSERT(m_readType != ReadAsArrayBuffer && m_readType != ReadByClient);
+String FileReaderLoader::StringResult() {
+  DCHECK_NE(read_type_, kReadAsArrayBuffer);
+  DCHECK_NE(read_type_, kReadByClient);
 
-  // If the loading is not started or an error occurs, return an empty result.
-  if (!m_rawData || m_errorCode)
-    return m_stringResult;
+  if (!raw_data_ || error_code_ || is_raw_data_converted_)
+    return string_result_;
 
-  // If already converted from the raw data, return the result now.
-  if (m_isRawDataConverted)
-    return m_stringResult;
-
-  switch (m_readType) {
-    case ReadAsArrayBuffer:
+  switch (read_type_) {
+    case kReadAsArrayBuffer:
       // No conversion is needed.
+      return string_result_;
+    case kReadAsBinaryString:
+      SetStringResult(raw_data_->ToString());
       break;
-    case ReadAsBinaryString:
-      m_stringResult = m_rawData->toString();
-      m_isRawDataConverted = true;
+    case kReadAsText:
+      SetStringResult(ConvertToText());
       break;
-    case ReadAsText:
-      convertToText();
-      break;
-    case ReadAsDataURL:
+    case kReadAsDataURL:
       // Partial data is not supported when reading as data URL.
-      if (m_finishedLoading)
-        convertToDataURL();
+      if (finished_loading_)
+        SetStringResult(ConvertToDataURL());
       break;
     default:
-      ASSERT_NOT_REACHED();
+      NOTREACHED();
   }
 
-  return m_stringResult;
+  if (finished_loading_) {
+    DCHECK(is_raw_data_converted_);
+    AdjustReportedMemoryUsageToV8(
+        -1 * static_cast<int64_t>(raw_data_->ByteLength()));
+    raw_data_.reset();
+  }
+  return string_result_;
 }
 
-void FileReaderLoader::convertToText() {
-  m_isRawDataConverted = true;
+void FileReaderLoader::SetStringResult(const String& result) {
+  AdjustReportedMemoryUsageToV8(
+      -1 * static_cast<int64_t>(string_result_.CharactersSizeInBytes()));
+  is_raw_data_converted_ = true;
+  string_result_ = result;
+  AdjustReportedMemoryUsageToV8(string_result_.CharactersSizeInBytes());
+}
 
-  if (!m_bytesLoaded) {
-    m_stringResult = "";
-    return;
-  }
+String FileReaderLoader::ConvertToText() {
+  if (!bytes_loaded_)
+    return "";
 
   // Decode the data.
   // The File API spec says that we should use the supplied encoding if it is
@@ -348,44 +357,42 @@ void FileReaderLoader::convertToText() {
   // override the provided encoding.
   // FIXME: consider supporting incremental decoding to improve the perf.
   StringBuilder builder;
-  if (!m_decoder)
-    m_decoder = TextResourceDecoder::create(
-        "text/plain", m_encoding.isValid() ? m_encoding : UTF8Encoding());
-  builder.append(m_decoder->decode(static_cast<const char*>(m_rawData->data()),
-                                   m_rawData->byteLength()));
+  if (!decoder_) {
+    decoder_ = TextResourceDecoder::Create(TextResourceDecoderOptions(
+        TextResourceDecoderOptions::kPlainTextContent,
+        encoding_.IsValid() ? encoding_ : UTF8Encoding()));
+  }
+  builder.Append(decoder_->Decode(static_cast<const char*>(raw_data_->Data()),
+                                  raw_data_->ByteLength()));
 
-  if (m_finishedLoading)
-    builder.append(m_decoder->flush());
+  if (finished_loading_)
+    builder.Append(decoder_->Flush());
 
-  m_stringResult = builder.toString();
+  return builder.ToString();
 }
 
-void FileReaderLoader::convertToDataURL() {
-  m_isRawDataConverted = true;
-
+String FileReaderLoader::ConvertToDataURL() {
   StringBuilder builder;
-  builder.append("data:");
+  builder.Append("data:");
 
-  if (!m_bytesLoaded) {
-    m_stringResult = builder.toString();
-    return;
-  }
+  if (!bytes_loaded_)
+    return builder.ToString();
 
-  builder.append(m_dataType);
-  builder.append(";base64,");
+  builder.Append(data_type_);
+  builder.Append(";base64,");
 
   Vector<char> out;
-  base64Encode(static_cast<const char*>(m_rawData->data()),
-               m_rawData->byteLength(), out);
+  Base64Encode(static_cast<const char*>(raw_data_->Data()),
+               raw_data_->ByteLength(), out);
   out.push_back('\0');
-  builder.append(out.data());
+  builder.Append(out.data());
 
-  m_stringResult = builder.toString();
+  return builder.ToString();
 }
 
-void FileReaderLoader::setEncoding(const String& encoding) {
-  if (!encoding.isEmpty())
-    m_encoding = WTF::TextEncoding(encoding);
+void FileReaderLoader::SetEncoding(const String& encoding) {
+  if (!encoding.IsEmpty())
+    encoding_ = WTF::TextEncoding(encoding);
 }
 
 }  // namespace blink

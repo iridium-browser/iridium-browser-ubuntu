@@ -22,18 +22,7 @@ using ::testing::_;
 using ::testing::DoAll;
 using ::testing::NiceMock;
 using ::testing::Return;
-using ::testing::SetArgumentPointee;
-
-// Allows us to inject our fake controller below.
-@interface BookmarkBarToolbarView (TestingAPI)
--(void)setController:(id<BookmarkBarToolbarViewController>)controller;
-@end
-
-@implementation BookmarkBarToolbarView (TestingAPI)
--(void)setController:(id<BookmarkBarToolbarViewController>)controller {
-  controller_ = controller;
-}
-@end
+using ::testing::SetArgPointee;
 
 // Allows us to control which way the view is rendered.
 @interface DrawDetachedBarFakeController :

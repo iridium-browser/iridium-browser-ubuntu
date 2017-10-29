@@ -15,6 +15,7 @@ import os
 
 from core import perf_benchmark
 
+from telemetry import benchmark
 from telemetry import page as page_module
 from telemetry.page import legacy_page_test
 from telemetry import story
@@ -131,6 +132,7 @@ class _OctaneMeasurement(legacy_page_test.LegacyPageTest):
                            'benchmark collection.'))
 
 
+@benchmark.Owner(emails=['bmeurer@chromium.org', 'mvstanton@chromium.org'])
 class Octane(perf_benchmark.PerfBenchmark):
   """Google's Octane JavaScript benchmark.
 
@@ -149,5 +151,12 @@ class Octane(perf_benchmark.PerfBenchmark):
         cloud_storage_bucket=story.PUBLIC_BUCKET)
     ps.AddStory(page_module.Page(
         'http://chromium.github.io/octane/index.html?auto=1',
-        ps, ps.base_dir, make_javascript_deterministic=False))
+        ps, ps.base_dir, make_javascript_deterministic=False,
+        name='http://chromium.github.io/octane/index.html?auto=1'))
     return ps
+
+  def GetExpectations(self):
+    class StoryExpectations(story.expectations.StoryExpectations):
+      def SetExpectations(self):
+        pass # Octane not disabled.
+    return StoryExpectations()

@@ -12,6 +12,7 @@
 #include "ui/aura/client/transient_window_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/mus/capture_synchronizer.h"
+#include "ui/aura/mus/focus_synchronizer.h"
 #include "ui/aura/mus/in_flight_change.h"
 #include "ui/aura/mus/window_mus.h"
 #include "ui/aura/mus/window_tree_client.h"
@@ -207,8 +208,10 @@ TEST_F(DesktopWindowTreeHostMusTest, ActivateBeforeShow) {
   aura::client::FocusClient* widget_focus_client =
       aura::client::GetFocusClient(widget1->GetNativeWindow());
   ASSERT_TRUE(widget_focus_client);
-  EXPECT_EQ(widget_focus_client,
-            aura::Env::GetInstance()->active_focus_client());
+  EXPECT_EQ(widget_focus_client, MusClient::Get()
+                                     ->window_tree_client()
+                                     ->focus_synchronizer()
+                                     ->active_focus_client());
 }
 
 TEST_F(DesktopWindowTreeHostMusTest, CursorClientDuringTearDown) {
@@ -322,6 +325,24 @@ TEST_F(DesktopWindowTreeHostMusTest, NoShadow) {
   EXPECT_EQ(wm::ShadowElevation::NONE,
             widget.GetNativeView()->GetHost()->window()->GetProperty(
                 wm::kShadowElevationKey));
+}
+
+TEST_F(DesktopWindowTreeHostMusTest, CreateFullscreenWidget) {
+  const Widget::InitParams::Type kWidgetTypes[] = {
+      Widget::InitParams::TYPE_WINDOW,
+      Widget::InitParams::TYPE_WINDOW_FRAMELESS,
+  };
+
+  for (auto widget_type : kWidgetTypes) {
+    Widget widget;
+    Widget::InitParams params(widget_type);
+    params.show_state = ui::SHOW_STATE_FULLSCREEN;
+    params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+    widget.Init(params);
+
+    EXPECT_TRUE(widget.IsFullscreen())
+        << "Fullscreen creation failed for type=" << widget_type;
+  }
 }
 
 }  // namespace views

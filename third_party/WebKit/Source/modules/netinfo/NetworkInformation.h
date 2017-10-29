@@ -5,11 +5,14 @@
 #ifndef NetworkInformation_h
 #define NetworkInformation_h
 
-#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
-#include "core/page/NetworkStateNotifier.h"
+#include "platform/bindings/ActiveScriptWrappable.h"
+#include "platform/network/NetworkStateNotifier.h"
+#include "platform/wtf/Optional.h"
+#include "platform/wtf/Time.h"
 #include "public/platform/WebConnectionType.h"
+#include "public/platform/WebEffectiveConnectionType.h"
 
 namespace blink {
 
@@ -24,25 +27,33 @@ class NetworkInformation final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static NetworkInformation* create(ExecutionContext*);
+  static NetworkInformation* Create(ExecutionContext*);
   ~NetworkInformation() override;
 
   String type() const;
   double downlinkMax() const;
+  String effectiveType() const;
+  unsigned long rtt() const;
+  double downlink() const;
 
   // NetworkStateObserver overrides.
-  void connectionChange(WebConnectionType, double downlinkMaxMbps) override;
+  void ConnectionChange(WebConnectionType,
+                        double downlink_max_mbps,
+                        WebEffectiveConnectionType effective_type,
+                        const Optional<TimeDelta>& http_rtt,
+                        const Optional<TimeDelta>& transport_rtt,
+                        const Optional<double>& downlink_mbps) override;
 
   // EventTarget overrides.
-  const AtomicString& interfaceName() const override;
-  ExecutionContext* getExecutionContext() const override;
-  void removeAllEventListeners() override;
+  const AtomicString& InterfaceName() const override;
+  ExecutionContext* GetExecutionContext() const override;
+  void RemoveAllEventListeners() override;
 
   // ScriptWrappable
-  bool hasPendingActivity() const final;
+  bool HasPendingActivity() const final;
 
   // ContextLifecycleObserver overrides.
-  void contextDestroyed(ExecutionContext*) override;
+  void ContextDestroyed(ExecutionContext*) override;
 
   DECLARE_VIRTUAL_TRACE();
 
@@ -51,27 +62,40 @@ class NetworkInformation final
 
  protected:
   // EventTarget overrides.
-  void addedEventListener(const AtomicString& eventType,
+  void AddedEventListener(const AtomicString& event_type,
                           RegisteredEventListener&) final;
-  void removedEventListener(const AtomicString& eventType,
+  void RemovedEventListener(const AtomicString& event_type,
                             const RegisteredEventListener&) final;
 
  private:
   explicit NetworkInformation(ExecutionContext*);
-  void startObserving();
-  void stopObserving();
+  void StartObserving();
+  void StopObserving();
 
   // Touched only on context thread.
-  WebConnectionType m_type;
+  WebConnectionType type_;
 
   // Touched only on context thread.
-  double m_downlinkMaxMbps;
+  double downlink_max_mbps_;
+
+  // Current effective connection type, which is the connection type whose
+  // typical performance is most similar to the measured performance of the
+  // network in use.
+  WebEffectiveConnectionType effective_type_;
+
+  // HTTP RTT estimate. Rounded off to the nearest 25 msec. Touched only on
+  // context thread.
+  unsigned long http_rtt_msec_;
+
+  // Downlink throughput estimate. Rounded off to the nearest 25 kbps. Touched
+  // only on context thread.
+  double downlink_mbps_;
 
   // Whether this object is listening for events from NetworkStateNotifier.
-  bool m_observing;
+  bool observing_;
 
   // Whether ContextLifecycleObserver::contextDestroyed has been called.
-  bool m_contextStopped;
+  bool context_stopped_;
 };
 
 }  // namespace blink

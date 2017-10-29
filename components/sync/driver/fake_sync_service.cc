@@ -146,14 +146,6 @@ void FakeSyncService::RegisterDataTypeController(
 
 void FakeSyncService::ReenableDatatype(ModelType type) {}
 
-bool FakeSyncService::IsPassphraseRequired() const {
-  return false;
-}
-
-ModelTypeSet FakeSyncService::GetEncryptedDataTypes() const {
-  return ModelTypeSet();
-}
-
 FakeSyncService::SyncTokenStatus FakeSyncService::GetSyncTokenStatus() const {
   return FakeSyncService::SyncTokenStatus();
 }
@@ -213,5 +205,19 @@ base::WeakPtr<JsController> FakeSyncService::GetJsController() {
 
 void FakeSyncService::GetAllNodes(
     const base::Callback<void(std::unique_ptr<base::ListValue>)>& callback) {}
+
+SigninManagerBase* FakeSyncService::signin() const {
+  return nullptr;
+}
+
+bool FakeSyncService::IsPassphraseRequired() const {
+  return false;
+}
+
+ModelTypeSet FakeSyncService::GetEncryptedDataTypes() const {
+  return ModelTypeSet();
+}
+
+void FakeSyncService::Shutdown() {}
 
 }  // namespace syncer

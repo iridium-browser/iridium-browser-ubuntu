@@ -6,8 +6,9 @@
 #define CONTENT_TEST_FAKE_COMPOSITOR_DEPENDENCIES_H_
 
 #include "base/macros.h"
-#include "cc/output/buffer_to_texture_target_map.h"
+#include "base/single_thread_task_runner.h"
 #include "cc/test/test_task_graph_runner.h"
+#include "components/viz/common/resources/buffer_to_texture_target_map.h"
 #include "content/renderer/gpu/compositor_dependencies.h"
 #include "third_party/WebKit/public/platform/scheduler/test/fake_renderer_scheduler.h"
 
@@ -28,21 +29,20 @@ class FakeCompositorDependencies : public CompositorDependencies {
   bool IsPartialRasterEnabled() override;
   bool IsGpuMemoryBufferCompositorResourcesEnabled() override;
   bool IsElasticOverscrollEnabled() override;
-  const cc::BufferToTextureTargetMap& GetBufferToTextureTargetMap() override;
+  const viz::BufferToTextureTargetMap& GetBufferToTextureTargetMap() override;
   scoped_refptr<base::SingleThreadTaskRunner>
   GetCompositorMainThreadTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner>
   GetCompositorImplThreadTaskRunner() override;
   blink::scheduler::RendererScheduler* GetRendererScheduler() override;
   cc::TaskGraphRunner* GetTaskGraphRunner() override;
-  bool AreImageDecodeTasksEnabled() override;
   bool IsThreadedAnimationEnabled() override;
   bool IsScrollAnimatorEnabled() override;
 
  private:
   cc::TestTaskGraphRunner task_graph_runner_;
   blink::scheduler::FakeRendererScheduler renderer_scheduler_;
-  cc::BufferToTextureTargetMap buffer_to_texture_target_map_;
+  viz::BufferToTextureTargetMap buffer_to_texture_target_map_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeCompositorDependencies);
 };

@@ -28,8 +28,8 @@ class CPDF_LinkExtract {
 
  protected:
   void ParseLink();
-  bool CheckWebLink(CFX_WideString& str);
-  bool CheckMailLink(CFX_WideString& str);
+  bool CheckWebLink(CFX_WideString* str, int32_t* nStart, int32_t* nCount);
+  bool CheckMailLink(CFX_WideString* str);
 
  private:
   struct Link {
@@ -38,7 +38,7 @@ class CPDF_LinkExtract {
     CFX_WideString m_strUrl;
   };
 
-  const CPDF_TextPage* const m_pTextPage;
+  CFX_UnownedPtr<const CPDF_TextPage> const m_pTextPage;
   CFX_WideString m_strPageText;
   std::vector<Link> m_LinkArray;
 };

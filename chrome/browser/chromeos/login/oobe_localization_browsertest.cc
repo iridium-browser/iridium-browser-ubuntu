@@ -14,7 +14,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
-#include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/screens/network_screen.h"
@@ -33,6 +32,7 @@
 #include "content/public/test/test_utils.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/base/ime/chromeos/input_method_util.h"
 #include "ui/base/ime/chromeos/input_method_whitelist.h"
 
 namespace base {
@@ -94,8 +94,8 @@ class TimedRunLoop {
 class LanguageListWaiter : public NetworkScreen::Observer {
  public:
   LanguageListWaiter()
-      : network_screen_(
-            NetworkScreen::Get(WizardController::default_controller())),
+      : network_screen_(NetworkScreen::Get(
+            WizardController::default_controller()->screen_manager())),
         loop_(base::TimeDelta::FromSeconds(kTimeoutSeconds), "LanguageList") {
     network_screen_->AddObserver(this);
     CheckLanguageList();
@@ -415,7 +415,7 @@ void OobeLocalizationTest::RunLocalizationTest() {
   EXPECT_EQ(expected_keyboard_select, DumpOptions(kKeyboardSelect));
 
   // Shut down the display host.
-  LoginDisplayHost::default_host()->Finalize();
+  LoginDisplayHost::default_host()->Finalize(base::OnceClosure());
   base::RunLoop().RunUntilIdle();
 
   // Clear the locale pref so the statistics provider is pinged next time.

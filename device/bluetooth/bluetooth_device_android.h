@@ -29,11 +29,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceAndroid final
   //
   // The ChromeBluetoothDevice instance will hold a Java reference
   // to |bluetooth_device_wrapper|.
-  //
-  // TODO(scheib): Return a std::unique_ptr<>, but then adapter will need to
-  // handle
-  // this correctly. http://crbug.com/506416
-  static BluetoothDeviceAndroid* Create(
+  static std::unique_ptr<BluetoothDeviceAndroid> Create(
       BluetoothAdapterAndroid* adapter,
       const base::android::JavaRef<jobject>&
           bluetooth_device_wrapper);  // Java Type: bluetoothDeviceWrapper
@@ -69,6 +65,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceAndroid final
   bool ExpectingPasskey() const override;
   bool ExpectingConfirmation() const override;
   void GetConnectionInfo(const ConnectionInfoCallback& callback) override;
+  void SetConnectionLatency(ConnectionLatency connection_latency,
+                            const base::Closure& callback,
+                            const ErrorCallback& error_callback) override;
   void Connect(device::BluetoothDevice::PairingDelegate* pairing_delegate,
                const base::Closure& callback,
                const ConnectErrorCallback& error_callback) override;

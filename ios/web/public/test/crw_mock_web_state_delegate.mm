@@ -7,6 +7,10 @@
 #import "ios/web/public/web_state/context_menu_params.h"
 #import "ios/web/public/web_state/web_state.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 @implementation CRWMockWebStateDelegate {
   // Backs up the property with the same name.
   std::unique_ptr<web::WebState::OpenURLParams> _openURLParams;
@@ -17,8 +21,24 @@
 }
 
 @synthesize webState = _webState;
+@synthesize webStateCreationRequested = _webStateCreationRequested;
+@synthesize webStateClosingRequested = _webStateClosingRequested;
 @synthesize repostFormWarningRequested = _repostFormWarningRequested;
 @synthesize authenticationRequested = _authenticationRequested;
+
+- (web::WebState*)webState:(web::WebState*)webState
+    createNewWebStateForURL:(const GURL&)URL
+                  openerURL:(const GURL&)openerURL
+            initiatedByUser:(BOOL)initiatedByUser {
+  _webState = webState;
+  _webStateCreationRequested = YES;
+  return nil;
+}
+
+- (void)closeWebState:(web::WebState*)webState {
+  _webState = webState;
+  _webStateClosingRequested = YES;
+}
 
 - (web::WebState*)webState:(web::WebState*)webState
          openURLWithParams:(const web::WebState::OpenURLParams&)params {

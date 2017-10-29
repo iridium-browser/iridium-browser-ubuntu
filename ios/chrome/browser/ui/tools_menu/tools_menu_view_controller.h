@@ -7,7 +7,9 @@
 
 #import <UIKit/UIKit.h>
 
-@class ToolsMenuContext;
+@protocol ApplicationCommands;
+@protocol BrowserCommands;
+@class ToolsMenuConfiguration;
 
 // TODO(crbug.com/228521): Remove this once the new command/metric handling is
 // implemented. This is a temporary workaround to allow metrics recording to
@@ -31,8 +33,8 @@ extern NSString* const kToolsMenuReaderMode;
 extern NSString* const kToolsMenuRequestDesktopId;
 extern NSString* const kToolsMenuSettingsId;
 extern NSString* const kToolsMenuHelpId;
-extern NSString* const kToolsMenuSuggestionsId;
 extern NSString* const kToolsMenuReadingListId;
+extern NSString* const kToolsMenuRequestMobileId;
 
 // Tools Popup Table Delegate Protocol
 @protocol ToolsPopupTableDelegate<NSObject>
@@ -52,12 +54,18 @@ extern NSString* const kToolsMenuReadingListId;
 @property(nonatomic, assign) BOOL isCurrentPageBookmarked;
 @property(nonatomic, assign) BOOL isTabLoading;
 // The tool button to be shown hovering above the popup.
-@property(nonatomic, readonly) UIButton* toolsButton;
+@property(nonatomic, readonly, weak) UIButton* toolsButton;
 
-@property(nonatomic, assign) id<ToolsPopupTableDelegate> delegate;
+// Keeps track of the items in tools menu.
+@property(nonatomic, copy) NSArray* menuItems;
+
+@property(nonatomic, weak) id<ToolsPopupTableDelegate> delegate;
+
+// Dispatcher for browser commands.
+@property(nonatomic, weak) id<ApplicationCommands, BrowserCommands> dispatcher;
 
 // Initializes the Tools popup menu.
-- (void)initializeMenu:(ToolsMenuContext*)context;
+- (void)initializeMenuWithConfiguration:(ToolsMenuConfiguration*)configuration;
 
 // Returns the optimal height needed to display the menu items.
 // The height returned is usually less than the |suggestedHeight| unless
@@ -85,9 +93,6 @@ extern NSString* const kToolsMenuReadingListId;
 
 // Informs tools popup menu whether the switch to reader mode is possible.
 - (void)setCanUseReaderMode:(BOOL)enabled;
-
-// Informs tools popup menu whether "Request Desktop Site" can be enabled.
-- (void)setCanUseDesktopUserAgent:(BOOL)value;
 
 - (void)animateContentIn;
 

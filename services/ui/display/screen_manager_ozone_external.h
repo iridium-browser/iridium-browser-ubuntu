@@ -23,9 +23,14 @@ class ScreenManagerOzoneExternal : public ScreenManager {
 
  private:
   // ScreenManager.
-  void AddInterfaces(service_manager::InterfaceRegistry* registry) override;
+  void AddInterfaces(
+      service_manager::BinderRegistryWithArgs<
+          const service_manager::BindSourceInfo&>* registry) override;
   void Init(ScreenManagerDelegate* delegate) override;
   void RequestCloseDisplay(int64_t display_id) override;
+  display::ScreenBase* GetScreen() override;
+
+  std::unique_ptr<display::ScreenBase> screen_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenManagerOzoneExternal);
 };

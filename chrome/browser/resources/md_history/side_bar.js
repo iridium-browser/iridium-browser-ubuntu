@@ -13,6 +13,12 @@ Polymer({
       notify: true,
     },
 
+    /** @private */
+    guestSession_: {
+      type: Boolean,
+      value: loadTimeData.getBoolean('isGuestSession'),
+    },
+
     showFooter: Boolean,
   },
 
@@ -46,6 +52,14 @@ Polymer({
     browserService.openClearBrowsingData();
     /** @type {PaperRippleElement} */ (this.$['cbd-ripple']).upAction();
     e.preventDefault();
+  },
+
+  /**
+   * @return {string}
+   * @private
+   */
+  computeClearBrowsingDataTabIndex_: function() {
+    return this.guestSession_ ? '-1' : '';
   },
 
   /**

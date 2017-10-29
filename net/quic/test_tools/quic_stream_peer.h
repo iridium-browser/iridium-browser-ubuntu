@@ -9,7 +9,9 @@
 
 #include "base/macros.h"
 #include "net/quic/core/quic_packets.h"
+#include "net/quic/core/quic_stream_send_buffer.h"
 #include "net/quic/core/quic_stream_sequencer.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
 
@@ -35,12 +37,14 @@ class QuicStreamPeer {
 
   static void WriteOrBufferData(
       QuicStream* stream,
-      base::StringPiece data,
+      QuicStringPiece data,
       bool fin,
       QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
 
   static QuicStreamSequencer* sequencer(QuicStream* stream);
   static QuicSession* session(QuicStream* stream);
+
+  static QuicStreamSendBuffer& SendBuffer(QuicStream* stream);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicStreamPeer);

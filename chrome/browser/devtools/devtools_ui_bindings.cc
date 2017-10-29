@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/base64.h"
+#include "base/guid.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/json/string_escape.h"
@@ -56,7 +57,6 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/renderer_preferences.h"
@@ -100,6 +100,12 @@ static const char kRemotePageActionInspect[] = "inspect";
 static const char kRemotePageActionReload[] = "reload";
 static const char kRemotePageActionActivate[] = "activate";
 static const char kRemotePageActionClose[] = "close";
+
+static const char kConfigDiscoverUsbDevices[] = "discoverUsbDevices";
+static const char kConfigPortForwardingEnabled[] = "portForwardingEnabled";
+static const char kConfigPortForwardingConfig[] = "portForwardingConfig";
+static const char kConfigNetworkDiscoveryEnabled[] = "networkDiscoveryEnabled";
+static const char kConfigNetworkDiscoveryConfig[] = "networkDiscoveryConfig";
 
 // This constant should be in sync with
 // the constant at shell_devtools_frontend.cc.
@@ -210,6 +216,7 @@ class DefaultBindingsDelegate : public DevToolsUIBindings::Delegate {
   void SetIsDocked(bool is_docked) override {}
   void OpenInNewTab(const std::string& url) override;
   void SetWhitelistedShortcuts(const std::string& message) override {}
+  void SetEyeDropperActive(bool active) override {}
   void OpenNodeFrontend() override {}
   using DispatchCallback =
       DevToolsEmbedderMessageDispatcher::Delegate::DispatchCallback;
@@ -290,14 +297,14 @@ int ResponseWriter::Write(net::IOBuffer* buffer,
   }
 
   base::Value* id = new base::Value(stream_id_);
-  base::StringValue* chunkValue = new base::StringValue(chunk);
+  base::Value* chunkValue = new base::Value(chunk);
   base::Value* encodedValue = new base::Value(encoded);
 
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&DevToolsUIBindings::CallClientFunction, bindings_,
-                 "DevToolsAPI.streamWrite", base::Owned(id),
-                 base::Owned(chunkValue), base::Owned(encodedValue)));
+      base::BindOnce(&DevToolsUIBindings::CallClientFunction, bindings_,
+                     "DevToolsAPI.streamWrite", base::Owned(id),
+                     base::Owned(chunkValue), base::Owned(encodedValue)));
   return num_bytes;
 }
 
@@ -506,8 +513,7 @@ void DevToolsUIBindings::FrontendWebContentsObserver::RenderProcessGone(
 
 void DevToolsUIBindings::FrontendWebContentsObserver::ReadyToCommitNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (navigation_handle->IsInMainFrame())
-    devtools_bindings_->UpdateFrontendHost(navigation_handle);
+  devtools_bindings_->ReadyToCommitNavigation(navigation_handle);
 }
 
 void DevToolsUIBindings::FrontendWebContentsObserver::
@@ -633,7 +639,7 @@ void DevToolsUIBindings::DispatchProtocolMessage(
 
   base::Value total_size(static_cast<int>(message.length()));
   for (size_t pos = 0; pos < message.length(); pos += kMaxMessageChunkSize) {
-    base::StringValue message_value(message.substr(pos, kMaxMessageChunkSize));
+    base::Value message_value(message.substr(pos, kMaxMessageChunkSize));
     CallClientFunction("DevToolsAPI.dispatchMessageChunk",
                        &message_value, pos ? NULL : &total_size, NULL);
   }
@@ -711,7 +717,7 @@ void DevToolsUIBindings::LoadNetworkResource(const DispatchCallback& callback,
             "resources from the network to enrich the debugging experience "
             "(e.g. source map resources)."
           trigger: "User opens Developer Tools to debug a web page."
-          data: "Any resources requested by Developer Tools"
+          data: "Any resources requested by Developer Tools."
           destination: WEBSITE
         }
         policy {
@@ -719,10 +725,10 @@ void DevToolsUIBindings::LoadNetworkResource(const DispatchCallback& callback,
           cookies_store: "user"
           setting:
             "It's not possible to disable this feature from settings."
-          policy {
+          chrome_policy {
             DeveloperToolsDisabled {
               policy_options {mode: MANDATORY}
-              value: true
+              DeveloperToolsDisabled: true
             }
           }
         })");
@@ -853,6 +859,10 @@ void DevToolsUIBindings::SetWhitelistedShortcuts(const std::string& message) {
   delegate_->SetWhitelistedShortcuts(message);
 }
 
+void DevToolsUIBindings::SetEyeDropperActive(bool active) {
+  delegate_->SetEyeDropperActive(active);
+}
+
 void DevToolsUIBindings::ShowCertificateViewer(const std::string& cert_chain) {
   std::unique_ptr<base::Value> value =
       base::JSONReader::Read(cert_chain);
@@ -914,30 +924,63 @@ void DevToolsUIBindings::ResetZoom() {
 void DevToolsUIBindings::SetDevicesDiscoveryConfig(
     bool discover_usb_devices,
     bool port_forwarding_enabled,
-    const std::string& port_forwarding_config) {
-  base::DictionaryValue* config_dict = nullptr;
-  std::unique_ptr<base::Value> parsed_config =
+    const std::string& port_forwarding_config,
+    bool network_discovery_enabled,
+    const std::string& network_discovery_config) {
+  base::DictionaryValue* port_forwarding_dict = nullptr;
+  std::unique_ptr<base::Value> parsed_port_forwarding =
       base::JSONReader::Read(port_forwarding_config);
-  if (!parsed_config || !parsed_config->GetAsDictionary(&config_dict))
+  if (!parsed_port_forwarding ||
+      !parsed_port_forwarding->GetAsDictionary(&port_forwarding_dict)) {
+    return;
+  }
+
+  base::ListValue* network_list = nullptr;
+  std::unique_ptr<base::Value> parsed_network =
+      base::JSONReader::Read(network_discovery_config);
+  if (!parsed_network || !parsed_network->GetAsList(&network_list))
     return;
 
   profile_->GetPrefs()->SetBoolean(
       prefs::kDevToolsDiscoverUsbDevicesEnabled, discover_usb_devices);
   profile_->GetPrefs()->SetBoolean(
       prefs::kDevToolsPortForwardingEnabled, port_forwarding_enabled);
-  profile_->GetPrefs()->Set(
-      prefs::kDevToolsPortForwardingConfig, *config_dict);
+  profile_->GetPrefs()->Set(prefs::kDevToolsPortForwardingConfig,
+                            *port_forwarding_dict);
+  profile_->GetPrefs()->SetBoolean(prefs::kDevToolsDiscoverTCPTargetsEnabled,
+                                   network_discovery_enabled);
+  profile_->GetPrefs()->Set(prefs::kDevToolsTCPDiscoveryConfig, *network_list);
 }
 
 void DevToolsUIBindings::DevicesDiscoveryConfigUpdated() {
-  CallClientFunction(
-      "DevToolsAPI.devicesDiscoveryConfigChanged",
-      profile_->GetPrefs()->FindPreference(
-          prefs::kDevToolsDiscoverUsbDevicesEnabled)->GetValue(),
-      profile_->GetPrefs()->FindPreference(
-          prefs::kDevToolsPortForwardingEnabled)->GetValue(),
-      profile_->GetPrefs()->FindPreference(
-          prefs::kDevToolsPortForwardingConfig)->GetValue());
+  base::DictionaryValue config;
+  config.Set(kConfigDiscoverUsbDevices,
+             profile_->GetPrefs()
+                 ->FindPreference(prefs::kDevToolsDiscoverUsbDevicesEnabled)
+                 ->GetValue()
+                 ->CreateDeepCopy());
+  config.Set(kConfigPortForwardingEnabled,
+             profile_->GetPrefs()
+                 ->FindPreference(prefs::kDevToolsPortForwardingEnabled)
+                 ->GetValue()
+                 ->CreateDeepCopy());
+  config.Set(kConfigPortForwardingConfig,
+             profile_->GetPrefs()
+                 ->FindPreference(prefs::kDevToolsPortForwardingConfig)
+                 ->GetValue()
+                 ->CreateDeepCopy());
+  config.Set(kConfigNetworkDiscoveryEnabled,
+             profile_->GetPrefs()
+                 ->FindPreference(prefs::kDevToolsDiscoverTCPTargetsEnabled)
+                 ->GetValue()
+                 ->CreateDeepCopy());
+  config.Set(kConfigNetworkDiscoveryConfig,
+             profile_->GetPrefs()
+                 ->FindPreference(prefs::kDevToolsTCPDiscoveryConfig)
+                 ->GetValue()
+                 ->CreateDeepCopy());
+  CallClientFunction("DevToolsAPI.devicesDiscoveryConfigChanged", &config,
+                     nullptr, nullptr);
 }
 
 void DevToolsUIBindings::SendPortForwardingStatus(const base::Value& status) {
@@ -962,6 +1005,14 @@ void DevToolsUIBindings::SetDevicesUpdatesEnabled(bool enabled) {
         base::Bind(&DevToolsUIBindings::DevicesDiscoveryConfigUpdated,
                    base::Unretained(this)));
     pref_change_registrar_.Add(prefs::kDevToolsPortForwardingConfig,
+        base::Bind(&DevToolsUIBindings::DevicesDiscoveryConfigUpdated,
+                   base::Unretained(this)));
+    pref_change_registrar_.Add(
+        prefs::kDevToolsDiscoverTCPTargetsEnabled,
+        base::Bind(&DevToolsUIBindings::DevicesDiscoveryConfigUpdated,
+                   base::Unretained(this)));
+    pref_change_registrar_.Add(
+        prefs::kDevToolsTCPDiscoveryConfig,
         base::Bind(&DevToolsUIBindings::DevicesDiscoveryConfigUpdated,
                    base::Unretained(this)));
     port_status_serializer_.reset(new PortForwardingStatusSerializer(
@@ -1061,11 +1112,11 @@ void DevToolsUIBindings::RecordEnumeratedHistogram(const std::string& name,
     return;
   }
   // Each histogram name must follow a different code path in
-  // order to UMA_HISTOGRAM_ENUMERATION work correctly.
+  // order to UMA_HISTOGRAM_EXACT_LINEAR work correctly.
   if (name == kDevToolsActionTakenHistogram)
-    UMA_HISTOGRAM_ENUMERATION(name, sample, boundary_value);
+    UMA_HISTOGRAM_EXACT_LINEAR(name, sample, boundary_value);
   else if (name == kDevToolsPanelShownHistogram)
-    UMA_HISTOGRAM_ENUMERATION(name, sample, boundary_value);
+    UMA_HISTOGRAM_EXACT_LINEAR(name, sample, boundary_value);
   else
     frontend_host_->BadMessageRecieved();
 }
@@ -1090,7 +1141,7 @@ void DevToolsUIBindings::JsonReceived(const DispatchCallback& callback,
     callback.Run(nullptr);
     return;
   }
-  base::StringValue message_value(message);
+  base::Value message_value(message);
   callback.Run(&message_value);
 }
 
@@ -1100,10 +1151,9 @@ void DevToolsUIBindings::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK(it != pending_requests_.end());
 
   base::DictionaryValue response;
-  base::DictionaryValue* headers = new base::DictionaryValue();
+  auto headers = base::MakeUnique<base::DictionaryValue>();
   net::HttpResponseHeaders* rh = source->GetResponseHeaders();
   response.SetInteger("statusCode", rh ? rh->response_code() : 200);
-  response.Set("headers", headers);
 
   size_t iterator = 0;
   std::string name;
@@ -1111,6 +1161,7 @@ void DevToolsUIBindings::OnURLFetchComplete(const net::URLFetcher* source) {
   while (rh && rh->EnumerateHeaderLines(&iterator, &name, &value))
     headers->SetString(name, value);
 
+  response.Set("headers", std::move(headers));
   it->second.Run(&response);
   pending_requests_.erase(it);
   delete source;
@@ -1130,18 +1181,18 @@ void DevToolsUIBindings::DevicesUpdated(
 }
 
 void DevToolsUIBindings::FileSavedAs(const std::string& url) {
-  base::StringValue url_value(url);
+  base::Value url_value(url);
   CallClientFunction("DevToolsAPI.savedURL", &url_value, NULL, NULL);
 }
 
 void DevToolsUIBindings::CanceledFileSaveAs(const std::string& url) {
-  base::StringValue url_value(url);
+  base::Value url_value(url);
   CallClientFunction("DevToolsAPI.canceledSaveURL",
                      &url_value, NULL, NULL);
 }
 
 void DevToolsUIBindings::AppendedTo(const std::string& url) {
-  base::StringValue url_value(url);
+  base::Value url_value(url);
   CallClientFunction("DevToolsAPI.appendedToURL", &url_value, NULL,
                      NULL);
 }
@@ -1156,7 +1207,7 @@ void DevToolsUIBindings::FileSystemAdded(
 
 void DevToolsUIBindings::FileSystemRemoved(
     const std::string& file_system_path) {
-  base::StringValue file_system_path_value(file_system_path);
+  base::Value file_system_path_value(file_system_path);
   CallClientFunction("DevToolsAPI.fileSystemRemoved",
                      &file_system_path_value, NULL, NULL);
 }
@@ -1180,7 +1231,7 @@ void DevToolsUIBindings::IndexingTotalWorkCalculated(
     int total_work) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::Value request_id_value(request_id);
-  base::StringValue file_system_path_value(file_system_path);
+  base::Value file_system_path_value(file_system_path);
   base::Value total_work_value(total_work);
   CallClientFunction("DevToolsAPI.indexingTotalWorkCalculated",
                      &request_id_value, &file_system_path_value,
@@ -1192,7 +1243,7 @@ void DevToolsUIBindings::IndexingWorked(int request_id,
                                         int worked) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::Value request_id_value(request_id);
-  base::StringValue file_system_path_value(file_system_path);
+  base::Value file_system_path_value(file_system_path);
   base::Value worked_value(worked);
   CallClientFunction("DevToolsAPI.indexingWorked", &request_id_value,
                      &file_system_path_value, &worked_value);
@@ -1203,7 +1254,7 @@ void DevToolsUIBindings::IndexingDone(int request_id,
   indexing_jobs_.erase(request_id);
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::Value request_id_value(request_id);
-  base::StringValue file_system_path_value(file_system_path);
+  base::Value file_system_path_value(file_system_path);
   CallClientFunction("DevToolsAPI.indexingDone", &request_id_value,
                      &file_system_path_value, NULL);
 }
@@ -1219,7 +1270,7 @@ void DevToolsUIBindings::SearchCompleted(
     file_paths_value.AppendString(*it);
   }
   base::Value request_id_value(request_id);
-  base::StringValue file_system_path_value(file_system_path);
+  base::Value file_system_path_value(file_system_path);
   CallClientFunction("DevToolsAPI.searchCompleted", &request_id_value,
                      &file_system_path_value, &file_paths_value);
 }
@@ -1234,20 +1285,6 @@ void DevToolsUIBindings::ShowDevToolsConfirmInfoBar(
   std::unique_ptr<DevToolsConfirmInfoBarDelegate> delegate(
       new DevToolsConfirmInfoBarDelegate(callback, message));
   GlobalConfirmInfoBar::Show(std::move(delegate));
-}
-
-void DevToolsUIBindings::UpdateFrontendHost(
-    content::NavigationHandle* navigation_handle) {
-  if (!IsValidFrontendURL(navigation_handle->GetURL())) {
-    LOG(ERROR) << "Attempt to navigate to an invalid DevTools front-end URL: "
-        << navigation_handle->GetURL().spec();
-    frontend_host_.reset();
-    return;
-  }
-  frontend_host_.reset(content::DevToolsFrontendHost::Create(
-      navigation_handle->GetRenderFrameHost(),
-      base::Bind(&DevToolsUIBindings::HandleMessageFromDevToolsFrontend,
-                 base::Unretained(this))));
 }
 
 void DevToolsUIBindings::AddDevToolsExtensionsToClient() {
@@ -1272,20 +1309,24 @@ void DevToolsUIBindings::AddDevToolsExtensionsToClient() {
 
     std::unique_ptr<base::DictionaryValue> extension_info(
         new base::DictionaryValue());
-    extension_info->Set(
+    extension_info->SetString(
         "startPage",
-        new base::StringValue(extensions::chrome_manifest_urls::GetDevToolsPage(
-                                  extension.get()).spec()));
-    extension_info->Set("name", new base::StringValue(extension->name()));
-    extension_info->Set(
-        "exposeExperimentalAPIs",
-        new base::Value(extension->permissions_data()->HasAPIPermission(
-            extensions::APIPermission::kExperimental)));
+        extensions::chrome_manifest_urls::GetDevToolsPage(extension.get())
+            .spec());
+    extension_info->SetString("name", extension->name());
+    extension_info->SetBoolean("exposeExperimentalAPIs",
+                               extension->permissions_data()->HasAPIPermission(
+                                   extensions::APIPermission::kExperimental));
     results.Append(std::move(extension_info));
   }
 
   CallClientFunction("DevToolsAPI.addExtensions",
                      &results, NULL, NULL);
+}
+
+void DevToolsUIBindings::RegisterExtensionsAPI(const std::string& origin,
+                                               const std::string& script) {
+  extensions_api_[origin + "/"] = script;
 }
 
 void DevToolsUIBindings::SetDelegate(Delegate* delegate) {
@@ -1304,6 +1345,8 @@ void DevToolsUIBindings::AttachTo(
 
 void DevToolsUIBindings::Reload() {
   reloading_ = true;
+  if (agent_host_)
+    agent_host_->DetachClient(this);
   web_contents_->GetController().Reload(content::ReloadType::NORMAL, false);
 }
 
@@ -1343,14 +1386,38 @@ void DevToolsUIBindings::CallClientFunction(const std::string& function_name,
       base::UTF8ToUTF16(javascript));
 }
 
+void DevToolsUIBindings::ReadyToCommitNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (navigation_handle->IsInMainFrame()) {
+    if (!IsValidFrontendURL(navigation_handle->GetURL())) {
+      LOG(ERROR) << "Attempt to navigate to an invalid DevTools front-end URL: "
+                 << navigation_handle->GetURL().spec();
+      frontend_host_.reset();
+      return;
+    }
+    frontend_host_.reset(content::DevToolsFrontendHost::Create(
+        navigation_handle->GetRenderFrameHost(),
+        base::Bind(&DevToolsUIBindings::HandleMessageFromDevToolsFrontend,
+                   base::Unretained(this))));
+    return;
+  }
+
+  content::RenderFrameHost* frame = navigation_handle->GetRenderFrameHost();
+  std::string origin = navigation_handle->GetURL().GetOrigin().spec();
+  auto it = extensions_api_.find(origin);
+  if (it == extensions_api_.end())
+    return;
+  std::string script = base::StringPrintf("%s(\"%s\")", it->second.c_str(),
+                                          base::GenerateGUID().c_str());
+  content::DevToolsFrontendHost::SetupExtensionsAPI(frame, script);
+}
+
 void DevToolsUIBindings::DocumentAvailableInMainFrame() {
   if (!reloading_)
     return;
   reloading_ = false;
-  if (agent_host_.get()) {
-    agent_host_->DetachClient(this);
+  if (agent_host_.get())
     agent_host_->AttachClient(this);
-  }
 }
 
 void DevToolsUIBindings::DocumentOnLoadCompletedInMainFrame() {

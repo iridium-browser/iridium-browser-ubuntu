@@ -2,36 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_feature_list.h"
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/loader/chrome_resource_dispatcher_host_delegate.h"
-#include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/autofill/core/browser/autofill_client.h"
-#include "components/autofill/core/browser/test_autofill_client.h"
 #include "components/guest_view/browser/guest_view_manager_delegate.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
-#include "components/security_state/core/security_state.h"
-#include "content/public/browser/focused_node_details.h"
+#include "components/spellcheck/spellcheck_build_features.h"
 #include "content/public/browser/interstitial_page.h"
-#include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/browser_test_utils.h"
@@ -41,15 +37,17 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/display/display_switches.h"
-#include "ui/gfx/geometry/point.h"
-#include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/geometry/vector2d.h"
 #include "url/gurl.h"
 
-namespace autofill {
-class AutofillPopupDelegate;
-struct Suggestion;
-}
+#if BUILDFLAG(ENABLE_SPELLCHECK)
+#include "components/spellcheck/common/spellcheck.mojom.h"
+#include "components/spellcheck/common/spellcheck_messages.h"
+#include "mojo/public/cpp/bindings/binding_set.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
+#if BUILDFLAG(HAS_SPELLCHECK_PANEL)
+#include "components/spellcheck/common/spellcheck_panel.mojom.h"
+#endif  // BUILDFLAG(HAS_SPELLCHECK_PANEL)
+#endif
 
 class ChromeSitePerProcessTest : public InProcessBrowserTest {
  public:
@@ -118,8 +116,16 @@ double GetFrameDeviceScaleFactor(const content::ToRenderFrameHost& adapter) {
   return device_scale_factor;
 }
 
+// Flaky on Windows 10. http://crbug.com/700150
+#if defined(OS_WIN)
+#define MAYBE_InterstitialLoadsWithCorrectDeviceScaleFactor \
+  DISABLED_InterstitialLoadsWithCorrectDeviceScaleFactor
+#else
+#define MAYBE_InterstitialLoadsWithCorrectDeviceScaleFactor \
+  InterstitialLoadsWithCorrectDeviceScaleFactor
+#endif
 IN_PROC_BROWSER_TEST_F(SitePerProcessHighDPIExpiredCertBrowserTest,
-                       InterstitialLoadsWithCorrectDeviceScaleFactor) {
+                       MAYBE_InterstitialLoadsWithCorrectDeviceScaleFactor) {
   GURL main_url(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(b)"));
   ui_test_utils::NavigateToURL(browser(), main_url);
@@ -257,7 +263,7 @@ IN_PROC_BROWSER_TEST_F(ChromeSitePerProcessTest, PopupWindowFocus) {
 
   // Focus the popup via window.focus().
   content::DOMMessageQueue queue;
-  EXPECT_TRUE(ExecuteScript(web_contents, "focusPopup()"));
+  ExecuteScriptAsync(web_contents, "focusPopup()");
 
   // Wait for main page to lose focus and for popup to gain focus.  Each event
   // will send a message, and the two messages can arrive in any order.
@@ -519,197 +525,332 @@ IN_PROC_BROWSER_TEST_F(ChromeSitePerProcessTest,
   ASSERT_EQ(2, browser()->tab_strip_model()->count());
 }
 
-class ChromeSitePerProcessAutofillTest : public ChromeSitePerProcessTest {
- public:
-  ChromeSitePerProcessAutofillTest() : ChromeSitePerProcessTest() {}
-  ~ChromeSitePerProcessAutofillTest() override{};
+IN_PROC_BROWSER_TEST_F(ChromeSitePerProcessTest, PrintIgnoredInUnloadHandler) {
+  ui_test_utils::NavigateToURL(
+      browser(), GURL(embedded_test_server()->GetURL("a.com", "/title1.html")));
 
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    ChromeSitePerProcessTest::SetUpCommandLine(command_line);
-    // We need to set the feature state before the render process is created,
-    // in order for it to inherit the feature state from the browser process.
-    // SetUp() runs too early, and SetUpOnMainThread() runs too late.
-    scoped_feature_list_.InitAndEnableFeature(
-        security_state::kHttpFormWarningFeature);
-  }
-
-  void SetUpOnMainThread() override {
-    ChromeSitePerProcessTest::SetUpOnMainThread();
-  }
-
- protected:
-  class TestAutofillClient : public autofill::TestAutofillClient {
-   public:
-    TestAutofillClient() : popup_shown_(false){};
-    ~TestAutofillClient() override {}
-
-    void WaitForNextPopup() {
-      if (popup_shown_)
-        return;
-      loop_runner_ = new content::MessageLoopRunner();
-      loop_runner_->Run();
-    }
-
-    void ShowAutofillPopup(
-        const gfx::RectF& element_bounds,
-        base::i18n::TextDirection text_direction,
-        const std::vector<autofill::Suggestion>& suggestions,
-        base::WeakPtr<autofill::AutofillPopupDelegate> delegate) override {
-      element_bounds_ = element_bounds;
-      popup_shown_ = true;
-      if (loop_runner_)
-        loop_runner_->Quit();
-    }
-
-    const gfx::RectF& last_element_bounds() const { return element_bounds_; }
-
-   private:
-    gfx::RectF element_bounds_;
-    bool popup_shown_;
-    scoped_refptr<content::MessageLoopRunner> loop_runner_;
-
-    DISALLOW_COPY_AND_ASSIGN(TestAutofillClient);
-  };
-
-  const int kIframeTopDisplacement = 150;
-  const int kIframeLeftDisplacement = 200;
-
-  void SetupMainTab() {
-    // Add a fresh new WebContents for which we add our own version of the
-    // ChromePasswordManagerClient that uses a custom TestAutofillClient.
-    content::WebContents* new_contents = content::WebContents::Create(
-        content::WebContents::CreateParams(browser()
-                                               ->tab_strip_model()
-                                               ->GetActiveWebContents()
-                                               ->GetBrowserContext()));
-    ASSERT_TRUE(new_contents);
-    ASSERT_FALSE(ChromePasswordManagerClient::FromWebContents(new_contents));
-
-    // Create ChromePasswordManagerClient and verify it exists for the new
-    // WebContents.
-    ChromePasswordManagerClient::CreateForWebContentsWithAutofillClient(
-        new_contents, &test_autofill_client_);
-    ASSERT_TRUE(ChromePasswordManagerClient::FromWebContents(new_contents));
-
-    browser()->tab_strip_model()->AppendWebContents(new_contents, true);
-  }
-
-  TestAutofillClient& autofill_client() { return test_autofill_client_; }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-  TestAutofillClient test_autofill_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeSitePerProcessAutofillTest);
-};
-
-// Observes the notifications for changes in focused node/element in the page.
-// The notification contains
-class FocusedEditableNodeChangedObserver : content::NotificationObserver {
- public:
-  FocusedEditableNodeChangedObserver() : observed_(false) {
-    registrar_.Add(this, content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
-                   content::NotificationService::AllSources());
-  }
-  ~FocusedEditableNodeChangedObserver() override {}
-
-  void WaitForFocusChangeInPage() {
-    if (observed_)
-      return;
-    loop_runner_ = new content::MessageLoopRunner();
-    loop_runner_->Run();
-  }
-
-  // content::NotificationObserver override.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override {
-    auto focused_node_details =
-        content::Details<content::FocusedNodeDetails>(details);
-    if (!focused_node_details->is_editable_node)
-      return;
-    focused_node_bounds_in_screen_ =
-        focused_node_details->node_bounds_in_screen.origin();
-    observed_ = true;
-    if (loop_runner_)
-      loop_runner_->Quit();
-  }
-
-  const gfx::Point& focused_node_bounds_in_screen() const {
-    return focused_node_bounds_in_screen_;
-  }
-
- private:
-  content::NotificationRegistrar registrar_;
-  bool observed_;
-  gfx::Point focused_node_bounds_in_screen_;
-  scoped_refptr<content::MessageLoopRunner> loop_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(FocusedEditableNodeChangedObserver);
-};
-
-// This test verifies that displacements (margin, etc) in the position of an
-// OOPIF is considered when showing an AutofillClient warning pop-up for
-// unsecure web sites.
-IN_PROC_BROWSER_TEST_F(ChromeSitePerProcessAutofillTest,
-                       AutofillClientPositionWhenInsideOOPIF) {
-  SetupMainTab();
-  ASSERT_TRUE(
-      base::FeatureList::IsEnabled(security_state::kHttpFormWarningFeature));
-
-  GURL main_url(embedded_test_server()->GetURL("a.com", "/iframe.html"));
-  ui_test_utils::NavigateToURL(browser(), main_url);
   content::WebContents* active_web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
-  // Add some displacement for <iframe>.
-  ASSERT_TRUE(content::ExecuteScript(
-      active_web_contents,
-      base::StringPrintf("var iframe = document.querySelector('iframe');"
-                         "iframe.style.marginTop = '%dpx';"
-                         "iframe.style.marginLeft = '%dpx';",
-                         kIframeTopDisplacement, kIframeLeftDisplacement)));
+  // Create 2 iframes and navigate them to b.com.
+  EXPECT_TRUE(ExecuteScript(active_web_contents,
+                            "var i = document.createElement('iframe'); i.id = "
+                            "'child-0'; document.body.appendChild(i);"));
+  EXPECT_TRUE(ExecuteScript(active_web_contents,
+                            "var i = document.createElement('iframe'); i.id = "
+                            "'child-1'; document.body.appendChild(i);"));
+  EXPECT_TRUE(NavigateIframeToURL(
+      active_web_contents, "child-0",
+      GURL(embedded_test_server()->GetURL("b.com", "/title1.html"))));
+  EXPECT_TRUE(NavigateIframeToURL(
+      active_web_contents, "child-1",
+      GURL(embedded_test_server()->GetURL("b.com", "/title1.html"))));
 
-  // Navigate the <iframe> to a simple page.
-  GURL frame_url = embedded_test_server()->GetURL("b.com", "/title1.html");
-  EXPECT_TRUE(NavigateIframeToURL(active_web_contents, "test", frame_url));
-  content::RenderFrameHost* child_frame = content::FrameMatchingPredicate(
-      active_web_contents, base::Bind(&content::FrameIsChildOfMainFrame));
+  content::RenderFrameHost* child_0 =
+      ChildFrameAt(active_web_contents->GetMainFrame(), 0);
+  content::RenderFrameHost* child_1 =
+      ChildFrameAt(active_web_contents->GetMainFrame(), 1);
 
-  // We will need to listen to focus changes to find out about the container
-  // bounds of any focused <input> elements on the page.
-  FocusedEditableNodeChangedObserver focus_observer;
+  // Add an unload handler that calls print() to child-0 iframe.
+  EXPECT_TRUE(ExecuteScript(
+      child_0, "document.body.onunload = function() { print(); }"));
 
-  // Focus the child frame, add an <input> with type "password", and focus it.
-  ASSERT_TRUE(ExecuteScript(child_frame,
-                            "window.focus();"
-                            "var input = document.createElement('input');"
-                            "input.type = 'password';"
-                            "document.body.appendChild(input);"
-                            "input.focus();"));
-  focus_observer.WaitForFocusChangeInPage();
+  // Transfer child-0 to a new process hosting c.com.
+  EXPECT_TRUE(NavigateIframeToURL(
+      active_web_contents, "child-0",
+      GURL(embedded_test_server()->GetURL("c.com", "/title1.html"))));
 
-  // The user gesture (input) should lead to a security warning.
-  content::SimulateKeyPress(active_web_contents, ui::DomKey::FromCharacter('A'),
-                            ui::DomCode::US_A, ui::VKEY_A, false, false, false,
-                            false);
-  autofill_client().WaitForNextPopup();
-
-  gfx::Point bounds_origin(
-      static_cast<int>(autofill_client().last_element_bounds().origin().x()),
-      static_cast<int>(autofill_client().last_element_bounds().origin().y()));
-
-  // Convert the bounds to screen coordinates (to then compare against the ones
-  // reported by focus change observer).
-  bounds_origin += active_web_contents->GetRenderWidgetHostView()
-                       ->GetViewBounds()
-                       .OffsetFromOrigin();
-
-  gfx::Vector2d error =
-      bounds_origin - focus_observer.focused_node_bounds_in_screen();
-
-  // Ideally, the length of the error vector should be 0.0f. But due to
-  // potential rounding errors, we assume a larger limit (which is slightly
-  // larger than square root of 2).
-  EXPECT_LT(error.Length(), 1.4143f);
+  // Check that b.com's process is still alive.
+  bool renderer_alive = false;
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      child_1, "window.domAutomationController.send(true);", &renderer_alive));
+  EXPECT_TRUE(renderer_alive);
 }
+
+#if BUILDFLAG(ENABLE_SPELLCHECK)
+// Class to sniff incoming spellcheck IPC / Mojo SpellCheckHost messages.
+class TestSpellCheckMessageFilter : public content::BrowserMessageFilter,
+                                    spellcheck::mojom::SpellCheckHost {
+ public:
+  explicit TestSpellCheckMessageFilter(content::RenderProcessHost* process_host)
+      : content::BrowserMessageFilter(SpellCheckMsgStart),
+        process_host_(process_host),
+        text_received_(false),
+        message_loop_runner_(
+            base::MakeRefCounted<content::MessageLoopRunner>()),
+        binding_(this) {}
+
+  content::RenderProcessHost* process_host() const { return process_host_; }
+
+  const base::string16& text() const { return text_; }
+
+  void Wait() {
+    if (!text_received_)
+      message_loop_runner_->Run();
+  }
+
+  bool OnMessageReceived(const IPC::Message& message) override {
+#if BUILDFLAG(USE_BROWSER_SPELLCHECKER)
+    IPC_BEGIN_MESSAGE_MAP(TestSpellCheckMessageFilter, message)
+      // TODO(crbug.com/714480): convert the RequestTextCheck IPC to mojo.
+      IPC_MESSAGE_HANDLER(SpellCheckHostMsg_RequestTextCheck, HandleMessage)
+    IPC_END_MESSAGE_MAP()
+#endif
+    return false;
+  }
+
+#if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
+  void ShellCheckHostRequest(spellcheck::mojom::SpellCheckHostRequest request) {
+    EXPECT_FALSE(binding_.is_bound());
+    binding_.Bind(std::move(request));
+  }
+#endif
+
+ private:
+  ~TestSpellCheckMessageFilter() override {}
+
+#if BUILDFLAG(USE_BROWSER_SPELLCHECKER)
+  void HandleMessage(int, int, const base::string16& text) {
+    content::BrowserThread::PostTask(
+        content::BrowserThread::UI, FROM_HERE,
+        base::BindOnce(&TestSpellCheckMessageFilter::HandleMessageOnUIThread,
+                       this, text));
+  }
+#endif
+
+  void HandleMessageOnUIThread(const base::string16& text) {
+    if (!text_received_) {
+      text_received_ = true;
+      text_ = text;
+      message_loop_runner_->Quit();
+    } else {
+      NOTREACHED();
+    }
+  }
+
+  // spellcheck::mojom::SpellCheckHost:
+  void RequestDictionary() override {}
+
+  void NotifyChecked(const base::string16& word, bool misspelled) override {}
+
+  void CallSpellingService(const base::string16& text,
+                           CallSpellingServiceCallback callback) override {
+#if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+    std::move(callback).Run(true, std::vector<SpellCheckResult>());
+    binding_.Close();
+    HandleMessageOnUIThread(text);
+#endif
+  }
+
+  content::RenderProcessHost* process_host_;
+  bool text_received_;
+  base::string16 text_;
+  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
+  mojo::Binding<spellcheck::mojom::SpellCheckHost> binding_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestSpellCheckMessageFilter);
+};
+
+class TestBrowserClientForSpellCheck : public ChromeContentBrowserClient {
+ public:
+  TestBrowserClientForSpellCheck() = default;
+
+  // ContentBrowserClient overrides.
+  void RenderProcessWillLaunch(
+      content::RenderProcessHost* process_host) override {
+    filters_.push_back(new TestSpellCheckMessageFilter(process_host));
+    process_host->AddFilter(filters_.back().get());
+    ChromeContentBrowserClient::RenderProcessWillLaunch(process_host);
+  }
+
+#if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
+  void ExposeInterfacesToRenderer(
+      service_manager::BinderRegistry* registry,
+      content::AssociatedInterfaceRegistry* associated_registry,
+      content::RenderProcessHost* render_process_host) override {
+    // Expose the default interfaces.
+    ChromeContentBrowserClient::ExposeInterfacesToRenderer(
+        registry, associated_registry, render_process_host);
+
+    scoped_refptr<TestSpellCheckMessageFilter> filter =
+        GetSpellCheckMessageFilterForProcess(render_process_host);
+    CHECK(filter);
+
+    // Override the default SpellCheckHost interface.
+    auto ui_task_runner = content::BrowserThread::GetTaskRunnerForThread(
+        content::BrowserThread::UI);
+    registry->AddInterface(
+        base::Bind(&TestSpellCheckMessageFilter::ShellCheckHostRequest, filter),
+        ui_task_runner);
+  }
+#endif  // !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
+
+  // Retrieves the registered filter for the given RenderProcessHost. It will
+  // return nullptr if the RenderProcessHost was initialized while a different
+  // instance of ContentBrowserClient was in action.
+  scoped_refptr<TestSpellCheckMessageFilter>
+  GetSpellCheckMessageFilterForProcess(
+      content::RenderProcessHost* process_host) const {
+    for (auto filter : filters_) {
+      if (filter->process_host() == process_host)
+        return filter;
+    }
+    return nullptr;
+  }
+
+ private:
+  std::vector<scoped_refptr<TestSpellCheckMessageFilter>> filters_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestBrowserClientForSpellCheck);
+};
+
+// Tests that spelling in out-of-process subframes is checked.
+// See crbug.com/638361 for details.
+IN_PROC_BROWSER_TEST_F(ChromeSitePerProcessTest, OOPIFSpellCheckTest) {
+  TestBrowserClientForSpellCheck browser_client;
+  content::ContentBrowserClient* old_browser_client =
+      content::SetBrowserClientForTesting(&browser_client);
+
+  GURL main_url(embedded_test_server()->GetURL(
+      "a.com", "/page_with_contenteditable_in_cross_site_subframe.html"));
+  ui_test_utils::NavigateToURL(browser(), main_url);
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::RenderFrameHost* cross_site_subframe =
+      ChildFrameAt(web_contents->GetMainFrame(), 0);
+
+  scoped_refptr<TestSpellCheckMessageFilter> filter =
+      browser_client.GetSpellCheckMessageFilterForProcess(
+          cross_site_subframe->GetProcess());
+  filter->Wait();
+
+  EXPECT_EQ(base::ASCIIToUTF16("zz."), filter->text());
+
+  content::SetBrowserClientForTesting(old_browser_client);
+}
+
+#if BUILDFLAG(HAS_SPELLCHECK_PANEL)
+class TestSpellCheckPanelHost : public spellcheck::mojom::SpellCheckPanelHost {
+ public:
+  explicit TestSpellCheckPanelHost(content::RenderProcessHost* process_host)
+      : process_host_(process_host) {}
+
+  content::RenderProcessHost* process_host() const { return process_host_; }
+
+  bool SpellingPanelVisible() {
+    if (!show_spelling_panel_called_) {
+      base::RunLoop run_loop;
+      quit_ = run_loop.QuitClosure();
+      run_loop.Run();
+    }
+
+    EXPECT_TRUE(show_spelling_panel_called_);
+    return spelling_panel_visible_;
+  }
+
+  void SpellCheckPanelHostRequest(
+      spellcheck::mojom::SpellCheckPanelHostRequest request) {
+    bindings_.AddBinding(this, std::move(request));
+  }
+
+ private:
+  // spellcheck::mojom::SpellCheckPanelHost:
+  void ShowSpellingPanel(bool show) override {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+    show_spelling_panel_called_ = true;
+    spelling_panel_visible_ = show;
+    if (quit_)
+      std::move(quit_).Run();
+  }
+
+  void UpdateSpellingPanelWithMisspelledWord(
+      const base::string16& word) override {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  }
+
+  mojo::BindingSet<spellcheck::mojom::SpellCheckPanelHost> bindings_;
+  content::RenderProcessHost* process_host_;
+  bool show_spelling_panel_called_ = false;
+  bool spelling_panel_visible_ = false;
+  base::OnceClosure quit_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestSpellCheckPanelHost);
+};
+
+class TestBrowserClientForSpellCheckPanelHost
+    : public ChromeContentBrowserClient {
+ public:
+  TestBrowserClientForSpellCheckPanelHost() = default;
+
+  // ContentBrowserClient overrides.
+  void ExposeInterfacesToRenderer(
+      service_manager::BinderRegistry* registry,
+      content::AssociatedInterfaceRegistry* associated_registry,
+      content::RenderProcessHost* render_process_host) override {
+    hosts_.push_back(
+        base::MakeUnique<TestSpellCheckPanelHost>(render_process_host));
+
+    // Expose the default interfaces.
+    ChromeContentBrowserClient::ExposeInterfacesToRenderer(
+        registry, associated_registry, render_process_host);
+
+    // Override the default SpellCheckPanelHost interface.
+    auto ui_task_runner = content::BrowserThread::GetTaskRunnerForThread(
+        content::BrowserThread::UI);
+    registry->AddInterface(
+        base::Bind(&TestSpellCheckPanelHost::SpellCheckPanelHostRequest,
+                   base::Unretained(hosts_.back().get())),
+        ui_task_runner);
+  }
+
+  TestSpellCheckPanelHost* GetTestSpellCheckPanelHostForProcess(
+      content::RenderProcessHost* render_process_host) const {
+    for (const auto& host : hosts_) {
+      if (host->process_host() == render_process_host)
+        return host.get();
+    }
+    return nullptr;
+  }
+
+ private:
+  std::vector<std::unique_ptr<TestSpellCheckPanelHost>> hosts_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestBrowserClientForSpellCheckPanelHost);
+};
+
+// Tests that the OSX spell check panel can be opened from an out-of-process
+// subframe, crbug.com/712395
+IN_PROC_BROWSER_TEST_F(ChromeSitePerProcessTest, OOPIFSpellCheckPanelTest) {
+  TestBrowserClientForSpellCheckPanelHost browser_client;
+  content::ContentBrowserClient* old_browser_client =
+      content::SetBrowserClientForTesting(&browser_client);
+
+  GURL main_url(embedded_test_server()->GetURL(
+      "a.com", "/page_with_contenteditable_in_cross_site_subframe.html"));
+  ui_test_utils::NavigateToURL(browser(), main_url);
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::RenderFrameHost* cross_site_subframe =
+      ChildFrameAt(web_contents->GetMainFrame(), 0);
+
+  EXPECT_TRUE(cross_site_subframe->IsCrossProcessSubframe());
+
+  spellcheck::mojom::SpellCheckPanelPtr spell_check_panel_client;
+  cross_site_subframe->GetRemoteInterfaces()->GetInterface(
+      &spell_check_panel_client);
+  spell_check_panel_client->ToggleSpellPanel(false);
+
+  TestSpellCheckPanelHost* host =
+      browser_client.GetTestSpellCheckPanelHostForProcess(
+          cross_site_subframe->GetProcess());
+  EXPECT_TRUE(host->SpellingPanelVisible());
+
+  content::SetBrowserClientForTesting(old_browser_client);
+}
+#endif  // BUILDFLAG(HAS_SPELLCHECK_PANEL)
+
+#endif  // BUILDFLAG(ENABLE_SPELLCHECK)

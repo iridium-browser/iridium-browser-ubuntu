@@ -6,12 +6,11 @@
 
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/test_overlay_delegate.h"
+#include "ash/wm/test_overlay_delegate.h"
 
 namespace ash {
-namespace test {
 
-typedef AshTestBase OverlayEventFilterTest;
+using OverlayEventFilterTest = AshTestBase;
 
 // Tests of the multiple overlay delegates attempt to activate, in that case
 // Cancel() of the existing delegate should be called.
@@ -20,18 +19,17 @@ TEST_F(OverlayEventFilterTest, CancelAtActivating) {
   TestOverlayDelegate d1;
   TestOverlayDelegate d2;
 
-  Shell::GetInstance()->overlay_filter()->Activate(&d1);
+  Shell::Get()->overlay_filter()->Activate(&d1);
   EXPECT_EQ(0, d1.GetCancelCountAndReset());
   EXPECT_EQ(0, d2.GetCancelCountAndReset());
 
-  Shell::GetInstance()->overlay_filter()->Activate(&d2);
+  Shell::Get()->overlay_filter()->Activate(&d2);
   EXPECT_EQ(1, d1.GetCancelCountAndReset());
   EXPECT_EQ(0, d2.GetCancelCountAndReset());
 
-  Shell::GetInstance()->overlay_filter()->Cancel();
+  Shell::Get()->overlay_filter()->Cancel();
   EXPECT_EQ(0, d1.GetCancelCountAndReset());
   EXPECT_EQ(1, d2.GetCancelCountAndReset());
 }
 
-}  // namespace test
 }  // namespace ash

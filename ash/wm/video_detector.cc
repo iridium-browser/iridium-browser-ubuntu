@@ -4,12 +4,9 @@
 
 #include "ash/wm/video_detector.h"
 
-#include "ash/common/wm/window_state.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/wm/window_state.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -82,13 +79,14 @@ VideoDetector::VideoDetector()
     : state_(State::NOT_PLAYING),
       video_is_playing_(false),
       window_observer_manager_(this),
+      scoped_session_observer_(this),
       is_shutting_down_(false) {
   aura::Env::GetInstance()->AddObserver(this);
-  WmShell::Get()->AddShellObserver(this);
+  Shell::Get()->AddShellObserver(this);
 }
 
 VideoDetector::~VideoDetector() {
-  WmShell::Get()->RemoveShellObserver(this);
+  Shell::Get()->RemoveShellObserver(this);
   aura::Env::GetInstance()->RemoveObserver(this);
 }
 
@@ -141,23 +139,22 @@ void VideoDetector::OnWindowDestroyed(aura::Window* window) {
   window_observer_manager_.Remove(window);
 }
 
-void VideoDetector::OnAppTerminating() {
+void VideoDetector::OnChromeTerminating() {
   // Stop checking video activity once the shutdown
   // process starts. crbug.com/231696.
   is_shutting_down_ = true;
 }
 
 void VideoDetector::OnFullscreenStateChanged(bool is_fullscreen,
-                                             WmWindow* root_window) {
-  aura::Window* aura_window = root_window->aura_window();
-  if (is_fullscreen && !fullscreen_root_windows_.count(aura_window)) {
-    fullscreen_root_windows_.insert(aura_window);
-    if (!window_observer_manager_.IsObserving(aura_window))
-      window_observer_manager_.Add(aura_window);
+                                             aura::Window* root_window) {
+  if (is_fullscreen && !fullscreen_root_windows_.count(root_window)) {
+    fullscreen_root_windows_.insert(root_window);
+    if (!window_observer_manager_.IsObserving(root_window))
+      window_observer_manager_.Add(root_window);
     UpdateState();
-  } else if (!is_fullscreen && fullscreen_root_windows_.count(aura_window)) {
-    fullscreen_root_windows_.erase(aura_window);
-    window_observer_manager_.Remove(aura_window);
+  } else if (!is_fullscreen && fullscreen_root_windows_.count(root_window)) {
+    fullscreen_root_windows_.erase(root_window);
+    window_observer_manager_.Remove(root_window);
     UpdateState();
   }
 }

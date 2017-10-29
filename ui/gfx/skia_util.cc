@@ -18,8 +18,6 @@
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
-#include "ui/gfx/image/image_skia_rep.h"
-#include "ui/gfx/shadow_value.h"
 #include "ui/gfx/transform.h"
 
 namespace gfx {
@@ -46,20 +44,10 @@ SkIRect RectToSkIRect(const Rect& rect) {
   return SkIRect::MakeXYWH(rect.x(), rect.y(), rect.width(), rect.height());
 }
 
-// Produces a non-negative integer for the difference between min and max,
-// yielding 0 if it would be negative and INT_MAX if it would overflow.
-// This yields a length such that min+length is in range as well.
-static int ClampLengthFromRange(int min, int max) {
-  if (min > max)
-    return 0;
-  return (base::CheckedNumeric<int>(max) - min)
-      .ValueOrDefault(std::numeric_limits<int>::max());
-}
-
 Rect SkIRectToRect(const SkIRect& rect) {
-  return Rect(rect.x(), rect.y(),
-              ClampLengthFromRange(rect.left(), rect.right()),
-              ClampLengthFromRange(rect.top(), rect.bottom()));
+  Rect result;
+  result.SetByBounds(rect.left(), rect.top(), rect.right(), rect.bottom());
+  return result;
 }
 
 SkRect RectFToSkRect(const RectF& rect) {
@@ -109,15 +97,11 @@ bool BitmapsAreEqual(const SkBitmap& bitmap1, const SkBitmap& bitmap2) {
   size_t size1 = 0;
   size_t size2 = 0;
 
-  bitmap1.lockPixels();
   addr1 = bitmap1.getAddr32(0, 0);
   size1 = bitmap1.getSize();
-  bitmap1.unlockPixels();
 
-  bitmap2.lockPixels();
   addr2 = bitmap2.getAddr32(0, 0);
   size2 = bitmap2.getSize();
-  bitmap2.unlockPixels();
 
   return (size1 == size2) && (0 == memcmp(addr1, addr2, bitmap1.getSize()));
 }

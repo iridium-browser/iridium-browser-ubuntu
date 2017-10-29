@@ -7,12 +7,26 @@
 #include <algorithm>
 #include <limits>
 
-using base::StringPiece;
+#include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_flags.h"
+#include "net/quic/platform/api/quic_logging.h"
 
 namespace net {
 
-QuicDataWriter::QuicDataWriter(size_t size, char* buffer)
-    : buffer_(buffer), capacity_(size), length_(0) {}
+#define ENDPOINT \
+  (perspective_ == Perspective::IS_SERVER ? "Server: " : "Client: ")
+
+QuicDataWriter::QuicDataWriter(size_t size,
+                               char* buffer,
+                               Perspective perspective,
+                               Endianness endianness)
+    : buffer_(buffer),
+      capacity_(size),
+      length_(0),
+      perspective_(perspective),
+      endianness_(endianness) {
+  QUIC_DVLOG(1) << ENDPOINT << "QuicDataWriter";
+}
 
 QuicDataWriter::~QuicDataWriter() {}
 
@@ -25,21 +39,37 @@ bool QuicDataWriter::WriteUInt8(uint8_t value) {
 }
 
 bool QuicDataWriter::WriteUInt16(uint16_t value) {
+  if (endianness_ == NETWORK_BYTE_ORDER) {
+    value = QuicEndian::HostToNet16(value);
+  }
   return WriteBytes(&value, sizeof(value));
 }
 
 bool QuicDataWriter::WriteUInt32(uint32_t value) {
+  if (endianness_ == NETWORK_BYTE_ORDER) {
+    value = QuicEndian::HostToNet32(value);
+  }
   return WriteBytes(&value, sizeof(value));
-}
-
-bool QuicDataWriter::WriteUInt48(uint64_t value) {
-  uint16_t hi = static_cast<uint16_t>(value >> 32);
-  uint32_t lo = static_cast<uint32_t>(value);
-  return WriteUInt32(lo) && WriteUInt16(hi);
 }
 
 bool QuicDataWriter::WriteUInt64(uint64_t value) {
+  if (endianness_ == NETWORK_BYTE_ORDER) {
+    value = QuicEndian::HostToNet64(value);
+  }
   return WriteBytes(&value, sizeof(value));
+}
+
+bool QuicDataWriter::WriteBytesToUInt64(size_t num_bytes, uint64_t value) {
+  if (num_bytes > sizeof(value)) {
+    return false;
+  }
+  if (endianness_ == HOST_BYTE_ORDER) {
+    return WriteBytes(&value, num_bytes);
+  }
+
+  value = QuicEndian::HostToNet64(value);
+  return WriteBytes(reinterpret_cast<char*>(&value) + sizeof(value) - num_bytes,
+                    num_bytes);
 }
 
 bool QuicDataWriter::WriteUFloat16(uint64_t value) {
@@ -78,10 +108,13 @@ bool QuicDataWriter::WriteUFloat16(uint64_t value) {
     result = static_cast<uint16_t>(value + (exponent << kUFloat16MantissaBits));
   }
 
+  if (endianness_ == NETWORK_BYTE_ORDER) {
+    result = QuicEndian::HostToNet16(result);
+  }
   return WriteBytes(&result, sizeof(result));
 }
 
-bool QuicDataWriter::WriteStringPiece16(StringPiece val) {
+bool QuicDataWriter::WriteStringPiece16(QuicStringPiece val) {
   if (val.size() > std::numeric_limits<uint16_t>::max()) {
     return false;
   }
@@ -138,6 +171,20 @@ void QuicDataWriter::WritePadding() {
   }
   memset(buffer_ + length_, 0x00, capacity_ - length_);
   length_ = capacity_;
+}
+
+bool QuicDataWriter::WritePaddingBytes(size_t count) {
+  return WriteRepeatedByte(0x00, count);
+}
+
+bool QuicDataWriter::WriteConnectionId(uint64_t connection_id) {
+  connection_id = QuicEndian::HostToNet64(connection_id);
+
+  return WriteBytes(&connection_id, sizeof(connection_id));
+}
+
+bool QuicDataWriter::WriteTag(uint32_t tag) {
+  return WriteBytes(&tag, sizeof(tag));
 }
 
 }  // namespace net

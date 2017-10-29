@@ -28,280 +28,158 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/CoreExport.h"
+#include "platform/bindings/StringResource.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Threading.h"
+#include "platform/wtf/text/AtomicString.h"
 #include "v8/include/v8.h"
-#include "wtf/Allocator.h"
-#include "wtf/Threading.h"
-#include "wtf/text/AtomicString.h"
 
 namespace blink {
-
-// WebCoreStringResource is a helper class for v8ExternalString. It is used
-// to manage the life-cycle of the underlying buffer of the external string.
-class WebCoreStringResourceBase {
-  USING_FAST_MALLOC(WebCoreStringResourceBase);
-  WTF_MAKE_NONCOPYABLE(WebCoreStringResourceBase);
-
- public:
-  explicit WebCoreStringResourceBase(const String& string)
-      : m_plainString(string) {
-#if DCHECK_IS_ON()
-    m_threadId = WTF::currentThread();
-#endif
-    ASSERT(!string.isNull());
-    v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(
-        string.charactersSizeInBytes());
-  }
-
-  explicit WebCoreStringResourceBase(const AtomicString& string)
-      : m_plainString(string.getString()), m_atomicString(string) {
-#if DCHECK_IS_ON()
-    m_threadId = WTF::currentThread();
-#endif
-    ASSERT(!string.isNull());
-    v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(
-        string.charactersSizeInBytes());
-  }
-
-  virtual ~WebCoreStringResourceBase() {
-#if DCHECK_IS_ON()
-    ASSERT(m_threadId == WTF::currentThread());
-#endif
-    int64_t reducedExternalMemory = m_plainString.charactersSizeInBytes();
-    if (m_plainString.impl() != m_atomicString.impl() &&
-        !m_atomicString.isNull())
-      reducedExternalMemory += m_atomicString.charactersSizeInBytes();
-    v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(
-        -reducedExternalMemory);
-  }
-
-  const String& webcoreString() { return m_plainString; }
-
-  const AtomicString& getAtomicString() {
-#if DCHECK_IS_ON()
-    ASSERT(m_threadId == WTF::currentThread());
-#endif
-    if (m_atomicString.isNull()) {
-      m_atomicString = AtomicString(m_plainString);
-      ASSERT(!m_atomicString.isNull());
-      if (m_plainString.impl() != m_atomicString.impl())
-        v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(
-            m_atomicString.charactersSizeInBytes());
-    }
-    return m_atomicString;
-  }
-
- protected:
-  // A shallow copy of the string. Keeps the string buffer alive until the V8
-  // engine garbage collects it.
-  String m_plainString;
-  // If this string is atomic or has been made atomic earlier the
-  // atomic string is held here. In the case where the string starts
-  // off non-atomic and becomes atomic later it is necessary to keep
-  // the original string alive because v8 may keep derived pointers
-  // into that string.
-  AtomicString m_atomicString;
-
- private:
-#if DCHECK_IS_ON()
-  WTF::ThreadIdentifier m_threadId;
-#endif
-};
-
-class WebCoreStringResource16 final
-    : public WebCoreStringResourceBase,
-      public v8::String::ExternalStringResource {
-  WTF_MAKE_NONCOPYABLE(WebCoreStringResource16);
-
- public:
-  explicit WebCoreStringResource16(const String& string)
-      : WebCoreStringResourceBase(string) {
-    ASSERT(!string.is8Bit());
-  }
-
-  explicit WebCoreStringResource16(const AtomicString& string)
-      : WebCoreStringResourceBase(string) {
-    ASSERT(!string.is8Bit());
-  }
-
-  size_t length() const override { return m_plainString.impl()->length(); }
-  const uint16_t* data() const override {
-    return reinterpret_cast<const uint16_t*>(
-        m_plainString.impl()->characters16());
-  }
-};
-
-class WebCoreStringResource8 final
-    : public WebCoreStringResourceBase,
-      public v8::String::ExternalOneByteStringResource {
-  WTF_MAKE_NONCOPYABLE(WebCoreStringResource8);
-
- public:
-  explicit WebCoreStringResource8(const String& string)
-      : WebCoreStringResourceBase(string) {
-    ASSERT(string.is8Bit());
-  }
-
-  explicit WebCoreStringResource8(const AtomicString& string)
-      : WebCoreStringResourceBase(string) {
-    ASSERT(string.is8Bit());
-  }
-
-  size_t length() const override { return m_plainString.impl()->length(); }
-  const char* data() const override {
-    return reinterpret_cast<const char*>(m_plainString.impl()->characters8());
-  }
-};
-
-enum ExternalMode { Externalize, DoNotExternalize };
-
-template <typename StringType>
-CORE_EXPORT StringType v8StringToWebCoreString(v8::Local<v8::String>,
-                                               ExternalMode);
-CORE_EXPORT String int32ToWebCoreString(int value);
 
 // V8StringResource is an adapter class that converts V8 values to Strings
 // or AtomicStrings as appropriate, using multiple typecast operators.
 enum V8StringResourceMode {
-  DefaultMode,
-  TreatNullAsEmptyString,
-  TreatNullAsNullString,
-  TreatNullAndUndefinedAsNullString
+  kDefaultMode,
+  kTreatNullAsEmptyString,
+  kTreatNullAsNullString,
+  kTreatNullAndUndefinedAsNullString
 };
 
-template <V8StringResourceMode Mode = DefaultMode>
+template <V8StringResourceMode Mode = kDefaultMode>
 class V8StringResource {
   STACK_ALLOCATED();
 
  public:
-  V8StringResource() : m_mode(Externalize) {}
+  V8StringResource() : mode_(kExternalize) {}
 
   V8StringResource(v8::Local<v8::Value> object)
-      : m_v8Object(object), m_mode(Externalize) {}
+      : v8_object_(object), mode_(kExternalize) {}
 
   V8StringResource(const String& string)
-      : m_mode(Externalize), m_string(string) {}
+      : mode_(kExternalize), string_(string) {}
 
-  void operator=(v8::Local<v8::Value> object) { m_v8Object = object; }
+  void operator=(v8::Local<v8::Value> object) { v8_object_ = object; }
 
-  void operator=(const String& string) { setString(string); }
+  void operator=(const String& string) { SetString(string); }
 
-  void operator=(std::nullptr_t) { setString(String()); }
+  void operator=(std::nullptr_t) { SetString(String()); }
 
-  bool prepare() {  // DEPRECATED
-    if (prepareFast())
+  bool Prepare() {  // DEPRECATED
+    if (PrepareFast())
       return true;
 
-    return m_v8Object->ToString(v8::Isolate::GetCurrent()->GetCurrentContext())
-        .ToLocal(&m_v8Object);
+    return v8_object_->ToString(v8::Isolate::GetCurrent()->GetCurrentContext())
+        .ToLocal(&v8_object_);
   }
 
-  bool prepare(v8::Isolate* isolate, ExceptionState& exceptionState) {
-    return prepareFast() || prepareSlow(isolate, exceptionState);
+  bool Prepare(v8::Isolate* isolate, ExceptionState& exception_state) {
+    return PrepareFast() || PrepareSlow(isolate, exception_state);
   }
 
-  bool prepare(ExceptionState& exceptionState) {  // DEPRECATED
-    return prepareFast() ||
-           prepareSlow(v8::Isolate::GetCurrent(), exceptionState);
+  bool Prepare(ExceptionState& exception_state) {  // DEPRECATED
+    return PrepareFast() ||
+           PrepareSlow(v8::Isolate::GetCurrent(), exception_state);
   }
 
-  operator String() const { return toString<String>(); }
-  operator AtomicString() const { return toString<AtomicString>(); }
+  operator String() const { return ToString<String>(); }
+  operator AtomicString() const { return ToString<AtomicString>(); }
 
  private:
-  bool prepareFast() {
-    if (m_v8Object.IsEmpty())
+  bool PrepareFast() {
+    if (v8_object_.IsEmpty())
       return true;
 
-    if (!isValid()) {
-      setString(fallbackString());
-      return true;
-    }
-
-    if (LIKELY(m_v8Object->IsString()))
-      return true;
-
-    if (LIKELY(m_v8Object->IsInt32())) {
-      setString(int32ToWebCoreString(m_v8Object.As<v8::Int32>()->Value()));
+    if (!IsValid()) {
+      SetString(FallbackString());
       return true;
     }
 
-    m_mode = DoNotExternalize;
+    if (LIKELY(v8_object_->IsString()))
+      return true;
+
+    if (LIKELY(v8_object_->IsInt32())) {
+      SetString(Int32ToWebCoreString(v8_object_.As<v8::Int32>()->Value()));
+      return true;
+    }
+
+    mode_ = kDoNotExternalize;
     return false;
   }
 
-  bool prepareSlow(v8::Isolate* isolate, ExceptionState& exceptionState) {
-    v8::TryCatch tryCatch(isolate);
-    if (!m_v8Object->ToString(isolate->GetCurrentContext())
-             .ToLocal(&m_v8Object)) {
-      exceptionState.rethrowV8Exception(tryCatch.Exception());
+  bool PrepareSlow(v8::Isolate* isolate, ExceptionState& exception_state) {
+    v8::TryCatch try_catch(isolate);
+    if (!v8_object_->ToString(isolate->GetCurrentContext())
+             .ToLocal(&v8_object_)) {
+      exception_state.RethrowV8Exception(try_catch.Exception());
       return false;
     }
     return true;
   }
 
-  bool isValid() const;
-  String fallbackString() const;
+  bool IsValid() const;
+  String FallbackString() const;
 
-  void setString(const String& string) {
-    m_string = string;
-    m_v8Object.Clear();  // To signal that String is ready.
+  void SetString(const String& string) {
+    string_ = string;
+    v8_object_.Clear();  // To signal that String is ready.
   }
 
   template <class StringType>
-  StringType toString() const {
-    if (LIKELY(!m_v8Object.IsEmpty()))
-      return v8StringToWebCoreString<StringType>(
-          const_cast<v8::Local<v8::Value>*>(&m_v8Object)->As<v8::String>(),
-          m_mode);
+  StringType ToString() const {
+    if (LIKELY(!v8_object_.IsEmpty()))
+      return V8StringToWebCoreString<StringType>(
+          const_cast<v8::Local<v8::Value>*>(&v8_object_)->As<v8::String>(),
+          mode_);
 
-    return StringType(m_string);
+    return StringType(string_);
   }
 
-  v8::Local<v8::Value> m_v8Object;
-  ExternalMode m_mode;
-  String m_string;
+  v8::Local<v8::Value> v8_object_;
+  ExternalMode mode_;
+  String string_;
 };
 
 template <>
-inline bool V8StringResource<DefaultMode>::isValid() const {
+inline bool V8StringResource<kDefaultMode>::IsValid() const {
   return true;
 }
 
 template <>
-inline String V8StringResource<DefaultMode>::fallbackString() const {
-  ASSERT_NOT_REACHED();
+inline String V8StringResource<kDefaultMode>::FallbackString() const {
+  NOTREACHED();
   return String();
 }
 
 template <>
-inline bool V8StringResource<TreatNullAsEmptyString>::isValid() const {
-  return !m_v8Object->IsNull();
+inline bool V8StringResource<kTreatNullAsEmptyString>::IsValid() const {
+  return !v8_object_->IsNull();
 }
 
 template <>
-inline String V8StringResource<TreatNullAsEmptyString>::fallbackString() const {
-  return emptyString;
-}
-
-template <>
-inline bool V8StringResource<TreatNullAsNullString>::isValid() const {
-  return !m_v8Object->IsNull();
-}
-
-template <>
-inline String V8StringResource<TreatNullAsNullString>::fallbackString() const {
-  return String();
-}
-
-template <>
-inline bool V8StringResource<TreatNullAndUndefinedAsNullString>::isValid()
+inline String V8StringResource<kTreatNullAsEmptyString>::FallbackString()
     const {
-  return !m_v8Object->IsNull() && !m_v8Object->IsUndefined();
+  return g_empty_string;
+}
+
+template <>
+inline bool V8StringResource<kTreatNullAsNullString>::IsValid() const {
+  return !v8_object_->IsNull();
+}
+
+template <>
+inline String V8StringResource<kTreatNullAsNullString>::FallbackString() const {
+  return String();
+}
+
+template <>
+inline bool V8StringResource<kTreatNullAndUndefinedAsNullString>::IsValid()
+    const {
+  return !v8_object_->IsNull() && !v8_object_->IsUndefined();
 }
 
 template <>
 inline String
-V8StringResource<TreatNullAndUndefinedAsNullString>::fallbackString() const {
+V8StringResource<kTreatNullAndUndefinedAsNullString>::FallbackString() const {
   return String();
 }
 

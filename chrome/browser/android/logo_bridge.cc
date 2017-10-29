@@ -10,7 +10,6 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
-#include "base/android/scoped_java_ref.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/android/logo_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -33,6 +32,29 @@ using base::android::ToJavaByteArray;
 
 namespace {
 
+ScopedJavaLocalRef<jobject> MakeJavaLogo(JNIEnv* env,
+                                         const SkBitmap* bitmap,
+                                         const GURL& on_click_url,
+                                         const std::string& alt_text,
+                                         const GURL& animated_url) {
+  ScopedJavaLocalRef<jobject> j_bitmap = gfx::ConvertToJavaBitmap(bitmap);
+
+  ScopedJavaLocalRef<jstring> j_on_click_url;
+  if (on_click_url.is_valid())
+    j_on_click_url = ConvertUTF8ToJavaString(env, on_click_url.spec());
+
+  ScopedJavaLocalRef<jstring> j_alt_text;
+  if (!alt_text.empty())
+    j_alt_text = ConvertUTF8ToJavaString(env, alt_text);
+
+  ScopedJavaLocalRef<jstring> j_animated_url;
+  if (animated_url.is_valid())
+    j_animated_url = ConvertUTF8ToJavaString(env, animated_url.spec());
+
+  return Java_LogoBridge_createLogo(env, j_bitmap, j_on_click_url, j_alt_text,
+                                    j_animated_url);
+}
+
 // Converts a C++ Logo to a Java Logo.
 ScopedJavaLocalRef<jobject> ConvertLogoToJavaObject(
     JNIEnv* env,
@@ -40,22 +62,9 @@ ScopedJavaLocalRef<jobject> ConvertLogoToJavaObject(
   if (!logo)
     return ScopedJavaLocalRef<jobject>();
 
-  ScopedJavaLocalRef<jobject> j_bitmap = gfx::ConvertToJavaBitmap(&logo->image);
-
-  ScopedJavaLocalRef<jstring> j_on_click_url;
-  if (!logo->metadata.on_click_url.empty())
-    j_on_click_url = ConvertUTF8ToJavaString(env, logo->metadata.on_click_url);
-
-  ScopedJavaLocalRef<jstring> j_alt_text;
-  if (!logo->metadata.alt_text.empty())
-    j_alt_text = ConvertUTF8ToJavaString(env, logo->metadata.alt_text);
-
-  ScopedJavaLocalRef<jstring> j_animated_url;
-  if (!logo->metadata.animated_url.empty())
-    j_animated_url = ConvertUTF8ToJavaString(env, logo->metadata.animated_url);
-
-  return Java_LogoBridge_createLogo(env, j_bitmap, j_on_click_url, j_alt_text,
-                                    j_animated_url);
+  return MakeJavaLogo(env, &logo->image, GURL(logo->metadata.on_click_url),
+                      logo->metadata.alt_text,
+                      GURL(logo->metadata.animated_url));
 }
 
 class LogoObserverAndroid : public search_provider_logos::LogoObserver {
@@ -172,10 +181,13 @@ static jlong Init(JNIEnv* env,
 }
 
 LogoBridge::LogoBridge(jobject j_profile)
-    : logo_service_(nullptr), weak_ptr_factory_(this) {
+    : logo_service_(nullptr),
+      weak_ptr_factory_(this) {
   Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
   DCHECK(profile);
+
   logo_service_ = LogoServiceFactory::GetForProfile(profile);
+
   animated_logo_fetcher_ = base::MakeUnique<AnimatedLogoFetcher>(
       profile->GetRequestContext());
 }
@@ -201,9 +213,4 @@ void LogoBridge::GetAnimatedLogo(JNIEnv* env,
                                  const JavaParamRef<jstring>& j_url) {
   GURL url = GURL(ConvertJavaStringToUTF8(env, j_url));
   animated_logo_fetcher_->Start(env, url, j_callback);
-}
-
-// static
-bool RegisterLogoBridge(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }

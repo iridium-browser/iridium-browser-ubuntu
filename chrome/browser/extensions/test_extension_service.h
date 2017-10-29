@@ -43,14 +43,11 @@ class TestExtensionService : public ExtensionServiceInterface {
 
   bool is_ready() override;
 
-  base::SequencedTaskRunner* GetFileTaskRunner() override;
-
   void AddExtension(const extensions::Extension* extension) override;
   void AddComponentExtension(const extensions::Extension* extension) override;
 
-  void UnloadExtension(
-      const std::string& extension_id,
-      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void UnloadExtension(const std::string& extension_id,
+                       extensions::UnloadedExtensionReason reason) override;
   void RemoveComponentExtension(const std::string& extension_id) override;
 };
 

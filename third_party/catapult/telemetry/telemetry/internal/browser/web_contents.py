@@ -190,18 +190,6 @@ class WebContents(object):
     """
     return self._inspector_backend.WaitForJavaScriptCondition(*args, **kwargs)
 
-  def ExecuteJavaScript2(self, *args, **kwargs):
-    """Alias to be removed soon. Do not use in new code."""
-    return self.ExecuteJavaScript(*args, **kwargs)
-
-  def EvaluateJavaScript2(self, *args, **kwargs):
-    """Alias to be removed soon. Do not use in new code."""
-    return self.EvaluateJavaScript(*args, **kwargs)
-
-  def WaitForJavaScriptCondition2(self, *args, **kwargs):
-    """Alias to be removed soon. Do not use in new code."""
-    return self.WaitForJavaScriptCondition(*args, **kwargs)
-
   def EnableAllContexts(self):
     """Enable all contexts in a page. Returns the number of available contexts.
 
@@ -237,6 +225,10 @@ class WebContents(object):
       py_utils.TimeoutException
       exceptions.DevtoolsTargetCrashException
     """
+    if not script_to_evaluate_on_commit:
+      script_to_evaluate_on_commit = ''
+    script_to_evaluate_on_commit = (
+        self._quiescence_js + ';' + script_to_evaluate_on_commit)
     self._inspector_backend.Navigate(url, script_to_evaluate_on_commit, timeout)
 
   def IsAlive(self):

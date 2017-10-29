@@ -29,19 +29,15 @@
 
 #include <memory>
 #include "core/CoreExport.h"
-#include "core/dom/Range.h"
 #include "core/dom/SynchronousMutationObserver.h"
 #include "core/editing/EphemeralRange.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleSelection.h"
-#include "core/editing/iterators/TextIteratorBehavior.h"
 #include "core/layout/ScrollAlignment.h"
-#include "platform/Timer.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/LayoutRect.h"
-#include "platform/graphics/PaintInvalidationReason.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Noncopyable.h"
+#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
@@ -51,23 +47,24 @@ class LocalFrame;
 class FrameCaret;
 class GranularityStrategy;
 class GraphicsContext;
-class HTMLFormElement;
+class Range;
 class SelectionEditor;
-class PendingSelection;
+class LayoutSelection;
+enum class SelectionModifyAlteration;
 class TextIteratorBehavior;
 struct PaintInvalidatorContext;
 
-enum class CursorAlignOnScroll { IfNeeded, Always };
+enum class CursorAlignOnScroll { kIfNeeded, kAlways };
 
-enum EUserTriggered { NotUserTriggered = 0, UserTriggered = 1 };
+enum EUserTriggered { kNotUserTriggered = 0, kUserTriggered = 1 };
 
-enum RevealExtentOption { RevealExtent, DoNotRevealExtent };
+enum RevealExtentOption { kRevealExtent, kDoNotRevealExtent };
 
-enum class SelectionDirectionalMode { NonDirectional, Directional };
+enum class SelectionDirectionalMode { kNonDirectional, kDirectional };
 
 enum class CaretVisibility;
 
-enum class HandleVisibility { NotVisible, Visible };
+enum class HandleVisibility { kNotVisible, kVisible };
 
 class CORE_EXPORT FrameSelection final
     : public GarbageCollectedFinalized<FrameSelection>,
@@ -76,203 +73,174 @@ class CORE_EXPORT FrameSelection final
   USING_GARBAGE_COLLECTED_MIXIN(FrameSelection);
 
  public:
-  static FrameSelection* create(LocalFrame& frame) {
+  static FrameSelection* Create(LocalFrame& frame) {
     return new FrameSelection(frame);
   }
   ~FrameSelection();
 
-  enum EAlteration { AlterationMove, AlterationExtend };
   enum SetSelectionOption {
     // 1 << 0 is reserved for EUserTriggered
-    CloseTyping = 1 << 1,
-    ClearTypingStyle = 1 << 2,
-    DoNotSetFocus = 1 << 3,
-    DoNotClearStrategy = 1 << 4,
+    kCloseTyping = 1 << 1,
+    kClearTypingStyle = 1 << 2,
+    kDoNotSetFocus = 1 << 3,
+    kDoNotClearStrategy = 1 << 4,
   };
   // Union of values in SetSelectionOption and EUserTriggered
   typedef unsigned SetSelectionOptions;
-  static inline EUserTriggered selectionOptionsToUserTriggered(
+  static inline EUserTriggered SelectionOptionsToUserTriggered(
       SetSelectionOptions options) {
-    return static_cast<EUserTriggered>(options & UserTriggered);
+    return static_cast<EUserTriggered>(options & kUserTriggered);
   }
 
-  bool isAvailable() const { return lifecycleContext(); }
+  bool IsAvailable() const { return LifecycleContext(); }
   // You should not call |document()| when |!isAvailable()|.
-  Document& document() const;
-  LocalFrame* frame() const { return m_frame; }
-  Element* rootEditableElementOrDocumentElement() const;
+  Document& GetDocument() const;
+  LocalFrame* GetFrame() const { return frame_; }
+  Element* RootEditableElementOrDocumentElement() const;
 
   // An implementation of |WebFrame::moveCaretSelection()|
-  void moveCaretSelection(const IntPoint&);
+  void MoveCaretSelection(const IntPoint&);
 
-  const VisibleSelection& computeVisibleSelectionInDOMTree() const;
-  const VisibleSelectionInFlatTree& computeVisibleSelectionInFlatTree() const;
+  const VisibleSelection& ComputeVisibleSelectionInDOMTree() const;
+  const VisibleSelectionInFlatTree& ComputeVisibleSelectionInFlatTree() const;
 
   // TODO(editing-dev): We should replace
   // |computeVisibleSelectionInDOMTreeDeprecated()| with update layout and
   // |computeVisibleSelectionInDOMTree()| to increase places hoisting update
   // layout.
-  const VisibleSelection& computeVisibleSelectionInDOMTreeDeprecated() const;
+  const VisibleSelection& ComputeVisibleSelectionInDOMTreeDeprecated() const;
 
-  void setSelection(const SelectionInDOMTree&,
-                    SetSelectionOptions = CloseTyping | ClearTypingStyle,
-                    CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded,
-                    TextGranularity = CharacterGranularity);
-
-  void setSelection(const SelectionInFlatTree&,
-                    SetSelectionOptions = CloseTyping | ClearTypingStyle,
-                    CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded,
-                    TextGranularity = CharacterGranularity);
-
-  // TODO(yosin): We should use |SelectionInDOMTree| version instead of
-  // |VisibleSelection| version.
-  void setSelection(const VisibleSelection&,
-                    HandleVisibility = HandleVisibility::NotVisible,
-                    SetSelectionOptions = CloseTyping | ClearTypingStyle,
-                    CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded,
-                    TextGranularity = CharacterGranularity);
-  void setSelection(const VisibleSelection&, SetSelectionOptions);
-  // TODO(yosin): We should use |SelectionInFlatTree| version instead of
-  // |VisibleSelectionInFlatTree| version.
-  void setSelection(const VisibleSelectionInFlatTree&,
-                    HandleVisibility = HandleVisibility::NotVisible,
-                    SetSelectionOptions = CloseTyping | ClearTypingStyle,
-                    CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded,
-                    TextGranularity = CharacterGranularity);
-  bool setSelectedRange(
-      const EphemeralRange&,
-      TextAffinity,
-      SelectionDirectionalMode = SelectionDirectionalMode::NonDirectional,
-      FrameSelection::SetSelectionOptions = CloseTyping | ClearTypingStyle);
-  void selectAll();
-  void clear();
+  void SetSelection(const SelectionInDOMTree&,
+                    SetSelectionOptions = kCloseTyping | kClearTypingStyle,
+                    CursorAlignOnScroll = CursorAlignOnScroll::kIfNeeded,
+                    TextGranularity = TextGranularity::kCharacter);
+  void SelectAll(EUserTriggered = kNotUserTriggered);
+  void Clear();
+  bool IsHidden() const;
 
   // TODO(tkent): These two functions were added to fix crbug.com/695211 without
   // changing focus behavior. Once we fix crbug.com/690272, we can remove these
   // functions.
   // setSelectionDeprecated() returns true if didSetSelectionDeprecated() should
   // be called.
-  bool setSelectionDeprecated(const SelectionInDOMTree&,
-                              SetSelectionOptions = CloseTyping |
-                                                    ClearTypingStyle,
-                              TextGranularity = CharacterGranularity);
-  void didSetSelectionDeprecated(
-      SetSelectionOptions = CloseTyping | ClearTypingStyle,
-      CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded);
+  bool SetSelectionDeprecated(const SelectionInDOMTree&,
+                              SetSelectionOptions = kCloseTyping |
+                                                    kClearTypingStyle,
+                              TextGranularity = TextGranularity::kCharacter);
+  void DidSetSelectionDeprecated(
+      SetSelectionOptions = kCloseTyping | kClearTypingStyle,
+      CursorAlignOnScroll = CursorAlignOnScroll::kIfNeeded);
 
   // Call this after doing user-triggered selections to make it easy to delete
   // the frame you entirely selected.
-  void selectFrameElementInParentIfFullySelected();
+  void SelectFrameElementInParentIfFullySelected();
 
-  bool contains(const LayoutPoint&);
+  bool Contains(const LayoutPoint&);
 
-  bool modify(EAlteration,
+  bool Modify(SelectionModifyAlteration,
               SelectionDirection,
               TextGranularity,
-              EUserTriggered = NotUserTriggered);
-  enum VerticalDirection { DirectionUp, DirectionDown };
-  bool modify(EAlteration, unsigned verticalDistance, VerticalDirection);
+              EUserTriggered = kNotUserTriggered);
 
   // Moves the selection extent based on the selection granularity strategy.
   // This function does not allow the selection to collapse. If the new
   // extent is resolved to the same position as the current base, this
   // function will do nothing.
-  void moveRangeSelectionExtent(const IntPoint&);
-  void moveRangeSelection(const VisiblePosition& base,
+  void MoveRangeSelectionExtent(const IntPoint&);
+  void MoveRangeSelection(const VisiblePosition& base,
                           const VisiblePosition& extent,
                           TextGranularity);
 
-  TextGranularity granularity() const { return m_granularity; }
+  TextGranularity Granularity() const { return granularity_; }
 
   // Returns true if specified layout block should paint caret. This function is
   // called during painting only.
-  bool shouldPaintCaret(const LayoutBlock&) const;
+  bool ShouldPaintCaret(const LayoutBlock&) const;
 
   // Bounds of (possibly transformed) caret in absolute coords
-  IntRect absoluteCaretBounds();
+  IntRect AbsoluteCaretBounds();
 
-  void didChangeFocus();
+  void DidChangeFocus();
 
-  const SelectionInDOMTree& selectionInDOMTree() const;
-  bool isInPasswordField() const;
-  bool isDirectional() const { return selectionInDOMTree().isDirectional(); }
+  const SelectionInDOMTree& GetSelectionInDOMTree() const;
+  bool IsDirectional() const { return GetSelectionInDOMTree().IsDirectional(); }
 
-  // If this FrameSelection has a logical range which is still valid, this
-  // function return its clone. Otherwise, the return value from underlying
-  // VisibleSelection's firstRange() is returned.
-  Range* firstRange() const;
+  void DocumentAttached(Document*);
 
-  void documentAttached(Document*);
-
-  void didLayout();
-  bool isAppearanceDirty() const;
-  void commitAppearanceIfNeeded(LayoutView&);
-  void setCaretVisible(bool caretIsVisible);
-  void scheduleVisualUpdate() const;
-  void scheduleVisualUpdateForPaintInvalidationIfNeeded() const;
+  void DidLayout();
+  bool NeedsLayoutSelectionUpdate() const;
+  void CommitAppearanceIfNeeded();
+  void SetCaretVisible(bool caret_is_visible);
+  void ScheduleVisualUpdate() const;
+  void ScheduleVisualUpdateForPaintInvalidationIfNeeded() const;
 
   // Paint invalidation methods delegating to FrameCaret.
-  void clearPreviousCaretVisualRect(const LayoutBlock&);
-  void layoutBlockWillBeDestroyed(const LayoutBlock&);
-  void updateStyleAndLayoutIfNeeded();
-  void invalidatePaintIfNeeded(const LayoutBlock&,
-                               const PaintInvalidatorContext&);
+  void ClearPreviousCaretVisualRect(const LayoutBlock&);
+  void LayoutBlockWillBeDestroyed(const LayoutBlock&);
+  void UpdateStyleAndLayoutIfNeeded();
+  void InvalidatePaint(const LayoutBlock&, const PaintInvalidatorContext&);
 
-  void paintCaret(GraphicsContext&, const LayoutPoint&);
+  void PaintCaret(GraphicsContext&, const LayoutPoint&);
 
   // Used to suspend caret blinking while the mouse is down.
-  void setCaretBlinkingSuspended(bool);
-  bool isCaretBlinkingSuspended() const;
+  void SetCaretBlinkingSuspended(bool);
+  bool IsCaretBlinkingSuspended() const;
 
   // Focus
-  void setFocused(bool);
-  bool isFocused() const { return m_focused; }
-  bool isFocusedAndActive() const;
-  void pageActivationChanged();
+  bool SelectionHasFocus() const;
+  void SetFrameIsFocused(bool);
+  bool FrameIsFocused() const { return focused_; }
+  bool FrameIsFocusedAndActive() const;
+  void PageActivationChanged();
 
-  void setUseSecureKeyboardEntryWhenActive(bool);
+  void SetUseSecureKeyboardEntryWhenActive(bool);
 
-  bool isHandleVisible() const;
+  bool IsHandleVisible() const;
 
-  void updateSecureKeyboardEntryIfActive();
+  void UpdateSecureKeyboardEntryIfActive();
 
   // Returns true if a word is selected.
-  bool selectWordAroundPosition(const VisiblePosition&);
+  bool SelectWordAroundPosition(const VisiblePosition&);
 
 #ifndef NDEBUG
-  void showTreeForThis() const;
+  void ShowTreeForThis() const;
 #endif
 
-  void setFocusedNodeIfNeeded();
-  void notifyLayoutObjectOfSelectionChange(EUserTriggered);
+  void SetFocusedNodeIfNeeded();
+  void NotifyTextControlOfSelectionChange(EUserTriggered);
 
-  String selectedHTMLForClipboard() const;
-  String selectedText(const TextIteratorBehavior&) const;
-  String selectedText() const;
-  String selectedTextForClipboard() const;
+  String SelectedHTMLForClipboard() const;
+  String SelectedText(const TextIteratorBehavior&) const;
+  String SelectedText() const;
+  String SelectedTextForClipboard() const;
 
   // The bounds are clipped to the viewport as this is what callers expect.
-  LayoutRect bounds() const;
-  LayoutRect unclippedBounds() const;
-
-  HTMLFormElement* currentForm() const;
+  // This returns last layouted selection bounds of LayoutSelection rather than
+  // SelectionEditor keeps.
+  LayoutRect Bounds() const;
+  LayoutRect UnclippedBounds() const;
 
   // TODO(tkent): This function has a bug that scrolling doesn't work well in
   // a case of RangeSelection. crbug.com/443061
-  void revealSelection(
-      const ScrollAlignment& = ScrollAlignment::alignCenterIfNeeded,
-      RevealExtentOption = DoNotRevealExtent);
-  void setSelectionFromNone();
+  void RevealSelection(
+      const ScrollAlignment& = ScrollAlignment::kAlignCenterIfNeeded,
+      RevealExtentOption = kDoNotRevealExtent);
+  void SetSelectionFromNone();
 
-  void updateAppearance();
-  bool shouldShowBlockCursor() const;
-  void setShouldShowBlockCursor(bool);
+  void UpdateAppearance();
+  bool ShouldShowBlockCursor() const;
+  void SetShouldShowBlockCursor(bool);
 
-  void cacheRangeOfDocument(Range*);
-  Range* documentCachedRange() const;
-  void clearDocumentCachedRange();
+  void CacheRangeOfDocument(Range*);
+  Range* DocumentCachedRange() const;
+  void ClearDocumentCachedRange();
 
-  FrameCaret& frameCaretForTesting() const { return *m_frameCaret; }
+  FrameCaret& FrameCaretForTesting() const { return *frame_caret_; }
+
+  std::pair<int, int> LayoutSelectionStartEnd();
+  base::Optional<int> LayoutSelectionStart() const;
+  base::Optional<int> LayoutSelectionEnd() const;
+  void ClearLayoutSelection();
 
   DECLARE_TRACE();
 
@@ -286,47 +254,49 @@ class CORE_EXPORT FrameSelection final
 
   explicit FrameSelection(LocalFrame&);
 
-  const DisplayItemClient& caretDisplayItemClientForTesting() const;
+  const DisplayItemClient& CaretDisplayItemClientForTesting() const;
 
   // Note: We have |selectionInFlatTree()| for unit tests, we should
   // use |visibleSelection<EditingInFlatTreeStrategy>()|.
-  const VisibleSelectionInFlatTree& selectionInFlatTree() const;
+  const VisibleSelectionInFlatTree& GetSelectionInFlatTree() const;
 
-  void notifyAccessibilityForSelectionChange();
-  void notifyCompositorForSelectionChange();
-  void notifyEventHandlerForSelectionChange();
+  void NotifyAccessibilityForSelectionChange();
+  void NotifyCompositorForSelectionChange();
+  void NotifyEventHandlerForSelectionChange();
 
-  void focusedOrActiveStateChanged();
+  void FocusedOrActiveStateChanged();
 
-  void setUseSecureKeyboardEntry(bool);
+  void SetUseSecureKeyboardEntry(bool);
 
-  void updateSelectionIfNeeded(const Position& base,
+  void UpdateSelectionIfNeeded(const Position& base,
                                const Position& extent,
                                const Position& start,
                                const Position& end);
 
-  GranularityStrategy* granularityStrategy();
+  GranularityStrategy* GetGranularityStrategy();
+
+  IntRect ComputeRectToScroll(RevealExtentOption);
 
   // Implementation of |SynchronousMutationObserver| member functions.
-  void contextDestroyed(Document*) final;
-  void nodeChildrenWillBeRemoved(ContainerNode&) final;
-  void nodeWillBeRemoved(Node&) final;
+  void ContextDestroyed(Document*) final;
+  void NodeChildrenWillBeRemoved(ContainerNode&) final;
+  void NodeWillBeRemoved(Node&) final;
 
-  Member<LocalFrame> m_frame;
-  const Member<PendingSelection> m_pendingSelection;
-  const Member<SelectionEditor> m_selectionEditor;
+  Member<LocalFrame> frame_;
+  const Member<LayoutSelection> layout_selection_;
+  const Member<SelectionEditor> selection_editor_;
 
-  TextGranularity m_granularity;
-  LayoutUnit m_xPosForVerticalArrowNavigation;
+  TextGranularity granularity_;
+  LayoutUnit x_pos_for_vertical_arrow_navigation_;
 
-  bool m_focused : 1;
+  bool focused_ : 1;
 
   // Controls text granularity used to adjust the selection's extent in
   // moveRangeSelectionExtent.
-  std::unique_ptr<GranularityStrategy> m_granularityStrategy;
+  std::unique_ptr<GranularityStrategy> granularity_strategy_;
 
-  const Member<FrameCaret> m_frameCaret;
-  bool m_useSecureKeyboardEntryWhenActive = false;
+  const Member<FrameCaret> frame_caret_;
+  bool use_secure_keyboard_entry_when_active_ = false;
 };
 
 }  // namespace blink

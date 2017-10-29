@@ -7,6 +7,7 @@
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/rand_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/infobar_responder.h"
@@ -178,7 +179,18 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
     return true;
   }
 
+  bool DetectLocalVideoPlaying(content::WebContents* tab_contents) {
+    // The remote video tag is called "local-video" in the AppRTC code.
+    return DetectVideoPlaying(tab_contents, "local-video");
+  }
+
   bool DetectRemoteVideoPlaying(content::WebContents* tab_contents) {
+    // The remote video tag is called "remote-video" in the AppRTC code.
+    return DetectVideoPlaying(tab_contents, "remote-video");
+  }
+
+  bool DetectVideoPlaying(content::WebContents* tab_contents,
+                          const std::string& video_tag) {
     if (!EvalInJavascriptFile(tab_contents, GetSourceDir().Append(
         FILE_PATH_LITERAL("chrome/test/data/webrtc/test_functions.js"))))
       return false;
@@ -186,8 +198,7 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
         FILE_PATH_LITERAL("chrome/test/data/webrtc/video_detector.js"))))
       return false;
 
-    // The remote video tag is called remoteVideo in the AppRTC code.
-    StartDetectingVideo(tab_contents, "remote-video");
+    StartDetectingVideo(tab_contents, video_tag);
     WaitForVideoToPlay(tab_contents);
     return true;
   }
@@ -232,6 +243,7 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
 };
 
 IN_PROC_BROWSER_TEST_F(WebRtcApprtcBrowserTest, MANUAL_WorksOnApprtc) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   DetectErrorsInJavaScript();
   ASSERT_TRUE(LaunchApprtcInstanceOnLocalhost("9999"));
   ASSERT_TRUE(LaunchColliderOnLocalHost("http://localhost:9999", "8089"));
@@ -250,6 +262,13 @@ IN_PROC_BROWSER_TEST_F(WebRtcApprtcBrowserTest, MANUAL_WorksOnApprtc) {
   InfoBarResponder left_infobar_responder(
       InfoBarService::FromWebContents(left_tab), InfoBarResponder::ACCEPT);
   ui_test_utils::NavigateToURL(browser(), room_url);
+
+  // Wait for the local video to start playing. This is needed, because opening
+  // a new tab too quickly, by sending the current tab to the background, can
+  // lead to the request for starting the video capture in the current tab to
+  // not get sent before it comes back to the foreground (which in this test
+  // case is never).
+  ASSERT_TRUE(DetectLocalVideoPlaying(left_tab));
 
   // Set up the right tab.
   chrome::AddTabAt(browser(), GURL(), -1, true);
@@ -272,8 +291,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcApprtcBrowserTest, MANUAL_WorksOnApprtc) {
 }
 
 #if defined(OS_LINUX)
-// Disabled due to failure. http://crbug.com/648181.
-#define MAYBE_MANUAL_FirefoxApprtcInteropTest DISABLED_MANUAL_FirefoxApprtcInteropTest
+#define MAYBE_MANUAL_FirefoxApprtcInteropTest MANUAL_FirefoxApprtcInteropTest
 #else
 // Not implemented yet on Windows and Mac.
 #define MAYBE_MANUAL_FirefoxApprtcInteropTest DISABLED_MANUAL_FirefoxApprtcInteropTest

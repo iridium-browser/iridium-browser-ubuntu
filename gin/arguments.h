@@ -74,9 +74,17 @@ class GIN_EXPORT Arguments {
     info_->GetReturnValue().Set(v8_value);
   }
 
+  // Returns the creation context of the Holder.
+  v8::Local<v8::Context> GetHolderCreationContext();
+
   // Always check the return value whether the handle is empty before
   // dereferencing the handle.
   v8::Local<v8::Value> PeekNext() const;
+
+  // Returns all arguments. Since this doesn't require any conversion, it
+  // cannot fail. This does not rely on or modify the current position in the
+  // array used by Get/PeekNext().
+  std::vector<v8::Local<v8::Value>> GetAll() const;
 
   void ThrowError() const;
   void ThrowTypeError(const std::string& message) const;

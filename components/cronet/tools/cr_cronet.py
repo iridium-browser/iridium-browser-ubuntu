@@ -80,7 +80,8 @@ def main():
   if is_os:
     target_os = 'ios'
     test_target = 'cronet_test'
-    gn_args = 'is_cronet_build=true is_component_build=false '
+    gn_args = 'is_cronet_build=true is_component_build=false ' \
+        'use_xcode_clang=true '
     gn_extra = '--ide=xcode'
     if options.iphoneos:
       gn_args += ' target_cpu="arm64" '
@@ -100,9 +101,12 @@ def main():
 
   gn_args += 'target_os="' + target_os + '" enable_websockets=false '+ \
       'disable_file_support=true disable_ftp_support=true '+ \
+      'disable_brotli_filter=false ' + \
       'use_platform_icu_alternatives=true '+ \
-      'disable_brotli_filter=true is_component_build=false ' + \
-      'ignore_elf32_limitations=true use_partition_alloc=false'
+      'enable_reporting=false '+ \
+      'is_component_build=false ' + \
+      'ignore_elf32_limitations=true use_partition_alloc=false ' + \
+      'include_transport_security_state_preload_list=false'
 
   extra_options = ' '.join(extra_options_list)
   if options.gn:
@@ -111,7 +115,7 @@ def main():
   if options.release:
     out_dir = 'out/Release' + out_dir_suffix
     release_arg = ' --release'
-    gn_args += ' is_debug=false '
+    gn_args += ' is_debug=false is_official_build=true '
   else:
     out_dir = 'out/Debug' + out_dir_suffix
     release_arg = ''

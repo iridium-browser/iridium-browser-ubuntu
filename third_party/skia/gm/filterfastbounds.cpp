@@ -6,10 +6,12 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkBlurImageFilter.h"
 #include "SkDropShadowImageFilter.h"
 #include "SkImageSource.h"
 #include "SkOffsetImageFilter.h"
+#include "SkPath.h"
 #include "SkPictureImageFilter.h"
 #include "SkPictureRecorder.h"
 #include "SkRandom.h"

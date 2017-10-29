@@ -83,6 +83,7 @@ Resources.DatabaseTableView = class extends UI.SimpleView {
       this._emptyWidget.show(this.element);
       return;
     }
+    this._dataGrid.setStriped(true);
     this._dataGrid.asWidget().show(this.element);
     this._dataGrid.autoSizeColumns(5);
 

@@ -7,16 +7,18 @@
 #include "core/css/CSSValueList.h"
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIBaselineShift::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  CSSValueID id = range.peek().id();
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  CSSValueID id = range.Peek().Id();
   if (id == CSSValueBaseline || id == CSSValueSub || id == CSSValueSuper)
-    return CSSPropertyParserHelpers::consumeIdent(range);
-  return CSSPropertyParserHelpers::consumeLengthOrPercent(
-      range, SVGAttributeMode, ValueRangeAll);
+    return CSSPropertyParserHelpers::ConsumeIdent(range);
+  return CSSPropertyParserHelpers::ConsumeLengthOrPercent(
+      range, kSVGAttributeMode, kValueRangeAll);
 }
 
 }  // namespace blink

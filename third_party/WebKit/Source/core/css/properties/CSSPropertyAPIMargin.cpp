@@ -8,13 +8,15 @@
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 #include "core/css/properties/CSSPropertyMarginUtils.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIMargin::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  return CSSPropertyMarginUtils::consumeMarginOrOffset(
-      range, context->mode(), CSSPropertyParserHelpers::UnitlessQuirk::Allow);
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  return CSSPropertyMarginUtils::ConsumeMarginOrOffset(
+      range, context.Mode(), CSSPropertyParserHelpers::UnitlessQuirk::kAllow);
 }
 
 }  // namespace blink

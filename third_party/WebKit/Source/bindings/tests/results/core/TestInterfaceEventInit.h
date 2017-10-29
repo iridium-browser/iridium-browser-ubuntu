@@ -15,7 +15,7 @@
 #include "core/CoreExport.h"
 #include "core/events/EventInit.h"
 #include "platform/heap/Handle.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -28,13 +28,14 @@ class CORE_EXPORT TestInterfaceEventInit : public EventInit {
   TestInterfaceEventInit& operator=(const TestInterfaceEventInit&);
 
   bool hasStringMember() const;
-  String stringMember() const;
-  void setStringMember(String);
+  const String& stringMember() const;
+  void setStringMember(const String&);
 
-  v8::Local<v8::Value> toV8Impl(v8::Local<v8::Object>, v8::Isolate*) const override;
+  v8::Local<v8::Value> ToV8Impl(v8::Local<v8::Object>, v8::Isolate*) const override;
   DECLARE_VIRTUAL_TRACE();
 
  private:
+
   String m_stringMember;
 
   friend class V8TestInterfaceEventInit;

@@ -36,7 +36,7 @@ class OffscreenTab;  // Forward declaration.  See below.
 //
 // This class operates exclusively on the UI thread and so is not thread-safe.
 class OffscreenTabsOwner
-    : protected content::WebContentsUserData<OffscreenTabsOwner> {
+    : public content::WebContentsUserData<OffscreenTabsOwner> {
  public:
   ~OffscreenTabsOwner() final;
 
@@ -122,6 +122,9 @@ class OffscreenTab : protected content::WebContentsDelegate,
              const gfx::Size& initial_size,
              const std::string& optional_presentation_id);
 
+  // Closes the underlying WebContents.
+  void Close();
+
   // content::WebContentsDelegate overrides to provide the desired behaviors.
   void CloseContents(content::WebContents* source) final;
   bool ShouldSuppressDialogs(content::WebContents* source) final;
@@ -131,9 +134,9 @@ class OffscreenTab : protected content::WebContentsDelegate,
                    const std::string& request_method,
                    const base::Callback<void(bool)>& callback) final;
   bool HandleContextMenu(const content::ContextMenuParams& params) final;
-  bool PreHandleKeyboardEvent(content::WebContents* source,
-                              const content::NativeWebKeyboardEvent& event,
-                              bool* is_keyboard_shortcut) final;
+  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      content::WebContents* source,
+      const content::NativeWebKeyboardEvent& event) final;
   bool PreHandleGestureEvent(content::WebContents* source,
                              const blink::WebGestureEvent& event) final;
   bool CanDragEnter(content::WebContents* source,
@@ -141,6 +144,7 @@ class OffscreenTab : protected content::WebContentsDelegate,
                     blink::WebDragOperationsMask operations_allowed) final;
   bool ShouldCreateWebContents(
       content::WebContents* web_contents,
+      content::RenderFrameHost* opener,
       content::SiteInstance* source_site_instance,
       int32_t route_id,
       int32_t main_frame_route_id,
@@ -169,11 +173,26 @@ class OffscreenTab : protected content::WebContentsDelegate,
 
   // content::WebContentsObserver overrides
   void DidShowFullscreenWidget() final;
+  void DidStartNavigation(content::NavigationHandle* navigation_handle) final;
 
  private:
   bool in_fullscreen_mode() const {
     return !non_fullscreen_size_.IsEmpty();
   }
+
+  // Selected calls to the navigation methods in WebContentsObserver are
+  // delegated to this object to determine a navigation is allowed.  If any
+  // call returns false, the offscreen tab is destroyed.  The default policy
+  // allows all navigations.
+  class NavigationPolicy {
+   public:
+    NavigationPolicy();
+    ~NavigationPolicy();
+    virtual bool DidStartNavigation(
+        content::NavigationHandle* navigation_handle);
+  };
+
+  class PresentationNavigationPolicy;  // Forward declaration
 
   // Called by |capture_poll_timer_| to automatically destroy this OffscreenTab
   // when the capturer count returns to zero.
@@ -211,6 +230,9 @@ class OffscreenTab : protected content::WebContentsDelegate,
   // This is false until after the Start() method is called, and capture of the
   // |offscreen_tab_web_contents_| is first detected.
   bool content_capture_was_detected_;
+
+  // Object consulted to determine which offscreen tab navigations are allowed.
+  std::unique_ptr<NavigationPolicy> navigation_policy_;
 
   DISALLOW_COPY_AND_ASSIGN(OffscreenTab);
 };

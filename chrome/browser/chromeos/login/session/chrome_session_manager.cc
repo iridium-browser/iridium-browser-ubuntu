@@ -18,11 +18,13 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/arc/arc_service_launcher.h"
 #include "chrome/browser/chromeos/boot_times_recorder.h"
+#include "chrome/browser/chromeos/lock_screen_apps/state_controller.h"
 #include "chrome/browser/chromeos/login/lock/webui_screen_locker.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/chromeos/tether/tether_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/ash/ash_util.h"
@@ -81,14 +83,16 @@ void StartLoginOobeSession() {
   }
 }
 
-// Restores user sessions for a crash-and-restarted chrome.
-void StartRestoreAfterCrashSession(Profile* user_profile,
-                                   const std::string& login_user_id) {
+// Starts Chrome with an existing user session. Possible cases:
+// 1. Chrome is restarted after crash.
+// 2. Chrome is restarted for Guest session.
+// 3. Chrome is started in browser_tests skipping the login flow.
+// 4. Chrome is started on dev machine i.e. not on Chrome OS device w/o
+//    login flow. In that case --login-user=[user_manager::kStubUserEmail] is
+//    added. See PreEarlyInitialization().
+void StartUserSession(Profile* user_profile, const std::string& login_user_id) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
-  // TODO(xiyuan): Identify tests that do not set this kLoginUser flag but
-  // still rely on "stub user" session. Keeping existing behavior to avoid
-  // breaking tests.
   if (command_line->HasSwitch(chromeos::switches::kLoginUser)) {
     // This is done in SessionManager::OnProfileCreated during normal login.
     UserSessionManager* user_session_mgr = UserSessionManager::GetInstance();
@@ -104,6 +108,8 @@ void StartRestoreAfterCrashSession(Profile* user_profile,
     user_session_mgr->InitializeCerts(user_profile);
     user_session_mgr->InitializeCRLSetFetcher(user);
     user_session_mgr->InitializeCertificateTransparencyComponents(user);
+    if (lock_screen_apps::StateController::IsEnabled())
+      lock_screen_apps::StateController::Get()->SetPrimaryProfile(user_profile);
 
     arc::ArcServiceLauncher::Get()->OnPrimaryUserProfilePrepared(user_profile);
 
@@ -134,16 +140,21 @@ void StartRestoreAfterCrashSession(Profile* user_profile,
     // restore Sync.
     UserSessionManager::GetInstance()->RestoreAuthenticationSession(
         user_profile);
+
+    TetherService* tether_service = TetherService::Get(user_profile);
+    if (tether_service)
+      tether_service->StartTetherIfPossible();
   }
 }
 
-// Starts a user session with stub user.
+// Starts a user session with stub user. This also happens on a dev machine
+// when running Chrome w/o login flow. See PreEarlyInitialization().
 void StartStubLoginSession(Profile* user_profile,
                            const std::string& login_user_id) {
   // For dev machines and stub user emulate as if sync has been initialized.
   SigninManagerFactory::GetForProfile(user_profile)
       ->SetAuthenticatedAccountInfo(login_user_id, login_user_id);
-  StartRestoreAfterCrashSession(user_profile, login_user_id);
+  StartUserSession(user_profile, login_user_id);
 }
 
 }  // namespace
@@ -197,15 +208,8 @@ void ChromeSessionManager::Initialize(
     return;
   }
 
-  VLOG(1) << "Starting Chrome with  restart after crash session.";
-  // Restarting Chrome inside existing user session. Possible cases:
-  // 1. Chrome is restarted after crash.
-  // 2. Chrome is restarted for Guest session.
-  // 3. Chrome is started in browser_tests skipping the login flow.
-  // 4. Chrome is started on dev machine i.e. not on Chrome OS device w/o
-  //    login flow. In that case --login-user=[user_manager::kStubUser] is
-  //    added. See PreEarlyInitialization().
-  StartRestoreAfterCrashSession(profile, login_account_id.GetUserEmail());
+  VLOG(1) << "Starting Chrome with a user session.";
+  StartUserSession(profile, login_account_id.GetUserEmail());
 }
 
 void ChromeSessionManager::SessionStarted() {

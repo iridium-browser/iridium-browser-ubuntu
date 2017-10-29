@@ -314,8 +314,8 @@ public class OverlayPanelContent {
 
                     @Override
                     public void didStartNavigation(String url, boolean isInMainFrame,
-                            boolean isSamePage, boolean isErrorPage) {
-                        if (isInMainFrame && !isSamePage) {
+                            boolean isSameDocument, boolean isErrorPage) {
+                        if (isInMainFrame && !isSameDocument) {
                             mContentDelegate.onMainFrameLoadStarted(
                                     url, !TextUtils.equals(url, mLoadedUrl));
                         }
@@ -323,7 +323,7 @@ public class OverlayPanelContent {
 
                     @Override
                     public void didFinishNavigation(String url, boolean isInMainFrame,
-                            boolean isErrorPage, boolean hasCommitted, boolean isSamePage,
+                            boolean isErrorPage, boolean hasCommitted, boolean isSameDocument,
                             boolean isFragmentNavigation, Integer pageTransition, int errorCode,
                             String errorDescription, int httpStatusCode) {
                         if (hasCommitted && isInMainFrame) {
@@ -336,8 +336,8 @@ public class OverlayPanelContent {
                 };
 
         mInterceptNavigationDelegate = new InterceptNavigationDelegateImpl();
-        nativeSetInterceptNavigationDelegate(mNativeOverlayPanelContentPtr,
-                mInterceptNavigationDelegate, panelWebContents);
+        nativeSetInterceptNavigationDelegate(
+                mNativeOverlayPanelContentPtr, mInterceptNavigationDelegate, panelWebContents);
 
         mContentDelegate.onContentViewCreated(mContentViewCore);
     }
@@ -479,6 +479,18 @@ public class OverlayPanelContent {
         return mContentViewCore;
     }
 
+    void onSizeChanged(int width, int height) {
+        mContentViewCore.onSizeChanged(width, height, mContentViewCore.getViewportWidthPix(),
+                mContentViewCore.getViewportHeightPix());
+    }
+
+    void onPhysicalBackingSizeChanged(int width, int height) {
+        if (mContentViewCore != null && mContentViewCore.getWebContents() != null) {
+            nativeOnPhysicalBackingSizeChanged(mNativeOverlayPanelContentPtr,
+                    mContentViewCore.getWebContents(), width, height);
+        }
+    }
+
     /**
      * Remove the list history entry from this panel if it was within a certain timeframe.
      * @param historyUrl The URL to remove.
@@ -509,6 +521,8 @@ public class OverlayPanelContent {
     private native void nativeDestroy(long nativeOverlayPanelContent);
     private native void nativeRemoveLastHistoryEntry(
             long nativeOverlayPanelContent, String historyUrl, long urlTimeMs);
+    private native void nativeOnPhysicalBackingSizeChanged(
+            long nativeOverlayPanelContent, WebContents webContents, int width, int height);
     private native void nativeSetWebContents(long nativeOverlayPanelContent,
             WebContents webContents, WebContentsDelegateAndroid delegate);
     private native void nativeDestroyWebContents(long nativeOverlayPanelContent);

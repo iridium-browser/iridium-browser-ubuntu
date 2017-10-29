@@ -19,7 +19,7 @@ namespace rx
 {
 class RendererVk;
 
-class ContextVk : public ContextImpl
+class ContextVk : public ContextImpl, public ResourceVk
 {
   public:
     ContextVk(const gl::ContextState &state, RendererVk *renderer);
@@ -32,32 +32,44 @@ class ContextVk : public ContextImpl
     gl::Error finish() override;
 
     // Drawing methods.
-    gl::Error drawArrays(GLenum mode, GLint first, GLsizei count) override;
-    gl::Error drawArraysInstanced(GLenum mode,
+    gl::Error drawArrays(const gl::Context *context,
+                         GLenum mode,
+                         GLint first,
+                         GLsizei count) override;
+    gl::Error drawArraysInstanced(const gl::Context *context,
+                                  GLenum mode,
                                   GLint first,
                                   GLsizei count,
                                   GLsizei instanceCount) override;
 
-    gl::Error drawElements(GLenum mode,
+    gl::Error drawElements(const gl::Context *context,
+                           GLenum mode,
                            GLsizei count,
                            GLenum type,
-                           const GLvoid *indices,
+                           const void *indices,
                            const gl::IndexRange &indexRange) override;
-    gl::Error drawElementsInstanced(GLenum mode,
+    gl::Error drawElementsInstanced(const gl::Context *context,
+                                    GLenum mode,
                                     GLsizei count,
                                     GLenum type,
-                                    const GLvoid *indices,
+                                    const void *indices,
                                     GLsizei instances,
                                     const gl::IndexRange &indexRange) override;
-    gl::Error drawRangeElements(GLenum mode,
+    gl::Error drawRangeElements(const gl::Context *context,
+                                GLenum mode,
                                 GLuint start,
                                 GLuint end,
                                 GLsizei count,
                                 GLenum type,
-                                const GLvoid *indices,
+                                const void *indices,
                                 const gl::IndexRange &indexRange) override;
-    gl::Error drawArraysIndirect(GLenum mode, const GLvoid *indirect) override;
-    gl::Error drawElementsIndirect(GLenum mode, GLenum type, const GLvoid *indirect) override;
+    gl::Error drawArraysIndirect(const gl::Context *context,
+                                 GLenum mode,
+                                 const void *indirect) override;
+    gl::Error drawElementsIndirect(const gl::Context *context,
+                                   GLenum mode,
+                                   GLenum type,
+                                   const void *indirect) override;
 
     // Device loss
     GLenum getResetStatus() override;
@@ -72,14 +84,14 @@ class ContextVk : public ContextImpl
     void popGroupMarker() override;
 
     // State sync with dirty bits.
-    void syncState(const gl::State::DirtyBits &dirtyBits) override;
+    void syncState(const gl::Context *context, const gl::State::DirtyBits &dirtyBits) override;
 
     // Disjoint timer queries
     GLint getGPUDisjoint() override;
     GLint64 getTimestamp() override;
 
     // Context switching
-    void onMakeCurrent(const gl::ContextState &data) override;
+    void onMakeCurrent(const gl::Context *context) override;
 
     // Native capabilities, unmodified by gl::Context.
     const gl::Caps &getNativeCaps() const override;
@@ -123,14 +135,25 @@ class ContextVk : public ContextImpl
     std::vector<PathImpl *> createPaths(GLsizei) override;
 
     VkDevice getDevice() const;
-    vk::CommandBuffer *getCommandBuffer();
-    vk::Error submitCommands(const vk::CommandBuffer &commandBuffer);
+    vk::Error getStartedCommandBuffer(vk::CommandBuffer **commandBufferOut);
+    vk::Error submitCommands(vk::CommandBuffer *commandBuffer);
 
     RendererVk *getRenderer() { return mRenderer; }
 
+    // TODO(jmadill): Use pipeline cache.
+    void invalidateCurrentPipeline();
+
+    gl::Error dispatchCompute(const gl::Context *context,
+                              GLuint numGroupsX,
+                              GLuint numGroupsY,
+                              GLuint numGroupsZ) override;
+
   private:
+    gl::Error initPipeline(const gl::Context *context);
+
     RendererVk *mRenderer;
     vk::Pipeline mCurrentPipeline;
+    GLenum mCurrentDrawMode;
 };
 
 }  // namespace rx

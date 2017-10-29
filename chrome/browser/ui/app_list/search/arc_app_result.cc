@@ -10,7 +10,6 @@
 #include "chrome/browser/ui/app_list/arc/arc_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/app_list/search/search_util.h"
-#include "content/public/browser/user_metrics.h"
 
 namespace {
 const char kArcAppPrefix[] = "arc://";
@@ -67,8 +66,10 @@ std::unique_ptr<SearchResult> ArcAppResult::Duplicate() const {
 }
 
 ui::MenuModel* ArcAppResult::GetContextMenuModel() {
-  context_menu_.reset(new ArcAppContextMenu(
-      this, profile(), app_id(), controller()));
+  if (!context_menu_) {
+    context_menu_.reset(
+        new ArcAppContextMenu(this, profile(), app_id(), controller()));
+  }
   return context_menu_->GetMenuModel();
 }
 

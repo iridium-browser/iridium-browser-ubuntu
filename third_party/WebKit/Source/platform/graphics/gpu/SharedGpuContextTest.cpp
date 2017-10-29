@@ -10,7 +10,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 
-using testing::Test;
+using ::testing::Test;
 
 namespace blink {
 
@@ -19,27 +19,27 @@ namespace {
 class SharedGpuContextTest : public Test {
  public:
   void SetUp() override {
-    SharedGpuContext::setContextProviderFactoryForTesting([this] {
-      m_gl.setIsContextLost(false);
+    SharedGpuContext::SetContextProviderFactoryForTesting([this] {
+      gl_.SetIsContextLost(false);
       return std::unique_ptr<WebGraphicsContext3DProvider>(
-          new FakeWebGraphicsContext3DProvider(&m_gl));
+          new FakeWebGraphicsContext3DProvider(&gl_));
     });
   }
 
   void TearDown() override {
-    SharedGpuContext::setContextProviderFactoryForTesting(nullptr);
+    SharedGpuContext::SetContextProviderFactoryForTesting(nullptr);
   }
 
-  FakeGLES2Interface m_gl;
+  FakeGLES2Interface gl_;
 };
 
 TEST_F(SharedGpuContextTest, contextLossAutoRecovery) {
-  EXPECT_TRUE(SharedGpuContext::isValid());
-  unsigned contextId = SharedGpuContext::contextId();
-  m_gl.setIsContextLost(true);
-  EXPECT_FALSE(SharedGpuContext::isValidWithoutRestoring());
-  EXPECT_TRUE(SharedGpuContext::isValid());
-  EXPECT_NE(contextId, SharedGpuContext::contextId());
+  EXPECT_TRUE(SharedGpuContext::IsValid());
+  unsigned context_id = SharedGpuContext::ContextId();
+  gl_.SetIsContextLost(true);
+  EXPECT_FALSE(SharedGpuContext::IsValidWithoutRestoring());
+  EXPECT_TRUE(SharedGpuContext::IsValid());
+  EXPECT_NE(context_id, SharedGpuContext::ContextId());
 }
 
 }  // unnamed namespace

@@ -8,6 +8,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -27,6 +28,7 @@
 #include "net/log/net_log_with_source.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_service.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_interceptor.h"
@@ -101,7 +103,7 @@ class DataReductionProxyIODataTest : public testing::Test {
 
 TEST_F(DataReductionProxyIODataTest, TestConstruction) {
   std::unique_ptr<DataReductionProxyIOData> io_data(
-      new DataReductionProxyIOData(Client::UNKNOWN, 0, net_log(), task_runner(),
+      new DataReductionProxyIOData(Client::UNKNOWN, net_log(), task_runner(),
                                    task_runner(), false /* enabled */,
                                    std::string() /* user_agent */,
                                    std::string() /* channel */));
@@ -123,8 +125,9 @@ TEST_F(DataReductionProxyIODataTest, TestConstruction) {
   // When creating a network delegate, expect that it properly wraps a
   // network delegate. Such a network delegate is thoroughly tested by
   // DataReductionProxyNetworkDelegateTest.
-  std::unique_ptr<net::URLRequest> fake_request = context().CreateRequest(
-      GURL("http://www.foo.com/"), net::IDLE, delegate());
+  std::unique_ptr<net::URLRequest> fake_request =
+      context().CreateRequest(GURL("http://www.foo.com/"), net::IDLE,
+                              delegate(), TRAFFIC_ANNOTATION_FOR_TESTS);
   CountingNetworkDelegate* wrapped_network_delegate =
       new CountingNetworkDelegate();
   std::unique_ptr<DataReductionProxyNetworkDelegate> network_delegate =
@@ -150,7 +153,6 @@ TEST_F(DataReductionProxyIODataTest, TestResetBadProxyListOnDisableDataSaver) {
   net::TestURLRequestContext context(false);
   std::unique_ptr<DataReductionProxyTestContext> drp_test_context =
       DataReductionProxyTestContext::Builder()
-          .WithParamsFlags(DataReductionProxyParams::kPromoAllowed)
           .WithURLRequestContext(&context)
           .SkipSettingsInitialization()
           .Build();
@@ -188,10 +190,11 @@ TEST_F(DataReductionProxyIODataTest, TestResetBadProxyListOnDisableDataSaver) {
 
 TEST_F(DataReductionProxyIODataTest, HoldbackConfiguresProxies) {
   net::TestURLRequestContext context(false);
+  base::FieldTrialList field_trial_list(nullptr);
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "DataCompressionProxyHoldback", "Enabled"));
   std::unique_ptr<DataReductionProxyTestContext> drp_test_context =
       DataReductionProxyTestContext::Builder()
-          .WithParamsFlags(DataReductionProxyParams::kPromoAllowed |
-                           DataReductionProxyParams::kHoldback)
           .WithURLRequestContext(&context)
           .SkipSettingsInitialization()
           .Build();

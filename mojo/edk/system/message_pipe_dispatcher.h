@@ -12,10 +12,9 @@
 
 #include "base/macros.h"
 #include "mojo/edk/system/atomic_flag.h"
-#include "mojo/edk/system/awakable_list.h"
 #include "mojo/edk/system/dispatcher.h"
-#include "mojo/edk/system/message_for_transit.h"
 #include "mojo/edk/system/ports/port_ref.h"
+#include "mojo/edk/system/watcher_set.h"
 
 namespace mojo {
 namespace edk {
@@ -48,25 +47,15 @@ class MessagePipeDispatcher : public Dispatcher {
   // Dispatcher:
   Type GetType() const override;
   MojoResult Close() override;
-  MojoResult Watch(MojoHandleSignals signals,
-                   const Watcher::WatchCallback& callback,
-                   uintptr_t context) override;
-  MojoResult CancelWatch(uintptr_t context) override;
-  MojoResult WriteMessage(std::unique_ptr<MessageForTransit> message,
+  MojoResult WriteMessage(std::unique_ptr<ports::UserMessageEvent> message,
                           MojoWriteMessageFlags flags) override;
-  MojoResult ReadMessage(std::unique_ptr<MessageForTransit>* message,
-                         uint32_t* num_bytes,
-                         MojoHandle* handles,
-                         uint32_t* num_handles,
-                         MojoReadMessageFlags flags,
-                         bool read_any_size) override;
+  MojoResult ReadMessage(
+      std::unique_ptr<ports::UserMessageEvent>* message) override;
   HandleSignalsState GetHandleSignalsState() const override;
-  MojoResult AddAwakable(Awakable* awakable,
-                         MojoHandleSignals signals,
-                         uintptr_t context,
-                         HandleSignalsState* signals_state) override;
-  void RemoveAwakable(Awakable* awakable,
-                      HandleSignalsState* signals_state) override;
+  MojoResult AddWatcherRef(const scoped_refptr<WatcherDispatcher>& watcher,
+                           uintptr_t context) override;
+  MojoResult RemoveWatcherRef(WatcherDispatcher* watcher,
+                              uintptr_t context) override;
   void StartSerialize(uint32_t* num_bytes,
                       uint32_t* num_ports,
                       uint32_t* num_handles) override;
@@ -110,7 +99,7 @@ class MessagePipeDispatcher : public Dispatcher {
 
   bool port_transferred_ = false;
   AtomicFlag port_closed_;
-  AwakableList awakables_;
+  WatcherSet watchers_;
 
   DISALLOW_COPY_AND_ASSIGN(MessagePipeDispatcher);
 };

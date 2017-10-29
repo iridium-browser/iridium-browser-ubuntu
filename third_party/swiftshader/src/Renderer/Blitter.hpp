@@ -73,7 +73,6 @@ namespace sw
 
 	public:
 		Blitter();
-
 		virtual ~Blitter();
 
 		void clear(void* pixel, sw::Format format, Surface *dest, const SliceRect &dRect, unsigned int rgbaMask);
@@ -81,6 +80,8 @@ namespace sw
 		void blit3D(Surface *source, Surface *dest);
 
 	private:
+		bool fastClear(void* pixel, sw::Format format, Surface *dest, const SliceRect &dRect, unsigned int rgbaMask);
+
 		bool read(Float4 &color, Pointer<Byte> element, Format format);
 		bool write(Float4 &color, Pointer<Byte> element, Format format, const Blitter::Options& options);
 		bool read(Int4 &color, Pointer<Byte> element, Format format);
@@ -95,8 +96,6 @@ namespace sw
 		RoutineCache<BlitState> *blitCache;
 		MutexLock criticalSection;
 	};
-
-	extern Blitter blitter;
 }
 
 #endif   // sw_Blitter_hpp

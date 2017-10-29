@@ -15,10 +15,6 @@
 
 class Profile;
 
-namespace base {
-class FilePath;
-}
-
 namespace extensions {
 class Extension;
 class ExtensionSet;
@@ -51,23 +47,19 @@ class AppListControllerDelegate {
 
   virtual ~AppListControllerDelegate();
 
-  // Whether to force the use of a native desktop widget when the app list
-  // window is first created.
-  virtual bool ForceNativeDesktop() const;
-
   // Dismisses the view.
   virtual void DismissView() = 0;
 
-  // Handle the view being closed.
+  // Handles the view being closed.
   virtual void ViewClosing();
 
-  // Get app list window.
+  // Gets app list window.
   virtual gfx::NativeWindow GetAppListWindow() = 0;
 
-  // Get the content bounds of the app list in the screen. On platforms that
-  // use views, this returns the bounds of the AppListView. Without views, this
-  // returns a 0x0 rectangle.
-  virtual gfx::Rect GetAppListBounds();
+  // Gets the content bounds of the app info dialog of the app list in the
+  // screen coordinates. On platforms that do not use views, this returns a 0x0
+  // rectangle.
+  virtual gfx::Rect GetAppInfoDialogBounds();
 
   // Control of pinning apps.
   virtual bool IsAppPinned(const std::string& app_id) = 0;
@@ -82,14 +74,6 @@ class AppListControllerDelegate {
   // displays an overlay that disables the app list while the dialog is open.
   virtual void OnShowChildDialog();
   virtual void OnCloseChildDialog();
-
-  // Whether the controller supports a Create Shortcuts flow.
-  virtual bool CanDoCreateShortcutsFlow() = 0;
-
-  // Show the dialog to create shortcuts. Call only if
-  // CanDoCreateShortcutsFlow() returns true.
-  virtual void DoCreateShortcutsFlow(Profile* profile,
-                                     const std::string& extension_id) = 0;
 
   // Whether the controller supports a Show App Info flow.
   virtual bool CanDoShowAppInfoFlow();
@@ -115,18 +99,12 @@ class AppListControllerDelegate {
                            AppListSource source,
                            int event_flags) = 0;
 
-  // Launch the app.
+  // Launch the app on the display identified by |display_id|.
   virtual void LaunchApp(Profile* profile,
                          const extensions::Extension* extension,
                          AppListSource source,
-                         int event_flags) = 0;
-
-  // Show the app list for the profile specified by |profile_path|.
-  virtual void ShowForProfileByPath(const base::FilePath& profile_path) = 0;
-
-  // Whether or not the icon indicating which user is logged in should be
-  // visible.
-  virtual bool ShouldShowUserIcon() = 0;
+                         int event_flags,
+                         int64_t display_id) = 0;
 
   static std::string AppListSourceToString(AppListSource source);
 

@@ -17,6 +17,7 @@
 @property CGFloat magnification;
 @property NSPoint locationInWindow;
 @property NSEventType type;
+@property NSEventPhase phase;
 
 // Filled with default values.
 @property(readonly) CGFloat deltaX;
@@ -31,6 +32,7 @@
 @synthesize magnification = magnification_;
 @synthesize locationInWindow = locationInWindow_;
 @synthesize type = type_;
+@synthesize phase = phase_;
 @synthesize deltaX = deltaX_;
 @synthesize deltaY = deltaY_;
 @synthesize modifierFlags = modifierFlags_;
@@ -41,6 +43,7 @@
   self = [super init];
   if (self) {
     type_ = NSEventTypeMagnify;
+    phase_ = NSEventPhaseChanged;
     magnification_ = magnification;
     locationInWindow_ = location;
 
@@ -56,10 +59,12 @@
 }
 
 + (id)eventWithMagnification:(float)magnification
-            locationInWindow:(NSPoint)location {
+            locationInWindow:(NSPoint)location
+                       phase:(NSEventPhase)phase {
   SyntheticPinchEvent* event =
       [[SyntheticPinchEvent alloc] initWithMagnification:magnification
                                         locationInWindow:location];
+  event.phase = phase;
   return [event autorelease];
 }
 
@@ -77,7 +82,7 @@ SyntheticGestureTargetMac::SyntheticGestureTargetMac(
 
 void SyntheticGestureTargetMac::DispatchInputEventToPlatform(
     const WebInputEvent& event) {
-  if (WebInputEvent::isGestureEventType(event.type())) {
+  if (WebInputEvent::IsGestureEventType(event.GetType())) {
     // Create an autorelease pool so that we clean up any synthetic events we
     // generate.
     base::mac::ScopedNSAutoreleasePool pool;
@@ -85,28 +90,31 @@ void SyntheticGestureTargetMac::DispatchInputEventToPlatform(
     const WebGestureEvent* gesture_event =
         static_cast<const WebGestureEvent*>(&event);
 
-    switch (event.type()) {
-      case WebInputEvent::GesturePinchBegin: {
+    switch (event.GetType()) {
+      case WebInputEvent::kGesturePinchBegin: {
         id event = [SyntheticPinchEvent
             eventWithMagnification:0.0f
                   locationInWindow:NSMakePoint(gesture_event->x,
-                                               gesture_event->y)];
-        [cocoa_view_ beginGestureWithEvent:event];
+                                               gesture_event->y)
+                             phase:NSEventPhaseBegan];
+        [cocoa_view_ handleBeginGestureWithEvent:event];
         return;
       }
-      case WebInputEvent::GesturePinchEnd: {
+      case WebInputEvent::kGesturePinchEnd: {
         id event = [SyntheticPinchEvent
             eventWithMagnification:0.0f
                   locationInWindow:NSMakePoint(gesture_event->x,
-                                               gesture_event->y)];
-        [cocoa_view_ endGestureWithEvent:event];
+                                               gesture_event->y)
+                             phase:NSEventPhaseEnded];
+        [cocoa_view_ handleEndGestureWithEvent:event];
         return;
       }
-      case WebInputEvent::GesturePinchUpdate: {
+      case WebInputEvent::kGesturePinchUpdate: {
         id event = [SyntheticPinchEvent
-            eventWithMagnification:gesture_event->data.pinchUpdate.scale - 1.0f
+            eventWithMagnification:gesture_event->data.pinch_update.scale - 1.0f
                   locationInWindow:NSMakePoint(gesture_event->x,
-                                               gesture_event->y)];
+                                               gesture_event->y)
+                             phase:NSEventPhaseChanged];
         [cocoa_view_ magnifyWithEvent:event];
         return;
       }

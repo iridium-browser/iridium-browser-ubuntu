@@ -68,8 +68,8 @@ const char kPreTestPrefix[] = "PRE_";
 // add a new binary that must be compiled on all builds.
 const char kManualTestPrefix[] = "MANUAL_";
 
-TestLauncherDelegate* g_launcher_delegate;
-ContentMainParams* g_params;
+TestLauncherDelegate* g_launcher_delegate = nullptr;
+ContentMainParams* g_params = nullptr;
 
 std::string RemoveAnyPrePrefixes(const std::string& test_name) {
   std::string result(test_name);
@@ -481,7 +481,7 @@ TestLauncherDelegate::~TestLauncherDelegate() {
 }
 
 int LaunchTests(TestLauncherDelegate* launcher_delegate,
-                int default_jobs,
+                size_t parallel_jobs,
                 int argc,
                 char** argv) {
   DCHECK(!g_launcher_delegate);
@@ -544,11 +544,10 @@ int LaunchTests(TestLauncherDelegate* launcher_delegate,
   base::FileDescriptorWatcher file_descriptor_watcher(&message_loop);
 #endif
 
-  // Allow the |launcher_delegate| to modify |default_jobs|.
-  launcher_delegate->AdjustDefaultParallelJobs(&default_jobs);
+  launcher_delegate->PreSharding();
 
   WrapperTestLauncherDelegate delegate(launcher_delegate);
-  base::TestLauncher launcher(&delegate, default_jobs);
+  base::TestLauncher launcher(&delegate, parallel_jobs);
   const int result = launcher.Run() ? 0 : 1;
   launcher_delegate->OnDoneRunningTests();
   return result;

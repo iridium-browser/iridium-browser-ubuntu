@@ -72,6 +72,7 @@ std::unique_ptr<KeyedService> BuildBookmarkModel(web::BrowserState* context) {
       browser_state->GetPrefs(),
       browser_state->GetStatePath(), browser_state->GetIOTaskRunner(),
       web::WebThread::GetTaskRunnerForThread(web::WebThread::UI));
+  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
   return std::move(bookmark_model);
 }
 
@@ -174,6 +175,8 @@ void TestChromeBrowserState::Init() {
 
   if (!base::PathExists(state_path_))
     base::CreateDirectory(state_path_);
+
+  BrowserState::Initialize(this, GetStatePath());
 
   // Normally this would happen during browser startup, but for tests we need to
   // trigger creation of BrowserState-related services.
@@ -281,8 +284,7 @@ void TestChromeBrowserState::ClearNetworkingHistorySince(
 }
 
 net::URLRequestContextGetter* TestChromeBrowserState::CreateRequestContext(
-    ProtocolHandlerMap* protocol_handlers,
-    URLRequestInterceptorScopedVector request_interceptors) {
+    ProtocolHandlerMap* protocol_handlers) {
   return new net::TestURLRequestContextGetter(
       web::WebThread::GetTaskRunnerForThread(web::WebThread::IO));
 }
@@ -291,10 +293,6 @@ net::URLRequestContextGetter*
 TestChromeBrowserState::CreateIsolatedRequestContext(
     const base::FilePath& partition_path) {
   return nullptr;
-}
-
-TestChromeBrowserState* TestChromeBrowserState::AsTestChromeBrowserState() {
-  return this;
 }
 
 void TestChromeBrowserState::CreateWebDataService() {

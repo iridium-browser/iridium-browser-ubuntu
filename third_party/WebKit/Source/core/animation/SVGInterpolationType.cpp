@@ -4,37 +4,43 @@
 
 #include "core/animation/SVGInterpolationType.h"
 
-#include "core/animation/InterpolationEnvironment.h"
+#include "core/animation/SVGInterpolationEnvironment.h"
 #include "core/animation/StringKeyframe.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/properties/SVGProperty.h"
 
 namespace blink {
 
-InterpolationValue SVGInterpolationType::maybeConvertSingle(
+InterpolationValue SVGInterpolationType::MaybeConvertSingle(
     const PropertySpecificKeyframe& keyframe,
     const InterpolationEnvironment& environment,
     const InterpolationValue& underlying,
-    ConversionCheckers& conversionCheckers) const {
-  if (keyframe.isNeutral())
-    return maybeConvertNeutral(underlying, conversionCheckers);
+    ConversionCheckers& conversion_checkers) const {
+  if (keyframe.IsNeutral())
+    return MaybeConvertNeutral(underlying, conversion_checkers);
 
-  SVGPropertyBase* svgValue = environment.svgBaseValue().cloneForAnimation(
-      toSVGPropertySpecificKeyframe(keyframe).value());
-  return maybeConvertSVGValue(*svgValue);
+  SVGPropertyBase* svg_value =
+      ToSVGInterpolationEnvironment(environment)
+          .SvgBaseValue()
+          .CloneForAnimation(ToSVGPropertySpecificKeyframe(keyframe).Value());
+  return MaybeConvertSVGValue(*svg_value);
 }
 
-InterpolationValue SVGInterpolationType::maybeConvertUnderlyingValue(
+InterpolationValue SVGInterpolationType::MaybeConvertUnderlyingValue(
     const InterpolationEnvironment& environment) const {
-  return maybeConvertSVGValue(environment.svgBaseValue());
+  return MaybeConvertSVGValue(
+      ToSVGInterpolationEnvironment(environment).SvgBaseValue());
 }
 
-void SVGInterpolationType::apply(
-    const InterpolableValue& interpolableValue,
-    const NonInterpolableValue* nonInterpolableValue,
+void SVGInterpolationType::Apply(
+    const InterpolableValue& interpolable_value,
+    const NonInterpolableValue* non_interpolable_value,
     InterpolationEnvironment& environment) const {
-  environment.svgElement().setWebAnimatedAttribute(
-      attribute(), appliedSVGValue(interpolableValue, nonInterpolableValue));
+  ToSVGInterpolationEnvironment(environment)
+      .SvgElement()
+      .SetWebAnimatedAttribute(
+          Attribute(),
+          AppliedSVGValue(interpolable_value, non_interpolable_value));
 }
 
 }  // namespace blink

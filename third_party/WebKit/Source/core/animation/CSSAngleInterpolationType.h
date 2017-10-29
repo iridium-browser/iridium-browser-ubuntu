@@ -11,18 +11,19 @@ namespace blink {
 
 class CSSAngleInterpolationType : public CSSInterpolationType {
  public:
-  CSSAngleInterpolationType(PropertyHandle property)
-      : CSSInterpolationType(property) {
-    DCHECK(property.isCSSCustomProperty());
+  CSSAngleInterpolationType(PropertyHandle property,
+                            const PropertyRegistration* registration = nullptr)
+      : CSSInterpolationType(property, registration) {
+    DCHECK(property.IsCSSCustomProperty());
   }
 
-  InterpolationValue maybeConvertNeutral(const InterpolationValue& underlying,
+  InterpolationValue MaybeConvertNeutral(const InterpolationValue& underlying,
                                          ConversionCheckers&) const final;
-  InterpolationValue maybeConvertValue(const CSSValue&,
+  InterpolationValue MaybeConvertValue(const CSSValue&,
                                        const StyleResolverState*,
                                        ConversionCheckers&) const final;
 
-  const CSSValue* createCSSValue(const InterpolableValue&,
+  const CSSValue* CreateCSSValue(const InterpolableValue&,
                                  const NonInterpolableValue*,
                                  const StyleResolverState&) const final;
 
@@ -31,22 +32,22 @@ class CSSAngleInterpolationType : public CSSInterpolationType {
   // properties.
   // CSSAngleInterpolationType is only accessible via registered custom CSS
   // properties.
-  InterpolationValue maybeConvertStandardPropertyUnderlyingValue(
+  InterpolationValue MaybeConvertStandardPropertyUnderlyingValue(
       const ComputedStyle&) const final {
     NOTREACHED();
     return nullptr;
   }
-  void applyStandardPropertyValue(const InterpolableValue&,
+  void ApplyStandardPropertyValue(const InterpolableValue&,
                                   const NonInterpolableValue*,
                                   StyleResolverState&) const final {
     NOTREACHED();
   }
-  InterpolationValue maybeConvertInitial(const StyleResolverState&,
+  InterpolationValue MaybeConvertInitial(const StyleResolverState&,
                                          ConversionCheckers&) const final {
     NOTREACHED();
     return nullptr;
   }
-  InterpolationValue maybeConvertInherit(const StyleResolverState&,
+  InterpolationValue MaybeConvertInherit(const StyleResolverState&,
                                          ConversionCheckers&) const final {
     NOTREACHED();
     return nullptr;

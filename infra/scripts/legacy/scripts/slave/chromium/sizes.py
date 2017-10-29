@@ -298,7 +298,12 @@ def check_linux_binary(target_dir, binary_name, options):
   has_init_array, init_array_size = get_elf_section_size(stdout, 'init_array')
   if has_init_array:
     si_count = init_array_size / word_size
-  si_count = max(si_count, 0)
+    # In newer versions of gcc crtbegin.o inserts frame_dummy into .init_array
+    # but we don't want to count this entry, since its alwasys present and not
+    # related to our code.
+    assert(si_count > 0)
+    si_count -= 1
+
   sizes.append((binary_name + '-si', 'initializers', '', si_count, 'files'))
 
   # For Release builds only, use dump-static-initializers.py to print the list

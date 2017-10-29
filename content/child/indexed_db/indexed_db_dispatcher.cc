@@ -20,7 +20,7 @@ using blink::WebIDBObservation;
 using base::ThreadLocalPointer;
 
 namespace content {
-static base::LazyInstance<ThreadLocalPointer<IndexedDBDispatcher> >::Leaky
+static base::LazyInstance<ThreadLocalPointer<IndexedDBDispatcher>>::Leaky
     g_idb_dispatcher_tls = LAZY_INSTANCE_INITIALIZER;
 
 namespace {
@@ -93,12 +93,12 @@ void IndexedDBDispatcher::UnregisterMojoOwnedDatabaseCallbacks(
 }
 
 void IndexedDBDispatcher::RegisterCursor(WebIDBCursorImpl* cursor) {
-  DCHECK(!base::ContainsValue(cursors_, cursor));
+  DCHECK(!base::ContainsKey(cursors_, cursor));
   cursors_.insert(cursor);
 }
 
 void IndexedDBDispatcher::UnregisterCursor(WebIDBCursorImpl* cursor) {
-  DCHECK(base::ContainsValue(cursors_, cursor));
+  DCHECK(base::ContainsKey(cursors_, cursor));
   cursors_.erase(cursor);
 }
 

@@ -14,6 +14,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -34,7 +36,6 @@
 #include "components/spellcheck/common/spellcheck_common.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/browser/translate_prefs.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -117,13 +118,14 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
   std::vector<std::string> languages;
   translate::TranslateDownloadManager::GetSupportedLanguages(&languages);
 
-  base::ListValue* languages_list = new base::ListValue();
+  auto languages_list = base::MakeUnique<base::ListValue>();
   for (std::vector<std::string>::iterator it = languages.begin();
        it != languages.end(); ++it) {
     languages_list->AppendString(*it);
   }
 
-  localized_strings->Set("translateSupportedLanguages", languages_list);
+  localized_strings->Set("translateSupportedLanguages",
+                         std::move(languages_list));
 }
 
 void LanguageOptionsHandlerCommon::Uninitialize() {
@@ -166,25 +168,26 @@ void LanguageOptionsHandlerCommon::OnHunspellDictionaryDownloadBegin(
     const std::string& language) {
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.LanguageOptions.onDictionaryDownloadBegin",
-      base::StringValue(language));
+      base::Value(language));
 }
 
 void LanguageOptionsHandlerCommon::OnHunspellDictionaryDownloadSuccess(
     const std::string& language) {
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.LanguageOptions.onDictionaryDownloadSuccess",
-      base::StringValue(language));
+      base::Value(language));
 }
 
 void LanguageOptionsHandlerCommon::OnHunspellDictionaryDownloadFailure(
     const std::string& language) {
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.LanguageOptions.onDictionaryDownloadFailure",
-      base::StringValue(language));
+      base::Value(language));
 }
 
-base::DictionaryValue* LanguageOptionsHandlerCommon::GetUILanguageCodeSet() {
-  base::DictionaryValue* dictionary = new base::DictionaryValue();
+std::unique_ptr<base::DictionaryValue>
+LanguageOptionsHandlerCommon::GetUILanguageCodeSet() {
+  auto dictionary = base::MakeUnique<base::DictionaryValue>();
   const std::vector<std::string>& available_locales =
       l10n_util::GetAvailableLocales();
   for (size_t i = 0; i < available_locales.size(); ++i)
@@ -192,9 +195,9 @@ base::DictionaryValue* LanguageOptionsHandlerCommon::GetUILanguageCodeSet() {
   return dictionary;
 }
 
-base::DictionaryValue*
+std::unique_ptr<base::DictionaryValue>
 LanguageOptionsHandlerCommon::GetSpellCheckLanguageCodeSet() {
-  base::DictionaryValue* dictionary = new base::DictionaryValue();
+  auto dictionary = base::MakeUnique<base::DictionaryValue>();
   std::vector<std::string> spell_check_languages;
   spellcheck::SpellCheckLanguages(&spell_check_languages);
   for (size_t i = 0; i < spell_check_languages.size(); ++i) {
@@ -205,7 +208,7 @@ LanguageOptionsHandlerCommon::GetSpellCheckLanguageCodeSet() {
 
 void LanguageOptionsHandlerCommon::LanguageOptionsOpenCallback(
     const base::ListValue* args) {
-  content::RecordAction(UserMetricsAction("LanguageOptions_Open"));
+  base::RecordAction(UserMetricsAction("LanguageOptions_Open"));
   SpellcheckService* service = GetSpellcheckService();
   if (!service)
     return;
@@ -230,9 +233,9 @@ void LanguageOptionsHandlerCommon::UiLanguageChangeCallback(
   CHECK(!language_code.empty());
   const std::string action = base::StringPrintf(
       "LanguageOptions_UiLanguageChange_%s", language_code.c_str());
-  content::RecordComputedAction(action);
+  base::RecordComputedAction(action);
   SetApplicationLocale(language_code);
-  base::StringValue language_value(language_code);
+  base::Value language_value(language_code);
   web_ui()->CallJavascriptFunctionUnsafe(
       "options.LanguageOptions.uiLanguageSaved", language_value);
 }
@@ -243,7 +246,7 @@ void LanguageOptionsHandlerCommon::SpellCheckLanguageChangeCallback(
       base::UTF16ToASCII(ExtractStringValue(args));
   const std::string action = base::StringPrintf(
       "LanguageOptions_SpellCheckLanguageChange_%s", language_code.c_str());
-  content::RecordComputedAction(action);
+  base::RecordComputedAction(action);
 
   SpellcheckService* service = GetSpellcheckService();
   if (!service)
@@ -266,7 +269,7 @@ void LanguageOptionsHandlerCommon::UpdateLanguageListCallback(
   for (base::ListValue::const_iterator it = language_list->begin();
        it != language_list->end(); ++it) {
     std::string lang;
-    (*it)->GetAsString(&lang);
+    it->GetAsString(&lang);
     languages.push_back(lang);
   }
 

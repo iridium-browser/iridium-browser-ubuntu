@@ -6,8 +6,11 @@
 
 namespace browser_watcher {
 
-// Additional stability instrumentation.
 const base::Feature kStabilityDebuggingFeature{
     "StabilityDebugging", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const char kInitFlushParam[] = "init_flush";
+
+const char kCollectPostmortemParam[] = "collect_postmortem";
 
 }  // namespace browser_watcher

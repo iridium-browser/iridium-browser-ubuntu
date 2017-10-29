@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/login_status.h"
-#include "ash/common/system/date/date_default_view.h"
-#include "ash/common/system/date/date_view.h"
-#include "ash/common/system/date/system_info_default_view.h"
-#include "ash/common/system/date/tray_system_info.h"
-#include "ash/common/system/tray/system_tray.h"
-#include "ash/common/wm_shell.h"
+#include "ash/login_status.h"
 #include "ash/shell.h"
+#include "ash/system/date/date_view.h"
+#include "ash/system/date/system_info_default_view.h"
+#include "ash/system/date/tray_system_info.h"
+#include "ash/system/tray/system_tray.h"
+#include "ash/system/tray/system_tray_test_api.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
@@ -53,7 +52,7 @@ class SystemUse24HourClockPolicyTest
     // If the login display is still showing, exit gracefully.
     if (LoginDisplayHost::default_host()) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&chrome::AttemptExit));
+          FROM_HERE, base::BindOnce(&chrome::AttemptExit));
       content::RunMessageLoop();
     }
   }
@@ -75,11 +74,13 @@ class SystemUse24HourClockPolicyTest
         ->ShouldUse24HourClock();
   }
 
+  static ash::TraySystemInfo* GetTraySystemInfo() {
+    return ash::SystemTrayTestApi(ash::Shell::Get()->GetPrimarySystemTray())
+        .tray_system_info();
+  }
+
   static base::HourClockType TestGetPrimarySystemTrayTimeHourType() {
-    const ash::TraySystemInfo* tray_system_info =
-        ash::Shell::GetInstance()
-            ->GetPrimarySystemTray()
-            ->GetTraySystemInfoForTesting();
+    const ash::TraySystemInfo* tray_system_info = GetTraySystemInfo();
     const ash::tray::TimeView* time_tray =
         tray_system_info->GetTimeTrayForTesting();
 
@@ -87,28 +88,20 @@ class SystemUse24HourClockPolicyTest
   }
 
   static bool TestPrimarySystemTrayHasDateDefaultView() {
-    const ash::TraySystemInfo* tray_system_info =
-        ash::Shell::GetInstance()
-            ->GetPrimarySystemTray()
-            ->GetTraySystemInfoForTesting();
+    const ash::TraySystemInfo* tray_system_info = GetTraySystemInfo();
     const ash::SystemInfoDefaultView* system_info_default_view =
         tray_system_info->GetDefaultViewForTesting();
     return system_info_default_view != nullptr;
   }
 
   static void TestPrimarySystemTrayCreateDefaultView() {
-    ash::TraySystemInfo* tray_system_info = ash::Shell::GetInstance()
-                                                ->GetPrimarySystemTray()
-                                                ->GetTraySystemInfoForTesting();
+    ash::TraySystemInfo* tray_system_info = GetTraySystemInfo();
     tray_system_info->CreateDefaultViewForTesting(
         ash::LoginStatus::NOT_LOGGED_IN);
   }
 
   static base::HourClockType TestGetPrimarySystemTrayDateHourType() {
-    const ash::TraySystemInfo* tray_system_info =
-        ash::Shell::GetInstance()
-            ->GetPrimarySystemTray()
-            ->GetTraySystemInfoForTesting();
+    const ash::TraySystemInfo* tray_system_info = GetTraySystemInfo();
     const ash::SystemInfoDefaultView* system_info_default_view =
         tray_system_info->GetDefaultViewForTesting();
 

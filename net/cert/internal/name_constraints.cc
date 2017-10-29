@@ -8,6 +8,7 @@
 
 #include <memory>
 
+#include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "net/cert/internal/verify_name_match.h"
 #include "net/der/input.h"
@@ -104,7 +105,7 @@ bool DNSNameMatches(base::StringPiece name,
 
 // Return true if the bitmask |mask| contains only zeros after the first
 // |prefix_length| bits.
-bool IsSuffixZero(const std::vector<uint8_t>& mask, unsigned prefix_length) {
+bool IsSuffixZero(const IPAddressBytes& mask, unsigned prefix_length) {
   size_t zero_bits = mask.size() * CHAR_BIT - prefix_length;
   size_t zero_bytes = zero_bits / CHAR_BIT;
   std::vector<uint8_t> zeros(zero_bytes, 0);

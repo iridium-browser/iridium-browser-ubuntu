@@ -9,9 +9,14 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/time/time.h"
+#include "base/memory/ptr_util.h"
+#include "cc/base/math_util.h"
+#include "chrome/browser/android/vr_shell/elbow_model.h"
+#include "third_party/WebKit/public/platform/WebGestureEvent.h"
+#include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr.h"
 #include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_controller.h"
+#include "ui/gfx/transform.h"
 
 namespace vr_shell {
 
@@ -40,62 +45,90 @@ constexpr float kNanoSecondsPerSecond = 1.0e9f;
 
 constexpr int kMaxNumOfExtrapolations = 2;
 
-class Vector {
- public:
-  static inline void ClampTouchpadPosition(gvr::Vec2f* position) {
-    position->x = std::min(std::max(0.0f, position->x), 1.0f);
-    position->y = std::min(std::max(0.0f, position->y), 1.0f);
-  }
+// Distance from the center of the controller to start rendering the laser.
+constexpr float kLaserStartDisplacement = 0.045;
 
-  static inline void SetZero(gvr::Vec2f* v) {
-    v->x = 0;
-    v->y = 0;
-  }
+void ClampTouchpadPosition(gfx::Vector2dF* position) {
+  position->set_x(cc::MathUtil::ClampToRange(position->x(), 0.0f, 1.0f));
+  position->set_y(cc::MathUtil::ClampToRange(position->y(), 0.0f, 1.0f));
+}
 
-  static inline gvr::Vec2f Subtract(gvr::Vec2f v1, gvr::Vec2f v2) {
-    gvr::Vec2f result;
-    result.x = v1.x - v2.x;
-    result.y = v1.y - v2.y;
-    return result;
-  }
-
-  static inline gvr::Vec2f Add(gvr::Vec2f v1, gvr::Vec2f v2) {
-    gvr::Vec2f result;
-    result.x = v1.x + v2.x;
-    result.y = v1.y + v2.y;
-    return result;
-  }
-
-  static inline bool Equal(const gvr::Vec2f v1, const gvr::Vec2f v2) {
-    return (std::abs(v1.x - v2.x) < kDelta) && (std::abs(v1.y - v2.y) < kDelta);
-  }
-
-  static inline gvr::Vec2f ScalarMult(gvr::Vec2f v, float scalar) {
-    gvr::Vec2f vect_prod;
-    vect_prod.x = v.x * scalar;
-    vect_prod.y = v.y * scalar;
-    return vect_prod;
-  }
-
-};  // Vector
+float DeltaTimeSeconds(int64_t last_timestamp_nanos) {
+  return (gvr::GvrApi::GetTimePointNow().monotonic_system_time_nanos -
+          last_timestamp_nanos) /
+         kNanoSecondsPerSecond;
+}
 
 }  // namespace
 
-VrController::VrController(gvr_context* vr_context) {
-  Initialize(vr_context);
+VrController::VrController(gvr_context* gvr_context) {
+  DVLOG(1) << __FUNCTION__ << "=" << this;
+  CHECK(gvr_context != nullptr) << "invalid gvr_context";
+  controller_api_ = base::MakeUnique<gvr::ControllerApi>();
+  controller_state_ = base::MakeUnique<gvr::ControllerState>();
+  gvr_api_ = gvr::GvrApi::WrapNonOwned(gvr_context);
+
+  int32_t options = gvr::ControllerApi::DefaultOptions();
+
+  // Enable non-default options - WebVR needs gyro and linear acceleration, and
+  // since VrShell implements GvrGamepadDataProvider we need this always.
+  options |= GVR_CONTROLLER_ENABLE_GYRO;
+  options |= GVR_CONTROLLER_ENABLE_ACCEL;
+
+  CHECK(controller_api_->Init(options, gvr_context));
+  controller_api_->Resume();
+
+  handedness_ = gvr_api_->GetUserPrefs().GetControllerHandedness();
+  elbow_model_ = base::MakeUnique<ElbowModel>(handedness_);
+
   Reset();
+  last_timestamp_nanos_ =
+      gvr::GvrApi::GetTimePointNow().monotonic_system_time_nanos;
 }
 
-VrController::~VrController() {}
+VrController::~VrController() {
+  DVLOG(1) << __FUNCTION__ << "=" << this;
+}
 
 void VrController::OnResume() {
-  if (controller_api_)
+  if (controller_api_) {
     controller_api_->Resume();
+    handedness_ = gvr_api_->GetUserPrefs().GetControllerHandedness();
+    elbow_model_->SetHandedness(handedness_);
+  }
 }
 
 void VrController::OnPause() {
   if (controller_api_)
     controller_api_->Pause();
+}
+
+device::GvrGamepadData VrController::GetGamepadData() {
+  device::GvrGamepadData pad = {};
+  pad.connected = IsConnected();
+  pad.timestamp = controller_state_->GetLastOrientationTimestamp();
+
+  if (pad.connected) {
+    pad.touch_pos.set_x(TouchPosX());
+    pad.touch_pos.set_y(TouchPosY());
+    pad.orientation = Orientation();
+
+    // Use orientation to rotate acceleration/gyro into seated space.
+    gfx::Transform pose_mat(Orientation());
+    const gvr::Vec3f& accel = controller_state_->GetAccel();
+    const gvr::Vec3f& gyro = controller_state_->GetGyro();
+    pad.accel = gfx::Vector3dF(accel.x, accel.y, accel.z);
+    pose_mat.TransformVector(&pad.accel);
+    pad.gyro = gfx::Vector3dF(gyro.x, gyro.y, gyro.z);
+    pose_mat.TransformVector(&pad.gyro);
+
+    pad.is_touching = controller_state_->IsTouching();
+    pad.controller_button_pressed =
+        controller_state_->GetButtonState(GVR_CONTROLLER_BUTTON_CLICK);
+    pad.right_handed = handedness_ == GVR_CONTROLLER_RIGHT_HANDED;
+  }
+
+  return pad;
 }
 
 bool VrController::IsTouching() {
@@ -110,8 +143,61 @@ float VrController::TouchPosY() {
   return controller_state_->GetTouchPos().y;
 }
 
-const gvr::Quatf VrController::Orientation() {
-  return controller_state_->GetOrientation();
+base::TimeTicks VrController::GetLastOrientationTimestamp() const {
+  // controller_state_->GetLast*Timestamp() returns timestamps in a
+  // different timebase from base::TimeTicks::Now(), so we can't use the
+  // timestamps in any meaningful way in the rest of Chrome.
+  // TODO(mthiesse): Use controller_state_->GetLastOrientationTimestamp() when
+  // b/62818778 is resolved.
+  return base::TimeTicks::Now();
+}
+
+base::TimeTicks VrController::GetLastTouchTimestamp() const {
+  // TODO(mthiesse): Use controller_state_->GetLastTouchTimestamp() when
+  // b/62818778 is resolved.
+  return base::TimeTicks::Now();
+}
+
+base::TimeTicks VrController::GetLastButtonTimestamp() const {
+  // TODO(mthiesse): Use controller_state_->GetLastButtonTimestamp() when
+  // b/62818778 is resolved.
+  return base::TimeTicks::Now();
+}
+
+gfx::Quaternion VrController::Orientation() const {
+  const gvr::Quatf& orientation = controller_state_->GetOrientation();
+  return gfx::Quaternion(orientation.qx, orientation.qy, orientation.qz,
+                         orientation.qw);
+}
+
+void VrController::GetTransform(gfx::Transform* out) const {
+  *out = gfx::Transform(elbow_model_->GetControllerRotation());
+  gfx::Point3F p = elbow_model_->GetControllerPosition();
+  out->matrix().postTranslate(p.x(), p.y(), p.z());
+}
+
+float VrController::GetOpacity() const {
+  return elbow_model_->GetAlphaValue();
+}
+
+gfx::Point3F VrController::GetPointerStart() const {
+  gfx::Point3F controller_position = elbow_model_->GetControllerPosition();
+  gfx::Vector3dF pointer_direction{0.0f, -sin(kErgoAngleOffset),
+                                   -cos(kErgoAngleOffset)};
+  gfx::Transform rotation_mat(Orientation());
+  rotation_mat.TransformVector(&pointer_direction);
+  return controller_position +
+         gfx::ScaleVector3d(pointer_direction, kLaserStartDisplacement);
+}
+
+vr::VrControllerModel::State VrController::GetModelState() const {
+  if (ButtonState(gvr::ControllerButton::GVR_CONTROLLER_BUTTON_CLICK))
+    return vr::VrControllerModel::TOUCHPAD;
+  if (ButtonState(gvr::ControllerButton::GVR_CONTROLLER_BUTTON_APP))
+    return vr::VrControllerModel::APP;
+  if (ButtonState(gvr::ControllerButton::GVR_CONTROLLER_BUTTON_HOME))
+    return vr::VrControllerModel::SYSTEM;
+  return vr::VrControllerModel::IDLE;
 }
 
 bool VrController::TouchDownHappened() {
@@ -130,11 +216,15 @@ bool VrController::ButtonUpHappened(gvr::ControllerButton button) {
   return controller_state_->GetButtonUp(button);
 }
 
+bool VrController::ButtonState(gvr::ControllerButton button) const {
+  return controller_state_->GetButtonState(button);
+}
+
 bool VrController::IsConnected() {
   return controller_state_->GetConnectionState() == gvr::kControllerConnected;
 }
 
-void VrController::UpdateState() {
+void VrController::UpdateState(const gfx::Vector3dF& head_direction) {
   const int32_t old_status = controller_state_->GetApiStatus();
   const int32_t old_connection_state = controller_state_->GetConnectionState();
   // Read current controller state.
@@ -146,29 +236,31 @@ void VrController::UpdateState() {
             << gvr_controller_connection_state_to_string(
                    controller_state_->GetConnectionState());
   }
+
+  const gvr::Vec3f& gvr_gyro = controller_state_->GetGyro();
+  elbow_model_->Update({IsConnected(), Orientation(),
+                        gfx::Vector3dF(gvr_gyro.x, gvr_gyro.y, gvr_gyro.z),
+                        head_direction,
+                        DeltaTimeSeconds(last_timestamp_nanos_)});
 }
 
 void VrController::UpdateTouchInfo() {
   CHECK(touch_info_ != nullptr) << "touch_info_ not initialized properly.";
   if (IsTouching() && state_ == SCROLLING &&
       (controller_state_->GetLastTouchTimestamp() == last_touch_timestamp_ ||
-       (Vector::Equal(cur_touch_point_->position,
-                      prev_touch_point_->position) &&
+       (cur_touch_point_->position == prev_touch_point_->position &&
         extrapolated_touch_ < kMaxNumOfExtrapolations))) {
     extrapolated_touch_++;
     touch_position_changed_ = true;
-    // Fill the touch_info
-    float duration =
-        (gvr::GvrApi::GetTimePointNow().monotonic_system_time_nanos -
-         last_timestamp_nanos_) /
-        kNanoSecondsPerSecond;
-    touch_info_->touch_point.position.x =
-        cur_touch_point_->position.x + overall_velocity_.x * duration;
-    touch_info_->touch_point.position.y =
-        cur_touch_point_->position.y + overall_velocity_.y * duration;
+    // vr::Fill the touch_info
+    float duration = DeltaTimeSeconds(last_timestamp_nanos_);
+    touch_info_->touch_point.position.set_x(cur_touch_point_->position.x() +
+                                            overall_velocity_.x() * duration);
+    touch_info_->touch_point.position.set_y(cur_touch_point_->position.y() +
+                                            overall_velocity_.y() * duration);
   } else {
     if (extrapolated_touch_ == kMaxNumOfExtrapolations) {
-      Vector::SetZero(&overall_velocity_);
+      overall_velocity_ = {0, 0};
     }
     extrapolated_touch_ = 0;
   }
@@ -177,24 +269,12 @@ void VrController::UpdateTouchInfo() {
       gvr::GvrApi::GetTimePointNow().monotonic_system_time_nanos;
 }
 
-void VrController::Initialize(gvr_context* gvr_context) {
-  CHECK(gvr_context != nullptr) << "invalid gvr_context";
-  controller_api_.reset(new gvr::ControllerApi);
-  controller_state_.reset(new gvr::ControllerState);
-  int32_t options = gvr::ControllerApi::DefaultOptions();
-
-  // Enable non-default options, if you need them:
-  // options |= GVR_CONTROLLER_ENABLE_GYRO;
-  CHECK(controller_api_->Init(options, gvr_context));
-  controller_api_->Resume();
-}
-
-std::vector<std::unique_ptr<WebGestureEvent>> VrController::DetectGestures() {
-  std::vector<std::unique_ptr<WebGestureEvent>> gesture_list;
-  std::unique_ptr<WebGestureEvent> gesture(new WebGestureEvent());
+std::unique_ptr<GestureList> VrController::DetectGestures() {
+  std::unique_ptr<GestureList> gesture_list = base::MakeUnique<GestureList>();
+  std::unique_ptr<blink::WebGestureEvent> gesture(new blink::WebGestureEvent());
 
   if (controller_state_->GetConnectionState() != gvr::kControllerConnected) {
-    gesture_list.push_back(std::move(gesture));
+    gesture_list->push_back(std::move(gesture));
     return gesture_list;
   }
 
@@ -204,31 +284,26 @@ std::vector<std::unique_ptr<WebGestureEvent>> VrController::DetectGestures() {
     UpdateOverallVelocity();
 
   UpdateGestureFromTouchInfo(gesture.get());
+  gesture->source_device = blink::kWebGestureDeviceTouchpad;
+  gesture_list->push_back(std::move(gesture));
 
-  if (gesture->type() == WebInputEvent::Undefined &&
-      ButtonUpHappened(gvr::kControllerButtonClick)) {
-    gesture->setType(WebInputEvent::GestureTapDown);
-    gesture->x = 0;
-    gesture->y = 0;
-  }
-  gesture->sourceDevice = blink::WebGestureDeviceTouchpad;
-  gesture_list.push_back(std::move(gesture));
-
-  if (gesture_list.back()->type() == WebInputEvent::GestureScrollEnd) {
+  if (gesture_list->back()->GetType() ==
+      blink::WebInputEvent::kGestureScrollEnd) {
     if (!ButtonDownHappened(gvr::kControllerButtonClick) &&
-        (last_velocity_.x != 0.0 || last_velocity_.y != 0.0)) {
-      std::unique_ptr<WebGestureEvent> fling(new WebGestureEvent(
-          WebInputEvent::GestureFlingStart, WebInputEvent::NoModifiers,
-          gesture_list.back()->timeStampSeconds()));
-      fling->sourceDevice = blink::WebGestureDeviceTouchpad;
+        (last_velocity_.x() != 0.0 || last_velocity_.y() != 0.0)) {
+      std::unique_ptr<blink::WebGestureEvent> fling(
+          new blink::WebGestureEvent(blink::WebInputEvent::kGestureFlingStart,
+                                     blink::WebInputEvent::kNoModifiers,
+                                     gesture_list->back()->TimeStampSeconds()));
+      fling->source_device = blink::kWebGestureDeviceTouchpad;
       if (IsHorizontalGesture()) {
-        fling->data.flingStart.velocityX =
-            last_velocity_.x * kDisplacementScaleFactor;
+        fling->data.fling_start.velocity_x =
+            last_velocity_.x() * kDisplacementScaleFactor;
       } else {
-        fling->data.flingStart.velocityY =
-            last_velocity_.y * kDisplacementScaleFactor;
+        fling->data.fling_start.velocity_y =
+            last_velocity_.y() * kDisplacementScaleFactor;
       }
-      gesture_list.push_back(std::move(fling));
+      gesture_list->push_back(std::move(fling));
     }
     Reset();
   }
@@ -236,9 +311,9 @@ std::vector<std::unique_ptr<WebGestureEvent>> VrController::DetectGestures() {
   return gesture_list;
 }
 
-void VrController::UpdateGestureFromTouchInfo(WebGestureEvent* gesture) {
-  gesture->setTimeStampSeconds(
-      (base::TimeTicks::Now() - base::TimeTicks()).InSecondsF());
+void VrController::UpdateGestureFromTouchInfo(blink::WebGestureEvent* gesture) {
+  gesture->SetTimeStampSeconds(
+      (GetLastTouchTimestamp() - base::TimeTicks()).InSecondsF());
   switch (state_) {
     // User has not put finger on touch pad.
     case WAITING:
@@ -258,7 +333,7 @@ void VrController::UpdateGestureFromTouchInfo(WebGestureEvent* gesture) {
   }
 }
 
-void VrController::HandleWaitingState(WebGestureEvent* gesture) {
+void VrController::HandleWaitingState(blink::WebGestureEvent* gesture) {
   // User puts finger on touch pad (or when the touch down for current gesture
   // is missed, initiate gesture from current touch point).
   if (touch_info_->touch_down || touch_info_->is_touching) {
@@ -268,12 +343,12 @@ void VrController::HandleWaitingState(WebGestureEvent* gesture) {
     *cur_touch_point_ = touch_info_->touch_point;
     state_ = TOUCHING;
 
-    gesture->setType(WebInputEvent::GestureFlingCancel);
-    gesture->data.flingCancel.preventBoosting = false;
+    gesture->SetType(blink::WebInputEvent::kGestureFlingCancel);
+    gesture->data.fling_cancel.prevent_boosting = false;
   }
 }
 
-void VrController::HandleDetectingState(WebGestureEvent* gesture) {
+void VrController::HandleDetectingState(blink::WebGestureEvent* gesture) {
   // User lifts up finger from touch pad.
   if (touch_info_->touch_up || !(touch_info_->is_touching)) {
     Reset();
@@ -284,48 +359,48 @@ void VrController::HandleDetectingState(WebGestureEvent* gesture) {
   // and the Controller's button is not down.
   if (touch_position_changed_ && touch_info_->is_touching &&
       !InSlop(touch_info_->touch_point.position) &&
-      !ButtonDownHappened(gvr::kControllerButtonClick)) {
+      !ButtonState(gvr::kControllerButtonClick)) {
     state_ = SCROLLING;
-    gesture->setType(WebInputEvent::GestureScrollBegin);
+    gesture->SetType(blink::WebInputEvent::kGestureScrollBegin);
     UpdateGestureParameters();
-    gesture->data.scrollBegin.deltaXHint =
-        displacement_.x * kDisplacementScaleFactor;
-    gesture->data.scrollBegin.deltaYHint =
-        displacement_.y * kDisplacementScaleFactor;
-    gesture->data.scrollBegin.deltaHintUnits =
-        blink::WebGestureEvent::ScrollUnits::PrecisePixels;
+    gesture->data.scroll_begin.delta_x_hint =
+        displacement_.x() * kDisplacementScaleFactor;
+    gesture->data.scroll_begin.delta_y_hint =
+        displacement_.y() * kDisplacementScaleFactor;
+    gesture->data.scroll_begin.delta_hint_units =
+        blink::WebGestureEvent::ScrollUnits::kPrecisePixels;
   }
 }
 
-void VrController::HandleScrollingState(WebGestureEvent* gesture) {
+void VrController::HandleScrollingState(blink::WebGestureEvent* gesture) {
   if (touch_info_->touch_up || !(touch_info_->is_touching) ||
       ButtonDownHappened(gvr::kControllerButtonClick)) {
     // Gesture ends.
-    gesture->setType(WebInputEvent::GestureScrollEnd);
+    gesture->SetType(blink::WebInputEvent::kGestureScrollEnd);
     UpdateGestureParameters();
   } else if (touch_position_changed_) {
     // User continues scrolling and there is a change in touch position.
-    gesture->setType(WebInputEvent::GestureScrollUpdate);
+    gesture->SetType(blink::WebInputEvent::kGestureScrollUpdate);
     UpdateGestureParameters();
     if (IsHorizontalGesture()) {
-      gesture->data.scrollUpdate.deltaX =
-          displacement_.x * kDisplacementScaleFactor;
+      gesture->data.scroll_update.delta_x =
+          displacement_.x() * kDisplacementScaleFactor;
     } else {
-      gesture->data.scrollUpdate.deltaY =
-          displacement_.y * kDisplacementScaleFactor;
+      gesture->data.scroll_update.delta_y =
+          displacement_.y() * kDisplacementScaleFactor;
     }
     last_velocity_ = overall_velocity_;
   }
 }
 
 bool VrController::IsHorizontalGesture() {
-  return std::abs(last_velocity_.x) > std::abs(last_velocity_.y);
+  return std::abs(last_velocity_.x()) > std::abs(last_velocity_.y());
 }
 
-bool VrController::InSlop(const gvr::Vec2f touch_position) {
-  return (std::abs(touch_position.x - init_touch_point_->position.x) <
+bool VrController::InSlop(const gfx::Vector2dF touch_position) {
+  return (std::abs(touch_position.x() - init_touch_point_->position.x()) <
           kSlopHorizontal) &&
-         (std::abs(touch_position.y - init_touch_point_->position.y) <
+         (std::abs(touch_position.y() - init_touch_point_->position.y()) <
           kSlopVertical);
 }
 
@@ -338,29 +413,28 @@ void VrController::Reset() {
   cur_touch_point_.reset(new TouchPoint);
   init_touch_point_.reset(new TouchPoint);
   touch_info_.reset(new TouchInfo);
-  Vector::SetZero(&overall_velocity_);
-  Vector::SetZero(&last_velocity_);
+  overall_velocity_ = {0, 0};
+  last_velocity_ = {0, 0};
 }
 
 void VrController::UpdateGestureParameters() {
-  displacement_ = Vector::Subtract(touch_info_->touch_point.position,
-                                   prev_touch_point_->position);
+  displacement_ =
+      touch_info_->touch_point.position - prev_touch_point_->position;
 }
 
 bool VrController::UpdateCurrentTouchpoint() {
   touch_info_->touch_up = TouchUpHappened();
   touch_info_->touch_down = TouchDownHappened();
   touch_info_->is_touching = IsTouching();
-  touch_info_->touch_point.position.x = TouchPosX();
-  touch_info_->touch_point.position.y = TouchPosY();
-  Vector::ClampTouchpadPosition(&touch_info_->touch_point.position);
+  touch_info_->touch_point.position.set_x(TouchPosX());
+  touch_info_->touch_point.position.set_y(TouchPosY());
+  ClampTouchpadPosition(&touch_info_->touch_point.position);
   touch_info_->touch_point.timestamp =
       gvr::GvrApi::GetTimePointNow().monotonic_system_time_nanos;
 
   if (IsTouching() || TouchUpHappened()) {
     // Update the touch point when the touch position has changed.
-    if (!Vector::Equal(cur_touch_point_->position,
-                       touch_info_->touch_point.position)) {
+    if (cur_touch_point_->position != touch_info_->touch_point.position) {
       prev_touch_point_.swap(cur_touch_point_);
       cur_touch_point_.reset(new TouchPoint);
       cur_touch_point_->position = touch_info_->touch_point.position;
@@ -380,16 +454,15 @@ void VrController::UpdateOverallVelocity() {
   if (duration < kDelta)
     return;
 
-  gvr::Vec2f displacement = Vector::Subtract(touch_info_->touch_point.position,
-                                             prev_touch_point_->position);
+  const gfx::Vector2dF& displacement =
+      touch_info_->touch_point.position - prev_touch_point_->position;
 
-  gvr::Vec2f velocity = Vector::ScalarMult(displacement, 1 / duration);
+  const gfx::Vector2dF& velocity = ScaleVector2d(displacement, (1 / duration));
 
   float weight = duration / (kRC + duration);
 
-  overall_velocity_ =
-      Vector::Add(Vector::ScalarMult(overall_velocity_, 1 - weight),
-                  Vector::ScalarMult(velocity, weight));
+  overall_velocity_ = ScaleVector2d(overall_velocity_, (1 - weight)) +
+                      ScaleVector2d(velocity, weight);
 }
 
 }  // namespace vr_shell

@@ -12,11 +12,12 @@
 #include "fpdfsdk/formfiller/cffl_formfiller.h"
 #include "fpdfsdk/formfiller/cffl_interactiveformfiller.h"
 #include "fpdfsdk/fsdk_common.h"
-#include "fpdfsdk/pdfwindow/PWL_ComboBox.h"
+#include "fpdfsdk/pdfwindow/cpwl_combo_box.h"
+#include "third_party/base/ptr_util.h"
 
 CFFL_ComboBox::CFFL_ComboBox(CPDFSDK_FormFillEnvironment* pApp,
-                             CPDFSDK_Annot* pAnnot)
-    : CFFL_FormFiller(pApp, pAnnot), m_pFontMap(nullptr) {
+                             CPDFSDK_Widget* pWidget)
+    : CFFL_FormFiller(pApp, pWidget) {
   m_State.nIndex = 0;
   m_State.nStart = 0;
   m_State.nEnd = 0;
@@ -30,27 +31,23 @@ CFFL_ComboBox::~CFFL_ComboBox() {
   // The font map should be stored somewhere more appropriate so it will live
   // until the PWL_Edit is done with it. pdfium:566
   DestroyWindows();
-  delete m_pFontMap;
 }
 
 PWL_CREATEPARAM CFFL_ComboBox::GetCreateParam() {
   PWL_CREATEPARAM cp = CFFL_FormFiller::GetCreateParam();
-
-  int nFlags = m_pWidget->GetFieldFlags();
-  if (nFlags & FIELDFLAG_EDIT) {
+  if (m_pWidget->GetFieldFlags() & FIELDFLAG_EDIT)
     cp.dwFlags |= PCBS_ALLOWCUSTOMTEXT;
+
+  if (!m_pFontMap) {
+    m_pFontMap =
+        pdfium::MakeUnique<CBA_FontMap>(m_pWidget.Get(), GetSystemHandler());
   }
-
-  if (!m_pFontMap)
-    m_pFontMap = new CBA_FontMap(m_pWidget, GetSystemHandler());
-  cp.pFontMap = m_pFontMap;
+  cp.pFontMap = m_pFontMap.get();
   cp.pFocusHandler = this;
-
   return cp;
 }
 
-CPWL_Wnd* CFFL_ComboBox::NewPDFWindow(const PWL_CREATEPARAM& cp,
-                                      CPDFSDK_PageView* pPageView) {
+CPWL_Wnd* CFFL_ComboBox::NewPDFWindow(const PWL_CREATEPARAM& cp) {
   CPWL_ComboBox* pWnd = new CPWL_ComboBox();
   pWnd->AttachFFLData(this);
   pWnd->Create(cp);
@@ -234,19 +231,12 @@ CPWL_Wnd* CFFL_ComboBox::ResetPDFWindow(CPDFSDK_PageView* pPageView,
     SaveState(pPageView);
 
   DestroyPDFWindow(pPageView);
-
-  CPWL_Wnd* pRet = nullptr;
-
-  if (bRestoreValue) {
+  if (bRestoreValue)
     RestoreState(pPageView);
-    pRet = GetPDFWindow(pPageView, false);
-  } else {
-    pRet = GetPDFWindow(pPageView, true);
-  }
 
-  m_pWidget->UpdateField();
-
-  return pRet;
+  CPWL_Wnd::ObservedPtr pRet(GetPDFWindow(pPageView, !bRestoreValue));
+  m_pWidget->UpdateField();  // May invoke JS, invalidating pRet.
+  return pRet.Get();
 }
 
 #ifdef PDF_ENABLE_XFA
@@ -260,21 +250,15 @@ bool CFFL_ComboBox::IsFieldFull(CPDFSDK_PageView* pPageView) {
 }
 #endif  // PDF_ENABLE_XFA
 
-void CFFL_ComboBox::OnSetFocus(CPWL_Wnd* pWnd) {
-  ASSERT(m_pFormFillEnv);
+void CFFL_ComboBox::OnSetFocus(CPWL_Edit* pEdit) {
+  pEdit->SetCharSet(FX_CHARSET_ChineseSimplified);
+  pEdit->SetReadyToInput();
 
-  if (pWnd->GetClassName() == PWL_CLASSNAME_EDIT) {
-    CPWL_Edit* pEdit = (CPWL_Edit*)pWnd;
-    pEdit->SetCharSet(FXFONT_GB2312_CHARSET);
-    pEdit->SetCodePage(936);
-
-    pEdit->SetReadyToInput();
-    CFX_WideString wsText = pEdit->GetText();
-    int nCharacters = wsText.GetLength();
-    CFX_ByteString bsUTFText = wsText.UTF16LE_Encode();
-    unsigned short* pBuffer = (unsigned short*)bsUTFText.c_str();
-    m_pFormFillEnv->OnSetFieldInputFocus(pBuffer, nCharacters, true);
-  }
+  CFX_WideString wsText = pEdit->GetText();
+  int nCharacters = wsText.GetLength();
+  CFX_ByteString bsUTFText = wsText.UTF16LE_Encode();
+  auto* pBuffer = reinterpret_cast<const unsigned short*>(bsUTFText.c_str());
+  m_pFormFillEnv->OnSetFieldInputFocus(pBuffer, nCharacters, true);
 }
 
 CFX_WideString CFFL_ComboBox::GetSelectExportText() {

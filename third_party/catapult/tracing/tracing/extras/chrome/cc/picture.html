@@ -6,21 +6,22 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/base/guid.html">
+<link rel="import" href="/tracing/base/math/rect.html">
 <link rel="import" href="/tracing/base/raf.html">
-<link rel="import" href="/tracing/base/rect.html">
 <link rel="import" href="/tracing/extras/chrome/cc/picture_as_image_data.html">
 <link rel="import" href="/tracing/extras/chrome/cc/util.html">
 <link rel="import" href="/tracing/model/object_instance.html">
 
 <script>
 'use strict';
+/* eslint-disable no-console */
 
 tr.exportTo('tr.e.cc', function() {
-  var ObjectSnapshot = tr.model.ObjectSnapshot;
+  const ObjectSnapshot = tr.model.ObjectSnapshot;
 
   // Number of pictures created. Used as an uniqueId because we are immutable.
-  var PictureCount = 0;
-  var OPS_TIMING_ITERATIONS = 3;
+  const PictureCount = 0;
+  const OPS_TIMING_ITERATIONS = 3;
 
   function Picture(skp64, layerRect) {
     this.skp64_ = skp64;
@@ -42,44 +43,46 @@ tr.exportTo('tr.e.cc', function() {
       return this.guid_;
     },
 
-    getBase64SkpData: function() {
+    getBase64SkpData() {
       return this.skp64_;
     },
 
-    getOps: function() {
+    getOps() {
       if (!PictureSnapshot.CanGetOps()) {
         console.error(PictureSnapshot.HowToEnablePictureDebugging());
         return undefined;
       }
 
-      var ops = window.chrome.skiaBenchmarking.getOps({
+      const ops = window.chrome.skiaBenchmarking.getOps({
         skp64: this.skp64_,
         params: {
           layer_rect: this.layerRect_.toArray()
         }
       });
 
-      if (!ops)
+      if (!ops) {
         console.error('Failed to get picture ops.');
+      }
 
       return ops;
     },
 
-    getOpTimings: function() {
+    getOpTimings() {
       if (!PictureSnapshot.CanGetOpTimings()) {
         console.error(PictureSnapshot.HowToEnablePictureDebugging());
         return undefined;
       }
 
-      var opTimings = window.chrome.skiaBenchmarking.getOpTimings({
+      const opTimings = window.chrome.skiaBenchmarking.getOpTimings({
         skp64: this.skp64_,
         params: {
           layer_rect: this.layerRect_.toArray()
         }
       });
 
-      if (!opTimings)
+      if (!opTimings) {
         console.error('Failed to get picture op timings.');
+      }
 
       return opTimings;
     },
@@ -94,20 +97,23 @@ tr.exportTo('tr.e.cc', function() {
      * @return {Array} Skia ops where op.cmd_time contains the associated time
      *         for a given op.
      */
-    tagOpsWithTimings: function(ops) {
-      var opTimings = [];
-      for (var iteration = 0; iteration < OPS_TIMING_ITERATIONS; iteration++) {
+    tagOpsWithTimings(ops) {
+      const opTimings = [];
+      for (let iteration = 0; iteration < OPS_TIMING_ITERATIONS; iteration++) {
         opTimings[iteration] = this.getOpTimings();
-        if (!opTimings[iteration] || !opTimings[iteration].cmd_times)
+        if (!opTimings[iteration] || !opTimings[iteration].cmd_times) {
           return ops;
-        if (opTimings[iteration].cmd_times.length !== ops.length)
+        }
+        if (opTimings[iteration].cmd_times.length !== ops.length) {
           return ops;
+        }
       }
 
-      for (var opIndex = 0; opIndex < ops.length; opIndex++) {
-        var min = Number.MAX_VALUE;
-        for (var i = 0; i < OPS_TIMING_ITERATIONS; i++)
+      for (let opIndex = 0; opIndex < ops.length; opIndex++) {
+        let min = Number.MAX_VALUE;
+        for (let i = 0; i < OPS_TIMING_ITERATIONS; i++) {
           min = Math.min(min, opTimings[i].cmd_times[opIndex]);
+        }
         ops[opIndex].cmd_time = min;
       }
 
@@ -124,14 +130,14 @@ tr.exportTo('tr.e.cc', function() {
      * @param {function(tr.e.cc.PictureAsImageData)} The callback function that
      *     is called after rasterization is complete or fails.
      */
-    rasterize: function(params, rasterCompleteCallback) {
+    rasterize(params, rasterCompleteCallback) {
       if (!PictureSnapshot.CanRasterize() || !PictureSnapshot.CanGetOps()) {
         rasterCompleteCallback(new tr.e.cc.PictureAsImageData(
             this, tr.e.cc.PictureSnapshot.HowToEnablePictureDebugging()));
         return;
       }
 
-      var raster = window.chrome.skiaBenchmarking.rasterize(
+      const raster = window.chrome.skiaBenchmarking.rasterize(
           {
             skp64: this.skp64_,
             params: {
@@ -145,15 +151,15 @@ tr.exportTo('tr.e.cc', function() {
           });
 
       if (raster) {
-        var canvas = document.createElement('canvas');
-        var ctx = canvas.getContext('2d');
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
         canvas.width = raster.width;
         canvas.height = raster.height;
-        var imageData = ctx.createImageData(raster.width, raster.height);
+        const imageData = ctx.createImageData(raster.width, raster.height);
         imageData.data.set(new Uint8ClampedArray(raster.data));
         rasterCompleteCallback(new tr.e.cc.PictureAsImageData(this, imageData));
       } else {
-        var error = 'Failed to rasterize picture. ' +
+        const error = 'Failed to rasterize picture. ' +
                 'Your recording may be from an old Chrome version. ' +
                 'The SkPicture format is not backward compatible.';
         rasterCompleteCallback(new tr.e.cc.PictureAsImageData(this, error));
@@ -179,8 +185,9 @@ tr.exportTo('tr.e.cc', function() {
     },
 
     get layerRect() {
-      if (this.layerRect_ !== undefined)
+      if (this.layerRect_ !== undefined) {
         return this.layerRect_;
+      }
 
       this.layerRect_ = {
         x: 0,
@@ -189,8 +196,8 @@ tr.exportTo('tr.e.cc', function() {
         height: 0
       };
 
-      for (var i = 0; i < this.pictures_.length; ++i) {
-        var rect = this.pictures_[i].layerRect;
+      for (let i = 0; i < this.pictures_.length; ++i) {
+        const rect = this.pictures_[i].layerRect;
         this.layerRect_.x = Math.min(this.layerRect_.x, rect.x);
         this.layerRect_.y = Math.min(this.layerRect_.y, rect.y);
         this.layerRect_.width =
@@ -205,60 +212,64 @@ tr.exportTo('tr.e.cc', function() {
       return this.guid_;
     },
 
-    getBase64SkpData: function() {
+    getBase64SkpData() {
       throw new Error('Not available with a LayeredPicture.');
     },
 
-    getOps: function() {
-      var ops = [];
-      for (var i = 0; i < this.pictures_.length; ++i)
+    getOps() {
+      let ops = [];
+      for (let i = 0; i < this.pictures_.length; ++i) {
         ops = ops.concat(this.pictures_[i].getOps());
+      }
       return ops;
     },
 
-    getOpTimings: function() {
-      var opTimings = this.pictures_[0].getOpTimings();
-      for (var i = 1; i < this.pictures_.length; ++i) {
-        var timings = this.pictures_[i].getOpTimings();
+    getOpTimings() {
+      const opTimings = this.pictures_[0].getOpTimings();
+      for (let i = 1; i < this.pictures_.length; ++i) {
+        const timings = this.pictures_[i].getOpTimings();
         opTimings.cmd_times = opTimings.cmd_times.concat(timings.cmd_times);
         opTimings.total_time += timings.total_time;
       }
       return opTimings;
     },
 
-    tagOpsWithTimings: function(ops) {
-      var opTimings = [];
-      for (var iteration = 0; iteration < OPS_TIMING_ITERATIONS; iteration++) {
+    tagOpsWithTimings(ops) {
+      const opTimings = [];
+      for (let iteration = 0; iteration < OPS_TIMING_ITERATIONS; iteration++) {
         opTimings[iteration] = this.getOpTimings();
-        if (!opTimings[iteration] || !opTimings[iteration].cmd_times)
+        if (!opTimings[iteration] || !opTimings[iteration].cmd_times) {
           return ops;
+        }
       }
 
-      for (var opIndex = 0; opIndex < ops.length; opIndex++) {
-        var min = Number.MAX_VALUE;
-        for (var i = 0; i < OPS_TIMING_ITERATIONS; i++)
+      for (let opIndex = 0; opIndex < ops.length; opIndex++) {
+        let min = Number.MAX_VALUE;
+        for (let i = 0; i < OPS_TIMING_ITERATIONS; i++) {
           min = Math.min(min, opTimings[i].cmd_times[opIndex]);
+        }
         ops[opIndex].cmd_time = min;
       }
       return ops;
     },
 
-    rasterize: function(params, rasterCompleteCallback) {
+    rasterize(params, rasterCompleteCallback) {
       this.picturesAsImageData_ = [];
-      var rasterCallback = function(pictureAsImageData) {
+      const rasterCallback = function(pictureAsImageData) {
         this.picturesAsImageData_.push(pictureAsImageData);
-        if (this.picturesAsImageData_.length !== this.pictures_.length)
+        if (this.picturesAsImageData_.length !== this.pictures_.length) {
           return;
+        }
 
-        var canvas = document.createElement('canvas');
-        var ctx = canvas.getContext('2d');
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
         canvas.width = this.layerRect.width;
         canvas.height = this.layerRect.height;
 
         // TODO(dsinclair): Verify these finish in the order started.
         //   Do the rasterize calls run sync or asyn? As the imageData
         //   going to be in the same order as the pictures_ list?
-        for (var i = 0; i < this.picturesAsImageData_.length; ++i) {
+        for (let i = 0; i < this.picturesAsImageData_.length; ++i) {
           ctx.putImageData(this.picturesAsImageData_[i].imageData,
               this.pictures_[i].layerRect.x,
               this.pictures_[i].layerRect.y);
@@ -270,8 +281,9 @@ tr.exportTo('tr.e.cc', function() {
                 this.layerRect.width, this.layerRect.height)));
       }.bind(this);
 
-      for (var i = 0; i < this.pictures_.length; ++i)
+      for (let i = 0; i < this.pictures_.length; ++i) {
         this.pictures_[i].rasterize(params, rasterCallback);
+      }
     }
   };
 
@@ -288,76 +300,92 @@ tr.exportTo('tr.e.cc', function() {
   };
 
   PictureSnapshot.CanRasterize = function() {
-    if (!PictureSnapshot.HasSkiaBenchmarking())
+    if (!PictureSnapshot.HasSkiaBenchmarking()) {
       return false;
-    if (!window.chrome.skiaBenchmarking.rasterize)
+    }
+    if (!window.chrome.skiaBenchmarking.rasterize) {
       return false;
+    }
     return true;
   };
 
   PictureSnapshot.CanGetOps = function() {
-    if (!PictureSnapshot.HasSkiaBenchmarking())
+    if (!PictureSnapshot.HasSkiaBenchmarking()) {
       return false;
-    if (!window.chrome.skiaBenchmarking.getOps)
+    }
+    if (!window.chrome.skiaBenchmarking.getOps) {
       return false;
+    }
     return true;
   };
 
   PictureSnapshot.CanGetOpTimings = function() {
-    if (!PictureSnapshot.HasSkiaBenchmarking())
+    if (!PictureSnapshot.HasSkiaBenchmarking()) {
       return false;
-    if (!window.chrome.skiaBenchmarking.getOpTimings)
+    }
+    if (!window.chrome.skiaBenchmarking.getOpTimings) {
       return false;
+    }
     return true;
   };
 
   PictureSnapshot.CanGetInfo = function() {
-    if (!PictureSnapshot.HasSkiaBenchmarking())
+    if (!PictureSnapshot.HasSkiaBenchmarking()) {
       return false;
-    if (!window.chrome.skiaBenchmarking.getInfo)
+    }
+    if (!window.chrome.skiaBenchmarking.getInfo) {
       return false;
+    }
     return true;
   };
 
   PictureSnapshot.HowToEnablePictureDebugging = function() {
-    if (tr.isHeadless)
+    if (tr.isHeadless) {
       return 'Pictures only work in chrome';
+    }
 
-    var usualReason = [
+    const usualReason = [
       'For pictures to show up, you need to have Chrome running with ',
       '--enable-skia-benchmarking. Please restart chrome with this flag ',
       'and try again.'
     ].join('');
 
-    if (!tr.isExported('global.chrome.skiaBenchmarking'))
+    if (!tr.isExported('global.chrome.skiaBenchmarking')) {
       return usualReason;
-    if (!global.chrome.skiaBenchmarking.rasterize)
+    }
+    if (!global.chrome.skiaBenchmarking.rasterize) {
       return 'Your chrome is old';
-    if (!global.chrome.skiaBenchmarking.getOps)
+    }
+    if (!global.chrome.skiaBenchmarking.getOps) {
       return 'Your chrome is old: skiaBenchmarking.getOps not found';
-    if (!global.chrome.skiaBenchmarking.getOpTimings)
+    }
+    if (!global.chrome.skiaBenchmarking.getOpTimings) {
       return 'Your chrome is old: skiaBenchmarking.getOpTimings not found';
-    if (!global.chrome.skiaBenchmarking.getInfo)
+    }
+    if (!global.chrome.skiaBenchmarking.getInfo) {
       return 'Your chrome is old: skiaBenchmarking.getInfo not found';
+    }
     return 'Rasterizing is on';
   };
 
   PictureSnapshot.prototype = {
     __proto__: ObjectSnapshot.prototype,
 
-    preInitialize: function() {
+    preInitialize() {
       tr.e.cc.preInitializeObject(this);
       this.rasterResult_ = undefined;
     },
 
-    initialize: function() {
+    initialize() {
       // If we have an alias args, that means this picture was represented
       // by an alias, and the real args is in alias.args.
-      if (this.args.alias)
+      if (this.args.alias) {
         this.args = this.args.alias.args;
+      }
 
-      if (!this.args.params.layerRect)
+      if (!this.args.params.layerRect) {
         throw new Error('Missing layer rect');
+      }
 
       this.layerRect_ = this.args.params.layerRect;
       this.picture_ = new Picture(this.args.skp64, this.args.params.layerRect);
@@ -379,23 +407,23 @@ tr.exportTo('tr.e.cc', function() {
       return this.picture_.guid;
     },
 
-    getBase64SkpData: function() {
+    getBase64SkpData() {
       return this.picture_.getBase64SkpData();
     },
 
-    getOps: function() {
+    getOps() {
       return this.picture_.getOps();
     },
 
-    getOpTimings: function() {
+    getOpTimings() {
       return this.picture_.getOpTimings();
     },
 
-    tagOpsWithTimings: function(ops) {
+    tagOpsWithTimings(ops) {
       return this.picture_.tagOpsWithTimings(ops);
     },
 
-    rasterize: function(params, rasterCompleteCallback) {
+    rasterize(params, rasterCompleteCallback) {
       this.picture_.rasterize(params, rasterCompleteCallback);
     }
   };

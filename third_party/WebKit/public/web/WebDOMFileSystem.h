@@ -30,11 +30,11 @@
 #ifndef WebDOMFileSystem_h
 #define WebDOMFileSystem_h
 
-#include "../platform/WebCommon.h"
-#include "../platform/WebFileSystem.h"
-#include "../platform/WebPrivatePtr.h"
-#include "../platform/WebString.h"
-#include "../platform/WebURL.h"
+#include "public/platform/WebCommon.h"
+#include "public/platform/WebFileSystem.h"
+#include "public/platform/WebPrivatePtr.h"
+#include "public/platform/WebString.h"
+#include "public/platform/WebURL.h"
 #include "WebFrame.h"
 
 #if BLINK_IMPLEMENTATION
@@ -56,53 +56,53 @@ class DOMFileSystem;
 class WebDOMFileSystem {
  public:
   enum SerializableType {
-    SerializableTypeSerializable,
-    SerializableTypeNotSerializable,
+    kSerializableTypeSerializable,
+    kSerializableTypeNotSerializable,
   };
   enum EntryType {
-    EntryTypeFile,
-    EntryTypeDirectory,
+    kEntryTypeFile,
+    kEntryTypeDirectory,
   };
 
-  ~WebDOMFileSystem() { reset(); }
+  ~WebDOMFileSystem() { Reset(); }
 
   WebDOMFileSystem() {}
-  WebDOMFileSystem(const WebDOMFileSystem& d) { assign(d); }
+  WebDOMFileSystem(const WebDOMFileSystem& d) { Assign(d); }
   WebDOMFileSystem& operator=(const WebDOMFileSystem& d) {
-    assign(d);
+    Assign(d);
     return *this;
   }
 
-  BLINK_EXPORT static WebDOMFileSystem fromV8Value(v8::Local<v8::Value>);
+  BLINK_EXPORT static WebDOMFileSystem FromV8Value(v8::Local<v8::Value>);
   // Create file system URL from the given entry.
-  BLINK_EXPORT static WebURL createFileSystemURL(v8::Local<v8::Value> entry);
+  BLINK_EXPORT static WebURL CreateFileSystemURL(v8::Local<v8::Value> entry);
 
   // FIXME: Deprecate the last argument when all filesystems become
   // serializable.
-  BLINK_EXPORT static WebDOMFileSystem create(
+  BLINK_EXPORT static WebDOMFileSystem Create(
       WebLocalFrame*,
       WebFileSystemType,
       const WebString& name,
-      const WebURL& rootURL,
-      SerializableType = SerializableTypeNotSerializable);
+      const WebURL& root_url,
+      SerializableType = kSerializableTypeNotSerializable);
 
-  BLINK_EXPORT void reset();
-  BLINK_EXPORT void assign(const WebDOMFileSystem&);
+  BLINK_EXPORT void Reset();
+  BLINK_EXPORT void Assign(const WebDOMFileSystem&);
 
-  BLINK_EXPORT WebString name() const;
-  BLINK_EXPORT WebFileSystem::Type type() const;
-  BLINK_EXPORT WebURL rootURL() const;
+  BLINK_EXPORT WebString GetName() const;
+  BLINK_EXPORT WebFileSystem::Type GetType() const;
+  BLINK_EXPORT WebURL RootURL() const;
 
-  BLINK_EXPORT v8::Local<v8::Value> toV8Value(
-      v8::Local<v8::Object> creationContext,
+  BLINK_EXPORT v8::Local<v8::Value> ToV8Value(
+      v8::Local<v8::Object> creation_context,
       v8::Isolate*);
-  BLINK_EXPORT v8::Local<v8::Value> createV8Entry(
+  BLINK_EXPORT v8::Local<v8::Value> CreateV8Entry(
       const WebString& path,
       EntryType,
-      v8::Local<v8::Object> creationContext,
+      v8::Local<v8::Object> creation_context,
       v8::Isolate*);
 
-  bool isNull() const { return m_private.isNull(); }
+  bool IsNull() const { return private_.IsNull(); }
 
 #if BLINK_IMPLEMENTATION
   WebDOMFileSystem(DOMFileSystem*);
@@ -110,7 +110,7 @@ class WebDOMFileSystem {
 #endif
 
  private:
-  WebPrivatePtr<DOMFileSystem> m_private;
+  WebPrivatePtr<DOMFileSystem> private_;
 };
 
 }  // namespace blink

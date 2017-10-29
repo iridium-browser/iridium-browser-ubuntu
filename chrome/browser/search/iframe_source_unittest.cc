@@ -18,6 +18,7 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "ipc/ipc_message.h"
 #include "net/base/request_priority.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_test_util.h"
@@ -88,21 +89,6 @@ class IframeSourceTest : public testing::Test {
     return "";
   }
 
-  std::unique_ptr<net::URLRequest> MockRequest(const std::string& url,
-                                               int render_process_id) {
-    std::unique_ptr<net::URLRequest> request(
-        resource_context_.GetRequestContext()->CreateRequest(
-            GURL(url), net::DEFAULT_PRIORITY, NULL));
-    content::ResourceRequestInfo::AllocateForTesting(
-        request.get(), content::RESOURCE_TYPE_SUB_FRAME, &resource_context_,
-        render_process_id, MSG_ROUTING_NONE, MSG_ROUTING_NONE,
-        /*is_main_frame=*/false,
-        /*parent_is_main_frame=*/false,
-        /*allow_download=*/true,
-        /*is_async=*/false, content::PREVIEWS_OFF);
-    return request;
-  }
-
   void SendResource(int resource_id) {
     source()->SendResource(resource_id, callback_);
   }
@@ -111,6 +97,11 @@ class IframeSourceTest : public testing::Test {
     source()->SendJSWithOrigin(
         resource_id, content::ResourceRequestInfo::WebContentsGetter(),
         callback_);
+  }
+
+  bool ShouldService(const std::string& path, int process_id) {
+    return source()->ShouldServiceRequest(GURL(path), &resource_context_,
+                                          process_id);
   }
 
  private:
@@ -143,26 +134,23 @@ class IframeSourceTest : public testing::Test {
 };
 
 TEST_F(IframeSourceTest, ShouldServiceRequest) {
-  std::unique_ptr<net::URLRequest> request;
   source()->set_origin(kNonInstantOrigin);
-  request = MockRequest("http://test/loader.js", kNonInstantRendererPID);
-  EXPECT_FALSE(source()->ShouldServiceRequest(request.get()));
+  EXPECT_FALSE(ShouldService("http://test/loader.js", kNonInstantRendererPID));
   source()->set_origin(kInstantOrigin);
-  request = MockRequest("chrome-search://bogus/valid.js", kInstantRendererPID);
-  EXPECT_FALSE(source()->ShouldServiceRequest(request.get()));
+  EXPECT_FALSE(
+      ShouldService("chrome-search://bogus/valid.js", kInstantRendererPID));
   source()->set_origin(kInstantOrigin);
-  request = MockRequest("chrome-search://test/bogus.js", kInstantRendererPID);
-  EXPECT_FALSE(source()->ShouldServiceRequest(request.get()));
+  EXPECT_FALSE(
+      ShouldService("chrome-search://test/bogus.js", kInstantRendererPID));
   source()->set_origin(kInstantOrigin);
-  request = MockRequest("chrome-search://test/valid.js", kInstantRendererPID);
-  EXPECT_TRUE(source()->ShouldServiceRequest(request.get()));
+  EXPECT_TRUE(
+      ShouldService("chrome-search://test/valid.js", kInstantRendererPID));
   source()->set_origin(kNonInstantOrigin);
-  request = MockRequest("chrome-search://test/valid.js",
-                        kNonInstantRendererPID);
-  EXPECT_FALSE(source()->ShouldServiceRequest(request.get()));
+  EXPECT_FALSE(
+      ShouldService("chrome-search://test/valid.js", kNonInstantRendererPID));
   source()->set_origin(std::string());
-  request = MockRequest("chrome-search://test/valid.js", kInvalidRendererPID);
-  EXPECT_FALSE(source()->ShouldServiceRequest(request.get()));
+  EXPECT_FALSE(
+      ShouldService("chrome-search://test/valid.js", kInvalidRendererPID));
 }
 
 TEST_F(IframeSourceTest, GetMimeType) {

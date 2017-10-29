@@ -6,12 +6,11 @@
 
 #include <utility>
 
-#include "ash/common/drag_drop/drag_image_view.h"
-#include "ash/common/wm_shell.h"
-#include "ash/common/wm_window.h"
 #include "ash/drag_drop/drag_drop_tracker.h"
+#include "ash/drag_drop/drag_image_view.h"
 #include "ash/shell.h"
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/run_loop.h"
@@ -39,8 +38,10 @@ namespace ash {
 namespace {
 
 // The duration of the drag cancel animation in millisecond.
-const int kCancelAnimationDuration = 250;
-const int kTouchCancelAnimationDuration = 20;
+constexpr base::TimeDelta kCancelAnimationDuration =
+    base::TimeDelta::FromMilliseconds(250);
+constexpr base::TimeDelta kTouchCancelAnimationDuration =
+    base::TimeDelta::FromMilliseconds(20);
 // The frame rate of the drag cancel animation in hertz.
 const int kCancelAnimationFrameRate = 60;
 
@@ -135,13 +136,13 @@ DragDropController::DragDropController()
       drag_drop_window_delegate_(new DragDropTrackerDelegate(this)),
       current_drag_event_source_(ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE),
       weak_factory_(this) {
-  Shell::GetInstance()->PrependPreTargetHandler(this);
-  WmShell::Get()->AddDisplayObserver(this);
+  Shell::Get()->PrependPreTargetHandler(this);
+  Shell::Get()->window_tree_host_manager()->AddObserver(this);
 }
 
 DragDropController::~DragDropController() {
-  WmShell::Get()->RemoveDisplayObserver(this);
-  Shell::GetInstance()->RemovePreTargetHandler(this);
+  Shell::Get()->window_tree_host_manager()->RemoveObserver(this);
+  Shell::Get()->RemovePreTargetHandler(this);
   Cleanup();
   if (cancel_animation_)
     cancel_animation_->End();
@@ -203,8 +204,8 @@ int DragDropController::StartDragAndDrop(
   drag_image_final_bounds_for_cancel_animation_ =
       gfx::Rect(start_location - provider->GetDragImageOffset(),
                 provider->GetDragImage().size());
-  drag_image_.reset(
-      new DragImageView(WmWindow::Get(source_window->GetRootWindow()), source));
+  drag_image_ =
+      base::MakeUnique<DragImageView>(source_window->GetRootWindow(), source);
   drag_image_->SetImage(provider->GetDragImage());
   drag_image_offset_ = provider->GetDragImageOffset();
   gfx::Rect drag_image_bounds(start_location, drag_image_->GetPreferredSize());
@@ -393,7 +394,7 @@ void DragDropController::OnWindowDestroyed(aura::Window* window) {
 // DragDropController, protected:
 
 gfx::LinearAnimation* DragDropController::CreateCancelAnimation(
-    int duration,
+    base::TimeDelta duration,
     int frame_rate,
     gfx::AnimationDelegate* delegate) {
   return new gfx::LinearAnimation(duration, frame_rate, delegate);
@@ -423,6 +424,7 @@ void DragDropController::DragUpdate(aura::Window* target,
       e.set_location_f(event.location_f());
       e.set_root_location_f(event.root_location_f());
       e.set_flags(event.flags());
+      ui::Event::DispatcherApi(&e).set_target(target);
       delegate->OnDragEntered(e);
     }
   } else {
@@ -434,15 +436,16 @@ void DragDropController::DragUpdate(aura::Window* target,
       e.set_location_f(event.location_f());
       e.set_root_location_f(event.root_location_f());
       e.set_flags(event.flags());
+      ui::Event::DispatcherApi(&e).set_target(target);
       op = delegate->OnDragUpdated(e);
-      gfx::NativeCursor cursor = ui::kCursorNoDrop;
+      gfx::NativeCursor cursor = ui::CursorType::kNoDrop;
       if (op & ui::DragDropTypes::DRAG_COPY)
-        cursor = ui::kCursorCopy;
+        cursor = ui::CursorType::kCopy;
       else if (op & ui::DragDropTypes::DRAG_LINK)
-        cursor = ui::kCursorAlias;
+        cursor = ui::CursorType::kAlias;
       else if (op & ui::DragDropTypes::DRAG_MOVE)
-        cursor = ui::kCursorGrabbing;
-      ash::Shell::GetInstance()->cursor_manager()->SetCursor(cursor);
+        cursor = ui::CursorType::kGrabbing;
+      ash::Shell::Get()->cursor_manager()->SetCursor(cursor);
     }
   }
 
@@ -459,7 +462,7 @@ void DragDropController::DragUpdate(aura::Window* target,
 
 void DragDropController::Drop(aura::Window* target,
                               const ui::LocatedEvent& event) {
-  ash::Shell::GetInstance()->cursor_manager()->SetCursor(ui::kCursorPointer);
+  ash::Shell::Get()->cursor_manager()->SetCursor(ui::CursorType::kPointer);
 
   // We must guarantee that a target gets a OnDragEntered before Drop. WebKit
   // depends on not getting a Drop without DragEnter. This behavior is
@@ -476,6 +479,7 @@ void DragDropController::Drop(aura::Window* target,
     e.set_location_f(event.location_f());
     e.set_root_location_f(event.root_location_f());
     e.set_flags(event.flags());
+    ui::Event::DispatcherApi(&e).set_target(target);
     drag_operation_ = delegate->OnPerformDrop(e);
     if (drag_operation_ == 0)
       StartCanceledAnimation(kCancelAnimationDuration);
@@ -501,7 +505,7 @@ void DragDropController::AnimationEnded(const gfx::Animation* animation) {
   if (!IsDragDropInProgress())
     drag_image_.reset();
   if (pending_long_tap_) {
-    // If not in a nested message loop, we can forward the long tap right now.
+    // If not in a nested run loop, we can forward the long tap right now.
     if (!should_block_during_drag_drop_) {
       ForwardPendingLongTap();
     } else {
@@ -513,8 +517,9 @@ void DragDropController::AnimationEnded(const gfx::Animation* animation) {
   }
 }
 
-void DragDropController::DoDragCancel(int drag_cancel_animation_duration_ms) {
-  ash::Shell::GetInstance()->cursor_manager()->SetCursor(ui::kCursorPointer);
+void DragDropController::DoDragCancel(
+    base::TimeDelta drag_cancel_animation_duration) {
+  ash::Shell::Get()->cursor_manager()->SetCursor(ui::CursorType::kPointer);
 
   // |drag_window_| can be NULL if we have just started the drag and have not
   // received any DragUpdates, or, if the |drag_window_| gets destroyed during
@@ -526,7 +531,7 @@ void DragDropController::DoDragCancel(int drag_cancel_animation_duration_ms) {
 
   Cleanup();
   drag_operation_ = 0;
-  StartCanceledAnimation(drag_cancel_animation_duration_ms);
+  StartCanceledAnimation(drag_cancel_animation_duration);
   if (should_block_during_drag_drop_)
     quit_closure_.Run();
 }
@@ -549,13 +554,14 @@ void DragDropController::OnDisplayConfigurationChanging() {
     DragCancel();
 }
 
-void DragDropController::StartCanceledAnimation(int animation_duration_ms) {
+void DragDropController::StartCanceledAnimation(
+    base::TimeDelta animation_duration) {
   DCHECK(drag_image_.get());
   drag_image_->SetTouchDragOperationHintOff();
   drag_image_initial_bounds_for_cancel_animation_ =
       drag_image_->GetBoundsInScreen();
   cancel_animation_.reset(CreateCancelAnimation(
-      animation_duration_ms, kCancelAnimationFrameRate, this));
+      animation_duration, kCancelAnimationFrameRate, this));
   cancel_animation_->Start();
 }
 

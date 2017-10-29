@@ -34,8 +34,9 @@
 
 #include "core/dom/DOMHighResTimeStamp.h"
 #include "core/timing/PerformanceEntry.h"
+#include "core/timing/PerformanceServerTiming.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
 
 namespace blink {
 
@@ -44,30 +45,36 @@ class ResourceTimingInfo;
 
 class CORE_EXPORT PerformanceResourceTiming : public PerformanceEntry {
   DEFINE_WRAPPERTYPEINFO();
+  friend class PerformanceResourceTimingTest;
 
  public:
   ~PerformanceResourceTiming() override;
-  static PerformanceResourceTiming* create(const ResourceTimingInfo& info,
-                                           double timeOrigin,
-                                           double startTime,
-                                           double lastRedirectEndTime,
-                                           bool allowTimingDetails,
-                                           bool allowRedirectDetails) {
+  static PerformanceResourceTiming* Create(
+      const ResourceTimingInfo& info,
+      double time_origin,
+      double start_time,
+      double last_redirect_end_time,
+      bool allow_timing_details,
+      bool allow_redirect_details,
+      PerformanceServerTimingVector& serverTiming) {
     return new PerformanceResourceTiming(
-        info, timeOrigin, startTime, lastRedirectEndTime, allowTimingDetails,
-        allowRedirectDetails);
+        info, time_origin, start_time, last_redirect_end_time,
+        allow_timing_details, allow_redirect_details, serverTiming);
   }
 
-  static PerformanceResourceTiming* create(const ResourceTimingInfo& info,
-                                           double timeOrigin,
-                                           double startTime,
-                                           bool allowTimingDetails) {
-    return new PerformanceResourceTiming(info, timeOrigin, startTime, 0.0,
-                                         allowTimingDetails, false);
+  static PerformanceResourceTiming* Create(
+      const ResourceTimingInfo& info,
+      double time_origin,
+      double start_time,
+      bool allow_timing_details,
+      PerformanceServerTimingVector& serverTiming) {
+    return new PerformanceResourceTiming(info, time_origin, start_time, 0.0,
+                                         allow_timing_details, false,
+                                         serverTiming);
   }
-
-  AtomicString initiatorType() const;
-
+  // Related doc: https://goo.gl/uNecAj.
+  virtual AtomicString initiatorType() const;
+  AtomicString nextHopProtocol() const;
   DOMHighResTimeStamp workerStart() const;
   virtual DOMHighResTimeStamp redirectStart() const;
   virtual DOMHighResTimeStamp redirectEnd() const;
@@ -83,46 +90,64 @@ class CORE_EXPORT PerformanceResourceTiming : public PerformanceEntry {
   unsigned long long transferSize() const;
   unsigned long long encodedBodySize() const;
   unsigned long long decodedBodySize() const;
+  PerformanceServerTimingVector serverTiming() const;
+
+  DECLARE_VIRTUAL_TRACE();
 
  protected:
-  void buildJSONValue(V8ObjectBuilder&) const override;
+  void BuildJSONValue(ScriptState*, V8ObjectBuilder&) const override;
 
-  PerformanceResourceTiming(const AtomicString& initiatorType,
-                            double timeOrigin,
-                            ResourceLoadTiming*,
-                            double lastRedirectEndTime,
-                            double finishTime,
-                            unsigned long long transferSize,
-                            unsigned long long encodedBodyLength,
-                            unsigned long long decodedBodyLength,
-                            bool didReuseConnection,
-                            bool allowTimingDetails,
-                            bool allowRedirectDetails,
-                            const String& name,
-                            const String& entryType,
-                            double startTime);
+  // This constructor is for PerformanceNavigationTiming.
+  // Related doc: https://goo.gl/uNecAj.
+  PerformanceResourceTiming(const String& name,
+                            const String& entry_type,
+                            double time_origin,
+                            double start_time,
+                            double duration,
+                            PerformanceServerTimingVector&);
+  virtual AtomicString AlpnNegotiatedProtocol() const;
+  virtual AtomicString ConnectionInfo() const;
+
+ protected:
+  double TimeOrigin() const { return time_origin_; }
 
  private:
   PerformanceResourceTiming(const ResourceTimingInfo&,
-                            double timeOrigin,
-                            double startTime,
-                            double lastRedirectEndTime,
-                            bool m_allowTimingDetails,
-                            bool m_allowRedirectDetails);
+                            double time_origin,
+                            double start_time,
+                            double last_redirect_end_time,
+                            bool allow_timing_details,
+                            bool allow_redirect_details,
+                            PerformanceServerTimingVector&);
 
-  double workerReady() const;
+  static AtomicString GetNextHopProtocol(
+      const AtomicString& alpn_negotiated_protocol,
+      const AtomicString& connection_info);
 
-  AtomicString m_initiatorType;
-  double m_timeOrigin;
-  RefPtr<ResourceLoadTiming> m_timing;
-  double m_lastRedirectEndTime;
-  double m_finishTime;
-  unsigned long long m_transferSize;
-  unsigned long long m_encodedBodySize;
-  unsigned long long m_decodedBodySize;
-  bool m_didReuseConnection;
-  bool m_allowTimingDetails;
-  bool m_allowRedirectDetails;
+  double WorkerReady() const;
+
+  virtual ResourceLoadTiming* GetResourceLoadTiming() const;
+  virtual bool AllowTimingDetails() const;
+  virtual bool DidReuseConnection() const;
+  virtual unsigned long long GetTransferSize() const;
+  virtual unsigned long long GetEncodedBodySize() const;
+  virtual unsigned long long GetDecodedBodySize() const;
+
+  AtomicString initiator_type_;
+  AtomicString alpn_negotiated_protocol_;
+  AtomicString connection_info_;
+  double time_origin_;
+  RefPtr<ResourceLoadTiming> timing_;
+  double last_redirect_end_time_;
+  double finish_time_;
+  unsigned long long transfer_size_;
+  unsigned long long encoded_body_size_;
+  unsigned long long decoded_body_size_;
+  bool did_reuse_connection_;
+  bool allow_timing_details_;
+  bool allow_redirect_details_;
+  bool allow_negative_value_;
+  PerformanceServerTimingVector serverTiming_;
 };
 
 }  // namespace blink

@@ -41,6 +41,7 @@ const char kOpusMimeType[] = "audio/opus";
 const char kVorbisMimeType[] = "audio/vorbis";
 const char kAc3MimeType[] = "audio/ac3";
 const char kEac3MimeType[] = "audio/eac3";
+const char kBitstreamAudioMimeType[] = "audio/raw";
 const char kAvcMimeType[] = "video/avc";
 const char kHevcMimeType[] = "video/hevc";
 const char kVp8MimeType[] = "video/x-vnd.on2.vp8";
@@ -69,13 +70,13 @@ static bool IsSupportedAndroidMimeType(const std::string& mime_type) {
 
 static std::string GetDefaultCodecName(const std::string& mime_type,
                                        MediaCodecDirection direction,
-                                       bool require_software_codec) {
+                                       bool requires_software_codec) {
   DCHECK(MediaCodecUtil::IsMediaCodecAvailable());
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jstring> j_mime = ConvertUTF8ToJavaString(env, mime_type);
   ScopedJavaLocalRef<jstring> j_codec_name =
       Java_MediaCodecUtil_getDefaultCodecName(
-          env, j_mime, static_cast<int>(direction), require_software_codec);
+          env, j_mime, static_cast<int>(direction), requires_software_codec);
   return ConvertJavaStringToUTF8(env, j_codec_name.obj());
 }
 
@@ -98,6 +99,9 @@ static bool IsEncoderSupportedByDevice(const std::string& android_mime_type) {
 
 // static
 std::string MediaCodecUtil::CodecToAndroidMimeType(AudioCodec codec) {
+  if (IsPassthroughAudioFormat(codec))
+    return kBitstreamAudioMimeType;
+
   switch (codec) {
     case kCodecMP3:
       return kMp3MimeType;
@@ -191,6 +195,12 @@ bool MediaCodecUtil::IsMediaCodecAvailableFor(int sdk, const char* model) {
 bool MediaCodecUtil::SupportsSetParameters() {
   // MediaCodec.setParameters() is only available starting with K.
   return base::android::BuildInfo::GetInstance()->sdk_int() >= 19;
+}
+
+// static
+bool MediaCodecUtil::PlatformSupportsCbcsEncryption(int sdk) {
+  JNIEnv* env = AttachCurrentThread();
+  return Java_MediaCodecUtil_platformSupportsCbcsEncryption(env, sdk);
 }
 
 // static
@@ -360,13 +370,19 @@ bool MediaCodecUtil::IsSetOutputSurfaceSupported() {
 }
 
 // static
+bool MediaCodecUtil::IsPassthroughAudioFormat(AudioCodec codec) {
+  return codec == kCodecAC3 || codec == kCodecEAC3;
+}
+
+// static
 bool MediaCodecUtil::CodecNeedsFlushWorkaround(MediaCodecBridge* codec) {
   int sdk_int = base::android::BuildInfo::GetInstance()->sdk_int();
   std::string codec_name = codec->GetName();
-  return sdk_int < 18 ||
-         (sdk_int == 18 && ("OMX.SEC.avc.dec" == codec_name ||
-                            "OMX.SEC.avc.dec.secure" == codec_name)) ||
-         (sdk_int == 19 &&
+  return sdk_int < SDK_VERSION_JELLY_BEAN_MR2 ||
+         (sdk_int == SDK_VERSION_JELLY_BEAN_MR2 &&
+          ("OMX.SEC.avc.dec" == codec_name ||
+           "OMX.SEC.avc.dec.secure" == codec_name)) ||
+         (sdk_int == SDK_VERSION_KITKAT &&
           base::StartsWith(base::android::BuildInfo::GetInstance()->model(),
                            "SM-G800", base::CompareCase::INSENSITIVE_ASCII) &&
           ("OMX.Exynos.avc.dec" == codec_name ||

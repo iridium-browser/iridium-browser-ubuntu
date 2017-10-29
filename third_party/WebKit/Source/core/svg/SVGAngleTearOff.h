@@ -31,9 +31,9 @@
 #ifndef SVGAngleTearOff_h
 #define SVGAngleTearOff_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/svg/SVGAngle.h"
 #include "core/svg/properties/SVGPropertyTearOff.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -42,14 +42,14 @@ class SVGAngleTearOff final : public SVGPropertyTearOff<SVGAngle>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGAngleTearOff* create(
-      SVGAngle* target,
-      SVGElement* contextElement,
-      PropertyIsAnimValType propertyIsAnimVal,
-      const QualifiedName& attributeName = QualifiedName::null()) {
-    return new SVGAngleTearOff(target, contextElement, propertyIsAnimVal,
-                               attributeName);
+  static SVGAngleTearOff* Create(SVGAngle* target,
+                                 SVGElement* context_element,
+                                 PropertyIsAnimValType property_is_anim_val,
+                                 const QualifiedName& attribute_name) {
+    return new SVGAngleTearOff(target, context_element, property_is_anim_val,
+                               attribute_name);
   }
+  static SVGAngleTearOff* CreateDetached();
 
   enum {
     kSvgAngletypeUnknown = SVGAngle::kSvgAngletypeUnknown,
@@ -62,24 +62,24 @@ class SVGAngleTearOff final : public SVGPropertyTearOff<SVGAngle>,
   ~SVGAngleTearOff() override;
 
   unsigned short unitType() {
-    return hasExposedAngleUnit() ? target()->unitType()
+    return HasExposedAngleUnit() ? Target()->UnitType()
                                  : SVGAngle::kSvgAngletypeUnknown;
   }
 
   void setValue(float, ExceptionState&);
-  float value() { return target()->value(); }
+  float value() { return Target()->Value(); }
 
   void setValueInSpecifiedUnits(float, ExceptionState&);
-  float valueInSpecifiedUnits() { return target()->valueInSpecifiedUnits(); }
+  float valueInSpecifiedUnits() { return Target()->ValueInSpecifiedUnits(); }
 
-  void newValueSpecifiedUnits(unsigned short unitType,
-                              float valueInSpecifiedUnits,
+  void newValueSpecifiedUnits(unsigned short unit_type,
+                              float value_in_specified_units,
                               ExceptionState&);
-  void convertToSpecifiedUnits(unsigned short unitType, ExceptionState&);
+  void convertToSpecifiedUnits(unsigned short unit_type, ExceptionState&);
 
   String valueAsString() {
-    return hasExposedAngleUnit() ? target()->valueAsString()
-                                 : String::number(0);
+    return HasExposedAngleUnit() ? Target()->ValueAsString()
+                                 : String::Number(0);
   }
   void setValueAsString(const String&, ExceptionState&);
 
@@ -91,8 +91,8 @@ class SVGAngleTearOff final : public SVGPropertyTearOff<SVGAngle>,
                   PropertyIsAnimValType,
                   const QualifiedName&);
 
-  bool hasExposedAngleUnit() {
-    return target()->unitType() <= SVGAngle::kSvgAngletypeGrad;
+  bool HasExposedAngleUnit() {
+    return Target()->UnitType() <= SVGAngle::kSvgAngletypeGrad;
   }
 };
 

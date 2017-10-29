@@ -56,7 +56,7 @@ tr.exportTo('tr.e.importer.v8', function() {
     if (this.root_.key === key) {
       return;
     }
-    var node = new SplayTree.Node(key, value);
+    const node = new SplayTree.Node(key, value);
     if (key > this.root_.key) {
       node.left = this.root_;
       node.right = this.root_.right;
@@ -86,11 +86,11 @@ tr.exportTo('tr.e.importer.v8', function() {
     if (this.root_.key !== key) {
       throw Error('Key not found: ' + key);
     }
-    var removed = this.root_;
+    const removed = this.root_;
     if (!this.root_.left) {
       this.root_ = this.root_.right;
     } else {
-      var right = this.root_.right;
+      const right = this.root_.right;
       this.root_ = this.root_.left;
       // Splay to make sure that the new root has an empty right child.
       this.splay_(key);
@@ -111,8 +111,7 @@ tr.exportTo('tr.e.importer.v8', function() {
    * @return {SplayTree.Node} Node having the specified key.
    */
   SplayTree.prototype.find = function(key) {
-    if (this.isEmpty())
-      return null;
+    if (this.isEmpty()) return null;
     this.splay_(key);
     return this.root_.key === key ? this.root_ : null;
   };
@@ -121,11 +120,11 @@ tr.exportTo('tr.e.importer.v8', function() {
    * @return {SplayTree.Node} Node having the minimum key value.
    */
   SplayTree.prototype.findMin = function() {
-    if (this.isEmpty())
-      return null;
-    var current = this.root_;
-    while (current.left)
+    if (this.isEmpty()) return null;
+    let current = this.root_;
+    while (current.left) {
       current = current.left;
+    }
     return current;
   };
 
@@ -133,11 +132,11 @@ tr.exportTo('tr.e.importer.v8', function() {
    * @return {SplayTree.Node} Node having the maximum key value.
    */
   SplayTree.prototype.findMax = function(opt_startNode) {
-    if (this.isEmpty())
-      return null;
-    var current = opt_startNode || this.root_;
-    while (current.right)
+    if (this.isEmpty()) return null;
+    let current = opt_startNode || this.root_;
+    while (current.right) {
       current = current.right;
+    }
     return current;
   };
 
@@ -146,17 +145,18 @@ tr.exportTo('tr.e.importer.v8', function() {
    *     is less or equal to the specified key value.
    */
   SplayTree.prototype.findGreatestLessThan = function(key) {
-    if (this.isEmpty())
-      return null;
+    if (this.isEmpty()) return null;
     // Splay on the key to move the node with the given key or the last
     // node on the search path to the top of the tree.
     this.splay_(key);
     // Now the result is either the root node or the greatest node in
     // the left subtree.
-    if (this.root_.key <= key)
+    if (this.root_.key <= key) {
       return this.root_;
-    if (this.root_.left)
+    }
+    if (this.root_.left) {
       return this.findMax(this.root_.left);
+    }
     return null;
   };
 
@@ -166,7 +166,7 @@ tr.exportTo('tr.e.importer.v8', function() {
    *
    */
   SplayTree.prototype.exportKeysAndValues = function() {
-    var result = [];
+    const result = [];
     this.traverse_(function(node) { result.push([node.key, node.value]); });
     return result;
   };
@@ -175,7 +175,7 @@ tr.exportTo('tr.e.importer.v8', function() {
    * @return {Array<*>} An array containing all the values of tree's nodes.
    */
   SplayTree.prototype.exportValues = function() {
-    var result = [];
+    const result = [];
     this.traverse_(function(node) { result.push(node.value); });
     return result;
   };
@@ -191,18 +191,16 @@ tr.exportTo('tr.e.importer.v8', function() {
    * @private
    */
   SplayTree.prototype.splay_ = function(key) {
-    if (this.isEmpty())
-      return;
+    if (this.isEmpty()) return;
     // Create a dummy node.  The use of the dummy node is a bit
     // counter-intuitive: The right child of the dummy node will hold
     // the L tree of the algorithm.  The left child of the dummy node
     // will hold the R tree of the algorithm.  Using a dummy node, left
     // and right will always be nodes and we avoid special cases.
-    var dummy;
-    var left;
-    var right;
-    dummy = left = right = new SplayTree.Node(null, null);
-    var current = this.root_;
+    const dummy = new SplayTree.Node(null, null);
+    let left = dummy;
+    let right = dummy;
+    let current = this.root_;
     while (true) {
       if (key < current.key) {
         if (!current.left) {
@@ -210,7 +208,7 @@ tr.exportTo('tr.e.importer.v8', function() {
         }
         if (key < current.left.key) {
           // Rotate right.
-          var tmp = current.left;
+          const tmp = current.left;
           current.left = tmp.right;
           tmp.right = current;
           current = tmp;
@@ -228,7 +226,7 @@ tr.exportTo('tr.e.importer.v8', function() {
         }
         if (key > current.right.key) {
           // Rotate left.
-          var tmp = current.right;
+          const tmp = current.right;
           current.right = tmp.left;
           tmp.left = current;
           current = tmp;
@@ -259,11 +257,10 @@ tr.exportTo('tr.e.importer.v8', function() {
    * @private
    */
   SplayTree.prototype.traverse_ = function(f) {
-    var nodesToVisit = [this.root_];
+    const nodesToVisit = [this.root_];
     while (nodesToVisit.length > 0) {
-      var node = nodesToVisit.shift();
-      if (node === null)
-        continue;
+      const node = nodesToVisit.shift();
+      if (node === null) continue;
       f(node);
       nodesToVisit.push(node.left);
       nodesToVisit.push(node.right);

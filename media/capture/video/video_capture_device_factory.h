@@ -6,6 +6,7 @@
 #define MEDIA_CAPTURE_VIDEO_VIDEO_CAPTURE_DEVICE_FACTORY_H_
 
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "media/capture/video/video_capture_device.h"
 
@@ -13,9 +14,9 @@ namespace media {
 
 // VideoCaptureDeviceFactory is the base class for creation of video capture
 // devices in the different platforms. VCDFs are created by MediaStreamManager
-// on IO thread and plugged into VideoCaptureManager, who owns and operates them
+// on UI thread and plugged into VideoCaptureManager, who owns and operates them
 // in Device Thread (a.k.a. Audio Thread).
-// Typical operation is to first call EnumerateDeviceDescriptors() to obtain
+// Typical operation is to first call GetDeviceDescriptors() to obtain
 // information about available devices. The obtained descriptors can then be
 // used to either obtain the supported formats of a device using
 // GetSupportedFormats(), or to create an instance of VideoCaptureDevice for
@@ -34,11 +35,6 @@ class CAPTURE_EXPORT VideoCaptureDeviceFactory {
   // Creates a VideoCaptureDevice object. Returns NULL if something goes wrong.
   virtual std::unique_ptr<VideoCaptureDevice> CreateDevice(
       const VideoCaptureDeviceDescriptor& device_descriptor) = 0;
-
-  // Asynchronous version of GetDeviceDescriptors calling back to |callback|.
-  virtual void EnumerateDeviceDescriptors(
-      const base::Callback<
-          void(std::unique_ptr<VideoCaptureDeviceDescriptors>)>& callback);
 
   // Obtains the supported formats of a device.
   // This method should be called before allocating or starting a device. In

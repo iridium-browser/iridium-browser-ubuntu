@@ -5,8 +5,9 @@
 #include "xfa/fde/css/cfde_cssdeclaration.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/test_support.h"
 
-TEST(CFDE_CSSDecalration, HexEncodingParsing) {
+TEST(CFDE_CSSDecalrationTest, HexEncodingParsing) {
   FX_ARGB color;
 
   // Length value invalid.
@@ -42,7 +43,7 @@ TEST(CFDE_CSSDecalration, HexEncodingParsing) {
   EXPECT_EQ(60, FXARGB_B(color));
 }
 
-TEST(CFDE_CSSDecalration, RGBEncodingParsing) {
+TEST(CFDE_CSSDecalrationTest, RGBEncodingParsing) {
   FX_ARGB color;
 
   // Invalid input for rgb() syntax.

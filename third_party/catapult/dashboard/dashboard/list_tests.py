@@ -103,9 +103,9 @@ def GetSubTests(suite_name, bot_names):
     if cached:
       combined = _MergeSubTestsDict(combined, json.loads(cached))
     else:
-      sub_test_paths_futures = _GetTestDescendantsAsync(
+      sub_test_paths_futures = GetTestDescendantsAsync(
           suite_key, has_rows=True, deprecated=False)
-      deprecated_sub_test_path_futures = _GetTestDescendantsAsync(
+      deprecated_sub_test_path_futures = GetTestDescendantsAsync(
           suite_key, has_rows=True, deprecated=True)
 
       ndb.Future.wait_all(
@@ -151,7 +151,6 @@ def _SubTestsDict(paths, deprecated):
       merged[test_name]['has_rows'] = True
     else:
       merged[test_name]['sub_tests'].append(sub_test_path)
-
 
   if deprecated:
     for k, v in merged.iteritems():
@@ -216,7 +215,9 @@ def _MergeSubTestsDictEntry(a, b):
   return entry
 
 
-def GetTestsMatchingPattern(pattern, only_with_rows=False, list_entities=False):
+@ndb.synctasklet
+def GetTestsMatchingPattern(
+    pattern, only_with_rows=False, list_entities=False, use_cache=True):
   """Gets the TestMetadata entities or keys which match |pattern|.
 
   For this function, it's assumed that a test path should only have up to seven
@@ -233,13 +234,22 @@ def GetTestsMatchingPattern(pattern, only_with_rows=False, list_entities=False):
   Returns:
     A list of test paths, or test entities if list_entities is True.
   """
+  result = yield GetTestsMatchingPatternAsync(
+      pattern, only_with_rows=only_with_rows, list_entities=list_entities,
+      use_cache=use_cache)
+  raise ndb.Return(result)
+
+
+@ndb.tasklet
+def GetTestsMatchingPatternAsync(
+    pattern, only_with_rows=False, list_entities=False, use_cache=True):
   property_names = [
       'master_name', 'bot_name', 'suite_name', 'test_part1_name',
       'test_part2_name', 'test_part3_name', 'test_part4_name',
       'test_part5_name']
   pattern_parts = pattern.split('/')
   if len(pattern_parts) > 8:
-    return []
+    raise ndb.Return([])
 
   # Below, we first build a list of (property_name, value) pairs to filter on.
   query_filters = []
@@ -266,14 +276,15 @@ def GetTestsMatchingPattern(pattern, only_with_rows=False, list_entities=False):
   if only_with_rows:
     query = query.filter(
         graph_data.TestMetadata.has_rows == True)
-  test_keys = query.fetch(keys_only=True)
+  test_keys = yield query.fetch_async(keys_only=True)
 
   # Filter to include only tests that match the pattern.
   test_keys = [k for k in test_keys if utils.TestMatchesPattern(k, pattern)]
 
   if list_entities:
-    return ndb.get_multi(test_keys)
-  return [utils.TestPath(k) for k in test_keys]
+    result = yield ndb.get_multi_async(test_keys, use_cache=use_cache)
+    raise ndb.Return(result)
+  raise ndb.Return([utils.TestPath(k) for k in test_keys])
 
 
 def GetTestDescendants(
@@ -288,13 +299,13 @@ def GetTestDescendants(
   Returns:
     A list of keys of all descendants of the given test.
   """
-  return _GetTestDescendantsAsync(test_key,
-                                  has_rows=has_rows,
-                                  deprecated=deprecated,
-                                  keys_only=keys_only).get_result()
+  return GetTestDescendantsAsync(test_key,
+                                 has_rows=has_rows,
+                                 deprecated=deprecated,
+                                 keys_only=keys_only).get_result()
 
 
-def _GetTestDescendantsAsync(
+def GetTestDescendantsAsync(
     test_key, has_rows=None, deprecated=None, keys_only=True):
   """Returns all the tests which are subtests of the test with the given key.
 
@@ -382,28 +393,54 @@ def GetTestsForTestPathDict(test_path_dict, return_selected):
 
 def _GetSelectedTestPathsForDict(test_path_dict):
   paths = []
+  test_key_futures = []
+  any_missing = False
   for path, selection in test_path_dict.iteritems():
     if selection == 'core':
-      paths.extend(_GetCoreTestPathsForTest(path, True))
+      try:
+        paths.extend(_GetCoreTestPathsForTest(path, True))
+      except AssertionError:
+        any_missing = True
     elif selection == 'all':
-      paths.append(path)
-      paths.extend(GetTestsMatchingPattern(
-          '%s/*' % path, only_with_rows=True))
+      test_key_futures.append(utils.TestKey(path).get_async())
+      try:
+        paths.extend(GetTestsMatchingPattern(
+            '%s/*' % path, only_with_rows=True))
+      except AssertionError:
+        any_missing = True
     elif isinstance(selection, list):
       parent_test_name = path.split('/')[-1]
+      test_key_futures = []
       for part in selection:
         if part == parent_test_name:
           # When the element in the selected list is the same as the last part
           # of the path, it's meant to mean just the path.
           # TODO(eakuefner): Disambiguate this by making it explicit.
-          paths.append(path)
+          part_path = path
         else:
-          # Otherwise, the element is intended to be appended to the path.
-          paths.append('%s/%s' % (path, part))
+          part_path = '%s/%s' % (path, part)
+        test_key_futures.append(utils.TestKey(part_path).get_async())
     else:
       raise BadRequestError("selected must be 'all', 'core', or a list of "
                             "subtests")
-  return paths
+
+  # Can't use Future.wait_all(): if any one test_key is internal-only, then
+  # wait_all() throws AssertionError.
+  for test_key_future in test_key_futures:
+    try:
+      test_key = test_key_future.get_result()
+    except AssertionError:
+      # This is an internal-only timeseries. Don't leak that fact by returning
+      # 500. Pretend that it doesn't exist.
+      any_missing = True
+      continue
+
+    if test_key is None or not test_key.has_rows:
+      any_missing = True
+    else:
+      paths.append(test_key.test_path)
+
+  return {'anyMissing': any_missing, 'tests': paths}
 
 
 def _GetUnselectedTestPathsForDict(test_path_dict):
@@ -412,7 +449,7 @@ def _GetUnselectedTestPathsForDict(test_path_dict):
     if selection == 'core':
       paths.extend(_GetCoreTestPathsForTest(path, False))
     elif selection == 'all':
-      return []
+      return {'tests': []}
     elif isinstance(selection, list):
       # The parent is represented in the selection by its last component, so if
       # we don't see it, we know we need to include it in unselected.
@@ -427,7 +464,7 @@ def _GetUnselectedTestPathsForDict(test_path_dict):
         item = child.split('/')[-1]
         if item not in selection:
           paths.append(child)
-  return paths
+  return {'tests': paths}
 
 
 def _GetCoreTestPathsForTest(path, return_selected):

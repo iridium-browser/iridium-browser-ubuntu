@@ -21,7 +21,8 @@ using content::BrowserThread;
 namespace breakpad {
 
 namespace {
-base::LazyInstance<CrashDumpObserver> g_instance = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<CrashDumpObserver>::DestructorAtExit g_instance =
+    LAZY_INSTANCE_INITIALIZER;
 }
 
 // static
@@ -84,7 +85,6 @@ void CrashDumpObserver::OnChildExit(int child_process_id,
 void CrashDumpObserver::BrowserChildProcessStarted(
     int child_process_id,
     content::FileDescriptorInfo* mappings) {
-  DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
   std::vector<Client*> registered_clients_copy;
   {
     base::AutoLock auto_lock(registered_clients_lock_);

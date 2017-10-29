@@ -14,6 +14,7 @@
 
 #include <deque>
 #include <list>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,7 +38,7 @@ class SourceBufferRange;
 class MEDIA_EXPORT SourceBufferStream {
  public:
   typedef StreamParser::BufferQueue BufferQueue;
-  typedef std::list<SourceBufferRange*> RangeList;
+  typedef std::list<std::unique_ptr<SourceBufferRange>> RangeList;
 
   // Status returned by GetNextBuffer().
   // kSuccess: Indicates that the next buffer was returned.
@@ -58,11 +59,10 @@ class MEDIA_EXPORT SourceBufferStream {
   };
 
   SourceBufferStream(const AudioDecoderConfig& audio_config,
-                     const scoped_refptr<MediaLog>& media_log);
+                     MediaLog* media_log);
   SourceBufferStream(const VideoDecoderConfig& video_config,
-                     const scoped_refptr<MediaLog>& media_log);
-  SourceBufferStream(const TextTrackConfig& text_config,
-                     const scoped_refptr<MediaLog>& media_log);
+                     MediaLog* media_log);
+  SourceBufferStream(const TextTrackConfig& text_config, MediaLog* media_log);
 
   ~SourceBufferStream();
 
@@ -229,8 +229,9 @@ class MEDIA_EXPORT SourceBufferStream {
   RangeList::iterator FindExistingRangeFor(DecodeTimestamp start_timestamp);
 
   // Inserts |new_range| into |ranges_| preserving sorted order. Returns an
-  // iterator in |ranges_| that points to |new_range|.
-  RangeList::iterator AddToRanges(SourceBufferRange* new_range);
+  // iterator in |ranges_| that points to |new_range|. |new_range| becomes owned
+  // by |ranges_|.
+  RangeList::iterator AddToRanges(std::unique_ptr<SourceBufferRange> new_range);
 
   // Returns an iterator that points to the place in |ranges_| where
   // |selected_range_| lives.
@@ -370,7 +371,7 @@ class MEDIA_EXPORT SourceBufferStream {
 
   // Used to report log messages that can help the web developer figure out what
   // is wrong with the content.
-  scoped_refptr<MediaLog> media_log_;
+  MediaLog* media_log_;
 
   // List of disjoint buffered ranges, ordered by start time.
   RangeList ranges_;

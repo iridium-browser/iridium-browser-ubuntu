@@ -16,6 +16,7 @@ import logging
 import logging.handlers
 import os
 import re
+import socket
 import sys
 import time
 
@@ -24,11 +25,11 @@ if __name__ == '__main__':
       os.path.abspath(os.path.join(os.path.dirname(__file__),
                                    '..', '..', '..')))
 
-from devil import devil_env
 from devil.android import battery_utils
 from devil.android import device_blacklist
 from devil.android import device_errors
 from devil.android import device_utils
+from devil.android.tools import script_common
 
 
 # Various names of sensors used to measure cpu temp
@@ -42,13 +43,14 @@ CPU_TEMP_SENSORS = [
 ]
 
 DEVICE_FILE_VERSION = 1
-DEVICE_FILE = os.path.join(os.path.expanduser('~'),
-                           'android_device_status.json')
+DEVICE_FILE = os.path.join(
+    os.path.expanduser('~'), '.android',
+    '%s__android_device_status.json' % socket.gethostname().split('.')[0])
 
 MEM_INFO_REGEX = re.compile(r'.*?\:\s*(\d+)\s*kB') # ex: 'MemTotal:   185735 kB'
 
 
-def get_device_status(device):
+def get_device_status_unsafe(device):
   """Polls the given device for various info.
 
     Returns: A dict of the following format:
@@ -61,6 +63,7 @@ def get_device_status(device):
         'build.id': 'ABC12D',
         'product.device': 'chickenofthesea'
       },
+      'imei': 123456789,
       'mem': {
         'avail': 1000000,
         'total': 1234567,
@@ -116,7 +119,8 @@ def get_device_status(device):
 
   # Process
   try:
-    lines = device.RunShellCommand('ps', check_return=True)
+    # TODO(catapult:#3215): Migrate to device.GetPids()
+    lines = device.RunShellCommand(['ps'], check_return=True)
     status['processes'] = len(lines) - 1 # Ignore the header row.
   except device_errors.AdbShellCommandFailedError:
     logging.exception('Unable to count process list.')
@@ -128,7 +132,7 @@ def get_device_status(device):
   try:
     files = device.RunShellCommand(
         'grep -lE "%s" /sys/class/thermal/thermal_zone*/type' % '|'.join(
-            CPU_TEMP_SENSORS), check_return=True)
+            CPU_TEMP_SENSORS), shell=True, check_return=True)
   except device_errors.AdbShellCommandFailedError:
     logging.exception('Unable to list thermal sensors.')
   for f in files:
@@ -146,7 +150,21 @@ def get_device_status(device):
   except (device_errors.AdbShellCommandFailedError, ValueError):
     logging.exception('Unable to read /proc/uptime')
 
+  try:
+    status['imei'] = device.GetIMEI()
+  except device_errors.CommandFailedError:
+    logging.exception('Unable to read IMEI')
+    status['imei'] = 'unknown'
+
   status['state'] = 'available'
+  return status
+
+
+def get_device_status(device):
+  try:
+    status = get_device_status_unsafe(device)
+  except device_errors.DeviceUnreachableError:
+    status = {'state': 'offline'}
   return status
 
 
@@ -182,7 +200,7 @@ def main(argv):
 
   parser = argparse.ArgumentParser(
       description='Launches the device monitor.')
-  parser.add_argument('--adb-path', help='Path to adb binary.')
+  script_common.AddEnvironmentArguments(parser)
   parser.add_argument('--blacklist-file', help='Path to device blacklist file.')
   args = parser.parse_args(argv)
 
@@ -194,14 +212,7 @@ def main(argv):
                           datefmt='%y%m%d %H:%M:%S')
   handler.setFormatter(fmt)
   logger.addHandler(handler)
-
-  devil_dynamic_config = devil_env.EmptyConfig()
-  if args.adb_path:
-    devil_dynamic_config['dependencies'].update(
-        devil_env.LocalConfigItem(
-            'adb', devil_env.GetPlatform(), args.adb_path))
-
-  devil_env.config.Initialize(configs=[devil_dynamic_config])
+  script_common.InitializeEnvironment(args)
 
   blacklist = (device_blacklist.Blacklist(args.blacklist_file)
                if args.blacklist_file else None)

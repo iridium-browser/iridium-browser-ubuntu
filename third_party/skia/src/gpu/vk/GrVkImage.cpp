@@ -20,7 +20,7 @@ VkImageAspectFlags vk_format_to_aspect_flags(VkFormat format) {
         case VK_FORMAT_D32_SFLOAT_S8_UINT:
             return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
         default:
-            SkASSERT(GrVkFormatToPixelConfig(format, nullptr));
+            SkASSERT(kUnknown_GrPixelConfig != GrVkFormatToPixelConfig(format));
             return VK_IMAGE_ASPECT_COLOR_BIT;
     }
 }
@@ -33,11 +33,12 @@ void GrVkImage::setImageLayout(const GrVkGpu* gpu, VkImageLayout newLayout,
              VK_IMAGE_LAYOUT_PREINITIALIZED != newLayout);
     VkImageLayout currentLayout = this->currentLayout();
 
-    // If the old and new layout are the same, there is no reason to put in a barrier since the
-    // operations used for each layout are implicitly synchronized with eachother. The one exception
-    // is if the layout is GENERAL. In this case the image could have been used for any operation so
-    // we must respect the barrier.
-    if (newLayout == currentLayout && VK_IMAGE_LAYOUT_GENERAL != currentLayout) {
+    // If the old and new layout are the same and the layout is a read only layout, there is no need
+    // to put in a barrier.
+    if (newLayout == currentLayout &&
+        (VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL == currentLayout ||
+         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL == currentLayout ||
+         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL == currentLayout)) {
         return;
     }
 
@@ -151,11 +152,23 @@ void GrVkImage::abandonImage() {
     }
 }
 
+void GrVkImage::setResourceRelease(ReleaseProc proc, ReleaseCtx ctx) {
+    // Forward the release proc on to GrVkImage::Resource
+    fResource->setRelease(proc, ctx);
+}
+
 void GrVkImage::Resource::freeGPUData(const GrVkGpu* gpu) const {
+    SkASSERT(!fReleaseProc);
     VK_CALL(gpu, DestroyImage(gpu->device(), fImage, nullptr));
     bool isLinear = (VK_IMAGE_TILING_LINEAR == fImageTiling);
     GrVkMemory::FreeImageMemory(gpu, isLinear, fAlloc);
 }
 
 void GrVkImage::BorrowedResource::freeGPUData(const GrVkGpu* gpu) const {
+    this->invokeReleaseProc();
 }
+
+void GrVkImage::BorrowedResource::abandonGPUData() const {
+    this->invokeReleaseProc();
+}
+

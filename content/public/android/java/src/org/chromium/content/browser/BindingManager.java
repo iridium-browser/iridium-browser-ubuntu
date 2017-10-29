@@ -6,20 +6,21 @@ package org.chromium.content.browser;
 
 import android.content.Context;
 
+import org.chromium.base.process_launcher.ChildProcessConnection;
+
 /**
  * Manages oom bindings used to bound child services. "Oom binding" is a binding that raises the
  * process oom priority so that it shouldn't be killed by the OS out-of-memory killer under
  * normal conditions (it can still be killed under drastic memory pressure). ChildProcessConnections
  * have two oom bindings: initial binding and strong binding.
  *
- * BindingManager receives calls that signal status of each service (setInForeground(),
- * determinedVisibility()) and the entire embedding application (onSentToBackground(),
- * onBroughtToForeground()) and manipulates child process bindings accordingly.
+ * BindingManager receives calls that signal status of each service (setPriority())
+ * and the entire embedding application (onSentToBackground(), onBroughtToForeground()) and
+ * manipulates child process bindings accordingly.
  *
  * In particular, BindingManager is responsible for:
- * - adding and removing the strong binding as service visibility changes (setInForeground())
- * - removing the initial binding of a service when we can start to rely on the visibility signal /
- *   strong binding exclusively (after determinedVisibility())
+ * - adding and removing the strong binding as service visibility changes (foreground)
+ * - adding and removing the initial binding (boostForPendingViews)
  * - dropping the current oom bindings when a new connection is started on a low-memory device
  * - keeping a strong binding on the foreground service while the entire application is in
  *   background
@@ -39,16 +40,11 @@ public interface BindingManager {
      * devices this will also drop the oom bindings of the last process that was oom-bound if a new
      * process is used in foreground.
      * @param pid handle of the service process
-     * @param inForeground true iff the service is visibile to the user
+     * @param foreground true iff the service is visibile to the user
+     * @param boostForPendingViews true iff a pending view is hosted in service, so service is
+     *                             likely about to become foreground.
      */
-    void setInForeground(int pid, boolean inForeground);
-
-    /**
-     * Called when we can begin to rely on the visibility signal only and remove the initial
-     * binding. It's safe to call it multiple times, only the first call matters.
-     * @param pid handle of the service process
-     */
-    void determinedVisibility(int pid);
+    void setPriority(int pid, boolean foreground, boolean boostForPendingViews);
 
     /**
      * Called when the embedding application is sent to background. We want to maintain a strong
@@ -70,25 +66,17 @@ public interface BindingManager {
     void onBroughtToForeground();
 
     /**
-     * @return True iff the given service process is protected from the out-of-memory killing, or it
-     * was protected when it died unexpectedly. This can be used to decide if a disconnection of a
-     * renderer was a crash or a probable out-of-memory kill. This can be called on any thread.
-     */
-    boolean isOomProtected(int pid);
-
-    /**
      * Should be called when the connection to the child process goes away (either after a clean
      * exit or an unexpected crash). At this point we let go of the reference to the
      * ChildProcessConnection. This can be called on any thread.
      */
-    void clearConnection(int pid);
+    void removeConnection(int pid);
 
     /**
      * Starts moderate binding management.
      * Please see https://goo.gl/tl9MQm for details.
      */
-    void startModerateBindingManagement(
-            Context context, int maxSize, boolean moderateBindingTillBackgrounded);
+    void startModerateBindingManagement(Context context, int maxSize);
 
     /**
      * Releases all moderate bindings.

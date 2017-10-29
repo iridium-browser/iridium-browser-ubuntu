@@ -17,9 +17,19 @@ namespace {
 
 // In these correctness tests, we only consider SW codecs.
 const bool kHwCodec = false;
+const bool kBatchMode = false;
+const bool kVerboseLogging = false;
 
 // Only allow encoder/decoder to use single core, for predictability.
 const bool kUseSingleCore = true;
+
+// Default codec setting is on.
+const bool kResilienceOn = true;
+
+// Default sequence is foreman (CIF): may be better to use VGA for resize test.
+const int kCifWidth = 352;
+const int kCifHeight = 288;
+const char kForemanCif[] = "foreman_cif";
 
 }  // namespace
 
@@ -37,9 +47,10 @@ TEST_F(VideoProcessorIntegrationTest, Process0PercentPacketLossH264) {
   rate_profile.frame_index_rate_update[1] = kNumFramesShort + 1;
   rate_profile.num_frames = kNumFramesShort;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecH264, kHwCodec, kUseSingleCore,
-                 0.0f, -1, 1, false, false, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecH264, 1, false, false,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 35.0, 25.0, 0.93, 0.70);
@@ -66,9 +77,10 @@ TEST_F(VideoProcessorIntegrationTest, Process0PercentPacketLossVP9) {
   rate_profile.frame_index_rate_update[1] = kNumFramesShort + 1;
   rate_profile.num_frames = kNumFramesShort;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP9, kHwCodec, kUseSingleCore,
-                 0.0f, -1, 1, false, false, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP9, 1, false, false,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 37.0, 36.0, 0.93, 0.92);
@@ -88,9 +100,10 @@ TEST_F(VideoProcessorIntegrationTest, Process5PercentPacketLossVP9) {
   rate_profile.frame_index_rate_update[1] = kNumFramesShort + 1;
   rate_profile.num_frames = kNumFramesShort;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP9, kHwCodec, kUseSingleCore,
-                 0.05f, -1, 1, false, false, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.05f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP9, 1, false, false,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 17.0, 14.0, 0.45, 0.36);
@@ -114,15 +127,16 @@ TEST_F(VideoProcessorIntegrationTest, ProcessNoLossChangeBitRateVP9) {
   rate_profile.frame_index_rate_update[3] = kNumFramesLong + 1;
   rate_profile.num_frames = kNumFramesLong;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP9, kHwCodec, kUseSingleCore,
-                 0.0f, -1, 1, false, false, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP9, 1, false, false,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 35.5, 30.0, 0.90, 0.85);
   // Thresholds for rate control.
   RateControlThresholds rc_thresholds[3];
-  SetRateControlThresholds(rc_thresholds, 0, 0, 30, 20, 20, 30, 0, 1);
+  SetRateControlThresholds(rc_thresholds, 0, 0, 30, 20, 20, 35, 0, 1);
   SetRateControlThresholds(rc_thresholds, 1, 2, 0, 20, 20, 60, 0, 0);
   SetRateControlThresholds(rc_thresholds, 2, 0, 0, 25, 20, 40, 0, 0);
   ProcessFramesAndVerify(quality_thresholds, rate_profile, process_settings,
@@ -147,17 +161,18 @@ TEST_F(VideoProcessorIntegrationTest,
   rate_profile.frame_index_rate_update[3] = kNumFramesLong + 1;
   rate_profile.num_frames = kNumFramesLong;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP9, kHwCodec, kUseSingleCore,
-                 0.0f, -1, 1, false, false, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP9, 1, false, false,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 31.5, 18.0, 0.80, 0.43);
   // Thresholds for rate control.
   RateControlThresholds rc_thresholds[3];
-  SetRateControlThresholds(rc_thresholds, 0, 38, 50, 75, 15, 45, 0, 1);
-  SetRateControlThresholds(rc_thresholds, 1, 10, 0, 40, 10, 30, 0, 0);
-  SetRateControlThresholds(rc_thresholds, 2, 5, 0, 30, 5, 20, 0, 0);
+  SetRateControlThresholds(rc_thresholds, 0, 45, 50, 95, 15, 45, 0, 1);
+  SetRateControlThresholds(rc_thresholds, 1, 20, 0, 50, 10, 30, 0, 0);
+  SetRateControlThresholds(rc_thresholds, 2, 5, 0, 30, 5, 25, 0, 0);
   ProcessFramesAndVerify(quality_thresholds, rate_profile, process_settings,
                          rc_thresholds, nullptr /* visualization_params */);
 }
@@ -170,9 +185,10 @@ TEST_F(VideoProcessorIntegrationTest, ProcessNoLossDenoiserOnVP9) {
   rate_profile.frame_index_rate_update[1] = kNumFramesShort + 1;
   rate_profile.num_frames = kNumFramesShort;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP9, kHwCodec, kUseSingleCore,
-                 0.0f, -1, 1, false, true, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP9, 1, false, true,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 36.8, 35.8, 0.92, 0.91);
@@ -195,9 +211,10 @@ TEST_F(VideoProcessorIntegrationTest,
   rate_profile.frame_index_rate_update[1] = kNumFramesLong + 1;
   rate_profile.num_frames = kNumFramesLong;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP9, kHwCodec, kUseSingleCore,
-                 0.0f, -1, 1, false, false, true, true);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP9, 1, false, false,
+                   true, true, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 24.0, 13.0, 0.65, 0.37);
@@ -223,9 +240,10 @@ TEST_F(VideoProcessorIntegrationTest, ProcessZeroPacketLoss) {
   rate_profile.frame_index_rate_update[1] = kNumFramesShort + 1;
   rate_profile.num_frames = kNumFramesShort;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP8, kHwCodec, kUseSingleCore,
-                 0.0f, -1, 1, false, true, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP8, 1, false, true,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 34.95, 33.0, 0.90, 0.89);
@@ -245,9 +263,10 @@ TEST_F(VideoProcessorIntegrationTest, Process5PercentPacketLoss) {
   rate_profile.frame_index_rate_update[1] = kNumFramesShort + 1;
   rate_profile.num_frames = kNumFramesShort;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP8, kHwCodec, kUseSingleCore,
-                 0.05f, -1, 1, false, true, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.05f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP8, 1, false, true,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 20.0, 16.0, 0.60, 0.40);
@@ -267,12 +286,39 @@ TEST_F(VideoProcessorIntegrationTest, Process10PercentPacketLoss) {
   rate_profile.frame_index_rate_update[1] = kNumFramesShort + 1;
   rate_profile.num_frames = kNumFramesShort;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP8, kHwCodec, kUseSingleCore,
-                 0.1f, -1, 1, false, true, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.1f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP8, 1, false, true,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 19.0, 16.0, 0.50, 0.35);
+  // Thresholds for rate control.
+  RateControlThresholds rc_thresholds[1];
+  SetRateControlThresholds(rc_thresholds, 0, 0, 40, 20, 10, 15, 0, 1);
+  ProcessFramesAndVerify(quality_thresholds, rate_profile, process_settings,
+                         rc_thresholds, nullptr /* visualization_params */);
+}
+
+// This test is identical to VideoProcessorIntegrationTest.ProcessZeroPacketLoss
+// except that |batch_mode| is turned on. The main point of this test is to see
+// that the reported stats are not wildly varying between batch mode and the
+// regular online mode.
+TEST_F(VideoProcessorIntegrationTest, ProcessInBatchMode) {
+  // Bit rate and frame rate profile.
+  RateProfile rate_profile;
+  SetRateProfile(&rate_profile, 0, 500, 30, 0);
+  rate_profile.frame_index_rate_update[1] = kNumFramesShort + 1;
+  rate_profile.num_frames = kNumFramesShort;
+  // Codec/network settings.
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging,
+                                 true /* batch_mode */);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP8, 1, false, true,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
+  // Thresholds for expected quality.
+  QualityThresholds quality_thresholds;
+  SetQualityThresholds(&quality_thresholds, 34.95, 33.0, 0.90, 0.89);
   // Thresholds for rate control.
   RateControlThresholds rc_thresholds[1];
   SetRateControlThresholds(rc_thresholds, 0, 0, 40, 20, 10, 15, 0, 1);
@@ -311,9 +357,10 @@ TEST_F(VideoProcessorIntegrationTest, MAYBE_ProcessNoLossChangeBitRateVP8) {
   rate_profile.frame_index_rate_update[3] = kNumFramesLong + 1;
   rate_profile.num_frames = kNumFramesLong;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP8, kHwCodec, kUseSingleCore,
-                 0.0f, -1, 1, false, true, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP8, 1, false, true,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 34.0, 32.0, 0.85, 0.80);
@@ -352,9 +399,10 @@ TEST_F(VideoProcessorIntegrationTest,
   rate_profile.frame_index_rate_update[3] = kNumFramesLong + 1;
   rate_profile.num_frames = kNumFramesLong;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP8, kHwCodec, kUseSingleCore,
-                 0.0f, -1, 1, false, true, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP8, 1, false, true,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 31.0, 22.0, 0.80, 0.65);
@@ -388,9 +436,10 @@ TEST_F(VideoProcessorIntegrationTest, MAYBE_ProcessNoLossTemporalLayersVP8) {
   rate_profile.frame_index_rate_update[2] = kNumFramesLong + 1;
   rate_profile.num_frames = kNumFramesLong;
   // Codec/network settings.
-  CodecParams process_settings;
-  SetCodecParams(&process_settings, kVideoCodecVP8, kHwCodec, kUseSingleCore,
-                 0.0f, -1, 3, false, true, true, false);
+  ProcessParams process_settings(kHwCodec, kUseSingleCore, 0.0f, -1,
+                                 kForemanCif, kVerboseLogging, kBatchMode);
+  SetCodecSettings(&config_, &codec_settings_, kVideoCodecVP8, 3, false, true,
+                   true, false, kResilienceOn, kCifWidth, kCifHeight);
   // Thresholds for expected quality.
   QualityThresholds quality_thresholds;
   SetQualityThresholds(&quality_thresholds, 32.5, 30.0, 0.85, 0.80);

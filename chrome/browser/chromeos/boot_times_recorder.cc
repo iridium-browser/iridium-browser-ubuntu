@@ -137,8 +137,8 @@ static const base::FilePath::CharType kLoginTimes[] = FPL("login-times");
 // Name of file collecting logout times.
 static const char kLogoutTimes[] = "logout-times";
 
-static base::LazyInstance<BootTimesRecorder> g_boot_times_recorder =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BootTimesRecorder>::DestructorAtExit
+    g_boot_times_recorder = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BootTimesRecorder::Stats BootTimesRecorder::Stats::GetCurrentStats() {
@@ -211,8 +211,7 @@ bool BootTimesRecorder::Stats::UptimeDouble(double* result) const {
 
 void BootTimesRecorder::Stats::RecordStats(const std::string& name) const {
   base::PostTaskWithTraits(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&BootTimesRecorder::Stats::RecordStatsAsync,
                  base::Owned(new Stats(*this)), name));
 }
@@ -221,8 +220,7 @@ void BootTimesRecorder::Stats::RecordStatsWithCallback(
     const std::string& name,
     const base::Closure& callback) const {
   base::PostTaskWithTraitsAndReply(
-      FROM_HERE, base::TaskTraits().MayBlock().WithPriority(
-                     base::TaskPriority::BACKGROUND),
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
       base::Bind(&BootTimesRecorder::Stats::RecordStatsAsync,
                  base::Owned(new Stats(*this)), name),
       callback);
@@ -339,15 +337,12 @@ void BootTimesRecorder::LoginDone(bool is_user_new) {
         content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
         content::NotificationService::AllSources());
   }
-  // Don't swamp the FILE thread right away.
-  BrowserThread::PostDelayedTask(
-      BrowserThread::FILE,
-      FROM_HERE,
-      base::Bind(&WriteTimes,
-                 kLoginTimes,
-                 (is_user_new ? kUmaLoginNewUser : kUmaLogin),
-                 kUmaLoginPrefix,
-                 login_time_markers_),
+  // Don't swamp the background thread right away.
+  base::PostDelayedTaskWithTraits(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      base::BindOnce(&WriteTimes, kLoginTimes,
+                     (is_user_new ? kUmaLoginNewUser : kUmaLogin),
+                     kUmaLoginPrefix, login_time_markers_),
       base::TimeDelta::FromMilliseconds(kLoginTimeWriteDelayMs));
 }
 

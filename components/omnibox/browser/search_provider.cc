@@ -41,6 +41,7 @@
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_request_headers.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -271,12 +272,8 @@ void SearchProvider::Start(const AutocompleteInput& input,
   providers_.set(default_provider_keyword, keyword_provider_keyword);
 
   if (input.from_omnibox_focus()) {
-    // Don't display any suggestions for on-focus requests.  Stop any pending
-    // requests here (there likely aren't yet, though it doesn't hurt to be safe
-    // so that we can create a new request later in this flow (to warm-up the
-    // suggest server by alerting it that the user is likely about to start
-    // typing).
-    StopSuggest();
+    // Don't display any suggestions for on-focus requests.
+    DCHECK(done_);
     ClearAllResults();
   } else if (input.text().empty()) {
     // User typed "?" alone.  Give them a placeholder result indicating what
@@ -906,8 +903,36 @@ std::unique_ptr<net::URLFetcher> SearchProvider::CreateSuggestFetcher(
 
   LogOmniboxSuggestRequest(REQUEST_SENT);
 
-  std::unique_ptr<net::URLFetcher> fetcher =
-      net::URLFetcher::Create(id, suggest_url, net::URLFetcher::GET, this);
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("omnibox_suggest", R"(
+        semantics {
+          sender: "Omnibox"
+          description:
+            "Chrome can provide search and navigation suggestions from the "
+            "currently-selected search provider in the omnibox dropdown, based "
+            "on user input."
+          trigger: "User typing in the omnibox."
+          data:
+            "The text typed into the address bar. Potentially other metadata, "
+            "such as the current cursor position or URL of the current page."
+          destination: WEBSITE
+        }
+        policy {
+          cookies_allowed: true
+          cookies_store: "user"
+          setting:
+            "Users can control this feature via the 'Use a prediction service "
+            "to help complete searches and URLs typed in the address bar' "
+            "setting under 'Privacy'. The feature is enabled by default."
+          chrome_policy {
+            SearchSuggestEnabled {
+                policy_options {mode: MANDATORY}
+                SearchSuggestEnabled: false
+            }
+          }
+        })");
+  std::unique_ptr<net::URLFetcher> fetcher = net::URLFetcher::Create(
+      id, suggest_url, net::URLFetcher::GET, this, traffic_annotation);
   data_use_measurement::DataUseUserData::AttachToFetcher(
       fetcher.get(), data_use_measurement::DataUseUserData::OMNIBOX);
   fetcher->SetRequestContext(client()->GetRequestContext());
@@ -967,7 +992,7 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
     }
 
     SearchSuggestionParser::SuggestResult verbatim(
-        trimmed_verbatim, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
+        trimmed_verbatim, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, 0,
         trimmed_verbatim, base::string16(), base::string16(), answer_contents,
         answer_type, std::move(answer), std::string(), std::string(), false,
         verbatim_relevance, relevance_from_server, false, trimmed_verbatim);
@@ -990,7 +1015,7 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
         const base::string16& trimmed_verbatim =
             base::CollapseWhitespace(keyword_input_.text(), false);
         SearchSuggestionParser::SuggestResult verbatim(
-            trimmed_verbatim, AutocompleteMatchType::SEARCH_OTHER_ENGINE,
+            trimmed_verbatim, AutocompleteMatchType::SEARCH_OTHER_ENGINE, 0,
             trimmed_verbatim, base::string16(), base::string16(),
             base::string16(), base::string16(), nullptr, std::string(),
             std::string(), true, keyword_verbatim_relevance,
@@ -1020,11 +1045,11 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
   // that set a legal default match if possible.  If Instant Extended is enabled
   // and we have server-provided (and thus hopefully more accurate) scores for
   // some suggestions, we allow more of those, until we reach
-  // AutocompleteResult::kMaxMatches total matches (that is, enough to fill the
-  // whole popup).
+  // AutocompleteResult::GetMaxMatches() total matches (that is, enough to fill
+  // the whole popup).
   //
   // We will always return any verbatim matches, no matter how we obtained their
-  // scores, unless we have already accepted AutocompleteResult::kMaxMatches
+  // scores, unless we have already accepted AutocompleteResult::GetMaxMatches()
   // higher-scoring matches under the conditions above.
   std::sort(matches.begin(), matches.end(), &AutocompleteMatch::MoreRelevant);
 
@@ -1048,7 +1073,7 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
   size_t num_suggestions = 0;
   for (ACMatches::const_iterator i(matches.begin());
        (i != matches.end()) &&
-           (matches_.size() < AutocompleteResult::kMaxMatches);
+       (matches_.size() < AutocompleteResult::GetMaxMatches());
        ++i) {
     // SEARCH_OTHER_ENGINE is only used in the SearchProvider for the keyword
     // verbatim result, so this condition basically means "if this match is a
@@ -1176,7 +1201,7 @@ SearchProvider::ScoreHistoryResultsHelper(const HistoryResults& results,
       insertion_position = scored_results.begin();
     }
     SearchSuggestionParser::SuggestResult history_suggestion(
-        trimmed_suggestion, AutocompleteMatchType::SEARCH_HISTORY,
+        trimmed_suggestion, AutocompleteMatchType::SEARCH_HISTORY, 0,
         trimmed_suggestion, base::string16(), base::string16(),
         base::string16(), base::string16(), nullptr, std::string(),
         std::string(), is_keyword, relevance, false, false, trimmed_input);
@@ -1418,6 +1443,7 @@ AutocompleteMatch SearchProvider::NavigationToMatch(
   AutocompleteMatch match(this, navigation.relevance(), false,
                           navigation.type());
   match.destination_url = navigation.url();
+  match.subtype_identifier = navigation.subtype_identifier();
   BaseSearchProvider::SetDeletionURL(navigation.deletion_url(), &match);
   // First look for the user's input inside the formatted url as it would be
   // without trimming the scheme, so we can find matches at the beginning of the

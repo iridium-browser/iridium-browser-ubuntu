@@ -8,11 +8,13 @@
 
 #include <utility>
 
+#include "base/debug/alias.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory.h"
 #include "base/process/process_handle.h"
 #include "base/sys_info.h"
+#include "build/build_config.h"
 #include "mojo/edk/embedder/platform_handle_utils.h"
 
 #if defined(OS_NACL)
@@ -28,12 +30,10 @@ namespace {
 // Takes ownership of |memory_handle|.
 ScopedPlatformHandle SharedMemoryToPlatformHandle(
     base::SharedMemoryHandle memory_handle) {
-#if defined(OS_POSIX) && !(defined(OS_MACOSX) && !defined(OS_IOS))
-  return ScopedPlatformHandle(PlatformHandle(memory_handle.fd));
-#elif defined(OS_WIN)
-  return ScopedPlatformHandle(PlatformHandle(memory_handle.GetHandle()));
-#else
+#if defined(OS_MACOSX) && !defined(OS_IOS)
   return ScopedPlatformHandle(PlatformHandle(memory_handle.GetMemoryObject()));
+#else
+  return ScopedPlatformHandle(PlatformHandle(memory_handle.GetHandle()));
 #endif
 }
 
@@ -58,11 +58,12 @@ PlatformSharedBuffer* PlatformSharedBuffer::Create(size_t num_bytes) {
 PlatformSharedBuffer* PlatformSharedBuffer::CreateFromPlatformHandle(
     size_t num_bytes,
     bool read_only,
+    const base::UnguessableToken& guid,
     ScopedPlatformHandle platform_handle) {
   DCHECK_GT(num_bytes, 0u);
 
   PlatformSharedBuffer* rv = new PlatformSharedBuffer(num_bytes, read_only);
-  if (!rv->InitFromPlatformHandle(std::move(platform_handle))) {
+  if (!rv->InitFromPlatformHandle(guid, std::move(platform_handle))) {
     // We can't just delete it directly, due to the "in destructor" (debug)
     // check.
     scoped_refptr<PlatformSharedBuffer> deleter(rv);
@@ -75,6 +76,7 @@ PlatformSharedBuffer* PlatformSharedBuffer::CreateFromPlatformHandle(
 // static
 PlatformSharedBuffer* PlatformSharedBuffer::CreateFromPlatformHandlePair(
     size_t num_bytes,
+    const base::UnguessableToken& guid,
     ScopedPlatformHandle rw_platform_handle,
     ScopedPlatformHandle ro_platform_handle) {
   DCHECK_GT(num_bytes, 0u);
@@ -82,7 +84,7 @@ PlatformSharedBuffer* PlatformSharedBuffer::CreateFromPlatformHandlePair(
   DCHECK(ro_platform_handle.is_valid());
 
   PlatformSharedBuffer* rv = new PlatformSharedBuffer(num_bytes, false);
-  if (!rv->InitFromPlatformHandlePair(std::move(rw_platform_handle),
+  if (!rv->InitFromPlatformHandlePair(guid, std::move(rw_platform_handle),
                                       std::move(ro_platform_handle))) {
     // We can't just delete it directly, due to the "in destructor" (debug)
     // check.
@@ -112,6 +114,11 @@ size_t PlatformSharedBuffer::GetNumBytes() const {
 
 bool PlatformSharedBuffer::IsReadOnly() const {
   return read_only_;
+}
+
+base::UnguessableToken PlatformSharedBuffer::GetGUID() const {
+  DCHECK(shared_memory_);
+  return shared_memory_->handle().GetGUID();
 }
 
 std::unique_ptr<PlatformSharedBufferMapping> PlatformSharedBuffer::Map(
@@ -145,7 +152,8 @@ std::unique_ptr<PlatformSharedBufferMapping> PlatformSharedBuffer::MapNoCheck(
     base::AutoLock locker(lock_);
     handle = base::SharedMemory::DuplicateHandle(shared_memory_->handle());
   }
-  if (handle == base::SharedMemory::NULLHandle())
+
+  if (!handle.IsValid())
     return nullptr;
 
   std::unique_ptr<PlatformSharedBufferMapping> mapping(
@@ -163,7 +171,7 @@ ScopedPlatformHandle PlatformSharedBuffer::DuplicatePlatformHandle() {
     base::AutoLock locker(lock_);
     handle = base::SharedMemory::DuplicateHandle(shared_memory_->handle());
   }
-  if (handle == base::SharedMemory::NULLHandle())
+  if (!handle.IsValid())
     return ScopedPlatformHandle();
 
   return SharedMemoryToPlatformHandle(handle);
@@ -195,20 +203,18 @@ PlatformSharedBuffer* PlatformSharedBuffer::CreateReadOnlyDuplicate() {
     base::AutoLock locker(lock_);
     base::SharedMemoryHandle handle;
     handle = base::SharedMemory::DuplicateHandle(ro_shared_memory_->handle());
-    if (handle == base::SharedMemory::NULLHandle())
+    if (!handle.IsValid())
       return nullptr;
     return CreateFromSharedMemoryHandle(num_bytes_, true, handle);
   }
 
   base::SharedMemoryHandle handle;
-  bool success;
   {
     base::AutoLock locker(lock_);
-    success = shared_memory_->ShareReadOnlyToProcess(
-        base::GetCurrentProcessHandle(), &handle);
+    handle = shared_memory_->GetReadOnlyHandle();
   }
-  if (!success || handle == base::SharedMemory::NULLHandle())
-      return nullptr;
+  if (!handle.IsValid())
+    return nullptr;
 
   return CreateFromSharedMemoryHandle(num_bytes_, true, handle);
 }
@@ -232,18 +238,23 @@ bool PlatformSharedBuffer::Init() {
 }
 
 bool PlatformSharedBuffer::InitFromPlatformHandle(
+    const base::UnguessableToken& guid,
     ScopedPlatformHandle platform_handle) {
   DCHECK(!shared_memory_);
 
-#if defined(OS_WIN)
-  base::SharedMemoryHandle handle(platform_handle.release().handle,
-                                  base::GetCurrentProcId());
+#if defined(OS_WIN) || defined(OS_FUCHSIA)
+  base::SharedMemoryHandle handle(platform_handle.release().handle, num_bytes_,
+                                  guid);
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
-  base::SharedMemoryHandle handle;
-  handle = base::SharedMemoryHandle(platform_handle.release().port, num_bytes_,
-                                    base::GetCurrentProcId());
+  base::SharedMemoryHandle handle = base::SharedMemoryHandle(
+      platform_handle.release().port, num_bytes_, guid);
+#elif defined(OS_FUCHSIA)
+  base::SharedMemoryHandle handle =
+      base::SharedMemoryHandle(platform_handle.release(), num_bytes_, guid);
 #else
-  base::SharedMemoryHandle handle(platform_handle.release().handle, false);
+  base::SharedMemoryHandle handle(
+      base::FileDescriptor(platform_handle.release().handle, false), num_bytes_,
+      guid);
 #endif
 
   shared_memory_.reset(new base::SharedMemory(handle, read_only_));
@@ -251,6 +262,7 @@ bool PlatformSharedBuffer::InitFromPlatformHandle(
 }
 
 bool PlatformSharedBuffer::InitFromPlatformHandlePair(
+    const base::UnguessableToken& guid,
     ScopedPlatformHandle rw_platform_handle,
     ScopedPlatformHandle ro_platform_handle) {
 #if defined(OS_MACOSX)
@@ -258,15 +270,18 @@ bool PlatformSharedBuffer::InitFromPlatformHandlePair(
   return false;
 #else  // defined(OS_MACOSX)
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_FUCHSIA)
   base::SharedMemoryHandle handle(rw_platform_handle.release().handle,
-                                  base::GetCurrentProcId());
+                                  num_bytes_, guid);
   base::SharedMemoryHandle ro_handle(ro_platform_handle.release().handle,
-                                     base::GetCurrentProcId());
-#else  // defined(OS_WIN)
-  base::SharedMemoryHandle handle(rw_platform_handle.release().handle, false);
-  base::SharedMemoryHandle ro_handle(ro_platform_handle.release().handle,
-                                     false);
+                                     num_bytes_, guid);
+#else  // defined(OS_WIN) || defined(OS_FUCHSIA)
+  base::SharedMemoryHandle handle(
+      base::FileDescriptor(rw_platform_handle.release().handle, false),
+      num_bytes_, guid);
+  base::SharedMemoryHandle ro_handle(
+      base::FileDescriptor(ro_platform_handle.release().handle, false),
+      num_bytes_, guid);
 #endif  // defined(OS_WIN)
 
   DCHECK(!shared_memory_);
@@ -297,9 +312,9 @@ size_t PlatformSharedBufferMapping::GetLength() const {
 }
 
 bool PlatformSharedBufferMapping::Map() {
-  // Mojo shared buffers can be mapped at any offset. However,
-  // base::SharedMemory must be mapped at a page boundary. So calculate what the
-  // nearest whole page offset is, and build a mapping that's offset from that.
+// Mojo shared buffers can be mapped at any offset. However,
+// base::SharedMemory must be mapped at a page boundary. So calculate what the
+// nearest whole page offset is, and build a mapping that's offset from that.
 #if defined(OS_NACL)
   // base::SysInfo isn't available under NaCl.
   size_t page_size = getpagesize();
@@ -310,9 +325,9 @@ bool PlatformSharedBufferMapping::Map() {
   size_t real_offset = offset_ - offset_rounding;
   size_t real_length = length_ + offset_rounding;
 
-  if (!shared_memory_.MapAt(static_cast<off_t>(real_offset), real_length))
-    return false;
-
+  bool result =
+      shared_memory_.MapAt(static_cast<off_t>(real_offset), real_length);
+  DCHECK(result);
   base_ = static_cast<char*>(shared_memory_.memory()) + offset_rounding;
   return true;
 }

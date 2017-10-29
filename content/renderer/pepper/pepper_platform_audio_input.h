@@ -15,8 +15,6 @@
 #include "media/audio/audio_input_ipc.h"
 #include "media/base/audio_parameters.h"
 
-class GURL;
-
 namespace base {
 class SingleThreadTaskRunner;
 }
@@ -46,7 +44,6 @@ class PepperPlatformAudioInput
   static PepperPlatformAudioInput* Create(
       int render_frame_id,
       const std::string& device_id,
-      const GURL& document_url,
       int sample_rate,
       int frames_per_buffer,
       PepperAudioInputHost* client);
@@ -61,8 +58,10 @@ class PepperPlatformAudioInput
   void OnStreamCreated(base::SharedMemoryHandle handle,
                        base::SyncSocket::Handle socket_handle,
                        int length,
-                       int total_segments) override;
+                       int total_segments,
+                       bool initially_muted) override;
   void OnError() override;
+  void OnMuted(bool is_muted) override;
   void OnIPCClosed() override;
 
  protected:
@@ -75,7 +74,6 @@ class PepperPlatformAudioInput
 
   bool Initialize(int render_frame_id,
                   const std::string& device_id,
-                  const GURL& document_url,
                   int sample_rate,
                   int frames_per_buffer,
                   PepperAudioInputHost* client);

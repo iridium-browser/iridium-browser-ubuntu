@@ -8,6 +8,7 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/animation/animation_container_observer.h"
 #include "ui/gfx/animation/linear_animation.h"
@@ -46,8 +47,7 @@ class FakeAnimationContainerObserver : public AnimationContainerObserver {
 class TestAnimation : public LinearAnimation {
  public:
   explicit TestAnimation(AnimationDelegate* delegate)
-      : LinearAnimation(20, 20, delegate) {
-  }
+      : LinearAnimation(base::TimeDelta::FromMilliseconds(20), 20, delegate) {}
 
   void AnimateToState(double state) override {}
 
@@ -58,8 +58,13 @@ class TestAnimation : public LinearAnimation {
 }  // namespace
 
 class AnimationContainerTest: public testing::Test {
+ protected:
+  AnimationContainerTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
+
  private:
-  base::MessageLoopForUI message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 };
 
 // Makes sure the animation ups the ref count of the container and releases it

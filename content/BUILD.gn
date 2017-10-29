@@ -60,10 +60,12 @@ config("content_implementation") {
 if (!is_nacl_nonsfi) {
   content_shared_components = [
     "//content/gpu:gpu_sources",
+    "//content/network:network_sources",
     "//content/public/browser:browser_sources",
     "//content/public/child:child_sources",
-    "//content/public/gpu:gpu_sources",
     "//content/public/common:common_sources",
+    "//content/public/gpu:gpu_sources",
+    "//content/public/network:network_sources",
     "//content/public/renderer:renderer_sources",
     "//content/public/utility:utility_sources",
   ]
@@ -79,7 +81,7 @@ if (is_component_build) {
     public_deps =
         content_shared_components + [ "//content/public/app:both_sources" ]
     deps = [
-      "//build/config/sanitizers:deps",
+      "//build/config:exe_and_shlib_deps",
     ]
   }
 } else if (is_nacl_nonsfi) {
@@ -111,7 +113,10 @@ if (is_component_build) {
 
 grit("resources") {
   source = "content_resources.grd"
-  use_qualified_include = true
+
+  # The .grd contains references to generated files.
+  source_is_generated = true
+
   outputs = [
     "grit/content_resources.h",
     "content_resources.pak",

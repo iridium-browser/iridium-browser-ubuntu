@@ -22,38 +22,6 @@
 
 DEFINE_bool(portableFonts, false, "Use portable fonts");
 
-#if SK_SUPPORT_GPU
-#include "effects/GrSRGBEffect.h"
-#include "SkColorFilter.h"
-
-// Color filter that just wraps GrSRGBEffect
-class SkSRGBColorFilter : public SkColorFilter {
-public:
-    static sk_sp<SkColorFilter> Make(GrSRGBEffect::Mode mode) {
-        return sk_sp<SkColorFilter>(new SkSRGBColorFilter(mode));
-    }
-
-    sk_sp<GrFragmentProcessor> asFragmentProcessor(GrContext*, SkColorSpace*) const override {
-        return GrSRGBEffect::Make(fMode);
-    }
-
-    void filterSpan(const SkPMColor src[], int count, SkPMColor dst[]) const override {
-        SK_ABORT("SkSRGBColorFilter is only implemented for GPU");
-    }
-    Factory getFactory() const override { return nullptr; }
-
-#ifndef SK_IGNORE_TO_STRING
-    void toString(SkString* str) const override {}
-#endif
-
-private:
-    SkSRGBColorFilter(GrSRGBEffect::Mode mode) : fMode(mode) {}
-
-    GrSRGBEffect::Mode fMode;
-    typedef SkColorFilter INHERITED;
-};
-#endif
-
 namespace sk_tool_utils {
 
 /* these are the default fonts chosen by Chrome for serif, sans-serif, and monospace */
@@ -87,7 +55,7 @@ const char* platform_font_name(const char* name) {
     if (platform.equals("Win")) {
         return gStandardFontNames[2][index];
     }
-    if (platform.equals("Ubuntu")) {
+    if (platform.equals("Ubuntu") || platform.equals("Debian")) {
         return gStandardFontNames[3][index];
     }
     if (platform.equals("Android")) {
@@ -101,7 +69,7 @@ const char* platform_font_name(const char* name) {
 
 const char* platform_os_emoji() {
     const char* osName = platform_os_name();
-    if (!strcmp(osName, "Android") || !strcmp(osName, "Ubuntu")) {
+    if (!strcmp(osName, "Android") || !strcmp(osName, "Ubuntu") || !strcmp(osName, "Debian")) {
         return "CBDT";
     }
     if (!strncmp(osName, "Mac", 3) || !strncmp(osName, "iOS", 3)) {
@@ -196,7 +164,6 @@ const char* colortype_name(SkColorType ct) {
     switch (ct) {
         case kUnknown_SkColorType:      return "Unknown";
         case kAlpha_8_SkColorType:      return "Alpha_8";
-        case kIndex_8_SkColorType:      return "Index_8";
         case kARGB_4444_SkColorType:    return "ARGB_4444";
         case kRGB_565_SkColorType:      return "RGB_565";
         case kRGBA_8888_SkColorType:    return "RGBA_8888";
@@ -225,8 +192,6 @@ void set_portable_typeface(SkPaint* paint, const char* name, SkFontStyle style) 
 void write_pixels(SkCanvas* canvas, const SkBitmap& bitmap, int x, int y,
                   SkColorType colorType, SkAlphaType alphaType) {
     SkBitmap tmp(bitmap);
-    tmp.lockPixels();
-
     const SkImageInfo info = SkImageInfo::Make(tmp.width(), tmp.height(), colorType, alphaType);
 
     canvas->writePixels(info, tmp.getPixels(), tmp.rowBytes(), x, y);
@@ -271,7 +236,7 @@ SkBitmap create_string_bitmap(int w, int h, SkColor c, int x, int y,
     paint.setTextSize(SkIntToScalar(textSize));
 
     canvas.clear(0x00000000);
-    canvas.drawText(str, strlen(str), SkIntToScalar(x), SkIntToScalar(y), paint);
+    canvas.drawString(str, SkIntToScalar(x), SkIntToScalar(y), paint);
 
     // Tag data as sRGB (without doing any color space conversion). Color-space aware configs
     // will process this correctly but legacy configs will render as if this returned N32.
@@ -588,6 +553,35 @@ SkRect compute_tallest_occluder(const SkRRect& rr) {
     return SkRect::MakeLTRB(r.fLeft + maxL, r.fTop, r.fRight - maxR, r.fBottom);
 }
 
+bool copy_to(SkBitmap* dst, SkColorType dstColorType, const SkBitmap& src) {
+    SkPixmap srcPM;
+    if (!src.peekPixels(&srcPM)) {
+        return false;
+    }
+
+    SkBitmap tmpDst;
+    SkImageInfo dstInfo = srcPM.info().makeColorType(dstColorType);
+    if (!tmpDst.setInfo(dstInfo)) {
+        return false;
+    }
+
+    if (!tmpDst.tryAllocPixels()) {
+        return false;
+    }
+
+    SkPixmap dstPM;
+    if (!tmpDst.peekPixels(&dstPM)) {
+        return false;
+    }
+
+    if (!srcPM.readPixels(dstPM)) {
+        return false;
+    }
+
+    dst->swap(tmpDst);
+    return true;
+}
+
 void copy_to_g8(SkBitmap* dst, const SkBitmap& src) {
     SkASSERT(kBGRA_8888_SkColorType == src.colorType() ||
              kRGBA_8888_SkColorType == src.colorType());
@@ -618,15 +612,5 @@ void copy_to_g8(SkBitmap* dst, const SkBitmap& src) {
         dst8 += dst->rowBytes();
     }
 }
-
-#if SK_SUPPORT_GPU
-sk_sp<SkColorFilter> MakeLinearToSRGBColorFilter() {
-    return SkSRGBColorFilter::Make(GrSRGBEffect::Mode::kLinearToSRGB);
-}
-
-sk_sp<SkColorFilter> MakeSRGBToLinearColorFilter() {
-    return SkSRGBColorFilter::Make(GrSRGBEffect::Mode::kSRGBToLinear);
-}
-#endif
 
 }  // namespace sk_tool_utils

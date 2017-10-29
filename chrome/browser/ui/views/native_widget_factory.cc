@@ -26,6 +26,9 @@ views::NativeWidget* CreateNativeWidget(
   aura::Window* window = nullptr;
   if (type == NativeWidgetType::DESKTOP_NATIVE_WIDGET_AURA ||
       (!params->parent && !params->context && !params->child)) {
+    // In the desktop case, do not always set the profile window
+    // property from the parent since there are windows (like the task
+    // manager) that are not associated with a specific profile.
     views::DesktopNativeWidgetAura* desktop_native_widget =
         new views::DesktopNativeWidgetAura(delegate);
     window = desktop_native_widget->GetNativeWindow();
@@ -42,6 +45,10 @@ views::NativeWidget* CreateNativeWidget(
     window = native_widget_aura->GetNativeWindow();
     native_widget = native_widget_aura;
   }
-  SetThemeProfileForWindow(window, profile);
+  // Use the original profile because |window| may outlive the profile
+  // of the context window.  This can happen with incognito profiles.
+  // However, the original profile will stick around until shutdown.
+  SetThemeProfileForWindow(window,
+                           profile ? profile->GetOriginalProfile() : nullptr);
   return native_widget;
 }

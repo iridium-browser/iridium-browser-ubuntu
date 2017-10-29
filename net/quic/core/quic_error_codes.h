@@ -153,6 +153,9 @@ enum QuicErrorCode {
   QUIC_EMPTY_STREAM_FRAME_NO_FIN = 50,
   // We received invalid data on the headers stream.
   QUIC_INVALID_HEADERS_STREAM_DATA = 56,
+  // Invalid data on the headers stream received because of decompression
+  // failure.
+  QUIC_HEADERS_STREAM_DATA_DECOMPRESS_FAILURE = 97,
   // The peer received too much data, violating flow control.
   QUIC_FLOW_CONTROL_RECEIVED_TOO_MUCH_DATA = 59,
   // The peer sent too much data, violating flow control.
@@ -171,8 +174,6 @@ enum QuicErrorCode {
   QUIC_BAD_PACKET_LOSS_RATE = 71,
   // Disabled QUIC because of too many PUBLIC_RESETs post handshake.
   QUIC_PUBLIC_RESETS_POST_HANDSHAKE = 73,
-  // Disabled QUIC because of too many timeouts with streams open.
-  QUIC_TIMEOUTS_WITH_OPEN_STREAMS = 74,
   // Closed because we failed to serialize a packet.
   QUIC_FAILED_TO_SERIALIZE_PACKET = 75,
   // QUIC timed out after too many RTOs.
@@ -273,7 +274,7 @@ enum QuicErrorCode {
   QUIC_TOO_MANY_SESSIONS_ON_SERVER = 96,
 
   // No error. Used as bound while iterating.
-  QUIC_LAST_ERROR = 97,
+  QUIC_LAST_ERROR = 98,
 };
 // QuicErrorCodes is encoded as a single octet on-the-wire.
 static_assert(static_cast<int>(QUIC_LAST_ERROR) <=

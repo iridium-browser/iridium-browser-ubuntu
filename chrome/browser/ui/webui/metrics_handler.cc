@@ -8,13 +8,11 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
-#include "chrome/browser/ui/webui/ntp/ntp_user_data_logger.h"
-#include "chrome/common/search/ntp_logging_events.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 
@@ -34,6 +32,10 @@ void MetricsHandler::RegisterMessages() {
       base::Bind(&MetricsHandler::HandleRecordInHistogram,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
+      "metricsHandler:recordBooleanHistogram",
+      base::Bind(&MetricsHandler::HandleRecordBooleanHistogram,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
       "metricsHandler:recordTime",
       base::Bind(&MetricsHandler::HandleRecordTime, base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
@@ -43,7 +45,7 @@ void MetricsHandler::RegisterMessages() {
 
 void MetricsHandler::HandleRecordAction(const base::ListValue* args) {
   std::string string_action = base::UTF16ToUTF8(ExtractStringValue(args));
-  content::RecordComputedAction(string_action);
+  base::RecordComputedAction(string_action);
 }
 
 void MetricsHandler::HandleRecordInHistogram(const base::ListValue* args) {
@@ -78,6 +80,19 @@ void MetricsHandler::HandleRecordInHistogram(const base::ListValue* args) {
           histogram_name, 1, int_boundary_value, bucket_count + 1,
           base::HistogramBase::kUmaTargetedHistogramFlag);
   counter->Add(int_value);
+}
+
+void MetricsHandler::HandleRecordBooleanHistogram(const base::ListValue* args) {
+  std::string histogram_name;
+  bool value;
+  if (!args->GetString(0, &histogram_name) || !args->GetBoolean(1, &value)) {
+    NOTREACHED();
+    return;
+  }
+
+  base::HistogramBase* counter = base::BooleanHistogram::FactoryGet(
+      histogram_name, base::HistogramBase::kUmaTargetedHistogramFlag);
+  counter->AddBoolean(value);
 }
 
 void MetricsHandler::HandleRecordTime(const base::ListValue* args) {

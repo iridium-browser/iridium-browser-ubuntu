@@ -4,11 +4,12 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
- 
+
 #ifndef SKSL_CODEGENERATOR
 #define SKSL_CODEGENERATOR
 
 #include "ir/SkSLProgram.h"
+#include "SkSLOutputStream.h"
 
 namespace SkSL {
 
@@ -18,7 +19,7 @@ namespace SkSL {
  */
 class CodeGenerator {
 public:
-    CodeGenerator(const Program* program, ErrorReporter* errors, SkWStream* out)
+    CodeGenerator(const Program* program, ErrorReporter* errors, OutputStream* out)
     : fProgram(*program)
     , fErrors(*errors)
     , fOut(out) {}
@@ -31,7 +32,7 @@ protected:
 
     const Program& fProgram;
     ErrorReporter& fErrors;
-    SkWStream* fOut;
+    OutputStream* fOut;
 };
 
 } // namespace

@@ -11,9 +11,9 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "components/payments/content/payment_app.mojom.h"
-#include "content/browser/payments/payment_app_manager.h"
+#include "content/browser/payments/payment_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/modules/payments/payment_app.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -29,19 +29,11 @@ class PaymentAppContentUnitTestBase : public testing::Test {
   ~PaymentAppContentUnitTestBase() override;
 
   BrowserContext* browser_context();
-  PaymentAppManager* CreatePaymentAppManager(const GURL& scope_url,
-                                             const GURL& sw_script_url);
-  void SetManifest(PaymentAppManager* manager,
-                   payments::mojom::PaymentAppManifestPtr manifest,
-                   const PaymentAppManager::SetManifestCallback& callback);
-  void GetManifest(PaymentAppManager* manager,
-                   const PaymentAppManager::GetManifestCallback& callback);
-  payments::mojom::PaymentAppManifestPtr CreatePaymentAppManifestForTest(
-      const std::string& name);
+  PaymentManager* CreatePaymentManager(const GURL& scope_url,
+                                       const GURL& sw_script_url);
   void UnregisterServiceWorker(const GURL& scope_url);
 
   void ResetPaymentAppInvoked() const;
-  bool payment_app_invoked() const;
   int64_t last_sw_registration_id() const;
   const GURL& last_sw_scope_url() const;
 
@@ -53,7 +45,7 @@ class PaymentAppContentUnitTestBase : public testing::Test {
 
   std::unique_ptr<TestBrowserThreadBundle> thread_bundle_;
   std::unique_ptr<PaymentAppForWorkerTestHelper> worker_helper_;
-  std::vector<payments::mojom::PaymentAppManagerPtr> payment_app_managers_;
+  std::vector<payments::mojom::PaymentManagerPtr> payment_managers_;
 
   DISALLOW_COPY_AND_ASSIGN(PaymentAppContentUnitTestBase);
 };

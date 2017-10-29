@@ -9,13 +9,14 @@
 #include <stdint.h>
 
 #include "base/memory/shared_memory.h"
+#include "base/trace_event/memory_allocator_dump_guid.h"
 #include "build/build_config.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/generic_shared_memory_id.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/gfx_export.h"
 
-#if defined(USE_OZONE)
+#if defined(OS_LINUX)
 #include "ui/gfx/native_pixmap_handle.h"
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
 #include "ui/gfx/mac/io_surface.h"
@@ -31,8 +32,8 @@ enum GpuMemoryBufferType {
   EMPTY_BUFFER,
   SHARED_MEMORY_BUFFER,
   IO_SURFACE_BUFFER,
-  OZONE_NATIVE_PIXMAP,
-  GPU_MEMORY_BUFFER_TYPE_LAST = OZONE_NATIVE_PIXMAP
+  NATIVE_PIXMAP,
+  GPU_MEMORY_BUFFER_TYPE_LAST = NATIVE_PIXMAP
 };
 
 using GpuMemoryBufferId = GenericSharedMemoryId;
@@ -47,7 +48,7 @@ struct GFX_EXPORT GpuMemoryBufferHandle {
   base::SharedMemoryHandle handle;
   uint32_t offset;
   int32_t stride;
-#if defined(USE_OZONE)
+#if defined(OS_LINUX)
   NativePixmapHandle native_pixmap_handle;
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
   ScopedRefCountedIOSurfaceMachPort mach_port;
@@ -97,6 +98,10 @@ class GFX_EXPORT GpuMemoryBuffer {
 
   // Type-checking downcast routine.
   virtual ClientBuffer AsClientBuffer() = 0;
+
+  // Returns the GUID for tracing.
+  virtual base::trace_event::MemoryAllocatorDumpGuid GetGUIDForTracing(
+      uint64_t tracing_process_id) const;
 };
 
 // Returns an instance of |handle| which can be sent over IPC. This duplicates

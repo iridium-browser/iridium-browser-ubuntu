@@ -5,17 +5,23 @@
 #include "core/editing/TextAffinity.h"
 
 #include <ostream>  // NOLINT
+#include "platform/wtf/Assertions.h"
+#include "public/web/WebAXEnums.h"
 
 namespace blink {
 
 std::ostream& operator<<(std::ostream& ostream, TextAffinity affinity) {
   switch (affinity) {
-    case TextAffinity::Downstream:
+    case TextAffinity::kDownstream:
       return ostream << "TextAffinity::Downstream";
-    case TextAffinity::Upstream:
+    case TextAffinity::kUpstream:
       return ostream << "TextAffinity::Upstream";
   }
   return ostream << "TextAffinity(" << static_cast<int>(affinity) << ')';
 }
+
+
+STATIC_ASSERT_ENUM(kWebAXTextAffinityUpstream, TextAffinity::kUpstream);
+STATIC_ASSERT_ENUM(kWebAXTextAffinityDownstream, TextAffinity::kDownstream);
 
 }  // namespace blink

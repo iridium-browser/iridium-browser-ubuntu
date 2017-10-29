@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/files/file.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -32,7 +33,7 @@ SecurityKeyMessageReaderImpl::SecurityKeyMessageReaderImpl(
 }
 
 SecurityKeyMessageReaderImpl::~SecurityKeyMessageReaderImpl() {
-  DCHECK(main_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
 
   // In order to ensure the reader thread is stopped cleanly, we want to stop
   // the thread before the task runners and weak pointers are invalidated.
@@ -42,7 +43,7 @@ SecurityKeyMessageReaderImpl::~SecurityKeyMessageReaderImpl() {
 void SecurityKeyMessageReaderImpl::Start(
     const SecurityKeyMessageCallback& message_callback,
     const base::Closure& error_callback) {
-  DCHECK(main_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
 
   message_callback_ = message_callback;
   error_callback_ = error_callback;
@@ -55,7 +56,7 @@ void SecurityKeyMessageReaderImpl::Start(
 }
 
 void SecurityKeyMessageReaderImpl::ReadMessage() {
-  DCHECK(read_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(read_task_runner_->RunsTasksInCurrentSequence());
 
   while (true) {
     if (!read_stream_.IsValid()) {
@@ -123,7 +124,7 @@ bool SecurityKeyMessageReaderImpl::ReadFromStream(char* buffer,
 }
 
 void SecurityKeyMessageReaderImpl::NotifyError() {
-  DCHECK(read_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(read_task_runner_->RunsTasksInCurrentSequence());
 
   main_task_runner_->PostTask(
       FROM_HERE, base::Bind(&SecurityKeyMessageReaderImpl::InvokeErrorCallback,
@@ -132,12 +133,12 @@ void SecurityKeyMessageReaderImpl::NotifyError() {
 
 void SecurityKeyMessageReaderImpl::InvokeMessageCallback(
     std::unique_ptr<SecurityKeyMessage> message) {
-  DCHECK(main_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
   message_callback_.Run(std::move(message));
 }
 
 void SecurityKeyMessageReaderImpl::InvokeErrorCallback() {
-  DCHECK(main_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(main_task_runner_->RunsTasksInCurrentSequence());
   error_callback_.Run();
 }
 

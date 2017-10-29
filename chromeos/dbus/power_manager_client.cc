@@ -29,6 +29,7 @@
 #include "chromeos/dbus/power_manager/policy.pb.h"
 #include "chromeos/dbus/power_manager/power_supply_properties.pb.h"
 #include "chromeos/dbus/power_manager/suspend.pb.h"
+#include "chromeos/dbus/power_manager/switch_states.pb.h"
 #include "chromeos/system/statistics_provider.h"
 #include "components/device_event_log/device_event_log.h"
 #include "dbus/bus.h"
@@ -38,12 +39,48 @@
 
 namespace chromeos {
 
+namespace {
+
 // Maximum amount of time that the power manager will wait for Chrome to
 // say that it's ready for the system to be suspended, in milliseconds.
 const int kSuspendDelayTimeoutMs = 5000;
 
 // Human-readable description of Chrome's suspend delay.
 const char kSuspendDelayDescription[] = "chrome";
+
+// Converts a LidState value from a power_manager::SwitchStates proto to the
+// corresponding PowerManagerClient::LidState value.
+PowerManagerClient::LidState GetLidStateFromProtoEnum(
+    power_manager::SwitchStates::LidState state) {
+  switch (state) {
+    case power_manager::SwitchStates_LidState_OPEN:
+      return PowerManagerClient::LidState::OPEN;
+    case power_manager::SwitchStates_LidState_CLOSED:
+      return PowerManagerClient::LidState::CLOSED;
+    case power_manager::SwitchStates_LidState_NOT_PRESENT:
+      return PowerManagerClient::LidState::NOT_PRESENT;
+  }
+  NOTREACHED() << "Unhandled lid state " << state;
+  return PowerManagerClient::LidState::NOT_PRESENT;
+}
+
+// Converts a TabletMode value from a power_manager::SwitchStates proto to the
+// corresponding PowerManagerClient::TabletMode value.
+PowerManagerClient::TabletMode GetTabletModeFromProtoEnum(
+    power_manager::SwitchStates::TabletMode mode) {
+  switch (mode) {
+    case power_manager::SwitchStates_TabletMode_ON:
+      return PowerManagerClient::TabletMode::ON;
+    case power_manager::SwitchStates_TabletMode_OFF:
+      return PowerManagerClient::TabletMode::OFF;
+    case power_manager::SwitchStates_TabletMode_UNSUPPORTED:
+      return PowerManagerClient::TabletMode::UNSUPPORTED;
+  }
+  NOTREACHED() << "Unhandled tablet mode " << mode;
+  return PowerManagerClient::TabletMode::UNSUPPORTED;
+}
+
+}  // namespace
 
 // The PowerManagerClient implementation used in production.
 class PowerManagerClientImpl : public PowerManagerClient {
@@ -262,6 +299,15 @@ class PowerManagerClientImpl : public PowerManagerClient {
                    weak_ptr_factory_.GetWeakPtr(), callback));
   }
 
+  void GetSwitchStates(const GetSwitchStatesCallback& callback) override {
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kGetSwitchStatesMethod);
+    power_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&PowerManagerClientImpl::OnGetSwitchStates,
+                   weak_ptr_factory_.GetWeakPtr(), callback));
+  }
+
   base::Closure GetSuspendReadinessCallback() override {
     DCHECK(OnOriginThread());
     DCHECK(suspend_is_pending_);
@@ -292,6 +338,14 @@ class PowerManagerClientImpl : public PowerManagerClient {
         power_manager::kPowerManagerInterface,
         power_manager::kBrightnessChangedSignal,
         base::Bind(&PowerManagerClientImpl::BrightnessChangedReceived,
+                   weak_ptr_factory_.GetWeakPtr()),
+        base::Bind(&PowerManagerClientImpl::SignalConnected,
+                   weak_ptr_factory_.GetWeakPtr()));
+
+    power_manager_proxy_->ConnectToSignal(
+        power_manager::kPowerManagerInterface,
+        power_manager::kKeyboardBrightnessChangedSignal,
+        base::Bind(&PowerManagerClientImpl::KeyboardBrightnessChangedReceived,
                    weak_ptr_factory_.GetWeakPtr()),
         base::Bind(&PowerManagerClientImpl::SignalConnected,
                    weak_ptr_factory_.GetWeakPtr()));
@@ -425,6 +479,22 @@ class PowerManagerClientImpl : public PowerManagerClient {
       observer.BrightnessChanged(brightness_level, user_initiated);
   }
 
+  void KeyboardBrightnessChangedReceived(dbus::Signal* signal) {
+    dbus::MessageReader reader(signal);
+    int32_t brightness_level = 0;
+    bool user_initiated = 0;
+    if (!(reader.PopInt32(&brightness_level) &&
+          reader.PopBool(&user_initiated))) {
+      POWER_LOG(ERROR) << "Keyboard brightness changed signal had incorrect "
+                       << "parameters: " << signal->ToString();
+      return;
+    }
+    POWER_LOG(DEBUG) << "Keyboard brightness changed to " << brightness_level
+                     << ": user initiated " << user_initiated;
+    for (auto& observer : observers_)
+      observer.KeyboardBrightnessChanged(brightness_level, user_initiated);
+  }
+
   void PeripheralBatteryStatusReceived(dbus::Signal* signal) {
     dbus::MessageReader reader(signal);
     power_manager::PeripheralBatteryStatus protobuf_status;
@@ -509,6 +579,23 @@ class PowerManagerClientImpl : public PowerManagerClient {
                        << response->ToString();
     }
     callback.Run(state);
+  }
+
+  void OnGetSwitchStates(const GetSwitchStatesCallback& callback,
+                         dbus::Response* response) {
+    if (!response) {
+      POWER_LOG(ERROR) << "Error calling "
+                       << power_manager::kGetSwitchStatesMethod;
+      return;
+    }
+    power_manager::SwitchStates proto;
+    if (!dbus::MessageReader(response).PopArrayOfBytesAsProto(&proto)) {
+      POWER_LOG(ERROR) << "Error parsing response from "
+                       << power_manager::kGetSwitchStatesMethod;
+      return;
+    }
+    callback.Run(GetLidStateFromProtoEnum(proto.lid_state()),
+                 GetTabletModeFromProtoEnum(proto.tablet_mode()));
   }
 
   void HandlePowerSupplyProperties(
@@ -694,21 +781,21 @@ class PowerManagerClientImpl : public PowerManagerClient {
         break;
       }
       case power_manager::InputEvent_Type_LID_OPEN:
-      case power_manager::InputEvent_Type_LID_CLOSED: {
-        bool open =
-            (proto.type() == power_manager::InputEvent_Type_LID_OPEN);
         for (auto& observer : observers_)
-          observer.LidEventReceived(open, timestamp);
+          observer.LidEventReceived(LidState::OPEN, timestamp);
         break;
-      }
+      case power_manager::InputEvent_Type_LID_CLOSED:
+        for (auto& observer : observers_)
+          observer.LidEventReceived(LidState::CLOSED, timestamp);
+        break;
       case power_manager::InputEvent_Type_TABLET_MODE_ON:
-      case power_manager::InputEvent_Type_TABLET_MODE_OFF: {
-        bool on =
-            (proto.type() == power_manager::InputEvent_Type_TABLET_MODE_ON);
         for (auto& observer : observers_)
-          observer.TabletModeEventReceived(on, timestamp);
+          observer.TabletModeEventReceived(TabletMode::ON, timestamp);
         break;
-      }
+      case power_manager::InputEvent_Type_TABLET_MODE_OFF:
+        for (auto& observer : observers_)
+          observer.TabletModeEventReceived(TabletMode::OFF, timestamp);
+        break;
     }
   }
 

@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// https://www.khronos.org/registry/webgl/extensions/WEBGL_compressed_texture_s3tc_srgb/
+
 [
     DependentLifetime,
     NoInterfaceObject,
-    DoNotCheckConstants,
+    DoNotCheckConstants
 ] interface WebGLCompressedTextureS3TCsRGB {
     /* Compressed Texture Formats */
     const unsigned long COMPRESSED_SRGB_S3TC_DXT1_EXT        = 0x8C4C;

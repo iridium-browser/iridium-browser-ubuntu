@@ -13,11 +13,12 @@
 #ifndef StringSequenceCallbackFunctionLongSequenceArg_h
 #define StringSequenceCallbackFunctionLongSequenceArg_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/core/v8/TraceWrapperV8Reference.h"
+#include "bindings/core/v8/NativeValueTraits.h"
 #include "core/CoreExport.h"
+#include "platform/bindings/ScriptWrappable.h"
+#include "platform/bindings/TraceWrapperV8Reference.h"
 #include "platform/heap/Handle.h"
-#include "wtf/text/WTFString.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -25,24 +26,29 @@ class ScriptState;
 
 class CORE_EXPORT StringSequenceCallbackFunctionLongSequenceArg final : public GarbageCollectedFinalized<StringSequenceCallbackFunctionLongSequenceArg>, public TraceWrapperBase {
  public:
-  static StringSequenceCallbackFunctionLongSequenceArg* create(ScriptState* scriptState, v8::Local<v8::Value> callback);
+  static StringSequenceCallbackFunctionLongSequenceArg* Create(ScriptState*, v8::Local<v8::Value> callback);
 
   ~StringSequenceCallbackFunctionLongSequenceArg() = default;
 
-  DECLARE_TRACE();
+  DEFINE_INLINE_TRACE() {}
   DECLARE_TRACE_WRAPPERS();
 
-  bool call(ScriptWrappable* scriptWrappable, const Vector<int>& arg, Vector<String>& returnValue);
+  bool call(ScriptWrappable* scriptWrappable, const Vector<int32_t>& arg, Vector<String>& returnValue);
 
   v8::Local<v8::Function> v8Value(v8::Isolate* isolate) {
-    return m_callback.newLocal(isolate);
+    return callback_.NewLocal(isolate);
   }
 
  private:
   StringSequenceCallbackFunctionLongSequenceArg(ScriptState*, v8::Local<v8::Function>);
 
-  RefPtr<ScriptState> m_scriptState;
-  TraceWrapperV8Reference<v8::Function> m_callback;
+  RefPtr<ScriptState> script_state_;
+  TraceWrapperV8Reference<v8::Function> callback_;
+};
+
+template <>
+struct NativeValueTraits<StringSequenceCallbackFunctionLongSequenceArg> : public NativeValueTraitsBase<StringSequenceCallbackFunctionLongSequenceArg> {
+  CORE_EXPORT static StringSequenceCallbackFunctionLongSequenceArg* NativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 }  // namespace blink

@@ -36,6 +36,9 @@ mojom_generator_sources = [
   "$mojom_generator_script",
 ]
 
+generate_export_header_script =
+    "$mojom_generator_root/generate_export_header.py"
+
 if (enable_mojom_typemapping) {
   if (!is_ios) {
     _bindings_configuration_files = [
@@ -65,6 +68,13 @@ if (enable_mojom_typemapping) {
         _typemap_config = typemap.config
         read_file(_typemap_config.mojom, "")
       }
+    } else if (is_chromeos && defined(configuration.typemaps_chromeos)) {
+      foreach(typemap, configuration.typemaps_chromeos) {
+        _typemap_config = {
+        }
+        _typemap_config = typemap.config
+        read_file(_typemap_config.mojom, "")
+      }
     }
   }
 } else {
@@ -72,9 +82,11 @@ if (enable_mojom_typemapping) {
   _bindings_configurations = [
     {
       typemaps = []
+      component_macro_suffix = ""
     },
     {
       variant = "blink"
+      component_macro_suffix = "_BLINK"
       for_blink = true
       typemaps = []
     },
@@ -89,14 +101,19 @@ if (enable_mojom_typemapping) {
 # is the target name):
 #
 #   foo
-#       C++ and Javascript bindings. Other mojom targets should also depend on
-#       this target.
+#       C++ bindings.
 #
 #   foo_blink
 #       C++ bindings using Blink standard types.
 #
 #   foo_java
 #       Java bindings.
+#
+#   foo_js
+#       JavaScript bindings; used as compile-time dependency.
+#
+#   foo_js_data_deps
+#       JavaScript bindings; used as run-time dependency.
 #
 # Parameters:
 #
@@ -126,7 +143,7 @@ if (enable_mojom_typemapping) {
 #   use_once_callback (optional)
 #       If set to true, generated classes will use base::OnceCallback instead of
 #       base::RepeatingCallback.
-#       Default value is false.
+#       Default value is true.
 #       TODO(dcheng):
 #           - Convert everything to use OnceCallback.
 #           - Remove support for the old mode.
@@ -134,10 +151,53 @@ if (enable_mojom_typemapping) {
 #   cpp_only (optional)
 #       If set to true, only the C++ bindings targets will be generated.
 #
+#   use_new_js_bindings (optional)
+#       If set to true, the generated JS code will use the new module loading
+#       approach and the core API exposed by Web IDL.
+#       Default value is true.
+#       TODO(yzshen): Convert all users to use new JS bindings and remove the
+#       old mode.
+#
+#   js_bindings_mode (optional)
+#       |js_bindings_mode| and |use_new_js_bindings| are mutually exclusive. You
+#       can only specify at most one of them.
+#       - "new" (default): generate only the new-style JS bindings;
+#       - "both": generate both the old- and new-style JS bindings;
+#       - "old": generate only the old-style JS bindings.
+#       TODO(yzshen): Convert all users to use new JS bindings and remove the
+#       old mode.
+#
+#   support_lazy_serialization (optional)
+#       If set to |true|, generated C++ bindings will effectively prefer to
+#       transmit messages in an unserialized form when going between endpoints
+#       in the same process. This avoids the runtime cost of serialization,
+#       deserialization, and validation logic at the expensive of increased
+#       code size. Defaults to |false|.
+#
+#   component_output_prefix (optional)
+#       The prefix to use for the output_name of any component library emitted
+#       for generated C++ bindings. If this is omitted, C++ bindings targets are
+#       emitted as source_sets instead. Because this controls the name of the
+#       output shared library binary in the root output directory, it must be
+#       unique across the entire build configuration.
+#
+#       This is required if |component_macro_prefix| is specified.
+#
+#   component_macro_prefix (optional)
+#       This specifies a macro prefix to use for component export macros and
+#       should therefore be globally unique in the project. For example if this
+#       is "FOO_BAR", then the generated C++ sources will be built with
+#       FOO_BAR_IMPL defined, and the generated public headers will affix
+#       FOO_BAR_EXPORT to all public symbol definitions; the meaning of the
+#       EXPORT macro depends on whether the corresponding IMPL macro is defined,
+#       per standard practice with Chromium component exports.
+#
 # The following parameters are used to support the component build. They are
 # needed so that bindings which are linked with a component can use the same
 # export settings for classes. The first three are for the chromium variant, and
-# the last three are for the blink variant.
+# the last three are for the blink variant. These parameters are mutually
+# exclusive to |component_macro_prefix|, but |component_output_prefix| may still
+# be used to uniqueify the generated invariant (i.e. shared) output component.
 #   export_class_attribute (optional)
 #       The attribute to add to the class declaration. e.g. "CONTENT_EXPORT"
 #   export_define (optional)
@@ -168,11 +228,18 @@ template("mojom") {
       defined(invoker.sources) || defined(invoker.deps) ||
           defined(invoker.public_deps),
       "\"sources\" or \"deps\" must be defined for the $target_name template.")
+
+  assert(!defined(invoker.use_new_js_bindings) ||
+             !defined(invoker.js_bindings_mode),
+         "You shouldn't specify both \"use_new_js_bindings\" and " +
+             "\"js_bindings_mode\".")
+
   if (defined(invoker.export_class_attribute) ||
       defined(invoker.export_define) || defined(invoker.export_header)) {
     assert(defined(invoker.export_class_attribute))
     assert(defined(invoker.export_define))
     assert(defined(invoker.export_header))
+    assert(!defined(invoker.component_macro_prefix))
   }
   if (defined(invoker.export_class_attribute_blink) ||
       defined(invoker.export_define_blink) ||
@@ -180,6 +247,7 @@ template("mojom") {
     assert(defined(invoker.export_class_attribute_blink))
     assert(defined(invoker.export_define_blink))
     assert(defined(invoker.export_header_blink))
+    assert(!defined(invoker.component_macro_prefix))
   }
   if (defined(invoker.overridden_deps) || defined(invoker.component_deps)) {
     assert(defined(invoker.overridden_deps))
@@ -192,12 +260,27 @@ template("mojom") {
     assert(defined(invoker.component_deps_blink))
   }
 
+  js_bindings_mode = "new"
+  if (defined(invoker.js_bindings_mode)) {
+    js_bindings_mode = invoker.js_bindings_mode
+  }
+  if (defined(invoker.use_new_js_bindings) && !invoker.use_new_js_bindings) {
+    js_bindings_mode = "old"
+  }
+  assert(js_bindings_mode == "new" || js_bindings_mode == "both" ||
+             js_bindings_mode == "old",
+         "Invalid js_bindings_mode value.")
+
   all_deps = []
   if (defined(invoker.deps)) {
     all_deps += invoker.deps
   }
   if (defined(invoker.public_deps)) {
     all_deps += invoker.public_deps
+  }
+
+  if (defined(invoker.component_macro_prefix)) {
+    assert(defined(invoker.component_output_prefix))
   }
 
   group("${target_name}__is_mojom") {
@@ -225,9 +308,9 @@ template("mojom") {
       "-I",
       rebase_path("//", root_build_dir),
       "-o",
-      rebase_path(root_gen_dir),
+      rebase_path(root_gen_dir, root_build_dir),
       "--bytecode_path",
-      rebase_path("$root_gen_dir/mojo/public/tools/bindings"),
+      rebase_path("$root_gen_dir/mojo/public/tools/bindings", root_build_dir),
     ]
 
     if (defined(invoker.import_dirs)) {
@@ -237,6 +320,47 @@ template("mojom") {
           rebase_path(import_dir, root_build_dir),
         ]
       }
+    }
+
+    if (defined(invoker.component_macro_prefix)) {
+      shared_component_export_macro =
+          "${invoker.component_macro_prefix}_SHARED_EXPORT"
+      shared_component_impl_macro =
+          "${invoker.component_macro_prefix}_SHARED_IMPL"
+      shared_component_output_name = "${invoker.component_output_prefix}_shared"
+    } else if (defined(invoker.export_class_attribute_shared) ||
+               defined(invoker.export_class_attribute)) {
+      if (defined(invoker.export_class_attribute_shared)) {
+        assert(defined(invoker.export_header_shared))
+        shared_component_export_macro = invoker.export_class_attribute_shared
+        shared_component_impl_macro = invoker.export_define_shared
+      } else {
+        assert(!defined(invoker.export_header_shared))
+
+        # If no explicit shared attribute/define was provided by the invoker,
+        # we derive some reasonable settings frorm the default variant. A new
+        # export header will be generated for these and used by shared code.
+        shared_component_export_macro =
+            "MOJOM_SHARED_" + invoker.export_class_attribute
+        shared_component_impl_macro = "MOJOM_SHARED_" + invoker.export_define
+      }
+
+      if (defined(invoker.component_output_prefix)) {
+        shared_component_output_name =
+            "${invoker.component_output_prefix}_shared"
+      } else {
+        shared_component_output_name = "${target_name}_shared"
+      }
+    }
+
+    if (defined(shared_component_export_macro) &&
+        !defined(invoker.export_header_shared)) {
+      generated_shared_export_header =
+          rebase_path("${target_name}_shared_export.h", "", target_gen_dir)
+      shared_export_header =
+          rebase_path(generated_shared_export_header, root_gen_dir)
+    } else if (defined(invoker.export_header_shared)) {
+      shared_export_header = invoker.export_header_shared
     }
 
     generator_shared_cpp_outputs = [
@@ -259,11 +383,47 @@ template("mojom") {
         "-g",
         "c++",
       ]
+      depfile = "{{source_gen_dir}}/${generator_shared_target_name}_{{source_name_part}}.d"
+      args += [
+        "--depfile",
+        depfile,
+        "--depfile_target",
+        "{{source_gen_dir}}/{{source_name_part}}.mojom-shared-internal.h",
+      ]
+
+      if (defined(shared_component_export_macro)) {
+        args += [
+          "--export_attribute",
+          shared_component_export_macro,
+          "--export_header",
+          shared_export_header,
+        ]
+      }
     }
   }
 
-  shared_cpp_sources_suffix = "shared_cpp_sources"
-  shared_cpp_sources_target_name = "${target_name}_${shared_cpp_sources_suffix}"
+  if (defined(generated_shared_export_header)) {
+    shared_export_generator_target_name =
+        "${target_name}__generate_shared_export_header"
+    action(shared_export_generator_target_name) {
+      script = generate_export_header_script
+      outputs = [
+        get_path_info(generated_shared_export_header, "abspath"),
+      ]
+      args = [
+        "--export_macro",
+        shared_component_export_macro,
+        "--impl_macro",
+        shared_component_impl_macro,
+        "--output_file",
+        rebase_path(generated_shared_export_header, root_build_dir),
+        "--relative_path",
+        rebase_path(generated_shared_export_header, root_gen_dir),
+      ]
+    }
+  }
+
+  shared_cpp_sources_target_name = "${target_name}_shared_cpp_sources"
   source_set(shared_cpp_sources_target_name) {
     if (defined(invoker.testonly)) {
       testonly = invoker.testonly
@@ -274,13 +434,44 @@ template("mojom") {
           process_file_template(invoker.sources, generator_shared_cpp_outputs)
       deps += [ ":$generator_shared_target_name" ]
     }
-    public_deps = []
+    public_deps = [
+      "//mojo/public/cpp/bindings",
+    ]
     foreach(d, all_deps) {
       # Resolve the name, so that a target //mojo/something becomes
       # //mojo/something:something and we can append shared_cpp_sources_suffix
       # to get the cpp dependency name.
       full_name = get_label_info("$d", "label_no_toolchain")
-      public_deps += [ "${full_name}_${shared_cpp_sources_suffix}" ]
+      public_deps += [ "${full_name}_shared" ]
+    }
+    if (defined(shared_component_impl_macro)) {
+      defines = [ shared_component_impl_macro ]
+    }
+    if (defined(generated_shared_export_header)) {
+      sources += [ get_path_info(generated_shared_export_header, "abspath") ]
+      public_deps += [ ":$shared_export_generator_target_name" ]
+    }
+  }
+
+  shared_cpp_library_target_name = "${target_name}_shared"
+  if (defined(shared_component_output_name)) {
+    component(shared_cpp_library_target_name) {
+      if (defined(invoker.testonly)) {
+        testonly = invoker.testonly
+      }
+      output_name = "$shared_component_output_name"
+      public_deps = [
+        ":$shared_cpp_sources_target_name",
+      ]
+    }
+  } else {
+    group(shared_cpp_library_target_name) {
+      if (defined(invoker.testonly)) {
+        testonly = invoker.testonly
+      }
+      public_deps = [
+        ":$shared_cpp_sources_target_name",
+      ]
     }
   }
 
@@ -303,7 +494,6 @@ template("mojom") {
     enabled_sources = []
     if (defined(invoker.sources)) {
       generator_cpp_outputs = []
-      generator_js_outputs = []
       generator_java_outputs = []
       variant_dash_suffix = ""
       if (defined(variant)) {
@@ -348,12 +538,45 @@ template("mojom") {
               active_typemaps += [ typemap ]
             }
           }
+        } else if (is_chromeos &&
+                   defined(bindings_configuration.typemaps_chromeos)) {
+          foreach(typemap, bindings_configuration.typemaps_chromeos) {
+            _typemap_config = {
+            }
+            _typemap_config = typemap.config
+            if (get_path_info(source, "abspath") == _typemap_config.mojom) {
+              active_typemaps += [ typemap ]
+            }
+          }
+        }
+      }
+
+      if (defined(invoker.component_macro_prefix)) {
+        export_header_generator_target_name =
+            "${target_name}${variant_suffix}__generate_export_header"
+        generated_export_header =
+            rebase_path("${target_name}${variant_suffix}_export.h",
+                        "",
+                        target_gen_dir)
+        action(export_header_generator_target_name) {
+          script = generate_export_header_script
+          outputs = [
+            get_path_info(generated_export_header, "abspath"),
+          ]
+          args = [
+            "--export_macro",
+            "${invoker.component_macro_prefix}${bindings_configuration.component_macro_suffix}_EXPORT",
+            "--impl_macro",
+            "${invoker.component_macro_prefix}${bindings_configuration.component_macro_suffix}_IMPL",
+            "--output_file",
+            rebase_path(generated_export_header, root_build_dir),
+            "--relative_path",
+            rebase_path(generated_export_header, root_gen_dir),
+          ]
         }
       }
 
       if (!cpp_only) {
-        generator_js_outputs =
-            [ "{{source_gen_dir}}/{{source_name_part}}.mojom.js" ]
         generator_java_outputs =
             [ "{{source_gen_dir}}/{{source_name_part}}.mojom.srcjar" ]
       }
@@ -366,8 +589,7 @@ template("mojom") {
           ":$type_mappings_target_name",
           "//mojo/public/tools/bindings:precompile_templates",
         ]
-        outputs = generator_cpp_outputs + generator_java_outputs +
-                  generator_js_outputs
+        outputs = generator_cpp_outputs + generator_java_outputs
         args = common_generator_args
 
         if (cpp_only) {
@@ -378,7 +600,7 @@ template("mojom") {
         } else {
           args += [
             "-g",
-            "c++,javascript,java",
+            "c++,java",
           ]
         }
 
@@ -388,11 +610,28 @@ template("mojom") {
             bindings_configuration.variant,
           ]
         }
+        depfile =
+            "{{source_gen_dir}}/${generator_target_name}_{{source_name_part}}.d"
+        args += [
+          "--depfile",
+          depfile,
+          "--depfile_target",
+          "{{source_gen_dir}}/{{source_name_part}}.mojom${variant_dash_suffix}.cc",
+        ]
 
         args += [
           "--typemap",
           rebase_path(type_mappings_path, root_build_dir),
         ]
+
+        if (defined(invoker.component_macro_prefix)) {
+          args += [
+            "--export_attribute",
+            "${invoker.component_macro_prefix}${bindings_configuration.component_macro_suffix}_EXPORT",
+            "--export_header",
+            rebase_path(generated_export_header, root_gen_dir),
+          ]
+        }
 
         if (defined(bindings_configuration.for_blink) &&
             bindings_configuration.for_blink) {
@@ -416,8 +655,13 @@ template("mojom") {
           }
         }
 
-        if (defined(invoker.use_once_callback) && invoker.use_once_callback) {
+        if (!defined(invoker.use_once_callback) || invoker.use_once_callback) {
           args += [ "--use_once_callback" ]
+        }
+
+        if (defined(invoker.support_lazy_serialization) &&
+            invoker.support_lazy_serialization) {
+          args += [ "--support_lazy_serialization" ]
         }
       }
     }
@@ -484,7 +728,13 @@ template("mojom") {
       }
     }
 
-    source_set("${target_name}${variant_suffix}") {
+    if (defined(invoker.component_macro_prefix)) {
+      output_target_type = "component"
+    } else {
+      output_target_type = "source_set"
+    }
+
+    target(output_target_type, "${target_name}${variant_suffix}") {
       if (defined(bindings_configuration.for_blink) &&
           bindings_configuration.for_blink &&
           defined(invoker.visibility_blink)) {
@@ -494,9 +744,6 @@ template("mojom") {
       }
       if (defined(invoker.testonly)) {
         testonly = invoker.testonly
-      }
-      if (defined(invoker.sources) && !defined(bindings_configuration.variant)) {
-        data = process_file_template(enabled_sources, generator_js_outputs)
       }
       defines = []
       if (defined(invoker.testonly)) {
@@ -517,12 +764,18 @@ template("mojom") {
         "//mojo/public/interfaces/bindings:bindings_shared__generator",
       ]
       public_deps = [
-        ":$shared_cpp_sources_target_name",
+        ":$shared_cpp_library_target_name",
         "//base",
         "//mojo/public/cpp/bindings",
       ]
       if (enabled_sources != []) {
         public_deps += [ ":$generator_target_name" ]
+      }
+      if (defined(invoker.component_macro_prefix)) {
+        output_name = "${invoker.component_output_prefix}${variant_suffix}"
+        defines += [ "${invoker.component_macro_prefix}${bindings_configuration.component_macro_suffix}_IMPL" ]
+        sources += [ get_path_info(generated_export_header, "abspath") ]
+        deps += [ ":$export_header_generator_target_name" ]
       }
       foreach(d, all_deps) {
         # Resolve the name, so that a target //mojo/something becomes
@@ -574,6 +827,9 @@ template("mojom") {
         if (defined(_typemap_config.deps)) {
           deps += _typemap_config.deps
         }
+      }
+      if (defined(invoker.export_header)) {
+        sources += [ "//" + invoker.export_header ]
       }
       if (defined(bindings_configuration.for_blink) &&
           bindings_configuration.for_blink) {
@@ -630,5 +886,83 @@ template("mojom") {
         run_findbugs_override = false
       }
     }
+  }
+
+  if (!defined(invoker.cpp_only) || !invoker.cpp_only) {
+    if (defined(invoker.sources)) {
+      generator_js_target_name = "${target_name}_js__generator"
+      generator_js_outputs =
+          [ "{{source_gen_dir}}/{{source_name_part}}.mojom.js" ]
+      action_foreach(generator_js_target_name) {
+        script = mojom_generator_script
+        inputs = mojom_generator_sources
+        sources = []
+        if (defined(invoker.sources)) {
+          sources += invoker.sources
+        }
+        deps = [
+          "//mojo/public/tools/bindings:precompile_templates",
+        ]
+        outputs = generator_js_outputs
+        args = common_generator_args
+        args += [
+          "-g",
+          "javascript",
+        ]
+
+        args += [
+          "--js_bindings_mode",
+          js_bindings_mode,
+        ]
+      }
+    }
+
+    js_target_name = target_name + "_js"
+    group(js_target_name) {
+      public_deps = []
+      if (defined(invoker.sources)) {
+        public_deps += [ ":$generator_js_target_name" ]
+      }
+
+      foreach(d, all_deps) {
+        full_name = get_label_info(d, "label_no_toolchain")
+        public_deps += [ "${full_name}_js" ]
+      }
+    }
+
+    js_data_deps_target_name = target_name + "_js_data_deps"
+    group(js_data_deps_target_name) {
+      deps = []
+      if (defined(invoker.sources)) {
+        data = process_file_template(invoker.sources, generator_js_outputs)
+        deps += [ ":$generator_js_target_name" ]
+      }
+
+      data_deps = []
+      foreach(d, all_deps) {
+        full_name = get_label_info(d, "label_no_toolchain")
+        data_deps += [ "${full_name}_js_data_deps" ]
+      }
+    }
+  }
+}
+
+# A helper for the mojom() template above when component libraries are desired
+# for generated C++ bindings units. Supports all the same arguments as mojom()
+# except for the optional |component_output_prefix| and |component_macro_prefix|
+# arguments. These are instead shortened to |output_prefix| and |macro_prefix|
+# and are *required*.
+template("mojom_component") {
+  assert(defined(invoker.output_prefix) && defined(invoker.macro_prefix))
+
+  mojom(target_name) {
+    forward_variables_from(invoker,
+                           "*",
+                           [
+                             "output_prefix",
+                             "macro_prefix",
+                           ])
+    component_output_prefix = invoker.output_prefix
+    component_macro_prefix = invoker.macro_prefix
   }
 }

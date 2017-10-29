@@ -26,6 +26,7 @@ namespace app_list {
 
 class AppsGridView;
 class AppListPage;
+class AppListView;
 class ApplicationDragAndDropHost;
 class AppListFolderItem;
 class AppListMainView;
@@ -44,7 +45,7 @@ class StartPageView;
 class APP_LIST_EXPORT ContentsView : public views::View,
                                      public PaginationModelObserver {
  public:
-  explicit ContentsView(AppListMainView* app_list_main_view);
+  ContentsView(AppListMainView* app_list_main_view, AppListView* app_list_view);
   ~ContentsView() override;
 
   // Initialize the pages of the launcher. Should be called after
@@ -104,6 +105,8 @@ class APP_LIST_EXPORT ContentsView : public views::View,
 
   AppListMainView* app_list_main_view() const { return app_list_main_view_; }
 
+  AppListView* app_list_view() const { return app_list_view_; }
+
   // Returns the pagination model for the ContentsView.
   const PaginationModel& pagination_model() { return pagination_model_; }
 
@@ -118,20 +121,33 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   // specify their own custom layout.
   gfx::Rect GetDefaultContentsBounds() const;
 
+  // Returns the maximum preferred size of the all pages.
+  gfx::Size GetMaximumContentsSize() const;
+
   // Performs the 'back' action for the active page. Returns whether the action
   // was handled.
   bool Back();
 
   // Overridden from views::View:
-  gfx::Size GetPreferredSize() const override;
+  gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
+  const char* GetClassName() const override;
 
   // Overridden from PaginationModelObserver:
   void TotalPagesChanged() override;
   void SelectedPageChanged(int old_selected, int new_selected) override;
   void TransitionStarted() override;
   void TransitionChanged() override;
+
+  // Returns the height of current display.
+  int GetDisplayHeight() const;
+
+  // Starts the fade out animation when the app list is closed.
+  void FadeOutOnClose(base::TimeDelta animation_duration);
+
+  // Returns selected view in active page.
+  views::View* GetSelectedView() const;
 
  private:
   // Sets the active launcher page, accounting for whether the change is for
@@ -175,6 +191,9 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   // launcher-page pagination.
   PaginationModel* GetAppsPaginationModel();
 
+  // Unowned pointer to application list model.
+  AppListModel* model_;
+
   // Sub-views of the ContentsView. All owned by the views hierarchy.
   AppsContainerView* apps_container_view_;
   SearchResultPageView* search_results_page_view_;
@@ -187,6 +206,9 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   // Parent view. Owned by the views hierarchy.
   AppListMainView* app_list_main_view_;
 
+  // Owned by the views hierarchy.
+  AppListView* const app_list_view_;
+
   // Maps State onto |view_model_| indices.
   std::map<AppListModel::State, int> state_to_view_;
 
@@ -198,6 +220,8 @@ class APP_LIST_EXPORT ContentsView : public views::View,
 
   // Manages the pagination for the launcher pages.
   PaginationModel pagination_model_;
+
+  const bool is_fullscreen_app_list_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentsView);
 };

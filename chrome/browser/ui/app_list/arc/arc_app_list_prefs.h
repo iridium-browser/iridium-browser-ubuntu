@@ -125,8 +125,16 @@ class ArcAppListPrefs
                                const std::string& package_name,
                                const std::string& activity,
                                const std::string& intent) {}
+    // Notifies that task description has been updated.
+    virtual void OnTaskDescriptionUpdated(
+        int32_t task_id,
+        const std::string& label,
+        const std::vector<uint8_t>& icon_png_data) {}
     // Notifies that task has been destroyed.
     virtual void OnTaskDestroyed(int32_t task_id) {}
+    virtual void OnTaskOrientationLockRequested(
+        int32_t task_id,
+        const arc::mojom::OrientationLock orientation_lock) {}
     // Notifies that task has been activated and moved to the front.
     virtual void OnTaskSetActive(int32_t task_id) {}
 
@@ -138,14 +146,14 @@ class ArcAppListPrefs
     // Notifies that package has been modified.
     virtual void OnPackageModified(
         const arc::mojom::ArcPackageInfo& package_info) {}
-    // Notifies that package has been uninstalled.
-    virtual void OnPackageRemoved(const std::string& package_name) {}
+    // Notifies that package has been removed from the system. |uninstalled| is
+    // set to true in case package was uninstalled by user or sync.
+    // OnPackageRemoved is called for each active package with |uninstalled| set
+    // to false in case the user opts out the Play Store.
+    virtual void OnPackageRemoved(const std::string& package_name,
+                                  bool uninstalled) {}
     // Notifies sync date type controller the model is ready to start.
     virtual void OnPackageListInitialRefreshed() {}
-
-    virtual void OnTaskOrientationLockRequested(
-        int32_t task_id,
-        const arc::mojom::OrientationLock orientation_lock) {}
 
    protected:
     virtual ~Observer() {}
@@ -197,7 +205,7 @@ class ArcAppListPrefs
       ui::ScaleFactor scale_factor) const;
 
   // Sets last launched time for the requested app.
-  void SetLastLaunchTime(const std::string& app_id, const base::Time& time);
+  void SetLastLaunchTime(const std::string& app_id);
 
   // Calls RequestIcon if no request is recorded.
   void MaybeRequestIcon(const std::string& app_id,
@@ -239,6 +247,8 @@ class ArcAppListPrefs
     return package_list_initial_refreshed_;
   }
 
+  // Returns set of ARC apps for provided package name, not including shortcuts,
+  // associated with this package.
   std::unordered_set<std::string> GetAppsForPackage(
       const std::string& package_name) const;
 
@@ -246,7 +256,7 @@ class ArcAppListPrefs
   void SimulateDefaultAppAvailabilityTimeoutForTesting();
 
  private:
-  friend class ChromeLauncherControllerImplTest;
+  friend class ChromeLauncherControllerTest;
   friend class ArcAppModelBuilderTest;
 
   // See the Create methods.
@@ -264,7 +274,9 @@ class ArcAppListPrefs
   void OnPackageAppListRefreshed(
       const std::string& package_name,
       std::vector<arc::mojom::AppInfoPtr> apps) override;
-  void OnInstallShortcut(arc::mojom::ShortcutInfoPtr app) override;
+  void OnInstallShortcut(arc::mojom::ShortcutInfoPtr shortcut) override;
+  void OnUninstallShortcut(const std::string& package_name,
+                           const std::string& intent_uri) override;
   void OnPackageRemoved(const std::string& package_name) override;
   void OnAppIcon(const std::string& package_name,
                  const std::string& activity,
@@ -278,7 +290,14 @@ class ArcAppListPrefs
                      const std::string& activity,
                      const base::Optional<std::string>& name,
                      const base::Optional<std::string>& intent) override;
+  void OnTaskDescriptionUpdated(
+      int32_t task_id,
+      const std::string& label,
+      const std::vector<uint8_t>& icon_png_data) override;
   void OnTaskDestroyed(int32_t task_id) override;
+  void OnTaskOrientationLockRequested(
+      int32_t task_id,
+      const arc::mojom::OrientationLock orientation_lock) override;
   void OnTaskSetActive(int32_t task_id) override;
   void OnNotificationsEnabledChanged(const std::string& package_name,
                                      bool enabled) override;
@@ -286,9 +305,6 @@ class ArcAppListPrefs
   void OnPackageModified(arc::mojom::ArcPackageInfoPtr package_info) override;
   void OnPackageListRefreshed(
       std::vector<arc::mojom::ArcPackageInfoPtr> packages) override;
-  void OnTaskOrientationLockRequested(
-      int32_t task_id,
-      const arc::mojom::OrientationLock orientation_lock) override;
   void OnInstallationStarted(
       const base::Optional<std::string>& package_name) override;
   void OnInstallationFinished(
@@ -302,8 +318,10 @@ class ArcAppListPrefs
   // Returns list of packages from prefs. If |installed| is set to true then
   // returns currently installed packages. If not, returns list of packages that
   // where uninstalled. Note, we store uninstall packages only for packages of
-  // default apps.
-  std::vector<std::string> GetPackagesFromPrefs(bool installed) const;
+  // default apps. If |check_arc_alive| is set to true then package list is
+  // filled only in case ARC is currently active.
+  std::vector<std::string> GetPackagesFromPrefs(bool check_arc_alive,
+                                                bool installed) const;
 
   void AddApp(const arc::mojom::AppInfo& app_info);
   void AddAppAndShortcut(bool app_ready,
@@ -325,8 +343,12 @@ class ArcAppListPrefs
                               const std::string& package_name);
 
   void DisableAllApps();
-  void RemoveAllApps();
+  void RemoveAllAppsAndPackages();
   std::vector<std::string> GetAppIdsNoArcEnabledCheck() const;
+  std::unordered_set<std::string> GetAppsAndShortcutsForPackage(
+      const std::string& package_name,
+      bool include_shortcuts) const;
+
   // Enumerates apps from preferences and notifies listeners about available
   // apps while ARC is not started yet. All apps in this case have disabled
   // state.
@@ -349,10 +371,11 @@ class ArcAppListPrefs
   void RequestIcon(const std::string& app_id, ui::ScaleFactor scale_factor);
 
   // This checks if app is not registered yet and in this case creates
-  // non-launchable app entry.
-  void MaybeAddNonLaunchableApp(const base::Optional<std::string>& name,
-                                const std::string& package_name,
-                                const std::string& activity);
+  // non-launchable app entry. In case app is already registered then updates
+  // last launch time.
+  void HandleTaskCreated(const base::Optional<std::string>& name,
+                         const std::string& package_name,
+                         const std::string& activity);
 
   // Reveals first app from provided package in app launcher if package is newly
   // installed by user. If all apps in package are hidden then app list is not
@@ -385,6 +408,12 @@ class ArcAppListPrefs
   // Dispatches OnAppReadyChanged event to observers.
   void NotifyAppReadyChanged(const std::string& app_id, bool ready);
 
+  // Marks app icons as invalidated and request icons updated.
+  void InvalidateAppIcons(const std::string& app_id);
+
+  // Marks package icons as invalidated and request icons updated.
+  void InvalidatePackageIcons(const std::string& package_name);
+
   Profile* const profile_;
 
   // Owned by the BrowserContext.
@@ -416,8 +445,10 @@ class ArcAppListPrefs
   bool is_initialized_ = false;
   // True if apps were restored.
   bool apps_restored_ = false;
-  // True is ARC package list has been refreshed once.
+  // True is ARC package list has been successfully refreshed.
   bool package_list_initial_refreshed_ = false;
+  // Used to detect first ARC app launch request.
+  bool first_launch_app_request_ = true;
   // Play Store does not have publicly available observers for default app
   // installations. This timeout is for validating default app availability.
   // Default apps should be either already installed or their installations
@@ -425,6 +456,8 @@ class ArcAppListPrefs
   base::OneShotTimer detect_default_app_availability_timeout_;
   // Set of currently installing default apps_.
   std::unordered_set<std::string> default_apps_installations_;
+  // Mask of scale factors for which the app's icon needs invalidation.
+  uint32_t invalidated_icon_scale_factor_mask_;
 
   arc::ArcPackageSyncableService* sync_service_ = nullptr;
 

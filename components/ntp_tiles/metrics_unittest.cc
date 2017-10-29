@@ -22,20 +22,33 @@ namespace {
 using testing::ElementsAre;
 using testing::IsEmpty;
 
-TEST(RecordPageImpressionTest, ShouldRecordUmaForIcons) {
+TEST(RecordPageImpressionTest, ShouldRecordNumberOfTiles) {
   base::HistogramTester histogram_tester;
-  RecordPageImpression(
-      {{NTPTileSource::TOP_SITES, ICON_REAL, GURL()},
-       {NTPTileSource::TOP_SITES, ICON_REAL, GURL()},
-       {NTPTileSource::TOP_SITES, ICON_REAL, GURL()},
-       {NTPTileSource::TOP_SITES, ICON_COLOR, GURL()},
-       {NTPTileSource::TOP_SITES, ICON_COLOR, GURL()},
-       {NTPTileSource::SUGGESTIONS_SERVICE, ICON_REAL, GURL()},
-       {NTPTileSource::SUGGESTIONS_SERVICE, ICON_DEFAULT, GURL()},
-       {NTPTileSource::POPULAR, ICON_COLOR, GURL()}},
-      /*rappor_service=*/nullptr);
+  RecordPageImpression(5);
   EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.NumberOfTiles"),
-              ElementsAre(base::Bucket(/*min=*/8, /*count=*/1)));
+              ElementsAre(base::Bucket(/*min=*/5, /*count=*/1)));
+}
+
+TEST(RecordTileImpressionTest, ShouldRecordUmaForIcons) {
+  base::HistogramTester histogram_tester;
+
+  RecordTileImpression(0, TileSource::TOP_SITES, ICON_REAL, GURL(),
+                       /*rappor_service=*/nullptr);
+  RecordTileImpression(1, TileSource::TOP_SITES, ICON_REAL, GURL(),
+                       /*rappor_service=*/nullptr);
+  RecordTileImpression(2, TileSource::TOP_SITES, ICON_REAL, GURL(),
+                       /*rappor_service=*/nullptr);
+  RecordTileImpression(3, TileSource::TOP_SITES, ICON_COLOR, GURL(),
+                       /*rappor_service=*/nullptr);
+  RecordTileImpression(4, TileSource::TOP_SITES, ICON_COLOR, GURL(),
+                       /*rappor_service=*/nullptr);
+  RecordTileImpression(5, TileSource::SUGGESTIONS_SERVICE, ICON_REAL, GURL(),
+                       /*rappor_service=*/nullptr);
+  RecordTileImpression(6, TileSource::SUGGESTIONS_SERVICE, ICON_DEFAULT, GURL(),
+                       /*rappor_service=*/nullptr);
+  RecordTileImpression(7, TileSource::POPULAR, ICON_COLOR, GURL(),
+                       /*rappor_service=*/nullptr);
+
   EXPECT_THAT(
       histogram_tester.GetAllSamples("NewTabPage.SuggestionsImpression"),
       ElementsAre(base::Bucket(/*min=*/0, /*count=*/1),
@@ -71,13 +84,8 @@ TEST(RecordPageImpressionTest, ShouldRecordUmaForIcons) {
               ElementsAre(base::Bucket(/*min=*/ICON_REAL, /*count=*/3),
                           base::Bucket(/*min=*/ICON_COLOR, /*count=*/2)));
   EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.TileType.popular"),
-              ElementsAre(base::Bucket(/*min=*/ICON_COLOR, /*count=*/1)));
-  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.IconsReal"),
-              ElementsAre(base::Bucket(/*min=*/4, /*count=*/1)));
-  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.IconsColor"),
-              ElementsAre(base::Bucket(/*min=*/3, /*count=*/1)));
-  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.IconsGray"),
-              ElementsAre(base::Bucket(/*min=*/1, /*count=*/1)));
+              ElementsAre(base::Bucket(/*min=*/ICON_COLOR,
+                                       /*count=*/1)));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   "NewTabPage.SuggestionsImpression.IconsReal"),
               ElementsAre(base::Bucket(/*min=*/0, /*count=*/1),
@@ -94,14 +102,16 @@ TEST(RecordPageImpressionTest, ShouldRecordUmaForIcons) {
               ElementsAre(base::Bucket(/*min=*/6, /*count=*/1)));
 }
 
-TEST(RecordPageImpressionTest, ShouldRecordUmaForThumbnails) {
+TEST(RecordTileImpressionTest, ShouldRecordUmaForThumbnails) {
   base::HistogramTester histogram_tester;
-  RecordPageImpression({{NTPTileSource::TOP_SITES, THUMBNAIL, GURL()},
-                        {NTPTileSource::SUGGESTIONS_SERVICE, THUMBNAIL, GURL()},
-                        {NTPTileSource::POPULAR, THUMBNAIL, GURL()}},
+
+  RecordTileImpression(0, TileSource::TOP_SITES, THUMBNAIL_FAILED, GURL(),
                        /*rappor_service=*/nullptr);
-  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.NumberOfTiles"),
-              ElementsAre(base::Bucket(/*min=*/3, /*count=*/1)));
+  RecordTileImpression(1, TileSource::SUGGESTIONS_SERVICE, THUMBNAIL, GURL(),
+                       /*rappor_service=*/nullptr);
+  RecordTileImpression(2, TileSource::POPULAR, THUMBNAIL, GURL(),
+                       /*rappor_service=*/nullptr);
+
   EXPECT_THAT(
       histogram_tester.GetAllSamples("NewTabPage.SuggestionsImpression"),
       ElementsAre(base::Bucket(/*min=*/0, /*count=*/1),
@@ -116,19 +126,15 @@ TEST(RecordPageImpressionTest, ShouldRecordUmaForThumbnails) {
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   "NewTabPage.SuggestionsImpression.popular"),
               ElementsAre(base::Bucket(/*min=*/2, /*count=*/1)));
-  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.TileType"), IsEmpty());
+  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.TileType"),
+              ElementsAre(base::Bucket(/*min=*/THUMBNAIL, /*count=*/2),
+                          base::Bucket(/*min=*/THUMBNAIL_FAILED, /*count=*/1)));
   EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.TileType.server"),
-              IsEmpty());
+              ElementsAre(base::Bucket(/*min=*/THUMBNAIL, /*count=*/1)));
   EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.TileType.client"),
-              IsEmpty());
+              ElementsAre(base::Bucket(/*min=*/THUMBNAIL_FAILED, /*count=*/1)));
   EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.TileType.popular"),
-              IsEmpty());
-  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.IconsReal"),
-              IsEmpty());
-  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.IconsColor"),
-              IsEmpty());
-  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.IconsGray"),
-              IsEmpty());
+              ElementsAre(base::Bucket(/*min=*/THUMBNAIL, /*count=*/1)));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   "NewTabPage.SuggestionsImpression.IconsReal"),
               IsEmpty());
@@ -140,9 +146,11 @@ TEST(RecordPageImpressionTest, ShouldRecordUmaForThumbnails) {
               IsEmpty());
 }
 
-TEST(RecordTileClickTest, ShouldRecordUma) {
+TEST(RecordTileClickTest, ShouldRecordUmaForIcon) {
   base::HistogramTester histogram_tester;
-  RecordTileClick(3, NTPTileSource::TOP_SITES, ICON_REAL);
+  RecordTileClick(3, TileSource::TOP_SITES, ICON_REAL);
+  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited"),
+              ElementsAre(base::Bucket(/*min=*/3, /*count=*/1)));
   EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited.client"),
               ElementsAre(base::Bucket(/*min=*/3, /*count=*/1)));
   EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited.server"),
@@ -158,11 +166,25 @@ TEST(RecordTileClickTest, ShouldRecordUma) {
   EXPECT_THAT(
       histogram_tester.GetAllSamples("NewTabPage.MostVisited.IconsGray"),
       IsEmpty());
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples("NewTabPage.MostVisited.Thumbnail"),
+      IsEmpty());
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples("NewTabPage.MostVisited.ThumbnailFailed"),
+      IsEmpty());
 }
 
-TEST(RecordTileClickTest, ShouldIgnoreThumbnails) {
+TEST(RecordTileClickTest, ShouldRecordUmaForThumbnail) {
   base::HistogramTester histogram_tester;
-  RecordTileClick(3, NTPTileSource::TOP_SITES, THUMBNAIL);
+  RecordTileClick(3, TileSource::TOP_SITES, THUMBNAIL);
+  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited"),
+              ElementsAre(base::Bucket(/*min=*/3, /*count=*/1)));
+  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited.client"),
+              ElementsAre(base::Bucket(/*min=*/3, /*count=*/1)));
+  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited.server"),
+              IsEmpty());
+  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited.popular"),
+              IsEmpty());
   EXPECT_THAT(
       histogram_tester.GetAllSamples("NewTabPage.MostVisited.IconsReal"),
       IsEmpty());
@@ -172,19 +194,54 @@ TEST(RecordTileClickTest, ShouldIgnoreThumbnails) {
   EXPECT_THAT(
       histogram_tester.GetAllSamples("NewTabPage.MostVisited.IconsGray"),
       IsEmpty());
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples("NewTabPage.MostVisited.Thumbnail"),
+      ElementsAre(base::Bucket(/*min=*/3, /*count=*/1)));
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples("NewTabPage.MostVisited.ThumbnailFailed"),
+      IsEmpty());
 }
 
-TEST(RecordPageImpressionTest, ShouldRecordRappor) {
+TEST(RecordTileClickTest, ShouldNotRecordUnknownTileType) {
+  base::HistogramTester histogram_tester;
+  RecordTileClick(3, TileSource::TOP_SITES, UNKNOWN_TILE_TYPE);
+  // The click should still get recorded.
+  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited"),
+              ElementsAre(base::Bucket(/*min=*/3, /*count=*/1)));
+  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited.client"),
+              ElementsAre(base::Bucket(/*min=*/3, /*count=*/1)));
+  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited.server"),
+              IsEmpty());
+  EXPECT_THAT(histogram_tester.GetAllSamples("NewTabPage.MostVisited.popular"),
+              IsEmpty());
+  // But all of the tile type histograms should be empty.
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples("NewTabPage.MostVisited.IconsReal"),
+      IsEmpty());
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples("NewTabPage.MostVisited.IconsColor"),
+      IsEmpty());
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples("NewTabPage.MostVisited.IconsGray"),
+      IsEmpty());
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples("NewTabPage.MostVisited.Thumbnail"),
+      IsEmpty());
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples("NewTabPage.MostVisited.ThumbnailFailed"),
+      IsEmpty());
+}
+
+TEST(RecordTileImpressionTest, ShouldRecordRappor) {
   rappor::TestRapporServiceImpl rappor_service;
 
-  RecordPageImpression(
-      {{NTPTileSource::TOP_SITES, ICON_REAL, GURL("http://www.site1.com/")},
-       {NTPTileSource::TOP_SITES, ICON_COLOR, GURL("http://www.site2.com/")},
-       {NTPTileSource::TOP_SITES, ICON_DEFAULT, GURL("http://www.site3.com/")},
-       {NTPTileSource::TOP_SITES, THUMBNAIL, GURL("http://www.site4.com/")}},
-      &rappor_service);
+  RecordTileImpression(0, TileSource::TOP_SITES, ICON_REAL,
+                       GURL("http://www.site1.com/"), &rappor_service);
+  RecordTileImpression(1, TileSource::TOP_SITES, ICON_COLOR,
+                       GURL("http://www.site2.com/"), &rappor_service);
+  RecordTileImpression(2, TileSource::TOP_SITES, ICON_DEFAULT,
+                       GURL("http://www.site3.com/"), &rappor_service);
 
-  // Thumbnail shouldn't get reported.
   EXPECT_EQ(3, rappor_service.GetReportsCount());
 
   {
@@ -213,6 +270,18 @@ TEST(RecordPageImpressionTest, ShouldRecordRappor) {
     EXPECT_EQ("site3.com", sample);
     EXPECT_EQ(rappor::ETLD_PLUS_ONE_RAPPOR_TYPE, type);
   }
+}
+
+TEST(RecordTileImpressionTest, ShouldNotRecordRapporForUnknownTileType) {
+  rappor::TestRapporServiceImpl rappor_service;
+
+  RecordTileImpression(0, TileSource::TOP_SITES, ICON_REAL,
+                       GURL("http://www.s1.com/"), &rappor_service);
+  RecordTileImpression(1, TileSource::TOP_SITES, UNKNOWN_TILE_TYPE,
+                       GURL("http://www.s2.com/"), &rappor_service);
+
+  // Unknown tile type shouldn't get reported.
+  EXPECT_EQ(1, rappor_service.GetReportsCount());
 }
 
 }  // namespace

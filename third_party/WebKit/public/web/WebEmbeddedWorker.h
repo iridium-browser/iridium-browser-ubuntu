@@ -31,49 +31,53 @@
 #ifndef WebEmbeddedWorker_h
 #define WebEmbeddedWorker_h
 
+#include <memory>
+
 #include "public/platform/WebCommon.h"
 
 namespace blink {
 
+class WebContentSettingsClient;
 class WebServiceWorkerContextClient;
+class WebServiceWorkerInstalledScriptsManager;
 class WebString;
-class WebWorkerContentSettingsClientProxy;
 struct WebConsoleMessage;
 struct WebEmbeddedWorkerStartData;
 
 // An interface to start and terminate an embedded worker.
 // All methods of this class must be called on the main thread.
-class WebEmbeddedWorker {
+class BLINK_EXPORT WebEmbeddedWorker {
  public:
   // Invoked on the main thread to instantiate a WebEmbeddedWorker.
-  // The given WebWorkerContextClient and WebWorkerContentSettingsClientProxy
-  // are going to be passed on to the worker thread and is held by a newly
-  // created WorkerGlobalScope.
-  BLINK_EXPORT static WebEmbeddedWorker* create(
-      WebServiceWorkerContextClient*,
-      WebWorkerContentSettingsClientProxy*);
+  // The given WebWorkerContextClient and WebContentSettingsClient are going to
+  // be passed on to the worker thread and is held by a newly created
+  // WorkerGlobalScope.
+  static std::unique_ptr<WebEmbeddedWorker> Create(
+      std::unique_ptr<WebServiceWorkerContextClient>,
+      std::unique_ptr<WebServiceWorkerInstalledScriptsManager>,
+      std::unique_ptr<WebContentSettingsClient>);
 
   virtual ~WebEmbeddedWorker() {}
 
   // Starts and terminates WorkerThread and WorkerGlobalScope.
-  virtual void startWorkerContext(const WebEmbeddedWorkerStartData&) = 0;
-  virtual void terminateWorkerContext() = 0;
+  virtual void StartWorkerContext(const WebEmbeddedWorkerStartData&) = 0;
+  virtual void TerminateWorkerContext() = 0;
 
   // Resumes starting a worker startup that was paused via
   // WebEmbeddedWorkerStartData.pauseAfterDownloadMode.
-  virtual void resumeAfterDownload() = 0;
+  virtual void ResumeAfterDownload() = 0;
 
   // Inspector related methods.
-  virtual void attachDevTools(const WebString& hostId, int sessionId) = 0;
-  virtual void reattachDevTools(const WebString& hostId,
-                                int sessionId,
-                                const WebString& savedState) = 0;
-  virtual void detachDevTools() = 0;
-  virtual void dispatchDevToolsMessage(int sessionId,
-                                       int callId,
+  virtual void AttachDevTools(const WebString& host_id, int session_id) = 0;
+  virtual void ReattachDevTools(const WebString& host_id,
+                                int session_id,
+                                const WebString& saved_state) = 0;
+  virtual void DetachDevTools(int session_id) = 0;
+  virtual void DispatchDevToolsMessage(int session_id,
+                                       int call_id,
                                        const WebString& method,
                                        const WebString& message) = 0;
-  virtual void addMessageToConsole(const WebConsoleMessage&) = 0;
+  virtual void AddMessageToConsole(const WebConsoleMessage&) = 0;
 };
 
 }  // namespace blink

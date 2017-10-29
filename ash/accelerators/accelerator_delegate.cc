@@ -4,8 +4,7 @@
 
 #include "ash/accelerators/accelerator_delegate.h"
 
-#include "ash/common/accelerators/accelerator_router.h"
-#include "ash/common/wm_window.h"
+#include "ash/accelerators/accelerator_router.h"
 #include "ui/aura/window.h"
 #include "ui/events/event.h"
 
@@ -19,8 +18,7 @@ bool AcceleratorDelegate::ProcessAccelerator(
     const ui::KeyEvent& key_event,
     const ui::Accelerator& accelerator) {
   return router_->ProcessAccelerator(
-      WmWindow::Get(static_cast<aura::Window*>(key_event.target())), key_event,
-      accelerator);
+      static_cast<aura::Window*>(key_event.target()), key_event, accelerator);
 }
 
 }  // namespace ash

@@ -27,12 +27,18 @@
 #include <windows.h>
 #endif
 
+#if defined(OS_FUCHSIA)
+#include <magenta/types.h>
+#endif
+
 namespace base {
 
 class CommandLine;
 
 #if defined(OS_WIN)
 typedef std::vector<HANDLE> HandlesToInheritVector;
+#elif defined(OS_FUCHSIA)
+typedef std::vector<mx_handle_t> HandlesToInheritVector;
 #endif
 // TODO(viettrungluu): Only define this on POSIX?
 typedef std::vector<std::pair<int, int> > FileHandleMappingVector;
@@ -153,6 +159,11 @@ struct BASE_EXPORT LaunchOptions {
   bool kill_on_parent_death = false;
 #endif  // defined(OS_LINUX)
 
+#if defined(OS_FUCHSIA)
+  // If valid, launches the application in that job object.
+  mx_handle_t job_handle = MX_HANDLE_INVALID;
+#endif
+
 #if defined(OS_POSIX)
   // If not empty, launch the specified executable instead of
   // cmdline.GetProgram(). This is useful when it is necessary to pass a custom
@@ -248,6 +259,13 @@ BASE_EXPORT bool GetAppOutput(const CommandLine& cl, std::string* output);
 BASE_EXPORT bool GetAppOutputAndError(const CommandLine& cl,
                                       std::string* output);
 
+// A version of |GetAppOutput()| which also returns the exit code of the
+// executed command. Returns true if the application runs and exits cleanly. If
+// this is the case the exit code of the application is available in
+// |*exit_code|.
+BASE_EXPORT bool GetAppOutputWithExitCode(const CommandLine& cl,
+                                          std::string* output, int* exit_code);
+
 #if defined(OS_WIN)
 // A Windows-specific version of GetAppOutput that takes a command line string
 // instead of a CommandLine object. Useful for situations where you need to
@@ -262,12 +280,10 @@ BASE_EXPORT bool GetAppOutput(const StringPiece16& cl, std::string* output);
 BASE_EXPORT bool GetAppOutput(const std::vector<std::string>& argv,
                               std::string* output);
 
-// A version of |GetAppOutput()| which also returns the exit code of the
-// executed command. Returns true if the application runs and exits cleanly. If
-// this is the case the exit code of the application is available in
-// |*exit_code|.
-BASE_EXPORT bool GetAppOutputWithExitCode(const CommandLine& cl,
-                                          std::string* output, int* exit_code);
+// Like the above POSIX-specific version of GetAppOutput, but also includes
+// stderr.
+BASE_EXPORT bool GetAppOutputAndError(const std::vector<std::string>& argv,
+                                      std::string* output);
 #endif  // defined(OS_POSIX)
 
 // If supported on the platform, and the user has sufficent rights, increase

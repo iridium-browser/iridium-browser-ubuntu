@@ -20,13 +20,12 @@ class FakeModelWorker : public ModelSafeWorker {
 
   // ModelSafeWorker implementation.
   ModelSafeGroup GetModelSafeGroup() override;
-  bool IsOnModelThread() override;
-
- protected:
-  SyncerError DoWorkAndWaitUntilDoneImpl(const WorkCallback& work) override;
+  bool IsOnModelSequence() override;
 
  private:
   ~FakeModelWorker() override;
+
+  void ScheduleWork(base::OnceClosure work) override;
 
   const ModelSafeGroup group_;
   base::ThreadChecker thread_checker_;

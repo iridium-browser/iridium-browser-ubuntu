@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_UPDATE_CLIENT_TEST_INSTALLER_H_
 #define COMPONENTS_UPDATE_CLIENT_TEST_INSTALLER_H_
 
+#include <memory>
 #include <string>
 
 #include "base/files/file_path.h"
@@ -25,7 +26,7 @@ class TestInstaller : public CrxInstaller {
 
   void OnUpdateError(int error) override;
 
-  Result Install(const base::DictionaryValue& manifest,
+  Result Install(std::unique_ptr<base::DictionaryValue> manifest,
                  const base::FilePath& unpack_path) override;
 
   bool GetInstalledFile(const std::string& file,
@@ -42,6 +43,10 @@ class TestInstaller : public CrxInstaller {
 
   int error_;
   int install_count_;
+
+ private:
+  // Contains the |unpack_path| argument of the Install call.
+  base::FilePath unpack_path_;
 };
 
 // A ReadOnlyTestInstaller is an installer that knows about files in an existing
@@ -65,7 +70,7 @@ class VersionedTestInstaller : public TestInstaller {
  public:
   VersionedTestInstaller();
 
-  Result Install(const base::DictionaryValue& manifest,
+  Result Install(std::unique_ptr<base::DictionaryValue> manifest,
                  const base::FilePath& unpack_path) override;
 
   bool GetInstalledFile(const std::string& file,

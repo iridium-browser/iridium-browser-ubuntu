@@ -49,22 +49,17 @@ const int kNonClientRestoredExtraThickness = 11;
 // pixels at the end of the top and bottom edges trigger diagonal resizing.
 const int kResizeCornerWidth = 16;
 // How far the profile switcher button is from the left of the minimize button.
-const int kProfileSwitcherButtonOffset = 5;
+const int kProfileSwitcherButtonOffset = 1;
 // The content edge images have a shadow built into them.
 const int kContentEdgeShadowThickness = 2;
 // In restored mode, the New Tab button isn't at the same height as the caption
 // buttons, but the space will look cluttered if it actually slides under them,
 // so we stop it when the gap between the two is down to 5 px.
 const int kNewTabCaptionRestoredSpacing = 5;
-// In maximized mode, where the New Tab button and the caption buttons are at
+// In tablet mode, where the New Tab button and the caption buttons are at
 // similar vertical coordinates, we need to reserve a larger, 16 px gap to avoid
 // looking too cluttered.
 const int kNewTabCaptionMaximizedSpacing = 16;
-// Height of the profile switcher button. Same as the height of the Windows 7/8
-// caption buttons.
-// TODO(bsep): Windows 10 caption buttons look very different and we would like
-// the profile switcher button to match on that platform.
-const int kProfileSwitcherButtonHeight = 20;
 // There is a small one-pixel strip right above the caption buttons in which the
 // resize border "peeks" through.
 const int kCaptionButtonTopInset = 1;
@@ -99,7 +94,8 @@ GlassBrowserFrameView::GlassBrowserFrameView(BrowserFrame* frame,
       restore_button_(nullptr),
       close_button_(nullptr),
       throbber_running_(false),
-      throbber_frame_(0) {
+      throbber_frame_(0),
+      tab_strip_observer_(this) {
   // We initialize all fields despite some of them being unused in some modes,
   // since it's possible for modes to flip dynamically (e.g. if the user enables
   // a high-contrast theme). Throbber icons are only used when ShowSystemIcon()
@@ -118,7 +114,7 @@ GlassBrowserFrameView::GlassBrowserFrameView(BrowserFrame* frame,
   if (browser_view->ShouldShowWindowTitle()) {
     window_title_ =
         new views::Label(browser_view->GetWindowTitle(),
-                         gfx::FontList(BrowserFrame::GetTitleFontList()));
+                         {gfx::FontList(BrowserFrame::GetTitleFontList())});
     window_title_->SetSubpixelRenderingEnabled(false);
     window_title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     window_title_->set_id(VIEW_ID_WINDOW_TITLE);
@@ -148,11 +144,12 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
 
     // The profile switcher button is optionally displayed to the left of the
     // minimize button.
-    if (profile_switcher_.view()) {
+    views::View* profile_switcher = GetProfileSwitcherView();
+    if (profile_switcher) {
       const int old_end_x = end_x;
-      end_x -= profile_switcher_.view()->width() + kProfileSwitcherButtonOffset;
+      end_x -= profile_switcher->width() + kProfileSwitcherButtonOffset;
 
-      // In non-maximized mode, allow the new tab button to slide completely
+      // In non-tablet mode, allow the new tab button to slide completely
       // under the profile switcher button.
       if (!IsMaximized()) {
         end_x = std::min(end_x + GetLayoutSize(NEW_TAB_BUTTON).width() +
@@ -215,6 +212,13 @@ gfx::Size GlassBrowserFrameView::GetMinimumSize() const {
 
 views::View* GlassBrowserFrameView::GetProfileSwitcherView() const {
   return profile_switcher_.view();
+}
+
+void GlassBrowserFrameView::OnBrowserViewInitViewsComplete() {
+  if (browser_view()->tabstrip()) {
+    DCHECK(!tab_strip_observer_.IsObserving(browser_view()->tabstrip()));
+    tab_strip_observer_.Add(browser_view()->tabstrip());
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -375,6 +379,28 @@ gfx::ImageSkia GlassBrowserFrameView::GetFaviconForTabIconView() {
   return frame()->widget_delegate()->GetWindowIcon();
 }
 
+void GlassBrowserFrameView::TabStripMaxXChanged(TabStrip* tab_strip) {
+  // The profile switcher button's height depends on the position of the new
+  // tab button.
+  if (browser_view()->IsRegularOrGuestSession())
+    LayoutProfileSwitcher();
+}
+
+void GlassBrowserFrameView::TabStripRemovedTabAt(TabStrip* tab_strip,
+                                                 int index) {
+  // The profile switcher button may need to change height here, too.
+  // TabStripMaxXChanged is not enough when a tab other than the last tab is
+  // closed.
+  if (browser_view()->IsRegularOrGuestSession())
+    LayoutProfileSwitcher();
+}
+
+void GlassBrowserFrameView::TabStripDeleted(TabStrip* tab_strip) {
+  // The tab strip is currently never deleted before the frame. If that changes
+  // tab_strip_observer_.Remove(tab_strip) may be needed here.
+  NOTREACHED();
+}
+
 bool GlassBrowserFrameView::IsMaximized() const {
   return frame()->IsMaximized();
 }
@@ -486,7 +512,7 @@ int GlassBrowserFrameView::TopAreaHeight(bool restored) const {
 
   const int top = FrameTopBorderThickness(restored);
   // The tab top inset is equal to the height of any shadow region above the
-  // tabs, plus a 1 px top stroke.  In maximized mode, we want to push the
+  // tabs, plus a 1 px top stroke.  In tablet mode, we want to push the
   // shadow region off the top of the screen but leave the top stroke.
   return (IsMaximized() && !restored)
              ? (top - GetLayoutInsets(TAB).top() + 1)
@@ -501,7 +527,7 @@ int GlassBrowserFrameView::TitlebarHeight(bool restored) const {
   if (frame()->IsFullscreen() && !restored)
     return 0;
   // The titlebar's actual height is the same in restored and maximized, but
-  // some of it is above the screen in maximized mode. See the comment in
+  // some of it is above the screen in tablet mode. See the comment in
   // FrameTopBorderThicknessPx().
   return TitlebarMaximizedVisualHeight() + FrameTopBorderThickness(false);
 }
@@ -615,9 +641,9 @@ void GlassBrowserFrameView::PaintTitlebar(gfx::Canvas* canvas) const {
   canvas->DrawRect(titlebar_rect, flags);
   const gfx::ImageSkia frame_image = GetFrameImage();
   if (!frame_image.isNull()) {
-    canvas->TileImageInt(frame_image, 0, 0, scale, scale, titlebar_rect.x(),
+    canvas->TileImageInt(frame_image, 0, 0, titlebar_rect.x(),
                          titlebar_rect.y(), titlebar_rect.width(),
-                         titlebar_rect.height());
+                         titlebar_rect.height(), scale);
   }
   const gfx::ImageSkia frame_overlay_image = GetFrameOverlayImage();
   if (!frame_overlay_image.isNull()) {
@@ -656,8 +682,8 @@ void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) const {
   // Top stroke.
   gfx::Rect separator_rect(x, y, w, 0);
   gfx::ScopedCanvas scoped_canvas(canvas);
-  gfx::Rect tabstrip_bounds(GetBoundsForTabStrip(browser_view()->tabstrip()));
-  tabstrip_bounds.set_x(GetMirroredXForRect(tabstrip_bounds));
+  gfx::Rect tabstrip_bounds =
+      GetMirroredRect(GetBoundsForTabStrip(browser_view()->tabstrip()));
   canvas->sk_canvas()->clipRect(gfx::RectToSkRect(tabstrip_bounds),
                                 SkClipOp::kDifference);
   separator_rect.set_y(tabstrip_bounds.bottom());
@@ -717,30 +743,40 @@ void GlassBrowserFrameView::FillClientEdgeRects(int x,
 
 void GlassBrowserFrameView::LayoutProfileSwitcher() {
   DCHECK(browser_view()->IsRegularOrGuestSession());
-  if (!profile_switcher_.view())
+
+  View* profile_switcher = profile_switcher_.view();
+  if (!profile_switcher)
     return;
 
-  gfx::Size label_size = profile_switcher_.view()->GetPreferredSize();
+  gfx::Size button_size = profile_switcher->GetPreferredSize();
+  int button_width = button_size.width();
+  int button_height = button_size.height();
 
   int button_x;
   if (CaptionButtonsOnLeadingEdge()) {
     button_x = width() - frame()->GetMinimizeButtonOffset() +
                kProfileSwitcherButtonOffset;
   } else {
-    button_x =
-        MinimizeButtonX() - kProfileSwitcherButtonOffset - label_size.width();
+    button_x = MinimizeButtonX() - kProfileSwitcherButtonOffset - button_width;
   }
 
   int button_y = WindowTopY();
   if (IsMaximized()) {
-    // In maximized mode the caption buttons appear only 19 pixels high, but
+    // In tablet mode the caption buttons appear only 19 pixels high, but
     // their contents are aligned as if they were 20 pixels high and extended
     // 1 pixel off the top of the screen. We position the profile switcher
     // button the same way to match.
     button_y -= 1;
   }
-  profile_switcher_.view()->SetBounds(button_x, button_y, label_size.width(),
-                                      kProfileSwitcherButtonHeight);
+
+  // Shrink the button height when it's atop part of the tabstrip. In RTL the
+  // new tab button is on the left, so it can never slide under the avatar
+  // button, which is still on the right [http://crbug.com/560619].
+  TabStrip* tabstrip = browser_view()->tabstrip();
+  if (tabstrip && !base::i18n::IsRTL() && tabstrip->max_x() >= button_x)
+    button_height = profile_switcher->GetMinimumSize().height();
+
+  profile_switcher->SetBounds(button_x, button_y, button_width, button_height);
 }
 
 void GlassBrowserFrameView::LayoutIncognitoIcon() {
@@ -749,7 +785,7 @@ void GlassBrowserFrameView::LayoutIncognitoIcon() {
   // In RTL, the icon needs to start after the caption buttons.
   if (CaptionButtonsOnLeadingEdge()) {
     x = width() - frame()->GetMinimizeButtonOffset() +
-        (profile_switcher_.view() ? (profile_switcher_.view()->width() +
+        (GetProfileSwitcherView() ? (GetProfileSwitcherView()->width() +
                                      kProfileSwitcherButtonOffset)
                                   : 0);
   }

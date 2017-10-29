@@ -4,6 +4,8 @@
 
 #include "media/base/win/mf_helpers.h"
 
+#include "base/metrics/histogram_macros.h"
+
 namespace media {
 
 namespace mf {
@@ -11,6 +13,7 @@ namespace mf {
 void LogDXVAError(int line) {
   LOG(ERROR) << "Error in dxva_video_decode_accelerator_win.cc on line "
              << line;
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Media.DXVAVDA.ErrorLine", line);
 }
 
 base::win::ScopedComPtr<IMFSample> CreateEmptySampleWithBuffer(
@@ -19,7 +22,7 @@ base::win::ScopedComPtr<IMFSample> CreateEmptySampleWithBuffer(
   CHECK_GT(buffer_length, 0U);
 
   base::win::ScopedComPtr<IMFSample> sample;
-  HRESULT hr = MFCreateSample(sample.Receive());
+  HRESULT hr = MFCreateSample(sample.GetAddressOf());
   RETURN_ON_HR_FAILURE(hr, "MFCreateSample failed",
                        base::win::ScopedComPtr<IMFSample>());
 
@@ -27,15 +30,15 @@ base::win::ScopedComPtr<IMFSample> CreateEmptySampleWithBuffer(
   if (align == 0) {
     // Note that MFCreateMemoryBuffer is same as MFCreateAlignedMemoryBuffer
     // with the align argument being 0.
-    hr = MFCreateMemoryBuffer(buffer_length, buffer.Receive());
+    hr = MFCreateMemoryBuffer(buffer_length, buffer.GetAddressOf());
   } else {
-    hr =
-        MFCreateAlignedMemoryBuffer(buffer_length, align - 1, buffer.Receive());
+    hr = MFCreateAlignedMemoryBuffer(buffer_length, align - 1,
+                                     buffer.GetAddressOf());
   }
   RETURN_ON_HR_FAILURE(hr, "Failed to create memory buffer for sample",
                        base::win::ScopedComPtr<IMFSample>());
 
-  hr = sample->AddBuffer(buffer.get());
+  hr = sample->AddBuffer(buffer.Get());
   RETURN_ON_HR_FAILURE(hr, "Failed to add buffer to sample",
                        base::win::ScopedComPtr<IMFSample>());
 

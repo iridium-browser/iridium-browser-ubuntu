@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "components/reading_list/ios/reading_list_model.h"
+#include "components/reading_list/core/reading_list_model.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_menu_notification_delegate.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -53,7 +53,7 @@ class ReadingListObserverBridge : public ReadingListModelObserver {
     [owner_ readingListModelCompletedBatchUpdates:model];
   }
 
-  void ReadingListModelBeingDeleted(const ReadingListModel* model) override{};
+  void ReadingListModelBeingDeleted(const ReadingListModel* model) override {}
 
   void ReadingListDidApplyChanges(ReadingListModel* model) override {
     [owner_ readingListModelCompletedBatchUpdates:model];

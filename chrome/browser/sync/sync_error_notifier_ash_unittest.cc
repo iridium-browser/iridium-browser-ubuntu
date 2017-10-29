@@ -10,8 +10,9 @@
 
 #include "ash/test/ash_test_base.h"
 #include "base/memory/ptr_util.h"
-#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/login/users/mock_user_manager.h"
+#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
@@ -26,23 +27,12 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/message_center/notification.h"
 
-#if defined(OS_WIN)
-#include "ui/aura/test/test_screen.h"
-#include "ui/display/screen.h"
-#endif
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/users/mock_user_manager.h"
-#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
-#endif
-
 using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::ReturnRef;
 using ::testing::_;
 
 namespace ash {
-namespace test {
 
 namespace {
 
@@ -77,20 +67,13 @@ std::unique_ptr<KeyedService> BuildMockLoginUIService(
   return base::MakeUnique<FakeLoginUIService>();
 }
 
-class SyncErrorNotifierTest : public AshTestBase  {
+class SyncErrorNotifierTest : public AshTestBase {
  public:
   SyncErrorNotifierTest() {}
   ~SyncErrorNotifierTest() override {}
 
   void SetUp() override {
     DCHECK(TestingBrowserProcess::GetGlobal());
-
-    // Set up a desktop screen for Windows to hold native widgets, used when
-    // adding desktop widgets (i.e., message center notifications).
-#if defined(OS_WIN)
-    test_screen_ = base::MakeUnique<aura::TestScreen::Create>(gfx::Size());
-    display::Screen::SetScreenInstance(test_screen_.get());
-#endif
 
     AshTestBase::SetUp();
 
@@ -122,11 +105,6 @@ class SyncErrorNotifierTest : public AshTestBase  {
     profile_manager_.reset();
 
     AshTestBase::TearDown();
-
-#if defined(OS_WIN)
-    display::Screen::SetScreenInstance(nullptr);
-    test_screen_.reset();
-#endif
   }
 
  protected:
@@ -134,7 +112,8 @@ class SyncErrorNotifierTest : public AshTestBase  {
   // given error condition.
   void VerifySyncErrorNotifierResult(GoogleServiceAuthError::State error_state,
                                      bool is_signed_in,
-                                     bool is_error) {
+                                     bool is_error,
+                                     bool expected_notification) {
     EXPECT_CALL(*service_, IsFirstSetupComplete())
         .WillRepeatedly(Return(is_signed_in));
 
@@ -145,22 +124,18 @@ class SyncErrorNotifierTest : public AshTestBase  {
     error_controller_->OnStateChanged(service_.get());
     EXPECT_EQ(is_error, error_controller_->HasError());
 
-    // If there is an error we should see a notification.
     const Notification* notification = notification_ui_manager_->FindById(
         kNotificationId, NotificationUIManager::GetProfileID(profile_));
-    if (is_error) {
+    if (expected_notification) {
       ASSERT_TRUE(notification);
       ASSERT_FALSE(notification->title().empty());
-      ASSERT_FALSE(notification->title().empty());
+      ASSERT_FALSE(notification->message().empty());
       ASSERT_EQ((size_t)1, notification->buttons().size());
     } else {
       ASSERT_FALSE(notification);
     }
   }
 
-#if defined(OS_WIN)
-  std::unique_ptr<display::Screen> test_screen_;
-#endif
   std::unique_ptr<TestingProfileManager> profile_manager_;
   std::unique_ptr<syncer::SyncErrorController> error_controller_;
   std::unique_ptr<SyncErrorNotifier> error_notifier_;
@@ -177,17 +152,9 @@ class SyncErrorNotifierTest : public AshTestBase  {
 
 // Test that SyncErrorNotifier shows an notification if a passphrase is
 // required.
-// Disabled on Windows: http://crbug.com/373238
-#if defined(OS_WIN)
-#define MAYBE_PassphraseNotification DISABLED_PassphraseNotification
-#else
-#define MAYBE_PassphraseNotification PassphraseNotification
-#endif
-TEST_F(SyncErrorNotifierTest, MAYBE_PassphraseNotification) {
-#if defined(OS_CHROMEOS)
+TEST_F(SyncErrorNotifierTest, PassphraseNotification) {
   chromeos::ScopedUserManagerEnabler scoped_enabler(
       new chromeos::MockUserManager());
-#endif
   ASSERT_FALSE(notification_ui_manager_->FindById(
       kNotificationId, NotificationUIManager::GetProfileID(profile_)));
 
@@ -202,8 +169,18 @@ TEST_F(SyncErrorNotifierTest, MAYBE_PassphraseNotification) {
   {
     SCOPED_TRACE("Expected a notification for passphrase error");
     VerifySyncErrorNotifierResult(GoogleServiceAuthError::NONE,
-                                  true /* signed in */,
-                                  true /* error */);
+                                  true /* signed in */, true /* error */,
+                                  true /* expecting notification */);
+  }
+
+  // Sumulate discarded notification and check that notification is not shown.
+  notification_ui_manager_->CancelById(
+      kNotificationId, NotificationUIManager::GetProfileID(profile_));
+  {
+    SCOPED_TRACE("Not expecting notification, one was already discarded");
+    VerifySyncErrorNotifierResult(GoogleServiceAuthError::NONE,
+                                  true /* signed in */, true /* error */,
+                                  false /* not expecting notification */);
   }
 
   // Check that no notification is shown if there is no error.
@@ -214,8 +191,8 @@ TEST_F(SyncErrorNotifierTest, MAYBE_PassphraseNotification) {
   {
     SCOPED_TRACE("Not expecting notification since no error exists");
     VerifySyncErrorNotifierResult(GoogleServiceAuthError::NONE,
-                                  true /* signed in */,
-                                  false /* no error */);
+                                  true /* signed in */, false /* no error */,
+                                  false /* not expecting notification */);
   }
 
   // Check that no notification is shown if sync setup is not completed.
@@ -227,10 +204,9 @@ TEST_F(SyncErrorNotifierTest, MAYBE_PassphraseNotification) {
     SCOPED_TRACE("Not expecting notification since sync setup is incomplete");
     VerifySyncErrorNotifierResult(
         GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS,
-        false /* not signed in */,
-        false /* no error */);
+        false /* not signed in */, false /* no error */,
+        false /* not expecting notification */);
   }
 }
 
-}  // namespace test
 }  // namespace ash

@@ -40,7 +40,7 @@
 #include "chrome/browser/ui/views/frame/browser_command_handler_linux.h"
 #endif
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if defined(USE_X11)
 #include "ui/views/widget/desktop_aura/x11_desktop_handler.h"
 #endif
 
@@ -205,21 +205,6 @@ void BrowserFrame::SchedulePaintInRect(const gfx::Rect& rect) {
   }
 }
 
-void BrowserFrame::OnNativeWidgetActivationChanged(bool active) {
-  if (active) {
-    // When running under remote desktop, if the remote desktop client is not
-    // active on the users desktop, then none of the windows contained in the
-    // remote desktop will be activated.  However, NativeWidget::Activate() will
-    // still bring this browser window to the foreground.  We explicitly set
-    // ourselves as the last active browser window to ensure that we get treated
-    // as such by the rest of Chrome.
-    BrowserList::SetLastActive(browser_view_->browser());
-  } else {
-    BrowserList::NotifyBrowserNoLongerActive(browser_view_->browser());
-  }
-  Widget::OnNativeWidgetActivationChanged(active);
-}
-
 void BrowserFrame::OnNativeWidgetWorkspaceChanged() {
   chrome::SaveWindowWorkspace(browser_view_->browser(), GetWorkspace());
 #if !defined(OS_CHROMEOS) && defined(USE_X11)
@@ -250,8 +235,7 @@ void BrowserFrame::ShowContextMenuForView(views::View* source,
   if (hit_test == HTCAPTION || hit_test == HTNOWHERE) {
     menu_runner_.reset(new views::MenuRunner(
         GetSystemMenuModel(),
-        views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU |
-            views::MenuRunner::ASYNC,
+        views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU,
         base::Bind(&BrowserFrame::OnMenuClosed, base::Unretained(this))));
     menu_runner_->RunMenuAt(source->GetWidget(), nullptr,
                             gfx::Rect(p, gfx::Size(0, 0)),

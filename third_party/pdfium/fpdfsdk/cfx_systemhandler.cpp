@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "core/fpdfapi/parser/cpdf_document.h"
+#include "core/fxcrt/fx_codepage.h"
 #include "core/fxge/cfx_fontmapper.h"
 #include "core/fxge/cfx_fontmgr.h"
 #include "core/fxge/cfx_gemodule.h"
@@ -21,18 +22,23 @@
 namespace {
 
 int CharSet2CP(int charset) {
-  if (charset == FXFONT_SHIFTJIS_CHARSET)
-    return 932;
-  if (charset == FXFONT_GB2312_CHARSET)
-    return 936;
-  if (charset == FXFONT_HANGUL_CHARSET)
-    return 949;
-  if (charset == FXFONT_CHINESEBIG5_CHARSET)
-    return 950;
-  return 0;
+  if (charset == FX_CHARSET_ShiftJIS)
+    return FX_CODEPAGE_ShiftJIS;
+  if (charset == FX_CHARSET_ChineseSimplified)
+    return FX_CODEPAGE_ChineseSimplified;
+  if (charset == FX_CHARSET_Hangul)
+    return FX_CODEPAGE_Hangul;
+  if (charset == FX_CHARSET_ChineseTraditional)
+    return FX_CODEPAGE_ChineseTraditional;
+  return FX_CODEPAGE_DefANSI;
 }
 
 }  // namespace
+
+CFX_SystemHandler::CFX_SystemHandler(CPDFSDK_FormFillEnvironment* pFormFillEnv)
+    : m_pFormFillEnv(pFormFillEnv) {}
+
+CFX_SystemHandler::~CFX_SystemHandler() {}
 
 void CFX_SystemHandler::InvalidateRect(CPDFSDK_Widget* widget, FX_RECT rect) {
   CPDFSDK_PageView* pPageView = widget->GetPageView();
@@ -43,13 +49,12 @@ void CFX_SystemHandler::InvalidateRect(CPDFSDK_Widget* widget, FX_RECT rect) {
   CFX_Matrix page2device;
   pPageView->GetCurrentMatrix(page2device);
 
-  CFX_Matrix device2page;
-  device2page.SetReverse(page2device);
+  CFX_Matrix device2page = page2device.GetInverse();
 
-  CFX_PointF left_top = device2page.Transform(CFX_PointF(
-      static_cast<FX_FLOAT>(rect.left), static_cast<FX_FLOAT>(rect.top)));
+  CFX_PointF left_top = device2page.Transform(
+      CFX_PointF(static_cast<float>(rect.left), static_cast<float>(rect.top)));
   CFX_PointF right_bottom = device2page.Transform(CFX_PointF(
-      static_cast<FX_FLOAT>(rect.right), static_cast<FX_FLOAT>(rect.bottom)));
+      static_cast<float>(rect.right), static_cast<float>(rect.bottom)));
 
   CFX_FloatRect rcPDF(left_top.x, right_bottom.y, right_bottom.x, left_top.y);
   rcPDF.Normalize();
@@ -114,7 +119,7 @@ CPDF_Font* CFX_SystemHandler::AddNativeTrueTypeFontToPDF(
   if (!pDoc)
     return nullptr;
 
-  std::unique_ptr<CFX_Font> pFXFont(new CFX_Font);
+  auto pFXFont = pdfium::MakeUnique<CFX_Font>();
   pFXFont->LoadSubst(sFontFaceName, true, 0, 0, 0, CharSet2CP(nCharset), false);
   return pDoc->AddFont(pFXFont.get(), nCharset, false);
 }

@@ -344,6 +344,7 @@ def main(argv):
       'dist_jar': ['build_config'],
       'resource_rewriter': ['build_config'],
       'group': ['build_config'],
+      'junit_binary': ['build_config'],
   }
   required_options = required_options_map.get(options.type)
   if not required_options:
@@ -374,6 +375,7 @@ def main(argv):
   direct_library_deps = deps.Direct('java_library')
   all_library_deps = deps.All('java_library')
 
+  direct_resources_deps = deps.Direct('android_resources')
   all_resources_deps = deps.All('android_resources')
   # Resources should be ordered with the highest-level dependency first so that
   # overrides are done correctly.
@@ -408,13 +410,16 @@ def main(argv):
     deps_info['gradle_treat_as_prebuilt'] = options.gradle_treat_as_prebuilt
 
   if options.android_manifest:
-    gradle['android_manifest'] = options.android_manifest
+    deps_info['android_manifest'] = options.android_manifest
+
   if options.type in ('java_binary', 'java_library', 'android_apk'):
     if options.java_sources_file:
-      gradle['java_sources_file'] = options.java_sources_file
+      deps_info['java_sources_file'] = options.java_sources_file
     if options.bundled_srcjars:
       gradle['bundled_srcjars'] = (
           build_utils.ParseGnList(options.bundled_srcjars))
+    else:
+      gradle['bundled_srcjars'] = []
 
     gradle['dependent_android_projects'] = []
     gradle['dependent_java_projects'] = []
@@ -432,23 +437,31 @@ def main(argv):
         gradle['dependent_java_projects'].append(c['path'])
 
 
-  if (options.type in ('java_binary', 'java_library') and
-      not options.bypass_platform_checks):
+  if options.type == 'android_apk':
+    config['jni'] = {}
+    all_java_sources = [c['java_sources_file'] for c in all_library_deps
+                        if 'java_sources_file' in c]
+    if options.java_sources_file:
+      all_java_sources.append(options.java_sources_file)
+    config['jni']['all_source'] = all_java_sources
+
+  if (options.type in ('java_binary', 'java_library')):
     deps_info['requires_android'] = options.requires_android
     deps_info['supports_android'] = options.supports_android
 
-    deps_require_android = (all_resources_deps +
-        [d['name'] for d in all_library_deps if d['requires_android']])
-    deps_not_support_android = (
-        [d['name'] for d in all_library_deps if not d['supports_android']])
+    if not options.bypass_platform_checks:
+      deps_require_android = (all_resources_deps +
+          [d['name'] for d in all_library_deps if d['requires_android']])
+      deps_not_support_android = (
+          [d['name'] for d in all_library_deps if not d['supports_android']])
 
-    if deps_require_android and not options.requires_android:
-      raise Exception('Some deps require building for the Android platform: ' +
-          str(deps_require_android))
+      if deps_require_android and not options.requires_android:
+        raise Exception('Some deps require building for the Android platform: '
+            + str(deps_require_android))
 
-    if deps_not_support_android and options.supports_android:
-      raise Exception('Not all deps support the Android platform: ' +
-          str(deps_not_support_android))
+      if deps_not_support_android and options.supports_android:
+        raise Exception('Not all deps support the Android platform: '
+            + str(deps_not_support_android))
 
   if options.type in ('java_binary', 'java_library', 'android_apk'):
     deps_info['jar_path'] = options.jar_path
@@ -478,8 +491,11 @@ def main(argv):
           c['package_name'] for c in all_resources_deps if 'package_name' in c]
 
   if options.type == 'android_apk':
-    # Apks will get their resources srcjar explicitly passed to the java step.
+    # Apks will get their resources srcjar explicitly passed to the java step
     config['javac']['srcjars'] = []
+    # Gradle may need to generate resources for some apks.
+    gradle['srcjars'] = [
+        c['srcjar'] for c in direct_resources_deps if 'srcjar' in c]
 
   if options.type == 'android_assets':
     all_asset_sources = []
@@ -536,7 +552,8 @@ def main(argv):
     deps_info['owned_resources_dirs'] = list(owned_resource_dirs)
     deps_info['owned_resources_zips'] = list(owned_resource_zips)
 
-  if options.type in ('android_resources','android_apk', 'resource_rewriter'):
+  if options.type in (
+      'android_resources', 'android_apk', 'junit_binary', 'resource_rewriter'):
     config['resources'] = {}
     config['resources']['dependency_zips'] = [
         c['resources_zip'] for c in all_resources_deps]
@@ -689,6 +706,9 @@ def main(argv):
         _CreateLocalePaksAssetJavaList(config['assets']))
     config['uncompressed_locales_java_list'] = (
         _CreateLocalePaksAssetJavaList(config['uncompressed_assets']))
+
+    config['extra_android_manifests'] = filter(None, (
+        d.get('android_manifest') for d in all_resources_deps))
 
     # Collect java resources
     java_resources_jars = [d['java_resources_jar'] for d in all_library_deps

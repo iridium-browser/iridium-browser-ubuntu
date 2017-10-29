@@ -78,6 +78,8 @@ bool GrStencilSettings::operator==(const GrStencilSettings& that) const {
     }
     if (kSingleSided_StencilFlag & (fFlags & that.fFlags)) {
         return 0 == memcmp(&fFront, &that.fFront, sizeof(Face)); // Both are single sided.
+    } else if (kSingleSided_StencilFlag & (fFlags | that.fFlags)) {
+        return false;
     } else {
         return 0 == memcmp(&fFront, &that.fFront, 2 * sizeof(Face));
         GR_STATIC_ASSERT(sizeof(Face) ==
@@ -451,6 +453,20 @@ GrUserStencilSettings const* const* GrStencilSettings::GetClipPasses(SkRegion::O
     }
     *drawDirectToClip = false;
     return gUserToClipTable[invertedFill][op];
+}
+
+static constexpr GrUserStencilSettings gZeroStencilClipBit(
+    GrUserStencilSettings::StaticInit<
+        0x0000,
+        GrUserStencilTest::kAlways,
+        0xffff,
+        GrUserStencilOp::kZeroClipBit,
+        GrUserStencilOp::kZeroClipBit,
+        0x0000>()
+);
+
+const GrUserStencilSettings* GrStencilSettings::SetClipBitSettings(bool setToInside) {
+    return setToInside ? &gReplaceClip : &gZeroStencilClipBit;
 }
 
 void GrStencilSettings::genKey(GrProcessorKeyBuilder* b) const {

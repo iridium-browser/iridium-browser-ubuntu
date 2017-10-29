@@ -217,6 +217,7 @@ bool SynchronizedMinidumpManager::AcquireLockFile() {
     LOG(ERROR) << "Lockfile did not parse correctly. ";
     if (!InitializeFiles() || !ParseFiles()) {
       LOG(ERROR) << "Failed to create a new lock file!";
+      ReleaseLockFile();
       return false;
     }
   }
@@ -267,7 +268,7 @@ bool SynchronizedMinidumpManager::WriteFiles(const base::ListValue* dumps,
   std::string lockfile;
 
   for (const auto& elem : *dumps) {
-    std::unique_ptr<std::string> dump_info = SerializeToJson(*elem);
+    std::unique_ptr<std::string> dump_info = SerializeToJson(elem);
     RCHECK(dump_info, false);
     lockfile += *dump_info;
     lockfile += "\n";  // Add line seperatators
@@ -284,10 +285,10 @@ bool SynchronizedMinidumpManager::InitializeFiles() {
   std::unique_ptr<base::DictionaryValue> metadata =
       base::MakeUnique<base::DictionaryValue>();
 
-  base::DictionaryValue* ratelimit_fields = new base::DictionaryValue();
-  metadata->Set(kLockfileRatelimitKey, base::WrapUnique(ratelimit_fields));
+  auto ratelimit_fields = base::MakeUnique<base::DictionaryValue>();
   ratelimit_fields->SetDouble(kLockfileRatelimitPeriodStartKey, 0.0);
   ratelimit_fields->SetInteger(kLockfileRatelimitPeriodDumpsKey, 0);
+  metadata->Set(kLockfileRatelimitKey, std::move(ratelimit_fields));
 
   std::unique_ptr<base::ListValue> dumps = base::MakeUnique<base::ListValue>();
 
@@ -317,7 +318,7 @@ void SynchronizedMinidumpManager::ReleaseLockFile() {
   // flock is associated with the fd entry in the open fd table, so closing
   // all fd's will release the lock. To be safe, we explicitly unlock.
   if (lockfile_fd_ >= 0) {
-    if (dumps_)
+    if (dumps_ && metadata_)
       WriteFiles(dumps_.get(), metadata_.get());
 
     UnlockAndCloseFile(lockfile_fd_);
@@ -332,7 +333,7 @@ std::vector<std::unique_ptr<DumpInfo>> SynchronizedMinidumpManager::GetDumps() {
   std::vector<std::unique_ptr<DumpInfo>> dumps;
 
   for (const auto& elem : *dumps_) {
-    dumps.push_back(std::unique_ptr<DumpInfo>(new DumpInfo(elem.get())));
+    dumps.push_back(std::unique_ptr<DumpInfo>(new DumpInfo(&elem)));
   }
 
   return dumps;

@@ -8,8 +8,8 @@
 #include <string>
 #include <utility>
 
-#include "ash/common/system/chromeos/network/network_icon.h"
-#include "ash/common/system/chromeos/network/network_icon_animation.h"
+#include "ash/system/network/network_icon.h"
+#include "ash/system/network/network_icon_animation.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
@@ -48,7 +48,7 @@ class NetworkMenuWebUI : public NetworkMenu {
 
  private:
   // Converts menu model into the ListValue, ready for passing to WebUI.
-  base::ListValue* ConvertMenuModel(ui::MenuModel* model);
+  std::unique_ptr<base::ListValue> ConvertMenuModel(ui::MenuModel* model);
 
   // WebUI where network menu is located.
   content::WebUI* web_ui_;
@@ -81,8 +81,9 @@ void NetworkMenuWebUI::OnItemChosen(int id) {
   model->ActivatedAt(index);
 }
 
-base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
-  base::ListValue* list = new base::ListValue();
+std::unique_ptr<base::ListValue> NetworkMenuWebUI::ConvertMenuModel(
+    ui::MenuModel* model) {
+  auto list = base::MakeUnique<base::ListValue>();
   for (int i = 0; i < model->GetItemCount(); ++i) {
     ui::MenuModel::ItemType type = model->GetTypeAt(i);
     int id;
@@ -200,8 +201,8 @@ void NetworkDropdown::SetNetworkIconAndText() {
   std::string icon_str;
   if (!icon_image.isNull())
     icon_str = webui::GetBitmapDataUrl(icon_bitmap);
-  base::StringValue title(text);
-  base::StringValue icon(icon_str);
+  base::Value title(text);
+  base::Value icon(icon_str);
   web_ui_->CallJavascriptFunctionUnsafe("cr.ui.DropDown.updateNetworkTitle",
                                         title, icon);
 }

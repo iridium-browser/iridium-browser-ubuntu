@@ -25,9 +25,9 @@
 #ifndef TreeWalker_h
 #define TreeWalker_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/NodeFilter.h"
 #include "core/dom/NodeIteratorBase.h"
+#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -41,13 +41,13 @@ class TreeWalker final : public GarbageCollected<TreeWalker>,
   USING_GARBAGE_COLLECTED_MIXIN(TreeWalker);
 
  public:
-  static TreeWalker* create(Node* rootNode,
-                            unsigned whatToShow,
-                            NodeFilter* filter) {
-    return new TreeWalker(rootNode, whatToShow, filter);
+  static TreeWalker* Create(Node* root_node,
+                            unsigned what_to_show,
+                            V8NodeFilterCondition* filter) {
+    return new TreeWalker(root_node, what_to_show, filter);
   }
 
-  Node* currentNode() const { return m_current.get(); }
+  Node* currentNode() const { return current_.Get(); }
   void setCurrentNode(Node*);
 
   Node* parentNode(ExceptionState&);
@@ -63,11 +63,13 @@ class TreeWalker final : public GarbageCollected<TreeWalker>,
   DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
  private:
-  TreeWalker(Node*, unsigned whatToShow, NodeFilter*);
+  TreeWalker(Node*, unsigned what_to_show, V8NodeFilterCondition*);
 
-  Node* setCurrent(Node*);
+  Node* SetCurrent(Node*);
+  template <typename Strategy>
+  Node* TraverseSiblings(ExceptionState&);
 
-  Member<Node> m_current;
+  Member<Node> current_;
 };
 
 }  // namespace blink

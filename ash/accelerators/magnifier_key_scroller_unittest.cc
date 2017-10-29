@@ -37,7 +37,7 @@ class KeyEventDelegate : public aura::test::TestWindowDelegate {
 
 }  // namespace
 
-typedef ash::test::AshTestBase MagnifierKeyScrollerTest;
+using MagnifierKeyScrollerTest = AshTestBase;
 
 TEST_F(MagnifierKeyScrollerTest, Basic) {
   KeyEventDelegate delegate;
@@ -46,8 +46,8 @@ TEST_F(MagnifierKeyScrollerTest, Basic) {
   wm::ActivateWindow(window.get());
 
   MagnifierKeyScroller::ScopedEnablerForTest scoped;
-  Shell* shell = Shell::GetInstance();
-  MagnificationController* controller = shell->magnification_controller();
+  MagnificationController* controller =
+      Shell::Get()->magnification_controller();
   controller->SetEnabled(true);
 
   EXPECT_EQ("200,150", controller->GetWindowPosition().ToString());

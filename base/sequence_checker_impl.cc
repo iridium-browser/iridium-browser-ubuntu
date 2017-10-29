@@ -19,14 +19,14 @@ class SequenceCheckerImpl::Core {
         sequenced_worker_pool_token_(
             SequencedWorkerPool::GetSequenceTokenForCurrentThread()) {
     // SequencedWorkerPool doesn't use SequenceToken and code outside of
-    // SequenceWorkerPool doesn't set a SequencedWorkerPool token.
+    // SequencedWorkerPool doesn't set a SequencedWorkerPool token.
     DCHECK(!sequence_token_.IsValid() ||
            !sequenced_worker_pool_token_.IsValid());
   }
 
   ~Core() = default;
 
-  bool CalledOnValidThread() const {
+  bool CalledOnValidSequence() const {
     if (sequence_token_.IsValid())
       return sequence_token_ == SequenceToken::GetForCurrentThread();
 
@@ -58,7 +58,7 @@ bool SequenceCheckerImpl::CalledOnValidSequence() const {
   AutoLock auto_lock(lock_);
   if (!core_)
     core_ = MakeUnique<Core>();
-  return core_->CalledOnValidThread();
+  return core_->CalledOnValidSequence();
 }
 
 void SequenceCheckerImpl::DetachFromSequence() {

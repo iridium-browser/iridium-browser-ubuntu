@@ -6,10 +6,11 @@ package org.chromium.chrome.browser.ntp.snippets;
 
 import org.chromium.chrome.browser.ntp.cards.ItemViewType;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder;
+import org.chromium.chrome.browser.ntp.cards.NodeVisitor;
 import org.chromium.chrome.browser.ntp.cards.OptionalLeaf;
 
 /**
- * Represents the data for a header of a group of snippets
+ * Represents the data for a header of a group of snippets.
  */
 public class SectionHeader extends OptionalLeaf {
     /** The header text to be shown. */
@@ -17,7 +18,7 @@ public class SectionHeader extends OptionalLeaf {
 
     public SectionHeader(String headerText) {
         this.mHeaderText = headerText;
-        setVisible(true);
+        setVisibilityInternal(true);
     }
 
     @Override
@@ -34,5 +35,14 @@ public class SectionHeader extends OptionalLeaf {
     protected void onBindViewHolder(NewTabPageViewHolder holder) {
         assert holder instanceof SectionHeaderViewHolder;
         ((SectionHeaderViewHolder) holder).onBindViewHolder(this);
+    }
+
+    @Override
+    public void visitOptionalItem(NodeVisitor visitor) {
+        visitor.visitHeader();
+    }
+
+    public void setVisible(boolean visible) {
+        setVisibilityInternal(visible);
     }
 }

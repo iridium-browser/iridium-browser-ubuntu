@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_PLATFORM_BRIDGE_ANDROID_H_
 #define CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_PLATFORM_BRIDGE_ANDROID_H_
 
-#include <jni.h>
 #include <stdint.h>
 #include <map>
 #include <set>
@@ -13,6 +12,7 @@
 
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
+#include "chrome/browser/notifications/displayed_notifications_dispatch_callback.h"
 #include "chrome/browser/notifications/notification_common.h"
 #include "chrome/browser/notifications/notification_platform_bridge.h"
 
@@ -69,11 +69,11 @@ class NotificationPlatformBridgeAndroid : public NotificationPlatformBridge {
                const Notification& notification) override;
   void Close(const std::string& profile_id,
              const std::string& notification_id) override;
-  bool GetDisplayed(const std::string& profile_id,
-                    bool incognito,
-                    std::set<std::string>* notifications) const override;
-
-  static bool RegisterNotificationPlatformBridge(JNIEnv* env);
+  void GetDisplayed(
+      const std::string& profile_id,
+      bool incognito,
+      const GetDisplayedNotificationsCallback& callback) const override;
+  void SetReadyCallback(NotificationBridgeReadyCallback callback) override;
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 

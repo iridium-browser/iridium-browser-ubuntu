@@ -1,9 +1,9 @@
 Name: Google VR SDK
 Short Name: gvr
 URL: https://github.com/googlevr/gvr-android-sdk
-Version: 1.10.0
-Date: 10 Feb 2017
-Revision: 8d1395957283ee13ebe2bc672ba24e5ca4ec343f
+Version: 1.60.1
+Date: 06 June 2017
+Revision: a27f768b13682189c23eed69656319db5ef7cbfc
 License: Apache 2.0
 License File: LICENSE
 Security Critical: yes
@@ -33,3 +33,9 @@ In order to run automated end-to-end tests on VR features, VR Services
 are downloaded into test-apks/vr_services and test-apks/daydream_home,
 respectively. The downloaded APKs are the release APKs that are or were
 publicly available via the Play Store.
+In order to run automated end-to-end tests that involve a Daydream controller,
+controller_test_api.aar needs to be present. This allows us to send controller
+events using broadcasts like a real controller sends them over Bluetooth. The
+library is open-sourced similar to the other .aars, but since it's only useful
+for Chromium at the moment, it is uploaded to storage instead of to GitHub like
+the GVR SDK.

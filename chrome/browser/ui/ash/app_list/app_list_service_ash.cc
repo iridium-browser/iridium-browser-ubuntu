@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/session_util.h"
+#include "ui/app_list/app_list_features.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/presenter/app_list_presenter_delegate_factory.h"
 #include "ui/app_list/presenter/app_list_presenter_impl.h"
@@ -27,6 +28,8 @@
 #include "ui/app_list/views/app_list_main_view.h"
 #include "ui/app_list/views/app_list_view.h"
 #include "ui/app_list/views/contents_view.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 
 namespace {
 
@@ -70,6 +73,12 @@ class AppListPresenterDelegateFactoryMus
   DISALLOW_COPY_AND_ASSIGN(AppListPresenterDelegateFactoryMus);
 };
 
+int64_t GetDisplayIdToShowAppListOn() {
+  return display::Screen::GetScreen()
+      ->GetDisplayNearestWindow(ash::Shell::GetRootWindowForNewWindows())
+      .id();
+}
+
 }  // namespace
 
 // static
@@ -91,6 +100,7 @@ AppListServiceAsh::AppListServiceAsh() {
       base::MakeUnique<app_list::AppListPresenterImpl>(std::move(factory));
   controller_delegate_ =
       base::MakeUnique<AppListControllerDelegateAsh>(app_list_presenter_.get());
+  app_list_presenter_service_ = base::MakeUnique<AppListPresenterService>();
 }
 
 AppListServiceAsh::~AppListServiceAsh() {}
@@ -100,10 +110,7 @@ app_list::AppListPresenterImpl* AppListServiceAsh::GetAppListPresenter() {
 }
 
 void AppListServiceAsh::Init(Profile* initial_profile) {
-  // The AppListPresenterService ctor calls AppListServiceAsh::GetInstance(),
-  // which isn't available in the AppListServiceAsh constructor, so init here.
-  // This establishes the mojo connections between the app list and presenter.
-  app_list_presenter_service_ = base::MakeUnique<AppListPresenterService>();
+  app_list_presenter_service_->Init();
 
   // Ensure the StartPageService is created here. This early initialization is
   // necessary to allow the WebContents to load before the app list is shown.
@@ -124,7 +131,7 @@ void AppListServiceAsh::ShowAndSwitchToState(
     // TODO(calamity): This may cause the app list to show briefly before the
     // state change. If this becomes an issue, add the ability to ash::Shell to
     // load the app list without showing it.
-    app_list_presenter_->Show(ash::Shell::GetTargetDisplayId());
+    app_list_presenter_->Show(GetDisplayIdToShowAppListOn());
     app_list_was_open = false;
     app_list_view = app_list_presenter_->GetView();
     DCHECK(app_list_view);
@@ -146,12 +153,14 @@ base::FilePath AppListServiceAsh::GetProfilePath(
 void AppListServiceAsh::ShowForProfile(Profile* /*default_profile*/) {
   // This may not work correctly if the profile passed in is different from the
   // one the ash Shell is currently using.
-  app_list_presenter_->Show(ash::Shell::GetTargetDisplayId());
+  app_list_presenter_->Show(GetDisplayIdToShowAppListOn());
 }
 
 void AppListServiceAsh::ShowForAppInstall(Profile* profile,
                                           const std::string& extension_id,
                                           bool start_discovery_tracking) {
+  if (app_list::features::IsFullscreenAppListEnabled())
+    return;
   ShowAndSwitchToState(app_list::AppListModel::STATE_APPS);
   AppListServiceImpl::ShowForAppInstall(profile, extension_id,
                                         start_discovery_tracking);

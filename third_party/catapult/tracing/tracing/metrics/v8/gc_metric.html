@@ -5,7 +5,7 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<link rel="import" href="/tracing/base/range.html">
+<link rel="import" href="/tracing/base/math/range.html">
 <link rel="import" href="/tracing/base/unit.html">
 <link rel="import" href="/tracing/metrics/metric_registry.html">
 <link rel="import" href="/tracing/metrics/v8/utils.html">
@@ -17,37 +17,34 @@ found in the LICENSE file.
 tr.exportTo('tr.metrics.v8', function() {
   // The time window size for mutator utilization computation.
   // It is equal to the duration of one frame corresponding to 60 FPS rendering.
-  var TARGET_FPS = 60;
-  var MS_PER_SECOND = 1000;
-  var WINDOW_SIZE_MS = MS_PER_SECOND / TARGET_FPS;
+  const TARGET_FPS = 60;
+  const MS_PER_SECOND = 1000;
+  const WINDOW_SIZE_MS = MS_PER_SECOND / TARGET_FPS;
 
   function gcMetric(histograms, model) {
     addDurationOfTopEvents(histograms, model);
     addTotalDurationOfTopEvents(histograms, model);
     addDurationOfSubEvents(histograms, model);
-    addIdleTimesOfTopEvents(histograms, model);
-    addTotalIdleTimesOfTopEvents(histograms, model);
     addPercentageInV8ExecuteOfTopEvents(histograms, model);
     addTotalPercentageInV8Execute(histograms, model);
-    addV8ExecuteMutatorUtilization(histograms, model);
   }
 
   tr.metrics.MetricRegistry.register(gcMetric);
 
-  var timeDurationInMs_smallerIsBetter =
+  const timeDurationInMs_smallerIsBetter =
       tr.b.Unit.byName.timeDurationInMs_smallerIsBetter;
-  var percentage_biggerIsBetter =
+  const percentage_biggerIsBetter =
       tr.b.Unit.byName.normalizedPercentage_biggerIsBetter;
-  var percentage_smallerIsBetter =
+  const percentage_smallerIsBetter =
       tr.b.Unit.byName.normalizedPercentage_smallerIsBetter;
 
   // 0.1 steps from 0 to 20 since it is the most common range.
   // Exponentially increasing steps from 20 to 200.
-  var CUSTOM_BOUNDARIES = tr.v.HistogramBinBoundaries.createLinear(0, 20, 200)
+  const CUSTOM_BOUNDARIES = tr.v.HistogramBinBoundaries.createLinear(0, 20, 200)
     .addExponentialBins(200, 100);
 
   function createNumericForTopEventTime(name) {
-    var n = new tr.v.Histogram(name,
+    const n = new tr.v.Histogram(name,
         timeDurationInMs_smallerIsBetter, CUSTOM_BOUNDARIES);
     n.customizeSummaryOptions({
       avg: true,
@@ -61,7 +58,7 @@ tr.exportTo('tr.metrics.v8', function() {
   }
 
   function createNumericForSubEventTime(name) {
-    var n = new tr.v.Histogram(name,
+    const n = new tr.v.Histogram(name,
         timeDurationInMs_smallerIsBetter, CUSTOM_BOUNDARIES);
     n.customizeSummaryOptions({
       avg: true,
@@ -76,7 +73,7 @@ tr.exportTo('tr.metrics.v8', function() {
   }
 
   function createNumericForIdleTime(name) {
-    var n = new tr.v.Histogram(name,
+    const n = new tr.v.Histogram(name,
         timeDurationInMs_smallerIsBetter, CUSTOM_BOUNDARIES);
     n.customizeSummaryOptions({
       avg: true,
@@ -91,11 +88,12 @@ tr.exportTo('tr.metrics.v8', function() {
   }
 
   function createPercentage(name, numerator, denominator, unit) {
-    var hist = new tr.v.Histogram(name, unit);
-    if (denominator === 0)
+    const hist = new tr.v.Histogram(name, unit);
+    if (denominator === 0) {
       hist.addSample(0);
-    else
+    } else {
       hist.addSample(numerator / denominator);
+    }
     hist.customizeSummaryOptions({
       avg: true,
       count: false,
@@ -131,7 +129,7 @@ tr.exportTo('tr.metrics.v8', function() {
         isNotForcedTopGarbageCollectionEvent,
         tr.metrics.v8.utils.topGarbageCollectionEventName,
         function(name, events) {
-          var cpuDuration = createNumericForTopEventTime(name);
+          const cpuDuration = createNumericForTopEventTime(name);
           events.forEach(function(event) {
             cpuDuration.addSample(event.cpuDuration);
           });
@@ -149,7 +147,7 @@ tr.exportTo('tr.metrics.v8', function() {
         isNotForcedTopGarbageCollectionEvent,
         event => 'v8-gc-total',
         function(name, events) {
-          var cpuDuration = createNumericForTopEventTime(name);
+          const cpuDuration = createNumericForTopEventTime(name);
           events.forEach(function(event) {
             cpuDuration.addSample(event.cpuDuration);
           });
@@ -167,7 +165,7 @@ tr.exportTo('tr.metrics.v8', function() {
         isNotForcedSubGarbageCollectionEvent,
         tr.metrics.v8.utils.subGarbageCollectionEventName,
         function(name, events) {
-          var cpuDuration = createNumericForSubEventTime(name);
+          const cpuDuration = createNumericForSubEventTime(name);
           events.forEach(function(event) {
             cpuDuration.addSample(event.cpuDuration);
           });
@@ -175,77 +173,6 @@ tr.exportTo('tr.metrics.v8', function() {
         }
     );
   }
-
-  /**
-   * Example output:
-   * - v8-gc-full-mark-compactor_idle_deadline_overrun,
-   * - v8-gc-full-mark-compactor_outside_idle,
-   * - v8-gc-full-mark-compactor_percentage_idle.
-   */
-  function addIdleTimesOfTopEvents(histograms, model) {
-    tr.metrics.v8.utils.groupAndProcessEvents(model,
-        isNotForcedTopGarbageCollectionEvent,
-        tr.metrics.v8.utils.topGarbageCollectionEventName,
-        function(name, events) {
-          addIdleTimes(histograms, model, name, events);
-        }
-    );
-  }
-
-  /**
-   * Example output:
-   * - v8-gc-total_idle_deadline_overrun,
-   * - v8-gc-total_outside_idle,
-   * - v8-gc-total_percentage_idle.
-   */
-  function addTotalIdleTimesOfTopEvents(histograms, model) {
-    tr.metrics.v8.utils.groupAndProcessEvents(model,
-        isNotForcedTopGarbageCollectionEvent,
-        event => 'v8-gc-total',
-        function(name, events) {
-          addIdleTimes(histograms, model, name, events);
-        }
-    );
-  }
-
-  function addIdleTimes(histograms, model, name, events) {
-    var cpuDuration = createNumericForIdleTime();
-    var insideIdle = createNumericForIdleTime();
-    var outsideIdle = createNumericForIdleTime(name + '_outside_idle');
-    var idleDeadlineOverrun = createNumericForIdleTime(
-        name + '_idle_deadline_overrun');
-    events.forEach(function(event) {
-      var idleTask = tr.metrics.v8.utils.findParent(
-          event, tr.metrics.v8.utils.isIdleTask);
-      var inside = 0;
-      var overrun = 0;
-      if (idleTask) {
-        var allottedTime = idleTask['args']['allotted_time_ms'];
-        if (event.duration > allottedTime) {
-          overrun = event.duration - allottedTime;
-          // Don't count time over the deadline as being inside idle time.
-          // Since the deadline should be relative to wall clock we
-          // compare allotted_time_ms with wall duration instead of thread
-          // duration, and then assume the thread duration was inside idle
-          // for the same percentage of time.
-          inside = event.cpuDuration * allottedTime / event.duration;
-        } else {
-          inside = event.cpuDuration;
-        }
-      }
-      cpuDuration.addSample(event.cpuDuration);
-      insideIdle.addSample(inside);
-      outsideIdle.addSample(event.cpuDuration - inside);
-      idleDeadlineOverrun.addSample(overrun);
-    });
-    histograms.addHistogram(idleDeadlineOverrun);
-    histograms.addHistogram(outsideIdle);
-    var percentage = createPercentage(name + '_percentage_idle', insideIdle.sum,
-        cpuDuration.sum,
-        percentage_biggerIsBetter);
-    histograms.addHistogram(percentage);
-  }
-
 
   /**
    * Example output:
@@ -276,58 +203,20 @@ tr.exportTo('tr.metrics.v8', function() {
   }
 
   function addPercentageInV8Execute(histograms, model, name, events) {
-    var cpuDurationInV8Execute = 0;
-    var cpuDurationTotal = 0;
+    let cpuDurationInV8Execute = 0;
+    let cpuDurationTotal = 0;
     events.forEach(function(event) {
-      var v8Execute = tr.metrics.v8.utils.findParent(
+      const v8Execute = tr.metrics.v8.utils.findParent(
           event, tr.metrics.v8.utils.isV8ExecuteEvent);
       if (v8Execute) {
         cpuDurationInV8Execute += event.cpuDuration;
       }
       cpuDurationTotal += event.cpuDuration;
     });
-    var percentage = createPercentage(
+    const percentage = createPercentage(
         name + '_percentage_in_v8_execute', cpuDurationInV8Execute,
         cpuDurationTotal, percentage_smallerIsBetter);
     histograms.addHistogram(percentage);
-  }
-
-  function addV8ExecuteMutatorUtilization(histograms, model) {
-    tr.metrics.v8.utils.groupAndProcessEvents(model,
-        tr.metrics.v8.utils.isTopV8ExecuteEvent,
-        event => 'v8-execute',
-        function(name, events) {
-          events.sort((a, b) => a.start - b.start);
-          var time = 0;
-          var pauses = [];
-          // Glue together the v8.execute events and adjust the GC pause
-          // times accordingly.
-          for (var topEvent of events) {
-            for (var e of topEvent.enumerateAllDescendents()) {
-              if (isNotForcedTopGarbageCollectionEvent(e)) {
-                pauses.push({ start: e.start - topEvent.start + time,
-                  end: e.end - topEvent.start + time });
-              }
-            }
-            time += topEvent.duration;
-          }
-          // Now we have one big v8.execute interval from 0 to |time| and
-          // a list of GC pauses.
-          var mutatorUtilization = tr.metrics.v8.utils.mutatorUtilization(
-              0, time, WINDOW_SIZE_MS, pauses);
-          [0.90, 0.95, 0.99].forEach(function(percent) {
-            var hist = new tr.v.Histogram(
-                'v8-execute-mutator-utilization_pct_0' + percent * 100,
-                percentage_biggerIsBetter);
-            hist.addSample(mutatorUtilization.percentile(1.0 - percent));
-            histograms.addHistogram(hist);
-          });
-          var hist = new tr.v.Histogram(
-              'v8-execute-mutator-utilization_min', percentage_biggerIsBetter);
-          hist.addSample(mutatorUtilization.min);
-          histograms.addHistogram(hist);
-        }
-    );
   }
 
   return {

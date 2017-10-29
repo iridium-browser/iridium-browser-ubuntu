@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/browser/indexed_db/indexed_db.h"
@@ -135,6 +136,8 @@ class CONTENT_EXPORT IndexedDBDatabase
 
   void TransactionCreated(IndexedDBTransaction* transaction);
   void TransactionFinished(IndexedDBTransaction* transaction, bool committed);
+
+  void AbortAllTransactionsForConnections();
 
   void AddPendingObserver(IndexedDBTransaction* transaction,
                           int32_t observer_id,
@@ -289,6 +292,10 @@ class CONTENT_EXPORT IndexedDBDatabase
  private:
   friend class base::RefCounted<IndexedDBDatabase>;
   friend class IndexedDBClassFactory;
+
+  FRIEND_TEST_ALL_PREFIXES(IndexedDBDatabaseTest, OpenDeleteClear);
+
+  void CallUpgradeTransactionStartedForTesting(int64_t old_version);
 
   class ConnectionRequest;
   class OpenRequest;

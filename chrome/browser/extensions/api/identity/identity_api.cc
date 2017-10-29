@@ -156,27 +156,6 @@ const IdentityAPI::CachedTokens& IdentityAPI::GetAllCachedTokens() {
   return token_cache_;
 }
 
-std::vector<std::string> IdentityAPI::GetAccounts() const {
-  const std::vector<gaia::AccountIds> ids = account_tracker_.GetAccounts();
-  std::vector<std::string> gaia_ids;
-
-  if (switches::IsExtensionsMultiAccount()) {
-    for (std::vector<gaia::AccountIds>::const_iterator it = ids.begin();
-         it != ids.end();
-         ++it) {
-      gaia_ids.push_back(it->gaia);
-    }
-  } else if (ids.size() >= 1) {
-    gaia_ids.push_back(ids[0].gaia);
-  }
-
-  return gaia_ids;
-}
-
-std::string IdentityAPI::FindAccountKeyByGaiaId(const std::string& gaia_id) {
-  return account_tracker_.FindAccountIdsByGaiaId(gaia_id).account_key;
-}
-
 void IdentityAPI::Shutdown() {
   if (get_auth_token_function_)
     get_auth_token_function_->Shutdown();
@@ -184,18 +163,13 @@ void IdentityAPI::Shutdown() {
   account_tracker_.Shutdown();
 }
 
-static base::LazyInstance<BrowserContextKeyedAPIFactory<IdentityAPI> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<
+    BrowserContextKeyedAPIFactory<IdentityAPI>>::DestructorAtExit g_factory =
+    LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<IdentityAPI>* IdentityAPI::GetFactoryInstance() {
   return g_factory.Pointer();
-}
-
-void IdentityAPI::OnAccountAdded(const gaia::AccountIds& ids) {
-}
-
-void IdentityAPI::OnAccountRemoved(const gaia::AccountIds& ids) {
 }
 
 void IdentityAPI::OnAccountSignInChanged(const gaia::AccountIds& ids,
@@ -211,11 +185,6 @@ void IdentityAPI::OnAccountSignInChanged(const gaia::AccountIds& ids,
                 browser_context_));
 
   EventRouter::Get(browser_context_)->BroadcastEvent(std::move(event));
-}
-
-void IdentityAPI::SetAccountStateForTest(gaia::AccountIds ids,
-                                         bool is_signed_in) {
-  account_tracker_.SetAccountStateForTest(ids, is_signed_in);
 }
 
 template <>

@@ -5,18 +5,20 @@
 #ifndef V8ScriptValueDeserializer_h
 #define V8ScriptValueDeserializer_h
 
-#include "bindings/core/v8/ScriptState.h"
-#include "bindings/core/v8/SerializationTag.h"
-#include "bindings/core/v8/SerializedScriptValue.h"
+#include "bindings/core/v8/serialization/SerializationTag.h"
+#include "bindings/core/v8/serialization/SerializedColorParams.h"
+#include "bindings/core/v8/serialization/SerializedScriptValue.h"
 #include "core/CoreExport.h"
+#include "platform/bindings/ScriptState.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Noncopyable.h"
+#include "platform/wtf/RefPtr.h"
 #include "v8/include/v8.h"
-#include "wtf/Allocator.h"
-#include "wtf/Noncopyable.h"
-#include "wtf/RefPtr.h"
 
 namespace blink {
 
 class File;
+class UnpackedSerializedScriptValue;
 
 // Deserializes V8 values serialized using V8ScriptValueSerializer (or its
 // predecessor, ScriptValueSerializer).
@@ -26,75 +28,94 @@ class File;
 //
 // A deserializer cannot be used multiple times; it is expected that its
 // deserialize method will be invoked exactly once.
-class GC_PLUGIN_IGNORE("https://crbug.com/644725") CORE_EXPORT
-    V8ScriptValueDeserializer : public v8::ValueDeserializer::Delegate {
+class CORE_EXPORT V8ScriptValueDeserializer
+    : public v8::ValueDeserializer::Delegate {
   STACK_ALLOCATED();
   WTF_MAKE_NONCOPYABLE(V8ScriptValueDeserializer);
 
  public:
-  V8ScriptValueDeserializer(RefPtr<ScriptState>, RefPtr<SerializedScriptValue>);
+  using Options = SerializedScriptValue::DeserializeOptions;
+  V8ScriptValueDeserializer(RefPtr<ScriptState>,
+                            UnpackedSerializedScriptValue*,
+                            const Options& = Options());
+  V8ScriptValueDeserializer(RefPtr<ScriptState>,
+                            RefPtr<SerializedScriptValue>,
+                            const Options& = Options());
 
-  void setTransferredMessagePorts(const MessagePortArray* ports) {
-    m_transferredMessagePorts = ports;
-  }
-  void setBlobInfoArray(const WebBlobInfoArray* blobInfoArray) {
-    m_blobInfoArray = blobInfoArray;
-  }
-
-  v8::Local<v8::Value> deserialize();
+  v8::Local<v8::Value> Deserialize();
 
  protected:
-  virtual ScriptWrappable* readDOMObject(SerializationTag);
+  virtual ScriptWrappable* ReadDOMObject(SerializationTag);
 
-  ScriptState* getScriptState() const { return m_scriptState.get(); }
+  ScriptState* GetScriptState() const { return script_state_.Get(); }
 
-  uint32_t version() const { return m_version; }
-  bool readTag(SerializationTag* tag) {
-    const void* tagBytes = nullptr;
-    if (!m_deserializer.ReadRawBytes(1, &tagBytes))
+  uint32_t Version() const { return version_; }
+  bool ReadTag(SerializationTag* tag) {
+    const void* tag_bytes = nullptr;
+    if (!deserializer_.ReadRawBytes(1, &tag_bytes))
       return false;
     *tag = static_cast<SerializationTag>(
-        *reinterpret_cast<const uint8_t*>(tagBytes));
+        *reinterpret_cast<const uint8_t*>(tag_bytes));
     return true;
   }
-  bool readUint32(uint32_t* value) { return m_deserializer.ReadUint32(value); }
-  bool readUint64(uint64_t* value) { return m_deserializer.ReadUint64(value); }
-  bool readDouble(double* value) { return m_deserializer.ReadDouble(value); }
-  bool readRawBytes(size_t size, const void** data) {
-    return m_deserializer.ReadRawBytes(size, data);
+  bool ReadUint32(uint32_t* value) { return deserializer_.ReadUint32(value); }
+  bool ReadUint64(uint64_t* value) { return deserializer_.ReadUint64(value); }
+  bool ReadDouble(double* value) { return deserializer_.ReadDouble(value); }
+  bool ReadRawBytes(size_t size, const void** data) {
+    return deserializer_.ReadRawBytes(size, data);
   }
-  bool readUTF8String(String* stringOut);
+  bool ReadUTF8String(String* string_out);
+
+  template <typename E>
+  bool ReadUint32Enum(E* value) {
+    static_assert(
+        std::is_enum<E>::value &&
+            std::is_same<uint32_t,
+                         typename std::underlying_type<E>::type>::value,
+        "Only enums backed by uint32_t are accepted.");
+    uint32_t tmp;
+    if (ReadUint32(&tmp) && tmp <= static_cast<uint32_t>(E::kLast)) {
+      *value = static_cast<E>(tmp);
+      return true;
+    }
+    return false;
+  }
 
  private:
-  void transfer();
+  V8ScriptValueDeserializer(RefPtr<ScriptState>,
+                            UnpackedSerializedScriptValue*,
+                            RefPtr<SerializedScriptValue>,
+                            const Options&);
+  void Transfer();
 
-  File* readFile();
-  File* readFileIndex();
+  File* ReadFile();
+  File* ReadFileIndex();
 
-  RefPtr<BlobDataHandle> getOrCreateBlobDataHandle(const String& uuid,
+  RefPtr<BlobDataHandle> GetOrCreateBlobDataHandle(const String& uuid,
                                                    const String& type,
                                                    uint64_t size);
 
   // v8::ValueDeserializer::Delegate
   v8::MaybeLocal<v8::Object> ReadHostObject(v8::Isolate*) override;
+  v8::MaybeLocal<v8::WasmCompiledModule> GetWasmModuleFromId(v8::Isolate*,
+                                                             uint32_t) override;
 
-  RefPtr<ScriptState> m_scriptState;
-  RefPtr<SerializedScriptValue> m_serializedScriptValue;
-  v8::ValueDeserializer m_deserializer;
+  RefPtr<ScriptState> script_state_;
+  Member<UnpackedSerializedScriptValue> unpacked_value_;
+  RefPtr<SerializedScriptValue> serialized_script_value_;
+  v8::ValueDeserializer deserializer_;
 
   // Message ports which were transferred in.
-  const MessagePortArray* m_transferredMessagePorts = nullptr;
-
-  // ImageBitmaps which were transferred in.
-  HeapVector<Member<ImageBitmap>> m_transferredImageBitmaps;
+  const MessagePortArray* transferred_message_ports_ = nullptr;
 
   // Blob info for blobs stored by index.
-  const WebBlobInfoArray* m_blobInfoArray = nullptr;
+  const WebBlobInfoArray* blob_info_array_ = nullptr;
 
   // Set during deserialize after the header is read.
-  uint32_t m_version = 0;
+  uint32_t version_ = 0;
+
 #if DCHECK_IS_ON()
-  bool m_deserializeInvoked = false;
+  bool deserialize_invoked_ = false;
 #endif
 };
 

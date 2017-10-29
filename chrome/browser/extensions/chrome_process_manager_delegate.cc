@@ -9,6 +9,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -19,7 +20,14 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_manager_factory.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/one_shot_event.h"
+#include "extensions/common/permissions/permissions_data.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chromeos/chromeos_switches.h"
+#endif
 
 namespace extensions {
 
@@ -38,16 +46,12 @@ ChromeProcessManagerDelegate::ChromeProcessManagerDelegate() {
 ChromeProcessManagerDelegate::~ChromeProcessManagerDelegate() {
 }
 
-bool ChromeProcessManagerDelegate::IsBackgroundPageAllowed(
+bool ChromeProcessManagerDelegate::AreBackgroundPagesAllowedForContext(
     content::BrowserContext* context) const {
-  Profile* profile = static_cast<Profile*>(context);
+  Profile* profile = Profile::FromBrowserContext(context);
 
   bool is_normal_session = !profile->IsGuestSession() &&
                            !profile->IsSystemProfile();
-#if defined(OS_CHROMEOS)
-  is_normal_session = is_normal_session &&
-                      user_manager::UserManager::Get()->IsUserLoggedIn();
-#endif
 
   // Disallow if the current session is a Guest mode session or login screen but
   // the current browser context is *not* off-the-record. Such context is
@@ -56,9 +60,48 @@ bool ChromeProcessManagerDelegate::IsBackgroundPageAllowed(
   return is_normal_session || profile->IsOffTheRecord();
 }
 
+bool ChromeProcessManagerDelegate::IsExtensionBackgroundPageAllowed(
+    content::BrowserContext* context,
+    const Extension& extension) const {
+#if defined(OS_CHROMEOS)
+  Profile* profile = Profile::FromBrowserContext(context);
+
+  const bool is_signin_profile =
+      chromeos::ProfileHelper::IsSigninProfile(profile) &&
+      !profile->IsOffTheRecord();
+
+  if (is_signin_profile) {
+    // Check for flag.
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kDisableLoginScreenApps)) {
+      return false;
+    }
+
+    // Get login screen apps installed by policy.
+    std::unique_ptr<base::DictionaryValue> login_screen_apps_list =
+        ExtensionManagementFactory::GetForBrowserContext(context)
+            ->GetForceInstallList();
+
+    // For the ChromeOS login profile, only allow apps installed by device
+    // policy.
+    return login_screen_apps_list->HasKey(extension.id());
+  }
+
+  if (chromeos::ProfileHelper::IsLockScreenAppProfile(profile) &&
+      !profile->IsOffTheRecord()) {
+    return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+               chromeos::switches::kDisableLockScreenApps) &&
+           extension.permissions_data()->HasAPIPermission(
+               APIPermission::kLockScreen);
+  }
+#endif
+
+  return AreBackgroundPagesAllowedForContext(context);
+}
+
 bool ChromeProcessManagerDelegate::DeferCreatingStartupBackgroundHosts(
     content::BrowserContext* context) const {
-  Profile* profile = static_cast<Profile*>(context);
+  Profile* profile = Profile::FromBrowserContext(context);
 
   // The profile may not be valid yet if it is still being initialized.
   // In that case, defer loading, since it depends on an initialized profile.

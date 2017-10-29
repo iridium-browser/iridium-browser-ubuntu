@@ -8,6 +8,7 @@
 
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/features.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -19,8 +20,7 @@
 #include "ui/views/border.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/controls/button/vector_icon_button.h"
-#include "ui/views/controls/button/vector_icon_button_delegate.h"
+#include "ui/views/controls/button/button.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/client_view.h"
@@ -129,19 +129,19 @@ class BaseDialogContainer : public views::DialogDelegateView {
 // The contents view for an App List Dialog, which covers the entire app list
 // and adds a close button.
 class AppListDialogContainer : public BaseDialogContainer,
-                               public views::VectorIconButtonDelegate {
+                               public views::ButtonListener {
  public:
   AppListDialogContainer(views::View* dialog_body,
                          const base::Closure& close_callback)
       : BaseDialogContainer(dialog_body, close_callback) {
-    set_background(new AppListOverlayBackground());
+    SetBackground(base::MakeUnique<AppListOverlayBackground>());
     close_button_ = views::BubbleFrameView::CreateCloseButton(this);
     AddChildView(close_button_);
   }
   ~AppListDialogContainer() override {}
 
  private:
-  // Overridden from views::View:
+  // views::View:
   void Layout() override {
     // Margin of the close button from the top right-hand corner of the dialog.
     const int kCloseButtonDialogMargin = 10;
@@ -154,13 +154,13 @@ class AppListDialogContainer : public BaseDialogContainer,
     views::DialogDelegateView::Layout();
   }
 
-  // Overridden from views::WidgetDelegate:
+  // views::WidgetDelegate:
   views::NonClientFrameView* CreateNonClientFrameView(
       views::Widget* widget) override {
     return new views::NativeFrameView(widget);
   }
 
-  // Overridden from views::ButtonListener:
+  // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override {
     if (sender == close_button_) {
       GetWidget()->Close();
@@ -215,15 +215,14 @@ class NativeDialogContainer : public BaseDialogContainer {
   NativeDialogContainer(views::View* dialog_body,
                         const gfx::Size& size,
                         const base::Closure& close_callback)
-      : BaseDialogContainer(dialog_body, close_callback), size_(size) {
+      : BaseDialogContainer(dialog_body, close_callback) {
     SetLayoutManager(new views::FillLayout());
+    chrome::RecordDialogCreation(chrome::DialogIdentifier::NATIVE_CONTAINER);
+    SetPreferredSize(size);
   }
   ~NativeDialogContainer() override {}
 
  private:
-  // Overridden from views::View:
-  gfx::Size GetPreferredSize() const override { return size_; }
-
   // Overridden from views::WidgetDelegate:
   views::NonClientFrameView* CreateNonClientFrameView(
       views::Widget* widget) override {
@@ -234,8 +233,6 @@ class NativeDialogContainer : public BaseDialogContainer {
     frame->SetBubbleBorder(std::move(border));
     return frame;
   }
-
-  const gfx::Size size_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeDialogContainer);
 };

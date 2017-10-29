@@ -257,7 +257,9 @@ void ExternalCache::CheckCache() {
         update_url = extension_urls::GetWebstoreUpdateUrl();
 
       if (update_url.is_valid())
-        downloader_->AddPendingExtension(it.key(), update_url, false, 0);
+        downloader_->AddPendingExtension(
+            it.key(), update_url, false, 0,
+            extensions::ManifestFetchData::FetchPriority::BACKGROUND);
     }
 
     base::FilePath file_path;
@@ -265,7 +267,8 @@ void ExternalCache::CheckCache() {
     std::string hash;
     if (local_cache_.GetExtension(it.key(), hash, &file_path, &version)) {
       // Copy entry to don't modify it inside extensions_.
-      base::DictionaryValue* entry_copy = entry->DeepCopy();
+      std::unique_ptr<base::DictionaryValue> entry_copy =
+          entry->CreateDeepCopy();
 
       if (extension_urls::IsWebstoreUpdateUrl(GURL(external_update_url))) {
         entry_copy->SetBoolean(
@@ -277,7 +280,7 @@ void ExternalCache::CheckCache() {
                             version);
       entry_copy->SetString(extensions::ExternalProviderImpl::kExternalCrx,
                             file_path.value());
-      cached_extensions_->Set(it.key(), entry_copy);
+      cached_extensions_->Set(it.key(), std::move(entry_copy));
     } else {
       bool has_external_crx = entry->HasKey(
           extensions::ExternalProviderImpl::kExternalCrx);
@@ -285,7 +288,7 @@ void ExternalCache::CheckCache() {
           !delegate_->GetInstalledExtensionVersion(it.key()).empty();
       if (keep_if_present || has_external_crx || is_already_installed) {
         // Copy entry to don't modify it inside extensions_.
-        cached_extensions_->Set(it.key(), entry->DeepCopy());
+        cached_extensions_->Set(it.key(), entry->CreateDeepCopy());
       }
     }
   }
@@ -303,21 +306,23 @@ void ExternalCache::OnPutExtension(const std::string& id,
                                    const base::FilePath& file_path,
                                    bool file_ownership_passed) {
   if (local_cache_.is_shutdown() || file_ownership_passed) {
-    backend_task_runner_->PostTask(FROM_HERE,
-        base::Bind(base::IgnoreResult(&base::DeleteFile), file_path, true));
+    backend_task_runner_->PostTask(
+        FROM_HERE,
+        base::BindOnce(base::IgnoreResult(&base::DeleteFile), file_path, true));
     return;
   }
 
   VLOG(1) << "ExternalCache installed a new extension in the cache " << id;
 
-  base::DictionaryValue* entry = NULL;
-  if (!extensions_->GetDictionary(id, &entry)) {
+  base::DictionaryValue* original_entry = NULL;
+  if (!extensions_->GetDictionary(id, &original_entry)) {
     LOG(ERROR) << "ExternalCache cannot find entry for extension " << id;
     return;
   }
 
-  // Copy entry to don't modify it inside extensions_.
-  entry = entry->DeepCopy();
+  // Copy original_entry to avoid modifying it inside extensions_.
+  std::unique_ptr<base::DictionaryValue> entry =
+      original_entry->CreateDeepCopy();
 
   std::string version;
   std::string hash;
@@ -329,7 +334,7 @@ void ExternalCache::OnPutExtension(const std::string& id,
 
   if (flush_on_put_) {
     backend_task_runner_->PostTask(FROM_HERE,
-                                   base::Bind(&FlushFile, file_path));
+                                   base::BindOnce(&FlushFile, file_path));
   }
 
   std::string update_url;
@@ -343,7 +348,7 @@ void ExternalCache::OnPutExtension(const std::string& id,
   entry->SetString(extensions::ExternalProviderImpl::kExternalCrx,
                    file_path.value());
 
-  cached_extensions_->Set(id, entry);
+  cached_extensions_->Set(id, std::move(entry));
   if (delegate_)
     delegate_->OnExtensionLoadedInCache(id);
   UpdateExtensionLoader();

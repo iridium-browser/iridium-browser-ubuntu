@@ -18,12 +18,17 @@
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/event_filter.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
+#include "extensions/common/extension_urls.h"
 #include "extensions/common/value_counter.h"
 #include "extensions/renderer/extension_frame_helper.h"
+#include "extensions/renderer/ipc_message_sender.h"
 #include "extensions/renderer/script_context.h"
+#include "extensions/renderer/worker_thread_dispatcher.h"
+#include "gin/converter.h"
 #include "url/gurl.h"
 
 namespace extensions {
@@ -36,8 +41,13 @@ namespace {
 typedef std::map<std::string, int> EventListenerCounts;
 
 // A map of extension IDs to listener counts for that extension.
-base::LazyInstance<std::map<std::string, EventListenerCounts>>
+base::LazyInstance<std::map<std::string, EventListenerCounts>>::DestructorAtExit
     g_listener_counts = LAZY_INSTANCE_INITIALIZER;
+
+// A collection of the unmanaged events (i.e., those for which the browser is
+// not notified of changes) that have listeners, by context.
+base::LazyInstance<std::map<ScriptContext*, std::set<std::string>>>::Leaky
+    g_unmanaged_listeners = LAZY_INSTANCE_INITIALIZER;
 
 // A map of (extension ID, event name) pairs to the filtered listener counts
 // for that pair. The map is used to keep track of which filters are in effect
@@ -46,10 +56,11 @@ base::LazyInstance<std::map<std::string, EventListenerCounts>>
 using FilteredEventListenerKey = std::pair<std::string, std::string>;
 using FilteredEventListenerCounts =
     std::map<FilteredEventListenerKey, std::unique_ptr<ValueCounter>>;
-base::LazyInstance<FilteredEventListenerCounts> g_filtered_listener_counts =
-    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<FilteredEventListenerCounts>::DestructorAtExit
+    g_filtered_listener_counts = LAZY_INSTANCE_INITIALIZER;
 
-base::LazyInstance<EventFilter> g_event_filter = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<EventFilter>::DestructorAtExit g_event_filter =
+    LAZY_INSTANCE_INITIALIZER;
 
 // Gets a unique string key identifier for a ScriptContext.
 // TODO(kalman): Just use pointer equality...?
@@ -76,44 +87,6 @@ int DecrementEventListenerCount(ScriptContext* script_context,
                                 const std::string& event_name) {
   return --g_listener_counts
                .Get()[GetKeyForScriptContext(script_context)][event_name];
-}
-
-EventFilteringInfo ParseFromObject(v8::Local<v8::Object> object,
-                                   v8::Isolate* isolate) {
-  EventFilteringInfo info;
-  v8::Local<v8::String> url(v8::String::NewFromUtf8(isolate, "url"));
-  if (object->Has(url)) {
-    v8::Local<v8::Value> url_value(object->Get(url));
-    info.SetURL(GURL(*v8::String::Utf8Value(url_value)));
-  }
-  v8::Local<v8::String> instance_id(
-      v8::String::NewFromUtf8(isolate, "instanceId"));
-  if (object->Has(instance_id)) {
-    v8::Local<v8::Value> instance_id_value(object->Get(instance_id));
-    info.SetInstanceID(instance_id_value->IntegerValue());
-  }
-  v8::Local<v8::String> service_type(
-      v8::String::NewFromUtf8(isolate, "serviceType"));
-  if (object->Has(service_type)) {
-    v8::Local<v8::Value> service_type_value(object->Get(service_type));
-    info.SetServiceType(*v8::String::Utf8Value(service_type_value));
-  }
-  v8::Local<v8::String> window_types(
-      v8::String::NewFromUtf8(isolate, "windowType"));
-  if (object->Has(window_types)) {
-    v8::Local<v8::Value> window_types_value(object->Get(window_types));
-    info.SetWindowType(*v8::String::Utf8Value(window_types_value));
-  }
-
-  v8::Local<v8::String> window_exposed(
-      v8::String::NewFromUtf8(isolate, "windowExposedByDefault"));
-  if (object->Has(window_exposed)) {
-    v8::Local<v8::Value> window_exposed_value(object->Get(window_exposed));
-    info.SetWindowExposedByDefault(
-        window_exposed_value.As<v8::Boolean>()->Value());
-  }
-
-  return info;
 }
 
 // Add a filter to |event_name| in |extension_id|, returning true if it
@@ -153,10 +126,44 @@ bool RemoveFilter(const std::string& event_name,
   return false;
 }
 
+// Returns a v8::Array containing the ids of the listeners that match the given
+// |event_filter_dict| in the given |script_context|.
+v8::Local<v8::Array> GetMatchingListeners(ScriptContext* script_context,
+                                          const std::string& event_name,
+                                          const EventFilteringInfo& info) {
+  const EventFilter& event_filter = g_event_filter.Get();
+  v8::Isolate* isolate = script_context->isolate();
+  v8::Local<v8::Context> context = script_context->v8_context();
+
+  // Only match events routed to this context's RenderFrame or ones that don't
+  // have a routingId in their filter.
+  std::set<EventFilter::MatcherID> matched_event_filters =
+      event_filter.MatchEvent(event_name, info,
+                              script_context->GetRenderFrame()->GetRoutingID());
+  v8::Local<v8::Array> array(
+      v8::Array::New(isolate, matched_event_filters.size()));
+  int i = 0;
+  for (EventFilter::MatcherID id : matched_event_filters) {
+    CHECK(array->CreateDataProperty(context, i++, v8::Integer::New(isolate, id))
+              .ToChecked());
+  }
+
+  return array;
+}
+
+bool IsLazyContext(ScriptContext* context) {
+  // Note: Check context type first so that ExtensionFrameHelper isn't accessed
+  // on a worker thread.
+  return context->context_type() == Feature::SERVICE_WORKER_CONTEXT ||
+         ExtensionFrameHelper::IsContextForEventPage(context);
+}
+
 }  // namespace
 
-EventBindings::EventBindings(ScriptContext* context)
-    : ObjectBackedNativeHandler(context) {
+EventBindings::EventBindings(ScriptContext* context,
+                             IPCMessageSender* ipc_message_sender)
+    : ObjectBackedNativeHandler(context),
+      ipc_message_sender_(ipc_message_sender) {
   RouteFunction("AttachEvent", base::Bind(&EventBindings::AttachEventHandler,
                                           base::Unretained(this)));
   RouteFunction("DetachEvent", base::Bind(&EventBindings::DetachEventHandler,
@@ -167,9 +174,12 @@ EventBindings::EventBindings(ScriptContext* context)
   RouteFunction("DetachFilteredEvent",
                 base::Bind(&EventBindings::DetachFilteredEventHandler,
                            base::Unretained(this)));
-  RouteFunction("MatchAgainstEventFilter",
-                base::Bind(&EventBindings::MatchAgainstEventFilter,
-                           base::Unretained(this)));
+  RouteFunction(
+      "AttachUnmanagedEvent",
+      base::Bind(&EventBindings::AttachUnmanagedEvent, base::Unretained(this)));
+  RouteFunction(
+      "DetachUnmanagedEvent",
+      base::Bind(&EventBindings::DetachUnmanagedEvent, base::Unretained(this)));
 
   // It's safe to use base::Unretained here because |context| will always
   // outlive us.
@@ -179,14 +189,63 @@ EventBindings::EventBindings(ScriptContext* context)
 
 EventBindings::~EventBindings() {}
 
-void EventBindings::AttachEventHandler(
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
-  CHECK_EQ(1, args.Length());
-  CHECK(args[0]->IsString());
-  AttachEvent(*v8::String::Utf8Value(args[0]));
+bool EventBindings::HasListener(ScriptContext* script_context,
+                                const std::string& event_name) {
+  const auto& unmanaged_listeners = g_unmanaged_listeners.Get();
+  auto unmanaged_iter = unmanaged_listeners.find(script_context);
+  if (unmanaged_iter != unmanaged_listeners.end() &&
+      base::ContainsKey(unmanaged_iter->second, event_name)) {
+    return true;
+  }
+  const auto& managed_listeners = g_listener_counts.Get();
+  auto managed_iter =
+      managed_listeners.find(GetKeyForScriptContext(script_context));
+  if (managed_iter != managed_listeners.end()) {
+    auto event_iter = managed_iter->second.find(event_name);
+    if (event_iter != managed_iter->second.end() && event_iter->second > 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
-void EventBindings::AttachEvent(const std::string& event_name) {
+// static
+void EventBindings::DispatchEventInContext(
+    const std::string& event_name,
+    const base::ListValue* event_args,
+    const EventFilteringInfo* filtering_info,
+    ScriptContext* context) {
+  v8::HandleScope handle_scope(context->isolate());
+  v8::Context::Scope context_scope(context->v8_context());
+
+  v8::Local<v8::Array> listener_ids;
+  if (filtering_info && !filtering_info->is_empty())
+    listener_ids = GetMatchingListeners(context, event_name, *filtering_info);
+  else
+    listener_ids = v8::Array::New(context->isolate());
+
+  v8::Local<v8::Value> v8_args[] = {
+      gin::StringToSymbol(context->isolate(), event_name),
+      content::V8ValueConverter::Create()->ToV8Value(event_args,
+                                                     context->v8_context()),
+      listener_ids,
+  };
+
+  context->module_system()->CallModuleMethodSafe(
+      kEventBindings, "dispatchEvent", arraysize(v8_args), v8_args);
+}
+
+void EventBindings::AttachEventHandler(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  CHECK_EQ(2, args.Length());
+  CHECK(args[0]->IsString());
+  CHECK(args[1]->IsBoolean());
+  AttachEvent(*v8::String::Utf8Value(args[0]), args[1]->BooleanValue());
+}
+
+void EventBindings::AttachEvent(const std::string& event_name,
+                                bool supports_lazy_listeners) {
   if (!context()->HasAccessOrThrowError(event_name))
     return;
 
@@ -199,60 +258,63 @@ void EventBindings::AttachEvent(const std::string& event_name) {
   // chrome/test/data/extensions/api_test/events/background.js.
   attached_event_names_.insert(event_name);
 
-  const std::string& extension_id = context()->GetExtensionID();
   if (IncrementEventListenerCount(context(), event_name) == 1) {
-    content::RenderThread::Get()->Send(new ExtensionHostMsg_AddListener(
-        extension_id, context()->url(), event_name));
+    ipc_message_sender_->SendAddUnfilteredEventListenerIPC(context(),
+                                                           event_name);
   }
 
   // This is called the first time the page has added a listener. Since
   // the background page is the only lazy page, we know this is the first
   // time this listener has been registered.
-  if (ExtensionFrameHelper::IsContextForEventPage(context())) {
-    content::RenderThread::Get()->Send(
-        new ExtensionHostMsg_AddLazyListener(extension_id, event_name));
+  if (IsLazyContext(context()) && supports_lazy_listeners) {
+    ipc_message_sender_->SendAddUnfilteredLazyEventListenerIPC(context(),
+                                                               event_name);
   }
 }
 
 void EventBindings::DetachEventHandler(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  CHECK_EQ(2, args.Length());
+  CHECK_EQ(3, args.Length());
   CHECK(args[0]->IsString());
   CHECK(args[1]->IsBoolean());
-  DetachEvent(*v8::String::Utf8Value(args[0]), args[1]->BooleanValue());
+  CHECK(args[2]->IsBoolean());
+  bool was_manual = args[1]->BooleanValue();
+  bool supports_lazy_listeners = args[2]->BooleanValue();
+  DetachEvent(*v8::String::Utf8Value(args[0]),
+              was_manual && supports_lazy_listeners);
 }
 
-void EventBindings::DetachEvent(const std::string& event_name, bool is_manual) {
+void EventBindings::DetachEvent(const std::string& event_name,
+                                bool remove_lazy_listener) {
   // See comment in AttachEvent().
   attached_event_names_.erase(event_name);
 
-  const std::string& extension_id = context()->GetExtensionID();
-
   if (DecrementEventListenerCount(context(), event_name) == 0) {
-    content::RenderThread::Get()->Send(new ExtensionHostMsg_RemoveListener(
-        extension_id, context()->url(), event_name));
+    ipc_message_sender_->SendRemoveUnfilteredEventListenerIPC(context(),
+                                                              event_name);
   }
 
   // DetachEvent is called when the last listener for the context is
-  // removed. If the context is the background page, and it removes the
-  // last listener manually, then we assume that it is no longer interested
-  // in being awakened for this event.
-  if (is_manual && ExtensionFrameHelper::IsContextForEventPage(context())) {
-    content::RenderThread::Get()->Send(
-        new ExtensionHostMsg_RemoveLazyListener(extension_id, event_name));
+  // removed. If the context is the background page or service worker, and it
+  // removes the last listener manually, then we assume that it is no longer
+  // interested in being awakened for this event.
+  if (remove_lazy_listener && IsLazyContext(context())) {
+    ipc_message_sender_->SendRemoveUnfilteredLazyEventListenerIPC(context(),
+                                                                  event_name);
   }
 }
 
 // MatcherID AttachFilteredEvent(string event_name, object filter)
 // event_name - Name of the event to attach.
 // filter - Which instances of the named event are we interested in.
-// returns the id assigned to the listener, which will be returned from calls
-// to MatchAgainstEventFilter where this listener matches.
+// returns the id assigned to the listener, which will be provided to calls to
+// dispatchEvent().
 void EventBindings::AttachFilteredEvent(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  CHECK_EQ(2, args.Length());
+  CHECK_EQ(3, args.Length());
   CHECK(args[0]->IsString());
   CHECK(args[1]->IsObject());
+  CHECK(args[2]->IsBoolean());
 
   std::string event_name = *v8::String::Utf8Value(args[0]);
   if (!context()->HasAccessOrThrowError(event_name))
@@ -260,10 +322,9 @@ void EventBindings::AttachFilteredEvent(
 
   std::unique_ptr<base::DictionaryValue> filter;
   {
-    std::unique_ptr<content::V8ValueConverter> converter(
-        content::V8ValueConverter::create());
-    std::unique_ptr<base::Value> filter_value(converter->FromV8Value(
-        v8::Local<v8::Object>::Cast(args[1]), context()->v8_context()));
+    std::unique_ptr<base::Value> filter_value =
+        content::V8ValueConverter::Create()->FromV8Value(
+            v8::Local<v8::Object>::Cast(args[1]), context()->v8_context());
     if (!filter_value || !filter_value->IsType(base::Value::Type::DICTIONARY)) {
       args.GetReturnValue().Set(static_cast<int32_t>(-1));
       return;
@@ -271,8 +332,12 @@ void EventBindings::AttachFilteredEvent(
     filter = base::DictionaryValue::From(std::move(filter_value));
   }
 
+  bool supports_lazy_listeners = args[2]->BooleanValue();
+
   int id = g_event_filter.Get().AddEventMatcher(
-      event_name, ParseEventMatcher(std::move(filter)));
+      event_name,
+      base::MakeUnique<EventMatcher>(
+          std::move(filter), context()->GetRenderFrame()->GetRoutingID()));
   if (id == -1) {
     args.GetReturnValue().Set(static_cast<int32_t>(-1));
     return;
@@ -283,11 +348,12 @@ void EventBindings::AttachFilteredEvent(
   const EventMatcher* matcher = g_event_filter.Get().GetEventMatcher(id);
   DCHECK(matcher);
   base::DictionaryValue* filter_weak = matcher->value();
-  std::string extension_id = context()->GetExtensionID();
+  const ExtensionId& extension_id = context()->GetExtensionID();
   if (AddFilter(event_name, extension_id, *filter_weak)) {
-    bool lazy = ExtensionFrameHelper::IsContextForEventPage(context());
-    content::RenderThread::Get()->Send(new ExtensionHostMsg_AddFilteredListener(
-        extension_id, event_name, *filter_weak, lazy));
+    bool lazy = supports_lazy_listeners &&
+                ExtensionFrameHelper::IsContextForEventPage(context());
+    ipc_message_sender_->SendAddFilteredEventListenerIPC(context(), event_name,
+                                                         *filter_weak, lazy);
   }
 
   args.GetReturnValue().Set(static_cast<int32_t>(id));
@@ -295,59 +361,54 @@ void EventBindings::AttachFilteredEvent(
 
 void EventBindings::DetachFilteredEventHandler(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  CHECK_EQ(2, args.Length());
+  CHECK_EQ(3, args.Length());
   CHECK(args[0]->IsInt32());
   CHECK(args[1]->IsBoolean());
-  DetachFilteredEvent(args[0]->Int32Value(), args[1]->BooleanValue());
+  CHECK(args[2]->IsBoolean());
+  bool was_manual = args[1]->BooleanValue();
+  bool supports_lazy_listeners = args[2]->BooleanValue();
+  DetachFilteredEvent(args[0]->Int32Value(),
+                      was_manual && supports_lazy_listeners);
 }
 
-void EventBindings::DetachFilteredEvent(int matcher_id, bool is_manual) {
+void EventBindings::DetachFilteredEvent(int matcher_id,
+                                        bool remove_lazy_event) {
   EventFilter& event_filter = g_event_filter.Get();
   EventMatcher* event_matcher = event_filter.GetEventMatcher(matcher_id);
 
   const std::string& event_name = event_filter.GetEventName(matcher_id);
 
   // Only send IPCs the last time a filter gets removed.
-  std::string extension_id = context()->GetExtensionID();
+  const ExtensionId& extension_id = context()->GetExtensionID();
   if (RemoveFilter(event_name, extension_id, event_matcher->value())) {
-    bool remove_lazy =
-        is_manual && ExtensionFrameHelper::IsContextForEventPage(context());
-    content::RenderThread::Get()->Send(
-        new ExtensionHostMsg_RemoveFilteredListener(
-            extension_id, event_name, *event_matcher->value(), remove_lazy));
+    bool remove_lazy = remove_lazy_event &&
+                       ExtensionFrameHelper::IsContextForEventPage(context());
+    ipc_message_sender_->SendRemoveFilteredEventListenerIPC(
+        context(), event_name, *event_matcher->value(), remove_lazy);
   }
 
   event_filter.RemoveEventMatcher(matcher_id);
   attached_matcher_ids_.erase(matcher_id);
 }
 
-void EventBindings::MatchAgainstEventFilter(
+void EventBindings::AttachUnmanagedEvent(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   v8::Isolate* isolate = args.GetIsolate();
-  typedef std::set<EventFilter::MatcherID> MatcherIDs;
-  EventFilter& event_filter = g_event_filter.Get();
-  std::string event_name = *v8::String::Utf8Value(args[0]);
-  EventFilteringInfo info =
-      ParseFromObject(args[1]->ToObject(isolate), isolate);
-  // Only match events routed to this context's RenderFrame or ones that don't
-  // have a routingId in their filter.
-  MatcherIDs matched_event_filters = event_filter.MatchEvent(
-      event_name, info, context()->GetRenderFrame()->GetRoutingID());
-  v8::Local<v8::Array> array(
-      v8::Array::New(isolate, matched_event_filters.size()));
-  int i = 0;
-  for (MatcherIDs::iterator it = matched_event_filters.begin();
-       it != matched_event_filters.end();
-       ++it) {
-    array->Set(v8::Integer::New(isolate, i++), v8::Integer::New(isolate, *it));
-  }
-  args.GetReturnValue().Set(array);
+  v8::HandleScope handle_scope(isolate);
+  CHECK_EQ(1, args.Length());
+  CHECK(args[0]->IsString());
+  std::string event_name = gin::V8ToString(args[0]);
+  g_unmanaged_listeners.Get()[context()].insert(event_name);
 }
 
-std::unique_ptr<EventMatcher> EventBindings::ParseEventMatcher(
-    std::unique_ptr<base::DictionaryValue> filter) {
-  return base::MakeUnique<EventMatcher>(
-      std::move(filter), context()->GetRenderFrame()->GetRoutingID());
+void EventBindings::DetachUnmanagedEvent(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  v8::Isolate* isolate = args.GetIsolate();
+  v8::HandleScope handle_scope(isolate);
+  CHECK_EQ(1, args.Length());
+  CHECK(args[0]->IsString());
+  std::string event_name = gin::V8ToString(args[0]);
+  g_unmanaged_listeners.Get()[context()].erase(event_name);
 }
 
 void EventBindings::OnInvalidated() {
@@ -367,6 +428,8 @@ void EventBindings::OnInvalidated() {
   }
   DCHECK(attached_matcher_ids_.empty())
       << "Filtered events cannot be attached during invalidation";
+
+  g_unmanaged_listeners.Get().erase(context());
 }
 
 }  // namespace extensions

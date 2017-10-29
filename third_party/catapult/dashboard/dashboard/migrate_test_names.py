@@ -30,7 +30,6 @@ from dashboard.common import request_handler
 from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import graph_data
-from dashboard.models import stoppage_alert
 
 _MAX_DATASTORE_PUTS_PER_PUT_MULTI_CALL = 50
 
@@ -107,21 +106,46 @@ class MigrateTestNamesHandler(request_handler.RequestHandler):
 
     old_pattern = self.request.get('old_pattern')
     new_pattern = self.request.get('new_pattern')
+    kicked_off = self.request.get('kicked_off')
     old_test_key = self.request.get('old_test_key')
     new_test_key = self.request.get('new_test_key')
 
     if old_pattern and new_pattern:
-      try:
+      if not kicked_off:
+        try:
+          _AddKickoffTask(old_pattern, new_pattern)
+          self.RenderHtml('result.html', {
+              'headline': 'Test name migration task started.'
+          })
+        except BadInputPatternError as error:
+          self.ReportError('Error: %s' % error.message, status=400)
+      else:
         _AddTasksForPattern(old_pattern, new_pattern)
-        self.RenderHtml('result.html', {
-            'headline': 'Test name migration task started.'
-        })
-      except BadInputPatternError as error:
-        self.ReportError('Error: %s' % error.message, status=400)
     elif old_test_key and new_test_key:
       _MigrateOldTest(old_test_key, new_test_key)
     else:
       self.ReportError('Missing required parameters of /migrate_test_names.')
+
+
+def _AddKickoffTask(old_pattern, new_pattern):
+  _ValidateTestPatterns(old_pattern, new_pattern)
+
+  task_params = {
+      'old_pattern': old_pattern,
+      'new_pattern': new_pattern,
+      'kicked_off': '1',
+  }
+  taskqueue.add(
+      url='/migrate_test_names',
+      params=task_params,
+      queue_name=_TASK_QUEUE_NAME)
+
+
+def _ValidateTestPatterns(old_pattern, new_pattern):
+  tests = list_tests.GetTestsMatchingPattern(old_pattern, list_entities=True)
+  for test in tests:
+    old_path = utils.TestPath(test.key)
+    _ValidateAndGetNewTestPath(old_path, new_pattern)
 
 
 def _AddTasksForPattern(old_pattern, new_pattern):
@@ -152,7 +176,7 @@ def _AddTaskForTest(test, new_pattern):
     new_pattern: A test path pattern which determines the new name.
   """
   old_path = utils.TestPath(test.key)
-  new_path = _GetNewTestPath(old_path, new_pattern)
+  new_path = _ValidateAndGetNewTestPath(old_path, new_pattern)
 
   # Copy the new test from the old test. The new parent should exist.
   new_test_key = _CreateRenamedEntityIfNotExists(
@@ -167,7 +191,7 @@ def _AddTaskForTest(test, new_pattern):
       queue_name=_TASK_QUEUE_NAME)
 
 
-def _GetNewTestPath(old_path, new_pattern):
+def _ValidateAndGetNewTestPath(old_path, new_pattern):
   """Returns the destination test path that a test should be renamed to.
 
   The given |new_pattern| consists of a sequence of parts separated by slashes,
@@ -301,7 +325,6 @@ def _MigrateTestToNewKey(old_test_key, new_test_key):
     return False
 
   futures += _MigrateAnomalies(old_test_key, new_test_key)
-  futures += _MigrateStoppageAlerts(old_test_key, new_test_key)
 
   if not futures:
     _SendNotificationEmail(old_test_key, new_test_key)
@@ -397,32 +420,6 @@ def _MigrateAnomalies(old_parent_key, new_parent_key):
   for anomaly_entity in anomalies_to_update:
     anomaly_entity.test = new_parent_key
   return ndb.put_multi_async(anomalies_to_update)
-
-
-def _MigrateStoppageAlerts(old_parent_key, new_parent_key):
-  """Copies the StoppageAlert entities from one test to another.
-
-  Args:
-    old_parent_key: Source TestMetadata entity key.
-    new_parent_key: Destination TestMetadata entity key.
-
-  Returns:
-    A list of Future objects for StoppageAlert puts and deletes.
-  """
-  alerts_to_update = stoppage_alert.StoppageAlert.GetAlertsForTest(
-      old_parent_key, limit=_MAX_DATASTORE_PUTS_PER_PUT_MULTI_CALL)
-  if not alerts_to_update:
-    return []
-  futures = []
-  for entity in alerts_to_update:
-    new_entity = stoppage_alert.StoppageAlert(
-        parent=ndb.Key('StoppageAlertParent', utils.TestPath(new_parent_key)),
-        id=entity.key.id(),
-        mail_sent=entity.mail_sent,
-        recovered=entity.recovered)
-    futures.append(entity.key.delete_async())
-    futures.append(new_entity.put_async())
-  return futures
 
 
 def _SendNotificationEmail(old_test_key, new_test_key):

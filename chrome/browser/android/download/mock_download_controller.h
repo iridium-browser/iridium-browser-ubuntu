@@ -31,12 +31,14 @@ class MockDownloadController : public DownloadControllerBase {
       content::WebContents* web_contents,
       bool is_link, const std::string& extra_headers) override;
   void AcquireFileAccessPermission(
-      content::WebContents* web_contents,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const AcquireFileAccessPermissionCallback& callback) override;
   void SetApproveFileAccessRequestForTesting(bool approve) override;
   void CreateAndroidDownload(
       const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const DownloadInfo& info) override;
+  void AboutToResumeDownload(content::DownloadItem* download_item) override;
+
  private:
   bool approve_file_access_request_;
   DISALLOW_COPY_AND_ASSIGN(MockDownloadController);

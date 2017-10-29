@@ -14,7 +14,8 @@
 
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/NativeValueTraits.h"
+#include "bindings/core/v8/V8BindingForCore.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 
@@ -27,9 +28,9 @@ class CORE_EXPORT StringOrStringSequence final {
   bool isNull() const { return m_type == SpecificTypeNone; }
 
   bool isString() const { return m_type == SpecificTypeString; }
-  String getAsString() const;
-  void setString(String);
-  static StringOrStringSequence fromString(String);
+  const String& getAsString() const;
+  void setString(const String&);
+  static StringOrStringSequence fromString(const String&);
 
   bool isStringSequence() const { return m_type == SpecificTypeStringSequence; }
   const Vector<String>& getAsStringSequence() const;
@@ -63,18 +64,23 @@ class V8StringOrStringSequence final {
 CORE_EXPORT v8::Local<v8::Value> ToV8(const StringOrStringSequence&, v8::Local<v8::Object>, v8::Isolate*);
 
 template <class CallbackInfo>
-inline void v8SetReturnValue(const CallbackInfo& callbackInfo, StringOrStringSequence& impl) {
-  v8SetReturnValue(callbackInfo, ToV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
+inline void V8SetReturnValue(const CallbackInfo& callbackInfo, StringOrStringSequence& impl) {
+  V8SetReturnValue(callbackInfo, ToV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
 }
 
 template <class CallbackInfo>
-inline void v8SetReturnValue(const CallbackInfo& callbackInfo, StringOrStringSequence& impl, v8::Local<v8::Object> creationContext) {
-  v8SetReturnValue(callbackInfo, ToV8(impl, creationContext, callbackInfo.GetIsolate()));
+inline void V8SetReturnValue(const CallbackInfo& callbackInfo, StringOrStringSequence& impl, v8::Local<v8::Object> creationContext) {
+  V8SetReturnValue(callbackInfo, ToV8(impl, creationContext, callbackInfo.GetIsolate()));
 }
 
 template <>
-struct NativeValueTraits<StringOrStringSequence> {
-  CORE_EXPORT static StringOrStringSequence nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+struct NativeValueTraits<StringOrStringSequence> : public NativeValueTraitsBase<StringOrStringSequence> {
+  CORE_EXPORT static StringOrStringSequence NativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+};
+
+template <>
+struct V8TypeOf<StringOrStringSequence> {
+  typedef V8StringOrStringSequence Type;
 };
 
 }  // namespace blink

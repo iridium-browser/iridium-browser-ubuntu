@@ -12,6 +12,7 @@
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "components/component_updater/component_updater_paths.h"
+#include "components/subresource_filter/content/browser/content_ruleset_service.h"
 #include "components/subresource_filter/core/browser/ruleset_service.h"
 #include "components/subresource_filter/core/browser/subresource_filter_constants.h"
 #include "components/subresource_filter/core/browser/subresource_filter_features.h"
@@ -28,16 +29,6 @@ const uint8_t kPublicKeySHA256[32] = {
 
 const char kSubresourceFilterSetFetcherManifestName[] =
     "Subresource Filter Rules";
-
-// static
-const base::FilePath::CharType
-    SubresourceFilterComponentInstallerTraits::kRulesetDataFileName[] =
-        FILE_PATH_LITERAL("Filtering Rules");
-
-// static
-const base::FilePath::CharType
-    SubresourceFilterComponentInstallerTraits::kLicenseFileName[] =
-        FILE_PATH_LITERAL("LICENSE");
 
 // static
 const char
@@ -85,12 +76,16 @@ void SubresourceFilterComponentInstallerTraits::ComponentReady(
   }
   subresource_filter::UnindexedRulesetInfo ruleset_info;
   ruleset_info.content_version = version.GetString();
-  ruleset_info.ruleset_path = install_dir.Append(kRulesetDataFileName);
-  ruleset_info.license_path = install_dir.Append(kLicenseFileName);
-  subresource_filter::RulesetService* ruleset_service =
+  ruleset_info.ruleset_path =
+      install_dir.Append(subresource_filter::kUnindexedRulesetDataFileName);
+  ruleset_info.license_path =
+      install_dir.Append(subresource_filter::kUnindexedRulesetLicenseFileName);
+  subresource_filter::ContentRulesetService* content_ruleset_service =
       g_browser_process->subresource_filter_ruleset_service();
-  if (ruleset_service)
-    ruleset_service->IndexAndStoreAndPublishRulesetIfNeeded(ruleset_info);
+  if (content_ruleset_service) {
+    content_ruleset_service->IndexAndStoreAndPublishRulesetIfNeeded(
+        ruleset_info);
+  }
 }
 
 // Called during startup and installation before ComponentReady().
@@ -117,14 +112,19 @@ std::string SubresourceFilterComponentInstallerTraits::GetName() const {
 
 // static
 std::string SubresourceFilterComponentInstallerTraits::GetInstallerTag() {
-  std::string ruleset_flavor = subresource_filter::GetRulesetFlavor();
+  const std::string ruleset_flavor =
+      subresource_filter::GetEnabledConfigurations()
+          ->lexicographically_greatest_ruleset_flavor()
+          .as_string();
+
+  // Allow the empty, and 4 non-empty ruleset flavor identifiers: a, b, c, d.
   if (ruleset_flavor.empty())
     return ruleset_flavor;
 
-  // We allow 4 ruleset flavor identifiers: a, b, c, d
   if (ruleset_flavor.size() == 1 && ruleset_flavor.at(0) >= 'a' &&
-      ruleset_flavor.at(0) <= 'd')
+      ruleset_flavor.at(0) <= 'd') {
     return ruleset_flavor;
+  }
 
   // Return 'invalid' for any cases where we encounter an invalid installer
   // tag. This allows us to verify that no clients are encountering invalid
@@ -148,8 +148,9 @@ SubresourceFilterComponentInstallerTraits::GetMimeTypes() const {
 
 void RegisterSubresourceFilterComponent(ComponentUpdateService* cus) {
   if (!base::FeatureList::IsEnabled(
-          subresource_filter::kSafeBrowsingSubresourceFilter))
+          subresource_filter::kSafeBrowsingSubresourceFilter)) {
     return;
+  }
   std::unique_ptr<ComponentInstallerTraits> traits(
       new SubresourceFilterComponentInstallerTraits());
   // |cus| will take ownership of |installer| during installer->Register(cus).

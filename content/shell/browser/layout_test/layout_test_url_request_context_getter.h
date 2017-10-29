@@ -11,6 +11,7 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/single_thread_task_runner.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/shell/browser/shell_url_request_context_getter.h"
 #include "net/url_request/url_request_job_factory.h"
@@ -29,7 +30,6 @@ class LayoutTestURLRequestContextGetter : public ShellURLRequestContextGetter {
       bool ignore_certificate_errors,
       const base::FilePath& base_path,
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
       ProtocolHandlerMap* protocol_handlers,
       URLRequestInterceptorScopedVector request_interceptors,
       net::NetLog* net_log);
@@ -39,6 +39,7 @@ class LayoutTestURLRequestContextGetter : public ShellURLRequestContextGetter {
 
   // ShellURLRequestContextGetter implementation.
   std::unique_ptr<net::NetworkDelegate> CreateNetworkDelegate() override;
+  std::unique_ptr<net::CertVerifier> GetCertVerifier() override;
   std::unique_ptr<net::ProxyConfigService> GetProxyConfigService() override;
   std::unique_ptr<net::ProxyService> GetProxyService() override;
 

@@ -29,8 +29,8 @@
 
 #include "core/page/AutoscrollController.h"
 
-#include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameView.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
@@ -38,380 +38,313 @@
 #include "core/layout/LayoutListBox.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
-#include "wtf/Time.h"
+#include "platform/wtf/Time.h"
 
 namespace blink {
 
 // Delay time in second for start autoscroll if pointer is in border edge of
 // scrollable element.
-static const TimeDelta kAutoscrollDelay = TimeDelta::FromSecondsD(0.2);
+constexpr TimeDelta kAutoscrollDelay = TimeDelta::FromSecondsD(0.2);
 
-AutoscrollController* AutoscrollController::create(Page& page) {
-  return new AutoscrollController(page);
-}
+static const int kNoMiddleClickAutoscrollRadius = 15;
 
-AutoscrollController::AutoscrollController(Page& page)
-    : m_page(&page),
-      m_autoscrollLayoutObject(nullptr),
-      m_pressedLayoutObject(nullptr),
-      m_autoscrollType(NoAutoscroll),
-      m_didLatchForMiddleClickAutoscroll(false) {}
-
-DEFINE_TRACE(AutoscrollController) {
-  visitor->trace(m_page);
-}
-
-bool AutoscrollController::autoscrollInProgress() const {
-  return m_autoscrollType == AutoscrollForSelection;
-}
-
-bool AutoscrollController::autoscrollInProgress(
-    const LayoutBox* layoutObject) const {
-  return m_autoscrollLayoutObject == layoutObject;
-}
-
-void AutoscrollController::startAutoscrollForSelection(
-    LayoutObject* layoutObject) {
-  // We don't want to trigger the autoscroll or the middleClickAutoscroll if
-  // it's already active.
-  if (m_autoscrollType != NoAutoscroll)
-    return;
-  if (layoutObject)
-    layoutObject->frameView()->updateAllLifecyclePhasesExceptPaint();
-  LayoutBox* scrollable = LayoutBox::findAutoscrollable(layoutObject);
-  if (!scrollable)
-    scrollable =
-        layoutObject->isListBox() ? toLayoutListBox(layoutObject) : nullptr;
-  if (!scrollable)
-    return;
-
-  m_pressedLayoutObject = layoutObject && layoutObject->isBox()
-                              ? toLayoutBox(layoutObject)
-                              : nullptr;
-  m_autoscrollType = AutoscrollForSelection;
-  m_autoscrollLayoutObject = scrollable;
-  startAutoscroll();
-}
-
-void AutoscrollController::stopAutoscroll() {
-  if (m_pressedLayoutObject) {
-    m_pressedLayoutObject->stopAutoscroll();
-    m_pressedLayoutObject = nullptr;
-  }
-  LayoutBox* scrollable = m_autoscrollLayoutObject;
-  m_autoscrollLayoutObject = nullptr;
-
-  if (!scrollable)
-    return;
-
-  if (RuntimeEnabledFeatures::middleClickAutoscrollEnabled() &&
-      middleClickAutoscrollInProgress()) {
-    if (FrameView* view = scrollable->frame()->view()) {
-      view->setCursor(pointerCursor());
-    }
-  }
-  m_autoscrollType = NoAutoscroll;
-}
-
-void AutoscrollController::stopAutoscrollIfNeeded(LayoutObject* layoutObject) {
-  if (m_pressedLayoutObject == layoutObject)
-    m_pressedLayoutObject = nullptr;
-
-  if (m_autoscrollLayoutObject != layoutObject)
-    return;
-  m_autoscrollLayoutObject = nullptr;
-  m_autoscrollType = NoAutoscroll;
-}
-
-void AutoscrollController::updateAutoscrollLayoutObject() {
-  if (!m_autoscrollLayoutObject)
-    return;
-
-  LayoutObject* layoutObject = m_autoscrollLayoutObject;
-
-  if (RuntimeEnabledFeatures::middleClickAutoscrollEnabled()) {
-    HitTestResult hitTest =
-        layoutObject->frame()->eventHandler().hitTestResultAtPoint(
-            m_middleClickAutoscrollStartPos,
-            HitTestRequest::ReadOnly | HitTestRequest::Active);
-
-    if (Node* nodeAtPoint = hitTest.innerNode())
-      layoutObject = nodeAtPoint->layoutObject();
-  }
-
-  while (layoutObject &&
-         !(layoutObject->isBox() && toLayoutBox(layoutObject)->canAutoscroll()))
-    layoutObject = layoutObject->parent();
-
-  m_autoscrollLayoutObject = layoutObject && layoutObject->isBox()
-                                 ? toLayoutBox(layoutObject)
-                                 : nullptr;
-
-  if (m_autoscrollType != NoAutoscroll && !m_autoscrollLayoutObject)
-    m_autoscrollType = NoAutoscroll;
-}
-
-void AutoscrollController::updateDragAndDrop(Node* dropTargetNode,
-                                             const IntPoint& eventPosition,
-                                             TimeTicks eventTime) {
-  if (!dropTargetNode || !dropTargetNode->layoutObject()) {
-    stopAutoscroll();
-    return;
-  }
-
-  if (m_autoscrollLayoutObject &&
-      m_autoscrollLayoutObject->frame() !=
-          dropTargetNode->layoutObject()->frame())
-    return;
-
-  dropTargetNode->layoutObject()
-      ->frameView()
-      ->updateAllLifecyclePhasesExceptPaint();
-
-  LayoutBox* scrollable =
-      LayoutBox::findAutoscrollable(dropTargetNode->layoutObject());
-  if (!scrollable) {
-    stopAutoscroll();
-    return;
-  }
-
-  Page* page = scrollable->frame() ? scrollable->frame()->page() : nullptr;
-  if (!page) {
-    stopAutoscroll();
-    return;
-  }
-
-  IntSize offset = scrollable->calculateAutoscrollDirection(eventPosition);
-  if (offset.isZero()) {
-    stopAutoscroll();
-    return;
-  }
-
-  m_dragAndDropAutoscrollReferencePosition = eventPosition + offset;
-
-  if (m_autoscrollType == NoAutoscroll) {
-    m_autoscrollType = AutoscrollForDragAndDrop;
-    m_autoscrollLayoutObject = scrollable;
-    m_dragAndDropAutoscrollStartTime = eventTime;
-    UseCounter::count(m_page->mainFrame(), UseCounter::DragAndDropScrollStart);
-    startAutoscroll();
-  } else if (m_autoscrollLayoutObject != scrollable) {
-    m_dragAndDropAutoscrollStartTime = eventTime;
-    m_autoscrollLayoutObject = scrollable;
-  }
-}
-
-void AutoscrollController::handleMouseReleaseForMiddleClickAutoscroll(
-    LocalFrame* frame,
-    const WebMouseEvent& mouseEvent) {
-  DCHECK(RuntimeEnabledFeatures::middleClickAutoscrollEnabled());
-  if (!frame->isMainFrame())
-    return;
-  switch (m_autoscrollType) {
-    case AutoscrollForMiddleClick:
-      if (mouseEvent.button == WebPointerProperties::Button::Middle)
-        m_autoscrollType = AutoscrollForMiddleClickCanStop;
-      break;
-    case AutoscrollForMiddleClickCanStop:
-      stopAutoscroll();
-      break;
-    case AutoscrollForDragAndDrop:
-    case AutoscrollForSelection:
-    case NoAutoscroll:
-      // Nothing to do.
-      break;
-  }
-}
-
-bool AutoscrollController::middleClickAutoscrollInProgress() const {
-  return m_autoscrollType == AutoscrollForMiddleClickCanStop ||
-         m_autoscrollType == AutoscrollForMiddleClick;
-}
-
-void AutoscrollController::startMiddleClickAutoscroll(
-    LayoutBox* scrollable,
-    const IntPoint& lastKnownMousePosition) {
-  DCHECK(RuntimeEnabledFeatures::middleClickAutoscrollEnabled());
-  // We don't want to trigger the autoscroll or the middleClickAutoscroll if
-  // it's already active.
-  if (m_autoscrollType != NoAutoscroll)
-    return;
-
-  m_autoscrollType = AutoscrollForMiddleClick;
-  m_autoscrollLayoutObject = scrollable;
-  m_middleClickAutoscrollStartPos = lastKnownMousePosition;
-  m_didLatchForMiddleClickAutoscroll = false;
-
-  UseCounter::count(m_page->mainFrame(),
-                    UseCounter::MiddleClickAutoscrollStart);
-  startAutoscroll();
-}
-
-static inline int adjustedScrollDelta(int beginningDelta) {
-  // This implemention matches Firefox's.
-  // http://mxr.mozilla.org/firefox/source/toolkit/content/widgets/browser.xml#856.
-  const int speedReducer = 12;
-
-  int adjustedDelta = beginningDelta / speedReducer;
-  if (adjustedDelta > 1) {
-    adjustedDelta = static_cast<int>(adjustedDelta *
-                                     sqrt(static_cast<double>(adjustedDelta))) -
-                    1;
-  } else if (adjustedDelta < -1) {
-    adjustedDelta =
-        static_cast<int>(adjustedDelta *
-                         sqrt(static_cast<double>(-adjustedDelta))) +
-        1;
-  }
-
-  return adjustedDelta;
-}
-
-static inline IntSize adjustedScrollDelta(const IntSize& delta) {
-  return IntSize(adjustedScrollDelta(delta.width()),
-                 adjustedScrollDelta(delta.height()));
-}
-
-FloatSize AutoscrollController::calculateAutoscrollDelta() {
-  LocalFrame* frame = m_autoscrollLayoutObject->frame();
-  if (!frame)
-    return FloatSize();
-
-  IntPoint lastKnownMousePosition =
-      frame->eventHandler().lastKnownMousePosition();
-
-  // We need to check if the last known mouse position is out of the window.
-  // When the mouse is out of the window, the position is incoherent
-  static IntPoint previousMousePosition;
-  if (lastKnownMousePosition.x() < 0 || lastKnownMousePosition.y() < 0)
-    lastKnownMousePosition = previousMousePosition;
-  else
-    previousMousePosition = lastKnownMousePosition;
-
-  IntSize delta = lastKnownMousePosition - m_middleClickAutoscrollStartPos;
-
-  // at the center we let the space for the icon.
-  if (abs(delta.width()) <= noMiddleClickAutoscrollRadius)
-    delta.setWidth(0);
-  if (abs(delta.height()) <= noMiddleClickAutoscrollRadius)
-    delta.setHeight(0);
-  return FloatSize(adjustedScrollDelta(delta));
-}
-
-void AutoscrollController::animate(double) {
-  if (!m_autoscrollLayoutObject || !m_autoscrollLayoutObject->frame()) {
-    stopAutoscroll();
-    return;
-  }
-
-  EventHandler& eventHandler =
-      m_autoscrollLayoutObject->frame()->eventHandler();
-  IntSize offset = m_autoscrollLayoutObject->calculateAutoscrollDirection(
-      eventHandler.lastKnownMousePosition());
-  IntPoint selectionPoint = eventHandler.lastKnownMousePosition() + offset;
-  switch (m_autoscrollType) {
-    case AutoscrollForDragAndDrop:
-      if ((TimeTicks::Now() - m_dragAndDropAutoscrollStartTime) >
-          kAutoscrollDelay)
-        m_autoscrollLayoutObject->autoscroll(
-            m_dragAndDropAutoscrollReferencePosition);
-      break;
-    case AutoscrollForSelection:
-      if (!eventHandler.mousePressed()) {
-        stopAutoscroll();
-        return;
-      }
-      eventHandler.updateSelectionForMouseDrag();
-      m_autoscrollLayoutObject->autoscroll(selectionPoint);
-      break;
-    case NoAutoscroll:
-      break;
-    case AutoscrollForMiddleClickCanStop:
-    case AutoscrollForMiddleClick:
-      DCHECK(RuntimeEnabledFeatures::middleClickAutoscrollEnabled());
-      if (!middleClickAutoscrollInProgress()) {
-        stopAutoscroll();
-        return;
-      }
-      if (FrameView* view = m_autoscrollLayoutObject->frame()->view())
-        updateMiddleClickAutoscrollState(view,
-                                         eventHandler.lastKnownMousePosition());
-      FloatSize delta = calculateAutoscrollDelta();
-      if (delta.isZero())
-        break;
-      ScrollResult result =
-          m_autoscrollLayoutObject->scroll(ScrollByPixel, delta);
-      LayoutObject* layoutObject = m_autoscrollLayoutObject;
-      while (!m_didLatchForMiddleClickAutoscroll && !result.didScroll()) {
-        if (layoutObject->node() && layoutObject->node()->isDocumentNode()) {
-          Element* owner = toDocument(layoutObject->node())->localOwner();
-          layoutObject = owner ? owner->layoutObject() : nullptr;
-        } else {
-          layoutObject = layoutObject->parent();
-        }
-        if (!layoutObject) {
-          break;
-        }
-        if (layoutObject && layoutObject->isBox() &&
-            toLayoutBox(layoutObject)->canBeScrolledAndHasScrollableArea())
-          result = toLayoutBox(layoutObject)->scroll(ScrollByPixel, delta);
-      }
-      if (result.didScroll()) {
-        m_didLatchForMiddleClickAutoscroll = true;
-        m_autoscrollLayoutObject = toLayoutBox(layoutObject);
-      }
-      break;
-  }
-  if (m_autoscrollType != NoAutoscroll && m_autoscrollLayoutObject)
-    m_page->chromeClient().scheduleAnimation(
-        m_autoscrollLayoutObject->frame()->view());
-}
-
-void AutoscrollController::startAutoscroll() {
-  m_page->chromeClient().scheduleAnimation(
-      m_autoscrollLayoutObject->frame()->view());
-}
-
-void AutoscrollController::updateMiddleClickAutoscrollState(
-    FrameView* view,
-    const IntPoint& lastKnownMousePosition) {
-  DCHECK(RuntimeEnabledFeatures::middleClickAutoscrollEnabled());
+static const Cursor& MiddleClickAutoscrollCursor(const FloatSize& velocity) {
   // At the original click location we draw a 4 arrowed icon. Over this icon
   // there won't be any scroll, So don't change the cursor over this area.
-  bool east = m_middleClickAutoscrollStartPos.x() <
-              (lastKnownMousePosition.x() - noMiddleClickAutoscrollRadius);
-  bool west = m_middleClickAutoscrollStartPos.x() >
-              (lastKnownMousePosition.x() + noMiddleClickAutoscrollRadius);
-  bool north = m_middleClickAutoscrollStartPos.y() >
-               (lastKnownMousePosition.y() + noMiddleClickAutoscrollRadius);
-  bool south = m_middleClickAutoscrollStartPos.y() <
-               (lastKnownMousePosition.y() - noMiddleClickAutoscrollRadius);
-
-  if (m_autoscrollType == AutoscrollForMiddleClick &&
-      (east || west || north || south))
-    m_autoscrollType = AutoscrollForMiddleClickCanStop;
+  bool east = velocity.Width() < 0;
+  bool west = velocity.Width() > 0;
+  bool north = velocity.Height() > 0;
+  bool south = velocity.Height() < 0;
 
   if (north) {
     if (east)
-      view->setCursor(northEastPanningCursor());
-    else if (west)
-      view->setCursor(northWestPanningCursor());
-    else
-      view->setCursor(northPanningCursor());
-  } else if (south) {
-    if (east)
-      view->setCursor(southEastPanningCursor());
-    else if (west)
-      view->setCursor(southWestPanningCursor());
-    else
-      view->setCursor(southPanningCursor());
-  } else if (east) {
-    view->setCursor(eastPanningCursor());
-  } else if (west) {
-    view->setCursor(westPanningCursor());
-  } else {
-    view->setCursor(middlePanningCursor());
+      return NorthEastPanningCursor();
+    if (west)
+      return NorthWestPanningCursor();
+    return NorthPanningCursor();
   }
+  if (south) {
+    if (east)
+      return SouthEastPanningCursor();
+    if (west)
+      return SouthWestPanningCursor();
+    return SouthPanningCursor();
+  }
+  if (east)
+    return EastPanningCursor();
+  if (west)
+    return WestPanningCursor();
+  return MiddlePanningCursor();
+}
+
+AutoscrollController* AutoscrollController::Create(Page& page) {
+  return new AutoscrollController(page);
+}
+
+AutoscrollController::AutoscrollController(Page& page) : page_(&page) {}
+
+DEFINE_TRACE(AutoscrollController) {
+  visitor->Trace(page_);
+}
+
+bool AutoscrollController::SelectionAutoscrollInProgress() const {
+  return autoscroll_type_ == kAutoscrollForSelection;
+}
+
+bool AutoscrollController::AutoscrollInProgress() const {
+  return autoscroll_layout_object_;
+}
+
+bool AutoscrollController::AutoscrollInProgressFor(
+    const LayoutBox* layout_object) const {
+  return autoscroll_layout_object_ == layout_object;
+}
+
+void AutoscrollController::StartAutoscrollForSelection(
+    LayoutObject* layout_object) {
+  // We don't want to trigger the autoscroll or the middleClickAutoscroll if
+  // it's already active.
+  if (autoscroll_type_ != kNoAutoscroll)
+    return;
+  LayoutBox* scrollable = LayoutBox::FindAutoscrollable(layout_object);
+  if (!scrollable)
+    scrollable =
+        layout_object->IsListBox() ? ToLayoutListBox(layout_object) : nullptr;
+  if (!scrollable)
+    return;
+
+  pressed_layout_object_ = layout_object && layout_object->IsBox()
+                               ? ToLayoutBox(layout_object)
+                               : nullptr;
+  autoscroll_type_ = kAutoscrollForSelection;
+  autoscroll_layout_object_ = scrollable;
+  ScheduleMainThreadAnimation();
+}
+
+void AutoscrollController::StopAutoscroll() {
+  if (pressed_layout_object_) {
+    pressed_layout_object_->StopAutoscroll();
+    pressed_layout_object_ = nullptr;
+  }
+  autoscroll_layout_object_ = nullptr;
+  autoscroll_type_ = kNoAutoscroll;
+}
+
+void AutoscrollController::StopAutoscrollIfNeeded(LayoutObject* layout_object) {
+  if (pressed_layout_object_ == layout_object)
+    pressed_layout_object_ = nullptr;
+
+  if (autoscroll_layout_object_ != layout_object)
+    return;
+  autoscroll_layout_object_ = nullptr;
+  autoscroll_type_ = kNoAutoscroll;
+}
+
+void AutoscrollController::UpdateAutoscrollLayoutObject() {
+  if (!autoscroll_layout_object_)
+    return;
+
+  LayoutObject* layout_object = autoscroll_layout_object_;
+
+  while (layout_object && !(layout_object->IsBox() &&
+                            ToLayoutBox(layout_object)->CanAutoscroll()))
+    layout_object = layout_object->Parent();
+
+  autoscroll_layout_object_ = layout_object && layout_object->IsBox()
+                                  ? ToLayoutBox(layout_object)
+                                  : nullptr;
+
+  if (!autoscroll_layout_object_)
+    autoscroll_type_ = kNoAutoscroll;
+}
+
+void AutoscrollController::UpdateDragAndDrop(Node* drop_target_node,
+                                             const IntPoint& event_position,
+                                             TimeTicks event_time) {
+  if (!drop_target_node || !drop_target_node->GetLayoutObject()) {
+    StopAutoscroll();
+    return;
+  }
+
+  if (autoscroll_layout_object_ &&
+      autoscroll_layout_object_->GetFrame() !=
+          drop_target_node->GetLayoutObject()->GetFrame())
+    return;
+
+  drop_target_node->GetLayoutObject()
+      ->GetFrameView()
+      ->UpdateAllLifecyclePhasesExceptPaint();
+
+  LayoutBox* scrollable =
+      LayoutBox::FindAutoscrollable(drop_target_node->GetLayoutObject());
+  if (!scrollable) {
+    StopAutoscroll();
+    return;
+  }
+
+  Page* page =
+      scrollable->GetFrame() ? scrollable->GetFrame()->GetPage() : nullptr;
+  if (!page) {
+    StopAutoscroll();
+    return;
+  }
+
+  IntSize offset = scrollable->CalculateAutoscrollDirection(event_position);
+  if (offset.IsZero()) {
+    StopAutoscroll();
+    return;
+  }
+
+  drag_and_drop_autoscroll_reference_position_ = event_position + offset;
+
+  if (autoscroll_type_ == kNoAutoscroll) {
+    autoscroll_type_ = kAutoscrollForDragAndDrop;
+    autoscroll_layout_object_ = scrollable;
+    drag_and_drop_autoscroll_start_time_ = event_time;
+    UseCounter::Count(autoscroll_layout_object_->GetFrame(),
+                      WebFeature::kDragAndDropScrollStart);
+    ScheduleMainThreadAnimation();
+  } else if (autoscroll_layout_object_ != scrollable) {
+    drag_and_drop_autoscroll_start_time_ = event_time;
+    autoscroll_layout_object_ = scrollable;
+  }
+}
+
+void AutoscrollController::HandleMouseMoveForMiddleClickAutoscroll(
+    LocalFrame* frame,
+    const FloatPoint& position_global,
+    bool is_middle_button) {
+  if (!MiddleClickAutoscrollInProgress())
+    return;
+
+  LocalFrameView* view = frame->View();
+  if (!view)
+    return;
+
+  FloatSize distance =
+      (position_global - middle_click_autoscroll_start_pos_global_)
+          .ScaledBy(1 / frame->DevicePixelRatio());
+
+  if (fabs(distance.Width()) <= kNoMiddleClickAutoscrollRadius)
+    distance.SetWidth(0);
+  if (fabs(distance.Height()) <= kNoMiddleClickAutoscrollRadius)
+    distance.SetHeight(0);
+
+  const float kExponent = 2.2f;
+  const float kMultiplier = -0.000008f;
+  const int x_signum = (distance.Width() < 0) ? -1 : (distance.Width() > 0);
+  const int y_signum = (distance.Height() < 0) ? -1 : (distance.Height() > 0);
+  FloatSize velocity(
+      pow(fabs(distance.Width()), kExponent) * kMultiplier * x_signum,
+      pow(fabs(distance.Height()), kExponent) * kMultiplier * y_signum);
+
+  if (velocity != last_velocity_) {
+    last_velocity_ = velocity;
+    if (middle_click_mode_ == kMiddleClickInitial)
+      middle_click_mode_ = kMiddleClickHolding;
+    page_->GetChromeClient().SetCursorOverridden(false);
+    view->SetCursor(MiddleClickAutoscrollCursor(velocity));
+    page_->GetChromeClient().SetCursorOverridden(true);
+    page_->GetChromeClient().AutoscrollFling(velocity, frame);
+  }
+}
+
+void AutoscrollController::HandleMouseReleaseForMiddleClickAutoscroll(
+    LocalFrame* frame,
+    bool is_middle_button) {
+  DCHECK(RuntimeEnabledFeatures::MiddleClickAutoscrollEnabled());
+  if (!MiddleClickAutoscrollInProgress())
+    return;
+
+  if (!frame->IsMainFrame())
+    return;
+
+  if (middle_click_mode_ == kMiddleClickInitial && is_middle_button)
+    middle_click_mode_ = kMiddleClickToggled;
+  else if (middle_click_mode_ == kMiddleClickHolding)
+    StopMiddleClickAutoscroll(frame);
+}
+
+void AutoscrollController::StopMiddleClickAutoscroll(LocalFrame* frame) {
+  if (!MiddleClickAutoscrollInProgress())
+    return;
+
+  page_->GetChromeClient().AutoscrollEnd(frame);
+  autoscroll_type_ = kNoAutoscroll;
+  page_->GetChromeClient().SetCursorOverridden(false);
+  frame->LocalFrameRoot().GetEventHandler().ScheduleCursorUpdate();
+}
+
+bool AutoscrollController::MiddleClickAutoscrollInProgress() const {
+  return autoscroll_type_ == kAutoscrollForMiddleClick;
+}
+
+void AutoscrollController::StartMiddleClickAutoscroll(
+    LocalFrame* frame,
+    const FloatPoint& position,
+    const FloatPoint& position_global) {
+  DCHECK(RuntimeEnabledFeatures::MiddleClickAutoscrollEnabled());
+  // We don't want to trigger the autoscroll or the middleClickAutoscroll if
+  // it's already active.
+  if (autoscroll_type_ != kNoAutoscroll)
+    return;
+
+  autoscroll_type_ = kAutoscrollForMiddleClick;
+  middle_click_mode_ = kMiddleClickInitial;
+  middle_click_autoscroll_start_pos_global_ = position_global;
+
+  UseCounter::Count(frame, WebFeature::kMiddleClickAutoscrollStart);
+
+  last_velocity_ = FloatSize();
+
+  if (LocalFrameView* view = frame->View())
+    view->SetCursor(MiddleClickAutoscrollCursor(last_velocity_));
+  page_->GetChromeClient().SetCursorOverridden(true);
+  page_->GetChromeClient().AutoscrollStart(
+      position.ScaledBy(1 / frame->DevicePixelRatio()), frame);
+}
+
+void AutoscrollController::Animate(double) {
+  // Middle-click autoscroll isn't handled on the main thread.
+  if (MiddleClickAutoscrollInProgress())
+    return;
+
+  if (!autoscroll_layout_object_ || !autoscroll_layout_object_->GetFrame()) {
+    StopAutoscroll();
+    return;
+  }
+
+  EventHandler& event_handler =
+      autoscroll_layout_object_->GetFrame()->GetEventHandler();
+  IntSize offset = autoscroll_layout_object_->CalculateAutoscrollDirection(
+      event_handler.LastKnownMousePosition());
+  IntPoint selection_point = event_handler.LastKnownMousePosition() + offset;
+  switch (autoscroll_type_) {
+    case kAutoscrollForDragAndDrop:
+      ScheduleMainThreadAnimation();
+      if ((TimeTicks::Now() - drag_and_drop_autoscroll_start_time_) >
+          kAutoscrollDelay)
+        autoscroll_layout_object_->Autoscroll(
+            drag_and_drop_autoscroll_reference_position_);
+      break;
+    case kAutoscrollForSelection:
+      if (!event_handler.MousePressed()) {
+        StopAutoscroll();
+        return;
+      }
+      event_handler.UpdateSelectionForMouseDrag();
+      ScheduleMainThreadAnimation();
+      autoscroll_layout_object_->Autoscroll(selection_point);
+      break;
+    case kNoAutoscroll:
+    case kAutoscrollForMiddleClick:
+      break;
+  }
+}
+
+void AutoscrollController::ScheduleMainThreadAnimation() {
+  page_->GetChromeClient().ScheduleAnimation(
+      autoscroll_layout_object_->GetFrame()->View());
 }
 
 }  // namespace blink

@@ -78,9 +78,9 @@ void RunWithFaviconResult(
   callback.Run(*bitmap_result);
 }
 
-void RunWithQueryURLResult(const HistoryService::QueryURLCallback& callback,
+void RunWithQueryURLResult(HistoryService::QueryURLCallback callback,
                            const QueryURLResult* result) {
-  callback.Run(result->success, result->row, result->visits);
+  std::move(callback).Run(result->success, result->row, result->visits);
 }
 
 void RunWithVisibleVisitCountToHostResult(
@@ -232,6 +232,10 @@ void HistoryService::ClearCachedDataForContextID(ContextID context_id) {
 URLDatabase* HistoryService::InMemoryDatabase() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return in_memory_backend_ ? in_memory_backend_->db() : nullptr;
+}
+
+TypedURLSyncBridge* HistoryService::GetTypedURLSyncBridge() const {
+  return history_backend_->GetTypedURLSyncBridge();
 }
 
 TypedUrlSyncableService* HistoryService::GetTypedUrlSyncableService() const {
@@ -498,9 +502,9 @@ void HistoryService::AddPagesWithDetails(const URLRows& info,
                           history_backend_, info, visit_source));
 }
 
-base::CancelableTaskTracker::TaskId HistoryService::GetFavicons(
-    const std::vector<GURL>& icon_urls,
-    int icon_types,
+base::CancelableTaskTracker::TaskId HistoryService::GetFavicon(
+    const GURL& icon_url,
+    favicon_base::IconType icon_type,
     const std::vector<int>& desired_sizes,
     const favicon_base::FaviconResultsCallback& callback,
     base::CancelableTaskTracker* tracker) {
@@ -511,8 +515,8 @@ base::CancelableTaskTracker::TaskId HistoryService::GetFavicons(
       new std::vector<favicon_base::FaviconRawBitmapResult>();
   return tracker->PostTaskAndReply(
       backend_task_runner_.get(), FROM_HERE,
-      base::Bind(&HistoryBackend::GetFavicons, history_backend_, icon_urls,
-                 icon_types, desired_sizes, results),
+      base::Bind(&HistoryBackend::GetFavicon, history_backend_, icon_url,
+                 icon_type, desired_sizes, results),
       base::Bind(&RunWithFaviconResults, callback, base::Owned(results)));
 }
 
@@ -571,8 +575,8 @@ base::CancelableTaskTracker::TaskId HistoryService::GetFaviconForID(
 base::CancelableTaskTracker::TaskId
 HistoryService::UpdateFaviconMappingsAndFetch(
     const GURL& page_url,
-    const std::vector<GURL>& icon_urls,
-    int icon_types,
+    const GURL& icon_url,
+    favicon_base::IconType icon_type,
     const std::vector<int>& desired_sizes,
     const favicon_base::FaviconResultsCallback& callback,
     base::CancelableTaskTracker* tracker) {
@@ -584,8 +588,8 @@ HistoryService::UpdateFaviconMappingsAndFetch(
   return tracker->PostTaskAndReply(
       backend_task_runner_.get(), FROM_HERE,
       base::Bind(&HistoryBackend::UpdateFaviconMappingsAndFetch,
-                 history_backend_, page_url, icon_urls, icon_types,
-                 desired_sizes, results),
+                 history_backend_, page_url, icon_url, icon_type, desired_sizes,
+                 results),
       base::Bind(&RunWithFaviconResults, callback, base::Owned(results)));
 }
 
@@ -621,12 +625,37 @@ void HistoryService::SetFavicons(const GURL& page_url,
                           page_url, icon_type, icon_url, bitmaps));
 }
 
+void HistoryService::SetOnDemandFavicons(const GURL& page_url,
+                                         favicon_base::IconType icon_type,
+                                         const GURL& icon_url,
+                                         const std::vector<SkBitmap>& bitmaps,
+                                         base::Callback<void(bool)> callback) {
+  DCHECK(backend_task_runner_) << "History service being called after cleanup";
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (history_client_ && !history_client_->CanAddURL(page_url))
+    return;
+
+  PostTaskAndReplyWithResult(
+      backend_task_runner_.get(), FROM_HERE,
+      base::Bind(&HistoryBackend::SetOnDemandFavicons, history_backend_,
+                 page_url, icon_type, icon_url, bitmaps),
+      callback);
+}
+
 void HistoryService::SetFaviconsOutOfDateForPage(const GURL& page_url) {
   DCHECK(backend_task_runner_) << "History service being called after cleanup";
   DCHECK(thread_checker_.CalledOnValidThread());
   ScheduleTask(PRIORITY_NORMAL,
                base::Bind(&HistoryBackend::SetFaviconsOutOfDateForPage,
                           history_backend_, page_url));
+}
+
+void HistoryService::TouchOnDemandFavicon(const GURL& icon_url) {
+  DCHECK(backend_task_runner_) << "History service being called after cleanup";
+  DCHECK(thread_checker_.CalledOnValidThread());
+  ScheduleTask(PRIORITY_NORMAL,
+               base::Bind(&HistoryBackend::TouchOnDemandFavicon,
+                          history_backend_, icon_url));
 }
 
 void HistoryService::SetImportedFavicons(
@@ -641,7 +670,7 @@ void HistoryService::SetImportedFavicons(
 base::CancelableTaskTracker::TaskId HistoryService::QueryURL(
     const GURL& url,
     bool want_visits,
-    const QueryURLCallback& callback,
+    QueryURLCallback callback,
     base::CancelableTaskTracker* tracker) {
   DCHECK(backend_task_runner_) << "History service being called after cleanup";
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -650,8 +679,8 @@ base::CancelableTaskTracker::TaskId HistoryService::QueryURL(
       backend_task_runner_.get(), FROM_HERE,
       base::Bind(&HistoryBackend::QueryURL, history_backend_, url, want_visits,
                  base::Unretained(query_url_result)),
-      base::Bind(&RunWithQueryURLResult, callback,
-                 base::Owned(query_url_result)));
+      base::BindOnce(&RunWithQueryURLResult, std::move(callback),
+                     base::Owned(query_url_result)));
 }
 
 // Statistics ------------------------------------------------------------------
@@ -879,11 +908,9 @@ bool HistoryService::Init(
     backend_task_runner_ = thread_->task_runner();
   } else {
     backend_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-        base::TaskTraits()
-            .WithPriority(base::TaskPriority::USER_BLOCKING)
-            .WithShutdownBehavior(base::TaskShutdownBehavior::BLOCK_SHUTDOWN)
-            .MayBlock()
-            .WithBaseSyncPrimitives());
+        {base::MayBlock(), base::WithBaseSyncPrimitives(),
+         base::TaskPriority::USER_BLOCKING,
+         base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
   }
 
   // Create the history backend.
@@ -915,11 +942,11 @@ void HistoryService::ScheduleAutocomplete(
 }
 
 void HistoryService::ScheduleTask(SchedulePriority priority,
-                                  const base::Closure& task) {
+                                  base::OnceClosure task) {
   DCHECK(thread_checker_.CalledOnValidThread());
   CHECK(backend_task_runner_);
   // TODO(brettw): Do prioritization.
-  backend_task_runner_->PostTask(FROM_HERE, task);
+  backend_task_runner_->PostTask(FROM_HERE, std::move(task));
 }
 
 base::WeakPtr<HistoryService> HistoryService::AsWeakPtr() {
@@ -1049,8 +1076,33 @@ void HistoryService::ExpireLocalAndRemoteHistoryBetween(
     //
     // TODO(davidben): |callback| should not run until this operation completes
     // too.
+    net::PartialNetworkTrafficAnnotationTag partial_traffic_annotation =
+        net::DefinePartialNetworkTrafficAnnotation(
+            "web_history_expire_between_dates", "web_history_service", R"(
+          semantics {
+            description:
+              "If a user who syncs their browsing history deletes history "
+              "items for a time range, Chrome sends a request to a google.com "
+              "host to execute the corresponding deletion serverside."
+            trigger:
+              "Deleting browsing history for a given time range, e.g. from the "
+              "Clear Browsing Data dialog, by an extension, or the "
+              "Clear-Site-Data header."
+            data:
+              "The begin and end timestamps of the selected time range, a "
+              "version info token to resolve transaction conflicts, and an "
+              "OAuth2 token authenticating the user."
+          }
+          policy {
+            chrome_policy {
+              AllowDeletingBrowserHistory {
+                AllowDeletingBrowserHistory: false
+              }
+            }
+          })");
     web_history->ExpireHistoryBetween(restrict_urls, begin_time, end_time,
-                                      base::Bind(&ExpireWebHistoryComplete));
+                                      base::Bind(&ExpireWebHistoryComplete),
+                                      partial_traffic_annotation);
   }
   ExpireHistoryBetween(restrict_urls, begin_time, end_time, callback, tracker);
 }

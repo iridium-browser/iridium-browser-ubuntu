@@ -15,8 +15,8 @@
 #include "components/safe_browsing_db/util.h"
 #include "components/safe_browsing_db/v4_feature_list.h"
 #include "components/safe_browsing_db/v4_local_database_manager.h"
+#include "components/safe_browsing_db/v4_protocol_manager_util.h"
 #include "components/security_interstitials/content/unsafe_resource.h"
-#include "components/subresource_filter/content/browser/content_subresource_filter_driver_factory.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
@@ -57,10 +57,15 @@ SafeBrowsingResourceThrottle::SafeBrowsingResourceThrottle(
     const net::URLRequest* request,
     content::ResourceType resource_type,
     safe_browsing::SafeBrowsingService* sb_service)
-    : safe_browsing::BaseResourceThrottle(request,
-                                          resource_type,
-                                          sb_service->database_manager(),
-                                          sb_service->ui_manager()) {}
+    : safe_browsing::BaseResourceThrottle(
+          request,
+          resource_type,
+          safe_browsing::CreateSBThreatTypeSet(
+              {safe_browsing::SB_THREAT_TYPE_URL_MALWARE,
+               safe_browsing::SB_THREAT_TYPE_URL_PHISHING,
+               safe_browsing::SB_THREAT_TYPE_URL_UNWANTED}),
+          sb_service->database_manager(),
+          sb_service->ui_manager()) {}
 
 SafeBrowsingResourceThrottle::~SafeBrowsingResourceThrottle() {}
 
@@ -73,16 +78,16 @@ void SafeBrowsingResourceThrottle::MaybeDestroyPrerenderContents(
   // Destroy the prefetch with FINAL_STATUS_SAFEBROSWING.
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&DestroyPrerenderContents,
-                 info->GetWebContentsGetterForRequest()));
+      base::BindOnce(&DestroyPrerenderContents,
+                     info->GetWebContentsGetterForRequest()));
 }
 
 void SafeBrowsingResourceThrottle::StartDisplayingBlockingPageHelper(
     security_interstitials::UnsafeResource resource) {
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&SafeBrowsingResourceThrottle::StartDisplayingBlockingPage,
-                 AsWeakPtr(), ui_manager(), resource));
+      base::BindOnce(&SafeBrowsingResourceThrottle::StartDisplayingBlockingPage,
+                     AsWeakPtr(), ui_manager(), resource));
 }
 
 // Static
@@ -92,7 +97,6 @@ void SafeBrowsingResourceThrottle::StartDisplayingBlockingPage(
     const security_interstitials::UnsafeResource& resource) {
   content::WebContents* web_contents = resource.web_contents_getter.Run();
   if (web_contents) {
-    BaseResourceThrottle::NotifySubresourceFilterOfBlockedResource(resource);
     prerender::PrerenderContents* prerender_contents =
         prerender::PrerenderContents::FromWebContents(web_contents);
     if (prerender_contents) {
@@ -106,5 +110,5 @@ void SafeBrowsingResourceThrottle::StartDisplayingBlockingPage(
   // Tab is gone or it's being prerendered.
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&SafeBrowsingResourceThrottle::Cancel, throttle));
+      base::BindOnce(&SafeBrowsingResourceThrottle::Cancel, throttle));
 }

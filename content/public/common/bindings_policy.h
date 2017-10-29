@@ -32,11 +32,7 @@ enum BindingsPolicy {
   // normal web contents and are intended only for use with WebUI and layout
   // tests.
   BINDINGS_POLICY_MOJO = 1 << 3,
-  // Similar to BINDINGS_POLICY_MOJO except it's intended for use by
-  // HeadlessWebContents.
-  BINDINGS_POLICY_HEADLESS = 1 << 4,
 };
-
 }
 
 #endif  // CONTENT_PUBLIC_COMMON_BINDINGS_POLICY_H_

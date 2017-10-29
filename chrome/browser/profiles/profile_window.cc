@@ -13,6 +13,7 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -44,11 +45,9 @@
 #include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/signin/core/common/signin_switches.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/user_metrics.h"
 #include "extensions/features/features.h"
 #include "net/base/escape.h"
 
@@ -110,8 +109,8 @@ class BrowserAddedForProfileObserver : public chrome::BrowserListObserver {
       // added. Post the callback to the message loop so it gets executed after
       // the tabs are created.
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE,
-          base::Bind(callback_, profile_, Profile::CREATE_STATUS_INITIALIZED));
+          FROM_HERE, base::BindOnce(callback_, profile_,
+                                    Profile::CREATE_STATUS_INITIALIZED));
       base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
     }
   }
@@ -124,13 +123,11 @@ class BrowserAddedForProfileObserver : public chrome::BrowserListObserver {
 };
 
 // Called after a |system_profile| is available to be used by the user manager.
-// Based on the value of |tutorial_mode| we determine a url to be displayed
-// by the webui and run the |callback|, if it exists. Depending on the value of
+// Runs |callback|, if it exists. Depending on the value of
 // |user_manager_action|, executes an action once the user manager displays or
 // after a profile is opened.
 void OnUserManagerSystemProfileCreated(
     const base::FilePath& profile_path_to_focus,
-    profiles::UserManagerTutorialMode tutorial_mode,
     profiles::UserManagerAction user_manager_action,
     const base::Callback<void(Profile*, const std::string&)>& callback,
     Profile* system_profile,
@@ -141,9 +138,7 @@ void OnUserManagerSystemProfileCreated(
   // Tell the webui which user should be focused.
   std::string page = chrome::kChromeUIMdUserManagerUrl;
 
-  if (tutorial_mode == profiles::USER_MANAGER_TUTORIAL_OVERVIEW) {
-    page += profiles::kUserManagerDisplayTutorial;
-  } else if (!profile_path_to_focus.empty()) {
+  if (!profile_path_to_focus.empty()) {
     // The file path is processed in the same way as base::CreateFilePathValue
     // (i.e. convert to std::string with AsUTF8Unsafe()), and then URI encoded.
     page += "#";
@@ -187,7 +182,6 @@ void ProfileLoadedCallback(ProfileManager::CreateCallback callback,
 namespace profiles {
 
 // User Manager parameters are prefixed with hash.
-const char kUserManagerDisplayTutorial[] = "#tutorial";
 const char kUserManagerOpenCreateUserPage[] = "#create-user";
 const char kUserManagerSelectProfileTaskManager[] = "#task-manager";
 const char kUserManagerSelectProfileAboutChrome[] = "#about-chrome";
@@ -221,7 +215,7 @@ void FindOrCreateNewWindowForProfile(
     }
   }
 
-  content::RecordAction(UserMetricsAction("NewWindow"));
+  base::RecordAction(UserMetricsAction("NewWindow"));
   base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
   StartupBrowserCreator browser_creator;
   browser_creator.LaunchBrowser(
@@ -361,7 +355,6 @@ void CreateAndSwitchToNewProfile(ProfileManager::CreateCallback callback,
 
 void ProfileBrowserCloseSuccess(const base::FilePath& profile_path) {
   UserManager::Show(base::FilePath(),
-                    profiles::USER_MANAGER_NO_TUTORIAL,
                     profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
 }
 
@@ -373,7 +366,7 @@ void CloseGuestProfileWindows() {
   if (profile) {
     BrowserList::CloseAllBrowsersWithProfile(
         profile, base::Bind(&ProfileBrowserCloseSuccess),
-        BrowserList::CloseCallback());
+        BrowserList::CloseCallback(), false);
   }
 }
 
@@ -392,7 +385,6 @@ void LockBrowserCloseSuccess(const base::FilePath& profile_path) {
 
   chrome::HideTaskManager();
   UserManager::Show(profile_path,
-                    profiles::USER_MANAGER_NO_TUTORIAL,
                     profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
 }
 
@@ -401,15 +393,12 @@ void LockProfile(Profile* profile) {
   if (profile) {
     BrowserList::CloseAllBrowsersWithProfile(
         profile, base::Bind(&LockBrowserCloseSuccess),
-        BrowserList::CloseCallback());
+        BrowserList::CloseCallback(), false);
   }
 }
 
 bool IsLockAvailable(Profile* profile) {
   DCHECK(profile);
-  if (!switches::IsNewProfileManagement())
-    return false;
-
   if (profile->IsGuestSession() || profile->IsSystemProfile())
     return false;
 
@@ -446,12 +435,11 @@ void CloseProfileWindows(Profile* profile) {
   DCHECK(profile);
   BrowserList::CloseAllBrowsersWithProfile(
       profile, base::Bind(&ProfileBrowserCloseSuccess),
-      BrowserList::CloseCallback());
+      BrowserList::CloseCallback(), false);
 }
 
 void CreateSystemProfileForUserManager(
     const base::FilePath& profile_path_to_focus,
-    profiles::UserManagerTutorialMode tutorial_mode,
     profiles::UserManagerAction user_manager_action,
     const base::Callback<void(Profile*, const std::string&)>& callback) {
   // Create the system profile, if necessary, and open the User Manager
@@ -460,7 +448,6 @@ void CreateSystemProfileForUserManager(
       ProfileManager::GetSystemProfilePath(),
       base::Bind(&OnUserManagerSystemProfileCreated,
                  profile_path_to_focus,
-                 tutorial_mode,
                  user_manager_action,
                  callback),
       base::string16(),
@@ -468,24 +455,8 @@ void CreateSystemProfileForUserManager(
       std::string());
 }
 
-void ShowUserManagerMaybeWithTutorial(Profile* profile) {
-  // Guest users cannot appear in the User Manager, nor display a tutorial.
-  if (!profile || profile->IsGuestSession()) {
-    UserManager::Show(base::FilePath(),
-                      profiles::USER_MANAGER_NO_TUTORIAL,
-                      profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
-    return;
-  }
-  UserManager::Show(base::FilePath(),
-                    profiles::USER_MANAGER_TUTORIAL_OVERVIEW,
-                    profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
-}
-
-void BubbleViewModeFromAvatarBubbleMode(
-    BrowserWindow::AvatarBubbleMode mode,
-    BubbleViewMode* bubble_view_mode,
-    TutorialMode* tutorial_mode) {
-  *tutorial_mode = TUTORIAL_MODE_NONE;
+void BubbleViewModeFromAvatarBubbleMode(BrowserWindow::AvatarBubbleMode mode,
+                                        BubbleViewMode* bubble_view_mode) {
   switch (mode) {
     case BrowserWindow::AVATAR_BUBBLE_MODE_ACCOUNT_MANAGEMENT:
       *bubble_view_mode = BUBBLE_VIEW_MODE_ACCOUNT_MANAGEMENT;
@@ -501,40 +472,13 @@ void BubbleViewModeFromAvatarBubbleMode(
       return;
     case BrowserWindow::AVATAR_BUBBLE_MODE_CONFIRM_SIGNIN:
       *bubble_view_mode = BUBBLE_VIEW_MODE_PROFILE_CHOOSER;
-      *tutorial_mode = TUTORIAL_MODE_CONFIRM_SIGNIN;
       return;
     case BrowserWindow::AVATAR_BUBBLE_MODE_SHOW_ERROR:
       *bubble_view_mode = BUBBLE_VIEW_MODE_PROFILE_CHOOSER;
-      *tutorial_mode = TUTORIAL_MODE_SHOW_ERROR;
-      return;
-    case BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH:
-      *bubble_view_mode = profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER;
       return;
     default:
       *bubble_view_mode = profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER;
   }
-}
-
-bool ShouldShowWelcomeUpgradeTutorial(
-    Profile* profile, TutorialMode tutorial_mode) {
-  const int show_count = profile->GetPrefs()->GetInteger(
-      prefs::kProfileAvatarTutorialShown);
-  // Do not show the tutorial if user has dismissed it.
-  if (show_count > signin_ui_util::kUpgradeWelcomeTutorialShowMax)
-    return false;
-
-  return tutorial_mode == TUTORIAL_MODE_WELCOME_UPGRADE ||
-         show_count != signin_ui_util::kUpgradeWelcomeTutorialShowMax;
-}
-
-bool ShouldShowRightClickTutorial(Profile* profile) {
-  PrefService* local_state = g_browser_process->local_state();
-  const bool dismissed = local_state->GetBoolean(
-      prefs::kProfileAvatarRightClickTutorialDismissed);
-
-  // Don't show the tutorial if it's already been dismissed or if right-clicking
-  // wouldn't show any targets.
-  return !dismissed && HasProfileSwitchTargets(profile);
 }
 
 }  // namespace profiles

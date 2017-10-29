@@ -637,7 +637,7 @@ int main(int argc, char **argv) {
   if (strncmp(encoder->name, "vp9", 3) == 0) cfg.rc_max_quantizer = 52;
   cfg.rc_undershoot_pct = 50;
   cfg.rc_overshoot_pct = 50;
-  cfg.rc_buf_initial_sz = 500;
+  cfg.rc_buf_initial_sz = 600;
   cfg.rc_buf_optimal_sz = 600;
   cfg.rc_buf_sz = 1000;
 
@@ -722,6 +722,12 @@ int main(int argc, char **argv) {
     vpx_codec_control(&codec, VP8E_SET_STATIC_THRESHOLD, 1);
     vpx_codec_control(&codec, VP9E_SET_TUNE_CONTENT, 0);
     vpx_codec_control(&codec, VP9E_SET_TILE_COLUMNS, (cfg.g_threads >> 1));
+    // TODO(marpan/jianj): There is an issue with row-mt for low resolutons at
+    // high speed settings, disable its use for those cases for now.
+    if (cfg.g_threads > 1 && ((cfg.g_w > 320 && cfg.g_h > 240) || speed < 7))
+      vpx_codec_control(&codec, VP9E_SET_ROW_MT, 1);
+    else
+      vpx_codec_control(&codec, VP9E_SET_ROW_MT, 0);
     if (vpx_codec_control(&codec, VP9E_SET_SVC, layering_mode > 0 ? 1 : 0))
       die_codec(&codec, "Failed to set SVC");
     for (i = 0; i < cfg.ts_number_layers; ++i) {
@@ -740,7 +746,7 @@ int main(int argc, char **argv) {
   // For generating smaller key frames, use a smaller max_intra_size_pct
   // value, like 100 or 200.
   {
-    const int max_intra_size_pct = 900;
+    const int max_intra_size_pct = 1000;
     vpx_codec_control(&codec, VP8E_SET_MAX_INTRA_BITRATE_PCT,
                       max_intra_size_pct);
   }

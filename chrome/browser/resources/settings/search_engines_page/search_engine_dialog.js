@@ -92,15 +92,6 @@ Polymer({
   },
 
   /**
-   * @param {!KeyboardEvent} e
-   * @private
-   */
-  onKeypress_: function(e) {
-    if (e.key == 'Enter' && !this.$.actionButton.disabled)
-      this.onActionButtonTap_();
-  },
-
-  /**
    * @param {!Event} event
    * @private
    */
@@ -115,11 +106,12 @@ Polymer({
       return;
     }
 
-    this.browserProxy_.validateSearchEngineInput(
-        inputElement.id, inputElement.value).then(function(isValid) {
-      inputElement.invalid = !isValid;
-      this.updateActionButtonState_();
-    }.bind(this));
+    this.browserProxy_
+        .validateSearchEngineInput(inputElement.id, inputElement.value)
+        .then(function(isValid) {
+          inputElement.invalid = !isValid;
+          this.updateActionButtonState_();
+        }.bind(this));
   },
 
   /** @private */

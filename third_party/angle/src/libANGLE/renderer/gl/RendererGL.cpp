@@ -35,6 +35,7 @@
 #include "libANGLE/renderer/gl/TransformFeedbackGL.h"
 #include "libANGLE/renderer/gl/VertexArrayGL.h"
 #include "libANGLE/renderer/gl/renderergl_utils.h"
+#include "libANGLE/renderer/renderer_utils.h"
 
 namespace
 {
@@ -54,43 +55,87 @@ std::vector<GLuint> GatherPaths(const std::vector<gl::Path *> &paths)
 
 }  // namespace
 
-#ifndef NDEBUG
-static void INTERNAL_GL_APIENTRY LogGLDebugMessage(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
-                                                   const GLchar *message, const void *userParam)
+static void INTERNAL_GL_APIENTRY LogGLDebugMessage(GLenum source,
+                                                   GLenum type,
+                                                   GLuint id,
+                                                   GLenum severity,
+                                                   GLsizei length,
+                                                   const GLchar *message,
+                                                   const void *userParam)
 {
     std::string sourceText;
     switch (source)
     {
-      case GL_DEBUG_SOURCE_API:             sourceText = "OpenGL";          break;
-      case GL_DEBUG_SOURCE_WINDOW_SYSTEM:   sourceText = "Windows";         break;
-      case GL_DEBUG_SOURCE_SHADER_COMPILER: sourceText = "Shader Compiler"; break;
-      case GL_DEBUG_SOURCE_THIRD_PARTY:     sourceText = "Third Party";     break;
-      case GL_DEBUG_SOURCE_APPLICATION:     sourceText = "Application";     break;
-      case GL_DEBUG_SOURCE_OTHER:           sourceText = "Other";           break;
-      default:                              sourceText = "UNKNOWN";         break;
+        case GL_DEBUG_SOURCE_API:
+            sourceText = "OpenGL";
+            break;
+        case GL_DEBUG_SOURCE_WINDOW_SYSTEM:
+            sourceText = "Windows";
+            break;
+        case GL_DEBUG_SOURCE_SHADER_COMPILER:
+            sourceText = "Shader Compiler";
+            break;
+        case GL_DEBUG_SOURCE_THIRD_PARTY:
+            sourceText = "Third Party";
+            break;
+        case GL_DEBUG_SOURCE_APPLICATION:
+            sourceText = "Application";
+            break;
+        case GL_DEBUG_SOURCE_OTHER:
+            sourceText = "Other";
+            break;
+        default:
+            sourceText = "UNKNOWN";
+            break;
     }
 
     std::string typeText;
     switch (type)
     {
-      case GL_DEBUG_TYPE_ERROR:               typeText = "Error";               break;
-      case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: typeText = "Deprecated behavior"; break;
-      case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:  typeText = "Undefined behavior";  break;
-      case GL_DEBUG_TYPE_PORTABILITY:         typeText = "Portability";         break;
-      case GL_DEBUG_TYPE_PERFORMANCE:         typeText = "Performance";         break;
-      case GL_DEBUG_TYPE_OTHER:               typeText = "Other";               break;
-      case GL_DEBUG_TYPE_MARKER:              typeText = "Marker";              break;
-      default:                                typeText = "UNKNOWN";             break;
+        case GL_DEBUG_TYPE_ERROR:
+            typeText = "Error";
+            break;
+        case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+            typeText = "Deprecated behavior";
+            break;
+        case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+            typeText = "Undefined behavior";
+            break;
+        case GL_DEBUG_TYPE_PORTABILITY:
+            typeText = "Portability";
+            break;
+        case GL_DEBUG_TYPE_PERFORMANCE:
+            typeText = "Performance";
+            break;
+        case GL_DEBUG_TYPE_OTHER:
+            typeText = "Other";
+            break;
+        case GL_DEBUG_TYPE_MARKER:
+            typeText = "Marker";
+            break;
+        default:
+            typeText = "UNKNOWN";
+            break;
     }
 
     std::string severityText;
     switch (severity)
     {
-      case GL_DEBUG_SEVERITY_HIGH:         severityText = "High";         break;
-      case GL_DEBUG_SEVERITY_MEDIUM:       severityText = "Medium";       break;
-      case GL_DEBUG_SEVERITY_LOW:          severityText = "Low";          break;
-      case GL_DEBUG_SEVERITY_NOTIFICATION: severityText = "Notification"; break;
-      default:                             severityText = "UNKNOWN";      break;
+        case GL_DEBUG_SEVERITY_HIGH:
+            severityText = "High";
+            break;
+        case GL_DEBUG_SEVERITY_MEDIUM:
+            severityText = "Medium";
+            break;
+        case GL_DEBUG_SEVERITY_LOW:
+            severityText = "Low";
+            break;
+        case GL_DEBUG_SEVERITY_NOTIFICATION:
+            severityText = "Notification";
+            break;
+        default:
+            severityText = "UNKNOWN";
+            break;
     }
 
     if (type == GL_DEBUG_TYPE_ERROR)
@@ -113,7 +158,6 @@ static void INTERNAL_GL_APIENTRY LogGLDebugMessage(GLenum source, GLenum type, G
                << "\tMessage: " << message;
     }
 }
-#endif
 
 namespace rx
 {
@@ -123,31 +167,37 @@ RendererGL::RendererGL(const FunctionsGL *functions, const egl::AttributeMap &at
       mFunctions(functions),
       mStateManager(nullptr),
       mBlitter(nullptr),
-      mHasDebugOutput(false),
+      mUseDebugOutput(false),
       mSkipDrawCalls(false),
-      mCapsInitialized(false)
+      mCapsInitialized(false),
+      mMultiviewImplementationType(MultiviewImplementationTypeGL::UNSPECIFIED)
 {
     ASSERT(mFunctions);
-    mStateManager = new StateManagerGL(mFunctions, getNativeCaps());
     nativegl_gl::GenerateWorkarounds(mFunctions, &mWorkarounds);
-    mBlitter = new BlitGL(functions, mWorkarounds, mStateManager);
+    mStateManager = new StateManagerGL(mFunctions, getNativeCaps());
+    mBlitter      = new BlitGL(functions, mWorkarounds, mStateManager);
 
-    mHasDebugOutput = mFunctions->isAtLeastGL(gl::Version(4, 3)) ||
-                      mFunctions->hasGLExtension("GL_KHR_debug") ||
-                      mFunctions->isAtLeastGLES(gl::Version(3, 2)) ||
-                      mFunctions->hasGLESExtension("GL_KHR_debug");
-#ifndef NDEBUG
-    if (mHasDebugOutput)
+    bool hasDebugOutput = mFunctions->isAtLeastGL(gl::Version(4, 3)) ||
+                          mFunctions->hasGLExtension("GL_KHR_debug") ||
+                          mFunctions->isAtLeastGLES(gl::Version(3, 2)) ||
+                          mFunctions->hasGLESExtension("GL_KHR_debug");
+
+    mUseDebugOutput = hasDebugOutput && ShouldUseDebugLayers(attribMap);
+
+    if (mUseDebugOutput)
     {
         mFunctions->enable(GL_DEBUG_OUTPUT);
         mFunctions->enable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-        mFunctions->debugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_HIGH, 0, nullptr, GL_TRUE);
-        mFunctions->debugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_MEDIUM, 0, nullptr, GL_TRUE);
-        mFunctions->debugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_LOW, 0, nullptr, GL_FALSE);
-        mFunctions->debugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+        mFunctions->debugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_HIGH, 0,
+                                        nullptr, GL_TRUE);
+        mFunctions->debugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_MEDIUM, 0,
+                                        nullptr, GL_TRUE);
+        mFunctions->debugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_LOW, 0,
+                                        nullptr, GL_FALSE);
+        mFunctions->debugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION,
+                                        0, nullptr, GL_FALSE);
         mFunctions->debugMessageCallback(&LogGLDebugMessage, nullptr);
     }
-#endif
 
     EGLint deviceType =
         static_cast<EGLint>(attribMap.get(EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE, EGL_NONE));
@@ -182,31 +232,27 @@ gl::Error RendererGL::flush()
 
 gl::Error RendererGL::finish()
 {
-#ifdef NDEBUG
-    if (mWorkarounds.finishDoesNotCauseQueriesToBeAvailable && mHasDebugOutput)
+    if (mWorkarounds.finishDoesNotCauseQueriesToBeAvailable && mUseDebugOutput)
     {
         mFunctions->enable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
     }
-#endif
 
     mFunctions->finish();
 
-#ifdef NDEBUG
-    if (mWorkarounds.finishDoesNotCauseQueriesToBeAvailable && mHasDebugOutput)
+    if (mWorkarounds.finishDoesNotCauseQueriesToBeAvailable && mUseDebugOutput)
     {
         mFunctions->disable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
     }
-#endif
 
     return gl::NoError();
 }
 
-gl::Error RendererGL::drawArrays(const gl::ContextState &data,
+gl::Error RendererGL::drawArrays(const gl::Context *context,
                                  GLenum mode,
                                  GLint first,
                                  GLsizei count)
 {
-    ANGLE_TRY(mStateManager->setDrawArraysState(data, first, count, 0));
+    ANGLE_TRY(mStateManager->setDrawArraysState(context, first, count, 0));
 
     if (!mSkipDrawCalls)
     {
@@ -216,13 +262,13 @@ gl::Error RendererGL::drawArrays(const gl::ContextState &data,
     return gl::NoError();
 }
 
-gl::Error RendererGL::drawArraysInstanced(const gl::ContextState &data,
+gl::Error RendererGL::drawArraysInstanced(const gl::Context *context,
                                           GLenum mode,
                                           GLint first,
                                           GLsizei count,
                                           GLsizei instanceCount)
 {
-    ANGLE_TRY(mStateManager->setDrawArraysState(data, first, count, instanceCount));
+    ANGLE_TRY(mStateManager->setDrawArraysState(context, first, count, instanceCount));
 
     if (!mSkipDrawCalls)
     {
@@ -232,15 +278,15 @@ gl::Error RendererGL::drawArraysInstanced(const gl::ContextState &data,
     return gl::NoError();
 }
 
-gl::Error RendererGL::drawElements(const gl::ContextState &data,
+gl::Error RendererGL::drawElements(const gl::Context *context,
                                    GLenum mode,
                                    GLsizei count,
                                    GLenum type,
-                                   const GLvoid *indices,
+                                   const void *indices,
                                    const gl::IndexRange &indexRange)
 {
-    const GLvoid *drawIndexPtr = nullptr;
-    ANGLE_TRY(mStateManager->setDrawElementsState(data, count, type, indices, 0, &drawIndexPtr));
+    const void *drawIndexPtr = nullptr;
+    ANGLE_TRY(mStateManager->setDrawElementsState(context, count, type, indices, 0, &drawIndexPtr));
 
     if (!mSkipDrawCalls)
     {
@@ -250,16 +296,16 @@ gl::Error RendererGL::drawElements(const gl::ContextState &data,
     return gl::NoError();
 }
 
-gl::Error RendererGL::drawElementsInstanced(const gl::ContextState &data,
+gl::Error RendererGL::drawElementsInstanced(const gl::Context *context,
                                             GLenum mode,
                                             GLsizei count,
                                             GLenum type,
-                                            const GLvoid *indices,
+                                            const void *indices,
                                             GLsizei instances,
                                             const gl::IndexRange &indexRange)
 {
-    const GLvoid *drawIndexPointer = nullptr;
-    ANGLE_TRY(mStateManager->setDrawElementsState(data, count, type, indices, instances,
+    const void *drawIndexPointer = nullptr;
+    ANGLE_TRY(mStateManager->setDrawElementsState(context, count, type, indices, instances,
                                                   &drawIndexPointer));
 
     if (!mSkipDrawCalls)
@@ -270,18 +316,18 @@ gl::Error RendererGL::drawElementsInstanced(const gl::ContextState &data,
     return gl::NoError();
 }
 
-gl::Error RendererGL::drawRangeElements(const gl::ContextState &data,
+gl::Error RendererGL::drawRangeElements(const gl::Context *context,
                                         GLenum mode,
                                         GLuint start,
                                         GLuint end,
                                         GLsizei count,
                                         GLenum type,
-                                        const GLvoid *indices,
+                                        const void *indices,
                                         const gl::IndexRange &indexRange)
 {
-    const GLvoid *drawIndexPointer = nullptr;
+    const void *drawIndexPointer = nullptr;
     ANGLE_TRY(
-        mStateManager->setDrawElementsState(data, count, type, indices, 0, &drawIndexPointer));
+        mStateManager->setDrawElementsState(context, count, type, indices, 0, &drawIndexPointer));
 
     if (!mSkipDrawCalls)
     {
@@ -291,11 +337,11 @@ gl::Error RendererGL::drawRangeElements(const gl::ContextState &data,
     return gl::NoError();
 }
 
-gl::Error RendererGL::drawArraysIndirect(const gl::ContextState &data,
+gl::Error RendererGL::drawArraysIndirect(const gl::Context *context,
                                          GLenum mode,
-                                         const GLvoid *indirect)
+                                         const void *indirect)
 {
-    ANGLE_TRY(mStateManager->setDrawIndirectState(data, GL_NONE));
+    ANGLE_TRY(mStateManager->setDrawIndirectState(context, GL_NONE));
 
     if (!mSkipDrawCalls)
     {
@@ -304,12 +350,12 @@ gl::Error RendererGL::drawArraysIndirect(const gl::ContextState &data,
     return gl::NoError();
 }
 
-gl::Error RendererGL::drawElementsIndirect(const gl::ContextState &data,
+gl::Error RendererGL::drawElementsIndirect(const gl::Context *context,
                                            GLenum mode,
                                            GLenum type,
-                                           const GLvoid *indirect)
+                                           const void *indirect)
 {
-    ANGLE_TRY(mStateManager->setDrawIndirectState(data, type));
+    ANGLE_TRY(mStateManager->setDrawIndirectState(context, type));
 
     if (!mSkipDrawCalls)
     {
@@ -509,13 +555,15 @@ void RendererGL::popGroupMarker()
 
 std::string RendererGL::getVendorString() const
 {
-    return std::string(reinterpret_cast<const char*>(mFunctions->getString(GL_VENDOR)));
+    return std::string(reinterpret_cast<const char *>(mFunctions->getString(GL_VENDOR)));
 }
 
 std::string RendererGL::getRendererDescription() const
 {
-    std::string nativeVendorString(reinterpret_cast<const char*>(mFunctions->getString(GL_VENDOR)));
-    std::string nativeRendererString(reinterpret_cast<const char*>(mFunctions->getString(GL_RENDERER)));
+    std::string nativeVendorString(
+        reinterpret_cast<const char *>(mFunctions->getString(GL_VENDOR)));
+    std::string nativeRendererString(
+        reinterpret_cast<const char *>(mFunctions->getString(GL_RENDERER)));
 
     std::ostringstream rendererString;
     rendererString << nativeVendorString << " " << nativeRendererString << " OpenGL";
@@ -549,11 +597,13 @@ const gl::Version &RendererGL::getMaxSupportedESVersion() const
     return mMaxSupportedESVersion;
 }
 
-void RendererGL::generateCaps(gl::Caps *outCaps, gl::TextureCapsMap* outTextureCaps,
+void RendererGL::generateCaps(gl::Caps *outCaps,
+                              gl::TextureCapsMap *outTextureCaps,
                               gl::Extensions *outExtensions,
                               gl::Limitations * /* outLimitations */) const
 {
-    nativegl_gl::GenerateCaps(mFunctions, outCaps, outTextureCaps, outExtensions, &mMaxSupportedESVersion);
+    nativegl_gl::GenerateCaps(mFunctions, mWorkarounds, outCaps, outTextureCaps, outExtensions,
+                              &mMaxSupportedESVersion, &mMultiviewImplementationType);
 }
 
 GLint RendererGL::getGPUDisjoint()
@@ -600,6 +650,28 @@ const gl::Limitations &RendererGL::getNativeLimitations() const
 {
     ensureCapsInitialized();
     return mNativeLimitations;
+}
+
+MultiviewImplementationTypeGL RendererGL::getMultiviewImplementationType() const
+{
+    ensureCapsInitialized();
+    return mMultiviewImplementationType;
+}
+
+void RendererGL::applyNativeWorkarounds(gl::Workarounds *workarounds) const
+{
+    ensureCapsInitialized();
+    nativegl_gl::ApplyWorkarounds(mFunctions, workarounds);
+}
+
+gl::Error RendererGL::dispatchCompute(const gl::Context *context,
+                                      GLuint numGroupsX,
+                                      GLuint numGroupsY,
+                                      GLuint numGroupsZ)
+{
+    ANGLE_TRY(mStateManager->setDispatchComputeState(context));
+    mFunctions->dispatchCompute(numGroupsX, numGroupsY, numGroupsZ);
+    return gl::NoError();
 }
 
 }  // namespace rx

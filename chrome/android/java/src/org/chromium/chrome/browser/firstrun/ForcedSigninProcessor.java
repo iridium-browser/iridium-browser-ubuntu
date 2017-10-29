@@ -16,7 +16,7 @@ import org.chromium.chrome.browser.services.AndroidEduAndChildAccountHelper;
 import org.chromium.chrome.browser.signin.AccountManagementFragment;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.util.FeatureUtilities;
-import org.chromium.components.signin.AccountManagerHelper;
+import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.ChromeSigninController;
 
 import javax.annotation.Nullable;
@@ -47,7 +47,7 @@ public final class ForcedSigninProcessor {
      * changes with early exit if an account has already been signed in.
      */
     public static void start(final Context appContext, @Nullable final Runnable onComplete) {
-        if (ChromeSigninController.get(appContext).isSignedIn()) return;
+        if (ChromeSigninController.get().isSignedIn()) return;
         new AndroidEduAndChildAccountHelper() {
             @Override
             public void onParametersReady() {
@@ -75,7 +75,7 @@ public final class ForcedSigninProcessor {
             Log.d(TAG, "Sign in disallowed");
             return;
         }
-        AccountManagerHelper.get(appContext).getGoogleAccounts(new Callback<Account[]>() {
+        AccountManagerFacade.get().tryGetGoogleAccounts(new Callback<Account[]>() {
             @Override
             public void onResult(Account[] accounts) {
                 if (accounts.length != 1) {
@@ -86,8 +86,7 @@ public final class ForcedSigninProcessor {
                     @Override
                     public void onSignInComplete() {
                         // Since this is a forced signin, signout is not allowed.
-                        AccountManagementFragment.setSignOutAllowedPreferenceValue(
-                                appContext, false);
+                        AccountManagementFragment.setSignOutAllowedPreferenceValue(false);
                         if (onComplete != null) {
                             onComplete.run();
                         }

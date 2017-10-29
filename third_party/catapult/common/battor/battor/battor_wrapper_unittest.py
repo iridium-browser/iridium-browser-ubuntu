@@ -61,7 +61,7 @@ class IsBattOrConnectedTest(unittest.TestCase):
 
     self._get_bus_number_to_device_tree_map = (
         find_usb_devices.GetBusNumberToDeviceTreeMap)
-    find_usb_devices.GetBusNumberToDeviceTreeMap = lambda fast=None: None
+    find_usb_devices.GetBusNumberToDeviceTreeMap = lambda fast=None: {}
 
     self._get_battor_list_return = []
     self._get_battor_list = battor_device_mapping.GetBattOrList
@@ -298,12 +298,6 @@ class BattOrWrapperTest(unittest.TestCase):
     self._subprocess_check_output_code = 1
     with self.assertRaises(battor_wrapper.BattOrFlashError):
       self._battor.FlashFirmware('hex_path', 'config_path')
-
-  def testFlashFirmwarePlatformNotSupported(self):
-    self._battor = battor_wrapper.BattOrWrapper('win')
-    self._DefaultBattOrReplacements()
-    self._battor._target_platform = 'unsupported_platform'
-    self.assertFalse(self._battor.FlashFirmware('hex_path', 'config_path'))
 
   def testFlashFirmwareShellRunning(self):
     self._battor = battor_wrapper.BattOrWrapper('linux')

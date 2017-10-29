@@ -7,15 +7,17 @@
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 #include "platform/RuntimeEnabledFeatures.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIFontSizeAdjust::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  DCHECK(RuntimeEnabledFeatures::cssFontSizeAdjustEnabled());
-  if (range.peek().id() == CSSValueNone)
-    return CSSPropertyParserHelpers::consumeIdent(range);
-  return CSSPropertyParserHelpers::consumeNumber(range, ValueRangeNonNegative);
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  DCHECK(RuntimeEnabledFeatures::CSSFontSizeAdjustEnabled());
+  if (range.Peek().Id() == CSSValueNone)
+    return CSSPropertyParserHelpers::ConsumeIdent(range);
+  return CSSPropertyParserHelpers::ConsumeNumber(range, kValueRangeNonNegative);
 }
 
 }  // namespace blink

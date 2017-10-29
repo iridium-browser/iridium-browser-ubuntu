@@ -13,12 +13,14 @@
 #include "base/debug/leak_annotations.h"
 #include "base/location.h"
 #include "base/memory/discardable_memory.h"
+#include "base/message_loop/message_loop.h"
+#include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "cc/output/buffer_to_texture_target_map.h"
+#include "components/viz/common/resources/buffer_to_texture_target_map.h"
 #include "content/app/mojo/mojo_init.h"
 #include "content/common/in_process_child_thread_params.h"
 #include "content/common/resource_messages.h"
@@ -44,9 +46,10 @@
 #include "ipc/ipc.mojom.h"
 #include "ipc/ipc_channel_mojo.h"
 #include "mojo/edk/embedder/embedder.h"
-#include "mojo/edk/embedder/pending_process_connection.h"
+#include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/scheduler/renderer/renderer_scheduler.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/gfx/buffer_format_util.h"
 
 // IPC messages for testing ----------------------------------------------------
@@ -83,7 +86,7 @@ class TestTaskCounter : public base::SingleThreadTaskRunner {
 
   // SingleThreadTaskRunner implementation.
   bool PostDelayedTask(const tracked_objects::Location&,
-                       const base::Closure&,
+                       base::OnceClosure,
                        base::TimeDelta) override {
     base::AutoLock auto_lock(lock_);
     count_++;
@@ -91,14 +94,14 @@ class TestTaskCounter : public base::SingleThreadTaskRunner {
   }
 
   bool PostNonNestableDelayedTask(const tracked_objects::Location&,
-                                  const base::Closure&,
+                                  base::OnceClosure,
                                   base::TimeDelta) override {
     base::AutoLock auto_lock(lock_);
     count_++;
     return true;
   }
 
-  bool RunsTasksOnCurrentThread() const override { return true; }
+  bool RunsTasksInCurrentSequence() const override { return true; }
 
   int NumTasksPosted() const {
     base::AutoLock auto_lock(lock_);
@@ -163,6 +166,8 @@ class QuitOnTestMsgFilter : public IPC::MessageFilter {
 
 class RenderThreadImplBrowserTest : public testing::Test {
  public:
+  RenderThreadImplBrowserTest() : field_trial_list_(nullptr) {}
+
   void SetUp() override {
     // SequencedWorkerPool is enabled by default in tests. Disable it for this
     // test to avoid a DCHECK failure when RenderThreadImpl::Init enables it.
@@ -180,20 +185,23 @@ class RenderThreadImplBrowserTest : public testing::Test {
 
     InitializeMojo();
     shell_context_.reset(new TestServiceManagerContext);
-    mojo::edk::PendingProcessConnection process_connection;
+    mojo::edk::OutgoingBrokerClientInvitation invitation;
+    service_manager::Identity child_identity(
+        mojom::kRendererServiceName, service_manager::mojom::kInheritUserID,
+        "test");
     child_connection_.reset(new ChildConnection(
-        mojom::kRendererServiceName, "test", &process_connection,
+        child_identity, &invitation,
         ServiceManagerConnection::GetForProcess()->GetConnector(),
         io_task_runner));
 
     mojo::MessagePipe pipe;
-    IPC::mojom::ChannelBootstrapPtr channel_bootstrap;
-    child_connection_->GetRemoteInterfaces()->GetInterface(&channel_bootstrap);
+    child_connection_->BindInterface(IPC::mojom::ChannelBootstrap::Name_,
+                                     std::move(pipe.handle1));
 
-    channel_ = IPC::ChannelProxy::Create(
-        IPC::ChannelMojo::CreateServerFactory(
-            channel_bootstrap.PassInterface().PassHandle(), io_task_runner),
-        nullptr, io_task_runner);
+    channel_ =
+        IPC::ChannelProxy::Create(IPC::ChannelMojo::CreateServerFactory(
+                                      std::move(pipe.handle0), io_task_runner),
+                                  nullptr, io_task_runner);
 
     mock_process_.reset(new MockRenderProcess);
     test_task_counter_ = make_scoped_refptr(new TestTaskCounter());
@@ -202,18 +210,23 @@ class RenderThreadImplBrowserTest : public testing::Test {
     base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
     base::CommandLine::StringVector old_argv = cmd->argv();
 
+    cmd->AppendSwitchASCII(switches::kLang, "en-US");
+
     cmd->AppendSwitchASCII(switches::kNumRasterThreads, "1");
     cmd->AppendSwitchASCII(
         switches::kContentImageTextureTarget,
-        cc::BufferToTextureTargetMapToString(
-            cc::DefaultBufferToTextureTargetMapForTesting()));
+        viz::BufferToTextureTargetMapToString(
+            viz::DefaultBufferToTextureTargetMapForTesting()));
 
     std::unique_ptr<blink::scheduler::RendererScheduler> renderer_scheduler =
         blink::scheduler::RendererScheduler::Create();
     scoped_refptr<base::SingleThreadTaskRunner> test_task_counter(
         test_task_counter_.get());
+
+    base::FieldTrialList::CreateTrialsFromCommandLine(
+        *cmd, switches::kFieldTrialHandle, -1);
     thread_ = new RenderThreadImplForTest(
-        InProcessChildThreadParams(io_task_runner,
+        InProcessChildThreadParams(io_task_runner, &invitation,
                                    child_connection_->service_token()),
         std::move(renderer_scheduler), test_task_counter);
     cmd->InitFromArgv(old_argv);
@@ -248,6 +261,8 @@ class RenderThreadImplBrowserTest : public testing::Test {
   std::unique_ptr<MockRenderProcess> mock_process_;
   scoped_refptr<QuitOnTestMsgFilter> test_msg_filter_;
   RenderThreadImplForTest* thread_;  // Owned by mock_process_.
+
+  base::FieldTrialList field_trial_list_;
 };
 
 void CheckRenderThreadInputHandlerManager(RenderThreadImpl* thread) {
@@ -257,8 +272,16 @@ void CheckRenderThreadInputHandlerManager(RenderThreadImpl* thread) {
 // Check that InputHandlerManager outlives compositor thread because it uses
 // raw pointers to post tasks.
 // Disabled under LeakSanitizer due to memory leaks. http://crbug.com/348994
+// Disabled on Windows due to flakiness: http://crbug.com/728034.
+#if defined(OS_WIN)
+#define MAYBE_InputHandlerManagerDestroyedAfterCompositorThread \
+  DISABLED_InputHandlerManagerDestroyedAfterCompositorThread
+#else
+#define MAYBE_InputHandlerManagerDestroyedAfterCompositorThread \
+  InputHandlerManagerDestroyedAfterCompositorThread
+#endif
 TEST_F(RenderThreadImplBrowserTest,
-       WILL_LEAK(InputHandlerManagerDestroyedAfterCompositorThread)) {
+       WILL_LEAK(MAYBE_InputHandlerManagerDestroyedAfterCompositorThread)) {
   ASSERT_TRUE(thread_->input_handler_manager());
 
   thread_->compositor_task_runner()->PostTask(

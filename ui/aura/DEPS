@@ -1,7 +1,9 @@
 include_rules = [
-  "+cc/surfaces/surface_id.h",
-  "+cc/surfaces/surface_sequence.h",
-  "+cc/surfaces/frame_sink_id.h",
+  "+cc/base",
+  "+cc/output",
+  "+cc/surfaces",
+  "+components/viz/common",
+  "+components/viz/host",
   "+mojo/common",
   "+mojo/public/cpp/bindings",
   "+net/base/filename_util.h",
@@ -19,6 +21,4 @@ include_rules = [
                        #             to ui/metro_viewer.
   "+ui/ozone/public",
   "+ui/platform_window",
-  "+ui/wm/public",
 ]
-

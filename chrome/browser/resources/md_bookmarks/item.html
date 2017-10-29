@@ -1,29 +1,36 @@
 <link rel="import" href="chrome://resources/html/polymer.html">
-<link rel="import" href="chrome://resources/cr_elements/icons.html">
+
 <link rel="import" href="chrome://resources/html/icon.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
+<link rel="import" href="chrome://bookmarks/actions.html">
 <link rel="import" href="chrome://bookmarks/shared_style.html">
+<link rel="import" href="chrome://bookmarks/store_client.html">
 
 <dom-module id="bookmarks-item">
   <template>
     <style include="shared-style">
       :host {
+        display: block;
+        flex-direction: row;
+        position: relative;
+      }
+
+      #url {
         -webkit-padding-start: 20px;
         -webkit-user-select: none;
         align-items: center;
+        color: inherit;
         display: flex;
-        flex-direction: row;
         height: 40px;
+        text-decoration: none;
       }
 
-      :host([is-selected-item]) {
-        background-color: rgb(225, 235, 253);
+      :host([is-selected-item_]) {
+        background-color: var(--highlight-color);
       }
 
       #website-title {
-        color: var(--primary-text-color);
-        cursor: pointer;
+        -webkit-margin-start: 20px;
         flex: 1;
         overflow: hidden;
         text-decoration: none;
@@ -32,42 +39,29 @@
       }
 
       #icon {
-        background-repeat: no-repeat;
-        height: 16px;
-        margin: 2px;
-      }
-
-      #icon-wrapper {
-        -webkit-margin-end: 20px;
-        height: 20px;
-        width: 20px;
-      }
-
-      .more-vert-button {
-        -webkit-margin-end: 12px;
-      }
-
-      iron-icon {
-        --iron-icon-height: 20px;
-        --iron-icon-width: 20px;
         color: var(--secondary-text-color);
       }
-      </style>
-    <div id="icon-wrapper">
-      <iron-icon id="folder-icon" icon="cr:folder"
-          hidden$="[[!isFolder_]]">
-      </iron-icon>
-      <div id="icon" hidden$="[[isFolder_]]"></div>
+
+      button.more-vert-button {
+        -webkit-margin-end: 12px;
+      }
+    </style>
+    <div id="url">
+      <div id="icon"></div>
+      <div id="website-title">
+        [[item_.title]]
+      </div>
+      <button is="paper-icon-button-light"
+          class="more-vert-button"
+          tabindex$="[[ironListTabIndex]]"
+          title="$i18n{moreActionsButtonTitle}"
+          on-click="onMenuButtonClick_"
+          on-dblclick="onMenuButtonDblClick_">
+        <div></div>
+        <div></div>
+        <div></div>
+      </button>
     </div>
-    <div id="website-title">
-      [[item.title]]
-    </div>
-    <button is="paper-icon-button-light" class="more-vert-button"
-        on-click="onMenuButtonOpenClick_">
-      <div></div>
-      <div></div>
-      <div></div>
-    </button>
   </template>
   <script src="chrome://bookmarks/item.js"></script>
 <dom-module>

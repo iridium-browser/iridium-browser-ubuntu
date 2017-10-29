@@ -9,10 +9,6 @@
 
 #import "ios/chrome/browser/ui/toolbar/toolbar_owner.h"
 
-@protocol OmniboxFocuser;
-@class TabModel;
-@protocol WebToolbarDelegate;
-
 class ReadingListModel;
 
 // Header view for the Material Design NTP. The header view contains all views
@@ -23,20 +19,20 @@ class ReadingListModel;
 // Return the toolbar view;
 @property(nonatomic, readonly) UIView* toolBarView;
 
-// Creates a NewTabPageToolbarController using the given |toolbarDelegate|,
-// |focuser| and |readingListModel|, and adds the toolbar view to self.
-- (void)addToolbarWithDelegate:(id<WebToolbarDelegate>)toolbarDelegate
-                       focuser:(id<OmniboxFocuser>)focuser
-                      tabModel:(TabModel*)tabModel
-              readingListModel:(ReadingListModel*)readingListModel;
+// Creates a NewTabPageToolbarController using the given |dispatcher|,
+// |readingListModel|, and adds the toolbar view to self.
+- (void)addToolbarWithReadingListModel:(ReadingListModel*)readingListModel
+                            dispatcher:(id)dispatcher;
 
-// Changes the frame of |searchField| based on its |initialFrame| and the scroll
-// view's y |offset|. Also adjust the alpha values for |_searchBoxBorder| and
-// |_shadow| and the constant values for the |constraints|.
-- (void)updateSearchField:(UIView*)searchField
-         withInitialFrame:(CGRect)initialFrame
-       subviewConstraints:(NSArray*)constraints
-                forOffset:(CGFloat)offset;
+// Changes the constraints of searchField based on its initialFrame and the
+// scroll view's y |offset|. Also adjust the alpha values for |_searchBoxBorder|
+// and |_shadow| and the constant values for the |constraints|.
+- (void)updateSearchFieldWidth:(NSLayoutConstraint*)widthConstraint
+                        height:(NSLayoutConstraint*)heightConstraint
+                     topMargin:(NSLayoutConstraint*)topMarginConstraint
+            subviewConstraints:(NSArray*)constraints
+                 logoIsShowing:(BOOL)logoIsShowing
+                     forOffset:(CGFloat)offset;
 
 // Initializes |_searchBoxBorder| and |_shadow| and adds them to |searchField|.
 - (void)addViewsToSearchField:(UIView*)searchField;
@@ -46,6 +42,15 @@ class ReadingListModel;
 
 // Hide toolbar subviews that should not be displayed on the new tab page.
 - (void)hideToolbarViewsForNewTabPage;
+
+// Updates the toolbar tab count;
+- (void)setToolbarTabCount:(int)tabCount;
+
+// |YES| if the toolbar can show the forward arrow.
+- (void)setCanGoForward:(BOOL)canGoForward;
+
+// |YES| if the toolbar can show the back arrow.
+- (void)setCanGoBack:(BOOL)canGoBack;
 
 @end
 

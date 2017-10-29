@@ -18,7 +18,7 @@ namespace remoting {
 
 namespace {
 
-base::LazyInstance<scoped_refptr<AudioPipeReader> >::Leaky
+base::LazyInstance<scoped_refptr<AudioPipeReader>>::Leaky
     g_pulseaudio_pipe_sink_reader = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
@@ -59,7 +59,7 @@ void AudioCapturerLinux::OnDataRead(
 
   if (silence_detector_.IsSilence(
           reinterpret_cast<const int16_t*>(data->data().data()),
-          data->data().size() / sizeof(int16_t))) {
+          data->data().size() / sizeof(int16_t) / AudioPipeReader::kChannels)) {
     return;
   }
 

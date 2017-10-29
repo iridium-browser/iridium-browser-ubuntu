@@ -16,6 +16,7 @@
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_share_group.h"
 #include "ui/gl/gl_state_restorer.h"
+#include "ui/gl/gl_workarounds.h"
 #include "ui/gl/gpu_preference.h"
 
 namespace gl {
@@ -39,6 +40,25 @@ struct GLVersionInfo;
 class RealGLApi;
 class TraceGLApi;
 
+// Where available, choose a GL context priority for devices that support it.
+// Currently this requires the EGL_IMG_context_priority extension that is
+// present on Daydream ready Android devices. Default is Medium, and the
+// attribute is ignored if the extension is missing.
+//
+// "High" priority must only be used for special cases with strong realtime
+// requirements, it is incompatible with other critical system GL work such as
+// the GVR library's asynchronous reprojection for VR viewing. Please avoid
+// using it for any GL contexts that may be used during VR presentation,
+// see crbug.com/727800.
+//
+// Instead, consider using "Low" priority for possibly-slow GL work such as
+// user WebGL content.
+enum ContextPriority {
+  ContextPriorityLow,
+  ContextPriorityMedium,
+  ContextPriorityHigh
+};
+
 struct GLContextAttribs {
   GpuPreference gpu_preference = PreferIntegratedGpu;
   bool bind_generates_resource = true;
@@ -46,6 +66,7 @@ struct GLContextAttribs {
   bool global_texture_share_group = false;
   int client_major_es_version = 3;
   int client_minor_es_version = 0;
+  ContextPriority context_priority = ContextPriorityMedium;
 };
 
 // Encapsulates an OpenGL context, hiding platform specific management.
@@ -75,6 +96,9 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
 
   // Creates a GPUTimingClient class which abstracts various GPU Timing exts.
   virtual scoped_refptr<GPUTimingClient> CreateGPUTimingClient() = 0;
+
+  // Set the GL workarounds.
+  void SetGLWorkarounds(const GLWorkarounds& workarounds);
 
   // Gets the GLStateRestorer for the context.
   GLStateRestorer* GetGLStateRestorer();
@@ -150,6 +174,17 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   // and API.
   CurrentGL* GetCurrentGL();
 
+  // Reinitialize the dynamic bindings of this context.  Needed when the driver
+  // may be exposing different extensions compared to when it was initialized.
+  // TODO(geofflang): Try to make this call uncessessary by pre-loading all
+  // extension entry points.
+  void ReinitializeDynamicBindings();
+
+  // Forces this context, which must be a virtual context, to be no
+  // longer considered virtually current. The real context remains
+  // current.
+  virtual void ForceReleaseVirtuallyCurrent();
+
  protected:
   virtual ~GLContext();
 
@@ -191,8 +226,10 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
 
   std::unique_ptr<GLVersionInfo> GenerateGLVersionInfo();
 
-  bool static_bindings_initialized_;
-  bool dynamic_bindings_initialized_;
+  GLWorkarounds gl_workarounds_;
+
+  bool static_bindings_initialized_ = false;
+  bool dynamic_bindings_initialized_ = false;
   std::unique_ptr<DriverGL> driver_gl_;
   std::unique_ptr<GLApi> gl_api_;
   std::unique_ptr<TraceGLApi> trace_gl_api_;
@@ -203,13 +240,14 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   RealGLApi* real_gl_api_ = nullptr;
 
   scoped_refptr<GLShareGroup> share_group_;
-  GLContext* current_virtual_context_;
-  bool state_dirtied_externally_;
+  GLContext* current_virtual_context_ = nullptr;
+  bool state_dirtied_externally_ = false;
   std::unique_ptr<GLStateRestorer> state_restorer_;
   std::unique_ptr<GLVersionInfo> version_info_;
 
-  int swap_interval_;
-  bool force_swap_interval_zero_;
+  // Start with an invalid value so that the first SetSwapInterval isn't a nop.
+  int swap_interval_ = -1;
+  bool force_swap_interval_zero_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(GLContext);
 };

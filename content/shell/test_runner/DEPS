@@ -1,5 +1,8 @@
 include_rules = [
   "+cc",
+  "+content/public/test",
+  "+device/gamepad/public/cpp",
+  "+device/sensors/public/cpp",
   "+gin",
   "+gpu/command_buffer/client",
   "+media/midi/midi_service.mojom.h",

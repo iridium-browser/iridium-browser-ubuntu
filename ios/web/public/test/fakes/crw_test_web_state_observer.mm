@@ -5,9 +5,14 @@
 #import "ios/web/public/test/fakes/crw_test_web_state_observer.h"
 
 #include "base/memory/ptr_util.h"
-#include "ios/web/public/web_state/navigation_context.h"
-#include "ios/web/web_state/navigation_context_impl.h"
+#import "ios/web/public/web_state/navigation_context.h"
+#import "ios/web/web_state/navigation_context_impl.h"
+#include "net/http/http_response_headers.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 TestFormActivityInfo::TestFormActivityInfo() {}
@@ -18,9 +23,11 @@ TestUpdateFaviconUrlCandidatesInfo::~TestUpdateFaviconUrlCandidatesInfo() =
 }
 
 @implementation CRWTestWebStateObserver {
-  // Arguments passed to |webState:didStartProvisionalNavigationForURL:|.
-  std::unique_ptr<web::TestStartProvisionalNavigationInfo>
-      _startProvisionalNavigationInfo;
+  // Arguments passed to |webState:didPruneNavigationItemsWithCount:|.
+  std::unique_ptr<web::TestNavigationItemsPrunedInfo>
+      _navigationItemsPrunedInfo;
+  // Arguments passed to |webState:didStartNavigation:|.
+  std::unique_ptr<web::TestDidStartNavigationInfo> _didStartNavigationInfo;
   // Arguments passed to |webState:didFinishNavigationForURL:|.
   std::unique_ptr<web::TestDidFinishNavigationInfo> _didFinishNavigationInfo;
   // Arguments passed to |webState:didCommitNavigationWithDetails:|.
@@ -34,6 +41,11 @@ TestUpdateFaviconUrlCandidatesInfo::~TestUpdateFaviconUrlCandidatesInfo() =
       _changeLoadingProgressInfo;
   // Arguments passed to |webStateDidChangeTitle:|.
   std::unique_ptr<web::TestTitleWasSetInfo> _titleWasSetInfo;
+  // Arguments passed to |webStateDidChangeVisibleSecurityState:|.
+  std::unique_ptr<web::TestDidChangeVisibleSecurityStateInfo>
+      _didChangeVisibleSecurityStateInfo;
+  // Arguments passed to |webStateDidSuppressDialog:|.
+  std::unique_ptr<web::TestDidSuppressDialogInfo> _didSuppressDialogInfo;
   // Arguments passed to
   // |webState:didSubmitDocumentWithFormNamed:userInitiated:|.
   std::unique_ptr<web::TestSubmitDocumentInfo> _submitDocumentInfo;
@@ -53,8 +65,12 @@ TestUpdateFaviconUrlCandidatesInfo::~TestUpdateFaviconUrlCandidatesInfo() =
   std::unique_ptr<web::TestStartLoadingInfo> _startLoadingInfo;
 }
 
-- (web::TestStartProvisionalNavigationInfo*)startProvisionalNavigationInfo {
-  return _startProvisionalNavigationInfo.get();
+- (web::TestNavigationItemsPrunedInfo*)navigationItemsPrunedInfo {
+  return _navigationItemsPrunedInfo.get();
+}
+
+- (web::TestDidStartNavigationInfo*)didStartNavigationInfo {
+  return _didStartNavigationInfo.get();
 }
 
 - (web::TestDidFinishNavigationInfo*)didFinishNavigationInfo {
@@ -79,6 +95,15 @@ TestUpdateFaviconUrlCandidatesInfo::~TestUpdateFaviconUrlCandidatesInfo() =
 
 - (web::TestTitleWasSetInfo*)titleWasSetInfo {
   return _titleWasSetInfo.get();
+}
+
+- (web::TestDidChangeVisibleSecurityStateInfo*)
+    didChangeVisibleSecurityStateInfo {
+  return _didChangeVisibleSecurityStateInfo.get();
+}
+
+- (web::TestDidSuppressDialogInfo*)didSuppressDialogInfo {
+  return _didSuppressDialogInfo.get();
 }
 
 - (web::TestSubmitDocumentInfo*)submitDocumentInfo {
@@ -112,11 +137,25 @@ TestUpdateFaviconUrlCandidatesInfo::~TestUpdateFaviconUrlCandidatesInfo() =
 #pragma mark CRWWebStateObserver methods -
 
 - (void)webState:(web::WebState*)webState
-    didStartProvisionalNavigationForURL:(const GURL&)URL {
-  _startProvisionalNavigationInfo =
-      base::MakeUnique<web::TestStartProvisionalNavigationInfo>();
-  _startProvisionalNavigationInfo->web_state = webState;
-  _startProvisionalNavigationInfo->url = URL;
+    didPruneNavigationItemsWithCount:(size_t)pruned_item_count {
+  _navigationItemsPrunedInfo =
+      base::MakeUnique<web::TestNavigationItemsPrunedInfo>();
+  _navigationItemsPrunedInfo->web_state = webState;
+  _navigationItemsPrunedInfo->count = pruned_item_count;
+}
+
+- (void)webState:(web::WebState*)webState
+    didStartNavigation:(web::NavigationContext*)navigation {
+  ASSERT_TRUE(!navigation->GetError() || !navigation->IsSameDocument());
+  _didStartNavigationInfo = base::MakeUnique<web::TestDidStartNavigationInfo>();
+  _didStartNavigationInfo->web_state = webState;
+  std::unique_ptr<web::NavigationContextImpl> context =
+      web::NavigationContextImpl::CreateNavigationContext(
+          navigation->GetWebState(), navigation->GetUrl(),
+          navigation->GetPageTransition());
+  context->SetIsSameDocument(navigation->IsSameDocument());
+  context->SetError(navigation->GetError());
+  _didStartNavigationInfo->context = std::move(context);
 }
 
 - (void)webState:(web::WebState*)webState
@@ -129,24 +168,17 @@ TestUpdateFaviconUrlCandidatesInfo::~TestUpdateFaviconUrlCandidatesInfo() =
 
 - (void)webState:(web::WebState*)webState
     didFinishNavigation:(web::NavigationContext*)navigation {
+  ASSERT_TRUE(!navigation->GetError() || !navigation->IsSameDocument());
   _didFinishNavigationInfo =
       base::MakeUnique<web::TestDidFinishNavigationInfo>();
   _didFinishNavigationInfo->web_state = webState;
-  if (navigation->IsSamePage()) {
-    ASSERT_FALSE(navigation->IsErrorPage());
-    _didFinishNavigationInfo->context =
-        web::NavigationContextImpl::CreateSamePageNavigationContext(
-            navigation->GetWebState(), navigation->GetUrl());
-  } else if (navigation->IsErrorPage()) {
-    ASSERT_FALSE(navigation->IsSamePage());
-    _didFinishNavigationInfo->context =
-        web::NavigationContextImpl::CreateErrorPageNavigationContext(
-            navigation->GetWebState(), navigation->GetUrl());
-  } else {
-    _didFinishNavigationInfo->context =
-        web::NavigationContextImpl::CreateNavigationContext(
-            navigation->GetWebState(), navigation->GetUrl());
-  }
+  std::unique_ptr<web::NavigationContextImpl> context =
+      web::NavigationContextImpl::CreateNavigationContext(
+          navigation->GetWebState(), navigation->GetUrl(),
+          navigation->GetPageTransition());
+  context->SetIsSameDocument(navigation->IsSameDocument());
+  context->SetError(navigation->GetError());
+  _didFinishNavigationInfo->context = std::move(context);
 }
 
 - (void)webState:(web::WebState*)webState didLoadPageWithSuccess:(BOOL)success {
@@ -172,6 +204,17 @@ TestUpdateFaviconUrlCandidatesInfo::~TestUpdateFaviconUrlCandidatesInfo() =
 - (void)webStateDidChangeTitle:(web::WebState*)webState {
   _titleWasSetInfo = base::MakeUnique<web::TestTitleWasSetInfo>();
   _titleWasSetInfo->web_state = webState;
+}
+
+- (void)webStateDidChangeVisibleSecurityState:(web::WebState*)webState {
+  _didChangeVisibleSecurityStateInfo =
+      base::MakeUnique<web::TestDidChangeVisibleSecurityStateInfo>();
+  _didChangeVisibleSecurityStateInfo->web_state = webState;
+}
+
+- (void)webStateDidSuppressDialog:(web::WebState*)webState {
+  _didSuppressDialogInfo = base::MakeUnique<web::TestDidSuppressDialogInfo>();
+  _didSuppressDialogInfo->web_state = webState;
 }
 
 - (void)webState:(web::WebState*)webState

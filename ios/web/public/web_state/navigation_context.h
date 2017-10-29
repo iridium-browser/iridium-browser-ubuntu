@@ -5,7 +5,15 @@
 #ifndef IOS_WEB_PUBLIC_WEB_STATE_NAVIGATION_CONTEXT_H_
 #define IOS_WEB_PUBLIC_WEB_STATE_NAVIGATION_CONTEXT_H_
 
+#import <Foundation/Foundation.h>
+
+#include "ui/base/page_transition_types.h"
+
 class GURL;
+
+namespace net {
+class HttpResponseHeaders;
+}
 
 namespace web {
 
@@ -24,15 +32,32 @@ class NavigationContext {
   // The URL the WebState is navigating to.
   virtual const GURL& GetUrl() const = 0;
 
-  // Whether the navigation happened in the same page. Examples of same page
-  // navigations are:
+  // Returns the page transition type for this navigation.
+  virtual ui::PageTransition GetPageTransition() const = 0;
+
+  // Whether the navigation happened within the same document. Examples of same
+  // document navigations are:
   // * reference fragment navigations
   // * pushState/replaceState
-  // * same page history navigation
-  virtual bool IsSamePage() const = 0;
+  // * same document history navigation
+  virtual bool IsSameDocument() const = 0;
 
-  // Whether the navigation resulted in an error page.
-  virtual bool IsErrorPage() const = 0;
+  // Whether the initial navigation is done using HTTP POST method. This will
+  // not change during the navigation (even after encountering a server
+  // redirect).
+  //
+  // Note: page and frame navigations can only be done using POST or GET
+  // methods Therefore API exposes only |bool IsPost()| as opposed to
+  // |const std::string& GetMethod()| method.
+  virtual bool IsPost() const = 0;
+
+  // Returns error if the navigation has failed.
+  virtual NSError* GetError() const = 0;
+
+  // Returns the response headers for the request, or null if there aren't any
+  // response headers or they have not been received yet. The response headers
+  // returned should not be modified, as modifications will not be reflected.
+  virtual net::HttpResponseHeaders* GetResponseHeaders() const = 0;
 
   virtual ~NavigationContext() {}
 };

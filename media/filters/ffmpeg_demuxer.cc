@@ -42,6 +42,7 @@
 #include "media/filters/webvtt_util.h"
 #include "media/formats/webm/webm_crypto_helpers.h"
 #include "media/media_features.h"
+#include "third_party/ffmpeg/ffmpeg_features.h"
 
 #if BUILDFLAG(ENABLE_HEVC_DEMUXING)
 #include "media/filters/ffmpeg_h265_to_annex_b_bitstream_converter.h"
@@ -49,9 +50,19 @@
 
 namespace media {
 
-static base::Time ExtractTimelineOffset(AVFormatContext* format_context) {
-  if (strstr(format_context->iformat->name, "webm") ||
-      strstr(format_context->iformat->name, "matroska")) {
+namespace {
+
+void SetAVStreamDiscard(AVStream* stream, AVDiscard discard) {
+  DCHECK(stream);
+  stream->discard = discard;
+}
+
+}  // namespace
+
+static base::Time ExtractTimelineOffset(
+    container_names::MediaContainerName container,
+    const AVFormatContext* format_context) {
+  if (container == container_names::CONTAINER_WEBM) {
     const AVDictionaryEntry* entry =
         av_dict_get(format_context->metadata, "creation_time", NULL, 0);
 
@@ -151,14 +162,24 @@ static void RecordAudioCodecStats(const AudioDecoderConfig& audio_config) {
 }
 
 // Record video decoder config UMA stats corresponding to a src= playback.
-static void RecordVideoCodecStats(const VideoDecoderConfig& video_config,
+static void RecordVideoCodecStats(container_names::MediaContainerName container,
+                                  const VideoDecoderConfig& video_config,
                                   AVColorRange color_range,
                                   MediaLog* media_log) {
   media_log->RecordRapporWithSecurityOrigin("Media.OriginUrl.SRC.VideoCodec." +
                                             GetCodecName(video_config.codec()));
 
+  // TODO(xhwang): Fix these misleading metric names. They should be something
+  // like "Media.SRC.Xxxx". See http://crbug.com/716183.
   UMA_HISTOGRAM_ENUMERATION("Media.VideoCodec", video_config.codec(),
                             kVideoCodecMax + 1);
+  if (container == container_names::CONTAINER_MOV) {
+    UMA_HISTOGRAM_ENUMERATION("Media.SRC.VideoCodec.MP4", video_config.codec(),
+                              kVideoCodecMax + 1);
+  } else if (container == container_names::CONTAINER_WEBM) {
+    UMA_HISTOGRAM_ENUMERATION("Media.SRC.VideoCodec.WebM", video_config.codec(),
+                              kVideoCodecMax + 1);
+  }
 
   // Drop UNKNOWN because U_H_E() uses one bucket for all values less than 1.
   if (video_config.profile() >= 0) {
@@ -203,7 +224,7 @@ static void SetTimeProperty(MediaLogEvent* event,
 std::unique_ptr<FFmpegDemuxerStream> FFmpegDemuxerStream::Create(
     FFmpegDemuxer* demuxer,
     AVStream* stream,
-    const scoped_refptr<MediaLog>& media_log) {
+    MediaLog* media_log) {
   if (!demuxer || !stream)
     return nullptr;
 
@@ -247,12 +268,14 @@ std::unique_ptr<FFmpegDemuxerStream> FFmpegDemuxerStream::Create(
                                << video_config->AsHumanReadableString();
   }
 
-  return base::WrapUnique(new FFmpegDemuxerStream(
-      demuxer, stream, std::move(audio_config), std::move(video_config)));
+  return base::WrapUnique(
+      new FFmpegDemuxerStream(demuxer, stream, std::move(audio_config),
+                              std::move(video_config), media_log));
 }
 
-static void UnmarkEndOfStream(AVFormatContext* format_context) {
+static void UnmarkEndOfStreamAndClearError(AVFormatContext* format_context) {
   format_context->pb->eof_reached = 0;
+  format_context->pb->error = 0;
 }
 
 //
@@ -262,13 +285,15 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(
     FFmpegDemuxer* demuxer,
     AVStream* stream,
     std::unique_ptr<AudioDecoderConfig> audio_config,
-    std::unique_ptr<VideoDecoderConfig> video_config)
+    std::unique_ptr<VideoDecoderConfig> video_config,
+    MediaLog* media_log)
     : demuxer_(demuxer),
       task_runner_(base::ThreadTaskRunnerHandle::Get()),
       stream_(stream),
       start_time_(kNoTimestamp),
       audio_config_(audio_config.release()),
       video_config_(video_config.release()),
+      media_log_(media_log),
       type_(UNKNOWN),
       liveness_(LIVENESS_UNKNOWN),
       end_of_stream_(false),
@@ -478,6 +503,7 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
       ConvertStreamTimestamp(stream_->time_base, packet->pts);
 
   if (stream_timestamp == kNoTimestamp) {
+    MEDIA_LOG(ERROR, media_log_) << "FFmpegDemuxer: PTS is not defined";
     demuxer_->NotifyDemuxerError(DEMUXER_ERROR_COULD_NOT_PARSE);
     return;
   }
@@ -502,7 +528,10 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
 
   // Only allow negative timestamps past if we know they'll be fixed up by the
   // code paths below; otherwise they should be treated as a parse error.
-  if (!fixup_negative_timestamps_ && buffer->timestamp() < base::TimeDelta()) {
+  if ((!fixup_negative_timestamps_ || last_packet_timestamp_ == kNoTimestamp) &&
+      buffer->timestamp() < base::TimeDelta()) {
+    MEDIA_LOG(DEBUG, media_log_)
+        << "FFmpegDemuxer: unfixable negative timestamp";
     demuxer_->NotifyDemuxerError(DEMUXER_ERROR_COULD_NOT_PARSE);
     return;
   }
@@ -721,24 +750,28 @@ VideoRotation FFmpegDemuxerStream::video_rotation() {
   return video_rotation_;
 }
 
-bool FFmpegDemuxerStream::enabled() const {
+bool FFmpegDemuxerStream::IsEnabled() const {
   DCHECK(task_runner_->BelongsToCurrentThread());
   return is_enabled_;
 }
 
-void FFmpegDemuxerStream::set_enabled(bool enabled, base::TimeDelta timestamp) {
+void FFmpegDemuxerStream::SetEnabled(bool enabled, base::TimeDelta timestamp) {
   DCHECK(task_runner_->BelongsToCurrentThread());
+  DCHECK(demuxer_);
+  DCHECK(demuxer_->ffmpeg_task_runner());
   if (enabled == is_enabled_)
     return;
 
   is_enabled_ = enabled;
+  demuxer_->ffmpeg_task_runner()->PostTask(
+      FROM_HERE, base::Bind(&SetAVStreamDiscard, av_stream(),
+                            enabled ? AVDISCARD_DEFAULT : AVDISCARD_ALL));
   if (is_enabled_) {
     waiting_for_keyframe_ = true;
   }
   if (!is_enabled_ && !read_cb_.is_null()) {
     DVLOG(1) << "Read from disabled stream, returning EOS";
     base::ResetAndReturn(&read_cb_).Run(kOk, DecoderBuffer::CreateEOSBuffer());
-    return;
   }
   if (!stream_status_change_cb_.is_null())
     stream_status_change_cb_.Run(this, is_enabled_, timestamp);
@@ -779,16 +812,9 @@ void FFmpegDemuxerStream::SatisfyPendingRead() {
 }
 
 bool FFmpegDemuxerStream::HasAvailableCapacity() {
-  // TODO(scherkus): Remove this return and reenable time-based capacity
-  // after our data sources support canceling/concurrent reads, see
-  // http://crbug.com/165762 for details.
-#if 1
-  return !read_cb_.is_null();
-#else
-  // Try to have one second's worth of encoded data per stream.
-  const base::TimeDelta kCapacity = base::TimeDelta::FromSeconds(1);
+  // Try to have two second's worth of encoded data per stream.
+  const base::TimeDelta kCapacity = base::TimeDelta::FromSeconds(2);
   return buffer_queue_.IsEmpty() || buffer_queue_.Duration() < kCapacity;
-#endif
 }
 
 size_t FFmpegDemuxerStream::MemoryUsage() const {
@@ -834,15 +860,15 @@ FFmpegDemuxer::FFmpegDemuxer(
     DataSource* data_source,
     const EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
     const MediaTracksUpdatedCB& media_tracks_updated_cb,
-    const scoped_refptr<MediaLog>& media_log)
+    MediaLog* media_log)
     : host_(NULL),
       task_runner_(task_runner),
       // FFmpeg has no asynchronous API, so we use base::WaitableEvents inside
       // the BlockingUrlProtocol to handle hops to the render thread for network
       // reads and seeks.
       blocking_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-          base::TaskTraits().MayBlock().WithBaseSyncPrimitives().WithPriority(
-              base::TaskPriority::USER_BLOCKING))),
+          {base::MayBlock(), base::WithBaseSyncPrimitives(),
+           base::TaskPriority::USER_BLOCKING})),
       stopped_(false),
       pending_read_(false),
       data_source_(data_source),
@@ -934,7 +960,8 @@ void FFmpegDemuxer::AbortPendingReads() {
 
   // Aborting the read may cause EOF to be marked, undo this.
   blocking_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&UnmarkEndOfStream, glue_->format_context()));
+      FROM_HERE,
+      base::Bind(&UnmarkEndOfStreamAndClearError, glue_->format_context()));
   pending_read_ = false;
 
   // TODO(dalecurtis): We probably should report PIPELINE_ERROR_ABORT here
@@ -1041,12 +1068,12 @@ std::vector<DemuxerStream*> FFmpegDemuxer::GetAllStreams() {
   // MediaResource::GetFirstStream returns the enabled stream if there is one.
   // TODO(servolk): Revisit this after media track switching is supported.
   for (const auto& stream : streams_) {
-    if (stream && stream->enabled())
+    if (stream && stream->IsEnabled())
       result.push_back(stream.get());
   }
   // And include disabled streams at the end of the list.
   for (const auto& stream : streams_) {
-    if (stream && !stream->enabled())
+    if (stream && !stream->IsEnabled())
       result.push_back(stream.get());
   }
   return result;
@@ -1062,7 +1089,7 @@ void FFmpegDemuxer::SetStreamStatusChangeCB(const StreamStatusChangeCB& cb) {
 FFmpegDemuxerStream* FFmpegDemuxer::GetFirstEnabledFFmpegStream(
     DemuxerStream::Type type) const {
   for (const auto& stream : streams_) {
-    if (stream && stream->type() == type && stream->enabled()) {
+    if (stream && stream->type() == type && stream->IsEnabled()) {
       return stream.get();
     }
   }
@@ -1221,6 +1248,7 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
   // If no estimate is found, the stream entry will be kInfiniteDuration.
   std::vector<base::TimeDelta> start_time_estimates(format_context->nb_streams,
                                                     kInfiniteDuration);
+#if !BUILDFLAG(USE_SYSTEM_FFMPEG)
   const AVFormatInternal* internal = format_context->internal;
   if (internal && internal->packet_buffer &&
       format_context->start_time != static_cast<int64_t>(AV_NOPTS_VALUE)) {
@@ -1233,12 +1261,18 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
       if (packet_buffer->pkt.pts != static_cast<int64_t>(AV_NOPTS_VALUE)) {
         const base::TimeDelta packet_pts =
             ConvertFromTimeBase(stream->time_base, packet_buffer->pkt.pts);
-        if (packet_pts < start_time_estimates[stream->index])
+        // We ignore kNoTimestamp here since -int64_t::min() is possible; see
+        // https://crbug.com/700501. Technically this is a valid value, but in
+        // practice shouldn't occur, so just ignore it when estimating.
+        if (packet_pts != kNoTimestamp && packet_pts != kInfiniteDuration &&
+            packet_pts < start_time_estimates[stream->index]) {
           start_time_estimates[stream->index] = packet_pts;
+        }
       }
       packet_buffer = packet_buffer->next;
     }
   }
+#endif  // !BUILDFLAG(USE_SYSTEM_FFMPEG)
 
   std::unique_ptr<MediaTracks> media_tracks(new MediaTracks());
 
@@ -1287,9 +1321,11 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
     } else if (codec_type == AVMEDIA_TYPE_SUBTITLE) {
       detected_text_track_count++;
       if (codec_id != AV_CODEC_ID_WEBVTT || !text_enabled_) {
+        stream->discard = AVDISCARD_ALL;
         continue;
       }
     } else {
+      stream->discard = AVDISCARD_ALL;
       continue;
     }
 
@@ -1320,13 +1356,20 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
     std::string track_language = streams_[i]->GetMetadata("language");
 
     // Some metadata is named differently in FFmpeg for webm files.
-    if (strstr(format_context->iformat->name, "webm") ||
-        strstr(format_context->iformat->name, "matroska")) {
+    if (glue_->container() == container_names::CONTAINER_WEBM) {
       // TODO(servolk): FFmpeg doesn't set stream->id correctly for webm files.
       // Need to fix that and use it as track id. crbug.com/323183
       track_id =
           static_cast<StreamParser::TrackId>(media_tracks->tracks().size() + 1);
       track_label = streams_[i]->GetMetadata("title");
+    }
+
+    if (codec_type == AVMEDIA_TYPE_AUDIO) {
+      streams_[i]->SetEnabled(detected_audio_track_count == 1,
+                              base::TimeDelta());
+    } else if (codec_type == AVMEDIA_TYPE_VIDEO) {
+      streams_[i]->SetEnabled(detected_video_track_count == 1,
+                              base::TimeDelta());
     }
 
     if ((codec_type == AVMEDIA_TYPE_AUDIO &&
@@ -1355,8 +1398,8 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
     } else if (codec_type == AVMEDIA_TYPE_VIDEO) {
       VideoDecoderConfig video_config = streams_[i]->video_decoder_config();
 
-      RecordVideoCodecStats(video_config, stream->codecpar->color_range,
-                            media_log_.get());
+      RecordVideoCodecStats(glue_->container(), video_config,
+                            stream->codecpar->color_range, media_log_);
 
       media_track = media_tracks->AddVideoTrack(video_config, track_id, "main",
                                                 track_label, track_language);
@@ -1424,7 +1467,7 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
     const AVStream* audio_stream = stream->av_stream();
     DCHECK(audio_stream);
     if (audio_stream->codecpar->codec_id == AV_CODEC_ID_OPUS ||
-        (strcmp(format_context->iformat->name, "ogg") == 0 &&
+        (glue_->container() == container_names::CONTAINER_OGG &&
          audio_stream->codecpar->codec_id == AV_CODEC_ID_VORBIS)) {
       for (size_t i = 0; i < streams_.size(); ++i) {
         if (!streams_[i])
@@ -1448,12 +1491,14 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
 
   // MPEG-4 B-frames cause grief for a simple container like AVI. Enable PTS
   // generation so we always get timestamps, see http://crbug.com/169570
-  if (strcmp(format_context->iformat->name, "avi") == 0)
+  if (glue_->container() == container_names::CONTAINER_AVI)
     format_context->flags |= AVFMT_FLAG_GENPTS;
 
   // For testing purposes, don't overwrite the timeline offset if set already.
-  if (timeline_offset_.is_null())
-    timeline_offset_ = ExtractTimelineOffset(format_context);
+  if (timeline_offset_.is_null()) {
+    timeline_offset_ =
+        ExtractTimelineOffset(glue_->container(), format_context);
+  }
 
   // Since we're shifting the externally visible start time to zero, we need to
   // adjust the timeline offset to compensate.
@@ -1554,7 +1599,7 @@ FFmpegDemuxerStream* FFmpegDemuxer::FindStreamWithLowestStartTimestamp(
     bool enabled) {
   FFmpegDemuxerStream* lowest_start_time_stream = nullptr;
   for (const auto& stream : streams_) {
-    if (!stream || stream->enabled() != enabled)
+    if (!stream || stream->IsEnabled() != enabled)
       continue;
     if (!lowest_start_time_stream ||
         stream->start_time() < lowest_start_time_stream->start_time()) {
@@ -1570,7 +1615,8 @@ FFmpegDemuxerStream* FFmpegDemuxer::FindPreferredStreamForSeeking(
   // than the |seek_time| or unknown, then always prefer it for seeking.
   FFmpegDemuxerStream* video_stream = nullptr;
   for (const auto& stream : streams_) {
-    if (stream && stream->type() == DemuxerStream::VIDEO && stream->enabled()) {
+    if (stream && stream->type() == DemuxerStream::VIDEO &&
+        stream->IsEnabled()) {
       video_stream = stream.get();
       if (video_stream->start_time() <= seek_time) {
         return video_stream;
@@ -1647,6 +1693,13 @@ void FFmpegDemuxer::OnEnabledAudioTracksChanged(
     FFmpegDemuxerStream* stream = track_id_to_demux_stream_map_[id];
     DCHECK(stream);
     DCHECK_EQ(DemuxerStream::AUDIO, stream->type());
+    // TODO(servolk): Remove after multiple enabled audio tracks are supported
+    // by the media::RendererImpl.
+    if (!enabled_streams.empty()) {
+      MEDIA_LOG(INFO, media_log_)
+          << "Only one enabled audio track is supported, ignoring track " << id;
+      continue;
+    }
     enabled_streams.insert(stream);
   }
 
@@ -1656,13 +1709,13 @@ void FFmpegDemuxer::OnEnabledAudioTracksChanged(
     if (stream && stream->type() == DemuxerStream::AUDIO &&
         enabled_streams.find(stream.get()) == enabled_streams.end()) {
       DVLOG(1) << __func__ << ": disabling stream " << stream.get();
-      stream->set_enabled(false, curr_time);
+      stream->SetEnabled(false, curr_time);
     }
   }
   for (auto* stream : enabled_streams) {
     DCHECK(stream);
     DVLOG(1) << __func__ << ": enabling stream " << stream;
-    stream->set_enabled(true, curr_time);
+    stream->SetEnabled(true, curr_time);
   }
 }
 
@@ -1684,12 +1737,12 @@ void FFmpegDemuxer::OnSelectedVideoTrackChanged(
     if (stream && stream->type() == DemuxerStream::VIDEO &&
         stream.get() != selected_stream) {
       DVLOG(1) << __func__ << ": disabling stream " << stream.get();
-      stream->set_enabled(false, curr_time);
+      stream->SetEnabled(false, curr_time);
     }
   }
   if (selected_stream) {
     DVLOG(1) << __func__ << ": enabling stream " << selected_stream;
-    selected_stream->set_enabled(true, curr_time);
+    selected_stream->SetEnabled(true, curr_time);
   }
 }
 
@@ -1728,8 +1781,15 @@ void FFmpegDemuxer::OnReadFrameDone(ScopedAVPacket packet, int result) {
   // - either underlying ffmpeg returned an error
   // - or FFMpegDemuxer reached the maximum allowed memory usage.
   if (result < 0 || IsMaxMemoryUsageReached()) {
-    DVLOG(1) << __func__ << " result=" << result
-             << " IsMaxMemoryUsageReached=" << IsMaxMemoryUsageReached();
+    if (result < 0) {
+      MEDIA_LOG(DEBUG, media_log_)
+          << GetDisplayName()
+          << ": av_read_frame(): " << AVErrorToString(result);
+    } else {
+      MEDIA_LOG(DEBUG, media_log_)
+          << GetDisplayName() << ": memory limit exceeded";
+    }
+
     // Update the duration based on the highest elapsed time across all streams.
     base::TimeDelta max_duration;
     for (const auto& stream : streams_) {
@@ -1753,11 +1813,8 @@ void FFmpegDemuxer::OnReadFrameDone(ScopedAVPacket packet, int result) {
     return;
   }
 
-  // Queue the packet with the appropriate stream.
-  DCHECK_GE(packet->stream_index, 0);
-  DCHECK_LT(packet->stream_index, static_cast<int>(streams_.size()));
-
-  // Defend against ffmpeg giving us a bad stream index.
+  // Queue the packet with the appropriate stream; we must defend against ffmpeg
+  // giving us a bad stream index.  See http://crbug.com/698549 for example.
   if (packet->stream_index >= 0 &&
       packet->stream_index < static_cast<int>(streams_.size()) &&
       streams_[packet->stream_index]) {
@@ -1773,7 +1830,7 @@ void FFmpegDemuxer::OnReadFrameDone(ScopedAVPacket packet, int result) {
     }
 
     FFmpegDemuxerStream* demuxer_stream = streams_[packet->stream_index].get();
-    if (demuxer_stream->enabled())
+    if (demuxer_stream->IsEnabled())
       demuxer_stream->EnqueuePacket(std::move(packet));
 
     // If duration estimate was incorrect, update it and tell higher layers.
@@ -1793,7 +1850,7 @@ void FFmpegDemuxer::OnReadFrameDone(ScopedAVPacket packet, int result) {
 bool FFmpegDemuxer::StreamsHaveAvailableCapacity() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   for (const auto& stream : streams_) {
-    if (stream && stream->HasAvailableCapacity())
+    if (stream && stream->IsEnabled() && stream->HasAvailableCapacity())
       return true;
   }
   return false;

@@ -57,10 +57,8 @@ void ObjectBackedNativeHandler::Router(
       !feature_name_value->IsString()) {
     ScriptContext* script_context =
         ScriptContextSet::GetContextByV8Context(context);
-    console::AddMessage(
-        script_context ? script_context->GetRenderFrame() : nullptr,
-        content::CONSOLE_MESSAGE_LEVEL_ERROR,
-        "Extension view no longer exists");
+    console::AddMessage(script_context, content::CONSOLE_MESSAGE_LEVEL_ERROR,
+                        "Extension view no longer exists");
     return;
   }
 
@@ -174,7 +172,7 @@ bool ObjectBackedNativeHandler::ContextCanAccessObject(
   if (!other_script_context || !other_script_context->web_frame())
     return allow_null_context;
 
-  return blink::WebFrame::scriptCanAccess(other_script_context->web_frame());
+  return blink::WebFrame::ScriptCanAccess(other_script_context->web_frame());
 }
 
 void ObjectBackedNativeHandler::SetPrivate(v8::Local<v8::Object> obj,

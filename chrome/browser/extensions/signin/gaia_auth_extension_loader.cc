@@ -83,9 +83,8 @@ void GaiaAuthExtensionLoader::LoadIfNeeded() {
 
 void GaiaAuthExtensionLoader::UnloadIfNeededAsync() {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(&GaiaAuthExtensionLoader::UnloadIfNeeded,
-                 weak_ptr_factory_.GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&GaiaAuthExtensionLoader::UnloadIfNeeded,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
 void GaiaAuthExtensionLoader::UnloadIfNeeded() {
@@ -108,8 +107,8 @@ GaiaAuthExtensionLoader* GaiaAuthExtensionLoader::Get(BrowserContext* context) {
 }
 
 static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<GaiaAuthExtensionLoader> > g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+    BrowserContextKeyedAPIFactory<GaiaAuthExtensionLoader>>::DestructorAtExit
+    g_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<GaiaAuthExtensionLoader>*

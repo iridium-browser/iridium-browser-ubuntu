@@ -5,8 +5,8 @@
 #include <algorithm>
 #include <vector>
 
-#include "ash/common/shelf/shelf_widget.h"
-#include "ash/common/shelf/wm_shelf.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_properties.h"
@@ -27,7 +27,7 @@
 
 namespace ash {
 
-using DIPTest = test::AshTestBase;
+using DIPTest = AshTestBase;
 
 // Test if the WM sets correct work area under different density.
 TEST_F(DIPTest, WorkArea) {
@@ -48,7 +48,7 @@ TEST_F(DIPTest, WorkArea) {
 
   const display::Display display_2x = screen->GetDisplayNearestWindow(root);
   const display::ManagedDisplayInfo display_info_2x =
-      Shell::GetInstance()->display_manager()->GetDisplayInfo(display_2x.id());
+      Shell::Get()->display_manager()->GetDisplayInfo(display_2x.id());
 
   // The |bounds_in_pixel()| should report bounds in pixel coordinate.
   EXPECT_EQ("1,1 2000x1800", display_info_2x.bounds_in_native().ToString());
@@ -62,7 +62,7 @@ TEST_F(DIPTest, WorkArea) {
 
   // Sanity check if the workarea's inset hight is same as
   // the shelf's height.
-  WmShelf* shelf = GetPrimaryShelf();
+  Shelf* shelf = GetPrimaryShelf();
   EXPECT_EQ(display_2x.bounds().InsetsFrom(work_area).height(),
             shelf->shelf_widget()->GetNativeView()->layer()->bounds().height());
 }

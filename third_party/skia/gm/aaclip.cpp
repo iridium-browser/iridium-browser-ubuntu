@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 #include "SkCanvas.h"
 #include "SkPath.h"
 #include "SkMakeUnique.h"
@@ -63,6 +64,7 @@ DEF_SIMPLE_GM(dont_clip_to_layer, canvas, 120, 120) {
     rec.fBounds = &r1;
     canvas->saveLayer(rec);
     do_draw(canvas, r);
+    canvas->restore();
     canvas->restore();
 
     canvas->restore();  // red-layer

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "content/browser/frame_host/frame_tree.h"
@@ -24,11 +25,6 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "third_party/WebKit/public/web/WebSandboxFlags.h"
 #include "url/url_constants.h"
-
-// For fine-grained suppression on flaky tests.
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
 
 namespace content {
 
@@ -134,7 +130,8 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, FrameTreeAfterCrash) {
   RenderProcessHostWatcher crash_observer(
       shell()->web_contents(),
       RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-  NavigateToURL(shell(), GURL(kChromeUICrashURL));
+  ASSERT_TRUE(
+      shell()->web_contents()->GetMainFrame()->GetProcess()->Shutdown(0, true));
   crash_observer.Wait();
 
   // The frame tree should be cleared.
@@ -166,11 +163,6 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, FrameTreeAfterCrash) {
 #define MAYBE_NavigateWithLeftoverFrames NavigateWithLeftoverFrames
 #endif
 IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, MAYBE_NavigateWithLeftoverFrames) {
-#if defined(OS_WIN)
-  // Flaky on XP bot http://crbug.com/468713
-  if (base::win::GetVersion() <= base::win::VERSION_XP)
-    return;
-#endif
   GURL base_url = embedded_test_server()->GetURL("A.com", "/site_isolation/");
 
   NavigateToURL(shell(),
@@ -528,15 +520,15 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, SandboxFlagsSetForChildFrames) {
   // which resets both SandboxFlags::Scripts and
   // SandboxFlags::AutomaticFeatures bits per blink::parseSandboxPolicy(), and
   // third frame has "allow-scripts allow-same-origin".
-  EXPECT_EQ(blink::WebSandboxFlags::None, root->effective_sandbox_flags());
-  EXPECT_EQ(blink::WebSandboxFlags::All,
+  EXPECT_EQ(blink::WebSandboxFlags::kNone, root->effective_sandbox_flags());
+  EXPECT_EQ(blink::WebSandboxFlags::kAll,
             root->child_at(0)->effective_sandbox_flags());
-  EXPECT_EQ(blink::WebSandboxFlags::All & ~blink::WebSandboxFlags::Scripts &
-                ~blink::WebSandboxFlags::AutomaticFeatures,
+  EXPECT_EQ(blink::WebSandboxFlags::kAll & ~blink::WebSandboxFlags::kScripts &
+                ~blink::WebSandboxFlags::kAutomaticFeatures,
             root->child_at(1)->effective_sandbox_flags());
-  EXPECT_EQ(blink::WebSandboxFlags::All & ~blink::WebSandboxFlags::Scripts &
-                ~blink::WebSandboxFlags::AutomaticFeatures &
-                ~blink::WebSandboxFlags::Origin,
+  EXPECT_EQ(blink::WebSandboxFlags::kAll & ~blink::WebSandboxFlags::kScripts &
+                ~blink::WebSandboxFlags::kAutomaticFeatures &
+                ~blink::WebSandboxFlags::kOrigin,
             root->child_at(2)->effective_sandbox_flags());
 
   // Sandboxed frames should set a unique origin unless they have the
@@ -549,7 +541,7 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, SandboxFlagsSetForChildFrames) {
   // Navigating to a different URL should not clear sandbox flags.
   GURL frame_url(embedded_test_server()->GetURL("/title1.html"));
   NavigateFrameToURL(root->child_at(0), frame_url);
-  EXPECT_EQ(blink::WebSandboxFlags::All,
+  EXPECT_EQ(blink::WebSandboxFlags::kAll,
             root->child_at(0)->effective_sandbox_flags());
 }
 
@@ -699,8 +691,8 @@ IN_PROC_BROWSER_TEST_F(CrossProcessFrameTreeBrowserTest,
 }
 
 // FrameTreeBrowserTest variant where we isolate http://*.is, Iceland's top
-// level domain. This is an analogue to --isolate-extensions that we use inside
-// of content_browsertests, where extensions don't exist. Iceland, like an
+// level domain. This is an analogue to isolating extensions, which we can use
+// inside content_browsertests, where extensions don't exist. Iceland, like an
 // extension process, is a special place with magical powers; we want to protect
 // it from outsiders.
 class IsolateIcelandFrameTreeBrowserTest : public ContentBrowserTest {
@@ -708,6 +700,10 @@ class IsolateIcelandFrameTreeBrowserTest : public ContentBrowserTest {
   IsolateIcelandFrameTreeBrowserTest() {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
+    // blink suppresses navigations to blob URLs of origins different from the
+    // frame initiating the navigation. We disable those checks for this test,
+    // to test what happens in a compromise scenario.
+    command_line->AppendSwitch(switches::kDisableWebSecurity);
     command_line->AppendSwitchASCII(switches::kIsolateSitesForTesting, "*.is");
   }
 
@@ -724,12 +720,6 @@ class IsolateIcelandFrameTreeBrowserTest : public ContentBrowserTest {
 // Regression test for https://crbug.com/644966
 IN_PROC_BROWSER_TEST_F(IsolateIcelandFrameTreeBrowserTest,
                        ProcessSwitchForIsolatedBlob) {
-  // blink suppresses navigations to blob URLs of origins different from the
-  // frame initiating the navigation. We disable those checks for this test, to
-  // test what happens in a compromise scenario.
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kDisableWebSecurity);
-
   // Set up an iframe.
   WebContents* contents = shell()->web_contents();
   FrameTreeNode* root =

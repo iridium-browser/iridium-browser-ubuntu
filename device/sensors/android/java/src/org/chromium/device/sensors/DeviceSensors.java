@@ -13,6 +13,7 @@ import android.os.Handler;
 import android.os.HandlerThread;
 
 import org.chromium.base.CollectionUtil;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
@@ -24,7 +25,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Android implementation of the device {motion|orientation|light} APIs.
+ * Android implementation of the device {motion|orientation} APIs.
  */
 @JNINamespace("device")
 class DeviceSensors implements SensorEventListener {
@@ -37,9 +38,6 @@ class DeviceSensors implements SensorEventListener {
     // These fields are lazily initialized by getHandler().
     private Thread mThread;
     private Handler mHandler;
-
-    // A reference to the application context in order to acquire the SensorService.
-    private final Context mAppContext;
 
     // The lock to access the mHandler.
     private final Object mHandlerLock = new Object();
@@ -66,10 +64,6 @@ class DeviceSensors implements SensorEventListener {
     // Lazily initialized when registering for notifications.
     private SensorManagerProxy mSensorManagerProxy;
 
-    // The only instance of that class and its associated lock.
-    private static DeviceSensors sSingleton;
-    private static Object sSingletonLock = new Object();
-
     static final Set<Integer> DEVICE_ORIENTATION_SENSORS_A =
             CollectionUtil.newHashSet(Sensor.TYPE_GAME_ROTATION_VECTOR);
     static final Set<Integer> DEVICE_ORIENTATION_SENSORS_B =
@@ -77,28 +71,33 @@ class DeviceSensors implements SensorEventListener {
     // Option C backup sensors are used when options A and B are not available.
     static final Set<Integer> DEVICE_ORIENTATION_SENSORS_C =
             CollectionUtil.newHashSet(Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_MAGNETIC_FIELD);
-    static final Set<Integer> DEVICE_ORIENTATION_ABSOLUTE_SENSORS =
+
+    static final Set<Integer> DEVICE_ORIENTATION_ABSOLUTE_SENSORS_A =
             CollectionUtil.newHashSet(Sensor.TYPE_ROTATION_VECTOR);
+    static final Set<Integer> DEVICE_ORIENTATION_ABSOLUTE_SENSORS_B =
+            CollectionUtil.newHashSet(Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_MAGNETIC_FIELD);
     static final Set<Integer> DEVICE_MOTION_SENSORS = CollectionUtil.newHashSet(
             Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_LINEAR_ACCELERATION, Sensor.TYPE_GYROSCOPE);
-    static final Set<Integer> DEVICE_LIGHT_SENSORS = CollectionUtil.newHashSet(Sensor.TYPE_LIGHT);
 
     @VisibleForTesting
     final Set<Integer> mActiveSensors = new HashSet<Integer>();
     final List<Set<Integer>> mOrientationSensorSets;
+    final List<Set<Integer>> mOrientationAbsoluteSensorSets;
     Set<Integer> mDeviceOrientationSensors;
-    boolean mDeviceLightIsActive;
+    Set<Integer> mDeviceOrientationAbsoluteSensors;
     boolean mDeviceMotionIsActive;
     boolean mDeviceOrientationIsActive;
     boolean mDeviceOrientationIsActiveWithBackupSensors;
     boolean mDeviceOrientationAbsoluteIsActive;
+    boolean mDeviceOrientationAbsoluteIsActiveWithBackupSensors;
     boolean mOrientationNotAvailable;
+    boolean mOrientationAbsoluteNotAvailable;
 
-    protected DeviceSensors(Context context) {
-        mAppContext = context.getApplicationContext();
-
+    protected DeviceSensors() {
         mOrientationSensorSets = CollectionUtil.newArrayList(DEVICE_ORIENTATION_SENSORS_A,
                 DEVICE_ORIENTATION_SENSORS_B, DEVICE_ORIENTATION_SENSORS_C);
+        mOrientationAbsoluteSensorSets = CollectionUtil.newArrayList(
+                DEVICE_ORIENTATION_ABSOLUTE_SENSORS_A, DEVICE_ORIENTATION_ABSOLUTE_SENSORS_B);
     }
 
     // For orientation we use a 3-way fallback approach where up to 3 different sets of sensors
@@ -128,8 +127,38 @@ class DeviceSensors implements SensorEventListener {
 
         mOrientationNotAvailable = true;
         mDeviceOrientationSensors = null;
-        mDeviceRotationMatrix = null;
-        mRotationAngles = null;
+        nullifyRotationStructures();
+        return false;
+    }
+
+    // For absolute orientation we use a 2-way fallback approach where up to 2 different sets
+    // of sensors are attempted if necessary.
+    // The sensors to be used for absolute orientation are determined in the following order:
+    //   A: ROTATION_VECTOR (absolute)
+    //   B: combination of ACCELEROMETER and MAGNETIC_FIELD (absolute)
+    // Some of the sensors may not be available depending on the device and Android version, so
+    // the 2-way fallback ensures selection of the best possible option.
+    // Examples:
+    //   * Samsung Edge, Android 6.0.1 --> option A
+    //   * Samsung Galaxy A7, Android 5.0.2 --> option B
+    @VisibleForTesting
+    protected boolean registerOrientationAbsoluteSensorsWithFallback(int rateInMicroseconds) {
+        if (mOrientationAbsoluteNotAvailable) return false;
+        if (mDeviceOrientationAbsoluteSensors != null) {
+            return registerSensors(mDeviceOrientationAbsoluteSensors, rateInMicroseconds, true);
+        }
+        ensureRotationStructuresAllocated();
+
+        for (Set<Integer> sensors : mOrientationAbsoluteSensorSets) {
+            mDeviceOrientationAbsoluteSensors = sensors;
+            if (registerSensors(mDeviceOrientationAbsoluteSensors, rateInMicroseconds, true)) {
+                return true;
+            }
+        }
+
+        mOrientationAbsoluteNotAvailable = true;
+        mDeviceOrientationAbsoluteSensors = null;
+        nullifyRotationStructures();
         return false;
     }
 
@@ -141,7 +170,7 @@ class DeviceSensors implements SensorEventListener {
      * @param rateInMicroseconds Requested callback rate in microseconds. The
      *            actual rate may be higher. Unwanted events should be ignored.
      * @param eventType Type of event to listen to, can be either DEVICE_ORIENTATION,
-     *            DEVICE_ORIENTATION_ABSOLUTE, DEVICE_MOTION or DEVICE_LIGHT.
+     *            DEVICE_ORIENTATION_ABSOLUTE or DEVICE_MOTION.
      * @return True on success.
      */
     @CalledByNative
@@ -153,16 +182,11 @@ class DeviceSensors implements SensorEventListener {
                     success = registerOrientationSensorsWithFallback(rateInMicroseconds);
                     break;
                 case ConsumerType.ORIENTATION_ABSOLUTE:
-                    ensureRotationStructuresAllocated();
-                    success = registerSensors(
-                            DEVICE_ORIENTATION_ABSOLUTE_SENSORS, rateInMicroseconds, true);
+                    success = registerOrientationAbsoluteSensorsWithFallback(rateInMicroseconds);
                     break;
                 case ConsumerType.MOTION:
                     // note: device motion spec does not require all sensors to be available
                     success = registerSensors(DEVICE_MOTION_SENSORS, rateInMicroseconds, false);
-                    break;
-                case ConsumerType.LIGHT:
-                    success = registerSensors(DEVICE_LIGHT_SENSORS, rateInMicroseconds, true);
                     break;
                 default:
                     Log.e(TAG, "Unknown event type: %d", eventType);
@@ -207,7 +231,7 @@ class DeviceSensors implements SensorEventListener {
      * if they are still in use by a different event type.
      *
      * @param eventType Type of event to listen to, can be either DEVICE_ORIENTATION or
-     *                  DEVICE_MOTION or DEVICE_LIGHT.
+     *                  DEVICE_MOTION.
      * We strictly guarantee that the corresponding native*() methods will not be called
      * after this method returns.
      */
@@ -222,15 +246,11 @@ class DeviceSensors implements SensorEventListener {
 
             if (mDeviceOrientationAbsoluteIsActive
                     && eventType != ConsumerType.ORIENTATION_ABSOLUTE) {
-                sensorsToRemainActive.addAll(DEVICE_ORIENTATION_ABSOLUTE_SENSORS);
+                sensorsToRemainActive.addAll(mDeviceOrientationAbsoluteSensors);
             }
 
             if (mDeviceMotionIsActive && eventType != ConsumerType.MOTION) {
                 sensorsToRemainActive.addAll(DEVICE_MOTION_SENSORS);
-            }
-
-            if (mDeviceLightIsActive && eventType != ConsumerType.LIGHT) {
-                sensorsToRemainActive.addAll(DEVICE_LIGHT_SENSORS);
             }
 
             Set<Integer> sensorsToDeactivate = new HashSet<Integer>(mActiveSensors);
@@ -260,7 +280,8 @@ class DeviceSensors implements SensorEventListener {
                 if (mDeviceMotionIsActive) {
                     gotAccelerationIncludingGravity(values[0], values[1], values[2]);
                 }
-                if (mDeviceOrientationIsActiveWithBackupSensors) {
+                if (mDeviceOrientationIsActiveWithBackupSensors
+                        || mDeviceOrientationAbsoluteIsActiveWithBackupSensors) {
                     getOrientationFromGeomagneticVectors(values, mMagneticFieldVector);
                 }
                 break;
@@ -275,14 +296,18 @@ class DeviceSensors implements SensorEventListener {
                 }
                 break;
             case Sensor.TYPE_ROTATION_VECTOR:
-                if (mDeviceOrientationAbsoluteIsActive) {
+                boolean anglesComputed = false;
+                if (mDeviceOrientationAbsoluteIsActive
+                        && mDeviceOrientationAbsoluteSensors
+                                == DEVICE_ORIENTATION_ABSOLUTE_SENSORS_A) {
                     convertRotationVectorToAngles(values, mRotationAngles);
+                    anglesComputed = true;
                     gotOrientationAbsolute(
                             mRotationAngles[0], mRotationAngles[1], mRotationAngles[2]);
                 }
                 if (mDeviceOrientationIsActive
                         && mDeviceOrientationSensors == DEVICE_ORIENTATION_SENSORS_B) {
-                    if (!mDeviceOrientationAbsoluteIsActive) {
+                    if (!anglesComputed) {
                         // only compute if not already computed for absolute orientation above.
                         convertRotationVectorToAngles(values, mRotationAngles);
                     }
@@ -296,17 +321,13 @@ class DeviceSensors implements SensorEventListener {
                 }
                 break;
             case Sensor.TYPE_MAGNETIC_FIELD:
-                if (mDeviceOrientationIsActiveWithBackupSensors) {
+                if (mDeviceOrientationIsActiveWithBackupSensors
+                        || mDeviceOrientationAbsoluteIsActiveWithBackupSensors) {
                     if (mMagneticFieldVector == null) {
                         mMagneticFieldVector = new float[3];
                     }
                     System.arraycopy(
                             values, 0, mMagneticFieldVector, 0, mMagneticFieldVector.length);
-                }
-                break;
-            case Sensor.TYPE_LIGHT:
-                if (mDeviceLightIsActive) {
-                    gotLight(values[0]);
                 }
                 break;
             default:
@@ -430,8 +451,15 @@ class DeviceSensors implements SensorEventListener {
         }
         computeDeviceOrientationFromRotationMatrix(mDeviceRotationMatrix, mRotationAngles);
 
-        gotOrientation(Math.toDegrees(mRotationAngles[0]), Math.toDegrees(mRotationAngles[1]),
-                Math.toDegrees(mRotationAngles[2]));
+        double alpha = Math.toDegrees(mRotationAngles[0]);
+        double beta = Math.toDegrees(mRotationAngles[1]);
+        double gamma = Math.toDegrees(mRotationAngles[2]);
+        if (mDeviceOrientationIsActiveWithBackupSensors) {
+            gotOrientation(alpha, beta, gamma);
+        }
+        if (mDeviceOrientationAbsoluteIsActiveWithBackupSensors) {
+            gotOrientationAbsolute(alpha, beta, gamma);
+        }
     }
 
     private SensorManagerProxy getSensorManagerProxy() {
@@ -441,7 +469,8 @@ class DeviceSensors implements SensorEventListener {
 
         ThreadUtils.assertOnUiThread();
         SensorManager sensorManager =
-                (SensorManager) mAppContext.getSystemService(Context.SENSOR_SERVICE);
+                (SensorManager) ContextUtils.getApplicationContext().getSystemService(
+                        Context.SENSOR_SERVICE);
 
         if (sensorManager != null) {
             mSensorManagerProxy = new SensorManagerProxyImpl(sensorManager);
@@ -463,12 +492,12 @@ class DeviceSensors implements SensorEventListener {
                 return;
             case ConsumerType.ORIENTATION_ABSOLUTE:
                 mDeviceOrientationAbsoluteIsActive = active;
+                mDeviceOrientationAbsoluteIsActiveWithBackupSensors = active
+                        && (mDeviceOrientationAbsoluteSensors
+                                   == DEVICE_ORIENTATION_ABSOLUTE_SENSORS_B);
                 return;
             case ConsumerType.MOTION:
                 mDeviceMotionIsActive = active;
-                return;
-            case ConsumerType.LIGHT:
-                mDeviceLightIsActive = active;
                 return;
         }
     }
@@ -483,6 +512,12 @@ class DeviceSensors implements SensorEventListener {
         if (mTruncatedRotationVector == null) {
             mTruncatedRotationVector = new float[4];
         }
+    }
+
+    private void nullifyRotationStructures() {
+        mDeviceRotationMatrix = null;
+        mRotationAngles = null;
+        mTruncatedRotationVector = null;
     }
 
     /**
@@ -571,14 +606,6 @@ class DeviceSensors implements SensorEventListener {
         }
     }
 
-    protected void gotLight(double value) {
-        synchronized (mNativePtrLock) {
-            if (mNativePtr != 0) {
-                nativeGotLight(mNativePtr, value);
-            }
-        }
-    }
-
     private Handler getHandler() {
         // TODO(timvolodine): Remove the mHandlerLock when sure that getHandler is not called
         // from multiple threads. This will be the case when device motion and device orientation
@@ -594,13 +621,8 @@ class DeviceSensors implements SensorEventListener {
     }
 
     @CalledByNative
-    static DeviceSensors getInstance(Context appContext) {
-        synchronized (sSingletonLock) {
-            if (sSingleton == null) {
-                sSingleton = new DeviceSensors(appContext);
-            }
-            return sSingleton;
-        }
+    static DeviceSensors create() {
+        return new DeviceSensors();
     }
 
     /**
@@ -637,11 +659,6 @@ class DeviceSensors implements SensorEventListener {
      */
     private native void nativeGotRotationRate(
             long nativeSensorManagerAndroid, double alpha, double beta, double gamma);
-
-    /**
-     * Device Light value from Ambient Light sensors.
-     */
-    private native void nativeGotLight(long nativeSensorManagerAndroid, double value);
 
     /**
      * Need the an interface for SensorManager for testing.

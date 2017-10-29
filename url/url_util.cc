@@ -81,6 +81,10 @@ const char* kWebStorageSchemes[] = {
   kWssScheme,
 };
 
+const char* kEmptyDocumentSchemes[] = {
+    kAboutScheme,
+};
+
 bool initialized = false;
 
 // Lists of the currently installed standard and referrer schemes. These lists
@@ -96,6 +100,7 @@ std::vector<std::string>* no_access_schemes = nullptr;
 std::vector<std::string>* cors_enabled_schemes = nullptr;
 std::vector<std::string>* web_storage_schemes = nullptr;
 std::vector<std::string>* csp_bypassing_schemes = nullptr;
+std::vector<std::string>* empty_document_schemes = nullptr;
 
 // See the LockSchemeRegistries declaration in the header.
 bool scheme_registries_locked = false;
@@ -180,8 +185,8 @@ bool DoFindAndCompareScheme(const CHAR* str,
   // This matches the canonicalization done in DoCanonicalize function.
   RawCanonOutputT<CHAR> whitespace_buffer;
   int spec_len;
-  const CHAR* spec = RemoveURLWhitespace(str, str_len,
-                                         &whitespace_buffer, &spec_len);
+  const CHAR* spec =
+      RemoveURLWhitespace(str, str_len, &whitespace_buffer, &spec_len, nullptr);
 
   Component our_scheme;
   if (!ExtractScheme(spec, spec_len, &our_scheme)) {
@@ -209,11 +214,8 @@ bool DoCanonicalize(const CHAR* spec,
   // Possibly this will result in copying to the new buffer.
   RawCanonOutputT<CHAR> whitespace_buffer;
   if (whitespace_policy == REMOVE_WHITESPACE) {
-    int original_len = spec_len;
-    spec =
-        RemoveURLWhitespace(spec, original_len, &whitespace_buffer, &spec_len);
-    if (spec_len != original_len)
-      output_parsed->whitespace_removed = true;
+    spec = RemoveURLWhitespace(spec, spec_len, &whitespace_buffer, &spec_len,
+                               &output_parsed->potentially_dangling_markup);
   }
 
   Parsed parsed_input;
@@ -291,11 +293,9 @@ bool DoResolveRelative(const char* base_spec,
   // copying to the new buffer.
   RawCanonOutputT<CHAR> whitespace_buffer;
   int relative_length;
-  const CHAR* relative = RemoveURLWhitespace(in_relative, in_relative_length,
-                                             &whitespace_buffer,
-                                             &relative_length);
-  if (in_relative_length != relative_length)
-    output_parsed->whitespace_removed = true;
+  const CHAR* relative = RemoveURLWhitespace(
+      in_relative, in_relative_length, &whitespace_buffer, &relative_length,
+      &output_parsed->potentially_dangling_markup);
 
   bool base_is_authority_based = false;
   bool base_is_hierarchical = false;
@@ -525,6 +525,8 @@ void Initialize() {
   InitSchemes(&web_storage_schemes, kWebStorageSchemes,
               arraysize(kWebStorageSchemes));
   InitSchemes(&csp_bypassing_schemes, nullptr, 0);
+  InitSchemes(&empty_document_schemes, kEmptyDocumentSchemes,
+              arraysize(kEmptyDocumentSchemes));
   initialized = true;
 }
 
@@ -546,6 +548,8 @@ void Shutdown() {
   web_storage_schemes = nullptr;
   delete csp_bypassing_schemes;
   csp_bypassing_schemes = nullptr;
+  delete empty_document_schemes;
+  empty_document_schemes = nullptr;
 }
 
 void AddStandardScheme(const char* new_scheme, SchemeType type) {
@@ -616,6 +620,16 @@ void AddCSPBypassingScheme(const char* new_scheme) {
 const std::vector<std::string>& GetCSPBypassingSchemes() {
   Initialize();
   return *csp_bypassing_schemes;
+}
+
+void AddEmptyDocumentScheme(const char* new_scheme) {
+  Initialize();
+  DoAddScheme(new_scheme, empty_document_schemes);
+}
+
+const std::vector<std::string>& GetEmptyDocumentSchemes() {
+  Initialize();
+  return *empty_document_schemes;
 }
 
 void LockSchemeRegistries() {

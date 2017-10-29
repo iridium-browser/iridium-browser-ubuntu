@@ -9,7 +9,6 @@
 #include "base/debug/crash_logging.h"
 #include "base/environment.h"
 #include "base/files/file_util.h"
-#include "base/lazy_instance.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -26,13 +25,6 @@
 namespace crash_reporter {
 namespace internal {
 
-namespace {
-
-base::LazyInstance<crashpad::CrashpadClient>::Leaky g_crashpad_client =
-    LAZY_INSTANCE_INITIALIZER;
-
-}  // namespace
-
 void GetPlatformCrashpadAnnotations(
     std::map<std::string, std::string>* annotations) {
   CrashReporterClient* crash_reporter_client = GetCrashReporterClient();
@@ -43,7 +35,14 @@ void GetPlatformCrashpadAnnotations(
       exe_file, &product_name, &version, &special_build, &channel_name);
   (*annotations)["prod"] = base::UTF16ToUTF8(product_name);
   (*annotations)["ver"] = base::UTF16ToUTF8(version);
-  (*annotations)["channel"] = base::UTF16ToUTF8(channel_name);
+#if defined(GOOGLE_CHROME_BUILD)
+  // Empty means stable.
+  const bool allow_empty_channel = true;
+#else
+  const bool allow_empty_channel = false;
+#endif
+  if (allow_empty_channel || !channel_name.empty())
+    (*annotations)["channel"] = base::UTF16ToUTF8(channel_name);
   if (!special_build.empty())
     (*annotations)["special"] = base::UTF16ToUTF8(special_build);
 #if defined(ARCH_CPU_X86)
@@ -104,65 +103,62 @@ base::FilePath PlatformCrashpadInitialization(bool initial_client,
     // If the handler is embedded in the binary (e.g. chrome, setup), we
     // reinvoke it with --type=crashpad-handler. Otherwise, we use the
     // standalone crashpad_handler.exe (for tests, etc.).
-    std::vector<std::string> arguments;
+    std::vector<std::string> start_arguments;
     if (embedded_handler) {
-      arguments.push_back(std::string("--type=") + switches::kCrashpadHandler);
+      start_arguments.push_back(std::string("--type=") +
+                                switches::kCrashpadHandler);
       // The prefetch argument added here has to be documented in
       // chrome_switches.cc, below the kPrefetchArgument* constants. A constant
       // can't be used here because crashpad can't depend on Chrome.
-      arguments.push_back("/prefetch:7");
+      start_arguments.push_back("/prefetch:7");
     } else {
       base::FilePath exe_dir = exe_file.DirName();
       exe_file = exe_dir.Append(FILE_PATH_LITERAL("crashpad_handler.exe"));
     }
 
-    g_crashpad_client.Get().StartHandler(
-        exe_file, database_path, metrics_path, url, process_annotations,
-        arguments, false, false);
+    std::vector<std::string> arguments(start_arguments);
+
+    if (crash_reporter_client->ShouldMonitorCrashHandlerExpensively()) {
+      arguments.push_back("--monitor-self");
+      for (const std::string& start_argument : start_arguments) {
+        arguments.push_back(std::string("--monitor-self-argument=") +
+                            start_argument);
+      }
+    }
+
+    // Set up --monitor-self-annotation even in the absence of --monitor-self so
+    // that minidumps produced by Crashpad's generate_dump tool will contain
+    // these annotations.
+    arguments.push_back(std::string("--monitor-self-annotation=ptype=") +
+                        switches::kCrashpadHandler);
+
+    GetCrashpadClient().StartHandler(exe_file, database_path, metrics_path, url,
+                                     process_annotations, arguments, false,
+                                     false);
 
     // If we're the browser, push the pipe name into the environment so child
     // processes can connect to it. If we inherited another crashpad_handler's
     // pipe name, we'll overwrite it here.
     env->SetVar(kPipeNameVar,
-                base::UTF16ToUTF8(g_crashpad_client.Get().GetHandlerIPCPipe()));
+                base::UTF16ToUTF8(GetCrashpadClient().GetHandlerIPCPipe()));
   } else {
     std::string pipe_name_utf8;
     if (env->GetVar(kPipeNameVar, &pipe_name_utf8)) {
-      g_crashpad_client.Get().SetHandlerIPCPipe(
-          base::UTF8ToUTF16(pipe_name_utf8));
+      GetCrashpadClient().SetHandlerIPCPipe(base::UTF8ToUTF16(pipe_name_utf8));
     }
   }
 
   return database_path;
 }
 
-// TODO(scottmg): http://crbug.com/546288 These exported functions are for
-// compatibility with how Breakpad worked, but it seems like there's no need to
-// do the CreateRemoteThread() dance with a minor extension of the Crashpad API
-// (to just pass the pid we want a dump for). We should add that and then modify
-// hang_crash_dump_win.cc to work in a more direct manner.
-
-// Used for dumping a process state when there is no crash.
-extern "C" void __declspec(dllexport) __cdecl DumpProcessWithoutCrash() {
-  CRASHPAD_SIMULATE_CRASH();
-}
-
 namespace {
 
-// We need to prevent ICF from folding DumpForHangDebuggingThread(),
-// DumpProcessForHungInputThread(), DumpProcessForHungInputNoCrashKeysThread()
-// and DumpProcessWithoutCrashThread() together, since that makes them
+// We need to prevent ICF from folding DumpProcessForHungInputThread(),
+// DumpProcessForHungInputNoCrashKeysThread() together, since that makes them
 // indistinguishable in crash dumps. We do this by making the function
 // bodies unique, and prevent optimization from shuffling things around.
 MSVC_DISABLE_OPTIMIZE()
 MSVC_PUSH_DISABLE_WARNING(4748)
-
-// Note that this function must be in a namespace for the [Renderer hang]
-// annotations to work on the crash server.
-DWORD WINAPI DumpProcessWithoutCrashThread(void*) {
-  DumpProcessWithoutCrash();
-  return 0;
-}
 
 // TODO(dtapuska): Remove when enough information is gathered where the crash
 // reports without crash keys come from.
@@ -175,7 +171,7 @@ DWORD WINAPI DumpProcessForHungInputThread(void* crash_keys_str) {
       base::debug::SetCrashKeyValue(crash_key.first, crash_key.second);
     }
   }
-  DumpProcessWithoutCrash();
+  DumpWithoutCrashing();
   return 0;
 }
 
@@ -188,15 +184,7 @@ DWORD WINAPI DumpProcessForHungInputNoCrashKeysThread(void* reason) {
       "hung-reason", base::IntToString(reinterpret_cast<int>(reason)));
 #pragma warning(pop)
 
-  DumpProcessWithoutCrash();
-  return 0;
-}
-
-// TODO(yzshen): Remove when enough information is collected and the hang rate
-// of pepper/renderer processes is reduced.
-DWORD WINAPI DumpForHangDebuggingThread(void*) {
-  DumpProcessWithoutCrash();
-  VLOG(1) << "dumped for hang debugging";
+  DumpWithoutCrashing();
   return 0;
 }
 
@@ -218,17 +206,8 @@ extern "C" {
 // releases of Chrome. Please contact syzygy-team@chromium.org before doing so!
 int __declspec(dllexport) CrashForException(
     EXCEPTION_POINTERS* info) {
-  crash_reporter::internal::g_crashpad_client.Get().DumpAndCrash(info);
+  crash_reporter::GetCrashpadClient().DumpAndCrash(info);
   return EXCEPTION_CONTINUE_SEARCH;
-}
-
-// Injects a thread into a remote process to dump state when there is no crash.
-HANDLE __declspec(dllexport) __cdecl InjectDumpProcessWithoutCrash(
-    HANDLE process) {
-  return CreateRemoteThread(
-      process, nullptr, 0,
-      crash_reporter::internal::DumpProcessWithoutCrashThread, nullptr, 0,
-      nullptr);
 }
 
 // Injects a thread into a remote process to dump state when there is no crash.
@@ -255,13 +234,6 @@ HANDLE __declspec(dllexport) __cdecl InjectDumpForHungInputNoCrashKeys(
       process, nullptr, 0,
       crash_reporter::internal::DumpProcessForHungInputNoCrashKeysThread,
       reinterpret_cast<void*>(reason), 0, nullptr);
-}
-
-HANDLE __declspec(dllexport) __cdecl InjectDumpForHangDebugging(
-    HANDLE process) {
-  return CreateRemoteThread(
-      process, nullptr, 0, crash_reporter::internal::DumpForHangDebuggingThread,
-      0, 0, nullptr);
 }
 
 #if defined(ARCH_CPU_X86_64)

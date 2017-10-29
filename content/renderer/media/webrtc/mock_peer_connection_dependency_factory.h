@@ -11,6 +11,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "content/renderer/media/webrtc/peer_connection_dependency_factory.h"
 #include "third_party/webrtc/api/mediaconstraintsinterface.h"
 #include "third_party/webrtc/api/mediastreaminterface.h"
@@ -124,7 +125,7 @@ class MockPeerConnectionDependencyFactory
 
   scoped_refptr<webrtc::PeerConnectionInterface> CreatePeerConnection(
       const webrtc::PeerConnectionInterface::RTCConfiguration& config,
-      blink::WebFrame* frame,
+      blink::WebLocalFrame* frame,
       webrtc::PeerConnectionObserver* observer) override;
   scoped_refptr<webrtc::VideoTrackSourceInterface> CreateVideoTrackSourceProxy(
       webrtc::VideoTrackSourceInterface* source) override;

@@ -9,11 +9,12 @@
 #include <stdint.h>
 
 #include <deque>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
-#include "base/process/process.h"
 #include "base/sync_socket.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -39,36 +40,36 @@ class CONTENT_EXPORT AudioInputSyncWriter
   // AudioBuses.
   enum { kMaxOverflowBusesSize = 100 };
 
-  AudioInputSyncWriter(void* shared_memory,
-                       size_t shared_memory_size,
-                       int shared_memory_segment_count,
+  // Create() automatically initializes the AudioInputSyncWriter correctly,
+  // and should be strongly preferred over calling the constructor directly!
+  AudioInputSyncWriter(std::unique_ptr<base::SharedMemory> shared_memory,
+                       std::unique_ptr<base::CancelableSyncSocket> socket,
+                       uint32_t shared_memory_segment_count,
                        const media::AudioParameters& params);
 
   ~AudioInputSyncWriter() override;
+
+  static std::unique_ptr<AudioInputSyncWriter> Create(
+      uint32_t shared_memory_segment_count,
+      const media::AudioParameters& params,
+      base::CancelableSyncSocket* foreign_socket);
+
+  const base::SharedMemory* shared_memory() const {
+    return shared_memory_.get();
+  }
+
+  size_t shared_memory_segment_count() const { return audio_buses_.size(); }
 
   // media::AudioInputController::SyncWriter implementation.
   void Write(const media::AudioBus* data,
              double volume,
              bool key_pressed,
              uint32_t hardware_delay_bytes) override;
+
   void Close() override;
-
-  bool Init();
-  bool PrepareForeignSocket(base::ProcessHandle process_handle,
-                            base::SyncSocket::TransitDescriptor* descriptor);
-
- protected:
-  // Socket for transmitting audio data.
-  std::unique_ptr<base::CancelableSyncSocket> socket_;
 
  private:
   friend class AudioInputSyncWriterTest;
-  FRIEND_TEST_ALL_PREFIXES(AudioInputSyncWriterTest, MultipleWritesAndReads);
-  FRIEND_TEST_ALL_PREFIXES(AudioInputSyncWriterTest, MultipleWritesNoReads);
-  FRIEND_TEST_ALL_PREFIXES(AudioInputSyncWriterTest, FillAndEmptyRingBuffer);
-  FRIEND_TEST_ALL_PREFIXES(AudioInputSyncWriterTest, FillRingBufferAndFifo);
-  FRIEND_TEST_ALL_PREFIXES(AudioInputSyncWriterTest,
-                           MultipleFillAndEmptyRingBufferAndPartOfFifo);
 
   // Called by Write(). Checks the time since last called and if larger than a
   // threshold logs info about that.
@@ -100,14 +101,17 @@ class CONTENT_EXPORT AudioInputSyncWriter
   // false if failure.
   bool SignalDataWrittenAndUpdateCounters();
 
-  uint8_t* shared_memory_;
-  uint32_t shared_memory_segment_size_;
-  uint32_t shared_memory_segment_count_;
-  uint32_t current_segment_id_;
+  // Socket used to signal that audio data is ready.
+  const std::unique_ptr<base::CancelableSyncSocket> socket_;
 
-  // Socket to be used by the renderer. The reference is released after
-  // PrepareForeignSocketHandle() is called and ran successfully.
-  std::unique_ptr<base::CancelableSyncSocket> foreign_socket_;
+  // Shared memory for audio data and associated metadata.
+  const std::unique_ptr<base::SharedMemory> shared_memory_;
+
+  // The size in bytes of a single audio segment in the shared memory.
+  const uint32_t shared_memory_segment_size_;
+
+  // Index of next segment to write.
+  uint32_t current_segment_id_ = 0;
 
   // The time of the creation of this object.
   base::Time creation_time_;
@@ -120,43 +124,47 @@ class CONTENT_EXPORT AudioInputSyncWriter
 
   // Increasing ID used for checking audio buffers are in correct sequence at
   // read side.
-  uint32_t next_buffer_id_;
+  uint32_t next_buffer_id_ = 0;
 
   // Next expected audio buffer index to have been read at the other side. We
   // will get the index read at the other side over the socket. Note that this
   // index does not correspond to |next_buffer_id_|, it's two separate counters.
-  uint32_t next_read_buffer_index_;
+  uint32_t next_read_buffer_index_ = 0;
 
   // Keeps track of number of filled buffer segments in the ring buffer to
   // ensure the we don't overwrite data that hasn't been read yet.
-  int number_of_filled_segments_;
+  size_t number_of_filled_segments_ = 0;
 
   // Counts the total number of calls to Write().
-  size_t write_count_;
+  size_t write_count_ = 0;
 
   // Counts the number of writes to the fifo instead of to the shared memory.
-  size_t write_to_fifo_count_;
+  size_t write_to_fifo_count_ = 0;
 
   // Counts the number of errors that causes data to be dropped, due to either
   // the fifo or the socket buffer being full.
-  size_t write_error_count_;
+  size_t write_error_count_ = 0;
+
+  // Denotes that the most recent socket error has been logged. Used to avoid
+  // log spam.
+  bool had_socket_error_ = false;
 
   // Counts the fifo writes and errors we get during renderer process teardown
   // so that we can account for that (subtract) when we calculate the overall
   // counts.
-  size_t trailing_write_to_fifo_count_;
-  size_t trailing_write_error_count_;
+  size_t trailing_write_to_fifo_count_ = 0;
+  size_t trailing_write_error_count_ = 0;
 
   // Vector of audio buses allocated during construction and deleted in the
   // destructor.
-  ScopedVector<media::AudioBus> audio_buses_;
+  std::vector<std::unique_ptr<media::AudioBus>> audio_buses_;
 
   // Fifo for audio that is used in case there isn't room in the shared memory.
   // This can for example happen under load when the consumer side is starved.
   // It should ideally be rare, but we need to guarantee that the data arrives
   // since audio processing such as echo cancelling requires that to perform
   // properly.
-  ScopedVector<media::AudioBus> overflow_buses_;
+  std::vector<std::unique_ptr<media::AudioBus>> overflow_buses_;
   struct OverflowParams {
     double volume;
     uint32_t hardware_delay_bytes;

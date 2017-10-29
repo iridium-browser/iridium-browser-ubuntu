@@ -6,19 +6,19 @@
 #define PluginScriptForbiddenScope_h
 
 #include "platform/PlatformExport.h"
-#include "wtf/Allocator.h"
-#include "wtf/Noncopyable.h"
+#include "platform/wtf/Allocator.h"
+#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
 // Similar to ScriptForbiddenScope, but more selective. This is intended to help
-// reduce the number of places where Flash can run a nested message loop as its
+// reduce the number of places where Flash can run a nested run loop as its
 // plugin element is being destroyed. One of the reasons that Flash runs this
-// nested message loop is to allow Flash content to synchronously script the
+// nested run loop is to allow Flash content to synchronously script the
 // page when the plugin element is destroyed.
 //
 // This is problematic for many reasons: the DOM may not be in a consistent
-// state, since Blink is in the middle of detaching nodes, nested message loops
+// state, since Blink is in the middle of detaching nodes, nested run loops
 // can cause normally impossible conditions to occur (https://crbug.com/367210),
 // etc.
 //
@@ -35,9 +35,9 @@ namespace blink {
 //
 // Unfortunately, there are still ways for plugins to synchronously script
 // during Document detach: if an unload handler removes a Flash plugin element,
-// that will run the nested message loop, etc. This scoper is intended to block
+// that will run the nested run loop, etc. This scoper is intended to block
 // those usages, with the eventual goal that Frame detach will never have to run
-// a nested message loop.
+// a nested run loop.
 class PLATFORM_EXPORT PluginScriptForbiddenScope final {
   STACK_ALLOCATED();
   WTF_MAKE_NONCOPYABLE(PluginScriptForbiddenScope);
@@ -46,7 +46,7 @@ class PLATFORM_EXPORT PluginScriptForbiddenScope final {
   PluginScriptForbiddenScope();
   ~PluginScriptForbiddenScope();
 
-  static bool isForbidden();
+  static bool IsForbidden();
 };
 
 }  // namespace blink

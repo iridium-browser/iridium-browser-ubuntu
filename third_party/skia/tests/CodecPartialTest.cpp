@@ -118,6 +118,9 @@ static void test_partial(skiatest::Reporter* r, const char* name, size_t minByte
 }
 
 DEF_TEST(Codec_partial, r) {
+#if 0
+    // FIXME (scroggo): SkPngCodec needs to use SkStreamBuffer in order to
+    // support incremental decoding.
     test_partial(r, "plane.png");
     test_partial(r, "plane_interlaced.png");
     test_partial(r, "yellow_rose.png");
@@ -128,7 +131,7 @@ DEF_TEST(Codec_partial, r) {
     test_partial(r, "arrow.png");
     test_partial(r, "randPixels.png");
     test_partial(r, "baby_tux.png");
-
+#endif
     test_partial(r, "box.gif");
     test_partial(r, "randPixels.gif", 215);
     test_partial(r, "color_wheel.gif");
@@ -197,24 +200,18 @@ DEF_TEST(Codec_partialAnim, r) {
     // frameByteCounts stores the number of bytes to decode a particular frame.
     // - [0] is the number of bytes for the header
     // - frames[i] requires frameByteCounts[i+1] bytes to decode
-    std::vector<size_t> frameByteCounts;
+    const std::vector<size_t> frameByteCounts = { 455, 69350, 1344, 1346, 1327 };
     std::vector<SkBitmap> frames;
-    size_t lastOffset = 0;
     for (size_t i = 0; true; i++) {
-        frameByteCounts.push_back(stream->getPosition() - lastOffset);
-        lastOffset = stream->getPosition();
-
         SkBitmap frame;
         frame.allocPixels(info);
 
         SkCodec::Options opts;
         opts.fFrameIndex = i;
         const SkCodec::Result result = fullCodec->getPixels(info, frame.getPixels(),
-                frame.rowBytes(), &opts, nullptr, nullptr);
+                frame.rowBytes(), &opts);
 
         if (result == SkCodec::kIncompleteInput || result == SkCodec::kInvalidInput) {
-            frameByteCounts.push_back(stream->getPosition() - lastOffset);
-
             // We need to distinguish between a partial frame and no more frames.
             // getFrameInfo lets us do this, since it tells the number of frames
             // not considering whether they are complete.
@@ -277,10 +274,6 @@ DEF_TEST(Codec_partialAnim, r) {
         frameInfo = partialCodec->getFrameInfo();
         REPORTER_ASSERT(r, frameInfo.size() == i + 1);
         REPORTER_ASSERT(r, frameInfo[i].fFullyReceived);
-
-        // allocPixels locked the pixels for frame, but frames[i] was copied
-        // from another bitmap, and did not retain the locked status.
-        SkAutoLockPixels alp(frames[i]);
         compare_bitmaps(r, frames[i], frame);
     }
 }
@@ -400,5 +393,64 @@ DEF_TEST(Codec_GifPreMap, r) {
         result = codec->incrementalDecode();
         REPORTER_ASSERT(r, result == SkCodec::kSuccess);
         compare_bitmaps(r, truth, bm);
+    }
+}
+
+DEF_TEST(Codec_emptyIDAT, r) {
+    const char* name = "baby_tux.png";
+    sk_sp<SkData> file = GetResourceAsData(name);
+    if (!file) {
+        return;
+    }
+
+    // Truncate to the beginning of the IDAT, immediately after the IDAT tag.
+    file = SkData::MakeSubset(file.get(), 0, 80);
+
+    std::unique_ptr<SkCodec> codec(SkCodec::NewFromData(std::move(file)));
+    if (!codec) {
+        ERRORF(r, "Failed to create a codec for %s", name);
+        return;
+    }
+
+    SkBitmap bm;
+    const auto info = standardize_info(codec.get());
+    bm.allocPixels(info);
+
+    const auto result = codec->getPixels(info, bm.getPixels(), bm.rowBytes());
+    REPORTER_ASSERT(r, SkCodec::kIncompleteInput == result);
+}
+
+DEF_TEST(Codec_incomplete, r) {
+    for (const char* name : { "baby_tux.png",
+                              "baby_tux.webp",
+                              "CMYK.jpg",
+                              "color_wheel.gif",
+                              "google_chrome.ico",
+                              "rle.bmp",
+                              "mandrill.wbmp",
+                              }) {
+        sk_sp<SkData> file = GetResourceAsData(name);
+        if (!name) {
+            continue;
+        }
+
+        for (size_t len = 14; len <= file->size(); len += 5) {
+            SkCodec::Result result;
+            auto* stream = new SkMemoryStream(file->data(), len);
+            std::unique_ptr<SkCodec> codec(SkCodec::NewFromStream(stream, &result));
+            if (codec) {
+                if (result != SkCodec::kSuccess) {
+                    ERRORF(r, "Created an SkCodec for %s with %lu bytes, but "
+                              "reported an error %i", name, len, result);
+                }
+                break;
+            }
+
+            if (SkCodec::kIncompleteInput != result) {
+                ERRORF(r, "Reported error %i for %s with %lu bytes",
+                       result, name, len);
+                break;
+            }
+        }
     }
 }

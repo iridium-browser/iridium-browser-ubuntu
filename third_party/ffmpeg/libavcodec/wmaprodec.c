@@ -323,9 +323,6 @@ static av_cold int decode_init(WMAProDecodeCtx *s, AVCodecContext *avctx)
     }
 
     s->avctx = avctx;
-    s->fdsp = avpriv_float_dsp_alloc(avctx->flags & AV_CODEC_FLAG_BITEXACT);
-    if (!s->fdsp)
-        return AVERROR(ENOMEM);
 
     init_put_bits(&s->pb, s->frame_data, MAX_FRAMESIZE);
 
@@ -523,6 +520,10 @@ static av_cold int decode_init(WMAProDecodeCtx *s, AVCodecContext *avctx)
         }
     }
 
+    s->fdsp = avpriv_float_dsp_alloc(avctx->flags & AV_CODEC_FLAG_BITEXACT);
+    if (!s->fdsp)
+        return AVERROR(ENOMEM);
+
     /** init MDCT, FIXME: only init needed sizes */
     for (i = 0; i < WMAPRO_BLOCK_SIZES; i++)
         ff_mdct_init(&s->mdct_ctx[i], WMAPRO_BLOCK_MIN_BITS+1+i, 1,
@@ -700,7 +701,7 @@ static int decode_tilehdr(WMAProDecodeCtx *s)
         int i;
         int offset = 0;
         for (i = 0; i < s->channel[c].num_subframes; i++) {
-            ff_dlog(s->avctx, "frame[%i] channel[%i] subframe[%i]"
+            ff_dlog(s->avctx, "frame[%"PRIu32"] channel[%i] subframe[%i]"
                     " len %i\n", s->frame_num, c, i,
                     s->channel[c].subframe_len[i]);
             s->channel[c].subframe_offset[i] = offset;
@@ -1759,6 +1760,10 @@ static int xma_decode_packet(AVCodecContext *avctx, void *data,
             memcpy(&s->samples[s->current_stream * 2 + 1][s->offset[s->current_stream] * 512],
                    s->frames[s->current_stream]->extended_data[1], 512 * 4);
         s->offset[s->current_stream]++;
+    } else if (ret < 0) {
+        memset(s->offset, 0, sizeof(s->offset));
+        s->current_stream = 0;
+        return ret;
     }
 
     if (s->xma[s->current_stream].packet_done ||

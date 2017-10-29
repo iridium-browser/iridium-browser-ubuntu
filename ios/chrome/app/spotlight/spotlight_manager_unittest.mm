@@ -67,7 +67,8 @@ class SpotlightManagerTest : public testing::Test {
   SpotlightManagerTest() {
     model_ = bookmarks::TestBookmarkClient::CreateModel();
     large_icon_service_.reset(new favicon::LargeIconService(
-        &mock_favicon_service_, base::ThreadTaskRunnerHandle::Get()));
+        &mock_favicon_service_, base::ThreadTaskRunnerHandle::Get(),
+        /*image_fetcher=*/nullptr));
     bookmarksSpotlightManager_ = [[BookmarksSpotlightManager alloc]
         initWithLargeIconService:large_icon_service_.get()
                    bookmarkModel:model_.get()];
@@ -76,6 +77,8 @@ class SpotlightManagerTest : public testing::Test {
                 GetLargestRawFaviconForPageURL(_, _, _, _, _))
         .WillRepeatedly(PostReply<5>(CreateTestBitmap(24, 24)));
   }
+
+  ~SpotlightManagerTest() override { [bookmarksSpotlightManager_ shutdown]; }
 
   base::MessageLoop loop_;
   testing::StrictMock<favicon::MockFaviconService> mock_favicon_service_;

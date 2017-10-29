@@ -77,21 +77,21 @@ class IconImage : public content::NotificationObserver {
   gfx::Image image() const { return image_; }
   const gfx::ImageSkia& image_skia() const { return image_skia_; }
 
+  // Returns true if the icon is attached to an existing extension.
+  bool is_valid() const { return extension_ ? true : false; }
+
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
  private:
   class Source;
 
-  // Loads an image representation for the scale factor.
-  // If the representation gets loaded synchronously, it is returned by this
-  // method.
-  // If representation loading is asynchronous, an empty image
-  // representation is returned. When the representation gets loaded the
-  // observers' OnExtensionIconImageLoaded() will be called.
-  gfx::ImageSkiaRep LoadImageForScale(float scale);
+  // Loads an image representation for the scale factor asynchronously. Result
+  // is passed to OnImageRepLoaded.
+  void LoadImageForScaleAsync(float scale);
 
   void OnImageLoaded(float scale, const gfx::Image& image);
+  void OnImageRepLoaded(const gfx::ImageSkiaRep& rep);
 
   // content::NotificationObserver overrides:
   void Observe(int type,

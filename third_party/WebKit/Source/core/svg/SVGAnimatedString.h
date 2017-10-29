@@ -31,9 +31,9 @@
 #ifndef SVGAnimatedString_h
 #define SVGAnimatedString_h
 
-#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/svg/SVGString.h"
 #include "core/svg/properties/SVGAnimatedProperty.h"
+#include "platform/bindings/ScriptWrappable.h"
 
 namespace blink {
 
@@ -42,9 +42,9 @@ class SVGAnimatedString : public SVGAnimatedProperty<SVGString>,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGAnimatedString* create(SVGElement* contextElement,
-                                   const QualifiedName& attributeName) {
-    return new SVGAnimatedString(contextElement, attributeName);
+  static SVGAnimatedString* Create(SVGElement* context_element,
+                                   const QualifiedName& attribute_name) {
+    return new SVGAnimatedString(context_element, attribute_name);
   }
 
   virtual String baseVal();
@@ -54,11 +54,11 @@ class SVGAnimatedString : public SVGAnimatedProperty<SVGString>,
   DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
  protected:
-  SVGAnimatedString(SVGElement* contextElement,
-                    const QualifiedName& attributeName)
-      : SVGAnimatedProperty<SVGString>(contextElement,
-                                       attributeName,
-                                       SVGString::create()) {}
+  SVGAnimatedString(SVGElement* context_element,
+                    const QualifiedName& attribute_name)
+      : SVGAnimatedProperty<SVGString>(context_element,
+                                       attribute_name,
+                                       SVGString::Create()) {}
 };
 
 }  // namespace blink

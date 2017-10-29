@@ -6,20 +6,20 @@
 
 namespace blink {
 
-ExtendableMessageEvent* ExtendableMessageEvent::create(
+ExtendableMessageEvent* ExtendableMessageEvent::Create(
     const AtomicString& type,
     const ExtendableMessageEventInit& initializer) {
   return new ExtendableMessageEvent(type, initializer);
 }
 
-ExtendableMessageEvent* ExtendableMessageEvent::create(
+ExtendableMessageEvent* ExtendableMessageEvent::Create(
     const AtomicString& type,
     const ExtendableMessageEventInit& initializer,
     WaitUntilObserver* observer) {
   return new ExtendableMessageEvent(type, initializer, observer);
 }
 
-ExtendableMessageEvent* ExtendableMessageEvent::create(
+ExtendableMessageEvent* ExtendableMessageEvent::Create(
     PassRefPtr<SerializedScriptValue> data,
     const String& origin,
     MessagePortArray* ports,
@@ -27,7 +27,7 @@ ExtendableMessageEvent* ExtendableMessageEvent::create(
   return new ExtendableMessageEvent(std::move(data), origin, ports, observer);
 }
 
-ExtendableMessageEvent* ExtendableMessageEvent::create(
+ExtendableMessageEvent* ExtendableMessageEvent::Create(
     PassRefPtr<SerializedScriptValue> data,
     const String& origin,
     MessagePortArray* ports,
@@ -35,11 +35,11 @@ ExtendableMessageEvent* ExtendableMessageEvent::create(
     WaitUntilObserver* observer) {
   ExtendableMessageEvent* event =
       new ExtendableMessageEvent(std::move(data), origin, ports, observer);
-  event->m_sourceAsClient = source;
+  event->source_as_client_ = source;
   return event;
 }
 
-ExtendableMessageEvent* ExtendableMessageEvent::create(
+ExtendableMessageEvent* ExtendableMessageEvent::Create(
     PassRefPtr<SerializedScriptValue> data,
     const String& origin,
     MessagePortArray* ports,
@@ -47,52 +47,45 @@ ExtendableMessageEvent* ExtendableMessageEvent::create(
     WaitUntilObserver* observer) {
   ExtendableMessageEvent* event =
       new ExtendableMessageEvent(std::move(data), origin, ports, observer);
-  event->m_sourceAsServiceWorker = source;
+  event->source_as_service_worker_ = source;
   return event;
 }
 
-MessagePortArray ExtendableMessageEvent::ports(bool& isNull) const {
+MessagePortArray ExtendableMessageEvent::ports() const {
   // TODO(bashi): Currently we return a copied array because the binding
   // layer could modify the content of the array while executing JS callbacks.
   // Avoid copying once we can make sure that the binding layer won't
   // modify the content.
-  if (m_ports) {
-    isNull = false;
-    return *m_ports;
+  if (ports_) {
+    return *ports_;
   }
-  isNull = true;
   return MessagePortArray();
-}
-
-MessagePortArray ExtendableMessageEvent::ports() const {
-  bool unused;
-  return ports(unused);
 }
 
 void ExtendableMessageEvent::source(
     ClientOrServiceWorkerOrMessagePort& result) const {
-  if (m_sourceAsClient)
-    result = ClientOrServiceWorkerOrMessagePort::fromClient(m_sourceAsClient);
-  else if (m_sourceAsServiceWorker)
+  if (source_as_client_)
+    result = ClientOrServiceWorkerOrMessagePort::fromClient(source_as_client_);
+  else if (source_as_service_worker_)
     result = ClientOrServiceWorkerOrMessagePort::fromServiceWorker(
-        m_sourceAsServiceWorker);
-  else if (m_sourceAsMessagePort)
+        source_as_service_worker_);
+  else if (source_as_message_port_)
     result = ClientOrServiceWorkerOrMessagePort::fromMessagePort(
-        m_sourceAsMessagePort);
+        source_as_message_port_);
   else
     result = ClientOrServiceWorkerOrMessagePort();
 }
 
-const AtomicString& ExtendableMessageEvent::interfaceName() const {
+const AtomicString& ExtendableMessageEvent::InterfaceName() const {
   return EventNames::ExtendableMessageEvent;
 }
 
 DEFINE_TRACE(ExtendableMessageEvent) {
-  visitor->trace(m_sourceAsClient);
-  visitor->trace(m_sourceAsServiceWorker);
-  visitor->trace(m_sourceAsMessagePort);
-  visitor->trace(m_ports);
-  ExtendableEvent::trace(visitor);
+  visitor->Trace(source_as_client_);
+  visitor->Trace(source_as_service_worker_);
+  visitor->Trace(source_as_message_port_);
+  visitor->Trace(ports_);
+  ExtendableEvent::Trace(visitor);
 }
 
 ExtendableMessageEvent::ExtendableMessageEvent(
@@ -106,19 +99,19 @@ ExtendableMessageEvent::ExtendableMessageEvent(
     WaitUntilObserver* observer)
     : ExtendableEvent(type, initializer, observer) {
   if (initializer.hasOrigin())
-    m_origin = initializer.origin();
+    origin_ = initializer.origin();
   if (initializer.hasLastEventId())
-    m_lastEventId = initializer.lastEventId();
+    last_event_id_ = initializer.lastEventId();
   if (initializer.hasSource()) {
     if (initializer.source().isClient())
-      m_sourceAsClient = initializer.source().getAsClient();
+      source_as_client_ = initializer.source().getAsClient();
     else if (initializer.source().isServiceWorker())
-      m_sourceAsServiceWorker = initializer.source().getAsServiceWorker();
+      source_as_service_worker_ = initializer.source().getAsServiceWorker();
     else if (initializer.source().isMessagePort())
-      m_sourceAsMessagePort = initializer.source().getAsMessagePort();
+      source_as_message_port_ = initializer.source().getAsMessagePort();
   }
   if (initializer.hasPorts())
-    m_ports = new MessagePortArray(initializer.ports());
+    ports_ = new MessagePortArray(initializer.ports());
 }
 
 ExtendableMessageEvent::ExtendableMessageEvent(
@@ -129,12 +122,12 @@ ExtendableMessageEvent::ExtendableMessageEvent(
     : ExtendableEvent(EventTypeNames::message,
                       ExtendableMessageEventInit(),
                       observer),
-      m_serializedData(data),
-      m_origin(origin),
-      m_lastEventId(String()),
-      m_ports(ports) {
-  if (m_serializedData)
-    m_serializedData->registerMemoryAllocatedWithCurrentScriptContext();
+      serialized_data_(std::move(data)),
+      origin_(origin),
+      last_event_id_(String()),
+      ports_(ports) {
+  if (serialized_data_)
+    serialized_data_->RegisterMemoryAllocatedWithCurrentScriptContext();
 }
 
 }  // namespace blink

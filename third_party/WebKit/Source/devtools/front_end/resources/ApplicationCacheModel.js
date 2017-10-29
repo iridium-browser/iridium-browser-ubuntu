@@ -40,7 +40,7 @@ Resources.ApplicationCacheModel = class extends SDK.SDKModel {
     this._agent = target.applicationCacheAgent();
     this._agent.enable();
 
-    var resourceTreeModel = SDK.ResourceTreeModel.fromTarget(target);
+    var resourceTreeModel = target.model(SDK.ResourceTreeModel);
     resourceTreeModel.addEventListener(SDK.ResourceTreeModel.Events.FrameNavigated, this._frameNavigated, this);
     resourceTreeModel.addEventListener(SDK.ResourceTreeModel.Events.FrameDetached, this._frameDetached, this);
 
@@ -52,21 +52,19 @@ Resources.ApplicationCacheModel = class extends SDK.SDKModel {
   }
 
   /**
-   * @param {!SDK.Target} target
-   * @return {?Resources.ApplicationCacheModel}
+   * @param {!Common.Event} event
    */
-  static fromTarget(target) {
-    return target.model(Resources.ApplicationCacheModel);
-  }
-
-  _frameNavigated(event) {
+  async _frameNavigated(event) {
     var frame = /** @type {!SDK.ResourceTreeFrame} */ (event.data);
     if (frame.isMainFrame()) {
       this._mainFrameNavigated();
       return;
     }
 
-    this._agent.getManifestForFrame(frame.id, this._manifestForFrameLoaded.bind(this, frame.id));
+    var frameId = frame.id;
+    var manifestURL = await this._agent.getManifestForFrame(frameId);
+    if (manifestURL !== null && !manifestURL)
+      this._frameManifestRemoved(frameId);
   }
 
   /**
@@ -83,39 +81,10 @@ Resources.ApplicationCacheModel = class extends SDK.SDKModel {
     this.dispatchEventToListeners(Resources.ApplicationCacheModel.Events.FrameManifestsReset);
   }
 
-  _mainFrameNavigated() {
-    this._agent.getFramesWithManifests(this._framesWithManifestsLoaded.bind(this));
-  }
-
-  /**
-   * @param {string} frameId
-   * @param {?Protocol.Error} error
-   * @param {string} manifestURL
-   */
-  _manifestForFrameLoaded(frameId, error, manifestURL) {
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    if (!manifestURL)
-      this._frameManifestRemoved(frameId);
-  }
-
-  /**
-   * @param {?Protocol.Error} error
-   * @param {!Array.<!Protocol.ApplicationCache.FrameWithManifest>} framesWithManifests
-   */
-  _framesWithManifestsLoaded(error, framesWithManifests) {
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    for (var i = 0; i < framesWithManifests.length; ++i) {
-      this._frameManifestUpdated(
-          framesWithManifests[i].frameId, framesWithManifests[i].manifestURL, framesWithManifests[i].status);
-    }
+  async _mainFrameNavigated() {
+    var framesWithManifests = await this._agent.getFramesWithManifests();
+    for (var frame of framesWithManifests || [])
+      this._frameManifestUpdated(frame.frameId, frame.manifestURL, frame.status);
   }
 
   /**
@@ -194,24 +163,10 @@ Resources.ApplicationCacheModel = class extends SDK.SDKModel {
 
   /**
    * @param {string} frameId
-   * @param {function(?Protocol.ApplicationCache.ApplicationCache)} callback
+   * @return {!Promise<?Protocol.ApplicationCache.ApplicationCache>}
    */
-  requestApplicationCache(frameId, callback) {
-    /**
-     * @param {?Protocol.Error} error
-     * @param {!Protocol.ApplicationCache.ApplicationCache} applicationCache
-     */
-    function callbackWrapper(error, applicationCache) {
-      if (error) {
-        console.error(error);
-        callback(null);
-        return;
-      }
-
-      callback(applicationCache);
-    }
-
-    this._agent.getApplicationCacheForFrame(frameId, callbackWrapper);
+  requestApplicationCache(frameId) {
+    return this._agent.getApplicationCacheForFrame(frameId);
   }
 
   /**
@@ -223,7 +178,7 @@ Resources.ApplicationCacheModel = class extends SDK.SDKModel {
   }
 };
 
-SDK.SDKModel.register(Resources.ApplicationCacheModel, SDK.Target.Capability.DOM);
+SDK.SDKModel.register(Resources.ApplicationCacheModel, SDK.Target.Capability.DOM, false);
 
 /** @enum {symbol} */
 Resources.ApplicationCacheModel.Events = {

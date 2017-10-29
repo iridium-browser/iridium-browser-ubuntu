@@ -248,8 +248,6 @@ class EnterprisePlatformKeysTest
   void SetUpInProcessBrowserTestFixture() override {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
 
-    host_resolver()->AddRule("*", "127.0.0.1");
-
     chromeos::FakeSessionManagerClient* fake_session_manager_client =
         new chromeos::FakeSessionManagerClient;
     chromeos::DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
@@ -283,6 +281,7 @@ class EnterprisePlatformKeysTest
   }
 
   void SetUpOnMainThread() override {
+    host_resolver()->AddRule("*", "127.0.0.1");
     // Start the accept thread as the sandbox host process has already been
     // spawned.
     embedded_test_server()->StartAcceptingConnections();
@@ -311,11 +310,9 @@ class EnterprisePlatformKeysTest
     if (GetParam().system_token_ == SYSTEM_TOKEN_EXISTS) {
       base::RunLoop loop;
       content::BrowserThread::PostTask(
-          content::BrowserThread::IO,
-          FROM_HERE,
-          base::Bind(&EnterprisePlatformKeysTest::SetUpTestSystemSlotOnIO,
-                     base::Unretained(this),
-                     loop.QuitClosure()));
+          content::BrowserThread::IO, FROM_HERE,
+          base::BindOnce(&EnterprisePlatformKeysTest::SetUpTestSystemSlotOnIO,
+                         base::Unretained(this), loop.QuitClosure()));
       loop.Run();
     }
 
@@ -326,17 +323,16 @@ class EnterprisePlatformKeysTest
     ExtensionApiTest::TearDownOnMainThread();
 
     if (chromeos::LoginDisplayHost::default_host())
-      chromeos::LoginDisplayHost::default_host()->Finalize();
+      chromeos::LoginDisplayHost::default_host()->Finalize(base::OnceClosure());
     base::RunLoop().RunUntilIdle();
 
     if (GetParam().system_token_ == SYSTEM_TOKEN_EXISTS) {
       base::RunLoop loop;
       content::BrowserThread::PostTask(
-          content::BrowserThread::IO,
-          FROM_HERE,
-          base::Bind(&EnterprisePlatformKeysTest::TearDownTestSystemSlotOnIO,
-                     base::Unretained(this),
-                     loop.QuitClosure()));
+          content::BrowserThread::IO, FROM_HERE,
+          base::BindOnce(
+              &EnterprisePlatformKeysTest::TearDownTestSystemSlotOnIO,
+              base::Unretained(this), loop.QuitClosure()));
       loop.Run();
     }
     EXPECT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
@@ -440,9 +436,8 @@ IN_PROC_BROWSER_TEST_P(EnterprisePlatformKeysTest, Basic) {
   // Enable the URLRequestMock, which is required for force-installing the
   // test extension through policy.
   content::BrowserThread::PostTask(
-     content::BrowserThread::IO,
-     FROM_HERE,
-     base::Bind(chrome_browser_net::SetUrlRequestMocksEnabled, true));
+      content::BrowserThread::IO, FROM_HERE,
+      base::BindOnce(chrome_browser_net::SetUrlRequestMocksEnabled, true));
 
   {
    base::RunLoop loop;

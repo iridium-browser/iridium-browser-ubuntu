@@ -6,11 +6,10 @@ package org.chromium.device.bluetooth;
 
 import android.annotation.TargetApi;
 import android.bluetooth.BluetoothDevice;
-import android.content.Context;
 import android.os.Build;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
-import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.metrics.RecordHistogram;
@@ -24,7 +23,7 @@ import java.util.HashMap;
  * Lifetime is controlled by device::BluetoothDeviceAndroid.
  */
 @JNINamespace("device")
-@TargetApi(Build.VERSION_CODES.LOLLIPOP)
+@TargetApi(Build.VERSION_CODES.M)
 final class ChromeBluetoothDevice {
     private static final String TAG = "Bluetooth";
 
@@ -101,15 +100,17 @@ final class ChromeBluetoothDevice {
 
     // Implements BluetoothDeviceAndroid::CreateGattConnectionImpl.
     @CalledByNative
-    private void createGattConnectionImpl(Context context) {
+    private void createGattConnectionImpl() {
         Log.i(TAG, "connectGatt");
 
         if (mBluetoothGatt != null) mBluetoothGatt.close();
 
         // autoConnect set to false as under experimentation using autoConnect failed to complete
         // connections.
-        mBluetoothGatt =
-                mDevice.connectGatt(context, false /* autoConnect */, mBluetoothGattCallbackImpl);
+        mBluetoothGatt = mDevice.connectGatt(ContextUtils.getApplicationContext(),
+                false /* autoConnect */, mBluetoothGattCallbackImpl,
+                // Prefer LE for dual-mode devices due to lower energy consumption.
+                BluetoothDevice.TRANSPORT_LE);
     }
 
     // Implements BluetoothDeviceAndroid::DisconnectGatt.
@@ -127,26 +128,27 @@ final class ChromeBluetoothDevice {
                     (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED)
                             ? "Connected"
                             : "Disconnected");
-            if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
-                RecordHistogram.recordSparseSlowlyHistogram(
-                        "Bluetooth.Web.Android.onConnectionStateChange.Status.Connected", status);
-                mBluetoothGatt.discoverServices();
-            } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
-                RecordHistogram.recordSparseSlowlyHistogram(
-                        "Bluetooth.Web.Android.onConnectionStateChange.Status.Disconnected",
-                        status);
-                if (mBluetoothGatt != null) {
-                    mBluetoothGatt.close();
-                    mBluetoothGatt = null;
-                }
-            } else {
-                RecordHistogram.recordSparseSlowlyHistogram(
-                        "Bluetooth.Web.Android.onConnectionStateChange.Status.InvalidState",
-                        status);
-            }
-            ThreadUtils.runOnUiThread(new Runnable() {
+            Wrappers.ThreadUtilsWrapper.getInstance().runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
+                    if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
+                        RecordHistogram.recordSparseSlowlyHistogram(
+                                "Bluetooth.Web.Android.onConnectionStateChange.Status.Connected",
+                                status);
+                        mBluetoothGatt.discoverServices();
+                    } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
+                        RecordHistogram.recordSparseSlowlyHistogram(
+                                "Bluetooth.Web.Android.onConnectionStateChange.Status.Disconnected",
+                                status);
+                        if (mBluetoothGatt != null) {
+                            mBluetoothGatt.close();
+                            mBluetoothGatt = null;
+                        }
+                    } else {
+                        RecordHistogram.recordSparseSlowlyHistogram(
+                                "Bluetooth.Web.Android.onConnectionStateChange.Status.InvalidState",
+                                status);
+                    }
                     if (mNativeBluetoothDeviceAndroid != 0) {
                         nativeOnConnectionStateChange(mNativeBluetoothDeviceAndroid, status,
                                 newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED);
@@ -159,7 +161,7 @@ final class ChromeBluetoothDevice {
         public void onServicesDiscovered(final int status) {
             Log.i(TAG, "onServicesDiscovered status:%d==%s", status,
                     status == android.bluetooth.BluetoothGatt.GATT_SUCCESS ? "OK" : "Error");
-            ThreadUtils.runOnUiThread(new Runnable() {
+            Wrappers.ThreadUtilsWrapper.getInstance().runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     if (mNativeBluetoothDeviceAndroid != 0) {
@@ -197,7 +199,10 @@ final class ChromeBluetoothDevice {
         public void onCharacteristicChanged(
                 final Wrappers.BluetoothGattCharacteristicWrapper characteristic) {
             Log.i(TAG, "device onCharacteristicChanged.");
-            ThreadUtils.runOnUiThread(new Runnable() {
+            // Copy the characteristic's value for this event so that new notifications that
+            // arrive before the posted task runs do not affect this event's value.
+            final byte[] value = characteristic.getValue();
+            Wrappers.ThreadUtilsWrapper.getInstance().runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     ChromeBluetoothRemoteGattCharacteristic chromeCharacteristic =
@@ -207,7 +212,7 @@ final class ChromeBluetoothDevice {
                         // when the event races object destruction.
                         Log.v(TAG, "onCharacteristicChanged when chromeCharacteristic == null.");
                     } else {
-                        chromeCharacteristic.onCharacteristicChanged();
+                        chromeCharacteristic.onCharacteristicChanged(value);
                     }
                 }
             });
@@ -217,7 +222,7 @@ final class ChromeBluetoothDevice {
         public void onCharacteristicRead(
                 final Wrappers.BluetoothGattCharacteristicWrapper characteristic,
                 final int status) {
-            ThreadUtils.runOnUiThread(new Runnable() {
+            Wrappers.ThreadUtilsWrapper.getInstance().runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     ChromeBluetoothRemoteGattCharacteristic chromeCharacteristic =
@@ -239,7 +244,7 @@ final class ChromeBluetoothDevice {
         public void onCharacteristicWrite(
                 final Wrappers.BluetoothGattCharacteristicWrapper characteristic,
                 final int status) {
-            ThreadUtils.runOnUiThread(new Runnable() {
+            Wrappers.ThreadUtilsWrapper.getInstance().runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     ChromeBluetoothRemoteGattCharacteristic chromeCharacteristic =
@@ -260,7 +265,7 @@ final class ChromeBluetoothDevice {
         @Override
         public void onDescriptorRead(
                 final Wrappers.BluetoothGattDescriptorWrapper descriptor, final int status) {
-            ThreadUtils.runOnUiThread(new Runnable() {
+            Wrappers.ThreadUtilsWrapper.getInstance().runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     ChromeBluetoothRemoteGattDescriptor chromeDescriptor =
@@ -281,7 +286,7 @@ final class ChromeBluetoothDevice {
         @Override
         public void onDescriptorWrite(
                 final Wrappers.BluetoothGattDescriptorWrapper descriptor, final int status) {
-            ThreadUtils.runOnUiThread(new Runnable() {
+            Wrappers.ThreadUtilsWrapper.getInstance().runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     ChromeBluetoothRemoteGattDescriptor chromeDescriptor =

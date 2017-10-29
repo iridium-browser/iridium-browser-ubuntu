@@ -163,9 +163,9 @@ class MemoryAllocator {
 
   // Each allocation is tagged with a single byte so that we know how to
   // deallocate it.
-  enum AllocationType {
-    HEAP_ALLOCATION,
-    FILE_ALLOCATION,
+  enum AllocationType : uint8_t {
+    HEAP_ALLOCATION = 0xF0,  // Non-trivial constants to detect corruption.
+    FILE_ALLOCATION = 0x0F,
   };
 
   // 5MB is the maximum heap allocation size that we'll attempt.
@@ -181,16 +181,15 @@ class MemoryAllocator {
     typedef MemoryAllocator<OtherT> other;
   };
 
-  MemoryAllocator() _THROW0() {
-  }
+  MemoryAllocator() {}
 
   // We can't use an explicit constructor here, as dictated by our style guide.
   // The implementation of basic_string in Visual Studio 2010 prevents this.
-  MemoryAllocator(const MemoryAllocator<T>& other) _THROW0() {  // NOLINT
+  MemoryAllocator(const MemoryAllocator<T>& other) {  // NOLINT
   }
 
-  template<class OtherT>
-  MemoryAllocator(const MemoryAllocator<OtherT>& other) _THROW0() {  // NOLINT
+  template <class OtherT>
+  MemoryAllocator(const MemoryAllocator<OtherT>& other) {  // NOLINT
   }
 
   ~MemoryAllocator() {
@@ -199,12 +198,12 @@ class MemoryAllocator {
   void deallocate(pointer ptr, size_type size) {
     uint8_t* mem = reinterpret_cast<uint8_t*>(ptr);
     mem -= sizeof(T);
-    if (mem[0] == HEAP_ALLOCATION) {
+    if (mem[0] == HEAP_ALLOCATION)
       free(mem);
-    } else {
-      DCHECK_EQ(static_cast<uint8_t>(FILE_ALLOCATION), mem[0]);
+    else if (mem[0] == FILE_ALLOCATION)
       UncheckedDelete(TempMapping::GetMappingFromPtr(mem));
-    }
+    else
+      LOG(FATAL);
   }
 
   pointer allocate(size_type count) {
@@ -256,7 +255,7 @@ class MemoryAllocator {
     ptr->~T();
   }
 
-  size_type max_size() const _THROW0() {
+  size_type max_size() const {
     size_type count = static_cast<size_type>(-1) / sizeof(T);
     return (0 < count ? count : 1);
   }

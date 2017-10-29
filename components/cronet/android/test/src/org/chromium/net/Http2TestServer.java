@@ -93,6 +93,13 @@ public final class Http2TestServer {
         return getServerUrl() + Http2TestHandler.ECHO_TRAILERS_PATH;
     }
 
+    /**
+     * @return url of a brotli-encoded server resource.
+     */
+    public static String getServeSimpleBrotliResponse() {
+        return getServerUrl() + Http2TestHandler.SERVE_SIMPLE_BROTLI_RESPONSE;
+    }
+
     public static boolean startHttp2TestServer(
             Context context, String certFileName, String keyFileName) throws Exception {
         new Thread(
@@ -112,6 +119,10 @@ public final class Http2TestServer {
             ApplicationProtocolConfig applicationProtocolConfig = new ApplicationProtocolConfig(
                     Protocol.ALPN, SelectorFailureBehavior.NO_ADVERTISE,
                     SelectedListenerFailureBehavior.ACCEPT, ApplicationProtocolNames.HTTP_2);
+
+            // Don't make netty use java.security.KeyStore.getInstance("JKS") as it doesn't
+            // exist.  Just avoid a KeyManagerFactory as it's unnecessary for our testing.
+            System.setProperty("io.netty.handler.ssl.openssl.useKeyManagerFactory", "false");
 
             mSslCtx = new OpenSslServerContext(certFile, keyFile, null, null,
                     Http2SecurityUtil.CIPHERS, SupportedCipherSuiteFilter.INSTANCE,

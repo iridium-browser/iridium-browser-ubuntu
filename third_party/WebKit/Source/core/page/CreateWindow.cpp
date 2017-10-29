@@ -26,40 +26,247 @@
 
 #include "core/page/CreateWindow.h"
 
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
+#include "core/dom/UserGestureIndicator.h"
+#include "core/events/UIEventWithKeyState.h"
 #include "core/frame/FrameClient.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/inspector/ConsoleMessage.h"
-#include "core/inspector/InspectorInstrumentation.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
-#include "core/page/WindowFeatures.h"
-#include "platform/UserGestureIndicator.h"
-#include "platform/network/ResourceRequest.h"
+#include "core/probe/CoreProbes.h"
+#include "platform/KeyboardCodes.h"
+#include "platform/loader/fetch/ResourceRequest.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/SecurityPolicy.h"
+#include "public/platform/WebInputEvent.h"
+#include "public/platform/WebKeyboardEvent.h"
+#include "public/platform/WebMouseEvent.h"
 #include "public/platform/WebURLRequest.h"
+#include "public/web/WebWindowFeatures.h"
 
 namespace blink {
 
-static Frame* reuseExistingWindow(LocalFrame& activeFrame,
-                                  LocalFrame& lookupFrame,
-                                  const AtomicString& frameName,
+namespace {
+
+void UpdatePolicyForEvent(const WebInputEvent* input_event,
+                          NavigationPolicy* policy) {
+  if (!input_event)
+    return;
+
+  unsigned short button_number = 0;
+  if (input_event->GetType() == WebInputEvent::kMouseUp) {
+    const WebMouseEvent* mouse_event =
+        static_cast<const WebMouseEvent*>(input_event);
+
+    switch (mouse_event->button) {
+      case WebMouseEvent::Button::kLeft:
+        button_number = 0;
+        break;
+      case WebMouseEvent::Button::kMiddle:
+        button_number = 1;
+        break;
+      case WebMouseEvent::Button::kRight:
+        button_number = 2;
+        break;
+      default:
+        return;
+    }
+  } else if ((WebInputEvent::IsKeyboardEventType(input_event->GetType()) &&
+              static_cast<const WebKeyboardEvent*>(input_event)
+                      ->windows_key_code == VKEY_RETURN) ||
+             WebInputEvent::IsGestureEventType(input_event->GetType())) {
+    // Keyboard and gesture events can simulate mouse events.
+    button_number = 0;
+  } else {
+    return;
+  }
+
+  bool ctrl = input_event->GetModifiers() & WebInputEvent::kControlKey;
+  bool shift = input_event->GetModifiers() & WebInputEvent::kShiftKey;
+  bool alt = input_event->GetModifiers() & WebInputEvent::kAltKey;
+  bool meta = input_event->GetModifiers() & WebInputEvent::kMetaKey;
+
+  NavigationPolicy user_policy = *policy;
+  NavigationPolicyFromMouseEvent(button_number, ctrl, shift, alt, meta,
+                                 &user_policy);
+
+  // When the input event suggests a download, but the navigation was initiated
+  // by script, we should not override it.
+  if (user_policy == kNavigationPolicyDownload &&
+      *policy != kNavigationPolicyIgnore)
+    return;
+
+  // User and app agree that we want a new window; let the app override the
+  // decorations.
+  if (user_policy == kNavigationPolicyNewWindow &&
+      *policy == kNavigationPolicyNewPopup)
+    return;
+  *policy = user_policy;
+}
+
+NavigationPolicy GetNavigationPolicy(const WebInputEvent* current_event,
+                                     const WebWindowFeatures& features) {
+  // If our default configuration was modified by a script or wasn't
+  // created by a user gesture, then show as a popup. Else, let this
+  // new window be opened as a toplevel window.
+  bool as_popup = !features.tool_bar_visible || !features.status_bar_visible ||
+                  !features.scrollbars_visible || !features.menu_bar_visible ||
+                  !features.resizable;
+  NavigationPolicy policy =
+      as_popup ? kNavigationPolicyNewPopup : kNavigationPolicyNewForegroundTab;
+  UpdatePolicyForEvent(current_event, &policy);
+  return policy;
+}
+
+}  // anonymous namespace
+
+NavigationPolicy EffectiveNavigationPolicy(NavigationPolicy policy,
+                                           const WebInputEvent* current_event,
+                                           const WebWindowFeatures& features) {
+  if (policy == kNavigationPolicyIgnore)
+    return GetNavigationPolicy(current_event, features);
+  if (policy == kNavigationPolicyNewBackgroundTab &&
+      GetNavigationPolicy(current_event, features) !=
+          kNavigationPolicyNewBackgroundTab &&
+      !UIEventWithKeyState::NewTabModifierSetFromIsolatedWorld()) {
+    return kNavigationPolicyNewForegroundTab;
+  }
+  return policy;
+}
+
+// Though isspace() considers \t and \v to be whitespace, Win IE doesn't when
+// parsing window features.
+static bool IsWindowFeaturesSeparator(UChar c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '=' ||
+         c == ',' || c == '\0';
+}
+
+WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string) {
+  WebWindowFeatures window_features;
+
+  // The IE rule is: all features except for channelmode default
+  // to YES, but if the user specifies a feature string, all features default to
+  // NO. (There is no public standard that applies to this method.)
+  // <http://msdn.microsoft.com/workshop/author/dhtml/reference/methods/open_0.asp>
+  if (feature_string.IsEmpty())
+    return window_features;
+
+  window_features.menu_bar_visible = false;
+  window_features.status_bar_visible = false;
+  window_features.tool_bar_visible = false;
+  window_features.scrollbars_visible = false;
+
+  // Tread lightly in this code -- it was specifically designed to mimic Win
+  // IE's parsing behavior.
+  unsigned key_begin, key_end;
+  unsigned value_begin, value_end;
+
+  String buffer = feature_string.DeprecatedLower();
+  unsigned length = buffer.length();
+  for (unsigned i = 0; i < length;) {
+    // skip to first non-separator, but don't skip past the end of the string
+    while (i < length && IsWindowFeaturesSeparator(buffer[i]))
+      i++;
+    key_begin = i;
+
+    // skip to first separator
+    while (i < length && !IsWindowFeaturesSeparator(buffer[i]))
+      i++;
+    key_end = i;
+
+    SECURITY_DCHECK(i <= length);
+
+    // skip to first '=', but don't skip past a ',' or the end of the string
+    while (i < length && buffer[i] != '=') {
+      if (buffer[i] == ',')
+        break;
+      i++;
+    }
+
+    SECURITY_DCHECK(i <= length);
+
+    // Skip to first non-separator, but don't skip past a ',' or the end of the
+    // string.
+    while (i < length && IsWindowFeaturesSeparator(buffer[i])) {
+      if (buffer[i] == ',')
+        break;
+      i++;
+    }
+    value_begin = i;
+
+    SECURITY_DCHECK(i <= length);
+
+    // skip to first separator
+    while (i < length && !IsWindowFeaturesSeparator(buffer[i]))
+      i++;
+    value_end = i;
+
+    SECURITY_DCHECK(i <= length);
+
+    String key_string(buffer.Substring(key_begin, key_end - key_begin));
+    String value_string(buffer.Substring(value_begin, value_end - value_begin));
+
+    // Listing a key with no value is shorthand for key=yes
+    int value;
+    if (value_string.IsEmpty() || value_string == "yes")
+      value = 1;
+    else
+      value = value_string.ToInt();
+
+    if (key_string == "left" || key_string == "screenx") {
+      window_features.x_set = true;
+      window_features.x = value;
+    } else if (key_string == "top" || key_string == "screeny") {
+      window_features.y_set = true;
+      window_features.y = value;
+    } else if (key_string == "width" || key_string == "innerwidth") {
+      window_features.width_set = true;
+      window_features.width = value;
+    } else if (key_string == "height" || key_string == "innerheight") {
+      window_features.height_set = true;
+      window_features.height = value;
+    } else if (key_string == "menubar") {
+      window_features.menu_bar_visible = value;
+    } else if (key_string == "toolbar" || key_string == "location") {
+      window_features.tool_bar_visible |= static_cast<bool>(value);
+    } else if (key_string == "status") {
+      window_features.status_bar_visible = value;
+    } else if (key_string == "scrollbars") {
+      window_features.scrollbars_visible = value;
+    } else if (key_string == "resizable") {
+      window_features.resizable = value;
+    } else if (key_string == "noopener") {
+      window_features.noopener = true;
+    } else if (key_string == "background") {
+      window_features.background = true;
+    } else if (key_string == "persistent") {
+      window_features.persistent = true;
+    }
+  }
+
+  return window_features;
+}
+
+static Frame* ReuseExistingWindow(LocalFrame& active_frame,
+                                  LocalFrame& lookup_frame,
+                                  const AtomicString& frame_name,
                                   NavigationPolicy policy) {
-  if (!frameName.isEmpty() && frameName != "_blank" &&
-      policy == NavigationPolicyIgnore) {
+  if (!frame_name.IsEmpty() && !EqualIgnoringASCIICase(frame_name, "_blank") &&
+      policy == kNavigationPolicyIgnore) {
     if (Frame* frame =
-            lookupFrame.findFrameForNavigation(frameName, activeFrame)) {
-      if (frameName != "_self") {
-        if (Page* page = frame->page()) {
-          if (page == activeFrame.page())
-            page->focusController().setFocusedFrame(frame);
+            lookup_frame.FindFrameForNavigation(frame_name, active_frame)) {
+      if (!EqualIgnoringASCIICase(frame_name, "_self")) {
+        if (Page* page = frame->GetPage()) {
+          if (page == active_frame.GetPage())
+            page->GetFocusController().SetFocusedFrame(frame);
           else
-            page->chromeClient().focus();
+            page->GetChromeClient().Focus();
         }
       }
       return frame;
@@ -68,139 +275,145 @@ static Frame* reuseExistingWindow(LocalFrame& activeFrame,
   return nullptr;
 }
 
-static Frame* createNewWindow(LocalFrame& openerFrame,
+static Frame* CreateNewWindow(LocalFrame& opener_frame,
                               const FrameLoadRequest& request,
-                              const WindowFeatures& features,
+                              const WebWindowFeatures& features,
                               NavigationPolicy policy,
                               bool& created) {
-  Page* oldPage = openerFrame.page();
-  if (!oldPage)
+  Page* old_page = opener_frame.GetPage();
+  if (!old_page)
     return nullptr;
 
-  Page* page = oldPage->chromeClient().createWindow(&openerFrame, request,
-                                                    features, policy);
+  policy = EffectiveNavigationPolicy(
+      policy, old_page->GetChromeClient().GetCurrentInputEvent(), features);
+
+  const SandboxFlags sandbox_flags =
+      opener_frame.GetDocument()->IsSandboxed(
+          kSandboxPropagatesToAuxiliaryBrowsingContexts)
+          ? opener_frame.GetSecurityContext()->GetSandboxFlags()
+          : kSandboxNone;
+
+  Page* page = old_page->GetChromeClient().CreateWindow(
+      &opener_frame, request, features, policy, sandbox_flags);
   if (!page)
     return nullptr;
 
-  ASSERT(page->mainFrame());
-  LocalFrame& frame = *toLocalFrame(page->mainFrame());
+  if (page == old_page)
+    return &opener_frame.Tree().Top();
 
-  if (request.frameName() != "_blank")
-    frame.tree().setName(request.frameName());
+  DCHECK(page->MainFrame());
+  LocalFrame& frame = *ToLocalFrame(page->MainFrame());
 
-  page->chromeClient().setWindowFeatures(features);
+  page->SetWindowFeatures(features);
+
+  frame.View()->SetCanHaveScrollbars(features.scrollbars_visible);
 
   // 'x' and 'y' specify the location of the window, while 'width' and 'height'
   // specify the size of the viewport. We can only resize the window, so adjust
   // for the difference between the window size and the viewport size.
 
-  IntRect windowRect = page->chromeClient().rootWindowRect();
-  IntSize viewportSize = page->chromeClient().pageRect().size();
+  IntRect window_rect = page->GetChromeClient().RootWindowRect();
+  IntSize viewport_size = page->GetChromeClient().PageRect().Size();
 
-  if (features.xSet)
-    windowRect.setX(features.x);
-  if (features.ySet)
-    windowRect.setY(features.y);
-  if (features.widthSet)
-    windowRect.setWidth(features.width +
-                        (windowRect.width() - viewportSize.width()));
-  if (features.heightSet)
-    windowRect.setHeight(features.height +
-                         (windowRect.height() - viewportSize.height()));
+  if (features.x_set)
+    window_rect.SetX(features.x);
+  if (features.y_set)
+    window_rect.SetY(features.y);
+  if (features.width_set)
+    window_rect.SetWidth(features.width +
+                         (window_rect.Width() - viewport_size.Width()));
+  if (features.height_set)
+    window_rect.SetHeight(features.height +
+                          (window_rect.Height() - viewport_size.Height()));
 
-  page->chromeClient().setWindowRectWithAdjustment(windowRect, frame);
-  page->chromeClient().show(policy);
+  page->GetChromeClient().SetWindowRectWithAdjustment(window_rect, frame);
+  page->GetChromeClient().Show(policy);
 
-  if (openerFrame.document()->isSandboxed(
-          SandboxPropagatesToAuxiliaryBrowsingContexts))
-    frame.loader().forceSandboxFlags(
-        openerFrame.securityContext()->getSandboxFlags());
-
-  // This call may suspend the execution by running nested message loop.
-  probe::windowCreated(&openerFrame, &frame);
+  // This call may suspend the execution by running nested run loop.
+  probe::windowCreated(&opener_frame, &frame);
   created = true;
   return &frame;
 }
 
-static Frame* createWindowHelper(LocalFrame& openerFrame,
-                                 LocalFrame& activeFrame,
-                                 LocalFrame& lookupFrame,
+static Frame* CreateWindowHelper(LocalFrame& opener_frame,
+                                 LocalFrame& active_frame,
+                                 LocalFrame& lookup_frame,
                                  const FrameLoadRequest& request,
-                                 const WindowFeatures& features,
+                                 const WebWindowFeatures& features,
                                  NavigationPolicy policy,
                                  bool& created) {
-  ASSERT(!features.dialog || request.frameName().isEmpty());
-  ASSERT(request.resourceRequest().requestorOrigin() ||
-         openerFrame.document()->url().isEmpty());
-  ASSERT(request.resourceRequest().frameType() ==
-         WebURLRequest::FrameTypeAuxiliary);
+  DCHECK(request.GetResourceRequest().RequestorOrigin() ||
+         opener_frame.GetDocument()->Url().IsEmpty());
+  DCHECK_EQ(request.GetResourceRequest().GetFrameType(),
+            WebURLRequest::kFrameTypeAuxiliary);
 
   created = false;
 
   Frame* window = features.noopener
                       ? nullptr
-                      : reuseExistingWindow(activeFrame, lookupFrame,
-                                            request.frameName(), policy);
+                      : ReuseExistingWindow(active_frame, lookup_frame,
+                                            request.FrameName(), policy);
 
   if (!window) {
     // Sandboxed frames cannot open new auxiliary browsing contexts.
-    if (openerFrame.document()->isSandboxed(SandboxPopups)) {
+    if (opener_frame.GetDocument()->IsSandboxed(kSandboxPopups)) {
       // FIXME: This message should be moved off the console once a solution to
       // https://bugs.webkit.org/show_bug.cgi?id=103274 exists.
-      openerFrame.document()->addConsoleMessage(ConsoleMessage::create(
-          SecurityMessageSource, ErrorMessageLevel,
-          "Blocked opening '" + request.resourceRequest().url().elidedString() +
+      opener_frame.GetDocument()->AddConsoleMessage(ConsoleMessage::Create(
+          kSecurityMessageSource, kErrorMessageLevel,
+          "Blocked opening '" +
+              request.GetResourceRequest().Url().ElidedString() +
               "' in a new window because the request was made in a sandboxed "
               "frame whose 'allow-popups' permission is not set."));
       return nullptr;
     }
-
-    if (openerFrame.settings() &&
-        !openerFrame.settings()->getSupportsMultipleWindows())
-      window = openerFrame.tree().top();
   }
 
   if (window) {
     // JS can run inside reuseExistingWindow (via onblur), which can detach
     // the target window.
-    if (!window->client())
+    if (!window->Client())
       return nullptr;
-    if (request.getShouldSetOpener() == MaybeSetOpener)
-      window->client()->setOpener(&openerFrame);
+    if (request.GetShouldSetOpener() == kMaybeSetOpener)
+      window->Client()->SetOpener(&opener_frame);
     return window;
   }
 
-  return createNewWindow(openerFrame, request, features, policy, created);
+  return CreateNewWindow(opener_frame, request, features, policy, created);
 }
 
-DOMWindow* createWindow(const String& urlString,
-                        const AtomicString& frameName,
-                        const WindowFeatures& windowFeatures,
-                        LocalDOMWindow& callingWindow,
-                        LocalFrame& firstFrame,
-                        LocalFrame& openerFrame) {
-  LocalFrame* activeFrame = callingWindow.frame();
-  ASSERT(activeFrame);
+DOMWindow* CreateWindow(const String& url_string,
+                        const AtomicString& frame_name,
+                        const String& window_features_string,
+                        LocalDOMWindow& calling_window,
+                        LocalFrame& first_frame,
+                        LocalFrame& opener_frame,
+                        ExceptionState& exception_state) {
+  LocalFrame* active_frame = calling_window.GetFrame();
+  DCHECK(active_frame);
 
-  KURL completedURL = urlString.isEmpty()
-                          ? KURL(ParsedURLString, emptyString)
-                          : firstFrame.document()->completeURL(urlString);
-  if (!completedURL.isEmpty() && !completedURL.isValid()) {
-    // Don't expose client code to invalid URLs.
-    callingWindow.printErrorMessage(
-        "Unable to open a window with invalid URL '" +
-        completedURL.getString() + "'.\n");
+  KURL completed_url = url_string.IsEmpty()
+                           ? KURL(kParsedURLString, g_empty_string)
+                           : first_frame.GetDocument()->CompleteURL(url_string);
+  if (!completed_url.IsEmpty() && !completed_url.IsValid()) {
+    UseCounter::Count(active_frame, WebFeature::kWindowOpenWithInvalidURL);
+    exception_state.ThrowDOMException(
+        kSyntaxError, "Unable to open a window with invalid URL '" +
+                          completed_url.GetString() + "'.\n");
     return nullptr;
   }
 
-  FrameLoadRequest frameRequest(callingWindow.document(), completedURL,
-                                frameName);
-  frameRequest.setShouldSetOpener(windowFeatures.noopener ? NeverSetOpener
-                                                          : MaybeSetOpener);
-  frameRequest.resourceRequest().setFrameType(
-      WebURLRequest::FrameTypeAuxiliary);
-  frameRequest.resourceRequest().setRequestorOrigin(
-      SecurityOrigin::create(activeFrame->document()->url()));
+  WebWindowFeatures window_features =
+      GetWindowFeaturesFromString(window_features_string);
+
+  FrameLoadRequest frame_request(calling_window.document(),
+                                 ResourceRequest(completed_url), frame_name);
+  frame_request.SetShouldSetOpener(window_features.noopener ? kNeverSetOpener
+                                                            : kMaybeSetOpener);
+  frame_request.GetResourceRequest().SetFrameType(
+      WebURLRequest::kFrameTypeAuxiliary);
+  frame_request.GetResourceRequest().SetRequestorOrigin(
+      SecurityOrigin::Create(active_frame->GetDocument()->Url()));
 
   // Normally, FrameLoader would take care of setting the referrer for a
   // navigation that is triggered from javascript. However, creating a window
@@ -208,28 +421,28 @@ DOMWindow* createWindow(const String& urlString,
   // an embedder-initiated navigation.  FrameLoader assumes no responsibility
   // for generating an embedder-initiated navigation's referrer, so we need to
   // ensure the proper referrer is set now.
-  frameRequest.resourceRequest().setHTTPReferrer(
-      SecurityPolicy::generateReferrer(
-          activeFrame->document()->getReferrerPolicy(), completedURL,
-          activeFrame->document()->outgoingReferrer()));
+  frame_request.GetResourceRequest().SetHTTPReferrer(
+      SecurityPolicy::GenerateReferrer(
+          active_frame->GetDocument()->GetReferrerPolicy(), completed_url,
+          active_frame->GetDocument()->OutgoingReferrer()));
 
   // Records HasUserGesture before the value is invalidated inside
   // createWindow(LocalFrame& openerFrame, ...).
   // This value will be set in ResourceRequest loaded in a new LocalFrame.
-  bool hasUserGesture = UserGestureIndicator::processingUserGesture();
+  bool has_user_gesture = UserGestureIndicator::ProcessingUserGesture();
 
   // We pass the opener frame for the lookupFrame in case the active frame is
   // different from the opener frame, and the name references a frame relative
   // to the opener frame.
   bool created;
-  Frame* newFrame =
-      createWindowHelper(openerFrame, *activeFrame, openerFrame, frameRequest,
-                         windowFeatures, NavigationPolicyIgnore, created);
-  if (!newFrame)
+  Frame* new_frame = CreateWindowHelper(
+      opener_frame, *active_frame, opener_frame, frame_request, window_features,
+      kNavigationPolicyIgnore, created);
+  if (!new_frame)
     return nullptr;
-  if (newFrame->domWindow()->isInsecureScriptAccess(callingWindow,
-                                                    completedURL))
-    return newFrame->domWindow();
+  if (new_frame->DomWindow()->IsInsecureScriptAccess(calling_window,
+                                                     completed_url))
+    return window_features.noopener ? nullptr : new_frame->DomWindow();
 
   // TODO(dcheng): Special case for window.open("about:blank") to ensure it
   // loads synchronously into a new window. This is our historical behavior, and
@@ -241,56 +454,56 @@ DOMWindow* createWindow(const String& urlString,
   // causes the navigation to be flagged as a client redirect, which is
   // observable via the webNavigation extension api.
   if (created) {
-    FrameLoadRequest request(callingWindow.document(), completedURL);
-    request.resourceRequest().setHasUserGesture(hasUserGesture);
-    newFrame->navigate(request);
-  } else if (!urlString.isEmpty()) {
-    newFrame->navigate(
-        *callingWindow.document(), completedURL, false,
-        hasUserGesture ? UserGestureStatus::Active : UserGestureStatus::None);
+    FrameLoadRequest request(calling_window.document(),
+                             ResourceRequest(completed_url));
+    request.GetResourceRequest().SetHasUserGesture(has_user_gesture);
+    new_frame->Navigate(request);
+  } else if (!url_string.IsEmpty()) {
+    new_frame->Navigate(*calling_window.document(), completed_url, false,
+                        has_user_gesture ? UserGestureStatus::kActive
+                                         : UserGestureStatus::kNone);
   }
-  return newFrame->domWindow();
+  return window_features.noopener ? nullptr : new_frame->DomWindow();
 }
 
-void createWindowForRequest(const FrameLoadRequest& request,
-                            LocalFrame& openerFrame,
+void CreateWindowForRequest(const FrameLoadRequest& request,
+                            LocalFrame& opener_frame,
                             NavigationPolicy policy) {
-  ASSERT(request.resourceRequest().requestorOrigin() ||
-         (openerFrame.document() && openerFrame.document()->url().isEmpty()));
+  DCHECK(request.GetResourceRequest().RequestorOrigin() ||
+         (opener_frame.GetDocument() &&
+          opener_frame.GetDocument()->Url().IsEmpty()));
 
-  if (openerFrame.document()->pageDismissalEventBeingDispatched() !=
-      Document::NoDismissal)
+  if (opener_frame.GetDocument()->PageDismissalEventBeingDispatched() !=
+      Document::kNoDismissal)
     return;
 
-  if (openerFrame.document() &&
-      openerFrame.document()->isSandboxed(SandboxPopups))
+  if (opener_frame.GetDocument() &&
+      opener_frame.GetDocument()->IsSandboxed(kSandboxPopups))
     return;
 
-  if (!LocalDOMWindow::allowPopUp(openerFrame))
-    return;
+  if (policy == kNavigationPolicyCurrentTab)
+    policy = kNavigationPolicyNewForegroundTab;
 
-  if (policy == NavigationPolicyCurrentTab)
-    policy = NavigationPolicyNewForegroundTab;
-
-  WindowFeatures features;
-  features.noopener = request.getShouldSetOpener() == NeverSetOpener;
+  WebWindowFeatures features;
+  features.noopener = request.GetShouldSetOpener() == kNeverSetOpener;
   bool created;
-  Frame* newFrame = createWindowHelper(openerFrame, openerFrame, openerFrame,
-                                       request, features, policy, created);
-  if (!newFrame)
+  Frame* new_frame =
+      CreateWindowHelper(opener_frame, opener_frame, opener_frame, request,
+                         features, policy, created);
+  if (!new_frame)
     return;
-  if (request.getShouldSendReferrer() == MaybeSendReferrer) {
+  if (request.GetShouldSendReferrer() == kMaybeSendReferrer) {
     // TODO(japhet): Does ReferrerPolicy need to be proagated for RemoteFrames?
-    if (newFrame->isLocalFrame())
-      toLocalFrame(newFrame)->document()->setReferrerPolicy(
-          openerFrame.document()->getReferrerPolicy());
+    if (new_frame->IsLocalFrame())
+      ToLocalFrame(new_frame)->GetDocument()->SetReferrerPolicy(
+          opener_frame.GetDocument()->GetReferrerPolicy());
   }
 
   // TODO(japhet): Form submissions on RemoteFrames don't work yet.
-  FrameLoadRequest newRequest(0, request.resourceRequest());
-  newRequest.setForm(request.form());
-  if (newFrame->isLocalFrame())
-    toLocalFrame(newFrame)->loader().load(newRequest);
+  FrameLoadRequest new_request(0, request.GetResourceRequest());
+  new_request.SetForm(request.Form());
+  if (new_frame->IsLocalFrame())
+    ToLocalFrame(new_frame)->Loader().Load(new_request);
 }
 
 }  // namespace blink

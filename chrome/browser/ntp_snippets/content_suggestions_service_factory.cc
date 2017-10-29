@@ -10,44 +10,58 @@
 #include "base/files/file_path.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/sequenced_task_runner.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/time/default_clock.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/favicon/large_icon_service_factory.h"
+#include "chrome/browser/gcm/gcm_profile_service_factory.h"
+#include "chrome/browser/gcm/instance_id/instance_id_profile_service.h"
+#include "chrome/browser/gcm/instance_id/instance_id_profile_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/language/url_language_histogram_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/suggestions/image_decoder_impl.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/translate/language_model_factory.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_features.h"
+#include "chrome/common/pref_names.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/browser_sync/profile_sync_service.h"
-#include "components/image_fetcher/image_decoder.h"
-#include "components/image_fetcher/image_fetcher.h"
-#include "components/image_fetcher/image_fetcher_impl.h"
+#include "components/gcm_driver/gcm_profile_service.h"
+#include "components/image_fetcher/core/image_decoder.h"
+#include "components/image_fetcher/core/image_fetcher.h"
+#include "components/image_fetcher/core/image_fetcher_impl.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/service_access_type.h"
+#include "components/language/core/browser/url_language_histogram.h"
 #include "components/ntp_snippets/bookmarks/bookmark_suggestions_provider.h"
+#include "components/ntp_snippets/breaking_news/breaking_news_gcm_app_handler.h"
+#include "components/ntp_snippets/breaking_news/breaking_news_suggestions_provider.h"
+#include "components/ntp_snippets/breaking_news/subscription_manager.h"
+#include "components/ntp_snippets/breaking_news/subscription_manager_impl.h"
 #include "components/ntp_snippets/category_rankers/category_ranker.h"
 #include "components/ntp_snippets/content_suggestions_service.h"
 #include "components/ntp_snippets/features.h"
 #include "components/ntp_snippets/ntp_snippets_constants.h"
 #include "components/ntp_snippets/remote/persistent_scheduler.h"
+#include "components/ntp_snippets/remote/prefetched_pages_tracker.h"
 #include "components/ntp_snippets/remote/remote_suggestions_database.h"
-#include "components/ntp_snippets/remote/remote_suggestions_fetcher.h"
+#include "components/ntp_snippets/remote/remote_suggestions_fetcher_impl.h"
 #include "components/ntp_snippets/remote/remote_suggestions_provider_impl.h"
+#include "components/ntp_snippets/remote/remote_suggestions_scheduler_impl.h"
 #include "components/ntp_snippets/remote/remote_suggestions_status_service.h"
-#include "components/ntp_snippets/remote/scheduling_remote_suggestions_provider.h"
 #include "components/ntp_snippets/sessions/foreign_sessions_suggestions_provider.h"
 #include "components/ntp_snippets/sessions/tab_delegate_sync_adapter.h"
+#include "components/ntp_snippets/user_classifier.h"
+#include "components/offline_pages/features/features.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_json/safe_json_parser.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/translate/core/browser/language_model.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -58,49 +72,69 @@
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/chrome_feature_list.h"
 #include "chrome/browser/android/ntp/ntp_snippets_launcher.h"
-#include "chrome/browser/android/offline_pages/offline_page_model_factory.h"
-#include "chrome/browser/android/offline_pages/request_coordinator_factory.h"
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_history.h"
-#include "chrome/browser/download/download_service.h"
-#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/ntp_snippets/download_suggestions_provider.h"
-#include "components/ntp_snippets/offline_pages/recent_tab_suggestions_provider.h"
 #include "components/ntp_snippets/physical_web_pages/physical_web_page_suggestions_provider.h"
+#include "components/physical_web/data_source/physical_web_data_source.h"
+#endif
+
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+#include "chrome/browser/offline_pages/offline_page_model_factory.h"
+#include "chrome/browser/offline_pages/prefetch/prefetch_service_factory.h"
+#include "chrome/browser/offline_pages/request_coordinator_factory.h"
+#include "components/ntp_snippets/offline_pages/recent_tab_suggestions_provider.h"
+#include "components/ntp_snippets/remote/prefetched_pages_tracker_impl.h"
 #include "components/offline_pages/core/background/request_coordinator.h"
 #include "components/offline_pages/core/offline_page_feature.h"
 #include "components/offline_pages/core/offline_page_model.h"
+#include "components/offline_pages/core/prefetch/prefetch_service.h"
+#include "components/offline_pages/core/prefetch/suggested_articles_observer.h"
 #include "components/offline_pages/core/recent_tabs/recent_tabs_ui_adapter_delegate.h"
-#include "components/physical_web/data_source/physical_web_data_source.h"
-
-using content::DownloadManager;
-using ntp_snippets::PhysicalWebPageSuggestionsProvider;
-using ntp_snippets::RecentTabSuggestionsProvider;
-using offline_pages::OfflinePageModel;
-using offline_pages::RequestCoordinator;
-using offline_pages::OfflinePageModelFactory;
-using offline_pages::RequestCoordinatorFactory;
-using physical_web::PhysicalWebDataSource;
-#endif  // OS_ANDROID
+#endif
 
 using bookmarks::BookmarkModel;
 using content::BrowserThread;
 using history::HistoryService;
 using image_fetcher::ImageFetcherImpl;
+using language::UrlLanguageHistogram;
 using ntp_snippets::BookmarkSuggestionsProvider;
+using ntp_snippets::BreakingNewsGCMAppHandler;
+using ntp_snippets::BreakingNewsSuggestionsProvider;
 using ntp_snippets::CategoryRanker;
 using ntp_snippets::ContentSuggestionsService;
 using ntp_snippets::ForeignSessionsSuggestionsProvider;
 using ntp_snippets::GetFetchEndpoint;
+using ntp_snippets::GetPushUpdatesSubscriptionEndpoint;
+using ntp_snippets::GetPushUpdatesUnsubscriptionEndpoint;
 using ntp_snippets::PersistentScheduler;
+using ntp_snippets::PrefetchedPagesTracker;
 using ntp_snippets::RemoteSuggestionsDatabase;
-using ntp_snippets::RemoteSuggestionsFetcher;
+using ntp_snippets::RemoteSuggestionsFetcherImpl;
 using ntp_snippets::RemoteSuggestionsProviderImpl;
+using ntp_snippets::RemoteSuggestionsSchedulerImpl;
 using ntp_snippets::RemoteSuggestionsStatusService;
-using ntp_snippets::SchedulingRemoteSuggestionsProvider;
+using ntp_snippets::SubscriptionManagerImpl;
 using ntp_snippets::TabDelegateSyncAdapter;
+using ntp_snippets::UserClassifier;
 using suggestions::ImageDecoderImpl;
 using syncer::SyncService;
-using translate::LanguageModel;
+
+#if defined(OS_ANDROID)
+using content::DownloadManager;
+using ntp_snippets::PhysicalWebPageSuggestionsProvider;
+using physical_web::PhysicalWebDataSource;
+#endif  // OS_ANDROID
+
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+using ntp_snippets::PrefetchedPagesTrackerImpl;
+using ntp_snippets::RecentTabSuggestionsProvider;
+using offline_pages::OfflinePageModel;
+using offline_pages::OfflinePageModelFactory;
+using offline_pages::RequestCoordinator;
+using offline_pages::RequestCoordinatorFactory;
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 
 // For now, ContentSuggestionsService must only be instantiated on Android.
 // See also crbug.com/688366.
@@ -116,7 +150,15 @@ using translate::LanguageModel;
 
 namespace {
 
+bool IsChromeHomeEnabled() {
 #if defined(OS_ANDROID)
+  return base::FeatureList::IsEnabled(chrome::android::kChromeHomeFeature);
+#else
+  return false;
+#endif
+}
+
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
 
 bool IsRecentTabProviderEnabled() {
   return base::FeatureList::IsEnabled(
@@ -125,36 +167,96 @@ bool IsRecentTabProviderEnabled() {
              offline_pages::kOffliningRecentPagesFeature);
 }
 
-void RegisterRecentTabProvider(OfflinePageModel* offline_page_model,
-                               RequestCoordinator* request_coordinator,
-                               ContentSuggestionsService* service,
-                               PrefService* pref_service) {
+void RegisterRecentTabProviderIfEnabled(ContentSuggestionsService* service,
+                                        Profile* profile,
+                                        OfflinePageModel* offline_page_model) {
+  if (!IsRecentTabProviderEnabled()) {
+    return;
+  }
+
+  RequestCoordinator* request_coordinator =
+      RequestCoordinatorFactory::GetForBrowserContext(profile);
   offline_pages::DownloadUIAdapter* ui_adapter = offline_pages::
       RecentTabsUIAdapterDelegate::GetOrCreateRecentTabsUIAdapter(
           offline_page_model, request_coordinator);
   auto provider = base::MakeUnique<RecentTabSuggestionsProvider>(
-      service, ui_adapter, pref_service);
+      service, ui_adapter, profile->GetPrefs());
   service->RegisterProvider(std::move(provider));
 }
 
-void RegisterDownloadsProvider(OfflinePageModel* offline_page_model,
-                               DownloadManager* download_manager,
-                               DownloadHistory* download_history,
-                               ContentSuggestionsService* service,
-                               PrefService* pref_service) {
+void RegisterPrefetchingObserver(ContentSuggestionsService* service,
+                                 Profile* profile) {
+  // The observer is always there, but the Prefetch Dispatcher will do nothing
+  // if the feature (or preference) is off.
+  offline_pages::SuggestedArticlesObserver* observer =
+      offline_pages::PrefetchServiceFactory::GetForBrowserContext(profile)
+          ->GetSuggestedArticlesObserver();
+  observer->SetContentSuggestionsServiceAndObserve(service);
+}
+
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
+
+#if defined(OS_ANDROID)
+
+bool AreAssetDownloadsEnabled() {
+  return !IsChromeHomeEnabled() &&
+         base::FeatureList::IsEnabled(
+             features::kAssetDownloadSuggestionsFeature);
+}
+
+bool AreOfflinePageDownloadsEnabled() {
+  return !IsChromeHomeEnabled() &&
+         base::FeatureList::IsEnabled(
+             features::kOfflinePageDownloadSuggestionsFeature);
+}
+
+bool IsDownloadsProviderEnabled() {
+  return AreAssetDownloadsEnabled() || AreOfflinePageDownloadsEnabled();
+}
+
+void RegisterDownloadsProviderIfEnabled(ContentSuggestionsService* service,
+                                        Profile* profile,
+                                        OfflinePageModel* offline_page_model) {
+  if (!IsDownloadsProviderEnabled()) {
+    return;
+  }
+
+  offline_page_model =
+      AreOfflinePageDownloadsEnabled() ? offline_page_model : nullptr;
+  DownloadManager* download_manager =
+      AreAssetDownloadsEnabled()
+          ? content::BrowserContext::GetDownloadManager(profile)
+          : nullptr;
+  DownloadCoreService* download_core_service =
+      DownloadCoreServiceFactory::GetForBrowserContext(profile);
+  DownloadHistory* download_history =
+      download_core_service->GetDownloadHistory();
+
   auto provider = base::MakeUnique<DownloadSuggestionsProvider>(
       service, offline_page_model, download_manager, download_history,
-      pref_service, base::MakeUnique<base::DefaultClock>());
+      profile->GetPrefs(), base::MakeUnique<base::DefaultClock>());
   service->RegisterProvider(std::move(provider));
 }
 
 #endif  // OS_ANDROID
 
-void RegisterBookmarkProvider(BookmarkModel* bookmark_model,
-                              ContentSuggestionsService* service,
-                              PrefService* pref_service) {
-  auto provider = base::MakeUnique<BookmarkSuggestionsProvider>(
-      service, bookmark_model, pref_service);
+bool IsBookmarkProviderEnabled(BookmarkModel* bookmark_model) {
+  return base::FeatureList::IsEnabled(
+             ntp_snippets::kBookmarkSuggestionsFeature) &&
+         bookmark_model &&  // |bookmark_model| can be null in tests.
+         !IsChromeHomeEnabled();
+}
+
+void RegisterBookmarkProviderIfEnabled(ContentSuggestionsService* service,
+                                       Profile* profile) {
+  BookmarkModel* bookmark_model =
+      BookmarkModelFactory::GetForBrowserContext(profile);
+  if (!IsBookmarkProviderEnabled(bookmark_model)) {
+    return;
+  }
+
+  auto provider =
+      base::MakeUnique<BookmarkSuggestionsProvider>(service, bookmark_model);
   service->RegisterProvider(std::move(provider));
 }
 
@@ -166,23 +268,41 @@ bool IsPhysicalWebPageProviderEnabled() {
          base::FeatureList::IsEnabled(chrome::android::kPhysicalWebFeature);
 }
 
-void RegisterPhysicalWebPageProvider(
+void RegisterPhysicalWebPageProviderIfEnabled(
     ContentSuggestionsService* service,
-    PhysicalWebDataSource* physical_web_data_source,
-    PrefService* pref_service) {
+    Profile* profile) {
+  if (!IsPhysicalWebPageProviderEnabled()) {
+    return;
+  }
+
+  PhysicalWebDataSource* physical_web_data_source =
+      g_browser_process->GetPhysicalWebDataSource();
   auto provider = base::MakeUnique<PhysicalWebPageSuggestionsProvider>(
-      service, physical_web_data_source, pref_service);
+      service, physical_web_data_source, profile->GetPrefs());
   service->RegisterProvider(std::move(provider));
 }
 
 #endif  // OS_ANDROID
 
-void RegisterArticleProvider(SigninManagerBase* signin_manager,
-                             OAuth2TokenService* token_service,
-                             ContentSuggestionsService* service,
-                             LanguageModel* language_model,
-                             PrefService* pref_service,
-                             Profile* profile) {
+bool IsArticleProviderEnabled() {
+  return base::FeatureList::IsEnabled(ntp_snippets::kArticleSuggestionsFeature);
+}
+
+void RegisterArticleProviderIfEnabled(ContentSuggestionsService* service,
+                                      Profile* profile,
+                                      SigninManagerBase* signin_manager,
+                                      UserClassifier* user_classifier,
+                                      OfflinePageModel* offline_page_model) {
+  if (!IsArticleProviderEnabled()) {
+    return;
+  }
+
+  PrefService* pref_service = profile->GetPrefs();
+  OAuth2TokenService* token_service =
+      ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
+  UrlLanguageHistogram* language_histogram =
+      UrlLanguageHistogramFactory::GetInstance()->GetForBrowserContext(profile);
+
   scoped_refptr<net::URLRequestContextGetter> request_context =
       content::BrowserContext::GetDefaultStoragePartition(profile)
           ->GetURLRequestContext();
@@ -190,53 +310,130 @@ void RegisterArticleProvider(SigninManagerBase* signin_manager,
   base::FilePath database_dir(
       profile->GetPath().Append(ntp_snippets::kDatabaseFolder));
   scoped_refptr<base::SequencedTaskRunner> task_runner =
-      BrowserThread::GetBlockingPool()
-          ->GetSequencedTaskRunnerWithShutdownBehavior(
-              base::SequencedWorkerPool::GetSequenceToken(),
-              base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
-  bool is_stable_channel =
-      chrome::GetChannel() == version_info::Channel::STABLE;
-  auto suggestions_fetcher = base::MakeUnique<RemoteSuggestionsFetcher>(
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
+  std::string api_key;
+  // The API is private. If we don't have the official API key, don't even try.
+  if (google_apis::IsGoogleChromeAPIKeyUsed()) {
+    bool is_stable_channel =
+        chrome::GetChannel() == version_info::Channel::STABLE;
+    api_key = is_stable_channel ? google_apis::GetAPIKey()
+                                : google_apis::GetNonStableAPIKey();
+  }
+
+  // Pass the pref name associated to the search suggest toggle, and use it to
+  // also guard the remote suggestions feature.
+  // TODO(https://crbug.com/710636): Cleanup this clunky dependency once the
+  // preference design is stable.
+  std::string additional_toggle_pref;
+  if (base::FeatureList::IsEnabled(
+          chrome::android::kContentSuggestionsSettings)) {
+    additional_toggle_pref = prefs::kSearchSuggestEnabled;
+  }
+  std::unique_ptr<PrefetchedPagesTracker> prefetched_pages_tracker;
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+  prefetched_pages_tracker =
+      base::MakeUnique<PrefetchedPagesTrackerImpl>(offline_page_model);
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
+  auto suggestions_fetcher = base::MakeUnique<RemoteSuggestionsFetcherImpl>(
       signin_manager, token_service, request_context, pref_service,
-      language_model, base::Bind(&safe_json::SafeJsonParser::Parse),
-      GetFetchEndpoint(chrome::GetChannel()),
-      is_stable_channel ? google_apis::GetAPIKey()
-                        : google_apis::GetNonStableAPIKey(),
-      service->user_classifier());
+      language_histogram, base::Bind(&safe_json::SafeJsonParser::Parse),
+      GetFetchEndpoint(chrome::GetChannel()), api_key, user_classifier);
   auto provider = base::MakeUnique<RemoteSuggestionsProviderImpl>(
       service, pref_service, g_browser_process->GetApplicationLocale(),
-      service->category_ranker(), std::move(suggestions_fetcher),
+      service->category_ranker(), service->remote_suggestions_scheduler(),
+      std::move(suggestions_fetcher),
       base::MakeUnique<ImageFetcherImpl>(base::MakeUnique<ImageDecoderImpl>(),
                                          request_context.get()),
-      base::MakeUnique<ImageDecoderImpl>(),
       base::MakeUnique<RemoteSuggestionsDatabase>(database_dir, task_runner),
-      base::MakeUnique<RemoteSuggestionsStatusService>(signin_manager,
-                                                       pref_service));
+      base::MakeUnique<RemoteSuggestionsStatusService>(
+          signin_manager, pref_service, additional_toggle_pref),
+      std::move(prefetched_pages_tracker));
 
-  PersistentScheduler* scheduler = nullptr;
-#if defined(OS_ANDROID)
-  scheduler = NTPSnippetsLauncher::Get();
-#endif  // OS_ANDROID
-
-  RemoteSuggestionsProviderImpl* provider_raw = provider.get();
-  auto scheduling_provider =
-      base::MakeUnique<SchedulingRemoteSuggestionsProvider>(
-          service, std::move(provider), scheduler, service->user_classifier(),
-          pref_service, base::MakeUnique<base::DefaultClock>());
-  provider_raw->SetRemoteSuggestionsScheduler(scheduling_provider.get());
-  service->set_remote_suggestions_provider(scheduling_provider.get());
-  service->set_remote_suggestions_scheduler(scheduling_provider.get());
-  service->RegisterProvider(std::move(scheduling_provider));
+  service->remote_suggestions_scheduler()->SetProvider(provider.get());
+  service->set_remote_suggestions_provider(provider.get());
+  service->RegisterProvider(std::move(provider));
 }
 
-void RegisterForeignSessionsProvider(SyncService* sync_service,
-                                     ContentSuggestionsService* service,
-                                     PrefService* pref_service) {
+bool IsForeignSessionsProviderEnabled() {
+  return base::FeatureList::IsEnabled(
+      ntp_snippets::kForeignSessionsSuggestionsFeature);
+}
+
+void RegisterForeignSessionsProviderIfEnabled(
+    ContentSuggestionsService* service,
+    Profile* profile) {
+  if (!IsForeignSessionsProviderEnabled()) {
+    return;
+  }
+
+  SyncService* sync_service =
+      ProfileSyncServiceFactory::GetSyncServiceForBrowserContext(profile);
   std::unique_ptr<TabDelegateSyncAdapter> sync_adapter =
       base::MakeUnique<TabDelegateSyncAdapter>(sync_service);
   auto provider = base::MakeUnique<ForeignSessionsSuggestionsProvider>(
-      service, std::move(sync_adapter), pref_service);
+      service, std::move(sync_adapter), profile->GetPrefs());
   service->RegisterProvider(std::move(provider));
+}
+
+void SubscribeForGCMPushUpdates(
+    PrefService* pref_service,
+    ContentSuggestionsService* content_suggestions_service,
+    Profile* profile) {
+  // TODO(mamir): Either pass all params from outside or pass only profile and
+  // create them inside the method, but be consistent.
+  gcm::GCMDriver* gcm_driver =
+      gcm::GCMProfileServiceFactory::GetForProfile(profile)->driver();
+
+  OAuth2TokenService* token_service =
+      ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
+
+  SigninManagerBase* signin_manager =
+      SigninManagerFactory::GetForProfile(profile);
+
+  scoped_refptr<net::URLRequestContextGetter> request_context =
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetURLRequestContext();
+
+  std::string api_key;
+  // The API is private. If we don't have the official API key, don't even try.
+  if (google_apis::IsGoogleChromeAPIKeyUsed()) {
+    bool is_stable_channel =
+        chrome::GetChannel() == version_info::Channel::STABLE;
+    api_key = is_stable_channel ? google_apis::GetAPIKey()
+                                : google_apis::GetNonStableAPIKey();
+  }
+
+  auto subscription_manager = base::MakeUnique<SubscriptionManagerImpl>(
+      request_context, pref_service, signin_manager, token_service, api_key,
+      GetPushUpdatesSubscriptionEndpoint(chrome::GetChannel()),
+      GetPushUpdatesUnsubscriptionEndpoint(chrome::GetChannel()));
+
+  instance_id::InstanceIDProfileService* instance_id_profile_service =
+      instance_id::InstanceIDProfileServiceFactory::GetForProfile(profile);
+  DCHECK(instance_id_profile_service);
+  DCHECK(instance_id_profile_service->driver());
+
+  auto handler = base::MakeUnique<BreakingNewsGCMAppHandler>(
+      gcm_driver, instance_id_profile_service->driver(), pref_service,
+      std::move(subscription_manager),
+      base::Bind(&safe_json::SafeJsonParser::Parse));
+
+  scoped_refptr<base::SequencedTaskRunner> task_runner =
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
+  // TODO(mamir): Check if the same DB can be used for both remote suggestions
+  // and breaking news. Don't create a separate DB for breaking news in order to
+  // reduce the memory footprint. (crbug.com/735402)
+  base::FilePath database_dir(
+      profile->GetPath().Append(ntp_snippets::kBreakingNewsDatabaseFolder));
+  auto provider = base::MakeUnique<BreakingNewsSuggestionsProvider>(
+      content_suggestions_service, std::move(handler),
+      base::MakeUnique<base::DefaultClock>(),
+      base::MakeUnique<RemoteSuggestionsDatabase>(database_dir, task_runner));
+  content_suggestions_service->RegisterProvider(std::move(provider));
 }
 
 }  // namespace
@@ -269,12 +466,18 @@ ContentSuggestionsServiceFactory::ContentSuggestionsServiceFactory()
           BrowserContextDependencyManager::GetInstance()) {
   DependsOn(BookmarkModelFactory::GetInstance());
   DependsOn(HistoryServiceFactory::GetInstance());
-#if defined(OS_ANDROID)
+  DependsOn(LargeIconServiceFactory::GetInstance());
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
   DependsOn(OfflinePageModelFactory::GetInstance());
-#endif  // OS_ANDROID
+  DependsOn(offline_pages::PrefetchServiceFactory::GetInstance());
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
   DependsOn(ProfileOAuth2TokenServiceFactory::GetInstance());
   DependsOn(ProfileSyncServiceFactory::GetInstance());
   DependsOn(SigninManagerFactory::GetInstance());
+#if defined(OS_ANDROID)
+  DependsOn(gcm::GCMProfileServiceFactory::GetInstance());
+  DependsOn(instance_id::InstanceIDProfileServiceFactory::GetInstance());
+#endif  // defined(OS_ANDROID)
 }
 
 ContentSuggestionsServiceFactory::~ContentSuggestionsServiceFactory() = default;
@@ -286,83 +489,61 @@ KeyedService* ContentSuggestionsServiceFactory::BuildServiceInstanceFor(
   using State = ContentSuggestionsService::State;
   Profile* profile = Profile::FromBrowserContext(context);
   DCHECK(!profile->IsOffTheRecord());
+  PrefService* pref_service = profile->GetPrefs();
+
+  auto user_classifier = base::MakeUnique<UserClassifier>(
+      pref_service, base::MakeUnique<base::DefaultClock>());
+  auto* user_classifier_raw = user_classifier.get();
+
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+  OfflinePageModel* offline_page_model =
+      OfflinePageModelFactory::GetForBrowserContext(profile);
+#else
+  OfflinePageModel* offline_page_model = nullptr;
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
+
+  // Create the RemoteSuggestionsScheduler.
+  PersistentScheduler* persistent_scheduler = nullptr;
+#if defined(OS_ANDROID)
+  persistent_scheduler = NTPSnippetsLauncher::Get();
+#endif  // OS_ANDROID
+  auto scheduler = base::MakeUnique<RemoteSuggestionsSchedulerImpl>(
+      persistent_scheduler, user_classifier_raw, pref_service,
+      g_browser_process->local_state(), base::MakeUnique<base::DefaultClock>());
 
   // Create the ContentSuggestionsService.
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetForProfile(profile);
   HistoryService* history_service = HistoryServiceFactory::GetForProfile(
       profile, ServiceAccessType::EXPLICIT_ACCESS);
-  PrefService* pref_service = profile->GetPrefs();
+  favicon::LargeIconService* large_icon_service =
+      LargeIconServiceFactory::GetForBrowserContext(profile);
   std::unique_ptr<CategoryRanker> category_ranker =
       ntp_snippets::BuildSelectedCategoryRanker(
           pref_service, base::MakeUnique<base::DefaultClock>());
-  auto* service =
-      new ContentSuggestionsService(State::ENABLED, signin_manager,
-          history_service, pref_service, std::move(category_ranker));
+  auto* service = new ContentSuggestionsService(
+      State::ENABLED, signin_manager, history_service, large_icon_service,
+      pref_service, std::move(category_ranker), std::move(user_classifier),
+      std::move(scheduler));
+
+  RegisterArticleProviderIfEnabled(service, profile, signin_manager,
+                                   user_classifier_raw, offline_page_model);
+  RegisterBookmarkProviderIfEnabled(service, profile);
+  RegisterForeignSessionsProviderIfEnabled(service, profile);
 
 #if defined(OS_ANDROID)
-  OfflinePageModel* offline_page_model =
-      OfflinePageModelFactory::GetForBrowserContext(profile);
-  RequestCoordinator* request_coordinator =
-      RequestCoordinatorFactory::GetForBrowserContext(profile);
-  DownloadManager* download_manager =
-      content::BrowserContext::GetDownloadManager(profile);
-  DownloadService* download_service =
-      DownloadServiceFactory::GetForBrowserContext(profile);
-  DownloadHistory* download_history = download_service->GetDownloadHistory();
-  PhysicalWebDataSource* physical_web_data_source =
-      g_browser_process->GetPhysicalWebDataSource();
-#endif  // OS_ANDROID
-  BookmarkModel* bookmark_model =
-      BookmarkModelFactory::GetForBrowserContext(profile);
-  OAuth2TokenService* token_service =
-      ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
-  SyncService* sync_service =
-      ProfileSyncServiceFactory::GetSyncServiceForBrowserContext(profile);
-  LanguageModel* language_model =
-      LanguageModelFactory::GetInstance()->GetForBrowserContext(profile);
-
-#if defined(OS_ANDROID)
-  if (IsRecentTabProviderEnabled()) {
-    RegisterRecentTabProvider(offline_page_model, request_coordinator, service,
-                              pref_service);
-  }
-
-  bool show_asset_downloads =
-      base::FeatureList::IsEnabled(features::kAssetDownloadSuggestionsFeature);
-  bool show_offline_page_downloads = base::FeatureList::IsEnabled(
-      features::kOfflinePageDownloadSuggestionsFeature);
-  if (show_asset_downloads || show_offline_page_downloads) {
-    RegisterDownloadsProvider(
-        show_offline_page_downloads ? offline_page_model : nullptr,
-        show_asset_downloads ? download_manager : nullptr, download_history,
-        service, pref_service);
-  }
+  RegisterDownloadsProviderIfEnabled(service, profile, offline_page_model);
+  RegisterPhysicalWebPageProviderIfEnabled(service, profile);
 #endif  // OS_ANDROID
 
-  // |bookmark_model| can be null in tests.
-  if (base::FeatureList::IsEnabled(ntp_snippets::kBookmarkSuggestionsFeature) &&
-      bookmark_model) {
-    RegisterBookmarkProvider(bookmark_model, service, pref_service);
-  }
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+  RegisterRecentTabProviderIfEnabled(service, profile, offline_page_model);
+  RegisterPrefetchingObserver(service, profile);
+#endif
 
-#if defined(OS_ANDROID)
-  if (IsPhysicalWebPageProviderEnabled()) {
-    RegisterPhysicalWebPageProvider(service, physical_web_data_source,
-                                    pref_service);
+  if (base::FeatureList::IsEnabled(ntp_snippets::kBreakingNewsPushFeature)) {
+    SubscribeForGCMPushUpdates(pref_service, service, profile);
   }
-#endif  // OS_ANDROID
-
-  if (base::FeatureList::IsEnabled(ntp_snippets::kArticleSuggestionsFeature)) {
-    RegisterArticleProvider(signin_manager, token_service, service,
-                            language_model, pref_service, profile);
-  }
-
-  if (base::FeatureList::IsEnabled(
-          ntp_snippets::kForeignSessionsSuggestionsFeature)) {
-    RegisterForeignSessionsProvider(sync_service, service, pref_service);
-  }
-
   return service;
 
 #else

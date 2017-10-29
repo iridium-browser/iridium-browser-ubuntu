@@ -9,6 +9,7 @@
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -42,6 +43,16 @@ class ContentCapabilitiesTest : public ExtensionApiTest {
             base::MakeAbsoluteFilePath(test_extension_dir_.UnpackedPath())));
   }
 
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    base::FilePath test_data;
+    EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data));
+    embedded_test_server()->ServeFilesFromDirectory(
+        test_data.AppendASCII("extensions/content_capabilities"));
+    ASSERT_TRUE(embedded_test_server()->Start());
+    host_resolver()->AddRule("*", embedded_test_server()->base_url().host());
+  }
+
   // Builds an extension manifest with the given content_capabilities matches
   // and permissions. The extension always has the same (whitelisted) ID.
   scoped_refptr<const Extension> LoadExtensionWithCapabilities(
@@ -67,7 +78,7 @@ class ContentCapabilitiesTest : public ExtensionApiTest {
   std::string MakeJSONList(const std::string& s0 = "",
                            const std::string& s1 = "",
                            const std::string& s2 = "") {
-    std::vector<std::string> v;
+    std::vector<base::StringPiece> v;
     if (!s0.empty())
       v.push_back(s0);
     if (!s1.empty())
@@ -92,15 +103,6 @@ class ContentCapabilitiesTest : public ExtensionApiTest {
     return embedded_test_server()
         ->GetURL("/" + host + ".html")
         .ReplaceComponents(replacements);
-  }
-
-  void InitializeTestServer() {
-    base::FilePath test_data;
-    EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data));
-    embedded_test_server()->ServeFilesFromDirectory(
-        test_data.AppendASCII("extensions/content_capabilities"));
-    ASSERT_TRUE(embedded_test_server()->Start());
-    host_resolver()->AddRule("*", embedded_test_server()->base_url().host());
   }
 
   // Run some script in the context of the given origin and in the presence of
@@ -155,7 +157,6 @@ class ContentCapabilitiesTest : public ExtensionApiTest {
 };
 
 IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, NoCapabilities) {
-  InitializeTestServer();
   scoped_refptr<const Extension> extension = LoadExtensionWithCapabilities(
       MakeJSONList("http://foo.example.com/*"), MakeJSONList());
   EXPECT_FALSE(
@@ -169,7 +170,6 @@ IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, NoCapabilities) {
 }
 
 IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, ClipboardRead) {
-  InitializeTestServer();
   scoped_refptr<const Extension> extension = LoadExtensionWithCapabilities(
       MakeJSONList("http://foo.example.com/*"), MakeJSONList("clipboardRead"));
   EXPECT_TRUE(
@@ -189,7 +189,6 @@ IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, ClipboardRead) {
 }
 
 IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, ClipboardWrite) {
-  InitializeTestServer();
   scoped_refptr<const Extension> extension = LoadExtensionWithCapabilities(
       MakeJSONList("http://foo.example.com/*"), MakeJSONList("clipboardWrite"));
   EXPECT_TRUE(
@@ -210,7 +209,6 @@ IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, ClipboardWrite) {
 }
 
 IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, ClipboardReadWrite) {
-  InitializeTestServer();
   scoped_refptr<const Extension> extension = LoadExtensionWithCapabilities(
       MakeJSONList("http://foo.example.com/*"),
       MakeJSONList("clipboardRead", "clipboardWrite"));
@@ -227,7 +225,6 @@ IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, ClipboardReadWrite) {
 }
 
 IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, UnlimitedStorage) {
-  InitializeTestServer();
   scoped_refptr<const Extension> extension =
       LoadExtensionWithCapabilities(MakeJSONList("http://foo.example.com/*"),
                                     MakeJSONList("unlimitedStorage"));
@@ -238,7 +235,6 @@ IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, UnlimitedStorage) {
 }
 
 IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, WebUnlimitedStorageIsIsolated) {
-  InitializeTestServer();
   // This extension grants unlimited storage to bar.example.com but does not
   // have unlimitedStorage itself.
   scoped_refptr<const Extension> extension = LoadExtensionWithCapabilities(
@@ -252,7 +248,6 @@ IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest, WebUnlimitedStorageIsIsolated) {
 
 IN_PROC_BROWSER_TEST_F(ContentCapabilitiesTest,
                        ExtensionUnlimitedStorageIsIsolated) {
-  InitializeTestServer();
   // This extension has unlimitedStorage but doesn't grant it to foo.example.com
   scoped_refptr<const Extension> extension = LoadExtensionWithCapabilities(
       MakeJSONList("http://foo.example.com/*"), MakeJSONList("clipboardRead"),

@@ -13,8 +13,8 @@ then
 fi
 
 version="$1"
-repoprefix="http://source.icu-project.org/repos/icu/icu/tags/release-"
-repo="${repoprefix}${version}"
+repoprefix="http://source.icu-project.org/repos/icu/tags/release-"
+repo="${repoprefix}${version}/icu4c"
 treeroot="$(dirname "$0")/.."
 
 # Check if the repo for $version is available.

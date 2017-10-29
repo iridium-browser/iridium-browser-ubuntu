@@ -6,12 +6,14 @@
 
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPIOpacity::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  return CSSPropertyParserHelpers::consumeNumber(range, ValueRangeAll);
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  return CSSPropertyParserHelpers::ConsumeNumber(range, kValueRangeAll);
 }
 
 }  // namespace blink

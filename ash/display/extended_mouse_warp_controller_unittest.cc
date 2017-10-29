@@ -17,14 +17,14 @@
 
 namespace ash {
 
-class ExtendedMouseWarpControllerTest : public test::AshTestBase {
+class ExtendedMouseWarpControllerTest : public AshTestBase {
  public:
   ExtendedMouseWarpControllerTest() {}
   ~ExtendedMouseWarpControllerTest() override {}
 
  protected:
   MouseCursorEventFilter* event_filter() {
-    return Shell::GetInstance()->mouse_cursor_filter();
+    return Shell::Get()->mouse_cursor_filter();
   }
 
   ExtendedMouseWarpController* mouse_warp_controller() {

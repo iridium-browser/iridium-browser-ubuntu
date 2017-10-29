@@ -9,8 +9,8 @@
 
 namespace ash {
 
+class FastInkPoints;
 class LaserPointerController;
-class LaserPointerPoints;
 class LaserPointerView;
 
 // An api for testing the LaserPointerController class.
@@ -20,11 +20,11 @@ class LaserPointerControllerTestApi {
   ~LaserPointerControllerTestApi();
 
   void SetEnabled(bool enabled);
-  bool IsShowingLaserPointer();
-  bool IsFadingAway();
-  void SetIsFadingAway(bool fading_away);
-  const LaserPointerPoints& laser_points();
-  LaserPointerView* laser_pointer_view();
+  bool IsShowingLaserPointer() const;
+  bool IsFadingAway() const;
+  const FastInkPoints& laser_points() const;
+  const FastInkPoints& predicted_laser_points() const;
+  LaserPointerView* laser_pointer_view() const;
 
  private:
   LaserPointerController* instance_;

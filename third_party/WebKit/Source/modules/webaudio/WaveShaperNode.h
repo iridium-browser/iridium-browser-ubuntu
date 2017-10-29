@@ -26,7 +26,8 @@
 #ifndef WaveShaperNode_h
 #define WaveShaperNode_h
 
-#include "core/dom/DOMTypedArray.h"
+#include "core/typed_arrays/ArrayBufferViewHelpers.h"
+#include "core/typed_arrays/DOMTypedArray.h"
 #include "modules/webaudio/AudioNode.h"
 #include "modules/webaudio/WaveShaperProcessor.h"
 
@@ -40,15 +41,15 @@ class WaveShaperNode final : public AudioNode {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static WaveShaperNode* create(BaseAudioContext&, ExceptionState&);
-  static WaveShaperNode* create(BaseAudioContext*,
+  static WaveShaperNode* Create(BaseAudioContext&, ExceptionState&);
+  static WaveShaperNode* Create(BaseAudioContext*,
                                 const WaveShaperOptions&,
                                 ExceptionState&);
 
   // setCurve() is called on the main thread.
-  void setCurve(DOMFloat32Array*, ExceptionState&);
+  void setCurve(NotShared<DOMFloat32Array>, ExceptionState&);
   void setCurve(const Vector<float>&, ExceptionState&);
-  DOMFloat32Array* curve();
+  NotShared<DOMFloat32Array> curve();
 
   void setOversample(const String&);
   String oversample() const;
@@ -56,10 +57,10 @@ class WaveShaperNode final : public AudioNode {
  private:
   explicit WaveShaperNode(BaseAudioContext&);
 
-  void setCurveImpl(const float* curveData,
-                    unsigned curveLength,
+  void SetCurveImpl(const float* curve_data,
+                    unsigned curve_length,
                     ExceptionState&);
-  WaveShaperProcessor* getWaveShaperProcessor() const;
+  WaveShaperProcessor* GetWaveShaperProcessor() const;
 };
 
 }  // namespace blink

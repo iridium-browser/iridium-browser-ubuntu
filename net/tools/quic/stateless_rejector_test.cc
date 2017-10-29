@@ -10,9 +10,12 @@
 #include "net/quic/core/crypto/crypto_handshake_message.h"
 #include "net/quic/core/crypto/proof_source.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_str_cat.h"
+#include "net/quic/platform/api/quic_string_piece.h"
+#include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
 #include "net/quic/test_tools/quic_crypto_server_config_peer.h"
@@ -71,7 +74,7 @@ std::vector<TestParams> GetTestParams() {
   return params;
 }
 
-class StatelessRejectorTest : public ::testing::TestWithParam<TestParams> {
+class StatelessRejectorTest : public QuicTestWithParam<TestParams> {
  public:
   StatelessRejectorTest()
       : proof_source_(crypto_test_utils::ProofSourceForTesting()),
@@ -117,7 +120,7 @@ class StatelessRejectorTest : public ::testing::TestWithParam<TestParams> {
     string nonce;
     CryptoUtils::GenerateNonce(
         clock_.WallNow(), QuicRandom::GetInstance(),
-        StringPiece(
+        QuicStringPiece(
             reinterpret_cast<char*>(config_peer_.GetPrimaryConfig()->orbit),
             kOrbitSize),
         &nonce);
@@ -144,8 +147,6 @@ class StatelessRejectorTest : public ::testing::TestWithParam<TestParams> {
    private:
     StatelessRejectorTest* test_;
   };
-
-  QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
 
   std::unique_ptr<ProofSource> proof_source_;
   MockClock clock_;
@@ -238,11 +239,9 @@ TEST_P(StatelessRejectorTest, RejectChlo) {
   ASSERT_EQ(StatelessRejector::REJECTED, rejector_->state());
   const CryptoHandshakeMessage& reply = rejector_->reply();
   EXPECT_EQ(kSREJ, reply.tag());
-  const uint32_t* reject_reasons;
-  size_t num_reject_reasons;
-  EXPECT_EQ(QUIC_NO_ERROR,
-            reply.GetTaglist(kRREJ, &reject_reasons, &num_reject_reasons));
-  EXPECT_EQ(1u, num_reject_reasons);
+  QuicTagVector reject_reasons;
+  EXPECT_EQ(QUIC_NO_ERROR, reply.GetTaglist(kRREJ, &reject_reasons));
+  EXPECT_EQ(1u, reject_reasons.size());
   EXPECT_EQ(INVALID_EXPECTED_LEAF_CERTIFICATE,
             static_cast<HandshakeFailureReason>(reject_reasons[0]));
 }

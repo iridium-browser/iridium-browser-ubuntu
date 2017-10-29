@@ -5,9 +5,11 @@
 #include "base/base64url.h"
 #include "base/bind.h"
 #include "base/macros.h"
-#include "components/cryptauth/device_to_device_initiator_operations.h"
+#include "base/memory/ptr_util.h"
+#include "components/cryptauth/device_to_device_initiator_helper.h"
 #include "components/cryptauth/device_to_device_responder_operations.h"
 #include "components/cryptauth/fake_secure_message_delegate.h"
+#include "components/cryptauth/session_keys.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace cryptauth {
@@ -52,12 +54,20 @@ void SaveValidationResultWithKey(bool* out_success,
   *out_key = key;
 }
 
+void SaveValidationResultWithSessionKeys(bool* out_success,
+                                         SessionKeys* out_keys,
+                                         bool success,
+                                         const SessionKeys& keys) {
+  *out_success = success;
+  *out_keys = keys;
+}
+
 }  // namespace
 
-class ProximityAuthDeviceToDeviceOperationsTest : public testing::Test {
+class CryptAuthDeviceToDeviceOperationsTest : public testing::Test {
  protected:
-  ProximityAuthDeviceToDeviceOperationsTest() {}
-  ~ProximityAuthDeviceToDeviceOperationsTest() override {}
+  CryptAuthDeviceToDeviceOperationsTest() {}
+  ~CryptAuthDeviceToDeviceOperationsTest() override {}
 
   void SetUp() override {
     ASSERT_TRUE(
@@ -80,17 +90,20 @@ class ProximityAuthDeviceToDeviceOperationsTest : public testing::Test {
     secure_message_delegate_.DeriveKey(
         local_session_private_key_, remote_session_public_key_,
         base::Bind(&SaveMessageResult, &session_symmetric_key_));
+    session_keys_ = SessionKeys(session_symmetric_key_);
 
     persistent_symmetric_key_ = "persistent symmetric key";
+
+    helper_ = base::MakeUnique<DeviceToDeviceInitiatorHelper>();
   }
 
   // Creates the initator's [Hello] message.
   std::string CreateHelloMessage() {
     std::string hello_message;
-    DeviceToDeviceInitiatorOperations::CreateHelloMessage(
-        local_session_public_key_, persistent_symmetric_key_,
-        &secure_message_delegate_,
-        base::Bind(&SaveMessageResult, &hello_message));
+    helper_->CreateHelloMessage(local_session_public_key_,
+                                persistent_symmetric_key_,
+                                &secure_message_delegate_,
+                                base::Bind(&SaveMessageResult, &hello_message));
     EXPECT_FALSE(hello_message.empty());
     return hello_message;
   }
@@ -115,8 +128,8 @@ class ProximityAuthDeviceToDeviceOperationsTest : public testing::Test {
   std::string CreateInitiatorAuthMessage(
       const std::string& remote_auth_message) {
     std::string local_auth_message;
-    DeviceToDeviceInitiatorOperations::CreateInitiatorAuthMessage(
-        session_symmetric_key_, persistent_symmetric_key_, remote_auth_message,
+    helper_->CreateInitiatorAuthMessage(
+        session_keys_, persistent_symmetric_key_, remote_auth_message,
         &secure_message_delegate_,
         base::Bind(&SaveMessageResult, &local_auth_message));
     EXPECT_FALSE(local_auth_message.empty());
@@ -131,12 +144,14 @@ class ProximityAuthDeviceToDeviceOperationsTest : public testing::Test {
   std::string remote_session_public_key_;
   std::string remote_session_private_key_;
   std::string session_symmetric_key_;
+  SessionKeys session_keys_;
 
-  DISALLOW_COPY_AND_ASSIGN(ProximityAuthDeviceToDeviceOperationsTest);
+  std::unique_ptr<DeviceToDeviceInitiatorHelper> helper_;
+
+  DISALLOW_COPY_AND_ASSIGN(CryptAuthDeviceToDeviceOperationsTest);
 };
 
-TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
-       ValidateHelloMessage_Success) {
+TEST_F(CryptAuthDeviceToDeviceOperationsTest, ValidateHelloMessage_Success) {
   bool validation_success = false;
   std::string hello_public_key;
   DeviceToDeviceResponderOperations::ValidateHelloMessage(
@@ -149,8 +164,7 @@ TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
   EXPECT_EQ(local_session_public_key_, hello_public_key);
 }
 
-TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
-       ValidateHelloMessage_Failure) {
+TEST_F(CryptAuthDeviceToDeviceOperationsTest, ValidateHelloMessage_Failure) {
   bool validation_success = true;
   std::string hello_public_key = "non-empty string";
   DeviceToDeviceResponderOperations::ValidateHelloMessage(
@@ -163,61 +177,66 @@ TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
   EXPECT_TRUE(hello_public_key.empty());
 }
 
-TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
+TEST_F(CryptAuthDeviceToDeviceOperationsTest,
        ValidateResponderAuthMessage_Success) {
   std::string hello_message = CreateHelloMessage();
   std::string remote_auth_message = CreateResponderAuthMessage(hello_message);
 
   bool validation_success = false;
-  std::string session_symmetric_key;
-  DeviceToDeviceInitiatorOperations::ValidateResponderAuthMessage(
+  SessionKeys session_keys;
+  helper_->ValidateResponderAuthMessage(
       remote_auth_message, kResponderPersistentPublicKey,
       persistent_symmetric_key_, local_session_private_key_, hello_message,
       &secure_message_delegate_,
-      base::Bind(&SaveValidationResultWithKey, &validation_success,
-                 &session_symmetric_key));
+      base::Bind(&SaveValidationResultWithSessionKeys, &validation_success,
+                 &session_keys));
 
   EXPECT_TRUE(validation_success);
-  EXPECT_EQ(session_symmetric_key_, session_symmetric_key);
+  EXPECT_EQ(session_keys_.initiator_encode_key(),
+            session_keys.initiator_encode_key());
+  EXPECT_EQ(session_keys_.responder_encode_key(),
+            session_keys.responder_encode_key());
 }
 
-TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
+TEST_F(CryptAuthDeviceToDeviceOperationsTest,
        ValidateResponderAuthMessage_InvalidHelloMessage) {
   std::string hello_message = CreateHelloMessage();
   std::string remote_auth_message = CreateResponderAuthMessage(hello_message);
 
   bool validation_success = true;
-  std::string session_symmetric_key = "non empty";
-  DeviceToDeviceInitiatorOperations::ValidateResponderAuthMessage(
+  SessionKeys session_keys("non empty");
+  helper_->ValidateResponderAuthMessage(
       remote_auth_message, kResponderPersistentPublicKey,
       persistent_symmetric_key_, local_session_private_key_,
       "invalid hello message", &secure_message_delegate_,
-      base::Bind(&SaveValidationResultWithKey, &validation_success,
-                 &session_symmetric_key));
+      base::Bind(&SaveValidationResultWithSessionKeys, &validation_success,
+                 &session_keys));
 
   EXPECT_FALSE(validation_success);
-  EXPECT_TRUE(session_symmetric_key.empty());
+  EXPECT_TRUE(session_keys.initiator_encode_key().empty());
+  EXPECT_TRUE(session_keys.responder_encode_key().empty());
 }
 
-TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
+TEST_F(CryptAuthDeviceToDeviceOperationsTest,
        ValidateResponderAuthMessage_InvalidPSK) {
   std::string hello_message = CreateHelloMessage();
   std::string remote_auth_message = CreateResponderAuthMessage(hello_message);
 
   bool validation_success = true;
-  std::string session_symmetric_key = "non empty";
-  DeviceToDeviceInitiatorOperations::ValidateResponderAuthMessage(
+  SessionKeys session_keys("non empty");
+  helper_->ValidateResponderAuthMessage(
       remote_auth_message, kResponderPersistentPublicKey,
       "invalid persistent symmetric key", local_session_private_key_,
       hello_message, &secure_message_delegate_,
-      base::Bind(&SaveValidationResultWithKey, &validation_success,
-                 &session_symmetric_key));
+      base::Bind(&SaveValidationResultWithSessionKeys, &validation_success,
+                 &session_keys));
 
   EXPECT_FALSE(validation_success);
-  EXPECT_TRUE(session_symmetric_key.empty());
+  EXPECT_TRUE(session_keys.initiator_encode_key().empty());
+  EXPECT_TRUE(session_keys.responder_encode_key().empty());
 }
 
-TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
+TEST_F(CryptAuthDeviceToDeviceOperationsTest,
        ValidateInitiatorAuthMessage_Success) {
   std::string hello_message = CreateHelloMessage();
   std::string remote_auth_message = CreateResponderAuthMessage(hello_message);
@@ -226,14 +245,14 @@ TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
 
   bool validation_success = false;
   DeviceToDeviceResponderOperations::ValidateInitiatorAuthMessage(
-      local_auth_message, session_symmetric_key_, persistent_symmetric_key_,
+      local_auth_message, session_keys_, persistent_symmetric_key_,
       remote_auth_message, &secure_message_delegate_,
       base::Bind(&SaveValidationResult, &validation_success));
 
   EXPECT_TRUE(validation_success);
 }
 
-TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
+TEST_F(CryptAuthDeviceToDeviceOperationsTest,
        ValidateInitiatorAuthMessage_InvalidRemoteAuth) {
   std::string hello_message = CreateHelloMessage();
   std::string remote_auth_message = CreateResponderAuthMessage(hello_message);
@@ -242,14 +261,14 @@ TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
 
   bool validation_success = true;
   DeviceToDeviceResponderOperations::ValidateInitiatorAuthMessage(
-      local_auth_message, session_symmetric_key_, persistent_symmetric_key_,
+      local_auth_message, session_keys_, persistent_symmetric_key_,
       "invalid remote auth", &secure_message_delegate_,
       base::Bind(&SaveValidationResult, &validation_success));
 
   EXPECT_FALSE(validation_success);
 }
 
-TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
+TEST_F(CryptAuthDeviceToDeviceOperationsTest,
        ValidateInitiatorAuthMessage_InvalidPSK) {
   std::string hello_message = CreateHelloMessage();
   std::string remote_auth_message = CreateResponderAuthMessage(hello_message);
@@ -258,9 +277,8 @@ TEST_F(ProximityAuthDeviceToDeviceOperationsTest,
 
   bool validation_success = true;
   DeviceToDeviceResponderOperations::ValidateInitiatorAuthMessage(
-      local_auth_message, session_symmetric_key_,
-      "invalid persistent symmetric key", remote_auth_message,
-      &secure_message_delegate_,
+      local_auth_message, session_keys_, "invalid persistent symmetric key",
+      remote_auth_message, &secure_message_delegate_,
       base::Bind(&SaveValidationResult, &validation_success));
 
   EXPECT_FALSE(validation_success);

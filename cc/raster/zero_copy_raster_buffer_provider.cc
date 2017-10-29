@@ -14,8 +14,8 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/debug/traced_value.h"
-#include "cc/resources/platform_color.h"
 #include "cc/resources/resource.h"
+#include "components/viz/common/resources/platform_color.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 
@@ -34,7 +34,7 @@ class RasterBufferImpl : public RasterBuffer {
       const gfx::Rect& raster_full_rect,
       const gfx::Rect& raster_dirty_rect,
       uint64_t new_content_id,
-      float scale,
+      const gfx::AxisTransform2d& transform,
       const RasterSource::PlaybackSettings& playback_settings) override {
     TRACE_EVENT0("cc", "ZeroCopyRasterBuffer::Playback");
     gfx::GpuMemoryBuffer* buffer = lock_.GetGpuMemoryBuffer();
@@ -52,7 +52,7 @@ class RasterBufferImpl : public RasterBuffer {
     RasterBufferProvider::PlaybackToMemory(
         buffer->memory(0), resource_->format(), resource_->size(),
         buffer->stride(0), raster_source, raster_full_rect, raster_full_rect,
-        scale, lock_.sk_color_space(), playback_settings);
+        transform, lock_.color_space_for_raster(), playback_settings);
     buffer->Unmap();
   }
 
@@ -68,7 +68,7 @@ class RasterBufferImpl : public RasterBuffer {
 // static
 std::unique_ptr<RasterBufferProvider> ZeroCopyRasterBufferProvider::Create(
     ResourceProvider* resource_provider,
-    ResourceFormat preferred_tile_format) {
+    viz::ResourceFormat preferred_tile_format) {
   return base::WrapUnique<RasterBufferProvider>(
       new ZeroCopyRasterBufferProvider(resource_provider,
                                        preferred_tile_format));
@@ -76,7 +76,7 @@ std::unique_ptr<RasterBufferProvider> ZeroCopyRasterBufferProvider::Create(
 
 ZeroCopyRasterBufferProvider::ZeroCopyRasterBufferProvider(
     ResourceProvider* resource_provider,
-    ResourceFormat preferred_tile_format)
+    viz::ResourceFormat preferred_tile_format)
     : resource_provider_(resource_provider),
       preferred_tile_format_(preferred_tile_format) {}
 
@@ -100,9 +100,11 @@ void ZeroCopyRasterBufferProvider::OrderingBarrier() {
   // No need to sync resources as this provider does not use GL context.
 }
 
-ResourceFormat ZeroCopyRasterBufferProvider::GetResourceFormat(
+void ZeroCopyRasterBufferProvider::Flush() {}
+
+viz::ResourceFormat ZeroCopyRasterBufferProvider::GetResourceFormat(
     bool must_support_alpha) const {
-  if (resource_provider_->IsResourceFormatSupported(preferred_tile_format_) &&
+  if (resource_provider_->IsTextureFormatSupported(preferred_tile_format_) &&
       (DoesResourceFormatSupportAlpha(preferred_tile_format_) ||
        !must_support_alpha)) {
     return preferred_tile_format_;

@@ -10,6 +10,7 @@
 #include <clocale>
 #include <cmath>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "base/base64.h"
@@ -33,6 +34,7 @@
 #include "components/plugins/renderer/plugin_placeholder.h"
 #include "content/common/content_switches_internal.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/service_names.mojom.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/web_preferences.h"
 #include "content/public/renderer/media_stream_utils.h"
@@ -60,8 +62,8 @@
 #include "media/media_features.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_errors.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
-#include "services/service_manager/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/binder_registry.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/platform/FilePathConversion.h"
 #include "third_party/WebKit/public/platform/Platform.h"
@@ -99,8 +101,8 @@ using blink::Platform;
 using blink::WebArrayBufferView;
 using blink::WebContextMenuData;
 using blink::WebDevToolsAgent;
-using blink::WebDeviceMotionData;
-using blink::WebDeviceOrientationData;
+using device::MotionData;
+using device::OrientationData;
 using blink::WebElement;
 using blink::WebLocalFrame;
 using blink::WebHistoryItem;
@@ -160,7 +162,7 @@ class MockGamepadProvider : public RendererGamepadProvider {
   }
 
   // RendererGamepadProvider implementation.
-  void SampleGamepads(blink::WebGamepads& gamepads) override {
+  void SampleGamepads(device::Gamepads& gamepads) override {
     controller_->SampleGamepads(gamepads);
   }
   void Start(blink::WebPlatformEventListener* listener) override {
@@ -181,18 +183,14 @@ class MockVideoCapturerSource : public media::VideoCapturerSource {
   MockVideoCapturerSource() = default;
   ~MockVideoCapturerSource() override {}
 
-  void GetCurrentSupportedFormats(
-      int max_requested_width,
-      int max_requested_height,
-      double max_requested_frame_rate,
-      const VideoCaptureDeviceFormatsCB& callback) override {
+  media::VideoCaptureFormats GetPreferredFormats() override {
     const int supported_width = 640;
     const int supported_height = 480;
     const float supported_framerate = 60.0;
-    callback.Run(media::VideoCaptureFormats(
+    return media::VideoCaptureFormats(
         1, media::VideoCaptureFormat(
                gfx::Size(supported_width, supported_height),
-               supported_framerate, media::PIXEL_FORMAT_I420)));
+               supported_framerate, media::PIXEL_FORMAT_I420));
   }
   void StartCapture(const media::VideoCaptureParams& params,
                     const VideoCaptureDeliverFrameCB& new_frame_callback,
@@ -255,10 +253,10 @@ WebURL RewriteAbsolutePathInCsswgTest(const std::string& utf8_url) {
 BlinkTestRunner::BlinkTestRunner(RenderView* render_view)
     : RenderViewObserver(render_view),
       RenderViewObserverTracker<BlinkTestRunner>(render_view),
+      test_config_(mojom::ShellTestConfiguration::New()),
       is_main_window_(false),
       focus_on_next_commit_(false),
-      leak_detector_(new LeakDetector(this)) {
-}
+      leak_detector_(new LeakDetector(this)) {}
 
 BlinkTestRunner::~BlinkTestRunner() {
 }
@@ -281,17 +279,16 @@ void BlinkTestRunner::SetGamepadProvider(
   SetMockGamepadProvider(std::move(provider));
 }
 
-void BlinkTestRunner::SetDeviceLightData(const double data) {
-  SetMockDeviceLightData(data);
-}
-
-void BlinkTestRunner::SetDeviceMotionData(const WebDeviceMotionData& data) {
+void BlinkTestRunner::SetDeviceMotionData(const MotionData& data) {
   SetMockDeviceMotionData(data);
 }
 
-void BlinkTestRunner::SetDeviceOrientationData(
-    const WebDeviceOrientationData& data) {
+void BlinkTestRunner::SetDeviceOrientationData(const OrientationData& data) {
   SetMockDeviceOrientationData(data);
+}
+
+void BlinkTestRunner::PrintMessageToStderr(const std::string& message) {
+  Send(new ShellViewHostMsg_PrintMessageToStderr(routing_id(), message));
 }
 
 void BlinkTestRunner::PrintMessage(const std::string& message) {
@@ -299,14 +296,14 @@ void BlinkTestRunner::PrintMessage(const std::string& message) {
 }
 
 void BlinkTestRunner::PostTask(const base::Closure& task) {
-  Platform::current()->currentThread()->getSingleThreadTaskRunner()->PostTask(
+  Platform::Current()->CurrentThread()->GetSingleThreadTaskRunner()->PostTask(
       FROM_HERE, task);
 }
 
 void BlinkTestRunner::PostDelayedTask(const base::Closure& task, long long ms) {
-  Platform::current()
-      ->currentThread()
-      ->getSingleThreadTaskRunner()
+  Platform::Current()
+      ->CurrentThread()
+      ->GetSingleThreadTaskRunner()
       ->PostDelayedTask(FROM_HERE, task, base::TimeDelta::FromMilliseconds(ms));
 }
 
@@ -318,7 +315,7 @@ WebString BlinkTestRunner::RegisterIsolatedFileSystem(
   std::string filesystem_id;
   Send(new LayoutTestHostMsg_RegisterIsolatedFileSystem(
       routing_id(), files, &filesystem_id));
-  return WebString::fromUTF8(filesystem_id);
+  return WebString::FromUTF8(filesystem_id);
 }
 
 long long BlinkTestRunner::GetCurrentTimeInMillisecond() {
@@ -359,9 +356,22 @@ WebURL BlinkTestRunner::RewriteLayoutTestsURL(const std::string& utf8_url,
                                               bool is_wpt_mode) {
   if (is_wpt_mode) {
     WebURL rewritten_url = RewriteAbsolutePathInCsswgTest(utf8_url);
-    if (!rewritten_url.isEmpty())
+    if (!rewritten_url.IsEmpty())
       return rewritten_url;
     return WebURL(GURL(utf8_url));
+  }
+
+  const char kGenPrefix[] = "file:///gen/";
+  const int kGenPrefixLen = arraysize(kGenPrefix) - 1;
+
+  // Map "file:///gen/" to "file://<build directory>/gen/".
+  if (!utf8_url.compare(0, kGenPrefixLen, kGenPrefix, kGenPrefixLen)) {
+    base::FilePath gen_directory_path =
+        test_config_->build_directory.Append(FILE_PATH_LITERAL("gen/"));
+    std::string new_url = std::string("file://") +
+                          gen_directory_path.AsUTF8Unsafe() +
+                          utf8_url.substr(kGenPrefixLen);
+    return WebURL(GURL(new_url));
   }
 
   const char kPrefix[] = "file:///tmp/LayoutTests/";
@@ -390,34 +400,9 @@ void BlinkTestRunner::ApplyPreferences() {
   Send(new ShellViewHostMsg_OverridePreferences(routing_id(), prefs));
 }
 
-std::string BlinkTestRunner::makeURLErrorDescription(const WebURLError& error) {
-  std::string domain = error.domain.utf8();
-  int code = error.reason;
-
-  if (domain == net::kErrorDomain) {
-    domain = "NSURLErrorDomain";
-    switch (error.reason) {
-    case net::ERR_ABORTED:
-      code = -999;  // NSURLErrorCancelled
-      break;
-    case net::ERR_UNSAFE_PORT:
-      // Our unsafe port checking happens at the network stack level, but we
-      // make this translation here to match the behavior of stock WebKit.
-      domain = "WebKitErrorDomain";
-      code = 103;
-      break;
-    case net::ERR_ADDRESS_INVALID:
-    case net::ERR_ADDRESS_UNREACHABLE:
-    case net::ERR_NETWORK_ACCESS_DENIED:
-      code = -1004;  // NSURLErrorCannotConnectToHost
-      break;
-    }
-  } else {
-    DLOG(WARNING) << "Unknown error domain";
-  }
-
-  return base::StringPrintf("<NSError domain %s, code %d, failing URL \"%s\">",
-      domain.c_str(), code, error.unreachableURL.string().utf8().data());
+void BlinkTestRunner::SetPopupBlockingEnabled(bool block_popups) {
+  Send(
+      new ShellViewHostMsg_SetPopupBlockingEnabled(routing_id(), block_popups));
 }
 
 void BlinkTestRunner::UseUnfortunateSynchronousResizeMode(bool enable) {
@@ -432,7 +417,7 @@ void BlinkTestRunner::EnableAutoResizeMode(const WebSize& min_size,
 
 void BlinkTestRunner::DisableAutoResizeMode(const WebSize& new_size) {
   content::DisableAutoResizeMode(render_view(), new_size);
-  if (!new_size.isEmpty())
+  if (!new_size.IsEmpty())
     ForceResizeRenderView(render_view(), new_size);
 }
 
@@ -448,10 +433,7 @@ void BlinkTestRunner::ShowDevTools(const std::string& settings,
 
 void BlinkTestRunner::CloseDevTools() {
   Send(new ShellViewHostMsg_CloseDevTools(routing_id()));
-  WebDevToolsAgent* agent =
-      render_view()->GetMainRenderFrame()->GetWebFrame()->devToolsAgent();
-  if (agent)
-    agent->detach();
+  render_view()->GetMainRenderFrame()->DetachDevToolsForTest();
 }
 
 void BlinkTestRunner::EvaluateInWebInspector(int call_id,
@@ -463,12 +445,12 @@ void BlinkTestRunner::EvaluateInWebInspector(int call_id,
 std::string BlinkTestRunner::EvaluateInWebInspectorOverlay(
     const std::string& script) {
   WebDevToolsAgent* agent =
-      render_view()->GetMainRenderFrame()->GetWebFrame()->devToolsAgent();
+      render_view()->GetMainRenderFrame()->GetWebFrame()->DevToolsAgent();
   if (!agent)
     return std::string();
 
-  return agent->evaluateInWebInspectorOverlay(
-      WebString::fromUTF8(script)).utf8();
+  return agent->EvaluateInWebInspectorOverlay(WebString::FromUTF8(script))
+      .Utf8();
 }
 
 void BlinkTestRunner::ClearAllDatabases() {
@@ -523,8 +505,8 @@ bool BlinkTestRunner::IsUseZoomForDSFEnabled() {
   return content::IsUseZoomForDSFEnabled();
 }
 
-void BlinkTestRunner::SetDeviceColorProfile(const std::string& name) {
-  content::SetDeviceColorProfile(render_view(), GetTestingICCProfile(name));
+void BlinkTestRunner::SetDeviceColorSpace(const std::string& name) {
+  content::SetDeviceColorSpace(render_view(), GetTestingColorSpace(name));
 }
 
 void BlinkTestRunner::SetBluetoothFakeAdapter(const std::string& adapter_name,
@@ -576,7 +558,9 @@ std::string BlinkTestRunner::PathToLocalResource(const std::string& resource) {
                           base::CompareCase::SENSITIVE)) {
     result = result.substr(0, kFileLen) + result.substr(kFileLen + 1);
   }
-  return RewriteLayoutTestsURL(result, false /* is_wpt_mode */).string().utf8();
+  return RewriteLayoutTestsURL(result, false /* is_wpt_mode */)
+      .GetString()
+      .Utf8();
 }
 
 void BlinkTestRunner::SetLocale(const std::string& locale) {
@@ -586,8 +570,11 @@ void BlinkTestRunner::SetLocale(const std::string& locale) {
 void BlinkTestRunner::OnLayoutTestRuntimeFlagsChanged(
     const base::DictionaryValue& changed_values) {
   // Ignore changes that happen before we got the initial, accumulated
-  // layout flag changes in ShellViewMsg_ReplicateTestConfiguration.
-  if (!is_main_window_)
+  // layout flag changes in either OnReplicateTestConfiguration or
+  // OnSetTestConfiguration.
+  test_runner::WebTestInterfaces* interfaces =
+      LayoutTestRenderThreadObserver::GetInstance()->test_interfaces();
+  if (!interfaces->TestIsRunning())
     return;
 
   RenderThread::Get()->Send(
@@ -595,14 +582,16 @@ void BlinkTestRunner::OnLayoutTestRuntimeFlagsChanged(
 }
 
 void BlinkTestRunner::TestFinished() {
+  test_runner::WebTestInterfaces* interfaces =
+      LayoutTestRenderThreadObserver::GetInstance()->test_interfaces();
+  interfaces->SetTestIsRunning(false);
+
   if (!is_main_window_ || !render_view()->GetMainRenderFrame()) {
     RenderThread::Get()->Send(
         new LayoutTestHostMsg_TestFinishedInSecondaryRenderer());
     return;
   }
-  test_runner::WebTestInterfaces* interfaces =
-      LayoutTestRenderThreadObserver::GetInstance()->test_interfaces();
-  interfaces->SetTestIsRunning(false);
+
   if (interfaces->TestRunner()->ShouldDumpBackForwardList()) {
     SyncNavigationStateVisitor visitor;
     RenderView::ForEach(&visitor);
@@ -610,8 +599,12 @@ void BlinkTestRunner::TestFinished() {
   } else {
     // clean out the lifecycle if needed before capturing the layout tree
     // dump and pixels from the compositor.
-    render_view()->GetWebView()->mainFrame()->toWebLocalFrame()
-        ->frameWidget()->updateAllLifecyclePhases();
+    render_view()
+        ->GetWebView()
+        ->MainFrame()
+        ->ToWebLocalFrame()
+        ->FrameWidget()
+        ->UpdateAllLifecyclePhases();
     CaptureDump();
   }
 }
@@ -699,7 +692,7 @@ void BlinkTestRunner::ResetPermissions() {
   Send(new LayoutTestHostMsg_ResetPermissions(routing_id()));
 }
 
-cc::SharedBitmapManager* BlinkTestRunner::GetSharedBitmapManager() {
+viz::SharedBitmapManager* BlinkTestRunner::GetSharedBitmapManager() {
   return RenderThread::Get()->GetSharedBitmapManager();
 }
 
@@ -708,11 +701,12 @@ void BlinkTestRunner::DispatchBeforeInstallPromptEvent(
     const base::Callback<void(bool)>& callback) {
   app_banner_service_.reset(new test_runner::AppBannerService());
 
-  service_manager::InterfaceRegistry::TestApi test_api(
-      render_view()->GetMainRenderFrame()->GetInterfaceRegistry());
-  test_api.GetLocalInterface(
-      mojo::MakeRequest(&app_banner_service_->controller()));
-
+  service_manager::BinderRegistry* registry =
+      render_view()->GetMainRenderFrame()->GetInterfaceRegistry();
+  blink::mojom::AppBannerControllerRequest request =
+      mojo::MakeRequest(&app_banner_service_->controller());
+  registry->BindInterface(blink::mojom::AppBannerController::Name_,
+                          request.PassMessagePipe());
   app_banner_service_->SendBannerPromptRequest(event_platforms, callback);
 }
 
@@ -725,13 +719,12 @@ void BlinkTestRunner::ResolveBeforeInstallPromptPromise(
 }
 
 blink::WebPlugin* BlinkTestRunner::CreatePluginPlaceholder(
-    blink::WebLocalFrame* frame, const blink::WebPluginParams& params) {
-  if (params.mimeType != "application/x-plugin-placeholder-test")
+    const blink::WebPluginParams& params) {
+  if (params.mime_type != "application/x-plugin-placeholder-test")
     return nullptr;
 
-  plugins::PluginPlaceholder* placeholder =
-      new plugins::PluginPlaceholder(render_view()->GetMainRenderFrame(), frame,
-                                     params, "<div>Test content</div>");
+  plugins::PluginPlaceholder* placeholder = new plugins::PluginPlaceholder(
+      render_view()->GetMainRenderFrame(), params, "<div>Test content</div>");
   return placeholder->plugin();
 }
 
@@ -743,7 +736,7 @@ void BlinkTestRunner::RunIdleTasks(const base::Closure& callback) {
     SchedulerRunIdleTasks(callback);
 }
 
-void BlinkTestRunner::ForceTextInputStateUpdate(WebFrame* frame) {
+void BlinkTestRunner::ForceTextInputStateUpdate(WebLocalFrame* frame) {
   ForceTextInputStateUpdateForRenderFrame(RenderFrame::FromWebFrame(frame));
 }
 
@@ -758,7 +751,6 @@ bool BlinkTestRunner::AddMediaStreamVideoSourceAndTrack(
 #if BUILDFLAG(ENABLE_WEBRTC)
   return AddVideoTrackToMediaStream(base::MakeUnique<MockVideoCapturerSource>(),
                                     false,  // is_remote
-                                    false,  // is_readonly
                                     stream);
 #else
   return false;
@@ -773,9 +765,8 @@ bool BlinkTestRunner::AddMediaStreamAudioSourceAndTrack(
       make_scoped_refptr(new MockAudioCapturerSource()),
       48000,  // sample rate
       media::CHANNEL_LAYOUT_STEREO,
-      480,  // sample frames per buffer
+      480,    // sample frames per buffer
       false,  // is_remote
-      false,  // is_readonly
       stream);
 #else
   return false;
@@ -785,7 +776,7 @@ bool BlinkTestRunner::AddMediaStreamAudioSourceAndTrack(
 // RenderViewObserver  --------------------------------------------------------
 
 void BlinkTestRunner::DidClearWindowObject(WebLocalFrame* frame) {
-  WebTestingSupport::injectInternalsObject(frame);
+  WebTestingSupport::InjectInternalsObject(frame);
 }
 
 bool BlinkTestRunner::OnMessageReceived(const IPC::Message& message) {
@@ -814,7 +805,7 @@ void BlinkTestRunner::DidCommitProvisionalLoad(WebLocalFrame* frame,
   if (!focus_on_next_commit_)
     return;
   focus_on_next_commit_ = false;
-  render_view()->GetWebView()->setFocusedFrame(frame);
+  render_view()->GetWebView()->SetFocusedFrame(frame);
 }
 
 void BlinkTestRunner::DidFailProvisionalLoad(WebLocalFrame* frame,
@@ -832,16 +823,16 @@ void BlinkTestRunner::Reset(bool for_new_test) {
 
   render_view()->ClearEditCommands();
   if (for_new_test) {
-    if (render_view()->GetWebView()->mainFrame()->isWebLocalFrame())
-      render_view()->GetWebView()->mainFrame()->setName(WebString());
-    render_view()->GetWebView()->mainFrame()->clearOpener();
+    if (render_view()->GetWebView()->MainFrame()->IsWebLocalFrame())
+      render_view()->GetWebView()->MainFrame()->SetName(WebString());
+    render_view()->GetWebView()->MainFrame()->ClearOpener();
   }
 
   // Resetting the internals object also overrides the WebPreferences, so we
   // have to sync them to WebKit again.
-  if (render_view()->GetWebView()->mainFrame()->isWebLocalFrame()) {
-    WebTestingSupport::resetInternalsObject(
-        render_view()->GetWebView()->mainFrame()->toWebLocalFrame());
+  if (render_view()->GetWebView()->MainFrame()->IsWebLocalFrame()) {
+    WebTestingSupport::ResetInternalsObject(
+        render_view()->GetWebView()->MainFrame()->ToWebLocalFrame());
     render_view()->SetWebkitPreferences(render_view()->GetWebkitPreferences());
   }
 }
@@ -899,9 +890,14 @@ void BlinkTestRunner::CaptureDumpContinued() {
   if (test_config_->enable_pixel_dumping &&
       interfaces->TestRunner()->ShouldGeneratePixelResults() &&
       !interfaces->TestRunner()->ShouldDumpAsAudio()) {
-    CHECK(render_view()->GetWebView()->isAcceleratedCompositingActive());
+    CHECK(render_view()->GetWebView()->IsAcceleratedCompositingActive());
+
+    // Test finish should only be processed in the BlinkTestRunner associated
+    // with the current, non-swapped-out RenderView.
+    DCHECK(render_view()->GetWebView()->MainFrame()->IsWebLocalFrame());
+
     interfaces->TestRunner()->DumpPixelsAsync(
-        render_view()->GetWebView(),
+        render_view()->GetWebView()->MainFrame()->ToWebLocalFrame(),
         base::Bind(&BlinkTestRunner::OnPixelsDumpCompleted,
                    base::Unretained(this)));
     return;
@@ -914,7 +910,6 @@ void BlinkTestRunner::OnPixelsDumpCompleted(const SkBitmap& snapshot) {
   DCHECK_NE(0, snapshot.info().width());
   DCHECK_NE(0, snapshot.info().height());
 
-  SkAutoLockPixels snapshot_lock(snapshot);
   // The snapshot arrives from the GPU process via shared memory. Because MSan
   // can't track initializedness across processes, we must assure it that the
   // pixels are in fact initialized.
@@ -936,7 +931,7 @@ void BlinkTestRunner::OnPixelsDumpCompleted(const SkBitmap& snapshot) {
 }
 
 void BlinkTestRunner::CaptureDumpComplete() {
-  render_view()->GetWebView()->mainFrame()->stopLoading();
+  render_view()->GetWebView()->MainFrame()->StopLoading();
 
   Send(new ShellViewHostMsg_TestFinished(routing_id()));
 }
@@ -944,7 +939,8 @@ void BlinkTestRunner::CaptureDumpComplete() {
 mojom::LayoutTestBluetoothFakeAdapterSetter&
 BlinkTestRunner::GetBluetoothFakeAdapterSetter() {
   if (!bluetooth_fake_adapter_setter_) {
-    RenderThread::Get()->GetRemoteInterfaces()->GetInterface(
+    RenderThread::Get()->GetConnector()->BindInterface(
+        mojom::kBrowserServiceName,
         mojo::MakeRequest(&bluetooth_fake_adapter_setter_));
   }
   return *bluetooth_fake_adapter_setter_;
@@ -1000,25 +996,40 @@ void BlinkTestRunner::OnSessionHistory(
 }
 
 void BlinkTestRunner::OnReset() {
+  // ShellViewMsg_Reset should always be sent to the *current* view.
+  DCHECK(render_view()->GetWebView()->MainFrame()->IsWebLocalFrame());
+  WebLocalFrame* main_frame =
+      render_view()->GetWebView()->MainFrame()->ToWebLocalFrame();
+
   LayoutTestRenderThreadObserver::GetInstance()->test_interfaces()->ResetAll();
   Reset(true /* for_new_test */);
   // Navigating to about:blank will make sure that no new loads are initiated
   // by the renderer.
-  WebURLRequest request = WebURLRequest(GURL(url::kAboutBlankURL));
-  render_view()->GetWebView()->mainFrame()->loadRequest(request);
+  main_frame->LoadRequest(WebURLRequest(GURL(url::kAboutBlankURL)));
   Send(new ShellViewHostMsg_ResetDone(routing_id()));
 }
 
 void BlinkTestRunner::OnTestFinishedInSecondaryRenderer() {
   DCHECK(is_main_window_ && render_view()->GetMainRenderFrame());
+
+  // Avoid a situation where TestFinished is called twice, because
+  // of a racey test finish in 2 secondary renderers.
+  test_runner::WebTestInterfaces* interfaces =
+      LayoutTestRenderThreadObserver::GetInstance()->test_interfaces();
+  if (!interfaces->TestIsRunning())
+    return;
+
   TestFinished();
 }
 
 void BlinkTestRunner::OnTryLeakDetection() {
-  blink::WebFrame* main_frame =
-      render_view()->GetWebView()->mainFrame();
-  DCHECK_EQ(GURL(url::kAboutBlankURL), GURL(main_frame->document().url()));
-  DCHECK(!main_frame->isLoading());
+  blink::WebFrame* main_frame = render_view()->GetWebView()->MainFrame();
+
+  DCHECK(!main_frame->IsLoading());
+  if (main_frame->IsWebLocalFrame()) {
+    DCHECK_EQ(GURL(url::kAboutBlankURL),
+              GURL(main_frame->ToWebLocalFrame()->GetDocument().Url()));
+  }
 
   leak_detector_->TryLeakDetection(main_frame);
 }

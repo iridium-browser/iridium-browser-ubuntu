@@ -8,7 +8,6 @@
 #include <cstring>
 #include <utility>
 
-#include "base/android/context_utils.h"
 #include "base/android/jni_string.h"
 #include "base/bind.h"
 #include "base/callback.h"
@@ -26,7 +25,6 @@
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "chrome/common/chrome_content_client.h"
-#include "chrome/grit/browser_resources.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/android/devtools_auth.h"
 #include "content/public/browser/browser_thread.h"
@@ -72,10 +70,9 @@ const int kBackLog = 10;
 bool AuthorizeSocketAccessWithDebugPermission(
     const net::UnixDomainServerSocket::Credentials& credentials) {
   JNIEnv* env = base::android::AttachCurrentThread();
-  return Java_DevToolsServer_checkDebugPermission(
-      env, base::android::GetApplicationContext(),
-      credentials.process_id, credentials.user_id) ||
-      content::CanUserConnectToDevTools(credentials);
+  return Java_DevToolsServer_checkDebugPermission(env, credentials.process_id,
+                                                  credentials.user_id) ||
+         content::CanUserConnectToDevTools(credentials);
 }
 
 // Factory for UnixDomainServerSocket. It tries a fallback socket when
@@ -171,10 +168,6 @@ void DevToolsServer::Stop() {
 
 bool DevToolsServer::IsStarted() const {
   return is_started_;
-}
-
-bool RegisterDevToolsServer(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 static jlong InitRemoteDebugging(

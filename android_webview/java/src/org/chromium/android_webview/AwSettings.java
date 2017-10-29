@@ -35,9 +35,6 @@ public class AwSettings {
     private static final String LOGTAG = AwSettings.class.getSimpleName();
     private static final boolean TRACE = false;
 
-    // TODO(hush): Use android.webkit.WebSettings.MENU_ITEM_*. crbug.com/546762.
-    private static final int MENU_ITEM_NONE = 0;
-
     private static final String TAG = "AwSettings";
 
     // This class must be created on the UI thread. Afterwards, it can be
@@ -88,14 +85,15 @@ public class AwSettings {
     private boolean mSpatialNavigationEnabled;  // Default depends on device features.
     private boolean mEnableSupportedHardwareAcceleratedFeatures;
     private int mMixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW;
+    private boolean mScrollTopLeftInteropEnabled = false;
 
     private boolean mOffscreenPreRaster;
-    private int mDisabledMenuItems = MENU_ITEM_NONE;
+    private int mDisabledMenuItems = WebSettings.MENU_ITEM_NONE;
 
     // Although this bit is stored on AwSettings it is actually controlled via the CookieManager.
     private boolean mAcceptThirdPartyCookies;
 
-    // if null, default to AwContentsStatics.getSafeBrowsingEnabled()
+    // if null, default to AwContentsStatics.getSafeBrowsingEnabledByManifest()
     private Boolean mSafeBrowsingEnabled;
 
     private final boolean mSupportLegacyQuirks;
@@ -330,9 +328,7 @@ public class AwSettings {
     public void setAcceptThirdPartyCookies(boolean accept) {
         if (TRACE) Log.d(LOGTAG, "setAcceptThirdPartyCookies=" + accept);
         synchronized (mAwSettingsLock) {
-            if (mAcceptThirdPartyCookies != accept) {
-                mAcceptThirdPartyCookies = accept;
-            }
+            mAcceptThirdPartyCookies = accept;
         }
     }
 
@@ -362,8 +358,14 @@ public class AwSettings {
      */
     public boolean getSafeBrowsingEnabled() {
         synchronized (mAwSettingsLock) {
+            Boolean userOptIn = AwSafeBrowsingConfigHelper.getSafeBrowsingUserOptIn();
+
+            // If we don't know yet what the user's preference is, we go through Safe Browsing logic
+            // anyway and correct the assumption before sending data to GMS.
+            if (userOptIn != null && !userOptIn) return false;
+
             if (mSafeBrowsingEnabled == null) {
-                return AwContentsStatics.getSafeBrowsingEnabled();
+                return AwContentsStatics.getSafeBrowsingEnabledByManifest();
             }
             return mSafeBrowsingEnabled;
         }
@@ -375,9 +377,7 @@ public class AwSettings {
     public void setAllowFileAccess(boolean allow) {
         if (TRACE) Log.d(LOGTAG, "setAllowFileAccess=" + allow);
         synchronized (mAwSettingsLock) {
-            if (mAllowFileUrlAccess != allow) {
-                mAllowFileUrlAccess = allow;
-            }
+            mAllowFileUrlAccess = allow;
         }
     }
 
@@ -396,9 +396,7 @@ public class AwSettings {
     public void setAllowContentAccess(boolean allow) {
         if (TRACE) Log.d(LOGTAG, "setAllowContentAccess=" + allow);
         synchronized (mAwSettingsLock) {
-            if (mAllowContentUrlAccess != allow) {
-                mAllowContentUrlAccess = allow;
-            }
+            mAllowContentUrlAccess = allow;
         }
     }
 
@@ -417,9 +415,7 @@ public class AwSettings {
     public void setCacheMode(int mode) {
         if (TRACE) Log.d(LOGTAG, "setCacheMode=" + mode);
         synchronized (mAwSettingsLock) {
-            if (mCacheMode != mode) {
-                mCacheMode = mode;
-            }
+            mCacheMode = mode;
         }
     }
 
@@ -528,9 +524,7 @@ public class AwSettings {
     public void setGeolocationEnabled(boolean flag) {
         if (TRACE) Log.d(LOGTAG, "setGeolocationEnabled=" + flag);
         synchronized (mAwSettingsLock) {
-            if (mGeolocationEnabled != flag) {
-                mGeolocationEnabled = flag;
-            }
+            mGeolocationEnabled = flag;
         }
     }
 
@@ -1275,6 +1269,21 @@ public class AwSettings {
     }
 
     @CalledByNative
+    private boolean getScrollTopLeftInteropEnabledLocked() {
+        assert Thread.holdsLock(mAwSettingsLock);
+        return mScrollTopLeftInteropEnabled;
+    }
+
+    public void setScrollTopLeftInteropEnabled(boolean enabled) {
+        synchronized (mAwSettingsLock) {
+            if (mScrollTopLeftInteropEnabled != enabled) {
+                mScrollTopLeftInteropEnabled = enabled;
+                mEventHandler.updateWebkitPreferencesLocked();
+            }
+        }
+    }
+
+    @CalledByNative
     private boolean getSupportLegacyQuirksLocked() {
         assert Thread.holdsLock(mAwSettingsLock);
         return mSupportLegacyQuirks;
@@ -1723,9 +1732,7 @@ public class AwSettings {
 
     public void setDisabledActionModeMenuItems(int menuItems) {
         synchronized (mAwSettingsLock) {
-            if (menuItems != mDisabledMenuItems) {
-                mDisabledMenuItems = menuItems;
-            }
+            mDisabledMenuItems = menuItems;
         }
     }
 

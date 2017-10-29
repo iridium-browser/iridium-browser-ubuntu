@@ -6,13 +6,14 @@
 #define NET_QUIC_CORE_CRYPTO_CRYPTO_SECRET_BOXER_H_
 
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/strings/string_piece.h"
 #include "net/quic/platform/api/quic_export.h"
 #include "net/quic/platform/api/quic_mutex.h"
+#include "net/quic/platform/api/quic_string_piece.h"
 
 namespace net {
 
@@ -39,20 +40,25 @@ class QUIC_EXPORT_PRIVATE CryptoSecretBoxer {
   // returns the resulting ciphertext. Since an authenticator and nonce are
   // included, the result will be slightly larger than |plaintext|. The first
   // key in the vector supplied to |SetKeys| will be used.
-  std::string Box(QuicRandom* rand, base::StringPiece plaintext) const;
+  std::string Box(QuicRandom* rand, QuicStringPiece plaintext) const;
 
   // Unbox takes the result of a previous call to |Box| in |ciphertext| and
   // authenticates+decrypts it. If |ciphertext| cannot be decrypted with any of
   // the supplied keys, the function returns false. Otherwise, |out_storage| is
   // used to store the result and |out| is set to point into |out_storage| and
   // contains the original plaintext.
-  bool Unbox(base::StringPiece ciphertext,
+  bool Unbox(QuicStringPiece ciphertext,
              std::string* out_storage,
-             base::StringPiece* out) const;
+             QuicStringPiece* out) const;
 
  private:
+  struct State;
+
   mutable QuicMutex lock_;
-  std::vector<std::string> keys_ GUARDED_BY(lock_);
+
+  // state_ is an opaque pointer to whatever additional state the concrete
+  // implementation of CryptoSecretBoxer requires.
+  std::unique_ptr<State> state_ GUARDED_BY(lock_);
 
   DISALLOW_COPY_AND_ASSIGN(CryptoSecretBoxer);
 };

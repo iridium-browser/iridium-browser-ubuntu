@@ -4,9 +4,10 @@
 
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller.h"
 
-#include <memory>
+#include <utility>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller_delegate.h"
 #include "chrome/browser/chromeos/policy/policy_cert_service.h"
 #include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
@@ -126,6 +127,20 @@ MultiProfileUserController::GetPrimaryUserPolicy() {
   return ALLOWED;
 }
 
+// static
+ash::mojom::MultiProfileUserBehavior
+MultiProfileUserController::UserBehaviorStringToEnum(
+    const std::string& behavior) {
+  if (behavior == kBehaviorPrimaryOnly)
+    return ash::mojom::MultiProfileUserBehavior::PRIMARY_ONLY;
+  if (behavior == kBehaviorNotAllowed)
+    return ash::mojom::MultiProfileUserBehavior::NOT_ALLOWED;
+  if (behavior == kBehaviorOwnerPrimaryOnly)
+    return ash::mojom::MultiProfileUserBehavior::OWNER_PRIMARY_ONLY;
+
+  return ash::mojom::MultiProfileUserBehavior::UNRESTRICTED;
+}
+
 bool MultiProfileUserController::IsUserAllowedInSession(
     const std::string& user_email,
     MultiProfileUserController::UserAllowedInSessionReason* reason) const {
@@ -170,7 +185,7 @@ void MultiProfileUserController::StartObserving(Profile* user_profile) {
       base::Bind(&MultiProfileUserController::OnUserPrefChanged,
                  base::Unretained(this),
                  user_profile));
-  pref_watchers_.push_back(registrar.release());
+  pref_watchers_.push_back(std::move(registrar));
 
   OnUserPrefChanged(user_profile);
 }

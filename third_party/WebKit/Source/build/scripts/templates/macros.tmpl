@@ -8,13 +8,29 @@
 {%- endmacro %}
 
 
+{% macro source_files_for_generated_file(template_file, input_files) %}
+{% if not template_file %}
+{{ "template_file must be defined in template scripts."/0 }}
+{% endif %}
+{% if not input_files %}
+{{ "input_files must be defined in template scripts."/0 }}
+{% endif %}
+// Generated from template:
+//   {{template_file}}
+// and input files:
+{% for input in input_files|sort %}
+//   {{input}}
+{% endfor %}
+{%- endmacro %}
+
+
 {% macro trie_leaf(index, object, return_macro, lowercase_data) %}
 {% set name, value = object.items()[0] %}
 {% if name|length %}
 if (
     {%- for c in name -%}
         {%- if lowercase_data -%}
-    {{ " && " if not loop.first }}toASCIILower(data[{{index + loop.index0}}]) == '{{c}}'
+    {{ " && " if not loop.first }}ToASCIILower(data[{{index + loop.index0}}]) == '{{c}}'
         {%- else -%}
     {{ " && " if not loop.first }}data[{{index + loop.index0}}] == '{{c}}'
         {%- endif -%}
@@ -33,7 +49,7 @@ return {{ return_macro(value) }};
 {{ trie_leaf(index, trie, return_macro, lowercase_data) -}}
 {% else %}
     {% if lowercase_data %}
-switch (toASCIILower(data[{{index}}])) {
+switch (ToASCIILower(data[{{index}}])) {
     {% else %}
 switch (data[{{index}}]) {
     {% endif %}

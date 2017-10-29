@@ -13,7 +13,7 @@ class Extension;
 }
 
 namespace blink {
-class WebFrame;
+class WebLocalFrame;
 }
 
 namespace extensions_v8 {
@@ -26,24 +26,20 @@ class SearchBoxExtension {
   // if match-preview is not enabled. Caller takes ownership of returned object.
   static v8::Extension* Get();
 
-  // Returns true if a page supports Instant, that is, if it has bound an
-  // onsubmit() handler.
-  static bool PageSupportsInstant(blink::WebFrame* frame);
-
   // Helpers to dispatch Javascript events.
-  static void DispatchChromeIdentityCheckResult(blink::WebFrame* frame,
+  static void DispatchChromeIdentityCheckResult(blink::WebLocalFrame* frame,
                                                 const base::string16& identity,
                                                 bool identity_match);
-  static void DispatchFocusChange(blink::WebFrame* frame);
-  static void DispatchHistorySyncCheckResult(blink::WebFrame* frame,
+  static void DispatchFocusChange(blink::WebLocalFrame* frame);
+  static void DispatchHistorySyncCheckResult(blink::WebLocalFrame* frame,
                                              bool sync_history);
-  static void DispatchInputCancel(blink::WebFrame* frame);
-  static void DispatchInputStart(blink::WebFrame* frame);
-  static void DispatchKeyCaptureChange(blink::WebFrame* frame);
-  static void DispatchMostVisitedChanged(blink::WebFrame* frame);
-  static void DispatchSubmit(blink::WebFrame* frame);
-  static void DispatchSuggestionChange(blink::WebFrame* frame);
-  static void DispatchThemeChange(blink::WebFrame* frame);
+  static void DispatchInputCancel(blink::WebLocalFrame* frame);
+  static void DispatchInputStart(blink::WebLocalFrame* frame);
+  static void DispatchKeyCaptureChange(blink::WebLocalFrame* frame);
+  static void DispatchMostVisitedChanged(blink::WebLocalFrame* frame);
+  static void DispatchSubmit(blink::WebLocalFrame* frame);
+  static void DispatchSuggestionChange(blink::WebLocalFrame* frame);
+  static void DispatchThemeChange(blink::WebLocalFrame* frame);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(SearchBoxExtension);

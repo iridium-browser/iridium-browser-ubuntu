@@ -5,7 +5,10 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_INPUT_INPUT_ROUTER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_INPUT_INPUT_ROUTER_H_
 
+#include "cc/input/touch_action.h"
 #include "content/browser/renderer_host/event_with_latency_info.h"
+#include "content/browser/renderer_host/input/gesture_event_queue.h"
+#include "content/browser/renderer_host/input/touch_event_queue.h"
 #include "content/common/input/input_event_ack_state.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "ipc/ipc_listener.h"
@@ -19,12 +22,13 @@ namespace content {
 // received, it is free to customize when those events are dispatched.
 class InputRouter : public IPC::Listener {
  public:
-  ~InputRouter() override {}
+  struct CONTENT_EXPORT Config {
+    Config();
+    GestureEventQueue::Config gesture_config;
+    TouchEventQueue::Config touch_config;
+  };
 
-  // Send and take ownership of the the given InputMsg_*. This should be used
-  // only for event types not associated with a WebInputEvent.  Returns true on
-  // success and false otherwise.
-  virtual bool SendInput(std::unique_ptr<IPC::Message> message) = 0;
+  ~InputRouter() override {}
 
   // WebInputEvents
   virtual void SendMouseEvent(
@@ -45,11 +49,6 @@ class InputRouter : public IPC::Listener {
   // the site has a mobile-friendly viewport).
   virtual void NotifySiteIsMobileOptimized(bool is_mobile_optimized) = 0;
 
-  // Request a notification from the input router when all events have been
-  // fully dispatched and there are no longer any pending events.
-  // Note: This may trigger a synchronous notification if the router is empty.
-  virtual void RequestNotificationWhenFlushed() = 0;
-
   // Whether there are any events pending dispatch to or ack from the renderer.
   virtual bool HasPendingEvents() const = 0;
 
@@ -60,6 +59,9 @@ class InputRouter : public IPC::Listener {
   // Sets the frame tree node id of associated frame, used when tracing
   // input event latencies to relate events to their target frames.
   virtual void SetFrameTreeNodeId(int frameTreeNodeId) = 0;
+
+  // Return the currently allowed touch-action.
+  virtual cc::TouchAction AllowedTouchAction() = 0;
 };
 
 }  // namespace content

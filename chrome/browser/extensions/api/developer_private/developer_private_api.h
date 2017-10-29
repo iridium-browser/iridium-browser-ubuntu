@@ -13,8 +13,6 @@
 #include "base/scoped_observer.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/developer_private/entry_picker.h"
-#include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
-#include "chrome/browser/extensions/api/file_system/file_system_api.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/error_console/error_console.h"
 #include "chrome/browser/extensions/extension_management.h"
@@ -23,6 +21,7 @@
 #include "chrome/common/extensions/api/developer_private.h"
 #include "chrome/common/extensions/webstore_install_result.h"
 #include "components/prefs/pref_change_registrar.h"
+#include "extensions/browser/api/file_system/file_system_api.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
@@ -55,7 +54,6 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
                                     public ProcessManagerObserver,
                                     public AppWindowRegistry::Observer,
                                     public CommandService::Observer,
-                                    public ExtensionActionAPI::Observer,
                                     public ExtensionPrefsObserver,
                                     public ExtensionManagement::Observer,
                                     public WarningService::Observer {
@@ -73,7 +71,7 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
                          const Extension* extension) override;
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
-                           UnloadedExtensionInfo::Reason reason) override;
+                           UnloadedExtensionReason reason) override;
   void OnExtensionInstalled(content::BrowserContext* browser_context,
                             const Extension* extension,
                             bool is_update) override;
@@ -102,10 +100,6 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
                                const Command& added_command) override;
   void OnExtensionCommandRemoved(const std::string& extension_id,
                                  const Command& removed_command) override;
-
-  // ExtensionActionAPI::Observer:
-  void OnExtensionActionVisibilityChanged(const std::string& extension_id,
-                                          bool is_now_visible) override;
 
   // ExtensionPrefsObserver:
   void OnExtensionDisableReasonsChanged(const std::string& extension_id,
@@ -137,8 +131,6 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
       process_manager_observer_;
   ScopedObserver<AppWindowRegistry, AppWindowRegistry::Observer>
       app_window_registry_observer_;
-  ScopedObserver<ExtensionActionAPI, ExtensionActionAPI::Observer>
-      extension_action_api_observer_;
   ScopedObserver<WarningService, WarningService::Observer>
       warning_service_observer_;
   ScopedObserver<ExtensionPrefs, ExtensionPrefsObserver>
@@ -171,6 +163,8 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
 class DeveloperPrivateAPI : public BrowserContextKeyedAPI,
                             public EventRouter::Observer {
  public:
+  using UnpackedRetryId = std::string;
+
   static BrowserContextKeyedAPIFactory<DeveloperPrivateAPI>*
       GetFactoryInstance();
 
@@ -180,11 +174,17 @@ class DeveloperPrivateAPI : public BrowserContextKeyedAPI,
   explicit DeveloperPrivateAPI(content::BrowserContext* context);
   ~DeveloperPrivateAPI() override;
 
-  void SetLastUnpackedDirectory(const base::FilePath& path);
+  // Adds a path to the list of allowed unpacked paths for the given
+  // |web_contents|. Returns a unique identifier to retry that path. Safe to
+  // call multiple times for the same <web_contents, path> pair; each call will
+  // return the same identifier.
+  UnpackedRetryId AddUnpackedPath(content::WebContents* web_contents,
+                                  const base::FilePath& path);
 
-  base::FilePath& GetLastUnpackedDirectory() {
-    return last_unpacked_directory_;
-  }
+  // Returns the FilePath associated with the given |id| and |web_contents|, if
+  // one exists.
+  base::FilePath GetUnpackedPath(content::WebContents* web_contents,
+                                 const UnpackedRetryId& id) const;
 
   // KeyedService implementation
   void Shutdown() override;
@@ -196,8 +196,13 @@ class DeveloperPrivateAPI : public BrowserContextKeyedAPI,
   DeveloperPrivateEventRouter* developer_private_event_router() {
     return developer_private_event_router_.get();
   }
+  const base::FilePath& last_unpacked_directory() const {
+    return last_unpacked_directory_;
+  }
 
  private:
+  class WebContentsTracker;
+
   friend class BrowserContextKeyedAPIFactory<DeveloperPrivateAPI>;
 
   // BrowserContextKeyedAPI implementation.
@@ -213,8 +218,22 @@ class DeveloperPrivateAPI : public BrowserContextKeyedAPI,
   // was loaded.
   base::FilePath last_unpacked_directory_;
 
+  // A set of unpacked paths that we are allowed to load for different
+  // WebContents. For security reasons, we don't let JavaScript arbitrarily
+  // pass us a path and load the extension at that location; instead, the user
+  // has to explicitly select the path through a native dialog first, and then
+  // we will allow JavaScript to request we reload that same selected path.
+  // Additionally, these are segmented by WebContents; this is primarily to
+  // allow collection (removing old paths when the WebContents closes) but has
+  // the effect that WebContents A cannot retry a path selected in
+  // WebContents B.
+  using IdToPathMap = std::map<UnpackedRetryId, base::FilePath>;
+  std::map<content::WebContents*, IdToPathMap> allowed_unpacked_paths_;
+
   // Created lazily upon OnListenerAdded.
   std::unique_ptr<DeveloperPrivateEventRouter> developer_private_event_router_;
+
+  base::WeakPtrFactory<DeveloperPrivateAPI> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DeveloperPrivateAPI);
 };
@@ -395,8 +414,20 @@ class DeveloperPrivateLoadUnpackedFunction
                       const std::string& error);
 
  private:
+  void OnGotManifestError(const base::FilePath& file_path,
+                          const std::string& error,
+                          size_t line_number,
+                          const std::string& manifest);
+
   // Whether or not we should fail quietly in the event of a load error.
-  bool fail_quietly_;
+  bool fail_quietly_ = false;
+
+  // Whether we populate a developer_private::LoadError on load failure, as
+  // opposed to simply passing the message in lastError.
+  bool populate_error_ = false;
+
+  // The identifier for the selected path when retrying an unpacked load.
+  DeveloperPrivateAPI::UnpackedRetryId retry_guid_;
 };
 
 class DeveloperPrivateChoosePathFunction

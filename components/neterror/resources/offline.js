@@ -20,10 +20,9 @@ function Runner(outerContainerId, opt_config) {
   this.outerContainerEl = document.querySelector(outerContainerId);
   this.containerEl = null;
   this.snackbarEl = null;
-  this.detailsButton = this.outerContainerEl.querySelector('#details-button');
 
   this.config = opt_config || Runner.config;
-
+  // Logical dimensions of the container.
   this.dimensions = Runner.defaultDimensions;
 
   this.canvas = null;
@@ -97,6 +96,9 @@ var IS_MOBILE = /Android/.test(window.navigator.userAgent) || IS_IOS;
 /** @const */
 var IS_TOUCH_ENABLED = 'ontouchstart' in window;
 
+/** @const */
+var ARCADE_MODE_URL = 'chrome://dino/';
+
 /**
  * Default game configuration.
  * @enum {number}
@@ -122,7 +124,9 @@ Runner.config = {
   MOBILE_SPEED_COEFFICIENT: 1.2,
   RESOURCE_TEMPLATE_ID: 'audio-resources',
   SPEED: 6,
-  SPEED_DROP_COEFFICIENT: 3
+  SPEED_DROP_COEFFICIENT: 3,
+  ARCADE_MODE_INITIAL_TOP_POSITION: 35,
+  ARCADE_MODE_TOP_POSITION_PERCENT: 0.1
 };
 
 
@@ -141,6 +145,7 @@ Runner.defaultDimensions = {
  * @enum {string}
  */
 Runner.classes = {
+  ARCADE_MODE: 'arcade-mode',
   CANVAS: 'runner-canvas',
   CONTAINER: 'runner-container',
   CRASHED: 'crashed',
@@ -225,7 +230,6 @@ Runner.events = {
   FOCUS: 'focus',
   LOAD: 'load'
 };
-
 
 Runner.prototype = {
   /**
@@ -419,6 +423,12 @@ Runner.prototype = {
         boxStyles.paddingLeft.length - 2));
 
     this.dimensions.WIDTH = this.outerContainerEl.offsetWidth - padding * 2;
+    if (this.isArcadeMode()) {
+      this.dimensions.WIDTH = Math.min(DEFAULT_WIDTH, this.dimensions.WIDTH);
+      if (this.activated) {
+        this.setArcadeModeContainerScale();
+      }
+    }
 
     // Redraw the elements back onto the canvas.
     if (this.canvas) {
@@ -487,6 +497,9 @@ Runner.prototype = {
    * Update the game status to started.
    */
   startGame: function() {
+    if (this.isArcadeMode()) {
+      this.setArcadeMode();
+    }
     this.runningTime = 0;
     this.playingIntro = false;
     this.tRex.playingIntro = false;
@@ -661,9 +674,11 @@ Runner.prototype = {
       e.preventDefault();
     }
 
-    if (e.target != this.detailsButton) {
-      if (!this.crashed && (Runner.keycodes.JUMP[e.keyCode] ||
-           e.type == Runner.events.TOUCHSTART)) {
+    if (!this.crashed && !this.paused) {
+      if (Runner.keycodes.JUMP[e.keyCode] ||
+          e.type == Runner.events.TOUCHSTART) {
+        e.preventDefault();
+        // Starting the game for the first time.
         if (!this.playing) {
           this.loadSounds();
           this.playing = true;
@@ -672,28 +687,24 @@ Runner.prototype = {
             errorPageController.trackEasterEgg();
           }
         }
-        //  Play sound effect and jump on starting the game for the first time.
+        // Start jump.
         if (!this.tRex.jumping && !this.tRex.ducking) {
           this.playSound(this.soundFx.BUTTON_PRESS);
           this.tRex.startJump(this.currentSpeed);
         }
+      } else if (this.playing && Runner.keycodes.DUCK[e.keyCode]) {
+        e.preventDefault();
+        if (this.tRex.jumping) {
+          // Speed drop, activated only when jump key is not pressed.
+          this.tRex.setSpeedDrop();
+        } else if (!this.tRex.jumping && !this.tRex.ducking) {
+          // Duck.
+          this.tRex.setDuck(true);
+        }
       }
-
-      if (this.crashed && e.type == Runner.events.TOUCHSTART &&
-          e.currentTarget == this.containerEl) {
-        this.restart();
-      }
-    }
-
-    if (this.playing && !this.crashed && Runner.keycodes.DUCK[e.keyCode]) {
-      e.preventDefault();
-      if (this.tRex.jumping) {
-        // Speed drop, activated only when jump key is not pressed.
-        this.tRex.setSpeedDrop();
-      } else if (!this.tRex.jumping && !this.tRex.ducking) {
-        // Duck.
-        this.tRex.setDuck(true);
-      }
+    } else if (this.crashed && e.type == Runner.events.TOUCHSTART &&
+        e.currentTarget == this.containerEl) {
+      this.restart();
     }
   },
 
@@ -812,6 +823,7 @@ Runner.prototype = {
       this.playCount++;
       this.runningTime = 0;
       this.playing = true;
+      this.paused = false;
       this.crashed = false;
       this.distanceRan = 0;
       this.setSpeed(this.config.SPEED);
@@ -825,6 +837,40 @@ Runner.prototype = {
       this.invert(true);
       this.update();
     }
+  },
+
+  /**
+   * Whether the game should go into arcade mode.
+   * @return {boolean}
+   */
+  isArcadeMode: function() {
+    return document.title == ARCADE_MODE_URL;
+  },
+
+  /**
+   * Hides offline messaging for a fullscreen game only experience.
+   */
+  setArcadeMode: function() {
+    document.body.classList.add(Runner.classes.ARCADE_MODE);
+    this.setArcadeModeContainerScale();
+  },
+
+  /**
+   * Sets the scaling for arcade mode.
+   */
+  setArcadeModeContainerScale: function() {
+    var windowHeight = window.innerHeight;
+    var scaleHeight = windowHeight / this.dimensions.HEIGHT;
+    var scaleWidth = window.innerWidth / this.dimensions.WIDTH;
+    var scale = Math.max(1, Math.min(scaleHeight, scaleWidth));
+    var scaledCanvasHeight = this.dimensions.HEIGHT * scale;
+    // Positions the game container at 10% of the available vertical window
+    // height minus the game container height.
+    var translateY = Math.max(0, (windowHeight - scaledCanvasHeight -
+        Runner.config.ARCADE_MODE_INITIAL_TOP_POSITION) *
+        Runner.config.ARCADE_MODE_TOP_POSITION_PERCENT);
+    this.containerEl.style.transform = 'scale(' + scale + ') translateY(' +
+        translateY + 'px)';
   },
 
   /**

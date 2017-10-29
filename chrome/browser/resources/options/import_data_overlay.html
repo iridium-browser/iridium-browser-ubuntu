@@ -1,23 +1,25 @@
 <div id="import-data-overlay" class="page" hidden>
   <div class="close-button"></div>
-  <h1 i18n-content="importDataOverlay"></h1>
+  <h1>$i18n{importDataOverlay}</h1>
   <div class="content-area">
     <div class="import-data-configure">
       <div id="import-from-div">
-        <span i18n-content="importFromLabel"></span>
+        <span>$i18n{importFromLabel}</span>
         <select id="import-browsers">
-          <option i18n-content="importLoading"></option>
+          <option>$i18n{importLoading}</option>
         </select>
       </div>
       <div id="import-checkboxes">
-        <div i18n-content="importDescription"></div>
+        <div>$i18n{importDescription}</div>
         <div class="checkbox controlled-setting-with-label"
               id="import-history-with-label">
           <label>
-            <input id="import-history" type="checkbox" pref="import_history">
+            <input id="import-history" type="checkbox"
+                pref="import_dialog_history">
             <span>
-              <span i18n-content="importHistory"></span>
-              <span class="controlled-setting-indicator" pref="import_history">
+              <span>$i18n{importHistory}</span>
+              <span class="controlled-setting-indicator"
+                  pref="import_dialog_history">
               </span>
             </span>
           </label>
@@ -26,11 +28,11 @@
             id="import-favorites-with-label">
           <label>
             <input id="import-favorites" type="checkbox"
-                pref="import_bookmarks">
+                pref="import_dialog_bookmarks">
             <span>
-              <span i18n-content="importFavorites"></span>
+              <span>$i18n{importFavorites}</span>
               <span class="controlled-setting-indicator"
-                  pref="import_bookmarks"></span>
+                  pref="import_dialog_bookmarks"></span>
             </span>
           </label>
         </div>
@@ -38,11 +40,11 @@
             id="import-passwords-with-label">
           <label>
             <input id="import-passwords" type="checkbox"
-                pref="import_saved_passwords">
+                pref="import_dialog_saved_passwords">
             <span>
-              <span i18n-content="importPasswords"></span>
+              <span>$i18n{importPasswords}</span>
               <span class="controlled-setting-indicator"
-                  pref="import_saved_passwords"></span>
+                  pref="import_dialog_saved_passwords"></span>
             </span>
           </label>
         </div>
@@ -50,11 +52,11 @@
             id="import-search-with-label">
           <label>
             <input id="import-search" type="checkbox"
-                pref="import_search_engine">
+                pref="import_dialog_search_engine">
             <span>
-              <span i18n-content="importSearch"></span>
+              <span>$i18n{importSearch}</span>
               <span class="controlled-setting-indicator"
-                  pref="import_search_engine"></span>
+                  pref="import_dialog_search_engine"></span>
             </span>
           </label>
         </div>
@@ -62,28 +64,28 @@
             id="import-autofill-form-data-with-label">
           <label>
             <input id="import-autofill-form-data" type="checkbox"
-                pref="import_autofill_form_data">
-            <span i18n-content="importAutofillFormData"></span>
+                pref="import_dialog_autofill_form_data">
+            <span>$i18n{importAutofillFormData}</span>
           </label>
           <span class="controlled-setting-indicator"
-              pref="import_autofill_form_data"></span>
+              pref="import_dialog_autofill_form_data"></span>
         </div>
       </div>
     </div>
     <div class="import-data-success" hidden>
       <div id="import-success-header">
-        <strong i18n-content="importSucceeded"></strong>
+        <strong>$i18n{importSucceeded}</strong>
       </div>
       <div id="import-success-image"></div>
       <div id="import-find-your-bookmarks">
-        <span i18n-content="findYourImportedBookmarks"></span>
+        <span>$i18n{findYourImportedBookmarks}</span>
         <div class="checkbox controlled-setting-with-label">
           <label>
             <input id="import-data-show-bookmarks-bar"
                 pref="bookmark_bar.show_on_all_tabs"
                 metric="Options_ShowBookmarksBar" type="checkbox">
             <span>
-              <span i18n-content="toolbarShowBookmarksBar"></span>
+              <span>$i18n{toolbarShowBookmarksBar}</span>
               <span class="controlled-setting-indicator"
                   pref="bookmark_bar.show_on_all_tabs"></span>
             </span>
@@ -97,11 +99,10 @@
       <div class="action-area-right">
         <div id="import-throbber" class="throbber"></div>
         <div class="button-strip">
-          <button id="import-data-cancel" i18n-content="cancel"></button>
-          <button id="import-choose-file" i18n-content="importChooseFile">
-          </button>
-          <button id="import-data-commit" class="default-button"
-              i18n-content="importCommit">
+          <button id="import-data-cancel">$i18n{cancel}</button>
+          <button id="import-choose-file">$i18n{importChooseFile}</button>
+          <button id="import-data-commit" class="default-button">
+            $i18n{importCommit}
           </button>
         </div>
       </div>
@@ -109,8 +110,8 @@
     <div class="import-data-success" hidden>
       <div class="action-area-right">
         <div class="button-strip">
-          <button id="import-data-confirm" class="default-button"
-              i18n-content="done">
+          <button id="import-data-confirm" class="default-button">
+            $i18n{done}
           </button>
         </div>
       </div>

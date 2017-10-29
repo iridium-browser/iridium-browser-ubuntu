@@ -46,26 +46,23 @@ SDK.ScreenCaptureModel = class extends SDK.SDKModel {
    * @return {!Promise<?string>}
    */
   captureScreenshot(format, quality) {
-    var fulfill;
-    var promise = new Promise(callback => fulfill = callback);
-    this._agent.captureScreenshot(format, quality, (error, content) => {
-      if (error)
-        console.error(error);
-      fulfill(error ? null : content);
-    });
-    return promise;
+    return this._agent.captureScreenshot(format, quality, undefined, true);
   }
 
   /**
-   * @return {!Promise<?{width: number, height: number}>}
+   * @return {!Promise<?{viewportX: number, viewportY: number, viewportScale: number, contentWidth: number, contentHeight: number}>}
    */
-  fetchContentSize() {
-    var fulfill;
-    var promise = new Promise(callback => fulfill = callback);
-    this._agent.getLayoutMetrics((error, layoutViewport, visualViewport, contentSize) => {
-      fulfill(error ? null : {width: contentSize.width, height: contentSize.height});
-    });
-    return promise;
+  async fetchLayoutMetrics() {
+    var response = await this._agent.invoke_getLayoutMetrics({});
+    if (response[Protocol.Error])
+      return null;
+    return {
+      viewportX: response.visualViewport.pageX,
+      viewportY: response.visualViewport.pageY,
+      viewportScale: response.visualViewport.scale,
+      contentWidth: response.contentSize.width,
+      contentHeight: response.contentSize.height
+    };
   }
 
   /**
@@ -177,13 +174,6 @@ SDK.ScreenCaptureModel = class extends SDK.SDKModel {
 
   /**
    * @override
-   * @param {!Protocol.DOM.RGBA} color
-   */
-  colorPicked(color) {
-  }
-
-  /**
-   * @override
    */
   interstitialShown() {
   }
@@ -201,4 +191,4 @@ SDK.ScreenCaptureModel = class extends SDK.SDKModel {
   }
 };
 
-SDK.SDKModel.register(SDK.ScreenCaptureModel, SDK.Target.Capability.ScreenCapture);
+SDK.SDKModel.register(SDK.ScreenCaptureModel, SDK.Target.Capability.ScreenCapture, false);

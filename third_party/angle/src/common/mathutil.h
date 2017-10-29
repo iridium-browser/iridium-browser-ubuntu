@@ -16,7 +16,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include <base/numerics/safe_math.h>
+#include <anglebase/numerics/safe_math.h>
 
 #include "common/debug.h"
 #include "common/platform.h"
@@ -557,38 +557,65 @@ inline unsigned int averageFloat10(unsigned int a, unsigned int b)
 }
 
 template <typename T>
-struct Range
+class Range
 {
+  public:
     Range() {}
-    Range(T lo, T hi) : start(lo), end(hi) { ASSERT(lo <= hi); }
+    Range(T lo, T hi) : mLow(lo), mHigh(hi) {}
 
-    T start;
-    T end;
-
-    T length() const { return end - start; }
+    T length() const { return (empty() ? 0 : (mHigh - mLow)); }
 
     bool intersects(Range<T> other)
     {
-        if (start <= other.start)
+        if (mLow <= other.mLow)
         {
-            return other.start < end;
+            return other.mLow < mHigh;
         }
         else
         {
-            return start < other.end;
+            return mLow < other.mHigh;
         }
     }
 
+    // Assumes that end is non-inclusive.. for example, extending to 5 will make "end" 6.
     void extend(T value)
     {
-        start = value > start ? value : start;
-        end = value < end ? value : end;
+        mLow  = value < mLow ? value : mLow;
+        mHigh = value >= mHigh ? (value + 1) : mHigh;
     }
 
-    bool empty() const
+    bool empty() const { return mHigh <= mLow; }
+
+    bool contains(T value) const { return value >= mLow && value < mHigh; }
+
+    class Iterator final
     {
-        return end <= start;
-    }
+      public:
+        Iterator(T value) : mCurrent(value) {}
+
+        Iterator &operator++()
+        {
+            mCurrent++;
+            return *this;
+        }
+        bool operator==(const Iterator &other) const { return mCurrent == other.mCurrent; }
+        bool operator!=(const Iterator &other) const { return mCurrent != other.mCurrent; }
+        T operator*() const { return mCurrent; }
+
+      private:
+        T mCurrent;
+    };
+
+    Iterator begin() const { return Iterator(mLow); }
+
+    Iterator end() const { return Iterator(mHigh); }
+
+    T low() const { return mLow; }
+    T high() const { return mHigh; }
+
+  private:
+    T mLow;
+    T mHigh;
 };
 
 typedef Range<int> RangeI;
@@ -791,6 +818,42 @@ inline void unpackHalf2x16(uint32_t u, float *f1, float *f2)
     *f2 = float16ToFloat32(mostSignificantBits);
 }
 
+inline uint8_t sRGBToLinear(uint8_t srgbValue)
+{
+    float value = srgbValue / 255.0f;
+    if (value <= 0.04045f)
+    {
+        value = value / 12.92f;
+    }
+    else
+    {
+        value = std::pow((value + 0.055f) / 1.055f, 2.4f);
+    }
+    return static_cast<uint8_t>(clamp(value * 255.0f + 0.5f, 0.0f, 255.0f));
+}
+
+inline uint8_t linearToSRGB(uint8_t linearValue)
+{
+    float value = linearValue / 255.0f;
+    if (value <= 0.0f)
+    {
+        value = 0.0f;
+    }
+    else if (value < 0.0031308f)
+    {
+        value = value * 12.92f;
+    }
+    else if (value < 1.0f)
+    {
+        value = std::pow(value, 0.41666f) * 1.055f - 0.055f;
+    }
+    else
+    {
+        value = 1.0f;
+    }
+    return static_cast<uint8_t>(clamp(value * 255.0f + 0.5f, 0.0f, 255.0f));
+}
+
 // Reverse the order of the bits.
 inline uint32_t BitfieldReverse(uint32_t value)
 {
@@ -805,33 +868,72 @@ inline uint32_t BitfieldReverse(uint32_t value)
 }
 
 // Count the 1 bits.
-inline int BitCount(unsigned int bits)
+#if defined(ANGLE_PLATFORM_WINDOWS)
+inline int BitCount(uint32_t bits)
 {
-#if defined(_MSC_VER)
     return static_cast<int>(__popcnt(bits));
-#elif defined(__GNUC__)
+}
+#if defined(ANGLE_X64_CPU)
+inline int BitCount(uint64_t bits)
+{
+    return static_cast<int>(__popcnt64(bits));
+}
+#endif  // defined(ANGLE_X64_CPU)
+#endif  // defined(ANGLE_PLATFORM_WINDOWS)
+
+#if defined(ANGLE_PLATFORM_POSIX)
+inline int BitCount(uint32_t bits)
+{
     return __builtin_popcount(bits);
-#else
-#error Please implement bit count for your platform!
-#endif
 }
 
+#if defined(ANGLE_X64_CPU)
+inline int BitCount(uint64_t bits)
+{
+    return __builtin_popcountll(bits);
+}
+#endif  // defined(ANGLE_X64_CPU)
+#endif  // defined(ANGLE_PLATFORM_POSIX)
+
+#if defined(ANGLE_PLATFORM_WINDOWS)
 // Return the index of the least significant bit set. Indexing is such that bit 0 is the least
-// significant bit.
-inline unsigned long ScanForward(unsigned long bits)
+// significant bit. Implemented for different bit widths on different platforms.
+inline unsigned long ScanForward(uint32_t bits)
 {
     ASSERT(bits != 0u);
-#if defined(ANGLE_PLATFORM_WINDOWS)
     unsigned long firstBitIndex = 0ul;
     unsigned char ret           = _BitScanForward(&firstBitIndex, bits);
     ASSERT(ret != 0u);
     return firstBitIndex;
-#elif defined(ANGLE_PLATFORM_POSIX)
-    return static_cast<unsigned long>(__builtin_ctzl(bits));
-#else
-#error Please implement bit-scan-forward for your platform!
-#endif
 }
+
+#if defined(ANGLE_X64_CPU)
+inline unsigned long ScanForward(uint64_t bits)
+{
+    ASSERT(bits != 0u);
+    unsigned long firstBitIndex = 0ul;
+    unsigned char ret           = _BitScanForward64(&firstBitIndex, bits);
+    ASSERT(ret != 0u);
+    return firstBitIndex;
+}
+#endif  // defined(ANGLE_X64_CPU)
+#endif  // defined(ANGLE_PLATFORM_WINDOWS)
+
+#if defined(ANGLE_PLATFORM_POSIX)
+inline unsigned long ScanForward(uint32_t bits)
+{
+    ASSERT(bits != 0u);
+    return static_cast<unsigned long>(__builtin_ctz(bits));
+}
+
+#if defined(ANGLE_X64_CPU)
+inline unsigned long ScanForward(uint64_t bits)
+{
+    ASSERT(bits != 0u);
+    return static_cast<unsigned long>(__builtin_ctzll(bits));
+}
+#endif  // defined(ANGLE_X64_CPU)
+#endif  // defined(ANGLE_PLATFORM_POSIX)
 
 // Return the index of the most significant bit set. Indexing is such that bit 0 is the least
 // significant bit.
@@ -851,8 +953,10 @@ inline unsigned long ScanReverse(unsigned long bits)
 }
 
 // Returns -1 on 0, otherwise the index of the least significant 1 bit as in GLSL.
-inline int FindLSB(uint32_t bits)
+template <typename T>
+int FindLSB(T bits)
 {
+    static_assert(std::is_integral<T>::value, "must be integral type.");
     if (bits == 0u)
     {
         return -1;
@@ -864,8 +968,10 @@ inline int FindLSB(uint32_t bits)
 }
 
 // Returns -1 on 0, otherwise the index of the most significant 1 bit as in GLSL.
-inline int FindMSB(uint32_t bits)
+template <typename T>
+int FindMSB(T bits)
 {
+    static_assert(std::is_integral<T>::value, "must be integral type.");
     if (bits == 0u)
     {
         return -1;

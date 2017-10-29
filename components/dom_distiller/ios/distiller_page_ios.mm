@@ -23,6 +23,10 @@
 #import "ios/web/public/web_state/web_state.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 
 // This is duplicated here from ios/web/web_state/ui/web_view_js_utils.mm in
@@ -48,9 +52,9 @@ std::unique_ptr<base::Value> ValueResultFromScriptResult(id wk_result,
     return result;
   }
 
-  CFTypeID result_type = CFGetTypeID(wk_result);
+  CFTypeID result_type = CFGetTypeID(reinterpret_cast<CFTypeRef>(wk_result));
   if (result_type == CFStringGetTypeID()) {
-    result.reset(new base::StringValue(base::SysNSStringToUTF16(wk_result)));
+    result.reset(new base::Value(base::SysNSStringToUTF16(wk_result)));
     DCHECK(result->IsType(base::Value::Type::STRING));
   } else if (result_type == CFNumberGetTypeID()) {
     // Different implementation is here.
@@ -66,7 +70,7 @@ std::unique_ptr<base::Value> ValueResultFromScriptResult(id wk_result,
     result.reset(new base::Value(static_cast<bool>([wk_result boolValue])));
     DCHECK(result->IsType(base::Value::Type::BOOLEAN));
   } else if (result_type == CFNullGetTypeID()) {
-    result = base::Value::CreateNullValue();
+    result = base::MakeUnique<base::Value>();
     DCHECK(result->IsType(base::Value::Type::NONE));
   } else if (result_type == CFDictionaryGetTypeID()) {
     std::unique_ptr<base::DictionaryValue> dictionary =
@@ -232,7 +236,7 @@ void DistillerPageIOS::OnLoadURLDone(
 }
 
 void DistillerPageIOS::HandleJavaScriptResult(id result) {
-  std::unique_ptr<base::Value> resultValue = base::Value::CreateNullValue();
+  auto resultValue = base::MakeUnique<base::Value>();
   if (result) {
     resultValue = ValueResultFromScriptResult(result);
   }

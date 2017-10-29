@@ -7,11 +7,15 @@
 #import <Foundation/Foundation.h>
 #import <WebKit/WebKit.h>
 
-#import "base/ios/weak_nsobject.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "ios/web/public/browser_state.h"
 #import "ios/web/web_state/js/page_script_util.h"
 #import "ios/web/web_state/ui/crw_wk_script_message_router.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 
@@ -21,11 +25,11 @@ const char kWKWebViewConfigProviderKeyName[] = "wk_web_view_config_provider";
 
 // Returns an autoreleased instance of WKUserScript to be added to
 // configuration's userContentController.
-WKUserScript* InternalGetEarlyPageScript() {
-  return [[[WKUserScript alloc]
-        initWithSource:GetEarlyPageScript()
+WKUserScript* InternalGetEarlyPageScript(BrowserState* browser_state) {
+  return [[WKUserScript alloc]
+        initWithSource:GetEarlyPageScript(browser_state)
          injectionTime:WKUserScriptInjectionTimeAtDocumentStart
-      forMainFrameOnly:YES] autorelease];
+      forMainFrameOnly:YES];
 }
 
 }  // namespace
@@ -36,18 +40,17 @@ WKWebViewConfigurationProvider::FromBrowserState(BrowserState* browser_state) {
   DCHECK([NSThread isMainThread]);
   DCHECK(browser_state);
   if (!browser_state->GetUserData(kWKWebViewConfigProviderKeyName)) {
-    bool is_off_the_record = browser_state->IsOffTheRecord();
     browser_state->SetUserData(
         kWKWebViewConfigProviderKeyName,
-        new WKWebViewConfigurationProvider(is_off_the_record));
+        base::WrapUnique(new WKWebViewConfigurationProvider(browser_state)));
   }
   return *(static_cast<WKWebViewConfigurationProvider*>(
       browser_state->GetUserData(kWKWebViewConfigProviderKeyName)));
 }
 
 WKWebViewConfigurationProvider::WKWebViewConfigurationProvider(
-    bool is_off_the_record)
-    : is_off_the_record_(is_off_the_record) {}
+    BrowserState* browser_state)
+    : browser_state_(browser_state) {}
 
 WKWebViewConfigurationProvider::~WKWebViewConfigurationProvider() {
 }
@@ -57,7 +60,7 @@ WKWebViewConfigurationProvider::GetWebViewConfiguration() {
   DCHECK([NSThread isMainThread]);
   if (!configuration_) {
     configuration_.reset([[WKWebViewConfiguration alloc] init]);
-    if (is_off_the_record_) {
+    if (browser_state_->IsOffTheRecord()) {
       [configuration_
           setWebsiteDataStore:[WKWebsiteDataStore nonPersistentDataStore]];
     }
@@ -67,10 +70,10 @@ WKWebViewConfigurationProvider::GetWebViewConfiguration() {
     // setJavaScriptCanOpenWindowsAutomatically is required to support popups.
     [[configuration_ preferences] setJavaScriptCanOpenWindowsAutomatically:YES];
     [[configuration_ userContentController]
-        addUserScript:InternalGetEarlyPageScript()];
+        addUserScript:InternalGetEarlyPageScript(browser_state_)];
   }
   // Prevent callers from changing the internals of configuration.
-  return [[configuration_ copy] autorelease];
+  return [configuration_ copy];
 }
 
 CRWWKScriptMessageRouter*
@@ -87,18 +90,8 @@ WKWebViewConfigurationProvider::GetScriptMessageRouter() {
 
 void WKWebViewConfigurationProvider::Purge() {
   DCHECK([NSThread isMainThread]);
-#if !defined(NDEBUG) || !defined(DCHECK_ALWAYS_ON)  // Matches DCHECK_IS_ON.
-  base::WeakNSObject<id> weak_configuration(configuration_);
-  base::WeakNSObject<id> weak_router(router_);
-  base::WeakNSObject<id> weak_process_pool([configuration_ processPool]);
-#endif  // !defined(NDEBUG) || defined(DCHECK_ALWAYS_ON)
   configuration_.reset();
   router_.reset();
-  // Make sure that no one retains configuration, router, processPool.
-  DCHECK(!weak_configuration);
-  DCHECK(!weak_router);
-  // TODO(crbug.com/522672): Enable this DCHECK.
-  // DCHECK(!weak_process_pool);
 }
 
 }  // namespace web

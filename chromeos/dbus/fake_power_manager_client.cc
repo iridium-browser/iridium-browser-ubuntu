@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/callback.h"
 #include "base/location.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -15,21 +16,11 @@ namespace chromeos {
 namespace {
 // Minimum power for a USB power source to be classified as AC.
 constexpr double kUsbMinAcWatts = 24;
-}
+}  // namespace
 
-FakePowerManagerClient::FakePowerManagerClient()
-    : num_request_restart_calls_(0),
-      num_request_shutdown_calls_(0),
-      num_set_policy_calls_(0),
-      num_set_is_projecting_calls_(0),
-      num_set_backlights_forced_off_calls_(0),
-      num_pending_suspend_readiness_callbacks_(0),
-      is_projecting_(false),
-      backlights_forced_off_(false),
-      weak_ptr_factory_(this) {}
+FakePowerManagerClient::FakePowerManagerClient() : weak_ptr_factory_(this) {}
 
-FakePowerManagerClient::~FakePowerManagerClient() {
-}
+FakePowerManagerClient::~FakePowerManagerClient() = default;
 
 void FakePowerManagerClient::Init(dbus::Bus* bus) {
   props_.set_battery_percent(50);
@@ -59,25 +50,19 @@ void FakePowerManagerClient::SetRenderProcessManagerDelegate(
   render_process_manager_delegate_ = delegate;
 }
 
-void FakePowerManagerClient::DecreaseScreenBrightness(bool allow_off) {
-}
+void FakePowerManagerClient::DecreaseScreenBrightness(bool allow_off) {}
 
-void FakePowerManagerClient::IncreaseScreenBrightness() {
-}
+void FakePowerManagerClient::IncreaseScreenBrightness() {}
 
 void FakePowerManagerClient::SetScreenBrightnessPercent(double percent,
-                                                        bool gradual) {
-}
+                                                        bool gradual) {}
 
 void FakePowerManagerClient::GetScreenBrightnessPercent(
-    const GetScreenBrightnessPercentCallback& callback) {
-}
+    const GetScreenBrightnessPercentCallback& callback) {}
 
-void FakePowerManagerClient::DecreaseKeyboardBrightness() {
-}
+void FakePowerManagerClient::DecreaseKeyboardBrightness() {}
 
-void FakePowerManagerClient::IncreaseKeyboardBrightness() {
-}
+void FakePowerManagerClient::IncreaseKeyboardBrightness() {}
 
 void FakePowerManagerClient::RequestStatusUpdate() {
   // RequestStatusUpdate() calls and notifies the observers
@@ -88,8 +73,7 @@ void FakePowerManagerClient::RequestStatusUpdate() {
                             weak_ptr_factory_.GetWeakPtr()));
 }
 
-void FakePowerManagerClient::RequestSuspend() {
-}
+void FakePowerManagerClient::RequestSuspend() {}
 
 void FakePowerManagerClient::RequestRestart() {
   ++num_request_restart_calls_;
@@ -100,8 +84,7 @@ void FakePowerManagerClient::RequestShutdown() {
 }
 
 void FakePowerManagerClient::NotifyUserActivity(
-    power_manager::UserActivityType type) {
-}
+    power_manager::UserActivityType type) {}
 
 void FakePowerManagerClient::NotifyVideoActivity(bool is_fullscreen) {
   video_activity_reports_.push_back(is_fullscreen);
@@ -111,6 +94,9 @@ void FakePowerManagerClient::SetPolicy(
     const power_manager::PowerManagementPolicy& policy) {
   policy_ = policy;
   ++num_set_policy_calls_;
+
+  if (power_policy_quit_closure_)
+    std::move(power_policy_quit_closure_).Run();
 }
 
 void FakePowerManagerClient::SetIsProjecting(bool is_projecting) {
@@ -144,6 +130,12 @@ void FakePowerManagerClient::GetBacklightsForcedOff(
     const GetBacklightsForcedOffCallback& callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(callback, backlights_forced_off_));
+}
+
+void FakePowerManagerClient::GetSwitchStates(
+    const GetSwitchStatesCallback& callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(callback, lid_state_, tablet_mode_));
 }
 
 base::Closure FakePowerManagerClient::GetSuspendReadinessCallback() {
@@ -190,11 +182,25 @@ void FakePowerManagerClient::SendBrightnessChanged(int level,
     observer.BrightnessChanged(level, user_initiated);
 }
 
+void FakePowerManagerClient::SendKeyboardBrightnessChanged(
+    int level,
+    bool user_initiated) {
+  for (auto& observer : observers_)
+    observer.KeyboardBrightnessChanged(level, user_initiated);
+}
+
 void FakePowerManagerClient::SendPowerButtonEvent(
     bool down,
     const base::TimeTicks& timestamp) {
   for (auto& observer : observers_)
     observer.PowerButtonEventReceived(down, timestamp);
+}
+
+void FakePowerManagerClient::SetLidState(LidState state,
+                                         const base::TimeTicks& timestamp) {
+  lid_state_ = state;
+  for (auto& observer : observers_)
+    observer.LidEventReceived(state, timestamp);
 }
 
 void FakePowerManagerClient::UpdatePowerProperties(
@@ -212,6 +218,11 @@ void FakePowerManagerClient::HandleSuspendReadiness() {
   CHECK(num_pending_suspend_readiness_callbacks_ > 0);
 
   --num_pending_suspend_readiness_callbacks_;
+}
+
+void FakePowerManagerClient::SetPowerPolicyQuitClosure(
+    base::OnceClosure quit_closure) {
+  power_policy_quit_closure_ = std::move(quit_closure);
 }
 
 }  // namespace chromeos

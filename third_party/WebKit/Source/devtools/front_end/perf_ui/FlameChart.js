@@ -49,25 +49,31 @@ PerfUI.FlameChartDelegate.prototype = {
 
 /**
  * @unrestricted
+ * @implements {PerfUI.ChartViewportDelegate}
  */
-PerfUI.FlameChart = class extends PerfUI.ChartViewport {
+PerfUI.FlameChart = class extends UI.VBox {
   /**
    * @param {!PerfUI.FlameChartDataProvider} dataProvider
    * @param {!PerfUI.FlameChartDelegate} flameChartDelegate
    * @param {!Common.Setting=} groupExpansionSetting
    */
   constructor(dataProvider, flameChartDelegate, groupExpansionSetting) {
-    super();
+    super(true);
     this.registerRequiredCSS('perf_ui/flameChart.css');
     this.contentElement.classList.add('flame-chart-main-pane');
-    this._flameChartDelegate = flameChartDelegate;
     this._groupExpansionSetting = groupExpansionSetting;
     this._groupExpansionState = groupExpansionSetting && groupExpansionSetting.get() || {};
+    this._flameChartDelegate = flameChartDelegate;
+
+    this._chartViewport = new PerfUI.ChartViewport(this);
+    this._chartViewport.show(this.contentElement);
 
     this._dataProvider = dataProvider;
     this._calculator = new PerfUI.FlameChart.Calculator(dataProvider);
 
-    this._canvas = /** @type {!HTMLCanvasElement} */ (this.viewportElement.createChild('canvas'));
+    this._viewportElement = this._chartViewport.viewportElement;
+    this._canvas = /** @type {!HTMLCanvasElement} */ (this._viewportElement.createChild('canvas'));
+
     this._canvas.tabIndex = 1;
     this.setDefaultFocusedElement(this._canvas);
     this._canvas.addEventListener('mousemove', this._onMouseMove.bind(this), false);
@@ -75,24 +81,27 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     this._canvas.addEventListener('click', this._onClick.bind(this), false);
     this._canvas.addEventListener('keydown', this._onKeyDown.bind(this), false);
 
-    this._entryInfo = this.viewportElement.createChild('div', 'flame-chart-entry-info');
-    this._markerHighlighElement = this.viewportElement.createChild('div', 'flame-chart-marker-highlight-element');
-    this._highlightElement = this.viewportElement.createChild('div', 'flame-chart-highlight-element');
-    this._selectedElement = this.viewportElement.createChild('div', 'flame-chart-selected-element');
+    this._entryInfo = this._viewportElement.createChild('div', 'flame-chart-entry-info');
+    this._markerHighlighElement = this._viewportElement.createChild('div', 'flame-chart-marker-highlight-element');
+    this._highlightElement = this._viewportElement.createChild('div', 'flame-chart-highlight-element');
+    this._selectedElement = this._viewportElement.createChild('div', 'flame-chart-selected-element');
+
+    UI.installDragHandle(
+        this._viewportElement, this._startDragging.bind(this), this._dragging.bind(this), this._endDragging.bind(this),
+        null);
 
     this._rulerEnabled = true;
     this._windowLeft = 0.0;
     this._windowRight = 1.0;
-    this._timeWindowLeft = 0;
-    this._timeWindowRight = Infinity;
+    this._timeWindowLeft = dataProvider.minimumBoundary();
+    this._timeWindowRight = this._timeWindowLeft + dataProvider.totalTime();
     this._rangeSelectionStart = 0;
     this._rangeSelectionEnd = 0;
     this._barHeight = 17;
     this._textBaseline = 5;
     this._textPadding = 5;
-    this._paddingLeft = 0;
-    var markerPadding = 2;
-    this._markerRadius = this._barHeight / 2 - markerPadding;
+    this._markerRadius = 6;
+    this._chartViewport.setWindowTimes(this._timeWindowLeft, this._timeWindowRight);
 
     /** @const */
     this._headerLeftPadding = 6;
@@ -144,17 +153,14 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
   }
 
   /**
-   * @param {number} value
-   */
-  setPaddingLeft(value) {
-    this._paddingLeft = value;
-  }
-
-  /**
    * @param {boolean} enable
    */
   enableRuler(enable) {
     this._rulerEnabled = enable;
+  }
+
+  alwaysShowVerticalScroll() {
+    this._chartViewport.alwaysShowVerticalScroll();
   }
 
   /**
@@ -163,16 +169,18 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
   highlightEntry(entryIndex) {
     if (this._highlightedEntryIndex === entryIndex)
       return;
+    if (!this._dataProvider.entryColor(entryIndex))
+      return;
     this._highlightedEntryIndex = entryIndex;
     this._updateElementPosition(this._highlightElement, this._highlightedEntryIndex);
-    this._dataProvider.highlightEntry(entryIndex);
+    this.dispatchEventToListeners(PerfUI.FlameChart.Events.EntryHighlighted, entryIndex);
   }
 
   hideHighlight() {
     this._entryInfo.removeChildren();
     this._highlightedEntryIndex = -1;
     this._updateElementPosition(this._highlightElement, this._highlightedEntryIndex);
-    this._dataProvider.highlightEntry(-1);
+    this.dispatchEventToListeners(PerfUI.FlameChart.Events.EntryHighlighted, -1);
   }
 
   _resetCanvas() {
@@ -181,6 +189,61 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     this._canvas.height = this._offsetHeight * ratio;
     this._canvas.style.width = this._offsetWidth + 'px';
     this._canvas.style.height = this._offsetHeight + 'px';
+  }
+
+  /**
+   * @override
+   * @param {number} startTime
+   * @param {number} endTime
+   */
+  requestWindowTimes(startTime, endTime) {
+    this._flameChartDelegate.requestWindowTimes(startTime, endTime);
+  }
+
+  /**
+   * @override
+   * @param {number} startTime
+   * @param {number} endTime
+   */
+  updateRangeSelection(startTime, endTime) {
+    this._flameChartDelegate.updateRangeSelection(startTime, endTime);
+  }
+
+  /**
+   * @override
+   * @param {number} width
+   * @param {number} height
+   */
+  setSize(width, height) {
+    this._offsetWidth = width;
+    this._offsetHeight = height;
+  }
+
+  /**
+   * @param {!MouseEvent} event
+   */
+  _startDragging(event) {
+    this.hideHighlight();
+    this._maxDragOffset = 0;
+    this._dragStartX = event.pageX;
+    this._dragStartY = event.pageY;
+    return true;
+  }
+
+  /**
+   * @param {!MouseEvent} event
+   */
+  _dragging(event) {
+    var dx = event.pageX - this._dragStartX;
+    var dy = event.pageY - this._dragStartY;
+    this._maxDragOffset = Math.max(this._maxDragOffset, Math.sqrt(dx * dx + dy * dy));
+  }
+
+  /**
+   * @param {!MouseEvent} event
+   */
+  _endDragging(event) {
+    this._updateHighlight();
   }
 
   /**
@@ -202,33 +265,36 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     var timelineData = this._timelineData();
     if (!timelineData)
       return;
-    // Think in terms of not where we are, but where we'll be after animation (if present)
-    var timeLeft = this._cancelWindowTimesAnimation ? this._pendingAnimationTimeLeft : this._timeWindowLeft;
-    var timeRight = this._cancelWindowTimesAnimation ? this._pendingAnimationTimeRight : this._timeWindowRight;
+    var timeLeft = this._timeWindowLeft;
+    var timeRight = this._timeWindowRight;
     var entryStartTime = timelineData.entryStartTimes[entryIndex];
     var entryTotalTime = timelineData.entryTotalTimes[entryIndex];
     var entryEndTime = entryStartTime + entryTotalTime;
     var minEntryTimeWindow = Math.min(entryTotalTime, timeRight - timeLeft);
 
-    var y = this._levelToHeight(timelineData.entryLevels[entryIndex]);
-    this.setScrollOffset(y, this._barHeight);
+    var level = timelineData.entryLevels[entryIndex];
+    this._chartViewport.setScrollOffset(this._levelToOffset(level), this._levelHeight(level));
 
+    var minVisibleWidthPx = 30;
+    var futurePixelToTime = (timeRight - timeLeft) / this._offsetWidth;
+    minEntryTimeWindow = Math.max(minEntryTimeWindow, futurePixelToTime * minVisibleWidthPx);
     if (timeLeft > entryEndTime) {
       var delta = timeLeft - entryEndTime + minEntryTimeWindow;
-      this._flameChartDelegate.requestWindowTimes(timeLeft - delta, timeRight - delta);
+      this.requestWindowTimes(timeLeft - delta, timeRight - delta);
     } else if (timeRight < entryStartTime) {
       var delta = entryStartTime - timeRight + minEntryTimeWindow;
-      this._flameChartDelegate.requestWindowTimes(timeLeft + delta, timeRight + delta);
+      this.requestWindowTimes(timeLeft + delta, timeRight + delta);
     }
   }
 
   /**
-   * @override
    * @param {number} startTime
    * @param {number} endTime
    */
   setWindowTimes(startTime, endTime) {
-    super.setWindowTimes(startTime, endTime);
+    this._chartViewport.setWindowTimes(startTime, endTime);
+    this._timeWindowLeft = startTime;
+    this._timeWindowRight = endTime;
     this._updateHighlight();
   }
 
@@ -240,11 +306,11 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     this._lastMouseOffsetY = event.offsetY;
     if (!this._enabled())
       return;
-    if (this.isDragging())
+    if (this._chartViewport.isDragging())
       return;
     if (this._coordinatesToGroupIndex(event.offsetX, event.offsetY) >= 0) {
       this.hideHighlight();
-      this.viewportElement.style.cursor = 'pointer';
+      this._viewportElement.style.cursor = 'pointer';
       return;
     }
     this._updateHighlight();
@@ -262,10 +328,10 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
       this.hideHighlight();
       return;
     }
-    if (this.isDragging())
+    if (this._chartViewport.isDragging())
       return;
     this._updatePopover(entryIndex);
-    this.viewportElement.style.cursor = this._dataProvider.canJumpToEntry(entryIndex) ? 'pointer' : 'default';
+    this._viewportElement.style.cursor = this._dataProvider.canJumpToEntry(entryIndex) ? 'pointer' : 'default';
     this.highlightEntry(entryIndex);
   }
 
@@ -323,14 +389,14 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     // So if there was drag (mouse move) in the middle of that events
     // we skip the click. Otherwise we jump to the sources.
     var /** @const */ clickThreshold = 5;
-    if (this.maxDragOffset() > clickThreshold)
+    if (this._maxDragOffset > clickThreshold)
       return;
     var groupIndex = this._coordinatesToGroupIndex(event.offsetX, event.offsetY);
     if (groupIndex >= 0) {
       this._toggleGroupVisibility(groupIndex);
       return;
     }
-    this.hideRangeSelection();
+    this._chartViewport.hideRangeSelection();
     this.dispatchEventToListeners(PerfUI.FlameChart.Events.EntrySelected, this._highlightedEntryIndex);
   }
 
@@ -353,7 +419,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
       var timelineData = this._timelineData();
       var level = timelineData.entryLevels[this._selectedEntryIndex];
       if (this._selectedEntryIndex >= 0 && level >= group.startLevel &&
-          (groupIndex === groups.length || groups[groupIndex + 1].startLevel > level))
+          (groupIndex >= groups.length - 1 || groups[groupIndex + 1].startLevel > level))
         this._selectedEntryIndex = -1;
     }
 
@@ -436,30 +502,21 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
 
   /**
    * @param {number} x
-   * @return {number}
-   */
-  _cursorTime(x) {
-    return (x + this._pixelWindowLeft - this._paddingLeft) * this._pixelToTime + this._minimumBoundary;
-  }
-
-  /**
-   * @param {number} x
    * @param {number} y
    * @return {number}
    */
   _coordinatesToEntryIndex(x, y) {
     if (x < 0 || y < 0)
       return -1;
-    y += this.getScrollOffset();
     var timelineData = this._timelineData();
     if (!timelineData)
       return -1;
-    var cursorTime = this._cursorTime(x);
+    y += this._chartViewport.scrollOffset();
     var cursorLevel = this._visibleLevelOffsets.upperBound(y) - 1;
     if (cursorLevel < 0 || !this._visibleLevels[cursorLevel])
       return -1;
     var offsetFromLevel = y - this._visibleLevelOffsets[cursorLevel];
-    if (offsetFromLevel > this._barHeight)
+    if (offsetFromLevel > this._levelHeight(cursorLevel))
       return -1;
     var entryStartTimes = timelineData.entryStartTimes;
     var entryTotalTimes = timelineData.entryTotalTimes;
@@ -475,6 +532,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     function comparator(time, entryIndex) {
       return time - entryStartTimes[entryIndex];
     }
+    var cursorTime = this._chartViewport.pixelToTime(x);
     var indexOnLevel = Math.max(entryIndexes.upperBound(cursorTime, comparator) - 1, 0);
 
     /**
@@ -486,15 +544,16 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
       if (entryIndex === undefined)
         return false;
       var startTime = entryStartTimes[entryIndex];
+      var startX = this._chartViewport.timeToPosition(startTime);
       var duration = entryTotalTimes[entryIndex];
       if (isNaN(duration)) {
-        var dx = (startTime - cursorTime) / this._pixelToTime;
-        var dy = this._barHeight / 2 - offsetFromLevel;
+        var dx = startX - x;
+        var dy = this._levelHeight(cursorLevel) / 2 - offsetFromLevel;
         return dx * dx + dy * dy < this._markerRadius * this._markerRadius;
       }
-      var endTime = startTime + duration;
-      var barThreshold = 3 * this._pixelToTime;
-      return startTime - barThreshold < cursorTime && cursorTime < endTime + barThreshold;
+      var endX = this._chartViewport.timeToPosition(startTime + duration);
+      var /** @const */ barThresholdPx = 3;
+      return startX - barThresholdPx < x && x < endX + barThresholdPx;
     }
 
     var entryIndex = entryIndexes[indexOnLevel];
@@ -514,7 +573,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
   _coordinatesToGroupIndex(x, y) {
     if (x < 0 || y < 0)
       return -1;
-    y += this.getScrollOffset();
+    y += this._chartViewport.scrollOffset();
     var groups = this._rawTimelineData.groups || [];
     var group = this._groupOffsets.upperBound(y) - 1;
 
@@ -540,9 +599,9 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     if (!markers)
       return -1;
     var /** @const */ accurracyOffsetPx = 4;
-    var time = this._cursorTime(x);
-    var leftTime = this._cursorTime(x - accurracyOffsetPx);
-    var rightTime = this._cursorTime(x + accurracyOffsetPx);
+    var time = this._chartViewport.pixelToTime(x);
+    var leftTime = this._chartViewport.pixelToTime(x - accurracyOffsetPx);
+    var rightTime = this._chartViewport.pixelToTime(x + accurracyOffsetPx);
     var left = this._markerIndexBeforeTime(leftTime);
     var markerIndex = -1;
     var distance = Infinity;
@@ -577,29 +636,27 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     var context = /** @type {!CanvasRenderingContext2D} */ (this._canvas.getContext('2d'));
     context.save();
     var ratio = window.devicePixelRatio;
-    var top = this.getScrollOffset();
+    var top = this._chartViewport.scrollOffset();
     context.scale(ratio, ratio);
     context.translate(0, -top);
     var defaultFont = '11px ' + Host.fontFamily();
     context.font = defaultFont;
 
-    var timeWindowRight = this._timeWindowRight;
-    var timeWindowLeft = this._timeWindowLeft - this._paddingLeft / this._timeToPixel;
     var entryTotalTimes = timelineData.entryTotalTimes;
     var entryStartTimes = timelineData.entryStartTimes;
     var entryLevels = timelineData.entryLevels;
+    var timeToPixel = this._chartViewport.timeToPixel();
 
     var titleIndices = [];
     var markerIndices = [];
     var textPadding = this._textPadding;
     var minTextWidth = 2 * textPadding + UI.measureTextWidth(context, '\u2026');
-    var barHeight = this._barHeight;
     var minVisibleBarLevel = Math.max(this._visibleLevelOffsets.upperBound(top) - 1, 0);
 
     /** @type {!Map<string, !Array<number>>} */
     var colorBuckets = new Map();
     for (var level = minVisibleBarLevel; level < this._dataProvider.maxStackDepth(); ++level) {
-      if (this._levelToHeight(level) > top + height)
+      if (this._levelToOffset(level) > top + height)
         break;
       if (!this._visibleLevels[level])
         continue;
@@ -607,13 +664,13 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
       // Entries are ordered by start time within a level, so find the last visible entry.
       var levelIndexes = this._timelineLevels[level];
       var rightIndexOnLevel =
-          levelIndexes.lowerBound(timeWindowRight, (time, entryIndex) => time - entryStartTimes[entryIndex]) - 1;
+          levelIndexes.lowerBound(this._timeWindowRight, (time, entryIndex) => time - entryStartTimes[entryIndex]) - 1;
       var lastDrawOffset = Infinity;
       for (var entryIndexOnLevel = rightIndexOnLevel; entryIndexOnLevel >= 0; --entryIndexOnLevel) {
         var entryIndex = levelIndexes[entryIndexOnLevel];
         var entryStartTime = entryStartTimes[entryIndex];
         var entryOffsetRight = entryStartTime + (entryTotalTimes[entryIndex] || 0);
-        if (entryOffsetRight <= timeWindowLeft)
+        if (entryOffsetRight <= this._timeWindowLeft)
           break;
 
         var barX = this._timeToPositionClipped(entryStartTime);
@@ -638,14 +695,14 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
       var color = colors[c];
       var indexes = colorBuckets.get(color);
       context.beginPath();
-      context.fillStyle = color;
       for (var i = 0; i < indexes.length; ++i) {
         var entryIndex = indexes[i];
         var entryStartTime = entryStartTimes[entryIndex];
         var barX = this._timeToPositionClipped(entryStartTime);
         var duration = entryTotalTimes[entryIndex];
         var barLevel = entryLevels[entryIndex];
-        var barY = this._levelToHeight(barLevel);
+        var barHeight = this._levelHeight(barLevel);
+        var barY = this._levelToOffset(barLevel);
         if (isNaN(duration)) {
           context.moveTo(barX + this._markerRadius, barY + barHeight / 2);
           context.arc(barX, barY + barHeight / 2, this._markerRadius, 0, Math.PI * 2);
@@ -654,29 +711,31 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
         }
         var barRight = this._timeToPositionClipped(entryStartTime + duration);
         var barWidth = Math.max(barRight - barX, 1);
-        context.rect(barX, barY, barWidth - 0.4, barHeight - 1);
+        if (color)
+          context.rect(barX, barY, barWidth - 0.4, barHeight - 1);
         if (barWidth > minTextWidth || this._dataProvider.forceDecoration(entryIndex))
           titleIndices.push(entryIndex);
       }
+      if (!color)
+        continue;
+      context.fillStyle = color;
       context.fill();
     }
 
-    context.strokeStyle = 'rgba(0, 0, 0, 0.2)';
     context.beginPath();
     for (var m = 0; m < markerIndices.length; ++m) {
       var entryIndex = markerIndices[m];
       var entryStartTime = entryStartTimes[entryIndex];
       var barX = this._timeToPositionClipped(entryStartTime);
       var barLevel = entryLevels[entryIndex];
-      var barY = this._levelToHeight(barLevel);
-      context.moveTo(barX + this._markerRadius, barY + barHeight / 2);
-      context.arc(barX, barY + barHeight / 2, this._markerRadius, 0, Math.PI * 2);
+      var y = this._levelToOffset(barLevel) + this._levelHeight(barLevel) / 2;
+      context.moveTo(barX + this._markerRadius, y);
+      context.arc(barX, y, this._markerRadius, 0, Math.PI * 2);
     }
+    context.strokeStyle = 'rgba(0, 0, 0, 0.2)';
     context.stroke();
 
     context.textBaseline = 'alphabetic';
-    var textBaseHeight = this._barHeight - this._textBaseline;
-
     for (var i = 0; i < titleIndices.length; ++i) {
       var entryIndex = titleIndices[i];
       var entryStartTime = entryStartTimes[entryIndex];
@@ -684,24 +743,27 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
       var barRight = Math.min(this._timeToPositionClipped(entryStartTime + entryTotalTimes[entryIndex]), width) + 1;
       var barWidth = barRight - barX;
       var barLevel = entryLevels[entryIndex];
-      var barY = this._levelToHeight(barLevel);
+      var barY = this._levelToOffset(barLevel);
       var text = this._dataProvider.entryTitle(entryIndex);
       if (text && text.length) {
         context.font = this._dataProvider.entryFont(entryIndex) || defaultFont;
         text = UI.trimTextMiddle(context, text, barWidth - 2 * textPadding);
       }
-      var unclippedBarX = this._timeToPosition(entryStartTime);
+      var unclippedBarX = this._chartViewport.timeToPosition(entryStartTime);
+      var barHeight = this._levelHeight(barLevel);
       if (this._dataProvider.decorateEntry(
-              entryIndex, context, text, barX, barY, barWidth, barHeight, unclippedBarX, this._timeToPixel))
+              entryIndex, context, text, barX, barY, barWidth, barHeight, unclippedBarX, timeToPixel))
         continue;
       if (!text || !text.length)
         continue;
       context.fillStyle = this._dataProvider.textColor(entryIndex);
-      context.fillText(text, barX + textPadding, barY + textBaseHeight);
+      context.fillText(text, barX + textPadding, barY + barHeight - this._textBaseline);
     }
+
     context.restore();
 
     this._drawGroupHeaders(width, height);
+    this._drawFlowEvents(context, width, height);
     this._drawMarkers();
     var headerHeight = this._rulerEnabled ? PerfUI.FlameChart.HeaderHeight : 0;
     PerfUI.TimelineGrid.drawCanvasGrid(context, this._calculator, 3, headerHeight);
@@ -717,10 +779,8 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
    */
   _drawGroupHeaders(width, height) {
     var context = /** @type {!CanvasRenderingContext2D} */ (this._canvas.getContext('2d'));
-    var top = this.getScrollOffset();
+    var top = this._chartViewport.scrollOffset();
     var ratio = window.devicePixelRatio;
-    var barHeight = this._barHeight;
-    var textBaseHeight = barHeight - this._textBaseline;
     var groups = this._rawTimelineData.groups || [];
     if (!groups.length)
       return;
@@ -735,7 +795,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     var defaultFont = '11px ' + Host.fontFamily();
     context.font = defaultFont;
 
-    context.fillStyle = UI.themeSupport.patchColor('#fff', colorUsage.Background);
+    context.fillStyle = UI.themeSupport.patchColorText('#fff', colorUsage.Background);
     forEachGroup.call(this, (offset, index, group) => {
       var paddingHeight = group.style.padding;
       if (paddingHeight < 5)
@@ -745,7 +805,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     if (groups.length && lastGroupOffset < top + height)
       context.fillRect(0, lastGroupOffset + 2, width, top + height - lastGroupOffset);
 
-    context.strokeStyle = UI.themeSupport.patchColor('#eee', colorUsage.Background);
+    context.strokeStyle = UI.themeSupport.patchColorText('#eee', colorUsage.Background);
     context.beginPath();
     forEachGroup.call(this, (offset, index, group, isFirst) => {
       if (isFirst || group.style.padding < 4)
@@ -780,27 +840,27 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
         context.fillStyle = Common.Color.parse(group.style.backgroundColor).setAlpha(0.8).asString(null);
         context.fillRect(
             this._headerLeftPadding - this._headerLabelXPadding, offset + this._headerLabelYPadding, width,
-            barHeight - 2 * this._headerLabelYPadding);
+            group.style.height - 2 * this._headerLabelYPadding);
       }
       context.fillStyle = group.style.color;
       context.fillText(
           group.name, Math.floor(this._expansionArrowIndent * (group.style.nestingLevel + 1) + this._arrowSide),
-          offset + textBaseHeight);
+          offset + group.style.height - this._textBaseline);
     });
     context.restore();
 
-    context.fillStyle = UI.themeSupport.patchColor('#6e6e6e', colorUsage.Foreground);
+    context.fillStyle = UI.themeSupport.patchColorText('#6e6e6e', colorUsage.Foreground);
     context.beginPath();
     forEachGroup.call(this, (offset, index, group) => {
       if (this._isGroupCollapsible(index)) {
         drawExpansionArrow.call(
             this, this._expansionArrowIndent * (group.style.nestingLevel + 1),
-            offset + textBaseHeight - this._arrowSide / 2, !!group.expanded);
+            offset + group.style.height - this._textBaseline - this._arrowSide / 2, !!group.expanded);
       }
     });
     context.fill();
 
-    context.strokeStyle = UI.themeSupport.patchColor('#ddd', colorUsage.Background);
+    context.strokeStyle = UI.themeSupport.patchColorText('#ddd', colorUsage.Background);
     context.beginPath();
     context.stroke();
 
@@ -877,11 +937,12 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
   _drawCollapsedOverviewForGroup(group, y, endLevel) {
     var range = new Common.SegmentedRange(mergeCallback);
     var timeWindowRight = this._timeWindowRight;
-    var timeWindowLeft = this._timeWindowLeft - this._paddingLeft / this._timeToPixel;
+    var timeWindowLeft = this._timeWindowLeft;
     var context = /** @type {!CanvasRenderingContext2D} */ (this._canvas.getContext('2d'));
-    var barHeight = this._barHeight - 1;
+    var barHeight = group.style.height;
     var entryStartTimes = this._rawTimelineData.entryStartTimes;
     var entryTotalTimes = this._rawTimelineData.entryTotalTimes;
+    var timeToPixel = this._chartViewport.timeToPixel();
 
     for (var level = group.startLevel; level < endLevel; ++level) {
       var levelIndexes = this._timelineLevels[level];
@@ -902,13 +963,13 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
         var color = this._dataProvider.entryColor(entryIndex);
         var endBarX = this._timeToPositionClipped(entryEndTime);
         if (group.style.useDecoratorsForOverview && this._dataProvider.forceDecoration(entryIndex)) {
-          var unclippedBarX = this._timeToPosition(entryStartTime);
+          var unclippedBarX = this._chartViewport.timeToPosition(entryStartTime);
           var barWidth = endBarX - barX;
           context.beginPath();
           context.fillStyle = color;
-          context.fillRect(barX, y, barWidth, barHeight);
+          context.fillRect(barX, y, barWidth, barHeight - 1);
           this._dataProvider.decorateEntry(
-              entryIndex, context, '', barX, y, barWidth, this._barHeight, unclippedBarX, this._timeToPixel);
+              entryIndex, context, '', barX, y, barWidth, barHeight, unclippedBarX, timeToPixel);
           continue;
         }
         range.append(new Common.Segment(barX, endBarX, color));
@@ -926,7 +987,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
         lastColor = segments[i].data;
         context.fillStyle = lastColor;
       }
-      context.rect(segment.begin, y, segment.end - segment.begin, barHeight);
+      context.rect(segment.begin, y, segment.end - segment.begin, barHeight - 1);
     }
     context.fill();
 
@@ -940,10 +1001,79 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     }
   }
 
+  /**
+   * @param {!CanvasRenderingContext2D} context
+   * @param {number} height
+   * @param {number} width
+   */
+  _drawFlowEvents(context, width, height) {
+    context.save();
+    var ratio = window.devicePixelRatio;
+    var top = this._chartViewport.scrollOffset();
+    var arrowWidth = 6;
+    context.scale(ratio, ratio);
+    context.translate(0, -top);
+
+    context.fillStyle = '#7f5050';
+    context.strokeStyle = '#7f5050';
+    var td = this._timelineData();
+    var endIndex = td.flowStartTimes.lowerBound(this._timeWindowRight);
+
+    context.lineWidth = 0.5;
+    for (var i = 0; i < endIndex; ++i) {
+      if (!td.flowEndTimes[i] || td.flowEndTimes[i] < this._timeWindowLeft)
+        continue;
+      var startX = this._chartViewport.timeToPosition(td.flowStartTimes[i]);
+      var endX = this._chartViewport.timeToPosition(td.flowEndTimes[i]);
+      var startLevel = td.flowStartLevels[i];
+      var endLevel = td.flowEndLevels[i];
+      var startY = this._levelToOffset(startLevel) + this._levelHeight(startLevel) / 2;
+      var endY = this._levelToOffset(endLevel) + this._levelHeight(endLevel) / 2;
+
+
+      var segment = Math.min((endX - startX) / 4, 40);
+      var distanceTime = td.flowEndTimes[i] - td.flowStartTimes[i];
+      var distanceY = (endY - startY) / 10;
+      var spread = 30;
+      var lineY = distanceTime < 1 ? startY : spread + Math.max(0, startY + distanceY * (i % spread));
+
+      var p = [];
+      p.push({x: startX, y: startY});
+      p.push({x: startX + arrowWidth, y: startY});
+      p.push({x: startX + segment + 2 * arrowWidth, y: startY});
+      p.push({x: startX + segment, y: lineY});
+      p.push({x: startX + segment * 2, y: lineY});
+      p.push({x: endX - segment * 2, y: lineY});
+      p.push({x: endX - segment, y: lineY});
+      p.push({x: endX - segment - 2 * arrowWidth, y: endY});
+      p.push({x: endX - arrowWidth, y: endY});
+
+      context.beginPath();
+      context.moveTo(p[0].x, p[0].y);
+      context.lineTo(p[1].x, p[1].y);
+      context.bezierCurveTo(p[2].x, p[2].y, p[3].x, p[3].y, p[4].x, p[4].y);
+      context.lineTo(p[5].x, p[5].y);
+      context.bezierCurveTo(p[6].x, p[6].y, p[7].x, p[7].y, p[8].x, p[8].y);
+      context.stroke();
+
+      context.beginPath();
+      context.arc(startX, startY, 2, -Math.PI / 2, Math.PI / 2, false);
+      context.fill();
+
+      context.beginPath();
+      context.moveTo(endX, endY);
+      context.lineTo(endX - arrowWidth, endY - 3);
+      context.lineTo(endX - arrowWidth, endY + 3);
+      context.fill();
+    }
+    context.restore();
+  }
+
   _drawMarkers() {
     var markers = this._timelineData().markers;
     var left = this._markerIndexBeforeTime(this._calculator.minimumBoundary());
     var rightBoundary = this._calculator.maximumBoundary();
+    var timeToPixel = this._chartViewport.timeToPixel();
 
     var context = /** @type {!CanvasRenderingContext2D} */ (this._canvas.getContext('2d'));
     context.save();
@@ -955,7 +1085,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
       var timestamp = markers[i].startTime();
       if (timestamp > rightBoundary)
         break;
-      markers[i].draw(context, this._calculator.computePosition(timestamp), height, this._timeToPixel);
+      markers[i].draw(context, this._calculator.computePosition(timestamp), height, timeToPixel);
     }
     context.restore();
   }
@@ -973,7 +1103,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     var style = element.style;
     style.left = barX + 'px';
     style.backgroundColor = marker.color();
-    this.viewportElement.appendChild(element);
+    this._viewportElement.appendChild(element);
   }
 
   /**
@@ -1020,6 +1150,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     var levelCount = this._dataProvider.maxStackDepth();
     var groups = this._rawTimelineData.groups || [];
     this._visibleLevelOffsets = new Uint32Array(levelCount + 1);
+    this._visibleLevelHeights = new Uint32Array(levelCount);
     this._visibleLevels = new Uint16Array(levelCount);
     this._groupOffsets = new Uint32Array(groups.length + 1);
 
@@ -1030,6 +1161,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     var groupStack = [{nestingLevel: -1, visible: true}];
     var lastGroupLevel = Math.max(levelCount, groups.length ? groups.peekLast().startLevel + 1 : 0);
     for (var level = 0; level < lastGroupLevel; ++level) {
+      var parentGroupIsVisible = true;
       while (groupIndex < groups.length - 1 && level === groups[groupIndex + 1].startLevel) {
         ++groupIndex;
         var style = groups[groupIndex].style;
@@ -1040,7 +1172,7 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
         }
         var thisGroupIsVisible =
             groupIndex >= 0 && this._isGroupCollapsible(groupIndex) ? groups[groupIndex].expanded : true;
-        var parentGroupIsVisible = groupStack.peekLast().visible;
+        parentGroupIsVisible = groupStack.peekLast().visible;
         visible = thisGroupIsVisible && parentGroupIsVisible;
         groupStack.push({nestingLevel: style.nestingLevel, visible: visible});
         if (parentGroupIsVisible)
@@ -1050,13 +1182,25 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
           currentOffset += style.height;
       }
       var isFirstOnLevel = groupIndex >= 0 && level === groups[groupIndex].startLevel;
-      var thisLevelIsVisible = visible || isFirstOnLevel && groups[groupIndex].style.useFirstLineForOverview;
+      var thisLevelIsVisible =
+          parentGroupIsVisible && (visible || isFirstOnLevel && groups[groupIndex].style.useFirstLineForOverview);
       if (level < levelCount) {
+        var height;
+        if (groupIndex >= 0) {
+          var group = groups[groupIndex];
+          var style = group.style;
+          height = isFirstOnLevel && !style.shareHeaderLine || (style.collapsible && !group.expanded) ?
+              style.height :
+              (style.itemsHeight || this._barHeight);
+        } else {
+          height = this._barHeight;
+        }
         this._visibleLevels[level] = thisLevelIsVisible;
         this._visibleLevelOffsets[level] = currentOffset;
+        this._visibleLevelHeights[level] = height;
       }
       if (thisLevelIsVisible || (parentGroupIsVisible && style.shareHeaderLine && isFirstOnLevel))
-        currentOffset += this._barHeight;
+        currentOffset += this._visibleLevelHeights[level];
     }
     if (groupIndex >= 0)
       this._groupOffsets[groupIndex + 1] = currentOffset;
@@ -1075,16 +1219,19 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     if (!isLastGroup && groups[index + 1].style.nestingLevel > style.nestingLevel)
       return true;
     var nextGroupLevel = isLastGroup ? this._dataProvider.maxStackDepth() : groups[index + 1].startLevel;
-    // For groups that only have one line and share header line, pretend these are not collapsible.
-    return nextGroupLevel !== groups[index].startLevel + 1;
+    if (nextGroupLevel !== groups[index].startLevel + 1)
+      return true;
+    // For groups that only have one line and share header line, pretend these are not collapsible
+    // unless the itemsHeight does not match the headerHeight
+    return style.height !== style.itemsHeight;
   }
 
   /**
    * @param {number} entryIndex
    */
   setSelectedEntry(entryIndex) {
-    if (entryIndex === -1 && !this.isDragging())
-      this.hideRangeSelection();
+    if (entryIndex === -1 && !this._chartViewport.isDragging())
+      this._chartViewport.hideRangeSelection();
     if (this._selectedEntryIndex === entryIndex)
       return;
     this._selectedEntryIndex = entryIndex;
@@ -1113,13 +1260,15 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     var barCenter = barX + barWidth / 2;
     barWidth = Math.max(barWidth, elementMinWidthPx);
     barX = barCenter - barWidth / 2;
-    var barY = this._levelToHeight(timelineData.entryLevels[entryIndex]) - this.getScrollOffset();
+    var entryLevel = timelineData.entryLevels[entryIndex];
+    var barY = this._levelToOffset(entryLevel) - this._chartViewport.scrollOffset();
+    var barHeight = this._levelHeight(entryLevel);
     var style = element.style;
     style.left = barX + 'px';
     style.top = barY + 'px';
     style.width = barWidth + 'px';
-    style.height = this._barHeight - 1 + 'px';
-    this.viewportElement.appendChild(element);
+    style.height = barHeight - 1 + 'px';
+    this._viewportElement.appendChild(element);
   }
 
   /**
@@ -1127,23 +1276,23 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
    * @return {number}
    */
   _timeToPositionClipped(time) {
-    return Number.constrain(this._timeToPosition(time), 0, this._offsetWidth);
-  }
-
-  /**
-   * @param {number} time
-   * @return {number}
-   */
-  _timeToPosition(time) {
-    return Math.floor((time - this._minimumBoundary) * this._timeToPixel) - this._pixelWindowLeft + this._paddingLeft;
+    return Number.constrain(this._chartViewport.timeToPosition(time), 0, this._offsetWidth);
   }
 
   /**
    * @param {number} level
    * @return {number}
    */
-  _levelToHeight(level) {
+  _levelToOffset(level) {
     return this._visibleLevelOffsets[level];
+  }
+
+  /**
+   * @param {number} level
+   * @return {number}
+   */
+  _levelHeight(level) {
+    return this._visibleLevelHeights[level];
   }
 
   _updateBoundaries() {
@@ -1163,23 +1312,21 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
       this._windowRight = 1;
     }
 
-    var totalPixels = Math.floor((this._offsetWidth - this._paddingLeft) / windowWidth);
+    var totalPixels = Math.floor(this._offsetWidth / windowWidth);
     this._pixelWindowLeft = Math.floor(totalPixels * this._windowLeft);
 
-    this._timeToPixel = totalPixels / this._totalTime;
-    this._pixelToTime = this._totalTime / totalPixels;
+    this._chartViewport.setBoundaries(this._minimumBoundary, this._totalTime);
   }
 
   _updateHeight() {
-    var height = this._levelToHeight(this._dataProvider.maxStackDepth());
-    this.setContentHeight(height);
+    var height = this._levelToOffset(this._dataProvider.maxStackDepth());
+    this._chartViewport.setContentHeight(height);
   }
 
   /**
    * @override
    */
   onResize() {
-    super.onResize();
     this.scheduleUpdate();
   }
 
@@ -1194,15 +1341,12 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     this._updateBoundaries();
     this._calculator._updateBoundaries(this);
     this._draw(this._offsetWidth, this._offsetHeight);
-    if (!this.isDragging())
+    if (!this._chartViewport.isDragging())
       this._updateHighlight();
   }
 
-  /**
-   * @override
-   */
   reset() {
-    super.reset();
+    this._chartViewport.reset();
     this._rawTimelineData = null;
     this._rawTimelineDataLength = 0;
     this._highlightedMarkerIndex = -1;
@@ -1210,7 +1354,11 @@ PerfUI.FlameChart = class extends PerfUI.ChartViewport {
     this._selectedEntryIndex = -1;
     /** @type {!Map<string,!Map<string,number>>} */
     this._textWidth = new Map();
-    this.scheduleUpdate();
+    this._chartViewport.scheduleUpdate();
+  }
+
+  scheduleUpdate() {
+    this._chartViewport.scheduleUpdate();
   }
 
   _enabled() {
@@ -1228,7 +1376,12 @@ PerfUI.FlameChart.MinimalTimeWindowMs = 0.5;
 PerfUI.FlameChartDataProvider = function() {};
 
 /**
- * @typedef {!{name: string, startLevel: number, expanded: (boolean|undefined), style: !PerfUI.FlameChart.GroupStyle}}
+ * @typedef {!{
+ *     name: string,
+ *     startLevel: number,
+ *     expanded: (boolean|undefined),
+ *     style: !PerfUI.FlameChart.GroupStyle
+ * }}
  */
 PerfUI.FlameChart.Group;
 
@@ -1241,6 +1394,7 @@ PerfUI.FlameChart.Group;
  *     color: string,
  *     backgroundColor: string,
  *     nestingLevel: number,
+ *     itemsHeight: (number|undefined),
  *     shareHeaderLine: (boolean|undefined),
  *     useFirstLineForOverview: (boolean|undefined),
  *     useDecoratorsForOverview: (boolean|undefined)
@@ -1265,6 +1419,10 @@ PerfUI.FlameChart.TimelineData = class {
     this.groups = groups;
     /** @type {!Array.<!PerfUI.FlameChartMarker>} */
     this.markers = [];
+    this.flowStartTimes = [];
+    this.flowStartLevels = [];
+    this.flowEndTimes = [];
+    this.flowEndLevels = [];
   }
 };
 
@@ -1335,15 +1493,10 @@ PerfUI.FlameChartDataProvider.prototype = {
    * @param {number} barWidth
    * @param {number} barHeight
    * @param {number} unclippedBarX
-   * @param {number} timeToPixels
+   * @param {number} timeToPixelRatio
    * @return {boolean}
    */
-  decorateEntry(entryIndex, context, text, barX, barY, barWidth, barHeight, unclippedBarX, timeToPixels) {},
-
-  /**
-   * @param {number} entryIndex
-   */
-  highlightEntry(entryIndex) {},
+  decorateEntry(entryIndex, context, text, barX, barY, barWidth, barHeight, unclippedBarX, timeToPixelRatio) {},
 
   /**
    * @param {number} entryIndex
@@ -1390,74 +1543,8 @@ PerfUI.FlameChartMarker.prototype = {
 
 /** @enum {symbol} */
 PerfUI.FlameChart.Events = {
-  EntrySelected: Symbol('EntrySelected')
-};
-
-/**
- * @unrestricted
- */
-PerfUI.FlameChart.ColorGenerator = class {
-  /**
-   * @param {!{min: number, max: number}|number=} hueSpace
-   * @param {!{min: number, max: number, count: (number|undefined)}|number=} satSpace
-   * @param {!{min: number, max: number, count: (number|undefined)}|number=} lightnessSpace
-   * @param {!{min: number, max: number, count: (number|undefined)}|number=} alphaSpace
-   */
-  constructor(hueSpace, satSpace, lightnessSpace, alphaSpace) {
-    this._hueSpace = hueSpace || {min: 0, max: 360};
-    this._satSpace = satSpace || 67;
-    this._lightnessSpace = lightnessSpace || 80;
-    this._alphaSpace = alphaSpace || 1;
-    /** @type {!Map<string, string>} */
-    this._colors = new Map();
-  }
-
-  /**
-   * @param {string} id
-   * @param {string} color
-   */
-  setColorForID(id, color) {
-    this._colors.set(id, color);
-  }
-
-  /**
-   * @param {string} id
-   * @return {string}
-   */
-  colorForID(id) {
-    var color = this._colors.get(id);
-    if (!color) {
-      color = this._generateColorForID(id);
-      this._colors.set(id, color);
-    }
-    return color;
-  }
-
-  /**
-   * @param {string} id
-   * @return {string}
-   */
-  _generateColorForID(id) {
-    var hash = String.hashCode(id);
-    var h = this._indexToValueInSpace(hash, this._hueSpace);
-    var s = this._indexToValueInSpace(hash >> 8, this._satSpace);
-    var l = this._indexToValueInSpace(hash >> 16, this._lightnessSpace);
-    var a = this._indexToValueInSpace(hash >> 24, this._alphaSpace);
-    return `hsla(${h}, ${s}%, ${l}%, ${a})`;
-  }
-
-  /**
-   * @param {number} index
-   * @param {!{min: number, max: number, count: (number|undefined)}|number} space
-   * @return {number}
-   */
-  _indexToValueInSpace(index, space) {
-    if (typeof space === 'number')
-      return space;
-    var count = space.count || space.max - space.min;
-    index %= count;
-    return space.min + Math.floor(index / (count - 1) * (space.max - space.min));
-  }
+  EntrySelected: Symbol('EntrySelected'),
+  EntryHighlighted: Symbol('EntryHighlighted')
 };
 
 /**
@@ -1480,8 +1567,7 @@ PerfUI.FlameChart.Calculator = class {
     this._zeroTime = mainPane._dataProvider.minimumBoundary();
     this._minimumBoundaries = this._zeroTime + mainPane._windowLeft * this._totalTime;
     this._maximumBoundaries = this._zeroTime + mainPane._windowRight * this._totalTime;
-    this._paddingLeft = mainPane._paddingLeft;
-    this._width = mainPane._offsetWidth - this._paddingLeft;
+    this._width = mainPane._offsetWidth;
     this._timeToPixel = this._width / this.boundarySpan();
   }
 
@@ -1491,7 +1577,7 @@ PerfUI.FlameChart.Calculator = class {
    * @return {number}
    */
   computePosition(time) {
-    return Math.round((time - this._minimumBoundaries) * this._timeToPixel + this._paddingLeft);
+    return Math.round((time - this._minimumBoundaries) * this._timeToPixel);
   }
 
   /**

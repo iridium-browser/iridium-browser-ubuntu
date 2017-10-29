@@ -56,7 +56,7 @@ public:
      * If elements() are nonempty, uniquely identifies the list of elements within ibounds().
      * Otherwise undefined.
      */
-    int32_t elementsGenID() const { SkASSERT(!fElements.isEmpty()); return fElementsGenID; }
+    uint32_t elementsGenID() const { SkASSERT(!fElements.isEmpty()); return fElementsGenID; }
 
     /**
      * Indicates whether antialiasing is required to process any of the clip elements.
@@ -71,7 +71,7 @@ public:
     InitialState initialState() const { return fInitialState; }
 
     bool drawAlphaClipMask(GrRenderTargetContext*) const;
-    bool drawStencilClipMask(GrContext*, GrRenderTargetContext*, const SkIPoint& clipOrigin) const;
+    bool drawStencilClipMask(GrContext*, GrRenderTargetContext*) const;
 
 private:
     void walkStack(const SkClipStack&, const SkRect& queryBounds, int maxWindowRectangles);
@@ -83,7 +83,7 @@ private:
     bool                 fHasIBounds;
     GrWindowRectangles   fWindowRects;
     ElementList          fElements;
-    int32_t              fElementsGenID;
+    uint32_t             fElementsGenID;
     bool                 fRequiresAA;
     InitialState         fInitialState;
 };

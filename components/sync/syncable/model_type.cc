@@ -7,9 +7,9 @@
 #include <stddef.h>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
-#include "components/reading_list/core/reading_list_enable_flags.h"
 #include "components/sync/protocol/app_notification_specifics.pb.h"
 #include "components/sync/protocol/app_setting_specifics.pb.h"
 #include "components/sync/protocol/app_specifics.pb.h"
@@ -139,6 +139,8 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
      sync_pb::EntitySpecifics::kPrinterFieldNumber, 37},
     {READING_LIST, "READING_LIST", "reading_list", "Reading List",
      sync_pb::EntitySpecifics::kReadingListFieldNumber, 38},
+    {USER_EVENTS, "USER_EVENT", "user_events", "User Events",
+     sync_pb::EntitySpecifics::kUserEventFieldNumber, 39},
     {PROXY_TABS, "", "", "Tabs", -1, 25},
     {NIGORI, "NIGORI", "nigori", "Encryption Keys",
      sync_pb::EntitySpecifics::kNigoriFieldNumber, 17},
@@ -148,20 +150,6 @@ const ModelTypeInfo kModelTypeInfoMap[] = {
 
 static_assert(arraysize(kModelTypeInfoMap) == MODEL_TYPE_COUNT,
               "kModelTypeInfoMap should have MODEL_TYPE_COUNT elements");
-
-// Notes:
-// 1) This list must contain exactly the same elements as the set returned by
-//    UserSelectableTypes().
-// 2) This list must be in the same order as the respective values in the
-//    ModelType enum.
-const char* kUserSelectableDataTypeNames[] = {
-    "bookmarks",   "preferences", "passwords",  "autofill",
-    "themes",      "typedUrls",   "extensions", "apps",
-#if BUILDFLAG(ENABLE_READING_LIST)
-    "readingList",
-#endif
-    "tabs",
-};
 
 void AddDefaultFieldValue(ModelType type, sync_pb::EntitySpecifics* specifics) {
   switch (type) {
@@ -270,6 +258,9 @@ void AddDefaultFieldValue(ModelType type, sync_pb::EntitySpecifics* specifics) {
     case READING_LIST:
       specifics->mutable_reading_list();
       break;
+    case USER_EVENTS:
+      specifics->mutable_user_event();
+      break;
     case PROXY_TABS:
       NOTREACHED() << "No default field value for " << ModelTypeToString(type);
       break;
@@ -339,7 +330,7 @@ ModelType GetModelType(const sync_pb::SyncEntity& sync_entity) {
 }
 
 ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
-  static_assert(39 == MODEL_TYPE_COUNT,
+  static_assert(40 == MODEL_TYPE_COUNT,
                 "When adding new protocol types, the following type lookup "
                 "logic must be updated.");
   if (specifics.has_bookmark())
@@ -410,35 +401,14 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
     return PRINTERS;
   if (specifics.has_reading_list())
     return READING_LIST;
+  if (specifics.has_user_event())
+    return USER_EVENTS;
   if (specifics.has_nigori())
     return NIGORI;
   if (specifics.has_experiments())
     return EXPERIMENTS;
 
   return UNSPECIFIED;
-}
-
-ModelTypeSet ProtocolTypes() {
-  return Difference(ModelTypeSet::All(), ProxyTypes());
-}
-
-ModelTypeSet UserTypes() {
-  // TODO(sync): We should be able to build the actual enumset's internal
-  // bitset value here at compile time, instead of makes a new one each time.
-  return ModelTypeSet::FromRange(FIRST_USER_MODEL_TYPE, LAST_USER_MODEL_TYPE);
-}
-
-ModelTypeSet UserSelectableTypes() {
-  return ModelTypeSet(BOOKMARKS, PREFERENCES, PASSWORDS, AUTOFILL, THEMES,
-                      TYPED_URLS, EXTENSIONS, APPS,
-#if BUILDFLAG(ENABLE_READING_LIST)
-                      READING_LIST,
-#endif
-                      PROXY_TABS);
-}
-
-bool IsUserSelectableType(ModelType model_type) {
-  return UserSelectableTypes().Has(model_type);
 }
 
 ModelTypeNameMap GetUserSelectableTypeNameMap() {
@@ -454,7 +424,7 @@ ModelTypeNameMap GetUserSelectableTypeNameMap() {
 }
 
 ModelTypeSet EncryptableUserTypes() {
-  static_assert(39 == MODEL_TYPE_COUNT,
+  static_assert(40 == MODEL_TYPE_COUNT,
                 "If adding an unencryptable type, remove from "
                 "encryptable_user_types below.");
   ModelTypeSet encryptable_user_types = UserTypes();
@@ -483,52 +453,13 @@ ModelTypeSet EncryptableUserTypes() {
   // Supervised user whitelists are not encrypted since they are managed
   // server-side.
   encryptable_user_types.Remove(SUPERVISED_USER_WHITELISTS);
+  // User events are not encrypted since they are consumed server-side.
+  encryptable_user_types.Remove(USER_EVENTS);
   // Proxy types have no sync representation and are therefore not encrypted.
   // Note however that proxy types map to one or more protocol types, which
   // may or may not be encrypted themselves.
   encryptable_user_types.RemoveAll(ProxyTypes());
   return encryptable_user_types;
-}
-
-ModelTypeSet PriorityUserTypes() {
-  return ModelTypeSet(DEVICE_INFO, PRIORITY_PREFERENCES);
-}
-
-ModelTypeSet ControlTypes() {
-  // TODO(sync): We should be able to build the actual enumset's internal
-  // bitset value here at compile time, instead of makes a new one each time.
-  return ModelTypeSet::FromRange(FIRST_CONTROL_MODEL_TYPE,
-                                 LAST_CONTROL_MODEL_TYPE);
-}
-
-ModelTypeSet ProxyTypes() {
-  return ModelTypeSet::FromRange(FIRST_PROXY_TYPE, LAST_PROXY_TYPE);
-}
-
-bool IsControlType(ModelType model_type) {
-  return ControlTypes().Has(model_type);
-}
-
-ModelTypeSet CoreTypes() {
-  ModelTypeSet result = PriorityCoreTypes();
-
-  // The following are low priority core types.
-  result.Put(SYNCED_NOTIFICATIONS);
-  result.Put(SYNCED_NOTIFICATION_APP_INFO);
-  result.Put(SUPERVISED_USER_SHARED_SETTINGS);
-  result.Put(SUPERVISED_USER_WHITELISTS);
-
-  return result;
-}
-
-ModelTypeSet PriorityCoreTypes() {
-  ModelTypeSet result = ControlTypes();
-
-  // The following are non-control core types.
-  result.Put(SUPERVISED_USERS);
-  result.Put(SUPERVISED_USER_SETTINGS);
-
-  return result;
 }
 
 const char* ModelTypeToString(ModelType model_type) {
@@ -538,7 +469,7 @@ const char* ModelTypeToString(ModelType model_type) {
   if (model_type >= UNSPECIFIED && model_type < MODEL_TYPE_COUNT)
     return kModelTypeInfoMap[model_type].model_type_string;
   NOTREACHED() << "No known extension for model type.";
-  return "INVALID";
+  return "Invalid";
 }
 
 // The normal rules about histograms apply here.  Always append to the bottom of
@@ -553,16 +484,16 @@ int ModelTypeToHistogramInt(ModelType model_type) {
   return 0;
 }
 
-base::StringValue* ModelTypeToValue(ModelType model_type) {
+std::unique_ptr<base::Value> ModelTypeToValue(ModelType model_type) {
   if (model_type >= FIRST_REAL_MODEL_TYPE) {
-    return new base::StringValue(ModelTypeToString(model_type));
+    return base::MakeUnique<base::Value>(ModelTypeToString(model_type));
   } else if (model_type == TOP_LEVEL_FOLDER) {
-    return new base::StringValue("Top-level folder");
+    return base::MakeUnique<base::Value>("Top-level folder");
   } else if (model_type == UNSPECIFIED) {
-    return new base::StringValue("Unspecified");
+    return base::MakeUnique<base::Value>("Unspecified");
   }
   NOTREACHED();
-  return new base::StringValue(std::string());
+  return base::MakeUnique<base::Value>(std::string());
 }
 
 ModelType ModelTypeFromValue(const base::Value& value) {
@@ -644,7 +575,7 @@ ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value) {
   ModelTypeSet result;
   for (base::ListValue::const_iterator i = value.begin(); i != value.end();
        ++i) {
-    result.Put(ModelTypeFromValue(**i));
+    result.Put(ModelTypeFromValue(*i));
   }
   return result;
 }

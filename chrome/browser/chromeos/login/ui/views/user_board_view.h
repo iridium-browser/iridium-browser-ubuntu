@@ -11,6 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "components/proximity_auth/screenlock_bridge.h"
 
 class AccountId;
@@ -26,6 +27,8 @@ class UserSelectionScreen;
 // or Views one.
 class UserBoardView {
  public:
+  constexpr static OobeScreen kScreenId = OobeScreen::SCREEN_USER_SELECTION;
+
   virtual ~UserBoardView() {}
 
   virtual void Bind(UserSelectionScreen* screen) = 0;
@@ -40,13 +43,14 @@ class UserBoardView {
                                        const std::string& default_locale,
                                        bool multiple_recommended_locales) = 0;
   virtual void ShowBannerMessage(const base::string16& message) = 0;
-  virtual void ShowUserPodCustomIcon(const AccountId& account_id,
-                                     const base::DictionaryValue& icon) = 0;
-  virtual void HideUserPodCustomIcon(const AccountId& account_id) = 0;
-  virtual void SetAuthType(
+  virtual void ShowUserPodCustomIcon(
       const AccountId& account_id,
-      proximity_auth::ScreenlockBridge::LockHandler::AuthType auth_type,
-      const base::string16& initial_value) = 0;
+      const proximity_auth::ScreenlockBridge::UserPodCustomIconOptions&
+          icon) = 0;
+  virtual void HideUserPodCustomIcon(const AccountId& account_id) = 0;
+  virtual void SetAuthType(const AccountId& account_id,
+                           proximity_auth::mojom::AuthType auth_type,
+                           const base::string16& initial_value) = 0;
 };
 
 }  // namespace chromeos

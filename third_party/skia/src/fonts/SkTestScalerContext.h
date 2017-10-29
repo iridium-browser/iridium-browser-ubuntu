@@ -65,10 +65,7 @@ protected:
     SkScalerContext* onCreateScalerContext(const SkScalerContextEffects&,
                                            const SkDescriptor* desc) const override;
     void onFilterRec(SkScalerContextRec* rec) const override;
-    SkAdvancedTypefaceMetrics* onGetAdvancedTypefaceMetrics(
-        PerGlyphInfo,
-        const uint32_t* glyphIDs,
-        uint32_t glyphIDsCount) const override;
+    std::unique_ptr<SkAdvancedTypefaceMetrics> onGetAdvancedMetrics() const override;
 
     SkStreamAsset* onOpenStream(int* ttcIndex) const override {
         return nullptr;
@@ -84,8 +81,7 @@ protected:
     }
 
     int onGetUPEM() const override {
-        SkASSERT(0);  // don't expect to get here
-        return 1;
+        return 2048;
     }
 
     void onGetFamilyName(SkString* familyName) const override;

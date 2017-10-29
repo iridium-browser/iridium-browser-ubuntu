@@ -10,8 +10,8 @@ our our repos and organizations, mailing lists, and other communications.
 
 # Workflow
 
-Install [depot_tools]
-(https://www.chromium.org/developers/how-tos/install-depot-tools).
+Install [depot_tools](
+https://www.chromium.org/developers/how-tos/install-depot-tools).
 
 Then checkout the catapult repo.
 
@@ -28,7 +28,7 @@ git commit -a -m "New files"
 
 Once you're ready for a review do:
 
-`git cl upload`
+`git cl upload --rietveld`
 
 Once uploaded you can view the CL in Rietveld and **request a review** by
 clicking the 'publish & mail' link, and adding a reviewer from the
@@ -52,12 +52,12 @@ git branch -D foo
 
 If you're new to the chromium-family of projects, you will also need to sign the
 chrome contributors license agreement. You can sign the
-[Contributor License Agreement]
-(https://cla.developers.google.com/about/google-individual?csw=1), which you can
+[Contributor License Agreement](
+https://cla.developers.google.com/about/google-individual?csw=1), which you can
 do online.
 It only takes a minute. If you are contributing on behalf of a corporation, you
-must fill out the [Corporate Contributor License Agreement]
-(https://cla.developers.google.com/about/google-corporate?csw=1) and send it to
+must fill out the [Corporate Contributor License Agreement](
+https://cla.developers.google.com/about/google-corporate?csw=1) and send it to
 us as described on that page.
 
 If you've never submitted code before, you must add your (or your
@@ -112,8 +112,8 @@ automatically runs all tests. Run the tests before committing with the
 
 Chromium's DEPS file needs to be rolled to the catapult revision containing your
 change in order for it to appear in Chrome's about:tracing or other
-third_party/catapult files. Follow the [directions for rolling DEPS]
-(/docs/rolling-deps.md) to do this.
+third_party/catapult files. Follow the [directions for rolling DEPS](/docs/rolling-deps.md)
+to do this.
 
 # Adding a new project
 

@@ -334,7 +334,7 @@ void WebViewInternalCaptureVisibleRegionFunction::OnCaptureSuccess(
     return;
   }
 
-  SetResult(base::MakeUnique<base::StringValue>(base64_result));
+  SetResult(base::MakeUnique<base::Value>(base64_result));
   SendResponse(true);
 }
 
@@ -442,7 +442,7 @@ const GURL& WebViewInternalExecuteCodeFunction::GetWebViewSrc() const {
 
 bool WebViewInternalExecuteCodeFunction::LoadFileForWebUI(
     const std::string& file_src,
-    const WebUIURLFetcher::WebUILoadFileCallback& callback) {
+    WebUIURLFetcher::WebUILoadFileCallback callback) {
   if (!render_frame_host() || !render_frame_host()->GetProcess())
     return false;
   WebViewGuest* guest = WebViewGuest::From(
@@ -453,9 +453,9 @@ bool WebViewInternalExecuteCodeFunction::LoadFileForWebUI(
   GURL owner_base_url(guest->GetOwnerSiteURL().GetWithEmptyPath());
   GURL file_url(owner_base_url.Resolve(file_src));
 
-  url_fetcher_.reset(new WebUIURLFetcher(
+  url_fetcher_ = base::MakeUnique<WebUIURLFetcher>(
       this->browser_context(), render_frame_host()->GetProcess()->GetID(),
-      render_frame_host()->GetRoutingID(), file_url, callback));
+      render_frame_host()->GetRoutingID(), file_url, std::move(callback));
   url_fetcher_->Start();
   return true;
 }
@@ -703,8 +703,8 @@ ExtensionFunction::ResponseAction WebViewInternalGetZoomModeFunction::Run() {
       NOTREACHED();
   }
 
-  return RespondNow(OneArgument(base::MakeUnique<base::StringValue>(
-      web_view_internal::ToString(zoom_mode))));
+  return RespondNow(OneArgument(
+      base::MakeUnique<base::Value>(web_view_internal::ToString(zoom_mode))));
 }
 
 WebViewInternalFindFunction::WebViewInternalFindFunction() {
@@ -728,7 +728,7 @@ bool WebViewInternalFindFunction::RunAsyncSafe(WebViewGuest* guest) {
   if (params->options) {
     options.forward =
         params->options->backward ? !*params->options->backward : true;
-    options.matchCase =
+    options.match_case =
         params->options->match_case ? *params->options->match_case : false;
   }
 

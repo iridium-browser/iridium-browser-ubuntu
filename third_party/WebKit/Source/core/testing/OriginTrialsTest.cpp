@@ -6,34 +6,22 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/dom/ExecutionContext.h"
 #include "core/origin_trials/OriginTrials.h"
 
 namespace blink {
 
-bool OriginTrialsTest::normalAttribute() {
-  return true;
-}
-
-// static
-bool OriginTrialsTest::staticAttribute() {
-  return true;
-}
-
-bool OriginTrialsTest::throwingAttribute(ScriptState* scriptState,
-                                         ExceptionState& exceptionState) {
-  String errorMessage;
+bool OriginTrialsTest::throwingAttribute(ScriptState* script_state,
+                                         ExceptionState& exception_state) {
+  String error_message;
   if (!OriginTrials::originTrialsSampleAPIEnabled(
-          scriptState->getExecutionContext())) {
-    exceptionState.throwDOMException(
-        NotSupportedError,
+          ExecutionContext::From(script_state))) {
+    exception_state.ThrowDOMException(
+        kNotSupportedError,
         "The Origin Trials Sample API has not been enabled in this context");
     return false;
   }
   return unconditionalAttribute();
-}
-
-bool OriginTrialsTest::unconditionalAttribute() {
-  return true;
 }
 
 DEFINE_TRACE(OriginTrialsTest) {}

@@ -9,11 +9,12 @@
 #include "core/inspector/ConsoleMessage.h"
 #include "core/workers/WorkerThread.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Forward.h"
+#include "platform/wtf/Forward.h"
+#include "platform/wtf/HashMap.h"
 
 namespace blink {
 
-class Document;
+class ExecutionContext;
 class KURL;
 
 // A proxy for talking to the worker inspector on the worker thread.
@@ -21,7 +22,7 @@ class KURL;
 class CORE_EXPORT WorkerInspectorProxy final
     : public GarbageCollectedFinalized<WorkerInspectorProxy> {
  public:
-  static WorkerInspectorProxy* create();
+  static WorkerInspectorProxy* Create();
 
   ~WorkerInspectorProxy();
   DECLARE_TRACE();
@@ -29,39 +30,40 @@ class CORE_EXPORT WorkerInspectorProxy final
   class CORE_EXPORT PageInspector {
    public:
     virtual ~PageInspector() {}
-    virtual void dispatchMessageFromWorker(WorkerInspectorProxy*,
-                                           const String&) = 0;
+    virtual void DispatchMessageFromWorker(WorkerInspectorProxy*,
+                                           int session_id,
+                                           const String& message) = 0;
   };
 
-  WorkerThreadStartMode workerStartMode(Document*);
-  void workerThreadCreated(Document*, WorkerThread*, const KURL&);
-  void workerThreadTerminated();
-  void dispatchMessageFromWorker(const String&);
-  void addConsoleMessageFromWorker(MessageLevel,
+  WorkerThreadStartMode WorkerStartMode(ExecutionContext*);
+  void WorkerThreadCreated(ExecutionContext*, WorkerThread*, const KURL&);
+  void WorkerThreadTerminated();
+  void DispatchMessageFromWorker(int session_id, const String&);
+  void AddConsoleMessageFromWorker(MessageLevel,
                                    const String& message,
                                    std::unique_ptr<SourceLocation>);
 
-  void connectToInspector(PageInspector*);
-  void disconnectFromInspector(PageInspector*);
-  void sendMessageToInspector(const String&);
-  void writeTimelineStartedEvent(const String& sessionId);
+  void ConnectToInspector(int session_id, PageInspector*);
+  void DisconnectFromInspector(int session_id, PageInspector*);
+  void SendMessageToInspector(int session_id, const String& message);
+  void WriteTimelineStartedEvent(const String& tracing_session_id);
 
-  const String& url() { return m_url; }
-  Document* getDocument() { return m_document; }
-  const String& inspectorId();
+  const String& Url() { return url_; }
+  ExecutionContext* GetExecutionContext() { return execution_context_; }
+  const String& InspectorId();
 
   using WorkerInspectorProxySet =
       PersistentHeapHashSet<WeakMember<WorkerInspectorProxy>>;
-  static const WorkerInspectorProxySet& allProxies();
+  static const WorkerInspectorProxySet& AllProxies();
 
  private:
   WorkerInspectorProxy();
 
-  WorkerThread* m_workerThread;
-  Member<Document> m_document;
-  PageInspector* m_pageInspector;
-  String m_url;
-  String m_inspectorId;
+  WorkerThread* worker_thread_;
+  Member<ExecutionContext> execution_context_;
+  HashMap<int, PageInspector*> page_inspectors_;
+  String url_;
+  String inspector_id_;
 };
 
 }  // namespace blink

@@ -18,7 +18,7 @@
 #include "base/debug/stack_trace.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/sequence_checker.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -27,6 +27,7 @@
 #include "components/prefs/pref_change_registrar.h"
 #include "extensions/features/features.h"
 #include "media/media_features.h"
+#include "ppapi/features/features.h"
 #include "printing/features/features.h"
 
 class ChromeChildProcessWatcher;
@@ -36,7 +37,7 @@ class DevToolsAutoOpener;
 class RemoteDebuggingServer;
 class PrefRegistrySimple;
 
-#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGINS)
 class PluginsResourceService;
 #endif
 
@@ -64,7 +65,6 @@ class PolicyService;
 
 // Real implementation of BrowserProcess that creates and returns the services.
 class BrowserProcessImpl : public BrowserProcess,
-                           public base::NonThreadSafe,
                            public KeepAliveStateObserver {
  public:
   // |local_state_task_runner| must be a shutdown-blocking task runner.
@@ -96,7 +96,7 @@ class BrowserProcessImpl : public BrowserProcess,
       override;
   metrics::MetricsService* metrics_service() override;
   rappor::RapporServiceImpl* rappor_service() override;
-  ukm::UkmService* ukm_service() override;
+  ukm::UkmRecorder* ukm_recorder() override;
   IOThread* io_thread() override;
   WatchDogThread* watchdog_thread() override;
   ProfileManager* profile_manager() override;
@@ -133,8 +133,8 @@ class BrowserProcessImpl : public BrowserProcess,
   safe_browsing::SafeBrowsingService* safe_browsing_service() override;
   safe_browsing::ClientSideDetectionService* safe_browsing_detection_service()
       override;
-  subresource_filter::RulesetService* subresource_filter_ruleset_service()
-      override;
+  subresource_filter::ContentRulesetService*
+  subresource_filter_ruleset_service() override;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   void StartAutoupdateTimer() override;
@@ -154,10 +154,11 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
   network_time::NetworkTimeTracker* network_time_tracker() override;
   gcm::GCMDriver* gcm_driver() override;
-  memory::TabManager* GetTabManager() override;
+  resource_coordinator::TabManager* GetTabManager() override;
   shell_integration::DefaultWebClientState CachedDefaultWebClientState()
       override;
   physical_web::PhysicalWebDataSource* GetPhysicalWebDataSource() override;
+  prefs::InProcessPrefServiceFactory* pref_service_factory() const override;
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
@@ -187,7 +188,9 @@ class BrowserProcessImpl : public BrowserProcess,
 
   void ApplyAllowCrossOriginAuthPromptPolicy();
   void ApplyDefaultBrowserPolicy();
+#if !defined(OS_ANDROID)
   void ApplyMetricsReportingPolicy();
+#endif
 
   void CacheDefaultWebClientState();
 
@@ -263,7 +266,7 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_refptr<safe_browsing::SafeBrowsingService> safe_browsing_service_;
 
   bool created_subresource_filter_ruleset_service_;
-  std::unique_ptr<subresource_filter::RulesetService>
+  std::unique_ptr<subresource_filter::ContentRulesetService>
       subresource_filter_ruleset_service_;
 
   bool shutting_down_;
@@ -319,7 +322,7 @@ class BrowserProcessImpl : public BrowserProcess,
   std::unique_ptr<component_updater::SupervisedUserWhitelistInstaller>
       supervised_user_whitelist_installer_;
 
-#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGINS)
   std::unique_ptr<PluginsResourceService> plugins_resource_service_;
 #endif
 
@@ -344,14 +347,18 @@ class BrowserProcessImpl : public BrowserProcess,
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
   // Any change to this #ifdef must be reflected as well in
-  // chrome/browser/memory/tab_manager_browsertest.cc
-  std::unique_ptr<memory::TabManager> tab_manager_;
+  // chrome/browser/resource_coordinator/tab_manager_browsertest.cc
+  std::unique_ptr<resource_coordinator::TabManager> tab_manager_;
 #endif
 
   shell_integration::DefaultWebClientState cached_default_web_client_state_;
 
   std::unique_ptr<physical_web::PhysicalWebDataSource>
       physical_web_data_source_;
+
+  std::unique_ptr<prefs::InProcessPrefServiceFactory> pref_service_factory_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);
 };

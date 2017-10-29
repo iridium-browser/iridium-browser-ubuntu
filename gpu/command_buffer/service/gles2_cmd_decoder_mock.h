@@ -36,13 +36,10 @@ struct ContextState;
 
 class MockGLES2Decoder : public GLES2Decoder {
  public:
-  MockGLES2Decoder();
+  explicit MockGLES2Decoder(CommandBufferServiceBase* command_buffer_service);
   virtual ~MockGLES2Decoder();
 
-  error::Error FakeDoCommands(unsigned int num_commands,
-                              const volatile void* buffer,
-                              int num_entries,
-                              int* entries_processed);
+  base::WeakPtr<GLES2Decoder> AsWeakPtr() override;
 
   MOCK_METHOD5(Initialize,
                bool(const scoped_refptr<gl::GLSurface>& surface,
@@ -77,11 +74,12 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD0(PerformPollingWork, void());
   MOCK_METHOD1(RestoreState, void(const ContextState* prev_state));
   MOCK_CONST_METHOD0(RestoreActiveTexture, void());
-  MOCK_CONST_METHOD1(
-      RestoreAllTextureUnitBindings, void(const ContextState* state));
+  MOCK_CONST_METHOD1(RestoreAllTextureUnitAndSamplerBindings,
+                     void(const ContextState* state));
   MOCK_CONST_METHOD1(
       RestoreActiveTextureUnitBinding, void(unsigned int target));
   MOCK_METHOD0(RestoreAllExternalTextureBindingsIfNeeded, void());
+  MOCK_METHOD1(RestoreBufferBinding, void(unsigned int target));
   MOCK_CONST_METHOD0(RestoreBufferBindings, void());
   MOCK_CONST_METHOD0(RestoreFramebufferBindings, void());
   MOCK_CONST_METHOD0(RestoreGlobalState, void());
@@ -89,22 +87,20 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD0(RestoreRenderbufferBindings, void());
   MOCK_CONST_METHOD1(RestoreTextureState, void(unsigned service_id));
   MOCK_CONST_METHOD1(RestoreTextureUnitBindings, void(unsigned unit));
+  MOCK_METHOD1(RestoreVertexAttribArray, void(unsigned index));
   MOCK_CONST_METHOD0(ClearAllAttributes, void());
   MOCK_CONST_METHOD0(RestoreAllAttributes, void());
   MOCK_METHOD0(GetQueryManager, gpu::gles2::QueryManager*());
+  MOCK_METHOD0(GetFramebufferManager, gpu::gles2::FramebufferManager*());
   MOCK_METHOD0(
       GetTransformFeedbackManager, gpu::gles2::TransformFeedbackManager*());
   MOCK_METHOD0(GetVertexArrayManager, gpu::gles2::VertexArrayManager*());
-  MOCK_METHOD0(GetImageManager, gpu::gles2::ImageManager*());
+  MOCK_METHOD0(GetImageManagerForTest, gpu::gles2::ImageManager*());
   MOCK_METHOD1(
       SetResizeCallback, void(const base::Callback<void(gfx::Size, float)>&));
   MOCK_METHOD1(SetIgnoreCachedStateForTest, void(bool ignore));
   MOCK_METHOD1(SetForceShaderNameHashingForTest, void(bool force));
   MOCK_METHOD1(SetAllowExit, void(bool allow));
-  MOCK_METHOD3(DoCommand,
-               error::Error(unsigned int command,
-                            unsigned int arg_count,
-                            const volatile void* cmd_data));
   MOCK_METHOD4(DoCommands,
                error::Error(unsigned int num_commands,
                             const volatile void* buffer,
@@ -112,8 +108,6 @@ class MockGLES2Decoder : public GLES2Decoder {
                             int* entries_processed));
   MOCK_METHOD2(GetServiceTextureId,
                bool(uint32_t client_texture_id, uint32_t* service_texture_id));
-  MOCK_METHOD0(GetContextLostReason, error::ContextLostReason());
-  MOCK_CONST_METHOD1(GetCommandName, const char*(unsigned int command_id));
   MOCK_METHOD9(ClearLevel,
                bool(Texture* texture,
                     unsigned target,
@@ -145,25 +139,14 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD0(GetErrorState, ErrorState *());
 
   MOCK_METHOD0(GetLogger, Logger*());
-  MOCK_METHOD1(SetShaderCacheCallback,
-               void(const ShaderCacheCallback& callback));
-  MOCK_METHOD1(SetFenceSyncReleaseCallback,
-               void(const FenceSyncReleaseCallback& callback));
-  MOCK_METHOD1(SetWaitSyncTokenCallback,
-               void(const WaitSyncTokenCallback& callback));
-  MOCK_METHOD1(SetDescheduleUntilFinishedCallback,
-               void(const NoParamCallback& callback));
-  MOCK_METHOD1(SetRescheduleAfterFinishedCallback,
-               void(const NoParamCallback& callback));
   MOCK_METHOD1(WaitForReadPixels,
                void(base::Closure callback));
-  MOCK_METHOD0(GetTextureUploadCount, uint32_t());
-  MOCK_METHOD0(GetTotalTextureUploadTime, base::TimeDelta());
-  MOCK_METHOD0(GetTotalProcessingCommandsTime, base::TimeDelta());
-  MOCK_METHOD1(AddProcessingCommandsTime, void(base::TimeDelta));
   MOCK_CONST_METHOD0(WasContextLost, bool());
   MOCK_CONST_METHOD0(WasContextLostByRobustnessExtension, bool());
   MOCK_METHOD1(MarkContextLost, void(gpu::error::ContextLostReason reason));
+
+ private:
+  base::WeakPtrFactory<MockGLES2Decoder> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MockGLES2Decoder);
 };

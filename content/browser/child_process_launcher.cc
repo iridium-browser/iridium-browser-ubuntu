@@ -23,14 +23,15 @@ ChildProcessLauncher::ChildProcessLauncher(
     std::unique_ptr<base::CommandLine> command_line,
     int child_process_id,
     Client* client,
-    std::unique_ptr<mojo::edk::PendingProcessConnection> pending_connection,
+    std::unique_ptr<mojo::edk::OutgoingBrokerClientInvitation>
+        broker_client_invitation,
     const mojo::edk::ProcessErrorCallback& process_error_callback,
     bool terminate_on_shutdown)
     : client_(client),
       termination_status_(base::TERMINATION_STATUS_NORMAL_TERMINATION),
       exit_code_(RESULT_CODE_NORMAL_EXIT),
       starting_(true),
-      pending_connection_(std::move(pending_connection)),
+      broker_client_invitation_(std::move(broker_client_invitation)),
       process_error_callback_(process_error_callback),
 #if defined(ADDRESS_SANITIZER) || defined(LEAK_SANITIZER) ||  \
     defined(MEMORY_SANITIZER) || defined(THREAD_SANITIZER) || \
@@ -40,7 +41,7 @@ ChildProcessLauncher::ChildProcessLauncher(
       terminate_child_on_shutdown_(terminate_on_shutdown),
 #endif
       weak_factory_(this) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(BrowserThread::GetCurrentThreadIdentifier(&client_thread_id_));
 
   helper_ = new ChildProcessLauncherHelper(
@@ -51,7 +52,7 @@ ChildProcessLauncher::ChildProcessLauncher(
 }
 
 ChildProcessLauncher::~ChildProcessLauncher() {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (process_.process.IsValid() && terminate_child_on_shutdown_) {
     // Client has gone away, so just kill the process.
     ChildProcessLauncherHelper::ForceNormalProcessTerminationAsync(
@@ -59,35 +60,38 @@ ChildProcessLauncher::~ChildProcessLauncher() {
   }
 }
 
-void ChildProcessLauncher::SetProcessBackgrounded(bool background) {
-  DCHECK(CalledOnValidThread());
+void ChildProcessLauncher::SetProcessPriority(bool background,
+                                              bool boost_for_pending_views) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   base::Process to_pass = process_.process.Duplicate();
   BrowserThread::PostTask(
       BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
       base::Bind(
-          &ChildProcessLauncherHelper::SetProcessBackgroundedOnLauncherThread,
-          base::Passed(&to_pass),
-          background));
+          &ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread,
+          helper_, base::Passed(&to_pass), background,
+          boost_for_pending_views));
 }
 
 void ChildProcessLauncher::Notify(
     ChildProcessLauncherHelper::Process process,
     mojo::edk::ScopedPlatformHandle server_handle,
     int error_code) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   starting_ = false;
   process_ = std::move(process);
 
-  // Take ownership of the pending connection here so it's destroyed when
+  // Take ownership of the broker client invitation here so it's destroyed when
   // we go out of scope regardless of the outcome below.
-  std::unique_ptr<mojo::edk::PendingProcessConnection> pending_connection =
-      std::move(pending_connection_);
+  std::unique_ptr<mojo::edk::OutgoingBrokerClientInvitation> invitation =
+      std::move(broker_client_invitation_);
   if (process_.process.IsValid()) {
     // Set up Mojo IPC to the new process.
-    DCHECK(pending_connection);
-    pending_connection->Connect(process_.process.Handle(),
-                                std::move(server_handle),
-                                process_error_callback_);
+    DCHECK(invitation);
+    invitation->Send(
+        process_.process.Handle(),
+        mojo::edk::ConnectionParams(mojo::edk::TransportProtocol::kLegacy,
+                                    std::move(server_handle)),
+        process_error_callback_);
     client_->OnProcessLaunched();
   } else {
     termination_status_ = base::TERMINATION_STATUS_LAUNCH_FAILED;
@@ -99,20 +103,20 @@ void ChildProcessLauncher::Notify(
 
 bool ChildProcessLauncher::IsStarting() {
   // TODO(crbug.com/469248): This fails in some tests.
-  // DCHECK(CalledOnValidThread());
+  // DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return starting_;
 }
 
 const base::Process& ChildProcessLauncher::GetProcess() const {
   // TODO(crbug.com/469248): This fails in some tests.
-  // DCHECK(CalledOnValidThread());
+  // DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return process_.process;
 }
 
 base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
     bool known_dead,
     int* exit_code) {
-  DCHECK(CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!process_.process.IsValid()) {
     // Process is already gone, so return the cached termination status.
     if (exit_code)
@@ -120,8 +124,8 @@ base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
     return termination_status_;
   }
 
-  termination_status_ = ChildProcessLauncherHelper::GetTerminationStatus(
-      process_, known_dead, &exit_code_);
+  termination_status_ =
+      helper_->GetTerminationStatus(process_, known_dead, &exit_code_);
   if (exit_code)
     *exit_code = exit_code_;
 
@@ -157,6 +161,18 @@ void ChildProcessLauncher::SetRegisteredFilesForService(
   ChildProcessLauncherHelper::SetRegisteredFilesForService(
       service_name, std::move(required_files));
 }
+
+// static
+void ChildProcessLauncher::ResetRegisteredFilesForTesting() {
+  ChildProcessLauncherHelper::ResetRegisteredFilesForTesting();
+}
+
+#if defined(OS_ANDROID)
+// static
+size_t ChildProcessLauncher::GetNumberOfRendererSlots() {
+  return ChildProcessLauncherHelper::GetNumberOfRendererSlots();
+}
+#endif  // OS_ANDROID
 
 ChildProcessLauncher::Client* ChildProcessLauncher::ReplaceClientForTest(
     Client* client) {

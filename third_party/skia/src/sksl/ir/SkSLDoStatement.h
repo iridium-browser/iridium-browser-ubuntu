@@ -4,7 +4,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
- 
+
 #ifndef SKSL_DOSTATEMENT
 #define SKSL_DOSTATEMENT
 
@@ -23,11 +23,11 @@ struct DoStatement : public Statement {
     , fStatement(std::move(statement))
     , fTest(std::move(test)) {}
 
-    SkString description() const override {
+    String description() const override {
         return "do " + fStatement->description() + " while (" + fTest->description() + ");";
     }
 
-    const std::unique_ptr<Statement> fStatement;
+    std::unique_ptr<Statement> fStatement;
     std::unique_ptr<Expression> fTest;
 
     typedef Statement INHERITED;

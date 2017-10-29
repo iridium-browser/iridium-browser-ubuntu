@@ -8,10 +8,12 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/test/integration/passwords_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/browsing_data/core/pref_names.h"
 #include "components/prefs/pref_service.h"
@@ -20,15 +22,19 @@
 namespace {
 
 using autofill::PasswordForm;
+using browsing_data::BrowsingDataCounter;
 
 class PasswordsCounterTest : public InProcessBrowserTest {
  public:
+  PasswordsCounterTest() {}
+
   void SetUpOnMainThread() override {
+    finished_ = false;
     time_ = base::Time::Now();
     store_ = PasswordStoreFactory::GetForProfile(
         browser()->profile(), ServiceAccessType::IMPLICIT_ACCESS);
     SetPasswordsDeletionPref(true);
-    SetDeletionPeriodPref(browsing_data::ALL_TIME);
+    SetDeletionPeriodPref(browsing_data::TimePeriod::ALL_TIME);
   }
 
   void AddLogin(const std::string& origin,
@@ -79,23 +85,21 @@ class PasswordsCounterTest : public InProcessBrowserTest {
     run_loop_->Run();
   }
 
-  browsing_data::BrowsingDataCounter::ResultInt GetResult() {
+  BrowsingDataCounter::ResultInt GetResult() {
     DCHECK(finished_);
     return result_;
   }
 
-  void Callback(
-      std::unique_ptr<browsing_data::BrowsingDataCounter::Result> result) {
+  void Callback(std::unique_ptr<BrowsingDataCounter::Result> result) {
+    DCHECK(result);
     finished_ = result->Finished();
 
     if (finished_) {
-      result_ =
-          static_cast<browsing_data::BrowsingDataCounter::FinishedResult*>(
-              result.get())
-              ->Value();
+      auto* password_result =
+          static_cast<BrowsingDataCounter::SyncResult*>(result.get());
+      result_ = password_result->Value();
     }
-
-    if (finished_)
+    if (run_loop_ && finished_)
       run_loop_->Quit();
   }
 
@@ -124,7 +128,7 @@ class PasswordsCounterTest : public InProcessBrowserTest {
   base::Time time_;
 
   bool finished_;
-  browsing_data::BrowsingDataCounter::ResultInt result_;
+  BrowsingDataCounter::ResultInt result_;
 };
 
 // Tests that the counter correctly counts each individual credential on
@@ -138,10 +142,13 @@ IN_PROC_BROWSER_TEST_F(PasswordsCounterTest, SameDomain) {
   WaitForUICallbacksFromAddingLogins();
 
   Profile* profile = browser()->profile();
-  browsing_data::PasswordsCounter counter(PasswordStoreFactory::GetForProfile(
-      profile, ServiceAccessType::EXPLICIT_ACCESS));
-  counter.Init(profile->GetPrefs(), base::Bind(&PasswordsCounterTest::Callback,
-                                               base::Unretained(this)));
+  browsing_data::PasswordsCounter counter(
+      PasswordStoreFactory::GetForProfile(profile,
+                                          ServiceAccessType::EXPLICIT_ACCESS),
+      ProfileSyncServiceFactory::GetForProfile(profile));
+  counter.Init(
+      profile->GetPrefs(), browsing_data::ClearBrowsingDataTab::ADVANCED,
+      base::Bind(&PasswordsCounterTest::Callback, base::Unretained(this)));
   counter.Restart();
 
   WaitForCounting();
@@ -156,11 +163,14 @@ IN_PROC_BROWSER_TEST_F(PasswordsCounterTest, Blacklisted) {
   WaitForUICallbacksFromAddingLogins();
 
   Profile* profile = browser()->profile();
-  browsing_data::PasswordsCounter counter(PasswordStoreFactory::GetForProfile(
-      profile, ServiceAccessType::EXPLICIT_ACCESS));
+  browsing_data::PasswordsCounter counter(
+      PasswordStoreFactory::GetForProfile(profile,
+                                          ServiceAccessType::EXPLICIT_ACCESS),
+      ProfileSyncServiceFactory::GetForProfile(profile));
 
-  counter.Init(profile->GetPrefs(), base::Bind(&PasswordsCounterTest::Callback,
-                                               base::Unretained(this)));
+  counter.Init(
+      profile->GetPrefs(), browsing_data::ClearBrowsingDataTab::ADVANCED,
+      base::Bind(&PasswordsCounterTest::Callback, base::Unretained(this)));
   counter.Restart();
 
   WaitForCounting();
@@ -176,10 +186,13 @@ IN_PROC_BROWSER_TEST_F(PasswordsCounterTest, PrefChanged) {
   WaitForUICallbacksFromAddingLogins();
 
   Profile* profile = browser()->profile();
-  browsing_data::PasswordsCounter counter(PasswordStoreFactory::GetForProfile(
-      profile, ServiceAccessType::EXPLICIT_ACCESS));
-  counter.Init(profile->GetPrefs(), base::Bind(&PasswordsCounterTest::Callback,
-                                               base::Unretained(this)));
+  browsing_data::PasswordsCounter counter(
+      PasswordStoreFactory::GetForProfile(profile,
+                                          ServiceAccessType::EXPLICIT_ACCESS),
+      ProfileSyncServiceFactory::GetForProfile(profile));
+  counter.Init(
+      profile->GetPrefs(), browsing_data::ClearBrowsingDataTab::ADVANCED,
+      base::Bind(&PasswordsCounterTest::Callback, base::Unretained(this)));
   SetPasswordsDeletionPref(true);
 
   WaitForCounting();
@@ -193,10 +206,13 @@ IN_PROC_BROWSER_TEST_F(PasswordsCounterTest, StoreChanged) {
   WaitForUICallbacksFromAddingLogins();
 
   Profile* profile = browser()->profile();
-  browsing_data::PasswordsCounter counter(PasswordStoreFactory::GetForProfile(
-      profile, ServiceAccessType::EXPLICIT_ACCESS));
-  counter.Init(profile->GetPrefs(), base::Bind(&PasswordsCounterTest::Callback,
-                                               base::Unretained(this)));
+  browsing_data::PasswordsCounter counter(
+      PasswordStoreFactory::GetForProfile(profile,
+                                          ServiceAccessType::EXPLICIT_ACCESS),
+      ProfileSyncServiceFactory::GetForProfile(profile));
+  counter.Init(
+      profile->GetPrefs(), browsing_data::ClearBrowsingDataTab::ADVANCED,
+      base::Bind(&PasswordsCounterTest::Callback, base::Unretained(this)));
   counter.Restart();
 
   WaitForCounting();
@@ -224,28 +240,31 @@ IN_PROC_BROWSER_TEST_F(PasswordsCounterTest, PeriodChanged) {
   WaitForUICallbacksFromAddingLogins();
 
   Profile* profile = browser()->profile();
-  browsing_data::PasswordsCounter counter(PasswordStoreFactory::GetForProfile(
-      profile, ServiceAccessType::EXPLICIT_ACCESS));
-  counter.Init(profile->GetPrefs(), base::Bind(&PasswordsCounterTest::Callback,
-                                               base::Unretained(this)));
+  browsing_data::PasswordsCounter counter(
+      PasswordStoreFactory::GetForProfile(profile,
+                                          ServiceAccessType::EXPLICIT_ACCESS),
+      ProfileSyncServiceFactory::GetForProfile(profile));
+  counter.Init(
+      profile->GetPrefs(), browsing_data::ClearBrowsingDataTab::ADVANCED,
+      base::Bind(&PasswordsCounterTest::Callback, base::Unretained(this)));
 
-  SetDeletionPeriodPref(browsing_data::LAST_HOUR);
+  SetDeletionPeriodPref(browsing_data::TimePeriod::LAST_HOUR);
   WaitForCounting();
   EXPECT_EQ(1u, GetResult());
 
-  SetDeletionPeriodPref(browsing_data::LAST_DAY);
+  SetDeletionPeriodPref(browsing_data::TimePeriod::LAST_DAY);
   WaitForCounting();
   EXPECT_EQ(1u, GetResult());
 
-  SetDeletionPeriodPref(browsing_data::LAST_WEEK);
+  SetDeletionPeriodPref(browsing_data::TimePeriod::LAST_WEEK);
   WaitForCounting();
   EXPECT_EQ(3u, GetResult());
 
-  SetDeletionPeriodPref(browsing_data::FOUR_WEEKS);
+  SetDeletionPeriodPref(browsing_data::TimePeriod::FOUR_WEEKS);
   WaitForCounting();
   EXPECT_EQ(3u, GetResult());
 
-  SetDeletionPeriodPref(browsing_data::ALL_TIME);
+  SetDeletionPeriodPref(browsing_data::TimePeriod::ALL_TIME);
   WaitForCounting();
   EXPECT_EQ(4u, GetResult());
 }

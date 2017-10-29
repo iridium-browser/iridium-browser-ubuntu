@@ -31,8 +31,7 @@ SurfaceTexture::~SurfaceTexture() {
   Java_SurfaceTexturePlatformWrapper_destroy(env, j_surface_texture_);
 }
 
-void SurfaceTexture::SetFrameAvailableCallback(
-    const base::Closure& callback) {
+void SurfaceTexture::SetFrameAvailableCallback(const base::Closure& callback) {
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_SurfaceTexturePlatformWrapper_setFrameAvailableCallback(
       env, j_surface_texture_,
@@ -90,12 +89,12 @@ ANativeWindow* SurfaceTexture::CreateSurface() {
   // ANativeWindow_fromSurface are released immediately. This is needed as a
   // workaround for https://code.google.com/p/android/issues/detail?id=68174
   base::android::ScopedJavaLocalFrame scoped_local_reference_frame(env);
-  ANativeWindow* native_window = ANativeWindow_fromSurface(
-      env, surface.j_surface().obj());
+  ANativeWindow* native_window =
+      ANativeWindow_fromSurface(env, surface.j_surface().obj());
   return native_window;
 }
 
-void SurfaceTexture::ReleaseSurfaceTexture() {
+void SurfaceTexture::ReleaseBackBuffers() {
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_SurfaceTexturePlatformWrapper_release(env, j_surface_texture_);
 }

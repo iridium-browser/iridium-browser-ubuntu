@@ -44,6 +44,7 @@ ACRONYMS = [
     'HTML',
     'IME',
     'JS',
+    'SMIL',
     'SVG',
     'URL',
     'WOFF',
@@ -114,18 +115,7 @@ def uncapitalize(name):
 
 def runtime_enabled_function(name):
     """Returns a function call of a runtime enabled feature."""
-    return 'RuntimeEnabledFeatures::%sEnabled()' % uncapitalize(name)
-
-
-def unique_by(dict_list, key):
-    """Returns elements from a list of dictionaries with unique values for the named key."""
-    keys_seen = set()
-    filtered_list = []
-    for item in dict_list:
-        if item.get(key) not in keys_seen:
-            filtered_list.append(item)
-            keys_seen.add(item.get(key))
-    return filtered_list
+    return 'RuntimeEnabledFeatures::%sEnabled()' % name
 
 
 ################################################################################
@@ -200,8 +190,8 @@ CALL_WITH_ARGUMENTS = {
     'ScriptState': 'scriptState',
     'ExecutionContext': 'executionContext',
     'ScriptArguments': 'scriptArguments',
-    'CurrentWindow': 'currentDOMWindow(info.GetIsolate())',
-    'EnteredWindow': 'enteredDOMWindow(info.GetIsolate())',
+    'CurrentWindow': 'CurrentDOMWindow(info.GetIsolate())',
+    'EnteredWindow': 'EnteredDOMWindow(info.GetIsolate())',
     'Document': 'document',
     'ThisValue': 'ScriptValue(scriptState, info.Holder())',
 }
@@ -243,16 +233,16 @@ def deprecate_as(member):
 
 # [Exposed]
 EXPOSED_EXECUTION_CONTEXT_METHOD = {
-    'AnimationWorklet': 'isAnimationWorkletGlobalScope',
-    'AudioWorklet': 'isAudioWorkletGlobalScope',
-    'CompositorWorker': 'isCompositorWorkerGlobalScope',
-    'DedicatedWorker': 'isDedicatedWorkerGlobalScope',
-    'PaintWorklet': 'isPaintWorkletGlobalScope',
-    'ServiceWorker': 'isServiceWorkerGlobalScope',
-    'SharedWorker': 'isSharedWorkerGlobalScope',
-    'Window': 'isDocument',
-    'Worker': 'isWorkerGlobalScope',
-    'Worklet': 'isWorkletGlobalScope',
+    'AnimationWorklet': 'IsAnimationWorkletGlobalScope',
+    'AudioWorklet': 'IsAudioWorkletGlobalScope',
+    'CompositorWorker': 'IsCompositorWorkerGlobalScope',
+    'DedicatedWorker': 'IsDedicatedWorkerGlobalScope',
+    'PaintWorklet': 'IsPaintWorkletGlobalScope',
+    'ServiceWorker': 'IsServiceWorkerGlobalScope',
+    'SharedWorker': 'IsSharedWorkerGlobalScope',
+    'Window': 'IsDocument',
+    'Worker': 'IsWorkerGlobalScope',
+    'Worklet': 'IsWorkletGlobalScope',
 }
 
 
@@ -321,8 +311,8 @@ def exposed(member, interface):
       => context->isDocument()
 
     EXAMPLE: [Exposed(Window Feature1, Window Feature2)]
-      => context->isDocument() && RuntimeEnabledFeatures::feature1Enabled() ||
-         context->isDocument() && RuntimeEnabledFeatures::feature2Enabled()
+      => context->isDocument() && RuntimeEnabledFeatures::Feature1Enabled() ||
+         context->isDocument() && RuntimeEnabledFeatures::Feature2Enabled()
     """
     exposure_set = ExposureSet(
         extended_attribute_value_as_list(member, 'Exposed'))
@@ -344,7 +334,7 @@ def secure_context(member, interface):
     """Returns C++ code that checks whether an interface/method/attribute/etc. is exposed
     to the current context."""
     if 'SecureContext' in member.extended_attributes or 'SecureContext' in interface.extended_attributes:
-        return "executionContext->isSecureContext()"
+        return "executionContext->IsSecureContext()"
     return None
 
 
@@ -386,9 +376,9 @@ def measure_as(definition_or_member, interface):
 def origin_trial_enabled_function_name(definition_or_member):
     """Returns the name of the OriginTrials enabled function.
 
-    An exception is raised if both the OriginTrialEnabled and RuntimeEnabled
-    extended attributes are applied to the same IDL member. Only one of the
-    two attributes can be applied to any member - they are mutually exclusive.
+    An exception is raised if OriginTrialEnabled is used in conjunction with any
+    of the following (which must be mutually exclusive with origin trials):
+      - RuntimeEnabled
 
     The returned function checks if the IDL member should be enabled.
     Given extended attribute OriginTrialEnabled=FeatureName, return:
@@ -402,8 +392,8 @@ def origin_trial_enabled_function_name(definition_or_member):
 
     if is_origin_trial_enabled and 'RuntimeEnabled' in extended_attributes:
         raise Exception('[OriginTrialEnabled] and [RuntimeEnabled] must '
-                        'not be specified on the same definition: '
-                        '%s.%s' % (definition_or_member.idl_name, definition_or_member.name))
+                        'not be specified on the same definition: %s'
+                        % definition_or_member.name)
 
     if is_origin_trial_enabled:
         trial_name = extended_attributes['OriginTrialEnabled']
@@ -413,11 +403,17 @@ def origin_trial_enabled_function_name(definition_or_member):
 
     if is_feature_policy_enabled and 'RuntimeEnabled' in extended_attributes:
         raise Exception('[FeaturePolicy] and [RuntimeEnabled] must '
-                        'not be specified on the same definition: '
-                        '%s.%s' % (definition_or_member.idl_name, definition_or_member.name))
+                        'not be specified on the same definition: %s'
+                        % definition_or_member.name)
+
+    if is_feature_policy_enabled and 'SecureContext' in extended_attributes:
+        raise Exception('[FeaturePolicy] and [SecureContext] must '
+                        'not be specified on the same definition '
+                        '(see https://crbug.com/695123 for workaround): %s'
+                        % definition_or_member.name)
 
     if is_feature_policy_enabled:
-        includes.add('bindings/core/v8/ScriptState.h')
+        includes.add('platform/bindings/ScriptState.h')
         includes.add('platform/feature_policy/FeaturePolicy.h')
 
         trial_name = extended_attributes['FeaturePolicy']
@@ -429,6 +425,11 @@ def origin_trial_enabled_function_name(definition_or_member):
 def origin_trial_feature_name(definition_or_member):
     extended_attributes = definition_or_member.extended_attributes
     return extended_attributes.get('OriginTrialEnabled') or extended_attributes.get('FeaturePolicy')
+
+
+# [ContextEnabled]
+def context_enabled_feature_name(definition_or_member):
+    return definition_or_member.extended_attributes.get('ContextEnabled')
 
 
 # [RuntimeEnabled]
@@ -458,16 +459,16 @@ def on_instance(interface, member):
     """Returns True if the interface's member needs to be defined on every
     instance object.
 
-    The following members must be defiend on an instance object.
+    The following members must be defined on an instance object.
     - [Unforgeable] members
     - regular members of [Global] or [PrimaryGlobal] interfaces
     """
     if member.is_static:
         return False
 
-    # TODO(yukishiino): Remove a hack for toString once we support
-    # Symbol.toStringTag.
-    if (interface.name == 'Window' and member.name == 'toString'):
+    # TODO(yukishiino): Remove a hack for ToString once we support
+    # Symbol.ToStringTag.
+    if interface.name == 'Window' and member.name == 'ToString':
         return False
 
     # TODO(yukishiino): Implement "interface object" and its [[Call]] method
@@ -611,7 +612,7 @@ def named_property_getter(interface):
             if ('getter' in method.specials and
                 len(method.arguments) == 1 and
                 str(method.arguments[0].idl_type) == 'DOMString'))
-        getter.name = getter.name or 'anonymousNamedGetter'
+        getter.name = getter.name or 'AnonymousNamedGetter'
         return getter
     except StopIteration:
         return None

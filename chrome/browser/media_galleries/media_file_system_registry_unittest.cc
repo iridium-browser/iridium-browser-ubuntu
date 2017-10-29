@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <memory>
 #include <set>
+#include <vector>
 
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -19,7 +20,6 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -52,7 +52,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #endif
@@ -202,8 +201,7 @@ class MockProfileSharedRenderProcessHostFactory
       content::BrowserContext* browser_context);
 
   content::RenderProcessHost* CreateRenderProcessHost(
-      content::BrowserContext* browser_context,
-      content::SiteInstance* site_instance) const override;
+      content::BrowserContext* browser_context) const override;
 
  private:
   mutable std::map<content::BrowserContext*,
@@ -280,6 +278,10 @@ base::string16 GetExpectedFolderName(const base::FilePath& path) {
 
 class MediaFileSystemRegistryTest : public ChromeRenderViewHostTestHarness {
  public:
+  MediaFileSystemRegistryTest() = default;
+
+  ~MediaFileSystemRegistryTest() override = default;
+
   void CreateProfileState(size_t profile_count);
 
   ProfileState* GetProfileState(size_t i);
@@ -375,12 +377,13 @@ class MediaFileSystemRegistryTest : public ChromeRenderViewHostTestHarness {
 #if defined(OS_CHROMEOS)
   chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
   chromeos::ScopedTestCrosSettings test_cros_settings_;
-  std::unique_ptr<chromeos::ScopedTestUserManager> test_user_manager_;
 #endif
 
   MockProfileSharedRenderProcessHostFactory rph_factory_;
 
-  ScopedVector<ProfileState> profile_states_;
+  std::vector<std::unique_ptr<ProfileState>> profile_states_;
+
+  DISALLOW_COPY_AND_ASSIGN(MediaFileSystemRegistryTest);
 };
 
 namespace {
@@ -413,8 +416,7 @@ MockProfileSharedRenderProcessHostFactory::ReleaseRPH(
 
 content::RenderProcessHost*
 MockProfileSharedRenderProcessHostFactory::CreateRenderProcessHost(
-    content::BrowserContext* browser_context,
-    content::SiteInstance* site_instance) const {
+    content::BrowserContext* browser_context) const {
   auto existing = rph_map_.find(browser_context);
   if (existing != rph_map_.end())
     return existing->second.get();
@@ -604,13 +606,12 @@ int ProfileState::GetAndClearComparisonCount() {
 
 void MediaFileSystemRegistryTest::CreateProfileState(size_t profile_count) {
   for (size_t i = 0; i < profile_count; ++i) {
-    ProfileState* state = new ProfileState(&rph_factory_);
-    profile_states_.push_back(state);
+    profile_states_.push_back(base::MakeUnique<ProfileState>(&rph_factory_));
   }
 }
 
 ProfileState* MediaFileSystemRegistryTest::GetProfileState(size_t i) {
-  return profile_states_[i];
+  return profile_states_[i].get();
 }
 
 MediaGalleriesPreferences* MediaFileSystemRegistryTest::GetPreferences(
@@ -772,10 +773,6 @@ void MediaFileSystemRegistryTest::SetUp() {
   test_file_system_context_ = new TestMediaFileSystemContext(
       g_browser_process->media_file_system_registry());
 
-#if defined(OS_CHROMEOS)
-  test_user_manager_.reset(new chromeos::ScopedTestUserManager());
-#endif
-
   ASSERT_TRUE(galleries_dir_.CreateUniqueTempDir());
   empty_dir_ = galleries_dir_.GetPath().AppendASCII("empty");
   ASSERT_TRUE(base::CreateDirectory(empty_dir_));
@@ -790,10 +787,6 @@ void MediaFileSystemRegistryTest::TearDown() {
   MediaFileSystemRegistry* registry =
       g_browser_process->media_file_system_registry();
   EXPECT_EQ(0U, GetExtensionGalleriesHostCount(registry));
-
-#if defined(OS_CHROMEOS)
-  test_user_manager_.reset();
-#endif
 
   // The TestingProfile must be destroyed before the TestingBrowserProcess
   // because it uses it in its destructor.

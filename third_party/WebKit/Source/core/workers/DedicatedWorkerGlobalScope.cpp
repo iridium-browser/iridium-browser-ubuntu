@@ -32,80 +32,79 @@
 
 #include <memory>
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/ScriptState.h"
-#include "bindings/core/v8/SerializedScriptValue.h"
+#include "bindings/core/v8/serialization/SerializedScriptValue.h"
+#include "core/dom/ExecutionContext.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/origin_trials/OriginTrialContext.h"
 #include "core/workers/DedicatedWorkerThread.h"
+#include "core/workers/GlobalScopeCreationParams.h"
 #include "core/workers/InProcessWorkerObjectProxy.h"
 #include "core/workers/WorkerClients.h"
-#include "core/workers/WorkerThreadStartupData.h"
+#include "platform/bindings/ScriptState.h"
 
 namespace blink {
 
-DedicatedWorkerGlobalScope* DedicatedWorkerGlobalScope::create(
+DedicatedWorkerGlobalScope* DedicatedWorkerGlobalScope::Create(
     DedicatedWorkerThread* thread,
-    std::unique_ptr<WorkerThreadStartupData> startupData,
-    double timeOrigin) {
-  // Note: startupData is finalized on return. After the relevant parts has been
-  // passed along to the created 'context'.
+    std::unique_ptr<GlobalScopeCreationParams> creation_params,
+    double time_origin) {
   DedicatedWorkerGlobalScope* context = new DedicatedWorkerGlobalScope(
-      startupData->m_scriptURL, startupData->m_userAgent, thread, timeOrigin,
-      std::move(startupData->m_starterOriginPrivilegeData),
-      startupData->m_workerClients);
-  context->applyContentSecurityPolicyFromVector(
-      *startupData->m_contentSecurityPolicyHeaders);
-  context->setWorkerSettings(std::move(startupData->m_workerSettings));
-  if (!startupData->m_referrerPolicy.isNull())
-    context->parseAndSetReferrerPolicy(startupData->m_referrerPolicy);
-  context->setAddressSpace(startupData->m_addressSpace);
-  OriginTrialContext::addTokens(context,
-                                startupData->m_originTrialTokens.get());
+      creation_params->script_url, creation_params->user_agent, thread,
+      time_origin, std::move(creation_params->starter_origin_privilege_data),
+      creation_params->worker_clients);
+  context->ApplyContentSecurityPolicyFromVector(
+      *creation_params->content_security_policy_headers);
+  context->SetWorkerSettings(std::move(creation_params->worker_settings));
+  if (!creation_params->referrer_policy.IsNull())
+    context->ParseAndSetReferrerPolicy(creation_params->referrer_policy);
+  context->SetAddressSpace(creation_params->address_space);
+  OriginTrialContext::AddTokens(context,
+                                creation_params->origin_trial_tokens.get());
   return context;
 }
 
 DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(
     const KURL& url,
-    const String& userAgent,
+    const String& user_agent,
     DedicatedWorkerThread* thread,
-    double timeOrigin,
-    std::unique_ptr<SecurityOrigin::PrivilegeData> starterOriginPrivilegeData,
-    WorkerClients* workerClients)
+    double time_origin,
+    std::unique_ptr<SecurityOrigin::PrivilegeData>
+        starter_origin_privilege_data,
+    WorkerClients* worker_clients)
     : WorkerGlobalScope(url,
-                        userAgent,
+                        user_agent,
                         thread,
-                        timeOrigin,
-                        std::move(starterOriginPrivilegeData),
-                        workerClients) {}
+                        time_origin,
+                        std::move(starter_origin_privilege_data),
+                        worker_clients) {}
 
 DedicatedWorkerGlobalScope::~DedicatedWorkerGlobalScope() {}
 
-const AtomicString& DedicatedWorkerGlobalScope::interfaceName() const {
+const AtomicString& DedicatedWorkerGlobalScope::InterfaceName() const {
   return EventTargetNames::DedicatedWorkerGlobalScope;
 }
 
 void DedicatedWorkerGlobalScope::postMessage(
-    ScriptState* scriptState,
+    ScriptState* script_state,
     PassRefPtr<SerializedScriptValue> message,
     const MessagePortArray& ports,
-    ExceptionState& exceptionState) {
+    ExceptionState& exception_state) {
   // Disentangle the port in preparation for sending it to the remote context.
-  MessagePortChannelArray channels =
-      MessagePort::disentanglePorts(scriptState->getExecutionContext(), ports,
-                                    exceptionState);
-  if (exceptionState.hadException())
+  MessagePortChannelArray channels = MessagePort::DisentanglePorts(
+      ExecutionContext::From(script_state), ports, exception_state);
+  if (exception_state.HadException())
     return;
-  workerObjectProxy().postMessageToWorkerObject(std::move(message),
+  WorkerObjectProxy().PostMessageToWorkerObject(std::move(message),
                                                 std::move(channels));
 }
 
-InProcessWorkerObjectProxy& DedicatedWorkerGlobalScope::workerObjectProxy()
+InProcessWorkerObjectProxy& DedicatedWorkerGlobalScope::WorkerObjectProxy()
     const {
-  return static_cast<DedicatedWorkerThread*>(thread())->workerObjectProxy();
+  return static_cast<DedicatedWorkerThread*>(GetThread())->WorkerObjectProxy();
 }
 
 DEFINE_TRACE(DedicatedWorkerGlobalScope) {
-  WorkerGlobalScope::trace(visitor);
+  WorkerGlobalScope::Trace(visitor);
 }
 
 }  // namespace blink

@@ -6,16 +6,18 @@
 
 #include <memory>
 
-#include "testing/gtest/include/gtest/gtest.h"
+#include "net/quic/platform/api/quic_test.h"
 
 using std::string;
 
 namespace net {
 namespace test {
 
+class P256KeyExchangeTest : public QuicTest {};
+
 // SharedKey just tests that the basic key exchange identity holds: that both
 // parties end up with the same key.
-TEST(P256KeyExchange, SharedKey) {
+TEST_F(P256KeyExchangeTest, SharedKey) {
   for (int i = 0; i < 5; i++) {
     string alice_private(P256KeyExchange::NewPrivateKey());
     string bob_private(P256KeyExchange::NewPrivateKey());
@@ -30,8 +32,8 @@ TEST(P256KeyExchange, SharedKey) {
     ASSERT_TRUE(alice.get() != nullptr);
     ASSERT_TRUE(bob.get() != nullptr);
 
-    const base::StringPiece alice_public(alice->public_value());
-    const base::StringPiece bob_public(bob->public_value());
+    const QuicStringPiece alice_public(alice->public_value());
+    const QuicStringPiece bob_public(bob->public_value());
 
     std::string alice_shared, bob_shared;
     ASSERT_TRUE(alice->CalculateSharedKey(bob_public, &alice_shared));

@@ -11,6 +11,7 @@
 #include <initguid.h>
 #include <inspectable.h>
 #include <mdmregistration.h>
+#include <objbase.h>
 #include <propkey.h>
 #include <propvarutil.h>
 #include <psapi.h>
@@ -33,8 +34,10 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/scoped_native_library.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -127,9 +130,7 @@ bool IsWindows10TabletMode(HWND hwnd) {
   }
 
   base::win::ScopedComPtr<IUIViewSettingsInterop> view_settings_interop;
-  hr = get_factory(view_settings_guid,
-                   __uuidof(IUIViewSettingsInterop),
-                   view_settings_interop.ReceiveVoid());
+  hr = get_factory(view_settings_guid, IID_PPV_ARGS(&view_settings_interop));
   if (FAILED(hr))
     return false;
 
@@ -138,10 +139,7 @@ bool IsWindows10TabletMode(HWND hwnd) {
   // TODO(ananta)
   // Avoid using GetForegroundWindow here and pass in the HWND of the window
   // intiating the request to display the keyboard.
-  hr = view_settings_interop->GetForWindow(
-      hwnd,
-      __uuidof(ABI::Windows::UI::ViewManagement::IUIViewSettings),
-      view_settings.ReceiveVoid());
+  hr = view_settings_interop->GetForWindow(hwnd, IID_PPV_ARGS(&view_settings));
   if (FAILED(hr))
     return false;
 
@@ -454,6 +452,25 @@ bool IsTabletDevice(std::string* reason) {
     }
   }
 
+  // If the device is not supporting rotation, it's unlikely to be a tablet,
+  // a convertible or a detachable.
+  // See
+  // https://msdn.microsoft.com/en-us/library/windows/desktop/dn629263(v=vs.85).aspx
+  typedef decltype(GetAutoRotationState)* GetAutoRotationStateType;
+  GetAutoRotationStateType get_auto_rotation_state_func =
+      reinterpret_cast<GetAutoRotationStateType>(GetProcAddress(
+          GetModuleHandle(L"user32.dll"), "GetAutoRotationState"));
+
+  if (get_auto_rotation_state_func) {
+    AR_STATE rotation_state;
+    ZeroMemory(&rotation_state, sizeof(AR_STATE));
+    if (get_auto_rotation_state_func(&rotation_state)) {
+      if ((rotation_state & AR_NOT_SUPPORTED) || (rotation_state & AR_LAPTOP) ||
+          (rotation_state & AR_NOSENSOR))
+        return false;
+    }
+  }
+
   // PlatformRoleSlate was added in Windows 8+.
   POWER_PLATFORM_ROLE role = GetPlatformRole();
   bool mobile_power_profile = (role == PlatformRoleMobile);
@@ -470,8 +487,8 @@ bool IsTabletDevice(std::string* reason) {
       }
     } else {
       if (reason) {
-        *reason += (role == PlatformRoleMobile) ? "PlatformRoleMobile\n" :
-                                                  "PlatformRoleSlate\n";
+        *reason += (role == PlatformRoleMobile) ? "PlatformRoleMobile\n"
+                                                : "PlatformRoleSlate\n";
       }
     }
   } else {
@@ -499,8 +516,9 @@ bool IsEnrolledToDomain() {
 
 bool IsDeviceRegisteredWithManagement() {
   static bool is_device_registered_with_management = []() {
-    HMODULE mdm_dll = ::LoadLibrary(L"MDMRegistration.dll");
-    if (!mdm_dll)
+    ScopedNativeLibrary library(
+        FilePath(FILE_PATH_LITERAL("MDMRegistration.dll")));
+    if (!library.is_valid())
       return false;
 
     using IsDeviceRegisteredWithManagementFunction =
@@ -508,7 +526,7 @@ bool IsDeviceRegisteredWithManagement() {
     IsDeviceRegisteredWithManagementFunction
         is_device_registered_with_management_function =
             reinterpret_cast<IsDeviceRegisteredWithManagementFunction>(
-                ::GetProcAddress(mdm_dll, "IsDeviceRegisteredWithManagement"));
+                library.GetFunctionPointer("IsDeviceRegisteredWithManagement"));
     if (!is_device_registered_with_management_function)
       return false;
 

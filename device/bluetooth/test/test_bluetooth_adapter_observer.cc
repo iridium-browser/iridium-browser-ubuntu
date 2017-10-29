@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "device/bluetooth/bluetooth_remote_gatt_characteristic.h"
 #include "device/bluetooth/bluetooth_remote_gatt_descriptor.h"
 #include "device/bluetooth/bluetooth_remote_gatt_service.h"
@@ -60,6 +61,7 @@ void TestBluetoothAdapterObserver::Reset() {
   last_gatt_characteristic_id_.clear();
   last_gatt_characteristic_uuid_ = BluetoothUUID();
   last_changed_characteristic_value_.clear();
+  previous_characteristic_value_changed_values_.clear();
   last_gatt_descriptor_id_.clear();
   last_gatt_descriptor_uuid_ = BluetoothUUID();
   last_changed_descriptor_value_.clear();
@@ -302,6 +304,7 @@ void TestBluetoothAdapterObserver::GattCharacteristicValueChanged(
   last_gatt_characteristic_id_ = characteristic->GetIdentifier();
   last_gatt_characteristic_uuid_ = characteristic->GetUUID();
   last_changed_characteristic_value_ = value;
+  previous_characteristic_value_changed_values_.push_back(value);
 
   ASSERT_TRUE(characteristic->GetService());
   EXPECT_EQ(characteristic->GetService()->GetCharacteristic(
@@ -331,8 +334,7 @@ void TestBluetoothAdapterObserver::GattDescriptorValueChanged(
 }
 
 void TestBluetoothAdapterObserver::QuitMessageLoop() {
-  if (base::MessageLoop::current() &&
-      base::MessageLoop::current()->is_running())
+  if (base::RunLoop::IsRunningOnCurrentThread())
     base::MessageLoop::current()->QuitWhenIdle();
 }
 

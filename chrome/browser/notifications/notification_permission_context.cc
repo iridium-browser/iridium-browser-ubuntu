@@ -4,13 +4,13 @@
 
 #include "chrome/browser/notifications/notification_permission_context.h"
 
-#include <algorithm>
 #include <deque>
 
 #include "base/callback.h"
 #include "base/location.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
@@ -86,11 +86,11 @@ VisibilityTimerTabHelper::VisibilityTimerTabHelper(
     is_visible_ = false;
   } else {
     switch (contents->GetMainFrame()->GetVisibilityState()) {
-      case blink::WebPageVisibilityStateHidden:
-      case blink::WebPageVisibilityStatePrerender:
+      case blink::kWebPageVisibilityStateHidden:
+      case blink::kWebPageVisibilityStatePrerender:
         is_visible_ = false;
         break;
-      case blink::WebPageVisibilityStateVisible:
+      case blink::kWebPageVisibilityStateVisible:
         is_visible_ = true;
         break;
     }
@@ -122,10 +122,7 @@ void VisibilityTimerTabHelper::PostTaskAfterVisibleDelay(
 void VisibilityTimerTabHelper::CancelTask(const PermissionRequestID& id) {
   bool deleting_front = task_queue_.front().id == id;
 
-  task_queue_.erase(
-      std::remove_if(task_queue_.begin(), task_queue_.end(),
-                     [id](const Task& task) { return task.id == id; }),
-      task_queue_.end());
+  base::EraseIf(task_queue_, [id](const Task& task) { return task.id == id; });
 
   if (!task_queue_.empty() && is_visible_ && deleting_front)
     task_queue_.front().timer->Reset();
@@ -162,7 +159,9 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(VisibilityTimerTabHelper);
 NotificationPermissionContext::NotificationPermissionContext(
     Profile* profile,
     ContentSettingsType content_settings_type)
-    : PermissionContextBase(profile, content_settings_type),
+    : PermissionContextBase(profile,
+                            content_settings_type,
+                            blink::WebFeaturePolicyFeature::kNotFound),
       weak_factory_ui_thread_(this) {
   DCHECK(content_settings_type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS ||
          content_settings_type == CONTENT_SETTINGS_TYPE_PUSH_MESSAGING);
@@ -171,6 +170,7 @@ NotificationPermissionContext::NotificationPermissionContext(
 NotificationPermissionContext::~NotificationPermissionContext() {}
 
 ContentSetting NotificationPermissionContext::GetPermissionStatusInternal(
+    content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     const GURL& embedding_origin) const {
   // Push messaging is only allowed to be granted on top-level origins.
@@ -179,8 +179,8 @@ ContentSetting NotificationPermissionContext::GetPermissionStatusInternal(
     return CONTENT_SETTING_BLOCK;
   }
 
-  return PermissionContextBase::GetPermissionStatusInternal(requesting_origin,
-                                                            embedding_origin);
+  return PermissionContextBase::GetPermissionStatusInternal(
+      render_frame_host, requesting_origin, embedding_origin);
 }
 
 void NotificationPermissionContext::ResetPermission(

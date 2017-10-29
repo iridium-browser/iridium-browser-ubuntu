@@ -35,27 +35,32 @@
  */
 SourceFrame.SourceFrame = class extends UI.SimpleView {
   /**
-   * @param {string} url
    * @param {function(): !Promise<?string>} lazyContent
    */
-  constructor(url, lazyContent) {
+  constructor(lazyContent) {
     super(Common.UIString('Source'));
 
-    this._url = url;
     this._lazyContent = lazyContent;
 
     this._textEditor = new SourceFrame.SourcesTextEditor(this);
+    this._textEditor.show(this.element);
 
+    this._searchConfig = null;
+    this._delayedFindSearchMatches = null;
     this._currentSearchResultIndex = -1;
     this._searchResults = [];
+    this._searchRegex = null;
 
     this._textEditor.addEventListener(
         SourceFrame.SourcesTextEditor.Events.EditorFocused, this._resetCurrentSearchResultIndex, this);
     this._textEditor.addEventListener(
         SourceFrame.SourcesTextEditor.Events.SelectionChanged, this._updateSourcePosition, this);
-    this._textEditor.addEventListener(
-        SourceFrame.SourcesTextEditor.Events.TextChanged,
-        event => this.onTextChanged(event.data.oldRange, event.data.newRange));
+    this._textEditor.addEventListener(UI.TextEditor.Events.TextChanged, event => {
+      if (!this._muteChangeEventsForSetContent)
+        this.onTextChanged(event.data.oldRange, event.data.newRange);
+    });
+    /** @type {boolean} */
+    this._muteChangeEventsForSetContent = false;
 
     this._shortcuts = {};
     this.element.addEventListener('keydown', this._handleKeyDown.bind(this), false);
@@ -68,6 +73,14 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
     this._searchableView = null;
     this._editable = false;
     this._textEditor.setReadOnly(true);
+
+    /** @type {?{line: number, column: (number|undefined), shouldHighlight: (boolean|undefined)}} */
+    this._positionToReveal = null;
+    this._lineToScrollTo = null;
+    this._selectionToSet = null;
+    this._loaded = false;
+    this._contentRequested = false;
+    this._highlighterType = '';
   }
 
   /**
@@ -93,16 +106,7 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
    */
   wasShown() {
     this._ensureContentLoaded();
-    this._textEditor.show(this.element);
-    this._editorAttached = true;
     this._wasShownOrLoaded();
-  }
-
-  /**
-   * @return {boolean}
-   */
-  isEditorShowing() {
-    return this.isShowing() && this._editorAttached;
   }
 
   /**
@@ -143,8 +147,8 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
    * @param {boolean=} shouldHighlight
    */
   revealPosition(line, column, shouldHighlight) {
-    this._clearLineToScrollTo();
-    this._clearSelectionToSet();
+    this._lineToScrollTo = null;
+    this._selectionToSet = null;
     this._positionToReveal = {line: line, column: column, shouldHighlight: shouldHighlight};
     this._innerRevealPositionIfNeeded();
   }
@@ -153,17 +157,17 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
     if (!this._positionToReveal)
       return;
 
-    if (!this.loaded || !this.isEditorShowing())
+    if (!this.loaded || !this.isShowing())
       return;
 
     this._textEditor.revealPosition(
         this._positionToReveal.line, this._positionToReveal.column, this._positionToReveal.shouldHighlight);
-    delete this._positionToReveal;
+    this._positionToReveal = null;
   }
 
   _clearPositionToReveal() {
     this._textEditor.clearPositionHighlight();
-    delete this._positionToReveal;
+    this._positionToReveal = null;
   }
 
   /**
@@ -176,27 +180,23 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
   }
 
   _innerScrollToLineIfNeeded() {
-    if (typeof this._lineToScrollTo === 'number') {
-      if (this.loaded && this.isEditorShowing()) {
+    if (this._lineToScrollTo !== null) {
+      if (this.loaded && this.isShowing()) {
         this._textEditor.scrollToLine(this._lineToScrollTo);
-        delete this._lineToScrollTo;
+        this._lineToScrollTo = null;
       }
     }
   }
 
-  _clearLineToScrollTo() {
-    delete this._lineToScrollTo;
-  }
-
   /**
-   * @return {!Common.TextRange}
+   * @return {!TextUtils.TextRange}
    */
   selection() {
     return this.textEditor.selection();
   }
 
   /**
-   * @param {!Common.TextRange} textRange
+   * @param {!TextUtils.TextRange} textRange
    */
   setSelection(textRange) {
     this._selectionToSet = textRange;
@@ -204,14 +204,10 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
   }
 
   _innerSetSelectionIfNeeded() {
-    if (this._selectionToSet && this.loaded && this.isEditorShowing()) {
+    if (this._selectionToSet && this.loaded && this.isShowing()) {
       this._textEditor.setSelection(this._selectionToSet);
-      delete this._selectionToSet;
+      this._selectionToSet = null;
     }
-  }
-
-  _clearSelectionToSet() {
-    delete this._selectionToSet;
   }
 
   _wasShownOrLoaded() {
@@ -221,8 +217,8 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
   }
 
   /**
-   * @param {!Common.TextRange} oldRange
-   * @param {!Common.TextRange} newRange
+   * @param {!TextUtils.TextRange} oldRange
+   * @param {!TextUtils.TextRange} newRange
    */
   onTextChanged(oldRange, newRange) {
     if (this._searchConfig && this._searchableView)
@@ -264,6 +260,7 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
    * @param {?string} content
    */
   setContent(content) {
+    this._muteChangeEventsForSetContent = true;
     if (!this._loaded) {
       this._loaded = true;
       this._textEditor.setText(content || '');
@@ -282,8 +279,9 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
 
     if (this._delayedFindSearchMatches) {
       this._delayedFindSearchMatches();
-      delete this._delayedFindSearchMatches;
+      this._delayedFindSearchMatches = null;
     }
+    this._muteChangeEventsForSetContent = false;
     this.onTextEditorContentSet();
   }
 
@@ -349,15 +347,15 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
     this._currentSearchResultIndex = -1;
     if (this._searchableView)
       this._searchableView.updateCurrentMatchIndex(this._currentSearchResultIndex);
-    this._textEditor.highlightSearchResults(this._searchRegex, null);
+    this._textEditor.highlightSearchResults(/** @type {!RegExp} */ (this._searchRegex), null);
   }
 
   _resetSearch() {
-    delete this._searchConfig;
-    delete this._delayedFindSearchMatches;
+    this._searchConfig = null;
+    this._delayedFindSearchMatches = null;
     this._currentSearchResultIndex = -1;
     this._searchResults = [];
-    delete this._searchRegex;
+    this._searchRegex = null;
   }
 
   /**
@@ -373,17 +371,6 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
       this.setSelection(range);
   }
 
-  /**
-   * @return {boolean}
-   */
-  hasSearchResults() {
-    return this._searchResults.length > 0;
-  }
-
-  jumpToFirstSearchResult() {
-    this.jumpToSearchResult(0);
-  }
-
   jumpToLastSearchResult() {
     this.jumpToSearchResult(this._searchResults.length - 1);
   }
@@ -392,7 +379,7 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
    * @return {number}
    */
   _searchResultIndexForCurrentSelection() {
-    return this._searchResults.lowerBound(this._textEditor.selection().collapseToEnd(), Common.TextRange.comparator);
+    return this._searchResults.lowerBound(this._textEditor.selection().collapseToEnd(), TextUtils.TextRange.comparator);
   }
 
   /**
@@ -438,7 +425,8 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
     this._currentSearchResultIndex = (index + this._searchResults.length) % this._searchResults.length;
     if (this._searchableView)
       this._searchableView.updateCurrentMatchIndex(this._currentSearchResultIndex);
-    this._textEditor.highlightSearchResults(this._searchRegex, this._searchResults[this._currentSearchResultIndex]);
+    this._textEditor.highlightSearchResults(
+        /** @type {!RegExp} */ (this._searchRegex), this._searchResults[this._currentSearchResultIndex]);
   }
 
   /**
@@ -450,7 +438,7 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
     var range = this._searchResults[this._currentSearchResultIndex];
     if (!range)
       return;
-    this._textEditor.highlightSearchResults(this._searchRegex, null);
+    this._textEditor.highlightSearchResults(/** @type {!RegExp} */ (this._searchRegex), null);
 
     var oldText = this._textEditor.text(range);
     var regex = searchConfig.toSearchRegex();
@@ -492,7 +480,7 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
       return;
 
     // Calculate the position of the end of the last range to be edited.
-    var currentRangeIndex = ranges.lowerBound(this._textEditor.selection(), Common.TextRange.comparator);
+    var currentRangeIndex = ranges.lowerBound(this._textEditor.selection(), TextUtils.TextRange.comparator);
     var lastRangeIndex = mod(currentRangeIndex - 1, ranges.length);
     var lastRange = ranges[lastRangeIndex];
     var replacementLineEndings = replacement.computeLineEndings();
@@ -506,7 +494,7 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
 
     this._textEditor.editRange(range, text);
     this._textEditor.revealPosition(lastLineNumber, lastColumnNumber);
-    this._textEditor.setSelection(Common.TextRange.createFromLocation(lastLineNumber, lastColumnNumber));
+    this._textEditor.setSelection(TextUtils.TextRange.createFromLocation(lastLineNumber, lastColumnNumber));
   }
 
   _collectRegexMatches(regexObject) {
@@ -519,7 +507,7 @@ SourceFrame.SourceFrame = class extends UI.SimpleView {
         if (match) {
           var matchEndIndex = match.index + Math.max(match[0].length, 1);
           if (match[0].length)
-            ranges.push(new Common.TextRange(i, offset + match.index, i, offset + matchEndIndex));
+            ranges.push(new TextUtils.TextRange(i, offset + match.index, i, offset + matchEndIndex));
           offset += matchEndIndex;
           line = line.substring(matchEndIndex);
         }

@@ -20,6 +20,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
@@ -27,6 +28,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/display/display.h"
+#include "ui/display/display_finder.h"
 #include "ui/display/display_observer.h"
 #include "ui/display/display_switches.h"
 #include "ui/display/manager/display_layout_store.h"
@@ -124,10 +126,35 @@ scoped_refptr<ManagedDisplayMode> GetDefaultDisplayMode(
   return *iter;
 }
 
+bool ContainsDisplayWithId(const std::vector<Display>& displays,
+                           int64_t display_id) {
+  for (auto& display : displays) {
+    if (display.id() == display_id)
+      return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 using std::string;
 using std::vector;
+
+DisplayManager::BeginEndNotifier::BeginEndNotifier(
+    DisplayManager* display_manager)
+    : display_manager_(display_manager) {
+  if (display_manager_->notify_depth_++ == 0) {
+    for (auto& observer : display_manager_->observers_)
+      observer.OnWillProcessDisplayChanges();
+  }
+}
+
+DisplayManager::BeginEndNotifier::~BeginEndNotifier() {
+  if (--display_manager_->notify_depth_ == 0) {
+    for (auto& observer : display_manager_->observers_)
+      observer.OnDidProcessDisplayChanges();
+  }
+}
 
 // static
 int64_t DisplayManager::kUnifiedDisplayId = -10;
@@ -235,6 +262,8 @@ void DisplayManager::SetLayoutForCurrentDisplays(
     std::unique_ptr<DisplayLayout> layout) {
   if (GetNumDisplays() == 1)
     return;
+  BeginEndNotifier notifier(this);
+
   const DisplayIdList list = GetCurrentDisplayIdList();
 
   DCHECK(DisplayLayout::Validate(list, *layout));
@@ -264,28 +293,33 @@ void DisplayManager::SetLayoutForCurrentDisplays(
     delegate_->PostDisplayConfigurationChange(false);
 }
 
-const Display& DisplayManager::GetDisplayForId(int64_t id) const {
-  Display* display = const_cast<DisplayManager*>(this)->FindDisplayForId(id);
+const Display& DisplayManager::GetDisplayForId(int64_t display_id) const {
+  Display* display =
+      const_cast<DisplayManager*>(this)->FindDisplayForId(display_id);
   return display ? *display : GetInvalidDisplay();
+}
+
+bool DisplayManager::IsDisplayIdValid(int64_t display_id) const {
+  return GetDisplayForId(display_id).is_valid();
 }
 
 const Display& DisplayManager::FindDisplayContainingPoint(
     const gfx::Point& point_in_screen) const {
-  int index =
-      FindDisplayIndexContainingPoint(active_display_list_, point_in_screen);
-  return index < 0 ? GetInvalidDisplay() : active_display_list_[index];
+  auto iter = display::FindDisplayContainingPoint(active_display_list_,
+                                                  point_in_screen);
+  return iter == active_display_list_.end() ? GetInvalidDisplay() : *iter;
 }
 
 bool DisplayManager::UpdateWorkAreaOfDisplay(int64_t display_id,
                                              const gfx::Insets& insets) {
+  BeginEndNotifier notifier(this);
   Display* display = FindDisplayForId(display_id);
   DCHECK(display);
   gfx::Rect old_work_area = display->work_area();
   display->UpdateWorkAreaFromInsets(insets);
   bool workarea_changed = old_work_area != display->work_area();
-  if (workarea_changed) {
+  if (workarea_changed)
     NotifyMetricsChanged(*display, DisplayObserver::DISPLAY_METRIC_WORK_AREA);
-  }
   return workarea_changed;
 }
 
@@ -371,27 +405,37 @@ bool DisplayManager::SetDisplayMode(
         display_property_changed = true;
       } else {
         display_modes_[display_id] = *iter;
-        if (info.bounds_in_native().size() != display_mode->size())
+        if (info.bounds_in_native().size() != display_mode->size()) {
+          // If resolution changes, then we can break right here. No need to
+          // continue to fill |display_info_list|, since we won't be
+          // synchronously updating the displays here.
           resolution_changed = true;
+          break;
+        }
         if (info.device_scale_factor() != display_mode->device_scale_factor()) {
           info.set_device_scale_factor(display_mode->device_scale_factor());
           display_property_changed = true;
         }
       }
     }
-    display_info_list.push_back(info);
+    display_info_list.emplace_back(info);
   }
-  if (display_property_changed) {
+
+  if (display_property_changed && !resolution_changed) {
+    // We shouldn't synchronously update the displays here if the resolution
+    // changed. This should happen asynchronously when configuration is
+    // triggered.
     AddMirrorDisplayInfoIfAny(&display_info_list);
     UpdateDisplaysWith(display_info_list);
   }
-  if (resolution_changed && IsInUnifiedMode()) {
+
+  if (resolution_changed && IsInUnifiedMode())
     ReconfigureDisplays();
 #if defined(OS_CHROMEOS)
-  } else if (resolution_changed && configure_displays_) {
+  else if (resolution_changed && configure_displays_)
     delegate_->display_configurator()->OnConfigurationChanged();
-#endif
-  }
+#endif  // defined(OS_CHROMEOS)
+
   return resolution_changed || display_property_changed;
 }
 
@@ -479,6 +523,21 @@ scoped_refptr<ManagedDisplayMode> DisplayManager::GetSelectedModeForDisplayId(
   if (iter == display_modes_.end())
     return scoped_refptr<ManagedDisplayMode>();
   return iter->second;
+}
+
+void DisplayManager::SetSelectedModeForDisplayId(
+    int64_t display_id,
+    const scoped_refptr<ManagedDisplayMode>& display_mode) {
+  ManagedDisplayInfo info = GetDisplayInfo(display_id);
+  auto iter = FindDisplayMode(info, display_mode);
+  if (iter == info.display_modes().end()) {
+    LOG(WARNING) << "Unsupported display mode was requested:"
+                 << "size=" << display_mode->size().ToString()
+                 << ", ui scale=" << display_mode->ui_scale()
+                 << ", scale factor=" << display_mode->device_scale_factor();
+  }
+
+  display_modes_[display_id] = *iter;
 }
 
 bool DisplayManager::IsDisplayUIScalingEnabled() const {
@@ -639,6 +698,8 @@ void DisplayManager::UpdateDisplays() {
 
 void DisplayManager::UpdateDisplaysWith(
     const DisplayInfoList& updated_display_info_list) {
+  BeginEndNotifier notifier(this);
+
 #if defined(OS_WIN)
   DCHECK_EQ(1u, updated_display_info_list.size())
       << ": Multiple display test does not work on Windows bots. Please "
@@ -767,8 +828,7 @@ void DisplayManager::UpdateDisplaysWith(
   std::vector<size_t> updated_indices;
   UpdateNonPrimaryDisplayBoundsForLayout(&new_displays, &updated_indices);
   for (size_t updated_index : updated_indices) {
-    if (std::find(added_display_indices.begin(), added_display_indices.end(),
-                  updated_index) == added_display_indices.end()) {
+    if (!base::ContainsValue(added_display_indices, updated_index)) {
       uint32_t metrics = DisplayObserver::DISPLAY_METRIC_BOUNDS |
                          DisplayObserver::DISPLAY_METRIC_WORK_AREA;
       if (display_changes.find(updated_index) != display_changes.end())
@@ -816,22 +876,31 @@ void DisplayManager::UpdateDisplaysWith(
     NotifyMetricsChanged(updated_display, metrics);
   }
 
+  uint32_t primary_metrics = 0;
+
   if (notify_primary_change) {
     // This happens when a primary display has moved to anther display without
     // bounds change.
     const Display& primary = screen_->GetPrimaryDisplay();
     if (primary.id() != old_primary.id()) {
-      uint32_t metrics = DisplayObserver::DISPLAY_METRIC_PRIMARY;
+      primary_metrics = DisplayObserver::DISPLAY_METRIC_PRIMARY;
       if (primary.size() != old_primary.size()) {
-        metrics |= (DisplayObserver::DISPLAY_METRIC_BOUNDS |
-                    DisplayObserver::DISPLAY_METRIC_WORK_AREA);
+        primary_metrics |= (DisplayObserver::DISPLAY_METRIC_BOUNDS |
+                            DisplayObserver::DISPLAY_METRIC_WORK_AREA);
       }
       if (primary.device_scale_factor() != old_primary.device_scale_factor())
-        metrics |= DisplayObserver::DISPLAY_METRIC_DEVICE_SCALE_FACTOR;
-
-      NotifyMetricsChanged(primary, metrics);
+        primary_metrics |= DisplayObserver::DISPLAY_METRIC_DEVICE_SCALE_FACTOR;
     }
   }
+
+  bool mirror_mode = IsInMirrorMode();
+  if (mirror_mode != mirror_mode_for_metrics_) {
+    primary_metrics |= DisplayObserver::DISPLAY_METRIC_MIRROR_STATE;
+    mirror_mode_for_metrics_ = mirror_mode;
+  }
+
+  if (delegate_ && primary_metrics)
+    NotifyMetricsChanged(screen_->GetPrimaryDisplay(), primary_metrics);
 
   bool must_clear_window = false;
 #if defined(USE_X11) && defined(OS_CHROMEOS)
@@ -866,10 +935,7 @@ size_t DisplayManager::GetNumDisplays() const {
 }
 
 bool DisplayManager::IsActiveDisplayId(int64_t display_id) const {
-  return std::find_if(active_display_list_.begin(), active_display_list_.end(),
-                      [display_id](const Display& display) {
-                        return display.id() == display_id;
-                      }) != active_display_list_.end();
+  return ContainsDisplayWithId(active_display_list_, display_id);
 }
 
 bool DisplayManager::IsInMirrorMode() const {
@@ -1070,8 +1136,21 @@ bool DisplayManager::UpdateDisplayBounds(int64_t display_id,
     // Don't notify observers if the mirrored window has changed.
     if (software_mirroring_enabled() && mirroring_display_id_ == display_id)
       return false;
+
+    // In unified mode then |active_display_list_| won't have a display for
+    // |display_id| but |software_mirroring_display_list_| should. Reconfigure
+    // the displays so the unified display size is recomputed.
+    if (IsInUnifiedMode() &&
+        ContainsDisplayWithId(software_mirroring_display_list_, display_id)) {
+      DCHECK(!IsActiveDisplayId(display_id));
+      ReconfigureDisplays();
+      return true;
+    }
+
     Display* display = FindDisplayForId(display_id);
+    DCHECK(display);
     display->SetSize(display_info_[display_id].size_in_pixel());
+    BeginEndNotifier notifier(this);
     NotifyMetricsChanged(*display, DisplayObserver::DISPLAY_METRIC_BOUNDS);
     return true;
   }
@@ -1289,7 +1368,7 @@ Display* DisplayManager::FindDisplayForId(int64_t id) {
   // TODO(oshima): This happens when windows in unified desktop have
   // been moved to a normal window. Fix this.
   if (id != kUnifiedDisplayId)
-    DLOG(WARNING) << "Could not find display:" << id;
+    DLOG(ERROR) << "Could not find display:" << id;
   return nullptr;
 }
 
@@ -1351,6 +1430,14 @@ Display DisplayManager::CreateDisplayFromDisplayInfoById(int64_t id) {
   new_display.set_rotation(display_info.GetActiveRotation());
   new_display.set_touch_support(display_info.touch_support());
   new_display.set_maximum_cursor_size(display_info.maximum_cursor_size());
+
+  if (internal_display_has_accelerometer_ && Display::IsInternalDisplayId(id)) {
+    new_display.set_accelerometer_support(
+        Display::ACCELEROMETER_SUPPORT_AVAILABLE);
+  } else {
+    new_display.set_accelerometer_support(
+        Display::ACCELEROMETER_SUPPORT_UNAVAILABLE);
+  }
   return new_display;
 }
 
@@ -1399,12 +1486,17 @@ void DisplayManager::UpdateNonPrimaryDisplayBoundsForLayout(
 }
 
 void DisplayManager::CreateMirrorWindowIfAny() {
-  if (software_mirroring_display_list_.empty() || !delegate_)
+  if (software_mirroring_display_list_.empty() || !delegate_) {
+    if (!created_mirror_window_.is_null())
+      base::ResetAndReturn(&created_mirror_window_).Run();
     return;
+  }
   DisplayInfoList list;
   for (auto& display : software_mirroring_display_list_)
     list.push_back(GetDisplayInfo(display.id()));
   delegate_->CreateOrUpdateMirroringDisplay(list);
+  if (!created_mirror_window_.is_null())
+    base::ResetAndReturn(&created_mirror_window_).Run();
 }
 
 void DisplayManager::ApplyDisplayLayout(DisplayLayout* layout,
@@ -1421,8 +1513,12 @@ void DisplayManager::ApplyDisplayLayout(DisplayLayout* layout,
 }
 
 void DisplayManager::RunPendingTasksForTest() {
-  if (!software_mirroring_display_list_.empty())
-    base::RunLoop().RunUntilIdle();
+  if (software_mirroring_display_list_.empty())
+    return;
+
+  base::RunLoop run_loop;
+  created_mirror_window_ = run_loop.QuitClosure();
+  run_loop.Run();
 }
 
 void DisplayManager::NotifyMetricsChanged(const Display& display,

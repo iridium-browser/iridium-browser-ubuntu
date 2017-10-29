@@ -4,10 +4,10 @@
 
 #include "chromeos/components/tether/ble_scanner.h"
 
-#include "base/logging.h"
+#include "base/callback_forward.h"
 #include "chromeos/components/tether/ble_constants.h"
-#include "chromeos/components/tether/mock_local_device_data_provider.h"
-#include "components/cryptauth/mock_eid_generator.h"
+#include "components/cryptauth/mock_foreground_eid_generator.h"
+#include "components/cryptauth/mock_local_device_data_provider.h"
 #include "components/cryptauth/proto/cryptauth_api.pb.h"
 #include "components/cryptauth/remote_device_test_util.h"
 #include "device/bluetooth/test/mock_bluetooth_adapter.h"
@@ -29,19 +29,9 @@ namespace tether {
 
 namespace {
 
-class MockBleScannerObserver : public BleScanner::Observer {
+class TestBleScannerObserver final : public BleScanner::Observer {
  public:
-  MockBleScannerObserver() {}
-
-  // BleScanner::Observer:
-  void OnReceivedAdvertisementFromDevice(
-      const std::string& device_address,
-      cryptauth::RemoteDevice remote_device) override {
-    device_addresses_.push_back(device_address);
-    remote_devices_.push_back(remote_device);
-  }
-
-  int GetNumCalls() { return static_cast<int>(device_addresses_.size()); }
+  TestBleScannerObserver() {}
 
   std::vector<std::string>& device_addresses() { return device_addresses_; }
 
@@ -49,9 +39,26 @@ class MockBleScannerObserver : public BleScanner::Observer {
     return remote_devices_;
   }
 
+  std::vector<bool>& discovery_session_state_changes() {
+    return discovery_session_state_changes_;
+  }
+
+  // BleScanner::Observer:
+  void OnReceivedAdvertisementFromDevice(
+      const std::string& device_address,
+      const cryptauth::RemoteDevice& remote_device) override {
+    device_addresses_.push_back(device_address);
+    remote_devices_.push_back(remote_device);
+  }
+
+  void OnDiscoverySessionStateChanged(bool discovery_session_active) override {
+    discovery_session_state_changes_.push_back(discovery_session_active);
+  }
+
  private:
   std::vector<std::string> device_addresses_;
   std::vector<cryptauth::RemoteDevice> remote_devices_;
+  std::vector<bool> discovery_session_state_changes_;
 };
 
 class MockBluetoothDeviceWithServiceData : public device::MockBluetoothDevice {
@@ -76,7 +83,6 @@ class MockBluetoothDeviceWithServiceData : public device::MockBluetoothDevice {
   std::vector<uint8_t> service_data_;
 };
 
-const int kExpectedDiscoveryRSSI = -90;
 const size_t kMinNumBytesInServiceData = 4;
 
 const std::string kDefaultBluetoothAddress = "11:22:33:44:55:66";
@@ -99,16 +105,16 @@ const std::string fake_beacon_seed2_data = "fakeBeaconSeed2Data";
 const int64_t fake_beacon_seed2_start_ms = adjacent_eid_start_ms;
 const int64_t fake_beacon_seed2_end_ms = adjacent_eid_end_ms;
 
-std::unique_ptr<cryptauth::EidGenerator::EidData>
+std::unique_ptr<cryptauth::ForegroundEidGenerator::EidData>
 CreateFakeBackgroundScanFilter() {
-  cryptauth::EidGenerator::DataWithTimestamp current(
-      current_eid_data, current_eid_start_ms, current_eid_end_ms);
+  cryptauth::DataWithTimestamp current(current_eid_data, current_eid_start_ms,
+                                       current_eid_end_ms);
 
-  std::unique_ptr<cryptauth::EidGenerator::DataWithTimestamp> adjacent =
-      base::MakeUnique<cryptauth::EidGenerator::DataWithTimestamp>(
+  std::unique_ptr<cryptauth::DataWithTimestamp> adjacent =
+      base::MakeUnique<cryptauth::DataWithTimestamp>(
           adjacent_eid_data, adjacent_eid_start_ms, adjacent_eid_end_ms);
 
-  return base::MakeUnique<cryptauth::EidGenerator::EidData>(
+  return base::MakeUnique<cryptauth::ForegroundEidGenerator::EidData>(
       current, std::move(adjacent));
 }
 
@@ -130,48 +136,19 @@ std::vector<cryptauth::BeaconSeed> CreateFakeBeaconSeeds() {
 
 class BleScannerTest : public testing::Test {
  protected:
-  class TestDelegate : public BleScanner::Delegate {
+  class TestServiceDataProvider : public BleScanner::ServiceDataProvider {
    public:
-    TestDelegate()
-        : is_bluetooth_adapter_available_(true),
-          last_get_adapter_callback_(nullptr) {}
+    TestServiceDataProvider() {}
 
-    ~TestDelegate() override {}
+    ~TestServiceDataProvider() override {}
 
-    bool IsBluetoothAdapterAvailable() const override {
-      return is_bluetooth_adapter_available_;
-    }
-
-    void set_is_bluetooth_adapter_available(
-        bool is_bluetooth_adapter_available) {
-      is_bluetooth_adapter_available_ = is_bluetooth_adapter_available;
-    }
-
-    void GetAdapter(const device::BluetoothAdapterFactory::AdapterCallback&
-                        callback) override {
-      last_get_adapter_callback_ = callback;
-    }
-
-    const device::BluetoothAdapterFactory::AdapterCallback
-    last_get_adapter_callback() {
-      return last_get_adapter_callback_;
-    }
-
+    // ServiceDataProvider:
     const std::vector<uint8_t>* GetServiceDataForUUID(
-        const device::BluetoothUUID& service_uuid,
         device::BluetoothDevice* bluetooth_device) override {
-      if (device::BluetoothUUID(kAdvertisingServiceUuid) == service_uuid) {
-        return reinterpret_cast<MockBluetoothDeviceWithServiceData*>(
-                   bluetooth_device)
-            ->service_data();
-      }
-
-      return nullptr;
+      return reinterpret_cast<MockBluetoothDeviceWithServiceData*>(
+                 bluetooth_device)
+          ->service_data();
     }
-
-   private:
-    bool is_bluetooth_adapter_available_;
-    device::BluetoothAdapterFactory::AdapterCallback last_get_adapter_callback_;
   };
 
   BleScannerTest()
@@ -179,109 +156,141 @@ class BleScannerTest : public testing::Test {
         test_beacon_seeds_(CreateFakeBeaconSeeds()) {}
 
   void SetUp() override {
-    test_delegate_ = new TestDelegate();
-    EXPECT_TRUE(test_delegate_->IsBluetoothAdapterAvailable());
-    EXPECT_FALSE(test_delegate_->last_get_adapter_callback());
+    test_service_data_provider_ = new TestServiceDataProvider();
 
-    mock_eid_generator_ = base::MakeUnique<cryptauth::MockEidGenerator>();
+    std::unique_ptr<cryptauth::MockForegroundEidGenerator> eid_generator =
+        base::MakeUnique<cryptauth::MockForegroundEidGenerator>();
+    mock_eid_generator_ = eid_generator.get();
     mock_eid_generator_->set_background_scan_filter(
         CreateFakeBackgroundScanFilter());
 
     mock_local_device_data_provider_ =
-        base::MakeUnique<MockLocalDeviceDataProvider>();
+        base::MakeUnique<cryptauth::MockLocalDeviceDataProvider>();
     mock_local_device_data_provider_->SetPublicKey(
         base::MakeUnique<std::string>(fake_local_public_key));
     mock_local_device_data_provider_->SetBeaconSeeds(
         base::MakeUnique<std::vector<cryptauth::BeaconSeed>>(
             test_beacon_seeds_));
 
+    last_discovery_callback_.Reset();
+    last_discovery_error_callback_.Reset();
+    last_stop_callback_.Reset();
+    last_discovery_error_callback_.Reset();
+
     mock_adapter_ =
         make_scoped_refptr(new NiceMock<device::MockBluetoothAdapter>());
-    stored_discovery_filter_.reset();
-    stored_discovery_callback_.Reset();
-    stored_discovery_errback_.Reset();
-    ON_CALL(*mock_adapter_, StartDiscoverySessionWithFilterRaw(_, _, _))
-        .WillByDefault(Invoke(
-            this, &BleScannerTest::SaveStartDiscoverySessionWithFilterArgs));
+    ON_CALL(*mock_adapter_, StartDiscoverySession(_, _))
+        .WillByDefault(
+            Invoke(this, &BleScannerTest::SaveStartDiscoverySessionArgs));
     ON_CALL(*mock_adapter_, IsPowered()).WillByDefault(Return(true));
 
     mock_discovery_session_ = nullptr;
 
     ble_scanner_ = base::WrapUnique(new BleScanner(
-        base::WrapUnique(test_delegate_), mock_eid_generator_.get(),
-        mock_local_device_data_provider_.get()));
+        base::WrapUnique(test_service_data_provider_), mock_adapter_,
+        std::move(eid_generator), mock_local_device_data_provider_.get()));
 
-    mock_observer_ = base::MakeUnique<MockBleScannerObserver>();
-    ble_scanner_->AddObserver(mock_observer_.get());
+    test_observer_ = base::MakeUnique<TestBleScannerObserver>();
+    ble_scanner_->AddObserver(test_observer_.get());
   }
 
-  void SaveStartDiscoverySessionWithFilterArgs(
-      const device::BluetoothDiscoveryFilter* discovery_filter,
+  void TearDown() override {
+    EXPECT_EQ(discovery_state_changes_so_far_,
+              test_observer_->discovery_session_state_changes());
+  }
+
+  void SaveStartDiscoverySessionArgs(
       const device::BluetoothAdapter::DiscoverySessionCallback& callback,
       const device::BluetoothAdapter::ErrorCallback& errback) {
-    stored_discovery_filter_ =
-        base::MakeUnique<device::BluetoothDiscoveryFilter>(
-            device::BluetoothTransport::BLUETOOTH_TRANSPORT_LE);
-    stored_discovery_filter_->CopyFrom(*discovery_filter);
-    stored_discovery_callback_ = callback;
-    stored_discovery_errback_ = errback;
+    last_discovery_callback_ = callback;
+    last_discovery_error_callback_ = errback;
   }
 
-  void InvokeAdapterCallback() {
-    const device::BluetoothAdapterFactory::AdapterCallback
-        last_get_adapter_callback = test_delegate_->last_get_adapter_callback();
-    ASSERT_TRUE(last_get_adapter_callback);
+  void InvokeDiscoveryStartedCallback(bool success) {
+    EXPECT_FALSE(last_discovery_callback_.is_null());
+    EXPECT_FALSE(last_discovery_error_callback_.is_null());
 
-    // Because the adapter has just been initialized, the discovery session
-    // should not have been started yet.
-    EXPECT_FALSE(stored_discovery_filter_);
-    EXPECT_TRUE(stored_discovery_callback_.is_null());
-    EXPECT_TRUE(stored_discovery_errback_.is_null());
+    // Make a copy of the callbacks and clear the instance fields. Invoke the
+    // copy below to ensure that if the callback results in another discovery
+    // attempt, the instance fields are not overwritten incorrectly.
+    device::BluetoothAdapter::DiscoverySessionCallback callback_copy =
+        last_discovery_callback_;
+    device::BluetoothAdapter::ErrorCallback error_callback_copy =
+        last_discovery_error_callback_;
+    last_discovery_callback_.Reset();
+    last_discovery_error_callback_.Reset();
 
-    EXPECT_CALL(*mock_adapter_, AddObserver(ble_scanner_.get()));
-    last_get_adapter_callback.Run(mock_adapter_);
+    if (success) {
+      mock_discovery_session_ = new device::MockBluetoothDiscoverySession();
+      ON_CALL(*mock_discovery_session_, IsActive()).WillByDefault(Return(true));
+      ON_CALL(*mock_discovery_session_, Stop(_, _))
+          .WillByDefault(Invoke(this, &BleScannerTest::MockDiscoveryStop));
 
-    // Once the adapter callback is returned, a discovery session should be
-    // started via that adapter.
-    AssertDiscoverySessionRequested();
+      callback_copy.Run(base::WrapUnique(mock_discovery_session_));
+      VerifyDiscoveryStatusChange(true /* discovery_session_active */);
+    } else {
+      error_callback_copy.Run();
+    }
   }
 
-  void AssertDiscoverySessionRequested() {
-    // First, ensure that the correct discovery filter was passed.
-    EXPECT_TRUE(stored_discovery_filter_);
-    EXPECT_EQ(device::BluetoothTransport::BLUETOOTH_TRANSPORT_LE,
-              stored_discovery_filter_->GetTransport());
-    int16_t observed_rssi;
-    ASSERT_TRUE(stored_discovery_filter_->GetRSSI(&observed_rssi));
-    EXPECT_EQ(kExpectedDiscoveryRSSI, observed_rssi);
-
-    // Now, ensure that both a callback and errback were passed.
-    EXPECT_FALSE(stored_discovery_callback_.is_null());
-    EXPECT_FALSE(stored_discovery_errback_.is_null());
+  bool IsDeviceRegistered(const std::string& device_id) {
+    return ble_scanner_->IsDeviceRegistered(device_id);
   }
 
-  void InvokeDiscoveryStartedCallback() {
-    EXPECT_FALSE(stored_discovery_callback_.is_null());
-
-    mock_discovery_session_ = new device::MockBluetoothDiscoverySession();
-    stored_discovery_callback_.Run(base::WrapUnique(mock_discovery_session_));
+  void VerifyDiscoveryStatusChange(bool discovery_session_active) {
+    discovery_state_changes_so_far_.push_back(discovery_session_active);
+    EXPECT_EQ(discovery_state_changes_so_far_,
+              test_observer_->discovery_session_state_changes());
   }
 
-  std::vector<cryptauth::RemoteDevice> test_devices_;
-  std::vector<cryptauth::BeaconSeed> test_beacon_seeds_;
+  void MockDiscoveryStop(
+      const base::Closure& callback,
+      const device::BluetoothDiscoverySession::ErrorCallback& error_callback) {
+    last_stop_callback_ = callback;
+    last_stop_error_callback_ = error_callback;
+  }
 
-  std::unique_ptr<MockBleScannerObserver> mock_observer_;
+  void InvokeStopDiscoveryCallback(bool success) {
+    EXPECT_FALSE(last_stop_callback_.is_null());
+    EXPECT_FALSE(last_stop_error_callback_.is_null());
 
-  TestDelegate* test_delegate_;
-  std::unique_ptr<cryptauth::MockEidGenerator> mock_eid_generator_;
-  std::unique_ptr<MockLocalDeviceDataProvider> mock_local_device_data_provider_;
+    // Make a copy of the callbacks and clear the instance fields. Invoke the
+    // copy below to ensure that if the callback results in another stop
+    // attempt, the instance fields are not overwritten incorrectly.
+    base::Closure callback_copy = last_stop_callback_;
+    device::BluetoothDiscoverySession::ErrorCallback error_callback_copy =
+        last_stop_error_callback_;
+    last_stop_callback_.Reset();
+    last_stop_error_callback_.Reset();
+
+    if (success) {
+      callback_copy.Run();
+      VerifyDiscoveryStatusChange(false /* discovery_session_active */);
+    } else {
+      error_callback_copy.Run();
+    }
+  }
+
+  const std::vector<cryptauth::RemoteDevice> test_devices_;
+  const std::vector<cryptauth::BeaconSeed> test_beacon_seeds_;
+
+  std::unique_ptr<TestBleScannerObserver> test_observer_;
+
+  TestServiceDataProvider* test_service_data_provider_;
+  cryptauth::MockForegroundEidGenerator* mock_eid_generator_;
+  std::unique_ptr<cryptauth::MockLocalDeviceDataProvider>
+      mock_local_device_data_provider_;
 
   scoped_refptr<NiceMock<device::MockBluetoothAdapter>> mock_adapter_;
   device::MockBluetoothDiscoverySession* mock_discovery_session_;
 
-  std::unique_ptr<device::BluetoothDiscoveryFilter> stored_discovery_filter_;
-  device::BluetoothAdapter::DiscoverySessionCallback stored_discovery_callback_;
-  device::BluetoothAdapter::ErrorCallback stored_discovery_errback_;
+  device::BluetoothAdapter::DiscoverySessionCallback last_discovery_callback_;
+  device::BluetoothAdapter::ErrorCallback last_discovery_error_callback_;
+
+  base::Closure last_stop_callback_;
+  device::BluetoothDiscoverySession::ErrorCallback last_stop_error_callback_;
+
+  std::vector<bool> discovery_state_changes_so_far_;
 
   std::unique_ptr<BleScanner> ble_scanner_;
 
@@ -289,98 +298,53 @@ class BleScannerTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(BleScannerTest);
 };
 
-TEST_F(BleScannerTest, TestNoBluetoothAdapter) {
-  test_delegate_->set_is_bluetooth_adapter_available(false);
-  EXPECT_FALSE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
-  EXPECT_FALSE(test_delegate_->last_get_adapter_callback());
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
-}
-
 TEST_F(BleScannerTest, TestNoLocalBeaconSeeds) {
   mock_local_device_data_provider_->SetBeaconSeeds(nullptr);
   EXPECT_FALSE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
-  EXPECT_FALSE(test_delegate_->last_get_adapter_callback());
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
+  EXPECT_FALSE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_EQ(0u, test_observer_->device_addresses().size());
 }
 
 TEST_F(BleScannerTest, TestNoBackgroundScanFilter) {
   mock_eid_generator_->set_background_scan_filter(nullptr);
   EXPECT_FALSE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
-  EXPECT_FALSE(test_delegate_->last_get_adapter_callback());
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
-}
-
-TEST_F(BleScannerTest, TestAdapterDoesNotInitialize) {
-  EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
-  EXPECT_TRUE(test_delegate_->last_get_adapter_callback());
-
-  // Do not call the last GetAdapter() callback. The device should still be able
-  // to be unregistered.
-  EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
-}
-
-TEST_F(BleScannerTest, TestAdapterDoesNotInitialize_MultipleDevicesRegistered) {
-  EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[1]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[1].GetDeviceId()));
-  EXPECT_TRUE(test_delegate_->last_get_adapter_callback());
-
-  // Do not call the last GetAdapter() callback. The devices should still be
-  // able to be unregistered.
-  EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[1]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[1].GetDeviceId()));
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
+  EXPECT_FALSE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_EQ(0u, test_observer_->device_addresses().size());
 }
 
 TEST_F(BleScannerTest, TestDiscoverySessionFailsToStart) {
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
 
-  InvokeAdapterCallback();
-  stored_discovery_errback_.Run();
+  InvokeDiscoveryStartedCallback(false /* success */);
 
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
+  EXPECT_EQ(0u, test_observer_->device_addresses().size());
 }
 
 TEST_F(BleScannerTest, TestDiscoveryStartsButNoDevicesFound) {
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
 
-  InvokeAdapterCallback();
-  InvokeDiscoveryStartedCallback();
+  InvokeDiscoveryStartedCallback(true /* success */);
 
   // No devices found.
 
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
+  EXPECT_EQ(0u, test_observer_->device_addresses().size());
+
+  InvokeStopDiscoveryCallback(true /* success */);
 }
 
 TEST_F(BleScannerTest, TestDiscovery_NoServiceData) {
   std::string empty_service_data = "";
 
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
 
-  InvokeAdapterCallback();
-  InvokeDiscoveryStartedCallback();
+  InvokeDiscoveryStartedCallback(true /* success */);
 
   // Device with no service data connected. Service data is required to identify
   // the advertising device.
@@ -388,7 +352,7 @@ TEST_F(BleScannerTest, TestDiscovery_NoServiceData) {
       mock_adapter_.get(), kDefaultBluetoothAddress, empty_service_data);
   ble_scanner_->DeviceAdded(mock_adapter_.get(), &device);
   EXPECT_FALSE(mock_eid_generator_->num_identify_calls());
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
+  EXPECT_EQ(0u, test_observer_->device_addresses().size());
 }
 
 TEST_F(BleScannerTest, TestDiscovery_ServiceDataTooShort) {
@@ -396,10 +360,9 @@ TEST_F(BleScannerTest, TestDiscovery_ServiceDataTooShort) {
   ASSERT_TRUE(short_service_data.size() < kMinNumBytesInServiceData);
 
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
 
-  InvokeAdapterCallback();
-  InvokeDiscoveryStartedCallback();
+  InvokeDiscoveryStartedCallback(true /* success */);
 
   // Device with short service data connected. Service data of at least 4 bytes
   // is required to identify the advertising device.
@@ -407,7 +370,7 @@ TEST_F(BleScannerTest, TestDiscovery_ServiceDataTooShort) {
       mock_adapter_.get(), kDefaultBluetoothAddress, short_service_data);
   ble_scanner_->DeviceAdded(mock_adapter_.get(), &device);
   EXPECT_FALSE(mock_eid_generator_->num_identify_calls());
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
+  EXPECT_EQ(0u, test_observer_->device_addresses().size());
 }
 
 TEST_F(BleScannerTest, TestDiscovery_LocalDeviceDataCannotBeFetched) {
@@ -416,10 +379,9 @@ TEST_F(BleScannerTest, TestDiscovery_LocalDeviceDataCannotBeFetched) {
               kMinNumBytesInServiceData);
 
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
 
-  InvokeAdapterCallback();
-  InvokeDiscoveryStartedCallback();
+  InvokeDiscoveryStartedCallback(true /* success */);
 
   // Device with valid service data connected, but the local device data
   // cannot be fetched.
@@ -430,7 +392,7 @@ TEST_F(BleScannerTest, TestDiscovery_LocalDeviceDataCannotBeFetched) {
       valid_service_data_for_other_device);
   ble_scanner_->DeviceAdded(mock_adapter_.get(), &device);
   EXPECT_FALSE(mock_eid_generator_->num_identify_calls());
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
+  EXPECT_EQ(0u, test_observer_->device_addresses().size());
 }
 
 TEST_F(BleScannerTest, TestDiscovery_ScanSuccessfulButNoRegisteredDevice) {
@@ -439,10 +401,9 @@ TEST_F(BleScannerTest, TestDiscovery_ScanSuccessfulButNoRegisteredDevice) {
               kMinNumBytesInServiceData);
 
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
 
-  InvokeAdapterCallback();
-  InvokeDiscoveryStartedCallback();
+  InvokeDiscoveryStartedCallback(true /* success */);
 
   // Device with valid service data connected, but there was no registered
   // device corresponding to the one that just connected.
@@ -455,7 +416,7 @@ TEST_F(BleScannerTest, TestDiscovery_ScanSuccessfulButNoRegisteredDevice) {
       valid_service_data_for_other_device);
   ble_scanner_->DeviceAdded(mock_adapter_.get(), &device);
   EXPECT_EQ(1, mock_eid_generator_->num_identify_calls());
-  EXPECT_FALSE(mock_observer_->GetNumCalls());
+  EXPECT_EQ(0u, test_observer_->device_addresses().size());
 }
 
 TEST_F(BleScannerTest, TestDiscovery_Success) {
@@ -464,10 +425,9 @@ TEST_F(BleScannerTest, TestDiscovery_Success) {
               kMinNumBytesInServiceData);
 
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
 
-  InvokeAdapterCallback();
-  InvokeDiscoveryStartedCallback();
+  InvokeDiscoveryStartedCallback(true /* success */);
 
   // Registered device connects.
   MockBluetoothDeviceWithServiceData device(
@@ -476,151 +436,233 @@ TEST_F(BleScannerTest, TestDiscovery_Success) {
   mock_eid_generator_->set_identified_device(&test_devices_[0]);
   ble_scanner_->DeviceAdded(mock_adapter_.get(), &device);
   EXPECT_EQ(1, mock_eid_generator_->num_identify_calls());
-  EXPECT_EQ(1, mock_observer_->GetNumCalls());
-  EXPECT_EQ(1, static_cast<int>(mock_observer_->device_addresses().size()));
-  EXPECT_EQ(device.GetAddress(), mock_observer_->device_addresses()[0]);
-  EXPECT_EQ(1, static_cast<int>(mock_observer_->remote_devices().size()));
-  EXPECT_EQ(test_devices_[0], mock_observer_->remote_devices()[0]);
+  EXPECT_EQ(1u, test_observer_->device_addresses().size());
+  EXPECT_EQ(device.GetAddress(), test_observer_->device_addresses()[0]);
+  EXPECT_EQ(1u, test_observer_->remote_devices().size());
+  EXPECT_EQ(test_devices_[0], test_observer_->remote_devices()[0]);
 
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
   EXPECT_EQ(1, mock_eid_generator_->num_identify_calls());
-  EXPECT_EQ(1, mock_observer_->GetNumCalls());
+  EXPECT_EQ(1u, test_observer_->device_addresses().size());
+  InvokeStopDiscoveryCallback(true /* success */);
 }
 
 TEST_F(BleScannerTest, TestDiscovery_MultipleObservers) {
-  MockBleScannerObserver extra_observer;
+  TestBleScannerObserver extra_observer;
   ble_scanner_->AddObserver(&extra_observer);
 
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
 
-  InvokeAdapterCallback();
-  InvokeDiscoveryStartedCallback();
+  InvokeDiscoveryStartedCallback(true /* success */);
 
   MockBluetoothDeviceWithServiceData mock_bluetooth_device(
       mock_adapter_.get(), kDefaultBluetoothAddress, "fakeServiceData");
   mock_eid_generator_->set_identified_device(&test_devices_[0]);
   ble_scanner_->DeviceAdded(mock_adapter_.get(), &mock_bluetooth_device);
 
-  EXPECT_EQ(1, mock_observer_->GetNumCalls());
-  EXPECT_EQ(1, static_cast<int>(mock_observer_->device_addresses().size()));
+  EXPECT_EQ(1u, test_observer_->device_addresses().size());
   EXPECT_EQ(mock_bluetooth_device.GetAddress(),
-            mock_observer_->device_addresses()[0]);
-  EXPECT_EQ(1, static_cast<int>(mock_observer_->remote_devices().size()));
-  EXPECT_EQ(test_devices_[0], mock_observer_->remote_devices()[0]);
+            test_observer_->device_addresses()[0]);
+  EXPECT_EQ(1u, test_observer_->remote_devices().size());
+  EXPECT_EQ(test_devices_[0], test_observer_->remote_devices()[0]);
 
-  EXPECT_EQ(1, extra_observer.GetNumCalls());
-  EXPECT_EQ(1, static_cast<int>(extra_observer.device_addresses().size()));
+  EXPECT_EQ(1u, extra_observer.device_addresses().size());
   EXPECT_EQ(mock_bluetooth_device.GetAddress(),
             extra_observer.device_addresses()[0]);
-  EXPECT_EQ(1, static_cast<int>(extra_observer.remote_devices().size()));
+  EXPECT_EQ(1u, extra_observer.remote_devices().size());
   EXPECT_EQ(test_devices_[0], extra_observer.remote_devices()[0]);
 
   // Now, unregister both observers.
-  ble_scanner_->RemoveObserver(mock_observer_.get());
+  ble_scanner_->RemoveObserver(test_observer_.get());
   ble_scanner_->RemoveObserver(&extra_observer);
 
   // Now, simulate another scan being received. The observers should not be
   // notified since they are unregistered, so they should still have a call
   // count of 1.
   ble_scanner_->DeviceAdded(mock_adapter_.get(), &mock_bluetooth_device);
-  EXPECT_EQ(1, mock_observer_->GetNumCalls());
-  EXPECT_EQ(1, extra_observer.GetNumCalls());
+  EXPECT_EQ(1u, test_observer_->device_addresses().size());
+  EXPECT_EQ(1u, extra_observer.device_addresses().size());
 
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
+
+  // Note: Cannot use InvokeStopDiscoveryCallback() since that function
+  // internally verifies observer callbacks, but the observers have been
+  // unregistered in this case.
+  EXPECT_FALSE(last_stop_callback_.is_null());
+  last_stop_callback_.Run();
 }
 
 TEST_F(BleScannerTest, TestRegistrationLimit) {
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[1]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[1].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[1].GetDeviceId()));
 
   // Attempt to register another device. Registration should fail since the
   // maximum number of devices have already been registered.
   ASSERT_EQ(2, kMaxConcurrentAdvertisements);
   EXPECT_FALSE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[2]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[2].GetDeviceId()));
+  EXPECT_FALSE(IsDeviceRegistered(test_devices_[2].GetDeviceId()));
 
   // Unregistering a device which is not registered should also return false.
   EXPECT_FALSE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[2]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[2].GetDeviceId()));
+  EXPECT_FALSE(IsDeviceRegistered(test_devices_[2].GetDeviceId()));
 
   // Unregister device 0.
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+  EXPECT_FALSE(IsDeviceRegistered(test_devices_[0].GetDeviceId()));
 
   // Now, device 2 can be registered.
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[2]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[2].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[2].GetDeviceId()));
 
   // Now, unregister the devices.
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[1].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[1].GetDeviceId()));
   EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[1]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[1].GetDeviceId()));
+  EXPECT_FALSE(IsDeviceRegistered(test_devices_[1].GetDeviceId()));
 
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[2].GetDeviceId()));
+  EXPECT_TRUE(IsDeviceRegistered(test_devices_[2].GetDeviceId()));
   EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[2]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[2].GetDeviceId()));
+  EXPECT_FALSE(IsDeviceRegistered(test_devices_[2].GetDeviceId()));
 }
 
-TEST_F(BleScannerTest, TestAdapterPoweredChanged) {
-  // This test starts with the adapter powered on, then turns power off before
-  // discovery starts, then turns power back on and allows discovery to
-  // complete, then turns power back off again, and finally turns it back on to
-  // complete another discovery session.
-  EXPECT_CALL(*mock_adapter_, IsPowered())
-      .WillOnce(Return(true))
-      .WillOnce(Return(false))
-      .WillOnce(Return(true))
-      .WillOnce(Return(false))
-      .WillOnce(Return(true));
-
+TEST_F(BleScannerTest, TestStartAndStopCallbacks_Success) {
   EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
-  InvokeAdapterCallback();
+  EXPECT_TRUE(ble_scanner_->ShouldDiscoverySessionBeActive());
 
-  // The discovery session should have been requested but not yet initialized.
-  EXPECT_TRUE(stored_discovery_filter_.get());
-  EXPECT_FALSE(mock_discovery_session_);
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+  InvokeDiscoveryStartedCallback(true /* success */);
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
 
-  // Turn the adapter off before the discovery session starts.
-  ble_scanner_->AdapterPoweredChanged(mock_adapter_.get(), false);
+  EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[1]));
 
-  // Turn the adapter back on, and finish initializing discovery this time.
-  ble_scanner_->AdapterPoweredChanged(mock_adapter_.get(), true);
-  InvokeDiscoveryStartedCallback();
+  // Registering device 1 should not have triggered a new discovery session from
+  // being created since one already existed.
+  EXPECT_TRUE(last_discovery_callback_.is_null());
+  EXPECT_TRUE(ble_scanner_->ShouldDiscoverySessionBeActive());
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
 
-  // The session should have been started.
-  device::MockBluetoothDiscoverySession* session1 = mock_discovery_session_;
-  EXPECT_NE(nullptr, session1);
-
-  // Now turn the adapter off again.
-  ble_scanner_->AdapterPoweredChanged(mock_adapter_.get(), false);
-
-  // Turn the adapter back on.
-  ble_scanner_->AdapterPoweredChanged(mock_adapter_.get(), true);
-  InvokeDiscoveryStartedCallback();
-
-  // A new session should have started, so the session objects should not be the
-  // same.
-  device::MockBluetoothDiscoverySession* session2 = mock_discovery_session_;
-  EXPECT_NE(nullptr, session2);
-  EXPECT_NE(session1, session2);
-
-  // Unregister device.
-  EXPECT_TRUE(ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
-  EXPECT_FALSE(
-      ble_scanner_->IsDeviceRegistered(test_devices_[0].GetDeviceId()));
+
+  // Unregistering device 0 should not have triggered a stopped session since
+  // a device is still registered.
+  EXPECT_TRUE(last_discovery_callback_.is_null());
+  EXPECT_TRUE(ble_scanner_->ShouldDiscoverySessionBeActive());
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Device 1 is the only device remaining, so unregistering it should trigger
+  // the session to stop.
+  EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[1]));
+  EXPECT_FALSE(ble_scanner_->ShouldDiscoverySessionBeActive());
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
+
+  InvokeStopDiscoveryCallback(true /* success */);
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+}
+
+TEST_F(BleScannerTest, TestStartAndStopCallbacks_Errors) {
+  EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
+  EXPECT_TRUE(ble_scanner_->ShouldDiscoverySessionBeActive());
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Fail to start discovery session.
+  InvokeDiscoveryStartedCallback(false /* success */);
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Since the previous try failed, a new one should have been attempted. Let
+  // that one fail as well.
+  InvokeDiscoveryStartedCallback(false /* success */);
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Now, let it succeed.
+  InvokeDiscoveryStartedCallback(true /* success */);
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Now, unregister it, but fail to stop the discovery session.
+  EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
+  EXPECT_FALSE(ble_scanner_->ShouldDiscoverySessionBeActive());
+  InvokeStopDiscoveryCallback(false /* success */);
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Since the previous try failed, a new stop should have been attempted. Let
+  // that one fail as well.
+  InvokeStopDiscoveryCallback(false /* success */);
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Now, let it succeed.
+  InvokeStopDiscoveryCallback(true /* success */);
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+}
+
+TEST_F(BleScannerTest, TestStartAndStopCallbacks_UnregisterBeforeStarted) {
+  EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
+  EXPECT_TRUE(ble_scanner_->ShouldDiscoverySessionBeActive());
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Before invoking the discovery callback, unregister the device.
+  EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
+  EXPECT_FALSE(ble_scanner_->ShouldDiscoverySessionBeActive());
+
+  // Complete the start discovery successfully.
+  InvokeDiscoveryStartedCallback(true /* success */);
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Because the session should not be active (i.e., there are no registered
+  // devices), a stop should be triggered.
+  InvokeStopDiscoveryCallback(true /* success */);
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+}
+
+TEST_F(BleScannerTest, TestStartAndStopCallbacks_UnregisterBeforeStartFails) {
+  EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
+  EXPECT_TRUE(ble_scanner_->ShouldDiscoverySessionBeActive());
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Before invoking the discovery callback, unregister the device.
+  EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
+  EXPECT_FALSE(ble_scanner_->ShouldDiscoverySessionBeActive());
+
+  // Fail to start discovery session.
+  InvokeDiscoveryStartedCallback(false /* success */);
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Because the session should not be active (i.e., there are no registered
+  // devices), a new attempt should not have occurred.
+  EXPECT_TRUE(last_discovery_callback_.is_null());
+  EXPECT_TRUE(last_discovery_error_callback_.is_null());
+}
+
+TEST_F(BleScannerTest, TestStartAndStopCallbacks_RegisterBeforeStopFails) {
+  EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
+  EXPECT_TRUE(ble_scanner_->ShouldDiscoverySessionBeActive());
+  EXPECT_FALSE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Start discovery session.
+  InvokeDiscoveryStartedCallback(true /* success */);
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Unregister device to attempt a stop.
+  EXPECT_TRUE(ble_scanner_->UnregisterScanFilterForDevice(test_devices_[0]));
+  EXPECT_FALSE(ble_scanner_->ShouldDiscoverySessionBeActive());
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Before the stop completes, register the device again.
+  EXPECT_TRUE(ble_scanner_->RegisterScanFilterForDevice(test_devices_[0]));
+  EXPECT_TRUE(ble_scanner_->ShouldDiscoverySessionBeActive());
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Fail to stop.
+  InvokeStopDiscoveryCallback(false /* success */);
+  EXPECT_TRUE(ble_scanner_->IsDiscoverySessionActive());
+
+  // Since there is a device registered again, there should not be another
+  // attempt to stop.
+  EXPECT_TRUE(last_stop_callback_.is_null());
+  EXPECT_TRUE(last_stop_error_callback_.is_null());
 }
 
 }  // namespace tether

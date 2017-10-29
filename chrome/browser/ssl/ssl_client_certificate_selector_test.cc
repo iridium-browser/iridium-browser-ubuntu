@@ -13,11 +13,9 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/request_priority.h"
-#include "net/cert/x509_certificate.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/ssl/ssl_cert_request_info.h"
-#include "net/test/cert_test_util.h"
-#include "net/test/test_data_directory.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -35,29 +33,17 @@ SSLClientCertificateSelectorTestBase::~SSLClientCertificateSelectorTestBase() {
 }
 
 void SSLClientCertificateSelectorTestBase::SetUpInProcessBrowserTestFixture() {
-  base::FilePath certs_dir = net::GetTestCertsDirectory();
-
-  mit_davidben_cert_ = net::ImportCertFromFile(certs_dir, "mit.davidben.der");
-  ASSERT_TRUE(mit_davidben_cert_.get());
-
-  foaf_me_chromium_test_cert_ = net::ImportCertFromFile(
-      certs_dir, "foaf.me.chromium-test-cert.der");
-  ASSERT_TRUE(foaf_me_chromium_test_cert_.get());
-
   cert_request_info_ = new net::SSLCertRequestInfo;
   cert_request_info_->host_and_port = net::HostPortPair("foo", 123);
-  cert_request_info_->client_certs.push_back(mit_davidben_cert_);
-  cert_request_info_->client_certs.push_back(foaf_me_chromium_test_cert_);
 }
 
 void SSLClientCertificateSelectorTestBase::SetUpOnMainThread() {
   url_request_context_getter_ = browser()->profile()->GetRequestContext();
 
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&SSLClientCertificateSelectorTestBase::SetUpOnIOThread,
-                 base::Unretained(this)));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&SSLClientCertificateSelectorTestBase::SetUpOnIOThread,
+                     base::Unretained(this)));
 
   io_loop_finished_event_.Wait();
 
@@ -69,10 +55,9 @@ void SSLClientCertificateSelectorTestBase::SetUpOnMainThread() {
 // it to be destroyed while the Browser and its IO thread still exist.
 void SSLClientCertificateSelectorTestBase::TearDownOnMainThread() {
   BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&SSLClientCertificateSelectorTestBase::TearDownOnIOThread,
-                 base::Unretained(this)));
+      BrowserThread::IO, FROM_HERE,
+      base::BindOnce(&SSLClientCertificateSelectorTestBase::TearDownOnIOThread,
+                     base::Unretained(this)));
 
   io_loop_finished_event_.Wait();
 
@@ -99,6 +84,7 @@ SSLClientCertificateSelectorTestBase::MakeURLRequest(
     net::URLRequestContextGetter* context_getter) {
   std::unique_ptr<net::URLRequest> request =
       context_getter->GetURLRequestContext()->CreateRequest(
-          GURL("https://example"), net::DEFAULT_PRIORITY, NULL);
+          GURL("https://example"), net::DEFAULT_PRIORITY, NULL,
+          TRAFFIC_ANNOTATION_FOR_TESTS);
   return request;
 }

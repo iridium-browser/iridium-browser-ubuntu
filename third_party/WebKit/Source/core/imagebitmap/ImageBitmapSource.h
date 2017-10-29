@@ -7,12 +7,12 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
-#include "bindings/core/v8/ScriptState.h"
 #include "core/CoreExport.h"
 #include "core/dom/ExceptionCode.h"
+#include "platform/bindings/ScriptState.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/IntSize.h"
-#include "third_party/WebKit/Source/wtf/Optional.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
@@ -21,16 +21,16 @@ class ImageBitmapOptions;
 
 class CORE_EXPORT ImageBitmapSource {
  public:
-  virtual IntSize bitmapSourceSize() const { return IntSize(); }
-  virtual ScriptPromise createImageBitmap(ScriptState*,
+  virtual IntSize BitmapSourceSize() const { return IntSize(); }
+  virtual ScriptPromise CreateImageBitmap(ScriptState*,
                                           EventTarget&,
                                           Optional<IntRect>,
                                           const ImageBitmapOptions&,
                                           ExceptionState&);
 
-  virtual bool isBlob() const { return false; }
+  virtual bool IsBlob() const { return false; }
 
-  static ScriptPromise fulfillImageBitmap(ScriptState*, ImageBitmap*);
+  static ScriptPromise FulfillImageBitmap(ScriptState*, ImageBitmap*);
 
  protected:
   virtual ~ImageBitmapSource() {}

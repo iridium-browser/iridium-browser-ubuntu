@@ -25,11 +25,10 @@ class FakeChromeIdentityService : public ChromeIdentityService {
   static FakeChromeIdentityService* GetInstanceFromChromeProvider();
 
   // ChromeIdentityService implementation.
-  base::scoped_nsobject<UINavigationController> NewAccountDetails(
+  UINavigationController* CreateAccountDetailsController(
       ChromeIdentity* identity,
       id<ChromeIdentityBrowserOpener> browser_opener) override;
-  base::scoped_nsobject<ChromeIdentityInteractionManager>
-  NewChromeIdentityInteractionManager(
+  ChromeIdentityInteractionManager* CreateChromeIdentityInteractionManager(
       ios::ChromeBrowserState* browser_state,
       id<ChromeIdentityInteractionManagerDelegate> delegate) const override;
 
@@ -42,12 +41,11 @@ class FakeChromeIdentityService : public ChromeIdentityService {
   void ForgetIdentity(ChromeIdentity* identity,
                       ForgetIdentityCallback callback) override;
 
-  virtual void GetAccessToken(
-      ChromeIdentity* identity,
-      const std::string& client_id,
-      const std::string& client_secret,
-      const std::set<std::string>& scopes,
-      const ios::AccessTokenCallback& callback) override;
+  virtual void GetAccessToken(ChromeIdentity* identity,
+                              const std::string& client_id,
+                              const std::string& client_secret,
+                              const std::set<std::string>& scopes,
+                              ios::AccessTokenCallback callback) override;
 
   virtual void GetAvatarForIdentity(ChromeIdentity* identity,
                                     GetAvatarCallback callback) override;
@@ -75,6 +73,10 @@ class FakeChromeIdentityService : public ChromeIdentityService {
 
   // Adds |identity| to the available identities.
   void AddIdentity(ChromeIdentity* identity);
+
+  // Removes |identity| from the available identities. No-op if the identity
+  // is unknown.
+  void RemoveIdentity(ChromeIdentity* identity);
 
  private:
   base::scoped_nsobject<NSMutableArray> identities_;

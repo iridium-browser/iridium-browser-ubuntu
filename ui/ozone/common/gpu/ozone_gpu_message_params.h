@@ -17,8 +17,10 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/overlay_transform.h"
 #include "ui/ozone/public/overlay_candidates_ozone.h"
+#include "ui/ozone/public/overlay_surface_candidate.h"
 
 namespace ui {
+class OverlaySurfaceCandidate;
 
 struct DisplayMode_Params {
   DisplayMode_Params();
@@ -56,15 +58,14 @@ struct DisplaySnapshot_Params {
 
 struct OverlayCheck_Params {
   OverlayCheck_Params();
-  OverlayCheck_Params(
-      const OverlayCandidatesOzone::OverlaySurfaceCandidate& candidate);
+  OverlayCheck_Params(const OverlaySurfaceCandidate& candidate);
   OverlayCheck_Params(const OverlayCheck_Params& other);
   ~OverlayCheck_Params();
 
   bool operator<(const OverlayCheck_Params& plane) const;
 
   gfx::Size buffer_size;
-  gfx::OverlayTransform transform = gfx::OVERLAY_TRANSFORM_INVALID;
+  gfx::OverlayTransform transform = gfx::OVERLAY_TRANSFORM_NONE;
   gfx::BufferFormat format = gfx::BufferFormat::BGRA_8888;
   gfx::Rect display_rect;
   gfx::RectF crop_rect;
@@ -73,7 +74,14 @@ struct OverlayCheck_Params {
   bool is_overlay_candidate = true;
 };
 
+struct OverlayCheckReturn_Params {
+  OverlayCheckReturn_Params() = default;
+  OverlayCheckReturn_Params(const OverlayCheckReturn_Params& other) = default;
+  ~OverlayCheckReturn_Params() = default;
+
+  OverlayStatus status = OVERLAY_STATUS_PENDING;
+};
+
 }  // namespace ui
 
 #endif  // UI_OZONE_COMMON_GPU_OZONE_GPU_MESSAGE_PARAMS_H_
-

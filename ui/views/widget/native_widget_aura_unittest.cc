@@ -27,6 +27,7 @@
 #include "ui/wm/core/base_focus_rules.h"
 #include "ui/wm/core/default_activation_client.h"
 #include "ui/wm/core/focus_controller.h"
+#include "ui/wm/core/transient_window_manager.h"
 
 namespace views {
 namespace {
@@ -75,7 +76,7 @@ class NativeWidgetAuraTest : public aura::test::AuraTestBase {
     AuraTestBase::SetUp();
     test_focus_rules_ = new TestFocusRules;
     focus_controller_.reset(new wm::FocusController(test_focus_rules_));
-    aura::client::SetActivationClient(root_window(), focus_controller_.get());
+    wm::SetActivationClient(root_window(), focus_controller_.get());
     host()->SetBoundsInPixels(gfx::Rect(640, 480));
   }
 
@@ -427,9 +428,9 @@ TEST_F(NativeWidgetAuraTest, DontCaptureOnGesture) {
   widget->Show();
 
   ui::TouchEvent press(
-      ui::ET_TOUCH_PRESSED, gfx::Point(41, 51), 1, ui::EventTimeForNow());
-  ui::EventDispatchDetails details =
-      event_processor()->OnEventFromSource(&press);
+      ui::ET_TOUCH_PRESSED, gfx::Point(41, 51), ui::EventTimeForNow(),
+      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 1));
+  ui::EventDispatchDetails details = event_sink()->OnEventFromSource(&press);
   ASSERT_FALSE(details.dispatcher_destroyed);
   // Both views should get the press.
   EXPECT_TRUE(view->got_gesture_event());
@@ -442,8 +443,9 @@ TEST_F(NativeWidgetAuraTest, DontCaptureOnGesture) {
   // Release touch. Only |view| should get the release since that it consumed
   // the press.
   ui::TouchEvent release(
-      ui::ET_TOUCH_RELEASED, gfx::Point(250, 251), 1, ui::EventTimeForNow());
-  details = event_processor()->OnEventFromSource(&release);
+      ui::ET_TOUCH_RELEASED, gfx::Point(250, 251), ui::EventTimeForNow(),
+      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH, 1));
+  details = event_sink()->OnEventFromSource(&release);
   ASSERT_FALSE(details.dispatcher_destroyed);
   EXPECT_TRUE(view->got_gesture_event());
   EXPECT_FALSE(child->got_gesture_event());
@@ -648,6 +650,40 @@ TEST_F(NativeWidgetAuraTest, PreventFocusOnNonActivableWindow) {
   views::test::TestInitialFocusWidgetDelegate delegate2(root_window());
   delegate2.GetWidget()->Show();
   EXPECT_TRUE(delegate2.view()->HasFocus());
+}
+
+// Tests that the transient child bubble window is only visible if the parent is
+// visible.
+TEST_F(NativeWidgetAuraTest, VisibilityOfChildBubbleWindow) {
+  // Create a parent window.
+  Widget parent;
+  Widget::InitParams parent_params(Widget::InitParams::TYPE_WINDOW);
+  parent_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  parent_params.context = root_window();
+  parent.Init(parent_params);
+  parent.SetBounds(gfx::Rect(0, 0, 480, 320));
+
+  // Add a child bubble window to the above parent window and show it.
+  Widget child;
+  Widget::InitParams child_params(Widget::InitParams::TYPE_BUBBLE);
+  child_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  child_params.parent = parent.GetNativeWindow();
+  child.Init(child_params);
+  child.SetBounds(gfx::Rect(0, 0, 200, 200));
+  child.Show();
+
+  // Check that the bubble window is added as the transient child and it is
+  // hidden because parent window is hidden.
+  wm::TransientWindowManager* manager =
+      wm::TransientWindowManager::Get(child.GetNativeWindow());
+  EXPECT_EQ(parent.GetNativeWindow(), manager->transient_parent());
+  EXPECT_FALSE(parent.IsVisible());
+  EXPECT_FALSE(child.IsVisible());
+
+  // Show the parent window should make the transient child bubble visible.
+  parent.Show();
+  EXPECT_TRUE(parent.IsVisible());
+  EXPECT_TRUE(child.IsVisible());
 }
 
 }  // namespace

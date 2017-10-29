@@ -23,8 +23,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/captive_portal/captive_portal_detector.h"
 #include "components/certificate_reporting/error_reporter.h"
-#include "components/safe_browsing_db/safe_browsing_prefs.h"
-#include "components/security_interstitials/core/common_string_util.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/security_interstitials/core/controller_client.h"
 #include "components/security_interstitials/core/metrics_helper.h"
 #include "components/url_formatter/url_formatter.h"
@@ -148,8 +147,7 @@ void CaptivePortalBlockingPage::PopulateInterstitialStrings(
   load_time_data->SetString("iconClass", "icon-offline");
   load_time_data->SetString("type", "CAPTIVE_PORTAL");
   load_time_data->SetBoolean("overridable", false);
-  security_interstitials::common_string_util::PopulateNewIconStrings(
-      load_time_data);
+  load_time_data->SetBoolean("hide_primary_button", false);
 
   // |IsWifiConnection| isn't accurate on some platforms, so always try to get
   // the Wi-Fi SSID even if |IsWifiConnection| is false.
@@ -242,10 +240,10 @@ void CaptivePortalBlockingPage::CommandReceived(const std::string& command) {
           safe_browsing::SBER_OPTIN_SITE_SECURITY_INTERSTITIAL);
       break;
     case security_interstitials::CMD_OPEN_REPORTING_PRIVACY:
-      controller()->OpenExtendedReportingPrivacyPolicy();
+      controller()->OpenExtendedReportingPrivacyPolicy(true);
       break;
     case security_interstitials::CMD_OPEN_WHITEPAPER:
-      controller()->OpenExtendedReportingWhitepaper();
+      controller()->OpenExtendedReportingWhitepaper(true);
       break;
     case security_interstitials::CMD_ERROR:
     case security_interstitials::CMD_TEXT_FOUND:

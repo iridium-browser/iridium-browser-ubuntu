@@ -42,30 +42,30 @@ class SVGPointListTearOff final
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static SVGPointListTearOff* create(
-      SVGPointList* target,
-      SVGElement* contextElement,
-      PropertyIsAnimValType propertyIsAnimVal,
-      const QualifiedName& attributeName = QualifiedName::null()) {
-    return new SVGPointListTearOff(target, contextElement, propertyIsAnimVal,
-                                   attributeName);
+  static SVGPointListTearOff* Create(SVGPointList* target,
+                                     SVGElement* context_element,
+                                     PropertyIsAnimValType property_is_anim_val,
+                                     const QualifiedName& attribute_name) {
+    return new SVGPointListTearOff(target, context_element,
+                                   property_is_anim_val, attribute_name);
   }
 
   DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
-    visitor->traceWrappers(contextElement());
+    SVGListPropertyTearOffHelper<SVGPointListTearOff,
+                                 SVGPointList>::TraceWrappers(visitor);
+    ScriptWrappable::TraceWrappers(visitor);
   }
 
  private:
-  SVGPointListTearOff(
-      SVGPointList* target,
-      SVGElement* contextElement,
-      PropertyIsAnimValType propertyIsAnimVal,
-      const QualifiedName& attributeName = QualifiedName::null())
+  SVGPointListTearOff(SVGPointList* target,
+                      SVGElement* context_element,
+                      PropertyIsAnimValType property_is_anim_val,
+                      const QualifiedName& attribute_name)
       : SVGListPropertyTearOffHelper<SVGPointListTearOff, SVGPointList>(
             target,
-            contextElement,
-            propertyIsAnimVal,
-            attributeName) {}
+            context_element,
+            property_is_anim_val,
+            attribute_name) {}
 };
 
 }  // namespace blink

@@ -20,21 +20,20 @@
 #include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/libyuv/include/libyuv/convert_from.h"
 #include "third_party/libyuv/include/libyuv/video_common.h"
-#include "webrtc/base/bind.h"
-#include "webrtc/base/checks.h"
-#include "webrtc/base/logging.h"
-#include "webrtc/base/scoped_ref_ptr.h"
-#include "webrtc/base/thread.h"
-#include "webrtc/base/timeutils.h"
 #include "webrtc/common_video/h264/h264_bitstream_parser.h"
 #include "webrtc/common_video/include/i420_buffer_pool.h"
 #include "webrtc/modules/video_coding/include/video_codec_interface.h"
 #include "webrtc/modules/video_coding/utility/vp8_header_parser.h"
+#include "webrtc/rtc_base/bind.h"
+#include "webrtc/rtc_base/checks.h"
+#include "webrtc/rtc_base/logging.h"
+#include "webrtc/rtc_base/scoped_ref_ptr.h"
+#include "webrtc/rtc_base/thread.h"
+#include "webrtc/rtc_base/timeutils.h"
 #include "webrtc/sdk/android/src/jni/androidmediacodeccommon.h"
 #include "webrtc/sdk/android/src/jni/classreferenceholder.h"
 #include "webrtc/sdk/android/src/jni/native_handle_impl.h"
 #include "webrtc/sdk/android/src/jni/surfacetexturehelper_jni.h"
-#include "webrtc/system_wrappers/include/logcat_trace_context.h"
 
 using rtc::Bind;
 using rtc::Thread;
@@ -56,7 +55,7 @@ namespace webrtc_jni {
 // Logging macros.
 #define TAG_DECODER "MediaCodecVideoDecoder"
 #ifdef TRACK_BUFFER_TIMING
-#define ALOGV(...)
+#define ALOGV(...) \
   __android_log_print(ANDROID_LOG_VERBOSE, TAG_DECODER, __VA_ARGS__)
 #else
 #define ALOGV(...)
@@ -181,25 +180,25 @@ class MediaCodecVideoDecoder : public webrtc::VideoDecoder,
   std::vector<jobject> input_buffers_;
 };
 
-MediaCodecVideoDecoder::MediaCodecVideoDecoder(
-    JNIEnv* jni, VideoCodecType codecType, jobject render_egl_context) :
-    codecType_(codecType),
-    render_egl_context_(render_egl_context),
-    key_frame_required_(true),
-    inited_(false),
-    sw_fallback_required_(false),
-    codec_thread_(new Thread()),
-    j_media_codec_video_decoder_class_(
-        jni,
-        FindClass(jni, "org/webrtc/MediaCodecVideoDecoder")),
-          j_media_codec_video_decoder_(
-              jni,
-              jni->NewObject(*j_media_codec_video_decoder_class_,
-                   GetMethodID(jni,
-                              *j_media_codec_video_decoder_class_,
-                              "<init>",
-                              "()V"))) {
-  ScopedLocalRefFrame local_ref_frame(jni);
+MediaCodecVideoDecoder::MediaCodecVideoDecoder(JNIEnv* jni,
+                                               VideoCodecType codecType,
+                                               jobject render_egl_context)
+    : codecType_(codecType),
+      render_egl_context_(render_egl_context),
+      key_frame_required_(true),
+      inited_(false),
+      sw_fallback_required_(false),
+      codec_thread_(Thread::Create()),
+      j_media_codec_video_decoder_class_(
+          jni,
+          FindClass(jni, "org/webrtc/MediaCodecVideoDecoder")),
+      j_media_codec_video_decoder_(
+          jni,
+          jni->NewObject(*j_media_codec_video_decoder_class_,
+                         GetMethodID(jni,
+                                     *j_media_codec_video_decoder_class_,
+                                     "<init>",
+                                     "()V"))) {
   codec_thread_->SetName("MediaCodecVideoDecoder", NULL);
   RTC_CHECK(codec_thread_->Start()) << "Failed to start MediaCodecVideoDecoder";
 
@@ -726,10 +725,6 @@ bool MediaCodecVideoDecoder::DeliverPendingOutputs(
       j_color_format_field_);
   int width = GetIntField(jni, *j_media_codec_video_decoder_, j_width_field_);
   int height = GetIntField(jni, *j_media_codec_video_decoder_, j_height_field_);
-  int stride = GetIntField(jni, *j_media_codec_video_decoder_, j_stride_field_);
-  int slice_height = GetIntField(jni, *j_media_codec_video_decoder_,
-      j_slice_height_field_);
-  RTC_CHECK_GE(slice_height, height);
 
   rtc::scoped_refptr<webrtc::VideoFrameBuffer> frame_buffer;
   int64_t presentation_timestamps_ms = 0;
@@ -767,6 +762,10 @@ bool MediaCodecVideoDecoder::DeliverPendingOutputs(
   } else {
     // Extract data from Java ByteBuffer and create output yuv420 frame -
     // for non surface decoding only.
+    int stride =
+        GetIntField(jni, *j_media_codec_video_decoder_, j_stride_field_);
+    const int slice_height =
+        GetIntField(jni, *j_media_codec_video_decoder_, j_slice_height_field_);
     const int output_buffer_index = GetIntField(
         jni, j_decoder_output_buffer, j_info_index_field_);
     const int output_buffer_offset = GetIntField(
@@ -782,6 +781,7 @@ bool MediaCodecVideoDecoder::DeliverPendingOutputs(
 
     decode_time_ms = GetLongField(jni, j_decoder_output_buffer,
                                   j_byte_buffer_decode_time_ms_field_);
+    RTC_CHECK_GE(slice_height, height);
 
     if (output_buffer_size < width * height * 3 / 2) {
       ALOGE << "Insufficient output buffer size: " << output_buffer_size;
@@ -870,7 +870,6 @@ bool MediaCodecVideoDecoder::DeliverPendingOutputs(
   if (frames_decoded_ < frames_decoded_logged_) {
     ALOGD << "Decoder frame out # " << frames_decoded_ <<
         ". " << width << " x " << height <<
-        ". " << stride << " x " <<  slice_height <<
         ". Color: " << color_format <<
         ". TS: " << presentation_timestamps_ms <<
         ". DecTime: " << (int)decode_time_ms <<
@@ -1014,8 +1013,9 @@ webrtc::VideoDecoder* MediaCodecVideoDecoderFactory::CreateVideoDecoder(
   for (VideoCodecType codec_type : supported_codec_types_) {
     if (codec_type == type) {
       ALOGD << "Create HW video decoder for type " << (int)type;
-      return new MediaCodecVideoDecoder(AttachCurrentThreadIfNeeded(), type,
-                                        egl_context_);
+      JNIEnv* jni = AttachCurrentThreadIfNeeded();
+      ScopedLocalRefFrame local_ref_frame(jni);
+      return new MediaCodecVideoDecoder(jni, type, egl_context_);
     }
   }
   ALOGW << "Can not find HW video decoder for type " << (int)type;

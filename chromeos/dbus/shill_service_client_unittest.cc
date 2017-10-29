@@ -99,8 +99,7 @@ TEST_F(ShillServiceClientTest, GetProperties) {
 
   // Set expectations.
   base::DictionaryValue value;
-  value.SetWithoutPathExpansion(shill::kSignalStrengthProperty,
-                                new base::Value(kValue));
+  value.SetIntegerWithoutPathExpansion(shill::kSignalStrengthProperty, kValue);
   PrepareForMethodCall(shill::kGetPropertiesFunction,
                        base::Bind(&ExpectNoArgument),
                        response.get());
@@ -117,7 +116,7 @@ TEST_F(ShillServiceClientTest, SetProperty) {
   std::unique_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
 
   // Set expectations.
-  const base::StringValue value(kValue);
+  const base::Value value(kValue);
   PrepareForMethodCall(shill::kSetPropertyFunction,
                        base::Bind(&ExpectStringAndValueArguments,
                                   shill::kPassphraseProperty,

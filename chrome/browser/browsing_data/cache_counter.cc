@@ -6,8 +6,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "components/browsing_data/content/conditional_cache_counting_helper.h"
 #include "components/browsing_data/core/pref_names.h"
+#include "components/offline_pages/features/features.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/net_errors.h"
+
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+#include "chrome/browser/offline_pages/offline_page_utils.h"
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 
 CacheCounter::CacheResult::CacheResult(const CacheCounter* source,
                                        int64_t cache_size,
@@ -26,10 +31,17 @@ CacheCounter::~CacheCounter() {
 }
 
 const char* CacheCounter::GetPrefName() const {
-  return browsing_data::prefs::kDeleteCache;
+  return GetTab() == browsing_data::ClearBrowsingDataTab::BASIC
+             ? browsing_data::prefs::kDeleteCacheBasic
+             : browsing_data::prefs::kDeleteCache;
 }
 
 void CacheCounter::Count() {
+  // Cancel existing requests and reset states.
+  weak_ptr_factory_.InvalidateWeakPtrs();
+  calculated_size_ = 0;
+  is_upper_limit_ = false;
+  pending_sources_ = 1;
   base::WeakPtr<browsing_data::ConditionalCacheCountingHelper> counter =
       browsing_data::ConditionalCacheCountingHelper::CreateForRange(
           content::BrowserContext::GetDefaultStoragePartition(profile_),
@@ -37,14 +49,30 @@ void CacheCounter::Count() {
           ->CountAndDestroySelfWhenFinished(
               base::Bind(&CacheCounter::OnCacheSizeCalculated,
                          weak_ptr_factory_.GetWeakPtr()));
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+  if (offline_pages::OfflinePageUtils::GetCachedOfflinePageSizeBetween(
+          profile_,
+          base::Bind(&CacheCounter::OnCacheSizeCalculated,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     false /* is_upper_limit */),
+          GetPeriodStart(), base::Time::Max())) {
+    pending_sources_++;
+  }
+#endif  // BUILDFLAG(ENABLE_OFFLINE_PAGES)
 }
 
-void CacheCounter::OnCacheSizeCalculated(int64_t result_bytes,
-                                         bool is_upper_limit) {
+void CacheCounter::OnCacheSizeCalculated(bool is_upper_limit,
+                                         int64_t cache_bytes) {
   // A value less than 0 means a net error code.
-  if (result_bytes < 0)
+  if (cache_bytes < 0)
     return;
-  auto result =
-      base::MakeUnique<CacheResult>(this, result_bytes, is_upper_limit);
-  ReportResult(std::move(result));
+
+  pending_sources_--;
+  calculated_size_ += cache_bytes;
+  is_upper_limit_ |= is_upper_limit;
+  if (pending_sources_ == 0) {
+    auto result =
+        base::MakeUnique<CacheResult>(this, calculated_size_, is_upper_limit_);
+    ReportResult(std::move(result));
+  }
 }

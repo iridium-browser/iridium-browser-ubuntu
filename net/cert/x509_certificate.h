@@ -19,8 +19,11 @@
 #include "net/base/net_export.h"
 #include "net/cert/cert_type.h"
 #include "net/cert/x509_cert_types.h"
+#include "net/net_features.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(USE_BYTE_CERTS)
+#include "third_party/boringssl/src/include/openssl/base.h"
+#elif defined(OS_WIN)
 #include <windows.h>
 #include "crypto/wincrypt_shim.h"
 #elif defined(OS_MACOSX)
@@ -29,7 +32,6 @@
 #elif defined(USE_OPENSSL_CERTS)
 // Forward declaration; real one in <x509.h>
 typedef struct x509_st X509;
-typedef struct x509_store_st X509_STORE;
 #elif defined(USE_NSS_CERTS)
 // Forward declaration; real one in <cert.h>
 struct CERTCertificateStr;
@@ -56,7 +58,11 @@ class NET_EXPORT X509Certificate
   // An OSCertHandle is a handle to a certificate object in the underlying
   // crypto library. We assume that OSCertHandle is a pointer type on all
   // platforms and that NULL represents an invalid OSCertHandle.
-#if defined(OS_WIN)
+#if BUILDFLAG(USE_BYTE_CERTS)
+  // TODO(mattm): Remove OSCertHandle type and clean up the interfaces once all
+  // platforms use the CRYPTO_BUFFER version.
+  typedef CRYPTO_BUFFER* OSCertHandle;
+#elif defined(OS_WIN)
   typedef PCCERT_CONTEXT OSCertHandle;
 #elif defined(OS_MACOSX)
   typedef SecCertificateRef OSCertHandle;
@@ -127,7 +133,11 @@ class NET_EXPORT X509Certificate
   };
 
   // Create an X509Certificate from a handle to the certificate object in the
-  // underlying crypto library.
+  // underlying crypto library. Returns NULL on failure to parse or extract
+  // data from the the certificate. Note that this does not guarantee the
+  // certificate is fully parsed and validated, only that the members of this
+  // class, such as subject, issuer, expiry times, and serial number, could be
+  // successfully initialized from the certificate.
   static scoped_refptr<X509Certificate> CreateFromHandle(
       OSCertHandle cert_handle,
       const OSCertHandles& intermediates);
@@ -220,66 +230,9 @@ class NET_EXPORT X509Certificate
     return intermediate_ca_certs_;
   }
 
-#if defined(OS_MACOSX)
-  // Does this certificate's usage allow SSL client authentication?
-  bool SupportsSSLClientAuth() const;
-
-  // Returns a new CFMutableArrayRef containing this certificate and its
-  // intermediate certificates in the form expected by Security.framework
-  // and Keychain Services, or NULL on failure.
-  // The first item in the array will be this certificate, followed by its
-  // intermediates, if any.
-  CFMutableArrayRef CreateOSCertChainForCert() const;
-#endif
-
   // Do any of the given issuer names appear in this cert's chain of trust?
   // |valid_issuers| is a list of DER-encoded X.509 DistinguishedNames.
   bool IsIssuedByEncoded(const std::vector<std::string>& valid_issuers);
-
-#if defined(OS_WIN)
-  // Returns a new PCCERT_CONTEXT containing this certificate and its
-  // intermediate certificates, or NULL on failure. The returned
-  // PCCERT_CONTEXT *MUST NOT* be stored in an X509Certificate, as this will
-  // cause os_cert_handle() to return incorrect results. This function is only
-  // necessary if the CERT_CONTEXT.hCertStore member will be accessed or
-  // enumerated, which is generally true for any CryptoAPI functions involving
-  // certificate chains, including validation or certificate display.
-  //
-  // Remarks:
-  // Depending on the CryptoAPI function, Windows may need to access the
-  // HCERTSTORE that the passed-in PCCERT_CONTEXT belongs to, such as to
-  // locate additional intermediates. However, all certificate handles are added
-  // to a NULL HCERTSTORE, allowing the system to manage the resources. As a
-  // result, intermediates for |cert_handle_| cannot be located simply via
-  // |cert_handle_->hCertStore|, as it refers to a magic value indicating
-  // "only this certificate".
-  //
-  // To avoid this problems, a new in-memory HCERTSTORE is created containing
-  // just this certificate and its intermediates. The handle to the version of
-  // the current certificate in the new HCERTSTORE is then returned, with the
-  // PCCERT_CONTEXT's HCERTSTORE set to be automatically freed when the returned
-  // certificate handle is freed.
-  //
-  // This function is only needed when the HCERTSTORE of the os_cert_handle()
-  // will be accessed, which is generally only during certificate validation
-  // or display. While the returned PCCERT_CONTEXT and its HCERTSTORE can
-  // safely be used on multiple threads if no further modifications happen, it
-  // is generally preferable for each thread that needs such a context to
-  // obtain its own, rather than risk thread-safety issues by sharing.
-  //
-  // Because of how X509Certificate caching is implemented, attempting to
-  // create an X509Certificate from the returned PCCERT_CONTEXT may result in
-  // the original handle (and thus the originall HCERTSTORE) being returned by
-  // os_cert_handle(). For this reason, the returned PCCERT_CONTEXT *MUST NOT*
-  // be stored in an X509Certificate.
-  PCCERT_CONTEXT CreateOSCertChainForCert() const;
-#endif
-
-#if defined(USE_OPENSSL_CERTS)
-  // Returns a handle to a global, in-memory certificate store. We
-  // use it for test code, e.g. importing the test server's certificate.
-  static X509_STORE* cert_store();
-#endif
 
   // Verifies that |hostname| matches this certificate.
   // Does not verify that the certificate is valid, only that the certificate
@@ -391,13 +344,7 @@ class NET_EXPORT X509Certificate
   ~X509Certificate();
 
   // Common object initialization code.  Called by the constructors only.
-  void Initialize();
-
-#if defined(USE_OPENSSL_CERTS)
-  // Resets the store returned by cert_store() to default state. Used by
-  // TestRootCerts to undo modifications.
-  static void ResetCertStore();
-#endif
+  bool Initialize();
 
   // Verifies that |hostname| matches one of the certificate names or IP
   // addresses supplied, based on TLS name matching rules - specifically,

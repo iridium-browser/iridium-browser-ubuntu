@@ -77,8 +77,8 @@ std::string ReadRestOfFileAsString(FileHandle file) {
   DCHECK_GT(end, read_from);
   size_t data_length = static_cast<size_t>(end - read_from);
   std::string buffer(data_length, '\0');
-  return LoggingReadFile(file, &buffer[0], data_length) ? buffer
-                                                        : std::string();
+  return LoggingReadFileExactly(file, &buffer[0], data_length) ? buffer
+                                                               : std::string();
 }
 
 // Helper structures, and conversions ------------------------------------------
@@ -242,8 +242,9 @@ class Metadata {
   //! written to disk via Write().
   //!
   //! \return #kNoError on success. #kReportNotFound if there was no report with
-  //!     the specified UUID. #kBusyError if the report was not in the specified
-  //!     state.
+  //!     the specified UUID, or if the report was not in the specified state
+  //!     and was not uploading. #kBusyError if the report was not in the
+  //!     specified state and was uploading.
   OperationStatus FindSingleReportAndMarkDirty(const UUID& uuid,
                                                ReportState desired_state,
                                                ReportDisk** report_disk);
@@ -417,7 +418,7 @@ void Metadata::Read() {
   }
 
   MetadataFileHeader header;
-  if (!LoggingReadFile(handle_.get(), &header, sizeof(header))) {
+  if (!LoggingReadFileExactly(handle_.get(), &header, sizeof(header))) {
     LOG(ERROR) << "failed to read header";
     return;
   }
@@ -438,7 +439,7 @@ void Metadata::Read() {
   std::vector<ReportDisk> reports;
   if (header.num_records > 0) {
     std::vector<MetadataFileReportRecord> records(header.num_records);
-    if (!LoggingReadFile(
+    if (!LoggingReadFileExactly(
             handle_.get(), &records[0], records_size.ValueOrDie())) {
       LOG(ERROR) << "failed to read records";
       return;
@@ -530,9 +531,13 @@ OperationStatus Metadata::VerifyReportAnyState(const ReportDisk& report_disk) {
 // static
 OperationStatus Metadata::VerifyReport(const ReportDisk& report_disk,
                                        ReportState desired_state) {
-  return (report_disk.state == desired_state)
-             ? VerifyReportAnyState(report_disk)
-             : CrashReportDatabase::kBusyError;
+  if (report_disk.state == desired_state) {
+    return VerifyReportAnyState(report_disk);
+  }
+
+  return report_disk.state == ReportState::kUploading
+             ? CrashReportDatabase::kBusyError
+             : CrashReportDatabase::kReportNotFound;
 }
 
 bool EnsureDirectory(const base::FilePath& path) {
@@ -876,7 +881,7 @@ OperationStatus CrashReportDatabaseWin::RequestUpload(const UUID& uuid) {
   // TODO(gayane): Search for the report only once regardless of its state.
   OperationStatus os = metadata->FindSingleReportAndMarkDirty(
       uuid, ReportState::kCompleted, &report_disk);
-  if (os == kBusyError) {
+  if (os == kReportNotFound) {
     os = metadata->FindSingleReportAndMarkDirty(
         uuid, ReportState::kPending, &report_disk);
   }

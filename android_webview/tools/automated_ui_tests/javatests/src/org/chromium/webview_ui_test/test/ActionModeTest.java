@@ -94,7 +94,7 @@ public class ActionModeTest {
     private static final String MORE_OPTIONS_ACTION = "More options";
     private static final String PASTE_ACTION = "Paste";
     private static final String SHARE_ACTION = "Share";
-    private static final String SELECT_ALL_ACTION = "Select All";
+    private static final String SELECT_ALL_ACTION = "Select all";
     private static final String WEB_SEARCH_ACTION = "Web search";
 
     private static final String QUICK_SEARCH_BOX_PKG = "com.google.android.googlequicksearchbox";
@@ -147,7 +147,7 @@ public class ActionModeTest {
     @UseLayout("edittext_webview")
     public void testSelectAll() {
         longClickOnLastWord(R.id.webview);
-        clickPopupAction("Select all");
+        clickPopupAction(SELECT_ALL_ACTION);
         clickPopupAction(COPY_ACTION);
         longClickOnLastWord(R.id.edittext);
         clickPopupAction(PASTE_ACTION);
@@ -205,7 +205,7 @@ public class ActionModeTest {
     @UseLayout("edittext_webview")
     public void testAssist() {
         // TODO(aluo): Get SdkSuppress to work with the test runner
-        if (Build.VERSION.SDK_INT < 24) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return;
         longClickOnLastWord(R.id.webview);
         clickPopupAction(ASSIST_ACTION);
         UiDevice device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
@@ -246,6 +246,14 @@ public class ActionModeTest {
                     .perform(click());
             onData(new MenuItemMatcher(equalTo(name))).inRoot(rootMatcher).perform(click());
         }
+
+        /**
+         * After select all action is clicked, the PopUp Menu may disappear
+         * briefly due to selection change, wait for the menu to reappear
+         */
+        if (name.equals(SELECT_ALL_ACTION)) {
+            mActionBarIdlingResource.start();
+        }
     }
 
     /**
@@ -285,11 +293,7 @@ public class ActionModeTest {
     private class ActionBarIdlingResource implements IdlingResource {
         private boolean mActionStarting;
         private ResourceCallback mResourceCallback;
-
-        ActionBarIdlingResource() {
-            mActionStarting = false;
-            mResourceCallback = null;
-        }
+        private boolean mPreviousActionBarDisplayed;
 
         @Override
         public String getName() {
@@ -299,10 +303,17 @@ public class ActionModeTest {
         @Override
         public boolean isIdleNow() {
             if (!mActionStarting) return true;
-            if (mWebViewActivityRule.isActionBarDisplayed()) {
+            boolean currentActionBarDisplayed = mWebViewActivityRule.isActionBarDisplayed();
+            /* Only transition to idle when action bar is displayed fully for
+             * 2 consecutive checks.  This avoids false transitions
+             * in cases where the action bar was already displayed but is due
+             * to be updated immediately after a previous action
+             */
+            if (mPreviousActionBarDisplayed && currentActionBarDisplayed) {
                 mActionStarting = false;
                 if (mResourceCallback != null) mResourceCallback.onTransitionToIdle();
             }
+            mPreviousActionBarDisplayed = currentActionBarDisplayed;
             return !mActionStarting;
         }
 
@@ -313,6 +324,7 @@ public class ActionModeTest {
 
         public void start() {
             mActionStarting = true;
+            mPreviousActionBarDisplayed = false;
         }
     }
 }

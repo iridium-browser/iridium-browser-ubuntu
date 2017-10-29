@@ -15,7 +15,6 @@
 #include "ash/host/ash_window_tree_host_init_params.h"
 #include "ash/host/ash_window_tree_host_unified.h"
 #include "ash/host/root_window_transformer.h"
-#include "ash/ime/input_method_event_handler.h"
 #include "base/sys_info.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -31,6 +30,7 @@
 #include "ui/events/null_event_targeter.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/x/x11_atom_cache.h"
 
 namespace ash {
 
@@ -43,10 +43,6 @@ AshWindowTreeHostX11::AshWindowTreeHostX11(const gfx::Rect& initial_bounds)
 AshWindowTreeHostX11::~AshWindowTreeHostX11() {
   aura::Env::GetInstance()->RemoveObserver(this);
   UnConfineCursor();
-}
-
-void AshWindowTreeHostX11::ToggleFullScreen() {
-  NOTIMPLEMENTED();
 }
 
 bool AshWindowTreeHostX11::ConfineCursorToRootWindow() {
@@ -210,24 +206,14 @@ bool AshWindowTreeHostX11::CanDispatchEvent(const ui::PlatformEvent& event) {
 void AshWindowTreeHostX11::TranslateAndDispatchLocatedEvent(
     ui::LocatedEvent* event) {
   TranslateLocatedEvent(event);
-  SendEventToProcessor(event);
-}
-
-ui::EventDispatchDetails AshWindowTreeHostX11::DispatchKeyEventPostIME(
-    ui::KeyEvent* event) {
-  input_method_handler()->SetPostIME(true);
-  ui::EventDispatchDetails details =
-      event_processor()->OnEventFromSource(event);
-  if (!details.dispatcher_destroyed)
-    input_method_handler()->SetPostIME(false);
-  return details;
+  SendEventToSink(event);
 }
 
 void AshWindowTreeHostX11::SetCrOSTapPaused(bool state) {
   if (!ui::IsXInput2Available())
     return;
   // Temporarily pause tap-to-click when the cursor is hidden.
-  Atom prop = atom_cache()->GetAtom("Tap Paused");
+  Atom prop = gfx::GetAtom("Tap Paused");
   unsigned char value = state;
   const XIDeviceList& dev_list =
       ui::DeviceListCacheX11::GetInstance()->GetXI2DeviceList(xdisplay());

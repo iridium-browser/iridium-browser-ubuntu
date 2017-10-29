@@ -7,7 +7,9 @@ found in the LICENSE file.
 
 <link rel="import" href="/tracing/base/fixed_color_scheme.html">
 <link rel="import" href="/tracing/extras/chrome/chrome_user_friendly_category_driver.html">
+<link rel="import" href="/tracing/metrics/all_fixed_color_schemes.html">
 <link rel="import" href="/tracing/ui/base/column_chart.html">
+<link rel="import" href="/tracing/ui/base/dom_helpers.html">
 <link rel="import" href="/tracing/ui/base/table.html">
 
 <dom-module id="tr-v-ui-breakdown-span">
@@ -67,6 +69,10 @@ class BreakdownTableSummaryRow {
     return this.keySpan_;
   }
 
+  get name() {
+    return 'Sum';
+  }
+
   get displayElement() {
     return this.displayElement_;
   }
@@ -89,9 +95,19 @@ class BreakdownTableRow {
     this.keySpan_ = undefined;
 
     this.color_ = color;
-    let hsl = this.color.toHSL();
+    const hsl = this.color.toHSL();
     hsl.l *= 0.85;
     this.highlightedColor_ = tr.b.Color.fromHSL(hsl);
+
+    if (this.isHistogram) {
+      this.displayElement_ = tr.v.ui.createScalarSpan(this.numberValue, {
+        unit: this.value.unit,
+      });
+    } else {
+      this.displayElement_ = tr.ui.b.createSpan({
+        textContent: this.value.toString(),
+      });
+    }
   }
 
   get isHistogram() {
@@ -149,19 +165,13 @@ class BreakdownTableRow {
 
   get stringPercent() {
     if (this.tableSum_ === undefined) return '';
-    let num = this.numberValue;
+    const num = this.numberValue;
     if (num === undefined) return '';
     return Math.floor(num * 100.0 / this.tableSum_) + '%';
   }
 
   get displayElement() {
-    if (this.numberValue === undefined) return this.value.toString();
-    if (this.isHistogram) {
-      return tr.v.ui.createScalarSpan(this.numberValue, {
-        unit: this.value.unit,
-      });
-    }
-    return this.numberValue;
+    return this.displayElement_;
   }
 
   compare(other) {
@@ -199,19 +209,19 @@ Polymer({
   },
 
   onRectMouseEnter_(event) {
-    for (let row of this.$.table.tableRows) {
+    for (const row of this.$.table.tableRows) {
       if (row.name === event.rect.key) {
-        row.keySpan.parentNode.nextSibling.style.background = event.rect.color;
+        row.displayElement.style.background = event.rect.color;
         row.keySpan.scrollIntoViewIfNeeded();
       } else {
-        row.keySpan.parentNode.nextSibling.style.background = '';
+        row.displayElement.style.background = '';
       }
     }
   },
 
   onRectMouseLeave_(event) {
-    for (let row of this.$.table.tableRows) {
-      row.keySpan.parentNode.nextSibling.style.background = '';
+    for (const row of this.$.table.tableRows) {
+      row.displayElement.style.background = '';
     }
   },
 
@@ -274,12 +284,12 @@ Polymer({
       colorScheme = (name) => DEFAULT_COLOR_SCHEME.colorForKey(name);
     }
 
-    let tableRows = [];
+    const tableRows = [];
     let tableSum = 0;
-    let histogramNames = [];
+    const histogramNames = [];
     let unit = undefined;
-    for (let [name, value] of this.diagnostic) {
-      let row = new BreakdownTableRow(name, value, colorScheme(name));
+    for (const [name, value] of this.diagnostic) {
+      const row = new BreakdownTableRow(name, value, colorScheme(name));
       tableRows.push(row);
       if (row.numberValue !== undefined) tableSum += row.numberValue;
       if (row.isHistogram) {
@@ -294,12 +304,15 @@ Polymer({
       if (unit !== undefined) {
         summaryDisplayElement = unit.format(tableSum);
       }
+      summaryDisplayElement = tr.ui.b.createSpan({
+        textContent: summaryDisplayElement,
+      });
       tableRows.unshift(new BreakdownTableSummaryRow(
           summaryDisplayElement, histogramNames));
     }
 
-    let chartData = {x: 0};
-    for (let row of tableRows) {
+    const chartData = {x: 0};
+    for (const row of tableRows) {
       if (row.numberValue === undefined) continue;
 
       // Let the row compute its percentage.
@@ -309,7 +322,7 @@ Polymer({
       chartData[row.name] = row.numberValue;
 
       // Configure the colors.
-      let dataSeries = this.chart_.getDataSeries(row.name);
+      const dataSeries = this.chart_.getDataSeries(row.name);
       dataSeries.color = row.color;
       dataSeries.highlightedColor = row.highlightedColor;
     }
@@ -321,7 +334,7 @@ Polymer({
       this.$.table.rebuild();
     }
 
-    if (tr.b.dictionaryLength(chartData) > 1) {
+    if (Object.keys(chartData).length > 1) {
       this.$.container.style.display = 'block';
       this.$.empty.style.display = 'none';
       this.chart_.data = [chartData];

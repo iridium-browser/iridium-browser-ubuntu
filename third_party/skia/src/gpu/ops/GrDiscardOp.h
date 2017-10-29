@@ -8,44 +8,42 @@
 #ifndef GrDiscardOp_DEFINED
 #define GrDiscardOp_DEFINED
 
-#include "GrGpu.h"
+#include "GrGpuCommandBuffer.h"
 #include "GrOp.h"
 #include "GrOpFlushState.h"
-#include "GrRenderTarget.h"
+#include "GrRenderTargetProxy.h"
 
 class GrDiscardOp final : public GrOp {
 public:
     DEFINE_OP_CLASS_ID
-    static std::unique_ptr<GrOp> Make(GrRenderTarget* rt) {
-        return std::unique_ptr<GrOp>(new GrDiscardOp(rt));
+
+    static std::unique_ptr<GrOp> Make(GrRenderTargetProxy* proxy) {
+        return std::unique_ptr<GrOp>(new GrDiscardOp(proxy));
     }
 
     const char* name() const override { return "Discard"; }
 
     SkString dumpInfo() const override {
         SkString string;
-        string.printf("RT: %d", fRenderTarget.get()->uniqueID().asUInt());
         string.append(INHERITED::dumpInfo());
         return string;
     }
 
 private:
-    GrDiscardOp(GrRenderTarget* rt) : INHERITED(ClassID()), fRenderTarget(rt) {
-        this->setBounds(SkRect::MakeIWH(rt->width(), rt->height()), HasAABloat::kNo,
-                        IsZeroArea::kNo);
+    GrDiscardOp(GrRenderTargetProxy* proxy) : INHERITED(ClassID()) {
+        this->setBounds(SkRect::MakeIWH(proxy->width(), proxy->height()),
+                        HasAABloat::kNo, IsZeroArea::kNo);
     }
 
-    bool onCombineIfPossible(GrOp* that, const GrCaps& caps) override {
-        return fRenderTarget.get() == that->cast<GrDiscardOp>()->fRenderTarget.get();
-    }
+    bool onCombineIfPossible(GrOp* that, const GrCaps& caps) override { return false; }
 
     void onPrepare(GrOpFlushState*) override {}
 
-    void onExecute(GrOpFlushState* state, const SkRect& /*bounds*/) override {
-        state->commandBuffer()->discard(fRenderTarget.get());
-    }
+    void onExecute(GrOpFlushState* state) override {
+        SkASSERT(state->drawOpArgs().fRenderTarget);
 
-    GrPendingIOResource<GrRenderTarget, kWrite_GrIOType> fRenderTarget;
+        state->commandBuffer()->discard(state->drawOpArgs().fRenderTarget);
+    }
 
     typedef GrOp INHERITED;
 };

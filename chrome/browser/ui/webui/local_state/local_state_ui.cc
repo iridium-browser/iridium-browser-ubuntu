@@ -62,7 +62,8 @@ void LocalStateUIHandler::RegisterMessages() {
 
 void LocalStateUIHandler::HandleRequestJson(const base::ListValue* args) {
   std::unique_ptr<base::DictionaryValue> local_state_values(
-      g_browser_process->local_state()->GetPreferenceValuesOmitDefaults());
+      g_browser_process->local_state()->GetPreferenceValues(
+          PrefService::EXCLUDE_DEFAULTS));
   if (ENABLE_FILTERING) {
     std::vector<std::string> whitelisted_prefixes = {
         "variations", "user_experience_metrics", "uninstall_metrics"};
@@ -76,7 +77,7 @@ void LocalStateUIHandler::HandleRequestJson(const base::ListValue* args) {
     json = "Error loading Local State file.";
 
   web_ui()->CallJavascriptFunctionUnsafe("localState.setLocalState",
-                                         base::StringValue(json));
+                                         base::Value(json));
 }
 
 // Returns true if |pref_name| starts with one of the |valid_prefixes|.

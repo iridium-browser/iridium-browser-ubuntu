@@ -35,7 +35,9 @@ UI.View.prototype = {
   /**
    * @return {!Promise<!UI.Widget>}
    */
-  widget() {}
+  widget() {},
+
+  disposeView() {}
 };
 
 UI.View._symbol = Symbol('view');
@@ -126,6 +128,12 @@ UI.SimpleView = class extends UI.VBox {
   revealView() {
     return UI.viewManager.revealView(this);
   }
+
+  /**
+   * @override
+   */
+  disposeView() {
+  }
 };
 
 /**
@@ -192,13 +200,23 @@ UI.ProvidedView = class {
    * @override
    * @return {!Promise<!UI.Widget>}
    */
-  widget() {
-    return this._extension.instance().then(widget => {
-      if (!(widget instanceof UI.Widget))
-        throw new Error('view className should point to a UI.Widget');
-      widget[UI.View._symbol] = this;
-      return /** @type {!UI.Widget} */ (widget);
-    });
+  async widget() {
+    this._widgetRequested = true;
+    var widget = await this._extension.instance();
+    if (!(widget instanceof UI.Widget))
+      throw new Error('view className should point to a UI.Widget');
+    widget[UI.View._symbol] = this;
+    return /** @type {!UI.Widget} */ (widget);
+  }
+
+  /**
+   * @override
+   */
+  async disposeView() {
+    if (!this._widgetRequested)
+      return;
+    var widget = await this.widget();
+    widget.ownerViewDisposed();
   }
 };
 
@@ -222,9 +240,10 @@ UI.ViewLocation.prototype = {
   /**
    * @param {!UI.View} view
    * @param {?UI.View=} insertBefore
+   * @param {boolean=} userGesture
    * @return {!Promise}
    */
-  showView(view, insertBefore) {},
+  showView(view, insertBefore, userGesture) {},
 
   /**
    * @param {!UI.View} view
@@ -326,9 +345,10 @@ UI.ViewManager = class {
 
   /**
    * @param {string} viewId
+   * @param {boolean=} userGesture
    * @return {!Promise}
    */
-  showView(viewId) {
+  showView(viewId, userGesture) {
     var view = this._views.get(viewId);
     if (!view) {
       console.error('Could not find view for id: \'' + viewId + '\' ' + new Error().stack);
@@ -342,14 +362,14 @@ UI.ViewManager = class {
     var location = view[UI.ViewManager._Location.symbol];
     if (location) {
       location._reveal();
-      return location.showView(view);
+      return location.showView(view, undefined, userGesture);
     }
 
     return this._resolveLocation(locationName).then(location => {
       if (!location)
         throw new Error('Could not resolve location for view: ' + viewId);
       location._reveal();
-      return location.showView(view);
+      return location.showView(view, undefined, userGesture);
     });
   }
 
@@ -418,7 +438,7 @@ UI.ViewManager._ContainerWidget = class extends UI.VBox {
     super();
     this.element.classList.add('flex-auto', 'view-container', 'overflow-auto');
     this._view = view;
-    this.element.tabIndex = 0;
+    this.element.tabIndex = -1;
     this.setDefaultFocusedElement(this.element);
   }
 
@@ -660,9 +680,11 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
    * @param {!UI.ContextMenu} contextMenu
    */
   _appendTabsToMenu(contextMenu) {
-    for (var view of this._views.values()) {
+    var views = Array.from(this._views.values());
+    views.sort((viewa, viewb) => viewa.title().localeCompare(viewb.title()));
+    for (var view of views) {
       var title = Common.UIString(view.title());
-      contextMenu.appendItem(title, this.showView.bind(this, view));
+      contextMenu.appendItem(title, this.showView.bind(this, view, undefined, true));
     }
   }
 
@@ -708,17 +730,28 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
       }
     }
     this._appendTab(view, index);
+
+    if (view.isCloseable()) {
+      var tabs = this._closeableTabSetting.get();
+      var tabId = view.viewId();
+      if (!tabs[tabId]) {
+        tabs[tabId] = true;
+        this._closeableTabSetting.set(tabs);
+      }
+    }
+    this._persistTabOrder();
   }
 
   /**
    * @override
    * @param {!UI.View} view
    * @param {?UI.View=} insertBefore
+   * @param {boolean=} userGesture
    * @return {!Promise}
    */
-  showView(view, insertBefore) {
+  showView(view, insertBefore, userGesture) {
     this.appendView(view, insertBefore);
-    this._tabbedPane.selectTab(view.viewId());
+    this._tabbedPane.selectTab(view.viewId(), userGesture);
     this._tabbedPane.focus();
     var widget = /** @type {!UI.ViewManager._ContainerWidget} */ (this._tabbedPane.tabView(view.viewId()));
     return widget._materialize();
@@ -745,17 +778,6 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
     var tabId = /** @type {string} */ (event.data.tabId);
     if (this._lastSelectedTabSetting && event.data['isUserGesture'])
       this._lastSelectedTabSetting.set(tabId);
-    var view = this._views.get(tabId);
-    if (!view)
-      return;
-
-    if (view.isCloseable()) {
-      var tabs = this._closeableTabSetting.get();
-      if (!tabs[tabId]) {
-        tabs[tabId] = true;
-        this._closeableTabSetting.set(tabs);
-      }
-    }
   }
 
   /**
@@ -768,12 +790,10 @@ UI.ViewManager._TabbedLocation = class extends UI.ViewManager._Location {
       delete tabs[id];
       this._closeableTabSetting.set(tabs);
     }
+    this._views.get(id).disposeView();
   }
 
-  /**
-   * @param {!Common.Event} event
-   */
-  _persistTabOrder(event) {
+  _persistTabOrder() {
     var tabIds = this._tabbedPane.tabIds();
     var tabOrders = {};
     for (var i = 0; i < tabIds.length; i++)

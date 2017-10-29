@@ -6,16 +6,15 @@
  */
 
 #include "gm.h"
+#include "sk_tool_utils.h"
 
 #include "Resources.h"
-#include "SkBitmapScaler.h"
 #include "SkGradientShader.h"
 #include "SkTypeface.h"
 #include "SkStream.h"
 #include "SkPaint.h"
 #include "SkMipMap.h"
 #include "Resources.h"
-#include "sk_tool_utils.h"
 
 #define SHOW_MIP_COLOR  0xFF000000
 
@@ -93,7 +92,6 @@ public:
 
     static void apply_gamma(const SkBitmap& bm) {
         return; // below is our experiment for sRGB correction
-        bm.lockPixels();
         for (int y = 0; y < bm.height(); ++y) {
             for (int x = 0; x < bm.width(); ++x) {
                 SkPMColor c = *bm.getAddr32(x, y);
@@ -115,13 +113,11 @@ protected:
         return str;
     }
 
-    SkISize onISize() override {
-        return { 824, 862 };
-    }
+    SkISize onISize() override { return { 150, 862 }; }
 
     static void DrawAndFrame(SkCanvas* canvas, const SkBitmap& orig, SkScalar x, SkScalar y) {
         SkBitmap bm;
-        orig.copyTo(&bm);
+        sk_tool_utils::copy_to(&bm, orig.colorType(), orig);
         apply_gamma(bm);
 
         canvas->drawBitmap(bm, x, y, nullptr);
@@ -136,7 +132,6 @@ protected:
         SkScalar y = 4;
 
         SkPixmap prevPM;
-        baseBM.lockPixels();
         baseBM.peekPixels(&prevPM);
 
         SkDestinationSurfaceColorMode colorMode = SkDestinationSurfaceColorMode::kLegacy;
@@ -171,26 +166,6 @@ protected:
             bm.installPixels(curr);
             return bm;
         });
-
-        const SkBitmapScaler::ResizeMethod methods[] = {
-            SkBitmapScaler::RESIZE_BOX,
-            SkBitmapScaler::RESIZE_TRIANGLE,
-            SkBitmapScaler::RESIZE_LANCZOS3,
-            SkBitmapScaler::RESIZE_HAMMING,
-            SkBitmapScaler::RESIZE_MITCHELL,
-        };
-
-        SkPixmap basePM;
-        orig.lockPixels();
-        orig.peekPixels(&basePM);
-        for (auto method : methods) {
-            canvas->translate(orig.width()/2 + 8.0f, 0);
-            drawLevels(canvas, orig, [method](const SkPixmap& prev, const SkPixmap& curr) {
-                SkBitmap bm;
-                SkBitmapScaler::Resize(&bm, prev, method, curr.width(), curr.height());
-                return bm;
-            });
-        }
     }
 
     void onOnceBeforeDraw() override {
@@ -204,7 +179,10 @@ protected:
         canvas->translate(4, 4);
         for (const auto& bm : fBM) {
             this->drawSet(canvas, bm);
-            canvas->translate(0, bm.height() * 0.85f);
+            // round so we always produce an integral translate, so the GOLD tool won't show
+            // unimportant diffs if this is drawn on a GPU with different rounding rules
+            // since we draw the bitmaps using nearest-neighbor
+            canvas->translate(0, SkScalarRoundToScalar(bm.height() * 0.85f));
         }
     }
 
@@ -221,7 +199,14 @@ void copy_to(SkBitmap* dst, SkColorType dstColorType, const SkBitmap& src) {
         return sk_tool_utils::copy_to_g8(dst, src);
     }
 
-    src.copyTo(dst, dstColorType);
+    const SkBitmap* srcPtr = &src;
+    SkBitmap tmp(src);
+    if (kRGB_565_SkColorType == dstColorType) {
+        tmp.setAlphaType(kOpaque_SkAlphaType);
+        srcPtr = &tmp;
+    }
+
+    sk_tool_utils::copy_to(dst, dstColorType, *srcPtr);
 }
 
 /**

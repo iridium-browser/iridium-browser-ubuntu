@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.ntp.snippets;
 import android.graphics.Bitmap;
 import android.support.annotation.Nullable;
 
+import org.chromium.base.DiscardableReferencePool.DiscardableReference;
 import org.chromium.chrome.browser.suggestions.OfflinableSuggestion;
 
 import java.io.File;
@@ -44,6 +45,9 @@ public class SnippetArticle implements OfflinableSuggestion {
      */
     public final long mFetchTimestampMilliseconds;
 
+    /** The flag that indicates whether this is a video suggestion. */
+    public boolean mIsVideoSuggestion;
+
     /** The rank of this article within its section. */
     private int mPerSectionRank = -1;
 
@@ -51,13 +55,16 @@ public class SnippetArticle implements OfflinableSuggestion {
     private int mGlobalRank = -1;
 
     /** Bitmap of the thumbnail, fetched lazily, when the RecyclerView wants to show the snippet. */
-    private Bitmap mThumbnailBitmap;
+    private DiscardableReference<Bitmap> mThumbnailBitmap;
 
     /** Stores whether impression of this article has been tracked already. */
     private boolean mImpressionTracked;
 
     /** Whether the linked article represents an asset download. */
     private boolean mIsAssetDownload;
+
+    /** The GUID of the asset download (only for asset download articles). */
+    private String mAssetDownloadGuid;
 
     /** The path to the asset download (only for asset download articles). */
     private File mAssetDownloadFile;
@@ -75,8 +82,8 @@ public class SnippetArticle implements OfflinableSuggestion {
      * Creates a SnippetArticleListItem object that will hold the data.
      */
     public SnippetArticle(int category, String idWithinCategory, String title, String publisher,
-            String previewText, String url, long publishTimestamp, float score,
-            long fetchTimestamp) {
+            String previewText, String url, long publishTimestamp, float score, long fetchTimestamp,
+            boolean isVideoSuggestion) {
         mCategory = category;
         mIdWithinCategory = idWithinCategory;
         mTitle = title;
@@ -86,6 +93,7 @@ public class SnippetArticle implements OfflinableSuggestion {
         mPublishTimestampMilliseconds = publishTimestamp;
         mScore = score;
         mFetchTimestampMilliseconds = fetchTimestamp;
+        mIsVideoSuggestion = isVideoSuggestion;
     }
 
     @Override
@@ -105,11 +113,11 @@ public class SnippetArticle implements OfflinableSuggestion {
      * initially unset.
      */
     public Bitmap getThumbnailBitmap() {
-        return mThumbnailBitmap;
+        return mThumbnailBitmap == null ? null : mThumbnailBitmap.get();
     }
 
     /** Sets the thumbnail bitmap for this article. */
-    public void setThumbnailBitmap(Bitmap bitmap) {
+    public void setThumbnailBitmap(DiscardableReference<Bitmap> bitmap) {
         mThumbnailBitmap = bitmap;
     }
 
@@ -121,6 +129,11 @@ public class SnippetArticle implements OfflinableSuggestion {
         return true;
     }
 
+    /** @return whether a snippet is a remote suggestion. */
+    public boolean isArticle() {
+        return mCategory == KnownCategories.ARTICLES;
+    }
+
     /** @return whether a snippet is either offline page or asset download. */
     public boolean isDownload() {
         return mCategory == KnownCategories.DOWNLOADS;
@@ -129,6 +142,16 @@ public class SnippetArticle implements OfflinableSuggestion {
     /** @return whether a snippet is asset download. */
     public boolean isAssetDownload() {
         return mIsAssetDownload;
+    }
+
+    /**
+     * @return the GUID of the asset download. May only be called if {@link #mIsAssetDownload} is
+     * {@code true} (which implies that this snippet belongs to the DOWNLOADS category).
+     */
+    public String getAssetDownloadGuid() {
+        assert isDownload();
+        assert mIsAssetDownload;
+        return mAssetDownloadGuid;
     }
 
     /**
@@ -155,9 +178,10 @@ public class SnippetArticle implements OfflinableSuggestion {
      * Marks the article suggestion as an asset download with the given path and mime type. May only
      * be called if this snippet belongs to DOWNLOADS category.
      */
-    public void setAssetDownloadData(String filePath, String mimeType) {
+    public void setAssetDownloadData(String downloadGuid, String filePath, String mimeType) {
         assert isDownload();
         mIsAssetDownload = true;
+        mAssetDownloadGuid = downloadGuid;
         mAssetDownloadFile = new File(filePath);
         mAssetDownloadMimeType = mimeType;
     }

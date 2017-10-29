@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
+#include "components/browsing_data/core/counters/sync_tracker.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 
@@ -19,7 +20,8 @@ class PasswordsCounter : public browsing_data::BrowsingDataCounter,
                          public password_manager::PasswordStore::Observer {
  public:
   explicit PasswordsCounter(
-      scoped_refptr<password_manager::PasswordStore> store);
+      scoped_refptr<password_manager::PasswordStore> store,
+      syncer::SyncService* sync_service);
   ~PasswordsCounter() override;
 
   const char* GetPrefName() const override;
@@ -41,6 +43,7 @@ class PasswordsCounter : public browsing_data::BrowsingDataCounter,
 
   base::CancelableTaskTracker cancelable_task_tracker_;
   scoped_refptr<password_manager::PasswordStore> store_;
+  SyncTracker sync_tracker_;
 };
 
 }  // namespace browsing_data

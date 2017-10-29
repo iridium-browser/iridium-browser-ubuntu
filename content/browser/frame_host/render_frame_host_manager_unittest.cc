@@ -318,7 +318,7 @@ class RenderFrameHostManagerTest : public RenderViewHostImplTestHarness {
 
   void set_webui_type(int type) { factory_.set_webui_type(type); }
 
-  void NavigateActiveAndCommit(const GURL& url) {
+  void NavigateActiveAndCommit(const GURL& url, bool dont_swap_out = false) {
     // Note: we navigate the active RenderFrameHost because previous navigations
     // won't have committed yet, so NavigateAndCommit does the wrong thing
     // for us.
@@ -357,6 +357,8 @@ class RenderFrameHostManagerTest : public RenderViewHostImplTestHarness {
     // Simulate the swap out ACK coming from the pending renderer.  This should
     // either shut down the old RFH or leave it in a swapped out state.
     if (old_rfh != active_rfh) {
+      if (dont_swap_out)
+        return;
       old_rfh->OnSwappedOut();
       EXPECT_TRUE(rfh_observer.deleted());
     }
@@ -437,8 +439,8 @@ class RenderFrameHostManagerTest : public RenderViewHostImplTestHarness {
           NavigationRequest::CreateBrowserInitiated(
               manager->frame_tree_node_, frame_entry->url(),
               frame_entry->referrer(), *frame_entry, entry, navigate_type,
-              PREVIEWS_UNSPECIFIED, false, false, base::TimeTicks::Now(),
-              controller);
+              PREVIEWS_UNSPECIFIED, false, false, nullptr,
+              base::TimeTicks::Now(), controller);
 
       // Simulates request creation that triggers the 1st internal call to
       // GetFrameHostForNavigation.
@@ -574,14 +576,12 @@ TEST_F(RenderFrameHostManagerTest, FilterMessagesWhileSwappedOut) {
   // Navigate our first tab to a chrome url and then to the destination.
   NavigateActiveAndCommit(kChromeURL);
   TestRenderFrameHost* ntp_rfh = contents()->GetMainFrame();
-  TestRenderViewHost* ntp_rvh = ntp_rfh->GetRenderViewHost();
 
   // Send an update favicon message and make sure it works.
   {
     PluginFaviconMessageObserver observer(contents());
-    EXPECT_TRUE(ntp_rfh->GetRenderViewHost()->GetWidget()->OnMessageReceived(
-        ViewHostMsg_UpdateFaviconURL(
-            ntp_rfh->GetRenderViewHost()->GetRoutingID(), icons)));
+    EXPECT_TRUE(ntp_rfh->OnMessageReceived(
+        FrameHostMsg_UpdateFaviconURL(ntp_rfh->GetRoutingID(), icons)));
     EXPECT_TRUE(observer.favicon_received());
   }
   // Create one more frame in the same SiteInstance where ntp_rfh
@@ -589,8 +589,8 @@ TEST_F(RenderFrameHostManagerTest, FilterMessagesWhileSwappedOut) {
   // site.
   ntp_rfh->GetSiteInstance()->IncrementActiveFrameCount();
 
-  // Navigate to a cross-site URL.
-  NavigateActiveAndCommit(kDestUrl);
+  // Navigate to a cross-site URL (don't swap out to keep |ntp_rfh| alive).
+  NavigateActiveAndCommit(kDestUrl, true /* dont_swap_out */);
   TestRenderFrameHost* dest_rfh = contents()->GetMainFrame();
   ASSERT_TRUE(dest_rfh);
   EXPECT_NE(ntp_rfh, dest_rfh);
@@ -598,9 +598,8 @@ TEST_F(RenderFrameHostManagerTest, FilterMessagesWhileSwappedOut) {
   // The new RVH should be able to update its favicon.
   {
     PluginFaviconMessageObserver observer(contents());
-    EXPECT_TRUE(dest_rfh->GetRenderViewHost()->GetWidget()->OnMessageReceived(
-        ViewHostMsg_UpdateFaviconURL(
-            dest_rfh->GetRenderViewHost()->GetRoutingID(), icons)));
+    EXPECT_TRUE(dest_rfh->OnMessageReceived(
+        FrameHostMsg_UpdateFaviconURL(dest_rfh->GetRoutingID(), icons)));
     EXPECT_TRUE(observer.favicon_received());
   }
 
@@ -608,17 +607,16 @@ TEST_F(RenderFrameHostManagerTest, FilterMessagesWhileSwappedOut) {
   // filtered out and not take effect.
   {
     PluginFaviconMessageObserver observer(contents());
-    EXPECT_TRUE(
-        ntp_rvh->GetWidget()->OnMessageReceived(ViewHostMsg_UpdateFaviconURL(
-            dest_rfh->GetRenderViewHost()->GetRoutingID(), icons)));
+    EXPECT_TRUE(ntp_rfh->OnMessageReceived(
+        FrameHostMsg_UpdateFaviconURL(ntp_rfh->GetRoutingID(), icons)));
     EXPECT_FALSE(observer.favicon_received());
   }
 }
 
-// Test that the ViewHostMsg_UpdateFaviconURL IPC message is ignored if the
+// Test that the FrameHostMsg_UpdateFaviconURL IPC message is ignored if the
 // renderer is in the STATE_PENDING_SWAP_OUT_STATE. The favicon code assumes
-// that it only gets ViewHostMsg_UpdateFaviconURL messages for the most recently
-// committed navigation for each WebContentsImpl.
+// that it only gets FrameHostMsg_UpdateFaviconURL messages for the most
+// recently committed navigation for each WebContentsImpl.
 TEST_F(RenderFrameHostManagerTest, UpdateFaviconURLWhilePendingSwapOut) {
   const GURL kChromeURL("chrome://foo");
   const GURL kDestUrl("http://www.google.com/");
@@ -631,9 +629,8 @@ TEST_F(RenderFrameHostManagerTest, UpdateFaviconURLWhilePendingSwapOut) {
   // Send an update favicon message and make sure it works.
   {
     PluginFaviconMessageObserver observer(contents());
-    EXPECT_TRUE(rfh1->GetRenderViewHost()->GetWidget()->OnMessageReceived(
-        ViewHostMsg_UpdateFaviconURL(rfh1->GetRenderViewHost()->GetRoutingID(),
-                                     icons)));
+    EXPECT_TRUE(rfh1->OnMessageReceived(
+        FrameHostMsg_UpdateFaviconURL(rfh1->GetRoutingID(), icons)));
     EXPECT_TRUE(observer.favicon_received());
   }
 
@@ -655,9 +652,8 @@ TEST_F(RenderFrameHostManagerTest, UpdateFaviconURLWhilePendingSwapOut) {
   // The new RVH should be able to update its favicons.
   {
     PluginFaviconMessageObserver observer(contents());
-    EXPECT_TRUE(rfh2->GetRenderViewHost()->GetWidget()->OnMessageReceived(
-        ViewHostMsg_UpdateFaviconURL(rfh2->GetRenderViewHost()->GetRoutingID(),
-                                     icons)));
+    EXPECT_TRUE(rfh2->OnMessageReceived(
+        FrameHostMsg_UpdateFaviconURL(rfh2->GetRoutingID(), icons)));
     EXPECT_TRUE(observer.favicon_received());
   }
 
@@ -665,9 +661,8 @@ TEST_F(RenderFrameHostManagerTest, UpdateFaviconURLWhilePendingSwapOut) {
   // be ignored.
   {
     PluginFaviconMessageObserver observer(contents());
-    EXPECT_TRUE(rfh1->GetRenderViewHost()->GetWidget()->OnMessageReceived(
-        ViewHostMsg_UpdateFaviconURL(rfh1->GetRenderViewHost()->GetRoutingID(),
-                                     icons)));
+    EXPECT_TRUE(rfh1->OnMessageReceived(
+        FrameHostMsg_UpdateFaviconURL(rfh1->GetRoutingID(), icons)));
     EXPECT_FALSE(observer.favicon_received());
   }
 }
@@ -938,11 +933,11 @@ TEST_F(RenderFrameHostManagerTest, Navigate) {
 
   // 2) Navigate to next site. -------------------------
   const GURL kUrl2("http://www.google.com/foo");
-  NavigationEntryImpl entry2(
-      NULL /* instance */, kUrl2,
-      Referrer(kUrl1, blink::WebReferrerPolicyDefault),
-      base::string16() /* title */, ui::PAGE_TRANSITION_LINK,
-      true /* is_renderer_init */);
+  NavigationEntryImpl entry2(NULL /* instance */, kUrl2,
+                             Referrer(kUrl1, blink::kWebReferrerPolicyDefault),
+                             base::string16() /* title */,
+                             ui::PAGE_TRANSITION_LINK,
+                             true /* is_renderer_init */);
   host = NavigateToEntry(manager, entry2);
 
   // The RenderFrameHost created in Init will be reused.
@@ -960,11 +955,11 @@ TEST_F(RenderFrameHostManagerTest, Navigate) {
 
   // 3) Cross-site navigate to next site. --------------
   const GURL kUrl3("http://webkit.org/");
-  NavigationEntryImpl entry3(
-      NULL /* instance */, kUrl3,
-      Referrer(kUrl2, blink::WebReferrerPolicyDefault),
-      base::string16() /* title */, ui::PAGE_TRANSITION_LINK,
-      false /* is_renderer_init */);
+  NavigationEntryImpl entry3(NULL /* instance */, kUrl3,
+                             Referrer(kUrl2, blink::kWebReferrerPolicyDefault),
+                             base::string16() /* title */,
+                             ui::PAGE_TRANSITION_LINK,
+                             false /* is_renderer_init */);
   host = NavigateToEntry(manager, entry3);
 
   // A new RenderFrameHost should be created.
@@ -1193,7 +1188,7 @@ TEST_F(RenderFrameHostManagerTest, PageDoesBackAndReload) {
   params.transition = ui::PAGE_TRANSITION_CLIENT_REDIRECT;
   params.should_update_history = false;
   params.gesture = NavigationGestureAuto;
-  params.was_within_same_page = false;
+  params.was_within_same_document = false;
   params.method = "GET";
   params.page_state = PageState::CreateFromURL(kUrl2);
 
@@ -1270,8 +1265,9 @@ TEST_F(RenderFrameHostManagerTest, NavigateAfterMissingSwapOutACK) {
 
   // The back navigation commits.
   const NavigationEntry* entry1 = contents()->GetController().GetPendingEntry();
-  contents()->GetPendingMainFrame()->SendNavigate(
-      entry1->GetUniqueID(), false, entry1->GetURL());
+  contents()->GetPendingMainFrame()->SendNavigateWithTransition(
+      entry1->GetUniqueID(), false, entry1->GetURL(),
+      entry1->GetTransitionType());
   EXPECT_TRUE(rfh2->IsWaitingForUnloadACK());
   EXPECT_FALSE(rfh2->is_active());
 
@@ -1279,8 +1275,9 @@ TEST_F(RenderFrameHostManagerTest, NavigateAfterMissingSwapOutACK) {
   contents()->GetController().GoForward();
   contents()->GetMainFrame()->PrepareForCommit();
   const NavigationEntry* entry2 = contents()->GetController().GetPendingEntry();
-  contents()->GetPendingMainFrame()->SendNavigate(
-      entry2->GetUniqueID(), false, entry2->GetURL());
+  contents()->GetPendingMainFrame()->SendNavigateWithTransition(
+      entry2->GetUniqueID(), false, entry2->GetURL(),
+      entry2->GetTransitionType());
   EXPECT_TRUE(main_test_rfh()->is_active());
 }
 
@@ -1445,8 +1442,9 @@ TEST_F(RenderFrameHostManagerTest, DisownOpenerDuringNavigation) {
 
   // The back navigation commits.
   const NavigationEntry* entry1 = contents()->GetController().GetPendingEntry();
-  contents()->GetPendingMainFrame()->SendNavigate(
-      entry1->GetUniqueID(), false, entry1->GetURL());
+  contents()->GetPendingMainFrame()->SendNavigateWithTransition(
+      entry1->GetUniqueID(), false, entry1->GetURL(),
+      entry1->GetTransitionType());
 
   // Ensure the opener is still cleared.
   EXPECT_FALSE(contents()->HasOpener());
@@ -1479,8 +1477,9 @@ TEST_F(RenderFrameHostManagerTest, DisownOpenerAfterNavigation) {
   contents()->GetController().GoBack();
   contents()->GetMainFrame()->PrepareForCommit();
   const NavigationEntry* entry1 = contents()->GetController().GetPendingEntry();
-  contents()->GetPendingMainFrame()->SendNavigate(
-      entry1->GetUniqueID(), false, entry1->GetURL());
+  contents()->GetPendingMainFrame()->SendNavigateWithTransition(
+      entry1->GetUniqueID(), false, entry1->GetURL(),
+      entry1->GetTransitionType());
 
   // Disown the opener from rfh2.
   rfh2->DidChangeOpener(MSG_ROUTING_NONE);
@@ -1628,11 +1627,11 @@ TEST_F(RenderFrameHostManagerTest, NoSwapOnGuestNavigations) {
   // 2) Navigate to a different domain. -------------------------
   // Guests stay in the same process on navigation.
   const GURL kUrl2("http://www.chromium.org");
-  NavigationEntryImpl entry2(
-      NULL /* instance */, kUrl2,
-      Referrer(kUrl1, blink::WebReferrerPolicyDefault),
-      base::string16() /* title */, ui::PAGE_TRANSITION_LINK,
-      true /* is_renderer_init */);
+  NavigationEntryImpl entry2(NULL /* instance */, kUrl2,
+                             Referrer(kUrl1, blink::kWebReferrerPolicyDefault),
+                             base::string16() /* title */,
+                             ui::PAGE_TRANSITION_LINK,
+                             true /* is_renderer_init */);
   host = NavigateToEntry(manager, entry2);
 
   // The RenderFrameHost created in Init will be reused.
@@ -1735,9 +1734,7 @@ TEST_F(RenderFrameHostManagerTest, CloseWithPendingWhileUnresponsive) {
   EXPECT_TRUE(contents()->CrossProcessNavigationPending());
 
   // Simulate the unresponsiveness timer.  The tab should close.
-  contents()->RendererUnresponsive(
-      rfh1->render_view_host()->GetWidget(),
-      RendererUnresponsiveType::RENDERER_UNRESPONSIVE_CLOSE_PAGE);
+  rfh1->render_view_host()->ClosePageTimeout();
   EXPECT_TRUE(close_delegate.is_closed());
 }
 
@@ -1947,12 +1944,14 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation, DetachPendingChild) {
   contents()->NavigateAndCommit(kUrlA);
   contents()->GetMainFrame()->OnCreateChildFrame(
       contents()->GetMainFrame()->GetProcess()->GetNextRoutingID(),
-      blink::WebTreeScopeType::Document, "frame_name", "uniqueName1",
-      blink::WebSandboxFlags::None, FrameOwnerProperties());
+      blink::WebTreeScopeType::kDocument, "frame_name", "uniqueName1",
+      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
+      FrameOwnerProperties());
   contents()->GetMainFrame()->OnCreateChildFrame(
       contents()->GetMainFrame()->GetProcess()->GetNextRoutingID(),
-      blink::WebTreeScopeType::Document, "frame_name", "uniqueName2",
-      blink::WebSandboxFlags::None, FrameOwnerProperties());
+      blink::WebTreeScopeType::kDocument, "frame_name", "uniqueName2",
+      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
+      FrameOwnerProperties());
   RenderFrameHostManager* root_manager =
       contents()->GetFrameTree()->root()->render_manager();
   RenderFrameHostManager* iframe1 =
@@ -1980,7 +1979,7 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation, DetachPendingChild) {
 
   // 2) Cross-site navigate both frames to next site.
   NavigationEntryImpl entryB(NULL /* instance */, kUrlB,
-                             Referrer(kUrlA, blink::WebReferrerPolicyDefault),
+                             Referrer(kUrlA, blink::kWebReferrerPolicyDefault),
                              base::string16() /* title */,
                              ui::PAGE_TRANSITION_LINK,
                              false /* is_renderer_init */);
@@ -2086,12 +2085,13 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
   // |contents1| creates an out of process iframe.
   contents1->GetMainFrame()->OnCreateChildFrame(
       contents1->GetMainFrame()->GetProcess()->GetNextRoutingID(),
-      blink::WebTreeScopeType::Document, "frame_name", "uniqueName1",
-      blink::WebSandboxFlags::None, FrameOwnerProperties());
+      blink::WebTreeScopeType::kDocument, "frame_name", "uniqueName1",
+      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
+      FrameOwnerProperties());
   RenderFrameHostManager* iframe =
       contents()->GetFrameTree()->root()->child_at(0)->render_manager();
   NavigationEntryImpl entry(NULL /* instance */, kUrl2,
-                            Referrer(kUrl1, blink::WebReferrerPolicyDefault),
+                            Referrer(kUrl1, blink::kWebReferrerPolicyDefault),
                             base::string16() /* title */,
                             ui::PAGE_TRANSITION_LINK,
                             false /* is_renderer_init */);
@@ -2133,10 +2133,11 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
   NavigateAndCommit(kUrl1);
   EXPECT_TRUE(main_rfh->render_view_host()->IsRenderViewLive());
   EXPECT_TRUE(main_rfh->IsRenderFrameLive());
-  main_rfh->OnCreateChildFrame(main_rfh->GetProcess()->GetNextRoutingID(),
-                               blink::WebTreeScopeType::Document, std::string(),
-                               "uniqueName1", blink::WebSandboxFlags::None,
-                               FrameOwnerProperties());
+  main_rfh->OnCreateChildFrame(
+      main_rfh->GetProcess()->GetNextRoutingID(),
+      blink::WebTreeScopeType::kDocument, std::string(), "uniqueName1",
+      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
+      FrameOwnerProperties());
   RenderFrameHostManager* subframe_rfhm =
       contents()->GetFrameTree()->root()->child_at(0)->render_manager();
 
@@ -2292,12 +2293,12 @@ TEST_F(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
   FrameTree* tree1 = contents()->GetFrameTree();
   FrameTreeNode* root1 = tree1->root();
   int process_id = root1->current_frame_host()->GetProcess()->GetID();
-  tree1->AddFrame(root1, process_id, 12, blink::WebTreeScopeType::Document,
-                  std::string(), "uniqueName0", blink::WebSandboxFlags::None,
-                  FrameOwnerProperties());
-  tree1->AddFrame(root1, process_id, 13, blink::WebTreeScopeType::Document,
-                  std::string(), "uniqueName1", blink::WebSandboxFlags::None,
-                  FrameOwnerProperties());
+  tree1->AddFrame(root1, process_id, 12, blink::WebTreeScopeType::kDocument,
+                  std::string(), "uniqueName0", blink::WebSandboxFlags::kNone,
+                  ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+  tree1->AddFrame(root1, process_id, 13, blink::WebTreeScopeType::kDocument,
+                  std::string(), "uniqueName1", blink::WebSandboxFlags::kNone,
+                  ParsedFeaturePolicyHeader(), FrameOwnerProperties());
 
   std::unique_ptr<TestWebContents> tab2(
       TestWebContents::Create(browser_context(), nullptr));
@@ -2305,12 +2306,12 @@ TEST_F(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
   FrameTree* tree2 = tab2->GetFrameTree();
   FrameTreeNode* root2 = tree2->root();
   process_id = root2->current_frame_host()->GetProcess()->GetID();
-  tree2->AddFrame(root2, process_id, 22, blink::WebTreeScopeType::Document,
-                  std::string(), "uniqueName2", blink::WebSandboxFlags::None,
-                  FrameOwnerProperties());
-  tree2->AddFrame(root2, process_id, 23, blink::WebTreeScopeType::Document,
-                  std::string(), "uniqueName3", blink::WebSandboxFlags::None,
-                  FrameOwnerProperties());
+  tree2->AddFrame(root2, process_id, 22, blink::WebTreeScopeType::kDocument,
+                  std::string(), "uniqueName2", blink::WebSandboxFlags::kNone,
+                  ParsedFeaturePolicyHeader(), FrameOwnerProperties());
+  tree2->AddFrame(root2, process_id, 23, blink::WebTreeScopeType::kDocument,
+                  std::string(), "uniqueName3", blink::WebSandboxFlags::kNone,
+                  ParsedFeaturePolicyHeader(), FrameOwnerProperties());
 
   std::unique_ptr<TestWebContents> tab3(
       TestWebContents::Create(browser_context(), nullptr));
@@ -2323,9 +2324,9 @@ TEST_F(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
   FrameTree* tree4 = tab4->GetFrameTree();
   FrameTreeNode* root4 = tree4->root();
   process_id = root4->current_frame_host()->GetProcess()->GetID();
-  tree4->AddFrame(root4, process_id, 42, blink::WebTreeScopeType::Document,
-                  std::string(), "uniqueName4", blink::WebSandboxFlags::None,
-                  FrameOwnerProperties());
+  tree4->AddFrame(root4, process_id, 42, blink::WebTreeScopeType::kDocument,
+                  std::string(), "uniqueName4", blink::WebSandboxFlags::kNone,
+                  ParsedFeaturePolicyHeader(), FrameOwnerProperties());
 
   root1->child_at(1)->SetOpener(root1->child_at(1));
   root1->SetOpener(root2->child_at(1));
@@ -2373,16 +2374,19 @@ TEST_F(RenderFrameHostManagerTest, PageFocusPropagatesToSubframeProcesses) {
   contents()->NavigateAndCommit(kUrlA);
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
-      blink::WebTreeScopeType::Document, "frame1", "uniqueName1",
-      blink::WebSandboxFlags::None, FrameOwnerProperties());
+      blink::WebTreeScopeType::kDocument, "frame1", "uniqueName1",
+      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
+      FrameOwnerProperties());
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
-      blink::WebTreeScopeType::Document, "frame2", "uniqueName2",
-      blink::WebSandboxFlags::None, FrameOwnerProperties());
+      blink::WebTreeScopeType::kDocument, "frame2", "uniqueName2",
+      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
+      FrameOwnerProperties());
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
-      blink::WebTreeScopeType::Document, "frame3", "uniqueName3",
-      blink::WebSandboxFlags::None, FrameOwnerProperties());
+      blink::WebTreeScopeType::kDocument, "frame3", "uniqueName3",
+      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
+      FrameOwnerProperties());
 
   FrameTreeNode* root = contents()->GetFrameTree()->root();
   RenderFrameHostManager* child1 = root->child_at(0)->render_manager();
@@ -2391,7 +2395,7 @@ TEST_F(RenderFrameHostManagerTest, PageFocusPropagatesToSubframeProcesses) {
 
   // Navigate first two subframes to B.
   NavigationEntryImpl entryB(nullptr /* instance */, kUrlB,
-                             Referrer(kUrlA, blink::WebReferrerPolicyDefault),
+                             Referrer(kUrlA, blink::kWebReferrerPolicyDefault),
                              base::string16() /* title */,
                              ui::PAGE_TRANSITION_LINK,
                              false /* is_renderer_init */);
@@ -2404,7 +2408,7 @@ TEST_F(RenderFrameHostManagerTest, PageFocusPropagatesToSubframeProcesses) {
 
   // Navigate the third subframe to C.
   NavigationEntryImpl entryC(nullptr /* instance */, kUrlC,
-                             Referrer(kUrlA, blink::WebReferrerPolicyDefault),
+                             Referrer(kUrlA, blink::kWebReferrerPolicyDefault),
                              base::string16() /* title */,
                              ui::PAGE_TRANSITION_LINK,
                              false /* is_renderer_init */);
@@ -2471,15 +2475,16 @@ TEST_F(RenderFrameHostManagerTest,
   contents()->NavigateAndCommit(kUrlA);
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
-      blink::WebTreeScopeType::Document, "frame1", "uniqueName1",
-      blink::WebSandboxFlags::None, FrameOwnerProperties());
+      blink::WebTreeScopeType::kDocument, "frame1", "uniqueName1",
+      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
+      FrameOwnerProperties());
 
   FrameTreeNode* root = contents()->GetFrameTree()->root();
   RenderFrameHostManager* child = root->child_at(0)->render_manager();
 
   // Navigate subframe to B.
   NavigationEntryImpl entryB(nullptr /* instance */, kUrlB,
-                             Referrer(kUrlA, blink::WebReferrerPolicyDefault),
+                             Referrer(kUrlA, blink::kWebReferrerPolicyDefault),
                              base::string16() /* title */,
                              ui::PAGE_TRANSITION_LINK,
                              false /* is_renderer_init */);
@@ -2493,7 +2498,7 @@ TEST_F(RenderFrameHostManagerTest,
 
   // Navigate the subframe to C.
   NavigationEntryImpl entryC(nullptr /* instance */, kUrlC,
-                             Referrer(kUrlA, blink::WebReferrerPolicyDefault),
+                             Referrer(kUrlA, blink::kWebReferrerPolicyDefault),
                              base::string16() /* title */,
                              ui::PAGE_TRANSITION_LINK,
                              false /* is_renderer_init */);
@@ -2769,7 +2774,7 @@ TEST_F(RenderFrameHostManagerTest, CanCommitOrigin) {
   params.transition = ui::PAGE_TRANSITION_LINK;
   params.should_update_history = false;
   params.gesture = NavigationGestureAuto;
-  params.was_within_same_page = false;
+  params.was_within_same_document = false;
   params.method = "GET";
   params.page_state = PageState::CreateFromURL(kUrlBar);
 
@@ -2846,7 +2851,7 @@ TEST_F(RenderFrameHostManagerTestWithBrowserSideNavigation,
           contents()->GetFrameTree()->root(), frame_entry->url(),
           frame_entry->referrer(), *frame_entry, entry,
           FrameMsg_Navigate_Type::DIFFERENT_DOCUMENT, PREVIEWS_UNSPECIFIED,
-          false, false, base::TimeTicks::Now(),
+          false, false, nullptr, base::TimeTicks::Now(),
           static_cast<NavigationControllerImpl*>(&controller()));
   manager->DidCreateNavigationRequest(navigation_request.get());
 
@@ -2907,7 +2912,7 @@ TEST_F(RenderFrameHostManagerTestWithBrowserSideNavigation,
           contents()->GetFrameTree()->root(), frame_entry->url(),
           frame_entry->referrer(), *frame_entry, entry,
           FrameMsg_Navigate_Type::DIFFERENT_DOCUMENT, PREVIEWS_UNSPECIFIED,
-          false, false, base::TimeTicks::Now(),
+          false, false, nullptr, base::TimeTicks::Now(),
           static_cast<NavigationControllerImpl*>(&controller()));
   manager->DidCreateNavigationRequest(navigation_request.get());
 
@@ -2965,7 +2970,7 @@ TEST_F(RenderFrameHostManagerTestWithBrowserSideNavigation,
           contents()->GetFrameTree()->root(), frame_entry->url(),
           frame_entry->referrer(), *frame_entry, entry,
           FrameMsg_Navigate_Type::DIFFERENT_DOCUMENT, PREVIEWS_UNSPECIFIED,
-          false, false, base::TimeTicks::Now(),
+          false, false, nullptr, base::TimeTicks::Now(),
           static_cast<NavigationControllerImpl*>(&controller()));
   manager->DidCreateNavigationRequest(navigation_request.get());
 
@@ -3015,15 +3020,16 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
   // Create a child frame and navigate it cross-site.
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
-      blink::WebTreeScopeType::Document, "frame1", "uniqueName1",
-      blink::WebSandboxFlags::None, FrameOwnerProperties());
+      blink::WebTreeScopeType::kDocument, "frame1", "uniqueName1",
+      blink::WebSandboxFlags::kNone, ParsedFeaturePolicyHeader(),
+      FrameOwnerProperties());
 
   FrameTreeNode* root = contents()->GetFrameTree()->root();
   RenderFrameHostManager* child = root->child_at(0)->render_manager();
 
   // Navigate subframe to kUrl2.
   NavigationEntryImpl entry1(nullptr /* instance */, kUrl2,
-                             Referrer(kUrl1, blink::WebReferrerPolicyDefault),
+                             Referrer(kUrl1, blink::kWebReferrerPolicyDefault),
                              base::string16() /* title */,
                              ui::PAGE_TRANSITION_LINK,
                              false /* is_renderer_init */);
@@ -3079,7 +3085,7 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
   commit_params.transition = ui::PAGE_TRANSITION_AUTO_SUBFRAME;
   commit_params.should_update_history = false;
   commit_params.gesture = NavigationGestureAuto;
-  commit_params.was_within_same_page = false;
+  commit_params.was_within_same_document = false;
   commit_params.method = "GET";
   commit_params.page_state = PageState::CreateFromURL(kUrl3);
   commit_params.insecure_request_policy = blink::kLeaveInsecureRequestsAlone;

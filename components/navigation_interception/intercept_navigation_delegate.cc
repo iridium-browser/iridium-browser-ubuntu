@@ -74,7 +74,7 @@ void InterceptNavigationDelegate::Associate(
     WebContents* web_contents,
     std::unique_ptr<InterceptNavigationDelegate> delegate) {
   web_contents->SetUserData(kInterceptNavigationDelegateUserDataKey,
-                            delegate.release());
+                            std::move(delegate));
 }
 
 // static
@@ -89,7 +89,7 @@ std::unique_ptr<content::NavigationThrottle>
 InterceptNavigationDelegate::CreateThrottleFor(
     content::NavigationHandle* handle) {
   return base::MakeUnique<InterceptNavigationThrottle>(
-      handle, base::Bind(&CheckIfShouldIgnoreNavigationOnUIThread), false);
+      handle, base::Bind(&CheckIfShouldIgnoreNavigationOnUIThread));
 }
 
 // static

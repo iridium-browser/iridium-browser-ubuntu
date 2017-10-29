@@ -38,12 +38,12 @@ import types
 from chromite.cbuildbot import archive_lib
 from chromite.lib import constants
 from chromite.lib import metadata_lib
-from chromite.cbuildbot import tree_status
 from chromite.lib import cidb
 from chromite.lib import cros_build_lib
 from chromite.lib import osutils
 from chromite.lib import path_util
 from chromite.lib import portage_util
+from chromite.lib import tree_status
 
 
 class RunAttributesError(Exception):
@@ -162,8 +162,6 @@ class RunAttributes(object):
   """
 
   REGULAR_ATTRS = frozenset((
-      'android_branch',   # Set by AndroidMetadataStage.
-      'android_version',  # Set by UprevAndroidStage, if it runs.
       'chrome_version',   # Set by SyncChromeStage, if it runs.
       'manifest_manager', # Set by ManifestVersionedSyncStage.
       'release_tag',      # Set by cbuildbot after sync stage.
@@ -629,8 +627,6 @@ class _BuilderRunBase(object):
 
     # Certain run attributes have sensible defaults which can be set here.
     # This allows all code to safely assume that the run attribute exists.
-    attrs.android_branch = None
-    attrs.android_version = None
     attrs.chrome_version = None
     attrs.metadata = metadata_lib.CBuildbotMetadata(
         multiprocess_manager=multiprocess_manager)
@@ -745,12 +741,8 @@ class _BuilderRunBase(object):
 
   def ShouldReexecAfterSync(self):
     """Return True if this run should re-exec itself after sync stage."""
-    if self.options.postsync_reexec and self.config.postsync_reexec:
-      # Return True if this source is not in designated buildroot.
-      abs_buildroot = os.path.abspath(self.buildroot)
-      return not os.path.abspath(__file__).startswith(abs_buildroot)
-
-    return False
+    return (self.options.postsync_reexec and self.config.postsync_reexec and
+            not self.options.resume)
 
   def ShouldPatchAfterSync(self):
     """Return True if this run should patch changes after sync stage."""

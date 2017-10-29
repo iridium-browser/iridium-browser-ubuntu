@@ -7,28 +7,28 @@
 
 #include <memory>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
+#include "platform/PlatformExport.h"
 #include "platform/WebTaskRunner.h"
-#include "public/platform/WebCommon.h"
 
 namespace blink {
 namespace scheduler {
 class TaskQueue;
 
-class BLINK_PLATFORM_EXPORT WebTaskRunnerImpl : public WebTaskRunner {
+class PLATFORM_EXPORT WebTaskRunnerImpl : public WebTaskRunner {
  public:
-  static RefPtr<WebTaskRunnerImpl> create(scoped_refptr<TaskQueue> task_queue);
+  static RefPtr<WebTaskRunnerImpl> Create(scoped_refptr<TaskQueue> task_queue);
 
   // WebTaskRunner implementation:
-  void postDelayedTask(const WebTraceLocation&,
-                       const base::Closure&,
-                       double delayMs) override;
-  bool runsTasksOnCurrentThread() override;
-  double virtualTimeSeconds() const override;
-  double monotonicallyIncreasingVirtualTimeSeconds() const override;
-  base::SingleThreadTaskRunner* toSingleThreadTaskRunner() override;
+  bool RunsTasksInCurrentSequence() override;
+  double VirtualTimeSeconds() const override;
+  double MonotonicallyIncreasingVirtualTimeSeconds() const override;
+  base::SingleThreadTaskRunner* ToSingleThreadTaskRunner() override;
+
+  TaskQueue* GetTaskQueue() const { return task_queue_.get(); }
 
  private:
   explicit WebTaskRunnerImpl(scoped_refptr<TaskQueue> task_queue);

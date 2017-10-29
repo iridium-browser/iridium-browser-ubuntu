@@ -9,22 +9,24 @@
 #include "core/css/parser/CSSPropertyParserHelpers.h"
 #include "platform/RuntimeEnabledFeatures.h"
 
+class CSSParserLocalContext;
 namespace blink {
 
 const CSSValue* CSSPropertyAPITextDecorationSkip::parseSingleValue(
     CSSParserTokenRange& range,
-    const CSSParserContext* context) {
-  DCHECK(RuntimeEnabledFeatures::css3TextDecorationsEnabled());
-  CSSValueList* list = CSSValueList::createSpaceSeparated();
+    const CSSParserContext& context,
+    const CSSParserLocalContext&) {
+  DCHECK(RuntimeEnabledFeatures::CSS3TextDecorationsEnabled());
+  CSSValueList* list = CSSValueList::CreateSpaceSeparated();
   while (true) {
     CSSIdentifierValue* ident =
-        CSSPropertyParserHelpers::consumeIdent<CSSValueObjects, CSSValueInk>(
+        CSSPropertyParserHelpers::ConsumeIdent<CSSValueObjects, CSSValueInk>(
             range);
     if (!ident)
       break;
-    if (list->hasValue(*ident))
+    if (list->HasValue(*ident))
       return nullptr;
-    list->append(*ident);
+    list->Append(*ident);
   }
 
   if (!list->length())

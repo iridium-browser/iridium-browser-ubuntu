@@ -31,8 +31,6 @@ namespace device {
 
 class BluetoothAdapter;
 class BluetoothGattConnection;
-class BluetoothRemoteGattCharacteristic;
-class BluetoothRemoteGattDescriptor;
 class BluetoothSocket;
 class BluetoothUUID;
 
@@ -74,24 +72,24 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
     ~ConnectionInfo();
   };
 
+  // Possible connection latency values to pass to SetConnectionLatency().
+  enum ConnectionLatency {
+    CONNECTION_LATENCY_LOW,
+    CONNECTION_LATENCY_MEDIUM,
+    CONNECTION_LATENCY_HIGH,
+  };
+
   // Possible errors passed back to an error callback function in case of a
   // failed call to Connect().
   enum ConnectErrorCode {
-    ERROR_ATTRIBUTE_LENGTH_INVALID,
     ERROR_AUTH_CANCELED,
     ERROR_AUTH_FAILED,
     ERROR_AUTH_REJECTED,
     ERROR_AUTH_TIMEOUT,
-    ERROR_CONNECTION_CONGESTED,
     ERROR_FAILED,
     ERROR_INPROGRESS,
-    ERROR_INSUFFICIENT_ENCRYPTION,
-    ERROR_OFFSET_INVALID,
-    ERROR_READ_NOT_PERMITTED,
-    ERROR_REQUEST_NOT_SUPPORTED,
     ERROR_UNKNOWN,
     ERROR_UNSUPPORTED_DEVICE,
-    ERROR_WRITE_NOT_PERMITTED,
     NUM_CONNECT_ERROR_CODES  // Keep as last enum.
   };
 
@@ -273,7 +271,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   virtual bool IsGattConnected() const = 0;
 
   // Indicates whether the paired device accepts connections initiated from the
-  // adapter. This value is undefined for unpaired devices.
+  // adapter. This value is undefined for unpaired devices. Only available for
+  // Chrome OS.
   virtual bool IsConnectable() const = 0;
 
   // Indicates whether there is a call to Connect() ongoing. For this attribute,
@@ -397,6 +396,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // If the device isn't connected, then the ConnectionInfo struct passed into
   // the callback will be populated with |kUnknownPower|.
   virtual void GetConnectionInfo(const ConnectionInfoCallback& callback) = 0;
+
+  // Sets the connection latency for the device. This API is only valid for LE
+  // devices.
+  virtual void SetConnectionLatency(ConnectionLatency connection_latency,
+                                    const base::Closure& callback,
+                                    const ErrorCallback& error_callback) = 0;
 
   // Initiates a connection to the device, pairing first if necessary.
   //
@@ -554,14 +559,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   std::vector<BluetoothRemoteGattService*> GetPrimaryServicesByUUID(
       const BluetoothUUID& service_uuid);
 
-  std::vector<BluetoothRemoteGattCharacteristic*> GetCharacteristicsByUUID(
-      const std::string& service_instance_id,
-      const BluetoothUUID& characteristic_uuid);
-
-  std::vector<device::BluetoothRemoteGattDescriptor*> GetDescriptorsByUUID(
-      device::BluetoothRemoteGattCharacteristic* characteristic,
-      const BluetoothUUID& descriptor_uuid);
-
  protected:
   // BluetoothGattConnection is a friend to call Add/RemoveGattConnection.
   friend BluetoothGattConnection;
@@ -633,7 +630,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // DidDisconnectGatt.
   void DidConnectGatt();
   void DidFailToConnectGatt(ConnectErrorCode);
-  void DidDisconnectGatt(bool notifyDeviceChanged);
+  void DidDisconnectGatt();
 
   // Tracks BluetoothGattConnection instances that act as a reference count
   // keeping the GATT connection open. Instances call Add/RemoveGattConnection

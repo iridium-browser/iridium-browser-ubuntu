@@ -27,7 +27,7 @@ cr.define('print_preview', function() {
      * @private
      */
     this.size_ = size;
-  };
+  }
 
   PrintableArea.prototype = {
     /**
@@ -51,14 +51,11 @@ cr.define('print_preview', function() {
      * @return {boolean} Whether another printable area is equal to this one.
      */
     equals: function(other) {
-      return other != null &&
-          this.origin_.equals(other.origin_) &&
+      return other != null && this.origin_.equals(other.origin_) &&
           this.size_.equals(other.size_);
     }
   };
 
   // Export
-  return {
-    PrintableArea: PrintableArea
-  };
+  return {PrintableArea: PrintableArea};
 });
